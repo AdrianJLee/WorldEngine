@@ -1,0 +1,25 @@
+﻿{
+  "configurations": [
+    {
+      "name": "x64-Debug",
+      "generator": "Visual Studio 18 2026 Win64", // 建议去掉 Win64，现代 VS 自动识别
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}\\build\\${name}",
+      "cmakeCommandArgs": "-DCMAKE_BUILD_TYPE=Debug"
+    },
+    {
+      "name": "x64-Release",
+      "generator": "Visual Studio 18 2026 Win64",
+      "configurationType": "Release",
+      "buildRoot": "${projectDir}\\build\\${name}",
+      "cmakeCommandArgs": "-DCMAKE_BUILD_TYPE=Release"
+    },
+    {
+      "name": "x64-Dist",
+      "generator": "Visual Studio 18 2026 Win64",
+      "configurationType": "Release", // 技巧：Dist 本质上通常是 Release 的变体
+      "buildRoot": "${projectDir}\\build\\${name}",
+      "cmakeCommandArgs": "-DCMAKE_BUILD_TYPE=Dist"
+    }
+  ]
+}

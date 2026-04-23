@@ -1,0 +1,135 @@
+Scene: Untitled
+Entities:
+  - EntityID: 18409351613801574232
+    TagComponent: Camera
+    TransformComponent:
+      Location: [0, 0, 0.5]
+      Rotation: [0, -0, 0]
+      Scale: [1, 1, 1]
+    CameraComponent:
+      Primary: true
+      FixedAspectRatio: false
+      ProjectionType: 1
+      AspectRatio: 1
+      PerspectiveFOV: 45
+      PerspectiveNearClip: 0.100000001
+      PerspectiveFarClip: 100
+      OrthographicZoom: 3
+      OrthographicNearClip: -1
+      OrthographicFarClip: 1
+  - EntityID: 12993328383427947612
+    TagComponent: Square
+    TransformComponent:
+      Location: [-0.0180547237, 2.84264803, 0]
+      Rotation: [0, -0, 0.7400195]
+      Scale: [1, 1, 1]
+    SpriteComponent:
+      Color: [1, 1, 1, 1]
+      TexturePath: assets\textures\Icon.png
+      TilingFactor: 1
+    BoxCollider2DComponent:
+      Size: [0.5, 0.5]
+      Offset: [0, 0]
+      Density: 1
+      Friction: 0.5
+      Restitution: 1
+      ShowCollider: true
+    RigidBody2DComponent:
+      BodyType: 1
+      FixedRotation: false
+  - EntityID: 9656972218538944549
+    TagComponent: StaticMesh
+    TransformComponent:
+      Location: [-2.18683863, 3.38640332, -9.53672952e-07]
+      Rotation: [0, -0, -2.30455732]
+      Scale: [11.6999826, 0.999999881, 1]
+    SpriteComponent:
+      Color: [1, 1, 1, 1]
+      TilingFactor: 1
+    BoxCollider2DComponent:
+      Size: [0.5, 0.5]
+      Offset: [1.40129846e-45, 0]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      ShowCollider: true
+    RigidBody2DComponent:
+      BodyType: 0
+      FixedRotation: false
+  - EntityID: 6547203319051865403
+    TagComponent: StaticMesh
+    TransformComponent:
+      Location: [4.73145008, 4.60497665, 0]
+      Rotation: [0, 0, -0.4837282]
+      Scale: [11.7000036, 1, 1]
+    SpriteComponent:
+      Color: [1, 1, 1, 1]
+      TilingFactor: 1
+    BoxCollider2DComponent:
+      Size: [0.5, 0.5]
+      Offset: [1.40129846e-45, 0]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      ShowCollider: true
+    RigidBody2DComponent:
+      BodyType: 0
+      FixedRotation: false
+  - EntityID: 4298503087466156158
+    TagComponent: Circle
+    TransformComponent:
+      Location: [3.28447342, 1.21434689, 0]
+      Rotation: [0, -0, 0]
+      Scale: [3, 3, 1]
+    CircleRendererComponent:
+      Color: [0.709803939, 0.482352942, 0.0352941193, 0.941176474]
+      Thickness: 0.5
+      Fade: 0.0659999996
+    CircleCollider2DComponent:
+      Radius: 0.5
+      Offset: [0, 0]
+      Density: 1
+      Friction: 0.5
+      Restitution: 1
+      ShowCollider: true
+    RigidBody2DComponent:
+      BodyType: 1
+      FixedRotation: false
+  - EntityID: 17715847037794397244
+    TagComponent: StaticMesh
+    TransformComponent:
+      Location: [5.64844513, 0.122648716, -1.90734761e-06]
+      Rotation: [0, -0, -2.30455732]
+      Scale: [11.6999826, 0.999999881, 1]
+    SpriteComponent:
+      Color: [1, 1, 1, 1]
+      TilingFactor: 1
+    BoxCollider2DComponent:
+      Size: [0.5, 0.5]
+      Offset: [1.40129846e-45, 0]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      ShowCollider: true
+    RigidBody2DComponent:
+      BodyType: 0
+      FixedRotation: false
+  - EntityID: 5824007774669977999
+    TagComponent: StaticMesh
+    TransformComponent:
+      Location: [0, -1.70000005, 0]
+      Rotation: [0, 0, -0.4837282]
+      Scale: [11.7000036, 1, 1]
+    SpriteComponent:
+      Color: [1, 1, 1, 1]
+      TilingFactor: 1
+    BoxCollider2DComponent:
+      Size: [0.5, 0.5]
+      Offset: [1.40129846e-45, 0]
+      Density: 1
+      Friction: 0.5
+      Restitution: 0
+      ShowCollider: true
+    RigidBody2DComponent:
+      BodyType: 0
+      FixedRotation: false
