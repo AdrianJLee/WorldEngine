@@ -11,6 +11,8 @@ namespace World
 
 	void VulkanPhysicalDevice::PickPhysicalDevice(VkInstance instance)
 	{
+		WLD_PROFILE_FUNCTION();
+
 		uint32_t deviceCount = 0;
 		vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
 		WLD_CORE_ASSERT(deviceCount > 0, "Failed to find GPUs with Vulkan support!");

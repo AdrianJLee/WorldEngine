@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include "World/Renderer/GraphicsContext.h"
-
+#include "SingletonHandles/VulkanInstance.h"
 struct GLFWwindow;
 namespace World
 {
@@ -14,5 +14,6 @@ namespace World
 		virtual void SwapBuffers() override;
 	private:
 		GLFWwindow* m_WindowHandle;
+		Ref<VulkanInstance> m_Instance;
 	};
 }

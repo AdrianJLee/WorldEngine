@@ -6,6 +6,8 @@ namespace World
 	VulkanDevice::VulkanDevice(const Ref<VulkanPhysicalDevice>& physicalDevice)
 		:m_PhysicalDevice(physicalDevice)
 	{
+		WLD_PROFILE_FUNCTION();
+
 		float queuePriority = 1.0f;
 		uint32_t queueFamilyIndex = m_PhysicalDevice->GetQueueFamilyIndices().GraphicsFamily.value();
 
@@ -56,6 +58,8 @@ namespace World
 
 	VulkanDevice::~VulkanDevice()
 	{
+		WLD_PROFILE_FUNCTION();
+
 		if (m_Allocator)
 		{
 			vmaDestroyAllocator(m_Allocator);
