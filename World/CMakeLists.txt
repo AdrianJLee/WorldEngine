@@ -55,6 +55,7 @@ target_include_directories(World PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/GLFW/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/Glad/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb_image"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/VMA/include"
     ${Vulkan_INCLUDE_DIRS} # 自动解析的 Vulkan 路径
 )
 target_include_directories(World PUBLIC 
@@ -69,6 +70,7 @@ target_include_directories(World PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/spdlog/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/include"
+
 )
 
 # 递归获取源文件

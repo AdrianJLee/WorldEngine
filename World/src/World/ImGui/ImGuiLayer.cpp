@@ -8,7 +8,6 @@
 #include <ImGuizmo.h>
 #include <GLFW/glfw3.h>
 
-#define IMGUI_IMPL_API
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
@@ -17,7 +16,7 @@ namespace World
 	bool ImGuiLayer::m_Show = false;
 
 	World::ImGuiLayer::ImGuiLayer()
-		: Layer("ImGuiLayer")
+		: Layer("ImGuiLayer"), m_Time(0.0f)
 	{}
 
 	World::ImGuiLayer::~ImGuiLayer()

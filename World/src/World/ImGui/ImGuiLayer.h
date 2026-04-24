@@ -29,7 +29,7 @@ namespace World
 		static bool m_Show;
 	private:
 		bool m_BlockEvents = true;
-		float m_Time;
+		float m_Time = 0.0f;
 
 	};
 }
