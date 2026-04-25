@@ -1,6 +1,7 @@
 ﻿#include "wldpch.h"
 #include "VulkanDevice.h"
 
+#include <set>
 namespace World
 {
 	VulkanDevice::VulkanDevice(const Ref<VulkanPhysicalDevice>& physicalDevice)
@@ -8,25 +9,38 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
-		float queuePriority = 1.0f;
-		uint32_t queueFamilyIndex = m_PhysicalDevice->GetQueueFamilyIndices().GraphicsFamily.value();
+		auto indices = m_PhysicalDevice->GetQueueFamilyIndices();
+
+		std::set<uint32_t> uniqueQueueFamilies = {
+			indices.GraphicsFamily.value(),
+			indices.PresentFamily.value()
+		};
+		if (indices.ComputeFamily.has_value())
+			uniqueQueueFamilies.insert(indices.ComputeFamily.value());
+		if (indices.TransferFamily.has_value())
+			uniqueQueueFamilies.insert(indices.TransferFamily.value());
 
 		// Create the device queue create info
-		VkDeviceQueueCreateInfo queueCreateInfo {};
-		queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-		queueCreateInfo.queueFamilyIndex = queueFamilyIndex;
-		queueCreateInfo.queueCount = 1;
-		queueCreateInfo.pQueuePriorities = &queuePriority;
+		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+		float queuePriority = 1.0f;
+		for (uint32_t queueFamily : uniqueQueueFamilies)
+		{
+			VkDeviceQueueCreateInfo queueCreateInfo {};
+			queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			queueCreateInfo.queueFamilyIndex = queueFamily;
+			queueCreateInfo.queueCount = 1;
+			queueCreateInfo.pQueuePriorities = &queuePriority;
+			queueCreateInfos.push_back(queueCreateInfo);
+		}
 
 		// Enable features
 		VkPhysicalDeviceFeatures deviceFeatures {};
 
-
 		// Create the device create info
 		VkDeviceCreateInfo createInfo {};
 		createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-		createInfo.queueCreateInfoCount = 1;
-		createInfo.pQueueCreateInfos = &queueCreateInfo;
+		createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+		createInfo.pQueueCreateInfos = queueCreateInfos.data();
 		std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 		createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
 		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
@@ -38,10 +52,15 @@ namespace World
 			return;
 		}
 
-		//TODO 注意这里多个队列的情况，当前只创建了一个队列，所以直接获取即可
 		// Get the graphics queue
-		vkGetDeviceQueue(m_LogicalDevice, queueFamilyIndex, 0, &m_PresentQueue);
+		vkGetDeviceQueue(m_LogicalDevice, indices.GraphicsFamily.value(), 0, &m_GraphicsQueue);
+		vkGetDeviceQueue(m_LogicalDevice, indices.PresentFamily.value(), 0, &m_PresentQueue);
+		if (indices.ComputeFamily.has_value())
+			vkGetDeviceQueue(m_LogicalDevice, indices.ComputeFamily.value(), 0, &m_ComputeQueue);
+		if (indices.TransferFamily.has_value())
+			vkGetDeviceQueue(m_LogicalDevice, indices.TransferFamily.value(), 0, &m_TransferQueue);
 
+		// Create VMA allocator
 		VmaAllocatorCreateInfo allocatorInfo {};
 		allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_4;
 		allocatorInfo.physicalDevice = m_PhysicalDevice->GetPhysicalDevice();

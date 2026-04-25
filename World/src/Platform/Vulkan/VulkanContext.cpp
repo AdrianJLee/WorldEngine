@@ -14,6 +14,9 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 
 		m_Instance = CreateRef<VulkanInstance>();
+		m_Surface = CreateRef<VulkanSurfaceKHR>(m_Instance, m_WindowHandle);
+		m_PhysicalDevice = CreateRef<VulkanPhysicalDevice>(m_Instance, m_Surface);
+		m_Device = CreateRef<VulkanDevice>(m_PhysicalDevice);
 	}
 	void VulkanContext::SwapBuffers()
 	{

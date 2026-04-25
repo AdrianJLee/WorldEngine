@@ -1,10 +1,9 @@
 ﻿#include "wldpch.h"
 #include "VulkanPhysicalDevice.h"
-
 namespace World
 {
-	VulkanPhysicalDevice::VulkanPhysicalDevice(const Ref<VulkanInstance>& instance)
-		: m_Instance(instance)
+	VulkanPhysicalDevice::VulkanPhysicalDevice(const Ref<VulkanInstance>& instance, const Ref<VulkanSurfaceKHR>& surface)
+		: m_Instance(instance), m_Surface(surface)
 	{
 		PickPhysicalDevice(m_Instance->GetInstance());
 	}
@@ -21,7 +20,7 @@ namespace World
 		vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 		for (const auto& device : devices)
 		{
-			QueueFamilyIndices queueFamilies = FindQueueFamilies(device);
+			QueueFamilyIndices queueFamilies = FindQueueFamilies(device, m_Surface->GetSurface());
 			if (queueFamilies.IsComplete())
 			{
 				m_PhysicalDevice = device;
@@ -38,8 +37,9 @@ namespace World
 		WLD_CORE_INFO("Selected GPU: {0}", m_Properties.deviceName);
 	}
 
-	VulkanPhysicalDevice::QueueFamilyIndices VulkanPhysicalDevice::FindQueueFamilies(VkPhysicalDevice device)
+	VulkanPhysicalDevice::QueueFamilyIndices VulkanPhysicalDevice::FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface)
 	{
+		WLD_PROFILE_FUNCTION();
 		QueueFamilyIndices indices;
 		uint32_t queueFamilyCount = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
@@ -49,32 +49,49 @@ namespace World
 
 		for (uint32_t i = 0; i < queueFamilies.size(); i++)
 		{
-			// Check for graphics support
+			// Check for graphics queue
 			if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
 			{
 				indices.GraphicsFamily = i;
 			}
+
 			// Check for presentation support
-			if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT)
+			VkBool32 presentSupport = false;
+			vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+			if (presentSupport)
+			{
+				indices.PresentFamily = i;
+			}
+
+			// Check for compute queue
+			// Prefer a "pure compute" queue (without graphics bit) for asynchronous compute
+			if ((queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+				!(queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
 			{
 				indices.ComputeFamily = i;
 			}
-			// Check for transfer support
-			if (queueFamilies[i].queueFlags & VK_QUEUE_TRANSFER_BIT)
+			else if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT && !indices.ComputeFamily.has_value())
+			{
+				indices.ComputeFamily = i;
+			}
+
+			// Check for transfer queue
+			// Prefer a "pure transfer" queue (without graphics and compute bits) for asynchronous transfers
+			if ((queueFamilies[i].queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+				!(queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+				!(queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT))
 			{
 				indices.TransferFamily = i;
 			}
-			//VkBool32 presentSupport = false;
-			//vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
-			//if (presentSupport)
-			//{
-			//	indices.PresentFamily = i;
-			//}
-			if (indices.IsComplete())
+			else if (queueFamilies[i].queueFlags & VK_QUEUE_TRANSFER_BIT && !indices.TransferFamily.has_value())
 			{
-				break;
+				indices.TransferFamily = i;
 			}
+
+			if (indices.IsComplete()) break;
 		}
+
 		return indices;
 	}
+
 }

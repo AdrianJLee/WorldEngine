@@ -62,6 +62,8 @@ namespace World
 
 	bool VulkanInstance::CheckValidationLayerSupport()
 	{
+		WLD_PROFILE_FUNCTION();
+
 		uint32_t layerCount;
 		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
 

@@ -1,7 +1,6 @@
 ﻿#pragma once
+#include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
-#include <vk_mem_alloc.h>
-
 namespace World
 {
 	class VulkanInstance
@@ -26,7 +25,7 @@ namespace World
 	private:
 		VkInstance m_Instance = VK_NULL_HANDLE;
 
-		const bool m_EnableValidationLayers = false;
+		const bool m_EnableValidationLayers = true;
 
 		const std::vector<const char*> m_ValidationLayers = {
 			"VK_LAYER_KHRONOS_validation"
