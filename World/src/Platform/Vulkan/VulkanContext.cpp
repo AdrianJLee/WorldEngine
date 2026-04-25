@@ -5,10 +5,15 @@
 #include <GLFW/glfw3.h>
 namespace World
 {
+	static VulkanContext* s_VulkanContext = nullptr;
+
 	VulkanContext::VulkanContext(GLFWwindow* windowHandle)
 		: m_WindowHandle(windowHandle)
 	{
 		WLD_CORE_ASSERT(windowHandle, "Window handle is null!");
+
+		WLD_CORE_ASSERT(!s_VulkanContext, "VulkanContext already exists!");
+		s_VulkanContext = this;
 	}
 	void VulkanContext::Init()
 	{
@@ -32,11 +37,15 @@ namespace World
 				VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
 			}
 		};
-		m_RenderPass = CreateRef<VulkanRenderPass>(m_Device, m_Swapchain->GetSwapChainImageFormat());
+		m_RenderPass = CreateRef<VulkanRenderPass>(m_Device, RenderPassSpec);
 	}
 	void VulkanContext::SwapBuffers()
 	{
 		// Vulkan does not use traditional buffer swapping like OpenGL.
 		// Instead, it uses a more complex presentation model involving command buffers and swapchains.
+	}
+	VulkanContext* VulkanContext::Get()
+	{
+		return s_VulkanContext;
 	}
 }

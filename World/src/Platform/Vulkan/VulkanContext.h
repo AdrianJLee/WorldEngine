@@ -18,6 +18,16 @@ namespace World
 		virtual ~VulkanContext() = default;
 		virtual void Init() override;
 		virtual void SwapBuffers() override;
+
+		static VulkanContext* Get();
+
+	public:
+		const Ref<VulkanInstance>& GetInstance() const { return m_Instance; }
+		const Ref<VulkanSurfaceKHR>& GetSurface() const { return m_Surface; }
+		const Ref<VulkanPhysicalDevice>& GetPhysicalDevice() const { return m_PhysicalDevice; }
+		const Ref<VulkanDevice>& GetDevice() const { return m_Device; }
+		const Ref<VulkanSwapchainKHR>& GetSwapchain() const { return m_Swapchain; }
+		const Ref<VulkanRenderPass>& GetRenderPass() const { return m_RenderPass; }
 	private:
 		GLFWwindow* m_WindowHandle;
 		Ref<VulkanInstance> m_Instance;
