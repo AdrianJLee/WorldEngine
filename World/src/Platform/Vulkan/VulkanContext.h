@@ -4,6 +4,9 @@
 #include "SingletonHandles/VulkanSurfaceKHR.h"
 #include "SingletonHandles/VulkanPhysicalDevice.h"
 #include "SingletonHandles/VulkanDevice.h"
+#include "SingletonHandles/VulkanRenderPass.h"
+#include "SingletonHandles/VulkanSwapchainKHR.h"
+
 struct GLFWwindow;
 namespace World
 {
@@ -21,5 +24,9 @@ namespace World
 		Ref<VulkanSurfaceKHR> m_Surface;
 		Ref<VulkanPhysicalDevice> m_PhysicalDevice;
 		Ref<VulkanDevice> m_Device;
+		Ref<VulkanSwapchainKHR> m_Swapchain;
+
+		VulkanRenderPassSpecification RenderPassSpec;
+		Ref<VulkanRenderPass> m_RenderPass;
 	};
 }
