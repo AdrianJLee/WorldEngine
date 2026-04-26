@@ -4,6 +4,9 @@
 
 namespace World
 {
+	// TODO: 这里可以考虑添加一个GPUVendor枚举来标识GPU厂商，以便在需要时进行特定优化或处理
+	enum class GPUVendor { Unknown, NVIDIA, AMD, Intel, Qualcomm, ARM };
+
 	class VulkanDevice
 	{
 	public:
