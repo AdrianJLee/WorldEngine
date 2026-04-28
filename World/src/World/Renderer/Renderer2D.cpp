@@ -8,13 +8,13 @@
 #include "World/Renderer/RenderCommand.h"
 #include "World/Renderer/Texture.h"
 #include "World/Renderer/PipelineStateObject.h"
-#include "World/Renderer/CommandBuffer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace World
 {
 	UniformBufferResource Renderer2D::m_UniformBuffers = UniformBufferResource();
+	Ref<CommandBuffer> Renderer2D::s_CurrentCommandBuffer = nullptr;
 	struct QuadVertex
 	{
 		glm::vec3 Position = { 0.0f, 0.0f, 0.0f };
@@ -124,7 +124,6 @@ namespace World
 		Renderer2DLineData LineData;
 
 		Ref<RenderPass> MainRenderPass;
-		Ref<CommandBuffer> MainCommandBuffer;
 
 		Ref<Texture2D> WhiteTexture;
 		Renderer2D::Statistics Stats;
@@ -153,7 +152,6 @@ namespace World
 			mainRenderPassSpec.TargetFramebuffer = nullptr; // 渲染到默认帧缓冲
 			s_Data.MainRenderPass = RenderPass::Create(mainRenderPassSpec);
 
-			s_Data.MainCommandBuffer = CommandBuffer::Create();
 		}
 		// Quad渲染数据初始化
 		{
@@ -334,10 +332,11 @@ namespace World
 
 	}
 
-	void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform)
+	void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform, Ref<CommandBuffer> commandBuffer, bool clear)
 	{
 		WLD_PROFILE_FUNCTION();
-		RenderCommand::BeginRenderPass(s_Data.MainRenderPass);
+		s_CurrentCommandBuffer = commandBuffer;
+		s_CurrentCommandBuffer->BeginRenderPass(s_Data.MainRenderPass, clear);
 
 		s_Data.QuadData.QuadPipeline->Bind();
 
@@ -348,10 +347,12 @@ namespace World
 
 		StartBatch();
 	}
-	void Renderer2D::BeginScene(const EditorCamera& camera)
+	void Renderer2D::BeginScene(const EditorCamera& camera, Ref<CommandBuffer> commandBuffer, bool clear)
 	{
 		WLD_PROFILE_FUNCTION();
-		RenderCommand::BeginRenderPass(s_Data.MainRenderPass);
+		s_CurrentCommandBuffer = commandBuffer;
+
+		s_CurrentCommandBuffer->BeginRenderPass(s_Data.MainRenderPass, clear);
 
 		s_Data.QuadData.QuadPipeline->Bind();
 
@@ -365,8 +366,8 @@ namespace World
 	void Renderer2D::BeginScene(const OrthographicCamera& camera)
 	{
 		WLD_PROFILE_FUNCTION();
-		RenderCommand::BeginRenderPass(s_Data.MainRenderPass);
-
+		//RenderCommand::BeginRenderPass(s_Data.MainRenderPass, true);
+		WLD_ERROR("Renderer2D::BeginScene with OrthographicCamera is not implemented yet. Please use the overload that takes a CommandBuffer and call BeginRenderPass manually.");
 		s_Data.QuadData.QuadPipeline->Bind();
 
 		//u_ViewProjection
@@ -379,7 +380,8 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		Flush();
 
-		RenderCommand::EndRenderPass();
+		s_CurrentCommandBuffer->EndRenderPass();
+		s_CurrentCommandBuffer = nullptr;
 	}
 
 	void Renderer2D::StartBatch()
@@ -416,8 +418,10 @@ namespace World
 		{
 			uint32_t lineDataSize = (uint32_t)((uint8_t*)s_Data.LineData.LineVertexBufferPtr - (uint8_t*)s_Data.LineData.LineVertexBufferBase);
 			s_Data.LineData.LineVertexBuffer->SetData(s_Data.LineData.LineVertexBufferBase, lineDataSize);
-			s_Data.LineData.LinePipeline->Bind();
-			RenderCommand::DrawLines(s_Data.LineData.LineVertexArray, s_Data.LineData.LineIndexCount);
+
+			s_CurrentCommandBuffer->BindPipeline(s_Data.LineData.LinePipeline);
+			s_CurrentCommandBuffer->DrawLines(s_Data.LineData.LineVertexArray, s_Data.LineData.LineIndexCount);
+
 			s_Data.Stats.DrawCalls++;
 
 		}
@@ -432,8 +436,8 @@ namespace World
 			{
 				s_Data.TextureSlots[i]->Bind(i);
 			}
-			s_Data.QuadData.QuadPipeline->Bind();
-			RenderCommand::DrawIndexed(s_Data.QuadData.QuadVertexArray, s_Data.QuadData.QuadIndexCount);
+			s_CurrentCommandBuffer->BindPipeline(s_Data.QuadData.QuadPipeline);
+			s_CurrentCommandBuffer->DrawIndexed(s_Data.QuadData.QuadVertexArray, s_Data.QuadData.QuadIndexCount);
 
 			s_Data.Stats.DrawCalls++;
 		}
@@ -443,9 +447,8 @@ namespace World
 			uint32_t circleDataSize = (uint32_t)((uint8_t*)s_Data.CircleData.CircleVertexBufferPtr - (uint8_t*)s_Data.CircleData.CircleVertexBufferBase);
 			s_Data.CircleData.CircleVertexBuffer->SetData(s_Data.CircleData.CircleVertexBufferBase, circleDataSize);
 
-			s_Data.CircleData.CirclePipeline->Bind();
-
-			RenderCommand::DrawIndexed(s_Data.CircleData.CircleVertexArray, s_Data.CircleData.CircleIndexCount);
+			s_CurrentCommandBuffer->BindPipeline(s_Data.CircleData.CirclePipeline);
+			s_CurrentCommandBuffer->DrawIndexed(s_Data.CircleData.CircleVertexArray, s_Data.CircleData.CircleIndexCount);
 
 			s_Data.Stats.DrawCalls++;
 		}

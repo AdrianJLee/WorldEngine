@@ -39,7 +39,7 @@ namespace World
 	{
 		glLineWidth(width);
 	}
-	void OpenGLRendererAPI::BeginRenderPass(const Ref<RenderPass>& renderPass)
+	void OpenGLRendererAPI::BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear)
 	{
 		const auto& spec = renderPass->GetSpecification();
 
@@ -51,16 +51,18 @@ namespace World
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		}
 
-		glClearColor(spec.ClearColor.r, spec.ClearColor.g, spec.ClearColor.b, spec.ClearColor.a);
+		if (clear)
+		{
+			glClearColor(spec.ClearColor.r, spec.ClearColor.g, spec.ClearColor.b, spec.ClearColor.a);
 
-		GLbitfield flags = 0;
-		if (spec.ClearOnColor) flags |= GL_COLOR_BUFFER_BIT;
-		if (spec.ClearOnDepth) flags |= GL_DEPTH_BUFFER_BIT;
+			GLbitfield flags = 0;
+			if (spec.ClearOnColor) flags |= GL_COLOR_BUFFER_BIT;
+			if (spec.ClearOnDepth) flags |= GL_DEPTH_BUFFER_BIT;
 
-		glClear(flags);
+			glClear(flags);
 
-		spec.TargetFramebuffer->ClearAttachment(1, -1);
-
+			spec.TargetFramebuffer->ClearAttachment(1, -1);
+		}
 	}
 	void OpenGLRendererAPI::EndRenderPass()
 	{

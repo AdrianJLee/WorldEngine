@@ -13,7 +13,7 @@ namespace World
 		virtual void DrawLines(const Ref<class VertexArray>& vertexArray, uint32_t vertexCount) override;
 		virtual void SetLineWidth(float width) override;
 
-		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass) override;
+		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear) override;
 		virtual void EndRenderPass()override;
 	private:
 

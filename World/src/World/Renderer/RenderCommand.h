@@ -32,9 +32,9 @@ namespace World
 			s_RendererAPI->SetLineWidth(width);
 		}
 
-		inline static void BeginRenderPass(const Ref<RenderPass>& renderPass)
+		inline static void BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear)
 		{
-			s_RendererAPI->BeginRenderPass(renderPass);
+			s_RendererAPI->BeginRenderPass(renderPass, clear);
 		}
 
 		inline static void EndRenderPass()

@@ -10,7 +10,7 @@ namespace World
 		virtual void Begin() override;
 		virtual void End() override;
 
-		virtual void BeginRenderPass(Ref<RenderPass> renderPass) override;
+		virtual void BeginRenderPass(Ref<RenderPass> renderPass, bool clear) override;
 		virtual void EndRenderPass() override;
 
 		virtual void BindPipeline(Ref<PipelineStateObject> pipeline) override;

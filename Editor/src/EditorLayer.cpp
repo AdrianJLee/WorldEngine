@@ -38,6 +38,8 @@ namespace World
 		Renderer2D::SetFramebuffer(m_Framebuffer);
 
 		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
+
+		m_CommandBuffer = CommandBuffer::Create();
 	}
 
 	void EditorLayer::OnDetach()
@@ -48,8 +50,8 @@ namespace World
 	void EditorLayer::OnUpdate(Timestep ts)
 	{
 		WLD_PROFILE_FUNCTION();
-
 		//WLD_CORE_TRACE("Delta Time: {0} ({1} FPS)", ts.GetSeconds(), ts.GetFPS());
+
 		{
 			// TODO: 停止聚焦时，摄像机不再更新,这不太合理，应该让摄像机在停止聚焦时继续更新，但不处理输入事件
 			if (m_ViewportFocused)
@@ -62,31 +64,26 @@ namespace World
 
 
 		WLD_PROFILE_SCOPE("Renderer Clear");
-		//m_Framebuffer->Bind();
-		//RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
-		//RenderCommand::Clear();
 
-		// Create an entity with a camera component and set it as the primary camera
-		//m_Framebuffer->ClearAttachment(1, -1);
-
+		m_CommandBuffer->Begin();
 		{
 			WLD_PROFILE_SCOPE("Renderer Draw");
 			switch (m_SceneState)
 			{
 				case SceneState::Edit:
-					m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+					m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera, m_CommandBuffer);
 					break;
 				case SceneState::Play:
 					if (!m_ScenePaused)
-						m_ActiveScene->OnUpdateRuntime(ts);
+						m_ActiveScene->OnUpdateRuntime(ts, m_CommandBuffer);
 					else
-						m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+						m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera, m_CommandBuffer);
 					break;
 				case SceneState::Simulate:
 					if (!m_ScenePaused)
-						m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
+						m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera, m_CommandBuffer);
 					else
-						m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+						m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera, m_CommandBuffer);
 					break;
 			}
 
@@ -105,7 +102,7 @@ namespace World
 					const Camera& mainCamera = cameraEntity.GetComponent<CameraComponent>().Camera;
 					glm::mat4 cameraTransform = cameraEntity.GetComponent<TransformComponent>().Transform;
 
-					Renderer2D::BeginScene(mainCamera, cameraTransform);
+					Renderer2D::BeginScene(mainCamera, cameraTransform, m_CommandBuffer);
 					Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
 					Renderer2D::EndScene();
 				}
@@ -113,13 +110,13 @@ namespace World
 			else
 			{
 				// Edit 和 Simulate 模式下，依然使用外部的编辑器相机
-				Renderer2D::BeginScene(m_EditorCamera);
+				Renderer2D::BeginScene(m_EditorCamera, m_CommandBuffer);
 				Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
 				Renderer2D::EndScene();
 			}
 		}
-
-		//m_Framebuffer->Unbind();
+		m_CommandBuffer->End();
+		m_CommandBuffer->Execute();
 	}
 
 	void EditorLayer::OnImGuiRender()

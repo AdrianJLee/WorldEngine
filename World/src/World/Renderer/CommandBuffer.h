@@ -15,7 +15,7 @@ namespace World
 		virtual void End() = 0;
 
 		// 录制指令
-		virtual void BeginRenderPass(Ref<RenderPass> renderPass) = 0;
+		virtual void BeginRenderPass(Ref<RenderPass> renderPass, bool clear = false) = 0;
 		virtual void EndRenderPass() = 0;
 
 		virtual void BindPipeline(Ref<PipelineStateObject> pipeline) = 0;

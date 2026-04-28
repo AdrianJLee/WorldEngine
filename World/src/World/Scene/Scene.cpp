@@ -2,6 +2,7 @@
 #include "Scene.h"
 #include "World/Scene/Components.h"
 #include "World/Renderer/Renderer2D.h"
+#include "World/Renderer/CommandBuffer.h"
 
 #include <physics_world.h>
 #include <box2d/box2d.h>
@@ -14,14 +15,14 @@ namespace World
 	{}
 	Scene::~Scene()
 	{}
-	void Scene::OnUpdateEditor(Timestep ts, const EditorCamera& camera)
+	void Scene::OnUpdateEditor(Timestep ts, const EditorCamera& camera, Ref<CommandBuffer> commandBuffer)
 	{
-		Renderer2D::BeginScene(camera);
+		Renderer2D::BeginScene(camera, commandBuffer, true);
 
 		RendererScene();
 		Renderer2D::EndScene();
 	}
-	void Scene::OnUpdateRuntime(Timestep ts)
+	void Scene::OnUpdateRuntime(Timestep ts, Ref<CommandBuffer> commandBuffer)
 	{
 		// Update scripts
 		{
@@ -48,18 +49,18 @@ namespace World
 			const Camera& mainCamera = cameraEntity.GetComponent<CameraComponent>().Camera;
 			glm::mat4 cameraTransform = cameraEntity.GetComponent<TransformComponent>().Transform;
 
-			Renderer2D::BeginScene(mainCamera, cameraTransform);
+			Renderer2D::BeginScene(mainCamera, cameraTransform, commandBuffer, true);
 
 			RendererScene();
 
 			Renderer2D::EndScene();
 		}
 	}
-	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera& camera)
+	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera& camera, Ref<CommandBuffer> commandBuffer)
 	{
 		OnUpdatePhysics2D(ts);
 
-		Renderer2D::BeginScene(camera);
+		Renderer2D::BeginScene(camera, commandBuffer, true);
 		RendererScene();
 		Renderer2D::EndScene();
 	}

@@ -40,7 +40,7 @@ namespace World
 		void SetSceneState(SceneState state);
 		void UpdateSceneContext(Ref<Scene> scene);
 	private:
-
+		Ref<CommandBuffer> m_CommandBuffer;
 		Ref<Framebuffer> m_Framebuffer;
 
 		Ref<Scene> m_ActiveScene;

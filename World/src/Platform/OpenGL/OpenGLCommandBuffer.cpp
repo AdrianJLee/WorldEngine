@@ -12,11 +12,11 @@ namespace World
 	{
 		// 录制结束，此时指令已全部存入 m_CommandQueue
 	}
-	void OpenGLCommandBuffer::BeginRenderPass(Ref<RenderPass> renderPass)
+	void OpenGLCommandBuffer::BeginRenderPass(Ref<RenderPass> renderPass, bool clear)
 	{
-		m_CommandQueue.push_back([renderPass]()
+		m_CommandQueue.push_back([renderPass, clear]()
 			{
-				RenderCommand::BeginRenderPass(renderPass);
+				RenderCommand::BeginRenderPass(renderPass, clear);
 			});
 	}
 	void OpenGLCommandBuffer::EndRenderPass()

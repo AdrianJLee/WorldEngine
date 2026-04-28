@@ -24,7 +24,7 @@ namespace World
 		virtual void SetLineWidth(float width) = 0;
 		inline static API GetAPI() { return s_API; }
 
-		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass) = 0;
+		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear) = 0;
 		virtual void EndRenderPass() = 0;
 	private:
 		static API s_API;
