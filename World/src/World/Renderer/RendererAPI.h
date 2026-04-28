@@ -1,4 +1,6 @@
 ﻿#pragma once
+#include "RenderPass.h"
+
 #include <glm/glm.hpp>
 
 namespace World
@@ -16,12 +18,14 @@ namespace World
 		virtual ~RendererAPI() = default;
 		virtual void Init() = 0;
 		virtual void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
-		virtual void SetClearColor(const glm::vec4& color) = 0;
-		virtual void Clear() = 0;
+
 		virtual void DrawIndexed(const Ref<class VertexArray>& vertexArray, uint32_t indexCount) = 0;
 		virtual void DrawLines(const Ref<class VertexArray>& vertexArray, uint32_t vertexCount) = 0;
 		virtual void SetLineWidth(float width) = 0;
 		inline static API GetAPI() { return s_API; }
+
+		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass) = 0;
+		virtual void EndRenderPass() = 0;
 	private:
 		static API s_API;
 	};

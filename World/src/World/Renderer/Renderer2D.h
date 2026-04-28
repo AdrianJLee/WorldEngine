@@ -17,7 +17,6 @@ namespace World
 	{
 	public:
 		static void Init();
-		static void Shutdown();
 		static void BeginScene(const Camera& camera, const glm::mat4& transform);
 		static void BeginScene(const EditorCamera& camera);
 		static void BeginScene(const OrthographicCamera& camera);// TODO: remove
@@ -62,6 +61,9 @@ namespace World
 		};
 		static Statistics GetStats();
 		static void ResetStats();
+
+
+		static void SetFramebuffer(const Ref<Framebuffer>& framebuffer);
 	private:
 		static void StartBatch();
 		static void NextBatch();

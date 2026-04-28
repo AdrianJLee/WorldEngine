@@ -20,14 +20,7 @@ namespace World
 	{
 		glViewport(x, y, width, height);
 	}
-	void OpenGLRendererAPI::SetClearColor(const glm::vec4& color)
-	{
-		glClearColor(color.r, color.g, color.b, color.a);
-	}
-	void OpenGLRendererAPI::Clear()
-	{
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-	}
+
 	void OpenGLRendererAPI::DrawIndexed(const Ref<class VertexArray>& vertexArray, uint32_t indexCount)
 	{
 		vertexArray->Bind();
@@ -45,5 +38,31 @@ namespace World
 	void OpenGLRendererAPI::SetLineWidth(float width)
 	{
 		glLineWidth(width);
+	}
+	void OpenGLRendererAPI::BeginRenderPass(const Ref<RenderPass>& renderPass)
+	{
+		const auto& spec = renderPass->GetSpecification();
+
+		// 1. 绑定目标渲染目标
+		if (spec.TargetFramebuffer)
+			spec.TargetFramebuffer->Bind();
+		else
+			glBindFramebuffer(GL_FRAMEBUFFER, 0); // 渲染到默认屏幕
+
+		// 2. 设置清除颜色并执行清除
+		glClearColor(spec.ClearColor.r, spec.ClearColor.g, spec.ClearColor.b, spec.ClearColor.a);
+
+		GLbitfield flags = 0;
+		if (spec.ClearOnColor) flags |= GL_COLOR_BUFFER_BIT;
+		if (spec.ClearOnDepth) flags |= GL_DEPTH_BUFFER_BIT;
+
+		glClear(flags);
+
+		spec.TargetFramebuffer->ClearAttachment(1, -1);
+
+	}
+	void OpenGLRendererAPI::EndRenderPass()
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
 }

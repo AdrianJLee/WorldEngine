@@ -123,6 +123,7 @@ namespace World
 		Renderer2DCircleData CircleData;
 		Renderer2DLineData LineData;
 
+		Ref<RenderPass> MainRenderPass;
 		Ref<Texture2D> WhiteTexture;
 		Renderer2D::Statistics Stats;
 		static const uint32_t MaxTextureSlots = 32; // 32是OpenGL至少支持的最大纹理单元数量
@@ -143,6 +144,13 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
+		{
+			RenderPassSpecification mainRenderPassSpec;
+			mainRenderPassSpec.ClearColor = { 0.1f, 0.1f, 0.1f, 1.0f };
+			// TODO: FrameBuffer
+			mainRenderPassSpec.TargetFramebuffer = nullptr; // 渲染到默认帧缓冲
+			s_Data.MainRenderPass = RenderPass::Create(mainRenderPassSpec);
+		}
 		// Quad渲染数据初始化
 		{
 			//Vertex Array
@@ -321,14 +329,11 @@ namespace World
 		s_Data.TextureSlots[0] = s_Data.WhiteTexture;
 
 	}
-	void Renderer2D::Shutdown()
-	{
-		WLD_PROFILE_FUNCTION();
 
-	}
 	void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform)
 	{
 		WLD_PROFILE_FUNCTION();
+		RenderCommand::BeginRenderPass(s_Data.MainRenderPass);
 
 		s_Data.QuadData.QuadPipeline->Bind();
 
@@ -342,6 +347,7 @@ namespace World
 	void Renderer2D::BeginScene(const EditorCamera& camera)
 	{
 		WLD_PROFILE_FUNCTION();
+		RenderCommand::BeginRenderPass(s_Data.MainRenderPass);
 
 		s_Data.QuadData.QuadPipeline->Bind();
 
@@ -355,6 +361,7 @@ namespace World
 	void Renderer2D::BeginScene(const OrthographicCamera& camera)
 	{
 		WLD_PROFILE_FUNCTION();
+		RenderCommand::BeginRenderPass(s_Data.MainRenderPass);
 
 		s_Data.QuadData.QuadPipeline->Bind();
 
@@ -367,6 +374,8 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 		Flush();
+
+		RenderCommand::EndRenderPass();
 	}
 
 	void Renderer2D::StartBatch()
@@ -667,5 +676,11 @@ namespace World
 
 		DrawRectCore(transform, color, -1);
 	}
+
+	void Renderer2D::SetFramebuffer(const Ref<Framebuffer>& framebuffer)
+	{
+		s_Data.MainRenderPass->GetSpecification().TargetFramebuffer = framebuffer;
+	}
+
 }
 

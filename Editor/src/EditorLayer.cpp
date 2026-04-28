@@ -33,8 +33,10 @@ namespace World
 		fbSpec.Attachments = { FramebufferTextureFormat::RGBA8, FramebufferTextureFormat::RED_INTEGER,FramebufferTextureFormat::Depth };
 		fbSpec.Width = 1280;
 		fbSpec.Height = 720;
-
 		m_Framebuffer = Framebuffer::Create(fbSpec);
+		// TODO:不规范
+		Renderer2D::SetFramebuffer(m_Framebuffer);
+
 		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
 	}
 
@@ -60,12 +62,12 @@ namespace World
 
 
 		WLD_PROFILE_SCOPE("Renderer Clear");
-		m_Framebuffer->Bind();
-		RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
-		RenderCommand::Clear();
+		//m_Framebuffer->Bind();
+		//RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
+		//RenderCommand::Clear();
 
 		// Create an entity with a camera component and set it as the primary camera
-		m_Framebuffer->ClearAttachment(1, -1);
+		//m_Framebuffer->ClearAttachment(1, -1);
 
 		{
 			WLD_PROFILE_SCOPE("Renderer Draw");
@@ -117,7 +119,7 @@ namespace World
 			}
 		}
 
-		m_Framebuffer->Unbind();
+		//m_Framebuffer->Unbind();
 	}
 
 	void EditorLayer::OnImGuiRender()
