@@ -1,0 +1,59 @@
+﻿#include "wldpch.h"
+#include "OpenGLCommandBuffer.h"
+#include "World/Renderer/RenderCommand.h"
+namespace World
+{
+
+	void OpenGLCommandBuffer::Begin()
+	{
+		m_CommandQueue.clear();
+	}
+	void OpenGLCommandBuffer::End()
+	{
+		// 录制结束，此时指令已全部存入 m_CommandQueue
+	}
+	void OpenGLCommandBuffer::BeginRenderPass(Ref<RenderPass> renderPass)
+	{
+		m_CommandQueue.push_back([renderPass]()
+			{
+				RenderCommand::BeginRenderPass(renderPass);
+			});
+	}
+	void OpenGLCommandBuffer::EndRenderPass()
+	{
+		m_CommandQueue.push_back([]()
+			{
+				RenderCommand::EndRenderPass();
+			});
+	}
+	void OpenGLCommandBuffer::BindPipeline(Ref<PipelineStateObject> pipeline)
+	{
+		m_CommandQueue.push_back([pipeline]()
+			{
+				pipeline->Bind();
+			});
+	}
+	void OpenGLCommandBuffer::DrawIndexed(Ref<VertexArray> va, uint32_t count)
+	{
+		m_CommandQueue.push_back([va, count]()
+			{
+				RenderCommand::DrawIndexed(va, count); // 最终调用 glDrawElements
+			});
+	}
+	void OpenGLCommandBuffer::DrawLines(Ref<VertexArray> va, uint32_t vertexCount)
+	{
+		m_CommandQueue.push_back([va, vertexCount]()
+			{
+				RenderCommand::DrawLines(va, vertexCount);
+			});
+	}
+	void OpenGLCommandBuffer::Execute()
+	{
+		WLD_PROFILE_FUNCTION();
+		// 核心：在渲染线程按序回放所有指令
+		for (auto& command : m_CommandQueue)
+		{
+			command();
+		}
+	}
+}

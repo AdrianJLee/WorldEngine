@@ -8,7 +8,7 @@
 #include "World/Renderer/RenderCommand.h"
 #include "World/Renderer/Texture.h"
 #include "World/Renderer/PipelineStateObject.h"
-
+#include "World/Renderer/CommandBuffer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -124,6 +124,8 @@ namespace World
 		Renderer2DLineData LineData;
 
 		Ref<RenderPass> MainRenderPass;
+		Ref<CommandBuffer> MainCommandBuffer;
+
 		Ref<Texture2D> WhiteTexture;
 		Renderer2D::Statistics Stats;
 		static const uint32_t MaxTextureSlots = 32; // 32是OpenGL至少支持的最大纹理单元数量
@@ -150,6 +152,8 @@ namespace World
 			// TODO: FrameBuffer
 			mainRenderPassSpec.TargetFramebuffer = nullptr; // 渲染到默认帧缓冲
 			s_Data.MainRenderPass = RenderPass::Create(mainRenderPassSpec);
+
+			s_Data.MainCommandBuffer = CommandBuffer::Create();
 		}
 		// Quad渲染数据初始化
 		{

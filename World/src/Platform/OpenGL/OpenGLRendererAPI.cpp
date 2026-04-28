@@ -43,13 +43,14 @@ namespace World
 	{
 		const auto& spec = renderPass->GetSpecification();
 
-		// 1. 绑定目标渲染目标
 		if (spec.TargetFramebuffer)
 			spec.TargetFramebuffer->Bind();
 		else
-			glBindFramebuffer(GL_FRAMEBUFFER, 0); // 渲染到默认屏幕
+		{
+			WLD_CORE_WARN("RenderPass has no target framebuffer! Rendering to default framebuffer.");
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		}
 
-		// 2. 设置清除颜色并执行清除
 		glClearColor(spec.ClearColor.r, spec.ClearColor.g, spec.ClearColor.b, spec.ClearColor.a);
 
 		GLbitfield flags = 0;
