@@ -7,6 +7,8 @@
 #include "World/Renderer/OrthographicCamera.h"
 #include "World/Renderer/RenderCommand.h"
 #include "World/Renderer/Texture.h"
+#include "World/Renderer/PipelineStateObject.h"
+
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -31,6 +33,8 @@ namespace World
 	};
 	struct Renderer2DQuadData
 	{
+		Ref<PipelineStateObject> QuadPipeline;
+
 		// 单次渲染调用中最多可以渲染的四边形数量
 		static const uint32_t MaxQuads = 20000;
 
@@ -47,13 +51,10 @@ namespace World
 
 		Ref<VertexBuffer> QuadVertexBuffer;
 
-		Ref<Shader> QuadShader;
-
 		// 四边形顶点数据的缓冲区
 		QuadVertex* QuadVertexBufferBase = nullptr;
 		// 四边形顶点数据的当前指针
 		QuadVertex* QuadVertexBufferPtr = nullptr;
-
 
 	};
 	struct CircleVertex
@@ -73,6 +74,8 @@ namespace World
 
 	struct Renderer2DCircleData
 	{
+		Ref<PipelineStateObject> CirclePipeline;
+
 		// 单次渲染调用中最多可以渲染的四边形数量
 		static const uint32_t MaxCircles = 20000;
 
@@ -83,8 +86,6 @@ namespace World
 		static const uint32_t MaxIndices = MaxCircles * 6;
 
 		uint32_t CircleIndexCount = 0;
-
-		Ref<Shader> CircleShader;
 
 		Ref<VertexArray> CircleVertexArray;
 		Ref<VertexBuffer> CircleVertexBuffer;
@@ -101,11 +102,13 @@ namespace World
 	};
 	struct Renderer2DLineData
 	{
+		Ref<PipelineStateObject> LinePipeline;
+
 		static const uint32_t MaxLines = 10000;
 		static const uint32_t MaxVertices = MaxLines * 2;
 		static const uint32_t MaxIndices = MaxLines * 2;
 		uint32_t LineIndexCount = 0;
-		Ref<Shader> LineShader;
+
 		Ref<VertexArray> LineVertexArray;
 		Ref<VertexBuffer> LineVertexBuffer;
 		LineVertex* LineVertexBufferBase = nullptr;
@@ -146,24 +149,29 @@ namespace World
 			s_Data.QuadData.QuadVertexArray = VertexArray::Create();
 
 			// Shader
-			s_Data.QuadData.QuadShader = Shader::Create();
-			s_Data.QuadData.QuadShader->AddShader("assets/shaders/Renderer2D_Quad.hlsl", Shader::ShaderType::Vertex);
-			s_Data.QuadData.QuadShader->AddShader("assets/shaders/Renderer2D_Quad.hlsl", Shader::ShaderType::Fragment);
-			s_Data.QuadData.QuadShader->Compile();
+			Ref<Shader>  quadShader = Shader::Create();
+			quadShader->AddShader("assets/shaders/Renderer2D_Quad.hlsl", Shader::ShaderType::Vertex);
+			quadShader->AddShader("assets/shaders/Renderer2D_Quad.hlsl", Shader::ShaderType::Fragment);
+			quadShader->Compile();
+
 
 			//Vertex Buffer
+			PipelineSpecification quadPipelineSpec;
+			quadPipelineSpec.Shader = quadShader;
+			quadPipelineSpec.Layout = {
+				{ ShaderDataType::Float3, "a_Position",0},
+				{ ShaderDataType::Float4, "a_Color",1 },
+				{ ShaderDataType::Float2, "a_TexCoord",2 },
+				{ ShaderDataType::Float, "a_TexIndex",3 },
+				{ ShaderDataType::Float, "a_TilingFactor",4 },
+				{ ShaderDataType::Int, "a_EntityID",5 }
+			};
+			s_Data.QuadData.QuadPipeline = PipelineStateObject::Create(quadPipelineSpec);
 
 			s_Data.QuadData.QuadVertexBuffer = VertexBuffer::Create(s_Data.QuadData.MaxVertices * sizeof(QuadVertex));
-			s_Data.QuadData.QuadVertexBuffer->SetLayout(
-				{
-					{ ShaderDataType::Float3, "a_Position",0},
-					{ ShaderDataType::Float4, "a_Color",1 },
-					{ ShaderDataType::Float2, "a_TexCoord",2 },
-					{ ShaderDataType::Float, "a_TexIndex",3 },
-					{ ShaderDataType::Float, "a_TilingFactor",4 },
-					{ ShaderDataType::Int, "a_EntityID",5 }
-				});
-			s_Data.QuadData.QuadVertexArray->AddVertexBuffer(s_Data.QuadData.QuadVertexBuffer, s_Data.QuadData.QuadShader);
+			s_Data.QuadData.QuadVertexBuffer->SetLayout(s_Data.QuadData.QuadPipeline->GetSpecification().Layout);
+			s_Data.QuadData.QuadVertexArray->AddVertexBuffer(s_Data.QuadData.QuadVertexBuffer,
+				s_Data.QuadData.QuadPipeline->GetSpecification().Shader);
 
 			// 为四边形顶点数据结构分配内存
 			s_Data.QuadData.QuadVertexBufferBase = new QuadVertex[s_Data.QuadData.MaxVertices];
@@ -194,7 +202,7 @@ namespace World
 
 			// 初始化纹理槽，绑定默认的白色纹理到槽0
 			{
-				s_Data.QuadData.QuadShader->Bind();
+				s_Data.QuadData.QuadPipeline->Bind();
 				// 解决 std140 布局的数组对齐问题
 				// std140 规定每个数组元素会向 16 bytes(vec4的大小) 对齐
 				struct TextureData
@@ -219,23 +227,27 @@ namespace World
 			s_Data.CircleData.CircleVertexArray = VertexArray::Create();
 
 			// Shader
-			s_Data.CircleData.CircleShader = Shader::Create();
-			s_Data.CircleData.CircleShader->AddShader("assets/shaders/Renderer2D_Circle.hlsl", Shader::ShaderType::Vertex);
-			s_Data.CircleData.CircleShader->AddShader("assets/shaders/Renderer2D_Circle.hlsl", Shader::ShaderType::Fragment);
-			s_Data.CircleData.CircleShader->Compile();
+			Ref<Shader> circleShader = Shader::Create();
+			circleShader->AddShader("assets/shaders/Renderer2D_Circle.hlsl", Shader::ShaderType::Vertex);
+			circleShader->AddShader("assets/shaders/Renderer2D_Circle.hlsl", Shader::ShaderType::Fragment);
+			circleShader->Compile();
 
 			// CircleVertexBuffer
+			PipelineSpecification circlePipelineSpec;
+			circlePipelineSpec.Shader = circleShader;
+			circlePipelineSpec.Layout = {
+				{ ShaderDataType::Float3, "WorldPosition",0},
+				{ ShaderDataType::Float3, "LocalPosition",1 },
+				{ ShaderDataType::Float4, "Color",2 },
+				{ ShaderDataType::Float, "Thickness",3 },
+				{ ShaderDataType::Float, "Fade",4 },
+				{ ShaderDataType::Int, "EntityID",5 }
+			};
+			s_Data.CircleData.CirclePipeline = PipelineStateObject::Create(circlePipelineSpec);
+
 			s_Data.CircleData.CircleVertexBuffer = VertexBuffer::Create(s_Data.CircleData.MaxVertices * sizeof(CircleVertex));
-			s_Data.CircleData.CircleVertexBuffer->SetLayout(
-				{
-					{ ShaderDataType::Float3, "WorldPosition",0},
-					{ ShaderDataType::Float3, "LocalPosition",1 },
-					{ ShaderDataType::Float4, "Color",2 },
-					{ ShaderDataType::Float, "Thickness",3 },
-					{ ShaderDataType::Float, "Fade",4 },
-					{ ShaderDataType::Int, "EntityID",5 }
-				});
-			s_Data.CircleData.CircleVertexArray->AddVertexBuffer(s_Data.CircleData.CircleVertexBuffer, s_Data.CircleData.CircleShader);
+			s_Data.CircleData.CircleVertexBuffer->SetLayout(s_Data.CircleData.CirclePipeline->GetSpecification().Layout);
+			s_Data.CircleData.CircleVertexArray->AddVertexBuffer(s_Data.CircleData.CircleVertexBuffer, s_Data.CircleData.CirclePipeline->GetSpecification().Shader);
 			// 为圆形顶点数据结构分配内存
 			s_Data.CircleData.CircleVertexBufferBase = new CircleVertex[s_Data.CircleData.MaxVertices];
 
@@ -265,20 +277,24 @@ namespace World
 			s_Data.LineData.LineVertexArray = VertexArray::Create();
 
 			// Shader
-			s_Data.LineData.LineShader = Shader::Create();
-			s_Data.LineData.LineShader->AddShader("assets/shaders/Renderer2D_Line.hlsl", Shader::ShaderType::Vertex);
-			s_Data.LineData.LineShader->AddShader("assets/shaders/Renderer2D_Line.hlsl", Shader::ShaderType::Fragment);
-			s_Data.LineData.LineShader->Compile();
+			Ref<Shader> lineShader = Shader::Create();
+			lineShader->AddShader("assets/shaders/Renderer2D_Line.hlsl", Shader::ShaderType::Vertex);
+			lineShader->AddShader("assets/shaders/Renderer2D_Line.hlsl", Shader::ShaderType::Fragment);
+			lineShader->Compile();
 
 			// LineVertexBuffer
+			PipelineSpecification linePipelineSpec;
+			linePipelineSpec.Shader = lineShader;
+			linePipelineSpec.Layout = {
+				{ ShaderDataType::Float3, "a_Position",0},
+				{ ShaderDataType::Float4, "a_Color",1 },
+				{ ShaderDataType::Int, "a_EntityID",2 }
+			};
+			s_Data.LineData.LinePipeline = PipelineStateObject::Create(linePipelineSpec);
+
 			s_Data.LineData.LineVertexBuffer = VertexBuffer::Create(s_Data.LineData.MaxVertices * sizeof(LineVertex));
-			s_Data.LineData.LineVertexBuffer->SetLayout(
-				{
-					{ ShaderDataType::Float3, "a_Position",0},
-					{ ShaderDataType::Float4, "a_Color",1 },
-					{ ShaderDataType::Int, "a_EntityID",2 }
-				});
-			s_Data.LineData.LineVertexArray->AddVertexBuffer(s_Data.LineData.LineVertexBuffer, s_Data.LineData.LineShader);
+			s_Data.LineData.LineVertexBuffer->SetLayout(s_Data.LineData.LinePipeline->GetSpecification().Layout);
+			s_Data.LineData.LineVertexArray->AddVertexBuffer(s_Data.LineData.LineVertexBuffer, s_Data.LineData.LinePipeline->GetSpecification().Shader);
 			s_Data.LineData.LineVertexBufferBase = new LineVertex[s_Data.LineData.MaxVertices];
 
 			// Index Buffer
@@ -314,7 +330,7 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
-		s_Data.QuadData.QuadShader->Bind();
+		s_Data.QuadData.QuadPipeline->Bind();
 
 		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(transform);
 
@@ -327,7 +343,7 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
-		s_Data.QuadData.QuadShader->Bind();
+		s_Data.QuadData.QuadPipeline->Bind();
 
 		glm::mat4 viewProjection = camera.GetViewProjection();
 
@@ -340,7 +356,7 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
-		s_Data.QuadData.QuadShader->Bind();
+		s_Data.QuadData.QuadPipeline->Bind();
 
 		//u_ViewProjection
 		m_UniformBuffers.SetData(0, &camera.GetViewProjectionMatrix(), sizeof(glm::mat4));
@@ -387,7 +403,7 @@ namespace World
 		{
 			uint32_t lineDataSize = (uint32_t)((uint8_t*)s_Data.LineData.LineVertexBufferPtr - (uint8_t*)s_Data.LineData.LineVertexBufferBase);
 			s_Data.LineData.LineVertexBuffer->SetData(s_Data.LineData.LineVertexBufferBase, lineDataSize);
-			s_Data.LineData.LineShader->Bind();
+			s_Data.LineData.LinePipeline->Bind();
 			RenderCommand::DrawLines(s_Data.LineData.LineVertexArray, s_Data.LineData.LineIndexCount);
 			s_Data.Stats.DrawCalls++;
 
@@ -403,7 +419,7 @@ namespace World
 			{
 				s_Data.TextureSlots[i]->Bind(i);
 			}
-			s_Data.QuadData.QuadShader->Bind();
+			s_Data.QuadData.QuadPipeline->Bind();
 			RenderCommand::DrawIndexed(s_Data.QuadData.QuadVertexArray, s_Data.QuadData.QuadIndexCount);
 
 			s_Data.Stats.DrawCalls++;
@@ -414,7 +430,7 @@ namespace World
 			uint32_t circleDataSize = (uint32_t)((uint8_t*)s_Data.CircleData.CircleVertexBufferPtr - (uint8_t*)s_Data.CircleData.CircleVertexBufferBase);
 			s_Data.CircleData.CircleVertexBuffer->SetData(s_Data.CircleData.CircleVertexBufferBase, circleDataSize);
 
-			s_Data.CircleData.CircleShader->Bind();
+			s_Data.CircleData.CirclePipeline->Bind();
 
 			RenderCommand::DrawIndexed(s_Data.CircleData.CircleVertexArray, s_Data.CircleData.CircleIndexCount);
 
