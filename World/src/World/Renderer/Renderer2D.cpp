@@ -4,7 +4,6 @@
 #include "World/Renderer/VertexArray.h"
 #include "World/Renderer/Buffer.h"
 #include "World/Renderer/Shader.h"
-#include "World/Renderer/OrthographicCamera.h"
 #include "World/Renderer/RenderCommand.h"
 #include "World/Renderer/Texture.h"
 #include "World/Renderer/PipelineStateObject.h"
@@ -363,18 +362,7 @@ namespace World
 
 		StartBatch();
 	}
-	void Renderer2D::BeginScene(const OrthographicCamera& camera)
-	{
-		WLD_PROFILE_FUNCTION();
-		//RenderCommand::BeginRenderPass(s_Data.MainRenderPass, true);
-		WLD_ERROR("Renderer2D::BeginScene with OrthographicCamera is not implemented yet. Please use the overload that takes a CommandBuffer and call BeginRenderPass manually.");
-		s_Data.QuadData.QuadPipeline->Bind();
 
-		//u_ViewProjection
-		m_UniformBuffers.SetData(0, &camera.GetViewProjectionMatrix(), sizeof(glm::mat4));
-
-		StartBatch();
-	}
 	void Renderer2D::EndScene()
 	{
 		WLD_PROFILE_FUNCTION();

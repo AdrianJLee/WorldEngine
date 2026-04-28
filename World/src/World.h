@@ -20,7 +20,6 @@
 #include "World/Scene/ScriptableEntity.h"
 #include "World/Scene/SceneSerializer.h"
 
-#include "World/Renderer/OrthographicCamera.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/RenderCommand.h"
@@ -30,7 +29,6 @@
 #include "World/Renderer/VertexArray.h"
 #include "World/Renderer/Texture.h"
 #include "World/Renderer/SubTexture2D.h"
-#include "World/Renderer/OrthographicCameraController.h"
 
 #include "World/Utils/PlatformUtils.h"
 //	Entry Point

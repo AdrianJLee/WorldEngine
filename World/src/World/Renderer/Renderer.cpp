@@ -4,7 +4,6 @@
 #include "World/Renderer/RenderCommand.h"
 #include "World/Renderer/VertexArray.h"
 #include "World/Renderer/Shader.h"
-#include "World/Renderer/OrthographicCamera.h"
 #include "World/Renderer/Renderer2D.h"
 
 namespace World
@@ -20,12 +19,7 @@ namespace World
 	{
 		RenderCommand::SetViewport(0, 0, width, height);
 	}
-	void Renderer::BeginScene(OrthographicCamera& camera)
-	{
-		m_SceneData->ViewProjectionMatrix = camera.GetViewProjectionMatrix();
-	}
-	void Renderer::EndScene()
-	{}
+
 	void Renderer::Submit(const Ref<class Shader>& shader, const Ref<class VertexArray>& vertexArray, const  glm::mat4& transform)
 	{
 		shader->Bind();

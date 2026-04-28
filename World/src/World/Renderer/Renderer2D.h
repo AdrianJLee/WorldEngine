@@ -20,7 +20,7 @@ namespace World
 		static void Init();
 		static void BeginScene(const Camera& camera, const glm::mat4& transform, Ref<CommandBuffer> commandBuffer, bool clear = false);
 		static void BeginScene(const EditorCamera& camera, Ref<CommandBuffer> commandBuffer, bool clear = false);
-		static void BeginScene(const OrthographicCamera& camera);// TODO: remove
+
 		static void EndScene();
 
 		static void Flush();
