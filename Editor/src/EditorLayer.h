@@ -2,6 +2,7 @@
 #include "World.h"
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
+#include "World/Renderer/SceneRenderer.h"
 namespace World
 {
 	class EditorLayer : public Layer
@@ -40,8 +41,8 @@ namespace World
 		void SetSceneState(SceneState state);
 		void UpdateSceneContext(Ref<Scene> scene);
 	private:
-		Ref<CommandBuffer> m_CommandBuffer;
-		Ref<Framebuffer> m_Framebuffer;
+		Ref<SceneRenderer> m_SceneRenderer;
+		SceneRendererOptions m_RendererOptions;
 
 		Ref<Scene> m_ActiveScene;
 		Ref<Scene> m_EditorScene, m_RuntimeScene;

@@ -331,11 +331,10 @@ namespace World
 
 	}
 
-	void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform, Ref<CommandBuffer> commandBuffer, bool clear)
+	void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform, Ref<CommandBuffer> commandBuffer)
 	{
 		WLD_PROFILE_FUNCTION();
 		s_CurrentCommandBuffer = commandBuffer;
-		s_CurrentCommandBuffer->BeginRenderPass(s_Data.MainRenderPass, clear);
 
 		s_Data.QuadData.QuadPipeline->Bind();
 
@@ -344,23 +343,6 @@ namespace World
 		//u_ViewProjection
 		m_UniformBuffers.SetData(0, &viewProjection, sizeof(glm::mat4));
 
-		StartBatch();
-	}
-	void Renderer2D::BeginScene(const EditorCamera& camera, Ref<CommandBuffer> commandBuffer, bool clear)
-	{
-		WLD_PROFILE_FUNCTION();
-		s_CurrentCommandBuffer = commandBuffer;
-
-		s_CurrentCommandBuffer->BeginRenderPass(s_Data.MainRenderPass, clear);
-
-		s_Data.QuadData.QuadPipeline->Bind();
-
-		glm::mat4 viewProjection = camera.GetViewProjection();
-
-		//u_ViewProjection 
-		m_UniformBuffers.SetData(0, &viewProjection, sizeof(glm::mat4));
-
-		StartBatch();
 	}
 
 	void Renderer2D::EndScene()
@@ -368,7 +350,6 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		Flush();
 
-		s_CurrentCommandBuffer->EndRenderPass();
 		s_CurrentCommandBuffer = nullptr;
 	}
 
@@ -402,7 +383,7 @@ namespace World
 
 	void Renderer2D::Flush()
 	{
-		if (s_Data.LineData.LineVertexBufferPtr != s_Data.LineData.LineVertexBufferBase)
+		if (s_Data.LineData.LineVertexBufferPtr != s_Data.LineData.LineVertexBufferBase && s_Data.LineData.LineVertexBufferPtr != nullptr)
 		{
 			uint32_t lineDataSize = (uint32_t)((uint8_t*)s_Data.LineData.LineVertexBufferPtr - (uint8_t*)s_Data.LineData.LineVertexBufferBase);
 			s_Data.LineData.LineVertexBuffer->SetData(s_Data.LineData.LineVertexBufferBase, lineDataSize);
@@ -430,7 +411,7 @@ namespace World
 			s_Data.Stats.DrawCalls++;
 		}
 
-		if (s_Data.CircleData.CircleVertexBufferPtr != s_Data.CircleData.CircleVertexBufferBase)
+		if (s_Data.CircleData.CircleVertexBufferPtr != s_Data.CircleData.CircleVertexBufferBase && s_Data.CircleData.CircleVertexBufferPtr != nullptr)
 		{
 			uint32_t circleDataSize = (uint32_t)((uint8_t*)s_Data.CircleData.CircleVertexBufferPtr - (uint8_t*)s_Data.CircleData.CircleVertexBufferBase);
 			s_Data.CircleData.CircleVertexBuffer->SetData(s_Data.CircleData.CircleVertexBufferBase, circleDataSize);
@@ -570,6 +551,7 @@ namespace World
 
 	void Renderer2D::NextBatch()
 	{
+		WLD_CORE_ERROR("NextBatch don't work.Please fix it!");
 		EndScene();
 
 		StartBatch();

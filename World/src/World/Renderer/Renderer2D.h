@@ -18,11 +18,10 @@ namespace World
 	{
 	public:
 		static void Init();
-		static void BeginScene(const Camera& camera, const glm::mat4& transform, Ref<CommandBuffer> commandBuffer, bool clear = false);
-		static void BeginScene(const EditorCamera& camera, Ref<CommandBuffer> commandBuffer, bool clear = false);
+		static void BeginScene(const Camera& camera, const glm::mat4& transform, Ref<CommandBuffer> commandBuffer);
 
 		static void EndScene();
-
+		static void StartBatch();
 		static void Flush();
 
 		static void DrawQuadCore(const glm::mat4& transform, const Ref<Texture2D>& texture,
@@ -66,7 +65,7 @@ namespace World
 
 		static void SetFramebuffer(const Ref<Framebuffer>& framebuffer);
 	private:
-		static void StartBatch();
+
 		static void NextBatch();
 
 	private:

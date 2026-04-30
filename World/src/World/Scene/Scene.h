@@ -15,9 +15,9 @@ namespace World
 		Scene();
 		~Scene();
 
-		void OnUpdateEditor(Timestep ts, const EditorCamera& camera, Ref<CommandBuffer> commandBuffer);
-		void OnUpdateRuntime(Timestep ts, Ref<CommandBuffer> commandBuffer);
-		void OnUpdateSimulation(Timestep ts, const EditorCamera& camera, Ref<CommandBuffer> commandBuffer);
+		void OnUpdateEditor(Timestep ts, const EditorCamera& camera);
+		void OnUpdateRuntime(Timestep ts);
+		void OnUpdateSimulation(Timestep ts, const EditorCamera& camera);
 		void OnViewportResize(uint32_t width, uint32_t height);
 
 		void OnRuntimeStart();
@@ -33,12 +33,12 @@ namespace World
 		static void CopyScene(Ref<Scene>& other, Ref<Scene>& newScene);
 
 	private:
-		void RendererScene();
 		void OnPhysics2DStart();
 		void OnUpdatePhysics2D(Timestep ts);
 		void OnPhysics2DStop();
 	private:
 		friend class Entity;
+		friend class SceneRenderer;
 
 		entt::registry m_Registry;
 
