@@ -134,13 +134,13 @@ namespace World
 			{ 0.5f, 0.5f,0.0f,1.0f},
 			{-0.5f, 0.5f,0.0f,1.0f}
 		};
+
 	};
 
 	static Renderer2DData s_Data;
 	void Renderer2D::Init()
 	{
 		WLD_PROFILE_FUNCTION();
-
 		// Quad渲染数据初始化
 		{
 			//Vertex Array
@@ -303,8 +303,7 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 		s_CurrentCommandBuffer = commandBuffer;
-
-		s_Data.QuadData.QuadPipeline->Bind();
+		s_CurrentCommandBuffer->BindPipeline(s_Data.QuadData.QuadPipeline);
 
 		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(transform);
 
@@ -370,6 +369,7 @@ namespace World
 			{
 				s_Data.TextureSlots[i]->Bind(i);
 			}
+
 			s_CurrentCommandBuffer->BindPipeline(s_Data.QuadData.QuadPipeline);
 			s_CurrentCommandBuffer->DrawIndexed(s_Data.QuadData.QuadVertexArray, s_Data.QuadData.QuadIndexCount);
 

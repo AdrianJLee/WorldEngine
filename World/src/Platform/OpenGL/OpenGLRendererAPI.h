@@ -15,8 +15,10 @@ namespace World
 
 		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear) override;
 		virtual void EndRenderPass()override;
-	private:
 
+		virtual uint32_t GetMaxFramesInFlight() const override { return MaxFramesInFlight; }
+	private:
+		static const uint32_t MaxFramesInFlight = 3;
 	};
 
 }

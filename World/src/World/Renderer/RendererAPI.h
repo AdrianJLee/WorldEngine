@@ -26,8 +26,12 @@ namespace World
 
 		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear) = 0;
 		virtual void EndRenderPass() = 0;
+
+		virtual uint32_t GetMaxFramesInFlight() const = 0;
+
 	private:
 		static API s_API;
+
 	};
 
 }

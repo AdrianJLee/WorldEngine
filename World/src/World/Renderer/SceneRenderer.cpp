@@ -2,6 +2,8 @@
 #include "SceneRenderer.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Scene/Components.h"
+#include "World/Renderer/RenderCommand.h"
+
 #include <glm/gtc/matrix_transform.hpp>
 namespace World
 {
@@ -25,17 +27,17 @@ namespace World
 		m_CommandBuffer = CommandBuffer::Create();
 
 		// Create Descriptor Set
-		m_DescriptorSet = CreateRef<DescriptorSet>();
+		m_GlobalDescriptorSet = CreateRef<DescriptorSet>();
 		// Binding 0: Camera UBO
-		m_DescriptorSet->AddUniformBufferSet(0, sizeof(glm::mat4), "u_Camera", MaxFramesInFlight);
+		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::Pass::Camera, sizeof(glm::mat4), RenderCommand::GetMaxFramesInFlight());
 		// Binding 1: Texture samplers UBO
 		u_TextureData samplers[32];
 		for (uint32_t i = 0; i < 32; i++)
 		{
 			samplers[i].Index = i;
 		}
-		m_DescriptorSet->AddUniformBufferSet(1, sizeof(samplers), "u_Textures", MaxFramesInFlight);
-		m_DescriptorSet->GetUniformBufferSet("u_Textures")->SetData(samplers, sizeof(samplers));
+		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::Pass::TextureIndices, sizeof(samplers), RenderCommand::GetMaxFramesInFlight());
+		m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::Pass::TextureIndices)->SetData(samplers, sizeof(samplers));
 	}
 
 	void SceneRenderer::Shutdown()
@@ -60,14 +62,15 @@ namespace World
 		m_ActiveScene = scene;
 		m_Options = options;
 
-		m_CommandBuffer->Begin();
+		m_CommandBuffer->Begin(m_CurrentFrameIndex);
 	}
 
 	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
 	{
-       glm::mat4 uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
-		m_DescriptorSet->GetUniformBufferSet("u_Camera")->Get(m_CurrentFrameIndex)->SetData(&uCameraData, sizeof(glm::mat4));
+		glm::mat4 uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::Pass::Camera)->SetData(&uCameraData, sizeof(glm::mat4));
 
+		//m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
 
 		m_CommandBuffer->BeginRenderPass(m_ActivePass, true);
 		Renderer2D::StartBatch();
@@ -88,8 +91,7 @@ namespace World
 
 
 		m_CommandBuffer->EndRenderPass();
-
-		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % MaxFramesInFlight;
+		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % RenderCommand::GetMaxFramesInFlight();
 	}
 
 	void SceneRenderer::RenderGeometry(Ref<CommandBuffer> cmd, const Camera& camera, const glm::mat4& cameraTransform)

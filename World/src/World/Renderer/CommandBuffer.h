@@ -2,6 +2,7 @@
 #include "RenderPass.h"
 #include "PipelineStateObject.h"
 #include "VertexArray.h"
+#include "DescriptorSet.h"
 namespace World
 {
 	class CommandBuffer
@@ -11,7 +12,7 @@ namespace World
 	public:
 		virtual ~CommandBuffer() = default;
 
-		virtual void Begin() = 0;
+		virtual void Begin(uint32_t frameIndex) = 0;
 		virtual void End() = 0;
 
 		// 录制指令
@@ -23,6 +24,7 @@ namespace World
 		virtual void DrawLines(Ref<VertexArray> va, uint32_t vertexCount) = 0;
 		virtual void Execute() = 0;
 
+		virtual void BindDescriptorSet(Ref<DescriptorSet> descriptorSet) = 0;
 		// ... 其他 Draw 指令
 
 	};

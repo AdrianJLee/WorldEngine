@@ -43,8 +43,7 @@ namespace World
 		const Scene* m_ActiveScene = nullptr;
 
 		uint32_t m_CurrentFrameIndex = 0;
-		static const uint32_t MaxFramesInFlight = 3;
 
-		Ref<DescriptorSet> m_DescriptorSet;
+		Ref<DescriptorSet> m_GlobalDescriptorSet;
 	};
 }

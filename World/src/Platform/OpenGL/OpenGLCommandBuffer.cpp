@@ -4,9 +4,10 @@
 namespace World
 {
 
-	void OpenGLCommandBuffer::Begin()
+	void OpenGLCommandBuffer::Begin(uint32_t frameIndex)
 	{
 		m_CommandQueue.clear();
+		m_CurrentFrameIndex = frameIndex;
 	}
 	void OpenGLCommandBuffer::End()
 	{
@@ -55,5 +56,13 @@ namespace World
 		{
 			command();
 		}
+	}
+	void OpenGLCommandBuffer::BindDescriptorSet(Ref<DescriptorSet> descriptorSet)
+	{
+		uint32_t frameIndex = m_CurrentFrameIndex;
+		m_CommandQueue.push_back([this, descriptorSet, frameIndex]()
+			{
+				descriptorSet->Bind(frameIndex);
+			});
 	}
 }
