@@ -65,8 +65,8 @@ namespace World
 
 	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
 	{
-		auto& uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
-		m_DescriptorSet->GetUniformBufferSet("u_Camera")->SetData(&uCameraData, sizeof(glm::mat4));
+       glm::mat4 uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		m_DescriptorSet->GetUniformBufferSet("u_Camera")->Get(m_CurrentFrameIndex)->SetData(&uCameraData, sizeof(glm::mat4));
 
 
 		m_CommandBuffer->BeginRenderPass(m_ActivePass, true);
@@ -88,6 +88,8 @@ namespace World
 
 
 		m_CommandBuffer->EndRenderPass();
+
+		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % MaxFramesInFlight;
 	}
 
 	void SceneRenderer::RenderGeometry(Ref<CommandBuffer> cmd, const Camera& camera, const glm::mat4& cameraTransform)
