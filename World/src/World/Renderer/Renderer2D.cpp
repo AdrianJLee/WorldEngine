@@ -12,7 +12,6 @@
 
 namespace World
 {
-	UniformBufferResource Renderer2D::m_UniformBuffers = UniformBufferResource();
 	Ref<CommandBuffer> Renderer2D::s_CurrentCommandBuffer = nullptr;
 	struct QuadVertex
 	{
@@ -122,8 +121,6 @@ namespace World
 		Renderer2DCircleData CircleData;
 		Renderer2DLineData LineData;
 
-		Ref<RenderPass> MainRenderPass;
-
 		Ref<Texture2D> WhiteTexture;
 		Renderer2D::Statistics Stats;
 		static const uint32_t MaxTextureSlots = 32; // 32是OpenGL至少支持的最大纹理单元数量
@@ -144,14 +141,6 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
-		{
-			RenderPassSpecification mainRenderPassSpec;
-			mainRenderPassSpec.ClearColor = { 0.1f, 0.1f, 0.1f, 1.0f };
-			// TODO: FrameBuffer
-			mainRenderPassSpec.TargetFramebuffer = nullptr; // 渲染到默认帧缓冲
-			s_Data.MainRenderPass = RenderPass::Create(mainRenderPassSpec);
-
-		}
 		// Quad渲染数据初始化
 		{
 			//Vertex Array
@@ -207,27 +196,6 @@ namespace World
 			Ref<IndexBuffer> quadIB = IndexBuffer::Create(quadIndices, s_Data.QuadData.MaxIndices);
 			s_Data.QuadData.QuadVertexArray->SetIndexBuffer(quadIB);
 			delete[] quadIndices;
-
-
-			// 初始化纹理槽，绑定默认的白色纹理到槽0
-			{
-				s_Data.QuadData.QuadPipeline->Bind();
-				// 解决 std140 布局的数组对齐问题
-				// std140 规定每个数组元素会向 16 bytes(vec4的大小) 对齐
-				struct TextureData
-				{
-					uint32_t Index;
-					uint32_t Padding[3]; // 填充12个字节凑齐16字节
-				};
-				TextureData samplers[s_Data.MaxTextureSlots];
-				for (uint32_t i = 0; i < s_Data.MaxTextureSlots; i++)
-				{
-					samplers[i].Index = i;
-				}
-
-				// u_Textures,将纹理槽数组上传到GPU的Uniform Buffer中，绑定点为1
-				m_UniformBuffers.SetData(1, samplers, sizeof(samplers));
-			}
 		}
 
 		// Circle渲染数据初始化
@@ -339,9 +307,6 @@ namespace World
 		s_Data.QuadData.QuadPipeline->Bind();
 
 		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(transform);
-
-		//u_ViewProjection
-		m_UniformBuffers.SetData(0, &viewProjection, sizeof(glm::mat4));
 
 	}
 
@@ -652,11 +617,6 @@ namespace World
 			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
 
 		DrawRectCore(transform, color, -1);
-	}
-
-	void Renderer2D::SetFramebuffer(const Ref<Framebuffer>& framebuffer)
-	{
-		s_Data.MainRenderPass->GetSpecification().TargetFramebuffer = framebuffer;
 	}
 
 }

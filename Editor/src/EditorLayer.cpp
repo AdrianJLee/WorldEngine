@@ -17,7 +17,6 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 		m_SceneRenderer->Init();
-		Renderer2D::SetFramebuffer(m_SceneRenderer->GetTargetFramebuffer());
 
 		m_IconPlay = Texture2D::Create("Resource/Icons/Icon_Play.png");
 		m_IconStop = Texture2D::Create("Resource/Icons/Icon_Stop.png");

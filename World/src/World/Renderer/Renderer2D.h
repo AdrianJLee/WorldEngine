@@ -62,14 +62,11 @@ namespace World
 		static Statistics GetStats();
 		static void ResetStats();
 
-
-		static void SetFramebuffer(const Ref<Framebuffer>& framebuffer);
 	private:
 
 		static void NextBatch();
 
 	private:
-		static UniformBufferResource m_UniformBuffers;
 		static Ref<CommandBuffer> s_CurrentCommandBuffer;
 	};
 }

@@ -2,24 +2,40 @@
 #include "SceneRenderer.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Scene/Components.h"
-
+#include <glm/gtc/matrix_transform.hpp>
 namespace World
 {
 
 	void SceneRenderer::Init()
 	{
+		// Create Framebuffer
 		FramebufferSpecification fbSpec;
 		fbSpec.Attachments = { FramebufferTextureFormat::RGBA8,FramebufferTextureFormat::RED_INTEGER, FramebufferTextureFormat::Depth };
 		fbSpec.Width = 1280;
 		fbSpec.Height = 720;
 		m_MainFramebuffer = Framebuffer::Create(fbSpec);
 
+		// Create Render Pass
 		RenderPassSpecification passSpec;
 		passSpec.TargetFramebuffer = m_MainFramebuffer;
 		passSpec.ClearColor = { 0.1f, 0.1f, 0.1f, 1.0f };
 		m_ActivePass = RenderPass::Create(passSpec);
 
+		// Create Command Buffer
 		m_CommandBuffer = CommandBuffer::Create();
+
+		// Create Descriptor Set
+		m_DescriptorSet = CreateRef<DescriptorSet>();
+		// Binding 0: Camera UBO
+		m_DescriptorSet->AddUniformBufferSet(0, sizeof(glm::mat4), "u_Camera", MaxFramesInFlight);
+		// Binding 1: Texture samplers UBO
+		u_TextureData samplers[32];
+		for (uint32_t i = 0; i < 32; i++)
+		{
+			samplers[i].Index = i;
+		}
+		m_DescriptorSet->AddUniformBufferSet(1, sizeof(samplers), "u_Textures", MaxFramesInFlight);
+		m_DescriptorSet->GetUniformBufferSet("u_Textures")->SetData(samplers, sizeof(samplers));
 	}
 
 	void SceneRenderer::Shutdown()
@@ -49,6 +65,10 @@ namespace World
 
 	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
 	{
+		auto& uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		m_DescriptorSet->GetUniformBufferSet("u_Camera")->SetData(&uCameraData, sizeof(glm::mat4));
+
+
 		m_CommandBuffer->BeginRenderPass(m_ActivePass, true);
 		Renderer2D::StartBatch();
 
@@ -61,10 +81,8 @@ namespace World
 			Renderer2D::EndScene();
 		}
 
-		if (m_Options.ShowPhysicsColliders)
-		{
-			RenderDebug(m_CommandBuffer, camera, cameraTransform);
-		}
+		RenderDebug(m_CommandBuffer, camera, cameraTransform);
+
 
 		RenderGeometry(m_CommandBuffer, camera, cameraTransform);
 

@@ -4,13 +4,13 @@
 #include "World/Renderer/CommandBuffer.h"
 #include "World/Renderer/EditorCamera.h"
 #include "World/Scene/Scene.h"
+#include "World/Renderer/DescriptorSet.h"
 #include <glm/glm.hpp>
 namespace World
 {
 	struct SceneRendererOptions
 	{
 		bool ShowGrid = true;
-		bool ShowPhysicsColliders = true;
 	};
 
 	class SceneRenderer
@@ -41,5 +41,10 @@ namespace World
 
 		SceneRendererOptions m_Options;
 		const Scene* m_ActiveScene = nullptr;
+
+		uint32_t m_CurrentFrameIndex = 0;
+		static const uint32_t MaxFramesInFlight = 3;
+
+		Ref<DescriptorSet> m_DescriptorSet;
 	};
 }
