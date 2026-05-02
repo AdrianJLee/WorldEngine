@@ -186,6 +186,7 @@ namespace World
 
 			{
 				ImGui::Separator();
+				ImGui::Text("Application average %.1f FPS", ImGui::GetIO().Framerate);
 				ImGui::Text("Renderer2D Stats:");
 				ImGui::Text("Draw Calls: %d", Renderer2D::GetStats().DrawCalls);
 				ImGui::Text("Quads: %d", Renderer2D::GetStats().QuadCount);

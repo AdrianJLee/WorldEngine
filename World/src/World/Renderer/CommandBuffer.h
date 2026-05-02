@@ -11,10 +11,11 @@ namespace World
 		static Ref<CommandBuffer> Create();
 	public:
 		virtual ~CommandBuffer() = default;
+		virtual void AddCommand(const std::function<void()>& command) = 0;
 
 		virtual void Begin(uint32_t frameIndex) = 0;
 		virtual void End() = 0;
-
+		virtual void StartBatch() = 0;
 		// 录制指令
 		virtual void BeginRenderPass(Ref<RenderPass> renderPass, bool clear = false) = 0;
 		virtual void EndRenderPass() = 0;

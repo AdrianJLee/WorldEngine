@@ -22,6 +22,7 @@ namespace World
 		void BeginScene(const Scene* scene, const SceneRendererOptions& options);
 		void EndScene();
 
+
 		// 核心：解析场景并决定渲染顺序
 		void SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity entity);
 

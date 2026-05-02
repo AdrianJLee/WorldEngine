@@ -6,9 +6,10 @@ namespace World
 	{
 	public:
 		virtual ~OpenGLCommandBuffer() = default;
-
+		virtual void AddCommand(const std::function<void()>& command) override { m_CommandQueue.push_back(command); }
 		virtual void Begin(uint32_t frameIndex) override;
 		virtual void End() override;
+		virtual void StartBatch() override;
 
 		virtual void BeginRenderPass(Ref<RenderPass> renderPass, bool clear) override;
 		virtual void EndRenderPass() override;

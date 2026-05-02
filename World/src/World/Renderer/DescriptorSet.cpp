@@ -34,7 +34,10 @@ namespace World
 		// 1. 绑定所有 UBO 到各自的 binding 点
 		for (auto& [binding, uboSet] : m_UniformBuffers)
 		{
-			uboSet->Get(frameIndex)->Bind(binding);
+			if (auto ubo = uboSet->Get(frameIndex))
+			{
+				ubo->Bind(binding);
+			}
 		}
 
 		// 2. 绑定所有纹理到各自的槽位 (对应 Renderer2D 的 32 个槽位)
@@ -42,7 +45,7 @@ namespace World
 		{
 			for (uint32_t i = 0; i < textureList.size(); i++)
 			{
-				if (textureList[i])
+				if (textureList[i] != nullptr)
 				{
 					// 计算实际的纹理槽位：binding 点 + 数组偏移
 					textureList[i]->Bind(binding + i);

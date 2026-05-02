@@ -61,17 +61,22 @@ namespace World
 	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
 	{
 		glm::mat4 uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
-		m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->SetData(&uCameraData, sizeof(glm::mat4));
 
-		//m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
+		m_CommandBuffer->AddCommand([this, uCameraData]()
+			{
+				m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->SetData(&uCameraData, sizeof(glm::mat4));
+			});
 
 		m_CommandBuffer->BeginRenderPass(m_ActivePass, true);
+
+		//m_CommandBuffer->StartBatch();
 		Renderer2D::StartBatch();
+		m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
 
 		if (selectedEntity)
 		{
 			auto& transform = selectedEntity.GetComponent<TransformComponent>();
-
+			Renderer2D::StartBatch();
 			Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
 			Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
 			Renderer2D::EndScene();
@@ -79,12 +84,10 @@ namespace World
 
 		RenderDebug(m_CommandBuffer, camera, cameraTransform);
 
-
 		RenderGeometry(m_CommandBuffer, camera, cameraTransform);
 
 
 		m_CommandBuffer->EndRenderPass();
-		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % RenderCommand::GetMaxFramesInFlight();
 	}
 
 	void SceneRenderer::RenderGeometry(Ref<CommandBuffer> cmd, const Camera& camera, const glm::mat4& cameraTransform)
@@ -167,6 +170,8 @@ namespace World
 		m_CommandBuffer->Execute();
 
 		m_ActiveScene = nullptr;
+
+		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % RenderCommand::GetMaxFramesInFlight();
 	}
 
 	void SceneRenderer::OnResize(uint32_t width, uint32_t height)

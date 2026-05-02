@@ -18,7 +18,7 @@ namespace World
 
 		virtual uint32_t GetMaxFramesInFlight() const override { return MaxFramesInFlight; }
 	private:
-		static const uint32_t MaxFramesInFlight = 3;
+		static const uint32_t MaxFramesInFlight = 1;
 	};
 
 }

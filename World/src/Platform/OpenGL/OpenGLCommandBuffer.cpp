@@ -1,6 +1,7 @@
 ﻿#include "wldpch.h"
 #include "OpenGLCommandBuffer.h"
 #include "World/Renderer/RenderCommand.h"
+#include "World/Renderer/Renderer2D.h"
 namespace World
 {
 
@@ -12,6 +13,13 @@ namespace World
 	void OpenGLCommandBuffer::End()
 	{
 		// 录制结束，此时指令已全部存入 m_CommandQueue
+	}
+	void OpenGLCommandBuffer::StartBatch()
+	{
+		m_CommandQueue.push_back([]()
+			{
+				Renderer2D::StartBatch();
+			});
 	}
 	void OpenGLCommandBuffer::BeginRenderPass(Ref<RenderPass> renderPass, bool clear)
 	{
@@ -67,9 +75,13 @@ namespace World
 	}
 	void OpenGLCommandBuffer::SetBufferData(Ref<class VertexBuffer> vertexBuffer, const void* data, uint32_t size)
 	{
-		m_CommandQueue.push_back([vertexBuffer, data, size]()
+		uint8_t* copiedData = new uint8_t[size];
+		memcpy(copiedData, data, size);
+		m_CommandQueue.push_back([vertexBuffer, copiedData, size]()
 			{
-				vertexBuffer->SetData(data, size);
+				vertexBuffer->SetData(copiedData, size);
+
+				free(copiedData);
 			});
 	}
 }
