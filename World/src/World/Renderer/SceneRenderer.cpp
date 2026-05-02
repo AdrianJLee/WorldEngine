@@ -29,15 +29,8 @@ namespace World
 		// Create Descriptor Set
 		m_GlobalDescriptorSet = CreateRef<DescriptorSet>();
 		// Binding 0: Camera UBO
-		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::Pass::Camera, sizeof(glm::mat4), RenderCommand::GetMaxFramesInFlight());
-		// Binding 1: Texture samplers UBO
-		u_TextureData samplers[32];
-		for (uint32_t i = 0; i < 32; i++)
-		{
-			samplers[i].Index = i;
-		}
-		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::Pass::TextureIndices, sizeof(samplers), RenderCommand::GetMaxFramesInFlight());
-		m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::Pass::TextureIndices)->SetData(samplers, sizeof(samplers));
+		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera, sizeof(glm::mat4), RenderCommand::GetMaxFramesInFlight());
+
 	}
 
 	void SceneRenderer::Shutdown()
@@ -68,7 +61,7 @@ namespace World
 	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
 	{
 		glm::mat4 uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
-		m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::Pass::Camera)->SetData(&uCameraData, sizeof(glm::mat4));
+		m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->SetData(&uCameraData, sizeof(glm::mat4));
 
 		//m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
 

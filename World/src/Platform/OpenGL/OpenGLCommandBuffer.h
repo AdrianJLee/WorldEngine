@@ -19,6 +19,8 @@ namespace World
 		virtual void Execute() override;
 
 		virtual void BindDescriptorSet(Ref<DescriptorSet> descriptorSet) override;
+
+		virtual void SetBufferData(Ref<class VertexBuffer> vertexBuffer, const void* data, uint32_t size) override;
 	private:
 		std::vector<std::function<void()>> m_CommandQueue;
 		uint32_t m_CurrentFrameIndex = 0;

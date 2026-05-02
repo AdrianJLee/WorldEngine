@@ -135,12 +135,16 @@ namespace World
 			{-0.5f, 0.5f,0.0f,1.0f}
 		};
 
+		Ref<DescriptorSet> TextureDescriptorSet;
 	};
 
 	static Renderer2DData s_Data;
 	void Renderer2D::Init()
 	{
 		WLD_PROFILE_FUNCTION();
+		{
+			s_Data.TextureDescriptorSet = CreateRef<DescriptorSet>();
+		}
 		// Quad渲染数据初始化
 		{
 			//Vertex Array
@@ -350,7 +354,7 @@ namespace World
 		if (s_Data.LineData.LineVertexBufferPtr != s_Data.LineData.LineVertexBufferBase && s_Data.LineData.LineVertexBufferPtr != nullptr)
 		{
 			uint32_t lineDataSize = (uint32_t)((uint8_t*)s_Data.LineData.LineVertexBufferPtr - (uint8_t*)s_Data.LineData.LineVertexBufferBase);
-			s_Data.LineData.LineVertexBuffer->SetData(s_Data.LineData.LineVertexBufferBase, lineDataSize);
+			s_CurrentCommandBuffer->SetBufferData(s_Data.LineData.LineVertexBuffer, s_Data.LineData.LineVertexBufferBase, lineDataSize);
 
 			s_CurrentCommandBuffer->BindPipeline(s_Data.LineData.LinePipeline);
 			s_CurrentCommandBuffer->DrawLines(s_Data.LineData.LineVertexArray, s_Data.LineData.LineIndexCount);
@@ -363,12 +367,11 @@ namespace World
 			// 计算已经提交的四边形顶点数据的大小，并将数据上传到GPU
 			// 当前指针减去基地址得到已经提交的顶点数据的字节大小
 			uint32_t dataSize = (uint32_t)((uint8_t*)s_Data.QuadData.QuadVertexBufferPtr - (uint8_t*)s_Data.QuadData.QuadVertexBufferBase);
-			s_Data.QuadData.QuadVertexBuffer->SetData(s_Data.QuadData.QuadVertexBufferBase, dataSize);
-			// 绑定当前渲染调用中使用的纹理对象到对应的纹理槽
-			for (uint32_t i = 0; i < s_Data.TextureSlotIndex; i++)
-			{
-				s_Data.TextureSlots[i]->Bind(i);
-			}
+			s_CurrentCommandBuffer->SetBufferData(s_Data.QuadData.QuadVertexBuffer, s_Data.QuadData.QuadVertexBufferBase, dataSize);
+
+			s_Data.TextureDescriptorSet->SetTextures(DescriptorBindings::Textures::Batching2D::BaseSlot, s_Data.TextureSlots);
+
+			s_CurrentCommandBuffer->BindDescriptorSet(s_Data.TextureDescriptorSet);
 
 			s_CurrentCommandBuffer->BindPipeline(s_Data.QuadData.QuadPipeline);
 			s_CurrentCommandBuffer->DrawIndexed(s_Data.QuadData.QuadVertexArray, s_Data.QuadData.QuadIndexCount);
@@ -379,7 +382,7 @@ namespace World
 		if (s_Data.CircleData.CircleVertexBufferPtr != s_Data.CircleData.CircleVertexBufferBase && s_Data.CircleData.CircleVertexBufferPtr != nullptr)
 		{
 			uint32_t circleDataSize = (uint32_t)((uint8_t*)s_Data.CircleData.CircleVertexBufferPtr - (uint8_t*)s_Data.CircleData.CircleVertexBufferBase);
-			s_Data.CircleData.CircleVertexBuffer->SetData(s_Data.CircleData.CircleVertexBufferBase, circleDataSize);
+			s_CurrentCommandBuffer->SetBufferData(s_Data.CircleData.CircleVertexBuffer, s_Data.CircleData.CircleVertexBufferBase, circleDataSize);
 
 			s_CurrentCommandBuffer->BindPipeline(s_Data.CircleData.CirclePipeline);
 			s_CurrentCommandBuffer->DrawIndexed(s_Data.CircleData.CircleVertexArray, s_Data.CircleData.CircleIndexCount);

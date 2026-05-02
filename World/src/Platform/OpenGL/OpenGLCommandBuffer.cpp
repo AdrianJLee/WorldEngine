@@ -60,9 +60,16 @@ namespace World
 	void OpenGLCommandBuffer::BindDescriptorSet(Ref<DescriptorSet> descriptorSet)
 	{
 		uint32_t frameIndex = m_CurrentFrameIndex;
-		m_CommandQueue.push_back([this, descriptorSet, frameIndex]()
+		m_CommandQueue.push_back([descriptorSet, frameIndex]()
 			{
 				descriptorSet->Bind(frameIndex);
+			});
+	}
+	void OpenGLCommandBuffer::SetBufferData(Ref<class VertexBuffer> vertexBuffer, const void* data, uint32_t size)
+	{
+		m_CommandQueue.push_back([vertexBuffer, data, size]()
+			{
+				vertexBuffer->SetData(data, size);
 			});
 	}
 }

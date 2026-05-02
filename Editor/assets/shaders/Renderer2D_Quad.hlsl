@@ -47,14 +47,9 @@ cbuffer Uniforms : register(b0)
 // 纹理数组与采样器
 //Texture2D u_Textures[32] : register(t0);
 //SamplerState u_Sampler : register(s0);
-Texture2D u_BindlessTextures[32] : register(t0, space1);
+Texture2D u_Textures[32] : register(t0, space0);
 SamplerState u_Sampler : register(s0, space0);
 
-// 2. 对应的 Constant Buffer (UBO)
-cbuffer TextureData : register(b1)
-{
-    uint u_TextureIndices[32];
-};
 // ==========================================
 // 3. 顶点着色器 (Vertex Shader)
 // ==========================================
@@ -86,10 +81,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
 
     // 采样纹理：使用纹理对象的 Sample 方法
     // 增加 + 0.5f 解决插值过程中的浮点数精度丢失引发的向下截断问题
-    float4 texColor = u_BindlessTextures[u_TextureIndices[int(input.v_TexIndex + 0.5f)]].Sample(
-    u_Sampler,
-    input.v_TexCoord * input.v_TilingFactor
-    );
+    float4 texColor = u_Textures[input.v_TexIndex].Sample(u_Sampler, input.v_TexCoord * input.v_TilingFactor);
     
     // 最终颜色计算
     output.Color = texColor * input.v_Color;
