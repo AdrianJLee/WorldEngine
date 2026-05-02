@@ -28,6 +28,7 @@ namespace World
 		virtual void BindDescriptorSet(Ref<DescriptorSet> descriptorSet) = 0;
 
 		virtual void SetBufferData(Ref<class VertexBuffer> vertexBuffer, const void* data, uint32_t size) = 0;
+		virtual uint32_t GetCurrentFrameIndex() const = 0;
 		// ... 其他 Draw 指令
 
 	};

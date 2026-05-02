@@ -42,7 +42,6 @@ namespace World
 			s_RendererAPI->EndRenderPass();
 		}
 
-		inline static uint32_t GetMaxFramesInFlight() { return s_RendererAPI->GetMaxFramesInFlight(); }
 	private:
 		static class RendererAPI* s_RendererAPI;
 	};

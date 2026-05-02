@@ -29,7 +29,7 @@ namespace World
 		// Create Descriptor Set
 		m_GlobalDescriptorSet = CreateRef<DescriptorSet>();
 		// Binding 0: Camera UBO
-		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera, sizeof(glm::mat4), RenderCommand::GetMaxFramesInFlight());
+		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera, sizeof(glm::mat4), RendererConfig::MAX_FRAMES_IN_FLIGHT);
 
 	}
 
@@ -76,12 +76,10 @@ namespace World
 		if (selectedEntity)
 		{
 			auto& transform = selectedEntity.GetComponent<TransformComponent>();
-			Renderer2D::StartBatch();
 			Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
 			Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
 			Renderer2D::EndScene();
 		}
-
 		RenderDebug(m_CommandBuffer, camera, cameraTransform);
 
 		RenderGeometry(m_CommandBuffer, camera, cameraTransform);
@@ -171,7 +169,7 @@ namespace World
 
 		m_ActiveScene = nullptr;
 
-		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % RenderCommand::GetMaxFramesInFlight();
+		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT;
 	}
 
 	void SceneRenderer::OnResize(uint32_t width, uint32_t height)

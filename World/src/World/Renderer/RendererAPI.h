@@ -5,6 +5,11 @@
 
 namespace World
 {
+	namespace RendererConfig
+	{
+		static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+	}
+
 	class RendererAPI
 	{
 	public:
@@ -26,8 +31,6 @@ namespace World
 
 		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear) = 0;
 		virtual void EndRenderPass() = 0;
-
-		virtual uint32_t GetMaxFramesInFlight() const = 0;
 
 	private:
 		static API s_API;

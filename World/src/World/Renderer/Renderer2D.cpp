@@ -13,6 +13,7 @@
 namespace World
 {
 	Ref<CommandBuffer> Renderer2D::s_CurrentCommandBuffer = nullptr;
+
 	struct QuadVertex
 	{
 		glm::vec3 Position = { 0.0f, 0.0f, 0.0f };
@@ -45,9 +46,9 @@ namespace World
 		// 当前渲染调用中已经提交的四边形数量
 		uint32_t QuadIndexCount = 0;
 
-		Ref<VertexArray> QuadVertexArray;
+		Ref<VertexArray> QuadVertexArray[RendererConfig::MAX_FRAMES_IN_FLIGHT];
 
-		Ref<VertexBuffer> QuadVertexBuffer;
+		Ref<VertexBuffer> QuadVertexBuffer[RendererConfig::MAX_FRAMES_IN_FLIGHT];
 
 		// 四边形顶点数据的缓冲区
 		QuadVertex* QuadVertexBufferBase = nullptr;
@@ -68,6 +69,7 @@ namespace World
 		float Fade = 0.005f;
 
 		int EntityID = -1;
+
 	};
 
 	struct Renderer2DCircleData
@@ -85,11 +87,10 @@ namespace World
 
 		uint32_t CircleIndexCount = 0;
 
-		Ref<VertexArray> CircleVertexArray;
-		Ref<VertexBuffer> CircleVertexBuffer;
+		Ref<VertexArray> CircleVertexArray[RendererConfig::MAX_FRAMES_IN_FLIGHT];
+		Ref<VertexBuffer> CircleVertexBuffer[RendererConfig::MAX_FRAMES_IN_FLIGHT];
 		CircleVertex* CircleVertexBufferBase = nullptr;
 		CircleVertex* CircleVertexBufferPtr = nullptr;
-
 	};
 
 	struct LineVertex
@@ -107,8 +108,8 @@ namespace World
 		static const uint32_t MaxIndices = MaxLines * 2;
 		uint32_t LineIndexCount = 0;
 
-		Ref<VertexArray> LineVertexArray;
-		Ref<VertexBuffer> LineVertexBuffer;
+		Ref<VertexArray> LineVertexArray[RendererConfig::MAX_FRAMES_IN_FLIGHT];
+		Ref<VertexBuffer> LineVertexBuffer[RendererConfig::MAX_FRAMES_IN_FLIGHT];
 		LineVertex* LineVertexBufferBase = nullptr;
 		LineVertex* LineVertexBufferPtr = nullptr;
 
@@ -147,15 +148,11 @@ namespace World
 		}
 		// Quad渲染数据初始化
 		{
-			//Vertex Array
-			s_Data.QuadData.QuadVertexArray = VertexArray::Create();
-
 			// Shader
 			Ref<Shader>  quadShader = Shader::Create();
 			quadShader->AddShader("assets/shaders/Renderer2D_Quad.hlsl", Shader::ShaderType::Vertex);
 			quadShader->AddShader("assets/shaders/Renderer2D_Quad.hlsl", Shader::ShaderType::Fragment);
 			quadShader->Compile();
-
 
 			//Vertex Buffer
 			PipelineSpecification quadPipelineSpec;
@@ -169,11 +166,6 @@ namespace World
 				{ ShaderDataType::Int, "a_EntityID",5 }
 			};
 			s_Data.QuadData.QuadPipeline = PipelineStateObject::Create(quadPipelineSpec);
-
-			s_Data.QuadData.QuadVertexBuffer = VertexBuffer::Create(s_Data.QuadData.MaxVertices * sizeof(QuadVertex));
-			s_Data.QuadData.QuadVertexBuffer->SetLayout(s_Data.QuadData.QuadPipeline->GetSpecification().Layout);
-			s_Data.QuadData.QuadVertexArray->AddVertexBuffer(s_Data.QuadData.QuadVertexBuffer,
-				s_Data.QuadData.QuadPipeline->GetSpecification().Shader);
 
 			// 为四边形顶点数据结构分配内存
 			s_Data.QuadData.QuadVertexBufferBase = new QuadVertex[s_Data.QuadData.MaxVertices];
@@ -198,15 +190,23 @@ namespace World
 			}
 
 			Ref<IndexBuffer> quadIB = IndexBuffer::Create(quadIndices, s_Data.QuadData.MaxIndices);
-			s_Data.QuadData.QuadVertexArray->SetIndexBuffer(quadIB);
+			for (uint32_t frameIndex = 0; frameIndex < RendererConfig::MAX_FRAMES_IN_FLIGHT; frameIndex++)
+			{
+				//Vertex Array
+				s_Data.QuadData.QuadVertexArray[frameIndex] = VertexArray::Create();
+
+				s_Data.QuadData.QuadVertexBuffer[frameIndex] = VertexBuffer::Create(s_Data.QuadData.MaxVertices * sizeof(QuadVertex));
+				s_Data.QuadData.QuadVertexBuffer[frameIndex]->SetLayout(s_Data.QuadData.QuadPipeline->GetSpecification().Layout);
+
+				s_Data.QuadData.QuadVertexArray[frameIndex]->AddVertexBuffer(s_Data.QuadData.QuadVertexBuffer[frameIndex], s_Data.QuadData.QuadPipeline->GetSpecification().Shader);
+				s_Data.QuadData.QuadVertexArray[frameIndex]->SetIndexBuffer(quadIB);
+
+			}
 			delete[] quadIndices;
 		}
 
 		// Circle渲染数据初始化
 		{
-			// Vertex Array
-			s_Data.CircleData.CircleVertexArray = VertexArray::Create();
-
 			// Shader
 			Ref<Shader> circleShader = Shader::Create();
 			circleShader->AddShader("assets/shaders/Renderer2D_Circle.hlsl", Shader::ShaderType::Vertex);
@@ -226,9 +226,6 @@ namespace World
 			};
 			s_Data.CircleData.CirclePipeline = PipelineStateObject::Create(circlePipelineSpec);
 
-			s_Data.CircleData.CircleVertexBuffer = VertexBuffer::Create(s_Data.CircleData.MaxVertices * sizeof(CircleVertex));
-			s_Data.CircleData.CircleVertexBuffer->SetLayout(s_Data.CircleData.CirclePipeline->GetSpecification().Layout);
-			s_Data.CircleData.CircleVertexArray->AddVertexBuffer(s_Data.CircleData.CircleVertexBuffer, s_Data.CircleData.CirclePipeline->GetSpecification().Shader);
 			// 为圆形顶点数据结构分配内存
 			s_Data.CircleData.CircleVertexBufferBase = new CircleVertex[s_Data.CircleData.MaxVertices];
 
@@ -246,16 +243,24 @@ namespace World
 				offset += 4;
 			}
 			Ref<IndexBuffer> circleIB = IndexBuffer::Create(circleIndices, s_Data.CircleData.MaxIndices);
-			s_Data.CircleData.CircleVertexArray->SetIndexBuffer(circleIB);
+			for (uint32_t frameIndex = 0; frameIndex < RendererConfig::MAX_FRAMES_IN_FLIGHT; frameIndex++)
+			{
+				// Vertex Array
+				s_Data.CircleData.CircleVertexArray[frameIndex] = VertexArray::Create();
+
+				s_Data.CircleData.CircleVertexBuffer[frameIndex] = VertexBuffer::Create(s_Data.CircleData.MaxVertices * sizeof(CircleVertex));
+				s_Data.CircleData.CircleVertexBuffer[frameIndex]->SetLayout(s_Data.CircleData.CirclePipeline->GetSpecification().Layout);
+
+				s_Data.CircleData.CircleVertexArray[frameIndex]->AddVertexBuffer(s_Data.CircleData.CircleVertexBuffer[frameIndex], s_Data.CircleData.CirclePipeline->GetSpecification().Shader);
+
+				s_Data.CircleData.CircleVertexArray[frameIndex]->SetIndexBuffer(circleIB);
+			}
 			delete[] circleIndices;
 		}
 
 		// Line渲染数据初始化
 		{
 			RenderCommand::SetLineWidth(s_Data.LineData.Thickness);
-
-			// Vertex Array
-			s_Data.LineData.LineVertexArray = VertexArray::Create();
 
 			// Shader
 			Ref<Shader> lineShader = Shader::Create();
@@ -272,10 +277,6 @@ namespace World
 				{ ShaderDataType::Int, "a_EntityID",2 }
 			};
 			s_Data.LineData.LinePipeline = PipelineStateObject::Create(linePipelineSpec);
-
-			s_Data.LineData.LineVertexBuffer = VertexBuffer::Create(s_Data.LineData.MaxVertices * sizeof(LineVertex));
-			s_Data.LineData.LineVertexBuffer->SetLayout(s_Data.LineData.LinePipeline->GetSpecification().Layout);
-			s_Data.LineData.LineVertexArray->AddVertexBuffer(s_Data.LineData.LineVertexBuffer, s_Data.LineData.LinePipeline->GetSpecification().Shader);
 			s_Data.LineData.LineVertexBufferBase = new LineVertex[s_Data.LineData.MaxVertices];
 
 			// Index Buffer
@@ -288,7 +289,17 @@ namespace World
 				lineOffset += 2;
 			}
 			Ref<IndexBuffer> lineIB = IndexBuffer::Create(lineIndices, s_Data.LineData.MaxIndices);
-			s_Data.LineData.LineVertexArray->SetIndexBuffer(lineIB);
+			for (uint32_t frameIndex = 0; frameIndex < RendererConfig::MAX_FRAMES_IN_FLIGHT; frameIndex++)
+			{			// Vertex Array
+				s_Data.LineData.LineVertexArray[frameIndex] = VertexArray::Create();
+
+				s_Data.LineData.LineVertexBuffer[frameIndex] = VertexBuffer::Create(s_Data.LineData.MaxVertices * sizeof(LineVertex));
+				s_Data.LineData.LineVertexBuffer[frameIndex]->SetLayout(s_Data.LineData.LinePipeline->GetSpecification().Layout);
+
+				s_Data.LineData.LineVertexArray[frameIndex]->AddVertexBuffer(s_Data.LineData.LineVertexBuffer[frameIndex], s_Data.LineData.LinePipeline->GetSpecification().Shader);
+				s_Data.LineData.LineVertexArray[frameIndex]->SetIndexBuffer(lineIB);
+
+			}
 			delete[] lineIndices;
 		}
 
@@ -308,7 +319,7 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		s_CurrentCommandBuffer = commandBuffer;
 		s_CurrentCommandBuffer->BindPipeline(s_Data.QuadData.QuadPipeline);
-
+		//Renderer2D::StartBatch();
 		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(transform);
 
 	}
@@ -351,13 +362,16 @@ namespace World
 
 	void Renderer2D::Flush()
 	{
+		s_Data.TextureDescriptorSet->SetTextures(DescriptorBindings::Textures::Batching2D::BaseSlot, s_Data.TextureSlots);
+		s_CurrentCommandBuffer->BindDescriptorSet(s_Data.TextureDescriptorSet);
+
 		if (s_Data.LineData.LineVertexBufferPtr != s_Data.LineData.LineVertexBufferBase && s_Data.LineData.LineVertexBufferPtr != nullptr)
 		{
 			uint32_t lineDataSize = (uint32_t)((uint8_t*)s_Data.LineData.LineVertexBufferPtr - (uint8_t*)s_Data.LineData.LineVertexBufferBase);
-			s_CurrentCommandBuffer->SetBufferData(s_Data.LineData.LineVertexBuffer, s_Data.LineData.LineVertexBufferBase, lineDataSize);
+			s_CurrentCommandBuffer->SetBufferData(s_Data.LineData.LineVertexBuffer[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.LineData.LineVertexBufferBase, lineDataSize);
 
 			s_CurrentCommandBuffer->BindPipeline(s_Data.LineData.LinePipeline);
-			s_CurrentCommandBuffer->DrawLines(s_Data.LineData.LineVertexArray, s_Data.LineData.LineIndexCount);
+			s_CurrentCommandBuffer->DrawLines(s_Data.LineData.LineVertexArray[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.LineData.LineIndexCount);
 
 			s_Data.Stats.DrawCalls++;
 
@@ -367,14 +381,10 @@ namespace World
 			// 计算已经提交的四边形顶点数据的大小，并将数据上传到GPU
 			// 当前指针减去基地址得到已经提交的顶点数据的字节大小
 			uint32_t dataSize = (uint32_t)((uint8_t*)s_Data.QuadData.QuadVertexBufferPtr - (uint8_t*)s_Data.QuadData.QuadVertexBufferBase);
-			s_CurrentCommandBuffer->SetBufferData(s_Data.QuadData.QuadVertexBuffer, s_Data.QuadData.QuadVertexBufferBase, dataSize);
-
-			s_Data.TextureDescriptorSet->SetTextures(DescriptorBindings::Textures::Batching2D::BaseSlot, s_Data.TextureSlots);
-
-			s_CurrentCommandBuffer->BindDescriptorSet(s_Data.TextureDescriptorSet);
+			s_CurrentCommandBuffer->SetBufferData(s_Data.QuadData.QuadVertexBuffer[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.QuadData.QuadVertexBufferBase, dataSize);
 
 			s_CurrentCommandBuffer->BindPipeline(s_Data.QuadData.QuadPipeline);
-			s_CurrentCommandBuffer->DrawIndexed(s_Data.QuadData.QuadVertexArray, s_Data.QuadData.QuadIndexCount);
+			s_CurrentCommandBuffer->DrawIndexed(s_Data.QuadData.QuadVertexArray[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.QuadData.QuadIndexCount);
 
 			s_Data.Stats.DrawCalls++;
 		}
@@ -382,10 +392,10 @@ namespace World
 		if (s_Data.CircleData.CircleVertexBufferPtr != s_Data.CircleData.CircleVertexBufferBase && s_Data.CircleData.CircleVertexBufferPtr != nullptr)
 		{
 			uint32_t circleDataSize = (uint32_t)((uint8_t*)s_Data.CircleData.CircleVertexBufferPtr - (uint8_t*)s_Data.CircleData.CircleVertexBufferBase);
-			s_CurrentCommandBuffer->SetBufferData(s_Data.CircleData.CircleVertexBuffer, s_Data.CircleData.CircleVertexBufferBase, circleDataSize);
+			s_CurrentCommandBuffer->SetBufferData(s_Data.CircleData.CircleVertexBuffer[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.CircleData.CircleVertexBufferBase, circleDataSize);
 
 			s_CurrentCommandBuffer->BindPipeline(s_Data.CircleData.CirclePipeline);
-			s_CurrentCommandBuffer->DrawIndexed(s_Data.CircleData.CircleVertexArray, s_Data.CircleData.CircleIndexCount);
+			s_CurrentCommandBuffer->DrawIndexed(s_Data.CircleData.CircleVertexArray[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.CircleData.CircleIndexCount);
 
 			s_Data.Stats.DrawCalls++;
 		}
