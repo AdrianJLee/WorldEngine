@@ -13,7 +13,7 @@ namespace World
 		virtual void Bind() override;
 		virtual void Unbind() override;
 
-		virtual const PipelineSpecification& GetSpecification() const { return m_PipelineSpec; };
+		virtual inline const PipelineSpecification& GetSpecification() const { return m_PipelineSpec; };
 	private:
 		void SetDepthTest(bool enabled);
 	private:

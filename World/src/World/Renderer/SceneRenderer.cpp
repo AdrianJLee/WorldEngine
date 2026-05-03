@@ -29,7 +29,7 @@ namespace World
 		// Create Descriptor Set
 		m_GlobalDescriptorSet = CreateRef<DescriptorSet>();
 		// Binding 0: Camera UBO
-		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera, sizeof(glm::mat4), RendererConfig::MAX_FRAMES_IN_FLIGHT);
+		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera, sizeof(glm::mat4), RendererConfig::MAX_FRAMES_IN_FLIGHT());
 
 	}
 
@@ -64,7 +64,8 @@ namespace World
 
 		m_CommandBuffer->AddCommand([this, uCameraData]()
 			{
-				m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->SetData(&uCameraData, sizeof(glm::mat4));
+				m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->Get(m_CommandBuffer->GetCurrentFrameIndex())->SetData(&uCameraData, sizeof(glm::mat4));
+				//m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->SetData(&uCameraData, sizeof(glm::mat4));
 			});
 
 		m_CommandBuffer->BeginRenderPass(m_ActivePass, true);
@@ -73,24 +74,26 @@ namespace World
 		Renderer2D::StartBatch();
 		m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
 
+		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
 		if (selectedEntity)
 		{
 			auto& transform = selectedEntity.GetComponent<TransformComponent>();
-			Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
+			//Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
 			Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
-			Renderer2D::EndScene();
+			//Renderer2D::EndScene();
 		}
 		RenderDebug(m_CommandBuffer, camera, cameraTransform);
 
 		RenderGeometry(m_CommandBuffer, camera, cameraTransform);
 
 
+		Renderer2D::EndScene();
 		m_CommandBuffer->EndRenderPass();
 	}
 
 	void SceneRenderer::RenderGeometry(Ref<CommandBuffer> cmd, const Camera& camera, const glm::mat4& cameraTransform)
 	{
-		Renderer2D::BeginScene(camera, cameraTransform, cmd);
+
 
 		{
 			auto view = m_ActiveScene->m_Registry.view<SpriteComponent>();
@@ -114,12 +117,10 @@ namespace World
 			}
 		}
 
-		Renderer2D::EndScene();
 	}
 
 	void SceneRenderer::RenderDebug(Ref<CommandBuffer> cmd, const Camera& camera, const glm::mat4& cameraTransform)
 	{
-		Renderer2D::BeginScene(camera, cameraTransform, cmd);
 		{
 			auto view = m_ActiveScene->m_Registry.view<CircleCollider2DComponent>();
 			for (auto entity : view)
@@ -158,7 +159,6 @@ namespace World
 			}
 
 		}
-		Renderer2D::EndScene();
 	}
 
 	void SceneRenderer::EndScene()
@@ -169,7 +169,7 @@ namespace World
 
 		m_ActiveScene = nullptr;
 
-		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT;
+		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT();
 	}
 
 	void SceneRenderer::OnResize(uint32_t width, uint32_t height)

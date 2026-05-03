@@ -75,13 +75,17 @@ namespace World
 	}
 	void OpenGLCommandBuffer::SetBufferData(Ref<class VertexBuffer> vertexBuffer, const void* data, uint32_t size)
 	{
-		uint8_t* copiedData = new uint8_t[size];
-		memcpy(copiedData, data, size);
-		m_CommandQueue.push_back([vertexBuffer, copiedData, size]()
+		void* dataCopy = malloc(size);
+		memcpy(dataCopy, data, size);
+		m_CommandQueue.push_back([vertexBuffer, dataCopy, size]()
 			{
-				vertexBuffer->SetData(copiedData, size);
-
-				free(copiedData);
+				// 2. 这里是“执行”时刻（Execute）
+				vertexBuffer->SetData(dataCopy, size);
+				free(dataCopy);
 			});
+		//m_CommandQueue.push_back([vertexBuffer, data, size]()
+		//	{
+		//		vertexBuffer->SetData(data, size);
+		//	});
 	}
 }
