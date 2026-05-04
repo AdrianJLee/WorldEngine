@@ -4,6 +4,7 @@
 #include "World/Renderer/EditorCamera.h"
 #include "World/Renderer/UniformBuffer.h"
 #include "World/Scene/Components.h"
+#include "World/Renderer/CommandBuffer.h"
 
 #include <vector>
 
@@ -17,12 +18,10 @@ namespace World
 	{
 	public:
 		static void Init();
-		static void Shutdown();
-		static void BeginScene(const Camera& camera, const glm::mat4& transform);
-		static void BeginScene(const EditorCamera& camera);
-		static void BeginScene(const OrthographicCamera& camera);// TODO: remove
-		static void EndScene();
+		static void BeginScene(const Camera& camera, const glm::mat4& transform, Ref<CommandBuffer> commandBuffer);
 
+		static void EndScene();
+		static void StartBatch();
 		static void Flush();
 
 		static void DrawQuadCore(const glm::mat4& transform, const Ref<Texture2D>& texture,
@@ -62,11 +61,12 @@ namespace World
 		};
 		static Statistics GetStats();
 		static void ResetStats();
+
 	private:
-		static void StartBatch();
+
 		static void NextBatch();
 
 	private:
-		static UniformBufferResource m_UniformBuffers;
+		static Ref<CommandBuffer> s_CurrentCommandBuffer;
 	};
 }

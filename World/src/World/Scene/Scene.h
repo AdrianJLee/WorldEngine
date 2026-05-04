@@ -7,6 +7,8 @@
 
 namespace World
 {
+	class CommandBuffer;
+
 	class Scene
 	{
 	public:
@@ -31,12 +33,12 @@ namespace World
 		static void CopyScene(Ref<Scene>& other, Ref<Scene>& newScene);
 
 	private:
-		void RendererScene();
 		void OnPhysics2DStart();
 		void OnUpdatePhysics2D(Timestep ts);
 		void OnPhysics2DStop();
 	private:
 		friend class Entity;
+		friend class SceneRenderer;
 
 		entt::registry m_Registry;
 

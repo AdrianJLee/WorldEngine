@@ -23,6 +23,7 @@ namespace World
 
 		const glm::mat4& GetViewMatrix() const { return m_ViewMatrix; }
 		glm::mat4 GetViewProjection() const { return m_ProjectionMatrix * m_ViewMatrix; }
+		glm::mat4 GetTransform() const { return m_Transform; }
 
 		glm::vec3 GetUpDirection() const;
 		glm::vec3 GetRightDirection() const;
@@ -56,7 +57,7 @@ namespace World
 	private:
 
 		float m_Fov = 45.0f, m_AspectRatio = 16.0f / 9.0f, m_NearClip = 0.1f, m_FarClip = 1000.0f;
-
+		glm::mat4 m_Transform { 1.0f };
 		glm::mat4 m_ViewMatrix { 1.0f };
 		// 摄像机位置
 		glm::vec3 m_Position { 0.0f, 0.0f, 0.0f };

@@ -16,15 +16,6 @@ namespace World
 		{
 			s_RendererAPI->SetViewport(x, y, width, height);
 		}
-		inline static void SetClearColor(const glm::vec4& color)
-		{
-			s_RendererAPI->SetClearColor(color);
-		}
-
-		inline static void Clear()
-		{
-			s_RendererAPI->Clear();
-		}
 
 		inline static void DrawIndexed(const Ref<class VertexArray>& vertexArray, uint32_t indexCount = 0)
 		{
@@ -39,6 +30,16 @@ namespace World
 		inline static void SetLineWidth(float width)
 		{
 			s_RendererAPI->SetLineWidth(width);
+		}
+
+		inline static void BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear)
+		{
+			s_RendererAPI->BeginRenderPass(renderPass, clear);
+		}
+
+		inline static void EndRenderPass()
+		{
+			s_RendererAPI->EndRenderPass();
 		}
 
 	private:

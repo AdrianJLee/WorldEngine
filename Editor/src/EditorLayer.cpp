@@ -15,6 +15,9 @@ namespace World
 	void EditorLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();
+		m_SceneRenderer = CreateRef<SceneRenderer>();
+		m_SceneRenderer->Init();
+
 		m_IconPlay = Texture2D::Create("Resource/Icons/Icon_Play.png");
 		m_IconStop = Texture2D::Create("Resource/Icons/Icon_Stop.png");
 
@@ -29,12 +32,6 @@ namespace World
 
 		NewScene();
 
-		FramebufferSpecification fbSpec;
-		fbSpec.Attachments = { FramebufferTextureFormat::RGBA8, FramebufferTextureFormat::RED_INTEGER,FramebufferTextureFormat::Depth };
-		fbSpec.Width = 1280;
-		fbSpec.Height = 720;
-
-		m_Framebuffer = Framebuffer::Create(fbSpec);
 		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
 	}
 
@@ -46,8 +43,8 @@ namespace World
 	void EditorLayer::OnUpdate(Timestep ts)
 	{
 		WLD_PROFILE_FUNCTION();
-
 		//WLD_CORE_TRACE("Delta Time: {0} ({1} FPS)", ts.GetSeconds(), ts.GetFPS());
+
 		{
 			// TODO: 停止聚焦时，摄像机不再更新,这不太合理，应该让摄像机在停止聚焦时继续更新，但不处理输入事件
 			if (m_ViewportFocused)
@@ -60,12 +57,8 @@ namespace World
 
 
 		WLD_PROFILE_SCOPE("Renderer Clear");
-		m_Framebuffer->Bind();
-		RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
-		RenderCommand::Clear();
-
-		// Create an entity with a camera component and set it as the primary camera
-		m_Framebuffer->ClearAttachment(1, -1);
+		Camera* renderCamera = &m_EditorCamera;
+		glm::mat4 renderCameraTransform = m_EditorCamera.GetTransform();
 
 		{
 			WLD_PROFILE_SCOPE("Renderer Draw");
@@ -76,7 +69,11 @@ namespace World
 					break;
 				case SceneState::Play:
 					if (!m_ScenePaused)
+					{
 						m_ActiveScene->OnUpdateRuntime(ts);
+						renderCamera = &m_ActiveScene->GetPrimaryCameraEntity().GetComponent<CameraComponent>().Camera;
+						renderCameraTransform = m_ActiveScene->GetPrimaryCameraEntity().GetComponent<TransformComponent>().Transform;
+					}
 					else
 						m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
 					break;
@@ -90,34 +87,9 @@ namespace World
 
 		}
 
-		if (Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity())
-		{
-			auto& transform = selectedEntity.GetComponent<TransformComponent>();
-
-			if (m_SceneState == SceneState::Play)
-			{
-				// Play 模式下，使用场景中的主相机绘制高光框
-				Entity cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
-				if (cameraEntity)
-				{
-					const Camera& mainCamera = cameraEntity.GetComponent<CameraComponent>().Camera;
-					glm::mat4 cameraTransform = cameraEntity.GetComponent<TransformComponent>().Transform;
-
-					Renderer2D::BeginScene(mainCamera, cameraTransform);
-					Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
-					Renderer2D::EndScene();
-				}
-			}
-			else
-			{
-				// Edit 和 Simulate 模式下，依然使用外部的编辑器相机
-				Renderer2D::BeginScene(m_EditorCamera);
-				Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
-				Renderer2D::EndScene();
-			}
-		}
-
-		m_Framebuffer->Unbind();
+		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
+		m_SceneRenderer->SubmitScene(*renderCamera, renderCameraTransform, m_SceneHierarchyPanel.GetSelectedEntity()); // 内部遍历实体并调用 Renderer2D
+		m_SceneRenderer->EndScene();
 	}
 
 	void EditorLayer::OnImGuiRender()
@@ -184,13 +156,13 @@ namespace World
 			if (viewportPanelSize.x > 0.0f && viewportPanelSize.y > 0.0f &&
 				(m_ViewportSize.x != viewportPanelSize.x || m_ViewportSize.y != viewportPanelSize.y))
 			{
-				m_Framebuffer->Resize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);
+				m_SceneRenderer->GetTargetFramebuffer()->Resize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);
 				m_ViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
 				m_EditorCamera.SetViewportSize(viewportPanelSize.x, viewportPanelSize.y);
 				m_ActiveScene->OnViewportResize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);
 
 			}
-			ImGui::Image((void*)m_Framebuffer->GetColorAttachmentRendererID(),
+			ImGui::Image((void*)m_SceneRenderer->GetTargetFramebuffer()->GetColorAttachmentRendererID(),
 				ImVec2 { m_ViewportSize.x,m_ViewportSize.y },
 				ImVec2 { 0,1 },
 				ImVec2 { 1,0 });
@@ -214,6 +186,7 @@ namespace World
 
 			{
 				ImGui::Separator();
+				ImGui::Text("Application average %.1f FPS", ImGui::GetIO().Framerate);
 				ImGui::Text("Renderer2D Stats:");
 				ImGui::Text("Draw Calls: %d", Renderer2D::GetStats().DrawCalls);
 				ImGui::Text("Quads: %d", Renderer2D::GetStats().QuadCount);
@@ -401,7 +374,7 @@ namespace World
 		// 边界检查：只有当鼠标在黑色内容区内时才读取
 		if (mouseX >= 0 && mouseY >= 0 && mouseX < (int)viewportSizeAvail.x && mouseY < (int)viewportSizeAvail.y)
 		{
-			pixelData = m_Framebuffer->ReadPixel(1, mouseX, mouseY);
+			pixelData = m_SceneRenderer->GetTargetFramebuffer()->ReadPixel(1, mouseX, mouseY);
 			//WLD_CORE_TRACE("Pixel Data at ({0}, {1}): {2}", mouseX, mouseY, pixelData);
 		}
 

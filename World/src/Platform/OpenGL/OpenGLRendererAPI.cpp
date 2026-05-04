@@ -12,7 +12,6 @@ namespace World
 
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		glEnable(GL_DEPTH_TEST);
 
 		glEnable(GL_LINE_SMOOTH);
 	}
@@ -20,14 +19,7 @@ namespace World
 	{
 		glViewport(x, y, width, height);
 	}
-	void OpenGLRendererAPI::SetClearColor(const glm::vec4& color)
-	{
-		glClearColor(color.r, color.g, color.b, color.a);
-	}
-	void OpenGLRendererAPI::Clear()
-	{
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-	}
+
 	void OpenGLRendererAPI::DrawIndexed(const Ref<class VertexArray>& vertexArray, uint32_t indexCount)
 	{
 		vertexArray->Bind();
@@ -45,5 +37,34 @@ namespace World
 	void OpenGLRendererAPI::SetLineWidth(float width)
 	{
 		glLineWidth(width);
+	}
+	void OpenGLRendererAPI::BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear)
+	{
+		const auto& spec = renderPass->GetSpecification();
+
+		if (spec.TargetFramebuffer)
+			spec.TargetFramebuffer->Bind();
+		else
+		{
+			WLD_CORE_WARN("RenderPass has no target framebuffer! Rendering to default framebuffer.");
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		}
+
+		if (clear)
+		{
+			glClearColor(spec.ClearColor.r, spec.ClearColor.g, spec.ClearColor.b, spec.ClearColor.a);
+
+			GLbitfield flags = 0;
+			if (spec.ClearOnColor) flags |= GL_COLOR_BUFFER_BIT;
+			if (spec.ClearOnDepth) flags |= GL_DEPTH_BUFFER_BIT;
+
+			glClear(flags);
+
+			spec.TargetFramebuffer->ClearAttachment(1, -1);
+		}
+	}
+	void OpenGLRendererAPI::EndRenderPass()
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
 }
