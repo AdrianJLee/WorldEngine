@@ -12,6 +12,21 @@ namespace World
 			glEnable(GL_DEPTH_TEST);
 		else
 			glDisable(GL_DEPTH_TEST);
+
+		if (m_PipelineSpec.BackfaceCulling)
+		{
+			glEnable(GL_CULL_FACE);
+			glCullFace(GL_BACK);
+		}
+		else
+		{
+			glDisable(GL_CULL_FACE);
+		}
+
+		if (m_PipelineSpec.Wireframe)
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		else
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	}
 	OpenGLPipeline::~OpenGLPipeline()
 	{}

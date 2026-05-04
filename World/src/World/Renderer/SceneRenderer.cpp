@@ -65,22 +65,20 @@ namespace World
 		m_CommandBuffer->AddCommand([this, uCameraData]()
 			{
 				m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->Get(m_CommandBuffer->GetCurrentFrameIndex())->SetData(&uCameraData, sizeof(glm::mat4));
-				//m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->SetData(&uCameraData, sizeof(glm::mat4));
+
 			});
 
 		m_CommandBuffer->BeginRenderPass(m_ActivePass, true);
 
-		//m_CommandBuffer->StartBatch();
-		Renderer2D::StartBatch();
+		m_CommandBuffer->StartBatch();
+
 		m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
 
 		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
 		if (selectedEntity)
 		{
 			auto& transform = selectedEntity.GetComponent<TransformComponent>();
-			//Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
 			Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
-			//Renderer2D::EndScene();
 		}
 		RenderDebug(m_CommandBuffer, camera, cameraTransform);
 

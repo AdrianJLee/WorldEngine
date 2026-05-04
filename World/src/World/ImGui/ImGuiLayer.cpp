@@ -51,10 +51,12 @@ namespace World
 
 
 		// Set default ImGui font
-		io.FontDefault = io.Fonts->AddFontFromFileTTF("assets/fonts/Montserrat/static/Montserrat-Regular.ttf", 15.0f);
+		std::string fontPath = WLD_EDITOR_DIR + std::string("assets/fonts/Montserrat/static/Montserrat-Regular.ttf");
+		io.FontDefault = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 15.0f);
 		//TODO: 需要字体管理器，来加载不同的字体，并且在 ImGui 中切换字体
 		// Bold font
-		io.Fonts->AddFontFromFileTTF("assets/fonts/Montserrat/static/Montserrat-Bold.ttf", 15.0f);
+		std::string boldFontPath = WLD_EDITOR_DIR + std::string("assets/fonts/Montserrat/static/Montserrat-Bold.ttf");
+		io.Fonts->AddFontFromFileTTF(boldFontPath.c_str(), 15.0f);
 
 		SetDarkThemeColors();
 
