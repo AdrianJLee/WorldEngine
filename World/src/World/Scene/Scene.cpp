@@ -19,28 +19,17 @@ namespace World
 	{}
 	void Scene::OnUpdateRuntime(Timestep ts)
 	{
-		// Update scripts
-		{
-			m_Registry.view<NativeScriptComponent>().each([=](auto entity, NativeScriptComponent& scriptComponent)
-				{
-					if (!scriptComponent.Instance)
-					{
-						scriptComponent.Instance = scriptComponent.InstantiateScript();
-						scriptComponent.Instance->m_Entity = Entity { this,entity };
-						scriptComponent.Instance->OnCreate();
-
-					}
-					scriptComponent.Instance->OnUpdate(ts);
-				});
-		}
-
 		// Update physics
 		OnUpdatePhysics2D(ts);
+
+		// Update scripts
+		OnScriptUpdate(ts);
 	}
 	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera& camera)
 	{
 		OnUpdatePhysics2D(ts);
 
+		OnScriptUpdate(ts);
 	}
 	void Scene::OnViewportResize(uint32_t width, uint32_t height)
 	{
@@ -61,19 +50,58 @@ namespace World
 	void Scene::OnRuntimeStart()
 	{
 		OnPhysics2DStart();
+		OnScriptStart();
 	}
 	void Scene::OnRuntimeStop()
 	{
 		OnPhysics2DStop();
+		OnScriptDestroy();
 	}
 	void Scene::OnSimulationStart()
 	{
 		OnPhysics2DStart();
+		OnScriptStart();
 	}
 	void Scene::OnSimulationStop()
 	{
 		OnPhysics2DStop();
+		OnScriptDestroy();
 	}
+	void Scene::OnScriptStart()
+	{
+		m_Registry.view<NativeScriptComponent>().each([=](auto entity, NativeScriptComponent& scriptComponent)
+			{
+				if (!scriptComponent.Instance)
+				{
+					scriptComponent.Instance = scriptComponent.InstantiateScript();
+					scriptComponent.Instance->m_Entity = Entity { this,entity };
+					scriptComponent.Instance->OnCreate();
+				}
+			});
+	}
+
+	void Scene::OnScriptUpdate(Timestep ts)
+	{
+		m_Registry.view<NativeScriptComponent>().each([=](auto entity, NativeScriptComponent& scriptComponent)
+			{
+				if (scriptComponent.Instance)
+				{
+					scriptComponent.Instance->OnUpdate(ts);
+				}
+			});
+	}
+	void Scene::OnScriptDestroy()
+	{
+		m_Registry.view<NativeScriptComponent>().each([=](auto entity, NativeScriptComponent& scriptComponent)
+			{
+				if (scriptComponent.Instance)
+				{
+					scriptComponent.Instance->OnDestroy();
+					scriptComponent.DestroyScript(&scriptComponent);
+				}
+			});
+	}
+
 	Entity Scene::GetPrimaryCameraEntity()
 	{
 		auto view = m_Registry.view<CameraComponent>();

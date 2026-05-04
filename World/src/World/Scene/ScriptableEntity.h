@@ -11,13 +11,16 @@ namespace World
 		{
 			return m_Entity.GetComponent<T>();
 		}
+
 	protected:
 		virtual void OnCreate() {}
 		virtual void OnUpdate(Timestep ts) {}
 		virtual void OnDestroy() {}
+		inline Entity GetEntity() const { return m_Entity; }
+		friend class Scene;
 	private:
 		Entity m_Entity;
-		friend class Scene;
+
 	};
 }
 

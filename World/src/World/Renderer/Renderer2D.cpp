@@ -422,6 +422,7 @@ namespace World
 
 		if (texture != nullptr)
 		{
+
 			// 检查纹理是否已经绑定在当前批次的某个槽位中
 			for (uint32_t i = 1; i < s_Data.TextureSlotIndex; i++)
 			{
@@ -532,8 +533,7 @@ namespace World
 	void Renderer2D::NextBatch()
 	{
 		WLD_CORE_ERROR("NextBatch don't work.Please fix it!");
-		EndScene();
-
+		Flush();
 		StartBatch();
 	}
 

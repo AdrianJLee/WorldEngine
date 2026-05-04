@@ -241,6 +241,14 @@ namespace World
 				out << YAML::Key << "FixedRotation" << YAML::Value << rb.FixedRotation;
 				out << YAML::EndMap;
 			}
+			if (entity.HasComponent<NativeScriptComponent>())
+			{
+				auto& script = entity.GetComponent<NativeScriptComponent>();
+				out << YAML::Key << "NativeScriptComponent" << YAML::Value;
+				out << YAML::BeginMap;
+				out << YAML::Key << "ScriptName" << YAML::Value << script.ScriptName;
+				out << YAML::EndMap;
+			}
 		}
 
 		out << YAML::EndMap;
@@ -450,6 +458,28 @@ namespace World
 							auto& rb = deserializedEntity.AddComponent<RigidBody2DComponent>();
 							AsValue<int>(rigidBodyComponent, "BodyType", (int&)rb.Type);
 							AsValue<bool>(rigidBodyComponent, "FixedRotation", rb.FixedRotation);
+						}
+					}
+					{
+						auto nativeScriptComponent = entity["NativeScriptComponent"];
+						if (nativeScriptComponent)
+						{
+							auto& script = deserializedEntity.AddComponent<NativeScriptComponent>();
+							AsValue<std::string>(nativeScriptComponent, "ScriptName", script.ScriptName);
+							if (!script.ScriptName.empty())
+							{
+								for (auto& scriptInfo : ScriptRegistry::GetScriptList())
+								{
+									if (script.ScriptName == scriptInfo.Name)
+									{
+										if (scriptInfo.BindFunc)
+										{
+											scriptInfo.BindFunc(script);
+										}
+										break;
+									}
+								}
+							}
 						}
 					}
 				}

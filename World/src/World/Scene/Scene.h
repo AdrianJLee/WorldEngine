@@ -26,6 +26,10 @@ namespace World
 		void OnSimulationStart();
 		void OnSimulationStop();
 
+		void OnScriptStart();
+		void OnScriptUpdate(Timestep ts);
+		void OnScriptDestroy();
+
 		class Entity GetPrimaryCameraEntity();
 		void DuplicateEntity(Entity entity);
 	public:

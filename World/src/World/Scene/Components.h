@@ -183,7 +183,7 @@ namespace World
 		// 原始函数指针
 		ScriptableEntity* (*InstantiateScript)() = nullptr;
 		void (*DestroyScript)(NativeScriptComponent*) = nullptr;
-
+		std::string ScriptName;
 		template<typename T>
 		void Bind()
 		{
@@ -198,7 +198,7 @@ namespace World
 		}
 
 		REGISTER_COMPONENT(NativeScriptComponent)
-
+			COMPONENT_UI()
 	};
 
 	struct RigidBody2DComponent

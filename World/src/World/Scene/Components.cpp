@@ -196,6 +196,70 @@ namespace World
 			});
 	}
 
+	void NativeScriptComponent::ComponentPropertiesUI(Entity entity)
+	{
+		ImGuiDrawLibrary::DrawComponent<NativeScriptComponent>("NativeScriptComponent", entity, [](NativeScriptComponent& nativeScript)
+			{
+				// 从注册表动态获取所有已注册的脚本
+				auto& scripts = ScriptRegistry::GetScriptList();
+
+				// 指针不为空则说明绑定了脚本
+				bool isBound = (nativeScript.InstantiateScript != nullptr);
+
+				// 使用刚刚我们在 Bind 中存下来的 ScriptName，如果是空的话显示 <None>
+				const char* currentPreview = isBound ? (nativeScript.ScriptName.empty() ? "Unknown Script" : nativeScript.ScriptName.c_str()) : "<None>";
+
+				// 下拉列表
+				if (ImGui::BeginCombo("Script Class", currentPreview))
+				{
+					// 提供置空选项
+					if (ImGui::Selectable("<None>", !isBound))
+					{
+						nativeScript.InstantiateScript = nullptr;
+						nativeScript.DestroyScript = nullptr;
+						nativeScript.ScriptName = ""; // 清空名字
+					}
+
+					// 遍历注册表里的全部脚本
+					for (auto& scriptInfo : scripts)
+					{
+						// 这个项是否已被选中？对比名字即可
+						bool isSelected = (scriptInfo.Name == nativeScript.ScriptName);
+						if (ImGui::Selectable(scriptInfo.Name.c_str(), isSelected))
+						{
+							// 通过工厂方法执行具体 T 的绑定 ( Bind<T>() )
+							if (scriptInfo.BindFunc)
+							{
+								scriptInfo.BindFunc(nativeScript);
+
+								nativeScript.ScriptName = scriptInfo.Name; // 更新当前绑定的脚本名字
+							}
+						}
+
+						// 焦点选中定位
+						if (isSelected)
+							ImGui::SetItemDefaultFocus();
+
+					}
+					ImGui::EndCombo();
+				}
+
+				ImGui::Spacing();
+
+				// 提供解绑操作按钮
+				if (isBound)
+				{
+					if (ImGui::Button("Unbind Script", ImVec2(-1.0f, 25.0f)))
+					{
+						// 清空函数指针和数据
+						nativeScript.InstantiateScript = nullptr;
+						nativeScript.DestroyScript = nullptr;
+						nativeScript.ScriptName = "";
+					}
+				}
+
+			});
+	}
 	void RigidBody2DComponent::ComponentPropertiesUI(Entity entity)
 	{
 		ImGuiDrawLibrary::DrawComponent<RigidBody2DComponent>("RigidBody2DComponent", entity, [](RigidBody2DComponent& rigidBody)
