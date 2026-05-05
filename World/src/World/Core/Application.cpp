@@ -5,7 +5,9 @@
 #include "World/Core/Timestep.h"
 #include "World/Renderer/Renderer.h"
 
+
 #include <GLFW/glfw3.h>
+
 
 namespace World
 {
@@ -16,6 +18,7 @@ namespace World
 
 		WLD_CORE_ASSERT(!s_Instance, "Appliicatiion already exists!");
 		s_Instance = this;
+		m_FrameAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator(1024 * 1024 * 10)); // 10 MB
 		m_Window = std::unique_ptr<Window>(Window::Create(WindowProps(name)));
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(Application::OnEvent));
 
@@ -66,6 +69,9 @@ namespace World
 
 
 			m_Window->OnUpdate();
+
+			// Clean up frame allocator after each frame
+			m_FrameAllocator->Reset();
 		}
 	}
 

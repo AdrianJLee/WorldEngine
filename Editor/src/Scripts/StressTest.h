@@ -36,5 +36,6 @@ namespace World
 		int Weight = 100;
 		int Height = 100;
 		std::vector<Entity> m_Created;
+
 	};
 }

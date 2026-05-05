@@ -11,6 +11,11 @@
 #include "World/Core/MouseCodes.h"
 #include "World/Core/ComponentRegistry.h"
 
+#include "World/Core/Memory/Memory.h"
+#include "World/Core/Memory/LinearAllocator.h"
+#include "World/Core/Memory/GrowableLinearAllocator.h"
+#include "World/Core/Memory/DualTrackAllocator.h"
+
 #include "World/ImGui/ImGuiLayer.h"
 #include "World/ImGui/ImGuiDrawLibrary.h"
 
