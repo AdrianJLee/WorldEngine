@@ -99,7 +99,11 @@ namespace World
 		size_t GetUsedMemory() const { return m_UsedMemory; }
 		size_t GetNumAllocations() const { return m_NumAllocations; }
 	protected:
-		virtual void RegisterDestructor(void* obj, DestructorFunc func) {};
+		virtual void RegisterDestructor(void* obj, DestructorFunc func)
+		{
+			// 默认实现：不注册任何析构回调，适用于不需要析构的分配器（如 Linear）
+			// 需要析构的分配器（如 DualTrack）会重写这个方法，把回调挂到链表上
+		};
 	protected:
 		void* m_Start = nullptr;           // 预分配大内存块的起始地址
 		size_t m_Size = 0;           // 内存块的总容量 (Total Capacity)

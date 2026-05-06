@@ -15,6 +15,7 @@
 #include "World/Core/Memory/LinearAllocator.h"
 #include "World/Core/Memory/GrowableLinearAllocator.h"
 #include "World/Core/Memory/DualTrackAllocator.h"
+#include "World/Core/Memory/PoolAllocator.h"
 
 #include "World/ImGui/ImGuiLayer.h"
 #include "World/ImGui/ImGuiDrawLibrary.h"
