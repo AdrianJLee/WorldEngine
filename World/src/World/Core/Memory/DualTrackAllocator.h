@@ -6,15 +6,15 @@ namespace World
 {
 	struct SOSPage
 	{
-		LinearAllocator* Alloc; // 每一页都是一个线性分配器
-		void* RawMemory;        // 存储实际申请的大块内存地址，用于最后释放
+		LinearAllocator* Alloc = nullptr; // 每一页都是一个线性分配器
+		void* RawMemory = nullptr;        // 存储实际申请的大块内存地址，用于最后释放
 		SOSPage* Next = nullptr;
 	};
 
 	struct LOSPage
 	{
-		void* Data;
-		size_t Size;
+		void* Data = nullptr;
+		size_t Size = 0;
 		LOSPage* Next = nullptr;
 	};
 
@@ -35,9 +35,12 @@ namespace World
 		void Reset()
 		{
 			DestructorNode* curr = m_DestructorChain;
-			while (curr)
+			while (curr != nullptr)
 			{
-				curr->Callback(curr->Object); // 调用真正的 ~T()
+				if (curr->Callback)
+				{
+					curr->Callback(curr->Object); // 调用真正的 ~T()
+				}
 				curr = curr->Next;
 			}
 			m_DestructorChain = nullptr; // 清空清单
@@ -66,14 +69,7 @@ namespace World
 
 		~DualTrackAllocator()
 		{
-			DestructorNode* currNode = m_DestructorChain;
-			while (currNode)
-			{
-				currNode->Callback(currNode->Object);
-				currNode = currNode->Next;
-			}
-			m_DestructorChain = nullptr;
-
+			Reset();
 			// 析构时释放所有 SOS 页
 			SOSPage* currSOS = m_HeadSOS;
 			while (currSOS)
@@ -179,11 +175,11 @@ namespace World
 			m_DestructorChain = node;
 		}
 	private:
-		size_t m_PageSize;
-		size_t m_Threshold; // 超过这个大小的请求走大对象轨
-		DestructorNode* m_DestructorChain;
-		SOSPage* m_HeadSOS;
-		SOSPage* m_CurrentSOS;
+		size_t m_PageSize = 0;
+		size_t m_Threshold = 0; // 超过这个大小的请求走大对象轨
+		DestructorNode* m_DestructorChain = nullptr;
+		SOSPage* m_HeadSOS = nullptr;
+		SOSPage* m_CurrentSOS = nullptr;
 		LOSPage* m_HeadLOS = nullptr;
 	};
 }

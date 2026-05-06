@@ -13,17 +13,17 @@ namespace World
 
 	struct DestructorNode
 	{
-		DestructorFunc Callback; // 这里的函数由编译器自动生成（模板魔法）
-		void* Object;            // 对象的地址
-		DestructorNode* Next;    // 指向下一个待办事项
+		DestructorFunc Callback = nullptr; // 这里的函数由编译器自动生成（模板魔法）
+		void* Object = nullptr;            // 对象的地址
+		DestructorNode* Next = nullptr;    // 指向下一个待办事项
 	};
 
 	struct MemoryPage
 	{
-		void* Data;         // 实际数据区
-		size_t Size;        // 该页大小
-		size_t Offset;      // 当前页已分配到的偏移量,即下一个可用地址 = Data + Offset
-		MemoryPage* Next;   // 链表指针
+		void* Data = nullptr;         // 实际数据区
+		size_t Size = 0;        // 该页大小
+		size_t Offset = 0;      // 当前页已分配到的偏移量,即下一个可用地址 = Data + Offset
+		MemoryPage* Next = nullptr;   // 链表指针
 	};
 
 	/**
@@ -101,9 +101,9 @@ namespace World
 	protected:
 		virtual void RegisterDestructor(void* obj, DestructorFunc func) {};
 	protected:
-		void* m_Start;           // 预分配大内存块的起始地址
-		size_t m_Size;           // 内存块的总容量 (Total Capacity)
-		size_t m_UsedMemory;     // 已使用的字节数
-		size_t m_NumAllocations; // 记录总分配次数，用于排查内存泄漏
+		void* m_Start = nullptr;           // 预分配大内存块的起始地址
+		size_t m_Size = 0;           // 内存块的总容量 (Total Capacity)
+		size_t m_UsedMemory = 0;     // 已使用的字节数
+		size_t m_NumAllocations = 0; // 记录总分配次数，用于排查内存泄漏
 	};
 }
