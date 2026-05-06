@@ -10,32 +10,28 @@ namespace World
 		virtual void OnCreate() override
 		{
 			m_Created.resize(Weight * Height);
-			for (int i = 0; i < Weight; i++)
-			{
-				for (int j = 0; j < Height; j++)
-				{
-					auto& entity = Entity::CreateEntity(GetEntity().GetScene(), "Empty Entity");
-					entity.AddComponent<TransformComponent>(glm::vec3 { i * 1.0f, j * 1.0f, -0.5f });
-					entity.AddComponent<SpriteComponent>().Color =
-						glm::vec4((float)rand() / RAND_MAX, (float)rand() / RAND_MAX, (float)rand() / RAND_MAX, 1.0f);
-					m_Created[i * Height + j] = entity;
-				}
-			}
-
+			m_Created2.resize(Weight * Height);
 		}
 		virtual void OnUpdate(Timestep ts) override
-		{}
+		{
+			CreateTest2();
+			DestroyTest2();
+		}
 		virtual void OnDestroy() override
 		{
-			for (auto& entity : m_Created)
-			{
-				Entity::DestroyEntity(GetEntity().GetScene(), entity);
-			}
+
 		}
+	private:
+		void CreateTest1();
+		void DestroyTest1();
+
+		Entity* Create();
+		void CreateTest2();
+		void DestroyTest2();
 	private:
 		int Weight = 100;
 		int Height = 100;
 		std::vector<Entity> m_Created;
-
+		std::vector<Entity*> m_Created2;
 	};
 }

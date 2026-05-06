@@ -32,6 +32,8 @@ namespace World
 
 		class Entity GetPrimaryCameraEntity();
 		void DuplicateEntity(Entity entity);
+
+		entt::registry& GetRegistry() { return m_Registry; }
 	public:
 
 		static void CopyScene(Ref<Scene>& other, Ref<Scene>& newScene);

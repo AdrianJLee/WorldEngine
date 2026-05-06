@@ -11,13 +11,6 @@ namespace World
 	// 析构回调：一个函数指针，知道如何把 void* 转回 T* 并调用 ~T()
 	typedef void (*DestructorFunc)(void*);
 
-	struct DestructorNode
-	{
-		DestructorFunc Callback = nullptr; // 这里的函数由编译器自动生成（模板魔法）
-		void* Object = nullptr;            // 对象的地址
-		DestructorNode* Next = nullptr;    // 指向下一个待办事项
-	};
-
 	struct MemoryPage
 	{
 		void* Data = nullptr;         // 实际数据区
