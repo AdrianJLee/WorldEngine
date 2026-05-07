@@ -19,6 +19,7 @@ namespace World
 	};
 
 	// 双轨分配器（Dual-Track Allocator）结合了小对象轨（SOS）和大对象轨（LOS）的优点
+	// DualTrack, 每帧通用的临时数据, 1帧, 自动分流大小对象，兼顾速度与容量
 	class DualTrackAllocator : public Allocator
 	{
 	public:

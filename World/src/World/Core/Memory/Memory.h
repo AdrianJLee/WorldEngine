@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <iostream>
+#include <typeinfo>
 
 namespace World
 {
@@ -59,6 +60,7 @@ namespace World
 				RegisterDestructor(obj, [](void* p) { static_cast<T*>(p)->~T(); });
 			}
 
+			WLD_CORE_INFO("Allocated object of type {} at address {}, size = {} bytes", typeid(T).name(), static_cast<const void*>(obj), sizeof(T));
 			return obj;
 		}
 		/**

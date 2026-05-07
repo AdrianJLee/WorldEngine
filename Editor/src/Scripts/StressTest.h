@@ -11,7 +11,7 @@ namespace World
 		{
 			m_Created.resize(Weight * Height);
 			m_Created2.resize(Weight * Height);
-			CreateTest2();
+			StackTest1();
 		}
 		virtual void OnUpdate(Timestep ts) override
 		{
@@ -20,7 +20,7 @@ namespace World
 		}
 		virtual void OnDestroy() override
 		{
-			DestroyTest2();
+
 		}
 	private:
 		void CreateTest1();
@@ -29,6 +29,10 @@ namespace World
 		Entity* Create();
 		void CreateTest2();
 		void DestroyTest2();
+
+		void StackTest1();
+		void StackTest2();
+		void StackTest3();
 	private:
 		int Weight = 100;
 		int Height = 100;

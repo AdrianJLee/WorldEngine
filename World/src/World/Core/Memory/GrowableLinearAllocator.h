@@ -3,7 +3,8 @@
 
 namespace World
 {
-	// 可增长的线性分配器（Growable Linear Allocator）是一种基于页的线性分配器
+	// 可增长线性分配器（Growable Linear Allocator）在 Linear Allocator 的基础上增加了自动增长功能，当当前页满了之后会申请新页继续分配，适用于不确定总内存需求但希望保持线性分配性能的场景
+	// Growable, 无法预测大小的临时任务, 任务级, 基于 Page 链表，永不溢出
 	class GrowableLinearAllocator : public Allocator
 	{
 	public:

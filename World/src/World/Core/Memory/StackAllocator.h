@@ -5,53 +5,38 @@ namespace World
 {
 	using Marker = size_t;
 
-
-	#define WLD_STACK_NEW(stack,T,...) (stack).New<T>(__VA_ARGS__)
-	#define WLD_STACK_SCOPE(stack) World::StackScope stack##_scope(stack)
-
 	/**
-	* @brief 在当前作用域创建一个局部栈分配器
-	* @param name 分配器变量名
-	* @param size 栈的总字节大小
-	*/
-	#define WLD_CREATE_STACK_LOCAL(name, size) \
-    void* name##_raw = _aligned_malloc(size, 16); \
-    World::StackAllocator name(size, name##_raw)
+	 * @brief 魔法宏：创建一个自管理的栈空间
+	 * 变量名为 name，它实际上是一个 ScopedStack 实例
+	 */
+	#define WLD_STACK_WIZARD(name, size) World::ScopedStack name(size);
 
-	/**
-	* @brief 销毁局部栈并归还原始内存给系统
-	*/
-	#define WLD_DESTROY_STACK_LOCAL(name) \
-    _aligned_free(name##_raw)
+	 /**
+	  * @brief 配合使用的分配宏
+	  * 注意这里通过 name.GetAllocator() 拿到真正的分配器
+	  */
+	#define WLD_STACK_NEW(T, name, ...) name.GetAllocator().New<T>(__VA_ARGS__);
 
-	/**
-	* @brief 创建一个指向堆上栈分配器的指针
-	* @param size 栈的总字节大小
-	*/
-	#define WLD_CREATE_STACK_PTR(size) \
-    new World::StackAllocator(size, _aligned_malloc(size, 16))
 
-	/**
-	* @brief 销毁栈指针及其管理的原始内存
-	*/
-	#define WLD_DESTROY_STACK_PTR(stackPtr) \
-    if (stackPtr) { \
-        void* raw = (stackPtr)->GetStart(); \
-        delete (stackPtr); \
-        _aligned_free(raw); \
-    }
-
-	// 栈分配器（Stack Allocator）适用于临时对象的分配，支持快速分配和回滚到之前的标记位置
+	  // 栈分配器（Stack Allocator）适用于临时对象的分配，支持快速分配和回滚到之前的标记位置
+	  // Stack, 嵌套逻辑、递归、UI 布局, 作用域级, 支持 Marker 回滚，RAII 安全自动清理
 	class StackAllocator : public Allocator
 	{
 	public:
 		StackAllocator(size_t size, void* start)
 			: Allocator(size, start), m_CurrentPos(start)
-		{}
+		{
+			WLD_CORE_INFO("Stack Allocator Created: Size = {} bytes, Start = {}", size, start);
+		}
 
 		~StackAllocator()
 		{
+			WLD_CORE_INFO("Stack Allocator Destroyed: Start = {}", m_Start);
+
 			Clear();
+			m_Start = nullptr;
+			m_CurrentPos = nullptr;
+			m_DestructorChain = nullptr;
 		}
 
 
@@ -105,6 +90,8 @@ namespace World
 			}
 			m_CurrentPos = reinterpret_cast<void*>(targetAddr);
 			m_UsedMemory = marker;
+
+			WLD_CORE_INFO("Stack Allocator FreeToMarker: Freed to marker {}, Current Used Memory = {} bytes", marker, m_UsedMemory);
 		}
 
 		/**
@@ -129,29 +116,40 @@ namespace World
 		DestructorNode* m_DestructorChain = nullptr;
 	};
 
-
-	/**
-	 * @brief RAII 辅助类：自动管理栈回滚
-	 * 在进入作用域时记录 Marker，离开时自动释放该作用域内申请的所有内存
-	 */
-	class StackScope
+	// ScopedStack 是 StackAllocator 的一个封装，负责管理内存的申请和释放，确保 RAII 安全
+	class ScopedStack
 	{
 	public:
-		StackScope(StackAllocator& allocator)
-			: m_Allocator(allocator), m_Marker(allocator.GetMarker())
-		{}
-
-		~StackScope()
+		ScopedStack(size_t size)
+			: m_RawMemory(_aligned_malloc(size, 16)), // 1. 必须先申请物理内存
+			m_Allocator(size, m_RawMemory)          // 2. 直接初始化成员变量
 		{
-			m_Allocator.FreeToMarker(m_Marker);
+			WLD_CORE_INFO("ScopedStack Created: Size = {} bytes, Raw Memory = {}", size, m_RawMemory);
 		}
 
-		// 阻止拷贝，确保唯一所有权
-		StackScope(const StackScope&) = delete;
-		StackScope& operator=(const StackScope&) = delete;
+		~ScopedStack()
+		{
+			WLD_CORE_INFO("ScopedStack Destroyed: Raw Memory = {}", m_RawMemory);
+			// 自动执行顺序：
+			// 1. m_Allocator 的析构函数会自动运行（清理析构链）
+			// 2. 然后进入 ScopedStack 析构函数体，执行物理内存释放
+			if (m_RawMemory)
+			{
+
+				_aligned_free(m_RawMemory);
+				m_RawMemory = nullptr;
+			}
+		}
+
+		// 返回引用，减少拷贝和开销
+		StackAllocator& GetAllocator() { return m_Allocator; }
+		StackAllocator* operator->() { return &m_Allocator; }
+
+		ScopedStack(const ScopedStack&) = delete;
+		ScopedStack& operator=(const ScopedStack&) = delete;
 
 	private:
-		StackAllocator& m_Allocator;
-		Marker m_Marker;
+		void* m_RawMemory = nullptr;
+		StackAllocator m_Allocator;
 	};
 }
