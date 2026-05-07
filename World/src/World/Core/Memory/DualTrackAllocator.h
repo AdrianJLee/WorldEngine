@@ -4,13 +4,6 @@
 
 namespace World
 {
-	struct DestructorNode
-	{
-		DestructorFunc Callback = nullptr; // 这里的函数由编译器自动生成（模板魔法）
-		void* Object = nullptr;            // 对象的地址
-		DestructorNode* Next = nullptr;    // 指向下一个待办事项
-	};
-
 	struct SOSPage
 	{
 		LinearAllocator* Alloc = nullptr; // 每一页都是一个线性分配器

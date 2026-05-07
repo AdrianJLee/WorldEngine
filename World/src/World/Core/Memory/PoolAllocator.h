@@ -1,7 +1,36 @@
 ﻿#pragma once
 #include "Memory.h"
+#include "MemoryTracker.h"
 namespace World
 {
+	enum class PoolTier : size_t
+	{
+		Tiny = 64,    // 极少量的对象（如：全局配置、罕见状态）
+		Small = 256,   // 少量（如：玩家、Boss、特殊特效）
+		Medium = 1024,  // 中等（如：普通敌人、常规子弹）
+		Large = 4096,  // 大量（如：粒子系统、大量碎片）
+		Huge = 16384  // 极端情况
+	};
+
+	enum class PoolTag : size_t
+	{
+		// --- 核心维度 ---
+		General = 0,    // 默认：通用对象
+
+		// --- 系统维度 ---
+		Rendering,      // 渲染系统专属（如：DrawCommands, MaterialInstances）
+		Physics,        // 物理系统专属（如：CollisionManifolds, Constraints）
+		ECS,            // 实体组件系统（如：各种 Component 存储）
+		AI,             // 路径寻路、行为树节点
+
+		// --- 场景维度 ---
+		GameMode,       // 游戏运行时的对象
+		Editor,         // 仅编辑器模式使用的对象（不希望混入游戏内存中）
+
+		// --- 扩展维度 ---
+		Tools,          // 临时分析工具、Debug 绘图对象
+		Internal        // 引擎底层管理对象（如：DestructorNode 本身）
+	};
 
 	// 池分配器（Pool Allocator）适用于大量同类型小对象的分配，内部维护一个空闲链表来快速分配和回收内存块
 	class PoolAllocator : public Allocator
@@ -20,19 +49,18 @@ namespace World
 		};
 
 	public:
-		/**
-		 * @param objectSize 每个对象的大小
-		 * @param objectAlignment 对齐要求
-		 * @param objectsPerChunk 每个 Chunk 包含的对象数量
-		 */
-		PoolAllocator(size_t objectSize, size_t objectAlignment, size_t objectsPerChunk = 64)
-			: Allocator(0, nullptr), m_ObjectSize(std::max(objectSize, sizeof(Node))),
+		PoolAllocator(const char* typeName, PoolTag tag, size_t objectSize, size_t objectAlignment, size_t objectsPerChunk = 64)
+			: Allocator(0, nullptr), m_TypeName(typeName), m_Tag(tag), m_ObjectSize(std::max(objectSize, sizeof(Node))),
 			m_Alignment(objectAlignment), m_ObjectsPerChunk(objectsPerChunk),
 			m_FreeList(nullptr), m_ChunkList(nullptr)
-		{}
+		{
+			MemoryTracker::Get().Register(this);
+		}
 
 		~PoolAllocator()
 		{
+			MemoryTracker::Get().Unregister(this);
+
 			// 销毁所有申请的 Chunk
 			Chunk* curr = m_ChunkList;
 			while (curr)
@@ -77,12 +105,26 @@ namespace World
 			m_NumAllocations--;
 		}
 
+		PoolStats GetStats() const
+		{
+			return {
+				m_TypeName,
+				m_Tag,
+				m_ObjectSize,
+				m_UsedMemory,      // 已经在之前代码中实现
+				m_TotalReserved,   // 需在 Grow() 时增加
+				m_NumAllocations   // 已经在之前代码中实现
+			};
+		}
 	private:
 		// 申请新的 Chunk，并将其划分成 Node 链表
 		void Grow()
 		{
 			size_t chunkMemorySize = m_ObjectSize * m_ObjectsPerChunk;
 			void* raw = _aligned_malloc(chunkMemorySize, m_Alignment);
+
+			// 统计总共从系统申请的内存（包含未使用的 Slots）
+			m_TotalReserved += chunkMemorySize;
 
 			// 将新申请的内存划分成若干 Node 链表
 			for (size_t i = 0; i < m_ObjectsPerChunk; ++i)
@@ -104,38 +146,12 @@ namespace World
 		size_t m_Alignment = 0;
 		size_t m_ObjectsPerChunk = 0; // 每个 Chunk 包含的对象数量
 
+
 		Node* m_FreeList = nullptr;   // 指向第一个可用的空闲块
 		Chunk* m_ChunkList = nullptr; // 指向所有分配的内存页，用于析构释放
-	};
 
-
-	enum class PoolTier : size_t
-	{
-		Tiny = 64,    // 极少量的对象（如：全局配置、罕见状态）
-		Small = 256,   // 少量（如：玩家、Boss、特殊特效）
-		Medium = 1024,  // 中等（如：普通敌人、常规子弹）
-		Large = 4096,  // 大量（如：粒子系统、大量碎片）
-		Huge = 16384  // 极端情况
-	};
-
-	enum class PoolTag : size_t
-	{
-		// --- 核心维度 ---
-		General = 0,    // 默认：通用对象
-
-		// --- 系统维度 ---
-		Rendering,      // 渲染系统专属（如：DrawCommands, MaterialInstances）
-		Physics,        // 物理系统专属（如：CollisionManifolds, Constraints）
-		ECS,            // 实体组件系统（如：各种 Component 存储）
-		AI,             // 路径寻路、行为树节点
-
-		// --- 场景维度 ---
-		GameMode,       // 游戏运行时的对象
-		Editor,         // 仅编辑器模式使用的对象（不希望混入游戏内存中）
-
-		// --- 扩展维度 ---
-		Tools,          // 临时分析工具、Debug 绘图对象
-		Internal        // 引擎底层管理对象（如：DestructorNode 本身）
+		const char* m_TypeName;
+		PoolTag m_Tag;
 	};
 
 	template<typename T, PoolTag Tag = PoolTag::General, PoolTier Tier = PoolTier::Medium>
@@ -144,10 +160,16 @@ namespace World
 	public:
 		static PoolAllocator& GetPool()
 		{
-			// 使用 thread_local 关键字
-			// 每一个线程在第一次访问时，都会创建一个专属于自己的静态池
-			thread_local PoolAllocator s_ThreadLocalPool(sizeof(T), alignof(T), static_cast<size_t>(Tier));
-			return s_ThreadLocalPool;
+			static const char* typeName = typeid(T).name();
+
+			thread_local World::PoolAllocator s_Pool(
+				typeName,
+				Tag,
+				sizeof(T),
+				alignof(T),
+				static_cast<size_t>(Tier)
+			);
+			return s_Pool;
 		}
 	};
 	// 方便的宏定义，简化调用

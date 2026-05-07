@@ -11,15 +11,16 @@ namespace World
 		{
 			m_Created.resize(Weight * Height);
 			m_Created2.resize(Weight * Height);
+			CreateTest2();
 		}
 		virtual void OnUpdate(Timestep ts) override
 		{
-			CreateTest2();
-			DestroyTest2();
+
+
 		}
 		virtual void OnDestroy() override
 		{
-
+			DestroyTest2();
 		}
 	private:
 		void CreateTest1();

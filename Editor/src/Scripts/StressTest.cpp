@@ -38,6 +38,7 @@ namespace World
 			for (int j = 0; j < Height; j++)
 			{
 				m_Created2[i * Height + j] = Create();
+
 			}
 		}
 
@@ -52,3 +53,4 @@ namespace World
 
 	}
 }
+
