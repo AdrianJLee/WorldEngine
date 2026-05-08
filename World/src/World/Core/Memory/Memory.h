@@ -60,7 +60,7 @@ namespace World
 				RegisterDestructor(obj, [](void* p) { static_cast<T*>(p)->~T(); });
 			}
 
-			WLD_CORE_INFO("Allocated object of type {} at address {}, size = {} bytes", typeid(T).name(), static_cast<const void*>(obj), sizeof(T));
+			//WLD_CORE_INFO("Allocated object of type {} at address {}, size = {} bytes", typeid(T).name(), static_cast<const void*>(obj), sizeof(T));
 			return obj;
 		}
 		/**
@@ -110,6 +110,5 @@ namespace World
 		size_t m_Size = 0;           // 内存块的总容量 (Total Capacity)
 		size_t m_UsedMemory = 0;     // 已使用的字节数
 		size_t m_NumAllocations = 0; // 记录总分配次数，用于排查内存泄漏
-		size_t m_TotalReserved = 0;   // 从系统申请的总物理内存（包含未使用的 Slots）
 	};
 }

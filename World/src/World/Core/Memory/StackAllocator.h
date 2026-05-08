@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include "Memory.h"
-
+#include "MemoryTracker.h"
 namespace World
 {
 	using Marker = size_t;
@@ -9,7 +9,7 @@ namespace World
 	 * @brief 魔法宏：创建一个自管理的栈空间
 	 * 变量名为 name，它实际上是一个 ScopedStack 实例
 	 */
-	#define WLD_STACK_WIZARD(name, size) World::ScopedStack name(size);
+	#define WLD_STACK_WIZARD(name, size) World::ScopedStack name(size,#name);
 
 	 /**
 	  * @brief 配合使用的分配宏
@@ -18,21 +18,25 @@ namespace World
 	#define WLD_STACK_NEW(T, name, ...) name.GetAllocator().New<T>(__VA_ARGS__);
 
 
+
 	  // 栈分配器（Stack Allocator）适用于临时对象的分配，支持快速分配和回滚到之前的标记位置
 	  // Stack, 嵌套逻辑、递归、UI 布局, 作用域级, 支持 Marker 回滚，RAII 安全自动清理
 	class StackAllocator : public Allocator
 	{
 	public:
-		StackAllocator(size_t size, void* start)
-			: Allocator(size, start), m_CurrentPos(start)
+		StackAllocator(size_t size, void* start, const char* debugName)
+			: Allocator(size, start), m_CurrentPos(start), m_DebugName(debugName)
 		{
-			WLD_CORE_INFO("Stack Allocator Created: Size = {} bytes, Start = {}", size, start);
+			MemoryTracker::Get().Register(this, m_DebugName, AllocatorType::Stack);
+
+			//WLD_CORE_INFO("Stack Allocator Created: Size = {} bytes, Start = {}", size, start);
 		}
 
 		~StackAllocator()
 		{
-			WLD_CORE_INFO("Stack Allocator Destroyed: Start = {}", m_Start);
+			//WLD_CORE_INFO("Stack Allocator Destroyed: Start = {}", m_Start);
 
+			MemoryTracker::Get().Unregister(this);
 			Clear();
 			m_Start = nullptr;
 			m_CurrentPos = nullptr;
@@ -91,7 +95,7 @@ namespace World
 			m_CurrentPos = reinterpret_cast<void*>(targetAddr);
 			m_UsedMemory = marker;
 
-			WLD_CORE_INFO("Stack Allocator FreeToMarker: Freed to marker {}, Current Used Memory = {} bytes", marker, m_UsedMemory);
+			//WLD_CORE_INFO("Stack Allocator FreeToMarker: Freed to marker {}, Current Used Memory = {} bytes", marker, m_UsedMemory);
 		}
 
 		/**
@@ -114,22 +118,23 @@ namespace World
 	private:
 		void* m_CurrentPos = nullptr;
 		DestructorNode* m_DestructorChain = nullptr;
+		const char* m_DebugName;
 	};
 
 	// ScopedStack 是 StackAllocator 的一个封装，负责管理内存的申请和释放，确保 RAII 安全
 	class ScopedStack
 	{
 	public:
-		ScopedStack(size_t size)
+		ScopedStack(size_t size, const char* debugName)
 			: m_RawMemory(_aligned_malloc(size, 16)), // 1. 必须先申请物理内存
-			m_Allocator(size, m_RawMemory)          // 2. 直接初始化成员变量
+			m_Allocator(size, m_RawMemory, debugName)          // 2. 直接初始化成员变量
 		{
-			WLD_CORE_INFO("ScopedStack Created: Size = {} bytes, Raw Memory = {}", size, m_RawMemory);
+			//WLD_CORE_INFO("ScopedStack Created: Size = {} bytes, Raw Memory = {}", size, m_RawMemory);
 		}
 
 		~ScopedStack()
 		{
-			WLD_CORE_INFO("ScopedStack Destroyed: Raw Memory = {}", m_RawMemory);
+			//WLD_CORE_INFO("ScopedStack Destroyed: Raw Memory = {}", m_RawMemory);
 			// 自动执行顺序：
 			// 1. m_Allocator 的析构函数会自动运行（清理析构链）
 			// 2. 然后进入 ScopedStack 析构函数体，执行物理内存释放

@@ -54,18 +54,19 @@ namespace World
 	}
 	void StressTest::StackTest1()
 	{
-		WLD_STACK_WIZARD(testStack, 1024 * 1024); // 1 MB 栈空间
+		//WLD_STACK_WIZARD(testStack, 1024 * 1024); // 1 MB 栈空间
 
 		{
-			WLD_STACK_NEW(int, testStack, 42); // 在栈上分配一个 int，值为 42
+			WLD_STACK_NEW(int, m_Stack, 42); // 在栈上分配一个 int，值为 42
 
 			{
-				WLD_STACK_NEW(float, testStack, 3.14f); // 在栈上分配一个 float，值为 3.14
+				WLD_STACK_NEW(float, m_Stack, 3.14f); // 在栈上分配一个 float，值为 3.14
 			}
 			StackTest2();
 			{
-				WLD_STACK_NEW(glm::vec4, testStack, 1.0f, 0.0f, 0.0f, 1.0f); // 在栈上分配一个 vec4，值为红色
+				WLD_STACK_NEW(glm::vec4, m_Stack, 1.0f, 0.0f, 0.0f, 1.0f); // 在栈上分配一个 vec4，值为红色
 			}
+
 		}
 
 

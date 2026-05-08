@@ -51,11 +51,11 @@ namespace World
 
 	public:
 		PoolAllocator(const char* typeName, PoolTag tag, size_t objectSize, size_t objectAlignment, size_t objectsPerChunk = 64)
-			: Allocator(0, nullptr), m_TypeName(typeName), m_Tag(tag), m_ObjectSize(std::max(objectSize, sizeof(Node))),
+			: Allocator(0, nullptr), m_DebugName(typeName), m_Tag(tag), m_ObjectSize(std::max(objectSize, sizeof(Node))),
 			m_Alignment(objectAlignment), m_ObjectsPerChunk(objectsPerChunk),
 			m_FreeList(nullptr), m_ChunkList(nullptr)
 		{
-			MemoryTracker::Get().Register(this);
+			MemoryTracker::Get().Register(this, m_DebugName, AllocatorType::Pool);
 		}
 
 		~PoolAllocator()
@@ -106,17 +106,6 @@ namespace World
 			m_NumAllocations--;
 		}
 
-		PoolStats GetStats() const
-		{
-			return {
-				m_TypeName,
-				m_Tag,
-				m_ObjectSize,
-				m_UsedMemory,      // 已经在之前代码中实现
-				m_TotalReserved,   // 需在 Grow() 时增加
-				m_NumAllocations   // 已经在之前代码中实现
-			};
-		}
 	private:
 		// 申请新的 Chunk，并将其划分成 Node 链表
 		void Grow()
@@ -125,7 +114,7 @@ namespace World
 			void* raw = _aligned_malloc(chunkMemorySize, m_Alignment);
 
 			// 统计总共从系统申请的内存（包含未使用的 Slots）
-			m_TotalReserved += chunkMemorySize;
+			m_Size += chunkMemorySize;
 
 			// 将新申请的内存划分成若干 Node 链表
 			for (size_t i = 0; i < m_ObjectsPerChunk; ++i)
@@ -151,7 +140,7 @@ namespace World
 		Node* m_FreeList = nullptr;   // 指向第一个可用的空闲块
 		Chunk* m_ChunkList = nullptr; // 指向所有分配的内存页，用于析构释放
 
-		const char* m_TypeName;
+		const char* m_DebugName;
 		PoolTag m_Tag;
 	};
 

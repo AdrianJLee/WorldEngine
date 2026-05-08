@@ -14,6 +14,5 @@ namespace World
 		virtual void OnImGuiRender() override;
 		virtual void OnEvent(Event& event) override;
 	private:
-		void DrawPoolStats();
 	};
 }
