@@ -48,7 +48,7 @@ namespace World
 
 
 	// 池分配器（Pool Allocator）适用于大量同类型小对象的分配，内部维护一个空闲链表来快速分配和回收内存块
-	// Pool, 大量同类小对象(Entity), 长期 / 不确定, 零碎片，O(1) 分配与随机销毁
+	// Pool, 大量同类小对象(Entity), 长期 / 不确定, 零碎片，O(1) 分配与随机销毁,频繁分配和销毁同类型对象的理想选择
 	class PoolAllocator : public Allocator
 	{
 		// 每个 Node 代表一个可用的内存块，Next 指向下一个可用块

@@ -29,12 +29,15 @@ namespace World
 		ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer; }
 
 		DualTrackAllocator& GetFrameAllocator() { return *m_FrameAllocator; }
+		DualTrackAllocator& GetEngineAllocator() { return *m_EngineAllocator; }
 	private:
 		bool OnWindowClose(WindowCloseEvent& e);
 		bool OnWindowResize(WindowResizeEvent& e);
+	private:
+		std::unique_ptr<DualTrackAllocator> m_FrameAllocator;
+		std::unique_ptr<DualTrackAllocator> m_EngineAllocator;
 
 		std::unique_ptr<Window> m_Window;
-
 		ImGuiLayer* m_ImGuiLayer;
 
 		float m_LastFrameTime = 0.0f;
@@ -46,7 +49,7 @@ namespace World
 
 		static Application* s_Instance;
 
-		std::unique_ptr<DualTrackAllocator> m_FrameAllocator;
+
 	};
 
 	// To be defined in CLIENT

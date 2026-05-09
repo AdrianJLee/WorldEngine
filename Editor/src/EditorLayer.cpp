@@ -19,6 +19,7 @@ namespace World
 		m_SceneRenderer->Init();
 
 		m_IconPlay = Texture2D::Create("Resource/Icons/Icon_Play.png");
+
 		m_IconStop = Texture2D::Create("Resource/Icons/Icon_Stop.png");
 
 		m_IconPause = Texture2D::Create("Resource/Icons/Icon_Pause.png");
@@ -58,7 +59,8 @@ namespace World
 
 		WLD_PROFILE_SCOPE("Renderer Clear");
 		Camera* renderCamera = &m_EditorCamera;
-		glm::mat4 renderCameraTransform = m_EditorCamera.GetTransform();
+		glm::mat4* renderCameraTransform = WLD_FRAME_NEW(glm::mat4, m_EditorCamera.GetTransform());
+
 
 		{
 			WLD_PROFILE_SCOPE("Renderer Draw");
@@ -72,7 +74,7 @@ namespace World
 					{
 						m_ActiveScene->OnUpdateRuntime(ts);
 						renderCamera = &m_ActiveScene->GetPrimaryCameraEntity().GetComponent<CameraComponent>().Camera;
-						renderCameraTransform = m_ActiveScene->GetPrimaryCameraEntity().GetComponent<TransformComponent>().Transform;
+						renderCameraTransform = &m_ActiveScene->GetPrimaryCameraEntity().GetComponent<TransformComponent>().Transform;
 					}
 					else
 						m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
@@ -88,7 +90,7 @@ namespace World
 		}
 
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
-		m_SceneRenderer->SubmitScene(*renderCamera, renderCameraTransform, m_SceneHierarchyPanel.GetSelectedEntity()); // 内部遍历实体并调用 Renderer2D
+		m_SceneRenderer->SubmitScene(*renderCamera, *renderCameraTransform, m_SceneHierarchyPanel.GetSelectedEntity()); // 内部遍历实体并调用 Renderer2D
 		m_SceneRenderer->EndScene();
 	}
 

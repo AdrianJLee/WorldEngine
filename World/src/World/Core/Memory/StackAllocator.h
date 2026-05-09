@@ -11,13 +11,13 @@ namespace World
 	* @brief 魔法宏：创建一个自管理的栈空间
 	* 变量名为 name，它实际上是一个 ScopedStack 实例
 	*/
-	#define WLD_STACK_WIZARD(name, size) World::ScopedStack name(size,#name);
+	#define WLD_STACK_WIZARD(name, size) World::ScopedStack name(size,#name)
 
 	/**
 	* @brief 配合使用的分配宏
 	* 注意这里通过 name.GetAllocator() 拿到真正的分配器
 	*/
-	#define WLD_STACK_NEW(T, name, ...) name.GetAllocator().New<T>(__VA_ARGS__);
+	#define WLD_STACK_NEW(T, name, ...) name.GetAllocator().New<T>(__VA_ARGS__)
 
 	#pragma endregion
 

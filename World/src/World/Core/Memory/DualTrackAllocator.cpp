@@ -128,13 +128,16 @@ namespace World
 	SOSPage* DualTrackAllocator::CreateSOSPage(size_t size)
 	{
 		void* raw = _aligned_malloc(size, 64);
-		// 这里体现了组合：DualTrack 创建并拥有 LinearAllocator
 
-		LinearAllocator* linear = new LinearAllocator(size, raw, "SOSPage");
+		// 这里体现了组合：DualTrack 创建并拥有 LinearAllocator
+		std::string debugName = (std::string(m_DebugName) + "_SOSPage");
+		SOSPage* sosPage = new SOSPage { nullptr, raw, nullptr,debugName };
+		LinearAllocator* linear = new LinearAllocator(size, raw, sosPage->DebugName.c_str());
+		sosPage->Alloc = linear;
 
 		m_Size += size;
 
-		return new SOSPage { linear, raw, nullptr };
+		return sosPage;
 	}
 
 

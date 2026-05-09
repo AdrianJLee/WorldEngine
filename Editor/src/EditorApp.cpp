@@ -13,8 +13,8 @@ namespace World
 		EditorApp()
 			:Application("Editor")
 		{
-			PushLayer(new EditorLayer());
-			PushLayer(new MemoryTraceLayer());
+			PushLayer(WLD_ENGINE_NEW(EditorLayer));
+			PushLayer(WLD_ENGINE_NEW(MemoryTraceLayer));
 		}
 		~EditorApp()
 		{

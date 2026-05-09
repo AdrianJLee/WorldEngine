@@ -18,12 +18,15 @@ namespace World
 
 		WLD_CORE_ASSERT(!s_Instance, "Appliicatiion already exists!");
 		s_Instance = this;
-		m_FrameAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("FrameAllocator", 1024 * 1024 * 1)); // 1 MB
+		m_FrameAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("FrameAllocator", 1024 * 1024 * 10)); // 10 MB
+		m_EngineAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("EngineAllocator", 1024 * 1024 * 50)); // 50 MB
 		m_Window = std::unique_ptr<Window>(Window::Create(WindowProps(name)));
+
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(Application::OnEvent));
 
 		Renderer::Init();
-		m_ImGuiLayer = new ImGuiLayer();
+		m_ImGuiLayer = WLD_ENGINE_NEW(ImGuiLayer);
+
 		PushOverlay(m_ImGuiLayer);
 
 	}
@@ -44,6 +47,7 @@ namespace World
 
 			float time = (float)glfwGetTime();
 			Timestep timestep = time - m_LastFrameTime;
+
 			m_LastFrameTime = time;
 
 			if (!m_Minimized)
