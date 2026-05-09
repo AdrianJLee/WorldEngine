@@ -1,6 +1,6 @@
 ﻿#pragma once
-#include "Memory.h"
-#include "MemoryTracker.h"
+#include "Allocator.h"
+
 namespace World
 {
 	enum class PoolTier : size_t
@@ -32,6 +32,21 @@ namespace World
 		Internal        // 引擎底层管理对象（如：DestructorNode 本身）
 	};
 
+	#pragma region Macro
+
+	// 方便的宏定义，简化调用
+	#define WLD_POOL_NEW_EX(T, Tag, Tier, ...) \
+    World::PoolRegistry<T, Tag, Tier>::GetPool().New<T>(__VA_ARGS__)
+
+	// 默认使用 General 标签和 Medium 级别的池
+	#define WLD_POOL_NEW(T, ...) \
+    WLD_POOL_NEW_EX(T, World::PoolTag::General, World::PoolTier::Medium, __VA_ARGS__)
+
+	#define WLD_POOL_DELETE(T, Tag, ptr) World::PoolRegistry<T, Tag>::GetPool().Delete(ptr)
+
+	#pragma endregion
+
+
 	// 池分配器（Pool Allocator）适用于大量同类型小对象的分配，内部维护一个空闲链表来快速分配和回收内存块
 	// Pool, 大量同类小对象(Entity), 长期 / 不确定, 零碎片，O(1) 分配与随机销毁
 	class PoolAllocator : public Allocator
@@ -50,87 +65,16 @@ namespace World
 		};
 
 	public:
-		PoolAllocator(const char* typeName, PoolTag tag, size_t objectSize, size_t objectAlignment, size_t objectsPerChunk = 64)
-			: Allocator(0, nullptr), m_DebugName(typeName), m_Tag(tag), m_ObjectSize(std::max(objectSize, sizeof(Node))),
-			m_Alignment(objectAlignment), m_ObjectsPerChunk(objectsPerChunk),
-			m_FreeList(nullptr), m_ChunkList(nullptr)
-		{
-			MemoryTracker::Get().Register(this, m_DebugName, AllocatorType::Pool);
-		}
+		PoolAllocator(const char* debugName, PoolTag tag, size_t objectSize, size_t objectAlignment, size_t objectsPerChunk = 64);
+		~PoolAllocator()override;
 
-		~PoolAllocator()
-		{
-			MemoryTracker::Get().Unregister(this);
+		void* Allocate(size_t size, size_t alignment = 8) override;
 
-			// 销毁所有申请的 Chunk
-			Chunk* curr = m_ChunkList;
-			while (curr)
-			{
-				Chunk* toDelete = curr;
-				curr = curr->Next;
-				_aligned_free(toDelete->Data);
-				delete toDelete;
-			}
-		}
-
-		void* Allocate(size_t size, size_t alignment = 8) override
-		{
-			WLD_CORE_ASSERT(size <= m_ObjectSize, "Allocation size too large for pool!");
-			WLD_CORE_ASSERT(alignment <= m_Alignment, "Alignment requirement too strict!");
-
-			// 如果 Free List 为空，说明需要申请新的 Chunk
-			if (!m_FreeList)
-			{
-				Grow();
-			}
-
-			// 从 Free List 头部取出一个块
-			Node* head = m_FreeList;
-			m_FreeList = head->Next;
-
-			m_UsedMemory += m_ObjectSize;
-			m_NumAllocations++;
-			return reinterpret_cast<void*>(head);
-		}
-
-		void Deallocate(void* p) override
-		{
-			if (!p) return;
-
-			// 将释放的内存块插回 Free List 头部
-			Node* node = reinterpret_cast<Node*>(p);
-			node->Next = m_FreeList;
-			m_FreeList = node;
-
-			m_UsedMemory -= m_ObjectSize;
-			m_NumAllocations--;
-		}
+		void Deallocate(void* p) override;
 
 	private:
 		// 申请新的 Chunk，并将其划分成 Node 链表
-		void Grow()
-		{
-			size_t chunkMemorySize = m_ObjectSize * m_ObjectsPerChunk;
-			void* raw = _aligned_malloc(chunkMemorySize, m_Alignment);
-
-			// 统计总共从系统申请的内存（包含未使用的 Slots）
-			m_Size += chunkMemorySize;
-
-			// 将新申请的内存划分成若干 Node 链表
-			for (size_t i = 0; i < m_ObjectsPerChunk; ++i)
-			{
-				Node* newNode = reinterpret_cast<Node*>(
-					static_cast<uint8_t*>(raw) + (i * m_ObjectSize)
-					);
-				newNode->Next = m_FreeList;
-				m_FreeList = newNode;
-			}
-
-			// 记录 Chunk 以便析构
-			Chunk* newChunk = new Chunk { raw, m_ChunkList };
-			m_ChunkList = newChunk;
-		}
-
+		void Grow();
 	private:
 		size_t m_ObjectSize = 0; // 每个对象的大小（至少要能存下一个 Node）
 		size_t m_Alignment = 0;
@@ -140,7 +84,6 @@ namespace World
 		Node* m_FreeList = nullptr;   // 指向第一个可用的空闲块
 		Chunk* m_ChunkList = nullptr; // 指向所有分配的内存页，用于析构释放
 
-		const char* m_DebugName;
 		PoolTag m_Tag;
 	};
 
@@ -162,14 +105,5 @@ namespace World
 			return s_Pool;
 		}
 	};
-	// 方便的宏定义，简化调用
-	#define WLD_POOL_NEW_EX(T, Tag, Tier, ...) \
-    World::PoolRegistry<T, Tag, Tier>::GetPool().New<T>(__VA_ARGS__)
 
-	// 默认使用 General 标签和 Medium 级别的池
-	#define WLD_POOL_NEW(T, ...) \
-    WLD_POOL_NEW_EX(T, World::PoolTag::General, World::PoolTier::Medium, __VA_ARGS__)
-
-
-	#define WLD_POOL_DELETE(T, Tag, ptr) World::PoolRegistry<T, Tag>::GetPool().Delete(ptr)
 }

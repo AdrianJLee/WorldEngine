@@ -12,6 +12,7 @@
 #include "World/Core/ComponentRegistry.h"
 
 #include "World/Core/Memory/Memory.h"
+#include "World/Core/Memory/Allocator.h"
 #include "World/Core/Memory/LinearAllocator.h"
 #include "World/Core/Memory/GrowableLinearAllocator.h"
 #include "World/Core/Memory/DualTrackAllocator.h"
