@@ -17,6 +17,9 @@ namespace World
 		while (p)
 		{
 			MemoryPage* next = p->Next;
+
+			m_Size -= p->Size;
+
 			free(p->Data);
 			delete p;
 			p = next;
@@ -33,6 +36,9 @@ namespace World
 		// 如果当前页放不下了
 		if (alignedAddr + size > reinterpret_cast<uintptr_t>(m_CurrentPage->Data) + m_CurrentPage->Size)
 		{
+			m_UsedMemory += (m_CurrentPage->Size - m_CurrentPage->Offset);
+
+
 			// 申请新页（大小至少能放下本次请求，或者是默认页大小）
 			size_t nextSize = std::max(m_PageSize, size + alignment);
 			MemoryPage* newPage = CreatePage(nextSize);
@@ -44,9 +50,16 @@ namespace World
 			// 在新页重新计算对齐地址
 			alignedAddr = AlignForward(reinterpret_cast<uintptr_t>(m_CurrentPage->Data), alignment);
 		}
+		else
+		{
+			// 累积由于对齐产生的内部碎片
+			size_t paddingBytes = alignedAddr - currentAddr;
+			m_UsedMemory += paddingBytes;
+		}
 
 		m_CurrentPage->Offset = (alignedAddr + size) - reinterpret_cast<uintptr_t>(m_CurrentPage->Data);
-		m_UsedMemory += size; // 统计总占用
+		m_UsedMemory += size;
+		m_NumAllocations++;
 		return reinterpret_cast<void*>(alignedAddr);
 	}
 	void GrowableLinearAllocator::Reset()
@@ -61,11 +74,13 @@ namespace World
 		}
 		m_CurrentPage = m_HeadPage;
 		m_UsedMemory = 0;
+		m_NumAllocations = 0;
 	}
 
 	MemoryPage* GrowableLinearAllocator::CreatePage(size_t size)
 	{
 		void* data = malloc(size);
+		m_Size += size;
 		return new MemoryPage { data, size, 0, nullptr };
 	}
 

@@ -41,11 +41,15 @@ namespace World
 		{
 			LOSPage* toDelete = currLOS;
 			currLOS = currLOS->Next;
+
+			m_Size -= toDelete->Size;
+
 			_aligned_free(toDelete->Data);
 			delete toDelete;
 		}
 		m_HeadLOS = nullptr;
 		m_UsedMemory = 0;
+		m_NumAllocations = 0;
 	}
 	DualTrackAllocator::~DualTrackAllocator()
 	{
@@ -103,6 +107,7 @@ namespace World
 		}
 
 		m_UsedMemory += size;
+		m_NumAllocations++;
 		return ptr;
 	}
 
@@ -124,8 +129,11 @@ namespace World
 	{
 		void* raw = _aligned_malloc(size, 64);
 		// 这里体现了组合：DualTrack 创建并拥有 LinearAllocator
-		const char* pageDebugName = (std::string(m_DebugName) + "_SOSPage" + std::to_string(size)).c_str();
-		LinearAllocator* linear = new LinearAllocator(size, raw, pageDebugName);
+
+		LinearAllocator* linear = new LinearAllocator(size, raw, "SOSPage");
+
+		m_Size += size;
+
 		return new SOSPage { linear, raw, nullptr };
 	}
 
@@ -146,6 +154,10 @@ namespace World
 		// 挂载到大对象链表
 		LOSPage* newPage = new LOSPage { raw, size, m_HeadLOS };
 		m_HeadLOS = newPage;
+
+		m_Size += size;
+		m_UsedMemory += size;
+		m_NumAllocations++;
 
 		return aligned;
 	}

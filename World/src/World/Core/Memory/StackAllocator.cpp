@@ -49,6 +49,10 @@ namespace World
 			while ((uintptr_t)m_DestructorChain->Object >= targetAddr)
 			{
 				m_DestructorChain->Callback(m_DestructorChain->Object); // 执行析构
+
+				if (m_NumAllocations >= 2)
+					m_NumAllocations -= 2;
+
 				m_DestructorChain = m_DestructorChain->Next;
 			}
 		}

@@ -17,9 +17,14 @@ namespace World
 		{
 			Chunk* toDelete = curr;
 			curr = curr->Next;
+
+			m_Size -= (m_ObjectSize * m_ObjectsPerChunk);
+
 			_aligned_free(toDelete->Data);
 			delete toDelete;
 		}
+		m_UsedMemory = 0;
+		m_NumAllocations = 0;
 	}
 
 	void* PoolAllocator::Allocate(size_t size, size_t alignment)

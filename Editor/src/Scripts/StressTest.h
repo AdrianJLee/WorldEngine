@@ -18,7 +18,7 @@ namespace World
 		}
 		virtual void OnUpdate(Timestep ts) override
 		{
-
+			FrameTest1();
 
 		}
 		virtual void OnDestroy() override
@@ -36,6 +36,9 @@ namespace World
 		void StackTest1();
 		void StackTest2();
 		void StackTest3();
+
+		void FrameTest1();
+		void FrameTest2();
 	private:
 		int Weight = 100;
 		int Height = 100;

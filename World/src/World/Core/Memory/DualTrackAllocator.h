@@ -3,6 +3,12 @@
 
 namespace World
 {
+	#pragma region Macro
+
+	#define WLD_FRAME_NEW(T, ...) Application::Get().GetFrameAllocator().New<T>(__VA_ARGS__);
+
+	#pragma endregion
+
 	class LinearAllocator;
 
 	struct SOSPage
@@ -10,6 +16,7 @@ namespace World
 		LinearAllocator* Alloc = nullptr; // 每一页都是一个线性分配器
 		void* RawMemory = nullptr;        // 存储实际申请的大块内存地址，用于最后释放
 		SOSPage* Next = nullptr;
+
 	};
 
 	struct LOSPage

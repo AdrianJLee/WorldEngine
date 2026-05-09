@@ -91,5 +91,21 @@ namespace World
 		}
 
 	}
+	struct FrameTestStruct
+	{
+		glm::mat4 a[10000];
+	};
+
+	void StressTest::FrameTest1()
+	{
+		WLD_FRAME_NEW(glm::mat4, glm::mat4(1.0f)); // 在帧分配器上分配一个 mat4x4，值为单位矩阵
+		WLD_FRAME_NEW(FrameTestStruct); // 在帧分配器上分配一个 int，值为 42
+
+
+	}
+	void StressTest::FrameTest2()
+	{
+
+	}
 }
 
