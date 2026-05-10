@@ -29,8 +29,6 @@ namespace World
 		auto entity = WLD_POOL_NEW(Entity, scene, scene->GetRegistry().create());
 		entity->AddComponent<TagComponent>("Empty Entity");
 		entity->AddComponent<UUIDComponent>(UUID());
-		//entity->AddComponent<SpriteComponent>().Color =
-		//	glm::vec4((float)rand() / RAND_MAX, (float)rand() / RAND_MAX, (float)rand() / RAND_MAX, 1.0f);
 
 		return entity;
 	}
