@@ -4,7 +4,8 @@
 #include "World/Core/Log.h"
 #include "World/Core/Timestep.h"
 #include "World/Renderer/Renderer.h"
-
+#include "World/Core/Thread/JobSystem.h"
+#include "World/Core/Memory/MemoryTracker.h"
 
 #include <GLFW/glfw3.h>
 
@@ -34,7 +35,7 @@ namespace World
 	Application::~Application()
 	{
 		WLD_PROFILE_FUNCTION();
-
+		JobSystem::Shutdown();
 	}
 
 	void Application::Run()
@@ -44,6 +45,9 @@ namespace World
 		while (m_Running)
 		{
 			WLD_PROFILE_SCOPE("RunLoop");
+
+			MemoryTracker::Get(); // 先启动监控
+			JobSystem::Init();    // 再启动线程池
 
 			float time = (float)glfwGetTime();
 			Timestep timestep = time - m_LastFrameTime;

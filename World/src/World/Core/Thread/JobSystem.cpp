@@ -1,7 +1,7 @@
 ﻿#include "wldpch.h"
 #include "JobSystem.h"
 #include "JobQueue.h"
-
+#include "World/Core/Memory/LinearAllocator.h"
 namespace World
 {
 	void JobSystem::Init()
@@ -50,6 +50,41 @@ namespace World
 			}
 		}
 	}
+	void JobSystem::Shutdown()
+	{
+		if (!m_Running) return;
+
+		// 1. 发出停止信号
+		m_Running = false;
+
+		// 2. 唤醒所有正在 sleep 的线程（如果使用了 CV 机制）
+		// 在目前的 sleep_for 实现中，线程会在下一次轮询时检测到 m_running 为 false
+
+		// 3. 等待所有工作线程安全退出
+		for (std::thread& worker : m_Workers)
+		{
+			if (worker.joinable())
+			{
+				worker.join();
+			}
+		}
+
+		// 4. 清理资源
+		if (m_Queues)
+		{
+			delete[] m_Queues;
+			m_Queues = nullptr;
+		}
+
+		m_Workers.clear();
+
+		// 归位
+		m_NumWorkers = 0;
+		m_LocalIndex = 0;
+
+		// 💡 工业级提示：可以在这里加一行日志，确认系统已安全关闭
+		WLD_CORE_INFO("JobSystem shutdown successfully.");
+	}
 	bool JobSystem::GetNextJob(JobDecl& outJob)
 	{
 		// 先尝试从本线程队列拿
@@ -65,18 +100,39 @@ namespace World
 	}
 	void JobSystem::WorkerLoop()
 	{
+		uint32_t idleTime = 0; // 记录线程空闲（拿不到任务）的次数
 		while (m_Running)
 		{
 			JobDecl job;
 			if (GetNextJob(job))
 			{
+				idleTime = 0;
 				job.Entry(job.Data);
 				// 如果任务有关联的计数器，通常在任务逻辑内部减一
 			}
 			else
 			{
-				// 让线程休眠100微秒
-				std::this_thread::sleep_for(std::chrono::microseconds(100)); // 降频节能
+				// 没拿到任务，开始梯度退避策略
+				idleTime++;
+
+				if (idleTime < 10)
+				{
+					// 第一阶段（刚闲下来）：只使用轻微的硬件暂停指令，提示 CPU 这是一个自旋锁循环
+					// 这避免了系统级的线程切换开销，响应最快
+					#if defined(_MSC_VER)
+					_mm_pause(); // 需要包含 <immintrin.h> 或使用平台特定的微架构暂停指令
+					#endif
+				}
+				else if (idleTime < 100)
+				{
+					// 第二阶段（闲了一小会）：出让时间片，让系统调度其他线程，但保持活跃状态
+					std::this_thread::yield();
+				}
+				else
+				{
+					// 第三阶段（长期处于彻底无任务状态）：强制休眠一小段时间，大幅降低 CPU 占用（节能降温）
+					std::this_thread::sleep_for(std::chrono::microseconds(100)); // 注意：在Windows下实际可能偏长
+				}
 			}
 		}
 	}
