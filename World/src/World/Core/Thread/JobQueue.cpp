@@ -18,6 +18,17 @@ namespace World
 
 		// 获取当前的底部索引，使用 relaxed 内存顺序，因为我们不需要在这个阶段保证任何特定的顺序
 		int64_t b = m_Bottom.load(std::memory_order_relaxed);
+		int64_t t = m_Top.load(std::memory_order_acquire);
+
+
+		if (b - t >= CAPACITY)
+		{
+			// 队列满了！
+			// 工业级策略：不再入队，而是由当前线程直接执行该任务（立刻消化掉）
+			job.Entry(job.Data);
+			return;
+		}
+
 
 		// 范围检查，确保不会覆盖未被消费的任务
 		m_Jobs[b & (CAPACITY - 1)] = job;

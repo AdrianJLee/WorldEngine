@@ -11,13 +11,16 @@ namespace World
 		JobQueue();
 		~JobQueue();
 
+		// 从顶部推入任务
 		void Push(JobDecl job);
 
+		// 从底部弹出任务
 		bool Pop(JobDecl& outJob);
 
+		// 从顶部窃取任务
 		bool Steal(JobDecl& outJob);
 	public:
-		// 注意：为了简化实现，这里使用固定大小的环形缓冲区，实际应用中可能需要动态扩展
+
 		static const uint32_t CAPACITY = 4096; // 必须是 2 的幂
 	private:
 		JobDecl* m_Jobs;
