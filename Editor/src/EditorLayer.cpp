@@ -1,5 +1,5 @@
 ﻿#include "EditorLayer.h"
-
+#include "World/Core/Thread/JobSystem.h"
 namespace World
 {
 	EditorLayer::EditorLayer()
@@ -97,6 +97,7 @@ namespace World
 	void EditorLayer::OnImGuiRender()
 	{
 		WLD_PROFILE_FUNCTION();
+
 		// DockSpace
 		ImGuiLayer::ShowDockSpaceBack(false);
 		// 菜单栏
@@ -200,6 +201,10 @@ namespace World
 
 			ImGui::End();
 		}
+
+
+
+
 	}
 
 	void EditorLayer::OnEvent(Event& event)

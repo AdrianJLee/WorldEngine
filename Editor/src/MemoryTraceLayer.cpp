@@ -121,9 +121,13 @@ namespace World
 				ImGui::Text("%llu", s.NumAllocations);
 			}
 			ImGui::EndTable();
+
 		}
 
 		ImGui::End();
+
+		// Cleanup: 移除所有分配器的短命快照，保持界面简洁
+		MemoryTracker::Get().ClearEphemeralStats();
 	}
 	void MemoryTraceLayer::OnEvent(Event& event)
 	{}

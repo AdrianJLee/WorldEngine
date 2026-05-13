@@ -11,7 +11,7 @@ namespace World
 	* @brief 魔法宏：创建一个自管理的栈空间
 	* 变量名为 name，它实际上是一个 ScopedStack 实例
 	*/
-	#define WLD_STACK_WIZARD(name, size) World::ScopedStack name(size,#name)
+	#define WLD_STACK_WIZARD(name, size, isEphemeral) World::ScopedStack name(size,#name,isEphemeral)
 
 	/**
 	* @brief 配合使用的分配宏
@@ -27,7 +27,7 @@ namespace World
 	class StackAllocator : public Allocator
 	{
 	public:
-		StackAllocator(size_t size, void* start, const char* debugName);
+		StackAllocator(size_t size, void* start, const char* debugName, bool isEphemeral = false);
 
 
 		~StackAllocator() override;
@@ -59,7 +59,7 @@ namespace World
 	class ScopedStack
 	{
 	public:
-		ScopedStack(size_t size, const char* debugName);
+		ScopedStack(size_t size, const char* debugName, bool isEphemeral = false);
 		~ScopedStack();
 
 		ScopedStack(const ScopedStack&) = delete;

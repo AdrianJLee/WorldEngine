@@ -39,7 +39,7 @@ namespace World
 			JobDecl job;
 			if (GetNextJob(job))
 			{
-				job.Entry(job.Data);
+				job.Entry(job.Padding);
 
 				counter->Count.fetch_sub(1, std::memory_order_release);
 			}
@@ -107,8 +107,9 @@ namespace World
 			if (GetNextJob(job))
 			{
 				idleTime = 0;
-				job.Entry(job.Data);
-				// 如果任务有关联的计数器，通常在任务逻辑内部减一
+				// 将包裹负载数据的那个内部连续内存地址传进去
+				if (job.Entry)
+					job.Entry(job.Padding);
 			}
 			else
 			{

@@ -31,7 +31,7 @@ namespace World
 		static inline std::vector<std::thread> m_Workers; // 工作线程列表
 		static inline JobQueue* m_Queues = nullptr; // 作业队列
 		static inline uint32_t m_NumWorkers = 0; // 工作线程数量
-		static inline std::atomic<bool> m_Running { false }; // 作业系统运行状态
+		static inline std::atomic<bool> m_Running { true }; // 作业系统运行状态
 
 	public:
 		/**
@@ -43,28 +43,31 @@ namespace World
 		template<typename F>
 		static void ParallelFor(uint32_t count, uint32_t batchSize, F&& func)
 		{
+			if (count == 0 || batchSize == 0) return;
 			struct ParallelForData
 			{
 				F func;
 				uint32_t start;// 起始索引
 				uint32_t end;// 结束索引（不包含）
+
+				ParallelForData(const F& f, uint32_t s, uint32_t e)
+					: func(f), start(s), end(e)
+				{}
 			};
-
-
-			// 预估大小：(任务数) * (数据包大小)
-			uint32_t numJobs = (count + batchSize - 1) / batchSize;
-			WLD_STACK_WIZARD(tempPayloads, numJobs * 128);
 
 			JobCounter sync;
 			for (uint32_t i = 0; i < count; i += batchSize)
 			{
 				uint32_t end = std::min(i + batchSize, count);
 
-				// 包装 Lambda 和范围数据
-				// 在实际工业实现中，我们会把 Lambda 对象拷贝到 Job 的 Data 内存里
-				auto* data = WLD_STACK_NEW(ParallelForData, tempPayloads, std::forward<F>(func), i, end);
-				auto wrapper = [](void* voidData)
+				JobDecl job;
+
+				// 将执行逻辑和状态数据强行塞入预留的 64 字节缝隙中！0 内存分配！
+				job.Emplace(ParallelForData(func, i, end));
+
+				job.Entry = [](void* voidData)
 					{
+						// 从那块预留缝隙中还原为我们实际的结构体
 						auto* pData = static_cast<ParallelForData*>(voidData);
 						for (uint32_t j = pData->start; j < pData->end; ++j)
 						{
@@ -72,7 +75,8 @@ namespace World
 						}
 					};
 
-				Kick({ wrapper, data }, &sync);
+				// 把这个自己内包揽了状态的肥胖 Job结构（通常不到80字节）直接推进无锁队列数组
+				Kick(job, &sync);
 			}
 
 			Wait(&sync);

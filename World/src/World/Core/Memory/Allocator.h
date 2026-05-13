@@ -67,7 +67,7 @@ namespace World
 		}
 
 	public:
-		Allocator(size_t size, void* start, const char* debugName = "", AllocatorType type = AllocatorType::Unknown);
+		Allocator(size_t size, void* start, const char* debugName = "", AllocatorType type = AllocatorType::Unknown, bool isEphemeral = false);
 
 		virtual ~Allocator();
 

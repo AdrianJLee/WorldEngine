@@ -41,13 +41,12 @@ namespace World
 	void Application::Run()
 	{
 		WLD_PROFILE_FUNCTION();
+		MemoryTracker::Get(); // 先启动监控
+		JobSystem::Init();    // 再启动线程池
 
 		while (m_Running)
 		{
 			WLD_PROFILE_SCOPE("RunLoop");
-
-			MemoryTracker::Get(); // 先启动监控
-			JobSystem::Init();    // 再启动线程池
 
 			float time = (float)glfwGetTime();
 			Timestep timestep = time - m_LastFrameTime;

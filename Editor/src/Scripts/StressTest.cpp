@@ -74,7 +74,7 @@ namespace World
 	}
 	void StressTest::StackTest2()
 	{
-		WLD_STACK_WIZARD(testStack, 512 * 512); // 1 MB 栈空间
+		WLD_STACK_WIZARD(testStack, 512 * 512, true); // 1 MB 栈空间
 
 		{
 			WLD_STACK_NEW(int, testStack, 42); // 在栈上分配一个 int，值为 42
@@ -84,7 +84,7 @@ namespace World
 	}
 	void StressTest::StackTest3()
 	{
-		WLD_STACK_WIZARD(testStack, 256 * 256); // 1 MB 栈空间
+		WLD_STACK_WIZARD(testStack, 256 * 256, true); // 1 MB 栈空间
 
 		{
 			WLD_STACK_NEW(double, testStack, 42); // 在栈上分配一个 double，值为 42

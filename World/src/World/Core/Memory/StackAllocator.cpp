@@ -1,10 +1,10 @@
 ﻿#include "wldpch.h"
 #include "StackAllocator.h"
-
+#include "MemoryTracker.h"
 namespace World
 {
-	StackAllocator::StackAllocator(size_t size, void* start, const char* debugName)
-		: Allocator(size, start, debugName, AllocatorType::Stack), m_CurrentPos(start)
+	StackAllocator::StackAllocator(size_t size, void* start, const char* debugName, bool isEphemeral)
+		: Allocator(size, start, debugName, AllocatorType::Stack, isEphemeral), m_CurrentPos(start)
 	{
 		//WLD_CORE_INFO("Stack Allocator Created: Size = {} bytes, Start = {}", size, start);
 	}
@@ -12,7 +12,7 @@ namespace World
 	StackAllocator::~StackAllocator()
 	{
 		//WLD_CORE_INFO("Stack Allocator Destroyed: Start = {}", m_Start);
-
+		MemoryTracker::Get().AddEphemeralSnapshot(this);
 		Clear();
 		m_Start = nullptr;
 		m_CurrentPos = nullptr;
@@ -76,9 +76,9 @@ namespace World
 		m_DestructorChain = node;
 	}
 
-	ScopedStack::ScopedStack(size_t size, const char* debugName)
+	ScopedStack::ScopedStack(size_t size, const char* debugName, bool isEphemeral)
 		: m_RawMemory(_aligned_malloc(size, 16)),
-		m_Allocator(size, m_RawMemory, debugName)
+		m_Allocator(size, m_RawMemory, debugName, isEphemeral)
 	{
 		//WLD_CORE_INFO("ScopedStack Created: Size = {} bytes, Raw Memory = {}", size, m_RawMemory);
 	}

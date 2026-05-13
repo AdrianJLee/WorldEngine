@@ -1,6 +1,8 @@
 ﻿#include "wldpch.h"
 #include "Scene.h"
 #include "World/Scene/Components.h"
+#include "World/Core/Thread/JobSystem.h"
+#include "World/Core/Application.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/CommandBuffer.h"
 
@@ -82,11 +84,27 @@ namespace World
 
 	void Scene::OnScriptUpdate(Timestep ts)
 	{
-		m_Registry.view<NativeScriptComponent>().each([=](auto entity, NativeScriptComponent& scriptComponent)
+		auto view = m_Registry.view<NativeScriptComponent>();
+		size_t count = view.size();
+		if (count == 0) return;
+
+		WLD_STACK_WIZARD(componentsBuffer, count * sizeof(NativeScriptComponent*), true);
+		NativeScriptComponent** componentsArray = (NativeScriptComponent**)componentsBuffer.GetAllocator().Allocate(count * sizeof(NativeScriptComponent*));
+
+		size_t index = 0;
+		for (auto entity : view)
+		{
+			componentsArray[index++] = &view.get<NativeScriptComponent>(entity);
+		}
+
+		// 假设 64 个脚本为一批次派发
+		JobSystem::ParallelFor(count, 64, [&](uint32_t i)
 			{
-				if (scriptComponent.Instance)
+				auto* comp = componentsArray[i];
+				if (comp->Instance)
 				{
-					scriptComponent.Instance->OnUpdate(ts);
+					// 在工作线程中并发更新
+					comp->Instance->OnUpdate(ts);
 				}
 			});
 	}
@@ -247,20 +265,42 @@ namespace World
 		b2World_Step(m_PhysicsWorldId, ts.GetSeconds(), subStepCount);
 
 		auto view = m_Registry.view<RigidBody2DComponent>();
+		auto count = view.size();
+		if (count == 0) return;
+
+		struct PhysicsSyncPayload
+		{
+			TransformComponent* Transform;
+			RigidBody2DComponent* Rb;
+		};
+
+		WLD_STACK_WIZARD(payloadsBuffer, count * sizeof(PhysicsSyncPayload), true);
+		PhysicsSyncPayload* syncPayloads = (PhysicsSyncPayload*)payloadsBuffer.GetAllocator().Allocate(count * sizeof(PhysicsSyncPayload));
+
+		size_t index = 0;
 		for (auto entity : view)
 		{
-			Entity Entity = { this,entity };
-			auto& transform = Entity.GetComponent<TransformComponent>();
-			auto& rb = Entity.GetComponent<RigidBody2DComponent>();
-
-			b2Transform& bodyTransform = b2Body_GetTransform(rb.RuntimeBodyId);
-
-			const b2Vec2& position = bodyTransform.p;
-
-			float rotation = b2Rot_GetAngle(bodyTransform.q);
-			transform.SetTransform({ position.x, position.y, transform.Location.z },
-				{ transform.Rotation.x, transform.Rotation.y, rotation }, transform.Scale);
+			// 主线程填充连续的载荷数组
+			syncPayloads[index++] = {
+				&m_Registry.get<TransformComponent>(entity),
+				&m_Registry.get<RigidBody2DComponent>(entity)
+			};
 		}
+
+		JobSystem::ParallelFor(count, 64, [&](uint32_t i)
+			{
+				auto& payload = syncPayloads[i];
+
+				// 从物理对象拿变换
+				b2Transform& bodyTransform = b2Body_GetTransform(payload.Rb->RuntimeBodyId);
+
+				const b2Vec2& position = bodyTransform.p;
+				float rotation = b2Rot_GetAngle(bodyTransform.q);
+
+				// 同步回引擎的组件
+				payload.Transform->SetTransform({ position.x, position.y, payload.Transform->Location.z },
+					{ payload.Transform->Rotation.x, payload.Transform->Rotation.y, rotation }, payload.Transform->Scale);
+			});
 	}
 	void Scene::OnPhysics2DStop()
 	{
