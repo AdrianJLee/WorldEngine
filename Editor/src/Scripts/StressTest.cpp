@@ -4,17 +4,53 @@ namespace World
 {
 	void StressTest::CreateTest1()
 	{
+		uint32_t totalCount = Weight * Height;
+		if (totalCount == 0) return;
+
+		auto scene = GetEntity().GetScene();
+		auto& registry = scene->GetRegistry();
+
+		// 1. 批量申请纯净的实体 ID
+		std::vector<entt::entity> entities(totalCount);
+		registry.create(entities.begin(), entities.end());
+
+		// 2. 准备组件数据数组
+		std::vector<TagComponent> tags(totalCount, TagComponent("Empty Entity"));
+		std::vector<UUIDComponent> uuids(totalCount);
+		std::vector<TransformComponent> transforms(totalCount);
+		std::vector<SpriteComponent> sprites(totalCount);
+
 		for (int i = 0; i < Weight; i++)
 		{
 			for (int j = 0; j < Height; j++)
 			{
-				auto& entity = Entity::CreateEntity(GetEntity().GetScene(), "Empty Entity");
-				entity.AddComponent<TransformComponent>(glm::vec3 { i * 1.0f, j * 1.0f, -0.5f });
-				entity.AddComponent<SpriteComponent>().Color =
-					glm::vec4((float)rand() / RAND_MAX, (float)rand() / RAND_MAX, (float)rand() / RAND_MAX, 1.0f);
-				m_Created[i * Height + j] = entity;
+				int index = i * Height + j;
+
+				// 填充 UUID（每实体必须有一个唯一ID）
+				uuids[index] = UUIDComponent(UUID());
+
+				// 计算出坐标点
+				transforms[index].SetLocation(glm::vec3 { i * 1.0f, j * 1.0f, -0.5f });
+
+				// 预生成颜色数据 (避免跨线程锁和频繁取随机数)
+				sprites[index].Color = glm::vec4(
+					(float)rand() / RAND_MAX,
+					(float)rand() / RAND_MAX,
+					(float)rand() / RAND_MAX,
+					1.0f
+				);
+
+				// 留存供摧毁时使用
+				m_Created[index] = Entity(scene, entities[index]);
 			}
 		}
+
+		// 3. 极速批处理插入到底层内存！
+		// 它们将在底层引擎被直接 memcpy 或者连续构造进去，而不用一次次的寻找可用内存
+		registry.insert<TagComponent>(entities.begin(), entities.end(), tags.begin());
+		registry.insert<UUIDComponent>(entities.begin(), entities.end(), uuids.begin());
+		registry.insert<TransformComponent>(entities.begin(), entities.end(), transforms.begin());
+		registry.insert<SpriteComponent>(entities.begin(), entities.end(), sprites.begin());
 	}
 	void StressTest::DestroyTest1()
 	{

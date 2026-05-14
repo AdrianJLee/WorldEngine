@@ -11,7 +11,7 @@ namespace World
 		{
 			m_Created.resize(Weight * Height);
 			m_Created2.resize(Weight * Height);
-			CreateTest2();
+			CreateTest1();
 
 
 			StackTest1();
@@ -23,7 +23,7 @@ namespace World
 		}
 		virtual void OnDestroy() override
 		{
-			DestroyTest2();
+			DestroyTest1();
 		}
 	private:
 		void CreateTest1();
@@ -41,7 +41,7 @@ namespace World
 		void FrameTest2();
 	private:
 		int Weight = 100;
-		int Height = 100;
+		int Height = 1000;
 		std::vector<Entity> m_Created;
 		std::vector<Entity*> m_Created2;
 		ScopedStack m_Stack { 1024, "StressTest Stack" };

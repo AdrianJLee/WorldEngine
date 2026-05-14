@@ -92,25 +92,20 @@ namespace World
 	void SceneRenderer::RenderGeometry(Ref<CommandBuffer> cmd, const Camera& camera, const glm::mat4& cameraTransform)
 	{
 
-
 		{
-			auto view = m_ActiveScene->m_Registry.view<SpriteComponent>();
-			for (auto entity : view)
+			// 同时请求 Transform 和 Sprite，EnTT 会在底层快速交叉比对拥有这两个组件的实体
+			auto view = m_ActiveScene->m_Registry.view<TransformComponent, SpriteComponent>();
+			for (auto [entity, transform, sprite] : view.each())
 			{
-				auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
-				auto& sprite = view.get<SpriteComponent>(entity);
 				Renderer2D::DrawQuadCore(transform, sprite.Texture, sprite.Color, nullptr, sprite.TilingFactor, (uint32_t)entity);
-
 			}
 		}
 
-
 		{
-			auto view = m_ActiveScene->m_Registry.view<CircleRendererComponent>();
-			for (auto entity : view)
+			// 对 CircleRendererComponent 做同样的优化
+			auto view = m_ActiveScene->m_Registry.view<TransformComponent, CircleRendererComponent>();
+			for (auto [entity, transform, circle] : view.each())
 			{
-				auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
-				auto& circle = view.get<CircleRendererComponent>(entity);
 				Renderer2D::DrawCircleCore(transform.Transform, circle.Color, circle.Thickness, circle.Fade, (uint32_t)entity);
 			}
 		}

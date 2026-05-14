@@ -7,6 +7,7 @@
 #include "World/Renderer/RenderCommand.h"
 #include "World/Renderer/Texture.h"
 #include "World/Renderer/PipelineStateObject.h"
+#include "World/Core/Thread/JobSystem.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -532,7 +533,7 @@ namespace World
 
 	void Renderer2D::NextBatch()
 	{
-		WLD_CORE_ERROR("NextBatch don't work.Please fix it!");
+		//WLD_CORE_ERROR("NextBatch don't work.Please fix it!");
 		Flush();
 		StartBatch();
 	}

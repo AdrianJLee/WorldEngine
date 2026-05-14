@@ -18,11 +18,29 @@ namespace World
 		{
 			ImGui::Begin("Scene Hierarchy");
 
-			for (const auto entity : m_Context->m_Registry.storage<entt::entity>())
+			// 将所有的 entity 提取到一个连续容器中供 Clipper 索引读取
+			// 因为 Storage 的迭代器不持支持 Clipper 需要的通过索引直接访问
+			std::vector<entt::entity> entities;
+			auto& storage = m_Context->m_Registry.storage<entt::entity>();
+
+			entities.reserve(storage.size());
+			for (const auto entity : storage)
 			{
-				Entity ent { m_Context.get(), entity };
-				DrawEntityNode(ent);
+				entities.push_back(entity);
 			}
+
+			// 使用 ImGuiListClipper 仅渲染可视区域内的节点
+			ImGuiListClipper clipper;
+			clipper.Begin((int)entities.size());
+			while (clipper.Step())
+			{
+				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++)
+				{
+					Entity ent { m_Context.get(), entities[i] };
+					DrawEntityNode(ent);
+				}
+			}
+			clipper.End();
 
 			// 点击空白处取消选中
 			if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
