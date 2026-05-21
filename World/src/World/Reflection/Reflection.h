@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include <any>
-#include "glm/glm.hpp"
+#include <glm/glm.hpp>
 
 namespace World
 {
@@ -56,6 +56,37 @@ namespace World
 
 	};
 
+	template<typename T>
+	inline static DataType GetDataType()
+	{
+		if constexpr (std::is_same_v<T, bool>) return DataType::Bool;
+		else if constexpr (std::is_same_v<T, char>) return DataType::Char;
+		else if constexpr (std::is_same_v<T, int8_t>) return DataType::Int8;
+		else if constexpr (std::is_same_v<T, uint8_t>) return DataType::UInt8;
+		else if constexpr (std::is_same_v<T, int16_t>) return DataType::Int16;
+		else if constexpr (std::is_same_v<T, uint16_t>) return DataType::UInt16;
+		else if constexpr (std::is_same_v<T, int32_t>) return DataType::Int32;
+		else if constexpr (std::is_same_v<T, uint32_t>) return DataType::UInt32;
+		else if constexpr (std::is_same_v<T, int64_t>) return DataType::Int64;
+		else if constexpr (std::is_same_v<T, uint64_t>) return DataType::UInt64;
+		else if constexpr (std::is_same_v<T, float>) return DataType::Float;
+		else if constexpr (std::is_same_v<T, double>) return DataType::Double;
+		else if constexpr (std::is_same_v<T, glm::vec2>) return DataType::Vec2;
+		else if constexpr (std::is_same_v<T, glm::vec3>) return DataType::Vec3;
+		else if constexpr (std::is_same_v<T, glm::vec4>) return DataType::Vec4;
+		else if constexpr (std::is_same_v<T, glm::ivec2>) return DataType::IVec2;
+		else if constexpr (std::is_same_v<T, glm::ivec3>) return DataType::IVec3;
+		else if constexpr (std::is_same_v<T, glm::ivec4>) return DataType::IVec4;
+		else if constexpr (std::is_same_v<T, glm::uvec2>) return DataType::UVec2;
+		else if constexpr (std::is_same_v<T, glm::uvec3>) return DataType::UVec3;
+		else if constexpr (std::is_same_v<T, glm::uvec4>) return DataType::UVec4;
+		else if constexpr (std::is_same_v<T, glm::mat3>) return DataType::Mat3;
+		else if constexpr (std::is_same_v<T, glm::mat4>) return DataType::Mat4;
+		else if constexpr (std::is_same_v<T, std::string>) return DataType::String;
+		else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) return DataType::Binary;
+		else if constexpr (std::is_enum_v<T>) return DataType::Enum;
+		else return DataType::Object;
+	}
 
 	// 属性描述结构体
 	struct PropertyDesc
@@ -72,7 +103,6 @@ namespace World
 		std::string Name;       // 结构体/类名称
 		size_t Size;            // 总内存大小
 		std::vector<PropertyDesc> Properties; // 属性列表
-
 
 		std::function<void(std::any, const PropertyDesc&, const std::any&)> SetValueErased; // 参数1：组件实例（std::any），参数2：属性描述，参数3：要设置的值（std::any）
 
@@ -111,12 +141,22 @@ namespace World
 		public:
 			Binder(TypeDesc& desc) : m_Desc(desc) {}
 
+			constexpr uint32_t constexpr_hash(const char* str)
+			{
+				uint32_t hash = 2166136261u;
+				while (*str)
+				{
+					hash = (hash ^ static_cast<uint8_t>(*str++)) * 16777619u;
+				}
+				return hash;
+			}
+
 			template<typename VariableType>
-			Binder& Property(const std::string& name, VariableType TClass::* memberPtr, DataType type, uint32_t fieldID)
+			Binder& Property(const std::string& name, VariableType TClass::* memberPtr, DataType type)
 			{
 				size_t offset = reinterpret_cast<size_t>(&(static_cast<TClass*>(nullptr)->*memberPtr));
 
-				PropertyDesc prop { name, type, offset, fieldID };
+				PropertyDesc prop { name, type, offset,constexpr_hash(name.c_str()) };
 				m_Desc.Properties.push_back(prop);
 				return *this;
 			}
@@ -250,4 +290,18 @@ namespace World
 
 	};
 
+	#define REFLECT_BODY(TClass) \
+	using TREFLECTClass = TClass; \
+	inline static struct AutoRegister_##TClass{ \
+		AutoRegister_##TClass() { \
+			const std::string className = typeid(TClass).name(); \
+			s_Binder = &TypeRegistry::Get().RegisterType<TClass>(className);} \
+		TypeRegistry::Binder<TClass>* s_Binder; \
+	} s_AutoRegister;
+
+	#define PROPERTY(varName) \
+	inline static struct AutoProp_##varName{ \
+		AutoProp_##varName(){ \
+		TypeRegistry::Get().RegisterType<TREFLECTClass>(typeid(TREFLECTClass).name()).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>());} \
+	}s_AutoProp_##varName;
 }

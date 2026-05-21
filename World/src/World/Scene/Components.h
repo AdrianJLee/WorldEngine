@@ -4,6 +4,7 @@
 #include "World/Scene/SceneCamera.h"
 #include "World/Scene/ScriptableEntity.h"
 #include "World/Renderer/Texture.h"
+#include "World/Reflection/Reflection.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp> 
@@ -12,7 +13,11 @@ namespace World
 {
 	struct TagComponent
 	{
+		REFLECT_BODY(TagComponent);
+
+		PROPERTY(Tag);
 		std::string Tag;
+
 		TagComponent() = default;
 		TagComponent(const std::string& tag)
 			: Tag(tag)
@@ -203,7 +208,10 @@ namespace World
 
 	struct RigidBody2DComponent
 	{
-		enum class BodyType { Static = 0, Dynamic, Kinematic };
+		enum class BodyType
+		{
+			Static = 0, Dynamic, Kinematic
+		};
 		BodyType Type = BodyType::Static;
 		b2BodyId RuntimeBodyId = b2_nullBodyId;
 		bool FixedRotation = false;
