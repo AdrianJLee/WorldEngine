@@ -109,6 +109,13 @@ namespace World
 		std::function<std::any(std::any, const PropertyDesc&)> GetValueErased; // 参数1：组件实例（std::any），参数2：属性描述，返回值：属性值（std::any）
 	};
 
+	enum class TypeCategory
+	{
+		None,
+		Component,
+		Asset,
+		Script,
+	};
 
 	// 全局类型注册表：负责存储所有注册的类型信息
 	class TypeRegistry
@@ -129,7 +136,7 @@ namespace World
 	private:
 		// 核心数据结构：哈希表存储类型名称到类型描述的映射，支持快速查询
 		std::unordered_map<std::string, TypeDesc> m_Registry;
-
+		std::unordered_map<TypeCategory, std::vector<std::string>> m_CategoryMap; // 可选：按类别存储类型名称列表，方便分类查询
 
 		// Binder 类，提供流式接口注册属性，并计算内存偏移量
 		#pragma region Binder
@@ -169,7 +176,7 @@ namespace World
 
 	public:
 		template<typename TClass>
-		Binder<TClass> RegisterType(const std::string& className)
+		Binder<TClass> RegisterType(const std::string& className, TypeCategory category)
 		{
 			#define ASSIGN_ANY(EnumType, CppType) \
 			case DataType::EnumType: \
@@ -275,6 +282,7 @@ namespace World
 
 			// 存入全局哈希表
 			m_Registry[className] = desc;
+			m_CategoryMap[category].push_back(className);
 			return Binder<TClass>(m_Registry[className]);
 		}
 
@@ -286,22 +294,37 @@ namespace World
 			return nullptr;
 		}
 
+		TypeDesc* GetTypeDesc(const std::string& className)
+		{
+			auto it = m_Registry.find(className);
+			if (it != m_Registry.end()) return &it->second;
+			return nullptr;
+		}
+
+
+		const std::vector<std::string>& GetTypesByCategory(TypeCategory category) const
+		{
+			static const std::vector<std::string> emptyList;
+			auto it = m_CategoryMap.find(category);
+			if (it != m_CategoryMap.end()) return it->second;
+			return emptyList;
+		}
+
 		const std::unordered_map<std::string, TypeDesc>& GetTemplateMap() const { return m_Registry; }
 
 	};
 
-	#define REFLECT_BODY(TClass) \
+	#define REFLECT_BODY(TClass,Category) \
 	using TREFLECTClass = TClass; \
 	inline static struct AutoRegister_##TClass{ \
 		AutoRegister_##TClass() { \
 			const std::string className = typeid(TClass).name(); \
-			s_Binder = &TypeRegistry::Get().RegisterType<TClass>(className);} \
-		TypeRegistry::Binder<TClass>* s_Binder; \
+			TypeRegistry::Get().RegisterType<TClass>(className, Category);} \
 	} s_AutoRegister;
 
 	#define PROPERTY(varName) \
 	inline static struct AutoProp_##varName{ \
 		AutoProp_##varName(){ \
-		TypeRegistry::Get().RegisterType<TREFLECTClass>(typeid(TREFLECTClass).name()).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>());} \
+		TypeRegistry::Binder<TREFLECTClass>(*TypeRegistry::Get().GetTypeDesc(typeid(TREFLECTClass).name())).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>());} \
 	}s_AutoProp_##varName;
 }

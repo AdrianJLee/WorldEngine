@@ -145,5 +145,7 @@ namespace World
 	struct has_ui_logic : std::false_type {};
 	template <typename T>
 	struct has_ui_logic<T, std::void_t<decltype(T::ComponentPropertiesUI)>> : std::true_type {};
-	#define COMPONENT_UI() static void ComponentPropertiesUI(Entity);
+
+	#define COMPONENT_UI() \
+	static void ComponentPropertiesUI(Entity);
 }

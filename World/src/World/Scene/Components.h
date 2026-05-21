@@ -13,7 +13,8 @@ namespace World
 {
 	struct TagComponent
 	{
-		REFLECT_BODY(TagComponent);
+		REFLECT_BODY(TagComponent, TypeCategory::Component);
+
 
 		PROPERTY(Tag);
 		std::string Tag;
@@ -29,6 +30,8 @@ namespace World
 
 	struct UUIDComponent
 	{
+		REFLECT_BODY(UUIDComponent, TypeCategory::Component);
+
 		World::UUID ID;
 		UUIDComponent() = default;
 		UUIDComponent(const World::UUID& id)
