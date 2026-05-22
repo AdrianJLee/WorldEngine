@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <any>
 #include <glm/glm.hpp>
-
+#include "World/Core/ComponentRegistry.h"
 namespace World
 {
 	// 数据类型枚举
@@ -100,13 +100,17 @@ namespace World
 	// 类型描述结构体
 	struct TypeDesc
 	{
-		std::string Name;       // 结构体/类名称
-		size_t Size;            // 总内存大小
+		std::string Name = "";       // 结构体/类名称
+		size_t Size = 0;            // 总内存大小
 		std::vector<PropertyDesc> Properties; // 属性列表
 
-		std::function<void(std::any, const PropertyDesc&, const std::any&)> SetValueErased; // 参数1：组件实例（std::any），参数2：属性描述，参数3：要设置的值（std::any）
+		// 参数1：组件实例（std::any），参数2：属性描述，参数3：要设置的值（std::any）
+		std::function<void(std::any, const PropertyDesc&, const std::any&)> SetValueErased;
 
-		std::function<std::any(std::any, const PropertyDesc&)> GetValueErased; // 参数1：组件实例（std::any），参数2：属性描述，返回值：属性值（std::any）
+		// 参数1：组件实例（std::any），参数2：属性描述，返回值：属性值（std::any）
+		std::function<std::any(std::any, const PropertyDesc&)> GetValueErased;
+
+		std::any UserData = {};
 	};
 
 	enum class TypeCategory
@@ -136,7 +140,7 @@ namespace World
 	private:
 		// 核心数据结构：哈希表存储类型名称到类型描述的映射，支持快速查询
 		std::unordered_map<std::string, TypeDesc> m_Registry;
-		std::unordered_map<TypeCategory, std::vector<std::string>> m_CategoryMap; // 可选：按类别存储类型名称列表，方便分类查询
+		std::unordered_map<TypeCategory, std::vector<std::string>> m_CategoryMap;
 
 		// Binder 类，提供流式接口注册属性，并计算内存偏移量
 		#pragma region Binder
@@ -312,6 +316,19 @@ namespace World
 
 		const std::unordered_map<std::string, TypeDesc>& GetTemplateMap() const { return m_Registry; }
 
+		template <typename T>
+		static void RegisterTypeData(TypeCategory category)
+		{
+			std::any& userData = TypeRegistry::Get().GetTypeDesc(typeid(T).name())->UserData;
+
+			switch (category)
+			{
+				case TypeCategory::Component:
+					TypeDescDataComponent::Register<T>(userData);
+					break;
+			}
+		}
+
 	};
 
 	#define REFLECT_BODY(TClass,Category) \
@@ -319,7 +336,8 @@ namespace World
 	inline static struct AutoRegister_##TClass{ \
 		AutoRegister_##TClass() { \
 			const std::string className = typeid(TClass).name(); \
-			TypeRegistry::Get().RegisterType<TClass>(className, Category);} \
+			TypeRegistry::Get().RegisterType<TClass>(className, Category); \
+			TypeRegistry::RegisterTypeData<TClass>(Category);} \
 	} s_AutoRegister;
 
 	#define PROPERTY(varName) \

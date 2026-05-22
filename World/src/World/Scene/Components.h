@@ -24,8 +24,7 @@ namespace World
 			: Tag(tag)
 		{}
 
-		REGISTER_COMPONENT(TagComponent)
-			COMPONENT_UI()
+		COMPONENT_UI()
 	};
 
 	struct UUIDComponent
@@ -38,12 +37,13 @@ namespace World
 			: ID(id)
 		{}
 
-		REGISTER_COMPONENT(UUIDComponent)
-			COMPONENT_UI()
+		COMPONENT_UI()
 	};
 
 	struct TransformComponent
 	{
+		REFLECT_BODY(TransformComponent, TypeCategory::Component);
+
 		glm::vec3 Location { 0.0f, 0.0f, 0.0f };
 		// rad
 		glm::vec3 Rotation { 0.0f, 0.0f, 0.0f };
@@ -133,12 +133,12 @@ namespace World
 			return Transform;
 		}
 
-		REGISTER_COMPONENT(TransformComponent)
-			COMPONENT_UI()
+		COMPONENT_UI()
 	};
 
 	struct SpriteComponent
 	{
+		REFLECT_BODY(SpriteComponent, TypeCategory::Component);
 
 		SpriteComponent()
 		{
@@ -154,21 +154,23 @@ namespace World
 		Ref<Texture2D> Texture;
 		float TilingFactor = 1.0f;
 
-		REGISTER_COMPONENT(SpriteComponent)
-			COMPONENT_UI()
+		COMPONENT_UI()
 	};
 
 	struct CircleRendererComponent
 	{
+		REFLECT_BODY(CircleRendererComponent, TypeCategory::Component);
+
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
 		float Thickness = 1.0f;
 		float Fade = 0.005f;
-		REGISTER_COMPONENT(CircleRendererComponent)
-			COMPONENT_UI()
+
+		COMPONENT_UI()
 	};
 
 	struct CameraComponent
 	{
+		REFLECT_BODY(CameraComponent, TypeCategory::Component);
 
 		CameraComponent() = default;
 		CameraComponent(const SceneCamera& sceneCamera, bool primary = false)
@@ -180,12 +182,14 @@ namespace World
 		SceneCamera Camera;
 		bool Primary = true;
 		bool FixedAspectRatio = false;
-		REGISTER_COMPONENT(CameraComponent)
-			COMPONENT_UI()
+
+		COMPONENT_UI()
 	};
 
 	struct NativeScriptComponent
 	{
+		REFLECT_BODY(NativeScriptComponent, TypeCategory::Component);
+
 		ScriptableEntity* Instance = nullptr;
 
 		// 原始函数指针
@@ -205,12 +209,13 @@ namespace World
 				};
 		}
 
-		REGISTER_COMPONENT(NativeScriptComponent)
-			COMPONENT_UI()
+		COMPONENT_UI()
 	};
 
 	struct RigidBody2DComponent
 	{
+		REFLECT_BODY(RigidBody2DComponent, TypeCategory::Component);
+
 		enum class BodyType
 		{
 			Static = 0, Dynamic, Kinematic
@@ -219,12 +224,13 @@ namespace World
 		b2BodyId RuntimeBodyId = b2_nullBodyId;
 		bool FixedRotation = false;
 
-		REGISTER_COMPONENT(RigidBody2DComponent)
-			COMPONENT_UI()
+		COMPONENT_UI()
 	};
 
 	struct BoxCollider2DComponent
 	{
+		REFLECT_BODY(BoxCollider2DComponent, TypeCategory::Component);
+
 		glm::vec2 Offset { 0.0f, 0.0f };
 		glm::vec2 Size { 0.5f, 0.5f };
 		float Density = 1.0f;
@@ -232,19 +238,20 @@ namespace World
 		float Restitution = 0.2f;
 		bool ShowCollider = true;
 
-		REGISTER_COMPONENT(BoxCollider2DComponent)
-			COMPONENT_UI()
+		COMPONENT_UI()
 	};
 
 	struct CircleCollider2DComponent
 	{
+		REFLECT_BODY(CircleCollider2DComponent, TypeCategory::Component);
+
 		glm::vec2 Offset { 0.0f, 0.0f };
 		float Radius = 0.5f;
 		float Density = 1.0f;
 		float Friction = 0.5f;
 		float Restitution = 0.2f;
 		bool ShowCollider = true;
-		REGISTER_COMPONENT(CircleCollider2DComponent)
-			COMPONENT_UI()
+
+		COMPONENT_UI()
 	};
 }

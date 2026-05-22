@@ -75,13 +75,17 @@ namespace World
 
 					if (ImGui::BeginMenu("Add Component"))
 					{
-						for (const auto& componentInfo : World::ComponentRegistry::GetList())
-						{
-							bool hasComponent = m_SelectedEntity.HasComponent(componentInfo.Id);
 
-							if (ImGui::MenuItem(componentInfo.Name.c_str(), nullptr, false, !hasComponent))
+						for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
+						{
+							if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
 							{
-								componentInfo.AddFunc(m_SelectedEntity);
+								bool hasComponent = m_SelectedEntity.HasComponent(componentInfo->Id);
+
+								if (ImGui::MenuItem(className.c_str(), nullptr, false, !hasComponent))
+								{
+									componentInfo->AddFunc(m_SelectedEntity);
+								}
 							}
 						}
 						ImGui::EndMenu();
@@ -144,16 +148,18 @@ namespace World
 	}
 	void SceneHierarchyPanel::DrawComponents(Entity entity)
 	{
-		for (const auto& componentInfo : World::ComponentRegistry::GetList())
+		for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
 		{
-			if (entity.HasComponent(componentInfo.Id))
+			if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
 			{
-				if (componentInfo.ComponentPropertiesUI)
+				if (entity.HasComponent(componentInfo->Id))
 				{
-					componentInfo.ComponentPropertiesUI(entity);
+					if (componentInfo->ComponentPropertiesUI)
+					{
+						componentInfo->ComponentPropertiesUI(entity);
+					}
 				}
 			}
 		}
-
 	}
 }

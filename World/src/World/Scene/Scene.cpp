@@ -143,15 +143,18 @@ namespace World
 
 		Entity newEntity = Entity::CreateEntity(this, name);
 
-		for (const auto& componentInfo : World::ComponentRegistry::GetList())
+		for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
 		{
-			bool hasComponent = entity.HasComponent(componentInfo.Id);
-
-			if (hasComponent)
+			if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
 			{
-				if (componentInfo.CopyFunc)
+				bool hasComponent = entity.HasComponent(componentInfo->Id);
+
+				if (hasComponent)
 				{
-					componentInfo.CopyFunc(newEntity, entity);
+					if (componentInfo->CopyFunc)
+					{
+						componentInfo->CopyFunc(newEntity, entity);
+					}
 				}
 			}
 		}
@@ -176,14 +179,16 @@ namespace World
 			entityMap[entityId] = newEntity;
 		}
 
-		for (const auto& componentInfo : World::ComponentRegistry::GetList())
+		for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
 		{
-			if (componentInfo.CopyComponentFunc)
+			if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
 			{
-				componentInfo.CopyComponentFunc(destRegistry, srcRegistry, entityMap);
+				if (componentInfo->CopyComponentFunc)
+				{
+					componentInfo->CopyComponentFunc(destRegistry, srcRegistry, entityMap);
+				}
 			}
 		}
-
 	}
 
 
