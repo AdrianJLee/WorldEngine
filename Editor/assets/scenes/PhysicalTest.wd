@@ -10,7 +10,7 @@ Entities:
       Primary: true
       FixedAspectRatio: false
       ProjectionType: 1
-      AspectRatio: 1.8550725
+      AspectRatio: 1.6584022
       PerspectiveFOV: 45
       PerspectiveNearClip: 0.100000001
       PerspectiveFarClip: 100
@@ -18,7 +18,7 @@ Entities:
       OrthographicNearClip: -1
       OrthographicFarClip: 1
     NativeScriptComponent:
-      ScriptName: StressTest
+      ScriptName: class World::StressTest
   - EntityID: 12993328383427947612
     TagComponent: Square
     TransformComponent:

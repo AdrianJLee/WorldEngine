@@ -73,7 +73,7 @@ namespace World
 	{
 		m_Registry.view<NativeScriptComponent>().each([=](auto entity, NativeScriptComponent& scriptComponent)
 			{
-				if (!scriptComponent.Instance)
+				if (!scriptComponent.Instance && scriptComponent.InstantiateScript)
 				{
 					scriptComponent.Instance = scriptComponent.InstantiateScript();
 					scriptComponent.Instance->m_Entity = Entity { this,entity };

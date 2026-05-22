@@ -196,6 +196,7 @@ namespace World
 		ScriptableEntity* (*InstantiateScript)() = nullptr;
 		void (*DestroyScript)(NativeScriptComponent*) = nullptr;
 		std::string ScriptName;
+
 		template<typename T>
 		void Bind()
 		{
@@ -205,7 +206,8 @@ namespace World
 				};
 			DestroyScript = [](NativeScriptComponent* component)
 				{
-					delete static_cast<T*>(component->Instance); component->Instance = nullptr;
+					delete static_cast<T*>(component->Instance);
+					component->Instance = nullptr;
 				};
 		}
 

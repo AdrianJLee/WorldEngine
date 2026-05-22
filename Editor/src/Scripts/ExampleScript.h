@@ -6,7 +6,7 @@ namespace World
 
 	class ExampleScript : public ScriptableEntity
 	{
-		REGISTER_SCRIPT(ExampleScript);
+		REFLECT_BODY(ExampleScript, TypeCategory::Script);
 	public:
 
 		virtual void OnCreate() override

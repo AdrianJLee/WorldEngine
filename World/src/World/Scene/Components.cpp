@@ -200,9 +200,6 @@ namespace World
 	{
 		ImGuiDrawLibrary::DrawComponent<NativeScriptComponent>("NativeScriptComponent", entity, [](NativeScriptComponent& nativeScript)
 			{
-				// 从注册表动态获取所有已注册的脚本
-				auto& scripts = ScriptRegistry::GetScriptList();
-
 				// 指针不为空则说明绑定了脚本
 				bool isBound = (nativeScript.InstantiateScript != nullptr);
 
@@ -220,27 +217,30 @@ namespace World
 						nativeScript.ScriptName = ""; // 清空名字
 					}
 
-					// 遍历注册表里的全部脚本
-					for (auto& scriptInfo : scripts)
+					// 遍历注册表中所有脚本类型，展示在下拉列表中
+					for (const auto& scriptName : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Script))
 					{
-						// 这个项是否已被选中？对比名字即可
-						bool isSelected = (scriptInfo.Name == nativeScript.ScriptName);
-						if (ImGui::Selectable(scriptInfo.Name.c_str(), isSelected))
+						if (TypeDescDataScript* scriptInfo = std::any_cast<TypeDescDataScript>(&TypeRegistry::Get().GetTypeDesc(scriptName)->UserData))
 						{
-							// 通过工厂方法执行具体 T 的绑定 ( Bind<T>() )
-							if (scriptInfo.BindFunc)
+							// 这个项是否已被选中？对比名字即可
+							bool isSelected = (scriptName == nativeScript.ScriptName);
+							if (ImGui::Selectable(scriptName.c_str(), isSelected))
 							{
-								scriptInfo.BindFunc(nativeScript);
+								// 通过工厂方法执行具体 T 的绑定 ( Bind<T>() )
+								if (scriptInfo->BindFunc)
+								{
+									scriptInfo->BindFunc(nativeScript);
 
-								nativeScript.ScriptName = scriptInfo.Name; // 更新当前绑定的脚本名字
+									nativeScript.ScriptName = scriptName; // 更新当前绑定的脚本名字
+								}
 							}
+
+							// 焦点选中定位
+							if (isSelected)
+								ImGui::SetItemDefaultFocus();
 						}
-
-						// 焦点选中定位
-						if (isSelected)
-							ImGui::SetItemDefaultFocus();
-
 					}
+
 					ImGui::EndCombo();
 				}
 

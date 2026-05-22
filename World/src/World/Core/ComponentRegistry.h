@@ -68,37 +68,20 @@ namespace World
 		static UUID GetEntityUUID(entt::registry& registry, entt::entity entity);
 	};
 
-	struct NativeScriptComponent;
-	struct ScriptInfo
-	{
-		entt::id_type Id;
-		entt::meta_type Type;
-		std::string Name;
-		// 绑定回调：传入目标实体上的 nativeScript，并执行 Bind<T>
-		void (*BindFunc)(NativeScriptComponent&) = nullptr;
-	};
 
-	class ScriptRegistry
+	class TypeDescDataScript
 	{
 	public:
-		using ScriptRegistryMap = std::vector<ScriptInfo>;
-
-		static ScriptRegistryMap& GetScriptList()
-		{
-			static ScriptRegistryMap s_ScriptList;
-			return s_ScriptList;
-		}
+		entt::id_type Id;
+		entt::meta_type Type;
+		void (*BindFunc)(struct NativeScriptComponent&) = nullptr;
 
 		template<typename T>
-		static void Register(const std::string& name)
+		static void Register(std::any& userData)
 		{
-			static_assert(std::is_base_of<ScriptableEntity, T>::value, "Registered script must inherit from ScriptableEntity!");
-
 			entt::id_type id = entt::type_id<T>().hash();
 			entt::meta_type type = entt::resolve(id);
-
-			GetScriptList().push_back({ id, type, name,
-				// 工厂函数：当通过名称查找到当前 ScriptInfo，以此回调将 T 绑定给 NativeScriptComponent
+			userData = std::make_any<TypeDescDataScript>(TypeDescDataScript { id, type,
 				[](NativeScriptComponent& nativeScript)
 				{
 					nativeScript.Bind<T>();
@@ -106,19 +89,6 @@ namespace World
 				});
 		}
 	};
-
-	#define REGISTER_COMPONENT(Type) \
-    inline static bool Type##_Registered = []() { \
-        ComponentRegistry::Register<Type>(#Type); \
-        return true; \
-    }();
-
-	#define REGISTER_SCRIPT(Type) \
-	inline static bool Type##_Registered = []() { \
-		ScriptRegistry::Register<Type>(#Type); \
-		return true; \
-	}();
-
 
 	// 探测器：检查 T 是否有名为 ComponentPropertiesUI 的成员
 	template <typename T, typename = void>

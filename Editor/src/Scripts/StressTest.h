@@ -5,7 +5,7 @@ namespace World
 {
 	class StressTest : public ScriptableEntity
 	{
-		REGISTER_SCRIPT(StressTest);
+		REFLECT_BODY(StressTest, TypeCategory::Script);
 	public:
 		virtual void OnCreate() override
 		{

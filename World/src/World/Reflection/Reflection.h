@@ -316,16 +316,18 @@ namespace World
 
 		const std::unordered_map<std::string, TypeDesc>& GetTemplateMap() const { return m_Registry; }
 
-		template <typename T>
-		static void RegisterTypeData(TypeCategory category)
+		template <TypeCategory Category, typename T>
+		static void RegisterTypeData()
 		{
 			std::any& userData = TypeRegistry::Get().GetTypeDesc(typeid(T).name())->UserData;
 
-			switch (category)
+			if constexpr (Category == TypeCategory::Component)
 			{
-				case TypeCategory::Component:
-					TypeDescDataComponent::Register<T>(userData);
-					break;
+				TypeDescDataComponent::Register<T>(userData);
+			}
+			else if constexpr (Category == TypeCategory::Script)
+			{
+				TypeDescDataScript::Register<T>(userData);
 			}
 		}
 
@@ -337,7 +339,7 @@ namespace World
 		AutoRegister_##TClass() { \
 			const std::string className = typeid(TClass).name(); \
 			TypeRegistry::Get().RegisterType<TClass>(className, Category); \
-			TypeRegistry::RegisterTypeData<TClass>(Category);} \
+			TypeRegistry::RegisterTypeData<Category, TClass>();} \
 	} s_AutoRegister;
 
 	#define PROPERTY(varName) \

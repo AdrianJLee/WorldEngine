@@ -468,15 +468,18 @@ namespace World
 							AsValue<std::string>(nativeScriptComponent, "ScriptName", script.ScriptName);
 							if (!script.ScriptName.empty())
 							{
-								for (auto& scriptInfo : ScriptRegistry::GetScriptList())
+								for (const auto& scriptName : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Script))
 								{
-									if (script.ScriptName == scriptInfo.Name)
+									if (TypeDescDataScript* scriptInfo = std::any_cast<TypeDescDataScript>(&TypeRegistry::Get().GetTypeDesc(scriptName)->UserData))
 									{
-										if (scriptInfo.BindFunc)
+										if (script.ScriptName == scriptName)
 										{
-											scriptInfo.BindFunc(script);
+											if (scriptInfo->BindFunc)
+											{
+												scriptInfo->BindFunc(script);
+											}
+											break;
 										}
-										break;
 									}
 								}
 							}
