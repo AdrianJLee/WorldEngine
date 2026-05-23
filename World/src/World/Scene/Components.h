@@ -191,7 +191,6 @@ namespace World
 		REFLECT_BODY(NativeScriptComponent, TypeCategory::Component);
 
 		ScriptableEntity* Instance = nullptr;
-
 		// 原始函数指针
 		ScriptableEntity* (*InstantiateScript)() = nullptr;
 		void (*DestroyScript)(NativeScriptComponent*) = nullptr;
@@ -211,7 +210,11 @@ namespace World
 				};
 		}
 
-		COMPONENT_UI()
+		COMPONENT_UI();
+
+		std::unordered_map<std::string, std::any> FieldValues;
+	private:
+		bool isFirstDraw = true;
 	};
 
 	struct RigidBody2DComponent

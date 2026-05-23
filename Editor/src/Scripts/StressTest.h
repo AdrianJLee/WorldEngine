@@ -40,7 +40,9 @@ namespace World
 		void FrameTest1();
 		void FrameTest2();
 	private:
-		int Weight = 100;
+		PROPERTY(Weight);
+		int32_t Weight = 100;
+		PROPERTY(Height);
 		int Height = 1000;
 		std::vector<Entity> m_Created;
 		std::vector<Entity*> m_Created2;

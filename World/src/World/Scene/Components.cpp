@@ -198,7 +198,7 @@ namespace World
 
 	void NativeScriptComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<NativeScriptComponent>("NativeScriptComponent", entity, [](NativeScriptComponent& nativeScript)
+		ImGuiDrawLibrary::DrawComponent<NativeScriptComponent>("NativeScriptComponent", entity, [](NativeScriptComponent& nativeScript) mutable
 			{
 				// 指针不为空则说明绑定了脚本
 				bool isBound = (nativeScript.InstantiateScript != nullptr);
@@ -214,7 +214,9 @@ namespace World
 					{
 						nativeScript.InstantiateScript = nullptr;
 						nativeScript.DestroyScript = nullptr;
-						nativeScript.ScriptName = ""; // 清空名字
+						nativeScript.ScriptName = "";
+						nativeScript.FieldValues.clear();
+						nativeScript.isFirstDraw = true;
 					}
 
 					// 遍历注册表中所有脚本类型，展示在下拉列表中
@@ -232,6 +234,8 @@ namespace World
 									scriptInfo->BindFunc(nativeScript);
 
 									nativeScript.ScriptName = scriptName; // 更新当前绑定的脚本名字
+									nativeScript.FieldValues.clear();
+									nativeScript.isFirstDraw = true;
 								}
 							}
 
@@ -255,8 +259,183 @@ namespace World
 						nativeScript.InstantiateScript = nullptr;
 						nativeScript.DestroyScript = nullptr;
 						nativeScript.ScriptName = "";
+						nativeScript.FieldValues.clear();
+						nativeScript.isFirstDraw = true;
+					}
+
+					ImGui::Spacing();
+
+					// ============================================
+					// 自动生成脚本实例或缓存属性的 UI 界面
+					// ============================================
+					if (!nativeScript.ScriptName.empty())
+					{
+						const TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(nativeScript.ScriptName);
+						if (typeDesc)
+						{
+							ImGui::Separator();
+							ImGui::Text("Script Properties");
+							ImGui::Spacing();
+
+							ScriptableEntity* tempInstance = nullptr;
+
+							if (nativeScript.Instance)
+							{
+								// 已经存在实例了，直接用它来反射获取当前值
+								tempInstance = nativeScript.Instance;
+							}
+							else
+							{
+								if (nativeScript.isFirstDraw)
+								{
+									tempInstance = nativeScript.InstantiateScript();
+
+								}
+							}
+
+							for (const auto& prop : typeDesc->Properties)
+							{
+								ImGui::PushID(prop.Name.c_str());
+
+								// 1. 获取当前数据
+								std::any currentVal;
+								if (tempInstance)
+								{
+									currentVal = typeDesc->GetValueErased(dynamic_cast<void*>(tempInstance), prop);
+									nativeScript.FieldValues[prop.Name] = currentVal;
+								}
+								else
+								{
+									auto it = nativeScript.FieldValues.find(prop.Name);
+									if (it != nativeScript.FieldValues.end())
+									{
+										currentVal = it->second;
+									}
+									else
+									{
+										switch (prop.Type)
+										{
+											case DataType::Int32: currentVal = int32_t(0); break;
+											case DataType::Float: currentVal = float(0.0f); break;
+											case DataType::Bool:  currentVal = bool(false); break;
+											case DataType::Vec2:  currentVal = glm::vec2(0.0f); break;
+											case DataType::Vec3:  currentVal = glm::vec3(0.0f); break;
+											case DataType::String:currentVal = std::string(""); break;
+											default: break;
+										}
+									}
+								}
+
+								bool valueChanged = false;
+
+								// 2. 绘制 UI 控制器
+								if (prop.Type == DataType::Vec3)
+								{
+									// Vec3 控制器自身已封装了带有名字在前的表格布局
+									if (currentVal.has_value())
+									{
+										glm::vec3 val = std::any_cast<glm::vec3>(currentVal);
+										glm::vec3 oldVal = val;
+										ImGuiDrawLibrary::DrawVec3Control(prop.Name, val, 0.0f, 100.0f);
+										if (val != oldVal) { currentVal = val; valueChanged = true; }
+									}
+								}
+								else
+								{
+									// 对其它属性构建 2 列对齐表格
+									if (ImGui::BeginTable("##PropertyTable", 2, ImGuiTableFlags_Resizable))
+									{
+										// 第一列宽固定 100 像素，维持跟 Vec3 控制器相同的对齐感
+										ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+										ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+										ImGui::TableNextRow();
+
+										ImGui::TableNextColumn();
+										ImGui::AlignTextToFramePadding();
+										ImGui::Text("%s", prop.Name.c_str()); // 名字在左边
+
+										ImGui::TableNextColumn();
+										ImGui::PushItemWidth(-1.0f); // 填满右边一列
+
+										switch (prop.Type)
+										{
+											case DataType::Int32:
+											{
+												if (currentVal.has_value())
+												{
+													int32_t val = std::any_cast<int32_t>(currentVal);
+													// 使用 "##XXX" 隐藏 ImGui 自身挂在后方的名字
+													if (ImGui::DragInt("##Val", &val)) { currentVal = val; valueChanged = true; }
+												}
+												break;
+											}
+											case DataType::Float:
+											{
+												if (currentVal.has_value())
+												{
+													float val = std::any_cast<float>(currentVal);
+													if (ImGui::DragFloat("##Val", &val, 0.1f)) { currentVal = val; valueChanged = true; }
+												}
+												break;
+											}
+											case DataType::Bool:
+											{
+												if (currentVal.has_value())
+												{
+													bool val = std::any_cast<bool>(currentVal);
+													if (ImGui::Checkbox("##Val", &val)) { currentVal = val; valueChanged = true; }
+												}
+												break;
+											}
+											case DataType::String:
+											{
+												if (currentVal.has_value())
+												{
+													std::string val = std::any_cast<std::string>(currentVal);
+													char buffer[256];
+													memset(buffer, 0, sizeof(buffer));
+													strncpy_s(buffer, val.c_str(), sizeof(buffer) - 1);
+													if (ImGui::InputText("##Val", buffer, sizeof(buffer)))
+													{
+														currentVal = std::string(buffer);
+														valueChanged = true;
+													}
+												}
+												break;
+											}
+											default:
+												ImGui::Text("[Unsupported]");
+												break;
+										}
+
+										ImGui::PopItemWidth();
+										ImGui::EndTable();
+									}
+								}
+
+								// 3. 将新的值写回调
+								if (valueChanged)
+								{
+									if (nativeScript.Instance)
+										typeDesc->SetValueErased(tempInstance, prop, currentVal);
+									else
+										nativeScript.FieldValues[prop.Name] = currentVal;
+								}
+								ImGui::PopID();
+							}
+
+
+							// 第一次绘制时，如果是通过实例获取的值，绘制完后就销毁实例，避免内存泄漏；后续绘制则直接使用缓存的值
+							if (nativeScript.isFirstDraw && tempInstance)
+							{
+								nativeScript.isFirstDraw = false;
+								delete tempInstance;
+							}
+						}
 					}
 				}
+
+
 
 			});
 	}

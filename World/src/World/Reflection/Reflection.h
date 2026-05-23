@@ -105,12 +105,13 @@ namespace World
 		std::vector<PropertyDesc> Properties; // 属性列表
 
 		// 参数1：组件实例（std::any），参数2：属性描述，参数3：要设置的值（std::any）
-		std::function<void(std::any, const PropertyDesc&, const std::any&)> SetValueErased;
+		std::function<void(void*, const PropertyDesc&, const std::any&)> SetValueErased;
 
 		// 参数1：组件实例（std::any），参数2：属性描述，返回值：属性值（std::any）
-		std::function<std::any(std::any, const PropertyDesc&)> GetValueErased;
+		std::function<std::any(void*, const PropertyDesc&)> GetValueErased;
 
 		std::any UserData = {};
+
 	};
 
 	enum class TypeCategory
@@ -193,10 +194,10 @@ namespace World
 			desc.Size = sizeof(TClass);
 
 			// 工业级：实现类型擦除的 Setter/Getter，保护内存安全
-			desc.SetValueErased = [](std::any instancePtr, const PropertyDesc& prop, const std::any& value)
+			desc.SetValueErased = [](void* instancePtr, const PropertyDesc& prop, const std::any& value)
 				{
-					// 将 std::any 转回原始指针类型
-					TClass* rawInstance = std::any_cast<TClass*>(instancePtr);
+					TClass* rawInstance = static_cast<TClass*>(instancePtr);
+
 					// 计算属性的实际内存地址
 					uint8_t* bytePtr = reinterpret_cast<uint8_t*>(rawInstance) + prop.Offset;
 
@@ -242,9 +243,10 @@ namespace World
 					#undef ASSIGN_ANY // 用完立即取消宏，防止污染全局
 				};
 
-			desc.GetValueErased = [](std::any instancePtr, const PropertyDesc& prop) -> std::any
+			desc.GetValueErased = [](void* instancePtr, const PropertyDesc& prop) -> std::any
 				{
-					TClass* rawInstance = std::any_cast<TClass*>(instancePtr);
+					TClass* rawInstance = static_cast<TClass*>(instancePtr);
+
 					uint8_t* bytePtr = reinterpret_cast<uint8_t*>(rawInstance) + prop.Offset;
 
 					#define RETURN_ANY(EnumType, CppType) \
