@@ -76,6 +76,14 @@ namespace World
 				if (!scriptComponent.Instance && scriptComponent.InstantiateScript)
 				{
 					scriptComponent.Instance = scriptComponent.InstantiateScript();
+					TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(scriptComponent.ScriptName);
+					for (const auto& prop : typeDesc->Properties)
+					{
+						if (scriptComponent.FieldValues.find(prop.Name) != scriptComponent.FieldValues.end())
+						{
+							typeDesc->SetValueErased(dynamic_cast<void*>(scriptComponent.Instance), prop, scriptComponent.FieldValues[prop.Name]);
+						}
+					};
 					scriptComponent.Instance->m_Entity = Entity { this,entity };
 					scriptComponent.Instance->OnCreate();
 				}
