@@ -25,11 +25,12 @@ namespace World
 		// 主线程使用最后一个队列
 		m_LocalIndex = numThreads;
 	}
-	void JobSystem::Kick(JobDecl job, JobCounter* counter)
+	void JobSystem::Kick(JobDecl job)
 	{
 		// 记录任务计数器，通常在提交任务时会关联一个计数器，以便后续等待时知道还有多少任务未完成
-		if (counter)
-			counter->Count.fetch_add(1);// 增加计数器，使用原子操作确保线程安全
+		if (job.Counter)
+			job.Counter->Count.fetch_add(1);// 增加计数器，使用原子操作确保线程安全
+
 		m_Queues[m_LocalIndex].Push(job);
 	}
 	void JobSystem::Wait(JobCounter* counter)
@@ -41,7 +42,10 @@ namespace World
 			{
 				job.Entry(job.Padding);
 
-				counter->Count.fetch_sub(1, std::memory_order_release);
+				if (job.Counter)
+				{
+					job.Counter->Count.fetch_sub(1, std::memory_order_release);
+				}
 			}
 			else
 			{
@@ -110,12 +114,17 @@ namespace World
 				// 将包裹负载数据的那个内部连续内存地址传进去
 				if (job.Entry)
 					job.Entry(job.Padding);
+
+				if (job.Counter)
+				{
+					// 这里必须用 memory_order_release，确保前面活儿的数据都写进内存了
+					job.Counter->Count.fetch_sub(1, std::memory_order_release);
+				}
 			}
 			else
 			{
 				// 没拿到任务，开始梯度退避策略
 				idleTime++;
-
 				if (idleTime < 10)
 				{
 					// 第一阶段（刚闲下来）：只使用轻微的硬件暂停指令，提示 CPU 这是一个自旋锁循环

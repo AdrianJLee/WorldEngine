@@ -13,7 +13,7 @@ namespace World
 		static void Init();
 
 		// 提交一个任务包
-		static void Kick(JobDecl job, JobCounter* counter = nullptr);
+		static void Kick(JobDecl job);
 
 		// 核心：非阻塞等待（边等边干活）
 		static void Wait(JobCounter* counter);
@@ -73,10 +73,12 @@ namespace World
 						{
 							pData->func(j);
 						}
+
 					};
+				job.Counter = &sync;
 
 				// 把这个自己内包揽了状态的肥胖 Job结构（通常不到80字节）直接推进无锁队列数组
-				Kick(job, &sync);
+				Kick(job);
 			}
 
 			Wait(&sync);
