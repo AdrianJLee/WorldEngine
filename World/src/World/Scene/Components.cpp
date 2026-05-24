@@ -205,6 +205,13 @@ namespace World
 
 				// 使用刚刚我们在 Bind 中存下来的 ScriptName，如果是空的话显示 <None>
 				const char* currentPreview = isBound ? (nativeScript.ScriptName.empty() ? "Unknown Script" : nativeScript.ScriptName.c_str()) : "<None>";
+				// 如果脚本实例正在运行了，就不允许修改绑定了
+				bool isRunning = (nativeScript.Instance != nullptr);
+
+				if (isRunning)
+				{
+					ImGui::BeginDisabled(true); // 禁用以下控件
+				}
 
 				// 下拉列表
 				if (ImGui::BeginCombo("Script Class", currentPreview))
@@ -247,12 +254,11 @@ namespace World
 
 					ImGui::EndCombo();
 				}
-
 				ImGui::Spacing();
 
-				// 提供解绑操作按钮
 				if (isBound)
 				{
+
 					if (ImGui::Button("Unbind Script", ImVec2(-1.0f, 25.0f)))
 					{
 						// 清空函数指针和数据
@@ -262,7 +268,24 @@ namespace World
 						nativeScript.FieldValues.clear();
 						nativeScript.isFirstDraw = true;
 					}
+				}
 
+				// 如果脚本正在运行，则禁用重新绑定和解绑按钮
+				if (isRunning)
+				{
+					ImGui::EndDisabled();
+
+					// 禁用提示
+					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					{
+						ImGui::SetTooltip("Cannot rebind or unbind scripts while the game is running.");
+					}
+				}
+
+
+				// 如果已经绑定了脚本，才显示下面的属性编辑界面
+				if (isBound)
+				{
 					ImGui::Spacing();
 
 					// ============================================
