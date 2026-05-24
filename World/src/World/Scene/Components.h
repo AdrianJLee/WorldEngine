@@ -193,7 +193,7 @@ namespace World
 		ScriptableEntity* Instance = nullptr;
 		// 原始函数指针
 		ScriptableEntity* (*InstantiateScript)() = nullptr;
-		void (*DestroyScript)(NativeScriptComponent*) = nullptr;
+		void (*DestroyScript)(ScriptableEntity*&) = nullptr;
 		std::string ScriptName;
 
 		template<typename T>
@@ -201,12 +201,13 @@ namespace World
 		{
 			InstantiateScript = []()
 				{
-					return static_cast<ScriptableEntity*>(new T());
+					return static_cast<ScriptableEntity*>(WLD_POOL_NEW(T));
 				};
-			DestroyScript = [](NativeScriptComponent* component)
+			DestroyScript = [](ScriptableEntity*& scriptableEntity)
 				{
-					delete static_cast<T*>(component->Instance);
-					component->Instance = nullptr;
+
+					WLD_POOL_DELETE(T, PoolTag::General, scriptableEntity);
+					scriptableEntity = nullptr;
 				};
 		}
 

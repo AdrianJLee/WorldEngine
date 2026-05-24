@@ -29,7 +29,9 @@ namespace World
 
 		// --- 扩展维度 ---
 		Tools,          // 临时分析工具、Debug 绘图对象
-		Internal        // 引擎底层管理对象（如：DestructorNode 本身）
+		Internal,       // 引擎底层管理对象（如：DestructorNode 本身）
+
+		Script,         // 脚本系统专用（如：ScriptableEntity 实例）
 	};
 
 	#pragma region Macro
@@ -84,7 +86,7 @@ namespace World
 		Node* m_FreeList = nullptr;   // 指向第一个可用的空闲块
 		Chunk* m_ChunkList = nullptr; // 指向所有分配的内存页，用于析构释放
 
-		PoolTag m_Tag;
+		PoolTag m_Tag; // 池的标签（用于统计和调试）
 	};
 
 	template<typename T, PoolTag Tag = PoolTag::General, PoolTier Tier = PoolTier::Medium>

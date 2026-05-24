@@ -123,7 +123,7 @@ namespace World
 				if (scriptComponent.Instance)
 				{
 					scriptComponent.Instance->OnDestroy();
-					scriptComponent.DestroyScript(&scriptComponent);
+					scriptComponent.DestroyScript(scriptComponent.Instance);
 				}
 			});
 	}

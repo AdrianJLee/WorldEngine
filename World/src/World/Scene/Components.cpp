@@ -1,6 +1,6 @@
 ﻿#include "wldpch.h"
 #include "Components.h"
-
+#include "World/Core/Memory/PoolAllocator.h"
 #include "World/ImGui/ImGuiDrawLibrary.h"
 
 #include <imgui.h>
@@ -452,7 +452,7 @@ namespace World
 							if (nativeScript.isFirstDraw && tempInstance)
 							{
 								nativeScript.isFirstDraw = false;
-								delete tempInstance;
+								nativeScript.DestroyScript(tempInstance);
 							}
 						}
 					}
