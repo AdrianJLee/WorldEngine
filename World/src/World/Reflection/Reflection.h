@@ -12,47 +12,79 @@ namespace World
 		// ==========================================
 		// 1. 基础标量类型 (按内存大小升序，1 -> 2 -> 4 -> 8 字节)
 		// ==========================================
-		Bool,       // 1 字节
-		Char,       // 1 字节
-		Int8,       // 1 字节 (新增)
-		UInt8,      // 1 字节 (新增)
-		Int16,      // 2 字节 (新增)
-		UInt16,     // 2 字节 (新增)
-		Int32,      // 4 字节
-		UInt32,     // 4 字节
-		Int64,      // 8 字节 (新增，配套常见 ID 存储)
-		UInt64,     // 8 字节
-		Float,      // 4 字节
-		Double,     // 8 字节 (新增，大世界坐标/大物理系统常用)
+		#pragma region Base
+		Bool,
+		Char,
+		Int8,
+		UInt8,
+		Int16,
+		UInt16,
+		Int32,
+		UInt32,
+		Int64,
+		UInt64,
+		Float,
+		Double,
+		#pragma endregion
 
 		// ==========================================
 		// 2. 数学向量类型 (分量数量升序，2 -> 3 -> 4)
 		// ==========================================
-		Vec2,       // 8 字节 (2 * float)
-		Vec3,       // 12字节 (3 * float)
-		Vec4,       // 16字节 (4 * float)
+		#pragma region Vector
+	   // 8 字节 (2 * float)
+		Vec2,
+		// 12字节 (3 * float)
+		Vec3,
+		// 16字节 (4 * float)
+		Vec4,
 
-		IVec2,      // 8 字节 (2 * int32，新增：UI坐标/网格索引)
-		IVec3,      // 12字节 (3 * int32，新增：3D网格索引)
-		IVec4,      // 16字节 (4 * int32，新增：骨骼动画影响的 Bone IDs)
+		// 8 字节 (2 * int32，新增：UI坐标/网格索引)
+		IVec2,
+		// 12字节 (3 * int32，新增：3D网格索引)
+		IVec3,
+		// 16字节 (4 * int32，新增：骨骼动画影响的 Bone IDs)
+		IVec4,
 
-		UVec2,      // 8 字节 (2 * uint32，新增)
-		UVec3,      // 12字节 (3 * uint32，新增)
-		UVec4,      // 16字节 (4 * uint32，新增)
+		// 8 字节 (2 * uint32，新增)
+		UVec2,
+		// 12字节 (3 * uint32，新增)
+		UVec3,
+		// 16字节 (4 * uint32，新增)
+		UVec4,
+
+		#pragma endregion
 
 		// ==========================================
 		// 3. 矩阵类型 (游戏引擎中 Mat3/Mat4 最常用)
 		// ==========================================
-		Mat3,       // 36字节 (3x3 float，新增：通常用于传递法线矩阵)
-		Mat4,       // 64字节 (4x4 float，变换矩阵)
+		#pragma region Matrix
+
+		// 36字节 (3x3 float，新增：通常用于传递法线矩阵)
+		Mat3,
+
+		// 64字节 (4x4 float，变换矩阵)
+		Mat4,
+
+		#pragma endregion
 
 		// ==========================================
 		// 4. 高级/复合/引用类型 (属于不确定大小或堆分配类型)
 		// ==========================================
-		String,     // 字符串 (内部一般对应 std::string)
-		Binary,     // 二进制大对象 (新增，对应 std::vector<uint8_t> 或 裸数据指针，用于自定义序列化)
-		Enum,       // 枚举类型 (新增，底层通常是 uint32_t，但反射时需要特殊处理)
-		Object,     // 嵌套子对象/组件 (新增，用于支持“类中类”的深层反射)
+		#pragma region Senior 
+
+		// 字符串 (内部一般对应 std::string)
+		String,
+
+		// 二进制大对象 (新增，对应 std::vector<uint8_t> 或 裸数据指针，用于自定义序列化)
+		Binary,
+
+		// 枚举类型 (新增，底层通常是 uint32_t，但反射时需要特殊处理)
+		Enum,
+
+		// 嵌套子对象/组件 (新增，用于支持“类中类”的深层反射),需要特殊处理的复杂类型
+		Object,
+
+		#pragma endregion
 
 	};
 
@@ -88,6 +120,18 @@ namespace World
 		else return DataType::Object;
 	}
 
+	struct EnumDesc
+	{
+		std::string Name; // 类型名称
+		uint32_t UnderlyingSize = 4;
+		bool IsSigned = false;
+	};
+
+	struct ObjectDesc
+	{
+		std::string Name; // 类型名称
+	};
+
 	// 属性描述结构体
 	struct PropertyDesc
 	{
@@ -95,12 +139,13 @@ namespace World
 		DataType Type;          // 属性的数据类型
 		size_t Offset;          // 工业级核心：该属性在结构体中的内存偏移量
 		uint32_t FieldID;       // 属性ID，用于区分同名属性或版本控制
+		std::any UserData;     // 用户数据字段，允许绑定任意类型的数据（如属性特定的反射信息、编辑器元数据等），实现高度灵活的扩展
 	};
 
 	// 类型描述结构体
 	struct TypeDesc
 	{
-		std::string Name = "";       // 结构体/类名称
+		std::string Name = "";       // 类型名称
 		size_t Size = 0;            // 总内存大小
 		std::vector<PropertyDesc> Properties; // 属性列表
 
@@ -110,6 +155,7 @@ namespace World
 		// 参数1：组件实例（std::any），参数2：属性描述，返回值：属性值（std::any）
 		std::function<std::any(void*, const PropertyDesc&)> GetValueErased;
 
+		// 用户数据字段，允许绑定任意类型的数据（如组件特定的反射信息、编辑器元数据等），实现高度灵活的扩展
 		std::any UserData = {};
 
 	};
@@ -168,7 +214,26 @@ namespace World
 			{
 				size_t offset = reinterpret_cast<size_t>(&(static_cast<TClass*>(nullptr)->*memberPtr));
 
-				PropertyDesc prop { name, type, offset,constexpr_hash(name.c_str()) };
+				std::any userData = {};
+
+				if constexpr (std::is_enum_v<VariableType>)
+				{
+					EnumDesc enumDesc;
+					enumDesc.Name = typeid(VariableType).name();
+					enumDesc.UnderlyingSize = sizeof(std::underlying_type_t<VariableType>);
+					enumDesc.IsSigned = std::is_signed_v<std::underlying_type_t<VariableType>>;
+
+					userData = enumDesc;
+				}
+				else
+				{
+					if (type == DataType::Object)
+					{
+						userData = ObjectDesc { typeid(VariableType).name() };
+					}
+				}
+
+				PropertyDesc prop { name, type, offset,constexpr_hash(name.c_str()),userData };
 				m_Desc.Properties.push_back(prop);
 				return *this;
 			}
@@ -193,7 +258,7 @@ namespace World
 			desc.Name = className;
 			desc.Size = sizeof(TClass);
 
-			// 工业级：实现类型擦除的 Setter/Getter，保护内存安全
+			// 实现类型擦除的 Setter/Getter，保护内存安全
 			desc.SetValueErased = [](void* instancePtr, const PropertyDesc& prop, const std::any& value)
 				{
 					TClass* rawInstance = static_cast<TClass*>(instancePtr);
@@ -234,10 +299,62 @@ namespace World
 						ASSIGN_ANY(Mat4, glm::mat4);
 						ASSIGN_ANY(String, std::string);
 						ASSIGN_ANY(Binary, std::vector<uint8_t>);
-						ASSIGN_ANY(Enum, uint32_t); // 枚举底层通常是 uint32_t，但反射时需要特殊处理)
-						ASSIGN_ANY(Object, std::any); // 对象类型需要特殊处理，暂时用 std::any 占位
+						case DataType::Enum:
+						{
+							const EnumDesc& enumDesc = std::any_cast<EnumDesc>(prop.UserData);
+							switch (enumDesc.UnderlyingSize)
+							{
+								case 1:
+									if (enumDesc.IsSigned)
+										*reinterpret_cast<int8_t*>(bytePtr) = std::any_cast<int8_t>(value);
+									else
+										*reinterpret_cast<uint8_t*>(bytePtr) = std::any_cast<uint8_t>(value);
+									break;
+								case 2:
+									if (enumDesc.IsSigned)
+										*reinterpret_cast<int16_t*>(bytePtr) = std::any_cast<int16_t>(value);
+									else
+										*reinterpret_cast<uint16_t*>(bytePtr) = std::any_cast<uint16_t>(value);
+									break;
+								case 4:
+									if (enumDesc.IsSigned)
+										*reinterpret_cast<int32_t*>(bytePtr) = std::any_cast<int32_t>(value);
+									else
+										*reinterpret_cast<uint32_t*>(bytePtr) = std::any_cast<uint32_t>(value);
+									break;
+								case 8:
+									if (enumDesc.IsSigned)
+										*reinterpret_cast<int64_t*>(bytePtr) = std::any_cast<int64_t>(value);
+									else
+										*reinterpret_cast<uint64_t*>(bytePtr) = std::any_cast<uint64_t>(value);
+									break;
+								default:
+									WLD_ERROR("Unsupported enum underlying size: {}", enumDesc.UnderlyingSize);
+							}
+							break;
+						}
+						case DataType::Object:
+						{
+							const ObjectDesc& objDesc = std::any_cast<ObjectDesc>(prop.UserData);
+							const TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(objDesc.Name);
+							if (value.has_value())
+							{
+								if (value.type() == typeid(void*))
+								{
+									void* srcPtr = std::any_cast<void*>(value);
+									if (srcPtr)
+									{
+										// 核心：把外面传进来的结构体内存，按字节直接铺到当前成员的地址上
+										std::memcpy(bytePtr, srcPtr, typeDesc->Size);
+									}
+								}
+							}
+							break;
+						}
 
-						default: break;
+						default:
+							WLD_ERROR("Unsupported data type for property '{}': {}", prop.Name, static_cast<int>(prop.Type));
+							break;
 					}
 
 					#undef ASSIGN_ANY // 用完立即取消宏，防止污染全局
@@ -280,8 +397,63 @@ namespace World
 						RETURN_ANY(Mat4, glm::mat4);
 						RETURN_ANY(String, std::string);
 						RETURN_ANY(Binary, std::vector<uint8_t>);
-						// 枚举和对象类型需要特殊处理，暂时用 std::any 占位
+						case DataType::Enum:
+						{
+							const EnumDesc& enumDesc = std::any_cast<EnumDesc>(prop.UserData);
+							switch (enumDesc.UnderlyingSize)
+							{
+								case 1:
+									if (enumDesc.IsSigned)
+										return std::any(*reinterpret_cast<int8_t*>(bytePtr));
+									else
+										return std::any(*reinterpret_cast<uint8_t*>(bytePtr));
+								case 2:
+									if (enumDesc.IsSigned)
+										return std::any(*reinterpret_cast<int16_t*>(bytePtr));
+									else
+										return std::any(*reinterpret_cast<uint16_t*>(bytePtr));
+								case 4:
+									if (enumDesc.IsSigned)
+										return std::any(*reinterpret_cast<int32_t*>(bytePtr));
+									else
+										return std::any(*reinterpret_cast<uint32_t*>(bytePtr));
+								case 8:
+									if (enumDesc.IsSigned)
+										return std::any(*reinterpret_cast<int64_t*>(bytePtr));
+									else
+										return std::any(*reinterpret_cast<uint64_t*>(bytePtr));
+								default:
+									WLD_ERROR("Unsupported enum underlying size: {}", enumDesc.UnderlyingSize);
+							}
+							break;
+						}
+						case DataType::Object:
+						{
+							const ObjectDesc& objDesc = std::any_cast<ObjectDesc>(prop.UserData);
+
+							const TypeDesc* objTypeDesc = TypeRegistry::Get().GetTypeDesc(objDesc.Name);
+
+							if (objTypeDesc)
+							{
+								std::unordered_map<std::string, std::any> childValues;
+
+								// 此时在这个大对象里的成员起始地址 bytePtr ，也就是这个内嵌的小结构体的地址指针
+								// 它相当于内部子对象的 instancePtr ！
+								void* childInstancePtr = reinterpret_cast<void*>(bytePtr);
+
+								// 遍历这个嵌套类型的所有内部属性，并再次调用 GetValueErased
+								for (const auto& childProp : objTypeDesc->Properties)
+								{
+									childValues[childProp.Name] = objTypeDesc->GetValueErased(childInstancePtr, childProp);
+								}
+
+								return std::make_any<std::unordered_map<std::string, std::any>>(childValues);
+							}
+
+							return std::make_any<std::unordered_map<std::string, std::any>>();
+						}
 						default:
+							WLD_ERROR("Unsupported data type for property '{}': {}", prop.Name, static_cast<int>(prop.Type));
 							return std::any();
 					}
 				};
