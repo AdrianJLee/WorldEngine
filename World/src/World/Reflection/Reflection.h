@@ -166,6 +166,7 @@ namespace World
 		Component,
 		Asset,
 		Script,
+		EnumClass,
 	};
 
 	// 全局类型注册表：负责存储所有注册的类型信息
@@ -199,6 +200,7 @@ namespace World
 		public:
 			Binder(TypeDesc& desc) : m_Desc(desc) {}
 
+			// FNV-1a 32位哈希函数，编译时计算字符串的哈希值，用于生成属性ID
 			constexpr uint32_t constexpr_hash(const char* str)
 			{
 				uint32_t hash = 2166136261u;
@@ -216,8 +218,10 @@ namespace World
 
 				std::any userData = {};
 
+
 				if constexpr (std::is_enum_v<VariableType>)
 				{
+					// 枚举变量
 					EnumDesc enumDesc;
 					enumDesc.Name = typeid(VariableType).name();
 					enumDesc.UnderlyingSize = sizeof(std::underlying_type_t<VariableType>);
@@ -238,6 +242,33 @@ namespace World
 				return *this;
 			}
 
+			// 枚举类型内部Property
+			template <typename EnumType>
+			Binder& PropertyEnum(const std::string& enumName, EnumType value)
+			{
+				DataType type;
+				constexpr bool isSigned = std::is_signed_v<std::underlying_type_t<EnumType>>;
+				constexpr uint32_t underlyingSize = sizeof(std::underlying_type_t<EnumType>);
+				if constexpr (underlyingSize == 1)
+				{
+					type = isSigned ? DataType::Int8 : DataType::UInt8;
+				}
+				else if constexpr (underlyingSize == 2)
+				{
+					type = isSigned ? DataType::Int16 : DataType::UInt16;
+				}
+				else if constexpr (underlyingSize == 4)
+				{
+					type = isSigned ? DataType::Int32 : DataType::UInt32;
+				}
+				else if constexpr (underlyingSize == 8)
+				{
+					type = isSigned ? DataType::Int64 : DataType::UInt64;
+				}
+				PropertyDesc propName { enumName ,type, 0, 0, value };
+				m_Desc.Properties.push_back(propName);
+				return *this;
+			}
 		private:
 			TypeDesc& m_Desc;
 		};
@@ -521,4 +552,26 @@ namespace World
 		AutoProp_##varName(){ \
 		TypeRegistry::Binder<TREFLECTClass>(*TypeRegistry::Get().GetTypeDesc(typeid(TREFLECTClass).name())).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>());} \
 	}s_AutoProp_##varName;
+
+
+	template<typename TEnum>
+	struct AutoRegisterEnum
+	{
+		AutoRegisterEnum()
+		{
+			const std::string enumName = typeid(TEnum).name();
+			TypeRegistry::Get().RegisterType<TEnum>(enumName, TypeCategory::EnumClass);
+			TypeRegistry::RegisterTypeData<TypeCategory::EnumClass, TEnum>();
+		}
+	};
+
+	#define REFLECT_ENUM(TClass) \
+	static AutoRegisterEnum<TClass> s_AutoRegisterEnum;
+
+	#define PROPERTY_ENUM(TEnum, varName) \
+    inline static struct AutoPropEnum_##TEnum##_##varName { \
+        AutoPropEnum_##TEnum##_##varName() { \
+            TypeRegistry::Binder<TEnum>(*TypeRegistry::Get().GetTypeDesc(typeid(TEnum).name())).PropertyEnum<TEnum>(#varName, TEnum::varName); \
+        } \
+    } s_AutoPropEnum_##TEnum##_##varName;
 }

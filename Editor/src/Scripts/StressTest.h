@@ -3,10 +3,24 @@
 
 namespace World
 {
+
+
+	enum class StressTestType :int
+	{
+		None = 0,
+		Test1,
+		Test2,
+	};
+	REFLECT_ENUM(StressTestType);
+	PROPERTY_ENUM(StressTestType, None);
+	PROPERTY_ENUM(StressTestType, Test1);
+	PROPERTY_ENUM(StressTestType, Test2);
+
 	class StressTest : public ScriptableEntity
 	{
 		REFLECT_BODY(StressTest, TypeCategory::Script);
 	public:
+
 		virtual void OnCreate() override
 		{
 			m_Created.resize(Weight * Height);
@@ -47,5 +61,8 @@ namespace World
 		std::vector<Entity> m_Created;
 		std::vector<Entity*> m_Created2;
 		ScopedStack m_Stack { 1024, "StressTest Stack" };
+
+		PROPERTY(m_Type);
+		StressTestType m_Type = StressTestType::None;
 	};
 }

@@ -53,6 +53,14 @@ namespace World
 			WLD_CORE_ASSERT(m_Scene, "Scene is null!");
 			return m_Scene->m_Registry.get<T>(m_EntityHandle);
 		}
+
+		void* GetComponent(entt::id_type componentId)
+		{
+			WLD_CORE_ASSERT(m_Scene, "Scene is null!");
+			auto storage = m_Scene->m_Registry.storage(componentId);
+			return storage->value(m_EntityHandle);
+		}
+
 		template <typename T>
 		void RemoveComponent()
 		{

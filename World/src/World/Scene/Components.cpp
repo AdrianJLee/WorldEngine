@@ -338,12 +338,27 @@ namespace World
 									{
 										switch (prop.Type)
 										{
-											case DataType::Int32: currentVal = int32_t(0); break;
-											case DataType::Float: currentVal = float(0.0f); break;
-											case DataType::Bool:  currentVal = bool(false); break;
-											case DataType::Vec2:  currentVal = glm::vec2(0.0f); break;
-											case DataType::Vec3:  currentVal = glm::vec3(0.0f); break;
-											case DataType::String:currentVal = std::string(""); break;
+											case DataType::Int32:
+												currentVal = int32_t(0);
+												break;
+											case DataType::Float:
+												currentVal = float(0.0f);
+												break;
+											case DataType::Bool:
+												currentVal = bool(false);
+												break;
+											case DataType::Vec2:
+												currentVal = glm::vec2(0.0f);
+												break;
+											case DataType::Vec3:
+												currentVal = glm::vec3(0.0f);
+												break;
+											case DataType::String:
+												currentVal = std::string("");
+												break;
+											case DataType::Enum:
+												currentVal = 0;
+												break;
 											default: break;
 										}
 									}
@@ -421,6 +436,28 @@ namespace World
 													if (ImGui::InputText("##Val", buffer, sizeof(buffer)))
 													{
 														currentVal = std::string(buffer);
+														valueChanged = true;
+													}
+												}
+												break;
+											}
+											case DataType::Enum:
+											{
+												if (currentVal.has_value())
+												{
+													std::vector<const char*> options;
+													const EnumDesc& enumDesc = std::any_cast<EnumDesc>(prop.UserData);
+													const TypeDesc* enumTypeDesc = TypeRegistry::Get().GetTypeDesc(enumDesc.Name);
+													for (const auto& enumProperty : enumTypeDesc->Properties)
+													{
+														options.push_back(enumProperty.Name.c_str());
+													}
+													int enumVal = std::any_cast<int>(currentVal);
+
+
+													if (ImGui::Combo("##Val", &enumVal, options.data(), static_cast<int>(options.size())))
+													{
+														currentVal = enumVal;
 														valueChanged = true;
 													}
 												}
