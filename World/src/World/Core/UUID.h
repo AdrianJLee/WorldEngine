@@ -1,9 +1,10 @@
 ﻿#pragma once
-
+#include "World/Reflection/Reflection.h"
 namespace World
 {
 	class UUID
 	{
+		REFLECT_BODY(UUID, TypeCategory::NormalClass);
 	public:
 		UUID();
 		UUID(uint64_t uuid);
@@ -12,13 +13,13 @@ namespace World
 	private:
 		uint64_t GenerateUUID();
 	private:
+		PROPERTY(m_UUID);
 		uint64_t m_UUID;
 	};
 }
 
 namespace std
 {
-
 	template<>
 	struct hash<World::UUID>
 	{

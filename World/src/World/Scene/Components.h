@@ -11,6 +11,21 @@
 
 namespace World
 {
+	struct UUIDComponent
+	{
+		REFLECT_BODY(UUIDComponent, TypeCategory::Component);
+
+		PROPERTY(ID);
+		World::UUID ID;
+
+		UUIDComponent() = default;
+		UUIDComponent(const World::UUID& id)
+			: ID(id)
+		{}
+
+		COMPONENT_UI()
+	};
+
 	struct TagComponent
 	{
 		REFLECT_BODY(TagComponent, TypeCategory::Component);
@@ -27,29 +42,19 @@ namespace World
 		COMPONENT_UI()
 	};
 
-	struct UUIDComponent
-	{
-		REFLECT_BODY(UUIDComponent, TypeCategory::Component);
-
-		World::UUID ID;
-		UUIDComponent() = default;
-		UUIDComponent(const World::UUID& id)
-			: ID(id)
-		{}
-
-		COMPONENT_UI()
-	};
-
 	struct TransformComponent
 	{
 		REFLECT_BODY(TransformComponent, TypeCategory::Component);
 
+		PROPERTY(Location);
 		glm::vec3 Location { 0.0f, 0.0f, 0.0f };
-		// rad
+
+		PROPERTY(Rotation);
 		glm::vec3 Rotation { 0.0f, 0.0f, 0.0f };
 
 		glm::quat RotationQuat { 1.0f, 0.0f, 0.0f, 0.0f };
 
+		PROPERTY(Scale);
 		glm::vec3 Scale { 1.0f, 1.0f, 1.0f };
 
 		glm::mat4 Transform { 1.0f };
@@ -150,8 +155,14 @@ namespace World
 		{
 
 		};
+
+		PROPERTY(Color);
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
+
+		PROPERTY(Texture);
 		Ref<Texture2D> Texture;
+
+		PROPERTY(TilingFactor);
 		float TilingFactor = 1.0f;
 
 		COMPONENT_UI()
@@ -161,8 +172,11 @@ namespace World
 	{
 		REFLECT_BODY(CircleRendererComponent, TypeCategory::Component);
 
+		PROPERTY(Color);
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
+		PROPERTY(Thickness);
 		float Thickness = 1.0f;
+		PROPERTY(Fade);
 		float Fade = 0.005f;
 
 		COMPONENT_UI()
@@ -179,8 +193,13 @@ namespace World
 		{
 
 		}
+		PROPERTY(Camera);
 		SceneCamera Camera;
+
+		PROPERTY(Primary);
 		bool Primary = true;
+
+		PROPERTY(FixedAspectRatio);
 		bool FixedAspectRatio = false;
 
 		COMPONENT_UI()
@@ -194,6 +213,8 @@ namespace World
 		// 原始函数指针
 		ScriptableEntity* (*InstantiateScript)() = nullptr;
 		void (*DestroyScript)(ScriptableEntity*&) = nullptr;
+
+		PROPERTY(ScriptName);
 		std::string ScriptName;
 
 		template<typename T>
@@ -222,12 +243,22 @@ namespace World
 	{
 		REFLECT_BODY(RigidBody2DComponent, TypeCategory::Component);
 
+
 		enum class BodyType
 		{
 			Static = 0, Dynamic, Kinematic
 		};
+		REFLECT_ENUM(BodyType);
+		PROPERTY_ENUM(BodyType, Static);
+		PROPERTY_ENUM(BodyType, Dynamic);
+		PROPERTY_ENUM(BodyType, Kinematic);
+
+		PROPERTY(Type);
 		BodyType Type = BodyType::Static;
+
 		b2BodyId RuntimeBodyId = b2_nullBodyId;
+
+		PROPERTY(FixedRotation);
 		bool FixedRotation = false;
 
 		COMPONENT_UI()
@@ -237,11 +268,17 @@ namespace World
 	{
 		REFLECT_BODY(BoxCollider2DComponent, TypeCategory::Component);
 
+		PROPERTY(Offset);
 		glm::vec2 Offset { 0.0f, 0.0f };
+		PROPERTY(Size);
 		glm::vec2 Size { 0.5f, 0.5f };
+		PROPERTY(Density);
 		float Density = 1.0f;
+		PROPERTY(Friction);
 		float Friction = 0.5f;
+		PROPERTY(Restitution);
 		float Restitution = 0.2f;
+		PROPERTY(ShowCollider);
 		bool ShowCollider = true;
 
 		COMPONENT_UI()
@@ -251,11 +288,17 @@ namespace World
 	{
 		REFLECT_BODY(CircleCollider2DComponent, TypeCategory::Component);
 
+		PROPERTY(Offset);
 		glm::vec2 Offset { 0.0f, 0.0f };
+		PROPERTY(Radius);
 		float Radius = 0.5f;
+		PROPERTY(Density);
 		float Density = 1.0f;
+		PROPERTY(Friction);
 		float Friction = 0.5f;
+		PROPERTY(Restitution);
 		float Restitution = 0.2f;
+		PROPERTY(ShowCollider);
 		bool ShowCollider = true;
 
 		COMPONENT_UI()

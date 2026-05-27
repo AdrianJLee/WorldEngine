@@ -1,9 +1,14 @@
 ﻿#pragma once
 #include <any>
 #include <glm/glm.hpp>
-#include "World/Core/ComponentRegistry.h"
+
 namespace World
 {
+	template <typename T>
+	struct is_ref_type : std::false_type {};
+	template <typename T>
+	struct is_ref_type<Ref<T>> : std::true_type {};
+
 	// 数据类型枚举
 	enum class DataType : uint8_t
 	{
@@ -84,6 +89,7 @@ namespace World
 		// 嵌套子对象/组件 (新增，用于支持“类中类”的深层反射),需要特殊处理的复杂类型
 		Object,
 
+		AssetHandle,
 		#pragma endregion
 
 	};
@@ -117,6 +123,7 @@ namespace World
 		else if constexpr (std::is_same_v<T, std::string>) return DataType::String;
 		else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) return DataType::Binary;
 		else if constexpr (std::is_enum_v<T>) return DataType::Enum;
+		else if constexpr (is_ref_type<T>::value) return DataType::AssetHandle;
 		else return DataType::Object;
 	}
 
@@ -130,6 +137,12 @@ namespace World
 	struct ObjectDesc
 	{
 		std::string Name; // 类型名称
+	};
+
+	struct AssetDesc
+	{
+		std::string Name; // 类型名称
+		std::string Path; // 资源路径
 	};
 
 	// 属性描述结构体
@@ -163,10 +176,11 @@ namespace World
 	enum class TypeCategory
 	{
 		None,
-		Component,
-		Asset,
-		Script,
-		EnumClass,
+		Component, // 游戏对象组件
+		Asset, // 游戏资源（纹理、模型、音频等）
+		Script, // 游戏逻辑脚本
+		EnumClass, // 枚举类
+		NormalClass, // 普通类
 	};
 
 	// 全局类型注册表：负责存储所有注册的类型信息
@@ -228,6 +242,13 @@ namespace World
 					enumDesc.IsSigned = std::is_signed_v<std::underlying_type_t<VariableType>>;
 
 					userData = enumDesc;
+				}
+				else if constexpr (is_ref_type<VariableType>::value)
+				{
+					AssetDesc assetDesc;
+					assetDesc.Name = typeid(VariableType::element_type).name();
+					assetDesc.Path = "";
+					userData = assetDesc;
 				}
 				else
 				{
@@ -364,6 +385,25 @@ namespace World
 							}
 							break;
 						}
+						case DataType::AssetHandle:
+						{
+							/*
+							Ref<Texture2D> newTexture = Texture2D::Create(...);
+							classDesc->SetValueErased(&component, prop, std::any(static_cast<void*>(&newTexture)));
+							*/
+							// 资源句柄类型，假设是 Ref<T>，内部存储一个指针
+							const AssetDesc& assetDesc = std::any_cast<AssetDesc>(prop.UserData);
+							if (value.has_value() && value.type() == typeid(void*))
+							{
+								void* srcPtr = std::any_cast<void*>(value);
+								if (srcPtr)
+								{
+									// MSVC shared_ptr 大小为 16 字节
+									std::memcpy(bytePtr, srcPtr, 16);
+								}
+							}
+							break;
+						}
 						case DataType::Object:
 						{
 							const ObjectDesc& objDesc = std::any_cast<ObjectDesc>(prop.UserData);
@@ -457,6 +497,17 @@ namespace World
 									WLD_ERROR("Unsupported enum underlying size: {}", enumDesc.UnderlyingSize);
 							}
 							break;
+						}
+						case DataType::AssetHandle:
+						{
+							/*
+							std::any val = classDesc->GetValueErased(&component, prop);
+							void* rawRefPtr = std::any_cast<void*>(val);
+							Ref<Texture2D> myRef = *static_cast<Ref<Texture2D>*>(rawRefPtr);
+							*/
+							// 返回一个指向整个 Ref<T> 对象的 void*（此时它的 type 应该是 void*，代表 "地址"）
+							// 外面拿到后可以强制转换成 Ref<T>* 并解引用，从而正确触发拷贝构造
+							return std::any(reinterpret_cast<void*>(bytePtr));
 						}
 						case DataType::Object:
 						{
@@ -566,7 +617,7 @@ namespace World
 	};
 
 	#define REFLECT_ENUM(TClass) \
-	static AutoRegisterEnum<TClass> s_AutoRegisterEnum;
+	inline static AutoRegisterEnum<TClass> s_AutoRegisterEnum;
 
 	#define PROPERTY_ENUM(TEnum, varName) \
     inline static struct AutoPropEnum_##TEnum##_##varName { \
