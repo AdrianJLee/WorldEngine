@@ -3,6 +3,7 @@
 #include "entt.hpp"
 #include <type_traits>
 #include <any>
+
 namespace World
 {
 	class TypeDescDataComponent
@@ -24,6 +25,8 @@ namespace World
 		{
 			entt::id_type id = entt::type_id<T>().hash();
 			entt::meta_type type = entt::resolve(id);
+			entt::meta_factory<T>().type(id).template ctor<>();
+
 			// 只有当 T 定义了 ComponentPropertiesUI 时才引用它，避免编译期错误
 			void (*uiFunc)(Entity) = nullptr;
 			if constexpr (has_ui_logic<T>::value)
@@ -73,15 +76,13 @@ namespace World
 	{
 	public:
 		entt::id_type Id;
-		entt::meta_type Type;
 		void (*BindFunc)(struct NativeScriptComponent&) = nullptr;
 
 		template<typename T>
 		static void Register(std::any& userData)
 		{
 			entt::id_type id = entt::type_id<T>().hash();
-			entt::meta_type type = entt::resolve(id);
-			userData = std::make_any<TypeDescDataScript>(TypeDescDataScript { id, type,
+			userData = std::make_any<TypeDescDataScript>(TypeDescDataScript { id,
 				[](NativeScriptComponent& nativeScript)
 				{
 					nativeScript.Bind<T>();

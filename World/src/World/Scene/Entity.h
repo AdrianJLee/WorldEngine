@@ -13,8 +13,6 @@ namespace World
 		static void DestroyEntity(Scene* scene, Entity entity);
 
 
-		static void CopyEntity(Ref<Scene>& destScene, Entity destEntity, Ref<Scene>& srcScene, Entity srcEntity);
-
 	public:
 		Entity() = default;
 		Entity(Scene* scene, entt::entity handle);
@@ -33,6 +31,23 @@ namespace World
 			WLD_CORE_ASSERT(m_Scene, "Scene is null!");
 			return m_Scene->m_Registry.emplace<T>(m_EntityHandle, std::forward<Args>(args)...);
 		}
+
+		void AddComponent(entt::id_type componentId, const void* data = nullptr)
+		{
+			WLD_CORE_ASSERT(m_Scene, "Scene is null!");
+			auto storage = m_Scene->m_Registry.storage(componentId);
+			WLD_CORE_ASSERT(storage, "Component storage not found for component ID: {0}", componentId);
+
+			if (data)
+			{
+				storage->push(m_EntityHandle, data);
+			}
+			else
+			{
+				storage->push(m_EntityHandle);
+			}
+		}
+
 
 		template<typename T>
 		bool HasComponent()

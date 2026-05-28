@@ -52,11 +52,13 @@ namespace World
 		PROPERTY(Rotation);
 		glm::vec3 Rotation { 0.0f, 0.0f, 0.0f };
 
+		PROPERTY(RotationQuat);
 		glm::quat RotationQuat { 1.0f, 0.0f, 0.0f, 0.0f };
 
 		PROPERTY(Scale);
 		glm::vec3 Scale { 1.0f, 1.0f, 1.0f };
 
+		PROPERTY(Transform);
 		glm::mat4 Transform { 1.0f };
 
 		TransformComponent(const glm::mat4& transform)

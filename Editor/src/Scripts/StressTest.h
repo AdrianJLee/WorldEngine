@@ -3,8 +3,6 @@
 
 namespace World
 {
-
-
 	enum class StressTestType :int
 	{
 		None = 0,

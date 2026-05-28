@@ -21,11 +21,6 @@ namespace World
 		scene->m_Registry.destroy(entity);
 	}
 
-	void Entity::CopyEntity(Ref<Scene>& destScene, Entity destEntity, Ref<Scene>& srcScene, Entity srcEntity)
-	{
-
-	}
-
 	Entity::Entity(Scene* scene, entt::entity handle)
 		: m_EntityHandle(handle), m_Scene(scene)
 	{

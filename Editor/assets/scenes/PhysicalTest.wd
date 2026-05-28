@@ -1,137 +1,177 @@
 Scene: Untitled
 Entities:
-  - EntityID: 18409351613801574232
-    TagComponent: Camera
-    TransformComponent:
+  - struct World::UUIDComponent:
+      ID:
+        m_UUID: 18409351613801574232
+    struct World::TagComponent:
+      Tag: Camera
+    struct World::TransformComponent:
       Location: [0, 0, 0.5]
       Rotation: [0, -0, 0]
+      RotationQuat: [0, 0, 0, 1]
       Scale: [1, 1, 1]
-    CameraComponent:
+      Transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0.5, 1]
+    struct World::CameraComponent:
+      Camera:
+        m_ProjectionType: 1
+        m_AspectRatio: 1.34986222
+        m_OrthographicZoom: 3
+        m_OrthographicNearClip: -1
+        m_OrthographicFarClip: 1
+        m_PerspectiveFOV: 45
+        m_PerspectiveNearClip: 0.100000001
+        m_PerspectiveFarClip: 100
       Primary: true
       FixedAspectRatio: false
-      ProjectionType: 1
-      AspectRatio: 1.6584022
-      PerspectiveFOV: 45
-      PerspectiveNearClip: 0.100000001
-      PerspectiveFarClip: 100
-      OrthographicZoom: 3
-      OrthographicNearClip: -1
-      OrthographicFarClip: 1
-    NativeScriptComponent:
+    struct World::NativeScriptComponent:
       ScriptName: class World::StressTest
-  - EntityID: 12993328383427947612
-    TagComponent: Square
-    TransformComponent:
+  - struct World::UUIDComponent:
+      ID:
+        m_UUID: 12993328383427947612
+    struct World::TagComponent:
+      Tag: Square
+    struct World::TransformComponent:
       Location: [-0.0180547237, 2.84264803, 0]
       Rotation: [0, -0, 0.7400195]
+      RotationQuat: [0, 0, 0.361624509, 0.932323813]
       Scale: [1, 1, 1]
-    SpriteComponent:
+      Transform: [0.738455415, 0.67430228, 0, 0, -0.67430228, 0.738455415, 0, 0, 0, 0, 1, 0, -0.0180547237, 2.84264803, 0, 1]
+    struct World::SpriteComponent:
       Color: [1, 1, 1, 1]
-      TexturePath: assets\textures\Icon.png
+      Texture: assets\textures\Icon.png
       TilingFactor: 1
-    BoxCollider2DComponent:
-      Size: [0.5, 0.5]
+    struct World::RigidBody2DComponent:
+      Type: 1
+      FixedRotation: false
+    struct World::BoxCollider2DComponent:
       Offset: [0, 0]
+      Size: [0.5, 0.5]
       Density: 1
       Friction: 0.5
       Restitution: 1
       ShowCollider: true
-    RigidBody2DComponent:
-      BodyType: 1
-      FixedRotation: false
-  - EntityID: 9656972218538944549
-    TagComponent: StaticMesh
-    TransformComponent:
+  - struct World::UUIDComponent:
+      ID:
+        m_UUID: 9656972218538944549
+    struct World::TagComponent:
+      Tag: StaticMesh
+    struct World::TransformComponent:
       Location: [-2.18683863, 3.38640332, -9.53672952e-07]
       Rotation: [0, -0, -2.30455732]
+      RotationQuat: [0, -0, -0.913692355, 0.406406492]
       Scale: [11.6999826, 0.999999881, 1]
-    SpriteComponent:
+      Transform: [-7.83509779, -8.68912125, 0, 0, 0.74266094, -0.669667423, 0, 0, 0, 0, 1, 0, -2.18683863, 3.38640332, -9.53672952e-07, 1]
+    struct World::SpriteComponent:
       Color: [1, 1, 1, 1]
+      Texture: ""
       TilingFactor: 1
-    BoxCollider2DComponent:
-      Size: [0.5, 0.5]
+    struct World::RigidBody2DComponent:
+      Type: 0
+      FixedRotation: false
+    struct World::BoxCollider2DComponent:
       Offset: [1.40129846e-45, 0]
+      Size: [0.5, 0.5]
       Density: 1
       Friction: 0.5
       Restitution: 0
       ShowCollider: true
-    RigidBody2DComponent:
-      BodyType: 0
-      FixedRotation: false
-  - EntityID: 6547203319051865403
-    TagComponent: StaticMesh
-    TransformComponent:
+  - struct World::UUIDComponent:
+      ID:
+        m_UUID: 6547203319051865403
+    struct World::TagComponent:
+      Tag: StaticMesh
+    struct World::TransformComponent:
       Location: [4.73145008, 4.60497665, 0]
       Rotation: [0, 0, -0.4837282]
+      RotationQuat: [0, 0, -0.239512891, 0.970893204]
       Scale: [11.7000036, 1, 1]
-    SpriteComponent:
+      Transform: [10.3576288, -5.44147158, 0, 0, 0.465082884, 0.885267138, 0, 0, 0, 0, 1, 0, 4.73145008, 4.60497665, 0, 1]
+    struct World::SpriteComponent:
       Color: [1, 1, 1, 1]
+      Texture: ""
       TilingFactor: 1
-    BoxCollider2DComponent:
-      Size: [0.5, 0.5]
+    struct World::RigidBody2DComponent:
+      Type: 0
+      FixedRotation: false
+    struct World::BoxCollider2DComponent:
       Offset: [1.40129846e-45, 0]
+      Size: [0.5, 0.5]
       Density: 1
       Friction: 0.5
       Restitution: 0
       ShowCollider: true
-    RigidBody2DComponent:
-      BodyType: 0
-      FixedRotation: false
-  - EntityID: 4298503087466156158
-    TagComponent: Circle
-    TransformComponent:
+  - struct World::UUIDComponent:
+      ID:
+        m_UUID: 4298503087466156158
+    struct World::TagComponent:
+      Tag: Circle
+    struct World::TransformComponent:
       Location: [3.28447342, 1.21434689, 0]
       Rotation: [0, -0, 0]
+      RotationQuat: [0, 0, 0, 1]
       Scale: [3, 3, 1]
-    CircleRendererComponent:
+      Transform: [3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 1, 0, 3.28447342, 1.21434689, 0, 1]
+    struct World::CircleRendererComponent:
       Color: [0.709803939, 0.482352942, 0.0352941193, 0.941176474]
       Thickness: 0.5
       Fade: 0.0659999996
-    CircleCollider2DComponent:
-      Radius: 0.5
+    struct World::RigidBody2DComponent:
+      Type: 1
+      FixedRotation: false
+    struct World::CircleCollider2DComponent:
       Offset: [0, 0]
+      Radius: 0.5
       Density: 1
       Friction: 0.5
       Restitution: 1
       ShowCollider: true
-    RigidBody2DComponent:
-      BodyType: 1
-      FixedRotation: false
-  - EntityID: 17715847037794397244
-    TagComponent: StaticMesh
-    TransformComponent:
+  - struct World::UUIDComponent:
+      ID:
+        m_UUID: 17715847037794397244
+    struct World::TagComponent:
+      Tag: StaticMesh
+    struct World::TransformComponent:
       Location: [5.64844513, 0.122648716, -1.90734761e-06]
       Rotation: [0, -0, -2.30455732]
+      RotationQuat: [0, -0, -0.913692355, 0.406406492]
       Scale: [11.6999826, 0.999999881, 1]
-    SpriteComponent:
+      Transform: [-7.83509779, -8.68912125, 0, 0, 0.74266094, -0.669667423, 0, 0, 0, 0, 1, 0, 5.64844513, 0.122648716, -1.90734761e-06, 1]
+    struct World::SpriteComponent:
       Color: [1, 1, 1, 1]
+      Texture: ""
       TilingFactor: 1
-    BoxCollider2DComponent:
-      Size: [0.5, 0.5]
+    struct World::RigidBody2DComponent:
+      Type: 0
+      FixedRotation: false
+    struct World::BoxCollider2DComponent:
       Offset: [1.40129846e-45, 0]
+      Size: [0.5, 0.5]
       Density: 1
       Friction: 0.5
       Restitution: 0
       ShowCollider: true
-    RigidBody2DComponent:
-      BodyType: 0
-      FixedRotation: false
-  - EntityID: 5824007774669977999
-    TagComponent: StaticMesh
-    TransformComponent:
+  - struct World::UUIDComponent:
+      ID:
+        m_UUID: 5824007774669977999
+    struct World::TagComponent:
+      Tag: StaticMesh
+    struct World::TransformComponent:
       Location: [0, -1.70000005, 0]
       Rotation: [0, 0, -0.4837282]
+      RotationQuat: [0, 0, -0.239512891, 0.970893204]
       Scale: [11.7000036, 1, 1]
-    SpriteComponent:
+      Transform: [10.3576288, -5.44147158, 0, 0, 0.465082884, 0.885267138, 0, 0, 0, 0, 1, 0, 0, -1.70000005, 0, 1]
+    struct World::SpriteComponent:
       Color: [1, 1, 1, 1]
+      Texture: ""
       TilingFactor: 1
-    BoxCollider2DComponent:
-      Size: [0.5, 0.5]
+    struct World::RigidBody2DComponent:
+      Type: 0
+      FixedRotation: false
+    struct World::BoxCollider2DComponent:
       Offset: [1.40129846e-45, 0]
+      Size: [0.5, 0.5]
       Density: 1
       Friction: 0.5
       Restitution: 0
       ShowCollider: true
-    RigidBody2DComponent:
-      BodyType: 0
-      FixedRotation: false

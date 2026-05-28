@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <any>
 #include <glm/glm.hpp>
-
+#include <glm/gtc/quaternion.hpp>
 namespace World
 {
 	template <typename T>
@@ -42,6 +42,8 @@ namespace World
 		Vec3,
 		// 16字节 (4 * float)
 		Vec4,
+
+		Quat,
 
 		// 8 字节 (2 * int32，新增：UI坐标/网格索引)
 		IVec2,
@@ -112,6 +114,7 @@ namespace World
 		else if constexpr (std::is_same_v<T, glm::vec2>) return DataType::Vec2;
 		else if constexpr (std::is_same_v<T, glm::vec3>) return DataType::Vec3;
 		else if constexpr (std::is_same_v<T, glm::vec4>) return DataType::Vec4;
+		else if constexpr (std::is_same_v<T, glm::quat>) return DataType::Quat;
 		else if constexpr (std::is_same_v<T, glm::ivec2>) return DataType::IVec2;
 		else if constexpr (std::is_same_v<T, glm::ivec3>) return DataType::IVec3;
 		else if constexpr (std::is_same_v<T, glm::ivec4>) return DataType::IVec4;
@@ -155,6 +158,16 @@ namespace World
 		std::any UserData;     // 用户数据字段，允许绑定任意类型的数据（如属性特定的反射信息、编辑器元数据等），实现高度灵活的扩展
 	};
 
+	enum class TypeCategory
+	{
+		None,
+		Component, // 游戏对象组件
+		Asset, // 游戏资源（纹理、模型、音频等）
+		Script, // 游戏逻辑脚本
+		EnumClass, // 枚举类
+		NormalClass, // 普通类
+	};
+
 	// 类型描述结构体
 	struct TypeDesc
 	{
@@ -171,18 +184,10 @@ namespace World
 		// 用户数据字段，允许绑定任意类型的数据（如组件特定的反射信息、编辑器元数据等），实现高度灵活的扩展
 		std::any UserData = {};
 
+		TypeCategory Category = TypeCategory::None; // 类型分类，便于编辑器组织和过滤
 	};
 
-	enum class TypeCategory
-	{
-		None,
-		Component, // 游戏对象组件
-		Asset, // 游戏资源（纹理、模型、音频等）
-		Script, // 游戏逻辑脚本
-		EnumClass, // 枚举类
-		NormalClass, // 普通类
-	};
-
+	class Texture2D;
 	// 全局类型注册表：负责存储所有注册的类型信息
 	class TypeRegistry
 	{
@@ -309,7 +314,7 @@ namespace World
 			TypeDesc desc;
 			desc.Name = className;
 			desc.Size = sizeof(TClass);
-
+			desc.Category = category;
 			// 实现类型擦除的 Setter/Getter，保护内存安全
 			desc.SetValueErased = [](void* instancePtr, const PropertyDesc& prop, const std::any& value)
 				{
@@ -341,6 +346,7 @@ namespace World
 						ASSIGN_ANY(Vec2, glm::vec2);
 						ASSIGN_ANY(Vec3, glm::vec3);
 						ASSIGN_ANY(Vec4, glm::vec4);
+						ASSIGN_ANY(Quat, glm::quat);
 						ASSIGN_ANY(IVec2, glm::ivec2);
 						ASSIGN_ANY(IVec3, glm::ivec3);
 						ASSIGN_ANY(IVec4, glm::ivec4);
@@ -392,14 +398,25 @@ namespace World
 							classDesc->SetValueErased(&component, prop, std::any(static_cast<void*>(&newTexture)));
 							*/
 							// 资源句柄类型，假设是 Ref<T>，内部存储一个指针
-							const AssetDesc& assetDesc = std::any_cast<AssetDesc>(prop.UserData);
-							if (value.has_value() && value.type() == typeid(void*))
+							if (value.has_value())
 							{
-								void* srcPtr = std::any_cast<void*>(value);
-								if (srcPtr)
+								if (value.type() == typeid(Ref<Texture2D>))
 								{
-									// MSVC shared_ptr 大小为 16 字节
-									std::memcpy(bytePtr, srcPtr, 16);
+									Ref<Texture2D> srcPtr = std::any_cast<Ref<Texture2D>>(value);
+
+									// 采用正确的 C++ 赋值操作符进行拷贝和引用计数，而非直接按位硬拷贝内存
+									*reinterpret_cast<Ref<Texture2D>*>(bytePtr) = srcPtr;
+								}
+								// 兼容旧有的反射保存 void* 指针情况（如果有别的途径走这里）
+								else if (value.type() == typeid(void*))
+								{
+									void* srcPtr = std::any_cast<void*>(value);
+									if (srcPtr)
+									{
+										// MSVC shared_ptr 大小为 16 字节
+										// 这是非常危险的！仅为向前兼容保留
+										std::memcpy(bytePtr, srcPtr, 16);
+									}
 								}
 							}
 							break;
@@ -458,6 +475,7 @@ namespace World
 						RETURN_ANY(Vec2, glm::vec2);
 						RETURN_ANY(Vec3, glm::vec3);
 						RETURN_ANY(Vec4, glm::vec4);
+						RETURN_ANY(Quat, glm::quat);
 						RETURN_ANY(IVec2, glm::ivec2);
 						RETURN_ANY(IVec3, glm::ivec3);
 						RETURN_ANY(IVec4, glm::ivec4);
