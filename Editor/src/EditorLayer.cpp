@@ -1,5 +1,6 @@
 ﻿#include "EditorLayer.h"
 #include "World/Core/Thread/JobSystem.h"
+#include "World/Core/Cook/VFS.h"
 namespace World
 {
 	EditorLayer::EditorLayer()
@@ -121,6 +122,30 @@ namespace World
 					NewScene();
 					OpenScene();
 				}
+				if (ImGui::MenuItem("Cooking"))
+				{
+					std::string outPath = World::FileDialogs::SaveFile("Pak (*.pak)\0*.pak\0");
+					if (!outPath.empty())
+					{
+						// 记录状态，准备显示弹窗
+						m_ShowCookingProgress = true;
+						m_CookingFinished = false;
+
+						// 告诉 ImGui 下一帧打开模态弹窗
+						ImGui::OpenPopup("Cooking Progress");
+
+						std::string sourceDir = "assets"; // 你的源资源目录
+
+						// 开启独立线程进行打包操作，防止编辑器卡死
+						std::thread([sourceDir, outPath, this]()
+							{
+								VFS::BuildPakFromDirectory(sourceDir, outPath);
+
+								// 任务完成后标记状态
+								this->m_CookingFinished = true;
+							}).detach();
+					}
+				}
 
 				if (ImGui::MenuItem("Exit"))
 					World::Application::Get().Close();
@@ -202,9 +227,10 @@ namespace World
 			ImGui::End();
 		}
 
-
-
-
+		if (m_ShowCookingProgress)
+		{
+			OnCooking();
+		}
 	}
 
 	void EditorLayer::OnEvent(Event& event)
@@ -533,5 +559,40 @@ namespace World
 		}
 		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 	}
+
+	void EditorLayer::OnCooking()
+	{
+
+		if (!ImGui::IsPopupOpen("Cooking Progress"))
+		{
+			ImGui::OpenPopup("Cooking Progress");
+		}
+
+		// 始终让弹窗居中
+		ImGuiWindowFlags window_flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse;
+		bool p_open = true; // 控制右上角是否有X，如果不需要能关掉，填NULL
+		if (ImGui::BeginPopupModal("Cooking Progress", NULL, window_flags))
+		{
+			ImGui::Text("Packing assets...");
+
+			// 动态显示一个来回滚动的无极进度条以表示程序没死机
+			// （如果有真实的进度数值，可以将下面这行替换为: ImGui::ProgressBar(m_progressPercent);）
+			ImGui::ProgressBar(-1.0f * (float)ImGui::GetTime(), ImVec2(200.0f, 0.0f), "Cooking...");
+
+			if (m_CookingFinished)
+			{
+				// 打包结束后，延迟关闭或提示完成
+				ImGui::TextColored(ImVec4(0, 1, 0, 1), "Cooking Complete!");
+				if (ImGui::Button("Close", ImVec2(120, 0)))
+				{
+					m_ShowCookingProgress = false;
+					ImGui::CloseCurrentPopup();
+				}
+			}
+
+			ImGui::EndPopup();
+		}
+	}
+
 
 }

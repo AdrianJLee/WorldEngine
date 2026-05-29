@@ -40,6 +40,7 @@ namespace World
 
 		void SetSceneState(SceneState state);
 		void UpdateSceneContext(Ref<Scene> scene);
+		void OnCooking();
 	private:
 		Ref<SceneRenderer> m_SceneRenderer;
 		SceneRendererOptions m_RendererOptions;
@@ -72,6 +73,9 @@ namespace World
 
 		Ref<Texture2D> m_IconSimulate, m_IconSimulateStop;
 		Ref<Texture2D> m_IconSimulatePause, m_IconSimulateContinue;
+
+		bool m_ShowCookingProgress = false;    // 是否显示打包弹窗
+		std::atomic<bool> m_CookingFinished = false; // 打包是否完成
 	};
 
 }

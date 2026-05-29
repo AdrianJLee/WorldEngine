@@ -16,6 +16,7 @@ find_package(Vulkan REQUIRED)
 add_subdirectory(World)
 
 add_subdirectory(Editor)
+add_subdirectory(Game)
 target_compile_definitions(World PUBLIC
     WLD_EDITOR_DIR="${CMAKE_SOURCE_DIR}/Editor/"
     WLD_ASSETPATH="assets"
