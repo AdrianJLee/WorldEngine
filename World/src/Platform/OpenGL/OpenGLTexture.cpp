@@ -16,7 +16,7 @@ namespace World
 		stbi_uc* data = nullptr;
 		{
 			WLD_PROFILE_SCOPE("stbi_load - OpenGLTexture2D::OpenGLTexture2D(const std::string&)");
-			data = stbi_load(m_Path.c_str(), &width, &height, &channels, 0);
+			data = stbi_load((std::string(WLD_EDITOR_DIR) + m_Path).c_str(), &width, &height, &channels, 0);
 			WLD_CORE_ASSERT(data, "Failed to load image!");
 		}
 		GLint internalFormat = 0, dataFormat = 0;

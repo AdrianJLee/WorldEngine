@@ -155,7 +155,7 @@ namespace World
 					{
 						const wchar_t* path = (const wchar_t*)payload->Data;
 
-						std::filesystem::path texturePath = std::filesystem::path(WLD_ASSETPATH) / path;
+						std::filesystem::path texturePath = std::filesystem::path("assets") / path;
 						sprite.Texture = Texture2D::Create(texturePath.string());
 					}
 					ImGui::EndDragDropTarget();

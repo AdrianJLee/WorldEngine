@@ -11,19 +11,19 @@ namespace World
 
 	const std::string ShaderCompiler::dxcAbsPath = WLD_ROOT_DIR + std::string("vendor/dxc/dxc.exe"); // 定位到你的 dxc
 	const std::string ShaderCompiler::spirvCrossAbsPath = WLD_ROOT_DIR + std::string("vendor/SPIRV-Cross/spirv-cross.exe"); // 定位到你的 spirv-cross
-	const std::string ShaderCompiler::outPutAbsPath = WLD_INTERMEDIATE_DIR + std::string("Editor/"); // 定位到你的中间目录
+	const std::string ShaderCompiler::outPutAbsPath = WLD_INTERMEDIATE_DIR + std::string("World/");
 
 	std::vector<char> ShaderCompiler::CompileOrLoad(const std::string& hlslRelativePath, const std::string& entryPoint, const std::string& profile)
 	{
 		// 使用 std::filesystem::path 处理和拼接路径
 		std::filesystem::path relativePath(hlslRelativePath);
-		std::filesystem::path sourceAbsPath = std::filesystem::path(WLD_EDITOR_DIR) / relativePath;
+		std::filesystem::path sourceAbsPath = std::filesystem::absolute(std::filesystem::path(WLD_WORLD_DIR) / relativePath);
 
 		// 获取文件名并去掉后缀 (stem)
 		std::string shaderStem = relativePath.stem().string();
 
 		// 拼接出输出目录
-		std::filesystem::path shaderOutputDir = std::filesystem::path(outPutAbsPath) / relativePath.parent_path();
+		std::filesystem::path shaderOutputDir = std::filesystem::absolute(std::filesystem::path(outPutAbsPath) / relativePath.parent_path());
 
 		// 生成相应文件的绝对路径
 		std::filesystem::path hlslAbsPath = shaderOutputDir / (shaderStem + ".hlsl");

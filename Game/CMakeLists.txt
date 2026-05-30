@@ -18,6 +18,7 @@ endif()
 target_compile_definitions(Game PRIVATE 
     _CRT_SECURE_NO_WARNINGS
     YAML_CPP_STATIC_DEFINE
+    WLD_CURRENT_DIR="${CMAKE_SOURCE_DIR}/Game/"
 )
 
 
@@ -31,4 +32,3 @@ target_sources(Game PRIVATE ${Game_SOURCES})
 target_link_libraries(Game PRIVATE 
     World
 )
-

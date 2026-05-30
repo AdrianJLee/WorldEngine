@@ -14,7 +14,7 @@ Entities:
     struct World::CameraComponent:
       Camera:
         m_ProjectionType: 1
-        m_AspectRatio: 1.34986222
+        m_AspectRatio: 0.97920996
         m_OrthographicZoom: 3
         m_OrthographicNearClip: -1
         m_OrthographicFarClip: 1

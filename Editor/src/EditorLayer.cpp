@@ -1,6 +1,8 @@
 ﻿#include "EditorLayer.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Cook/VFS.h"
+
+#include <filesystem>
 namespace World
 {
 	EditorLayer::EditorLayer()
@@ -124,27 +126,67 @@ namespace World
 				}
 				if (ImGui::MenuItem("Cooking"))
 				{
-					std::string outPath = World::FileDialogs::SaveFile("Pak (*.pak)\0*.pak\0");
-					if (!outPath.empty())
+					// 提示用户选择一个用来存放发布版游戏包的“存储包名”
+					std::string cookTarget = World::FileDialogs::SaveFile("Game Package\0*.*\0");
+					if (!cookTarget.empty())
 					{
-						// 记录状态，准备显示弹窗
 						m_ShowCookingProgress = true;
 						m_CookingFinished = false;
 
-						// 告诉 ImGui 下一帧打开模态弹窗
 						ImGui::OpenPopup("Cooking Progress");
 
-						std::string sourceDir = "assets"; // 你的源资源目录
-
-						// 开启独立线程进行打包操作，防止编辑器卡死
-						std::thread([sourceDir, outPath, this]()
+						std::thread([cookTarget, this]()
 							{
-								VFS::BuildPakFromDirectory(sourceDir, outPath);
+								namespace fs = std::filesystem;
+								fs::path publishDir = fs::path(cookTarget);
+								publishDir.replace_extension("");
 
-								// 任务完成后标记状态
+								// 创建发布目录
+								fs::create_directories(publishDir);
+								fs::path srcGameOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "Game/" + std::string(WLD_BUILD_TYPE));
+								fs::path srcGameExe = srcGameOutputDir / "Game.exe";
+
+								if (!srcGameExe.empty())
+								{
+									// 将被找到的 Game.exe 复制进发布目录
+									fs::copy_file(srcGameExe, publishDir / "Game.exe", fs::copy_options::overwrite_existing);
+									WLD_CORE_INFO("Copied Game executable from: {0}", srcGameExe.string());
+
+
+								}
+								else
+								{
+									WLD_CORE_ERROR("Game.exe built successfully but could not be located on disk.");
+									this->m_CookingFinished = true;
+									return;
+								}
+
+								for (const auto& entry : fs::directory_iterator(srcGameOutputDir))
+								{
+									if (entry.path().extension() == ".dll")
+									{
+										fs::copy_file(entry.path(), publishDir / entry.path().filename(), fs::copy_options::overwrite_existing);
+									}
+								}
+
+								// ---- 第 2 步：创建 Content 资源大包 (Cooking) ----
+								fs::path contentDir = publishDir / "content";
+								fs::create_directories(contentDir);
+
+								fs::path sourceAssetsDir = "assets"; // 当前游戏项目的源资产文件目录
+								fs::path outPakFile = contentDir / "Base.wpak";
+
+								// 直接调用后台的 VFS 打包方法
+								World::VFS::BuildPakFromDirectory(sourceAssetsDir, outPakFile);
+
+								WLD_CORE_INFO("Game Cooked Successfully to {0}", publishDir.string());
+
+								// 通知 UI 任务完成可以关掉进度条进度弹窗了
 								this->m_CookingFinished = true;
+
 							}).detach();
 					}
+
 				}
 
 				if (ImGui::MenuItem("Exit"))

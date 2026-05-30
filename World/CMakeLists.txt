@@ -43,6 +43,7 @@ target_compile_definitions(World PRIVATE
     YAML_CPP_STATIC_DEFINE
     GLFW_INCLUDE_VULKAN
     NOMINMAX
+    WLD_CURRENT_DIR="${CMAKE_SOURCE_DIR}/World/"
 )
 target_compile_definitions(World PUBLIC 
     WLD_CORE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/"

@@ -3,6 +3,8 @@
 # 设置输出目录 (类似 Premake 的 outputdir)
 set(OUTPUT_CONFIG "${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_NAME}-x64")
 
+set(CMAKE_VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 project(World VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -17,7 +19,12 @@ add_subdirectory(World)
 
 add_subdirectory(Editor)
 add_subdirectory(Game)
+add_dependencies(Editor Game)
+
 target_compile_definitions(World PUBLIC
+    WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"
     WLD_EDITOR_DIR="${CMAKE_SOURCE_DIR}/Editor/"
-    WLD_ASSETPATH="assets"
+    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/Editor/assets"
+    WLD_OUTPUT_DIR="${OUTPUT_CONFIG}/"
+    WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/World/"
 )
