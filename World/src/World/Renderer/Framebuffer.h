@@ -22,8 +22,7 @@ namespace World
 	{
 		FramebufferTextureSpecification(FramebufferTextureFormat format)
 			: TextureFormat(format)
-		{
-		}
+		{}
 
 		FramebufferTextureFormat TextureFormat = FramebufferTextureFormat::None;
 
@@ -36,8 +35,7 @@ namespace World
 		FramebufferAttachmentSpecification() = default;
 		FramebufferAttachmentSpecification(std::initializer_list<FramebufferTextureSpecification> attachments)
 			: Attachments(attachments)
-		{
-		}
+		{}
 
 		std::vector<FramebufferTextureSpecification> Attachments;
 	};

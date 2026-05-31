@@ -9,6 +9,7 @@ namespace World
 	{
 	public:
 		static Ref<CommandBuffer> Create();
+
 	public:
 		virtual ~CommandBuffer() = default;
 		virtual void AddCommand(const std::function<void()>& command) = 0;
@@ -17,7 +18,8 @@ namespace World
 		virtual void End() = 0;
 		virtual void StartBatch() = 0;
 		// 录制指令
-		virtual void BeginRenderPass(Ref<RenderPass> renderPass, bool clear = false) = 0;
+		virtual void BeginRenderPass(Ref<RenderPass> renderPass, bool clear) = 0;
+		virtual void BeginRenderPass(Ref<RenderPass> renderPass) = 0;
 		virtual void EndRenderPass() = 0;
 
 		virtual void BindPipeline(Ref<PipelineStateObject> pipeline) = 0;

@@ -26,6 +26,8 @@ namespace World
 		virtual void SetLineWidth(float width) = 0;
 		inline constexpr static API GetAPI() { return s_API; }
 
+		// 纯Game视图渲染，不考虑选中实体等编辑器特有功能
+		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass) = 0;
 		virtual void BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear) = 0;
 		virtual void EndRenderPass() = 0;
 

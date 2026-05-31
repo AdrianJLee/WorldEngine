@@ -173,7 +173,7 @@ namespace World
 								fs::path contentDir = publishDir / "content";
 								fs::create_directories(contentDir);
 
-								fs::path sourceAssetsDir = "assets"; // 当前游戏项目的源资产文件目录
+								fs::path sourceAssetsDir = std::string(WLD_CURRENT_DIR) + "assets"; // 当前游戏项目的源资产文件目录
 								fs::path outPakFile = contentDir / "Base.wpak";
 
 								// 直接调用后台的 VFS 打包方法

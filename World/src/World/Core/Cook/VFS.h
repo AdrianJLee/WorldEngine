@@ -19,6 +19,7 @@ namespace World
 		{
 			uint64_t Offset;
 			uint64_t Size;
+			std::string PakPath; // 新增：记录该文件属于哪个 pak 包
 		};
 
 		// 初始化 VFS，加载 .wpak 大文件

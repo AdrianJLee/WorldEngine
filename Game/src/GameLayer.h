@@ -14,8 +14,10 @@ namespace World
 		virtual void OnImGuiRender() override;
 		virtual void OnEvent(Event& event) override;
 	private:
+		bool OnWindowResize(WindowResizeEvent& e);
 		void LoadScene();
 	private:
 		Ref<Scene> m_ActiveScene;
+		Ref<SceneRenderer> m_SceneRenderer;
 	};
 }

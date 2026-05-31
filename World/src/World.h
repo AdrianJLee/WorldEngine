@@ -34,6 +34,7 @@
 #include "World/Scene/ScriptableEntity.h"
 #include "World/Scene/SceneSerializer.h"
 
+#include "World/Renderer/SceneRenderer.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/RenderCommand.h"

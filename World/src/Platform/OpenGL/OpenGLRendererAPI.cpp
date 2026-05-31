@@ -38,6 +38,17 @@ namespace World
 	{
 		glLineWidth(width);
 	}
+	void OpenGLRendererAPI::BeginRenderPass(const Ref<RenderPass>& renderPass)
+	{
+		const auto& spec = renderPass->GetSpecification();
+		glClearColor(spec.ClearColor.r, spec.ClearColor.g, spec.ClearColor.b, spec.ClearColor.a);
+
+		GLbitfield flags = 0;
+		if (spec.ClearOnColor) flags |= GL_COLOR_BUFFER_BIT;
+		if (spec.ClearOnDepth) flags |= GL_DEPTH_BUFFER_BIT;
+
+		glClear(flags);
+	}
 	void OpenGLRendererAPI::BeginRenderPass(const Ref<RenderPass>& renderPass, bool clear)
 	{
 		const auto& spec = renderPass->GetSpecification();

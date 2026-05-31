@@ -11,6 +11,7 @@ namespace World
 		virtual void End() override;
 		virtual void StartBatch() override;
 
+		virtual void BeginRenderPass(Ref<RenderPass> renderPass) override;
 		virtual void BeginRenderPass(Ref<RenderPass> renderPass, bool clear) override;
 		virtual void EndRenderPass() override;
 

@@ -37,6 +37,11 @@ namespace World
 			s_RendererAPI->BeginRenderPass(renderPass, clear);
 		}
 
+		inline static void BeginRenderPass(const Ref<RenderPass>& renderPass)
+		{
+			s_RendererAPI->BeginRenderPass(renderPass);
+		}
+
 		inline static void EndRenderPass()
 		{
 			s_RendererAPI->EndRenderPass();

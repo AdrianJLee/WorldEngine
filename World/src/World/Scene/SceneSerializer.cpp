@@ -4,6 +4,7 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
 #include "World/Core/UUID.h"
+#include "World/Core/Cook/VFS.h"
 
 #include <filesystem>
 #include <fstream>
@@ -565,17 +566,32 @@ namespace World
 
 	bool SceneSerializer::Deserialize(const std::string& filepath)
 	{
-		std::ifstream stream(filepath);
-		if (!stream.is_open())
+		std::string yamlData;
+		if (std::filesystem::exists(filepath))
 		{
-			WLD_CORE_ERROR("Could not open file '{0}'", filepath);
-			return false;
+			std::ifstream stream(filepath);
+			if (!stream.is_open())
+			{
+				WLD_CORE_ERROR("Could not open file '{0}'", filepath);
+				return false;
+			}
+			std::stringstream strstream;
+			strstream << stream.rdbuf();
+			yamlData = strstream.str();
 		}
-		std::stringstream strstream;
-		// 1. 将文件内容读入字符串流
-		strstream << stream.rdbuf();
+		else
+		{
+			// Try to read from VFS
+			auto data = VFS::ReadFile(filepath);
+			if (data.empty())
+			{
+				WLD_CORE_ERROR("Could not load file '{0}' from disk or VFS", filepath);
+				return false;
+			}
+			yamlData = std::string(data.begin(), data.end());
+		}
 
-		YAML::Node data = YAML::Load(strstream.str());
+		YAML::Node data = YAML::Load(yamlData);
 		if (!data["Scene"])
 		{
 			WLD_CORE_ERROR("Could not find 'Scene' node in '{0}'", filepath);
@@ -619,14 +635,16 @@ namespace World
 								if (typeid(NativeScriptComponent).name() == typeDesc->Name)
 								{
 									TypeDesc* scriptTypeDesc = TypeRegistry::Get().GetTypeDesc(((NativeScriptComponent*)rawPtr)->ScriptName);
-									if (TypeDescDataScript* scriptInfo = std::any_cast<TypeDescDataScript>(&scriptTypeDesc->UserData))
+									if (scriptTypeDesc)
 									{
-										if (scriptInfo->BindFunc)
+										if (TypeDescDataScript* scriptInfo = std::any_cast<TypeDescDataScript>(&scriptTypeDesc->UserData))
 										{
-											scriptInfo->BindFunc(*(NativeScriptComponent*)rawPtr);
+											if (scriptInfo->BindFunc)
+											{
+												scriptInfo->BindFunc(*(NativeScriptComponent*)rawPtr);
+											}
 										}
 									}
-
 								}
 
 							}

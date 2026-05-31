@@ -21,6 +21,13 @@ namespace World
 				Renderer2D::StartBatch();
 			});
 	}
+	void OpenGLCommandBuffer::BeginRenderPass(Ref<RenderPass> renderPass)
+	{
+		m_CommandQueue.push_back([renderPass]()
+			{
+				RenderCommand::BeginRenderPass(renderPass);
+			});
+	}
 	void OpenGLCommandBuffer::BeginRenderPass(Ref<RenderPass> renderPass, bool clear)
 	{
 		m_CommandQueue.push_back([renderPass, clear]()
@@ -75,13 +82,12 @@ namespace World
 	}
 	void OpenGLCommandBuffer::SetBufferData(Ref<class VertexBuffer> vertexBuffer, const void* data, uint32_t size)
 	{
-		void* dataCopy = malloc(size);
-		memcpy(dataCopy, data, size);
-		m_CommandQueue.push_back([vertexBuffer, dataCopy, size]()
+		std::vector<uint8_t> dataCopy((const uint8_t*)data, (const uint8_t*)data + size);
+
+		m_CommandQueue.push_back([vertexBuffer, buffer = std::move(dataCopy)]()
 			{
-				// 2. 这里是“执行”时刻（Execute）
-				vertexBuffer->SetData(dataCopy, size);
-				free(dataCopy);
+				// 通过 buffer.data() 和 buffer.size() 安全使用
+				vertexBuffer->SetData(buffer.data(), buffer.size());
 			});
 		//m_CommandQueue.push_back([vertexBuffer, data, size]()
 		//	{

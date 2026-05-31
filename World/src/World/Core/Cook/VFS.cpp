@@ -54,11 +54,12 @@ namespace World
 			FileEntry entry;
 			if (!file.read((char*)&entry.Offset, sizeof(uint64_t))) break;
 			if (!file.read((char*)&entry.Size, sizeof(uint64_t))) break;
+			entry.PakPath = pakFilePath;
 
 			s_IndexTable[path] = entry;
 		}
 
-		WLD_CORE_INFO("Successfully mounted {0} (Indexed {1} files)", pakFilePath, s_IndexTable.size());
+		WLD_CORE_INFO("Successfully mounted {0} (Indexed {1} files)", pakFilePath, header.IndexCount);
 	}
 
 	std::vector<uint8_t> VFS::ReadFile(const std::string& virtualPath)
@@ -71,13 +72,15 @@ namespace World
 		const auto& entry = s_IndexTable[virtualPath];
 		std::vector<uint8_t> buffer(entry.Size);
 
-		std::ifstream file(s_MountedPakPath, std::ios::binary);
-		file.seekg(entry.Offset);
-		file.read((char*)buffer.data(), entry.Size);
+		std::ifstream file(entry.PakPath, std::ios::binary);
+		if (file.is_open())
+		{
+			file.seekg(entry.Offset);
+			file.read((char*)buffer.data(), entry.Size);
+		}
 
 		return buffer;
 	}
-
 
 	void VFS::BuildPakFromDirectory(const std::filesystem::path& sourceDir, const std::filesystem::path& outPakPath)
 	{

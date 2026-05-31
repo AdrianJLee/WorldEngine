@@ -25,6 +25,8 @@ namespace World
 
 		// 核心：解析场景并决定渲染顺序
 		void SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity entity);
+		// 纯Game视图渲染，不考虑选中实体等编辑器特有功能
+		void SubmitScene(const Camera& camera, const glm::mat4& cameraTransform);
 
 		void OnResize(uint32_t width, uint32_t height);
 

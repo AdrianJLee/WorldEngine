@@ -57,7 +57,29 @@ namespace World
 
 		m_CommandBuffer->Begin(m_CurrentFrameIndex);
 	}
+	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		glm::mat4 uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
 
+		m_CommandBuffer->AddCommand([this, uCameraData]()
+			{
+				m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->Get(m_CommandBuffer->GetCurrentFrameIndex())->SetData(&uCameraData, sizeof(glm::mat4));
+
+			});
+
+		m_CommandBuffer->BeginRenderPass(m_ActivePass);
+
+		Renderer2D::StartBatch();
+		m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
+
+		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
+
+		RenderGeometry(m_CommandBuffer, camera, cameraTransform);
+
+		Renderer2D::EndScene();
+
+		m_CommandBuffer->EndRenderPass();
+	}
 	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
 	{
 		glm::mat4 uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
@@ -70,17 +92,19 @@ namespace World
 
 		m_CommandBuffer->BeginRenderPass(m_ActivePass, true);
 
-		m_CommandBuffer->StartBatch();
-
+		Renderer2D::StartBatch();
 		m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
 
 		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
+
+
 		if (selectedEntity)
 		{
 			auto& transform = selectedEntity.GetComponent<TransformComponent>();
 			Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
 		}
 		RenderDebug(m_CommandBuffer, camera, cameraTransform);
+
 
 		RenderGeometry(m_CommandBuffer, camera, cameraTransform);
 
