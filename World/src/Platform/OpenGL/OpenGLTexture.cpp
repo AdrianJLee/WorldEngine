@@ -16,7 +16,17 @@ namespace World
 		stbi_uc* data = nullptr;
 		{
 			WLD_PROFILE_SCOPE("stbi_load - OpenGLTexture2D::OpenGLTexture2D(const std::string&)");
-			data = stbi_load((std::string(WLD_EDITOR_DIR) + m_Path).c_str(), &width, &height, &channels, 0);
+			std::string path;
+			if (std::filesystem::exists(std::string(WLD_GAME_DIR) + m_Path))
+			{
+				path = std::string(WLD_GAME_DIR) + m_Path;
+			}
+			else
+			{
+				// 如果在游戏目录下找不到，就尝试在编辑器目录下找
+				path = std::string(WLD_EDITOR_DIR) + m_Path;
+			}
+			data = stbi_load(path.c_str(), &width, &height, &channels, 0);
 			WLD_CORE_ASSERT(data, "Failed to load image!");
 		}
 		GLint internalFormat = 0, dataFormat = 0;

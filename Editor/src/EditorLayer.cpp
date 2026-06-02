@@ -18,6 +18,46 @@ namespace World
 	void EditorLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();
+		std::string dllPath = std::string(WLD_OUTPUT_DIR) + "bin/" + WLD_BUILD_TYPE + "Game/" + WLD_BUILD_TYPE + "Game.dll";
+		HMODULE gameModule = LoadLibraryA(dllPath.c_str());
+
+		if (gameModule)
+		{
+			WLD_CORE_INFO("Successfully loaded Game.dll from {0}", dllPath);
+
+			typedef void(*InitGameDLLFunc)(World::Application*);
+			InitGameDLLFunc initFunc = (InitGameDLLFunc)GetProcAddress(gameModule, "OnInitGameDLL");
+
+			if (initFunc)
+			{
+				initFunc(&World::Application::Get());
+			}
+			else
+			{
+				WLD_CORE_ERROR("Failed to find InitGameDLL function in Game.dll!");
+			}
+
+			typedef void* (*GetRegistryFunc)();
+			GetRegistryFunc getGameTypeRegistry = (GetRegistryFunc)GetProcAddress(gameModule, "GetGameTypeRegistry");
+
+			if (getGameTypeRegistry)
+			{
+				// 拿到对面的 TypeRegistry 指针
+				World::TypeRegistry* gameRegistry = static_cast<World::TypeRegistry*>(getGameTypeRegistry());
+
+				// 将对面的所有脚本、属性数据，倒灌到当前 Editor 的单例中！
+				World::TypeRegistry::Get().MergeFrom(*gameRegistry);
+			}
+			else
+			{
+				WLD_CORE_ERROR("Failed to find GetGameTypeRegistry function in Game.dll!");
+			}
+		}
+		else
+		{
+			WLD_CORE_ERROR("Failed to load Game.dll!");
+		}
+
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 		m_SceneRenderer->Init();
 
@@ -143,15 +183,14 @@ namespace World
 
 								// 创建发布目录
 								fs::create_directories(publishDir);
-								fs::path srcGameOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "Game/" + std::string(WLD_BUILD_TYPE));
-								fs::path srcGameExe = srcGameOutputDir / "Game.exe";
+								fs::path srcRuntimeOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "Runtime/" + std::string(WLD_BUILD_TYPE));
+								fs::path srcRuntimeExe = srcRuntimeOutputDir / "Runtime.exe";
 
-								if (!srcGameExe.empty())
+								if (!srcRuntimeExe.empty())
 								{
-									// 将被找到的 Game.exe 复制进发布目录
-									fs::copy_file(srcGameExe, publishDir / "Game.exe", fs::copy_options::overwrite_existing);
-									WLD_CORE_INFO("Copied Game executable from: {0}", srcGameExe.string());
-
+									// 将被找到的 Runtime.exe 复制进发布目录
+									fs::copy_file(srcRuntimeExe, publishDir / "Runtime.exe", fs::copy_options::overwrite_existing);
+									WLD_CORE_INFO("Copied Runtime executable from: {0}", srcRuntimeExe.string());
 
 								}
 								else
@@ -160,7 +199,7 @@ namespace World
 									this->m_CookingFinished = true;
 									return;
 								}
-
+								fs::path srcGameOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "Game/" + std::string(WLD_BUILD_TYPE));
 								for (const auto& entry : fs::directory_iterator(srcGameOutputDir))
 								{
 									if (entry.path().extension() == ".dll")
@@ -173,7 +212,7 @@ namespace World
 								fs::path contentDir = publishDir / "content";
 								fs::create_directories(contentDir);
 
-								fs::path sourceAssetsDir = std::string(WLD_CURRENT_DIR) + "assets"; // 当前游戏项目的源资产文件目录
+								fs::path sourceAssetsDir = std::string(WLD_GAME_DIR) + "assets"; // 当前游戏项目的源资产文件目录
 								fs::path outPakFile = contentDir / "Base.wpak";
 
 								// 直接调用后台的 VFS 打包方法

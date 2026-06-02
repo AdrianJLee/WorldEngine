@@ -13,7 +13,7 @@ namespace World
 	public:
 		Application(const std::string& name);
 		virtual ~Application();
-
+		static void SetInstance(Application* instance) { s_Instance = instance; }
 		void Run();
 
 		void OnEvent(Event& e);
@@ -21,7 +21,7 @@ namespace World
 		void PushLayer(Layer* layer);
 		void PushOverlay(Layer* layer);
 
-		inline static Application& Get() { return *s_Instance; };
+		static Application& Get();
 		inline Window& GetWindow() { return *m_Window; };
 
 		void Close();

@@ -192,11 +192,8 @@ namespace World
 	class TypeRegistry
 	{
 	public:
-		static TypeRegistry& Get()
-		{
-			static TypeRegistry instance;
-			return instance;
-		}
+		static TypeRegistry& Get();
+		void MergeFrom(const TypeRegistry& other);
 	private:
 		TypeRegistry() = default;
 		~TypeRegistry() = default;

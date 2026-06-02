@@ -645,6 +645,10 @@ namespace World
 											}
 										}
 									}
+									else
+									{
+										WLD_CORE_ERROR("Could not find script type '{0}' for NativeScriptComponent!", ((NativeScriptComponent*)rawPtr)->ScriptName);
+									}
 								}
 
 							}

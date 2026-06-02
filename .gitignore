@@ -8,3 +8,4 @@ bin-int/
 build
 *.vcxproj
 *.filters
+.github

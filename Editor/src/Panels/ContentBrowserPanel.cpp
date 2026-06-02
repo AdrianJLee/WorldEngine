@@ -132,7 +132,7 @@ namespace World
 		std::filesystem::path relativePath = std::filesystem::relative(m_CurrentDirectory, m_RootDirectory);
 		std::filesystem::path accumulatedPath = m_RootDirectory;
 
-		if (ImGui::Button("Assets"))
+		if (ImGui::Button("Root"))
 		{
 			m_CurrentDirectory = m_RootDirectory;
 		}

@@ -1,24 +1,25 @@
 ﻿#include "World.h"
-#include "GameLayer.h"
-// 这个文件是整个 Game 程序的入口，定义了 GameApp 类并实现了 CreateApplication 函数
+#include "RuntimeLayer.h"
+// 这个文件是整个 Runtime 程序的入口，定义了 RuntimeApp 类并实现了 CreateApplication 函数
 #include "World/Core/EntryPoint.h"
 
 namespace World
 {
-	class GameApp : public Application
+	class RuntimeApp : public Application
 	{
 	public:
-		GameApp()
-			:Application("Game")
+		RuntimeApp()
+			:Application("Runtime")
 		{
 			// 在游戏程序启动时，自动扫描 content 目录下的所有 .wpak 或 .pak 文件，并挂载到 VFS 中
-			MountAllPakFiles("content");
+			std::filesystem::path contentDir = std::string(WLD_CURRENT_DIR) + "content";
+			MountAllPakFiles(contentDir);
 
-			PushLayer(WLD_ENGINE_NEW(GameLayer));
+			PushLayer(WLD_ENGINE_NEW(RuntimeLayer));
 
 
 		}
-		~GameApp()
+		~RuntimeApp()
 		{
 
 		}
@@ -57,6 +58,6 @@ namespace World
 	Application* CreateApplication()
 	{
 
-		return new GameApp();
+		return new RuntimeApp();
 	}
 }

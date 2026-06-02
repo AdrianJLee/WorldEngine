@@ -19,12 +19,16 @@ add_subdirectory(World)
 
 add_subdirectory(Editor)
 add_subdirectory(Game)
+add_subdirectory(Runtime)
+
 add_dependencies(Editor Game)
+add_dependencies(Runtime Game)
 
 target_compile_definitions(World PUBLIC
     WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"
     WLD_EDITOR_DIR="${CMAKE_SOURCE_DIR}/Editor/"
-    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/Editor/assets"
+    WLD_GAME_DIR="${CMAKE_SOURCE_DIR}/Game/"
+    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/Game/assets"
     WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
     WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/World/"
 )

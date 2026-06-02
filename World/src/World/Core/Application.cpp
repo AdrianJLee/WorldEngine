@@ -13,6 +13,10 @@
 namespace World
 {
 	Application* Application::s_Instance = nullptr;
+	Application& Application::Get()
+	{
+		return *s_Instance;
+	}
 	Application::Application(const std::string& name)
 	{
 		WLD_PROFILE_FUNCTION();

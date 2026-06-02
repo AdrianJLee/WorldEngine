@@ -1,6 +1,7 @@
 ﻿#include "GameLayer.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Renderer/RenderCommand.h"
+#include "GameAPI.h"
 
 namespace World
 {
@@ -92,5 +93,25 @@ namespace World
 		{
 			WLD_CORE_ERROR("Failed to load scene from VFS or Disk: {0}", scenePath);
 		}
+	}
+}
+
+#pragma comment(linker, "/EXPORT:OnInitGameDLL")
+#pragma comment(linker, "/EXPORT:OnShutdownGameDLL")
+#pragma comment(linker, "/EXPORT:GetGameTypeRegistry")
+
+extern "C"
+{
+	__declspec(dllexport) void OnInitGameDLL(World::Application* hostInstance)
+	{
+		World::Application::SetInstance(hostInstance);
+	}
+
+	__declspec(dllexport) void OnShutdownGameDLL()
+	{}
+
+	__declspec(dllexport) void* GetGameTypeRegistry()
+	{
+		return &(World::TypeRegistry::Get());
 	}
 }

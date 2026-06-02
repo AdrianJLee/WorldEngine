@@ -6,11 +6,11 @@ Entities:
     struct World::TagComponent:
       Tag: Camera
     struct World::TransformComponent:
-      Location: [0, 0, 0.5]
+      Location: [0, 0, 0]
       Rotation: [0, -0, 0]
       RotationQuat: [0, 0, 0, 1]
       Scale: [1, 1, 1]
-      Transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0.5, 1]
+      Transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     struct World::CameraComponent:
       Camera:
         m_ProjectionType: 1

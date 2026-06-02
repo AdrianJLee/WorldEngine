@@ -1,14 +1,13 @@
 ﻿#pragma once
-#include "GameAPI.h"
 #include "World.h"
 
 namespace World
 {
-	class GameLayer : public Layer
+	class RuntimeLayer : public Layer
 	{
 	public:
-		GameLayer();
-		virtual ~GameLayer() = default;
+		RuntimeLayer();
+		virtual ~RuntimeLayer() = default;
 		virtual void OnAttach() override;
 		virtual void OnDetach() override;
 		virtual void OnUpdate(Timestep ts) override;
