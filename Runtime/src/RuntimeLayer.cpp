@@ -19,18 +19,25 @@ namespace World
 		std::filesystem::path exePath = exePathBuf;
 		std::filesystem::path exeDir = exePath.parent_path(); // 提取 exe 所在目录
 
-		// 拼接打包后的预期路径：exe 同级目录下的 Game.dll
-		std::filesystem::path packagedDllPath = exeDir / "Game.dll";
-		WLD_INFO("Looking for Game.dll at: {0}", packagedDllPath.string());
-		// 检查打包版路径是否存在
-		if (std::filesystem::exists(packagedDllPath))
+		std::filesystem::path binDir = exeDir / "bin";
+		WLD_INFO("Looking for Game.dll in: {0}", binDir.string());
+
+		if (std::filesystem::exists(binDir))
 		{
-			dllPath = packagedDllPath.string();
+			for (const auto& entry : std::filesystem::recursive_directory_iterator(binDir))
+			{
+				if (entry.is_regular_file() && entry.path().filename() == "Game.dll")
+				{
+					dllPath = entry.path().string();
+					break;
+				}
+			}
 		}
-		else
+
+		if (dllPath.empty())
 		{
-			// 4. 兜底：如果在开发环境运行，退回 CMake 生成的工作区路径
-			dllPath = std::string(WLD_OUTPUT_DIR) + "bin/" + WLD_BUILD_TYPE + "Game/" + WLD_BUILD_TYPE + "Game.dll";
+			// 兜底：如果在开发环境运行，退回 CMake 生成的工作区路径
+			dllPath = std::string(WLD_OUTPUT_DIR) + "bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll";
 		}
 
 		HMODULE gameModule = LoadLibraryA(dllPath.c_str());

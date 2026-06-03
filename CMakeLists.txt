@@ -21,8 +21,9 @@ add_subdirectory(Editor)
 add_subdirectory(Game)
 add_subdirectory(Runtime)
 
-add_dependencies(Editor Game)
 add_dependencies(Runtime Game)
+add_dependencies(Editor Runtime)
+
 
 target_compile_definitions(World PUBLIC
     WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"

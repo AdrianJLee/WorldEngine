@@ -195,16 +195,19 @@ namespace World
 								}
 								else
 								{
-									WLD_CORE_ERROR("Game.exe built successfully but could not be located on disk.");
+									WLD_CORE_ERROR("Runtime.exe built successfully but could not be located on disk.");
 									this->m_CookingFinished = true;
 									return;
 								}
-								fs::path srcGameOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "Game/" + std::string(WLD_BUILD_TYPE));
-								for (const auto& entry : fs::directory_iterator(srcGameOutputDir))
+								fs::path srcGameOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "bin/");
+								for (const auto& entry : fs::recursive_directory_iterator(srcGameOutputDir))
 								{
-									if (entry.path().extension() == ".dll")
+									if (entry.is_regular_file() && entry.path().extension() == ".dll")
 									{
-										fs::copy_file(entry.path(), publishDir / entry.path().filename(), fs::copy_options::overwrite_existing);
+										fs::path relativePath = fs::relative(entry.path(), srcGameOutputDir);
+										fs::path destPath = publishDir / "bin" / relativePath;
+										fs::create_directories(destPath.parent_path());
+										fs::copy_file(entry.path(), destPath, fs::copy_options::overwrite_existing);
 									}
 								}
 
