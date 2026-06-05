@@ -19,7 +19,7 @@ namespace World
 		void Init();
 		void Shutdown();
 
-		void BeginScene(const Scene* scene, const SceneRendererOptions& options);
+		void BeginScene(Scene* scene, const SceneRendererOptions& options);
 		void EndScene();
 
 
@@ -43,7 +43,7 @@ namespace World
 		Ref<CommandBuffer> m_CommandBuffer; // 当前帧的指令载体
 
 		SceneRendererOptions m_Options;
-		const Scene* m_ActiveScene = nullptr;
+		Scene* m_ActiveScene = nullptr;
 
 		uint32_t m_CurrentFrameIndex = 0;
 

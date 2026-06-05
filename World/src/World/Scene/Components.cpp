@@ -325,7 +325,9 @@ namespace World
 								if (tempInstance)
 								{
 									currentVal = typeDesc->GetValueErased(dynamic_cast<void*>(tempInstance), prop);
+
 									nativeScript.FieldValues[prop.Name] = currentVal;
+
 								}
 								else
 								{
@@ -479,7 +481,9 @@ namespace World
 									if (nativeScript.Instance)
 										typeDesc->SetValueErased(tempInstance, prop, currentVal);
 									else
+									{
 										nativeScript.FieldValues[prop.Name] = currentVal;
+									}
 								}
 								ImGui::PopID();
 							}

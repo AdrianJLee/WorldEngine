@@ -8,6 +8,7 @@
 #include "World/Renderer/Texture.h"
 #include "World/Renderer/PipelineStateObject.h"
 #include "World/Core/Thread/JobSystem.h"
+#include "World/Math/Math.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -453,9 +454,13 @@ namespace World
 
 		// 组装并上传顶点数据
 		constexpr uint32_t quadVertexCount = 4;
+		glm::vec3 transformedPositions[quadVertexCount];
+		Math::MultiplyMat4ByVec4_SIMD_x4(transform, s_Data.VertexPositions, transformedPositions);
+
 		for (uint32_t i = 0; i < quadVertexCount; i++)
 		{
-			s_Data.QuadData.QuadVertexBufferPtr->Position = transform * s_Data.VertexPositions[i];
+			s_Data.QuadData.QuadVertexBufferPtr->Position = transformedPositions[i];
+			//s_Data.QuadData.QuadVertexBufferPtr->Position = transform * s_Data.VertexPositions[i];
 			s_Data.QuadData.QuadVertexBufferPtr->Color = color;
 			s_Data.QuadData.QuadVertexBufferPtr->TexCoord = actualTexCoords[i];
 			s_Data.QuadData.QuadVertexBufferPtr->TexIndex = textureIndex;

@@ -50,9 +50,10 @@ namespace World
 		m_ActiveScene = nullptr;
 	}
 
-	void SceneRenderer::BeginScene(const Scene* scene, const SceneRendererOptions& options)
+	void SceneRenderer::BeginScene(Scene* scene, const SceneRendererOptions& options)
 	{
 		m_ActiveScene = scene;
+
 		m_Options = options;
 
 		m_CommandBuffer->Begin(m_CurrentFrameIndex);
@@ -115,13 +116,13 @@ namespace World
 
 	void SceneRenderer::RenderGeometry(Ref<CommandBuffer> cmd, const Camera& camera, const glm::mat4& cameraTransform)
 	{
-
 		{
-			// 同时请求 Transform 和 Sprite，EnTT 会在底层快速交叉比对拥有这两个组件的实体
-			auto view = m_ActiveScene->m_Registry.view<TransformComponent, SpriteComponent>();
-			for (auto [entity, transform, sprite] : view.each())
+			// 使用 group 替代 view，会使遍历性能成倍提升（它们在内存中完美对齐）
+			auto group = m_ActiveScene->m_Registry.group<TransformComponent>(entt::get<SpriteComponent>);
+			for (auto entity : group)
 			{
-				Renderer2D::DrawQuadCore(transform, sprite.Texture, sprite.Color, nullptr, sprite.TilingFactor, (uint32_t)entity);
+				auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
+				Renderer2D::DrawQuadCore(transform.Transform, sprite.Texture, sprite.Color, nullptr, sprite.TilingFactor, (uint32_t)entity);
 			}
 		}
 
