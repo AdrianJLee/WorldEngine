@@ -8,6 +8,7 @@ add_subdirectory(vendor/spdlog)
 set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
 add_subdirectory(vendor/SPIRV-Cross)
 add_subdirectory(vendor/box2d)
+add_subdirectory(vendor/sol2)
 add_library(World STATIC)
 
 # 预编译头
@@ -71,7 +72,8 @@ target_include_directories(World PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/spdlog/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/include"
-
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/sol2/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/lua/src"
 )
 
 # 递归获取源文件
@@ -84,10 +86,14 @@ file(GLOB_RECURSE WORLD_SOURCES
 	"vendor/glm/glm/**.inl"
     "vendor/ImGuizmo/ImGuizmo.h"
     "vendor/ImGuizmo/ImGuizmo.cpp"
+    "vendor/sol2/include/**.hpp"
+    "vendor/lua/src/**.h"
+    "vendor/lua/src/**.c"
+
 )
+
 # 添加源文件到 target
 target_sources(World PRIVATE ${WORLD_SOURCES})
-
 
 # 链接库 (Vulkan::Vulkan 解决了 vulkan-1.lib 路径问题)
 target_link_libraries(World PRIVATE 
@@ -96,6 +102,7 @@ target_link_libraries(World PRIVATE
     opengl32
     Vulkan::Vulkan
     box2d
+    sol2
 )
 target_link_libraries(World PUBLIC 
     yaml-cpp

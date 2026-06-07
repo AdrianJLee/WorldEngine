@@ -22,3 +22,6 @@
 [submodule "World/vendor/yaml"]
 	path = World/vendor/yaml
 	url = https://github.com/AdrianJLee/yaml-cpp.git
+[submodule "World/vendor/sol2"]
+	path = World/vendor/sol2
+	url = https://github.com/ThePhD/sol2.git
