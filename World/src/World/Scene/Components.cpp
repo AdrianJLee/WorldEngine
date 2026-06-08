@@ -1,6 +1,6 @@
 ﻿#include "wldpch.h"
 #include "Components.h"
-#include "World/Core/Memory/PoolAllocator.h"
+#include "World/Scene/ScriptEngine.h"
 #include "World/ImGui/ImGuiDrawLibrary.h"
 
 #include <imgui.h>
@@ -503,6 +503,169 @@ namespace World
 
 			});
 	}
+	void LuaScriptComponent::ComponentPropertiesUI(Entity entity)
+	{
+		ImGuiDrawLibrary::DrawComponent<LuaScriptComponent>("LuaScriptComponent", entity, [](LuaScriptComponent& component) mutable
+			{
+				// 是否已经绑定了脚本
+				bool isBound = !component.ScriptFilePath.empty();
+
+				ImGui::Text("Script File");
+				ImGui::SameLine();
+
+				// 1. 绘制一个占满宽度的按钮，作为拖放的目标区域 (Drop Target)
+				std::string pathString = isBound ? component.ScriptFilePath : "<Drop Lua File Here>";
+
+				// 按钮本身可以点击（未来可扩展为打开系统的文件选择框），这里主要作为占位符接受拖拽
+				ImGui::Button(pathString.c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0));
+
+				// ============================================
+				// 2. 拖拽接收核心逻辑 (Drag & Drop Target)
+				// ============================================
+				if (ImGui::BeginDragDropTarget())
+				{
+					// 注意："CONTENT_BROWSER_ITEM" 必须与你在 ContentBrowserPanel.cpp 中 BeginDragDropSource() 使用的 Payload 名称一致！
+					if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
+					{
+						// 获取拖拽过来的相对路径数据 (通常 ContentBrowser 传递的是 const wchar_t*)
+						const wchar_t* path = (const wchar_t*)payload->Data;
+						std::filesystem::path scriptPath(path);
+
+						// 仅当文件后缀是 .lua 时才接收
+						if (scriptPath.extension() == ".lua")
+						{
+							// 统一路径分隔符并赋值
+							component.ScriptFilePath = scriptPath.string();
+
+							// 🚀 核心：路径改变，重置加载状态，让 ScriptEngine 下一帧重新读取
+							component.IsLoaded = false;
+							ScriptEngine::InitScriptForEditor(component);
+						}
+						else
+						{
+							WLD_CORE_WARN("Failed to bind script: '{0}' is not a .lua file!", scriptPath.filename().string());
+						}
+					}
+					ImGui::EndDragDropTarget();
+				}
+
+				ImGui::Spacing();
+
+				// 3. 解绑按钮（类似于 NativeScript 里的 Unbind Script）
+				if (isBound)
+				{
+
+					if (ImGui::Button("Unbind Lua Script##Lua", ImVec2(-1.0f, 25.0f)))
+					{
+						component.ScriptFilePath.clear();
+						component.IsLoaded = false;
+
+						component.LuaEnv = sol::lua_nil;
+						component.OnCreateFunc = sol::lua_nil;
+						component.OnUpdateFunc = sol::lua_nil;
+						component.OnDestroyFunc = sol::lua_nil;
+					}
+					{
+						std::filesystem::path filepath = WLD_ASSETPATH + std::string("/") + component.ScriptFilePath;
+						if (std::filesystem::exists(filepath))
+						{
+							// 获取硬盘上该文件当前的最后修改时间
+							auto currentModifiedTime = std::filesystem::last_write_time(filepath);
+
+							// 如果时间戳不匹配（说明是刚加载场景，或者文件在外部被 VS Code 修改了并保存了）
+							if (component.LastModifiedTime != currentModifiedTime)
+							{
+								// 重新解析提取变量
+								ScriptEngine::InitScriptForEditor(component);
+
+								// 更新时间戳
+								component.LastModifiedTime = currentModifiedTime;
+
+								// 如果是在运行时修改的，可以顺便标记为需要重新加载环境
+								component.IsLoaded = false;
+							}
+						}
+					}
+				}
+
+				// 4. 运行状态指示器
+				ImGui::Spacing();
+				if (component.IsLoaded)
+				{
+					ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "Status: Script Running");
+				}
+				else
+				{
+					if (!isBound)
+						ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.2f, 1.0f), "Status: <None>");
+					else
+						ImGui::TextColored(ImVec4(0.8f, 0.2f, 0.2f, 1.0f), "Status: Pending Load...");
+				}
+
+				if (!component.CachedFields.empty())
+				{
+					ImGui::Separator();
+					ImGui::Text("Script Properties");
+					ImGui::Spacing();
+
+					if (ImGui::BeginTable("##LuaPropertiesTable", 2, ImGuiTableFlags_Resizable))
+					{
+						ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+						ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+
+						for (auto& [name, field] : component.CachedFields)
+						{
+							ImGui::TableNextRow();
+							ImGui::TableNextColumn();
+							ImGui::AlignTextToFramePadding();
+							ImGui::Text("%s", name.c_str());
+
+							ImGui::TableNextColumn();
+							ImGui::PushItemWidth(-1.0f);
+							ImGui::PushID(name.c_str()); // 防止同名变量冲突
+
+							// 纯粹地在 C++ 内存里修改这些值
+							switch (field.Type)
+							{
+								case LuaFieldType::Float:
+								{
+									float val = std::any_cast<float>(field.Value);
+									ImGui::DragFloat("##val", &val, 0.1f);
+									field.Value = val;
+									break;
+								}
+								case LuaFieldType::Int:
+								{
+									int val = std::any_cast<int>(field.Value);
+									ImGui::DragInt("##val", &val);
+									field.Value = val;
+									break;
+								}
+								case LuaFieldType::Bool:
+								{
+									bool val = std::any_cast<bool>(field.Value);
+									ImGui::Checkbox("##val", &val);
+									field.Value = val;
+									break;
+								}
+								case LuaFieldType::String:
+								{
+									std::string val = std::any_cast<std::string>(field.Value);
+									if (ImGui::InputText("##val", val.data(), val.size()))
+										field.Value = val;
+									break;
+								}
+							}
+
+							ImGui::PopID();
+							ImGui::PopItemWidth();
+						}
+						ImGui::EndTable();
+					}
+				}
+			});
+	}
+
 	void RigidBody2DComponent::ComponentPropertiesUI(Entity entity)
 	{
 		ImGuiDrawLibrary::DrawComponent<RigidBody2DComponent>("RigidBody2DComponent", entity, [](RigidBody2DComponent& rigidBody)

@@ -25,6 +25,8 @@ Entities:
       FixedAspectRatio: false
     struct World::NativeScriptComponent:
       ScriptName: class World::StressTest
+    struct World::LuaScriptComponent:
+      ScriptFilePath: scripts\Test.lua
   - struct World::UUIDComponent:
       ID:
         m_UUID: 12993328383427947612

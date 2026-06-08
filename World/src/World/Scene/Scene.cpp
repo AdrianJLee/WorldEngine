@@ -2,9 +2,7 @@
 #include "Scene.h"
 #include "World/Scene/Components.h"
 #include "World/Core/Thread/JobSystem.h"
-#include "World/Core/Application.h"
-#include "World/Renderer/Renderer2D.h"
-#include "World/Renderer/CommandBuffer.h"
+#include "World/Scene/ScriptEngine.h"
 
 #include <physics_world.h>
 #include <box2d/box2d.h>
@@ -88,33 +86,68 @@ namespace World
 					scriptComponent.Instance->OnCreate();
 				}
 			});
+		m_Registry.view<LuaScriptComponent>().each([=](auto entity, LuaScriptComponent& scriptComponent)
+			{
+				ScriptEngine::OnCreateScript(scriptComponent);
+			});
+
 	}
 
 	void Scene::OnScriptUpdate(Timestep ts)
 	{
-		auto view = m_Registry.view<NativeScriptComponent>();
-		size_t count = view.size();
-		if (count == 0) return;
-
-		WLD_STACK_WIZARD(componentsBuffer, count * sizeof(NativeScriptComponent*), true);
-		NativeScriptComponent** componentsArray = (NativeScriptComponent**)componentsBuffer.GetAllocator().Allocate(count * sizeof(NativeScriptComponent*));
-
-		size_t index = 0;
-		for (auto entity : view)
 		{
-			componentsArray[index++] = &view.get<NativeScriptComponent>(entity);
+			auto view = m_Registry.view<NativeScriptComponent>();
+			size_t count = view.size();
+			if (count != 0)
+			{
+				WLD_STACK_WIZARD(componentsBuffer, count * sizeof(NativeScriptComponent*), true);
+				NativeScriptComponent** componentsArray = (NativeScriptComponent**)componentsBuffer.GetAllocator().Allocate(count * sizeof(NativeScriptComponent*));
+
+				size_t index = 0;
+				for (auto entity : view)
+				{
+					componentsArray[index++] = &view.get<NativeScriptComponent>(entity);
+				}
+
+				// 假设 64 个脚本为一批次派发
+				JobSystem::ParallelFor(count, 64, [&](uint32_t i)
+					{
+						auto* comp = componentsArray[i];
+						if (comp->Instance)
+						{
+							// 在工作线程中并发更新
+							comp->Instance->OnUpdate(ts);
+						}
+					});
+			}
 		}
 
-		// 假设 64 个脚本为一批次派发
-		JobSystem::ParallelFor(count, 64, [&](uint32_t i)
+		{
+			auto view = m_Registry.view<LuaScriptComponent>();
+			size_t count = view.size();
+			if (count != 0)
 			{
-				auto* comp = componentsArray[i];
-				if (comp->Instance)
+				WLD_STACK_WIZARD(componentsBuffer, count * sizeof(LuaScriptComponent*), true);
+				LuaScriptComponent** componentsArray = (LuaScriptComponent**)componentsBuffer.GetAllocator().Allocate(count * sizeof(LuaScriptComponent*));
+				size_t index = 0;
+				for (auto entity : view)
 				{
-					// 在工作线程中并发更新
-					comp->Instance->OnUpdate(ts);
+					componentsArray[index++] = &view.get<LuaScriptComponent>(entity);
 				}
-			});
+				// 假设 64 个脚本为一批次派发
+				JobSystem::ParallelFor(count, 64, [&](uint32_t i)
+					{
+						auto* comp = componentsArray[i];
+						if (comp->IsLoaded)
+						{
+							// 在工作线程中并发更新
+							ScriptEngine::OnUpdateScript(*comp, ts);
+						}
+					});
+			}
+		}
+
+
 	}
 	void Scene::OnScriptDestroy()
 	{
@@ -125,6 +158,11 @@ namespace World
 					scriptComponent.Instance->OnDestroy();
 					scriptComponent.DestroyScript(scriptComponent.Instance);
 				}
+			});
+
+		m_Registry.view<LuaScriptComponent>().each([=](auto entity, LuaScriptComponent& scriptComponent)
+			{
+				ScriptEngine::OnDestroyScript(scriptComponent);
 			});
 	}
 

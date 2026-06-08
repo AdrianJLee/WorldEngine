@@ -87,7 +87,7 @@ file(GLOB_RECURSE WORLD_SOURCES
     "vendor/ImGuizmo/ImGuizmo.h"
     "vendor/ImGuizmo/ImGuizmo.cpp"
     "vendor/sol2/include/**.hpp"
-    "vendor/lua/src/**.h"
+    "vendor/lua/src/**.hpp"
     "vendor/lua/src/**.c"
 
 )

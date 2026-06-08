@@ -6,6 +6,7 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Memory/MemoryTracker.h"
+#include "World/Scene/ScriptEngine.h"
 
 #include <GLFW/glfw3.h>
 
@@ -31,15 +32,16 @@ namespace World
 
 		Renderer::Init();
 		m_ImGuiLayer = WLD_ENGINE_NEW(ImGuiLayer);
-
 		PushOverlay(m_ImGuiLayer);
 
+		ScriptEngine::Init();
 	}
 
 	Application::~Application()
 	{
 		WLD_PROFILE_FUNCTION();
 		JobSystem::Shutdown();
+		ScriptEngine::Shutdown();
 	}
 
 	void Application::Run()

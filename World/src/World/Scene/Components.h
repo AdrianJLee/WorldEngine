@@ -6,9 +6,10 @@
 #include "World/Renderer/Texture.h"
 #include "World/Reflection/Reflection.h"
 
-#include <glm/glm.hpp>
-#include <glm/gtc/quaternion.hpp> 
 
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include "sol/sol.hpp"
 namespace World
 {
 	struct UUIDComponent
@@ -239,6 +240,42 @@ namespace World
 		std::unordered_map<std::string, std::any> FieldValues;
 	private:
 		bool isFirstDraw = true;
+	};
+
+
+	enum class LuaFieldType { None, Float, Int, Bool, String };
+	struct LuaScriptField
+	{
+		LuaFieldType Type = LuaFieldType::None;
+		std::any Value;
+	};
+
+	struct LuaScriptComponent
+	{
+		REFLECT_BODY(LuaScriptComponent, TypeCategory::Component);
+
+		PROPERTY(ScriptFilePath);
+		std::string ScriptFilePath = ""; // Lua 文件的路径，比如 "assets/scripts/Player.lua"
+
+		// 核心：为每个实体创建一个独立的 Lua 运行环境，防止变量冲突
+		sol::environment LuaEnv;
+		sol::table ScriptTable;
+		// 缓存从 Lua 文件里读取出来的函数
+		sol::protected_function OnCreateFunc;
+		sol::protected_function OnUpdateFunc;
+		sol::protected_function OnDestroyFunc;
+
+		std::unordered_map<std::string, LuaScriptField> CachedFields;
+		std::filesystem::file_time_type LastModifiedTime;
+
+		// 标记是否已经加载过文件
+		bool IsLoaded = false;
+
+		LuaScriptComponent() = default;
+		LuaScriptComponent(const LuaScriptComponent&) = default;
+		LuaScriptComponent(const std::string& path) : ScriptFilePath(path) {}
+
+		COMPONENT_UI()
 	};
 
 	struct RigidBody2DComponent

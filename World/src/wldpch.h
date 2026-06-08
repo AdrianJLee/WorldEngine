@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#ifdef __cplusplus
+
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -19,3 +21,10 @@
 #ifdef WLD_PLATFORM_WINDOWS
 #include <Windows.h>	
 #endif // WLD_PLATFORM_WINDOWS
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <sol/sol.hpp>
+
+#endif // __cplusplus
