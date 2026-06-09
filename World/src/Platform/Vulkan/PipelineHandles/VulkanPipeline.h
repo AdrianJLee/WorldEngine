@@ -1,29 +1,12 @@
 ﻿#pragma once
 #include "Platform/Vulkan/SingletonHandles/VulkanRenderPass.h"
+#include "World/Renderer/PipelineStateObject.h"
 #include "World/Renderer/Buffer.h"
 #include "Platform/Vulkan/DataHandles/VulkanShader.h"
 
 #include <vulkan/vulkan.h>
 namespace World
 {
-	struct PipelineSpecification
-	{
-		Ref<VulkanRenderPass> RenderPass;
-		Ref<VulkanShader> Shader;
-
-		BufferLayout Layout;
-
-		bool BackfaceCulling = true;
-		bool DepthTest = true;
-		bool DepthWrite = true;
-		bool Wireframe = false;
-		float LineWidth = 1.0f;
-
-		// 多重采样 (MSAA)
-		VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT;
-
-		std::string DebugName;
-	};
 
 	class VulkanPipeline
 	{

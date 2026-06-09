@@ -102,7 +102,7 @@ namespace World
 		// Create the multisampling state
 		VkPipelineMultisampleStateCreateInfo multisampling { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
 		multisampling.sampleShadingEnable = VK_FALSE;
-		multisampling.rasterizationSamples = m_PipelineSpec.Samples;
+		//multisampling.rasterizationSamples = m_PipelineSpec.Samples;
 
 		// Create the depth stencil state
 		VkPipelineDepthStencilStateCreateInfo depthStencil { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
@@ -158,9 +158,9 @@ namespace World
 
 		// Create the graphics pipeline
 		VkGraphicsPipelineCreateInfo pipelineInfo { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-		const auto& shaderStages = m_PipelineSpec.Shader->GetShaderStages();
-		pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-		pipelineInfo.pStages = shaderStages.data();
+		//const auto& shaderStages = m_PipelineSpec.Shader->GetShaderStages();
+		//pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+		//pipelineInfo.pStages = shaderStages.data();
 
 		pipelineInfo.pVertexInputState = &vertexInputInfo;
 		pipelineInfo.pInputAssemblyState = &inputAssembly;
@@ -172,7 +172,7 @@ namespace World
 		pipelineInfo.pDynamicState = &dynamicState;
 
 		pipelineInfo.layout = m_PipelineLayout;
-		pipelineInfo.renderPass = m_PipelineSpec.RenderPass->GetRenderPass();
+		//pipelineInfo.renderPass = m_PipelineSpec.RenderPass->GetRenderPass();
 		pipelineInfo.subpass = 0;
 
 		if (vkCreateGraphicsPipelines(m_Device->GetLogicalDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_GraphicsPipeline) != VK_SUCCESS)

@@ -3,7 +3,7 @@
 local PlayerScript = {} -- 创建一个 Table 作为模块返回
 PlayerScript.Speed = 5.0
 PlayerScript.Name="12345"
-
+---@type UUID
 -- 这个会被缓存进 sc.OnCreateFunc
 function PlayerScript:OnCreate()
     -- 利用 LuaEnv 沙盒的特性，我们可以安全地在这里定义变量
@@ -14,6 +14,7 @@ function PlayerScript:OnCreate()
     print("Speed is: " .. self.Name)
     print("Speed is: " .. PlayerScript.Speed)
     print("Speed is: " .. self.Speed)
+
 end
 
 -- 这个会被缓存进 sc.OnUpdateFunc

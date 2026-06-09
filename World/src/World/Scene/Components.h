@@ -248,6 +248,19 @@ namespace World
 	{
 		LuaFieldType Type = LuaFieldType::None;
 		std::any Value;
+
+		static std::string GetLuaTypeName(LuaFieldType type)
+		{
+			switch (type)
+			{
+				case LuaFieldType::None: return "any";
+				case LuaFieldType::Float: return "number";
+				case LuaFieldType::Int: return "number";
+				case LuaFieldType::Bool: return "boolean";
+				case LuaFieldType::String: return "string";
+				default: return "any";
+			}
+		}
 	};
 
 	struct LuaScriptComponent

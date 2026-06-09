@@ -185,6 +185,25 @@ namespace World
 		std::any UserData = {};
 
 		TypeCategory Category = TypeCategory::None; // 类型分类，便于编辑器组织和过滤
+
+		std::string GetCleanClassName() const
+		{
+			// 1. 寻找最后一个命名空间分隔符 "::"
+			size_t lastColon = Name.find_last_of(':');
+			if (lastColon != std::string_view::npos)
+			{
+				return Name.substr(lastColon + 1);
+			}
+
+			// 2. 兜底：如果没有命名空间，但 MSVC 带有 "struct " 或 "class " 前缀，按最后一个空格切
+			size_t lastSpace = Name.find_last_of(' ');
+			if (lastSpace != std::string_view::npos)
+			{
+				return Name.substr(lastSpace + 1);
+			}
+
+			return Name;
+		}
 	};
 
 	class Texture2D;

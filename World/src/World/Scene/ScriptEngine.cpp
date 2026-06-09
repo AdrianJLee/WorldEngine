@@ -1,8 +1,10 @@
 ﻿#include "wldpch.h"
 #include "ScriptEngine.h"
 #include "Components.h"
+
 namespace World
 {
+	// 全局 Lua 状态指针，整个引擎只会有这一个实例
 	static sol::state* s_LuaState = nullptr;
 
 	void ScriptEngine::Init()
@@ -28,13 +30,214 @@ namespace World
 		//	"Location", &TransformComponent::Location,
 		//	"SetLocation", &TransformComponent::SetLocation
 		//);
-
+		RegisterMathTypes();
 		WLD_CORE_INFO("[Lua] ScriptEngine initialized successfully.");
 	}
 	void ScriptEngine::Shutdown()
 	{
 		delete s_LuaState;
 		s_LuaState = nullptr;
+	}
+
+	std::string GetLuaTypeName(const PropertyDesc& prop)
+	{
+		switch (prop.Type)
+		{
+			case DataType::Bool: return "boolean";
+			case DataType::Char: return "string"; // Lua 没有 char 类型，使用 string 代替
+			case DataType::Int8:
+			case DataType::UInt8:
+			case DataType::Int16:
+			case DataType::UInt16:
+			case DataType::Int32:
+			case DataType::UInt32:
+			case DataType::Int64:
+			case DataType::UInt64:
+			case DataType::Float:
+			case DataType::Double:
+				return "number";
+			case DataType::String: return "string";
+			case DataType::Vec2: return "vec2";
+			case DataType::Vec3: return "vec3";
+			case DataType::Vec4: return "vec4";
+			case DataType::Mat3: return "mat3";
+			case DataType::Mat4: return "mat4";
+			case DataType::Enum: return "number"; // 枚举在 Lua 中通常表示为数字
+			case DataType::Object:
+			{
+				const ObjectDesc& objDesc = std::any_cast<ObjectDesc>(prop.UserData);
+
+				const TypeDesc* objTypeDesc = TypeRegistry::Get().GetTypeDesc(objDesc.Name);
+				if (objTypeDesc)
+				{
+					return objTypeDesc->GetCleanClassName();
+				}
+				return "any";
+			}
+
+			default: return "any";
+		}
+	}
+	void ScriptEngine::DefineMathType()
+	{
+
+		MathReflectionRegistry::GetTable().push_back(
+			{
+				"vec2",
+				{
+					{"x", "number"},
+					{"y", "number"},
+					{"length", "fun():number","Get the length of the vector"},
+				},
+				[](sol::state& lua)
+				{
+					lua.new_usertype<glm::vec2>(
+						"vec2",sol::constructors<glm::vec2(),glm::vec2(float), glm::vec2(float, float)>(),
+						"x", &glm::vec2::x,
+						"y", &glm::vec2::y,
+						"length", [](const glm::vec2& v) -> float { return glm::length(v); },
+
+						sol::meta_function::addition, [](const glm::vec2& a, const glm::vec2& b) { return a + b; },
+
+						sol::meta_function::subtraction, [](const glm::vec2& a, const glm::vec2& b) { return a - b; },
+
+						sol::meta_function::multiplication, sol::overload(
+							// 形态 1：向量 * 标量 (vec2 * float)
+							[](const glm::vec2& a, float b) -> glm::vec2 { return a * b; },
+
+							// 形态 2：标量 * 向量 (float * vec2)
+							[](float a, const glm::vec2& b) -> glm::vec2 { return a * b; },
+
+							// 形态 3：向量 * 向量 (vec2 * vec2)
+							[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return glm::vec2(a.x * b.x, a.y * b.y); }
+						),
+
+						sol::meta_function::division,sol::overload(
+							// 形态 1：向量 / 标量 (vec2 / float)
+							[](const glm::vec2& a, float b) -> glm::vec2 { return a / b; },
+							// 形态 2：向量 / 向量 (vec2 / vec2)
+							[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return glm::vec2(a.x / b.x, a.y / b.y); }
+						)
+					);
+
+				}
+			});
+
+		MathReflectionRegistry::GetTable().push_back(
+			{
+				"vec3",
+				{
+					{"x", "number"},
+					{"y", "number"},
+					{"z", "number"},
+					{"length", "fun():number","Get the length of the vector"},
+					{"normalize", "fun():vec3","Normalize the vector"},
+					{"dot", "fun(vec3):number","Calculate the dot product with another vector"},
+					{"cross", "fun(vec3):vec3","Calculate the cross product with another vector"},
+				},
+
+				[](sol::state& lua)
+				{
+					lua.new_usertype<glm::vec3>(
+						"vec3",sol::constructors<glm::vec3(), glm::vec3(float), glm::vec3(float, float, float)>(),
+						"x", &glm::vec3::x,
+						"y", &glm::vec3::y,
+						"z", &glm::vec3::z,
+						"length", [](const glm::vec3& v) -> float { return glm::length(v); },
+						"normalize", [](const glm::vec3& v) -> glm::vec3 { return glm::normalize(v); },
+						"dot", [](const glm::vec3& a, const glm::vec3& b) -> float { return glm::dot(a, b); },
+						"cross", [](const glm::vec3& a, const glm::vec3& b) -> glm::vec3 { return glm::cross(a, b); },
+
+						sol::meta_function::addition, [](const glm::vec3& a, const glm::vec3& b) { return a + b; },
+						sol::meta_function::subtraction, [](const glm::vec3& a, const glm::vec3& b) { return a - b; },
+						sol::meta_function::multiplication, sol::overload(
+							// 形态 1：向量 * 标量 (vec3 * float)
+							[](const glm::vec3& a, float b) -> glm::vec3 { return a * b; },
+							// 形态 2：标量 * 向量 (float * vec3)
+							[](float a, const glm::vec3& b) -> glm::vec3 { return a * b; },
+							// 形态 3：向量 * 向量 (vec3 * vec3)
+							[](const glm::vec3& a, const glm::vec3& b) -> glm::vec3 { return glm::vec3(a.x * b.x, a.y * b.y, a.z * b.z); }
+						),
+
+						sol::meta_function::division,sol::overload(
+							// 形态 1：向量 / 标量 (vec3 / float)
+							[](const glm::vec3& a, float b) -> glm::vec3 { return a / b; },
+							// 形态 2：向量 / 向量 (vec3 / vec3)
+							[](const glm::vec3& a, const glm::vec3& b) -> glm::vec3 { return glm::vec3(a.x / b.x, a.y / b.y, a.z / b.z); }
+						)
+					);
+				}
+			});
+		MathReflectionRegistry::GetTable().push_back(
+			{
+				"vec4",
+				{
+					{"x", "number"},
+					{"y", "number"},
+					{"z", "number"},
+					{"w", "number"},
+					{"length", "fun():number","Get the length of the vector"},
+				},
+				[](sol::state& lua)
+				{
+					lua.new_usertype<glm::vec4>(
+						"vec4", sol::constructors<glm::vec4(), glm::vec4(float), glm::vec4(float, float, float, float)>(),
+						"x", &glm::vec4::x,
+						"y", &glm::vec4::y,
+						"z", &glm::vec4::z,
+						"w", &glm::vec4::w,
+						"length", [](const glm::vec4& v) -> float { return glm::length(v); }
+					);
+				}
+			});
+	}
+	void ScriptEngine::RegisterMathTypes()
+	{
+		auto& lua = GetState(); // 拿到你的 sol::state
+		DefineMathType();
+		// 遍历描述表，直接执行各自的 C++ 绑定 Lambda！
+		for (const auto& mathType : MathReflectionRegistry::GetTable())
+		{
+			mathType.BindFunc(lua);
+		}
+
+	}
+	void ScriptEngine::GenerateLuaStubs()
+	{
+		std::ofstream out(WLD_ASSETPATH + std::string("/scripts/WorldEngineAPI.lua"));
+		out << "---WorldEngineAPI\n\n"; // 告诉插件这是个提示文件
+
+		// 先输出数学类的 Lua 注释
+		for (const auto& mathType : MathReflectionRegistry::GetTable())
+		{
+			out << "---@class " << mathType.ClassName << "\n";
+			for (const auto& prop : mathType.Properties)
+			{
+				out << "---@field " << prop.Name << " " << prop.LuaType;
+				if (!prop.Description.empty())
+				{
+					out << " " << prop.Description;
+				}
+				out << "\n";
+			}
+			out << mathType.ClassName << " = {}\n\n";
+		}
+
+		// 遍历你的 C++ 反射系统
+		for (const auto& [name, type] : TypeRegistry::Get().GetTemplateMap())
+		{
+			out << "---@class " << type.GetCleanClassName() << "\n";
+			for (const auto& prop : type.Properties)
+			{
+				// 将 C++ 类型映射为 Lua 类型字符串 (如 int -> number)
+				out << "---@field " << prop.Name << " " << GetLuaTypeName(prop) << "\n";
+			}
+
+			out << type.GetCleanClassName() << " = {}\n\n";
+		}
+
+		out.close();
+		WLD_CORE_INFO("Lua API Stubs generated successfully!");
 	}
 
 	sol::state& ScriptEngine::GetState()

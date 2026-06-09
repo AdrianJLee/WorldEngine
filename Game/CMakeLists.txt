@@ -11,6 +11,7 @@ if(WIN32)
     )
     if(MSVC)
         target_compile_options(Game PRIVATE "/utf-8")
+        target_link_options(Editor PRIVATE "/WHOLEARCHIVE:World")
     endif()
 endif()
 

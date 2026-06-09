@@ -28,6 +28,7 @@ if(WIN32)
     # /utf-8 仅适用于 MSVC 编译器，建议加上编译器判断
     if(MSVC)
         target_compile_options(World PRIVATE "/utf-8")
+    else()
     endif()
 
     # 3. 系统版本 (systemversion "latest")

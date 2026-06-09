@@ -19,6 +19,8 @@ namespace World
 		// 多重采样 (MSAA)
 		//VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT;
 
+
+
 		std::string DebugName;
 	};
 

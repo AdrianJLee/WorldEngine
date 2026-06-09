@@ -1,7 +1,7 @@
 ﻿#include "EditorLayer.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Cook/VFS.h"
-
+#include "World/Scene/ScriptEngine.h"
 #include <filesystem>
 namespace World
 {
@@ -230,7 +230,10 @@ namespace World
 					}
 
 				}
-
+				if (ImGui::MenuItem("Generate Lua API Stubs"))
+				{
+					ScriptEngine::GenerateLuaStubs();
+				}
 				if (ImGui::MenuItem("Exit"))
 					World::Application::Get().Close();
 
@@ -238,6 +241,7 @@ namespace World
 			}
 			ImGui::EndMenuBar();
 		}
+
 		ImGui::End();
 
 		// 场景层级面板
