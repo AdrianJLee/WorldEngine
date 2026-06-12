@@ -85,6 +85,14 @@ namespace World
 			}
 		}
 
+		void RemoveComponent(entt::id_type componentId)
+		{
+			if (HasComponent(componentId))
+			{
+				auto storage = m_Scene->m_Registry.storage(componentId);
+				storage->remove(m_EntityHandle);
+			}
+		}
 		operator bool() const { return m_EntityHandle != entt::null && m_Scene != nullptr; }
 		operator entt::entity() const { return m_EntityHandle; }
 		operator uint32_t() const { return (uint32_t)m_EntityHandle; }

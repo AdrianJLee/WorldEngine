@@ -168,6 +168,25 @@ namespace World
 		NormalClass, // 普通类
 	};
 
+	static constexpr std::string_view GetTypeIdName(std::string_view name)
+	{
+		std::string_view cleanName = name;
+		size_t lastColon = cleanName.find_last_of(':');
+		if (lastColon != std::string_view::npos)
+		{
+			return cleanName.substr(lastColon + 1);
+		}
+
+		// 2. 兜底：如果没有命名空间，但 MSVC 带有 "struct " 或 "class " 前缀，按最后一个空格切
+		size_t lastSpace = cleanName.find_last_of(' ');
+		if (lastSpace != std::string_view::npos)
+		{
+			return cleanName.substr(lastSpace + 1);
+		}
+
+		return cleanName;
+	}
+
 	// 类型描述结构体
 	struct TypeDesc
 	{
@@ -186,24 +205,6 @@ namespace World
 
 		TypeCategory Category = TypeCategory::None; // 类型分类，便于编辑器组织和过滤
 
-		std::string GetCleanClassName() const
-		{
-			// 1. 寻找最后一个命名空间分隔符 "::"
-			size_t lastColon = Name.find_last_of(':');
-			if (lastColon != std::string_view::npos)
-			{
-				return Name.substr(lastColon + 1);
-			}
-
-			// 2. 兜底：如果没有命名空间，但 MSVC 带有 "struct " 或 "class " 前缀，按最后一个空格切
-			size_t lastSpace = Name.find_last_of(' ');
-			if (lastSpace != std::string_view::npos)
-			{
-				return Name.substr(lastSpace + 1);
-			}
-
-			return Name;
-		}
 	};
 
 	class Texture2D;
@@ -258,7 +259,7 @@ namespace World
 				{
 					// 枚举变量
 					EnumDesc enumDesc;
-					enumDesc.Name = typeid(VariableType).name();
+					enumDesc.Name = static_cast<std::string>(GetTypeIdName(typeid(VariableType).name()));
 					enumDesc.UnderlyingSize = sizeof(std::underlying_type_t<VariableType>);
 					enumDesc.IsSigned = std::is_signed_v<std::underlying_type_t<VariableType>>;
 
@@ -267,7 +268,7 @@ namespace World
 				else if constexpr (is_ref_type<VariableType>::value)
 				{
 					AssetDesc assetDesc;
-					assetDesc.Name = typeid(VariableType::element_type).name();
+					assetDesc.Name = static_cast<std::string>(GetTypeIdName(typeid(VariableType::element_type).name()));
 					assetDesc.Path = "";
 					userData = assetDesc;
 				}
@@ -275,7 +276,7 @@ namespace World
 				{
 					if (type == DataType::Object)
 					{
-						userData = ObjectDesc { typeid(VariableType).name() };
+						userData = ObjectDesc { static_cast<std::string>(GetTypeIdName(typeid(VariableType).name())) };
 					}
 				}
 
@@ -609,7 +610,7 @@ namespace World
 		template <TypeCategory Category, typename T>
 		static void RegisterTypeData()
 		{
-			std::any& userData = TypeRegistry::Get().GetTypeDesc(typeid(T).name())->UserData;
+			std::any& userData = TypeRegistry::Get().GetTypeDesc(static_cast<std::string>(GetTypeIdName(typeid(T).name())))->UserData;
 
 			if constexpr (Category == TypeCategory::Component)
 			{
@@ -627,7 +628,7 @@ namespace World
 	using TREFLECTClass = TClass; \
 	inline static struct AutoRegister_##TClass{ \
 		AutoRegister_##TClass() { \
-			const std::string className = typeid(TClass).name(); \
+			const std::string className = static_cast<std::string>(GetTypeIdName(typeid(TClass).name())); \
 			TypeRegistry::Get().RegisterType<TClass>(className, Category); \
 			TypeRegistry::RegisterTypeData<Category, TClass>();} \
 	} s_AutoRegister;
@@ -635,7 +636,7 @@ namespace World
 	#define PROPERTY(varName) \
 	inline static struct AutoProp_##varName{ \
 		AutoProp_##varName(){ \
-		TypeRegistry::Binder<TREFLECTClass>(*TypeRegistry::Get().GetTypeDesc(typeid(TREFLECTClass).name())).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>());} \
+		TypeRegistry::Binder<TREFLECTClass>(*TypeRegistry::Get().GetTypeDesc(static_cast<std::string>(GetTypeIdName(typeid(TREFLECTClass).name())))).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>());} \
 	}s_AutoProp_##varName;
 
 
@@ -644,7 +645,7 @@ namespace World
 	{
 		AutoRegisterEnum()
 		{
-			const std::string enumName = typeid(TEnum).name();
+			const std::string enumName = static_cast<std::string>(GetTypeIdName(typeid(TEnum).name()));
 			TypeRegistry::Get().RegisterType<TEnum>(enumName, TypeCategory::EnumClass);
 			TypeRegistry::RegisterTypeData<TypeCategory::EnumClass, TEnum>();
 		}
@@ -656,7 +657,7 @@ namespace World
 	#define PROPERTY_ENUM(TEnum, varName) \
     inline static struct AutoPropEnum_##TEnum##_##varName { \
         AutoPropEnum_##TEnum##_##varName() { \
-            TypeRegistry::Binder<TEnum>(*TypeRegistry::Get().GetTypeDesc(typeid(TEnum).name())).PropertyEnum<TEnum>(#varName, TEnum::varName); \
+            TypeRegistry::Binder<TEnum>(*TypeRegistry::Get().GetTypeDesc(static_cast<std::string>(GetTypeIdName(typeid(TEnum).name())))).PropertyEnum<TEnum>(#varName, TEnum::varName); \
         } \
     } s_AutoPropEnum_##TEnum##_##varName;
 }

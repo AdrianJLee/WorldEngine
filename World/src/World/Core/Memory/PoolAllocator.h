@@ -95,7 +95,7 @@ namespace World
 	public:
 		static PoolAllocator& GetPool()
 		{
-			static const char* typeName = typeid(T).name();
+			static const char* typeName = static_cast<std::string>(GetTypeIdName(typeid(T).name())).c_str();
 
 			thread_local World::PoolAllocator s_Pool(
 				typeName,

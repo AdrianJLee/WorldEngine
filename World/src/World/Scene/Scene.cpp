@@ -88,7 +88,7 @@ namespace World
 			});
 		m_Registry.view<LuaScriptComponent>().each([=](auto entity, LuaScriptComponent& scriptComponent)
 			{
-				ScriptEngine::OnCreateScript(scriptComponent);
+				ScriptEngine::OnCreateScript(scriptComponent, { this,entity });
 			});
 
 	}

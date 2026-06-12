@@ -10,10 +10,9 @@ function PlayerScript:OnCreate()
     -- 这些变量只会属于当前挂载了这个脚本的 Entity！
 
     print("Player Entity Initialized!")
-    print("Speed is: " .. PlayerScript.Name)
-    print("Speed is: " .. self.Name)
-    print("Speed is: " .. PlayerScript.Speed)
+    print("Name is: " .. self.Name)
     print("Speed is: " .. self.Speed)
+    print("Speed is: "..self.__Entity:GetID())
 
 end
 

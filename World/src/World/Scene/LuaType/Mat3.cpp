@@ -3,7 +3,7 @@
 
 namespace World
 {
-	static MathTypeRegistrar s_Mat3Registrar(
+	static LuaTypeRegistrar s_Mat3Registrar(
 		{
 			"mat3",
 			{

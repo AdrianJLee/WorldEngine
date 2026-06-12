@@ -632,7 +632,7 @@ namespace World
 								// 3. 将解析出的属性值直接反序列化到该真实地址的结构体成员上
 								DeserializeProperties(entity[componentName], typeDesc, rawPtr);
 
-								if (typeid(NativeScriptComponent).name() == typeDesc->Name)
+								if (GetTypeIdName(typeid(NativeScriptComponent).name()) == typeDesc->Name)
 								{
 									TypeDesc* scriptTypeDesc = TypeRegistry::Get().GetTypeDesc(((NativeScriptComponent*)rawPtr)->ScriptName);
 									if (scriptTypeDesc)

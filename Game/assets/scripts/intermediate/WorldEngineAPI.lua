@@ -1,5 +1,13 @@
 ---WorldEngineAPI
 
+---@class Entity
+---@field GetID fun():number Get the unique ID of the entity
+---@field HasComponent fun(componentType:string):boolean Check if the entity has a component of the specified type
+---@field GetComponent fun(componentType:string):table Get the component of the specified type as a Lua table
+---@field AddComponent fun(componentType:string) Add a component of the specified type to the entity
+---@field RemoveComponent fun(componentType:string) Remove the component of the specified type from the entity
+Entity = {}
+
 ---@class mat4
 ---@field inverse fun():mat4 Get the inverse of the matrix
 ---@field transpose fun():mat4 Get the transpose of the matrix
@@ -36,11 +44,20 @@ vec3 = {}
 ---@field length fun():number Get the length of the vector
 vec4 = {}
 
----@class SpriteComponent
----@field Color vec4
----@field Texture any
----@field TilingFactor number
-SpriteComponent = {}
+---@class TransformComponent
+---@field Location vec3
+---@field Rotation vec3
+---@field RotationQuat any
+---@field Scale vec3
+---@field Transform mat4
+TransformComponent = {}
+
+---@class TagComponent
+---@field Tag string
+TagComponent = {}
+
+---@class ExampleScript
+ExampleScript = {}
 
 ---@class Camera
 ---@field m_ProjectionMatrix mat4
@@ -49,11 +66,6 @@ Camera = {}
 ---@class UUID
 ---@field m_UUID number
 UUID = {}
-
----@class ProjectionType
----@field Perspective number
----@field Orthographic number
-ProjectionType = {}
 
 ---@class SceneCamera
 ---@field m_ProjectionType number
@@ -66,31 +78,61 @@ ProjectionType = {}
 ---@field m_PerspectiveFarClip number
 SceneCamera = {}
 
+---@class ProjectionType
+---@field Perspective number
+---@field Orthographic number
+ProjectionType = {}
+
+---@class UUIDComponent
+---@field ID UUID
+UUIDComponent = {}
+
+---@class SpriteComponent
+---@field Color vec4
+---@field Texture any
+---@field TilingFactor number
+SpriteComponent = {}
+
 ---@class CircleRendererComponent
 ---@field Color vec4
 ---@field Thickness number
 ---@field Fade number
 CircleRendererComponent = {}
 
----@class UUIDComponent
----@field ID UUID
-UUIDComponent = {}
+---@class BodyType
+---@field Static number
+---@field Dynamic number
+---@field Kinematic number
+BodyType = {}
 
----@class TagComponent
----@field Tag string
-TagComponent = {}
+---@class LuaScriptComponent
+---@field ScriptFilePath string
+LuaScriptComponent = {}
+
+---@class CameraComponent
+---@field Camera SceneCamera
+---@field Primary boolean
+---@field FixedAspectRatio boolean
+CameraComponent = {}
 
 ---@class NativeScriptComponent
 ---@field ScriptName string
 NativeScriptComponent = {}
 
----@class TransformComponent
----@field Location vec3
----@field Rotation vec3
----@field RotationQuat any
----@field Scale vec3
----@field Transform mat4
-TransformComponent = {}
+---@class StressTestType
+---@field None number
+---@field Test1 number
+---@field Test2 number
+StressTestType = {}
+
+---@class RigidBody2DComponent
+---@field Type number
+---@field FixedRotation boolean
+RigidBody2DComponent = {}
+
+---@class OpenGLTexture2D
+---@field m_Path string
+OpenGLTexture2D = {}
 
 ---@class BoxCollider2DComponent
 ---@field Offset vec2
@@ -101,33 +143,6 @@ TransformComponent = {}
 ---@field ShowCollider boolean
 BoxCollider2DComponent = {}
 
----@class CameraComponent
----@field Camera SceneCamera
----@field Primary boolean
----@field FixedAspectRatio boolean
-CameraComponent = {}
-
----@class StressTestType
----@field None number
----@field Test1 number
----@field Test2 number
-StressTestType = {}
-
----@class LuaScriptComponent
----@field ScriptFilePath string
-LuaScriptComponent = {}
-
----@class BodyType
----@field Static number
----@field Dynamic number
----@field Kinematic number
-BodyType = {}
-
----@class RigidBody2DComponent
----@field Type number
----@field FixedRotation boolean
-RigidBody2DComponent = {}
-
 ---@class CircleCollider2DComponent
 ---@field Offset vec2
 ---@field Radius number
@@ -137,16 +152,9 @@ RigidBody2DComponent = {}
 ---@field ShowCollider boolean
 CircleCollider2DComponent = {}
 
----@class OpenGLTexture2D
----@field m_Path string
-OpenGLTexture2D = {}
-
 ---@class StressTest
 ---@field Weight number
 ---@field Height number
 ---@field m_Type number
 StressTest = {}
-
----@class ExampleScript
-ExampleScript = {}
 

@@ -70,7 +70,7 @@ namespace World
 				const TypeDesc* objTypeDesc = TypeRegistry::Get().GetTypeDesc(objDesc.Name);
 				if (objTypeDesc)
 				{
-					return objTypeDesc->GetCleanClassName();
+					return objTypeDesc->Name;
 				}
 				return "any";
 			}
@@ -81,7 +81,7 @@ namespace World
 	void ScriptEngine::DefineMathType()
 	{
 
-		MathReflectionRegistry::GetTable().push_back(
+		LuaReflectionRegistry::GetTable().push_back(
 			{
 				"vec2",
 				{
@@ -123,7 +123,7 @@ namespace World
 				}
 			});
 
-		MathReflectionRegistry::GetTable().push_back(
+		LuaReflectionRegistry::GetTable().push_back(
 			{
 				"vec3",
 				{
@@ -168,7 +168,7 @@ namespace World
 					);
 				}
 			});
-		MathReflectionRegistry::GetTable().push_back(
+		LuaReflectionRegistry::GetTable().push_back(
 			{
 				"vec4",
 				{
@@ -196,7 +196,7 @@ namespace World
 		auto& lua = GetState(); // 拿到你的 sol::state
 		DefineMathType();
 		// 遍历描述表，直接执行各自的 C++ 绑定 Lambda！
-		for (const auto& mathType : MathReflectionRegistry::GetTable())
+		for (const auto& mathType : LuaReflectionRegistry::GetTable())
 		{
 			mathType.BindFunc(lua);
 		}
@@ -204,11 +204,14 @@ namespace World
 	}
 	void ScriptEngine::GenerateLuaStubs()
 	{
-		std::ofstream out(WLD_ASSETPATH + std::string("/scripts/WorldEngineAPI.lua"));
+		std::filesystem::path stubPath(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.lua"));
+		std::filesystem::create_directories(stubPath.parent_path()); // 确保目录存在
+
+		std::ofstream out(stubPath);
 		out << "---WorldEngineAPI\n\n"; // 告诉插件这是个提示文件
 
 		// 先输出数学类的 Lua 注释
-		for (const auto& mathType : MathReflectionRegistry::GetTable())
+		for (const auto& mathType : LuaReflectionRegistry::GetTable())
 		{
 			out << "---@class " << mathType.ClassName << "\n";
 			for (const auto& prop : mathType.Properties)
@@ -226,14 +229,14 @@ namespace World
 		// 遍历你的 C++ 反射系统
 		for (const auto& [name, type] : TypeRegistry::Get().GetTemplateMap())
 		{
-			out << "---@class " << type.GetCleanClassName() << "\n";
+			out << "---@class " << type.Name << "\n";
 			for (const auto& prop : type.Properties)
 			{
 				// 将 C++ 类型映射为 Lua 类型字符串 (如 int -> number)
 				out << "---@field " << prop.Name << " " << GetLuaTypeName(prop) << "\n";
 			}
 
-			out << type.GetCleanClassName() << " = {}\n\n";
+			out << type.Name << " = {}\n\n";
 		}
 
 		out.close();
@@ -306,7 +309,7 @@ namespace World
 		}
 	}
 
-	void ScriptEngine::OnCreateScript(LuaScriptComponent& scriptComponent)
+	void ScriptEngine::OnCreateScript(LuaScriptComponent& scriptComponent, Entity entity)
 	{
 		if (!scriptComponent.IsLoaded && !scriptComponent.ScriptFilePath.empty())
 		{
@@ -330,6 +333,7 @@ namespace World
 					}
 				}
 
+				scriptComponent.ScriptTable["__EntityID"] = entity;
 				scriptComponent.OnCreateFunc = scriptComponent.ScriptTable["OnCreate"];
 				scriptComponent.OnUpdateFunc = scriptComponent.ScriptTable["OnUpdate"];
 				scriptComponent.OnDestroyFunc = scriptComponent.ScriptTable["OnDestroy"];
