@@ -26,6 +26,11 @@ namespace World
 			// 队列满了！
 			// 工业级策略：不再入队，而是由当前线程直接执行该任务（立刻消化掉）
 			job.Entry(job.Padding);
+			if (job.Counter)
+			{
+				job.Counter->Count.fetch_sub(1, std::memory_order_release);
+			}
+
 			return;
 		}
 

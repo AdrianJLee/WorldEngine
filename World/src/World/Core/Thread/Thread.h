@@ -14,11 +14,12 @@ namespace World
 	// JobDeclaration,任务声明结构体，包含任务函数指针和任务数据指针
 	struct JobDecl
 	{
-		void (*Entry)(void*); // 任务函数指针
 
 		// 我们不再使用 `void* Data` 去指向外面的大对象池或者堆内存！
 		// 取而代之，我们直接把闭包按位拍到这个内联数组里面！
 		alignas(16) uint8_t Padding[JOB_PADDING_SIZE];
+
+		void (*Entry)(void*); // 任务函数指针
 
 		JobCounter* Counter = nullptr;
 

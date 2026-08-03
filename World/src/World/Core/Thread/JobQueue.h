@@ -12,7 +12,7 @@ namespace World
 		~JobQueue();
 
 		// 从顶部推入任务
-		void Push(JobDecl job);
+		void Push(const JobDecl& job);
 
 		// 从底部弹出任务
 		bool Pop(JobDecl& outJob);

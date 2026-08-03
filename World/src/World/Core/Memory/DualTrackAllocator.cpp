@@ -143,16 +143,7 @@ namespace World
 
 	void* DualTrackAllocator::AllocateLOS(size_t size, size_t alignment)
 	{
-		void* raw = _aligned_malloc(size + alignment, alignment);// 额外申请 alignment 字节以确保对齐后有足够空间
-
-		if (!raw)
-		{
-			WLD_CORE_ERROR("Failed to allocate Large Object of size {0}", size);
-			return nullptr;
-		}
-
-		void* aligned = (void*)AlignForward((uintptr_t)raw, alignment);
-
+		void* raw = _aligned_malloc(size, alignment);
 
 		// 挂载到大对象链表
 		LOSPage* newPage = new LOSPage { raw, size, m_HeadLOS };
@@ -162,6 +153,6 @@ namespace World
 		m_UsedMemory += size;
 		m_NumAllocations++;
 
-		return aligned;
+		return raw;
 	}
 }
