@@ -18,16 +18,21 @@ namespace World
 		{
 			ImGui::Begin("Scene Hierarchy");
 
-			// 将所有的 entity 提取到一个连续容器中供 Clipper 索引读取
-			// 因为 Storage 的迭代器不持支持 Clipper 需要的通过索引直接访问
-			std::vector<entt::entity> entities;
+			// 将可显示的 entity 提取到连续容器中供 Clipper 索引读取
+			// 仅包含可绘制节点，保证 Clipper 的 ItemsCount 与实际行数一致
+			std::vector<Entity> entities;
 			auto& storage = m_Context->m_Registry.storage<entt::entity>();
 
 			entities.reserve(storage.size());
-			for (const auto entity : storage)
+			for (const auto rawEntity : storage)
 			{
-				entities.push_back(entity);
+				Entity entity { m_Context.get(), rawEntity };
+				if (entity.HasComponent<TagComponent>())
+					entities.push_back(entity);
 			}
+
+			std::vector<Entity> entitiesToDelete;
+			entitiesToDelete.reserve(1);
 
 			// 使用 ImGuiListClipper 仅渲染可视区域内的节点
 			ImGuiListClipper clipper;
@@ -36,11 +41,15 @@ namespace World
 			{
 				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++)
 				{
-					Entity ent { m_Context.get(), entities[i] };
-					DrawEntityNode(ent);
+					DrawEntityNode(entities[i], entitiesToDelete);
 				}
 			}
 			clipper.End();
+
+			for (Entity entity : entitiesToDelete)
+			{
+				Entity::DestroyEntity(m_Context.get(), entity);
+			}
 
 			// 点击空白处取消选中
 			if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
@@ -98,7 +107,7 @@ namespace World
 		}
 	}
 
-	void SceneHierarchyPanel::DrawEntityNode(Entity entity)
+	void SceneHierarchyPanel::DrawEntityNode(Entity entity, std::vector<Entity>& entitiesToDelete)
 	{
 		if (entity.HasComponent<TagComponent>())
 		{
@@ -137,12 +146,11 @@ namespace World
 				ImGui::TreePop();
 			}
 
-			// 将删除操作移到下面，避免在渲染 UI 的中间状态破坏实体
 			if (entityDeleted)
 			{
 				if (m_SelectedEntity == entity)
 					m_SelectedEntity = {};
-				Entity::DestroyEntity(m_Context.get(), entity);
+				entitiesToDelete.push_back(entity);
 			}
 		}
 	}

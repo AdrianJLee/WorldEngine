@@ -12,7 +12,7 @@ namespace World
 	{
 		delete[] m_Jobs;
 	}
-	void JobQueue::Push(JobDecl job)
+	void JobQueue::Push(JobDecl& job)
 	{
 		// 由于只有生产者线程会调用 Push，消费者线程会调用 Pop 和 Steal，因此我们可以使用无锁的方式来实现这个队列
 

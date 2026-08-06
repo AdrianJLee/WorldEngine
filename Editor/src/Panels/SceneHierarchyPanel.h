@@ -16,7 +16,7 @@ namespace World
 		Entity GetSelectedEntity() const { return m_SelectedEntity; }
 		void SetSelectedEntity(Entity entity) { m_SelectedEntity = entity; }
 	private:
-		void DrawEntityNode(Entity entity);
+		void DrawEntityNode(Entity entity, std::vector<Entity>& entitiesToDelete);
 		void DrawComponents(Entity entity);
 	private:
 		Ref<Scene> m_Context;
