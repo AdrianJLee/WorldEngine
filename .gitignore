@@ -9,3 +9,8 @@ build
 *.vcxproj
 *.filters
 .github
+.codex
+.vscode
+docs
+tools
+AGENTS.md
