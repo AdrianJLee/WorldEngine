@@ -40,13 +40,31 @@ namespace World
 	Application::~Application()
 	{
 		WLD_PROFILE_FUNCTION();
-		JobSystem::Shutdown();
+		Shutdown();
+	}
+
+	void Application::Shutdown()
+	{
+		if (m_Shutdown) return;
+		m_Shutdown = true;
+		m_Running = false;
+		// OnDetach releases scene instances and joins layer-owned work first.
+		m_LayerStack.DetachAll();
+		m_ImGuiLayer = nullptr;
+		// WLD_ENGINE_NEW already registered the concrete layer destructors.
+		// Run them while their Lua state and graphics context are still alive.
+		if (m_FrameAllocator) m_FrameAllocator->Reset();
+		if (m_EngineAllocator) m_EngineAllocator->Reset();
 		ScriptEngine::Shutdown();
+		JobSystem::Shutdown();
+		m_Window.reset();
+		s_Instance = nullptr;
 	}
 
 	void Application::Run()
 	{
 		WLD_PROFILE_FUNCTION();
+		if (m_Shutdown) return;
 		MemoryTracker::Get(); // 先启动监控
 		JobSystem::Init();    // 再启动线程池
 
@@ -86,6 +104,7 @@ namespace World
 			// Clean up frame allocator after each frame
 			m_FrameAllocator->Reset();
 		}
+		Shutdown();
 	}
 
 	void Application::OnEvent(Event& e)
@@ -134,14 +153,12 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 
 		m_LayerStack.PushLayer(layer);
-		layer->OnAttach();
 	}
 	void Application::PushOverlay(Layer* layer)
 	{
 		WLD_PROFILE_FUNCTION();
 
 		m_LayerStack.PushOverLay(layer);
-		layer->OnAttach();
 	}
 	void Application::Close()
 	{

@@ -1,361 +1,602 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "Scene.h"
 #include "World/Scene/Components.h"
-#include "World/Core/Thread/JobSystem.h"
 #include "World/Scene/ScriptEngine.h"
-
-#include <physics_world.h>
 #include <box2d/box2d.h>
-#include <unordered_map>
-#include <glm/glm.hpp>
+#include <stdexcept>
 
 namespace World
 {
-	Scene::Scene()
-	{}
-	Scene::~Scene()
-	{}
-	void Scene::OnUpdateEditor(Timestep ts, const EditorCamera& camera)
-	{}
-	void Scene::OnUpdateRuntime(Timestep ts)
+	namespace
 	{
-		// Update physics
-		OnUpdatePhysics2D(ts);
-
-		// Update scripts
-		OnScriptUpdate(ts);
-	}
-	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera& camera)
-	{
-		OnUpdatePhysics2D(ts);
-
-		OnScriptUpdate(ts);
-	}
-	void Scene::OnViewportResize(uint32_t width, uint32_t height)
-	{
-		m_ViewportWidth = width;
-		m_ViewportHeight = height;
-		auto view = m_Registry.view<CameraComponent>();
-
-		for (auto entity : view)
+		template<typename T>
+		std::vector<entt::entity> Snapshot(entt::registry& registry)
 		{
-			auto& cameraComponent = view.get<CameraComponent>(entity);
-			if (!cameraComponent.FixedAspectRatio)
-			{
-				cameraComponent.Camera.SetViewportSize(width, height);
-			}
+			auto view = registry.view<T>();
+			return { view.begin(), view.end() };
+		}
 
+		std::string NativeError(const NativeScriptComponent& script, entt::entity entity, const char* phase, const char* error)
+		{
+			return "[Native] " + script.ScriptName + " entity=" + std::to_string(static_cast<uint32_t>(entity)) +
+				" phase=" + phase + ": " + error;
+		}
+
+		void Report(const std::string& error)
+		{
+			if (Log::GetCoreLogger()) WLD_CORE_ERROR("{0}", error);
 		}
 	}
+
+	Scene::Scene() : m_OwnerThread(std::this_thread::get_id()) {}
+
+	Scene::~Scene()
+	{
+		// Destroying a scene on another thread would also destroy Lua references there.
+		if (m_OwnerThread != std::this_thread::get_id())
+		{
+			Report("Scene destruction must run on its owner thread");
+			std::terminate();
+		}
+		StopScene();
+		m_Lifetime.reset();
+	}
+
+	void Scene::AssertOwnerThread() const
+	{
+		if (m_OwnerThread != std::this_thread::get_id())
+			throw std::logic_error("Scene access must run on its owner thread");
+	}
+
+	void Scene::AssertStructuralWrite() const
+	{
+		AssertOwnerThread();
+		if (m_CallbackDepth)
+			throw std::logic_error("Synchronous structural writes are forbidden in lifecycle callbacks; use DeferStructuralChange");
+		if (m_State == SceneState::Stopping || (IsActive() && !m_Committing))
+			throw std::logic_error("An active scene accepts structural writes only while committing a command");
+	}
+
+	entt::registry& Scene::GetRegistry() { AssertStructuralWrite(); return m_Registry; }
+	const entt::registry& Scene::GetRegistry() const { AssertOwnerThread(); return m_Registry; }
+
+	bool Scene::IsPendingDestroy(entt::entity entity) const
+	{
+		AssertOwnerThread();
+		return m_PendingDestroy.count(entity) != 0;
+	}
+
+	bool Scene::IsPendingRemoval(entt::entity entity, entt::id_type component) const
+	{
+		auto it = m_PendingRemove.find(entity);
+		return it != m_PendingRemove.end() && it->second.count(component) != 0;
+	}
+
+	bool Scene::IsSourceAlive(const ScriptSource& source) const
+	{
+		if (source.EntityHandle == entt::null) return true;
+		if (!m_Registry.valid(source.EntityHandle) || IsPendingDestroy(source.EntityHandle) ||
+			IsPendingRemoval(source.EntityHandle, source.Component)) return false;
+		if (source.Component == entt::type_id<NativeScriptComponent>().hash())
+		{
+			auto* script = m_Registry.try_get<NativeScriptComponent>(source.EntityHandle);
+			return script && script->Generation == source.Generation && script->State == ScriptInstanceState::Running;
+		}
+		if (source.Component == entt::type_id<LuaScriptComponent>().hash())
+		{
+			auto* script = m_Registry.try_get<LuaScriptComponent>(source.EntityHandle);
+			return script && script->Generation == source.Generation && script->State == ScriptInstanceState::Running;
+		}
+		return false;
+	}
+
+	bool Scene::DeferStructuralChange(std::function<void(Scene&)> command)
+	{
+		AssertOwnerThread();
+		if (!command || m_State == SceneState::Stopping || m_StopRequested || m_CallbackSource.Destroying) return false;
+		if (!IsActive() && !m_CallbackDepth && !m_Committing)
+		{
+			try { command(*this); return true; }
+			catch (const std::exception& error) { Report(std::string("[Scene] StructuralChange: ") + error.what()); }
+			catch (...) { Report("[Scene] StructuralChange: unknown exception"); }
+			return false;
+		}
+		m_Changes.push_back({ ChangeKind::General, std::move(command), m_CallbackSource });
+		return true;
+	}
+
+	void Scene::RequestDestroy(entt::entity entity)
+	{
+		AssertOwnerThread();
+		if (!m_Registry.valid(entity) || !m_PendingDestroy.insert(entity).second) return;
+		m_Changes.push_back({ ChangeKind::DestroyEntity, {}, {}, entity });
+		if (!IsActive() && !m_CallbackDepth && !m_Committing) FlushStructuralChanges();
+	}
+
+	void Scene::RequestRemove(entt::entity entity, entt::id_type component)
+	{
+		AssertOwnerThread();
+		if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, component)) return;
+		Entity target(this, entity);
+		if (!target.HasComponent(component)) return;
+		std::string reason;
+		if (!target.CanRemoveComponent(component, &reason)) throw std::logic_error(reason);
+		m_PendingRemove[entity].insert(component);
+		m_Changes.push_back({ ChangeKind::RemoveComponent, {}, {}, entity, component });
+		if (!IsActive() && !m_CallbackDepth && !m_Committing) FlushStructuralChanges();
+	}
+
+	void Scene::FlushStructuralChanges()
+	{
+		AssertOwnerThread();
+		if (m_CallbackDepth || m_Committing) throw std::logic_error("Structural changes cannot be recursively committed");
+		if (m_StopRequested) { StopScene(); return; }
+		std::vector<StructuralChange> batch;
+		batch.swap(m_Changes);
+		m_Committing = true;
+		for (auto& change : batch)
+		{
+			const auto previousSource = m_CallbackSource;
+			// Commands submitted by a command retain its original script owner too.
+			m_CallbackSource = change.Source;
+			try
+			{
+				switch (change.Kind)
+				{
+					case ChangeKind::General:
+						if (m_State != SceneState::Stopping && IsSourceAlive(change.Source)) change.Command(*this);
+						break;
+					case ChangeKind::DestroyEntity: DestroyEntityNow(change.Target); break;
+					case ChangeKind::RemoveComponent: RemoveComponentNow(change.Target, change.Component); break;
+				}
+			}
+			catch (const std::exception& error) { FaultSource(change.Source, error.what()); }
+			catch (...) { FaultSource(change.Source, "Unknown exception in structural command"); }
+			m_CallbackSource = previousSource;
+			if (m_StopRequested) break;
+		}
+		m_Committing = false;
+		if (m_StopRequested) StopScene();
+	}
+
+	void Scene::InvokeCallback(const ScriptSource& source, const std::function<void()>& callback)
+	{
+		const auto previous = m_CallbackSource;
+		m_CallbackSource = source;
+		++m_CallbackDepth;
+		try { callback(); }
+		catch (...) { --m_CallbackDepth; m_CallbackSource = previous; throw; }
+		--m_CallbackDepth;
+		m_CallbackSource = previous;
+	}
+
+	void Scene::FaultSource(const ScriptSource& source, const std::string& error)
+	{
+		std::string scriptName;
+		if (m_Registry.valid(source.EntityHandle))
+		{
+			if (source.Component == entt::type_id<NativeScriptComponent>().hash())
+			{
+				if (auto* script = m_Registry.try_get<NativeScriptComponent>(source.EntityHandle)) scriptName = script->ScriptName;
+			}
+			else if (source.Component == entt::type_id<LuaScriptComponent>().hash())
+			{
+				if (auto* script = m_Registry.try_get<LuaScriptComponent>(source.EntityHandle)) scriptName = script->ScriptFilePath;
+			}
+		}
+		const std::string message = "[Scene] " + scriptName + " entity=" + std::to_string(static_cast<uint32_t>(source.EntityHandle)) +
+			" phase=StructuralChange: " + error;
+		Report(message);
+		if (!m_Registry.valid(source.EntityHandle)) return;
+		if (source.Component == entt::type_id<NativeScriptComponent>().hash())
+		{
+			auto* script = m_Registry.try_get<NativeScriptComponent>(source.EntityHandle);
+			if (script && script->Generation == source.Generation)
+			{
+				script->LastError = message;
+				DestroyNativeScript(source.EntityHandle, true);
+			}
+		}
+		else if (source.Component == entt::type_id<LuaScriptComponent>().hash())
+		{
+			auto* script = m_Registry.try_get<LuaScriptComponent>(source.EntityHandle);
+			if (script && script->Generation == source.Generation)
+			{
+				script->LastError = message;
+				DestroyLuaScript(source.EntityHandle, true);
+			}
+		}
+	}
+
+	void Scene::StartPendingScripts()
+	{
+		for (const auto entity : Snapshot<NativeScriptComponent>(m_Registry))
+		{
+			if (m_StopRequested) break;
+			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<NativeScriptComponent>().hash())) continue;
+			auto& script = m_Registry.get<NativeScriptComponent>(entity);
+			if (script.State != ScriptInstanceState::Pending) continue;
+			script.Generation = ++m_NextGeneration;
+			script.State = ScriptInstanceState::Creating;
+			script.LastError.clear();
+			const ScriptSource source{ entity, entt::type_id<NativeScriptComponent>().hash(), script.Generation };
+			try
+			{
+				InvokeCallback(source, [&] {
+					auto* type = TypeRegistry::Get().GetTypeDesc(script.ScriptName);
+					if (!script.InstantiateScript && type)
+					{
+						if (auto* binding = std::any_cast<TypeDescDataScript>(&type->UserData); binding && binding->BindFunc)
+							binding->BindFunc(script);
+					}
+					if (!script.InstantiateScript && script.ScriptName.empty()) { script.State = ScriptInstanceState::Stopped; return; }
+					if (!script.InstantiateScript || !script.DestroyScript) throw std::logic_error("Native script requires paired instantiate/destroy functions");
+					script.Instance = script.InstantiateScript();
+					if (!script.Instance) throw std::runtime_error("Native script factory returned null");
+					script.Instance->m_Entity = Entity(this, entity);
+					if (type && type->SetValueErased)
+						for (const auto& property : type->Properties)
+							if (auto it = script.FieldValues.find(property.Name); it != script.FieldValues.end())
+								type->SetValueErased(dynamic_cast<void*>(script.Instance), property, it->second);
+					script.CreateEntered = true;
+					script.Instance->OnCreate();
+					script.State = ScriptInstanceState::Running;
+				});
+			}
+			catch (const std::exception& error) { script.LastError = NativeError(script, entity, "OnCreate", error.what()); Report(script.LastError); DestroyNativeScript(entity, true); }
+			catch (...) { script.LastError = NativeError(script, entity, "OnCreate", "Unknown exception"); Report(script.LastError); DestroyNativeScript(entity, true); }
+		}
+		for (const auto entity : Snapshot<LuaScriptComponent>(m_Registry))
+		{
+			if (m_StopRequested) break;
+			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<LuaScriptComponent>().hash())) continue;
+			auto& script = m_Registry.get<LuaScriptComponent>(entity);
+			if (script.State != ScriptInstanceState::Pending) continue;
+			script.Generation = ++m_NextGeneration;
+			const ScriptSource source{ entity, entt::type_id<LuaScriptComponent>().hash(), script.Generation };
+			try { InvokeCallback(source, [&] { ScriptEngine::OnCreateScript(script, Entity(this, entity)); }); }
+			catch (const std::exception& error) { script.LastError = error.what(); script.State = ScriptInstanceState::Faulted; Report(script.LastError); }
+			catch (...) { script.LastError = "Unknown Lua creation exception"; script.State = ScriptInstanceState::Faulted; Report(script.LastError); }
+			if (script.State == ScriptInstanceState::Faulted) DestroyLuaScript(entity, true);
+		}
+	}
+
+	void Scene::DestroyNativeScript(entt::entity entity, bool faulted)
+	{
+		auto* script = m_Registry.try_get<NativeScriptComponent>(entity);
+		if (!script || script->State == ScriptInstanceState::Destroying) return;
+		faulted = faulted || script->State == ScriptInstanceState::Faulted;
+		script->State = ScriptInstanceState::Destroying;
+		const ScriptSource source{ entity, entt::type_id<NativeScriptComponent>().hash(), script->Generation, true };
+		try
+		{
+			if (script->Instance && script->CreateEntered)
+			{
+				script->CreateEntered = false;
+				InvokeCallback(source, [&] { script->Instance->OnDestroy(); });
+			}
+		}
+		catch (const std::exception& error) { script->LastError += "\n" + NativeError(*script, entity, "OnDestroy", error.what()); Report(script->LastError); faulted = true; }
+		catch (...) { script->LastError += "\n" + NativeError(*script, entity, "OnDestroy", "Unknown exception"); Report(script->LastError); faulted = true; }
+		try
+		{
+			if (script->Instance && script->DestroyScript)
+				InvokeCallback(source, [&] { script->DestroyScript(script->Instance); });
+		}
+		catch (const std::exception& error) { script->LastError += "\n" + NativeError(*script, entity, "Release", error.what()); Report(script->LastError); faulted = true; }
+		catch (...) { Report("Native script release threw an unknown exception"); faulted = true; }
+		script->Instance = nullptr;
+		script->CreateEntered = false;
+		script->State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
+	}
+
+	void Scene::DestroyLuaScript(entt::entity entity, bool faulted)
+	{
+		auto* script = m_Registry.try_get<LuaScriptComponent>(entity);
+		if (!script || script->State == ScriptInstanceState::Destroying) return;
+		if (faulted) script->State = ScriptInstanceState::Faulted;
+		const ScriptSource source{ entity, entt::type_id<LuaScriptComponent>().hash(), script->Generation, true };
+		InvokeCallback(source, [&] { ScriptEngine::OnDestroyScript(*script); });
+	}
+
+	void Scene::DestroyPhysicsBody(entt::entity entity)
+	{
+		if (auto* body = m_Registry.try_get<RigidBody2DComponent>(entity))
+		{
+			if (b2Body_IsValid(body->RuntimeBodyId)) b2DestroyBody(body->RuntimeBodyId);
+			body->RuntimeBodyId = b2_nullBodyId;
+		}
+	}
+
+	void Scene::DestroyEntityNow(entt::entity entity)
+	{
+		if (m_Registry.valid(entity))
+		{
+			DestroyNativeScript(entity);
+			DestroyLuaScript(entity);
+			DestroyPhysicsBody(entity);
+			m_Registry.destroy(entity);
+		}
+		m_PendingDestroy.erase(entity);
+		m_PendingRemove.erase(entity);
+	}
+
+	void Scene::RemoveComponentNow(entt::entity entity, entt::id_type component)
+	{
+		if (m_Registry.valid(entity) && !IsPendingDestroy(entity))
+		{
+			Entity target(this, entity);
+			std::string reason;
+			if (target.HasComponent(component) && target.CanRemoveComponent(component, &reason))
+			{
+				if (component == entt::type_id<NativeScriptComponent>().hash()) DestroyNativeScript(entity);
+				else if (component == entt::type_id<LuaScriptComponent>().hash()) DestroyLuaScript(entity);
+				else if (component == entt::type_id<RigidBody2DComponent>().hash()) DestroyPhysicsBody(entity);
+				if (auto* storage = m_Registry.storage(component)) storage->remove(entity);
+			}
+			else if (!reason.empty()) Report("[Scene] RemoveComponent: " + reason);
+		}
+		auto it = m_PendingRemove.find(entity);
+		if (it != m_PendingRemove.end())
+		{
+			it->second.erase(component);
+			if (it->second.empty()) m_PendingRemove.erase(it);
+		}
+	}
+
+	void Scene::OnUpdateEditor(Timestep, const EditorCamera&) { AssertOwnerThread(); }
+	void Scene::OnUpdateRuntime(Timestep ts) { OnScriptUpdate(ts); }
+	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera&) { OnScriptUpdate(ts); }
+
 	void Scene::OnRuntimeStart()
 	{
+		AssertOwnerThread();
+		if (IsActive()) return;
 		OnPhysics2DStart();
 		OnScriptStart();
 	}
-	void Scene::OnRuntimeStop()
-	{
-		OnPhysics2DStop();
-		OnScriptDestroy();
-	}
-	void Scene::OnSimulationStart()
-	{
-		OnPhysics2DStart();
-		OnScriptStart();
-	}
-	void Scene::OnSimulationStop()
-	{
-		OnPhysics2DStop();
-		OnScriptDestroy();
-	}
+	void Scene::OnSimulationStart() { OnRuntimeStart(); }
+	void Scene::OnRuntimeStop() { OnScriptDestroy(); }
+	void Scene::OnSimulationStop() { OnScriptDestroy(); }
+
 	void Scene::OnScriptStart()
 	{
-		m_Registry.view<NativeScriptComponent>().each([=](auto entity, NativeScriptComponent& scriptComponent)
-			{
-				if (!scriptComponent.Instance && scriptComponent.InstantiateScript)
-				{
-					scriptComponent.Instance = scriptComponent.InstantiateScript();
-					TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(scriptComponent.ScriptName);
-					for (const auto& prop : typeDesc->Properties)
-					{
-						if (scriptComponent.FieldValues.find(prop.Name) != scriptComponent.FieldValues.end())
-						{
-							typeDesc->SetValueErased(dynamic_cast<void*>(scriptComponent.Instance), prop, scriptComponent.FieldValues[prop.Name]);
-						}
-					};
-					scriptComponent.Instance->m_Entity = Entity { this,entity };
-					scriptComponent.Instance->OnCreate();
-				}
-			});
-		m_Registry.view<LuaScriptComponent>().each([=](auto entity, LuaScriptComponent& scriptComponent)
-			{
-				ScriptEngine::OnCreateScript(scriptComponent, { this,entity });
-			});
-
+		AssertOwnerThread();
+		if (IsActive()) return;
+		if (m_CallbackDepth || m_Committing) throw std::logic_error("Scene cannot start inside a callback or structural command");
+		m_State = SceneState::Starting;
+		m_StopRequested = false;
+		for (const auto entity : Snapshot<NativeScriptComponent>(m_Registry))
+		{
+			auto& script = m_Registry.get<NativeScriptComponent>(entity);
+			script.State = ScriptInstanceState::Pending;
+			script.LastError.clear();
+		}
+		for (const auto entity : Snapshot<LuaScriptComponent>(m_Registry))
+		{
+			auto& script = m_Registry.get<LuaScriptComponent>(entity);
+			script.State = ScriptInstanceState::Pending;
+			script.LastError.clear();
+		}
+		StartPendingScripts();
+		if (m_StopRequested) StopScene();
+		else m_State = SceneState::Running;
 	}
 
 	void Scene::OnScriptUpdate(Timestep ts)
 	{
-		{
-			auto view = m_Registry.view<NativeScriptComponent>();
-			size_t count = view.size();
-			if (count != 0)
-			{
-				WLD_STACK_WIZARD(componentsBuffer, count * sizeof(NativeScriptComponent*), true);
-				NativeScriptComponent** componentsArray = (NativeScriptComponent**)componentsBuffer.GetAllocator().Allocate(count * sizeof(NativeScriptComponent*));
-
-				size_t index = 0;
-				for (auto entity : view)
-				{
-					componentsArray[index++] = &view.get<NativeScriptComponent>(entity);
-				}
-
-				// 假设 64 个脚本为一批次派发
-				JobSystem::ParallelFor(count, 64, [&](uint32_t i)
-					{
-						auto* comp = componentsArray[i];
-						if (comp->Instance)
-						{
-							// 在工作线程中并发更新
-							comp->Instance->OnUpdate(ts);
-						}
-					});
-			}
-		}
-
-		{
-			auto view = m_Registry.view<LuaScriptComponent>();
-			size_t count = view.size();
-			if (count != 0)
-			{
-				WLD_STACK_WIZARD(componentsBuffer, count * sizeof(LuaScriptComponent*), true);
-				LuaScriptComponent** componentsArray = (LuaScriptComponent**)componentsBuffer.GetAllocator().Allocate(count * sizeof(LuaScriptComponent*));
-				size_t index = 0;
-				for (auto entity : view)
-				{
-					componentsArray[index++] = &view.get<LuaScriptComponent>(entity);
-				}
-				// 假设 64 个脚本为一批次派发
-				JobSystem::ParallelFor(count, 64, [&](uint32_t i)
-					{
-						auto* comp = componentsArray[i];
-						if (comp->IsLoaded)
-						{
-							// 在工作线程中并发更新
-							ScriptEngine::OnUpdateScript(*comp, ts);
-						}
-					});
-			}
-		}
-
-
+		AssertOwnerThread();
+		if (m_CallbackDepth || m_Committing) throw std::logic_error("Scene updates cannot be reentrant");
+		if (!IsRunning()) return;
+		FlushStructuralChanges();
+		if (!IsRunning()) return;
+		// Only instances already running at this update boundary may receive OnUpdate.
+		std::vector<entt::entity> native, lua;
+		for (const auto entity : Snapshot<NativeScriptComponent>(m_Registry))
+			if (m_Registry.get<NativeScriptComponent>(entity).State == ScriptInstanceState::Running) native.push_back(entity);
+		for (const auto entity : Snapshot<LuaScriptComponent>(m_Registry))
+			if (m_Registry.get<LuaScriptComponent>(entity).State == ScriptInstanceState::Running) lua.push_back(entity);
+		StartPendingScripts();
+		if (m_StopRequested) { StopScene(); return; }
+		OnUpdatePhysics2D(ts);
+		UpdateScriptSnapshot(ts, native, lua);
+		if (m_StopRequested) StopScene();
+		else FlushStructuralChanges();
 	}
+
+	void Scene::UpdateScriptSnapshot(Timestep ts, const std::vector<entt::entity>& native, const std::vector<entt::entity>& lua)
+	{
+		for (const auto entity : native)
+		{
+			if (m_StopRequested) break;
+			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<NativeScriptComponent>().hash())) continue;
+			auto* script = m_Registry.try_get<NativeScriptComponent>(entity);
+			if (!script || script->State != ScriptInstanceState::Running || !script->Instance) continue;
+			const ScriptSource source{ entity, entt::type_id<NativeScriptComponent>().hash(), script->Generation };
+			try { InvokeCallback(source, [&] { script->Instance->OnUpdate(ts); }); }
+			catch (const std::exception& error) { script->LastError = NativeError(*script, entity, "OnUpdate", error.what()); Report(script->LastError); DestroyNativeScript(entity, true); }
+			catch (...) { script->LastError = NativeError(*script, entity, "OnUpdate", "Unknown exception"); Report(script->LastError); DestroyNativeScript(entity, true); }
+		}
+		for (const auto entity : lua)
+		{
+			if (m_StopRequested) break;
+			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<LuaScriptComponent>().hash())) continue;
+			auto* script = m_Registry.try_get<LuaScriptComponent>(entity);
+			if (!script || script->State != ScriptInstanceState::Running) continue;
+			const ScriptSource source{ entity, entt::type_id<LuaScriptComponent>().hash(), script->Generation };
+			try { InvokeCallback(source, [&] { ScriptEngine::OnUpdateScript(*script, ts); }); }
+			catch (const std::exception& error) { script->LastError = error.what(); script->State = ScriptInstanceState::Faulted; Report(script->LastError); }
+			catch (...) { script->LastError = "Unknown Lua update exception"; script->State = ScriptInstanceState::Faulted; Report(script->LastError); }
+			if (script->State == ScriptInstanceState::Faulted) DestroyLuaScript(entity, true);
+		}
+	}
+
 	void Scene::OnScriptDestroy()
 	{
-		m_Registry.view<NativeScriptComponent>().each([=](auto entity, NativeScriptComponent& scriptComponent)
-			{
-				if (scriptComponent.Instance)
-				{
-					scriptComponent.Instance->OnDestroy();
-					scriptComponent.DestroyScript(scriptComponent.Instance);
-				}
-			});
+		AssertOwnerThread();
+		if (m_CallbackDepth || m_Committing) { m_StopRequested = true; return; }
+		StopScene();
+	}
 
-		m_Registry.view<LuaScriptComponent>().each([=](auto entity, LuaScriptComponent& scriptComponent)
-			{
-				ScriptEngine::OnDestroyScript(scriptComponent);
-			});
+	void Scene::StopScene()
+	{
+		AssertOwnerThread();
+		if (m_State == SceneState::Stopping) return;
+		m_State = SceneState::Stopping;
+		m_StopRequested = false;
+		// Never instantiate Pending scripts during stop. Keep component storage readable in OnDestroy.
+		m_Changes.clear();
+		for (const auto entity : Snapshot<NativeScriptComponent>(m_Registry)) DestroyNativeScript(entity);
+		for (const auto entity : Snapshot<LuaScriptComponent>(m_Registry)) DestroyLuaScript(entity);
+		OnPhysics2DStop();
+		// Destruction callbacks may request further idempotent deletes/removals, but no general work.
+		while (!m_PendingDestroy.empty() || !m_PendingRemove.empty())
+		{
+			const auto destroys = m_PendingDestroy;
+			for (const auto entity : destroys) DestroyEntityNow(entity);
+			const auto removals = m_PendingRemove;
+			for (const auto& [entity, components] : removals)
+				for (const auto component : components) RemoveComponentNow(entity, component);
+		}
+		m_Changes.clear();
+		m_StopRequested = false;
+		m_State = SceneState::Stopped;
+	}
+
+	void Scene::OnViewportResize(uint32_t width, uint32_t height)
+	{
+		AssertOwnerThread();
+		m_ViewportWidth = width;
+		m_ViewportHeight = height;
+		for (const auto entity : m_Registry.view<CameraComponent>())
+		{
+			auto& camera = m_Registry.get<CameraComponent>(entity);
+			if (!camera.FixedAspectRatio && width && height) camera.Camera.SetViewportSize(width, height);
+		}
 	}
 
 	Entity Scene::GetPrimaryCameraEntity()
 	{
-		auto view = m_Registry.view<CameraComponent>();
-		for (auto entity : view)
-		{
-			auto& cameraComponent = view.get<CameraComponent>(entity);
-			if (cameraComponent.Primary)
-			{
-				return Entity(this, entity);
-			}
-		}
-		return Entity();
+		AssertOwnerThread();
+		for (const auto entity : m_Registry.view<CameraComponent, TransformComponent>())
+			if (!IsPendingDestroy(entity) && !IsPendingRemoval(entity, entt::type_id<CameraComponent>().hash()) &&
+				m_Registry.get<CameraComponent>(entity).Primary) return Entity(this, entity);
+		return {};
 	}
 
 	void Scene::DuplicateEntity(Entity entity)
 	{
-
-		auto view = m_Registry.view<TagComponent>();
-
-		auto name = entity.GetComponent<TagComponent>().Tag;
-
-		Entity newEntity = Entity::CreateEntity(this, name);
-
-		for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
+		AssertStructuralWrite();
+		if (!entity.IsValid() || entity.GetScene() != this || IsPendingDestroy(entity)) return;
+		if (IsActive() && (entity.HasComponent<RigidBody2DComponent>() || entity.HasComponent<BoxCollider2DComponent>() || entity.HasComponent<CircleCollider2DComponent>()))
+			throw std::logic_error("Duplicating physics components requires a stopped scene");
+		const std::string name = entity.HasComponent<TagComponent>() ? entity.GetComponent<TagComponent>().Tag : "Empty Entity";
+		Entity copy = Entity::CreateEntity(this, name);
+		if (entity.HasComponent<TransformComponent>()) copy.AddComponent<TransformComponent>(entity.GetComponent<TransformComponent>());
+		for (const auto& name : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
 		{
-			if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
-			{
-				bool hasComponent = entity.HasComponent(componentInfo->Id);
-
-				if (hasComponent)
-				{
-					if (componentInfo->CopyFunc)
-					{
-						componentInfo->CopyFunc(newEntity, entity);
-					}
-				}
-			}
+			auto* type = TypeRegistry::Get().GetTypeDesc(name);
+			auto* component = type ? std::any_cast<TypeDescDataComponent>(&type->UserData) : nullptr;
+			if (component && component->CopyFunc && entity.HasComponent(component->Id)) component->CopyFunc(copy, entity);
 		}
 	}
 
 	void Scene::CopyScene(Ref<Scene>& other, Ref<Scene>& newScene)
 	{
+		if (!other || !newScene || other == newScene) throw std::logic_error("Scene clone requires distinct source and destination scenes");
+		other->AssertOwnerThread();
+		newScene->AssertStructuralWrite();
+		if (newScene->IsActive()) throw std::logic_error("Scene clone destination must be stopped");
 		newScene->m_ViewportHeight = other->m_ViewportHeight;
 		newScene->m_ViewportWidth = other->m_ViewportWidth;
-
-		auto& srcRegistry = other->m_Registry;
-		auto& destRegistry = newScene->m_Registry;
 		std::unordered_map<UUID, entt::entity> entityMap;
-
-		auto view = srcRegistry.view<UUIDComponent>();
-		for (auto entity : view)
+		for (const auto entity : other->m_Registry.view<UUIDComponent>())
 		{
-			UUID entityId = srcRegistry.get<UUIDComponent>(entity).ID;
-			auto name = srcRegistry.get<TagComponent>(entity).Tag;
-
-			Entity newEntity = Entity::CreateEntity(newScene.get(), name, entityId);
-			entityMap[entityId] = newEntity;
+			const auto id = other->m_Registry.get<UUIDComponent>(entity).ID;
+			const auto* tag = other->m_Registry.try_get<TagComponent>(entity);
+			entityMap[id] = Entity::CreateEntity(newScene.get(), tag ? tag->Tag : "Empty Entity", id);
 		}
-
-		for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
+		for (const auto& name : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
 		{
-			if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
-			{
-				if (componentInfo->CopyComponentFunc)
-				{
-					componentInfo->CopyComponentFunc(destRegistry, srcRegistry, entityMap);
-				}
-			}
+			auto* type = TypeRegistry::Get().GetTypeDesc(name);
+			auto* component = type ? std::any_cast<TypeDescDataComponent>(&type->UserData) : nullptr;
+			if (component && component->CopyComponentFunc) component->CopyComponentFunc(newScene->m_Registry, other->m_Registry, entityMap);
 		}
 	}
 
-
 	void Scene::OnPhysics2DStart()
 	{
+		if (b2World_IsValid(m_PhysicsWorldId)) return;
 		b2WorldDef worldDef = b2DefaultWorldDef();
 		worldDef.gravity = { 0.0f, -9.8f };
 		worldDef.restitutionThreshold = 0.5f;
 		m_PhysicsWorldId = b2CreateWorld(&worldDef);
-
-		auto view = m_Registry.view<RigidBody2DComponent>();
-		for (auto entity : view)
+		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 		{
-			Entity Entity = { this,entity };
-			auto& transform = Entity.GetComponent<TransformComponent>();
-			auto& rb = Entity.GetComponent<RigidBody2DComponent>();
-
+			auto& rb = m_Registry.get<RigidBody2DComponent>(entity);
+			rb.RuntimeBodyId = b2_nullBodyId;
+			auto* transform = m_Registry.try_get<TransformComponent>(entity);
+			if (!transform) { Report("[Physics] Missing Transform for rigid body entity=" + std::to_string(static_cast<uint32_t>(entity))); continue; }
 			b2BodyDef bodyDef = b2DefaultBodyDef();
 			switch (rb.Type)
 			{
-				case RigidBody2DComponent::BodyType::Static:
-					bodyDef.type = b2_staticBody;
-					break;
-				case RigidBody2DComponent::BodyType::Dynamic:
-					bodyDef.type = b2_dynamicBody;
-					break;
-				case RigidBody2DComponent::BodyType::Kinematic:
-					bodyDef.type = b2_kinematicBody;
-					break;
+				case RigidBody2DComponent::BodyType::Static: bodyDef.type = b2_staticBody; break;
+				case RigidBody2DComponent::BodyType::Dynamic: bodyDef.type = b2_dynamicBody; break;
+				case RigidBody2DComponent::BodyType::Kinematic: bodyDef.type = b2_kinematicBody; break;
 			}
-			bodyDef.position = { transform.Location.x, transform.Location.y };
-			bodyDef.rotation = b2MakeRot(transform.Rotation.z);
+			bodyDef.position = { transform->Location.x, transform->Location.y };
+			bodyDef.rotation = b2MakeRot(transform->Rotation.z);
 			bodyDef.motionLocks.angularZ = rb.FixedRotation;
-
 			rb.RuntimeBodyId = b2CreateBody(m_PhysicsWorldId, &bodyDef);
-
-			if (Entity.HasComponent<BoxCollider2DComponent>())
+			if (const auto* box = m_Registry.try_get<BoxCollider2DComponent>(entity))
 			{
-				auto& bc2d = Entity.GetComponent<BoxCollider2DComponent>();
-
-				// 1. 创建形状定义 (取代了 b2FixtureDef)
 				b2ShapeDef shapeDef = b2DefaultShapeDef();
-				shapeDef.density = bc2d.Density;   // 建议从组件读取，而不是硬编码
-
-				shapeDef.material.friction = bc2d.Friction;
-				shapeDef.material.restitution = bc2d.Restitution; // 新版可以直接在这里设弹性
-
-				// 2. 创建盒模型几何数据 (取代了 boxShape.SetAsBox)
-				// 注意：v3.0 的 b2MakeBox 依然接受“半宽”和“半高”
-				float hx = transform.Scale.x * bc2d.Size.x;
-				float hy = transform.Scale.y * bc2d.Size.y;
-				b2Polygon boxPolygon = b2MakeOffsetBox(hx, hy, { bc2d.Offset.x, bc2d.Offset.y }, b2MakeRot(0.0f));
-
-
-				// 3. 将形状绑定到 Body 上 (取代了 body->CreateFixture)
-				// 注意：这里返回的是 b2ShapeId，如果不需要后续操作可以不保存
-				b2CreatePolygonShape(rb.RuntimeBodyId, &shapeDef, &boxPolygon);
+				shapeDef.density = box->Density;
+				shapeDef.material.friction = box->Friction;
+				shapeDef.material.restitution = box->Restitution;
+				b2Polygon polygon = b2MakeOffsetBox(transform->Scale.x * box->Size.x, transform->Scale.y * box->Size.y,
+					{ box->Offset.x, box->Offset.y }, b2MakeRot(0.0f));
+				b2CreatePolygonShape(rb.RuntimeBodyId, &shapeDef, &polygon);
 			}
-			if (Entity.HasComponent<CircleCollider2DComponent>())
+			if (const auto* circle = m_Registry.try_get<CircleCollider2DComponent>(entity))
 			{
-				auto& circle = Entity.GetComponent<CircleCollider2DComponent>();
-
-				b2Circle circleShape;
-				circleShape.center = { circle.Offset.x, circle.Offset.y }; // 碰撞盒偏移
-				circleShape.radius = circle.Radius * transform.Scale.x;  // 实际半径（需考虑缩放）
-
+				b2Circle shape;
+				shape.center = { circle->Offset.x, circle->Offset.y };
+				shape.radius = circle->Radius * transform->Scale.x;
 				b2ShapeDef shapeDef = b2DefaultShapeDef();
-				shapeDef.density = circle.Density; // 可以根据需要从组件读取
-				shapeDef.material.friction = circle.Friction; // 可以根据需要从组件读取
-				shapeDef.material.restitution = circle.Restitution; // 可以根据需要从组件读取
-
-				b2CreateCircleShape(rb.RuntimeBodyId, &shapeDef, &circleShape);
+				shapeDef.density = circle->Density;
+				shapeDef.material.friction = circle->Friction;
+				shapeDef.material.restitution = circle->Restitution;
+				b2CreateCircleShape(rb.RuntimeBodyId, &shapeDef, &shape);
 			}
 		}
 	}
+
 	void Scene::OnUpdatePhysics2D(Timestep ts)
 	{
-		const int subStepCount = 4;
-		b2World_Step(m_PhysicsWorldId, ts.GetSeconds(), subStepCount);
-
-		auto view = m_Registry.view<RigidBody2DComponent>();
-		auto count = view.size();
-		if (count == 0) return;
-
-		struct PhysicsSyncPayload
+		if (!b2World_IsValid(m_PhysicsWorldId)) return;
+		b2World_Step(m_PhysicsWorldId, ts.GetSeconds(), 4);
+		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 		{
-			TransformComponent* Transform;
-			RigidBody2DComponent* Rb;
-		};
-
-		WLD_STACK_WIZARD(payloadsBuffer, count * sizeof(PhysicsSyncPayload), true);
-		PhysicsSyncPayload* syncPayloads = (PhysicsSyncPayload*)payloadsBuffer.GetAllocator().Allocate(count * sizeof(PhysicsSyncPayload));
-
-		size_t index = 0;
-		for (auto entity : view)
-		{
-			// 主线程填充连续的载荷数组
-			syncPayloads[index++] = {
-				&m_Registry.get<TransformComponent>(entity),
-				&m_Registry.get<RigidBody2DComponent>(entity)
-			};
-		}
-
-		JobSystem::ParallelFor(count, 64, [&](uint32_t i)
+			if (IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<RigidBody2DComponent>().hash())) continue;
+			auto& rb = m_Registry.get<RigidBody2DComponent>(entity);
+			auto* transform = m_Registry.try_get<TransformComponent>(entity);
+			if (!transform || !b2Body_IsValid(rb.RuntimeBodyId))
 			{
-				auto& payload = syncPayloads[i];
-
-				// 从物理对象拿变换
-				b2Transform& bodyTransform = b2Body_GetTransform(payload.Rb->RuntimeBodyId);
-
-				const b2Vec2& position = bodyTransform.p;
-				float rotation = b2Rot_GetAngle(bodyTransform.q);
-
-				// 同步回引擎的组件
-				payload.Transform->SetTransform({ position.x, position.y, payload.Transform->Location.z },
-					{ payload.Transform->Rotation.x, payload.Transform->Rotation.y, rotation }, payload.Transform->Scale);
-			});
+				Report("[Physics] Skipping invalid body or missing Transform entity=" + std::to_string(static_cast<uint32_t>(entity)));
+				continue;
+			}
+			const b2Transform body = b2Body_GetTransform(rb.RuntimeBodyId);
+			transform->SetTransform({ body.p.x, body.p.y, transform->Location.z },
+				{ transform->Rotation.x, transform->Rotation.y, b2Rot_GetAngle(body.q) }, transform->Scale);
+		}
 	}
+
 	void Scene::OnPhysics2DStop()
 	{
-		b2DestroyWorld(m_PhysicsWorldId);
+		if (b2World_IsValid(m_PhysicsWorldId)) b2DestroyWorld(m_PhysicsWorldId);
 		m_PhysicsWorldId = b2_nullWorldId;
+		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
+			m_Registry.get<RigidBody2DComponent>(entity).RuntimeBodyId = b2_nullBodyId;
 	}
 }

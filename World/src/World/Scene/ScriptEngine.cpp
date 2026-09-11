@@ -1,390 +1,330 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "ScriptEngine.h"
 #include "Components.h"
+#include "LuaStubGenerator.h"
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+#include <thread>
 
 namespace World
 {
-	// 全局 Lua 状态指针，整个引擎只会有这一个实例
-	static sol::state* s_LuaState = nullptr;
+	namespace
+	{
+		sol::state* s_LuaState = nullptr;
+		std::thread::id s_OwnerThread;
+
+		void ReportLuaError(LuaScriptComponent& script, const char* phase, const std::string& error)
+		{
+			const std::string message = "[Lua] " + script.ScriptFilePath + " entity=" +
+				std::to_string(static_cast<uint32_t>(script.RuntimeEntity)) + " phase=" + phase + ":\n" + error;
+			if (!script.LastError.empty()) script.LastError += "\n";
+			script.LastError += message;
+			script.State = ScriptInstanceState::Faulted;
+			if (Log::GetCoreLogger()) WLD_CORE_ERROR("{0}", message);
+		}
+
+		void ClearLuaReferences(LuaScriptComponent& script)
+		{
+			script.OnCreateFunc = sol::protected_function{};
+			script.OnUpdateFunc = sol::protected_function{};
+			script.OnDestroyFunc = sol::protected_function{};
+			script.ScriptTable = sol::table{};
+			script.LuaEnv = sol::environment{};
+			script.RuntimeEntity = {};
+			script.IsLoaded = false;
+			script.CreateEntered = false;
+		}
+
+		void CheckResult(const sol::protected_function_result& result)
+		{
+			if (!result.valid())
+			{
+				sol::error error = result;
+				throw std::runtime_error(error.what());
+			}
+		}
+
+		int LookupCallback(lua_State* state)
+		{
+			// This C function runs inside a protected Lua call. Ordinary indexing preserves
+			// __index inheritance, and Lua errors cannot unwind through C++ local objects.
+			lua_gettable(state, 1);
+			return 1;
+		}
+
+		sol::protected_function ReadCallback(const sol::table& table, const char* name)
+		{
+			auto lookup = sol::make_object(*s_LuaState, static_cast<lua_CFunction>(&LookupCallback)).as<sol::protected_function>();
+			auto result = lookup(table, name);
+			CheckResult(result);
+			sol::object value = result.get<sol::object>();
+			if (!value.valid() || value == sol::lua_nil) return {};
+			if (value.get_type() != sol::type::function) throw std::logic_error(std::string(name) + " must be a function or nil");
+			return value.as<sol::protected_function>();
+		}
+
+		LuaTypeReflection VectorDescription(const char* name, size_t dimensions)
+		{
+			LuaTypeReflection type;
+			type.ClassName = name;
+			const char* axes[] = { "x", "y", "z", "w" };
+			std::vector<LuaPropDesc> coordinates;
+			for (size_t i = 0; i < dimensions; ++i)
+			{
+				type.Properties.push_back({ axes[i], "number", "Vector coordinate" });
+				coordinates.push_back({ axes[i], "number", "Vector coordinate" });
+			}
+			type.Methods = { { "length", {}, "number", "Euclidean vector length", true } };
+			type.Constructors = {
+				{ "new", {}, name, "Create a vector", false },
+				{ "new", {{ "value", "number", "Value for every coordinate" }}, name, "Fill every coordinate", false },
+				{ "new", coordinates, name, "Create a vector from coordinates", false }
+			};
+			return type;
+		}
+	}
+
+	bool ScriptEngine::IsInitialized() { return s_LuaState != nullptr; }
+
+	void ScriptEngine::AssertOwnerThread()
+	{
+		if (!s_LuaState) throw std::logic_error("ScriptEngine is not initialized");
+		if (s_OwnerThread != std::this_thread::get_id()) throw std::logic_error("Lua access must run on the ScriptEngine owner thread");
+	}
 
 	void ScriptEngine::Init()
 	{
+		if (s_LuaState) { AssertOwnerThread(); return; }
+		s_OwnerThread = std::this_thread::get_id();
 		s_LuaState = new sol::state();
-
-		// 1. 打开 Lua 的基础库和数学库
-		s_LuaState->open_libraries(sol::lib::base, sol::lib::math, sol::lib::package);
-
-		// 2. 接管 Lua 的 print 函数，让脚本里的 print 直接输出到你的引擎控制台
-		s_LuaState->set_function("print", [](sol::variadic_args args)
-			{
-				std::string result = "[Lua] ";
-				for (auto arg : args)
+		try
+		{
+			s_LuaState->open_libraries(sol::lib::base, sol::lib::math, sol::lib::package);
+			s_LuaState->set_function("print", [](sol::variadic_args args) {
+				AssertOwnerThread();
+				std::string text = "[Lua]";
+				sol::protected_function tostring = GetState()["tostring"];
+				for (auto argument : args)
 				{
-					result += arg.as<std::string>() + " ";
+					sol::object value = argument;
+					auto result = tostring(value);
+					CheckResult(result);
+					text += " " + result.get<std::string>();
 				}
-				WLD_TRACE(result);
+				if (Log::GetClientLogger()) WLD_TRACE("{0}", text);
 			});
-
-		// 3. 注册你的 C++ 组件给 Lua 使用
-		//s_LuaState->new_usertype<TransformComponent>("TransformComponent",
-		//	"Location", &TransformComponent::Location,
-		//	"SetLocation", &TransformComponent::SetLocation
-		//);
-		RegisterMathTypes();
-		WLD_CORE_INFO("[Lua] ScriptEngine initialized successfully.");
+			RegisterMathTypes();
+		}
+		catch (...) { delete s_LuaState; s_LuaState = nullptr; s_OwnerThread = {}; throw; }
+		if (Log::GetCoreLogger()) WLD_CORE_INFO("[Lua] ScriptEngine initialized successfully.");
 	}
+
 	void ScriptEngine::Shutdown()
 	{
+		if (!s_LuaState) return;
+		AssertOwnerThread();
+		// Hosts release all scene/preview references before entering this function.
 		delete s_LuaState;
 		s_LuaState = nullptr;
+		s_OwnerThread = {};
 	}
 
-	std::string GetLuaTypeName(const PropertyDesc& prop)
-	{
-		switch (prop.Type)
-		{
-			case DataType::Bool: return "boolean";
-			case DataType::Char: return "string"; // Lua 没有 char 类型，使用 string 代替
-			case DataType::Int8:
-			case DataType::UInt8:
-			case DataType::Int16:
-			case DataType::UInt16:
-			case DataType::Int32:
-			case DataType::UInt32:
-			case DataType::Int64:
-			case DataType::UInt64:
-			case DataType::Float:
-			case DataType::Double:
-				return "number";
-			case DataType::String: return "string";
-			case DataType::Vec2: return "vec2";
-			case DataType::Vec3: return "vec3";
-			case DataType::Vec4: return "vec4";
-			case DataType::Mat3: return "mat3";
-			case DataType::Mat4: return "mat4";
-			case DataType::Enum: return "number"; // 枚举在 Lua 中通常表示为数字
-			case DataType::Object:
-			{
-				const ObjectDesc& objDesc = std::any_cast<ObjectDesc>(prop.UserData);
+	sol::state& ScriptEngine::GetState() { AssertOwnerThread(); return *s_LuaState; }
 
-				const TypeDesc* objTypeDesc = TypeRegistry::Get().GetTypeDesc(objDesc.Name);
-				if (objTypeDesc)
-				{
-					return objTypeDesc->Name;
-				}
-				return "any";
-			}
-
-			default: return "any";
-		}
-	}
 	void ScriptEngine::DefineMathType()
 	{
+		if (IsInitialized()) AssertOwnerThread();
+		auto vec2 = VectorDescription("vec2", 2);
+		vec2.Operators = { { "add", "vec2", "vec2" }, { "sub", "vec2", "vec2" },
+			{ "mul", "number", "vec2" }, { "mul", "vec2", "vec2" }, { "div", "number", "vec2" }, { "div", "vec2", "vec2" } };
+		vec2.BindFunc = [](sol::state& lua) {
+			lua.new_usertype<glm::vec2>("vec2", sol::constructors<glm::vec2(), glm::vec2(float), glm::vec2(float, float)>(),
+				"x", &glm::vec2::x, "y", &glm::vec2::y,
+				"length", [](const glm::vec2& value) { return glm::length(value); },
+				sol::meta_function::addition, [](const glm::vec2& a, const glm::vec2& b) { return a + b; },
+				sol::meta_function::subtraction, [](const glm::vec2& a, const glm::vec2& b) { return a - b; },
+				sol::meta_function::multiplication, sol::overload(
+					[](const glm::vec2& a, float b) { return a * b; },
+					[](float a, const glm::vec2& b) { return a * b; },
+					[](const glm::vec2& a, const glm::vec2& b) { return a * b; }),
+				sol::meta_function::division, sol::overload(
+					[](const glm::vec2& a, float b) { return a / b; },
+					[](const glm::vec2& a, const glm::vec2& b) { return a / b; }));
+		};
+		LuaReflectionRegistry::Register(vec2);
 
-		LuaReflectionRegistry::GetTable().push_back(
-			{
-				"vec2",
-				{
-					{"x", "number"},
-					{"y", "number"},
-					{"length", "fun():number","Get the length of the vector"},
-				},
-				[](sol::state& lua)
-				{
-					lua.new_usertype<glm::vec2>(
-						"vec2",sol::constructors<glm::vec2(),glm::vec2(float), glm::vec2(float, float)>(),
-						"x", &glm::vec2::x,
-						"y", &glm::vec2::y,
-						"length", [](const glm::vec2& v) -> float { return glm::length(v); },
+		auto vec3 = VectorDescription("vec3", 3);
+		vec3.Methods.push_back({ "normalize", {}, "vec3", "Return a normalized vector", true });
+		vec3.Methods.push_back({ "dot", {{ "other", "vec3", "Other vector" }}, "number", "Dot product", true });
+		vec3.Methods.push_back({ "cross", {{ "other", "vec3", "Other vector" }}, "vec3", "Cross product", true });
+		vec3.Operators = { { "add", "vec3", "vec3" }, { "sub", "vec3", "vec3" },
+			{ "mul", "number", "vec3" }, { "mul", "vec3", "vec3" }, { "div", "number", "vec3" }, { "div", "vec3", "vec3" } };
+		vec3.BindFunc = [](sol::state& lua) {
+			lua.new_usertype<glm::vec3>("vec3", sol::constructors<glm::vec3(), glm::vec3(float), glm::vec3(float, float, float)>(),
+				"x", &glm::vec3::x, "y", &glm::vec3::y, "z", &glm::vec3::z,
+				"length", [](const glm::vec3& value) { return glm::length(value); },
+				"normalize", [](const glm::vec3& value) { return glm::normalize(value); },
+				"dot", [](const glm::vec3& a, const glm::vec3& b) { return glm::dot(a, b); },
+				"cross", [](const glm::vec3& a, const glm::vec3& b) { return glm::cross(a, b); },
+				sol::meta_function::addition, [](const glm::vec3& a, const glm::vec3& b) { return a + b; },
+				sol::meta_function::subtraction, [](const glm::vec3& a, const glm::vec3& b) { return a - b; },
+				sol::meta_function::multiplication, sol::overload(
+					[](const glm::vec3& a, float b) { return a * b; },
+					[](float a, const glm::vec3& b) { return a * b; },
+					[](const glm::vec3& a, const glm::vec3& b) { return a * b; }),
+				sol::meta_function::division, sol::overload(
+					[](const glm::vec3& a, float b) { return a / b; },
+					[](const glm::vec3& a, const glm::vec3& b) { return a / b; }));
+		};
+		LuaReflectionRegistry::Register(vec3);
 
-						sol::meta_function::addition, [](const glm::vec2& a, const glm::vec2& b) { return a + b; },
-
-						sol::meta_function::subtraction, [](const glm::vec2& a, const glm::vec2& b) { return a - b; },
-
-						sol::meta_function::multiplication, sol::overload(
-							// 形态 1：向量 * 标量 (vec2 * float)
-							[](const glm::vec2& a, float b) -> glm::vec2 { return a * b; },
-
-							// 形态 2：标量 * 向量 (float * vec2)
-							[](float a, const glm::vec2& b) -> glm::vec2 { return a * b; },
-
-							// 形态 3：向量 * 向量 (vec2 * vec2)
-							[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return glm::vec2(a.x * b.x, a.y * b.y); }
-						),
-
-						sol::meta_function::division,sol::overload(
-							// 形态 1：向量 / 标量 (vec2 / float)
-							[](const glm::vec2& a, float b) -> glm::vec2 { return a / b; },
-							// 形态 2：向量 / 向量 (vec2 / vec2)
-							[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return glm::vec2(a.x / b.x, a.y / b.y); }
-						)
-					);
-
-				}
-			});
-
-		LuaReflectionRegistry::GetTable().push_back(
-			{
-				"vec3",
-				{
-					{"x", "number"},
-					{"y", "number"},
-					{"z", "number"},
-					{"length", "fun():number","Get the length of the vector"},
-					{"normalize", "fun():vec3","Normalize the vector"},
-					{"dot", "fun(vec3):number","Calculate the dot product with another vector"},
-					{"cross", "fun(vec3):vec3","Calculate the cross product with another vector"},
-				},
-
-				[](sol::state& lua)
-				{
-					lua.new_usertype<glm::vec3>(
-						"vec3",sol::constructors<glm::vec3(), glm::vec3(float), glm::vec3(float, float, float)>(),
-						"x", &glm::vec3::x,
-						"y", &glm::vec3::y,
-						"z", &glm::vec3::z,
-						"length", [](const glm::vec3& v) -> float { return glm::length(v); },
-						"normalize", [](const glm::vec3& v) -> glm::vec3 { return glm::normalize(v); },
-						"dot", [](const glm::vec3& a, const glm::vec3& b) -> float { return glm::dot(a, b); },
-						"cross", [](const glm::vec3& a, const glm::vec3& b) -> glm::vec3 { return glm::cross(a, b); },
-
-						sol::meta_function::addition, [](const glm::vec3& a, const glm::vec3& b) { return a + b; },
-						sol::meta_function::subtraction, [](const glm::vec3& a, const glm::vec3& b) { return a - b; },
-						sol::meta_function::multiplication, sol::overload(
-							// 形态 1：向量 * 标量 (vec3 * float)
-							[](const glm::vec3& a, float b) -> glm::vec3 { return a * b; },
-							// 形态 2：标量 * 向量 (float * vec3)
-							[](float a, const glm::vec3& b) -> glm::vec3 { return a * b; },
-							// 形态 3：向量 * 向量 (vec3 * vec3)
-							[](const glm::vec3& a, const glm::vec3& b) -> glm::vec3 { return glm::vec3(a.x * b.x, a.y * b.y, a.z * b.z); }
-						),
-
-						sol::meta_function::division,sol::overload(
-							// 形态 1：向量 / 标量 (vec3 / float)
-							[](const glm::vec3& a, float b) -> glm::vec3 { return a / b; },
-							// 形态 2：向量 / 向量 (vec3 / vec3)
-							[](const glm::vec3& a, const glm::vec3& b) -> glm::vec3 { return glm::vec3(a.x / b.x, a.y / b.y, a.z / b.z); }
-						)
-					);
-				}
-			});
-		LuaReflectionRegistry::GetTable().push_back(
-			{
-				"vec4",
-				{
-					{"x", "number"},
-					{"y", "number"},
-					{"z", "number"},
-					{"w", "number"},
-					{"length", "fun():number","Get the length of the vector"},
-				},
-				[](sol::state& lua)
-				{
-					lua.new_usertype<glm::vec4>(
-						"vec4", sol::constructors<glm::vec4(), glm::vec4(float), glm::vec4(float, float, float, float)>(),
-						"x", &glm::vec4::x,
-						"y", &glm::vec4::y,
-						"z", &glm::vec4::z,
-						"w", &glm::vec4::w,
-						"length", [](const glm::vec4& v) -> float { return glm::length(v); }
-					);
-				}
-			});
+		auto vec4 = VectorDescription("vec4", 4);
+		vec4.BindFunc = [](sol::state& lua) {
+			lua.new_usertype<glm::vec4>("vec4", sol::constructors<glm::vec4(), glm::vec4(float), glm::vec4(float, float, float, float)>(),
+				"x", &glm::vec4::x, "y", &glm::vec4::y, "z", &glm::vec4::z, "w", &glm::vec4::w,
+				"length", [](const glm::vec4& value) { return glm::length(value); });
+		};
+		LuaReflectionRegistry::Register(vec4);
 	}
+
 	void ScriptEngine::RegisterMathTypes()
 	{
-		auto& lua = GetState(); // 拿到你的 sol::state
+		AssertOwnerThread();
 		DefineMathType();
-		// 遍历描述表，直接执行各自的 C++ 绑定 Lambda！
-		for (const auto& mathType : LuaReflectionRegistry::GetTable())
-		{
-			mathType.BindFunc(lua);
-		}
-
-	}
-	void ScriptEngine::GenerateLuaStubs()
-	{
-		std::filesystem::path stubPath(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.lua"));
-		std::filesystem::create_directories(stubPath.parent_path()); // 确保目录存在
-
-		std::ofstream out(stubPath);
-		out << "---WorldEngineAPI\n\n"; // 告诉插件这是个提示文件
-
-		// 先输出数学类的 Lua 注释
-		for (const auto& mathType : LuaReflectionRegistry::GetTable())
-		{
-			out << "---@class " << mathType.ClassName << "\n";
-			for (const auto& prop : mathType.Properties)
-			{
-				out << "---@field " << prop.Name << " " << prop.LuaType;
-				if (!prop.Description.empty())
-				{
-					out << " " << prop.Description;
-				}
-				out << "\n";
-			}
-			out << mathType.ClassName << " = {}\n\n";
-		}
-
-		// 遍历你的 C++ 反射系统
-		for (const auto& [name, type] : TypeRegistry::Get().GetTemplateMap())
-		{
-			out << "---@class " << type.Name << "\n";
-			for (const auto& prop : type.Properties)
-			{
-				// 将 C++ 类型映射为 Lua 类型字符串 (如 int -> number)
-				out << "---@field " << prop.Name << " " << GetLuaTypeName(prop) << "\n";
-			}
-
-			out << type.Name << " = {}\n\n";
-		}
-
-		out.close();
-		WLD_CORE_INFO("Lua API Stubs generated successfully!");
+		RegisterBuiltinEntityLuaType();
+		RegisterBuiltinMat3LuaType();
+		RegisterBuiltinMat4LuaType();
+		for (const auto& type : LuaReflectionRegistry::GetTable())
+			if (type.BindFunc) type.BindFunc(*s_LuaState);
 	}
 
-	sol::state& ScriptEngine::GetState()
+	bool ScriptEngine::GenerateLuaStubs()
 	{
-		return *s_LuaState;
+		AssertOwnerThread();
+		std::string error;
+		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.lua"));
+		if (!LuaStubGenerator::Generate(path, error))
+		{
+			if (Log::GetCoreLogger()) WLD_CORE_ERROR("[Lua] {0}", error);
+			return false;
+		}
+		return true;
 	}
 
-	void ScriptEngine::InitScriptForEditor(LuaScriptComponent& sc)
+	bool ScriptEngine::InitScriptForEditor(LuaScriptComponent& script)
 	{
-		if (sc.ScriptFilePath.empty()) return;
-
-		sc.CachedFields.clear(); // 清空旧数据
-
-		// 1. 开辟一个临时沙盒，防止污染全局
-		sol::environment tempEnv(*s_LuaState, sol::create, s_LuaState->globals());
-
-		// 2. 尝试读取文件
-		auto result = s_LuaState->script_file(WLD_ASSETPATH + std::string("/") + sc.ScriptFilePath, tempEnv);
-		if (result.valid())
+		AssertOwnerThread();
+		if (script.ScriptFilePath.empty() || script.IsLoaded || script.State == ScriptInstanceState::Creating ||
+			script.State == ScriptInstanceState::Running || script.State == ScriptInstanceState::Destroying) return false;
+		try
 		{
-			sol::table scriptTable = result;
-
-			// 3. 遍历提取非函数变量
-			for (auto& kv : scriptTable)
+			sol::environment environment(*s_LuaState, sol::create, s_LuaState->globals());
+			auto result = s_LuaState->safe_script_file(WLD_ASSETPATH + std::string("/") + script.ScriptFilePath, environment, sol::script_pass_on_error);
+			CheckResult(result);
+			if (result.return_count() == 0 || result.get_type() != sol::type::table) throw std::logic_error("Script must return a table");
+			sol::table table = result.get<sol::table>();
+			std::unordered_map<std::string, LuaScriptField> fields;
+			for (const auto& [keyObject, value] : table)
 			{
-				std::string key = kv.first.as<std::string>();
-				sol::object value = kv.second;
-				sol::type type = value.get_type();
-
-				// 跳过内部函数（如 OnCreate, OnUpdate）和隐藏变量（如以下划线开头的 _xxx）
-				if (type == sol::type::function || key.empty() || key[0] == '_') continue;
-
+				if (keyObject.get_type() != sol::type::string) continue;
+				const std::string name = keyObject.as<std::string>();
+				if (name.empty() || name[0] == '_' || name == "entity") continue;
 				LuaScriptField field;
-				if (type == sol::type::number)
+				if (value.get_type() == sol::type::number)
 				{
-					// Lua 的 number 默认是 double，我们在引擎里简化处理
-					// 如果没有小数，我们当成 Int，否则当成 Float
-					double val = value.as<double>();
-					if (val == std::floor(val))
-					{
-						field.Type = LuaFieldType::Int;
-						field.Value = (int)val;
-					}
-					else
-					{
-						field.Type = LuaFieldType::Float;
-						field.Value = (float)val;
-					}
+					const double number = value.as<double>();
+					if (std::isfinite(number) && number == std::floor(number) && number >= (std::numeric_limits<int>::min)() && number <= (std::numeric_limits<int>::max)())
+						field = { LuaFieldType::Int, static_cast<int>(number) };
+					else field = { LuaFieldType::Float, static_cast<float>(number) };
 				}
-				else if (type == sol::type::boolean)
-				{
-					field.Type = LuaFieldType::Bool;
-					field.Value = value.as<bool>();
-				}
-				else if (type == sol::type::string)
-				{
-					field.Type = LuaFieldType::String;
-					field.Value = value.as<std::string>();
-				}
-
-				if (field.Type != LuaFieldType::None)
-				{
-					sc.CachedFields[key] = field; // 存入 C++ 缓存！
-				}
+				else if (value.get_type() == sol::type::boolean) field = { LuaFieldType::Bool, value.as<bool>() };
+				else if (value.get_type() == sol::type::string) field = { LuaFieldType::String, value.as<std::string>() };
+				if (field.Type == LuaFieldType::None) continue;
+				const auto old = script.CachedFields.find(name);
+				if (old != script.CachedFields.end() && old->second.Type == field.Type) field.Value = old->second.Value;
+				fields.emplace(name, std::move(field));
 			}
+			script.CachedFields = std::move(fields);
+			script.LastError.clear();
+			script.State = ScriptInstanceState::Stopped;
+			return true;
 		}
+		catch (const std::exception& error) { script.LastError.clear(); ReportLuaError(script, "EditorLoad", error.what()); }
+		catch (...) { script.LastError.clear(); ReportLuaError(script, "EditorLoad", "Unknown exception"); }
+		return false;
 	}
 
-	void ScriptEngine::OnCreateScript(LuaScriptComponent& scriptComponent, Entity entity)
+	void ScriptEngine::OnCreateScript(LuaScriptComponent& script, Entity entity)
 	{
-		if (!scriptComponent.IsLoaded && !scriptComponent.ScriptFilePath.empty())
+		AssertOwnerThread();
+		if (script.State != ScriptInstanceState::Pending && script.State != ScriptInstanceState::Stopped) return;
+		ClearLuaReferences(script);
+		script.LastError.clear();
+		script.RuntimeEntity = entity;
+		if (script.ScriptFilePath.empty()) { script.State = ScriptInstanceState::Stopped; return; }
+		script.State = ScriptInstanceState::Creating;
+		const char* phase = "Load";
+		try
 		{
-			scriptComponent.LuaEnv = sol::environment(*s_LuaState, sol::create, s_LuaState->globals());
-
-
-			auto result = s_LuaState->script_file(WLD_ASSETPATH + std::string("/") + scriptComponent.ScriptFilePath, scriptComponent.LuaEnv);
-
-			if (result.valid())
+			script.LuaEnv = sol::environment(*s_LuaState, sol::create, s_LuaState->globals());
+			auto result = s_LuaState->safe_script_file(WLD_ASSETPATH + std::string("/") + script.ScriptFilePath, script.LuaEnv, sol::script_pass_on_error);
+			CheckResult(result);
+			if (result.return_count() == 0 || result.get_type() != sol::type::table) throw std::logic_error("Script must return a table");
+			script.ScriptTable = result.get<sol::table>();
+			for (const auto& [name, field] : script.CachedFields)
 			{
-				scriptComponent.ScriptTable = result;
-
-				for (const auto& [name, field] : scriptComponent.CachedFields)
+				switch (field.Type)
 				{
-					switch (field.Type)
-					{
-						case LuaFieldType::Float:  scriptComponent.ScriptTable[name] = std::any_cast<float>(field.Value); break;
-						case LuaFieldType::Int:    scriptComponent.ScriptTable[name] = std::any_cast<int>(field.Value); break;
-						case LuaFieldType::Bool:   scriptComponent.ScriptTable[name] = std::any_cast<bool>(field.Value); break;
-						case LuaFieldType::String: scriptComponent.ScriptTable[name] = std::any_cast<std::string>(field.Value); break;
-					}
-				}
-
-				scriptComponent.ScriptTable["__EntityID"] = entity;
-				scriptComponent.OnCreateFunc = scriptComponent.ScriptTable["OnCreate"];
-				scriptComponent.OnUpdateFunc = scriptComponent.ScriptTable["OnUpdate"];
-				scriptComponent.OnDestroyFunc = scriptComponent.ScriptTable["OnDestroy"];
-
-
-				if (scriptComponent.OnCreateFunc.valid())
-				{
-					scriptComponent.OnCreateFunc(scriptComponent.ScriptTable);
+					case LuaFieldType::Float: script.ScriptTable.raw_set(name, std::any_cast<float>(field.Value)); break;
+					case LuaFieldType::Int: script.ScriptTable.raw_set(name, std::any_cast<int>(field.Value)); break;
+					case LuaFieldType::Bool: script.ScriptTable.raw_set(name, std::any_cast<bool>(field.Value)); break;
+					case LuaFieldType::String: script.ScriptTable.raw_set(name, std::any_cast<std::string>(field.Value)); break;
+					default: break;
 				}
 			}
-			else
-			{
-				sol::error err = result;
-				WLD_CORE_ERROR("[Lua] Script Error: {0}", err.what());
-			}
-
-			// 标记为已加载，防止每帧都去读硬盘
-			scriptComponent.IsLoaded = true;
+			// All names carry the same non-owning, generation-checked entity handle.
+			script.ScriptTable.raw_set("entity", entity, "__Entity", entity, "__EntityID", entity);
+			script.OnCreateFunc = ReadCallback(script.ScriptTable, "OnCreate");
+			script.OnUpdateFunc = ReadCallback(script.ScriptTable, "OnUpdate");
+			script.OnDestroyFunc = ReadCallback(script.ScriptTable, "OnDestroy");
+			script.IsLoaded = true;
+			script.CreateEntered = true;
+			phase = "OnCreate";
+			if (script.OnCreateFunc.valid()) CheckResult(script.OnCreateFunc(script.ScriptTable));
+			script.State = ScriptInstanceState::Running;
 		}
+		catch (const std::exception& error) { ReportLuaError(script, phase, error.what()); }
+		catch (...) { ReportLuaError(script, phase, "Unknown exception"); }
 	}
 
-	void ScriptEngine::OnUpdateScript(LuaScriptComponent& scriptComponent, Timestep ts)
+	void ScriptEngine::OnUpdateScript(LuaScriptComponent& script, Timestep ts)
 	{
-		if (scriptComponent.IsLoaded && scriptComponent.OnUpdateFunc.valid())
-		{
-			auto result = scriptComponent.OnUpdateFunc(scriptComponent.ScriptTable, (float)ts);
-			if (!result.valid())
-			{
-				sol::error err = result;
-
-				WLD_CORE_ERROR("[Lua] Runtime Error in {0}:\n{1}", scriptComponent.ScriptFilePath, err.what());
-
-
-				OnDestroyScript(scriptComponent);
-			}
-		}
+		AssertOwnerThread();
+		if (script.State != ScriptInstanceState::Running || !script.IsLoaded) return;
+		try { if (script.OnUpdateFunc.valid()) CheckResult(script.OnUpdateFunc(script.ScriptTable, ts.GetSeconds())); }
+		catch (const std::exception& error) { ReportLuaError(script, "OnUpdate", error.what()); }
+		catch (...) { ReportLuaError(script, "OnUpdate", "Unknown exception"); }
 	}
 
-	void ScriptEngine::OnDestroyScript(LuaScriptComponent& scriptComponent)
+	void ScriptEngine::OnDestroyScript(LuaScriptComponent& script)
 	{
-		// 如果脚本加载过，并且包含 OnDestroy 方法，则执行它
-		if (scriptComponent.IsLoaded && scriptComponent.OnDestroyFunc.valid())
+		// Empty/stopped components can outlive the VM; live references cannot.
+		if (IsInitialized()) AssertOwnerThread();
+		else if (script.IsLoaded || script.LuaEnv.valid() || script.ScriptTable.valid())
+			throw std::logic_error("Script references must be released before ScriptEngine::Shutdown");
+		if (script.State == ScriptInstanceState::Destroying) return;
+		bool faulted = script.State == ScriptInstanceState::Faulted;
+		script.State = ScriptInstanceState::Destroying;
+		try
 		{
-			scriptComponent.OnDestroyFunc(scriptComponent.ScriptTable);
+			const bool entered = script.CreateEntered;
+			script.CreateEntered = false;
+			if (entered && script.OnDestroyFunc.valid()) CheckResult(script.OnDestroyFunc(script.ScriptTable));
 		}
-
-		// 彻底清空环境，防止内存泄漏
-		scriptComponent.IsLoaded = false;
-		scriptComponent.LuaEnv = sol::lua_nil;
-		scriptComponent.OnCreateFunc = sol::lua_nil;
-		scriptComponent.OnUpdateFunc = sol::lua_nil;
-		scriptComponent.OnDestroyFunc = sol::lua_nil;
+		catch (const std::exception& error) { ReportLuaError(script, "OnDestroy", error.what()); faulted = true; }
+		catch (...) { ReportLuaError(script, "OnDestroy", "Unknown exception"); faulted = true; }
+		ClearLuaReferences(script);
+		script.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
 	}
 }

@@ -1,8 +1,11 @@
-﻿#pragma once
+#pragma once
 #include "World.h"
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
 #include "World/Renderer/SceneRenderer.h"
+#include <atomic>
+#include <string>
+#include <thread>
 namespace World
 {
 	class EditorLayer : public Layer
@@ -40,6 +43,7 @@ namespace World
 
 		void SetSceneState(SceneState state);
 		void UpdateSceneContext(Ref<Scene> scene);
+		void StartCooking(const std::string& target);
 		void OnCooking();
 	private:
 		Ref<SceneRenderer> m_SceneRenderer;
@@ -56,6 +60,7 @@ namespace World
 		glm::vec2 m_ViewportBounds[2] = { {0,0}, {0,0} };
 
 		bool m_ViewportFocused = false, m_ViewportHovered = false;
+		bool m_HasRenderedScene = false;
 
 		SceneHierarchyPanel m_SceneHierarchyPanel;
 		ContentBrowserPanel m_ContentBrowserPanel;
@@ -76,6 +81,10 @@ namespace World
 
 		bool m_ShowCookingProgress = false;    // 是否显示打包弹窗
 		std::atomic<bool> m_CookingFinished = false; // 打包是否完成
+		std::thread m_CookingThread;
+		// Published by m_CookingFinished; the UI reads these only after completion.
+		bool m_CookingSucceeded = false;
+		std::string m_CookingError;
 	};
 
 }

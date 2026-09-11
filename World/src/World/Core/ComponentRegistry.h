@@ -6,6 +6,21 @@
 
 namespace World
 {
+	struct NativeScriptComponent;
+	struct LuaScriptComponent;
+	struct RigidBody2DComponent;
+	// Clone editor configuration without changing EnTT's ordinary move/copy semantics.
+	NativeScriptComponent CloneComponentConfiguration(const NativeScriptComponent& source);
+	LuaScriptComponent CloneComponentConfiguration(const LuaScriptComponent& source);
+	RigidBody2DComponent CloneComponentConfiguration(const RigidBody2DComponent& source);
+	template<typename T>
+	T CloneComponentConfiguration(const T& source) { return source; }
+
+	template <typename T, typename = void>
+	struct has_ui_logic : std::false_type {};
+	template <typename T>
+	struct has_ui_logic<T, std::void_t<decltype(T::ComponentPropertiesUI)>> : std::true_type {};
+
 	class TypeDescDataComponent
 	{
 	public:
@@ -39,7 +54,7 @@ namespace World
 			{
 				copyFunc = [](Entity dest, Entity src)
 					{
-						dest.AddOrReplaceComponent<T>(src.GetComponent<T>());
+						dest.AddOrReplaceComponent<T>(CloneComponentConfiguration(src.GetComponent<T>()));
 					};
 
 			}
@@ -52,7 +67,7 @@ namespace World
 						if (entityMap.find(entityId) != entityMap.end())
 						{
 							entt::entity destEntity = entityMap.at(entityId);
-							destRegistry.emplace_or_replace<T>(destEntity, srcRegistry.get<T>(entity));
+							destRegistry.emplace_or_replace<T>(destEntity, CloneComponentConfiguration(srcRegistry.get<T>(entity)));
 						}
 					}
 
@@ -90,12 +105,6 @@ namespace World
 				});
 		}
 	};
-
-	// 探测器：检查 T 是否有名为 ComponentPropertiesUI 的成员
-	template <typename T, typename = void>
-	struct has_ui_logic : std::false_type {};
-	template <typename T>
-	struct has_ui_logic<T, std::void_t<decltype(T::ComponentPropertiesUI)>> : std::true_type {};
 
 	#define COMPONENT_UI() \
 	static void ComponentPropertiesUI(Entity);

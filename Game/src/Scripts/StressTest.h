@@ -21,8 +21,7 @@ namespace World
 
 		virtual void OnCreate() override
 		{
-			m_Created.resize(Weight * Height);
-			m_Created2.resize(Weight * Height);
+			m_Created = std::make_shared<std::vector<Entity>>();
 			CreateTest1();
 
 
@@ -41,10 +40,6 @@ namespace World
 		void CreateTest1();
 		void DestroyTest1();
 
-		Entity* Create();
-		void CreateTest2();
-		void DestroyTest2();
-
 		void StackTest1();
 		void StackTest2();
 		void StackTest3();
@@ -56,8 +51,8 @@ namespace World
 		int Weight = 1;
 		PROPERTY(Height);
 		int Height = 1;
-		std::vector<Entity> m_Created;
-		std::vector<Entity*> m_Created2;
+		// The deferred batch owns its result list, never the script instance or a component reference.
+		std::shared_ptr<std::vector<Entity>> m_Created = std::make_shared<std::vector<Entity>>();
 		ScopedStack m_Stack { 1024, "StressTest Stack" };
 
 		PROPERTY(m_Type);

@@ -1,94 +1,50 @@
-﻿#include "StressTest.h"
+#include "StressTest.h"
 
 namespace World
 {
 	void StressTest::CreateTest1()
 	{
-		uint32_t totalCount = Weight * Height;
-		if (totalCount == 0) return;
+		if (Weight <= 0 || Height <= 0) return;
+		const int width = Weight;
+		const int height = Height;
+		const auto created = m_Created;
+		GetEntity().GetScene()->DeferStructuralChange([width, height, created](Scene& scene) {
+			const size_t total = static_cast<size_t>(width) * static_cast<size_t>(height);
+			auto& registry = scene.GetRegistry();
+			std::vector<entt::entity> entities(total);
+			created->resize(total);
+			registry.create(entities.begin(), entities.end());
+			for (size_t i = 0; i < total; ++i) (*created)[i] = Entity(&scene, entities[i]);
 
-		auto scene = GetEntity().GetScene();
-		auto& registry = scene->GetRegistry();
-
-		// 1. 批量申请纯净的实体 ID
-		std::vector<entt::entity> entities(totalCount);
-		registry.create(entities.begin(), entities.end());
-
-		// 2. 准备组件数据数组
-		std::vector<TagComponent> tags(totalCount, TagComponent("Empty Entity"));
-		std::vector<UUIDComponent> uuids(totalCount);
-		std::vector<TransformComponent> transforms(totalCount);
-		std::vector<SpriteComponent> sprites(totalCount);
-
-		for (int i = 0; i < Weight; i++)
-		{
-			for (int j = 0; j < Height; j++)
+			std::vector<TagComponent> tags(total, TagComponent("Empty Entity"));
+			std::vector<UUIDComponent> uuids(total);
+			std::vector<TransformComponent> transforms(total);
+			std::vector<SpriteComponent> sprites(total);
+			for (int i = 0; i < width; ++i)
 			{
-				int index = i * Height + j;
-
-				// 填充 UUID（每实体必须有一个唯一ID）
-				uuids[index] = UUIDComponent(UUID());
-
-				// 计算出坐标点
-				transforms[index].SetLocation(glm::vec3 { i * 1.0f, j * 1.0f, -0.5f });
-
-				// 预生成颜色数据 (避免跨线程锁和频繁取随机数)
-				sprites[index].Color = glm::vec4(
-					(float)rand() / RAND_MAX,
-					(float)rand() / RAND_MAX,
-					(float)rand() / RAND_MAX,
-					1.0f
-				);
-
-				// 留存供摧毁时使用
-				m_Created[index] = Entity(scene, entities[index]);
+				for (int j = 0; j < height; ++j)
+				{
+					const size_t index = static_cast<size_t>(i) * height + j;
+					uuids[index] = UUIDComponent(UUID());
+					transforms[index].SetLocation({ static_cast<float>(i), static_cast<float>(j), -0.5f });
+					sprites[index].Color = glm::vec4(static_cast<float>(rand()) / RAND_MAX,
+						static_cast<float>(rand()) / RAND_MAX, static_cast<float>(rand()) / RAND_MAX, 1.0f);
+				}
 			}
-		}
-
-		// 3. 极速批处理插入到底层内存！
-		// 它们将在底层引擎被直接 memcpy 或者连续构造进去，而不用一次次的寻找可用内存
-		registry.insert<TagComponent>(entities.begin(), entities.end(), tags.begin());
-		registry.insert<UUIDComponent>(entities.begin(), entities.end(), uuids.begin());
-		registry.insert<TransformComponent>(entities.begin(), entities.end(), transforms.begin());
-		registry.insert<SpriteComponent>(entities.begin(), entities.end(), sprites.begin());
+			registry.insert<TagComponent>(entities.begin(), entities.end(), tags.begin());
+			registry.insert<UUIDComponent>(entities.begin(), entities.end(), uuids.begin());
+			registry.insert<TransformComponent>(entities.begin(), entities.end(), transforms.begin());
+			registry.insert<SpriteComponent>(entities.begin(), entities.end(), sprites.begin());
+		});
 	}
+
 	void StressTest::DestroyTest1()
 	{
-		for (auto& entity : m_Created)
-		{
+		for (const auto entity : *m_Created)
 			Entity::DestroyEntity(GetEntity().GetScene(), entity);
-		}
+		m_Created->clear();
 	}
-	Entity* StressTest::Create()
-	{
-		const auto& scene = GetEntity().GetScene();
-		auto entity = WLD_POOL_NEW(Entity, scene, scene->GetRegistry().create());
-		entity->AddComponent<TagComponent>("Empty Entity");
-		entity->AddComponent<UUIDComponent>(UUID());
 
-		return entity;
-	}
-	void StressTest::CreateTest2()
-	{
-		for (int i = 0; i < Weight; i++)
-		{
-			for (int j = 0; j < Height; j++)
-			{
-				m_Created2[i * Height + j] = Create();
-
-			}
-		}
-
-	}
-	void StressTest::DestroyTest2()
-	{
-		for (auto& entity : m_Created2)
-		{
-			Entity::DestroyEntity(GetEntity().GetScene(), *entity);
-			WLD_POOL_DELETE(Entity, PoolTag::General, entity);
-		}
-
-	}
 	void StressTest::StackTest1()
 	{
 		//WLD_STACK_WIZARD(testStack, 1024 * 1024); // 1 MB 栈空间
@@ -145,4 +101,3 @@ namespace World
 
 	}
 }
-

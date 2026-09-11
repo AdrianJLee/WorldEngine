@@ -1,61 +1,110 @@
-﻿#pragma once
+#pragma once
 #include "World/Core/Timestep.h"
 #include "World/Renderer/EditorCamera.h"
-
 #include <box2d/id.h>
 #include <entt.hpp>
+#include <functional>
+#include <memory>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace World
 {
-	class CommandBuffer;
+	class Entity;
+	enum class SceneState { Stopped, Starting, Running, Stopping };
 
 	class Scene
 	{
 	public:
 		Scene();
 		~Scene();
+		Scene(const Scene&) = delete;
+		Scene& operator=(const Scene&) = delete;
 
 		void OnUpdateEditor(Timestep ts, const EditorCamera& camera);
 		void OnUpdateRuntime(Timestep ts);
 		void OnUpdateSimulation(Timestep ts, const EditorCamera& camera);
 		void OnViewportResize(uint32_t width, uint32_t height);
-
 		void OnRuntimeStart();
 		void OnRuntimeStop();
-
 		void OnSimulationStart();
 		void OnSimulationStop();
-
 		void OnScriptStart();
 		void OnScriptUpdate(Timestep ts);
 		void OnScriptDestroy();
 
-		class Entity GetPrimaryCameraEntity();
+		bool IsActive() const { return m_State != SceneState::Stopped; }
+		bool IsRunning() const { return m_State == SceneState::Running; }
+		bool IsPendingDestroy(entt::entity entity) const;
+		// Accepted commands execute once at a safe point; callbacks enqueue the next batch.
+		bool DeferStructuralChange(std::function<void(Scene&)> command);
+		void FlushStructuralChanges();
+		void AssertOwnerThread() const;
+
+		Entity GetPrimaryCameraEntity();
 		void DuplicateEntity(Entity entity);
-
-		entt::registry& GetRegistry() { return m_Registry; }
-	public:
-
+		entt::registry& GetRegistry();
+		const entt::registry& GetRegistry() const;
 		static void CopyScene(Ref<Scene>& other, Ref<Scene>& newScene);
 
 	private:
-		void OnPhysics2DStart();
-		void OnUpdatePhysics2D(Timestep ts);
-		void OnPhysics2DStop();
-	private:
 		friend class Entity;
 		friend class SceneRenderer;
-
-		entt::registry m_Registry;
-
-		uint32_t m_ViewportWidth = 0, m_ViewportHeight = 0;
-
 		friend class SceneHierarchyPanel;
 		friend class SceneSerializer;
 
-		b2WorldId m_PhysicsWorldId;
+		struct ScriptSource
+		{
+			entt::entity EntityHandle = entt::null;
+			entt::id_type Component = 0;
+			uint64_t Generation = 0;
+			bool Destroying = false;
+		};
+		enum class ChangeKind { General, DestroyEntity, RemoveComponent };
+		struct StructuralChange
+		{
+			ChangeKind Kind = ChangeKind::General;
+			std::function<void(Scene&)> Command;
+			ScriptSource Source;
+			entt::entity Target = entt::null;
+			entt::id_type Component = 0;
+		};
 
+		void AssertStructuralWrite() const;
+		bool IsPendingRemoval(entt::entity entity, entt::id_type component) const;
+		bool IsSourceAlive(const ScriptSource& source) const;
+		void RequestDestroy(entt::entity entity);
+		void RequestRemove(entt::entity entity, entt::id_type component);
+		void DestroyEntityNow(entt::entity entity);
+		void RemoveComponentNow(entt::entity entity, entt::id_type component);
+		void InvokeCallback(const ScriptSource& source, const std::function<void()>& callback);
+		void StartPendingScripts();
+		void UpdateScriptSnapshot(Timestep ts, const std::vector<entt::entity>& native, const std::vector<entt::entity>& lua);
+		void DestroyNativeScript(entt::entity entity, bool faulted = false);
+		void DestroyLuaScript(entt::entity entity, bool faulted = false);
+		void FaultSource(const ScriptSource& source, const std::string& error);
+		void StopScene();
+		void OnPhysics2DStart();
+		void OnUpdatePhysics2D(Timestep ts);
+		void OnPhysics2DStop();
+		void DestroyPhysicsBody(entt::entity entity);
+
+		entt::registry m_Registry;
+		std::shared_ptr<const uint8_t> m_Lifetime = std::make_shared<const uint8_t>(0);
+		std::thread::id m_OwnerThread;
+		SceneState m_State = SceneState::Stopped;
+		bool m_StopRequested = false;
+		bool m_Committing = false;
+		unsigned m_CallbackDepth = 0;
+		uint64_t m_NextGeneration = 0;
+		ScriptSource m_CallbackSource;
+		std::vector<StructuralChange> m_Changes;
+		std::unordered_set<entt::entity> m_PendingDestroy;
+		std::unordered_map<entt::entity, std::unordered_set<entt::id_type>> m_PendingRemove;
+		uint32_t m_ViewportWidth = 0, m_ViewportHeight = 0;
+		b2WorldId m_PhysicsWorldId = b2_nullWorldId;
 	};
-
 }
-

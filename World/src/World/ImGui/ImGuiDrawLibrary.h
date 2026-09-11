@@ -14,7 +14,7 @@ namespace World
 		template<typename T, typename UIFunction>
 		static void DrawComponent(const std::string& name, Entity entity, UIFunction uiFunction, bool removable = true)
 		{
-			if (entity.HasComponent<T>())
+			if (entity && !entity.GetScene()->IsPendingDestroy(entity) && entity.HasComponent<T>())
 			{
 				ImGui::Separator();
 				ImGuiTreeNodeFlags flags =
@@ -23,7 +23,9 @@ namespace World
 					| ImGuiTreeNodeFlags_SpanAvailWidth
 					| ImGuiTreeNodeFlags_AllowItemOverlap;
 				auto& component = entity.GetComponent<T>();
-				if (removable)
+				std::string removalReason;
+				const bool canRemove = removable && entity.CanRemoveComponent(entt::type_id<T>().hash(), &removalReason);
+				if (canRemove)
 				{
 					bool closable_group = true;
 					if (ImGui::CollapsingHeader(name.c_str(), &closable_group, flags))
@@ -32,13 +34,16 @@ namespace World
 					}
 					if (!closable_group)
 					{
-						entity.RemoveComponent<T>();
+						try { entity.RemoveComponent<T>(); }
+						catch (const std::exception& error) { ImGui::TextWrapped("Cannot remove: %s", error.what()); }
 					}
 				}
 				else
 				{
 					if (ImGui::CollapsingHeader(name.c_str(), flags))
 					{
+						if (removable && !removalReason.empty())
+							ImGui::TextWrapped("Cannot remove: %s", removalReason.c_str());
 						uiFunction(component);
 					}
 				}

@@ -33,3 +33,9 @@ target_compile_definitions(World PUBLIC
     WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
     WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/World/"
 )
+
+option(WORLD_BUILD_SCRIPT_TESTS "Build WorldEngine script lifecycle checks" OFF)
+if(WORLD_BUILD_SCRIPT_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

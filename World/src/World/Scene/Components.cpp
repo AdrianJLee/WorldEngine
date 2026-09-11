@@ -8,6 +8,24 @@
 
 namespace World
 {
+	namespace
+	{
+		void DrawScriptStatus(ScriptInstanceState state, const std::string& error)
+		{
+			const char* label = "Pending";
+			switch (state)
+			{
+				case ScriptInstanceState::Creating: label = "Creating"; break;
+				case ScriptInstanceState::Running: label = "Running"; break;
+				case ScriptInstanceState::Destroying: label = "Destroying"; break;
+				case ScriptInstanceState::Stopped: label = "Stopped"; break;
+				case ScriptInstanceState::Faulted: label = "Faulted"; break;
+				default: break;
+			}
+			ImGui::Text("Status: %s", label);
+			if (!error.empty()) ImGui::TextWrapped("%s", error.c_str());
+		}
+	}
 	void TagComponent::ComponentPropertiesUI(Entity entity)
 	{
 		if (entity.HasComponent<TagComponent>())
@@ -198,7 +216,7 @@ namespace World
 
 	void NativeScriptComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<NativeScriptComponent>("NativeScriptComponent", entity, [](NativeScriptComponent& nativeScript) mutable
+		ImGuiDrawLibrary::DrawComponent<NativeScriptComponent>("NativeScriptComponent", entity, [entity](NativeScriptComponent& nativeScript) mutable
 			{
 				// 指针不为空则说明绑定了脚本
 				bool isBound = (nativeScript.InstantiateScript != nullptr);
@@ -206,7 +224,8 @@ namespace World
 				// 使用刚刚我们在 Bind 中存下来的 ScriptName，如果是空的话显示 <None>
 				const char* currentPreview = isBound ? (nativeScript.ScriptName.empty() ? "Unknown Script" : nativeScript.ScriptName.c_str()) : "<None>";
 				// 如果脚本实例正在运行了，就不允许修改绑定了
-				bool isRunning = (nativeScript.Instance != nullptr);
+				bool isRunning = entity.GetScene()->IsActive();
+				DrawScriptStatus(nativeScript.State, nativeScript.LastError);
 
 				if (isRunning)
 				{
@@ -283,6 +302,7 @@ namespace World
 				}
 
 
+				isBound = nativeScript.InstantiateScript != nullptr;
 				// 如果已经绑定了脚本，才显示下面的属性编辑界面
 				if (isBound)
 				{
@@ -301,6 +321,14 @@ namespace World
 							ImGui::Spacing();
 
 							ScriptableEntity* tempInstance = nullptr;
+							// The runtime instance is borrowed. Only a factory-created preview is owned here.
+							auto releasePreview = [destroy = nativeScript.DestroyScript](ScriptableEntity* preview)
+							{
+								try { if (preview && destroy) destroy(preview); }
+								catch (const std::exception& error) { WLD_CORE_ERROR("Preview cleanup failed: {0}", error.what()); }
+								catch (...) { WLD_CORE_ERROR("Preview cleanup failed"); }
+							};
+							std::unique_ptr<ScriptableEntity, decltype(releasePreview)> ownedPreview(nullptr, releasePreview);
 
 							if (nativeScript.Instance)
 							{
@@ -309,9 +337,18 @@ namespace World
 							}
 							else
 							{
-								if (nativeScript.isFirstDraw)
+								if (!isRunning && nativeScript.isFirstDraw && nativeScript.DestroyScript)
 								{
-									tempInstance = nativeScript.InstantiateScript();
+									try
+									{
+										ownedPreview.reset(nativeScript.InstantiateScript());
+										tempInstance = ownedPreview.get();
+									}
+									catch (const std::exception& error)
+									{
+										nativeScript.LastError = error.what();
+										ImGui::TextWrapped("Preview failed: %s", error.what());
+									}
 
 								}
 							}
@@ -490,10 +527,9 @@ namespace World
 
 
 							// 第一次绘制时，如果是通过实例获取的值，绘制完后就销毁实例，避免内存泄漏；后续绘制则直接使用缓存的值
-							if (nativeScript.isFirstDraw && tempInstance)
+							if (ownedPreview)
 							{
 								nativeScript.isFirstDraw = false;
-								nativeScript.DestroyScript(tempInstance);
 							}
 						}
 					}
@@ -505,8 +541,10 @@ namespace World
 	}
 	void LuaScriptComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<LuaScriptComponent>("LuaScriptComponent", entity, [](LuaScriptComponent& component) mutable
+		ImGuiDrawLibrary::DrawComponent<LuaScriptComponent>("LuaScriptComponent", entity, [entity](LuaScriptComponent& component) mutable
 			{
+				const bool active = entity.GetScene()->IsActive();
+				ImGui::BeginDisabled(active);
 				// 是否已经绑定了脚本
 				bool isBound = !component.ScriptFilePath.empty();
 
@@ -522,7 +560,7 @@ namespace World
 				// ============================================
 				// 2. 拖拽接收核心逻辑 (Drag & Drop Target)
 				// ============================================
-				if (ImGui::BeginDragDropTarget())
+				if (!active && ImGui::BeginDragDropTarget())
 				{
 					// 注意："CONTENT_BROWSER_ITEM" 必须与你在 ContentBrowserPanel.cpp 中 BeginDragDropSource() 使用的 Payload 名称一致！
 					if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("CONTENT_BROWSER_ITEM"))
@@ -564,7 +602,13 @@ namespace World
 						component.OnCreateFunc = sol::lua_nil;
 						component.OnUpdateFunc = sol::lua_nil;
 						component.OnDestroyFunc = sol::lua_nil;
+						component.ScriptTable = sol::lua_nil;
+						component.CachedFields.clear();
+						component.State = ScriptInstanceState::Stopped;
+						component.LastError.clear();
 					}
+					if (!active && !component.ScriptFilePath.empty())
+					try
 					{
 						std::filesystem::path filepath = WLD_ASSETPATH + std::string("/") + component.ScriptFilePath;
 						if (std::filesystem::exists(filepath))
@@ -586,27 +630,25 @@ namespace World
 							}
 						}
 					}
+					catch (const std::filesystem::filesystem_error& error)
+					{
+						component.LastError = error.what();
+					}
 				}
+				ImGui::EndDisabled();
+				if (active) ImGui::TextWrapped("Stop the scene to rebind or reload scripts.");
 
 				// 4. 运行状态指示器
 				ImGui::Spacing();
-				if (component.IsLoaded)
-				{
-					ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "Status: Script Running");
-				}
-				else
-				{
-					if (!isBound)
-						ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.2f, 1.0f), "Status: <None>");
-					else
-						ImGui::TextColored(ImVec4(0.8f, 0.2f, 0.2f, 1.0f), "Status: Pending Load...");
-				}
+				DrawScriptStatus(component.State, component.LastError);
 
 				if (!component.CachedFields.empty())
 				{
 					ImGui::Separator();
 					ImGui::Text("Script Properties");
 					ImGui::Spacing();
+					ImGui::BeginDisabled(active);
+					if (active) ImGui::TextWrapped("Cached starting values; edit after stopping the scene.");
 
 					if (ImGui::BeginTable("##LuaPropertiesTable", 2, ImGuiTableFlags_Resizable))
 					{
@@ -651,8 +693,10 @@ namespace World
 								case LuaFieldType::String:
 								{
 									std::string val = std::any_cast<std::string>(field.Value);
-									if (ImGui::InputText("##val", val.data(), val.size()))
-										field.Value = val;
+									std::vector<char> buffer(std::max<size_t>(1024, val.size() + 256), '\0');
+									std::copy(val.begin(), val.end(), buffer.begin());
+									if (ImGui::InputText("##val", buffer.data(), buffer.size()))
+										field.Value = std::string(buffer.data());
 									break;
 								}
 							}
@@ -662,6 +706,7 @@ namespace World
 						}
 						ImGui::EndTable();
 					}
+					ImGui::EndDisabled();
 				}
 			});
 	}

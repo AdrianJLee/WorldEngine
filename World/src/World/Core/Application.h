@@ -31,6 +31,7 @@ namespace World
 		DualTrackAllocator& GetFrameAllocator() { return *m_FrameAllocator; }
 		DualTrackAllocator& GetEngineAllocator() { return *m_EngineAllocator; }
 	private:
+		void Shutdown();
 		bool OnWindowClose(WindowCloseEvent& e);
 		bool OnWindowResize(WindowResizeEvent& e);
 	private:
@@ -38,12 +39,13 @@ namespace World
 		std::unique_ptr<DualTrackAllocator> m_EngineAllocator;
 
 		std::unique_ptr<Window> m_Window;
-		ImGuiLayer* m_ImGuiLayer;
+		ImGuiLayer* m_ImGuiLayer = nullptr;
 
 		float m_LastFrameTime = 0.0f;
 
 		bool m_Running = true;
 		bool m_Minimized = false;
+		bool m_Shutdown = false;
 
 		LayerStack m_LayerStack;
 

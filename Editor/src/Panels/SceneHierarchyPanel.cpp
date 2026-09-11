@@ -1,9 +1,30 @@
-﻿#include "SceneHierarchyPanel.h"
+#include "SceneHierarchyPanel.h"
 
-#include <type_traits>
+#include <exception>
+#include <utility>
 
 namespace World
 {
+	namespace
+	{
+		template<typename Action>
+		void RunPanelAction(const char* description, Action&& action)
+		{
+			try
+			{
+				action();
+			}
+			catch (const std::exception& error)
+			{
+				WLD_CORE_ERROR("{0}: {1}", description, error.what());
+			}
+			catch (...)
+			{
+				WLD_CORE_ERROR("{0}: unknown error.", description);
+			}
+		}
+	}
+
 	SceneHierarchyPanel::SceneHierarchyPanel(const Ref<Scene>& scene)
 	{
 		SetContext(scene);
@@ -15,20 +36,37 @@ namespace World
 	}
 	void SceneHierarchyPanel::OnImGuiRender()
 	{
+		if (!m_Context)
+		{
+			m_SelectedEntity = {};
+			ImGui::Begin("Scene Hierarchy");
+			ImGui::TextDisabled("No scene loaded.");
+			ImGui::End();
+			ImGui::Begin("Properties");
+			ImGui::End();
+			return;
+		}
+		if (!m_SelectedEntity.IsValid() || m_SelectedEntity.GetScene() != m_Context.get() ||
+			m_Context->IsPendingDestroy(m_SelectedEntity))
+			m_SelectedEntity = {};
+
 		{
 			ImGui::Begin("Scene Hierarchy");
 
 			// 将可显示的 entity 提取到连续容器中供 Clipper 索引读取
 			// 仅包含可绘制节点，保证 Clipper 的 ItemsCount 与实际行数一致
 			std::vector<Entity> entities;
-			auto& storage = m_Context->m_Registry.storage<entt::entity>();
+			const auto* storage = std::as_const(*m_Context).GetRegistry().storage<entt::entity>();
 
-			entities.reserve(storage.size());
-			for (const auto rawEntity : storage)
+			if (storage)
 			{
-				Entity entity { m_Context.get(), rawEntity };
-				if (entity.HasComponent<TagComponent>())
-					entities.push_back(entity);
+				entities.reserve(storage->size());
+				for (const auto rawEntity : *storage)
+				{
+					Entity entity { m_Context.get(), rawEntity };
+					if (entity.IsValid() && !m_Context->IsPendingDestroy(rawEntity) && entity.HasComponent<TagComponent>())
+						entities.push_back(entity);
+				}
 			}
 
 			std::vector<Entity> entitiesToDelete;
@@ -48,7 +86,11 @@ namespace World
 
 			for (Entity entity : entitiesToDelete)
 			{
-				Entity::DestroyEntity(m_Context.get(), entity);
+				RunPanelAction("Unable to delete entity", [&]()
+				{
+					if (entity.IsValid() && !m_Context->IsPendingDestroy(entity))
+						Entity::DestroyEntity(m_Context.get(), entity);
+				});
 			}
 
 			// 点击空白处取消选中
@@ -63,8 +105,24 @@ namespace World
 
 				if (ImGui::MenuItem("Create Empty Entity"))
 				{
-					m_SelectedEntity = Entity::CreateEntity(m_Context.get(), "Empty Entity");
-					m_SelectedEntity.AddComponent<TransformComponent>();
+					RunPanelAction("Unable to create entity", [&]()
+					{
+						if (m_Context->IsActive())
+						{
+							if (!m_Context->DeferStructuralChange([](Scene& scene)
+							{
+								Entity entity = Entity::CreateEntity(&scene, "Empty Entity");
+								entity.AddComponent<TransformComponent>();
+								// Select from the hierarchy after commit; do not retain the panel in a command.
+							}))
+								WLD_CORE_WARN("Create entity request was rejected by the scene.");
+						}
+						else
+						{
+							m_SelectedEntity = Entity::CreateEntity(m_Context.get(), "Empty Entity");
+							m_SelectedEntity.AddComponent<TransformComponent>();
+						}
+					});
 				}
 
 				ImGui::EndPopup();
@@ -75,7 +133,7 @@ namespace World
 
 		{
 			ImGui::Begin("Properties");
-			if (m_SelectedEntity)
+			if (m_SelectedEntity.IsValid() && !m_Context->IsPendingDestroy(m_SelectedEntity))
 			{
 				DrawComponents(m_SelectedEntity);
 
@@ -89,12 +147,33 @@ namespace World
 						{
 							if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
 							{
-								bool hasComponent = m_SelectedEntity.HasComponent(componentInfo->Id);
-
-								if (ImGui::MenuItem(className.c_str(), nullptr, false, !hasComponent))
+								std::string reason;
+								bool canAdd = m_SelectedEntity.CanAddComponent(componentInfo->Id, &reason);
+								if (!componentInfo->AddFunc)
 								{
-									componentInfo->AddFunc(m_SelectedEntity);
+									canAdd = false;
+									reason = "This component has no registered add operation.";
 								}
+								if (ImGui::MenuItem(className.c_str(), nullptr, false, canAdd))
+								{
+									const entt::entity handle = m_SelectedEntity;
+									const entt::id_type componentId = componentInfo->Id;
+									RunPanelAction("Unable to add component", [&]()
+									{
+										if (!m_Context->DeferStructuralChange([handle, componentId, className](Scene& scene)
+										{
+											Entity target(&scene, handle);
+											std::string commitReason;
+											if (target.CanAddComponent(componentId, &commitReason))
+												target.AddComponent(componentId);
+											else
+												WLD_CORE_WARN("Cannot add {0}: {1}", className, commitReason);
+										}))
+											WLD_CORE_WARN("Add component request was rejected by the scene.");
+									});
+								}
+								if (!canAdd && !reason.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+									ImGui::SetTooltip("%s", reason.c_str());
 							}
 						}
 						ImGui::EndMenu();
@@ -109,7 +188,7 @@ namespace World
 
 	void SceneHierarchyPanel::DrawEntityNode(Entity entity, std::vector<Entity>& entitiesToDelete)
 	{
-		if (entity.HasComponent<TagComponent>())
+		if (entity.IsValid() && !m_Context->IsPendingDestroy(entity) && entity.HasComponent<TagComponent>())
 		{
 			auto& tag = entity.GetComponent<TagComponent>().Tag;
 
@@ -158,13 +237,18 @@ namespace World
 	{
 		for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
 		{
+			if (!entity.IsValid() || m_Context->IsPendingDestroy(entity))
+				break;
 			if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
 			{
 				if (entity.HasComponent(componentInfo->Id))
 				{
 					if (componentInfo->ComponentPropertiesUI)
 					{
-						componentInfo->ComponentPropertiesUI(entity);
+						RunPanelAction("Unable to draw component properties", [&]()
+						{
+							componentInfo->ComponentPropertiesUI(entity);
+						});
 					}
 				}
 			}

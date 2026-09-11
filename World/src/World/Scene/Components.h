@@ -208,11 +208,17 @@ namespace World
 		COMPONENT_UI()
 	};
 
+	enum class ScriptInstanceState { Pending, Creating, Running, Destroying, Stopped, Faulted };
+
 	struct NativeScriptComponent
 	{
 		REFLECT_BODY(NativeScriptComponent, TypeCategory::Component);
 
 		ScriptableEntity* Instance = nullptr;
+		ScriptInstanceState State = ScriptInstanceState::Pending;
+		std::string LastError;
+		uint64_t Generation = 0;
+		bool CreateEntered = false;
 		// 原始函数指针
 		ScriptableEntity* (*InstantiateScript)() = nullptr;
 		void (*DestroyScript)(ScriptableEntity*&) = nullptr;
@@ -283,6 +289,11 @@ namespace World
 
 		// 标记是否已经加载过文件
 		bool IsLoaded = false;
+		ScriptInstanceState State = ScriptInstanceState::Pending;
+		std::string LastError;
+		uint64_t Generation = 0;
+		bool CreateEntered = false;
+		Entity RuntimeEntity;
 
 		LuaScriptComponent() = default;
 		LuaScriptComponent(const LuaScriptComponent&) = default;

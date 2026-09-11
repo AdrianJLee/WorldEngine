@@ -1,8 +1,9 @@
-﻿#include "EditorLayer.h"
+#include "EditorLayer.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Cook/VFS.h"
 #include "World/Scene/ScriptEngine.h"
 #include <filesystem>
+#include <stdexcept>
 namespace World
 {
 	EditorLayer::EditorLayer()
@@ -58,6 +59,10 @@ namespace World
 			WLD_CORE_ERROR("Failed to load Game.dll!");
 		}
 
+		// Application initialized Lua before attach; Game registration is now merged.
+		if (!ScriptEngine::GenerateLuaStubs())
+			WLD_CORE_ERROR("Automatic Lua API stub generation failed; keeping the last valid declarations.");
+
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 		m_SceneRenderer->Init();
 
@@ -82,11 +87,29 @@ namespace World
 	void EditorLayer::OnDetach()
 	{
 		WLD_PROFILE_FUNCTION();
+		if (m_CookingThread.joinable())
+			m_CookingThread.join();
+		m_ShowCookingProgress = false;
+		m_HasRenderedScene = false;
+
+		SetSceneState(SceneState::Edit);
+		m_SceneHierarchyPanel.SetContext(nullptr);
+		m_ActiveScene.reset();
+		m_RuntimeScene.reset();
+		m_EditorScene.reset();
+		if (m_SceneRenderer)
+		{
+			m_SceneRenderer->Shutdown();
+			m_SceneRenderer.reset();
+		}
 	}
 
 	void EditorLayer::OnUpdate(Timestep ts)
 	{
 		WLD_PROFILE_FUNCTION();
+		m_HasRenderedScene = false;
+		if (!m_ActiveScene || !m_SceneRenderer)
+			return;
 		//WLD_CORE_TRACE("Delta Time: {0} ({1} FPS)", ts.GetSeconds(), ts.GetFPS());
 
 		{
@@ -102,7 +125,7 @@ namespace World
 
 		WLD_PROFILE_SCOPE("Renderer Clear");
 		Camera* renderCamera = &m_EditorCamera;
-		glm::mat4* renderCameraTransform = WLD_FRAME_NEW(glm::mat4, m_EditorCamera.GetTransform());
+		glm::mat4 renderCameraTransform = m_EditorCamera.GetTransform();
 
 
 		{
@@ -116,25 +139,45 @@ namespace World
 					if (!m_ScenePaused)
 					{
 						m_ActiveScene->OnUpdateRuntime(ts);
-						renderCamera = &m_ActiveScene->GetPrimaryCameraEntity().GetComponent<CameraComponent>().Camera;
-						renderCameraTransform = &m_ActiveScene->GetPrimaryCameraEntity().GetComponent<TransformComponent>().Transform;
 					}
 					else
-						m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+						m_ActiveScene->FlushStructuralChanges();
 					break;
 				case SceneState::Simulate:
 					if (!m_ScenePaused)
 						m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
 					else
-						m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
+						m_ActiveScene->FlushStructuralChanges();
 					break;
 			}
 
 		}
 
+		Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+		if (!selectedEntity.IsValid() || selectedEntity.GetScene() != m_ActiveScene.get() ||
+			m_ActiveScene->IsPendingDestroy(selectedEntity))
+		{
+			m_SceneHierarchyPanel.SetSelectedEntity({});
+			selectedEntity = {};
+		}
+		else if (!selectedEntity.HasComponent<TransformComponent>())
+			selectedEntity = {}; // Keep Inspector selection, but omit the renderer's outline.
+
+		// No component reference survives Scene update or its structural flush.
+		if (m_SceneState == SceneState::Play && !m_ScenePaused)
+		{
+			Entity cameraEntity = m_ActiveScene->GetPrimaryCameraEntity();
+			if (!cameraEntity.IsValid() || m_ActiveScene->IsPendingDestroy(cameraEntity) ||
+				!cameraEntity.HasComponent<CameraComponent>() || !cameraEntity.HasComponent<TransformComponent>())
+				return;
+			renderCamera = &cameraEntity.GetComponent<CameraComponent>().Camera;
+			renderCameraTransform = cameraEntity.GetComponent<TransformComponent>().Transform;
+		}
+
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
-		m_SceneRenderer->SubmitScene(*renderCamera, *renderCameraTransform, m_SceneHierarchyPanel.GetSelectedEntity()); // 内部遍历实体并调用 Renderer2D
+		m_SceneRenderer->SubmitScene(*renderCamera, renderCameraTransform, selectedEntity);
 		m_SceneRenderer->EndScene();
+		m_HasRenderedScene = true;
 	}
 
 	void EditorLayer::OnImGuiRender()
@@ -164,75 +207,16 @@ namespace World
 					NewScene();
 					OpenScene();
 				}
-				if (ImGui::MenuItem("Cooking"))
+				if (ImGui::MenuItem("Cooking", nullptr, false, !m_ShowCookingProgress))
 				{
-					// 提示用户选择一个用来存放发布版游戏包的“存储包名”
 					std::string cookTarget = World::FileDialogs::SaveFile("Game Package\0*.*\0");
 					if (!cookTarget.empty())
-					{
-						m_ShowCookingProgress = true;
-						m_CookingFinished = false;
-
-						ImGui::OpenPopup("Cooking Progress");
-
-						std::thread([cookTarget, this]()
-							{
-								namespace fs = std::filesystem;
-								fs::path publishDir = fs::path(cookTarget);
-								publishDir.replace_extension("");
-
-								// 创建发布目录
-								fs::create_directories(publishDir);
-								fs::path srcRuntimeOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "Runtime/" + std::string(WLD_BUILD_TYPE));
-								fs::path srcRuntimeExe = srcRuntimeOutputDir / "Runtime.exe";
-
-								if (!srcRuntimeExe.empty())
-								{
-									// 将被找到的 Runtime.exe 复制进发布目录
-									fs::copy_file(srcRuntimeExe, publishDir / "Runtime.exe", fs::copy_options::overwrite_existing);
-									WLD_CORE_INFO("Copied Runtime executable from: {0}", srcRuntimeExe.string());
-
-								}
-								else
-								{
-									WLD_CORE_ERROR("Runtime.exe built successfully but could not be located on disk.");
-									this->m_CookingFinished = true;
-									return;
-								}
-								fs::path srcGameOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "bin/");
-								for (const auto& entry : fs::recursive_directory_iterator(srcGameOutputDir))
-								{
-									if (entry.is_regular_file() && entry.path().extension() == ".dll")
-									{
-										fs::path relativePath = fs::relative(entry.path(), srcGameOutputDir);
-										fs::path destPath = publishDir / "bin" / relativePath;
-										fs::create_directories(destPath.parent_path());
-										fs::copy_file(entry.path(), destPath, fs::copy_options::overwrite_existing);
-									}
-								}
-
-								// ---- 第 2 步：创建 Content 资源大包 (Cooking) ----
-								fs::path contentDir = publishDir / "content";
-								fs::create_directories(contentDir);
-
-								fs::path sourceAssetsDir = std::string(WLD_GAME_DIR) + "assets"; // 当前游戏项目的源资产文件目录
-								fs::path outPakFile = contentDir / "Base.wpak";
-
-								// 直接调用后台的 VFS 打包方法
-								World::VFS::BuildPakFromDirectory(sourceAssetsDir, outPakFile);
-
-								WLD_CORE_INFO("Game Cooked Successfully to {0}", publishDir.string());
-
-								// 通知 UI 任务完成可以关掉进度条进度弹窗了
-								this->m_CookingFinished = true;
-
-							}).detach();
-					}
-
+						StartCooking(cookTarget);
 				}
 				if (ImGui::MenuItem("Generate Lua API Stubs"))
 				{
-					ScriptEngine::GenerateLuaStubs();
+					if (!ScriptEngine::GenerateLuaStubs())
+						WLD_CORE_ERROR("Lua API stub generation failed; keeping the last valid declarations.");
 				}
 				if (ImGui::MenuItem("Exit"))
 					World::Application::Get().Close();
@@ -278,15 +262,23 @@ namespace World
 				m_ActiveScene->OnViewportResize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);
 
 			}
-			ImGui::Image((void*)m_SceneRenderer->GetTargetFramebuffer()->GetColorAttachmentRendererID(),
-				ImVec2 { m_ViewportSize.x,m_ViewportSize.y },
-				ImVec2 { 0,1 },
-				ImVec2 { 1,0 });
+			if (m_HasRenderedScene)
+				ImGui::Image((void*)m_SceneRenderer->GetTargetFramebuffer()->GetColorAttachmentRendererID(),
+					ImVec2 { m_ViewportSize.x,m_ViewportSize.y }, ImVec2 { 0,1 }, ImVec2 { 1,0 });
+			else
+			{
+				const ImVec2 messagePosition = ImGui::GetCursorScreenPos();
+				ImGui::Dummy(ImVec2 { m_ViewportSize.x, m_ViewportSize.y });
+				ImGui::GetWindowDrawList()->AddText(ImVec2(messagePosition.x + 10.0f, messagePosition.y + 65.0f),
+					ImGui::GetColorU32(ImGuiCol_TextDisabled), "No scene view available. Play requires a Camera and Transform.");
+			}
 
 			// 工具栏
 			UI_Toolbar();
 
-			if (auto selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity())
+			Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+			if (selectedEntity.IsValid() && selectedEntity.GetScene() == m_ActiveScene.get() &&
+				!m_ActiveScene->IsPendingDestroy(selectedEntity) && selectedEntity.HasComponent<TransformComponent>() && m_HasRenderedScene)
 			{
 				// Draw Gizmo
 				ImGuiDrawLibrary::DrawGizmo(m_EditorCamera, selectedEntity, m_CurrentGizmoOperation);
@@ -435,9 +427,37 @@ namespace World
 				if (control)
 				{
 					Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-					if (selectedEntity)
+					if (!m_ActiveScene || !selectedEntity.IsValid() || selectedEntity.GetScene() != m_ActiveScene.get() ||
+						m_ActiveScene->IsPendingDestroy(selectedEntity))
 					{
-						m_ActiveScene->DuplicateEntity(selectedEntity);
+						m_SceneHierarchyPanel.SetSelectedEntity({});
+						break;
+					}
+					try
+					{
+						if (m_ActiveScene->IsActive() &&
+							(selectedEntity.HasComponent<RigidBody2DComponent>() || selectedEntity.HasComponent<BoxCollider2DComponent>() ||
+							 selectedEntity.HasComponent<CircleCollider2DComponent>()))
+						{
+							WLD_CORE_WARN("Cannot duplicate physics entities while the scene is active. Stop the scene first.");
+							break;
+						}
+						const entt::entity handle = selectedEntity;
+						if (!m_ActiveScene->DeferStructuralChange([handle](Scene& scene)
+						{
+							Entity source(&scene, handle);
+							if (source.IsValid() && !scene.IsPendingDestroy(handle))
+								scene.DuplicateEntity(source);
+						}))
+							WLD_CORE_WARN("Duplicate entity request was rejected by the scene.");
+					}
+					catch (const std::exception& error)
+					{
+						WLD_CORE_ERROR("Unable to duplicate entity: {0}", error.what());
+					}
+					catch (...)
+					{
+						WLD_CORE_ERROR("Unable to duplicate entity: unknown error.");
 					}
 				}
 				break;
@@ -477,6 +497,8 @@ namespace World
 	}
 	Entity EditorLayer::GetEntityAtMousePosition()
 	{
+		if (!m_HasRenderedScene || !m_ActiveScene || !m_SceneRenderer)
+			return {};
 		// --- 鼠标交互逻辑 ---
 
 		// 获取鼠标在屏幕上的绝对位置
@@ -501,7 +523,7 @@ namespace World
 
 		Entity result = pixelData == -1 ? Entity() : Entity(m_ActiveScene.get(), (entt::entity)pixelData);
 
-		return result;
+		return result.IsValid() && !m_ActiveScene->IsPendingDestroy(result) ? result : Entity{};
 	}
 	void EditorLayer::UI_Toolbar()
 	{
@@ -606,51 +628,135 @@ namespace World
 	{
 		if (m_SceneState == state) return;
 
-		if (state == SceneState::Play)
-		{
-			m_RuntimeScene = CreateRef<Scene>();
-			Scene::CopyScene(m_EditorScene, m_RuntimeScene);
-
-			m_SceneState = SceneState::Play;
-			UpdateSceneContext(m_RuntimeScene);
-			m_ActiveScene->OnRuntimeStart();
-		}
-		else if (state == SceneState::Simulate)
-		{
-			m_RuntimeScene = CreateRef<Scene>();
-			Scene::CopyScene(m_EditorScene, m_RuntimeScene);
-
-			m_SceneState = SceneState::Simulate;
-			UpdateSceneContext(m_RuntimeScene);
-			m_ActiveScene->OnSimulationStart();
-		}
-		else if (state == SceneState::Edit)
+		// End the previous mode before replacing any scene references.
+		if (m_RuntimeScene)
 		{
 			if (m_SceneState == SceneState::Play)
-				m_ActiveScene->OnRuntimeStop();
+				m_RuntimeScene->OnRuntimeStop();
 			else if (m_SceneState == SceneState::Simulate)
-				m_ActiveScene->OnSimulationStop();
-
-			m_SceneState = SceneState::Edit;
-			UpdateSceneContext(m_EditorScene);
-			m_RuntimeScene = nullptr;
+				m_RuntimeScene->OnSimulationStop();
 		}
+		m_SceneState = SceneState::Edit;
+		m_ScenePaused = false;
+		UpdateSceneContext(m_EditorScene);
+		m_RuntimeScene.reset();
+		if (state == SceneState::Edit || !m_EditorScene)
+			return;
 
-		m_ScenePaused = false; // 切换状态时重置暂停状态
+		try
+		{
+			m_RuntimeScene = CreateRef<Scene>();
+			Scene::CopyScene(m_EditorScene, m_RuntimeScene);
+			m_SceneState = state;
+			UpdateSceneContext(m_RuntimeScene);
+			if (state == SceneState::Play)
+				m_RuntimeScene->OnRuntimeStart();
+			else
+				m_RuntimeScene->OnSimulationStart();
+		}
+		catch (const std::exception& error)
+		{
+			WLD_CORE_ERROR("Unable to start scene: {0}", error.what());
+			if (m_RuntimeScene)
+				m_RuntimeScene->OnRuntimeStop();
+			UpdateSceneContext(m_EditorScene);
+			m_RuntimeScene.reset();
+			m_SceneState = SceneState::Edit;
+		}
+		catch (...)
+		{
+			WLD_CORE_ERROR("Unable to start scene: unknown error.");
+			if (m_RuntimeScene)
+				m_RuntimeScene->OnRuntimeStop();
+			UpdateSceneContext(m_EditorScene);
+			m_RuntimeScene.reset();
+			m_SceneState = SceneState::Edit;
+		}
 	}
 	void EditorLayer::UpdateSceneContext(Ref<Scene> scene)
 	{
+		m_HasRenderedScene = false;
 		m_ActiveScene = scene;
-		if (m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f)
+		if (m_ActiveScene && m_ViewportSize.x > 0.0f && m_ViewportSize.y > 0.0f)
 		{
 			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 		}
 		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 	}
 
+	void EditorLayer::StartCooking(const std::string& target)
+	{
+		if (m_CookingThread.joinable())
+		{
+			if (!m_CookingFinished.load(std::memory_order_acquire))
+				return;
+			m_CookingThread.join();
+		}
+		m_ShowCookingProgress = true;
+		m_CookingSucceeded = false;
+		m_CookingError.clear();
+		m_CookingFinished.store(false, std::memory_order_relaxed);
+		try
+		{
+			m_CookingThread = std::thread([target, this]()
+			{
+				try
+				{
+					namespace fs = std::filesystem;
+					fs::path publishDir(target);
+					publishDir.replace_extension("");
+					fs::create_directories(publishDir);
+					fs::path srcRuntimeOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "Runtime/" + WLD_BUILD_TYPE);
+					fs::path srcRuntimeExe = srcRuntimeOutputDir / "Runtime.exe";
+					if (!fs::is_regular_file(srcRuntimeExe))
+						throw std::runtime_error("Runtime.exe could not be located: " + srcRuntimeExe.string());
+					fs::copy_file(srcRuntimeExe, publishDir / "Runtime.exe", fs::copy_options::overwrite_existing);
+					WLD_CORE_INFO("Copied Runtime executable from: {0}", srcRuntimeExe.string());
+
+					fs::path srcGameOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "bin/");
+					for (const auto& entry : fs::recursive_directory_iterator(srcGameOutputDir))
+					{
+						if (entry.is_regular_file() && entry.path().extension() == ".dll")
+						{
+							fs::path destPath = publishDir / "bin" / fs::relative(entry.path(), srcGameOutputDir);
+							fs::create_directories(destPath.parent_path());
+							fs::copy_file(entry.path(), destPath, fs::copy_options::overwrite_existing);
+						}
+					}
+
+					fs::path contentDir = publishDir / "content";
+					fs::create_directories(contentDir);
+					fs::path sourceAssetsDir = std::string(WLD_GAME_DIR) + "assets";
+					fs::path outPakFile = contentDir / "Base.wpak";
+					VFS::BuildPakFromDirectory(sourceAssetsDir, outPakFile);
+					if (!fs::is_regular_file(outPakFile) || fs::file_size(outPakFile) == 0)
+						throw std::runtime_error("Asset package was not created: " + outPakFile.string());
+					WLD_CORE_INFO("Game Cooked Successfully to {0}", publishDir.string());
+					m_CookingSucceeded = true;
+				}
+				catch (const std::exception& error)
+				{
+					m_CookingError = error.what();
+					WLD_CORE_ERROR("Game cooking failed: {0}", m_CookingError);
+				}
+				catch (...)
+				{
+					m_CookingError = "Unknown background cooking error.";
+					WLD_CORE_ERROR("{0}", m_CookingError);
+				}
+				m_CookingFinished.store(true, std::memory_order_release);
+			});
+		}
+		catch (const std::exception& error)
+		{
+			m_CookingError = error.what();
+			m_CookingFinished.store(true, std::memory_order_release);
+			WLD_CORE_ERROR("Unable to start cooking: {0}", m_CookingError);
+		}
+	}
+
 	void EditorLayer::OnCooking()
 	{
-
 		if (!ImGui::IsPopupOpen("Cooking Progress"))
 		{
 			ImGui::OpenPopup("Cooking Progress");
@@ -658,24 +764,29 @@ namespace World
 
 		// 始终让弹窗居中
 		ImGuiWindowFlags window_flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse;
-		bool p_open = true; // 控制右上角是否有X，如果不需要能关掉，填NULL
 		if (ImGui::BeginPopupModal("Cooking Progress", NULL, window_flags))
 		{
-			ImGui::Text("Packing assets...");
-
-			// 动态显示一个来回滚动的无极进度条以表示程序没死机
-			// （如果有真实的进度数值，可以将下面这行替换为: ImGui::ProgressBar(m_progressPercent);）
-			ImGui::ProgressBar(-1.0f * (float)ImGui::GetTime(), ImVec2(200.0f, 0.0f), "Cooking...");
-
-			if (m_CookingFinished)
+			if (m_CookingFinished.load(std::memory_order_acquire))
 			{
-				// 打包结束后，延迟关闭或提示完成
-				ImGui::TextColored(ImVec4(0, 1, 0, 1), "Cooking Complete!");
+				if (m_CookingThread.joinable())
+					m_CookingThread.join();
+				if (m_CookingSucceeded)
+					ImGui::TextColored(ImVec4(0, 1, 0, 1), "Cooking Complete!");
+				else
+				{
+					ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Cooking Failed");
+					ImGui::TextWrapped("%s", m_CookingError.c_str());
+				}
 				if (ImGui::Button("Close", ImVec2(120, 0)))
 				{
 					m_ShowCookingProgress = false;
 					ImGui::CloseCurrentPopup();
 				}
+			}
+			else
+			{
+				ImGui::Text("Packing assets...");
+				ImGui::ProgressBar(-1.0f * (float)ImGui::GetTime(), ImVec2(200.0f, 0.0f), "Cooking...");
 			}
 
 			ImGui::EndPopup();

@@ -89,7 +89,12 @@ namespace World
 	void RuntimeLayer::OnDetach()
 	{
 		WLD_PROFILE_FUNCTION();
-		m_SceneRenderer->Shutdown();
+		if (m_ActiveScene)
+			m_ActiveScene->OnRuntimeStop();
+		m_ActiveScene.reset();
+		if (m_SceneRenderer)
+			m_SceneRenderer->Shutdown();
+		m_SceneRenderer.reset();
 	}
 	void RuntimeLayer::OnUpdate(Timestep ts)
 	{
@@ -98,10 +103,11 @@ namespace World
 		{
 			Renderer2D::ResetStats();
 
+			m_ActiveScene->OnUpdateRuntime(ts);
+			// Scripts may remove the camera or its entity during the update.
 			auto entity = m_ActiveScene->GetPrimaryCameraEntity();
-			if (entity)
+			if (m_SceneRenderer && entity && entity.HasComponent<CameraComponent>() && entity.HasComponent<TransformComponent>())
 			{
-				m_ActiveScene->OnUpdateRuntime(ts);
 				auto& camera = entity.GetComponent<CameraComponent>().Camera;
 				auto& transform = entity.GetComponent<TransformComponent>().Transform;
 
@@ -109,10 +115,6 @@ namespace World
 				m_SceneRenderer->SubmitScene(camera, transform);
 				m_SceneRenderer->EndScene();
 
-			}
-			else
-			{
-				m_ActiveScene->OnUpdateRuntime(ts);
 			}
 
 
@@ -134,7 +136,8 @@ namespace World
 		if (e.GetWidth() == 0 || e.GetHeight() == 0)
 			return false; // 最小化时跳过
 
-		m_ActiveScene->OnViewportResize(e.GetWidth(), e.GetHeight());
+		if (m_ActiveScene)
+			m_ActiveScene->OnViewportResize(e.GetWidth(), e.GetHeight());
 		return false;
 	}
 
