@@ -126,6 +126,10 @@ namespace World::Wui
 		void EndDrag();
 		// 拖动期间每帧调用以保持目标矩形;释放后 AcceptDrop 返回 true。
 		bool DropTarget(const WuiRect& rect);
+		// 仅当 payload 以指定前缀开头时武装落点(区分面板拖拽与文件拖拽)。
+		bool DropTarget(const WuiRect& rect, const std::string& payloadPrefix);
+		// 每帧构建 UI 前调用:清空上一帧的落点,只保留本帧悬停命中的目标。
+		void ClearDropTarget() { m_DropArmed = false; }
 		bool AcceptDrop(std::string* payload);
 
 	private:

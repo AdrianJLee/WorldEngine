@@ -106,6 +106,7 @@ namespace World
 	void EditorShell::OnRender(Wui::WuiContext& ctx)
 	{
 		m_ViewportRect = {};
+		ctx.ClearDropTarget();
 		DrawMenuBar(ctx);
 		const glm::vec2 viewport = ctx.ViewportSize();
 		RenderNode(ctx, m_Layout.Root, { 0, 26, viewport.x, viewport.y - 26 });
@@ -113,8 +114,12 @@ namespace World
 		std::string payload;
 		if (ctx.AcceptDrop(&payload))
 		{
-			if (!m_DropTargetPanel.empty() && payload != m_DropTargetPanel && m_Layout.AddTab(payload, m_DropTargetPanel, m_DropZone))
-				SaveLayout();
+			if (payload.rfind("panel:", 0) == 0)
+			{
+				const std::string panel = payload.substr(6);
+				if (!m_DropTargetPanel.empty() && panel != m_DropTargetPanel && m_Layout.AddTab(panel, m_DropTargetPanel, m_DropZone))
+					SaveLayout();
+			}
 		}
 		m_DropTargetPanel.clear();
 		m_DropZone = Wui::DropZone::Center;
@@ -125,7 +130,12 @@ namespace World
 
 		std::string dragPayload;
 		if (ctx.IsDragActive(&dragPayload))
-			Label(ctx, ctx.Input().MousePos + glm::vec2 { 14, 14 }, "moving: " + dragPayload, m_Theme.Text, 13.0f);
+		{
+			std::string label = dragPayload;
+			if (dragPayload.rfind("panel:", 0) == 0) label = "停靠面板: " + dragPayload.substr(6);
+			else if (dragPayload.rfind("file:", 0) == 0) label = "移动文件: " + dragPayload.substr(5);
+			Label(ctx, ctx.Input().MousePos + glm::vec2 { 14, 14 }, label, m_Theme.Text, 13.0f);
+		}
 	}
 
 	void EditorShell::RenderNode(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -207,7 +217,7 @@ namespace World
 			if (ctx.IsHovered(tab))
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 			if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab))
-				ctx.BeginDrag(Wui::HashId(("tab." + panel).c_str()), panel);
+				ctx.BeginDrag(Wui::HashId(("tab." + panel).c_str()), "panel:" + panel);
 
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { tab.X + 6, tab.Y + 3, 0, 0 }, m_Theme.Text, 0, 1.0f, PanelTitle(panel), 14.0f, false });
 			const Wui::WuiRect close { tab.X + tab.W - 18, tab.Y + 4, 14, 14 };
@@ -227,8 +237,9 @@ namespace World
 			RenderPanelContent(ctx, node.Panels[node.Active], content);
 
 		std::string dragPayload;
-		if (ctx.IsDragActive(&dragPayload) && ctx.IsHovered(area))
+		if (ctx.IsDragActive(&dragPayload) && dragPayload.rfind("panel:", 0) == 0 && ctx.IsHovered(area))
 		{
+			ctx.DropTarget(area, "panel:"); // 武装落点:仅面板拖拽在此生效
 			const glm::vec2 rel = ctx.Input().MousePos - glm::vec2 { area.X, area.Y };
 			const float lx = area.W > 0 ? rel.x / area.W : 0;
 			const float ly = area.H > 0 ? rel.y / area.H : 0;
@@ -958,17 +969,17 @@ namespace World
 			if (ctx.Input().MouseDown[0] && ctx.IsHovered(cellRect))
 			{
 				const std::filesystem::path rel = std::filesystem::relative(path, m_Browser.Root);
-				ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), rel.string());
+				ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
 			}
 			if (ctx.IsHovered(cellRect))
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 			if (isDir)
 			{
-				ctx.DropTarget(cellRect);
+				ctx.DropTarget(cellRect, "file:");
 				std::string payload;
-				if (ctx.AcceptDrop(&payload))
+				if (ctx.AcceptDrop(&payload) && payload.rfind("file:", 0) == 0)
 				{
-					const std::filesystem::path dragged = m_Browser.Root / payload;
+					const std::filesystem::path dragged = m_Browser.Root / payload.substr(5);
 					if (dragged != path && dragged.parent_path() != path)
 						std::filesystem::rename(dragged, path / dragged.filename());
 				}

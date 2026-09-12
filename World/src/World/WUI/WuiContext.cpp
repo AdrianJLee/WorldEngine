@@ -133,7 +133,14 @@ namespace World::Wui
 
 	bool WuiContext::DropTarget(const WuiRect& rect)
 	{
+		return DropTarget(rect, {});
+	}
+
+	bool WuiContext::DropTarget(const WuiRect& rect, const std::string& payloadPrefix)
+	{
 		if (!m_Dragging)
+			return false;
+		if (!payloadPrefix.empty() && m_DragPayload.rfind(payloadPrefix, 0) != 0)
 			return false;
 		if (HitTest(rect, m_Input.MousePos))
 			m_DropArmed = true;
