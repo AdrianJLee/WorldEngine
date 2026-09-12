@@ -3,6 +3,7 @@
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiDock.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
 
 #include <chrono>
@@ -37,6 +38,9 @@ namespace World
 		std::filesystem::path LastSelected;
 		std::filesystem::path RenameTarget;
 		char RenameBuffer[256] = { 0 };
+		std::string RenameEdit;
+		std::string SearchEdit;
+		std::filesystem::path ContextMenuPath;
 		std::vector<std::filesystem::path> Clipboard;
 		bool ClipboardCut = false;
 		bool ShowDeleteModal = false;
@@ -127,6 +131,7 @@ namespace World
 		Wui::WuiTheme m_Theme;
 		ContentBrowserModel m_Browser;
 		Wui::WuiRect m_ViewportRect;
+		Entity m_HierarchyContext;
 
 		bool m_SplitterDragging = false;
 		Wui::DockNode* m_DragSplitNode = nullptr;

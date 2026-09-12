@@ -28,7 +28,7 @@ namespace World::Wui
 	bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme);
 	bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int64_t min, int64_t max, const WuiTheme& theme);
 	// 文本输入:UTF-8 追加/退格;回车提交返回 true,Escape 失焦。
-	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme);
+	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme, bool* cancelledOut = nullptr);
 	void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme);
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);

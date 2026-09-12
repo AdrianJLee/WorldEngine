@@ -162,6 +162,27 @@ namespace World::Wui
 			return offset;
 		}
 
+		// 由像素位置估算光标字符下标:ASCII 半角按 0.52 倍字号,其余按全角宽度。
+		int CursorAtX(const std::string& text, float x, float fontSize)
+		{
+			if (x <= 0)
+				return 0;
+			float accumulated = 0;
+			int index = 0;
+			for (size_t i = 0; i < text.size();)
+			{
+				const unsigned char c = static_cast<unsigned char>(text[i]);
+				const int length = (c & 0x80) ? ((c & 0xE0) == 0xC0 ? 2 : ((c & 0xF0) == 0xE0 ? 3 : 4)) : 1;
+				const float width = (c < 0x80) ? fontSize * 0.52f : fontSize * 0.95f;
+				if (x < accumulated + width * 0.5f)
+					return index;
+				accumulated += width;
+				i += length;
+				++index;
+			}
+			return index;
+		}
+
 		void InsertUtf8At(std::string& text, size_t offset, uint32_t codepoint)
 		{
 			std::string encoded;
@@ -446,15 +467,16 @@ namespace World::Wui
 		return changed;
 	}
 
-	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme)
+	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme, bool* cancelledOut)
 	{
 		WuiEditState& state = ctx.Persist<WuiEditState>(id, {});
 		if (ctx.IsClicked(rect))
 		{
 			ctx.SetFocus(id);
-			state.Cursor = Utf8Count(buffer);
-			state.SelStart = 0;
-			state.SelEnd = Utf8Count(buffer);
+			// 点击定位光标,不再整段全选;避免一输入就整体覆盖。
+			state.Cursor = CursorAtX(buffer, ctx.Input().MousePos.x - (rect.X + 6.0f), 15.0f);
+			state.SelStart = -1;
+			state.SelEnd = -1;
 		}
 		const bool focused = ctx.Focus() == id;
 		if (focused) ctx.SetTextInputActive(true);
@@ -466,8 +488,12 @@ namespace World::Wui
 				ctx.SetFocus(0);
 			else if (ctx.Input().MouseClicked[0] && !ctx.IsHovered(rect))
 				ctx.SetFocus(0);
+			if (cancelledOut)
+				*cancelledOut = cancelled;
 			ctx.SetCursor(WuiCursor::IBeam);
 		}
+		else if (cancelledOut)
+			*cancelledOut = false;
 		else if (ctx.IsHovered(rect))
 			ctx.SetCursor(WuiCursor::IBeam);
 		const bool hasSelection = focused && state.SelStart >= 0 && state.SelEnd > state.SelStart;

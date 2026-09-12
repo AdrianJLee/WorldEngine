@@ -77,6 +77,13 @@ namespace World
 			}
 		}
 
+		// 字符串字段的编辑期缓冲区:Enter/失焦提交,Escape 丢弃。
+		struct SchemaTextState
+		{
+			std::string Buffer;
+			bool Editing = false;
+		};
+
 		const char* ZoneName(Wui::DropZone zone)
 		{
 			switch (zone)
@@ -521,7 +528,6 @@ namespace World
 
 		float scrollY = 0;
 		BeginScrollArea(ctx, rect, entities.size() * 22.0f + 8.0f, scrollY, m_Theme);
-		Entity contextTarget;
 		for (size_t i = 0; i < entities.size(); ++i)
 		{
 			const Wui::WuiRect row { rect.X + 4, rect.Y + 4 + i * 22.0f - scrollY, rect.W - 8, 22 };
@@ -534,21 +540,21 @@ namespace World
 				m_Editor.SetSelectedEntity(entities[i]);
 			if (ctx.Input().MouseClicked[1] && ctx.IsHovered(row))
 			{
-				contextTarget = entities[i];
+				m_HierarchyContext = entities[i];
 				ctx.OpenPopup(Wui::HashId("hierarchy.context"));
 			}
 		}
 		EndScrollArea(ctx);
 
 		const Wui::WuiId popup = Wui::HashId("hierarchy.context");
-		if (ctx.IsPopupOpen(popup) && contextTarget.IsValid())
+		if (ctx.IsPopupOpen(popup) && m_HierarchyContext.IsValid())
 		{
 			ctx.PushOverlay();
 			const Wui::WuiRect panel { ctx.Input().MousePos.x, ctx.Input().MousePos.y, 140, 30 };
 			const Wui::WuiRect item { panel.X + 4, panel.Y + 4, panel.W - 8, 22 };
 			if (MenuItem(ctx, Wui::HashId("hierarchy.delete"), item, "Delete", true, m_Theme))
 			{
-				Entity::DestroyEntity(scene.get(), contextTarget);
+				Entity::DestroyEntity(scene.get(), m_HierarchyContext);
 				m_Editor.MarkDocumentDirty();
 				ctx.CloseAllPopups();
 			}
@@ -556,6 +562,13 @@ namespace World
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(popup);
 			ctx.PopOverlay();
+		}
+		else
+		{
+			// 菜单关闭后清空目标,避免残留;残留的不可见弹窗一并收起。
+			m_HierarchyContext = Entity();
+			if (ctx.IsPopupOpen(popup))
+				ctx.ClosePopup(popup);
 		}
 	}
 
@@ -645,6 +658,25 @@ namespace World
 			{
 				const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
 				void* nestedInstance = field.GetPtr ? field.GetPtr(instance) : nullptr;
+				// UUID 等身份标识只读展示,不提供编辑控件。
+				if (nested && nestedInstance && (nested->Id.Name == "World::UUID" || nested->DisplayName == "UUID"))
+				{
+					std::string display = "(invalid)";
+					if (!nested->Fields.empty() && nested->Fields[0].Get)
+					{
+						const Schema::Value inner = nested->Fields[0].Get(nestedInstance);
+						if (std::holds_alternative<uint64_t>(inner))
+						{
+							char buffer[32];
+							std::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(std::get<uint64_t>(inner)));
+							display = buffer;
+						}
+					}
+					Label(ctx, { row.X + 4, row.Y + 3 }, label, m_Theme.TextMuted, 13.0f);
+					Label(ctx, { ctrl.X, row.Y + 3 }, display, m_Theme.Text, 13.0f);
+					y += 20;
+					continue;
+				}
 				bool& open = ctx.Persist<bool>(fid, false);
 				if (ctx.IsClicked(row))
 					open = !open;
@@ -758,11 +790,42 @@ namespace World
 				case Schema::Kind::String:
 				case Schema::Kind::Asset:
 				{
-					std::string s = std::get<std::string>(value);
-					const std::string before = s;
-					TextField(ctx, fid, ctrl, s, m_Theme);
-					fieldChanged = s != before;
-					if (fieldChanged) value = s;
+					auto& state = ctx.Persist<SchemaTextState>(fid, {});
+					const std::string current = std::get<std::string>(value);
+					if (!state.Editing)
+						state.Buffer = current;
+					bool cancelled = false;
+					if (TextField(ctx, fid, ctrl, state.Buffer, m_Theme, &cancelled))
+					{
+						// Enter 提交
+						if (state.Editing && state.Buffer != current)
+						{
+							value = state.Buffer;
+							fieldChanged = true;
+						}
+						state.Editing = false;
+					}
+					else if (state.Editing)
+					{
+						if (cancelled)
+						{
+							// Escape 丢弃
+							state.Editing = false;
+						}
+						else if (ctx.Focus() != fid)
+						{
+							// 失焦提交
+							if (state.Buffer != current)
+							{
+								value = state.Buffer;
+								fieldChanged = true;
+							}
+							state.Editing = false;
+						}
+					}
+					// 本次点击进入编辑
+					if (!state.Editing && ctx.Focus() == fid)
+						state.Editing = true;
 					break;
 				}
 				case Schema::Kind::Enum:
@@ -1270,7 +1333,8 @@ namespace World
 		{
 			std::filesystem::create_directory(newPath);
 			m_Browser.RenameTarget = newPath;
-			std::strncpy(m_Browser.RenameBuffer, newPath.filename().string().c_str(), sizeof(m_Browser.RenameBuffer) - 1);
+			m_Browser.RenameEdit = newPath.filename().string();
+			std::strncpy(m_Browser.RenameBuffer, m_Browser.RenameEdit.c_str(), sizeof(m_Browser.RenameBuffer) - 1);
 			m_Browser.Selected.clear();
 			m_Browser.Selected.insert(newPath);
 			m_Browser.LastSelected = newPath;
@@ -1393,10 +1457,12 @@ namespace World
 				UpdateBrowserSearch();
 		}
 		{
-			std::string query = m_Browser.Search;
-			if (TextField(ctx, Wui::HashId("browser.search"), { rect.X + rect.W - 168, y, 162, 24 }, query, m_Theme))
+			if (m_Browser.SearchEdit.empty() && m_Browser.Search[0])
+				m_Browser.SearchEdit = m_Browser.Search;
+			if (TextField(ctx, Wui::HashId("browser.search"), { rect.X + rect.W - 168, y, 162, 24 }, m_Browser.SearchEdit, m_Theme))
 			{
-				std::strncpy(m_Browser.Search, query.c_str(), sizeof(m_Browser.Search) - 1);
+				std::strncpy(m_Browser.Search, m_Browser.SearchEdit.c_str(), sizeof(m_Browser.Search) - 1);
+				m_Browser.Search[sizeof(m_Browser.Search) - 1] = 0;
 				UpdateBrowserSearch();
 			}
 		}
@@ -1468,7 +1534,8 @@ namespace World
 		if (ctx.IsKeyPressed(KeyCodes::F2) && m_Browser.Selected.size() == 1 && ctx.IsHovered(content))
 		{
 			m_Browser.RenameTarget = *m_Browser.Selected.begin();
-			std::strncpy(m_Browser.RenameBuffer, m_Browser.RenameTarget.filename().string().c_str(), sizeof(m_Browser.RenameBuffer) - 1);
+			m_Browser.RenameEdit = m_Browser.RenameTarget.filename().string();
+			std::strncpy(m_Browser.RenameBuffer, m_Browser.RenameEdit.c_str(), sizeof(m_Browser.RenameBuffer) - 1);
 		}
 
 		if (fileDrag && ctx.IsHovered(content))
@@ -1478,7 +1545,6 @@ namespace World
 			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, content, m_Theme.Accent, 0.0f, 2.0f });
 		}
 
-		std::filesystem::path contextPath;
 		auto interact = [&](const std::filesystem::path& path, const Wui::WuiRect& itemRect, bool isDir)
 		{
 			const bool selected = m_Browser.Selected.find(path) != m_Browser.Selected.end();
@@ -1530,7 +1596,7 @@ namespace World
 					m_Browser.Selected.insert(path);
 					m_Browser.LastSelected = path;
 				}
-				contextPath = path;
+				m_Browser.ContextMenuPath = path;
 				ctx.OpenPopup(Wui::HashId("browser.context"));
 			}
 			return selected || hovered;
@@ -1563,9 +1629,8 @@ namespace World
 				Label(ctx, { row.X + content.W * 0.72f, row.Y + 4 }, size, m_Theme.TextMuted, 13.0f);
 				if (m_Browser.RenameTarget == path)
 				{
-					std::string renameText = m_Browser.RenameBuffer;
-					if (TextField(ctx, Wui::HashId("browser.rename"), { row.X + 26, row.Y + 2, 160, 20 }, renameText, m_Theme))
-						BrowserApplyRename(path, renameText);
+					if (TextField(ctx, Wui::HashId("browser.rename"), { row.X + 26, row.Y + 2, 160, 20 }, m_Browser.RenameEdit, m_Theme))
+						BrowserApplyRename(path, m_Browser.RenameEdit);
 					else if (ctx.IsKeyPressed(KeyCodes::Escape))
 						m_Browser.RenameTarget.clear();
 				}
@@ -1599,9 +1664,8 @@ namespace World
 				Label(ctx, { cellRect.X, cellRect.Y + 130 }, path.filename().string(), m_Theme.Text, 13.0f);
 				if (m_Browser.RenameTarget == path)
 				{
-					std::string renameText = m_Browser.RenameBuffer;
-					if (TextField(ctx, Wui::HashId("browser.rename"), { cellRect.X, cellRect.Y + 150, 128, 22 }, renameText, m_Theme))
-						BrowserApplyRename(path, renameText);
+					if (TextField(ctx, Wui::HashId("browser.rename"), { cellRect.X, cellRect.Y + 150, 128, 22 }, m_Browser.RenameEdit, m_Theme))
+						BrowserApplyRename(path, m_Browser.RenameEdit);
 					else if (ctx.IsKeyPressed(KeyCodes::Escape))
 						m_Browser.RenameTarget.clear();
 				}
@@ -1672,7 +1736,7 @@ namespace World
 
 		// ---- 右键菜单 ----
 		const Wui::WuiId popup = Wui::HashId("browser.context");
-		if (ctx.IsPopupOpen(popup) && !contextPath.empty())
+		if (ctx.IsPopupOpen(popup) && !m_Browser.ContextMenuPath.empty())
 		{
 			ctx.PushOverlay();
 			const Wui::WuiRect menuPanel { ctx.Input().MousePos.x, ctx.Input().MousePos.y, 180, 8 * 24 + 8 };
@@ -1680,13 +1744,13 @@ namespace World
 			struct BrowserItem { const char* Label; std::function<void()> Action; };
 			const bool single = m_Browser.Selected.size() == 1;
 			const std::vector<BrowserItem> items = {
-				{ "Open", [this, &contextPath] { BrowserOpenItem(contextPath); } },
+				{ "Open", [this] { BrowserOpenItem(m_Browser.ContextMenuPath); } },
 				{ "Cut", [this] { BrowserCut(); } },
 				{ "Copy", [this] { BrowserCopy(); } },
-				{ "Paste", [this, &contextPath] { BrowserPasteInto(std::filesystem::is_directory(contextPath) ? contextPath : m_Browser.Current); } },
-				{ "Rename", [this, &contextPath, single] { if (single) { m_Browser.RenameTarget = contextPath; std::strncpy(m_Browser.RenameBuffer, contextPath.filename().string().c_str(), sizeof(m_Browser.RenameBuffer) - 1); } } },
+				{ "Paste", [this] { BrowserPasteInto(std::filesystem::is_directory(m_Browser.ContextMenuPath) ? m_Browser.ContextMenuPath : m_Browser.Current); } },
+				{ "Rename", [this, single] { if (single) { m_Browser.RenameTarget = m_Browser.ContextMenuPath; m_Browser.RenameEdit = m_Browser.ContextMenuPath.filename().string(); std::strncpy(m_Browser.RenameBuffer, m_Browser.RenameEdit.c_str(), sizeof(m_Browser.RenameBuffer) - 1); } } },
 				{ "New Folder", [this] { BrowserCreateFolder(); } },
-				{ "Open in Explorer", [this, &contextPath] { const std::string cmd = "explorer \"" + std::filesystem::absolute(contextPath).string() + "\""; system(cmd.c_str()); } },
+				{ "Open in Explorer", [this] { const std::string cmd = "explorer \"" + std::filesystem::absolute(m_Browser.ContextMenuPath).string() + "\""; system(cmd.c_str()); } },
 				{ "Delete", [this] { m_Browser.ShowDeleteModal = true; } },
 			};
 			for (size_t i = 0; i < items.size(); ++i)
@@ -1703,6 +1767,13 @@ namespace World
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(popup);
 			ctx.PopOverlay();
+		}
+		else
+		{
+			// 菜单关闭后清空目标,残留的不可见弹窗一并收起。
+			m_Browser.ContextMenuPath.clear();
+			if (ctx.IsPopupOpen(popup))
+				ctx.ClosePopup(popup);
 		}
 
 		// ---- 删除确认 ----
