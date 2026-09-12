@@ -4,6 +4,8 @@
 
 #include <imgui.h>
 
+#include <cfloat>
+
 namespace
 {
 	// ImGuiKey 的非 ASCII 特殊键与引擎 KeyCodes(继承 GLFW)的映射。
@@ -119,6 +121,15 @@ namespace World::Wui
 						font = m_Cjk;
 					else if (command.Bold && m_Bold)
 						font = m_Bold;
+					if (command.TextSelStart >= 0 && command.TextSelEnd > command.TextSelStart)
+					{
+						const float widthBefore = font->CalcTextSizeA(command.FontSize, FLT_MAX, 0.0f, command.Text.substr(0, static_cast<size_t>(command.TextSelStart)).c_str()).x;
+						const float widthSelected = font->CalcTextSizeA(command.FontSize, FLT_MAX, 0.0f, command.Text.substr(static_cast<size_t>(command.TextSelStart), static_cast<size_t>(command.TextSelEnd - command.TextSelStart)).c_str()).x;
+						drawList->AddRectFilled(
+							ImVec2(min.x + widthBefore, min.y),
+							ImVec2(min.x + widthBefore + widthSelected, min.y + command.FontSize),
+							ImGui::GetColorU32(ImVec4(0.25f, 0.45f, 0.85f, 0.55f)));
+					}
 					drawList->AddText(font, command.FontSize, min, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)), command.Text.c_str());
 					break;
 				}

@@ -19,6 +19,20 @@ namespace World::Wui
 
 	void WuiContext::EndFrame()
 	{
+		// 待拖 → 真拖:不依赖源控件仍处于悬停状态(鼠标可离开源标签/图标)。
+		if (m_DragPending && !m_Dragging)
+		{
+			if (!m_Input.MouseDown[0])
+			{
+				m_DragPending = false;
+				m_DragPayload.clear();
+				m_DragId = 0;
+			}
+			else if (glm::length(m_Input.MousePos - m_DragPressPos) > 4.0f)
+			{
+				m_Dragging = true;
+			}
+		}
 		if (m_Dragging && m_Input.MouseReleased[0])
 		{
 			m_DropAccepted = m_DropArmed;

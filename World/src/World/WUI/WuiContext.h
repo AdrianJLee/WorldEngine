@@ -48,6 +48,8 @@ namespace World::Wui
 		bool Bold = false;
 		uint64_t Image = 0;
 		WuiRect Uv { 0, 0, 1, 1 };
+		int TextSelStart = -1;
+		int TextSelEnd = -1;
 	};
 
 	// 帧级上下文:输入、持久状态、样式栈、焦点、绘制命令。

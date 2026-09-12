@@ -132,8 +132,8 @@ namespace World::Wui
 
 	namespace
 	{
-		struct WuiEditState { int Cursor = -1; };
-		struct WuiNumericState { bool Pressed = false; bool Dragging = false; bool Editing = false; float PressX = 0; double PressValue = 0; std::string Buffer; int Cursor = -1; };
+		struct WuiEditState { int Cursor = -1; int SelStart = -1; int SelEnd = -1; };
+		struct WuiNumericState { bool Pressed = false; bool Dragging = false; bool Editing = false; float PressX = 0; double PressValue = 0; std::string Buffer; int Cursor = -1; int SelStart = -1; int SelEnd = -1; };
 
 		int Utf8Count(const std::string& text)
 		{
@@ -187,24 +187,53 @@ namespace World::Wui
 			text.erase(offset, end - offset);
 		}
 
-		bool EditUpdate(WuiContext& ctx, std::string& buffer, int& cursor, bool& submitted, bool& cancelled)
+		bool EditUpdate(WuiContext& ctx, std::string& buffer, int& cursor, int& selStart, int& selEnd, bool& submitted, bool& cancelled)
 		{
 			submitted = false;
 			cancelled = false;
 			if (cursor < 0) cursor = Utf8Count(buffer);
 			for (uint32_t codepoint : ctx.Input().TextInput)
 			{
+				if (selStart >= 0 && selEnd > selStart)
+				{
+					buffer.erase(Utf8Offset(buffer, selStart), Utf8Offset(buffer, selEnd) - Utf8Offset(buffer, selStart));
+					cursor = selStart;
+				}
+				selStart = -1;
+				selEnd = -1;
 				InsertUtf8At(buffer, Utf8Offset(buffer, cursor), codepoint);
 				++cursor;
 			}
 			const int count = Utf8Count(buffer);
 			if (cursor > count) cursor = count;
-			if (ctx.IsKeyPressed(KeyCodes::Left) && cursor > 0) --cursor;
-			if (ctx.IsKeyPressed(KeyCodes::Right) && cursor < count) ++cursor;
-			if (ctx.IsKeyPressed(KeyCodes::Home)) cursor = 0;
-			if (ctx.IsKeyPressed(KeyCodes::End)) cursor = count;
-			if (ctx.IsKeyPressed(KeyCodes::Backspace) && cursor > 0) EraseBefore(buffer, cursor);
-			if (ctx.IsKeyPressed(KeyCodes::Delete) && cursor < count) EraseAt(buffer, cursor);
+			if (ctx.IsKeyPressed(KeyCodes::Left) && cursor > 0) { --cursor; selStart = -1; selEnd = -1; }
+			if (ctx.IsKeyPressed(KeyCodes::Right) && cursor < count) { ++cursor; selStart = -1; selEnd = -1; }
+			if (ctx.IsKeyPressed(KeyCodes::Home)) { cursor = 0; selStart = -1; selEnd = -1; }
+			if (ctx.IsKeyPressed(KeyCodes::End)) { cursor = count; selStart = -1; selEnd = -1; }
+			if (ctx.IsKeyPressed(KeyCodes::Backspace))
+			{
+				if (selStart >= 0 && selEnd > selStart)
+				{
+					buffer.erase(Utf8Offset(buffer, selStart), Utf8Offset(buffer, selEnd) - Utf8Offset(buffer, selStart));
+					cursor = selStart;
+					selStart = -1;
+					selEnd = -1;
+				}
+				else if (cursor > 0)
+					EraseBefore(buffer, cursor);
+			}
+			if (ctx.IsKeyPressed(KeyCodes::Delete))
+			{
+				if (selStart >= 0 && selEnd > selStart)
+				{
+					buffer.erase(Utf8Offset(buffer, selStart), Utf8Offset(buffer, selEnd) - Utf8Offset(buffer, selStart));
+					cursor = selStart;
+					selStart = -1;
+					selEnd = -1;
+				}
+				else if (cursor < Utf8Count(buffer))
+					EraseAt(buffer, cursor);
+			}
 			if (ctx.IsKeyPressed(KeyCodes::Enter)) submitted = true;
 			if (ctx.IsKeyPressed(KeyCodes::Escape)) cancelled = true;
 			return submitted || cancelled;
@@ -214,6 +243,17 @@ namespace World::Wui
 		{
 			const size_t offset = Utf8Offset(text, cursor);
 			return text.substr(0, offset) + "|" + text.substr(offset);
+		}
+
+		void PushTextFieldCommand(WuiContext& ctx, const WuiRect& rect, const std::string& text, const WuiTheme& theme, bool focused, bool hovered, int selStart, int selEnd)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonBg, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, focused ? theme.Accent : theme.Border, 3.0f, focused ? 1.5f : 1.0f });
+			WuiDrawCommand command { WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 15.0f, false };
+			command.TextSelStart = (focused && selStart >= 0 && selEnd > selStart) ? static_cast<int>(Utf8Offset(text, selStart)) : -1;
+			command.TextSelEnd = (focused && selStart >= 0 && selEnd > selStart) ? static_cast<int>(Utf8Offset(text, selEnd)) : -1;
+			ctx.Commands().push_back(std::move(command));
+			(void)hovered;
 		}
 	}
 
@@ -228,7 +268,7 @@ namespace World::Wui
 		if (state.Editing)
 		{
 			bool submitted = false, cancelled = false;
-			if (EditUpdate(ctx, state.Buffer, state.Cursor, submitted, cancelled))
+			if (EditUpdate(ctx, state.Buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
 			{
 				if (submitted)
 				{
@@ -238,6 +278,8 @@ namespace World::Wui
 				}
 				state.Editing = false;
 				state.Cursor = -1;
+				state.SelStart = -1;
+				state.SelEnd = -1;
 			}
 			else if (ctx.Input().MouseClicked[0] && !hovered)
 			{
@@ -246,6 +288,8 @@ namespace World::Wui
 				if (end && *end == 0) { value = std::max(lo, std::min(hi, parsed)); changed = true; }
 				state.Editing = false;
 				state.Cursor = -1;
+				state.SelStart = -1;
+				state.SelEnd = -1;
 			}
 			ctx.SetCursor(WuiCursor::IBeam);
 		}
@@ -260,7 +304,11 @@ namespace World::Wui
 			if (state.Pressed)
 			{
 				const float dx = ctx.Input().MousePos.x - state.PressX;
-				if (!state.Dragging && std::fabs(dx) > 3.0f) { state.Dragging = true; ctx.SetFocus(id); }
+				if (std::fabs(dx) > 1.5f)
+				{
+					state.Dragging = true;
+					ctx.SetFocus(id);
+				}
 				if (state.Dragging)
 				{
 					value = std::max(lo, std::min(hi, static_cast<float>(state.PressValue + dx * speed)));
@@ -276,6 +324,8 @@ namespace World::Wui
 						std::snprintf(buffer, sizeof(buffer), "%.3f", value);
 						state.Buffer = buffer;
 						state.Cursor = -1;
+						state.SelStart = 0;
+						state.SelEnd = Utf8Count(state.Buffer);
 						ctx.SetFocus(id);
 						ctx.SetTextInputActive(true);
 					}
@@ -290,9 +340,15 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, state.Editing ? theme.ButtonHover : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, (state.Editing || hovered || state.Dragging) ? theme.Accent : theme.Border, 3.0f, 1.0f });
 		std::string text;
-		if (state.Editing) text = WithCursor(state.Buffer, state.Cursor);
+		if (state.Editing) text = (state.SelStart >= 0 && state.SelEnd > state.SelStart) ? state.Buffer : WithCursor(state.Buffer, state.Cursor);
 		else { char buffer[32]; std::snprintf(buffer, sizeof(buffer), "%.3f", value); text = buffer; }
-		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 5.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 14.0f, false });
+		WuiDrawCommand command { WuiDrawKind::Text, { rect.X + 5.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 14.0f, false };
+		if (state.Editing && state.SelStart >= 0 && state.SelEnd > state.SelStart)
+		{
+			command.TextSelStart = static_cast<int>(Utf8Offset(state.Buffer, state.SelStart));
+			command.TextSelEnd = static_cast<int>(Utf8Offset(state.Buffer, state.SelEnd));
+		}
+		ctx.Commands().push_back(std::move(command));
 		return changed;
 	}
 
@@ -307,7 +363,7 @@ namespace World::Wui
 		if (state.Editing)
 		{
 			bool submitted = false, cancelled = false;
-			if (EditUpdate(ctx, state.Buffer, state.Cursor, submitted, cancelled))
+			if (EditUpdate(ctx, state.Buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
 			{
 				if (submitted)
 				{
@@ -317,6 +373,8 @@ namespace World::Wui
 				}
 				state.Editing = false;
 				state.Cursor = -1;
+				state.SelStart = -1;
+				state.SelEnd = -1;
 			}
 			else if (ctx.Input().MouseClicked[0] && !hovered)
 			{
@@ -325,6 +383,8 @@ namespace World::Wui
 				if (end && *end == 0) { value = std::max(lo, std::min(hi, static_cast<int64_t>(parsed))); changed = true; }
 				state.Editing = false;
 				state.Cursor = -1;
+				state.SelStart = -1;
+				state.SelEnd = -1;
 			}
 			ctx.SetCursor(WuiCursor::IBeam);
 		}
@@ -339,7 +399,11 @@ namespace World::Wui
 			if (state.Pressed)
 			{
 				const float dx = ctx.Input().MousePos.x - state.PressX;
-				if (!state.Dragging && std::fabs(dx) > 3.0f) { state.Dragging = true; ctx.SetFocus(id); }
+				if (std::fabs(dx) > 1.5f)
+				{
+					state.Dragging = true;
+					ctx.SetFocus(id);
+				}
 				if (state.Dragging)
 				{
 					value = std::max(lo, std::min(hi, static_cast<int64_t>(state.PressValue + static_cast<double>(dx))));
@@ -353,6 +417,8 @@ namespace World::Wui
 						state.Editing = true;
 						state.Buffer = std::to_string(value);
 						state.Cursor = -1;
+						state.SelStart = 0;
+						state.SelEnd = Utf8Count(state.Buffer);
 						ctx.SetFocus(id);
 						ctx.SetTextInputActive(true);
 					}
@@ -366,22 +432,36 @@ namespace World::Wui
 
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, state.Editing ? theme.ButtonHover : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, (state.Editing || hovered || state.Dragging) ? theme.Accent : theme.Border, 3.0f, 1.0f });
-		const std::string text = state.Editing ? WithCursor(state.Buffer, state.Cursor) : std::to_string(value);
-		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 5.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 14.0f, false });
+		std::string text;
+		if (state.Editing) text = (state.SelStart >= 0 && state.SelEnd > state.SelStart) ? state.Buffer : WithCursor(state.Buffer, state.Cursor);
+		else text = std::to_string(value);
+		WuiDrawCommand command { WuiDrawKind::Text, { rect.X + 5.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 14.0f, false };
+		if (state.Editing && state.SelStart >= 0 && state.SelEnd > state.SelStart)
+		{
+			command.TextSelStart = static_cast<int>(Utf8Offset(state.Buffer, state.SelStart));
+			command.TextSelEnd = static_cast<int>(Utf8Offset(state.Buffer, state.SelEnd));
+		}
+		ctx.Commands().push_back(std::move(command));
 		return changed;
 	}
 
 	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme)
 	{
 		WuiEditState& state = ctx.Persist<WuiEditState>(id, {});
-		if (ctx.IsClicked(rect)) { ctx.SetFocus(id); state.Cursor = -1; }
+		if (ctx.IsClicked(rect))
+		{
+			ctx.SetFocus(id);
+			state.Cursor = Utf8Count(buffer);
+			state.SelStart = 0;
+			state.SelEnd = Utf8Count(buffer);
+		}
 		const bool focused = ctx.Focus() == id;
 		if (focused) ctx.SetTextInputActive(true);
 		bool submitted = false;
 		if (focused)
 		{
 			bool cancelled = false;
-			if (EditUpdate(ctx, buffer, state.Cursor, submitted, cancelled))
+			if (EditUpdate(ctx, buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
 				ctx.SetFocus(0);
 			else if (ctx.Input().MouseClicked[0] && !ctx.IsHovered(rect))
 				ctx.SetFocus(0);
@@ -389,13 +469,19 @@ namespace World::Wui
 		}
 		else if (ctx.IsHovered(rect))
 			ctx.SetCursor(WuiCursor::IBeam);
+		const bool hasSelection = focused && state.SelStart >= 0 && state.SelEnd > state.SelStart;
+		const std::string text = hasSelection ? buffer : (focused ? WithCursor(buffer, state.Cursor) : buffer);
+		WuiDrawCommand command { WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 15.0f, false };
+		if (hasSelection)
+		{
+			command.TextSelStart = static_cast<int>(Utf8Offset(buffer, state.SelStart));
+			command.TextSelEnd = static_cast<int>(Utf8Offset(buffer, state.SelEnd));
+		}
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, focused ? theme.Accent : theme.Border, 3.0f, focused ? 1.5f : 1.0f });
-		const std::string text = focused ? WithCursor(buffer, state.Cursor) : buffer;
-		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 15.0f, false });
+		ctx.Commands().push_back(std::move(command));
 		return submitted;
 	}
-
 	void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme)
 	{
 		ctx.Commands().push_back({ WuiDrawKind::Image, rect, theme.Text, 0, 1.0f, "", 15.0f, false, textureId, uv });

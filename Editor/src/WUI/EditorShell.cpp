@@ -237,6 +237,12 @@ namespace World
 			else if (ly < 0.25f) m_DropZone = Wui::DropZone::Top;
 			else if (ly > 0.75f) m_DropZone = Wui::DropZone::Bottom;
 			else m_DropZone = Wui::DropZone::Center;
+			Wui::WuiRect zone = area;
+			if (m_DropZone == Wui::DropZone::Left) zone.W = area.W * 0.25f;
+			else if (m_DropZone == Wui::DropZone::Right) { zone.X = area.X + area.W * 0.75f; zone.W = area.W * 0.25f; }
+			else if (m_DropZone == Wui::DropZone::Top) zone.H = area.H * 0.25f;
+			else if (m_DropZone == Wui::DropZone::Bottom) { zone.Y = area.Y + area.H * 0.75f; zone.H = area.H * 0.25f; }
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, zone, { 0.3f, 0.5f, 0.9f, 0.28f }, 3.0f });
 			if (!node.Panels.empty())
 				m_DropTargetPanel = node.Panels[node.Active];
 		}
@@ -550,8 +556,8 @@ namespace World
 				{
 					float f = field.K == Schema::Kind::Float ? std::get<float>(value) : static_cast<float>(std::get<double>(value));
 					const float before = f;
-					const float lo = field.Meta.Min.has_value() ? *field.Meta.Min : -1.0f;
-					const float hi = field.Meta.Max.has_value() ? *field.Meta.Max : 1.0f;
+					const float lo = field.Meta.Min.has_value() ? *field.Meta.Min : 1.0f;   // 1,-1 哨兵 = 无范围
+					const float hi = field.Meta.Max.has_value() ? *field.Meta.Max : -1.0f;
 					DragFloat(ctx, fid, ctrl, f, 0.01f, lo, hi, m_Theme);
 					fieldChanged = f != before;
 					if (fieldChanged) value = field.K == Schema::Kind::Float ? Schema::Value(f) : Schema::Value(static_cast<double>(f));
@@ -568,7 +574,7 @@ namespace World
 						float f = field.K == Schema::Kind::Vec2 ? std::get<glm::vec2>(value)[c]
 							: field.K == Schema::Kind::Vec3 ? std::get<glm::vec3>(value)[c] : std::get<glm::vec4>(value)[c];
 						const float before = f;
-						DragFloat(ctx, fid ^ static_cast<Wui::WuiId>(c + 1), { ctrl.X + slot * c, ctrl.Y, slot - 2, ctrl.H }, f, 0.01f, -1.0f, 1.0f, m_Theme);
+						DragFloat(ctx, fid ^ static_cast<Wui::WuiId>(c + 1), { ctrl.X + slot * c, ctrl.Y, slot - 2, ctrl.H }, f, 0.01f, 1.0f, -1.0f, m_Theme);
 						if (f != before)
 						{
 							fieldChanged = true;
