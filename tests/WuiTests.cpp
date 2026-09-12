@@ -8,6 +8,8 @@
 
 #include <filesystem>
 #include <cstdio>
+#include <functional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -277,6 +279,48 @@ int main()
 			CHECK(stack.Undo() && value == 0);
 			stack.Clear();
 			CHECK(!stack.CanUndo() && !stack.CanRedo());
+		}
+
+		// 13. 布局不变量:任意 MoveTab 序列后无重复/缺失/空组/单子 split
+		{
+			const std::vector<PanelId> all = { "hierarchy", "properties", "content_browser", "view", "stats", "memory", "operations" };
+			const std::vector<DropZone> zones = { DropZone::Center, DropZone::Left, DropZone::Right, DropZone::Top, DropZone::Bottom };
+			std::function<void(const DockNode&, std::set<PanelId>&, bool&, const std::string&)> walk =
+				[&](const DockNode& node, std::set<PanelId>& seen, bool& ok, const std::string& path)
+				{
+					if (!ok) return;
+					if (node.IsTabs())
+					{
+						if (node.Panels.empty()) { ok = false; return; }
+						if (node.Active >= node.Panels.size()) { ok = false; return; }
+						for (const PanelId& panel : node.Panels)
+							if (!seen.insert(panel).second) { ok = false; return; }
+						return;
+					}
+					if (node.Children.size() < 2) { ok = false; return; }
+					for (const DockNode& child : node.Children)
+						walk(child, seen, ok, path + "/");
+				};
+
+			for (const PanelId& panel : all)
+			{
+				for (const PanelId& target : all)
+				{
+					if (target == panel) continue;
+					for (const DropZone& zone : zones)
+					{
+						DockLayout layout = DockLayout::Default(all);
+						const bool moved = layout.MoveTab(panel, target, zone);
+						CHECK(moved);
+						std::set<PanelId> seen;
+						bool ok = true;
+						walk(layout.Root, seen, ok, "");
+						CHECK(ok);
+						CHECK(seen.size() == all.size());
+						CHECK(layout.Contains(panel));
+					}
+				}
+			}
 		}
 
 		std::printf("World.Wui: all checks passed\n");

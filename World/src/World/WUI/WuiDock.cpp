@@ -45,7 +45,12 @@ namespace World::Wui
 		if (path)
 			path->push_back(&node);
 		if (node.IsTabs())
-			return std::find(node.Panels.begin(), node.Panels.end(), panel) != node.Panels.end() ? &node : nullptr;
+		{
+			const bool found = std::find(node.Panels.begin(), node.Panels.end(), panel) != node.Panels.end();
+			if (!found && path)
+				path->pop_back();
+			return found ? &node : nullptr;
+		}
 		for (DockNode& child : node.Children)
 		{
 			DockNode* found = FindTabNode(child, panel, path);
