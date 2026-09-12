@@ -37,10 +37,10 @@ namespace World::Wui
 		{
 			m_DropAccepted = m_DropArmed;
 			m_Dragging = false;
-			m_DragPayload.clear();
 			m_DragId = 0;
 			m_DropArmed = false;
 			m_DragPending = false;
+			// m_DragPayload 保留到 AcceptDrop 消费后再清空。
 		}
 		else
 		{
@@ -154,6 +154,7 @@ namespace World::Wui
 		if (payload)
 			*payload = m_DragPayload;
 		m_DropAccepted = false;
+		m_DragPayload.clear();
 		return true;
 	}
 }

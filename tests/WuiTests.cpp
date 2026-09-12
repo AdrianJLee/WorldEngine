@@ -1,4 +1,5 @@
 #include "World/WUI/WuiCore.h"
+#include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiDock.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLayoutStore.h"
@@ -186,6 +187,61 @@ int main()
 			CHECK(parsed->Find("count")->AsNumber() == 3);
 			CHECK(!JsonValue::Parse("{bad", &error).has_value());
 			CHECK(!error.empty());
+		}
+
+		// 11. 拖放状态机:按下→移动→武装落点→释放→AcceptDrop 拿到完整 payload
+		{
+			WuiContext ctx;
+			WuiInputState input;
+			input.MousePos = { 10, 10 };
+			input.MouseDown[0] = true;
+			input.MouseClicked[0] = true;
+			ctx.BeginFrame(input);
+			ctx.BeginDrag(HashId("d"), "panel:view");
+			ctx.EndFrame();
+			CHECK(!ctx.IsDragActive(nullptr));
+
+			WuiInputState move;
+			move.MousePos = { 60, 60 };
+			move.MouseDown[0] = true;
+			ctx.BeginFrame(move);
+			ctx.EndFrame(); // 移动超过阈值,帧末进入拖拽态
+			std::string kind;
+			CHECK(ctx.IsDragActive(&kind));
+			CHECK(kind == "panel:view");
+			ctx.DropTarget({ 50, 50, 40, 40 }, "file:"); // 前缀不匹配,不应武装
+
+			WuiInputState release;
+			release.MousePos = { 60, 60 };
+			release.MouseReleased[0] = true;
+			ctx.BeginFrame(release);
+			ctx.DropTarget({ 50, 50, 40, 40 }, "panel:");
+			ctx.EndFrame();
+
+			std::string payload;
+			CHECK(ctx.AcceptDrop(&payload));
+			CHECK(payload == "panel:view");
+			CHECK(!ctx.AcceptDrop(&payload)); // 只消费一次
+
+			// 释放时无任何武装落点 → 不接受
+			WuiInputState press2;
+			press2.MousePos = { 10, 10 };
+			press2.MouseDown[0] = true;
+			press2.MouseClicked[0] = true;
+			ctx.BeginFrame(press2);
+			ctx.BeginDrag(HashId("d2"), "panel:stats");
+			ctx.EndFrame();
+			WuiInputState move2;
+			move2.MousePos = { 90, 90 };
+			move2.MouseDown[0] = true;
+			ctx.BeginFrame(move2);
+			ctx.EndFrame();
+			WuiInputState release2;
+			release2.MousePos = { 90, 90 };
+			release2.MouseReleased[0] = true;
+			ctx.BeginFrame(release2);
+			ctx.EndFrame();
+			CHECK(!ctx.AcceptDrop(&payload));
 		}
 
 		std::printf("World.Wui: all checks passed\n");
