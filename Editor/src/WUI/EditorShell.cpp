@@ -378,6 +378,7 @@ namespace World
 			{
 				ctx.PushOverlay();
 				const Wui::WuiRect panel { header.X, 24, 240, static_cast<float>(entries.size() * 22 + 8) };
+				DrawPanelSurface(ctx, panel, m_Theme);
 				for (size_t i = 0; i < entries.size(); ++i)
 				{
 					const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };

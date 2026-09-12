@@ -2,6 +2,7 @@
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiOperationLog.h"
 #include "World/WUI/WuiUndoStack.h"
+#include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiDock.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLayoutStore.h"
@@ -342,6 +343,42 @@ int main()
 			ctx.BeginFrame(outside);
 			ctx.ClosePopupsOnOutsideClick({ popup }, { 0, 20, 200, 100 });
 			CHECK(!ctx.IsPopupOpen(popup)); // 后续帧点击外部 → 关闭
+			ctx.EndFrame();
+		}
+
+		// 15. 菜单栏交互:点击头部 → 弹层打开并包含条目,下一帧仍打开
+		{
+			WuiContext ctx;
+			const WuiTheme theme;
+			const WuiId menuId = HashId("menu.window");
+			const WuiRect header { 70, 2, 76, 22 };
+			WuiInputState click;
+			click.MousePos = { 80, 12 };
+			click.MouseClicked[0] = true;
+			click.MouseDown[0] = true;
+			ctx.BeginFrame(click);
+			CHECK(BeginMenu(ctx, menuId, header, "Window", theme));
+			ctx.PushOverlay();
+			DrawPanelSurface(ctx, { header.X, 24, 240, 60 }, theme);
+			const WuiRect item { header.X + 4, 28, 200, 22 };
+			MenuItem(ctx, HashId("w.hierarchy"), item, "Scene Hierarchy", true, true, theme);
+			EndMenu(ctx, menuId, { header.X, 24, 240, 60 }, theme);
+			ctx.PopOverlay();
+			CHECK(ctx.IsPopupOpen(menuId));
+			const size_t overlayCount = ctx.OverlayCommands().size();
+			CHECK(overlayCount >= 3); // 面板背景 + 边框 + 条目文字
+			ctx.EndFrame();
+
+			WuiInputState idle;
+			idle.MousePos = { 100, 40 };
+			ctx.BeginFrame(idle);
+			CHECK(BeginMenu(ctx, menuId, header, "Window", theme));
+			ctx.PushOverlay();
+			DrawPanelSurface(ctx, { header.X, 24, 240, 60 }, theme);
+			MenuItem(ctx, HashId("w.hierarchy"), item, "Scene Hierarchy", true, true, theme);
+			EndMenu(ctx, menuId, { header.X, 24, 240, 60 }, theme);
+			ctx.PopOverlay();
+			CHECK(ctx.IsPopupOpen(menuId));
 			ctx.EndFrame();
 		}
 

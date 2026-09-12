@@ -43,11 +43,12 @@ namespace World::Wui
 				buffer.pop_back();
 		}
 
-		void DrawPanelSurface(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme)
-		{
-			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.PanelBg, 3.0f });
-			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
-		}
+	}
+
+	void DrawPanelSurface(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.PanelBg, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
 	}
 
 	void Panel(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiTheme& theme)
@@ -575,7 +576,6 @@ namespace World::Wui
 
 	void EndMenu(WuiContext& ctx, WuiId id, const WuiRect& panel, const WuiTheme& theme)
 	{
-		DrawPanelSurface(ctx, panel, theme);
 		ctx.ClosePopupsOnOutsideClick({ id }, panel);
 		if (ctx.IsKeyPressed(KeyCodes::Escape))
 			ctx.ClosePopup(id);

@@ -39,6 +39,8 @@ namespace World::Wui
 	void EndMenuBar(WuiContext& ctx);
 	bool BeginMenu(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	void EndMenu(WuiContext& ctx, WuiId id, const WuiRect& panel, const WuiTheme& theme);
+	// 弹出面板背景(在条目之前调用,避免背景盖住文字)。
+	void DrawPanelSurface(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
 	bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool enabled, const WuiTheme& theme);
 	// checked:在标签前绘制勾选标记。
 	bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool checked, bool enabled, const WuiTheme& theme);
