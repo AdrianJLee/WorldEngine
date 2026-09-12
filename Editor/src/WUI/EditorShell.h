@@ -87,9 +87,7 @@ namespace World
 		TransformComponent m_GizmoBefore;
 		std::string m_DropTargetPanel;
 		Wui::DropZone m_DropZone = Wui::DropZone::Center;
-		bool m_WasDragging = false;
 		std::string m_LastDragTarget;
 		Wui::DropZone m_LastDragZone = Wui::DropZone::Center;
-		bool m_LastDragValid = false;
 	};
 }

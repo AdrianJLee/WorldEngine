@@ -172,9 +172,10 @@ namespace World
 						RecordDockChange(ctx, "drop", panel + " -> " + m_DropTargetPanel + "/" + ZoneName(m_DropZone), before);
 				}
 			}
+			// 只在落位消费后清空,避免下一帧 AcceptDrop 读取时目标已被清。
+			m_DropTargetPanel.clear();
+			m_DropZone = Wui::DropZone::Center;
 		}
-		m_DropTargetPanel.clear();
-		m_DropZone = Wui::DropZone::Center;
 
 		ImGuiLayer::ApplyImeState(ctx.Focus() == 0 || ctx.IsTextInputActive());
 
@@ -189,13 +190,6 @@ namespace World
 			Label(ctx, ctx.Input().MousePos + glm::vec2 { 14, 14 }, label, m_Theme.Text, 13.0f);
 		}
 
-		const bool draggingNow = ctx.IsDragActive(&dragPayload);
-		if (draggingNow && !m_WasDragging)
-			ctx.RecordOp("drag", "begin", dragPayload, "");
-		if (!draggingNow && m_WasDragging && !m_LastDragValid)
-			ctx.RecordOp("drag", "release", "", "no-armed-target");
-		m_WasDragging = draggingNow;
-		m_LastDragValid = false;
 	}
 
 	void EditorShell::RenderNode(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -319,11 +313,10 @@ namespace World
 			if (!node.Panels.empty())
 			{
 				const std::string target = node.Panels[node.Active];
-				if (target != m_LastDragTarget || m_DropZone != m_LastDragZone || !m_LastDragValid)
+				if (target != m_LastDragTarget || m_DropZone != m_LastDragZone)
 					ctx.RecordOp("drag", "hover", target, ZoneName(m_DropZone));
 				m_LastDragTarget = target;
 				m_LastDragZone = m_DropZone;
-				m_LastDragValid = true;
 				m_DropTargetPanel = node.Panels[node.Active];
 			}
 		}
