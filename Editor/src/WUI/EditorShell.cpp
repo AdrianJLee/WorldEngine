@@ -169,6 +169,7 @@ namespace World
 
 	void EditorShell::OnRender(Wui::WuiContext& ctx)
 	{
+		m_Ctx = &ctx;
 		m_ViewportRect = {};
 		ctx.ClearDropTarget();
 		const bool undoKey = ctx.Input().Ctrl && !ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z);
@@ -953,18 +954,56 @@ namespace World
 		}
 	}
 
+	void EditorShell::BrowserNavigate(const std::filesystem::path& path)
+	{
+		if (m_Browser.HistoryIndex >= 0 && m_Browser.HistoryIndex < static_cast<int>(m_Browser.History.size()) && m_Browser.History[m_Browser.HistoryIndex] == path)
+			return;
+		if (m_Browser.HistoryIndex < static_cast<int>(m_Browser.History.size()) - 1)
+			m_Browser.History.resize(m_Browser.HistoryIndex + 1);
+		m_Browser.History.push_back(path);
+		m_Browser.HistoryIndex = static_cast<int>(m_Browser.History.size()) - 1;
+		m_Browser.Current = path;
+		m_Browser.Selected.clear();
+		m_Browser.LastSelected.clear();
+		if (m_Browser.Search[0])
+			UpdateBrowserSearch();
+	}
+
+	void EditorShell::BrowserGoBack()
+	{
+		if (m_Browser.HistoryIndex > 0)
+		{
+			--m_Browser.HistoryIndex;
+			m_Browser.Current = m_Browser.History[m_Browser.HistoryIndex];
+			m_Browser.Selected.clear();
+			m_Browser.LastSelected.clear();
+			if (m_Browser.Search[0])
+				UpdateBrowserSearch();
+		}
+	}
+
+	void EditorShell::BrowserGoUp()
+	{
+		if (m_Browser.Current != m_Browser.Root)
+			BrowserNavigate(m_Browser.Current.parent_path());
+	}
+
 	void EditorShell::BrowserOpenItem(const std::filesystem::path& path)
 	{
 		if (std::filesystem::is_directory(path))
 		{
-			m_Browser.Current = path;
-			m_Browser.Selected.clear();
-			m_Browser.LastSelected.clear();
+			BrowserNavigate(path);
 			return;
 		}
 		if (path.extension() == ".wd")
 			m_Editor.OpenScene(path);
+		else
+		{
+			const std::string cmd = "start \"\" \"" + std::filesystem::absolute(path).string() + "\"";
+			system(cmd.c_str());
+		}
 	}
+
 
 	void EditorShell::BrowserPasteInto(const std::filesystem::path& destination)
 	{
@@ -976,7 +1015,10 @@ namespace World
 			if (m_Browser.ClipboardCut)
 			{
 				if (path != destPath)
+				{
 					std::filesystem::rename(path, destPath);
+					m_Ctx->RecordOp("browser", "move", path.filename().string(), "-> " + destination.string());
+				}
 			}
 			else
 			{
@@ -986,6 +1028,7 @@ namespace World
 				while (std::filesystem::exists(destPath))
 					destPath = destination / (stem + "-Copy(" + std::to_string(counter++) + ")" + ext);
 				std::filesystem::copy(path, destPath, std::filesystem::copy_options::recursive);
+				m_Ctx->RecordOp("browser", "copy", path.filename().string(), "-> " + destPath.string());
 			}
 		}
 		if (m_Browser.ClipboardCut)
@@ -993,10 +1036,13 @@ namespace World
 			m_Browser.Clipboard.clear();
 			m_Browser.ClipboardCut = false;
 		}
+		if (m_Browser.Search[0])
+			UpdateBrowserSearch();
 	}
 
 	void EditorShell::BrowserDeleteSelection()
 	{
+		const size_t count = m_Browser.Selected.size();
 		for (const auto& path : m_Browser.Selected)
 		{
 			std::error_code ignored;
@@ -1004,6 +1050,70 @@ namespace World
 		}
 		m_Browser.Selected.clear();
 		m_Browser.LastSelected.clear();
+		if (m_Browser.Search[0])
+			UpdateBrowserSearch();
+		m_Ctx->RecordOp("browser", "delete", std::to_string(count), "");
+	}
+
+	void EditorShell::BrowserCreateFolder()
+	{
+		std::filesystem::path newPath = m_Browser.Current / "New Folder";
+		int counter = 1;
+		while (std::filesystem::exists(newPath))
+			newPath = m_Browser.Current / ("New Folder (" + std::to_string(counter++) + ")");
+		try
+		{
+			std::filesystem::create_directory(newPath);
+			m_Browser.RenameTarget = newPath;
+			std::strncpy(m_Browser.RenameBuffer, newPath.filename().string().c_str(), sizeof(m_Browser.RenameBuffer) - 1);
+			m_Browser.Selected.clear();
+			m_Browser.Selected.insert(newPath);
+			m_Browser.LastSelected = newPath;
+			m_Ctx->RecordOp("browser", "mkdir", newPath.filename().string(), "");
+		}
+		catch (const std::exception& error)
+		{
+			WLD_CORE_ERROR("Could not create directory: {0}", error.what());
+		}
+	}
+
+	void EditorShell::BrowserApplyRename(const std::filesystem::path& target, const std::string& newName)
+	{
+		if (newName.empty())
+		{
+			m_Browser.RenameTarget.clear();
+			return;
+		}
+		const std::filesystem::path newPath = target.parent_path() / newName;
+		if (newPath != target)
+		{
+			std::error_code ignored;
+			std::filesystem::rename(target, newPath, ignored);
+			m_Ctx->RecordOp("browser", "rename", target.filename().string(), "-> " + newPath.filename().string());
+		}
+		m_Browser.RenameTarget.clear();
+		if (m_Browser.Search[0])
+			UpdateBrowserSearch();
+	}
+
+	void EditorShell::BrowserCut()
+	{
+		m_Browser.Clipboard.assign(m_Browser.Selected.begin(), m_Browser.Selected.end());
+		m_Browser.ClipboardCut = true;
+	}
+
+	void EditorShell::BrowserCopy()
+	{
+		m_Browser.Clipboard.assign(m_Browser.Selected.begin(), m_Browser.Selected.end());
+		m_Browser.ClipboardCut = false;
+	}
+
+	void EditorShell::BrowserSelectAll(const std::vector<std::filesystem::path>& paths)
+	{
+		m_Browser.Selected.clear();
+		m_Browser.Selected.insert(paths.begin(), paths.end());
+		if (!paths.empty())
+			m_Browser.LastSelected = paths.back();
 	}
 
 	void EditorShell::DrawContentBrowser(Wui::WuiContext& ctx, const Wui::WuiRect& rect)
@@ -1013,36 +1123,74 @@ namespace World
 		if (!m_Browser.FileIcon)
 			m_Browser.FileIcon = Texture2D::Create("Resource/Icons/ContentBrowser/FileIcon.png");
 
-		// 导航条
+		// ---- 顶部工具栏 ----
 		float y = rect.Y + 6;
-		if (Button(ctx, Wui::HashId("browser.back"), { rect.X + 6, y, 28, 24 }, "<", m_Theme) && m_Browser.Current != m_Browser.Root)
-			m_Browser.Current = m_Browser.Current.parent_path();
-		float x = rect.X + 40;
-		if (Button(ctx, Wui::HashId("browser.root"), { x, y, 48, 24 }, "Root", m_Theme))
-			m_Browser.Current = m_Browser.Root;
-		x += 54;
-		const std::filesystem::path relative = std::filesystem::relative(m_Browser.Current, m_Browser.Root);
+		const bool canBack = m_Browser.HistoryIndex > 0;
+		const bool canForward = m_Browser.HistoryIndex < static_cast<int>(m_Browser.History.size()) - 1;
+		const Wui::WuiRect backBtn { rect.X + 6, y, 24, 24 };
+		if (Button(ctx, Wui::HashId("browser.back"), backBtn, "<", m_Theme) && canBack)
+			BrowserGoBack();
+		const Wui::WuiRect fwdBtn { rect.X + 32, y, 24, 24 };
+		if (Button(ctx, Wui::HashId("browser.forward"), fwdBtn, ">", m_Theme) && canForward)
+		{
+			++m_Browser.HistoryIndex;
+			m_Browser.Current = m_Browser.History[m_Browser.HistoryIndex];
+			m_Browser.Selected.clear();
+			if (m_Browser.Search[0])
+				UpdateBrowserSearch();
+		}
+		const Wui::WuiRect upBtn { rect.X + 58, y, 32, 24 };
+		if (Button(ctx, Wui::HashId("browser.up"), upBtn, "Up", m_Theme) && m_Browser.Current != m_Browser.Root)
+			BrowserGoUp();
+
+		// 面包屑(可点击导航 + 拖放目标:支持把文件拖回上级目录)
+		float x = rect.X + 96;
+		std::string filePayload;
+		const bool fileDrag = ctx.IsDragActive(&filePayload) && filePayload.rfind("file:", 0) == 0;
+		auto breadcrumb = [&](const std::string& label, const std::filesystem::path& destination, const Wui::WuiId id)
+		{
+			const Wui::WuiRect btn { x, y, static_cast<float>(label.size() * 8 + 20), 24 };
+			const bool target = fileDrag && ctx.IsHovered(btn);
+			if (target)
+			{
+				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, btn, m_Theme.Accent, 2.0f, 2.0f });
+				ctx.DropTarget(btn, "file:");
+			}
+			if (Button(ctx, id, btn, label, m_Theme))
+				BrowserNavigate(destination);
+			x += btn.W + 6;
+		};
+		breadcrumb("Root", m_Browser.Root, Wui::HashId("browser.crumb.root"));
 		std::filesystem::path accumulated = m_Browser.Root;
+		const std::filesystem::path relative = std::filesystem::relative(m_Browser.Current, m_Browser.Root);
 		for (const auto& part : relative)
 		{
 			accumulated /= part;
-			const std::string label = part.string();
-			const Wui::WuiRect btn { x, y, static_cast<float>(label.size() * 8 + 20), 24 };
-			if (Button(ctx, Wui::HashId(("browser.crumb." + label).c_str()), btn, label, m_Theme))
-				m_Browser.Current = accumulated;
-			x += btn.W + 4;
+			breadcrumb(part.string(), accumulated, Wui::HashId(("browser.crumb." + part.string()).c_str()));
 		}
-		Wui::WuiRect search { rect.X + rect.W - 170, y, 160, 24 };
+
+		// 右侧:新建文件夹 / 刷新 / 搜索
+		const Wui::WuiRect newBtn { rect.X + rect.W - 300, y, 70, 24 };
+		if (Button(ctx, Wui::HashId("browser.newfolder"), newBtn, "+ Folder", m_Theme))
+			BrowserCreateFolder();
+		const Wui::WuiRect refreshBtn { rect.X + rect.W - 224, y, 58, 24 };
+		if (Button(ctx, Wui::HashId("browser.refresh"), refreshBtn, "Refresh", m_Theme))
+		{
+			if (m_Browser.Search[0])
+				UpdateBrowserSearch();
+		}
+		const Wui::WuiRect searchRect { rect.X + rect.W - 160, y, 154, 24 };
 		{
 			std::string query = m_Browser.Search;
-			if (TextField(ctx, Wui::HashId("browser.search"), search, query, m_Theme))
+			if (TextField(ctx, Wui::HashId("browser.search"), searchRect, query, m_Theme))
 			{
 				std::strncpy(m_Browser.Search, query.c_str(), sizeof(m_Browser.Search) - 1);
 				UpdateBrowserSearch();
 			}
 		}
-		y += 30;
+		y += 32;
 
+		// ---- 内容网格 ----
 		std::vector<std::filesystem::path> paths;
 		const bool searching = m_Browser.Search[0] != 0;
 		if (searching)
@@ -1054,27 +1202,69 @@ namespace World
 			std::sort(paths.begin(), paths.end());
 		}
 
-		const float cell = 144;
+		const Wui::WuiRect gridRect { rect.X, y, rect.W, rect.H - (y - rect.Y) };
+		if (ctx.Input().Ctrl && ctx.IsKeyPressed(KeyCodes::A) && ctx.IsHovered(gridRect))
+			BrowserSelectAll(paths);
+		if (ctx.IsKeyPressed(KeyCodes::Delete) && !m_Browser.Selected.empty() && ctx.IsHovered(gridRect))
+			m_Browser.ShowDeleteModal = true;
+		if (ctx.IsKeyPressed(KeyCodes::F2) && m_Browser.Selected.size() == 1 && ctx.IsHovered(gridRect))
+		{
+			m_Browser.RenameTarget = *m_Browser.Selected.begin();
+			std::strncpy(m_Browser.RenameBuffer, m_Browser.RenameTarget.filename().string().c_str(), sizeof(m_Browser.RenameBuffer) - 1);
+		}
+
+		// 拖放到网格空白处 = 移动到当前目录;目标高亮提示
+		std::filesystem::path dropDestination;
+		if (fileDrag && ctx.IsHovered(gridRect))
+		{
+			ctx.DropTarget(gridRect, "file:");
+			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, gridRect, m_Theme.Accent, 0.0f, 2.0f });
+			dropDestination = m_Browser.Current;
+		}
+
+		const float cell = 142;
 		const int columns = std::max(1, static_cast<int>(rect.W / cell));
 		const float rows = std::ceil(static_cast<float>(paths.size()) / columns);
 		float scrollY = 0;
-		BeginScrollArea(ctx, { rect.X, y, rect.W, rect.H - (y - rect.Y) }, rows * cell + 16, scrollY, m_Theme);
+		BeginScrollArea(ctx, gridRect, rows * cell + 16, scrollY, m_Theme);
 		std::filesystem::path contextPath;
 		for (size_t i = 0; i < paths.size(); ++i)
 		{
 			const int column = static_cast<int>(i % columns);
 			const int row = static_cast<int>(i / columns);
-			const Wui::WuiRect cellRect { rect.X + 8 + column * cell, y + 8 + row * cell - scrollY, 128, 128 };
+			const Wui::WuiRect cellRect { gridRect.X + 8 + column * cell, gridRect.Y + 8 + row * cell - scrollY, 128, 128 };
 			const std::filesystem::path& path = paths[i];
 			const bool isDir = std::filesystem::is_directory(path);
 			const bool selected = m_Browser.Selected.find(path) != m_Browser.Selected.end();
+			const bool hovered = ctx.IsHovered(cellRect);
+
 			if (selected)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { cellRect.X - 3, cellRect.Y - 3, cellRect.W + 6, cellRect.H + 26 }, { 0.3f, 0.3f, 0.3f, 0.5f }, 4.0f });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { cellRect.X - 3, cellRect.Y - 3, cellRect.W + 6, cellRect.H + 28 }, { 0.28f, 0.45f, 0.85f, 0.35f }, 4.0f });
+			else if (hovered)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { cellRect.X - 3, cellRect.Y - 3, cellRect.W + 6, cellRect.H + 28 }, m_Theme.ButtonHover, 4.0f });
+
 			Ref<Texture2D> icon = isDir ? m_Browser.DirIcon : m_Browser.FileIcon;
 			if (icon)
 				Image(ctx, cellRect, icon->GetRendererID(), { 0, 1, 1, -1 }, m_Theme);
-			Label(ctx, { cellRect.X, cellRect.Y + 128 }, path.filename().string(), m_Theme.Text, 13.0f);
+			Label(ctx, { cellRect.X, cellRect.Y + 130 }, path.filename().string(), m_Theme.Text, 13.0f);
 
+			// 拖放目标指示:文件夹上显示高亮边框
+			if (isDir && fileDrag && hovered)
+			{
+				ctx.DropTarget(cellRect, "file:");
+				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, { cellRect.X - 3, cellRect.Y - 3, cellRect.W + 6, cellRect.H + 28 }, m_Theme.Accent, 4.0f, 2.0f });
+				dropDestination = path;
+			}
+
+			// 拖拽源
+			if (ctx.Input().MouseDown[0] && hovered)
+			{
+				const std::filesystem::path rel = std::filesystem::relative(path, m_Browser.Root);
+				ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+			}
+
+			// 交互:双击打开 / 单击选中(ctrl/shift)/ 右键菜单
 			if (ctx.IsDoubleClicked(cellRect))
 				BrowserOpenItem(path);
 			else if (ctx.IsClicked(cellRect))
@@ -1102,7 +1292,7 @@ namespace World
 				}
 				m_Browser.LastSelected = path;
 			}
-			else if (ctx.Input().MouseClicked[1] && ctx.IsHovered(cellRect))
+			else if (ctx.Input().MouseClicked[1] && hovered)
 			{
 				if (!selected)
 				{
@@ -1114,78 +1304,65 @@ namespace World
 				ctx.OpenPopup(Wui::HashId("browser.context"));
 			}
 
-			if (ctx.Input().MouseDown[0] && ctx.IsHovered(cellRect))
-			{
-				const std::filesystem::path rel = std::filesystem::relative(path, m_Browser.Root);
-				ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
-			}
-			if (ctx.IsHovered(cellRect))
-				ctx.SetCursor(Wui::WuiCursor::Hand);
-			if (isDir)
-			{
-				ctx.DropTarget(cellRect, "file:");
-				std::string payload;
-				if (ctx.AcceptDrop(&payload, "file:"))
-				{
-					const std::filesystem::path dragged = m_Browser.Root / payload.substr(5);
-					if (dragged != path && dragged.parent_path() != path)
-					{
-						std::filesystem::rename(dragged, path / dragged.filename());
-						ctx.RecordOp("browser", "move", dragged.filename().string(), "-> " + path.string());
-					}
-				}
-			}
-
+			// 行内重命名
 			if (m_Browser.RenameTarget == path)
 			{
 				const Wui::WuiRect rename { cellRect.X, cellRect.Y + 150, 128, 22 };
 				std::string renameText = m_Browser.RenameBuffer;
 				if (TextField(ctx, Wui::HashId("browser.rename"), rename, renameText, m_Theme))
-				{
-					const std::filesystem::path newPath = path.parent_path() / renameText;
-					if (newPath != path)
-					{
-						std::filesystem::rename(path, newPath);
-						ctx.RecordOp("browser", "rename", path.filename().string(), "-> " + newPath.filename().string());
-					}
+					BrowserApplyRename(path, renameText);
+				else if (ctx.IsKeyPressed(KeyCodes::Escape))
 					m_Browser.RenameTarget.clear();
-				}
 			}
 		}
 		EndScrollArea(ctx);
 
-		// 右键菜单
+		// 落位处理(网格空白或某个文件夹)
+		if (ctx.AcceptDrop(&filePayload, "file:") && !dropDestination.empty())
+		{
+			const std::filesystem::path dragged = m_Browser.Root / filePayload.substr(5);
+			if (dragged != dropDestination && dragged.parent_path() != dropDestination)
+			{
+				std::filesystem::rename(dragged, dropDestination / dragged.filename());
+				m_Ctx->RecordOp("browser", "move", dragged.filename().string(), "-> " + dropDestination.string());
+			}
+		}
+
+		// ---- 右键菜单 ----
 		const Wui::WuiId popup = Wui::HashId("browser.context");
 		if (ctx.IsPopupOpen(popup) && !contextPath.empty())
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect panel { ctx.Input().MousePos.x, ctx.Input().MousePos.y, 170, 7 * 24 + 8 };
+			DrawPanelSurface(ctx, { ctx.Input().MousePos.x, ctx.Input().MousePos.y, 180, 8 * 24 + 8 }, m_Theme);
 			struct BrowserItem { const char* Label; std::function<void()> Action; };
+			const bool single = m_Browser.Selected.size() == 1;
 			const std::vector<BrowserItem> items = {
 				{ "Open", [this, &contextPath] { BrowserOpenItem(contextPath); } },
-				{ "Cut", [this] { m_Browser.Clipboard.assign(m_Browser.Selected.begin(), m_Browser.Selected.end()); m_Browser.ClipboardCut = true; } },
-				{ "Copy", [this] { m_Browser.Clipboard.assign(m_Browser.Selected.begin(), m_Browser.Selected.end()); m_Browser.ClipboardCut = false; } },
-				{ "Paste", [this, &contextPath] { BrowserPasteInto(contextPath); } },
-				{ "Rename", [this, &contextPath] { m_Browser.RenameTarget = contextPath; std::strncpy(m_Browser.RenameBuffer, contextPath.filename().string().c_str(), sizeof(m_Browser.RenameBuffer) - 1); } },
+				{ "Cut", [this] { BrowserCut(); } },
+				{ "Copy", [this] { BrowserCopy(); } },
+				{ "Paste", [this, &contextPath] { BrowserPasteInto(std::filesystem::is_directory(contextPath) ? contextPath : m_Browser.Current); } },
+				{ "Rename", [this, &contextPath, single] { if (single) { m_Browser.RenameTarget = contextPath; std::strncpy(m_Browser.RenameBuffer, contextPath.filename().string().c_str(), sizeof(m_Browser.RenameBuffer) - 1); } } },
+				{ "New Folder", [this] { BrowserCreateFolder(); } },
 				{ "Open in Explorer", [this, &contextPath] { const std::string cmd = "explorer \"" + std::filesystem::absolute(contextPath).string() + "\""; system(cmd.c_str()); } },
 				{ "Delete", [this] { m_Browser.ShowDeleteModal = true; } },
 			};
 			for (size_t i = 0; i < items.size(); ++i)
 			{
-				const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 24, panel.W - 8, 22 };
+				const Wui::WuiRect item { ctx.Input().MousePos.x + 4, ctx.Input().MousePos.y + 4 + i * 24, 172, 22 };
 				if (MenuItem(ctx, Wui::HashId(("browser.item." + std::string(items[i].Label)).c_str()), item, items[i].Label, true, m_Theme))
 				{
 					items[i].Action();
+					m_Ctx->RecordOp("menu", "item", items[i].Label, "browser");
 					ctx.CloseAllPopups();
 				}
 			}
-			ctx.ClosePopupsOnOutsideClick({ popup }, panel);
+			ctx.ClosePopupsOnOutsideClick({ popup }, { ctx.Input().MousePos.x, ctx.Input().MousePos.y, 180, 8 * 24 + 8 });
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(popup);
 			ctx.PopOverlay();
 		}
 
-		// 删除确认
+		// ---- 删除确认 ----
 		const Wui::WuiId deleteModal = Wui::HashId("browser.delete");
 		if (m_Browser.ShowDeleteModal)
 		{
@@ -1195,14 +1372,12 @@ namespace World
 		else if (ctx.Modal() == deleteModal)
 			ctx.ClearModal();
 		Wui::WuiRect panel;
-		if (BeginModal(ctx, deleteModal, "Delete Confirmation", { 360, 160 }, &panel, m_Theme))
+		if (BeginModal(ctx, deleteModal, "Delete Confirmation", { 380, 160 }, &panel, m_Theme))
 		{
 			Label(ctx, { panel.X + 16, panel.Y + 48 }, "Delete " + std::to_string(m_Browser.Selected.size()) + " item(s)? This cannot be undone.", m_Theme.Text, 14.0f);
 			if (Button(ctx, Wui::HashId("browser.delete.yes"), { panel.X + 20, panel.Y + 110, 110, 28 }, "Yes", m_Theme))
 			{
-				const size_t deleted = m_Browser.Selected.size();
 				BrowserDeleteSelection();
-				ctx.RecordOp("browser", "delete", std::to_string(deleted), "");
 				ctx.ClearModal();
 			}
 			if (Button(ctx, Wui::HashId("browser.delete.no"), { panel.X + 150, panel.Y + 110, 110, 28 }, "No", m_Theme))
@@ -1210,7 +1385,6 @@ namespace World
 			EndModal(ctx, deleteModal);
 		}
 	}
-
 	void EditorShell::DrawModals(Wui::WuiContext& ctx)
 	{
 		const Wui::WuiId unsaved = Wui::HashId("modal.unsaved");

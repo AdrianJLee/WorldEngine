@@ -30,6 +30,10 @@ namespace World
 		std::vector<std::filesystem::path> Clipboard;
 		bool ClipboardCut = false;
 		bool ShowDeleteModal = false;
+		std::vector<std::filesystem::path> History;
+		int HistoryIndex = -1;
+		bool ShowNewFolderInput = false;
+		char NewFolderBuffer[256] = { 0 };
 		Ref<Texture2D> DirIcon, FileIcon;
 	};
 
@@ -73,6 +77,14 @@ namespace World
 		void BrowserOpenItem(const std::filesystem::path& path);
 		void BrowserPasteInto(const std::filesystem::path& destination);
 		void BrowserDeleteSelection();
+		void BrowserNavigate(const std::filesystem::path& path);
+		void BrowserGoBack();
+		void BrowserGoUp();
+		void BrowserCreateFolder();
+		void BrowserApplyRename(const std::filesystem::path& target, const std::string& newName);
+		void BrowserCut();
+		void BrowserCopy();
+		void BrowserSelectAll(const std::vector<std::filesystem::path>& paths);
 
 		EditorLayer& m_Editor;
 		Wui::DockLayout m_Layout;
@@ -92,5 +104,6 @@ namespace World
 		Wui::DropZone m_DropZone = Wui::DropZone::Center;
 		std::string m_LastDragTarget;
 		Wui::DropZone m_LastDragZone = Wui::DropZone::Center;
+		Wui::WuiContext* m_Ctx = nullptr;
 	};
 }
