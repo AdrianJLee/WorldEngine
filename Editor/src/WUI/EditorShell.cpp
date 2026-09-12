@@ -540,6 +540,7 @@ namespace World
 				m_Editor.SetSelectedEntity(entities[i]);
 			if (ctx.Input().MouseClicked[1] && ctx.IsHovered(row))
 			{
+				m_Editor.SetSelectedEntity(entities[i]);
 				m_HierarchyContext = entities[i];
 				m_HierarchyMenuPos = ctx.Input().MousePos;
 				ctx.OpenPopup(Wui::HashId("hierarchy.context"));
@@ -551,9 +552,14 @@ namespace World
 		if (ctx.IsPopupOpen(popup) && m_HierarchyContext.IsValid())
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect panel { m_HierarchyMenuPos.x, m_HierarchyMenuPos.y, 140, 30 };
-			const Wui::WuiRect item { panel.X + 4, panel.Y + 4, panel.W - 8, 22 };
-			if (MenuItem(ctx, Wui::HashId("hierarchy.delete"), item, "Delete", true, m_Theme))
+			const Wui::WuiRect panel { m_HierarchyMenuPos.x, m_HierarchyMenuPos.y, 150, 2 * 22 + 8 };
+			DrawPanelSurface(ctx, panel, m_Theme);
+			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicate"), { panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Duplicate", true, m_Theme))
+			{
+				m_Editor.DuplicateSelectedEntity();
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.delete"), { panel.X + 4, panel.Y + 26, panel.W - 8, 22 }, "Delete", true, m_Theme))
 			{
 				Entity::DestroyEntity(scene.get(), m_HierarchyContext);
 				m_Editor.MarkDocumentDirty();
