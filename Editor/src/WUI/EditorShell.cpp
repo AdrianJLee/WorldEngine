@@ -138,6 +138,7 @@ namespace World
 		ctx.History().Push("Dock " + action + " " + target,
 			[this, before] { RestoreLayout(before); },
 			[this, after] { RestoreLayout(after); });
+		SaveLayout();
 	}
 
 	void EditorShell::TogglePanel(Wui::WuiContext& ctx, const std::string& panel)
