@@ -98,15 +98,8 @@ namespace World
 		if (!Wui::WuiLayoutStore::Load(m_LayoutPath, fallback, &m_Layout, &error))
 			WLD_CORE_WARN("Failed to load WUI layout, using default: {0}", error);
 
-		std::string target = "view";
-		if (!m_Layout.Contains(target))
-		{
-			for (const auto& panel : panels)
-				if (m_Layout.Contains(panel)) { target = panel; break; }
-		}
-		for (const auto& panel : panels)
-			if (!m_Layout.Contains(panel))
-				m_Layout.AddTab(panel, target, Wui::DropZone::Center);
+		// 尊重用户关闭的面板:仅当布局文件缺失/损坏时使用默认布局,
+		// 不把"已关闭"的面板强制补回。重新显示由 Window 菜单负责。
 
 		m_Browser.Current = m_Browser.Root;
 	}
@@ -152,8 +145,18 @@ namespace World
 		else
 		{
 			const std::string anchor = m_Layout.FirstPanel();
-			if (!anchor.empty() && m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
+			if (anchor.empty())
+			{
+				// 布局为空(所有面板都被关闭):把该面板作为根标签组恢复。
+				Wui::DockLayout fresh;
+				fresh.Root.Panels.push_back(panel);
+				m_Layout = std::move(fresh);
 				RecordDockChange(ctx, "show", panel, before);
+			}
+			else if (m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
+			{
+				RecordDockChange(ctx, "show", panel, before);
+			}
 		}
 	}
 
