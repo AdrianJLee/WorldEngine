@@ -13,6 +13,7 @@ namespace World::Wui
 		m_Input = input;
 		m_ViewportSize = input.ViewportSize;
 		m_TextInputActive = false;
+		m_Cursor = WuiCursor::Arrow;
 		m_Commands.clear();
 	}
 
@@ -25,10 +26,17 @@ namespace World::Wui
 			m_DragPayload.clear();
 			m_DragId = 0;
 			m_DropArmed = false;
+			m_DragPending = false;
 		}
-		else if (!m_Dragging)
+		else
 		{
 			m_DropAccepted = false;
+			if (m_DragPending && m_Input.MouseReleased[0])
+			{
+				m_DragPending = false;
+				m_DragPayload.clear();
+				m_DragId = 0;
+			}
 		}
 	}
 
@@ -77,13 +85,19 @@ namespace World::Wui
 
 	void WuiContext::BeginDrag(WuiId id, const std::string& payload)
 	{
-		if (m_Input.MouseDown[0] && !m_Dragging)
+		if (m_Dragging || !m_Input.MouseDown[0])
+			return;
+		if (!m_DragPending)
 		{
-			m_Dragging = true;
+			m_DragPending = true;
+			m_DragPressPos = m_Input.MousePos;
 			m_DragId = id;
 			m_DragPayload = payload;
 			m_DropArmed = false;
+			return;
 		}
+		if (glm::length(m_Input.MousePos - m_DragPressPos) > 4.0f)
+			m_Dragging = true;
 	}
 
 	bool WuiContext::IsDragActive(std::string* payload) const
@@ -96,6 +110,7 @@ namespace World::Wui
 	void WuiContext::EndDrag()
 	{
 		m_Dragging = false;
+		m_DragPending = false;
 		m_DropArmed = false;
 		m_DropAccepted = false;
 		m_DragPayload.clear();

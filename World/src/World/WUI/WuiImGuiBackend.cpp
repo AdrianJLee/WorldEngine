@@ -53,6 +53,17 @@ namespace World::Wui
 	bool WuiImGuiBackend::BeginFrame(WuiInputState& input)
 	{
 		const ImGuiIO& io = ImGui::GetIO();
+		ImGuiMouseCursor cursor = ImGuiMouseCursor_Arrow;
+		switch (m_PendingCursor)
+		{
+			case WuiCursor::IBeam: cursor = ImGuiMouseCursor_TextInput; break;
+			case WuiCursor::ResizeEW: cursor = ImGuiMouseCursor_ResizeEW; break;
+			case WuiCursor::ResizeNS: cursor = ImGuiMouseCursor_ResizeNS; break;
+			case WuiCursor::Hand: cursor = ImGuiMouseCursor_Hand; break;
+			default: break;
+		}
+		ImGui::SetMouseCursor(cursor);
+		m_PendingCursor = WuiCursor::Arrow;
 		input.MousePos = { io.MousePos.x, io.MousePos.y };
 		for (int i = 0; i < 3; ++i)
 		{
@@ -124,7 +135,8 @@ namespace World::Wui
 		}
 	}
 
-	void WuiImGuiBackend::EndFrame()
+	void WuiImGuiBackend::EndFrame(WuiCursor cursor)
 	{
+		m_PendingCursor = cursor;
 	}
 }

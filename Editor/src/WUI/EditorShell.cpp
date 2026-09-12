@@ -164,6 +164,8 @@ namespace World
 					: Wui::WuiRect { area.X, area.Y + cursor - 2, area.W, 4 };
 				if (ctx.IsHovered(splitter) || m_DragSplitNode == &node)
 					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, splitter, m_Theme.Border, 0.0f });
+				if (ctx.IsHovered(splitter))
+					ctx.SetCursor(row ? Wui::WuiCursor::ResizeEW : Wui::WuiCursor::ResizeNS);
 				if (ctx.IsClicked(splitter))
 				{
 					m_SplitterDragging = true;
@@ -202,6 +204,8 @@ namespace World
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.ButtonHover, 2.0f });
 			if (ctx.IsClicked(tab))
 				m_Layout.Activate(panel);
+			if (ctx.IsHovered(tab))
+				ctx.SetCursor(Wui::WuiCursor::Hand);
 			if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab))
 				ctx.BeginDrag(Wui::HashId(("tab." + panel).c_str()), panel);
 
@@ -222,7 +226,8 @@ namespace World
 		if (!node.Panels.empty())
 			RenderPanelContent(ctx, node.Panels[node.Active], content);
 
-		if (ctx.DropTarget(area))
+		std::string dragPayload;
+		if (ctx.IsDragActive(&dragPayload) && ctx.IsHovered(area))
 		{
 			const glm::vec2 rel = ctx.Input().MousePos - glm::vec2 { area.X, area.Y };
 			const float lx = area.W > 0 ? rel.x / area.W : 0;
@@ -949,8 +954,11 @@ namespace World
 				const std::filesystem::path rel = std::filesystem::relative(path, m_Browser.Root);
 				ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), rel.string());
 			}
-			if (isDir && ctx.DropTarget(cellRect))
+			if (ctx.IsHovered(cellRect))
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+			if (isDir)
 			{
+				ctx.DropTarget(cellRect);
 				std::string payload;
 				if (ctx.AcceptDrop(&payload))
 				{

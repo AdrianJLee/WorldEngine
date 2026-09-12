@@ -11,6 +11,6 @@ namespace World::Wui
 		virtual ~WuiBackend() = default;
 		virtual bool BeginFrame(WuiInputState& input) = 0;
 		virtual void Render(const std::vector<WuiDrawCommand>& commands) = 0;
-		virtual void EndFrame() = 0;
+		virtual void EndFrame(WuiCursor cursor = WuiCursor::Arrow) = 0;
 	};
 }

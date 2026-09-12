@@ -173,7 +173,7 @@ namespace World
 			wuiContext.EndFrame();
 			wuiBackend.Render(wuiContext.Commands());
 		}
-		wuiBackend.EndFrame();
+		wuiBackend.EndFrame(wuiContext.Cursor());
 	}
 
 	void EditorLayer::OnEvent(Event& event)

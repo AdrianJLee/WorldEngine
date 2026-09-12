@@ -14,11 +14,12 @@ namespace World::Wui
 
 		bool BeginFrame(WuiInputState& input) override;
 		void Render(const std::vector<WuiDrawCommand>& commands) override;
-		void EndFrame() override;
+		void EndFrame(WuiCursor cursor) override;
 
 	private:
 		ImFont* m_Regular = nullptr;
 		ImFont* m_Bold = nullptr;
 		ImFont* m_Cjk = nullptr;
+		WuiCursor m_PendingCursor = WuiCursor::Arrow;
 	};
 }

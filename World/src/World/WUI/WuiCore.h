@@ -52,6 +52,15 @@ namespace World::Wui
 		Column,
 	};
 
+	enum class WuiCursor : uint8_t
+	{
+		Arrow,
+		IBeam,
+		ResizeEW,
+		ResizeNS,
+		Hand,
+	};
+
 	// ---- 样式与级联 ----
 	struct WuiStyle
 	{

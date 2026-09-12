@@ -90,6 +90,8 @@ namespace World::Wui
 		WuiId Focus() const { return m_Focus; }
 		void SetTextInputActive(bool active) { m_TextInputActive = active; }
 		bool IsTextInputActive() const { return m_TextInputActive; }
+		void SetCursor(WuiCursor cursor) { m_Cursor = cursor; }
+		WuiCursor Cursor() const { return m_Cursor; }
 		bool IsKeyPressed(uint32_t keyCode) const
 		{
 			return std::find(m_Input.KeyDown.begin(), m_Input.KeyDown.end(), keyCode) != m_Input.KeyDown.end();
@@ -137,6 +139,7 @@ namespace World::Wui
 		WuiStyleSheet m_Sheet;
 		WuiId m_Focus = 0;
 		bool m_TextInputActive = false;
+		WuiCursor m_Cursor = WuiCursor::Arrow;
 		std::vector<WuiId> m_OpenPopups;
 		WuiId m_Modal = 0;
 		glm::vec2 m_ViewportSize { 1280, 720 };
@@ -145,5 +148,7 @@ namespace World::Wui
 		std::string m_DragPayload;
 		bool m_DropArmed = false;
 		bool m_DropAccepted = false;
+		bool m_DragPending = false;
+		glm::vec2 m_DragPressPos { 0, 0 };
 	};
 }
