@@ -8,6 +8,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
 #include <yaml-cpp/yaml.h>
 
 namespace YAML
@@ -374,7 +375,235 @@ namespace World
 		}
 	}
 
-	static void SerializeEntity(YAML::Emitter& out, Entity entity)
+	static bool IsSupportedFieldType(DataType type)
+	{
+		switch (type)
+		{
+			case DataType::Bool:
+			case DataType::Char:
+			case DataType::Int8:
+			case DataType::UInt8:
+			case DataType::Int16:
+			case DataType::UInt16:
+			case DataType::Int32:
+			case DataType::UInt32:
+			case DataType::Int64:
+			case DataType::UInt64:
+			case DataType::Float:
+			case DataType::Double:
+			case DataType::Vec2:
+			case DataType::Vec3:
+			case DataType::Vec4:
+			case DataType::Quat:
+			case DataType::Mat3:
+			case DataType::Mat4:
+			case DataType::String:
+			case DataType::Enum:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	static void SerializeFieldValue(YAML::Emitter& out, DataType type, const std::any& value, const std::any& userData)
+	{
+		switch (type)
+		{
+			case DataType::Bool: out << std::any_cast<bool>(value); break;
+			case DataType::Char: out << std::any_cast<char>(value); break;
+			case DataType::Int8: out << std::any_cast<int8_t>(value); break;
+			case DataType::UInt8: out << std::any_cast<uint8_t>(value); break;
+			case DataType::Int16: out << std::any_cast<int16_t>(value); break;
+			case DataType::UInt16: out << std::any_cast<uint16_t>(value); break;
+			case DataType::Int32: out << std::any_cast<int32_t>(value); break;
+			case DataType::UInt32: out << std::any_cast<uint32_t>(value); break;
+			case DataType::Int64: out << std::any_cast<int64_t>(value); break;
+			case DataType::UInt64: out << std::any_cast<uint64_t>(value); break;
+			case DataType::Float: out << std::any_cast<float>(value); break;
+			case DataType::Double: out << std::any_cast<double>(value); break;
+			case DataType::Vec2: out << std::any_cast<glm::vec2>(value); break;
+			case DataType::Vec3: out << std::any_cast<glm::vec3>(value); break;
+			case DataType::Vec4: out << std::any_cast<glm::vec4>(value); break;
+			case DataType::Quat: out << std::any_cast<glm::quat>(value); break;
+			case DataType::Mat3: out << std::any_cast<glm::mat3>(value); break;
+			case DataType::Mat4: out << std::any_cast<glm::mat4>(value); break;
+			case DataType::String: out << std::any_cast<std::string>(value); break;
+			case DataType::Enum:
+			{
+				EnumDesc enumDesc = std::any_cast<EnumDesc>(userData);
+				switch (enumDesc.UnderlyingSize)
+				{
+					case 1:
+						if (enumDesc.IsSigned) out << (int32_t)std::any_cast<int8_t>(value);
+						else                   out << (uint32_t)std::any_cast<uint8_t>(value);
+						break;
+					case 2:
+						if (enumDesc.IsSigned) out << (int32_t)std::any_cast<int16_t>(value);
+						else                   out << (uint32_t)std::any_cast<uint16_t>(value);
+						break;
+					case 4:
+						if (enumDesc.IsSigned) out << std::any_cast<int32_t>(value);
+						else                   out << std::any_cast<uint32_t>(value);
+						break;
+					case 8:
+						if (enumDesc.IsSigned) out << std::any_cast<int64_t>(value);
+						else                   out << std::any_cast<uint64_t>(value);
+						break;
+					default:
+						out << 0;
+						break;
+				}
+				break;
+			}
+			default:
+				out << 0;
+				break;
+		}
+	}
+
+	static std::any DeserializeFieldValue(const YAML::Node& node, DataType type, const std::any& userData)
+	{
+		switch (type)
+		{
+			case DataType::Bool: return std::any(node.as<bool>());
+			case DataType::Char: return std::any(node.as<char>());
+			case DataType::Int8: return std::any(node.as<int8_t>());
+			case DataType::UInt8: return std::any(node.as<uint8_t>());
+			case DataType::Int16: return std::any(node.as<int16_t>());
+			case DataType::UInt16: return std::any(node.as<uint16_t>());
+			case DataType::Int32: return std::any(node.as<int32_t>());
+			case DataType::UInt32: return std::any(node.as<uint32_t>());
+			case DataType::Int64: return std::any(node.as<int64_t>());
+			case DataType::UInt64: return std::any(node.as<uint64_t>());
+			case DataType::Float: return std::any(node.as<float>());
+			case DataType::Double: return std::any(node.as<double>());
+			case DataType::Vec2: return std::any(node.as<glm::vec2>());
+			case DataType::Vec3: return std::any(node.as<glm::vec3>());
+			case DataType::Vec4: return std::any(node.as<glm::vec4>());
+			case DataType::Quat: return std::any(node.as<glm::quat>());
+			case DataType::Mat3: return std::any(node.as<glm::mat3>());
+			case DataType::Mat4: return std::any(node.as<glm::mat4>());
+			case DataType::String: return std::any(node.as<std::string>());
+			case DataType::Enum:
+			{
+				EnumDesc enumDesc = std::any_cast<EnumDesc>(userData);
+				switch (enumDesc.UnderlyingSize)
+				{
+					case 1:
+						if (enumDesc.IsSigned) return std::any(node.as<int8_t>());
+						return std::any(node.as<uint8_t>());
+					case 2:
+						if (enumDesc.IsSigned) return std::any(node.as<int16_t>());
+						return std::any(node.as<uint16_t>());
+					case 4:
+						if (enumDesc.IsSigned) return std::any(node.as<int32_t>());
+						return std::any(node.as<uint32_t>());
+					case 8:
+						if (enumDesc.IsSigned) return std::any(node.as<int64_t>());
+						return std::any(node.as<uint64_t>());
+					default:
+						return std::any();
+				}
+			}
+			default:
+				return std::any();
+		}
+	}
+
+	static void SerializeNativeScriptFieldValues(YAML::Emitter& out, NativeScriptComponent& script)
+	{
+		if (script.FieldValues.empty())
+			return;
+		const TypeDesc* scriptType = TypeRegistry::Get().GetTypeDesc(script.ScriptName);
+		if (!scriptType)
+			return;
+
+		out << YAML::Key << "FieldValues" << YAML::Value << YAML::BeginMap;
+		for (const auto& property : scriptType->Properties)
+		{
+			const auto it = script.FieldValues.find(property.Name);
+			if (it == script.FieldValues.end() || !it->second.has_value())
+				continue;
+			if (!IsSupportedFieldType(property.Type))
+				continue;
+			out << YAML::Key << property.Name << YAML::Value;
+			SerializeFieldValue(out, property.Type, it->second, property.UserData);
+		}
+		out << YAML::EndMap;
+	}
+
+	static void DeserializeNativeScriptFieldValues(const YAML::Node& node, NativeScriptComponent& script)
+	{
+		const YAML::Node fields = node["FieldValues"];
+		if (!fields || !fields.IsMap())
+			return;
+		const TypeDesc* scriptType = TypeRegistry::Get().GetTypeDesc(script.ScriptName);
+		if (!scriptType)
+			return;
+		for (const auto& property : scriptType->Properties)
+		{
+			const YAML::Node fieldNode = fields[property.Name];
+			if (!fieldNode)
+				continue;
+			std::any value = DeserializeFieldValue(fieldNode, property.Type, property.UserData);
+			if (value.has_value())
+				script.FieldValues[property.Name] = std::move(value);
+		}
+	}
+
+	static void SerializeLuaCachedFields(YAML::Emitter& out, LuaScriptComponent& script)
+	{
+		if (script.CachedFields.empty())
+			return;
+		out << YAML::Key << "CachedFields" << YAML::Value << YAML::BeginMap;
+		for (const auto& [name, field] : script.CachedFields)
+		{
+			if (field.Type == LuaFieldType::None || !field.Value.has_value())
+				continue;
+			out << YAML::Key << name << YAML::Value << YAML::BeginMap;
+			out << YAML::Key << "Type" << YAML::Value << static_cast<int>(field.Type);
+			out << YAML::Key << "Value" << YAML::Value;
+			switch (field.Type)
+			{
+				case LuaFieldType::Float: out << std::any_cast<float>(field.Value); break;
+				case LuaFieldType::Int: out << std::any_cast<int>(field.Value); break;
+				case LuaFieldType::Bool: out << std::any_cast<bool>(field.Value); break;
+				case LuaFieldType::String: out << std::any_cast<std::string>(field.Value); break;
+				default: break;
+			}
+			out << YAML::EndMap;
+		}
+		out << YAML::EndMap;
+	}
+
+	static void DeserializeLuaCachedFields(const YAML::Node& node, LuaScriptComponent& script)
+	{
+		const YAML::Node fields = node["CachedFields"];
+		if (!fields || !fields.IsMap())
+			return;
+		for (const auto& kv : fields)
+		{
+			const std::string name = kv.first.as<std::string>();
+			const YAML::Node typeNode = kv.second["Type"];
+			const YAML::Node valueNode = kv.second["Value"];
+			if (!typeNode || !valueNode)
+				continue;
+
+			LuaScriptField field;
+			field.Type = static_cast<LuaFieldType>(typeNode.as<int>());
+			switch (field.Type)
+			{
+				case LuaFieldType::Float: field.Value = valueNode.as<float>(); break;
+				case LuaFieldType::Int: field.Value = valueNode.as<int>(); break;
+				case LuaFieldType::Bool: field.Value = valueNode.as<bool>(); break;
+				case LuaFieldType::String: field.Value = valueNode.as<std::string>(); break;
+				default: continue;
+			}
+			script.CachedFields[name] = std::move(field);
+		}
+	}
+
+	static void SerializeEntity(YAML::Emitter& out, Entity entity, const std::unordered_map<UUID, std::string>& unknownNodes)
 	{
 		WLD_ASSERT(entity.HasComponent<UUIDComponent>(), "Entity does not have a UUIDComponent!");
 
@@ -387,42 +616,78 @@ namespace World
 			{
 				if (entity.HasComponent(componentInfo->Id))
 				{
-					out << YAML::Key << typeDesc->Name << YAML::Value;
+					out << YAML::Key << typeDesc->TypeId << YAML::Value;
 					out << YAML::BeginMap;
 
 					void* componentInstance = entity.GetComponent(componentInfo->Id);
 					SerializeProperties(out, typeDesc, componentInstance);
+
+					if (typeDesc->TypeId == GetTypeFullName(typeid(NativeScriptComponent).name()))
+						SerializeNativeScriptFieldValues(out, *static_cast<NativeScriptComponent*>(componentInstance));
+					else if (typeDesc->TypeId == GetTypeFullName(typeid(LuaScriptComponent).name()))
+						SerializeLuaCachedFields(out, *static_cast<LuaScriptComponent*>(componentInstance));
 
 					out << YAML::EndMap;
 				}
 			}
 
 		}
+
+		const UUID entityUuid = entity.GetComponent<UUIDComponent>().ID;
+		const auto unknownIt = unknownNodes.find(entityUuid);
+		if (unknownIt != unknownNodes.end() && !unknownIt->second.empty())
+		{
+			try
+			{
+				const YAML::Node unknownMap = YAML::Load(unknownIt->second);
+				for (const auto& kv : unknownMap)
+					out << YAML::Key << kv.first.as<std::string>() << YAML::Value << kv.second;
+			}
+			catch (const std::exception& e)
+			{
+				WLD_CORE_WARN("Failed to re-emit preserved unknown component nodes: {0}", e.what());
+			}
+		}
+
 		out << YAML::EndMap;
 	}
-	void SceneSerializer::Serialize(const std::string& filepath)
+	bool SceneSerializer::Serialize(const std::string& filepath)
 	{
 		YAML::Emitter out;
 		out << YAML::BeginMap;
 		{
+			out << YAML::Key << "FormatVersion" << YAML::Value << 1;
 			out << YAML::Key << "Scene" << YAML::Value << "Untitled";
 
 			out << YAML::Key << "Entities" << YAML::Value << YAML::BeginSeq;
 
 			// 使用反向迭代器遍历实体，以修正保存加载后的顺序颠倒问题
 			auto& entities = m_Scene->m_Registry.storage<entt::entity>();
+			std::unordered_set<UUID> emitted;
 
 			for (auto it = entities.rbegin(); it != entities.rend(); ++it)
 			{
 				Entity ent { m_Scene.get(), *it };
 				if (!ent)
 				{
-					return;
+					return false;
 				};
 
-				SerializeEntity(out, ent);
+				SerializeEntity(out, ent, m_Scene->m_UnknownComponentNodes);
+				if (ent.HasComponent<UUIDComponent>())
+					emitted.insert(ent.GetComponent<UUIDComponent>().ID);
 			}
 			out << YAML::EndSeq;
+
+			// 保留优先：若某实体携带了上次未识别的组件片段，但该实体已不存在，则阻止破坏性保存。
+			for (const auto& [uuid, fragment] : m_Scene->m_UnknownComponentNodes)
+			{
+				if (emitted.find(uuid) == emitted.end())
+				{
+					m_LastError = "Cannot save scene: an entity with preserved unknown components no longer exists.";
+					return false;
+				}
+			}
 		}
 		out << YAML::EndMap;
 
@@ -451,6 +716,7 @@ namespace World
 				fout.close();
 			}
 		}
+		return true;
 	}
 
 	static void DeserializeProperties(const YAML::Node& node, const TypeDesc* typeDesc, void* instance)
@@ -566,6 +832,9 @@ namespace World
 
 	bool SceneSerializer::Deserialize(const std::string& filepath)
 	{
+		// 每次反序列化都重建“未知组件保留”集合，避免把上一个场景的未知片段带入本次保存。
+		m_Scene->m_UnknownComponentNodes.clear();
+
 		std::string yamlData;
 		if (std::filesystem::exists(filepath))
 		{
@@ -573,6 +842,7 @@ namespace World
 			if (!stream.is_open())
 			{
 				WLD_CORE_ERROR("Could not open file '{0}'", filepath);
+				m_LastError = "Could not open file '" + filepath + "'";
 				return false;
 			}
 			std::stringstream strstream;
@@ -586,15 +856,22 @@ namespace World
 			if (data.empty())
 			{
 				WLD_CORE_ERROR("Could not load file '{0}' from disk or VFS", filepath);
+				m_LastError = "Could not load file '" + filepath + "' from disk or VFS";
 				return false;
 			}
 			yamlData = std::string(data.begin(), data.end());
 		}
 
 		YAML::Node data = YAML::Load(yamlData);
+		if (data["FormatVersion"])
+		{
+			const int formatVersion = data["FormatVersion"].as<int>();
+			(void)formatVersion; // 目前仅有 v1；缺失版本按 v1 兼容读取。
+		}
 		if (!data["Scene"])
 		{
 			WLD_CORE_ERROR("Could not find 'Scene' node in '{0}'", filepath);
+			m_LastError = "Could not find 'Scene' node in '" + filepath + "'";
 			return false;
 		}
 
@@ -608,55 +885,79 @@ namespace World
 			{
 				auto newEntity = Entity(m_Scene.get(), m_Scene->m_Registry.create());
 
+				// 收集未能识别的组件节点（保留优先，避免缺插件静默丢数据）。
+				YAML::Node unknownMap(YAML::NodeType::Map);
+				bool hasUnknown = false;
+				for (const auto& kv : entity)
+				{
+					const std::string key = kv.first.as<std::string>();
+					const TypeDesc* keyType = TypeRegistry::Get().GetTypeDesc(key);
+					const bool known = keyType && std::any_cast<TypeDescDataComponent>(&keyType->UserData) != nullptr;
+					if (!known)
+					{
+						unknownMap[key] = kv.second;
+						hasUnknown = true;
+					}
+				}
+
 				for (const auto& componentName : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
 				{
-					// Check if evaluating YAML entity has a sub-node with the name of this component.
-					// We should not be adding a component to an entity if it does not actually have it saved in YAML.
-					if (!entity[componentName])
+					TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(componentName);
+					if (!typeDesc)
 						continue;
 
-					TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(componentName);
+					// 兼容旧短名键：新文件用全名，旧文件用短名。
+					YAML::Node compNode = entity[componentName];
+					if (!compNode)
+						compNode = entity[typeDesc->Name];
+					if (!compNode)
+						continue;
+
 					if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&typeDesc->UserData))
 					{
 						if (componentInfo->AddFunc)
 						{
-							// 1. 调用已经绑定的 AddFunc (内部执行了 newEntity.AddComponent<T>())
-							// 这会激发 EnTT 根据具体的编译期类型 T 懒加载并创建出对应的 storage 内存池
 							componentInfo->AddFunc(newEntity);
-
-							// 2. 从实体上获取在 Registry 里刚刚生成的真正组件对象的地址
 							void* rawPtr = newEntity.GetComponent(componentInfo->Id);
-
 							if (rawPtr)
 							{
-								// 3. 将解析出的属性值直接反序列化到该真实地址的结构体成员上
-								DeserializeProperties(entity[componentName], typeDesc, rawPtr);
+								DeserializeProperties(compNode, typeDesc, rawPtr);
 
-								if (GetTypeIdName(typeid(NativeScriptComponent).name()) == typeDesc->Name)
+								if (typeDesc->TypeId == GetTypeFullName(typeid(NativeScriptComponent).name()))
 								{
-									TypeDesc* scriptTypeDesc = TypeRegistry::Get().GetTypeDesc(((NativeScriptComponent*)rawPtr)->ScriptName);
+									NativeScriptComponent* nativeScript = static_cast<NativeScriptComponent*>(rawPtr);
+									DeserializeNativeScriptFieldValues(compNode, *nativeScript);
+
+									TypeDesc* scriptTypeDesc = TypeRegistry::Get().GetTypeDesc(nativeScript->ScriptName);
 									if (scriptTypeDesc)
 									{
 										if (TypeDescDataScript* scriptInfo = std::any_cast<TypeDescDataScript>(&scriptTypeDesc->UserData))
 										{
 											if (scriptInfo->BindFunc)
 											{
-												scriptInfo->BindFunc(*(NativeScriptComponent*)rawPtr);
+												scriptInfo->BindFunc(*nativeScript);
 											}
 										}
 									}
 									else
 									{
-										WLD_CORE_ERROR("Could not find script type '{0}' for NativeScriptComponent!", ((NativeScriptComponent*)rawPtr)->ScriptName);
+										WLD_CORE_ERROR("Could not find script type '{0}' for NativeScriptComponent!", nativeScript->ScriptName);
 									}
 								}
-
+								else if (typeDesc->TypeId == GetTypeFullName(typeid(LuaScriptComponent).name()))
+								{
+									LuaScriptComponent* luaScript = static_cast<LuaScriptComponent*>(rawPtr);
+									DeserializeLuaCachedFields(compNode, *luaScript);
+								}
 							}
-
-
 						}
 					}
+				}
 
+				if (hasUnknown && newEntity.HasComponent<UUIDComponent>())
+				{
+					const UUID entityUuid = newEntity.GetComponent<UUIDComponent>().ID;
+					m_Scene->m_UnknownComponentNodes[entityUuid] = YAML::Dump(unknownMap);
 				}
 			}
 		}
@@ -664,9 +965,9 @@ namespace World
 
 		return true;
 	}
-	void SceneSerializer::SerializeRuntime(const std::string& filepath)
+	bool SceneSerializer::SerializeRuntime(const std::string& filepath)
 	{
-
+		return false;
 	}
 	bool SceneSerializer::DeserializeRuntime(const std::string& filepath)
 	{

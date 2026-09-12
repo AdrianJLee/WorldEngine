@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace World
@@ -89,6 +90,8 @@ namespace World
 
 		static bool GenerateLuaStubs();
 		static bool InitScriptForEditor(LuaScriptComponent& component);
+		// 从 Lua 脚本源码文本静态解析 `---@field Name Type` 注解，返回字段名到 Lua 类型名的映射（不执行脚本）。
+		static std::unordered_map<std::string, std::string> ParseFieldAnnotations(const std::string& scriptText);
 		// 核心：处理单个实体的脚本实例化和每帧更新
 		static void OnCreateScript(LuaScriptComponent& scriptComponent, Entity entity);
 		static void OnUpdateScript(LuaScriptComponent& scriptComponent, Timestep ts);

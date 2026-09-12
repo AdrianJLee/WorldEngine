@@ -187,10 +187,22 @@ namespace World
 		return cleanName;
 	}
 
+	// 返回保留命名空间的稳定全名（如 World::TransformComponent），去掉 MSVC 的 class/struct/enum/union 前缀。
+	static inline std::string GetTypeFullName(std::string_view name)
+	{
+		std::string full(name);
+		if (full.rfind("class ", 0) == 0) full.erase(0, 6);
+		else if (full.rfind("struct ", 0) == 0) full.erase(0, 7);
+		else if (full.rfind("enum ", 0) == 0) full.erase(0, 5);
+		else if (full.rfind("union ", 0) == 0) full.erase(0, 6);
+		return full;
+	}
+
 	// 类型描述结构体
 	struct TypeDesc
 	{
 		std::string Name = "";       // 类型名称
+		std::string TypeId = "";     // 持久、模块作用域的全名（稳定标识，如 World::TransformComponent）
 		size_t Size = 0;            // 总内存大小
 		std::vector<PropertyDesc> Properties; // 属性列表
 
@@ -222,8 +234,9 @@ namespace World
 		TypeRegistry(const TypeRegistry&) = delete;
 		TypeRegistry& operator=(const TypeRegistry&) = delete;
 	private:
-		// 核心数据结构：哈希表存储类型名称到类型描述的映射，支持快速查询
+		// 核心数据结构：哈希表以持久全名（TypeId）为键；短名别名索引支持旧数据兼容。
 		std::unordered_map<std::string, TypeDesc> m_Registry;
+		std::unordered_map<std::string, std::vector<std::string>> m_NameToIds;
 		std::unordered_map<TypeCategory, std::vector<std::string>> m_CategoryMap;
 
 		// Binder 类，提供流式接口注册属性，并计算内存偏移量
@@ -259,7 +272,7 @@ namespace World
 				{
 					// 枚举变量
 					EnumDesc enumDesc;
-					enumDesc.Name = static_cast<std::string>(GetTypeIdName(typeid(VariableType).name()));
+					enumDesc.Name = GetTypeFullName(typeid(VariableType).name());
 					enumDesc.UnderlyingSize = sizeof(std::underlying_type_t<VariableType>);
 					enumDesc.IsSigned = std::is_signed_v<std::underlying_type_t<VariableType>>;
 
@@ -268,7 +281,7 @@ namespace World
 				else if constexpr (is_ref_type<VariableType>::value)
 				{
 					AssetDesc assetDesc;
-					assetDesc.Name = static_cast<std::string>(GetTypeIdName(typeid(VariableType::element_type).name()));
+					assetDesc.Name = GetTypeFullName(typeid(VariableType::element_type).name());
 					assetDesc.Path = "";
 					userData = assetDesc;
 				}
@@ -276,7 +289,7 @@ namespace World
 				{
 					if (type == DataType::Object)
 					{
-						userData = ObjectDesc { static_cast<std::string>(GetTypeIdName(typeid(VariableType).name())) };
+						userData = ObjectDesc { GetTypeFullName(typeid(VariableType).name()) };
 					}
 				}
 
@@ -328,8 +341,11 @@ namespace World
 			break;
 
 
+			const std::string fullName = GetTypeFullName(typeid(TClass).name());
+			const std::string shortName = static_cast<std::string>(GetTypeIdName(typeid(TClass).name()));
 			TypeDesc desc;
-			desc.Name = className;
+			desc.Name = className.empty() ? shortName : className;
+			desc.TypeId = fullName;
 			desc.Size = sizeof(TClass);
 			desc.Category = category;
 			// 实现类型擦除的 Setter/Getter，保护内存安全
@@ -575,24 +591,55 @@ namespace World
 					}
 				};
 
-			// 存入全局哈希表
-			m_Registry[className] = desc;
-			m_CategoryMap[category].push_back(className);
-			return Binder<TClass>(m_Registry[className]);
+			// 同一全名重复注册是合法场景：命名空间级 REFLECT_ENUM 静态对象是内部链接，每个翻译单元都会注册一次。
+			// 覆盖写入保持旧的幂等语义，避免枚举值在同一描述上重复累积。
+			m_Registry[fullName] = desc;
+
+			{
+				auto& nameIds = m_NameToIds[desc.Name];
+				bool found = false;
+				for (const auto& id : nameIds)
+					if (id == fullName) { found = true; break; }
+				if (!found) nameIds.push_back(fullName);
+			}
+			{
+				auto& categoryIds = m_CategoryMap[category];
+				bool found = false;
+				for (const auto& id : categoryIds)
+					if (id == fullName) { found = true; break; }
+				if (!found) categoryIds.push_back(fullName);
+			}
+			return Binder<TClass>(m_Registry[fullName]);
 		}
 
-		// 根据类名获取类型描述信息，返回指针以避免不必要的复制
-		const TypeDesc* GetTypeDesc(const std::string& className) const
+		// 根据持久全名或旧短名别名获取类型描述信息，返回指针以避免不必要的复制。
+		const TypeDesc* GetTypeDesc(const std::string& idOrName) const
 		{
-			auto it = m_Registry.find(className);
+			auto it = m_Registry.find(idOrName);
 			if (it != m_Registry.end()) return &it->second;
+			auto aliasIt = m_NameToIds.find(idOrName);
+			if (aliasIt != m_NameToIds.end() && !aliasIt->second.empty())
+			{
+				if (aliasIt->second.size() > 1)
+					WLD_CORE_WARN("Ambiguous type short name '{}' resolves to {} types; using the first", idOrName, aliasIt->second.size());
+				auto regIt = m_Registry.find(aliasIt->second.front());
+				return regIt != m_Registry.end() ? &regIt->second : nullptr;
+			}
 			return nullptr;
 		}
 
-		TypeDesc* GetTypeDesc(const std::string& className)
+		TypeDesc* GetTypeDesc(const std::string& idOrName)
 		{
-			auto it = m_Registry.find(className);
+			auto it = m_Registry.find(idOrName);
 			if (it != m_Registry.end()) return &it->second;
+			auto aliasIt = m_NameToIds.find(idOrName);
+			if (aliasIt != m_NameToIds.end() && !aliasIt->second.empty())
+			{
+				if (aliasIt->second.size() > 1)
+					WLD_CORE_WARN("Ambiguous type short name '{}' resolves to {} types; using the first", idOrName, aliasIt->second.size());
+				auto regIt = m_Registry.find(aliasIt->second.front());
+				return regIt != m_Registry.end() ? &regIt->second : nullptr;
+			}
 			return nullptr;
 		}
 
@@ -610,7 +657,7 @@ namespace World
 		template <TypeCategory Category, typename T>
 		static void RegisterTypeData()
 		{
-			std::any& userData = TypeRegistry::Get().GetTypeDesc(static_cast<std::string>(GetTypeIdName(typeid(T).name())))->UserData;
+			std::any& userData = TypeRegistry::Get().GetTypeDesc(GetTypeFullName(typeid(T).name()))->UserData;
 
 			if constexpr (Category == TypeCategory::Component)
 			{
@@ -636,7 +683,7 @@ namespace World
 	#define PROPERTY(varName) \
 	inline static struct AutoProp_##varName{ \
 		AutoProp_##varName(){ \
-		TypeRegistry::Binder<TREFLECTClass>(*TypeRegistry::Get().GetTypeDesc(static_cast<std::string>(GetTypeIdName(typeid(TREFLECTClass).name())))).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>());} \
+		TypeRegistry::Binder<TREFLECTClass>(*TypeRegistry::Get().GetTypeDesc(GetTypeFullName(typeid(TREFLECTClass).name()))).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>());} \
 	}s_AutoProp_##varName;
 
 
@@ -657,7 +704,7 @@ namespace World
 	#define PROPERTY_ENUM(TEnum, varName) \
     inline static struct AutoPropEnum_##TEnum##_##varName { \
         AutoPropEnum_##TEnum##_##varName() { \
-            TypeRegistry::Binder<TEnum>(*TypeRegistry::Get().GetTypeDesc(static_cast<std::string>(GetTypeIdName(typeid(TEnum).name())))).PropertyEnum<TEnum>(#varName, TEnum::varName); \
+            TypeRegistry::Binder<TEnum>(*TypeRegistry::Get().GetTypeDesc(GetTypeFullName(typeid(TEnum).name()))).PropertyEnum<TEnum>(#varName, TEnum::varName); \
         } \
     } s_AutoPropEnum_##TEnum##_##varName;
 }

@@ -19,7 +19,7 @@ namespace World
 	void EditorLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();
-		std::string dllPath = std::string(WLD_OUTPUT_DIR) + "bin/" + WLD_BUILD_TYPE + "Game/" + WLD_BUILD_TYPE + "Game.dll";
+		std::string dllPath = std::string(WLD_OUTPUT_DIR) + "bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll";
 		HMODULE gameModule = LoadLibraryA(dllPath.c_str());
 
 		if (gameModule)

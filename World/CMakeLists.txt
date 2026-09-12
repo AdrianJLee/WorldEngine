@@ -27,7 +27,7 @@ if(WIN32)
     # 2. 编译选项 (buildoptions)
     # /utf-8 仅适用于 MSVC 编译器，建议加上编译器判断
     if(MSVC)
-        target_compile_options(World PRIVATE "/utf-8")
+        target_compile_options(World PRIVATE "/utf-8" "/bigobj")
     else()
     endif()
 

@@ -19,5 +19,12 @@ namespace World
 		{
 
 		}
+
+		// 原生脚本字段 schema 样例：这些 PROPERTY 会进入反射，供属性面板编辑并可随场景保存/重载。
+		PROPERTY(Health);
+		float Health = 100.0f;
+
+		PROPERTY(Speed);
+		float Speed = 1.0f;
 	};
 }

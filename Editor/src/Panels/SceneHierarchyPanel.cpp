@@ -145,7 +145,10 @@ namespace World
 
 						for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
 						{
-							if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
+							TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(className);
+							if (!typeDesc)
+								continue;
+							if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&typeDesc->UserData))
 							{
 								std::string reason;
 								bool canAdd = m_SelectedEntity.CanAddComponent(componentInfo->Id, &reason);
@@ -154,7 +157,8 @@ namespace World
 									canAdd = false;
 									reason = "This component has no registered add operation.";
 								}
-								if (ImGui::MenuItem(className.c_str(), nullptr, false, canAdd))
+								// 迭代值现在是全名；菜单展示使用显示短名，查找仍用原迭代值。
+								if (ImGui::MenuItem(typeDesc->Name.c_str(), nullptr, false, canAdd))
 								{
 									const entt::entity handle = m_SelectedEntity;
 									const entt::id_type componentId = componentInfo->Id;

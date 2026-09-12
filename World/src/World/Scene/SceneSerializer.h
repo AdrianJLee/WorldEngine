@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "Scene.h"
+#include <string>
 
 namespace World
 {
@@ -7,14 +8,16 @@ namespace World
 	{
 	public:
 		SceneSerializer(const Ref<Scene>& scene);
-		void Serialize(const std::string& filepath);
+		bool Serialize(const std::string& filepath);
 		bool Deserialize(const std::string& filepath);
 
-		void SerializeRuntime(const std::string& filepath);
+		bool SerializeRuntime(const std::string& filepath);
 		bool DeserializeRuntime(const std::string& filepath);
 
+		const std::string& GetLastError() const { return m_LastError; }
 
 	private:
 		Ref<Scene> m_Scene;
+		std::string m_LastError;
 	};
 }

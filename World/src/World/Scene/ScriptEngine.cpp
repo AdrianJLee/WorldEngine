@@ -3,7 +3,9 @@
 #include "Components.h"
 #include "LuaStubGenerator.h"
 #include <cmath>
+#include <fstream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 
@@ -82,6 +84,53 @@ namespace World
 				{ "new", coordinates, name, "Create a vector from coordinates", false }
 			};
 			return type;
+		}
+
+		std::unordered_map<std::string, std::string> ParseFieldAnnotationsInternal(const std::string& text)
+		{
+			std::unordered_map<std::string, std::string> schema;
+			std::istringstream stream(text);
+			std::string line;
+			while (std::getline(stream, line))
+			{
+				const size_t start = line.find_first_not_of(" \t\r\n");
+				if (start == std::string::npos)
+					continue;
+				const std::string trimmed = line.substr(start);
+				if (trimmed.rfind("---@field", 0) != 0)
+					continue;
+				std::istringstream rest(trimmed.substr(9));
+				std::string name, type;
+				if (!(rest >> name))
+					continue;
+				if (!(rest >> type))
+					continue;
+				schema[name] = type;
+			}
+			return schema;
+		}
+
+		LuaFieldType AnnotationToFieldTypeInternal(const std::string& typeName, const sol::object& value)
+		{
+			if (typeName == "number")
+			{
+				if (value.get_type() == sol::type::number)
+				{
+					const double number = value.as<double>();
+					if (std::isfinite(number) && number == std::floor(number) &&
+						number >= (std::numeric_limits<int>::min)() && number <= (std::numeric_limits<int>::max)())
+						return LuaFieldType::Int;
+					return LuaFieldType::Float;
+				}
+				return LuaFieldType::None;
+			}
+			if (typeName == "integer" || typeName == "int")
+				return value.get_type() == sol::type::number ? LuaFieldType::Int : LuaFieldType::None;
+			if (typeName == "boolean" || typeName == "bool")
+				return value.get_type() == sol::type::boolean ? LuaFieldType::Bool : LuaFieldType::None;
+			if (typeName == "string")
+				return value.get_type() == sol::type::string ? LuaFieldType::String : LuaFieldType::None;
+			return LuaFieldType::None;
 		}
 	}
 
@@ -212,6 +261,11 @@ namespace World
 		return true;
 	}
 
+	std::unordered_map<std::string, std::string> ScriptEngine::ParseFieldAnnotations(const std::string& scriptText)
+	{
+		return ParseFieldAnnotationsInternal(scriptText);
+	}
+
 	bool ScriptEngine::InitScriptForEditor(LuaScriptComponent& script)
 	{
 		AssertOwnerThread();
@@ -219,27 +273,61 @@ namespace World
 			script.State == ScriptInstanceState::Running || script.State == ScriptInstanceState::Destroying) return false;
 		try
 		{
+			// 1. 读取脚本源码，静态解析 ---@field 注解（不执行脚本顶层代码）。
+			std::unordered_map<std::string, std::string> schema;
+			{
+				const std::filesystem::path filePath = WLD_ASSETPATH + std::string("/") + script.ScriptFilePath;
+				std::ifstream file(filePath);
+				if (file.is_open())
+				{
+					std::stringstream buffer;
+					buffer << file.rdbuf();
+					schema = ParseFieldAnnotationsInternal(buffer.str());
+				}
+			}
+
+			// 2. 执行脚本获取默认值表。
 			sol::environment environment(*s_LuaState, sol::create, s_LuaState->globals());
 			auto result = s_LuaState->safe_script_file(WLD_ASSETPATH + std::string("/") + script.ScriptFilePath, environment, sol::script_pass_on_error);
 			CheckResult(result);
 			if (result.return_count() == 0 || result.get_type() != sol::type::table) throw std::logic_error("Script must return a table");
 			sol::table table = result.get<sol::table>();
+
+			// 3. 构建字段：类型优先取注解，缺失注解走旧值推断兼容路径。
 			std::unordered_map<std::string, LuaScriptField> fields;
 			for (const auto& [keyObject, value] : table)
 			{
 				if (keyObject.get_type() != sol::type::string) continue;
 				const std::string name = keyObject.as<std::string>();
 				if (name.empty() || name[0] == '_' || name == "entity") continue;
+
 				LuaScriptField field;
-				if (value.get_type() == sol::type::number)
+				const auto schemaIt = schema.find(name);
+				if (schemaIt != schema.end())
 				{
-					const double number = value.as<double>();
-					if (std::isfinite(number) && number == std::floor(number) && number >= (std::numeric_limits<int>::min)() && number <= (std::numeric_limits<int>::max)())
-						field = { LuaFieldType::Int, static_cast<int>(number) };
-					else field = { LuaFieldType::Float, static_cast<float>(number) };
+					field.Type = AnnotationToFieldTypeInternal(schemaIt->second, value);
+					if (field.Type == LuaFieldType::None) continue;
+					switch (field.Type)
+					{
+						case LuaFieldType::Int: field.Value = value.as<int>(); break;
+						case LuaFieldType::Float: field.Value = value.as<float>(); break;
+						case LuaFieldType::Bool: field.Value = value.as<bool>(); break;
+						case LuaFieldType::String: field.Value = value.as<std::string>(); break;
+						default: break;
+					}
 				}
-				else if (value.get_type() == sol::type::boolean) field = { LuaFieldType::Bool, value.as<bool>() };
-				else if (value.get_type() == sol::type::string) field = { LuaFieldType::String, value.as<std::string>() };
+				else
+				{
+					if (value.get_type() == sol::type::number)
+					{
+						const double number = value.as<double>();
+						if (std::isfinite(number) && number == std::floor(number) && number >= (std::numeric_limits<int>::min)() && number <= (std::numeric_limits<int>::max)())
+							field = { LuaFieldType::Int, static_cast<int>(number) };
+						else field = { LuaFieldType::Float, static_cast<float>(number) };
+					}
+					else if (value.get_type() == sol::type::boolean) field = { LuaFieldType::Bool, value.as<bool>() };
+					else if (value.get_type() == sol::type::string) field = { LuaFieldType::String, value.as<std::string>() };
+				}
 				if (field.Type == LuaFieldType::None) continue;
 				const auto old = script.CachedFields.find(name);
 				if (old != script.CachedFields.end() && old->second.Type == field.Type) field.Value = old->second.Value;

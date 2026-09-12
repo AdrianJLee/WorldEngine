@@ -1,5 +1,6 @@
 #pragma once
 #include "World/Core/Timestep.h"
+#include "World/Core/UUID.h"
 #include "World/Renderer/EditorCamera.h"
 #include <box2d/id.h>
 #include <entt.hpp>
@@ -106,5 +107,7 @@ namespace World
 		std::unordered_map<entt::entity, std::unordered_set<entt::id_type>> m_PendingRemove;
 		uint32_t m_ViewportWidth = 0, m_ViewportHeight = 0;
 		b2WorldId m_PhysicsWorldId = b2_nullWorldId;
+		// 上次反序列化时未能识别的组件节点（按实体 UUID 保存原始 YAML 片段），供保存时回写，避免缺插件静默丢数据。
+		std::unordered_map<UUID, std::string> m_UnknownComponentNodes;
 	};
 }

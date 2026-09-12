@@ -248,18 +248,22 @@ namespace World
 					// 遍历注册表中所有脚本类型，展示在下拉列表中
 					for (const auto& scriptName : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Script))
 					{
-						if (TypeDescDataScript* scriptInfo = std::any_cast<TypeDescDataScript>(&TypeRegistry::Get().GetTypeDesc(scriptName)->UserData))
+						TypeDesc* scriptType = TypeRegistry::Get().GetTypeDesc(scriptName);
+						if (!scriptType)
+							continue;
+						if (TypeDescDataScript* scriptInfo = std::any_cast<TypeDescDataScript>(&scriptType->UserData))
 						{
-							// 这个项是否已被选中？对比名字即可
-							bool isSelected = (scriptName == nativeScript.ScriptName);
-							if (ImGui::Selectable(scriptName.c_str(), isSelected))
+							// 迭代值现在是全名；展示与选中比较使用显示短名。
+							const std::string displayName = scriptType->Name;
+							bool isSelected = (displayName == nativeScript.ScriptName);
+							if (ImGui::Selectable(displayName.c_str(), isSelected))
 							{
 								// 通过工厂方法执行具体 T 的绑定 ( Bind<T>() )
 								if (scriptInfo->BindFunc)
 								{
 									scriptInfo->BindFunc(nativeScript);
 
-									nativeScript.ScriptName = scriptName; // 更新当前绑定的脚本名字
+									nativeScript.ScriptName = displayName; // 更新当前绑定的脚本显示名
 									nativeScript.FieldValues.clear();
 									nativeScript.isFirstDraw = true;
 								}

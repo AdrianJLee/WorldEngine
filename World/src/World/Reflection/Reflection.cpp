@@ -11,23 +11,25 @@ namespace World
 	}
 	void TypeRegistry::MergeFrom(const TypeRegistry& other)
 	{
-		for (const auto& [name, desc] : other.m_Registry)
+		for (const auto& [typeId, desc] : other.m_Registry)
 		{
-			if (m_Registry.find(name) != m_Registry.end())
+			if (m_Registry.find(typeId) != m_Registry.end())
 			{
 				continue;
 			}
-			m_Registry[name] = desc;
+			m_Registry[typeId] = desc;
+
+			auto& nameIds = m_NameToIds[desc.Name];
+			if (std::find(nameIds.begin(), nameIds.end(), typeId) == nameIds.end())
+				nameIds.push_back(typeId);
 		}
-		for (const auto& [category, names] : other.m_CategoryMap)
+		for (const auto& [category, typeIds] : other.m_CategoryMap)
 		{
-			for (const auto& n : names)
+			for (const auto& typeId : typeIds)
 			{
-				// 注意去重，防止二次合并
-				if (std::find(m_CategoryMap[category].begin(), m_CategoryMap[category].end(), n) == m_CategoryMap[category].end())
-				{
-					m_CategoryMap[category].push_back(n);
-				}
+				auto& categoryIds = m_CategoryMap[category];
+				if (std::find(categoryIds.begin(), categoryIds.end(), typeId) == categoryIds.end())
+					categoryIds.push_back(typeId);
 			}
 		}
 	}
