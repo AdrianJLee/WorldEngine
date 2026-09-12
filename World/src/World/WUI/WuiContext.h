@@ -3,10 +3,13 @@
 #include "World/WUI/WuiCore.h"
 #include "World/WUI/WuiOperationLog.h"
 #include "World/WUI/WuiUndoStack.h"
+#include "World/Core/Log.h"
 
 #include <algorithm>
+#include <cstring>
 #include <memory>
 #include <string>
+#include <typeinfo>
 #include <unordered_map>
 #include <vector>
 
@@ -77,6 +80,7 @@ namespace World::Wui
 		{
 			struct Holder : WuiStateBase
 			{
+				Holder() { TypeName = typeid(T).name(); }
 				T Value;
 			};
 			auto it = m_State.find(id);
@@ -87,6 +91,9 @@ namespace World::Wui
 				m_State[id] = holder;
 				return static_cast<Holder*>(holder.get())->Value;
 			}
+			if (!it->second->TypeName || std::strcmp(it->second->TypeName, typeid(T).name()) != 0)
+				WLD_CORE_ERROR("WUI persisted state id {0} reused with different types ({1} vs {2})",
+					id, it->second->TypeName ? it->second->TypeName : "null", typeid(T).name());
 			return static_cast<Holder*>(it->second.get())->Value;
 		}
 
@@ -149,6 +156,7 @@ namespace World::Wui
 	private:
 		struct WuiStateBase
 		{
+			const char* TypeName = nullptr;
 			virtual ~WuiStateBase() = default;
 		};
 

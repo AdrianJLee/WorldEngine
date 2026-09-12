@@ -652,6 +652,7 @@ namespace World
 				if (schema && schema->Storage && !entity.HasComponent(schema->Storage->ComponentId))
 					candidates.push_back(schema);
 			const Wui::WuiRect panel { addButton.X, addButton.Y + addButton.H, 220, candidates.size() * 22.0f + 8 };
+			DrawPanelSurface(ctx, panel, m_Theme);
 			for (size_t i = 0; i < candidates.size(); ++i)
 			{
 				const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };
@@ -846,7 +847,9 @@ namespace World
 				case Schema::Kind::String:
 				case Schema::Kind::Asset:
 				{
-					auto& state = ctx.Persist<SchemaTextState>(fid, {});
+					// 与 TextField 的 WuiEditState 共用 fid 会导致类型混淆,
+					// 编辑缓冲必须使用独立 id。
+					auto& state = ctx.Persist<SchemaTextState>(Wui::HashId("schema.text.state") ^ fid, {});
 					const std::string current = std::get<std::string>(value);
 					if (!state.Editing)
 						state.Buffer = current;
