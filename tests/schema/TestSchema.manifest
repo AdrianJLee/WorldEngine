@@ -1,0 +1,4 @@
+struct World::TestSchema::HealthFixture
+struct World::TestSchema::ReorderFixture
+enum World::TestSchema::TestEnum
+struct World::TestSchema::NestedFixture
