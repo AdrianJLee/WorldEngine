@@ -160,7 +160,7 @@ namespace World
 		RenderNode(ctx, m_Layout.Root, { 0, 26, viewport.x, viewport.y - 26 });
 
 		std::string payload;
-		if (ctx.AcceptDrop(&payload))
+		if (ctx.AcceptDrop(&payload, "panel:"))
 		{
 			if (payload.rfind("panel:", 0) == 0)
 			{
@@ -1068,7 +1068,7 @@ namespace World
 			{
 				ctx.DropTarget(cellRect, "file:");
 				std::string payload;
-				if (ctx.AcceptDrop(&payload) && payload.rfind("file:", 0) == 0)
+				if (ctx.AcceptDrop(&payload, "file:"))
 				{
 					const std::filesystem::path dragged = m_Browser.Root / payload.substr(5);
 					if (dragged != path && dragged.parent_path() != path)

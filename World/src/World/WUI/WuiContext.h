@@ -138,6 +138,9 @@ namespace World::Wui
 		// 每帧构建 UI 前调用:清空上一帧的落点,只保留本帧悬停命中的目标。
 		void ClearDropTarget() { m_DropArmed = false; }
 		bool AcceptDrop(std::string* payload);
+		// 仅当 payload 以指定前缀开头时才消费;不匹配返回 false 且不消耗,
+		// 把 drop 留给声明了匹配前缀的其他消费者。
+		bool AcceptDrop(std::string* payload, const std::string& payloadPrefix);
 
 	private:
 		struct WuiStateBase

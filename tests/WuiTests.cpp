@@ -229,9 +229,10 @@ int main()
 			ctx.EndFrame();
 
 			std::string payload;
-			CHECK(ctx.AcceptDrop(&payload));
+			CHECK(!ctx.AcceptDrop(&payload, "file:")); // 类型不匹配:不消费,留给 panel 消费者
+			CHECK(ctx.AcceptDrop(&payload, "panel:"));
 			CHECK(payload == "panel:view");
-			CHECK(!ctx.AcceptDrop(&payload)); // 只消费一次
+			CHECK(!ctx.AcceptDrop(&payload, "panel:")); // 只消费一次
 
 			// 释放时无任何武装落点 → 不接受
 			WuiInputState press2;

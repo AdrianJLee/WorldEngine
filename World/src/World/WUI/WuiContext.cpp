@@ -165,8 +165,15 @@ namespace World::Wui
 
 	bool WuiContext::AcceptDrop(std::string* payload)
 	{
+		return AcceptDrop(payload, {});
+	}
+
+	bool WuiContext::AcceptDrop(std::string* payload, const std::string& payloadPrefix)
+	{
 		if (!m_DropAccepted)
 			return false;
+		if (!payloadPrefix.empty() && m_DragPayload.rfind(payloadPrefix, 0) != 0)
+			return false; // 类型不匹配,留给其他消费者
 		if (payload)
 			*payload = m_DragPayload;
 		m_DropAccepted = false;
