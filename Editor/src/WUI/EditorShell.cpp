@@ -7,6 +7,7 @@
 #include "World/ImGui/ImGuiDrawLibrary.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Scene/SceneCamera.h"
+#include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLayoutStore.h"
 #include "World/WUI/WuiWidgets.h"
 
@@ -16,6 +17,8 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 
 namespace World
 {
@@ -89,7 +92,8 @@ namespace World
 	}
 
 	EditorShell::EditorShell(EditorLayer& editor)
-		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json")
+		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json"),
+		m_BrowserPath(std::string(WLD_EDITOR_DIR) + "wui-browser.json")
 	{
 		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "stats", "memory", "operations" };
 		m_Panels = panels;
@@ -102,6 +106,12 @@ namespace World
 		// 不把"已关闭"的面板强制补回。重新显示由 Window 菜单负责。
 
 		m_Browser.Current = m_Browser.Root;
+		LoadBrowserState();
+	}
+
+	EditorShell::~EditorShell()
+	{
+		SaveBrowserState();
 	}
 
 	void EditorShell::SaveLayout()
@@ -957,6 +967,172 @@ namespace World
 		}
 	}
 
+	void EditorShell::RefreshBrowserTree(bool force)
+	{
+		const auto now = std::chrono::steady_clock::now();
+		if (!force && !m_Browser.DirTreeDirty && std::chrono::duration<double>(now - m_Browser.LastTreeCheck).count() < 0.5)
+			return;
+		m_Browser.LastTreeCheck = now;
+
+		// 目录树只在 Root 直接内容变化或显式标脏时重扫,避免每帧全量递归。
+		std::error_code stampError;
+		const auto stamp = std::filesystem::last_write_time(m_Browser.Root, stampError);
+		if (!force && !m_Browser.DirTreeDirty && !stampError && stamp == m_Browser.TreeStamp)
+			return;
+
+		m_Browser.DirTree.clear();
+		std::error_code scanError;
+		std::filesystem::recursive_directory_iterator scanIt(m_Browser.Root, std::filesystem::directory_options::skip_permission_denied, scanError);
+		const std::filesystem::recursive_directory_iterator scanEnd;
+		for (; scanIt != scanEnd; scanIt.increment(scanError))
+		{
+			if (scanError)
+				break;
+			const auto& entry = *scanIt;
+			std::error_code dirError;
+			if (!entry.is_directory(dirError))
+				continue;
+			BrowserDirNode node;
+			node.Path = entry.path();
+			// depth():根的直接子项为 0;顶层目录显示深度记为 1。
+			node.Depth = scanIt.depth() + 1;
+			node.HasChildren = false;
+			std::error_code childError;
+			for (const auto& child : std::filesystem::directory_iterator(node.Path, std::filesystem::directory_options::skip_permission_denied, childError))
+			{
+				if (childError)
+					break;
+				std::error_code childDirError;
+				if (child.is_directory(childDirError)) { node.HasChildren = true; break; }
+			}
+			m_Browser.DirTree.push_back(std::move(node));
+		}
+		std::sort(m_Browser.DirTree.begin(), m_Browser.DirTree.end(), [](const BrowserDirNode& a, const BrowserDirNode& b) { return a.Path < b.Path; });
+		m_Browser.TreeStamp = stamp;
+		m_Browser.DirTreeDirty = false;
+	}
+
+	void EditorShell::RefreshBrowserListing()
+	{
+		const auto now = std::chrono::steady_clock::now();
+		if (!m_Browser.ListingDirty && m_Browser.ListingPath == m_Browser.Current && std::chrono::duration<double>(now - m_Browser.LastListingCheck).count() < 0.5)
+			return;
+		m_Browser.LastListingCheck = now;
+
+		std::error_code stampError;
+		const auto stamp = std::filesystem::last_write_time(m_Browser.Current, stampError);
+		if (!m_Browser.ListingDirty && m_Browser.ListingPath == m_Browser.Current && !stampError && stamp == m_Browser.ListingStamp)
+			return;
+
+		m_Browser.Listing.clear();
+		std::error_code listError;
+		for (const auto& entry : std::filesystem::directory_iterator(m_Browser.Current, std::filesystem::directory_options::skip_permission_denied, listError))
+		{
+			if (listError)
+				break;
+			m_Browser.Listing.push_back(entry.path());
+		}
+		std::sort(m_Browser.Listing.begin(), m_Browser.Listing.end());
+		m_Browser.ListingPath = m_Browser.Current;
+		m_Browser.ListingStamp = stamp;
+		m_Browser.ListingDirty = false;
+	}
+
+	uintmax_t EditorShell::BrowserFileSize(const std::filesystem::path& path)
+	{
+		std::error_code stampError;
+		const auto stamp = std::filesystem::last_write_time(path, stampError);
+		const auto cached = m_Browser.SizeCache.find(path);
+		if (!stampError && cached != m_Browser.SizeCache.end() && cached->second.first == stamp)
+			return cached->second.second;
+		std::error_code sizeError;
+		const uintmax_t size = std::filesystem::file_size(path, sizeError);
+		const uintmax_t result = sizeError ? 0 : size;
+		m_Browser.SizeCache[path] = { stamp, result };
+		return result;
+	}
+
+	void EditorShell::InvalidateBrowserContents()
+	{
+		m_Browser.DirTreeDirty = true;
+		m_Browser.ListingDirty = true;
+		m_Browser.TreeStamp = {};
+		m_Browser.ListingStamp = {};
+	}
+
+	void EditorShell::SaveBrowserState()
+	{
+		try
+		{
+			Wui::JsonValue root;
+			root.type = Wui::JsonValue::Type::Object;
+			root.Object.push_back({ "listMode", Wui::JsonValue::MakeBool(m_Browser.ListMode) });
+			root.Object.push_back({ "current", Wui::JsonValue::MakeString(m_Browser.Current.lexically_relative(m_Browser.Root).generic_string()) });
+			root.Object.push_back({ "treeScroll", Wui::JsonValue::MakeNumber(m_Browser.TreeScroll) });
+			root.Object.push_back({ "contentScroll", Wui::JsonValue::MakeNumber(m_Browser.ContentScroll) });
+			Wui::JsonValue open;
+			open.type = Wui::JsonValue::Type::Array;
+			for (const auto& path : m_Browser.TreeOpen)
+				open.Array.push_back(Wui::JsonValue::MakeString(path.lexically_relative(m_Browser.Root).generic_string()));
+			root.Object.push_back({ "treeOpen", std::move(open) });
+			std::ofstream stream(m_BrowserPath, std::ios::binary | std::ios::trunc);
+			if (stream)
+				stream << root.Dump();
+		}
+		catch (const std::exception& error)
+		{
+			WLD_CORE_WARN("Failed to save content browser state: {0}", error.what());
+		}
+	}
+
+	void EditorShell::LoadBrowserState()
+	{
+		if (!std::filesystem::exists(m_BrowserPath))
+			return;
+		try
+		{
+			std::ifstream stream(m_BrowserPath, std::ios::binary);
+			if (!stream)
+				return;
+			std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+			std::string error;
+			const auto parsed = Wui::JsonValue::Parse(text, &error);
+			if (!parsed)
+				return;
+			if (const Wui::JsonValue* value = parsed->Find("listMode"))
+				m_Browser.ListMode = value->AsBool(false);
+			if (const Wui::JsonValue* value = parsed->Find("current"))
+			{
+				const std::string relative = value->AsString("");
+				if (!relative.empty())
+				{
+					const std::filesystem::path target = m_Browser.Root / std::filesystem::path(relative);
+					std::error_code dirError;
+					if (std::filesystem::is_directory(target, dirError))
+						m_Browser.Current = target;
+				}
+			}
+			if (const Wui::JsonValue* value = parsed->Find("treeScroll"))
+				m_Browser.TreeScroll = static_cast<float>(value->AsNumber(0));
+			if (const Wui::JsonValue* value = parsed->Find("contentScroll"))
+				m_Browser.ContentScroll = static_cast<float>(value->AsNumber(0));
+			if (const Wui::JsonValue* value = parsed->Find("treeOpen"))
+			{
+				m_Browser.TreeOpen.clear();
+				for (const auto& item : value->Array)
+				{
+					const std::string relative = item.AsString("");
+					if (!relative.empty())
+						m_Browser.TreeOpen.insert(m_Browser.Root / std::filesystem::path(relative));
+				}
+			}
+		}
+		catch (const std::exception& error)
+		{
+			WLD_CORE_WARN("Failed to load content browser state: {0}", error.what());
+		}
+	}
+
 	void EditorShell::BrowserNavigate(const std::filesystem::path& path)
 	{
 		if (m_Browser.HistoryIndex >= 0 && m_Browser.HistoryIndex < static_cast<int>(m_Browser.History.size()) && m_Browser.History[m_Browser.HistoryIndex] == path)
@@ -969,6 +1145,9 @@ namespace World
 		m_Browser.Selected.clear();
 		m_Browser.LastSelected.clear();
 		BrowserReveal(path);
+		m_Browser.ListingDirty = true;
+		m_Browser.ListingStamp = {};
+		SaveBrowserState();
 		if (m_Browser.Search[0])
 			UpdateBrowserSearch();
 	}
@@ -996,6 +1175,9 @@ namespace World
 			m_Browser.Selected.clear();
 			m_Browser.LastSelected.clear();
 			BrowserReveal(m_Browser.Current);
+			m_Browser.ListingDirty = true;
+			m_Browser.ListingStamp = {};
+			SaveBrowserState();
 			if (m_Browser.Search[0])
 				UpdateBrowserSearch();
 		}
@@ -1055,6 +1237,8 @@ namespace World
 			m_Browser.Clipboard.clear();
 			m_Browser.ClipboardCut = false;
 		}
+		InvalidateBrowserContents();
+		SaveBrowserState();
 		if (m_Browser.Search[0])
 			UpdateBrowserSearch();
 	}
@@ -1069,6 +1253,8 @@ namespace World
 		}
 		m_Browser.Selected.clear();
 		m_Browser.LastSelected.clear();
+		InvalidateBrowserContents();
+		SaveBrowserState();
 		if (m_Browser.Search[0])
 			UpdateBrowserSearch();
 		m_Ctx->RecordOp("browser", "delete", std::to_string(count), "");
@@ -1088,6 +1274,8 @@ namespace World
 			m_Browser.Selected.clear();
 			m_Browser.Selected.insert(newPath);
 			m_Browser.LastSelected = newPath;
+			InvalidateBrowserContents();
+			SaveBrowserState();
 			m_Ctx->RecordOp("browser", "mkdir", newPath.filename().string(), "");
 		}
 		catch (const std::exception& error)
@@ -1111,6 +1299,8 @@ namespace World
 			m_Ctx->RecordOp("browser", "rename", target.filename().string(), "-> " + newPath.filename().string());
 		}
 		m_Browser.RenameTarget.clear();
+		InvalidateBrowserContents();
+		SaveBrowserState();
 		if (m_Browser.Search[0])
 			UpdateBrowserSearch();
 	}
@@ -1158,6 +1348,9 @@ namespace World
 			m_Browser.Selected.clear();
 			m_Browser.LastSelected.clear();
 			BrowserReveal(m_Browser.Current);
+			m_Browser.ListingDirty = true;
+			m_Browser.ListingStamp = {};
+			SaveBrowserState();
 			if (m_Browser.Search[0])
 				UpdateBrowserSearch();
 		}
@@ -1187,11 +1380,15 @@ namespace World
 		}
 
 		if (Button(ctx, Wui::HashId("browser.viewmode"), { rect.X + rect.W - 372, y, 58, 24 }, m_Browser.ListMode ? "Grid" : "List", m_Theme))
+		{
 			m_Browser.ListMode = !m_Browser.ListMode;
+			SaveBrowserState();
+		}
 		if (Button(ctx, Wui::HashId("browser.newfolder"), { rect.X + rect.W - 308, y, 70, 24 }, "+ Folder", m_Theme))
 			BrowserCreateFolder();
 		if (Button(ctx, Wui::HashId("browser.refresh"), { rect.X + rect.W - 232, y, 58, 24 }, "Refresh", m_Theme))
 		{
+			InvalidateBrowserContents();
 			if (m_Browser.Search[0])
 				UpdateBrowserSearch();
 		}
@@ -1209,38 +1406,10 @@ namespace World
 		const float treeW = 190;
 		const Wui::WuiRect treeRect { rect.X, y, treeW, rect.H - (y - rect.Y) };
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, treeRect, { 0.09f, 0.095f, 0.10f, 1 }, 0.0f });
-		struct DirNode { std::filesystem::path Path; int Depth; bool HasChildren; };
-		std::vector<DirNode> dirs;
-		std::error_code scanError;
-		std::filesystem::recursive_directory_iterator scanIt(m_Browser.Root, std::filesystem::directory_options::skip_permission_denied, scanError);
-		const std::filesystem::recursive_directory_iterator scanEnd;
-		for (; scanIt != scanEnd; scanIt.increment(scanError))
-		{
-			if (scanError)
-				break;
-			const auto& entry = *scanIt;
-			std::error_code dirError;
-			if (!entry.is_directory(dirError))
-				continue;
-			DirNode node;
-			node.Path = entry.path();
-			// depth():根的直接子项为 0;顶层目录显示深度记为 1。
-			node.Depth = scanIt.depth() + 1;
-			node.HasChildren = false;
-			std::error_code childError;
-			for (const auto& child : std::filesystem::directory_iterator(node.Path, std::filesystem::directory_options::skip_permission_denied, childError))
-			{
-				if (childError)
-					break;
-				std::error_code childDirError;
-				if (child.is_directory(childDirError)) { node.HasChildren = true; break; }
-			}
-			dirs.push_back(std::move(node));
-		}
-		std::sort(dirs.begin(), dirs.end(), [](const DirNode& a, const DirNode& b) { return a.Path < b.Path; });
-		BeginScrollArea(ctx, treeRect, dirs.size() * 20.0f + 8, m_Browser.TreeScroll, m_Theme);
+		RefreshBrowserTree(false);
+		BeginScrollArea(ctx, treeRect, m_Browser.DirTree.size() * 20.0f + 8, m_Browser.TreeScroll, m_Theme);
 		float ty = treeRect.Y + 4 - m_Browser.TreeScroll;
-		for (const DirNode& node : dirs)
+		for (const BrowserDirNode& node : m_Browser.DirTree)
 		{
 			// 顶层目录恒可见;更深层目录仅在父级展开时显示。
 			if (node.Depth > 1 && m_Browser.TreeOpen.find(node.Path.parent_path()) == m_Browser.TreeOpen.end())
@@ -1260,6 +1429,7 @@ namespace World
 				{
 					if (open) m_Browser.TreeOpen.erase(node.Path);
 					else m_Browser.TreeOpen.insert(node.Path);
+					SaveBrowserState();
 				}
 				Label(ctx, { row.X, ty + 2 }, open ? "[-]" : "[+]", m_Theme.TextMuted, 12.0f);
 			}
@@ -1286,21 +1456,10 @@ namespace World
 
 		// ---- 右侧内容区 ----
 		const Wui::WuiRect content { rect.X + treeW + 6, y, rect.W - treeW - 6, rect.H - (y - rect.Y) };
-		std::vector<std::filesystem::path> paths;
 		const bool searching = m_Browser.Search[0] != 0;
-		if (searching)
-			paths = m_Browser.SearchResults;
-		else
-		{
-			std::error_code listError;
-			for (const auto& entry : std::filesystem::directory_iterator(m_Browser.Current, std::filesystem::directory_options::skip_permission_denied, listError))
-			{
-				if (listError)
-					break;
-				paths.push_back(entry.path());
-			}
-			std::sort(paths.begin(), paths.end());
-		}
+		if (!searching)
+			RefreshBrowserListing();
+		const std::vector<std::filesystem::path>& paths = searching ? m_Browser.SearchResults : m_Browser.Listing;
 
 		if (ctx.Input().Ctrl && ctx.IsKeyPressed(KeyCodes::A) && ctx.IsHovered(content))
 			BrowserSelectAll(paths);
@@ -1332,7 +1491,7 @@ namespace World
 			}
 			if (ctx.Input().MouseDown[0] && hovered)
 			{
-				const std::filesystem::path rel = std::filesystem::relative(path, m_Browser.Root);
+				const std::filesystem::path rel = path.lexically_relative(m_Browser.Root);
 				ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 			}
@@ -1400,11 +1559,7 @@ namespace World
 				Label(ctx, { row.X + content.W * 0.52f, row.Y + 4 }, isDir ? "Folder" : "File", m_Theme.TextMuted, 13.0f);
 				std::string size = "-";
 				if (!isDir)
-				{
-					std::error_code ec;
-					const uintmax_t bytes = std::filesystem::file_size(path, ec);
-					if (!ec) size = FormatBytes(static_cast<size_t>(bytes));
-				}
+					size = FormatBytes(static_cast<size_t>(BrowserFileSize(path)));
 				Label(ctx, { row.X + content.W * 0.72f, row.Y + 4 }, size, m_Theme.TextMuted, 13.0f);
 				if (m_Browser.RenameTarget == path)
 				{
@@ -1498,6 +1653,8 @@ namespace World
 								UpdateBrowserSearch();
 						}
 						BrowserReveal(dest);
+						InvalidateBrowserContents();
+						SaveBrowserState();
 					}
 					catch (const std::exception& error)
 					{

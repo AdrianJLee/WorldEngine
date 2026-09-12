@@ -5,7 +5,9 @@
 #include "World/WUI/WuiWidgets.h"
 #include "World/Scene/Components.h"
 
+#include <chrono>
 #include <filesystem>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -15,6 +17,14 @@ namespace World
 	class EditorLayer;
 	struct TypeSchema;
 	struct FieldSchema;
+
+	// 目录树节点(缓存扫描结果,避免每帧全量扫盘)。
+	struct BrowserDirNode
+	{
+		std::filesystem::path Path;
+		int Depth = 0;
+		bool HasChildren = false;
+	};
 
 	// 内容浏览器状态模型(与绘制分离)。
 	struct ContentBrowserModel
@@ -39,6 +49,16 @@ namespace World
 		std::set<std::filesystem::path> TreeOpen;
 		float TreeScroll = 0;
 		float ContentScroll = 0;
+		std::vector<BrowserDirNode> DirTree;
+		bool DirTreeDirty = true;
+		std::filesystem::file_time_type TreeStamp {};
+		std::chrono::steady_clock::time_point LastTreeCheck {};
+		std::filesystem::path ListingPath;
+		std::vector<std::filesystem::path> Listing;
+		bool ListingDirty = true;
+		std::filesystem::file_time_type ListingStamp {};
+		std::chrono::steady_clock::time_point LastListingCheck {};
+		std::map<std::filesystem::path, std::pair<std::filesystem::file_time_type, uintmax_t>> SizeCache;
 		Ref<Texture2D> DirIcon, FileIcon;
 	};
 
@@ -46,6 +66,7 @@ namespace World
 	{
 	public:
 		explicit EditorShell(EditorLayer& editor);
+		~EditorShell();
 		void OnRender(Wui::WuiContext& ctx);
 		Wui::WuiRect ViewportRect() const { return m_ViewportRect; }
 
@@ -91,10 +112,17 @@ namespace World
 		void BrowserCut();
 		void BrowserCopy();
 		void BrowserSelectAll(const std::vector<std::filesystem::path>& paths);
+		void RefreshBrowserTree(bool force);
+		void RefreshBrowserListing();
+		uintmax_t BrowserFileSize(const std::filesystem::path& path);
+		void InvalidateBrowserContents();
+		void SaveBrowserState();
+		void LoadBrowserState();
 
 		EditorLayer& m_Editor;
 		Wui::DockLayout m_Layout;
 		std::filesystem::path m_LayoutPath;
+		std::filesystem::path m_BrowserPath;
 		std::vector<std::string> m_Panels;
 		Wui::WuiTheme m_Theme;
 		ContentBrowserModel m_Browser;

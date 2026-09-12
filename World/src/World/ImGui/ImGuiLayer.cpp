@@ -65,7 +65,7 @@ namespace World
 		s_BoldFont = io.Fonts->AddFontFromFileTTF(boldFontPath.c_str(), 15.0f);
 
 		// CJK 回退字体:中文输入与界面文本(P3 起由 WUI 统一管理,此处先行加载)。
-		std::string cjkFontPath = WLD_EDITOR_DIR + std::string("assets/fonts/NotoSansSC/NotoSansSC-Regular.ttf");
+		std::string cjkFontPath = WLD_EDITOR_DIR + std::string("assets/fonts/NotoSansSC/NotoSansSC-Subset.ttf");
 		ImFontConfig cjkConfig;
 		cjkConfig.MergeMode = false;
 		cjkConfig.OversampleH = 1;
