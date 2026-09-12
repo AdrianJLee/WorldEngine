@@ -87,13 +87,21 @@ namespace World::Wui
 	void WuiContext::OpenPopup(WuiId id)
 	{
 		if (std::find(m_OpenPopups.begin(), m_OpenPopups.end(), id) == m_OpenPopups.end())
+		{
 			m_OpenPopups.push_back(id);
+			RecordOp("popup", "open", std::to_string(id), "");
+		}
 		m_PopupOpenFrame[id] = m_Frame;
 	}
 
 	void WuiContext::ClosePopup(WuiId id)
 	{
-		m_OpenPopups.erase(std::remove(m_OpenPopups.begin(), m_OpenPopups.end(), id), m_OpenPopups.end());
+		auto it = std::find(m_OpenPopups.begin(), m_OpenPopups.end(), id);
+		if (it != m_OpenPopups.end())
+		{
+			m_OpenPopups.erase(it);
+			RecordOp("popup", "close", std::to_string(id), "");
+		}
 		m_PopupOpenFrame.erase(id);
 	}
 

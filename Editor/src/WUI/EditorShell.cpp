@@ -385,6 +385,7 @@ namespace World
 					if (MenuItem(ctx, itemId, item, entries[i].Label, entries[i].Checked, true, m_Theme))
 					{
 						entries[i].Action();
+						ctx.RecordOp("menu", "item", entries[i].Label, menuIdName);
 						ctx.CloseAllPopups();
 					}
 				}
