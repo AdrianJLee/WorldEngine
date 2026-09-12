@@ -63,6 +63,7 @@ namespace World
 		void ResolveUnsavedModal(bool save);
 		void CancelUnsavedModal();
 		bool HasRenderedScene() const { return m_HasRenderedScene; }
+		void ExportOperationLog();
 		Wui::WuiCommandRegistry& Commands() { return m_Commands; }
 
 		bool OnKeyPressed(KeyPressedEvent& e);
@@ -135,6 +136,7 @@ namespace World
 
 		Wui::WuiCommandRegistry m_Commands;
 		EditorShell m_Shell;
+		Wui::WuiContext m_WuiContext;
 	};
 
 }

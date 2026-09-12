@@ -73,6 +73,7 @@ namespace World
 			m_SceneRenderer->Shutdown();
 			m_SceneRenderer.reset();
 		}
+		ExportOperationLog();
 	}
 
 	void EditorLayer::OnUpdate(Timestep ts)
@@ -156,7 +157,6 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
-		static Wui::WuiContext wuiContext;
 		static Wui::WuiImGuiBackend wuiBackend;
 		static bool fontsInitialized = false;
 		if (!fontsInitialized)
@@ -168,12 +168,22 @@ namespace World
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
 		{
-			wuiContext.BeginFrame(input);
-			m_Shell.OnRender(wuiContext);
-			wuiContext.EndFrame();
-			wuiBackend.Render(wuiContext.Commands());
+			m_WuiContext.BeginFrame(input);
+			m_Shell.OnRender(m_WuiContext);
+			m_WuiContext.EndFrame();
+			wuiBackend.Render(m_WuiContext.Commands());
 		}
-		wuiBackend.EndFrame(wuiContext.Cursor());
+		wuiBackend.EndFrame(m_WuiContext.Cursor());
+	}
+
+	void EditorLayer::ExportOperationLog()
+	{
+		const std::string path = std::string(WLD_OUTPUT_DIR) + "wui-ops.json";
+		std::string error;
+		if (m_WuiContext.Ops().Save(path, &error))
+			WLD_CORE_INFO("WUI operation log exported to {0}", path);
+		else
+			WLD_CORE_WARN("Failed to export WUI operation log: {0}", error);
 	}
 
 	void EditorLayer::OnEvent(Event& event)

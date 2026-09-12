@@ -34,11 +34,13 @@ namespace World::Wui
 			else if (glm::length(m_Input.MousePos - m_DragPressPos) > 4.0f)
 			{
 				m_Dragging = true;
+				RecordOp("drag", "active", m_DragPayload, "");
 			}
 		}
 		if (m_Dragging && m_Input.MouseReleased[0])
 		{
 			m_DropAccepted = m_DropArmed;
+			RecordOp("drag", "release", m_DragPayload, m_DropArmed ? "armed" : "no-target");
 			m_Dragging = false;
 			m_DragId = 0;
 			m_DropArmed = false;
@@ -118,10 +120,14 @@ namespace World::Wui
 			m_DragId = id;
 			m_DragPayload = payload;
 			m_DropArmed = false;
+			RecordOp("drag", "press", m_DragPayload, "");
 			return;
 		}
 		if (glm::length(m_Input.MousePos - m_DragPressPos) > 4.0f)
+		{
 			m_Dragging = true;
+			RecordOp("drag", "active", m_DragPayload, "");
+		}
 	}
 
 	bool WuiContext::IsDragActive(std::string* payload) const
@@ -164,6 +170,7 @@ namespace World::Wui
 		if (payload)
 			*payload = m_DragPayload;
 		m_DropAccepted = false;
+		RecordOp("drag", "accept", payload ? *payload : m_DragPayload, "");
 		m_DragPayload.clear();
 		return true;
 	}

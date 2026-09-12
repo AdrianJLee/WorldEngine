@@ -145,8 +145,7 @@ int main()
 			DockLayout moving = DockLayout::Default({ "hierarchy", "properties", "view" });
 			CHECK(moving.FindSibling("hierarchy") == "properties");
 			CHECK(moving.FirstPanel() == "hierarchy");
-			CHECK(moving.RemoveTab("view"));
-			CHECK(moving.AddTab("view", "hierarchy", DropZone::Center));
+			CHECK(moving.MoveTab("view", "hierarchy", DropZone::Center));
 			CHECK(moving.IsActive("view"));
 			CHECK(moving.FindSibling("view") == "hierarchy" || moving.FindSibling("view") == "properties");
 		}

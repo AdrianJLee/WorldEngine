@@ -188,6 +188,26 @@ namespace World::Wui
 		return true;
 	}
 
+	bool DockLayout::MoveTab(const PanelId& panel, const PanelId& target, DropZone zone)
+	{
+		if (!Contains(panel) || !Contains(target))
+			return false;
+		if (panel == target && zone == DropZone::Center)
+		{
+			Activate(panel);
+			return true;
+		}
+		std::string anchor = target;
+		if (anchor == panel)
+			anchor = FindSibling(panel);
+		RemoveTab(panel);
+		if (!Contains(anchor))
+			anchor = FirstPanel();
+		if (anchor.empty() || anchor == panel)
+			return false;
+		return AddTab(panel, anchor, zone);
+	}
+
 	bool DockLayout::RemoveFromTree(DockNode& parent, DockNode* child)
 	{
 		auto it = std::find_if(parent.Children.begin(), parent.Children.end(), [&](const DockNode& node)

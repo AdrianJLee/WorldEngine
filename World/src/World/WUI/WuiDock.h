@@ -52,6 +52,8 @@ namespace World::Wui
 
 		// zone=Center 并入目标 tab 组;其余在目标外侧新建 split。
 		bool AddTab(const PanelId& panel, const PanelId& target, DropZone zone);
+		// 移动已存在的面板:摘除→挂载,源组塌缩后回退锚点;返回是否生效。
+		bool MoveTab(const PanelId& panel, const PanelId& target, DropZone zone);
 		bool RemoveTab(const PanelId& panel);
 		bool Activate(const PanelId& panel);
 		// 同一 tab 组内除 panel 外的另一个面板;无则返回空。
