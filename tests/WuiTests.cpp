@@ -1,5 +1,9 @@
 #include "World/WUI/WuiCore.h"
+#include "World/WUI/WuiDock.h"
+#include "World/WUI/WuiJson.h"
+#include "World/WUI/WuiLayoutStore.h"
 
+#include <filesystem>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -109,6 +113,79 @@ int main()
 			CHECK(NextFocus(order, 1, true).value() == 3);
 			CHECK(NextFocus(order, 99, false).value() == 1);
 			CHECK(!NextFocus({}, 1, false).has_value());
+		}
+
+		// 8. 停靠布局:AddTab 形状、RemoveTab 塌缩、序列化往返
+		{
+			DockLayout layout = DockLayout::Default({ "hierarchy", "properties", "content_browser", "view", "stats", "memory" });
+			CHECK(layout.Contains("view"));
+			CHECK(layout.AddTab("inspector", "view", DropZone::Center));
+			CHECK(layout.IsActive("inspector"));
+			CHECK(layout.AddTab("console", "view", DropZone::Right));
+			CHECK(layout.Contains("console"));
+
+			// 序列化往返内容一致
+			const std::string serialized = layout.Serialize();
+			DockLayout restored;
+			std::string error;
+			CHECK(DockLayout::Deserialize(serialized, &restored, &error));
+			CHECK(restored.Serialize() == serialized);
+			CHECK(restored.Contains("inspector") && restored.Contains("console"));
+
+			// 删除最后一个 tab 后空组塌缩;重复删除失败
+			DockLayout single = DockLayout::Default({ "view" });
+			CHECK(single.RemoveTab("view"));
+			CHECK(!single.Contains("view"));
+			CHECK(!single.RemoveTab("view"));
+		}
+
+		// 9. 布局文件持久化:写读往返与缺失回退
+		{
+			const std::filesystem::path path = std::filesystem::temp_directory_path() / "worldengine-wui-layout.json";
+			DockLayout layout = DockLayout::Default({ "view", "stats" });
+			std::string error;
+			CHECK(WuiLayoutStore::Save(path, layout, &error));
+			DockLayout loaded;
+			CHECK(WuiLayoutStore::Load(path, layout, &loaded, &error));
+			CHECK(loaded.Contains("view") && loaded.Contains("stats"));
+			std::error_code ignored;
+			std::filesystem::remove(path, ignored);
+
+			DockLayout fallback = DockLayout::Default({ "fallback_only" });
+			DockLayout missing;
+			CHECK(WuiLayoutStore::Load(path, fallback, &missing, &error));
+			CHECK(missing.Contains("fallback_only"));
+		}
+
+		// 9b. 停靠矩形切分:两级 split 按比例分区
+		{
+			DockLayout layout = DockLayout::Default({ "hierarchy", "properties", "content_browser", "view", "stats", "memory" });
+			std::vector<std::pair<PanelId, WuiRect>> rects;
+			layout.ComputeRects({ 0, 0, 1000, 800 }, &rects);
+			CHECK(rects.size() == 6);
+			WuiRect hierarchy, view, stats;
+			for (const auto& [panel, rect] : rects)
+			{
+				if (panel == "hierarchy") hierarchy = rect;
+				if (panel == "view") view = rect;
+				if (panel == "stats") stats = rect;
+			}
+			CHECK(Near(hierarchy.X, 0) && Near(hierarchy.W, 240));
+			CHECK(Near(hierarchy.H, 800 * 0.58f));
+			CHECK(Near(view.X, 240) && Near(view.W, 760));
+			CHECK(Near(view.H, 800 * 0.82f));
+			CHECK(Near(stats.Y, 800 * 0.82f));
+		}
+
+		// 10. JSON:字符串转义与解析错误
+		{
+			std::string error;
+			auto parsed = JsonValue::Parse("{\"title\":\"a\\n\\\"b\\\"\",\"count\":3}", &error);
+			CHECK(parsed.has_value());
+			CHECK(parsed->Find("title")->AsString() == "a\n\"b\"");
+			CHECK(parsed->Find("count")->AsNumber() == 3);
+			CHECK(!JsonValue::Parse("{bad", &error).has_value());
+			CHECK(!error.empty());
 		}
 
 		std::printf("World.Wui: all checks passed\n");

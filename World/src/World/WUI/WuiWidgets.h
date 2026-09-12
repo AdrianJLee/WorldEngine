@@ -22,5 +22,26 @@ namespace World::Wui
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	bool Toggle(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	void SliderFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float min, float max, const WuiTheme& theme);
-	void TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme);
+	// 文本输入:UTF-8 追加/退格;回车提交返回 true,Escape 失焦。
+	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme);
+	void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme);
+	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);
+	bool TreeNode(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool leaf, const WuiTheme& theme);
+
+	// 菜单与弹窗
+	bool BeginMenuBar(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
+	void EndMenuBar(WuiContext& ctx);
+	bool BeginMenu(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
+	void EndMenu(WuiContext& ctx, WuiId id, const WuiRect& panel, const WuiTheme& theme);
+	bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool enabled, const WuiTheme& theme);
+	bool BeginModal(WuiContext& ctx, WuiId id, const std::string& title, const glm::vec2& size, WuiRect* panel, const WuiTheme& theme);
+	void EndModal(WuiContext& ctx, WuiId id);
+
+	// 滚动区:Begin 后子项按 -scrollY 偏移绘制,End 恢复裁剪。
+	bool BeginScrollArea(WuiContext& ctx, const WuiRect& viewport, float contentHeight, float& scrollY, const WuiTheme& theme);
+	void EndScrollArea(WuiContext& ctx);
+
+	// 表格单元矩形(按列宽累计)。
+	WuiRect TableCell(const WuiRect& table, const std::vector<float>& columns, size_t row, size_t column, float rowHeight);
 }

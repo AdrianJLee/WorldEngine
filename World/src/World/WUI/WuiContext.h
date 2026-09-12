@@ -2,6 +2,7 @@
 
 #include "World/WUI/WuiCore.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -14,8 +15,13 @@ namespace World::Wui
 		glm::vec2 MousePos { 0, 0 };
 		bool MouseDown[3] = { false, false, false };
 		bool MouseClicked[3] = { false, false, false };
+		bool MouseReleased[3] = { false, false, false };
 		float Wheel = 0;
 		bool WantKeyboard = false;
+		bool Ctrl = false, Shift = false, Alt = false;
+		std::vector<uint32_t> KeyDown;   // 引擎 KeyCodes
+		std::vector<uint32_t> TextInput; // 本帧输入字符(UTF-32)
+		glm::vec2 ViewportSize { 1280, 720 };
 	};
 
 	enum class WuiDrawKind : uint8_t
@@ -23,6 +29,9 @@ namespace World::Wui
 		Rect,
 		RectOutline,
 		Text,
+		Image,
+		ClipPush,
+		ClipPop,
 	};
 
 	struct WuiDrawCommand
@@ -35,6 +44,8 @@ namespace World::Wui
 		std::string Text;
 		float FontSize = 15;
 		bool Bold = false;
+		uint64_t Image = 0;
+		WuiRect Uv { 0, 0, 1, 1 };
 	};
 
 	// 帧级上下文:输入、持久状态、样式栈、焦点、绘制命令。
@@ -75,11 +86,35 @@ namespace World::Wui
 
 		void SetFocus(WuiId id) { m_Focus = id; }
 		WuiId Focus() const { return m_Focus; }
+		bool IsKeyPressed(uint32_t keyCode) const
+		{
+			return std::find(m_Input.KeyDown.begin(), m_Input.KeyDown.end(), keyCode) != m_Input.KeyDown.end();
+		}
 		bool IsHovered(const WuiRect& rect) const { return HitTest(rect, m_Input.MousePos); }
 		bool IsClicked(const WuiRect& rect, int button = 0) const
 		{
 			return HitTest(rect, m_Input.MousePos) && m_Input.MouseClicked[button];
 		}
+
+		// ---- 弹窗/模态 ----
+		void OpenPopup(WuiId id);
+		void ClosePopup(WuiId id);
+		void CloseAllPopups() { m_OpenPopups.clear(); }
+		bool IsPopupOpen(WuiId id) const;
+		bool ClosePopupsOnOutsideClick(const std::vector<WuiId>& popups, const WuiRect& ignoreRect);
+		void SetModal(WuiId id) { m_Modal = id; }
+		void ClearModal() { m_Modal = 0; }
+		WuiId Modal() const { return m_Modal; }
+		void SetViewportSize(glm::vec2 size) { m_ViewportSize = size; }
+		glm::vec2 ViewportSize() const { return m_ViewportSize; }
+
+		// ---- 拖拽/放置 ----
+		void BeginDrag(WuiId id, const std::string& payload);
+		bool IsDragActive(std::string* payload) const;
+		void EndDrag();
+		// 拖动期间每帧调用以保持目标矩形;释放后 AcceptDrop 返回 true。
+		bool DropTarget(const WuiRect& rect);
+		bool AcceptDrop(std::string* payload);
 
 	private:
 		struct WuiStateBase
@@ -93,5 +128,13 @@ namespace World::Wui
 		std::vector<WuiStyle> m_StyleStack;
 		WuiStyleSheet m_Sheet;
 		WuiId m_Focus = 0;
+		std::vector<WuiId> m_OpenPopups;
+		WuiId m_Modal = 0;
+		glm::vec2 m_ViewportSize { 1280, 720 };
+		bool m_Dragging = false;
+		WuiId m_DragId = 0;
+		std::string m_DragPayload;
+		bool m_DropArmed = false;
+		bool m_DropAccepted = false;
 	};
 }
