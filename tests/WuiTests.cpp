@@ -1,5 +1,7 @@
 #include "World/WUI/WuiCore.h"
 #include "World/WUI/WuiContext.h"
+#include "World/WUI/WuiOperationLog.h"
+#include "World/WUI/WuiUndoStack.h"
 #include "World/WUI/WuiDock.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLayoutStore.h"
@@ -251,6 +253,30 @@ int main()
 			ctx.BeginFrame(release2);
 			ctx.EndFrame();
 			CHECK(!ctx.AcceptDrop(&payload));
+		}
+
+		// 12. 操作记录与撤销栈
+		{
+			WuiOperationLog log;
+			log.Record(1, 0, "dock", "drop", "view", "");
+			log.Record(2, 0, "browser", "move", "a.png", "dir");
+			CHECK(log.Count() == 2);
+			CHECK(log.Records().front().Category == "dock");
+			CHECK(log.Records().back().Target == "a.png");
+
+			WuiUndoStack stack;
+			int value = 0;
+			stack.Push("inc", [&] { --value; }, [&] { ++value; });
+			value = 5;
+			CHECK(stack.Undo() && value == 4);
+			CHECK(stack.Redo() && value == 5);
+			// 新 Push 截断重做分支
+			CHECK(stack.Undo() && value == 4);
+			stack.Push("set", [&] { value = 0; }, [&] { value = 4; });
+			CHECK(!stack.CanRedo());
+			CHECK(stack.Undo() && value == 0);
+			stack.Clear();
+			CHECK(!stack.CanUndo() && !stack.CanRedo());
 		}
 
 		std::printf("World.Wui: all checks passed\n");

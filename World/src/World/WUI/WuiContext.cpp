@@ -1,6 +1,8 @@
 #include "wldpch.h"
 #include "World/WUI/WuiContext.h"
 
+#include <chrono>
+
 namespace World::Wui
 {
 	WuiContext::WuiContext()
@@ -15,6 +17,7 @@ namespace World::Wui
 		m_TextInputActive = false;
 		m_Cursor = WuiCursor::Arrow;
 		m_Commands.clear();
+		++m_Frame;
 	}
 
 	void WuiContext::EndFrame()
@@ -52,6 +55,13 @@ namespace World::Wui
 				m_DragId = 0;
 			}
 		}
+	}
+
+	void WuiContext::RecordOp(std::string category, std::string action, std::string target, std::string detail)
+	{
+		const double timeMs = static_cast<double>(
+			std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+		m_Ops.Record(m_Frame, timeMs, std::move(category), std::move(action), std::move(target), std::move(detail));
 	}
 
 	void WuiContext::PushStyle(const WuiStyle& style)

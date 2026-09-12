@@ -1,6 +1,8 @@
 #pragma once
 
 #include "World/WUI/WuiCore.h"
+#include "World/WUI/WuiOperationLog.h"
+#include "World/WUI/WuiUndoStack.h"
 
 #include <algorithm>
 #include <memory>
@@ -94,6 +96,11 @@ namespace World::Wui
 		bool IsTextInputActive() const { return m_TextInputActive; }
 		void SetCursor(WuiCursor cursor) { m_Cursor = cursor; }
 		WuiCursor Cursor() const { return m_Cursor; }
+		uint64_t Frame() const { return m_Frame; }
+		WuiOperationLog& Ops() { return m_Ops; }
+		const WuiOperationLog& Ops() const { return m_Ops; }
+		WuiUndoStack& History() { return m_History; }
+		void RecordOp(std::string category, std::string action, std::string target, std::string detail);
 		bool IsKeyPressed(uint32_t keyCode) const
 		{
 			return std::find(m_Input.KeyDown.begin(), m_Input.KeyDown.end(), keyCode) != m_Input.KeyDown.end();
@@ -156,5 +163,8 @@ namespace World::Wui
 		bool m_DropAccepted = false;
 		bool m_DragPending = false;
 		glm::vec2 m_DragPressPos { 0, 0 };
+		uint64_t m_Frame = 0;
+		WuiOperationLog m_Ops;
+		WuiUndoStack m_History;
 	};
 }

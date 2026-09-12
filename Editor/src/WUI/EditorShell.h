@@ -56,7 +56,10 @@ namespace World
 		void DrawViewport(Wui::WuiContext& ctx, const Wui::WuiRect& rect);
 		void DrawStats(Wui::WuiContext& ctx, const Wui::WuiRect& rect);
 		void DrawMemory(Wui::WuiContext& ctx, const Wui::WuiRect& rect);
+		void DrawOperations(Wui::WuiContext& ctx, const Wui::WuiRect& rect);
 		void DrawModals(Wui::WuiContext& ctx);
+		void RestoreLayout(const std::string& json);
+		void RecordDockChange(Wui::WuiContext& ctx, const std::string& action, const std::string& target, const std::string& before);
 
 		// Inspector 辅助
 		float DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect, void* instance,
@@ -79,9 +82,14 @@ namespace World
 		bool m_SplitterDragging = false;
 		Wui::DockNode* m_DragSplitNode = nullptr;
 		bool m_DragSplitRow = true;
+		std::string m_SplitterBeforeJson;
 		bool m_GizmoActive = false;
 		TransformComponent m_GizmoBefore;
 		std::string m_DropTargetPanel;
 		Wui::DropZone m_DropZone = Wui::DropZone::Center;
+		bool m_WasDragging = false;
+		std::string m_LastDragTarget;
+		Wui::DropZone m_LastDragZone = Wui::DropZone::Center;
+		bool m_LastDragValid = false;
 	};
 }

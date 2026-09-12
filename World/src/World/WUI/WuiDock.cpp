@@ -20,7 +20,7 @@ namespace World::Wui
 		for (const PanelId& panel : panels)
 		{
 			if (panel == "view") viewTabs.Panels.push_back(panel);
-			else if (panel == "stats" || panel == "memory") miscTabs.Panels.push_back(panel);
+			else if (panel == "stats" || panel == "memory" || panel == "operations") miscTabs.Panels.push_back(panel);
 			else if (panel == "content_browser") contentTabs.Panels.push_back(panel);
 			else hierarchyTabs.Panels.push_back(panel);
 		}

@@ -29,6 +29,7 @@ namespace World
 			if (id == "view") return "View";
 			if (id == "stats") return "Stats";
 			if (id == "memory") return "Memory Analyzer";
+			if (id == "operations") return "Operations";
 			return id.c_str();
 		}
 
@@ -72,12 +73,25 @@ namespace World
 				default: return "Unknown";
 			}
 		}
+
+		const char* ZoneName(Wui::DropZone zone)
+		{
+			switch (zone)
+			{
+				case Wui::DropZone::Center: return "center";
+				case Wui::DropZone::Left: return "left";
+				case Wui::DropZone::Right: return "right";
+				case Wui::DropZone::Top: return "top";
+				case Wui::DropZone::Bottom: return "bottom";
+				default: return "?";
+			}
+		}
 	}
 
 	EditorShell::EditorShell(EditorLayer& editor)
 		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json")
 	{
-		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "stats", "memory" };
+		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "stats", "memory", "operations" };
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(panels);
 		std::string error;
 		if (!Wui::WuiLayoutStore::Load(m_LayoutPath, fallback, &m_Layout, &error))
@@ -103,10 +117,44 @@ namespace World
 			WLD_CORE_WARN("Failed to save WUI layout: {0}", error);
 	}
 
+	void EditorShell::RestoreLayout(const std::string& json)
+	{
+		std::string error;
+		Wui::DockLayout restored;
+		if (Wui::DockLayout::Deserialize(json, &restored, &error))
+		{
+			m_Layout = std::move(restored);
+			SaveLayout();
+		}
+		else
+			WLD_CORE_WARN("Failed to restore dock layout: {0}", error);
+	}
+
+	void EditorShell::RecordDockChange(Wui::WuiContext& ctx, const std::string& action, const std::string& target, const std::string& before)
+	{
+		const std::string after = m_Layout.Serialize();
+		ctx.RecordOp("dock", action, target, "");
+		ctx.History().Push("Dock " + action + " " + target,
+			[this, before] { RestoreLayout(before); },
+			[this, after] { RestoreLayout(after); });
+	}
+
 	void EditorShell::OnRender(Wui::WuiContext& ctx)
 	{
 		m_ViewportRect = {};
 		ctx.ClearDropTarget();
+		const bool undoKey = ctx.Input().Ctrl && !ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z);
+		const bool redoKey = ctx.Input().Ctrl && (ctx.IsKeyPressed(KeyCodes::Y) || (ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z)));
+		if (undoKey)
+		{
+			if (ctx.History().Undo())
+				ctx.RecordOp("undo", "undo", ctx.History().UndoName(), "");
+		}
+		else if (redoKey)
+		{
+			if (ctx.History().Redo())
+				ctx.RecordOp("undo", "redo", ctx.History().RedoName(), "");
+		}
 		DrawMenuBar(ctx);
 		const glm::vec2 viewport = ctx.ViewportSize();
 		RenderNode(ctx, m_Layout.Root, { 0, 26, viewport.x, viewport.y - 26 });
@@ -119,6 +167,7 @@ namespace World
 				const std::string panel = payload.substr(6);
 				if (!m_DropTargetPanel.empty() && m_Layout.Contains(panel))
 				{
+					const std::string before = m_Layout.Serialize();
 					// 移动已存在的面板:先摘除再挂载;源组塌缩后回退到布局首面板作锚点。
 					std::string anchor = m_DropTargetPanel;
 					if (anchor == panel)
@@ -127,7 +176,7 @@ namespace World
 					if (!m_Layout.Contains(anchor))
 						anchor = m_Layout.FirstPanel();
 					if (!anchor.empty() && m_Layout.AddTab(panel, anchor, m_DropZone))
-						SaveLayout();
+						RecordDockChange(ctx, "drop", panel + " -> " + m_DropTargetPanel + "/" + ZoneName(m_DropZone), before);
 				}
 			}
 		}
@@ -146,6 +195,14 @@ namespace World
 			else if (dragPayload.rfind("file:", 0) == 0) label = "移动文件: " + dragPayload.substr(5);
 			Label(ctx, ctx.Input().MousePos + glm::vec2 { 14, 14 }, label, m_Theme.Text, 13.0f);
 		}
+
+		const bool draggingNow = ctx.IsDragActive(&dragPayload);
+		if (draggingNow && !m_WasDragging)
+			ctx.RecordOp("drag", "begin", dragPayload, "");
+		if (!draggingNow && m_WasDragging && !m_LastDragValid)
+			ctx.RecordOp("drag", "release", "", "no-armed-target");
+		m_WasDragging = draggingNow;
+		m_LastDragValid = false;
 	}
 
 	void EditorShell::RenderNode(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -191,6 +248,7 @@ namespace World
 					m_SplitterDragging = true;
 					m_DragSplitNode = &node;
 					m_DragSplitRow = row;
+					m_SplitterBeforeJson = m_Layout.Serialize();
 				}
 			}
 		}
@@ -203,7 +261,7 @@ namespace World
 			{
 				m_SplitterDragging = false;
 				m_DragSplitNode = nullptr;
-				SaveLayout();
+				RecordDockChange(ctx, "resize", "", m_SplitterBeforeJson);
 			}
 		}
 	}
@@ -236,8 +294,9 @@ namespace World
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 3, close.Y - 1, 0, 0 }, m_Theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
 			if (ctx.IsClicked(close))
 			{
+				const std::string before = m_Layout.Serialize();
 				if (m_Layout.RemoveTab(panel))
-					SaveLayout();
+					RecordDockChange(ctx, "close", panel, before);
 			}
 			x += width;
 		}
@@ -265,7 +324,15 @@ namespace World
 			else if (m_DropZone == Wui::DropZone::Bottom) { zone.Y = area.Y + area.H * 0.75f; zone.H = area.H * 0.25f; }
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, zone, { 0.3f, 0.5f, 0.9f, 0.28f }, 3.0f });
 			if (!node.Panels.empty())
+			{
+				const std::string target = node.Panels[node.Active];
+				if (target != m_LastDragTarget || m_DropZone != m_LastDragZone || !m_LastDragValid)
+					ctx.RecordOp("drag", "hover", target, ZoneName(m_DropZone));
+				m_LastDragTarget = target;
+				m_LastDragZone = m_DropZone;
+				m_LastDragValid = true;
 				m_DropTargetPanel = node.Panels[node.Active];
+			}
 		}
 	}
 
@@ -278,6 +345,7 @@ namespace World
 		else if (id == "view") DrawViewport(ctx, rect);
 		else if (id == "stats") DrawStats(ctx, rect);
 		else if (id == "memory") DrawMemory(ctx, rect);
+		else if (id == "operations") DrawOperations(ctx, rect);
 		else Label(ctx, { rect.X + 8, rect.Y + 8 }, PanelTitle(id), m_Theme.TextMuted, 14.0f);
 	}
 
@@ -354,6 +422,32 @@ namespace World
 			Label(ctx, { allocs.X + 6, allocs.Y + 4 }, std::to_string(snapshots[row].NumAllocations), m_Theme.Text, 13.0f);
 		}
 		MemoryTracker::Get().ClearEphemeralStats();
+	}
+
+	void EditorShell::DrawOperations(Wui::WuiContext& ctx, const Wui::WuiRect& rect)
+	{
+		const std::vector<Wui::WuiOpRecord>& records = ctx.Ops().Records();
+		const float rowHeight = 16.0f;
+		float scrollY = 0;
+		BeginScrollArea(ctx, rect, records.size() * rowHeight + 8.0f, scrollY, m_Theme);
+		float y = rect.Y + 6 - scrollY;
+		for (auto it = records.rbegin(); it != records.rend(); ++it)
+		{
+			Wui::WuiColor color = m_Theme.TextMuted;
+			if (it->Category == "dock") color = m_Theme.Accent;
+			else if (it->Category == "undo") color = { 0.35f, 0.8f, 0.45f, 1 };
+			else if (it->Category == "drag") color = m_Theme.Text;
+			const std::string line = "F" + std::to_string(it->Frame) + " [" + it->Category + "] " + it->Action +
+				(it->Target.empty() ? "" : " " + it->Target) + (it->Detail.empty() ? "" : " " + it->Detail);
+			Label(ctx, { rect.X + 8, y }, line, color, 12.0f);
+			y += rowHeight;
+		}
+		EndScrollArea(ctx);
+		if (Button(ctx, Wui::HashId("ops.clear"), { rect.X + rect.W - 70, rect.Y + 4, 60, 20 }, "Clear", m_Theme))
+		{
+			ctx.Ops().Clear();
+			ctx.RecordOp("ops", "clear", "", "");
+		}
 	}
 
 	void EditorShell::DrawHierarchy(Wui::WuiContext& ctx, const Wui::WuiRect& rect)
@@ -991,7 +1085,10 @@ namespace World
 				{
 					const std::filesystem::path dragged = m_Browser.Root / payload.substr(5);
 					if (dragged != path && dragged.parent_path() != path)
+					{
 						std::filesystem::rename(dragged, path / dragged.filename());
+						ctx.RecordOp("browser", "move", dragged.filename().string(), "-> " + path.string());
+					}
 				}
 			}
 
@@ -1003,7 +1100,10 @@ namespace World
 				{
 					const std::filesystem::path newPath = path.parent_path() / renameText;
 					if (newPath != path)
+					{
 						std::filesystem::rename(path, newPath);
+						ctx.RecordOp("browser", "rename", path.filename().string(), "-> " + newPath.filename().string());
+					}
 					m_Browser.RenameTarget.clear();
 				}
 			}
@@ -1054,7 +1154,9 @@ namespace World
 			Label(ctx, { panel.X + 16, panel.Y + 48 }, "Delete " + std::to_string(m_Browser.Selected.size()) + " item(s)? This cannot be undone.", m_Theme.Text, 14.0f);
 			if (Button(ctx, Wui::HashId("browser.delete.yes"), { panel.X + 20, panel.Y + 110, 110, 28 }, "Yes", m_Theme))
 			{
+				const size_t deleted = m_Browser.Selected.size();
 				BrowserDeleteSelection();
+				ctx.RecordOp("browser", "delete", std::to_string(deleted), "");
 				ctx.ClearModal();
 			}
 			if (Button(ctx, Wui::HashId("browser.delete.no"), { panel.X + 150, panel.Y + 110, 110, 28 }, "No", m_Theme))
