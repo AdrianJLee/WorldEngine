@@ -55,6 +55,7 @@ namespace World::Wui
 		WuiRect Uv { 0, 0, 1, 1 };
 		int TextSelStart = -1;
 		int TextSelEnd = -1;
+		int TextCursorByte = -1;
 	};
 
 	// 帧级上下文:输入、持久状态、样式栈、焦点、绘制命令。

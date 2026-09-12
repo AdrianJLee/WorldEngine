@@ -4,6 +4,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cfloat>
 
 namespace
@@ -131,6 +132,15 @@ namespace World::Wui
 								ImVec2(min.x + widthBefore, min.y),
 								ImVec2(min.x + widthBefore + widthSelected, min.y + command.FontSize),
 								ImGui::GetColorU32(ImVec4(0.25f, 0.45f, 0.85f, 0.55f)));
+						}
+						if (command.TextCursorByte >= 0)
+						{
+							const size_t prefixLength = std::min<size_t>(static_cast<size_t>(command.TextCursorByte), command.Text.size());
+							const float cursorX = font->CalcTextSizeA(command.FontSize, FLT_MAX, 0.0f, command.Text.substr(0, prefixLength).c_str()).x;
+							drawList->AddRectFilled(
+								ImVec2(min.x + cursorX - 1.0f, min.y + 2.0f),
+								ImVec2(min.x + cursorX + 1.0f, min.y + command.FontSize - 2.0f),
+								ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)));
 						}
 						drawList->AddText(font, command.FontSize, min, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)), command.Text.c_str());
 						break;
