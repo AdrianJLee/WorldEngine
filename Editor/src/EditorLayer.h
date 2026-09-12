@@ -1,9 +1,9 @@
 #pragma once
 #include "World.h"
-#include "Panels/SceneHierarchyPanel.h"
-#include "Panels/ContentBrowserPanel.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "Document/EditorDocument.h"
+#include "World/WUI/WuiCommand.h"
+#include "WUI/EditorShell.h"
 #include <atomic>
 #include <functional>
 #include <string>
@@ -25,9 +25,47 @@ namespace World
 		void OpenScene();
 		void OpenScene(const std::filesystem::path& path);
 		bool SaveScene();
+		void StartCookingAction();
+		void GenerateLuaStubsAction();
+		void CloseAction();
+		void DuplicateSelectedEntity();
+
+		// ---- WUI 面板访问(W2) ----
+		Ref<Scene> GetActiveScene() const { return m_ActiveScene; }
+		EditorDocument& GetDocument() { return m_Document; }
+		Entity GetSelectedEntity() const { return m_SelectedEntity; }
+		void SetSelectedEntity(Entity entity) { m_SelectedEntity = entity; }
+		EditorCamera& GetEditorCamera() { return m_EditorCamera; }
+		Ref<SceneRenderer>& GetSceneRenderer() { return m_SceneRenderer; }
+		bool IsPlaying() const { return m_SceneState == SceneState::Play; }
+		bool IsSimulating() const { return m_SceneState == SceneState::Simulate; }
+		bool IsPaused() const { return m_ScenePaused; }
+		void TogglePlay();
+		void ToggleSimulate();
+		void TogglePause();
+		void SetGizmoOperation(ImGuizmo::OPERATION operation) { m_CurrentGizmoOperation = operation; }
+		int GetGizmoOperation() const { return m_CurrentGizmoOperation; }
+		Entity PickEntityAt(glm::vec2 viewportLocal) { return GetEntityAtMousePosition(viewportLocal); }
+		Ref<Texture2D> GetIcon(int index) const;
+		// 视口状态(由 WUI 视口面板回填)
+		void SetViewportState(bool focused, bool hovered, glm::vec2 size, glm::vec2 bounds[2]);
+		glm::vec2 GetViewportSize() const { return m_ViewportSize; }
+		void MarkDocumentDirty() { if (m_SceneState == SceneState::Edit && m_ActiveScene == m_Document.GetScene()) m_Document.MarkDirty(); }
+
+		// ---- 模态状态(WUI 读取) ----
+		bool& ShowUnsavedModal() { return m_ShowUnsavedModal; }
+		bool& ShowErrorModal() { return m_ShowErrorModal; }
+		std::string& ErrorText() { return m_ErrorText; }
+		bool& ShowCookingProgress() { return m_ShowCookingProgress; }
+		bool CookingFinished() const { return m_CookingFinished.load(std::memory_order_acquire); }
+		bool CookingSucceeded() const { return m_CookingSucceeded; }
+		const std::string& CookingError() const { return m_CookingError; }
+		void ResolveUnsavedModal(bool save);
+		void CancelUnsavedModal();
+		bool HasRenderedScene() const { return m_HasRenderedScene; }
+		Wui::WuiCommandRegistry& Commands() { return m_Commands; }
 
 		bool OnKeyPressed(KeyPressedEvent& e);
-		bool OnMouseButtonPressed(MouseButtonPressedEvent& e);
 		bool OnWindowClose(WindowCloseEvent& e);
 
 	private:
@@ -36,13 +74,7 @@ namespace World
 			Edit = 0, Play = 1, Simulate = 2
 		};
 	private:
-		// 更新视口边界，获取视口在屏幕上的坐标范围
-		void UpdateViewBounds();
-
-		Entity GetEntityAtMousePosition();
-
-
-		void UI_Toolbar();
+		Entity GetEntityAtMousePosition(glm::vec2 viewportLocal);
 
 		void SetSceneState(SceneState state);
 		void UpdateSceneContext(Ref<Scene> scene);
@@ -51,10 +83,7 @@ namespace World
 		bool TrySave();
 		void RequestAction(std::function<void()> action);
 		void ShowError(const std::string& message);
-		void DrawUnsavedModal();
-		void DrawErrorModal();
 		void StartCooking(const std::string& target);
-		void OnCooking();
 	private:
 		Ref<SceneRenderer> m_SceneRenderer;
 		SceneRendererOptions m_RendererOptions;
@@ -65,14 +94,13 @@ namespace World
 
 		EditorCamera m_EditorCamera;
 
+		Entity m_SelectedEntity;
+
 		glm::vec2 m_ViewportSize = { 0,0 };
 		glm::vec2 m_ViewportBounds[2] = { {0,0}, {0,0} };
 
 		bool m_ViewportFocused = false, m_ViewportHovered = false;
 		bool m_HasRenderedScene = false;
-
-		SceneHierarchyPanel m_SceneHierarchyPanel;
-		ContentBrowserPanel m_ContentBrowserPanel;
 
 		// Gizmo operation type
 		ImGuizmo::OPERATION m_CurrentGizmoOperation = (ImGuizmo::OPERATION)-1;
@@ -104,6 +132,9 @@ namespace World
 		// Gizmo 拖动前后快照，仅用于标脏（不做撤销）。
 		bool m_GizmoDragging = false;
 		TransformComponent m_GizmoDragBefore;
+
+		Wui::WuiCommandRegistry m_Commands;
+		EditorShell m_Shell;
 	};
 
 }

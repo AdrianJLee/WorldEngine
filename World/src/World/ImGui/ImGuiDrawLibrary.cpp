@@ -8,18 +8,15 @@
 
 namespace World
 {
-	void ImGuiDrawLibrary::DrawGizmo(const EditorCamera& editorCamera, Entity targetEntity, ImGuizmo::OPERATION operation, float snap)
+	void ImGuiDrawLibrary::DrawGizmo(const EditorCamera& editorCamera, Entity targetEntity, ImGuizmo::OPERATION operation,
+		const Wui::WuiRect& rect, float snap)
 	{
 		// 设置 ImGuizmo 的操作模式和坐标系统
 		ImGuizmo::SetOrthographic(false);
 		// 注意：ImGuizmo 的坐标系统是左手系，且默认使用列主序矩阵
-		ImGuizmo::SetDrawlist();
+		ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());
 
-		float windowWidth = ImGui::GetWindowWidth();
-		float windowHeight = ImGui::GetWindowHeight();
-
-		// 设置操作区域为当前 ImGui 窗口的大小和位置
-		ImGuizmo::SetRect(ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, windowWidth, windowHeight);
+		ImGuizmo::SetRect(rect.X, rect.Y, rect.W, rect.H);
 
 		glm::mat4 cameraView = editorCamera.GetViewMatrix();
 		glm::mat4 camerProjection = editorCamera.GetProjectionMatrix();
@@ -35,5 +32,15 @@ namespace World
 		{
 			targetTransform.SetTransform(entityTransform);
 		}
+	}
+
+	bool ImGuiDrawLibrary::GizmoIsUsing()
+	{
+		return ImGuizmo::IsUsing();
+	}
+
+	bool ImGuiDrawLibrary::GizmoIsOver()
+	{
+		return ImGuizmo::IsOver();
 	}
 }

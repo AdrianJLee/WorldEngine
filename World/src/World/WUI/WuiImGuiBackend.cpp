@@ -59,6 +59,7 @@ namespace World::Wui
 			input.MouseDown[i] = io.MouseDown[i];
 			input.MouseClicked[i] = io.MouseClicked[i];
 			input.MouseReleased[i] = io.MouseReleased[i];
+			input.MouseDoubleClicked[i] = io.MouseDoubleClicked[i];
 		}
 		input.Wheel = io.MouseWheel;
 		input.WantKeyboard = io.WantCaptureKeyboard;
@@ -78,6 +79,7 @@ namespace World::Wui
 			if (character)
 				input.TextInput.push_back(character);
 		input.ViewportSize = { io.DisplaySize.x, io.DisplaySize.y };
+		input.FPS = io.Framerate;
 		return true;
 	}
 

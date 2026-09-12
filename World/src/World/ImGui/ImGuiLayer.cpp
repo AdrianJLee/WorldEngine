@@ -1,7 +1,8 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "ImGuiLayer.h"
 
 #include "World/Core/Application.h"
+#include "World/Utils/PlatformUtils.h"
 
 
 #include <imgui.h>
@@ -13,9 +14,20 @@
 
 namespace World
 {
-	bool ImGuiLayer::m_Show = false;
 	ImFont* ImGuiLayer::s_BoldFont = nullptr;
 	ImFont* ImGuiLayer::s_CjkFont = nullptr;
+
+	ImFont* ImGuiLayer::GetDefaultFont()
+	{
+		return ImGui::GetIO().FontDefault;
+	}
+
+	void ImGuiLayer::ApplyImeState(bool enabled)
+	{
+		void* windowHandle = ImGui::GetMainViewport()->PlatformHandleRaw;
+		if (windowHandle)
+			SystemUtils::SetIMEState(enabled, windowHandle);
+	}
 
 	World::ImGuiLayer::ImGuiLayer()
 		: Layer("ImGuiLayer"), m_Time(0.0f)
@@ -36,20 +48,11 @@ namespace World
 		ImGuiIO& io = ImGui::GetIO(); (void)io;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;       // Enable Keyboard Controls
 		//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;       // Enable Gamepad Controls
-		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;           // Enable Docking
-		io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;         // Enable Multi-Viewport / Platform Windows
 
 		// Setup Dear ImGui style
 		ImGui::StyleColorsDark();
 		//ImGui::StyleColorsClassic();
 
-		//When viewports are enabled we tweak WindowRounding/WindowBg so platform windows can look identical to regular ones.
-		ImGuiStyle& style = ImGui::GetStyle();
-		if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-		{
-			style.WindowRounding = 0.0f;
-			style.Colors[ImGuiCol_WindowBg].w = 1.0f;
-		}
 
 
 		// Set default ImGui font
@@ -92,8 +95,6 @@ namespace World
 	void ImGuiLayer::OnImGuiRender()
 	{
 		WLD_PROFILE_FUNCTION();
-		if (m_Show)
-			ImGui::ShowDemoWindow(&m_Show);
 	}
 	void ImGuiLayer::OnEvent(Event& event)
 	{
@@ -126,63 +127,8 @@ namespace World
 		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-		//允许 ImGui 的窗口脱离主程序窗口，在桌面上任意拖拽
-		if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-		{
-			// 1. 备份当前的 OpenGL 上下文（主窗口）
-			GLFWwindow* backup_current_context = glfwGetCurrentContext();
-
-			// 2. 更新所有子窗口的位置、大小等状态
-			ImGui::UpdatePlatformWindows();
-
-			// 3. 让 ImGui 调用底层驱动（GLFW/OpenGL），在主窗口之外渲染那些脱离的小窗口
-			ImGui::RenderPlatformWindowsDefault();
-
-			// 4. 关键：把 OpenGL 上下文切回到主窗口，保证引擎下一帧还能画在主窗口里
-			glfwMakeContextCurrent(backup_current_context);
-		}
 	}
 
-	void ImGuiLayer::ShowDockSpaceBack(bool autoEnd)
-	{
-		static bool dockspaceOpen = true;
-		static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
-
-		// 1. 配置全屏窗口标志
-		ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
-		const ImGuiViewport* viewport = ImGui::GetMainViewport();
-		ImGui::SetNextWindowPos(viewport->WorkPos);
-		ImGui::SetNextWindowSize(viewport->WorkSize);
-		ImGui::SetNextWindowViewport(viewport->ID);
-
-		// 强制窗口风格：无圆角、无边框、不置顶
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-		// 彻底禁用内边距
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-
-		window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
-		window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
-
-		// 2. 开始渲染背景窗口
-		// 注意：即使点击了关闭按钮，我们通常也保持 DockSpace 开启
-		ImGui::Begin("MyDockSpace", &dockspaceOpen, window_flags);
-		ImGui::PopStyleVar(3);
-
-		// 3. 建立 DockSpace 核心
-		ImGuiIO& io = ImGui::GetIO();
-		if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
-		{
-			ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
-			ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
-		}
-
-
-		// 这里可以放置其他的子窗口，它们现在可以停靠在这个背景上了
-		// ImGui::Begin("Stats"); ImGui::Text("Hello"); ImGui::End();
-		if (autoEnd)
-			ImGui::End(); // 结束背景窗口
-	}
 	void ImGuiLayer::SetDarkThemeColors()
 	{
 		ImGuiStyle& style = ImGui::GetStyle();

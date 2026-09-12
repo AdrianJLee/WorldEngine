@@ -16,12 +16,14 @@ namespace World::Wui
 		bool MouseDown[3] = { false, false, false };
 		bool MouseClicked[3] = { false, false, false };
 		bool MouseReleased[3] = { false, false, false };
+		bool MouseDoubleClicked[3] = { false, false, false };
 		float Wheel = 0;
 		bool WantKeyboard = false;
 		bool Ctrl = false, Shift = false, Alt = false;
 		std::vector<uint32_t> KeyDown;   // 引擎 KeyCodes
 		std::vector<uint32_t> TextInput; // 本帧输入字符(UTF-32)
 		glm::vec2 ViewportSize { 1280, 720 };
+		float FPS = 0;
 	};
 
 	enum class WuiDrawKind : uint8_t
@@ -86,6 +88,8 @@ namespace World::Wui
 
 		void SetFocus(WuiId id) { m_Focus = id; }
 		WuiId Focus() const { return m_Focus; }
+		void SetTextInputActive(bool active) { m_TextInputActive = active; }
+		bool IsTextInputActive() const { return m_TextInputActive; }
 		bool IsKeyPressed(uint32_t keyCode) const
 		{
 			return std::find(m_Input.KeyDown.begin(), m_Input.KeyDown.end(), keyCode) != m_Input.KeyDown.end();
@@ -94,6 +98,10 @@ namespace World::Wui
 		bool IsClicked(const WuiRect& rect, int button = 0) const
 		{
 			return HitTest(rect, m_Input.MousePos) && m_Input.MouseClicked[button];
+		}
+		bool IsDoubleClicked(const WuiRect& rect, int button = 0) const
+		{
+			return HitTest(rect, m_Input.MousePos) && m_Input.MouseDoubleClicked[button];
 		}
 
 		// ---- 弹窗/模态 ----
@@ -128,6 +136,7 @@ namespace World::Wui
 		std::vector<WuiStyle> m_StyleStack;
 		WuiStyleSheet m_Sheet;
 		WuiId m_Focus = 0;
+		bool m_TextInputActive = false;
 		std::vector<WuiId> m_OpenPopups;
 		WuiId m_Modal = 0;
 		glm::vec2 m_ViewportSize { 1280, 720 };

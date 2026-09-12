@@ -87,6 +87,18 @@ namespace World::Wui
 		return value;
 	}
 
+	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool& value, const WuiTheme& theme)
+	{
+		if (ctx.IsClicked(rect))
+			value = !value;
+		const WuiRect box { rect.X, rect.Y + (rect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
+		ctx.Commands().push_back({ WuiDrawKind::Rect, box, value ? theme.Accent : theme.ButtonBg, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box, theme.Border, 3.0f, 1.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 24.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, label, 15.0f, false });
+		(void)id;
+		return value;
+	}
+
 	void SliderFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float min, float max, const WuiTheme& theme)
 	{
 		const float range = std::max(0.0001f, max - min);
@@ -110,6 +122,8 @@ namespace World::Wui
 		if (ctx.IsClicked(rect))
 			ctx.SetFocus(id);
 		const bool focused = ctx.Focus() == id;
+		if (focused)
+			ctx.SetTextInputActive(true);
 		bool submitted = false;
 		if (focused)
 		{

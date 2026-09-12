@@ -3,24 +3,25 @@
 #include "World/Core/Cook/VFS.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Scene/ScriptEngine.h"
-#include "World/WUI/WuiDemo.h"
 #include "World/WUI/WuiImGuiBackend.h"
 #include <filesystem>
 #include <stdexcept>
 namespace World
 {
 	EditorLayer::EditorLayer()
-		: Layer("EditorLayer"), m_Document(Application::Get().GetContext())
+		: Layer("EditorLayer"), m_Document(Application::Get().GetContext()), m_Shell(*this)
 	{
-		m_ContentBrowserPanel.RegisterOpenAction(".wd", [this](const std::filesystem::path& filepath)
-			{
-				OpenScene(filepath);
-			});
-		m_SceneHierarchyPanel.SetEditCallback([this]()
-			{
-				if (m_SceneState == SceneState::Edit && m_ActiveScene == m_Document.GetScene())
-					m_Document.MarkDirty();
-			});
+		m_Commands.Register({ Wui::HashId("cmd.new"), "New", KeyCodes::N, true, false, [this] { NewScene(); } });
+		m_Commands.Register({ Wui::HashId("cmd.open"), "Open", KeyCodes::O, true, false, [this] { OpenScene(); } });
+		m_Commands.Register({ Wui::HashId("cmd.save"), "Save", KeyCodes::S, true, false, [this] { SaveScene(); } });
+		m_Commands.Register({ Wui::HashId("cmd.duplicate"), "Duplicate", KeyCodes::D, true, false, [this] { DuplicateSelectedEntity(); } });
+		m_Commands.Register({ Wui::HashId("cmd.gizmo_none"), "Gizmo None", KeyCodes::Q, false, false, [this] { SetGizmoOperation((ImGuizmo::OPERATION)-1); } });
+		m_Commands.Register({ Wui::HashId("cmd.gizmo_move"), "Gizmo Move", KeyCodes::W, false, false, [this] { SetGizmoOperation(ImGuizmo::TRANSLATE); } });
+		m_Commands.Register({ Wui::HashId("cmd.gizmo_rotate"), "Gizmo Rotate", KeyCodes::E, false, false, [this] { SetGizmoOperation(ImGuizmo::ROTATE); } });
+		m_Commands.Register({ Wui::HashId("cmd.gizmo_scale"), "Gizmo Scale", KeyCodes::R, false, false, [this] { SetGizmoOperation(ImGuizmo::SCALE); } });
+		m_Commands.Register({ Wui::HashId("cmd.play"), "Play", KeyCodes::F5, false, false, [this] { TogglePlay(); } });
+		m_Commands.Register({ Wui::HashId("cmd.simulate"), "Simulate", KeyCodes::F6, false, false, [this] { ToggleSimulate(); } });
+		m_Commands.Register({ Wui::HashId("cmd.pause"), "Pause", KeyCodes::F7, false, false, [this] { TogglePause(); } });
 	}
 	void EditorLayer::OnAttach()
 	{
@@ -63,7 +64,7 @@ namespace World
 		m_HasRenderedScene = false;
 
 		SetSceneState(SceneState::Edit);
-		m_SceneHierarchyPanel.SetContext(nullptr);
+		
 		m_ActiveScene.reset();
 		m_RuntimeScene.reset();
 		m_Document = EditorDocument(Application::Get().GetContext());
@@ -123,11 +124,11 @@ namespace World
 
 		}
 
-		Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
+		Entity selectedEntity = m_SelectedEntity;
 		if (!selectedEntity.IsValid() || selectedEntity.GetScene() != m_ActiveScene.get() ||
 			m_ActiveScene->IsPendingDestroy(selectedEntity))
 		{
-			m_SceneHierarchyPanel.SetSelectedEntity({});
+			m_SelectedEntity = {};
 			selectedEntity = {};
 		}
 		else if (!selectedEntity.HasComponent<TransformComponent>())
@@ -150,194 +151,42 @@ namespace World
 		m_HasRenderedScene = true;
 	}
 
+
 	void EditorLayer::OnImGuiRender()
 	{
 		WLD_PROFILE_FUNCTION();
 
-		// DockSpace
-		ImGuiLayer::ShowDockSpaceBack(false);
-		// 菜单栏
-		if (ImGui::BeginMenuBar())
+		static Wui::WuiContext wuiContext;
+		static Wui::WuiImGuiBackend wuiBackend;
+		static bool fontsInitialized = false;
+		if (!fontsInitialized)
 		{
-			if (ImGui::BeginMenu("File"))
-			{
-				if (ImGui::MenuItem("Show Demo Window", nullptr, ImGuiLayer::m_Show))
-					ImGuiLayer::m_Show = !ImGuiLayer::m_Show;
-
-				if (ImGui::MenuItem("New", "Ctrl+N"))
-				{
-					NewScene();
-				}
-				if (ImGui::MenuItem("Save", "Ctrl+S"))
-				{
-					SaveScene();
-				}
-				if (ImGui::MenuItem("Load", "Ctrl+O"))
-				{
-					OpenScene();
-				}
-				if (ImGui::MenuItem("Cooking", nullptr, false, !m_ShowCookingProgress))
-				{
-					std::string cookTarget = World::FileDialogs::SaveFile("Game Package\0*.*\0");
-					if (!cookTarget.empty())
-						StartCooking(cookTarget);
-				}
-				if (ImGui::MenuItem("Generate Lua API Stubs"))
-				{
-					if (!ScriptEngine::GenerateLuaStubs())
-						WLD_CORE_ERROR("Lua API stub generation failed; keeping the last valid declarations.");
-				}
-				if (ImGui::MenuItem("Exit"))
-					RequestAction([this]() { World::Application::Get().Close(); });
-
-				ImGui::EndMenu();
-			}
-			ImGui::EndMenuBar();
+			wuiBackend.SetFonts(ImGuiLayer::GetDefaultFont(), ImGuiLayer::GetBoldFont(), ImGuiLayer::GetCjkFont());
+			fontsInitialized = true;
 		}
 
-		ImGui::End();
-
-		// 场景层级面板
-		m_SceneHierarchyPanel.OnImGuiRender();
-		m_ContentBrowserPanel.OnImGuiRender();
-
-
-		// 视口
+		Wui::WuiInputState input;
+		if (wuiBackend.BeginFrame(input))
 		{
-			ImGui::Begin("View");
-
-			UpdateViewBounds();
-
-			m_ViewportFocused = ImGui::IsWindowFocused();
-			m_ViewportHovered = ImGui::IsWindowHovered();
-			// 如果视口没有被聚焦或悬停，则阻止事件传递给主程序
-			Application::Get().GetImGuiLayer()->SetBlockEvents(!m_ViewportFocused && !m_ViewportHovered);
-
-			void* windowHandle = ImGui::GetMainViewport()->PlatformHandleRaw;
-			if (windowHandle)
-			{
-				// 如果当前 View 视口聚焦，并且用户没有在其他 UI 里打字，则禁止操作系统唤卡输入法
-				bool disableIME = m_ViewportFocused && !ImGui::GetIO().WantTextInput;
-				SystemUtils::SetIMEState(!disableIME, windowHandle);
-			}
-
-			ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
-			if (viewportPanelSize.x > 0.0f && viewportPanelSize.y > 0.0f &&
-				(m_ViewportSize.x != viewportPanelSize.x || m_ViewportSize.y != viewportPanelSize.y))
-			{
-				m_SceneRenderer->GetTargetFramebuffer()->Resize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);
-				m_ViewportSize = { viewportPanelSize.x, viewportPanelSize.y };
-				m_EditorCamera.SetViewportSize(viewportPanelSize.x, viewportPanelSize.y);
-				m_ActiveScene->OnViewportResize((uint32_t)viewportPanelSize.x, (uint32_t)viewportPanelSize.y);
-
-			}
-			if (m_HasRenderedScene)
-				ImGui::Image((void*)m_SceneRenderer->GetTargetFramebuffer()->GetColorAttachmentRendererID(),
-					ImVec2 { m_ViewportSize.x,m_ViewportSize.y }, ImVec2 { 0,1 }, ImVec2 { 1,0 });
-			else
-			{
-				const ImVec2 messagePosition = ImGui::GetCursorScreenPos();
-				ImGui::Dummy(ImVec2 { m_ViewportSize.x, m_ViewportSize.y });
-				ImGui::GetWindowDrawList()->AddText(ImVec2(messagePosition.x + 10.0f, messagePosition.y + 65.0f),
-					ImGui::GetColorU32(ImGuiCol_TextDisabled), "No scene view available. Play requires a Camera and Transform.");
-			}
-
-			// 工具栏
-			UI_Toolbar();
-
-			Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-			if (selectedEntity.IsValid() && selectedEntity.GetScene() == m_ActiveScene.get() &&
-				!m_ActiveScene->IsPendingDestroy(selectedEntity) && selectedEntity.HasComponent<TransformComponent>() && m_HasRenderedScene)
-			{
-				// Draw Gizmo：拖动起止沿用于标脏（不做撤销）。
-				auto& transform = selectedEntity.GetComponent<TransformComponent>();
-				const bool wasUsing = ImGuizmo::IsUsing();
-				const TransformComponent beforeTransform = transform;
-				ImGuiDrawLibrary::DrawGizmo(m_EditorCamera, selectedEntity, m_CurrentGizmoOperation);
-				const bool nowUsing = ImGuizmo::IsUsing();
-				if (!wasUsing && nowUsing)
-				{
-					m_GizmoDragging = true;
-					m_GizmoDragBefore = beforeTransform;
-				}
-				else if (wasUsing && !nowUsing && m_GizmoDragging)
-				{
-					m_GizmoDragging = false;
-					const auto& afterTransform = selectedEntity.GetComponent<TransformComponent>();
-					if (m_SceneState == SceneState::Edit && selectedEntity.GetScene() == m_Document.GetScene().get() &&
-						(afterTransform.Location != m_GizmoDragBefore.Location ||
-							afterTransform.Rotation != m_GizmoDragBefore.Rotation ||
-							afterTransform.Scale != m_GizmoDragBefore.Scale ||
-							afterTransform.RotationQuat != m_GizmoDragBefore.RotationQuat))
-					{
-						m_Document.MarkDirty();
-					}
-				}
-			}
-
-			ImGui::End();
+			wuiContext.BeginFrame(input);
+			m_Shell.OnRender(wuiContext);
+			wuiContext.EndFrame();
+			wuiBackend.Render(wuiContext.Commands());
 		}
-
-		// 统计面板
-		{
-			ImGui::Begin("Settings");
-
-			{
-				ImGui::Separator();
-				ImGui::Text("Application average %.1f FPS", ImGui::GetIO().Framerate);
-				ImGui::Text("Renderer2D Stats:");
-				ImGui::Text("Draw Calls: %d", Renderer2D::GetStats().DrawCalls);
-				ImGui::Text("Quads: %d", Renderer2D::GetStats().QuadCount);
-				ImGui::Text("Circles: %d", Renderer2D::GetStats().CircleCount);
-				ImGui::Text("Vertices: %d", Renderer2D::GetStats().GetTotalVertexCount());
-				ImGui::Text("Indices: %d", Renderer2D::GetStats().GetTotalIndexCount());
-				ImGui::Separator();
-			}
-
-			ImGui::End();
-		}
-
-		if (m_ShowCookingProgress)
-		{
-			OnCooking();
-		}
-
-		DrawUnsavedModal();
-		DrawErrorModal();
-
-		// W1:WUI 演示面板(临时;W2 全量迁移后移除)。
-		{
-			static Wui::WuiContext wuiContext;
-			static Wui::WuiImGuiBackend wuiBackend;
-			static bool fontsInitialized = false;
-			if (!fontsInitialized)
-			{
-				wuiBackend.SetFonts(ImGui::GetIO().FontDefault, ImGuiLayer::GetBoldFont(), ImGuiLayer::GetCjkFont());
-				fontsInitialized = true;
-			}
-			Wui::WuiInputState input;
-			if (wuiBackend.BeginFrame(input))
-			{
-				wuiContext.BeginFrame(input);
-				Wui::ShowDemoPanel(wuiContext, { 12.0f, 42.0f, 320.0f, 210.0f });
-				wuiContext.EndFrame();
-				wuiBackend.Render(wuiContext.Commands());
-			}
-			wuiBackend.EndFrame();
-		}
+		wuiBackend.EndFrame();
 	}
 
 	void EditorLayer::OnEvent(Event& event)
 	{
 		WLD_PROFILE_FUNCTION();
 
-		m_EditorCamera.OnEvent(event);
+		if (m_ViewportFocused && m_ViewportHovered)
+			m_EditorCamera.OnEvent(event);
 
 		EventDispatcher dispatcher(event);
 
 		dispatcher.Dispatch<WindowCloseEvent>(WLD_BIND_EVENT_FN(EditorLayer::OnWindowClose));
 		dispatcher.Dispatch<KeyPressedEvent>(WLD_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
-		dispatcher.Dispatch<MouseButtonPressedEvent>(WLD_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
 	}
 	bool EditorLayer::OnWindowClose(WindowCloseEvent& e)
 	{
@@ -397,6 +246,135 @@ namespace World
 			ShowError(m_Document.GetLastError());
 		return false;
 	}
+	void EditorLayer::StartCookingAction()
+	{
+		const std::string target = World::FileDialogs::SaveFile("Game Package\0*.*\0");
+		if (!target.empty())
+			StartCooking(target);
+	}
+
+	void EditorLayer::GenerateLuaStubsAction()
+	{
+		if (!ScriptEngine::GenerateLuaStubs())
+			WLD_CORE_ERROR("Lua API stub generation failed; keeping the last valid declarations.");
+	}
+
+	void EditorLayer::CloseAction()
+	{
+		RequestAction([this]() { World::Application::Get().Close(); });
+	}
+
+	void EditorLayer::DuplicateSelectedEntity()
+	{
+		Entity selectedEntity = m_SelectedEntity;
+		if (!m_ActiveScene || !selectedEntity.IsValid() || selectedEntity.GetScene() != m_ActiveScene.get() ||
+			m_ActiveScene->IsPendingDestroy(selectedEntity))
+		{
+			m_SelectedEntity = {};
+			return;
+		}
+		try
+		{
+			if (m_ActiveScene->IsActive() &&
+				(selectedEntity.HasComponent<RigidBody2DComponent>() || selectedEntity.HasComponent<BoxCollider2DComponent>() ||
+					selectedEntity.HasComponent<CircleCollider2DComponent>()))
+			{
+				WLD_CORE_WARN("Cannot duplicate physics entities while the scene is active. Stop the scene first.");
+				return;
+			}
+			const entt::entity handle = selectedEntity;
+			if (m_ActiveScene->DeferStructuralChange([handle](Scene& scene)
+			{
+				Entity source(&scene, handle);
+				if (source.IsValid() && !scene.IsPendingDestroy(handle))
+					scene.DuplicateEntity(source);
+			}))
+			{
+				MarkDocumentDirty();
+			}
+			else
+				WLD_CORE_WARN("Duplicate entity request was rejected by the scene.");
+		}
+		catch (const std::exception& error)
+		{
+			WLD_CORE_ERROR("Unable to duplicate entity: {0}", error.what());
+		}
+		catch (...)
+		{
+			WLD_CORE_ERROR("Unable to duplicate entity: unknown error.");
+		}
+	}
+
+	void EditorLayer::TogglePlay()
+	{
+		SetSceneState(m_SceneState == SceneState::Play ? SceneState::Edit : SceneState::Play);
+	}
+
+	void EditorLayer::ToggleSimulate()
+	{
+		SetSceneState(m_SceneState == SceneState::Simulate ? SceneState::Edit : SceneState::Simulate);
+	}
+
+	void EditorLayer::TogglePause()
+	{
+		if (m_SceneState == SceneState::Play || m_SceneState == SceneState::Simulate)
+			m_ScenePaused = !m_ScenePaused;
+	}
+
+	Ref<Texture2D> EditorLayer::GetIcon(int index) const
+	{
+		switch (index)
+		{
+			case 1: return m_IconStop;
+			case 2: return m_IconPause;
+			case 3: return m_IconContinue;
+			case 4: return m_IconSimulate;
+			case 5: return m_IconSimulateStop;
+			case 6: return m_IconSimulatePause;
+			case 7: return m_IconSimulateContinue;
+			default: return m_IconPlay;
+		}
+	}
+
+	void EditorLayer::SetViewportState(bool focused, bool hovered, glm::vec2 size, glm::vec2 bounds[2])
+	{
+		m_ViewportFocused = focused;
+		m_ViewportHovered = hovered;
+		m_ViewportBounds[0] = bounds[0];
+		m_ViewportBounds[1] = bounds[1];
+		if (size.x > 0 && size.y > 0 && (m_ViewportSize.x != size.x || m_ViewportSize.y != size.y))
+		{
+			m_ViewportSize = size;
+			if (m_SceneRenderer)
+				m_SceneRenderer->GetTargetFramebuffer()->Resize((uint32_t)size.x, (uint32_t)size.y);
+			m_EditorCamera.SetViewportSize(size.x, size.y);
+			if (m_ActiveScene)
+				m_ActiveScene->OnViewportResize((uint32_t)size.x, (uint32_t)size.y);
+		}
+
+	}
+
+	void EditorLayer::ResolveUnsavedModal(bool save)
+	{
+		std::function<void()> action = std::move(m_PendingAction);
+		m_PendingAction = nullptr;
+		m_ShowUnsavedModal = false;
+		if (save && !TrySave())
+		{
+			if (!m_Document.GetLastError().empty())
+				WLD_CORE_ERROR("{0}", m_Document.GetLastError());
+			return;
+		}
+		if (action)
+			action();
+	}
+
+	void EditorLayer::CancelUnsavedModal()
+	{
+		m_PendingAction = nullptr;
+		m_ShowUnsavedModal = false;
+	}
+
 	bool EditorLayer::TrySave()
 	{
 		m_Document.ClearError();
@@ -418,128 +396,9 @@ namespace World
 		bool shift = Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift);
 
 
-		switch (e.GetKeyCode())
-		{
-			case KeyCodes::N:
-			{
-				if (control)
-					NewScene();
-				break;
-			}
-
-			case KeyCodes::O:
-			{
-				if (control)
-					OpenScene();
-				break;
-			}
-
-			case KeyCodes::S:
-			{
-				if (control)
-					SaveScene();
-				break;
-			}
-
-			case KeyCodes::Q:
-			{
-				m_CurrentGizmoOperation = (ImGuizmo::OPERATION)-1;
-				break;
-			}
-			case KeyCodes::W:
-			{
-				m_CurrentGizmoOperation = ImGuizmo::TRANSLATE;
-				break;
-			}
-			case KeyCodes::E:
-			{
-				m_CurrentGizmoOperation = ImGuizmo::ROTATE;
-				break;
-			}
-			case KeyCodes::R:
-			{
-				m_CurrentGizmoOperation = ImGuizmo::SCALE;
-				break;
-			}
-			case KeyCodes::D:
-			{
-				if (control)
-				{
-					Entity selectedEntity = m_SceneHierarchyPanel.GetSelectedEntity();
-					if (!m_ActiveScene || !selectedEntity.IsValid() || selectedEntity.GetScene() != m_ActiveScene.get() ||
-						m_ActiveScene->IsPendingDestroy(selectedEntity))
-					{
-						m_SceneHierarchyPanel.SetSelectedEntity({});
-						break;
-					}
-					try
-					{
-						if (m_ActiveScene->IsActive() &&
-							(selectedEntity.HasComponent<RigidBody2DComponent>() || selectedEntity.HasComponent<BoxCollider2DComponent>() ||
-							 selectedEntity.HasComponent<CircleCollider2DComponent>()))
-						{
-							WLD_CORE_WARN("Cannot duplicate physics entities while the scene is active. Stop the scene first.");
-							break;
-						}
-						const entt::entity handle = selectedEntity;
-						if (m_ActiveScene->DeferStructuralChange([handle](Scene& scene)
-						{
-							Entity source(&scene, handle);
-							if (source.IsValid() && !scene.IsPendingDestroy(handle))
-								scene.DuplicateEntity(source);
-						}))
-						{
-							if (m_SceneState == SceneState::Edit && m_ActiveScene == m_Document.GetScene())
-								m_Document.MarkDirty();
-						}
-						else
-							WLD_CORE_WARN("Duplicate entity request was rejected by the scene.");
-					}
-					catch (const std::exception& error)
-					{
-						WLD_CORE_ERROR("Unable to duplicate entity: {0}", error.what());
-					}
-					catch (...)
-					{
-						WLD_CORE_ERROR("Unable to duplicate entity: unknown error.");
-					}
-				}
-				break;
-			}
-		}
-
-		return false;
+		return m_Commands.HandleKey(e.GetKeyCode(), control, shift);
 	}
-	bool EditorLayer::OnMouseButtonPressed(MouseButtonPressedEvent& e)
-	{
-		if (e.GetMouseButton() == MouseCodes::ButtonLeft)
-		{
-			if (m_ViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(KeyCodes::LeftAlt))
-			{
-				//GetEntityAtMousePosition();
-				m_SceneHierarchyPanel.SetSelectedEntity(GetEntityAtMousePosition());
-			}
-		}
-		return false;
-	}
-	void EditorLayer::UpdateViewBounds()
-	{
-		// 1. 获取视口（黑色绘图区）的左上角屏幕坐标
-		// GetCursorScreenPos 会自动处理标题栏高度，直接指向绘图区的起始点
-		ImVec2 minBound = ImGui::GetCursorScreenPos();
-
-		// 2. 获取视口（黑色绘图区）的实际可用尺寸
-		// 这不含标题栏和滚动条，正是你 Framebuffer 渲染的大小
-		ImVec2 viewportSizeAvail = ImGui::GetContentRegionAvail();
-
-		// 3. 计算右下角坐标
-		ImVec2 maxBound = { minBound.x + viewportSizeAvail.x, minBound.y + viewportSizeAvail.y };
-
-		// 保存边界（用于后续坐标转换）
-		m_ViewportBounds[0] = { minBound.x, minBound.y };
-		m_ViewportBounds[1] = { maxBound.x, maxBound.y };
-	}
-	Entity EditorLayer::GetEntityAtMousePosition()
+	Entity EditorLayer::GetEntityAtMousePosition(glm::vec2 viewportLocal)
 	{
 		if (!m_HasRenderedScene || !m_ActiveScene || !m_SceneRenderer)
 			return {};
@@ -547,15 +406,12 @@ namespace World
 
 		// 获取鼠标在屏幕上的绝对位置
 		glm::vec2 viewportSizeAvail = { m_ViewportBounds[1].x - m_ViewportBounds[0].x, m_ViewportBounds[1].y - m_ViewportBounds[0].y };
-		auto [mouseX_Screen, mouseY_Screen] = ImGui::GetMousePos();
 
 		// 转换到视口局部坐标 (0,0) 是左上角
-		float localX = mouseX_Screen - m_ViewportBounds[0].x;
-		float localY = mouseY_Screen - m_ViewportBounds[0].y;
 
 		// 翻转 Y 轴，因为 OpenGL 的 (0,0) 在左下角，而 ImGui 在左上角
-		int mouseX = (int)localX;
-		int mouseY = (int)(viewportSizeAvail.y - localY);
+		int mouseX = (int)viewportLocal.x;
+		int mouseY = (int)(viewportSizeAvail.y - viewportLocal.y);
 
 		int pixelData = -1;
 		// 边界检查：只有当鼠标在黑色内容区内时才读取
@@ -568,105 +424,6 @@ namespace World
 		Entity result = pixelData == -1 ? Entity() : Entity(m_ActiveScene.get(), (entt::entity)pixelData);
 
 		return result.IsValid() && !m_ActiveScene->IsPendingDestroy(result) ? result : Entity{};
-	}
-	void EditorLayer::UI_Toolbar()
-	{
-
-		// 去除默认按钮背景，以便我们自己控制底板
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-		auto& colors = ImGui::GetStyle().Colors;
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(colors[ImGuiCol_ButtonHovered].x, colors[ImGuiCol_ButtonHovered].y, colors[ImGuiCol_ButtonHovered].z, 0.5f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(colors[ImGuiCol_ButtonActive].x, colors[ImGuiCol_ButtonActive].y, colors[ImGuiCol_ButtonActive].z, 0.5f));
-
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0, 0));
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0)); // 让 Button 的实际大小精准等于传入的 iconSize
-
-
-		float iconSize = 28.0f; // 图标尺寸
-		float spacing = 8.0f;   // 按钮间距
-		float padding = 8.0f;   // 底板内边距
-
-		// 当前我们需要4个按钮组 Play | Pause | Simulate | SimulatePause 
-		float buttonsWidth = (iconSize * 3.0f) + (spacing * 2.0f);
-		float panelWidth = buttonsWidth + (padding * 2.0f);
-		float panelHeight = iconSize + (padding * 2.0f);
-
-		// 设置底板在视口中的悬浮位置（横向居中，纵向靠上）
-		ImVec2 contentMin = ImGui::GetWindowContentRegionMin();
-		ImGui::SetCursorPos(ImVec2(contentMin.x + (m_ViewportSize.x - panelWidth) * 0.5f, contentMin.y + 15.0f));
-
-		// 绘制半透明圆角底板
-		ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.12f, 0.12f, 0.85f));
-		ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-
-		if (ImGui::BeginChild("##ToolbarOverlay", ImVec2(panelWidth, panelHeight), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
-		{
-			ImGui::SetCursorPos(ImVec2(padding, padding)); // 将绘制起点往内收起 Padding 的距离
-
-			bool isPlayMode = m_SceneState == SceneState::Play;
-			bool isSimulateMode = m_SceneState == SceneState::Simulate;
-
-			// ==== 1. Play / Stop 按钮 ====
-			Ref<Texture2D> playIcon = isPlayMode ? m_IconStop : m_IconPlay;
-			if (isSimulateMode) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f); // 模拟状态下 Play 置灰
-
-			if (ImGui::ImageButton((ImTextureID)(uint64_t)playIcon->GetRendererID(), ImVec2(iconSize, iconSize), { 0, 1 }, { 1, 0 }) && !isSimulateMode)
-			{
-				SetSceneState(isPlayMode ? SceneState::Edit : SceneState::Play);
-			}
-			if (isSimulateMode) ImGui::PopStyleVar();
-
-			ImGui::SameLine(0, spacing);
-
-			// ==== 2. Simulate / Stop 按钮 ====
-			Ref<Texture2D> simulateIcon = isSimulateMode ? m_IconSimulateStop : m_IconSimulate;
-			if (isPlayMode) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f);
-
-			if (ImGui::ImageButton((ImTextureID)(uint64_t)simulateIcon->GetRendererID(), ImVec2(iconSize, iconSize), { 0, 1 }, { 1, 0 }) && !isPlayMode)
-			{
-				SetSceneState(isSimulateMode ? SceneState::Edit : SceneState::Simulate);
-			}
-			if (isPlayMode) ImGui::PopStyleVar();
-
-			ImGui::SameLine(0, spacing);
-
-
-			// ==== 3. Pause / Continue 按钮 ====
-			Ref<Texture2D> pauseIcon;
-			if (m_ScenePaused)
-				pauseIcon = isSimulateMode ? m_IconSimulateContinue : m_IconContinue;
-			else
-				pauseIcon = isSimulateMode ? m_IconSimulatePause : m_IconPause;
-
-			bool isPausedDisabled = (!isPlayMode && !isSimulateMode);
-
-			if (isPausedDisabled)
-			{
-				ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f); // 降低透明度变灰
-			}
-
-			if (ImGui::ImageButton((ImTextureID)(uint64_t)pauseIcon->GetRendererID(), ImVec2(iconSize, iconSize), { 0, 1 }, { 1, 0 }))
-			{
-				if (!isPausedDisabled)
-				{
-					// 布尔值反转替代 OnSceneContinue 和 OnScenePause
-					m_ScenePaused = !m_ScenePaused;
-				}
-			}
-
-			if (isPausedDisabled)
-			{
-				ImGui::PopStyleVar();
-			}
-		}
-		ImGui::EndChild();
-		ImGui::PopStyleVar();   // Pop ChildRounding
-		ImGui::PopStyleColor(); // Pop ChildBg
-
-		ImGui::PopStyleVar(4);
-		ImGui::PopStyleColor(3);
 	}
 	void EditorLayer::SetSceneState(SceneState state)
 	{
@@ -726,7 +483,6 @@ namespace World
 		{
 			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 		}
-		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
 	}
 
 	void EditorLayer::RequestAction(std::function<void()> action)
@@ -747,64 +503,7 @@ namespace World
 		WLD_CORE_ERROR("{0}", message);
 	}
 
-	void EditorLayer::DrawUnsavedModal()
-	{
-		if (!m_ShowUnsavedModal)
-			return;
-		ImGui::OpenPopup("Unsaved Changes");
-		const ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse;
-		if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, flags))
-		{
-			ImGui::TextWrapped("The current scene has unsaved changes.");
-			bool takeAction = false;
-			if (ImGui::Button("Save", ImVec2(120, 0)))
-			{
-				if (TrySave())
-					takeAction = true;
-				else if (!m_Document.GetLastError().empty())
-					WLD_CORE_ERROR("{0}", m_Document.GetLastError());
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Don't Save", ImVec2(120, 0)))
-				takeAction = true;
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(120, 0)))
-			{
-				m_ShowUnsavedModal = false;
-				m_PendingAction = nullptr;
-				ImGui::CloseCurrentPopup();
-			}
-			if (takeAction)
-			{
-				std::function<void()> action = std::move(m_PendingAction);
-				m_PendingAction = nullptr;
-				m_ShowUnsavedModal = false;
-				ImGui::CloseCurrentPopup();
-				if (action)
-					action();
-			}
-			ImGui::EndPopup();
-		}
-	}
 
-	void EditorLayer::DrawErrorModal()
-	{
-		if (!m_ShowErrorModal)
-			return;
-		ImGui::OpenPopup("Error");
-		const ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse;
-		if (ImGui::BeginPopupModal("Error", nullptr, flags))
-		{
-			ImGui::TextWrapped("%s", m_ErrorText.c_str());
-			if (ImGui::Button("OK", ImVec2(120, 0)))
-			{
-				m_ShowErrorModal = false;
-				m_ErrorText.clear();
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndPopup();
-		}
-	}
 
 	void EditorLayer::StartCooking(const std::string& target)
 	{
@@ -877,43 +576,6 @@ namespace World
 		}
 	}
 
-	void EditorLayer::OnCooking()
-	{
-		if (!ImGui::IsPopupOpen("Cooking Progress"))
-		{
-			ImGui::OpenPopup("Cooking Progress");
-		}
-
-		// 始终让弹窗居中
-		ImGuiWindowFlags window_flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse;
-		if (ImGui::BeginPopupModal("Cooking Progress", NULL, window_flags))
-		{
-			if (m_CookingFinished.load(std::memory_order_acquire))
-			{
-				if (m_CookingThread.joinable())
-					m_CookingThread.join();
-				if (m_CookingSucceeded)
-					ImGui::TextColored(ImVec4(0, 1, 0, 1), "Cooking Complete!");
-				else
-				{
-					ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Cooking Failed");
-					ImGui::TextWrapped("%s", m_CookingError.c_str());
-				}
-				if (ImGui::Button("Close", ImVec2(120, 0)))
-				{
-					m_ShowCookingProgress = false;
-					ImGui::CloseCurrentPopup();
-				}
-			}
-			else
-			{
-				ImGui::Text("Packing assets...");
-				ImGui::ProgressBar(-1.0f * (float)ImGui::GetTime(), ImVec2(200.0f, 0.0f), "Cooking...");
-			}
-
-			ImGui::EndPopup();
-		}
-	}
 
 
 }

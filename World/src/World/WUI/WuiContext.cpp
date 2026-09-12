@@ -12,6 +12,7 @@ namespace World::Wui
 	{
 		m_Input = input;
 		m_ViewportSize = input.ViewportSize;
+		m_TextInputActive = false;
 		m_Commands.clear();
 	}
 

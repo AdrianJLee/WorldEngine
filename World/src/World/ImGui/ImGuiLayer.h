@@ -23,14 +23,13 @@ namespace World
 		void Begin();
 		void End();
 
-		static void ShowDockSpaceBack(bool autoEnd = true);
-
 		void SetBlockEvents(bool block) { m_BlockEvents = block; }
 		void SetDarkThemeColors();
 		static ImFont* GetBoldFont() { return s_BoldFont; }
 		static ImFont* GetCjkFont() { return s_CjkFont; }
-	public:
-		static bool m_Show;
+		static ImFont* GetDefaultFont();
+		// 编辑器 IME 开关(视口聚焦/文本输入状态由宿主统一管理)。
+		static void ApplyImeState(bool enabled);
 	private:
 		bool m_BlockEvents = true;
 		float m_Time = 0.0f;

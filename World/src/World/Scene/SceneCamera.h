@@ -27,6 +27,8 @@ namespace World
 
 		void SetViewportSize(uint32_t width, uint32_t height);
 		float GetAspectRatio() const { return m_AspectRatio; }
+		// WUI 泛型检查器直接改字段后重算投影。
+		void ApplyEdit() { RecalculateProjection(); }
 
 		#pragma region Perspective
 
