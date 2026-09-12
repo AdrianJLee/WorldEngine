@@ -86,11 +86,13 @@ namespace World::Wui
 	{
 		if (std::find(m_OpenPopups.begin(), m_OpenPopups.end(), id) == m_OpenPopups.end())
 			m_OpenPopups.push_back(id);
+		m_PopupOpenFrame[id] = m_Frame;
 	}
 
 	void WuiContext::ClosePopup(WuiId id)
 	{
 		m_OpenPopups.erase(std::remove(m_OpenPopups.begin(), m_OpenPopups.end(), id), m_OpenPopups.end());
+		m_PopupOpenFrame.erase(id);
 	}
 
 	bool WuiContext::IsPopupOpen(WuiId id) const
@@ -105,7 +107,13 @@ namespace World::Wui
 		if (HitTest(ignoreRect, m_Input.MousePos))
 			return false;
 		for (WuiId popup : popups)
+		{
+			// 弹出开启当帧的点击(即打开菜单的那一下)不算外部点击。
+			auto frameIt = m_PopupOpenFrame.find(popup);
+			if (frameIt != m_PopupOpenFrame.end() && frameIt->second == m_Frame)
+				continue;
 			ClosePopup(popup);
+		}
 		return true;
 	}
 

@@ -323,6 +323,28 @@ int main()
 			}
 		}
 
+		// 14. 弹出菜单:开启当帧的点击不关闭,后续帧点击外部才关闭
+		{
+			WuiContext ctx;
+			const WuiId popup = HashId("menu");
+			WuiInputState open;
+			open.MousePos = { 100, 5 };
+			open.MouseClicked[0] = true;
+			ctx.BeginFrame(open);
+			ctx.OpenPopup(popup);
+			ctx.ClosePopupsOnOutsideClick({ popup }, { 0, 20, 200, 100 });
+			CHECK(ctx.IsPopupOpen(popup)); // 同帧打开,不应被这次点击关闭
+			ctx.EndFrame();
+
+			WuiInputState outside;
+			outside.MousePos = { 100, 5 };
+			outside.MouseClicked[0] = true;
+			ctx.BeginFrame(outside);
+			ctx.ClosePopupsOnOutsideClick({ popup }, { 0, 20, 200, 100 });
+			CHECK(!ctx.IsPopupOpen(popup)); // 后续帧点击外部 → 关闭
+			ctx.EndFrame();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}

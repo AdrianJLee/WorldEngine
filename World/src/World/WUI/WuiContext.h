@@ -118,7 +118,7 @@ namespace World::Wui
 		// ---- 弹窗/模态 ----
 		void OpenPopup(WuiId id);
 		void ClosePopup(WuiId id);
-		void CloseAllPopups() { m_OpenPopups.clear(); }
+		void CloseAllPopups() { m_OpenPopups.clear(); m_PopupOpenFrame.clear(); }
 		bool IsPopupOpen(WuiId id) const;
 		bool ClosePopupsOnOutsideClick(const std::vector<WuiId>& popups, const WuiRect& ignoreRect);
 		void SetModal(WuiId id) { m_Modal = id; }
@@ -157,6 +157,7 @@ namespace World::Wui
 		bool m_TextInputActive = false;
 		WuiCursor m_Cursor = WuiCursor::Arrow;
 		std::vector<WuiId> m_OpenPopups;
+		std::unordered_map<WuiId, uint64_t> m_PopupOpenFrame;
 		WuiId m_Modal = 0;
 		glm::vec2 m_ViewportSize { 1280, 720 };
 		bool m_Dragging = false;
