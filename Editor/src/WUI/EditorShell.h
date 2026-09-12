@@ -34,6 +34,11 @@ namespace World
 		int HistoryIndex = -1;
 		bool ShowNewFolderInput = false;
 		char NewFolderBuffer[256] = { 0 };
+		std::filesystem::path PendingDropDest;
+		bool ListMode = false;
+		std::set<std::filesystem::path> TreeOpen;
+		float TreeScroll = 0;
+		float ContentScroll = 0;
 		Ref<Texture2D> DirIcon, FileIcon;
 	};
 
@@ -78,6 +83,7 @@ namespace World
 		void BrowserPasteInto(const std::filesystem::path& destination);
 		void BrowserDeleteSelection();
 		void BrowserNavigate(const std::filesystem::path& path);
+		void BrowserReveal(const std::filesystem::path& path);
 		void BrowserGoBack();
 		void BrowserGoUp();
 		void BrowserCreateFolder();
