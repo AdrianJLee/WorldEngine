@@ -541,6 +541,7 @@ namespace World
 			if (ctx.Input().MouseClicked[1] && ctx.IsHovered(row))
 			{
 				m_HierarchyContext = entities[i];
+				m_HierarchyMenuPos = ctx.Input().MousePos;
 				ctx.OpenPopup(Wui::HashId("hierarchy.context"));
 			}
 		}
@@ -550,7 +551,7 @@ namespace World
 		if (ctx.IsPopupOpen(popup) && m_HierarchyContext.IsValid())
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect panel { ctx.Input().MousePos.x, ctx.Input().MousePos.y, 140, 30 };
+			const Wui::WuiRect panel { m_HierarchyMenuPos.x, m_HierarchyMenuPos.y, 140, 30 };
 			const Wui::WuiRect item { panel.X + 4, panel.Y + 4, panel.W - 8, 22 };
 			if (MenuItem(ctx, Wui::HashId("hierarchy.delete"), item, "Delete", true, m_Theme))
 			{
@@ -1545,6 +1546,7 @@ namespace World
 			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, content, m_Theme.Accent, 0.0f, 2.0f });
 		}
 
+		bool itemRightClicked = false;
 		auto interact = [&](const std::filesystem::path& path, const Wui::WuiRect& itemRect, bool isDir)
 		{
 			const bool selected = m_Browser.Selected.find(path) != m_Browser.Selected.end();
@@ -1590,6 +1592,7 @@ namespace World
 			}
 			else if (ctx.Input().MouseClicked[1] && hovered)
 			{
+				itemRightClicked = true;
 				if (!selected)
 				{
 					m_Browser.Selected.clear();
@@ -1597,6 +1600,7 @@ namespace World
 					m_Browser.LastSelected = path;
 				}
 				m_Browser.ContextMenuPath = path;
+				m_Browser.ContextMenuPos = ctx.Input().MousePos;
 				ctx.OpenPopup(Wui::HashId("browser.context"));
 			}
 			return selected || hovered;
@@ -1739,7 +1743,7 @@ namespace World
 		if (ctx.IsPopupOpen(popup) && !m_Browser.ContextMenuPath.empty())
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect menuPanel { ctx.Input().MousePos.x, ctx.Input().MousePos.y, 180, 8 * 24 + 8 };
+			const Wui::WuiRect menuPanel { m_Browser.ContextMenuPos.x, m_Browser.ContextMenuPos.y, 180, 8 * 24 + 8 };
 			DrawPanelSurface(ctx, menuPanel, m_Theme);
 			struct BrowserItem { const char* Label; std::function<void()> Action; };
 			const bool single = m_Browser.Selected.size() == 1;
@@ -1774,6 +1778,40 @@ namespace World
 			m_Browser.ContextMenuPath.clear();
 			if (ctx.IsPopupOpen(popup))
 				ctx.ClosePopup(popup);
+		}
+
+		// ---- 内容区空白处右键 ----
+		if (ctx.Input().MouseClicked[1] && ctx.IsHovered(content) && !itemRightClicked)
+		{
+			m_Browser.BlankMenuPos = ctx.Input().MousePos;
+			ctx.OpenPopup(Wui::HashId("browser.blankcontext"));
+		}
+		const Wui::WuiId blankPopup = Wui::HashId("browser.blankcontext");
+		if (ctx.IsPopupOpen(blankPopup))
+		{
+			ctx.PushOverlay();
+			const Wui::WuiRect menuPanel { m_Browser.BlankMenuPos.x, m_Browser.BlankMenuPos.y, 180, 3 * 24 + 8 };
+			DrawPanelSurface(ctx, menuPanel, m_Theme);
+			struct BlankItem { const char* Label; std::function<void()> Action; };
+			const std::vector<BlankItem> items = {
+				{ "New Folder", [this] { BrowserCreateFolder(); } },
+				{ "Paste", [this] { BrowserPasteInto(m_Browser.Current); } },
+				{ "Refresh", [this] { InvalidateBrowserContents(); if (m_Browser.Search[0]) UpdateBrowserSearch(); } },
+			};
+			for (size_t i = 0; i < items.size(); ++i)
+			{
+				const Wui::WuiRect item { menuPanel.X + 4, menuPanel.Y + 4 + i * 24, menuPanel.W - 8, 22 };
+				if (MenuItem(ctx, Wui::HashId(("browser.blank." + std::string(items[i].Label)).c_str()), item, items[i].Label, true, m_Theme))
+				{
+					items[i].Action();
+					m_Ctx->RecordOp("menu", "item", items[i].Label, "browser-blank");
+					ctx.CloseAllPopups();
+				}
+			}
+			ctx.ClosePopupsOnOutsideClick({ blankPopup }, menuPanel);
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+				ctx.ClosePopup(blankPopup);
+			ctx.PopOverlay();
 		}
 
 		// ---- 删除确认 ----

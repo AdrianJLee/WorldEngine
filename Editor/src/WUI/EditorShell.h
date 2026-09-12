@@ -41,6 +41,8 @@ namespace World
 		std::string RenameEdit;
 		std::string SearchEdit;
 		std::filesystem::path ContextMenuPath;
+		glm::vec2 ContextMenuPos {};
+		glm::vec2 BlankMenuPos {};
 		std::vector<std::filesystem::path> Clipboard;
 		bool ClipboardCut = false;
 		bool ShowDeleteModal = false;
@@ -132,6 +134,7 @@ namespace World
 		ContentBrowserModel m_Browser;
 		Wui::WuiRect m_ViewportRect;
 		Entity m_HierarchyContext;
+		glm::vec2 m_HierarchyMenuPos {};
 
 		bool m_SplitterDragging = false;
 		Wui::DockNode* m_DragSplitNode = nullptr;
