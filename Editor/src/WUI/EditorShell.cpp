@@ -503,18 +503,17 @@ namespace World
 					int64_t raw = field.K == Schema::Kind::Int8 ? std::get<int8_t>(value)
 						: field.K == Schema::Kind::Int16 ? std::get<int16_t>(value)
 						: field.K == Schema::Kind::Int32 ? std::get<int32_t>(value) : std::get<int64_t>(value);
-					float f = static_cast<float>(raw);
-					const float before = f;
-					const float lo = field.Meta.Min.has_value() ? *field.Meta.Min : -100000.0f;
-					const float hi = field.Meta.Max.has_value() ? *field.Meta.Max : 100000.0f;
-					SliderFloat(ctx, fid, ctrl, f, lo, hi, m_Theme);
-					fieldChanged = f != before;
+					const int64_t before = raw;
+					const int64_t lo = field.Meta.Min.has_value() ? static_cast<int64_t>(*field.Meta.Min) : INT64_MIN;
+					const int64_t hi = field.Meta.Max.has_value() ? static_cast<int64_t>(*field.Meta.Max) : INT64_MAX;
+					DragInt(ctx, fid, ctrl, raw, lo, hi, m_Theme);
+					fieldChanged = raw != before;
 					if (fieldChanged)
 					{
-						if (field.K == Schema::Kind::Int8) value = static_cast<int8_t>(f);
-						else if (field.K == Schema::Kind::Int16) value = static_cast<int16_t>(f);
-						else if (field.K == Schema::Kind::Int32) value = static_cast<int32_t>(f);
-						else value = static_cast<int64_t>(f);
+						if (field.K == Schema::Kind::Int8) value = static_cast<int8_t>(raw);
+						else if (field.K == Schema::Kind::Int16) value = static_cast<int16_t>(raw);
+						else if (field.K == Schema::Kind::Int32) value = static_cast<int32_t>(raw);
+						else value = raw;
 					}
 					break;
 				}
@@ -526,16 +525,18 @@ namespace World
 					uint64_t raw = field.K == Schema::Kind::UInt8 ? std::get<uint8_t>(value)
 						: field.K == Schema::Kind::UInt16 ? std::get<uint16_t>(value)
 						: field.K == Schema::Kind::UInt32 ? std::get<uint32_t>(value) : std::get<uint64_t>(value);
-					float f = static_cast<float>(raw);
-					const float before = f;
-					SliderFloat(ctx, fid, ctrl, f, 0, 100000.0f, m_Theme);
-					fieldChanged = f != before;
+					int64_t signedRaw = static_cast<int64_t>(raw);
+					const int64_t before = signedRaw;
+					const int64_t lo = field.Meta.Min.has_value() ? static_cast<int64_t>(*field.Meta.Min) : 0;
+					const int64_t hi = field.Meta.Max.has_value() ? static_cast<int64_t>(*field.Meta.Max) : INT64_MAX;
+					DragInt(ctx, fid, ctrl, signedRaw, lo, hi, m_Theme);
+					fieldChanged = signedRaw != before;
 					if (fieldChanged)
 					{
-						if (field.K == Schema::Kind::UInt8) value = static_cast<uint8_t>(f);
-						else if (field.K == Schema::Kind::UInt16) value = static_cast<uint16_t>(f);
-						else if (field.K == Schema::Kind::UInt32) value = static_cast<uint32_t>(f);
-						else value = static_cast<uint64_t>(f);
+						if (field.K == Schema::Kind::UInt8) value = static_cast<uint8_t>(signedRaw);
+						else if (field.K == Schema::Kind::UInt16) value = static_cast<uint16_t>(signedRaw);
+						else if (field.K == Schema::Kind::UInt32) value = static_cast<uint32_t>(signedRaw);
+						else value = static_cast<uint64_t>(signedRaw);
 					}
 					break;
 				}
@@ -544,9 +545,9 @@ namespace World
 				{
 					float f = field.K == Schema::Kind::Float ? std::get<float>(value) : static_cast<float>(std::get<double>(value));
 					const float before = f;
-					const float lo = field.Meta.Min.has_value() ? *field.Meta.Min : -100000.0f;
-					const float hi = field.Meta.Max.has_value() ? *field.Meta.Max : 100000.0f;
-					SliderFloat(ctx, fid, ctrl, f, lo, hi, m_Theme);
+					const float lo = field.Meta.Min.has_value() ? *field.Meta.Min : -1.0f;
+					const float hi = field.Meta.Max.has_value() ? *field.Meta.Max : 1.0f;
+					DragFloat(ctx, fid, ctrl, f, 0.01f, lo, hi, m_Theme);
 					fieldChanged = f != before;
 					if (fieldChanged) value = field.K == Schema::Kind::Float ? Schema::Value(f) : Schema::Value(static_cast<double>(f));
 					break;
@@ -562,7 +563,7 @@ namespace World
 						float f = field.K == Schema::Kind::Vec2 ? std::get<glm::vec2>(value)[c]
 							: field.K == Schema::Kind::Vec3 ? std::get<glm::vec3>(value)[c] : std::get<glm::vec4>(value)[c];
 						const float before = f;
-						SliderFloat(ctx, fid ^ static_cast<Wui::WuiId>(c + 1), { ctrl.X + slot * c, ctrl.Y, slot - 2, ctrl.H }, f, -1000.0f, 1000.0f, m_Theme);
+						DragFloat(ctx, fid ^ static_cast<Wui::WuiId>(c + 1), { ctrl.X + slot * c, ctrl.Y, slot - 2, ctrl.H }, f, 0.01f, -1.0f, 1.0f, m_Theme);
 						if (f != before)
 						{
 							fieldChanged = true;

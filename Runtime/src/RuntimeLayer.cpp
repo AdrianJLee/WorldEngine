@@ -1,6 +1,9 @@
 ﻿#include "RuntimeLayer.h"
+#include "GameHud.h"
+#include "World/ImGui/ImGuiLayer.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
+#include "World/WUI/WuiImGuiBackend.h"
 
 namespace World
 {
@@ -61,7 +64,24 @@ namespace World
 	}
 	void RuntimeLayer::OnImGuiRender()
 	{
-
+		static Wui::WuiContext wuiContext;
+		static Wui::WuiImGuiBackend wuiBackend;
+		static bool fontsInitialized = false;
+		if (!fontsInitialized)
+		{
+			wuiBackend.SetFonts(ImGuiLayer::GetDefaultFont(), ImGuiLayer::GetBoldFont(), ImGuiLayer::GetCjkFont());
+			fontsInitialized = true;
+		}
+		Wui::WuiInputState input;
+		if (wuiBackend.BeginFrame(input))
+		{
+			wuiContext.BeginFrame(input);
+			const size_t entityCount = m_ActiveScene ? m_ActiveScene->GetRegistry().view<UUIDComponent>().size() : 0;
+			DrawGameHud(wuiContext, entityCount);
+			wuiContext.EndFrame();
+			wuiBackend.Render(wuiContext.Commands());
+		}
+		wuiBackend.EndFrame();
 	}
 	void RuntimeLayer::OnEvent(Event& event)
 	{

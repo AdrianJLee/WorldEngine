@@ -14,3 +14,5 @@ build
 docs
 tools
 AGENTS.md
+Editor/wui-layout.json
+imgui.ini
