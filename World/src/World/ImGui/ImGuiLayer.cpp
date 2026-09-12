@@ -14,6 +14,8 @@
 namespace World
 {
 	bool ImGuiLayer::m_Show = false;
+	ImFont* ImGuiLayer::s_BoldFont = nullptr;
+	ImFont* ImGuiLayer::s_CjkFont = nullptr;
 
 	World::ImGuiLayer::ImGuiLayer()
 		: Layer("ImGuiLayer"), m_Time(0.0f)
@@ -56,7 +58,17 @@ namespace World
 		//TODO: 需要字体管理器，来加载不同的字体，并且在 ImGui 中切换字体
 		// Bold font
 		std::string boldFontPath = WLD_EDITOR_DIR + std::string("assets/fonts/Montserrat/static/Montserrat-Bold.ttf");
-		io.Fonts->AddFontFromFileTTF(boldFontPath.c_str(), 15.0f);
+		s_BoldFont = io.Fonts->AddFontFromFileTTF(boldFontPath.c_str(), 15.0f);
+
+		// CJK 回退字体:中文输入与界面文本(P3 起由 WUI 统一管理,此处先行加载)。
+		std::string cjkFontPath = WLD_EDITOR_DIR + std::string("assets/fonts/NotoSansSC/NotoSansSC-Regular.ttf");
+		ImFontConfig cjkConfig;
+		cjkConfig.MergeMode = false;
+		cjkConfig.OversampleH = 1;
+		cjkConfig.OversampleV = 1;
+		s_CjkFont = io.Fonts->AddFontFromFileTTF(cjkFontPath.c_str(), 16.0f, &cjkConfig, io.Fonts->GetGlyphRangesChineseFull());
+		if (!s_CjkFont)
+			WLD_CORE_WARN("Failed to load CJK font from {0}", cjkFontPath);
 
 		SetDarkThemeColors();
 

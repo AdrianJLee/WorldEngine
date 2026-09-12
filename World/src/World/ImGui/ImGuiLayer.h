@@ -5,6 +5,8 @@
 #include "World/Events/ApplicationEvent.h"
 #include "World/Events/MouseEvent.h"
 
+struct ImFont;
+
 namespace World
 {
 	class ImGuiLayer : public Layer
@@ -25,11 +27,15 @@ namespace World
 
 		void SetBlockEvents(bool block) { m_BlockEvents = block; }
 		void SetDarkThemeColors();
+		static ImFont* GetBoldFont() { return s_BoldFont; }
+		static ImFont* GetCjkFont() { return s_CjkFont; }
 	public:
 		static bool m_Show;
 	private:
 		bool m_BlockEvents = true;
 		float m_Time = 0.0f;
+		static ImFont* s_BoldFont;
+		static ImFont* s_CjkFont;
 
 	};
 }

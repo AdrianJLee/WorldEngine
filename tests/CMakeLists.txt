@@ -45,3 +45,24 @@ set_tests_properties(World.Schema PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+# WUI Core 纯逻辑回归:布局/样式/命中/焦点(无 GL)。
+add_executable(WorldWuiTests WuiTests.cpp)
+target_link_libraries(WorldWuiTests PRIVATE World)
+target_compile_features(WorldWuiTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldWuiTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldWuiTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldWuiTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Wui COMMAND WorldWuiTests)
+set_tests_properties(World.Wui PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)

@@ -3,6 +3,8 @@
 #include "World/Core/Cook/VFS.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/WUI/WuiDemo.h"
+#include "World/WUI/WuiImGuiBackend.h"
 #include <filesystem>
 #include <stdexcept>
 namespace World
@@ -302,6 +304,27 @@ namespace World
 
 		DrawUnsavedModal();
 		DrawErrorModal();
+
+		// W1:WUI 演示面板(临时;W2 全量迁移后移除)。
+		{
+			static Wui::WuiContext wuiContext;
+			static Wui::WuiImGuiBackend wuiBackend;
+			static bool fontsInitialized = false;
+			if (!fontsInitialized)
+			{
+				wuiBackend.SetFonts(ImGui::GetIO().FontDefault, ImGuiLayer::GetBoldFont(), ImGuiLayer::GetCjkFont());
+				fontsInitialized = true;
+			}
+			Wui::WuiInputState input;
+			if (wuiBackend.BeginFrame(input))
+			{
+				wuiContext.BeginFrame(input);
+				Wui::ShowDemoPanel(wuiContext, { 12.0f, 42.0f, 320.0f, 210.0f });
+				wuiContext.EndFrame();
+				wuiBackend.Render(wuiContext.Commands());
+			}
+			wuiBackend.EndFrame();
+		}
 	}
 
 	void EditorLayer::OnEvent(Event& event)
