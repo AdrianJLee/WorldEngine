@@ -528,6 +528,7 @@ namespace World
 
 		float scrollY = 0;
 		BeginScrollArea(ctx, rect, entities.size() * 22.0f + 8.0f, scrollY, m_Theme);
+		bool itemRightClicked = false;
 		for (size_t i = 0; i < entities.size(); ++i)
 		{
 			const Wui::WuiRect row { rect.X + 4, rect.Y + 4 + i * 22.0f - scrollY, rect.W - 8, 22 };
@@ -540,6 +541,7 @@ namespace World
 				m_Editor.SetSelectedEntity(entities[i]);
 			if (ctx.Input().MouseClicked[1] && ctx.IsHovered(row))
 			{
+				itemRightClicked = true;
 				m_Editor.SetSelectedEntity(entities[i]);
 				m_HierarchyContext = entities[i];
 				m_HierarchyMenuPos = ctx.Input().MousePos;
@@ -576,6 +578,53 @@ namespace World
 			m_HierarchyContext = Entity();
 			if (ctx.IsPopupOpen(popup))
 				ctx.ClosePopup(popup);
+		}
+
+		// ---- 空白处右键 ----
+		if (ctx.Input().MouseClicked[1] && ctx.IsHovered(rect) && !itemRightClicked)
+		{
+			m_HierarchyBlankMenuPos = ctx.Input().MousePos;
+			ctx.OpenPopup(Wui::HashId("hierarchy.blankcontext"));
+		}
+		const Wui::WuiId blankPopup = Wui::HashId("hierarchy.blankcontext");
+		if (ctx.IsPopupOpen(blankPopup))
+		{
+			ctx.PushOverlay();
+			const Wui::WuiRect panel { m_HierarchyBlankMenuPos.x, m_HierarchyBlankMenuPos.y, 190, 3 * 22 + 8 };
+			DrawPanelSurface(ctx, panel, m_Theme);
+			const bool hasSelection = m_Editor.GetSelectedEntity().IsValid() && m_Editor.GetSelectedEntity().GetScene() == scene.get();
+			if (MenuItem(ctx, Wui::HashId("hierarchy.create"), { panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Create Empty Entity", true, m_Theme))
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created](Scene& s) { created = Entity::CreateEntity(&s, "Empty Entity"); }) && created.IsValid())
+				{
+					m_Editor.SetSelectedEntity(created);
+					m_Editor.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), { panel.X + 4, panel.Y + 26, panel.W - 8, 22 }, "Duplicate Selected", hasSelection, m_Theme))
+			{
+				if (hasSelection)
+				{
+					m_Editor.DuplicateSelectedEntity();
+					m_Editor.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.deletesel"), { panel.X + 4, panel.Y + 48, panel.W - 8, 22 }, "Delete Selected", hasSelection, m_Theme))
+			{
+				if (hasSelection)
+				{
+					Entity::DestroyEntity(scene.get(), m_Editor.GetSelectedEntity());
+					m_Editor.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			ctx.ClosePopupsOnOutsideClick({ blankPopup }, panel);
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+				ctx.ClosePopup(blankPopup);
+			ctx.PopOverlay();
 		}
 	}
 

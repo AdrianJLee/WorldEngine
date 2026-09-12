@@ -135,6 +135,7 @@ namespace World
 		Wui::WuiRect m_ViewportRect;
 		Entity m_HierarchyContext;
 		glm::vec2 m_HierarchyMenuPos {};
+		glm::vec2 m_HierarchyBlankMenuPos {};
 
 		bool m_SplitterDragging = false;
 		Wui::DockNode* m_DragSplitNode = nullptr;
