@@ -17,6 +17,8 @@ namespace World::Wui
 		m_TextInputActive = false;
 		m_Cursor = WuiCursor::Arrow;
 		m_Commands.clear();
+		m_OverlayCommands.clear();
+		m_OverlayDepth = 0;
 		++m_Frame;
 	}
 

@@ -171,7 +171,7 @@ namespace World
 			m_WuiContext.BeginFrame(input);
 			m_Shell.OnRender(m_WuiContext);
 			m_WuiContext.EndFrame();
-			wuiBackend.Render(m_WuiContext.Commands());
+			wuiBackend.Render(m_WuiContext.Commands(), m_WuiContext.OverlayCommands());
 		}
 		wuiBackend.EndFrame(m_WuiContext.Cursor());
 	}

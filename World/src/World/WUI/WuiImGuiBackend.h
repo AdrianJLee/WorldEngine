@@ -13,7 +13,7 @@ namespace World::Wui
 		void SetFonts(ImFont* regular, ImFont* bold, ImFont* cjk);
 
 		bool BeginFrame(WuiInputState& input) override;
-		void Render(const std::vector<WuiDrawCommand>& commands) override;
+		void Render(const std::vector<WuiDrawCommand>& commands, const std::vector<WuiDrawCommand>& overlayCommands) override;
 		void EndFrame(WuiCursor cursor) override;
 
 	private:

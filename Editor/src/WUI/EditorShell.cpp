@@ -179,7 +179,6 @@ namespace World
 			if (ctx.History().Redo())
 				ctx.RecordOp("undo", "redo", ctx.History().RedoName(), "");
 		}
-		DrawMenuBar(ctx);
 		const glm::vec2 viewport = ctx.ViewportSize();
 		RenderNode(ctx, m_Layout.Root, { 0, 26, viewport.x, viewport.y - 26 });
 
@@ -201,6 +200,9 @@ namespace World
 			m_DropZone = Wui::DropZone::Center;
 		}
 
+		// 菜单栏最后绘制:其弹出面板需要盖在所有停靠面板之上。
+		DrawMenuBar(ctx);
+
 		ImGuiLayer::ApplyImeState(ctx.Focus() == 0 || ctx.IsTextInputActive());
 
 		DrawModals(ctx);
@@ -211,7 +213,9 @@ namespace World
 			std::string label = dragPayload;
 			if (dragPayload.rfind("panel:", 0) == 0) label = "停靠面板: " + dragPayload.substr(6);
 			else if (dragPayload.rfind("file:", 0) == 0) label = "移动文件: " + dragPayload.substr(5);
+			ctx.PushOverlay();
 			Label(ctx, ctx.Input().MousePos + glm::vec2 { 14, 14 }, label, m_Theme.Text, 13.0f);
+			ctx.PopOverlay();
 		}
 
 	}
@@ -372,6 +376,7 @@ namespace World
 			const Wui::WuiRect header { x, 2, static_cast<float>(std::strlen(title) * 9 + 22), 22 };
 			if (BeginMenu(ctx, menuId, header, title, m_Theme))
 			{
+				ctx.PushOverlay();
 				const Wui::WuiRect panel { header.X, 24, 240, static_cast<float>(entries.size() * 22 + 8) };
 				for (size_t i = 0; i < entries.size(); ++i)
 				{
@@ -384,6 +389,7 @@ namespace World
 					}
 				}
 				EndMenu(ctx, menuId, panel, m_Theme);
+				ctx.PopOverlay();
 			}
 			x += header.W + 4;
 		};
@@ -520,6 +526,7 @@ namespace World
 		const Wui::WuiId popup = Wui::HashId("hierarchy.context");
 		if (ctx.IsPopupOpen(popup) && contextTarget.IsValid())
 		{
+			ctx.PushOverlay();
 			const Wui::WuiRect panel { ctx.Input().MousePos.x, ctx.Input().MousePos.y, 140, 30 };
 			const Wui::WuiRect item { panel.X + 4, panel.Y + 4, panel.W - 8, 22 };
 			if (MenuItem(ctx, Wui::HashId("hierarchy.delete"), item, "Delete", true, m_Theme))
@@ -531,6 +538,7 @@ namespace World
 			ctx.ClosePopupsOnOutsideClick({ popup }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(popup);
+			ctx.PopOverlay();
 		}
 	}
 
@@ -552,6 +560,7 @@ namespace World
 		const Wui::WuiId addPopup = Wui::HashId("prop.add.popup");
 		if (ctx.IsPopupOpen(addPopup))
 		{
+			ctx.PushOverlay();
 			std::vector<const Schema::TypeSchema*> candidates;
 			for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
 				if (schema && schema->Storage && !entity.HasComponent(schema->Storage->ComponentId))
@@ -577,6 +586,7 @@ namespace World
 			ctx.ClosePopupsOnOutsideClick({ addPopup }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(addPopup);
+			ctx.PopOverlay();
 		}
 
 		float y = rect.Y + 40;
@@ -1142,6 +1152,7 @@ namespace World
 		const Wui::WuiId popup = Wui::HashId("browser.context");
 		if (ctx.IsPopupOpen(popup) && !contextPath.empty())
 		{
+			ctx.PushOverlay();
 			const Wui::WuiRect panel { ctx.Input().MousePos.x, ctx.Input().MousePos.y, 170, 7 * 24 + 8 };
 			struct BrowserItem { const char* Label; std::function<void()> Action; };
 			const std::vector<BrowserItem> items = {
@@ -1165,6 +1176,7 @@ namespace World
 			ctx.ClosePopupsOnOutsideClick({ popup }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(popup);
+			ctx.PopOverlay();
 		}
 
 		// 删除确认

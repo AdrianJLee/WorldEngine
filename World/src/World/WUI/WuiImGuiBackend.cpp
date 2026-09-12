@@ -96,54 +96,59 @@ namespace World::Wui
 		return true;
 	}
 
-	void WuiImGuiBackend::Render(const std::vector<WuiDrawCommand>& commands)
+	void WuiImGuiBackend::Render(const std::vector<WuiDrawCommand>& commands, const std::vector<WuiDrawCommand>& overlayCommands)
 	{
 		ImDrawList* drawList = ImGui::GetForegroundDrawList();
-		for (const WuiDrawCommand& command : commands)
+		auto renderList = [&](const std::vector<WuiDrawCommand>& list)
 		{
-			const ImVec2 min { command.Rect.X, command.Rect.Y };
-			const ImVec2 max { command.Rect.X + command.Rect.W, command.Rect.Y + command.Rect.H };
-			switch (command.Kind)
+			for (const WuiDrawCommand& command : list)
 			{
-				case WuiDrawKind::Rect:
-					drawList->AddRectFilled(min, max, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)), command.Rounding);
-					break;
-				case WuiDrawKind::RectOutline:
-					drawList->AddRect(min, max, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)), command.Rounding, 0, command.Thickness);
-					break;
-				case WuiDrawKind::Text:
+				const ImVec2 min { command.Rect.X, command.Rect.Y };
+				const ImVec2 max { command.Rect.X + command.Rect.W, command.Rect.Y + command.Rect.H };
+				switch (command.Kind)
 				{
-					ImFont* font = m_Regular ? m_Regular : ImGui::GetFont();
-					bool hasNonAscii = false;
-					for (unsigned char c : command.Text)
-						if (c > 127) { hasNonAscii = true; break; }
-					if (hasNonAscii && m_Cjk)
-						font = m_Cjk;
-					else if (command.Bold && m_Bold)
-						font = m_Bold;
-					if (command.TextSelStart >= 0 && command.TextSelEnd > command.TextSelStart)
+					case WuiDrawKind::Rect:
+						drawList->AddRectFilled(min, max, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)), command.Rounding);
+						break;
+					case WuiDrawKind::RectOutline:
+						drawList->AddRect(min, max, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)), command.Rounding, 0, command.Thickness);
+						break;
+					case WuiDrawKind::Text:
 					{
-						const float widthBefore = font->CalcTextSizeA(command.FontSize, FLT_MAX, 0.0f, command.Text.substr(0, static_cast<size_t>(command.TextSelStart)).c_str()).x;
-						const float widthSelected = font->CalcTextSizeA(command.FontSize, FLT_MAX, 0.0f, command.Text.substr(static_cast<size_t>(command.TextSelStart), static_cast<size_t>(command.TextSelEnd - command.TextSelStart)).c_str()).x;
-						drawList->AddRectFilled(
-							ImVec2(min.x + widthBefore, min.y),
-							ImVec2(min.x + widthBefore + widthSelected, min.y + command.FontSize),
-							ImGui::GetColorU32(ImVec4(0.25f, 0.45f, 0.85f, 0.55f)));
+						ImFont* font = m_Regular ? m_Regular : ImGui::GetFont();
+						bool hasNonAscii = false;
+						for (unsigned char c : command.Text)
+							if (c > 127) { hasNonAscii = true; break; }
+						if (hasNonAscii && m_Cjk)
+							font = m_Cjk;
+						else if (command.Bold && m_Bold)
+							font = m_Bold;
+						if (command.TextSelStart >= 0 && command.TextSelEnd > command.TextSelStart)
+						{
+							const float widthBefore = font->CalcTextSizeA(command.FontSize, FLT_MAX, 0.0f, command.Text.substr(0, static_cast<size_t>(command.TextSelStart)).c_str()).x;
+							const float widthSelected = font->CalcTextSizeA(command.FontSize, FLT_MAX, 0.0f, command.Text.substr(static_cast<size_t>(command.TextSelStart), static_cast<size_t>(command.TextSelEnd - command.TextSelStart)).c_str()).x;
+							drawList->AddRectFilled(
+								ImVec2(min.x + widthBefore, min.y),
+								ImVec2(min.x + widthBefore + widthSelected, min.y + command.FontSize),
+								ImGui::GetColorU32(ImVec4(0.25f, 0.45f, 0.85f, 0.55f)));
+						}
+						drawList->AddText(font, command.FontSize, min, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)), command.Text.c_str());
+						break;
 					}
-					drawList->AddText(font, command.FontSize, min, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)), command.Text.c_str());
-					break;
+					case WuiDrawKind::Image:
+						drawList->AddImage(reinterpret_cast<ImTextureID>(command.Image), min, max, { command.Uv.X, command.Uv.Y }, { command.Uv.X + command.Uv.W, command.Uv.Y + command.Uv.H }, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)));
+						break;
+					case WuiDrawKind::ClipPush:
+						drawList->PushClipRect(min, max);
+						break;
+					case WuiDrawKind::ClipPop:
+						drawList->PopClipRect();
+						break;
 				}
-				case WuiDrawKind::Image:
-					drawList->AddImage(reinterpret_cast<ImTextureID>(command.Image), min, max, { command.Uv.X, command.Uv.Y }, { command.Uv.X + command.Uv.W, command.Uv.Y + command.Uv.H }, ImGui::GetColorU32(ImVec4(command.Color.R, command.Color.G, command.Color.B, command.Color.A)));
-					break;
-				case WuiDrawKind::ClipPush:
-					drawList->PushClipRect(min, max);
-					break;
-				case WuiDrawKind::ClipPop:
-					drawList->PopClipRect();
-					break;
 			}
-		}
+		};
+		renderList(commands);
+		renderList(overlayCommands);
 	}
 
 	void WuiImGuiBackend::EndFrame(WuiCursor cursor)

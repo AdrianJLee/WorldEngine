@@ -79,7 +79,7 @@ namespace World
 			const size_t entityCount = m_ActiveScene ? m_ActiveScene->GetRegistry().view<UUIDComponent>().size() : 0;
 			DrawGameHud(wuiContext, entityCount);
 			wuiContext.EndFrame();
-			wuiBackend.Render(wuiContext.Commands());
+			wuiBackend.Render(wuiContext.Commands(), wuiContext.OverlayCommands());
 		}
 		wuiBackend.EndFrame(wuiContext.Cursor());
 	}

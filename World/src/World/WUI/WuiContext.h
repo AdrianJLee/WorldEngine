@@ -65,7 +65,11 @@ namespace World::Wui
 
 		WuiInputState& Input() { return m_Input; }
 		const WuiInputState& Input() const { return m_Input; }
-		std::vector<WuiDrawCommand>& Commands() { return m_Commands; }
+		std::vector<WuiDrawCommand>& Commands() { return m_OverlayDepth > 0 ? m_OverlayCommands : m_Commands; }
+		const std::vector<WuiDrawCommand>& OverlayCommands() const { return m_OverlayCommands; }
+		// 进入/退出顶层绘制:弹出菜单、模态等画在普通 UI 之上。
+		void PushOverlay() { ++m_OverlayDepth; }
+		void PopOverlay() { if (m_OverlayDepth > 0) --m_OverlayDepth; }
 		WuiStyleSheet& Sheet() { return m_Sheet; }
 
 		template <typename T>
@@ -150,6 +154,8 @@ namespace World::Wui
 
 		WuiInputState m_Input;
 		std::vector<WuiDrawCommand> m_Commands;
+		std::vector<WuiDrawCommand> m_OverlayCommands;
+		int m_OverlayDepth = 0;
 		std::unordered_map<WuiId, std::shared_ptr<WuiStateBase>> m_State;
 		std::vector<WuiStyle> m_StyleStack;
 		WuiStyleSheet m_Sheet;

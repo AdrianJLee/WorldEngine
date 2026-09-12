@@ -507,6 +507,7 @@ namespace World::Wui
 		bool changed = false;
 		if (ctx.IsPopupOpen(id))
 		{
+			ctx.PushOverlay();
 			const float itemH = 22.0f;
 			const WuiRect panel { rect.X, rect.Y + rect.H + 2.0f, rect.W, itemH * options.size() + 8.0f };
 			DrawPanelSurface(ctx, panel, theme);
@@ -526,6 +527,7 @@ namespace World::Wui
 			ctx.ClosePopupsOnOutsideClick({ id }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(id);
+			ctx.PopOverlay();
 		}
 		return changed;
 	}
@@ -598,6 +600,7 @@ namespace World::Wui
 	{
 		if (ctx.Modal() != id)
 			return false;
+		ctx.PushOverlay();
 		const glm::vec2 viewport = ctx.ViewportSize();
 		const WuiRect centered { (viewport.x - size.x) * 0.5f, (viewport.y - size.y) * 0.5f, size.x, size.y };
 		if (panel)
@@ -613,6 +616,7 @@ namespace World::Wui
 	{
 		(void)ctx;
 		(void)id;
+		ctx.PopOverlay();
 	}
 
 	bool BeginScrollArea(WuiContext& ctx, const WuiRect& viewport, float contentHeight, float& scrollY, const WuiTheme& theme)
