@@ -60,6 +60,8 @@ namespace World
 		void DrawModals(Wui::WuiContext& ctx);
 		void RestoreLayout(const std::string& json);
 		void RecordDockChange(Wui::WuiContext& ctx, const std::string& action, const std::string& target, const std::string& before);
+		void TogglePanel(Wui::WuiContext& ctx, const std::string& panel);
+		void ResetLayout(Wui::WuiContext& ctx);
 
 		// Inspector 辅助
 		float DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect, void* instance,
@@ -75,6 +77,7 @@ namespace World
 		EditorLayer& m_Editor;
 		Wui::DockLayout m_Layout;
 		std::filesystem::path m_LayoutPath;
+		std::vector<std::string> m_Panels;
 		Wui::WuiTheme m_Theme;
 		ContentBrowserModel m_Browser;
 		Wui::WuiRect m_ViewportRect;

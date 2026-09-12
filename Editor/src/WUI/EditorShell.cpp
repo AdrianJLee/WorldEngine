@@ -92,6 +92,7 @@ namespace World
 		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json")
 	{
 		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "stats", "memory", "operations" };
+		m_Panels = panels;
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(panels);
 		std::string error;
 		if (!Wui::WuiLayoutStore::Load(m_LayoutPath, fallback, &m_Layout, &error))
@@ -137,6 +138,29 @@ namespace World
 		ctx.History().Push("Dock " + action + " " + target,
 			[this, before] { RestoreLayout(before); },
 			[this, after] { RestoreLayout(after); });
+	}
+
+	void EditorShell::TogglePanel(Wui::WuiContext& ctx, const std::string& panel)
+	{
+		const std::string before = m_Layout.Serialize();
+		if (m_Layout.Contains(panel))
+		{
+			if (m_Layout.RemoveTab(panel))
+				RecordDockChange(ctx, "hide", panel, before);
+		}
+		else
+		{
+			const std::string anchor = m_Layout.FirstPanel();
+			if (!anchor.empty() && m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
+				RecordDockChange(ctx, "show", panel, before);
+		}
+	}
+
+	void EditorShell::ResetLayout(Wui::WuiContext& ctx)
+	{
+		const std::string before = m_Layout.Serialize();
+		m_Layout = Wui::DockLayout::Default(m_Panels);
+		RecordDockChange(ctx, "reset", "", before);
 	}
 
 	void EditorShell::OnRender(Wui::WuiContext& ctx)
@@ -340,32 +364,49 @@ namespace World
 		const glm::vec2 viewport = ctx.ViewportSize();
 		BeginMenuBar(ctx, { 0, 0, viewport.x, 26 }, m_Theme);
 		float x = 8;
-		struct Item { const char* Label; std::function<void()> Action; };
-		const std::vector<Item> items = {
-			{ "New", [this] { m_Editor.NewScene(); } },
-			{ "Open", [this] { m_Editor.OpenScene(); } },
-			{ "Save", [this] { m_Editor.SaveScene(); } },
-			{ "Generate Lua API Stubs", [this] { m_Editor.GenerateLuaStubsAction(); } },
-			{ "Cooking", [this] { m_Editor.StartCookingAction(); } },
-			{ "Export Operation Log", [this] { m_Editor.ExportOperationLog(); } },
-			{ "Exit", [this] { m_Editor.CloseAction(); } },
-		};
-		const Wui::WuiId menuId = Wui::HashId("menu.file");
-		const Wui::WuiRect header { x, 2, 52, 22 };
-		if (BeginMenu(ctx, menuId, header, "File", m_Theme))
+
+		struct MenuEntry { std::string Label; bool Checked; std::function<void()> Action; };
+		auto drawMenu = [&](const std::string& menuIdName, const char* title, const std::vector<MenuEntry>& entries)
 		{
-			const Wui::WuiRect panel { header.X, 24, 220, static_cast<float>(items.size() * 22 + 8) };
-			for (size_t i = 0; i < items.size(); ++i)
+			const Wui::WuiId menuId = Wui::HashId(menuIdName.c_str());
+			const Wui::WuiRect header { x, 2, static_cast<float>(std::strlen(title) * 9 + 22), 22 };
+			if (BeginMenu(ctx, menuId, header, title, m_Theme))
 			{
-				const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };
-				if (MenuItem(ctx, Wui::HashId(("menu.file." + std::string(items[i].Label)).c_str()), item, items[i].Label, true, m_Theme))
+				const Wui::WuiRect panel { header.X, 24, 240, static_cast<float>(entries.size() * 22 + 8) };
+				for (size_t i = 0; i < entries.size(); ++i)
 				{
-					items[i].Action();
-					ctx.CloseAllPopups();
+					const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };
+					const Wui::WuiId itemId = Wui::HashId((menuIdName + "." + entries[i].Label).c_str());
+					if (MenuItem(ctx, itemId, item, entries[i].Label, entries[i].Checked, true, m_Theme))
+					{
+						entries[i].Action();
+						ctx.CloseAllPopups();
+					}
 				}
+				EndMenu(ctx, menuId, panel, m_Theme);
 			}
-			EndMenu(ctx, menuId, panel, m_Theme);
+			x += header.W + 4;
+		};
+
+		drawMenu("menu.file", "File", {
+			{ "New", false, [this] { m_Editor.NewScene(); } },
+			{ "Open", false, [this] { m_Editor.OpenScene(); } },
+			{ "Save", false, [this] { m_Editor.SaveScene(); } },
+			{ "Generate Lua API Stubs", false, [this] { m_Editor.GenerateLuaStubsAction(); } },
+			{ "Cooking", false, [this] { m_Editor.StartCookingAction(); } },
+			{ "Export Operation Log", false, [this] { m_Editor.ExportOperationLog(); } },
+			{ "Exit", false, [this] { m_Editor.CloseAction(); } },
+		});
+
+		std::vector<MenuEntry> windowEntries;
+		for (const std::string& panel : m_Panels)
+		{
+			const bool visible = m_Layout.Contains(panel);
+			windowEntries.push_back({ PanelTitle(panel), visible, [this, panel, &ctx] { TogglePanel(ctx, panel); } });
 		}
+		windowEntries.push_back({ "Reset Layout", false, [this, &ctx] { ResetLayout(ctx); } });
+		drawMenu("menu.window", "Window", windowEntries);
+
 		EndMenuBar(ctx);
 	}
 
