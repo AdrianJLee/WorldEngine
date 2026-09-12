@@ -56,6 +56,7 @@ namespace World::Schema
 
 		std::vector<TypeEntry> m_Entries;                              // 稳定顺序
 		std::unordered_map<std::string, std::vector<size_t>> m_ByName; // TypeId.Name -> 索引
+		std::unordered_map<std::string, std::vector<size_t>> m_ByAlias; // 短名(最后一个 :: 之后)-> 索引
 		std::unordered_map<uint32_t, size_t> m_ByComponentId;
 
 		std::vector<EnumEntry> m_EnumEntries;

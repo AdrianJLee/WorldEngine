@@ -1,6 +1,6 @@
 #pragma once
 
-#include "World/Reflection/Reflection.h"
+#include "World/Schema/Schema.h"
 #include "World/Scene/Entity.h"
 
 #include <entt.hpp>
@@ -16,7 +16,7 @@ namespace World
 
 		static void Register(entt::id_type componentId, InspectorFunc inspector);
 		// 返回本帧是否改动了可序列化数据。
-		static bool Draw(const TypeDesc& componentDesc, entt::id_type componentId, Entity entity);
+		static bool Draw(const Schema::TypeSchema& componentSchema, entt::id_type componentId, Entity entity);
 
 	private:
 		static std::unordered_map<entt::id_type, InspectorFunc>& Registry();

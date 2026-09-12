@@ -8,8 +8,8 @@ namespace World
 	class RuntimeApp : public Application
 	{
 	public:
-		RuntimeApp()
-			:Application("Runtime")
+		RuntimeApp(World::WorldContext& context)
+			:Application("Runtime", context)
 		{
 			// 在游戏程序启动时，自动扫描 content 目录下的所有 .wpak 或 .pak 文件，并挂载到 VFS 中
 			std::filesystem::path contentDir = std::string(WLD_CURRENT_DIR) + "content";
@@ -55,9 +55,9 @@ namespace World
 		}
 	};
 
-	Application* CreateApplication()
+	Application* CreateApplication(World::WorldContext& context)
 	{
 
-		return new RuntimeApp();
+		return new RuntimeApp(context);
 	}
 }

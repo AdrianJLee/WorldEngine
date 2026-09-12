@@ -5,8 +5,8 @@
 
 namespace World
 {
-	EditorDocument::EditorDocument()
-		: m_Scene(CreateRef<Scene>())
+	EditorDocument::EditorDocument(WorldContext& context)
+		: m_Context(&context), m_Scene(CreateRef<Scene>(context))
 	{
 	}
 
@@ -18,7 +18,7 @@ namespace World
 			return false;
 		}
 
-		Ref<Scene> newScene = CreateRef<Scene>();
+		Ref<Scene> newScene = CreateRef<Scene>(*m_Context);
 		SceneSerializer serializer(newScene);
 		if (!serializer.Deserialize(path.string()))
 		{
@@ -60,7 +60,7 @@ namespace World
 
 	void EditorDocument::New()
 	{
-		m_Scene = CreateRef<Scene>();
+		m_Scene = CreateRef<Scene>(*m_Context);
 		m_Path.clear();
 		m_Dirty = false;
 		m_LastError.clear();

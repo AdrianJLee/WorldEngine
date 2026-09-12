@@ -12,15 +12,10 @@ namespace World
 			return false;
 		}
 
-		const TypeDescDataComponent* FindComponent(entt::id_type id)
+		const Schema::TypeSchema* FindComponentSchema(Scene* scene, entt::id_type id)
 		{
-			for (const auto& name : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
-			{
-				auto* type = TypeRegistry::Get().GetTypeDesc(name);
-				auto* component = type ? std::any_cast<TypeDescDataComponent>(&type->UserData) : nullptr;
-				if (component && component->Id == id) return component;
-			}
-			return nullptr;
+			const Schema::TypeSchema* schema = scene->GetContext().Schemas().FindByComponentId(static_cast<uint32_t>(id));
+			return (schema && schema->Storage) ? schema : nullptr;
 		}
 	}
 
@@ -126,8 +121,8 @@ namespace World
 		RequireValid();
 		std::string reason;
 		if (!CheckAdd(componentId, false, true, &reason)) throw std::logic_error(reason);
-		const auto* component = FindComponent(componentId);
-		if (!component || !component->AddFunc) throw std::logic_error("Type is not a registered component");
+		const Schema::TypeSchema* schema = FindComponentSchema(m_Scene, componentId);
+		if (!schema || !schema->Storage || !schema->Storage->Add) throw std::logic_error("Type is not a registered component");
 		if (!data && m_Scene->m_CallbackDepth)
 		{
 			Entity target = *this;
@@ -144,7 +139,7 @@ namespace World
 			if (!storage) throw std::logic_error("Data-bearing component addition requires existing storage");
 			storage->push(m_EntityHandle, data);
 		}
-		else component->AddFunc(*this);
+		else schema->Storage->Add(static_cast<void*>(this));
 	}
 
 	void Entity::RemoveComponent(entt::id_type componentId)
@@ -153,30 +148,4 @@ namespace World
 		m_Scene->RequestRemove(m_EntityHandle, componentId);
 	}
 
-	NativeScriptComponent CloneComponentConfiguration(const NativeScriptComponent& source)
-	{
-		NativeScriptComponent copy;
-		copy.ScriptName = source.ScriptName;
-		copy.FieldValues = source.FieldValues;
-		copy.InstantiateScript = source.InstantiateScript;
-		copy.DestroyScript = source.DestroyScript;
-		return copy;
-	}
-
-	LuaScriptComponent CloneComponentConfiguration(const LuaScriptComponent& source)
-	{
-		LuaScriptComponent copy;
-		copy.ScriptFilePath = source.ScriptFilePath;
-		copy.CachedFields = source.CachedFields;
-		copy.LastModifiedTime = source.LastModifiedTime;
-		return copy;
-	}
-
-	RigidBody2DComponent CloneComponentConfiguration(const RigidBody2DComponent& source)
-	{
-		RigidBody2DComponent copy;
-		copy.Type = source.Type;
-		copy.FixedRotation = source.FixedRotation;
-		return copy;
-	}
 }

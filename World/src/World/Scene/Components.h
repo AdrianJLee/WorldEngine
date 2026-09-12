@@ -1,90 +1,72 @@
-﻿#pragma once
-#include "World/Core/ComponentRegistry.h"
+#pragma once
+
 #include "World/Core/UUID.h"
+#include "World/Core/Memory/Memory.h"
+#include "World/Core/Memory/PoolAllocator.h"
+#include "World/Scene/Entity.h"
 #include "World/Scene/SceneCamera.h"
 #include "World/Scene/ScriptableEntity.h"
 #include "World/Renderer/Texture.h"
-#include "World/Reflection/Reflection.h"
+#include "World/Schema/Schema.h"
+#include "World/Schema/BuiltinAssetOps.h"
 
-
+#include <any>
+#include <box2d/id.h>
+#include <filesystem>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include "sol/sol.hpp"
+#include <sol/sol.hpp>
+
+#include <string>
+#include <unordered_map>
+
 namespace World
 {
+	// 复制组件时只保留"编辑配置",剔除运行态。默认整体复制;有运行态的组件提供特化。
+	template <typename T>
+	T CloneComponentConfiguration(const T& source) { return source; }
+
 	struct UUIDComponent
 	{
-		REFLECT_BODY(UUIDComponent, TypeCategory::Component);
-
-		PROPERTY(ID);
-		World::UUID ID;
+		UUID ID;
 
 		UUIDComponent() = default;
-		UUIDComponent(const World::UUID& id)
-			: ID(id)
-		{}
+		UUIDComponent(const UUID& id) : ID(id) {}
 
+		WE_SCHEMA_BODY(World, UUIDComponent, Component)
+			WE_FIELD(ID, Object, Of(UUID));
+		WE_SCHEMA_END
 	};
 
 	struct TagComponent
 	{
-		REFLECT_BODY(TagComponent, TypeCategory::Component);
-
-
-		PROPERTY(Tag);
 		std::string Tag;
 
 		TagComponent() = default;
-		TagComponent(const std::string& tag)
-			: Tag(tag)
-		{}
+		TagComponent(const std::string& tag) : Tag(tag) {}
 
+		WE_SCHEMA_BODY(World, TagComponent, Component)
+			WE_FIELD(Tag, String);
+		WE_SCHEMA_END
 	};
 
 	struct TransformComponent
 	{
-		REFLECT_BODY(TransformComponent, TypeCategory::Component);
-
-		PROPERTY(Location);
 		glm::vec3 Location { 0.0f, 0.0f, 0.0f };
-
-		PROPERTY(Rotation);
 		glm::vec3 Rotation { 0.0f, 0.0f, 0.0f };
-
-		PROPERTY(RotationQuat);
 		glm::quat RotationQuat { 1.0f, 0.0f, 0.0f, 0.0f };
-
-		PROPERTY(Scale);
 		glm::vec3 Scale { 1.0f, 1.0f, 1.0f };
-
-		PROPERTY(Transform);
 		glm::mat4 Transform { 1.0f };
 
-		TransformComponent(const glm::mat4& transform)
-		{
-			SetTransform(transform);
-		}
-		TransformComponent(const glm::vec3& location = glm::vec3 { 0.0f, 0.0f, 0.0f }, const glm::vec3& rotation = glm::vec3 { 0.0f, 0.0f, 0.0f }, const glm::vec3& scale = glm::vec3 { 1.0f,1.0f,1.0f })
+		TransformComponent(const glm::mat4& transform) { SetTransform(transform); }
+		TransformComponent(const glm::vec3& location = glm::vec3 { 0.0f, 0.0f, 0.0f }, const glm::vec3& rotation = glm::vec3 { 0.0f, 0.0f, 0.0f }, const glm::vec3& scale = glm::vec3 { 1.0f, 1.0f, 1.0f })
 		{
 			SetTransform(location, rotation, scale);
 		}
 
-		void SetLocation(const glm::vec3& location)
-		{
-			Location = location;
-			RecalculateTransform();
-		}
-		void SetRotation(const glm::vec3& rotation)
-		{
-			Rotation = rotation;
-			RotationQuat = glm::quat(rotation);
-			RecalculateTransform();
-		}
-		void SetScale(const glm::vec3& scale)
-		{
-			Scale = scale;
-			RecalculateTransform();
-		}
+		void SetLocation(const glm::vec3& location) { Location = location; RecalculateTransform(); }
+		void SetRotation(const glm::vec3& rotation) { Rotation = rotation; RotationQuat = glm::quat(rotation); RecalculateTransform(); }
+		void SetScale(const glm::vec3& scale) { Scale = scale; RecalculateTransform(); }
 		void SetTransform(const glm::vec3& location, const glm::vec3& rotation, const glm::vec3& scale)
 		{
 			Location = location;
@@ -96,29 +78,19 @@ namespace World
 		void SetTransform(const glm::mat4& transform)
 		{
 			Transform = transform;
-			// 1. 提取位置 (Translation)
 			Location = glm::vec3(transform[3]);
-
-			// 2. 提取缩放 (Scale) 并处理负缩放
-			// 这种方法通过计算行列式的正负来尝试保留镜像信息
 			Scale.x = glm::length(glm::vec3(transform[0]));
 			Scale.y = glm::length(glm::vec3(transform[1]));
 			Scale.z = glm::length(glm::vec3(transform[2]));
-
-			// 如果行列式为负，说明存在镜像变换，通常需要修正一个轴
 			if (glm::determinant(transform) < 0)
 				Scale.x *= -1.0f;
-
-			// 3. 提取旋转 (Rotation)
-			// 必须先移除缩放的影响，否则 quat_cast 的结果是错误的
 			glm::mat4 rotationMatrix = transform;
 			rotationMatrix[0] /= Scale.x;
 			rotationMatrix[1] /= Scale.y;
 			rotationMatrix[2] /= Scale.z;
-			rotationMatrix[3] = glm::vec4(0, 0, 0, 1); // 清除平移
-
+			rotationMatrix[3] = glm::vec4(0, 0, 0, 1);
 			RotationQuat = glm::quat_cast(rotationMatrix);
-			Rotation = glm::eulerAngles(RotationQuat); // 注意：这里返回的是弧度
+			Rotation = glm::eulerAngles(RotationQuat);
 		}
 		void SetRotationQuat(const glm::quat& rotationQuat)
 		{
@@ -134,121 +106,108 @@ namespace World
 			Transform = translationMatrix * rotationMatrix * scaleMatrix;
 		}
 
-		operator const glm::mat4& () const
-		{
-			return Transform;
-		}
+		operator const glm::mat4&() const { return Transform; }
 
+		WE_SCHEMA_BODY(World, TransformComponent, Component)
+			WE_FIELD(Location, Vec3, Group("Transform"));
+			WE_FIELD(Rotation, Vec3, Group("Transform"));
+			WE_FIELD(RotationQuat, Quat, Transient, Group("Transform"));
+			WE_FIELD(Scale, Vec3, Group("Transform"));
+			WE_FIELD(Transform, Mat4, Transient, Group("Transform"));
+		WE_SCHEMA_END
 	};
 
 	struct SpriteComponent
 	{
-		REFLECT_BODY(SpriteComponent, TypeCategory::Component);
-
-		SpriteComponent()
-		{
-
-		};
-
-		SpriteComponent(const glm::vec4& color)
-			: Color(color)
-		{
-
-		};
-
-		PROPERTY(Color);
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
-
-		PROPERTY(Texture);
 		Ref<Texture2D> Texture;
-
-		PROPERTY(TilingFactor);
 		float TilingFactor = 1.0f;
 
+		SpriteComponent() = default;
+		SpriteComponent(const glm::vec4& color) : Color(color) {}
+
+		WE_SCHEMA_BODY(World, SpriteComponent, Component)
+			WE_FIELD(Color, Vec4);
+			WE_FIELD(Texture, Asset, Of("Texture2D"));
+			WE_FIELD(TilingFactor, Float);
+		WE_SCHEMA_END
 	};
 
 	struct CircleRendererComponent
 	{
-		REFLECT_BODY(CircleRendererComponent, TypeCategory::Component);
-
-		PROPERTY(Color);
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
-		PROPERTY(Thickness);
 		float Thickness = 1.0f;
-		PROPERTY(Fade);
 		float Fade = 0.005f;
 
+		WE_SCHEMA_BODY(World, CircleRendererComponent, Component)
+			WE_FIELD(Color, Vec4);
+			WE_FIELD(Thickness, Float);
+			WE_FIELD(Fade, Float);
+		WE_SCHEMA_END
 	};
 
 	struct CameraComponent
 	{
-		REFLECT_BODY(CameraComponent, TypeCategory::Component);
-
 		CameraComponent() = default;
 		CameraComponent(const SceneCamera& sceneCamera, bool primary = false)
-			:Camera(sceneCamera),
-			Primary(primary)
+			: Camera(sceneCamera), Primary(primary)
 		{
-
 		}
-		PROPERTY(Camera);
+
 		SceneCamera Camera;
-
-		PROPERTY(Primary);
 		bool Primary = true;
-
-		PROPERTY(FixedAspectRatio);
 		bool FixedAspectRatio = false;
 
+		WE_SCHEMA_BODY(World, CameraComponent, Component)
+			WE_FIELD(Camera, Object, Of(SceneCamera));
+			WE_FIELD(Primary, Bool);
+			WE_FIELD(FixedAspectRatio, Bool);
+		WE_SCHEMA_END
 	};
 
 	enum class ScriptInstanceState { Pending, Creating, Running, Destroying, Stopped, Faulted };
 
 	struct NativeScriptComponent
 	{
-		REFLECT_BODY(NativeScriptComponent, TypeCategory::Component);
-
 		ScriptableEntity* Instance = nullptr;
 		ScriptInstanceState State = ScriptInstanceState::Pending;
 		std::string LastError;
 		uint64_t Generation = 0;
 		bool CreateEntered = false;
-		// 原始函数指针
 		ScriptableEntity* (*InstantiateScript)() = nullptr;
 		void (*DestroyScript)(ScriptableEntity*&) = nullptr;
 
-		PROPERTY(ScriptName);
 		std::string ScriptName;
+		std::unordered_map<std::string, Schema::Value> FieldValues;
 
-		template<typename T>
+		template <typename T>
 		void Bind()
 		{
 			InstantiateScript = []()
-				{
-					return static_cast<ScriptableEntity*>(WLD_POOL_NEW(T));
-				};
+			{
+				return static_cast<ScriptableEntity*>(WLD_POOL_NEW(T));
+			};
 			DestroyScript = [](ScriptableEntity*& scriptableEntity)
-				{
-
-					WLD_POOL_DELETE(T, PoolTag::General, scriptableEntity);
-					scriptableEntity = nullptr;
-				};
+			{
+				WLD_POOL_DELETE(T, PoolTag::General, scriptableEntity);
+				scriptableEntity = nullptr;
+			};
 		}
 
-		// T04：无 ImGui 的字段访问合同，供 Editor Inspector 与测试共用。
+		WE_SCHEMA_BODY(World, NativeScriptComponent, Component)
+			WE_FIELD(ScriptName, String);
+		WE_SCHEMA_END
+
+		// 无 ImGui 的字段访问合同,供 Editor Inspector 与测试共用;运行期场景也用它应用字段。
 		ScriptableEntity* GetOrCreateEditorInstance(bool allowCreate, bool& outOwned);
 		void ReleaseEditorInstance(ScriptableEntity* preview);
-		// 清空编辑字段缓存并允许下次重新创建预览实例。
 		void ResetEditorFieldState();
-		std::any GetErasedFieldValue(const TypeDesc& typeDesc, const PropertyDesc& prop, ScriptableEntity* instance);
-		void SetErasedFieldValue(const TypeDesc& typeDesc, const PropertyDesc& prop, ScriptableEntity* instance, const std::any& value);
+		Schema::Value GetErasedFieldValue(const Schema::TypeSchema& typeSchema, const Schema::FieldSchema& field, ScriptableEntity* instance);
+		void SetErasedFieldValue(const Schema::TypeSchema& typeSchema, const Schema::FieldSchema& field, ScriptableEntity* instance, const Schema::Value& value);
 
-
-		std::unordered_map<std::string, std::any> FieldValues;
 	private:
 		bool isFirstDraw = true;
 	};
-
 
 	enum class LuaFieldType { None, Float, Int, Bool, String };
 	struct LuaScriptField
@@ -272,15 +231,11 @@ namespace World
 
 	struct LuaScriptComponent
 	{
-		REFLECT_BODY(LuaScriptComponent, TypeCategory::Component);
+		std::string ScriptFilePath = ""; // 例如 "assets/scripts/Player.lua"
 
-		PROPERTY(ScriptFilePath);
-		std::string ScriptFilePath = ""; // Lua 文件的路径，比如 "assets/scripts/Player.lua"
-
-		// 核心：为每个实体创建一个独立的 Lua 运行环境，防止变量冲突
+		// 每个实体独立的 Lua 环境,防止变量冲突。
 		sol::environment LuaEnv;
 		sol::table ScriptTable;
-		// 缓存从 Lua 文件里读取出来的函数
 		sol::protected_function OnCreateFunc;
 		sol::protected_function OnUpdateFunc;
 		sol::protected_function OnDestroyFunc;
@@ -288,7 +243,6 @@ namespace World
 		std::unordered_map<std::string, LuaScriptField> CachedFields;
 		std::filesystem::file_time_type LastModifiedTime;
 
-		// 标记是否已经加载过文件
 		bool IsLoaded = false;
 		ScriptInstanceState State = ScriptInstanceState::Pending;
 		std::string LastError;
@@ -300,67 +254,73 @@ namespace World
 		LuaScriptComponent(const LuaScriptComponent&) = default;
 		LuaScriptComponent(const std::string& path) : ScriptFilePath(path) {}
 
+		WE_SCHEMA_BODY(World, LuaScriptComponent, Component)
+			WE_FIELD(ScriptFilePath, String);
+		WE_SCHEMA_END
 	};
 
 	struct RigidBody2DComponent
 	{
-		REFLECT_BODY(RigidBody2DComponent, TypeCategory::Component);
-
-
 		enum class BodyType
 		{
 			Static = 0, Dynamic, Kinematic
 		};
-		REFLECT_ENUM(BodyType);
-		PROPERTY_ENUM(BodyType, Static);
-		PROPERTY_ENUM(BodyType, Dynamic);
-		PROPERTY_ENUM(BodyType, Kinematic);
+		WE_ENUM_SCHEMA(World, BodyType, Int32)
+			WE_ENUM_VALUE(Static);
+			WE_ENUM_VALUE(Dynamic);
+			WE_ENUM_VALUE(Kinematic);
+		WE_ENUM_END
 
-		PROPERTY(Type);
 		BodyType Type = BodyType::Static;
-
 		b2BodyId RuntimeBodyId = b2_nullBodyId;
-
-		PROPERTY(FixedRotation);
 		bool FixedRotation = false;
 
+		WE_SCHEMA_BODY(World, RigidBody2DComponent, Component)
+			WE_FIELD(Type, Enum, Of(BodyType));
+			WE_FIELD(FixedRotation, Bool);
+		WE_SCHEMA_END
 	};
 
 	struct BoxCollider2DComponent
 	{
-		REFLECT_BODY(BoxCollider2DComponent, TypeCategory::Component);
-
-		PROPERTY(Offset);
 		glm::vec2 Offset { 0.0f, 0.0f };
-		PROPERTY(Size);
 		glm::vec2 Size { 0.5f, 0.5f };
-		PROPERTY(Density);
 		float Density = 1.0f;
-		PROPERTY(Friction);
 		float Friction = 0.5f;
-		PROPERTY(Restitution);
 		float Restitution = 0.2f;
-		PROPERTY(ShowCollider);
 		bool ShowCollider = true;
 
+		WE_SCHEMA_BODY(World, BoxCollider2DComponent, Component)
+			WE_FIELD(Offset, Vec2);
+			WE_FIELD(Size, Vec2);
+			WE_FIELD(Density, Float);
+			WE_FIELD(Friction, Float);
+			WE_FIELD(Restitution, Float);
+			WE_FIELD(ShowCollider, Bool);
+		WE_SCHEMA_END
 	};
 
 	struct CircleCollider2DComponent
 	{
-		REFLECT_BODY(CircleCollider2DComponent, TypeCategory::Component);
-
-		PROPERTY(Offset);
 		glm::vec2 Offset { 0.0f, 0.0f };
-		PROPERTY(Radius);
 		float Radius = 0.5f;
-		PROPERTY(Density);
 		float Density = 1.0f;
-		PROPERTY(Friction);
 		float Friction = 0.5f;
-		PROPERTY(Restitution);
 		float Restitution = 0.2f;
-		PROPERTY(ShowCollider);
 		bool ShowCollider = true;
 
+		WE_SCHEMA_BODY(World, CircleCollider2DComponent, Component)
+			WE_FIELD(Offset, Vec2);
+			WE_FIELD(Radius, Float);
+			WE_FIELD(Density, Float);
+			WE_FIELD(Friction, Float);
+			WE_FIELD(Restitution, Float);
+			WE_FIELD(ShowCollider, Bool);
+		WE_SCHEMA_END
 	};
+
+	// 组件配置克隆特化(剔除运行态)。
+	NativeScriptComponent CloneComponentConfiguration(const NativeScriptComponent& source);
+	LuaScriptComponent CloneComponentConfiguration(const LuaScriptComponent& source);
+	RigidBody2DComponent CloneComponentConfiguration(const RigidBody2DComponent& source);
 }

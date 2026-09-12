@@ -1,7 +1,7 @@
 #include "InspectorRegistry.h"
 
-#include "World/Core/ComponentRegistry.h"
 #include "World/Core/Log.h"
+#include "World/Schema/Schema.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/ScriptEngine.h"
 
@@ -150,106 +150,116 @@ namespace World
 			return false;
 		}
 
-		// 通用属性控件：把编辑结果写回 current，返回是否改动。
-		bool DrawPropertyControl(const PropertyDesc& prop, const std::string& label, std::any& current)
+		// 通用属性控件:把编辑结果写回 current,返回是否改动。
+		bool DrawPropertyControl(const Schema::FieldSchema& field, const std::string& label, Schema::Value& current)
 		{
-			if (!current.has_value())
+			if (std::holds_alternative<std::monostate>(current))
 			{
 				ImGui::TextWrapped("%s: [no value]", label.c_str());
 				return false;
 			}
 
-			switch (prop.Type)
+			switch (field.K)
 			{
-				case DataType::Bool:
+				case Schema::Kind::Bool:
 				{
-					bool v = std::any_cast<bool>(current);
+					bool v = std::get<bool>(current);
 					if (ImGui::Checkbox(label.c_str(), &v)) { current = v; return true; }
 					break;
 				}
-				case DataType::Int8:
-				case DataType::Int16:
-				case DataType::Int32:
-				case DataType::Int64:
+				case Schema::Kind::Int8:
+				case Schema::Kind::Int16:
+				case Schema::Kind::Int32:
+				case Schema::Kind::Int64:
 				{
-					int v = prop.Type == DataType::Int64
-						? static_cast<int>(std::any_cast<int64_t>(current))
-						: static_cast<int>(std::any_cast<int32_t>(current));
-					bool hasRange = prop.Edit.Min.has_value() && prop.Edit.Max.has_value();
+					int64_t raw = field.K == Schema::Kind::Int64
+						? static_cast<int64_t>(std::get<int64_t>(current))
+						: field.K == Schema::Kind::Int8
+							? static_cast<int64_t>(std::get<int8_t>(current))
+							: field.K == Schema::Kind::Int16
+								? static_cast<int64_t>(std::get<int16_t>(current))
+								: static_cast<int64_t>(std::get<int32_t>(current));
+					int v = static_cast<int>(raw);
+					bool hasRange = field.Meta.Min.has_value() && field.Meta.Max.has_value();
 					bool edited = hasRange
-						? ImGui::DragInt(label.c_str(), &v, 1, static_cast<int>(*prop.Edit.Min), static_cast<int>(*prop.Edit.Max))
+						? ImGui::DragInt(label.c_str(), &v, 1, static_cast<int>(*field.Meta.Min), static_cast<int>(*field.Meta.Max))
 						: ImGui::DragInt(label.c_str(), &v, 1);
 					if (edited)
 					{
-						switch (prop.Type)
+						switch (field.K)
 						{
-							case DataType::Int8: current = static_cast<int8_t>(v); break;
-							case DataType::Int16: current = static_cast<int16_t>(v); break;
-							case DataType::Int64: current = static_cast<int64_t>(v); break;
+							case Schema::Kind::Int8: current = static_cast<int8_t>(v); break;
+							case Schema::Kind::Int16: current = static_cast<int16_t>(v); break;
+							case Schema::Kind::Int64: current = static_cast<int64_t>(v); break;
 							default: current = static_cast<int32_t>(v); break;
 						}
 						return true;
 					}
 					break;
 				}
-				case DataType::UInt8:
-				case DataType::UInt16:
-				case DataType::UInt32:
-				case DataType::UInt64:
+				case Schema::Kind::UInt8:
+				case Schema::Kind::UInt16:
+				case Schema::Kind::UInt32:
+				case Schema::Kind::UInt64:
 				{
-					int v = prop.Type == DataType::UInt64
-						? static_cast<int>(std::any_cast<uint64_t>(current))
-						: static_cast<int>(std::any_cast<uint32_t>(current));
+					uint64_t raw = field.K == Schema::Kind::UInt64
+						? static_cast<uint64_t>(std::get<uint64_t>(current))
+						: field.K == Schema::Kind::UInt8
+							? static_cast<uint64_t>(std::get<uint8_t>(current))
+							: field.K == Schema::Kind::UInt16
+								? static_cast<uint64_t>(std::get<uint16_t>(current))
+								: static_cast<uint64_t>(std::get<uint32_t>(current));
+					int v = static_cast<int>(raw);
 					if (ImGui::DragInt(label.c_str(), &v, 1, 0, 0))
 					{
-						switch (prop.Type)
+						switch (field.K)
 						{
-							case DataType::UInt8: current = static_cast<uint8_t>(v); break;
-							case DataType::UInt16: current = static_cast<uint16_t>(v); break;
-							case DataType::UInt64: current = static_cast<uint64_t>(v); break;
+							case Schema::Kind::UInt8: current = static_cast<uint8_t>(v); break;
+							case Schema::Kind::UInt16: current = static_cast<uint16_t>(v); break;
+							case Schema::Kind::UInt64: current = static_cast<uint64_t>(v); break;
 							default: current = static_cast<uint32_t>(v); break;
 						}
 						return true;
 					}
 					break;
 				}
-				case DataType::Float:
+				case Schema::Kind::Float:
 				{
-					float v = std::any_cast<float>(current);
-					bool hasRange = prop.Edit.Min.has_value() && prop.Edit.Max.has_value();
+					float v = std::get<float>(current);
+					bool hasRange = field.Meta.Min.has_value() && field.Meta.Max.has_value();
 					bool edited = hasRange
-						? ImGui::DragFloat(label.c_str(), &v, 0.1f, *prop.Edit.Min, *prop.Edit.Max, "%.3f")
+						? ImGui::DragFloat(label.c_str(), &v, 0.1f, *field.Meta.Min, *field.Meta.Max, "%.3f")
 						: ImGui::DragFloat(label.c_str(), &v, 0.1f, 0.0f, 0.0f, "%.3f");
 					if (edited) { current = v; return true; }
 					break;
 				}
-				case DataType::Double:
+				case Schema::Kind::Double:
 				{
-					double v = std::any_cast<double>(current);
+					double v = std::get<double>(current);
 					if (ImGui::InputDouble(label.c_str(), &v)) { current = v; return true; }
 					break;
 				}
-				case DataType::Vec2:
+				case Schema::Kind::Vec2:
 				{
-					glm::vec2 v = std::any_cast<glm::vec2>(current);
+					glm::vec2 v = std::get<glm::vec2>(current);
 					if (ImGui::DragFloat2(label.c_str(), glm::value_ptr(v), 0.1f)) { current = v; return true; }
 					break;
 				}
-				case DataType::Vec3:
+				case Schema::Kind::Vec3:
 				{
-					glm::vec3 v = std::any_cast<glm::vec3>(current);
+					glm::vec3 v = std::get<glm::vec3>(current);
 					if (ImGui::DragFloat3(label.c_str(), glm::value_ptr(v), 0.1f)) { current = v; return true; }
 					break;
 				}
-				case DataType::Vec4:
+				case Schema::Kind::Vec4:
 				{
-					glm::vec4 v = std::any_cast<glm::vec4>(current);
+					glm::vec4 v = std::get<glm::vec4>(current);
 					if (ImGui::DragFloat4(label.c_str(), glm::value_ptr(v), 0.1f)) { current = v; return true; }
 					break;
 				}
-				case DataType::String:
+				case Schema::Kind::String:
 				{
-					std::string v = std::any_cast<std::string>(current);
+					std::string v = std::get<std::string>(current);
 					std::vector<char> buffer(std::max<size_t>(256, v.size() + 64), '\0');
 					std::copy(v.begin(), v.end(), buffer.begin());
 					if (ImGui::InputText(label.c_str(), buffer.data(), buffer.size()))
@@ -259,20 +269,27 @@ namespace World
 					}
 					break;
 				}
-				case DataType::Enum:
+				case Schema::Kind::Enum:
 				{
-					const EnumDesc& enumDesc = std::any_cast<EnumDesc>(prop.UserData);
-					const TypeDesc* enumTypeDesc = TypeRegistry::Get().GetTypeDesc(enumDesc.Name);
-					if (enumTypeDesc)
+					const Schema::EnumSchema* enumSchema = field.GetEnum ? field.GetEnum() : nullptr;
+					if (enumSchema)
 					{
 						std::vector<const char*> options;
-						options.reserve(enumTypeDesc->Properties.size());
-						for (const auto& enumProperty : enumTypeDesc->Properties)
-							options.push_back(enumProperty.Name.c_str());
-						int enumVal = std::any_cast<int32_t>(current);
-						if (ImGui::Combo(label.c_str(), &enumVal, options.data(), static_cast<int>(options.size())))
+						options.reserve(enumSchema->Values.size());
+						int selected = 0;
+						const int64_t raw = enumSchema->IsSigned
+							? static_cast<int64_t>(std::get<int64_t>(current))
+							: static_cast<int64_t>(std::get<uint64_t>(current));
+						for (size_t i = 0; i < enumSchema->Values.size(); ++i)
 						{
-							current = enumVal;
+							options.push_back(enumSchema->Values[i].first.c_str());
+							if (enumSchema->Values[i].second == raw)
+								selected = static_cast<int>(i);
+						}
+						if (ImGui::Combo(label.c_str(), &selected, options.data(), static_cast<int>(options.size())))
+						{
+							const int64_t value = enumSchema->Values[selected].second;
+							current = enumSchema->IsSigned ? Schema::Value(static_cast<int64_t>(value)) : Schema::Value(static_cast<uint64_t>(value));
 							return true;
 						}
 					}
@@ -283,7 +300,7 @@ namespace World
 					break;
 				}
 				default:
-					ImGui::TextWrapped("%s: [read-only type %d]", label.c_str(), static_cast<int>(prop.Type));
+					ImGui::TextWrapped("%s: [read-only type %d]", label.c_str(), static_cast<int>(field.K));
 					break;
 			}
 			return false;
@@ -466,28 +483,21 @@ namespace World
 						changed = true;
 					}
 
-					for (const auto& scriptName : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Script))
+					for (const Schema::TypeSchema* scriptSchema : entity.GetScene()->GetContext().Schemas().List(Schema::TypeCategory::Script))
 					{
-						TypeDesc* scriptType = TypeRegistry::Get().GetTypeDesc(scriptName);
-						if (!scriptType)
+						if (!scriptSchema || !scriptSchema->Script)
 							continue;
-						if (TypeDescDataScript* scriptInfo = std::any_cast<TypeDescDataScript>(&scriptType->UserData))
+						const std::string displayName = scriptSchema->DisplayName;
+						const bool isSelected = (displayName == nativeScript.ScriptName);
+						if (ImGui::Selectable(displayName.c_str(), isSelected))
 						{
-							const std::string displayName = scriptType->Name;
-							bool isSelected = (displayName == nativeScript.ScriptName);
-							if (ImGui::Selectable(displayName.c_str(), isSelected))
-							{
-								if (scriptInfo->BindFunc)
-								{
-									scriptInfo->BindFunc(nativeScript);
-									nativeScript.ScriptName = displayName;
-									nativeScript.ResetEditorFieldState();
-									changed = true;
-								}
-							}
-							if (isSelected)
-								ImGui::SetItemDefaultFocus();
+							scriptSchema->Script->Bind(static_cast<void*>(&nativeScript));
+							nativeScript.ScriptName = displayName;
+							nativeScript.ResetEditorFieldState();
+							changed = true;
 						}
+						if (isSelected)
+							ImGui::SetItemDefaultFocus();
 					}
 					ImGui::EndCombo();
 				}
@@ -515,8 +525,8 @@ namespace World
 				isBound = nativeScript.InstantiateScript != nullptr;
 				if (isBound && !nativeScript.ScriptName.empty())
 				{
-					const TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(nativeScript.ScriptName);
-					if (typeDesc)
+					const Schema::TypeSchema* typeSchema = entity.GetScene()->GetContext().Schemas().Find(nativeScript.ScriptName);
+					if (typeSchema)
 					{
 						ImGui::Separator();
 						ImGui::Text("Script Properties");
@@ -534,21 +544,21 @@ namespace World
 							ImGui::TextWrapped("Preview failed: %s", error.what());
 						}
 
-						for (const auto& prop : typeDesc->Properties)
+						for (const Schema::FieldSchema& field : typeSchema->Fields)
 						{
-							ImGui::PushID(prop.Name.c_str());
-							std::any currentVal = nativeScript.GetErasedFieldValue(*typeDesc, prop, preview);
+							if (field.Meta.Transient)
+								continue;
+							ImGui::PushID(field.Name.c_str());
+							Schema::Value currentVal = nativeScript.GetErasedFieldValue(*typeSchema, field, preview);
 							bool valueChanged = false;
 
-							if (prop.Type == DataType::Vec3)
+							if (field.K == Schema::Kind::Vec3)
 							{
-								if (currentVal.has_value())
+								if (!std::holds_alternative<std::monostate>(currentVal))
 								{
-									glm::vec3 val = std::any_cast<glm::vec3>(currentVal);
-									glm::vec3 oldVal = val;
-									valueChanged = DrawVec3Control(prop.Name, val, 0.0f, 100.0f);
+									glm::vec3 val = std::get<glm::vec3>(currentVal);
+									valueChanged = DrawVec3Control(field.Name, val, 0.0f, 100.0f);
 									if (valueChanged) currentVal = val;
-									(void)oldVal;
 								}
 							}
 							else
@@ -560,80 +570,10 @@ namespace World
 									ImGui::TableNextRow();
 									ImGui::TableNextColumn();
 									ImGui::AlignTextToFramePadding();
-									ImGui::Text("%s", prop.Name.c_str());
+									ImGui::Text("%s", field.Name.c_str());
 									ImGui::TableNextColumn();
 									ImGui::PushItemWidth(-1.0f);
-
-									switch (prop.Type)
-									{
-										case DataType::Int32:
-										{
-											if (currentVal.has_value())
-											{
-												int32_t val = std::any_cast<int32_t>(currentVal);
-												if (ImGui::DragInt("##Val", &val)) { currentVal = val; valueChanged = true; }
-											}
-											break;
-										}
-										case DataType::Float:
-										{
-											if (currentVal.has_value())
-											{
-												float val = std::any_cast<float>(currentVal);
-												if (ImGui::DragFloat("##Val", &val, 0.1f)) { currentVal = val; valueChanged = true; }
-											}
-											break;
-										}
-										case DataType::Bool:
-										{
-											if (currentVal.has_value())
-											{
-												bool val = std::any_cast<bool>(currentVal);
-												if (ImGui::Checkbox("##Val", &val)) { currentVal = val; valueChanged = true; }
-											}
-											break;
-										}
-										case DataType::String:
-										{
-											if (currentVal.has_value())
-											{
-												std::string val = std::any_cast<std::string>(currentVal);
-												char buffer[256];
-												memset(buffer, 0, sizeof(buffer));
-												strncpy_s(buffer, val.c_str(), sizeof(buffer) - 1);
-												if (ImGui::InputText("##Val", buffer, sizeof(buffer)))
-												{
-													currentVal = std::string(buffer);
-													valueChanged = true;
-												}
-											}
-											break;
-										}
-										case DataType::Enum:
-										{
-											if (currentVal.has_value())
-											{
-												std::vector<const char*> options;
-												const EnumDesc& enumDesc = std::any_cast<EnumDesc>(prop.UserData);
-												const TypeDesc* enumTypeDesc = TypeRegistry::Get().GetTypeDesc(enumDesc.Name);
-												if (enumTypeDesc)
-												{
-													for (const auto& enumProperty : enumTypeDesc->Properties)
-														options.push_back(enumProperty.Name.c_str());
-													int enumVal = std::any_cast<int32_t>(currentVal);
-													if (ImGui::Combo("##Val", &enumVal, options.data(), static_cast<int>(options.size())))
-													{
-														currentVal = enumVal;
-														valueChanged = true;
-													}
-												}
-											}
-											break;
-										}
-										default:
-											ImGui::Text("[Unsupported]");
-											break;
-									}
+									valueChanged = DrawPropertyControl(field, "##Val", currentVal);
 									ImGui::PopItemWidth();
 									ImGui::EndTable();
 								}
@@ -641,7 +581,7 @@ namespace World
 
 							if (valueChanged)
 							{
-								nativeScript.SetErasedFieldValue(*typeDesc, prop, preview, currentVal);
+								nativeScript.SetErasedFieldValue(*typeSchema, field, preview, currentVal);
 								changed = true;
 							}
 							ImGui::PopID();
@@ -811,28 +751,30 @@ namespace World
 
 	// ---------------- 反射自动检查器 ----------------
 
-	bool DrawAutoInspector(const TypeDesc& componentDesc, entt::id_type componentId, Entity entity)
+	bool DrawAutoInspector(const Schema::TypeSchema& componentSchema, uint32_t componentId, Entity entity)
 	{
 		void* instance = entity.GetComponent(componentId);
 		if (!instance)
 			return false;
 
 		bool changed = false;
-		for (const auto& prop : componentDesc.Properties)
+		for (const Schema::FieldSchema& field : componentSchema.Fields)
 		{
-			const std::string label = prop.Edit.DisplayName.empty() ? prop.Name : prop.Edit.DisplayName;
-			ImGui::PushID(prop.Name.c_str());
-			if (prop.Edit.ReadOnly)
+			if (field.Meta.Transient)
+				continue;
+			const std::string label = field.Meta.DisplayName.empty() ? field.Name : field.Meta.DisplayName;
+			ImGui::PushID(field.Name.c_str());
+			if (field.Meta.ReadOnly)
 				ImGui::BeginDisabled();
 
-			std::any current = componentDesc.GetValueErased(instance, prop);
-			if (DrawPropertyControl(prop, label, current))
+			Schema::Value current = field.Get(instance);
+			if (DrawPropertyControl(field, label, current))
 			{
-				componentDesc.SetValueErased(instance, prop, current);
+				field.Set(instance, current);
 				changed = true;
 			}
 
-			if (prop.Edit.ReadOnly)
+			if (field.Meta.ReadOnly)
 				ImGui::EndDisabled();
 			ImGui::PopID();
 		}

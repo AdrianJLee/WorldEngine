@@ -28,7 +28,7 @@ namespace World
 		}
 	}
 
-	Scene::Scene() : m_OwnerThread(std::this_thread::get_id()) {}
+	Scene::Scene(WorldContext& context) : m_Context(&context), m_OwnerThread(std::this_thread::get_id()) {}
 
 	Scene::~Scene()
 	{
@@ -223,21 +223,23 @@ namespace World
 			try
 			{
 				InvokeCallback(source, [&] {
-					auto* type = TypeRegistry::Get().GetTypeDesc(script.ScriptName);
-					if (!script.InstantiateScript && type)
-					{
-						if (auto* binding = std::any_cast<TypeDescDataScript>(&type->UserData); binding && binding->BindFunc)
-							binding->BindFunc(script);
-					}
+					const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script.ScriptName) : nullptr;
+					if (!script.InstantiateScript && type && type->Script)
+						type->Script->Bind(static_cast<void*>(&script));
 					if (!script.InstantiateScript && script.ScriptName.empty()) { script.State = ScriptInstanceState::Stopped; return; }
 					if (!script.InstantiateScript || !script.DestroyScript) throw std::logic_error("Native script requires paired instantiate/destroy functions");
 					script.Instance = script.InstantiateScript();
 					if (!script.Instance) throw std::runtime_error("Native script factory returned null");
 					script.Instance->m_Entity = Entity(this, entity);
-					if (type && type->SetValueErased)
-						for (const auto& property : type->Properties)
-							if (auto it = script.FieldValues.find(property.Name); it != script.FieldValues.end())
-								type->SetValueErased(dynamic_cast<void*>(script.Instance), property, it->second);
+					if (type)
+					{
+						for (const Schema::FieldSchema& field : type->Fields)
+						{
+							const auto it = script.FieldValues.find(field.Name);
+							if (it != script.FieldValues.end())
+								field.Set(dynamic_cast<void*>(script.Instance), it->second);
+						}
+					}
 					script.CreateEntered = true;
 					script.Instance->OnCreate();
 					script.State = ScriptInstanceState::Running;
@@ -493,11 +495,11 @@ namespace World
 		const std::string name = entity.HasComponent<TagComponent>() ? entity.GetComponent<TagComponent>().Tag : "Empty Entity";
 		Entity copy = Entity::CreateEntity(this, name);
 		if (entity.HasComponent<TransformComponent>()) copy.AddComponent<TransformComponent>(entity.GetComponent<TransformComponent>());
-		for (const auto& name : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
+		for (const Schema::TypeSchema* schema : m_Context->Schemas().List(Schema::TypeCategory::Component))
 		{
-			auto* type = TypeRegistry::Get().GetTypeDesc(name);
-			auto* component = type ? std::any_cast<TypeDescDataComponent>(&type->UserData) : nullptr;
-			if (component && component->CopyFunc && entity.HasComponent(component->Id)) component->CopyFunc(copy, entity);
+			if (!schema || !schema->Storage || !schema->Storage->Copy) continue;
+			if (entity.HasComponent(schema->Storage->ComponentId))
+				schema->Storage->Copy(static_cast<void*>(&copy), static_cast<void*>(&entity));
 		}
 	}
 
@@ -516,11 +518,10 @@ namespace World
 			const auto* tag = other->m_Registry.try_get<TagComponent>(entity);
 			entityMap[id] = Entity::CreateEntity(newScene.get(), tag ? tag->Tag : "Empty Entity", id);
 		}
-		for (const auto& name : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
+		for (const Schema::TypeSchema* schema : other->m_Context->Schemas().List(Schema::TypeCategory::Component))
 		{
-			auto* type = TypeRegistry::Get().GetTypeDesc(name);
-			auto* component = type ? std::any_cast<TypeDescDataComponent>(&type->UserData) : nullptr;
-			if (component && component->CopyComponentFunc) component->CopyComponentFunc(newScene->m_Registry, other->m_Registry, entityMap);
+			if (!schema || !schema->Storage || !schema->Storage->CopyAll) continue;
+			schema->Storage->CopyAll(static_cast<void*>(&newScene->m_Registry), static_cast<void*>(&other->m_Registry), static_cast<const void*>(&entityMap));
 		}
 	}
 

@@ -4,8 +4,8 @@
 
 namespace World
 {
-	GameLayer::GameLayer()
-		:Layer("GameLayer")
+	GameLayer::GameLayer(WorldContext& context)
+		: Layer("GameLayer"), m_Context(&context)
 	{
 
 	}
@@ -74,7 +74,7 @@ namespace World
 
 	void GameLayer::LoadScene()
 	{
-		m_ActiveScene = CreateRef<Scene>();
+		m_ActiveScene = CreateRef<Scene>(*m_Context);
 		SceneSerializer serializer(m_ActiveScene);
 		// During the cook process, scenes could be packed or placed in content folder.
 		// Assuming "Resource/Scenes/TestScene.wdscene" relative path is maintained or packed in pak.

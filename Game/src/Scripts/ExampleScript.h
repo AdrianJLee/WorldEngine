@@ -6,7 +6,6 @@ namespace World
 
 	class ExampleScript : public ScriptableEntity
 	{
-		REFLECT_BODY(ExampleScript, TypeCategory::Script);
 	public:
 
 		virtual void OnCreate() override
@@ -20,11 +19,14 @@ namespace World
 
 		}
 
-		// 原生脚本字段 schema 样例：这些 PROPERTY 会进入反射，供属性面板编辑并可随场景保存/重载。
-		PROPERTY(Health);
+		// 原生脚本字段 schema 样例:供属性面板编辑并可随场景保存/重载。
 		float Health = 100.0f;
 
-		PROPERTY(Speed);
 		float Speed = 1.0f;
+
+		WE_SCHEMA_BODY(Game, ExampleScript, Script)
+			WE_FIELD(Health, Float);
+			WE_FIELD(Speed, Float);
+		WE_SCHEMA_END
 	};
 }

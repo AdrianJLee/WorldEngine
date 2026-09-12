@@ -643,8 +643,8 @@ namespace
 				out << "    static void Set_" << field.Name << "(void* instance, const Value& value)\n";
 				out << "    {\n        " << qualified << "* self = static_cast<" << qualified << "*>(instance);\n";
 				out << "        self->" << field.Name << " = static_cast<" << enumType << ">(std::get<" << signedType << ">(value));\n    }\n";
-				out << "    static const EnumSchema* GetEnum_" << field.Name << "()\n";
-				out << "    {\n        return &GeneratedEnum<" << enumType << ">::WeEnumSchema();\n    }\n";
+			out << "    static const EnumSchema* GetEnum_" << field.Name << "()\n";
+			out << "    {\n        return &WeEnumSchemaOf_" << ShortName(enumType) << "();\n    }\n";
 			}
 			else if (field.Kind == "Object")
 			{
@@ -654,17 +654,17 @@ namespace
 				out << "    {\n        return &(static_cast<" << qualified << "*>(instance)->" << field.Name << ");\n    }\n";
 				out << "    static const void* GetPtrConst_" << field.Name << "(const void* instance)\n";
 				out << "    {\n        return &(static_cast<const " << qualified << "*>(instance)->" << field.Name << ");\n    }\n";
-				out << "    static const TypeSchema* GetNested_" << field.Name << "()\n";
-				out << "    {\n        return &GeneratedAccess<" << nested << ">::WeSchema();\n    }\n";
+			out << "    static const TypeSchema* GetNested_" << field.Name << "()\n";
+			out << "    {\n        return &WeSchemaOf_" << ShortName(nested) << "();\n    }\n";
 			}
 			else if (field.Kind == "Asset")
 			{
 				out << "    static Value Get_" << field.Name << "(const void* instance)\n";
 				out << "    {\n        const " << qualified << "* self = static_cast<const " << qualified << "*>(instance);\n";
-				out << "        return Value(AssetOps<decltype(self->" << field.Name << ")>::GetPath(self->" << field.Name << "));\n    }\n";
+				out << "        return Value(AssetOps<std::remove_reference_t<decltype(self->" << field.Name << ")>>::GetPath(self->" << field.Name << "));\n    }\n";
 				out << "    static void Set_" << field.Name << "(void* instance, const Value& value)\n";
 				out << "    {\n        " << qualified << "* self = static_cast<" << qualified << "*>(instance);\n";
-				out << "        AssetOps<decltype(self->" << field.Name << ")>::SetPath(self->" << field.Name << ", std::get<std::string>(value));\n    }\n";
+				out << "        AssetOps<std::remove_reference_t<decltype(self->" << field.Name << ")>>::SetPath(self->" << field.Name << ", std::get<std::string>(value));\n    }\n";
 			}
 			else
 			{
@@ -744,6 +744,18 @@ namespace
 			out << "            " << def << ",\n";
 			out << "        };\n        return schema;\n    }\n";
 		}
+		if (decl.Category == "Component")
+		{
+			out << "    static const StorageBinding& StorageBindingOf()\n";
+			out << "    {\n        static const StorageBinding binding = MakeComponentStorage<" << qualified << ">();\n";
+			out << "        return binding;\n    }\n";
+		}
+		if (decl.Category == "Script")
+		{
+			out << "    static const ScriptBinding& ScriptBindingOf()\n";
+			out << "    {\n        static const ScriptBinding binding = MakeScriptBinding<" << qualified << ">();\n";
+			out << "        return binding;\n    }\n";
+		}
 		out << "    static const TypeSchema& WeSchema()\n";
 		out << "    {\n        static const TypeSchema schema = {\n";
 		out << "            TypeId{ \"" << decl.Module << "::" << decl.Type << "\" },\n";
@@ -755,7 +767,12 @@ namespace
 		for (const FieldDecl& field : decl.Fields)
 			out << "                Field_" << field.Name << "(),\n";
 		out << "            },\n";
-		out << "            nullptr,\n            nullptr,\n";
+		if (decl.Category == "Component")
+			out << "            &StorageBindingOf(),\n            nullptr,\n";
+		else if (decl.Category == "Script")
+			out << "            nullptr,\n            &ScriptBindingOf(),\n";
+		else
+			out << "            nullptr,\n            nullptr,\n";
 		out << "        };\n        return schema;\n    }\n";
 		out << "};\n\n";
 	}
@@ -810,6 +827,17 @@ namespace
 		for (const std::string& include : regIncludes)
 			out << "#include \"" << include << "\"\n";
 		out << "\nnamespace World::Schema\n{\n";
+
+		// 前置声明自由函数:访问器之间可按任意顺序互引(嵌套 Object/Enum)。
+		for (const auto& [kind, qualified] : manifestEntries)
+		{
+			if (kind == "struct")
+				out << "const TypeSchema& WeSchemaOf_" << ShortName(qualified) << "();\n";
+			else
+				out << "const EnumSchema& WeEnumSchemaOf_" << ShortName(qualified) << "();\n";
+		}
+		out << "\n";
+
 		out << "\tnamespace\n\t{\n";
 		out << "\t\tconst ModuleId kModule { \"" << moduleName << "\", 1 };\n";
 		out << "\t}\n\n";
@@ -822,15 +850,25 @@ namespace
 				EmitEnumAccessor(out, enumsByName.at(ShortName(qualified)), qualified);
 		}
 
+		// 特化全部完整后,自由函数再映射到特化成员(不依赖声明顺序)。
+		for (const auto& [kind, qualified] : manifestEntries)
+		{
+			if (kind == "struct")
+				out << "const TypeSchema& WeSchemaOf_" << ShortName(qualified) << "() { return GeneratedAccess<" << qualified << ">::WeSchema(); }\n";
+			else
+				out << "const EnumSchema& WeEnumSchemaOf_" << ShortName(qualified) << "() { return GeneratedEnum<" << qualified << ">::WeEnumSchema(); }\n";
+		}
+		out << "\n";
+
 		out << "\tbool Register" << moduleName << "SchemaModule(SchemaRegistry& registry)\n\t{\n";
 		out << "\t\tbool ok = true;\n";
 		for (const auto& [kind, qualified] : manifestEntries)
 			if (kind == "enum")
-				out << "\t\tif (registry.RegisterEnum(kModule, GeneratedEnum<" << qualified << ">::WeEnumSchema()) != SchemaRegistry::Status::Ok) ok = false;\n";
+				out << "\t\tif (registry.RegisterEnum(kModule, WeEnumSchemaOf_" << ShortName(qualified) << "()) != SchemaRegistry::Status::Ok) ok = false;\n";
 		out << "\t\tconst std::vector<TypeSchema> schemas = {\n";
 		for (const auto& [kind, qualified] : manifestEntries)
 			if (kind == "struct")
-				out << "\t\t\tGeneratedAccess<" << qualified << ">::WeSchema(),\n";
+				out << "\t\t\tWeSchemaOf_" << ShortName(qualified) << "(),\n";
 		out << "\t\t};\n";
 		out << "\t\tif (registry.RegisterModule(kModule, schemas) != SchemaRegistry::Status::Ok) ok = false;\n";
 		out << "\t\tif (!ok)\n\t\t{\n\t\t\tregistry.UnregisterModule(kModule);\n\t\t\treturn false;\n\t\t}\n";

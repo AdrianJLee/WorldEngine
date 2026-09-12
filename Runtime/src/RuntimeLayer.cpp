@@ -1,4 +1,5 @@
 ﻿#include "RuntimeLayer.h"
+#include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
 
 namespace World
@@ -12,71 +13,9 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
-		std::string dllPath;
-		// 获取当前 Runtime.exe 所在的绝对路径
-		char exePathBuf[MAX_PATH];
-		GetModuleFileNameA(NULL, exePathBuf, MAX_PATH);
-		std::filesystem::path exePath = exePathBuf;
-		std::filesystem::path exeDir = exePath.parent_path(); // 提取 exe 所在目录
-
-		std::filesystem::path binDir = exeDir / "bin";
-		WLD_INFO("Looking for Game.dll in: {0}", binDir.string());
-
-		if (std::filesystem::exists(binDir))
-		{
-			for (const auto& entry : std::filesystem::recursive_directory_iterator(binDir))
-			{
-				if (entry.is_regular_file() && entry.path().filename() == "Game.dll")
-				{
-					dllPath = entry.path().string();
-					break;
-				}
-			}
-		}
-
-		if (dllPath.empty())
-		{
-			// 兜底：如果在开发环境运行，退回 CMake 生成的工作区路径
-			dllPath = std::string(WLD_OUTPUT_DIR) + "bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll";
-		}
-
-		HMODULE gameModule = LoadLibraryA(dllPath.c_str());
-
-		if (gameModule)
-		{
-			WLD_CORE_INFO("Successfully loaded Game.dll from {0}", dllPath);
-			typedef void(*InitGameDLLFunc)(World::Application*);
-			InitGameDLLFunc initFunc = (InitGameDLLFunc)GetProcAddress(gameModule, "OnInitGameDLL");
-
-			if (initFunc)
-			{
-				initFunc(&World::Application::Get());
-			}
-			else
-			{
-				WLD_CORE_ERROR("Failed to find InitGameDLL function in Game.dll!");
-			}
-
-			typedef void* (*GetRegistryFunc)();
-			GetRegistryFunc getGameTypeRegistry = (GetRegistryFunc)GetProcAddress(gameModule, "GetGameTypeRegistry");
-
-			if (getGameTypeRegistry)
-			{
-				// 拿到对面的 TypeRegistry 指针
-				World::TypeRegistry* gameRegistry = static_cast<World::TypeRegistry*>(getGameTypeRegistry());
-
-				// 将对面的所有脚本、属性数据，倒灌到当前 Editor 的单例中！
-				World::TypeRegistry::Get().MergeFrom(*gameRegistry);
-			}
-			else
-			{
-				WLD_CORE_ERROR("Failed to find GetGameTypeRegistry function in Game.dll!");
-			}
-		}
-		else
-		{
-			WLD_CORE_ERROR("Failed to load Game.dll!");
-		}
+		std::string moduleError;
+		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
+			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
 
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 
@@ -143,7 +82,7 @@ namespace World
 
 	void RuntimeLayer::LoadScene()
 	{
-		Ref<Scene> tempScene = CreateRef<Scene>();
+		Ref<Scene> tempScene = CreateRef<Scene>(Application::Get().GetContext());
 		SceneSerializer serializer(tempScene);
 		// During the cook process, scenes could be packed or placed in content folder.
 		// Assuming "Resource/Scenes/TestScene.wdscene" relative path is maintained or packed in pak.

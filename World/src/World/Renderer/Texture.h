@@ -1,5 +1,10 @@
 ﻿#pragma once
 
+#include "World/Core/Core.h"
+
+#include <cstdint>
+#include <string>
+
 namespace World
 {
 	class Texture

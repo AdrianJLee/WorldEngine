@@ -1,5 +1,6 @@
 #pragma once
 
+#include "World/Modules/ModuleManager.h"
 #include "World/Schema/SchemaRegistry.h"
 
 namespace World
@@ -15,8 +16,11 @@ namespace World
 
 		Schema::SchemaRegistry& Schemas() { return m_Schemas; }
 		const Schema::SchemaRegistry& Schemas() const { return m_Schemas; }
+		Modules::ModuleManager& Modules() { return m_Modules; }
+		const Modules::ModuleManager& Modules() const { return m_Modules; }
 
 	private:
 		Schema::SchemaRegistry m_Schemas;
+		Modules::ModuleManager m_Modules;
 	};
 }

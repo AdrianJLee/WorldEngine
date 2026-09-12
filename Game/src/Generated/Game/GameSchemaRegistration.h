@@ -5,6 +5,6 @@
 
 namespace World::Schema
 {
-	bool RegisterWorldSchemaModule(SchemaRegistry& registry);
-	void UnregisterWorldSchemaModule(SchemaRegistry& registry);
+	bool RegisterGameSchemaModule(SchemaRegistry& registry);
+	void UnregisterGameSchemaModule(SchemaRegistry& registry);
 }

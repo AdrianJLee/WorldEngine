@@ -27,6 +27,7 @@ file(GLOB_RECURSE Game_SOURCES
     "src/*.h"
     "src/*.cpp"
 )
+target_include_directories(Game PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_sources(Game PRIVATE ${Game_SOURCES})
 
 # Game 层依然依赖引擎核心

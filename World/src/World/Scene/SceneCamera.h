@@ -1,11 +1,10 @@
 ﻿#pragma once
 #include "World/Renderer/Camera.h"
-#include "World/Reflection/Reflection.h"
+#include "World/Schema/Schema.h"
 namespace World
 {
 	class SceneCamera :public Camera
 	{
-		REFLECT_BODY(SceneCamera, TypeCategory::NormalClass);
 	public:
 
 		enum class ProjectionType :int
@@ -13,9 +12,10 @@ namespace World
 			Perspective = 0,
 			Orthographic = 1
 		};
-		REFLECT_ENUM(ProjectionType);
-		PROPERTY_ENUM(ProjectionType, Perspective);
-		PROPERTY_ENUM(ProjectionType, Orthographic);
+		WE_ENUM_SCHEMA(World, ProjectionType, Int32)
+			WE_ENUM_VALUE(Perspective);
+			WE_ENUM_VALUE(Orthographic);
+		WE_ENUM_END
 	public:
 		SceneCamera();
 		SceneCamera(uint32_t width, uint32_t height, float zoom = 1.0f, float zNear = -1.0f, float zFar = 1.0f);
@@ -61,26 +61,29 @@ namespace World
 	private:
 		// Common
 
-		PROPERTY(m_ProjectionType);
 		ProjectionType m_ProjectionType = ProjectionType::Orthographic;
-		PROPERTY(m_AspectRatio);
 		float m_AspectRatio = 1.0f;
 
 		// Orthographic
-		PROPERTY(m_OrthographicZoom);
 		float m_OrthographicZoom = 1.0f;
-		PROPERTY(m_OrthographicNearClip);
 		float m_OrthographicNearClip = -1.0f;
-		PROPERTY(m_OrthographicFarClip);
 		float m_OrthographicFarClip = 1.0f;
 
 		// Perspective
-		PROPERTY(m_PerspectiveFOV);
 		float m_PerspectiveFOV = 45.0f;
-		PROPERTY(m_PerspectiveNearClip);
 		float m_PerspectiveNearClip = 0.1f;
-		PROPERTY(m_PerspectiveFarClip);
 		float m_PerspectiveFarClip = 100.0f;
+
+		WE_SCHEMA_BODY(World, SceneCamera, Struct)
+			WE_FIELD(m_ProjectionType, Enum, Of(ProjectionType), Group("Projection"));
+			WE_FIELD(m_AspectRatio, Float, Transient);
+			WE_FIELD(m_OrthographicZoom, Float, Group("Orthographic"));
+			WE_FIELD(m_OrthographicNearClip, Float, Group("Orthographic"));
+			WE_FIELD(m_OrthographicFarClip, Float, Group("Orthographic"));
+			WE_FIELD(m_PerspectiveFOV, Float, Group("Perspective"));
+			WE_FIELD(m_PerspectiveNearClip, Float, Group("Perspective"));
+			WE_FIELD(m_PerspectiveFarClip, Float, Group("Perspective"));
+		WE_SCHEMA_END
 	};
 
 }

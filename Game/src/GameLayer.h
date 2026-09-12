@@ -7,7 +7,7 @@ namespace World
 	class GameLayer : public Layer
 	{
 	public:
-		GameLayer();
+		explicit GameLayer(WorldContext& context);
 		virtual ~GameLayer() = default;
 		virtual void OnAttach() override;
 		virtual void OnDetach() override;
@@ -18,6 +18,7 @@ namespace World
 		bool OnWindowResize(WindowResizeEvent& e);
 		void LoadScene();
 	private:
+		WorldContext* m_Context = nullptr;
 		Ref<Scene> m_ActiveScene;
 		Ref<SceneRenderer> m_SceneRenderer;
 	};

@@ -1,6 +1,7 @@
 #include "wldpch.h"
 #include "World/Core/WorldContext.h"
 #include "World/Schema/Generated/World/WorldSchemaRegistration.h"
+#include "World/Utils/DynamicLibrary.h"
 
 namespace World
 {
@@ -13,6 +14,7 @@ namespace World
 
 	WorldContext::~WorldContext()
 	{
+		m_Modules.UnloadAll(*this);
 		Schema::UnregisterWorldSchemaModule(m_Schemas);
 	}
 }

@@ -1,0 +1,15 @@
+struct World::UUIDComponent
+struct World::TagComponent
+struct World::TransformComponent
+struct World::SpriteComponent
+struct World::CircleRendererComponent
+struct World::CameraComponent
+struct World::NativeScriptComponent
+struct World::LuaScriptComponent
+struct World::RigidBody2DComponent
+struct World::BoxCollider2DComponent
+struct World::CircleCollider2DComponent
+struct World::UUID
+struct World::SceneCamera
+enum World::RigidBody2DComponent::BodyType
+enum World::SceneCamera::ProjectionType

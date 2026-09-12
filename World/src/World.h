@@ -9,7 +9,7 @@
 #include "World/Core/KeyCodes.h"
 #include "World/Core/Timestep.h"
 #include "World/Core/MouseCodes.h"
-#include "World/Core/ComponentRegistry.h"
+#include "World/Core/WorldContext.h"
 
 #include "World/Core/Memory/Memory.h"
 #include "World/Core/Memory/Allocator.h"
@@ -21,7 +21,8 @@
 #include "World/Core/Memory/StackAllocator.h"
 
 #include "World/Core/Cook/VFS.h"
-#include "World/Reflection/Reflection.h"
+#include "World/Schema/Schema.h"
+#include "World/Schema/SchemaRegistry.h"
 
 #include "World/Core/Thread/JobSystem.h"
 

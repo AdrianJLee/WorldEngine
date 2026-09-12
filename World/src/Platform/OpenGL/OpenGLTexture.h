@@ -1,13 +1,12 @@
 ﻿#pragma once
 #include "World/Renderer/Texture.h"
-#include "World/Reflection/Reflection.h"
 #include <glad/glad.h>
+#include <string>
 
 namespace World
 {
 	class OpenGLTexture2D :public Texture2D
 	{
-		REFLECT_BODY(OpenGLTexture2D, TypeCategory::Asset);
 	public:
 		OpenGLTexture2D(const std::string& path);
 		OpenGLTexture2D(uint32_t width, uint32_t height);
@@ -24,7 +23,6 @@ namespace World
 			return m_RendererID == ((OpenGLTexture2D&)other).m_RendererID;
 		}
 	private:
-		PROPERTY(m_Path);
 		std::string m_Path;
 		uint32_t m_Width, m_Height;
 		uint32_t m_RendererID;

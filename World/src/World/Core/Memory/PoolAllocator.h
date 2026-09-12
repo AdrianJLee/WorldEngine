@@ -1,8 +1,23 @@
 ﻿#pragma once
 #include "Allocator.h"
 
+#include <string>
+#include <string_view>
+
 namespace World
 {
+	// 去除 MSVC typeid 的 "class/struct/namespace::" 前缀,仅用于池命名与调试。
+	inline std::string_view ShortTypeName(std::string_view name)
+	{
+		const size_t lastColon = name.find_last_of(':');
+		if (lastColon != std::string_view::npos)
+			return name.substr(lastColon + 1);
+		const size_t lastSpace = name.find_last_of(' ');
+		if (lastSpace != std::string_view::npos)
+			return name.substr(lastSpace + 1);
+		return name;
+	}
+
 	enum class PoolTier : size_t
 	{
 		Tiny = 64,    // 极少量的对象（如：全局配置、罕见状态）
@@ -95,10 +110,10 @@ namespace World
 	public:
 		static PoolAllocator& GetPool()
 		{
-			static const char* typeName = static_cast<std::string>(GetTypeIdName(typeid(T).name())).c_str();
+			static const std::string typeName = std::string(ShortTypeName(typeid(T).name()));
 
 			thread_local World::PoolAllocator s_Pool(
-				typeName,
+				typeName.c_str(),
 				Tag,
 				sizeof(T),
 				alignof(T),

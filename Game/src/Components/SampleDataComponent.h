@@ -8,30 +8,31 @@ namespace World
 	// 由 Editor 的 InspectorRegistry 自动生成控件编辑。
 	struct SampleDataComponent
 	{
-		REFLECT_BODY(SampleDataComponent, TypeCategory::Component);
-
-		PROPERTY(Health);
 		float Health = 100.0f;
 
-		PROPERTY_RANGE(Speed, 0.0f, 10.0f);
 		float Speed = 1.0f;
 
-		PROPERTY(Enabled);
 		bool Enabled = true;
 
-		PROPERTY(Offset);
 		glm::vec2 Offset { 0.0f, 0.0f };
 
-		PROPERTY(Count);
 		int32_t Count = 3;
 
-		PROPERTY_RANGE(Opacity, 0.0f, 1.0f);
 		float Opacity = 1.0f;
 
-		PROPERTY_READONLY(DisplayName);
 		std::string DisplayName = "Sample";
 
-		PROPERTY(Tags);
 		std::string Tags;
+
+		WE_SCHEMA_BODY(Game, SampleDataComponent, Component)
+			WE_FIELD(Health, Float);
+			WE_FIELD(Speed, Float, Range(0.0f, 10.0f));
+			WE_FIELD(Enabled, Bool);
+			WE_FIELD(Offset, Vec2);
+			WE_FIELD(Count, Int32);
+			WE_FIELD(Opacity, Float, Range(0.0f, 1.0f));
+			WE_FIELD(DisplayName, String, ReadOnly);
+			WE_FIELD(Tags, String);
+		WE_SCHEMA_END
 	};
 }

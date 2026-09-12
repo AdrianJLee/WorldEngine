@@ -1,10 +1,16 @@
 #include "World/Core/WorldContext.h"
+#include "World/Core/Log.h"
 #include "World/Schema/Schema.h"
+#include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
+#include "World/Scene/SceneSerializer.h"
 #include "schema/FixtureTypes.h"
 #include "schema/Generated/TestKit/TestKitSchemaRegistration.h"
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -34,12 +40,16 @@ int main()
 {
 	try
 	{
+		World::Log::Init();
+
 		// WorldContext 独立于窗口/Application:核心可无界面验证。
 		WorldContext context;
+		const size_t baselineTypes = context.Schemas().TypeCount();
+		const size_t baselineEnums = context.Schemas().EnumCount();
 
 		CHECK(RegisterTestKitSchemaModule(context.Schemas()));
-		CHECK(context.Schemas().TypeCount() == 3);
-		CHECK(context.Schemas().EnumCount() == 1);
+		CHECK(context.Schemas().TypeCount() == baselineTypes + 3);
+		CHECK(context.Schemas().EnumCount() == baselineEnums + 1);
 
 		// 1. 查找与元数据
 		const TypeSchema* health = context.Schemas().Find("TestKit::HealthFixture");
@@ -111,7 +121,7 @@ int main()
 
 		// 6. 同模块重复注册被拒绝且不改变现有条目
 		CHECK(context.Schemas().Register({ "TestKit", 1 }, *context.Schemas().Find("TestKit::HealthFixture")) == SchemaRegistry::Status::DuplicateType);
-		CHECK(context.Schemas().TypeCount() == 3);
+		CHECK(context.Schemas().TypeCount() == baselineTypes + 3);
 
 		// 7. RegisterModule 事务化:批内失败不留下任何条目
 		{
@@ -123,10 +133,10 @@ int main()
 
 		// 8. 跨模块同名 Struct 共存;Find 歧义返回 nullptr;卸载只清本模块
 		CHECK(context.Schemas().Register({ "Other", 1 }, *context.Schemas().Find("TestKit::HealthFixture")) == SchemaRegistry::Status::Ok);
-		CHECK(context.Schemas().TypeCount() == 4);
+		CHECK(context.Schemas().TypeCount() == baselineTypes + 4);
 		CHECK(context.Schemas().Find("TestKit::HealthFixture") == nullptr);
 		context.Schemas().UnregisterModule({ "Other", 1 });
-		CHECK(context.Schemas().TypeCount() == 3);
+		CHECK(context.Schemas().TypeCount() == baselineTypes + 3);
 		const TypeSchema* healthAgain = context.Schemas().Find("TestKit::HealthFixture");
 		CHECK(healthAgain != nullptr);
 		CHECK(healthAgain->Fields.size() == 5);
@@ -139,11 +149,44 @@ int main()
 
 		// 10. 模块卸载后重新注册可恢复
 		UnregisterTestKitSchemaModule(context.Schemas());
-		CHECK(context.Schemas().TypeCount() == 0);
-		CHECK(context.Schemas().EnumCount() == 0);
+		CHECK(context.Schemas().TypeCount() == baselineTypes);
+		CHECK(context.Schemas().EnumCount() == baselineEnums);
 		CHECK(context.Schemas().Find("TestKit::HealthFixture") == nullptr);
 		CHECK(RegisterTestKitSchemaModule(context.Schemas()));
-		CHECK(context.Schemas().TypeCount() == 3);
+		CHECK(context.Schemas().TypeCount() == baselineTypes + 3);
+
+		// 11. 场景序列化往返(无 GL 组件):schema 驱动的保存/加载保持数据一致。
+		{
+			Ref<Scene> scene = CreateRef<Scene>(context);
+			Entity entity = Entity::CreateEntity(scene.get(), "RoundTrip", World::UUID(uint64_t(0x1122334455)));
+			entity.AddComponent<TransformComponent>().SetTransform(glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(0.1f, 0.2f, 0.3f), glm::vec3(2.0f));
+			entity.AddComponent<BoxCollider2DComponent>().Density = 3.5f;
+
+			const std::filesystem::path path = std::filesystem::temp_directory_path() / "worldengine-schema-roundtrip.wd";
+			SceneSerializer writer(scene);
+			CHECK(writer.Serialize(path.string()));
+
+			Ref<Scene> loaded = CreateRef<Scene>(context);
+			SceneSerializer reader(loaded);
+			CHECK(reader.Deserialize(path.string()));
+
+			bool found = false;
+			for (auto handle : loaded->GetRegistry().view<TagComponent>())
+			{
+				Entity loadedEntity(loaded.get(), handle);
+				if (loadedEntity.GetComponent<TagComponent>().Tag != "RoundTrip")
+					continue;
+				found = true;
+				const auto& transform = loadedEntity.GetComponent<TransformComponent>();
+				CHECK(transform.Location.x == 1.0f && transform.Location.y == 2.0f && transform.Location.z == 3.0f);
+				CHECK(transform.Scale.x == 2.0f);
+				CHECK(loadedEntity.GetComponent<BoxCollider2DComponent>().Density == 3.5f);
+				CHECK(static_cast<uint64_t>(loadedEntity.GetComponent<UUIDComponent>().ID) == uint64_t(0x1122334455));
+			}
+			CHECK(found);
+			std::error_code ignored;
+			std::filesystem::remove(path, ignored);
+		}
 
 		std::printf("World.Schema: all checks passed\n");
 		return 0;

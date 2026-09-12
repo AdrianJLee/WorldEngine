@@ -148,25 +148,23 @@ namespace World
 					if (ImGui::BeginMenu("Add Component"))
 					{
 
-						for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
+						for (const Schema::TypeSchema* schema : m_Context->GetContext().Schemas().List(Schema::TypeCategory::Component))
 						{
-							TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(className);
-							if (!typeDesc)
+							if (!schema || !schema->Storage)
 								continue;
-							if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&typeDesc->UserData))
 							{
 								std::string reason;
-								bool canAdd = m_SelectedEntity.CanAddComponent(componentInfo->Id, &reason);
-								if (!componentInfo->AddFunc)
+								bool canAdd = m_SelectedEntity.CanAddComponent(schema->Storage->ComponentId, &reason);
+								if (!schema->Storage->Add)
 								{
 									canAdd = false;
 									reason = "This component has no registered add operation.";
 								}
-								// 迭代值现在是全名；菜单展示使用显示短名，查找仍用原迭代值。
-								if (ImGui::MenuItem(typeDesc->Name.c_str(), nullptr, false, canAdd))
+								if (ImGui::MenuItem(schema->DisplayName.c_str(), nullptr, false, canAdd))
 								{
 									const entt::entity handle = m_SelectedEntity;
-									const entt::id_type componentId = componentInfo->Id;
+									const entt::id_type componentId = schema->Storage->ComponentId;
+									const std::string className = schema->DisplayName;
 									RunPanelAction("Unable to add component", [&]()
 									{
 										if (!m_Context->DeferStructuralChange([handle, componentId, className](Scene& scene)
@@ -247,22 +245,18 @@ namespace World
 	void SceneHierarchyPanel::DrawComponents(Entity entity)
 	{
 		bool changed = false;
-		for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
+		for (const Schema::TypeSchema* schema : m_Context->GetContext().Schemas().List(Schema::TypeCategory::Component))
 		{
 			if (!entity.IsValid() || m_Context->IsPendingDestroy(entity))
 				break;
-			TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(className);
-			if (!typeDesc)
+			if (!schema || !schema->Storage)
 				continue;
-			if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&typeDesc->UserData))
+			if (entity.HasComponent(schema->Storage->ComponentId))
 			{
-				if (entity.HasComponent(componentInfo->Id))
+				RunPanelAction("Unable to draw component properties", [&]()
 				{
-					RunPanelAction("Unable to draw component properties", [&]()
-					{
-						changed = InspectorRegistry::Draw(*typeDesc, componentInfo->Id, entity) || changed;
-					});
-				}
+					changed = InspectorRegistry::Draw(*schema, schema->Storage->ComponentId, entity) || changed;
+				});
 			}
 		}
 		if (changed && m_EditCallback)

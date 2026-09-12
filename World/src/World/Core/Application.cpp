@@ -18,7 +18,8 @@ namespace World
 	{
 		return *s_Instance;
 	}
-	Application::Application(const std::string& name)
+	Application::Application(const std::string& name, WorldContext& context)
+		: m_Context(context)
 	{
 		WLD_PROFILE_FUNCTION();
 

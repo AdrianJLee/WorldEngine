@@ -94,6 +94,8 @@ namespace World::Schema
 		const size_t index = m_Entries.size();
 		m_Entries.push_back({ module, std::move(copy) });
 		m_ByName[typeName].push_back(index);
+		const size_t colon = typeName.find_last_of(':');
+		m_ByAlias[colon == std::string::npos ? typeName : typeName.substr(colon + 1)].push_back(index);
 		if (componentId != 0)
 			m_ByComponentId[componentId] = index;
 		return Status::Ok;
@@ -147,10 +149,16 @@ namespace World::Schema
 		m_Entries.swap(entries);
 
 		m_ByName.clear();
+		m_ByAlias.clear();
 		m_ByComponentId.clear();
 		for (size_t i = 0; i < m_Entries.size(); ++i)
 		{
 			m_ByName[m_Entries[i].Schema.Id.Name].push_back(i);
+			const size_t colon = m_Entries[i].Schema.Id.Name.find_last_of(':');
+			const std::string alias = colon == std::string::npos
+				? m_Entries[i].Schema.Id.Name
+				: m_Entries[i].Schema.Id.Name.substr(colon + 1);
+			m_ByAlias[alias].push_back(i);
 			if (m_Entries[i].Schema.Storage && m_Entries[i].Schema.Storage->ComponentId != 0)
 				m_ByComponentId[m_Entries[i].Schema.Storage->ComponentId] = i;
 		}
@@ -170,14 +178,26 @@ namespace World::Schema
 	const TypeSchema* SchemaRegistry::Find(const std::string& typeIdName) const
 	{
 		const auto it = m_ByName.find(typeIdName);
-		if (it == m_ByName.end() || it->second.empty())
-			return nullptr;
-		if (it->second.size() > 1)
+		if (it != m_ByName.end() && !it->second.empty())
 		{
-			RegistryWarn("SchemaRegistry: type '{}' is ambiguous across modules", typeIdName);
+			if (it->second.size() > 1)
+			{
+				RegistryWarn("SchemaRegistry: type '{}' is ambiguous across modules", typeIdName);
+				return nullptr;
+			}
+			return &m_Entries[it->second.front()].Schema;
+		}
+
+		// 短名回退(旧 Lua API / 显示名兼容);歧义同样拒绝。
+		const auto aliasIt = m_ByAlias.find(typeIdName);
+		if (aliasIt == m_ByAlias.end() || aliasIt->second.empty())
+			return nullptr;
+		if (aliasIt->second.size() > 1)
+		{
+			RegistryWarn("SchemaRegistry: short type name '{}' is ambiguous across modules", typeIdName);
 			return nullptr;
 		}
-		return &m_Entries[it->second.front()].Schema;
+		return &m_Entries[aliasIt->second.front()].Schema;
 	}
 
 	const TypeSchema* SchemaRegistry::FindByComponentId(uint32_t componentId) const

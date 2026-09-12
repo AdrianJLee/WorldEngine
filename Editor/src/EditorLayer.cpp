@@ -1,13 +1,14 @@
 #include "EditorLayer.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Cook/VFS.h"
+#include "World/Modules/GameModuleHost.h"
 #include "World/Scene/ScriptEngine.h"
 #include <filesystem>
 #include <stdexcept>
 namespace World
 {
 	EditorLayer::EditorLayer()
-		:Layer("EditorLayer")
+		: Layer("EditorLayer"), m_Document(Application::Get().GetContext())
 	{
 		m_ContentBrowserPanel.RegisterOpenAction(".wd", [this](const std::filesystem::path& filepath)
 			{
@@ -22,45 +23,9 @@ namespace World
 	void EditorLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();
-		std::string dllPath = std::string(WLD_OUTPUT_DIR) + "bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll";
-		HMODULE gameModule = LoadLibraryA(dllPath.c_str());
-
-		if (gameModule)
-		{
-			WLD_CORE_INFO("Successfully loaded Game.dll from {0}", dllPath);
-
-			typedef void(*InitGameDLLFunc)(World::Application*);
-			InitGameDLLFunc initFunc = (InitGameDLLFunc)GetProcAddress(gameModule, "OnInitGameDLL");
-
-			if (initFunc)
-			{
-				initFunc(&World::Application::Get());
-			}
-			else
-			{
-				WLD_CORE_ERROR("Failed to find InitGameDLL function in Game.dll!");
-			}
-
-			typedef void* (*GetRegistryFunc)();
-			GetRegistryFunc getGameTypeRegistry = (GetRegistryFunc)GetProcAddress(gameModule, "GetGameTypeRegistry");
-
-			if (getGameTypeRegistry)
-			{
-				// 拿到对面的 TypeRegistry 指针
-				World::TypeRegistry* gameRegistry = static_cast<World::TypeRegistry*>(getGameTypeRegistry());
-
-				// 将对面的所有脚本、属性数据，倒灌到当前 Editor 的单例中！
-				World::TypeRegistry::Get().MergeFrom(*gameRegistry);
-			}
-			else
-			{
-				WLD_CORE_ERROR("Failed to find GetGameTypeRegistry function in Game.dll!");
-			}
-		}
-		else
-		{
-			WLD_CORE_ERROR("Failed to load Game.dll!");
-		}
+		std::string moduleError;
+		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
+			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
 
 		// Application initialized Lua before attach; Game registration is now merged.
 		if (!ScriptEngine::GenerateLuaStubs())
@@ -99,7 +64,7 @@ namespace World
 		m_SceneHierarchyPanel.SetContext(nullptr);
 		m_ActiveScene.reset();
 		m_RuntimeScene.reset();
-		m_Document = EditorDocument{};
+		m_Document = EditorDocument(Application::Get().GetContext());
 		if (m_SceneRenderer)
 		{
 			m_SceneRenderer->Shutdown();
@@ -701,7 +666,7 @@ namespace World
 
 		try
 		{
-			m_RuntimeScene = CreateRef<Scene>();
+			m_RuntimeScene = CreateRef<Scene>(Application::Get().GetContext());
 			Ref<Scene> editorScene = m_Document.GetScene();
 			Scene::CopyScene(editorScene, m_RuntimeScene);
 			m_SceneState = state;

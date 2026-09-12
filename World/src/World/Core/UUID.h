@@ -1,10 +1,11 @@
-﻿#pragma once
-#include "World/Reflection/Reflection.h"
+#pragma once
+
+#include "World/Schema/Schema.h"
+
 namespace World
 {
 	class UUID
 	{
-		REFLECT_BODY(UUID, TypeCategory::NormalClass);
 	public:
 		UUID();
 		UUID(uint64_t uuid);
@@ -13,8 +14,11 @@ namespace World
 	private:
 		uint64_t GenerateUUID();
 	private:
-		PROPERTY(m_UUID);
 		uint64_t m_UUID;
+
+		WE_SCHEMA_BODY(World, UUID, Struct)
+			WE_FIELD(m_UUID, UInt64);
+		WE_SCHEMA_END
 	};
 }
 

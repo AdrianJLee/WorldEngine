@@ -3,6 +3,33 @@
 
 namespace World
 {
+	NativeScriptComponent CloneComponentConfiguration(const NativeScriptComponent& source)
+	{
+		NativeScriptComponent copy;
+		copy.ScriptName = source.ScriptName;
+		copy.FieldValues = source.FieldValues;
+		copy.InstantiateScript = source.InstantiateScript;
+		copy.DestroyScript = source.DestroyScript;
+		return copy;
+	}
+
+	LuaScriptComponent CloneComponentConfiguration(const LuaScriptComponent& source)
+	{
+		LuaScriptComponent copy;
+		copy.ScriptFilePath = source.ScriptFilePath;
+		copy.CachedFields = source.CachedFields;
+		copy.LastModifiedTime = source.LastModifiedTime;
+		return copy;
+	}
+
+	RigidBody2DComponent CloneComponentConfiguration(const RigidBody2DComponent& source)
+	{
+		RigidBody2DComponent copy;
+		copy.Type = source.Type;
+		copy.FixedRotation = source.FixedRotation;
+		return copy;
+	}
+
 	ScriptableEntity* NativeScriptComponent::GetOrCreateEditorInstance(bool allowCreate, bool& outOwned)
 	{
 		outOwned = false;
@@ -34,37 +61,27 @@ namespace World
 		isFirstDraw = true;
 	}
 
-	std::any NativeScriptComponent::GetErasedFieldValue(const TypeDesc& typeDesc, const PropertyDesc& prop, ScriptableEntity* instance)
+	Schema::Value NativeScriptComponent::GetErasedFieldValue(const Schema::TypeSchema&, const Schema::FieldSchema& field, ScriptableEntity* instance)
 	{
 		if (instance)
 		{
-			std::any value = typeDesc.GetValueErased(instance, prop);
-			FieldValues[prop.Name] = value;
+			Schema::Value value = field.Get(instance);
+			FieldValues[field.Name] = value;
 			return value;
 		}
 
-		auto it = FieldValues.find(prop.Name);
+		auto it = FieldValues.find(field.Name);
 		if (it != FieldValues.end())
 			return it->second;
-
-		switch (prop.Type)
-		{
-			case DataType::Int32: return std::any(int32_t(0));
-			case DataType::Float: return std::any(float(0.0f));
-			case DataType::Bool: return std::any(false);
-			case DataType::Vec2: return std::any(glm::vec2(0.0f));
-			case DataType::Vec3: return std::any(glm::vec3(0.0f));
-			case DataType::String: return std::any(std::string(""));
-			case DataType::Enum: return std::any(int32_t(0));
-			default: return std::any();
-		}
+		FieldValues[field.Name] = field.Default;
+		return field.Default;
 	}
 
-	void NativeScriptComponent::SetErasedFieldValue(const TypeDesc& typeDesc, const PropertyDesc& prop, ScriptableEntity* instance, const std::any& value)
+	void NativeScriptComponent::SetErasedFieldValue(const Schema::TypeSchema&, const Schema::FieldSchema& field, ScriptableEntity* instance, const Schema::Value& value)
 	{
 		if (instance)
-			typeDesc.SetValueErased(instance, prop, value);
+			field.Set(instance, value);
 		else
-			FieldValues[prop.Name] = value;
+			FieldValues[field.Name] = value;
 	}
 }

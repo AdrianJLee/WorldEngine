@@ -1,6 +1,7 @@
 #pragma once
 #include "World/Core/Timestep.h"
 #include "World/Core/UUID.h"
+#include "World/Core/WorldContext.h"
 #include "World/Renderer/EditorCamera.h"
 #include <box2d/id.h>
 #include <entt.hpp>
@@ -20,7 +21,7 @@ namespace World
 	class Scene
 	{
 	public:
-		Scene();
+		explicit Scene(WorldContext& context);
 		~Scene();
 		Scene(const Scene&) = delete;
 		Scene& operator=(const Scene&) = delete;
@@ -46,6 +47,8 @@ namespace World
 		void AssertOwnerThread() const;
 
 		Entity GetPrimaryCameraEntity();
+		WorldContext& GetContext() { return *m_Context; }
+		const WorldContext& GetContext() const { return *m_Context; }
 		void DuplicateEntity(Entity entity);
 		entt::registry& GetRegistry();
 		const entt::registry& GetRegistry() const;
@@ -94,6 +97,7 @@ namespace World
 		void DestroyPhysicsBody(entt::entity entity);
 
 		entt::registry m_Registry;
+		WorldContext* m_Context = nullptr;
 		std::shared_ptr<const uint8_t> m_Lifetime = std::make_shared<const uint8_t>(0);
 		std::thread::id m_OwnerThread;
 		SceneState m_State = SceneState::Stopped;

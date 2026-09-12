@@ -9,14 +9,14 @@ namespace World
 		Test1,
 		Test2,
 	};
-	REFLECT_ENUM(StressTestType);
-	PROPERTY_ENUM(StressTestType, None);
-	PROPERTY_ENUM(StressTestType, Test1);
-	PROPERTY_ENUM(StressTestType, Test2);
+	WE_ENUM_SCHEMA(Game, StressTestType, Int32)
+		WE_ENUM_VALUE(None);
+		WE_ENUM_VALUE(Test1);
+		WE_ENUM_VALUE(Test2);
+	WE_ENUM_END
 
 	class StressTest : public ScriptableEntity
 	{
-		REFLECT_BODY(StressTest, TypeCategory::Script);
 	public:
 
 		virtual void OnCreate() override
@@ -47,15 +47,18 @@ namespace World
 		void FrameTest1();
 		void FrameTest2();
 	private:
-		PROPERTY(Weight);
 		int Weight = 1;
-		PROPERTY(Height);
 		int Height = 1;
 		// The deferred batch owns its result list, never the script instance or a component reference.
 		std::shared_ptr<std::vector<Entity>> m_Created = std::make_shared<std::vector<Entity>>();
 		ScopedStack m_Stack { 1024, "StressTest Stack" };
 
-		PROPERTY(m_Type);
 		StressTestType m_Type = StressTestType::None;
+
+		WE_SCHEMA_BODY(Game, StressTest, Script)
+			WE_FIELD(Weight, Int32);
+			WE_FIELD(Height, Int32);
+			WE_FIELD(m_Type, Enum, Of(StressTestType));
+		WE_SCHEMA_END
 	};
 }

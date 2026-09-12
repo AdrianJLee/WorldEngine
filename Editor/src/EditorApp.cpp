@@ -10,8 +10,8 @@ namespace World
 	class EditorApp : public Application
 	{
 	public:
-		EditorApp()
-			:Application("Editor")
+		EditorApp(World::WorldContext& context)
+			:Application("Editor", context)
 		{
 			PushLayer(WLD_ENGINE_NEW(EditorLayer));
 			PushLayer(WLD_ENGINE_NEW(MemoryTraceLayer));
@@ -22,9 +22,9 @@ namespace World
 		}
 	};
 
-	Application* CreateApplication()
+	Application* CreateApplication(World::WorldContext& context)
 	{
 
-		return new EditorApp();
+		return new EditorApp(context);
 	}
 }

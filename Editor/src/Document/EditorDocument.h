@@ -8,13 +8,14 @@
 namespace World
 {
 	class Scene;
+	class WorldContext;
 
 	// 编辑文档状态：持有编辑场景、路径、dirty 与最近错误。
 	// 本类不依赖 ImGui 或文件对话框；UI 由 EditorLayer 负责。
 	class EditorDocument
 	{
 	public:
-		EditorDocument();
+		explicit EditorDocument(WorldContext& context);
 
 		const Ref<Scene>& GetScene() const { return m_Scene; }
 		const std::filesystem::path& GetPath() const { return m_Path; }
@@ -32,6 +33,7 @@ namespace World
 		void New();
 
 	private:
+		WorldContext* m_Context = nullptr;
 		Ref<Scene> m_Scene;
 		std::filesystem::path m_Path;
 		bool m_Dirty = false;

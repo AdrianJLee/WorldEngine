@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Core/Memory/PoolAllocator.h"
+#include "World/Core/WorldContext.h"
 #include "World/Core/LayerStack.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/ScriptEngine.h"
@@ -19,6 +20,12 @@ namespace
 {
     using namespace World;
     namespace fs = std::filesystem;
+
+    World::WorldContext& TestContext()
+    {
+        static World::WorldContext context;
+        return context;
+    }
 
     void Check(bool condition, const char* expression, int line)
     {
@@ -135,7 +142,7 @@ namespace
     struct Fixture
     {
         ProbeContext Context;
-        Ref<Scene> World = CreateRef<Scene>();
+        Ref<Scene> World = CreateRef<Scene>(TestContext());
 
         Fixture()
         {
@@ -615,7 +622,7 @@ namespace
         SetLuaString(source, "Mode", "normal");
         fixture.World->OnRuntimeStart();
         CHECK(b2Body_IsValid(source.GetComponent<RigidBody2DComponent>().RuntimeBodyId));
-        auto clone = CreateRef<Scene>();
+        auto clone = CreateRef<Scene>(TestContext());
         Scene::CopyScene(fixture.World, clone);
         auto view = static_cast<const Scene&>(*clone).GetRegistry().view<NativeScriptComponent, LuaScriptComponent, RigidBody2DComponent>();
         CHECK(view.begin() != view.end());
@@ -623,7 +630,7 @@ namespace
         auto& native = copy.GetComponent<NativeScriptComponent>();
         CHECK(native.Instance == nullptr && native.State == ScriptInstanceState::Pending && native.Generation == 0);
         CHECK(native.InstantiateScript == source.GetComponent<NativeScriptComponent>().InstantiateScript);
-        CHECK(std::any_cast<float>(native.FieldValues.at("Value")) == 19.0f);
+        CHECK(std::get<float>(native.FieldValues.at("Value")) == 19.0f);
         CheckLuaReleased(copy);
         CHECK(copy.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Pending);
         CHECK(copy.GetComponent<LuaScriptComponent>().Generation == 0);
@@ -737,7 +744,7 @@ namespace
         CHECK(!camera.HasComponent<TransformComponent>());
         Entity old;
         {
-            auto shortScene = CreateRef<Scene>();
+            auto shortScene = CreateRef<Scene>(TestContext());
             old = Entity::CreateEntity(shortScene.get());
             ScriptEngine::GetState()["T02Entity"] = old;
         }
@@ -808,12 +815,12 @@ namespace
         ScriptableEntity* preview = script.GetOrCreateEditorInstance(!fixture.World->IsActive(), owned);
         CHECK(preview == instance);
         CHECK(!owned);
-        const TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(script.ScriptName);
-        CHECK(typeDesc != nullptr);
-        if (typeDesc)
+        const Schema::TypeSchema* typeSchema = TestContext().Schemas().Find(script.ScriptName);
+        CHECK(typeSchema != nullptr);
+        if (typeSchema)
         {
-            for (const auto& prop : typeDesc->Properties)
-                script.GetErasedFieldValue(*typeDesc, prop, preview);
+            for (const Schema::FieldSchema& field : typeSchema->Fields)
+                script.GetErasedFieldValue(*typeSchema, field, preview);
         }
         script.ReleaseEditorInstance(preview); // 借用路径不销毁
 
@@ -988,9 +995,32 @@ int main(int argc, char** argv)
         if (argc != 1) throw std::runtime_error("Usage: WorldScriptTests [--generate-stubs]");
         s_OutputDirectory = fs::path(WORLD_SCRIPT_TEST_OUTPUT_DIR) / ("run-" + std::to_string(GetCurrentProcessId()));
         fs::create_directories(s_OutputDirectory);
-        TypeRegistry::Get().RegisterType<NativeProbe>("T02NativeProbe", TypeCategory::Script)
-            .Property("Value", &NativeProbe::Value, DataType::Float);
-        TypeRegistry::Get().GetTypeDesc("T02NativeProbe")->UserData = TypeDescDataScript { entt::type_id<NativeProbe>().hash(), BindProbe };
+        {
+            static const Schema::ScriptBinding probeBinding = {
+                [](void* raw) { BindProbe(*static_cast<NativeScriptComponent*>(raw)); }
+            };
+            static const Schema::FieldSchema probeValue = {
+                Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Value") },
+                "Value",
+                Schema::Kind::Float,
+                [](const void* instance) { return Schema::Value(static_cast<const NativeProbe*>(instance)->Value); },
+                [](void* instance, const Schema::Value& value) { static_cast<NativeProbe*>(instance)->Value = std::get<float>(value); },
+                nullptr, nullptr, nullptr, nullptr, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value(0.0f),
+            };
+            static const Schema::TypeSchema probeSchema = {
+                Schema::TypeId{ "T02NativeProbe" },
+                "T02NativeProbe",
+                Schema::WE_SCHEMA_ABI_VERSION,
+                sizeof(NativeProbe),
+                Schema::TypeCategory::Script,
+                { probeValue },
+                nullptr,
+                &probeBinding,
+            };
+            CHECK(TestContext().Schemas().Register({ "Test", 1 }, probeSchema) == Schema::SchemaRegistry::Status::Ok);
+        }
 
         const std::pair<const char*, void(*)()> tests[] = {
             { "130 Lua instances, native counts and restart", ManyInstancesAndRestart },

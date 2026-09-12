@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "World/Core/Window.h"
+#include "World/Core/WorldContext.h"
 #include "World/Core/LayerStack.h"
 #include "World/Events/ApplicationEvent.h"
 #include "World/Events/Event.h"
@@ -11,7 +12,7 @@ namespace World
 	class Application
 	{
 	public:
-		Application(const std::string& name);
+		Application(const std::string& name, WorldContext& context);
 		virtual ~Application();
 		static void SetInstance(Application* instance) { s_Instance = instance; }
 		void Run();
@@ -22,6 +23,8 @@ namespace World
 		void PushOverlay(Layer* layer);
 
 		static Application& Get();
+		WorldContext& GetContext() { return m_Context; }
+		const WorldContext& GetContext() const { return m_Context; }
 		inline Window& GetWindow() { return *m_Window; };
 
 		void Close();
@@ -35,6 +38,7 @@ namespace World
 		bool OnWindowClose(WindowCloseEvent& e);
 		bool OnWindowResize(WindowResizeEvent& e);
 	private:
+		WorldContext& m_Context;
 		std::unique_ptr<DualTrackAllocator> m_FrameAllocator;
 		std::unique_ptr<DualTrackAllocator> m_EngineAllocator;
 
@@ -55,5 +59,5 @@ namespace World
 	};
 
 	// To be defined in CLIENT
-	Application* CreateApplication();
+	Application* CreateApplication(WorldContext& context);
 }

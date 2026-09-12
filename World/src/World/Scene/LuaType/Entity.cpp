@@ -1,8 +1,7 @@
 #include "wldpch.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Scene/Entity.h"
-#include "World/Core/ComponentRegistry.h"
-#include "World/Reflection/Reflection.h"
+#include "World/Core/WorldContext.h"
 
 #include <any>
 #include <stdexcept>
@@ -19,15 +18,12 @@ namespace World
 				throw std::logic_error(std::string("Entity:") + operation + " on invalid/expired handle " + std::to_string(static_cast<uint32_t>(entity)));
 		}
 
-		const TypeDescDataComponent& RequireComponentType(const std::string& name, const char* operation)
+		const Schema::TypeSchema& RequireComponentType(const Entity& entity, const std::string& name, const char* operation)
 		{
-			const TypeDesc* type = TypeRegistry::Get().GetTypeDesc(name);
-			if (!type || type->Category != TypeCategory::Component)
+			const Schema::TypeSchema* type = entity.GetScene()->GetContext().Schemas().Find(name);
+			if (!type || type->Category != Schema::TypeCategory::Component || !type->Storage)
 				throw std::logic_error(std::string("Entity:") + operation + " requires a registered component type; got '" + name + "'");
-			const auto* component = std::any_cast<TypeDescDataComponent>(&type->UserData);
-			if (!component)
-				throw std::logic_error(std::string("Entity:") + operation + " found invalid component metadata for '" + name + "'");
-			return *component;
+			return *type;
 		}
 	}
 
@@ -60,19 +56,19 @@ namespace World
 				"HasComponent", [](const Entity& entity, const std::string& typeName) -> bool
 				{
 					RequireEntity(entity, "HasComponent");
-					return entity.HasComponent(RequireComponentType(typeName, "HasComponent").Id);
+					return entity.HasComponent(RequireComponentType(entity, typeName, "HasComponent").Storage->ComponentId);
 				},
 				"GetComponent", [](Entity& entity, const std::string& typeName) -> sol::object
 				{
 					RequireEntity(entity, "GetComponent");
-					const auto componentId = RequireComponentType(typeName, "GetComponent").Id;
+					const auto componentId = RequireComponentType(entity, typeName, "GetComponent").Storage->ComponentId;
 					if (!entity.HasComponent(componentId)) return sol::nil;
 					return sol::make_object(ScriptEngine::GetState(), entity.GetComponent(componentId));
 				},
 				"AddComponent", [](Entity& entity, const std::string& typeName)
 				{
 					RequireEntity(entity, "AddComponent");
-					const auto componentId = RequireComponentType(typeName, "AddComponent").Id;
+					const auto componentId = RequireComponentType(entity, typeName, "AddComponent").Storage->ComponentId;
 					std::string reason;
 					if (!entity.CanAddComponent(componentId, &reason))
 						throw std::logic_error("Entity:AddComponent '" + typeName + "': " + reason);
@@ -92,7 +88,7 @@ namespace World
 				"RemoveComponent", [](Entity& entity, const std::string& typeName)
 				{
 					RequireEntity(entity, "RemoveComponent");
-					entity.RemoveComponent(RequireComponentType(typeName, "RemoveComponent").Id);
+					entity.RemoveComponent(RequireComponentType(entity, typeName, "RemoveComponent").Storage->ComponentId);
 				},
 				"Destroy", [](Entity& entity)
 				{
