@@ -945,8 +945,11 @@ namespace World
 		m_Browser.SearchResults.clear();
 		std::string query = m_Browser.Search;
 		std::transform(query.begin(), query.end(), query.begin(), ::tolower);
-		for (const auto& entry : std::filesystem::recursive_directory_iterator(m_Browser.Current))
+		std::error_code searchError;
+		for (const auto& entry : std::filesystem::recursive_directory_iterator(m_Browser.Current, std::filesystem::directory_options::skip_permission_denied, searchError))
 		{
+			if (searchError)
+				break;
 			std::string name = entry.path().filename().string();
 			std::transform(name.begin(), name.end(), name.begin(), ::tolower);
 			if (name.find(query) != std::string::npos)
@@ -1177,7 +1180,7 @@ namespace World
 		};
 		breadcrumb("Root", m_Browser.Root, Wui::HashId("browser.crumb.root"));
 		std::filesystem::path accumulated = m_Browser.Root;
-		for (const auto& part : std::filesystem::relative(m_Browser.Current, m_Browser.Root))
+		for (const auto& part : m_Browser.Current.lexically_relative(m_Browser.Root))
 		{
 			accumulated /= part;
 			breadcrumb(part.string(), accumulated, Wui::HashId(("browser.crumb." + part.string()).c_str()));
@@ -1208,17 +1211,29 @@ namespace World
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, treeRect, { 0.09f, 0.095f, 0.10f, 1 }, 0.0f });
 		struct DirNode { std::filesystem::path Path; int Depth; bool HasChildren; };
 		std::vector<DirNode> dirs;
-		for (const auto& entry : std::filesystem::recursive_directory_iterator(m_Browser.Root, std::filesystem::directory_options::skip_permission_denied))
+		std::error_code scanError;
+		std::filesystem::recursive_directory_iterator scanIt(m_Browser.Root, std::filesystem::directory_options::skip_permission_denied, scanError);
+		const std::filesystem::recursive_directory_iterator scanEnd;
+		for (; scanIt != scanEnd; scanIt.increment(scanError))
 		{
-			if (!entry.is_directory())
+			if (scanError)
+				break;
+			const auto& entry = *scanIt;
+			std::error_code dirError;
+			if (!entry.is_directory(dirError))
 				continue;
 			DirNode node;
 			node.Path = entry.path();
-			node.Depth = static_cast<int>(std::distance(m_Browser.Root.begin(), entry.path().begin())) - static_cast<int>(std::distance(m_Browser.Root.begin(), m_Browser.Root.end()));
+			// depth():根的直接子项为 0;顶层目录显示深度记为 1。
+			node.Depth = scanIt.depth() + 1;
 			node.HasChildren = false;
-			for (const auto& child : std::filesystem::directory_iterator(node.Path, std::filesystem::directory_options::skip_permission_denied))
+			std::error_code childError;
+			for (const auto& child : std::filesystem::directory_iterator(node.Path, std::filesystem::directory_options::skip_permission_denied, childError))
 			{
-				if (child.is_directory()) { node.HasChildren = true; break; }
+				if (childError)
+					break;
+				std::error_code childDirError;
+				if (child.is_directory(childDirError)) { node.HasChildren = true; break; }
 			}
 			dirs.push_back(std::move(node));
 		}
@@ -1254,7 +1269,7 @@ namespace World
 			// 树中的目录既可作为拖拽源,也可作为文件/文件夹的落点。
 			if (ctx.Input().MouseDown[0] && hovered && node.Path != m_Browser.Root)
 			{
-				const std::filesystem::path rel = std::filesystem::relative(node.Path, m_Browser.Root);
+				const std::filesystem::path rel = node.Path.lexically_relative(m_Browser.Root);
 				ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 			}
@@ -1277,8 +1292,13 @@ namespace World
 			paths = m_Browser.SearchResults;
 		else
 		{
-			for (const auto& entry : std::filesystem::directory_iterator(m_Browser.Current))
+			std::error_code listError;
+			for (const auto& entry : std::filesystem::directory_iterator(m_Browser.Current, std::filesystem::directory_options::skip_permission_denied, listError))
+			{
+				if (listError)
+					break;
 				paths.push_back(entry.path());
+			}
 			std::sort(paths.begin(), paths.end());
 		}
 
@@ -1367,7 +1387,8 @@ namespace World
 			for (size_t i = 0; i < paths.size(); ++i)
 			{
 				const std::filesystem::path& path = paths[i];
-				const bool isDir = std::filesystem::is_directory(path);
+				std::error_code dirError;
+				const bool isDir = std::filesystem::is_directory(path, dirError);
 				const Wui::WuiRect row { content.X + 4, content.Y + 24 + i * rowH - m_Browser.ContentScroll, content.W - 8, rowH };
 				interact(path, row, isDir);
 				if (m_Browser.Selected.find(path) != m_Browser.Selected.end())
@@ -1408,7 +1429,8 @@ namespace World
 				const int row = static_cast<int>(i / columns);
 				const Wui::WuiRect cellRect { content.X + 8 + column * cell, content.Y + 8 + row * cell - m_Browser.ContentScroll, 128, 128 };
 				const std::filesystem::path& path = paths[i];
-				const bool isDir = std::filesystem::is_directory(path);
+				std::error_code dirError;
+				const bool isDir = std::filesystem::is_directory(path, dirError);
 				const bool selected = m_Browser.Selected.find(path) != m_Browser.Selected.end();
 				const bool hovered = ctx.IsHovered(cellRect);
 				if (selected)
