@@ -33,7 +33,7 @@ namespace World
 		void (*AddFunc)(Entity) = nullptr;
 		void (*CopyFunc)(Entity dest, Entity src) = nullptr;
 		void (*CopyComponentFunc)(entt::registry& destRegistry, entt::registry& srcRegistry, const std::unordered_map<UUID, entt::entity>& entityMap) = nullptr;
-		void (*ComponentPropertiesUI)(Entity) = nullptr;
+		bool (*ComponentPropertiesUI)(Entity) = nullptr;
 
 		template<typename T>
 		static void Register(std::any& userData)
@@ -43,7 +43,7 @@ namespace World
 			entt::meta_factory<T>().type(id).template ctor<>();
 
 			// 只有当 T 定义了 ComponentPropertiesUI 时才引用它，避免编译期错误
-			void (*uiFunc)(Entity) = nullptr;
+			bool (*uiFunc)(Entity) = nullptr;
 			if constexpr (has_ui_logic<T>::value)
 				uiFunc = T::ComponentPropertiesUI;
 
@@ -107,5 +107,5 @@ namespace World
 	};
 
 	#define COMPONENT_UI() \
-	static void ComponentPropertiesUI(Entity);
+	static bool ComponentPropertiesUI(Entity);
 }

@@ -10,12 +10,13 @@
 namespace World
 {
 
-	void ImGuiDrawLibrary::DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue, float columnWidth)
+	bool ImGuiDrawLibrary::DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue, float columnWidth)
 	{
 		ImGuiIO& io = ImGui::GetIO();
 		auto boldFont = io.Fonts->Fonts[1];
 
 		ImGui::PushID(label.c_str());
+		bool changed = false;
 
 		// 1. 创建表格：2列，开启可调宽度，但不显示分割线以保持美观
 		if (ImGui::BeginTable("##Vec3ControlTable", 2, ImGuiTableFlags_Resizable))
@@ -65,11 +66,12 @@ namespace World
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.30f, 0.35f, 1.0f));
 				ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.55f, 0.15f, 0.20f, 1.0f));
 				ImGui::PushFont(boldFont);
-				if (ImGui::Button("X", buttonSize)) values.x = resetValue;
+				if (ImGui::Button("X", buttonSize)) { values.x = resetValue; changed = true; }
 				ImGui::PopFont();
 				ImGui::PopStyleColor(3);
 				ImGui::SameLine();
 				ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.3f");
+				if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
 				ImGui::PopItemWidth(); // 对应第一个宽度
 				ImGui::SameLine();
 			}
@@ -78,11 +80,12 @@ namespace World
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.75f, 0.40f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.45f, 0.25f, 1.0f));
 			ImGui::PushFont(boldFont);
-			if (ImGui::Button("Y", buttonSize)) values.y = resetValue;
+			if (ImGui::Button("Y", buttonSize)) { values.y = resetValue; changed = true; }
 			ImGui::PopFont();
 			ImGui::PopStyleColor(3);
 			ImGui::SameLine();
 			ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.3f");
+			if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
 			ImGui::PopItemWidth(); // 对应第二个宽度
 			ImGui::SameLine();
 
@@ -91,11 +94,12 @@ namespace World
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.60f, 0.90f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.35f, 0.60f, 1.0f));
 			ImGui::PushFont(boldFont);
-			if (ImGui::Button("Z", buttonSize)) values.z = resetValue;
+			if (ImGui::Button("Z", buttonSize)) { values.z = resetValue; changed = true; }
 			ImGui::PopFont();
 			ImGui::PopStyleColor(3);
 			ImGui::SameLine();
 			ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.3f");
+			if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
 			ImGui::PopItemWidth(); // 对应第三个宽度
 
 			ImGui::PopStyleVar(); // 恢复 ItemSpacing
@@ -103,6 +107,7 @@ namespace World
 		}
 
 		ImGui::PopID();
+		return changed;
 	}
 
 	void ImGuiDrawLibrary::DrawGizmo(const EditorCamera& editorCamera, Entity targetEntity, ImGuizmo::OPERATION operation, float snap)

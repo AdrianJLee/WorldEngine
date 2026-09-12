@@ -26,7 +26,7 @@ namespace World
 			if (!error.empty()) ImGui::TextWrapped("%s", error.c_str());
 		}
 	}
-	void TagComponent::ComponentPropertiesUI(Entity entity)
+	bool TagComponent::ComponentPropertiesUI(Entity entity)
 	{
 		if (entity.HasComponent<TagComponent>())
 		{
@@ -37,44 +37,50 @@ namespace World
 			if (ImGui::InputText("##Tag", buffer, sizeof(buffer)))
 			{
 				tag = std::string(buffer);
+				return true;
 			}
 		}
+		return false;
 	}
 
-	void UUIDComponent::ComponentPropertiesUI(Entity entity)
+	bool UUIDComponent::ComponentPropertiesUI(Entity entity)
 	{
 		if (entity.HasComponent<UUIDComponent>())
 		{
 			auto& uuid = entity.GetComponent<UUIDComponent>().ID;
 			ImGui::Text("UUID: %llu", (uint64_t)uuid);
 		}
+		return false;
 	}
 
-	void TransformComponent::ComponentPropertiesUI(Entity entity)
+	bool TransformComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<TransformComponent>("TransformComponent", entity, [](TransformComponent& transform)
+		return ImGuiDrawLibrary::DrawComponent<TransformComponent>("TransformComponent", entity, [](TransformComponent& transform) -> bool
 			{
-				ImGuiDrawLibrary::DrawVec3Control("Location", transform.Location, 0.0f, 75.0f);
+				bool changed = false;
+				changed |= ImGuiDrawLibrary::DrawVec3Control("Location", transform.Location, 0.0f, 75.0f);
 
 				glm::vec3 rotationDegrees = glm::degrees(transform.Rotation);
-				ImGuiDrawLibrary::DrawVec3Control("Rotation", rotationDegrees, 0.0f, 75.0f);
+				changed |= ImGuiDrawLibrary::DrawVec3Control("Rotation", rotationDegrees, 0.0f, 75.0f);
 				transform.Rotation = glm::radians(rotationDegrees);
 
-				ImGuiDrawLibrary::DrawVec3Control("Scale", transform.Scale, 1.0f, 75.0f);
+				changed |= ImGuiDrawLibrary::DrawVec3Control("Scale", transform.Scale, 1.0f, 75.0f);
 
 				transform.SetTransform(transform.Location, transform.Rotation, transform.Scale);
+				return changed;
 			});
 	}
 
-	void CameraComponent::ComponentPropertiesUI(Entity entity)
+	bool CameraComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<CameraComponent>("CameraComponent", entity, [](CameraComponent& cameraComponent)
+		return ImGuiDrawLibrary::DrawComponent<CameraComponent>("CameraComponent", entity, [](CameraComponent& cameraComponent) -> bool
 			{
+				bool changed = false;
 				auto& camera = cameraComponent.Camera;
 
 
-				ImGui::Checkbox("Primary", &cameraComponent.Primary);
-				ImGui::Checkbox("Fixed Aspect Ratio", &cameraComponent.FixedAspectRatio);
+				changed |= ImGui::Checkbox("Primary", &cameraComponent.Primary);
+				changed |= ImGui::Checkbox("Fixed Aspect Ratio", &cameraComponent.FixedAspectRatio);
 				const char* projectionTypeStrings[] = { "Perspective", "Orthographic" };
 				// Get the current projection type as a string
 				const char* currentProjectionTypeString = projectionTypeStrings[(int)camera.GetProjectionType()];
@@ -86,6 +92,7 @@ namespace World
 						if (ImGui::Selectable(projectionTypeStrings[i], isSelected))
 						{
 							camera.SetProjectionType((SceneCamera::ProjectionType)i);
+							changed = true;
 						}
 					}
 					ImGui::EndCombo();
@@ -99,14 +106,17 @@ namespace World
 					if (ImGui::DragFloat("Zoom", &zoom, 0.1f))
 					{
 						camera.SetOrthographicZoom(zoom);
+						changed = true;
 					}
 					if (ImGui::DragFloat("Near Clip", &nearClip, 0.1f))
 					{
 						camera.SetOrthographicNearClip(nearClip);
+						changed = true;
 					}
 					if (ImGui::DragFloat("Far Clip", &farClip, 0.1f))
 					{
 						camera.SetOrthographicFarClip(farClip);
+						changed = true;
 					}
 				}
 				else if (camera.GetProjectionType() == SceneCamera::ProjectionType::Perspective)
@@ -117,25 +127,30 @@ namespace World
 					if (ImGui::DragFloat("FOV", &fov, 0.1f, 0.0f, 180.0f))
 					{
 						camera.SetPerspectiveFOV(fov);
+						changed = true;
 					}
 					if (ImGui::DragFloat("Near Clip", &nearClip, 0.1f))
 					{
 						camera.SetPerspectiveNearClip(nearClip);
+						changed = true;
 					}
 					if (ImGui::DragFloat("Far Clip", &farClip, 0.1f))
 					{
 						camera.SetPerspectiveFarClip(farClip);
+						changed = true;
 					}
 				}
+				return changed;
 			});
 	}
 
-	void SpriteComponent::ComponentPropertiesUI(Entity entity)
+	bool SpriteComponent::ComponentPropertiesUI(Entity entity)
 	{
 
-		ImGuiDrawLibrary::DrawComponent<SpriteComponent>("SpriteComponent", entity, [](SpriteComponent& sprite)
+		return ImGuiDrawLibrary::DrawComponent<SpriteComponent>("SpriteComponent", entity, [](SpriteComponent& sprite) -> bool
 			{
-				ImGui::ColorEdit4("Color", glm::value_ptr(sprite.Color));
+				bool changed = false;
+				changed |= ImGui::ColorEdit4("Color", glm::value_ptr(sprite.Color));
 
 				// 2. 纹理槽位 (Texture Slot)
 				ImGui::Text("Texture");
@@ -175,6 +190,7 @@ namespace World
 
 						std::filesystem::path texturePath = std::filesystem::path("assets") / path;
 						sprite.Texture = Texture2D::Create(texturePath.string());
+						changed = true;
 					}
 					ImGui::EndDragDropTarget();
 				}
@@ -189,6 +205,7 @@ namespace World
 					if (ImGui::Button("Clear", ImVec2(50.0f, 0.0f)))
 					{
 						sprite.Texture = nullptr;
+						changed = true;
 					}
 				}
 				else
@@ -199,25 +216,29 @@ namespace World
 
 
 				// 平铺因子编辑
-				ImGui::DragFloat("Tiling", &sprite.TilingFactor, 0.1f, 0.0f, 100.0f);
+				changed |= ImGui::DragFloat("Tiling", &sprite.TilingFactor, 0.1f, 0.0f, 100.0f);
 
+				return changed;
 			});
 	}
 
-	void CircleRendererComponent::ComponentPropertiesUI(Entity entity)
+	bool CircleRendererComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<CircleRendererComponent>("CircleRendererComponent", entity, [](CircleRendererComponent& circleRenderer)
+		return ImGuiDrawLibrary::DrawComponent<CircleRendererComponent>("CircleRendererComponent", entity, [](CircleRendererComponent& circleRenderer) -> bool
 			{
-				ImGui::ColorEdit4("Color", glm::value_ptr(circleRenderer.Color));
-				ImGui::DragFloat("Thickness", &circleRenderer.Thickness, 0.1f, 0.0f, 1.0f);
-				ImGui::DragFloat("Fade", &circleRenderer.Fade, 0.001f, 0.0f, 1.0f);
+				bool changed = false;
+				changed |= ImGui::ColorEdit4("Color", glm::value_ptr(circleRenderer.Color));
+				changed |= ImGui::DragFloat("Thickness", &circleRenderer.Thickness, 0.1f, 0.0f, 1.0f);
+				changed |= ImGui::DragFloat("Fade", &circleRenderer.Fade, 0.001f, 0.0f, 1.0f);
+				return changed;
 			});
 	}
 
-	void NativeScriptComponent::ComponentPropertiesUI(Entity entity)
+	bool NativeScriptComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<NativeScriptComponent>("NativeScriptComponent", entity, [entity](NativeScriptComponent& nativeScript) mutable
+		return ImGuiDrawLibrary::DrawComponent<NativeScriptComponent>("NativeScriptComponent", entity, [entity](NativeScriptComponent& nativeScript) mutable -> bool
 			{
+				bool changed = false;
 				// 指针不为空则说明绑定了脚本
 				bool isBound = (nativeScript.InstantiateScript != nullptr);
 
@@ -243,6 +264,7 @@ namespace World
 						nativeScript.ScriptName = "";
 						nativeScript.FieldValues.clear();
 						nativeScript.isFirstDraw = true;
+						changed = true;
 					}
 
 					// 遍历注册表中所有脚本类型，展示在下拉列表中
@@ -266,6 +288,7 @@ namespace World
 									nativeScript.ScriptName = displayName; // 更新当前绑定的脚本显示名
 									nativeScript.FieldValues.clear();
 									nativeScript.isFirstDraw = true;
+									changed = true;
 								}
 							}
 
@@ -290,6 +313,7 @@ namespace World
 						nativeScript.ScriptName = "";
 						nativeScript.FieldValues.clear();
 						nativeScript.isFirstDraw = true;
+						changed = true;
 					}
 				}
 
@@ -525,6 +549,7 @@ namespace World
 									{
 										nativeScript.FieldValues[prop.Name] = currentVal;
 									}
+									changed = true;
 								}
 								ImGui::PopID();
 							}
@@ -541,12 +566,14 @@ namespace World
 
 
 
+				return changed;
 			});
 	}
-	void LuaScriptComponent::ComponentPropertiesUI(Entity entity)
+	bool LuaScriptComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<LuaScriptComponent>("LuaScriptComponent", entity, [entity](LuaScriptComponent& component) mutable
+		return ImGuiDrawLibrary::DrawComponent<LuaScriptComponent>("LuaScriptComponent", entity, [entity](LuaScriptComponent& component) mutable -> bool
 			{
+				bool changed = false;
 				const bool active = entity.GetScene()->IsActive();
 				ImGui::BeginDisabled(active);
 				// 是否已经绑定了脚本
@@ -578,6 +605,7 @@ namespace World
 						{
 							// 统一路径分隔符并赋值
 							component.ScriptFilePath = scriptPath.string();
+							changed = true;
 
 							// 🚀 核心：路径改变，重置加载状态，让 ScriptEngine 下一帧重新读取
 							component.IsLoaded = false;
@@ -610,6 +638,7 @@ namespace World
 						component.CachedFields.clear();
 						component.State = ScriptInstanceState::Stopped;
 						component.LastError.clear();
+						changed = true;
 					}
 					if (!active && !component.ScriptFilePath.empty())
 					try
@@ -676,21 +705,21 @@ namespace World
 								case LuaFieldType::Float:
 								{
 									float val = std::any_cast<float>(field.Value);
-									ImGui::DragFloat("##val", &val, 0.1f);
+									if (ImGui::DragFloat("##val", &val, 0.1f)) changed = true;
 									field.Value = val;
 									break;
 								}
 								case LuaFieldType::Int:
 								{
 									int val = std::any_cast<int>(field.Value);
-									ImGui::DragInt("##val", &val);
+									if (ImGui::DragInt("##val", &val)) changed = true;
 									field.Value = val;
 									break;
 								}
 								case LuaFieldType::Bool:
 								{
 									bool val = std::any_cast<bool>(field.Value);
-									ImGui::Checkbox("##val", &val);
+									if (ImGui::Checkbox("##val", &val)) changed = true;
 									field.Value = val;
 									break;
 								}
@@ -700,7 +729,10 @@ namespace World
 									std::vector<char> buffer(std::max<size_t>(1024, val.size() + 256), '\0');
 									std::copy(val.begin(), val.end(), buffer.begin());
 									if (ImGui::InputText("##val", buffer.data(), buffer.size()))
+									{
 										field.Value = std::string(buffer.data());
+										changed = true;
+									}
 									break;
 								}
 							}
@@ -712,47 +744,55 @@ namespace World
 					}
 					ImGui::EndDisabled();
 				}
+				return changed;
 			});
 	}
 
-	void RigidBody2DComponent::ComponentPropertiesUI(Entity entity)
+	bool RigidBody2DComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<RigidBody2DComponent>("RigidBody2DComponent", entity, [](RigidBody2DComponent& rigidBody)
+		return ImGuiDrawLibrary::DrawComponent<RigidBody2DComponent>("RigidBody2DComponent", entity, [](RigidBody2DComponent& rigidBody) -> bool
 			{
+				bool changed = false;
 				const char* bodyTypes[] = { "Static", "Dynamic", "Kinematic" };
 				int currentType = static_cast<int>(rigidBody.Type);
 				if (ImGui::Combo("Body Type", &currentType, bodyTypes, IM_ARRAYSIZE(bodyTypes)))
 				{
 					rigidBody.Type = static_cast<RigidBody2DComponent::BodyType>(currentType);
+					changed = true;
 				}
 
-				ImGui::Checkbox("Fixed Rotation", &rigidBody.FixedRotation);
+				changed |= ImGui::Checkbox("Fixed Rotation", &rigidBody.FixedRotation);
+				return changed;
 			});
 	}
 
-	void BoxCollider2DComponent::ComponentPropertiesUI(Entity entity)
+	bool BoxCollider2DComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<BoxCollider2DComponent>("BoxCollider2DComponent", entity, [](BoxCollider2DComponent& boxCollider)
+		return ImGuiDrawLibrary::DrawComponent<BoxCollider2DComponent>("BoxCollider2DComponent", entity, [](BoxCollider2DComponent& boxCollider) -> bool
 			{
-				ImGui::DragFloat2("Offset", glm::value_ptr(boxCollider.Offset), 0.1f);
-				ImGui::DragFloat2("Size", glm::value_ptr(boxCollider.Size), 0.1f, 0.0f);
-				ImGui::DragFloat("Density", &boxCollider.Density, 0.1f, 0.0f);
-				ImGui::DragFloat("Friction", &boxCollider.Friction, 0.1f, 0.0f);
-				ImGui::DragFloat("Restitution", &boxCollider.Restitution, 0.1f, 0.0f);
-				ImGui::Checkbox("Show Collider", &boxCollider.ShowCollider);
+				bool changed = false;
+				changed |= ImGui::DragFloat2("Offset", glm::value_ptr(boxCollider.Offset), 0.1f);
+				changed |= ImGui::DragFloat2("Size", glm::value_ptr(boxCollider.Size), 0.1f, 0.0f);
+				changed |= ImGui::DragFloat("Density", &boxCollider.Density, 0.1f, 0.0f);
+				changed |= ImGui::DragFloat("Friction", &boxCollider.Friction, 0.1f, 0.0f);
+				changed |= ImGui::DragFloat("Restitution", &boxCollider.Restitution, 0.1f, 0.0f);
+				changed |= ImGui::Checkbox("Show Collider", &boxCollider.ShowCollider);
+				return changed;
 			});
 	}
 
-	void CircleCollider2DComponent::ComponentPropertiesUI(Entity entity)
+	bool CircleCollider2DComponent::ComponentPropertiesUI(Entity entity)
 	{
-		ImGuiDrawLibrary::DrawComponent<CircleCollider2DComponent>("CircleCollider2DComponent", entity, [](CircleCollider2DComponent& circleCollider)
+		return ImGuiDrawLibrary::DrawComponent<CircleCollider2DComponent>("CircleCollider2DComponent", entity, [](CircleCollider2DComponent& circleCollider) -> bool
 			{
-				ImGui::DragFloat2("Offset", glm::value_ptr(circleCollider.Offset), 0.1f);
-				ImGui::DragFloat("Radius", &circleCollider.Radius, 0.1f, 0.0f);
-				ImGui::DragFloat("Density", &circleCollider.Density, 0.1f, 0.0f);
-				ImGui::DragFloat("Friction", &circleCollider.Friction, 0.1f, 0.0f);
-				ImGui::DragFloat("Restitution", &circleCollider.Restitution, 0.1f, 0.0f);
-				ImGui::Checkbox("Show Collider", &circleCollider.ShowCollider);
+				bool changed = false;
+				changed |= ImGui::DragFloat2("Offset", glm::value_ptr(circleCollider.Offset), 0.1f);
+				changed |= ImGui::DragFloat("Radius", &circleCollider.Radius, 0.1f, 0.0f);
+				changed |= ImGui::DragFloat("Density", &circleCollider.Density, 0.1f, 0.0f);
+				changed |= ImGui::DragFloat("Friction", &circleCollider.Friction, 0.1f, 0.0f);
+				changed |= ImGui::DragFloat("Restitution", &circleCollider.Restitution, 0.1f, 0.0f);
+				changed |= ImGui::Checkbox("Show Collider", &circleCollider.ShowCollider);
+				return changed;
 			});
 	}
 }

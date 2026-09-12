@@ -3,7 +3,9 @@
 #include "Panels/SceneHierarchyPanel.h"
 #include "Panels/ContentBrowserPanel.h"
 #include "World/Renderer/SceneRenderer.h"
+#include "Document/EditorDocument.h"
 #include <atomic>
+#include <functional>
 #include <string>
 #include <thread>
 namespace World
@@ -22,10 +24,11 @@ namespace World
 		void NewScene();
 		void OpenScene();
 		void OpenScene(const std::filesystem::path& path);
-		void SaveScene();
+		bool SaveScene();
 
 		bool OnKeyPressed(KeyPressedEvent& e);
 		bool OnMouseButtonPressed(MouseButtonPressedEvent& e);
+		bool OnWindowClose(WindowCloseEvent& e);
 
 	private:
 		enum class SceneState
@@ -43,6 +46,13 @@ namespace World
 
 		void SetSceneState(SceneState state);
 		void UpdateSceneContext(Ref<Scene> scene);
+		void DoNewScene();
+		void DoOpenScene(const std::filesystem::path& path);
+		bool TrySave();
+		void RequestAction(std::function<void()> action);
+		void ShowError(const std::string& message);
+		void DrawUnsavedModal();
+		void DrawErrorModal();
 		void StartCooking(const std::string& target);
 		void OnCooking();
 	private:
@@ -50,9 +60,8 @@ namespace World
 		SceneRendererOptions m_RendererOptions;
 
 		Ref<Scene> m_ActiveScene;
-		Ref<Scene> m_EditorScene, m_RuntimeScene;
-
-		std::filesystem::path m_ScenePath;
+		Ref<Scene> m_RuntimeScene;
+		EditorDocument m_Document;
 
 		EditorCamera m_EditorCamera;
 
@@ -85,6 +94,16 @@ namespace World
 		// Published by m_CookingFinished; the UI reads these only after completion.
 		bool m_CookingSucceeded = false;
 		std::string m_CookingError;
+
+		// 未保存确认与错误提示
+		std::function<void()> m_PendingAction;
+		bool m_ShowUnsavedModal = false;
+		bool m_ShowErrorModal = false;
+		std::string m_ErrorText;
+
+		// Gizmo 拖动前后快照，仅用于标脏（不做撤销）。
+		bool m_GizmoDragging = false;
+		TransformComponent m_GizmoDragBefore;
 	};
 
 }

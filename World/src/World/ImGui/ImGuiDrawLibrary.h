@@ -12,7 +12,7 @@ namespace World
 	{
 	public:
 		template<typename T, typename UIFunction>
-		static void DrawComponent(const std::string& name, Entity entity, UIFunction uiFunction, bool removable = true)
+		static bool DrawComponent(const std::string& name, Entity entity, UIFunction uiFunction, bool removable = true)
 		{
 			if (entity && !entity.GetScene()->IsPendingDestroy(entity) && entity.HasComponent<T>())
 			{
@@ -25,16 +25,17 @@ namespace World
 				auto& component = entity.GetComponent<T>();
 				std::string removalReason;
 				const bool canRemove = removable && entity.CanRemoveComponent(entt::type_id<T>().hash(), &removalReason);
+				bool changed = false;
 				if (canRemove)
 				{
 					bool closable_group = true;
 					if (ImGui::CollapsingHeader(name.c_str(), &closable_group, flags))
 					{
-						uiFunction(component);
+						changed = uiFunction(component) || changed;
 					}
 					if (!closable_group)
 					{
-						try { entity.RemoveComponent<T>(); }
+						try { entity.RemoveComponent<T>(); changed = true; }
 						catch (const std::exception& error) { ImGui::TextWrapped("Cannot remove: %s", error.what()); }
 					}
 				}
@@ -44,14 +45,16 @@ namespace World
 					{
 						if (removable && !removalReason.empty())
 							ImGui::TextWrapped("Cannot remove: %s", removalReason.c_str());
-						uiFunction(component);
+						changed = uiFunction(component) || changed;
 					}
 				}
 
+				return changed;
 			}
+			return false;
 		}
 
-		static void DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f, float columnWidth = 100.0f);
+		static bool DrawVec3Control(const std::string& label, glm::vec3& values, float resetValue = 0.0f, float columnWidth = 100.0f);
 
 
 		static void DrawGizmo(const EditorCamera& editorCamera, Entity targetEntity, ImGuizmo::OPERATION operation, float snap = 0);

@@ -693,27 +693,70 @@ namespace World
 
 
 		{
-			// 1. 将字符串路径转换为 path 对象
 			std::filesystem::path path(filepath);
-
-			// 2. 获取该文件所在的父目录路径
-			// 例如：filepath 是 "assets/scenes/level.yaml"，parentPath 就是 "assets/scenes"
 			std::filesystem::path parentPath = path.parent_path();
-
-			// 3. 检查并创建路径
-			// 如果 parentPath 为空（说明文件就在当前目录下），create_directories 会安全跳过
 			if (!parentPath.empty() && !std::filesystem::exists(parentPath))
-			{
-				// create_directories 会创建多级目录（不存在的都会补齐）
 				std::filesystem::create_directories(parentPath);
+
+			// 先写同目录临时文件；成功后按「备份 + 替换」顺序落地，避免中途失败破坏已有有效文件。
+			const std::string tempPath = path.string() + ".tmp";
+			{
+				std::ofstream fout(tempPath, std::ios::binary | std::ios::trunc);
+				if (!fout.is_open())
+				{
+					m_LastError = "Could not open temporary file for writing: " + tempPath;
+					return false;
+				}
+				fout << out.c_str();
+				fout.flush();
+				if (!fout)
+				{
+					fout.close();
+					std::error_code ignored;
+					std::filesystem::remove(tempPath, ignored);
+					m_LastError = "Failed to write scene data to: " + tempPath;
+					return false;
+				}
+				fout.close();
 			}
 
-			// 4. 现在可以放心地创建并写入文件了
-			std::ofstream fout(filepath);
-			if (fout.is_open())
+			const std::string backupPath = path.string() + ".bak";
+			const bool hadExisting = std::filesystem::exists(path);
+			if (hadExisting)
 			{
-				fout << out.c_str();
-				fout.close();
+				std::error_code ec;
+				if (std::filesystem::exists(backupPath))
+					std::filesystem::remove(backupPath, ec);
+				ec.clear();
+				std::filesystem::rename(path, backupPath, ec);
+				if (ec)
+				{
+					std::error_code ignored;
+					std::filesystem::remove(tempPath, ignored);
+					m_LastError = "Failed to back up existing scene file: " + ec.message();
+					return false;
+				}
+			}
+
+			{
+				std::error_code ec;
+				std::filesystem::rename(tempPath, path, ec);
+				if (ec)
+				{
+					if (hadExisting)
+					{
+						std::error_code ignored;
+						std::filesystem::rename(backupPath, path, ignored);
+					}
+					m_LastError = "Failed to replace scene file: " + ec.message();
+					return false;
+				}
+			}
+
+			if (hadExisting)
+			{
+				std::error_code ignored;
+				std::filesystem::remove(backupPath, ignored);
 			}
 		}
 		return true;

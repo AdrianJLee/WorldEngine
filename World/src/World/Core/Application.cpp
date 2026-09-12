@@ -112,8 +112,6 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		EventDispatcher dispatcher(e);
 
-		//Application::OnWindowClose(e)
-		dispatcher.Dispatch<WindowCloseEvent>(WLD_BIND_EVENT_FN(Application::OnWindowClose));
 		dispatcher.Dispatch<WindowResizeEvent>(WLD_BIND_EVENT_FN(Application::OnWindowResize));
 		for (auto it = m_LayerStack.end(); it != m_LayerStack.begin(); )
 		{
@@ -121,6 +119,12 @@ namespace World
 			(*--it)->OnEvent(e);
 			if (e.m_Handled)
 				break;
+		}
+
+		// 窗口关闭后置：先让 Layer 有机会否决（标记 handled），未被处理才真正退出主循环。
+		if (e.GetEventType() == WindowCloseEvent::GetStaticType() && !e.m_Handled)
+		{
+			dispatcher.Dispatch<WindowCloseEvent>(WLD_BIND_EVENT_FN(Application::OnWindowClose));
 		}
 
 		//WLD_CORE_TRACE("{0}", e.ToString());

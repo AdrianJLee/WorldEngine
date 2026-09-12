@@ -11,9 +11,12 @@ namespace World
 	{
 		m_ContentBrowserPanel.RegisterOpenAction(".wd", [this](const std::filesystem::path& filepath)
 			{
-				NewScene();
-				// 调用 EditorLayer 的加载场景函数
 				OpenScene(filepath);
+			});
+		m_SceneHierarchyPanel.SetEditCallback([this]()
+			{
+				if (m_SceneState == SceneState::Edit && m_ActiveScene == m_Document.GetScene())
+					m_Document.MarkDirty();
 			});
 	}
 	void EditorLayer::OnAttach()
@@ -96,7 +99,7 @@ namespace World
 		m_SceneHierarchyPanel.SetContext(nullptr);
 		m_ActiveScene.reset();
 		m_RuntimeScene.reset();
-		m_EditorScene.reset();
+		m_Document = EditorDocument{};
 		if (m_SceneRenderer)
 		{
 			m_SceneRenderer->Shutdown();
@@ -204,7 +207,6 @@ namespace World
 				}
 				if (ImGui::MenuItem("Load", "Ctrl+O"))
 				{
-					NewScene();
 					OpenScene();
 				}
 				if (ImGui::MenuItem("Cooking", nullptr, false, !m_ShowCookingProgress))
@@ -219,7 +221,7 @@ namespace World
 						WLD_CORE_ERROR("Lua API stub generation failed; keeping the last valid declarations.");
 				}
 				if (ImGui::MenuItem("Exit"))
-					World::Application::Get().Close();
+					RequestAction([this]() { World::Application::Get().Close(); });
 
 				ImGui::EndMenu();
 			}
@@ -280,9 +282,30 @@ namespace World
 			if (selectedEntity.IsValid() && selectedEntity.GetScene() == m_ActiveScene.get() &&
 				!m_ActiveScene->IsPendingDestroy(selectedEntity) && selectedEntity.HasComponent<TransformComponent>() && m_HasRenderedScene)
 			{
-				// Draw Gizmo
+				// Draw Gizmo：拖动起止沿用于标脏（不做撤销）。
+				auto& transform = selectedEntity.GetComponent<TransformComponent>();
+				const bool wasUsing = ImGuizmo::IsUsing();
+				const TransformComponent beforeTransform = transform;
 				ImGuiDrawLibrary::DrawGizmo(m_EditorCamera, selectedEntity, m_CurrentGizmoOperation);
-
+				const bool nowUsing = ImGuizmo::IsUsing();
+				if (!wasUsing && nowUsing)
+				{
+					m_GizmoDragging = true;
+					m_GizmoDragBefore = beforeTransform;
+				}
+				else if (wasUsing && !nowUsing && m_GizmoDragging)
+				{
+					m_GizmoDragging = false;
+					const auto& afterTransform = selectedEntity.GetComponent<TransformComponent>();
+					if (m_SceneState == SceneState::Edit && selectedEntity.GetScene() == m_Document.GetScene().get() &&
+						(afterTransform.Location != m_GizmoDragBefore.Location ||
+							afterTransform.Rotation != m_GizmoDragBefore.Rotation ||
+							afterTransform.Scale != m_GizmoDragBefore.Scale ||
+							afterTransform.RotationQuat != m_GizmoDragBefore.RotationQuat))
+					{
+						m_Document.MarkDirty();
+					}
+				}
 			}
 
 			ImGui::End();
@@ -311,6 +334,9 @@ namespace World
 		{
 			OnCooking();
 		}
+
+		DrawUnsavedModal();
+		DrawErrorModal();
 	}
 
 	void EditorLayer::OnEvent(Event& event)
@@ -321,54 +347,79 @@ namespace World
 
 		EventDispatcher dispatcher(event);
 
+		dispatcher.Dispatch<WindowCloseEvent>(WLD_BIND_EVENT_FN(EditorLayer::OnWindowClose));
 		dispatcher.Dispatch<KeyPressedEvent>(WLD_BIND_EVENT_FN(EditorLayer::OnKeyPressed));
 		dispatcher.Dispatch<MouseButtonPressedEvent>(WLD_BIND_EVENT_FN(EditorLayer::OnMouseButtonPressed));
 	}
+	bool EditorLayer::OnWindowClose(WindowCloseEvent& e)
+	{
+		// 确认框已打开：继续拦截关闭，等待用户在框内选择。
+		if (m_ShowUnsavedModal)
+		{
+			e.m_Handled = true;
+			return true;
+		}
+		if (m_Document.IsDirty())
+		{
+			RequestAction([this]() { World::Application::Get().Close(); });
+			e.m_Handled = true;
+			return true;
+		}
+		return false;
+	}
 	void EditorLayer::NewScene()
+	{
+		RequestAction([this]() { DoNewScene(); });
+	}
+	void EditorLayer::DoNewScene()
 	{
 		SetSceneState(SceneState::Edit);
 
-		m_EditorScene = CreateRef<Scene>();
-		UpdateSceneContext(m_EditorScene);
-		m_ScenePath = std::filesystem::path();
+		m_Document.New();
+		UpdateSceneContext(m_Document.GetScene());
 	}
 	void EditorLayer::OpenScene()
 	{
-		std::string Path = FileDialogs::OpenFile("Scene File (*.wd)\0*.wd\0");
-
-		OpenScene(Path);
-
+		std::string path = FileDialogs::OpenFile("Scene File (*.wd)\0*.wd\0");
+		if (path.empty())
+			return;
+		OpenScene(std::filesystem::path(path));
 	}
 	void EditorLayer::OpenScene(const std::filesystem::path& path)
 	{
-		SetSceneState(SceneState::Edit);
-
-		m_ScenePath = path;
-		Ref<Scene> newScene = CreateRef<Scene>();
-		if (!path.empty())
-		{
-			SceneSerializer serializer(newScene);
-			serializer.Deserialize(path.string());
-		}
-		m_EditorScene = newScene;
-		UpdateSceneContext(m_EditorScene);
+		if (path.empty())
+			return;
+		RequestAction([this, path]() { DoOpenScene(path); });
 	}
-	void EditorLayer::SaveScene()
+	void EditorLayer::DoOpenScene(const std::filesystem::path& path)
 	{
-		if (m_ScenePath.empty())
+		if (!m_Document.LoadFromFile(path))
 		{
-			std::string Path = FileDialogs::SaveFile("Scene File (*.wd)\0*.wd\0");
-			if (!Path.empty())
-			{
-				SceneSerializer serializer(m_EditorScene);
-				serializer.Serialize(Path);
-			}
+			ShowError(m_Document.GetLastError());
+			return;
 		}
-		else
+		SetSceneState(SceneState::Edit);
+		UpdateSceneContext(m_Document.GetScene());
+	}
+	bool EditorLayer::SaveScene()
+	{
+		if (TrySave())
+			return true;
+		if (!m_Document.GetLastError().empty())
+			ShowError(m_Document.GetLastError());
+		return false;
+	}
+	bool EditorLayer::TrySave()
+	{
+		m_Document.ClearError();
+		if (!m_Document.HasPath())
 		{
-			SceneSerializer serializer(m_EditorScene);
-			serializer.Serialize(m_ScenePath.string());
+			std::string path = FileDialogs::SaveFile("Scene File (*.wd)\0*.wd\0");
+			if (path.empty())
+				return false;
+			return m_Document.SaveTo(std::filesystem::path(path));
 		}
+		return m_Document.SaveTo(m_Document.GetPath());
 	}
 	bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
 	{
@@ -443,12 +494,17 @@ namespace World
 							break;
 						}
 						const entt::entity handle = selectedEntity;
-						if (!m_ActiveScene->DeferStructuralChange([handle](Scene& scene)
+						if (m_ActiveScene->DeferStructuralChange([handle](Scene& scene)
 						{
 							Entity source(&scene, handle);
 							if (source.IsValid() && !scene.IsPendingDestroy(handle))
 								scene.DuplicateEntity(source);
 						}))
+						{
+							if (m_SceneState == SceneState::Edit && m_ActiveScene == m_Document.GetScene())
+								m_Document.MarkDirty();
+						}
+						else
 							WLD_CORE_WARN("Duplicate entity request was rejected by the scene.");
 					}
 					catch (const std::exception& error)
@@ -638,15 +694,16 @@ namespace World
 		}
 		m_SceneState = SceneState::Edit;
 		m_ScenePaused = false;
-		UpdateSceneContext(m_EditorScene);
+		UpdateSceneContext(m_Document.GetScene());
 		m_RuntimeScene.reset();
-		if (state == SceneState::Edit || !m_EditorScene)
+		if (state == SceneState::Edit || !m_Document.GetScene())
 			return;
 
 		try
 		{
 			m_RuntimeScene = CreateRef<Scene>();
-			Scene::CopyScene(m_EditorScene, m_RuntimeScene);
+			Ref<Scene> editorScene = m_Document.GetScene();
+			Scene::CopyScene(editorScene, m_RuntimeScene);
 			m_SceneState = state;
 			UpdateSceneContext(m_RuntimeScene);
 			if (state == SceneState::Play)
@@ -659,7 +716,7 @@ namespace World
 			WLD_CORE_ERROR("Unable to start scene: {0}", error.what());
 			if (m_RuntimeScene)
 				m_RuntimeScene->OnRuntimeStop();
-			UpdateSceneContext(m_EditorScene);
+			UpdateSceneContext(m_Document.GetScene());
 			m_RuntimeScene.reset();
 			m_SceneState = SceneState::Edit;
 		}
@@ -668,7 +725,7 @@ namespace World
 			WLD_CORE_ERROR("Unable to start scene: unknown error.");
 			if (m_RuntimeScene)
 				m_RuntimeScene->OnRuntimeStop();
-			UpdateSceneContext(m_EditorScene);
+			UpdateSceneContext(m_Document.GetScene());
 			m_RuntimeScene.reset();
 			m_SceneState = SceneState::Edit;
 		}
@@ -682,6 +739,83 @@ namespace World
 			m_ActiveScene->OnViewportResize((uint32_t)m_ViewportSize.x, (uint32_t)m_ViewportSize.y);
 		}
 		m_SceneHierarchyPanel.SetContext(m_ActiveScene);
+	}
+
+	void EditorLayer::RequestAction(std::function<void()> action)
+	{
+		if (m_Document.IsDirty())
+		{
+			m_PendingAction = std::move(action);
+			m_ShowUnsavedModal = true;
+			return;
+		}
+		action();
+	}
+
+	void EditorLayer::ShowError(const std::string& message)
+	{
+		m_ErrorText = message;
+		m_ShowErrorModal = true;
+		WLD_CORE_ERROR("{0}", message);
+	}
+
+	void EditorLayer::DrawUnsavedModal()
+	{
+		if (!m_ShowUnsavedModal)
+			return;
+		ImGui::OpenPopup("Unsaved Changes");
+		const ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse;
+		if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, flags))
+		{
+			ImGui::TextWrapped("The current scene has unsaved changes.");
+			bool takeAction = false;
+			if (ImGui::Button("Save", ImVec2(120, 0)))
+			{
+				if (TrySave())
+					takeAction = true;
+				else if (!m_Document.GetLastError().empty())
+					WLD_CORE_ERROR("{0}", m_Document.GetLastError());
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Don't Save", ImVec2(120, 0)))
+				takeAction = true;
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(120, 0)))
+			{
+				m_ShowUnsavedModal = false;
+				m_PendingAction = nullptr;
+				ImGui::CloseCurrentPopup();
+			}
+			if (takeAction)
+			{
+				std::function<void()> action = std::move(m_PendingAction);
+				m_PendingAction = nullptr;
+				m_ShowUnsavedModal = false;
+				ImGui::CloseCurrentPopup();
+				if (action)
+					action();
+			}
+			ImGui::EndPopup();
+		}
+	}
+
+	void EditorLayer::DrawErrorModal()
+	{
+		if (!m_ShowErrorModal)
+			return;
+		ImGui::OpenPopup("Error");
+		const ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse;
+		if (ImGui::BeginPopupModal("Error", nullptr, flags))
+		{
+			ImGui::TextWrapped("%s", m_ErrorText.c_str());
+			if (ImGui::Button("OK", ImVec2(120, 0)))
+			{
+				m_ShowErrorModal = false;
+				m_ErrorText.clear();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
 	}
 
 	void EditorLayer::StartCooking(const std::string& target)

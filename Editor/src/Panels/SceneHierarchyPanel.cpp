@@ -92,6 +92,8 @@ namespace World
 						Entity::DestroyEntity(m_Context.get(), entity);
 				});
 			}
+			if (!entitiesToDelete.empty() && m_EditCallback)
+				m_EditCallback();
 
 			// 点击空白处取消选中
 			if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
@@ -123,6 +125,8 @@ namespace World
 							m_SelectedEntity.AddComponent<TransformComponent>();
 						}
 					});
+					if (m_EditCallback)
+						m_EditCallback();
 				}
 
 				ImGui::EndPopup();
@@ -175,6 +179,8 @@ namespace World
 										}))
 											WLD_CORE_WARN("Add component request was rejected by the scene.");
 									});
+									if (m_EditCallback)
+										m_EditCallback();
 								}
 								if (!canAdd && !reason.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 									ImGui::SetTooltip("%s", reason.c_str());
@@ -239,6 +245,7 @@ namespace World
 	}
 	void SceneHierarchyPanel::DrawComponents(Entity entity)
 	{
+		bool changed = false;
 		for (const auto& className : TypeRegistry::Get().GetTypesByCategory(TypeCategory::Component))
 		{
 			if (!entity.IsValid() || m_Context->IsPendingDestroy(entity))
@@ -251,11 +258,13 @@ namespace World
 					{
 						RunPanelAction("Unable to draw component properties", [&]()
 						{
-							componentInfo->ComponentPropertiesUI(entity);
+							changed = componentInfo->ComponentPropertiesUI(entity) || changed;
 						});
 					}
 				}
 			}
 		}
+		if (changed && m_EditCallback)
+			m_EditCallback();
 	}
 }
