@@ -1,5 +1,15 @@
 ﻿#pragma once
+#include "World/Core/Core.h"
+#include "World/Core/Log.h"
+
 #include <any>
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 namespace World
@@ -149,6 +159,16 @@ namespace World
 	};
 
 	// 属性描述结构体
+	// 属性编辑元信息：供自动 Inspector 使用，不占用承担类型信息的 UserData。
+	struct PropertyEditDesc
+	{
+		std::string DisplayName;      // 空则回退 Name
+		std::string Group;            // 分组名；v1 仅存储，自动检查器按属性顺序显示
+		bool ReadOnly = false;
+		std::optional<float> Min;     // 数值控件范围下限
+		std::optional<float> Max;     // 数值控件范围上限
+	};
+
 	struct PropertyDesc
 	{
 		std::string Name;       // 属性名称
@@ -156,6 +176,7 @@ namespace World
 		size_t Offset;          // 工业级核心：该属性在结构体中的内存偏移量
 		uint32_t FieldID;       // 属性ID，用于区分同名属性或版本控制
 		std::any UserData;     // 用户数据字段，允许绑定任意类型的数据（如属性特定的反射信息、编辑器元数据等），实现高度灵活的扩展
+		PropertyEditDesc Edit;  // 编辑器元信息（显示名/分组/范围/只读）
 	};
 
 	enum class TypeCategory
@@ -295,6 +316,35 @@ namespace World
 
 				PropertyDesc prop { name, type, offset,constexpr_hash(name.c_str()),userData };
 				m_Desc.Properties.push_back(prop);
+				return *this;
+			}
+
+			// —— 编辑器元信息（作用于最近添加的属性）——
+			Binder& DisplayName(const std::string& displayName)
+			{
+				if (!m_Desc.Properties.empty())
+					m_Desc.Properties.back().Edit.DisplayName = displayName;
+				return *this;
+			}
+			Binder& Group(const std::string& group)
+			{
+				if (!m_Desc.Properties.empty())
+					m_Desc.Properties.back().Edit.Group = group;
+				return *this;
+			}
+			Binder& Range(float min, float max)
+			{
+				if (!m_Desc.Properties.empty())
+				{
+					m_Desc.Properties.back().Edit.Min = min;
+					m_Desc.Properties.back().Edit.Max = max;
+				}
+				return *this;
+			}
+			Binder& ReadOnly()
+			{
+				if (!m_Desc.Properties.empty())
+					m_Desc.Properties.back().Edit.ReadOnly = true;
 				return *this;
 			}
 
@@ -620,8 +670,7 @@ namespace World
 			auto aliasIt = m_NameToIds.find(idOrName);
 			if (aliasIt != m_NameToIds.end() && !aliasIt->second.empty())
 			{
-				if (aliasIt->second.size() > 1)
-					WLD_CORE_WARN("Ambiguous type short name '{}' resolves to {} types; using the first", idOrName, aliasIt->second.size());
+				// 短名歧义时取首个（保持旧语义）；本头文件保持无日志依赖，不在静态初始化期打日志。
 				auto regIt = m_Registry.find(aliasIt->second.front());
 				return regIt != m_Registry.end() ? &regIt->second : nullptr;
 			}
@@ -635,8 +684,7 @@ namespace World
 			auto aliasIt = m_NameToIds.find(idOrName);
 			if (aliasIt != m_NameToIds.end() && !aliasIt->second.empty())
 			{
-				if (aliasIt->second.size() > 1)
-					WLD_CORE_WARN("Ambiguous type short name '{}' resolves to {} types; using the first", idOrName, aliasIt->second.size());
+				// 短名歧义时取首个（保持旧语义）；本头文件保持无日志依赖，不在静态初始化期打日志。
 				auto regIt = m_Registry.find(aliasIt->second.front());
 				return regIt != m_Registry.end() ? &regIt->second : nullptr;
 			}
@@ -685,6 +733,18 @@ namespace World
 		AutoProp_##varName(){ \
 		TypeRegistry::Binder<TREFLECTClass>(*TypeRegistry::Get().GetTypeDesc(GetTypeFullName(typeid(TREFLECTClass).name()))).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>());} \
 	}s_AutoProp_##varName;
+
+	#define PROPERTY_RANGE(varName, minV, maxV) \
+	inline static struct AutoPropRange_##varName{ \
+		AutoPropRange_##varName(){ \
+		TypeRegistry::Binder<TREFLECTClass>(*TypeRegistry::Get().GetTypeDesc(GetTypeFullName(typeid(TREFLECTClass).name()))).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>()).Range(minV, maxV);} \
+	}s_AutoPropRange_##varName;
+
+	#define PROPERTY_READONLY(varName) \
+	inline static struct AutoPropReadOnly_##varName{ \
+		AutoPropReadOnly_##varName(){ \
+		TypeRegistry::Binder<TREFLECTClass>(*TypeRegistry::Get().GetTypeDesc(GetTypeFullName(typeid(TREFLECTClass).name()))).Property(#varName, &TREFLECTClass::varName, GetDataType<decltype(varName)>()).ReadOnly();} \
+	}s_AutoPropReadOnly_##varName;
 
 
 	template<typename TEnum>

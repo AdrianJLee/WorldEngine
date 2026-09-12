@@ -1,4 +1,5 @@
 #include "SceneHierarchyPanel.h"
+#include "../Inspector/InspectorRegistry.h"
 
 #include <exception>
 #include <utility>
@@ -250,17 +251,17 @@ namespace World
 		{
 			if (!entity.IsValid() || m_Context->IsPendingDestroy(entity))
 				break;
-			if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&TypeRegistry::Get().GetTypeDesc(className)->UserData))
+			TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(className);
+			if (!typeDesc)
+				continue;
+			if (TypeDescDataComponent* componentInfo = std::any_cast<TypeDescDataComponent>(&typeDesc->UserData))
 			{
 				if (entity.HasComponent(componentInfo->Id))
 				{
-					if (componentInfo->ComponentPropertiesUI)
+					RunPanelAction("Unable to draw component properties", [&]()
 					{
-						RunPanelAction("Unable to draw component properties", [&]()
-						{
-							changed = componentInfo->ComponentPropertiesUI(entity) || changed;
-						});
-					}
+						changed = InspectorRegistry::Draw(*typeDesc, componentInfo->Id, entity) || changed;
+					});
 				}
 			}
 		}

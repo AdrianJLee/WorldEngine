@@ -799,27 +799,27 @@ namespace
         Fixture fixture;
         auto entity = fixture.AddNative();
         fixture.World->OnScriptStart();
-        auto* instance = entity.GetComponent<NativeScriptComponent>().Instance;
+        auto& script = entity.GetComponent<NativeScriptComponent>();
+        auto* instance = script.Instance;
         CHECK(instance != nullptr);
-        auto* context = ImGui::CreateContext();
-        auto& io = ImGui::GetIO();
-        io.IniFilename = nullptr;
-        io.LogFilename = nullptr;
-        io.DisplaySize = ImVec2(1024.0f, 768.0f);
-        io.DeltaTime = 1.0f / 60.0f;
-        unsigned char* pixels = nullptr;
-        int width = 0, height = 0;
-        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-        ImGui::NewFrame();
-        ImGui::SetNextWindowSize(ImVec2(800.0f, 600.0f));
-        ImGui::Begin("Lifecycle inspector test");
-        NativeScriptComponent::ComponentPropertiesUI(entity);
-        ImGui::End();
-        ImGui::EndFrame();
-        ImGui::DestroyContext(context);
+
+        // T04：经无 ImGui 的字段访问合同，验证“借用运行实例、不新建、不销毁、FieldValues 回填”。
+        bool owned = false;
+        ScriptableEntity* preview = script.GetOrCreateEditorInstance(!fixture.World->IsActive(), owned);
+        CHECK(preview == instance);
+        CHECK(!owned);
+        const TypeDesc* typeDesc = TypeRegistry::Get().GetTypeDesc(script.ScriptName);
+        CHECK(typeDesc != nullptr);
+        if (typeDesc)
+        {
+            for (const auto& prop : typeDesc->Properties)
+                script.GetErasedFieldValue(*typeDesc, prop, preview);
+        }
+        script.ReleaseEditorInstance(preview); // 借用路径不销毁
+
         CHECK(entity.GetComponent<NativeScriptComponent>().Instance == instance);
         CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Deletes == 0);
-        CHECK(entity.GetComponent<NativeScriptComponent>().FieldValues.count("Value") == 1); // Property body was actually visited.
+        CHECK(entity.GetComponent<NativeScriptComponent>().FieldValues.count("Value") == 1); // Field body was actually visited.
         fixture.Step();
         fixture.Stop();
         CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Destroys == 1);

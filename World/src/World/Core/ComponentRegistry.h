@@ -16,11 +16,6 @@ namespace World
 	template<typename T>
 	T CloneComponentConfiguration(const T& source) { return source; }
 
-	template <typename T, typename = void>
-	struct has_ui_logic : std::false_type {};
-	template <typename T>
-	struct has_ui_logic<T, std::void_t<decltype(T::ComponentPropertiesUI)>> : std::true_type {};
-
 	class TypeDescDataComponent
 	{
 	public:
@@ -33,7 +28,6 @@ namespace World
 		void (*AddFunc)(Entity) = nullptr;
 		void (*CopyFunc)(Entity dest, Entity src) = nullptr;
 		void (*CopyComponentFunc)(entt::registry& destRegistry, entt::registry& srcRegistry, const std::unordered_map<UUID, entt::entity>& entityMap) = nullptr;
-		bool (*ComponentPropertiesUI)(Entity) = nullptr;
 
 		template<typename T>
 		static void Register(std::any& userData)
@@ -41,11 +35,6 @@ namespace World
 			entt::id_type id = entt::type_id<T>().hash();
 			entt::meta_type type = entt::resolve(id);
 			entt::meta_factory<T>().type(id).template ctor<>();
-
-			// 只有当 T 定义了 ComponentPropertiesUI 时才引用它，避免编译期错误
-			bool (*uiFunc)(Entity) = nullptr;
-			if constexpr (has_ui_logic<T>::value)
-				uiFunc = T::ComponentPropertiesUI;
 
 			// 决定是否提供绑定复制的函数
 			void (*copyFunc)(Entity dest, Entity src) = nullptr;
@@ -77,8 +66,7 @@ namespace World
 			userData = std::make_any<TypeDescDataComponent>(TypeDescDataComponent { id, type,
 				[](Entity e) { e.AddComponent<T>(); },
 				copyFunc,
-				copyComponentFunc,
-				uiFunc });
+				copyComponentFunc });
 		}
 
 	private:
@@ -106,6 +94,4 @@ namespace World
 		}
 	};
 
-	#define COMPONENT_UI() \
-	static bool ComponentPropertiesUI(Entity);
 }

@@ -24,7 +24,6 @@ namespace World
 			: ID(id)
 		{}
 
-		COMPONENT_UI()
 	};
 
 	struct TagComponent
@@ -40,7 +39,6 @@ namespace World
 			: Tag(tag)
 		{}
 
-		COMPONENT_UI()
 	};
 
 	struct TransformComponent
@@ -141,7 +139,6 @@ namespace World
 			return Transform;
 		}
 
-		COMPONENT_UI()
 	};
 
 	struct SpriteComponent
@@ -168,7 +165,6 @@ namespace World
 		PROPERTY(TilingFactor);
 		float TilingFactor = 1.0f;
 
-		COMPONENT_UI()
 	};
 
 	struct CircleRendererComponent
@@ -182,7 +178,6 @@ namespace World
 		PROPERTY(Fade);
 		float Fade = 0.005f;
 
-		COMPONENT_UI()
 	};
 
 	struct CameraComponent
@@ -205,7 +200,6 @@ namespace World
 		PROPERTY(FixedAspectRatio);
 		bool FixedAspectRatio = false;
 
-		COMPONENT_UI()
 	};
 
 	enum class ScriptInstanceState { Pending, Creating, Running, Destroying, Stopped, Faulted };
@@ -241,7 +235,14 @@ namespace World
 				};
 		}
 
-		COMPONENT_UI();
+		// T04：无 ImGui 的字段访问合同，供 Editor Inspector 与测试共用。
+		ScriptableEntity* GetOrCreateEditorInstance(bool allowCreate, bool& outOwned);
+		void ReleaseEditorInstance(ScriptableEntity* preview);
+		// 清空编辑字段缓存并允许下次重新创建预览实例。
+		void ResetEditorFieldState();
+		std::any GetErasedFieldValue(const TypeDesc& typeDesc, const PropertyDesc& prop, ScriptableEntity* instance);
+		void SetErasedFieldValue(const TypeDesc& typeDesc, const PropertyDesc& prop, ScriptableEntity* instance, const std::any& value);
+
 
 		std::unordered_map<std::string, std::any> FieldValues;
 	private:
@@ -299,7 +300,6 @@ namespace World
 		LuaScriptComponent(const LuaScriptComponent&) = default;
 		LuaScriptComponent(const std::string& path) : ScriptFilePath(path) {}
 
-		COMPONENT_UI()
 	};
 
 	struct RigidBody2DComponent
@@ -324,7 +324,6 @@ namespace World
 		PROPERTY(FixedRotation);
 		bool FixedRotation = false;
 
-		COMPONENT_UI()
 	};
 
 	struct BoxCollider2DComponent
@@ -344,7 +343,6 @@ namespace World
 		PROPERTY(ShowCollider);
 		bool ShowCollider = true;
 
-		COMPONENT_UI()
 	};
 
 	struct CircleCollider2DComponent
@@ -364,6 +362,5 @@ namespace World
 		PROPERTY(ShowCollider);
 		bool ShowCollider = true;
 
-		COMPONENT_UI()
 	};
 }
