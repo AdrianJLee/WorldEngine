@@ -54,6 +54,10 @@ namespace World::Wui
 		bool AddTab(const PanelId& panel, const PanelId& target, DropZone zone);
 		bool RemoveTab(const PanelId& panel);
 		bool Activate(const PanelId& panel);
+		// 同一 tab 组内除 panel 外的另一个面板;无则返回空。
+		PanelId FindSibling(const PanelId& panel) const;
+		// 深度优先找到的第一个面板。
+		PanelId FirstPanel() const;
 
 		std::string Serialize() const;
 		static bool Deserialize(const std::string& text, DockLayout* out, std::string* error);

@@ -138,6 +138,15 @@ int main()
 			CHECK(single.RemoveTab("view"));
 			CHECK(!single.Contains("view"));
 			CHECK(!single.RemoveTab("view"));
+
+			// 移动已存在面板:摘除 → 重新挂载到目标组
+			DockLayout moving = DockLayout::Default({ "hierarchy", "properties", "view" });
+			CHECK(moving.FindSibling("hierarchy") == "properties");
+			CHECK(moving.FirstPanel() == "hierarchy");
+			CHECK(moving.RemoveTab("view"));
+			CHECK(moving.AddTab("view", "hierarchy", DropZone::Center));
+			CHECK(moving.IsActive("view"));
+			CHECK(moving.FindSibling("view") == "hierarchy" || moving.FindSibling("view") == "properties");
 		}
 
 		// 9. 布局文件持久化:写读往返与缺失回退

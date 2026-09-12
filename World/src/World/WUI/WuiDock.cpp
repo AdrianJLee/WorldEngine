@@ -239,6 +239,34 @@ namespace World::Wui
 		return true;
 	}
 
+	PanelId DockLayout::FindSibling(const PanelId& panel) const
+	{
+		const DockNode* node = FindTabNode(Root, panel);
+		if (!node)
+			return {};
+		for (const PanelId& candidate : node->Panels)
+			if (candidate != panel)
+				return candidate;
+		return {};
+	}
+
+	PanelId DockLayout::FirstPanel() const
+	{
+		std::function<PanelId(const DockNode&)> walk = [&](const DockNode& node) -> PanelId
+		{
+			if (node.IsTabs())
+				return node.Panels.empty() ? PanelId {} : node.Panels.front();
+			for (const DockNode& child : node.Children)
+			{
+				const PanelId found = walk(child);
+				if (!found.empty())
+					return found;
+			}
+			return {};
+		};
+		return walk(Root);
+	}
+
 	bool DockLayout::SerializeNode(const DockNode& node, JsonValue* out)
 	{
 		if (node.IsTabs())

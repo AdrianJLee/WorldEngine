@@ -117,8 +117,18 @@ namespace World
 			if (payload.rfind("panel:", 0) == 0)
 			{
 				const std::string panel = payload.substr(6);
-				if (!m_DropTargetPanel.empty() && panel != m_DropTargetPanel && m_Layout.AddTab(panel, m_DropTargetPanel, m_DropZone))
-					SaveLayout();
+				if (!m_DropTargetPanel.empty() && m_Layout.Contains(panel))
+				{
+					// 移动已存在的面板:先摘除再挂载;源组塌缩后回退到布局首面板作锚点。
+					std::string anchor = m_DropTargetPanel;
+					if (anchor == panel)
+						anchor = m_Layout.FindSibling(panel);
+					m_Layout.RemoveTab(panel);
+					if (!m_Layout.Contains(anchor))
+						anchor = m_Layout.FirstPanel();
+					if (!anchor.empty() && m_Layout.AddTab(panel, anchor, m_DropZone))
+						SaveLayout();
+				}
 			}
 		}
 		m_DropTargetPanel.clear();
