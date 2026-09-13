@@ -26,6 +26,8 @@ int main()
 	}
 
 	// 资源类冒烟:创建/销毁一轮,验证合同对象在 Vulkan 上可实例化。
+	World::Rhi::Handle<World::Rhi::RenderPass> pass;
+	World::Rhi::Handle<World::Rhi::Framebuffer> framebuffer;
 	{
 		using namespace World::Rhi;
 		BufferDesc bufferDesc;
@@ -59,7 +61,7 @@ int main()
 		SubpassDesc subpass;
 		subpass.ColorAttachments = { { 0, AttachmentLayout::ColorAttachment } };
 		passDesc.Subpasses = { subpass };
-		const Handle<RenderPass> pass = device->CreateRenderPass(passDesc);
+		pass = device->CreateRenderPass(passDesc);
 		if (!pass)
 			return 1;
 
@@ -67,7 +69,8 @@ int main()
 		framebufferDesc.RenderPass = pass;
 		framebufferDesc.Extent = { 4, 4 };
 		framebufferDesc.Attachments = { texture };
-		if (!device->CreateFramebuffer(framebufferDesc))
+		framebuffer = device->CreateFramebuffer(framebufferDesc);
+		if (!framebuffer)
 			return 1;
 
 		DescriptorSetLayoutDesc layoutDesc;
@@ -91,6 +94,26 @@ int main()
 			return 1;
 		if (!device->CreateQueryPool(QueryType::Occlusion, 2))
 			return 1;
+	}
+
+	// 命令缓冲 + 队列 + 围栏:录制一个空渲染通道并提交执行。
+	{
+		using namespace World::Rhi;
+		const Handle<CommandQueue> queue = device->CreateQueue();
+		const Handle<CommandBuffer> commandBuffer = device->CreateCommandBuffer();
+		const Handle<Fence> fence = device->CreateFence(false);
+		if (!queue || !commandBuffer || !fence)
+			return 1;
+		commandBuffer->Begin();
+		std::vector<ClearValue> clears(1);
+		clears[0].Color = { 0.1f, 0.2f, 0.3f, 1.0f };
+		commandBuffer->BeginRenderPass(pass, framebuffer, clears);
+		commandBuffer->SetViewport({ 0, 0, 4, 4 });
+		commandBuffer->SetScissor({ 0, 0, 4, 4 });
+		commandBuffer->EndRenderPass();
+		commandBuffer->End();
+		queue->Submit({ { commandBuffer }, {}, {}, fence });
+		fence->Wait();
 	}
 	device->WaitIdle();
 	std::printf("World.VulkanDevice: ok\n");

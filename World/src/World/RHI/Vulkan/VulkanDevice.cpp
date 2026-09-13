@@ -1,5 +1,7 @@
 #include "wldpch.h"
 #include "World/RHI/Vulkan/VulkanDevice.h"
+#include "World/RHI/Vulkan/VulkanCommand.h"
+#include "World/RHI/Vulkan/VulkanPipeline.h"
 #include "World/RHI/Vulkan/VulkanResources.h"
 #include "World/Core/Log.h"
 
@@ -54,6 +56,8 @@ namespace World::Rhi::Vulkan
 		if (m_Device)
 		{
 			vkDeviceWaitIdle(m_Device);
+			if (m_CommandPool)
+				vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
 			vkDestroyDevice(m_Device, nullptr);
 		}
 		if (m_Instance)
@@ -142,6 +146,12 @@ namespace World::Rhi::Vulkan
 		volkLoadDevice(m_Device);
 		vkGetDeviceQueue(m_Device, m_GraphicsFamily, 0, &m_GraphicsQueue);
 
+		VkCommandPoolCreateInfo poolInfo{};
+		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		poolInfo.queueFamilyIndex = m_GraphicsFamily;
+		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool);
+
 		VkPhysicalDeviceProperties properties{};
 		vkGetPhysicalDeviceProperties(m_PhysicalDevice, &properties);
 		VkPhysicalDeviceFeatures features{};
@@ -204,12 +214,12 @@ namespace World::Rhi::Vulkan
 
 #define NOT_IMPLEMENTED() do { if (Log::GetCoreLogger()) WLD_CORE_WARN("[RHI-VK] {0} not implemented yet", __func__); } while (0)
 
-	Handle<CommandQueue> VulkanDevice::CreateQueue(const std::string&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<CommandBuffer> VulkanDevice::CreateCommandBuffer(const std::string&) { NOT_IMPLEMENTED(); return nullptr; }
+	Handle<CommandQueue> VulkanDevice::CreateQueue(const std::string&) { return CreateRef<VulkanCommandQueue>(*this); }
+	Handle<CommandBuffer> VulkanDevice::CreateCommandBuffer(const std::string&) { return CreateRef<VulkanCommandBuffer>(*this); }
 	Handle<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc&) { NOT_IMPLEMENTED(); return nullptr; }
 	Handle<RenderPass> VulkanDevice::CreateRenderPass(const RenderPassDesc& desc) { return CreateRef<VulkanRenderPass>(*this, desc); }
 	Handle<Framebuffer> VulkanDevice::CreateFramebuffer(const FramebufferDesc& desc) { return CreateRef<VulkanFramebuffer>(*this, desc); }
-	Handle<Pipeline> VulkanDevice::CreatePipeline(const PipelineDesc&) { NOT_IMPLEMENTED(); return nullptr; }
+	Handle<Pipeline> VulkanDevice::CreatePipeline(const PipelineDesc& desc) { return CreateRef<VulkanPipeline>(*this, desc); }
 	Handle<Shader> VulkanDevice::CreateShader(const ShaderDesc& desc) { return CreateRef<VulkanShader>(*this, desc); }
 	Handle<Buffer> VulkanDevice::CreateBuffer(const BufferDesc& desc) { return CreateRef<VulkanBuffer>(*this, desc); }
 	Handle<Texture> VulkanDevice::CreateTexture(const TextureDesc& desc) { return CreateRef<VulkanTexture>(*this, desc); }

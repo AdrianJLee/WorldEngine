@@ -41,6 +41,9 @@ namespace World::Rhi::Vulkan
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
 		VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsFamily; }
+		VkCommandPool GetCommandPool() const { return m_CommandPool; }
+		void SetLastPipelineLayout(VkPipelineLayout layout) { m_LastPipelineLayout = layout; }
+		VkPipelineLayout GetLastPipelineLayout() const { return m_LastPipelineLayout; }
 
 	private:
 		bool Initialize(const DeviceDesc& desc, std::string* error);
@@ -53,5 +56,7 @@ namespace World::Rhi::Vulkan
 		VkDevice m_Device = VK_NULL_HANDLE;
 		VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
 		uint32_t m_GraphicsFamily = 0;
+		VkCommandPool m_CommandPool = VK_NULL_HANDLE;
+		VkPipelineLayout m_LastPipelineLayout = VK_NULL_HANDLE;
 	};
 }
