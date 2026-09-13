@@ -33,6 +33,9 @@ namespace
 				default: return 0;
 			}
 		}
+		// 功能键:ImGuiKey_F1..F12 与 GLFW/KeyCodes 顺序一致,仅差一个偏移。
+		if (key >= ImGuiKey_F1 && key <= ImGuiKey_F12)
+			return static_cast<uint32_t>(World::KeyCodes::F1) + (key - ImGuiKey_F1);
 		// ASCII 区间与 GLFW/KeyCodes 一致。
 		if (key >= ImGuiKey_Space && key <= ImGuiKey_GraveAccent)
 			return static_cast<uint32_t>(key);
