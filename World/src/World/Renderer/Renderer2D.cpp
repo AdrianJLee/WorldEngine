@@ -48,9 +48,9 @@ namespace World
 		// 当前渲染调用中已经提交的四边形数量
 		uint32_t QuadIndexCount = 0;
 
-		Ref<VertexArray> QuadVertexArray[RendererConfig::MAX_FRAMES_IN_FLIGHT() + RendererConfig::MAX_FRAMES_MODIFY()];
+		Ref<VertexArray> QuadVertexArray[4];
 
-		Ref<VertexBuffer> QuadVertexBuffer[RendererConfig::MAX_FRAMES_IN_FLIGHT() + RendererConfig::MAX_FRAMES_MODIFY()];
+		Ref<VertexBuffer> QuadVertexBuffer[4];
 
 		// 四边形顶点数据的缓冲区
 		QuadVertex* QuadVertexBufferBase = nullptr;
@@ -89,8 +89,8 @@ namespace World
 
 		uint32_t CircleIndexCount = 0;
 
-		Ref<VertexArray> CircleVertexArray[RendererConfig::MAX_FRAMES_IN_FLIGHT() + RendererConfig::MAX_FRAMES_MODIFY()];
-		Ref<VertexBuffer> CircleVertexBuffer[RendererConfig::MAX_FRAMES_IN_FLIGHT() + RendererConfig::MAX_FRAMES_MODIFY()];
+		Ref<VertexArray> CircleVertexArray[4];
+		Ref<VertexBuffer> CircleVertexBuffer[4];
 		CircleVertex* CircleVertexBufferBase = nullptr;
 		CircleVertex* CircleVertexBufferPtr = nullptr;
 	};
@@ -110,8 +110,8 @@ namespace World
 		static const uint32_t MaxIndices = MaxLines * 2;
 		uint32_t LineIndexCount = 0;
 
-		Ref<VertexArray> LineVertexArray[RendererConfig::MAX_FRAMES_IN_FLIGHT() + RendererConfig::MAX_FRAMES_MODIFY()];
-		Ref<VertexBuffer> LineVertexBuffer[RendererConfig::MAX_FRAMES_IN_FLIGHT() + RendererConfig::MAX_FRAMES_MODIFY()];
+		Ref<VertexArray> LineVertexArray[4];
+		Ref<VertexBuffer> LineVertexBuffer[4];
 		LineVertex* LineVertexBufferBase = nullptr;
 		LineVertex* LineVertexBufferPtr = nullptr;
 
@@ -192,7 +192,7 @@ namespace World
 			}
 
 			Ref<IndexBuffer> quadIB = IndexBuffer::Create(quadIndices, s_Data.QuadData.MaxIndices);
-			for (uint32_t frameIndex = 0; frameIndex < RendererConfig::MAX_FRAMES_IN_FLIGHT() + RendererConfig::MAX_FRAMES_MODIFY(); frameIndex++)
+			for (uint32_t frameIndex = 0; frameIndex < 4; frameIndex++)
 			{
 				//Vertex Array
 				s_Data.QuadData.QuadVertexArray[frameIndex] = VertexArray::Create();
@@ -247,7 +247,7 @@ namespace World
 			}
 			Ref<IndexBuffer> circleIB = IndexBuffer::Create(circleIndices, s_Data.CircleData.MaxIndices);
 
-			for (uint32_t frameIndex = 0; frameIndex < RendererConfig::MAX_FRAMES_IN_FLIGHT() + RendererConfig::MAX_FRAMES_MODIFY(); frameIndex++)
+			for (uint32_t frameIndex = 0; frameIndex < 4; frameIndex++)
 			{
 				// Vertex Array
 				s_Data.CircleData.CircleVertexArray[frameIndex] = VertexArray::Create();
@@ -293,7 +293,7 @@ namespace World
 				lineOffset += 2;
 			}
 			Ref<IndexBuffer> lineIB = IndexBuffer::Create(lineIndices, s_Data.LineData.MaxIndices);
-			for (uint32_t frameIndex = 0; frameIndex < RendererConfig::MAX_FRAMES_IN_FLIGHT() + RendererConfig::MAX_FRAMES_MODIFY(); frameIndex++)
+			for (uint32_t frameIndex = 0; frameIndex < 4; frameIndex++)
 			{
 				// Vertex Array
 				s_Data.LineData.LineVertexArray[frameIndex] = VertexArray::Create();

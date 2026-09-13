@@ -6,6 +6,7 @@
 #include "World/Core/Memory/MemoryTracker.h"
 #include "World/Core/KeyCodes.h"
 #include "World/ImGui/ImGuiDrawLibrary.h"
+#include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Scene/SceneCamera.h"
 #include "World/WUI/WuiJson.h"
@@ -2013,7 +2014,10 @@ namespace World
 				{
 					manifest.Renderer = m_ProjectRendererIndex == 1 ? "vulkan" : "opengl";
 					if (World::Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+					{
 						WLD_CORE_INFO("Project settings saved: renderer={0}", manifest.Renderer);
+						World::Renderer::SetRequestedRenderer(manifest.Renderer);
+					}
 					else
 						WLD_CORE_ERROR("Failed to save project manifest: {0}", error);
 				}
