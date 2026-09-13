@@ -1996,8 +1996,6 @@ namespace World
 			ctx.SetModal(projectSettings);
 			m_ShowProjectSettings = false;
 		}
-		else if (ctx.Modal() == projectSettings)
-			ctx.ClearModal();
 		if (BeginModal(ctx, projectSettings, "Project Settings", { 380, 190 }, &panel, m_Theme))
 		{
 			Label(ctx, { panel.X + 16, panel.Y + 48 }, "Renderer", m_Theme.TextMuted, 13.0f);
@@ -2026,6 +2024,8 @@ namespace World
 				ctx.ClearModal();
 			}
 			if (Button(ctx, Wui::HashId("project.cancel"), { panel.X + 190, panel.Y + 125, 110, 28 }, "Cancel", m_Theme))
+				ctx.ClearModal();
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClearModal();
 			EndModal(ctx, projectSettings);
 		}
