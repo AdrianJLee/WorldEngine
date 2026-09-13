@@ -24,6 +24,8 @@ namespace World::Vfs
 		{
 			uint64_t offset = 0;
 			uint64_t size = 0;
+			uint32_t crc32 = 0;
+			std::string hash;   // 内容指纹(FNV-1a 64 十六进制,W2 可替换算法)
 		};
 
 		PackageProvider(std::filesystem::path pak, std::unordered_map<std::string, Entry> entries);

@@ -1,20 +1,28 @@
 #include "wldpch.h"
 #include "World/Core/Vfs/PackageProvider.h"
 #include "World/Core/Vfs/Crc32.h"
+#include "World/WUI/WuiJson.h"
 
 #include <algorithm>
-#include <cstring>
+#include <array>
+#include <cstdio>
+#include <cstdlib>
 
 namespace World::Vfs
 {
 	namespace
 	{
-		constexpr uint32_t kMagic = 0x4B325057u;        // "WP2K"
-		constexpr uint32_t kLegacyMagic = 0x4B415057u;  // "WPAK"
+		// 包格式 v2("WPAK2"):
+		//   header(16B): uint32 magic="WPAK" uint32 version=2 uint32 jsonLen uint32 indexCrc32
+		//   index: jsonLen 字节 JSON { "version":2, "entries":[ {path,hash,offset,size,crc32}... ] }
+		//   blobs: 紧随 index,offset 为文件内绝对偏移
+		// 每条目带内容指纹(FNV-1a 64 十六进制)与独立 CRC32;索引整体另有 CRC32;
+		// 旧 v1 包返回 not_supported。
+		constexpr uint32_t kMagic = 0x4B415057u;  // "WPAK"
 		constexpr uint32_t kVersion = 2;
-		constexpr size_t kHeaderSize = 40;
+		constexpr uint32_t kLegacyVersion = 1;
+		constexpr size_t kHeaderSize = 16;
 		constexpr uint64_t kMaxEntryCount = 1u << 20;
-		constexpr uint32_t kMaxPathLength = 1024;
 
 		void WriteU32(uint8_t* out, uint32_t value)
 		{
@@ -22,12 +30,6 @@ namespace World::Vfs
 			out[1] = static_cast<uint8_t>((value >> 8) & 0xFFu);
 			out[2] = static_cast<uint8_t>((value >> 16) & 0xFFu);
 			out[3] = static_cast<uint8_t>((value >> 24) & 0xFFu);
-		}
-
-		void WriteU64(uint8_t* out, uint64_t value)
-		{
-			for (int i = 0; i < 8; ++i)
-				out[i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFFu);
 		}
 
 		uint32_t ReadU32(const uint8_t* in)
@@ -38,17 +40,24 @@ namespace World::Vfs
 			       (static_cast<uint32_t>(in[3]) << 24);
 		}
 
-		uint64_t ReadU64(const uint8_t* in)
+		uint64_t Fnv1a64(const void* data, size_t size)
 		{
-			uint64_t value = 0;
-			for (int i = 7; i >= 0; --i)
-				value = (value << 8) | in[i];
-			return value;
+			uint64_t hash = 14695981039346656037ULL;
+			const auto* bytes = static_cast<const uint8_t*>(data);
+			for (size_t i = 0; i < size; ++i)
+			{
+				hash ^= bytes[i];
+				hash *= 1099511628211ULL;
+			}
+			return hash;
 		}
 
-		uint64_t Align4(uint64_t value)
+		std::string FnvHex(uint64_t hash)
 		{
-			return (value + 3u) & ~uint64_t{ 3 };
+			char buffer[24];
+			std::snprintf(buffer, sizeof(buffer), "%016llx",
+				static_cast<unsigned long long>(hash));
+			return buffer;
 		}
 
 		struct BuildItem
@@ -57,7 +66,89 @@ namespace World::Vfs
 			std::filesystem::path source;
 			uint64_t size = 0;
 			uint64_t offset = 0;
+			uint32_t crc32 = 0;
+			std::string hash;
 		};
+
+		// 内容指纹与 CRC 的第一遍读取。
+		bool FingerprintItem(BuildItem& item, std::error_code& ec)
+		{
+			std::ifstream in(item.source, std::ios::binary);
+			if (!in.is_open())
+			{
+				ec = std::make_error_code(std::errc::io_error);
+				return false;
+			}
+			Crc32 crc;
+			uint64_t hash = 14695981039346656037ULL;
+			std::vector<char> buffer(4 * 1024 * 1024);
+			uint64_t remaining = item.size;
+			while (remaining > 0)
+			{
+				const std::streamsize chunk = static_cast<std::streamsize>(
+					std::min<uint64_t>(remaining, buffer.size()));
+				in.read(buffer.data(), chunk);
+				if (in.gcount() != chunk)
+				{
+					ec = std::make_error_code(std::errc::io_error);
+					return false;
+				}
+				crc.Update(buffer.data(), static_cast<size_t>(chunk));
+				const auto* bytes = reinterpret_cast<const uint8_t*>(buffer.data());
+				for (std::streamsize i = 0; i < chunk; ++i)
+				{
+					hash ^= bytes[i];
+					hash *= 1099511628211ULL;
+				}
+				remaining -= static_cast<uint64_t>(chunk);
+			}
+			item.crc32 = crc.Final();
+			item.hash = FnvHex(hash);
+			return true;
+		}
+
+		std::string SerializeIndex(const std::vector<BuildItem>& items)
+		{
+			Wui::JsonValue root;
+			root.type = Wui::JsonValue::Type::Object;
+			root.Object.push_back({ "version", Wui::JsonValue::MakeNumber(kVersion) });
+			Wui::JsonValue entries;
+			entries.type = Wui::JsonValue::Type::Array;
+			for (const BuildItem& item : items)
+			{
+				Wui::JsonValue entry;
+				entry.type = Wui::JsonValue::Type::Object;
+				entry.Object.push_back({ "path", Wui::JsonValue::MakeString(item.path) });
+				entry.Object.push_back({ "hash", Wui::JsonValue::MakeString(item.hash) });
+				// 大整数以十进制字符串存储,避免 JSON 数字经 double 丢失精度。
+				entry.Object.push_back({ "offset", Wui::JsonValue::MakeString(std::to_string(item.offset)) });
+				entry.Object.push_back({ "size", Wui::JsonValue::MakeString(std::to_string(item.size)) });
+				entry.Object.push_back({ "crc32", Wui::JsonValue::MakeString(std::to_string(item.crc32)) });
+				entries.Array.push_back(std::move(entry));
+			}
+			root.Object.push_back({ "entries", std::move(entries) });
+			return root.Dump();
+		}
+
+		// 索引长度与 offset 互相依赖(offset 数字位数随 jsonLen 变化),定点迭代收敛。
+		uint64_t LayoutIndex(std::vector<BuildItem>& items)
+		{
+			uint64_t jsonLen = 0;
+			for (int attempt = 0; attempt < 4; ++attempt)
+			{
+				uint64_t cursor = kHeaderSize + jsonLen;
+				for (BuildItem& item : items)
+				{
+					item.offset = cursor;
+					cursor += item.size;
+				}
+				const std::string text = SerializeIndex(items);
+				if (static_cast<uint64_t>(text.size()) == jsonLen)
+					return jsonLen;
+				jsonLen = text.size();
+			}
+			return jsonLen;
+		}
 	}
 
 	PackageProvider::PackageProvider(std::filesystem::path pak, std::unordered_map<std::string, Entry> entries)
@@ -84,28 +175,25 @@ namespace World::Vfs
 			return nullptr;
 		}
 
-		const uint32_t magic = ReadU32(header + 0);
-		if (magic == kLegacyMagic)
+		if (ReadU32(header + 0) != kMagic)
+		{
+			ec = std::make_error_code(std::errc::invalid_argument);
+			return nullptr;
+		}
+		const uint32_t version = ReadU32(header + 4);
+		if (version == kLegacyVersion)
 		{
 			ec = std::make_error_code(std::errc::not_supported);
 			return nullptr;
 		}
-		if (magic != kMagic)
-		{
-			ec = std::make_error_code(std::errc::invalid_argument);
-			return nullptr;
-		}
-		if (ReadU32(header + 4) != kVersion)
+		if (version != kVersion)
 		{
 			ec = std::make_error_code(std::errc::invalid_argument);
 			return nullptr;
 		}
 
-		const uint64_t indexOffset = ReadU64(header + 8);
-		const uint64_t indexSize = ReadU64(header + 16);
-		const uint64_t entryCount = ReadU64(header + 24);
-		const uint32_t storedCrc = ReadU32(header + 32);
-
+		const uint64_t jsonLen = ReadU32(header + 8);
+		const uint32_t indexCrc32 = ReadU32(header + 12);
 		file.seekg(0, std::ios::end);
 		const std::streamoff endPosition = file.tellg();
 		if (endPosition < 0)
@@ -114,104 +202,95 @@ namespace World::Vfs
 			return nullptr;
 		}
 		const uint64_t fileSize = static_cast<uint64_t>(endPosition);
-
-		if (entryCount > kMaxEntryCount ||
-			indexOffset < kHeaderSize ||
-			indexOffset > fileSize ||
-			indexSize > fileSize - indexOffset)
+		if (jsonLen == 0 || jsonLen > fileSize - kHeaderSize)
 		{
 			ec = std::make_error_code(std::errc::invalid_argument);
 			return nullptr;
 		}
-
-		file.seekg(static_cast<std::streamoff>(indexOffset), std::ios::beg);
-		std::vector<uint8_t> indexBytes(static_cast<size_t>(indexSize));
-		file.read(reinterpret_cast<char*>(indexBytes.data()), static_cast<std::streamsize>(indexSize));
-		if (file.gcount() != static_cast<std::streamsize>(indexSize))
-		{
-			ec = std::make_error_code(std::errc::invalid_argument);
-			return nullptr;
-		}
-
-		const uint64_t dataStart = indexOffset + indexSize;
-		std::unordered_map<std::string, Entry> entries;
-		entries.reserve(static_cast<size_t>(entryCount));
-
-		size_t cursor = 0;
-		for (uint64_t i = 0; i < entryCount; ++i)
-		{
-			if (cursor + 4 > indexBytes.size())
-			{
-				ec = std::make_error_code(std::errc::invalid_argument);
-				return nullptr;
-			}
-			const uint32_t pathLength = ReadU32(indexBytes.data() + cursor);
-			cursor += 4;
-			if (pathLength == 0 || pathLength > kMaxPathLength ||
-				cursor + pathLength + 16 > indexBytes.size())
-			{
-				ec = std::make_error_code(std::errc::invalid_argument);
-				return nullptr;
-			}
-			const std::string rawPath(reinterpret_cast<const char*>(indexBytes.data() + cursor), pathLength);
-			cursor += pathLength;
-
-			Path normalized;
-			if (!Normalize(rawPath, normalized, ec))
-			{
-				ec = std::make_error_code(std::errc::invalid_argument);
-				return nullptr;
-			}
-
-			const uint64_t offset = ReadU64(indexBytes.data() + cursor);
-			const uint64_t size = ReadU64(indexBytes.data() + cursor + 8);
-			cursor += 16;
-
-			if (offset < dataStart || offset > fileSize || size > fileSize - offset || (offset % 4) != 0)
-			{
-				ec = std::make_error_code(std::errc::invalid_argument);
-				return nullptr;
-			}
-			if (!entries.emplace(std::move(normalized), Entry{ offset, size }).second)
-			{
-				ec = std::make_error_code(std::errc::invalid_argument);
-				return nullptr;
-			}
-		}
-		if (cursor != indexBytes.size())
-		{
-			ec = std::make_error_code(std::errc::invalid_argument);
-			return nullptr;
-		}
-
-		// CRC 覆盖整个文件,Header 内 crc32 字段按 0 参与计算。
-		uint8_t headerForCrc[kHeaderSize];
-		std::memcpy(headerForCrc, header, kHeaderSize);
-		headerForCrc[32] = headerForCrc[33] = headerForCrc[34] = headerForCrc[35] = 0;
-
-		Crc32 crc;
-		crc.Update(headerForCrc, kHeaderSize);
 
 		file.seekg(static_cast<std::streamoff>(kHeaderSize), std::ios::beg);
-		std::vector<char> buffer(1024 * 1024);   // 堆上分块缓冲,避免 1MB 栈帧溢出
-		uint64_t remaining = fileSize - kHeaderSize;
-		while (remaining > 0)
+		std::vector<char> jsonBytes(static_cast<size_t>(jsonLen));
+		file.read(jsonBytes.data(), static_cast<std::streamsize>(jsonLen));
+		if (file.gcount() != static_cast<std::streamsize>(jsonLen))
 		{
-			const std::streamsize chunk = static_cast<std::streamsize>(
-				std::min<uint64_t>(remaining, buffer.size()));
-			file.read(buffer.data(), chunk);
-			if (file.gcount() != chunk)
+			ec = std::make_error_code(std::errc::invalid_argument);
+			return nullptr;
+		}
+		if (Crc32::Compute(jsonBytes.data(), jsonBytes.size()) != indexCrc32)
+		{
+			ec = std::make_error_code(std::errc::invalid_argument);
+			return nullptr;
+		}
+
+		std::string jsonError;
+		const std::optional<Wui::JsonValue> root =
+			Wui::JsonValue::Parse(std::string(jsonBytes.data(), static_cast<size_t>(jsonLen)), &jsonError);
+		if (!root)
+		{
+			ec = std::make_error_code(std::errc::invalid_argument);
+			return nullptr;
+		}
+		const Wui::JsonValue* entriesNode = root->Find("entries");
+		if (!entriesNode || entriesNode->type != Wui::JsonValue::Type::Array ||
+			entriesNode->Array.size() > kMaxEntryCount)
+		{
+			ec = std::make_error_code(std::errc::invalid_argument);
+			return nullptr;
+		}
+
+		const uint64_t dataStart = kHeaderSize + jsonLen;
+		std::unordered_map<std::string, Entry> entries;
+		entries.reserve(entriesNode->Array.size());
+		for (const Wui::JsonValue& node : entriesNode->Array)
+		{
+			const Wui::JsonValue* pathNode = node.Find("path");
+			const Wui::JsonValue* offsetNode = node.Find("offset");
+			const Wui::JsonValue* sizeNode = node.Find("size");
+			const Wui::JsonValue* crcNode = node.Find("crc32");
+			const Wui::JsonValue* hashNode = node.Find("hash");
+			if (!pathNode || !offsetNode || !sizeNode || !crcNode || !hashNode)
 			{
 				ec = std::make_error_code(std::errc::invalid_argument);
 				return nullptr;
 			}
-			crc.Update(buffer.data(), static_cast<size_t>(chunk));
-			remaining -= static_cast<uint64_t>(chunk);
-		}
-		if (crc.Final() != storedCrc)
-		{
-			ec = std::make_error_code(std::errc::invalid_argument);
-			return nullptr;
+
+			Path normalized;
+			std::error_code normalizeEc;
+			if (!Normalize(pathNode->AsString(""), normalized, normalizeEc))
+			{
+				ec = std::make_error_code(std::errc::invalid_argument);
+				return nullptr;
+			}
+
+			const std::string offsetText = offsetNode->AsString("");
+			const std::string sizeText = sizeNode->AsString("");
+			const std::string crcText = crcNode->AsString("");
+			char* offsetEnd = nullptr;
+			char* sizeEnd = nullptr;
+			char* crcEnd = nullptr;
+			const uint64_t offset = offsetText.empty() ? UINT64_MAX :
+				std::strtoull(offsetText.c_str(), &offsetEnd, 10);
+			const uint64_t size = sizeText.empty() ? UINT64_MAX :
+				std::strtoull(sizeText.c_str(), &sizeEnd, 10);
+			const uint64_t crc64 = crcText.empty() ? UINT64_MAX :
+				std::strtoull(crcText.c_str(), &crcEnd, 10);
+			if (!offsetEnd || *offsetEnd != '\0' || !sizeEnd || *sizeEnd != '\0' ||
+				!crcEnd || *crcEnd != '\0' || crc64 > UINT32_MAX ||
+				offset < dataStart || offset > fileSize || size > fileSize - offset)
+			{
+				ec = std::make_error_code(std::errc::invalid_argument);
+				return nullptr;
+			}
+			Entry entry;
+			entry.offset = offset;
+			entry.size = size;
+			entry.crc32 = static_cast<uint32_t>(crc64);
+			entry.hash = hashNode->AsString("");
+			if (!entries.emplace(std::move(normalized), std::move(entry)).second)
+			{
+				ec = std::make_error_code(std::errc::invalid_argument);
+				return nullptr;
+			}
 		}
 
 		return std::shared_ptr<PackageProvider>(new PackageProvider(pak, std::move(entries)));
@@ -282,22 +361,15 @@ namespace World::Vfs
 
 		std::sort(items.begin(), items.end(),
 			[](const BuildItem& a, const BuildItem& b) { return a.path < b.path; });
-
-		uint64_t indexSize = 0;
-		for (const BuildItem& item : items)
-			indexSize += 4 + item.path.size() + 16;
-
-		const uint64_t dataStart = kHeaderSize + indexSize;
-		uint64_t cursor = Align4(dataStart);
 		for (BuildItem& item : items)
-		{
-			item.offset = cursor;
-			cursor = Align4(cursor + item.size);
-		}
+			if (!FingerprintItem(item, ec))
+				return false;
+
+		const uint64_t jsonLen = LayoutIndex(items);
+		const std::string indexText = SerializeIndex(items);
 
 		std::filesystem::path tempPath = outPak;
 		tempPath += ".tmp";
-
 		{
 			std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
 			if (!out.is_open())
@@ -309,42 +381,15 @@ namespace World::Vfs
 			std::array<uint8_t, kHeaderSize> header{};
 			WriteU32(header.data() + 0, kMagic);
 			WriteU32(header.data() + 4, kVersion);
-			WriteU64(header.data() + 8, kHeaderSize);
-			WriteU64(header.data() + 16, indexSize);
-			WriteU64(header.data() + 24, items.size());
-			// header[32..35] crc 暂为 0,header[36..39] pad 为 0。
-
-			Crc32 crc;
+			WriteU32(header.data() + 8, static_cast<uint32_t>(jsonLen));
+			WriteU32(header.data() + 12,
+				Crc32::Compute(indexText.data(), indexText.size()));
 			out.write(reinterpret_cast<const char*>(header.data()), static_cast<std::streamsize>(header.size()));
-			crc.Update(header.data(), header.size());
+			out.write(indexText.data(), static_cast<std::streamsize>(indexText.size()));
 
-			std::vector<uint8_t> index(static_cast<size_t>(indexSize));
-			size_t indexCursor = 0;
-			for (const BuildItem& item : items)
-			{
-				WriteU32(index.data() + indexCursor, static_cast<uint32_t>(item.path.size()));
-				indexCursor += 4;
-				std::memcpy(index.data() + indexCursor, item.path.data(), item.path.size());
-				indexCursor += item.path.size();
-				WriteU64(index.data() + indexCursor, item.offset);
-				WriteU64(index.data() + indexCursor + 8, item.size);
-				indexCursor += 16;
-			}
-			out.write(reinterpret_cast<const char*>(index.data()), static_cast<std::streamsize>(index.size()));
-			crc.Update(index.data(), index.size());
-
-			uint64_t written = kHeaderSize + indexSize;
 			std::vector<char> buffer(4 * 1024 * 1024);
 			for (const BuildItem& item : items)
 			{
-				while (written < item.offset)
-				{
-					const char zero = '\0';
-					out.put(zero);
-					crc.Update(&zero, 1);
-					++written;
-				}
-
 				std::ifstream in(item.source, std::ios::binary);
 				if (!in.is_open())
 				{
@@ -354,7 +399,6 @@ namespace World::Vfs
 					ec = std::make_error_code(std::errc::io_error);
 					return false;
 				}
-
 				uint64_t remaining = item.size;
 				while (remaining > 0)
 				{
@@ -378,17 +422,9 @@ namespace World::Vfs
 						ec = std::make_error_code(std::errc::io_error);
 						return false;
 					}
-					crc.Update(buffer.data(), static_cast<size_t>(chunk));
 					remaining -= static_cast<uint64_t>(chunk);
-					written += static_cast<uint64_t>(chunk);
 				}
 			}
-
-			const uint32_t finalCrc = crc.Final();
-			uint8_t crcBytes[4];
-			WriteU32(crcBytes, finalCrc);
-			out.seekp(32, std::ios::beg);
-			out.write(reinterpret_cast<const char*>(crcBytes), 4);
 			out.flush();
 			if (!out)
 			{
@@ -400,7 +436,7 @@ namespace World::Vfs
 			}
 		}
 
-		// 先写临时文件再替换,失败不残留半成品;目标已存在时删除后重试。
+		// 先写临时文件再替换;目标已存在时删除后重试。
 		std::error_code renameEc;
 		std::filesystem::rename(tempPath, outPak, renameEc);
 		if (renameEc)
@@ -452,6 +488,14 @@ namespace World::Vfs
 				ec = std::make_error_code(std::errc::io_error);
 				return false;
 			}
+		}
+
+		// 每条目 CRC 校验:内容被篡改时仅该条目失败。
+		if (Crc32::Compute(out.data(), out.size()) != it->second.crc32)
+		{
+			out.clear();
+			ec = std::make_error_code(std::errc::invalid_argument);
+			return false;
 		}
 		return true;
 	}

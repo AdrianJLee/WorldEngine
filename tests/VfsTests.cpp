@@ -1,6 +1,7 @@
 #include "World/Core/Vfs/Vfs.h"
 #include "World/Core/Vfs/DirectoryProvider.h"
 #include "World/Core/Vfs/PackageProvider.h"
+#include "World/Core/Vfs/Crc32.h"
 
 #include <chrono>
 #include <cstdint>
@@ -24,8 +25,7 @@ namespace
 	}
 #define CHECK(expression) Check(static_cast<bool>(expression), #expression, __LINE__)
 
-	constexpr uint32_t kTestMagic = 0x4B325057u;        // "WP2K"
-	constexpr uint32_t kLegacyTestMagic = 0x4B415057u;  // "WPAK"
+	constexpr uint32_t kTestMagic = 0x4B415057u;        // "WPAK"
 
 	struct TempDir
 	{
@@ -98,52 +98,42 @@ namespace
 		out[pos + 3] = static_cast<uint8_t>((value >> 24) & 0xFFu);
 	}
 
-	void PutU64(std::vector<uint8_t>& out, size_t pos, uint64_t value)
-	{
-		for (int i = 0; i < 8; ++i)
-			out[pos + i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFFu);
-	}
-
-	void AppendU32(std::vector<uint8_t>& out, uint32_t value)
-	{
-		const size_t pos = out.size();
-		out.resize(pos + 4);
-		PutU32(out, pos, value);
-	}
-
-	void AppendU64(std::vector<uint8_t>& out, uint64_t value)
-	{
-		const size_t pos = out.size();
-		out.resize(pos + 8);
-		PutU64(out, pos, value);
-	}
-
 	using SyntheticEntry = std::pair<std::string, std::pair<uint64_t, uint64_t>>;
 
-	// 写一个只含 header+index 的最小包(不含 data、crc 恒为 0,校验在解析之后)。
+	// 写一个只含 header+JSON 索引的最小包(不含 data,offset/size 由调用方指定)。
 	void WriteSyntheticPak(const std::filesystem::path& pak,
-		uint32_t magic,
+		uint32_t version,
 		const std::vector<SyntheticEntry>& entries)
 	{
-		size_t indexSize = 0;
-		for (const SyntheticEntry& entry : entries)
-			indexSize += 4 + entry.first.size() + 16;
-
-		std::vector<uint8_t> bytes(40, 0);
-		PutU32(bytes, 0, magic);
-		PutU32(bytes, 4, 2);
-		PutU64(bytes, 8, 40);
-		PutU64(bytes, 16, indexSize);
-		PutU64(bytes, 24, entries.size());
-
-		for (const SyntheticEntry& entry : entries)
+		std::ostringstream json;
+		json << "{\"version\":2,\"entries\":[";
+		for (size_t i = 0; i < entries.size(); ++i)
 		{
-			AppendU32(bytes, static_cast<uint32_t>(entry.first.size()));
-			bytes.insert(bytes.end(), entry.first.begin(), entry.first.end());
-			AppendU64(bytes, entry.second.first);
-			AppendU64(bytes, entry.second.second);
+			if (i)
+				json << ",";
+			json << "{\"path\":\"" << entries[i].first << "\",\"hash\":\"0000000000000000\","
+				<< "\"offset\":\"" << entries[i].second.first
+				<< "\",\"size\":\"" << entries[i].second.second
+				<< "\",\"crc32\":\"0\"}";
 		}
+		json << "]}";
+		const std::string text = json.str();
+
+		std::vector<uint8_t> bytes(16, 0);
+		PutU32(bytes, 0, kTestMagic);
+		PutU32(bytes, 4, version);
+		PutU32(bytes, 8, static_cast<uint32_t>(text.size()));
+		PutU32(bytes, 12, Crc32::Compute(text.data(), text.size()));
+		bytes.insert(bytes.end(), text.begin(), text.end());
 		WriteBytes(pak, bytes);
+	}
+
+	uint32_t ReadJsonLen(const std::vector<uint8_t>& pak)
+	{
+		return static_cast<uint32_t>(pak[8]) |
+		       (static_cast<uint32_t>(pak[9]) << 8) |
+		       (static_cast<uint32_t>(pak[10]) << 16) |
+		       (static_cast<uint32_t>(pak[11]) << 24);
 	}
 
 	std::string AsString(const std::vector<uint8_t>& bytes)
@@ -318,7 +308,7 @@ int main()
 			}
 		}
 
-		// 5. 篡改字节后 Open 拒绝
+		// 5. 篡改 blob 一个字节 → 挂载成功、该条目读取 CRC 失败;索引被篡改 → 挂载失败
 		{
 			std::error_code ec;
 			const std::filesystem::path srcDir = temp.path / "tampersrc";
@@ -327,10 +317,22 @@ int main()
 			CHECK(PackageProvider::BuildFromDirectory(srcDir, pakPath, ec));
 
 			std::vector<uint8_t> bytes = ReadBytes(pakPath);
-			bytes[bytes.size() / 2] ^= 0xFFu;
+			bytes.back() ^= 0xFFu;   // 最后一个 blob 的最后一个字节
 			WriteBytes(pakPath, bytes);
 
-			CHECK(PackageProvider::Open(pakPath, ec) == nullptr);
+			std::shared_ptr<PackageProvider> provider = PackageProvider::Open(pakPath, ec);
+			CHECK(provider != nullptr);   // 索引完好,挂载成功
+			std::vector<uint8_t> data;
+			CHECK(!provider->Open("x.bin", data, ec));
+			CHECK(static_cast<bool>(ec));
+
+			const std::filesystem::path pakPath2 = temp.path / "tamper-index.wpak";
+			CHECK(PackageProvider::BuildFromDirectory(srcDir, pakPath2, ec));
+			bytes = ReadBytes(pakPath2);
+			const uint32_t jsonLen = ReadJsonLen(bytes);
+			bytes[16 + jsonLen / 2] ^= 0xFFu;   // 索引 JSON 内部
+			WriteBytes(pakPath2, bytes);
+			CHECK(PackageProvider::Open(pakPath2, ec) == nullptr);
 			CHECK(static_cast<bool>(ec));
 		}
 
@@ -338,23 +340,23 @@ int main()
 		{
 			std::error_code ec;
 			const std::filesystem::path badBounds = temp.path / "bad-bounds.wpak";
-			WriteSyntheticPak(badBounds, kTestMagic, { { "a.txt", { 0, 1 } } });  // offset < dataStart
+			WriteSyntheticPak(badBounds, 2, { { "a.txt", { 0, 1 } } });  // offset < dataStart
 			CHECK(PackageProvider::Open(badBounds, ec) == nullptr);
 			CHECK(static_cast<bool>(ec));
 
 			const std::filesystem::path badSize = temp.path / "bad-size.wpak";
-			// offset == 文件末尾(dataStart),size 越界。
-			WriteSyntheticPak(badSize, kTestMagic, { { "a.txt", { 40 + 4 + 5 + 16, 1 } } });
+			// offset 远超文件大小,size 亦越界。
+			WriteSyntheticPak(badSize, 2, { { "a.txt", { 0xFFFFFFFFFFFFFFFFull, 1 } } });
 			CHECK(PackageProvider::Open(badSize, ec) == nullptr);
 			CHECK(static_cast<bool>(ec));
 
 			const std::filesystem::path badDotdot = temp.path / "bad-dotdot.wpak";
-			WriteSyntheticPak(badDotdot, kTestMagic, { { "../evil", { 100, 1 } } });
+			WriteSyntheticPak(badDotdot, 2, { { "../evil", { 100, 1 } } });
 			CHECK(PackageProvider::Open(badDotdot, ec) == nullptr);
 			CHECK(static_cast<bool>(ec));
 
 			const std::filesystem::path legacy = temp.path / "legacy.wpak";
-			WriteSyntheticPak(legacy, kLegacyTestMagic, {});
+			WriteSyntheticPak(legacy, 1, {});   // v1 旧格式
 			CHECK(PackageProvider::Open(legacy, ec) == nullptr);
 			CHECK(ec == std::errc::not_supported);
 
