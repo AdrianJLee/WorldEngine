@@ -303,6 +303,14 @@ namespace World
 			auto data = VFS::ReadFile(filepath);
 			if (data.empty())
 			{
+				// VFS 2.0 回退(目录/包 provider):旧 VFS 未命中时经 WorldContext 挂载栈解析。
+				// 旧 VFS 在 W3 移除后,此处将成为唯一解析路径。
+				std::error_code vfsEc;
+				if (!m_Scene->GetContext().Vfs().Read(filepath, data, vfsEc))
+					data.clear();
+			}
+			if (data.empty())
+			{
 				WLD_CORE_ERROR("Could not load file '{0}' from disk or VFS", filepath);
 				m_LastError = "Could not load file '" + filepath + "' from disk or VFS";
 				return false;
