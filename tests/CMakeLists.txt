@@ -130,7 +130,28 @@ set_tests_properties(World.RhiContract PROPERTIES
     TIMEOUT 90
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests)
+# Vulkan 设备创建(volk 动态加载驱动;无驱动环境优雅跳过)。
+add_executable(WorldVulkanDeviceTests VulkanDeviceTests.cpp)
+target_link_libraries(WorldVulkanDeviceTests PRIVATE World)
+target_compile_features(WorldVulkanDeviceTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldVulkanDeviceTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldVulkanDeviceTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldVulkanDeviceTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.VulkanDevice COMMAND WorldVulkanDeviceTests)
+set_tests_properties(World.VulkanDevice PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
+
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests)
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

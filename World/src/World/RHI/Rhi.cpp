@@ -2,6 +2,7 @@
 #include "World/RHI/Rhi.h"
 
 #include "World/RHI/OpenGL/OpenGLDevice.h"
+#include "World/RHI/Vulkan/VulkanDevice.h"
 
 #include "World/Core/Log.h"
 
@@ -26,6 +27,10 @@ namespace World::Rhi
 
 	Handle<Device> CreateDevice(Backend backend, const DeviceDesc& desc, std::string* error)
 	{
+		if (error)
+			error->clear();
+		if (backend == Backend::Vulkan)
+			return Vulkan::VulkanDevice::Create(desc, error);
 		const Backend chosen = ResolveBackend(backend, nullptr);
 		if (chosen == Backend::OpenGL)
 		{
