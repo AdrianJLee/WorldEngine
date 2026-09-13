@@ -1,6 +1,7 @@
 ﻿#include "RuntimeLayer.h"
 #include "GameHud.h"
 #include "World/Core/Asset/ProjectManifest.h"
+#include "World/Renderer/Renderer.h"
 #include "World/ImGui/ImGuiLayer.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
@@ -109,14 +110,17 @@ namespace World
 		Ref<Scene> tempScene = CreateRef<Scene>(Application::Get().GetContext());
 		SceneSerializer serializer(tempScene);
 		// 启动场景:项目 manifest 的 start_scene;无 manifest 时回退默认。
-		std::string scenePath = "scenes/PhysicalTest.wd";
+		std::string scenePath = "scenes/test.wd";
 		std::filesystem::path manifestPath;
 		if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
 		{
 			std::string error;
 			World::Asset::ProjectManifest manifest;
 			if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+			{
 				scenePath = manifest.StartScene;
+				World::Renderer::SetRequestedRenderer(manifest.Renderer);
+			}
 		}
 		if (serializer.Deserialize(scenePath))
 		{
