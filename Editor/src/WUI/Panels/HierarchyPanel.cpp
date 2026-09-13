@@ -3,7 +3,6 @@
 
 #include "World/Core/KeyCodes.h"
 #include "World/Scene/Components.h"
-#include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
 
 #include <algorithm>
@@ -19,72 +18,39 @@ namespace World
 			Label(ctx, { rect.X + 8, rect.Y + 8 }, "(no scene)", theme.TextMuted, 14.0f);
 			return;
 		}
-
 		std::vector<Entity> entities;
 		for (auto handle : scene->GetRegistry().view<UUIDComponent>())
 			entities.push_back(Entity(scene.get(), handle));
 		std::sort(entities.begin(), entities.end(), [](Entity a, Entity b)
 			{
-				return a.GetComponent<TagComponent>().Tag < b.GetComponent<TagComponent>().Tag;
+				const std::string& at = a.GetComponent<TagComponent>().Tag;
+				const std::string& bt = b.GetComponent<TagComponent>().Tag;
+				return at < bt;
 			});
 
-		std::string orderKey;
-		for (Entity entity : entities)
-		{
-			orderKey += entity.GetComponent<TagComponent>().Tag;
-			orderKey += '\n';
-		}
-
-		if (!m_Root)
-		{
-			m_Root = std::make_shared<Wui::WuiBox>();
-			m_Root->Direction = Wui::WuiDirection::Column;
-			m_Scroll = std::make_shared<Wui::WuiScrollArea>();
-			m_Root->Add(m_Scroll, { 0, 1e30f, 0, 1e30f, 1 });
-		}
-
-		// 实体集合/排序变化时重建行;否则只更新文本与选中态。
-		if (m_RowEntities.size() != entities.size() || orderKey != m_LastOrderKey)
-		{
-			m_LastOrderKey = std::move(orderKey);
-			m_Rows.clear();
-			m_RowEntities = entities;
-			auto content = std::make_shared<Wui::WuiBox>();
-			for (Entity entity : entities)
-			{
-				auto row = std::make_shared<Wui::WuiListRow>();
-				row->Text = entity.GetComponent<TagComponent>().Tag.empty() ? "Empty Entity" : entity.GetComponent<TagComponent>().Tag;
-				row->OnClick = [&host, entity] { host.SetSelectedEntity(entity); };
-				content->Add(row, { 0, 1e30f, 0, 22, 0 });
-				m_Rows.push_back(row);
-			}
-			m_Scroll->Child = content;
-			m_Root->Invalidate();
-		}
-		else
-		{
-			for (size_t i = 0; i < m_Rows.size(); ++i)
-				m_Rows[i]->Selected = host.GetSelectedEntity() == m_RowEntities[i];
-		}
-		m_Scroll->ContentHeight = entities.size() * 22.0f + 8.0f;
-
-		Wui::LayoutWidgetTree(m_Root, { rect.X + 4, rect.Y + 4, rect.W - 8, rect.H - 8 });
-		Wui::WuiPaintContext paint(ctx);
-		m_Root->Paint(paint);
-
-		// ---- 右键菜单(瞬态 overlay,不参与布局)----
+		float scrollY = 0;
+		BeginScrollArea(ctx, rect, entities.size() * 22.0f + 8.0f, scrollY, theme);
 		bool itemRightClicked = false;
-		for (size_t i = 0; i < m_Rows.size(); ++i)
+		for (size_t i = 0; i < entities.size(); ++i)
 		{
-			if (ctx.Input().MouseClicked[1] && ctx.IsHovered(m_Rows[i]->Rect()))
+			const Wui::WuiRect row { rect.X + 4, rect.Y + 4 + i * 22.0f - scrollY, rect.W - 8, 22 };
+			const bool selected = host.GetSelectedEntity() == entities[i];
+			if (selected || ctx.IsHovered(row))
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, selected ? theme.Accent : theme.ButtonHover, 2.0f });
+			const std::string tag = entities[i].GetComponent<TagComponent>().Tag;
+			Label(ctx, { row.X + 6, row.Y + 3 }, tag.empty() ? "Empty Entity" : tag, theme.Text, 14.0f);
+			if (ctx.IsClicked(row))
+				host.SetSelectedEntity(entities[i]);
+			if (ctx.Input().MouseClicked[1] && ctx.IsHovered(row))
 			{
 				itemRightClicked = true;
-				host.SetSelectedEntity(m_RowEntities[i]);
-				m_Context = m_RowEntities[i];
+				host.SetSelectedEntity(entities[i]);
+				m_Context = entities[i];
 				m_MenuPos = ctx.Input().MousePos;
 				ctx.OpenPopup(Wui::HashId("hierarchy.context"));
 			}
 		}
+		EndScrollArea(ctx);
 
 		const Wui::WuiId popup = Wui::HashId("hierarchy.context");
 		if (ctx.IsPopupOpen(popup) && m_Context.IsValid())
@@ -110,6 +76,7 @@ namespace World
 		}
 		else
 		{
+			// 菜单关闭后清空目标,避免残留;残留的不可见弹窗一并收起。
 			m_Context = Entity();
 			if (ctx.IsPopupOpen(popup))
 				ctx.ClosePopup(popup);

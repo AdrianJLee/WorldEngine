@@ -2,9 +2,6 @@
 
 #include "ViewportHost.h"
 #include "World/Scene/Components.h"
-#include "World/WUI/WuiWidget.h"
-
-#include <memory>
 
 namespace World
 {
@@ -19,9 +16,6 @@ namespace World
 
 	private:
 		ViewportHost& m_Host;
-		std::shared_ptr<Wui::WuiBox> m_Root;
-		std::shared_ptr<Wui::WuiImage> m_SceneImage;
-		std::vector<std::shared_ptr<Wui::WuiImageButton>> m_Tools;
 		bool m_GizmoActive = false;
 		TransformComponent m_GizmoBefore;
 	};

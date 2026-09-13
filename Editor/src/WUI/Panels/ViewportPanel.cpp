@@ -2,7 +2,7 @@
 #include "ViewportPanel.h"
 
 #include "World/WUI/WuiGizmo.h"
-#include "World/WUI/WuiWidget.h"
+#include "World/WUI/WuiWidgets.h"
 
 namespace World
 {
@@ -10,60 +10,12 @@ namespace World
 	{
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		m_Host.SetViewportRect(rect);
-
-		if (!m_Root)
-		{
-			m_Root = std::make_shared<Wui::WuiBox>();
-			m_Root->Direction = Wui::WuiDirection::Column;
-			m_SceneImage = std::make_shared<Wui::WuiImage>();
-			m_SceneImage->Uv = { 0, 1, 1, -1 };
-			m_Root->Add(m_SceneImage, { 0, 1e30f, 0, 1e30f, 1 });
-
-			auto toolbar = std::make_shared<Wui::WuiBox>();
-			toolbar->Direction = Wui::WuiDirection::Row;
-			toolbar->Gap = 8;
-			toolbar->AlignMain = Wui::WuiAlign::Center;
-			toolbar->AlignCross = Wui::WuiAlign::Center;
-			for (int i = 0; i < 3; ++i)
-			{
-				auto button = std::make_shared<Wui::WuiImageButton>();
-				button->Uv = { 0, 1, 1, -1 };
-				toolbar->Add(button, { 28, 28, 28, 28, 0 });
-				m_Tools.push_back(button);
-			}
-			m_Root->Add(toolbar, { 0, 1e30f, 0, 44, 0 });
-		}
-
-		const bool play = m_Host.IsPlaying();
-		const bool simulate = m_Host.IsSimulating();
-		const bool paused = m_Host.IsPaused();
-		const int icons[3] = {
-			play ? 1 : 0,
-			simulate ? 5 : 4,
-			paused ? (simulate ? 7 : 3) : (simulate ? 6 : 2),
-		};
-		const bool dim[3] = { simulate, play, !play && !simulate };
-		m_Tools[0]->OnClick = [this] { m_Host.TogglePlay(); };
-		m_Tools[1]->OnClick = [this] { m_Host.ToggleSimulate(); };
-		m_Tools[2]->OnClick = [this] { m_Host.TogglePause(); };
-		for (int i = 0; i < 3; ++i)
-		{
-			m_Tools[i]->TextureId = m_Host.GetIconId(icons[i]);
-			m_Tools[i]->Dim = dim[i];
-		}
-		m_SceneImage->TextureId = m_Host.GetSceneTextureId();
-
-		// 面板底色与工具栏底板:纯绘制,不进布局树。
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, { 0.06f, 0.06f, 0.07f, 1 }, 0.0f });
-		const float panelWidth = 3 * 28.0f + 2 * 8.0f + 16.0f;
-		const Wui::WuiRect bar { rect.X + (rect.W - panelWidth) * 0.5f, rect.Y + 14, panelWidth, 44 };
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, bar, { 0.12f, 0.12f, 0.12f, 0.85f }, 6.0f });
+		if (m_Host.HasRenderedScene() && m_Host.GetSceneTextureId())
+		{
+			Image(ctx, rect, m_Host.GetSceneTextureId(), { 0, 1, 1, -1 }, theme);
+		}
 
-		Wui::LayoutWidgetTree(m_Root, rect);
-		Wui::WuiPaintContext paint(ctx);
-		m_Root->Paint(paint);
-
-		const Wui::WuiRect sceneRect = m_SceneImage->Rect();
 		const bool hovered = ctx.IsHovered(rect);
 		if (ctx.IsClicked(rect))
 			ctx.SetFocus(Wui::HashId("viewport"));
@@ -71,9 +23,34 @@ namespace World
 		glm::vec2 bounds[2] = { { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } };
 		m_Host.SetViewportState(focused, hovered, { rect.W, rect.H }, bounds);
 
-		if (ctx.IsClicked(sceneRect) && !m_GizmoActive)
+		// 悬浮工具栏:Play / Simulate / Pause
+		const float panelWidth = 3 * 28.0f + 2 * 8.0f + 16.0f;
+		const Wui::WuiRect bar { rect.X + (rect.W - panelWidth) * 0.5f, rect.Y + 14, panelWidth, 44 };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, bar, { 0.12f, 0.12f, 0.12f, 0.85f }, 6.0f });
+		const bool play = m_Host.IsPlaying();
+		const bool simulate = m_Host.IsSimulating();
+		const bool paused = m_Host.IsPaused();
+		struct Tool { int Icon; std::function<void()> Action; bool Dim; };
+		const Tool tools[] = {
+			{ play ? 1 : 0, [this] { m_Host.TogglePlay(); }, simulate },
+			{ simulate ? 5 : 4, [this] { m_Host.ToggleSimulate(); }, play },
+			{ paused ? (simulate ? 7 : 3) : (simulate ? 6 : 2), [this] { m_Host.TogglePause(); }, !play && !simulate },
+		};
+		for (int i = 0; i < 3; ++i)
 		{
-			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
+			const Wui::WuiRect button { bar.X + 8 + i * 36, bar.Y + 8, 28, 28 };
+			const uint64_t iconId = m_Host.GetIconId(tools[i].Icon);
+			if (iconId)
+			{
+				Image(ctx, button, iconId, { 0, 1, 1, -1 }, theme);
+				if (!tools[i].Dim && ctx.IsClicked(button))
+					tools[i].Action();
+			}
+		}
+
+		if (ctx.IsClicked(rect) && !m_GizmoActive)
+		{
+			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { rect.X, rect.Y };
 			m_Host.SetSelectedEntity(m_Host.PickEntityAt(local));
 		}
 
@@ -84,7 +61,7 @@ namespace World
 			auto& transform = selected.GetComponent<TransformComponent>();
 			const TransformComponent before = transform;
 			const bool nowUsing = Wui::ManipulateGizmo(m_Host.GetEditorCamera(),
-				m_Host.GetGizmoOperation(), transform, sceneRect, ctx);
+				m_Host.GetGizmoOperation(), transform, rect, ctx);
 			if (!m_GizmoActive && nowUsing)
 			{
 				m_GizmoActive = true;
@@ -98,6 +75,5 @@ namespace World
 					m_Host.MarkDocumentDirty();
 			}
 		}
-		(void)theme;
 	}
 }
