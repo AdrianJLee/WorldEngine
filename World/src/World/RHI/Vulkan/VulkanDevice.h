@@ -38,6 +38,7 @@ namespace World::Rhi::Vulkan
 		static Handle<VulkanDevice> Create(const DeviceDesc& desc, std::string* error);
 
 		VkDevice GetNativeDevice() const { return m_Device; }
+		VkInstance GetInstance() const { return m_Instance; }
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
 		VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsFamily; }

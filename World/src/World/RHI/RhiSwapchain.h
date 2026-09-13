@@ -4,6 +4,8 @@
 
 namespace World::Rhi
 {
+	class Semaphore;
+
 	enum class PresentMode : uint8_t { Immediate = 0, Mailbox, Fifo };
 	enum class ColorSpace : uint8_t { SrgbNonlinear = 0, ExtendedSrgbLinear };
 

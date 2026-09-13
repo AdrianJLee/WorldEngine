@@ -1,8 +1,10 @@
 #include "wldpch.h"
+#define VK_USE_PLATFORM_WIN32_KHR
 #include "World/RHI/Vulkan/VulkanDevice.h"
 #include "World/RHI/Vulkan/VulkanCommand.h"
 #include "World/RHI/Vulkan/VulkanPipeline.h"
 #include "World/RHI/Vulkan/VulkanResources.h"
+#include "World/RHI/Vulkan/VulkanSwapchain.h"
 #include "World/Core/Log.h"
 
 #include <cstring>
@@ -87,6 +89,9 @@ namespace World::Rhi::Vulkan
 		VkInstanceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		createInfo.pApplicationInfo = &app;
+		static const char* instanceExtensions[] = { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME };
+		createInfo.enabledExtensionCount = 2;
+		createInfo.ppEnabledExtensionNames = instanceExtensions;
 		if (enableValidation)
 		{
 			static const char* layer = "VK_LAYER_KHRONOS_validation";
@@ -216,7 +221,7 @@ namespace World::Rhi::Vulkan
 
 	Handle<CommandQueue> VulkanDevice::CreateQueue(const std::string&) { return CreateRef<VulkanCommandQueue>(*this); }
 	Handle<CommandBuffer> VulkanDevice::CreateCommandBuffer(const std::string&) { return CreateRef<VulkanCommandBuffer>(*this); }
-	Handle<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc&) { NOT_IMPLEMENTED(); return nullptr; }
+	Handle<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc& desc) { return CreateRef<VulkanSwapchain>(*this, desc); }
 	Handle<RenderPass> VulkanDevice::CreateRenderPass(const RenderPassDesc& desc) { return CreateRef<VulkanRenderPass>(*this, desc); }
 	Handle<Framebuffer> VulkanDevice::CreateFramebuffer(const FramebufferDesc& desc) { return CreateRef<VulkanFramebuffer>(*this, desc); }
 	Handle<Pipeline> VulkanDevice::CreatePipeline(const PipelineDesc& desc) { return CreateRef<VulkanPipeline>(*this, desc); }
