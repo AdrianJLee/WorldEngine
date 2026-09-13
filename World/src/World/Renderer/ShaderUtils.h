@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "World/Core/Export.h"
 #include <string>
 #include <vector>
 
@@ -20,8 +21,8 @@ namespace World
 		// 从文件中读取二进制数据
 		static std::vector<char> ReadBinaryFile(const std::string& filename);
 
-		static const std::string dxcAbsPath;
-		static const std::string spirvCrossAbsPath;
-		static const std::string outPutAbsPath;
+		static WLD_API const std::string dxcAbsPath;
+		static WLD_API const std::string spirvCrossAbsPath;
+		static WLD_API const std::string outPutAbsPath;
 	};
 }

@@ -47,11 +47,7 @@ namespace World
 	class LuaReflectionRegistry
 	{
 	public:
-		static std::vector<LuaTypeReflection>& GetTable()
-		{
-			static std::vector<LuaTypeReflection> s_Table;
-			return s_Table;
-		}
+		static std::vector<LuaTypeReflection>& GetTable();
 		static bool Register(const LuaTypeReflection& desc)
 		{
 			auto& table = GetTable();

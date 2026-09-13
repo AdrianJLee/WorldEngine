@@ -32,3 +32,10 @@ target_link_libraries(Editor PRIVATE
     World
 )
 
+add_custom_command(TARGET Editor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:World>"
+        "$<TARGET_FILE_DIR:Editor>"
+    COMMENT "Copying WorldRuntime.dll next to Editor.exe"
+    VERBATIM
+)

@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "World/Core/Core.h"
+#include "World/Core/Export.h"
 
 #include "spdlog/spdlog.h"
 #include "spdlog/fmt/ostr.h"
@@ -14,8 +15,8 @@ namespace World
 		inline static std::shared_ptr<spdlog::logger>& GetCoreLogger() { return s_CoreLogger; }
 		inline static std::shared_ptr<spdlog::logger>& GetClientLogger() { return s_ClientLogger; }
 	private:
-		static std::shared_ptr<spdlog::logger> s_CoreLogger;
-		static std::shared_ptr<spdlog::logger> s_ClientLogger;
+		static WLD_API std::shared_ptr<spdlog::logger> s_CoreLogger;
+		static WLD_API std::shared_ptr<spdlog::logger> s_ClientLogger;
 	};
 }
 

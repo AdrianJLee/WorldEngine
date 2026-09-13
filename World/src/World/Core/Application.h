@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "World/Core/Export.h"
 #include "World/Core/Window.h"
 #include "World/Core/WorldContext.h"
 #include "World/Core/LayerStack.h"
@@ -53,7 +54,7 @@ namespace World
 
 		LayerStack m_LayerStack;
 
-		static Application* s_Instance;
+		static WLD_API Application* s_Instance;
 
 
 	};

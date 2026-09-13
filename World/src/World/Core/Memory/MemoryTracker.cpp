@@ -3,6 +3,12 @@
 #include "Memory.h"
 namespace World
 {
+	MemoryTracker& MemoryTracker::Get()
+	{
+		static MemoryTracker instance;
+		return instance;
+	}
+
 	void MemoryTracker::Register(Allocator* allocator, const char* name, AllocatorType type, bool isEphemeral)
 	{
 		std::lock_guard<std::mutex> lock(m_Mutex);

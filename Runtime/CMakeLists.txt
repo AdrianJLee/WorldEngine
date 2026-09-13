@@ -33,3 +33,10 @@ target_link_libraries(Runtime PRIVATE
     World
 )
 
+add_custom_command(TARGET Runtime POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:World>"
+        "$<TARGET_FILE_DIR:Runtime>"
+    COMMENT "Copying WorldRuntime.dll next to Runtime.exe"
+    VERBATIM
+)

@@ -82,11 +82,7 @@ namespace World
 			m_OutputStream.flush();
 		}
 
-		static Instrumentor& Get()
-		{
-			static Instrumentor instance;
-			return instance;
-		}
+		static Instrumentor& Get();
 	};
 
 	class InstrumentationTimer

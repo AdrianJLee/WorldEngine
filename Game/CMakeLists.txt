@@ -11,7 +11,6 @@ if(WIN32)
     )
     if(MSVC)
         target_compile_options(Game PRIVATE "/utf-8")
-        target_link_options(Editor PRIVATE "/WHOLEARCHIVE:World")
     endif()
 endif()
 
@@ -33,4 +32,12 @@ target_sources(Game PRIVATE ${Game_SOURCES})
 # Game 层依然依赖引擎核心
 target_link_libraries(Game PRIVATE 
     World
+)
+
+add_custom_command(TARGET Game POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:World>"
+        "$<TARGET_FILE_DIR:Game>"
+    COMMENT "Copying WorldRuntime.dll next to Game.dll"
+    VERBATIM
 )

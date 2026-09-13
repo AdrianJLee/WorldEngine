@@ -11,6 +11,12 @@
 
 namespace World
 {
+	std::vector<LuaTypeReflection>& LuaReflectionRegistry::GetTable()
+	{
+		static std::vector<LuaTypeReflection> s_Table;
+		return s_Table;
+	}
+
 	namespace
 	{
 		sol::state* s_LuaState = nullptr;

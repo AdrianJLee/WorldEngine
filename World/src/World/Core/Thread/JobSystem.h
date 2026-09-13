@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "Thread.h"
+#include "World/Core/Export.h"
 #include "World/Core/Memory/StackAllocator.h"
 namespace World
 {
@@ -27,11 +28,11 @@ namespace World
 		static void WorkerLoop();
 
 	private:
-		static inline thread_local uint32_t m_LocalIndex = 0; // 线程局部索引，主线程为最后一个
-		static inline std::vector<std::thread> m_Workers; // 工作线程列表
-		static inline JobQueue* m_Queues = nullptr; // 作业队列
-		static inline uint32_t m_NumWorkers = 0; // 工作线程数量
-		static inline std::atomic<bool> m_Running { true }; // 作业系统运行状态
+		static uint32_t& LocalIndex(); // 线程局部索引，主线程为最后一个
+		static WLD_API std::vector<std::thread> m_Workers; // 工作线程列表
+		static WLD_API JobQueue* m_Queues; // 作业队列
+		static WLD_API uint32_t m_NumWorkers; // 工作线程数量
+		static WLD_API std::atomic<bool> m_Running; // 作业系统运行状态
 
 	public:
 		/**

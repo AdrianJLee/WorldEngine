@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "World/Core/Export.h"
 #include "World/Renderer/RendererAPI.h"
 
 namespace World
@@ -18,7 +19,7 @@ namespace World
 			glm::mat4 ViewProjectionMatrix;
 		};
 
-		static SceneData* m_SceneData;
+		static WLD_API SceneData* m_SceneData;
 	};
 }
 

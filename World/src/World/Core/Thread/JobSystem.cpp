@@ -4,6 +4,17 @@
 #include "World/Core/Memory/LinearAllocator.h"
 namespace World
 {
+	std::vector<std::thread> JobSystem::m_Workers;
+	JobQueue* JobSystem::m_Queues = nullptr;
+	uint32_t JobSystem::m_NumWorkers = 0;
+	std::atomic<bool> JobSystem::m_Running { true };
+
+	uint32_t& JobSystem::LocalIndex()
+	{
+		static thread_local uint32_t index = 0;
+		return index;
+	}
+
 	void JobSystem::Init()
 	{
 		// 获得系统的 CPU 核心数量，减去主线程
@@ -18,12 +29,12 @@ namespace World
 			// Lambda表达式创建线程
 			m_Workers.emplace_back([i]()
 				{
-					m_LocalIndex = i;
+					LocalIndex() = i;
 					WorkerLoop();
 				});
 		}
 		// 主线程使用最后一个队列
-		m_LocalIndex = numThreads;
+		LocalIndex() = numThreads;
 	}
 	void JobSystem::Kick(JobDecl job)
 	{
@@ -31,7 +42,7 @@ namespace World
 		if (job.Counter)
 			job.Counter->Count.fetch_add(1);// 增加计数器，使用原子操作确保线程安全
 
-		m_Queues[m_LocalIndex].Push(job);
+		m_Queues[LocalIndex()].Push(job);
 	}
 	void JobSystem::Wait(JobCounter* counter)
 	{
@@ -84,7 +95,7 @@ namespace World
 
 		// 归位
 		m_NumWorkers = 0;
-		m_LocalIndex = 0;
+		LocalIndex() = 0;
 
 		// 💡 工业级提示：可以在这里加一行日志，确认系统已安全关闭
 		WLD_CORE_INFO("JobSystem shutdown successfully.");
@@ -92,12 +103,12 @@ namespace World
 	bool JobSystem::GetNextJob(JobDecl& outJob)
 	{
 		// 先尝试从本线程队列拿
-		if (m_Queues[m_LocalIndex].Pop(outJob)) return true;
+		if (m_Queues[LocalIndex()].Pop(outJob)) return true;
 
 		// 拿不到就去偷别人的
 		for (uint32_t i = 0; i <= m_NumWorkers; ++i)
 		{
-			if (i == m_LocalIndex) continue;
+			if (i == LocalIndex()) continue;
 			if (m_Queues[i].Steal(outJob)) return true;
 		}
 		return false;

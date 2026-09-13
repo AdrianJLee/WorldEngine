@@ -5,11 +5,7 @@ namespace World
 	class MemoryTracker
 	{
 	public:
-		static MemoryTracker& Get()
-		{
-			static MemoryTracker instance;
-			return instance;
-		}
+		static MemoryTracker& Get();
 
 		// 核心：注册函数现在接受 Allocator 基类
 		void Register(Allocator* allocator, const char* name, AllocatorType type, bool isEphemeral = false);

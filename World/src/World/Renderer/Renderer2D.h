@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "World/Core/Export.h"
 #include "World/Renderer/RendererAPI.h"
 #include "World/Renderer/SubTexture2D.h"
 #include "World/Renderer/EditorCamera.h"
@@ -67,6 +68,6 @@ namespace World
 		static void NextBatch();
 
 	private:
-		static Ref<CommandBuffer> s_CurrentCommandBuffer;
+		static WLD_API Ref<CommandBuffer> s_CurrentCommandBuffer;
 	};
 }

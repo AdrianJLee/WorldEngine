@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "World/Core/Export.h"
 #include "World/Renderer/RendererAPI.h"
 
 #include <glm/glm.hpp>
@@ -48,7 +49,7 @@ namespace World
 		}
 
 	private:
-		static class RendererAPI* s_RendererAPI;
+		static WLD_API class RendererAPI* s_RendererAPI;
 	};
 }
 

@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "World/Core/Export.h"
 #include "World/Core/Layer.h"
 #include "World/Events/KeyEvent.h"
 #include "World/Events/ApplicationEvent.h"
@@ -33,8 +34,8 @@ namespace World
 	private:
 		bool m_BlockEvents = true;
 		float m_Time = 0.0f;
-		static ImFont* s_BoldFont;
-		static ImFont* s_CjkFont;
+		static WLD_API ImFont* s_BoldFont;
+		static WLD_API ImFont* s_CjkFont;
 
 	};
 }

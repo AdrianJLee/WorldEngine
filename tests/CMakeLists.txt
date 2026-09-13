@@ -87,3 +87,13 @@ set_tests_properties(World.Vfs PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests)
+    add_custom_command(TARGET ${_we_test_target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:World>"
+            "$<TARGET_FILE_DIR:${_we_test_target}>"
+        COMMENT "Copying WorldRuntime.dll next to ${_we_test_target}.exe"
+        VERBATIM
+    )
+endforeach()

@@ -7,12 +7,83 @@ add_subdirectory(vendor/yaml)
 add_subdirectory(vendor/spdlog)
 set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
 add_subdirectory(vendor/SPIRV-Cross)
-add_subdirectory(vendor/box2d)
+# Box2D 以 OBJECT 库并入 World（W4）：box2d 是带全局 id 池（b2_worldIdPool）
+# 的 C 库，若以静态库形式被 World 和消费者各链接一份，跨 DLL 的
+# b2Body_IsValid 等接口会查各自模块的 id 池而失效。以 OBJECT 形式并入
+# World 后，符号经 WINDOWS_EXPORT_ALL_SYMBOLS 从 WorldRuntime.dll 导出，
+# 保证进程内只有一份 box2d 状态。
+set(WE_BOX2D_SOURCES
+    vendor/box2d/src/aabb.c
+    vendor/box2d/src/arena_allocator.c
+    vendor/box2d/src/array.c
+    vendor/box2d/src/bitset.c
+    vendor/box2d/src/body.c
+    vendor/box2d/src/broad_phase.c
+    vendor/box2d/src/constraint_graph.c
+    vendor/box2d/src/contact.c
+    vendor/box2d/src/contact_solver.c
+    vendor/box2d/src/core.c
+    vendor/box2d/src/distance.c
+    vendor/box2d/src/distance_joint.c
+    vendor/box2d/src/dynamic_tree.c
+    vendor/box2d/src/geometry.c
+    vendor/box2d/src/hull.c
+    vendor/box2d/src/id_pool.c
+    vendor/box2d/src/island.c
+    vendor/box2d/src/joint.c
+    vendor/box2d/src/manifold.c
+    vendor/box2d/src/math_functions.c
+    vendor/box2d/src/motor_joint.c
+    vendor/box2d/src/mover.c
+    vendor/box2d/src/parallel_for.c
+    vendor/box2d/src/physics_world.c
+    vendor/box2d/src/prismatic_joint.c
+    vendor/box2d/src/revolute_joint.c
+    vendor/box2d/src/scheduler.c
+    vendor/box2d/src/sensor.c
+    vendor/box2d/src/shape.c
+    vendor/box2d/src/solver.c
+    vendor/box2d/src/solver_set.c
+    vendor/box2d/src/table.c
+    vendor/box2d/src/timer.c
+    vendor/box2d/src/types.c
+    vendor/box2d/src/weld_joint.c
+    vendor/box2d/src/wheel_joint.c
+)
+add_library(WorldBox2d OBJECT ${WE_BOX2D_SOURCES})
+target_include_directories(WorldBox2d
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/include"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/src"
+)
+set_target_properties(WorldBox2d PROPERTIES
+    C_STANDARD 17
+    C_STANDARD_REQUIRED YES
+    C_EXTENSIONS YES
+)
+if(MSVC)
+    target_compile_options(WorldBox2d PRIVATE /Wall /wd4820 /wd5045 /wd4061 /wd4711 /wd4710)
+endif()
+
 add_subdirectory(vendor/sol2)
-add_library(World STATIC)
+add_library(World SHARED)
+set_target_properties(World PROPERTIES
+    OUTPUT_NAME "WorldRuntime"
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
 
 # 预编译头
-target_precompile_headers(World PRIVATE src/wldpch.h)
+# W4 说明：World 改为 SHARED + WINDOWS_EXPORT_ALL_SYMBOLS 后，PCH 对象
+# (cmake_pch.cxx.obj / cmake_pch.c.obj) 的 __@@_PchSym_ 符号会让链接器在
+# 生成 exports.def 时误导出并报 LNK2001 "无法解析的外部符号 __"。暂时关闭
+# PCH（wldpch.h 仍作为普通头文件被各源文件 include），后续可用显式 .def
+# 方案恢复。
+# target_precompile_headers(World PRIVATE src/wldpch.h)
+
+# 用 /FI 强制包含替代 PCH：既保持各 TU 的传递头文件语义，又不产生
+# cmake_pch.*.obj 参与导出表生成。
+if(MSVC)
+    target_compile_options(World PRIVATE "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/wldpch.h" "/FS")
+endif()
 # 针对 ImGuizmo 禁用 PCH (类似你的 Premake filter)
 set_source_files_properties(vendor/ImGuizmo/ImGuizmo.cpp PROPERTIES SKIP_PRECOMPILED_HEADERS ON)
 
@@ -94,18 +165,15 @@ file(GLOB_RECURSE WORLD_SOURCES
 )
 
 # 添加源文件到 target
-target_sources(World PRIVATE ${WORLD_SOURCES})
+target_sources(World PRIVATE ${WORLD_SOURCES} $<TARGET_OBJECTS:WorldBox2d>)
 
 # 链接库 (Vulkan::Vulkan 解决了 vulkan-1.lib 路径问题)
-target_link_libraries(World PRIVATE 
+target_link_libraries(World PRIVATE
     glfw    # 对应子目录生成的 target 名
     Glad
     opengl32
     Vulkan::Vulkan
-    box2d
     sol2
-)
-target_link_libraries(World PUBLIC 
     yaml-cpp
     ImGui
     spdlog::spdlog
