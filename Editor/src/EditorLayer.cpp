@@ -1,6 +1,7 @@
 #include "EditorLayer.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Cook/VFS.h"
+#include "World/Core/Vfs/PackageProvider.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/WUI/WuiImGuiBackend.h"
@@ -544,6 +545,13 @@ namespace World
 					fs::copy_file(srcRuntimeExe, publishDir / "Runtime.exe", fs::copy_options::overwrite_existing);
 					WLD_CORE_INFO("Copied Runtime executable from: {0}", srcRuntimeExe.string());
 
+					// W4 起 Runtime 依赖 WorldRuntime.dll,必须与 exe 同目录。
+					fs::path srcRuntimeDll = srcRuntimeOutputDir / "WorldRuntime.dll";
+					if (!fs::is_regular_file(srcRuntimeDll))
+						throw std::runtime_error("WorldRuntime.dll could not be located: " + srcRuntimeDll.string());
+					fs::copy_file(srcRuntimeDll, publishDir / "WorldRuntime.dll", fs::copy_options::overwrite_existing);
+					WLD_CORE_INFO("Copied WorldRuntime.dll from: {0}", srcRuntimeDll.string());
+
 					fs::path srcGameOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "bin/");
 					for (const auto& entry : fs::recursive_directory_iterator(srcGameOutputDir))
 					{
@@ -559,7 +567,10 @@ namespace World
 					fs::create_directories(contentDir);
 					fs::path sourceAssetsDir = std::string(WLD_GAME_DIR) + "assets";
 					fs::path outPakFile = contentDir / "Base.wpak";
-					VFS::BuildPakFromDirectory(sourceAssetsDir, outPakFile);
+					std::error_code pakEc;
+					if (!World::Vfs::PackageProvider::BuildFromDirectory(sourceAssetsDir, outPakFile, pakEc))
+						throw std::runtime_error("Asset package was not created: " +
+							(pakEc ? pakEc.message() : std::string(outPakFile.string())));
 					if (!fs::is_regular_file(outPakFile) || fs::file_size(outPakFile) == 0)
 						throw std::runtime_error("Asset package was not created: " + outPakFile.string());
 					WLD_CORE_INFO("Game Cooked Successfully to {0}", publishDir.string());
