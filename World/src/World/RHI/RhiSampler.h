@@ -18,6 +18,8 @@ namespace World::Rhi
 		float MaxAnisotropy = 1.0f;
 		bool EnableCompare = false;
 		CompareOp Compare = CompareOp::Never;
+		BorderColor Border = BorderColor::TransparentBlack;
+		bool UnnormalizedCoordinates = false;
 		std::string DebugName;
 	};
 

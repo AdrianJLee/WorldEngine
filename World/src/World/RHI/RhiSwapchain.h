@@ -4,12 +4,17 @@
 
 namespace World::Rhi
 {
+	enum class PresentMode : uint8_t { Immediate = 0, Mailbox, Fifo };
+	enum class ColorSpace : uint8_t { SrgbNonlinear = 0, ExtendedSrgbLinear };
+
 	struct SwapchainDesc
 	{
 		void* NativeWindow = nullptr;      // 平台原生窗口句柄
 		Format Format = Format::B8G8R8A8_UNORM;
 		uint32_t ImageCount = 3;           // 0 = 后端默认
 		bool VSync = true;
+		PresentMode Present = PresentMode::Fifo;
+		ColorSpace Space = ColorSpace::SrgbNonlinear;
 		std::string DebugName;
 	};
 

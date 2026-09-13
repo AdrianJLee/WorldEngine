@@ -19,7 +19,15 @@ namespace World::Rhi
 	{
 		bool EnableValidation = false;    // 开发期验证层(存在才启用)
 		bool Headless = false;            // 无窗口(离屏/测试)
+		uint32_t AdapterIndex = 0;        // 多 GPU 时选择物理设备
 		std::string DebugName;
+	};
+
+	struct DeviceLimits
+	{
+		uint64_t MinUniformBufferOffsetAlignment = 64;
+		uint64_t NonCoherentAtomSize = 1;
+		float TimestampPeriod = 0.0f;     // 0 = 不支持时间戳
 	};
 
 	class WLD_API Device
@@ -28,6 +36,7 @@ namespace World::Rhi
 		virtual ~Device() = default;
 
 		virtual const Capabilities& GetCapabilities() const = 0;
+		virtual DeviceLimits GetLimits() const = 0;
 		virtual void WaitIdle() = 0;
 
 		virtual Handle<CommandQueue> CreateQueue(const std::string& name = {}) = 0;
@@ -43,7 +52,8 @@ namespace World::Rhi
 		virtual Handle<DescriptorSetLayout> CreateDescriptorSetLayout(const DescriptorSetLayoutDesc& desc) = 0;
 		virtual Handle<DescriptorSet> CreateDescriptorSet(const Handle<DescriptorSetLayout>& layout) = 0;
 		virtual Handle<Fence> CreateFence(bool signaled = false) = 0;
-		virtual Handle<Semaphore> CreateSemaphore() = 0;
+		virtual Handle<Semaphore> CreateSemaphore(const SemaphoreCreateDesc& desc = {}) = 0;
+		virtual Handle<QueryPool> CreateQueryPool(QueryType type, uint32_t count) = 0;
 
 		// 帧资源回收:渲染器完成 fence 后调用,释放该帧标记的临时资源。
 		virtual void BeginFrame() = 0;

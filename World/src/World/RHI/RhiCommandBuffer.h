@@ -19,6 +19,9 @@ namespace World::Rhi
 		virtual void Begin() = 0;
 		virtual void End() = 0;
 
+		virtual void BeginLabel(const std::string& label) = 0;
+		virtual void EndLabel() = 0;
+
 		virtual void BeginRenderPass(const Handle<RenderPass>& pass,
 			const Handle<Framebuffer>& framebuffer,
 			const std::vector<ClearValue>& clears) = 0;
@@ -51,5 +54,20 @@ namespace World::Rhi
 			uint64_t srcOffset, uint32_t mip = 0, uint32_t layer = 0) = 0;
 		virtual void CopyTextureToBuffer(const Handle<Texture>& src, const Handle<Buffer>& dst,
 			uint64_t dstOffset, uint32_t mip = 0, uint32_t layer = 0) = 0;
+		virtual void CopyTexture(const Handle<Texture>& src, const Handle<Texture>& dst,
+			uint32_t srcMip = 0, uint32_t srcLayer = 0,
+			uint32_t dstMip = 0, uint32_t dstLayer = 0) = 0;
+		virtual void ResolveTexture(const Handle<Texture>& src, const Handle<Texture>& dst,
+			uint32_t srcMip = 0, uint32_t dstMip = 0, uint32_t layer = 0) = 0;
+		virtual void GenerateMipmaps(const Handle<Texture>& texture) = 0;
+
+		virtual void ResetQueryPool(const Handle<class QueryPool>& pool,
+			uint32_t first = 0, uint32_t count = 0) = 0;   // count=0 = 全部
+		virtual void BeginQuery(const Handle<class QueryPool>& pool,
+			uint32_t index, QueryType type = QueryType::Occlusion) = 0;
+		virtual void EndQuery(const Handle<class QueryPool>& pool, uint32_t index) = 0;
+		virtual void WriteTimestamp(const Handle<class QueryPool>& pool, uint32_t index) = 0;
+		virtual void CopyQueryResults(const Handle<class QueryPool>& pool,
+			const Handle<Buffer>& dst, uint32_t first = 0, uint32_t count = 0) = 0;
 	};
 }

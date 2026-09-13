@@ -32,6 +32,9 @@ namespace World::Rhi
 	struct StencilState
 	{
 		CompareOp Compare = CompareOp::Always;
+		StencilOp Fail = StencilOp::Keep;
+		StencilOp DepthFail = StencilOp::Keep;
+		StencilOp Pass = StencilOp::Keep;
 		uint32_t Reference = 0;
 		uint32_t CompareMask = 0xFF;
 		uint32_t WriteMask = 0xFF;
@@ -74,6 +77,14 @@ namespace World::Rhi
 		std::vector<BlendAttachmentState> Blends;   // 每颜色附件一个;空=默认关闭混合
 		SampleCount Samples = SampleCount::Count1;
 		float LineWidth = 1.0f;
+		bool PrimitiveRestart = false;
+		bool RasterizerDiscard = false;
+		bool DepthClamp = false;
+		bool AlphaToCoverage = false;
+		uint32_t SampleMask = 0xFFFFFFFF;
+		float DepthBiasConstant = 0.0f;
+		float DepthBiasSlope = 0.0f;
+		float DepthBiasClamp = 0.0f;
 		std::vector<PushConstantRange> PushConstants;
 		std::string DebugName;
 	};

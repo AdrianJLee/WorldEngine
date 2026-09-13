@@ -12,6 +12,7 @@ namespace World::Rhi
 		DescriptorType Type = DescriptorType::CombinedImageSampler;
 		ShaderStageFlags Stages = 0;
 		uint32_t Count = 1;
+		bool VariableCount = false;   // bindless:运行时数组大小
 	};
 
 	struct DescriptorSetLayoutDesc

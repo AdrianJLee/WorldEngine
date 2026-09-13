@@ -31,10 +31,22 @@ namespace World::Rhi
 		bool HasDepthStencil() const { return DepthStencilAttachment.Index != UINT32_MAX; }
 	};
 
+	struct SubpassDependency
+	{
+		uint32_t SrcSubpass = UINT32_MAX;   // UINT32_MAX = 外部(VK_SUBPASS_EXTERNAL)
+		uint32_t DstSubpass = 0;
+		uint32_t SrcStages = PipelineStageNone;
+		uint32_t DstStages = PipelineStageNone;
+		uint32_t SrcAccess = AccessNone;
+		uint32_t DstAccess = AccessNone;
+		bool ByRegion = false;
+	};
+
 	struct RenderPassDesc
 	{
 		std::vector<RenderPassAttachment> Attachments;
 		std::vector<SubpassDesc> Subpasses;
+		std::vector<SubpassDependency> Dependencies;
 		std::string DebugName;
 	};
 
