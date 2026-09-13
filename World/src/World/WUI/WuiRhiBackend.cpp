@@ -19,7 +19,6 @@
 namespace World::Wui
 {
 	WuiInputCollector WuiRhiBackend::s_Input;
-	WuiBackendStats WuiRhiBackend::s_Stats;
 
 	namespace
 	{
@@ -78,8 +77,6 @@ namespace World::Wui
 	void WuiRhiBackend::FeedMouseButton(int button, bool down) { s_Input.OnMouseButton(button, down); }
 	void WuiRhiBackend::FeedMouseMove(float x, float y) { s_Input.OnMouseMove(x, y); }
 	void WuiRhiBackend::FeedMouseScroll(float dx, float dy) { s_Input.OnMouseScroll(dx, dy); }
-
-	WuiBackendStats WuiRhiBackend::Stats() { return s_Stats; }
 
 	bool WuiRhiBackend::BeginFrame(WuiInputState& input)
 	{
@@ -324,20 +321,11 @@ namespace World::Wui
 		std::vector<int> offsets;
 		DecodeUtf8(text, codepoints, offsets);
 		float width = 0;
-		uint32_t previous = 0;
-		const float scale = face.Info ? stbtt_ScaleForPixelHeight(face.Info, fontSize) : 0;
 		for (size_t i = 0; i < codepoints.size(); ++i)
 		{
 			if (byteOffset >= 0 && offsets[i] >= byteOffset)
 				break;
-			if (i > 0 && scale > 0)
-			{
-				int kern = 0;
-				stbtt_GetGlyphKernAdvance(face.Info, previous, codepoints[i]);
-				width += kern * scale;
-			}
 			width += AdvanceOf(face, codepoints[i], fontSize);
-			previous = codepoints[i];
 		}
 		return width;
 	}
@@ -393,9 +381,6 @@ namespace World::Wui
 		m_Cmd->BindVertexBuffer(0, m_Vb);
 		m_Cmd->BindIndexBuffer(m_Ib);
 		m_Cmd->DrawIndexed(static_cast<uint32_t>(m_Indices.size()));
-		s_Stats.DrawCalls++;
-		s_Stats.Vertices += static_cast<uint32_t>(m_Vertices.size());
-		s_Stats.Indices += static_cast<uint32_t>(m_Indices.size());
 		m_Vertices.clear();
 		m_Indices.clear();
 	}
@@ -446,17 +431,9 @@ namespace World::Wui
 		DecodeUtf8(command.Text, codepoints, offsets);
 		float pen = command.Rect.X;
 		SetActiveTexture(face.AtlasTexture);
-		uint32_t previous = 0;
 		for (uint32_t cp : codepoints)
 		{
-			if (previous != 0 && pen > command.Rect.X)
-			{
-				int kern = 0;
-				kern = stbtt_GetGlyphKernAdvance(face.Info, previous, cp);
-				pen += kern * scale;
-			}
 			Glyph& glyph = Bake(face, cp);
-			s_Stats.TextGlyphs++;
 			const float w = glyph.W * sizeRatio;
 			const float h = glyph.H * sizeRatio;
 			if (w > 0 && h > 0)
@@ -464,7 +441,6 @@ namespace World::Wui
 					command.Color,
 					{ glyph.X / face.AtlasW, glyph.Y / face.AtlasH, glyph.W / face.AtlasW, glyph.H / face.AtlasH });
 			pen += glyph.Advance * sizeRatio;
-			previous = cp;
 		}
 
 		if (command.TextCursorByte >= 0)
@@ -633,7 +609,6 @@ namespace World::Wui
 
 		if (!m_IsVulkan)
 			Rhi::BlitFramebufferToBackbuffer(m_UiFramebuffer, { m_UiWidth, m_UiHeight });
-		s_Stats.Frames++;
 	}
 
 	void WuiRhiBackend::EndFrame(WuiCursor cursor)
