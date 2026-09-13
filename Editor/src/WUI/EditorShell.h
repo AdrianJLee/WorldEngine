@@ -92,5 +92,11 @@ namespace World
 		Wui::DropZone m_DropZone = Wui::DropZone::Center;
 		std::string m_LastDragTarget;
 		Wui::DropZone m_LastDragZone = Wui::DropZone::Center;
+		std::shared_ptr<Wui::WuiBox> m_MenuBar;
+		std::shared_ptr<Wui::WuiButton> m_FileButton;
+		std::shared_ptr<Wui::WuiButton> m_WindowButton;
+		Wui::WuiId m_OpenMenu = 0;
+		Wui::WuiRect m_MenuHeaderRect;
+		Wui::WuiContext* m_Ctx = nullptr;
 	};
 }
