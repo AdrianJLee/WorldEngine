@@ -299,15 +299,13 @@ namespace World::Wui
 		return bold ? m_Faces[1] : m_Faces[0];
 	}
 
-	WuiRhiBackend::Glyph& WuiRhiBackend::Bake(FontFace& face, uint32_t codepoint, float fontSize)
+	WuiRhiBackend::Glyph& WuiRhiBackend::Bake(FontFace& face, uint32_t codepoint)
 	{
-		const uint32_t bucket = static_cast<uint32_t>(std::max(4.0f, fontSize) * 2.0f);
-		auto& glyphs = face.Glyphs[bucket];
-		auto it = glyphs.find(codepoint);
-		if (it != glyphs.end())
+		auto it = face.Glyphs.find(codepoint);
+		if (it != face.Glyphs.end())
 			return it->second;
 		Glyph glyph;
-		const float scale = stbtt_ScaleForPixelHeight(face.Info, fontSize);
+		const float scale = stbtt_ScaleForPixelHeight(face.Info, face.BaseSize);
 		int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 		stbtt_GetCodepointBitmapBox(face.Info, codepoint, scale, scale, &x0, &y0, &x1, &y1);
 		const int width = x1 - x0;
@@ -348,7 +346,7 @@ namespace World::Wui
 		int advance = 0;
 		stbtt_GetCodepointHMetrics(face.Info, codepoint, &advance, nullptr);
 		glyph.Advance = advance * scale;
-		const auto result = glyphs.emplace(codepoint, glyph);
+		const auto result = face.Glyphs.emplace(codepoint, glyph);
 		return result.first->second;
 	}
 
@@ -471,6 +469,7 @@ namespace World::Wui
 			return;
 		const float fontSize = command.FontSize > 0 ? command.FontSize : 15.0f;
 		const float scale = stbtt_ScaleForPixelHeight(face.Info, fontSize);
+		const float sizeRatio = fontSize / face.BaseSize;
 		int ascent = 0;
 		stbtt_GetFontVMetrics(face.Info, &ascent, nullptr, nullptr);
 		const float baseline = command.Rect.Y + ascent * scale;
@@ -497,15 +496,15 @@ namespace World::Wui
 				kern = stbtt_GetGlyphKernAdvance(face.Info, previous, cp);
 				pen += kern * scale;
 			}
-			Glyph& glyph = Bake(face, cp, fontSize);
+			Glyph& glyph = Bake(face, cp);
 			s_Stats.TextGlyphs++;
-			const float w = glyph.W;
-			const float h = glyph.H;
+			const float w = glyph.W * sizeRatio;
+			const float h = glyph.H * sizeRatio;
 			if (w > 0 && h > 0)
-				PushQuad({ pen + glyph.OffsetX, baseline + glyph.OffsetY, w, h },
+				PushQuad({ pen + glyph.OffsetX * sizeRatio, baseline + glyph.OffsetY * sizeRatio, w, h },
 					command.Color,
 					{ glyph.X / face.AtlasW, glyph.Y / face.AtlasH, glyph.W / face.AtlasW, glyph.H / face.AtlasH });
-			pen += glyph.Advance;
+			pen += glyph.Advance * sizeRatio;
 			previous = cp;
 		}
 
@@ -658,7 +657,7 @@ namespace World::Wui
 					FontFace& face = FaceFor(command.Text, command.Bold);
 					if (face.Info)
 						for (uint32_t cp : codepoints)
-							Bake(face, cp, command.FontSize > 0 ? command.FontSize : 15.0f);
+							Bake(face, cp);
 				}
 		};
 		prebake(commands);

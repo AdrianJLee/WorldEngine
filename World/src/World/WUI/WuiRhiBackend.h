@@ -53,13 +53,13 @@ namespace World::Wui
 		{
 			std::vector<unsigned char> Ttf;
 			stbtt_fontinfo* Info = nullptr;
+			float BaseSize = 16.0f;
 			uint32_t AtlasW = 1024, AtlasH = 1024;
 			std::vector<unsigned char> Atlas;
 			uint32_t CursorX = 1, CursorY = 1, RowH = 0;
 			bool AtlasDirty = false;
 			Rhi::Handle<Rhi::Texture> AtlasTexture;
-			// 字号桶 → 码点 → 字形;按实际字号光栅化保证多字号清晰。
-			std::unordered_map<uint32_t, std::unordered_map<uint32_t, Glyph>> Glyphs;
+			std::unordered_map<uint32_t, Glyph> Glyphs;
 		};
 
 		void EnsureResources();
@@ -72,7 +72,7 @@ namespace World::Wui
 		void ApplyScissor(const WuiRect& rect);
 
 		FontFace& FaceFor(const std::string& text, bool bold);
-		Glyph& Bake(FontFace& face, uint32_t codepoint, float fontSize);
+		Glyph& Bake(FontFace& face, uint32_t codepoint);
 		float Measure(FontFace& face, const std::string& text, float fontSize, int byteOffset = -1);
 		float AdvanceOf(FontFace& face, uint32_t codepoint, float fontSize);
 		void DrawText(const WuiDrawCommand& command);
