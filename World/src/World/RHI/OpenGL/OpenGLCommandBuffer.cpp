@@ -10,6 +10,37 @@
 
 namespace World::Rhi::OpenGL
 {
+	namespace
+	{
+		bool IsIntegerFormat(Format format)
+		{
+			switch (format)
+			{
+				case Format::R8_UINT:
+				case Format::R8G8_UINT:
+				case Format::R8G8B8A8_UINT:
+				case Format::R16_UINT:
+				case Format::R16G16_UINT:
+				case Format::R16G16B16A16_UINT:
+				case Format::R32_UINT:
+				case Format::R32G32_UINT:
+				case Format::R32G32B32A32_UINT:
+				case Format::R8_SINT:
+				case Format::R8G8_SINT:
+				case Format::R8G8B8A8_SINT:
+				case Format::R16_SINT:
+				case Format::R16G16_SINT:
+				case Format::R16G16B16A16_SINT:
+				case Format::R32_SINT:
+				case Format::R32G32_SINT:
+				case Format::R32G32B32A32_SINT:
+					return true;
+				default:
+					return false;
+			}
+		}
+	}
+
 	void OpenGLCommandBuffer::Begin()
 	{
 		m_InRenderPass = false;
@@ -61,7 +92,13 @@ namespace World::Rhi::OpenGL
 			ClearColor color{};
 			if (attachmentIndex < clearCount)
 				color = clears[attachmentIndex].Color;
-			glClearBufferfv(GL_COLOR, static_cast<GLint>(i), &color.R);
+			if (IsIntegerFormat(attachment.Format))
+			{
+				// 合同无整数清除字段;ClearColor 的存储按位复用整数清除值。
+				glClearBufferiv(GL_COLOR, static_cast<GLint>(i), reinterpret_cast<const GLint*>(&color));
+			}
+			else
+				glClearBufferfv(GL_COLOR, static_cast<GLint>(i), &color.R);
 		}
 
 		if (subpass.HasDepthStencil())

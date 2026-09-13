@@ -22,18 +22,26 @@ namespace World::Rhi::OpenGL
 		const auto& passDesc = desc.RenderPass->GetDesc();
 
 		glCreateFramebuffers(1, &m_ID);
+		m_AttachmentIDs.resize(passDesc.Attachments.size(), 0);
+		std::vector<GLenum> drawBuffers;
 		for (size_t i = 0; i < passDesc.Attachments.size() && i < desc.Attachments.size(); i++)
 		{
 			const auto& attachment = passDesc.Attachments[i];
 			const auto texture = std::dynamic_pointer_cast<OpenGLTexture>(desc.Attachments[i]);
 			if (!texture)
 				continue;
+			m_AttachmentIDs[i] = texture->GetID();
 
 			if (IsDepthStencilFormat(attachment.Format))
 				glNamedFramebufferTexture(m_ID, GL_DEPTH_STENCIL_ATTACHMENT, texture->GetID(), 0);
 			else
+			{
 				glNamedFramebufferTexture(m_ID, GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(i), texture->GetID(), 0);
+				drawBuffers.push_back(GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(i));
+			}
 		}
+		if (!drawBuffers.empty())
+			glNamedFramebufferDrawBuffers(m_ID, static_cast<GLsizei>(drawBuffers.size()), drawBuffers.data());
 
 		if (glCheckNamedFramebufferStatus(m_ID, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 			WLD_CORE_WARN("OpenGL framebuffer '{0}' is incomplete", desc.DebugName);
@@ -43,5 +51,23 @@ namespace World::Rhi::OpenGL
 	{
 		if (m_ID)
 			glDeleteFramebuffers(1, &m_ID);
+	}
+
+	uint32_t OpenGLFramebuffer::GetAttachmentID(size_t index) const
+	{
+		return index < m_AttachmentIDs.size() ? m_AttachmentIDs[index] : 0;
+	}
+
+	int OpenGLFramebuffer::ReadPixel(uint32_t attachmentIndex, int x, int y)
+	{
+		if (attachmentIndex >= m_AttachmentIDs.size())
+			return -1;
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, m_ID);
+		glReadBuffer(GL_COLOR_ATTACHMENT0 + attachmentIndex);
+		int pixel = -1;
+		glReadPixels(x, y, 1, 1, GL_RED_INTEGER, GL_INT, &pixel);
+		glReadBuffer(GL_NONE);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+		return pixel;
 	}
 }

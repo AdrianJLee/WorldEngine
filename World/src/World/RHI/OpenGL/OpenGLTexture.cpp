@@ -37,7 +37,7 @@ namespace World::Rhi::OpenGL
 
 	OpenGLTexture::~OpenGLTexture()
 	{
-		if (m_ID)
+		if (m_ID && m_OwnsId)
 			glDeleteTextures(1, &m_ID);
 	}
 

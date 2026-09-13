@@ -22,9 +22,12 @@ namespace World::Rhi::OpenGL
 
 		const FramebufferDesc& GetDesc() const override { return m_Desc; }
 		uint32_t GetID() const { return m_ID; }
+		uint32_t GetAttachmentID(size_t index) const;
+		int ReadPixel(uint32_t attachmentIndex, int x, int y);
 
 	private:
 		FramebufferDesc m_Desc;
 		uint32_t m_ID = 0;
+		std::vector<uint32_t> m_AttachmentIDs;
 	};
 }
