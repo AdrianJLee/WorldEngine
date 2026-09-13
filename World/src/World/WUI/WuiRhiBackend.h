@@ -19,6 +19,7 @@ namespace World::Wui
 		uint32_t Indices = 0;
 		uint32_t TextGlyphs = 0;
 		uint32_t Frames = 0;
+		uint32_t CachedFrames = 0;
 	};
 
 	// Backend v2:WUI 绘制命令经 RHI 2D 批管线呈现(OpenGL 默认帧缓冲 /
@@ -108,6 +109,9 @@ namespace World::Wui
 		std::vector<WuiRect> m_ClipStack;
 		WuiRect m_CurrentClip {};
 		bool m_IsVulkan = false;
+		bool m_InputActive = false;
+		bool m_HasCachedFrame = false;
+		uint64_t m_LastFrameHash = 0;
 		static WuiBackendStats s_Stats;
 	};
 }
