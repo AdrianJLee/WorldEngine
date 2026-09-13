@@ -2,6 +2,7 @@
 
 #include "World/Modules/ModuleManager.h"
 #include "World/Schema/SchemaRegistry.h"
+#include "World/Core/Vfs/Vfs.h"
 
 namespace World
 {
@@ -18,8 +19,11 @@ namespace World
 		const Schema::SchemaRegistry& Schemas() const { return m_Schemas; }
 		Modules::ModuleManager& Modules() { return m_Modules; }
 		const Modules::ModuleManager& Modules() const { return m_Modules; }
+		World::Vfs::Vfs& Vfs() { return m_Vfs; }
+		const World::Vfs::Vfs& Vfs() const { return m_Vfs; }
 
 	private:
+		World::Vfs::Vfs m_Vfs;
 		Schema::SchemaRegistry m_Schemas;
 		Modules::ModuleManager m_Modules;
 	};

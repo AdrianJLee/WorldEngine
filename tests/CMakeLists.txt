@@ -66,3 +66,24 @@ set_tests_properties(World.Wui PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+# VFS 2.0 核心回归:归一化、目录/包 provider、挂载优先级与包格式校验。
+add_executable(WorldVfsTests VfsTests.cpp)
+target_link_libraries(WorldVfsTests PRIVATE World)
+target_compile_features(WorldVfsTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldVfsTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldVfsTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldVfsTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Vfs COMMAND WorldVfsTests)
+set_tests_properties(World.Vfs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
