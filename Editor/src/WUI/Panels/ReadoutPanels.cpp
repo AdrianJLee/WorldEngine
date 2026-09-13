@@ -3,7 +3,7 @@
 
 #include "World/Core/Memory/MemoryTracker.h"
 #include "World/Renderer/Renderer2D.h"
-#include "World/WUI/WuiWidgets.h"
+#include "World/WUI/WuiWidget.h"
 
 namespace World
 {
@@ -37,74 +37,135 @@ namespace World
 		}
 	}
 
-	void StatsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	void StatsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost&)
 	{
-		const Wui::WuiTheme& theme = host.Theme();
-		float y = rect.Y + 8;
+		if (!m_Root)
+		{
+			m_Root = std::make_shared<Wui::WuiBox>();
+			m_Root->Gap = 2;
+			for (int i = 0; i < 7; ++i)
+			{
+				auto label = std::make_shared<Wui::WuiLabel>();
+				label->FontSize = 14;
+				m_Root->Add(label);
+				m_Lines.push_back(label);
+			}
+		}
+
 		const auto& stats = Renderer2D::GetStats();
-		Label(ctx, { rect.X + 8, y }, "Application " + std::to_string(ctx.Input().FPS) + " FPS", theme.Text, 14.0f);
-		y += 20;
-		Label(ctx, { rect.X + 8, y }, "Renderer2D Stats:", theme.TextMuted, 14.0f);
-		y += 20;
-		Label(ctx, { rect.X + 8, y }, "Draw Calls: " + std::to_string(stats.DrawCalls), theme.Text, 14.0f);
-		y += 18;
-		Label(ctx, { rect.X + 8, y }, "Quads: " + std::to_string(stats.QuadCount), theme.Text, 14.0f);
-		y += 18;
-		Label(ctx, { rect.X + 8, y }, "Circles: " + std::to_string(stats.CircleCount), theme.Text, 14.0f);
-		y += 18;
-		Label(ctx, { rect.X + 8, y }, "Vertices: " + std::to_string(stats.GetTotalVertexCount()), theme.Text, 14.0f);
-		y += 18;
-		Label(ctx, { rect.X + 8, y }, "Indices: " + std::to_string(stats.GetTotalIndexCount()), theme.Text, 14.0f);
+		m_Lines[0]->Text = "Application " + std::to_string(ctx.Input().FPS) + " FPS";
+		m_Lines[1]->Text = "Renderer2D Stats:";
+		m_Lines[1]->Color = { 0.55f, 0.58f, 0.62f, 1 };
+		m_Lines[2]->Text = "Draw Calls: " + std::to_string(stats.DrawCalls);
+		m_Lines[3]->Text = "Quads: " + std::to_string(stats.QuadCount);
+		m_Lines[4]->Text = "Circles: " + std::to_string(stats.CircleCount);
+		m_Lines[5]->Text = "Vertices: " + std::to_string(stats.GetTotalVertexCount());
+		m_Lines[6]->Text = "Indices: " + std::to_string(stats.GetTotalIndexCount());
+
+		Wui::LayoutWidgetTree(m_Root, { rect.X + 8, rect.Y + 8, rect.W - 16, rect.H - 16 });
+		Wui::WuiPaintContext paint(ctx);
+		m_Root->Paint(paint);
 	}
 
-	void MemoryPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	void MemoryPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost&)
 	{
-		const Wui::WuiTheme& theme = host.Theme();
 		const std::vector<AllocatorStats> snapshots = MemoryTracker::Get().GetFullSnapshot();
-		const std::vector<float> columns { rect.W * 0.28f, 80, rect.W * 0.2f, rect.W * 0.36f, 70 };
-		for (size_t row = 0; row < snapshots.size(); ++row)
+		if (!m_Root)
 		{
-			const Wui::WuiRect name = TableCell(rect, columns, row, 0, 24);
-			const Wui::WuiRect type = TableCell(rect, columns, row, 1, 24);
-			const Wui::WuiRect usage = TableCell(rect, columns, row, 2, 24);
-			const Wui::WuiRect bar = TableCell(rect, columns, row, 3, 24);
-			const Wui::WuiRect allocs = TableCell(rect, columns, row, 4, 24);
-			Label(ctx, { name.X + 6, name.Y + 4 }, snapshots[row].Name, theme.Text, 13.0f);
-			Label(ctx, { type.X + 6, type.Y + 4 }, AllocatorTypeName(snapshots[row].Type), theme.TextMuted, 13.0f);
-			Label(ctx, { usage.X + 6, usage.Y + 4 }, FormatBytes(snapshots[row].UsedBytes) + " / " + FormatBytes(snapshots[row].TotalReserved), theme.Text, 13.0f);
-			const float fraction = snapshots[row].TotalReserved > 0 ? static_cast<float>(snapshots[row].UsedBytes) / static_cast<float>(snapshots[row].TotalReserved) : 0;
-			const Wui::WuiRect track { bar.X + 4, bar.Y + 8, bar.W - 8, 8 };
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, track, theme.ButtonBg, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { track.X, track.Y, track.W * fraction, track.H }, theme.Accent, 3.0f });
-			Label(ctx, { allocs.X + 6, allocs.Y + 4 }, std::to_string(snapshots[row].NumAllocations), theme.Text, 13.0f);
+			m_Root = std::make_shared<Wui::WuiBox>();
+			m_Root->Direction = Wui::WuiDirection::Column;
+			m_Root->Gap = 4;
+		}
+		if (m_Rows.size() != snapshots.size())
+		{
+			m_Root->Invalidate();
+			m_Rows.clear();
+			for (size_t i = 0; i < snapshots.size(); ++i)
+			{
+				auto row = std::make_shared<Wui::WuiBox>();
+				row->Direction = Wui::WuiDirection::Row;
+				row->Gap = 8;
+				row->AlignCross = Wui::WuiAlign::Center;
+
+				Row entry;
+				entry.Name = std::make_shared<Wui::WuiLabel>();
+				entry.Type = std::make_shared<Wui::WuiLabel>();
+				entry.Usage = std::make_shared<Wui::WuiLabel>();
+				entry.Bar = std::make_shared<Wui::WuiProgress>();
+				entry.Allocs = std::make_shared<Wui::WuiLabel>();
+				for (auto& label : { entry.Name, entry.Type, entry.Usage, entry.Allocs })
+					label->FontSize = 13;
+				row->Add(entry.Name, { rect.W * 0.26f, rect.W * 0.26f, 0, 1e30f, 0 });
+				row->Add(entry.Type, { 70, 70, 0, 1e30f, 0 });
+				row->Add(entry.Usage, { rect.W * 0.2f, rect.W * 0.2f, 0, 1e30f, 0 });
+				row->Add(entry.Bar, { rect.W * 0.32f, rect.W * 0.32f, 0, 1e30f, 1 });
+				row->Add(entry.Allocs, { 60, 60, 0, 1e30f, 0 });
+				m_Root->Add(row, { 0, 1e30f, 0, 24, 0 });
+				m_Rows.push_back(std::move(entry));
+			}
+		}
+
+		for (size_t i = 0; i < m_Rows.size(); ++i)
+		{
+			const AllocatorStats& snapshot = snapshots[i];
+			m_Rows[i].Name->Text = snapshot.Name;
+			m_Rows[i].Type->Text = AllocatorTypeName(snapshot.Type);
+			m_Rows[i].Type->Color = { 0.55f, 0.58f, 0.62f, 1 };
+			m_Rows[i].Usage->Text = FormatBytes(snapshot.UsedBytes) + " / " + FormatBytes(snapshot.TotalReserved);
+			m_Rows[i].Bar->Fraction = snapshot.TotalReserved > 0
+				? static_cast<float>(snapshot.UsedBytes) / static_cast<float>(snapshot.TotalReserved) : 0;
+			m_Rows[i].Allocs->Text = std::to_string(snapshot.NumAllocations);
 		}
 		MemoryTracker::Get().ClearEphemeralStats();
+
+		Wui::LayoutWidgetTree(m_Root, { rect.X + 8, rect.Y + 8, rect.W - 16, rect.H - 16 });
+		Wui::WuiPaintContext paint(ctx);
+		m_Root->Paint(paint);
 	}
 
-	void OperationsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	void OperationsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost&)
 	{
-		const Wui::WuiTheme& theme = host.Theme();
+		if (!m_Root)
+		{
+			m_Root = std::make_shared<Wui::WuiBox>();
+			m_Root->Direction = Wui::WuiDirection::Column;
+			m_Root->Gap = 4;
+			m_Scroll = std::make_shared<Wui::WuiScrollArea>();
+			m_Content = std::make_shared<Wui::WuiBox>();
+			m_Content->Gap = 1;
+			m_Scroll->Child = m_Content;
+			m_Root->Add(m_Scroll, { 0, 1e30f, 0, 1e30f, 1 });
+
+			auto clear = std::make_shared<Wui::WuiButton>();
+			clear->Label = "Clear";
+			clear->OnClick = [&ctx] { ctx.Ops().Clear(); ctx.RecordOp("ops", "clear", "", ""); };
+			m_Root->Add(clear);
+		}
+
 		const std::vector<Wui::WuiOpRecord>& records = ctx.Ops().Records();
-		const float rowHeight = 16.0f;
-		float scrollY = 0;
-		BeginScrollArea(ctx, rect, records.size() * rowHeight + 8.0f, scrollY, theme);
-		float y = rect.Y + 6 - scrollY;
-		for (auto it = records.rbegin(); it != records.rend(); ++it)
+		if (m_Content->Children().size() != records.size())
 		{
-			Wui::WuiColor color = theme.TextMuted;
-			if (it->Category == "dock") color = theme.Accent;
-			else if (it->Category == "undo") color = { 0.35f, 0.8f, 0.45f, 1 };
-			else if (it->Category == "drag") color = theme.Text;
-			const std::string line = "F" + std::to_string(it->Frame) + " [" + it->Category + "] " + it->Action +
-				(it->Target.empty() ? "" : " " + it->Target) + (it->Detail.empty() ? "" : " " + it->Detail);
-			Label(ctx, { rect.X + 8, y }, line, color, 12.0f);
-			y += rowHeight;
+			// 操作日志频繁变化:内容子树按需重建(容器布局仍被缓存)。
+			m_Content = std::make_shared<Wui::WuiBox>();
+			m_Content->Gap = 1;
+			for (size_t i = 0; i < records.size(); ++i)
+				m_Content->Add(std::make_shared<Wui::WuiLabel>());
+			m_Scroll->Child = m_Content;
+			m_Root->Invalidate();
 		}
-		EndScrollArea(ctx);
-		if (Button(ctx, Wui::HashId("ops.clear"), { rect.X + rect.W - 70, rect.Y + 4, 60, 20 }, "Clear", theme))
+		for (size_t i = 0; i < m_Content->Children().size() && i < records.size(); ++i)
 		{
-			ctx.Ops().Clear();
-			ctx.RecordOp("ops", "clear", "", "");
+			const auto& record = records[records.size() - 1 - i];
+			auto label = std::static_pointer_cast<Wui::WuiLabel>(m_Content->Children()[i].Widget);
+			label->Text = "F" + std::to_string(record.Frame) + " [" + record.Category + "] " + record.Action +
+				(record.Target.empty() ? "" : " " + record.Target) + (record.Detail.empty() ? "" : " " + record.Detail);
+			label->FontSize = 12;
+			label->FixedHeight = 16;
 		}
+		m_Scroll->ContentHeight = records.size() * 17.0f + 8;
+
+		Wui::LayoutWidgetTree(m_Root, { rect.X + 8, rect.Y + 8, rect.W - 16, rect.H - 16 });
+		Wui::WuiPaintContext paint(ctx);
+		m_Root->Paint(paint);
 	}
 }
