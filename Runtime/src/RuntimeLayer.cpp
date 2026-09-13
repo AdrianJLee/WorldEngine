@@ -125,6 +125,15 @@ namespace World
 		if (serializer.Deserialize(scenePath))
 		{
 			WLD_CORE_INFO("Scene loaded successfully from VFS or Disk!");
+			bool hasCamera = false;
+			for (auto handle : tempScene->GetRegistry().view<CameraComponent>())
+			{
+				(void)handle;
+				hasCamera = true;
+				break;
+			}
+			if (!hasCamera)
+				WLD_CORE_WARN("Scene has no CameraComponent entity; nothing will be rendered. Add a camera in the editor (Hierarchy -> Create Camera).");
 			m_ActiveScene = tempScene;
 
 			uint32_t width = Application::Get().GetWindow().GetWidth();

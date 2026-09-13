@@ -590,7 +590,7 @@ namespace World
 		if (ctx.IsPopupOpen(blankPopup))
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect panel { m_HierarchyBlankMenuPos.x, m_HierarchyBlankMenuPos.y, 190, 3 * 22 + 8 };
+			const Wui::WuiRect panel { m_HierarchyBlankMenuPos.x, m_HierarchyBlankMenuPos.y, 190, 4 * 22 + 8 };
 			DrawPanelSurface(ctx, panel, m_Theme);
 			const bool hasSelection = m_Editor.GetSelectedEntity().IsValid() && m_Editor.GetSelectedEntity().GetScene() == scene.get();
 			if (MenuItem(ctx, Wui::HashId("hierarchy.create"), { panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Create Empty Entity", true, m_Theme))
@@ -603,7 +603,23 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), { panel.X + 4, panel.Y + 26, panel.W - 8, 22 }, "Duplicate Selected", hasSelection, m_Theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.createcamera"), { panel.X + 4, panel.Y + 26, panel.W - 8, 22 }, "Create Camera", true, m_Theme))
+			{
+				Entity created;
+				if (scene->DeferStructuralChange([&created](Scene& s)
+					{
+						created = Entity::CreateEntity(&s, "Camera");
+						created.AddComponent<TransformComponent>();
+						auto& camera = created.AddComponent<CameraComponent>();
+						camera.Primary = true;
+					}) && created.IsValid())
+				{
+					m_Editor.SetSelectedEntity(created);
+					m_Editor.MarkDocumentDirty();
+				}
+				ctx.CloseAllPopups();
+			}
+			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicatesel"), { panel.X + 4, panel.Y + 48, panel.W - 8, 22 }, "Duplicate Selected", hasSelection, m_Theme))
 			{
 				if (hasSelection)
 				{
@@ -612,7 +628,7 @@ namespace World
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.deletesel"), { panel.X + 4, panel.Y + 48, panel.W - 8, 22 }, "Delete Selected", hasSelection, m_Theme))
+			if (MenuItem(ctx, Wui::HashId("hierarchy.deletesel"), { panel.X + 4, panel.Y + 70, panel.W - 8, 22 }, "Delete Selected", hasSelection, m_Theme))
 			{
 				if (hasSelection)
 				{
