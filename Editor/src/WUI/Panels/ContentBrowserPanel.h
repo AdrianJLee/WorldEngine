@@ -32,6 +32,7 @@ namespace World
 		std::filesystem::path RenameTarget;
 		char RenameBuffer[256] = { 0 };
 		std::string RenameEdit;
+		bool RenameActive = false;
 		std::string SearchEdit;
 		std::filesystem::path ContextMenuPath;
 		glm::vec2 ContextMenuPos {};
@@ -79,8 +80,10 @@ namespace World
 		void Reveal(const std::filesystem::path& path);
 		void GoBack();
 		void GoUp();
-		void CreateFolder();
+		void CreateFolder(Wui::WuiContext& ctx);
 		void ApplyRename(const std::filesystem::path& target, const std::string& newName);
+		void StartRename(Wui::WuiContext& ctx, const std::filesystem::path& path);
+		void RenderRenameField(Wui::WuiContext& ctx, const std::filesystem::path& path, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
 		void Cut();
 		void Copy();
 		void SelectAll(const std::vector<std::filesystem::path>& paths);

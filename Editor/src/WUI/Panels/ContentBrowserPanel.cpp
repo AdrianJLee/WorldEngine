@@ -383,6 +383,7 @@ namespace World
 		{
 			m_Model.RenameTarget.clear();
 			m_Model.RenameEdit.clear();
+			m_Model.RenameActive = false;
 		}
 		if (!m_Model.PendingDropDest.empty() && referenced(m_Model.PendingDropDest))
 			m_Model.PendingDropDest.clear();
@@ -398,7 +399,7 @@ namespace World
 		if (m_Ctx) m_Ctx->RecordOp("browser", "delete", std::to_string(count), "");
 	}
 
-	void ContentBrowserPanel::CreateFolder()
+	void ContentBrowserPanel::CreateFolder(Wui::WuiContext& ctx)
 	{
 		std::filesystem::path newPath = m_Model.Current / "New Folder";
 		int counter = 1;
@@ -407,15 +408,13 @@ namespace World
 		try
 		{
 			std::filesystem::create_directory(newPath);
-			m_Model.RenameTarget = newPath;
-			m_Model.RenameEdit = newPath.filename().string();
-			std::strncpy(m_Model.RenameBuffer, m_Model.RenameEdit.c_str(), sizeof(m_Model.RenameBuffer) - 1);
 			m_Model.Selected.clear();
 			m_Model.Selected.insert(newPath);
 			m_Model.LastSelected = newPath;
 			InvalidateContents();
 			SaveState();
 			if (m_Ctx) m_Ctx->RecordOp("browser", "mkdir", newPath.filename().string(), "");
+			StartRename(ctx, newPath);
 		}
 		catch (const std::exception& error)
 		{
@@ -428,6 +427,7 @@ namespace World
 		if (newName.empty())
 		{
 			m_Model.RenameTarget.clear();
+			m_Model.RenameActive = false;
 			return;
 		}
 		const std::filesystem::path newPath = target.parent_path() / newName;
@@ -438,10 +438,44 @@ namespace World
 			if (m_Ctx) m_Ctx->RecordOp("browser", "rename", target.filename().string(), "-> " + newPath.filename().string());
 		}
 		m_Model.RenameTarget.clear();
+		m_Model.RenameActive = false;
 		InvalidateContents();
 		SaveState();
 		if (m_Model.Search[0])
 			UpdateSearch();
+	}
+
+	void ContentBrowserPanel::StartRename(Wui::WuiContext& ctx, const std::filesystem::path& path)
+	{
+		m_Model.RenameTarget = path;
+		m_Model.RenameEdit = path.filename().string();
+		std::strncpy(m_Model.RenameBuffer, m_Model.RenameEdit.c_str(), sizeof(m_Model.RenameBuffer) - 1);
+		m_Model.RenameActive = true;
+		ctx.SetFocus(Wui::HashId("browser.rename"));
+		ctx.SetTextInputActive(true);
+	}
+
+	void ContentBrowserPanel::RenderRenameField(Wui::WuiContext& ctx, const std::filesystem::path& path, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
+	{
+		const Wui::WuiId renameId = Wui::HashId("browser.rename");
+		bool cancelled = false;
+		if (TextField(ctx, renameId, rect, m_Model.RenameEdit, theme, &cancelled))
+		{
+			// 回车提交
+			ApplyRename(path, m_Model.RenameEdit);
+		}
+		else if (cancelled)
+		{
+			// Escape 丢弃
+			m_Model.RenameTarget.clear();
+			m_Model.RenameEdit.clear();
+			m_Model.RenameActive = false;
+		}
+		else if (m_Model.RenameActive && ctx.Focus() != renameId)
+		{
+			// 失焦提交:点选其他条目或空白处时收起重命名框。
+			ApplyRename(path, m_Model.RenameEdit);
+		}
 	}
 
 	void ContentBrowserPanel::Cut()
@@ -525,7 +559,7 @@ namespace World
 			SaveState();
 		}
 		if (Button(ctx, Wui::HashId("browser.newfolder"), { rect.X + rect.W - 308, y, 70, 24 }, "+ Folder", theme))
-			CreateFolder();
+			CreateFolder(ctx);
 		if (Button(ctx, Wui::HashId("browser.refresh"), { rect.X + rect.W - 232, y, 58, 24 }, "Refresh", theme))
 		{
 			InvalidateContents();
@@ -607,9 +641,7 @@ namespace World
 			m_Model.ShowDeleteModal = true;
 		if (ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
 		{
-			m_Model.RenameTarget = *m_Model.Selected.begin();
-			m_Model.RenameEdit = m_Model.RenameTarget.filename().string();
-			std::strncpy(m_Model.RenameBuffer, m_Model.RenameEdit.c_str(), sizeof(m_Model.RenameBuffer) - 1);
+			StartRename(ctx, *m_Model.Selected.begin());
 		}
 
 		if (fileDrag && ctx.IsHovered(content))
@@ -705,12 +737,7 @@ namespace World
 					size = FormatBytes(static_cast<size_t>(FileSize(path)));
 				Label(ctx, { row.X + content.W * 0.72f, row.Y + 4 }, size, theme.TextMuted, 13.0f);
 				if (m_Model.RenameTarget == path)
-				{
-					if (TextField(ctx, Wui::HashId("browser.rename"), { row.X + 26, row.Y + 2, 160, 20 }, m_Model.RenameEdit, theme))
-						ApplyRename(path, m_Model.RenameEdit);
-					else if (ctx.IsKeyPressed(KeyCodes::Escape))
-						m_Model.RenameTarget.clear();
-				}
+					RenderRenameField(ctx, path, { row.X + 26, row.Y + 2, 160, 20 }, theme);
 			}
 			EndScrollArea(ctx);
 		}
@@ -740,12 +767,7 @@ namespace World
 					Image(ctx, cellRect, icon->GetRendererID(), { 0, 1, 1, -1 }, theme);
 				Label(ctx, { cellRect.X, cellRect.Y + 130 }, path.filename().string(), theme.Text, 13.0f);
 				if (m_Model.RenameTarget == path)
-				{
-					if (TextField(ctx, Wui::HashId("browser.rename"), { cellRect.X, cellRect.Y + 150, 128, 22 }, m_Model.RenameEdit, theme))
-						ApplyRename(path, m_Model.RenameEdit);
-					else if (ctx.IsKeyPressed(KeyCodes::Escape))
-						m_Model.RenameTarget.clear();
-				}
+					RenderRenameField(ctx, path, { cellRect.X, cellRect.Y + 150, 128, 22 }, theme);
 			}
 			EndScrollArea(ctx);
 		}
@@ -820,8 +842,8 @@ namespace World
 				{ "Cut", [this] { Cut(); } },
 				{ "Copy", [this] { Copy(); } },
 				{ "Paste", [this] { PasteInto(std::filesystem::is_directory(m_Model.ContextMenuPath) ? m_Model.ContextMenuPath : m_Model.Current); } },
-				{ "Rename", [this, single] { if (single) { m_Model.RenameTarget = m_Model.ContextMenuPath; m_Model.RenameEdit = m_Model.ContextMenuPath.filename().string(); std::strncpy(m_Model.RenameBuffer, m_Model.RenameEdit.c_str(), sizeof(m_Model.RenameBuffer) - 1); } } },
-				{ "New Folder", [this] { CreateFolder(); } },
+				{ "Rename", [this, single] { if (single && m_Ctx) StartRename(*m_Ctx, m_Model.ContextMenuPath); } },
+				{ "New Folder", [this, &ctx] { CreateFolder(ctx); } },
 				{ "Open in Explorer", [this] { const std::string cmd = "explorer \"" + std::filesystem::absolute(m_Model.ContextMenuPath).string() + "\""; system(cmd.c_str()); } },
 				{ "Delete", [this] { m_Model.ShowDeleteModal = true; } },
 			};
@@ -861,7 +883,7 @@ namespace World
 			DrawPanelSurface(ctx, menuPanel, theme);
 			struct BlankItem { const char* Label; std::function<void()> Action; };
 			const std::vector<BlankItem> items = {
-				{ "New Folder", [this] { CreateFolder(); } },
+				{ "New Folder", [this, &ctx] { CreateFolder(ctx); } },
 				{ "Paste", [this] { PasteInto(m_Model.Current); } },
 				{ "Refresh", [this] { InvalidateContents(); if (m_Model.Search[0]) UpdateSearch(); } },
 			};
