@@ -1,6 +1,9 @@
 #include "EditorLayer.h"
+#include "World/Core/Asset/BuiltinImporters.h"
+#include "World/Core/Asset/CookPipeline.h"
+#include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Thread/JobSystem.h"
-#include "World/Core/Cook/VFS.h"
+#include "World/Core/Vfs/DirectoryProvider.h"
 #include "World/Core/Vfs/PackageProvider.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Scene/ScriptEngine.h"
@@ -30,6 +33,10 @@ namespace World
 		std::string moduleError;
 		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
 			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
+
+		// 开发期资产:编辑器与 Runtime 一致,经 VFS 目录 provider 读内容。
+		Application::Get().GetContext().Vfs().Mount("dir:game-assets",
+			std::make_shared<World::Vfs::DirectoryProvider>(std::string(WLD_ASSETPATH)), 100);
 
 		// Application initialized Lua before attach; Game registration is now merged.
 		if (!ScriptEngine::GenerateLuaStubs())
@@ -538,6 +545,49 @@ namespace World
 					fs::path publishDir(target);
 					publishDir.replace_extension("");
 					fs::create_directories(publishDir);
+
+					// 1. 项目清单(单一事实源)。
+					const fs::path projectManifestPath =
+						std::string(WLD_GAME_DIR) + "project.we.yaml";
+					World::Asset::ProjectManifest manifest;
+					std::string manifestError;
+					if (!World::Asset::ProjectManifest::Load(projectManifestPath, &manifest, &manifestError))
+						throw std::runtime_error("Project manifest load failed: " + manifestError);
+					if (manifest.Packages.empty())
+						throw std::runtime_error("Project manifest declares no packages");
+
+					// 2. 当前打开场景若在内容根内,覆盖启动场景。
+					if (m_Document.HasPath())
+					{
+						const fs::path contentRoot = manifest.ResolveContentRoot(projectManifestPath);
+						const fs::path relative = fs::relative(m_Document.GetPath(), contentRoot);
+						if (!relative.empty() && relative.generic_string().find("..") == std::string::npos)
+							manifest.StartScene = relative.generic_string();
+					}
+
+					// 3. 增量烘焙(构建期缓存目录,仅此一处使用构建路径)。
+					const fs::path cookedDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "cooked");
+					World::Asset::CookPipeline pipeline(World::Asset::DefaultImporters());
+					World::Asset::CookSummary summary;
+					const std::vector<World::Asset::CookEntryResult> results =
+						pipeline.Cook(manifest, projectManifestPath, cookedDir, false, &summary);
+					for (const World::Asset::CookEntryResult& result : results)
+						if (result.Failed)
+							WLD_CORE_ERROR("Cook failed: {0}: {1}", result.Path, result.Error);
+					WLD_CORE_INFO("Cooked {0} assets ({1} changed, {2} skipped, {3} failed)",
+						summary.Total, summary.Changed, summary.Skipped, summary.Failed);
+					if (summary.Failed)
+						throw std::runtime_error("Asset cooking failed");
+
+					// 4. 打包 cooked 产物为发行包。
+					const fs::path outPakFile = publishDir / manifest.Packages[0];
+					fs::create_directories(outPakFile.parent_path());
+					std::error_code pakEc;
+					if (!World::Vfs::PackageProvider::BuildFromDirectory(cookedDir / "cooked", outPakFile, pakEc))
+						throw std::runtime_error("Package build failed: " +
+							(pakEc ? pakEc.message() : outPakFile.string()));
+
+					// 5. 拷贝运行时:Runtime.exe + 单份 WorldRuntime.dll + bin/Game.dll。
 					fs::path srcRuntimeOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "Runtime/" + WLD_BUILD_TYPE);
 					fs::path srcRuntimeExe = srcRuntimeOutputDir / "Runtime.exe";
 					if (!fs::is_regular_file(srcRuntimeExe))
@@ -545,14 +595,12 @@ namespace World
 					fs::copy_file(srcRuntimeExe, publishDir / "Runtime.exe", fs::copy_options::overwrite_existing);
 					WLD_CORE_INFO("Copied Runtime executable from: {0}", srcRuntimeExe.string());
 
-					// W4 起 Runtime 依赖 WorldRuntime.dll,必须与 exe 同目录。
 					fs::path srcRuntimeDll = srcRuntimeOutputDir / "WorldRuntime.dll";
 					if (!fs::is_regular_file(srcRuntimeDll))
 						throw std::runtime_error("WorldRuntime.dll could not be located: " + srcRuntimeDll.string());
 					fs::copy_file(srcRuntimeDll, publishDir / "WorldRuntime.dll", fs::copy_options::overwrite_existing);
 					WLD_CORE_INFO("Copied WorldRuntime.dll from: {0}", srcRuntimeDll.string());
 
-					// 扁平拷贝必需 DLL,避免深层嵌套与重复。
 					fs::path srcGameDll = fs::absolute(std::string(WLD_OUTPUT_DIR) +
 						"bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll");
 					if (!fs::is_regular_file(srcGameDll))
@@ -560,33 +608,13 @@ namespace World
 					fs::create_directories(publishDir / "bin");
 					fs::copy_file(srcGameDll, publishDir / "bin" / "Game.dll",
 						fs::copy_options::overwrite_existing);
-					fs::copy_file(srcRuntimeDll, publishDir / "bin" / "WorldRuntime.dll",
-						fs::copy_options::overwrite_existing);
-					WLD_CORE_INFO("Copied Game.dll and WorldRuntime.dll into bin/");
+					WLD_CORE_INFO("Copied Game.dll into bin/");
 
-					fs::path contentDir = publishDir / "content";
-					fs::create_directories(contentDir);
-					fs::path sourceAssetsDir = std::string(WLD_GAME_DIR) + "assets";
-					fs::path outPakFile = contentDir / "Base.wpak";
-					std::error_code pakEc;
-					if (!World::Vfs::PackageProvider::BuildFromDirectory(sourceAssetsDir, outPakFile, pakEc))
-						throw std::runtime_error("Asset package was not created: " +
-							(pakEc ? pakEc.message() : std::string(outPakFile.string())));
-					if (!fs::is_regular_file(outPakFile) || fs::file_size(outPakFile) == 0)
-						throw std::runtime_error("Asset package was not created: " + outPakFile.string());
+					// 6. 写发行清单(start_scene 已在第 2 步写入 manifest)。
+					std::string saveError;
+					if (!World::Asset::ProjectManifest::Save(publishDir / "project.we.yaml", manifest, &saveError))
+						throw std::runtime_error("Project manifest save failed: " + saveError);
 
-					// 启动场景:记录当前打开场景相对内容根的路径,Runtime 据此加载。
-					std::string startScene = "scenes/PhysicalTest.wd";
-					if (m_Document.HasPath())
-					{
-						fs::path relative = fs::relative(m_Document.GetPath(), sourceAssetsDir);
-						if (!relative.empty() && relative.generic_string().find("..") == std::string::npos)
-							startScene = relative.generic_string();
-					}
-					{
-						std::ofstream startSceneFile(publishDir / "start_scene.txt");
-						startSceneFile << startScene;
-					}
 					WLD_CORE_INFO("Game Cooked Successfully to {0}", publishDir.string());
 					m_CookingSucceeded = true;
 				}

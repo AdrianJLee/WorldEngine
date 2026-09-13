@@ -2,6 +2,7 @@
 #include "ScriptEngine.h"
 #include "Components.h"
 #include "LuaStubGenerator.h"
+#include "World/Core/Application.h"
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -42,6 +43,28 @@ namespace World
 			script.RuntimeEntity = {};
 			script.IsLoaded = false;
 			script.CreateEntered = false;
+		}
+
+		// VFS 优先读脚本源码;未命中回退磁盘;找不到抛 logic_error。
+		std::string ReadScriptSource(const std::string& scriptFilePath)
+		{
+			if (Application::HasInstance())
+			{
+				std::error_code ec;
+				std::vector<uint8_t> bytes;
+				if (Application::Get().GetContext().Vfs().Read(scriptFilePath, bytes, ec) && !bytes.empty())
+					return std::string(bytes.begin(), bytes.end());
+			}
+			const std::filesystem::path diskPath =
+				WLD_ASSETPATH + std::string("/") + scriptFilePath;
+			std::ifstream file(diskPath, std::ios::binary);
+			if (file.is_open())
+			{
+				std::stringstream buffer;
+				buffer << file.rdbuf();
+				return buffer.str();
+			}
+			throw std::logic_error("Script not found: " + scriptFilePath);
 		}
 
 		void CheckResult(const sol::protected_function_result& result)
@@ -281,20 +304,11 @@ namespace World
 		{
 			// 1. 读取脚本源码，静态解析 ---@field 注解（不执行脚本顶层代码）。
 			std::unordered_map<std::string, std::string> schema;
-			{
-				const std::filesystem::path filePath = WLD_ASSETPATH + std::string("/") + script.ScriptFilePath;
-				std::ifstream file(filePath);
-				if (file.is_open())
-				{
-					std::stringstream buffer;
-					buffer << file.rdbuf();
-					schema = ParseFieldAnnotationsInternal(buffer.str());
-				}
-			}
+			schema = ParseFieldAnnotationsInternal(ReadScriptSource(script.ScriptFilePath));
 
 			// 2. 执行脚本获取默认值表。
 			sol::environment environment(*s_LuaState, sol::create, s_LuaState->globals());
-			auto result = s_LuaState->safe_script_file(WLD_ASSETPATH + std::string("/") + script.ScriptFilePath, environment, sol::script_pass_on_error);
+			auto result = s_LuaState->safe_script(ReadScriptSource(script.ScriptFilePath), environment, sol::script_pass_on_error);
 			CheckResult(result);
 			if (result.return_count() == 0 || result.get_type() != sol::type::table) throw std::logic_error("Script must return a table");
 			sol::table table = result.get<sol::table>();
@@ -362,7 +376,7 @@ namespace World
 		try
 		{
 			script.LuaEnv = sol::environment(*s_LuaState, sol::create, s_LuaState->globals());
-			auto result = s_LuaState->safe_script_file(WLD_ASSETPATH + std::string("/") + script.ScriptFilePath, script.LuaEnv, sol::script_pass_on_error);
+			auto result = s_LuaState->safe_script(ReadScriptSource(script.ScriptFilePath), script.LuaEnv, sol::script_pass_on_error);
 			CheckResult(result);
 			if (result.return_count() == 0 || result.get_type() != sol::type::table) throw std::logic_error("Script must return a table");
 			script.ScriptTable = result.get<sol::table>();

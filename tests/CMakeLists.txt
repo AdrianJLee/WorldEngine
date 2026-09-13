@@ -88,7 +88,28 @@ set_tests_properties(World.Vfs PROPERTIES
     TIMEOUT 90
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests)
+# 资产管线回归:项目清单、指纹缓存、增量烘焙与打包读回一致性。
+add_executable(WorldAssetTests AssetCookTests.cpp)
+target_link_libraries(WorldAssetTests PRIVATE World)
+target_compile_features(WorldAssetTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldAssetTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldAssetTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldAssetTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Asset COMMAND WorldAssetTests)
+set_tests_properties(World.Asset PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests)
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

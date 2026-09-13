@@ -1,5 +1,6 @@
 ﻿#include "RuntimeLayer.h"
 #include "GameHud.h"
+#include "World/Core/Asset/ProjectManifest.h"
 #include "World/ImGui/ImGuiLayer.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
@@ -107,20 +108,15 @@ namespace World
 	{
 		Ref<Scene> tempScene = CreateRef<Scene>(Application::Get().GetContext());
 		SceneSerializer serializer(tempScene);
-		// 启动场景:优先读工作目录下的 start_scene.txt(打包时由 Editor 写入),
-		// 否则回退到默认场景。P2/P3 的项目 manifest 会取代该文件。
+		// 启动场景:项目 manifest 的 start_scene;无 manifest 时回退默认。
 		std::string scenePath = "scenes/PhysicalTest.wd";
+		std::filesystem::path manifestPath;
+		if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
 		{
-			std::ifstream config("start_scene.txt");
-			std::string line;
-			if (config && std::getline(config, line))
-			{
-				while (!line.empty() && (line.back() == '\r' || line.back() == '\n' ||
-					line.back() == ' ' || line.back() == '\t'))
-					line.pop_back();
-				if (!line.empty())
-					scenePath = line;
-			}
+			std::string error;
+			World::Asset::ProjectManifest manifest;
+			if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+				scenePath = manifest.StartScene;
 		}
 		if (serializer.Deserialize(scenePath))
 		{

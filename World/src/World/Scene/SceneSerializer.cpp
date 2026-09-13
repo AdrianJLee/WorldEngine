@@ -4,7 +4,6 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
 #include "World/Core/UUID.h"
-#include "World/Core/Cook/VFS.h"
 #include "World/Schema/SchemaWriter.h"
 
 #include <filesystem>
@@ -300,19 +299,14 @@ namespace World
 		}
 		else
 		{
-			auto data = VFS::ReadFile(filepath);
+			// VFS 2.0:目录/包 provider 统一解析,带来源与错误码。
+			std::vector<uint8_t> data;
+			std::error_code vfsEc;
+			m_Scene->GetContext().Vfs().Read(filepath, data, vfsEc);
 			if (data.empty())
 			{
-				// VFS 2.0 回退(目录/包 provider):旧 VFS 未命中时经 WorldContext 挂载栈解析。
-				// 旧 VFS 在 W3 移除后,此处将成为唯一解析路径。
-				std::error_code vfsEc;
-				if (!m_Scene->GetContext().Vfs().Read(filepath, data, vfsEc))
-					data.clear();
-			}
-			if (data.empty())
-			{
-				WLD_CORE_ERROR("Could not load file '{0}' from disk or VFS", filepath);
-				m_LastError = "Could not load file '" + filepath + "' from disk or VFS";
+				WLD_CORE_ERROR("Could not load file '{0}' from VFS", filepath);
+				m_LastError = "Could not load file '" + filepath + "' from VFS";
 				return false;
 			}
 			yamlData = std::string(data.begin(), data.end());

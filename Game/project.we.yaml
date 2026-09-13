@@ -1,0 +1,6 @@
+id: com.example.game
+version: 1.0.0
+content_root: assets
+start_scene: scenes/test.wd
+packages:
+  - packages/Base.wpak

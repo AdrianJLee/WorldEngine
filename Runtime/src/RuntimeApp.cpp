@@ -1,7 +1,8 @@
-﻿#include "World.h"
+#include "World.h"
 #include "RuntimeLayer.h"
-// 这个文件是整个 Runtime 程序的入口，定义了 RuntimeApp 类并实现了 CreateApplication 函数
+// 这个文件是整个 Runtime 程序的入口,定义了 RuntimeApp 类并实现了 CreateApplication 函数
 #include "World/Core/EntryPoint.h"
+#include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Vfs/DirectoryProvider.h"
 #include "World/Core/Vfs/PackageProvider.h"
 
@@ -16,7 +17,7 @@ namespace World
 		RuntimeApp(World::WorldContext& context)
 			:Application("Runtime", context)
 		{
-			// VFS 2.0:开发形态挂目录 provider,发行形态挂包 provider。
+			// VFS 2.0:清单驱动的挂载;无清单时回退开发目录 + content 扫描。
 			MountContent(context.Vfs());
 
 			PushLayer(WLD_ENGINE_NEW(RuntimeLayer));
@@ -29,67 +30,66 @@ namespace World
 	private:
 		void MountContent(World::Vfs::Vfs& vfs)
 		{
-			// 开发形态:源码资产目录直读,优先级最高,保留热迭代体验。
+			std::filesystem::path manifestPath;
+			if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+			{
+				std::string error;
+				World::Asset::ProjectManifest manifest;
+				if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+				{
+					// 开发形态:content_root 存在则挂目录 provider(优先级最高)。
+					const std::filesystem::path contentRoot = manifest.ResolveContentRoot(manifestPath);
+					std::error_code dirEc;
+					if (std::filesystem::is_directory(contentRoot, dirEc))
+						vfs.Mount("dir:game-assets",
+							std::make_shared<World::Vfs::DirectoryProvider>(contentRoot), 100);
+
+					// 发行形态:按 manifest 逐条挂载包,失败只记错误继续。
+					for (const std::string& package : manifest.Packages)
+					{
+						const std::filesystem::path pakPath =
+							std::filesystem::current_path() / package;
+						std::error_code openEc;
+						std::shared_ptr<World::Vfs::PackageProvider> provider =
+							World::Vfs::PackageProvider::Open(pakPath, openEc);
+						if (!provider)
+						{
+							WLD_CORE_ERROR("Failed to mount package '{0}': {1}",
+								pakPath.string(), openEc.message());
+							continue;
+						}
+						vfs.Mount("pak:" + package, std::move(provider), 10);
+						WLD_CORE_INFO("Mounted package '{0}'", pakPath.string());
+					}
+					return;
+				}
+				WLD_CORE_WARN("Failed to load manifest '{0}': {1}", manifestPath.string(), error);
+			}
+
+			// 回退:无清单时的旧开发形态(仅保留到旧工程完全迁移)。
+			WLD_CORE_WARN("No project manifest found; falling back to legacy content mounting.");
 			std::error_code dirEc;
 			const std::filesystem::path assetsDir =
 				std::filesystem::path(std::string(WLD_CURRENT_DIR) + "../Game/assets");
-			if (!std::filesystem::is_directory(assetsDir, dirEc))
-			{
-				WLD_CORE_WARN("Assets directory '{0}' not found, skipping directory provider mount.",
-					assetsDir.string());
-			}
-			else
-			{
+			if (std::filesystem::is_directory(assetsDir, dirEc))
 				vfs.Mount("dir:game-assets",
 					std::make_shared<World::Vfs::DirectoryProvider>(assetsDir), 100);
-			}
 
-			// 发行形态:扫描工作目录下 content/*.wpak 并逐个挂载;打开失败只记错误继续。
-			// 不能用 WLD_CURRENT_DIR:那是编译期源码树路径,发行副本必须相对运行目录解析。
 			const std::filesystem::path contentDir =
 				std::filesystem::current_path() / "content";
 			if (!std::filesystem::is_directory(contentDir, dirEc))
-			{
-				WLD_CORE_WARN("Content directory '{0}' not found, skipping package mounts.",
-					contentDir.string());
 				return;
-			}
-
-			std::error_code itEc;
-			const std::filesystem::directory_iterator end;
-			for (std::filesystem::directory_iterator it(contentDir, itEc); it != end; it.increment(itEc))
+			for (const auto& entry : std::filesystem::directory_iterator(contentDir, dirEc))
 			{
-				if (itEc)
-				{
-					WLD_CORE_WARN("Failed to enumerate content directory '{0}': {1}",
-						contentDir.string(), itEc.message());
+				if (dirEc)
 					break;
-				}
-				const std::filesystem::directory_entry& entry = *it;
-				if (!entry.is_regular_file(itEc))
-				{
-					if (itEc)
-					{
-						WLD_CORE_WARN("Failed to inspect '{0}': {1}",
-							entry.path().string(), itEc.message());
-						break;
-					}
+				if (!entry.is_regular_file(dirEc) || entry.path().extension() != ".wpak")
 					continue;
-				}
-				if (entry.path().extension() != ".wpak")
-					continue;
-
 				std::error_code openEc;
 				std::shared_ptr<World::Vfs::PackageProvider> provider =
 					World::Vfs::PackageProvider::Open(entry.path(), openEc);
-				if (!provider)
-				{
-					WLD_CORE_ERROR("Failed to mount package '{0}': {1}",
-						entry.path().string(), openEc.message());
-					continue;
-				}
-				vfs.Mount("pak:" + entry.path().filename().string(), std::move(provider), 10);
-				WLD_CORE_INFO("Mounted package '{0}'", entry.path().string());
+				if (provider)
+					vfs.Mount("pak:" + entry.path().filename().string(), std::move(provider), 10);
 			}
 		}
 	};

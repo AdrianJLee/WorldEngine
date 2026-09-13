@@ -16,6 +16,7 @@ namespace World
 		Application(const std::string& name, WorldContext& context);
 		virtual ~Application();
 		static void SetInstance(Application* instance) { s_Instance = instance; }
+		static bool HasInstance() { return s_Instance != nullptr; }
 		void Run();
 
 		void OnEvent(Event& e);

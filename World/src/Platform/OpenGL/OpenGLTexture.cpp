@@ -1,5 +1,6 @@
 ﻿#include "wldpch.h"
 #include "OpenGLTexture.h"
+#include "World/Core/Application.h"
 
 #include <stb_image.h>
 
@@ -12,22 +13,37 @@ namespace World
 
 		stbi_set_flip_vertically_on_load(1);
 
-		int width, height, channels;
+		int width = 1, height = 1, channels = 4;
 		stbi_uc* data = nullptr;
 		{
 			WLD_PROFILE_SCOPE("stbi_load - OpenGLTexture2D::OpenGLTexture2D(const std::string&)");
-			std::string path;
-			if (std::filesystem::exists(std::string(WLD_GAME_DIR) + m_Path))
+			// 1. VFS 优先:开发目录 provider 或发行包 provider。
+			if (Application::HasInstance())
 			{
-				path = std::string(WLD_GAME_DIR) + m_Path;
+				std::error_code vfsEc;
+				std::vector<uint8_t> bytes;
+				if (Application::Get().GetContext().Vfs().Read(m_Path, bytes, vfsEc) && !bytes.empty())
+					data = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+						&width, &height, &channels, 0);
 			}
-			else
+			// 2. 磁盘回退(未挂载 VFS 的开发环境)。
+			if (!data)
 			{
-				// 如果在游戏目录下找不到，就尝试在编辑器目录下找
-				path = std::string(WLD_EDITOR_DIR) + m_Path;
+				std::string diskPath;
+				if (std::filesystem::exists(std::string(WLD_GAME_DIR) + m_Path))
+					diskPath = std::string(WLD_GAME_DIR) + m_Path;
+				else
+					diskPath = std::string(WLD_EDITOR_DIR) + m_Path;
+				data = stbi_load(diskPath.c_str(), &width, &height, &channels, 0);
 			}
-			data = stbi_load(path.c_str(), &width, &height, &channels, 0);
-			WLD_CORE_ASSERT(data, "Failed to load image!");
+			// 3. 加载失败给 1x1 白色兜底,不让坏资产拖垮进程。
+			if (!data)
+			{
+				WLD_CORE_WARN("Failed to load image '{0}'; using 1x1 white fallback", m_Path);
+				static const stbi_uc white[4] = { 255, 255, 255, 255 };
+				data = stbi_load_from_memory(white, 4, &width, &height, &channels, 4);
+				width = height = 1;
+			}
 		}
 		GLint internalFormat = 0, dataFormat = 0;
 		if (channels == 4)

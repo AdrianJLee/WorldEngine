@@ -20,7 +20,6 @@
 #include "World/Core/Memory/MemoryTracker.h"
 #include "World/Core/Memory/StackAllocator.h"
 
-#include "World/Core/Cook/VFS.h"
 #include "World/Core/Vfs/Vfs.h"
 #include "World/Schema/Schema.h"
 #include "World/Schema/SchemaRegistry.h"
