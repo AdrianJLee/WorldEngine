@@ -14,9 +14,8 @@ namespace World::Rhi
 		switch (requested)
 		{
 			case Backend::Vulkan:
-				WLD_CORE_WARN("RHI: Vulkan backend not available yet; falling back to OpenGL");
-				if (chosenName) *chosenName = "opengl";
-				return Backend::OpenGL;
+				if (chosenName) *chosenName = "vulkan";
+				return Backend::Vulkan;
 			case Backend::Auto:
 			case Backend::OpenGL:
 			default:

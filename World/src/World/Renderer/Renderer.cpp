@@ -1,6 +1,7 @@
 ﻿#include "wldpch.h"
 #include "Renderer.h"
 
+#include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Application.h"
 #include "World/Renderer/RenderCommand.h"
 #include "World/Renderer/VertexArray.h"
@@ -18,10 +19,33 @@ namespace World
 	static Rhi::Handle<Rhi::DescriptorSetLayout> s_GlobalDescriptorSetLayout;
 	void Renderer::Init()
 	{
-		// RHI 设备:W5 只接线 OpenGL 后端;设备在 GL 上下文创建后初始化。
+		// 按 project.we.yaml 的 renderer 选择后端;Vulkan 不可用时降级 OpenGL。
+		std::string requested = "opengl";
+		std::filesystem::path manifestPath;
+		if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+		{
+			std::string manifestError;
+			World::Asset::ProjectManifest manifest;
+			if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError))
+				requested = manifest.Renderer;
+		}
+
+		const Rhi::Backend requestedBackend =
+			requested == "vulkan" ? Rhi::Backend::Vulkan : Rhi::Backend::OpenGL;
 		std::string error;
-		m_Device = Rhi::CreateDevice(Rhi::Backend::Auto, {}, &error);
+		m_Device = Rhi::CreateDevice(requestedBackend, {}, &error);
+		if (!m_Device)
+		{
+			WLD_CORE_WARN("Requested backend '{0}' unavailable ({1}); falling back to OpenGL",
+				requested, error);
+			error.clear();
+			m_Device = Rhi::CreateDevice(Rhi::Backend::OpenGL, {}, &error);
+		}
 		WLD_CORE_ASSERT(m_Device, "Failed to create RHI device: {0}", error);
+
+		// ShaderCompiler 依据 API 决定返回 SPIR-V 或 GLSL。
+		RendererAPI::SetAPI(requestedBackend == Rhi::Backend::Vulkan && m_Device->GetCapabilities().BackendName == "Vulkan"
+			? RendererAPI::API::Vulkan : RendererAPI::API::OpenGL);
 
 		RenderCommand::Init();
 
