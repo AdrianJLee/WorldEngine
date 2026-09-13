@@ -501,7 +501,8 @@ namespace World::Wui
 	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme, bool* cancelledOut)
 	{
 		WuiEditState& state = ctx.Persist<WuiEditState>(id, {});
-		if (ctx.Input().MouseDown[0] && ctx.IsHovered(rect))
+		// 仅在按下的那一帧初始化拖选锚点;按住期间持续更新选区。
+		if (ctx.Input().MouseClicked[0] && ctx.IsHovered(rect))
 		{
 			ctx.SetFocus(id);
 			const int clicked = CursorAtX(buffer, ctx.Input().MousePos.x - (rect.X + 6.0f), 15.0f);
@@ -519,6 +520,11 @@ namespace World::Wui
 			{
 				state.SelStart = std::min(state.DragAnchor, current);
 				state.SelEnd = std::max(state.DragAnchor, current);
+			}
+			else
+			{
+				state.SelStart = -1;
+				state.SelEnd = -1;
 			}
 		}
 		if (state.MouseSelecting && ctx.Input().MouseReleased[0])
