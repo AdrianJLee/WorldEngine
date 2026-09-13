@@ -232,6 +232,33 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
+	class WuiListRow final : public WuiWidget
+	{
+	public:
+		std::string Text;
+		bool Selected = false;
+		std::function<void()> OnClick;
+		float FontSize = 14;
+		WuiColor IdleFill { 0, 0, 0, 0 };
+		WuiColor HoverFill { 1, 1, 1, 0.06f };
+		WuiColor SelectedFill { 0.28f, 0.45f, 0.85f, 0.35f };
+
+		WuiMeasure Measure(const WuiConstraints& constraints) override;
+		void Paint(WuiPaintContext& context) override;
+	};
+
+	class WuiImageButton final : public WuiWidget
+	{
+	public:
+		uint64_t TextureId = 0;
+		WuiRect Uv { 0, 1, 1, -1 };
+		std::function<void()> OnClick;
+		bool Dim = false;
+
+		WuiMeasure Measure(const WuiConstraints& constraints) override;
+		void Paint(WuiPaintContext& context) override;
+	};
+
 	// 便捷:根据约束框递归测量并布局整棵树。
 	void LayoutWidgetTree(const WuiWidgetPtr& root, const WuiRect& rect);
 }
