@@ -1,11 +1,9 @@
 ﻿#pragma once
 #include "World/Core/Export.h"
-#include "World/Renderer/RendererAPI.h"
+#include "World/RHI/Rhi.h"
 #include "World/Renderer/SubTexture2D.h"
 #include "World/Renderer/EditorCamera.h"
-#include "World/Renderer/UniformBuffer.h"
 #include "World/Scene/Components.h"
-#include "World/Renderer/CommandBuffer.h"
 
 #include <vector>
 
@@ -19,7 +17,7 @@ namespace World
 	{
 	public:
 		static void Init();
-		static void BeginScene(const Camera& camera, const glm::mat4& transform, Ref<CommandBuffer> commandBuffer);
+		static void BeginScene(const Camera& camera, const glm::mat4& transform, Rhi::Handle<Rhi::CommandBuffer> commandBuffer);
 
 		static void EndScene();
 		static void StartBatch();
@@ -68,6 +66,6 @@ namespace World
 		static void NextBatch();
 
 	private:
-		static WLD_API Ref<CommandBuffer> s_CurrentCommandBuffer;
+		static WLD_API Rhi::Handle<Rhi::CommandBuffer> s_CurrentCommandBuffer;
 	};
 }

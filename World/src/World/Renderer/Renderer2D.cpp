@@ -1,325 +1,235 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "Renderer2D.h"
 
-#include "World/Renderer/VertexArray.h"
-#include "World/Renderer/Buffer.h"
-#include "World/Renderer/Shader.h"
-#include "World/Renderer/RenderCommand.h"
-#include "World/Renderer/Texture.h"
-#include "World/Renderer/PipelineStateObject.h"
-#include "World/Core/Thread/JobSystem.h"
 #include "World/Math/Math.h"
+#include "World/Renderer/Renderer.h"
+#include "World/Renderer/ShaderUtils.h"
+#include "World/RHI/RhiTextureBridge.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <array>
+
 namespace World
 {
-	Ref<CommandBuffer> Renderer2D::s_CurrentCommandBuffer = nullptr;
+	Rhi::Handle<Rhi::CommandBuffer> Renderer2D::s_CurrentCommandBuffer = nullptr;
 
-	struct QuadVertex
+	namespace
 	{
-		glm::vec3 Position = { 0.0f, 0.0f, 0.0f };
+		constexpr uint32_t MaxQuads = 20000;
+		constexpr uint32_t MaxCircles = 20000;
+		constexpr uint32_t MaxLines = 10000;
+		constexpr uint32_t MaxTextureSlots = 32;
 
-		// 默认颜色为白色
-		glm::vec4 Color = { 1.0f, 1.0f, 1.0f, 1.0f };
-
-		glm::vec2 TexCoord = { 0.0f, 0.0f };
-
-		// 默认纹理索引为0，表示使用白色纹理
-		float TexIndex = 0.0f;
-
-		float TilingFactor = 1.0f;
-
-		int EntityID = -1; // 用于场景编辑器中选择实体，默认为-1表示没有实体
-	};
-	struct Renderer2DQuadData
-	{
-		Ref<PipelineStateObject> QuadPipeline;
-
-		// 单次渲染调用中最多可以渲染的四边形数量
-		static const uint32_t MaxQuads = 20000;
-
-		// 每个四边形有4个顶点数据
-		static const uint32_t MaxVertices = MaxQuads * 4;
-
-		// 每个四边形有6个顶点索引
-		static const uint32_t MaxIndices = MaxQuads * 6;
-
-		// 当前渲染调用中已经提交的四边形数量
-		uint32_t QuadIndexCount = 0;
-
-		Ref<VertexArray> QuadVertexArray[4];
-
-		Ref<VertexBuffer> QuadVertexBuffer[4];
-
-		// 四边形顶点数据的缓冲区
-		QuadVertex* QuadVertexBufferBase = nullptr;
-		// 四边形顶点数据的当前指针
-		QuadVertex* QuadVertexBufferPtr = nullptr;
-
-	};
-	struct CircleVertex
-	{
-		glm::vec3 WorldPosition = { 0.0f, 0.0f, 0.0f };
-
-		glm::vec3 LocalPosition = { 0.0f, 0.0f, 0.0f };
-
-		glm::vec4 Color = { 1.0f, 1.0f, 1.0f, 1.0f };
-
-		float Thickness = 1.0f;
-
-		float Fade = 0.005f;
-
-		int EntityID = -1;
-
-	};
-
-	struct Renderer2DCircleData
-	{
-		Ref<PipelineStateObject> CirclePipeline;
-
-		// 单次渲染调用中最多可以渲染的四边形数量
-		static const uint32_t MaxCircles = 20000;
-
-		// 每个四边形有4个顶点数据
-		static const uint32_t MaxVertices = MaxCircles * 4;
-
-		// 每个四边形有6个顶点索引
-		static const uint32_t MaxIndices = MaxCircles * 6;
-
-		uint32_t CircleIndexCount = 0;
-
-		Ref<VertexArray> CircleVertexArray[4];
-		Ref<VertexBuffer> CircleVertexBuffer[4];
-		CircleVertex* CircleVertexBufferBase = nullptr;
-		CircleVertex* CircleVertexBufferPtr = nullptr;
-	};
-
-	struct LineVertex
-	{
-		glm::vec3 Position = { 0.0f, 0.0f, 0.0f };
-		glm::vec4 Color = { 1.0f, 1.0f, 1.0f, 1.0f };
-		int EntityID = -1;
-	};
-	struct Renderer2DLineData
-	{
-		Ref<PipelineStateObject> LinePipeline;
-
-		static const uint32_t MaxLines = 10000;
-		static const uint32_t MaxVertices = MaxLines * 2;
-		static const uint32_t MaxIndices = MaxLines * 2;
-		uint32_t LineIndexCount = 0;
-
-		Ref<VertexArray> LineVertexArray[4];
-		Ref<VertexBuffer> LineVertexBuffer[4];
-		LineVertex* LineVertexBufferBase = nullptr;
-		LineVertex* LineVertexBufferPtr = nullptr;
-
-		const float Thickness = 2.0f;
-	};
-
-	struct Renderer2DData
-	{
-		Renderer2DQuadData QuadData;
-		Renderer2DCircleData CircleData;
-		Renderer2DLineData LineData;
-
-		Ref<Texture2D> WhiteTexture;
-		Renderer2D::Statistics Stats;
-		static const uint32_t MaxTextureSlots = 32; // 32是OpenGL至少支持的最大纹理单元数量
-		// 纹理槽数组，存储当前渲染调用中使用的纹理对象
-		std::array<Ref<Texture2D>, MaxTextureSlots> TextureSlots;
-		uint32_t TextureSlotIndex = 1; // 0 预留给白色纹理
-		glm::vec4 VertexPositions[4] =
+		struct QuadVertex
 		{
-			{-0.5f,-0.5f,0.0f,1.0f},
-			{ 0.5f,-0.5f,0.0f,1.0f},
-			{ 0.5f, 0.5f,0.0f,1.0f},
-			{-0.5f, 0.5f,0.0f,1.0f}
+			glm::vec3 Position;
+			glm::vec4 Color;
+			glm::vec2 TexCoord;
+			float TexIndex = 0.0f;
+			float TilingFactor = 1.0f;
+			int EntityID = -1;
 		};
 
-		Ref<DescriptorSet> TextureDescriptorSet;
-	};
+		struct CircleVertex
+		{
+			glm::vec3 WorldPosition;
+			glm::vec3 LocalPosition;
+			glm::vec4 Color;
+			float Thickness = 1.0f;
+			float Fade = 0.005f;
+			int EntityID = -1;
+		};
 
-	static Renderer2DData s_Data;
+		struct LineVertex
+		{
+			glm::vec3 Position;
+			glm::vec4 Color;
+			int EntityID = -1;
+		};
+
+		Rhi::Handle<Rhi::Shader> CreateRendererShader(const char* hlsl, const char* debugName)
+		{
+			const auto vsBytes = ShaderCompiler::CompileOrLoad(hlsl, "VSMain", "vs_6_0");
+			const auto psBytes = ShaderCompiler::CompileOrLoad(hlsl, "PSMain", "ps_6_0");
+			Rhi::ShaderDesc desc;
+			desc.DebugName = debugName;
+			desc.Stages.push_back({ Rhi::ShaderStage::Vertex, "main", {},
+				std::string(vsBytes.begin(), vsBytes.end()) });
+			desc.Stages.push_back({ Rhi::ShaderStage::Fragment, "main", {},
+				std::string(psBytes.begin(), psBytes.end()) });
+			return Renderer::GetDevice()->CreateShader(desc);
+		}
+
+		Rhi::PipelineDesc MakePipeline(const Rhi::Handle<Rhi::Shader>& shader,
+			const std::vector<Rhi::VertexAttribute>& attributes, uint32_t stride,
+			Rhi::PrimitiveTopology topology, float lineWidth = 1.0f)
+		{
+			Rhi::PipelineDesc desc;
+			desc.Shader = shader;
+			desc.Topology = topology;
+			desc.LineWidth = lineWidth;
+			desc.VertexBindings.push_back({ 0, stride, false });
+			desc.VertexAttributes = attributes;
+			desc.Blends.push_back({
+				true,
+				Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
+				Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
+				0xF });
+			desc.DebugName = shader->GetDesc().DebugName;
+			return desc;
+		}
+
+		template <typename Vertex>
+		struct Batch
+		{
+			Rhi::Handle<Rhi::Pipeline> Pipeline;
+			Rhi::Handle<Rhi::Buffer> VertexBuffer;
+			Rhi::Handle<Rhi::Buffer> IndexBuffer;
+			Vertex* Base = nullptr;
+			Vertex* Ptr = nullptr;
+			uint32_t IndexCount = 0;
+		};
+
+		struct Renderer2DData
+		{
+			Batch<QuadVertex> Quads;
+			Batch<CircleVertex> Circles;
+			Batch<LineVertex> Lines;
+
+			Rhi::Handle<Rhi::Sampler> Sampler;
+			Rhi::Handle<Rhi::DescriptorSet> TextureDescriptorSet;
+			std::array<Rhi::Handle<Rhi::Texture>, MaxTextureSlots> Textures;
+			std::array<Ref<Texture2D>, MaxTextureSlots> SourceTextures;
+			uint32_t TextureSlotIndex = 1;
+
+			glm::vec4 VertexPositions[4] =
+			{
+				{ -0.5f, -0.5f, 0.0f, 1.0f },
+				{ 0.5f, -0.5f, 0.0f, 1.0f },
+				{ 0.5f, 0.5f, 0.0f, 1.0f },
+				{ -0.5f, 0.5f, 0.0f, 1.0f }
+			};
+
+			Renderer2D::Statistics Stats;
+		};
+
+		Renderer2DData s_Data;
+
+		template <typename Vertex, uint32_t MaxIndices>
+		void CreateBatch(Batch<Vertex>& batch, const Rhi::Handle<Rhi::Shader>& shader,
+			const std::vector<Rhi::VertexAttribute>& attributes,
+			Rhi::PrimitiveTopology topology, uint32_t maxVertices, float lineWidth)
+		{
+			batch.Pipeline = Renderer::GetDevice()->CreatePipeline(
+				MakePipeline(shader, attributes, sizeof(Vertex), topology, lineWidth));
+			Rhi::BufferDesc vertexDesc;
+			vertexDesc.Size = static_cast<uint64_t>(maxVertices) * sizeof(Vertex);
+			vertexDesc.Usage = Rhi::BufferUsageVertex;
+			vertexDesc.Memory = Rhi::MemoryHint::HostVisible;
+			batch.VertexBuffer = Renderer::GetDevice()->CreateBuffer(vertexDesc);
+			batch.Base = new Vertex[maxVertices];
+			batch.Ptr = batch.Base;
+
+			std::vector<uint32_t> indices(MaxIndices);
+			uint32_t offset = 0;
+			if (topology == Rhi::PrimitiveTopology::LineList)
+			{
+				for (uint32_t i = 0; i < MaxIndices; i += 2)
+				{
+					indices[i + 0] = offset + 0;
+					indices[i + 1] = offset + 1;
+					offset += 2;
+				}
+			}
+			else
+			{
+				for (uint32_t i = 0; i < MaxIndices; i += 6)
+				{
+					indices[i + 0] = offset + 0;
+					indices[i + 1] = offset + 1;
+					indices[i + 2] = offset + 2;
+					indices[i + 3] = offset + 2;
+					indices[i + 4] = offset + 3;
+					indices[i + 5] = offset + 0;
+					offset += 4;
+				}
+			}
+			Rhi::BufferDesc indexDesc;
+			indexDesc.Size = MaxIndices * sizeof(uint32_t);
+			indexDesc.Usage = Rhi::BufferUsageIndex;
+			indexDesc.InitialData = indices.data();
+			batch.IndexBuffer = Renderer::GetDevice()->CreateBuffer(indexDesc);
+		}
+
+		template <typename Vertex>
+		void ResetBatch(Batch<Vertex>& batch)
+		{
+			batch.IndexCount = 0;
+			batch.Ptr = batch.Base;
+		}
+	}
+
 	void Renderer2D::Init()
 	{
 		WLD_PROFILE_FUNCTION();
-		{
-			s_Data.TextureDescriptorSet = CreateRef<DescriptorSet>();
-		}
-		// Quad渲染数据初始化
-		{
-			// Shader
-			Ref<Shader>  quadShader = Shader::Create();
-			quadShader->AddShader("assets/shaders/Renderer2D_Quad.hlsl", Shader::ShaderType::Vertex);
-			quadShader->AddShader("assets/shaders/Renderer2D_Quad.hlsl", Shader::ShaderType::Fragment);
-			quadShader->Compile();
 
-			//Vertex Buffer
-			PipelineSpecification quadPipelineSpec;
-			quadPipelineSpec.Shader = quadShader;
-			quadPipelineSpec.Layout = {
-				{ ShaderDataType::Float3, "a_Position",0},
-				{ ShaderDataType::Float4, "a_Color",1 },
-				{ ShaderDataType::Float2, "a_TexCoord",2 },
-				{ ShaderDataType::Float, "a_TexIndex",3 },
-				{ ShaderDataType::Float, "a_TilingFactor",4 },
-				{ ShaderDataType::Int, "a_EntityID",5 }
-			};
-			s_Data.QuadData.QuadPipeline = PipelineStateObject::Create(quadPipelineSpec);
+		// 纹理描述符(绑定 0 = t0~t31;GLSL 未显式声明 layout,默认单元 0..31)。
+		Rhi::DescriptorSetLayoutDesc textureLayout;
+		textureLayout.Bindings.push_back({ 0, Rhi::DescriptorType::CombinedImageSampler,
+			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), MaxTextureSlots });
+		s_Data.TextureDescriptorSet =
+			Renderer::GetDevice()->CreateDescriptorSet(
+				Renderer::GetDevice()->CreateDescriptorSetLayout(textureLayout));
 
-			// 为四边形顶点数据结构分配内存
-			s_Data.QuadData.QuadVertexBufferBase = new QuadVertex[s_Data.QuadData.MaxVertices];
+		Rhi::SamplerDesc samplerDesc;
+		samplerDesc.MinFilter = Rhi::Filter::Linear;
+		samplerDesc.MagFilter = Rhi::Filter::Linear;
+		samplerDesc.AddressU = Rhi::SamplerAddressMode::Repeat;
+		samplerDesc.AddressV = Rhi::SamplerAddressMode::Repeat;
+		samplerDesc.AddressW = Rhi::SamplerAddressMode::Repeat;
+		s_Data.Sampler = Renderer::GetDevice()->CreateSampler(samplerDesc);
 
-			//Index Buffer
-			// 构建四边形索引数据，每个四边形由两个三角形组成，共6个顶点索引
-			uint32_t* quadIndices = new uint32_t[s_Data.QuadData.MaxIndices];
-			uint32_t offset = 0;
-			for (uint32_t i = 0; i < s_Data.QuadData.MaxIndices; i += 6)
-			{
-				// {0,1,2,2,3,0}
-				quadIndices[i + 0] = offset + 0;
-				quadIndices[i + 1] = offset + 1;
-				quadIndices[i + 2] = offset + 2;
+		// 白色纹理(槽 0)。
+		Rhi::TextureDesc whiteDesc;
+		whiteDesc.Type = Rhi::TextureType::Texture2D;
+		whiteDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+		whiteDesc.Extent = { 1, 1, 1 };
+		whiteDesc.Usage = Rhi::TextureUsageSampled;
+		s_Data.Textures[0] = Renderer::GetDevice()->CreateTexture(whiteDesc);
+		const uint8_t white[4] = { 255, 255, 255, 255 };
+		s_Data.Textures[0]->SetData(white, 4);
+		s_Data.SourceTextures[0] = nullptr;
 
-				quadIndices[i + 3] = offset + 2;
-				quadIndices[i + 4] = offset + 3;
-				quadIndices[i + 5] = offset + 0;
+		const auto quadShader = CreateRendererShader("assets/shaders/Renderer2D_Quad.hlsl", "Renderer2D-Quad");
+		CreateBatch<QuadVertex, MaxQuads * 6>(s_Data.Quads, quadShader, {
+			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
+			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 12 },
+			{ 2, 0, Rhi::Format::R32G32_SFLOAT, 28 },
+			{ 3, 0, Rhi::Format::R32_SFLOAT, 36 },
+			{ 4, 0, Rhi::Format::R32_SFLOAT, 40 },
+			{ 5, 0, Rhi::Format::R32_SINT, 44 },
+		}, Rhi::PrimitiveTopology::TriangleList, MaxQuads * 4, 1.0f);
 
-				// 下一个四边形的顶点索引从当前偏移量开始，偏移量每次增加4（每个四边形有4个顶点）
-				offset += 4;
-			}
+		const auto circleShader = CreateRendererShader("assets/shaders/Renderer2D_Circle.hlsl", "Renderer2D-Circle");
+		CreateBatch<CircleVertex, MaxCircles * 6>(s_Data.Circles, circleShader, {
+			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
+			{ 1, 0, Rhi::Format::R32G32B32_SFLOAT, 12 },
+			{ 2, 0, Rhi::Format::R32G32B32A32_SFLOAT, 24 },
+			{ 3, 0, Rhi::Format::R32_SFLOAT, 40 },
+			{ 4, 0, Rhi::Format::R32_SFLOAT, 44 },
+			{ 5, 0, Rhi::Format::R32_SINT, 48 },
+		}, Rhi::PrimitiveTopology::TriangleList, MaxCircles * 4, 1.0f);
 
-			Ref<IndexBuffer> quadIB = IndexBuffer::Create(quadIndices, s_Data.QuadData.MaxIndices);
-			for (uint32_t frameIndex = 0; frameIndex < 4; frameIndex++)
-			{
-				//Vertex Array
-				s_Data.QuadData.QuadVertexArray[frameIndex] = VertexArray::Create();
-
-				s_Data.QuadData.QuadVertexBuffer[frameIndex] = VertexBuffer::Create(s_Data.QuadData.MaxVertices * sizeof(QuadVertex));
-				s_Data.QuadData.QuadVertexBuffer[frameIndex]->SetLayout(s_Data.QuadData.QuadPipeline->GetSpecification().Layout);
-
-				s_Data.QuadData.QuadVertexArray[frameIndex]->AddVertexBuffer(s_Data.QuadData.QuadVertexBuffer[frameIndex], s_Data.QuadData.QuadPipeline->GetSpecification().Shader);
-				s_Data.QuadData.QuadVertexArray[frameIndex]->SetIndexBuffer(quadIB);
-
-			}
-			delete[] quadIndices;
-		}
-
-		// Circle渲染数据初始化
-		{
-			// Shader
-			Ref<Shader> circleShader = Shader::Create();
-			circleShader->AddShader("assets/shaders/Renderer2D_Circle.hlsl", Shader::ShaderType::Vertex);
-			circleShader->AddShader("assets/shaders/Renderer2D_Circle.hlsl", Shader::ShaderType::Fragment);
-			circleShader->Compile();
-
-			// CircleVertexBuffer
-			PipelineSpecification circlePipelineSpec;
-			circlePipelineSpec.Shader = circleShader;
-			circlePipelineSpec.Layout = {
-				{ ShaderDataType::Float3, "WorldPosition",0},
-				{ ShaderDataType::Float3, "LocalPosition",1 },
-				{ ShaderDataType::Float4, "Color",2 },
-				{ ShaderDataType::Float, "Thickness",3 },
-				{ ShaderDataType::Float, "Fade",4 },
-				{ ShaderDataType::Int, "EntityID",5 }
-			};
-			s_Data.CircleData.CirclePipeline = PipelineStateObject::Create(circlePipelineSpec);
-
-			// 为圆形顶点数据结构分配内存
-			s_Data.CircleData.CircleVertexBufferBase = new CircleVertex[s_Data.CircleData.MaxVertices];
-
-			// Index Buffer
-			uint32_t* circleIndices = new uint32_t[s_Data.CircleData.MaxIndices];
-			uint32_t offset = 0;
-			for (uint32_t i = 0; i < s_Data.CircleData.MaxIndices; i += 6)
-			{
-				circleIndices[i + 0] = offset + 0;
-				circleIndices[i + 1] = offset + 1;
-				circleIndices[i + 2] = offset + 2;
-
-				circleIndices[i + 3] = offset + 2;
-				circleIndices[i + 4] = offset + 3;
-				circleIndices[i + 5] = offset + 0;
-				offset += 4;
-			}
-			Ref<IndexBuffer> circleIB = IndexBuffer::Create(circleIndices, s_Data.CircleData.MaxIndices);
-
-			for (uint32_t frameIndex = 0; frameIndex < 4; frameIndex++)
-			{
-				// Vertex Array
-				s_Data.CircleData.CircleVertexArray[frameIndex] = VertexArray::Create();
-
-				s_Data.CircleData.CircleVertexBuffer[frameIndex] = VertexBuffer::Create(s_Data.CircleData.MaxVertices * sizeof(CircleVertex));
-				s_Data.CircleData.CircleVertexBuffer[frameIndex]->SetLayout(s_Data.CircleData.CirclePipeline->GetSpecification().Layout);
-
-				s_Data.CircleData.CircleVertexArray[frameIndex]->AddVertexBuffer(s_Data.CircleData.CircleVertexBuffer[frameIndex], s_Data.CircleData.CirclePipeline->GetSpecification().Shader);
-
-				s_Data.CircleData.CircleVertexArray[frameIndex]->SetIndexBuffer(circleIB);
-			}
-			delete[] circleIndices;
-		}
-
-		// Line渲染数据初始化
-		{
-			RenderCommand::SetLineWidth(s_Data.LineData.Thickness);
-
-			// Shader
-			Ref<Shader> lineShader = Shader::Create();
-			lineShader->AddShader("assets/shaders/Renderer2D_Line.hlsl", Shader::ShaderType::Vertex);
-			lineShader->AddShader("assets/shaders/Renderer2D_Line.hlsl", Shader::ShaderType::Fragment);
-			lineShader->Compile();
-
-			// LineVertexBuffer
-			PipelineSpecification linePipelineSpec;
-			linePipelineSpec.Shader = lineShader;
-			linePipelineSpec.Layout = {
-				{ ShaderDataType::Float3, "a_Position",0},
-				{ ShaderDataType::Float4, "a_Color",1 },
-				{ ShaderDataType::Int, "a_EntityID",2 }
-			};
-			s_Data.LineData.LinePipeline = PipelineStateObject::Create(linePipelineSpec);
-			s_Data.LineData.LineVertexBufferBase = new LineVertex[s_Data.LineData.MaxVertices];
-
-			// Index Buffer
-			uint32_t* lineIndices = new uint32_t[s_Data.LineData.MaxIndices];
-			uint32_t lineOffset = 0;
-			for (uint32_t i = 0; i < s_Data.LineData.MaxIndices; i += 2)
-			{
-				lineIndices[i + 0] = lineOffset + 0;
-				lineIndices[i + 1] = lineOffset + 1;
-				lineOffset += 2;
-			}
-			Ref<IndexBuffer> lineIB = IndexBuffer::Create(lineIndices, s_Data.LineData.MaxIndices);
-			for (uint32_t frameIndex = 0; frameIndex < 4; frameIndex++)
-			{
-				// Vertex Array
-				s_Data.LineData.LineVertexArray[frameIndex] = VertexArray::Create();
-
-				s_Data.LineData.LineVertexBuffer[frameIndex] = VertexBuffer::Create(s_Data.LineData.MaxVertices * sizeof(LineVertex));
-				s_Data.LineData.LineVertexBuffer[frameIndex]->SetLayout(s_Data.LineData.LinePipeline->GetSpecification().Layout);
-
-				s_Data.LineData.LineVertexArray[frameIndex]->AddVertexBuffer(s_Data.LineData.LineVertexBuffer[frameIndex], s_Data.LineData.LinePipeline->GetSpecification().Shader);
-				s_Data.LineData.LineVertexArray[frameIndex]->SetIndexBuffer(lineIB);
-
-			}
-			delete[] lineIndices;
-		}
-
-
-		// 创建一个1x1的白色纹理，作为默认纹理使用
-		s_Data.WhiteTexture = Texture2D::Create(1, 1);
-		uint32_t whiteTextureData = 0xffffffff;
-
-		s_Data.WhiteTexture->SetData(&whiteTextureData, sizeof(uint32_t));
-		// 将白色纹理绑定到纹理槽0，确保在渲染调用中默认使用白色纹理
-		s_Data.TextureSlots[0] = s_Data.WhiteTexture;
-
+		const auto lineShader = CreateRendererShader("assets/shaders/Renderer2D_Line.hlsl", "Renderer2D-Line");
+		CreateBatch<LineVertex, MaxLines * 2>(s_Data.Lines, lineShader, {
+			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
+			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 12 },
+			{ 2, 0, Rhi::Format::R32_SINT, 28 },
+		}, Rhi::PrimitiveTopology::LineList, MaxLines * 2, 2.0f);
 	}
 
-	void Renderer2D::BeginScene(const Camera& camera, const glm::mat4& transform, Ref<CommandBuffer> commandBuffer)
+	void Renderer2D::BeginScene(const Camera&, const glm::mat4&, Rhi::Handle<Rhi::CommandBuffer> commandBuffer)
 	{
 		WLD_PROFILE_FUNCTION();
 		s_CurrentCommandBuffer = commandBuffer;
@@ -329,196 +239,144 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 		Flush();
-
 		s_CurrentCommandBuffer = nullptr;
 	}
 
 	void Renderer2D::StartBatch()
 	{
-		// 重置纹理槽索引，保留槽0给白色纹理
 		s_Data.TextureSlotIndex = 1;
+		ResetBatch(s_Data.Quads);
+		ResetBatch(s_Data.Circles);
+		ResetBatch(s_Data.Lines);
+	}
 
-		// Quad
-		{
-			// 重置四边形索引计数
-			s_Data.QuadData.QuadIndexCount = 0;
-			// 重置四边形顶点数据的当前指针
-			s_Data.QuadData.QuadVertexBufferPtr = s_Data.QuadData.QuadVertexBufferBase;
-		}
-
-		// Circle
-		{
-
-			s_Data.CircleData.CircleIndexCount = 0;
-			s_Data.CircleData.CircleVertexBufferPtr = s_Data.CircleData.CircleVertexBufferBase;
-		}
-
-		// Line
-		{
-			s_Data.LineData.LineIndexCount = 0;
-			s_Data.LineData.LineVertexBufferPtr = s_Data.LineData.LineVertexBufferBase;
-		}
-
+	void Renderer2D::NextBatch()
+	{
+		Flush();
+		StartBatch();
 	}
 
 	void Renderer2D::Flush()
 	{
-		s_Data.TextureDescriptorSet->SetTextures(DescriptorBindings::Textures::Batching2D::BaseSlot, s_Data.TextureSlots);
+		if (!s_CurrentCommandBuffer)
+			return;
+
+		// 纹理描述符更新。
+		std::vector<Rhi::DescriptorWrite> writes;
+		writes.reserve(s_Data.TextureSlotIndex);
+		for (uint32_t i = 0; i < s_Data.TextureSlotIndex; ++i)
+		{
+			Rhi::DescriptorWrite write;
+			write.Binding = 0;
+			write.ArrayIndex = i;
+			write.Type = Rhi::DescriptorType::CombinedImageSampler;
+			write.Texture = s_Data.Textures[i];
+			write.Sampler = s_Data.Sampler;
+			writes.push_back(write);
+		}
+		s_Data.TextureDescriptorSet->Update(writes);
 		s_CurrentCommandBuffer->BindDescriptorSet(s_Data.TextureDescriptorSet);
 
-		if (s_Data.LineData.LineVertexBufferPtr != s_Data.LineData.LineVertexBufferBase && s_Data.LineData.LineVertexBufferPtr != nullptr)
+		auto flushBatch = [&](auto& batch)
 		{
-			uint32_t lineDataSize = (uint32_t)((uint8_t*)s_Data.LineData.LineVertexBufferPtr - (uint8_t*)s_Data.LineData.LineVertexBufferBase);
-
-			s_CurrentCommandBuffer->BindPipeline(s_Data.LineData.LinePipeline);
-			s_CurrentCommandBuffer->SetBufferData(s_Data.LineData.LineVertexBuffer[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.LineData.LineVertexBufferBase, lineDataSize);
-
-			s_CurrentCommandBuffer->DrawLines(s_Data.LineData.LineVertexArray[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.LineData.LineIndexCount);
-
+			if (batch.Ptr == batch.Base)
+				return;
+			const uint64_t size = static_cast<uint64_t>(
+				reinterpret_cast<uint8_t*>(batch.Ptr) - reinterpret_cast<uint8_t*>(batch.Base));
+			batch.VertexBuffer->SetData(batch.Base, size);
+			s_CurrentCommandBuffer->BindPipeline(batch.Pipeline);
+			s_CurrentCommandBuffer->BindVertexBuffer(0, batch.VertexBuffer);
+			s_CurrentCommandBuffer->BindIndexBuffer(batch.IndexBuffer);
+			s_CurrentCommandBuffer->DrawIndexed(batch.IndexCount);
 			s_Data.Stats.DrawCalls++;
+		};
 
-		}
-		if (s_Data.QuadData.QuadIndexCount > 0)
-		{
-			// 计算已经提交的四边形顶点数据的大小，并将数据上传到GPU
-			// 当前指针减去基地址得到已经提交的顶点数据的字节大小
-			uint32_t dataSize = (uint32_t)((uint8_t*)s_Data.QuadData.QuadVertexBufferPtr - (uint8_t*)s_Data.QuadData.QuadVertexBufferBase);
-
-			s_CurrentCommandBuffer->BindPipeline(s_Data.QuadData.QuadPipeline);
-			s_CurrentCommandBuffer->SetBufferData(s_Data.QuadData.QuadVertexBuffer[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.QuadData.QuadVertexBufferBase, dataSize);
-
-			s_CurrentCommandBuffer->DrawIndexed(s_Data.QuadData.QuadVertexArray[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.QuadData.QuadIndexCount);
-
-			s_Data.Stats.DrawCalls++;
-		}
-
-		if (s_Data.CircleData.CircleVertexBufferPtr != s_Data.CircleData.CircleVertexBufferBase && s_Data.CircleData.CircleVertexBufferPtr != nullptr)
-		{
-			uint32_t circleDataSize = (uint32_t)((uint8_t*)s_Data.CircleData.CircleVertexBufferPtr - (uint8_t*)s_Data.CircleData.CircleVertexBufferBase);
-
-			s_CurrentCommandBuffer->BindPipeline(s_Data.CircleData.CirclePipeline);
-			s_CurrentCommandBuffer->SetBufferData(s_Data.CircleData.CircleVertexBuffer[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.CircleData.CircleVertexBufferBase, circleDataSize);
-
-			s_CurrentCommandBuffer->DrawIndexed(s_Data.CircleData.CircleVertexArray[s_CurrentCommandBuffer->GetCurrentFrameIndex()], s_Data.CircleData.CircleIndexCount);
-
-			s_Data.Stats.DrawCalls++;
-		}
-
+		flushBatch(s_Data.Lines);
+		flushBatch(s_Data.Quads);
+		flushBatch(s_Data.Circles);
 	}
-	void Renderer2D::DrawQuadCore(const glm::mat4& transform, const Ref<Texture2D>& texture, const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
+
+	void Renderer2D::DrawQuadCore(const glm::mat4& transform, const Ref<Texture2D>& texture,
+		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
 	{
 		WLD_PROFILE_FUNCTION();
-
-		// 如果超出了批次允许的最大顶点索引数，直接开启下一批次
-		if (s_Data.QuadData.QuadIndexCount >= s_Data.QuadData.MaxIndices)
-		{
+		if (s_Data.Quads.IndexCount >= MaxQuads * 6)
 			NextBatch();
-		}
 
-		// 处理 UV
-		constexpr glm::vec2 defaultTexCoords[] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
-		const glm::vec2* actualTexCoords = texCoords != nullptr ? texCoords : defaultTexCoords;
+		constexpr glm::vec2 defaultTexCoords[] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+		const glm::vec2* actualTexCoords = texCoords ? texCoords : defaultTexCoords;
 
-		// 处理 纹理
-		float textureIndex = 0.0f; // 默认使用 0 号槽位，即白纹理 (WhiteTexture)
-
-		if (texture != nullptr)
+		float textureIndex = 0.0f;
+		if (texture)
 		{
-
-			// 检查纹理是否已经绑定在当前批次的某个槽位中
 			for (uint32_t i = 1; i < s_Data.TextureSlotIndex; i++)
-			{
-				if (*s_Data.TextureSlots[i] == *texture)
+				if (s_Data.SourceTextures[i] && *s_Data.SourceTextures[i] == *texture)
 				{
-					textureIndex = (float)i;
+					textureIndex = static_cast<float>(i);
 					break;
 				}
-			}
-
-			// 如果纹理尚未在此批次中绑定，则进行分配
 			if (textureIndex == 0.0f)
 			{
-
-				if (s_Data.TextureSlotIndex >= s_Data.MaxTextureSlots)
-				{
+				if (s_Data.TextureSlotIndex >= MaxTextureSlots)
 					NextBatch();
-				}
-				if (s_Data.TextureSlotIndex < s_Data.MaxTextureSlots)
-				{
-					textureIndex = (float)s_Data.TextureSlotIndex;
-					s_Data.TextureSlots[s_Data.TextureSlotIndex] = texture;
-					s_Data.TextureSlotIndex++;
-				}
+				textureIndex = static_cast<float>(s_Data.TextureSlotIndex);
+				s_Data.Textures[s_Data.TextureSlotIndex] = Rhi::WrapTexture2D(texture);
+				s_Data.SourceTextures[s_Data.TextureSlotIndex] = texture;
+				s_Data.TextureSlotIndex++;
 			}
 		}
 
-		// 组装并上传顶点数据
-		constexpr uint32_t quadVertexCount = 4;
-		glm::vec3 transformedPositions[quadVertexCount];
+		glm::vec3 transformedPositions[4];
 		Math::MultiplyMat4ByVec4_SIMD_x4(transform, s_Data.VertexPositions, transformedPositions);
-
-		for (uint32_t i = 0; i < quadVertexCount; i++)
+		for (uint32_t i = 0; i < 4; i++)
 		{
-			s_Data.QuadData.QuadVertexBufferPtr->Position = transformedPositions[i];
-			//s_Data.QuadData.QuadVertexBufferPtr->Position = transform * s_Data.VertexPositions[i];
-			s_Data.QuadData.QuadVertexBufferPtr->Color = color;
-			s_Data.QuadData.QuadVertexBufferPtr->TexCoord = actualTexCoords[i];
-			s_Data.QuadData.QuadVertexBufferPtr->TexIndex = textureIndex;
-			s_Data.QuadData.QuadVertexBufferPtr->TilingFactor = tilingFactor;
-			s_Data.QuadData.QuadVertexBufferPtr->EntityID = entityID;
-			s_Data.QuadData.QuadVertexBufferPtr++;
+			s_Data.Quads.Ptr->Position = transformedPositions[i];
+			s_Data.Quads.Ptr->Color = color;
+			s_Data.Quads.Ptr->TexCoord = actualTexCoords[i];
+			s_Data.Quads.Ptr->TexIndex = textureIndex;
+			s_Data.Quads.Ptr->TilingFactor = tilingFactor;
+			s_Data.Quads.Ptr->EntityID = entityID;
+			s_Data.Quads.Ptr++;
 		}
-
-		// 更新统计数据
-		s_Data.QuadData.QuadIndexCount += 6;
+		s_Data.Quads.IndexCount += 6;
 		s_Data.Stats.QuadCount++;
 	}
 
-	void Renderer2D::DrawCircleCore(const glm::mat4& transform, const glm::vec4& color, float thickness, float fade, int entityID)
+	void Renderer2D::DrawCircleCore(const glm::mat4& transform, const glm::vec4& color,
+		float thickness, float fade, int entityID)
 	{
 		WLD_PROFILE_FUNCTION();
-
-		if (s_Data.CircleData.CircleIndexCount >= s_Data.CircleData.MaxIndices)
-		{
+		if (s_Data.Circles.IndexCount >= MaxCircles * 6)
 			NextBatch();
-		}
-
-		constexpr uint32_t circleVertexCount = 4;
-		for (uint32_t i = 0; i < circleVertexCount; i++)
+		for (uint32_t i = 0; i < 4; i++)
 		{
-			s_Data.CircleData.CircleVertexBufferPtr->WorldPosition = transform * s_Data.VertexPositions[i];
-			s_Data.CircleData.CircleVertexBufferPtr->LocalPosition = s_Data.VertexPositions[i] * 2.0f;
-			s_Data.CircleData.CircleVertexBufferPtr->Color = color;
-			s_Data.CircleData.CircleVertexBufferPtr->Thickness = thickness;
-			s_Data.CircleData.CircleVertexBufferPtr->Fade = fade;
-			s_Data.CircleData.CircleVertexBufferPtr->EntityID = entityID;
-			s_Data.CircleData.CircleVertexBufferPtr++;
+			s_Data.Circles.Ptr->WorldPosition = transform * s_Data.VertexPositions[i];
+			s_Data.Circles.Ptr->LocalPosition = s_Data.VertexPositions[i] * 2.0f;
+			s_Data.Circles.Ptr->Color = color;
+			s_Data.Circles.Ptr->Thickness = thickness;
+			s_Data.Circles.Ptr->Fade = fade;
+			s_Data.Circles.Ptr->EntityID = entityID;
+			s_Data.Circles.Ptr++;
 		}
-
-		// 更新统计数据
-		s_Data.CircleData.CircleIndexCount += 6;
+		s_Data.Circles.IndexCount += 6;
 		s_Data.Stats.CircleCount++;
-
 	}
 
-	void Renderer2D::DrawLineCore(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color, int entityID)
+	void Renderer2D::DrawLineCore(const glm::vec3& p0, const glm::vec3& p1,
+		const glm::vec4& color, int entityID)
 	{
 		WLD_PROFILE_FUNCTION();
-		if (s_Data.LineData.LineIndexCount >= s_Data.LineData.MaxIndices)
-		{
+		if (s_Data.Lines.IndexCount >= MaxLines * 2)
 			NextBatch();
-		}
-
-		s_Data.LineData.LineVertexBufferPtr->Position = p0;
-		s_Data.LineData.LineVertexBufferPtr->Color = color;
-		s_Data.LineData.LineVertexBufferPtr->EntityID = entityID;
-		s_Data.LineData.LineVertexBufferPtr++;
-		s_Data.LineData.LineVertexBufferPtr->Position = p1;
-		s_Data.LineData.LineVertexBufferPtr->Color = color;
-		s_Data.LineData.LineVertexBufferPtr->EntityID = entityID;
-		s_Data.LineData.LineVertexBufferPtr++;
-
-		s_Data.LineData.LineIndexCount += 2;
+		s_Data.Lines.Ptr->Position = p0;
+		s_Data.Lines.Ptr->Color = color;
+		s_Data.Lines.Ptr->EntityID = entityID;
+		s_Data.Lines.Ptr++;
+		s_Data.Lines.Ptr->Position = p1;
+		s_Data.Lines.Ptr->Color = color;
+		s_Data.Lines.Ptr->EntityID = entityID;
+		s_Data.Lines.Ptr++;
+		s_Data.Lines.IndexCount += 2;
 		s_Data.Stats.LineCount++;
 	}
 
@@ -529,6 +387,7 @@ namespace World
 		for (uint32_t i = 0; i < 4; i++)
 		{
 			vertices[i] = transform * s_Data.VertexPositions[i];
+			vertices[i].z = 0.0f;
 		}
 		DrawLineCore(vertices[0], vertices[1], color, entityID);
 		DrawLineCore(vertices[1], vertices[2], color, entityID);
@@ -536,45 +395,43 @@ namespace World
 		DrawLineCore(vertices[3], vertices[0], color, entityID);
 	}
 
-	void Renderer2D::NextBatch()
-	{
-		//WLD_CORE_ERROR("NextBatch don't work.Please fix it!");
-		Flush();
-		StartBatch();
-	}
-
 	void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const glm::vec4& color)
 	{
 		DrawQuad(glm::vec3(position, 0.0f), size, color);
 	}
+
 	void Renderer2D::DrawQuad(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color)
 	{
-		DrawQuadCore(glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f }), nullptr, color, nullptr, 1.0f, -1);
+		DrawQuadCore(glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f }),
+			nullptr, color, nullptr, 1.0f, -1);
 	}
+
 	void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const Ref<Texture2D>& texture, float tilingFactor)
 	{
 		DrawQuad(glm::vec3(position, 0.0f), size, texture, tilingFactor);
 	}
+
 	void Renderer2D::DrawQuad(const glm::vec3& position, const glm::vec2& size, const Ref<Texture2D>& texture, float tilingFactor)
 	{
-		DrawQuadCore(glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f }), texture, glm::vec4(1.0f), nullptr, tilingFactor, -1);
+		DrawQuadCore(glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f }),
+			texture, glm::vec4(1.0f), nullptr, tilingFactor, -1);
 	}
 
 	void Renderer2D::DrawQuad(const glm::vec2& position, const glm::vec2& size, const Ref<SubTexture2D>& subtexture, float tilingFactor)
 	{
 		DrawQuad(glm::vec3(position, 0.0f), size, subtexture, tilingFactor);
 	}
+
 	void Renderer2D::DrawQuad(const glm::vec3& position, const glm::vec2& size, const Ref<SubTexture2D>& subtexture, float tilingFactor)
 	{
 		WLD_PROFILE_FUNCTION();
-
 		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
 			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
-
-		DrawQuadCore(transform, subtexture->GetTexture(), { 1.0f, 1.0f, 1.0f, 1.0f }, subtexture->GetTexCoords(), tilingFactor, -1);
+		DrawQuadCore(transform, subtexture->GetTexture(), { 1, 1, 1, 1 }, subtexture->GetTexCoords(), tilingFactor, -1);
 	}
 
-	void Renderer2D::DrawQuad(const glm::mat4& transform, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
+	void Renderer2D::DrawQuad(const glm::mat4& transform, const Ref<Texture2D>& texture,
+		float tilingFactor, const glm::vec4& tintColor)
 	{
 		DrawQuadCore(transform, texture, tintColor, nullptr, tilingFactor, -1);
 	}
@@ -583,62 +440,64 @@ namespace World
 	{
 		DrawRotatedQuad(glm::vec3(position, 0.0f), size, rotation, color);
 	}
+
 	void Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation, const glm::vec4& color)
 	{
 		WLD_PROFILE_FUNCTION();
-
 		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
 			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
 			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
-
 		DrawQuadCore(transform, nullptr, color);
 	}
-	void Renderer2D::DrawRotatedQuad(const glm::vec2& position, const glm::vec2& size, float rotation, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
+
+	void Renderer2D::DrawRotatedQuad(const glm::vec2& position, const glm::vec2& size, float rotation,
+		const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
 	{
 		DrawRotatedQuad(glm::vec3(position, 0.0f), size, rotation, texture, tilingFactor, tintColor);
 	}
-	void Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation, const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
+
+	void Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation,
+		const Ref<Texture2D>& texture, float tilingFactor, const glm::vec4& tintColor)
 	{
 		WLD_PROFILE_FUNCTION();
-
 		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
 			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
 			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
 		DrawQuadCore(transform, texture, tintColor, nullptr, tilingFactor, -1);
 	}
 
+	void Renderer2D::DrawRotatedQuad(const glm::vec2& position, const glm::vec2& size, float rotation,
+		const Ref<SubTexture2D>& subtexture, float tilingFactor, const glm::vec4& tintColor)
+	{
+		DrawRotatedQuad(glm::vec3(position, 0.0f), size, rotation, subtexture, tilingFactor, tintColor);
+	}
+
+	void Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation,
+		const Ref<SubTexture2D>& subtexture, float tilingFactor, const glm::vec4& tintColor)
+	{
+		WLD_PROFILE_FUNCTION();
+		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
+			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
+			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
+		DrawQuadCore(transform, subtexture->GetTexture(), tintColor, subtexture->GetTexCoords(), tilingFactor, -1);
+	}
+
+	void Renderer2D::DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, float rotation)
+	{
+		WLD_PROFILE_FUNCTION();
+		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
+			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
+			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
+		DrawRectCore(transform, color, -1);
+	}
+
 	Renderer2D::Statistics Renderer2D::GetStats()
 	{
 		return s_Data.Stats;
 	}
+
 	void Renderer2D::ResetStats()
 	{
 		memset(&s_Data.Stats, 0, sizeof(Statistics));
 	}
-
-	void Renderer2D::DrawRotatedQuad(const glm::vec2& position, const glm::vec2& size, float rotation, const Ref<SubTexture2D>& subtexture, float tilingFactor, const glm::vec4& tintColor)
-	{
-		DrawRotatedQuad(glm::vec3(position, 0.0f), size, rotation, subtexture, tilingFactor, tintColor);
-	}
-	void  Renderer2D::DrawRotatedQuad(const glm::vec3& position, const glm::vec2& size, float rotation, const Ref<SubTexture2D>& subtexture, float tilingFactor, const glm::vec4& tintColor)
-	{
-		WLD_PROFILE_FUNCTION();
-		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
-			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
-			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
-
-		DrawQuadCore(transform, subtexture->GetTexture(), tintColor, subtexture->GetTexCoords(), tilingFactor, -1);
-	}
-	void Renderer2D::DrawRect(const glm::vec3& position, const glm::vec2& size, const glm::vec4& color, float rotation)
-	{
-		WLD_PROFILE_FUNCTION();
-
-		glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
-			* glm::rotate(glm::mat4(1.0f), rotation, { 0.0f, 0.0f, 1.0f })
-			* glm::scale(glm::mat4(1.0f), { size.x, size.y, 1.0f });
-
-		DrawRectCore(transform, color, -1);
-	}
-
 }
-

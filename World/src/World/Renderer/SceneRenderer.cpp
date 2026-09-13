@@ -1,197 +1,278 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "SceneRenderer.h"
+
+#include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
-#include "World/Scene/Components.h"
-#include "World/Renderer/RenderCommand.h"
+#include "World/RHI/RhiTextureBridge.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+
 namespace World
 {
+	namespace
+	{
+		// 旧 Framebuffer 接口适配器:编辑器显示/拾取仍走 GL id,迁到 RHI 后移除。
+		class RhiFramebufferAdapter final : public Framebuffer
+		{
+		public:
+			SceneRenderer* Owner = nullptr;
+			Rhi::Handle<Rhi::Framebuffer> Target;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+
+			void Resize(uint32_t width, uint32_t height) override
+			{
+				if (Owner)
+					Owner->OnResize(width, height);
+			}
+
+			const FramebufferSpecification& GetSpecification() const override
+			{
+				static FramebufferSpecification spec;
+				return spec;
+			}
+
+			uint32_t GetColorAttachmentRendererID(size_t index = 0) const override
+			{
+				return Rhi::FramebufferAttachmentId(Target, index);
+			}
+
+			void Bind() override {}
+			void Unbind() override {}
+
+			int ReadPixel(uint32_t attachmentIndex, int x, int y) override
+			{
+				return Rhi::FramebufferReadPixel(Target, attachmentIndex, x, y);
+			}
+
+			void ClearAttachment(uint32_t, int) override {}
+		};
+	}
 
 	void SceneRenderer::Init()
 	{
-		// Create Framebuffer
-		FramebufferSpecification fbSpec;
-		fbSpec.Attachments = { FramebufferTextureFormat::RGBA8,FramebufferTextureFormat::RED_INTEGER, FramebufferTextureFormat::Depth };
-		fbSpec.Width = 1280;
-		fbSpec.Height = 720;
-		m_MainFramebuffer = Framebuffer::Create(fbSpec);
+		WLD_PROFILE_FUNCTION();
+		m_Device = Renderer::GetDevice();
+		m_CommandBuffer = m_Device->CreateCommandBuffer("SceneRenderer");
 
-		// Create Render Pass
-		RenderPassSpecification passSpec;
-		passSpec.TargetFramebuffer = m_MainFramebuffer;
-		passSpec.ClearColor = { 0.1f, 0.1f, 0.1f, 1.0f };
-		m_ActivePass = RenderPass::Create(passSpec);
+		Rhi::RenderPassDesc passDesc;
+		Rhi::RenderPassAttachment color;
+		color.Format = Rhi::Format::R8G8B8A8_UNORM;
+		color.Samples = Rhi::SampleCount::Count1;
+		color.Load = Rhi::LoadOp::Clear;
+		color.Store = Rhi::StoreOp::Store;
+		color.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		color.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		color.Clear.Color = { 0.1f, 0.1f, 0.1f, 1.0f };
 
-		// Create Command Buffer
-		m_CommandBuffer = CommandBuffer::Create();
+		Rhi::RenderPassAttachment entityId;
+		entityId.Format = Rhi::Format::R32_SINT;
+		entityId.Samples = Rhi::SampleCount::Count1;
+		entityId.Load = Rhi::LoadOp::Clear;
+		entityId.Store = Rhi::StoreOp::Store;
+		entityId.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		entityId.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		const int minusOne = -1;
+		std::memcpy(&entityId.Clear.Color, &minusOne, sizeof(int));
 
-		// Create Descriptor Set
-		m_GlobalDescriptorSet = CreateRef<DescriptorSet>();
-		// Binding 0: Camera UBO
-		m_GlobalDescriptorSet->AddUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera, sizeof(glm::mat4), RendererConfig::MAX_FRAMES_IN_FLIGHT());
+		Rhi::RenderPassAttachment depth;
+		depth.Format = Rhi::Format::D24_UNORM_S8_UINT;
+		depth.Samples = Rhi::SampleCount::Count1;
+		depth.Load = Rhi::LoadOp::Clear;
+		depth.Store = Rhi::StoreOp::Store;
+		depth.InitialLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
+		depth.FinalLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
+		depth.Clear.IsDepthStencil = true;
+		depth.Clear.DepthStencil.Depth = 1.0f;
 
+		passDesc.Attachments = { color, entityId, depth };
+		Rhi::SubpassDesc subpass;
+		subpass.ColorAttachments = {
+			{ 0, Rhi::AttachmentLayout::ColorAttachment },
+			{ 1, Rhi::AttachmentLayout::ColorAttachment },
+		};
+		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
+		passDesc.Subpasses = { subpass };
+		m_RenderPass = m_Device->CreateRenderPass(passDesc);
+
+		Rhi::BufferDesc cameraDesc;
+		cameraDesc.Size = sizeof(glm::mat4);
+		cameraDesc.Usage = Rhi::BufferUsageUniform;
+		cameraDesc.Memory = Rhi::MemoryHint::HostVisible;
+		m_CameraBuffer = m_Device->CreateBuffer(cameraDesc);
+
+		Rhi::DescriptorSetLayoutDesc globalLayout;
+		globalLayout.Bindings.push_back({ 0, Rhi::DescriptorType::UniformBuffer,
+			Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex), 1 });
+		m_GlobalDescriptorSet = m_Device->CreateDescriptorSet(
+			m_Device->CreateDescriptorSetLayout(globalLayout));
+		Rhi::DescriptorWrite cameraWrite;
+		cameraWrite.Binding = 0;
+		cameraWrite.Type = Rhi::DescriptorType::UniformBuffer;
+		cameraWrite.Buffer = m_CameraBuffer;
+		m_GlobalDescriptorSet->Update({ cameraWrite });
+
+		m_FramebufferView = CreateRef<RhiFramebufferAdapter>();
+		static_cast<RhiFramebufferAdapter*>(m_FramebufferView.get())->Owner = this;
+		RecreateTargets(m_Width, m_Height);
 	}
 
 	void SceneRenderer::Shutdown()
 	{
 		WLD_PROFILE_FUNCTION();
-
-		m_ActivePass = nullptr;
-
-		if (m_MainFramebuffer)
-		{
-			m_MainFramebuffer->Unbind();
-			m_MainFramebuffer = nullptr;
-		}
-
-		m_CommandBuffer = nullptr;
-
 		m_ActiveScene = nullptr;
+		m_Framebuffer = nullptr;
+		m_ColorTexture = nullptr;
+		m_EntityTexture = nullptr;
+		m_DepthTexture = nullptr;
+		m_RenderPass = nullptr;
+		m_CommandBuffer = nullptr;
+		m_Device = nullptr;
+	}
+
+	void SceneRenderer::RecreateTargets(uint32_t width, uint32_t height)
+	{
+		m_Width = std::max(1u, width);
+		m_Height = std::max(1u, height);
+
+		Rhi::TextureDesc colorDesc;
+		colorDesc.Type = Rhi::TextureType::Texture2D;
+		colorDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+		colorDesc.Extent = { m_Width, m_Height, 1 };
+		colorDesc.Usage = Rhi::TextureUsageColorAttachment | Rhi::TextureUsageSampled;
+		m_ColorTexture = m_Device->CreateTexture(colorDesc);
+
+		Rhi::TextureDesc entityDesc;
+		entityDesc.Type = Rhi::TextureType::Texture2D;
+		entityDesc.Format = Rhi::Format::R32_SINT;
+		entityDesc.Extent = { m_Width, m_Height, 1 };
+		entityDesc.Usage = Rhi::TextureUsageColorAttachment;
+		m_EntityTexture = m_Device->CreateTexture(entityDesc);
+
+		Rhi::TextureDesc depthDesc;
+		depthDesc.Type = Rhi::TextureType::Texture2D;
+		depthDesc.Format = Rhi::Format::D24_UNORM_S8_UINT;
+		depthDesc.Extent = { m_Width, m_Height, 1 };
+		depthDesc.Usage = Rhi::TextureUsageDepthStencilAttachment;
+		m_DepthTexture = m_Device->CreateTexture(depthDesc);
+
+		Rhi::FramebufferDesc framebufferDesc;
+		framebufferDesc.RenderPass = m_RenderPass;
+		framebufferDesc.Extent = { m_Width, m_Height };
+		framebufferDesc.Attachments = { m_ColorTexture, m_EntityTexture, m_DepthTexture };
+		m_Framebuffer = m_Device->CreateFramebuffer(framebufferDesc);
+
+		if (m_FramebufferView)
+		{
+			auto* adapter = static_cast<RhiFramebufferAdapter*>(m_FramebufferView.get());
+			adapter->Target = m_Framebuffer;
+			adapter->Width = m_Width;
+			adapter->Height = m_Height;
+		}
 	}
 
 	void SceneRenderer::BeginScene(Scene* scene, const SceneRendererOptions& options)
 	{
 		m_ActiveScene = scene;
-
 		m_Options = options;
-
-		m_CommandBuffer->Begin(m_CurrentFrameIndex);
 	}
+
+	void SceneRenderer::EndScene()
+	{
+		m_ActiveScene = nullptr;
+	}
+
 	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform)
 	{
-		glm::mat4 uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
-
-		m_CommandBuffer->AddCommand([this, uCameraData]()
-			{
-				m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->Get(m_CommandBuffer->GetCurrentFrameIndex())->SetData(&uCameraData, sizeof(glm::mat4));
-
-			});
-
-		m_CommandBuffer->BeginRenderPass(m_ActivePass);
-
-		Renderer2D::StartBatch();
-		m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
-
-		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
-
-		RenderGeometry(m_CommandBuffer, camera, cameraTransform);
-
-		Renderer2D::EndScene();
-
-		m_CommandBuffer->EndRenderPass();
+		RecordSubmit(camera, cameraTransform, Entity());
 	}
-	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
+
+	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity entity)
 	{
-		glm::mat4 uCameraData = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		RecordSubmit(camera, cameraTransform, entity);
+	}
 
-		m_CommandBuffer->AddCommand([this, uCameraData]()
-			{
-				m_GlobalDescriptorSet->GetUniformBufferSet(DescriptorBindings::UniformBuffers::Pass::Camera)->Get(m_CommandBuffer->GetCurrentFrameIndex())->SetData(&uCameraData, sizeof(glm::mat4));
+	void SceneRenderer::RecordSubmit(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
+	{
+		if (!m_ActiveScene)
+			return;
 
-			});
+		const glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		m_CameraBuffer->SetData(&viewProjection, sizeof(glm::mat4));
 
-		m_CommandBuffer->BeginRenderPass(m_ActivePass, true);
+		std::vector<Rhi::ClearValue> clears(3);
+		clears[0].Color = { 0.1f, 0.1f, 0.1f, 1.0f };
+		const int minusOne = -1;
+		std::memcpy(&clears[1].Color, &minusOne, sizeof(int));
+		clears[2].IsDepthStencil = true;
+		clears[2].DepthStencil.Depth = 1.0f;
 
-		Renderer2D::StartBatch();
+		m_CommandBuffer->Begin();
+		m_CommandBuffer->BeginRenderPass(m_RenderPass, m_Framebuffer, clears);
+		m_CommandBuffer->SetViewport({ 0, 0, static_cast<float>(m_Width), static_cast<float>(m_Height) });
 		m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
 
+		Renderer2D::StartBatch();
 		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
-
 
 		if (selectedEntity)
 		{
 			auto& transform = selectedEntity.GetComponent<TransformComponent>();
 			Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
+			RenderDebug(camera, cameraTransform);
 		}
-		RenderDebug(m_CommandBuffer, camera, cameraTransform);
-
-
-		RenderGeometry(m_CommandBuffer, camera, cameraTransform);
-
+		RenderGeometry(camera, cameraTransform);
 
 		Renderer2D::EndScene();
 		m_CommandBuffer->EndRenderPass();
+		m_CommandBuffer->End();
 	}
 
-	void SceneRenderer::RenderGeometry(Ref<CommandBuffer> cmd, const Camera& camera, const glm::mat4& cameraTransform)
+	void SceneRenderer::RenderGeometry(const Camera&, const glm::mat4&)
 	{
 		{
-			// 使用 group 替代 view，会使遍历性能成倍提升（它们在内存中完美对齐）
 			auto group = m_ActiveScene->m_Registry.group<TransformComponent>(entt::get<SpriteComponent>);
 			for (auto entity : group)
 			{
 				auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
-				Renderer2D::DrawQuadCore(transform.Transform, sprite.Texture, sprite.Color, nullptr, sprite.TilingFactor, (uint32_t)entity);
+				Renderer2D::DrawQuadCore(transform.Transform, sprite.Texture, sprite.Color, nullptr,
+					sprite.TilingFactor, static_cast<uint32_t>(entity));
 			}
 		}
-
 		{
-			// 对 CircleRendererComponent 做同样的优化
 			auto view = m_ActiveScene->m_Registry.view<TransformComponent, CircleRendererComponent>();
 			for (auto [entity, transform, circle] : view.each())
-			{
-				Renderer2D::DrawCircleCore(transform.Transform, circle.Color, circle.Thickness, circle.Fade, (uint32_t)entity);
-			}
-		}
-
-	}
-
-	void SceneRenderer::RenderDebug(Ref<CommandBuffer> cmd, const Camera& camera, const glm::mat4& cameraTransform)
-	{
-		{
-			auto view = m_ActiveScene->m_Registry.view<CircleCollider2DComponent>();
-			for (auto entity : view)
-			{
-				auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
-				auto& circleCollider = view.get<CircleCollider2DComponent>(entity);
-				if (circleCollider.ShowCollider)
-				{
-					glm::vec4 color = { 0.1f, 0.9f, 0.1f, 1.0f };
-					glm::mat4 colliderTransform = glm::translate(glm::mat4(1.0f), transform.Location) *
-						glm::rotate(glm::mat4(1.0f), transform.Rotation.z, glm::vec3(0.0f, 0.0f, 1.0f)) *
-						glm::translate(glm::mat4(1.0f), glm::vec3(circleCollider.Offset.x, circleCollider.Offset.y, 0.0f)) *
-						glm::scale(glm::mat4(1.0f), glm::vec3(transform.Scale.x * circleCollider.Radius * 2.0f, transform.Scale.y * circleCollider.Radius * 2.0f, 1.0f));
-					Renderer2D::DrawCircleCore(colliderTransform, color, 0.025f, 0.005f, (uint32_t)entity);
-				}
-			}
-		}
-
-		{
-			auto view = m_ActiveScene->m_Registry.view<BoxCollider2DComponent>();
-			for (auto entity : view)
-			{
-				auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
-				auto& boxCollider = view.get<BoxCollider2DComponent>(entity);
-				if (boxCollider.ShowCollider)
-				{
-					glm::vec4 color = { 0.1f, 0.9f, 0.1f, 1.0f };
-					glm::vec3 scale = { transform.Scale.x * boxCollider.Size.x * 2, transform.Scale.y * boxCollider.Size.y * 2, 1.0f };
-					glm::mat4 colliderTransform = glm::translate(glm::mat4(1.0f), transform.Location) *
-						glm::rotate(glm::mat4(1.0f), transform.Rotation.z, glm::vec3(0.0f, 0.0f, 1.0f)) *
-						glm::translate(glm::mat4(1.0f), glm::vec3(boxCollider.Offset.x, boxCollider.Offset.y, 0.0f)) *
-						glm::scale(glm::mat4(1.0f), scale);
-
-					Renderer2D::DrawRectCore(colliderTransform, color, (uint32_t)entity);
-				}
-			}
-
+				Renderer2D::DrawCircleCore(transform.Transform, circle.Color, circle.Thickness,
+					circle.Fade, static_cast<uint32_t>(entity));
 		}
 	}
 
-	void SceneRenderer::EndScene()
+	void SceneRenderer::RenderDebug(const Camera&, const glm::mat4&)
 	{
-		m_CommandBuffer->End();
-
-		m_CommandBuffer->Execute();
-
-		m_ActiveScene = nullptr;
-
-		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT();
+		auto view = m_ActiveScene->m_Registry.view<CircleCollider2DComponent>();
+		for (auto entity : view)
+		{
+			auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			auto& circleCollider = view.get<CircleCollider2DComponent>(entity);
+			if (!circleCollider.ShowCollider)
+				continue;
+			glm::mat4 colliderTransform = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::rotate(glm::mat4(1.0f), transform.Rotation.z, glm::vec3(0.0f, 0.0f, 1.0f))
+				* glm::translate(glm::mat4(1.0f), glm::vec3(circleCollider.Offset.x, circleCollider.Offset.y, 0.0f))
+				* glm::scale(glm::mat4(1.0f), glm::vec3(transform.Scale.x * circleCollider.Radius * 2.0f,
+					transform.Scale.y * circleCollider.Radius * 2.0f, 1.0f));
+			Renderer2D::DrawCircleCore(colliderTransform, { 0.1f, 0.9f, 0.1f, 1.0f },
+				0.025f, 0.005f, static_cast<uint32_t>(entity));
+		}
 	}
 
 	void SceneRenderer::OnResize(uint32_t width, uint32_t height)
 	{
-		m_MainFramebuffer->Resize(width, height);
+		RecreateTargets(width, height);
+	}
+
+	void SceneRenderer::CaptureFrame(const std::filesystem::path& path) const
+	{
+		Renderer::CaptureFramebuffer(path, Rhi::FramebufferId(m_Framebuffer), m_Width, m_Height);
 	}
 }

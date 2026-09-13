@@ -21,6 +21,8 @@ namespace World
 		static Rhi::Handle<Rhi::Device> GetDevice() { return m_Device; }
 		// 开发验证:把当前默认帧缓冲读回并写 PPM(渲染基线截图)。
 		static void CaptureFrame(const std::filesystem::path& path);
+		// 读回指定离屏帧缓冲(场景渲染目标)写 PPM。
+		static void CaptureFramebuffer(const std::filesystem::path& path, uint32_t fbo, uint32_t width, uint32_t height);
 	private:
 		struct SceneData
 		{

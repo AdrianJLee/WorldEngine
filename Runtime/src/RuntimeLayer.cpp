@@ -90,7 +90,8 @@ namespace World
 		const char* pathEnv = std::getenv("WLD_CAPTURE_PATH");
 		if (!pathEnv || !pathEnv[0])
 			return;
-		Renderer::CaptureFrame(pathEnv);
+		if (m_SceneRenderer)
+			m_SceneRenderer->CaptureFrame(pathEnv);
 	}
 	void RuntimeLayer::OnImGuiRender()
 	{
