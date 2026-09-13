@@ -221,17 +221,6 @@ namespace World::Wui
 		float m_ScrollY = 0;
 	};
 
-	class WuiProgress final : public WuiWidget
-	{
-	public:
-		float Fraction = 0; // 0..1
-		WuiColor TrackColor { 0.2f, 0.21f, 0.23f, 1 };
-		WuiColor FillColor { 0.3f, 0.5f, 0.9f, 1 };
-
-		WuiMeasure Measure(const WuiConstraints& constraints) override;
-		void Paint(WuiPaintContext& context) override;
-	};
-
 	// 便捷:根据约束框递归测量并布局整棵树。
 	void LayoutWidgetTree(const WuiWidgetPtr& root, const WuiRect& rect);
 }

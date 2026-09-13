@@ -66,8 +66,7 @@ namespace World::Wui
 		std::vector<WuiFlexItem> items;
 		items.reserve(m_Children.size());
 		const bool row = Direction == WuiDirection::Row;
-		// flex 子项按无界约束测 intrinsic;容器空间由 SolveFlex 再分配。
-		const WuiConstraints childConstraints { 0, 0, 1e30f, 1e30f };
+		const WuiConstraints childConstraints { 0, 0, constraints.MaxW, constraints.MaxH };
 		for (const WuiFlexChild& child : m_Children)
 		{
 			const WuiMeasure measured = child.Widget->Measure(childConstraints);
@@ -105,7 +104,7 @@ namespace World::Wui
 		items.reserve(m_Children.size());
 		for (const WuiFlexChild& child : m_Children)
 		{
-			const WuiMeasure measured = child.Widget->Measure({ 0, 0, 1e30f, 1e30f });
+			const WuiMeasure measured = child.Widget->Measure({ 0, 0, rect.W, rect.H });
 			WuiFlexItem item = child.Item;
 			const float intrinsicMain = row ? measured.Width : measured.Height;
 			item.MinMain = intrinsicMain;
@@ -154,8 +153,9 @@ namespace World::Wui
 
 	WuiMeasure WuiLabel::Measure(const WuiConstraints& constraints)
 	{
+		// 无字体度量的无头环境:优先固定尺寸,否则取约束下限。
 		const float width = FixedWidth >= 0 ? FixedWidth : constraints.MinW;
-		const float height = FixedHeight >= 0 ? FixedHeight : std::max(constraints.MinH, FontSize);
+		const float height = FixedHeight >= 0 ? FixedHeight : constraints.MinH;
 		MarkClean();
 		return { width, height };
 	}
@@ -331,23 +331,6 @@ namespace World::Wui
 			if (WuiWidgetPtr hit = Child->HitTest(point))
 				return hit;
 		return shared_from_this();
-	}
-
-	// ---- WuiProgress ----
-
-	WuiMeasure WuiProgress::Measure(const WuiConstraints& constraints)
-	{
-		MarkClean();
-		return { std::max(constraints.MinW, 8.0f), std::max(constraints.MinH, 8.0f) };
-	}
-
-	void WuiProgress::Paint(WuiPaintContext& context)
-	{
-		WuiContext& ctx = context.Context();
-		const float clamped = std::max(0.0f, std::min(1.0f, Fraction));
-		ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, TrackColor, 3.0f });
-		ctx.Commands().push_back({ WuiDrawKind::Rect,
-			{ m_Rect.X, m_Rect.Y, m_Rect.W * clamped, m_Rect.H }, FillColor, 3.0f });
 	}
 
 	// ---- 便捷布局 ----
