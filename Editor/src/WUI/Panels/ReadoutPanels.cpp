@@ -4,6 +4,7 @@
 #include "World/Core/Memory/MemoryTracker.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/WUI/WuiRhiBackend.h"
 
 namespace World
 {
@@ -43,7 +44,7 @@ namespace World
 		{
 			m_Root = std::make_shared<Wui::WuiBox>();
 			m_Root->Gap = 2;
-			for (int i = 0; i < 7; ++i)
+			for (int i = 0; i < 9; ++i)
 			{
 				auto label = std::make_shared<Wui::WuiLabel>();
 				label->FontSize = 14;
@@ -61,6 +62,9 @@ namespace World
 		m_Lines[4]->Text = "Circles: " + std::to_string(stats.CircleCount);
 		m_Lines[5]->Text = "Vertices: " + std::to_string(stats.GetTotalVertexCount());
 		m_Lines[6]->Text = "Indices: " + std::to_string(stats.GetTotalIndexCount());
+		const Wui::WuiBackendStats uiStats = Wui::WuiRhiBackend::Stats();
+		m_Lines[7]->Text = "WUI Draw Calls: " + std::to_string(uiStats.DrawCalls) + "  Vertices: " + std::to_string(uiStats.Vertices);
+		m_Lines[8]->Text = "WUI Text Glyphs: " + std::to_string(uiStats.TextGlyphs);
 
 		Wui::LayoutWidgetTree(m_Root, { rect.X + 8, rect.Y + 8, rect.W - 16, rect.H - 16 });
 		Wui::WuiPaintContext paint(ctx);

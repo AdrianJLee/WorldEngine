@@ -12,6 +12,15 @@ struct stbtt_fontinfo;
 
 namespace World::Wui
 {
+	struct WuiBackendStats
+	{
+		uint32_t DrawCalls = 0;
+		uint32_t Vertices = 0;
+		uint32_t Indices = 0;
+		uint32_t TextGlyphs = 0;
+		uint32_t Frames = 0;
+	};
+
 	// Backend v2:WUI 绘制命令经 RHI 2D 批管线呈现(OpenGL 默认帧缓冲 /
 	// Vulkan 交换链),输入直接来自 GLFW 事件,不依赖 ImGui。
 	class WLD_API WuiRhiBackend final : public WuiBackend
@@ -26,6 +35,7 @@ namespace World::Wui
 		static void FeedMouseButton(int button, bool down);
 		static void FeedMouseMove(float x, float y);
 		static void FeedMouseScroll(float dx, float dy);
+		static WuiBackendStats Stats();
 
 		bool BeginFrame(WuiInputState& input) override;
 		void Render(const std::vector<WuiDrawCommand>& commands, const std::vector<WuiDrawCommand>& overlayCommands) override;
@@ -98,5 +108,6 @@ namespace World::Wui
 		std::vector<WuiRect> m_ClipStack;
 		WuiRect m_CurrentClip {};
 		bool m_IsVulkan = false;
+		static WuiBackendStats s_Stats;
 	};
 }
