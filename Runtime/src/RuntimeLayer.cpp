@@ -76,7 +76,10 @@ namespace World
 		if (wuiBackend.BeginFrame(input))
 		{
 			wuiContext.BeginFrame(input);
-			const size_t entityCount = m_ActiveScene ? m_ActiveScene->GetRegistry().view<UUIDComponent>().size() : 0;
+			// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
+			// 会触发结构写断言并抛异常。
+			const Scene* activeScene = m_ActiveScene.get();
+			const size_t entityCount = activeScene ? activeScene->GetRegistry().view<UUIDComponent>().size() : 0;
 			DrawGameHud(wuiContext, entityCount);
 			wuiContext.EndFrame();
 			wuiBackend.Render(wuiContext.Commands(), wuiContext.OverlayCommands());

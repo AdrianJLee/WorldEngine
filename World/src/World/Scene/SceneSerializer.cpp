@@ -363,7 +363,13 @@ namespace World
 				{
 					if (!schema || !schema->Storage || !schema->Storage->Add)
 						continue;
-					const YAML::Node compNode = entity[schema->Id.Name];
+					YAML::Node compNode = entity[schema->Id.Name];
+					if (!compNode)
+					{
+						const size_t separator = schema->Id.Name.rfind("::");
+						if (separator != std::string::npos)
+							compNode = entity[schema->Id.Name.substr(separator + 2)];
+					}
 					if (!compNode)
 						continue;
 
