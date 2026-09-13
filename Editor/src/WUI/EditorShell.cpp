@@ -216,7 +216,6 @@ namespace World
 
 	void EditorShell::OnRender(Wui::WuiContext& ctx)
 	{
-		m_Ctx = &ctx;
 		m_ViewportRect = {};
 		ctx.ClearDropTarget();
 		const bool undoKey = ctx.Input().Ctrl && !ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z);
@@ -412,60 +411,18 @@ namespace World
 	void EditorShell::DrawMenuBar(Wui::WuiContext& ctx)
 	{
 		const glm::vec2 viewport = ctx.ViewportSize();
+		BeginMenuBar(ctx, { 0, 0, viewport.x, 26 }, m_Theme);
+		float x = 8;
+
 		struct MenuEntry { std::string Label; bool Checked; std::function<void()> Action; };
-
-		const Wui::WuiId menuFile = Wui::HashId("menu.file");
-		const Wui::WuiId menuWindow = Wui::HashId("menu.window");
-		if (!m_MenuBar)
+		auto drawMenu = [&](const std::string& menuIdName, const char* title, const std::vector<MenuEntry>& entries)
 		{
-			m_MenuBar = std::make_shared<Wui::WuiBox>();
-			m_MenuBar->Direction = Wui::WuiDirection::Row;
-			m_MenuBar->Gap = 4;
-			m_FileButton = std::make_shared<Wui::WuiButton>();
-			m_FileButton->Label = "File";
-			m_FileButton->OnClick = [this, menuFile]
-				{
-					const bool opening = m_OpenMenu != menuFile;
-					m_OpenMenu = opening ? menuFile : 0;
-					if (opening)
-					{
-						m_Ctx->CloseAllPopups();
-						m_MenuHeaderRect = m_FileButton->Rect();
-						m_Ctx->OpenPopup(menuFile);
-					}
-					else
-						m_Ctx->ClosePopup(menuFile);
-				};
-			m_MenuBar->Add(m_FileButton, { 60, 60, 0, 22, 0 });
-			m_WindowButton = std::make_shared<Wui::WuiButton>();
-			m_WindowButton->Label = "Window";
-			m_WindowButton->OnClick = [this, menuWindow]
-				{
-					const bool opening = m_OpenMenu != menuWindow;
-					m_OpenMenu = opening ? menuWindow : 0;
-					if (opening)
-					{
-						m_Ctx->CloseAllPopups();
-						m_MenuHeaderRect = m_WindowButton->Rect();
-						m_Ctx->OpenPopup(menuWindow);
-					}
-					else
-						m_Ctx->ClosePopup(menuWindow);
-				};
-			m_MenuBar->Add(m_WindowButton, { 78, 78, 0, 22, 0 });
-		}
-
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { 0, 0, viewport.x, 26 }, m_Theme.PanelHeader, 0.0f });
-		Wui::LayoutWidgetTree(m_MenuBar, { 8, 2, viewport.x - 16, 22 });
-		Wui::WuiPaintContext paint(ctx);
-		m_MenuBar->Paint(paint);
-
-		auto drawMenu = [&](const Wui::WuiId menuId, const std::string& menuIdName, const std::vector<MenuEntry>& entries)
-		{
-			if (ctx.IsPopupOpen(menuId))
+			const Wui::WuiId menuId = Wui::HashId(menuIdName.c_str());
+			const Wui::WuiRect header { x, 2, static_cast<float>(std::strlen(title) * 9 + 22), 22 };
+			if (BeginMenu(ctx, menuId, header, title, m_Theme))
 			{
 				ctx.PushOverlay();
-				const Wui::WuiRect panel { m_MenuHeaderRect.X, m_MenuHeaderRect.Y + m_MenuHeaderRect.H + 2, 240, static_cast<float>(entries.size() * 22 + 8) };
+				const Wui::WuiRect panel { header.X, 24, 240, static_cast<float>(entries.size() * 22 + 8) };
 				DrawPanelSurface(ctx, panel, m_Theme);
 				for (size_t i = 0; i < entries.size(); ++i)
 				{
@@ -476,20 +433,15 @@ namespace World
 						entries[i].Action();
 						ctx.RecordOp("menu", "item", entries[i].Label, menuIdName);
 						ctx.CloseAllPopups();
-						m_OpenMenu = 0;
 					}
 				}
-				ctx.ClosePopupsOnOutsideClick({ menuId }, panel);
-				if (ctx.IsKeyPressed(KeyCodes::Escape))
-				{
-					ctx.ClosePopup(menuId);
-					m_OpenMenu = 0;
-				}
+				EndMenu(ctx, menuId, panel, m_Theme);
 				ctx.PopOverlay();
 			}
+			x += header.W + 4;
 		};
 
-		drawMenu(menuFile, "menu.file", {
+		drawMenu("menu.file", "File", {
 			{ "New", false, [this] { m_Editor.NewScene(); } },
 			{ "Open", false, [this] { m_Editor.OpenScene(); } },
 			{ "Save", false, [this] { m_Editor.SaveScene(); } },
@@ -518,7 +470,9 @@ namespace World
 			windowEntries.push_back({ PanelTitle(panel), visible, [this, panel, &ctx] { TogglePanel(ctx, panel); } });
 		}
 		windowEntries.push_back({ "Reset Layout", false, [this, &ctx] { ResetLayout(ctx); } });
-		drawMenu(menuWindow, "menu.window", windowEntries);
+		drawMenu("menu.window", "Window", windowEntries);
+
+		EndMenuBar(ctx);
 	}
 
 	void EditorShell::DrawModals(Wui::WuiContext& ctx)
