@@ -39,6 +39,10 @@ VS_OUTPUT VSMain(VS_INPUT input)
 PS_OUTPUT PSMain(VS_OUTPUT input)
 {
     PS_OUTPUT output;
-    output.Color = u_Texture.Sample(u_Sampler, input.v_TexCoord) * input.v_Color;
+    // uv.x < -0.5 表示纯色矩形,不走纹理采样。
+    if (input.v_TexCoord.x < -0.5f)
+        output.Color = input.v_Color;
+    else
+        output.Color = u_Texture.Sample(u_Sampler, input.v_TexCoord) * input.v_Color;
     return output;
 }

@@ -55,6 +55,7 @@ namespace World::Wui
 		void ReleaseResources();
 		void DrawList(const std::vector<WuiDrawCommand>& commands);
 		void PushQuad(const WuiRect& rect, const WuiColor& color, const WuiRect& uv);
+		void PushSolidQuad(const WuiRect& rect, const WuiColor& color);
 		void SetActiveTexture(const Rhi::Handle<Rhi::Texture>& texture);
 		void Flush();
 		void ApplyScissor(const WuiRect& rect);
@@ -82,6 +83,10 @@ namespace World::Wui
 		Rhi::Handle<Rhi::DescriptorSet> m_TextureSet, m_GlobalSet;
 		Rhi::Handle<Rhi::Sampler> m_Sampler;
 		Rhi::Handle<Rhi::Texture> m_WhiteTexture;
+		Rhi::Handle<Rhi::RenderPass> m_UiPass;
+		Rhi::Handle<Rhi::Texture> m_UiColor;
+		Rhi::Handle<Rhi::Framebuffer> m_UiFramebuffer;
+		uint32_t m_UiWidth = 0, m_UiHeight = 0;
 		std::vector<FontFace> m_Faces;
 		glm::mat4 m_Projection { 1.0f };
 

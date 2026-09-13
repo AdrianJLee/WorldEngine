@@ -4,6 +4,7 @@
 #include "World/Core/Application.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/ShaderUtils.h"
+#include "World/RHI/RhiTextureBridge.h"
 #include "WuiTextureRegistry.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -33,31 +34,11 @@ namespace World::Wui
 				const int start = static_cast<int>(i);
 				const unsigned char c = static_cast<unsigned char>(text[i]);
 				uint32_t cp = 0;
-				if (c < 0x80)
-				{
-					cp = c;
-					i += 1;
-				}
-				else if ((c >> 5) == 0x6 && i + 1 < text.size())
-				{
-					cp = ((c & 0x1Fu) << 6) | (text[i + 1] & 0x3Fu);
-					i += 2;
-				}
-				else if ((c >> 4) == 0xE && i + 2 < text.size())
-				{
-					cp = ((c & 0x0Fu) << 12) | ((text[i + 1] & 0x3Fu) << 6) | (text[i + 2] & 0x3Fu);
-					i += 3;
-				}
-				else if ((c >> 3) == 0x1E && i + 3 < text.size())
-				{
-					cp = ((c & 0x07u) << 18) | ((text[i + 1] & 0x3Fu) << 12) | ((text[i + 2] & 0x3Fu) << 6) | (text[i + 3] & 0x3Fu);
-					i += 4;
-				}
-				else
-				{
-					cp = 0xFFFD;
-					i += 1;
-				}
+				if (c < 0x80) { cp = c; i += 1; }
+				else if ((c >> 5) == 0x6 && i + 1 < text.size()) { cp = ((c & 0x1Fu) << 6) | (text[i + 1] & 0x3Fu); i += 2; }
+				else if ((c >> 4) == 0xE && i + 2 < text.size()) { cp = ((c & 0x0Fu) << 12) | ((text[i + 1] & 0x3Fu) << 6) | (text[i + 2] & 0x3Fu); i += 3; }
+				else if ((c >> 3) == 0x1E && i + 3 < text.size()) { cp = ((c & 0x07u) << 18) | ((text[i + 1] & 0x3Fu) << 12) | ((text[i + 2] & 0x3Fu) << 6) | (text[i + 3] & 0x3Fu); i += 4; }
+				else { cp = 0xFFFD; i += 1; }
 				codepoints.push_back(cp);
 				byteOffsets.push_back(start);
 			}
@@ -125,6 +106,10 @@ namespace World::Wui
 		m_GlobalSet = nullptr;
 		m_Sampler = nullptr;
 		m_WhiteTexture = nullptr;
+		m_UiPass = nullptr;
+		m_UiColor = nullptr;
+		m_UiFramebuffer = nullptr;
+		m_UiWidth = m_UiHeight = 0;
 		m_ActiveTexture = nullptr;
 		for (FontFace& face : m_Faces)
 			face.AtlasTexture = nullptr;
@@ -166,9 +151,24 @@ namespace World::Wui
 		samplerDesc.AddressV = Rhi::SamplerAddressMode::ClampToEdge;
 		m_Sampler = device->CreateSampler(samplerDesc);
 
+		Rhi::RenderPassDesc passDesc;
+		Rhi::RenderPassAttachment colorAttachment;
+		colorAttachment.Format = m_IsVulkan ? Rhi::Format::B8G8R8A8_UNORM : Rhi::Format::R8G8B8A8_UNORM;
+		colorAttachment.Samples = Rhi::SampleCount::Count1;
+		colorAttachment.Load = m_IsVulkan ? Rhi::LoadOp::Load : Rhi::LoadOp::Clear;
+		colorAttachment.Store = Rhi::StoreOp::Store;
+		colorAttachment.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		colorAttachment.FinalLayout = m_IsVulkan ? Rhi::AttachmentLayout::Present : Rhi::AttachmentLayout::ShaderReadOnly;
+		passDesc.Attachments = { colorAttachment };
+		Rhi::SubpassDesc subpass;
+		subpass.ColorAttachments = { { 0, Rhi::AttachmentLayout::ColorAttachment } };
+		passDesc.Subpasses = { subpass };
+		passDesc.DebugName = "WuiTarget";
+		m_UiPass = device->CreateRenderPass(passDesc);
+
 		Rhi::PipelineDesc pipelineDesc;
 		pipelineDesc.Shader = m_Shader;
-		pipelineDesc.RenderPass = Renderer::GetPresentRenderPass();
+		pipelineDesc.RenderPass = m_IsVulkan ? Renderer::GetPresentRenderPass() : m_UiPass;
 		pipelineDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), m_TextureLayout };
 		pipelineDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
 		pipelineDesc.Cull = Rhi::CullMode::None;
@@ -264,8 +264,8 @@ namespace World::Wui
 		const float scale = stbtt_ScaleForPixelHeight(face.Info, face.BaseSize);
 		int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 		stbtt_GetCodepointBitmapBox(face.Info, codepoint, scale, scale, &x0, &y0, &x1, &y1);
-		int width = x1 - x0;
-		int height = y1 - y0;
+		const int width = x1 - x0;
+		const int height = y1 - y0;
 		if (width > 0 && height > 0)
 		{
 			if (face.CursorX + width + 1 >= face.AtlasW)
@@ -274,13 +274,10 @@ namespace World::Wui
 				face.CursorY += face.RowH + 1;
 				face.RowH = 0;
 			}
-			if (face.CursorY + height + 1 >= face.AtlasH)
-				WLD_CORE_WARN("WUI font atlas exhausted");
-			else
+			if (face.CursorY + height + 1 < face.AtlasH)
 			{
 				std::vector<unsigned char> bitmap(static_cast<size_t>(width) * height);
-				stbtt_MakeCodepointBitmap(face.Info, bitmap.data(), width, height, width,
-					scale, scale, codepoint);
+				stbtt_MakeCodepointBitmap(face.Info, bitmap.data(), width, height, width, scale, scale, codepoint);
 				for (int row = 0; row < height; ++row)
 					for (int col = 0; col < width; ++col)
 					{
@@ -346,6 +343,11 @@ namespace World::Wui
 		m_Vertices.push_back({ rect.X, y1, color.R, color.G, color.B, color.A, uv.X, uv.Y + uv.H });
 		const uint32_t quad = base / 4;
 		m_Indices.insert(m_Indices.end(), { quad * 4, quad * 4 + 1, quad * 4 + 2, quad * 4, quad * 4 + 2, quad * 4 + 3 });
+	}
+
+	void WuiRhiBackend::PushSolidQuad(const WuiRect& rect, const WuiColor& color)
+	{
+		PushQuad(rect, color, { -1.0f, 0.0f, 0.0f, 0.0f });
 	}
 
 	void WuiRhiBackend::SetActiveTexture(const Rhi::Handle<Rhi::Texture>& texture)
@@ -420,9 +422,8 @@ namespace World::Wui
 		{
 			const float x0 = Measure(face, command.Text, fontSize, command.TextSelStart);
 			const float x1 = Measure(face, command.Text, fontSize, command.TextSelEnd);
-			SetActiveTexture(m_WhiteTexture);
-			PushQuad({ command.Rect.X + x0, command.Rect.Y, x1 - x0, fontSize },
-				{ 0.3f, 0.5f, 0.9f, 0.45f }, { 0, 0, 1, 1 });
+			PushSolidQuad({ command.Rect.X + x0, command.Rect.Y, x1 - x0, fontSize },
+				{ 0.3f, 0.5f, 0.9f, 0.45f });
 		}
 
 		std::vector<uint32_t> codepoints;
@@ -436,36 +437,32 @@ namespace World::Wui
 			const float w = glyph.W * sizeRatio;
 			const float h = glyph.H * sizeRatio;
 			if (w > 0 && h > 0)
-			{
 				PushQuad({ pen + glyph.OffsetX * sizeRatio, baseline + glyph.OffsetY * sizeRatio, w, h },
 					command.Color,
 					{ glyph.X / face.AtlasW, glyph.Y / face.AtlasH, glyph.W / face.AtlasW, glyph.H / face.AtlasH });
-			}
 			pen += glyph.Advance * sizeRatio;
 		}
 
 		if (command.TextCursorByte >= 0)
 		{
 			const float cursorX = command.Rect.X + Measure(face, command.Text, fontSize, command.TextCursorByte);
-			SetActiveTexture(m_WhiteTexture);
-			PushQuad({ cursorX, command.Rect.Y, 1.0f, fontSize }, command.Color, { 0, 0, 1, 1 });
+			PushSolidQuad({ cursorX, command.Rect.Y, 1.0f, fontSize }, command.Color);
 		}
 	}
 
 	void WuiRhiBackend::DrawRectCommand(const WuiDrawCommand& command, bool outline)
 	{
-		SetActiveTexture(m_WhiteTexture);
 		if (!outline)
 		{
-			PushQuad(command.Rect, command.Color, { 0, 0, 1, 1 });
+			PushSolidQuad(command.Rect, command.Color);
 			return;
 		}
 		const float t = command.Thickness > 0 ? command.Thickness : 1.0f;
 		const WuiRect& r = command.Rect;
-		PushQuad({ r.X, r.Y, r.W, t }, command.Color, { 0, 0, 1, 1 });
-		PushQuad({ r.X, r.Y + r.H - t, r.W, t }, command.Color, { 0, 0, 1, 1 });
-		PushQuad({ r.X, r.Y + t, t, r.H - 2 * t }, command.Color, { 0, 0, 1, 1 });
-		PushQuad({ r.X + r.W - t, r.Y + t, t, r.H - 2 * t }, command.Color, { 0, 0, 1, 1 });
+		PushSolidQuad({ r.X, r.Y, r.W, t }, command.Color);
+		PushSolidQuad({ r.X, r.Y + r.H - t, r.W, t }, command.Color);
+		PushSolidQuad({ r.X, r.Y + t, t, r.H - 2 * t }, command.Color);
+		PushSolidQuad({ r.X + r.W - t, r.Y + t, t, r.H - 2 * t }, command.Color);
 	}
 
 	void WuiRhiBackend::DrawImageCommand(const WuiDrawCommand& command)
@@ -523,18 +520,45 @@ namespace World::Wui
 		if (!Renderer::GetDevice())
 			return;
 		if (Renderer::GetDevice().get() != m_DeviceKey)
-		{
 			WuiTextureRegistry::Get().Clear();
-			EnsureResources();
-		}
 		EnsureResources();
 		if (!m_Cmd || !m_Pipeline)
 			return;
-		// Vulkan 呈现 framebuffer 尚未就绪(交换链图像接线进行中)时跳过本帧。
-		if (m_IsVulkan && !Renderer::GetPresentFramebuffer())
-			return;
 
-		// 预烘焙:先把文本用到的字形放入图集并上传,再记录绘制。
+		Rhi::Handle<Rhi::RenderPass> pass;
+		Rhi::Handle<Rhi::Framebuffer> framebuffer;
+		if (m_IsVulkan)
+		{
+			pass = Renderer::GetPresentRenderPass();
+			framebuffer = Renderer::GetPresentFramebuffer();
+			if (!framebuffer)
+				return;
+		}
+		else
+		{
+			const uint32_t width = std::max(1u, static_cast<uint32_t>(m_Viewport.x));
+			const uint32_t height = std::max(1u, static_cast<uint32_t>(m_Viewport.y));
+			if (m_UiWidth != width || m_UiHeight != height || !m_UiFramebuffer)
+			{
+				m_UiWidth = width;
+				m_UiHeight = height;
+				Rhi::TextureDesc colorDesc;
+				colorDesc.Type = Rhi::TextureType::Texture2D;
+				colorDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+				colorDesc.Extent = { width, height, 1 };
+				colorDesc.Usage = Rhi::TextureUsageColorAttachment | Rhi::TextureUsageSampled;
+				m_UiColor = Renderer::GetDevice()->CreateTexture(colorDesc);
+				Rhi::FramebufferDesc framebufferDesc;
+				framebufferDesc.RenderPass = m_UiPass;
+				framebufferDesc.Extent = { width, height };
+				framebufferDesc.Attachments = { m_UiColor };
+				framebufferDesc.DebugName = "WuiOffscreen";
+				m_UiFramebuffer = Renderer::GetDevice()->CreateFramebuffer(framebufferDesc);
+			}
+			pass = m_UiPass;
+			framebuffer = m_UiFramebuffer;
+		}
+
 		const auto prebake = [&](const std::vector<WuiDrawCommand>& list)
 		{
 			for (const WuiDrawCommand& command : list)
@@ -573,7 +597,7 @@ namespace World::Wui
 		m_Cmd->Begin();
 		Rhi::ClearValue clear;
 		clear.Color = { 0, 0, 0, 0 };
-		m_Cmd->BeginRenderPass(Renderer::GetPresentRenderPass(), Renderer::GetPresentFramebuffer(), { clear });
+		m_Cmd->BeginRenderPass(pass, framebuffer, { clear });
 		m_Cmd->SetViewport({ 0, 0, m_Viewport.x, m_Viewport.y, 0.0f, 1.0f });
 		ApplyScissor(m_CurrentClip);
 		DrawList(commands);
@@ -582,6 +606,9 @@ namespace World::Wui
 		m_Cmd->EndRenderPass();
 		m_Cmd->End();
 		Renderer::SubmitUi(m_Cmd);
+
+		if (!m_IsVulkan)
+			Rhi::BlitFramebufferToBackbuffer(m_UiFramebuffer, { m_UiWidth, m_UiHeight });
 	}
 
 	void WuiRhiBackend::EndFrame(WuiCursor cursor)
@@ -592,25 +619,17 @@ namespace World::Wui
 		GLFWwindow* window = static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow());
 		if (!window)
 			return;
-		static GLFWcursor* cursors[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+		int index = 0;
 		int shape = GLFW_ARROW_CURSOR;
 		switch (cursor)
 		{
-			case WuiCursor::IBeam: shape = GLFW_IBEAM_CURSOR; break;
-			case WuiCursor::ResizeEW: shape = GLFW_HRESIZE_CURSOR; break;
-			case WuiCursor::ResizeNS: shape = GLFW_VRESIZE_CURSOR; break;
-			case WuiCursor::Hand: shape = GLFW_HAND_CURSOR; break;
-			default: shape = GLFW_ARROW_CURSOR; break;
+			case WuiCursor::IBeam: index = 1; shape = GLFW_IBEAM_CURSOR; break;
+			case WuiCursor::ResizeEW: index = 2; shape = GLFW_HRESIZE_CURSOR; break;
+			case WuiCursor::ResizeNS: index = 3; shape = GLFW_VRESIZE_CURSOR; break;
+			case WuiCursor::Hand: index = 4; shape = GLFW_HAND_CURSOR; break;
+			default: index = 0; shape = GLFW_ARROW_CURSOR; break;
 		}
-		int index = 0;
-		switch (cursor)
-		{
-			case WuiCursor::IBeam: index = 1; break;
-			case WuiCursor::ResizeEW: index = 2; break;
-			case WuiCursor::ResizeNS: index = 3; break;
-			case WuiCursor::Hand: index = 4; break;
-			default: index = 0; break;
-		}
+		static GLFWcursor* cursors[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
 		if (!cursors[index])
 			cursors[index] = glfwCreateStandardCursor(shape);
 		if (cursors[index])
