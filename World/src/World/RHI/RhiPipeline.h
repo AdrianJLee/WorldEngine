@@ -6,6 +6,7 @@
 namespace World::Rhi
 {
 	class RenderPass;
+	class DescriptorSetLayout;
 
 	struct VertexAttribute
 	{
@@ -66,6 +67,7 @@ namespace World::Rhi
 	{
 		Handle<Shader> Shader;
 		Handle<RenderPass> RenderPass;      // 兼容渲染通道
+		std::vector<Handle<DescriptorSetLayout>> DescriptorSetLayouts;   // 按 set 顺序
 		uint32_t SubpassIndex = 0;
 		std::vector<VertexBinding> VertexBindings;
 		std::vector<VertexAttribute> VertexAttributes;

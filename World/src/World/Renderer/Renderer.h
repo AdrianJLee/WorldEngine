@@ -19,6 +19,8 @@ namespace World
 		// 自动降级 OpenGL 并告警。宿主在加载 manifest 后调用。
 		static void SetRequestedRenderer(const std::string& name);
 		static Rhi::Handle<Rhi::Device> GetDevice() { return m_Device; }
+		// set 0 全局布局(相机 UBO binding 0),由 SceneRenderer 与 Renderer2D 管线共享。
+		static Rhi::Handle<Rhi::DescriptorSetLayout> GetGlobalDescriptorSetLayout();
 		// 开发验证:把当前默认帧缓冲读回并写 PPM(渲染基线截图)。
 		static void CaptureFrame(const std::filesystem::path& path);
 		// 读回指定离屏帧缓冲(场景渲染目标)写 PPM。

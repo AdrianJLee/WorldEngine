@@ -63,10 +63,13 @@ namespace World
 
 		Rhi::PipelineDesc MakePipeline(const Rhi::Handle<Rhi::Shader>& shader,
 			const std::vector<Rhi::VertexAttribute>& attributes, uint32_t stride,
-			Rhi::PrimitiveTopology topology, float lineWidth = 1.0f)
+			Rhi::PrimitiveTopology topology,
+			const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout,
+			float lineWidth = 1.0f)
 		{
 			Rhi::PipelineDesc desc;
 			desc.Shader = shader;
+			desc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), textureLayout };
 			desc.Topology = topology;
 			desc.LineWidth = lineWidth;
 			desc.VertexBindings.push_back({ 0, stride, false });
@@ -99,6 +102,7 @@ namespace World
 
 			Rhi::Handle<Rhi::Sampler> Sampler;
 			Rhi::Handle<Rhi::DescriptorSet> TextureDescriptorSet;
+			Rhi::Handle<Rhi::DescriptorSetLayout> TextureLayout;
 			std::array<Rhi::Handle<Rhi::Texture>, MaxTextureSlots> Textures;
 			std::array<Ref<Texture2D>, MaxTextureSlots> SourceTextures;
 			uint32_t TextureSlotIndex = 1;
@@ -119,10 +123,12 @@ namespace World
 		template <typename Vertex, uint32_t MaxIndices>
 		void CreateBatch(Batch<Vertex>& batch, const Rhi::Handle<Rhi::Shader>& shader,
 			const std::vector<Rhi::VertexAttribute>& attributes,
-			Rhi::PrimitiveTopology topology, uint32_t maxVertices, float lineWidth)
+			Rhi::PrimitiveTopology topology,
+			const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout,
+			uint32_t maxVertices, float lineWidth)
 		{
 			batch.Pipeline = Renderer::GetDevice()->CreatePipeline(
-				MakePipeline(shader, attributes, sizeof(Vertex), topology, lineWidth));
+				MakePipeline(shader, attributes, sizeof(Vertex), topology, textureLayout, lineWidth));
 			Rhi::BufferDesc vertexDesc;
 			vertexDesc.Size = static_cast<uint64_t>(maxVertices) * sizeof(Vertex);
 			vertexDesc.Usage = Rhi::BufferUsageVertex;
@@ -178,9 +184,11 @@ namespace World
 		Rhi::DescriptorSetLayoutDesc textureLayout;
 		textureLayout.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), MaxTextureSlots });
+		s_Data.TextureLayout =
+			Renderer::GetDevice()->CreateDescriptorSetLayout(textureLayout);
 		s_Data.TextureDescriptorSet =
 			Renderer::GetDevice()->CreateDescriptorSet(
-				Renderer::GetDevice()->CreateDescriptorSetLayout(textureLayout));
+				s_Data.TextureLayout);
 
 		Rhi::SamplerDesc samplerDesc;
 		samplerDesc.MinFilter = Rhi::Filter::Linear;
@@ -209,7 +217,7 @@ namespace World
 			{ 3, 0, Rhi::Format::R32_SFLOAT, 36 },
 			{ 4, 0, Rhi::Format::R32_SFLOAT, 40 },
 			{ 5, 0, Rhi::Format::R32_SINT, 44 },
-		}, Rhi::PrimitiveTopology::TriangleList, MaxQuads * 4, 1.0f);
+		}, Rhi::PrimitiveTopology::TriangleList, s_Data.TextureLayout, MaxQuads * 4, 1.0f);
 
 		const auto circleShader = CreateRendererShader("assets/shaders/Renderer2D_Circle.hlsl", "Renderer2D-Circle");
 		CreateBatch<CircleVertex, MaxCircles * 6>(s_Data.Circles, circleShader, {
@@ -219,14 +227,14 @@ namespace World
 			{ 3, 0, Rhi::Format::R32_SFLOAT, 40 },
 			{ 4, 0, Rhi::Format::R32_SFLOAT, 44 },
 			{ 5, 0, Rhi::Format::R32_SINT, 48 },
-		}, Rhi::PrimitiveTopology::TriangleList, MaxCircles * 4, 1.0f);
+		}, Rhi::PrimitiveTopology::TriangleList, s_Data.TextureLayout, MaxCircles * 4, 1.0f);
 
 		const auto lineShader = CreateRendererShader("assets/shaders/Renderer2D_Line.hlsl", "Renderer2D-Line");
 		CreateBatch<LineVertex, MaxLines * 2>(s_Data.Lines, lineShader, {
 			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
 			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 12 },
 			{ 2, 0, Rhi::Format::R32_SINT, 28 },
-		}, Rhi::PrimitiveTopology::LineList, MaxLines * 2, 2.0f);
+		}, Rhi::PrimitiveTopology::LineList, s_Data.TextureLayout, MaxLines * 2, 2.0f);
 	}
 
 	void Renderer2D::BeginScene(const Camera&, const glm::mat4&, Rhi::Handle<Rhi::CommandBuffer> commandBuffer)
@@ -275,7 +283,7 @@ namespace World
 			writes.push_back(write);
 		}
 		s_Data.TextureDescriptorSet->Update(writes);
-		s_CurrentCommandBuffer->BindDescriptorSet(s_Data.TextureDescriptorSet);
+		s_CurrentCommandBuffer->BindDescriptorSet(s_Data.TextureDescriptorSet, 1);
 
 		auto flushBatch = [&](auto& batch)
 		{

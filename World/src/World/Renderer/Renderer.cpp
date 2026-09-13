@@ -15,6 +15,7 @@ namespace World
 {
 	Renderer::SceneData* Renderer::m_SceneData = new Renderer::SceneData;
 	Rhi::Handle<Rhi::Device> Renderer::m_Device = nullptr;
+	static Rhi::Handle<Rhi::DescriptorSetLayout> s_GlobalDescriptorSetLayout;
 	void Renderer::Init()
 	{
 		// RHI 设备:W5 只接线 OpenGL 后端;设备在 GL 上下文创建后初始化。
@@ -39,6 +40,18 @@ namespace World
 			WLD_CORE_WARN("Renderer '{0}' requested but unavailable; running {1}", name, chosen);
 		else
 			WLD_CORE_INFO("RHI backend selected: {0}", chosen);
+	}
+
+	Rhi::Handle<Rhi::DescriptorSetLayout> Renderer::GetGlobalDescriptorSetLayout()
+	{
+		if (!s_GlobalDescriptorSetLayout && m_Device)
+		{
+			Rhi::DescriptorSetLayoutDesc desc;
+			desc.Bindings.push_back({ 0, Rhi::DescriptorType::UniformBuffer,
+				Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex), 1 });
+			s_GlobalDescriptorSetLayout = m_Device->CreateDescriptorSetLayout(desc);
+		}
+		return s_GlobalDescriptorSetLayout;
 	}
 	void Renderer::OnWindowResize(uint32_t width, uint32_t height)
 	{

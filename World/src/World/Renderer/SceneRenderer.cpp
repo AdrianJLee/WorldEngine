@@ -101,11 +101,8 @@ namespace World
 		cameraDesc.Memory = Rhi::MemoryHint::HostVisible;
 		m_CameraBuffer = m_Device->CreateBuffer(cameraDesc);
 
-		Rhi::DescriptorSetLayoutDesc globalLayout;
-		globalLayout.Bindings.push_back({ 0, Rhi::DescriptorType::UniformBuffer,
-			Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex), 1 });
 		m_GlobalDescriptorSet = m_Device->CreateDescriptorSet(
-			m_Device->CreateDescriptorSetLayout(globalLayout));
+			Renderer::GetGlobalDescriptorSetLayout());
 		Rhi::DescriptorWrite cameraWrite;
 		cameraWrite.Binding = 0;
 		cameraWrite.Type = Rhi::DescriptorType::UniformBuffer;
