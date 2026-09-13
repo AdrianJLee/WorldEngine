@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/RHI/Vulkan/VulkanDevice.h"
+#include "World/RHI/Vulkan/VulkanResources.h"
 #include "World/Core/Log.h"
 
 #include <cstring>
@@ -206,18 +207,21 @@ namespace World::Rhi::Vulkan
 	Handle<CommandQueue> VulkanDevice::CreateQueue(const std::string&) { NOT_IMPLEMENTED(); return nullptr; }
 	Handle<CommandBuffer> VulkanDevice::CreateCommandBuffer(const std::string&) { NOT_IMPLEMENTED(); return nullptr; }
 	Handle<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<RenderPass> VulkanDevice::CreateRenderPass(const RenderPassDesc&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<Framebuffer> VulkanDevice::CreateFramebuffer(const FramebufferDesc&) { NOT_IMPLEMENTED(); return nullptr; }
+	Handle<RenderPass> VulkanDevice::CreateRenderPass(const RenderPassDesc& desc) { return CreateRef<VulkanRenderPass>(*this, desc); }
+	Handle<Framebuffer> VulkanDevice::CreateFramebuffer(const FramebufferDesc& desc) { return CreateRef<VulkanFramebuffer>(*this, desc); }
 	Handle<Pipeline> VulkanDevice::CreatePipeline(const PipelineDesc&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<Shader> VulkanDevice::CreateShader(const ShaderDesc&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<Buffer> VulkanDevice::CreateBuffer(const BufferDesc&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<Texture> VulkanDevice::CreateTexture(const TextureDesc&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<Sampler> VulkanDevice::CreateSampler(const SamplerDesc&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<DescriptorSetLayout> VulkanDevice::CreateDescriptorSetLayout(const DescriptorSetLayoutDesc&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<DescriptorSet> VulkanDevice::CreateDescriptorSet(const Handle<DescriptorSetLayout>&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<Fence> VulkanDevice::CreateFence(bool) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<Semaphore> VulkanDevice::CreateSemaphore(const SemaphoreCreateDesc&) { NOT_IMPLEMENTED(); return nullptr; }
-	Handle<QueryPool> VulkanDevice::CreateQueryPool(QueryType, uint32_t) { NOT_IMPLEMENTED(); return nullptr; }
+	Handle<Shader> VulkanDevice::CreateShader(const ShaderDesc& desc) { return CreateRef<VulkanShader>(*this, desc); }
+	Handle<Buffer> VulkanDevice::CreateBuffer(const BufferDesc& desc) { return CreateRef<VulkanBuffer>(*this, desc); }
+	Handle<Texture> VulkanDevice::CreateTexture(const TextureDesc& desc) { return CreateRef<VulkanTexture>(*this, desc); }
+	Handle<Sampler> VulkanDevice::CreateSampler(const SamplerDesc& desc) { return CreateRef<VulkanSampler>(*this, desc); }
+	Handle<DescriptorSetLayout> VulkanDevice::CreateDescriptorSetLayout(const DescriptorSetLayoutDesc& desc) { return CreateRef<VulkanDescriptorSetLayout>(*this, desc); }
+	Handle<DescriptorSet> VulkanDevice::CreateDescriptorSet(const Handle<DescriptorSetLayout>& layout)
+	{
+		return CreateRef<VulkanDescriptorSet>(*this, std::static_pointer_cast<VulkanDescriptorSetLayout>(layout));
+	}
+	Handle<Fence> VulkanDevice::CreateFence(bool signaled) { return CreateRef<VulkanFence>(*this, signaled); }
+	Handle<Semaphore> VulkanDevice::CreateSemaphore(const SemaphoreCreateDesc& desc) { return CreateRef<VulkanSemaphore>(*this, desc); }
+	Handle<QueryPool> VulkanDevice::CreateQueryPool(QueryType type, uint32_t count) { return CreateRef<VulkanQueryPool>(*this, type, count); }
 
 	Handle<VulkanDevice> VulkanDevice::Create(const DeviceDesc& desc, std::string* error)
 	{

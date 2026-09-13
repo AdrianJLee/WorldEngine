@@ -24,6 +24,74 @@ int main()
 		std::fprintf(stderr, "World.VulkanDevice: invalid device limits\n");
 		return 1;
 	}
+
+	// 资源类冒烟:创建/销毁一轮,验证合同对象在 Vulkan 上可实例化。
+	{
+		using namespace World::Rhi;
+		BufferDesc bufferDesc;
+		bufferDesc.Size = 256;
+		bufferDesc.Usage = BufferUsageVertex | BufferUsageUniform;
+		const Handle<Buffer> buffer = device->CreateBuffer(bufferDesc);
+		if (!buffer)
+			return 1;
+		buffer->SetData("hello", 5);
+
+		TextureDesc textureDesc;
+		textureDesc.Type = TextureType::Texture2D;
+		textureDesc.Format = Format::R8G8B8A8_UNORM;
+		textureDesc.Extent = { 4, 4, 1 };
+		textureDesc.Usage = TextureUsageSampled;
+		const Handle<Texture> texture = device->CreateTexture(textureDesc);
+		if (!texture)
+			return 1;
+		texture->SetData("1234567890123456", 16);
+
+		SamplerDesc samplerDesc;
+		if (!device->CreateSampler(samplerDesc))
+			return 1;
+
+		RenderPassDesc passDesc;
+		RenderPassAttachment color;
+		color.Format = Format::R8G8B8A8_UNORM;
+		color.Load = LoadOp::Clear;
+		color.Store = StoreOp::Store;
+		passDesc.Attachments = { color };
+		SubpassDesc subpass;
+		subpass.ColorAttachments = { { 0, AttachmentLayout::ColorAttachment } };
+		passDesc.Subpasses = { subpass };
+		const Handle<RenderPass> pass = device->CreateRenderPass(passDesc);
+		if (!pass)
+			return 1;
+
+		FramebufferDesc framebufferDesc;
+		framebufferDesc.RenderPass = pass;
+		framebufferDesc.Extent = { 4, 4 };
+		framebufferDesc.Attachments = { texture };
+		if (!device->CreateFramebuffer(framebufferDesc))
+			return 1;
+
+		DescriptorSetLayoutDesc layoutDesc;
+		layoutDesc.Bindings.push_back({ 0, DescriptorType::UniformBuffer,
+			ShaderStageFlag(ShaderStage::Vertex), 1 });
+		const Handle<DescriptorSetLayout> layout = device->CreateDescriptorSetLayout(layoutDesc);
+		const Handle<DescriptorSet> set = device->CreateDescriptorSet(layout);
+		if (!set)
+			return 1;
+		DescriptorWrite write;
+		write.Binding = 0;
+		write.Type = DescriptorType::UniformBuffer;
+		write.Buffer = buffer;
+		set->Update({ write });
+
+		if (!device->CreateFence(false) || !device->CreateFence(true))
+			return 1;
+		SemaphoreCreateDesc timelineDesc;
+		timelineDesc.Timeline = true;
+		if (!device->CreateSemaphore() || !device->CreateSemaphore(timelineDesc))
+			return 1;
+		if (!device->CreateQueryPool(QueryType::Occlusion, 2))
+			return 1;
+	}
 	device->WaitIdle();
 	std::printf("World.VulkanDevice: ok\n");
 	return 0;
