@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorPanel.h"
+#include "World/Renderer/Texture.h"
 
 #include <chrono>
 #include <filesystem>
@@ -64,6 +65,7 @@ namespace World
 	{
 	public:
 		explicit ContentBrowserPanel(PanelHost& host);
+		~ContentBrowserPanel();
 		const char* Id() const override { return "content_browser"; }
 		const char* Title() const override { return "Content Browser"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
@@ -91,5 +93,7 @@ namespace World
 
 		PanelHost& m_Host;
 		ContentBrowserModel m_Model;
+		std::filesystem::path m_StatePath;
+		Wui::WuiContext* m_Ctx = nullptr;
 	};
 }

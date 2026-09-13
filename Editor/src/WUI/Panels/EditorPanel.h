@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/WUI/WuiContext.h"
+#include "World/WUI/WuiWidgets.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 
@@ -17,6 +18,7 @@ namespace World
 		virtual Entity GetSelectedEntity() = 0;
 		virtual void SetSelectedEntity(Entity entity) = 0;
 		virtual void MarkDocumentDirty() = 0;
+		virtual void DuplicateSelectedEntity() = 0;
 		virtual void OpenScene(const std::filesystem::path& path) = 0;
 		virtual Wui::WuiTheme& Theme() = 0;
 	};
