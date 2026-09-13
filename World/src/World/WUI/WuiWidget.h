@@ -259,6 +259,25 @@ namespace World::Wui
 		void Paint(WuiPaintContext& context) override;
 	};
 
+	class WuiSection final : public WuiWidget
+	{
+	public:
+		std::string Title;
+		bool Open = false;
+		float ContentHeight = 0;
+		std::function<void(WuiContext&, const WuiRect&)> DrawContent;
+		WuiColor HeaderFill { 0.2f, 0.21f, 0.23f, 1 };
+
+		WuiMeasure Measure(const WuiConstraints& constraints) override;
+		void Arrange(const WuiRect& rect) override;
+		void Paint(WuiPaintContext& context) override;
+		WuiWidgetPtr HitTest(glm::vec2 point) override;
+		const WuiRect& ContentRect() const { return m_ContentRect; }
+
+	private:
+		WuiRect m_ContentRect;
+	};
+
 	// 便捷:根据约束框递归测量并布局整棵树。
 	void LayoutWidgetTree(const WuiWidgetPtr& root, const WuiRect& rect);
 }
