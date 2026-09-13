@@ -2,6 +2,7 @@
 #include "EditorShell.h"
 #include "../EditorLayer.h"
 
+#include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Memory/MemoryTracker.h"
 #include "World/Core/KeyCodes.h"
 #include "World/ImGui/ImGuiDrawLibrary.h"
@@ -422,6 +423,18 @@ namespace World
 			{ "New", false, [this] { m_Editor.NewScene(); } },
 			{ "Open", false, [this] { m_Editor.OpenScene(); } },
 			{ "Save", false, [this] { m_Editor.SaveScene(); } },
+			{ "Project Settings", false, [this]
+				{
+					std::string error;
+					World::Asset::ProjectManifest manifest;
+					const std::filesystem::path manifestPath =
+						std::string(WLD_GAME_DIR) + "project.we.yaml";
+					if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+						m_ProjectRendererIndex = manifest.Renderer == "vulkan" ? 1 : 0;
+					else
+						WLD_CORE_WARN("Failed to load project manifest: {0}", error);
+					m_ShowProjectSettings = true;
+				} },
 			{ "Generate Lua API Stubs", false, [this] { m_Editor.GenerateLuaStubsAction(); } },
 			{ "Cooking", false, [this] { m_Editor.StartCookingAction(); } },
 			{ "Export Operation Log", false, [this] { m_Editor.ExportOperationLog(); } },
@@ -1973,6 +1986,44 @@ namespace World
 				Label(ctx, { panel.X + 16, panel.Y + 52 }, "Packaging...", m_Theme.Text, 14.0f);
 			}
 			EndModal(ctx, cooking);
+		}
+
+		// ---- 项目设置 ----
+		const Wui::WuiId projectSettings = Wui::HashId("modal.projectsettings");
+		if (m_ShowProjectSettings)
+		{
+			ctx.SetModal(projectSettings);
+			m_ShowProjectSettings = false;
+		}
+		else if (ctx.Modal() == projectSettings)
+			ctx.ClearModal();
+		if (BeginModal(ctx, projectSettings, "Project Settings", { 380, 190 }, &panel, m_Theme))
+		{
+			Label(ctx, { panel.X + 16, panel.Y + 48 }, "Renderer", m_Theme.TextMuted, 13.0f);
+			std::vector<std::string> options = { "OpenGL", "Vulkan" };
+			Combo(ctx, Wui::HashId("project.renderer"), { panel.X + 110, panel.Y + 46, 220, 24 },
+				"", options, m_ProjectRendererIndex, m_Theme);
+			if (Button(ctx, Wui::HashId("project.save"), { panel.X + 60, panel.Y + 125, 110, 28 }, "Save", m_Theme))
+			{
+				std::string error;
+				World::Asset::ProjectManifest manifest;
+				const std::filesystem::path manifestPath =
+					std::string(WLD_GAME_DIR) + "project.we.yaml";
+				if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+				{
+					manifest.Renderer = m_ProjectRendererIndex == 1 ? "vulkan" : "opengl";
+					if (World::Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+						WLD_CORE_INFO("Project settings saved: renderer={0}", manifest.Renderer);
+					else
+						WLD_CORE_ERROR("Failed to save project manifest: {0}", error);
+				}
+				else
+					WLD_CORE_ERROR("Failed to load project manifest: {0}", error);
+				ctx.ClearModal();
+			}
+			if (Button(ctx, Wui::HashId("project.cancel"), { panel.X + 190, panel.Y + 125, 110, 28 }, "Cancel", m_Theme))
+				ctx.ClearModal();
+			EndModal(ctx, projectSettings);
 		}
 	}
 }

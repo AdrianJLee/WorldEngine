@@ -17,6 +17,7 @@ namespace World::Asset
 		std::string Version = "1.0.0";
 		std::filesystem::path ContentRoot = "assets";
 		std::string StartScene;
+		std::string Renderer = "opengl";   // opengl | vulkan
 		std::vector<std::string> Packages;
 
 		// 加载并校验;error 为空表示成功。

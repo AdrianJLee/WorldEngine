@@ -61,6 +61,11 @@ namespace World::Asset
 			if (manifest.StartScene.empty() ||
 				!ValidateRelativePath(manifest.StartScene, &manifest.StartScene, error))
 				return false;
+			if (manifest.Renderer != "opengl" && manifest.Renderer != "vulkan")
+			{
+				if (error) *error = "renderer must be 'opengl' or 'vulkan': " + manifest.Renderer;
+				return false;
+			}
 			for (std::string& package : manifest.Packages)
 				if (!ValidateRelativePath(package, &package, error))
 					return false;
@@ -88,6 +93,7 @@ namespace World::Asset
 			manifest.Version = root["version"] ? root["version"].as<std::string>("1.0.0") : "1.0.0";
 			manifest.ContentRoot = root["content_root"] ? root["content_root"].as<std::string>("assets") : "assets";
 			manifest.StartScene = root["start_scene"] ? root["start_scene"].as<std::string>("") : "";
+			manifest.Renderer = root["renderer"] ? root["renderer"].as<std::string>("opengl") : "opengl";
 			if (const YAML::Node packages = root["packages"])
 				for (const YAML::Node& item : packages)
 					manifest.Packages.push_back(item.as<std::string>(""));
@@ -116,6 +122,7 @@ namespace World::Asset
 			out << YAML::Key << "version" << YAML::Value << copy.Version;
 			out << YAML::Key << "content_root" << YAML::Value << copy.ContentRoot.generic_string();
 			out << YAML::Key << "start_scene" << YAML::Value << copy.StartScene;
+			out << YAML::Key << "renderer" << YAML::Value << copy.Renderer;
 			out << YAML::Key << "packages" << YAML::Value << YAML::BeginSeq;
 			for (const std::string& package : copy.Packages)
 				out << package;
