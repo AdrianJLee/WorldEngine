@@ -266,7 +266,8 @@ namespace World
 	}
 	void EditorLayer::StartCookingAction()
 	{
-		const std::string target = World::FileDialogs::SaveFile("Game Package\0*.*\0");
+		const std::string target =
+			World::FileDialogs::SelectFolder("Select the output folder for the game package");
 		if (!target.empty())
 			StartCooking(target);
 	}
@@ -543,7 +544,6 @@ namespace World
 				{
 					namespace fs = std::filesystem;
 					fs::path publishDir(target);
-					publishDir.replace_extension("");
 					fs::create_directories(publishDir);
 
 					// 1. 项目清单(单一事实源)。

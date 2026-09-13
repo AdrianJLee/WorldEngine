@@ -4,6 +4,7 @@
 
 // Windows 相关的头文件
 #include <commdlg.h>
+#include <shlobj.h>
 #include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
@@ -57,6 +58,36 @@ namespace World
 			return std::string(ofn.lpstrFile);
 		}
 		return std::string();
+	}
+
+	std::string FileDialogs::SelectFolder(const char* title)
+	{
+		// 文件夹选择对话框(标准"选取目标目录"体验,不会因同名文件夹而进入其中)。
+		BROWSEINFOW info {};
+		info.hwndOwner = glfwGetWin32Window((GLFWwindow*)Application::Get().GetWindow().GetNativeWindow());
+		info.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX;
+		WCHAR titleBuffer[128] = { 0 };
+		if (title)
+			MultiByteToWideChar(CP_UTF8, 0, title, -1, titleBuffer, 128);
+		info.lpszTitle = titleBuffer[0] ? titleBuffer : L"Select folder";
+
+		std::string result;
+		PIDLIST_ABSOLUTE selection = SHBrowseForFolderW(&info);
+		if (selection)
+		{
+			WCHAR pathBuffer[MAX_PATH] = { 0 };
+			if (SHGetPathFromIDListW(selection, pathBuffer))
+			{
+				const int length = WideCharToMultiByte(CP_UTF8, 0, pathBuffer, -1, nullptr, 0, nullptr, nullptr);
+				if (length > 0)
+				{
+					result.resize(static_cast<size_t>(length) - 1);
+					WideCharToMultiByte(CP_UTF8, 0, pathBuffer, -1, result.data(), length, nullptr, nullptr);
+				}
+			}
+			CoTaskMemFree(selection);
+		}
+		return result;
 	}
 
 	void SystemUtils::SetIMEState(bool enable, void* windowHandle)
