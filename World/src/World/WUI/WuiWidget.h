@@ -2,7 +2,6 @@
 
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiCore.h"
-#include "World/WUI/WuiWidgets.h"
 
 #include <functional>
 #include <memory>
@@ -148,77 +147,6 @@ namespace World::Wui
 
 		WuiMeasure Measure(const WuiConstraints&) override { MarkClean(); return { 0, 0 }; }
 		void Paint(WuiPaintContext& context) override;
-	};
-
-	inline const WuiTheme& WuiDefaultTheme()
-	{
-		static WuiTheme theme;
-		return theme;
-	}
-
-	class WuiTextField final : public WuiWidget
-	{
-	public:
-		std::string* Buffer = nullptr;
-		std::function<void()> OnCommit;
-		std::function<void()> OnCancel;
-		const WuiTheme* Theme = nullptr;
-
-		WuiMeasure Measure(const WuiConstraints& constraints) override;
-		void Paint(WuiPaintContext& context) override;
-	};
-
-	class WuiDragFloat final : public WuiWidget
-	{
-	public:
-		float* Value = nullptr;
-		float Speed = 0.01f;
-		float Min = 1.0f;
-		float Max = -1.0f;
-		const WuiTheme* Theme = nullptr;
-
-		WuiMeasure Measure(const WuiConstraints& constraints) override;
-		void Paint(WuiPaintContext& context) override;
-	};
-
-	class WuiDragInt final : public WuiWidget
-	{
-	public:
-		int64_t* Value = nullptr;
-		int64_t Min = INT64_MIN;
-		int64_t Max = INT64_MAX;
-		const WuiTheme* Theme = nullptr;
-
-		WuiMeasure Measure(const WuiConstraints& constraints) override;
-		void Paint(WuiPaintContext& context) override;
-	};
-
-	class WuiCombo final : public WuiWidget
-	{
-	public:
-		std::string Label;
-		const std::vector<std::string>* Options = nullptr;
-		int* Selected = nullptr;
-		const WuiTheme* Theme = nullptr;
-
-		WuiMeasure Measure(const WuiConstraints& constraints) override;
-		void Paint(WuiPaintContext& context) override;
-	};
-
-	class WuiScrollArea final : public WuiWidget
-	{
-	public:
-		WuiWidgetPtr Child;
-		float ContentHeight = 0;
-		const WuiTheme* Theme = nullptr;
-
-		WuiMeasure Measure(const WuiConstraints& constraints) override;
-		void Arrange(const WuiRect& rect) override;
-		void Paint(WuiPaintContext& context) override;
-		WuiWidgetPtr HitTest(glm::vec2 point) override;
-
-	private:
-		float m_ScrollY = 0;
 	};
 
 	// 便捷:根据约束框递归测量并布局整棵树。

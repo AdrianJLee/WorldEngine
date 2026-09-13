@@ -438,53 +438,6 @@ int main()
 			ctx.EndFrame();
 		}
 
-		// M2 控件:TextField/DragInt/Combo/ScrollArea 的布局与命令输出
-		{
-			WuiContext ctx;
-			WuiInputState input;
-			ctx.BeginFrame(input);
-
-			std::string buffer = "hello";
-			const auto field = std::make_shared<WuiTextField>();
-			field->Buffer = &buffer;
-			LayoutWidgetTree(field, { 0, 0, 200, 24 });
-			CHECK(Near(field->Rect().W, 200) && Near(field->Rect().H, 24));
-			WuiPaintContext paint(ctx);
-			field->Paint(paint);
-			CHECK(ctx.Commands().size() >= 2);
-
-			int64_t integer = 3;
-			const auto drag = std::make_shared<WuiDragInt>();
-			drag->Value = &integer;
-			drag->SetId(HashId("drag.i"));
-			LayoutWidgetTree(drag, { 0, 0, 100, 22 });
-			drag->Paint(paint);
-			CHECK(integer == 3);
-
-			std::vector<std::string> options = { "A", "B" };
-			int selected = 1;
-			const auto combo = std::make_shared<WuiCombo>();
-			combo->Options = &options;
-			combo->Selected = &selected;
-			combo->SetId(HashId("combo"));
-			LayoutWidgetTree(combo, { 0, 0, 120, 24 });
-			combo->Paint(paint);
-			CHECK(selected == 1);
-
-			const auto scroll = std::make_shared<WuiScrollArea>();
-			const auto content = std::make_shared<WuiLabel>();
-			content->Text = "content";
-			content->FixedHeight = 1000;
-			scroll->ContentHeight = 1000;
-			scroll->Child = content;
-			LayoutWidgetTree(scroll, { 0, 0, 100, 100 });
-			scroll->Paint(paint);
-			CHECK(scroll->HitTest({ 50, 50 }) == content);
-			CHECK(scroll->HitTest({ 500, 500 }) == nullptr);
-
-			ctx.EndFrame();
-		}
-
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}
