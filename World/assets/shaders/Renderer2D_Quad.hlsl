@@ -47,8 +47,8 @@ cbuffer Uniforms : register(b0)
 // 纹理数组与采样器
 //Texture2D u_Textures[32] : register(t0);
 //SamplerState u_Sampler : register(s0);
-Texture2D u_Textures[32] : register(t0, space0);
-SamplerState u_Sampler : register(s0, space0);
+Texture2D u_Textures[32] : register(t1, space0);
+SamplerState u_Sampler : register(s1, space0);
 
 // ==========================================
 // 3. 顶点着色器 (Vertex Shader)

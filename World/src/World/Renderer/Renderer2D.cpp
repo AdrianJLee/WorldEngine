@@ -176,7 +176,7 @@ namespace World
 
 		// 纹理描述符(绑定 0 = t0~t31;GLSL 未显式声明 layout,默认单元 0..31)。
 		Rhi::DescriptorSetLayoutDesc textureLayout;
-		textureLayout.Bindings.push_back({ 0, Rhi::DescriptorType::CombinedImageSampler,
+		textureLayout.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), MaxTextureSlots });
 		s_Data.TextureDescriptorSet =
 			Renderer::GetDevice()->CreateDescriptorSet(
@@ -267,7 +267,7 @@ namespace World
 		for (uint32_t i = 0; i < s_Data.TextureSlotIndex; ++i)
 		{
 			Rhi::DescriptorWrite write;
-			write.Binding = 0;
+			write.Binding = 1;
 			write.ArrayIndex = i;
 			write.Type = Rhi::DescriptorType::CombinedImageSampler;
 			write.Texture = s_Data.Textures[i];

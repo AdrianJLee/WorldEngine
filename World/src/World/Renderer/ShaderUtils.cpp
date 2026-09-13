@@ -88,6 +88,7 @@ namespace World
 	{
 		std::string cmd = "\"\"" + spirvCrossAbsPath + "\"" +
 			" --version 450 " +
+			" --combined-samplers-inherit-bindings " +
 			" --output \"" + glslAbsPath + "\" " +
 			" \"" + spvAbsPath + "\"\"";
 		int result = std::system(cmd.c_str());
