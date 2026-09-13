@@ -2,6 +2,7 @@
 
 #include "EditorPanel.h"
 #include "World/Renderer/Texture.h"
+#include "World/WUI/WuiWidget.h"
 
 #include <chrono>
 #include <filesystem>
@@ -101,6 +102,16 @@ namespace World
 		uint64_t m_DirIconId = 0;
 		uint64_t m_FileIconId = 0;
 		uint32_t m_IconGeneration = ~0u;
+		std::shared_ptr<Wui::WuiBox> m_Toolbar;
+		std::shared_ptr<Wui::WuiBox> m_Breadcrumbs;
+		std::shared_ptr<Wui::WuiTextField> m_SearchField;
+		std::shared_ptr<Wui::WuiButton> m_BackButton;
+		std::shared_ptr<Wui::WuiButton> m_ForwardButton;
+		std::shared_ptr<Wui::WuiButton> m_UpButton;
+		std::shared_ptr<Wui::WuiButton> m_ViewModeButton;
+		std::vector<std::shared_ptr<Wui::WuiButton>> m_CrumbButtons;
+		std::vector<std::filesystem::path> m_CrumbDests;
+		std::filesystem::path m_LastCrumbPath;
 		std::filesystem::path m_StatePath;
 		Wui::WuiContext* m_Ctx = nullptr;
 	};

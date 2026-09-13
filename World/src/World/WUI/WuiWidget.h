@@ -81,6 +81,7 @@ namespace World::Wui
 		float Gap = 0;
 
 		void Add(const WuiWidgetPtr& child, const WuiFlexItem& item = {});
+		void Clear();
 		const std::vector<WuiFlexChild>& Children() const { return m_Children; }
 
 		WuiMeasure Measure(const WuiConstraints& constraints) override;
@@ -124,6 +125,7 @@ namespace World::Wui
 	public:
 		std::string Label;
 		std::function<void()> OnClick;
+		bool Enabled = true;
 
 		WuiMeasure Measure(const WuiConstraints& constraints) override;
 		void Paint(WuiPaintContext& context) override;
@@ -276,6 +278,16 @@ namespace World::Wui
 
 	private:
 		WuiRect m_ContentRect;
+	};
+
+	class WuiCustom final : public WuiWidget
+	{
+	public:
+		float ContentHeight = 0;
+		std::function<void(WuiContext&, const WuiRect&)> Draw;
+
+		WuiMeasure Measure(const WuiConstraints& constraints) override;
+		void Paint(WuiPaintContext& context) override;
 	};
 
 	// 便捷:根据约束框递归测量并布局整棵树。
