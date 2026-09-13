@@ -16,6 +16,7 @@ namespace World
 	private:
 		bool OnWindowResize(WindowResizeEvent& e);
 		void LoadScene();
+		void CaptureFrameIfRequested();
 	private:
 		Ref<Scene> m_ActiveScene;
 		Ref<SceneRenderer> m_SceneRenderer;

@@ -1,10 +1,15 @@
 ﻿#include "wldpch.h"
 #include "Renderer.h"
 
+#include "World/Core/Application.h"
 #include "World/Renderer/RenderCommand.h"
 #include "World/Renderer/VertexArray.h"
 #include "World/Renderer/Shader.h"
 #include "World/Renderer/Renderer2D.h"
+
+#include <glad/glad.h>
+
+#include <fstream>
 
 namespace World
 {
@@ -51,5 +56,33 @@ namespace World
 		//vertexArray->Bind();
 		// TODO: 这里应该允许用户指定索引数量，而不是每次都使用整个索引缓冲区的大小
 		RenderCommand::DrawIndexed(vertexArray);
+	}
+
+	void Renderer::CaptureFrame(const std::filesystem::path& path)
+	{
+		if (!Application::HasInstance())
+			return;
+		const uint32_t width = Application::Get().GetWindow().GetWidth();
+		const uint32_t height = Application::Get().GetWindow().GetHeight();
+		std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 3);
+		glReadBuffer(GL_BACK);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		glReadPixels(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height),
+			GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+
+		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		if (!file)
+		{
+			WLD_CORE_ERROR("[capture] cannot open {0}", path.string());
+			return;
+		}
+		file << "P6\n" << width << " " << height << "\n255\n";
+		for (uint32_t row = 0; row < height; ++row)
+		{
+			const uint32_t sourceRow = height - 1 - row;
+			file.write(reinterpret_cast<const char*>(pixels.data() + static_cast<size_t>(sourceRow) * width * 3),
+				static_cast<std::streamsize>(width) * 3);
+		}
+		WLD_CORE_INFO("[capture] wrote {0} ({1}x{2})", path.string(), width, height);
 	}
 }

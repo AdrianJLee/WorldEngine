@@ -7,6 +7,8 @@
 #include "World/Renderer/SceneRenderer.h"
 #include "World/WUI/WuiImGuiBackend.h"
 
+#include <cstdlib>
+
 namespace World
 {
 	RuntimeLayer::RuntimeLayer()
@@ -63,6 +65,32 @@ namespace World
 
 
 		}
+
+		// 渲染基线捕获(仅开发验证):WLD_CAPTURE_FRAMES=N 后读默认帧缓冲写 PPM。
+		CaptureFrameIfRequested();
+	}
+
+	void RuntimeLayer::CaptureFrameIfRequested()
+	{
+		static int countdown = -1;
+		if (countdown == -1)
+		{
+			const char* frames = std::getenv("WLD_CAPTURE_FRAMES");
+			countdown = frames ? std::atoi(frames) : -2;
+		}
+		if (countdown > 0)
+		{
+			--countdown;
+			return;
+		}
+		if (countdown != 0)
+			return;
+		countdown = -2;
+
+		const char* pathEnv = std::getenv("WLD_CAPTURE_PATH");
+		if (!pathEnv || !pathEnv[0])
+			return;
+		Renderer::CaptureFrame(pathEnv);
 	}
 	void RuntimeLayer::OnImGuiRender()
 	{
