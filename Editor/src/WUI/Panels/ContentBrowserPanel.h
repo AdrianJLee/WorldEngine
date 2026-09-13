@@ -84,6 +84,7 @@ namespace World
 		void ApplyRename(const std::filesystem::path& target, const std::string& newName);
 		void StartRename(Wui::WuiContext& ctx, const std::filesystem::path& path);
 		void RenderRenameField(Wui::WuiContext& ctx, const std::filesystem::path& path, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
+		void OpenInExplorer(const std::filesystem::path& path);
 		void Cut();
 		void Copy();
 		void SelectAll(const std::vector<std::filesystem::path>& paths);

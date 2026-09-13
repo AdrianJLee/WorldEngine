@@ -13,6 +13,9 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <shellapi.h>
+
+#pragma comment(lib, "shell32.lib")
 
 namespace World
 {
@@ -478,6 +481,15 @@ namespace World
 		}
 	}
 
+	void ContentBrowserPanel::OpenInExplorer(const std::filesystem::path& path)
+	{
+		// /select 让资源管理器打开所在文件夹并选中该项,而不是直接打开文件。
+		const std::wstring parameters = L"/select,\"" + std::filesystem::absolute(path).wstring() + L"\"";
+		const HINSTANCE result = ShellExecuteW(nullptr, L"open", L"explorer.exe", parameters.c_str(), nullptr, SW_SHOWNORMAL);
+		if (reinterpret_cast<intptr_t>(result) <= 32)
+			WLD_CORE_WARN("Could not open Explorer for '{0}' (error {1})", path.string(), reinterpret_cast<intptr_t>(result));
+	}
+
 	void ContentBrowserPanel::Cut()
 	{
 		m_Model.Clipboard.assign(m_Model.Selected.begin(), m_Model.Selected.end());
@@ -844,7 +856,7 @@ namespace World
 				{ "Paste", [this] { PasteInto(std::filesystem::is_directory(m_Model.ContextMenuPath) ? m_Model.ContextMenuPath : m_Model.Current); } },
 				{ "Rename", [this, single] { if (single && m_Ctx) StartRename(*m_Ctx, m_Model.ContextMenuPath); } },
 				{ "New Folder", [this, &ctx] { CreateFolder(ctx); } },
-				{ "Open in Explorer", [this] { const std::string cmd = "explorer \"" + std::filesystem::absolute(m_Model.ContextMenuPath).string() + "\""; system(cmd.c_str()); } },
+				{ "Open in Explorer", [this] { OpenInExplorer(m_Model.ContextMenuPath); } },
 				{ "Delete", [this] { m_Model.ShowDeleteModal = true; } },
 			};
 			for (size_t i = 0; i < items.size(); ++i)
