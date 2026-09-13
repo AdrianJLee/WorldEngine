@@ -530,118 +530,73 @@ namespace World
 		std::string filePayload;
 		const bool fileDrag = ctx.IsDragActive(&filePayload) && filePayload.rfind("file:", 0) == 0;
 
-		// ---- 工具栏(布局树):后退/前进/上级 + 面包屑 + 视图/新建/刷新/搜索 ----
-		if (!m_Toolbar)
+		float y = rect.Y + 6;
+		const bool canBack = m_Model.HistoryIndex > 0;
+		const bool canForward = m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1;
+		if (Button(ctx, Wui::HashId("browser.back"), { rect.X + 6, y, 24, 24 }, "<", theme) && canBack)
+			GoBack();
+		if (Button(ctx, Wui::HashId("browser.forward"), { rect.X + 32, y, 24, 24 }, ">", theme) && canForward)
 		{
-			m_Toolbar = std::make_shared<Wui::WuiBox>();
-			m_Toolbar->Direction = Wui::WuiDirection::Row;
-			m_Toolbar->Gap = 6;
-			m_Toolbar->AlignCross = Wui::WuiAlign::Center;
+			++m_Model.HistoryIndex;
+			m_Model.Current = m_Model.History[m_Model.HistoryIndex];
+			m_Model.Selected.clear();
+			m_Model.LastSelected.clear();
+			Reveal(m_Model.Current);
+			m_Model.ListingDirty = true;
+			m_Model.ListingStamp = {};
+			SaveState();
+			if (m_Model.Search[0])
+				UpdateSearch();
+		}
+		if (Button(ctx, Wui::HashId("browser.up"), { rect.X + 58, y, 32, 24 }, "Up", theme) && m_Model.Current != m_Model.Root)
+			GoUp();
 
-			auto addButton = [&](const std::string& label, std::function<void()> action, float width)
+		float x = rect.X + 96;
+		auto breadcrumb = [&](const std::string& label, const std::filesystem::path& destination, const Wui::WuiId id)
+		{
+			const Wui::WuiRect btn { x, y, static_cast<float>(label.size() * 8 + 20), 24 };
+			if (fileDrag && ctx.IsHovered(btn))
 			{
-				auto button = std::make_shared<Wui::WuiButton>();
-				button->Label = label;
-				button->OnClick = std::move(action);
-				m_Toolbar->Add(button, { width, width, 0, 24, 0 });
-				return button;
-			};
-			m_BackButton = addButton("<", [this] { if (m_Model.HistoryIndex > 0) GoBack(); }, 24);
-			m_ForwardButton = addButton(">", [this]
-				{
-					if (m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1)
-					{
-						++m_Model.HistoryIndex;
-						m_Model.Current = m_Model.History[m_Model.HistoryIndex];
-						m_Model.Selected.clear();
-						m_Model.LastSelected.clear();
-						Reveal(m_Model.Current);
-						m_Model.ListingDirty = true;
-						m_Model.ListingStamp = {};
-						SaveState();
-						if (m_Model.Search[0])
-							UpdateSearch();
-					}
-				}, 24);
-			m_UpButton = addButton("Up", [this] { if (m_Model.Current != m_Model.Root) GoUp(); }, 32);
-
-			m_Breadcrumbs = std::make_shared<Wui::WuiBox>();
-			m_Breadcrumbs->Direction = Wui::WuiDirection::Row;
-			m_Breadcrumbs->Gap = 4;
-			m_Breadcrumbs->AlignCross = Wui::WuiAlign::Center;
-			m_Toolbar->Add(m_Breadcrumbs);
-
-			auto spacer = std::make_shared<Wui::WuiSpacer>();
-			m_Toolbar->Add(spacer, { 0, 1e30f, 0, 1e30f, 1 });
-
-			m_ViewModeButton = addButton(m_Model.ListMode ? "Grid" : "List", [this]
-				{
-					m_Model.ListMode = !m_Model.ListMode;
-					SaveState();
-				}, 58);
-			addButton("+ Folder", [this, &ctx] { CreateFolder(ctx); }, 70);
-			addButton("Refresh", [this]
-				{
-					InvalidateContents();
-					if (m_Model.Search[0])
-						UpdateSearch();
-				}, 58);
-
-			m_SearchField = std::make_shared<Wui::WuiTextField>();
-			m_SearchField->Buffer = &m_Model.SearchEdit;
-			m_SearchField->OnCommit = [this]
-				{
-					std::strncpy(m_Model.Search, m_Model.SearchEdit.c_str(), sizeof(m_Model.Search) - 1);
-					m_Model.Search[sizeof(m_Model.Search) - 1] = 0;
-					UpdateSearch();
-				};
-			m_Toolbar->Add(m_SearchField, { 162, 162, 0, 24, 0 });
+				ctx.DropTarget(btn, "file:");
+				m_Model.PendingDropDest = destination;
+				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, btn, theme.Accent, 2.0f, 2.0f });
+			}
+			if (Button(ctx, id, btn, label, theme))
+				Navigate(destination);
+			x += btn.W + 6;
+		};
+		breadcrumb("Root", m_Model.Root, Wui::HashId("browser.crumb.root"));
+		std::filesystem::path accumulated = m_Model.Root;
+		for (const auto& part : m_Model.Current.lexically_relative(m_Model.Root))
+		{
+			accumulated /= part;
+			breadcrumb(part.string(), accumulated, Wui::HashId(("browser.crumb." + part.string()).c_str()));
 		}
 
-		m_BackButton->Enabled = m_Model.HistoryIndex > 0;
-		m_ForwardButton->Enabled = m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1;
-		m_UpButton->Enabled = m_Model.Current != m_Model.Root;
-		m_ViewModeButton->Label = m_Model.ListMode ? "Grid" : "List";
-
-		// 面包屑随路径变化重建。
-		if (m_LastCrumbPath != m_Model.Current)
+		if (Button(ctx, Wui::HashId("browser.viewmode"), { rect.X + rect.W - 372, y, 58, 24 }, m_Model.ListMode ? "Grid" : "List", theme))
 		{
-			m_LastCrumbPath = m_Model.Current;
-			m_CrumbButtons.clear();
-			m_CrumbDests.clear();
-			m_Breadcrumbs->Clear();
-			const auto addCrumb = [&](const std::string& label, const std::filesystem::path& destination)
+			m_Model.ListMode = !m_Model.ListMode;
+			SaveState();
+		}
+		if (Button(ctx, Wui::HashId("browser.newfolder"), { rect.X + rect.W - 308, y, 70, 24 }, "+ Folder", theme))
+			CreateFolder(ctx);
+		if (Button(ctx, Wui::HashId("browser.refresh"), { rect.X + rect.W - 232, y, 58, 24 }, "Refresh", theme))
+		{
+			InvalidateContents();
+			if (m_Model.Search[0])
+				UpdateSearch();
+		}
+		{
+			if (m_Model.SearchEdit.empty() && m_Model.Search[0])
+				m_Model.SearchEdit = m_Model.Search;
+			if (TextField(ctx, Wui::HashId("browser.search"), { rect.X + rect.W - 168, y, 162, 24 }, m_Model.SearchEdit, theme))
 			{
-				auto button = std::make_shared<Wui::WuiButton>();
-				button->Label = label;
-				button->OnClick = [this, destination] { Navigate(destination); };
-				m_Breadcrumbs->Add(button, { static_cast<float>(label.size() * 8 + 20), static_cast<float>(label.size() * 8 + 20), 0, 24, 0 });
-				m_CrumbButtons.push_back(button);
-				m_CrumbDests.push_back(destination);
-			};
-			addCrumb("Root", m_Model.Root);
-			std::filesystem::path accumulated = m_Model.Root;
-			for (const auto& part : m_Model.Current.lexically_relative(m_Model.Root))
-			{
-				accumulated /= part;
-				addCrumb(part.string(), accumulated);
+				std::strncpy(m_Model.Search, m_Model.SearchEdit.c_str(), sizeof(m_Model.Search) - 1);
+				m_Model.Search[sizeof(m_Model.Search) - 1] = 0;
+				UpdateSearch();
 			}
 		}
-
-		Wui::LayoutWidgetTree(m_Toolbar, { rect.X + 6, rect.Y + 6, rect.W - 12, 24 });
-		Wui::WuiPaintContext toolbarPaint(ctx);
-		m_Toolbar->Paint(toolbarPaint);
-
-		if (fileDrag)
-			for (size_t i = 0; i < m_CrumbButtons.size(); ++i)
-				if (ctx.IsHovered(m_CrumbButtons[i]->Rect()))
-				{
-					ctx.DropTarget(m_CrumbButtons[i]->Rect(), "file:");
-					m_Model.PendingDropDest = m_CrumbDests[i];
-					ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, m_CrumbButtons[i]->Rect(), theme.Accent, 2.0f, 2.0f });
-				}
-
-		float y = rect.Y + 38;
+		y += 32;
 
 		// ---- 左侧目录树 ----
 		const float treeW = 190;
