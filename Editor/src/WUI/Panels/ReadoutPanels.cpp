@@ -64,7 +64,7 @@ namespace World
 		m_Lines[6]->Text = "Indices: " + std::to_string(stats.GetTotalIndexCount());
 		const Wui::WuiBackendStats uiStats = Wui::WuiRhiBackend::Stats();
 		m_Lines[7]->Text = "WUI Draw Calls: " + std::to_string(uiStats.DrawCalls) + "  Vertices: " + std::to_string(uiStats.Vertices);
-		m_Lines[8]->Text = "WUI Text Glyphs: " + std::to_string(uiStats.TextGlyphs) + "  Cached Frames: " + std::to_string(uiStats.CachedFrames);
+		m_Lines[8]->Text = "WUI Text Glyphs: " + std::to_string(uiStats.TextGlyphs);
 
 		Wui::LayoutWidgetTree(m_Root, { rect.X + 8, rect.Y + 8, rect.W - 16, rect.H - 16 });
 		Wui::WuiPaintContext paint(ctx);

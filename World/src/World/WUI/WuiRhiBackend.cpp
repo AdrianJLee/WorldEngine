@@ -59,42 +59,6 @@ namespace World::Wui
 			stream.read(reinterpret_cast<char*>(bytes.data()), size);
 			return stream.good();
 		}
-
-		uint64_t HashByte(uint64_t hash, uint8_t byte)
-		{
-			return (hash ^ byte) * 1099511628211ull;
-		}
-
-		uint64_t HashFloat(uint64_t hash, float value)
-		{
-			const int32_t bits = static_cast<int32_t>(value * 2.0f);
-			for (int i = 0; i < 4; ++i)
-				hash = HashByte(hash, static_cast<uint8_t>((bits >> (i * 8)) & 0xFF));
-			return hash;
-		}
-
-		uint64_t HashCommands(const std::vector<WuiDrawCommand>& commands, uint64_t hash)
-		{
-			for (const WuiDrawCommand& command : commands)
-			{
-				hash = HashByte(hash, static_cast<uint8_t>(command.Kind));
-				hash = HashFloat(hash, command.Rect.X);
-				hash = HashFloat(hash, command.Rect.Y);
-				hash = HashFloat(hash, command.Rect.W);
-				hash = HashFloat(hash, command.Rect.H);
-				for (unsigned char c : command.Text)
-					hash = HashByte(hash, c);
-				hash = HashByte(hash, command.Bold ? 1 : 0);
-				hash = HashFloat(hash, command.FontSize);
-				hash = HashFloat(hash, command.Color.R * 64.0f);
-				hash = HashFloat(hash, command.Color.G * 64.0f);
-				hash = HashFloat(hash, command.Color.B * 64.0f);
-				hash = HashFloat(hash, command.Color.A * 64.0f);
-				hash = HashFloat(hash, static_cast<float>(command.Image & 0xFFFFFFFFull));
-				hash = HashFloat(hash, static_cast<float>((command.Image >> 32) & 0xFFFFFFFFull));
-			}
-			return hash;
-		}
 	}
 
 	WuiRhiBackend::WuiRhiBackend()
@@ -129,10 +93,6 @@ namespace World::Wui
 			m_Fps = static_cast<float>(1.0 / (now - m_LastTime));
 		m_LastTime = now;
 		s_Input.BeginFrame(input, m_Viewport, m_Fps);
-		m_InputActive = false;
-		for (int i = 0; i < 3; ++i)
-			m_InputActive = m_InputActive || input.MouseDown[i] || input.MouseClicked[i] || input.MouseReleased[i];
-		m_InputActive = m_InputActive || input.Wheel != 0 || !input.KeyDown.empty() || !input.TextInput.empty();
 		return true;
 	}
 
@@ -157,7 +117,6 @@ namespace World::Wui
 		for (FontFace& face : m_Faces)
 			face.AtlasTexture = nullptr;
 		m_DeviceKey = nullptr;
-		m_HasCachedFrame = false;
 	}
 
 	void WuiRhiBackend::EnsureResources()
@@ -590,28 +549,6 @@ namespace World::Wui
 		if (!m_Cmd || !m_Pipeline)
 			return;
 
-		uint64_t frameHash = HashCommands(commands, 1469598103934665603ull);
-		frameHash = HashCommands(overlayCommands, frameHash);
-		frameHash = HashFloat(frameHash, m_Viewport.x);
-		frameHash = HashFloat(frameHash, m_Viewport.y);
-		const auto containsImage = [](const std::vector<WuiDrawCommand>& list)
-		{
-			for (const WuiDrawCommand& command : list)
-				if (command.Kind == WuiDrawKind::Image)
-					return true;
-			return false;
-		};
-		const bool hasImage = containsImage(commands) || containsImage(overlayCommands);
-
-		// 空闲帧缓存:无输入且命令流/视口未变时,跳过重录重绘,直接呈现上一帧。
-		if (!m_IsVulkan && !hasImage && !m_InputActive && m_HasCachedFrame && frameHash == m_LastFrameHash && m_UiFramebuffer)
-		{
-			Rhi::BlitFramebufferToBackbuffer(m_UiFramebuffer, { m_UiWidth, m_UiHeight });
-			s_Stats.CachedFrames++;
-			s_Stats.Frames++;
-			return;
-		}
-
 		Rhi::Handle<Rhi::RenderPass> pass;
 		Rhi::Handle<Rhi::Framebuffer> framebuffer;
 		if (m_IsVulkan)
@@ -697,8 +634,6 @@ namespace World::Wui
 		if (!m_IsVulkan)
 			Rhi::BlitFramebufferToBackbuffer(m_UiFramebuffer, { m_UiWidth, m_UiHeight });
 		s_Stats.Frames++;
-		m_LastFrameHash = frameHash;
-		m_HasCachedFrame = !m_IsVulkan && !hasImage;
 	}
 
 	void WuiRhiBackend::EndFrame(WuiCursor cursor)
