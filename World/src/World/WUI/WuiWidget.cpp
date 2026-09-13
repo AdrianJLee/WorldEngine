@@ -219,6 +219,120 @@ namespace World::Wui
 		context.Context().Commands().push_back({ WuiDrawKind::Image, m_Rect, Tint, 0, 1.0f, "", 15.0f, false, TextureId, Uv });
 	}
 
+	// ---- WuiTextField ----
+
+	WuiMeasure WuiTextField::Measure(const WuiConstraints& constraints)
+	{
+		MarkClean();
+		return { std::max(constraints.MinW, std::min(120.0f, constraints.MaxW)),
+			std::max(constraints.MinH, std::min(24.0f, constraints.MaxH)) };
+	}
+
+	void WuiTextField::Paint(WuiPaintContext& context)
+	{
+		if (!Buffer)
+			return;
+		bool cancelled = false;
+		if (TextField(context.Context(), Id(), m_Rect, *Buffer, Theme ? *Theme : WuiDefaultTheme(), &cancelled))
+		{
+			if (OnCommit) OnCommit();
+		}
+		else if (cancelled)
+		{
+			if (OnCancel) OnCancel();
+		}
+	}
+
+	// ---- WuiDragFloat ----
+
+	WuiMeasure WuiDragFloat::Measure(const WuiConstraints& constraints)
+	{
+		MarkClean();
+		return { std::max(constraints.MinW, std::min(80.0f, constraints.MaxW)),
+			std::max(constraints.MinH, std::min(22.0f, constraints.MaxH)) };
+	}
+
+	void WuiDragFloat::Paint(WuiPaintContext& context)
+	{
+		if (!Value)
+			return;
+		DragFloat(context.Context(), Id(), m_Rect, *Value, Speed, Min, Max, Theme ? *Theme : WuiDefaultTheme());
+	}
+
+	// ---- WuiDragInt ----
+
+	WuiMeasure WuiDragInt::Measure(const WuiConstraints& constraints)
+	{
+		MarkClean();
+		return { std::max(constraints.MinW, std::min(80.0f, constraints.MaxW)),
+			std::max(constraints.MinH, std::min(22.0f, constraints.MaxH)) };
+	}
+
+	void WuiDragInt::Paint(WuiPaintContext& context)
+	{
+		if (!Value)
+			return;
+		DragInt(context.Context(), Id(), m_Rect, *Value, Min, Max, Theme ? *Theme : WuiDefaultTheme());
+	}
+
+	// ---- WuiCombo ----
+
+	WuiMeasure WuiCombo::Measure(const WuiConstraints& constraints)
+	{
+		MarkClean();
+		return { std::max(constraints.MinW, std::min(120.0f, constraints.MaxW)),
+			std::max(constraints.MinH, std::min(24.0f, constraints.MaxH)) };
+	}
+
+	void WuiCombo::Paint(WuiPaintContext& context)
+	{
+		std::vector<std::string> empty;
+		const std::vector<std::string>& options = Options ? *Options : empty;
+		int selected = Selected ? *Selected : -1;
+		Combo(context.Context(), Id(), m_Rect, Label, options, selected, Theme ? *Theme : WuiDefaultTheme());
+		if (Selected)
+			*Selected = selected;
+	}
+
+	// ---- WuiScrollArea ----
+
+	WuiMeasure WuiScrollArea::Measure(const WuiConstraints& constraints)
+	{
+		MarkClean();
+		return { constraints.MinW, constraints.MinH };
+	}
+
+	void WuiScrollArea::Arrange(const WuiRect& rect)
+	{
+		m_Rect = rect;
+		if (Child)
+			Child->Arrange({ rect.X, rect.Y - m_ScrollY, rect.W, std::max(rect.H, ContentHeight) });
+		MarkClean();
+	}
+
+	void WuiScrollArea::Paint(WuiPaintContext& context)
+	{
+		float scrollY = m_ScrollY;
+		BeginScrollArea(context.Context(), m_Rect, ContentHeight, scrollY, Theme ? *Theme : WuiDefaultTheme());
+		if (Child)
+		{
+			Child->Arrange({ m_Rect.X, m_Rect.Y - scrollY, m_Rect.W, std::max(m_Rect.H, ContentHeight) });
+			Child->Paint(context);
+		}
+		EndScrollArea(context.Context());
+		m_ScrollY = scrollY;
+	}
+
+	WuiWidgetPtr WuiScrollArea::HitTest(glm::vec2 point)
+	{
+		if (!m_Rect.Contains(point))
+			return nullptr;
+		if (Child)
+			if (WuiWidgetPtr hit = Child->HitTest(point))
+				return hit;
+		return shared_from_this();
+	}
+
 	// ---- 便捷布局 ----
 
 	void LayoutWidgetTree(const WuiWidgetPtr& root, const WuiRect& rect)
