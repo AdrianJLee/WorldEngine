@@ -20,5 +20,6 @@ namespace World
 	private:
 		Ref<Scene> m_ActiveScene;
 		Ref<SceneRenderer> m_SceneRenderer;
+		uint64_t m_SceneTextureId = 0;
 	};
 }

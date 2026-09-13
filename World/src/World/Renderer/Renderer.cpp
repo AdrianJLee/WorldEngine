@@ -7,6 +7,8 @@
 #include "World/Renderer/VertexArray.h"
 #include "World/Renderer/Shader.h"
 #include "World/Renderer/Renderer2D.h"
+#include "World/RHI/Vulkan/VulkanSwapchain.h"
+#include "World/RHI/Vulkan/VulkanResources.h"
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <glad/glad.h>
@@ -29,6 +31,7 @@ namespace World
 	static Rhi::Handle<Rhi::Framebuffer> s_PresentFramebuffer;
 	static Rhi::Handle<Rhi::Semaphore> s_ImageReady, s_RenderDone;
 	static bool s_SwapchainDirty = true;
+	static uint32_t s_CurrentImageIndex = 0;
 
 	void Renderer::Init()
 	{
@@ -178,13 +181,34 @@ namespace World
 			return;
 		}
 		s_PresentImage = acquired.Image;
-		s_PresentFramebuffer = nullptr;
+		s_CurrentImageIndex = acquired.ImageIndex;
+		const auto vulkanSwapchain = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanSwapchain>(s_Swapchain);
+		if (vulkanSwapchain && s_PresentImage)
+			vulkanSwapchain->TransitionImage(s_CurrentImageIndex, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		if (s_PresentImage)
+		{
+			if (s_PresentFramebuffers.size() <= s_CurrentImageIndex)
+				s_PresentFramebuffers.resize(s_CurrentImageIndex + 1);
+			if (!s_PresentFramebuffers[s_CurrentImageIndex])
+			{
+				Rhi::FramebufferDesc framebufferDesc;
+				framebufferDesc.RenderPass = s_PresentPass;
+				framebufferDesc.Extent = s_Swapchain->GetExtent();
+				framebufferDesc.Attachments = { s_PresentImage };
+				framebufferDesc.DebugName = "Present";
+				s_PresentFramebuffers[s_CurrentImageIndex] = m_Device->CreateFramebuffer(framebufferDesc);
+			}
+			s_PresentFramebuffer = s_PresentFramebuffers[s_CurrentImageIndex];
+		}
 	}
 
 	void Renderer::EndFramePresent()
 	{
 		if (m_Device && s_Swapchain && s_RenderDone)
 		{
+			const auto vulkanSwapchain = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanSwapchain>(s_Swapchain);
+			if (vulkanSwapchain && s_PresentImage)
+				vulkanSwapchain->TransitionImage(s_CurrentImageIndex, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 			s_Swapchain->Present(s_RenderDone);
 			if (s_PresentQueue)
 				s_PresentQueue->WaitIdle();
@@ -218,6 +242,27 @@ namespace World
 		if (s_RenderDone)
 			submit.SignalSemaphores = { s_RenderDone };
 		s_PresentQueue->Submit(submit);
+	}
+
+	void Renderer::SubmitScene(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer,
+		const Rhi::Handle<Rhi::Texture>& colorTexture)
+	{
+		if (!m_Device || !commandBuffer)
+			return;
+		if (s_BackendName != "vulkan")
+			return; // OpenGL 立即模式
+		if (!s_PresentQueue)
+			return;
+		Rhi::SubmitInfo submit;
+		submit.CommandBuffers = { commandBuffer };
+		s_PresentQueue->Submit(submit);
+		s_PresentQueue->WaitIdle();
+		if (colorTexture)
+		{
+			const auto texture = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanTexture>(colorTexture);
+			if (texture)
+				texture->TransitionTo(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		}
 	}
 
 	void Renderer::Submit(const Ref<class Shader>& shader, const Ref<class VertexArray>& vertexArray, const  glm::mat4& transform)

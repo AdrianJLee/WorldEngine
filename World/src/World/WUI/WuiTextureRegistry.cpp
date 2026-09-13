@@ -16,8 +16,12 @@ namespace World::Wui
 	{
 		if (!texture)
 			return 0;
+		const auto existing = m_TextureIds.find(texture.get());
+		if (existing != m_TextureIds.end())
+			return existing->second;
 		const uint64_t id = m_NextId++;
 		m_Textures[id] = { texture, nullptr };
+		m_TextureIds[texture.get()] = id;
 		return id;
 	}
 
@@ -28,6 +32,21 @@ namespace World::Wui
 		const uint64_t id = m_NextId++;
 		m_Textures[id] = { nullptr, texture };
 		return id;
+	}
+
+	void WuiTextureRegistry::Update(uint64_t id, const Rhi::Handle<Rhi::Texture>& texture)
+	{
+		if (id == 0)
+			return;
+		const auto it = m_Textures.find(id);
+		if (it == m_Textures.end())
+			return;
+		if (it->second.Texture)
+			m_TextureIds.erase(it->second.Texture.get());
+		it->second.Texture = texture;
+		it->second.Source = nullptr;
+		if (texture)
+			m_TextureIds[texture.get()] = id;
 	}
 
 	Rhi::Handle<Rhi::Texture> WuiTextureRegistry::Resolve(uint64_t id)
@@ -50,6 +69,7 @@ namespace World::Wui
 	void WuiTextureRegistry::Clear()
 	{
 		m_Textures.clear();
+		m_TextureIds.clear();
 		++m_Generation;
 	}
 }

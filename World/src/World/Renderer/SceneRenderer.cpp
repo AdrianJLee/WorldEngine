@@ -226,6 +226,7 @@ namespace World
 		Renderer2D::EndScene();
 		m_CommandBuffer->EndRenderPass();
 		m_CommandBuffer->End();
+		Renderer::SubmitScene(m_CommandBuffer, m_ColorTexture);
 	}
 
 	void SceneRenderer::RenderGeometry(const Camera&, const glm::mat4&)

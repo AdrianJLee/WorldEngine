@@ -174,6 +174,13 @@ namespace World
 		if (wuiBackend.BeginFrame(input))
 		{
 			m_WuiContext.BeginFrame(input);
+			if (m_SceneRenderer && m_SceneRenderer->GetColorTexture())
+			{
+				if (!m_SceneTextureId)
+					m_SceneTextureId = Wui::WuiTextureRegistry::Get().Register(m_SceneRenderer->GetColorTexture());
+				else
+					Wui::WuiTextureRegistry::Get().Update(m_SceneTextureId, m_SceneRenderer->GetColorTexture());
+			}
 			m_Shell.OnRender(m_WuiContext);
 			m_WuiContext.EndFrame();
 			wuiBackend.Render(m_WuiContext.Commands(), m_WuiContext.OverlayCommands());

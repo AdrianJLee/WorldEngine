@@ -39,19 +39,24 @@ namespace World::Rhi::Vulkan
 	{
 	public:
 		VulkanTexture(VulkanDevice& device, const TextureDesc& desc);
+		// 包装外部图像(如交换链图像):不拥有 VkImage/内存,析构只释放视图。
+		VulkanTexture(VulkanDevice& device, const TextureDesc& desc, VkImage image);
 		~VulkanTexture() override;
 		const TextureDesc& GetDesc() const override { return m_Desc; }
 		void SetData(const void* data, uint64_t size, uint32_t layer = 0, uint32_t mip = 0) override;
 		VkImage GetImage() const { return m_Image; }
 		VkImageView GetView() const { return m_View; }
-	private:
+		VkImageLayout GetLayout() const { return m_Layout; }
 		void Transition(VkImageLayout oldLayout, VkImageLayout newLayout);
+		void TransitionTo(VkImageLayout newLayout) { Transition(m_Layout, newLayout); }
+	private:
 		VulkanDevice& m_Device;
 		TextureDesc m_Desc;
 		VkImage m_Image = VK_NULL_HANDLE;
 		VkDeviceMemory m_Memory = VK_NULL_HANDLE;
 		VkImageView m_View = VK_NULL_HANDLE;
 		VkImageLayout m_Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		bool m_OwnsImage = true;
 	};
 
 	class VulkanSampler final : public Sampler

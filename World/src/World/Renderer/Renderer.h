@@ -19,6 +19,8 @@ namespace World
 		static Rhi::Handle<Rhi::Framebuffer> GetPresentFramebuffer();
 		static Rhi::Handle<Rhi::Texture> GetPresentTarget();
 		static void SubmitUi(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer);
+		static void SubmitScene(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer,
+			const Rhi::Handle<Rhi::Texture>& colorTexture);
 
 		static void Submit(const Ref<class Shader>& shader, const Ref<class VertexArray>& vertexArray, const  glm::mat4& transform = glm::mat4(1.0));
 

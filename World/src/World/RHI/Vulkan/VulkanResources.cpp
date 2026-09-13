@@ -236,12 +236,29 @@ namespace World::Rhi::Vulkan
 		vkCreateImageView(device.GetNativeDevice(), &viewInfo, nullptr, &m_View);
 	}
 
+	VulkanTexture::VulkanTexture(VulkanDevice& device, const TextureDesc& desc, VkImage image)
+		: m_Device(device), m_Desc(desc), m_Image(image), m_OwnsImage(false)
+	{
+		VkImageViewCreateInfo viewInfo{};
+		viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		viewInfo.image = m_Image;
+		viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		viewInfo.format = ToVkFormatInternal(desc.Format);
+		viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		viewInfo.subresourceRange.levelCount = std::max(1u, desc.MipLevels);
+		viewInfo.subresourceRange.layerCount = std::max(1u, desc.ArrayLayers);
+		vkCreateImageView(device.GetNativeDevice(), &viewInfo, nullptr, &m_View);
+	}
+
 	VulkanTexture::~VulkanTexture()
 	{
 		const VkDevice device = m_Device.GetNativeDevice();
 		if (m_View) vkDestroyImageView(device, m_View, nullptr);
-		if (m_Image) vkDestroyImage(device, m_Image, nullptr);
-		if (m_Memory) vkFreeMemory(device, m_Memory, nullptr);
+		if (m_OwnsImage)
+		{
+			if (m_Image) vkDestroyImage(device, m_Image, nullptr);
+			if (m_Memory) vkFreeMemory(device, m_Memory, nullptr);
+		}
 	}
 
 	void VulkanTexture::Transition(VkImageLayout oldLayout, VkImageLayout newLayout)

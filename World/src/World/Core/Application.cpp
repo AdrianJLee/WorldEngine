@@ -83,6 +83,7 @@ namespace World
 
 			if (!m_Minimized)
 			{
+				Renderer::BeginFramePresent();
 				{
 					WLD_PROFILE_SCOPE("LayerStack OnUpdate");
 					for (Layer* layer : m_LayerStack)
@@ -91,7 +92,6 @@ namespace World
 					}
 				}
 
-				Renderer::BeginFramePresent();
 				m_ImGuiLayer->Begin();
 				{
 					WLD_PROFILE_SCOPE("LayerStack OnImGuiRender");

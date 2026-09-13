@@ -16,6 +16,7 @@ namespace World::Wui
 
 		uint64_t Register(const Rhi::Handle<Rhi::Texture>& texture);
 		uint64_t RegisterTexture2D(const Ref<Texture2D>& texture);
+		void Update(uint64_t id, const Rhi::Handle<Rhi::Texture>& texture);
 		Rhi::Handle<Rhi::Texture> Resolve(uint64_t id);
 		void Clear();
 		uint32_t Generation() const { return m_Generation; }
@@ -29,5 +30,6 @@ namespace World::Wui
 		uint64_t m_NextId = 1;
 		uint32_t m_Generation = 0;
 		std::unordered_map<uint64_t, Entry> m_Textures;
+		std::unordered_map<const void*, uint64_t> m_TextureIds;
 	};
 }

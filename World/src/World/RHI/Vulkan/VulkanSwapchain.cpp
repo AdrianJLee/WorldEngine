@@ -45,6 +45,16 @@ namespace World::Rhi::Vulkan
 		vkGetSwapchainImagesKHR(device.GetNativeDevice(), m_Swapchain, &count, nullptr);
 		m_Images.resize(count);
 		vkGetSwapchainImagesKHR(device.GetNativeDevice(), m_Swapchain, &count, m_Images.data());
+
+		TextureDesc imageDesc;
+		imageDesc.Type = TextureType::Texture2D;
+		imageDesc.Format = Format::B8G8R8A8_UNORM;
+		imageDesc.Extent = { m_Extent.Width, m_Extent.Height, 1 };
+		imageDesc.Usage = TextureUsageColorAttachment | TextureUsageSampled;
+		m_ImageTextures.clear();
+		m_ImageTextures.reserve(m_Images.size());
+		for (VkImage image : m_Images)
+			m_ImageTextures.push_back(CreateRef<VulkanTexture>(device, imageDesc, image));
 	}
 
 	VulkanSwapchain::~VulkanSwapchain()
@@ -62,7 +72,14 @@ namespace World::Rhi::Vulkan
 		const VkResult status = vkAcquireNextImageKHR(m_Device.GetNativeDevice(), m_Swapchain,
 			UINT64_MAX, semaphore, VK_NULL_HANDLE, &result.ImageIndex);
 		if (status == VK_ERROR_OUT_OF_DATE_KHR)
+		{
 			result.OutOfDate = true;
+			return result;
+		}
+		if (status != VK_SUCCESS && status != VK_SUBOPTIMAL_KHR)
+			return result;
+		if (result.ImageIndex < m_ImageTextures.size())
+			result.Image = m_ImageTextures[result.ImageIndex];
 		return result;
 	}
 
@@ -82,4 +99,10 @@ namespace World::Rhi::Vulkan
 
 	Extent2D VulkanSwapchain::GetExtent() const { return m_Extent; }
 	void VulkanSwapchain::Resize(Extent2D) { /* 重建由宿主触发;此处保持现状 */ }
+
+	void VulkanSwapchain::TransitionImage(uint32_t index, VkImageLayout layout)
+	{
+		if (index < m_ImageTextures.size() && m_ImageTextures[index])
+			m_ImageTextures[index]->TransitionTo(layout);
+	}
 }

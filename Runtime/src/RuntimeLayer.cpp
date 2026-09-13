@@ -7,6 +7,7 @@
 #include "World/Renderer/SceneRenderer.h"
 #include "World/RHI/RhiTextureBridge.h"
 #include "World/WUI/WuiRhiBackend.h"
+#include "World/WUI/WuiTextureRegistry.h"
 
 #include <cstdlib>
 
@@ -28,6 +29,7 @@ namespace World
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 
 		m_SceneRenderer->Init();
+		m_SceneTextureId = Wui::WuiTextureRegistry::Get().Register(m_SceneRenderer->GetColorTexture());
 
 
 		LoadScene();
@@ -96,18 +98,18 @@ namespace World
 	}
 	void RuntimeLayer::OnImGuiRender()
 	{
-		// 场景显示:GL 下把离屏颜色附件 blit 到窗口默认帧缓冲,HUD 随后叠画。
-		// Vulkan 呈现将在 WUI RHI 后端(交换链)落地时切换此路径。
-		if (m_SceneRenderer && m_SceneRenderer->GetRhiTarget())
-			Rhi::BlitFramebufferToBackbuffer(m_SceneRenderer->GetRhiTarget(),
-				{ m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight() });
-
 		static Wui::WuiContext wuiContext;
 		static Wui::WuiRhiBackend wuiBackend;
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
 		{
 			wuiContext.BeginFrame(input);
+			// 场景全屏显示:离屏颜色附件作为图像画进呈现目标,HUD 随后叠画。
+			if (m_SceneTextureId)
+				wuiContext.Commands().push_back({ Wui::WuiDrawKind::Image,
+					{ 0, 0, input.ViewportSize.x, input.ViewportSize.y },
+					{ 1, 1, 1, 1 }, 0, 1.0f, "", 15.0f, false,
+					m_SceneTextureId, { 0, 1, 1, -1 }, -1, -1, -1 });
 			// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
 			// 会触发结构写断言并抛异常。
 			const Scene* activeScene = m_ActiveScene.get();
