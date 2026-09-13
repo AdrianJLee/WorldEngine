@@ -328,7 +328,8 @@ namespace World
 				if (s_Data.TextureSlotIndex >= MaxTextureSlots)
 					NextBatch();
 				textureIndex = static_cast<float>(s_Data.TextureSlotIndex);
-				s_Data.Textures[s_Data.TextureSlotIndex] = Rhi::WrapTexture2D(texture);
+				s_Data.Textures[s_Data.TextureSlotIndex] =
+					Rhi::WrapTexture2D(Renderer::GetDevice(), texture);
 				s_Data.SourceTextures[s_Data.TextureSlotIndex] = texture;
 				s_Data.TextureSlotIndex++;
 			}

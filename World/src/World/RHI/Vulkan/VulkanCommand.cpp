@@ -34,6 +34,7 @@ namespace World::Rhi::Vulkan
 
 	void VulkanCommandBuffer::Begin()
 	{
+		m_PendingDescriptorSets.clear();
 		VkCommandBufferBeginInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -92,6 +93,16 @@ namespace World::Rhi::Vulkan
 		{
 			vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan->GetPipeline());
 			m_Device.SetLastPipelineLayout(vulkan->GetLayout());
+			for (const auto& [firstSet, descriptorSet] : m_PendingDescriptorSets)
+			{
+				const auto pendingVulkan = std::dynamic_pointer_cast<VulkanDescriptorSet>(descriptorSet);
+				if (!pendingVulkan)
+					continue;
+				const VkDescriptorSet set = pendingVulkan->GetSet();
+				vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+					vulkan->GetLayout(), firstSet, 1, &set, 0, nullptr);
+			}
+			m_PendingDescriptorSets.clear();
 		}
 	}
 
@@ -102,8 +113,8 @@ namespace World::Rhi::Vulkan
 			return;
 		if (!m_Device.GetLastPipelineLayout())
 		{
-			if (Log::GetCoreLogger())
-				WLD_CORE_WARN("[RHI-VK] BindDescriptorSet without a bound pipeline");
+			// Vulkan 需要管线布局才能绑描述符;记录待绑,在下次 BindPipeline 时应用。
+			m_PendingDescriptorSets.push_back({ firstSet, set });
 			return;
 		}
 		const VkDescriptorSet descriptorSet = vulkan->GetSet();

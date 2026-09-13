@@ -63,6 +63,7 @@ namespace World::Rhi::Vulkan
 	private:
 		VulkanDevice& m_Device;
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
+		std::vector<std::pair<uint32_t, Handle<DescriptorSet>>> m_PendingDescriptorSets;
 	};
 
 	class VulkanCommandQueue final : public CommandQueue
