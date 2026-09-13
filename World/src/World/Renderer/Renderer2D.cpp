@@ -237,6 +237,34 @@ namespace World
 		}, Rhi::PrimitiveTopology::LineList, s_Data.TextureLayout, MaxLines * 2, 2.0f);
 	}
 
+	void Renderer2D::Shutdown()
+	{
+		WLD_PROFILE_FUNCTION();
+		s_CurrentCommandBuffer = nullptr;
+
+		const auto release = [](auto& batch)
+		{
+			batch.Pipeline = nullptr;
+			batch.VertexBuffer = nullptr;
+			batch.IndexBuffer = nullptr;
+			delete[] batch.Base;
+			batch.Base = nullptr;
+			batch.Ptr = nullptr;
+			batch.IndexCount = 0;
+		};
+		release(s_Data.Quads);
+		release(s_Data.Circles);
+		release(s_Data.Lines);
+
+		s_Data.Sampler = nullptr;
+		s_Data.TextureDescriptorSet = nullptr;
+		s_Data.TextureLayout = nullptr;
+		s_Data.Textures.fill(nullptr);
+		s_Data.SourceTextures.fill(nullptr);
+		s_Data.TextureSlotIndex = 1;
+		s_Data.Stats = {};
+	}
+
 	void Renderer2D::BeginScene(const Camera&, const glm::mat4&, Rhi::Handle<Rhi::CommandBuffer> commandBuffer)
 	{
 		WLD_PROFILE_FUNCTION();

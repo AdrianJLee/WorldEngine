@@ -5,6 +5,7 @@
 #include "World/ImGui/ImGuiLayer.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
+#include "World/RHI/RhiTextureBridge.h"
 #include "World/WUI/WuiImGuiBackend.h"
 
 #include <cstdlib>
@@ -95,6 +96,12 @@ namespace World
 	}
 	void RuntimeLayer::OnImGuiRender()
 	{
+		// 场景显示:GL 下把离屏颜色附件 blit 到窗口默认帧缓冲,HUD 随后叠画。
+		// Vulkan 呈现将在 WUI RHI 后端(交换链)落地时切换此路径。
+		if (m_SceneRenderer && m_SceneRenderer->GetRhiTarget())
+			Rhi::BlitFramebufferToBackbuffer(m_SceneRenderer->GetRhiTarget(),
+				{ m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight() });
+
 		static Wui::WuiContext wuiContext;
 		static Wui::WuiImGuiBackend wuiBackend;
 		static bool fontsInitialized = false;

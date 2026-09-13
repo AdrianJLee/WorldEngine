@@ -17,6 +17,7 @@ namespace World
 	{
 	public:
 		static void Init();
+		static void Shutdown();
 		static void BeginScene(const Camera& camera, const glm::mat4& transform, Rhi::Handle<Rhi::CommandBuffer> commandBuffer);
 
 		static void EndScene();

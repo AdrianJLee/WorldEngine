@@ -58,4 +58,25 @@ namespace World::Rhi
 		const auto gl = std::dynamic_pointer_cast<OpenGL::OpenGLFramebuffer>(framebuffer);
 		return gl ? gl->ReadPixel(attachmentIndex, x, y) : -1;
 	}
+
+	bool BlitFramebufferToBackbuffer(const Handle<Framebuffer>& framebuffer, Extent2D extent)
+	{
+		const auto gl = std::dynamic_pointer_cast<OpenGL::OpenGLFramebuffer>(framebuffer);
+		if (!gl || extent.Width == 0 || extent.Height == 0)
+			return false;
+		const GLuint colorId = gl->GetAttachmentID(0);
+		if (!colorId)
+			return false;
+		GLuint readFbo = 0;
+		glCreateFramebuffers(1, &readFbo);
+		glNamedFramebufferTexture(readFbo, GL_COLOR_ATTACHMENT0, colorId, 0);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, readFbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+		glBlitFramebuffer(0, 0, static_cast<GLint>(extent.Width), static_cast<GLint>(extent.Height),
+			0, 0, static_cast<GLint>(extent.Width), static_cast<GLint>(extent.Height),
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+		glDeleteFramebuffers(1, &readFbo);
+		return true;
+	}
 }

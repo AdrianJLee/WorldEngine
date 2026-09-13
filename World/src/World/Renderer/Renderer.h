@@ -9,6 +9,8 @@ namespace World
 	{
 	public:
 		static void Init();
+		static void Init(const std::string& backend);
+		static void Shutdown();
 		static void OnWindowResize(uint32_t width, uint32_t height);
 
 		static void Submit(const Ref<class Shader>& shader, const Ref<class VertexArray>& vertexArray, const  glm::mat4& transform = glm::mat4(1.0));
@@ -17,7 +19,10 @@ namespace World
 
 		// 按 project.we.yaml 的 renderer 字段选择后端;W5 阶段 Vulkan 未接线时
 		// 自动降级 OpenGL 并告警。宿主在加载 manifest 后调用。
-		static void SetRequestedRenderer(const std::string& name);
+		// 记录目标后端;返回是否与当前不同。实际重建由宿主在安全时机调
+		// Shutdown()/Init(backend) 完成。
+		static bool SetRequestedRenderer(const std::string& name);
+		static std::string GetBackendName();
 		static Rhi::Handle<Rhi::Device> GetDevice() { return m_Device; }
 		// set 0 全局布局(相机 UBO binding 0),由 SceneRenderer 与 Renderer2D 管线共享。
 		static Rhi::Handle<Rhi::DescriptorSetLayout> GetGlobalDescriptorSetLayout();

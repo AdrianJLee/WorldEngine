@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "Renderer.h"
 
 #include "World/Core/Asset/ProjectManifest.h"
@@ -17,6 +17,8 @@ namespace World
 	Renderer::SceneData* Renderer::m_SceneData = new Renderer::SceneData;
 	Rhi::Handle<Rhi::Device> Renderer::m_Device = nullptr;
 	static Rhi::Handle<Rhi::DescriptorSetLayout> s_GlobalDescriptorSetLayout;
+	static std::string s_BackendName = "opengl";
+
 	void Renderer::Init()
 	{
 		// 按 project.we.yaml 的 renderer 选择后端;Vulkan 不可用时降级 OpenGL。
@@ -29,15 +31,22 @@ namespace World
 			if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError))
 				requested = manifest.Renderer;
 		}
+		Init(requested);
+	}
+
+	void Renderer::Init(const std::string& backend)
+	{
+		if (m_Device)
+			Shutdown();
 
 		const Rhi::Backend requestedBackend =
-			requested == "vulkan" ? Rhi::Backend::Vulkan : Rhi::Backend::OpenGL;
+			backend == "vulkan" ? Rhi::Backend::Vulkan : Rhi::Backend::OpenGL;
 		std::string error;
 		m_Device = Rhi::CreateDevice(requestedBackend, {}, &error);
 		if (!m_Device)
 		{
 			WLD_CORE_WARN("Requested backend '{0}' unavailable ({1}); falling back to OpenGL",
-				requested, error);
+				backend, error);
 			error.clear();
 			m_Device = Rhi::CreateDevice(Rhi::Backend::OpenGL, {}, &error);
 		}
@@ -46,24 +55,31 @@ namespace World
 		// ShaderCompiler 依据 API 决定返回 SPIR-V 或 GLSL。
 		RendererAPI::SetAPI(requestedBackend == Rhi::Backend::Vulkan && m_Device->GetCapabilities().BackendName == "Vulkan"
 			? RendererAPI::API::Vulkan : RendererAPI::API::OpenGL);
+		s_BackendName = RendererAPI::GetAPI() == RendererAPI::API::Vulkan ? "vulkan" : "opengl";
 
 		RenderCommand::Init();
-
 		Renderer2D::Init();
+		WLD_CORE_INFO("RHI backend initialized: {0}", s_BackendName);
 	}
-	void Renderer::SetRequestedRenderer(const std::string& name)
-	{
-		const Rhi::Backend requested = name == "vulkan" ? Rhi::Backend::Vulkan
-			: name == "opengl" ? Rhi::Backend::OpenGL
-			: Rhi::Backend::Auto;
 
-		std::string chosen;
-		const Rhi::Backend actual = Rhi::ResolveBackend(requested, &chosen);
-		RendererAPI::SetAPI(actual == Rhi::Backend::Vulkan ? RendererAPI::API::Vulkan : RendererAPI::API::OpenGL);
-		if (requested == Rhi::Backend::Vulkan && actual != Rhi::Backend::Vulkan)
-			WLD_CORE_WARN("Renderer '{0}' requested but unavailable; running {1}", name, chosen);
-		else
-			WLD_CORE_INFO("RHI backend selected: {0}", chosen);
+	void Renderer::Shutdown()
+	{
+		WLD_PROFILE_FUNCTION();
+		Renderer2D::Shutdown();
+		s_GlobalDescriptorSetLayout = nullptr;
+		m_Device = nullptr;
+		s_BackendName = "opengl";
+	}
+
+	bool Renderer::SetRequestedRenderer(const std::string& name)
+	{
+		const std::string requested = name == "vulkan" ? "vulkan" : "opengl";
+		return requested != s_BackendName;
+	}
+
+	std::string Renderer::GetBackendName()
+	{
+		return s_BackendName;
 	}
 
 	Rhi::Handle<Rhi::DescriptorSetLayout> Renderer::GetGlobalDescriptorSetLayout()
@@ -77,6 +93,7 @@ namespace World
 		}
 		return s_GlobalDescriptorSetLayout;
 	}
+
 	void Renderer::OnWindowResize(uint32_t width, uint32_t height)
 	{
 		RenderCommand::SetViewport(0, 0, width, height);

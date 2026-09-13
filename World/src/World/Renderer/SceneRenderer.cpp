@@ -52,6 +52,8 @@ namespace World
 	void SceneRenderer::Init()
 	{
 		WLD_PROFILE_FUNCTION();
+		if (m_Device)
+			Shutdown();
 		m_Device = Renderer::GetDevice();
 		m_CommandBuffer = m_Device->CreateCommandBuffer("SceneRenderer");
 
@@ -119,6 +121,7 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		m_ActiveScene = nullptr;
 		m_Framebuffer = nullptr;
+		m_FramebufferView = nullptr;
 		m_ColorTexture = nullptr;
 		m_EntityTexture = nullptr;
 		m_DepthTexture = nullptr;

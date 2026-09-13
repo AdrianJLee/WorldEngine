@@ -556,7 +556,7 @@ namespace World
 					if (World::Asset::ProjectManifest::Save(manifestPath, manifest, &error))
 					{
 						WLD_CORE_INFO("Project settings saved: renderer={0}", manifest.Renderer);
-						World::Renderer::SetRequestedRenderer(manifest.Renderer);
+						m_Editor.ApplyRendererChange(manifest.Renderer);
 					}
 					else
 						WLD_CORE_ERROR("Failed to save project manifest: {0}", error);

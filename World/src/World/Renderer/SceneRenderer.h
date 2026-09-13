@@ -29,6 +29,10 @@ namespace World
 		void OnResize(uint32_t width, uint32_t height);
 
 		Ref<Framebuffer> GetTargetFramebuffer() const { return m_FramebufferView; }
+		Rhi::Handle<Rhi::Texture> GetColorTexture() const { return m_ColorTexture; }
+		Rhi::Handle<Rhi::Framebuffer> GetRhiTarget() const { return m_Framebuffer; }
+		uint32_t GetWidth() const { return m_Width; }
+		uint32_t GetHeight() const { return m_Height; }
 		// 开发验证:把颜色附件读回写 PPM。
 		void CaptureFrame(const std::filesystem::path& path) const;
 

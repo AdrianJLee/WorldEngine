@@ -29,6 +29,8 @@ namespace World
 		void GenerateLuaStubsAction();
 		void CloseAction();
 		void DuplicateSelectedEntity();
+		// 请求切换渲染后端;在下一帧 OnUpdate 开头(渲染前)安全重建 GPU 资源。
+		void ApplyRendererChange(const std::string& name);
 
 		// ---- WUI 面板访问(W2) ----
 		Ref<Scene> GetActiveScene() const { return m_ActiveScene; }
@@ -83,6 +85,7 @@ namespace World
 		void DoOpenScene(const std::filesystem::path& path);
 		bool TrySave();
 		void RequestAction(std::function<void()> action);
+		void ProcessPendingRendererChange();
 		void ShowError(const std::string& message);
 		void StartCooking(const std::string& target);
 	private:
@@ -137,6 +140,8 @@ namespace World
 		Wui::WuiCommandRegistry m_Commands;
 		EditorShell m_Shell;
 		Wui::WuiContext m_WuiContext;
+		bool m_RendererChangePending = false;
+		std::string m_RendererChangeName;
 	};
 
 }

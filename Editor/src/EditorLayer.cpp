@@ -87,6 +87,7 @@ namespace World
 	void EditorLayer::OnUpdate(Timestep ts)
 	{
 		WLD_PROFILE_FUNCTION();
+		ProcessPendingRendererChange();
 		m_HasRenderedScene = false;
 		if (!m_ActiveScene || !m_SceneRenderer)
 			return;
@@ -322,6 +323,32 @@ namespace World
 		{
 			WLD_CORE_ERROR("Unable to duplicate entity: unknown error.");
 		}
+	}
+
+	void EditorLayer::ApplyRendererChange(const std::string& name)
+	{
+		if (!Renderer::SetRequestedRenderer(name))
+			return;
+		m_RendererChangeName = name;
+		m_RendererChangePending = true;
+	}
+
+	void EditorLayer::ProcessPendingRendererChange()
+	{
+		if (!m_RendererChangePending)
+			return;
+		m_RendererChangePending = false;
+
+		// 在渲染开始前重建:上一帧的绘制命令已消费完,销毁旧设备/目标是安全的。
+		if (m_SceneRenderer)
+			m_SceneRenderer->Shutdown();
+		Renderer::Shutdown();
+		Renderer::Init(m_RendererChangeName);
+		if (m_SceneRenderer)
+			m_SceneRenderer->Init();
+
+		m_ViewportSize = { 0, 0 };
+		WLD_CORE_INFO("Editor renderer switched to {0}", Renderer::GetBackendName());
 	}
 
 	void EditorLayer::TogglePlay()
