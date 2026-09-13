@@ -10,8 +10,8 @@ project(World VERSION 1.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# --- 查找 Vulkan SDK
-find_package(Vulkan REQUIRED)
+# --- 查找 Vulkan SDK(可选):headers+volk 已 vendor,SDK 仅用于可选验证层
+find_package(Vulkan QUIET)
 
 
 # --- 添加子项目---
