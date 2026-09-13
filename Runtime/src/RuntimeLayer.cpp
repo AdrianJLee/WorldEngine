@@ -107,9 +107,21 @@ namespace World
 	{
 		Ref<Scene> tempScene = CreateRef<Scene>(Application::Get().GetContext());
 		SceneSerializer serializer(tempScene);
-		// During the cook process, scenes could be packed or placed in content folder.
-		// Assuming "Resource/Scenes/TestScene.wdscene" relative path is maintained or packed in pak.
+		// 启动场景:优先读工作目录下的 start_scene.txt(打包时由 Editor 写入),
+		// 否则回退到默认场景。P2/P3 的项目 manifest 会取代该文件。
 		std::string scenePath = "scenes/PhysicalTest.wd";
+		{
+			std::ifstream config("start_scene.txt");
+			std::string line;
+			if (config && std::getline(config, line))
+			{
+				while (!line.empty() && (line.back() == '\r' || line.back() == '\n' ||
+					line.back() == ' ' || line.back() == '\t'))
+					line.pop_back();
+				if (!line.empty())
+					scenePath = line;
+			}
+		}
 		if (serializer.Deserialize(scenePath))
 		{
 			WLD_CORE_INFO("Scene loaded successfully from VFS or Disk!");

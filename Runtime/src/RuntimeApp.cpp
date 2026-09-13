@@ -44,9 +44,10 @@ namespace World
 					std::make_shared<World::Vfs::DirectoryProvider>(assetsDir), 100);
 			}
 
-			// 发行形态:扫描 content 目录下的所有 .wpak 并逐个挂载;打开失败只记错误继续。
+			// 发行形态:扫描工作目录下 content/*.wpak 并逐个挂载;打开失败只记错误继续。
+			// 不能用 WLD_CURRENT_DIR:那是编译期源码树路径,发行副本必须相对运行目录解析。
 			const std::filesystem::path contentDir =
-				std::filesystem::path(std::string(WLD_CURRENT_DIR) + "content");
+				std::filesystem::current_path() / "content";
 			if (!std::filesystem::is_directory(contentDir, dirEc))
 			{
 				WLD_CORE_WARN("Content directory '{0}' not found, skipping package mounts.",

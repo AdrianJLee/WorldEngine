@@ -552,16 +552,17 @@ namespace World
 					fs::copy_file(srcRuntimeDll, publishDir / "WorldRuntime.dll", fs::copy_options::overwrite_existing);
 					WLD_CORE_INFO("Copied WorldRuntime.dll from: {0}", srcRuntimeDll.string());
 
-					fs::path srcGameOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "bin/");
-					for (const auto& entry : fs::recursive_directory_iterator(srcGameOutputDir))
-					{
-						if (entry.is_regular_file() && entry.path().extension() == ".dll")
-						{
-							fs::path destPath = publishDir / "bin" / fs::relative(entry.path(), srcGameOutputDir);
-							fs::create_directories(destPath.parent_path());
-							fs::copy_file(entry.path(), destPath, fs::copy_options::overwrite_existing);
-						}
-					}
+					// 扁平拷贝必需 DLL,避免深层嵌套与重复。
+					fs::path srcGameDll = fs::absolute(std::string(WLD_OUTPUT_DIR) +
+						"bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll");
+					if (!fs::is_regular_file(srcGameDll))
+						throw std::runtime_error("Game.dll could not be located: " + srcGameDll.string());
+					fs::create_directories(publishDir / "bin");
+					fs::copy_file(srcGameDll, publishDir / "bin" / "Game.dll",
+						fs::copy_options::overwrite_existing);
+					fs::copy_file(srcRuntimeDll, publishDir / "bin" / "WorldRuntime.dll",
+						fs::copy_options::overwrite_existing);
+					WLD_CORE_INFO("Copied Game.dll and WorldRuntime.dll into bin/");
 
 					fs::path contentDir = publishDir / "content";
 					fs::create_directories(contentDir);
@@ -573,6 +574,19 @@ namespace World
 							(pakEc ? pakEc.message() : std::string(outPakFile.string())));
 					if (!fs::is_regular_file(outPakFile) || fs::file_size(outPakFile) == 0)
 						throw std::runtime_error("Asset package was not created: " + outPakFile.string());
+
+					// 启动场景:记录当前打开场景相对内容根的路径,Runtime 据此加载。
+					std::string startScene = "scenes/PhysicalTest.wd";
+					if (m_Document.HasPath())
+					{
+						fs::path relative = fs::relative(m_Document.GetPath(), sourceAssetsDir);
+						if (!relative.empty() && relative.generic_string().find("..") == std::string::npos)
+							startScene = relative.generic_string();
+					}
+					{
+						std::ofstream startSceneFile(publishDir / "start_scene.txt");
+						startSceneFile << startScene;
+					}
 					WLD_CORE_INFO("Game Cooked Successfully to {0}", publishDir.string());
 					m_CookingSucceeded = true;
 				}
