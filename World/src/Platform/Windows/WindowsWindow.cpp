@@ -7,6 +7,10 @@
 
 #include "Platform/OpenGL/OpenGLContext.h"
 
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#include <imm.h>
+
 namespace World
 {
 	static bool s_GLFWInitialized = false;
@@ -158,7 +162,28 @@ namespace World
 	void WindowsWindow::Shutdown()
 	{
 		WLD_PROFILE_FUNCTION();
+
+		// 第三方输入法(如搜狗)会在进程退出时由系统回调其清理代码并可能崩溃。
+		// 在销毁窗口前禁用线程 IME 并泵空消息,让输入法先完成解挂。
+		if (const HWND hwnd = glfwGetWin32Window(m_Window))
+		{
+			ImmAssociateContext(hwnd, nullptr);
+			ImmDisableIME(GetCurrentThreadId());
+		}
+		MSG message {};
+		while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+		{
+			TranslateMessage(&message);
+			DispatchMessageW(&message);
+		}
+
 		glfwDestroyWindow(m_Window);
+
+		while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+		{
+			TranslateMessage(&message);
+			DispatchMessageW(&message);
+		}
 	}
 
 	void WindowsWindow::OnUpdate()

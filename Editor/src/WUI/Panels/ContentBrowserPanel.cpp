@@ -32,6 +32,16 @@ namespace World
 			std::snprintf(buffer, sizeof(buffer), "%.2f %s", value, units[unit]);
 			return buffer;
 		}
+
+		// 判断 candidate 是否等于 root 或位于 root 的子树内。
+		bool IsWithinOrEqual(const std::filesystem::path& candidate, const std::filesystem::path& root)
+		{
+			if (candidate == root)
+				return true;
+			const std::filesystem::path relative = candidate.lexically_relative(root);
+			const std::string text = relative.generic_string();
+			return !text.empty() && text.rfind("..", 0) != 0;
+		}
 	}
 
 	ContentBrowserPanel::ContentBrowserPanel(PanelHost& host)
@@ -337,14 +347,50 @@ namespace World
 
 	void ContentBrowserPanel::DeleteSelection()
 	{
-		const size_t count = m_Model.Selected.size();
-		for (const auto& path : m_Model.Selected)
+		// 先快照目标:父目录删除时已覆盖其子项,跳过冗余 remove_all。
+		const std::vector<std::filesystem::path> targets(m_Model.Selected.begin(), m_Model.Selected.end());
+		const size_t count = targets.size();
+		bool removedCurrent = false;
+		for (const auto& path : targets)
 		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
+			if (m_Model.Current == path || IsWithinOrEqual(m_Model.Current, path))
+				removedCurrent = true;
+			const bool covered = std::any_of(targets.begin(), targets.end(),
+				[&](const std::filesystem::path& other) { return other != path && IsWithinOrEqual(path, other); });
+			if (covered)
+				continue;
+			std::error_code ec;
+			std::filesystem::remove_all(path, ec);
+			if (ec)
+				WLD_CORE_WARN("Content browser delete failed for '{0}': {1}", path.string(), ec.message());
 		}
+
+		// 清理指向已删除路径的模型状态,避免残留导航、展开与拖放目标。
+		const auto referenced = [&](const std::filesystem::path& entry)
+		{
+			return std::any_of(targets.begin(), targets.end(),
+				[&](const std::filesystem::path& target) { return IsWithinOrEqual(entry, target); });
+		};
+		for (auto it = m_Model.TreeOpen.begin(); it != m_Model.TreeOpen.end();)
+		{
+			if (referenced(*it)) it = m_Model.TreeOpen.erase(it);
+			else ++it;
+		}
+		m_Model.History.erase(std::remove_if(m_Model.History.begin(), m_Model.History.end(), referenced), m_Model.History.end());
+		m_Model.HistoryIndex = static_cast<int>(m_Model.History.size()) - 1;
+		m_Model.Clipboard.erase(std::remove_if(m_Model.Clipboard.begin(), m_Model.Clipboard.end(), referenced), m_Model.Clipboard.end());
+		if (!m_Model.RenameTarget.empty() && referenced(m_Model.RenameTarget))
+		{
+			m_Model.RenameTarget.clear();
+			m_Model.RenameEdit.clear();
+		}
+		if (!m_Model.PendingDropDest.empty() && referenced(m_Model.PendingDropDest))
+			m_Model.PendingDropDest.clear();
+
 		m_Model.Selected.clear();
 		m_Model.LastSelected.clear();
+		if (removedCurrent)
+			Navigate(m_Model.Root);
 		InvalidateContents();
 		SaveState();
 		if (m_Model.Search[0])
@@ -837,12 +883,9 @@ namespace World
 
 		// ---- 删除确认 ----
 		const Wui::WuiId deleteModal = Wui::HashId("browser.delete");
-		if (m_Model.ShowDeleteModal)
-		{
+		if (m_Model.ShowDeleteModal && (ctx.Modal() == 0 || ctx.Modal() == deleteModal))
 			ctx.SetModal(deleteModal);
-			m_Model.ShowDeleteModal = false;
-		}
-		else if (ctx.Modal() == deleteModal)
+		else if (!m_Model.ShowDeleteModal && ctx.Modal() == deleteModal)
 			ctx.ClearModal();
 		Wui::WuiRect panel;
 		if (BeginModal(ctx, deleteModal, "Delete Confirmation", { 380, 160 }, &panel, theme))
@@ -851,10 +894,19 @@ namespace World
 			if (Button(ctx, Wui::HashId("browser.delete.yes"), { panel.X + 20, panel.Y + 110, 110, 28 }, "Yes", theme))
 			{
 				DeleteSelection();
+				m_Model.ShowDeleteModal = false;
 				ctx.ClearModal();
 			}
 			if (Button(ctx, Wui::HashId("browser.delete.no"), { panel.X + 150, panel.Y + 110, 110, 28 }, "No", theme))
+			{
+				m_Model.ShowDeleteModal = false;
 				ctx.ClearModal();
+			}
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+			{
+				m_Model.ShowDeleteModal = false;
+				ctx.ClearModal();
+			}
 			EndModal(ctx, deleteModal);
 		}
 	}
