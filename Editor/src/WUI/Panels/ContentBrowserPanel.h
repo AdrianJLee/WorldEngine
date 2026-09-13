@@ -59,7 +59,6 @@ namespace World
 		std::filesystem::file_time_type ListingStamp {};
 		std::chrono::steady_clock::time_point LastListingCheck {};
 		std::map<std::filesystem::path, std::pair<std::filesystem::file_time_type, uintmax_t>> SizeCache;
-		Ref<Texture2D> DirIcon, FileIcon;
 	};
 
 	class ContentBrowserPanel final : public EditorPanel
@@ -97,6 +96,11 @@ namespace World
 
 		PanelHost& m_Host;
 		ContentBrowserModel m_Model;
+		Ref<Texture2D> m_DirIcon;
+		Ref<Texture2D> m_FileIcon;
+		uint64_t m_DirIconId = 0;
+		uint64_t m_FileIconId = 0;
+		uint32_t m_IconGeneration = ~0u;
 		std::filesystem::path m_StatePath;
 		Wui::WuiContext* m_Ctx = nullptr;
 	};

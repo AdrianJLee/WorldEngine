@@ -6,7 +6,10 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Memory/MemoryTracker.h"
+#include "World/Events/KeyEvent.h"
+#include "World/Events/MouseEvent.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/WUI/WuiRhiBackend.h"
 
 #include <GLFW/glfw3.h>
 
@@ -88,6 +91,7 @@ namespace World
 					}
 				}
 
+				Renderer::BeginFramePresent();
 				m_ImGuiLayer->Begin();
 				{
 					WLD_PROFILE_SCOPE("LayerStack OnImGuiRender");
@@ -97,6 +101,7 @@ namespace World
 					}
 				}
 				m_ImGuiLayer->End();
+				Renderer::EndFramePresent();
 			}
 
 
@@ -112,6 +117,22 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 		EventDispatcher dispatcher(e);
+
+		// WUI RHI 后端输入:GLFW 事件先喂给输入收集器。
+		dispatcher.Dispatch<KeyPressedEvent>([](KeyPressedEvent& ev)
+			{ Wui::WuiRhiBackend::FeedKey(static_cast<uint32_t>(ev.GetKeyCode()), true, ev.GetRepeatCount() > 0); return false; });
+		dispatcher.Dispatch<KeyReleasedEvent>([](KeyReleasedEvent& ev)
+			{ Wui::WuiRhiBackend::FeedKey(static_cast<uint32_t>(ev.GetKeyCode()), false, false); return false; });
+		dispatcher.Dispatch<KeyTypedEvent>([](KeyTypedEvent& ev)
+			{ Wui::WuiRhiBackend::FeedChar(static_cast<uint32_t>(ev.GetKeyCode())); return false; });
+		dispatcher.Dispatch<MouseButtonPressedEvent>([](MouseButtonPressedEvent& ev)
+			{ Wui::WuiRhiBackend::FeedMouseButton(ev.GetMouseButton(), true); return false; });
+		dispatcher.Dispatch<MouseButtonReleasedEvent>([](MouseButtonReleasedEvent& ev)
+			{ Wui::WuiRhiBackend::FeedMouseButton(ev.GetMouseButton(), false); return false; });
+		dispatcher.Dispatch<MouseMovedEvent>([](MouseMovedEvent& ev)
+			{ Wui::WuiRhiBackend::FeedMouseMove(ev.GetX(), ev.GetY()); return false; });
+		dispatcher.Dispatch<MouseScrolledEvent>([](MouseScrolledEvent& ev)
+			{ Wui::WuiRhiBackend::FeedMouseScroll(ev.GetXOffset(), ev.GetYOffset()); return false; });
 
 		dispatcher.Dispatch<WindowResizeEvent>(WLD_BIND_EVENT_FN(Application::OnWindowResize));
 		for (auto it = m_LayerStack.end(); it != m_LayerStack.begin(); )

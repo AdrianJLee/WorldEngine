@@ -7,7 +7,8 @@
 #include "World/Core/Vfs/PackageProvider.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Scene/ScriptEngine.h"
-#include "World/WUI/WuiImGuiBackend.h"
+#include "World/WUI/WuiRhiBackend.h"
+#include "World/WUI/WuiTextureRegistry.h"
 #include <filesystem>
 #include <stdexcept>
 namespace World
@@ -19,10 +20,10 @@ namespace World
 		m_Commands.Register({ Wui::HashId("cmd.open"), "Open", KeyCodes::O, true, false, [this] { OpenScene(); } });
 		m_Commands.Register({ Wui::HashId("cmd.save"), "Save", KeyCodes::S, true, false, [this] { SaveScene(); } });
 		m_Commands.Register({ Wui::HashId("cmd.duplicate"), "Duplicate", KeyCodes::D, true, false, [this] { DuplicateSelectedEntity(); } });
-		m_Commands.Register({ Wui::HashId("cmd.gizmo_none"), "Gizmo None", KeyCodes::Q, false, false, [this] { SetGizmoOperation((ImGuizmo::OPERATION)-1); } });
-		m_Commands.Register({ Wui::HashId("cmd.gizmo_move"), "Gizmo Move", KeyCodes::W, false, false, [this] { SetGizmoOperation(ImGuizmo::TRANSLATE); } });
-		m_Commands.Register({ Wui::HashId("cmd.gizmo_rotate"), "Gizmo Rotate", KeyCodes::E, false, false, [this] { SetGizmoOperation(ImGuizmo::ROTATE); } });
-		m_Commands.Register({ Wui::HashId("cmd.gizmo_scale"), "Gizmo Scale", KeyCodes::R, false, false, [this] { SetGizmoOperation(ImGuizmo::SCALE); } });
+		m_Commands.Register({ Wui::HashId("cmd.gizmo_none"), "Gizmo None", KeyCodes::Q, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::None); } });
+		m_Commands.Register({ Wui::HashId("cmd.gizmo_move"), "Gizmo Move", KeyCodes::W, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Translate); } });
+		m_Commands.Register({ Wui::HashId("cmd.gizmo_rotate"), "Gizmo Rotate", KeyCodes::E, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Rotate); } });
+		m_Commands.Register({ Wui::HashId("cmd.gizmo_scale"), "Gizmo Scale", KeyCodes::R, false, false, [this] { SetGizmoOperation(Wui::GizmoOperation::Scale); } });
 		m_Commands.Register({ Wui::HashId("cmd.play"), "Play", KeyCodes::F5, false, false, [this] { TogglePlay(); } });
 		m_Commands.Register({ Wui::HashId("cmd.simulate"), "Simulate", KeyCodes::F6, false, false, [this] { ToggleSimulate(); } });
 		m_Commands.Register({ Wui::HashId("cmd.pause"), "Pause", KeyCodes::F7, false, false, [this] { TogglePause(); } });
@@ -57,6 +58,7 @@ namespace World
 		m_IconSimulatePause = Texture2D::Create("Resource/Icons/Icon_SimulatePause.png");
 		m_IconSimulateContinue = Texture2D::Create("Resource/Icons/Icon_SimulateContinue.png");
 
+		RegisterUiTextures();
 
 		NewScene();
 
@@ -166,13 +168,7 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
-		static Wui::WuiImGuiBackend wuiBackend;
-		static bool fontsInitialized = false;
-		if (!fontsInitialized)
-		{
-			wuiBackend.SetFonts(ImGuiLayer::GetDefaultFont(), ImGuiLayer::GetBoldFont(), ImGuiLayer::GetCjkFont());
-			fontsInitialized = true;
-		}
+		static Wui::WuiRhiBackend wuiBackend;
 
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
@@ -346,9 +342,30 @@ namespace World
 		Renderer::Init(m_RendererChangeName);
 		if (m_SceneRenderer)
 			m_SceneRenderer->Init();
+		RegisterUiTextures();
 
 		m_ViewportSize = { 0, 0 };
 		WLD_CORE_INFO("Editor renderer switched to {0}", Renderer::GetBackendName());
+	}
+
+	void EditorLayer::RegisterUiTextures()
+	{
+		auto& registry = Wui::WuiTextureRegistry::Get();
+		if (m_SceneRenderer && m_SceneRenderer->GetColorTexture())
+			m_SceneTextureId = registry.Register(m_SceneRenderer->GetColorTexture());
+		const Ref<Texture2D> icons[8] = {
+			m_IconPlay, m_IconStop, m_IconPause, m_IconContinue,
+			m_IconSimulate, m_IconSimulateStop, m_IconSimulatePause, m_IconSimulateContinue,
+		};
+		for (int i = 0; i < 8; ++i)
+			m_IconIds[i] = registry.RegisterTexture2D(icons[i]);
+	}
+
+	uint64_t EditorLayer::GetIconId(int index) const
+	{
+		if (index < 0 || index >= 8)
+			return 0;
+		return m_IconIds[index];
 	}
 
 	void EditorLayer::TogglePlay()

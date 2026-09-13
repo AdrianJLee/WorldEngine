@@ -120,6 +120,16 @@ namespace World
 		return m_Editor.GetIcon(index);
 	}
 
+	uint64_t EditorShell::GetIconId(int index) const
+	{
+		return m_Editor.GetIconId(index);
+	}
+
+	uint64_t EditorShell::GetSceneTextureId() const
+	{
+		return m_Editor.GetSceneTextureId();
+	}
+
 	Entity EditorShell::PickEntityAt(glm::vec2 viewportLocal)
 	{
 		return m_Editor.PickEntityAt(viewportLocal);
@@ -130,7 +140,7 @@ namespace World
 		return m_Editor.GetEditorCamera();
 	}
 
-	int EditorShell::GetGizmoOperation() const
+	Wui::GizmoOperation EditorShell::GetGizmoOperation() const
 	{
 		return m_Editor.GetGizmoOperation();
 	}
@@ -243,8 +253,6 @@ namespace World
 
 		// 菜单栏最后绘制:其弹出面板需要盖在所有停靠面板之上。
 		DrawMenuBar(ctx);
-
-		ImGuiLayer::ApplyImeState(ctx.Focus() == 0 || ctx.IsTextInputActive());
 
 		DrawModals(ctx);
 

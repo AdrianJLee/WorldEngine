@@ -1,10 +1,8 @@
 #include "wldpch.h"
 #include "ViewportPanel.h"
 
-#include "World/ImGui/ImGuiDrawLibrary.h"
+#include "World/WUI/WuiGizmo.h"
 #include "World/WUI/WuiWidgets.h"
-
-#include <ImGuizmo.h>
 
 namespace World
 {
@@ -13,10 +11,9 @@ namespace World
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		m_Host.SetViewportRect(rect);
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, { 0.06f, 0.06f, 0.07f, 1 }, 0.0f });
-		if (m_Host.HasRenderedScene() && m_Host.GetSceneRenderer())
+		if (m_Host.HasRenderedScene() && m_Host.GetSceneTextureId())
 		{
-			const uint64_t texture = m_Host.GetSceneRenderer()->GetTargetFramebuffer()->GetColorAttachmentRendererID();
-			Image(ctx, rect, texture, { 0, 1, 1, -1 }, theme);
+			Image(ctx, rect, m_Host.GetSceneTextureId(), { 0, 1, 1, -1 }, theme);
 		}
 
 		const bool hovered = ctx.IsHovered(rect);
@@ -42,16 +39,16 @@ namespace World
 		for (int i = 0; i < 3; ++i)
 		{
 			const Wui::WuiRect button { bar.X + 8 + i * 36, bar.Y + 8, 28, 28 };
-			Ref<Texture2D> icon = m_Host.GetIcon(tools[i].Icon);
-			if (icon)
+			const uint64_t iconId = m_Host.GetIconId(tools[i].Icon);
+			if (iconId)
 			{
-				Image(ctx, button, icon->GetRendererID(), { 0, 1, 1, -1 }, theme);
+				Image(ctx, button, iconId, { 0, 1, 1, -1 }, theme);
 				if (!tools[i].Dim && ctx.IsClicked(button))
 					tools[i].Action();
 			}
 		}
 
-		if (ctx.IsClicked(rect) && !ImGuiDrawLibrary::GizmoIsOver())
+		if (ctx.IsClicked(rect) && !m_GizmoActive)
 		{
 			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { rect.X, rect.Y };
 			m_Host.SetSelectedEntity(m_Host.PickEntityAt(local));
@@ -62,16 +59,15 @@ namespace World
 			selected.HasComponent<TransformComponent>() && m_Host.HasRenderedScene())
 		{
 			auto& transform = selected.GetComponent<TransformComponent>();
-			const bool wasUsing = ImGuiDrawLibrary::GizmoIsUsing();
 			const TransformComponent before = transform;
-			ImGuiDrawLibrary::DrawGizmo(m_Host.GetEditorCamera(), selected, static_cast<ImGuizmo::OPERATION>(m_Host.GetGizmoOperation()), rect);
-			const bool nowUsing = ImGuiDrawLibrary::GizmoIsUsing();
-			if (!wasUsing && nowUsing)
+			const bool nowUsing = Wui::ManipulateGizmo(m_Host.GetEditorCamera(),
+				m_Host.GetGizmoOperation(), transform, rect, ctx);
+			if (!m_GizmoActive && nowUsing)
 			{
 				m_GizmoActive = true;
 				m_GizmoBefore = before;
 			}
-			else if (wasUsing && !nowUsing && m_GizmoActive)
+			else if (m_GizmoActive && !nowUsing)
 			{
 				m_GizmoActive = false;
 				const auto& after = selected.GetComponent<TransformComponent>();

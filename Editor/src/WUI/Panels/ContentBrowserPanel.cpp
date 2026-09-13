@@ -4,6 +4,7 @@
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/WuiTextureRegistry.h"
 #include "World/Renderer/Texture.h"
 
 #include <algorithm>
@@ -514,10 +515,17 @@ namespace World
 	{
 		m_Ctx = &ctx;
 		const Wui::WuiTheme& theme = host.Theme();
-		if (!m_Model.DirIcon)
-			m_Model.DirIcon = Texture2D::Create("Resource/Icons/ContentBrowser/DirectoryIcon.png");
-		if (!m_Model.FileIcon)
-			m_Model.FileIcon = Texture2D::Create("Resource/Icons/ContentBrowser/FileIcon.png");
+		if (!m_DirIcon)
+			m_DirIcon = Texture2D::Create("Resource/Icons/ContentBrowser/DirectoryIcon.png");
+		if (!m_FileIcon)
+			m_FileIcon = Texture2D::Create("Resource/Icons/ContentBrowser/FileIcon.png");
+		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
+		if (registry.Generation() != m_IconGeneration)
+		{
+			m_DirIconId = registry.RegisterTexture2D(m_DirIcon);
+			m_FileIconId = registry.RegisterTexture2D(m_FileIcon);
+			m_IconGeneration = registry.Generation();
+		}
 
 		std::string filePayload;
 		const bool fileDrag = ctx.IsDragActive(&filePayload) && filePayload.rfind("file:", 0) == 0;
@@ -739,9 +747,9 @@ namespace World
 				interact(path, row, isDir);
 				if (m_Model.Selected.find(path) != m_Model.Selected.end())
 					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, { 0.28f, 0.45f, 0.85f, 0.35f }, 2.0f });
-				Ref<Texture2D> icon = isDir ? m_Model.DirIcon : m_Model.FileIcon;
-				if (icon)
-					Image(ctx, { row.X + 2, row.Y + 3, 18, 18 }, icon->GetRendererID(), { 0, 1, 1, -1 }, theme);
+				const uint64_t iconId = isDir ? m_DirIconId : m_FileIconId;
+				if (iconId)
+					Image(ctx, { row.X + 2, row.Y + 3, 18, 18 }, iconId, { 0, 1, 1, -1 }, theme);
 				Label(ctx, { row.X + 26, row.Y + 4 }, path.filename().string(), theme.Text, 13.0f);
 				Label(ctx, { row.X + content.W * 0.52f, row.Y + 4 }, isDir ? "Folder" : "File", theme.TextMuted, 13.0f);
 				std::string size = "-";
@@ -774,9 +782,9 @@ namespace World
 				else if (hovered)
 					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { cellRect.X - 3, cellRect.Y - 3, cellRect.W + 6, cellRect.H + 28 }, theme.ButtonHover, 4.0f });
 				interact(path, cellRect, isDir);
-				Ref<Texture2D> icon = isDir ? m_Model.DirIcon : m_Model.FileIcon;
-				if (icon)
-					Image(ctx, cellRect, icon->GetRendererID(), { 0, 1, 1, -1 }, theme);
+				const uint64_t iconId = isDir ? m_DirIconId : m_FileIconId;
+				if (iconId)
+					Image(ctx, cellRect, iconId, { 0, 1, 1, -1 }, theme);
 				Label(ctx, { cellRect.X, cellRect.Y + 130 }, path.filename().string(), theme.Text, 13.0f);
 				if (m_Model.RenameTarget == path)
 					RenderRenameField(ctx, path, { cellRect.X, cellRect.Y + 150, 128, 22 }, theme);

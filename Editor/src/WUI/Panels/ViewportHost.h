@@ -5,6 +5,7 @@
 #include "World/Renderer/EditorCamera.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Renderer/Texture.h"
+#include "World/WUI/WuiGizmo.h"
 
 namespace World
 {
@@ -24,8 +25,10 @@ namespace World
 		virtual void ToggleSimulate() = 0;
 		virtual void TogglePause() = 0;
 		virtual Ref<Texture2D> GetIcon(int index) const = 0;
+		virtual uint64_t GetIconId(int index) const = 0;
+		virtual uint64_t GetSceneTextureId() const = 0;
 		virtual Entity PickEntityAt(glm::vec2 viewportLocal) = 0;
 		virtual EditorCamera& GetEditorCamera() = 0;
-		virtual int GetGizmoOperation() const = 0;
+		virtual Wui::GizmoOperation GetGizmoOperation() const = 0;
 	};
 }

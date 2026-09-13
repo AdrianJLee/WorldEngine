@@ -6,6 +6,7 @@
 #include "World/Events/ApplicationEvent.h"
 
 #include "Platform/OpenGL/OpenGLContext.h"
+#include "World/Renderer/Renderer.h"
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
@@ -193,7 +194,9 @@ namespace World
 		// Poll for and process events
 		glfwPollEvents();
 
-		m_Context->SwapBuffers();
+		// Vulkan 由交换链 Present 呈现;GL 保持 glfwSwapBuffers。
+		if (Renderer::GetBackendName() != "vulkan")
+			m_Context->SwapBuffers();
 	}
 
 	void WindowsWindow::SetVsync(bool enabled)

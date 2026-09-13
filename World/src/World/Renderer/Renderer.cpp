@@ -8,7 +8,10 @@
 #include "World/Renderer/Shader.h"
 #include "World/Renderer/Renderer2D.h"
 
+#define GLFW_EXPOSE_NATIVE_WIN32
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
 
 #include <fstream>
 
@@ -18,6 +21,14 @@ namespace World
 	Rhi::Handle<Rhi::Device> Renderer::m_Device = nullptr;
 	static Rhi::Handle<Rhi::DescriptorSetLayout> s_GlobalDescriptorSetLayout;
 	static std::string s_BackendName = "opengl";
+	static Rhi::Handle<Rhi::CommandQueue> s_PresentQueue;
+	static Rhi::Handle<Rhi::Swapchain> s_Swapchain;
+	static Rhi::Handle<Rhi::RenderPass> s_PresentPass;
+	static std::vector<Rhi::Handle<Rhi::Framebuffer>> s_PresentFramebuffers;
+	static Rhi::Handle<Rhi::Texture> s_PresentImage;
+	static Rhi::Handle<Rhi::Framebuffer> s_PresentFramebuffer;
+	static Rhi::Handle<Rhi::Semaphore> s_ImageReady, s_RenderDone;
+	static bool s_SwapchainDirty = true;
 
 	void Renderer::Init()
 	{
@@ -67,6 +78,15 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		Renderer2D::Shutdown();
 		s_GlobalDescriptorSetLayout = nullptr;
+		s_PresentFramebuffer = nullptr;
+		s_PresentImage = nullptr;
+		s_PresentFramebuffers.clear();
+		s_PresentPass = nullptr;
+		s_Swapchain = nullptr;
+		s_RenderDone = nullptr;
+		s_ImageReady = nullptr;
+		s_PresentQueue = nullptr;
+		s_SwapchainDirty = true;
 		m_Device = nullptr;
 		s_BackendName = "opengl";
 	}
@@ -97,6 +117,107 @@ namespace World
 	void Renderer::OnWindowResize(uint32_t width, uint32_t height)
 	{
 		RenderCommand::SetViewport(0, 0, width, height);
+		s_SwapchainDirty = true;
+	}
+
+	Rhi::Handle<Rhi::RenderPass> Renderer::GetPresentRenderPass()
+	{
+		if (!s_PresentPass && m_Device)
+		{
+			Rhi::RenderPassDesc desc;
+			Rhi::RenderPassAttachment color;
+			const bool vulkan = s_BackendName == "vulkan";
+			color.Format = vulkan ? Rhi::Format::B8G8R8A8_UNORM : Rhi::Format::R8G8B8A8_UNORM;
+			color.Samples = Rhi::SampleCount::Count1;
+			color.Load = vulkan ? Rhi::LoadOp::Clear : Rhi::LoadOp::Load;
+			color.Store = Rhi::StoreOp::Store;
+			color.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+			color.FinalLayout = vulkan ? Rhi::AttachmentLayout::Present : Rhi::AttachmentLayout::ColorAttachment;
+			desc.Attachments = { color };
+			Rhi::SubpassDesc subpass;
+			subpass.ColorAttachments = { { 0, Rhi::AttachmentLayout::ColorAttachment } };
+			desc.Subpasses = { subpass };
+			desc.DebugName = "Present";
+			s_PresentPass = m_Device->CreateRenderPass(desc);
+		}
+		return s_PresentPass;
+	}
+
+	void Renderer::BeginFramePresent()
+	{
+		if (!m_Device || s_BackendName != "vulkan")
+			return;
+		if (s_SwapchainDirty || !s_Swapchain)
+		{
+			s_SwapchainDirty = false;
+			s_PresentFramebuffers.clear();
+			s_PresentFramebuffer = nullptr;
+			s_Swapchain = nullptr;
+			s_ImageReady = nullptr;
+			s_RenderDone = nullptr;
+			if (Application::HasInstance())
+			{
+				Rhi::SwapchainDesc swapDesc;
+				swapDesc.NativeWindow = glfwGetWin32Window(
+					static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow()));
+				swapDesc.Format = Rhi::Format::B8G8R8A8_UNORM;
+				swapDesc.Present = Rhi::PresentMode::Fifo;
+				swapDesc.DebugName = "MainSwapchain";
+				s_Swapchain = m_Device->CreateSwapchain(swapDesc);
+				s_PresentQueue = m_Device->CreateQueue("Present");
+				s_ImageReady = m_Device->CreateSemaphore();
+				s_RenderDone = m_Device->CreateSemaphore();
+			}
+		}
+		if (!s_Swapchain)
+			return;
+		const Rhi::AcquireResult acquired = s_Swapchain->AcquireNext(s_ImageReady);
+		if (acquired.OutOfDate)
+		{
+			s_SwapchainDirty = true;
+			return;
+		}
+		s_PresentImage = acquired.Image;
+		s_PresentFramebuffer = nullptr;
+	}
+
+	void Renderer::EndFramePresent()
+	{
+		if (m_Device && s_Swapchain && s_RenderDone)
+		{
+			s_Swapchain->Present(s_RenderDone);
+			if (s_PresentQueue)
+				s_PresentQueue->WaitIdle();
+		}
+		s_PresentImage = nullptr;
+		s_PresentFramebuffer = nullptr;
+	}
+
+	Rhi::Handle<Rhi::Framebuffer> Renderer::GetPresentFramebuffer()
+	{
+		return s_PresentFramebuffer;
+	}
+
+	Rhi::Handle<Rhi::Texture> Renderer::GetPresentTarget()
+	{
+		return s_PresentImage;
+	}
+
+	void Renderer::SubmitUi(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer)
+	{
+		if (!m_Device || !commandBuffer)
+			return;
+		if (s_BackendName != "vulkan")
+			return; // OpenGL 立即模式
+		if (!s_PresentQueue || !s_PresentImage)
+			return;
+		Rhi::SubmitInfo submit;
+		submit.CommandBuffers = { commandBuffer };
+		if (s_ImageReady)
+			submit.WaitSemaphores = { s_ImageReady };
+		if (s_RenderDone)
+			submit.SignalSemaphores = { s_RenderDone };
+		s_PresentQueue->Submit(submit);
 	}
 
 	void Renderer::Submit(const Ref<class Shader>& shader, const Ref<class VertexArray>& vertexArray, const  glm::mat4& transform)

@@ -51,9 +51,11 @@ namespace World
 		void ToggleSimulate() override;
 		void TogglePause() override;
 		Ref<Texture2D> GetIcon(int index) const override;
+		uint64_t GetIconId(int index) const override;
+		uint64_t GetSceneTextureId() const override;
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;
 		EditorCamera& GetEditorCamera() override;
-		int GetGizmoOperation() const override;
+		Wui::GizmoOperation GetGizmoOperation() const override;
 
 	private:
 		// 停靠

@@ -6,7 +6,7 @@
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/RHI/RhiTextureBridge.h"
-#include "World/WUI/WuiImGuiBackend.h"
+#include "World/WUI/WuiRhiBackend.h"
 
 #include <cstdlib>
 
@@ -103,13 +103,7 @@ namespace World
 				{ m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight() });
 
 		static Wui::WuiContext wuiContext;
-		static Wui::WuiImGuiBackend wuiBackend;
-		static bool fontsInitialized = false;
-		if (!fontsInitialized)
-		{
-			wuiBackend.SetFonts(ImGuiLayer::GetDefaultFont(), ImGuiLayer::GetBoldFont(), ImGuiLayer::GetCjkFont());
-			fontsInitialized = true;
-		}
+		static Wui::WuiRhiBackend wuiBackend;
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
 		{

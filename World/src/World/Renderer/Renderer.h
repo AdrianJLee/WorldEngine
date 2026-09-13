@@ -12,6 +12,13 @@ namespace World
 		static void Init(const std::string& backend);
 		static void Shutdown();
 		static void OnWindowResize(uint32_t width, uint32_t height);
+		// ---- 帧呈现编排(UI/场景合成到窗口)----
+		static void BeginFramePresent();
+		static void EndFramePresent();
+		static Rhi::Handle<Rhi::RenderPass> GetPresentRenderPass();
+		static Rhi::Handle<Rhi::Framebuffer> GetPresentFramebuffer();
+		static Rhi::Handle<Rhi::Texture> GetPresentTarget();
+		static void SubmitUi(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer);
 
 		static void Submit(const Ref<class Shader>& shader, const Ref<class VertexArray>& vertexArray, const  glm::mat4& transform = glm::mat4(1.0));
 

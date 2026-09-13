@@ -3,6 +3,7 @@
 #include "World/Renderer/SceneRenderer.h"
 #include "Document/EditorDocument.h"
 #include "World/WUI/WuiCommand.h"
+#include "World/WUI/WuiGizmo.h"
 #include "WUI/EditorShell.h"
 #include <atomic>
 #include <functional>
@@ -45,10 +46,12 @@ namespace World
 		void TogglePlay();
 		void ToggleSimulate();
 		void TogglePause();
-		void SetGizmoOperation(ImGuizmo::OPERATION operation) { m_CurrentGizmoOperation = operation; }
-		int GetGizmoOperation() const { return m_CurrentGizmoOperation; }
+		void SetGizmoOperation(Wui::GizmoOperation operation) { m_CurrentGizmoOperation = operation; }
+		Wui::GizmoOperation GetGizmoOperation() const { return m_CurrentGizmoOperation; }
 		Entity PickEntityAt(glm::vec2 viewportLocal) { return GetEntityAtMousePosition(viewportLocal); }
 		Ref<Texture2D> GetIcon(int index) const;
+		uint64_t GetIconId(int index) const;
+		uint64_t GetSceneTextureId() const { return m_SceneTextureId; }
 		// 视口状态(由 WUI 视口面板回填)
 		void SetViewportState(bool focused, bool hovered, glm::vec2 size, glm::vec2 bounds[2]);
 		glm::vec2 GetViewportSize() const { return m_ViewportSize; }
@@ -86,6 +89,7 @@ namespace World
 		bool TrySave();
 		void RequestAction(std::function<void()> action);
 		void ProcessPendingRendererChange();
+		void RegisterUiTextures();
 		void ShowError(const std::string& message);
 		void StartCooking(const std::string& target);
 	private:
@@ -107,7 +111,7 @@ namespace World
 		bool m_HasRenderedScene = false;
 
 		// Gizmo operation type
-		ImGuizmo::OPERATION m_CurrentGizmoOperation = (ImGuizmo::OPERATION)-1;
+		Wui::GizmoOperation m_CurrentGizmoOperation = Wui::GizmoOperation::None;
 
 
 		Ref<Texture2D> m_IconPlay, m_IconStop;
@@ -142,6 +146,8 @@ namespace World
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;
 		std::string m_RendererChangeName;
+		uint64_t m_SceneTextureId = 0;
+		uint64_t m_IconIds[8] = {};
 	};
 
 }
