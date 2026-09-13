@@ -109,7 +109,28 @@ set_tests_properties(World.Asset PROPERTIES
     TIMEOUT 90
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests)
+# RHI 合同头自洽性:全部 POD 描述符默认构造与关键语义(无渲染)。
+add_executable(WorldRhiContractTests RhiContractTests.cpp)
+target_link_libraries(WorldRhiContractTests PRIVATE World)
+target_compile_features(WorldRhiContractTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldRhiContractTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldRhiContractTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldRhiContractTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.RhiContract COMMAND WorldRhiContractTests)
+set_tests_properties(World.RhiContract PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests)
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"
