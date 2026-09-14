@@ -20,16 +20,17 @@ namespace World
 	};
 }
 
-//Core log macros
-#define WLD_CORE_TRACE(...) ::World::Log::GetCoreLogger()->trace(__VA_ARGS__)
-#define WLD_CORE_INFO(...) ::World::Log::GetCoreLogger()->info(__VA_ARGS__)
-#define WLD_CORE_WARN(...) ::World::Log::GetCoreLogger()->warn(__VA_ARGS__)
-#define WLD_CORE_ERROR(...) ::World::Log::GetCoreLogger()->error(__VA_ARGS__)
-#define WLD_CORE_CRITICAL(...) ::World::Log::GetCoreLogger()->critical(__VA_ARGS__)
+// Core log macros。日志器未初始化(无头测试/静态析构期)时静默跳过:
+// 之前的裸 ->info() 在 logger 为空指针时会直接崩溃。
+#define WLD_CORE_TRACE(...) do { if (auto logger = ::World::Log::GetCoreLogger()) logger->trace(__VA_ARGS__); } while (0)
+#define WLD_CORE_INFO(...) do { if (auto logger = ::World::Log::GetCoreLogger()) logger->info(__VA_ARGS__); } while (0)
+#define WLD_CORE_WARN(...) do { if (auto logger = ::World::Log::GetCoreLogger()) logger->warn(__VA_ARGS__); } while (0)
+#define WLD_CORE_ERROR(...) do { if (auto logger = ::World::Log::GetCoreLogger()) logger->error(__VA_ARGS__); } while (0)
+#define WLD_CORE_CRITICAL(...) do { if (auto logger = ::World::Log::GetCoreLogger()) logger->critical(__VA_ARGS__); } while (0)
 
-//Client log macros
-#define WLD_TRACE(...) ::World::Log::GetClientLogger()->trace(__VA_ARGS__)
-#define WLD_INFO(...) ::World::Log::GetClientLogger()->info(__VA_ARGS__)
-#define WLD_WARN(...) ::World::Log::GetClientLogger()->warn(__VA_ARGS__)
-#define WLD_ERROR(...) ::World::Log::GetClientLogger()->error(__VA_ARGS__)
-#define WLD_CRITICAL(...) ::World::Log::GetClientLogger()->critical(__VA_ARGS__)
+// Client log macros
+#define WLD_TRACE(...) do { if (auto logger = ::World::Log::GetClientLogger()) logger->trace(__VA_ARGS__); } while (0)
+#define WLD_INFO(...) do { if (auto logger = ::World::Log::GetClientLogger()) logger->info(__VA_ARGS__); } while (0)
+#define WLD_WARN(...) do { if (auto logger = ::World::Log::GetClientLogger()) logger->warn(__VA_ARGS__); } while (0)
+#define WLD_ERROR(...) do { if (auto logger = ::World::Log::GetClientLogger()) logger->error(__VA_ARGS__); } while (0)
+#define WLD_CRITICAL(...) do { if (auto logger = ::World::Log::GetClientLogger()) logger->critical(__VA_ARGS__); } while (0)

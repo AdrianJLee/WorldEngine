@@ -11,14 +11,17 @@ namespace World
 		JobQueue();
 		~JobQueue();
 
-		// 从顶部推入任务
-		void Push(JobDecl& job);
+		// 从顶部推入任务;返回 false 表示队列已满(调用方需走溢出队列,不能丢任务)。
+		bool Push(JobDecl& job);
 
 		// 从底部弹出任务
 		bool Pop(JobDecl& outJob);
 
 		// 从顶部窃取任务
 		bool Steal(JobDecl& outJob);
+
+		// 当前排队任务数(统计用,近似值)。
+		int64_t Size() const { return m_Bottom.load(std::memory_order_relaxed) - m_Top.load(std::memory_order_relaxed); }
 	public:
 
 		static const uint32_t CAPACITY = 4096; // 必须是 2 的幂

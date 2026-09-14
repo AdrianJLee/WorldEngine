@@ -187,6 +187,27 @@ if(MSVC)
     target_compile_options(WorldMemoryTests PRIVATE /utf-8)
 endif()
 
+# 任务系统回归:提交/等待、ParallelFor、嵌套依赖、取消、压力与统计。
+add_executable(WorldTaskTests TaskTests.cpp)
+target_link_libraries(WorldTaskTests PRIVATE World)
+target_compile_features(WorldTaskTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldTaskTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldTaskTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldTaskTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Tasks COMMAND WorldTaskTests)
+set_tests_properties(World.Tasks PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 180
+)
+
 add_test(NAME World.Memory COMMAND WorldMemoryTests)
 set_tests_properties(World.Memory PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -214,7 +235,7 @@ set_tests_properties(World.RendererHotswap PROPERTIES
     TIMEOUT 180
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests)
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests)
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"
@@ -223,3 +244,4 @@ foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfs
         VERBATIM
     )
 endforeach()
+

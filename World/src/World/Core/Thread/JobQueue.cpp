@@ -12,7 +12,7 @@ namespace World
 	{
 		delete[] m_Jobs;
 	}
-	void JobQueue::Push(JobDecl& job)
+	bool JobQueue::Push(JobDecl& job)
 	{
 		// 由于只有生产者线程会调用 Push，消费者线程会调用 Pop 和 Steal，因此我们可以使用无锁的方式来实现这个队列
 
@@ -23,15 +23,8 @@ namespace World
 
 		if (b - t >= CAPACITY)
 		{
-			// 队列满了！
-			// 工业级策略：不再入队，而是由当前线程直接执行该任务（立刻消化掉）
-			job.Entry(job.Padding);
-			if (job.Counter)
-			{
-				job.Counter->Count.fetch_sub(1, std::memory_order_release);
-			}
-
-			return;
+			// 队列满:调用方需把任务放到溢出队列(旧实现直接在此执行,会打乱调用方语义)。
+			return false;
 		}
 
 
@@ -43,6 +36,7 @@ namespace World
 
 		// 更新底部索引，使用 relaxed 内存顺序，因为我们已经通过内存屏障确保了可见性
 		m_Bottom.store(b + 1, std::memory_order_relaxed);
+		return true;
 	}
 	bool JobQueue::Pop(JobDecl& outJob)
 	{

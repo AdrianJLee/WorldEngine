@@ -1,13 +1,41 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "JobSystem.h"
+
 #include "JobQueue.h"
-#include "World/Core/Memory/LinearAllocator.h"
+
+#include <algorithm>
+#include <cstdlib>
+#include <chrono>
+
 namespace World
 {
-	std::vector<std::thread> JobSystem::m_Workers;
-	JobQueue* JobSystem::m_Queues = nullptr;
-	uint32_t JobSystem::m_NumWorkers = 0;
-	std::atomic<bool> JobSystem::m_Running { true };
+	namespace
+	{
+		constexpr uint32_t kPriorityCount = static_cast<uint32_t>(JobPriority::Count);
+		constexpr uint32_t kMaxWorkers = 64;
+
+		std::vector<std::thread> s_Workers;
+		JobQueue* s_Queues = nullptr;         // [queueCount][kPriorityCount]
+		uint32_t s_WorkerCount = 0;
+		std::atomic<bool> s_Running { false };
+		std::atomic<int> s_PendingJobs { 0 };  // 已提交未完成(含未开始)的任务数
+
+		// 溢出队列:某条线程队列满时接管,保证任务不丢。
+		std::mutex s_OverflowMutex;
+		std::deque<JobDecl> s_Overflow;
+
+		// 等待/唤醒:提交与完成时通知阻塞中的线程。
+		std::mutex s_WakeMutex;
+		std::condition_variable s_WakeCv;
+		std::atomic<uint32_t> s_WaiterCount { 0 };   // 无等待者时跳过锁与 notify(提交路径上的大头开销)
+
+		std::atomic<uint64_t> s_StatExecuted { 0 };
+		std::atomic<uint64_t> s_StatStolen { 0 };
+		std::atomic<uint64_t> s_StatExecutedWhileWaiting { 0 };
+		std::atomic<uint64_t> s_StatOverflowPushes { 0 };
+		std::atomic<uint64_t> s_StatQueueHighWater { 0 };
+		std::atomic<uint64_t> s_StatWaits { 0 };
+	}
 
 	uint32_t& JobSystem::LocalIndex()
 	{
@@ -15,146 +43,320 @@ namespace World
 		return index;
 	}
 
-	void JobSystem::Init()
+	uint32_t JobSystem::QueueCount()
 	{
-		// 获得系统的 CPU 核心数量，减去主线程
-		uint32_t numThreads = std::thread::hardware_concurrency() - 1;
-		m_NumWorkers = numThreads;
-
-		// 留出一个队列给主线程使用
-		m_Queues = new JobQueue[numThreads + 1];
-
-		for (uint32_t i = 0; i < numThreads; ++i)
-		{
-			// Lambda表达式创建线程
-			m_Workers.emplace_back([i]()
-				{
-					LocalIndex() = i;
-					WorkerLoop();
-				});
-		}
-		// 主线程使用最后一个队列
-		LocalIndex() = numThreads;
+		return s_WorkerCount + 1;   // 工作线程 + 主线程
 	}
-	void JobSystem::Kick(JobDecl job)
-	{
-		// 记录任务计数器，通常在提交任务时会关联一个计数器，以便后续等待时知道还有多少任务未完成
-		if (job.Counter)
-			job.Counter->Count.fetch_add(1);// 增加计数器，使用原子操作确保线程安全
 
-		m_Queues[LocalIndex()].Push(job);
+	bool JobSystem::IsRunning()
+	{
+		return s_Running.load(std::memory_order_acquire);
 	}
-	void JobSystem::Wait(JobCounter* counter)
-	{
-		while (counter->Count.load(std::memory_order_acquire) > 0)
-		{
-			JobDecl job;
-			if (GetNextJob(job))
-			{
-				job.Entry(job.Padding);
 
-				if (job.Counter)
-				{
-					job.Counter->Count.fetch_sub(1, std::memory_order_release);
-				}
-			}
-			else
+	uint32_t JobSystem::WorkerCount()
+	{
+		return s_WorkerCount;
+	}
+
+	void JobSystem::Init(uint32_t threadCount)
+	{
+		if (s_Running.load(std::memory_order_acquire))
+			return;
+
+		if (threadCount == 0)
+		{
+			if (const char* fromEnvironment = std::getenv("WLD_JOB_THREADS"))
 			{
-				// 没有任务可执行了，主动让出 CPU 给其他线程，避免忙等待导致的 CPU 占用过高
-				std::this_thread::yield();
+				const int parsed = std::atoi(fromEnvironment);
+				if (parsed > 0)
+					threadCount = static_cast<uint32_t>(parsed);
 			}
 		}
+		if (threadCount == 0)
+		{
+			const uint32_t hardware = std::thread::hardware_concurrency();
+			threadCount = hardware > 1 ? hardware - 1 : 1;   // 修掉 hc-1 在 hc==0 时的下溢
+		}
+		threadCount = std::min(threadCount, kMaxWorkers);
+
+		s_WorkerCount = threadCount;
+		s_Queues = new JobQueue[QueueCount() * kPriorityCount];
+		s_Running.store(true, std::memory_order_release);
+		s_PendingJobs.store(0, std::memory_order_relaxed);
+
+		LocalIndex() = s_WorkerCount;   // 主线程使用最后一条队列
+
+		for (uint32_t i = 0; i < s_WorkerCount; ++i)
+		{
+			s_Workers.emplace_back([i]()
+			{
+				LocalIndex() = i;
+				WorkerLoop();
+			});
+		}
+
+		WLD_CORE_INFO("JobSystem initialized with {0} worker thread(s)", s_WorkerCount);
 	}
+
 	void JobSystem::Shutdown()
 	{
-		if (!m_Running) return;
+		if (!s_Running.exchange(false, std::memory_order_acq_rel))
+			return;
 
-		// 1. 发出停止信号
-		m_Running = false;
-
-		// 2. 唤醒所有正在 sleep 的线程（如果使用了 CV 机制）
-		// 在目前的 sleep_for 实现中，线程会在下一次轮询时检测到 m_running 为 false
-
-		// 3. 等待所有工作线程安全退出
-		for (std::thread& worker : m_Workers)
-		{
+		NotifyAll();
+		for (std::thread& worker : s_Workers)
 			if (worker.joinable())
-			{
 				worker.join();
-			}
-		}
+		s_Workers.clear();
 
-		// 4. 清理资源
-		if (m_Queues)
 		{
-			delete[] m_Queues;
-			m_Queues = nullptr;
+			std::lock_guard<std::mutex> lock(s_OverflowMutex);
+			for (JobDecl& job : s_Overflow)
+				Complete(job);   // 未执行的任务也要归还计数器/负载
+			s_Overflow.clear();
 		}
 
-		m_Workers.clear();
-
-		// 归位
-		m_NumWorkers = 0;
+		delete[] s_Queues;
+		s_Queues = nullptr;
+		s_WorkerCount = 0;
 		LocalIndex() = 0;
-
-		// 💡 工业级提示：可以在这里加一行日志，确认系统已安全关闭
 		WLD_CORE_INFO("JobSystem shutdown successfully.");
 	}
-	bool JobSystem::GetNextJob(JobDecl& outJob)
-	{
-		// 先尝试从本线程队列拿
-		if (m_Queues[LocalIndex()].Pop(outJob)) return true;
 
-		// 拿不到就去偷别人的
-		for (uint32_t i = 0; i <= m_NumWorkers; ++i)
+	void JobSystem::Kick(JobDecl job, JobPriority priority)
+	{
+		if (!s_Running.load(std::memory_order_acquire))
 		{
-			if (i == LocalIndex()) continue;
-			if (m_Queues[i].Steal(outJob)) return true;
+			// 未初始化(或已关闭):同步执行,保持调用方语义。
+			JobDecl local = std::move(job);
+			if (local.Counter)
+				local.Counter->Count.fetch_add(1, std::memory_order_release);
+			Execute(local, false);
+			local.Release();
+			if (local.Counter)
+			{
+				local.Counter->Count.fetch_sub(1, std::memory_order_acq_rel);
+				local.Counter = nullptr;
+			}
+			return;
+		}
+
+		job.Priority = priority;
+		if (job.Counter)
+			job.Counter->Count.fetch_add(1, std::memory_order_release);
+		s_PendingJobs.fetch_add(1, std::memory_order_acq_rel);
+
+		const uint32_t queueIndex = LocalIndex() * kPriorityCount + static_cast<uint32_t>(priority);
+		if (!s_Queues[queueIndex].Push(job))
+			PushOverflow(job);
+
+		const uint64_t queued = static_cast<uint64_t>(s_PendingJobs.load(std::memory_order_relaxed));
+		uint64_t high = s_StatQueueHighWater.load(std::memory_order_relaxed);
+		while (queued > high && !s_StatQueueHighWater.compare_exchange_weak(high, queued, std::memory_order_relaxed))
+		{
+		}
+
+		NotifyAll();
+	}
+
+	void JobSystem::PushOverflow(JobDecl& job)
+	{
+		std::lock_guard<std::mutex> lock(s_OverflowMutex);
+		JobDecl moved = std::move(job);
+		s_Overflow.push_back(std::move(moved));
+		s_StatOverflowPushes.fetch_add(1, std::memory_order_relaxed);
+	}
+
+	bool JobSystem::TryGetOverflow(JobDecl& outJob)
+	{
+		std::lock_guard<std::mutex> lock(s_OverflowMutex);
+		if (s_Overflow.empty())
+			return false;
+		outJob = std::move(s_Overflow.front());
+		s_Overflow.pop_front();
+		return true;
+	}
+
+	bool JobSystem::PopLocal(JobDecl& outJob)
+	{
+		const uint32_t base = LocalIndex() * kPriorityCount;
+		for (uint32_t priority = kPriorityCount; priority-- > 0;)
+			if (s_Queues[base + priority].Pop(outJob))
+				return true;
+		return false;
+	}
+
+	bool JobSystem::TryGetJob(JobDecl& outJob, bool& stolen)
+	{
+		stolen = false;
+		if (PopLocal(outJob))
+			return true;
+		if (TryGetOverflow(outJob))
+			return true;
+		for (uint32_t priority = kPriorityCount; priority-- > 0;)
+		{
+			for (uint32_t i = 0; i < QueueCount(); ++i)
+			{
+				if (i == LocalIndex())
+					continue;
+				if (s_Queues[i * kPriorityCount + priority].Steal(outJob))
+				{
+					stolen = true;
+					return true;
+				}
+			}
 		}
 		return false;
 	}
-	void JobSystem::WorkerLoop()
-	{
-		uint32_t idleTime = 0; // 记录线程空闲（拿不到任务）的次数
-		while (m_Running)
-		{
-			JobDecl job;
-			if (GetNextJob(job))
-			{
-				idleTime = 0;
-				// 将包裹负载数据的那个内部连续内存地址传进去
-				if (job.Entry)
-					job.Entry(job.Padding);
 
-				if (job.Counter)
-				{
-					// 这里必须用 memory_order_release，确保前面活儿的数据都写进内存了
-					job.Counter->Count.fetch_sub(1, std::memory_order_release);
-				}
-			}
-			else
-			{
-				// 没拿到任务，开始梯度退避策略
-				idleTime++;
-				if (idleTime < 10)
-				{
-					// 第一阶段（刚闲下来）：只使用轻微的硬件暂停指令，提示 CPU 这是一个自旋锁循环
-					// 这避免了系统级的线程切换开销，响应最快
-					#if defined(_MSC_VER)
-					_mm_pause(); // 需要包含 <immintrin.h> 或使用平台特定的微架构暂停指令
-					#endif
-				}
-				else if (idleTime < 100)
-				{
-					// 第二阶段（闲了一小会）：出让时间片，让系统调度其他线程，但保持活跃状态
-					std::this_thread::yield();
-				}
-				else
-				{
-					// 第三阶段（长期处于彻底无任务状态）：强制休眠一小段时间，大幅降低 CPU 占用（节能降温）
-					std::this_thread::sleep_for(std::chrono::microseconds(100)); // 注意：在Windows下实际可能偏长
-				}
-			}
+	void JobSystem::Execute(JobDecl& job, bool whileWaiting)
+	{
+		const bool cancelled = job.Counter && job.Counter->IsCancelled();
+		if (job.Entry && !cancelled)
+		{
+			job.Entry(job.Data());
+			s_StatExecuted.fetch_add(1, std::memory_order_relaxed);
+			if (whileWaiting)
+				s_StatExecutedWhileWaiting.fetch_add(1, std::memory_order_relaxed);
 		}
 	}
+
+	void JobSystem::Complete(JobDecl& job)
+	{
+		job.Release();
+		if (job.Counter)
+		{
+			job.Counter->Count.fetch_sub(1, std::memory_order_acq_rel);
+			job.Counter = nullptr;
+		}
+		s_PendingJobs.fetch_sub(1, std::memory_order_acq_rel);
+		NotifyAll();
+	}
+
+	void JobSystem::NotifyAll()
+	{
+		if (s_WaiterCount.load(std::memory_order_relaxed) == 0)
+			return;   // 没有线程在等:不取锁、不 notify
+		std::lock_guard<std::mutex> lock(s_WakeMutex);
+		s_WakeCv.notify_all();
+	}
+
+	void JobSystem::Wait(JobCounter* counter)
+	{
+		if (!counter)
+			return;
+		s_StatWaits.fetch_add(1, std::memory_order_relaxed);
+
+		uint32_t spin = 0;
+		while (!counter->IsComplete())
+		{
+			JobDecl job;
+			bool stolen = false;
+			if (TryGetJob(job, stolen))
+			{
+				if (stolen)
+					s_StatStolen.fetch_add(1, std::memory_order_relaxed);
+				Execute(job, true);
+				Complete(job);
+				continue;
+			}
+
+			if (spin++ < 64)
+			{
+				std::this_thread::yield();
+				continue;
+			}
+
+			std::unique_lock<std::mutex> lock(s_WakeMutex);
+			s_WaiterCount.fetch_add(1, std::memory_order_relaxed);
+			s_WakeCv.wait_for(lock, std::chrono::milliseconds(1), [&counter]()
+			{
+				return counter->IsComplete();
+			});
+			s_WaiterCount.fetch_sub(1, std::memory_order_relaxed);
+		}
+	}
+
+	void JobSystem::WaitAll()
+	{
+		uint32_t spin = 0;
+		while (s_PendingJobs.load(std::memory_order_acquire) > 0)
+		{
+			JobDecl job;
+			bool stolen = false;
+			if (TryGetJob(job, stolen))
+			{
+				if (stolen)
+					s_StatStolen.fetch_add(1, std::memory_order_relaxed);
+				Execute(job, true);
+				Complete(job);
+				continue;
+			}
+			if (spin++ < 64)
+			{
+				std::this_thread::yield();
+				continue;
+			}
+			std::unique_lock<std::mutex> lock(s_WakeMutex);
+			s_WaiterCount.fetch_add(1, std::memory_order_relaxed);
+			s_WakeCv.wait_for(lock, std::chrono::milliseconds(1));
+			s_WaiterCount.fetch_sub(1, std::memory_order_relaxed);
+		}
+	}
+
+	void JobSystem::WorkerLoop()
+	{
+		uint32_t spin = 0;
+		while (s_Running.load(std::memory_order_acquire))
+		{
+			JobDecl job;
+			bool stolen = false;
+			if (TryGetJob(job, stolen))
+			{
+				spin = 0;
+				if (stolen)
+					s_StatStolen.fetch_add(1, std::memory_order_relaxed);
+				Execute(job, false);
+				Complete(job);
+				continue;
+			}
+
+			// 空闲:短自旋(低延迟) → 条件变量阻塞(不烧 CPU)。
+			if (spin++ < 256)
+			{
+				std::this_thread::yield();
+				continue;
+			}
+
+			std::unique_lock<std::mutex> lock(s_WakeMutex);
+			s_WaiterCount.fetch_add(1, std::memory_order_relaxed);
+			s_WakeCv.wait_for(lock, std::chrono::milliseconds(2));
+			s_WaiterCount.fetch_sub(1, std::memory_order_relaxed);
+		}
+	}
+
+	JobSystem::Stats JobSystem::GetStats()
+	{
+		Stats stats;
+		stats.Executed = s_StatExecuted.load(std::memory_order_relaxed);
+		stats.Stolen = s_StatStolen.load(std::memory_order_relaxed);
+		stats.ExecutedWhileWaiting = s_StatExecutedWhileWaiting.load(std::memory_order_relaxed);
+		stats.OverflowPushes = s_StatOverflowPushes.load(std::memory_order_relaxed);
+		stats.QueueHighWater = s_StatQueueHighWater.load(std::memory_order_relaxed);
+		stats.Waits = s_StatWaits.load(std::memory_order_relaxed);
+		return stats;
+	}
+
+	std::string JobSystem::DescribeStats()
+	{
+		const Stats stats = GetStats();
+		return "workers=" + std::to_string(s_WorkerCount) +
+			" executed=" + std::to_string(stats.Executed) +
+			" stolen=" + std::to_string(stats.Stolen) +
+			" helped=" + std::to_string(stats.ExecutedWhileWaiting) +
+			" overflow=" + std::to_string(stats.OverflowPushes) +
+			" highWater=" + std::to_string(stats.QueueHighWater) +
+			" waits=" + std::to_string(stats.Waits);
+	}
 }
+
