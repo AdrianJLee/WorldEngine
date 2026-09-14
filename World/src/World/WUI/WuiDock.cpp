@@ -379,7 +379,33 @@ namespace World::Wui
 			});
 		if (it == Floating.end())
 			return false;
+		RememberFloat(*it);
 		Floating.erase(it);
+		return true;
+	}
+
+	void DockLayout::RememberFloat(const DockFloat& entry)
+	{
+		auto it = std::find_if(FloatMemory.begin(), FloatMemory.end(), [&](const DockFloat& candidate)
+			{
+				return candidate.Panel == entry.Panel;
+			});
+		if (it != FloatMemory.end())
+			*it = entry;
+		else
+			FloatMemory.push_back(entry);
+	}
+
+	bool DockLayout::FindFloatMemory(const PanelId& panel, WuiRect* out) const
+	{
+		auto it = std::find_if(FloatMemory.begin(), FloatMemory.end(), [&](const DockFloat& candidate)
+			{
+				return candidate.Panel == panel;
+			});
+		if (it == FloatMemory.end())
+			return false;
+		if (out)
+			*out = it->Rect;
 		return true;
 	}
 
@@ -500,6 +526,26 @@ namespace World::Wui
 			}
 			root.Object.push_back({ "floating", std::move(floating) });
 		}
+		if (!FloatMemory.empty())
+		{
+			JsonValue memory;
+			memory.type = JsonValue::Type::Array;
+			for (const DockFloat& entry : FloatMemory)
+			{
+				JsonValue item;
+				item.type = JsonValue::Type::Object;
+				item.Object.push_back({ "panel", JsonValue::MakeString(entry.Panel) });
+				JsonValue rect;
+				rect.type = JsonValue::Type::Array;
+				rect.Array.push_back(JsonValue::MakeNumber(entry.Rect.X));
+				rect.Array.push_back(JsonValue::MakeNumber(entry.Rect.Y));
+				rect.Array.push_back(JsonValue::MakeNumber(entry.Rect.W));
+				rect.Array.push_back(JsonValue::MakeNumber(entry.Rect.H));
+				item.Object.push_back({ "rect", std::move(rect) });
+				memory.Array.push_back(std::move(item));
+			}
+			root.Object.push_back({ "float_memory", std::move(memory) });
+		}
 		return root.Dump();
 	}
 
@@ -601,6 +647,34 @@ namespace World::Wui
 					}
 				}
 				layout.Floating.push_back(std::move(window));
+			}
+		}
+		// v2 扩展:跨会话的独立窗口位置记忆(缺失时留空)。
+		if (const JsonValue* memory = parsed->Find("float_memory"))
+		{
+			if (memory->type != JsonValue::Type::Array)
+			{
+				*error = "float_memory must be an array";
+				return false;
+			}
+			for (const JsonValue& entry : memory->Array)
+			{
+				const JsonValue* panel = entry.Find("panel");
+				if (!panel || panel->type != JsonValue::Type::String || panel->String.empty())
+					continue;
+				DockFloat window;
+				window.Panel = panel->String;
+				if (const JsonValue* rect = entry.Find("rect"))
+				{
+					if (rect->type == JsonValue::Type::Array && rect->Array.size() == 4)
+					{
+						window.Rect.X = static_cast<float>(rect->Array[0].AsNumber(0));
+						window.Rect.Y = static_cast<float>(rect->Array[1].AsNumber(0));
+						window.Rect.W = static_cast<float>(rect->Array[2].AsNumber(0));
+						window.Rect.H = static_cast<float>(rect->Array[3].AsNumber(0));
+					}
+				}
+				layout.FloatMemory.push_back(std::move(window));
 			}
 		}
 		*out = std::move(layout);

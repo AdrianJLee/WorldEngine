@@ -78,6 +78,9 @@ namespace World::Wui
 		bool CloseFloating(const PanelId& panel);
 		// 浮动窗口提到最前(最后绘制 = 最上层)。
 		void BringFloatToFront(const PanelId& panel);
+		// 记录/查询独立窗口的上次屏幕矩形(跨会话记忆)。
+		void RememberFloat(const DockFloat& entry);
+		bool FindFloatMemory(const PanelId& panel, WuiRect* out) const;
 		bool Activate(const PanelId& panel);
 		// 同一 tab 组内除 panel 外的另一个面板;无则返回空。
 		PanelId FindSibling(const PanelId& panel) const;
@@ -89,6 +92,9 @@ namespace World::Wui
 
 		DockNode Root;
 		std::vector<DockFloat> Floating;
+		// 曾经作为独立窗口存在过的面板及其最后屏幕矩形(跨会话记忆):
+		// 从 Window 菜单重新打开时据此恢复为独立窗口,而不是塞进停靠树。
+		std::vector<DockFloat> FloatMemory;
 
 	private:
 		static DockNode* FindTabNode(DockNode& node, const PanelId& panel, std::vector<DockNode*>* path);

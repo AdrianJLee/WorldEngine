@@ -58,6 +58,9 @@ namespace World
 		// 独立窗口(与停靠面板是不同组件):按保存的浮动布局重建。
 		for (const Wui::DockFloat& entry : m_Layout.Floating)
 			AddFloatWindow(entry.Panel, entry.Rect, "restore");
+		// 跨会话记忆:曾经作为独立窗口存在过的面板,其屏幕矩形用于下次打开。
+		for (const Wui::DockFloat& entry : m_Layout.FloatMemory)
+			m_LastFloatRects[entry.Panel] = entry.Rect;
 	}
 
 	EditorShell::~EditorShell() = default;
