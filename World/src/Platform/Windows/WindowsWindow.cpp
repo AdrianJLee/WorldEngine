@@ -311,7 +311,9 @@ namespace World
 		if (const HWND hwnd = glfwGetWin32Window(m_Window))
 		{
 			ReleaseCapture();
-			SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+			// SC_MOVE 是无边框窗口最可靠的标准拖动方式(WM_NCLBUTTONDOWN+HTCAPTION
+			// 会被 GLFW 的窗口过程吞掉,导致无边框窗口拖不动)。
+			SendMessageW(hwnd, WM_SYSCOMMAND, SC_MOVE | HTCAPTION, 0);
 		}
 	}
 
