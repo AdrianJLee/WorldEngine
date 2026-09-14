@@ -54,6 +54,8 @@ namespace World
 		static void CaptureFrame(const std::filesystem::path& path);
 		// 读回指定离屏帧缓冲(场景渲染目标)写 PPM。
 		static void CaptureFramebuffer(const std::filesystem::path& path, uint32_t fbo, uint32_t width, uint32_t height);
+		// 读回当前上下文的默认帧缓冲(GL_BACK)写 PPM;独立窗口验证用。
+		static void CaptureDefaultFramebuffer(const std::filesystem::path& path, uint32_t width, uint32_t height);
 	private:
 		struct SceneData
 		{

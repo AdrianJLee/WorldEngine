@@ -237,7 +237,9 @@ namespace World
 
 	void WindowsWindow::MakeCurrent()
 	{
-		glfwMakeContextCurrent(m_Window);
+		// Vulkan 附加窗口用 GLFW_NO_API 创建,没有 GL 上下文。
+		if (m_HasGLContext)
+			glfwMakeContextCurrent(m_Window);
 	}
 
 	void WindowsWindow::SwapBuffers()

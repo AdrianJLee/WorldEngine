@@ -23,6 +23,8 @@ namespace World
 			return;
 		m_Window->SetPosition(static_cast<int>(screenRect.X), static_cast<int>(screenRect.Y));
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(FloatWindowHost::OnEvent));
+		WLD_CORE_INFO("[float] independent window created: {0} ({1}x{2})", m_Panel,
+			m_Window->GetWidth(), m_Window->GetHeight());
 		// 创建附加窗口会切换当前 GL 上下文,恢复主窗口的上下文。
 		if (main)
 			main->MakeCurrent();
@@ -79,7 +81,7 @@ namespace World
 		{
 			static int frameCount = 0;
 			if (++frameCount == 120)
-				Renderer::CaptureFramebuffer(std::string(capturePrefix) + m_Panel + ".ppm", 0,
+				Renderer::CaptureDefaultFramebuffer(std::string(capturePrefix) + m_Panel + ".ppm",
 					static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y));
 		}
 		m_Window->SwapBuffers();

@@ -402,4 +402,36 @@ namespace World
 		glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
 		WLD_CORE_INFO("[capture] wrote framebuffer {0} ({1}x{2})", path.string(), width, height);
 	}
+
+	void Renderer::CaptureDefaultFramebuffer(const std::filesystem::path& path, uint32_t width, uint32_t height)
+	{
+		// 默认帧缓冲读取必须用 GL_BACK(GL_COLOR_ATTACHMENT0 只对 FBO 有效)。
+		if (width == 0 || height == 0)
+			return;
+		GLint previous = 0;
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glReadBuffer(GL_BACK);
+
+		std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 3);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		glReadPixels(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height),
+			GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+
+		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		if (!file)
+		{
+			WLD_CORE_ERROR("[capture] cannot open {0}", path.string());
+			return;
+		}
+		file << "P6\n" << width << " " << height << "\n255\n";
+		for (uint32_t row = 0; row < height; ++row)
+		{
+			const uint32_t sourceRow = height - 1 - row;
+			file.write(reinterpret_cast<const char*>(pixels.data() + static_cast<size_t>(sourceRow) * width * 3),
+				static_cast<std::streamsize>(width) * 3);
+		}
+		glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
+		WLD_CORE_INFO("[capture] wrote default framebuffer {0} ({1}x{2})", path.string(), width, height);
+	}
 }
