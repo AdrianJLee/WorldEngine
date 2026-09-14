@@ -206,6 +206,22 @@ namespace World
 		}
 		else
 		{
+			// 曾经作为独立窗口存在过的面板:再次打开时回到它上次的屏幕位置,
+			// 而不是固定塞进停靠树的某个位置。
+			const auto remembered = m_LastFloatRects.find(panel);
+			if (remembered != m_LastFloatRects.end())
+			{
+				Wui::WuiRect rect = remembered->second;
+				if (rect.W < 200.0f || rect.H < 140.0f)
+					rect = { 220.0f, 140.0f, 520.0f, 400.0f };
+				const std::string before = m_Layout.Serialize();
+				if (m_Layout.Float(panel, rect))
+				{
+					AddFloatWindow(panel, rect, "reopen");
+					RecordDockChange(ctx, "float", panel, before);
+					return;
+				}
+			}
 			const std::string anchor = m_Layout.FirstPanel();
 			if (anchor.empty())
 			{
