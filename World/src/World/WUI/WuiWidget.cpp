@@ -350,6 +350,50 @@ namespace World::Wui
 			{ m_Rect.X, m_Rect.Y, m_Rect.W * clamped, m_Rect.H }, FillColor, 3.0f });
 	}
 
+	// ---- WuiListRow ----
+
+	WuiMeasure WuiListRow::Measure(const WuiConstraints& constraints)
+	{
+		MarkClean();
+		return { constraints.MinW, std::max(constraints.MinH, FontSize + 6.0f) };
+	}
+
+	void WuiListRow::Paint(WuiPaintContext& context)
+	{
+		WuiContext& ctx = context.Context();
+		const bool hovered = ctx.IsHovered(m_Rect);
+		if (Selected)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, SelectedFill, 2.0f });
+		else if (hovered)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, HoverFill, 2.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Text,
+			{ m_Rect.X + 6, m_Rect.Y + (m_Rect.H - FontSize) * 0.5f, 0, 0 },
+			WuiColor { 0.82f, 0.84f, 0.87f, 1 }, 0, 1.0f, Text, FontSize, false });
+		if (ctx.IsClicked(m_Rect) && OnClick)
+			OnClick();
+	}
+
+	// ---- WuiImageButton ----
+
+	WuiMeasure WuiImageButton::Measure(const WuiConstraints& constraints)
+	{
+		MarkClean();
+		return { constraints.MinW, constraints.MinH };
+	}
+
+	void WuiImageButton::Paint(WuiPaintContext& context)
+	{
+		WuiContext& ctx = context.Context();
+		if (ctx.IsHovered(m_Rect))
+			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, WuiColor { 1, 1, 1, 0.08f }, 2.0f });
+		if (TextureId && !Dim)
+			ctx.Commands().push_back({ WuiDrawKind::Image, m_Rect, WuiColor { 1, 1, 1, 1 }, 0, 1.0f, "", 15.0f, false, TextureId, Uv });
+		else if (TextureId)
+			ctx.Commands().push_back({ WuiDrawKind::Image, m_Rect, WuiColor { 1, 1, 1, 0.35f }, 0, 1.0f, "", 15.0f, false, TextureId, Uv });
+		if (!Dim && ctx.IsClicked(m_Rect) && OnClick)
+			OnClick();
+	}
+
 	// ---- 便捷布局 ----
 
 	void LayoutWidgetTree(const WuiWidgetPtr& root, const WuiRect& rect)

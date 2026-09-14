@@ -1,6 +1,9 @@
 #pragma once
 
 #include "EditorPanel.h"
+#include "World/WUI/WuiWidget.h"
+
+#include <memory>
 
 namespace World
 {
@@ -13,6 +16,11 @@ namespace World
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 
 	private:
+		std::shared_ptr<Wui::WuiBox> m_Root;
+		std::shared_ptr<Wui::WuiScrollArea> m_Scroll;
+		std::vector<std::shared_ptr<Wui::WuiListRow>> m_Rows;
+		std::vector<Entity> m_RowEntities;
+		std::string m_LastOrderKey;
 		Entity m_Context;
 		glm::vec2 m_MenuPos {};
 		glm::vec2 m_BlankMenuPos {};
