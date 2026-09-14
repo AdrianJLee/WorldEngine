@@ -3,6 +3,7 @@
 
 #include "World/WUI/WuiGizmo.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 namespace World
 {
@@ -57,7 +58,8 @@ namespace World
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, { 0.06f, 0.06f, 0.07f, 1 }, 0.0f });
 		const float panelWidth = 3 * 28.0f + 2 * 8.0f + 16.0f;
 		const Wui::WuiRect bar { rect.X + (rect.W - panelWidth) * 0.5f, rect.Y + 14, panelWidth, 44 };
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, bar, { 0.12f, 0.12f, 0.12f, 0.85f }, 6.0f });
+		// 工具栏底板走组件(Toolbar):与其它工具栏样式统一。
+		Wui::Toolbar(ctx, bar, theme, 6.0f, 0.85f);
 
 		Wui::LayoutWidgetTree(m_Root, rect);
 		Wui::WuiPaintContext paint(ctx);

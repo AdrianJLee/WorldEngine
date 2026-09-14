@@ -528,20 +528,18 @@ namespace World
 
 			if (i + 1 < count)
 			{
-				const Wui::WuiRect splitter = row
+				// 分隔条走组件(Splitter):高亮/光标/命中统一。
+				const Wui::WuiRect splitterArea = row
 					? Wui::WuiRect { area.X + cursor - 2, area.Y, 4, area.H }
 					: Wui::WuiRect { area.X, area.Y + cursor - 2, area.W, 4 };
-			if (ctx.IsHovered(splitter) || m_DragSplitNode == &node)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, splitter, m_Theme.Border, 0.0f });
-			if (ctx.IsHovered(splitter))
-				ctx.SetCursor(row ? Wui::WuiCursor::ResizeEW : Wui::WuiCursor::ResizeNS);
-			if (ctx.IsClicked(splitter))
-			{
-				m_SplitterDragging = true;
-				m_DragSplitNode = &node;
-				m_DragSplitRow = row;
-				m_SplitterBeforeJson = m_Layout.Serialize();
-			}
+				const Wui::SplitterResult split = Wui::Splitter(ctx, splitterArea, row, m_Theme, m_DragSplitNode == &node);
+				if (split.Hovered && ctx.IsClicked(splitterArea))
+				{
+					m_SplitterDragging = true;
+					m_DragSplitNode = &node;
+					m_DragSplitRow = row;
+					m_SplitterBeforeJson = m_Layout.Serialize();
+				}
 			}
 		}
 

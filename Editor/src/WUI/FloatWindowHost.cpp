@@ -5,6 +5,7 @@
 #include "World/Events/ApplicationEvent.h"
 #include "World/Events/KeyEvent.h"
 #include "World/Events/MouseEvent.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -306,48 +307,28 @@ namespace World
 		float lastTabEnd = area.X + 4.0f;
 		if (!m_Panels.empty())
 		{
-			const float slot = std::max(1.0f, (area.W - 8.0f) / static_cast<float>(m_Panels.size()));
-			const float width = std::min(150.0f, slot);
-			float x = area.X + 4.0f;
+			// 与主窗口停靠标签栏共用同一组件(WuiChrome::DockTabBar)。
+			std::vector<Wui::DockTab> tabs;
+			tabs.reserve(m_Panels.size());
 			for (size_t i = 0; i < m_Panels.size(); ++i)
+				tabs.push_back({ Wui::HashId(("float.tab." + m_Panels[i]).c_str()), TitleOf(m_Panels[i]), i == m_Active });
+			const Wui::DockTabBarResult bar = Wui::DockTabBar(ctx,
+				{ area.X, tabTop, std::max(0.0f, area.W - 102.0f), tabH }, tabs, theme);
+			if (bar.Clicked >= 0)
+				m_Active = static_cast<size_t>(bar.Clicked);
+			if (bar.Closed >= 0)
+				closeRequest = m_Panels[static_cast<size_t>(bar.Closed)];
+			// 按下标签(非关闭键):记录起点,移动超阈值后发起跨窗口拖拽。
+			if (!m_TabDragActive && m_PressSeenInWindow && bar.DragStart >= 0
+				&& ctx.Input().MouseClicked[0])
 			{
-				const std::string& panel = m_Panels[i];
-				const Wui::WuiRect tab { x, tabTop + 2.0f, width, tabH - 2.0f };
-				const Wui::WuiRect close { tab.X + tab.W - 18.0f, tab.Y + 4.0f, 14.0f, 14.0f };
-				// 标签按下:记录来源,拖动超过阈值后发出拖拽请求。
-				// 只在"按下的那一帧"记录起点:若每帧都记录,起点会跟着光标走,
-				// 阈值永远不成立(表现就是"只有光标快离开标签时才动")。
-				if (!m_TabDragActive && m_PressSeenInWindow && ctx.Input().MouseClicked[0]
-					&& ctx.IsHovered(tab) && !ctx.IsHovered(close))
-				{
-					m_TabPressArmed = true;
-					m_PressedTab = panel;
-					m_TabPressPos = ctx.Input().MousePos;
-				}
-				if (i == m_Active)
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, theme.PanelBg, 2.0f });
-				else if (ctx.IsHovered(tab))
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, theme.ButtonHover, 2.0f });
-				if (ctx.IsHovered(tab))
-					ctx.SetCursor(Wui::WuiCursor::Hand);
-				if (ctx.IsClicked(tab))
-					m_Active = i;
-
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { tab.X + 6.0f, tab.Y + 3.0f, 0, 0 },
-					theme.Text, 0, 1.0f, TitleOf(panel), 14.0f, false });
-
-				if (ctx.IsHovered(close))
-				{
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, close, theme.ButtonHover, 2.0f });
-					ctx.SetCursor(Wui::WuiCursor::Hand);
-				}
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 3.0f, close.Y - 1.0f, 0, 0 },
-					theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
-				if (ctx.IsClicked(close))
-					closeRequest = panel;
-				x += width;
+				m_TabPressArmed = true;
+				m_PressedTab = m_Panels[static_cast<size_t>(bar.DragStart)];
+				m_TabPressPos = ctx.Input().MousePos;
 			}
-			lastTabEnd = x;
+			const float width = std::min(150.0f,
+				std::max(1.0f, (area.W - 8.0f) / static_cast<float>(m_Panels.size())));
+			lastTabEnd = area.X + 4.0f + width * static_cast<float>(m_Panels.size());
 		}
 
 		// 标准窗口控制(最小化/最大化/关闭)位于标签栏最右侧;其余空白拖动移动窗口。
