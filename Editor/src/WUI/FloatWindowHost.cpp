@@ -303,9 +303,10 @@ namespace World
 			else if (glm::length(ctx.Input().MousePos - m_TabPressPos) > 2.0f)
 			{
 				m_TabPressArmed = false;
-				m_PendingTabDrag = m_PressedTab;
-				if (m_Callbacks.TabDragStart)
-					m_Callbacks.TabDragStart(m_PressedTab);
+				// 标签按住拖动 = 移动窗口(与空白区一致,系统级 SC_MOVE 拖动)。
+				// 跨窗口附加/挂靠仍通过"把窗口拖到主窗口顶栏自动挂靠"实现。
+				m_Window->BeginSystemDrag();
+				m_PressedTab.clear();
 			}
 		}
 
