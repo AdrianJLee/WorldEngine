@@ -287,9 +287,16 @@ namespace World
 			m_Window->MaximizeOrRestore();
 		else if (control == Wui::WindowControl::Close)
 			m_Window->SetShouldClose(true);
-		else if (!m_TabDragActive && ctx.Input().MouseDown[0] && m_PressSeenInWindow && ctx.IsHovered({ lastTabEnd, tabTop,
-			std::max(0.0f, area.W - lastTabEnd - 110.0f), tabH }))
-			m_Window->BeginSystemDrag();
+		else if (!m_TabDragActive && ctx.Input().MouseDown[0] && m_PressSeenInWindow
+			&& ctx.IsHovered({ lastTabEnd, tabTop,
+				std::max(0.0f, area.W - lastTabEnd - 110.0f), tabH }))
+		{
+			// 标签栏空白区也按住即拖动窗口:与标签拖拽共用同一套跟随逻辑,
+			// 落点决定附加/挂靠/留在原地(手感与标签一致)。
+			m_PressedTab = m_Panels.empty() ? std::string() : m_Panels.front();
+			m_TabPressArmed = true;
+			m_TabPressPos = ctx.Input().MousePos;
+		}
 
 		// 拖拽阈值:按下后移动超过 4px 即发起一次跨窗口拖拽请求。
 		if (m_TabPressArmed)
