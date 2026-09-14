@@ -76,6 +76,9 @@ namespace World
 		bool m_TabPressArmed = false;
 		glm::vec2 m_TabPressPos { 0, 0 };
 		bool m_TabDropHighlight = false;
+		// 左键按下必须发生在本窗口内,才允许解读为拖拽:
+		// 避免主窗口拖动时,经过本窗口的"悬空按键"被误当成新的拖拽。
+		bool m_PressSeenInWindow = false;
 		Callbacks m_Callbacks;
 		Window* m_Window = nullptr;
 		PresentTarget* m_Target = nullptr;

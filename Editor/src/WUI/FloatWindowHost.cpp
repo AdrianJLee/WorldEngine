@@ -236,7 +236,7 @@ namespace World
 				const Wui::WuiRect tab { x, tabTop + 2.0f, width, tabH - 2.0f };
 				const Wui::WuiRect close { tab.X + tab.W - 18.0f, tab.Y + 4.0f, 14.0f, 14.0f };
 				// 标签按下:记录来源,拖动超过阈值后发出拖拽请求。
-				if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab) && !ctx.IsHovered(close))
+				if (ctx.Input().MouseDown[0] && m_PressSeenInWindow && ctx.IsHovered(tab) && !ctx.IsHovered(close))
 				{
 					m_TabPressArmed = true;
 					m_PressedTab = panel;
@@ -277,7 +277,7 @@ namespace World
 			m_Window->MaximizeOrRestore();
 		else if (control == Wui::WindowControl::Close)
 			m_Window->SetShouldClose(true);
-		else if (ctx.Input().MouseDown[0] && ctx.IsHovered({ lastTabEnd, tabTop,
+		else if (ctx.Input().MouseDown[0] && m_PressSeenInWindow && ctx.IsHovered({ lastTabEnd, tabTop,
 			std::max(0.0f, area.W - lastTabEnd - 110.0f), tabH }))
 			m_Window->BeginSystemDrag();
 
@@ -315,9 +315,9 @@ namespace World
 		dispatcher.Dispatch<KeyTypedEvent>([&](KeyTypedEvent& ev)
 			{ m_Backend.LocalChar(static_cast<uint32_t>(ev.GetKeyCode())); return false; });
 		dispatcher.Dispatch<MouseButtonPressedEvent>([&](MouseButtonPressedEvent& ev)
-			{ m_Backend.LocalMouseButton(ev.GetMouseButton(), true); return false; });
+			{ m_PressSeenInWindow = true; m_Backend.LocalMouseButton(ev.GetMouseButton(), true); return false; });
 		dispatcher.Dispatch<MouseButtonReleasedEvent>([&](MouseButtonReleasedEvent& ev)
-			{ m_Backend.LocalMouseButton(ev.GetMouseButton(), false); return false; });
+			{ m_Backend.LocalMouseButton(ev.GetMouseButton(), false); m_PressSeenInWindow = false; return false; });
 		dispatcher.Dispatch<MouseMovedEvent>([&](MouseMovedEvent& ev)
 			{ m_Backend.LocalMouseMove(ev.GetX(), ev.GetY()); return false; });
 		dispatcher.Dispatch<MouseScrolledEvent>([&](MouseScrolledEvent& ev)
