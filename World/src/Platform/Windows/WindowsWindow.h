@@ -35,6 +35,7 @@ namespace World
 		void SetShouldClose(bool shouldClose) override;
 		void Focus() override;
 		void BeginSystemDrag() override;
+		void SetFrameless(bool frameless) override;
 
 	private:
 		virtual void Init(const WindowProps& props);
@@ -46,6 +47,9 @@ namespace World
 		bool m_Auxiliary = false;
 		bool m_HasGLContext = true;
 		GLFWwindow* m_ShareWindow = nullptr;
+		WNDPROC m_PrevWndProc = nullptr;
+		static LRESULT CALLBACK StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+		LRESULT HitTestNc(LPARAM lParam);
 
 		struct WindowData
 		{

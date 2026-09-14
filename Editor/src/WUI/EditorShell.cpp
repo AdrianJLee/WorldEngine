@@ -614,16 +614,34 @@ namespace World
 	void EditorShell::DrawAttachBar(Wui::WuiContext& ctx)
 	{
 		const glm::vec2 viewport = ctx.ViewportSize();
-		const Wui::WuiRect bar { 0, 26.0f, viewport.x, m_AttachBarHeight };
+		// 顶部第一行即挂靠栏:也是无边框主窗口的拖动/关闭区域。
+		const Wui::WuiRect bar { 0, 0.0f, viewport.x, m_AttachBarHeight };
 		const Wui::WuiColor fill = m_AttachSlotHighlight
 			? Wui::WuiColor { 0.3f, 0.5f, 0.9f, 0.45f }
 			: m_Theme.PanelHeader;
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, bar, fill, 0.0f });
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { bar.X, bar.Y + bar.H - 1.0f, bar.W, 1.0f }, m_Theme.Border, 0.0f });
 
+		// 最右侧:窗口关闭(主窗口)与空区拖动。
+		const Wui::WuiRect windowClose { bar.X + bar.W - 20.0f, bar.Y + 5.0f, 14.0f, 14.0f };
+		if (ctx.IsHovered(windowClose))
+		{
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, windowClose, m_Theme.ButtonHover, 2.0f });
+			ctx.SetCursor(Wui::WuiCursor::Hand);
+		}
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { windowClose.X + 3.0f, windowClose.Y - 1.0f, 0, 0 },
+			m_Theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
+		if (ctx.IsClicked(windowClose))
+		{
+			m_Editor.CloseAction();
+			return;
+		}
+
 		if (m_FloatHosts.empty())
 		{
 			Label(ctx, { bar.X + 10, bar.Y + 5 }, "挂靠栏:把独立窗口拖到这条栏上即可挂靠回主窗口", m_Theme.TextMuted, 13.0f);
+			if (ctx.Input().MouseDown[0] && ctx.IsHovered(bar))
+				Application::Get().GetWindow().BeginSystemDrag();
 			return;
 		}
 
@@ -650,6 +668,8 @@ namespace World
 		}
 		if (!attachRequest.empty())
 			AttachIndependentWindowToSlot(attachRequest);
+		else if (ctx.Input().MouseDown[0] && ctx.IsHovered(bar) && !ctx.IsHovered({ 0, 0, x + 70.0f, bar.H }))
+			Application::Get().GetWindow().BeginSystemDrag();
 	}
 
 	// 独立窗口:每个宿主 = 一个 OS 窗口(可含多个标签面板),绘制在停靠区之上。
@@ -662,7 +682,7 @@ namespace World
 		const glm::vec2 viewport = ctx.ViewportSize();
 		std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> dockRects;
 		// 挂靠栏的屏幕矩形(横条):客户区坐标 -> 屏幕坐标。
-		m_AttachSlotScreenRect = { 0, 26.0f, viewport.x, m_AttachBarHeight };
+		m_AttachSlotScreenRect = { 0, 0.0f, viewport.x, m_AttachBarHeight };
 		int windowX = 0, windowY = 0;
 		if (Application::HasInstance())
 			Application::Get().GetWindow().GetPosition(&windowX, &windowY);
@@ -1070,8 +1090,9 @@ namespace World
 			m_MenuBar->Add(m_WindowButton, { 78, 78, 0, 22, 0 });
 		}
 
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { 0, 0, viewport.x, 26 }, m_Theme.PanelHeader, 0.0f });
-		Wui::LayoutWidgetTree(m_MenuBar, { 8, 2, viewport.x - 16, 22 });
+		// 菜单栏下移一行:顶部第一行现在是挂靠栏。
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { 0, 26, viewport.x, 26 }, m_Theme.PanelHeader, 0.0f });
+		Wui::LayoutWidgetTree(m_MenuBar, { 8, 28, viewport.x - 16, 22 });
 		Wui::WuiPaintContext paint(ctx);
 		m_MenuBar->Paint(paint);
 

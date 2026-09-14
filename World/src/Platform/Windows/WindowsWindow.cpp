@@ -315,6 +315,60 @@ namespace World
 		}
 	}
 
+	void WindowsWindow::SetFrameless(bool frameless)
+	{
+		if (!m_Window)
+			return;
+		glfwSetWindowAttrib(m_Window, GLFW_DECORATED, frameless ? GLFW_FALSE : GLFW_TRUE);
+		const HWND hwnd = glfwGetWin32Window(m_Window);
+		if (!hwnd)
+			return;
+		if (frameless && !m_PrevWndProc)
+		{
+			SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+			m_PrevWndProc = reinterpret_cast<WNDPROC>(
+				SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&WindowsWindow::StaticWndProc)));
+		}
+		else if (!frameless && m_PrevWndProc)
+		{
+			SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(m_PrevWndProc));
+			m_PrevWndProc = nullptr;
+		}
+	}
+
+	LRESULT CALLBACK WindowsWindow::StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+	{
+		WindowsWindow* self = reinterpret_cast<WindowsWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+		if (self && msg == WM_NCHITTEST)
+			return self->HitTestNc(lParam);
+		const WNDPROC previous = self ? self->m_PrevWndProc : nullptr;
+		return previous ? CallWindowProcW(previous, hwnd, msg, wParam, lParam)
+			: DefWindowProcW(hwnd, msg, wParam, lParam);
+	}
+
+	LRESULT WindowsWindow::HitTestNc(LPARAM lParam)
+	{
+		// 无边框窗口仍保留四边/四角的缩放命中,其余交还客户区(菜单/挂靠栏拖动)。
+		const int x = static_cast<int>(static_cast<short>(LOWORD(lParam)));
+		const int y = static_cast<int>(static_cast<short>(HIWORD(lParam)));
+		RECT rect {};
+		GetWindowRect(glfwGetWin32Window(m_Window), &rect);
+		constexpr int border = 6;
+		const bool left = x < rect.left + border;
+		const bool right = x >= rect.right - border;
+		const bool top = y < rect.top + border;
+		const bool bottom = y >= rect.bottom - border;
+		if (left && top) return HTTOPLEFT;
+		if (right && top) return HTTOPRIGHT;
+		if (left && bottom) return HTBOTTOMLEFT;
+		if (right && bottom) return HTBOTTOMRIGHT;
+		if (left) return HTLEFT;
+		if (right) return HTRIGHT;
+		if (top) return HTTOP;
+		if (bottom) return HTBOTTOM;
+		return HTCLIENT;
+	}
+
 	bool WindowsWindow::IsVsync() const
 	{
 		return m_Data.VSync;

@@ -31,6 +31,8 @@ namespace World
 	void EditorLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();
+		// 主窗口无边框:顶部第一行(挂靠栏)即窗口栏位,可拖动/关闭;边缘缩放保留。
+		Application::Get().GetWindow().SetFrameless(true);
 		std::string moduleError;
 		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
 			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);

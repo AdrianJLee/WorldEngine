@@ -192,29 +192,10 @@ namespace World
 	void FloatWindowHost::RenderTabBar(Wui::WuiContext& ctx, const Wui::WuiRect& area)
 	{
 		const Wui::WuiTheme& theme = m_Callbacks.Theme;
-		constexpr float titleH = 26.0f;
 		constexpr float tabH = 24.0f;
 
-		// ---- 标题栏(替代系统标题栏):拖动移动 + 关闭 ----
-		const Wui::WuiRect titleBar { area.X, area.Y, area.W, titleH };
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, titleBar, theme.PanelHeader, 0.0f });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { titleBar.X + 8.0f, titleBar.Y + 5.0f, 0, 0 },
-			theme.Text, 0, 1.0f, m_Title, 14.0f, false });
-		const Wui::WuiRect windowClose { titleBar.X + titleBar.W - 22.0f, titleBar.Y + 6.0f, 14.0f, 14.0f };
-		if (ctx.IsHovered(windowClose))
-		{
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, windowClose, theme.ButtonHover, 2.0f });
-			ctx.SetCursor(Wui::WuiCursor::Hand);
-		}
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { windowClose.X + 3.0f, windowClose.Y - 1.0f, 0, 0 },
-			theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
-		if (ctx.IsClicked(windowClose))
-			m_Window->SetShouldClose(true);
-		else if (ctx.Input().MouseDown[0] && ctx.IsHovered(titleBar))
-			m_Window->BeginSystemDrag();
-
 		// ---- 标签栏(浏览器式):附加目标 + 切换/关闭标签 ----
-		const float tabTop = area.Y + titleH;
+		const float tabTop = area.Y;
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH }, theme.PanelHeader, 0.0f });
 		// 放置目标高亮:其他窗口的标签正被拖到本窗口上方。
 		if (m_TabDropHighlight)
@@ -222,6 +203,7 @@ namespace World
 				Wui::WuiColor { 0.3f, 0.5f, 0.9f, 0.55f }, 0.0f });
 
 		std::string closeRequest;
+		float lastTabEnd = area.X + 4.0f;
 		if (!m_Panels.empty())
 		{
 			const float slot = std::max(1.0f, (area.W - 8.0f) / static_cast<float>(m_Panels.size()));
@@ -262,7 +244,23 @@ namespace World
 					closeRequest = panel;
 				x += width;
 			}
+			lastTabEnd = x;
 		}
+
+		// 窗口级关闭按钮(标签栏最右侧);标签栏右侧空白 = 拖动移动窗口。
+		const Wui::WuiRect windowClose { area.X + area.W - 20.0f, tabTop + 5.0f, 14.0f, 14.0f };
+		if (ctx.IsHovered(windowClose))
+		{
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, windowClose, theme.ButtonHover, 2.0f });
+			ctx.SetCursor(Wui::WuiCursor::Hand);
+		}
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { windowClose.X + 3.0f, windowClose.Y - 1.0f, 0, 0 },
+			theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
+		if (ctx.IsClicked(windowClose))
+			m_Window->SetShouldClose(true);
+		else if (ctx.Input().MouseDown[0] && ctx.IsHovered({ lastTabEnd, tabTop,
+			std::max(0.0f, area.W - lastTabEnd - 24.0f), tabH }))
+			m_Window->BeginSystemDrag();
 
 		// 拖拽阈值:按下后移动超过 4px 即发起一次跨窗口拖拽请求。
 		if (m_TabPressArmed)
@@ -281,7 +279,7 @@ namespace World
 			}
 		}
 
-		const Wui::WuiRect content { area.X, tabTop + tabH, area.W, std::max(0.0f, area.H - titleH - tabH) };
+		const Wui::WuiRect content { area.X, tabTop + tabH, area.W, std::max(0.0f, area.H - tabH) };
 		if (!m_Panels.empty() && m_Callbacks.Content)
 			m_Callbacks.Content(ctx, content, ActivePanel());
 		if (!closeRequest.empty())

@@ -60,6 +60,8 @@ namespace World
 		virtual void Focus() = 0;
 		// 无边框窗口自定义标题栏:让系统进入"窗口移动"循环。
 		virtual void BeginSystemDrag() = 0;
+		// 运行时切换无边框(去掉系统标题栏),并安装边缘缩放的命中测试。
+		virtual void SetFrameless(bool frameless) = 0;
 
 		// Creates a window
 		static Window* Create(const WindowProps& props = WindowProps());
