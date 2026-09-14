@@ -912,9 +912,6 @@ namespace World
 		const Wui::WuiId popup = Wui::HashId("browser.context");
 		if (ctx.IsPopupOpen(popup) && !m_Model.ContextMenuPath.empty())
 		{
-			ctx.PushOverlay();
-			const Wui::WuiRect menuPanel { m_Model.ContextMenuPos.x, m_Model.ContextMenuPos.y, 180, 8 * 24 + 8 };
-			DrawPanelSurface(ctx, menuPanel, theme);
 			struct BrowserItem { const char* Label; std::function<void()> Action; };
 			const bool single = m_Model.Selected.size() == 1;
 			const std::vector<BrowserItem> items = {
@@ -927,20 +924,25 @@ namespace World
 				{ "Open in Explorer", [this] { OpenInExplorer(m_Model.ContextMenuPath); } },
 				{ "Delete", [this] { m_Model.ShowDeleteModal = true; } },
 			};
-			for (size_t i = 0; i < items.size(); ++i)
+			// 右键菜单走组件(ContextMenu):位置钉住 + 外部点击/Esc 关闭统一处理。
+			Wui::WuiRect menuPanel;
+			if (Wui::BeginContextMenu(ctx, popup, m_Model.ContextMenuPos, 180.0f, items.size(), &menuPanel, theme))
 			{
-				const Wui::WuiRect item { menuPanel.X + 4, menuPanel.Y + 4 + i * 24, menuPanel.W - 8, 22 };
-				if (MenuItem(ctx, Wui::HashId(("browser.item." + std::string(items[i].Label)).c_str()), item, items[i].Label, true, theme))
+				for (size_t i = 0; i < items.size(); ++i)
 				{
-					items[i].Action();
-					if (m_Ctx) m_Ctx->RecordOp("menu", "item", items[i].Label, "browser");
-					ctx.CloseAllPopups();
+					const Wui::WuiRect item { menuPanel.X + 4, menuPanel.Y + 4 + i * 22, menuPanel.W - 8, 22 };
+					if (Wui::ContextMenuItem(ctx, Wui::HashId(("browser.item." + std::string(items[i].Label)).c_str()),
+						item, items[i].Label, theme))
+					{
+						items[i].Action();
+						if (m_Ctx) m_Ctx->RecordOp("menu", "item", items[i].Label, "browser");
+						ctx.CloseAllPopups();
+					}
 				}
+				if (ctx.IsKeyPressed(KeyCodes::Escape))
+					ctx.ClosePopup(popup);
+				Wui::EndContextMenu(ctx, popup, menuPanel, theme);
 			}
-			ctx.ClosePopupsOnOutsideClick({ popup }, menuPanel);
-			if (ctx.IsKeyPressed(KeyCodes::Escape))
-				ctx.ClosePopup(popup);
-			ctx.PopOverlay();
 		}
 		else
 		{

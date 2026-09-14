@@ -38,6 +38,15 @@ namespace World
 		bool m_TreeChildExpanded = false;
 		std::string m_LastAction = "(none)";
 		float m_ScrollY = 0.0f;
+		// 骨架组件演示状态(WuiChrome)
+		std::string m_ChromeSearch;
+		int m_ChromeListIndex = 0;
+		int m_ChromeGridIndex = 0;
+		int m_ChromeTreeIndex = 0;
+		int m_ChromeTabIndex = 0;
+		bool m_ChromeTreeExpanded = true;
+		bool m_ChromeMenuChecked = true;
+		glm::vec2 m_ChromeMenuPos { 0, 0 };
 
 		// 控件实例:保留模式,跨帧复用(布局每帧 Arrange)。
 		std::shared_ptr<Wui::WuiButton> m_Button;

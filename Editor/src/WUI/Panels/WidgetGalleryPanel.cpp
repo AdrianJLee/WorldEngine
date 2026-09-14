@@ -2,6 +2,7 @@
 #include "WidgetGalleryPanel.h"
 
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
 
@@ -311,6 +312,146 @@ namespace World
 			Wui::Label(ctx, { row.X + 8, row.Y + 3 }, "scroll row " + std::to_string(i + 1), theme.Text, 14.0f);
 		}
 		Wui::EndScrollArea(ctx);
+
+		// ---- 界面骨架组件(WuiChrome):工具栏 / 面包屑 / 搜索 / 列表 / 网格 / 树 / 标签栏 / 分隔条 ----
+		section("Chrome: Toolbar / Breadcrumb / Search");
+		{
+			const Wui::WuiRect toolbarRect { x0, y, width * 0.5f, 32.0f };
+			const Wui::WuiRect toolbarContent = Wui::Toolbar(ctx, toolbarRect, theme);
+			for (int i = 0; i < 3; ++i)
+			{
+				const Wui::WuiRect button { toolbarContent.X + i * 32.0f, toolbarContent.Y, 26.0f, 24.0f };
+				if (Wui::ToolbarIconButton(ctx, Wui::HashId("gallery.chrome.tool") + static_cast<Wui::WuiId>(i), button,
+					host.GetIconId(i), { 0, 1, 1, -1 }, i == 0 ? "A" : (i == 1 ? "B" : "C"), theme))
+					m_LastAction = "Chrome toolbar button " + std::to_string(i);
+			}
+			if (Wui::Breadcrumb(ctx, { x0 + width * 0.52f, y, width * 0.44f, 24.0f }, "Game/Assets/Scenes", theme) >= 0)
+				m_LastAction = "Breadcrumb clicked";
+			if (Wui::SearchField(ctx, Wui::HashId("gallery.chrome.search"), { x0, y + 34.0f, 220.0f, 24.0f },
+				m_ChromeSearch, "Search assets...", theme))
+				m_LastAction = "Search submitted: " + m_ChromeSearch;
+			const Wui::SplitterResult split = Wui::Splitter(ctx,
+				{ x0 + 240.0f, y + 34.0f, 4.0f, 24.0f }, true, theme, false);
+			if (split.Hovered)
+				m_LastAction = "Splitter hovered";
+			y += 66.0f;
+		}
+
+		section("Chrome: ListView / GridView / TreeView / TabBar / ContextMenu");
+		{
+			std::vector<Wui::ListViewItem> listItems;
+			for (int i = 0; i < 4; ++i)
+			{
+				Wui::ListViewItem item;
+				item.Id = Wui::HashId("gallery.chrome.list") + static_cast<Wui::WuiId>(i);
+				item.Label = "List row " + std::to_string(i + 1);
+				item.SubLabel = i % 2 ? "File" : "Folder";
+				item.Icon = host.GetIconId(i);
+				item.Uv = { 0, 1, 1, -1 };
+				item.Selected = m_ChromeListIndex == i;
+				listItems.push_back(item);
+			}
+			float listScroll = 0.0f;
+			const Wui::ListViewResult lv = Wui::ListView(ctx, { x0, y, width * 0.3f, 110.0f }, listItems, 24.0f,
+				listScroll, theme);
+			if (lv.Clicked >= 0)
+			{
+				m_ChromeListIndex = lv.Clicked;
+				m_LastAction = "ListView clicked " + std::to_string(lv.Clicked);
+			}
+
+			std::vector<Wui::GridViewItem> gridItems;
+			for (int i = 0; i < 3; ++i)
+			{
+				Wui::GridViewItem item;
+				item.Id = Wui::HashId("gallery.chrome.grid") + static_cast<Wui::WuiId>(i);
+				item.Label = "Cell " + std::to_string(i + 1);
+				item.Icon = host.GetIconId(i);
+				item.Uv = { 0, 1, 1, -1 };
+				item.Selected = m_ChromeGridIndex == i;
+				gridItems.push_back(item);
+			}
+			float gridScroll = 0.0f;
+			const Wui::GridViewResult gv = Wui::GridView(ctx, { x0 + width * 0.32f, y, width * 0.3f, 110.0f },
+				gridItems, 74.0f, 96.0f, gridScroll, theme);
+			if (gv.Clicked >= 0)
+			{
+				m_ChromeGridIndex = gv.Clicked;
+				m_LastAction = "GridView clicked " + std::to_string(gv.Clicked);
+			}
+
+			std::vector<Wui::TreeViewItem> treeItems;
+			for (int i = 0; i < 3; ++i)
+			{
+				Wui::TreeViewItem item;
+				item.Id = Wui::HashId("gallery.chrome.tree") + static_cast<Wui::WuiId>(i);
+				item.Label = i == 0 ? "Root" : ("Child " + std::to_string(i));
+				item.Depth = i == 0 ? 0 : 1;
+				item.HasChildren = i == 0;
+				item.Expanded = m_ChromeTreeExpanded;
+				item.Selected = m_ChromeTreeIndex == i;
+				treeItems.push_back(item);
+			}
+			float treeScroll = 0.0f;
+			const Wui::TreeViewResult tv = Wui::TreeView(ctx, { x0 + width * 0.64f, y, width * 0.34f, 110.0f },
+				treeItems, 22.0f, treeScroll, theme);
+			if (tv.ClickedArrow == 0)
+			{
+				m_ChromeTreeExpanded = !m_ChromeTreeExpanded;
+				m_LastAction = "TreeView toggled";
+			}
+			else if (tv.Clicked >= 0)
+			{
+				m_ChromeTreeIndex = tv.Clicked;
+				m_LastAction = "TreeView clicked " + std::to_string(tv.Clicked);
+			}
+			y += 116.0f;
+
+			std::vector<Wui::DockTab> dockTabs = { { 1, "Tab A", m_ChromeTabIndex == 0 },
+				{ 2, "Tab B", m_ChromeTabIndex == 1 }, { 3, "Tab C", m_ChromeTabIndex == 2 } };
+			const Wui::DockTabBarResult tabBar = Wui::DockTabBar(ctx, { x0, y, width * 0.5f, 24.0f }, dockTabs, theme);
+			if (tabBar.Clicked >= 0)
+			{
+				m_ChromeTabIndex = tabBar.Clicked;
+				m_LastAction = "DockTabBar tab " + std::to_string(tabBar.Clicked);
+			}
+			if (Wui::Button(ctx, Wui::HashId("gallery.chrome.context.open"), { x0 + width * 0.52f, y, 130.0f, 24.0f },
+				"Open context menu", theme))
+			{
+				m_ChromeMenuPos = ctx.Input().MousePos;
+				ctx.OpenPopup(Wui::HashId("gallery.chrome.menu"));
+			}
+			y += 34.0f;
+		}
+
+		// ContextMenu 演示:菜单项点击写入操作日志。
+		{
+			Wui::WuiRect menuPanel;
+			const Wui::WuiId menuId = Wui::HashId("gallery.chrome.menu");
+			if (Wui::BeginContextMenu(ctx, menuId, m_ChromeMenuPos, 170.0f, 3, &menuPanel, theme))
+			{
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("gallery.chrome.menu.a"),
+					{ menuPanel.X + 4, menuPanel.Y + 4, menuPanel.W - 8, 22 }, "Action A", theme))
+				{
+					m_LastAction = "ContextMenu: Action A";
+					ctx.CloseAllPopups();
+				}
+				if (Wui::ContextMenuToggleItem(ctx, Wui::HashId("gallery.chrome.menu.toggle"),
+					{ menuPanel.X + 4, menuPanel.Y + 26, menuPanel.W - 8, 22 }, "Toggle item", m_ChromeMenuChecked, theme))
+				{
+					m_ChromeMenuChecked = !m_ChromeMenuChecked;
+					m_LastAction = "ContextMenu: toggle";
+				}
+				Wui::ContextMenuSeparator(ctx, { menuPanel.X + 4, menuPanel.Y + 48, menuPanel.W - 8, 4 }, theme);
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("gallery.chrome.menu.b"),
+					{ menuPanel.X + 4, menuPanel.Y + 54, menuPanel.W - 8, 22 }, "Action B", theme))
+				{
+					m_LastAction = "ContextMenu: Action B";
+					ctx.CloseAllPopups();
+				}
+				Wui::EndContextMenu(ctx, menuId, menuPanel, theme);
+			}
+		}
 
 		Wui::EndScrollArea(ctx);
 
