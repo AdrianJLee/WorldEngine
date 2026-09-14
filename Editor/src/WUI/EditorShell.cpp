@@ -1098,38 +1098,17 @@ namespace World
 		if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) == m_AttachedPanels.end())
 			m_AttachedPanels.push_back(panel);
 		m_ActiveWindowTag = panel;
-		WLD_CORE_INFO("Independent window attached as switch tab: {0}", panel);
+		WLD_CORE_INFO("Independent window attached as switch tab: {0} (still in dock tree: {1})",
+			panel, m_Layout.Contains(panel) ? "yes" : "no");
 
-		const Wui::PanelId slot = "attach_slot";
-		const Wui::PanelId anchor = m_Layout.Contains(slot) ? slot : m_Layout.FirstPanel();
-		bool placed = false;
-		if (anchor.empty())
-		{
-			// 停靠树已空(所有面板都在独立窗口):整窗面板作为根标签组恢复,
-			// 保留 float_memory(跨会话位置记忆)。
-			std::vector<Wui::DockFloat> memory = std::move(m_Layout.FloatMemory);
-			m_Layout = Wui::DockLayout {};
-			m_Layout.FloatMemory = std::move(memory);
-			m_Layout.Root.Panels = panels;
-			placed = !panels.empty();
-		}
-		else
-		{
-			for (const std::string& id : panels)
-				placed = m_Layout.DockFloating(id, anchor, Wui::DropZone::Center) || placed;
-		}
-		if (placed)
-		{
-			m_AttachSlotHighlight = false;
-			// 挂靠后必须清掉拖拽状态:否则同一帧/下一帧的拖拽状态机会把
-			// 刚挂靠回停靠树的面板再次"拖出"成独立窗口。
-			m_DragPanel.clear();
-			m_MovingFloat.clear();
-			m_TabDragPanel.clear();
-			m_LastDragPos = { 0, 0 };
-			m_AttachCooldownFrames = 45;
-			WLD_CORE_INFO("Independent window attached to slot: {0} ({1} panels)", panel, panels.size());
-		}
+		// 不再把面板并入停靠树(那是旧"挂靠"语义);附加只建立标签切换关系。
+		m_AttachSlotHighlight = false;
+		m_DragPanel.clear();
+		m_MovingFloat.clear();
+		m_TabDragPanel.clear();
+		m_LastDragPos = { 0, 0 };
+		m_AttachCooldownFrames = 45;
+		WLD_CORE_INFO("Independent window attached to slot: {0} ({1} panels)", panel, panels.size());
 	}
 
 	// 隐藏单个面板(标签栏 x / Window 菜单):从所属窗口摘除,窗口为空则销毁。
