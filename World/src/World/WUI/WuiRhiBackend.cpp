@@ -513,7 +513,16 @@ namespace World::Wui
 	{
 		Rhi::Handle<Rhi::Texture> texture = WuiTextureRegistry::Get().Resolve(command.Image);
 		if (!texture)
+		{
+			static int s_MissingLogged = 0;
+			if (s_MissingLogged < 12)
+			{
+				WLD_CORE_WARN("[wui-img] unresolved image id={0} rect=({1},{2},{3},{4})",
+					command.Image, command.Rect.X, command.Rect.Y, command.Rect.W, command.Rect.H);
+				++s_MissingLogged;
+			}
 			return;
+		}
 		SetActiveTexture(texture);
 		PushQuad(command.Rect, command.Color, command.Uv);
 	}

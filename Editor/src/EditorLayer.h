@@ -53,6 +53,8 @@ namespace World
 		Entity PickEntityAt(glm::vec2 viewportLocal) { return GetEntityAtMousePosition(viewportLocal); }
 		Ref<Texture2D> GetIcon(int index) const;
 		uint64_t GetIconId(int index) const;
+		// 旧式纹理纪元:窗口/上下文重建后自增,面板据此重载自己的 GL 图标。
+		uint32_t TextureEpoch() const { return m_TextureEpoch; }
 		uint64_t GetSceneTextureId() const { return m_SceneTextureId; }
 		// 视口状态(由 WUI 视口面板回填)
 		void SetViewportState(bool focused, bool hovered, glm::vec2 size, glm::vec2 bounds[2]);
@@ -92,6 +94,8 @@ namespace World
 		void RequestAction(std::function<void()> action);
 		void ProcessPendingRendererChange();
 		void RegisterUiTextures();
+		// 重载工具栏/AI 图标(旧式 GL 纹理):窗口或上下文重建后必须重新创建。
+		void LoadIconTextures();
 		void ShowError(const std::string& message);
 		void StartCooking(const std::string& target);
 	private:
@@ -150,6 +154,7 @@ namespace World
 		std::string m_RendererChangeName;
 		uint64_t m_SceneTextureId = 0;
 		uint64_t m_IconIds[8] = {};
+		uint32_t m_TextureEpoch = 0;
 		uint32_t m_UiTextureGeneration = 0;
 		// 视口目标延迟重建:拖拽分隔条时尺寸每帧变化,逐帧销毁/重建渲染目标
 		// 会在 GPU 仍采样旧纹理时释放资源(Vulkan 下会卡死)。尺寸稳定后再重建。

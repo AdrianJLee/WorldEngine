@@ -102,6 +102,7 @@ namespace World
 		uint64_t m_DirIconId = 0;
 		uint64_t m_FileIconId = 0;
 		uint32_t m_IconGeneration = ~0u;
+		uint32_t m_TextureEpoch = ~0u;
 		std::shared_ptr<Wui::WuiBox> m_Toolbar;
 		std::shared_ptr<Wui::WuiBox> m_Breadcrumbs;
 		std::shared_ptr<Wui::WuiTextField> m_SearchField;

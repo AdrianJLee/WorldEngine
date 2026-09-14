@@ -48,6 +48,21 @@ namespace World
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 		m_SceneRenderer->Init();
 
+		LoadIconTextures();
+		RegisterUiTextures();
+
+		// 诊断/自动化:WLD_START_SCENE=<路径> 时启动即打开该场景。
+		if (const char* startScene = std::getenv("WLD_START_SCENE"))
+			DoOpenScene(std::filesystem::path(startScene));
+		else
+			NewScene();
+
+		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
+	}
+
+	// 图标是旧式(GL)纹理:窗口/上下文重建后必须重新加载,否则渲染出的图标会错乱。
+	void EditorLayer::LoadIconTextures()
+	{
 		m_IconPlay = Texture2D::Create("Resource/Icons/Icon_Play.png");
 
 		m_IconStop = Texture2D::Create("Resource/Icons/Icon_Stop.png");
@@ -59,16 +74,6 @@ namespace World
 		m_IconSimulateStop = Texture2D::Create("Resource/Icons/Icon_SimulateStop.png");
 		m_IconSimulatePause = Texture2D::Create("Resource/Icons/Icon_SimulatePause.png");
 		m_IconSimulateContinue = Texture2D::Create("Resource/Icons/Icon_SimulateContinue.png");
-
-		RegisterUiTextures();
-
-		// 诊断/自动化:WLD_START_SCENE=<路径> 时启动即打开该场景。
-		if (const char* startScene = std::getenv("WLD_START_SCENE"))
-			DoOpenScene(std::filesystem::path(startScene));
-		else
-			NewScene();
-
-		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
 	}
 
 	void EditorLayer::OnDetach()
@@ -385,6 +390,9 @@ namespace World
 		Application::Get().RecreateWindow();
 		Renderer::Init(m_RendererChangeName);
 		m_Shell.RecreateIndependentWindows();
+		// 窗口重建 = 新的 GL 上下文:重载旧式纹理并让面板(内容浏览器等)也重载。
+		++m_TextureEpoch;
+		LoadIconTextures();
 		if (m_SceneRenderer)
 			m_SceneRenderer->Init();
 		WLD_CORE_INFO("[switch] scene renderer rebuilt for {0}", Renderer::GetBackendName());
@@ -666,3 +674,4 @@ namespace World
 
 
 }
+

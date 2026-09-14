@@ -516,6 +516,15 @@ namespace World
 	{
 		m_Ctx = &ctx;
 		const Wui::WuiTheme& theme = host.Theme();
+		// 窗口/GL 上下文重建后旧图标纹理失效:丢弃缓存,重新加载并注册。
+		if (m_TextureEpoch != host.TextureEpoch())
+		{
+			m_TextureEpoch = host.TextureEpoch();
+			m_DirIcon = nullptr;
+			m_FileIcon = nullptr;
+			m_DirIconId = 0;
+			m_FileIconId = 0;
+		}
 		if (!m_DirIcon)
 			m_DirIcon = Texture2D::Create("Resource/Icons/ContentBrowser/DirectoryIcon.png");
 		if (!m_FileIcon)
@@ -1015,3 +1024,4 @@ namespace World
 		}
 	}
 }
+

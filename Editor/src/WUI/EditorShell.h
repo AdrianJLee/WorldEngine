@@ -60,6 +60,7 @@ namespace World
 		void TogglePause() override;
 		Ref<Texture2D> GetIcon(int index) const override;
 		uint64_t GetIconId(int index) const override;
+		uint32_t TextureEpoch() const override;
 		uint64_t GetSceneTextureId() const override;
 		// ---- 独立窗口(与停靠面板不同的组件)----
 		// 计数/索引均按"窗口"而不是"面板":一个窗口可承载多个面板(标签栏)。

@@ -178,6 +178,11 @@ namespace World
 		return m_Editor.GetIconId(index);
 	}
 
+	uint32_t EditorShell::TextureEpoch() const
+	{
+		return m_Editor.TextureEpoch();
+	}
+
 	uint64_t EditorShell::GetSceneTextureId() const
 	{
 		return m_Editor.GetSceneTextureId();
@@ -1460,3 +1465,4 @@ namespace World
 		}
 	}
 }
+
