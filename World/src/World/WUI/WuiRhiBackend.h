@@ -89,12 +89,18 @@ namespace World::Wui
 		double m_LastTime = -1;
 		void* m_DeviceKey = nullptr;
 
-		Rhi::Handle<Rhi::CommandBuffer> m_Cmd;
+		// 帧深 2:命令缓冲/UBO/全局描述符集/纹理描述符集/顶点索引缓冲都按帧槽位环形。
+		static constexpr uint32_t kFramesInFlight = 2;
+		uint32_t FrameSlot() const;
+		uint64_t SlotVertexBase() const;
+		uint64_t SlotIndexBase() const;
+
+		Rhi::Handle<Rhi::CommandBuffer> m_Cmds[kFramesInFlight];
 		Rhi::Handle<Rhi::Shader> m_Shader;
 		Rhi::Handle<Rhi::Pipeline> m_Pipeline;
-		Rhi::Handle<Rhi::Buffer> m_Vb, m_Ib, m_Ubo;
+		Rhi::Handle<Rhi::Buffer> m_Vbs[kFramesInFlight], m_Ibs[kFramesInFlight], m_Ubos[kFramesInFlight];
 		Rhi::Handle<Rhi::DescriptorSetLayout> m_TextureLayout;
-		Rhi::Handle<Rhi::DescriptorSet> m_GlobalSet;
+		Rhi::Handle<Rhi::DescriptorSet> m_GlobalSets[kFramesInFlight];
 		Rhi::Handle<Rhi::Sampler> m_Sampler;
 		Rhi::Handle<Rhi::Texture> m_WhiteTexture;
 		Rhi::Handle<Rhi::RenderPass> m_UiPass;
@@ -118,7 +124,7 @@ namespace World::Wui
 		uint64_t m_FrameIndexBytes = 0;
 		// 每个纹理一份描述符集:一个描述符集在一帧内被多次改写时,GPU 执行
 		// 整条命令缓冲只能看到最后一次写入,导致除最后一张外的贴图全部采样错误。
-		std::unordered_map<const void*, Rhi::Handle<Rhi::DescriptorSet>> m_TextureSets;
+		std::unordered_map<const void*, Rhi::Handle<Rhi::DescriptorSet>> m_TextureSets[kFramesInFlight];
 		uint32_t m_TextureGeneration = 0;
 	};
 }

@@ -44,14 +44,18 @@ namespace World
 
 	private:
 		Rhi::Handle<Rhi::Device> m_Device;
-		Rhi::Handle<Rhi::CommandBuffer> m_CommandBuffer;
+		// 帧深 2:命令缓冲/相机 UBO/描述符集按帧槽位环形,允许 CPU 录制与 GPU 执行重叠。
+		static constexpr uint32_t kFramesInFlight = 2;
+		Rhi::Handle<Rhi::CommandBuffer> m_CommandBuffers[kFramesInFlight];
 		Rhi::Handle<Rhi::RenderPass> m_RenderPass;
 		Rhi::Handle<Rhi::Framebuffer> m_Framebuffer;
 		Rhi::Handle<Rhi::Texture> m_ColorTexture;
 		Rhi::Handle<Rhi::Texture> m_EntityTexture;
 		Rhi::Handle<Rhi::Texture> m_DepthTexture;
-		Rhi::Handle<Rhi::Buffer> m_CameraBuffer;
-		Rhi::Handle<Rhi::DescriptorSet> m_GlobalDescriptorSet;
+		Rhi::Handle<Rhi::Buffer> m_CameraBuffers[kFramesInFlight];
+		Rhi::Handle<Rhi::DescriptorSet> m_GlobalDescriptorSets[kFramesInFlight];
+
+		uint32_t FrameSlot() const;
 
 		uint32_t m_Width = 1280;
 		uint32_t m_Height = 720;

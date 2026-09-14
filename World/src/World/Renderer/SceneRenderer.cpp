@@ -9,6 +9,11 @@
 
 namespace World
 {
+	uint32_t SceneRenderer::FrameSlot() const
+	{
+		return static_cast<uint32_t>(Renderer::FrameSlot());
+	}
+
 	namespace
 	{
 		// 旧 Framebuffer 接口适配器:编辑器显示/拾取仍走 GL id,迁到 RHI 后移除。
@@ -55,7 +60,8 @@ namespace World
 		if (m_Device)
 			Shutdown();
 		m_Device = Renderer::GetDevice();
-		m_CommandBuffer = m_Device->CreateCommandBuffer("SceneRenderer");
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+			m_CommandBuffers[slot] = m_Device->CreateCommandBuffer("SceneRenderer");
 
 		Rhi::RenderPassDesc passDesc;
 		Rhi::RenderPassAttachment color;
@@ -101,15 +107,17 @@ namespace World
 		cameraDesc.Size = sizeof(glm::mat4);
 		cameraDesc.Usage = Rhi::BufferUsageUniform;
 		cameraDesc.Memory = Rhi::MemoryHint::HostVisible;
-		m_CameraBuffer = m_Device->CreateBuffer(cameraDesc);
-
-		m_GlobalDescriptorSet = m_Device->CreateDescriptorSet(
-			Renderer::GetGlobalDescriptorSetLayout());
-		Rhi::DescriptorWrite cameraWrite;
-		cameraWrite.Binding = 0;
-		cameraWrite.Type = Rhi::DescriptorType::UniformBuffer;
-		cameraWrite.Buffer = m_CameraBuffer;
-		m_GlobalDescriptorSet->Update({ cameraWrite });
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_CameraBuffers[slot] = m_Device->CreateBuffer(cameraDesc);
+			m_GlobalDescriptorSets[slot] = m_Device->CreateDescriptorSet(
+				Renderer::GetGlobalDescriptorSetLayout());
+			Rhi::DescriptorWrite cameraWrite;
+			cameraWrite.Binding = 0;
+			cameraWrite.Type = Rhi::DescriptorType::UniformBuffer;
+			cameraWrite.Buffer = m_CameraBuffers[slot];
+			m_GlobalDescriptorSets[slot]->Update({ cameraWrite });
+		}
 
 		m_FramebufferView = CreateRef<RhiFramebufferAdapter>();
 		static_cast<RhiFramebufferAdapter*>(m_FramebufferView.get())->Owner = this;
@@ -126,9 +134,12 @@ namespace World
 		m_EntityTexture = nullptr;
 		m_DepthTexture = nullptr;
 		m_RenderPass = nullptr;
-		m_CommandBuffer = nullptr;
-		m_CameraBuffer = nullptr;
-		m_GlobalDescriptorSet = nullptr;
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_CommandBuffers[slot] = nullptr;
+			m_CameraBuffers[slot] = nullptr;
+			m_GlobalDescriptorSets[slot] = nullptr;
+		}
 		m_FramebufferView = nullptr;
 		m_Device = nullptr;
 	}
@@ -210,7 +221,8 @@ namespace World
 			viewProjection[2][1] = -viewProjection[2][1];
 			viewProjection[3][1] = -viewProjection[3][1];
 		}
-		m_CameraBuffer->SetData(&viewProjection, sizeof(glm::mat4));
+		const uint32_t slot = FrameSlot();
+		m_CameraBuffers[slot]->SetData(&viewProjection, sizeof(glm::mat4));
 
 		std::vector<Rhi::ClearValue> clears(3);
 		clears[0].Color = { 0.1f, 0.1f, 0.1f, 1.0f };
@@ -219,13 +231,13 @@ namespace World
 		clears[2].IsDepthStencil = true;
 		clears[2].DepthStencil.Depth = 1.0f;
 
-		m_CommandBuffer->Begin();
-		m_CommandBuffer->BeginRenderPass(m_RenderPass, m_Framebuffer, clears);
-		m_CommandBuffer->SetViewport({ 0, 0, static_cast<float>(m_Width), static_cast<float>(m_Height) });
-		m_CommandBuffer->BindDescriptorSet(m_GlobalDescriptorSet);
+		m_CommandBuffers[slot]->Begin();
+		m_CommandBuffers[slot]->BeginRenderPass(m_RenderPass, m_Framebuffer, clears);
+		m_CommandBuffers[slot]->SetViewport({ 0, 0, static_cast<float>(m_Width), static_cast<float>(m_Height) });
+		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot]);
 
 		Renderer2D::StartBatch();
-		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffer);
+		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffers[slot]);
 
 		if (selectedEntity)
 		{
@@ -236,7 +248,7 @@ namespace World
 		RenderGeometry(camera, cameraTransform);
 
 		Renderer2D::EndScene();
-		m_CommandBuffer->EndRenderPass();
+		m_CommandBuffers[slot]->EndRenderPass();
 		// 场景颜色附件在命令缓冲内转为可采样布局:提交方无需再 WaitIdle 做外部转换,
 		// 同一队列上后续提交(UI)按顺序即可安全采样。
 		{
@@ -244,10 +256,10 @@ namespace World
 			barrier.Texture = m_ColorTexture;
 			barrier.Before = Rhi::ResourceState::ColorAttachment;
 			barrier.After = Rhi::ResourceState::ShaderReadOnly;
-			m_CommandBuffer->PipelineBarrier({ barrier });
+			m_CommandBuffers[slot]->PipelineBarrier({ barrier });
 		}
-		m_CommandBuffer->End();
-		Renderer::SubmitScene(m_CommandBuffer, m_ColorTexture);
+		m_CommandBuffers[slot]->End();
+		Renderer::SubmitScene(m_CommandBuffers[slot], m_ColorTexture);
 	}
 
 	void SceneRenderer::RenderGeometry(const Camera&, const glm::mat4&)
@@ -298,5 +310,6 @@ namespace World
 		Renderer::CaptureFramebuffer(path, Rhi::FramebufferId(m_Framebuffer), m_Width, m_Height);
 	}
 }
+
 
 

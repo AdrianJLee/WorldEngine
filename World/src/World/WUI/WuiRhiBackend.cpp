@@ -106,14 +106,18 @@ namespace World::Wui
 
 	void WuiRhiBackend::ReleaseResources()
 	{
-		m_Cmd = nullptr;
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_Cmds[slot] = nullptr;
+			m_Vbs[slot] = nullptr;
+			m_Ibs[slot] = nullptr;
+			m_Ubos[slot] = nullptr;
+			m_GlobalSets[slot] = nullptr;
+			m_TextureSets[slot].clear();
+		}
 		m_Shader = nullptr;
 		m_Pipeline = nullptr;
-		m_Vb = nullptr;
-		m_Ib = nullptr;
-		m_Ubo = nullptr;
 		m_TextureLayout = nullptr;
-		m_GlobalSet = nullptr;
 		m_Sampler = nullptr;
 		m_WhiteTexture = nullptr;
 		m_UiPass = nullptr;
@@ -123,8 +127,6 @@ namespace World::Wui
 		m_ActiveTexture = nullptr;
 		for (FontFace& face : m_Faces)
 			face.AtlasTexture = nullptr;
-		// 每纹理描述符集也是设备对象:不清空会在旧设备销毁后被析构(驱动层崩溃)。
-		m_TextureSets.clear();
 		++m_TextureGeneration;
 		m_TextureChanged = true;
 		m_DeviceKey = nullptr;
@@ -143,7 +145,8 @@ namespace World::Wui
 		m_DeviceKey = device.get();
 		m_IsVulkan = Renderer::GetBackendName() == "vulkan";
 
-		m_Cmd = device->CreateCommandBuffer("WuiBackend");
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+			m_Cmds[slot] = device->CreateCommandBuffer("WuiBackend");
 
 		Rhi::ShaderDesc shaderDesc;
 		shaderDesc.DebugName = "WUI";
@@ -159,7 +162,8 @@ namespace World::Wui
 		textureLayoutDesc.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
 		m_TextureLayout = device->CreateDescriptorSetLayout(textureLayoutDesc);
-		m_GlobalSet = device->CreateDescriptorSet(Renderer::GetGlobalDescriptorSetLayout());
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+			m_GlobalSets[slot] = device->CreateDescriptorSet(Renderer::GetGlobalDescriptorSetLayout());
 
 		Rhi::SamplerDesc samplerDesc;
 		samplerDesc.MinFilter = Rhi::Filter::Linear;
@@ -209,22 +213,25 @@ namespace World::Wui
 		vertexDesc.Size = static_cast<uint64_t>(MaxQuads) * 4 * sizeof(Vertex);
 		vertexDesc.Usage = Rhi::BufferUsageVertex;
 		vertexDesc.Memory = Rhi::MemoryHint::HostVisible;
-		m_Vb = device->CreateBuffer(vertexDesc);
 		Rhi::BufferDesc indexDesc;
 		indexDesc.Size = static_cast<uint64_t>(MaxQuads) * 6 * sizeof(uint32_t);
 		indexDesc.Usage = Rhi::BufferUsageIndex;
 		indexDesc.Memory = Rhi::MemoryHint::HostVisible;
-		m_Ib = device->CreateBuffer(indexDesc);
 		Rhi::BufferDesc uboDesc;
 		uboDesc.Size = sizeof(glm::mat4);
 		uboDesc.Usage = Rhi::BufferUsageUniform;
 		uboDesc.Memory = Rhi::MemoryHint::HostVisible;
-		m_Ubo = device->CreateBuffer(uboDesc);
-		Rhi::DescriptorWrite globalWrite;
-		globalWrite.Binding = 0;
-		globalWrite.Type = Rhi::DescriptorType::UniformBuffer;
-		globalWrite.Buffer = m_Ubo;
-		m_GlobalSet->Update({ globalWrite });
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_Vbs[slot] = device->CreateBuffer(vertexDesc);
+			m_Ibs[slot] = device->CreateBuffer(indexDesc);
+			m_Ubos[slot] = device->CreateBuffer(uboDesc);
+			Rhi::DescriptorWrite globalWrite;
+			globalWrite.Binding = 0;
+			globalWrite.Type = Rhi::DescriptorType::UniformBuffer;
+			globalWrite.Buffer = m_Ubos[slot];
+			m_GlobalSets[slot]->Update({ globalWrite });
+		}
 
 		Rhi::TextureDesc whiteDesc;
 		whiteDesc.Type = Rhi::TextureType::Texture2D;
@@ -380,9 +387,11 @@ namespace World::Wui
 
 	Rhi::Handle<Rhi::DescriptorSet> WuiRhiBackend::TextureSetFor(const Rhi::Handle<Rhi::Texture>& texture)
 	{
+		const uint32_t slot = FrameSlot();
+		auto& textureSets = m_TextureSets[slot];
 		const void* key = texture.get();
-		auto it = m_TextureSets.find(key);
-		if (it != m_TextureSets.end())
+		auto it = textureSets.find(key);
+		if (it != textureSets.end())
 			return it->second;
 		Rhi::Handle<Rhi::DescriptorSet> set = Renderer::GetDevice()->CreateDescriptorSet(m_TextureLayout);
 		if (set)
@@ -394,13 +403,29 @@ namespace World::Wui
 			write.Sampler = m_Sampler;
 			set->Update({ write });
 		}
-		m_TextureSets.emplace(key, set);
+		textureSets.emplace(key, set);
 		return set;
+	}
+
+	uint32_t WuiRhiBackend::FrameSlot() const
+	{
+		return static_cast<uint32_t>(Renderer::FrameSlot()) % kFramesInFlight;
+	}
+
+	uint64_t WuiRhiBackend::SlotVertexBase() const
+	{
+		return static_cast<uint64_t>(FrameSlot()) * MaxQuads * 4 * sizeof(Vertex);
+	}
+
+	uint64_t WuiRhiBackend::SlotIndexBase() const
+	{
+		return static_cast<uint64_t>(FrameSlot()) * MaxQuads * 6 * sizeof(uint32_t);
 	}
 
 	void WuiRhiBackend::Flush()
 	{
-		if (m_Vertices.empty() || !m_Cmd)
+		const uint32_t slot = FrameSlot();
+		if (m_Vertices.empty() || !m_Cmds[slot])
 			return;
 		if (m_TextureChanged)
 			m_TextureChanged = false;
@@ -408,31 +433,34 @@ namespace World::Wui
 		// 复用同一段内存会让所有绘制都读到最后一个批次的数据(界面成片缺失)。
 		const uint64_t vertexBytes = m_Vertices.size() * sizeof(Vertex);
 		const uint64_t indexBytes = m_Indices.size() * sizeof(uint32_t);
-		if (m_FrameVertexBytes + vertexBytes > MaxQuads * 4 * sizeof(Vertex) ||
-			m_FrameIndexBytes + indexBytes > static_cast<uint64_t>(MaxQuads) * 6 * sizeof(uint32_t))
+		const uint64_t vertexBase = SlotVertexBase();
+		const uint64_t indexBase = SlotIndexBase();
+		if (m_FrameVertexBytes + vertexBytes > vertexBase + MaxQuads * 4 * sizeof(Vertex) ||
+			m_FrameIndexBytes + indexBytes > indexBase + static_cast<uint64_t>(MaxQuads) * 6 * sizeof(uint32_t))
 		{
-			m_FrameVertexBytes = 0;
-			m_FrameIndexBytes = 0;
+			m_FrameVertexBytes = vertexBase;
+			m_FrameIndexBytes = indexBase;
 		}
 		const uint64_t vertexOffset = m_FrameVertexBytes;
 		const uint64_t indexOffset = m_FrameIndexBytes;
 		m_FrameVertexBytes += vertexBytes;
 		m_FrameIndexBytes += indexBytes;
-		m_Vb->SetData(m_Vertices.data(), vertexBytes, vertexOffset);
-		m_Ib->SetData(m_Indices.data(), indexBytes, indexOffset);
-		m_Cmd->BindPipeline(m_Pipeline);
-		m_Cmd->BindDescriptorSet(m_GlobalSet, 0);
-		m_Cmd->BindDescriptorSet(TextureSetFor(m_ActiveTexture), 1);
-		m_Cmd->BindVertexBuffer(0, m_Vb, vertexOffset);
-		m_Cmd->BindIndexBuffer(m_Ib, indexOffset);
-		m_Cmd->DrawIndexed(static_cast<uint32_t>(m_Indices.size()));
+		m_Vbs[slot]->SetData(m_Vertices.data(), vertexBytes, vertexOffset);
+		m_Ibs[slot]->SetData(m_Indices.data(), indexBytes, indexOffset);
+		m_Cmds[slot]->BindPipeline(m_Pipeline);
+		m_Cmds[slot]->BindDescriptorSet(m_GlobalSets[slot], 0);
+		m_Cmds[slot]->BindDescriptorSet(TextureSetFor(m_ActiveTexture), 1);
+		m_Cmds[slot]->BindVertexBuffer(0, m_Vbs[slot], vertexOffset);
+		m_Cmds[slot]->BindIndexBuffer(m_Ibs[slot], indexOffset);
+		m_Cmds[slot]->DrawIndexed(static_cast<uint32_t>(m_Indices.size()));
 		m_Vertices.clear();
 		m_Indices.clear();
 	}
 
 	void WuiRhiBackend::ApplyScissor(const WuiRect& rect)
 	{
-		if (!m_Cmd)
+		const uint32_t slot = FrameSlot();
+		if (!m_Cmds[slot])
 			return;
 		Rhi::Scissor scissor;
 		scissor.X = std::max(0, static_cast<int32_t>(rect.X));
@@ -448,7 +476,7 @@ namespace World::Wui
 			scissor.Y = std::max(0, static_cast<int32_t>(m_Viewport.y) - top - height);
 		}
 		scissor.Height = static_cast<uint32_t>(std::max(0.0f, rect.H));
-		m_Cmd->SetScissor(scissor);
+			m_Cmds[slot]->SetScissor(scissor);
 	}
 
 	void WuiRhiBackend::DrawText(const WuiDrawCommand& command)
@@ -580,11 +608,13 @@ namespace World::Wui
 		// 注册表重建后,按纹理缓存的描述符集会指向已销毁的贴图,需要一并失效。
 		if (WuiTextureRegistry::Get().Generation() != m_TextureGeneration)
 		{
-			m_TextureSets.clear();
+			for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+				m_TextureSets[slot].clear();
 			m_TextureGeneration = WuiTextureRegistry::Get().Generation();
 		}
 		EnsureResources();
-		if (!m_Cmd || !m_Pipeline)
+		const uint32_t slot = FrameSlot();
+		if (!m_Cmds[slot] || !m_Pipeline)
 			return;
 
 		Rhi::Handle<Rhi::RenderPass> pass;
@@ -658,29 +688,29 @@ namespace World::Wui
 		m_Projection = m_IsVulkan
 			? glm::ortho(0.0f, m_Viewport.x, 0.0f, m_Viewport.y, -1.0f, 1.0f)
 			: glm::ortho(0.0f, m_Viewport.x, m_Viewport.y, 0.0f, -1.0f, 1.0f);
-		m_Ubo->SetData(&m_Projection, sizeof(glm::mat4));
+		m_Ubos[slot]->SetData(&m_Projection, sizeof(glm::mat4));
 
 		m_Vertices.clear();
 		m_Indices.clear();
 		m_ClipStack.clear();
 		m_CurrentClip = { 0, 0, m_Viewport.x, m_Viewport.y };
-		m_FrameVertexBytes = 0;
-		m_FrameIndexBytes = 0;
+		m_FrameVertexBytes = SlotVertexBase();
+		m_FrameIndexBytes = SlotIndexBase();
 		m_ActiveTexture = m_WhiteTexture;
 		m_TextureChanged = true;
 
-		m_Cmd->Begin();
+		m_Cmds[slot]->Begin();
 		Rhi::ClearValue clear;
 		clear.Color = { 0, 0, 0, 0 };
-		m_Cmd->BeginRenderPass(pass, framebuffer, { clear });
-		m_Cmd->SetViewport({ 0, 0, m_Viewport.x, m_Viewport.y, 0.0f, 1.0f });
+		m_Cmds[slot]->BeginRenderPass(pass, framebuffer, { clear });
+		m_Cmds[slot]->SetViewport({ 0, 0, m_Viewport.x, m_Viewport.y, 0.0f, 1.0f });
 		ApplyScissor(m_CurrentClip);
 		DrawList(commands);
 		DrawList(overlayCommands);
 		Flush();
-		m_Cmd->EndRenderPass();
-		m_Cmd->End();
-		Renderer::SubmitUi(m_Cmd);
+		m_Cmds[slot]->EndRenderPass();
+		m_Cmds[slot]->End();
+		Renderer::SubmitUi(m_Cmds[slot]);
 
 		if (!m_IsVulkan)
 		{
@@ -724,3 +754,6 @@ namespace World::Wui
 		}
 	}
 }
+
+
+
