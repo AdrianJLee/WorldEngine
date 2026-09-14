@@ -151,7 +151,28 @@ set_tests_properties(World.VulkanDevice PROPERTIES
     TIMEOUT 120
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests)
+# 着色器管线回归:烘焙产物、内容寻址缓存、打包读回与运行时解析器优先级。
+add_executable(WorldShaderPipelineTests ShaderPipelineTests.cpp)
+target_link_libraries(WorldShaderPipelineTests PRIVATE World)
+target_compile_features(WorldShaderPipelineTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldShaderPipelineTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldShaderPipelineTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldShaderPipelineTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.ShaderPipeline COMMAND WorldShaderPipelineTests)
+set_tests_properties(World.ShaderPipeline PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
+
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests)
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

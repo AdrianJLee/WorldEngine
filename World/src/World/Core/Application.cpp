@@ -3,6 +3,7 @@
 
 #include "World/Core/Log.h"
 #include "World/Core/Timestep.h"
+#include "World/Core/Asset/ProjectMount.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Memory/MemoryTracker.h"
@@ -33,6 +34,9 @@ namespace World
 		m_Window = std::unique_ptr<Window>(Window::Create(WindowProps(name)));
 
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(Application::OnEvent));
+
+		// 内容挂载必须早于渲染器初始化:发行形态下管线创建即解析着色器烘焙产物。
+		Asset::MountProjectContent(m_Context);
 
 		Renderer::Init();
 

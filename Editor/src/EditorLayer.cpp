@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "EditorCooker.h"
 #include "World/Core/Asset/BuiltinImporters.h"
 #include "World/Core/Asset/CookPipeline.h"
 #include "World/Core/Asset/ProjectManifest.h"
@@ -620,94 +621,28 @@ namespace World
 		{
 			m_CookingThread = std::thread([target, this]()
 			{
-				try
+				namespace fs = std::filesystem;
+				Editor::CookOptions options;
+				options.PublishDir = target;
+
+				// 当前打开场景若在内容根内,覆盖清单里的启动场景。
+				if (m_Document.HasPath())
 				{
-					namespace fs = std::filesystem;
-					fs::path publishDir(target);
-					fs::create_directories(publishDir);
-
-					// 1. 项目清单(单一事实源)。
-					const fs::path projectManifestPath =
-						std::string(WLD_GAME_DIR) + "project.we.yaml";
-					World::Asset::ProjectManifest manifest;
 					std::string manifestError;
-					if (!World::Asset::ProjectManifest::Load(projectManifestPath, &manifest, &manifestError))
-						throw std::runtime_error("Project manifest load failed: " + manifestError);
-					if (manifest.Packages.empty())
-						throw std::runtime_error("Project manifest declares no packages");
-
-					// 2. 当前打开场景若在内容根内,覆盖启动场景。
-					if (m_Document.HasPath())
+					World::Asset::ProjectManifest manifest;
+					const fs::path projectManifestPath = std::string(WLD_GAME_DIR) + "project.we.yaml";
+					if (World::Asset::ProjectManifest::Load(projectManifestPath, &manifest, &manifestError))
 					{
 						const fs::path contentRoot = manifest.ResolveContentRoot(projectManifestPath);
 						const fs::path relative = fs::relative(m_Document.GetPath(), contentRoot);
 						if (!relative.empty() && relative.generic_string().find("..") == std::string::npos)
-							manifest.StartScene = relative.generic_string();
+							options.StartSceneOverride = relative;
 					}
-
-					// 3. 增量烘焙(构建期缓存目录,仅此一处使用构建路径)。
-					const fs::path cookedDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "cooked");
-					World::Asset::CookPipeline pipeline(World::Asset::DefaultImporters());
-					World::Asset::CookSummary summary;
-					const std::vector<World::Asset::CookEntryResult> results =
-						pipeline.Cook(manifest, projectManifestPath, cookedDir, false, &summary);
-					for (const World::Asset::CookEntryResult& result : results)
-						if (result.Failed)
-							WLD_CORE_ERROR("Cook failed: {0}: {1}", result.Path, result.Error);
-					WLD_CORE_INFO("Cooked {0} assets ({1} changed, {2} skipped, {3} failed)",
-						summary.Total, summary.Changed, summary.Skipped, summary.Failed);
-					if (summary.Failed)
-						throw std::runtime_error("Asset cooking failed");
-
-					// 4. 打包 cooked 产物为发行包。
-					const fs::path outPakFile = publishDir / manifest.Packages[0];
-					fs::create_directories(outPakFile.parent_path());
-					std::error_code pakEc;
-					if (!World::Vfs::PackageProvider::BuildFromDirectory(cookedDir / "cooked", outPakFile, pakEc))
-						throw std::runtime_error("Package build failed: " +
-							(pakEc ? pakEc.message() : outPakFile.string()));
-
-					// 5. 拷贝运行时:Runtime.exe + 单份 WorldRuntime.dll + bin/Game.dll。
-					fs::path srcRuntimeOutputDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "Runtime/" + WLD_BUILD_TYPE);
-					fs::path srcRuntimeExe = srcRuntimeOutputDir / "Runtime.exe";
-					if (!fs::is_regular_file(srcRuntimeExe))
-						throw std::runtime_error("Runtime.exe could not be located: " + srcRuntimeExe.string());
-					fs::copy_file(srcRuntimeExe, publishDir / "Runtime.exe", fs::copy_options::overwrite_existing);
-					WLD_CORE_INFO("Copied Runtime executable from: {0}", srcRuntimeExe.string());
-
-					fs::path srcRuntimeDll = srcRuntimeOutputDir / "WorldRuntime.dll";
-					if (!fs::is_regular_file(srcRuntimeDll))
-						throw std::runtime_error("WorldRuntime.dll could not be located: " + srcRuntimeDll.string());
-					fs::copy_file(srcRuntimeDll, publishDir / "WorldRuntime.dll", fs::copy_options::overwrite_existing);
-					WLD_CORE_INFO("Copied WorldRuntime.dll from: {0}", srcRuntimeDll.string());
-
-					fs::path srcGameDll = fs::absolute(std::string(WLD_OUTPUT_DIR) +
-						"bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll");
-					if (!fs::is_regular_file(srcGameDll))
-						throw std::runtime_error("Game.dll could not be located: " + srcGameDll.string());
-					fs::create_directories(publishDir / "bin");
-					fs::copy_file(srcGameDll, publishDir / "bin" / "Game.dll",
-						fs::copy_options::overwrite_existing);
-					WLD_CORE_INFO("Copied Game.dll into bin/");
-
-					// 6. 写发行清单(start_scene 已在第 2 步写入 manifest)。
-					std::string saveError;
-					if (!World::Asset::ProjectManifest::Save(publishDir / "project.we.yaml", manifest, &saveError))
-						throw std::runtime_error("Project manifest save failed: " + saveError);
-
-					WLD_CORE_INFO("Game Cooked Successfully to {0}", publishDir.string());
-					m_CookingSucceeded = true;
 				}
-				catch (const std::exception& error)
-				{
-					m_CookingError = error.what();
-					WLD_CORE_ERROR("Game cooking failed: {0}", m_CookingError);
-				}
-				catch (...)
-				{
-					m_CookingError = "Unknown background cooking error.";
-					WLD_CORE_ERROR("{0}", m_CookingError);
-				}
+
+				const Editor::CookResult cooked = Editor::CookProject(options);
+				m_CookingError = cooked.Error;
+				m_CookingSucceeded = cooked.Ok;
 				m_CookingFinished.store(true, std::memory_order_release);
 			});
 		}

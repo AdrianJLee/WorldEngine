@@ -13,6 +13,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # --- 查找 Vulkan SDK(可选):headers+volk 已 vendor,SDK 仅用于可选验证层
 find_package(Vulkan QUIET)
 
+# --- DXC 着色器编译器:SPIR-V 代码生成要求 dxc.exe 与 dxcompiler.dll 版本匹配,
+# 仓库内的 vendor/dxc/dxc.exe 只带壳。优先用 Vulkan SDK 的完整工具链(与 glslc 同目录),
+# 找不到时回退 vendor/dxc(仅 DXIL 场景可用)。
+set(WLD_DXC_DIR "${CMAKE_SOURCE_DIR}/vendor/dxc/")
+if(Vulkan_GLSLC_EXECUTABLE)
+    get_filename_component(_we_vulkan_bin "${Vulkan_GLSLC_EXECUTABLE}" DIRECTORY)
+    if(EXISTS "${_we_vulkan_bin}/dxc.exe" AND EXISTS "${_we_vulkan_bin}/dxcompiler.dll")
+        set(WLD_DXC_DIR "${_we_vulkan_bin}/")
+    endif()
+endif()
+message(STATUS "WorldEngine DXC tool dir: ${WLD_DXC_DIR}")
+if(WLD_DXC_DIR STREQUAL "${CMAKE_SOURCE_DIR}/vendor/dxc/")
+    message(WARNING "Complete dxc toolchain not found in the Vulkan SDK; "
+        "dev-time shader compilation may fail (packaged builds use baked artifacts).")
+endif()
 
 # --- 添加子项目---
 add_subdirectory(World)
@@ -32,6 +47,7 @@ target_compile_definitions(World PUBLIC
     WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/Game/assets"
     WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
     WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/World/"
+    WLD_DXC_DIR="${WLD_DXC_DIR}"
 )
 
 option(WORLD_BUILD_SCRIPT_TESTS "Build WorldEngine script lifecycle checks" OFF)
