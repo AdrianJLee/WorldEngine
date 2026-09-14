@@ -77,6 +77,8 @@ namespace World
 		void RenderPanelContent(Wui::WuiContext& ctx, const std::string& id, const Wui::WuiRect& rect);
 		// 浮动面板:在停靠区之上绘制,支持拖动/缩放/关闭与拖回停靠。
 		void RenderFloating(Wui::WuiContext& ctx);
+		// 跨窗口标签拖拽:全局光标追踪 + 目标高亮 + 附加/新建/挂靠落点。
+		void UpdateCrossWindowDrag(Wui::WuiContext& ctx);
 		// 挂靠栏:横跨主窗口的一条(类似菜单栏),独立窗口拖到其上即挂靠。
 		void DrawAttachBar(Wui::WuiContext& ctx);
 		// 独立窗口组件:创建/销毁(与停靠面板不同,各自拥有 OS 窗口)。
@@ -131,6 +133,11 @@ namespace World
 		float m_AttachBarHeight = 26.0f;
 		int m_AttachCooldownFrames = 0; // 挂靠后短暂抑制"拖出",避免同一次拖拽再次浮出
 		std::string m_TabDragPanel;     // 本次拖拽真正起手于哪个标签页(tab 按下)
+		std::string m_CrossDragPanel;   // 正在跨窗口拖动的标签面板
+		std::string m_CrossDragSourceKey; // 源窗口 key(首标签)
+		std::string m_CrossDragTargetKey; // 悬停目标窗口 key
+		bool m_CrossDragActive = false;
+		glm::vec2 m_CrossDragGrab { 0, 0 };
 		// 上一帧各独立窗口的位置(用于判断"停稳在槽位上")。
 		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatScreenRects;
 

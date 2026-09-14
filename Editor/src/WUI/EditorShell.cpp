@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <map>
+#include <tuple>
 
 namespace World
 {
@@ -55,9 +57,29 @@ namespace World
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 		m_PanelRegistry.emplace("windows", std::make_unique<WindowsPanel>());
-		// 独立窗口(与停靠面板是不同组件):按保存的浮动布局重建。
+		// 独立窗口(与停靠面板是不同组件):按屏幕矩形分组重建,
+		// 同一窗口的多个标签共享一个容器(多标签窗口)。
+		std::map<std::tuple<int, int, int, int>, std::vector<std::string>> floatGroups;
 		for (const Wui::DockFloat& entry : m_Layout.Floating)
-			AddFloatWindow(entry.Panel, entry.Rect, "restore");
+		{
+			const auto key = std::make_tuple(
+				static_cast<int>(entry.Rect.X), static_cast<int>(entry.Rect.Y),
+				static_cast<int>(entry.Rect.W), static_cast<int>(entry.Rect.H));
+			floatGroups[key].push_back(entry.Panel);
+		}
+		for (const auto& [key, panels] : floatGroups)
+		{
+			if (panels.empty())
+				continue;
+			const Wui::WuiRect rect { static_cast<float>(std::get<0>(key)), static_cast<float>(std::get<1>(key)),
+				static_cast<float>(std::get<2>(key)), static_cast<float>(std::get<3>(key)) };
+			AddFloatWindow(panels.front(), rect, "restore");
+			if (FloatWindowHost* host = m_FloatHosts.empty() ? nullptr : m_FloatHosts.back().get())
+			{
+				for (size_t i = 1; i < panels.size(); ++i)
+					host->AddPanel(panels[i], false);
+			}
+		}
 		// 跨会话记忆:曾经作为独立窗口存在过的面板,其屏幕矩形用于下次打开。
 		for (const Wui::DockFloat& entry : m_Layout.FloatMemory)
 			m_LastFloatRects[entry.Panel] = entry.Rect;
@@ -392,6 +414,10 @@ namespace World
 					AddFloatWindow(m_DragPanel, source, "drag-out");
 				}
 			}
+			else if (!m_DragPanel.empty() && m_Layout.Contains(m_DragPanel))
+			{
+				// 拖出条件未满足:保持原状(用于人工排查,不打印高频日志)。
+			}
 		}
 		else if (ctx.IsDragActive(nullptr))
 		{
@@ -643,6 +669,26 @@ namespace World
 		// 每个独立窗口渲染自己的 OS 窗口(含标签栏);窗口被关闭 = 隐藏其全部面板。
 		// 标签栏 x 只登记关闭请求,统一在遍历结束后处理,避免边遍历边改 m_FloatHosts。
 		std::vector<std::string> closeRequests;
+		// 收集新发起的标签拖拽(跨窗口附加);同帧只接受一个。
+		if (!m_CrossDragActive)
+		{
+			for (const std::unique_ptr<FloatWindowHost>& candidate : m_FloatHosts)
+			{
+				if (const std::string drag = candidate->TakePendingTabDrag(); !drag.empty())
+				{
+					m_CrossDragActive = true;
+					m_CrossDragPanel = drag;
+					m_CrossDragSourceKey = candidate->Panels().front();
+					m_CrossDragTargetKey.clear();
+					POINT cursor { 0, 0 };
+					GetCursorPos(&cursor);
+					const Wui::WuiRect rect = candidate->ScreenRect();
+					m_CrossDragGrab = { static_cast<float>(cursor.x) - rect.X,
+						static_cast<float>(cursor.y) - rect.Y };
+					break;
+				}
+			}
+		}
 		for (size_t i = 0; i < m_FloatHosts.size(); )
 		{
 			FloatWindowHost& host = *m_FloatHosts[i];
@@ -703,10 +749,92 @@ namespace World
 			HideFloatPanel(panel, &ctx);
 		if (m_FloatHosts.empty())
 			m_AttachSlotHighlight = false;
+		// 跨窗口拖拽的目标命中与落点(在窗口渲染之后执行,便于统一改容器)。
+		UpdateCrossWindowDrag(ctx);
 		// 独立窗口渲染会把 GL 上下文切到各自窗口,这里恢复主窗口上下文,
 		// 否则主窗口后续的呈现/交换会作用在错误的上下文上(表现为主窗口不再刷新)。
 		if (Application::HasInstance())
 			Application::Get().GetWindow().MakeCurrent();
+	}
+
+	// 跨窗口标签拖拽(浏览器式附加):源窗口标签按下拖动后,这里用全局光标轮询跟踪,
+	// 悬停到其他独立窗口标签栏时高亮,松手后按落点执行 附加/新建窗口/挂靠回主窗口。
+	void EditorShell::UpdateCrossWindowDrag(Wui::WuiContext& ctx)
+	{
+		if (!m_CrossDragActive)
+			return;
+		POINT cursor { 0, 0 };
+		GetCursorPos(&cursor);
+		const glm::vec2 pos { static_cast<float>(cursor.x), static_cast<float>(cursor.y) };
+
+		// 目标命中:其他独立窗口的标题栏+标签栏区域(顶部约 64px)。
+		m_CrossDragTargetKey.clear();
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+		{
+			const Wui::WuiRect rect = host->ScreenRect();
+			const Wui::WuiRect dropZone { rect.X, rect.Y, rect.W, 64.0f };
+			const bool hit = host->Panels().front() != m_CrossDragSourceKey
+				&& pos.x >= dropZone.X && pos.x <= dropZone.X + dropZone.W
+				&& pos.y >= dropZone.Y && pos.y <= dropZone.Y + dropZone.H;
+			host->SetTabDropHighlight(hit);
+			if (hit)
+				m_CrossDragTargetKey = host->Panels().front();
+		}
+
+		// 挂靠栏(主窗口)也是有效落点,优先级高于其他独立窗口。
+		const bool overAttachBar = m_AttachSlotScreenRect.W > 0.0f
+			&& pos.x >= m_AttachSlotScreenRect.X && pos.x <= m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W
+			&& pos.y >= m_AttachSlotScreenRect.Y && pos.y <= m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H;
+		m_AttachSlotHighlight = overAttachBar;
+		if (overAttachBar)
+			m_CrossDragTargetKey.clear();
+
+		// 松手(左键释放)才落点。
+		if (GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+			return;
+
+		const std::string panel = m_CrossDragPanel;
+		const std::string sourceKey = m_CrossDragSourceKey;
+		FloatWindowHost* source = FindFloatHost(panel);
+		FloatWindowHost* target = m_CrossDragTargetKey.empty() ? nullptr : FindFloatHost(m_CrossDragTargetKey);
+
+		if (target && source && source != target)
+		{
+			// 附加到目标窗口:面板从源窗口迁移到目标窗口标签栏。
+			source->RemovePanel(panel);
+			target->AddPanel(panel, true);
+			if (source->Empty())
+				EraseFloatHost(source);
+			if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
+				entry->Rect = target->ScreenRect();
+			ctx.RecordOp("float", "attach", panel, m_CrossDragTargetKey);
+		}
+		else if (overAttachBar)
+		{
+			AttachIndependentWindowToSlot(panel);
+		}
+		else if (source)
+		{
+			// 桌面空白:若源窗口还有其他标签,拆分为新独立窗口;单标签窗口只算移动。
+			if (source->Panels().size() > 1)
+			{
+				source->RemovePanel(panel);
+				const Wui::WuiRect rect { pos.x - m_CrossDragGrab.x, pos.y - m_CrossDragGrab.y, 520.0f, 400.0f };
+				AddFloatWindow(panel, rect, "detach");
+				if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
+					entry->Rect = rect;
+				ctx.RecordOp("float", "detach", panel, "");
+			}
+		}
+
+		// 清理:高亮与跨窗口拖拽状态全部复位。
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+			host->SetTabDropHighlight(false);
+		m_CrossDragActive = false;
+		m_CrossDragPanel.clear();
+		m_CrossDragSourceKey.clear();
+		m_CrossDragTargetKey.clear();
+		m_AttachSlotHighlight = false;
 	}
 
 	void EditorShell::AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect, const char* origin)

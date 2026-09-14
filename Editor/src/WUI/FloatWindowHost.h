@@ -24,6 +24,8 @@ namespace World
 			Wui::WuiTheme Theme;
 			std::function<std::string(const std::string&)> Title;
 			std::function<void(Wui::WuiContext&, const Wui::WuiRect&, const std::string&)> Content;
+			// 标签按下并拖动超过阈值时触发;EditorShell 据此启动跨窗口附加拖拽。
+			std::function<void(const std::string& panel)> TabDragStart;
 		};
 
 		FloatWindowHost(std::string panel, std::string title, const Wui::WuiRect& screenRect, Callbacks callbacks);
@@ -46,6 +48,10 @@ namespace World
 		bool ActivatePanel(const std::string& panel);
 		// 标签栏 x 的关闭请求:Render 后由 EditorShell 取走并处理(隐藏该面板)。
 		std::string TakeCloseRequest();
+		// 标签拖拽请求(一次性):Render 后由 EditorShell 取走并进入跨窗口拖拽。
+		std::string TakePendingTabDrag();
+		// 其他窗口正在被拖拽悬停:高亮本窗口的标签栏(放置目标指示)。
+		void SetTabDropHighlight(bool highlighted) { m_TabDropHighlight = highlighted; }
 
 		// 渲染该独立窗口;返回 false 表示 OS 窗口已关闭(其全部面板应隐藏)。
 		bool Render();
@@ -63,6 +69,11 @@ namespace World
 		std::vector<std::string> m_Panels;
 		size_t m_Active = 0;
 		std::string m_CloseRequest;
+		std::string m_PendingTabDrag;
+		std::string m_PressedTab;
+		bool m_TabPressArmed = false;
+		glm::vec2 m_TabPressPos { 0, 0 };
+		bool m_TabDropHighlight = false;
 		Callbacks m_Callbacks;
 		Window* m_Window = nullptr;
 		PresentTarget* m_Target = nullptr;
