@@ -558,7 +558,17 @@ namespace World
 		for (size_t i = 0; i < m_FloatHosts.size(); )
 		{
 			FloatWindowHost& host = *m_FloatHosts[i];
-			if (!host.Render())
+			bool alive = true;
+			try
+			{
+				alive = host.Render();
+			}
+			catch (const std::exception& error)
+			{
+				WLD_CORE_ERROR("[float] render failed for '{0}': {1}", host.Panel(), error.what());
+				alive = false;
+			}
+			if (!alive)
 			{
 				const std::string panel = host.Panel();
 				CloseFloatWindow(panel, true, &ctx);
@@ -578,7 +588,15 @@ namespace World
 		{
 			RenderPanelContent(ctx, panel, rect);
 		};
-		m_FloatHosts.push_back(std::make_unique<FloatWindowHost>(panel, PanelTitle(panel), screenRect, content));
+		try
+		{
+			m_FloatHosts.push_back(std::make_unique<FloatWindowHost>(panel, PanelTitle(panel), screenRect, content));
+		}
+		catch (const std::exception& error)
+		{
+			WLD_CORE_ERROR("[float] create failed for '{0}': {1}", panel, error.what());
+			m_Layout.CloseFloating(panel);
+		}
 	}
 
 	std::string EditorShell::IndependentWindowPanel(size_t index) const

@@ -31,7 +31,8 @@ namespace World
 
 		m_Backend.UseLocalInput({ static_cast<float>(m_Window->GetWidth()), static_cast<float>(m_Window->GetHeight()) });
 		m_Backend.SetCursorWindow(m_Window->GetNativeWindow());
-		if (Renderer::GetBackendName() == "vulkan")
+		const bool skipTarget = std::getenv("WLD_FLOAT_NO_TARGET") != nullptr;
+		if (!skipTarget && Renderer::GetBackendName() == "vulkan")
 		{
 			PresentTargetDesc desc;
 			desc.NativeWindow = m_Window->GetNativeWindow();
@@ -53,6 +54,8 @@ namespace World
 	{
 		if (!m_Window)
 			return false;
+		if (std::getenv("WLD_FLOAT_NO_RENDER"))
+			return true; // 诊断:只创建窗口,不渲染内容
 		if (m_Window->ShouldClose())
 			return false;
 		const glm::vec2 size { static_cast<float>(m_Window->GetWidth()), static_cast<float>(m_Window->GetHeight()) };

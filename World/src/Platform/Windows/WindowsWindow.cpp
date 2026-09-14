@@ -76,10 +76,13 @@ namespace World
 
 		{
 			WLD_PROFILE_SCOPE("glfwCreateWindow");
+			// Vulkan 附加窗口用 GLFW_NO_API:该模式下 GLFW 要求 share 必须为空。
+			GLFWwindow* shareWindow = (m_Auxiliary && m_HasGLContext) ? m_ShareWindow : nullptr;
 			if (m_Auxiliary && !m_HasGLContext)
-				glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // Vulkan:交换链由 RHI 创建
-			m_Window = glfwCreateWindow((int)props.Widdth, (int)props.Height, m_Data.Title.c_str(), nullptr,
-				m_Auxiliary ? m_ShareWindow : nullptr);
+				glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+			m_Window = glfwCreateWindow((int)props.Widdth, (int)props.Height, m_Data.Title.c_str(), nullptr, shareWindow);
+			if (m_Auxiliary && !m_HasGLContext)
+				glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API); // hint 会残留,恢复默认
 		}
 		if (m_HasGLContext)
 		{
@@ -226,6 +229,12 @@ namespace World
 	void WindowsWindow::SetVsync(bool enabled)
 	{
 		WLD_PROFILE_FUNCTION();
+		// 无 GL 上下文的窗口(Vulkan 附加窗口)不能调用 glfwSwapInterval。
+		if (!m_HasGLContext)
+		{
+			m_Data.VSync = false;
+			return;
+		}
 
 		if (enabled)
 			glfwSwapInterval(1);
