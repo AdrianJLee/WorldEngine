@@ -57,6 +57,14 @@ namespace World::Wui
 		Invalidate();
 	}
 
+	void WuiBox::Clear()
+	{
+		if (m_Children.empty())
+			return;
+		m_Children.clear();
+		Invalidate();
+	}
+
 	WuiMeasure WuiBox::Measure(const WuiConstraints& constraints)
 	{
 		if (!m_Dirty)
@@ -184,10 +192,12 @@ namespace World::Wui
 		WuiContext& ctx = context.Context();
 		const bool hovered = ctx.IsHovered(m_Rect);
 		const bool pressed = hovered && ctx.Input().MouseDown[0];
-		ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, pressed ? WuiColor { 0.16f, 0.16f, 0.17f, 1 } : WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 3.0f });
+		const WuiColor fill = !Enabled ? WuiColor { 0.17f, 0.175f, 0.18f, 1 } : (pressed ? WuiColor { 0.16f, 0.16f, 0.17f, 1 } : WuiColor { 0.2f, 0.21f, 0.23f, 1 });
+		const WuiColor text = Enabled ? WuiColor { 0.82f, 0.84f, 0.87f, 1 } : WuiColor { 0.5f, 0.52f, 0.55f, 1 };
+		ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, fill, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, m_Rect, WuiColor { 0.3f, 0.5f, 0.9f, 0.8f }, 3.0f, 1.0f });
-		ctx.Commands().push_back({ WuiDrawKind::Text, { m_Rect.X + 8, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 }, WuiColor { 0.82f, 0.84f, 0.87f, 1 }, 0, 1.0f, Label, 15.0f, false });
-		if (ctx.IsClicked(m_Rect) && OnClick)
+		ctx.Commands().push_back({ WuiDrawKind::Text, { m_Rect.X + 8, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 }, text, 0, 1.0f, Label, 15.0f, false });
+		if (Enabled && ctx.IsClicked(m_Rect) && OnClick)
 			OnClick();
 	}
 
@@ -429,6 +439,20 @@ namespace World::Wui
 	WuiWidgetPtr WuiSection::HitTest(glm::vec2 point)
 	{
 		return m_Rect.Contains(point) ? shared_from_this() : nullptr;
+	}
+
+	// ---- WuiCustom ----
+
+	WuiMeasure WuiCustom::Measure(const WuiConstraints& constraints)
+	{
+		MarkClean();
+		return { constraints.MinW, std::max(constraints.MinH, ContentHeight) };
+	}
+
+	void WuiCustom::Paint(WuiPaintContext& context)
+	{
+		if (Draw)
+			Draw(context.Context(), m_Rect);
 	}
 
 	// ---- 便捷布局 ----
