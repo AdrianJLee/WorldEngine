@@ -34,6 +34,7 @@ namespace World
 		const char* Name;         // 分配器实例名称
 		AllocatorType Type;       // 分配器类型
 		size_t UsedBytes;         // 已使用字节
+		size_t PeakBytes;         // 峰值已使用字节
 		size_t TotalReserved;     // 总预留字节
 		size_t NumAllocations;    // 活跃分配数
 	};

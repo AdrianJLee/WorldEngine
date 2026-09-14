@@ -1,5 +1,9 @@
-﻿#pragma once
+#pragma once
 #include "Allocator.h"
+
+#include <mutex>
+#include <string>
+#include <vector>
 namespace World
 {
 	class MemoryTracker
@@ -17,6 +21,10 @@ namespace World
 		// 获取所有分配器的快照
 		std::vector<AllocatorStats> GetFullSnapshot();
 
+		// 泄漏检查:返回"仍有活跃分配"的分配器数量,并把明细写入 out(可空)。
+		// 供退出/关卡卸载时做断言或日志;不计入短命分配器的死亡快照。
+		size_t ReportLeaks(std::vector<std::string>* out = nullptr);
+
 		void ClearEphemeralStats();
 	private:
 		struct TrackerEntry
@@ -25,6 +33,7 @@ namespace World
 			const char* Name;
 			AllocatorType Type;
 			bool IsEphemeral = false;
+			size_t PeakBytes = 0;
 		};
 
 		std::vector<TrackerEntry> m_Allocators;
@@ -34,3 +43,5 @@ namespace World
 		std::mutex m_Mutex;
 	};
 }
+
+

@@ -3,6 +3,7 @@
 
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace World
 {
@@ -89,11 +90,19 @@ namespace World
 
 		void Deallocate(void* p) override;
 
+		// 调试:检查所有在册分配的哨兵字节,返回被破坏的块数量(0 = 健康)。
+		size_t ValidateAllocations() const;
+		// 释放所有"整块空闲"的 chunk(保留至少一个),用于关卡卸载等显式回收时机。
+		size_t TrimFreeChunks();
+		PoolTag GetTag() const { return m_Tag; }
+		bool IsOwnerThread() const { return m_Owner == std::this_thread::get_id(); }
+
 	private:
 		// 申请新的 Chunk，并将其划分成 Node 链表
 		void Grow();
 	private:
 		size_t m_ObjectSize = 0; // 每个对象的大小（至少要能存下一个 Node）
+		size_t m_BlockSize = 0;  // 实际块大小(Debug 下含哨兵)
 		size_t m_Alignment = 0;
 		size_t m_ObjectsPerChunk = 0; // 每个 Chunk 包含的对象数量
 
@@ -102,6 +111,8 @@ namespace World
 		Chunk* m_ChunkList = nullptr; // 指向所有分配的内存页，用于析构释放
 
 		PoolTag m_Tag; // 池的标签（用于统计和调试）
+		std::thread::id m_Owner;
+		mutable size_t m_CorruptedBlocks = 0;   // 最近一次校验发现的破坏块数
 	};
 
 	template<typename T, PoolTag Tag = PoolTag::General, PoolTier Tier = PoolTier::Medium>

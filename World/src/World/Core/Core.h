@@ -22,18 +22,13 @@
 
 
 #ifdef WLD_ENABLE_ASSERTS
-// Alteratively we could use the same "default" message for both "WITH_MSG" and "NO_MSG" and
-// provide support for custom formatting by concatenating the formatting string instead of having the format inside the default message
-#define WLD_INTERNAL_ASSERT_IMPL(type, check, msg, ...) { if(!(check)) { WLD##type##ERROR(msg, __VA_ARGS__); WLD_DEBUGBREAK(); } }
-#define WLD_INTERNAL_ASSERT_WITH_MSG(type, check, ...) WLD_INTERNAL_ASSERT_IMPL(type, check, "Assertion failed: {0}", __VA_ARGS__)
-#define WLD_INTERNAL_ASSERT_NO_MSG(type, check) WLD_INTERNAL_ASSERT_IMPL(type, check, "Assertion '{0}' failed at {1}:{2}", WLD_STRINGIFY_MACRO(check), std::filesystem::path(__FILE__).filename().string(), __LINE__)
+// 断言:第一个参数是条件,其后是日志格式串与可选参数(所有调用点都带消息)。
+// 之前的实现用宏参数个数选择器,3 个及以上参数时会选错宏,已简化。
+#define WLD_INTERNAL_ASSERT_IMPL(type, check, ...) \
+	{ if (!(check)) { WLD##type##ERROR(__VA_ARGS__); WLD_DEBUGBREAK(); } }
 
-#define WLD_INTERNAL_ASSERT_GET_MACRO_NAME(arg1, arg2, macro, ...) macro
-#define WLD_INTERNAL_ASSERT_GET_MACRO(...) WLD_EXPAND_MACRO( WLD_INTERNAL_ASSERT_GET_MACRO_NAME(__VA_ARGS__, WLD_INTERNAL_ASSERT_WITH_MSG, WLD_INTERNAL_ASSERT_NO_MSG) )
-
-// Currently accepts at least the condition and one additional parameter (the message) being optional
-#define WLD_ASSERT(...) WLD_EXPAND_MACRO( WLD_INTERNAL_ASSERT_GET_MACRO(__VA_ARGS__)(_, __VA_ARGS__) )
-#define WLD_CORE_ASSERT(...) WLD_EXPAND_MACRO( WLD_INTERNAL_ASSERT_GET_MACRO(__VA_ARGS__)(_CORE_, __VA_ARGS__) )
+#define WLD_ASSERT(...) WLD_EXPAND_MACRO( WLD_INTERNAL_ASSERT_IMPL(_, __VA_ARGS__) )
+#define WLD_CORE_ASSERT(...) WLD_EXPAND_MACRO( WLD_INTERNAL_ASSERT_IMPL(_CORE_, __VA_ARGS__) )
 #else
 #define WLD_ASSERT(...)
 #define WLD_CORE_ASSERT(...)

@@ -1,6 +1,7 @@
 #include "World/Core/Memory/DualTrackAllocator.h"
 #include "World/Core/Memory/FrameArena.h"
 #include "World/Core/Memory/PoolAllocator.h"
+#include "World/Core/Memory/MemoryTracker.h"
 
 #include <atomic>
 #include <cstdio>
@@ -127,11 +128,43 @@ int main()
 			void* first = pool.Allocate(sizeof(Tracked), alignof(Tracked));
 			void* second = pool.Allocate(sizeof(Tracked), alignof(Tracked));
 			CHECK(first != nullptr && second != nullptr && first != second);
+			CHECK(pool.IsOwnerThread());
+			CHECK(pool.ValidateAllocations() == 0);
 			pool.Deallocate(first);
 			void* reused = pool.Allocate(sizeof(Tracked), alignof(Tracked));
 			CHECK(reused == first);
 			pool.Deallocate(second);
 			pool.Deallocate(reused);
+			CHECK(pool.GetNumAllocations() == 0);
+		}
+
+		// 7. Debug 哨兵:越界写会被 ValidateAllocations 发现
+		{
+			World::PoolAllocator pool("MemoryTestPoolGuard", World::PoolTag::General, 32, 8, 4);
+			auto* block = static_cast<uint8_t*>(pool.Allocate(32, 8));
+			CHECK(block != nullptr && pool.ValidateAllocations() == 0);
+#ifdef WLD_DEBUG
+			block[32] = 0xAB;   // 越过对象尾部 1 字节(踩到尾哨兵)
+			CHECK(pool.ValidateAllocations() == 1);
+#endif
+		}
+
+		// 8. 追踪器:峰值 + 泄漏报告
+		{
+			World::DualTrackAllocator allocator("MemoryTestTracked", 256 * 1024);
+			World::MemoryTracker::Get().Register(&allocator, "MemoryTestTracked", World::AllocatorType::DualTrack);
+			(void)allocator.Allocate(4096, 16);
+			std::vector<World::AllocatorStats> snapshot = World::MemoryTracker::Get().GetFullSnapshot();
+			bool found = false;
+			for (const World::AllocatorStats& stats : snapshot)
+				if (stats.Name && std::string(stats.Name) == "MemoryTestTracked")
+				found = stats.PeakBytes >= 4096 && stats.UsedBytes >= 4096;
+			CHECK(found);
+
+			std::vector<std::string> leaks;
+			CHECK(World::MemoryTracker::Get().ReportLeaks(&leaks) >= 1);
+			World::MemoryTracker::Get().Unregister(&allocator);
+			allocator.Reset();
 		}
 
 		World::FrameArena::Shutdown();
@@ -144,3 +177,4 @@ int main()
 		return 1;
 	}
 }
+

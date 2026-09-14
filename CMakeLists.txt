@@ -50,6 +50,12 @@ target_compile_definitions(World PUBLIC
     WLD_DXC_DIR="${WLD_DXC_DIR}"
 )
 
+# Debug 配置启用引擎断言与调试期诊断(内存哨兵/污染填充等):
+# 之前 WLD_DEBUG 从未定义,导致 WLD_CORE_ASSERT 在所有配置下都是空操作。
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(World PUBLIC WLD_DEBUG)
+endif()
+
 option(WORLD_BUILD_SCRIPT_TESTS "Build WorldEngine script lifecycle checks" OFF)
 if(WORLD_BUILD_SCRIPT_TESTS)
     enable_testing()

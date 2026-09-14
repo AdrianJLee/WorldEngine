@@ -69,10 +69,13 @@ namespace World
 		std::vector<AllocatorStats> stats;
 		for (auto& entry : m_Allocators)
 		{
+			const size_t used = entry.Ptr->GetUsedMemory();
+			entry.PeakBytes = std::max(entry.PeakBytes, used);
 			stats.push_back({
 				entry.Name,
 				entry.Type,
-				entry.Ptr->GetUsedMemory(),
+				used,
+				entry.PeakBytes,
 				entry.Ptr->GetSize(),
 				entry.Ptr->GetNumAllocations()
 				});
@@ -84,6 +87,29 @@ namespace World
 		}
 
 		return stats;
+	}
+
+	size_t MemoryTracker::ReportLeaks(std::vector<std::string>* out)
+	{
+		std::lock_guard<std::mutex> lock(m_Mutex);
+		size_t leaking = 0;
+		for (const TrackerEntry& entry : m_Allocators)
+		{
+			if (!entry.Ptr)
+				continue;
+			const size_t used = entry.Ptr->GetUsedMemory();
+			const size_t allocations = entry.Ptr->GetNumAllocations();
+			if (used == 0 && allocations == 0)
+				continue;
+			++leaking;
+			if (out)
+			{
+				out->push_back(std::string(entry.Name ? entry.Name : "<unnamed>") +
+					": " + std::to_string(used) + " bytes / " +
+					std::to_string(allocations) + " allocations still live");
+			}
+		}
+		return leaking;
 	}
 
 	void MemoryTracker::ClearEphemeralStats()

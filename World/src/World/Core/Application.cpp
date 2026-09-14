@@ -87,6 +87,17 @@ namespace World
 		if (m_FrameAllocator) m_FrameAllocator->Reset();
 		if (m_EngineAllocator) m_EngineAllocator->Reset();
 		FrameArena::Shutdown();
+		// 退出前的泄漏检查:仍有活跃分配的分配器会被点名(便于定位谁没释放)。
+		{
+			std::vector<std::string> leaks;
+			const size_t leaking = MemoryTracker::Get().ReportLeaks(&leaks);
+			if (leaking > 0)
+			{
+				for (const std::string& line : leaks)
+					WLD_CORE_WARN("[memory] leak: {0}", line);
+				WLD_CORE_WARN("[memory] {0} allocator(s) still hold live allocations at shutdown", leaking);
+			}
+		}
 		ScriptEngine::Shutdown();
 		JobSystem::Shutdown();
 		m_Window.reset();

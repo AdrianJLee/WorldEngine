@@ -133,6 +133,9 @@ namespace World
 
 	void FrameArena::Reset()
 	{
+		// 先按登记逆序析构(此时对象与其登记节点仍完整),再污染回收区域:
+		// 顺序颠倒会把析构链表本身填成 0xDD 而崩溃。
+		ReleaseDestructors();
 #ifdef WLD_DEBUG
 		// 回收前污染已用区域:跨帧引用会在调试器里以 0xDD… 暴露,而不是读到旧数据。
 		for (const Page& page : m_Pages)
@@ -142,7 +145,6 @@ namespace World
 			std::memset(page.Alloc->GetStart(), kPoisonByte, page.Alloc->GetUsedMemory());
 		}
 #endif
-		ReleaseDestructors();
 		for (const Page& page : m_Pages)
 			if (page.Alloc)
 				page.Alloc->Reset();
