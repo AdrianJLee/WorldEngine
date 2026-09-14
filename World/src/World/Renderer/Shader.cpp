@@ -3,8 +3,6 @@
 
 #include "World/Renderer/Renderer.h"
 #include "Platform/OpenGL/OpenGLShader.h"
-#include "Platform/Vulkan/DataHandles/VulkanShader.h"
-#include "Platform/Vulkan/VulkanContext.h"
 namespace World
 {
 	Ref<Shader> Shader::Create()
@@ -17,8 +15,10 @@ namespace World
 			case RendererAPI::API::OpenGL:
 				return CreateRef<OpenGLShader>();
 			case RendererAPI::API::Vulkan:
-				auto device = VulkanContext::Get()->GetDevice();
-				return CreateRef<VulkanShader>(device);
+				// 旧 Vulkan 骨架已随 P1 W6 删除;Vulkan 走 RHI(World/RHI/Vulkan) +
+				// RhiShader,不再经过这里。
+				WLD_CORE_ASSERT(false, "Legacy Shader::Create is not available on Vulkan; use RHI shaders.");
+				return nullptr;
 		}
 		WLD_CORE_ASSERT(false, "Unknown RendererAPI!");
 		return nullptr;
