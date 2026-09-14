@@ -11,6 +11,7 @@
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
 #include <imm.h>
+#include <dwmapi.h>
 
 namespace World
 {
@@ -76,13 +77,23 @@ namespace World
 
 		{
 			WLD_PROFILE_SCOPE("glfwCreateWindow");
+			if (props.Frameless)
+				glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
 			// Vulkan 附加窗口用 GLFW_NO_API:该模式下 GLFW 要求 share 必须为空。
 			GLFWwindow* shareWindow = (m_Auxiliary && m_HasGLContext) ? m_ShareWindow : nullptr;
 			if (m_Auxiliary && !m_HasGLContext)
 				glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 			m_Window = glfwCreateWindow((int)props.Widdth, (int)props.Height, m_Data.Title.c_str(), nullptr, shareWindow);
+			if (props.Frameless)
+				glfwWindowHint(GLFW_DECORATED, GLFW_TRUE); // hint 会残留,恢复默认
 			if (m_Auxiliary && !m_HasGLContext)
 				glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API); // hint 会残留,恢复默认
+		}
+		// 深色标题栏:消除顶部白色系统标题栏,与 WUI 深色主题一致。
+		if (const HWND hwnd = glfwGetWin32Window(m_Window))
+		{
+			const BOOL dark = TRUE;
+			DwmSetWindowAttribute(hwnd, 20 /*DWMWA_USE_IMMERSIVE_DARK_MODE*/, &dark, sizeof(dark));
 		}
 		if (m_HasGLContext)
 		{
@@ -293,6 +304,15 @@ namespace World
 	void WindowsWindow::Focus()
 	{
 		glfwFocusWindow(m_Window);
+	}
+
+	void WindowsWindow::BeginSystemDrag()
+	{
+		if (const HWND hwnd = glfwGetWin32Window(m_Window))
+		{
+			ReleaseCapture();
+			SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+		}
 	}
 
 	bool WindowsWindow::IsVsync() const

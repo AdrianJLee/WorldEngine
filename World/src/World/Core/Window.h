@@ -11,10 +11,11 @@ namespace World
 		std::string Title;
 		uint32_t Widdth;
 		uint32_t Height;
+		bool Frameless = false;
 
 		WindowProps(const std::string& title = "World Engine",
-			uint32_t width = 1280, uint32_t height = 720)
-			: Title(title), Widdth(width), Height(height)
+			uint32_t width = 1280, uint32_t height = 720, bool frameless = false)
+			: Title(title), Widdth(width), Height(height), Frameless(frameless)
 		{
 
 		}
@@ -57,6 +58,8 @@ namespace World
 		virtual bool ShouldClose() const = 0;
 		virtual void SetShouldClose(bool shouldClose) = 0;
 		virtual void Focus() = 0;
+		// 无边框窗口自定义标题栏:让系统进入"窗口移动"循环。
+		virtual void BeginSystemDrag() = 0;
 
 		// Creates a window
 		static Window* Create(const WindowProps& props = WindowProps());

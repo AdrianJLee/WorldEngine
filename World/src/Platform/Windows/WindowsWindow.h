@@ -34,6 +34,7 @@ namespace World
 		bool ShouldClose() const override;
 		void SetShouldClose(bool shouldClose) override;
 		void Focus() override;
+		void BeginSystemDrag() override;
 
 	private:
 		virtual void Init(const WindowProps& props);

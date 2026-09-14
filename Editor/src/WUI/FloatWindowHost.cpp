@@ -18,7 +18,8 @@ namespace World
 		m_Active = 0;
 		WindowProps props(m_Title,
 			static_cast<uint32_t>(std::max(240.0f, screenRect.W)),
-			static_cast<uint32_t>(std::max(160.0f, screenRect.H)));
+			static_cast<uint32_t>(std::max(160.0f, screenRect.H)),
+			true /* 无边框:标题栏由 WUI 绘制,顶部即标签/附加区域 */);
 		Window* main = Application::HasInstance() ? &Application::Get().GetWindow() : nullptr;
 		m_Window = Window::CreateAuxiliary(props, main);
 		if (!m_Window)
@@ -191,11 +192,33 @@ namespace World
 	void FloatWindowHost::RenderTabBar(Wui::WuiContext& ctx, const Wui::WuiRect& area)
 	{
 		const Wui::WuiTheme& theme = m_Callbacks.Theme;
+		constexpr float titleH = 26.0f;
 		constexpr float tabH = 24.0f;
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, area.Y, area.W, tabH }, theme.PanelHeader, 0.0f });
+
+		// ---- 标题栏(替代系统标题栏):拖动移动 + 关闭 ----
+		const Wui::WuiRect titleBar { area.X, area.Y, area.W, titleH };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, titleBar, theme.PanelHeader, 0.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { titleBar.X + 8.0f, titleBar.Y + 5.0f, 0, 0 },
+			theme.Text, 0, 1.0f, m_Title, 14.0f, false });
+		const Wui::WuiRect windowClose { titleBar.X + titleBar.W - 22.0f, titleBar.Y + 6.0f, 14.0f, 14.0f };
+		if (ctx.IsHovered(windowClose))
+		{
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, windowClose, theme.ButtonHover, 2.0f });
+			ctx.SetCursor(Wui::WuiCursor::Hand);
+		}
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { windowClose.X + 3.0f, windowClose.Y - 1.0f, 0, 0 },
+			theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
+		if (ctx.IsClicked(windowClose))
+			m_Window->SetShouldClose(true);
+		else if (ctx.Input().MouseDown[0] && ctx.IsHovered(titleBar))
+			m_Window->BeginSystemDrag();
+
+		// ---- 标签栏(浏览器式):附加目标 + 切换/关闭标签 ----
+		const float tabTop = area.Y + titleH;
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH }, theme.PanelHeader, 0.0f });
 		// 放置目标高亮:其他窗口的标签正被拖到本窗口上方。
 		if (m_TabDropHighlight)
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, area.Y, area.W, tabH },
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH },
 				Wui::WuiColor { 0.3f, 0.5f, 0.9f, 0.55f }, 0.0f });
 
 		std::string closeRequest;
@@ -207,7 +230,7 @@ namespace World
 			for (size_t i = 0; i < m_Panels.size(); ++i)
 			{
 				const std::string& panel = m_Panels[i];
-				const Wui::WuiRect tab { x, area.Y + 2.0f, width, tabH - 2.0f };
+				const Wui::WuiRect tab { x, tabTop + 2.0f, width, tabH - 2.0f };
 				const Wui::WuiRect close { tab.X + tab.W - 18.0f, tab.Y + 4.0f, 14.0f, 14.0f };
 				// 标签按下:记录来源,拖动超过阈值后发出拖拽请求。
 				if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab) && !ctx.IsHovered(close))
@@ -258,7 +281,7 @@ namespace World
 			}
 		}
 
-		const Wui::WuiRect content { area.X, area.Y + tabH, area.W, std::max(0.0f, area.H - tabH) };
+		const Wui::WuiRect content { area.X, tabTop + tabH, area.W, std::max(0.0f, area.H - titleH - tabH) };
 		if (!m_Panels.empty() && m_Callbacks.Content)
 			m_Callbacks.Content(ctx, content, ActivePanel());
 		if (!closeRequest.empty())
