@@ -197,9 +197,8 @@ namespace World
 		const std::string before = m_Layout.Serialize();
 		if (m_Layout.IsFloating(panel))
 		{
-			// 隐藏独立窗口面板:销毁其 OS 窗口并移除浮动记录。
-			(void)before;
-			CloseFloatWindow(panel, true, &ctx);
+			// 隐藏独立窗口内的该面板:它只是窗口的一个标签,窗口可继续承载其它面板。
+			HideFloatPanel(panel, &ctx);
 			return;
 		}
 		if (m_Layout.Contains(panel))
@@ -581,8 +580,8 @@ namespace World
 			Label(ctx, { rect.X + 8, rect.Y + 8 }, PanelTitle(id), m_Theme.TextMuted, 14.0f);
 	}
 
-	// 挂靠栏:横跨主窗口的一条,列出独立窗口并提供"挂靠"入口。
-	// 独立窗口被拖到这条栏上(窗口中心进入栏内并停稳)会自动挂靠回来。
+	// 挂靠栏:横跨主窗口的一条,按"窗口"列出一行(chip 显示活动标签名与标签数),
+	// 独立窗口被拖到这条栏上(窗口中心进入栏内并停稳)或点 Attach 会整窗挂靠回主窗口。
 	void EditorShell::DrawAttachBar(Wui::WuiContext& ctx)
 	{
 		const glm::vec2 viewport = ctx.ViewportSize();
@@ -605,12 +604,16 @@ namespace World
 		std::string attachRequest;
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
 		{
-			const std::string panel = host->Panel();
+			// 每行一个窗口:代表面板 = 第一个标签(稳定,不随活动标签切换而变)。
+			const std::string panel = host->Panels().empty() ? std::string() : host->Panels().front();
+			std::string label = PanelTitle(panel);
+			if (host->Panels().size() > 1)
+				label += " +" + std::to_string(host->Panels().size() - 1);
 			const Wui::WuiRect chip { x, bar.Y + 3.0f, 150.0f, bar.H - 6.0f };
 			if (ctx.IsHovered(chip))
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, chip, m_Theme.ButtonHover, 3.0f });
 			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, chip, m_Theme.Border, 3.0f, 1.0f });
-			Label(ctx, { chip.X + 8, chip.Y + 3 }, PanelTitle(panel), m_Theme.Text, 13.0f);
+			Label(ctx, { chip.X + 8, chip.Y + 3 }, label, m_Theme.Text, 13.0f);
 			const Wui::WuiRect attach { chip.X + chip.W + 4.0f, chip.Y, 62.0f, chip.H };
 			if (Wui::Button(ctx, Wui::HashId(("attachbar." + panel).c_str()), attach, "Attach", m_Theme))
 				attachRequest = panel;
@@ -620,7 +623,7 @@ namespace World
 			AttachIndependentWindowToSlot(attachRequest);
 	}
 
-	// 浮动面板:每个窗口一个面板,绘制在停靠区之上(Overlay 层)。
+	// 独立窗口:每个宿主 = 一个 OS 窗口(可含多个标签面板),绘制在停靠区之上。
 	void EditorShell::RenderFloating(Wui::WuiContext& ctx)
 	{
 		if (m_AttachCooldownFrames > 0)
@@ -637,10 +640,18 @@ namespace World
 		m_AttachSlotScreenRect.X += static_cast<float>(windowX);
 		m_AttachSlotScreenRect.Y += static_cast<float>(windowY);
 
-		// 每个独立窗口渲染自己的 OS 窗口;窗口被关闭 = 隐藏该面板。
+		// 每个独立窗口渲染自己的 OS 窗口(含标签栏);窗口被关闭 = 隐藏其全部面板。
+		// 标签栏 x 只登记关闭请求,统一在遍历结束后处理,避免边遍历边改 m_FloatHosts。
+		std::vector<std::string> closeRequests;
 		for (size_t i = 0; i < m_FloatHosts.size(); )
 		{
 			FloatWindowHost& host = *m_FloatHosts[i];
+			// 不变量:宿主至少承载一个面板;空宿主属于已关闭窗口,直接移除。
+			if (host.Panels().empty())
+			{
+				EraseFloatHost(&host);
+				continue;
+			}
 			bool alive = true;
 			try
 			{
@@ -657,31 +668,39 @@ namespace World
 				CloseFloatWindow(panel, true, &ctx);
 				continue; // CloseFloatWindow 会移除该 host
 			}
-			// 位置/尺寸变化写回布局(供重启恢复)。
-			if (Wui::DockFloat* entry = m_Layout.FindFloat(host.Panel()))
-				entry->Rect = host.ScreenRect();
+			if (const std::string closing = host.TakeCloseRequest(); !closing.empty())
+				closeRequests.push_back(closing);
+
+			// 位置/尺寸变化写回布局(供重启恢复):窗口内每个标签写同一屏幕矩形。
+			const Wui::WuiRect rect = host.ScreenRect();
+			for (const std::string& panel : host.Panels())
+				if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
+					entry->Rect = rect;
 
 			// 挂靠判定:窗口中心停在槽位矩形内且已停稳(位置与上一帧相同)。
-			const Wui::WuiRect rect = host.ScreenRect();
 			const glm::vec2 center { rect.X + rect.W * 0.5f, rect.Y + rect.H * 0.5f };
 			const bool overSlot = m_AttachSlotScreenRect.W > 0.0f && m_AttachSlotScreenRect.H > 0.0f
 				&& center.x >= m_AttachSlotScreenRect.X && center.x <= m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W
 				&& center.y >= m_AttachSlotScreenRect.Y && center.y <= m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H;
-			const auto previous = m_LastFloatScreenRects.find(host.Panel());
+			// 每窗口位置缓存以第一个标签为键(窗口身份 = 面板集合)。
+			const std::string windowKey = host.Panels().front();
+			const auto previous = m_LastFloatScreenRects.find(windowKey);
 			const bool stationary = previous != m_LastFloatScreenRects.end()
 				&& std::fabs(previous->second.X - rect.X) < 0.5f && std::fabs(previous->second.Y - rect.Y) < 0.5f;
-			m_LastFloatScreenRects[host.Panel()] = rect;
+			m_LastFloatScreenRects[windowKey] = rect;
 			if (overSlot)
 			{
 				m_AttachSlotHighlight = true;
 				if (stationary)
 				{
-					AttachIndependentWindowToSlot(host.Panel());
+					AttachIndependentWindowToSlot(windowKey);
 					continue; // host 已销毁
 				}
 			}
 			++i;
 		}
+		for (const std::string& panel : closeRequests)
+			HideFloatPanel(panel, &ctx);
 		if (m_FloatHosts.empty())
 			m_AttachSlotHighlight = false;
 		// 独立窗口渲染会把 GL 上下文切到各自窗口,这里恢复主窗口上下文,
@@ -694,14 +713,17 @@ namespace World
 	{
 		WLD_CORE_INFO("[float] AddFloatWindow panel={0} origin={1} rect=({2},{3},{4},{5})",
 			panel, origin, screenRect.X, screenRect.Y, screenRect.W, screenRect.H);
-		// 独立窗口内容 = 该面板自身;停靠时的 tab/标题栏由停靠组件负责,这里只有面板内容。
-		auto content = [this, panel](Wui::WuiContext& ctx, const Wui::WuiRect& rect)
+		// 独立窗口 = 容器 + 标签栏;标题与内容由面板注册表提供,容器不感知具体面板类型。
+		FloatWindowHost::Callbacks callbacks;
+		callbacks.Theme = m_Theme;
+		callbacks.Title = [this](const std::string& id) { return std::string(PanelTitle(id)); };
+		callbacks.Content = [this](Wui::WuiContext& ctx, const Wui::WuiRect& rect, const std::string& id)
 		{
-			RenderPanelContent(ctx, panel, rect);
+			RenderPanelContent(ctx, id, rect);
 		};
 		try
 		{
-			m_FloatHosts.push_back(std::make_unique<FloatWindowHost>(panel, PanelTitle(panel), screenRect, content));
+			m_FloatHosts.push_back(std::make_unique<FloatWindowHost>(panel, PanelTitle(panel), screenRect, std::move(callbacks)));
 		}
 		catch (const std::exception& error)
 		{
@@ -712,56 +734,89 @@ namespace World
 
 	std::string EditorShell::IndependentWindowPanel(size_t index) const
 	{
+		// 返回该窗口的代表面板(活动标签);调用方以它定位窗口(焦点/收回/挂靠)。
 		return index < m_FloatHosts.size() ? m_FloatHosts[index]->Panel() : std::string();
+	}
+
+	FloatWindowHost* EditorShell::FindFloatHost(const std::string& panel)
+	{
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+			if (host->Contains(panel))
+				return host.get();
+		return nullptr;
+	}
+
+	void EditorShell::EraseFloatHost(FloatWindowHost* host)
+	{
+		if (!host)
+			return;
+		// 每窗口屏幕位置缓存以标签为键:宿主销毁时一并清理,避免重建后误判"停稳"。
+		for (const std::string& panel : host->Panels())
+			m_LastFloatScreenRects.erase(panel);
+		m_FloatHosts.erase(std::remove_if(m_FloatHosts.begin(), m_FloatHosts.end(),
+			[&](const std::unique_ptr<FloatWindowHost>& candidate) { return candidate.get() == host; }),
+			m_FloatHosts.end());
 	}
 
 	void EditorShell::FocusIndependentWindow(const std::string& panel)
 	{
-		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
-		{
-			if (host->Panel() == panel)
-			{
-				host->Focus();
-				return;
-			}
-		}
+		if (FloatWindowHost* host = FindFloatHost(panel))
+			host->Focus();
 	}
 
 	void EditorShell::DockBackIndependentWindow(const std::string& panel)
 	{
-		// 记住用户调好的尺寸,再销毁独立窗口并把面板挂回停靠树。
-		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
-			if (host->Panel() == panel)
-				m_LastFloatRects[panel] = host->ScreenRect();
+		// 收回整窗:记住用户调好的尺寸,销毁独立窗口并把它的全部标签挂回停靠树。
+		FloatWindowHost* host = FindFloatHost(panel);
+		if (!host)
+			return;
+		const std::vector<std::string> panels = host->Panels();
+		const Wui::WuiRect rect = host->ScreenRect();
+		for (const std::string& id : panels)
+			m_LastFloatRects[id] = rect;
+		EraseFloatHost(host);
 
-		const std::string before = m_Layout.Serialize();
-		m_FloatHosts.erase(std::remove_if(m_FloatHosts.begin(), m_FloatHosts.end(),
-			[&](const std::unique_ptr<FloatWindowHost>& host) { return host->Panel() == panel; }),
-			m_FloatHosts.end());
-		m_Layout.CloseFloating(panel);
 		const Wui::PanelId anchor = m_Layout.FirstPanel();
-		if (!anchor.empty() && m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
-			WLD_CORE_INFO("Independent window docked back: {0}", panel);
+		for (const std::string& id : panels)
+		{
+			// 停靠树为空时无法挂载:仅隐藏该面板(CloseFloating 会留下跨会话位置记忆)。
+			if (!anchor.empty() && m_Layout.DockFloating(id, anchor, Wui::DropZone::Center))
+				WLD_CORE_INFO("Independent window docked back: {0}", id);
+			else
+				m_Layout.CloseFloating(id);
+		}
 	}
 
 	void EditorShell::AttachIndependentWindowToSlot(const std::string& panel)
 	{
-		// 挂靠:面板作为槽位所在标签组的一员回到主窗口,独立窗口销毁。
-		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
-			if (host->Panel() == panel)
-				m_LastFloatRects[panel] = host->ScreenRect();
-
-		const std::string before = m_Layout.Serialize();
-		m_FloatHosts.erase(std::remove_if(m_FloatHosts.begin(), m_FloatHosts.end(),
-			[&](const std::unique_ptr<FloatWindowHost>& host) { return host->Panel() == panel; }),
-			m_FloatHosts.end());
-		m_Layout.CloseFloating(panel);
-		m_LastFloatScreenRects.erase(panel);
+		// 挂靠整窗:窗口的全部面板作为槽位所在标签组的成员回到主窗口,OS 窗口销毁。
+		FloatWindowHost* host = FindFloatHost(panel);
+		if (!host)
+			return;
+		const std::vector<std::string> panels = host->Panels();
+		const Wui::WuiRect rect = host->ScreenRect();
+		for (const std::string& id : panels)
+			m_LastFloatRects[id] = rect;
+		EraseFloatHost(host);
 
 		const Wui::PanelId slot = "attach_slot";
-		const bool placed = m_Layout.Contains(slot)
-			? m_Layout.AddTab(panel, slot, Wui::DropZone::Center)
-			: (!m_Layout.FirstPanel().empty() && m_Layout.AddTab(panel, m_Layout.FirstPanel(), Wui::DropZone::Center));
+		const Wui::PanelId anchor = m_Layout.Contains(slot) ? slot : m_Layout.FirstPanel();
+		bool placed = false;
+		if (anchor.empty())
+		{
+			// 停靠树已空(所有面板都在独立窗口):整窗面板作为根标签组恢复,
+			// 保留 float_memory(跨会话位置记忆)。
+			std::vector<Wui::DockFloat> memory = std::move(m_Layout.FloatMemory);
+			m_Layout = Wui::DockLayout {};
+			m_Layout.FloatMemory = std::move(memory);
+			m_Layout.Root.Panels = panels;
+			placed = !panels.empty();
+		}
+		else
+		{
+			for (const std::string& id : panels)
+				placed = m_Layout.DockFloating(id, anchor, Wui::DropZone::Center) || placed;
+		}
 		if (placed)
 		{
 			m_AttachSlotHighlight = false;
@@ -772,17 +827,55 @@ namespace World
 			m_TabDragPanel.clear();
 			m_LastDragPos = { 0, 0 };
 			m_AttachCooldownFrames = 45;
-			WLD_CORE_INFO("Independent window attached to slot: {0}", panel);
+			WLD_CORE_INFO("Independent window attached to slot: {0} ({1} panels)", panel, panels.size());
 		}
 	}
 
+	// 隐藏单个面板(标签栏 x / Window 菜单):从所属窗口摘除,窗口为空则销毁。
+	void EditorShell::HideFloatPanel(const std::string& panel, Wui::WuiContext* ctx)
+	{
+		const std::string before = m_Layout.Serialize();
+		if (FloatWindowHost* host = FindFloatHost(panel))
+		{
+			// 写回最后位置:窗口内其余标签仍由它们自己的布局记录继续跟踪。
+			const Wui::WuiRect rect = host->ScreenRect();
+			if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
+				entry->Rect = rect;
+			m_LastFloatRects[panel] = rect;
+			host->RemovePanel(panel);
+			if (host->Empty())
+				EraseFloatHost(host);
+		}
+		m_LastFloatScreenRects.erase(panel);
+		// 宿主不存在时也清掉浮动记录(保持"隐藏即从布局移除"的旧语义)。
+		if (m_Layout.CloseFloating(panel) && ctx)
+			RecordDockChange(*ctx, "hide", panel, before);
+	}
+
+	// 整窗关闭(用户关闭/渲染失败):窗口内全部面板隐藏,布局写回并记录操作。
 	void EditorShell::CloseFloatWindow(const std::string& panel, bool recordChange, Wui::WuiContext* ctx)
 	{
 		const std::string before = m_Layout.Serialize();
-		m_FloatHosts.erase(std::remove_if(m_FloatHosts.begin(), m_FloatHosts.end(),
-			[&](const std::unique_ptr<FloatWindowHost>& host) { return host->Panel() == panel; }),
-			m_FloatHosts.end());
-		if (m_Layout.CloseFloating(panel) && recordChange && ctx)
+		FloatWindowHost* host = FindFloatHost(panel);
+		if (!host)
+		{
+			// 宿主已不存在:仅清理浮动记录,避免残留"看不见的窗口"。
+			if (m_Layout.CloseFloating(panel) && recordChange && ctx)
+				RecordDockChange(*ctx, "hide", panel, before);
+			return;
+		}
+		const std::vector<std::string> panels = host->Panels();
+		const Wui::WuiRect rect = host->ScreenRect();
+		EraseFloatHost(host);
+		bool changed = false;
+		for (const std::string& id : panels)
+		{
+			if (Wui::DockFloat* entry = m_Layout.FindFloat(id))
+				entry->Rect = rect;
+			m_LastFloatRects[id] = rect;
+			changed = m_Layout.CloseFloating(id) || changed;
+		}
+		if (changed && recordChange && ctx)
 			RecordDockChange(*ctx, "hide", panel, before);
 	}
 

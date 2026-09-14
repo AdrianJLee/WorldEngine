@@ -58,6 +58,7 @@ namespace World
 		uint64_t GetIconId(int index) const override;
 		uint64_t GetSceneTextureId() const override;
 		// ---- 独立窗口(与停靠面板不同的组件)----
+		// 计数/索引均按"窗口"而不是"面板":一个窗口可承载多个面板(标签栏)。
 		size_t IndependentWindowCount() const override { return m_FloatHosts.size(); }
 		std::string IndependentWindowPanel(size_t index) const override;
 		void FocusIndependentWindow(const std::string& panel) override;
@@ -80,7 +81,16 @@ namespace World
 		void DrawAttachBar(Wui::WuiContext& ctx);
 		// 独立窗口组件:创建/销毁(与停靠面板不同,各自拥有 OS 窗口)。
 		void AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect, const char* origin);
+		// 整窗关闭(OS 窗口关闭或渲染失败):窗口内全部面板隐藏并写回布局。
 		void CloseFloatWindow(const std::string& panel, bool recordChange, Wui::WuiContext* ctx);
+		// 隐藏单个面板(标签栏 x 或 Window 菜单):窗口为空时销毁该窗口。
+		void HideFloatPanel(const std::string& panel, Wui::WuiContext* ctx);
+		// 承载指定面板的独立窗口查找入口(W7.3 跨窗口附加按它定位目标/源窗口)。
+		// 跨窗口迁移配方:源/目标窗口用 FindFloatHost 定位,面板迁移用 AddPanel/RemovePanel,
+		// 迁移后把该面板的 DockFloat.Rect 写成目标窗口 ScreenRect();源窗口为空则 EraseFloatHost。
+		FloatWindowHost* FindFloatHost(const std::string& panel);
+		// 从 m_FloatHosts 移除宿主,并清理其面板的每窗口屏幕位置缓存。
+		void EraseFloatHost(FloatWindowHost* host);
 		void SaveLayout();
 
 		// 菜单 / 模态 / 布局
