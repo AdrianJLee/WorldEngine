@@ -19,7 +19,7 @@ namespace World::Rhi::Vulkan
 		Extent2D GetExtent() const override;
 		void Resize(Extent2D extent) override;
 		VkSwapchainKHR GetSwapchain() const { return m_Swapchain; }
-		uint32_t GetImageCount() const { return static_cast<uint32_t>(m_Images.size()); }
+		uint32_t GetImageCount() const override { return static_cast<uint32_t>(m_Images.size()); }
 		void TransitionImage(uint32_t index, VkImageLayout layout);
 	private:
 		VulkanDevice& m_Device;

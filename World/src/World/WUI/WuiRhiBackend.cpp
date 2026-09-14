@@ -210,11 +210,12 @@ namespace World::Wui
 		m_Pipeline = device->CreatePipeline(pipelineDesc);
 
 		Rhi::BufferDesc vertexDesc;
-		vertexDesc.Size = static_cast<uint64_t>(MaxQuads) * 4 * sizeof(Vertex);
+		// 按帧槽位分段:每个槽位一段,保证帧 N+1 的上传不覆盖帧 N 仍在读的数据。
+		vertexDesc.Size = static_cast<uint64_t>(MaxQuads) * kFramesInFlight * 4 * sizeof(Vertex);
 		vertexDesc.Usage = Rhi::BufferUsageVertex;
 		vertexDesc.Memory = Rhi::MemoryHint::HostVisible;
 		Rhi::BufferDesc indexDesc;
-		indexDesc.Size = static_cast<uint64_t>(MaxQuads) * 6 * sizeof(uint32_t);
+		indexDesc.Size = static_cast<uint64_t>(MaxQuads) * kFramesInFlight * 6 * sizeof(uint32_t);
 		indexDesc.Usage = Rhi::BufferUsageIndex;
 		indexDesc.Memory = Rhi::MemoryHint::HostVisible;
 		Rhi::BufferDesc uboDesc;

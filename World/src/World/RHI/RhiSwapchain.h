@@ -34,6 +34,8 @@ namespace World::Rhi
 		virtual AcquireResult AcquireNext(const Handle<Semaphore>& signalWhenReady = nullptr) = 0;
 		virtual void Present(const Handle<Semaphore>& waitBeforePresent = nullptr) = 0;
 		virtual Extent2D GetExtent() const = 0;
+		// 交换链图像数量:呈现信号量需按图像配对(不按帧槽位)。
+		virtual uint32_t GetImageCount() const = 0;
 		virtual void Resize(Extent2D extent) = 0;
 	};
 }

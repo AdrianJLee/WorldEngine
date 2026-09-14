@@ -34,8 +34,9 @@ namespace World
 		bool Dirty = true;
 		Rhi::Handle<Rhi::Swapchain> Swapchain;
 		Rhi::Handle<Rhi::CommandQueue> Queue;
-		// 每帧槽位一对信号量(acquire / present),避免帧间互相踩。
-		Rhi::Handle<Rhi::Semaphore> ImageReady[2], RenderDone[2];
+		// 呈现信号量按**交换链图像**配对(Vulkan 规范要求):acquire 信号由渲染该图像的
+		// 提交等待,渲染完成的信号由 Present 等待。按帧槽位配对在帧深 >1 时会互相踩。
+		std::vector<Rhi::Handle<Rhi::Semaphore>> ImageReady, RenderDone;
 		std::vector<Rhi::Handle<Rhi::Framebuffer>> Framebuffers;
 		Rhi::Handle<Rhi::Framebuffer> Framebuffer;
 		Rhi::Handle<Rhi::Texture> Image;
@@ -57,9 +58,9 @@ namespace World
 		}
 
 		// ---- 帧槽位 / 栅栏 / 延迟释放(B0) ----
-		// B0.2:场景/UI 的命令缓冲、UBO/描述符集、顶点索引缓冲已按槽位环形化;
-		// 帧深暂为 1 —— 呈现路径(交换链信号量环)在深度 2 下会呈现空白,待修好再提高。
-		constexpr uint32_t kFramesInFlight = 1;
+		// B0.2:场景/UI 的命令缓冲、UBO/描述符集、顶点索引缓冲按槽位环形化;
+		// 呈现信号量按"acquire 按帧槽位 + render-finished 按交换链图像"配对(Vulkan 规范做法)。
+		constexpr uint32_t kFramesInFlight = 2;
 		uint64_t s_FrameNumber = 0;
 		Rhi::Handle<Rhi::Fence> s_FrameFences[kFramesInFlight];
 		bool s_FrameFenceSubmitted[kFramesInFlight] = {};
@@ -84,6 +85,20 @@ namespace World
 			}
 		}
 
+		// WLD_VK_PRESENT_TRACE=1:逐帧打印 acquire/present 的关键状态(排查"窗口空白")。
+		bool PresentTraceEnabled()
+		{
+			static const bool enabled = std::getenv("WLD_VK_PRESENT_TRACE") != nullptr;
+			return enabled;
+		}
+
+		template <typename... Args>
+		void PresentTrace(const char* format, Args&&... args)
+		{
+			if (PresentTraceEnabled())
+				WLD_CORE_INFO(format, std::forward<decltype(args)>(args)...);
+		}
+
 		void ReleasePresentState(PresentTarget& state)
 		{
 			state.Framebuffers.clear();
@@ -92,11 +107,8 @@ namespace World
 			state.Swapchain = nullptr;
 			// 队列/信号量都属于设备:漏掉任何一个都会在切换后端后用到已销毁设备。
 			state.Queue = nullptr;
-			for (uint32_t i = 0; i < 2; ++i)
-			{
-				state.ImageReady[i] = nullptr;
-				state.RenderDone[i] = nullptr;
-			}
+			state.ImageReady.clear();
+			state.RenderDone.clear();
 			state.Dirty = true;
 		}
 	}
@@ -379,17 +391,27 @@ namespace World
 			state.Swapchain = m_Device->CreateSwapchain(swapDesc);
 			state.Queue = m_Device->CreateQueue("Present");
 			state.QueueDevice = m_Device.get();
+			// acquire 信号量按帧槽位环(它只被同帧的提交消费);
+			// render-finished 信号量按交换链图像配对(Present 等待它,同图像下次 acquire 前必须已被消费)。
+			const uint32_t imageCount = std::max(1u, state.Swapchain->GetImageCount());
+			state.ImageReady.clear();
+			state.RenderDone.clear();
+			state.ImageReady.reserve(kFramesInFlight);
+			state.RenderDone.reserve(imageCount);
 			for (uint32_t i = 0; i < kFramesInFlight; ++i)
-			{
-				state.ImageReady[i] = m_Device->CreateSemaphore();
-				state.RenderDone[i] = m_Device->CreateSemaphore();
-			}
+				state.ImageReady.push_back(m_Device->CreateSemaphore());
+			for (uint32_t i = 0; i < imageCount; ++i)
+				state.RenderDone.push_back(m_Device->CreateSemaphore());
 		}
 		if (!state.Swapchain)
 			return false;
 		// acquire 必须携带信号量或栅栏(VUID 01780);该信号由 UI 提交等待消费,
 		// UI 提交再发出 RenderDone 供 Present 等待。
-		const Rhi::AcquireResult acquired = state.Swapchain->AcquireNext(state.ImageReady[FrameSlot()]);
+		const Rhi::AcquireResult acquired = state.Swapchain->AcquireNext(
+			state.ImageReady.empty() ? nullptr : state.ImageReady[FrameSlot() % state.ImageReady.size()]);
+		PresentTrace("[present] frame={0} acquire image={1} outOfDate={2} swapchain={3}",
+			s_FrameNumber, acquired.ImageIndex, acquired.OutOfDate ? 1 : 0,
+			static_cast<int>(state.Swapchain ? 1 : 0));
 		if (acquired.OutOfDate)
 		{
 			state.Dirty = true;
@@ -421,12 +443,14 @@ namespace World
 	void Renderer::EndFramePresent(PresentTarget* target)
 	{
 		PresentTarget& state = target ? *static_cast<PresentTarget*>(target) : s_MainPresent;
-		if (m_Device && state.Swapchain && state.RenderDone[FrameSlot()])
+		const size_t presentIndex = std::min<size_t>(state.ImageIndex, state.RenderDone.empty() ? 0 : state.RenderDone.size() - 1);
+		if (m_Device && state.Swapchain && !state.RenderDone.empty() && state.RenderDone[presentIndex])
 		{
 			const auto vulkanSwapchain = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanSwapchain>(state.Swapchain);
 			if (vulkanSwapchain && state.Image)
 				vulkanSwapchain->TransitionImage(state.ImageIndex, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-			state.Swapchain->Present(state.RenderDone[FrameSlot()]);
+			state.Swapchain->Present(state.RenderDone[presentIndex]);
+			PresentTrace("[present] presented frame={0} imageIndex={1}", s_FrameNumber, state.ImageIndex);
 		}
 		state.Image = nullptr;
 		state.Framebuffer = nullptr;
@@ -455,14 +479,19 @@ namespace World
 		s_FrameHadSubmission = true;
 		PresentTarget& state = s_ActivePresent ? *s_ActivePresent : s_MainPresent;
 		if (!state.Queue || !state.Image)
+		{
+			PresentTrace("[present] skip UI submit frame={0} queue={1} image={2}",
+				s_FrameNumber, static_cast<int>(state.Queue ? 1 : 0), static_cast<int>(state.Image ? 1 : 0));
 			return;
+		}
 		Rhi::SubmitInfo submit;
 		submit.CommandBuffers = { commandBuffer };
 		const uint32_t slot = FrameSlot();
-		if (state.ImageReady[slot])
-			submit.WaitSemaphores = { state.ImageReady[slot] };
-		if (state.RenderDone[slot])
-			submit.SignalSemaphores = { state.RenderDone[slot] };
+		if (!state.ImageReady.empty())
+			submit.WaitSemaphores = { state.ImageReady[slot % state.ImageReady.size()] };
+		const size_t imageIndex = std::min<size_t>(state.ImageIndex, state.RenderDone.empty() ? 0 : state.RenderDone.size() - 1);
+		if (!state.RenderDone.empty())
+			submit.SignalSemaphores = { state.RenderDone[imageIndex] };
 		// 帧栅栏挂在"本帧最后一次提交"上:场景提交(若有)与本次提交同队列有序,
 		// 因此该 fence 信号即代表整帧 GPU 工作完成。
 		if (!s_FrameFences[slot])
@@ -470,6 +499,8 @@ namespace World
 		submit.Fence = s_FrameFences[slot];
 		s_FrameFenceSubmitted[slot] = true;
 		state.Queue->Submit(submit);
+		PresentTrace("[present] UI submitted frame={0} slot={1} imageIndex={2} fence=1",
+			s_FrameNumber, slot, state.ImageIndex);
 	}
 
 	void Renderer::SubmitScene(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer,

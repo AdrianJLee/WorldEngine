@@ -20,6 +20,7 @@ namespace World::Rhi::OpenGL
 			// 宿主通过 GLFW SwapBuffers 呈现。
 		}
 		Extent2D GetExtent() const override { return m_Extent; }
+		uint32_t GetImageCount() const override { return 1; }   // GL 只有默认帧缓冲
 		void Resize(Extent2D extent) override { m_Extent = extent; }
 
 	private:
