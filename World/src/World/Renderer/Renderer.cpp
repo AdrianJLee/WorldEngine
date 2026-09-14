@@ -23,15 +23,41 @@ namespace World
 	Rhi::Handle<Rhi::Device> Renderer::m_Device = nullptr;
 	static Rhi::Handle<Rhi::DescriptorSetLayout> s_GlobalDescriptorSetLayout;
 	static std::string s_BackendName = "opengl";
-	static Rhi::Handle<Rhi::CommandQueue> s_PresentQueue;
-	static Rhi::Handle<Rhi::Swapchain> s_Swapchain;
 	static Rhi::Handle<Rhi::RenderPass> s_PresentPass;
-	static std::vector<Rhi::Handle<Rhi::Framebuffer>> s_PresentFramebuffers;
-	static Rhi::Handle<Rhi::Texture> s_PresentImage;
-	static Rhi::Handle<Rhi::Framebuffer> s_PresentFramebuffer;
-	static Rhi::Handle<Rhi::Semaphore> s_ImageReady, s_RenderDone;
-	static bool s_SwapchainDirty = true;
-	static uint32_t s_CurrentImageIndex = 0;
+
+	// 每窗口呈现状态(头文件中只前置声明,由 Renderer 创建与销毁)。
+	struct PresentTarget
+	{
+		void* NativeWindow = nullptr;
+		bool IsMain = false;
+		uint32_t Width = 0, Height = 0;
+		bool Dirty = true;
+		Rhi::Handle<Rhi::Swapchain> Swapchain;
+		Rhi::Handle<Rhi::CommandQueue> Queue;
+		Rhi::Handle<Rhi::Semaphore> ImageReady, RenderDone;
+		std::vector<Rhi::Handle<Rhi::Framebuffer>> Framebuffers;
+		Rhi::Handle<Rhi::Framebuffer> Framebuffer;
+		Rhi::Handle<Rhi::Texture> Image;
+		uint32_t ImageIndex = 0;
+	};
+
+	namespace
+	{
+		PresentTarget s_MainPresent;
+		PresentTarget* s_ActivePresent = &s_MainPresent;
+		std::vector<std::unique_ptr<PresentTarget>> s_AuxPresent;
+
+		void ReleasePresentState(PresentTarget& state)
+		{
+			state.Framebuffers.clear();
+			state.Framebuffer = nullptr;
+			state.Image = nullptr;
+			state.Swapchain = nullptr;
+			state.ImageReady = nullptr;
+			state.RenderDone = nullptr;
+			state.Dirty = true;
+		}
+	}
 
 	void Renderer::Init()
 	{
@@ -81,15 +107,10 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		Renderer2D::Shutdown();
 		s_GlobalDescriptorSetLayout = nullptr;
-		s_PresentFramebuffer = nullptr;
-		s_PresentImage = nullptr;
-		s_PresentFramebuffers.clear();
 		s_PresentPass = nullptr;
-		s_Swapchain = nullptr;
-		s_RenderDone = nullptr;
-		s_ImageReady = nullptr;
-		s_PresentQueue = nullptr;
-		s_SwapchainDirty = true;
+		ReleasePresentState(s_MainPresent);
+		s_AuxPresent.clear();
+		s_ActivePresent = &s_MainPresent;
 		m_Device = nullptr;
 		s_BackendName = "opengl";
 	}
@@ -120,7 +141,7 @@ namespace World
 	void Renderer::OnWindowResize(uint32_t width, uint32_t height)
 	{
 		RenderCommand::SetViewport(0, 0, width, height);
-		s_SwapchainDirty = true;
+		s_MainPresent.Dirty = true;
 	}
 
 	Rhi::Handle<Rhi::RenderPass> Renderer::GetPresentRenderPass()
@@ -146,86 +167,124 @@ namespace World
 		return s_PresentPass;
 	}
 
-	void Renderer::BeginFramePresent()
+	PresentTarget* Renderer::MainPresentTarget()
 	{
+		return &s_MainPresent;
+	}
+
+	PresentTarget* Renderer::CreatePresentTarget(const PresentTargetDesc& desc)
+	{
+		auto state = std::make_unique<PresentTarget>();
+		state->NativeWindow = desc.NativeWindow;
+		state->Width = desc.Width;
+		state->Height = desc.Height;
+		s_AuxPresent.push_back(std::move(state));
+		return s_AuxPresent.back().get();
+	}
+
+	void Renderer::DestroyPresentTarget(PresentTarget* target)
+	{
+		if (!target || target == &s_MainPresent)
+			return;
+		auto* state = static_cast<PresentTarget*>(target);
+		if (s_ActivePresent == state)
+			s_ActivePresent = &s_MainPresent;
+		ReleasePresentState(*state);
+		s_AuxPresent.erase(std::remove_if(s_AuxPresent.begin(), s_AuxPresent.end(),
+			[state](const std::unique_ptr<PresentTarget>& candidate) { return candidate.get() == state; }),
+			s_AuxPresent.end());
+	}
+
+	void Renderer::ResizePresentTarget(PresentTarget* target, uint32_t width, uint32_t height)
+	{
+		PresentTarget* state = target ? static_cast<PresentTarget*>(target) : &s_MainPresent;
+		state->Width = width;
+		state->Height = height;
+		state->Dirty = true;
+	}
+
+	bool Renderer::BeginFramePresent(PresentTarget* target)
+	{
+		PresentTarget& state = target ? *static_cast<PresentTarget*>(target) : s_MainPresent;
+		s_ActivePresent = &state;
 		if (!m_Device || s_BackendName != "vulkan")
-			return;
-		if (s_SwapchainDirty || !s_Swapchain)
+			return true; // GL:渲染到各自窗口的默认帧缓冲,无需交换链
+		if (state.Dirty || !state.Swapchain)
 		{
-			s_SwapchainDirty = false;
-			s_PresentFramebuffers.clear();
-			s_PresentFramebuffer = nullptr;
-			s_Swapchain = nullptr;
-			s_ImageReady = nullptr;
-			s_RenderDone = nullptr;
-			if (Application::HasInstance())
-			{
-				Rhi::SwapchainDesc swapDesc;
-				swapDesc.NativeWindow = Application::Get().GetWindow().GetNativeWindow();
-				swapDesc.Format = Rhi::Format::B8G8R8A8_UNORM;
-				swapDesc.Present = Rhi::PresentMode::Fifo;
-				swapDesc.DebugName = "MainSwapchain";
-				s_Swapchain = m_Device->CreateSwapchain(swapDesc);
-				s_PresentQueue = m_Device->CreateQueue("Present");
-				s_ImageReady = m_Device->CreateSemaphore();
-				s_RenderDone = m_Device->CreateSemaphore();
-			}
+			state.Dirty = false;
+			ReleasePresentState(state);
+			void* nativeWindow = state.NativeWindow;
+			if (!nativeWindow && Application::HasInstance())
+				nativeWindow = Application::Get().GetWindow().GetNativeWindow();
+			if (!nativeWindow)
+				return false;
+			Rhi::SwapchainDesc swapDesc;
+			swapDesc.NativeWindow = nativeWindow;
+			swapDesc.Format = Rhi::Format::B8G8R8A8_UNORM;
+			swapDesc.Present = Rhi::PresentMode::Fifo;
+			swapDesc.DebugName = state.IsMain ? "MainSwapchain" : "AuxSwapchain";
+			state.Swapchain = m_Device->CreateSwapchain(swapDesc);
+			state.Queue = m_Device->CreateQueue("Present");
+			state.ImageReady = m_Device->CreateSemaphore();
+			state.RenderDone = m_Device->CreateSemaphore();
 		}
-		if (!s_Swapchain)
-			return;
-		// 帧循环用队列 WaitIdle 串行化,但 acquire 必须携带信号量或栅栏(VUID 01780),
-		// 该信号由 UI 提交等待消费,UI 提交再发出 s_RenderDone 供 Present 等待。
-		const Rhi::AcquireResult acquired = s_Swapchain->AcquireNext(s_ImageReady);
+		if (!state.Swapchain)
+			return false;
+		// acquire 必须携带信号量或栅栏(VUID 01780);该信号由 UI 提交等待消费,
+		// UI 提交再发出 RenderDone 供 Present 等待。
+		const Rhi::AcquireResult acquired = state.Swapchain->AcquireNext(state.ImageReady);
 		if (acquired.OutOfDate)
 		{
-			s_SwapchainDirty = true;
-			return;
+			state.Dirty = true;
+			return false;
 		}
-		s_PresentImage = acquired.Image;
-		s_CurrentImageIndex = acquired.ImageIndex;
-		const auto vulkanSwapchain = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanSwapchain>(s_Swapchain);
-		if (vulkanSwapchain && s_PresentImage)
-			vulkanSwapchain->TransitionImage(s_CurrentImageIndex, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-		if (s_PresentImage)
+		state.Image = acquired.Image;
+		state.ImageIndex = acquired.ImageIndex;
+		const auto vulkanSwapchain = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanSwapchain>(state.Swapchain);
+		if (vulkanSwapchain && state.Image)
+			vulkanSwapchain->TransitionImage(state.ImageIndex, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		if (state.Image)
 		{
-			if (s_PresentFramebuffers.size() <= s_CurrentImageIndex)
-				s_PresentFramebuffers.resize(s_CurrentImageIndex + 1);
-			if (!s_PresentFramebuffers[s_CurrentImageIndex])
+			if (state.Framebuffers.size() <= state.ImageIndex)
+				state.Framebuffers.resize(state.ImageIndex + 1);
+			if (!state.Framebuffers[state.ImageIndex])
 			{
 				Rhi::FramebufferDesc framebufferDesc;
 				framebufferDesc.RenderPass = GetPresentRenderPass();
-				framebufferDesc.Extent = s_Swapchain->GetExtent();
-				framebufferDesc.Attachments = { s_PresentImage };
+				framebufferDesc.Extent = state.Swapchain->GetExtent();
+				framebufferDesc.Attachments = { state.Image };
 				framebufferDesc.DebugName = "Present";
-				s_PresentFramebuffers[s_CurrentImageIndex] = m_Device->CreateFramebuffer(framebufferDesc);
+				state.Framebuffers[state.ImageIndex] = m_Device->CreateFramebuffer(framebufferDesc);
 			}
-			s_PresentFramebuffer = s_PresentFramebuffers[s_CurrentImageIndex];
+			state.Framebuffer = state.Framebuffers[state.ImageIndex];
 		}
+		return true;
 	}
 
-	void Renderer::EndFramePresent()
+	void Renderer::EndFramePresent(PresentTarget* target)
 	{
-		if (m_Device && s_Swapchain && s_RenderDone)
+		PresentTarget& state = target ? *static_cast<PresentTarget*>(target) : s_MainPresent;
+		if (m_Device && state.Swapchain && state.RenderDone)
 		{
-			const auto vulkanSwapchain = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanSwapchain>(s_Swapchain);
-			if (vulkanSwapchain && s_PresentImage)
-				vulkanSwapchain->TransitionImage(s_CurrentImageIndex, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-			s_Swapchain->Present(s_RenderDone);
-			if (s_PresentQueue)
-				s_PresentQueue->WaitIdle();
+			const auto vulkanSwapchain = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanSwapchain>(state.Swapchain);
+			if (vulkanSwapchain && state.Image)
+				vulkanSwapchain->TransitionImage(state.ImageIndex, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+			state.Swapchain->Present(state.RenderDone);
+			if (state.Queue)
+				state.Queue->WaitIdle();
 		}
-		s_PresentImage = nullptr;
-		s_PresentFramebuffer = nullptr;
+		state.Image = nullptr;
+		state.Framebuffer = nullptr;
 	}
 
 	Rhi::Handle<Rhi::Framebuffer> Renderer::GetPresentFramebuffer()
 	{
-		return s_PresentFramebuffer;
+		return s_ActivePresent ? s_ActivePresent->Framebuffer : Rhi::Handle<Rhi::Framebuffer>();
 	}
 
 	Rhi::Handle<Rhi::Texture> Renderer::GetPresentTarget()
 	{
-		return s_PresentImage;
+		return s_ActivePresent ? s_ActivePresent->Image : Rhi::Handle<Rhi::Texture>();
 	}
 
 	void Renderer::SubmitUi(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer)
@@ -234,17 +293,18 @@ namespace World
 			return;
 		if (s_BackendName != "vulkan")
 			return; // OpenGL 立即模式
-		if (!s_PresentQueue || !s_PresentImage)
+		PresentTarget& state = s_ActivePresent ? *s_ActivePresent : s_MainPresent;
+		if (!state.Queue || !state.Image)
 			return;
 		Rhi::SubmitInfo submit;
 		submit.CommandBuffers = { commandBuffer };
-		if (s_ImageReady)
-			submit.WaitSemaphores = { s_ImageReady };
-		if (s_RenderDone)
-			submit.SignalSemaphores = { s_RenderDone };
-		s_PresentQueue->Submit(submit);
+		if (state.ImageReady)
+			submit.WaitSemaphores = { state.ImageReady };
+		if (state.RenderDone)
+			submit.SignalSemaphores = { state.RenderDone };
+		state.Queue->Submit(submit);
 		// 帧循环串行化:提交后等待队列空闲,下一帧才可安全复用命令缓冲与资源。
-		s_PresentQueue->WaitIdle();
+		state.Queue->WaitIdle();
 	}
 
 	void Renderer::SubmitScene(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer,
@@ -254,12 +314,13 @@ namespace World
 			return;
 		if (s_BackendName != "vulkan")
 			return; // OpenGL 立即模式
-		if (!s_PresentQueue)
+		PresentTarget& state = s_ActivePresent ? *s_ActivePresent : s_MainPresent;
+		if (!state.Queue)
 			return;
 		Rhi::SubmitInfo submit;
 		submit.CommandBuffers = { commandBuffer };
-		s_PresentQueue->Submit(submit);
-		s_PresentQueue->WaitIdle();
+		state.Queue->Submit(submit);
+		state.Queue->WaitIdle();
 		if (colorTexture)
 		{
 			const auto texture = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanTexture>(colorTexture);

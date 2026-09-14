@@ -9,6 +9,8 @@ namespace World
 	{
 	public:
 		WindowsWindow(const WindowProps& props);
+		// 附加窗口:不重复初始化 GLFW/Vulkan 设备,GL 共享主窗口上下文。
+		WindowsWindow(const WindowProps& props, GLFWwindow* shareWindow, bool auxiliary);
 		virtual ~WindowsWindow();
 
 		void OnUpdate() override;
@@ -24,12 +26,24 @@ namespace World
 
 		inline virtual void* GetNativeWindow() const override { return m_Window; };
 
+		void MakeCurrent() override;
+		void SwapBuffers() override;
+		void SetPosition(int x, int y) override;
+		void GetPosition(int* x, int* y) const override;
+		void SetSize(uint32_t width, uint32_t height) override;
+		bool ShouldClose() const override;
+		void SetShouldClose(bool shouldClose) override;
+
 	private:
 		virtual void Init(const WindowProps& props);
 		virtual void Shutdown();
 	private:
 		GLFWwindow* m_Window;
 		class GraphicsContext* m_Context;
+		// 附加窗口:GL 共享上下文,不拥有 GLFW 初始化;Vulkan 窗口不建 GL 上下文。
+		bool m_Auxiliary = false;
+		bool m_HasGLContext = true;
+		GLFWwindow* m_ShareWindow = nullptr;
 
 		struct WindowData
 		{

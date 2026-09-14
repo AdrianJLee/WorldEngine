@@ -80,7 +80,7 @@ namespace World::Wui
 
 	bool WuiRhiBackend::BeginFrame(WuiInputState& input)
 	{
-		if (Application::HasInstance())
+		if (Application::HasInstance() && !m_UseLocalInput)
 		{
 			m_Viewport = { static_cast<float>(Application::Get().GetWindow().GetWidth()),
 				static_cast<float>(Application::Get().GetWindow().GetHeight()) };
@@ -89,8 +89,18 @@ namespace World::Wui
 		if (m_LastTime > 0 && now > m_LastTime)
 			m_Fps = static_cast<float>(1.0 / (now - m_LastTime));
 		m_LastTime = now;
-		s_Input.BeginFrame(input, m_Viewport, m_Fps);
+		if (m_UseLocalInput)
+			m_LocalInput.BeginFrame(input, m_Viewport, m_Fps);
+		else
+			s_Input.BeginFrame(input, m_Viewport, m_Fps);
 		return true;
+	}
+
+	void WuiRhiBackend::UseLocalInput(glm::vec2 viewport)
+	{
+		m_UseLocalInput = true;
+		m_Viewport = viewport;
+		m_CursorWindow = nullptr;
 	}
 
 	void WuiRhiBackend::ReleaseResources()
@@ -662,10 +672,15 @@ namespace World::Wui
 
 	void WuiRhiBackend::EndFrame(WuiCursor cursor)
 	{
-		s_Input.EndFrame();
-		if (!Application::HasInstance())
-			return;
-		GLFWwindow* window = static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow());
+		if (m_UseLocalInput)
+			m_LocalInput.EndFrame();
+		else
+			s_Input.EndFrame();
+		GLFWwindow* window = m_CursorWindow
+			? static_cast<GLFWwindow*>(m_CursorWindow)
+			: (Application::HasInstance()
+				? static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow())
+				: nullptr);
 		if (!window)
 			return;
 		int index = 0;

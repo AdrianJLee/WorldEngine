@@ -5,6 +5,16 @@
 
 namespace World
 {
+	// 每窗口一个呈现目标:主窗口由 Renderer 内部维护,独立浮动窗口按需创建。
+	struct PresentTargetDesc
+	{
+		void* NativeWindow = nullptr;
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+		std::string DebugName;
+	};
+	struct PresentTarget;
+
 	class Renderer
 	{
 	public:
@@ -13,8 +23,13 @@ namespace World
 		static void Shutdown();
 		static void OnWindowResize(uint32_t width, uint32_t height);
 		// ---- 帧呈现编排(UI/场景合成到窗口)----
-		static void BeginFramePresent();
-		static void EndFramePresent();
+		static PresentTarget* MainPresentTarget();
+		static PresentTarget* CreatePresentTarget(const PresentTargetDesc& desc);
+		static void DestroyPresentTarget(PresentTarget* target);
+		static void ResizePresentTarget(PresentTarget* target, uint32_t width, uint32_t height);
+		// target=nullptr 表示主窗口。
+		static bool BeginFramePresent(PresentTarget* target = nullptr);
+		static void EndFramePresent(PresentTarget* target = nullptr);
 		static Rhi::Handle<Rhi::RenderPass> GetPresentRenderPass();
 		static Rhi::Handle<Rhi::Framebuffer> GetPresentFramebuffer();
 		static Rhi::Handle<Rhi::Texture> GetPresentTarget();

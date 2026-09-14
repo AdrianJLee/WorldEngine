@@ -27,6 +27,16 @@ namespace World::Wui
 		static void FeedMouseMove(float x, float y);
 		static void FeedMouseScroll(float dx, float dy);
 
+		// ---- 独立窗口支持:本实例单独收集输入与视口,不与主窗口共享 ----
+		void UseLocalInput(glm::vec2 viewport);
+		void SetViewportSize(glm::vec2 viewport) { m_Viewport = viewport; }
+		void SetCursorWindow(void* nativeWindow) { m_CursorWindow = nativeWindow; }
+		void LocalKey(uint32_t keyCode, bool down, bool repeat) { m_LocalInput.OnKey(keyCode, down, repeat); }
+		void LocalChar(uint32_t codepoint) { m_LocalInput.OnChar(codepoint); }
+		void LocalMouseButton(int button, bool down) { m_LocalInput.OnMouseButton(button, down); }
+		void LocalMouseMove(float x, float y) { m_LocalInput.OnMouseMove(x, y); }
+		void LocalMouseScroll(float dx, float dy) { m_LocalInput.OnMouseScroll(dx, dy); }
+
 		bool BeginFrame(WuiInputState& input) override;
 		void Render(const std::vector<WuiDrawCommand>& commands, const std::vector<WuiDrawCommand>& overlayCommands) override;
 		void EndFrame(WuiCursor cursor = WuiCursor::Arrow) override;
@@ -70,6 +80,9 @@ namespace World::Wui
 		void DrawImageCommand(const WuiDrawCommand& command);
 
 		static WuiInputCollector s_Input;
+		WuiInputCollector m_LocalInput;
+		bool m_UseLocalInput = false;
+		void* m_CursorWindow = nullptr;
 
 		glm::vec2 m_Viewport {};
 		float m_Fps = 0;

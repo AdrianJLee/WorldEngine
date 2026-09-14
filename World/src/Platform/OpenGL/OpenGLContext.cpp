@@ -6,8 +6,8 @@
 
 namespace World
 {
-	OpenGLContext::OpenGLContext(GLFWwindow* windowHandle)
-		:m_WindowHandle(windowHandle)
+	OpenGLContext::OpenGLContext(GLFWwindow* windowHandle, bool initializeLoader)
+		: m_WindowHandle(windowHandle), m_InitializeLoader(initializeLoader)
 	{
 		WLD_CORE_ASSERT(windowHandle, "Window handle is null!");
 	}
@@ -18,6 +18,8 @@ namespace World
 
 		// Make the OpenGL context current
 		glfwMakeContextCurrent(m_WindowHandle);
+		if (!m_InitializeLoader)
+			return; // 共享上下文的附加窗口:GLAD 指针由主窗口加载
 		int status = gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 		WLD_CORE_ASSERT(status, "Failed to initialize GLAD!");
 

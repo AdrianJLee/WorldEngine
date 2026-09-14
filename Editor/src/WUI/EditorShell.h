@@ -6,6 +6,7 @@
 #include "Panels/ReadoutPanels.h"
 #include "Panels/ViewportPanel.h"
 #include "Panels/WidgetGalleryPanel.h"
+#include "FloatWindowHost.h"
 
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiDock.h"
@@ -66,7 +67,9 @@ namespace World
 		void RenderPanelContent(Wui::WuiContext& ctx, const std::string& id, const Wui::WuiRect& rect);
 		// 浮动面板:在停靠区之上绘制,支持拖动/缩放/关闭与拖回停靠。
 		void RenderFloating(Wui::WuiContext& ctx);
-		void RenderFloatWindow(Wui::WuiContext& ctx, Wui::DockFloat& window, bool* closed);
+		// 独立窗口组件:创建/销毁(与停靠面板不同,各自拥有 OS 窗口)。
+		void AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect);
+		void CloseFloatWindow(const std::string& panel, bool recordChange, Wui::WuiContext* ctx);
 		void SaveLayout();
 
 		// 菜单 / 模态 / 布局
@@ -110,6 +113,7 @@ namespace World
 		Wui::WuiRect m_FloatResizeRect;
 		std::string m_FloatChangeBefore;    // 浮动移动/缩放前的布局快照(操作日志)
 		std::string m_BringFloatFront;      // 本帧请求置顶的浮动面板(下一帧生效)
+		std::vector<std::unique_ptr<FloatWindowHost>> m_FloatHosts;
 
 		// 菜单栏(保留模式树)。
 		std::shared_ptr<Wui::WuiBox> m_MenuBar;

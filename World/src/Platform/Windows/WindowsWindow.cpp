@@ -26,8 +26,22 @@ namespace World
 		return new WindowsWindow(props);
 	}
 
+	Window* Window::CreateAuxiliary(const WindowProps& props, Window* share)
+	{
+		GLFWwindow* shareWindow = share ? static_cast<GLFWwindow*>(share->GetNativeWindow()) : nullptr;
+		return new WindowsWindow(props, shareWindow, true);
+	}
+
 	WindowsWindow::WindowsWindow(const WindowProps& props)
 	{
+		Init(props);
+	}
+
+	WindowsWindow::WindowsWindow(const WindowProps& props, GLFWwindow* shareWindow, bool auxiliary)
+		: m_Auxiliary(auxiliary), m_ShareWindow(shareWindow)
+	{
+		// Vulkan 模式下附加窗口不建 GL 上下文(交换链由 RHI 的 present target 创建)。
+		m_HasGLContext = Renderer::GetBackendName() != "vulkan";
 		Init(props);
 	}
 
@@ -56,15 +70,22 @@ namespace World
 				WLD_CORE_ASSERT(success, "Could not initialize GLFW!");
 			}
 			glfwSetErrorCallback(GLFWErrorCallback);
-			s_GLFWInitialized = true;
+			if (!m_Auxiliary)
+				s_GLFWInitialized = true;
 		}
 
 		{
 			WLD_PROFILE_SCOPE("glfwCreateWindow");
-			m_Window = glfwCreateWindow((int)props.Widdth, (int)props.Height, m_Data.Title.c_str(), nullptr, nullptr);
+			if (m_Auxiliary && !m_HasGLContext)
+				glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // Vulkan:交换链由 RHI 创建
+			m_Window = glfwCreateWindow((int)props.Widdth, (int)props.Height, m_Data.Title.c_str(), nullptr,
+				m_Auxiliary ? m_ShareWindow : nullptr);
 		}
-		m_Context = new OpenGLContext(m_Window);
-		m_Context->Init();
+		if (m_HasGLContext)
+		{
+			m_Context = new OpenGLContext(m_Window, !m_Auxiliary);
+			m_Context->Init();
+		}
 
 		// Set the user pointer to our window data
 		glfwSetWindowUserPointer(m_Window, &m_Data);
@@ -178,7 +199,10 @@ namespace World
 			DispatchMessageW(&message);
 		}
 
+		delete m_Context;
+		m_Context = nullptr;
 		glfwDestroyWindow(m_Window);
+		m_Window = nullptr;
 
 		while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
 		{
@@ -195,7 +219,7 @@ namespace World
 		glfwPollEvents();
 
 		// Vulkan 由交换链 Present 呈现;GL 保持 glfwSwapBuffers。
-		if (Renderer::GetBackendName() != "vulkan")
+		if (m_Context && Renderer::GetBackendName() != "vulkan")
 			m_Context->SwapBuffers();
 	}
 
@@ -209,6 +233,46 @@ namespace World
 			glfwSwapInterval(0);
 
 		m_Data.VSync = enabled;
+	}
+
+	void WindowsWindow::MakeCurrent()
+	{
+		glfwMakeContextCurrent(m_Window);
+	}
+
+	void WindowsWindow::SwapBuffers()
+	{
+		// Vulkan 由 present target 呈现;GL 交换该窗口的缓冲。
+		if (m_HasGLContext)
+			glfwSwapBuffers(m_Window);
+	}
+
+	void WindowsWindow::SetPosition(int x, int y)
+	{
+		glfwSetWindowPos(m_Window, x, y);
+	}
+
+	void WindowsWindow::GetPosition(int* x, int* y) const
+	{
+		int px = 0, py = 0;
+		glfwGetWindowPos(m_Window, &px, &py);
+		if (x) *x = px;
+		if (y) *y = py;
+	}
+
+	void WindowsWindow::SetSize(uint32_t width, uint32_t height)
+	{
+		glfwSetWindowSize(m_Window, static_cast<int>(width), static_cast<int>(height));
+	}
+
+	bool WindowsWindow::ShouldClose() const
+	{
+		return glfwWindowShouldClose(m_Window) != 0;
+	}
+
+	void WindowsWindow::SetShouldClose(bool shouldClose)
+	{
+		glfwSetWindowShouldClose(m_Window, shouldClose ? GLFW_TRUE : GLFW_FALSE);
 	}
 
 	bool WindowsWindow::IsVsync() const
