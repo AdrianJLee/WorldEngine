@@ -246,4 +246,113 @@ namespace World::Wui
 		}
 		return submitted;
 	}
+
+	// ---- 列表视图 ----
+
+	ListViewResult ListView(WuiContext& ctx, const WuiRect& area, const std::vector<ListViewItem>& items,
+		float rowHeight, float& scrollY, const WuiTheme& theme)
+	{
+		ListViewResult result;
+		const float contentHeight = rowHeight * static_cast<float>(items.size()) + 8.0f;
+		BeginScrollArea(ctx, area, contentHeight, scrollY, theme);
+		for (size_t i = 0; i < items.size(); ++i)
+		{
+			const ListViewItem& item = items[i];
+			const WuiRect row { area.X + 4.0f, area.Y + 4.0f + rowHeight * static_cast<float>(i) - scrollY,
+				std::max(0.0f, area.W - 8.0f), rowHeight };
+			if (row.Y + row.H < area.Y || row.Y > area.Y + area.H)
+				continue; // 视野外:不绘制也不命中
+			const bool hovered = !item.Disabled && ctx.IsHovered(row);
+			if (hovered)
+				result.Hovered = static_cast<int>(i);
+
+			if (item.Selected)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.PanelBg, 2.0f });
+			else if (hovered)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.ButtonHover, 2.0f });
+
+			float textX = row.X + 6.0f;
+			if (item.Icon != 0)
+			{
+				const float icon = 16.0f;
+				ctx.Commands().push_back({ WuiDrawKind::Image,
+					{ row.X + 4.0f, row.Y + (row.H - icon) * 0.5f, icon, icon },
+					WuiColor { 1, 1, 1, item.Disabled ? 0.4f : 1.0f }, 0.0f, 1.0f, "", 15.0f, false, item.Icon, item.Uv });
+				textX = row.X + 24.0f;
+			}
+			PushText(ctx, { textX, row.Y + (row.H - 14.0f) * 0.5f }, item.Label,
+				item.Disabled ? theme.TextMuted : theme.Text, 14.0f, item.Selected);
+			if (!item.SubLabel.empty())
+				PushText(ctx, { row.X + row.W - 8.0f - 7.0f * static_cast<float>(item.SubLabel.size()),
+					row.Y + (row.H - 13.0f) * 0.5f }, item.SubLabel, theme.TextMuted, 13.0f);
+
+			if (item.Disabled)
+				continue;
+			if (ctx.Input().MouseClicked[1] && hovered)
+				result.ContextClicked = static_cast<int>(i);
+			if (ctx.IsDoubleClicked(row))
+				result.DoubleClicked = static_cast<int>(i);
+			else if (ctx.IsClicked(row))
+				result.Clicked = static_cast<int>(i);
+		}
+		EndScrollArea(ctx);
+		return result;
+	}
+
+	// ---- 网格视图 ----
+
+	GridViewResult GridView(WuiContext& ctx, const WuiRect& area, const std::vector<GridViewItem>& items,
+		float cellWidth, float cellHeight, float& scrollY, const WuiTheme& theme)
+	{
+		GridViewResult result;
+		const int columns = std::max(1, static_cast<int>(area.W / std::max(1.0f, cellWidth)));
+		const float slotW = area.W / static_cast<float>(columns);
+		const int rows = static_cast<int>((items.size() + static_cast<size_t>(columns) - 1) / static_cast<size_t>(columns));
+		const float contentHeight = cellHeight * static_cast<float>(rows) + 8.0f;
+		BeginScrollArea(ctx, area, contentHeight, scrollY, theme);
+		for (size_t i = 0; i < items.size(); ++i)
+		{
+			const GridViewItem& item = items[i];
+			const int column = static_cast<int>(i) % columns;
+			const int rowIndex = static_cast<int>(i) / columns;
+			const WuiRect cell { area.X + slotW * static_cast<float>(column) + 4.0f,
+				area.Y + 4.0f + cellHeight * static_cast<float>(rowIndex) - scrollY,
+				std::max(0.0f, slotW - 8.0f), cellHeight - 4.0f };
+			if (cell.Y + cell.H < area.Y || cell.Y > area.Y + area.H)
+				continue;
+			const bool hovered = !item.Disabled && ctx.IsHovered(cell);
+			if (hovered)
+				result.Hovered = static_cast<int>(i);
+
+			if (item.Selected)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, cell, theme.PanelBg, 3.0f });
+			else if (hovered)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, cell, theme.ButtonHover, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, cell,
+				item.Selected ? theme.Accent : theme.Border, 3.0f, 1.0f });
+
+			if (item.Icon != 0)
+			{
+				const float icon = std::min(cell.W - 16.0f, cell.H - 30.0f);
+				if (icon > 4.0f)
+					ctx.Commands().push_back({ WuiDrawKind::Image,
+						{ cell.X + (cell.W - icon) * 0.5f, cell.Y + 8.0f, icon, icon },
+						WuiColor { 1, 1, 1, item.Disabled ? 0.4f : 1.0f }, 0.0f, 1.0f, "", 15.0f, false, item.Icon, item.Uv });
+			}
+			const float labelW = 7.0f * static_cast<float>(item.Label.size());
+			PushText(ctx, { cell.X + std::max(4.0f, (cell.W - labelW) * 0.5f), cell.Y + cell.H - 20.0f },
+				item.Label, item.Disabled ? theme.TextMuted : theme.Text, 13.0f, item.Selected);
+
+			if (item.Disabled)
+				continue;
+			if (ctx.Input().MouseClicked[1] && hovered)
+				result.ContextClicked = static_cast<int>(i);
+			if (ctx.IsDoubleClicked(cell))
+				result.DoubleClicked = static_cast<int>(i);
+			else if (ctx.IsClicked(cell))
+				result.Clicked = static_cast<int>(i);
+		}
+		EndScrollArea(ctx);
+		return result;
+	}
 }

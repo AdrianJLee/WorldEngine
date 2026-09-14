@@ -75,4 +75,51 @@ namespace World::Wui
 	// 带放大镜占位与清除按钮的文本框;返回回车提交。
 	bool SearchField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
 		const std::string& placeholder, const WuiTheme& theme);
+
+	// ---- 列表视图 ----
+	struct ListViewItem
+	{
+		WuiId Id = 0;
+		std::string Label;
+		std::string SubLabel;      // 可选:右侧灰色副标题(如文件大小/类型)
+		uint64_t Icon = 0;         // 可选图标纹理
+		WuiRect Uv { 0, 0, 1, 1 };
+		bool Selected = false;
+		bool Disabled = false;
+	};
+
+	struct ListViewResult
+	{
+		int Clicked = -1;         // 单击(用于选中)
+		int DoubleClicked = -1;   // 双击(用于打开)
+		int ContextClicked = -1;  // 右键(用于上下文菜单)
+		int Hovered = -1;
+	};
+
+	// 行列表:自带滚动裁剪与滚轮滚动(scrollY 由调用方持有)。
+	ListViewResult ListView(WuiContext& ctx, const WuiRect& area, const std::vector<ListViewItem>& items,
+		float rowHeight, float& scrollY, const WuiTheme& theme);
+
+	// ---- 网格视图 ----
+	struct GridViewItem
+	{
+		WuiId Id = 0;
+		std::string Label;
+		uint64_t Icon = 0;
+		WuiRect Uv { 0, 0, 1, 1 };
+		bool Selected = false;
+		bool Disabled = false;
+	};
+
+	struct GridViewResult
+	{
+		int Clicked = -1;
+		int DoubleClicked = -1;
+		int ContextClicked = -1;
+		int Hovered = -1;
+	};
+
+	// 图标网格:按 cellWidth/cellHeight 自动换行,自带滚动裁剪。
+	GridViewResult GridView(WuiContext& ctx, const WuiRect& area, const std::vector<GridViewItem>& items,
+		float cellWidth, float cellHeight, float& scrollY, const WuiTheme& theme);
 }
