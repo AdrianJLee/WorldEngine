@@ -57,7 +57,7 @@ namespace World
 		m_PanelRegistry.emplace("windows", std::make_unique<WindowsPanel>());
 		// 独立窗口(与停靠面板是不同组件):按保存的浮动布局重建。
 		for (const Wui::DockFloat& entry : m_Layout.Floating)
-			AddFloatWindow(entry.Panel, entry.Rect);
+			AddFloatWindow(entry.Panel, entry.Rect, "restore");
 	}
 
 	EditorShell::~EditorShell() = default;
@@ -335,7 +335,10 @@ namespace World
 		{
 			m_DragPanel = activePayload.substr(6);
 			m_LastDragPos = ctx.Input().MousePos;
-			if (!dropConsumed && m_AttachCooldownFrames <= 0 && m_Layout.Contains(m_DragPanel))
+			// 只有"本次拖拽确实起手于该面板的标签页"时才允许拖出为独立窗口;
+			// 否则残留的拖拽状态会在挂靠后立刻把面板再次浮出(表现为多出一个窗口)。
+			if (!dropConsumed && m_AttachCooldownFrames <= 0 && m_Layout.Contains(m_DragPanel)
+				&& m_TabDragPanel == m_DragPanel)
 			{
 				// 拖出即成为独立 OS 窗口:按原停靠尺寸创建,放在鼠标所在的屏幕位置。
 				Wui::WuiRect source { m_LastDragPos.x - 40.0f, m_LastDragPos.y - 12.0f, 480.0f, 320.0f };
@@ -368,7 +371,7 @@ namespace World
 				if (m_Layout.Float(m_DragPanel, source))
 				{
 					RecordDockChange(ctx, "float", m_DragPanel, before);
-					AddFloatWindow(m_DragPanel, source);
+					AddFloatWindow(m_DragPanel, source, "drag-out");
 				}
 			}
 		}
@@ -487,6 +490,8 @@ namespace World
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 			if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab))
 				ctx.BeginDrag(Wui::HashId(("tab." + panel).c_str()), "panel:" + panel);
+			if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab))
+				m_TabDragPanel = panel; // 记录本次拖拽的真实来源
 
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { tab.X + 6, tab.Y + 3, 0, 0 }, m_Theme.Text, 0, 1.0f, PanelTitle(panel), 14.0f, false });
 			const Wui::WuiRect close { tab.X + tab.W - 18, tab.Y + 4, 14, 14 };
@@ -666,8 +671,10 @@ namespace World
 			Application::Get().GetWindow().MakeCurrent();
 	}
 
-	void EditorShell::AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect)
+	void EditorShell::AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect, const char* origin)
 	{
+		WLD_CORE_INFO("[float] AddFloatWindow panel={0} origin={1} rect=({2},{3},{4},{5})",
+			panel, origin, screenRect.X, screenRect.Y, screenRect.W, screenRect.H);
 		// 独立窗口内容 = 该面板自身;停靠时的 tab/标题栏由停靠组件负责,这里只有面板内容。
 		auto content = [this, panel](Wui::WuiContext& ctx, const Wui::WuiRect& rect)
 		{
@@ -743,6 +750,7 @@ namespace World
 			// 刚挂靠回停靠树的面板再次"拖出"成独立窗口。
 			m_DragPanel.clear();
 			m_MovingFloat.clear();
+			m_TabDragPanel.clear();
 			m_LastDragPos = { 0, 0 };
 			m_AttachCooldownFrames = 45;
 			WLD_CORE_INFO("Independent window attached to slot: {0}", panel);
