@@ -6,6 +6,7 @@
 #include "World/WUI/WuiDock.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLayoutStore.h"
+#include "World/WUI/WuiWidget.h"
 
 #include <filesystem>
 #include <cstdio>
@@ -379,6 +380,108 @@ int main()
 			EndMenu(ctx, menuId, { header.X, 24, 240, 60 }, theme);
 			ctx.PopOverlay();
 			CHECK(ctx.IsPopupOpen(menuId));
+			ctx.EndFrame();
+		}
+
+		// 保留模式 widget 树:列布局、grow 与命中顺序
+		{
+			const auto root = std::make_shared<WuiBox>();
+			root->Direction = WuiDirection::Column;
+			root->Gap = 4;
+			root->AlignCross = WuiAlign::Stretch;
+
+			const auto top = std::make_shared<WuiLabel>();
+			top->Text = "Header";
+			top->FixedHeight = 24;
+
+			const auto row = std::make_shared<WuiBox>();
+			row->Direction = WuiDirection::Row;
+			row->AlignCross = WuiAlign::Stretch;
+			row->Gap = 4;
+
+			const auto left = std::make_shared<WuiButton>();
+			left->Label = "Left";
+			left->SetId(HashId("btn.left"));
+			const auto right = std::make_shared<WuiButton>();
+			right->Label = "Right";
+			right->SetId(HashId("btn.right"));
+			row->Add(left, { 0, 1e30f, 0, 1e30f, 1 });
+			row->Add(right, { 0, 1e30f, 0, 1e30f, 1 });
+
+			root->Add(top);
+			root->Add(row, { 0, 1e30f, 0, 1e30f, 1 });
+
+			LayoutWidgetTree(root, { 10, 10, 200, 100 });
+			CHECK(Near(root->Rect().X, 10) && Near(root->Rect().W, 200));
+			CHECK(Near(top->Rect().H, 24));
+			CHECK(Near(row->Rect().Y, 10 + 24 + 4));
+			CHECK(Near(left->Rect().W, 98) && Near(right->Rect().W, 98));
+
+			// 命中:右侧按钮优先命中其自身,空白处回退到容器。
+			CHECK(root->HitTest({ 160, 60 }) == right);
+			CHECK(root->HitTest({ 60, 60 }) == left);
+			CHECK(root->HitTest({ -5, -5 }) == nullptr);
+
+			// 脏标记:无变化时布局结果被缓存,再次 arrange 不改变矩形。
+			left->Invalidate();
+			CHECK(root->IsDirty());
+			LayoutWidgetTree(root, { 10, 10, 200, 100 });
+			CHECK(!root->IsDirty());
+
+			// 绘制输出命令。
+			WuiContext ctx;
+			WuiInputState input;
+			ctx.BeginFrame(input);
+			WuiPaintContext paint(ctx);
+			root->Paint(paint);
+			CHECK(ctx.Commands().size() >= 5);
+			ctx.EndFrame();
+		}
+
+		// M2 控件:TextField/DragInt/Combo/ScrollArea 的布局与命令输出
+		{
+			WuiContext ctx;
+			WuiInputState input;
+			ctx.BeginFrame(input);
+
+			std::string buffer = "hello";
+			const auto field = std::make_shared<WuiTextField>();
+			field->Buffer = &buffer;
+			LayoutWidgetTree(field, { 0, 0, 200, 24 });
+			CHECK(Near(field->Rect().W, 200) && Near(field->Rect().H, 24));
+			WuiPaintContext paint(ctx);
+			field->Paint(paint);
+			CHECK(ctx.Commands().size() >= 2);
+
+			int64_t integer = 3;
+			const auto drag = std::make_shared<WuiDragInt>();
+			drag->Value = &integer;
+			drag->SetId(HashId("drag.i"));
+			LayoutWidgetTree(drag, { 0, 0, 100, 22 });
+			drag->Paint(paint);
+			CHECK(integer == 3);
+
+			std::vector<std::string> options = { "A", "B" };
+			int selected = 1;
+			const auto combo = std::make_shared<WuiCombo>();
+			combo->Options = &options;
+			combo->Selected = &selected;
+			combo->SetId(HashId("combo"));
+			LayoutWidgetTree(combo, { 0, 0, 120, 24 });
+			combo->Paint(paint);
+			CHECK(selected == 1);
+
+			const auto scroll = std::make_shared<WuiScrollArea>();
+			const auto content = std::make_shared<WuiLabel>();
+			content->Text = "content";
+			content->FixedHeight = 1000;
+			scroll->ContentHeight = 1000;
+			scroll->Child = content;
+			LayoutWidgetTree(scroll, { 0, 0, 100, 100 });
+			scroll->Paint(paint);
+			CHECK(scroll->HitTest({ 50, 50 }) == content);
+			CHECK(scroll->HitTest({ 500, 500 }) == nullptr);
+
 			ctx.EndFrame();
 		}
 
