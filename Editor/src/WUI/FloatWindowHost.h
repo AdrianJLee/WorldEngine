@@ -26,6 +26,9 @@ namespace World
 			std::function<void(Wui::WuiContext&, const Wui::WuiRect&, const std::string&)> Content;
 			// 标签按下并拖动超过阈值时触发;EditorShell 据此启动跨窗口附加拖拽。
 			std::function<void(const std::string& panel)> TabDragStart;
+			// 窗口自带菜单的动作(每个独立窗口有自己的菜单栏)。
+			std::function<void(const std::string& panel)> DockToMain;
+			std::function<void(const std::string& panel)> CloseWindow;
 		};
 
 		FloatWindowHost(std::string panel, std::string title, const Wui::WuiRect& screenRect, Callbacks callbacks);
@@ -71,6 +74,8 @@ namespace World
 	private:
 		void OnEvent(Event& e);
 		void RenderTabBar(Wui::WuiContext& ctx, const Wui::WuiRect& area);
+		void RenderWindowMenu(Wui::WuiContext& ctx, const Wui::WuiRect& bar);
+		bool m_MenuOpen = false;
 		std::string TitleOf(const std::string& panel) const;
 
 		std::string m_Panel;   // 窗口创建时的首个面板(日志/截图命名用,窗口身份 = 面板集合)

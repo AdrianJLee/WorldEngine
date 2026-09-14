@@ -244,16 +244,60 @@ namespace World
 		return m_Callbacks.Title ? m_Callbacks.Title(panel) : panel;
 	}
 
+	// 每个独立窗口自己的菜单栏(左下角 ☰):关闭本窗口 / 挂靠回主窗口。
+	void FloatWindowHost::RenderWindowMenu(Wui::WuiContext& ctx, const Wui::WuiRect& bar)
+	{
+		const Wui::WuiTheme& theme = m_Callbacks.Theme;
+		const Wui::WuiId menuId = Wui::HashId("float.window.menu");
+		const std::string panel = ActivePanel();
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { bar.X + 6.0f, bar.Y + 4.0f, 0, 0 },
+			m_MenuOpen || ctx.IsHovered(bar) ? theme.Text : theme.TextMuted, 0, 1.0f, "M", 13.0f, false });
+		if (ctx.IsClicked(bar))
+		{
+			m_MenuOpen = !m_MenuOpen;
+			if (m_MenuOpen)
+				ctx.OpenPopup(menuId);
+			else
+				ctx.ClosePopup(menuId);
+		}
+		if (!m_MenuOpen)
+			return;
+
+		const Wui::WuiRect panelRect { bar.X, bar.Y + bar.H + 2.0f, 160.0f, 2 * 22.0f + 8.0f };
+		ctx.PushOverlay();
+		Wui::DrawPanelSurface(ctx, panelRect, theme);
+		if (Wui::MenuItem(ctx, Wui::HashId("float.window.menu.dock"),
+			{ panelRect.X + 4.0f, panelRect.Y + 4.0f, panelRect.W - 8.0f, 22.0f }, "Dock to Main", true, theme))
+		{
+			m_MenuOpen = false;
+			ctx.CloseAllPopups();
+			if (m_Callbacks.DockToMain)
+				m_Callbacks.DockToMain(panel);
+		}
+		if (Wui::MenuItem(ctx, Wui::HashId("float.window.menu.close"),
+			{ panelRect.X + 4.0f, panelRect.Y + 26.0f, panelRect.W - 8.0f, 22.0f }, "Close Window", true, theme))
+		{
+			m_MenuOpen = false;
+			ctx.CloseAllPopups();
+			if (m_Callbacks.CloseWindow)
+				m_Callbacks.CloseWindow(panel);
+		}
+		ctx.ClosePopupsOnOutsideClick({ menuId }, panelRect);
+		ctx.PopOverlay();
+	}
+
 	// 标签栏(高度 24):点击切换活动面板,x 关闭只登记请求,由 EditorShell 统一处理
 	// (窗口计数/布局记录属于外壳状态,容器不直接改动)。
 	void FloatWindowHost::RenderTabBar(Wui::WuiContext& ctx, const Wui::WuiRect& area)
 	{
 		const Wui::WuiTheme& theme = m_Callbacks.Theme;
 		constexpr float tabH = 24.0f;
+		constexpr float menuW = 22.0f; // 窗口自己的菜单按钮(☰)
 
 		// ---- 标签栏(浏览器式):附加目标 + 切换/关闭标签 ----
 		const float tabTop = area.Y;
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH }, theme.PanelHeader, 0.0f });
+		RenderWindowMenu(ctx, { area.X, tabTop, menuW, tabH });
 		// 放置目标高亮:其他窗口的标签正被拖到本窗口上方。
 		if (m_TabDropHighlight)
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH },
@@ -265,7 +309,7 @@ namespace World
 		{
 			const float slot = std::max(1.0f, (area.W - 8.0f) / static_cast<float>(m_Panels.size()));
 			const float width = std::min(150.0f, slot);
-			float x = area.X + 4.0f;
+			float x = area.X + menuW + 2.0f;
 			for (size_t i = 0; i < m_Panels.size(); ++i)
 			{
 				const std::string& panel = m_Panels[i];

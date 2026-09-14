@@ -703,8 +703,6 @@ namespace World
 			}
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 2.0f, close.Y - 1.0f, 0, 0 },
 				m_Theme.TextMuted, 0, 1.0f, "x", 12.0f, false });
-			if (ctx.IsClicked(tab) && !ctx.IsHovered(close))
-				m_ActiveWindowTag = panel;
 			if (ctx.IsClicked(close))
 				closeRequest = panel;
 			// 按下(非关闭键)记录起点;移动超过阈值进入拖动。
@@ -715,10 +713,19 @@ namespace World
 				m_AttachTagPressPos = ctx.Input().MousePos;
 			}
 			if (m_AttachTagPress == panel && m_AttachTagDrag.empty() && ctx.Input().MouseDown[0]
-				&& glm::length(ctx.Input().MousePos - m_AttachTagPressPos) > 6.0f)
+				&& glm::length(ctx.Input().MousePos - m_AttachTagPressPos) > 3.0f)
 				m_AttachTagDrag = panel;
 			if (m_AttachTagDrag == panel)
+			{
 				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, tab, m_Theme.Accent, 2.0f, 2.0f });
+				// 脱出提示:跟随光标的标签名 + 栏外时提示将变为独立窗口。
+				const bool outside = !ctx.IsHovered(bar);
+				ctx.PushOverlay();
+				Label(ctx, { ctx.Input().MousePos.x + 14.0f, ctx.Input().MousePos.y + 14.0f },
+					outside ? std::string(PanelTitle(panel)) + "  →  独立窗口" : std::string(PanelTitle(panel)),
+					m_Theme.Text, 13.0f);
+				ctx.PopOverlay();
+			}
 			tagHits.push_back({ panel, tab });
 			x += 144.0f;
 		}
@@ -733,6 +740,12 @@ namespace World
 				m_ActiveWindowTag.clear();
 		}
 		// 拖动结束:在栏内 → 换位;在栏外 → 拖出为独立窗口。
+		if (m_AttachTagDrag.empty() && !m_AttachTagPress.empty() && ctx.Input().MouseReleased[0])
+		{
+			// 未拖动 = 单击:切换显示该窗口内容。
+			m_ActiveWindowTag = m_AttachTagPress;
+			m_AttachTagPress.clear();
+		}
 		if (!m_AttachTagDrag.empty() && ctx.Input().MouseReleased[0])
 		{
 			const std::string dragged = m_AttachTagDrag;
@@ -1049,6 +1062,8 @@ namespace World
 		{
 			WLD_CORE_INFO("[float] tag drag started: {0}", panel);
 		};
+		callbacks.DockToMain = [this](const std::string& id) { AttachIndependentWindowToSlot(id); };
+		callbacks.CloseWindow = [this](const std::string& id) { CloseFloatWindow(id, false, m_Ctx); };
 		try
 		{
 			m_FloatHosts.push_back(std::make_unique<FloatWindowHost>(panel, PanelTitle(panel), screenRect, std::move(callbacks)));
