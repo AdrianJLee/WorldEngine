@@ -292,12 +292,14 @@ namespace World
 	{
 		const Wui::WuiTheme& theme = m_Callbacks.Theme;
 		constexpr float tabH = 24.0f;
-		constexpr float menuW = 22.0f; // 窗口自己的菜单按钮(☰)
+
+		// 菜单栏:每个窗口都有自己的菜单栏(独立),Widget 窗口目前为空。
+		constexpr float menuH = 24.0f;
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, area.Y, area.W, menuH }, theme.PanelHeader, 0.0f });
 
 		// ---- 标签栏(浏览器式):附加目标 + 切换/关闭标签 ----
-		const float tabTop = area.Y;
+		const float tabTop = area.Y + menuH;
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH }, theme.PanelHeader, 0.0f });
-		RenderWindowMenu(ctx, { area.X, tabTop, menuW, tabH });
 		// 放置目标高亮:其他窗口的标签正被拖到本窗口上方。
 		if (m_TabDropHighlight)
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH },
@@ -309,7 +311,7 @@ namespace World
 		{
 			const float slot = std::max(1.0f, (area.W - 8.0f) / static_cast<float>(m_Panels.size()));
 			const float width = std::min(150.0f, slot);
-			float x = area.X + menuW + 2.0f;
+			float x = area.X + 4.0f;
 			for (size_t i = 0; i < m_Panels.size(); ++i)
 			{
 				const std::string& panel = m_Panels[i];
@@ -392,7 +394,8 @@ namespace World
 			}
 		}
 
-		const Wui::WuiRect content { area.X, tabTop + tabH, area.W, std::max(0.0f, area.H - tabH) };
+		const Wui::WuiRect content { area.X, tabTop + tabH, area.W,
+			std::max(0.0f, area.H - menuH - tabH) };
 		if (!m_Panels.empty() && m_Callbacks.Content)
 			m_Callbacks.Content(ctx, content, ActivePanel());
 		if (!closeRequest.empty())
