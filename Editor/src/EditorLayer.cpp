@@ -11,6 +11,7 @@
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include <filesystem>
+#include <shellapi.h>
 #include <stdexcept>
 namespace World
 {
@@ -443,17 +444,48 @@ namespace World
 			environmentBlock.push_back(L'\0');
 		}
 
-		STARTUPINFOW startup {};
-		startup.cb = sizeof(startup);
-		PROCESS_INFORMATION process {};
-		if (!CreateProcessW(exePath.wstring().c_str(), commandLine.data(), nullptr, nullptr,
-			FALSE, 0, environmentBlock.empty() ? nullptr : environmentBlock.data(), nullptr, &startup, &process))
+		DWORD lastError = 0;
+		const auto tryLaunch = [&](LPVOID environment)
 		{
-			WLD_CORE_ERROR("Renderer change requires restart, but relaunching the editor failed.");
-			return;
+			STARTUPINFOW startup {};
+			startup.cb = sizeof(startup);
+			PROCESS_INFORMATION process {};
+			std::wstring writableCommandLine = commandLine;   // CreateProcess 可能修改该缓冲
+			const BOOL ok = CreateProcessW(exePath.wstring().c_str(), writableCommandLine.data(),
+				nullptr, nullptr, FALSE, 0, environment, nullptr, &startup, &process);
+			if (ok)
+			{
+				CloseHandle(process.hThread);
+				CloseHandle(process.hProcess);
+				return true;
+			}
+			lastError = GetLastError();
+			return false;
+		};
+
+		// 优先沿用调用进程环境(-scene 参数已按 UTF-8→UTF-16 转换);
+		// 自定义环境块作为第二选择(需要它时才构造额外环境)。
+		bool launched = tryLaunch(nullptr);
+		if (!launched && !environmentBlock.empty())
+			launched = tryLaunch(environmentBlock.data());
+		if (!launched)
+		{
+			// CreateProcess 可能被作业对象/权限策略拦下(错误码会写进日志);
+			// 退一步交给 Shell 启动,它走 explorer 的令牌,通常不受当前进程作业限制。
+			const HINSTANCE shellResult = ShellExecuteW(nullptr, L"open", exePath.wstring().c_str(),
+				wideArguments.empty() ? nullptr : wideArguments.c_str(), nullptr, SW_SHOWNORMAL);
+			if (reinterpret_cast<INT_PTR>(shellResult) <= 32)
+			{
+				const std::string message = "Renderer change requires a restart, but relaunching the editor failed"
+					" (CreateProcess error " + std::to_string(lastError) + ", ShellExecute error " +
+					std::to_string(static_cast<int>(reinterpret_cast<INT_PTR>(shellResult))) + ")."
+					" The renderer setting has been saved; please restart the editor manually.";
+				WLD_CORE_ERROR("{0}", message);
+				ShowError(message);
+				return;
+			}
+			WLD_CORE_INFO("Editor relaunched via ShellExecute (CreateProcess error {0})", lastError);
 		}
-		CloseHandle(process.hThread);
-		CloseHandle(process.hProcess);
 		WLD_CORE_INFO("Editor restarted for renderer change (scene kept: {0})",
 			m_Document.HasPath() ? m_Document.GetPath().string() : "(new scene)");
 		Application::Get().Close();
@@ -761,4 +793,5 @@ namespace World
 
 
 }
+
 
