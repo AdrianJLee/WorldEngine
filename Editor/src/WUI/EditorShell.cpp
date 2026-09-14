@@ -1239,6 +1239,15 @@ namespace World
 	void EditorShell::DrawMenuBar(Wui::WuiContext& ctx)
 	{
 		const glm::vec2 viewport = ctx.ViewportSize();
+
+		// 菜单栏属于"当前窗口":切到已附加的独立窗口内容时,显示它自己的菜单栏
+		// (Widget 目前为空),而不是主窗口的 File/Window 菜单。
+		if (!m_ActiveWindowTag.empty())
+		{
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { 0, 26, viewport.x, 26 }, m_Theme.PanelHeader, 0.0f });
+			return;
+		}
+
 		struct MenuEntry { std::string Label; bool Checked; std::function<void()> Action; };
 
 		const Wui::WuiId menuFile = Wui::HashId("menu.file");
