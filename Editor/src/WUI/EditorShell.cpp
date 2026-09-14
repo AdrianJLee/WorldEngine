@@ -7,6 +7,7 @@
 #include "World/Renderer/Renderer.h"
 #include "World/WUI/WuiLayoutStore.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
 #include <cstring>
@@ -560,38 +561,26 @@ namespace World
 	void EditorShell::RenderTabs(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
 	{
 		const float tabH = 24;
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, area.Y, area.W, tabH }, m_Theme.PanelHeader, 0.0f });
-		float x = area.X + 4;
+		// 停靠标签栏统一走组件(WuiChrome::DockTabBar),主窗口与独立窗口外观/交互一致。
+		std::vector<Wui::DockTab> tabs;
+		tabs.reserve(node.Panels.size());
 		for (size_t i = 0; i < node.Panels.size(); ++i)
-		{
-			const std::string& panel = node.Panels[i];
-			const float width = std::min(150.0f, area.W / std::max<size_t>(1, node.Panels.size()));
-			const Wui::WuiRect tab { x, area.Y + 2, width, tabH - 2 };
-			if (i == node.Active)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.PanelBg, 2.0f });
-			else if (ctx.IsHovered(tab))
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.ButtonHover, 2.0f });
-			if (ctx.IsClicked(tab))
-				m_Layout.Activate(panel);
-			if (ctx.IsHovered(tab))
-				ctx.SetCursor(Wui::WuiCursor::Hand);
-			if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab))
-				ctx.BeginDrag(Wui::HashId(("tab." + panel).c_str()), "panel:" + panel);
-			if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab))
-				m_TabDragPanel = panel; // 记录本次拖拽的真实来源
+			tabs.push_back({ Wui::HashId(("tab." + node.Panels[i]).c_str()), PanelTitle(node.Panels[i]), i == node.Active });
+		const Wui::DockTabBarResult tabResult = Wui::DockTabBar(ctx, { area.X, area.Y, area.W, tabH }, tabs, m_Theme);
 
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { tab.X + 6, tab.Y + 3, 0, 0 }, m_Theme.Text, 0, 1.0f, PanelTitle(panel), 14.0f, false });
-			const Wui::WuiRect close { tab.X + tab.W - 18, tab.Y + 4, 14, 14 };
-			if (ctx.IsHovered(close))
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, close, m_Theme.ButtonHover, 2.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 3, close.Y - 1, 0, 0 }, m_Theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
-			if (ctx.IsClicked(close))
-			{
-				const std::string before = m_Layout.Serialize();
-				if (m_Layout.RemoveTab(panel))
-					RecordDockChange(ctx, "close", panel, before);
-			}
-			x += width;
+		if (tabResult.Clicked >= 0 && static_cast<size_t>(tabResult.Clicked) < node.Panels.size())
+			m_Layout.Activate(node.Panels[tabResult.Clicked]);
+		if (tabResult.Closed >= 0 && static_cast<size_t>(tabResult.Closed) < node.Panels.size())
+		{
+			const std::string before = m_Layout.Serialize();
+			if (m_Layout.RemoveTab(node.Panels[tabResult.Closed]))
+				RecordDockChange(ctx, "close", node.Panels[tabResult.Closed], before);
+		}
+		if (tabResult.DragStart >= 0 && static_cast<size_t>(tabResult.DragStart) < node.Panels.size())
+		{
+			const std::string& panel = node.Panels[tabResult.DragStart];
+			ctx.BeginDrag(Wui::HashId(("tab." + panel).c_str()), "panel:" + panel);
+			m_TabDragPanel = panel; // 记录本次拖拽的真实来源
 		}
 
 		const Wui::WuiRect content { area.X, area.Y + tabH, area.W, area.H - tabH };
