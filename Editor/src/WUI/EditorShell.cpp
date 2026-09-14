@@ -257,11 +257,11 @@ namespace World
 					Application::Get().GetWindow().GetPosition(&windowX, &windowY);
 				rect = { static_cast<float>(windowX) + 140.0f, static_cast<float>(windowY) + 100.0f, 520.0f, 400.0f };
 			}
-			if (m_Layout.Float(panel, rect))
-			{
-				AddFloatWindow(panel, rect, "reopen");
-				RecordDockChange(ctx, "float", panel, before);
-			}
+			// 该面板此刻既不在停靠树也不在浮动列表(Float 只接受已停靠面板),
+			// 直接登记浮动记录再创建窗口。
+			m_Layout.Floating.push_back({ panel, rect });
+			AddFloatWindow(panel, rect, "reopen");
+			RecordDockChange(ctx, "float", panel, before);
 		}
 	}
 
