@@ -356,6 +356,13 @@ namespace World
 		}
 	}
 
+	bool WindowsWindow::IsFrameless() const
+	{
+		if (!m_Window)
+			return false;
+		return glfwGetWindowAttrib(m_Window, GLFW_DECORATED) == GLFW_FALSE;
+	}
+
 	void WindowsWindow::Minimize()
 	{
 		if (m_Window)

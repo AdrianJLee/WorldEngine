@@ -34,6 +34,8 @@ namespace World
 		void OnRender(Wui::WuiContext& ctx);
 		// 退出前释放独立窗口(释放其呈现目标/OS 窗口,必须在 RHI 设备销毁前调用)。
 		void ReleaseIndependentWindows();
+		// 渲染后端切换后重建全部可见独立窗口(位置/尺寸/面板归属保留)。
+		void RecreateIndependentWindows();
 		Wui::WuiRect ViewportRect() const { return m_ViewportRect; }
 
 		// ---- PanelHost ----

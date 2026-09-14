@@ -37,6 +37,7 @@ namespace World
 		void SetVisible(bool visible) override;
 		void BeginSystemDrag() override;
 		void SetFrameless(bool frameless) override;
+		bool IsFrameless() const override;
 		void Minimize() override;
 		void MaximizeOrRestore() override;
 		bool IsMaximized() const override;

@@ -62,6 +62,8 @@ namespace World
 		// 隐藏/复用:关闭或挂靠时隐藏窗口而不是销毁(运行期销毁在 Vulkan 下会崩)。
 		bool IsHidden() const { return m_Hidden; }
 		void SetHidden(bool hidden);
+		// 渲染后端切换:重建 OS 窗口与呈现目标(GL 上下文/ Vulkan 表面与窗口绑定)。
+		void RecreateWindow();
 
 		// 渲染该独立窗口;返回 false 表示 OS 窗口已关闭(其全部面板应隐藏)。
 		bool Render();

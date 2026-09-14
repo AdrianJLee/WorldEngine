@@ -100,6 +100,13 @@ namespace World
 		m_ActiveWindowTag.clear();
 	}
 
+	void EditorShell::RecreateIndependentWindows()
+	{
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+			if (host && !host->IsHidden())
+				host->RecreateWindow();
+	}
+
 	// ---- PanelHost ----
 
 	Ref<Scene> EditorShell::GetActiveScene()

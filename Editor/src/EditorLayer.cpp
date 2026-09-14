@@ -380,7 +380,11 @@ namespace World
 		if (m_SceneRenderer)
 			m_SceneRenderer->Shutdown();
 		Renderer::Shutdown();
+		// GL 上下文与 Vulkan 表面不能在同一 HWND 上可靠共存(切回 GL 后呈现失效),
+		// 因此换后端时重建主窗口(保留位置/尺寸/无边框/垂直同步)。
+		Application::Get().RecreateWindow();
 		Renderer::Init(m_RendererChangeName);
+		m_Shell.RecreateIndependentWindows();
 		if (m_SceneRenderer)
 			m_SceneRenderer->Init();
 		WLD_CORE_INFO("[switch] scene renderer rebuilt for {0}", Renderer::GetBackendName());

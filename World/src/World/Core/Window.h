@@ -64,6 +64,7 @@ namespace World
 		virtual void BeginSystemDrag() = 0;
 		// 运行时切换无边框(去掉系统标题栏),并安装边缘缩放的命中测试。
 		virtual void SetFrameless(bool frameless) = 0;
+		virtual bool IsFrameless() const = 0;
 		virtual void Minimize() = 0;
 		virtual void MaximizeOrRestore() = 0;
 		virtual bool IsMaximized() const = 0;

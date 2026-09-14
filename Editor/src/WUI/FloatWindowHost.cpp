@@ -126,6 +126,56 @@ namespace World
 			m_Window->SetPosition(static_cast<int>(x), static_cast<int>(y));
 	}
 
+	// 渲染后端切换:同一个 HWND 上 GL 上下文与 Vulkan 表面无法可靠共存,
+	// 独立窗口也必须按新后端重建(位置/尺寸/可见性保留)。
+	void FloatWindowHost::RecreateWindow()
+	{
+		if (!m_Window)
+			return;
+
+		int x = 0, y = 0;
+		m_Window->GetPosition(&x, &y);
+		const uint32_t width = std::max(240u, m_Window->GetWidth());
+		const uint32_t height = std::max(160u, m_Window->GetHeight());
+		const bool visible = !m_Hidden;
+
+		if (m_Target)
+		{
+			Renderer::DestroyPresentTarget(m_Target);
+			m_Target = nullptr;
+		}
+		m_Window->SetEventCallback(Window::EventCallbackFn {});
+		delete m_Window;
+		m_Window = nullptr;
+
+		WindowProps props(m_Title, width, height, true);
+		Window* main = Application::HasInstance() ? &Application::Get().GetWindow() : nullptr;
+		m_Window = Window::CreateAuxiliary(props, main);
+		if (!m_Window)
+			return;
+		m_Window->SetPosition(x, y);
+		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(FloatWindowHost::OnEvent));
+		if (!visible)
+			m_Window->SetVisible(false);
+		if (main)
+			main->MakeCurrent();
+
+		m_Backend.SetCursorWindow(m_Window->GetNativeWindow());
+		m_Backend.SetViewportSize({ static_cast<float>(m_Window->GetWidth()),
+			static_cast<float>(m_Window->GetHeight()) });
+		if (Renderer::GetBackendName() == "vulkan")
+		{
+			PresentTargetDesc desc;
+			desc.NativeWindow = m_Window->GetNativeWindow();
+			desc.Width = m_Window->GetWidth();
+			desc.Height = m_Window->GetHeight();
+			desc.DebugName = "Float:" + m_Panel;
+			m_Target = Renderer::CreatePresentTarget(desc);
+		}
+		WLD_CORE_INFO("[float] independent window recreated for backend '{0}': {1}",
+			Renderer::GetBackendName(), m_Panel);
+	}
+
 	void FloatWindowHost::SetHidden(bool hidden)
 	{
 		m_Hidden = hidden;

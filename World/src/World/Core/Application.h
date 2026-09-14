@@ -32,12 +32,16 @@ namespace World
 
 		DualTrackAllocator& GetFrameAllocator() { return *m_FrameAllocator; }
 		DualTrackAllocator& GetEngineAllocator() { return *m_EngineAllocator; }
+		// 运行时切换渲染后端时重建主窗口:GL 上下文与 Vulkan 表面无法在同一
+		// HWND 上可靠共存(切回 GL 后呈现会失效),按后端重建窗口与上下文。
+		void RecreateWindow();
 	private:
 		void Shutdown();
 		bool OnWindowClose(WindowCloseEvent& e);
 		bool OnWindowResize(WindowResizeEvent& e);
 	private:
 		WorldContext& m_Context;
+		std::string m_Title;
 		std::unique_ptr<DualTrackAllocator> m_FrameAllocator;
 		std::unique_ptr<DualTrackAllocator> m_EngineAllocator;
 

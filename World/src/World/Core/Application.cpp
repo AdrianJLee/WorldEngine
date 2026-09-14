@@ -32,6 +32,7 @@ namespace World
 		m_FrameAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("FrameAllocator", 1024 * 1024 * 10)); // 10 MB
 		m_EngineAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("EngineAllocator", 1024 * 1024 * 50)); // 50 MB
 		m_Window = std::unique_ptr<Window>(Window::Create(WindowProps(name)));
+		m_Title = name;
 
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(Application::OnEvent));
 
@@ -47,6 +48,31 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 		Shutdown();
+	}
+
+	void Application::RecreateWindow()
+	{
+		if (!m_Window)
+			return;
+		int x = 0, y = 0;
+		m_Window->GetPosition(&x, &y);
+		const uint32_t width = m_Window->GetWidth();
+		const uint32_t height = m_Window->GetHeight();
+		const bool frameless = m_Window->IsFrameless();
+		const bool vsync = m_Window->IsVsync();
+
+		// 旧窗口连同其 GL 上下文/原生句柄一起销毁:后端切换后重新按当前后端创建。
+		m_Window.reset();
+		m_Window = std::unique_ptr<Window>(Window::Create(
+			WindowProps(m_Title, width, height, frameless)));
+		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(Application::OnEvent));
+		m_Window->SetVsync(vsync);
+		if (frameless)
+			m_Window->SetFrameless(true);
+		m_Window->SetPosition(x, y);
+		m_Window->MakeCurrent();
+		Renderer::OnWindowResize(width, height);
+		WLD_CORE_INFO("Main window recreated for backend '{0}'", Renderer::GetBackendName());
 	}
 
 	void Application::Shutdown()
