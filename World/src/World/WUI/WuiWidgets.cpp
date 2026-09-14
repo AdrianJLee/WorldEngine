@@ -340,7 +340,9 @@ namespace World::Wui
 				state.SelStart = -1;
 				state.SelEnd = -1;
 			}
-			ctx.SetCursor(WuiCursor::IBeam);
+			// 编辑态也只在悬停该控件时显示 I 型光标:否则鼠标移到别处仍保持输入形状。
+			if (hovered)
+				ctx.SetCursor(WuiCursor::IBeam);
 		}
 		else
 		{
@@ -437,7 +439,8 @@ namespace World::Wui
 				state.SelStart = -1;
 				state.SelEnd = -1;
 			}
-			ctx.SetCursor(WuiCursor::IBeam);
+			if (hovered)
+				ctx.SetCursor(WuiCursor::IBeam);
 		}
 		else
 		{
@@ -541,7 +544,9 @@ namespace World::Wui
 				ctx.SetFocus(0);
 			if (cancelledOut)
 				*cancelledOut = cancelled;
-			ctx.SetCursor(WuiCursor::IBeam);
+			// 焦点字段只有在鼠标悬停其上时才显示 I 型光标。
+			if (ctx.IsHovered(rect))
+				ctx.SetCursor(WuiCursor::IBeam);
 		}
 		else if (cancelledOut)
 			*cancelledOut = false;
