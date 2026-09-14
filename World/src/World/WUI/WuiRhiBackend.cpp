@@ -12,6 +12,7 @@
 
 #include <GLFW/glfw3.h>
 
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -682,7 +683,9 @@ namespace World::Wui
 		Renderer::SubmitUi(m_Cmd);
 
 		if (!m_IsVulkan)
+		{
 			Rhi::BlitFramebufferToBackbuffer(m_UiFramebuffer, { m_UiWidth, m_UiHeight });
+		}
 	}
 
 	void WuiRhiBackend::EndFrame(WuiCursor cursor)
