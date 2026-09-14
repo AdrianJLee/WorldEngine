@@ -64,6 +64,9 @@ namespace World
 		void RenderTabs(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area);
 		void RenderSplit(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area);
 		void RenderPanelContent(Wui::WuiContext& ctx, const std::string& id, const Wui::WuiRect& rect);
+		// 浮动面板:在停靠区之上绘制,支持拖动/缩放/关闭与拖回停靠。
+		void RenderFloating(Wui::WuiContext& ctx);
+		void RenderFloatWindow(Wui::WuiContext& ctx, Wui::DockFloat& window, bool* closed);
 		void SaveLayout();
 
 		// 菜单 / 模态 / 布局
@@ -96,5 +99,16 @@ namespace World
 		Wui::DropZone m_EdgeDropZone = Wui::DropZone::Center;
 		std::string m_LastDragTarget;
 		Wui::DropZone m_LastDragZone = Wui::DropZone::Center;
+
+		// 面板拖拽/浮动状态。
+		std::string m_DragPanel;            // 本帧拖拽中的面板(来自 payload "panel:")
+		glm::vec2 m_LastDragPos { 0, 0 };   // 拖拽结束位置(浮动窗口落点)
+		std::string m_MovingFloat;          // 正在移动的浮动面板
+		glm::vec2 m_FloatGrabOffset { 0, 0 };
+		std::string m_FloatResize;          // 正在缩放的浮动面板
+		glm::vec2 m_FloatResizeStart { 0, 0 };
+		Wui::WuiRect m_FloatResizeRect;
+		std::string m_FloatChangeBefore;    // 浮动移动/缩放前的布局快照(操作日志)
+		std::string m_BringFloatFront;      // 本帧请求置顶的浮动面板(下一帧生效)
 	};
 }

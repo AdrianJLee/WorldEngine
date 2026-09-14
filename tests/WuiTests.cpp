@@ -639,6 +639,49 @@ int main()
 			ctx.EndFrame();
 		}
 
+		// 浮动面板:拖出停靠、序列化往返、回停靠与关闭
+		{
+			DockLayout layout = DockLayout::Default({ "a", "b", "c" });
+			CHECK(layout.Contains("a"));
+			CHECK(layout.Float("a", { 100, 120, 300, 200 }));
+			CHECK(!layout.Contains("a"));
+			CHECK(layout.IsFloating("a"));
+			const DockFloat* floating = layout.FindFloat("a");
+			CHECK(floating != nullptr);
+			CHECK(Near(floating->Rect.X, 100) && Near(floating->Rect.W, 300));
+
+			const std::string json = layout.Serialize();
+			DockLayout restored;
+			std::string error;
+			CHECK(DockLayout::Deserialize(json, &restored, &error));
+			CHECK(restored.IsFloating("a") && !restored.Contains("a"));
+			CHECK(restored.FindFloat("a") != nullptr && Near(restored.FindFloat("a")->Rect.Y, 120));
+
+			// 回停靠到 b,再确认浮动记录被移除。
+			CHECK(restored.DockFloating("a", "b", DropZone::Center));
+			CHECK(restored.Contains("a") && !restored.IsFloating("a"));
+
+			// 旧版(v1,无 floating 字段)布局仍可读取。
+			DockLayout legacy;
+			CHECK(DockLayout::Deserialize(
+				"{\"version\":1,\"root\":{\"type\":\"tabs\",\"panels\":[\"x\"],\"active\":0}}", &legacy, &error));
+			CHECK(legacy.Contains("x"));
+			CHECK(legacy.Floating.empty());
+
+			// 关闭浮动面板只移除浮动记录,不影响停靠树。
+			CHECK(legacy.Float("x", { 40, 60, 240, 160 }));
+			CHECK(legacy.IsFloating("x"));
+			CHECK(legacy.CloseFloating("x"));
+			CHECK(!legacy.IsFloating("x"));
+
+			// 置顶:最后绘制 = 最后入列。
+			DockLayout order = DockLayout::Default({ "one", "two" });
+			CHECK(order.Float("one", { 10, 10, 200, 150 }));
+			CHECK(order.Float("two", { 40, 40, 200, 150 }));
+			order.BringFloatToFront("one");
+			CHECK(order.Floating.back().Panel == "one");
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}

@@ -290,6 +290,112 @@ namespace World::Wui
 		return RemoveFromTree(*path[path.size() - 2], node);
 	}
 
+	bool DockLayout::IsFloating(const PanelId& panel) const
+	{
+		return FindFloat(panel) != nullptr;
+	}
+
+	DockFloat* DockLayout::FindFloat(const PanelId& panel)
+	{
+		for (DockFloat& floating : Floating)
+			if (floating.Panel == panel)
+				return &floating;
+		return nullptr;
+	}
+
+	const DockFloat* DockLayout::FindFloat(const PanelId& panel) const
+	{
+		for (const DockFloat& floating : Floating)
+			if (floating.Panel == panel)
+				return &floating;
+		return nullptr;
+	}
+
+	bool DockLayout::Float(const PanelId& panel, const WuiRect& rect)
+	{
+		if (IsFloating(panel))
+		{
+			// 已在浮动:只更新位置。
+			FindFloat(panel)->Rect = rect;
+			return true;
+		}
+		if (!Contains(panel))
+			return false;
+
+		DockFloat floating;
+		floating.Panel = panel;
+		floating.Rect = rect;
+		// 先摘除停靠;RemoveTab 负责 tab 组塌缩。
+		if (!RemoveTab(panel))
+			return false;
+		Floating.push_back(std::move(floating));
+		return true;
+	}
+
+	bool DockLayout::DockFloating(const PanelId& panel, const PanelId& target, DropZone zone)
+	{
+		DockFloat* floating = FindFloat(panel);
+		if (!floating)
+			return false;
+		if (!Contains(target))
+			return false;
+		const DockFloat saved = *floating;
+		auto it = std::find_if(Floating.begin(), Floating.end(), [&](const DockFloat& candidate)
+			{
+				return candidate.Panel == panel;
+			});
+		if (it != Floating.end())
+			Floating.erase(it);
+		if (AddTab(panel, target, zone))
+			return true;
+		// 挂载失败(例如目标是自身):恢复浮动记录。
+		Floating.push_back(saved);
+		return false;
+	}
+
+	bool DockLayout::DockFloatingToRoot(const PanelId& panel, DropZone zone)
+	{
+		DockFloat* floating = FindFloat(panel);
+		if (!floating)
+			return false;
+		const DockFloat saved = *floating;
+		auto it = std::find_if(Floating.begin(), Floating.end(), [&](const DockFloat& candidate)
+			{
+				return candidate.Panel == panel;
+			});
+		if (it != Floating.end())
+			Floating.erase(it);
+		if (DockToRoot(panel, zone))
+			return true;
+		Floating.push_back(saved);
+		return false;
+	}
+
+	bool DockLayout::CloseFloating(const PanelId& panel)
+	{
+		auto it = std::find_if(Floating.begin(), Floating.end(), [&](const DockFloat& candidate)
+			{
+				return candidate.Panel == panel;
+			});
+		if (it == Floating.end())
+			return false;
+		Floating.erase(it);
+		return true;
+	}
+
+	void DockLayout::BringFloatToFront(const PanelId& panel)
+	{
+		auto it = std::find_if(Floating.begin(), Floating.end(), [&](const DockFloat& candidate)
+			{
+				return candidate.Panel == panel;
+			});
+		if (it == Floating.end() || it + 1 == Floating.end())
+			return;
+		DockFloat moved = *it;
+		Floating.erase(it);
+		Floating.push_back(std::move(moved));
+	}
+
 	bool DockLayout::Activate(const PanelId& panel)
 	{
 		DockNode* node = FindTabNode(Root, panel, nullptr);
@@ -370,10 +476,30 @@ namespace World::Wui
 	{
 		JsonValue root;
 		root.type = JsonValue::Type::Object;
-		root.Object.push_back({ "version", JsonValue::MakeNumber(1) });
+		root.Object.push_back({ "version", JsonValue::MakeNumber(2) });
 		JsonValue node;
 		SerializeNode(Root, &node);
 		root.Object.push_back({ "root", std::move(node) });
+		if (!Floating.empty())
+		{
+			JsonValue floating;
+			floating.type = JsonValue::Type::Array;
+			for (const DockFloat& entry : Floating)
+			{
+				JsonValue item;
+				item.type = JsonValue::Type::Object;
+				item.Object.push_back({ "panel", JsonValue::MakeString(entry.Panel) });
+				JsonValue rect;
+				rect.type = JsonValue::Type::Array;
+				rect.Array.push_back(JsonValue::MakeNumber(entry.Rect.X));
+				rect.Array.push_back(JsonValue::MakeNumber(entry.Rect.Y));
+				rect.Array.push_back(JsonValue::MakeNumber(entry.Rect.W));
+				rect.Array.push_back(JsonValue::MakeNumber(entry.Rect.H));
+				item.Object.push_back({ "rect", std::move(rect) });
+				floating.Array.push_back(std::move(item));
+			}
+			root.Object.push_back({ "floating", std::move(floating) });
+		}
 		return root.Dump();
 	}
 
@@ -443,6 +569,40 @@ namespace World::Wui
 		DockLayout layout;
 		if (!DeserializeNode(*root, &layout.Root, error))
 			return false;
+		// v2:还原浮动窗口;与停靠树重复的面板以停靠树为准(忽略浮动记录)。
+		if (const JsonValue* floating = parsed->Find("floating"))
+		{
+			if (floating->type != JsonValue::Type::Array)
+			{
+				*error = "floating must be an array";
+				return false;
+			}
+			for (const JsonValue& entry : floating->Array)
+			{
+				const JsonValue* panel = entry.Find("panel");
+				if (!panel || panel->type != JsonValue::Type::String || panel->String.empty())
+					continue;
+				DockFloat window;
+				window.Panel = panel->String;
+				if (layout.Contains(window.Panel))
+					continue;
+				const DockFloat defaults;
+				window.Rect = defaults.Rect;
+				if (const JsonValue* rect = entry.Find("rect"))
+				{
+					if (rect->type == JsonValue::Type::Array && rect->Array.size() == 4)
+					{
+						window.Rect.X = static_cast<float>(rect->Array[0].AsNumber(0));
+						window.Rect.Y = static_cast<float>(rect->Array[1].AsNumber(0));
+						window.Rect.W = static_cast<float>(rect->Array[2].AsNumber(0));
+						window.Rect.H = static_cast<float>(rect->Array[3].AsNumber(0));
+						if (window.Rect.W < 80.0f || window.Rect.H < 60.0f)
+							window.Rect = defaults.Rect;
+					}
+				}
+				layout.Floating.push_back(std::move(window));
+			}
+		}
 		*out = std::move(layout);
 		return true;
 	}

@@ -185,6 +185,12 @@ namespace World
 	void EditorShell::TogglePanel(Wui::WuiContext& ctx, const std::string& panel)
 	{
 		const std::string before = m_Layout.Serialize();
+		if (m_Layout.IsFloating(panel))
+		{
+			if (m_Layout.CloseFloating(panel))
+				RecordDockChange(ctx, "hide", panel, before);
+			return;
+		}
 		if (m_Layout.Contains(panel))
 		{
 			if (m_Layout.RemoveTab(panel))
@@ -277,21 +283,30 @@ namespace World
 		}
 
 		std::string payload;
+		bool dropConsumed = false;
 		if (ctx.AcceptDrop(&payload, "panel:"))
 		{
+			dropConsumed = true;
 			if (payload.rfind("panel:", 0) == 0)
 			{
 				const std::string panel = payload.substr(6);
-				if (m_EdgeDockActive && m_Layout.Contains(panel))
+				const bool floating = m_Layout.IsFloating(panel);
+				if (m_EdgeDockActive && (floating || m_Layout.Contains(panel)))
 				{
 					const std::string before = m_Layout.Serialize();
-					if (m_Layout.DockToRoot(panel, m_EdgeDropZone))
+					const bool docked = floating
+						? m_Layout.DockFloatingToRoot(panel, m_EdgeDropZone)
+						: m_Layout.DockToRoot(panel, m_EdgeDropZone);
+					if (docked)
 						RecordDockChange(ctx, "drop", panel + " -> editor/" + ZoneName(m_EdgeDropZone), before);
 				}
-				else if (!m_DropTargetPanel.empty() && m_Layout.Contains(panel))
+				else if (!m_DropTargetPanel.empty() && (floating || m_Layout.Contains(panel)))
 				{
 					const std::string before = m_Layout.Serialize();
-					if (m_Layout.MoveTab(panel, m_DropTargetPanel, m_DropZone))
+					const bool docked = floating
+						? m_Layout.DockFloating(panel, m_DropTargetPanel, m_DropZone)
+						: m_Layout.MoveTab(panel, m_DropTargetPanel, m_DropZone);
+					if (docked)
 						RecordDockChange(ctx, "drop", panel + " -> " + m_DropTargetPanel + "/" + ZoneName(m_DropZone), before);
 				}
 			}
@@ -300,7 +315,53 @@ namespace World
 			m_DropZone = Wui::DropZone::Center;
 			m_EdgeDockActive = false;
 			m_EdgeDropZone = Wui::DropZone::Center;
+			m_MovingFloat.clear();
 		}
+
+		// ---- 面板拖拽状态机:停靠面板一旦进入拖拽即"拖出"为浮动窗口 ----
+		// 拖到落点上释放会重新停靠(DockFloating*),否则保持浮动并跟随鼠标。
+		std::string activePayload;
+		if (ctx.IsDragActive(&activePayload) && activePayload.rfind("panel:", 0) == 0)
+		{
+			m_DragPanel = activePayload.substr(6);
+			m_LastDragPos = ctx.Input().MousePos;
+			if (!dropConsumed && m_Layout.Contains(m_DragPanel))
+			{
+				// 以原停靠尺寸弹出,抓取点落在标题栏左侧(接近原 tab 位置)。
+				Wui::WuiRect source { m_LastDragPos.x - 40.0f, m_LastDragPos.y - 12.0f, 480.0f, 320.0f };
+				std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> rects;
+				m_Layout.ComputeRects({ 0, 26, viewport.x, viewport.y - 26 }, &rects);
+				for (const auto& entry : rects)
+				{
+					if (entry.first != m_DragPanel)
+						continue;
+					source.W = entry.second.W;
+					source.H = entry.second.H;
+					break;
+				}
+				const std::string before = m_Layout.Serialize();
+				if (m_Layout.Float(m_DragPanel, source))
+				{
+					RecordDockChange(ctx, "float", m_DragPanel, before);
+					m_MovingFloat = m_DragPanel;
+					m_FloatGrabOffset = { 40.0f, 12.0f };
+				}
+			}
+		}
+		else if (ctx.IsDragActive(nullptr))
+		{
+			// 其他类型的拖拽(file: 等)不参与面板浮动。
+			m_DragPanel.clear();
+		}
+		else if (!m_DragPanel.empty())
+		{
+			// 拖拽结束:落点已在上方处理;未回收则保持浮动位置。
+			m_DragPanel.clear();
+			m_MovingFloat.clear();
+		}
+
+		// 浮动面板绘制在停靠区之上、菜单/模态之下。
+		RenderFloating(ctx);
 
 		// 菜单栏最后绘制:其弹出面板需要盖在所有停靠面板之上。
 		DrawMenuBar(ctx);
@@ -422,15 +483,26 @@ namespace World
 		std::string dragPayload;
 		if (!m_EdgeDockActive && ctx.IsDragActive(&dragPayload) && dragPayload.rfind("panel:", 0) == 0 && ctx.IsHovered(area))
 		{
-			ctx.DropTarget(area, "panel:"); // 武装落点:仅面板拖拽在此生效
 			const glm::vec2 rel = ctx.Input().MousePos - glm::vec2 { area.X, area.Y };
 			const float lx = area.W > 0 ? rel.x / area.W : 0;
 			const float ly = area.H > 0 ? rel.y / area.H : 0;
-			if (lx < 0.25f) m_DropZone = Wui::DropZone::Left;
-			else if (lx > 0.75f) m_DropZone = Wui::DropZone::Right;
-			else if (ly < 0.25f) m_DropZone = Wui::DropZone::Top;
-			else if (ly > 0.75f) m_DropZone = Wui::DropZone::Bottom;
-			else m_DropZone = Wui::DropZone::Center;
+			Wui::DropZone targetZone = Wui::DropZone::Center;
+			if (lx < 0.25f) targetZone = Wui::DropZone::Left;
+			else if (lx > 0.75f) targetZone = Wui::DropZone::Right;
+			else if (ly < 0.25f) targetZone = Wui::DropZone::Top;
+			else if (ly > 0.75f) targetZone = Wui::DropZone::Bottom;
+			// 浮动窗口只在"明确落区"上停靠:四边 25% 条带或 tab 栏(Center);
+			// 停在面板中部不会把浮动窗口吸回停靠,便于自由摆放。
+			const bool draggingFloating = m_Layout.IsFloating(dragPayload.substr(6));
+			const bool overTabBar = ctx.IsHovered({ area.X, area.Y, area.W, tabH });
+			if (draggingFloating && targetZone == Wui::DropZone::Center && !overTabBar)
+			{
+				m_DropTargetPanel.clear();
+				return;
+			}
+
+			ctx.DropTarget(area, "panel:"); // 武装落点:仅面板拖拽在此生效
+			m_DropZone = targetZone;
 			Wui::WuiRect zone = area;
 			if (m_DropZone == Wui::DropZone::Left) zone.W = area.W * 0.25f;
 			else if (m_DropZone == Wui::DropZone::Right) { zone.X = area.X + area.W * 0.75f; zone.W = area.W * 0.25f; }
@@ -457,6 +529,112 @@ namespace World
 			it->second->OnRender(ctx, rect, *this);
 		else
 			Label(ctx, { rect.X + 8, rect.Y + 8 }, PanelTitle(id), m_Theme.TextMuted, 14.0f);
+	}
+
+	// 浮动面板:每个窗口一个面板,绘制在停靠区之上(Overlay 层)。
+	void EditorShell::RenderFloating(Wui::WuiContext& ctx)
+	{
+		for (size_t i = 0; i < m_Layout.Floating.size(); ++i)
+		{
+			const std::string panel = m_Layout.Floating[i].Panel;
+			bool closed = false;
+			RenderFloatWindow(ctx, m_Layout.Floating[i], &closed);
+			if (closed)
+			{
+				const std::string before = m_Layout.Serialize();
+				m_Layout.CloseFloating(panel);
+				RecordDockChange(ctx, "hide", panel, before);
+				break; // 容器已改变,下一帧继续绘制其余窗口
+			}
+		}
+		// 置顶在绘制结束后应用,避免遍历中修改容器。
+		if (!m_BringFloatFront.empty())
+		{
+			m_Layout.BringFloatToFront(m_BringFloatFront);
+			m_BringFloatFront.clear();
+		}
+	}
+
+	void EditorShell::RenderFloatWindow(Wui::WuiContext& ctx, Wui::DockFloat& window, bool* closed)
+	{
+		const float titleH = 24.0f;
+		const glm::vec2 viewport = ctx.ViewportSize();
+		Wui::WuiRect& rect = window.Rect;
+
+		// 视口约束:窗口不能完全跑出屏幕,标题栏必须可见。
+		rect.W = std::max(200.0f, std::min(rect.W, std::max(200.0f, viewport.x - 16.0f)));
+		rect.H = std::max(140.0f, std::min(rect.H, std::max(140.0f, viewport.y - 40.0f)));
+		rect.X = std::max(8.0f, std::min(rect.X, std::max(8.0f, viewport.x - rect.W - 8.0f)));
+		rect.Y = std::max(26.0f, std::min(rect.Y, std::max(26.0f, viewport.y - rect.H - 8.0f)));
+
+		ctx.PushOverlay();
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, m_Theme.PanelBg, 5.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect, m_Theme.Border, 5.0f, 1.0f });
+		const Wui::WuiRect title { rect.X, rect.Y, rect.W, titleH };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, title, m_Theme.PanelHeader, 5.0f });
+		Label(ctx, { title.X + 10, title.Y + 4 }, PanelTitle(window.Panel), m_Theme.Text, 14.0f);
+
+		// 关闭按钮
+		const Wui::WuiRect close { title.X + title.W - 22, title.Y + 5, 14, 14 };
+		if (ctx.IsHovered(close))
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, close, m_Theme.ButtonHover, 2.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 3, close.Y - 1, 0, 0 }, m_Theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
+		const bool closeClicked = ctx.IsClicked(close);
+
+		// 标题栏拖动:移动窗口;拖到停靠区释放会重新停靠(复用面板拖拽落点)。
+		if (!closeClicked && ctx.IsClicked(title) && !ctx.IsHovered(close))
+		{
+			m_BringFloatFront = window.Panel;
+			m_MovingFloat = window.Panel;
+			m_FloatGrabOffset = ctx.Input().MousePos - glm::vec2 { rect.X, rect.Y };
+			m_FloatChangeBefore = m_Layout.Serialize();
+			ctx.BeginDrag(Wui::HashId(("float." + window.Panel).c_str()), "panel:" + window.Panel);
+		}
+		if (m_MovingFloat == window.Panel && ctx.IsDragActive(nullptr))
+		{
+			rect.X = ctx.Input().MousePos.x - m_FloatGrabOffset.x;
+			rect.Y = ctx.Input().MousePos.y - m_FloatGrabOffset.y;
+			ctx.SetCursor(Wui::WuiCursor::Hand);
+		}
+
+		// 右下角缩放
+		const Wui::WuiRect grip { rect.X + rect.W - 16, rect.Y + rect.H - 16, 16, 16 };
+		if (ctx.IsHovered(grip))
+		{
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, grip, m_Theme.ButtonHover, 3.0f });
+			ctx.SetCursor(Wui::WuiCursor::ResizeEW);
+		}
+		if (ctx.IsClicked(grip))
+		{
+			m_BringFloatFront = window.Panel;
+			m_FloatResize = window.Panel;
+			m_FloatResizeStart = ctx.Input().MousePos;
+			m_FloatResizeRect = rect;
+			m_FloatChangeBefore = m_Layout.Serialize();
+		}
+		if (m_FloatResize == window.Panel && ctx.Input().MouseDown[0])
+		{
+			const glm::vec2 delta = ctx.Input().MousePos - m_FloatResizeStart;
+			rect.W = std::max(200.0f, m_FloatResizeRect.W + delta.x);
+			rect.H = std::max(140.0f, m_FloatResizeRect.H + delta.y);
+		}
+		if (ctx.Input().MouseReleased[0] && m_FloatResize == window.Panel)
+		{
+			m_FloatResize.clear();
+			if (!m_FloatChangeBefore.empty())
+			{
+				RecordDockChange(ctx, "float-resize", window.Panel, m_FloatChangeBefore);
+				m_FloatChangeBefore.clear();
+			}
+		}
+
+		// 内容区(在标题栏之下)
+		const Wui::WuiRect body { rect.X + 1, rect.Y + titleH, rect.W - 2, rect.H - titleH - 1 };
+		RenderPanelContent(ctx, window.Panel, body);
+		ctx.PopOverlay();
+
+		if (closeClicked && closed)
+			*closed = true;
 	}
 
 	void EditorShell::DrawMenuBar(Wui::WuiContext& ctx)
@@ -517,7 +695,7 @@ namespace World
 		std::vector<MenuEntry> windowEntries;
 		for (const std::string& panel : m_Panels)
 		{
-			const bool visible = m_Layout.Contains(panel);
+			const bool visible = m_Layout.Contains(panel) || m_Layout.IsFloating(panel);
 			windowEntries.push_back({ PanelTitle(panel), visible, [this, panel, &ctx] { TogglePanel(ctx, panel); } });
 		}
 		windowEntries.push_back({ "Reset Layout", false, [this, &ctx] { ResetLayout(ctx); } });
