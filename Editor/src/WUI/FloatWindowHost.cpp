@@ -111,6 +111,12 @@ namespace World
 		return rect;
 	}
 
+	void FloatWindowHost::SetScreenPosition(float x, float y)
+	{
+		if (m_Window)
+			m_Window->SetPosition(static_cast<int>(x), static_cast<int>(y));
+	}
+
 	void FloatWindowHost::Focus()
 	{
 		if (m_Window)

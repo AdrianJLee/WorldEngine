@@ -59,6 +59,8 @@ namespace World
 		bool Render();
 		// 屏幕坐标(用于布局持久化)。
 		Wui::WuiRect ScreenRect() const;
+		// 拖动标签时让窗口跟随光标(跨窗口拖拽期间由外壳驱动)。
+		void SetScreenPosition(float x, float y);
 		void Focus();
 
 	private:

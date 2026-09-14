@@ -836,6 +836,10 @@ namespace World
 			PanelTitle(m_CrossDragPanel), m_Theme.Text, 13.0f);
 		ctx.PopOverlay();
 
+		// 拖拽期间窗口跟随光标(像拖标题栏一样),落点决定 附加/挂靠/留在原地。
+		if (FloatWindowHost* source = FindFloatHost(m_CrossDragPanel))
+			source->SetScreenPosition(pos.x - m_CrossDragGrab.x, pos.y - m_CrossDragGrab.y);
+
 		// 目标命中:其他独立窗口的标题栏+标签栏区域(顶部约 64px)。
 		m_CrossDragTargetKey.clear();
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
