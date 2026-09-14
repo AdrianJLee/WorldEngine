@@ -110,5 +110,13 @@ namespace World
 		Wui::WuiRect m_FloatResizeRect;
 		std::string m_FloatChangeBefore;    // 浮动移动/缩放前的布局快照(操作日志)
 		std::string m_BringFloatFront;      // 本帧请求置顶的浮动面板(下一帧生效)
+
+		// 菜单栏(保留模式树)。
+		std::shared_ptr<Wui::WuiBox> m_MenuBar;
+		std::shared_ptr<Wui::WuiButton> m_FileButton;
+		std::shared_ptr<Wui::WuiButton> m_WindowButton;
+		Wui::WuiId m_OpenMenu = 0;
+		Wui::WuiRect m_MenuHeaderRect;
+		Wui::WuiContext* m_Ctx = nullptr;
 	};
 }
