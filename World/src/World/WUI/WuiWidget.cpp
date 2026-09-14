@@ -394,6 +394,43 @@ namespace World::Wui
 			OnClick();
 	}
 
+	// ---- WuiSection ----
+
+	WuiMeasure WuiSection::Measure(const WuiConstraints& constraints)
+	{
+		MarkClean();
+		return { constraints.MinW, 24.0f + (Open ? ContentHeight : 0.0f) };
+	}
+
+	void WuiSection::Arrange(const WuiRect& rect)
+	{
+		m_Rect = rect;
+		m_ContentRect = { rect.X + 10, rect.Y + 24, rect.W - 10, ContentHeight };
+		MarkClean();
+	}
+
+	void WuiSection::Paint(WuiPaintContext& context)
+	{
+		WuiContext& ctx = context.Context();
+		const WuiRect header { m_Rect.X, m_Rect.Y, m_Rect.W, 24 };
+		ctx.Commands().push_back({ WuiDrawKind::Rect, header, Open ? WuiColor { 0.27f, 0.28f, 0.31f, 1 } : HeaderFill, 2.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Text,
+			{ header.X + 6, header.Y + 3, 0, 0 },
+			WuiColor { 0.82f, 0.84f, 0.87f, 1 }, 0, 1.0f, (Open ? "- " : "+ ") + Title, 14.0f, false });
+		if (ctx.IsClicked(header))
+		{
+			Open = !Open;
+			Invalidate();
+		}
+		if (Open && DrawContent)
+			DrawContent(ctx, m_ContentRect);
+	}
+
+	WuiWidgetPtr WuiSection::HitTest(glm::vec2 point)
+	{
+		return m_Rect.Contains(point) ? shared_from_this() : nullptr;
+	}
+
 	// ---- 便捷布局 ----
 
 	void LayoutWidgetTree(const WuiWidgetPtr& root, const WuiRect& rect)

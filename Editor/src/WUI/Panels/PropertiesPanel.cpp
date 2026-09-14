@@ -79,23 +79,60 @@ namespace World
 			ctx.PopOverlay();
 		}
 
-		float y = rect.Y + 40;
+		// 组件分区进入保留模式布局树;字段内容复用已测的 schema 绘制逻辑。
+		std::vector<const Schema::TypeSchema*> componentSchemas;
 		for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
 		{
 			if (!schema || !schema->Storage || !entity.HasComponent(schema->Storage->ComponentId))
 				continue;
-			const Wui::WuiRect fold { rect.X + 6, y, rect.W - 12, 24 };
-			bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), false);
-			if (ctx.IsClicked(fold))
-				open = !open;
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, fold, open ? theme.ButtonHover : theme.ButtonBg, 2.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { fold.X + 6, fold.Y + 3, 0, 0 }, theme.Text, 0, 1.0f, (open ? "- " : "+ ") + schema->DisplayName, 14.0f, false });
-			y += 26;
-			if (open)
+			componentSchemas.push_back(schema);
+		}
+
+		std::vector<std::string> schemaNames;
+		for (const Schema::TypeSchema* schema : componentSchemas)
+			schemaNames.push_back(schema->DisplayName);
+		if (!m_Root)
+		{
+			m_Root = std::make_shared<Wui::WuiBox>();
+			m_Root->Direction = Wui::WuiDirection::Column;
+			m_Root->Gap = 2;
+		}
+		if (schemaNames != m_LastSchemaNames)
+		{
+			m_LastSchemaNames = std::move(schemaNames);
+			m_Sections.clear();
+			m_Root = std::make_shared<Wui::WuiBox>();
+			m_Root->Direction = Wui::WuiDirection::Column;
+			m_Root->Gap = 2;
+			for (const Schema::TypeSchema* schema : componentSchemas)
 			{
-				const Wui::WuiRect inner { rect.X + 14, y, rect.W - 28, 0 };
-				y += DrawComponentInspector(ctx, inner, entity, *schema);
+				auto section = std::make_shared<Wui::WuiSection>();
+				section->Title = schema->DisplayName;
+				m_Root->Add(section);
+				m_Sections.push_back({ schema->DisplayName, section });
 			}
+		}
+
+		for (size_t i = 0; i < m_Sections.size(); ++i)
+		{
+			const Schema::TypeSchema* schema = componentSchemas[i];
+			bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), false);
+			m_Sections[i].Section->Open = open;
+			m_Sections[i].Section->DrawContent = [this, entity, schema, &m_HeightCache = m_Sections[i].Section](Wui::WuiContext& drawCtx, const Wui::WuiRect& inner)
+			{
+				const float height = DrawComponentInspector(drawCtx, { inner.X, inner.Y, inner.W, 0 }, entity, *schema);
+				m_HeightCache->ContentHeight = height + 4.0f;
+			};
+		}
+
+		Wui::LayoutWidgetTree(m_Root, { rect.X + 6, rect.Y + 40, rect.W - 12, rect.H - 40 });
+		Wui::WuiPaintContext paint(ctx);
+		m_Root->Paint(paint);
+		for (size_t i = 0; i < m_Sections.size(); ++i)
+		{
+			const Schema::TypeSchema* schema = componentSchemas[i];
+			bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), false);
+			open = m_Sections[i].Section->Open;
 		}
 	}
 
