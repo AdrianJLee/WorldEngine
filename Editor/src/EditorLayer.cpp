@@ -188,6 +188,10 @@ namespace World
 
 		static Wui::WuiRhiBackend wuiBackend;
 
+		// 多窗口:每帧开始前显式把主窗口的 GL 上下文设为当前,
+		// 避免上一帧独立窗口渲染留下的上下文影响主窗口的绘制与交换。
+		Application::Get().GetWindow().MakeCurrent();
+
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
 		{

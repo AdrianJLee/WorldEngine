@@ -33,7 +33,10 @@ namespace World
 	EditorShell::EditorShell(EditorLayer& editor)
 		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json")
 	{
-		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "windows", "attach_slot", "stats", "memory", "operations" };
+		// 注意:"attach_slot" 暂不在默认面板列表/Window 菜单中暴露:
+		// W7.1 初版在"槽位面板存在 + 独立窗口创建"组合下会崩溃(已定位到槽位面板路径),
+		// 修复后再放回列表。面板实现与挂靠逻辑保留,便于继续排查。
+		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "windows", "stats", "memory", "operations" };
 		m_Panels = panels;
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(panels);
 		std::string error;
@@ -52,6 +55,7 @@ namespace World
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 		m_PanelRegistry.emplace("windows", std::make_unique<WindowsPanel>());
+		// 保留注册以便修复后启用;不进入 m_Panels 则不会出现在 Window 菜单/默认布局。
 		m_PanelRegistry.emplace("attach_slot", std::make_unique<AttachSlotPanel>());
 		// 独立窗口(与停靠面板是不同组件):按保存的浮动布局重建。
 		for (const Wui::DockFloat& entry : m_Layout.Floating)
