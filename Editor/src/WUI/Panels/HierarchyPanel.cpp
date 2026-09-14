@@ -5,6 +5,7 @@
 #include "World/Scene/Components.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
 
@@ -89,24 +90,27 @@ namespace World
 		const Wui::WuiId popup = Wui::HashId("hierarchy.context");
 		if (ctx.IsPopupOpen(popup) && m_Context.IsValid())
 		{
-			ctx.PushOverlay();
-			const Wui::WuiRect panel { m_MenuPos.x, m_MenuPos.y, 150, 2 * 22 + 8 };
-			DrawPanelSurface(ctx, panel, theme);
-			if (MenuItem(ctx, Wui::HashId("hierarchy.duplicate"), { panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Duplicate", true, theme))
+			// 右键菜单走组件(ContextMenu):位置钉住 + 外部点击/Esc 关闭统一由组件处理。
+			Wui::WuiRect panel;
+			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 150.0f, 2, &panel, theme))
 			{
-				host.DuplicateSelectedEntity();
-				ctx.CloseAllPopups();
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.duplicate"),
+					{ panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Duplicate", theme))
+				{
+					host.DuplicateSelectedEntity();
+					ctx.CloseAllPopups();
+				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.delete"),
+					{ panel.X + 4, panel.Y + 26, panel.W - 8, 22 }, "Delete", theme))
+				{
+					Entity::DestroyEntity(scene.get(), m_Context);
+					host.MarkDocumentDirty();
+					ctx.CloseAllPopups();
+				}
+				if (ctx.IsKeyPressed(KeyCodes::Escape))
+					ctx.ClosePopup(popup);
+				Wui::EndContextMenu(ctx, popup, panel, theme);
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.delete"), { panel.X + 4, panel.Y + 26, panel.W - 8, 22 }, "Delete", true, theme))
-			{
-				Entity::DestroyEntity(scene.get(), m_Context);
-				host.MarkDocumentDirty();
-				ctx.CloseAllPopups();
-			}
-			ctx.ClosePopupsOnOutsideClick({ popup }, panel);
-			if (ctx.IsKeyPressed(KeyCodes::Escape))
-				ctx.ClosePopup(popup);
-			ctx.PopOverlay();
 		}
 		else
 		{
