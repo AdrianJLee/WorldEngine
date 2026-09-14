@@ -223,7 +223,11 @@ namespace World
 
 		// Vulkan 由交换链 Present 呈现;GL 保持 glfwSwapBuffers。
 		if (m_Context && Renderer::GetBackendName() != "vulkan")
+		{
+			// 多窗口:独立窗口渲染会切换当前上下文,交换前必须切回本窗口。
+			glfwMakeContextCurrent(m_Window);
 			m_Context->SwapBuffers();
+		}
 	}
 
 	void WindowsWindow::SetVsync(bool enabled)

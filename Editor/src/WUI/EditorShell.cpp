@@ -579,6 +579,10 @@ namespace World
 				entry->Rect = host.ScreenRect();
 			++i;
 		}
+		// 独立窗口渲染会把 GL 上下文切到各自窗口,这里恢复主窗口上下文,
+		// 否则主窗口后续的呈现/交换会作用在错误的上下文上(表现为主窗口不再刷新)。
+		if (Application::HasInstance())
+			Application::Get().GetWindow().MakeCurrent();
 	}
 
 	void EditorShell::AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect)
