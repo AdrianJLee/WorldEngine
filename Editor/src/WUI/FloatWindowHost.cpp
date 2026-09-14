@@ -293,12 +293,9 @@ namespace World
 		const Wui::WuiTheme& theme = m_Callbacks.Theme;
 		constexpr float tabH = 24.0f;
 
-		// 菜单栏:每个窗口都有自己的菜单栏(独立),Widget 窗口目前为空。
-		constexpr float menuH = 24.0f;
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, area.Y, area.W, menuH }, theme.PanelHeader, 0.0f });
-
 		// ---- 标签栏(浏览器式):附加目标 + 切换/关闭标签 ----
-		const float tabTop = area.Y + menuH;
+		// 菜单栏为空时不占位:标签栏直接在最顶部(窗口顶栏 = 标签栏)。
+		const float tabTop = area.Y;
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH }, theme.PanelHeader, 0.0f });
 		// 放置目标高亮:其他窗口的标签正被拖到本窗口上方。
 		if (m_TabDropHighlight)
@@ -394,8 +391,7 @@ namespace World
 			}
 		}
 
-		const Wui::WuiRect content { area.X, tabTop + tabH, area.W,
-			std::max(0.0f, area.H - menuH - tabH) };
+		const Wui::WuiRect content { area.X, tabTop + tabH, area.W, std::max(0.0f, area.H - tabH) };
 		if (!m_Panels.empty() && m_Callbacks.Content)
 			m_Callbacks.Content(ctx, content, ActivePanel());
 		if (!closeRequest.empty())
