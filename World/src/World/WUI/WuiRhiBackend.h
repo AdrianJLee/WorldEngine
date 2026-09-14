@@ -59,6 +59,7 @@ namespace World::Wui
 		void SetActiveTexture(const Rhi::Handle<Rhi::Texture>& texture);
 		void Flush();
 		void ApplyScissor(const WuiRect& rect);
+		Rhi::Handle<Rhi::DescriptorSet> TextureSetFor(const Rhi::Handle<Rhi::Texture>& texture);
 
 		FontFace& FaceFor(const std::string& text, bool bold);
 		Glyph& Bake(FontFace& face, uint32_t codepoint);
@@ -80,7 +81,7 @@ namespace World::Wui
 		Rhi::Handle<Rhi::Pipeline> m_Pipeline;
 		Rhi::Handle<Rhi::Buffer> m_Vb, m_Ib, m_Ubo;
 		Rhi::Handle<Rhi::DescriptorSetLayout> m_TextureLayout;
-		Rhi::Handle<Rhi::DescriptorSet> m_TextureSet, m_GlobalSet;
+		Rhi::Handle<Rhi::DescriptorSet> m_GlobalSet;
 		Rhi::Handle<Rhi::Sampler> m_Sampler;
 		Rhi::Handle<Rhi::Texture> m_WhiteTexture;
 		Rhi::Handle<Rhi::RenderPass> m_UiPass;
@@ -98,5 +99,13 @@ namespace World::Wui
 		std::vector<WuiRect> m_ClipStack;
 		WuiRect m_CurrentClip {};
 		bool m_IsVulkan = false;
+		// 每帧为每个批次分配独立的缓冲区区间:同一命令缓冲里的所有绘制
+		// 在提交后才执行,若各批次复用同一段数据,GPU 只能看到最后一批。
+		uint64_t m_FrameVertexBytes = 0;
+		uint64_t m_FrameIndexBytes = 0;
+		// 每个纹理一份描述符集:一个描述符集在一帧内被多次改写时,GPU 执行
+		// 整条命令缓冲只能看到最后一次写入,导致除最后一张外的贴图全部采样错误。
+		std::unordered_map<const void*, Rhi::Handle<Rhi::DescriptorSet>> m_TextureSets;
+		uint32_t m_TextureGeneration = 0;
 	};
 }

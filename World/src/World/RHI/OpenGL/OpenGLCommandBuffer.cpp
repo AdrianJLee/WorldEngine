@@ -171,13 +171,13 @@ namespace World::Rhi::OpenGL
 	void OpenGLCommandBuffer::BindIndexBuffer(const Handle<Buffer>& buffer, uint64_t offset, IndexType indexType)
 	{
 		m_IndexType = indexType;
+		m_IndexBufferOffset = offset;
 		if (!m_CurrentPipeline)
 			return;
 		const auto pipeline = std::static_pointer_cast<OpenGLPipeline>(m_CurrentPipeline);
 		const auto glBuffer = std::dynamic_pointer_cast<OpenGLBuffer>(buffer);
 		if (glBuffer)
 			glVertexArrayElementBuffer(pipeline->GetVertexArray(), glBuffer->GetID());
-		(void)offset;
 	}
 
 	void OpenGLCommandBuffer::PushConstants(ShaderStageFlags /*stages*/, uint32_t /*offset*/, uint32_t /*size*/, const void* /*data*/)
@@ -209,7 +209,8 @@ namespace World::Rhi::OpenGL
 			topology = ToGLTopology(std::static_pointer_cast<OpenGLPipeline>(m_CurrentPipeline)->GetDesc().Topology);
 		}
 		const GLenum type = m_IndexType == IndexType::UInt16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
-		const void* offset = reinterpret_cast<const void*>(static_cast<uintptr_t>(firstIndex) *
+		const void* offset = reinterpret_cast<const void*>(static_cast<uintptr_t>(m_IndexBufferOffset) +
+			static_cast<uintptr_t>(firstIndex) *
 			(m_IndexType == IndexType::UInt16 ? sizeof(uint16_t) : sizeof(uint32_t)));
 		glDrawElementsInstancedBaseVertexBaseInstance(topology, indexCount, type, offset,
 			instanceCount, vertexOffset, firstInstance);

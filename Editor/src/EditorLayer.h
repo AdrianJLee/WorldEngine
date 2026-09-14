@@ -148,6 +148,11 @@ namespace World
 		std::string m_RendererChangeName;
 		uint64_t m_SceneTextureId = 0;
 		uint64_t m_IconIds[8] = {};
+		uint32_t m_UiTextureGeneration = 0;
+		// 视口目标延迟重建:拖拽分隔条时尺寸每帧变化,逐帧销毁/重建渲染目标
+		// 会在 GPU 仍采样旧纹理时释放资源(Vulkan 下会卡死)。尺寸稳定后再重建。
+		glm::vec2 m_PendingViewportSize { 0, 0 };
+		float m_ViewportResizeDelay = 0.0f;
 	};
 
 }

@@ -213,6 +213,44 @@ namespace World::Wui
 		return AddTab(panel, anchor, zone);
 	}
 
+	bool DockLayout::DockToRoot(const PanelId& panel, DropZone zone)
+	{
+		if (zone == DropZone::Center || panel.empty())
+			return false;
+		if (Contains(panel))
+			RemoveTab(panel);
+
+		DockNode dock;
+		dock.Type = DockNode::Type::Tabs;
+		dock.Panels.push_back(panel);
+
+		// 根为空(所有面板已关闭)时,直接作为整个区域。
+		if (Root.IsTabs() && Root.Panels.empty())
+		{
+			Root = std::move(dock);
+			return true;
+		}
+
+		DockNode split;
+		split.Type = DockNode::Type::Split;
+		split.Direction = (zone == DropZone::Left || zone == DropZone::Right)
+			? WuiDirection::Row : WuiDirection::Column;
+		const bool before = zone == DropZone::Left || zone == DropZone::Top;
+		split.Ratio = before ? 0.25f : 0.75f;
+		if (before)
+		{
+			split.Children.push_back(std::move(dock));
+			split.Children.push_back(std::move(Root));
+		}
+		else
+		{
+			split.Children.push_back(std::move(Root));
+			split.Children.push_back(std::move(dock));
+		}
+		Root = std::move(split);
+		return true;
+	}
+
 	bool DockLayout::RemoveFromTree(DockNode& parent, DockNode* child)
 	{
 		auto it = std::find_if(parent.Children.begin(), parent.Children.end(), [&](const DockNode& node)

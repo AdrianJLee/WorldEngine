@@ -48,16 +48,15 @@ namespace World
 			int EntityID = -1;
 		};
 
+		// Renderer2D 管线的渲染通道(与 SceneRenderer 目标结构相同)。
+		Rhi::Handle<Rhi::RenderPass> s_RenderPass;
+
 		Rhi::Handle<Rhi::Shader> CreateRendererShader(const char* hlsl, const char* debugName)
 		{
-			const auto vsBytes = ShaderCompiler::CompileOrLoad(hlsl, "VSMain", "vs_6_0");
-			const auto psBytes = ShaderCompiler::CompileOrLoad(hlsl, "PSMain", "ps_6_0");
 			Rhi::ShaderDesc desc;
 			desc.DebugName = debugName;
-			desc.Stages.push_back({ Rhi::ShaderStage::Vertex, "main", {},
-				std::string(vsBytes.begin(), vsBytes.end()) });
-			desc.Stages.push_back({ Rhi::ShaderStage::Fragment, "main", {},
-				std::string(psBytes.begin(), psBytes.end()) });
+			desc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Vertex, hlsl, "VSMain", "vs_6_0"));
+			desc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Fragment, hlsl, "PSMain", "ps_6_0"));
 			return Renderer::GetDevice()->CreateShader(desc);
 		}
 
@@ -70,6 +69,7 @@ namespace World
 			Rhi::PipelineDesc desc;
 			desc.Shader = shader;
 			desc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), textureLayout };
+			desc.RenderPass = s_RenderPass;
 			desc.Topology = topology;
 			desc.LineWidth = lineWidth;
 			desc.VertexBindings.push_back({ 0, stride, false });
@@ -198,6 +198,40 @@ namespace World
 		samplerDesc.AddressW = Rhi::SamplerAddressMode::Repeat;
 		s_Data.Sampler = Renderer::GetDevice()->CreateSampler(samplerDesc);
 
+		// Renderer2D 管线渲染进 SceneRenderer 目标;创建结构相同的渲染通道,
+		// Vulkan 只要求管线与帧缓冲使用的 pass 兼容,无需同一实例。
+		Rhi::RenderPassDesc passDesc;
+		Rhi::RenderPassAttachment color;
+		color.Format = Rhi::Format::R8G8B8A8_UNORM;
+		color.Samples = Rhi::SampleCount::Count1;
+		color.Load = Rhi::LoadOp::Clear;
+		color.Store = Rhi::StoreOp::Store;
+		color.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		color.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		Rhi::RenderPassAttachment entityId;
+		entityId.Format = Rhi::Format::R32_SINT;
+		entityId.Samples = Rhi::SampleCount::Count1;
+		entityId.Load = Rhi::LoadOp::Clear;
+		entityId.Store = Rhi::StoreOp::Store;
+		entityId.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		entityId.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		Rhi::RenderPassAttachment depth;
+		depth.Format = Rhi::Format::D24_UNORM_S8_UINT;
+		depth.Samples = Rhi::SampleCount::Count1;
+		depth.Load = Rhi::LoadOp::Clear;
+		depth.Store = Rhi::StoreOp::Store;
+		depth.InitialLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
+		depth.FinalLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
+		passDesc.Attachments = { color, entityId, depth };
+		Rhi::SubpassDesc subpass;
+		subpass.ColorAttachments = {
+			{ 0, Rhi::AttachmentLayout::ColorAttachment },
+			{ 1, Rhi::AttachmentLayout::ColorAttachment },
+		};
+		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
+		passDesc.Subpasses = { subpass };
+		s_RenderPass = Renderer::GetDevice()->CreateRenderPass(passDesc);
+
 		// 白色纹理(槽 0)。
 		Rhi::TextureDesc whiteDesc;
 		whiteDesc.Type = Rhi::TextureType::Texture2D;
@@ -257,6 +291,7 @@ namespace World
 		release(s_Data.Lines);
 
 		s_Data.Sampler = nullptr;
+		s_RenderPass = nullptr;
 		s_Data.TextureDescriptorSet = nullptr;
 		s_Data.TextureLayout = nullptr;
 		s_Data.Textures.fill(nullptr);

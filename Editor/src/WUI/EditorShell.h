@@ -90,6 +90,9 @@ namespace World
 		std::string m_SplitterBeforeJson;
 		std::string m_DropTargetPanel;
 		Wui::DropZone m_DropZone = Wui::DropZone::Center;
+		// 编辑器级四边停靠:拖拽面板到窗口边缘时激活(优先于面板内的分栏落区)。
+		bool m_EdgeDockActive = false;
+		Wui::DropZone m_EdgeDropZone = Wui::DropZone::Center;
 		std::string m_LastDragTarget;
 		Wui::DropZone m_LastDragZone = Wui::DropZone::Center;
 	};

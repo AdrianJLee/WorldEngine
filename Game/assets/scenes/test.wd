@@ -1,0 +1,36 @@
+FormatVersion: 2
+Scene: Untitled
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 11840720356800898302
+    World::TagComponent:
+      Tag: Empty Entity
+    World::TransformComponent:
+      Location: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::SpriteComponent:
+      Color: [1.26999998, 0.220000029, 1, 1]
+      Texture: ""
+      TilingFactor: 1
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 12632687009605733917
+    World::TagComponent:
+      Tag: Camera
+    World::TransformComponent:
+      Location: [0, 0, 5.75999975]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::CameraComponent:
+      Camera:
+        m_ProjectionType: 1
+        m_OrthographicZoom: 1
+        m_OrthographicNearClip: -1
+        m_OrthographicFarClip: 1
+        m_PerspectiveFOV: 45
+        m_PerspectiveNearClip: 0.100000001
+        m_PerspectiveFarClip: 100
+      Primary: true
+      FixedAspectRatio: false

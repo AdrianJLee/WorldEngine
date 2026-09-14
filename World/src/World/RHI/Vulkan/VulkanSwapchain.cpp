@@ -1,22 +1,41 @@
+#define VK_USE_PLATFORM_WIN32_KHR
 #include "wldpch.h"
 #include "World/RHI/Vulkan/VulkanSwapchain.h"
 #include "World/RHI/Vulkan/VulkanDevice.h"
 #include "World/RHI/Vulkan/VulkanResources.h"
 #include "World/Core/Log.h"
 
-#define GLFW_INCLUDE_VULKAN
+// 本 TU 需要 volk 的 Win32 平台头(vulkan_win32.h 来自 Vulkan SDK include 目录),
+// 但 GLFW_INCLUDE_VULKAN 是 World 目标的全局编译宏,会让 glfw3.h 去包含 vendor
+// 精简版 vulkan.h(其中没有平台头)。这里在引入 GLFW 前取消该宏。
+#undef GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
 
 namespace World::Rhi::Vulkan
 {
 	VulkanSwapchain::VulkanSwapchain(VulkanDevice& device, const SwapchainDesc& desc)
 		: m_Device(device), m_Desc(desc)
 	{
-		if (glfwCreateWindowSurface(device.GetInstance(),
-			static_cast<GLFWwindow*>(desc.NativeWindow), nullptr, &m_Surface) != VK_SUCCESS)
+		// 窗口在宿主内固定带 OpenGL 上下文(双后端共用一个 HWND),GLFW 的
+		// glfwCreateWindowSurface 会因 client != GLFW_NO_API 拒绝;直接用
+		// Win32 surface,拿到 HWND 后交给 Vulkan。
+		const HWND hwnd = glfwGetWin32Window(static_cast<GLFWwindow*>(desc.NativeWindow));
+		if (!hwnd)
 		{
 			if (Log::GetCoreLogger())
-				WLD_CORE_ERROR("[RHI-VK] glfwCreateWindowSurface failed");
+				WLD_CORE_ERROR("[RHI-VK] swapchain surface creation failed: no native window handle");
+			return;
+		}
+		VkWin32SurfaceCreateInfoKHR surfaceInfo {};
+		surfaceInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+		surfaceInfo.hinstance = GetModuleHandleW(nullptr);
+		surfaceInfo.hwnd = hwnd;
+		if (vkCreateWin32SurfaceKHR(device.GetInstance(), &surfaceInfo, nullptr, &m_Surface) != VK_SUCCESS)
+		{
+			if (Log::GetCoreLogger())
+				WLD_CORE_ERROR("[RHI-VK] vkCreateWin32SurfaceKHR failed");
 			return;
 		}
 
@@ -78,6 +97,7 @@ namespace World::Rhi::Vulkan
 		}
 		if (status != VK_SUCCESS && status != VK_SUBOPTIMAL_KHR)
 			return result;
+		m_CurrentImageIndex = result.ImageIndex;
 		if (result.ImageIndex < m_ImageTextures.size())
 			result.Image = m_ImageTextures[result.ImageIndex];
 		return result;
@@ -94,6 +114,7 @@ namespace World::Rhi::Vulkan
 		info.pWaitSemaphores = wait ? &wait : nullptr;
 		info.swapchainCount = 1;
 		info.pSwapchains = &m_Swapchain;
+		info.pImageIndices = &m_CurrentImageIndex;
 		vkQueuePresentKHR(m_Device.GetGraphicsQueue(), &info);
 	}
 

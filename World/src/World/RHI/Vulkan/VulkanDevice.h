@@ -59,5 +59,6 @@ namespace World::Rhi::Vulkan
 		uint32_t m_GraphicsFamily = 0;
 		VkCommandPool m_CommandPool = VK_NULL_HANDLE;
 		VkPipelineLayout m_LastPipelineLayout = VK_NULL_HANDLE;
+		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
 	};
 }

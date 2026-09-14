@@ -26,6 +26,7 @@ namespace World::Rhi::Vulkan
 		SwapchainDesc m_Desc;
 		VkSurfaceKHR m_Surface = VK_NULL_HANDLE;
 		VkSwapchainKHR m_Swapchain = VK_NULL_HANDLE;
+		uint32_t m_CurrentImageIndex = 0;
 		std::vector<VkImage> m_Images;
 		std::vector<Handle<VulkanTexture>> m_ImageTextures;
 		Extent2D m_Extent;

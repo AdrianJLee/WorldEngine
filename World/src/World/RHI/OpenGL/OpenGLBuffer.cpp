@@ -17,15 +17,12 @@ namespace World::Rhi::OpenGL
 			m_Target = GL_ARRAY_BUFFER;
 
 		GLbitfield storageFlags = GL_DYNAMIC_STORAGE_BIT;
-		if (desc.Memory != MemoryHint::DeviceLocal)
-			storageFlags |= GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
 
 		glCreateBuffers(1, &m_ID);
 		glNamedBufferStorage(m_ID, desc.Size, desc.InitialData, storageFlags);
-
-		if (desc.Memory != MemoryHint::DeviceLocal)
-			m_Mapped = static_cast<uint8_t*>(
-				glMapNamedBufferRange(m_ID, 0, desc.Size, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT));
+		// 不使用持久映射:批绘制后端每帧多次覆写同一缓冲区,映射写入与 GPU
+		// 读取之间没有同步,早期批次会读到被后续批次覆盖的顶点数据(表现为
+		// 界面局部不绘制)。glNamedBufferSubData 由驱动处理读写冲突。
 	}
 
 	OpenGLBuffer::~OpenGLBuffer()
@@ -36,23 +33,18 @@ namespace World::Rhi::OpenGL
 
 	void* OpenGLBuffer::Map(uint64_t offset, uint64_t size)
 	{
-		if (!m_Mapped)
-			return nullptr;
-		return m_Mapped + offset;
+		(void)offset;
+		(void)size;
+		return nullptr;
 	}
 
 	void OpenGLBuffer::Unmap()
 	{
-		// 持久映射,显式 Unmap 为 no-op。
+		// 非映射实现:SetData 由驱动同步,无需 Unmap。
 	}
 
 	void OpenGLBuffer::SetData(const void* data, uint64_t size, uint64_t offset)
 	{
-		if (m_Mapped)
-		{
-			std::memcpy(m_Mapped + offset, data, size);
-			return;
-		}
 		glNamedBufferSubData(m_ID, offset, size, data);
 	}
 }

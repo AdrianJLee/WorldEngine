@@ -231,7 +231,49 @@ namespace World
 				ctx.RecordOp("undo", "redo", ctx.History().RedoName(), "");
 		}
 		const glm::vec2 viewport = ctx.ViewportSize();
+		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
+		// 停靠区(而不是只切分鼠标所在的面板组)。需在渲染面板前判定,以便
+		// RenderTabs 跳过面板内的落区逻辑。
+		const Wui::WuiRect editorArea { 0, 26, viewport.x, viewport.y - 26 };
+		std::string edgePayload;
+		const bool edgeDragActive = ctx.IsDragActive(&edgePayload) && edgePayload.rfind("panel:", 0) == 0;
+		if (edgeDragActive)
+		{
+			m_EdgeDockActive = false;
+			m_EdgeDropZone = Wui::DropZone::Center;
+			if (ctx.IsHovered(editorArea))
+			{
+				constexpr float edgeBand = 110.0f;
+				const glm::vec2 mouse = ctx.Input().MousePos;
+				if (mouse.x - editorArea.X <= edgeBand) m_EdgeDropZone = Wui::DropZone::Left;
+				else if (editorArea.X + editorArea.W - mouse.x <= edgeBand) m_EdgeDropZone = Wui::DropZone::Right;
+				else if (mouse.y - editorArea.Y <= edgeBand) m_EdgeDropZone = Wui::DropZone::Top;
+				else if (editorArea.Y + editorArea.H - mouse.y <= edgeBand) m_EdgeDropZone = Wui::DropZone::Bottom;
+				m_EdgeDockActive = m_EdgeDropZone != Wui::DropZone::Center;
+				if (m_EdgeDockActive)
+				{
+					ctx.DropTarget(editorArea, "panel:");
+					// 原面板落区状态让位,避免同时高亮/同时落位。
+					m_DropTargetPanel.clear();
+					m_DropZone = Wui::DropZone::Center;
+				}
+			}
+		}
+		// 拖拽结束的落位在下一帧消费,因此拖拽不活跃时保留上一帧的边缘落区状态。
 		RenderNode(ctx, m_Layout.Root, { 0, 26, viewport.x, viewport.y - 26 });
+
+		// 边缘落位提示必须在面板之后绘制:面板背景是不透明矩形,
+		// 先画会被完全遮住(表现就是"没有目标位置提示")。
+		if (m_EdgeDockActive)
+		{
+			Wui::WuiRect zone = editorArea;
+			if (m_EdgeDropZone == Wui::DropZone::Left) zone.W = editorArea.W * 0.25f;
+			else if (m_EdgeDropZone == Wui::DropZone::Right) { zone.X = editorArea.X + editorArea.W * 0.75f; zone.W = editorArea.W * 0.25f; }
+			else if (m_EdgeDropZone == Wui::DropZone::Top) zone.H = editorArea.H * 0.25f;
+			else if (m_EdgeDropZone == Wui::DropZone::Bottom) { zone.Y = editorArea.Y + editorArea.H * 0.75f; zone.H = editorArea.H * 0.25f; }
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, zone, { 0.3f, 0.5f, 0.9f, 0.30f }, 3.0f });
+			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, zone, { 0.45f, 0.65f, 1.0f, 1.0f }, 3.0f, 2.0f });
+		}
 
 		std::string payload;
 		if (ctx.AcceptDrop(&payload, "panel:"))
@@ -239,7 +281,13 @@ namespace World
 			if (payload.rfind("panel:", 0) == 0)
 			{
 				const std::string panel = payload.substr(6);
-				if (!m_DropTargetPanel.empty() && m_Layout.Contains(panel))
+				if (m_EdgeDockActive && m_Layout.Contains(panel))
+				{
+					const std::string before = m_Layout.Serialize();
+					if (m_Layout.DockToRoot(panel, m_EdgeDropZone))
+						RecordDockChange(ctx, "drop", panel + " -> editor/" + ZoneName(m_EdgeDropZone), before);
+				}
+				else if (!m_DropTargetPanel.empty() && m_Layout.Contains(panel))
 				{
 					const std::string before = m_Layout.Serialize();
 					if (m_Layout.MoveTab(panel, m_DropTargetPanel, m_DropZone))
@@ -249,6 +297,8 @@ namespace World
 			// 只在落位消费后清空,避免下一帧 AcceptDrop 读取时目标已被清。
 			m_DropTargetPanel.clear();
 			m_DropZone = Wui::DropZone::Center;
+			m_EdgeDockActive = false;
+			m_EdgeDropZone = Wui::DropZone::Center;
 		}
 
 		// 菜单栏最后绘制:其弹出面板需要盖在所有停靠面板之上。
@@ -302,17 +352,17 @@ namespace World
 				const Wui::WuiRect splitter = row
 					? Wui::WuiRect { area.X + cursor - 2, area.Y, 4, area.H }
 					: Wui::WuiRect { area.X, area.Y + cursor - 2, area.W, 4 };
-				if (ctx.IsHovered(splitter) || m_DragSplitNode == &node)
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, splitter, m_Theme.Border, 0.0f });
-				if (ctx.IsHovered(splitter))
-					ctx.SetCursor(row ? Wui::WuiCursor::ResizeEW : Wui::WuiCursor::ResizeNS);
-				if (ctx.IsClicked(splitter))
-				{
-					m_SplitterDragging = true;
-					m_DragSplitNode = &node;
-					m_DragSplitRow = row;
-					m_SplitterBeforeJson = m_Layout.Serialize();
-				}
+			if (ctx.IsHovered(splitter) || m_DragSplitNode == &node)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, splitter, m_Theme.Border, 0.0f });
+			if (ctx.IsHovered(splitter))
+				ctx.SetCursor(row ? Wui::WuiCursor::ResizeEW : Wui::WuiCursor::ResizeNS);
+			if (ctx.IsClicked(splitter))
+			{
+				m_SplitterDragging = true;
+				m_DragSplitNode = &node;
+				m_DragSplitRow = row;
+				m_SplitterBeforeJson = m_Layout.Serialize();
+			}
 			}
 		}
 
@@ -369,7 +419,7 @@ namespace World
 			RenderPanelContent(ctx, node.Panels[node.Active], content);
 
 		std::string dragPayload;
-		if (ctx.IsDragActive(&dragPayload) && dragPayload.rfind("panel:", 0) == 0 && ctx.IsHovered(area))
+		if (!m_EdgeDockActive && ctx.IsDragActive(&dragPayload) && dragPayload.rfind("panel:", 0) == 0 && ctx.IsHovered(area))
 		{
 			ctx.DropTarget(area, "panel:"); // 武装落点:仅面板拖拽在此生效
 			const glm::vec2 rel = ctx.Input().MousePos - glm::vec2 { area.X, area.Y };

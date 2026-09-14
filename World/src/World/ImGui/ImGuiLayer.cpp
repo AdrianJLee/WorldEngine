@@ -48,6 +48,9 @@ namespace World
 		ImGuiIO& io = ImGui::GetIO(); (void)io;
 		io.IniFilename = nullptr; // 布局由 WUI 的 wui-layout.json 管理
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;       // Enable Keyboard Controls
+		// 光标由 WUI 后端统一管理(悬停/拖拽/缩放形状);ImGui 若同时写光标,
+		// 每帧会与本引擎的值互相覆盖,表现为光标闪烁或形状不生效。
+		io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
 		//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;       // Enable Gamepad Controls
 
 		// Setup Dear ImGui style

@@ -172,6 +172,11 @@ file(GLOB_RECURSE WORLD_SOURCES
 # 添加源文件到 target
 target_sources(World PRIVATE ${WORLD_SOURCES} $<TARGET_OBJECTS:WorldBox2d>)
 
+# volk 需要在启用 Win32 平台宏时编译,才会导出 VkWin32SurfaceCreateInfoKHR /
+# vkCreateWin32SurfaceKHR 等平台符号(VulkanSwapchain 用它们创建表面)。
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/vendor/volk/volk.c"
+    PROPERTIES COMPILE_DEFINITIONS "VK_USE_PLATFORM_WIN32_KHR")
+
 # 链接库 (Vulkan::Vulkan 解决了 vulkan-1.lib 路径问题)
 target_link_libraries(World PRIVATE
     glfw    # 对应子目录生成的 target 名

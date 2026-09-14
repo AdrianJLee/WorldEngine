@@ -17,7 +17,11 @@ namespace World::Rhi
 
 	struct AttachmentRef
 	{
-		uint32_t Index = 0;
+		// UINT32_MAX 表示"未使用"。默认值必须是 UINT32_MAX:
+		// SubpassDesc::HasDepthStencil() 依赖它判断是否真的绑定了深度附件,
+		// 否则没有深度附件的通道(如 WUI 的呈现通道)会把颜色附件当成
+		// 深度附件引用,导致 VkRenderPass 非法、渲染整体失效。
+		uint32_t Index = UINT32_MAX;
 		AttachmentLayout Layout = AttachmentLayout::Undefined;
 	};
 

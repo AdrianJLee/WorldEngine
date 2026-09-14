@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "World/Core/Export.h"
+#include "World/RHI/RhiShader.h"
 #include <string>
 #include <vector>
 
@@ -10,6 +11,9 @@ namespace World
 	public:
 		// 编译或加载指定的 HLSL 文件，返回对应平台的字节码（SPV 或 GLSL）
 		static std::vector<char> CompileOrLoad(const std::string& hlslPath, const std::string& entryPoint, const std::string& profile);
+		// 按当前后端填充规范的 RHI 着色器阶段(Vulkan 填 SPIR-V,OpenGL 填 GLSL)。
+		static Rhi::ShaderStageSource CompileStage(Rhi::ShaderStage stage, const std::string& hlslPath,
+			const std::string& entryPoint, const std::string& profile);
 
 	private:
 		static bool CompileToSpv(const std::string& hlslAbsPath, const std::string& entryPoint, const std::string& profile, const std::string& spvAbsPath);

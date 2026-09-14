@@ -66,6 +66,20 @@ namespace World
 		}
 	}
 
+	Rhi::ShaderStageSource ShaderCompiler::CompileStage(Rhi::ShaderStage stage, const std::string& hlslPath,
+		const std::string& entryPoint, const std::string& profile)
+	{
+		Rhi::ShaderStageSource out;
+		out.Stage = stage;
+		out.EntryPoint = entryPoint;
+		const std::vector<char> bytes = CompileOrLoad(hlslPath, entryPoint, profile);
+		if (Renderer::GetAPI() == RendererAPI::API::Vulkan)
+			out.SpirV.assign(bytes.begin(), bytes.end());
+		else
+			out.Glsl.assign(bytes.begin(), bytes.end());
+		return out;
+	}
+
 	bool ShaderCompiler::CompileToSpv(const std::string& hlslAbsPath, const std::string& entryPoint, const std::string& profile, const std::string& spvAbsPath)
 	{
 		//dxc.exe -spirv -T vs_6_0 -E VS Test.vert.hlsl -Fo Test.3.vert.spv

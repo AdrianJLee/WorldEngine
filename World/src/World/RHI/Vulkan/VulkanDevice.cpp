@@ -15,6 +15,16 @@ namespace World::Rhi::Vulkan
 {
 	namespace
 	{
+		VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
+			VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+			VkDebugUtilsMessageTypeFlagsEXT /*type*/,
+			const VkDebugUtilsMessengerCallbackDataEXT* data,
+			void* /*user*/)
+		{
+			WLD_CORE_WARN("[vk-validation] {0}", data->pMessage ? data->pMessage : "");
+			return VK_FALSE;
+		}
+
 		bool HasValidationLayer()
 		{
 			// 实例创建前只有 loader(vkGetInstanceProcAddr)可用,全局入口未装载。
@@ -64,6 +74,8 @@ namespace World::Rhi::Vulkan
 		}
 		if (m_Instance)
 		{
+			if (m_DebugMessenger)
+				vkDestroyDebugUtilsMessengerEXT(m_Instance, m_DebugMessenger, nullptr);
 			vkDestroyInstance(m_Instance, nullptr);
 			m_Instance = VK_NULL_HANDLE;
 		}
@@ -106,6 +118,22 @@ namespace World::Rhi::Vulkan
 			return false;
 		}
 		volkLoadInstance(m_Instance);
+		if (enableValidation)
+		{
+			VkDebugUtilsMessengerCreateInfoEXT messengerInfo {};
+			messengerInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+			messengerInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+				VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+			messengerInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+				VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+			messengerInfo.pfnUserCallback = DebugCallback;
+			if (vkCreateDebugUtilsMessengerEXT)
+			{
+				VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
+				if (vkCreateDebugUtilsMessengerEXT(m_Instance, &messengerInfo, nullptr, &messenger) == VK_SUCCESS)
+					m_DebugMessenger = messenger;
+			}
+		}
 
 		uint32_t deviceCount = 0;
 		vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
@@ -140,6 +168,35 @@ namespace World::Rhi::Vulkan
 		deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		deviceInfo.queueCreateInfoCount = 1;
 		deviceInfo.pQueueCreateInfos = &queueInfo;
+		VkPhysicalDeviceFeatures supportedFeatures{};
+		vkGetPhysicalDeviceFeatures(m_PhysicalDevice, &supportedFeatures);
+		VkPhysicalDeviceFeatures enabledFeatures{};
+		if (supportedFeatures.wideLines)
+			enabledFeatures.wideLines = VK_TRUE;
+		// 多渲染目标下各附件的混合状态不同(颜色附件开混合、实体 ID 附件只写),
+		// 需要 independentBlend。
+		if (supportedFeatures.independentBlend)
+			enabledFeatures.independentBlend = VK_TRUE;
+		deviceInfo.pEnabledFeatures = &enabledFeatures;
+		// 批绘制后端( WUI 字体图集 / Renderer2D 纹理槽 )在命令缓冲录制期间更新
+		// 已绑定的描述符集,需要 UPDATE_AFTER_BIND;先在物理设备上查询支持情况。
+		VkPhysicalDeviceDescriptorIndexingFeatures supportedIndexing{};
+		supportedIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+		VkPhysicalDeviceFeatures2 supportedFeatures2{};
+		supportedFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		supportedFeatures2.pNext = &supportedIndexing;
+		vkGetPhysicalDeviceFeatures2(m_PhysicalDevice, &supportedFeatures2);
+		VkPhysicalDeviceDescriptorIndexingFeatures enabledIndexing{};
+		enabledIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+		enabledIndexing.descriptorBindingUniformBufferUpdateAfterBind =
+			supportedIndexing.descriptorBindingUniformBufferUpdateAfterBind;
+		enabledIndexing.descriptorBindingSampledImageUpdateAfterBind =
+			supportedIndexing.descriptorBindingSampledImageUpdateAfterBind;
+		enabledIndexing.descriptorBindingStorageBufferUpdateAfterBind =
+			supportedIndexing.descriptorBindingStorageBufferUpdateAfterBind;
+		enabledIndexing.descriptorBindingStorageImageUpdateAfterBind =
+			supportedIndexing.descriptorBindingStorageImageUpdateAfterBind;
+		deviceInfo.pNext = &enabledIndexing;
 		static const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 		deviceInfo.enabledExtensionCount = 1;
 		deviceInfo.ppEnabledExtensionNames = extensions;

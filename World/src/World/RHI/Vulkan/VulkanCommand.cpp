@@ -35,6 +35,7 @@ namespace World::Rhi::Vulkan
 	void VulkanCommandBuffer::Begin()
 	{
 		m_PendingDescriptorSets.clear();
+		m_LastPipelineLayout = VK_NULL_HANDLE;
 		VkCommandBufferBeginInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -92,7 +93,7 @@ namespace World::Rhi::Vulkan
 		if (const auto vulkan = std::dynamic_pointer_cast<VulkanPipeline>(pipeline))
 		{
 			vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan->GetPipeline());
-			m_Device.SetLastPipelineLayout(vulkan->GetLayout());
+			m_LastPipelineLayout = vulkan->GetLayout();
 			for (const auto& [firstSet, descriptorSet] : m_PendingDescriptorSets)
 			{
 				const auto pendingVulkan = std::dynamic_pointer_cast<VulkanDescriptorSet>(descriptorSet);
@@ -111,7 +112,7 @@ namespace World::Rhi::Vulkan
 		const auto vulkan = std::dynamic_pointer_cast<VulkanDescriptorSet>(set);
 		if (!vulkan)
 			return;
-		if (!m_Device.GetLastPipelineLayout())
+		if (!m_LastPipelineLayout)
 		{
 			// Vulkan 需要管线布局才能绑描述符;记录待绑,在下次 BindPipeline 时应用。
 			m_PendingDescriptorSets.push_back({ firstSet, set });
@@ -119,7 +120,7 @@ namespace World::Rhi::Vulkan
 		}
 		const VkDescriptorSet descriptorSet = vulkan->GetSet();
 		vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			m_Device.GetLastPipelineLayout(), firstSet, 1, &descriptorSet, 0, nullptr);
+			m_LastPipelineLayout, firstSet, 1, &descriptorSet, 0, nullptr);
 	}
 
 	void VulkanCommandBuffer::BindVertexBuffer(uint32_t binding, const Handle<Buffer>& buffer, uint64_t offset)
@@ -215,7 +216,27 @@ namespace World::Rhi::Vulkan
 	}
 
 	void VulkanCommandBuffer::CopyBufferToTexture(const Handle<Buffer>&, const Handle<Texture>&, uint64_t, uint32_t, uint32_t) {}
-	void VulkanCommandBuffer::CopyTextureToBuffer(const Handle<Texture>&, const Handle<Buffer>&, uint64_t, uint32_t, uint32_t) {}
+	void VulkanCommandBuffer::CopyTextureToBuffer(const Handle<Texture>& src, const Handle<Buffer>& dst,
+		uint64_t dstOffset, uint32_t mip, uint32_t layer)
+	{
+		const auto srcVk = std::dynamic_pointer_cast<VulkanTexture>(src);
+		const auto dstVk = std::dynamic_pointer_cast<VulkanBuffer>(dst);
+		if (!srcVk || !dstVk)
+			return;
+		const TextureDesc& desc = srcVk->GetDesc();
+		VkBufferImageCopy region{};
+		region.bufferOffset = dstOffset;
+		region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		region.imageSubresource.mipLevel = mip;
+		region.imageSubresource.baseArrayLayer = layer;
+		region.imageSubresource.layerCount = 1;
+		region.imageExtent = {
+			std::max(1u, desc.Extent.Width >> mip),
+			std::max(1u, desc.Extent.Height >> mip),
+			std::max(1u, desc.Extent.Depth >> mip) };
+		vkCmdCopyImageToBuffer(m_CommandBuffer, srcVk->GetImage(),
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstVk->GetBuffer(), 1, &region);
+	}
 	void VulkanCommandBuffer::CopyTexture(const Handle<Texture>&, const Handle<Texture>&, uint32_t, uint32_t, uint32_t, uint32_t) {}
 	void VulkanCommandBuffer::ResolveTexture(const Handle<Texture>&, const Handle<Texture>&, uint32_t, uint32_t, uint32_t) {}
 	void VulkanCommandBuffer::GenerateMipmaps(const Handle<Texture>&) {}

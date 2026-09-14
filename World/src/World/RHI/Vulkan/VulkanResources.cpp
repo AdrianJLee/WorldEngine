@@ -190,6 +190,14 @@ namespace World::Rhi::Vulkan
 	void VulkanBuffer::SetData(const void* data, uint64_t size, uint64_t offset)
 	{
 		std::memcpy(static_cast<uint8_t*>(m_Mapped) + offset, data, size);
+		// 即使申请的是 HOST_COHERENT 内存,也显式刷新一次:批绘制后端每帧
+		// 反复写入同一段映射内存,避免 GPU 读到陈旧数据。
+		VkMappedMemoryRange range{};
+		range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+		range.memory = m_Memory;
+		range.offset = 0;
+		range.size = VK_WHOLE_SIZE;
+		vkFlushMappedMemoryRanges(m_Device.GetNativeDevice(), 1, &range);
 	}
 
 	// ---- Texture ----
@@ -275,12 +283,30 @@ namespace World::Rhi::Vulkan
 		barrier.subresourceRange.aspectMask = IsDepthFormat(m_Desc.Format) ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 		barrier.subresourceRange.levelCount = std::max(1u, m_Desc.MipLevels);
 		barrier.subresourceRange.layerCount = m_Desc.Type == TextureType::Cube ? std::max(1u, m_Desc.ArrayLayers) * 6 : std::max(1u, m_Desc.ArrayLayers);
+		// 按目标布局选择同步域:之前固定为 TOP_OF_PIPE→TRANSFER,导致
+		// TRANSFER_DST→SHADER_READ_ONLY 之后片元着色器看不到拷贝结果
+		// (单次上传的小纹理,如图标,采样全黑)。
+		VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 		barrier.srcAccessMask = 0;
 		barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		if (newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+		{
+			srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		}
+		else if (newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL || newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+		{
+			srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		}
 		ExecuteOneShot(m_Device, [&](VkCommandBuffer commandBuffer)
 		{
-			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-				VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+			vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 		});
 		m_Layout = newLayout;
 	}
@@ -482,6 +508,16 @@ namespace World::Rhi::Vulkan
 		info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		info.bindingCount = static_cast<uint32_t>(bindings.size());
 		info.pBindings = bindings.empty() ? nullptr : bindings.data();
+		// 批绘制后端会在命令缓冲录制期间更新已绑定的描述符集(WUI 纹理/字体图集);
+		// 允许 UPDATE_AFTER_BIND,避免更新动作使在录制的命令缓冲失效。
+		std::vector<VkDescriptorBindingFlags> bindingFlags(bindings.size(),
+			VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT);
+		VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo{};
+		bindingFlagsInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+		bindingFlagsInfo.bindingCount = static_cast<uint32_t>(bindingFlags.size());
+		bindingFlagsInfo.pBindingFlags = bindingFlags.empty() ? nullptr : bindingFlags.data();
+		info.pNext = &bindingFlagsInfo;
+		info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 		vkCreateDescriptorSetLayout(device.GetNativeDevice(), &info, nullptr, &m_Layout);
 	}
 
@@ -500,6 +536,7 @@ namespace World::Rhi::Vulkan
 		};
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
 		poolInfo.maxSets = 1;
 		poolInfo.poolSizeCount = 3;
 		poolInfo.pPoolSizes = sizes;

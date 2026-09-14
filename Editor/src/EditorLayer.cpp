@@ -91,6 +91,24 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		ProcessPendingRendererChange();
 		m_HasRenderedScene = false;
+		// 视口目标重建节流:尺寸稳定(约 100ms)后再真正重建渲染目标。
+		if (m_PendingViewportSize.x > 0 && m_PendingViewportSize.y > 0)
+		{
+			m_ViewportResizeDelay -= ts.GetSeconds();
+			if (m_ViewportResizeDelay <= 0.0f)
+			{
+				const glm::vec2 size = m_PendingViewportSize;
+				m_PendingViewportSize = { 0, 0 };
+				if (m_ViewportSize != size)
+				{
+					m_ViewportSize = size;
+					if (m_SceneRenderer)
+						m_SceneRenderer->GetTargetFramebuffer()->Resize((uint32_t)size.x, (uint32_t)size.y);
+					if (m_ActiveScene)
+						m_ActiveScene->OnViewportResize((uint32_t)size.x, (uint32_t)size.y);
+				}
+			}
+		}
 		if (!m_ActiveScene || !m_SceneRenderer)
 			return;
 		//WLD_CORE_TRACE("Delta Time: {0} ({1} FPS)", ts.GetSeconds(), ts.GetFPS());
@@ -174,6 +192,10 @@ namespace World
 		if (wuiBackend.BeginFrame(input))
 		{
 			m_WuiContext.BeginFrame(input);
+			// 注册表在设备切换/重建后会被清空(Generation 递增),此时需要
+			// 重新注册图标与场景纹理,否则图像命令解析不到贴图(图标消失)。
+			if (Wui::WuiTextureRegistry::Get().Generation() != m_UiTextureGeneration)
+				RegisterUiTextures();
 			if (m_SceneRenderer && m_SceneRenderer->GetColorTexture())
 			{
 				if (!m_SceneTextureId)
@@ -366,6 +388,7 @@ namespace World
 		};
 		for (int i = 0; i < 8; ++i)
 			m_IconIds[i] = registry.RegisterTexture2D(icons[i]);
+		m_UiTextureGeneration = registry.Generation();
 	}
 
 	uint64_t EditorLayer::GetIconId(int index) const
@@ -414,12 +437,10 @@ namespace World
 		m_ViewportBounds[1] = bounds[1];
 		if (size.x > 0 && size.y > 0 && (m_ViewportSize.x != size.x || m_ViewportSize.y != size.y))
 		{
-			m_ViewportSize = size;
-			if (m_SceneRenderer)
-				m_SceneRenderer->GetTargetFramebuffer()->Resize((uint32_t)size.x, (uint32_t)size.y);
+			// 相机宽高比即时跟随,渲染目标延迟重建(见 OnUpdate)。
+			m_PendingViewportSize = size;
+			m_ViewportResizeDelay = 0.1f;
 			m_EditorCamera.SetViewportSize(size.x, size.y);
-			if (m_ActiveScene)
-				m_ActiveScene->OnViewportResize((uint32_t)size.x, (uint32_t)size.y);
 		}
 
 	}

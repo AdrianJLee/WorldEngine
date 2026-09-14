@@ -161,8 +161,7 @@ namespace World
 			if (Application::HasInstance())
 			{
 				Rhi::SwapchainDesc swapDesc;
-				swapDesc.NativeWindow = glfwGetWin32Window(
-					static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow()));
+				swapDesc.NativeWindow = Application::Get().GetWindow().GetNativeWindow();
 				swapDesc.Format = Rhi::Format::B8G8R8A8_UNORM;
 				swapDesc.Present = Rhi::PresentMode::Fifo;
 				swapDesc.DebugName = "MainSwapchain";
@@ -174,6 +173,8 @@ namespace World
 		}
 		if (!s_Swapchain)
 			return;
+		// 帧循环用队列 WaitIdle 串行化,但 acquire 必须携带信号量或栅栏(VUID 01780),
+		// 该信号由 UI 提交等待消费,UI 提交再发出 s_RenderDone 供 Present 等待。
 		const Rhi::AcquireResult acquired = s_Swapchain->AcquireNext(s_ImageReady);
 		if (acquired.OutOfDate)
 		{
@@ -192,7 +193,7 @@ namespace World
 			if (!s_PresentFramebuffers[s_CurrentImageIndex])
 			{
 				Rhi::FramebufferDesc framebufferDesc;
-				framebufferDesc.RenderPass = s_PresentPass;
+				framebufferDesc.RenderPass = GetPresentRenderPass();
 				framebufferDesc.Extent = s_Swapchain->GetExtent();
 				framebufferDesc.Attachments = { s_PresentImage };
 				framebufferDesc.DebugName = "Present";
@@ -242,6 +243,8 @@ namespace World
 		if (s_RenderDone)
 			submit.SignalSemaphores = { s_RenderDone };
 		s_PresentQueue->Submit(submit);
+		// 帧循环串行化:提交后等待队列空闲,下一帧才可安全复用命令缓冲与资源。
+		s_PresentQueue->WaitIdle();
 	}
 
 	void Renderer::SubmitScene(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer,
@@ -310,8 +313,10 @@ namespace World
 	{
 		if (width == 0 || height == 0)
 			return;
-		const GLint previous = 0;
-		glGetIntegerv(GL_FRAMEBUFFER_BINDING, const_cast<GLint*>(&previous));
+		// 注意:不能用 const 变量 + const_cast 接收 glGetIntegerv(编译器会按常量
+		// 折叠优化,导致恢复绑定失效,把后续绘制画到错误的目标上)。
+		GLint previous = 0;
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
 		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
 		std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 3);

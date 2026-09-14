@@ -24,8 +24,8 @@ cbuffer Uniforms : register(b0)
     float4x4 u_ViewProjection;
 };
 
-Texture2D u_Texture : register(t1);
-SamplerState u_Sampler : register(s1);
+[[vk::combinedImageSampler]] Texture2D u_Texture : register(t1, space1);
+[[vk::combinedImageSampler]] SamplerState u_Sampler : register(s1, space1);
 
 VS_OUTPUT VSMain(VS_INPUT input)
 {

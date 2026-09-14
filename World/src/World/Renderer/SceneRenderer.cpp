@@ -197,7 +197,16 @@ namespace World
 		if (!m_ActiveScene)
 			return;
 
-		const glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		// 相机投影按"NDC +Y 向上"编写(GL 约定);Vulkan 的 NDC +Y 向下,
+		// 翻转投影的 Y 行,场景在两种后端保持同一方向。
+		if (Renderer::GetBackendName() == "vulkan")
+		{
+			viewProjection[0][1] = -viewProjection[0][1];
+			viewProjection[1][1] = -viewProjection[1][1];
+			viewProjection[2][1] = -viewProjection[2][1];
+			viewProjection[3][1] = -viewProjection[3][1];
+		}
 		m_CameraBuffer->SetData(&viewProjection, sizeof(glm::mat4));
 
 		std::vector<Rhi::ClearValue> clears(3);

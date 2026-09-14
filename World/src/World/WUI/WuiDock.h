@@ -54,6 +54,9 @@ namespace World::Wui
 		bool AddTab(const PanelId& panel, const PanelId& target, DropZone zone);
 		// 移动已存在的面板:摘除→挂载,源组塌缩后回退锚点;返回是否生效。
 		bool MoveTab(const PanelId& panel, const PanelId& target, DropZone zone);
+		// 停靠到整个编辑器边缘:在根级新建横跨全区的分栏(Left/Right/Top/Bottom),
+		// 用于拖到编辑器四边时生成全局停靠区,而不是只切分某个面板组。
+		bool DockToRoot(const PanelId& panel, DropZone zone);
 		bool RemoveTab(const PanelId& panel);
 		bool Activate(const PanelId& panel);
 		// 同一 tab 组内除 panel 外的另一个面板;无则返回空。

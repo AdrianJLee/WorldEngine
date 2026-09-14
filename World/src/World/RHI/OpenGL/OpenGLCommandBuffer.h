@@ -68,6 +68,7 @@ namespace World::Rhi::OpenGL
 	private:
 		Handle<Pipeline> m_CurrentPipeline;
 		IndexType m_IndexType = IndexType::UInt32;
+		uint64_t m_IndexBufferOffset = 0;
 		bool m_InRenderPass = false;
 		bool m_PushConstantsWarned = false;
 	};

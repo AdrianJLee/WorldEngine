@@ -35,6 +35,27 @@ namespace World::Rhi::Vulkan
 				default: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 			}
 		}
+
+		// RHI 的 BlendFactor 省略了 DST_COLOR / ONE_MINUS_DST_COLOR,
+		// 数值与 VkBlendFactor 不一致,必须显式映射(直接强转会把
+		// SrcAlpha/OneMinusSrcAlpha 变成 DST_COLOR,导致全部绘制乘成黑色)。
+		VkBlendFactor ToVkBlendFactor(BlendFactor factor)
+		{
+			switch (factor)
+			{
+				case BlendFactor::Zero: return VK_BLEND_FACTOR_ZERO;
+				case BlendFactor::One: return VK_BLEND_FACTOR_ONE;
+				case BlendFactor::SrcColor: return VK_BLEND_FACTOR_SRC_COLOR;
+				case BlendFactor::OneMinusSrcColor: return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+				case BlendFactor::SrcAlpha: return VK_BLEND_FACTOR_SRC_ALPHA;
+				case BlendFactor::OneMinusSrcAlpha: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+				case BlendFactor::DstAlpha: return VK_BLEND_FACTOR_DST_ALPHA;
+				case BlendFactor::OneMinusDstAlpha: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+				case BlendFactor::ConstantAlpha: return VK_BLEND_FACTOR_CONSTANT_ALPHA;
+				case BlendFactor::OneMinusConstantAlpha: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+				default: return VK_BLEND_FACTOR_ONE;
+			}
+		}
 	}
 
 	VulkanPipeline::VulkanPipeline(VulkanDevice& device, const PipelineDesc& desc)
@@ -130,14 +151,31 @@ namespace World::Rhi::Vulkan
 		{
 			VkPipelineColorBlendAttachmentState out{};
 			out.blendEnable = blend.BlendEnable ? VK_TRUE : VK_FALSE;
-			out.srcColorBlendFactor = static_cast<VkBlendFactor>(static_cast<uint8_t>(blend.SrcColor));
-			out.dstColorBlendFactor = static_cast<VkBlendFactor>(static_cast<uint8_t>(blend.DstColor));
+			out.srcColorBlendFactor = ToVkBlendFactor(blend.SrcColor);
+			out.dstColorBlendFactor = ToVkBlendFactor(blend.DstColor);
 			out.colorBlendOp = static_cast<VkBlendOp>(static_cast<uint8_t>(blend.ColorOp));
-			out.srcAlphaBlendFactor = static_cast<VkBlendFactor>(static_cast<uint8_t>(blend.SrcAlpha));
-			out.dstAlphaBlendFactor = static_cast<VkBlendFactor>(static_cast<uint8_t>(blend.DstAlpha));
+			out.srcAlphaBlendFactor = ToVkBlendFactor(blend.SrcAlpha);
+			out.dstAlphaBlendFactor = ToVkBlendFactor(blend.DstAlpha);
 			out.alphaBlendOp = static_cast<VkBlendOp>(static_cast<uint8_t>(blend.AlphaOp));
 			out.colorWriteMask = blend.ColorWriteMask;
 			blends.push_back(out);
+		}
+		// Vulkan 要求 pColorBlendState 的附件数量与子通道颜色附件数量一致:
+		// 多渲染目标(如场景的颜色 + 实体 ID)在后端补齐,多余附件关闭混合、全通道写入。
+		if (desc.RenderPass)
+		{
+			const auto& passDesc = desc.RenderPass->GetDesc();
+			if (desc.SubpassIndex < passDesc.Subpasses.size())
+			{
+				const size_t colorCount = passDesc.Subpasses[desc.SubpassIndex].ColorAttachments.size();
+				while (blends.size() < colorCount)
+				{
+					VkPipelineColorBlendAttachmentState extra{};
+					extra.blendEnable = VK_FALSE;
+					extra.colorWriteMask = 0xF;
+					blends.push_back(extra);
+				}
+			}
 		}
 		VkPipelineColorBlendStateCreateInfo colorBlend{};
 		colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;

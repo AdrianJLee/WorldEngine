@@ -102,7 +102,6 @@ namespace World::Wui
 		m_Ib = nullptr;
 		m_Ubo = nullptr;
 		m_TextureLayout = nullptr;
-		m_TextureSet = nullptr;
 		m_GlobalSet = nullptr;
 		m_Sampler = nullptr;
 		m_WhiteTexture = nullptr;
@@ -129,19 +128,20 @@ namespace World::Wui
 
 		m_Cmd = device->CreateCommandBuffer("WuiBackend");
 
-		const auto vs = ShaderCompiler::CompileOrLoad("assets/shaders/Wui_Ui.hlsl", "VSMain", "vs_6_0");
-		const auto ps = ShaderCompiler::CompileOrLoad("assets/shaders/Wui_Ui.hlsl", "PSMain", "ps_6_0");
 		Rhi::ShaderDesc shaderDesc;
 		shaderDesc.DebugName = "WUI";
-		shaderDesc.Stages.push_back({ Rhi::ShaderStage::Vertex, "main", {}, std::string(vs.begin(), vs.end()) });
-		shaderDesc.Stages.push_back({ Rhi::ShaderStage::Fragment, "main", {}, std::string(ps.begin(), ps.end()) });
+		shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(
+			Rhi::ShaderStage::Vertex, "assets/shaders/Wui_Ui.hlsl", "VSMain", "vs_6_0"));
+		shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(
+			Rhi::ShaderStage::Fragment, "assets/shaders/Wui_Ui.hlsl", "PSMain", "ps_6_0"));
 		m_Shader = device->CreateShader(shaderDesc);
 
 		Rhi::DescriptorSetLayoutDesc textureLayoutDesc;
+		// 着色器用 [[vk::combinedImageSampler]] 声明合并采样器,SPIR-V 与 GLSL 交叉
+		// 编译产物统一为 binding 1 的 combined image sampler。
 		textureLayoutDesc.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
 		m_TextureLayout = device->CreateDescriptorSetLayout(textureLayoutDesc);
-		m_TextureSet = device->CreateDescriptorSet(m_TextureLayout);
 		m_GlobalSet = device->CreateDescriptorSet(Renderer::GetGlobalDescriptorSetLayout());
 
 		Rhi::SamplerDesc samplerDesc;
@@ -155,7 +155,9 @@ namespace World::Wui
 		Rhi::RenderPassAttachment colorAttachment;
 		colorAttachment.Format = m_IsVulkan ? Rhi::Format::B8G8R8A8_UNORM : Rhi::Format::R8G8B8A8_UNORM;
 		colorAttachment.Samples = Rhi::SampleCount::Count1;
-		colorAttachment.Load = m_IsVulkan ? Rhi::LoadOp::Load : Rhi::LoadOp::Clear;
+		// 该通道仅用于 OpenGL 离屏层(Vulkan 直接渲染到呈现通道):
+		// 每帧清除,避免 Load + Undefined 初始布局的非法组合。
+		colorAttachment.Load = Rhi::LoadOp::Clear;
 		colorAttachment.Store = Rhi::StoreOp::Store;
 		colorAttachment.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
 		colorAttachment.FinalLayout = m_IsVulkan ? Rhi::AttachmentLayout::Present : Rhi::AttachmentLayout::ShaderReadOnly;
@@ -359,27 +361,53 @@ namespace World::Wui
 		m_TextureChanged = true;
 	}
 
+	Rhi::Handle<Rhi::DescriptorSet> WuiRhiBackend::TextureSetFor(const Rhi::Handle<Rhi::Texture>& texture)
+	{
+		const void* key = texture.get();
+		auto it = m_TextureSets.find(key);
+		if (it != m_TextureSets.end())
+			return it->second;
+		Rhi::Handle<Rhi::DescriptorSet> set = Renderer::GetDevice()->CreateDescriptorSet(m_TextureLayout);
+		if (set)
+		{
+			Rhi::DescriptorWrite write;
+			write.Binding = 1;
+			write.Type = Rhi::DescriptorType::CombinedImageSampler;
+			write.Texture = texture;
+			write.Sampler = m_Sampler;
+			set->Update({ write });
+		}
+		m_TextureSets.emplace(key, set);
+		return set;
+	}
+
 	void WuiRhiBackend::Flush()
 	{
 		if (m_Vertices.empty() || !m_Cmd)
 			return;
 		if (m_TextureChanged)
-		{
-			Rhi::DescriptorWrite write;
-			write.Binding = 1;
-			write.Type = Rhi::DescriptorType::CombinedImageSampler;
-			write.Texture = m_ActiveTexture;
-			write.Sampler = m_Sampler;
-			m_TextureSet->Update({ write });
 			m_TextureChanged = false;
+		// 每个批次写入独立的缓冲区区间:同一命令缓冲在提交后才由 GPU 执行,
+		// 复用同一段内存会让所有绘制都读到最后一个批次的数据(界面成片缺失)。
+		const uint64_t vertexBytes = m_Vertices.size() * sizeof(Vertex);
+		const uint64_t indexBytes = m_Indices.size() * sizeof(uint32_t);
+		if (m_FrameVertexBytes + vertexBytes > MaxQuads * 4 * sizeof(Vertex) ||
+			m_FrameIndexBytes + indexBytes > static_cast<uint64_t>(MaxQuads) * 6 * sizeof(uint32_t))
+		{
+			m_FrameVertexBytes = 0;
+			m_FrameIndexBytes = 0;
 		}
-		m_Vb->SetData(m_Vertices.data(), m_Vertices.size() * sizeof(Vertex));
-		m_Ib->SetData(m_Indices.data(), m_Indices.size() * sizeof(uint32_t));
+		const uint64_t vertexOffset = m_FrameVertexBytes;
+		const uint64_t indexOffset = m_FrameIndexBytes;
+		m_FrameVertexBytes += vertexBytes;
+		m_FrameIndexBytes += indexBytes;
+		m_Vb->SetData(m_Vertices.data(), vertexBytes, vertexOffset);
+		m_Ib->SetData(m_Indices.data(), indexBytes, indexOffset);
 		m_Cmd->BindPipeline(m_Pipeline);
 		m_Cmd->BindDescriptorSet(m_GlobalSet, 0);
-		m_Cmd->BindDescriptorSet(m_TextureSet, 1);
-		m_Cmd->BindVertexBuffer(0, m_Vb);
-		m_Cmd->BindIndexBuffer(m_Ib);
+		m_Cmd->BindDescriptorSet(TextureSetFor(m_ActiveTexture), 1);
+		m_Cmd->BindVertexBuffer(0, m_Vb, vertexOffset);
+		m_Cmd->BindIndexBuffer(m_Ib, indexOffset);
 		m_Cmd->DrawIndexed(static_cast<uint32_t>(m_Indices.size()));
 		m_Vertices.clear();
 		m_Indices.clear();
@@ -519,8 +547,16 @@ namespace World::Wui
 	{
 		if (!Renderer::GetDevice())
 			return;
-		if (Renderer::GetDevice().get() != m_DeviceKey)
+		// 只在设备真正切换时失效注册表;首帧 m_DeviceKey 还是空指针,
+		// 之前会把宿主在 OnAttach 里注册好的图标/场景纹理全部清掉。
+		if (m_DeviceKey && Renderer::GetDevice().get() != m_DeviceKey)
 			WuiTextureRegistry::Get().Clear();
+		// 注册表重建后,按纹理缓存的描述符集会指向已销毁的贴图,需要一并失效。
+		if (WuiTextureRegistry::Get().Generation() != m_TextureGeneration)
+		{
+			m_TextureSets.clear();
+			m_TextureGeneration = WuiTextureRegistry::Get().Generation();
+		}
 		EnsureResources();
 		if (!m_Cmd || !m_Pipeline)
 			return;
@@ -575,6 +611,14 @@ namespace World::Wui
 		};
 		prebake(commands);
 		prebake(overlayCommands);
+		// 预解析图像贴图:GL→Vulkan 包装包含一次离屏上传(提交并等待队列),
+		// 必须在命令缓冲开始录制之前完成,否则上传不可靠(图标/场景贴图全黑)。
+		for (const WuiDrawCommand& command : commands)
+			if (command.Kind == WuiDrawKind::Image)
+				WuiTextureRegistry::Get().Resolve(command.Image);
+		for (const WuiDrawCommand& command : overlayCommands)
+			if (command.Kind == WuiDrawKind::Image)
+				WuiTextureRegistry::Get().Resolve(command.Image);
 		for (FontFace& face : m_Faces)
 			if (face.AtlasDirty && face.AtlasTexture)
 			{
@@ -582,6 +626,9 @@ namespace World::Wui
 				face.AtlasDirty = false;
 			}
 
+		// WUI 矩形是“原点在左上、Y 向下”。GL 的 NDC +Y 在窗口上方,Vulkan 的
+		// NDC +Y 在窗口下方,所以要按后端取相反的 Y 顺序,才能让 rect.Y=0 落在
+		// 屏幕顶部并与 ApplyScissor 的裁剪矩形一致(否则界面整体上下颠倒)。
 		m_Projection = m_IsVulkan
 			? glm::ortho(0.0f, m_Viewport.x, 0.0f, m_Viewport.y, -1.0f, 1.0f)
 			: glm::ortho(0.0f, m_Viewport.x, m_Viewport.y, 0.0f, -1.0f, 1.0f);
@@ -591,6 +638,8 @@ namespace World::Wui
 		m_Indices.clear();
 		m_ClipStack.clear();
 		m_CurrentClip = { 0, 0, m_Viewport.x, m_Viewport.y };
+		m_FrameVertexBytes = 0;
+		m_FrameIndexBytes = 0;
 		m_ActiveTexture = m_WhiteTexture;
 		m_TextureChanged = true;
 
@@ -630,9 +679,15 @@ namespace World::Wui
 			default: index = 0; shape = GLFW_ARROW_CURSOR; break;
 		}
 		static GLFWcursor* cursors[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
-		if (!cursors[index])
-			cursors[index] = glfwCreateStandardCursor(shape);
-		if (cursors[index])
-			glfwSetCursor(window, cursors[index]);
+		// 只在形状变化时写入,避免每帧重复设置造成光标闪烁。
+		static int currentIndex = -1;
+		if (index != currentIndex)
+		{
+			if (!cursors[index])
+				cursors[index] = glfwCreateStandardCursor(shape);
+			if (cursors[index])
+				glfwSetCursor(window, cursors[index]);
+			currentIndex = index;
+		}
 	}
 }
