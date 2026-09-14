@@ -275,6 +275,10 @@ namespace World
 		}
 		state.Image = nullptr;
 		state.Framebuffer = nullptr;
+		// 独立窗口在编辑器帧内渲染:呈现结束后把"当前呈现目标"切回主窗口,
+		// 否则随后主窗口 UI 的提交会作用到独立窗口的 framebuffer(主窗口黑屏)。
+		if (target)
+			s_ActivePresent = &s_MainPresent;
 	}
 
 	Rhi::Handle<Rhi::Framebuffer> Renderer::GetPresentFramebuffer()
