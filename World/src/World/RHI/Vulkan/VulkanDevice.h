@@ -4,6 +4,9 @@
 
 #include <volk.h>
 
+#include <mutex>
+#include <vector>
+
 namespace World::Rhi::Vulkan
 {
 	// Vulkan 后端设备。W6-A:实例/物理设备/逻辑设备/队列与能力表;渲染资源类随后补齐。
@@ -43,6 +46,9 @@ namespace World::Rhi::Vulkan
 		VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsFamily; }
 		VkCommandPool GetCommandPool() const { return m_CommandPool; }
+		// 每线程命令池:命令缓冲的分配/释放是线程相关的(Vulkan 规范),
+		// 多线程录制必须用各自线程的池。首次调用时按当前线程创建。
+		VkCommandPool GetThreadCommandPool();
 		void SetLastPipelineLayout(VkPipelineLayout layout) { m_LastPipelineLayout = layout; }
 		VkPipelineLayout GetLastPipelineLayout() const { return m_LastPipelineLayout; }
 
@@ -58,6 +64,8 @@ namespace World::Rhi::Vulkan
 		VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
 		uint32_t m_GraphicsFamily = 0;
 		VkCommandPool m_CommandPool = VK_NULL_HANDLE;
+		std::mutex m_PoolMutex;                                  // 保护 m_ThreadPools 的创建
+		std::vector<VkCommandPool> m_ThreadPools;                // 每线程一个池(含主线程的第一个)
 		VkPipelineLayout m_LastPipelineLayout = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
 	};

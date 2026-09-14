@@ -148,6 +148,15 @@ namespace World
 	{
 		m_Width = std::max(1u, width);
 		m_Height = std::max(1u, height);
+		// 旧目标可能仍被在飞的帧引用:交给延迟释放队列,在栅栏通过后回收。
+		if (m_Framebuffer || m_ColorTexture || m_EntityTexture || m_DepthTexture)
+		{
+			auto oldFramebuffer = m_Framebuffer;
+			auto oldColor = m_ColorTexture;
+			auto oldEntity = m_EntityTexture;
+			auto oldDepth = m_DepthTexture;
+			Renderer::QueueRelease([oldFramebuffer, oldColor, oldEntity, oldDepth]() {});
+		}
 
 		Rhi::TextureDesc colorDesc;
 		colorDesc.Type = Rhi::TextureType::Texture2D;

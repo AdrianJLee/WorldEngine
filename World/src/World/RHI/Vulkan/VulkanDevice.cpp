@@ -68,6 +68,10 @@ namespace World::Rhi::Vulkan
 		if (m_Device)
 		{
 			vkDeviceWaitIdle(m_Device);
+			for (VkCommandPool pool : m_ThreadPools)
+				if (pool)
+					vkDestroyCommandPool(m_Device, pool, nullptr);
+			m_ThreadPools.clear();
 			if (m_CommandPool)
 				vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
 			vkDestroyDevice(m_Device, nullptr);
@@ -231,6 +235,9 @@ namespace World::Rhi::Vulkan
 		m_Capabilities.ApiMinor = VK_API_VERSION_MINOR(properties.apiVersion);
 		m_Capabilities.Compute = true;
 		m_Capabilities.DrawIndirect = true;
+		// 每线程命令池:命令缓冲可在任意线程录制;帧深由渲染器控制(当前 2)。
+		m_Capabilities.ParallelRecording = true;
+		m_Capabilities.MaxFramesInFlight = 2;
 		m_Capabilities.MultiDrawIndirect = features.multiDrawIndirect == VK_TRUE;
 		m_Capabilities.PushConstants = true;
 		m_Capabilities.TimelineSemaphores = v12.timelineSemaphore == VK_TRUE;
@@ -277,6 +284,26 @@ namespace World::Rhi::Vulkan
 #define NOT_IMPLEMENTED() do { if (Log::GetCoreLogger()) WLD_CORE_WARN("[RHI-VK] {0} not implemented yet", __func__); } while (0)
 
 	Handle<CommandQueue> VulkanDevice::CreateQueue(const std::string&) { return CreateRef<VulkanCommandQueue>(*this); }
+
+	VkCommandPool VulkanDevice::GetThreadCommandPool()
+	{
+		// 每线程一个池:命令缓冲分配/释放必须在创建它的池所属线程上进行。
+		static thread_local VkCommandPool cached = VK_NULL_HANDLE;
+		if (cached != VK_NULL_HANDLE)
+			return cached;
+
+		VkCommandPoolCreateInfo poolInfo {};
+		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		poolInfo.queueFamilyIndex = m_GraphicsFamily;
+		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		VkCommandPool pool = VK_NULL_HANDLE;
+		if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
+			return m_CommandPool;   // 退化为设备级池(单线程录制仍可用)
+		cached = pool;
+		std::lock_guard<std::mutex> lock(m_PoolMutex);
+		m_ThreadPools.push_back(pool);
+		return pool;
+	}
 	Handle<CommandBuffer> VulkanDevice::CreateCommandBuffer(const std::string&) { return CreateRef<VulkanCommandBuffer>(*this); }
 	Handle<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc& desc) { return CreateRef<VulkanSwapchain>(*this, desc); }
 	Handle<RenderPass> VulkanDevice::CreateRenderPass(const RenderPassDesc& desc) { return CreateRef<VulkanRenderPass>(*this, desc); }

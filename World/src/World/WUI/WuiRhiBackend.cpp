@@ -635,6 +635,13 @@ namespace World::Wui
 			{
 				m_UiWidth = width;
 				m_UiHeight = height;
+				// 旧的离屏目标可能仍在飞:延迟释放,避免 resize 时回收在用资源。
+				if (m_UiFramebuffer || m_UiColor)
+				{
+					auto oldFramebuffer = m_UiFramebuffer;
+					auto oldColor = m_UiColor;
+					Renderer::QueueRelease([oldFramebuffer, oldColor]() {});
+				}
 				Rhi::TextureDesc colorDesc;
 				colorDesc.Type = Rhi::TextureType::Texture2D;
 				colorDesc.Format = Rhi::Format::R8G8B8A8_UNORM;

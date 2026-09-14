@@ -63,6 +63,7 @@ namespace World::Rhi::Vulkan
 	private:
 		VulkanDevice& m_Device;
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
+		VkCommandPool m_Pool = VK_NULL_HANDLE;   // 分配该命令缓冲的线程池
 		VkPipelineLayout m_LastPipelineLayout = VK_NULL_HANDLE;
 		std::vector<std::pair<uint32_t, Handle<DescriptorSet>>> m_PendingDescriptorSets;
 	};

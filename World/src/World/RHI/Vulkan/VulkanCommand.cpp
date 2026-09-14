@@ -21,7 +21,9 @@ namespace World::Rhi::Vulkan
 	{
 		VkCommandBufferAllocateInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		info.commandPool = device.GetCommandPool();
+		// 用"当前线程"的命令池:多线程录制时命令缓冲必须与其池同线程分配/释放。
+		m_Pool = device.GetThreadCommandPool();
+		info.commandPool = m_Pool;
 		info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		info.commandBufferCount = 1;
 		vkAllocateCommandBuffers(device.GetNativeDevice(), &info, &m_CommandBuffer);
@@ -29,7 +31,7 @@ namespace World::Rhi::Vulkan
 
 	VulkanCommandBuffer::~VulkanCommandBuffer()
 	{
-		vkFreeCommandBuffers(m_Device.GetNativeDevice(), m_Device.GetCommandPool(), 1, &m_CommandBuffer);
+		vkFreeCommandBuffers(m_Device.GetNativeDevice(), m_Pool, 1, &m_CommandBuffer);
 	}
 
 	void VulkanCommandBuffer::Begin()

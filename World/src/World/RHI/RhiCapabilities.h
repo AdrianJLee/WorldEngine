@@ -24,6 +24,11 @@ namespace World::Rhi
 		bool TimestampQueries = false;
 		bool MeshShaders = false;
 		bool RayTracing = false;
+		// 命令缓冲能否在工作线程录制(Vulkan: 每线程命令池 → true;
+		// OpenGL: 需先落"延迟命令列表 + 渲染线程回放",在此之前为 false)。
+		bool ParallelRecording = false;
+		// 每帧可同时在飞的帧数(RHI 侧约定的上限;后端可按交换链图像数进一步限制)。
+		uint32_t MaxFramesInFlight = 1;
 		bool SamplerMirrorClampToEdge = false;
 		bool TextureCompressionBC = false;
 		uint32_t MaxColorAttachments = 4;
