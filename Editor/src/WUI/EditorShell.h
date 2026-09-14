@@ -143,6 +143,8 @@ namespace World
 		glm::vec2 m_CrossDragGrab { 0, 0 };
 		// 上一帧各独立窗口的位置(用于判断"停稳在槽位上")。
 		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatScreenRects;
+		// 各独立窗口最近一次移动的帧号:拖到主窗口顶栏后短时间内松手才挂靠。
+		std::unordered_map<std::string, uint64_t> m_FloatLastMoveFrame;
 
 		// 面板拖拽/浮动状态。
 		std::string m_DragPanel;            // 本帧拖拽中的面板(来自 payload "panel:")

@@ -793,23 +793,33 @@ namespace World
 				if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
 					entry->Rect = rect;
 
-			// 挂靠判定:窗口中心停在槽位矩形内且已停稳(位置与上一帧相同)。
-			const glm::vec2 center { rect.X + rect.W * 0.5f, rect.Y + rect.H * 0.5f };
-			const bool overSlot = m_AttachSlotScreenRect.W > 0.0f && m_AttachSlotScreenRect.H > 0.0f
-				&& center.x >= m_AttachSlotScreenRect.X && center.x <= m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W
-				&& center.y >= m_AttachSlotScreenRect.Y && center.y <= m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H;
-			// 每窗口位置缓存以第一个标签为键(窗口身份 = 面板集合)。
+			// 挂靠判定:拖动结束后光标落在主窗口顶栏(挂靠栏)上 → 挂靠;
+			// 只在"刚移动过"的短时间内判定,避免窗口被移到栏附近就误挂靠。
 			const std::string windowKey = host.Panels().front();
 			const auto previous = m_LastFloatScreenRects.find(windowKey);
-			const bool stationary = previous != m_LastFloatScreenRects.end()
-				&& std::fabs(previous->second.X - rect.X) < 0.5f && std::fabs(previous->second.Y - rect.Y) < 0.5f;
+			const bool moved = previous == m_LastFloatScreenRects.end()
+				|| std::fabs(previous->second.X - rect.X) >= 0.5f || std::fabs(previous->second.Y - rect.Y) >= 0.5f;
 			m_LastFloatScreenRects[windowKey] = rect;
-			if (overSlot)
+			if (moved)
+				m_FloatLastMoveFrame[windowKey] = ctx.Frame();
+
+			POINT cursor { 0, 0 };
+			GetCursorPos(&cursor);
+			const bool cursorOverSlot = m_AttachSlotScreenRect.W > 0.0f && m_AttachSlotScreenRect.H > 0.0f
+				&& cursor.x >= static_cast<LONG>(m_AttachSlotScreenRect.X)
+				&& cursor.x <= static_cast<LONG>(m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W)
+				&& cursor.y >= static_cast<LONG>(m_AttachSlotScreenRect.Y)
+				&& cursor.y <= static_cast<LONG>(m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H);
+			const auto lastMove = m_FloatLastMoveFrame.find(windowKey);
+			const bool recentlyMoved = lastMove != m_FloatLastMoveFrame.end()
+				&& ctx.Frame() - lastMove->second <= 30;
+			if (cursorOverSlot)
 			{
 				m_AttachSlotHighlight = true;
-				if (stationary)
+				if (recentlyMoved)
 				{
 					AttachIndependentWindowToSlot(windowKey);
+					m_FloatLastMoveFrame.erase(windowKey);
 					continue; // host 已销毁
 				}
 			}
