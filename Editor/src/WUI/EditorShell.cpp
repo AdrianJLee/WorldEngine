@@ -740,6 +740,7 @@ namespace World
 					m_CrossDragPanel = drag;
 					m_CrossDragSourceKey = candidate->Panels().front();
 					m_CrossDragTargetKey.clear();
+					candidate->SetTabDragActive(true);
 					POINT cursor { 0, 0 };
 					GetCursorPos(&cursor);
 					const Wui::WuiRect rect = candidate->ScreenRect();
@@ -748,6 +749,15 @@ namespace World
 					break;
 				}
 			}
+		}
+		// 拖拽期间窗口位置在渲染前更新,避免"渲染一帧后窗口才动"的迟滞感。
+		if (m_CrossDragActive)
+		{
+			POINT cursor { 0, 0 };
+			GetCursorPos(&cursor);
+			if (FloatWindowHost* source = FindFloatHost(m_CrossDragPanel))
+				source->SetScreenPosition(static_cast<float>(cursor.x) - m_CrossDragGrab.x,
+					static_cast<float>(cursor.y) - m_CrossDragGrab.y);
 		}
 		for (size_t i = 0; i < m_FloatHosts.size(); )
 		{
@@ -836,10 +846,6 @@ namespace World
 			PanelTitle(m_CrossDragPanel), m_Theme.Text, 13.0f);
 		ctx.PopOverlay();
 
-		// 拖拽期间窗口跟随光标(像拖标题栏一样),落点决定 附加/挂靠/留在原地。
-		if (FloatWindowHost* source = FindFloatHost(m_CrossDragPanel))
-			source->SetScreenPosition(pos.x - m_CrossDragGrab.x, pos.y - m_CrossDragGrab.y);
-
 		// 目标命中:其他独立窗口的标题栏+标签栏区域(顶部约 64px)。
 		m_CrossDragTargetKey.clear();
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
@@ -870,6 +876,8 @@ namespace World
 		const std::string sourceKey = m_CrossDragSourceKey;
 		FloatWindowHost* source = FindFloatHost(panel);
 		FloatWindowHost* target = m_CrossDragTargetKey.empty() ? nullptr : FindFloatHost(m_CrossDragTargetKey);
+		if (source)
+			source->SetTabDragActive(false);
 
 		if (target && source && source != target)
 		{

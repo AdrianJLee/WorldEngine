@@ -54,6 +54,8 @@ namespace World
 		std::string TakePendingTabDrag();
 		// 其他窗口正在被拖拽悬停:高亮本窗口的标签栏(放置目标指示)。
 		void SetTabDropHighlight(bool highlighted) { m_TabDropHighlight = highlighted; }
+		// 跨窗口拖拽期间置位:抑制本窗口的标签按下与空区系统拖动,避免叠加。
+		void SetTabDragActive(bool active) { m_TabDragActive = active; }
 
 		// 渲染该独立窗口;返回 false 表示 OS 窗口已关闭(其全部面板应隐藏)。
 		bool Render();
@@ -81,6 +83,7 @@ namespace World
 		// 左键按下必须发生在本窗口内,才允许解读为拖拽:
 		// 避免主窗口拖动时,经过本窗口的"悬空按键"被误当成新的拖拽。
 		bool m_PressSeenInWindow = false;
+		bool m_TabDragActive = false;
 		Callbacks m_Callbacks;
 		Window* m_Window = nullptr;
 		PresentTarget* m_Target = nullptr;
