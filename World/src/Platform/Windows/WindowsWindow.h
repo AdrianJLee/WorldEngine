@@ -33,6 +33,7 @@ namespace World
 		void SetSize(uint32_t width, uint32_t height) override;
 		bool ShouldClose() const override;
 		void SetShouldClose(bool shouldClose) override;
+		void Focus() override;
 
 	private:
 		virtual void Init(const WindowProps& props);

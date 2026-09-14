@@ -275,6 +275,11 @@ namespace World
 		glfwSetWindowShouldClose(m_Window, shouldClose ? GLFW_TRUE : GLFW_FALSE);
 	}
 
+	void WindowsWindow::Focus()
+	{
+		glfwFocusWindow(m_Window);
+	}
+
 	bool WindowsWindow::IsVsync() const
 	{
 		return m_Data.VSync;

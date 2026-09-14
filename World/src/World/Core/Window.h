@@ -56,6 +56,7 @@ namespace World
 		virtual void SetSize(uint32_t width, uint32_t height) = 0;
 		virtual bool ShouldClose() const = 0;
 		virtual void SetShouldClose(bool shouldClose) = 0;
+		virtual void Focus() = 0;
 
 		// Creates a window
 		static Window* Create(const WindowProps& props = WindowProps());

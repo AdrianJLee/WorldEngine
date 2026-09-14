@@ -23,6 +23,12 @@ namespace World
 		virtual Wui::WuiTheme& Theme() = 0;
 		// 图标纹理 id(与 ViewportHost 一致;0 = 无图标)。
 		virtual uint64_t GetIconId(int index) const = 0;
+		// ---- 独立窗口(与停靠面板不同的组件)----
+		virtual size_t IndependentWindowCount() const = 0;
+		virtual std::string IndependentWindowPanel(size_t index) const = 0;
+		virtual void FocusIndependentWindow(const std::string& panel) = 0;
+		// 关闭独立窗口并把面板作为停靠标签恢复。
+		virtual void DockBackIndependentWindow(const std::string& panel) = 0;
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

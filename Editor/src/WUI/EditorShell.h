@@ -6,6 +6,7 @@
 #include "Panels/ReadoutPanels.h"
 #include "Panels/ViewportPanel.h"
 #include "Panels/WidgetGalleryPanel.h"
+#include "Panels/WindowsPanel.h"
 #include "FloatWindowHost.h"
 
 #include "World/WUI/WuiContext.h"
@@ -55,6 +56,11 @@ namespace World
 		Ref<Texture2D> GetIcon(int index) const override;
 		uint64_t GetIconId(int index) const override;
 		uint64_t GetSceneTextureId() const override;
+		// ---- 独立窗口(与停靠面板不同的组件)----
+		size_t IndependentWindowCount() const override { return m_FloatHosts.size(); }
+		std::string IndependentWindowPanel(size_t index) const override;
+		void FocusIndependentWindow(const std::string& panel) override;
+		void DockBackIndependentWindow(const std::string& panel) override;
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;
 		EditorCamera& GetEditorCamera() override;
 		Wui::GizmoOperation GetGizmoOperation() const override;
@@ -102,6 +108,8 @@ namespace World
 		Wui::DropZone m_EdgeDropZone = Wui::DropZone::Center;
 		std::string m_LastDragTarget;
 		Wui::DropZone m_LastDragZone = Wui::DropZone::Center;
+		// 独立窗口的"上次位置尺寸"记忆:收回停靠后再拖出沿用用户调好的尺寸。
+		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatRects;
 
 		// 面板拖拽/浮动状态。
 		std::string m_DragPanel;            // 本帧拖拽中的面板(来自 payload "panel:")

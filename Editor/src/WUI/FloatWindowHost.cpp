@@ -93,7 +93,8 @@ namespace World
 
 	void FloatWindowHost::Focus()
 	{
-		// GLFW 无直接激活 API;窗口获得鼠标事件时系统已按点击激活。
+		if (m_Window)
+			m_Window->Focus();
 	}
 
 	void FloatWindowHost::OnEvent(Event& e)

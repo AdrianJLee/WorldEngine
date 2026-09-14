@@ -33,7 +33,7 @@ namespace World
 	EditorShell::EditorShell(EditorLayer& editor)
 		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json")
 	{
-		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "stats", "memory", "operations" };
+		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "windows", "stats", "memory", "operations" };
 		m_Panels = panels;
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(panels);
 		std::string error;
@@ -51,6 +51,7 @@ namespace World
 		m_PanelRegistry.emplace("memory", std::make_unique<MemoryPanel>());
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
+		m_PanelRegistry.emplace("windows", std::make_unique<WindowsPanel>());
 		// 独立窗口(与停靠面板是不同组件):按保存的浮动布局重建。
 		for (const Wui::DockFloat& entry : m_Layout.Floating)
 			AddFloatWindow(entry.Panel, entry.Rect);
@@ -334,15 +335,30 @@ namespace World
 			{
 				// 拖出即成为独立 OS 窗口:按原停靠尺寸创建,放在鼠标所在的屏幕位置。
 				Wui::WuiRect source { m_LastDragPos.x - 40.0f, m_LastDragPos.y - 12.0f, 480.0f, 320.0f };
-				std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> rects;
-				m_Layout.ComputeRects({ 0, 26, viewport.x, viewport.y - 26 }, &rects);
-				for (const auto& entry : rects)
+				if (const auto remembered = m_LastFloatRects.find(m_DragPanel); remembered != m_LastFloatRects.end())
 				{
-					if (entry.first != m_DragPanel)
-						continue;
-					source.W = entry.second.W;
-					source.H = entry.second.H;
-					break;
+					source.W = remembered->second.W;
+					source.H = remembered->second.H;
+				}
+				// 屏幕坐标 = 主窗口位置 + 客户区鼠标位置。
+				int windowX = 0, windowY = 0;
+				if (Application::HasInstance())
+					Application::Get().GetWindow().GetPosition(&windowX, &windowY);
+				source.X += static_cast<float>(windowX);
+				source.Y += static_cast<float>(windowY);
+				std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> rects;
+				if (m_LastFloatRects.find(m_DragPanel) == m_LastFloatRects.end())
+				{
+					// 首次拖出:沿用原停靠区的尺寸作为初始浮动尺寸。
+					m_Layout.ComputeRects({ 0, 26, viewport.x, viewport.y - 26 }, &rects);
+					for (const auto& entry : rects)
+					{
+						if (entry.first != m_DragPanel)
+							continue;
+						source.W = std::max(360.0f, entry.second.W * 0.75f);
+						source.H = std::max(260.0f, entry.second.H * 0.75f);
+						break;
+					}
 				}
 				const std::string before = m_Layout.Serialize();
 				if (m_Layout.Float(m_DragPanel, source))
@@ -563,6 +579,40 @@ namespace World
 			RenderPanelContent(ctx, panel, rect);
 		};
 		m_FloatHosts.push_back(std::make_unique<FloatWindowHost>(panel, PanelTitle(panel), screenRect, content));
+	}
+
+	std::string EditorShell::IndependentWindowPanel(size_t index) const
+	{
+		return index < m_FloatHosts.size() ? m_FloatHosts[index]->Panel() : std::string();
+	}
+
+	void EditorShell::FocusIndependentWindow(const std::string& panel)
+	{
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+		{
+			if (host->Panel() == panel)
+			{
+				host->Focus();
+				return;
+			}
+		}
+	}
+
+	void EditorShell::DockBackIndependentWindow(const std::string& panel)
+	{
+		// 记住用户调好的尺寸,再销毁独立窗口并把面板挂回停靠树。
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+			if (host->Panel() == panel)
+				m_LastFloatRects[panel] = host->ScreenRect();
+
+		const std::string before = m_Layout.Serialize();
+		m_FloatHosts.erase(std::remove_if(m_FloatHosts.begin(), m_FloatHosts.end(),
+			[&](const std::unique_ptr<FloatWindowHost>& host) { return host->Panel() == panel; }),
+			m_FloatHosts.end());
+		m_Layout.CloseFloating(panel);
+		const Wui::PanelId anchor = m_Layout.FirstPanel();
+		if (!anchor.empty() && m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
+			WLD_CORE_INFO("Independent window docked back: {0}", panel);
 	}
 
 	void EditorShell::CloseFloatWindow(const std::string& panel, bool recordChange, Wui::WuiContext* ctx)
