@@ -462,6 +462,25 @@ namespace World::Wui
 		return walk(Root);
 	}
 
+	void DockLayout::AllPanels(std::vector<PanelId>* out) const
+	{
+		if (!out)
+			return;
+		out->clear();
+		const std::function<void(const DockNode&)> visit = [&](const DockNode& node)
+		{
+			if (node.IsTabs())
+			{
+				for (const PanelId& panel : node.Panels)
+					out->push_back(panel);
+				return;
+			}
+			for (const DockNode& child : node.Children)
+				visit(child);
+		};
+		visit(Root);
+	}
+
 	bool DockLayout::SerializeNode(const DockNode& node, JsonValue* out)
 	{
 		if (node.IsTabs())

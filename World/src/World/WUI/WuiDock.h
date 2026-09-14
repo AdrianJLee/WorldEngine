@@ -86,6 +86,8 @@ namespace World::Wui
 		PanelId FindSibling(const PanelId& panel) const;
 		// 深度优先找到的第一个面板。
 		PanelId FirstPanel() const;
+		// 深度优先收集全部停靠面板(树序),主窗口全局标签栏用。
+		void AllPanels(std::vector<PanelId>* out) const;
 
 		std::string Serialize() const;
 		static bool Deserialize(const std::string& text, DockLayout* out, std::string* error);

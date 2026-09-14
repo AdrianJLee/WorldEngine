@@ -644,17 +644,32 @@ namespace World
 			return;
 		}
 
-		if (m_FloatHosts.empty())
+		// 主窗口自己的全局标签栏:停靠面板(树序)每个一个标签,点击激活。
+		std::vector<Wui::PanelId> docked;
+		m_Layout.AllPanels(&docked);
+		float x = bar.X + 6.0f;
+		for (const Wui::PanelId& panel : docked)
 		{
-			Label(ctx, { bar.X + 10, bar.Y + 5 }, "挂靠栏:把独立窗口拖到这条栏上即可挂靠回主窗口", m_Theme.TextMuted, 13.0f);
-			if (ctx.Input().MouseDown[0] && ctx.IsHovered(bar))
-				Application::Get().GetWindow().BeginSystemDrag();
-			return;
+			const bool active = m_Layout.IsActive(panel);
+			const Wui::WuiRect tab { x, bar.Y + 3.0f, 118.0f, bar.H - 6.0f };
+			if (ctx.IsHovered(tab))
+			{
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.ButtonHover, 2.0f });
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+			}
+			else if (active)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.PanelBg, 2.0f });
+			Label(ctx, { tab.X + 7.0f, tab.Y + 4.0f }, PanelTitle(panel),
+				active ? m_Theme.Text : m_Theme.TextMuted, 13.0f);
+			if (ctx.IsClicked(tab))
+				m_Layout.Activate(panel);
+			x += 122.0f;
 		}
+		if (!docked.empty())
+			x += 6.0f;
 
 		// 独立窗口以"标签"形式显示在栏上(与独立窗口自身的标签栏同款):
 		// 点击聚焦;标签右侧 x 隐藏该窗口的全部面板;整栏是挂靠落点。
-		float x = bar.X + 8.0f;
 		std::string hideRequest;
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
 		{
@@ -685,6 +700,8 @@ namespace World
 				hideRequest = panel;
 			x += tab.W + 4.0f;
 		}
+		if (docked.empty() && m_FloatHosts.empty())
+			Label(ctx, { bar.X + 10, bar.Y + 5 }, "把面板/独立窗口拖到这条栏上即可停靠或挂靠", m_Theme.TextMuted, 13.0f);
 		if (!hideRequest.empty())
 		{
 			// 隐藏该窗口承载的全部面板(bar 上的 x = 关闭整个独立窗口)。
@@ -866,8 +883,21 @@ namespace World
 		}
 		else if (source)
 		{
+			// 松手仍在本窗口标签栏上:标签重排(浏览器式拖动标签换位)。
+			const Wui::WuiRect sourceRect = source->ScreenRect();
+			const Wui::WuiRect sourceTabs { sourceRect.X, sourceRect.Y, sourceRect.W, 24.0f };
+			if (pos.x >= sourceTabs.X && pos.x <= sourceTabs.X + sourceTabs.W
+				&& pos.y >= sourceTabs.Y && pos.y <= sourceTabs.Y + sourceTabs.H)
+			{
+				const size_t count = source->Panels().size();
+				const float slot = std::max(1.0f, (sourceRect.W - 8.0f) / static_cast<float>(count));
+				const size_t index = static_cast<size_t>(std::max(0.0f,
+					(pos.x - sourceRect.X - 4.0f) / std::min(150.0f, slot)));
+				source->MovePanelTo(panel, index);
+				ctx.RecordOp("float", "reorder", panel, std::to_string(index));
+			}
 			// 桌面空白:若源窗口还有其他标签,拆分为新独立窗口;单标签窗口只算移动。
-			if (source->Panels().size() > 1)
+			else if (source->Panels().size() > 1)
 			{
 				source->RemovePanel(panel);
 				const Wui::WuiRect rect { pos.x - m_CrossDragGrab.x, pos.y - m_CrossDragGrab.y, 520.0f, 400.0f };

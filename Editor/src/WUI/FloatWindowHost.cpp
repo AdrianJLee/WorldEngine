@@ -159,6 +159,27 @@ namespace World
 		return true;
 	}
 
+	bool FloatWindowHost::MovePanelTo(const std::string& panel, size_t index)
+	{
+		auto it = std::find(m_Panels.begin(), m_Panels.end(), panel);
+		if (it == m_Panels.end() || m_Panels.empty())
+			return false;
+		const bool wasActive = ActivePanel() == panel;
+		const size_t from = static_cast<size_t>(it - m_Panels.begin());
+		const size_t target = std::min(index, m_Panels.size() - 1);
+		if (from == target)
+			return true;
+		m_Panels.erase(it);
+		m_Panels.insert(m_Panels.begin() + static_cast<std::ptrdiff_t>(target), panel);
+		if (wasActive)
+			m_Active = target;
+		else if (from < m_Active && target >= m_Active)
+			--m_Active;
+		else if (from > m_Active && target <= m_Active)
+			++m_Active;
+		return true;
+	}
+
 	bool FloatWindowHost::ActivatePanel(const std::string& panel)
 	{
 		auto it = std::find(m_Panels.begin(), m_Panels.end(), panel);

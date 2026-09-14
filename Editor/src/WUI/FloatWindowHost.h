@@ -45,6 +45,8 @@ namespace World
 		// 布局记录(floating Rect)由调用方(EditorShell)按窗口屏幕矩形写回。
 		bool AddPanel(const std::string& panel, bool activate = true);
 		bool RemovePanel(const std::string& panel);
+		// 把面板移到标签序的指定位置(拖拽重排)。
+		bool MovePanelTo(const std::string& panel, size_t index);
 		bool ActivatePanel(const std::string& panel);
 		// 标签栏 x 的关闭请求:Render 后由 EditorShell 取走并处理(隐藏该面板)。
 		std::string TakeCloseRequest();
