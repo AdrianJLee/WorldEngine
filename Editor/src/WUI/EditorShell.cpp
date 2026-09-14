@@ -320,7 +320,17 @@ namespace World
 			}
 		}
 		// 拖拽结束的落位在下一帧消费,因此拖拽不活跃时保留上一帧的边缘落区状态。
-		RenderNode(ctx, m_Layout.Root, editorArea);
+		// 已附加独立窗口时,主窗口作为"切换容器":当前标签是它,就显示它的内容。
+		if (!m_ActiveWindowTag.empty())
+		{
+			const auto attached = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), m_ActiveWindowTag);
+			if (attached != m_AttachedPanels.end())
+				RenderPanelContent(ctx, m_ActiveWindowTag, editorArea);
+			else
+				m_ActiveWindowTag.clear();
+		}
+		if (m_ActiveWindowTag.empty())
+			RenderNode(ctx, m_Layout.Root, editorArea);
 
 		// 边缘落位提示必须在面板之后绘制:面板背景是不透明矩形,
 		// 先画会被完全遮住(表现就是"没有目标位置提示")。
@@ -651,33 +661,27 @@ namespace World
 			return;
 		}
 
-		// 标签栏只列出"窗口":主窗口 + 各独立窗口(不是停靠面板)。
+		// 标签栏只列出"窗口":Main + 已附加到主窗口的独立窗口(切换关系)。
 		float x = bar.X + 6.0f;
 		{
 			const Wui::WuiRect tab { x, bar.Y + 3.0f, 90.0f, bar.H - 6.0f };
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.PanelBg, 2.0f });
-			Label(ctx, { tab.X + 7.0f, tab.Y + 4.0f }, "Main", m_Theme.Text, 13.0f);
+			const bool active = m_ActiveWindowTag.empty();
+			if (ctx.IsHovered(tab) || active)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, active ? m_Theme.PanelBg : m_Theme.ButtonHover, 2.0f });
+			Label(ctx, { tab.X + 7.0f, tab.Y + 4.0f }, "Main", active ? m_Theme.Text : m_Theme.TextMuted, 13.0f);
 			if (ctx.IsHovered(tab))
-			{
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.ButtonHover, 2.0f });
 				ctx.SetCursor(Wui::WuiCursor::Hand);
-			}
 			if (ctx.IsClicked(tab))
-			{
-				if (Application::HasInstance())
-					Application::Get().GetWindow().Focus();
-			}
+				m_ActiveWindowTag.clear();
 			x += 96.0f;
 		}
 		x += 4.0f;
 
-		// 独立窗口的标签只在"已附加到主窗口栏"时显示;浮动中的独立窗口
-		// 在自己的窗口里显示标签,不占用主窗口栏。
-		for (const std::string& panel : m_Panels)
+		// 已附加的独立窗口标签:点击切换显示其内容,× 分离回独立窗口。
+		std::string detachRequest;
+		for (const std::string& panel : m_AttachedPanels)
 		{
-			if (!IsFloatablePanel(panel) || !m_Layout.Contains(panel))
-				continue;
-			const bool active = m_Layout.IsActive(panel);
+			const bool active = m_ActiveWindowTag == panel;
 			const Wui::WuiRect tab { x, bar.Y + 3.0f, 140.0f, bar.H - 6.0f };
 			if (ctx.IsHovered(tab))
 			{
@@ -697,10 +701,20 @@ namespace World
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 2.0f, close.Y - 1.0f, 0, 0 },
 				m_Theme.TextMuted, 0, 1.0f, "x", 12.0f, false });
 			if (ctx.IsClicked(tab) && !ctx.IsHovered(close))
-				m_Layout.Activate(panel);
+				m_ActiveWindowTag = panel;
 			if (ctx.IsClicked(close))
-				TogglePanel(ctx, panel);
+				detachRequest = panel;
 			x += 144.0f;
+		}
+		if (!detachRequest.empty())
+		{
+			// 分离:恢复为独立 OS 窗口(切换回主界面)。
+			if (FloatWindowHost* host = FindFloatHost(detachRequest))
+				host->SetHidden(false);
+			m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), detachRequest),
+				m_AttachedPanels.end());
+			if (m_ActiveWindowTag == detachRequest)
+				m_ActiveWindowTag.clear();
 		}
 		if (ctx.Input().MouseDown[0] && ctx.IsHovered(bar) && !ctx.IsHovered({ 0, 0, x, bar.H })
 			&& !ctx.IsHovered({ bar.X + bar.W - 102.0f, bar.Y, 102.0f, bar.H }))
@@ -1078,9 +1092,13 @@ namespace World
 		const Wui::WuiRect rect = host->ScreenRect();
 		for (const std::string& id : panels)
 			m_LastFloatRects[id] = rect;
-		for (const std::string& id : panels)
-			host->RemovePanel(id);
-		host->SetHidden(true); // 复用:隐藏而非销毁
+		// 附加 = 与主窗口建立"标签切换"关系:窗口与其面板保持不变,只隐藏 OS 窗口;
+		// 主窗口顶栏出现该标签,点击即在 主界面 / 该窗口内容 之间切换。
+		host->SetHidden(true);
+		if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) == m_AttachedPanels.end())
+			m_AttachedPanels.push_back(panel);
+		m_ActiveWindowTag = panel;
+		WLD_CORE_INFO("Independent window attached as switch tab: {0}", panel);
 
 		const Wui::PanelId slot = "attach_slot";
 		const Wui::PanelId anchor = m_Layout.Contains(slot) ? slot : m_Layout.FirstPanel();
