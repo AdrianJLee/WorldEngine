@@ -76,6 +76,8 @@ namespace World
 		void RenderPanelContent(Wui::WuiContext& ctx, const std::string& id, const Wui::WuiRect& rect);
 		// 浮动面板:在停靠区之上绘制,支持拖动/缩放/关闭与拖回停靠。
 		void RenderFloating(Wui::WuiContext& ctx);
+		// 挂靠栏:横跨主窗口的一条(类似菜单栏),独立窗口拖到其上即挂靠。
+		void DrawAttachBar(Wui::WuiContext& ctx);
 		// 独立窗口组件:创建/销毁(与停靠面板不同,各自拥有 OS 窗口)。
 		void AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect);
 		void CloseFloatWindow(const std::string& panel, bool recordChange, Wui::WuiContext* ctx);
@@ -116,6 +118,8 @@ namespace World
 		// 挂靠槽位:屏幕矩形(每帧计算)与高亮状态。
 		Wui::WuiRect m_AttachSlotScreenRect;
 		bool m_AttachSlotHighlight = false;
+		float m_AttachBarHeight = 26.0f;
+		int m_AttachCooldownFrames = 0; // 挂靠后短暂抑制"拖出",避免同一次拖拽再次浮出
 		// 上一帧各独立窗口的位置(用于判断"停稳在槽位上")。
 		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatScreenRects;
 

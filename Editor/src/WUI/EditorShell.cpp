@@ -55,8 +55,6 @@ namespace World
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 		m_PanelRegistry.emplace("windows", std::make_unique<WindowsPanel>());
-		// 保留注册以便修复后启用;不进入 m_Panels 则不会出现在 Window 菜单/默认布局。
-		m_PanelRegistry.emplace("attach_slot", std::make_unique<AttachSlotPanel>());
 		// 独立窗口(与停靠面板是不同组件):按保存的浮动布局重建。
 		for (const Wui::DockFloat& entry : m_Layout.Floating)
 			AddFloatWindow(entry.Panel, entry.Rect);
@@ -252,7 +250,8 @@ namespace World
 		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
 		// 停靠区(而不是只切分鼠标所在的面板组)。需在渲染面板前判定,以便
 		// RenderTabs 跳过面板内的落区逻辑。
-		const Wui::WuiRect editorArea { 0, 26, viewport.x, viewport.y - 26 };
+		const float editorTop = 26.0f + m_AttachBarHeight;
+		const Wui::WuiRect editorArea { 0, editorTop, viewport.x, viewport.y - editorTop };
 		std::string edgePayload;
 		const bool edgeDragActive = ctx.IsDragActive(&edgePayload) && edgePayload.rfind("panel:", 0) == 0;
 		if (edgeDragActive)
@@ -278,7 +277,7 @@ namespace World
 			}
 		}
 		// 拖拽结束的落位在下一帧消费,因此拖拽不活跃时保留上一帧的边缘落区状态。
-		RenderNode(ctx, m_Layout.Root, { 0, 26, viewport.x, viewport.y - 26 });
+		RenderNode(ctx, m_Layout.Root, editorArea);
 
 		// 边缘落位提示必须在面板之后绘制:面板背景是不透明矩形,
 		// 先画会被完全遮住(表现就是"没有目标位置提示")。
@@ -336,7 +335,7 @@ namespace World
 		{
 			m_DragPanel = activePayload.substr(6);
 			m_LastDragPos = ctx.Input().MousePos;
-			if (!dropConsumed && m_Layout.Contains(m_DragPanel))
+			if (!dropConsumed && m_AttachCooldownFrames <= 0 && m_Layout.Contains(m_DragPanel))
 			{
 				// 拖出即成为独立 OS 窗口:按原停靠尺寸创建,放在鼠标所在的屏幕位置。
 				Wui::WuiRect source { m_LastDragPos.x - 40.0f, m_LastDragPos.y - 12.0f, 480.0f, 320.0f };
@@ -390,6 +389,8 @@ namespace World
 
 		// 菜单栏最后绘制:其弹出面板需要盖在所有停靠面板之上。
 		DrawMenuBar(ctx);
+		// 挂靠栏:横条形式(排在菜单栏下方),独立窗口可挂靠至此。
+		DrawAttachBar(ctx);
 
 		DrawModals(ctx);
 
@@ -556,17 +557,56 @@ namespace World
 			Label(ctx, { rect.X + 8, rect.Y + 8 }, PanelTitle(id), m_Theme.TextMuted, 14.0f);
 	}
 
+	// 挂靠栏:横跨主窗口的一条,列出独立窗口并提供"挂靠"入口。
+	// 独立窗口被拖到这条栏上(窗口中心进入栏内并停稳)会自动挂靠回来。
+	void EditorShell::DrawAttachBar(Wui::WuiContext& ctx)
+	{
+		const glm::vec2 viewport = ctx.ViewportSize();
+		const Wui::WuiRect bar { 0, 26.0f, viewport.x, m_AttachBarHeight };
+		const Wui::WuiColor fill = m_AttachSlotHighlight
+			? Wui::WuiColor { 0.3f, 0.5f, 0.9f, 0.45f }
+			: m_Theme.PanelHeader;
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, bar, fill, 0.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { bar.X, bar.Y + bar.H - 1.0f, bar.W, 1.0f }, m_Theme.Border, 0.0f });
+
+		if (m_FloatHosts.empty())
+		{
+			Label(ctx, { bar.X + 10, bar.Y + 5 }, "挂靠栏:把独立窗口拖到这条栏上即可挂靠回主窗口", m_Theme.TextMuted, 13.0f);
+			return;
+		}
+
+		float x = bar.X + 8.0f;
+		// 注意:挂靠会销毁宿主窗口并从 m_FloatHosts 移除元素,
+		// 因此先收集请求,遍历结束后再执行(遍历中修改容器会导致崩溃)。
+		std::string attachRequest;
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+		{
+			const std::string panel = host->Panel();
+			const Wui::WuiRect chip { x, bar.Y + 3.0f, 150.0f, bar.H - 6.0f };
+			if (ctx.IsHovered(chip))
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, chip, m_Theme.ButtonHover, 3.0f });
+			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, chip, m_Theme.Border, 3.0f, 1.0f });
+			Label(ctx, { chip.X + 8, chip.Y + 3 }, PanelTitle(panel), m_Theme.Text, 13.0f);
+			const Wui::WuiRect attach { chip.X + chip.W + 4.0f, chip.Y, 62.0f, chip.H };
+			if (Wui::Button(ctx, Wui::HashId(("attachbar." + panel).c_str()), attach, "Attach", m_Theme))
+				attachRequest = panel;
+			x += chip.W + 70.0f;
+		}
+		if (!attachRequest.empty())
+			AttachIndependentWindowToSlot(attachRequest);
+	}
+
 	// 浮动面板:每个窗口一个面板,绘制在停靠区之上(Overlay 层)。
 	void EditorShell::RenderFloating(Wui::WuiContext& ctx)
 	{
+		if (m_AttachCooldownFrames > 0)
+			--m_AttachCooldownFrames;
+
 		// 槽位屏幕矩形(客户区 -> 屏幕):用于判断独立窗口是否停到了槽位上。
 		const glm::vec2 viewport = ctx.ViewportSize();
 		std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> dockRects;
-		m_Layout.ComputeRects({ 0, 26, viewport.x, viewport.y - 26 }, &dockRects);
-		m_AttachSlotScreenRect = {};
-		for (const auto& entry : dockRects)
-			if (entry.first == "attach_slot")
-				m_AttachSlotScreenRect = entry.second;
+		// 挂靠栏的屏幕矩形(横条):客户区坐标 -> 屏幕坐标。
+		m_AttachSlotScreenRect = { 0, 26.0f, viewport.x, m_AttachBarHeight };
 		int windowX = 0, windowY = 0;
 		if (Application::HasInstance())
 			Application::Get().GetWindow().GetPosition(&windowX, &windowY);
@@ -699,6 +739,12 @@ namespace World
 		if (placed)
 		{
 			m_AttachSlotHighlight = false;
+			// 挂靠后必须清掉拖拽状态:否则同一帧/下一帧的拖拽状态机会把
+			// 刚挂靠回停靠树的面板再次"拖出"成独立窗口。
+			m_DragPanel.clear();
+			m_MovingFloat.clear();
+			m_LastDragPos = { 0, 0 };
+			m_AttachCooldownFrames = 45;
 			WLD_CORE_INFO("Independent window attached to slot: {0}", panel);
 		}
 	}
