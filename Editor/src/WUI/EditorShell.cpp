@@ -33,7 +33,7 @@ namespace World
 	EditorShell::EditorShell(EditorLayer& editor)
 		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json")
 	{
-		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "stats", "memory", "operations" };
+		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "stats", "memory", "operations" };
 		m_Panels = panels;
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(panels);
 		std::string error;
@@ -50,6 +50,7 @@ namespace World
 		m_PanelRegistry.emplace("stats", std::make_unique<StatsPanel>());
 		m_PanelRegistry.emplace("memory", std::make_unique<MemoryPanel>());
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
+		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 	}
 
 	EditorShell::~EditorShell() = default;

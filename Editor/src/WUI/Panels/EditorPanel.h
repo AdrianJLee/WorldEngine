@@ -21,6 +21,8 @@ namespace World
 		virtual void DuplicateSelectedEntity() = 0;
 		virtual void OpenScene(const std::filesystem::path& path) = 0;
 		virtual Wui::WuiTheme& Theme() = 0;
+		// 图标纹理 id(与 ViewportHost 一致;0 = 无图标)。
+		virtual uint64_t GetIconId(int index) const = 0;
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

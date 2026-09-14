@@ -7,6 +7,7 @@
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLayoutStore.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/WUI/Widgets/WuiControls.h"
 
 #include <filesystem>
 #include <cstdio>
@@ -481,6 +482,159 @@ int main()
 			scroll->Paint(paint);
 			CHECK(scroll->HitTest({ 50, 50 }) == content);
 			CHECK(scroll->HitTest({ 500, 500 }) == nullptr);
+
+			ctx.EndFrame();
+		}
+
+		// 组件库:Toggle / Slider / Tabs / ListItem / TreeItem / MenuButton / Tooltip
+		{
+			WuiContext ctx;
+			WuiInputState input;
+			ctx.BeginFrame(input);
+
+			bool toggleValue = false;
+			auto toggle = std::make_shared<WuiToggle>();
+			toggle->Value = &toggleValue;
+			toggle->SetId(HashId("gallery.toggle"));
+			LayoutWidgetTree(toggle, { 0, 0, 160, 22 });
+			{
+				WuiPaintContext paint(ctx);
+				input.MousePos = { 150, 11 };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				toggle->Paint(paint);
+				CHECK(toggleValue);
+				input.MouseClicked[0] = false;
+			}
+
+			float sliderValue = 0.0f;
+			auto slider = std::make_shared<WuiSlider>();
+			slider->Value = &sliderValue;
+			slider->SetId(HashId("gallery.slider"));
+			LayoutWidgetTree(slider, { 0, 0, 200, 22 });
+			{
+				WuiPaintContext paint(ctx);
+				input.MousePos = { 100, 11 }; // 轨道中点
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				slider->Paint(paint);
+				CHECK(sliderValue > 0.45f && sliderValue < 0.55f);
+				input.MouseClicked[0] = false;
+				input.MouseDown[0] = false;
+				ctx.BeginFrame(input);
+				slider->Paint(paint);
+			}
+
+			int selectedTab = 0;
+			int tabChanges = 0;
+			auto tabs = std::make_shared<WuiTabs>();
+			tabs->Labels = { "One", "Two", "Three" };
+			tabs->Selected = &selectedTab;
+			tabs->OnChanged = [&](int) { ++tabChanges; };
+			tabs->SetId(HashId("gallery.tabs"));
+			LayoutWidgetTree(tabs, { 0, 0, 300, 26 });
+			{
+				WuiPaintContext paint(ctx);
+				input.MousePos = { 160, 13 }; // 第二格
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				tabs->Paint(paint);
+				CHECK(selectedTab == 1);
+				CHECK(tabChanges == 1);
+				input.MouseClicked[0] = false;
+			}
+
+			int listClicks = 0;
+			auto item = std::make_shared<WuiListItem>();
+			item->Label = "Row";
+			item->Selected = true;
+			item->OnSelect = [&] { ++listClicks; };
+			item->SetId(HashId("gallery.item"));
+			LayoutWidgetTree(item, { 0, 0, 180, 22 });
+			{
+				WuiPaintContext paint(ctx);
+				input.MousePos = { 90, 11 };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				item->Paint(paint);
+				CHECK(listClicks == 1);
+				CHECK(!ctx.Commands().empty());
+				input.MouseClicked[0] = false;
+			}
+
+			bool expanded = false;
+			int treeToggles = 0;
+			auto treeItem = std::make_shared<WuiTreeItem>();
+			treeItem->Label = "Node";
+			treeItem->Expanded = &expanded;
+			treeItem->OnToggle = [&] { ++treeToggles; };
+			treeItem->SetId(HashId("gallery.tree"));
+			LayoutWidgetTree(treeItem, { 0, 0, 180, 22 });
+			{
+				WuiPaintContext paint(ctx);
+				input.MousePos = { 14, 11 }; // 箭头区域
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				treeItem->Paint(paint);
+				CHECK(expanded);
+				CHECK(treeToggles == 1);
+				input.MouseClicked[0] = false;
+			}
+
+			int menuChoice = -1;
+			auto menuButton = std::make_shared<WuiMenuButton>();
+			menuButton->Label = "Menu";
+			menuButton->Items = { "Alpha", "Beta" };
+			menuButton->OnSelect = [&](int index) { menuChoice = index; };
+			menuButton->SetId(HashId("gallery.menu"));
+			LayoutWidgetTree(menuButton, { 0, 0, 120, 24 });
+			{
+				WuiPaintContext paint(ctx);
+				input.MousePos = { 60, 12 };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseClicked[0] = false;
+
+				// 展开帧:菜单条目绘制到 Overlay 层。
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(!ctx.OverlayCommands().empty());
+
+				// 选择第二项:回调触发且菜单关闭。
+				input.MousePos = { 60, 24 + 2 + 4 + 22 + 11 }; // 第二个条目中心
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(menuChoice == 1);
+				CHECK(!ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseClicked[0] = false;
+			}
+
+			auto tooltip = std::make_shared<WuiTooltip>();
+			tooltip->Text = "hint";
+			tooltip->Anchor = { 0, 0, 100, 20 };
+			tooltip->SetId(HashId("gallery.tooltip"));
+			{
+				WuiPaintContext paint(ctx);
+				input.MousePos = { 50, 10 };
+				ctx.BeginFrame(input);
+				tooltip->Paint(paint);
+				CHECK(!ctx.OverlayCommands().empty());
+				CHECK(ctx.Commands().empty());
+			}
+
+			// 分隔线:只输出一条线命令。
+			auto separator = std::make_shared<WuiSeparator>();
+			LayoutWidgetTree(separator, { 0, 40, 120, 1 });
+			{
+				ctx.BeginFrame(input);
+				WuiPaintContext paint(ctx);
+				separator->Paint(paint);
+				CHECK(ctx.Commands().size() == 1);
+			}
 
 			ctx.EndFrame();
 		}

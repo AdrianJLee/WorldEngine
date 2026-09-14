@@ -5,6 +5,7 @@
 #include "Panels/PropertiesPanel.h"
 #include "Panels/ReadoutPanels.h"
 #include "Panels/ViewportPanel.h"
+#include "Panels/WidgetGalleryPanel.h"
 
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiDock.h"

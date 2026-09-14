@@ -52,6 +52,14 @@ namespace World::Wui
 		virtual void Paint(WuiPaintContext& context) = 0;
 		virtual WuiWidgetPtr HitTest(glm::vec2 point);
 
+		// ---- 交互状态(组件统一解剖:Id/Rect/Disabled/Hovered/Active/Focused) ----
+		bool Disabled = false;
+		bool Hovered(WuiContext& ctx) const { return !Disabled && ctx.IsHovered(m_Rect); }
+		bool Active(WuiContext& ctx) const { return Hovered(ctx) && ctx.Input().MouseDown[0]; }
+		// 点击边沿;禁用或未命中返回 false。
+		bool Clicked(WuiContext& ctx) const { return !Disabled && ctx.IsClicked(m_Rect); }
+		bool Focused(WuiContext& ctx) const { return m_Id != 0 && ctx.Focus() == m_Id; }
+
 		// 布局/绘制缓存:子树脏时重算,否则复用上一帧结果。
 		void Invalidate();
 		bool IsDirty() const { return m_Dirty; }
