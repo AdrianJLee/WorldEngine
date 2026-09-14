@@ -866,6 +866,20 @@ namespace World
 		return index < m_FloatHosts.size() ? m_FloatHosts[index]->Panel() : std::string();
 	}
 
+	std::string EditorShell::IndependentWindowLabel(size_t index) const
+	{
+		if (index >= m_FloatHosts.size())
+			return std::string();
+		std::string label;
+		for (size_t i = 0; i < m_FloatHosts[index]->Panels().size(); ++i)
+		{
+			if (i != 0)
+				label += " | ";
+			label += PanelTitle(m_FloatHosts[index]->Panels()[i]);
+		}
+		return label;
+	}
+
 	FloatWindowHost* EditorShell::FindFloatHost(const std::string& panel)
 	{
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)

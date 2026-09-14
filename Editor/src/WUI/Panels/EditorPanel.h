@@ -26,6 +26,8 @@ namespace World
 		// ---- 独立窗口(与停靠面板不同的组件)----
 		virtual size_t IndependentWindowCount() const = 0;
 		virtual std::string IndependentWindowPanel(size_t index) const = 0;
+		// 该窗口承载的全部标签标题(连接),窗口管理器显示用。
+		virtual std::string IndependentWindowLabel(size_t index) const = 0;
 		virtual void FocusIndependentWindow(const std::string& panel) = 0;
 		// 关闭独立窗口并把面板作为停靠标签恢复。
 		virtual void DockBackIndependentWindow(const std::string& panel) = 0;

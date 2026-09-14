@@ -61,6 +61,7 @@ namespace World
 		// 计数/索引均按"窗口"而不是"面板":一个窗口可承载多个面板(标签栏)。
 		size_t IndependentWindowCount() const override { return m_FloatHosts.size(); }
 		std::string IndependentWindowPanel(size_t index) const override;
+		std::string IndependentWindowLabel(size_t index) const override;
 		void FocusIndependentWindow(const std::string& panel) override;
 		void DockBackIndependentWindow(const std::string& panel) override;
 		bool AttachSlotHighlighted() const override { return m_AttachSlotHighlight; }
