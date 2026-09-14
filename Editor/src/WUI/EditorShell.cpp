@@ -365,8 +365,7 @@ namespace World
 			else if (m_EdgeDropZone == Wui::DropZone::Right) { zone.X = editorArea.X + editorArea.W * 0.75f; zone.W = editorArea.W * 0.25f; }
 			else if (m_EdgeDropZone == Wui::DropZone::Top) zone.H = editorArea.H * 0.25f;
 			else if (m_EdgeDropZone == Wui::DropZone::Bottom) { zone.Y = editorArea.Y + editorArea.H * 0.75f; zone.H = editorArea.H * 0.25f; }
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, zone, { 0.3f, 0.5f, 0.9f, 0.30f }, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, zone, { 0.45f, 0.65f, 1.0f, 1.0f }, 3.0f, 2.0f });
+			Wui::DropZoneOverlay(ctx, zone, 0.30f, 3.0f);
 		}
 
 		std::string payload;
@@ -613,7 +612,8 @@ namespace World
 			else if (m_DropZone == Wui::DropZone::Right) { zone.X = area.X + area.W * 0.75f; zone.W = area.W * 0.25f; }
 			else if (m_DropZone == Wui::DropZone::Top) zone.H = area.H * 0.25f;
 			else if (m_DropZone == Wui::DropZone::Bottom) { zone.Y = area.Y + area.H * 0.75f; zone.H = area.H * 0.25f; }
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, zone, { 0.3f, 0.5f, 0.9f, 0.28f }, 3.0f });
+			// 落区预览走组件:与边缘停靠提示保持同一配色。
+			Wui::PanelBackground(ctx, zone, { 0.30f, 0.50f, 0.90f, 0.28f }, 3.0f);
 			if (!node.Panels.empty())
 			{
 				const std::string target = node.Panels[node.Active];
@@ -628,7 +628,7 @@ namespace World
 
 	void EditorShell::RenderPanelContent(Wui::WuiContext& ctx, const std::string& id, const Wui::WuiRect& rect)
 	{
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, m_Theme.PanelBg, 0.0f });
+		Wui::PanelBackground(ctx, rect, m_Theme.PanelBg);
 		const auto it = m_PanelRegistry.find(id);
 		if (it != m_PanelRegistry.end())
 			it->second->OnRender(ctx, rect, *this);
@@ -646,8 +646,7 @@ namespace World
 		const Wui::WuiColor fill = m_AttachSlotHighlight
 			? Wui::WuiColor { 0.3f, 0.5f, 0.9f, 0.45f }
 			: m_Theme.PanelHeader;
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, bar, fill, 0.0f });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { bar.X, bar.Y + bar.H - 1.0f, bar.W, 1.0f }, m_Theme.Border, 0.0f });
+		Wui::BarSurface(ctx, bar, fill, m_Theme.Border);
 
 		// 标准窗口控制(最小化/最大化/关闭)在最右侧。
 		const Wui::WindowControl control = Wui::WindowControls(ctx,
@@ -676,12 +675,8 @@ namespace World
 		{
 			const Wui::WuiRect tab { x, bar.Y + 3.0f, 90.0f, bar.H - 6.0f };
 			const bool active = m_ActiveWindowTag.empty();
-			if (ctx.IsHovered(tab) || active)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, active ? m_Theme.PanelBg : m_Theme.ButtonHover, 2.0f });
-			Label(ctx, { tab.X + 7.0f, tab.Y + 4.0f }, "Main", active ? m_Theme.Text : m_Theme.TextMuted, 13.0f);
-			if (ctx.IsHovered(tab))
-				ctx.SetCursor(Wui::WuiCursor::Hand);
-			if (ctx.IsClicked(tab))
+			// 标签 chip 走组件:活动/悬停底色与关闭 x 的外观统一。
+			if (Wui::AttachTag(ctx, tab, "Main", active, false, m_Theme).Clicked)
 				m_ActiveWindowTag.clear();
 			x += 96.0f;
 		}
@@ -696,27 +691,11 @@ namespace World
 		{
 			const bool active = m_ActiveWindowTag == panel;
 			const Wui::WuiRect tab { x, bar.Y + 3.0f, 140.0f, bar.H - 6.0f };
-			if (ctx.IsHovered(tab))
-			{
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.ButtonHover, 2.0f });
-				ctx.SetCursor(Wui::WuiCursor::Hand);
-			}
-			else if (active)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.PanelBg, 2.0f });
-			Label(ctx, { tab.X + 8, tab.Y + 4 }, PanelTitle(panel),
-				active ? m_Theme.Text : m_Theme.TextMuted, 13.0f);
-			const Wui::WuiRect close { tab.X + tab.W - 18.0f, tab.Y + 5.0f, 12.0f, 12.0f };
-			if (ctx.IsHovered(close))
-			{
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, close, m_Theme.ButtonHover, 2.0f });
-				ctx.SetCursor(Wui::WuiCursor::Hand);
-			}
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 2.0f, close.Y - 1.0f, 0, 0 },
-				m_Theme.TextMuted, 0, 1.0f, "x", 12.0f, false });
-			if (ctx.IsClicked(close))
+			const Wui::AttachTagResult tag = Wui::AttachTag(ctx, tab, PanelTitle(panel), active, true, m_Theme);
+			if (tag.CloseClicked)
 				closeRequest = panel;
 			// 按下(非关闭键)记录起点;移动超过阈值进入拖动。
-			if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab) && !ctx.IsHovered(close)
+			if (ctx.Input().MouseDown[0] && tag.Hovered && !tag.CloseHovered
 				&& m_AttachTagDrag.empty())
 			{
 				m_AttachTagPress = panel;
@@ -727,7 +706,7 @@ namespace World
 				m_AttachTagDrag = panel;
 			if (m_AttachTagDrag == panel)
 			{
-				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, tab, m_Theme.Accent, 2.0f, 2.0f });
+				Wui::HighlightOutline(ctx, tab, m_Theme.Accent, 2.0f, 2.0f);
 				// 脱出提示:跟随光标的标签名 + 栏外时提示将变为独立窗口。
 				const bool outside = !ctx.IsHovered(bar);
 				ctx.PushOverlay();
@@ -1254,7 +1233,7 @@ namespace World
 		// (Widget 目前为空),而不是主窗口的 File/Window 菜单。
 		if (!m_ActiveWindowTag.empty())
 		{
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { 0, 26, viewport.x, 26 }, m_Theme.PanelHeader, 0.0f });
+			Wui::PanelBackground(ctx, { 0, 26, viewport.x, 26 }, m_Theme.PanelHeader);
 			return;
 		}
 
@@ -1302,7 +1281,7 @@ namespace World
 		}
 
 		// 菜单栏下移一行:顶部第一行现在是挂靠栏。
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { 0, 26, viewport.x, 26 }, m_Theme.PanelHeader, 0.0f });
+		Wui::PanelBackground(ctx, { 0, 26, viewport.x, 26 }, m_Theme.PanelHeader);
 		Wui::LayoutWidgetTree(m_MenuBar, { 8, 28, viewport.x - 16, 22 });
 		Wui::WuiPaintContext paint(ctx);
 		m_MenuBar->Paint(paint);

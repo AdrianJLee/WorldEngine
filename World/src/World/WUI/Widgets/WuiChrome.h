@@ -12,6 +12,39 @@
 
 namespace World::Wui
 {
+	// ---- 基础表面与高亮 ----
+	// 面板/子区域底色:纯填充,统一从这里走,避免面板里散落裸绘制。
+	void PanelBackground(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius = 0.0f);
+	// 条状底板(挂靠栏/菜单栏等):填充 + 底边 1px 分隔线。
+	void BarSurface(WuiContext& ctx, const WuiRect& rect, const WuiColor& fill, const WuiColor& border);
+	// 行悬停/选中底色:仅在 hovered 或 selected 时绘制,返回 hovered。
+	bool HoverRow(WuiContext& ctx, const WuiRect& rect, bool hovered, bool selected, const WuiTheme& theme,
+		float radius = 3.0f);
+	// 高亮描边:拖放目标/拖动标签等统一用强调色。
+	void HighlightOutline(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius = 2.0f,
+		float thickness = 2.0f);
+	// 拖放落区预览:半透明强调色填充 + 高亮描边(边缘停靠/挂靠栏提示)。
+	void DropZoneOverlay(WuiContext& ctx, const WuiRect& rect, float alpha = 0.30f, float radius = 3.0f);
+	// 分节标题:标题文字 + 下方 1px 分隔线。
+	void SectionHeader(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiColor& color,
+		const WuiTheme& theme, float fontSize = 15.0f);
+
+	// ---- 挂靠标签(主窗口顶栏 chip) ----
+	struct AttachTagResult
+	{
+		bool Hovered = false;
+		bool CloseHovered = false;
+		bool Clicked = false;      // 单击标签本体(用于切换显示)
+		bool CloseClicked = false; // 单击 × (closable 时才可能出现)
+		WuiRect Rect {};
+		WuiRect CloseRect {};
+	};
+
+	// 主窗口挂靠栏上的标签:活动/悬停底色 + 标题 + 可选关闭 ×。
+	// 拖动状态机仍由调用方持有(本组件只负责绘制与命中)。
+	AttachTagResult AttachTag(WuiContext& ctx, const WuiRect& rect, const std::string& title, bool active,
+		bool closable, const WuiTheme& theme, float fontSize = 13.0f);
+
 	// ---- 停靠标签栏 ----
 	struct DockTab
 	{

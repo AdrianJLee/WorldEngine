@@ -55,7 +55,7 @@ namespace World
 		m_SceneImage->TextureId = m_Host.GetSceneTextureId();
 
 		// 面板底色与工具栏底板:纯绘制,不进布局树。
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, { 0.06f, 0.06f, 0.07f, 1 }, 0.0f });
+		Wui::PanelBackground(ctx, rect, { 0.06f, 0.06f, 0.07f, 1 });
 		const float panelWidth = 3 * 28.0f + 2 * 8.0f + 16.0f;
 		const Wui::WuiRect bar { rect.X + (rect.W - panelWidth) * 0.5f, rect.Y + 14, panelWidth, 44 };
 		// 工具栏底板走组件(Toolbar):与其它工具栏样式统一。

@@ -178,7 +178,7 @@ namespace World
 				bool& open = ctx.Persist<bool>(fid, false);
 				if (ctx.IsClicked(row))
 					open = !open;
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { row.X + 4, row.Y + 3, 0, 0 }, theme.Text, 0, 1.0f, (open ? "- " : "+ ") + label, 13.0f, false });
+				Label(ctx, { row.X + 4, row.Y + 3 }, (open ? "- " : "+ ") + label, theme.Text, 13.0f);
 				y += 20;
 				if (open && nested && nestedInstance)
 					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u, { row.X + 10, row.Y + 20, row.W - 10, 0 }, nestedInstance, nested->DisplayName, *nested);

@@ -251,8 +251,8 @@ namespace World
 		const Wui::WuiTheme& theme = m_Callbacks.Theme;
 		const Wui::WuiId menuId = Wui::HashId("float.window.menu");
 		const std::string panel = ActivePanel();
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { bar.X + 6.0f, bar.Y + 4.0f, 0, 0 },
-			m_MenuOpen || ctx.IsHovered(bar) ? theme.Text : theme.TextMuted, 0, 1.0f, "M", 13.0f, false });
+		Wui::Label(ctx, { bar.X + 6.0f, bar.Y + 4.0f }, "M",
+			m_MenuOpen || ctx.IsHovered(bar) ? theme.Text : theme.TextMuted, 13.0f);
 		if (ctx.IsClicked(bar))
 		{
 			m_MenuOpen = !m_MenuOpen;
@@ -297,11 +297,10 @@ namespace World
 		// ---- 标签栏(浏览器式):附加目标 + 切换/关闭标签 ----
 		// 菜单栏为空时不占位:标签栏直接在最顶部(窗口顶栏 = 标签栏)。
 		const float tabTop = area.Y;
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH }, theme.PanelHeader, 0.0f });
+		Wui::PanelBackground(ctx, { area.X, tabTop, area.W, tabH }, theme.PanelHeader);
 		// 放置目标高亮:其他窗口的标签正被拖到本窗口上方。
 		if (m_TabDropHighlight)
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { area.X, tabTop, area.W, tabH },
-				Wui::WuiColor { 0.3f, 0.5f, 0.9f, 0.55f }, 0.0f });
+			Wui::PanelBackground(ctx, { area.X, tabTop, area.W, tabH }, { 0.3f, 0.5f, 0.9f, 0.55f });
 
 		std::string closeRequest;
 		float lastTabEnd = area.X + 4.0f;

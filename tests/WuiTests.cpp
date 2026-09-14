@@ -8,6 +8,7 @@
 #include "World/WUI/WuiLayoutStore.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/Widgets/WuiControls.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <filesystem>
 #include <cstdio>
@@ -680,6 +681,82 @@ int main()
 			CHECK(order.Float("two", { 40, 40, 200, 150 }));
 			order.BringFloatToFront("one");
 			CHECK(order.Floating.back().Panel == "one");
+		}
+
+		// 16. Chrome 基础组件:每条命令的输出与命中/悬停语义
+		{
+			WuiContext ctx;
+			WuiTheme theme;
+			WuiInputState input;
+			input.MousePos = { 1000, 1000 };
+			ctx.BeginFrame(input);
+
+			PanelBackground(ctx, { 0, 0, 10, 10 }, theme.PanelBg, 2.0f);
+			CHECK(ctx.Commands().size() == 1);
+			CHECK(ctx.Commands().back().Kind == WuiDrawKind::Rect);
+
+			BarSurface(ctx, { 0, 0, 100, 24 }, theme.PanelHeader, theme.Border);
+			CHECK(ctx.Commands().size() == 3); // 填充 + 底边线
+			CHECK(Near(ctx.Commands().back().Rect.Y, 23.0f) && Near(ctx.Commands().back().Rect.H, 1.0f));
+
+			HighlightOutline(ctx, { 0, 0, 20, 20 }, theme.Accent);
+			CHECK(ctx.Commands().size() == 4);
+			CHECK(ctx.Commands().back().Kind == WuiDrawKind::RectOutline);
+
+			DropZoneOverlay(ctx, { 0, 0, 20, 20 });
+			CHECK(ctx.Commands().size() == 6); // 半透明填充 + 高亮描边
+
+			// 悬停行:未悬停/未选中不绘制,悬停或选中各输出一条底色。
+			CHECK(!HoverRow(ctx, { 0, 0, 50, 20 }, false, false, theme));
+			CHECK(ctx.Commands().size() == 6);
+			CHECK(HoverRow(ctx, { 0, 0, 50, 20 }, true, false, theme));
+			CHECK(ctx.Commands().size() == 7);
+			HoverRow(ctx, { 0, 0, 50, 20 }, false, true, theme);
+			CHECK(ctx.Commands().size() == 8);
+
+			// 分节标题:文字 + 分隔线。
+			SectionHeader(ctx, { 0, 0, 120, 24 }, "Section", theme.Accent, theme);
+			CHECK(ctx.Commands().size() == 10);
+			ctx.EndFrame();
+		}
+
+		// 17. 挂靠标签 chip:普通标签点击、活动底色、关闭按钮命中
+		{
+			const WuiRect tag { 0, 0, 140, 20 };
+			WuiTheme theme;
+			{
+				WuiContext ctx;
+				WuiInputState input;
+				input.MousePos = { 20, 10 };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				const AttachTagResult result = AttachTag(ctx, tag, "Widget", false, false, theme);
+				CHECK(result.Hovered && result.Clicked && !result.CloseClicked);
+				CHECK(ctx.Commands().size() == 2); // 悬停底色 + 标题
+				ctx.EndFrame();
+			}
+			{
+				WuiContext ctx;
+				WuiInputState input;
+				input.MousePos = { 20, 10 };
+				ctx.BeginFrame(input);
+				const AttachTagResult result = AttachTag(ctx, tag, "Widget", true, false, theme);
+				CHECK(result.Hovered && !result.Clicked);
+				CHECK(ctx.Commands().size() == 2); // 活动底色 + 标题
+				ctx.EndFrame();
+			}
+			{
+				WuiContext ctx;
+				WuiInputState input;
+				input.MousePos = { tag.X + tag.W - 12.0f, tag.Y + tag.H * 0.5f };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				const AttachTagResult result = AttachTag(ctx, tag, "Widget", false, true, theme);
+				CHECK(result.CloseHovered && result.CloseClicked && !result.Clicked);
+				CHECK(result.CloseRect.W > 0.0f);
+				CHECK(result.CloseRect.X + result.CloseRect.W <= tag.X + tag.W);
+				ctx.EndFrame();
+			}
 		}
 
 		std::printf("World.Wui: all checks passed\n");

@@ -203,8 +203,7 @@ namespace World
 		};
 		const auto section = [&](const char* title)
 		{
-			Wui::Label(ctx, { x0, y + 4 }, title, theme.Accent, 15.0f);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { x0, y + 22, width, 1.0f }, theme.Border, 0.0f });
+			Wui::SectionHeader(ctx, { x0, y, width, 24.0f }, title, theme.Accent, theme, 15.0f);
 			y += 28.0f;
 		};
 
@@ -224,8 +223,8 @@ namespace World
 
 		// ---- 悬浮提示 + 模态触发 ----
 		const Wui::WuiRect hoverAnchor { x0, y, 150, rowH };
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, hoverAnchor, ctx.IsHovered(hoverAnchor) ? theme.ButtonHover : theme.ButtonBg, 3.0f });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { hoverAnchor.X + 8, hoverAnchor.Y + 4, 0, 0 }, theme.Text, 0, 1.0f, "Hover for tooltip", 15.0f, false });
+		Wui::PanelBackground(ctx, hoverAnchor, ctx.IsHovered(hoverAnchor) ? theme.ButtonHover : theme.ButtonBg, 3.0f);
+		Wui::Label(ctx, { hoverAnchor.X + 8, hoverAnchor.Y + 4 }, "Hover for tooltip", theme.Text, 15.0f);
 		m_Tooltip->Anchor = hoverAnchor;
 
 		const Wui::WuiRect modalButton { x0 + 160, y, 130, rowH };
@@ -307,8 +306,7 @@ namespace World
 		for (int i = 0; i < 12; ++i)
 		{
 			const Wui::WuiRect row { inner.X + 4, inner.Y + 4 + i * 22.0f - innerScroll, inner.W - 8, 22.0f };
-			if (ctx.IsHovered(row))
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.ButtonHover, 2.0f });
+			Wui::HoverRow(ctx, row, ctx.IsHovered(row), false, theme, 2.0f);
 			Wui::Label(ctx, { row.X + 8, row.Y + 3 }, "scroll row " + std::to_string(i + 1), theme.Text, 14.0f);
 		}
 		Wui::EndScrollArea(ctx);

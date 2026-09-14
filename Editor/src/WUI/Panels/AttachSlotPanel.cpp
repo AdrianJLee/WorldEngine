@@ -2,6 +2,7 @@
 #include "AttachSlotPanel.h"
 
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 namespace World
 {
@@ -13,8 +14,8 @@ namespace World
 		const Wui::WuiColor border = highlighted ? Wui::WuiColor { 0.45f, 0.65f, 1.0f, 1.0f } : theme.Border;
 
 		const Wui::WuiRect area { rect.X + 6, rect.Y + 6, rect.W - 12, rect.H - 12 };
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, area, fill, 4.0f });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, area, border, 4.0f, 2.0f });
+		Wui::PanelBackground(ctx, area, fill, 4.0f);
+		Wui::HighlightOutline(ctx, area, border, 4.0f, 2.0f);
 		Wui::Label(ctx, { area.X + 10, area.Y + 8 }, "挂靠槽位(Attach Slot)", theme.Text, 14.0f);
 		Wui::Label(ctx, { area.X + 10, area.Y + 28 }, "把独立窗口拖到此处松手即可挂靠回主窗口。", theme.TextMuted, 13.0f);
 

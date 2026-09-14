@@ -639,7 +639,7 @@ namespace World
 				{
 					ctx.DropTarget(m_CrumbButtons[i]->Rect(), "file:");
 					m_Model.PendingDropDest = m_CrumbDests[i];
-					ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, m_CrumbButtons[i]->Rect(), theme.Accent, 2.0f, 2.0f });
+					Wui::HighlightOutline(ctx, m_CrumbButtons[i]->Rect(), theme.Accent, 2.0f, 2.0f);
 				}
 
 		float y = rect.Y + 38;
@@ -647,7 +647,7 @@ namespace World
 		// ---- 左侧目录树 ----
 		const float treeW = 190;
 		const Wui::WuiRect treeRect { rect.X, y, treeW, rect.H - (y - rect.Y) };
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, treeRect, { 0.09f, 0.095f, 0.10f, 1 }, 0.0f });
+		Wui::PanelBackground(ctx, treeRect, { 0.09f, 0.095f, 0.10f, 1 });
 		RefreshTree(false);
 		// 目录树走 TreeView 组件:展开箭头/悬停/选中由组件绘制,
 		// 导航、拖拽起手、拖入目标仍由面板处理(用组件返回的 ItemRects)。
@@ -695,7 +695,7 @@ namespace World
 				{
 					ctx.DropTarget(row, "file:");
 					m_Model.PendingDropDest = node.Path;
-					ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, row, theme.Accent, 2.0f, 2.0f });
+					Wui::HighlightOutline(ctx, row, theme.Accent, 2.0f, 2.0f);
 				}
 			}
 		}
@@ -720,7 +720,7 @@ namespace World
 		{
 			ctx.DropTarget(content, "file:");
 			m_Model.PendingDropDest = m_Model.Current;
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, content, theme.Accent, 0.0f, 2.0f });
+			Wui::HighlightOutline(ctx, content, theme.Accent, 0.0f, 2.0f);
 		}
 
 		bool itemRightClicked = false;
@@ -732,7 +732,7 @@ namespace World
 			{
 				ctx.DropTarget(itemRect, "file:");
 				m_Model.PendingDropDest = path;
-				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, itemRect, theme.Accent, 2.0f, 2.0f });
+				Wui::HighlightOutline(ctx, itemRect, theme.Accent, 2.0f, 2.0f);
 			}
 			if (ctx.Input().MouseDown[0] && hovered)
 			{

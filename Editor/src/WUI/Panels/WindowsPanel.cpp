@@ -2,6 +2,7 @@
 #include "WindowsPanel.h"
 
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 namespace World
 {
@@ -17,8 +18,7 @@ namespace World
 			const std::string panel = host.IndependentWindowPanel(i);
 			const std::string label = host.IndependentWindowLabel(i);
 			const Wui::WuiRect row { rect.X + 6, y, std::max(120.0f, rect.W - 12), 26.0f };
-			if (ctx.IsHovered(row))
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.ButtonHover, 3.0f });
+			Wui::HoverRow(ctx, row, ctx.IsHovered(row), false, theme);
 			Wui::Label(ctx, { row.X + 8, row.Y + 6 }, label, theme.Text, 14.0f);
 
 			const Wui::WuiRect focus { row.X + row.W - 150, row.Y + 2, 62, 22 };

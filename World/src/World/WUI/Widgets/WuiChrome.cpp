@@ -14,6 +14,86 @@ namespace World::Wui
 		}
 	}
 
+	// ---- 基础表面与高亮 ----
+
+	void PanelBackground(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, color, radius });
+	}
+
+	void BarSurface(WuiContext& ctx, const WuiRect& rect, const WuiColor& fill, const WuiColor& border)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 0.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y + rect.H - 1.0f, rect.W, 1.0f }, border, 0.0f });
+	}
+
+	bool HoverRow(WuiContext& ctx, const WuiRect& rect, bool hovered, bool selected, const WuiTheme& theme,
+		float radius)
+	{
+		if (selected)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonBg, radius });
+		else if (hovered)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, radius });
+		return hovered;
+	}
+
+	void HighlightOutline(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius, float thickness)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, color, radius, thickness });
+	}
+
+	void DropZoneOverlay(WuiContext& ctx, const WuiRect& rect, float alpha, float radius)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, { 0.30f, 0.50f, 0.90f, alpha }, radius });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, { 0.45f, 0.65f, 1.0f, 1.0f }, radius, 2.0f });
+	}
+
+	void SectionHeader(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiColor& color,
+		const WuiTheme& theme, float fontSize)
+	{
+		PushText(ctx, { rect.X, rect.Y + 2.0f }, title, color, fontSize);
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y + rect.H - 1.0f, rect.W, 1.0f }, theme.Border, 0.0f });
+	}
+
+	// ---- 挂靠标签 ----
+
+	AttachTagResult AttachTag(WuiContext& ctx, const WuiRect& rect, const std::string& title, bool active,
+		bool closable, const WuiTheme& theme, float fontSize)
+	{
+		AttachTagResult result;
+		result.Rect = rect;
+		result.CloseRect = { rect.X + rect.W - 18.0f, rect.Y + 5.0f, 12.0f, 12.0f };
+		result.Hovered = ctx.IsHovered(rect);
+		result.CloseHovered = closable && ctx.IsHovered(result.CloseRect);
+
+		// 活动标签优先使用面板底色(与 DockTabBar 一致),悬停只在非活动时给反馈。
+		if (active)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.PanelBg, 2.0f });
+		else if (result.Hovered)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 2.0f });
+		if (result.Hovered)
+			ctx.SetCursor(WuiCursor::Hand);
+
+		PushText(ctx, { rect.X + (closable ? 8.0f : 7.0f), rect.Y + 4.0f }, title,
+			active ? theme.Text : theme.TextMuted, fontSize);
+
+		if (!closable)
+		{
+			result.Clicked = ctx.IsClicked(rect);
+			return result;
+		}
+
+		if (result.CloseHovered)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, result.CloseRect, theme.ButtonHover, 2.0f });
+			ctx.SetCursor(WuiCursor::Hand);
+		}
+		PushText(ctx, { result.CloseRect.X + 2.0f, result.CloseRect.Y - 1.0f }, "x", theme.TextMuted, fontSize - 1.0f);
+		result.CloseClicked = ctx.IsClicked(result.CloseRect);
+		result.Clicked = !result.CloseClicked && ctx.IsClicked(rect);
+		return result;
+	}
+
 	// ---- 停靠标签栏 ----
 
 	DockTabBarResult DockTabBar(WuiContext& ctx, const WuiRect& area, const std::vector<DockTab>& tabs,
