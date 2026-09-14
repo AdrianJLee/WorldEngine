@@ -290,7 +290,10 @@ namespace World
 		else if (!m_TabDragActive && ctx.Input().MouseDown[0] && m_PressSeenInWindow
 			&& ctx.IsHovered({ lastTabEnd, tabTop,
 				std::max(0.0f, area.W - lastTabEnd - 110.0f), tabH }))
+		{
+			WLD_CORE_INFO("[diag] empty area -> BeginSystemDrag");
 			m_Window->BeginSystemDrag();
+		}
 
 		// 拖拽阈值:按下后移动超过 4px 即发起一次跨窗口拖拽请求。
 		if (m_TabPressArmed)
@@ -302,6 +305,8 @@ namespace World
 			}
 			else if (glm::length(ctx.Input().MousePos - m_TabPressPos) > 2.0f)
 			{
+				WLD_CORE_INFO("[diag] tab threshold -> BeginSystemDrag (moved {0})",
+					glm::length(ctx.Input().MousePos - m_TabPressPos));
 				m_TabPressArmed = false;
 				// 标签按住拖动 = 移动窗口(与空白区一致,系统级 SC_MOVE 拖动)。
 				// 跨窗口附加/挂靠仍通过"把窗口拖到主窗口顶栏自动挂靠"实现。
