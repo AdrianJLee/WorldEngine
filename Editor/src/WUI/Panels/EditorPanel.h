@@ -29,6 +29,10 @@ namespace World
 		virtual void FocusIndependentWindow(const std::string& panel) = 0;
 		// 关闭独立窗口并把面板作为停靠标签恢复。
 		virtual void DockBackIndependentWindow(const std::string& panel) = 0;
+		// ---- 挂靠槽位(主窗口接收独立窗口的位置)----
+		virtual bool AttachSlotHighlighted() const = 0;
+		// 把独立窗口挂靠到槽位:面板进入槽位所在标签组,OS 窗口销毁。
+		virtual void AttachIndependentWindowToSlot(const std::string& panel) = 0;
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

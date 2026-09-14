@@ -33,7 +33,7 @@ namespace World
 	EditorShell::EditorShell(EditorLayer& editor)
 		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json")
 	{
-		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "windows", "stats", "memory", "operations" };
+		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "windows", "attach_slot", "stats", "memory", "operations" };
 		m_Panels = panels;
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(panels);
 		std::string error;
@@ -52,6 +52,7 @@ namespace World
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 		m_PanelRegistry.emplace("windows", std::make_unique<WindowsPanel>());
+		m_PanelRegistry.emplace("attach_slot", std::make_unique<AttachSlotPanel>());
 		// 独立窗口(与停靠面板是不同组件):按保存的浮动布局重建。
 		for (const Wui::DockFloat& entry : m_Layout.Floating)
 			AddFloatWindow(entry.Panel, entry.Rect);
@@ -554,6 +555,20 @@ namespace World
 	// 浮动面板:每个窗口一个面板,绘制在停靠区之上(Overlay 层)。
 	void EditorShell::RenderFloating(Wui::WuiContext& ctx)
 	{
+		// 槽位屏幕矩形(客户区 -> 屏幕):用于判断独立窗口是否停到了槽位上。
+		const glm::vec2 viewport = ctx.ViewportSize();
+		std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> dockRects;
+		m_Layout.ComputeRects({ 0, 26, viewport.x, viewport.y - 26 }, &dockRects);
+		m_AttachSlotScreenRect = {};
+		for (const auto& entry : dockRects)
+			if (entry.first == "attach_slot")
+				m_AttachSlotScreenRect = entry.second;
+		int windowX = 0, windowY = 0;
+		if (Application::HasInstance())
+			Application::Get().GetWindow().GetPosition(&windowX, &windowY);
+		m_AttachSlotScreenRect.X += static_cast<float>(windowX);
+		m_AttachSlotScreenRect.Y += static_cast<float>(windowY);
+
 		// 每个独立窗口渲染自己的 OS 窗口;窗口被关闭 = 隐藏该面板。
 		for (size_t i = 0; i < m_FloatHosts.size(); )
 		{
@@ -577,8 +592,30 @@ namespace World
 			// 位置/尺寸变化写回布局(供重启恢复)。
 			if (Wui::DockFloat* entry = m_Layout.FindFloat(host.Panel()))
 				entry->Rect = host.ScreenRect();
+
+			// 挂靠判定:窗口中心停在槽位矩形内且已停稳(位置与上一帧相同)。
+			const Wui::WuiRect rect = host.ScreenRect();
+			const glm::vec2 center { rect.X + rect.W * 0.5f, rect.Y + rect.H * 0.5f };
+			const bool overSlot = m_AttachSlotScreenRect.W > 0.0f && m_AttachSlotScreenRect.H > 0.0f
+				&& center.x >= m_AttachSlotScreenRect.X && center.x <= m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W
+				&& center.y >= m_AttachSlotScreenRect.Y && center.y <= m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H;
+			const auto previous = m_LastFloatScreenRects.find(host.Panel());
+			const bool stationary = previous != m_LastFloatScreenRects.end()
+				&& std::fabs(previous->second.X - rect.X) < 0.5f && std::fabs(previous->second.Y - rect.Y) < 0.5f;
+			m_LastFloatScreenRects[host.Panel()] = rect;
+			if (overSlot)
+			{
+				m_AttachSlotHighlight = true;
+				if (stationary)
+				{
+					AttachIndependentWindowToSlot(host.Panel());
+					continue; // host 已销毁
+				}
+			}
 			++i;
 		}
+		if (m_FloatHosts.empty())
+			m_AttachSlotHighlight = false;
 		// 独立窗口渲染会把 GL 上下文切到各自窗口,这里恢复主窗口上下文,
 		// 否则主窗口后续的呈现/交换会作用在错误的上下文上(表现为主窗口不再刷新)。
 		if (Application::HasInstance())
@@ -635,6 +672,31 @@ namespace World
 		const Wui::PanelId anchor = m_Layout.FirstPanel();
 		if (!anchor.empty() && m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
 			WLD_CORE_INFO("Independent window docked back: {0}", panel);
+	}
+
+	void EditorShell::AttachIndependentWindowToSlot(const std::string& panel)
+	{
+		// 挂靠:面板作为槽位所在标签组的一员回到主窗口,独立窗口销毁。
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+			if (host->Panel() == panel)
+				m_LastFloatRects[panel] = host->ScreenRect();
+
+		const std::string before = m_Layout.Serialize();
+		m_FloatHosts.erase(std::remove_if(m_FloatHosts.begin(), m_FloatHosts.end(),
+			[&](const std::unique_ptr<FloatWindowHost>& host) { return host->Panel() == panel; }),
+			m_FloatHosts.end());
+		m_Layout.CloseFloating(panel);
+		m_LastFloatScreenRects.erase(panel);
+
+		const Wui::PanelId slot = "attach_slot";
+		const bool placed = m_Layout.Contains(slot)
+			? m_Layout.AddTab(panel, slot, Wui::DropZone::Center)
+			: (!m_Layout.FirstPanel().empty() && m_Layout.AddTab(panel, m_Layout.FirstPanel(), Wui::DropZone::Center));
+		if (placed)
+		{
+			m_AttachSlotHighlight = false;
+			WLD_CORE_INFO("Independent window attached to slot: {0}", panel);
+		}
 	}
 
 	void EditorShell::CloseFloatWindow(const std::string& panel, bool recordChange, Wui::WuiContext* ctx)

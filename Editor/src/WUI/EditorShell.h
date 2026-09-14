@@ -7,6 +7,7 @@
 #include "Panels/ViewportPanel.h"
 #include "Panels/WidgetGalleryPanel.h"
 #include "Panels/WindowsPanel.h"
+#include "Panels/AttachSlotPanel.h"
 #include "FloatWindowHost.h"
 
 #include "World/WUI/WuiContext.h"
@@ -61,6 +62,8 @@ namespace World
 		std::string IndependentWindowPanel(size_t index) const override;
 		void FocusIndependentWindow(const std::string& panel) override;
 		void DockBackIndependentWindow(const std::string& panel) override;
+		bool AttachSlotHighlighted() const override { return m_AttachSlotHighlight; }
+		void AttachIndependentWindowToSlot(const std::string& panel) override;
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;
 		EditorCamera& GetEditorCamera() override;
 		Wui::GizmoOperation GetGizmoOperation() const override;
@@ -110,6 +113,11 @@ namespace World
 		Wui::DropZone m_LastDragZone = Wui::DropZone::Center;
 		// 独立窗口的"上次位置尺寸"记忆:收回停靠后再拖出沿用用户调好的尺寸。
 		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatRects;
+		// 挂靠槽位:屏幕矩形(每帧计算)与高亮状态。
+		Wui::WuiRect m_AttachSlotScreenRect;
+		bool m_AttachSlotHighlight = false;
+		// 上一帧各独立窗口的位置(用于判断"停稳在槽位上")。
+		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatScreenRects;
 
 		// 面板拖拽/浮动状态。
 		std::string m_DragPanel;            // 本帧拖拽中的面板(来自 payload "panel:")
