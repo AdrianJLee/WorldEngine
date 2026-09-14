@@ -230,34 +230,23 @@ namespace World
 		}
 		else
 		{
-			// 曾经作为独立窗口存在过的面板:再次打开时回到它上次的屏幕位置,
-			// 而不是固定塞进停靠树的某个位置。
+			// 从 Window 菜单打开的面板一律以"独立窗口"出现(不进入停靠树):
+			// 有历史位置就回到上次位置,否则放在主窗口右下方一个默认位置。
+			Wui::WuiRect rect;
 			const auto remembered = m_LastFloatRects.find(panel);
 			if (remembered != m_LastFloatRects.end())
+				rect = remembered->second;
+			if (rect.W < 200.0f || rect.H < 140.0f)
 			{
-				Wui::WuiRect rect = remembered->second;
-				if (rect.W < 200.0f || rect.H < 140.0f)
-					rect = { 220.0f, 140.0f, 520.0f, 400.0f };
-				const std::string before = m_Layout.Serialize();
-				if (m_Layout.Float(panel, rect))
-				{
-					AddFloatWindow(panel, rect, "reopen");
-					RecordDockChange(ctx, "float", panel, before);
-					return;
-				}
+				int windowX = 0, windowY = 0;
+				if (Application::HasInstance())
+					Application::Get().GetWindow().GetPosition(&windowX, &windowY);
+				rect = { static_cast<float>(windowX) + 140.0f, static_cast<float>(windowY) + 100.0f, 520.0f, 400.0f };
 			}
-			const std::string anchor = m_Layout.FirstPanel();
-			if (anchor.empty())
+			if (m_Layout.Float(panel, rect))
 			{
-				// 布局为空(所有面板都被关闭):把该面板作为根标签组恢复。
-				Wui::DockLayout fresh;
-				fresh.Root.Panels.push_back(panel);
-				m_Layout = std::move(fresh);
-				RecordDockChange(ctx, "show", panel, before);
-			}
-			else if (m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
-			{
-				RecordDockChange(ctx, "show", panel, before);
+				AddFloatWindow(panel, rect, "reopen");
+				RecordDockChange(ctx, "float", panel, before);
 			}
 		}
 	}
