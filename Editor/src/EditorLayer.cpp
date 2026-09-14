@@ -53,7 +53,14 @@ namespace World
 
 		// 诊断/自动化:WLD_START_SCENE=<路径> 时启动即打开该场景。
 		if (const char* startScene = std::getenv("WLD_START_SCENE"))
-			DoOpenScene(std::filesystem::path(startScene));
+		{
+			const std::filesystem::path startupPath(startScene);
+			WLD_CORE_INFO("Startup scene requested: {0}", startupPath.string());
+			DoOpenScene(startupPath);
+			if (!m_Document.HasPath())
+				WLD_CORE_ERROR("Startup scene could not be opened: {0} ({1})",
+					startupPath.string(), m_Document.GetLastError());
+		}
 		else
 			NewScene();
 
@@ -291,6 +298,7 @@ namespace World
 	}
 	void EditorLayer::DoOpenScene(const std::filesystem::path& path)
 	{
+		WLD_CORE_INFO("Opening scene: {0}", path.string());
 		if (!m_Document.LoadFromFile(path))
 		{
 			ShowError(m_Document.GetLastError());
@@ -387,17 +395,59 @@ namespace World
 		}
 		const std::filesystem::path exePath(exeBuffer);
 
+		// 重启前把未保存的改动写回磁盘(切换渲染后端不应丢编辑内容)。
+		if (m_Document.HasPath() && m_Document.IsDirty())
+		{
+			if (m_Document.SaveTo(m_Document.GetPath()))
+				WLD_CORE_INFO("Saved scene before renderer restart: {0}", m_Document.GetPath().string());
+			else
+				WLD_CORE_WARN("Scene could not be saved before renderer restart: {0}",
+					m_Document.GetLastError());
+		}
+
 		std::string arguments;
 		if (m_Document.HasPath())
 			arguments = " -scene \"" + m_Document.GetPath().string() + "\"";
-		std::wstring commandLine = L"\"" + exePath.wstring() + L"\"" +
-			std::wstring(arguments.begin(), arguments.end());
+		// 参数按 UTF-8 → UTF-16 转换(非 ASCII 路径不能按字节直接变宽字符)。
+		std::wstring wideArguments;
+		if (!arguments.empty())
+		{
+			const int wideLength = MultiByteToWideChar(CP_UTF8, 0, arguments.c_str(),
+				static_cast<int>(arguments.size()), nullptr, 0);
+			wideArguments.resize(static_cast<size_t>(std::max(0, wideLength)));
+			if (wideLength > 0)
+				MultiByteToWideChar(CP_UTF8, 0, arguments.c_str(), static_cast<int>(arguments.size()),
+					wideArguments.data(), wideLength);
+		}
+		std::wstring commandLine = L"\"" + exePath.wstring() + L"\"" + wideArguments;
+
+		// 场景路径同时通过环境块传给子进程(启动时即可见,且不受引号/编码影响)。
+		std::wstring environmentBlock;
+		if (m_Document.HasPath())
+		{
+			const std::wstring sceneWide = m_Document.GetPath().wstring();
+			if (LPWCH current = GetEnvironmentStringsW())
+			{
+				for (const wchar_t* entry = current; *entry; entry += std::wcslen(entry) + 1)
+				{
+					if (std::wcsncmp(entry, L"WLD_START_SCENE=", 16) == 0)
+						continue; // 覆盖旧值
+					environmentBlock.append(entry);
+					environmentBlock.push_back(L'\0');
+				}
+				FreeEnvironmentStringsW(current);
+			}
+			environmentBlock.append(L"WLD_START_SCENE=");
+			environmentBlock.append(sceneWide);
+			environmentBlock.push_back(L'\0');
+			environmentBlock.push_back(L'\0');
+		}
 
 		STARTUPINFOW startup {};
 		startup.cb = sizeof(startup);
 		PROCESS_INFORMATION process {};
 		if (!CreateProcessW(exePath.wstring().c_str(), commandLine.data(), nullptr, nullptr,
-			FALSE, 0, nullptr, nullptr, &startup, &process))
+			FALSE, 0, environmentBlock.empty() ? nullptr : environmentBlock.data(), nullptr, &startup, &process))
 		{
 			WLD_CORE_ERROR("Renderer change requires restart, but relaunching the editor failed.");
 			return;
