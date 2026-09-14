@@ -18,6 +18,9 @@ namespace World::Wui
 
 		void BeginFrame(WuiInputState& out, glm::vec2 viewport, float fps);
 		void EndFrame();
+		// 与系统按键状态同步:跨窗口拖拽时释放事件可能不会送达原窗口,
+		// 此时若本窗口仍认为按钮按着,会产生"幽灵拖拽"。
+		void SyncButtonsWithSystem();
 
 	private:
 		std::unordered_set<uint32_t> m_Down;

@@ -7,6 +7,16 @@
 
 namespace World::Wui
 {
+	void WuiInputCollector::SyncButtonsWithSystem()
+	{
+		const bool left = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+		const bool right = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+		const bool middle = (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
+		if (!left && m_MouseDown[0]) { m_MouseDown[0] = false; m_MouseReleased[0] = true; }
+		if (!right && m_MouseDown[1]) { m_MouseDown[1] = false; m_MouseReleased[1] = true; }
+		if (!middle && m_MouseDown[2]) { m_MouseDown[2] = false; m_MouseReleased[2] = true; }
+	}
+
 	namespace
 	{
 		bool Has(const std::unordered_set<uint32_t>& set, uint32_t key) { return set.find(key) != set.end(); }
@@ -54,6 +64,7 @@ namespace World::Wui
 
 	void WuiInputCollector::BeginFrame(WuiInputState& out, glm::vec2 viewport, float fps)
 	{
+		SyncButtonsWithSystem();
 		out.MousePos = m_MousePos;
 		out.ViewportSize = viewport;
 		out.FPS = fps;

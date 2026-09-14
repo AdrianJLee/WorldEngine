@@ -64,6 +64,9 @@ namespace World
 		const glm::vec2 size { static_cast<float>(m_Window->GetWidth()), static_cast<float>(m_Window->GetHeight()) };
 		if (size.x < 8.0f || size.y < 8.0f)
 			return true; // 最小化/尚未布局
+		// 若系统左键已释放(可能释放在别的窗口),清除"本窗口按下"标志。
+		if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000))
+			m_PressSeenInWindow = false;
 
 		m_Backend.SetViewportSize(size);
 		Wui::WuiInputState input;
