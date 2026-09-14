@@ -86,6 +86,7 @@ namespace World
 		// are still alive.
 		if (m_FrameAllocator) m_FrameAllocator->Reset();
 		if (m_EngineAllocator) m_EngineAllocator->Reset();
+		FrameArena::Shutdown();
 		ScriptEngine::Shutdown();
 		JobSystem::Shutdown();
 		m_Window.reset();
@@ -134,6 +135,8 @@ namespace World
 
 			// Clean up frame allocator after each frame
 			m_FrameAllocator->Reset();
+			// 帧内临时分配(每线程 arena):工作线程已空闲,统一回卷。
+			FrameArena::ResetAll();
 		}
 		Shutdown();
 	}

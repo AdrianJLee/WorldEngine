@@ -172,6 +172,27 @@ set_tests_properties(World.ShaderPipeline PROPERTIES
     TIMEOUT 120
 )
 
+# 内存基座回归:每线程帧 arena、析构、追加页、双轨与池分配器。
+add_executable(WorldMemoryTests MemoryTests.cpp)
+target_link_libraries(WorldMemoryTests PRIVATE World)
+target_compile_features(WorldMemoryTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldMemoryTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldMemoryTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldMemoryTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Memory COMMAND WorldMemoryTests)
+set_tests_properties(World.Memory PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
+
 # 渲染后端运行时热切换回归:GL↔VK 往返 ≥3 次,含 SceneRenderer 重建。
 add_executable(WorldRendererHotswapTests RendererHotswapTests.cpp)
 target_link_libraries(WorldRendererHotswapTests PRIVATE World)
@@ -193,7 +214,7 @@ set_tests_properties(World.RendererHotswap PROPERTIES
     TIMEOUT 180
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests)
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests)
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

@@ -1,11 +1,14 @@
-﻿#pragma once
+#pragma once
 #include "Allocator.h"
+#include "FrameArena.h"
 
 namespace World
 {
 	#pragma region Macro
 
-	#define WLD_FRAME_NEW(T, ...) Application::Get().GetFrameAllocator().New<T>(__VA_ARGS__)
+	// 帧内临时分配走"每线程 arena"(FrameArena),无锁且可在工作线程使用;
+	// 引擎级长生命周期对象仍走 Application 的引擎分配器。
+	#define WLD_FRAME_NEW(T, ...) ::World::FrameArena::Get().New<T>(__VA_ARGS__)
 	#define WLD_ENGINE_NEW(T, ...) Application::Get().GetEngineAllocator().New<T>(__VA_ARGS__)
 
 	#pragma endregion
@@ -55,3 +58,4 @@ namespace World
 		LOSPage* m_HeadLOS = nullptr;
 	};
 }
+
