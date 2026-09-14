@@ -198,7 +198,7 @@ namespace World
 			WE_FIELD(ScriptName, String);
 		WE_SCHEMA_END
 
-		// 无 ImGui 的字段访问合同,供 Editor Inspector 与测试共用;运行期场景也用它应用字段。
+		// 与 UI 框架解耦的字段访问合同,供 Editor Inspector 与测试共用;运行期场景也用它应用字段。
 		ScriptableEntity* GetOrCreateEditorInstance(bool allowCreate, bool& outOwned);
 		void ReleaseEditorInstance(ScriptableEntity* preview);
 		void ResetEditorFieldState();

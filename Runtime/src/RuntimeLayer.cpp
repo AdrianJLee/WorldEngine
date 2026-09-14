@@ -2,7 +2,6 @@
 #include "GameHud.h"
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Renderer/Renderer.h"
-#include "World/ImGui/ImGuiLayer.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/RHI/RhiTextureBridge.h"
@@ -96,7 +95,7 @@ namespace World
 		if (m_SceneRenderer)
 			m_SceneRenderer->CaptureFrame(pathEnv);
 	}
-	void RuntimeLayer::OnImGuiRender()
+	void RuntimeLayer::OnUiFrame()
 	{
 		static Wui::WuiContext wuiContext;
 		static Wui::WuiRhiBackend wuiBackend;

@@ -52,7 +52,7 @@ namespace World
 
 		}
 	}
-	void GameLayer::OnImGuiRender()
+	void GameLayer::OnUiFrame()
 	{
 
 	}

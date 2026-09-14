@@ -14,7 +14,8 @@ namespace World
 		virtual void OnAttach() {}
 		virtual void OnDetach() {}
 		virtual void OnUpdate(Timestep ts) {}
-		virtual void OnImGuiRender() {}
+		// 每帧 UI 钩子：WUI 在当前呈现目标上构建并绘制界面。
+		virtual void OnUiFrame() {}
 		virtual void OnEvent(Event& event) {}
 
 		inline const std::string& GetName() const { return m_DebugName; };

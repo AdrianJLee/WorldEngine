@@ -26,9 +26,6 @@
 
 #include "World/Core/Thread/JobSystem.h"
 
-#include "World/ImGui/ImGuiLayer.h"
-#include "World/ImGui/ImGuiDrawLibrary.h"
-
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"

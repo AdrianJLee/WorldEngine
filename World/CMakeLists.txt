@@ -1,6 +1,5 @@
 ﻿add_subdirectory(vendor/GLFW)
 add_subdirectory(vendor/Glad)
-add_subdirectory(vendor/imgui)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(vendor/yaml)
@@ -84,8 +83,6 @@ set_target_properties(World PROPERTIES
 if(MSVC)
     target_compile_options(World PRIVATE "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/wldpch.h" "/FS")
 endif()
-# 针对 ImGuizmo 禁用 PCH (类似你的 Premake filter)
-set_source_files_properties(vendor/ImGuizmo/ImGuizmo.cpp PROPERTIES SKIP_PRECOMPILED_HEADERS ON)
 
 if(WIN32)
     # 1. 宏定义 (defines)
@@ -139,9 +136,7 @@ target_include_directories(World PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glm"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/entt/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/yaml/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ImGuizmo"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SPIRV-Cross"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SPIRV-Cross/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/spdlog/include"
@@ -159,8 +154,6 @@ file(GLOB_RECURSE WORLD_SOURCES
     "vendor/stb_image/*.cpp"
     "vendor/glm/glm/**.hpp"
 	"vendor/glm/glm/**.inl"
-    "vendor/ImGuizmo/ImGuizmo.h"
-    "vendor/ImGuizmo/ImGuizmo.cpp"
     "vendor/sol2/include/**.hpp"
     "vendor/lua/src/**.hpp"
     "vendor/lua/src/**.c"
@@ -182,8 +175,10 @@ target_link_libraries(World PRIVATE
     glfw    # 对应子目录生成的 target 名
     Glad
     opengl32
+    # WindowsWindow/WindowsPlatformUtils 的 IME 接口(ImmGetContext 等);
+    # 此前由 vendor/imgui 的 CMake 传递链接,剔除 ImGui 后需显式声明。
+    imm32
     sol2
     yaml-cpp
-    ImGui
     spdlog::spdlog
 )

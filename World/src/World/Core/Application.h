@@ -5,7 +5,6 @@
 #include "World/Core/LayerStack.h"
 #include "World/Events/ApplicationEvent.h"
 #include "World/Events/Event.h"
-#include "World/ImGui/ImGuiLayer.h"
 #include "World/Core/Memory/DualTrackAllocator.h"
 
 namespace World
@@ -31,8 +30,6 @@ namespace World
 
 		void Close();
 
-		ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer; }
-
 		DualTrackAllocator& GetFrameAllocator() { return *m_FrameAllocator; }
 		DualTrackAllocator& GetEngineAllocator() { return *m_EngineAllocator; }
 	private:
@@ -45,7 +42,6 @@ namespace World
 		std::unique_ptr<DualTrackAllocator> m_EngineAllocator;
 
 		std::unique_ptr<Window> m_Window;
-		ImGuiLayer* m_ImGuiLayer = nullptr;
 
 		float m_LastFrameTime = 0.0f;
 

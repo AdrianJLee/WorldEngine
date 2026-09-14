@@ -12,7 +12,7 @@ namespace World
 		virtual void OnAttach() override;
 		virtual void OnDetach() override;
 		virtual void OnUpdate(Timestep ts) override;
-		virtual void OnImGuiRender() override;
+		virtual void OnUiFrame() override;
 		virtual void OnEvent(Event& event) override;
 	private:
 		bool OnWindowResize(WindowResizeEvent& e);

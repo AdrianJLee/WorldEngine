@@ -182,7 +182,7 @@ namespace World
 	}
 
 
-	void EditorLayer::OnImGuiRender()
+	void EditorLayer::OnUiFrame()
 	{
 		WLD_PROFILE_FUNCTION();
 
@@ -500,7 +500,7 @@ namespace World
 
 		// 转换到视口局部坐标 (0,0) 是左上角
 
-		// 翻转 Y 轴，因为 OpenGL 的 (0,0) 在左下角，而 ImGui 在左上角
+		// 翻转 Y 轴：GL 像素读回的 (0,0) 在左下角，UI 视口坐标在左上角
 		int mouseX = (int)viewportLocal.x;
 		int mouseY = (int)(viewportSizeAvail.y - viewportLocal.y);
 

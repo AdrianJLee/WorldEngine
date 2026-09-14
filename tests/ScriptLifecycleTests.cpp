@@ -7,7 +7,6 @@
 #include "World/Scene/LuaStubGenerator.h"
 
 #include <box2d/box2d.h>
-#include <imgui.h>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -777,10 +776,10 @@ namespace
         std::vector<int> events;
         int destructed = 0;
         {
-            RecordingLayer imgui(1, events, destructed), editor(2, events, destructed), extra(3, events, destructed), failed(4, events, destructed);
+            RecordingLayer overlayLayer(1, events, destructed), editor(2, events, destructed), extra(3, events, destructed), failed(4, events, destructed);
             {
                 LayerStack stack;
-                stack.PushOverLay(&imgui); // Attached first; intentionally last in render order.
+                stack.PushOverLay(&overlayLayer); // Attached first; intentionally last in render order.
                 stack.PushLayer(&editor);
                 stack.PushLayer(&extra);
                 CHECK(RejectsLogic([&] { stack.PushLayer(&editor); }));
@@ -810,7 +809,7 @@ namespace
         auto* instance = script.Instance;
         CHECK(instance != nullptr);
 
-        // T04：经无 ImGui 的字段访问合同，验证“借用运行实例、不新建、不销毁、FieldValues 回填”。
+        // T04：经与 UI 框架解耦的字段访问合同，验证“借用运行实例、不新建、不销毁、FieldValues 回填”。
         bool owned = false;
         ScriptableEntity* preview = script.GetOrCreateEditorInstance(!fixture.World->IsActive(), owned);
         CHECK(preview == instance);

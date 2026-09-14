@@ -4,18 +4,12 @@
 [submodule "World/vendor/GLFW"]
 	path = World/vendor/GLFW
 	url = https://github.com/AdrianJLee/glfw.git
-[submodule "World/vendor/ImGuizmo"]
-	path = World/vendor/ImGuizmo
-	url = https://github.com/AdrianJLee/ImGuizmo.git
 [submodule "World/vendor/SPIRV-Cross"]
 	path = World/vendor/SPIRV-Cross
 	url = https://github.com/KhronosGroup/SPIRV-Cross.git
 [submodule "World/vendor/glm"]
 	path = World/vendor/glm
 	url = https://github.com/g-truc/glm.git
-[submodule "World/vendor/imgui"]
-	path = World/vendor/imgui
-	url = https://github.com/AdrianJLee/imgui.git
 [submodule "World/vendor/spdlog"]
 	path = World/vendor/spdlog
 	url = https://github.com/gabime/spdlog.git

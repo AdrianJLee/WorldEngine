@@ -4,7 +4,7 @@
 
 namespace World
 {
-	// 纯数据示例组件：只做反射声明，不写任何 ImGui/编辑代码，
+	// 纯数据示例组件：只做反射声明，不写任何 UI/编辑代码，
 	// 由 Editor 的 InspectorRegistry 自动生成控件编辑。
 	struct SampleDataComponent
 	{

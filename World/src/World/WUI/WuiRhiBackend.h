@@ -13,7 +13,7 @@ struct stbtt_fontinfo;
 namespace World::Wui
 {
 	// Backend v2:WUI 绘制命令经 RHI 2D 批管线呈现(OpenGL 默认帧缓冲 /
-	// Vulkan 交换链),输入直接来自 GLFW 事件,不依赖 ImGui。
+	// Vulkan 交换链),输入直接来自 GLFW 事件,不依赖第三方 UI 库。
 	class WLD_API WuiRhiBackend final : public WuiBackend
 	{
 	public:

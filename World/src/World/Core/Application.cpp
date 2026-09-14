@@ -35,8 +35,6 @@ namespace World
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(Application::OnEvent));
 
 		Renderer::Init();
-		m_ImGuiLayer = WLD_ENGINE_NEW(ImGuiLayer);
-		PushOverlay(m_ImGuiLayer);
 
 		ScriptEngine::Init();
 	}
@@ -54,9 +52,8 @@ namespace World
 		m_Running = false;
 		// OnDetach releases scene instances and joins layer-owned work first.
 		m_LayerStack.DetachAll();
-		m_ImGuiLayer = nullptr;
-		// WLD_ENGINE_NEW already registered the concrete layer destructors.
-		// Run them while their Lua state and graphics context are still alive.
+		// Run the allocator resets while their Lua state and graphics context
+		// are still alive.
 		if (m_FrameAllocator) m_FrameAllocator->Reset();
 		if (m_EngineAllocator) m_EngineAllocator->Reset();
 		ScriptEngine::Shutdown();
@@ -92,15 +89,13 @@ namespace World
 					}
 				}
 
-				m_ImGuiLayer->Begin();
 				{
-					WLD_PROFILE_SCOPE("LayerStack OnImGuiRender");
+					WLD_PROFILE_SCOPE("LayerStack UiFrame");
 					for (Layer* layer : m_LayerStack)
 					{
-						layer->OnImGuiRender();
+						layer->OnUiFrame();
 					}
 				}
-				m_ImGuiLayer->End();
 				Renderer::EndFramePresent();
 			}
 

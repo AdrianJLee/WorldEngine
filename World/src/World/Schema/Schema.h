@@ -1,7 +1,7 @@
 #pragma once
 
 // WorldEngine Schema 2.0 — 单一事实源反射契约。
-// 纯数据合同:不依赖 entt、ImGui、Scene 类型;访问器由 schema-compiler 生成。
+// 纯数据合同:不依赖 entt、UI 框架、Scene 类型;访问器由 schema-compiler 生成。
 // 本头文件禁止任何静态初始化期注册与跨 DLL 单例。
 
 #include <cstddef>

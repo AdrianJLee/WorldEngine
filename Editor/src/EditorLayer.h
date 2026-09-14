@@ -1,5 +1,7 @@
 #pragma once
 #include "World.h"
+#include "World/Events/KeyEvent.h"
+#include "World/Events/ApplicationEvent.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "Document/EditorDocument.h"
 #include "World/WUI/WuiCommand.h"
@@ -19,7 +21,7 @@ namespace World
 		virtual void OnAttach() override;
 		virtual void OnDetach() override;
 		virtual void OnUpdate(Timestep ts) override;
-		virtual void OnImGuiRender() override;
+		virtual void OnUiFrame() override;
 		virtual void OnEvent(Event& event) override;
 
 		void NewScene();

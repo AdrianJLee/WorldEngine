@@ -11,7 +11,7 @@ namespace World
 	class WorldContext;
 
 	// 编辑文档状态：持有编辑场景、路径、dirty 与最近错误。
-	// 本类不依赖 ImGui 或文件对话框；UI 由 EditorLayer 负责。
+	// 本类不依赖 UI 框架或文件对话框；UI 由 EditorLayer 负责。
 	class EditorDocument
 	{
 	public:
