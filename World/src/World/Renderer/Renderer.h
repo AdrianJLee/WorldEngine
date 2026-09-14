@@ -3,6 +3,9 @@
 #include "World/Renderer/RendererAPI.h"
 #include "World/RHI/Rhi.h"
 
+#include <cstdint>
+#include <functional>
+
 namespace World
 {
 	// 每窗口一个呈现目标:主窗口由 Renderer 内部维护,独立浮动窗口按需创建。
@@ -21,6 +24,15 @@ namespace World
 		static void Init();
 		static void Init(const std::string& backend);
 		static void Shutdown();
+		// ---- 帧节拍与资源回收(B0:去阻塞同步) ----
+		// 帧开始:等待本槽位的 fence(上一轮使用该槽位的提交已完成),并执行到期的延迟释放。
+		static void BeginFrame();
+		// 帧结束:推进帧槽位。
+		static void EndFrame();
+		static uint32_t FrameSlot();      // 当前帧槽位(0..kFramesInFlight-1)
+		static uint64_t FrameNumber();    // 单调递增的帧号
+		// 延迟释放:GPU 可能仍在使用的资源改为"下一轮该槽位开始前"回收,不再用整队列 WaitIdle。
+		static void QueueRelease(std::function<void()> release);
 		static void OnWindowResize(uint32_t width, uint32_t height);
 		// ---- 帧呈现编排(UI/场景合成到窗口)----
 		static PresentTarget* MainPresentTarget();

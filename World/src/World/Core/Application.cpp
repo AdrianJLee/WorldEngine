@@ -122,6 +122,7 @@ namespace World
 
 			if (!m_Minimized)
 			{
+				Renderer::BeginFrame();
 				Renderer::BeginFramePresent();
 				{
 					WLD_PROFILE_SCOPE("LayerStack OnUpdate");
@@ -139,6 +140,7 @@ namespace World
 					}
 				}
 				Renderer::EndFramePresent();
+				Renderer::EndFrame();
 			}
 
 

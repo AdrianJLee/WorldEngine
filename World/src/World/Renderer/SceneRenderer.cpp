@@ -237,6 +237,15 @@ namespace World
 
 		Renderer2D::EndScene();
 		m_CommandBuffer->EndRenderPass();
+		// 场景颜色附件在命令缓冲内转为可采样布局:提交方无需再 WaitIdle 做外部转换,
+		// 同一队列上后续提交(UI)按顺序即可安全采样。
+		{
+			Rhi::ResourceBarrier barrier;
+			barrier.Texture = m_ColorTexture;
+			barrier.Before = Rhi::ResourceState::ColorAttachment;
+			barrier.After = Rhi::ResourceState::ShaderReadOnly;
+			m_CommandBuffer->PipelineBarrier({ barrier });
+		}
 		m_CommandBuffer->End();
 		Renderer::SubmitScene(m_CommandBuffer, m_ColorTexture);
 	}

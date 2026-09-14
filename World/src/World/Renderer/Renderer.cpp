@@ -55,6 +55,31 @@ namespace World
 			return *hooks;
 		}
 
+		// ---- 帧槽位 / 栅栏 / 延迟释放(B0) ----
+		constexpr uint32_t kFramesInFlight = 1;   // B0.1:先去阻塞;槽位扩容(2–3)在 B0.2 随命令缓冲/缓冲区环形化一起做
+		uint64_t s_FrameNumber = 0;
+		Rhi::Handle<Rhi::Fence> s_FrameFences[kFramesInFlight];
+		bool s_FrameFenceSubmitted[kFramesInFlight] = {};
+		std::vector<std::pair<uint64_t, std::function<void()>>> s_DeferredReleases;   // (到期帧号, 回收动作)
+
+		void RunDeferredReleases(uint64_t frameNumber)
+		{
+			auto& releases = s_DeferredReleases;
+			for (auto it = releases.begin(); it != releases.end();)
+			{
+				if (it->first <= frameNumber)
+				{
+					if (it->second)
+						it->second();
+					it = releases.erase(it);
+				}
+				else
+				{
+					++it;
+				}
+			}
+		}
+
 		void ReleasePresentState(PresentTarget& state)
 		{
 			state.Framebuffers.clear();
@@ -119,6 +144,13 @@ namespace World
 	void Renderer::Shutdown()
 	{
 		WLD_PROFILE_FUNCTION();
+		// 设备销毁前的兜底:所有延迟释放先跑完(它们的资源属于当前设备)。
+		RunDeferredReleases(std::numeric_limits<uint64_t>::max());
+		for (uint32_t i = 0; i < kFramesInFlight; ++i)
+		{
+			s_FrameFences[i] = nullptr;
+			s_FrameFenceSubmitted[i] = false;
+		}
 		// 设备销毁前先让持有句柄的子系统释放资源(否则它们的析构会用到已销毁设备)。
 		{
 			auto hooks = DeviceReleaseHooks();
@@ -154,6 +186,52 @@ namespace World
 	std::string Renderer::GetBackendName()
 	{
 		return s_BackendName;
+	}
+
+	uint32_t Renderer::FrameSlot()
+	{
+		return static_cast<uint32_t>(s_FrameNumber % kFramesInFlight);
+	}
+
+	uint64_t Renderer::FrameNumber()
+	{
+		return s_FrameNumber;
+	}
+
+	void Renderer::BeginFrame()
+	{
+		if (!m_Device)
+			return;
+		const uint32_t slot = FrameSlot();
+		if (s_BackendName == "vulkan" && s_FrameFenceSubmitted[slot])
+		{
+			// 该槽位上一轮提交的 GPU 工作完成后才开始复用其资源(替代整队列 WaitIdle)。
+			if (!s_FrameFences[slot])
+				s_FrameFences[slot] = m_Device->CreateFence(true);
+			s_FrameFences[slot]->Wait();
+			s_FrameFences[slot]->Reset();
+			s_FrameFenceSubmitted[slot] = false;
+		}
+		RunDeferredReleases(s_FrameNumber);
+	}
+
+	void Renderer::EndFrame()
+	{
+		++s_FrameNumber;
+	}
+
+	void Renderer::QueueRelease(std::function<void()> release)
+	{
+		if (!release)
+			return;
+		if (!m_Device || s_BackendName != "vulkan")
+		{
+			// GL 立即模式:调用点已经保证安全,直接执行。
+			release();
+			return;
+		}
+		// kFramesInFlight 轮之后、且该槽位的 fence 通过后执行。
+		s_DeferredReleases.emplace_back(s_FrameNumber + kFramesInFlight, std::move(release));
 	}
 
 	void Renderer::RegisterDeviceReleaseHook(void* owner, std::function<void()> hook)
@@ -332,8 +410,6 @@ namespace World
 			if (vulkanSwapchain && state.Image)
 				vulkanSwapchain->TransitionImage(state.ImageIndex, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 			state.Swapchain->Present(state.RenderDone);
-			if (state.Queue)
-				state.Queue->WaitIdle();
 		}
 		state.Image = nullptr;
 		state.Framebuffer = nullptr;
@@ -386,14 +462,16 @@ namespace World
 			return;
 		Rhi::SubmitInfo submit;
 		submit.CommandBuffers = { commandBuffer };
+		// 用帧栅栏替代整队列 WaitIdle:GPU 完成时信号,下一轮同槽位开始前才等待。
+		const uint32_t slot = FrameSlot();
+		if (!s_FrameFences[slot])
+			s_FrameFences[slot] = m_Device->CreateFence(true);
+		submit.Fence = s_FrameFences[slot];
+		s_FrameFenceSubmitted[slot] = true;
 		state.Queue->Submit(submit);
-		state.Queue->WaitIdle();
-		if (colorTexture)
-		{
-			const auto texture = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanTexture>(colorTexture);
-			if (texture)
-				texture->TransitionTo(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-		}
+		// 场景纹理的 ShaderRead 转换已记录进场景命令缓冲(SceneRenderer::RecordSubmit),
+		// 这里不再 WaitIdle、也不再做外部转换。
+		(void)colorTexture;
 	}
 
 	void Renderer::Submit(const Ref<class Shader>& shader, const Ref<class VertexArray>& vertexArray, const  glm::mat4& transform)
