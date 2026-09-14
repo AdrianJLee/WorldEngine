@@ -370,6 +370,13 @@ namespace World
 			m_EdgeDropZone = Wui::DropZone::Center;
 			m_MovingFloat.clear();
 		}
+		// 拖拽结束且本帧未消费落点时,清除四边高亮:
+		// 否则四边预览框会残留,表现成"启动/平时自动出现一个框"。
+		if (!ctx.IsDragActive(nullptr))
+		{
+			m_EdgeDockActive = false;
+			m_EdgeDropZone = Wui::DropZone::Center;
+		}
 
 		// ---- 面板拖拽状态机:停靠面板一旦进入拖拽即"拖出"为浮动窗口 ----
 		// 拖到落点上释放会重新停靠(DockFloating*),否则保持浮动并跟随鼠标。
@@ -705,6 +712,8 @@ namespace World
 	{
 		if (m_AttachCooldownFrames > 0)
 			--m_AttachCooldownFrames;
+		// 每帧复位挂靠栏高亮,只在独立窗口真正悬停其上时点亮,避免残留。
+		m_AttachSlotHighlight = false;
 
 		// 槽位屏幕矩形(客户区 -> 屏幕):用于判断独立窗口是否停到了槽位上。
 		const glm::vec2 viewport = ctx.ViewportSize();
