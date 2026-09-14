@@ -818,6 +818,15 @@ namespace World
 		GetCursorPos(&cursor);
 		const glm::vec2 pos { static_cast<float>(cursor.x), static_cast<float>(cursor.y) };
 
+		// 拖拽指示:按光标位置显示被拖动标签的名称(主窗口客户区坐标)。
+		int mainX = 0, mainY = 0;
+		if (Application::HasInstance())
+			Application::Get().GetWindow().GetPosition(&mainX, &mainY);
+		ctx.PushOverlay();
+		Label(ctx, { pos.x - static_cast<float>(mainX) + 14.0f, pos.y - static_cast<float>(mainY) + 14.0f },
+			PanelTitle(m_CrossDragPanel), m_Theme.Text, 13.0f);
+		ctx.PopOverlay();
+
 		// 目标命中:其他独立窗口的标题栏+标签栏区域(顶部约 64px)。
 		m_CrossDragTargetKey.clear();
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
@@ -912,6 +921,10 @@ namespace World
 		callbacks.Content = [this](Wui::WuiContext& ctx, const Wui::WuiRect& rect, const std::string& id)
 		{
 			RenderPanelContent(ctx, id, rect);
+		};
+		callbacks.TabDragStart = [](const std::string& panel)
+		{
+			WLD_CORE_INFO("[float] tag drag started: {0}", panel);
 		};
 		try
 		{
