@@ -14,6 +14,9 @@ namespace World::Wui
 	public:
 		static WuiTextureRegistry& Get();
 
+		WuiTextureRegistry();
+		~WuiTextureRegistry();
+
 		uint64_t Register(const Rhi::Handle<Rhi::Texture>& texture);
 		uint64_t RegisterTexture2D(const Ref<Texture2D>& texture);
 		void Update(uint64_t id, const Rhi::Handle<Rhi::Texture>& texture);

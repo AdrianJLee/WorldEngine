@@ -172,7 +172,28 @@ set_tests_properties(World.ShaderPipeline PROPERTIES
     TIMEOUT 120
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests)
+# 渲染后端运行时热切换回归:GL↔VK 往返 ≥3 次,含 SceneRenderer 重建。
+add_executable(WorldRendererHotswapTests RendererHotswapTests.cpp)
+target_link_libraries(WorldRendererHotswapTests PRIVATE World)
+target_compile_features(WorldRendererHotswapTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldRendererHotswapTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldRendererHotswapTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldRendererHotswapTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.RendererHotswap COMMAND WorldRendererHotswapTests)
+set_tests_properties(World.RendererHotswap PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 180
+)
+
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests)
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

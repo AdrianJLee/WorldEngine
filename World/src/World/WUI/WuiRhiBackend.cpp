@@ -122,6 +122,10 @@ namespace World::Wui
 		m_ActiveTexture = nullptr;
 		for (FontFace& face : m_Faces)
 			face.AtlasTexture = nullptr;
+		// 每纹理描述符集也是设备对象:不清空会在旧设备销毁后被析构(驱动层崩溃)。
+		m_TextureSets.clear();
+		++m_TextureGeneration;
+		m_TextureChanged = true;
 		m_DeviceKey = nullptr;
 	}
 
@@ -132,6 +136,8 @@ namespace World::Wui
 			return;
 		if (device.get() == m_DeviceKey && m_Pipeline)
 			return;
+		// 设备销毁前主动释放:句柄析构必须发生在设备仍存活时。
+		Renderer::RegisterDeviceReleaseHook(this, [this] { ReleaseResources(); });
 		ReleaseResources();
 		m_DeviceKey = device.get();
 		m_IsVulkan = Renderer::GetBackendName() == "vulkan";

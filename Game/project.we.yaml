@@ -2,6 +2,6 @@ id: com.example.game
 version: 1.0.0
 content_root: assets
 start_scene: scenes/test.wd
-renderer: vulkan
+renderer: opengl
 packages:
   - packages/Base.wpak

@@ -127,6 +127,9 @@ namespace World
 		m_DepthTexture = nullptr;
 		m_RenderPass = nullptr;
 		m_CommandBuffer = nullptr;
+		m_CameraBuffer = nullptr;
+		m_GlobalDescriptorSet = nullptr;
+		m_FramebufferView = nullptr;
 		m_Device = nullptr;
 	}
 
@@ -286,3 +289,5 @@ namespace World
 		Renderer::CaptureFramebuffer(path, Rhi::FramebufferId(m_Framebuffer), m_Width, m_Height);
 	}
 }
+
+

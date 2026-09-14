@@ -380,7 +380,9 @@ namespace World
 		Renderer::Init(m_RendererChangeName);
 		if (m_SceneRenderer)
 			m_SceneRenderer->Init();
+		WLD_CORE_INFO("[switch] scene renderer rebuilt for {0}", Renderer::GetBackendName());
 		RegisterUiTextures();
+		WLD_CORE_INFO("[switch] ui textures registered");
 
 		m_ViewportSize = { 0, 0 };
 		WLD_CORE_INFO("Editor renderer switched to {0}", Renderer::GetBackendName());

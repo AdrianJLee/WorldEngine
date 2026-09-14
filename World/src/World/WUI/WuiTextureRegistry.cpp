@@ -12,6 +12,17 @@ namespace World::Wui
 		return registry;
 	}
 
+	WuiTextureRegistry::WuiTextureRegistry()
+	{
+		// 设备切换/销毁时先丢掉旧句柄,面板持有的 id 在切回后重新注册。
+		Renderer::RegisterDeviceReleaseHook(this, [this] { Clear(); });
+	}
+
+	WuiTextureRegistry::~WuiTextureRegistry()
+	{
+		Renderer::UnregisterDeviceReleaseHook(this);
+	}
+
 	uint64_t WuiTextureRegistry::Register(const Rhi::Handle<Rhi::Texture>& texture)
 	{
 		if (!texture)

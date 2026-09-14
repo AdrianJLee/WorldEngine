@@ -146,6 +146,7 @@ namespace World::Asset
 				return false;
 			}
 			stream << out.c_str();
+			stream << '\n';   // YAML 文件保持行尾换行(git 差异干净)
 			return static_cast<bool>(stream);
 		}
 		catch (const std::exception& exception)

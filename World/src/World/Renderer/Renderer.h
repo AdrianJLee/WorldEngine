@@ -48,6 +48,12 @@ namespace World
 		static bool SetRequestedRenderer(const std::string& name);
 		static std::string GetBackendName();
 		static Rhi::Handle<Rhi::Device> GetDevice() { return m_Device; }
+		// ---- 设备销毁前的释放钩子 ----
+		// 持有 RHI 句柄的子系统(WUI 后端、纹理注册表等)在这里登记释放回调:
+		// 设备销毁前回调先跑,资源的析构才能带着有效设备执行。
+		// 同一 owner 重复登记视为替换(幂等)。
+		static void RegisterDeviceReleaseHook(void* owner, std::function<void()> hook);
+		static void UnregisterDeviceReleaseHook(void* owner);
 		// set 0 全局布局(相机 UBO binding 0),由 SceneRenderer 与 Renderer2D 管线共享。
 		static Rhi::Handle<Rhi::DescriptorSetLayout> GetGlobalDescriptorSetLayout();
 		// 开发验证:把当前默认帧缓冲读回并写 PPM(渲染基线截图)。

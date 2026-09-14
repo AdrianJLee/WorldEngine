@@ -39,6 +39,7 @@ namespace World
 		Rhi::Handle<Rhi::Framebuffer> Framebuffer;
 		Rhi::Handle<Rhi::Texture> Image;
 		uint32_t ImageIndex = 0;
+		void* QueueDevice = nullptr;   // 队列所属设备(切换后端时校验)
 	};
 
 	namespace
@@ -47,12 +48,21 @@ namespace World
 		PresentTarget* s_ActivePresent = &s_MainPresent;
 		std::vector<std::unique_ptr<PresentTarget>> s_AuxPresent;
 
+		// 刻意用堆分配且不析构:避免静态析构顺序导致退出期访问已销毁的容器。
+		std::vector<std::pair<void*, std::function<void()>>>& DeviceReleaseHooks()
+		{
+			static auto* hooks = new std::vector<std::pair<void*, std::function<void()>>>();
+			return *hooks;
+		}
+
 		void ReleasePresentState(PresentTarget& state)
 		{
 			state.Framebuffers.clear();
 			state.Framebuffer = nullptr;
 			state.Image = nullptr;
 			state.Swapchain = nullptr;
+			// 队列/信号量都属于设备:漏掉任何一个都会在切换后端后用到已销毁设备。
+			state.Queue = nullptr;
 			state.ImageReady = nullptr;
 			state.RenderDone = nullptr;
 			state.Dirty = true;
@@ -82,7 +92,11 @@ namespace World
 		const Rhi::Backend requestedBackend =
 			backend == "vulkan" ? Rhi::Backend::Vulkan : Rhi::Backend::OpenGL;
 		std::string error;
-		m_Device = Rhi::CreateDevice(requestedBackend, {}, &error);
+		Rhi::DeviceDesc deviceDesc;
+		// 开发期可选:WLD_VULKAN_VALIDATION=1 打开验证层(仅当层可用)。
+		if (const char* validation = std::getenv("WLD_VULKAN_VALIDATION"))
+			deviceDesc.EnableValidation = validation[0] != '0';
+		m_Device = Rhi::CreateDevice(requestedBackend, deviceDesc, &error);
 		if (!m_Device)
 		{
 			WLD_CORE_WARN("Requested backend '{0}' unavailable ({1}); falling back to OpenGL",
@@ -105,11 +119,27 @@ namespace World
 	void Renderer::Shutdown()
 	{
 		WLD_PROFILE_FUNCTION();
+		// 设备销毁前先让持有句柄的子系统释放资源(否则它们的析构会用到已销毁设备)。
+		{
+			auto hooks = DeviceReleaseHooks();
+			for (auto& [owner, hook] : hooks)
+			{
+				if (hook)
+					hook();
+			}
+		}
 		Renderer2D::Shutdown();
 		s_GlobalDescriptorSetLayout = nullptr;
 		s_PresentPass = nullptr;
+		// 主窗口与独立窗口的呈现目标保留对象本身(宿主持有 PresentTarget*),
+		// 只释放随设备生存的交换链/画面/信号量,并标记为需要重建。
 		ReleasePresentState(s_MainPresent);
-		s_AuxPresent.clear();
+		s_MainPresent.Dirty = true;
+		for (const std::unique_ptr<PresentTarget>& target : s_AuxPresent)
+		{
+			ReleasePresentState(*target);
+			target->Dirty = true;
+		}
 		s_ActivePresent = &s_MainPresent;
 		m_Device = nullptr;
 		s_BackendName = "opengl";
@@ -124,6 +154,33 @@ namespace World
 	std::string Renderer::GetBackendName()
 	{
 		return s_BackendName;
+	}
+
+	void Renderer::RegisterDeviceReleaseHook(void* owner, std::function<void()> hook)
+	{
+		auto& hooks = DeviceReleaseHooks();
+		for (auto& [key, existing] : hooks)
+		{
+			if (key == owner)
+			{
+				existing = std::move(hook);
+				return;
+			}
+		}
+		hooks.emplace_back(owner, std::move(hook));
+	}
+
+	void Renderer::UnregisterDeviceReleaseHook(void* owner)
+	{
+		auto& hooks = DeviceReleaseHooks();
+		for (auto it = hooks.begin(); it != hooks.end(); ++it)
+		{
+			if (it->first == owner)
+			{
+				hooks.erase(it);
+				return;
+			}
+		}
 	}
 
 	Rhi::Handle<Rhi::DescriptorSetLayout> Renderer::GetGlobalDescriptorSetLayout()
@@ -229,6 +286,7 @@ namespace World
 			swapDesc.DebugName = state.IsMain ? "MainSwapchain" : "AuxSwapchain";
 			state.Swapchain = m_Device->CreateSwapchain(swapDesc);
 			state.Queue = m_Device->CreateQueue("Present");
+			state.QueueDevice = m_Device.get();
 			state.ImageReady = m_Device->CreateSemaphore();
 			state.RenderDone = m_Device->CreateSemaphore();
 		}
@@ -323,7 +381,8 @@ namespace World
 		if (s_BackendName != "vulkan")
 			return; // OpenGL 立即模式
 		PresentTarget& state = s_ActivePresent ? *s_ActivePresent : s_MainPresent;
-		if (!state.Queue)
+		// 设备切换后队列属于旧设备:必须等 BeginFramePresent 重建后再提交。
+		if (!state.Queue || state.QueueDevice != m_Device.get())
 			return;
 		Rhi::SubmitInfo submit;
 		submit.CommandBuffers = { commandBuffer };
@@ -443,3 +502,4 @@ namespace World
 		WLD_CORE_INFO("[capture] wrote default framebuffer {0} ({1}x{2})", path.string(), width, height);
 	}
 }
+
