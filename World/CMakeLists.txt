@@ -176,7 +176,7 @@ target_link_libraries(World PRIVATE
     Glad
     opengl32
     # WindowsWindow/WindowsPlatformUtils 的 IME 接口(ImmGetContext 等);
-    # 此前由 vendor/imgui 的 CMake 传递链接,剔除 ImGui 后需显式声明。
+    # 此前由已移除的第三方 UI 依赖传递链接,现需显式声明。
     imm32
     sol2
     yaml-cpp
