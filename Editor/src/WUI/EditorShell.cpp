@@ -217,6 +217,17 @@ namespace World
 	void EditorShell::TogglePanel(Wui::WuiContext& ctx, const std::string& panel)
 	{
 		const std::string before = m_Layout.Serialize();
+		// 已附加到主窗口(标签切换状态):菜单点击 = 关闭该窗口,
+		// 隐藏其面板并把标签移出栏(此前只调 HideFloatPanel,会残留附加标签)。
+		const auto attached = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
+		if (attached != m_AttachedPanels.end())
+		{
+			CloseFloatWindow(panel, true, &ctx);
+			m_AttachedPanels.erase(attached);
+			if (m_ActiveWindowTag == panel)
+				m_ActiveWindowTag.clear();
+			return;
+		}
 		if (m_Layout.IsFloating(panel))
 		{
 			// 隐藏独立窗口内的该面板:它只是窗口的一个标签,窗口可继续承载其它面板。
