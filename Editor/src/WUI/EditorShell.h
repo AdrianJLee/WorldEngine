@@ -137,6 +137,10 @@ namespace World
 		// 已附加到主窗口的独立窗口(标签切换关系):"" = 主界面。
 		std::vector<std::string> m_AttachedPanels;
 		std::string m_ActiveWindowTag;
+		// 附加标签的拖动状态:按下 / 正在拖 / 按下位置。
+		std::string m_AttachTagPress;
+		std::string m_AttachTagDrag;
+		glm::vec2 m_AttachTagPressPos { 0, 0 };
 		int m_AttachCooldownFrames = 0; // 挂靠后短暂抑制"拖出",避免同一次拖拽再次浮出
 		std::string m_TabDragPanel;     // 本次拖拽真正起手于哪个标签页(tab 按下)
 		std::string m_CrossDragPanel;   // 正在跨窗口拖动的标签面板

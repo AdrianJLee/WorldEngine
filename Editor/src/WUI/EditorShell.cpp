@@ -677,8 +677,11 @@ namespace World
 		}
 		x += 4.0f;
 
-		// 已附加的独立窗口标签:点击切换显示其内容,× 分离回独立窗口。
-		std::string detachRequest;
+		// 已附加的独立窗口标签:点击切换;× 关闭该窗口;按住可拖出为独立窗口;
+		// 多个附加窗口之间可左右拖动换位。
+		std::string closeRequest;
+		struct AttachTagHit { std::string Panel; Wui::WuiRect Rect; };
+		std::vector<AttachTagHit> tagHits;
 		for (const std::string& panel : m_AttachedPanels)
 		{
 			const bool active = m_ActiveWindowTag == panel;
@@ -703,19 +706,76 @@ namespace World
 			if (ctx.IsClicked(tab) && !ctx.IsHovered(close))
 				m_ActiveWindowTag = panel;
 			if (ctx.IsClicked(close))
-				detachRequest = panel;
+				closeRequest = panel;
+			// 按下(非关闭键)记录起点;移动超过阈值进入拖动。
+			if (ctx.Input().MouseDown[0] && ctx.IsHovered(tab) && !ctx.IsHovered(close)
+				&& m_AttachTagDrag.empty())
+			{
+				m_AttachTagPress = panel;
+				m_AttachTagPressPos = ctx.Input().MousePos;
+			}
+			if (m_AttachTagPress == panel && m_AttachTagDrag.empty() && ctx.Input().MouseDown[0]
+				&& glm::length(ctx.Input().MousePos - m_AttachTagPressPos) > 6.0f)
+				m_AttachTagDrag = panel;
+			if (m_AttachTagDrag == panel)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, tab, m_Theme.Accent, 2.0f, 2.0f });
+			tagHits.push_back({ panel, tab });
 			x += 144.0f;
 		}
-		if (!detachRequest.empty())
+
+		if (!closeRequest.empty())
 		{
-			// 分离:恢复为独立 OS 窗口(切换回主界面)。
-			if (FloatWindowHost* host = FindFloatHost(detachRequest))
-				host->SetHidden(false);
-			m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), detachRequest),
+			// × = 关闭:隐藏该窗口的面板(可从 Window 菜单重新打开),并把标签移出栏。
+			CloseFloatWindow(closeRequest, true, &ctx);
+			m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), closeRequest),
 				m_AttachedPanels.end());
-			if (m_ActiveWindowTag == detachRequest)
+			if (m_ActiveWindowTag == closeRequest)
 				m_ActiveWindowTag.clear();
 		}
+		// 拖动结束:在栏内 → 换位;在栏外 → 拖出为独立窗口。
+		if (!m_AttachTagDrag.empty() && ctx.Input().MouseReleased[0])
+		{
+			const std::string dragged = m_AttachTagDrag;
+			if (ctx.IsHovered(bar))
+			{
+				size_t target = m_AttachedPanels.size();
+				for (size_t i = 0; i < tagHits.size(); ++i)
+					if (ctx.Input().MousePos.x < tagHits[i].Rect.X + tagHits[i].Rect.W * 0.5f)
+					{
+						target = i;
+						break;
+					}
+				const auto current = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), dragged);
+				if (current != m_AttachedPanels.end())
+				{
+					const size_t from = static_cast<size_t>(current - m_AttachedPanels.begin());
+					m_AttachedPanels.erase(current);
+					if (target > from && target > 0)
+						--target;
+					m_AttachedPanels.insert(m_AttachedPanels.begin()
+						+ static_cast<std::ptrdiff_t>(std::min(target, m_AttachedPanels.size())), dragged);
+				}
+			}
+			else if (FloatWindowHost* host = FindFloatHost(dragged))
+			{
+				// 拖出:恢复为独立窗口,窗口放到光标附近(屏幕坐标)。
+				int mainX = 0, mainY = 0;
+				if (Application::HasInstance())
+					Application::Get().GetWindow().GetPosition(&mainX, &mainY);
+				host->SetScreenPosition(static_cast<float>(mainX) + ctx.Input().MousePos.x - 60.0f,
+					static_cast<float>(mainY) + ctx.Input().MousePos.y - 12.0f);
+				host->SetHidden(false);
+				m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), dragged),
+					m_AttachedPanels.end());
+				if (m_ActiveWindowTag == dragged)
+					m_ActiveWindowTag.clear();
+				ctx.RecordOp("float", "detach", dragged, "");
+			}
+			m_AttachTagPress.clear();
+			m_AttachTagDrag.clear();
+		}
+		if (!ctx.Input().MouseDown[0] && m_AttachTagDrag.empty())
+			m_AttachTagPress.clear();
 		if (ctx.Input().MouseDown[0] && ctx.IsHovered(bar) && !ctx.IsHovered({ 0, 0, x, bar.H })
 			&& !ctx.IsHovered({ bar.X + bar.W - 102.0f, bar.Y, 102.0f, bar.H }))
 			Application::Get().GetWindow().BeginSystemDrag();
