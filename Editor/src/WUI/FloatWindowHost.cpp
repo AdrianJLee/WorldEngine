@@ -245,7 +245,9 @@ namespace World
 				const Wui::WuiRect tab { x, tabTop + 2.0f, width, tabH - 2.0f };
 				const Wui::WuiRect close { tab.X + tab.W - 18.0f, tab.Y + 4.0f, 14.0f, 14.0f };
 				// 标签按下:记录来源,拖动超过阈值后发出拖拽请求。
-				if (!m_TabDragActive && ctx.Input().MouseDown[0] && m_PressSeenInWindow
+				// 只在"按下的那一帧"记录起点:若每帧都记录,起点会跟着光标走,
+				// 阈值永远不成立(表现就是"只有光标快离开标签时才动")。
+				if (!m_TabDragActive && m_PressSeenInWindow && ctx.Input().MouseClicked[0]
 					&& ctx.IsHovered(tab) && !ctx.IsHovered(close))
 				{
 					m_TabPressArmed = true;
@@ -287,7 +289,7 @@ namespace World
 			m_Window->MaximizeOrRestore();
 		else if (control == Wui::WindowControl::Close)
 			m_Window->SetShouldClose(true);
-		else if (!m_TabDragActive && ctx.Input().MouseDown[0] && m_PressSeenInWindow
+		else if (!m_TabDragActive && ctx.Input().MouseClicked[0] && m_PressSeenInWindow
 			&& ctx.IsHovered({ lastTabEnd, tabTop,
 				std::max(0.0f, area.W - lastTabEnd - 110.0f), tabH }))
 		{
