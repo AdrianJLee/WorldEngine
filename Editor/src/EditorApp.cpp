@@ -1,5 +1,6 @@
 #include "World.h"
 #include "EditorCooker.h"
+#include "EditorStartup.h"
 #include "EditorLayer.h"
 
 // 这个文件是整个 Editor 程序的入口，定义了 EditorApp 类并实现了 CreateApplication 函数
@@ -38,7 +39,7 @@ namespace World
 			// 渲染后端切换后的自动重启会把当前场景带回来。
 			if (arguments[i] == "-scene")
 			{
-				SetEnvironmentVariableA("WLD_START_SCENE", arguments[i + 1].c_str());
+				World::Editor::SetStartupScenePath(arguments[i + 1]);
 				continue;
 			}
 			if (arguments[i] != "--cook")

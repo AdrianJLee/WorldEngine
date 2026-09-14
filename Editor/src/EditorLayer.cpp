@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 #include "EditorCooker.h"
+#include "EditorStartup.h"
 #include "World/Core/Asset/BuiltinImporters.h"
 #include "World/Core/Asset/CookPipeline.h"
 #include "World/Core/Asset/ProjectManifest.h"
@@ -52,8 +53,12 @@ namespace World
 		LoadIconTextures();
 		RegisterUiTextures();
 
-		// 诊断/自动化:WLD_START_SCENE=<路径> 时启动即打开该场景。
-		if (const char* startScene = std::getenv("WLD_START_SCENE"))
+		// 启动场景来源:-scene 参数(进程内传递,优先)或 WLD_START_SCENE 环境变量。
+		std::string startScene = World::Editor::StartupScenePath();
+		if (startScene.empty())
+			if (const char* fromEnvironment = std::getenv("WLD_START_SCENE"))
+				startScene = fromEnvironment;
+		if (!startScene.empty())
 		{
 			const std::filesystem::path startupPath(startScene);
 			WLD_CORE_INFO("Startup scene requested: {0}", startupPath.string());
