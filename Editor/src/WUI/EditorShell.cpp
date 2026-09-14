@@ -644,29 +644,25 @@ namespace World
 			return;
 		}
 
-		// 主窗口自己的全局标签栏:停靠面板(树序)每个一个标签,点击激活。
-		std::vector<Wui::PanelId> docked;
-		m_Layout.AllPanels(&docked);
+		// 标签栏只列出"窗口":主窗口 + 各独立窗口(不是停靠面板)。
 		float x = bar.X + 6.0f;
-		for (const Wui::PanelId& panel : docked)
 		{
-			const bool active = m_Layout.IsActive(panel);
-			const Wui::WuiRect tab { x, bar.Y + 3.0f, 118.0f, bar.H - 6.0f };
+			const Wui::WuiRect tab { x, bar.Y + 3.0f, 90.0f, bar.H - 6.0f };
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.PanelBg, 2.0f });
+			Label(ctx, { tab.X + 7.0f, tab.Y + 4.0f }, "Main", m_Theme.Text, 13.0f);
 			if (ctx.IsHovered(tab))
 			{
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.ButtonHover, 2.0f });
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 			}
-			else if (active)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.PanelBg, 2.0f });
-			Label(ctx, { tab.X + 7.0f, tab.Y + 4.0f }, PanelTitle(panel),
-				active ? m_Theme.Text : m_Theme.TextMuted, 13.0f);
 			if (ctx.IsClicked(tab))
-				m_Layout.Activate(panel);
-			x += 122.0f;
+			{
+				if (Application::HasInstance())
+					Application::Get().GetWindow().Focus();
+			}
+			x += 96.0f;
 		}
-		if (!docked.empty())
-			x += 6.0f;
+		x += 4.0f;
 
 		// 独立窗口以"标签"形式显示在栏上(与独立窗口自身的标签栏同款):
 		// 点击聚焦;标签右侧 x 隐藏该窗口的全部面板;整栏是挂靠落点。
@@ -700,8 +696,8 @@ namespace World
 				hideRequest = panel;
 			x += tab.W + 4.0f;
 		}
-		if (docked.empty() && m_FloatHosts.empty())
-			Label(ctx, { bar.X + 10, bar.Y + 5 }, "把面板/独立窗口拖到这条栏上即可停靠或挂靠", m_Theme.TextMuted, 13.0f);
+		if (m_FloatHosts.empty())
+			Label(ctx, { x + 2.0f, bar.Y + 5 }, "把独立窗口标签拖到这里即可挂靠", m_Theme.TextMuted, 13.0f);
 		if (!hideRequest.empty())
 		{
 			// 隐藏该窗口承载的全部面板(bar 上的 x = 关闭整个独立窗口)。
