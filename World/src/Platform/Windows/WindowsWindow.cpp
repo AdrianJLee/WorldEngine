@@ -1,4 +1,4 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "WindowsWindow.h"
 
 #include "World/Events/KeyEvent.h"
@@ -114,7 +114,7 @@ namespace World
 
 				WindowResizeEvent event(width, height);
 				// event作为EventCallback存储函数的参数
-				data.EventCallback(event);
+				if (data.EventCallback) data.EventCallback(event);
 
 			});
 
@@ -122,7 +122,7 @@ namespace World
 			{
 				WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
 				WindowCloseEvent event;
-				data.EventCallback(event);
+				if (data.EventCallback) data.EventCallback(event);
 			});
 
 		glfwSetKeyCallback(m_Window, [](GLFWwindow* window, int key, int scancode, int action, int mods)
@@ -133,19 +133,19 @@ namespace World
 					case GLFW_PRESS:
 					{
 						KeyPressedEvent event(key, 0);
-						data.EventCallback(event);
+						if (data.EventCallback) data.EventCallback(event);
 						break;
 					}
 					case GLFW_RELEASE:
 					{
 						KeyReleasedEvent event(key);
-						data.EventCallback(event);
+						if (data.EventCallback) data.EventCallback(event);
 						break;
 					}
 					case GLFW_REPEAT:
 					{
 						KeyPressedEvent event(key, 1);
-						data.EventCallback(event);
+						if (data.EventCallback) data.EventCallback(event);
 						break;
 					}
 				}
@@ -156,7 +156,7 @@ namespace World
 			{
 				WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
 				KeyTypedEvent event(keycode);
-				data.EventCallback(event);
+				if (data.EventCallback) data.EventCallback(event);
 			});
 
 		glfwSetMouseButtonCallback(m_Window, [](GLFWwindow* window, int button, int action, int mods)
@@ -167,13 +167,13 @@ namespace World
 					case GLFW_PRESS:
 					{
 						MouseButtonPressedEvent event(button);
-						data.EventCallback(event);
+						if (data.EventCallback) data.EventCallback(event);
 						break;
 					}
 					case GLFW_RELEASE:
 					{
 						MouseButtonReleasedEvent event(button);
-						data.EventCallback(event);
+						if (data.EventCallback) data.EventCallback(event);
 						break;
 					}
 				}
@@ -183,14 +183,14 @@ namespace World
 			{
 				WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
 				MouseScrolledEvent event((float)xOffset, (float)yOffset);
-				data.EventCallback(event);
+				if (data.EventCallback) data.EventCallback(event);
 			});
 
 		glfwSetCursorPosCallback(m_Window, [](GLFWwindow* window, double xPos, double yPos)
 			{
 				WindowData& data = *(WindowData*)glfwGetWindowUserPointer(window);
 				MouseMovedEvent event((float)xPos, (float)yPos);
-				data.EventCallback(event);
+				if (data.EventCallback) data.EventCallback(event);
 			});
 
 	}
@@ -201,28 +201,36 @@ namespace World
 
 		// 第三方输入法(如搜狗)会在进程退出时由系统回调其清理代码并可能崩溃。
 		// 在销毁窗口前禁用线程 IME 并泵空消息,让输入法先完成解挂。
-		if (const HWND hwnd = glfwGetWin32Window(m_Window))
+		// 注意:仅主窗口这么做。附加窗口的销毁发生在主窗口的一帧渲染内部,
+		// 此时泵消息会把消息重入分发回主窗口(正在渲染/正在改容器),导致崩溃。
+		const bool skipIme = std::getenv("WLD_SKIP_IME_SHUTDOWN") != nullptr;
+		if (!skipIme && !m_Auxiliary)
 		{
-			ImmAssociateContext(hwnd, nullptr);
-			ImmDisableIME(GetCurrentThreadId());
+			if (const HWND hwnd = glfwGetWin32Window(m_Window))
+			{
+				ImmAssociateContext(hwnd, nullptr);
+				ImmDisableIME(GetCurrentThreadId());
+			}
 		}
 		MSG message {};
-		while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
-		{
-			TranslateMessage(&message);
-			DispatchMessageW(&message);
-		}
+		if (!m_Auxiliary)
+			while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+			{
+				TranslateMessage(&message);
+				DispatchMessageW(&message);
+			}
 
 		delete m_Context;
 		m_Context = nullptr;
 		glfwDestroyWindow(m_Window);
 		m_Window = nullptr;
 
-		while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
-		{
-			TranslateMessage(&message);
-			DispatchMessageW(&message);
-		}
+		if (!m_Auxiliary)
+			while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+			{
+				TranslateMessage(&message);
+				DispatchMessageW(&message);
+			}
 	}
 
 	void WindowsWindow::OnUpdate()
@@ -304,6 +312,16 @@ namespace World
 	void WindowsWindow::Focus()
 	{
 		glfwFocusWindow(m_Window);
+	}
+
+	void WindowsWindow::SetVisible(bool visible)
+	{
+		if (!m_Window)
+			return;
+		if (visible)
+			glfwShowWindow(m_Window);
+		else
+			glfwHideWindow(m_Window);
 	}
 
 	void WindowsWindow::BeginSystemDrag()

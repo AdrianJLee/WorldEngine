@@ -762,10 +762,17 @@ namespace World
 		for (size_t i = 0; i < m_FloatHosts.size(); )
 		{
 			FloatWindowHost& host = *m_FloatHosts[i];
-			// 不变量:宿主至少承载一个面板;空宿主属于已关闭窗口,直接移除。
+			// 隐藏的宿主(复用中)不渲染。
+			if (host.IsHidden())
+			{
+				++i;
+				continue;
+			}
+			// 空宿主:隐藏保留(运行期销毁窗口在 Vulkan 下会崩),等待下次复用。
 			if (host.Panels().empty())
 			{
-				EraseFloatHost(&host);
+				host.SetHidden(true);
+				++i;
 				continue;
 			}
 			bool alive = true;
@@ -895,7 +902,7 @@ namespace World
 			source->RemovePanel(panel);
 			target->AddPanel(panel, true);
 			if (source->Empty())
-				EraseFloatHost(source);
+				source->SetHidden(true); // 复用:隐藏而非销毁
 			if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
 				entry->Rect = target->ScreenRect();
 			ctx.RecordOp("float", "attach", panel, m_CrossDragTargetKey);
@@ -945,6 +952,17 @@ namespace World
 	{
 		WLD_CORE_INFO("[float] AddFloatWindow panel={0} origin={1} rect=({2},{3},{4},{5})",
 			panel, origin, screenRect.X, screenRect.Y, screenRect.W, screenRect.H);
+		// 复用已隐藏的独立窗口:运行期销毁窗口在 Vulkan 下会崩,因此"关闭/挂靠"只隐藏。
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+		{
+			if (!host->IsHidden())
+				continue;
+			host->SetScreenPosition(screenRect.X, screenRect.Y);
+			host->AddPanel(panel, true);
+			host->SetHidden(false);
+			WLD_CORE_INFO("[float] reused hidden window for panel={0}", panel);
+			return;
+		}
 		// 独立窗口 = 容器 + 标签栏;标题与内容由面板注册表提供,容器不感知具体面板类型。
 		FloatWindowHost::Callbacks callbacks;
 		callbacks.Theme = m_Theme;
@@ -971,7 +989,18 @@ namespace World
 	std::string EditorShell::IndependentWindowPanel(size_t index) const
 	{
 		// 返回该窗口的代表面板(活动标签);调用方以它定位窗口(焦点/收回/挂靠)。
-		return index < m_FloatHosts.size() ? m_FloatHosts[index]->Panel() : std::string();
+		if (index >= m_FloatHosts.size() || m_FloatHosts[index]->IsHidden())
+			return std::string();
+		return m_FloatHosts[index]->Panel();
+	}
+
+	size_t EditorShell::IndependentWindowCount() const
+	{
+		size_t count = 0;
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+			if (!host->IsHidden())
+				++count;
+		return count;
 	}
 
 	std::string EditorShell::IndependentWindowLabel(size_t index) const
@@ -1024,7 +1053,9 @@ namespace World
 		const Wui::WuiRect rect = host->ScreenRect();
 		for (const std::string& id : panels)
 			m_LastFloatRects[id] = rect;
-		EraseFloatHost(host);
+		for (const std::string& id : panels)
+			host->RemovePanel(id);
+		host->SetHidden(true); // 复用:隐藏而非销毁(运行期销毁窗口会崩)
 
 		const Wui::PanelId anchor = m_Layout.FirstPanel();
 		for (const std::string& id : panels)
@@ -1047,7 +1078,9 @@ namespace World
 		const Wui::WuiRect rect = host->ScreenRect();
 		for (const std::string& id : panels)
 			m_LastFloatRects[id] = rect;
-		EraseFloatHost(host);
+		for (const std::string& id : panels)
+			host->RemovePanel(id);
+		host->SetHidden(true); // 复用:隐藏而非销毁
 
 		const Wui::PanelId slot = "attach_slot";
 		const Wui::PanelId anchor = m_Layout.Contains(slot) ? slot : m_Layout.FirstPanel();
@@ -1094,7 +1127,7 @@ namespace World
 			m_LastFloatRects[panel] = rect;
 			host->RemovePanel(panel);
 			if (host->Empty())
-				EraseFloatHost(host);
+				host->SetHidden(true); // 复用:隐藏而非销毁
 		}
 		m_LastFloatScreenRects.erase(panel);
 		// 宿主不存在时也清掉浮动记录(保持"隐藏即从布局移除"的旧语义)。
@@ -1116,7 +1149,9 @@ namespace World
 		}
 		const std::vector<std::string> panels = host->Panels();
 		const Wui::WuiRect rect = host->ScreenRect();
-		EraseFloatHost(host);
+		for (const std::string& id : panels)
+			host->RemovePanel(id);
+		host->SetHidden(true); // 复用:隐藏而非销毁
 		bool changed = false;
 		for (const std::string& id : panels)
 		{

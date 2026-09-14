@@ -59,7 +59,7 @@ namespace World
 		uint64_t GetSceneTextureId() const override;
 		// ---- 独立窗口(与停靠面板不同的组件)----
 		// 计数/索引均按"窗口"而不是"面板":一个窗口可承载多个面板(标签栏)。
-		size_t IndependentWindowCount() const override { return m_FloatHosts.size(); }
+		size_t IndependentWindowCount() const override;
 		std::string IndependentWindowPanel(size_t index) const override;
 		std::string IndependentWindowLabel(size_t index) const override;
 		void FocusIndependentWindow(const std::string& panel) override;

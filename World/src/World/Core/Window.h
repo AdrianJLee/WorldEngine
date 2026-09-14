@@ -58,6 +58,8 @@ namespace World
 		virtual bool ShouldClose() const = 0;
 		virtual void SetShouldClose(bool shouldClose) = 0;
 		virtual void Focus() = 0;
+		// 显示/隐藏窗口(独立窗口复用:避免运行期销毁窗口)。
+		virtual void SetVisible(bool visible) = 0;
 		// 无边框窗口自定义标题栏:让系统进入"窗口移动"循环。
 		virtual void BeginSystemDrag() = 0;
 		// 运行时切换无边框(去掉系统标题栏),并安装边缘缩放的命中测试。

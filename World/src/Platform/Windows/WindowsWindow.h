@@ -34,6 +34,7 @@ namespace World
 		bool ShouldClose() const override;
 		void SetShouldClose(bool shouldClose) override;
 		void Focus() override;
+		void SetVisible(bool visible) override;
 		void BeginSystemDrag() override;
 		void SetFrameless(bool frameless) override;
 		void Minimize() override;

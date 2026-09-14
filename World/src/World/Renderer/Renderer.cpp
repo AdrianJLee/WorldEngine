@@ -189,6 +189,10 @@ namespace World
 		auto* state = static_cast<PresentTarget*>(target);
 		if (s_ActivePresent == state)
 			s_ActivePresent = &s_MainPresent;
+		// 销毁独立窗口的交换链前先等 GPU 空闲:该窗口可能刚提交过帧,
+		// 直接释放会让 Vulkan 在仍有在途工作时销毁资源(访问违例)。
+		if (m_Device)
+			m_Device->WaitIdle();
 		ReleasePresentState(*state);
 		s_AuxPresent.erase(std::remove_if(s_AuxPresent.begin(), s_AuxPresent.end(),
 			[state](const std::unique_ptr<PresentTarget>& candidate) { return candidate.get() == state; }),

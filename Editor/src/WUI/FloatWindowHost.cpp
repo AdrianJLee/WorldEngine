@@ -48,7 +48,13 @@ namespace World
 
 	FloatWindowHost::~FloatWindowHost()
 	{
-		if (m_Target)
+		// 先断开事件回调:GLFW 在销毁窗口时会派发消息,若回调仍指向正在析构的
+		// 本对象(或其成员),会造成访问违例。
+		if (m_Window)
+			m_Window->SetEventCallback(Window::EventCallbackFn {});
+		// 诊断开关:WLD_FLOAT_LEAK_TARGET 跳过呈现目标销毁,用于区分
+		// "交换链销毁"与"窗口销毁"两类崩溃来源。
+		if (m_Target && !std::getenv("WLD_FLOAT_LEAK_TARGET"))
 			Renderer::DestroyPresentTarget(m_Target);
 		delete m_Window;
 	}
@@ -57,6 +63,8 @@ namespace World
 	{
 		if (!m_Window)
 			return false;
+		if (m_Hidden)
+			return true; // 已隐藏(复用中):不渲染、不处理输入
 		if (std::getenv("WLD_FLOAT_NO_RENDER"))
 			return true; // 诊断:只创建窗口,不渲染内容
 		if (m_Window->ShouldClose())
@@ -115,6 +123,25 @@ namespace World
 	{
 		if (m_Window)
 			m_Window->SetPosition(static_cast<int>(x), static_cast<int>(y));
+	}
+
+	void FloatWindowHost::SetHidden(bool hidden)
+	{
+		m_Hidden = hidden;
+		if (!m_Window)
+			return;
+		m_PressSeenInWindow = false;
+		m_TabPressArmed = false;
+		m_PressedTab.clear();
+		if (hidden)
+		{
+			m_Window->SetVisible(false);
+		}
+		else
+		{
+			m_Window->SetShouldClose(false);
+			m_Window->SetVisible(true);
+		}
 	}
 
 	void FloatWindowHost::Focus()
@@ -293,8 +320,10 @@ namespace World
 			&& ctx.IsHovered({ lastTabEnd, tabTop,
 				std::max(0.0f, area.W - lastTabEnd - 110.0f), tabH }))
 		{
-			WLD_CORE_INFO("[diag] empty area -> BeginSystemDrag");
-			m_Window->BeginSystemDrag();
+			// 空白区与标签统一:走同一条"按住即跟随 + 实时高亮目标"的自定义拖拽。
+			m_PressedTab = m_Panels.empty() ? std::string() : m_Panels.front();
+			m_TabPressArmed = true;
+			m_TabPressPos = ctx.Input().MousePos;
 		}
 
 		// 拖拽阈值:按下后移动超过 4px 即发起一次跨窗口拖拽请求。
@@ -307,12 +336,14 @@ namespace World
 			}
 			else if (glm::length(ctx.Input().MousePos - m_TabPressPos) > 2.0f)
 			{
-				WLD_CORE_INFO("[diag] tab threshold -> BeginSystemDrag (moved {0})",
+				WLD_CORE_INFO("[diag] tab threshold -> cross drag (moved {0})",
 					glm::length(ctx.Input().MousePos - m_TabPressPos));
 				m_TabPressArmed = false;
-				// 标签按住拖动 = 移动窗口(与空白区一致,系统级 SC_MOVE 拖动)。
-				// 跨窗口附加/挂靠仍通过"把窗口拖到主窗口顶栏自动挂靠"实现。
-				m_Window->BeginSystemDrag();
+				// 自定义拖拽:窗口每帧跟随光标(不阻塞主循环),因此拖动期间
+				// 主窗口能实时高亮挂靠栏;松手时按落点挂靠/附加/留在原地。
+				m_PendingTabDrag = m_PressedTab;
+				if (m_Callbacks.TabDragStart)
+					m_Callbacks.TabDragStart(m_PressedTab);
 				m_PressedTab.clear();
 			}
 		}

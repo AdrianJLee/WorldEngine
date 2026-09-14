@@ -56,6 +56,9 @@ namespace World
 		void SetTabDropHighlight(bool highlighted) { m_TabDropHighlight = highlighted; }
 		// 跨窗口拖拽期间置位:抑制本窗口的标签按下与空区系统拖动,避免叠加。
 		void SetTabDragActive(bool active) { m_TabDragActive = active; }
+		// 隐藏/复用:关闭或挂靠时隐藏窗口而不是销毁(运行期销毁在 Vulkan 下会崩)。
+		bool IsHidden() const { return m_Hidden; }
+		void SetHidden(bool hidden);
 
 		// 渲染该独立窗口;返回 false 表示 OS 窗口已关闭(其全部面板应隐藏)。
 		bool Render();
@@ -84,6 +87,7 @@ namespace World
 		// 避免主窗口拖动时,经过本窗口的"悬空按键"被误当成新的拖拽。
 		bool m_PressSeenInWindow = false;
 		bool m_TabDragActive = false;
+		bool m_Hidden = false;
 		Callbacks m_Callbacks;
 		Window* m_Window = nullptr;
 		PresentTarget* m_Target = nullptr;
