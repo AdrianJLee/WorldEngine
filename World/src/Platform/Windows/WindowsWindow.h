@@ -46,7 +46,9 @@ namespace World
 		virtual void Shutdown();
 	private:
 		GLFWwindow* m_Window;
-		class GraphicsContext* m_Context;
+		// 必须初始化为空:Vulkan 附加窗口不创建 GL 上下文,
+		// 否则 Shutdown 里的 delete m_Context 会释放野指针(销毁窗口即崩)。
+		class GraphicsContext* m_Context = nullptr;
 		// 附加窗口:GL 共享上下文,不拥有 GLFW 初始化;Vulkan 窗口不建 GL 上下文。
 		bool m_Auxiliary = false;
 		bool m_HasGLContext = true;

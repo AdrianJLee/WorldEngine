@@ -379,8 +379,6 @@ namespace World
 			}
 			else if (glm::length(ctx.Input().MousePos - m_TabPressPos) > 2.0f)
 			{
-				WLD_CORE_INFO("[diag] tab threshold -> cross drag (moved {0})",
-					glm::length(ctx.Input().MousePos - m_TabPressPos));
 				m_TabPressArmed = false;
 				// 自定义拖拽:窗口每帧跟随光标(不阻塞主循环),因此拖动期间
 				// 主窗口能实时高亮挂靠栏;松手时按落点挂靠/附加/留在原地。

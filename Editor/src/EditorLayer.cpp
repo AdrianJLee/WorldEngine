@@ -85,6 +85,8 @@ namespace World
 			m_SceneRenderer->Shutdown();
 			m_SceneRenderer.reset();
 		}
+		// 独立窗口(含附加状态)必须先于 RHI 设备/主窗口销毁,否则关闭引擎时会崩。
+		m_Shell.ReleaseIndependentWindows();
 		ExportOperationLog();
 	}
 

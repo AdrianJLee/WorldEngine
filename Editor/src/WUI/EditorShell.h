@@ -32,6 +32,8 @@ namespace World
 		explicit EditorShell(EditorLayer& editor);
 		~EditorShell();
 		void OnRender(Wui::WuiContext& ctx);
+		// 退出前释放独立窗口(释放其呈现目标/OS 窗口,必须在 RHI 设备销毁前调用)。
+		void ReleaseIndependentWindows();
 		Wui::WuiRect ViewportRect() const { return m_ViewportRect; }
 
 		// ---- PanelHost ----

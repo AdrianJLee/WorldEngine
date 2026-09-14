@@ -87,6 +87,18 @@ namespace World
 
 	EditorShell::~EditorShell() = default;
 
+	void EditorShell::ReleaseIndependentWindows()
+	{
+		// 退出时先显式销毁独立窗口:它们的 Vulkan 交换链/OS 窗口必须在
+		// RHI 设备与主窗口销毁之前释放,否则会在关闭引擎时崩溃。
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+			if (host)
+				host->SetHidden(true); // 保持隐藏,直接进入销毁
+		m_FloatHosts.clear();
+		m_AttachedPanels.clear();
+		m_ActiveWindowTag.clear();
+	}
+
 	// ---- PanelHost ----
 
 	Ref<Scene> EditorShell::GetActiveScene()
