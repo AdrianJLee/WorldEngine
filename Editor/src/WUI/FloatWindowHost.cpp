@@ -7,6 +7,7 @@
 #include "World/Events/MouseEvent.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace World
 {
@@ -73,6 +74,14 @@ namespace World
 			Renderer::EndFramePresent(m_Target);
 		}
 		m_Backend.EndFrame(m_Context.Cursor());
+		// 开发验证:读回独立窗口的默认帧缓冲(WLD_CAPTURE_FLOAT=<路径前缀>)。
+		if (const char* capturePrefix = std::getenv("WLD_CAPTURE_FLOAT"))
+		{
+			static int frameCount = 0;
+			if (++frameCount == 120)
+				Renderer::CaptureFramebuffer(std::string(capturePrefix) + m_Panel + ".ppm", 0,
+					static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y));
+		}
 		m_Window->SwapBuffers();
 		return true;
 	}
