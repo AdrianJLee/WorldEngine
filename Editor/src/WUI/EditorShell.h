@@ -64,6 +64,8 @@ namespace World
 		std::string IndependentWindowLabel(size_t index) const override;
 		void FocusIndependentWindow(const std::string& panel) override;
 		void DockBackIndependentWindow(const std::string& panel) override;
+		// 仅 Widget 画廊可以作为独立窗口存在;其余面板只停靠。
+		bool IsFloatablePanel(const std::string& panel) const { return panel == "gallery"; }
 		bool AttachSlotHighlighted() const override { return m_AttachSlotHighlight; }
 		void AttachIndependentWindowToSlot(const std::string& panel) override;
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;

@@ -230,8 +230,22 @@ namespace World
 		}
 		else
 		{
-			// 从 Window 菜单打开的面板一律以"独立窗口"出现(不进入停靠树):
-			// 有历史位置就回到上次位置,否则放在主窗口右下方一个默认位置。
+			// 只有可浮动的面板(Widget 画廊)从 Window 菜单打开时以独立窗口出现;
+			// 其余面板回到停靠树。
+			if (!IsFloatablePanel(panel))
+			{
+				const std::string anchor = m_Layout.FirstPanel();
+				if (anchor.empty())
+				{
+					Wui::DockLayout fresh;
+					fresh.Root.Panels.push_back(panel);
+					m_Layout = std::move(fresh);
+					RecordDockChange(ctx, "show", panel, before);
+				}
+				else if (m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
+					RecordDockChange(ctx, "show", panel, before);
+				return;
+			}
 			Wui::WuiRect rect;
 			const auto remembered = m_LastFloatRects.find(panel);
 			if (remembered != m_LastFloatRects.end())
@@ -367,7 +381,7 @@ namespace World
 			// 只有"本次拖拽确实起手于该面板的标签页"时才允许拖出为独立窗口;
 			// 否则残留的拖拽状态会在挂靠后立刻把面板再次浮出(表现为多出一个窗口)。
 			if (!dropConsumed && m_AttachCooldownFrames <= 0 && m_Layout.Contains(m_DragPanel)
-				&& m_TabDragPanel == m_DragPanel)
+				&& m_TabDragPanel == m_DragPanel && IsFloatablePanel(m_DragPanel))
 			{
 				// 拖出即成为独立 OS 窗口:按原停靠尺寸创建,放在鼠标所在的屏幕位置。
 				Wui::WuiRect source { m_LastDragPos.x - 40.0f, m_LastDragPos.y - 12.0f, 480.0f, 320.0f };
