@@ -5,6 +5,7 @@
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiTextureRegistry.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 #include "World/Renderer/Texture.h"
 
 #include <algorithm>
@@ -779,62 +780,70 @@ namespace World
 		if (m_Model.ListMode)
 		{
 			const float rowH = 24;
-			Label(ctx, { content.X + 8, content.Y + 4 }, "Name", theme.TextMuted, 13.0f);
-			Label(ctx, { content.X + content.W * 0.52f, content.Y + 4 }, "Type", theme.TextMuted, 13.0f);
-			Label(ctx, { content.X + content.W * 0.72f, content.Y + 4 }, "Size", theme.TextMuted, 13.0f);
-			BeginScrollArea(ctx, { content.X, content.Y + 22, content.W, content.H - 22 }, paths.size() * rowH, m_Model.ContentScroll, theme);
-			for (size_t i = 0; i < paths.size(); ++i)
+			Label(ctx, { content.X + 8, content.Y + 4 }, "Name / Type / Size", theme.TextMuted, 13.0f);
+			// 列表模式走 ListView 组件;拖拽/选中/重命名仍由面板处理——
+			// 组件返回每行矩形(ItemRects),面板据此调用既有 interact/RenderRenameField。
+			std::vector<Wui::ListViewItem> items;
+			items.reserve(paths.size());
+			for (const std::filesystem::path& path : paths)
 			{
-				const std::filesystem::path& path = paths[i];
 				std::error_code dirError;
 				const bool isDir = std::filesystem::is_directory(path, dirError);
-				const Wui::WuiRect row { content.X + 4, content.Y + 24 + i * rowH - m_Model.ContentScroll, content.W - 8, rowH };
-				interact(path, row, isDir);
-				if (m_Model.Selected.find(path) != m_Model.Selected.end())
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, { 0.28f, 0.45f, 0.85f, 0.35f }, 2.0f });
-				const uint64_t iconId = isDir ? m_DirIconId : m_FileIconId;
-				if (iconId)
-					Image(ctx, { row.X + 2, row.Y + 3, 18, 18 }, iconId, { 0, 1, 1, -1 }, theme);
-				Label(ctx, { row.X + 26, row.Y + 4 }, path.filename().string(), theme.Text, 13.0f);
-				Label(ctx, { row.X + content.W * 0.52f, row.Y + 4 }, isDir ? "Folder" : "File", theme.TextMuted, 13.0f);
 				std::string size = "-";
 				if (!isDir)
 					size = FormatBytes(static_cast<size_t>(FileSize(path)));
-				Label(ctx, { row.X + content.W * 0.72f, row.Y + 4 }, size, theme.TextMuted, 13.0f);
-				if (m_Model.RenameTarget == path)
-					RenderRenameField(ctx, path, { row.X + 26, row.Y + 2, 160, 20 }, theme);
+				const std::filesystem::path rel = path.lexically_relative(m_Model.Root);
+				Wui::ListViewItem item;
+				item.Id = Wui::HashId(("browser.item." + rel.generic_string()).c_str());
+				item.Label = path.filename().string();
+				item.SubLabel = isDir ? "Folder" : size;
+				item.Icon = isDir ? m_DirIconId : m_FileIconId;
+				item.Uv = { 0, 1, 1, -1 };
+				item.Selected = m_Model.Selected.find(path) != m_Model.Selected.end();
+				items.push_back(std::move(item));
 			}
-			EndScrollArea(ctx);
+			const Wui::ListViewResult lv = Wui::ListView(ctx,
+				{ content.X, content.Y + 22, content.W, content.H - 22 }, items, rowH, m_Model.ContentScroll, theme);
+			for (size_t i = 0; i < paths.size() && i < lv.ItemRects.size(); ++i)
+			{
+				std::error_code dirError;
+				const bool isDir = std::filesystem::is_directory(paths[i], dirError);
+				interact(paths[i], lv.ItemRects[i], isDir);
+				if (m_Model.RenameTarget == paths[i])
+					RenderRenameField(ctx, paths[i], { lv.ItemRects[i].X + 26, lv.ItemRects[i].Y + 2, 160, 20 }, theme);
+			}
 		}
 		else
 		{
 			const float cell = 142;
-			const int columns = std::max(1, static_cast<int>(content.W / cell));
-			const float rows = std::ceil(static_cast<float>(paths.size()) / columns);
-			BeginScrollArea(ctx, content, rows * cell + 16, m_Model.ContentScroll, theme);
-			for (size_t i = 0; i < paths.size(); ++i)
+			// 网格模式走 GridView 组件(缩略图/选中/悬停由组件绘制);
+			// 拖拽/选中/重命名仍由面板处理(使用组件返回的 ItemRects)。
+			std::vector<Wui::GridViewItem> items;
+			items.reserve(paths.size());
+			for (const std::filesystem::path& path : paths)
 			{
-				const int column = static_cast<int>(i % columns);
-				const int row = static_cast<int>(i / columns);
-				const Wui::WuiRect cellRect { content.X + 8 + column * cell, content.Y + 8 + row * cell - m_Model.ContentScroll, 128, 128 };
-				const std::filesystem::path& path = paths[i];
 				std::error_code dirError;
 				const bool isDir = std::filesystem::is_directory(path, dirError);
-				const bool selected = m_Model.Selected.find(path) != m_Model.Selected.end();
-				const bool hovered = ctx.IsHovered(cellRect);
-				if (selected)
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { cellRect.X - 3, cellRect.Y - 3, cellRect.W + 6, cellRect.H + 28 }, { 0.28f, 0.45f, 0.85f, 0.35f }, 4.0f });
-				else if (hovered)
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { cellRect.X - 3, cellRect.Y - 3, cellRect.W + 6, cellRect.H + 28 }, theme.ButtonHover, 4.0f });
-				interact(path, cellRect, isDir);
-				const uint64_t iconId = isDir ? m_DirIconId : m_FileIconId;
-				if (iconId)
-					Image(ctx, cellRect, iconId, { 0, 1, 1, -1 }, theme);
-				Label(ctx, { cellRect.X, cellRect.Y + 130 }, path.filename().string(), theme.Text, 13.0f);
-				if (m_Model.RenameTarget == path)
-					RenderRenameField(ctx, path, { cellRect.X, cellRect.Y + 150, 128, 22 }, theme);
+				const std::filesystem::path rel = path.lexically_relative(m_Model.Root);
+				Wui::GridViewItem item;
+				item.Id = Wui::HashId(("browser.cell." + rel.generic_string()).c_str());
+				item.Label = path.filename().string();
+				item.Icon = isDir ? m_DirIconId : m_FileIconId;
+				item.Uv = { 0, 1, 1, -1 };
+				item.Selected = m_Model.Selected.find(path) != m_Model.Selected.end();
+				items.push_back(std::move(item));
 			}
-			EndScrollArea(ctx);
+			const Wui::GridViewResult gv = Wui::GridView(ctx, content, items, cell, cell + 30.0f,
+				m_Model.ContentScroll, theme);
+			for (size_t i = 0; i < paths.size() && i < gv.ItemRects.size(); ++i)
+			{
+				std::error_code dirError;
+				const bool isDir = std::filesystem::is_directory(paths[i], dirError);
+				interact(paths[i], gv.ItemRects[i], isDir);
+				if (m_Model.RenameTarget == paths[i])
+					RenderRenameField(ctx, paths[i],
+						{ gv.ItemRects[i].X, gv.ItemRects[i].Y + gv.ItemRects[i].H + 2.0f, 128, 22 }, theme);
+			}
 		}
 
 		if (ctx.AcceptDrop(&filePayload, "file:"))

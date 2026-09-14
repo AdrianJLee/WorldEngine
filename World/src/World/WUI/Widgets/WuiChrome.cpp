@@ -254,12 +254,14 @@ namespace World::Wui
 	{
 		ListViewResult result;
 		const float contentHeight = rowHeight * static_cast<float>(items.size()) + 8.0f;
+		result.ItemRects.reserve(items.size());
 		BeginScrollArea(ctx, area, contentHeight, scrollY, theme);
 		for (size_t i = 0; i < items.size(); ++i)
 		{
 			const ListViewItem& item = items[i];
 			const WuiRect row { area.X + 4.0f, area.Y + 4.0f + rowHeight * static_cast<float>(i) - scrollY,
 				std::max(0.0f, area.W - 8.0f), rowHeight };
+			result.ItemRects.push_back(row); // 索引对齐:即使不可见也占位
 			if (row.Y + row.H < area.Y || row.Y > area.Y + area.H)
 				continue; // 视野外:不绘制也不命中
 			const bool hovered = !item.Disabled && ctx.IsHovered(row);
@@ -305,6 +307,7 @@ namespace World::Wui
 		float cellWidth, float cellHeight, float& scrollY, const WuiTheme& theme)
 	{
 		GridViewResult result;
+		result.ItemRects.reserve(items.size());
 		const int columns = std::max(1, static_cast<int>(area.W / std::max(1.0f, cellWidth)));
 		const float slotW = area.W / static_cast<float>(columns);
 		const int rows = static_cast<int>((items.size() + static_cast<size_t>(columns) - 1) / static_cast<size_t>(columns));
@@ -318,6 +321,7 @@ namespace World::Wui
 			const WuiRect cell { area.X + slotW * static_cast<float>(column) + 4.0f,
 				area.Y + 4.0f + cellHeight * static_cast<float>(rowIndex) - scrollY,
 				std::max(0.0f, slotW - 8.0f), cellHeight - 4.0f };
+			result.ItemRects.push_back(cell);
 			if (cell.Y + cell.H < area.Y || cell.Y > area.Y + area.H)
 				continue;
 			const bool hovered = !item.Disabled && ctx.IsHovered(cell);

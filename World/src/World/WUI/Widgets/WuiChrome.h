@@ -94,6 +94,7 @@ namespace World::Wui
 		int DoubleClicked = -1;   // 双击(用于打开)
 		int ContextClicked = -1;  // 右键(用于上下文菜单)
 		int Hovered = -1;
+		std::vector<WuiRect> ItemRects; // 与 items 一一对应(调用方据此保留拖拽/重命名等自定义交互)
 	};
 
 	// 行列表:自带滚动裁剪与滚轮滚动(scrollY 由调用方持有)。
@@ -117,6 +118,7 @@ namespace World::Wui
 		int DoubleClicked = -1;
 		int ContextClicked = -1;
 		int Hovered = -1;
+		std::vector<WuiRect> ItemRects;
 	};
 
 	// 图标网格:按 cellWidth/cellHeight 自动换行,自带滚动裁剪。
