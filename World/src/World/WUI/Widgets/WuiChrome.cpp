@@ -359,4 +359,57 @@ namespace World::Wui
 		EndScrollArea(ctx);
 		return result;
 	}
+
+	// ---- 树视图 ----
+
+	TreeViewResult TreeView(WuiContext& ctx, const WuiRect& area, const std::vector<TreeViewItem>& items,
+		float rowHeight, float& scrollY, const WuiTheme& theme)
+	{
+		TreeViewResult result;
+		const float contentHeight = rowHeight * static_cast<float>(items.size()) + 8.0f;
+		result.ItemRects.reserve(items.size());
+		result.ArrowRects.reserve(items.size());
+		BeginScrollArea(ctx, area, contentHeight, scrollY, theme);
+		for (size_t i = 0; i < items.size(); ++i)
+		{
+			const TreeViewItem& item = items[i];
+			const float indent = 6.0f + static_cast<float>(std::max(0, item.Depth)) * 12.0f;
+			const WuiRect row { area.X + 2.0f + indent, area.Y + 4.0f + rowHeight * static_cast<float>(i) - scrollY,
+				std::max(0.0f, area.W - 4.0f - indent), rowHeight };
+			const WuiRect arrow { row.X, row.Y, item.HasChildren ? 16.0f : 0.0f, rowHeight };
+			result.ItemRects.push_back(row);
+			result.ArrowRects.push_back(arrow);
+			if (row.Y + row.H < area.Y || row.Y > area.Y + area.H)
+				continue;
+
+			const bool hovered = !item.Disabled && ctx.IsHovered(row);
+			if (item.Selected)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.ButtonHover, 2.0f });
+			else if (hovered)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, WuiColor { 1, 1, 1, 0.06f }, 2.0f });
+
+			if (item.HasChildren)
+			{
+				PushText(ctx, { row.X + 2.0f, row.Y + (row.H - 13.0f) * 0.5f },
+					item.Expanded ? "[-]" : "[+]", theme.TextMuted, 12.0f);
+				if (ctx.IsClicked(arrow))
+					result.ClickedArrow = static_cast<int>(i);
+			}
+			const float labelX = row.X + (item.HasChildren ? 18.0f : 2.0f);
+			PushText(ctx, { labelX, row.Y + (row.H - 13.0f) * 0.5f }, item.Label,
+				item.Disabled ? theme.TextMuted : theme.Text, 13.0f, item.Selected);
+
+			if (item.Disabled)
+				continue;
+			const WuiRect labelRect { labelX, row.Y, std::max(0.0f, row.W - (labelX - row.X)), row.H };
+			if (ctx.Input().MouseClicked[1] && hovered)
+				result.ContextClicked = static_cast<int>(i);
+			if (ctx.IsDoubleClicked(labelRect))
+				result.DoubleClicked = static_cast<int>(i);
+			else if (ctx.IsClicked(labelRect))
+				result.Clicked = static_cast<int>(i);
+		}
+		EndScrollArea(ctx);
+		return result;
+	}
 }

@@ -124,4 +124,30 @@ namespace World::Wui
 	// 图标网格:按 cellWidth/cellHeight 自动换行,自带滚动裁剪。
 	GridViewResult GridView(WuiContext& ctx, const WuiRect& area, const std::vector<GridViewItem>& items,
 		float cellWidth, float cellHeight, float& scrollY, const WuiTheme& theme);
+
+	// ---- 树视图 ----
+	struct TreeViewItem
+	{
+		WuiId Id = 0;
+		std::string Label;
+		int Depth = 0;
+		bool HasChildren = false;
+		bool Expanded = false;
+		bool Selected = false;
+		bool Disabled = false;
+	};
+
+	struct TreeViewResult
+	{
+		std::vector<WuiRect> ItemRects;   // 与 items 索引对齐(不可见项也占位)
+		std::vector<WuiRect> ArrowRects;  // 展开箭头区域(无子节点为零矩形)
+		int ClickedArrow = -1;            // 点击展开箭头(调用方切换 Expanded)
+		int Clicked = -1;                 // 点击行(调用方导航/选中)
+		int DoubleClicked = -1;
+		int ContextClicked = -1;
+	};
+
+	// 目录/层级树:行 = 缩进 + 展开箭头 + 标题,自带滚动裁剪。
+	TreeViewResult TreeView(WuiContext& ctx, const WuiRect& area, const std::vector<TreeViewItem>& items,
+		float rowHeight, float& scrollY, const WuiTheme& theme);
 }

@@ -649,50 +649,56 @@ namespace World
 		const Wui::WuiRect treeRect { rect.X, y, treeW, rect.H - (y - rect.Y) };
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, treeRect, { 0.09f, 0.095f, 0.10f, 1 }, 0.0f });
 		RefreshTree(false);
-		BeginScrollArea(ctx, treeRect, m_Model.DirTree.size() * 20.0f + 8, m_Model.TreeScroll, theme);
-		float ty = treeRect.Y + 4 - m_Model.TreeScroll;
+		// 目录树走 TreeView 组件:展开箭头/悬停/选中由组件绘制,
+		// 导航、拖拽起手、拖入目标仍由面板处理(用组件返回的 ItemRects)。
+		std::vector<const BrowserDirNode*> visibleNodes;
+		std::vector<Wui::TreeViewItem> treeItems;
 		for (const BrowserDirNode& node : m_Model.DirTree)
 		{
 			if (node.Depth > 1 && m_Model.TreeOpen.find(node.Path.parent_path()) == m_Model.TreeOpen.end())
 				continue;
-			const Wui::WuiRect row { treeRect.X + 4 + node.Depth * 12, ty, treeW - 8 - node.Depth * 12, 20 };
-			const bool isCurrent = m_Model.Current == node.Path;
-			if (isCurrent)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.ButtonHover, 2.0f });
-			const bool hovered = ctx.IsHovered(row);
-			if (hovered && !isCurrent)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, { 1, 1, 1, 0.06f }, 2.0f });
-			if (node.HasChildren)
+			const std::filesystem::path rel = node.Path.lexically_relative(m_Model.Root);
+			Wui::TreeViewItem item;
+			item.Id = Wui::HashId(("browser.tree." + rel.generic_string()).c_str());
+			item.Label = node.Path.filename().string();
+			item.Depth = node.Depth;
+			item.HasChildren = node.HasChildren;
+			item.Expanded = m_Model.TreeOpen.find(node.Path) != m_Model.TreeOpen.end();
+			item.Selected = m_Model.Current == node.Path;
+			visibleNodes.push_back(&node);
+			treeItems.push_back(std::move(item));
+		}
+		{
+			Wui::TreeViewResult tree = Wui::TreeView(ctx, treeRect, treeItems, 20.0f, m_Model.TreeScroll, theme);
+			for (size_t i = 0; i < visibleNodes.size(); ++i)
 			{
-				const Wui::WuiRect arrow { row.X, ty, 16, 20 };
-				const bool open = m_Model.TreeOpen.find(node.Path) != m_Model.TreeOpen.end();
-				if (ctx.IsClicked(arrow))
+				const BrowserDirNode& node = *visibleNodes[i];
+				if (i >= tree.ItemRects.size())
+					break;
+				const Wui::WuiRect& row = tree.ItemRects[i];
+				const bool hovered = ctx.IsHovered(row);
+				if (tree.ClickedArrow == static_cast<int>(i))
 				{
-					if (open) m_Model.TreeOpen.erase(node.Path);
+					if (treeItems[i].Expanded) m_Model.TreeOpen.erase(node.Path);
 					else m_Model.TreeOpen.insert(node.Path);
 					SaveState();
 				}
-				Label(ctx, { row.X, ty + 2 }, open ? "[-]" : "[+]", theme.TextMuted, 12.0f);
+				else if (tree.Clicked == static_cast<int>(i))
+					Navigate(node.Path);
+				if (ctx.Input().MouseDown[0] && hovered && node.Path != m_Model.Root)
+				{
+					const std::filesystem::path rel = node.Path.lexically_relative(m_Model.Root);
+					ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
+					ctx.SetCursor(Wui::WuiCursor::Hand);
+				}
+				if (fileDrag && hovered)
+				{
+					ctx.DropTarget(row, "file:");
+					m_Model.PendingDropDest = node.Path;
+					ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, row, theme.Accent, 2.0f, 2.0f });
+				}
 			}
-			const float labelX = node.HasChildren ? row.X + 18 : row.X + 2;
-			if (ctx.IsClicked({ labelX, ty, row.W - (labelX - row.X), 20 }))
-				Navigate(node.Path);
-			if (ctx.Input().MouseDown[0] && hovered && node.Path != m_Model.Root)
-			{
-				const std::filesystem::path rel = node.Path.lexically_relative(m_Model.Root);
-				ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
-				ctx.SetCursor(Wui::WuiCursor::Hand);
-			}
-			if (fileDrag && hovered)
-			{
-				ctx.DropTarget(row, "file:");
-				m_Model.PendingDropDest = node.Path;
-				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, row, theme.Accent, 2.0f, 2.0f });
-			}
-			Label(ctx, { labelX, ty + 2 }, node.Path.filename().string(), theme.Text, 13.0f);
-			ty += 20;
 		}
-		EndScrollArea(ctx);
 
 		// ---- 右侧内容区 ----
 		const Wui::WuiRect content { rect.X + treeW + 6, y, rect.W - treeW - 6, rect.H - (y - rect.Y) };
