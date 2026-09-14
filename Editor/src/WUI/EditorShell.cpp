@@ -664,24 +664,23 @@ namespace World
 		}
 		x += 4.0f;
 
-		// 独立窗口以"标签"形式显示在栏上(与独立窗口自身的标签栏同款):
-		// 点击聚焦;标签右侧 x 隐藏该窗口的全部面板;整栏是挂靠落点。
-		std::string hideRequest;
-		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+		// 独立窗口的标签只在"已附加到主窗口栏"时显示;浮动中的独立窗口
+		// 在自己的窗口里显示标签,不占用主窗口栏。
+		for (const std::string& panel : m_Panels)
 		{
-			const std::string panel = host->Panels().empty() ? std::string() : host->Panels().front();
-			std::string label = PanelTitle(panel);
-			if (host->Panels().size() > 1)
-				label += " +" + std::to_string(host->Panels().size() - 1);
-			const Wui::WuiRect tab { x, bar.Y + 3.0f, 150.0f, bar.H - 6.0f };
+			if (!IsFloatablePanel(panel) || !m_Layout.Contains(panel))
+				continue;
+			const bool active = m_Layout.IsActive(panel);
+			const Wui::WuiRect tab { x, bar.Y + 3.0f, 140.0f, bar.H - 6.0f };
 			if (ctx.IsHovered(tab))
 			{
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.ButtonHover, 2.0f });
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 			}
-			else
+			else if (active)
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.PanelBg, 2.0f });
-			Label(ctx, { tab.X + 8, tab.Y + 4 }, label, m_Theme.Text, 13.0f);
+			Label(ctx, { tab.X + 8, tab.Y + 4 }, PanelTitle(panel),
+				active ? m_Theme.Text : m_Theme.TextMuted, 13.0f);
 			const Wui::WuiRect close { tab.X + tab.W - 18.0f, tab.Y + 5.0f, 12.0f, 12.0f };
 			if (ctx.IsHovered(close))
 			{
@@ -691,24 +690,12 @@ namespace World
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 2.0f, close.Y - 1.0f, 0, 0 },
 				m_Theme.TextMuted, 0, 1.0f, "x", 12.0f, false });
 			if (ctx.IsClicked(tab) && !ctx.IsHovered(close))
-				host->Focus();
+				m_Layout.Activate(panel);
 			if (ctx.IsClicked(close))
-				hideRequest = panel;
-			x += tab.W + 4.0f;
+				TogglePanel(ctx, panel);
+			x += 144.0f;
 		}
-		if (m_FloatHosts.empty())
-			Label(ctx, { x + 2.0f, bar.Y + 5 }, "把独立窗口标签拖到这里即可挂靠", m_Theme.TextMuted, 13.0f);
-		if (!hideRequest.empty())
-		{
-			// 隐藏该窗口承载的全部面板(bar 上的 x = 关闭整个独立窗口)。
-			if (FloatWindowHost* host = FindFloatHost(hideRequest))
-			{
-				const std::vector<std::string> panels = host->Panels();
-				for (const std::string& panel : panels)
-					HideFloatPanel(panel, &ctx);
-			}
-		}
-		else if (ctx.Input().MouseDown[0] && ctx.IsHovered(bar) && !ctx.IsHovered({ 0, 0, x, bar.H })
+		if (ctx.Input().MouseDown[0] && ctx.IsHovered(bar) && !ctx.IsHovered({ 0, 0, x, bar.H })
 			&& !ctx.IsHovered({ bar.X + bar.W - 102.0f, bar.Y, 102.0f, bar.H }))
 			Application::Get().GetWindow().BeginSystemDrag();
 	}
