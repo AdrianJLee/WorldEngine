@@ -30,7 +30,17 @@ namespace World::Asset
 				// 发行形态:按 manifest 逐条挂载包,失败只记错误继续。
 				for (const std::string& package : manifest.Packages)
 				{
-					const std::filesystem::path pakPath = std::filesystem::current_path() / package;
+					// 包路径相对清单所在目录解析(发行目录 = 清单目录;开发目录 = 仓库 Game/)。
+					std::filesystem::path pakPath = manifestPath.parent_path() / package;
+					std::error_code existsEc;
+					if (!std::filesystem::is_regular_file(pakPath, existsEc))
+						pakPath = std::filesystem::current_path() / package;
+					if (!std::filesystem::is_regular_file(pakPath, existsEc))
+					{
+						// 开发形态没有发行包属正常情况。
+						WLD_CORE_INFO("Package '{0}' not present (development layout)", package);
+						continue;
+					}
 					std::error_code openEc;
 					std::shared_ptr<World::Vfs::PackageProvider> provider =
 						World::Vfs::PackageProvider::Open(pakPath, openEc);

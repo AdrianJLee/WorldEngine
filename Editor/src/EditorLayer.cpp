@@ -39,8 +39,7 @@ namespace World
 			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
 
 		// 开发期资产:编辑器与 Runtime 一致,经 VFS 目录 provider 读内容。
-		Application::Get().GetContext().Vfs().Mount("dir:game-assets",
-			std::make_shared<World::Vfs::DirectoryProvider>(std::string(WLD_ASSETPATH)), 100);
+		// 目录 provider 已由 Application::MountProjectContent 统一挂载,此处不再重复。
 
 		// Application initialized Lua before attach; Game registration is now merged.
 		if (!ScriptEngine::GenerateLuaStubs())
@@ -63,7 +62,11 @@ namespace World
 
 		RegisterUiTextures();
 
-		NewScene();
+		// 诊断/自动化:WLD_START_SCENE=<路径> 时启动即打开该场景。
+		if (const char* startScene = std::getenv("WLD_START_SCENE"))
+			DoOpenScene(std::filesystem::path(startScene));
+		else
+			NewScene();
 
 		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
 	}

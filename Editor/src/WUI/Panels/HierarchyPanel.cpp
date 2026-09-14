@@ -22,7 +22,9 @@ namespace World
 		}
 
 		std::vector<Entity> entities;
-		for (auto handle : scene->GetRegistry().view<UUIDComponent>())
+		// 只读遍历必须走 const registry:运行中的场景拒绝非 const 访问(结构写保护)。
+		const entt::registry& registry = static_cast<const Scene*>(scene.get())->GetRegistry();
+		for (auto handle : registry.view<UUIDComponent>())
 			entities.push_back(Entity(scene.get(), handle));
 		std::sort(entities.begin(), entities.end(), [](Entity a, Entity b)
 			{
