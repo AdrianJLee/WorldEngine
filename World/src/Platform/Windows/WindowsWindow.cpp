@@ -336,6 +336,27 @@ namespace World
 		}
 	}
 
+	void WindowsWindow::Minimize()
+	{
+		if (m_Window)
+			glfwIconifyWindow(m_Window);
+	}
+
+	void WindowsWindow::MaximizeOrRestore()
+	{
+		if (!m_Window)
+			return;
+		if (glfwGetWindowAttrib(m_Window, GLFW_MAXIMIZED))
+			glfwRestoreWindow(m_Window);
+		else
+			glfwMaximizeWindow(m_Window);
+	}
+
+	bool WindowsWindow::IsMaximized() const
+	{
+		return m_Window && glfwGetWindowAttrib(m_Window, GLFW_MAXIMIZED);
+	}
+
 	LRESULT CALLBACK WindowsWindow::StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	{
 		WindowsWindow* self = reinterpret_cast<WindowsWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));

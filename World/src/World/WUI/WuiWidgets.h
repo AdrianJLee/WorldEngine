@@ -53,4 +53,14 @@ namespace World::Wui
 
 	// 表格单元矩形(按列宽累计)。
 	WuiRect TableCell(const WuiRect& table, const std::vector<float>& columns, size_t row, size_t column, float rowHeight);
+
+	// 标准窗口控制(最小化/最大化或还原/关闭),绘制在 bar 右侧;返回被点击的按钮。
+	enum class WindowControl : uint8_t
+	{
+		None = 0,
+		Minimize = 1,
+		Maximize = 2,
+		Close = 4,
+	};
+	WindowControl WindowControls(WuiContext& ctx, const WuiRect& bar, const WuiTheme& theme, bool maximized = false);
 }

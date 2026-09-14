@@ -730,4 +730,46 @@ namespace World::Wui
 		const float width = column < columns.size() ? columns[column] : table.W;
 		return { x, table.Y + rowHeight * static_cast<float>(row), width, rowHeight };
 	}
+
+	WindowControl WindowControls(WuiContext& ctx, const WuiRect& bar, const WuiTheme& theme, bool maximized)
+	{
+		constexpr float buttonW = 34.0f;
+		const float x0 = bar.X + bar.W - buttonW * 3.0f;
+		const auto buttonRect = [&](int index)
+		{
+			return WuiRect { x0 + buttonW * static_cast<float>(index), bar.Y, buttonW, bar.H };
+		};
+
+		const WuiRect minimize = buttonRect(0);
+		const WuiRect maximize = buttonRect(1);
+		const WuiRect close = buttonRect(2);
+		for (const WuiRect* rect : { &minimize, &maximize, &close })
+		{
+			if (ctx.IsHovered(*rect))
+			{
+				const WuiColor bg = rect == &close ? WuiColor { 0.76f, 0.22f, 0.22f, 1 } : theme.ButtonHover;
+				ctx.Commands().push_back({ WuiDrawKind::Rect, *rect, bg, 0.0f });
+				ctx.SetCursor(WuiCursor::Hand);
+			}
+		}
+
+		// 最小化:横线;最大化/还原:方框(还原时叠加小方框);关闭:x。
+		ctx.Commands().push_back({ WuiDrawKind::Rect,
+			{ minimize.X + 11.0f, minimize.Y + minimize.H * 0.5f, 12.0f, 1.0f }, theme.Text, 0.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline,
+			{ maximize.X + 11.0f, maximize.Y + maximize.H * 0.5f - 6.0f, 12.0f, 12.0f }, theme.Text, 0.0f, 1.0f });
+		if (maximized)
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline,
+				{ maximize.X + 9.0f, maximize.Y + maximize.H * 0.5f - 3.0f, 12.0f, 12.0f }, theme.Text, 0.0f, 1.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Text,
+			{ close.X + 10.0f, close.Y + close.H * 0.5f - 8.0f, 0, 0 }, theme.Text, 0, 1.0f, "x", 14.0f, false });
+
+		if (ctx.IsClicked(minimize))
+			return WindowControl::Minimize;
+		if (ctx.IsClicked(maximize))
+			return WindowControl::Maximize;
+		if (ctx.IsClicked(close))
+			return WindowControl::Close;
+		return WindowControl::None;
+	}
 }

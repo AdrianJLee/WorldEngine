@@ -36,6 +36,9 @@ namespace World
 		void Focus() override;
 		void BeginSystemDrag() override;
 		void SetFrameless(bool frameless) override;
+		void Minimize() override;
+		void MaximizeOrRestore() override;
+		bool IsMaximized() const override;
 
 	private:
 		virtual void Init(const WindowProps& props);

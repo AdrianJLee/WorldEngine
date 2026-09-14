@@ -247,19 +247,17 @@ namespace World
 			lastTabEnd = x;
 		}
 
-		// 窗口级关闭按钮(标签栏最右侧);标签栏右侧空白 = 拖动移动窗口。
-		const Wui::WuiRect windowClose { area.X + area.W - 20.0f, tabTop + 5.0f, 14.0f, 14.0f };
-		if (ctx.IsHovered(windowClose))
-		{
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, windowClose, theme.ButtonHover, 2.0f });
-			ctx.SetCursor(Wui::WuiCursor::Hand);
-		}
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { windowClose.X + 3.0f, windowClose.Y - 1.0f, 0, 0 },
-			theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
-		if (ctx.IsClicked(windowClose))
+		// 标准窗口控制(最小化/最大化/关闭)位于标签栏最右侧;其余空白拖动移动窗口。
+		const Wui::WindowControl control = Wui::WindowControls(ctx,
+			{ area.X + area.W - 102.0f, tabTop, 102.0f, tabH }, theme, m_Window->IsMaximized());
+		if (control == Wui::WindowControl::Minimize)
+			m_Window->Minimize();
+		else if (control == Wui::WindowControl::Maximize)
+			m_Window->MaximizeOrRestore();
+		else if (control == Wui::WindowControl::Close)
 			m_Window->SetShouldClose(true);
 		else if (ctx.Input().MouseDown[0] && ctx.IsHovered({ lastTabEnd, tabTop,
-			std::max(0.0f, area.W - lastTabEnd - 24.0f), tabH }))
+			std::max(0.0f, area.W - lastTabEnd - 110.0f), tabH }))
 			m_Window->BeginSystemDrag();
 
 		// 拖拽阈值:按下后移动超过 4px 即发起一次跨窗口拖拽请求。

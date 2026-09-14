@@ -622,16 +622,23 @@ namespace World
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, bar, fill, 0.0f });
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { bar.X, bar.Y + bar.H - 1.0f, bar.W, 1.0f }, m_Theme.Border, 0.0f });
 
-		// 最右侧:窗口关闭(主窗口)与空区拖动。
-		const Wui::WuiRect windowClose { bar.X + bar.W - 20.0f, bar.Y + 5.0f, 14.0f, 14.0f };
-		if (ctx.IsHovered(windowClose))
+		// 标准窗口控制(最小化/最大化/关闭)在最右侧。
+		const Wui::WindowControl control = Wui::WindowControls(ctx,
+			{ bar.X + bar.W - 102.0f, bar.Y, 102.0f, bar.H }, m_Theme,
+			Application::HasInstance() && Application::Get().GetWindow().IsMaximized());
+		if (control == Wui::WindowControl::Minimize)
 		{
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, windowClose, m_Theme.ButtonHover, 2.0f });
-			ctx.SetCursor(Wui::WuiCursor::Hand);
+			if (Application::HasInstance())
+				Application::Get().GetWindow().Minimize();
+			return;
 		}
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { windowClose.X + 3.0f, windowClose.Y - 1.0f, 0, 0 },
-			m_Theme.TextMuted, 0, 1.0f, "x", 13.0f, false });
-		if (ctx.IsClicked(windowClose))
+		if (control == Wui::WindowControl::Maximize)
+		{
+			if (Application::HasInstance())
+				Application::Get().GetWindow().MaximizeOrRestore();
+			return;
+		}
+		if (control == Wui::WindowControl::Close)
 		{
 			m_Editor.CloseAction();
 			return;
@@ -645,30 +652,51 @@ namespace World
 			return;
 		}
 
+		// 独立窗口以"标签"形式显示在栏上(与独立窗口自身的标签栏同款):
+		// 点击聚焦;标签右侧 x 隐藏该窗口的全部面板;整栏是挂靠落点。
 		float x = bar.X + 8.0f;
-		// 注意:挂靠会销毁宿主窗口并从 m_FloatHosts 移除元素,
-		// 因此先收集请求,遍历结束后再执行(遍历中修改容器会导致崩溃)。
-		std::string attachRequest;
+		std::string hideRequest;
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
 		{
-			// 每行一个窗口:代表面板 = 第一个标签(稳定,不随活动标签切换而变)。
 			const std::string panel = host->Panels().empty() ? std::string() : host->Panels().front();
 			std::string label = PanelTitle(panel);
 			if (host->Panels().size() > 1)
 				label += " +" + std::to_string(host->Panels().size() - 1);
-			const Wui::WuiRect chip { x, bar.Y + 3.0f, 150.0f, bar.H - 6.0f };
-			if (ctx.IsHovered(chip))
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, chip, m_Theme.ButtonHover, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, chip, m_Theme.Border, 3.0f, 1.0f });
-			Label(ctx, { chip.X + 8, chip.Y + 3 }, label, m_Theme.Text, 13.0f);
-			const Wui::WuiRect attach { chip.X + chip.W + 4.0f, chip.Y, 62.0f, chip.H };
-			if (Wui::Button(ctx, Wui::HashId(("attachbar." + panel).c_str()), attach, "Attach", m_Theme))
-				attachRequest = panel;
-			x += chip.W + 70.0f;
+			const Wui::WuiRect tab { x, bar.Y + 3.0f, 150.0f, bar.H - 6.0f };
+			if (ctx.IsHovered(tab))
+			{
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.ButtonHover, 2.0f });
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+			}
+			else
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, tab, m_Theme.PanelBg, 2.0f });
+			Label(ctx, { tab.X + 8, tab.Y + 4 }, label, m_Theme.Text, 13.0f);
+			const Wui::WuiRect close { tab.X + tab.W - 18.0f, tab.Y + 5.0f, 12.0f, 12.0f };
+			if (ctx.IsHovered(close))
+			{
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, close, m_Theme.ButtonHover, 2.0f });
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+			}
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 2.0f, close.Y - 1.0f, 0, 0 },
+				m_Theme.TextMuted, 0, 1.0f, "x", 12.0f, false });
+			if (ctx.IsClicked(tab) && !ctx.IsHovered(close))
+				host->Focus();
+			if (ctx.IsClicked(close))
+				hideRequest = panel;
+			x += tab.W + 4.0f;
 		}
-		if (!attachRequest.empty())
-			AttachIndependentWindowToSlot(attachRequest);
-		else if (ctx.Input().MouseDown[0] && ctx.IsHovered(bar) && !ctx.IsHovered({ 0, 0, x + 70.0f, bar.H }))
+		if (!hideRequest.empty())
+		{
+			// 隐藏该窗口承载的全部面板(bar 上的 x = 关闭整个独立窗口)。
+			if (FloatWindowHost* host = FindFloatHost(hideRequest))
+			{
+				const std::vector<std::string> panels = host->Panels();
+				for (const std::string& panel : panels)
+					HideFloatPanel(panel, &ctx);
+			}
+		}
+		else if (ctx.Input().MouseDown[0] && ctx.IsHovered(bar) && !ctx.IsHovered({ 0, 0, x, bar.H })
+			&& !ctx.IsHovered({ bar.X + bar.W - 102.0f, bar.Y, 102.0f, bar.H }))
 			Application::Get().GetWindow().BeginSystemDrag();
 	}
 
