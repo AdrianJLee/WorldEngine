@@ -35,6 +35,12 @@ namespace World
 			arguments.emplace_back(__argv[i] ? __argv[i] : "");
 		for (size_t i = 0; i + 1 < arguments.size(); ++i)
 		{
+			// 渲染后端切换后的自动重启会把当前场景带回来。
+			if (arguments[i] == "-scene")
+			{
+				SetEnvironmentVariableA("WLD_START_SCENE", arguments[i + 1].c_str());
+				continue;
+			}
 			if (arguments[i] != "--cook")
 				continue;
 			World::Editor::CookOptions options;

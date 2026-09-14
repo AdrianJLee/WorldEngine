@@ -93,6 +93,8 @@ namespace World
 		bool TrySave();
 		void RequestAction(std::function<void()> action);
 		void ProcessPendingRendererChange();
+		// 渲染后端切换:保存设置后自动重启编辑器进程(热切换会串资源)。
+		void RestartForRendererChange();
 		void RegisterUiTextures();
 		// 重载工具栏/AI 图标(旧式 GL 纹理):窗口或上下文重建后必须重新创建。
 		void LoadIconTextures();

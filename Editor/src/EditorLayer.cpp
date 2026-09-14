@@ -371,8 +371,45 @@ namespace World
 	{
 		if (!Renderer::SetRequestedRenderer(name))
 			return;
-		m_RendererChangeName = name;
-		m_RendererChangePending = true;
+		// 运行中热切换会串资源(GL 名字/描述符集跨上下文复用 → 图标与贴图错乱),
+		// 改为自动重启编辑器进程:设置已写入清单,重启后即按新后端干净启动。
+		RestartForRendererChange();
+	}
+
+	void EditorLayer::RestartForRendererChange()
+	{
+#ifdef WLD_PLATFORM_WINDOWS
+		wchar_t exeBuffer[MAX_PATH] = {};
+		if (GetModuleFileNameW(nullptr, exeBuffer, MAX_PATH) == 0)
+		{
+			WLD_CORE_ERROR("Renderer change requires restart, but the executable path is unknown.");
+			return;
+		}
+		const std::filesystem::path exePath(exeBuffer);
+
+		std::string arguments;
+		if (m_Document.HasPath())
+			arguments = " -scene \"" + m_Document.GetPath().string() + "\"";
+		std::wstring commandLine = L"\"" + exePath.wstring() + L"\"" +
+			std::wstring(arguments.begin(), arguments.end());
+
+		STARTUPINFOW startup {};
+		startup.cb = sizeof(startup);
+		PROCESS_INFORMATION process {};
+		if (!CreateProcessW(exePath.wstring().c_str(), commandLine.data(), nullptr, nullptr,
+			FALSE, 0, nullptr, nullptr, &startup, &process))
+		{
+			WLD_CORE_ERROR("Renderer change requires restart, but relaunching the editor failed.");
+			return;
+		}
+		CloseHandle(process.hThread);
+		CloseHandle(process.hProcess);
+		WLD_CORE_INFO("Editor restarted for renderer change (scene kept: {0})",
+			m_Document.HasPath() ? m_Document.GetPath().string() : "(new scene)");
+		Application::Get().Close();
+#else
+		WLD_CORE_WARN("Renderer change requires an editor restart on this platform.");
+#endif
 	}
 
 	void EditorLayer::ProcessPendingRendererChange()
