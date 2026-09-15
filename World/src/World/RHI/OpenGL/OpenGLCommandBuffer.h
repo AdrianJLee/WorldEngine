@@ -4,14 +4,62 @@
 
 #include <glad/glad.h>
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 namespace World::Rhi::OpenGL
 {
 	class OpenGLPipeline;
+
+	// 延迟命令列表:录制期只写数据,回放期在渲染线程执行(GL 语义下的"多线程录制")。
+	enum class GLCommandKind : uint8_t
+	{
+		BeginLabel, EndLabel,
+		BeginRenderPass, EndRenderPass,
+		SetViewport, SetScissor,
+		BindPipeline, BindDescriptorSet, BindVertexBuffer, BindIndexBuffer,
+		Draw, DrawIndexed, DrawIndirect, DrawIndexedIndirect, Dispatch,
+		PipelineBarrier, CopyBuffer, UpdateBuffer,
+		CopyBufferToTexture, CopyTextureToBuffer, CopyTexture, ResolveTexture, GenerateMipmaps,
+		ResetQueryPool, BeginQuery, EndQuery, WriteTimestamp, CopyQueryResults,
+	};
+
+	struct GLCommand
+	{
+		GLCommandKind Kind = GLCommandKind::BeginLabel;
+		Handle<Pipeline> Pipeline_;
+		Handle<DescriptorSet> DescriptorSet_;
+		Handle<Buffer> BufferA, BufferB;
+		Handle<Texture> TextureA, TextureB;
+		Handle<RenderPass> Pass;
+		Handle<Framebuffer> Framebuffer_;
+		Handle<QueryPool> QueryPool_;
+		std::vector<ClearValue> Clears;
+		std::vector<ResourceBarrier> Barriers;
+		std::vector<uint8_t> Data;        // UpdateBuffer 的数据副本
+		Viewport Viewport_;
+		Scissor Scissor_;
+		uint64_t OffsetA = 0, OffsetB = 0, Size = 0;
+		uint32_t Count0 = 0, Count1 = 0, Count2 = 0, Count3 = 0;
+		int32_t Signed0 = 0;
+		uint32_t Binding = 0;
+		uint32_t FirstSet = 0;
+		IndexType IndexType_ = IndexType::UInt32;
+		QueryType QueryType_ = QueryType::Occlusion;
+		ShaderStageFlags Stages = 0;
+		std::string Label;
+	};
 
 	class OpenGLCommandBuffer : public CommandBuffer
 	{
 	public:
 		OpenGLCommandBuffer() = default;
+
+		// 在渲染线程回放已录制的命令(由 OpenGLCommandQueue::Submit 调用)。
+		void Replay();
+		bool IsRecording() const { return m_Recording; }
+		size_t CommandCount() const { return m_Commands.size(); }
 
 		void Begin() override;
 		void End() override;
@@ -68,10 +116,10 @@ namespace World::Rhi::OpenGL
 			const Handle<Buffer>& dst, uint32_t first = 0, uint32_t count = 0) override;
 
 	private:
-		Handle<Pipeline> m_CurrentPipeline;
-		IndexType m_IndexType = IndexType::UInt32;
-		uint64_t m_IndexBufferOffset = 0;
-		bool m_InRenderPass = false;
+		GLCommand& Push(GLCommandKind kind);
+
+		std::vector<GLCommand> m_Commands;
+		bool m_Recording = false;
 		bool m_PushConstantsWarned = false;
 	};
 }

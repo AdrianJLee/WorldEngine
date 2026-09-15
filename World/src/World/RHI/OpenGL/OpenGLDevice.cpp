@@ -39,9 +39,8 @@ namespace World::Rhi::OpenGL
 		m_Capabilities.ApiMinor = version.second;
 		m_Capabilities.Compute = true;
 		m_Capabilities.DrawIndirect = true;
-		// GL 调用必须在持有上下文的线程执行:并行"录制"需要先落延迟命令列表(B1.2),
-		// 在此之前能力表如实报告 false。
-		m_Capabilities.ParallelRecording = false;
+		// 已落地"延迟命令列表 + 渲染线程回放":录制期不触碰 GL 状态机 → 可多线程录制。
+		m_Capabilities.ParallelRecording = true;
 		m_Capabilities.MaxFramesInFlight = 1;
 		m_Capabilities.MultiDrawIndirect = true;
 		m_Capabilities.TimestampQueries = true;

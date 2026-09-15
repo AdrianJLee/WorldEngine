@@ -65,6 +65,7 @@ namespace World
 		Rhi::Handle<Rhi::Fence> s_FrameFences[kFramesInFlight];
 		bool s_FrameFenceSubmitted[kFramesInFlight] = {};
 		bool s_FrameHadSubmission = false;
+		Rhi::Handle<Rhi::CommandQueue> s_GlQueue;   // GL:提交点回放命令列表用的队列
 		std::vector<std::pair<uint64_t, std::function<void()>>> s_DeferredReleases;   // (到期帧号, 回收动作)
 
 		void RunDeferredReleases(uint64_t frameNumber)
@@ -170,6 +171,7 @@ namespace World
 			s_FrameFences[i] = nullptr;
 			s_FrameFenceSubmitted[i] = false;
 		}
+		s_GlQueue = nullptr;
 		// 设备销毁前先让持有句柄的子系统释放资源(否则它们的析构会用到已销毁设备)。
 		{
 			auto hooks = DeviceReleaseHooks();
@@ -475,7 +477,15 @@ namespace World
 		if (!m_Device || !commandBuffer)
 			return;
 		if (s_BackendName != "vulkan")
-			return; // OpenGL 立即模式
+		{
+			// GL:命令列表在提交点回放(调用线程持有上下文,且早于 WUI 的 blit 与窗口交换)。
+			if (!s_GlQueue)
+				s_GlQueue = m_Device->CreateQueue("GL");
+			Rhi::SubmitInfo submit;
+			submit.CommandBuffers = { commandBuffer };
+			s_GlQueue->Submit(submit);
+			return;
+		}
 		s_FrameHadSubmission = true;
 		PresentTarget& state = s_ActivePresent ? *s_ActivePresent : s_MainPresent;
 		if (!state.Queue || !state.Image)
@@ -509,7 +519,15 @@ namespace World
 		if (!m_Device || !commandBuffer)
 			return;
 		if (s_BackendName != "vulkan")
-			return; // OpenGL 立即模式
+		{
+			// GL:场景命令列表在提交点回放(早于 UI 提交,保持场景→UI 顺序)。
+			if (!s_GlQueue)
+				s_GlQueue = m_Device->CreateQueue("GL");
+			Rhi::SubmitInfo submit;
+			submit.CommandBuffers = { commandBuffer };
+			s_GlQueue->Submit(submit);
+			return;
+		}
 		s_FrameHadSubmission = true;
 		PresentTarget& state = s_ActivePresent ? *s_ActivePresent : s_MainPresent;
 		// 设备切换后队列属于旧设备:必须等 BeginFramePresent 重建后再提交。

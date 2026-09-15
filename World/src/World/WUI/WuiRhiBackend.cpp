@@ -697,7 +697,6 @@ namespace World::Wui
 		m_Projection = m_IsVulkan
 			? glm::ortho(0.0f, m_Viewport.x, 0.0f, m_Viewport.y, -1.0f, 1.0f)
 			: glm::ortho(0.0f, m_Viewport.x, m_Viewport.y, 0.0f, -1.0f, 1.0f);
-		m_Cmds[slot]->UpdateBuffer(m_Ubos[slot], &m_Projection, sizeof(glm::mat4), 0);
 
 		m_Vertices.clear();
 		m_Indices.clear();
@@ -708,7 +707,9 @@ namespace World::Wui
 		m_ActiveTexture = m_WhiteTexture;
 		m_TextureChanged = true;
 
+		// Begin 会清空命令列表(两种后端一致),因此投影 UBO 的更新必须录在 Begin 之后。
 		m_Cmds[slot]->Begin();
+		m_Cmds[slot]->UpdateBuffer(m_Ubos[slot], &m_Projection, sizeof(glm::mat4), 0);
 		Rhi::ClearValue clear;
 		clear.Color = { 0, 0, 0, 0 };
 		m_Cmds[slot]->BeginRenderPass(pass, framebuffer, { clear });
