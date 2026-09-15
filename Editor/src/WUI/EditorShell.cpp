@@ -56,18 +56,16 @@ namespace World
 		// 启动时清掉,避免它以挂靠标签的形式出现。
 		m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), "input"),
 			m_AttachedPanels.end());
-		if (!m_Layout.IsFloating("input"))
+		// Input Map 固定为独立窗口:每次启动都强制收敛到"唯一表示"——
+		// 无论存档里它是停靠在左区、挂靠在主窗口、还是浮动,都先摘干净再无条件创建独立窗口。
+		// (之前只处理"未浮动"的情况,存档一旦把停靠记录写回来,它就会又出现在左侧。)
 		{
-			// 旧布局可能把它停靠在左侧:先从停靠树摘除,避免"停靠 + 浮动"双重表示
-			// (同一面板被两套容器持有 -> 关闭时重复释放,实测崩溃)。
 			if (m_Layout.Contains("input"))
 				m_Layout.RemoveTab("input");
-			// 与 Window 菜单重开面板走同一条路径:登记浮动记录 + 直接创建独立窗口
-			// (仅登记记录不够——构造期的分组循环只处理此前已浮动的面板)。
-			const Wui::WuiRect inputRect { 140.0f, 140.0f, 440.0f, 340.0f };
-			m_Layout.Floating.push_back({ "input", inputRect });
-			AddFloatWindow("input", inputRect, "open");
+			m_Layout.Floating.push_back({ "input", { 140.0f, 140.0f, 440.0f, 340.0f } });
+			AddFloatWindow("input", { 140.0f, 140.0f, 440.0f, 340.0f }, "open");
 		}
+
 
 		// 尊重用户关闭的面板:仅当布局文件缺失/损坏时使用默认布局,
 		// 不把"已关闭"的面板强制补回。重新显示由 Window 菜单负责。
