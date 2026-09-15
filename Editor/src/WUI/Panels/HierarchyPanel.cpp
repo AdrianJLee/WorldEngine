@@ -229,9 +229,12 @@ namespace World
 		if (!dragging && !m_PendingPrefabFile.empty())
 		{
 			// 内容浏览器载荷是"相对内容根"的路径:先按相对路径尝试,失败再用项目清单解析内容根。
+			// 两者都不可用时仍把原始载荷交给引擎(其 VFS/磁盘解析链路可能认得该路径),
+			// 由 InstantiateFromFile 反序列化的成败决定最终结果。
 			std::filesystem::path prefabPath = m_PendingPrefabFile;
 			if (!std::filesystem::exists(prefabPath))
 			{
+				bool resolved = false;
 				std::filesystem::path manifestPath;
 				if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
 				{
@@ -242,9 +245,15 @@ namespace World
 						const std::filesystem::path candidate =
 							manifest.ResolveContentRoot(manifestPath) / m_PendingPrefabFile;
 						if (std::filesystem::exists(candidate))
+						{
 							prefabPath = candidate;
+							resolved = true;
+						}
 					}
 				}
+				if (!resolved)
+					WLD_CORE_WARN("[drop] prefab path not resolved on disk, falling back to engine lookup: {0}",
+						m_PendingPrefabFile);
 			}
 
 			const entt::entity parent = m_PendingDropHandle.IsValid()

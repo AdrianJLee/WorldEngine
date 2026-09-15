@@ -59,12 +59,8 @@ namespace World::Gameplay
 		Scene& destination, entt::entity parent)
 	{
 		PrefabInstanceResult result;
-		if (!std::filesystem::exists(path))
-		{
-			WLD_CORE_ERROR("Prefab::InstantiateFromFile: file not found: {0}", path.generic_string());
-			return result;
-		}
-
+		// 不做 std::filesystem::exists 预检:内容根下的相对路径(如 "prefabs/X.wprefab")
+		// 由引擎的 VFS/磁盘解析链路处理,这里只以反序列化结果为准。
 		const Ref<Scene> staging = CreateRef<Scene>(destination.GetContext());
 		SceneSerializer serializer(staging);
 		if (!serializer.Deserialize(path.string()))
