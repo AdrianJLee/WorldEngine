@@ -42,6 +42,9 @@ namespace World
 		virtual Gameplay::SaveService* GetSaveService() { return nullptr; }
 		// Play/Simulate 期间为 true:面板只读查看(可选中/显示,但不改场景数据)。
 		virtual bool IsReadOnlyMode() const { return false; }
+		// D7-1a:视口相机模式(2D/3D)与切换 —— 视口面板用它画切换按钮。
+		virtual bool IsViewportCamera3D() const { return false; }
+		virtual void ToggleViewportCamera3D() {}
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

@@ -15,6 +15,7 @@
 #include <shellapi.h>
 #include <stdexcept>
 #include <chrono>
+#include "World/Events/MouseEvent.h"
 namespace World
 {
 	EditorLayer::EditorLayer()
@@ -342,7 +343,40 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 
 		if (m_ViewportFocused && m_ViewportHovered)
+		{
 			m_EditorCamera.OnEvent(event);
+			// D7-1a:3D 视口的轨道/平移/推拉(右键 orbit、中键 pan、滚轮 dolly)。
+			if (m_Viewport3D)
+			{
+				EventDispatcher cameraDispatcher(event);
+				cameraDispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e)
+				{
+					m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键*/ ? Viewport3DDrag::Orbit
+						: (e.GetMouseButton() == 2 /*中键*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
+					return false;
+				});
+				cameraDispatcher.Dispatch<MouseButtonReleasedEvent>([this](MouseButtonReleasedEvent& e)
+				{
+					(void)e;
+					m_Viewport3DDragging = Viewport3DDrag::None;
+					return false;
+				});
+				cameraDispatcher.Dispatch<MouseMovedEvent>([this](MouseMovedEvent& e)
+				{
+					if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
+						m_EditorCamera3D.Orbit(e.GetX() - m_Viewport3DLastMouse.x, e.GetY() - m_Viewport3DLastMouse.y);
+					else if (m_Viewport3DDragging == Viewport3DDrag::Pan)
+						m_EditorCamera3D.Pan(e.GetX() - m_Viewport3DLastMouse.x, e.GetY() - m_Viewport3DLastMouse.y);
+					m_Viewport3DLastMouse = { e.GetX(), e.GetY() };
+					return false;
+				});
+				cameraDispatcher.Dispatch<MouseScrolledEvent>([this](MouseScrolledEvent& e)
+				{
+					m_EditorCamera3D.Dolly(-e.GetYOffset() * 0.6f);
+					return false;
+				});
+			}
+		}
 
 		EventDispatcher dispatcher(event);
 
@@ -678,6 +712,7 @@ namespace World
 			m_PendingViewportSize = size;
 			m_ViewportResizeDelay = 0.1f;
 			m_EditorCamera.SetViewportSize(size.x, size.y);
+			m_EditorCamera3D.SetViewportSize(static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y));
 		}
 
 	}

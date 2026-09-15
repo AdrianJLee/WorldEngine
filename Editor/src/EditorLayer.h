@@ -126,6 +126,9 @@ namespace World
 		EditorCamera m_EditorCamera;
 		EditorCamera3D m_EditorCamera3D;
 		bool m_Viewport3D = false;
+		enum class Viewport3DDrag { None, Orbit, Pan };
+		Viewport3DDrag m_Viewport3DDragging = Viewport3DDrag::None;
+		glm::vec2 m_Viewport3DLastMouse { 0.0f, 0.0f };
 
 		Entity m_SelectedEntity;
 

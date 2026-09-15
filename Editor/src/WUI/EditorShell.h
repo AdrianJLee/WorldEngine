@@ -85,6 +85,9 @@ namespace World
 		// Play/Simulate = 只读查看(用户 2026-09-15 确认:Play 下属性面板可查看不可改)。
 		// 定义放 .cpp:本头文件只有 EditorLayer 的前置声明。
 		bool IsReadOnlyMode() const override;
+		// D7-1a:视口相机模式透传(视口面板的 2D/3D 切换按钮)。
+		bool IsViewportCamera3D() const override;
+		void ToggleViewportCamera3D() override;
 		void AttachIndependentWindowToSlot(const std::string& panel) override;
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;
 		EditorCamera& GetEditorCamera() override;

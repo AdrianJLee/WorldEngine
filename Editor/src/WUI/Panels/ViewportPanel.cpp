@@ -61,6 +61,12 @@ namespace World
 		// 工具栏底板走组件(Toolbar):与其它工具栏样式统一。
 		Wui::Toolbar(ctx, bar, theme, 6.0f, 0.85f);
 
+		// D7-1a:视口相机模式切换(2D 正视 / 3D 轨道)。放在工具栏左侧,不与播放按钮混排。
+		const bool camera3D = m_Host.IsViewportCamera3D();
+		if (Button(ctx, Wui::HashId("viewport.camera.mode"),
+			{ rect.X + 10.0f, rect.Y + 14.0f, 46.0f, 24.0f }, camera3D ? "3D" : "2D", theme))
+			m_Host.ToggleViewportCamera3D();
+
 		Wui::LayoutWidgetTree(m_Root, rect);
 		Wui::WuiPaintContext paint(ctx);
 		m_Root->Paint(paint);

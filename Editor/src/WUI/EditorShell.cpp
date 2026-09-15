@@ -220,6 +220,16 @@ namespace World
 		return m_Editor.IsPlaying() || m_Editor.IsSimulating();
 	}
 
+	bool EditorShell::IsViewportCamera3D() const
+	{
+		return m_Editor.IsViewportCamera3D();
+	}
+
+	void EditorShell::ToggleViewportCamera3D()
+	{
+		m_Editor.ToggleViewportCamera3D();
+	}
+
 	void EditorShell::ReleaseIndependentWindows()
 	{
 		// 退出时先显式销毁独立窗口:它们的 Vulkan 交换链/OS 窗口必须在
