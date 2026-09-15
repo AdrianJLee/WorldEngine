@@ -42,6 +42,8 @@ namespace World::Rhi::Vulkan
 		void PipelineBarrier(const std::vector<ResourceBarrier>& barriers) override;
 		void CopyBuffer(const Handle<Buffer>& src, const Handle<Buffer>& dst,
 			uint64_t srcOffset, uint64_t dstOffset, uint64_t size) override;
+		void UpdateBuffer(const Handle<Buffer>& dst, const void* data, uint64_t size,
+			uint64_t offset = 0) override;
 		void CopyBufferToTexture(const Handle<Buffer>& src, const Handle<Texture>& dst,
 			uint64_t srcOffset, uint32_t mip = 0, uint32_t layer = 0) override;
 		void CopyTextureToBuffer(const Handle<Texture>& src, const Handle<Buffer>& dst,
@@ -66,6 +68,8 @@ namespace World::Rhi::Vulkan
 		VkCommandPool m_Pool = VK_NULL_HANDLE;   // 分配该命令缓冲的线程池
 		VkPipelineLayout m_LastPipelineLayout = VK_NULL_HANDLE;
 		std::vector<std::pair<uint32_t, Handle<DescriptorSet>>> m_PendingDescriptorSets;
+		// UpdateBuffer 走 staging 时临时创建的源缓冲:复用到本槽位时(两帧后)释放。
+		std::vector<Handle<Buffer>> m_TransientBuffers;
 	};
 
 	class VulkanCommandQueue final : public CommandQueue

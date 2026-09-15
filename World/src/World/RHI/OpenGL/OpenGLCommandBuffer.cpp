@@ -271,6 +271,16 @@ namespace World::Rhi::OpenGL
 		glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, srcOffset, dstOffset, size);
 	}
 
+	void OpenGLCommandBuffer::UpdateBuffer(const Handle<Buffer>& dst, const void* data, uint64_t size,
+		uint64_t offset)
+	{
+		const auto dstGl = std::dynamic_pointer_cast<OpenGLBuffer>(dst);
+		if (!dstGl || !data)
+			return;
+		// GL 立即模式:直接写缓冲(上下文由调用线程持有)。
+		glNamedBufferSubData(dstGl->GetID(), offset, size, data);
+	}
+
 	void OpenGLCommandBuffer::CopyBufferToTexture(const Handle<Buffer>& src, const Handle<Texture>& dst,
 		uint64_t srcOffset, uint32_t mip, uint32_t /*layer*/)
 	{

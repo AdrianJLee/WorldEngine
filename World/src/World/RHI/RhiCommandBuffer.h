@@ -50,6 +50,10 @@ namespace World::Rhi
 		virtual void PipelineBarrier(const std::vector<ResourceBarrier>& barriers) = 0;
 		virtual void CopyBuffer(const Handle<Buffer>& src, const Handle<Buffer>& dst,
 			uint64_t srcOffset, uint64_t dstOffset, uint64_t size) = 0;
+		// 把 CPU 数据写入 GPU buffer(录制成命令,由提交阶段执行)。
+		// 这是"工作线程录制"的关键:录制期间不触碰任何后端状态机。
+		virtual void UpdateBuffer(const Handle<Buffer>& dst, const void* data, uint64_t size,
+			uint64_t offset = 0) = 0;
 		virtual void CopyBufferToTexture(const Handle<Buffer>& src, const Handle<Texture>& dst,
 			uint64_t srcOffset, uint32_t mip = 0, uint32_t layer = 0) = 0;
 		virtual void CopyTextureToBuffer(const Handle<Texture>& src, const Handle<Buffer>& dst,

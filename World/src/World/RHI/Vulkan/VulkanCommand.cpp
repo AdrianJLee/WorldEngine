@@ -37,6 +37,7 @@ namespace World::Rhi::Vulkan
 	void VulkanCommandBuffer::Begin()
 	{
 		m_PendingDescriptorSets.clear();
+		m_TransientBuffers.clear();   // 上一轮同槽位提交的 fence 已通过,临时 staging 可以释放
 		m_LastPipelineLayout = VK_NULL_HANDLE;
 		VkCommandBufferBeginInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -218,6 +219,33 @@ namespace World::Rhi::Vulkan
 	}
 
 	void VulkanCommandBuffer::CopyBufferToTexture(const Handle<Buffer>&, const Handle<Texture>&, uint64_t, uint32_t, uint32_t) {}
+
+	void VulkanCommandBuffer::UpdateBuffer(const Handle<Buffer>& dst, const void* data, uint64_t size,
+		uint64_t offset)
+	{
+		const auto dstVk = std::dynamic_pointer_cast<VulkanBuffer>(dst);
+		if (!dstVk || !data || size == 0)
+			return;
+		// vkCmdUpdateBuffer 单次上限 64 KiB;更大走 staging + CopyBuffer。
+		constexpr uint64_t kMaxDirectUpdate = 64 * 1024;
+		if (size <= kMaxDirectUpdate)
+		{
+			vkCmdUpdateBuffer(m_CommandBuffer, dstVk->GetBuffer(), offset, size, data);
+			return;
+		}
+
+		Rhi::BufferDesc stagingDesc;
+		stagingDesc.Size = size;
+		stagingDesc.Usage = Rhi::BufferUsageTransferSrc;
+		stagingDesc.Memory = Rhi::MemoryHint::HostVisible;
+		stagingDesc.DebugName = "CmdUpdateStaging";
+		Handle<Buffer> staging = m_Device.CreateBuffer(stagingDesc);
+		if (!staging)
+			return;
+		staging->SetData(data, size, 0);
+		CopyBuffer(staging, dst, 0, offset, size);
+		m_TransientBuffers.push_back(std::move(staging));   // 随命令缓冲复位释放
+	}
 	void VulkanCommandBuffer::CopyTextureToBuffer(const Handle<Texture>& src, const Handle<Buffer>& dst,
 		uint64_t dstOffset, uint32_t mip, uint32_t layer)
 	{

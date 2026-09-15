@@ -446,8 +446,9 @@ namespace World::Wui
 		const uint64_t indexOffset = m_FrameIndexBytes;
 		m_FrameVertexBytes += vertexBytes;
 		m_FrameIndexBytes += indexBytes;
-		m_Vbs[slot]->SetData(m_Vertices.data(), vertexBytes, vertexOffset);
-		m_Ibs[slot]->SetData(m_Indices.data(), indexBytes, indexOffset);
+		// 顶点/索引数据走命令缓冲更新(录制期不触碰后端状态机)。
+		m_Cmds[slot]->UpdateBuffer(m_Vbs[slot], m_Vertices.data(), vertexBytes, vertexOffset);
+		m_Cmds[slot]->UpdateBuffer(m_Ibs[slot], m_Indices.data(), indexBytes, indexOffset);
 		m_Cmds[slot]->BindPipeline(m_Pipeline);
 		m_Cmds[slot]->BindDescriptorSet(m_GlobalSets[slot], 0);
 		m_Cmds[slot]->BindDescriptorSet(TextureSetFor(m_ActiveTexture), 1);
@@ -696,7 +697,7 @@ namespace World::Wui
 		m_Projection = m_IsVulkan
 			? glm::ortho(0.0f, m_Viewport.x, 0.0f, m_Viewport.y, -1.0f, 1.0f)
 			: glm::ortho(0.0f, m_Viewport.x, m_Viewport.y, 0.0f, -1.0f, 1.0f);
-		m_Ubos[slot]->SetData(&m_Projection, sizeof(glm::mat4));
+		m_Cmds[slot]->UpdateBuffer(m_Ubos[slot], &m_Projection, sizeof(glm::mat4), 0);
 
 		m_Vertices.clear();
 		m_Indices.clear();
