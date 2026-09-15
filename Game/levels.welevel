@@ -4,6 +4,3 @@ levels:
   - id: 3dtest
     name: 3D Test
     scene: scenes/3DTest.wd
-  - id: test
-    name: Test
-    scene: scenes/test.wd
