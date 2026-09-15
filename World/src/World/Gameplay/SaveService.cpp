@@ -4,6 +4,7 @@
 #include "World/Schema/SchemaWriter.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
+#include "World/Scene/Hierarchy.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -165,6 +166,11 @@ namespace World::Gameplay
 		// GetRegistry()(非 const 版本会触发"运行期结构写"断言,const 版本在 entt 3.x 不支持遍历)。
 		entt::registry& registry = scene->m_Registry;
 		auto& storage = registry.storage<entt::entity>();
+		// 层级引用落成 UUID(entt 句柄跨会话无效):先建 handle → UUID 表。
+		std::unordered_map<entt::entity, UUID> uuidByHandle;
+		for (const entt::entity handle : storage)
+			if (registry.all_of<UUIDComponent>(handle))
+				uuidByHandle[handle] = registry.get<UUIDComponent>(handle).ID;
 		for (const entt::entity handle : storage)
 		{
 			Entity entity { scene, handle };
@@ -190,6 +196,20 @@ namespace World::Gameplay
 				for (const Schema::FieldSchema& field : schema->Fields)
 					writer.WriteField(field, instance);
 				writer.EndType(*schema);
+			}
+			// 引用:层级(父子)按 UUID 落盘,读档时重建 —— 直接存 entt 句柄会指向错误实体。
+			if (entity.HasComponent<HierarchyComponent>())
+			{
+				const HierarchyComponent& hierarchy = entity.GetComponent<HierarchyComponent>();
+				out << YAML::Key << "Hierarchy" << YAML::Value << YAML::BeginMap;
+				if (hierarchy.Parent != entt::null)
+					if (const auto parent = uuidByHandle.find(hierarchy.Parent); parent != uuidByHandle.end())
+						out << YAML::Key << "Parent" << YAML::Value << static_cast<uint64_t>(parent->second);
+				out << YAML::Key << "Children" << YAML::Value << YAML::BeginSeq;
+				for (const entt::entity child : hierarchy.Children)
+					if (const auto found = uuidByHandle.find(child); found != uuidByHandle.end())
+						out << static_cast<uint64_t>(found->second);
+				out << YAML::EndSeq << YAML::EndMap;
 			}
 			out << YAML::EndMap;
 		}
@@ -386,6 +406,47 @@ namespace World::Gameplay
 						++m_LastLoadReport.ComponentsFailed;
 						WLD_CORE_WARN("[save] component '{}' on entity {} failed to load",
 							schema->Id.Name, static_cast<uint64_t>(uuid));
+					}
+				}
+
+				// 引用重建:层级父子按 UUID 解析回 entt 句柄;引用不到的目标计入报告(失效引用可检出)。
+				if (const YAML::Node hierarchyNode = entityNode["Hierarchy"];
+					hierarchyNode && hierarchyNode.IsMap())
+				{
+					const auto resolve = [&](const YAML::Node& uuidNode, entt::entity* out)
+					{
+						if (!uuidNode)
+							return false;
+						const UUID reference(uuidNode.as<uint64_t>());
+						const auto it = byUuid.find(reference);
+						if (it == byUuid.end())
+							return false;
+						*out = static_cast<entt::entity>(it->second);
+						return true;
+					};
+
+					if (hierarchyNode["Parent"])
+					{
+						entt::entity parent = entt::null;
+						if (resolve(hierarchyNode["Parent"], &parent) && parent != static_cast<entt::entity>(entity))
+							Hierarchy::SetParent(registry, static_cast<entt::entity>(entity), parent);
+						else if (parent == entt::null)
+						{
+							++m_LastLoadReport.ReferencesMissing;
+							WLD_CORE_WARN("[save] hierarchy parent of entity {} is missing", static_cast<uint64_t>(uuid));
+						}
+					}
+					const YAML::Node children = hierarchyNode["Children"];
+					if (children && children.IsSequence())
+					{
+						for (const YAML::Node childNode : children)
+						{
+							entt::entity child = entt::null;
+							if (resolve(childNode, &child))
+								Hierarchy::SetParent(registry, child, static_cast<entt::entity>(entity));
+							else
+								++m_LastLoadReport.ReferencesMissing;
+						}
 					}
 				}
 			}

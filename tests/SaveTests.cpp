@@ -4,8 +4,10 @@
 #include "World/Gameplay/SaveService.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
+#include "World/Scene/Hierarchy.h"
 #include "World/Scene/Scene.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -182,6 +184,47 @@ int main()
 				CHECK(std::fabs(transform.Location.x - 7.0f) < 1e-4f);   // 上一步迁移后写入的值
 			}
 			CHECK(rebuilt);
+		}
+
+		// 10. W8-2:层级引用按 UUID 往返;引用不到的目标计入 ReferencesMissing。
+		{
+			const entt::entity parentHandle = registry.create();
+			registry.emplace<UUIDComponent>(parentHandle, UUID());
+			registry.emplace<TransformComponent>(parentHandle);
+			const entt::entity childHandle = registry.create();
+			registry.emplace<UUIDComponent>(childHandle, UUID());
+			registry.emplace<TransformComponent>(childHandle);
+			CHECK(Hierarchy::SetParent(registry, childHandle, parentHandle));
+			CHECK(registry.get<HierarchyComponent>(childHandle).Parent == parentHandle);
+
+			CHECK(saves.Save(7, "level-hierarchy"));
+			// 拆掉层级再读档:父子关系必须按 UUID 重建(而不是沿用旧句柄)。
+			CHECK(Hierarchy::SetParent(registry, childHandle, entt::null));
+			CHECK(saves.Load(7));
+			CHECK(registry.get<HierarchyComponent>(childHandle).Parent == parentHandle);
+			CHECK(saves.GetLastLoadReport().ReferencesMissing == 0);
+
+			// 失效引用:把存档里 Child 的 Parent 指向不存在的 UUID → 计入报告(不崩)。
+			const std::filesystem::path slotPath = saves.GetSlotPath(7);
+			std::string text;
+			{
+				std::ifstream stream(slotPath, std::ios::binary);
+				text.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+			}
+			const size_t position = text.find("Parent:");
+			CHECK(position != std::string::npos);
+			const size_t valueBegin = text.find_first_of("0123456789", position);
+			CHECK(valueBegin != std::string::npos);
+			size_t valueEnd = valueBegin;
+			while (valueEnd < text.size() && std::isdigit(static_cast<unsigned char>(text[valueEnd])))
+				++valueEnd;
+			text.replace(valueBegin, valueEnd - valueBegin, "900000000000000001");
+			{
+				std::ofstream stream(slotPath, std::ios::binary | std::ios::trunc);
+				stream << text;
+			}
+			CHECK(saves.Load(7));
+			CHECK(saves.GetLastLoadReport().ReferencesMissing >= 1);
 		}
 
 		// 9. W8-3 接线:GameApp 持有 SaveService(宿主注入场景来源),未注入前为空。

@@ -43,6 +43,7 @@ namespace World::Gameplay
 		uint32_t EntitiesCreated = 0;   // 存档里有、当前场景没有 → 新建
 		uint32_t ComponentsApplied = 0;
 		uint32_t ComponentsFailed = 0;  // 字段读取失败(保留默认值并告警)
+		uint32_t ReferencesMissing = 0; // 层级引用指向的实体在存档/场景中都不存在(失效引用可检出)
 	};
 
 	class WLD_API SaveService
