@@ -120,6 +120,49 @@ namespace World
 		Wui::WuiPaintContext paint(ctx);
 		m_Root->Paint(paint);
 
+		// ---- W3b-2:拖拽设父(目标行 = 成为其子节点;非法目标由内核环路检测拒绝)----
+		// 交互范式与 ContentBrowser 一致:按下即 BeginDrag(移动 >4px 才真正激活),
+		// 悬停在候选行上时登记落点并高亮,拖拽结束后统一提交。
+		std::string dragPayload;
+		const bool dragging = ctx.IsDragActive(&dragPayload);
+		for (size_t i = 0; i < m_Rows.size(); ++i)
+		{
+			const Wui::WuiRect rowRect = m_Rows[i]->Rect();
+			const bool hovered = ctx.IsHovered(rowRect);
+			if (ctx.Input().MouseDown[0] && hovered)
+			{
+				const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(m_RowEntities[i]));
+				ctx.BeginDrag(Wui::HashId(("hierarchy.drag." + std::to_string(handle)).c_str()),
+					"entity:" + std::to_string(handle));
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+			}
+			if (dragging && hovered && dragPayload.rfind("entity:", 0) == 0)
+			{
+				const uint32_t source = static_cast<uint32_t>(std::stoul(dragPayload.substr(7)));
+				const uint32_t target = static_cast<uint32_t>(static_cast<entt::entity>(m_RowEntities[i]));
+				if (source != target)
+				{
+					ctx.DropTarget(rowRect, "entity:");
+					m_PendingDropHandle = m_RowEntities[i];
+					m_PendingDropSource = source;
+					Wui::HighlightOutline(ctx, rowRect, theme.Accent, 2.0f, 2.0f);
+				}
+			}
+		}
+		if (!dragging && m_PendingDropHandle.IsValid() && m_PendingDropSource != 0)
+		{
+			const entt::entity child = static_cast<entt::entity>(m_PendingDropSource);
+			const entt::entity parent = m_PendingDropHandle;
+			if (scene->DeferStructuralChange([child, parent](Scene& s)
+				{
+					if (!Hierarchy::SetParent(s.GetRegistry(), child, parent))
+						WLD_CORE_WARN("Hierarchy: drag-drop rejected (cycle or invalid target)");
+				}))
+				host.MarkDocumentDirty();
+			m_PendingDropHandle = Entity();
+			m_PendingDropSource = 0;
+		}
+
 		// ---- 右键菜单(瞬态 overlay,不参与布局)----
 		bool itemRightClicked = false;
 		for (size_t i = 0; i < m_Rows.size(); ++i)

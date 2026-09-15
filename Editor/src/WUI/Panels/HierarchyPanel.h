@@ -22,6 +22,9 @@ namespace World
 		std::vector<Entity> m_RowEntities;
 		std::string m_LastOrderKey;
 		Entity m_Context;
+		// 拖拽设父的待提交落点(拖拽结束后统一提交)。
+		Entity m_PendingDropHandle;
+		uint32_t m_PendingDropSource = 0;
 		glm::vec2 m_MenuPos {};
 		glm::vec2 m_BlankMenuPos {};
 	};
