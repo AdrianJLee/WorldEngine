@@ -31,44 +31,54 @@ namespace World
 				default: return "?";
 			}
 		}
+
+		// 面板形态声明(单一事实源):Id 同时用于 Window 菜单、面板注册表与布局存档。
+		// Independent = "独立窗口"(自带 OS 窗口 + 标签栏;只能挂靠到主窗口顶部挂靠栏)。
+		struct PanelSpec
+		{
+			const char* Id;
+			EditorShell::PanelForm Form;
+			Wui::WuiRect DefaultFloatRect; // 独立形态:没有位置记忆时的默认屏幕矩形
+		};
+
+		const PanelSpec kPanelSpecs[] =
+		{
+			{ "hierarchy",       EditorShell::PanelForm::Docked, {} },
+			{ "properties",      EditorShell::PanelForm::Docked, {} },
+			{ "content_browser", EditorShell::PanelForm::Docked, {} },
+			{ "view",            EditorShell::PanelForm::Docked, {} },
+			{ "stats",           EditorShell::PanelForm::Docked, {} },
+			{ "memory",          EditorShell::PanelForm::Docked, {} },
+			{ "operations",      EditorShell::PanelForm::Docked, {} },
+			// 独立窗口(用户指定):Widget Gallery 与 Input Map。
+			{ "gallery",         EditorShell::PanelForm::Independent, { 120.0f, 120.0f, 520.0f, 400.0f } },
+			{ "input",           EditorShell::PanelForm::Independent, { 660.0f, 120.0f, 440.0f, 340.0f } },
+		};
 	}
 
 	EditorShell::EditorShell(EditorLayer& editor)
 		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json")
 	{
-		// 注意:"attach_slot" 暂不在默认面板列表/Window 菜单中暴露:
-		// W7.1 初版在"槽位面板存在 + 独立窗口创建"组合下会崩溃(已定位到槽位面板路径),
-		// 修复后再放回列表。面板实现与挂靠逻辑保留,便于继续排查。
-		// 注意:"windows"(Independent Windows 面板)暂不放回列表——它当前关闭时会崩溃,且布局保存会把
-		// "已注册但无归属"的面板写回停靠树(实测 RemoveTab 无法让它消失)。待崩溃修好后重新加入。
-		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "stats", "memory", "operations", "input" };
-		m_Panels = panels;
-		// W7-2:Input Map 设计为**独立窗口**(可按统一窗口模型挂靠到主窗口顶栏),
-		// 因此不进入默认停靠布局;仍保留在 m_Panels(Window 菜单可开关)。
-		std::vector<Wui::PanelId> dockedPanels = panels;
+		// 面板列表与默认停靠布局都由形态声明生成:独立形态面板不进停靠树。
+		// 注意:"windows"(Independent Windows 面板)与 "attach_slot" 仍未注册(等后续任务),
+		// 因此也不在声明表里——布局存档里若残留它们的记录会被加载白名单丢弃。
+		std::vector<Wui::PanelId> dockedPanels;
+		for (const PanelSpec& spec : kPanelSpecs)
+		{
+			m_Panels.push_back(spec.Id);
+			if (spec.Form == PanelForm::Docked)
+				dockedPanels.push_back(spec.Id);
+		}
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(dockedPanels);
 		std::string error;
 		if (!Wui::WuiLayoutStore::Load(m_LayoutPath, fallback, &m_Layout, &error))
 			WLD_CORE_WARN("Failed to load WUI layout, using default: {0}", error);
 
-		// 首次运行(或旧布局里没有该面板):把 Input Map 登记为浮动窗口,
-		// 下面的浮动分组循环会据此创建独立窗口。
-		// Input Map 设计为独立窗口:布局存档里可能残留"已挂靠到主窗口"的旧状态,
-		// 启动时清掉,避免它以挂靠标签的形式出现。
-		m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), "input"),
-			m_AttachedPanels.end());
-		// 同 Input Map:旧布局存档会把面板写回停靠树(默认布局改动对已存在的存档无效),
-		// 因此这里在加载后强制摘除"不要出现在停靠区"的面板(仍可由 Window 菜单打开)。
-		if (m_Layout.Contains("windows"))
-			m_Layout.RemoveTab("windows");
-		// 重要:启动期**不创建任何独立窗口**。面板一律按布局(默认=停靠)呈现,
-		// 独立窗口只在用户从 Window 菜单打开对应面板时创建(该路径待按预期行为重新实现)。
-		// 之前在这里"无条件登记浮动 + AddFloatWindow"导致启动弹出多个独立窗口,已移除。
-		(void)0;
-
-
-		// 尊重用户关闭的面板:仅当布局文件缺失/损坏时使用默认布局,
-		// 不把"已关闭"的面板强制补回。重新显示由 Window 菜单负责。
+		// 加载白名单(按声明纠正存档,不尝试"修复"矛盾记录):
+		//  - 未声明的历史面板、声明为独立窗口的面板:从停靠树/浮动记录里直接丢弃;
+		//  - 声明为停靠的面板:临时拖出不跨会话(回停靠树)。
+		StripIndependentPanelsFromTree(m_Layout);
+		RestoreDockedPanelsFromFloat(m_Layout);
 
 		m_PanelRegistry.emplace("hierarchy", std::make_unique<HierarchyPanel>());
 		m_PanelRegistry.emplace("properties", std::make_unique<PropertiesPanel>(*this));
@@ -79,12 +89,14 @@ namespace World
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("input", std::make_unique<InputMapPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
-		// "windows" 面板暂不注册(见上方注释):不注册才能保证布局保存/恢复都不会把它写回停靠区。
-		// 独立窗口(与停靠面板是不同组件):按屏幕矩形分组重建,
-		// 同一窗口的多个标签共享一个容器(多标签窗口)。
+
+		// 恢复"上次退出时开着"的独立窗口:存档里仍有浮动记录 = 上次开着(关掉的不会自动弹出)。
+		// 按屏幕矩形分组重建:同一窗口的多个标签共享一个容器;AddFloatWindow 内部按面板去重。
 		std::map<std::tuple<int, int, int, int>, std::vector<std::string>> floatGroups;
 		for (const Wui::DockFloat& entry : m_Layout.Floating)
 		{
+			if (!IsIndependentPanel(entry.Panel))
+				continue;
 			const auto key = std::make_tuple(
 				static_cast<int>(entry.Rect.X), static_cast<int>(entry.Rect.Y),
 				static_cast<int>(entry.Rect.W), static_cast<int>(entry.Rect.H));
@@ -109,6 +121,89 @@ namespace World
 	}
 
 	EditorShell::~EditorShell() = default;
+
+	// ---- 面板形态(单一事实源,见 EditorShell.h / T03 方案)----
+
+	EditorShell::PanelForm EditorShell::FormOf(const std::string& panel) const
+	{
+		for (const PanelSpec& spec : kPanelSpecs)
+			if (panel == spec.Id)
+				return spec.Form;
+		return PanelForm::Docked; // 未声明面板按停靠处理,加载白名单会把它们丢掉
+	}
+
+	bool EditorShell::IsDeclaredPanel(const std::string& panel) const
+	{
+		for (const PanelSpec& spec : kPanelSpecs)
+			if (panel == spec.Id)
+				return true;
+		return false;
+	}
+
+	// 独立窗口只能以"独立窗口"存在:存档/撤销里的停靠树记录一律丢弃(不尝试修复)。
+	// 同时清掉未声明的历史面板(如已下线的 "windows"),避免它们被保存路径写回停靠树。
+	void EditorShell::StripIndependentPanelsFromTree(Wui::DockLayout& layout) const
+	{
+		std::vector<Wui::PanelId> docked;
+		layout.AllPanels(&docked);
+		for (const Wui::PanelId& panel : docked)
+			if (!IsDeclaredPanel(panel) || IsIndependentPanel(panel))
+				layout.RemoveTab(panel);
+
+		const auto undeclared = [this](const Wui::DockFloat& entry) { return !IsDeclaredPanel(entry.Panel); };
+		layout.Floating.erase(std::remove_if(layout.Floating.begin(), layout.Floating.end(), undeclared),
+			layout.Floating.end());
+		layout.FloatMemory.erase(std::remove_if(layout.FloatMemory.begin(), layout.FloatMemory.end(), undeclared),
+			layout.FloatMemory.end());
+	}
+
+	// 停靠形态面板的"临时拖出"不跨会话:加载/保存时回停靠树(位置记忆仍保留在 FloatMemory)。
+	void EditorShell::RestoreDockedPanelsFromFloat(Wui::DockLayout& layout) const
+	{
+		for (const PanelSpec& spec : kPanelSpecs)
+		{
+			if (spec.Form != PanelForm::Docked || !layout.IsFloating(spec.Id))
+				continue;
+			layout.Floating.erase(std::remove_if(layout.Floating.begin(), layout.Floating.end(),
+				[&](const Wui::DockFloat& entry) { return entry.Panel == spec.Id; }), layout.Floating.end());
+			if (layout.Contains(spec.Id))
+				continue;
+			const Wui::PanelId anchor = layout.FirstPanel();
+			if (!anchor.empty())
+			{
+				layout.AddTab(spec.Id, anchor, Wui::DropZone::Center);
+				continue;
+			}
+			// 停靠树为空(用户关掉了所有停靠面板):重建一个只含该面板的根 tab 组。
+			Wui::DockLayout fresh;
+			fresh.Floating = std::move(layout.Floating);
+			fresh.FloatMemory = std::move(layout.FloatMemory);
+			fresh.Root.Panels.push_back(spec.Id);
+			fresh.Root.Active = 0;
+			layout = std::move(fresh);
+		}
+	}
+
+	Wui::DockLayout EditorShell::LayoutForSave() const
+	{
+		Wui::DockLayout out = m_Layout;
+		StripIndependentPanelsFromTree(out);
+		RestoreDockedPanelsFromFloat(out);
+		return out;
+	}
+
+	Wui::WuiRect EditorShell::FloatRectFor(const std::string& panel) const
+	{
+		if (const auto remembered = m_LastFloatRects.find(panel); remembered != m_LastFloatRects.end())
+			return remembered->second;
+		for (const PanelSpec& spec : kPanelSpecs)
+			if (panel == spec.Id && spec.Form == PanelForm::Independent)
+				return spec.DefaultFloatRect;
+		int windowX = 0, windowY = 0;
+		if (Application::HasInstance())
+			Application::Get().GetWindow().GetPosition(&windowX, &windowY);
+		return { static_cast<float>(windowX) + 140.0f, static_cast<float>(windowY) + 100.0f, 480.0f, 340.0f };
+	}
 
 	void EditorShell::ReleaseIndependentWindows()
 	{
@@ -234,7 +329,8 @@ namespace World
 	void EditorShell::SaveLayout()
 	{
 		std::string error;
-		if (!Wui::WuiLayoutStore::Save(m_LayoutPath, m_Layout, &error))
+		// 落盘前按形态声明规范化:独立窗口不进停靠树;停靠面板不持久化"临时拖出"。
+		if (!Wui::WuiLayoutStore::Save(m_LayoutPath, LayoutForSave(), &error))
 			WLD_CORE_WARN("Failed to save WUI layout: {0}", error);
 	}
 
@@ -275,58 +371,93 @@ namespace World
 				m_ActiveWindowTag.clear();
 			return;
 		}
+		// 独立窗口:开着 → 关闭(隐藏复用,不写回停靠树);关着 → 打开/复用同一窗口。
+		if (IsIndependentPanel(panel))
+		{
+			if (m_Layout.IsFloating(panel))
+			{
+				HideFloatPanel(panel, &ctx);
+				return;
+			}
+			OpenIndependentPanel(panel);
+			RecordDockChange(ctx, "float", panel, before);
+			return;
+		}
+		// 停靠形态面板:临时浮动着 → 回停靠位(D3);已停靠 → 隐藏;两者都不是 → 回到停靠树。
 		if (m_Layout.IsFloating(panel))
 		{
-			// 隐藏独立窗口内的该面板:它只是窗口的一个标签,窗口可继续承载其它面板。
-			HideFloatPanel(panel, &ctx);
+			if (DockPanelBackToTree(panel))
+				RecordDockChange(ctx, "dock", panel, before);
 			return;
 		}
 		if (m_Layout.Contains(panel))
 		{
 			if (m_Layout.RemoveTab(panel))
 				RecordDockChange(ctx, "hide", panel, before);
+			return;
 		}
-		else
 		{
-			// 只有可浮动的面板(Widget 画廊)从 Window 菜单打开时以独立窗口出现;
-			// 其余面板回到停靠树。
-			if (!IsFloatablePanel(panel))
+			const std::string anchor = m_Layout.FirstPanel();
+			if (anchor.empty())
 			{
-				const std::string anchor = m_Layout.FirstPanel();
-				if (anchor.empty())
-				{
-					Wui::DockLayout fresh;
-					fresh.Root.Panels.push_back(panel);
-					m_Layout = std::move(fresh);
-					RecordDockChange(ctx, "show", panel, before);
-				}
-				else if (m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
-					RecordDockChange(ctx, "show", panel, before);
-				return;
+				Wui::DockLayout fresh;
+				fresh.Root.Panels.push_back(panel);
+				fresh.Root.Active = 0;
+				m_Layout = std::move(fresh);
+				RecordDockChange(ctx, "show", panel, before);
 			}
-			Wui::WuiRect rect;
-			const auto remembered = m_LastFloatRects.find(panel);
-			if (remembered != m_LastFloatRects.end())
-				rect = remembered->second;
-			if (rect.W < 200.0f || rect.H < 140.0f)
-			{
-				int windowX = 0, windowY = 0;
-				if (Application::HasInstance())
-					Application::Get().GetWindow().GetPosition(&windowX, &windowY);
-				rect = { static_cast<float>(windowX) + 140.0f, static_cast<float>(windowY) + 100.0f, 520.0f, 400.0f };
-			}
-			// 该面板此刻既不在停靠树也不在浮动列表(Float 只接受已停靠面板),
-			// 直接登记浮动记录再创建窗口。
-			m_Layout.Floating.push_back({ panel, rect });
-			AddFloatWindow(panel, rect, "reopen");
-			RecordDockChange(ctx, "float", panel, before);
+			else if (m_Layout.AddTab(panel, anchor, Wui::DropZone::Center))
+				RecordDockChange(ctx, "show", panel, before);
 		}
+	}
+
+	// 停靠形态面板:从"临时拖出"回到停靠树(锚点 = 树里第一个面板;树为空则重建根 tab 组)。
+	bool EditorShell::DockPanelBackToTree(const std::string& panel)
+	{
+		if (IsIndependentPanel(panel))
+			return false;
+		bool changed = false;
+		if (m_Layout.IsFloating(panel))
+		{
+			m_Layout.Floating.erase(std::remove_if(m_Layout.Floating.begin(), m_Layout.Floating.end(),
+				[&](const Wui::DockFloat& entry) { return entry.Panel == panel; }), m_Layout.Floating.end());
+			changed = true;
+		}
+		if (m_Layout.Contains(panel))
+			return changed;
+		const Wui::PanelId anchor = m_Layout.FirstPanel();
+		if (!anchor.empty())
+			return m_Layout.AddTab(panel, anchor, Wui::DropZone::Center) || changed;
+		const std::vector<Wui::DockFloat> floating = std::move(m_Layout.Floating);
+		const std::vector<Wui::DockFloat> memory = std::move(m_Layout.FloatMemory);
+		Wui::DockLayout fresh;
+		fresh.Root.Panels.push_back(panel);
+		fresh.Root.Active = 0;
+		fresh.Floating = floating;
+		fresh.FloatMemory = memory;
+		m_Layout = std::move(fresh);
+		return true;
+	}
+
+	// Window 菜单:打开独立形态面板 = 复用已隐藏的窗口(含它原有的其它标签)。
+	void EditorShell::OpenIndependentPanel(const std::string& panel)
+	{
+		const Wui::WuiRect rect = FloatRectFor(panel);
+		if (!m_Layout.IsFloating(panel))
+			m_Layout.Floating.push_back({ panel, rect });
+		m_LastFloatRects[panel] = rect;
+		AddFloatWindow(panel, rect, "open");
 	}
 
 	void EditorShell::ResetLayout(Wui::WuiContext& ctx)
 	{
 		const std::string before = m_Layout.Serialize();
-		m_Layout = Wui::DockLayout::Default(m_Panels);
+		// 重置也要按形态声明:独立窗口面板不进停靠树。
+		std::vector<Wui::PanelId> dockedPanels;
+		for (const PanelSpec& spec : kPanelSpecs)
+			if (spec.Form == PanelForm::Docked)
+				dockedPanels.push_back(spec.Id);
+		m_Layout = Wui::DockLayout::Default(dockedPanels);
 		RecordDockChange(ctx, "reset", "", before);
 	}
 
@@ -355,7 +486,10 @@ namespace World
 		const Wui::WuiRect editorArea { 0, editorTop, viewport.x, viewport.y - editorTop };
 		std::string edgePayload;
 		const bool edgeDragActive = ctx.IsDragActive(&edgePayload) && edgePayload.rfind("panel:", 0) == 0;
-		if (edgeDragActive)
+		// 独立窗口不参与四边停靠:它只能挂靠到顶部挂靠栏。
+		const bool edgeDragIndependent = edgeDragActive
+			&& IsIndependentPanel(edgePayload.substr(6));
+		if (edgeDragActive && !edgeDragIndependent)
 		{
 			m_EdgeDockActive = false;
 			m_EdgeDropZone = Wui::DropZone::Center;
@@ -411,7 +545,16 @@ namespace World
 			{
 				const std::string panel = payload.substr(6);
 				const bool floating = m_Layout.IsFloating(panel);
-				if (m_EdgeDockActive && (floating || m_Layout.Contains(panel)))
+				// 独立窗口只能挂靠到顶部挂靠栏:落到停靠区/面板一律忽略,窗口留在原处。
+				if (IsIndependentPanel(panel))
+				{
+					m_DropTargetPanel.clear();
+					m_DropZone = Wui::DropZone::Center;
+					m_EdgeDockActive = false;
+					m_EdgeDropZone = Wui::DropZone::Center;
+					m_MovingFloat.clear();
+				}
+				else if (m_EdgeDockActive && (floating || m_Layout.Contains(panel)))
 				{
 					const std::string before = m_Layout.Serialize();
 					const bool docked = floating
@@ -455,7 +598,7 @@ namespace World
 			// 只有"本次拖拽确实起手于该面板的标签页"时才允许拖出为独立窗口;
 			// 否则残留的拖拽状态会在挂靠后立刻把面板再次浮出(表现为多出一个窗口)。
 			if (!dropConsumed && m_AttachCooldownFrames <= 0 && m_Layout.Contains(m_DragPanel)
-				&& m_TabDragPanel == m_DragPanel && IsFloatablePanel(m_DragPanel))
+				&& m_TabDragPanel == m_DragPanel)
 			{
 				// 拖出即成为独立 OS 窗口:按原停靠尺寸创建,放在鼠标所在的屏幕位置。
 				Wui::WuiRect source { m_LastDragPos.x - 40.0f, m_LastDragPos.y - 12.0f, 480.0f, 320.0f };
@@ -500,11 +643,15 @@ namespace World
 		{
 			// 其他类型的拖拽(file: 等)不参与面板浮动。
 			m_DragPanel.clear();
+			m_TabDragPanel.clear();
 		}
 		else if (!m_DragPanel.empty())
 		{
 			// 拖拽结束:落点已在上方处理;未回收则保持浮动位置。
 			m_DragPanel.clear();
+			// 拖拽起点标记必须一起清掉:残留会让下一次"拖出"把已经收回停靠的面板
+			// 立刻再次浮出(表现为关闭临时窗口后窗口又跳出来)。
+			m_TabDragPanel.clear();
 			m_MovingFloat.clear();
 		}
 
@@ -619,7 +766,9 @@ namespace World
 			RenderPanelContent(ctx, node.Panels[node.Active], content);
 
 		std::string dragPayload;
-		if (!m_EdgeDockActive && ctx.IsDragActive(&dragPayload) && dragPayload.rfind("panel:", 0) == 0 && ctx.IsHovered(area))
+		// 独立窗口不能在停靠面板上落区(只能挂靠到顶部挂靠栏)。
+		if (!m_EdgeDockActive && ctx.IsDragActive(&dragPayload) && dragPayload.rfind("panel:", 0) == 0
+			&& !IsIndependentPanel(dragPayload.substr(6)) && ctx.IsHovered(area))
 		{
 			const glm::vec2 rel = ctx.Input().MousePos - glm::vec2 { area.X, area.Y };
 			const float lx = area.W > 0 ? rel.x / area.W : 0;
@@ -911,35 +1060,21 @@ namespace World
 					entry->Rect = rect;
 
 			// 挂靠判定:拖动结束后光标落在主窗口顶栏(挂靠栏)上 → 挂靠;
-			// 只在"刚移动过"的短时间内判定,避免窗口被移到栏附近就误挂靠。
+			// 判定只在"拖动经过顶部栏"时点亮提示;真正的挂靠动作发生在松手时
+			// (UpdateCrossWindowDrag)——悬停即挂靠会让拖动路径经过顶部栏时被截断。
 			const std::string windowKey = host.Panels().front();
-			const auto previous = m_LastFloatScreenRects.find(windowKey);
-			const bool moved = previous == m_LastFloatScreenRects.end()
-				|| std::fabs(previous->second.X - rect.X) >= 0.5f || std::fabs(previous->second.Y - rect.Y) >= 0.5f;
 			m_LastFloatScreenRects[windowKey] = rect;
-			if (moved)
-				m_FloatLastMoveFrame[windowKey] = ctx.Frame();
-
 			POINT cursor { 0, 0 };
 			GetCursorPos(&cursor);
-			const bool cursorOverSlot = m_AttachSlotScreenRect.W > 0.0f && m_AttachSlotScreenRect.H > 0.0f
+			// 挂靠栏只接受独立窗口:停靠形态的临时浮动不参与挂靠(高亮也不点亮)。
+			const bool cursorOverSlot = IsIndependentPanel(windowKey)
+				&& m_AttachSlotScreenRect.W > 0.0f && m_AttachSlotScreenRect.H > 0.0f
 				&& cursor.x >= static_cast<LONG>(m_AttachSlotScreenRect.X)
 				&& cursor.x <= static_cast<LONG>(m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W)
 				&& cursor.y >= static_cast<LONG>(m_AttachSlotScreenRect.Y)
 				&& cursor.y <= static_cast<LONG>(m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H);
-			const auto lastMove = m_FloatLastMoveFrame.find(windowKey);
-			const bool recentlyMoved = lastMove != m_FloatLastMoveFrame.end()
-				&& ctx.Frame() - lastMove->second <= 30;
 			if (cursorOverSlot)
-			{
 				m_AttachSlotHighlight = true;
-				if (recentlyMoved)
-				{
-					AttachIndependentWindowToSlot(windowKey);
-					m_FloatLastMoveFrame.erase(windowKey);
-					continue; // host 已销毁
-				}
-			}
 			++i;
 		}
 		for (const std::string& panel : closeRequests)
@@ -973,22 +1108,14 @@ namespace World
 			PanelTitle(m_CrossDragPanel), m_Theme.Text, 13.0f);
 		ctx.PopOverlay();
 
-		// 目标命中:其他独立窗口的标题栏+标签栏区域(顶部约 64px)。
+		// 独立窗口之间不是合法落点(T03:只能挂靠到顶部挂靠栏,不能互相附加标签)。
 		m_CrossDragTargetKey.clear();
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
-		{
-			const Wui::WuiRect rect = host->ScreenRect();
-			const Wui::WuiRect dropZone { rect.X, rect.Y, rect.W, 64.0f };
-			const bool hit = host->Panels().front() != m_CrossDragSourceKey
-				&& pos.x >= dropZone.X && pos.x <= dropZone.X + dropZone.W
-				&& pos.y >= dropZone.Y && pos.y <= dropZone.Y + dropZone.H;
-			host->SetTabDropHighlight(hit);
-			if (hit)
-				m_CrossDragTargetKey = host->Panels().front();
-		}
+			host->SetTabDropHighlight(false);
 
 		// 挂靠栏(主窗口)也是有效落点,优先级高于其他独立窗口。
-		const bool overAttachBar = m_AttachSlotScreenRect.W > 0.0f
+		const bool overAttachBar = IsIndependentPanel(m_CrossDragPanel)
+			&& m_AttachSlotScreenRect.W > 0.0f
 			&& pos.x >= m_AttachSlotScreenRect.X && pos.x <= m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W
 			&& pos.y >= m_AttachSlotScreenRect.Y && pos.y <= m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H;
 		m_AttachSlotHighlight = overAttachBar;
@@ -1000,24 +1127,12 @@ namespace World
 			return;
 
 		const std::string panel = m_CrossDragPanel;
-		const std::string sourceKey = m_CrossDragSourceKey;
 		FloatWindowHost* source = FindFloatHost(panel);
-		FloatWindowHost* target = m_CrossDragTargetKey.empty() ? nullptr : FindFloatHost(m_CrossDragTargetKey);
 		if (source)
 			source->SetTabDragActive(false);
 
-		if (target && source && source != target)
-		{
-			// 附加到目标窗口:面板从源窗口迁移到目标窗口标签栏。
-			source->RemovePanel(panel);
-			target->AddPanel(panel, true);
-			if (source->Empty())
-				source->SetHidden(true); // 复用:隐藏而非销毁
-			if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
-				entry->Rect = target->ScreenRect();
-			ctx.RecordOp("float", "attach", panel, m_CrossDragTargetKey);
-		}
-		else if (overAttachBar)
+		// 整窗挂靠到顶部挂靠栏(唯一合法落点)。
+		if (overAttachBar)
 		{
 			AttachIndependentWindowToSlot(panel);
 		}
@@ -1062,6 +1177,16 @@ namespace World
 	{
 		WLD_CORE_INFO("[float] AddFloatWindow panel={0} origin={1} rect=({2},{3},{4},{5})",
 			panel, origin, screenRect.X, screenRect.Y, screenRect.W, screenRect.H);
+		// 去重(T03):同一面板最多一个窗口——已存在的窗口(可见或隐藏)直接复用,
+		// 避免"同一面板被创建两次"这类布局乱象。
+		if (FloatWindowHost* existing = FindFloatHost(panel))
+		{
+			existing->SetScreenPosition(screenRect.X, screenRect.Y);
+			existing->ActivatePanel(panel);
+			existing->SetHidden(false);
+			WLD_CORE_INFO("[float] reused existing window for panel={0}", panel);
+			return;
+		}
 		// 复用已隐藏的独立窗口:运行期销毁窗口在 Vulkan 下会崩,因此"关闭/挂靠"只隐藏。
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
 		{
@@ -1087,6 +1212,7 @@ namespace World
 		};
 		callbacks.DockToMain = [this](const std::string& id) { AttachIndependentWindowToSlot(id); };
 		callbacks.CloseWindow = [this](const std::string& id) { CloseFloatWindow(id, false, m_Ctx); };
+		callbacks.CanAttach = [this](const std::string& id) { return IsIndependentPanel(id); };
 		try
 		{
 			m_FloatHosts.push_back(std::make_unique<FloatWindowHost>(panel, PanelTitle(panel), screenRect, std::move(callbacks)));
@@ -1186,6 +1312,12 @@ namespace World
 		FloatWindowHost* host = FindFloatHost(panel);
 		if (!host)
 			return;
+		// 只有声明为"独立窗口"的面板能挂靠到顶部挂靠栏;停靠形态的临时浮动不允许挂靠。
+		if (!IsIndependentPanel(panel))
+		{
+			WLD_CORE_INFO("[float] panel '{0}' is a docked panel; attach ignored", panel);
+			return;
+		}
 		const std::vector<std::string> panels = host->Panels();
 		const Wui::WuiRect rect = host->ScreenRect();
 		for (const std::string& id : panels)
@@ -1225,8 +1357,12 @@ namespace World
 				host->SetHidden(true); // 复用:隐藏而非销毁
 		}
 		m_LastFloatScreenRects.erase(panel);
-		// 宿主不存在时也清掉浮动记录(保持"隐藏即从布局移除"的旧语义)。
-		if (m_Layout.CloseFloating(panel) && ctx)
+		// 独立形态:隐藏即从浮动记录移除(Window 菜单可重开);
+		// 停靠形态:临时拖出的标签关闭 = 回停靠位(D3)。
+		const bool changed = IsIndependentPanel(panel)
+			? m_Layout.CloseFloating(panel)
+			: DockPanelBackToTree(panel);
+		if (changed && ctx)
 			RecordDockChange(*ctx, "hide", panel, before);
 	}
 
@@ -1240,6 +1376,9 @@ namespace World
 			// 宿主已不存在:仅清理浮动记录,避免残留"看不见的窗口"。
 			if (m_Layout.CloseFloating(panel) && recordChange && ctx)
 				RecordDockChange(*ctx, "hide", panel, before);
+			// 停靠形态的"临时浮动"关闭后应回停靠位(独立形态保持隐藏)。
+			if (!IsIndependentPanel(panel))
+				DockPanelBackToTree(panel);
 			return;
 		}
 		const std::vector<std::string> panels = host->Panels();
@@ -1252,8 +1391,17 @@ namespace World
 		{
 			if (Wui::DockFloat* entry = m_Layout.FindFloat(id))
 				entry->Rect = rect;
-			m_LastFloatRects[id] = rect;
-			changed = m_Layout.CloseFloating(id) || changed;
+			// 独立形态:关闭 = 隐藏复用(移除浮动记录,便于 Window 菜单重开)。
+			// 停靠形态:临时拖出不跨会话,直接回停靠树(D3)。
+			if (IsIndependentPanel(id))
+			{
+				m_LastFloatRects[id] = rect;
+				changed = m_Layout.CloseFloating(id) || changed;
+			}
+			else
+			{
+				changed = DockPanelBackToTree(id) || changed;
+			}
 		}
 		if (changed && recordChange && ctx)
 			RecordDockChange(*ctx, "hide", panel, before);

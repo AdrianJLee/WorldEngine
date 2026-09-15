@@ -338,8 +338,10 @@ namespace World
 		const Wui::WuiRect panelRect { bar.X, bar.Y + bar.H + 2.0f, 160.0f, 2 * 22.0f + 8.0f };
 		ctx.PushOverlay();
 		Wui::DrawPanelSurface(ctx, panelRect, theme);
+		// 挂靠只对"独立窗口"面板开放:停靠形态的临时浮动不提供该入口。
+		const bool canAttach = !m_Callbacks.CanAttach || m_Callbacks.CanAttach(panel);
 		if (Wui::MenuItem(ctx, Wui::HashId("float.window.menu.dock"),
-			{ panelRect.X + 4.0f, panelRect.Y + 4.0f, panelRect.W - 8.0f, 22.0f }, "Dock to Main", true, theme))
+			{ panelRect.X + 4.0f, panelRect.Y + 4.0f, panelRect.W - 8.0f, 22.0f }, "Attach to Top Bar", canAttach, theme))
 		{
 			m_MenuOpen = false;
 			ctx.CloseAllPopups();

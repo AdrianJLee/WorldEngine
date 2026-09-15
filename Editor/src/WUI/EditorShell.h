@@ -70,8 +70,13 @@ namespace World
 		std::string IndependentWindowLabel(size_t index) const override;
 		void FocusIndependentWindow(const std::string& panel) override;
 		void DockBackIndependentWindow(const std::string& panel) override;
-		// 仅 Widget 画廊可以作为独立窗口存在;其余面板只停靠。
-		bool IsFloatablePanel(const std::string& panel) const { return panel == "gallery"; }
+		// ---- 面板形态(单一事实源)----
+		// 每个面板要么是普通停靠面板,要么是"独立窗口"(自带 OS 窗口 + 标签栏)。
+		// 形态只在声明表里写一次,其余判定一律读 FormOf(),不再按面板名特判。
+		enum class PanelForm { Docked, Independent };
+		PanelForm FormOf(const std::string& panel) const;
+		bool IsDeclaredPanel(const std::string& panel) const;
+		bool IsIndependentPanel(const std::string& panel) const { return FormOf(panel) == PanelForm::Independent; }
 		bool AttachSlotHighlighted() const override { return m_AttachSlotHighlight; }
 		void AttachIndependentWindowToSlot(const std::string& panel) override;
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;
@@ -96,6 +101,19 @@ namespace World
 		void CloseFloatWindow(const std::string& panel, bool recordChange, Wui::WuiContext* ctx);
 		// 隐藏单个面板(标签栏 x 或 Window 菜单):窗口为空时销毁该窗口。
 		void HideFloatPanel(const std::string& panel, Wui::WuiContext* ctx);
+		// ---- 形态规则(T03)----
+		// 加载/保存时按声明纠正布局:
+		//  - 独立形态面板(以及未声明的历史面板)不得出现在停靠树与浮动记录里;
+		//  - 停靠形态面板的"临时拖出"不跨会话(保存时回停靠树)。
+		void StripIndependentPanelsFromTree(Wui::DockLayout& layout) const;
+		void RestoreDockedPanelsFromFloat(Wui::DockLayout& layout) const;
+		Wui::DockLayout LayoutForSave() const;
+		// 停靠形态面板:关闭"临时浮动"时回到停靠树(而不是变成隐藏面板)。
+		bool DockPanelBackToTree(const std::string& panel);
+		// Window 菜单:打开/复用独立形态面板的窗口(已隐藏的窗口直接复用)。
+		void OpenIndependentPanel(const std::string& panel);
+		// 独立窗口的屏幕矩形:优先用跨会话位置记忆,其次用声明表里的默认值。
+		Wui::WuiRect FloatRectFor(const std::string& panel) const;
 		// 承载指定面板的独立窗口查找入口(W7.3 跨窗口附加按它定位目标/源窗口)。
 		// 跨窗口迁移配方:源/目标窗口用 FindFloatHost 定位,面板迁移用 AddPanel/RemovePanel,
 		// 迁移后把该面板的 DockFloat.Rect 写成目标窗口 ScreenRect();源窗口为空则 EraseFloatHost。
@@ -156,8 +174,6 @@ namespace World
 		glm::vec2 m_CrossDragGrab { 0, 0 };
 		// 上一帧各独立窗口的位置(用于判断"停稳在槽位上")。
 		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatScreenRects;
-		// 各独立窗口最近一次移动的帧号:拖到主窗口顶栏后短时间内松手才挂靠。
-		std::unordered_map<std::string, uint64_t> m_FloatLastMoveFrame;
 
 		// 面板拖拽/浮动状态。
 		std::string m_DragPanel;            // 本帧拖拽中的面板(来自 payload "panel:")

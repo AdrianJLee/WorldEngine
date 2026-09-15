@@ -29,6 +29,8 @@ namespace World
 			// 窗口自带菜单的动作(每个独立窗口有自己的菜单栏)。
 			std::function<void(const std::string& panel)> DockToMain;
 			std::function<void(const std::string& panel)> CloseWindow;
+			// 该面板是否允许挂靠到主窗口顶部挂靠栏(只有声明为独立窗口的面板允许)。
+			std::function<bool(const std::string& panel)> CanAttach;
 		};
 
 		FloatWindowHost(std::string panel, std::string title, const Wui::WuiRect& screenRect, Callbacks callbacks);
