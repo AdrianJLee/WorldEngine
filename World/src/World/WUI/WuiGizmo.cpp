@@ -224,15 +224,27 @@ namespace World::Wui
 			int picked = hoveredAxis;
 			if (picked < 0 && operation == GizmoOperation::Rotate)
 			{
-				// 环命中:鼠标到中心的距离接近投影半径即可(足够稳定,不必解椭圆)。
+				// 环命中:算鼠标到**投影环折线**的最短距离,取最近的那个环。
+				// (此前用"到中心的距离 ≈ 半径"近似,投影成椭圆后完全不准 → 很难选中对应轴。)
+				float bestDistance = kPickTolerance + 2.0f;
 				for (int i = 0; i < 3; ++i)
 				{
 					const auto ring = ringRadiusFor(i);
-					const float radius = glm::length(ring[0] - center);
-					if (std::fabs(glm::length(mouse - center) - radius) <= kPickTolerance)
+					float ringDistance = 1e9f;
+					for (int s = 0; s < kRingSegments; ++s)
 					{
+						const glm::vec2& a = ring[s];
+						const glm::vec2& b = ring[(s + 1) % kRingSegments];
+						const glm::vec2 ab = b - a;
+						const float lengthSquared = glm::dot(ab, ab);
+						const float t = lengthSquared > 1e-6f
+							? glm::clamp(glm::dot(mouse - a, ab) / lengthSquared, 0.0f, 1.0f) : 0.0f;
+						ringDistance = std::min(ringDistance, glm::length(mouse - (a + ab * t)));
+					}
+					if (ringDistance <= kPickTolerance && ringDistance < bestDistance)
+					{
+						bestDistance = ringDistance;
 						picked = i;
-						break;
 					}
 				}
 			}
@@ -270,7 +282,23 @@ namespace World::Wui
 			}
 			else if (operation == GizmoOperation::Scale)
 			{
-				const float amount = 1.0f + (delta.x - delta.y) * 0.006f;
+				// 沿"选中轴的屏幕方向"投影位移;轴指向相机(屏幕投影退化)时改用
+				// "离 gizmo 中心的距离变化" → 往外拉一定变大,不会出现"往外拉反而缩小"。
+				float drive = 0.0f;
+				if (activeAxis >= 0 && activeAxis < 3)
+				{
+					const glm::vec2 axisDirection = startAxisScreen[activeAxis];
+					const float axisLength = glm::length(axisDirection);
+					if (axisLength > 0.3f)
+						drive = glm::dot(delta, axisDirection / axisLength);
+					else
+						drive = glm::length(mouse - startCenter) - glm::length(startMouse - startCenter);
+				}
+				else
+				{
+					drive = delta.x - delta.y;   // 中心方块:等比缩放(保留原有手感)
+				}
+				const float amount = 1.0f + drive * 0.006f;
 				if (activeAxis == 0)
 					transform.Scale.x = std::max(0.01f, startScale.x * amount);
 				else if (activeAxis == 1)
