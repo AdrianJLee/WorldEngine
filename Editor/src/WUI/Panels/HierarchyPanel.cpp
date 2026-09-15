@@ -16,6 +16,22 @@
 
 namespace World
 {
+	namespace
+	{
+		// 解析内容根(开发布局为 Game/assets,打包布局由清单决定);失败时返回空路径。
+		std::filesystem::path ResolveContentRoot()
+		{
+			std::filesystem::path manifestPath;
+			if (!World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+				return {};
+			std::string error;
+			World::Asset::ProjectManifest manifest;
+			if (!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+				return {};
+			return manifest.ResolveContentRoot(manifestPath);
+		}
+	}
+
 	void HierarchyPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
@@ -296,7 +312,7 @@ namespace World
 		{
 			// 右键菜单走组件(ContextMenu):位置钉住 + 外部点击/Esc 关闭统一由组件处理。
 			Wui::WuiRect panel;
-			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 150.0f, 4, &panel, theme))
+			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 170.0f, 5, &panel, theme))
 			{
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.duplicate"),
 					{ panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Duplicate", theme))
@@ -341,6 +357,35 @@ namespace World
 					const entt::entity child = m_Context;
 					scene->DeferStructuralChange([child](Scene& s) { Hierarchy::ClearParent(s.GetRegistry(), child); });
 					host.MarkDocumentDirty();
+					ctx.CloseAllPopups();
+				}
+				// W4-2c:把选中实体的子树导出为 .wprefab(落在内容根 prefabs/ 下)。
+				// 说明:首版不做文件对话框,固定目录 + 以 Tag 命名,便于立刻验证拖拽实例化链路。
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.exportprefab"),
+					{ panel.X + 4, panel.Y + 92, panel.W - 8, 22 }, "Export as Prefab (.wprefab)", theme))
+				{
+					const std::filesystem::path contentRoot = ResolveContentRoot();
+					if (contentRoot.empty())
+					{
+						WLD_CORE_WARN("Export Prefab: content root not found (project.we.yaml?)");
+					}
+					else
+					{
+						std::string tag = m_Context.GetComponent<TagComponent>().Tag;
+						if (tag.empty())
+							tag = "Prefab";
+						for (char& ch : tag)
+							if (ch == ' ' || ch == '/' || ch == '\\' || ch == ':')
+								ch = '_';
+						const std::filesystem::path output =
+							contentRoot / "prefabs" / (tag + ".wprefab");
+						std::filesystem::create_directories(output.parent_path());
+						std::string error;
+						if (Gameplay::SaveFromScene(*scene, m_Context, output, &error))
+							WLD_CORE_INFO("Prefab exported: {0}", output.generic_string());
+						else
+							WLD_CORE_WARN("Export Prefab failed: {0}", error);
+					}
 					ctx.CloseAllPopups();
 				}
 				if (ctx.IsKeyPressed(KeyCodes::Escape))

@@ -1,0 +1,16 @@
+FormatVersion: 2
+Scene: ExampleCube
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000001
+    World::TagComponent:
+      Tag: Example Cube
+    World::TransformComponent:
+      Location: [0, 0.5, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::MeshRendererComponent:
+      Primitive: cube
+      Color: [1, 0.55, 0.12, 1]
+      MeshPath: ""
