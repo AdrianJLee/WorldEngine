@@ -83,6 +83,32 @@ int main()
 			CHECK(std::fabs(mesh->GetBounds().Max.z - 6.0f) < 1e-6f);
 		}
 
+		// 绕序约定守卫:所有内建网格外壁 = 从外侧看逆时针(CCW),即 (v1-v0)×(v2-v0)
+		// 与外法线同向。这条正是"看到 cube 内部"类问题的根因 —— cube 与 plane 的绕序
+		// 曾经相反,任何单一 FrontFace 约定都必然让其中一个里外反了。
+		{
+			struct TestVertex { glm::vec3 Position; glm::vec3 Normal; glm::vec2 TexCoord; };
+			const auto checkOutward = [&](const Ref<Mesh>& mesh, const char* label)
+			{
+				CHECK(mesh != nullptr);
+				const MeshDesc& desc = mesh->GetDesc();
+				CHECK(desc.VertexData.size() == sizeof(TestVertex) * mesh->GetVertexCount());
+				const auto* vertices = reinterpret_cast<const TestVertex*>(desc.VertexData.data());
+				for (size_t index = 0; index + 2 < desc.Indices.size(); index += 3)
+				{
+					const TestVertex& v0 = vertices[desc.Indices[index]];
+					const TestVertex& v1 = vertices[desc.Indices[index + 1]];
+					const TestVertex& v2 = vertices[desc.Indices[index + 2]];
+					const glm::vec3 faceNormal =
+						glm::cross(v1.Position - v0.Position, v2.Position - v0.Position);
+					CHECK(glm::dot(faceNormal, v0.Normal) > 0.0f);
+				}
+				(void)label;
+			};
+			checkOutward(Mesh::CreateUnitCube(1.0f), "UnitCube");
+			checkOutward(Mesh::CreateUnitPlane(1.0f), "UnitPlane");
+		}
+
 		std::printf("World.Mesh: all checks passed\n");
 		return 0;
 	}

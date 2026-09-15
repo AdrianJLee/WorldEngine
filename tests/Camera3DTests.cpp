@@ -141,9 +141,9 @@ int main()
 			}
 		}
 
-		// 5c. 绕序约定:Vulkan 适配翻转 Y 行 ⇒ 屏幕空间绕序跟着反转 ⇒ Renderer3D 必须把
-		//     Vulkan 的正面判据设为 Clockwise(否则外壁被判成背面,Back 剔除后只剩内壁)。
-		//     这里用"已知 CCW 三角形"钉住这条依赖关系。
+		// 5c. 需要同一份"变换后的可见性"约定:Y 翻转只改变画面方向,不改变"外壁 = CCW"的
+		//     网格约定(两个后端共用 CCW 判正面,实测一致)。这条钉住"翻 Y 不等于翻绕序",
+		//     以及 Vulkan 近端/远端映射的符号,避免再出现"按后端翻 FrontFace"的误改。
 		{
 			const glm::vec3 origin = camera.GetPosition();
 			const glm::vec3 right = camera.GetRight();
@@ -151,7 +151,7 @@ int main()
 			const glm::vec3 forward = camera.GetForward();
 			const float distance = camera.GetDistance();
 			const float half = 0.5f;
-			// 相机前方面上、从相机看去逆时针的三个点。
+			// 相机前方、从相机看去逆时针的三个点(等价于一个外壁 CCW 的三角形)。
 			const glm::vec3 a = origin + forward * distance - right * half - up * half;
 			const glm::vec3 b = origin + forward * distance + right * half - up * half;
 			const glm::vec3 c = origin + forward * distance - right * half + up * half;
@@ -171,8 +171,10 @@ int main()
 
 			const float glArea = signedArea(camera.GetViewProjectionMatrix(false));
 			const float vkArea = signedArea(camera.GetViewProjectionMatrix(true));
-			CHECK(glArea > 0.0f);   // GL:外壁 = 逆时针(CCW 即正面)
-			CHECK(vkArea < 0.0f);   // Vulkan:同一网格变成顺时针 ⇒ 正面判据必须是 Clockwise
+			CHECK(glArea > 0.0f);
+			// Vulkan 适配翻转 Y 行 ⇒ 同一三角形在 NDC 上的有向面积符号相反;两个后端各自按
+			// 自己的 framebuffer 约定判定,最终都把这个三角形当正面(以抓屏 A/B 实测为准)。
+			CHECK(vkArea < 0.0f);
 			CHECK(std::fabs(glArea + vkArea) < 1e-4f);
 		}
 

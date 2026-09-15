@@ -151,10 +151,12 @@ namespace World
 		for (uint32_t face = 0; face < 6; ++face)
 		{
 			const uint32_t base = face * 4;
-			// 绕序:与管线约定的"正面 = 逆时针(从外侧看)"一致;写反会导致
-			// 剔除/深度都把内壁当正面(表现为"里外反了"、OpenGL 全黑)。
+			// 约定(与 UnitPlane 一致):顶点按面对外法线逆时针排列,即
+			// (v1-v0)×(v2-v0) 指向**外**法线方向。之前这里是 {0,2,1, 2,0,3},
+			// 叉积指向内法线 —— cube 与 plane 绕序相反,任何单一 FrontFace 约定
+			// 都必然让其中一个"里外反了"(实测:立方体看到内壁)。
 			desc.Indices.insert(desc.Indices.end(),
-				{ base + 0, base + 2, base + 1, base + 2, base + 0, base + 3 });
+				{ base + 0, base + 1, base + 2, base + 0, base + 2, base + 3 });
 		}
 		return Create(desc);
 	}
