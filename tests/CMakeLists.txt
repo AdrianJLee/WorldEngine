@@ -153,6 +153,53 @@ set_tests_properties(World.VulkanDevice PROPERTIES
     TIMEOUT 120
 )
 
+# P2a 游戏框架:会话(GameApp)与流程(GameFlow)——固定步长、暂停、安全点切换,无设备依赖。
+add_executable(WorldGameplayTests GameplayTests.cpp)
+target_link_libraries(WorldGameplayTests PRIVATE World)
+target_compile_features(WorldGameplayTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldGameplayTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldGameplayTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldGameplayTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Gameplay COMMAND WorldGameplayTests)
+set_tests_properties(World.Gameplay PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
+# P1b D1:3D 相机与射线数学(纯 glm,无窗口/无设备)。
+# 注意:源文件由 P1b D1 子 agent 产出中,文件落地后再打开本目标(临时禁用以免 configure 失败)。
+set(_we_optional_test_targets "")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Camera3DTests.cpp")
+add_executable(WorldCamera3DTests Camera3DTests.cpp)
+target_link_libraries(WorldCamera3DTests PRIVATE World)
+target_compile_features(WorldCamera3DTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldCamera3DTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldCamera3DTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldCamera3DTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Camera3D COMMAND WorldCamera3DTests)
+set_tests_properties(World.Camera3D PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+list(APPEND _we_optional_test_targets WorldCamera3DTests)
+endif()
+
 # 着色器管线回归:烘焙产物、内容寻址缓存、打包读回与运行时解析器优先级。
 add_executable(WorldShaderPipelineTests ShaderPipelineTests.cpp)
 target_link_libraries(WorldShaderPipelineTests PRIVATE World)
@@ -237,7 +284,7 @@ set_tests_properties(World.RendererHotswap PROPERTIES
     TIMEOUT 180
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests)
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"
