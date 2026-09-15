@@ -88,6 +88,11 @@ namespace World
 			NewScene();
 
 		m_EditorCamera = EditorCamera(45.0f, 1.6f / 0.9f, 0.1f, 1000.0f);
+		// D7-1a:3D 视口相机(轨道/飞行)。默认关闭;WLD_VIEWPORT_3D=1 便于自动化验证,
+		// 工具栏切换在 ViewportPanel 接入(下一步)。
+		m_EditorCamera3D = EditorCamera3D(60.0f, 1.6f / 0.9f, 0.1f, 2000.0f, 12.0f);
+		m_EditorCamera3D.SetViewportSize(1280, 720);
+		m_Viewport3D = std::getenv("WLD_VIEWPORT_3D") != nullptr;
 	}
 
 	// 图标是旧式(GL)纹理:窗口/上下文重建后必须重新加载,否则渲染出的图标会错乱。
@@ -184,6 +189,13 @@ namespace World
 		WLD_PROFILE_SCOPE("Renderer Clear");
 		Camera* renderCamera = &m_EditorCamera;
 		glm::mat4 renderCameraTransform = m_EditorCamera.GetTransform();
+		// D7-1a:3D 模式用 EditorCamera3D 的投影/视图(P1b D1 的相机),沿用同一个提交接口。
+		Camera viewportCamera3D { m_EditorCamera3D.GetProjectionMatrix(false) };
+		if (m_Viewport3D)
+		{
+			renderCamera = &viewportCamera3D;
+			renderCameraTransform = glm::inverse(m_EditorCamera3D.GetViewMatrix());
+		}
 
 
 		{

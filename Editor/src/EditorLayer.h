@@ -4,6 +4,7 @@
 #include "World/Events/KeyEvent.h"
 #include "World/Events/ApplicationEvent.h"
 #include "World/Renderer/SceneRenderer.h"
+#include "World/Renderer/EditorCamera3D.h"
 #include "Document/EditorDocument.h"
 #include "World/WUI/WuiCommand.h"
 #include "World/WUI/WuiGizmo.h"
@@ -42,6 +43,11 @@ namespace World
 		Entity GetSelectedEntity() const { return m_SelectedEntity; }
 		void SetSelectedEntity(Entity entity) { m_SelectedEntity = entity; }
 		EditorCamera& GetEditorCamera() { return m_EditorCamera; }
+		// D7-1a:视口 3D 相机(轨道/飞行)。与 2D EditorCamera 二选一用于视口渲染。
+		EditorCamera3D& GetEditorCamera3D() { return m_EditorCamera3D; }
+		bool IsViewportCamera3D() const { return m_Viewport3D; }
+		void SetViewportCamera3D(bool enabled) { m_Viewport3D = enabled; }
+		void ToggleViewportCamera3D() { m_Viewport3D = !m_Viewport3D; }
 		Ref<SceneRenderer>& GetSceneRenderer() { return m_SceneRenderer; }
 		// W8:编辑器的存档服务(场景来源 = 当前活动场景),供存档面板使用。
 		Gameplay::SaveService* GetSaveService() { return m_SaveService.get(); }
@@ -118,6 +124,8 @@ namespace World
 		EditorDocument m_Document;
 
 		EditorCamera m_EditorCamera;
+		EditorCamera3D m_EditorCamera3D;
+		bool m_Viewport3D = false;
 
 		Entity m_SelectedEntity;
 
