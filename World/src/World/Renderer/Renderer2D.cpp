@@ -354,8 +354,9 @@ namespace World
 				return;
 			const uint64_t size = static_cast<uint64_t>(
 				reinterpret_cast<uint8_t*>(batch.Ptr) - reinterpret_cast<uint8_t*>(batch.Base));
-			// 走命令缓冲更新:录制期不触碰后端状态机,为工作线程录制/GL 延迟回放铺路。
-			s_CurrentCommandBuffer->UpdateBuffer(batch.VertexBuffer, batch.Base, size, 0);
+			// 映射写:批次上传发生在 render pass 内,Vulkan 不允许在那里录制
+			// vkCmdUpdateBuffer/vkCmdCopyBuffer;缓冲按帧槽位环形化,上一轮 GPU 引用已由帧栅栏保证结束。
+			batch.VertexBuffer->SetData(batch.Base, size, 0);
 			s_CurrentCommandBuffer->BindPipeline(batch.Pipeline);
 			s_CurrentCommandBuffer->BindVertexBuffer(0, batch.VertexBuffer);
 			s_CurrentCommandBuffer->BindIndexBuffer(batch.IndexBuffer);

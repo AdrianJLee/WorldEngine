@@ -5,6 +5,7 @@
 #include "World/RHI/Vulkan/VulkanPipeline.h"
 #include "World/RHI/Vulkan/VulkanResources.h"
 #include "World/RHI/Vulkan/VulkanSwapchain.h"
+#include "World/RHI/Vulkan/VulkanUploadRing.h"
 #include "World/Core/Log.h"
 
 #include <cstring>
@@ -68,6 +69,14 @@ namespace World::Rhi::Vulkan
 		if (m_Device)
 		{
 			vkDeviceWaitIdle(m_Device);
+			// 先回收上传环形缓冲(释放 staging 缓冲/栅栏/命令池),再销毁设备。
+			m_UploadRing.reset();
+			for (OneShotSlot& slot : m_OneShotSlots)
+				if (slot.Fence)
+					vkDestroyFence(m_Device, slot.Fence, nullptr);
+			m_OneShotSlots.clear();
+			if (m_TransientPool)
+				vkDestroyCommandPool(m_Device, m_TransientPool, nullptr);
 			for (VkCommandPool pool : m_ThreadPools)
 				if (pool)
 					vkDestroyCommandPool(m_Device, pool, nullptr);
@@ -272,6 +281,9 @@ namespace World::Rhi::Vulkan
 		if (Log::GetCoreLogger())
 			WLD_CORE_INFO("Vulkan device created: {0} ({1}.{2})", properties.deviceName,
 				m_Capabilities.ApiMajor, m_Capabilities.ApiMinor);
+
+		// B2:异步上传基座。段大小 4 MiB × 最多 8 段,按需扩容;失败时上传回退同步路径。
+		m_UploadRing = std::make_unique<VulkanUploadRing>(*this);
 		return true;
 	}
 
@@ -279,6 +291,102 @@ namespace World::Rhi::Vulkan
 	{
 		if (m_Device)
 			vkDeviceWaitIdle(m_Device);
+	}
+
+	bool VulkanDevice::SubmitOneShot(const std::function<void(VkCommandBuffer)>& record, bool wait,
+		VkSemaphore waitSemaphore, VkSemaphore signalSemaphore)
+	{
+		if (!m_Device || !record)
+			return false;
+
+		if (m_OneShotSlots.empty())
+		{
+			VkCommandPoolCreateInfo poolInfo{};
+			poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+			poolInfo.queueFamilyIndex = m_GraphicsFamily;
+			poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+			if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_TransientPool) != VK_SUCCESS)
+				return false;
+
+			m_OneShotSlots.resize(4);
+			std::vector<VkCommandBuffer> buffers(m_OneShotSlots.size(), VK_NULL_HANDLE);
+			VkCommandBufferAllocateInfo allocInfo{};
+			allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+			allocInfo.commandPool = m_TransientPool;
+			allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+			allocInfo.commandBufferCount = static_cast<uint32_t>(buffers.size());
+			if (vkAllocateCommandBuffers(m_Device, &allocInfo, buffers.data()) != VK_SUCCESS)
+			{
+				m_OneShotSlots.clear();
+				return false;
+			}
+			for (size_t i = 0; i < m_OneShotSlots.size(); i++)
+			{
+				m_OneShotSlots[i].CommandBuffer = buffers[i];
+				VkFenceCreateInfo fenceInfo{};
+				fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+				fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;   // 初始即"空闲"
+				if (vkCreateFence(m_Device, &fenceInfo, nullptr, &m_OneShotSlots[i].Fence) != VK_SUCCESS)
+				{
+					m_OneShotSlots.clear();
+					return false;
+				}
+			}
+		}
+
+		// 优先找空闲槽位(栅栏已信号);全部在飞时只等待最老的那个槽位。
+		OneShotSlot* slot = nullptr;
+		const size_t count = m_OneShotSlots.size();
+		for (size_t i = 0; i < count; i++)
+		{
+			OneShotSlot& candidate = m_OneShotSlots[(m_NextOneShot + i) % count];
+			if (vkGetFenceStatus(m_Device, candidate.Fence) == VK_SUCCESS)
+			{
+				slot = &candidate;
+				m_NextOneShot = (m_NextOneShot + i + 1) % count;
+				break;
+			}
+		}
+		if (!slot)
+		{
+			slot = &m_OneShotSlots[m_NextOneShot];
+			vkWaitForFences(m_Device, 1, &slot->Fence, VK_TRUE, UINT64_MAX);
+			m_NextOneShot = (m_NextOneShot + 1) % count;
+		}
+
+		vkResetFences(m_Device, 1, &slot->Fence);
+		vkResetCommandBuffer(slot->CommandBuffer, 0);
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		if (vkBeginCommandBuffer(slot->CommandBuffer, &beginInfo) != VK_SUCCESS)
+			return false;
+		record(slot->CommandBuffer);
+		if (vkEndCommandBuffer(slot->CommandBuffer) != VK_SUCCESS)
+			return false;
+
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &slot->CommandBuffer;
+		const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		if (waitSemaphore != VK_NULL_HANDLE)
+		{
+			submitInfo.waitSemaphoreCount = 1;
+			submitInfo.pWaitSemaphores = &waitSemaphore;
+			submitInfo.pWaitDstStageMask = &waitStage;
+		}
+		if (signalSemaphore != VK_NULL_HANDLE)
+		{
+			submitInfo.signalSemaphoreCount = 1;
+			submitInfo.pSignalSemaphores = &signalSemaphore;
+		}
+		if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, slot->Fence) != VK_SUCCESS)
+			return false;
+
+		if (wait)
+			vkWaitForFences(m_Device, 1, &slot->Fence, VK_TRUE, UINT64_MAX);
+		return true;
 	}
 
 #define NOT_IMPLEMENTED() do { if (Log::GetCoreLogger()) WLD_CORE_WARN("[RHI-VK] {0} not implemented yet", __func__); } while (0)

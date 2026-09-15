@@ -1,5 +1,8 @@
 #include "World/RHI/Rhi.h"
+#include "World/RHI/Vulkan/VulkanDevice.h"
+#include "World/RHI/Vulkan/VulkanUploadRing.h"
 
+#include <cstring>
 #include <cstdio>
 
 int main()
@@ -116,6 +119,58 @@ int main()
 		fence->Wait();
 	}
 	device->WaitIdle();
+
+	// B2 上传环形缓冲:分配/写入/提交(不等待)循环后段可复用,且不阻塞主线程。
+	if (const auto vulkanDevice = std::dynamic_pointer_cast<World::Rhi::Vulkan::VulkanDevice>(device))
+	{
+		using namespace World::Rhi::Vulkan;
+		VulkanUploadRing& ring = vulkanDevice->GetUploadRing();
+		for (int i = 0; i < 16; i++)
+		{
+			const VulkanUploadAllocation allocation = ring.Allocate(4096, 4);
+			if (!allocation.IsValid())
+			{
+				std::fprintf(stderr, "World.VulkanDevice: upload ring allocation %d failed\n", i);
+				return 1;
+			}
+			std::memset(allocation.Mapped, i, static_cast<size_t>(allocation.Size));
+			// 空录制:只验证提交/栅栏/段回收逻辑,不依赖具体拷贝目标。
+			if (!ring.Submit([](VkCommandBuffer) {}))
+			{
+				std::fprintf(stderr, "World.VulkanDevice: upload ring submit %d failed\n", i);
+				return 1;
+			}
+		}
+		if (ring.GetSegmentCount() < 2)
+		{
+			std::fprintf(stderr, "World.VulkanDevice: upload ring did not rotate segments\n");
+			return 1;
+		}
+		// 等待一次后,整环应可复用:段数不再增长,分配不失败。
+		ring.WaitAll();
+		const uint32_t segmentsAfterWait = ring.GetSegmentCount();
+		// 每轮结束都等待回收:此时只应有 1 个段在飞,段数不应继续增长(段确实被复用)。
+		for (int i = 0; i < 32; i++)
+		{
+			const VulkanUploadAllocation allocation = ring.Allocate(4096, 4);
+			if (!allocation.IsValid() || !ring.Submit([](VkCommandBuffer) {}))
+				return 1;
+			ring.WaitAll();
+		}
+		if (ring.GetSegmentCount() > segmentsAfterWait)
+		{
+			std::fprintf(stderr, "World.VulkanDevice: upload ring did not recycle after WaitAll\n");
+			return 1;
+		}
+		// 段数上限是契约的一部分:极端情况下也不能无限吃显存。
+		if (ring.GetSegmentCount() > 8)
+		{
+			std::fprintf(stderr, "World.VulkanDevice: upload ring exceeded segment cap\n");
+			return 1;
+		}
+		ring.WaitAll();
+		device->WaitIdle();
+	}
 	std::printf("World.VulkanDevice: ok\n");
 	return 0;
 }

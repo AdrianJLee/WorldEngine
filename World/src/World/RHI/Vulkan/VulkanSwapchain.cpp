@@ -121,9 +121,50 @@ namespace World::Rhi::Vulkan
 	Extent2D VulkanSwapchain::GetExtent() const { return m_Extent; }
 	void VulkanSwapchain::Resize(Extent2D) { /* 重建由宿主触发;此处保持现状 */ }
 
-	void VulkanSwapchain::TransitionImage(uint32_t index, VkImageLayout layout)
+	bool VulkanSwapchain::TransitionImage(uint32_t index, VkImageLayout layout,
+		const Handle<Semaphore>& signalAfter, const Handle<Semaphore>& waitBefore)
 	{
-		if (index < m_ImageTextures.size() && m_ImageTextures[index])
-			m_ImageTextures[index]->TransitionTo(layout);
+		if (index >= m_ImageTextures.size() || !m_ImageTextures[index])
+			return false;
+		// B0/B2:交换链图像布局转换是每帧两次的常驻操作,提交后不等待——
+		// 转换与后续渲染/呈现同队列,队列顺序保证可见性(旧实现在这里整队列排空两次)。
+		const auto texture = std::static_pointer_cast<VulkanTexture>(m_ImageTextures[index]);
+		const VkImageLayout oldLayout = texture->GetLayout();
+		VkSemaphore signal = VK_NULL_HANDLE;
+		if (signalAfter)
+			signal = std::static_pointer_cast<VulkanSemaphore>(signalAfter)->GetSemaphore();
+		VkSemaphore wait = VK_NULL_HANDLE;
+		if (waitBefore)
+			wait = std::static_pointer_cast<VulkanSemaphore>(waitBefore)->GetSemaphore();
+		const bool needsBarrier = oldLayout != layout;
+		if (!needsBarrier && signal == VK_NULL_HANDLE && wait == VK_NULL_HANDLE)
+			return false;
+		const bool submitted = m_Device.SubmitOneShot([&](VkCommandBuffer commandBuffer)
+		{
+			if (!needsBarrier)
+				return;   // 布局已就位:这里只需要发出/消费信号量
+			VkImageMemoryBarrier barrier{};
+			barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			barrier.oldLayout = oldLayout;
+			barrier.newLayout = layout;
+			barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			barrier.image = texture->GetImage();
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			barrier.subresourceRange.levelCount = 1;
+			barrier.subresourceRange.layerCount = 1;
+			barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			barrier.dstAccessMask = (layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+				? 0 : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			vkCmdPipelineBarrier(commandBuffer,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				(layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+					? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				0, 0, nullptr, 0, nullptr, 1, &barrier);
+		}, false, wait, signal);
+		if (needsBarrier && submitted)
+			texture->SetLayout(layout);
+		// 返回 true 表示"调用方可以等待 signalAfter"。
+		return submitted && signal != VK_NULL_HANDLE;
 	}
 }

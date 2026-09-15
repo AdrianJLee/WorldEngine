@@ -47,6 +47,8 @@ namespace World::Rhi::Vulkan
 		VkImage GetImage() const { return m_Image; }
 		VkImageView GetView() const { return m_View; }
 		VkImageLayout GetLayout() const { return m_Layout; }
+		// 延迟布局转换(转换命令已入队但不必等完成)时同步登记逻辑布局。
+		void SetLayout(VkImageLayout layout) { m_Layout = layout; }
 		void Transition(VkImageLayout oldLayout, VkImageLayout newLayout);
 		void TransitionTo(VkImageLayout newLayout) { Transition(m_Layout, newLayout); }
 	private:

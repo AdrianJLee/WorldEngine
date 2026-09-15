@@ -33,6 +33,9 @@ namespace World
 		static uint64_t FrameNumber();    // 单调递增的帧号
 		// 延迟释放:GPU 可能仍在使用的资源改为"下一轮该槽位开始前"回收,不再用整队列 WaitIdle。
 		static void QueueRelease(std::function<void()> release);
+		// 等待 GPU 空闲(整设备排空)。只在重建交换链/后端切换/关闭等**低频**路径调用,
+		// 用于保证随后释放的画面/信号量/描述符池不再被在飞命令引用。
+		static void WaitForGpu();
 		static void OnWindowResize(uint32_t width, uint32_t height);
 		// ---- 帧呈现编排(UI/场景合成到窗口)----
 		static PresentTarget* MainPresentTarget();

@@ -80,6 +80,9 @@ namespace World
 		if (m_Shutdown) return;
 		m_Shutdown = true;
 		m_Running = false;
+		// 关闭流程第一步:排空 GPU,避免 OnDetach/资源释放销毁仍在被在飞命令引用的对象
+		// (VUID-vkDestroyFramebuffer-00892 / vkFreeCommandBuffers-00047 等)。
+		Renderer::WaitForGpu();
 		// OnDetach releases scene instances and joins layer-owned work first.
 		m_LayerStack.DetachAll();
 		// Run the allocator resets while their Lua state and graphics context

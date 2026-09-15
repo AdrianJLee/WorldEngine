@@ -37,6 +37,14 @@ namespace World
 		// 呈现信号量按**交换链图像**配对(Vulkan 规范要求):acquire 信号由渲染该图像的
 		// 提交等待,渲染完成的信号由 Present 等待。按帧槽位配对在帧深 >1 时会互相踩。
 		std::vector<Rhi::Handle<Rhi::Semaphore>> ImageReady, RenderDone;
+		// acquire 信号量由"帧起始的布局转换提交"消费,该提交再发出 FrameStart,
+		// 帧内渲染提交等待 FrameStart:同一个信号量不会被等待两次(二值信号量语义)。
+		std::vector<Rhi::Handle<Rhi::Semaphore>> FrameStart;
+		bool FrameStartPending = false;    // FrameStart 已发出、尚无提交等待
+		bool AcquireConsumed = false;      // acquire 信号量已被帧起始转换消费
+		// 呈现前的布局转换也走"提交后不等待":该信号量由转换提交发出,Present 等它,
+		// 从而既保证图像已处于 PRESENT 布局,又不用整队列排空(旧实现在这里 WaitIdle)。
+		std::vector<Rhi::Handle<Rhi::Semaphore>> PresentReady;
 		std::vector<Rhi::Handle<Rhi::Framebuffer>> Framebuffers;
 		Rhi::Handle<Rhi::Framebuffer> Framebuffer;
 		Rhi::Handle<Rhi::Texture> Image;
@@ -58,6 +66,23 @@ namespace World
 		}
 
 		// ---- 帧槽位 / 栅栏 / 延迟释放(B0) ----
+		// 本帧第一个提交要等待的二进制信号量:优先 FrameStart(帧起始转换完成),
+		// 回退 acquire 信号量(转换提交失败时);二值信号量不能被等待两次,故取用即清标志。
+		Rhi::Handle<Rhi::Semaphore> TakePresentWait(PresentTarget& state, uint32_t slot)
+		{
+			if (state.FrameStartPending && !state.FrameStart.empty())
+			{
+				state.FrameStartPending = false;
+				return state.FrameStart[slot % state.FrameStart.size()];
+			}
+			if (!state.AcquireConsumed && !state.ImageReady.empty())
+			{
+				state.AcquireConsumed = true;
+				return state.ImageReady[slot % state.ImageReady.size()];
+			}
+			return nullptr;
+		}
+
 		// B0.2:场景/UI 的命令缓冲、UBO/描述符集、顶点索引缓冲按槽位环形化;
 		// 呈现信号量按"acquire 按帧槽位 + render-finished 按交换链图像"配对(Vulkan 规范做法)。
 		constexpr uint32_t kFramesInFlight = 2;
@@ -108,9 +133,13 @@ namespace World
 			state.Swapchain = nullptr;
 			// 队列/信号量都属于设备:漏掉任何一个都会在切换后端后用到已销毁设备。
 			state.Queue = nullptr;
-			state.ImageReady.clear();
-			state.RenderDone.clear();
-			state.Dirty = true;
+		state.ImageReady.clear();
+		state.FrameStart.clear();
+		state.RenderDone.clear();
+		state.PresentReady.clear();
+		state.FrameStartPending = false;
+		state.AcquireConsumed = false;
+		state.Dirty = true;
 		}
 	}
 
@@ -166,6 +195,11 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		// 设备销毁前的兜底:所有延迟释放先跑完(它们的资源属于当前设备)。
 		RunDeferredReleases(std::numeric_limits<uint64_t>::max());
+		// 释放交换链画面/信号量/描述符池前必须让 GPU 工作结束,
+		// 否则触发 VUID-vkDestroyFramebuffer-00892 / vkDestroySemaphore-05149 /
+		// vkDestroyDescriptorPool-00303(销毁仍在被提交命令引用的对象)。
+		if (m_Device)
+			m_Device->WaitIdle();
 		for (uint32_t i = 0; i < kFramesInFlight; ++i)
 		{
 			s_FrameFences[i] = nullptr;
@@ -228,7 +262,7 @@ namespace World
 		{
 			// 该槽位上一轮提交的 GPU 工作完成后才开始复用其资源(替代整队列 WaitIdle)。
 			if (!s_FrameFences[slot])
-				s_FrameFences[slot] = m_Device->CreateFence(true);
+				s_FrameFences[slot] = m_Device->CreateFence(false);
 			s_FrameFences[slot]->Wait();
 			s_FrameFences[slot]->Reset();
 			s_FrameFenceSubmitted[slot] = false;
@@ -260,6 +294,14 @@ namespace World
 		}
 		// kFramesInFlight 轮之后、且该槽位的 fence 通过后执行。
 		s_DeferredReleases.emplace_back(s_FrameNumber + kFramesInFlight, std::move(release));
+	}
+
+	void Renderer::WaitForGpu()
+	{
+		// GL 语义下没有跨帧 GPU 队列:调用点自身已同步。
+		if (!m_Device || s_BackendName != "vulkan")
+			return;
+		m_Device->WaitIdle();
 	}
 
 	void Renderer::RegisterDeviceReleaseHook(void* owner, std::function<void()> hook)
@@ -379,6 +421,8 @@ namespace World
 		if (state.Dirty || !state.Swapchain)
 		{
 			state.Dirty = false;
+			// 重建交换链前先等 GPU 空闲:旧的画面/信号量可能仍被在飞命令引用。
+			m_Device->WaitIdle();
 			ReleasePresentState(state);
 			void* nativeWindow = state.NativeWindow;
 			if (!nativeWindow && Application::HasInstance())
@@ -398,12 +442,21 @@ namespace World
 			const uint32_t imageCount = std::max(1u, state.Swapchain->GetImageCount());
 			state.ImageReady.clear();
 			state.RenderDone.clear();
+			state.PresentReady.clear();
 			state.ImageReady.reserve(kFramesInFlight);
 			state.RenderDone.reserve(imageCount);
+			state.PresentReady.reserve(imageCount);
+			state.FrameStart.reserve(kFramesInFlight);
 			for (uint32_t i = 0; i < kFramesInFlight; ++i)
+			{
 				state.ImageReady.push_back(m_Device->CreateSemaphore());
+				state.FrameStart.push_back(m_Device->CreateSemaphore());
+			}
 			for (uint32_t i = 0; i < imageCount; ++i)
+			{
 				state.RenderDone.push_back(m_Device->CreateSemaphore());
+				state.PresentReady.push_back(m_Device->CreateSemaphore());
+			}
 		}
 		if (!state.Swapchain)
 			return false;
@@ -421,9 +474,22 @@ namespace World
 		}
 		state.Image = acquired.Image;
 		state.ImageIndex = acquired.ImageIndex;
+		state.FrameStartPending = false;
+		state.AcquireConsumed = false;
 		const auto vulkanSwapchain = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanSwapchain>(state.Swapchain);
 		if (vulkanSwapchain && state.Image)
-			vulkanSwapchain->TransitionImage(state.ImageIndex, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		{
+			// 转换必须等 acquire 信号量(否则可能在呈现引擎仍持有图像时就改写布局),
+			// 完成后再发出 FrameStart 供本帧渲染提交等待。
+			const uint32_t startSlot = FrameSlot();
+			const Rhi::Handle<Rhi::Semaphore> acquireSemaphore = state.ImageReady.empty()
+				? nullptr : state.ImageReady[startSlot % state.ImageReady.size()];
+			const Rhi::Handle<Rhi::Semaphore> frameStartSemaphore = state.FrameStart.empty()
+				? nullptr : state.FrameStart[startSlot % state.FrameStart.size()];
+			state.FrameStartPending = vulkanSwapchain->TransitionImage(state.ImageIndex,
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, frameStartSemaphore, acquireSemaphore);
+			state.AcquireConsumed = state.FrameStartPending;
+		}
 		if (state.Image)
 		{
 			if (state.Framebuffers.size() <= state.ImageIndex)
@@ -445,13 +511,33 @@ namespace World
 	void Renderer::EndFramePresent(PresentTarget* target)
 	{
 		PresentTarget& state = target ? *static_cast<PresentTarget*>(target) : s_MainPresent;
+		// 空帧兜底:本帧没有任何提交时 FrameStart 会停在"已发出未被等待",
+		// 二值信号量不能连续发出两次;用一个只带等待的空提交把它消费掉。
+		if (state.FrameStartPending && !state.FrameStart.empty() && state.Queue && s_BackendName == "vulkan")
+		{
+			const uint32_t slot = FrameSlot();
+			Rhi::SubmitInfo drain;
+			drain.WaitSemaphores = { state.FrameStart[slot % state.FrameStart.size()] };
+			state.Queue->Submit(drain);
+			state.FrameStartPending = false;
+			PresentTrace("[present] drained unused frame-start semaphore frame={0} slot={1}", s_FrameNumber, slot);
+		}
 		const size_t presentIndex = std::min<size_t>(state.ImageIndex, state.RenderDone.empty() ? 0 : state.RenderDone.size() - 1);
 		if (m_Device && state.Swapchain && !state.RenderDone.empty() && state.RenderDone[presentIndex])
 		{
 			const auto vulkanSwapchain = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanSwapchain>(state.Swapchain);
+			// 布局转换提交在 UI 提交之后入队(同队列有序),完成时发出 PresentReady,
+			// Present 等待它即可,不需要整队列排空。
+			Rhi::Handle<Rhi::Semaphore> presentWait = state.RenderDone[presentIndex];
 			if (vulkanSwapchain && state.Image)
-				vulkanSwapchain->TransitionImage(state.ImageIndex, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-			state.Swapchain->Present(state.RenderDone[presentIndex]);
+			{
+				const size_t readyIndex = std::min<size_t>(state.ImageIndex,
+					state.PresentReady.empty() ? 0 : state.PresentReady.size() - 1);
+				if (!state.PresentReady.empty())
+					presentWait = state.PresentReady[readyIndex];
+				vulkanSwapchain->TransitionImage(state.ImageIndex, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, presentWait);
+			}
+			state.Swapchain->Present(presentWait);
 			PresentTrace("[present] presented frame={0} imageIndex={1}", s_FrameNumber, state.ImageIndex);
 		}
 		state.Image = nullptr;
@@ -497,15 +583,18 @@ namespace World
 		Rhi::SubmitInfo submit;
 		submit.CommandBuffers = { commandBuffer };
 		const uint32_t slot = FrameSlot();
-		if (!state.ImageReady.empty())
-			submit.WaitSemaphores = { state.ImageReady[slot % state.ImageReady.size()] };
+		// 帧起始转换已消费 acquire 信号量并发出 FrameStart(见 TakePresentWait)。
+		if (const Rhi::Handle<Rhi::Semaphore> wait = TakePresentWait(state, slot))
+			submit.WaitSemaphores = { wait };
 		const size_t imageIndex = std::min<size_t>(state.ImageIndex, state.RenderDone.empty() ? 0 : state.RenderDone.size() - 1);
 		if (!state.RenderDone.empty())
 			submit.SignalSemaphores = { state.RenderDone[imageIndex] };
 		// 帧栅栏挂在"本帧最后一次提交"上:场景提交(若有)与本次提交同队列有序,
 		// 因此该 fence 信号即代表整帧 GPU 工作完成。
 		if (!s_FrameFences[slot])
-			s_FrameFences[slot] = m_Device->CreateFence(true);
+			// 提交栅栏必须未信号(创建时就用 SIGNALED 会触发 VUID-vkQueueSubmit-fence-00063);
+			// 等待前由 BeginFrame 统一 Wait + Reset。
+			s_FrameFences[slot] = m_Device->CreateFence(false);
 		submit.Fence = s_FrameFences[slot];
 		s_FrameFenceSubmitted[slot] = true;
 		state.Queue->Submit(submit);
@@ -535,6 +624,9 @@ namespace World
 			return;
 		Rhi::SubmitInfo submit;
 		submit.CommandBuffers = { commandBuffer };
+		// 场景提交通常是本帧第一个提交:由它消费 FrameStart/acquire 等待,避免二值信号量被等两次。
+		if (const Rhi::Handle<Rhi::Semaphore> wait = TakePresentWait(state, FrameSlot()))
+			submit.WaitSemaphores = { wait };
 		// 帧栅栏挂在 UI 提交上(本帧最后一次提交),场景提交与它同队列有序。
 		// 若本帧没有 UI 提交(纯场景帧),这里也负责挂栅栏。
 		state.Queue->Submit(submit);

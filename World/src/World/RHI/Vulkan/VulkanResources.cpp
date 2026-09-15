@@ -1,6 +1,7 @@
 #include "wldpch.h"
 #include "World/RHI/Vulkan/VulkanResources.h"
 #include "World/RHI/Vulkan/VulkanDevice.h"
+#include "World/RHI/Vulkan/VulkanUploadRing.h"
 
 #include <cstring>
 
@@ -111,39 +112,11 @@ namespace World::Rhi::Vulkan
 		return flags;
 	}
 
+	// 需要"完成后才继续"的一次性提交(初始化/布局过渡等);走设备级槽位环,
+	// 不再每次新建命令池 + vkQueueWaitIdle。
 	void ExecuteOneShot(VulkanDevice& device, const std::function<void(VkCommandBuffer)>& record)
 	{
-		VkCommandPoolCreateInfo poolInfo{};
-		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		poolInfo.queueFamilyIndex = device.GetGraphicsQueueFamily();
-		poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-		VkCommandPool pool = VK_NULL_HANDLE;
-		vkCreateCommandPool(device.GetNativeDevice(), &poolInfo, nullptr, &pool);
-
-		VkCommandBufferAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		allocInfo.commandPool = pool;
-		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandBufferCount = 1;
-		VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-		vkAllocateCommandBuffers(device.GetNativeDevice(), &allocInfo, &commandBuffer);
-
-		VkCommandBufferBeginInfo beginInfo{};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		vkBeginCommandBuffer(commandBuffer, &beginInfo);
-		record(commandBuffer);
-		vkEndCommandBuffer(commandBuffer);
-
-		VkSubmitInfo submitInfo{};
-		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &commandBuffer;
-		vkQueueSubmit(device.GetGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-		vkQueueWaitIdle(device.GetGraphicsQueue());
-
-		vkFreeCommandBuffers(device.GetNativeDevice(), pool, 1, &commandBuffer);
-		vkDestroyCommandPool(device.GetNativeDevice(), pool, nullptr);
+		device.SubmitOneShot(record, true);
 	}
 
 	// ---- Buffer ----
@@ -153,7 +126,10 @@ namespace World::Rhi::Vulkan
 		VkBufferCreateInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 		info.size = desc.Size;
-		info.usage = ToVkBufferUsage(desc.Usage);
+		// 所有缓冲都允许传输读写:命令缓冲里的 UpdateBuffer(staging 拷贝)、
+		// 查询结果回读等路径要求 TRANSFER_DST/TRANSFER_SRC,否则
+		// VUID-vkCmdUpdateBuffer-dstBuffer-00034(vector 缓冲区只声明了 VERTEX)。
+		info.usage = ToVkBufferUsage(desc.Usage) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		vkCreateBuffer(device.GetNativeDevice(), &info, nullptr, &m_Buffer);
 
@@ -269,50 +245,113 @@ namespace World::Rhi::Vulkan
 		}
 	}
 
+	namespace
+	{
+		// 把一次图像布局转换录进命令缓冲(Transition 与异步上传共用同一套同步域)。
+		// sourceAllCommands:上传路径重写整张图时用 ALL_COMMANDS 作为源域(重复上传同一纹理时
+		// 需要覆盖上一轮采样的读访问),布局过渡路径保持原语义。
+		void RecordImageTransition(VkCommandBuffer commandBuffer, VkImage image, const TextureDesc& desc,
+			VkImageLayout oldLayout, VkImageLayout newLayout, bool sourceAllCommands)
+		{
+			if (oldLayout == newLayout)
+				return;
+			VkImageMemoryBarrier barrier{};
+			barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			barrier.oldLayout = oldLayout;
+			barrier.newLayout = newLayout;
+			barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			barrier.image = image;
+			barrier.subresourceRange.aspectMask = IsDepthFormat(desc.Format) ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+			barrier.subresourceRange.levelCount = std::max(1u, desc.MipLevels);
+			barrier.subresourceRange.layerCount = desc.Type == TextureType::Cube ? std::max(1u, desc.ArrayLayers) * 6 : std::max(1u, desc.ArrayLayers);
+			// 按目标布局选择同步域:之前固定为 TOP_OF_PIPE→TRANSFER,导致
+			// TRANSFER_DST→SHADER_READ_ONLY 之后片元着色器看不到拷贝结果
+			// (单次上传的小纹理,如图标,采样全黑)。
+			VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			barrier.srcAccessMask = 0;
+			barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			if (oldLayout != VK_IMAGE_LAYOUT_UNDEFINED && sourceAllCommands)
+			{
+				srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+				barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			}
+			if (newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+			{
+				srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+				dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+				barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+				barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			}
+			else if (newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL || newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+			{
+				srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+				dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+				barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+				barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			}
+			vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+		}
+	}
+
 	void VulkanTexture::Transition(VkImageLayout oldLayout, VkImageLayout newLayout)
 	{
 		if (oldLayout == newLayout)
 			return;
-		VkImageMemoryBarrier barrier{};
-		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		barrier.oldLayout = oldLayout;
-		barrier.newLayout = newLayout;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.image = m_Image;
-		barrier.subresourceRange.aspectMask = IsDepthFormat(m_Desc.Format) ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-		barrier.subresourceRange.levelCount = std::max(1u, m_Desc.MipLevels);
-		barrier.subresourceRange.layerCount = m_Desc.Type == TextureType::Cube ? std::max(1u, m_Desc.ArrayLayers) * 6 : std::max(1u, m_Desc.ArrayLayers);
-		// 按目标布局选择同步域:之前固定为 TOP_OF_PIPE→TRANSFER,导致
-		// TRANSFER_DST→SHADER_READ_ONLY 之后片元着色器看不到拷贝结果
-		// (单次上传的小纹理,如图标,采样全黑)。
-		VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-		VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		barrier.srcAccessMask = 0;
-		barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		if (newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-		{
-			srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-			dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		}
-		else if (newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL || newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-		{
-			srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-			dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		}
 		ExecuteOneShot(m_Device, [&](VkCommandBuffer commandBuffer)
 		{
-			vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+			RecordImageTransition(commandBuffer, m_Image, m_Desc, oldLayout, newLayout, false);
 		});
 		m_Layout = newLayout;
 	}
 
 	void VulkanTexture::SetData(const void* data, uint64_t size, uint32_t layer, uint32_t mip)
 	{
+		if (!data || size == 0)
+			return;
+
+		// B2 异步上传:拷贝进常驻 staging 段,transition/copy/transition 一次提交完成,
+		// 不再 wait idle(旧路径每次上传要排空队列 3 次)。上传提交与渲染提交同队列,
+		// 队列顺序保证后续绘制能看到结果。
+		if (m_OwnsImage)
+		{
+			VulkanUploadRing& ring = m_Device.GetUploadRing();
+			const VulkanUploadAllocation allocation = ring.Allocate(size, 4);
+			if (allocation.IsValid())
+			{
+				std::memcpy(allocation.Mapped, data, size);
+				const VkImageLayout target = TargetLayout(m_Desc);
+				const VkImageLayout source = m_Layout;
+				const bool submitted = ring.Submit([&](VkCommandBuffer commandBuffer)
+				{
+					RecordImageTransition(commandBuffer, m_Image, m_Desc, source,
+						VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, true);
+					VkBufferImageCopy region{};
+					region.bufferOffset = allocation.Offset;
+					region.imageSubresource.aspectMask = IsDepthFormat(m_Desc.Format)
+						? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+					region.imageSubresource.mipLevel = mip;
+					region.imageSubresource.baseArrayLayer = layer;
+					region.imageSubresource.layerCount = 1;
+					region.imageExtent = {
+						std::max(1u, m_Desc.Extent.Width >> mip),
+						std::max(1u, m_Desc.Extent.Height >> mip),
+						std::max(1u, m_Desc.Extent.Depth >> mip) };
+					vkCmdCopyBufferToImage(commandBuffer, allocation.Buffer, m_Image,
+						VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+					RecordImageTransition(commandBuffer, m_Image, m_Desc,
+						VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, target, false);
+				});
+				if (submitted)
+				{
+					m_Layout = target;
+					return;
+				}
+			}
+		}
+
+		// 回退:上传环形缓冲不可用(设备初始化失败/包装外部图像)时走同步路径。
 		BufferDesc stagingDesc;
 		stagingDesc.Size = size;
 		stagingDesc.Usage = BufferUsageTransferSrc;

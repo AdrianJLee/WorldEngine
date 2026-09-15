@@ -446,9 +446,13 @@ namespace World::Wui
 		const uint64_t indexOffset = m_FrameIndexBytes;
 		m_FrameVertexBytes += vertexBytes;
 		m_FrameIndexBytes += indexBytes;
-		// 顶点/索引数据走命令缓冲更新(录制期不触碰后端状态机)。
-		m_Cmds[slot]->UpdateBuffer(m_Vbs[slot], m_Vertices.data(), vertexBytes, vertexOffset);
-		m_Cmds[slot]->UpdateBuffer(m_Ibs[slot], m_Indices.data(), indexBytes, indexOffset);
+		// 顶点/索引走槽位缓冲的直接映射写:
+		//   ① Vulkan 的 vkCmdUpdateBuffer/CopyBuffer 不允许录制在 render pass 内
+		//      (VUID-vkCmdUpdateBuffer-renderpass),而批次上传发生在 Begin/EndRenderPass 之间;
+		//   ② 缓冲按帧槽位环形化 + BeginFrame 等待该槽位的帧栅栏,GPU 上一轮引用已结束,
+		//      映射写不会与在飞绘制冲突;CPU 侧只剩一次 memcpy(无驱动同步点)。
+		m_Vbs[slot]->SetData(m_Vertices.data(), vertexBytes, vertexOffset);
+		m_Ibs[slot]->SetData(m_Indices.data(), indexBytes, indexOffset);
 		m_Cmds[slot]->BindPipeline(m_Pipeline);
 		m_Cmds[slot]->BindDescriptorSet(m_GlobalSets[slot], 0);
 		m_Cmds[slot]->BindDescriptorSet(TextureSetFor(m_ActiveTexture), 1);
@@ -707,9 +711,9 @@ namespace World::Wui
 		m_ActiveTexture = m_WhiteTexture;
 		m_TextureChanged = true;
 
-		// Begin 会清空命令列表(两种后端一致),因此投影 UBO 的更新必须录在 Begin 之后。
 		m_Cmds[slot]->Begin();
-		m_Cmds[slot]->UpdateBuffer(m_Ubos[slot], &m_Projection, sizeof(glm::mat4), 0);
+		// 投影 UBO 走槽位缓冲的映射写(理由同批次顶点:render pass 内不能录制上传命令)。
+		m_Ubos[slot]->SetData(&m_Projection, sizeof(glm::mat4), 0);
 		Rhi::ClearValue clear;
 		clear.Color = { 0, 0, 0, 0 };
 		m_Cmds[slot]->BeginRenderPass(pass, framebuffer, { clear });

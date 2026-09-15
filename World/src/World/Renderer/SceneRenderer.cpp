@@ -243,6 +243,9 @@ namespace World
 		m_CommandBuffers[slot]->Begin();
 		m_CommandBuffers[slot]->BeginRenderPass(m_RenderPass, m_Framebuffer, clears);
 		m_CommandBuffers[slot]->SetViewport({ 0, 0, static_cast<float>(m_Width), static_cast<float>(m_Height) });
+		// 管线把视口/裁剪都设为动态状态,绑定后必须先设置再绘制
+		// (VUID-vkCmdDrawIndexed-None-07832:动态裁剪未设置时状态未定义)。
+		m_CommandBuffers[slot]->SetScissor({ 0, 0, m_Width, m_Height });
 		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot]);
 
 		Renderer2D::StartBatch();

@@ -4,11 +4,15 @@
 
 #include <volk.h>
 
+#include <memory>
+#include <functional>
 #include <mutex>
 #include <vector>
 
 namespace World::Rhi::Vulkan
 {
+	class VulkanUploadRing;
+
 	// Vulkan 后端设备。W6-A:实例/物理设备/逻辑设备/队列与能力表;渲染资源类随后补齐。
 	class VulkanDevice final : public Device
 	{
@@ -51,6 +55,13 @@ namespace World::Rhi::Vulkan
 		VkCommandPool GetThreadCommandPool();
 		void SetLastPipelineLayout(VkPipelineLayout layout) { m_LastPipelineLayout = layout; }
 		VkPipelineLayout GetLastPipelineLayout() const { return m_LastPipelineLayout; }
+		// B2:常驻 staging 环形缓冲(异步上传)。设备初始化后有效,渲染线程使用。
+		VulkanUploadRing& GetUploadRing() { return *m_UploadRing; }
+		// 一次性录制+提交(内部槽位环):wait=false 时 fire-and-forget,
+		// 槽位都在飞时只等待最老的一个,替代"每次提交都 vkQueueWaitIdle"。
+		// waitSemaphore/signalSemaphore 用于需要与渲染提交排序的场景(如呈现前的布局转换)。
+		bool SubmitOneShot(const std::function<void(VkCommandBuffer)>& record, bool wait,
+			VkSemaphore waitSemaphore = VK_NULL_HANDLE, VkSemaphore signalSemaphore = VK_NULL_HANDLE);
 
 	private:
 		bool Initialize(const DeviceDesc& desc, std::string* error);
@@ -68,5 +79,14 @@ namespace World::Rhi::Vulkan
 		std::vector<VkCommandPool> m_ThreadPools;                // 每线程一个池(含主线程的第一个)
 		VkPipelineLayout m_LastPipelineLayout = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
+		std::unique_ptr<VulkanUploadRing> m_UploadRing;
+		struct OneShotSlot
+		{
+			VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
+			VkFence Fence = VK_NULL_HANDLE;
+		};
+		VkCommandPool m_TransientPool = VK_NULL_HANDLE;
+		std::vector<OneShotSlot> m_OneShotSlots;
+		size_t m_NextOneShot = 0;
 	};
 }

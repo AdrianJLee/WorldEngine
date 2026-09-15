@@ -20,7 +20,10 @@ namespace World::Rhi::Vulkan
 		void Resize(Extent2D extent) override;
 		VkSwapchainKHR GetSwapchain() const { return m_Swapchain; }
 		uint32_t GetImageCount() const override { return static_cast<uint32_t>(m_Images.size()); }
-		void TransitionImage(uint32_t index, VkImageLayout layout);
+		// signalAfter:非空时该信号量在转换提交完成时被发出(呈现前的转换用它排序);
+		// waitBefore:非空时该转换命令等到 acquire 信号量后再执行。
+		bool TransitionImage(uint32_t index, VkImageLayout layout,
+			const Handle<Semaphore>& signalAfter = nullptr, const Handle<Semaphore>& waitBefore = nullptr);
 	private:
 		VulkanDevice& m_Device;
 		SwapchainDesc m_Desc;
