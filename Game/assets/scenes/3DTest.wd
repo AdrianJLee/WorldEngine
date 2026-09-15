@@ -1,5 +1,5 @@
 FormatVersion: 2
-Scene: 3D Test
+Scene: Untitled
 Entities:
   - World::UUIDComponent:
       ID:
@@ -32,7 +32,7 @@ Entities:
       Scale: [12, 1, 12]
     World::MeshRendererComponent:
       Primitive: plane
-      Color: [0.34, 0.36, 0.4, 1]
+      Color: [0.340000004, 0.360000014, 0.400000006, 1]
       MeshPath: ""
   - World::UUIDComponent:
       ID:
@@ -45,7 +45,7 @@ Entities:
       Scale: [1, 1, 1]
     World::MeshRendererComponent:
       Primitive: cube
-      Color: [1, 0.55, 0.12, 1]
+      Color: [1, 0.550000012, 0.119999997, 1]
       MeshPath: ""
   - World::UUIDComponent:
       ID:
@@ -53,12 +53,12 @@ Entities:
     World::TagComponent:
       Tag: Mesh:Cube Green
     World::TransformComponent:
-      Location: [0, 0.9, 0]
+      Location: [0, 0.899999976, 0]
       Rotation: [0, 0, 0]
-      Scale: [1.6, 1.6, 1.6]
+      Scale: [1.60000002, 1.60000002, 1.60000002]
     World::MeshRendererComponent:
       Primitive: cube
-      Color: [0.25, 0.85, 0.35, 1]
+      Color: [0.25, 0.850000024, 0.349999994, 1]
       MeshPath: ""
   - World::UUIDComponent:
       ID:
@@ -71,7 +71,7 @@ Entities:
       Scale: [1, 1, 1]
     World::MeshRendererComponent:
       Primitive: cube
-      Color: [0.25, 0.55, 0.95, 1]
+      Color: [0.25, 0.550000012, 0.949999988, 1]
       MeshPath: ""
   - World::UUIDComponent:
       ID:
@@ -79,10 +79,10 @@ Entities:
     World::TagComponent:
       Tag: Mesh:Cube Small
     World::TransformComponent:
-      Location: [1.2, 0.35, 1.8]
+      Location: [1.20000005, 0.349999994, 1.79999995]
       Rotation: [18, 12, 0]
-      Scale: [0.7, 0.7, 0.7]
+      Scale: [0.699999988, 0.699999988, 0.699999988]
     World::MeshRendererComponent:
       Primitive: cube
-      Color: [0.9, 0.25, 0.35, 1]
+      Color: [0.899999976, 0.25, 0.349999994, 1]
       MeshPath: ""
