@@ -3,6 +3,7 @@
 
 #include "World/Scene/Entity.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Hierarchy.h"
 #include "World/Core/UUID.h"
 #include "World/Schema/SchemaWriter.h"
 
@@ -400,8 +401,31 @@ namespace World
 		// 反序列化只写入 Location/Rotation/Scale 原始字段,不会触发缓存矩阵重算
 		// (schema 生成的 setter 直接赋值)。这里统一重算一次,否则所有实体(含相机)
 		// 会停在单位矩阵——表现为"相机在物体内部/物体全部堆在原点"。
-		for (const auto entity : m_Scene->m_Registry.view<TransformComponent>())
-			m_Scene->m_Registry.get<TransformComponent>(entity).RecalculateTransform();
+		auto& registry = m_Scene->m_Registry;
+		for (const auto entity : registry.view<TransformComponent>())
+			registry.get<TransformComponent>(entity).RecalculateTransform();
+
+		// 层级:Parent 已随字段读入,Children 不入库,这里按 Parent 重建反向索引;
+		// 之后求解一次世界矩阵(P2a W3b)。
+		for (const auto entity : registry.view<HierarchyComponent>())
+		{
+			auto& hierarchy = registry.get<HierarchyComponent>(entity);
+			hierarchy.Children.clear();
+		}
+		std::vector<entt::entity> childrenToLink;
+		for (const auto entity : registry.view<HierarchyComponent>())
+		{
+			const auto& hierarchy = registry.get<HierarchyComponent>(entity);
+			if (hierarchy.Parent != entt::null && registry.valid(hierarchy.Parent))
+				childrenToLink.push_back(entity);
+		}
+		for (const entt::entity child : childrenToLink)
+		{
+			auto& parentHierarchy = registry.get_or_emplace<HierarchyComponent>(
+				registry.get<HierarchyComponent>(child).Parent);
+			parentHierarchy.Children.push_back(child);
+		}
+		Hierarchy::UpdateWorldTransforms(registry);
 
 		return true;
 	}

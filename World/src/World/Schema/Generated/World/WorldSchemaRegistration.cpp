@@ -14,6 +14,7 @@ const TypeSchema& WeSchemaOf_TransformComponent();
 const TypeSchema& WeSchemaOf_SpriteComponent();
 const TypeSchema& WeSchemaOf_CircleRendererComponent();
 const TypeSchema& WeSchemaOf_MeshRendererComponent();
+const TypeSchema& WeSchemaOf_HierarchyComponent();
 const TypeSchema& WeSchemaOf_CameraComponent();
 const TypeSchema& WeSchemaOf_NativeScriptComponent();
 const TypeSchema& WeSchemaOf_LuaScriptComponent();
@@ -526,6 +527,93 @@ struct GeneratedAccess<World::CircleRendererComponent>
                 Field_Color(),
                 Field_Thickness(),
                 Field_Fade(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+// HierarchyComponent(P2a W3b):同样手写补充。Parent 以 UInt64 承载 32 位实体句柄,
+// Children 不入库(读档后按 Parent 重建)。
+template <>
+struct GeneratedAccess<World::HierarchyComponent>
+{
+    static Value Get_Parent(const void* instance)
+    {
+        const World::HierarchyComponent* self = static_cast<const World::HierarchyComponent*>(instance);
+        return Value(static_cast<uint64_t>(static_cast<uint32_t>(self->Parent)));
+    }
+    static void Set_Parent(void* instance, const Value& value)
+    {
+        World::HierarchyComponent* self = static_cast<World::HierarchyComponent*>(instance);
+        const uint64_t raw = std::get<uint64_t>(value);
+        self->Parent = raw == static_cast<uint64_t>(entt::null)
+            ? entt::null : static_cast<entt::entity>(static_cast<uint32_t>(raw));
+    }
+    static Value Get_InheritTransform(const void* instance)
+    {
+        const World::HierarchyComponent* self = static_cast<const World::HierarchyComponent*>(instance);
+        return Value(self->InheritTransform);
+    }
+    static void Set_InheritTransform(void* instance, const Value& value)
+    {
+        World::HierarchyComponent* self = static_cast<World::HierarchyComponent*>(instance);
+        self->InheritTransform = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Parent()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4849455241524331ull },
+            "Parent",
+            Kind::UInt64,
+            &Get_Parent,
+            &Set_Parent,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(static_cast<uint64_t>(static_cast<uint32_t>(entt::null))),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_InheritTransform()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4849455241524332ull },
+            "InheritTransform",
+            Kind::Bool,
+            &Get_InheritTransform,
+            &Set_InheritTransform,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::HierarchyComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::HierarchyComponent" },
+            "HierarchyComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::HierarchyComponent),
+            TypeCategory::Component,
+            {
+                Field_Parent(),
+                Field_InheritTransform(),
             },
             &StorageBindingOf(),
             nullptr,
@@ -1703,6 +1791,7 @@ const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World
 const TypeSchema& WeSchemaOf_SpriteComponent() { return GeneratedAccess<World::SpriteComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleRendererComponent() { return GeneratedAccess<World::CircleRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshRendererComponent() { return GeneratedAccess<World::MeshRendererComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_HierarchyComponent() { return GeneratedAccess<World::HierarchyComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraComponent() { return GeneratedAccess<World::CameraComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_NativeScriptComponent() { return GeneratedAccess<World::NativeScriptComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_LuaScriptComponent() { return GeneratedAccess<World::LuaScriptComponent>::WeSchema(); }
@@ -1726,6 +1815,7 @@ const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::
 			WeSchemaOf_SpriteComponent(),
 			WeSchemaOf_CircleRendererComponent(),
 			WeSchemaOf_MeshRendererComponent(),
+			WeSchemaOf_HierarchyComponent(),
 			WeSchemaOf_CameraComponent(),
 			WeSchemaOf_NativeScriptComponent(),
 			WeSchemaOf_LuaScriptComponent(),

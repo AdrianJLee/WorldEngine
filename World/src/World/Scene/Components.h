@@ -147,6 +147,26 @@ namespace World
 	};
 
 	// P1b D2c:3D 网格渲染组件。
+	// P2a W3:层级关系(父子 + 是否继承父变换)与世界矩阵缓存。
+	// Parent 以 UInt64 存 schema(entt::entity 是 32 位句柄),Children 由读档后按 Parent 重建,
+	// WorldTransformComponent 是缓存不参与序列化。
+	struct HierarchyComponent
+	{
+		entt::entity Parent = entt::null;
+		std::vector<entt::entity> Children;
+		bool InheritTransform = true;
+
+		WE_SCHEMA_BODY(World, HierarchyComponent, Component)
+			WE_FIELD(Parent, UInt64);
+			WE_FIELD(InheritTransform, Bool);
+		WE_SCHEMA_END
+	};
+
+	struct WorldTransformComponent
+	{
+		glm::mat4 Matrix { 1.0f };
+	};
+
 	// Primitive:内置网格名("cube"/"plane");MeshPath 预留给 glTF 导入的模型资产(D5),
 	// 届时 Primitive 会升级为资产引用,这里的字段 id 保持不变以便存档迁移。
 	struct MeshRendererComponent

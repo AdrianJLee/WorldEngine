@@ -3,6 +3,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/Scene.h"
+#include "World/Scene/SceneSerializer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
