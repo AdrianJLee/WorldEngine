@@ -633,7 +633,17 @@ namespace World
 		PresentTarget& state = s_ActivePresent ? *s_ActivePresent : s_MainPresent;
 		// 设备切换后队列属于旧设备:必须等 BeginFramePresent 重建后再提交。
 		if (!state.Queue || state.QueueDevice != m_Device.get())
+		{
+			// 诊断:场景提交被丢弃时静默失败会让"画面只有清屏色"变成谜案(实测 Runtime 侧)。
+			static int dropLogged = 0;
+			if (dropLogged < 3)
+			{
+				++dropLogged;
+				WLD_CORE_WARN("[scene] submission dropped: queue={0} deviceMatch={1}",
+					state.Queue ? 1 : 0, state.Queue && state.QueueDevice == m_Device.get() ? 1 : 0);
+			}
 			return;
+		}
 		Rhi::SubmitInfo submit;
 		submit.CommandBuffers = { commandBuffer };
 		// 场景提交通常是本帧第一个提交:由它消费 FrameStart/acquire 等待,避免二值信号量被等两次。
@@ -778,6 +788,9 @@ namespace World
 			s_CaptureQueue = m_Device->CreateQueue("Capture");
 		if (!s_CaptureQueue)
 			return false;
+		// 截图是开发期低频操作:先把在飞工作等干净,避免"拷贝跑到本帧绘制之前"
+		// (实测 Runtime 侧会因此抓到只有清屏色的旧内容)。
+		m_Device->WaitIdle();
 
 		// 场景颜色附件在帧末处于 ShaderReadOnly;拷贝前后各做一次转换,
 		// 保证拷完仍可被 UI 采样(否则下一帧读到的是一张"被拷走"的布局)。
