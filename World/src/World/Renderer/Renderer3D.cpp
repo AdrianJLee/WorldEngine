@@ -110,16 +110,14 @@ namespace World
 		pipelineDesc.VertexBindings = meshLayout.Bindings;
 		pipelineDesc.VertexAttributes = meshLayout.Attributes;
 		pipelineDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
-		// TODO(D2c):网格绕序与 FrontFace 约定统一后再打开背面剔除;
-		// 当前 CreateUnitCube/CreateUnitPlane 的索引绕序在两个后端下未统一,开剔除会剔掉正对相机的面。
-		pipelineDesc.Cull = Rhi::CullMode::None;
-		pipelineDesc.Front = Rhi::FrontFace::CounterClockwise;
-		// 深度默认关闭:启用后几何会被吞掉(已验证 CPU 侧矩阵/颜色/索引正确、深度清除值链路正确,
-		// 关闭深度时场景完全正确),根因尚未定位,见任务文档 D2 待办。
-		// WLD_3D_DEPTH=1 可强制打开,用于后续排查。
-		const bool depthEnabled = std::getenv("WLD_3D_DEPTH") != nullptr;
-		pipelineDesc.DepthStencil.DepthTest = depthEnabled;
-		pipelineDesc.DepthStencil.DepthWrite = depthEnabled;
+		pipelineDesc.Cull = Rhi::CullMode::Back;
+		// Vulkan 后端为了适配"NDC +Y 向上"的 2D 约定,对投影矩阵 Y 行取反;
+		// 这一步同时把屏幕空间绕序反转了,因此 Vulkan 下正面是 Clockwise(否则正面会被当背面剔除,
+		// 表现为"立方体渲染反了/开剔除就消失")。OpenGL 没有这个翻转,保持 CCW。
+		pipelineDesc.Front = Renderer::GetBackendName() == "vulkan"
+			? Rhi::FrontFace::Clockwise : Rhi::FrontFace::CounterClockwise;
+		pipelineDesc.DepthStencil.DepthTest = true;
+		pipelineDesc.DepthStencil.DepthWrite = true;
 		pipelineDesc.DepthStencil.DepthCompare = Rhi::CompareOp::LessOrEqual;
 		state.Pipeline = Renderer::GetDevice()->CreatePipeline(pipelineDesc);
 	}
