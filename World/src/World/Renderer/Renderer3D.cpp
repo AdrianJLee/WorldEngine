@@ -112,12 +112,14 @@ namespace World
 		pipelineDesc.VertexBindings = meshLayout.Bindings;
 		pipelineDesc.VertexAttributes = meshLayout.Attributes;
 		pipelineDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
-		// 剔除约定:所有网格按"外壁 = 从外侧看逆时针(CCW)"编写(Mesh::Create* 统一保证,
-		// 回归见 World.Mesh),两个后端都用 CCW 判正面 —— 实测双后端一致,不需要按后端翻转。
-		// 注意:这里曾按"Vulkan 的 Y 翻转会反转屏幕绕序"把 Vulkan 改成 CW,那是把 cube 自身的
-		// 索引写反(与 plane 相反)误判成了后端差异,结果只修好了 cube、plane 反而被剔除。
+		// 剔除约定:网格按"外壁 = 从外侧看逆时针(CCW)"编写(Mesh::Create* 统一保证,
+		// 回归见 World.Mesh)。正面判据必须与**后端的屏幕空间绕序约定**配套:
+		// Vulkan 的帧缓冲 Y 向下,同样的世界绕序在它的光栅化约定里是反的,因此 Vulkan 用 CW。
+		// 依据:离屏不再做 Y 翻转(见 ProjectionConventions.h)后实测——GL 用 CCW 正常,
+		// Vulkan 用 CCW 会剔除外壁只剩内壁,改 CW 后恢复外壁。
+		pipelineDesc.Front = Renderer::GetBackendName() == "vulkan"
+			? Rhi::FrontFace::Clockwise : Rhi::FrontFace::CounterClockwise;
 		pipelineDesc.Cull = Rhi::CullMode::Back;
-		pipelineDesc.Front = Rhi::FrontFace::CounterClockwise;
 		pipelineDesc.DepthStencil.DepthTest = true;
 		pipelineDesc.DepthStencil.DepthWrite = true;
 		// 深度约定:清值 1.0 + LessOrEqual(近处深度小者胜)。Vulkan 的 NDC z∈[0,1] 由
