@@ -62,6 +62,20 @@ namespace World::Gameplay
 	};
 
 	// 输入服务(P2a W7):宿主每帧把原始设备状态喂进来,玩法/脚本只问动作与轴。
+	// W7-4:每帧可生成只读快照,供并行安全系统读取(避免系统直接读实时服务)。
+	struct InputSnapshot
+	{
+		std::unordered_map<std::string, bool> Down;
+		std::unordered_map<std::string, bool> Pressed;
+		std::unordered_map<std::string, bool> Released;
+		std::unordered_map<std::string, float> Axes;
+
+		bool IsDown(const std::string& action) const;
+		bool WasPressed(const std::string& action) const;
+		bool WasReleased(const std::string& action) const;
+		float GetAxis(const std::string& axis) const;
+	};
+
 	// 多玩家:按键状态按"玩家槽位 + 设备 + 键码"记录,同一份映射可服务多个玩家。
 	class WLD_API InputService
 	{
@@ -77,6 +91,9 @@ namespace World::Gameplay
 		void SetGamepadAxis(uint32_t player, const std::string& axis, float value);
 		// 帧末调用:把"当前按下"滚成"上一帧按下",供 Pressed/Released 边沿判定。
 		void EndFrame();
+		// W7-4:把本帧所有动作/轴求值成快照(在喂完原始状态、系统运行之前调用)。
+		void BuildSnapshot(uint32_t player = 0);
+		const InputSnapshot& GetSnapshot() const { return m_Snapshot; }
 		void Clear();
 
 		bool ActionDown(const std::string& action, uint32_t player = 0) const;
@@ -102,6 +119,7 @@ namespace World::Gameplay
 
 		InputMap m_Map;
 		std::vector<PlayerState> m_Players;
+		InputSnapshot m_Snapshot;
 		uint64_t m_EndFrameCount = 0;
 	};
 }

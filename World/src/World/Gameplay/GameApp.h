@@ -5,6 +5,7 @@
 #include "World/Gameplay/GameFlow.h"
 #include "World/Gameplay/LevelService.h"
 #include "World/Gameplay/SystemRegistry.h"
+#include "World/Gameplay/InputMap.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -55,6 +56,9 @@ namespace World::Gameplay
 		LevelService& Levels() { return m_Levels; }
 		const LevelService& Levels() const { return m_Levels; }
 		// W5:系统注册表(阶段/顺序/并行标记/耗时)。Tick 会按阶段顺序派发它。
+		// W7:输入服务(动作/轴/帧快照)。宿主负责喂原始状态,玩法只读动作与轴。
+		InputService& Input() { return m_Input; }
+		const InputService& Input() const { return m_Input; }
 		SystemRegistry& Systems() { return m_Systems; }
 		const SystemRegistry& Systems() const { return m_Systems; }
 
@@ -78,6 +82,7 @@ namespace World::Gameplay
 		GameFlow m_Flow;
 		LevelService m_Levels;
 		SystemRegistry m_Systems;
+		InputService m_Input;
 		double m_FixedStepSeconds = 1.0 / 60.0;
 		double m_Accumulator = 0.0;
 		uint32_t m_LastFixedSteps = 0;

@@ -1,4 +1,6 @@
 #include "World/Gameplay/GameHost.h"
+#include "World/Core/Input.h"
+#include "World/Gameplay/InputMap.h"
 
 #include "World/Core/Application.h"
 #include "World/Core/Log.h"
@@ -271,6 +273,25 @@ namespace World::Gameplay
 	{
 		if (!m_Initialized)
 			return;
+
+		// W7-3:把引擎轮询到的键盘/鼠标状态喂给 InputService(只喂映射里真正用到的绑定),
+		// 再生成只读快照供并行安全系统读取(W7-4)。
+		{
+			Gameplay::InputService& input = GameApp::Get().Input();
+			const Gameplay::InputMap& mapInput = input.GetMap();
+			if (input.GetPlayerCount() == 0)
+				input.SetPlayerCount(1);
+			for (const Gameplay::InputAction& action : mapInput.Actions())
+				for (const Gameplay::InputBinding& binding : action.Bindings)
+				{
+					const bool down = binding.Device == Gameplay::InputDevice::Mouse
+						? Input::IsMouseButtonPressed(binding.Code)
+						: (binding.Device == Gameplay::InputDevice::Key
+							? Input::IsKeyPressed(binding.Code) : false);
+					input.SetKeyState(0, binding.Device, binding.Code, down);
+				}
+			input.BuildSnapshot(0);
+		}
 
 		// W2:推进排队的关卡加载(读盘 → 反序列化 → 激活;激活时进度回调会把场景交给宿主)。
 		GameApp::Get().Levels().Pump();

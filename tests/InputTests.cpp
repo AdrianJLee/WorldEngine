@@ -102,6 +102,20 @@ int main()
 			CHECK(!input.ActionDown("Jump", 7));
 			CHECK(std::fabs(input.Axis("Move", 7)) < 1e-5f);
 
+			// 5. W7-4 快照:一次性求值全部动作/轴,供并行系统只读。
+			input.SetKeyState(0, InputDevice::Key, 32, true);
+			input.SetGamepadAxis(0, "LX", 0.6f);
+			input.BuildSnapshot(0);
+			const InputSnapshot& snapshot = input.GetSnapshot();
+			CHECK(snapshot.IsDown("Jump"));
+			CHECK(snapshot.WasPressed("Jump"));
+			CHECK(!snapshot.WasReleased("Jump"));
+			CHECK(std::fabs(snapshot.GetAxis("Move") - 0.6f) < 1e-5f);
+			CHECK(!snapshot.IsDown("Ghost"));
+			CHECK(std::fabs(snapshot.GetAxis("Ghost")) < 1e-5f);
+			// 快照是只读副本:之后喂入新状态不会改变已有快照。
+			input.SetKeyState(0, InputDevice::Key, 32, false);
+			CHECK(snapshot.IsDown("Jump"));
 			input.Clear();
 			CHECK(input.GetPlayerCount() == 0);
 			std::filesystem::remove(path);

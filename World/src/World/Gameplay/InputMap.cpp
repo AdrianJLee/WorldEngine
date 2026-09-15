@@ -159,6 +159,30 @@ namespace World::Gameplay
 
 	// ---- InputService ----
 
+	bool InputSnapshot::IsDown(const std::string& action) const
+	{
+		const auto it = Down.find(action);
+		return it != Down.end() && it->second;
+	}
+
+	bool InputSnapshot::WasPressed(const std::string& action) const
+	{
+		const auto it = Pressed.find(action);
+		return it != Pressed.end() && it->second;
+	}
+
+	bool InputSnapshot::WasReleased(const std::string& action) const
+	{
+		const auto it = Released.find(action);
+		return it != Released.end() && it->second;
+	}
+
+	float InputSnapshot::GetAxis(const std::string& axis) const
+	{
+		const auto it = Axes.find(axis);
+		return it != Axes.end() ? it->second : 0.0f;
+	}
+
 	uint64_t InputService::MakeKey(InputDevice device, int code)
 	{
 		return (static_cast<uint64_t>(device) << 32) | static_cast<uint32_t>(code);
@@ -194,6 +218,19 @@ namespace World::Gameplay
 		for (PlayerState& player : m_Players)
 			player.Previous = player.Down;
 		m_EndFrameCount++;
+	}
+
+	void InputService::BuildSnapshot(uint32_t player)
+	{
+		m_Snapshot = {};
+		for (const InputAction& action : m_Map.Actions())
+		{
+			m_Snapshot.Down[action.Name] = ActionDown(action.Name, player);
+			m_Snapshot.Pressed[action.Name] = ActionPressed(action.Name, player);
+			m_Snapshot.Released[action.Name] = ActionReleased(action.Name, player);
+		}
+		for (const InputAxis& axis : m_Map.Axes())
+			m_Snapshot.Axes[axis.Name] = Axis(axis.Name, player);
 	}
 
 	const InputService::PlayerState* InputService::GetPlayer(uint32_t player) const
