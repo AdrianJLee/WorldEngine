@@ -46,7 +46,13 @@ namespace World::Gameplay
 			RestoreComponentIfPresent<CircleRendererComponent>(source, destination, from, to);
 			RestoreComponentIfPresent<MeshRendererComponent>(source, destination, from, to);
 			RestoreComponentIfPresent<CameraComponent>(source, destination, from, to);
-			RestoreComponentIfPresent<RigidBody2DComponent>(source, destination, from, to);
+			// 同 Prefab.cpp:物理运行时句柄属于各自的物理世界,回滚时也置空重建。
+			if (const auto* body = source.try_get<RigidBody2DComponent>(from))
+			{
+				RigidBody2DComponent copy = *body;
+				copy.RuntimeBodyId = b2_nullBodyId;
+				destination.emplace_or_replace<RigidBody2DComponent>(to, copy);
+			}
 			RestoreComponentIfPresent<BoxCollider2DComponent>(source, destination, from, to);
 			RestoreComponentIfPresent<CircleCollider2DComponent>(source, destination, from, to);
 		}
