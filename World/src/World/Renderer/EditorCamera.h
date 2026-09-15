@@ -34,6 +34,8 @@ namespace World
 
 		float GetPitch() const { return m_Pitch; }
 		float GetYaw() const { return m_Yaw; }
+		// Gizmo 需要"世界单位 → 屏幕像素"的换算(依赖 FOV),因此暴露只读访问。
+		float GetFov() const { return m_Fov; }
 	private:
 
 		void UpdateProjection();
