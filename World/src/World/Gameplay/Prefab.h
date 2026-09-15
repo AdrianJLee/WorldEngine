@@ -5,6 +5,8 @@
 #include "World/Scene/Scene.h"
 
 #include <cstdint>
+#include <filesystem>
+#include <string>
 
 namespace World::Gameplay
 {
@@ -24,5 +26,15 @@ namespace World::Gameplay
 	//  - 非法输入(源实体不在给定场景)返回无效结果,不抛异常。
 	// 文件资产(.wprefab)读写、实例覆盖与嵌套/断链在 W4 后续增量接入。
 	WLD_API PrefabInstanceResult Instantiate(const Scene& source, Entity sourceRoot,
+		Scene& destination, entt::entity parent = entt::null);
+
+	// W4-2:.wprefab 资产读写。
+	// 实现方式:用临时场景承载子树,复用①已验证的实例化内核②场景序列化器
+	// (因此 prefab 文件与 .wd 同格式、同 schema 版本,读档路径也只有一条)。
+	//  - SaveFromScene:把 source 中 root 的子树导出为 prefab 文件;
+	//  - InstantiateFromFile:读入 prefab 并作为实例挂到 destination 的 parent 下。
+	WLD_API bool SaveFromScene(Scene& source, Entity root,
+		const std::filesystem::path& path, std::string* error = nullptr);
+	WLD_API PrefabInstanceResult InstantiateFromFile(const std::filesystem::path& path,
 		Scene& destination, entt::entity parent = entt::null);
 }

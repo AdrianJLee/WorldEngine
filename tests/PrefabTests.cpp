@@ -6,6 +6,7 @@
 #include "World/Scene/Scene.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -105,6 +106,41 @@ int main()
 			uuids.insert(static_cast<uint64_t>(destinationRegistry.get<UUIDComponent>(entity).ID));
 		CHECK(uuids.size() == static_cast<size_t>(destinationRegistry.view<UUIDComponent>().size()));
 
+		// 6. 资产往返:.wprefab 保存后能从文件实例化(与 .wd 同格式,复用同一序列化器)。
+		{
+			const std::filesystem::path prefabPath =
+				std::filesystem::temp_directory_path() / "worldengine-prefab-test.wprefab";
+			std::string error;
+			CHECK(SaveFromScene(source, Entity(&source, root), prefabPath, &error));
+			CHECK(error.empty());
+			CHECK(std::filesystem::exists(prefabPath));
+
+			Scene loaded(context);
+			auto& loadedRegistry = loaded.GetRegistry();
+			const entt::entity host2 = loadedRegistry.create();
+			loadedRegistry.emplace<UUIDComponent>(host2, UUID());
+			loadedRegistry.emplace<TagComponent>(host2, "Host2");
+			loadedRegistry.emplace<TransformComponent>(host2, TransformComponent(glm::vec3(-5.0f, 0.0f, 0.0f)));
+
+			const PrefabInstanceResult fromFile = InstantiateFromFile(prefabPath, loaded, host2);
+			CHECK(fromFile.IsValid());
+			CHECK(fromFile.EntityCount == 2);
+
+			const entt::entity fileRoot = static_cast<entt::entity>(fromFile.Root);
+			CHECK(loadedRegistry.get<TagComponent>(fileRoot).Tag == "Prefab Root");
+			CHECK(loadedRegistry.get<HierarchyComponent>(fileRoot).Parent == host2);
+			const auto& fileChildren = loadedRegistry.get<HierarchyComponent>(fileRoot).Children;
+			CHECK(fileChildren.size() == 1);
+			CHECK(loadedRegistry.get<TagComponent>(fileChildren[0]).Tag == "Prefab Child");
+			// Host2(-5,0,0) + Root(1,2,3) + Child(0,1,0) = (-4,3,3)
+			const glm::vec3 fileChildWorld =
+				glm::vec3(loadedRegistry.get<WorldTransformComponent>(fileChildren[0]).Matrix[3]);
+			CHECK(glm::length(fileChildWorld - glm::vec3(-4.0f, 3.0f, 3.0f)) < 1e-3f);
+
+			// 缺失文件与非法来源都应安全失败(不抛异常)。
+			CHECK(!InstantiateFromFile(std::filesystem::temp_directory_path() / "missing.wprefab", loaded).IsValid());
+			std::filesystem::remove(prefabPath);
+		}
 		std::printf("World.Prefab: all checks passed\n");
 		return 0;
 	}
