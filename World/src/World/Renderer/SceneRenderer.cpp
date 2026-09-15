@@ -425,7 +425,9 @@ namespace World
 
 	void SceneRenderer::CaptureFrame(const std::filesystem::path& path) const
 	{
-		Renderer::CaptureFramebuffer(path, Rhi::FramebufferId(m_Framebuffer), m_Width, m_Height);
+		// 走后端无关的 RHI 读回:GL 的延迟命令列表与 Vulkan 的呈现路径下,
+		// 旧的 glReadPixels 版本分别只能抓到清屏色与全黑。
+		Renderer::CaptureTexture(path, m_ColorTexture, m_Width, m_Height);
 	}
 }
 

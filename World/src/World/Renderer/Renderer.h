@@ -81,6 +81,10 @@ namespace World
 		static void CaptureFramebuffer(const std::filesystem::path& path, uint32_t fbo, uint32_t width, uint32_t height);
 		// 读回当前上下文的默认帧缓冲(GL_BACK)写 PPM;独立窗口验证用。
 		static void CaptureDefaultFramebuffer(const std::filesystem::path& path, uint32_t width, uint32_t height);
+		// 后端无关的纹理读回(RHI CopyTextureToBuffer + Map):把任意采样纹理写成 PPM。
+		// 双后端截图基线必须走这条(旧的 glReadPixels 路径在 Vulkan 下只能抓到全黑)。
+		static bool CaptureTexture(const std::filesystem::path& path,
+			const Rhi::Handle<Rhi::Texture>& texture, uint32_t width, uint32_t height);
 	private:
 		struct SceneData
 		{

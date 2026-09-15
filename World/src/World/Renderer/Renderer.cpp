@@ -752,6 +752,83 @@ namespace World
 		glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
 		WLD_CORE_INFO("[capture] wrote default framebuffer {0} ({1}x{2})", path.string(), width, height);
 	}
+
+	// 后端无关的纹理读回:CopyTextureToBuffer(RHI) → Map → PPM。
+	// 与上面三个 GL 专用函数不同,这条路径在 Vulkan 下同样有效,是"双后端截图基线"的基础。
+	bool Renderer::CaptureTexture(const std::filesystem::path& path,
+		const Rhi::Handle<Rhi::Texture>& texture, uint32_t width, uint32_t height)
+	{
+		if (!m_Device || !texture || width == 0 || height == 0)
+			return false;
+
+		Rhi::BufferDesc readbackDesc;
+		readbackDesc.Size = static_cast<uint64_t>(width) * height * 4;
+		readbackDesc.Usage = Rhi::BufferUsageTransferDst;
+		readbackDesc.Memory = Rhi::MemoryHint::HostVisible;
+		readbackDesc.DebugName = "CaptureReadback";
+		Rhi::Handle<Rhi::Buffer> readback = m_Device->CreateBuffer(readbackDesc);
+		if (!readback)
+		{
+			WLD_CORE_ERROR("[capture] failed to create readback buffer");
+			return false;
+		}
+		// 抓取用队列缓存复用:每次抓图都建队列会泄漏后端对象。
+		static Rhi::Handle<Rhi::CommandQueue> s_CaptureQueue;
+		if (!s_CaptureQueue)
+			s_CaptureQueue = m_Device->CreateQueue("Capture");
+		if (!s_CaptureQueue)
+			return false;
+
+		// 场景颜色附件在帧末处于 ShaderReadOnly;拷贝前后各做一次转换,
+		// 保证拷完仍可被 UI 采样(否则下一帧读到的是一张"被拷走"的布局)。
+		s_CaptureQueue->ExecuteImmediate([&](Rhi::CommandBuffer& cmd)
+		{
+			Rhi::ResourceBarrier toCopy;
+			toCopy.Texture = texture;
+			toCopy.Before = Rhi::ResourceState::ShaderReadOnly;
+			toCopy.After = Rhi::ResourceState::CopySrc;
+			cmd.PipelineBarrier({ toCopy });
+			cmd.CopyTextureToBuffer(texture, readback, 0);
+			Rhi::ResourceBarrier back;
+			back.Texture = texture;
+			back.Before = Rhi::ResourceState::CopySrc;
+			back.After = Rhi::ResourceState::ShaderReadOnly;
+			cmd.PipelineBarrier({ back });
+		});
+
+		const uint8_t* pixels = static_cast<const uint8_t*>(readback->Map());
+		if (!pixels)
+		{
+			WLD_CORE_ERROR("[capture] readback buffer is not mappable on this backend");
+			return false;
+		}
+		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		if (!file)
+		{
+			readback->Unmap();
+			WLD_CORE_ERROR("[capture] cannot open {0}", path.string());
+			return false;
+		}
+		file << "P6\n" << width << " " << height << "\n255\n";
+		// GL 的纹理原点在左下(读回是自下而上),Vulkan 复制出来自顶向下 —— 统一成 PPM 的顶向下。
+		const bool flipRows = s_BackendName != "vulkan";
+		std::vector<uint8_t> row(static_cast<size_t>(width) * 3);
+		for (uint32_t y = 0; y < height; ++y)
+		{
+			const uint32_t sourceRow = flipRows ? (height - 1 - y) : y;
+			const uint8_t* source = pixels + static_cast<size_t>(sourceRow) * width * 4;
+			for (uint32_t x = 0; x < width; ++x)
+			{
+				row[x * 3 + 0] = source[x * 4 + 0];
+				row[x * 3 + 1] = source[x * 4 + 1];
+				row[x * 3 + 2] = source[x * 4 + 2];
+			}
+			file.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size()));
+		}
+		readback->Unmap();
+		WLD_CORE_INFO("[capture] wrote texture {0} ({1}x{2})", path.string(), width, height);
+		return true;
+	}
 }
 
 

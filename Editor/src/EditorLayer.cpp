@@ -221,6 +221,32 @@ namespace World
 		m_SceneRenderer->SubmitScene(*renderCamera, renderCameraTransform, selectedEntity);
 		m_SceneRenderer->EndScene();
 		m_HasRenderedScene = true;
+		// 开发验证:像素基线截图(与 Runtime 同名开关)。走的是后端无关的 RHI 读回,
+		// Vulkan/GL 都能抓到本帧场景颜色附件。
+		CaptureFrameIfRequested();
+	}
+
+	void EditorLayer::CaptureFrameIfRequested()
+	{
+		static int countdown = -1;
+		if (countdown == -1)
+		{
+			const char* frames = std::getenv("WLD_CAPTURE_FRAMES");
+			countdown = frames ? std::atoi(frames) : -2;
+		}
+		if (countdown > 0)
+		{
+			--countdown;
+			return;
+		}
+		if (countdown != 0)
+			return;
+		countdown = -2;
+
+		const char* pathEnv = std::getenv("WLD_CAPTURE_PATH");
+		if (!pathEnv || !pathEnv[0] || !m_SceneRenderer)
+			return;
+		m_SceneRenderer->CaptureFrame(pathEnv);
 	}
 
 

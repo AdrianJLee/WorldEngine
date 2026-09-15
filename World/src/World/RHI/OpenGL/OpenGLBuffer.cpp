@@ -16,7 +16,9 @@ namespace World::Rhi::OpenGL
 		else
 			m_Target = GL_ARRAY_BUFFER;
 
-		GLbitfield storageFlags = GL_DYNAMIC_STORAGE_BIT;
+		// GL_MAP_READ_BIT:读回路径(截图/校验)要能 glMapNamedBufferRange;
+		// 持久映射仍不使用(见下方注释),所以这里只开"可读"。
+		GLbitfield storageFlags = GL_DYNAMIC_STORAGE_BIT | GL_MAP_READ_BIT;
 
 		glCreateBuffers(1, &m_ID);
 		glNamedBufferStorage(m_ID, desc.Size, desc.InitialData, storageFlags);
@@ -33,14 +35,23 @@ namespace World::Rhi::OpenGL
 
 	void* OpenGLBuffer::Map(uint64_t offset, uint64_t size)
 	{
-		(void)offset;
-		(void)size;
-		return nullptr;
+		if (m_Mapped)
+			return nullptr;
+		const uint64_t length = size != 0 ? size : (m_Desc.Size > offset ? m_Desc.Size - offset : 0);
+		if (length == 0)
+			return nullptr;
+		// DSA 映射(GL 4.5+):读回路径(截图、GPU 数据校验)需要 CPU 侧指针。
+		// 注意映射期间不能再对同一 buffer 做 SetData,因此只在读回结束时 Unmap。
+		m_Mapped = glMapNamedBufferRange(m_ID, offset, length, GL_MAP_READ_BIT);
+		return m_Mapped;
 	}
 
 	void OpenGLBuffer::Unmap()
 	{
-		// 非映射实现:SetData 由驱动同步,无需 Unmap。
+		if (!m_Mapped)
+			return;
+		glUnmapNamedBuffer(m_ID);
+		m_Mapped = nullptr;
 	}
 
 	void OpenGLBuffer::SetData(const void* data, uint64_t size, uint64_t offset)

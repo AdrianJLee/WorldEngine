@@ -24,5 +24,6 @@ namespace World::Rhi::OpenGL
 		BufferDesc m_Desc;
 		GLuint m_ID = 0;
 		GLenum m_Target = GL_ARRAY_BUFFER;
+		void* m_Mapped = nullptr;
 	};
 }

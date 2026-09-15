@@ -101,6 +101,8 @@ namespace World
 		void LoadIconTextures();
 		void ShowError(const std::string& message);
 		void StartCooking(const std::string& target);
+		// 开发验证:WLD_CAPTURE_FRAMES=N 后把场景渲染目标写 PPM(后端无关 RHI 读回)。
+		void CaptureFrameIfRequested();
 	private:
 		Ref<SceneRenderer> m_SceneRenderer;
 		SceneRendererOptions m_RendererOptions;
