@@ -38,9 +38,13 @@ int main()
 		auto& registry = scene.GetRegistry();
 
 		const entt::entity parent = registry.create();
+		registry.emplace<UUIDComponent>(parent, UUID());
+		registry.emplace<TagComponent>(parent, "Parent");
 		registry.emplace<TransformComponent>(parent,
 			TransformComponent(glm::vec3(1.0f, 0.0f, 0.0f)));
 		const entt::entity child = registry.create();
+		registry.emplace<UUIDComponent>(child, UUID());
+		registry.emplace<TagComponent>(child, "Child");
 		registry.emplace<TransformComponent>(child,
 			TransformComponent(glm::vec3(0.0f, 2.0f, 0.0f)));
 
@@ -92,6 +96,8 @@ int main()
 			CHECK(!Hierarchy::SetParent(registry, parent, parent));
 			// 合法:挂到另一个独立根上。
 			other = registry.create();
+			registry.emplace<UUIDComponent>(other, UUID());
+			registry.emplace<TagComponent>(other, "Other");
 			registry.emplace<TransformComponent>(other, TransformComponent(glm::vec3(5.0f, 0.0f, 0.0f)));
 			CHECK(Hierarchy::SetParent(registry, parent, other));
 			CHECK(Hierarchy::GetDepth(registry, child) == 2);
@@ -117,6 +123,46 @@ int main()
 			CHECK(NearVec(parentWorld, glm::vec3(1.0f, 0.0f, 0.0f), 1e-4f));
 		}
 
+		// 7. 序列化往返:父子关系写进 .wd 后能重建(Children 不入库,读档按 Parent 重建)。
+		// 注意:序列化要求实体带 UUIDComponent(SceneSerializer 有断言)。
+		{
+			const std::filesystem::path path =
+				std::filesystem::temp_directory_path() / "worldengine-hierarchy-test.wd";
+			{
+				SceneSerializer writer(Ref<Scene>(&scene, [](Scene*) {}));
+				CHECK(writer.Serialize(path.string()));
+			}
+
+			Ref<Scene> loaded = CreateRef<Scene>(context);
+			SceneSerializer loader(loaded);
+			CHECK(loader.Deserialize(path.string()));
+			CHECK(loader.GetLastError().empty());
+
+			auto& loadedRegistry = loaded->GetRegistry();
+			entt::entity loadedParent = entt::null;
+			entt::entity loadedChild = entt::null;
+			for (const auto entity : loadedRegistry.view<HierarchyComponent>())
+			{
+				const auto& hierarchy = loadedRegistry.get<HierarchyComponent>(entity);
+				if (hierarchy.Parent == entt::null)
+					loadedParent = entity;
+				else
+					loadedChild = entity;
+			}
+			CHECK(loadedParent != entt::null);
+			CHECK(loadedChild != entt::null);
+			CHECK(loadedRegistry.get<HierarchyComponent>(loadedChild).Parent == loadedParent);
+			const auto& loadedParentHierarchy = loadedRegistry.get<HierarchyComponent>(loadedParent);
+			CHECK(loadedParentHierarchy.Children.size() == 1);
+			CHECK(loadedParentHierarchy.Children[0] == loadedChild);
+			// 读档后世界矩阵已求解:父世界 = 自身(此时已解挂),子世界 = 父世界 * 子局部。
+			const glm::mat4 expected = loadedRegistry.get<WorldTransformComponent>(loadedParent).Matrix *
+				loadedRegistry.get<TransformComponent>(loadedChild).Transform;
+			const glm::vec3 loadedChildWorld =
+				glm::vec3(loadedRegistry.get<WorldTransformComponent>(loadedChild).Matrix[3]);
+			CHECK(NearVec(loadedChildWorld, glm::vec3(expected[3]), 1e-3f));
+			std::filesystem::remove(path);
+		}
 		// 6. 深层链(64 层)与失效父节点容错。
 		{
 			entt::entity previous = entt::null;
