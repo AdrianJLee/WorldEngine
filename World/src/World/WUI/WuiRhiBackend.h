@@ -71,6 +71,8 @@ namespace World::Wui
 		void ReleaseResources();
 		void DrawList(const std::vector<WuiDrawCommand>& commands);
 		void PushQuad(const WuiRect& rect, const WuiColor& color, const WuiRect& uv);
+		// 任意四边形(D7-D4):用于斜线/箭头/圆环等轴对齐矩形画不出的形状。
+		void PushQuadVertices(const std::array<glm::vec2, 4>& positions, const WuiColor& color);
 		void PushSolidQuad(const WuiRect& rect, const WuiColor& color);
 		void SetActiveTexture(const Rhi::Handle<Rhi::Texture>& texture);
 		void Flush();

@@ -385,6 +385,18 @@ namespace World::Wui
 		PushQuad(rect, color, { -1.0f, 0.0f, 0.0f, 0.0f });
 	}
 
+	void WuiRhiBackend::PushQuadVertices(const std::array<glm::vec2, 4>& positions, const WuiColor& color)
+	{
+		if (m_Vertices.size() + 4 > MaxQuads * 4)
+			Flush();
+		const uint32_t base = static_cast<uint32_t>(m_Vertices.size());
+		// 实心四边形:UV 落在白纹理上(-1 表示"不采样贴图"的既有约定)。
+		for (const glm::vec2& position : positions)
+			m_Vertices.push_back({ position.x, position.y, color.R, color.G, color.B, color.A, -1.0f, 0.0f });
+		const uint32_t quad = base / 4;
+		m_Indices.insert(m_Indices.end(), { quad * 4, quad * 4 + 1, quad * 4 + 2, quad * 4, quad * 4 + 2, quad * 4 + 3 });
+	}
+
 	void WuiRhiBackend::SetActiveTexture(const Rhi::Handle<Rhi::Texture>& texture)
 	{
 		if (texture.get() == m_ActiveTexture.get())
@@ -607,6 +619,7 @@ namespace World::Wui
 				case WuiDrawKind::RectOutline: DrawRectCommand(command, true); break;
 				case WuiDrawKind::Text: DrawText(command); break;
 				case WuiDrawKind::Image: DrawImageCommand(command); break;
+				case WuiDrawKind::Quad: PushQuadVertices(command.Vertices, command.Color); break;
 			}
 		}
 	}

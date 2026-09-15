@@ -6,6 +6,7 @@
 #include "World/Core/Log.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -37,6 +38,9 @@ namespace World::Wui
 		RectOutline,
 		Text,
 		Image,
+		// 任意四边形(顶点按左上/右上/右下/左下顺序):画斜线、箭头、圆环等
+		// 轴对齐矩形覆盖不到的形状。4 个顶点放在 WuiDrawCommand::Vertices。
+		Quad,
 		ClipPush,
 		ClipPop,
 	};
@@ -56,6 +60,8 @@ namespace World::Wui
 		int TextSelStart = -1;
 		int TextSelEnd = -1;
 		int TextCursorByte = -1;
+		// Quad 命令的 4 个顶点(屏幕坐标);其余命令忽略。
+		std::array<glm::vec2, 4> Vertices { glm::vec2 { 0, 0 }, glm::vec2 { 0, 0 }, glm::vec2 { 0, 0 }, glm::vec2 { 0, 0 } };
 	};
 
 	// 帧级上下文:输入、持久状态、样式栈、焦点、绘制命令。
