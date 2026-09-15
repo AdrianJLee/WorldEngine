@@ -85,7 +85,11 @@ namespace World
 
 		// B0.2:场景/UI 的命令缓冲、UBO/描述符集、顶点索引缓冲按槽位环形化;
 		// 呈现信号量按"acquire 按帧槽位 + render-finished 按交换链图像"配对(Vulkan 规范做法)。
-		constexpr uint32_t kFramesInFlight = 2;
+		// B0 遗留评估:帧深 2 → 3(CPU/GPU 重叠更充分)。资源按槽位环形,信号量按
+		// 帧槽位/交换链图像配对,延迟释放窗口随之放宽。
+		// 槽位数量的唯一来源是 Renderer::FramesInFlight:SceneRenderer / WUI 的
+		// 槽位数组同源于它,避免"渲染帧深 3、子系统仍按 2 取模"导致的越界/在飞复用。
+		constexpr uint32_t kFramesInFlight = Renderer::FramesInFlight;
 		uint64_t s_FrameNumber = 0;
 		Rhi::Handle<Rhi::Fence> s_FrameFences[kFramesInFlight];
 		bool s_FrameFenceSubmitted[kFramesInFlight] = {};

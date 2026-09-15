@@ -3,6 +3,7 @@
 #include "World/WUI/WuiBackend.h"
 #include "World/WUI/WuiInputCollector.h"
 #include "World/RHI/Rhi.h"
+#include "World/Renderer/Renderer.h"
 
 #include <glm/glm.hpp>
 #include <unordered_map>
@@ -90,7 +91,8 @@ namespace World::Wui
 		void* m_DeviceKey = nullptr;
 
 		// 帧深 2:命令缓冲/UBO/全局描述符集/纹理描述符集/顶点索引缓冲都按帧槽位环形。
-		static constexpr uint32_t kFramesInFlight = 2;
+		// 与 Renderer::FramesInFlight 同源(见 Renderer.h 的说明)。
+		static constexpr uint32_t kFramesInFlight = Renderer::FramesInFlight;
 		uint32_t FrameSlot() const;
 		uint64_t SlotVertexBase() const;
 		uint64_t SlotIndexBase() const;

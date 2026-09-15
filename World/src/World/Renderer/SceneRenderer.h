@@ -3,6 +3,7 @@
 #include "World/RHI/Rhi.h"
 #include "World/Renderer/EditorCamera.h"
 #include "World/Renderer/Framebuffer.h"
+#include "World/Renderer/Renderer.h"
 #include "World/Scene/Scene.h"
 
 #include <glm/glm.hpp>
@@ -45,7 +46,8 @@ namespace World
 	private:
 		Rhi::Handle<Rhi::Device> m_Device;
 		// 帧深 2:命令缓冲/相机 UBO/描述符集按帧槽位环形,允许 CPU 录制与 GPU 执行重叠。
-		static constexpr uint32_t kFramesInFlight = 2;
+		// 与 Renderer::FramesInFlight 同源(见 Renderer.h 的说明)。
+		static constexpr uint32_t kFramesInFlight = Renderer::FramesInFlight;
 		Rhi::Handle<Rhi::CommandBuffer> m_CommandBuffers[kFramesInFlight];
 		Rhi::Handle<Rhi::RenderPass> m_RenderPass;
 		Rhi::Handle<Rhi::Framebuffer> m_Framebuffer;

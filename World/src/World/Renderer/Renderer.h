@@ -30,6 +30,10 @@ namespace World
 		// 帧结束:推进帧槽位。
 		static void EndFrame();
 		static uint32_t FrameSlot();      // 当前帧槽位(0..kFramesInFlight-1)
+		// 帧槽位数量(帧深)的唯一来源:所有"按帧槽位环形"的子系统
+		// (场景命令缓冲/相机 UBO、WUI 命令缓冲/UBO/顶点索引缓冲等)必须用同一个值,
+		// 否则槽位索引越界或跨帧复用仍在飞的资源。
+		static constexpr uint32_t FramesInFlight = 3;
 		static uint64_t FrameNumber();    // 单调递增的帧号
 		// 延迟释放:GPU 可能仍在使用的资源改为"下一轮该槽位开始前"回收,不再用整队列 WaitIdle。
 		static void QueueRelease(std::function<void()> release);
