@@ -102,7 +102,11 @@ namespace World::Wui
 		if (center.x < -1e8f)
 			return false;
 
-		const glm::vec3 axisWorld[3] = { camera.Right, camera.Up, camera.Forward };
+		// 关键:gizmo 的轴是**世界轴** X/Y/Z,不是相机基向量(相机基会把箭头顶到屏幕上,
+		// 看着就"方向不对"且退化)。相机基只用于深度排序。
+		const glm::vec3 axisWorld[3] = {
+			{ 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }
+		};
 		const float unit = kAxisPixels * WorldPerPixel(camera, viewport);
 
 		// 轴向屏幕方向(退化轴 = 与视线平行,长度近 0 → 不画也不可拖)。
@@ -285,6 +289,11 @@ namespace World::Wui
 		if (dragging && ctx.Input().MouseReleased[0])
 			dragging = false;
 
-		return dragging;
+		// 返回值 = "本帧 gizmo 是否占用鼠标":拖拽中,或指针正悬停在手柄/圆环/中心块上。
+		// 视口面板据此**优先于实体拾取**处理点击,否则点箭头会先被"点空白清除选择"吃掉(实测拖不动)。
+		const bool hoveringHandle = hoveredAxis >= 0
+			|| (operation == GizmoOperation::Scale && glm::length(mouse - center) <= kArrowSize)
+			|| (operation == GizmoOperation::Rotate && glm::length(mouse - center) <= kArrowSize);
+		return dragging || (hoveringHandle && ctx.IsHovered(viewport));
 	}
 }

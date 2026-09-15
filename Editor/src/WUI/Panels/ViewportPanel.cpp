@@ -79,12 +79,9 @@ namespace World
 		glm::vec2 bounds[2] = { { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } };
 		m_Host.SetViewportState(focused, hovered, { rect.W, rect.H }, bounds);
 
-		if (ctx.IsClicked(sceneRect) && !m_GizmoActive)
-		{
-			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
-			m_Host.SetSelectedEntity(m_Host.PickEntityAt(local));
-		}
-
+		// 先跑 gizmo:它有"鼠标占用"语义(拖拽中/悬停在手柄上),必须优先于实体拾取 ——
+		// 否则点箭头会被"点空白清空选择"吃掉,表现为"拖不动箭头"。
+		bool gizmoEngaged = false;
 		Entity selected = m_Host.GetSelectedEntity();
 		if (selected.IsValid() && selected.GetScene() == m_Host.GetActiveScene().get() &&
 			selected.HasComponent<TransformComponent>() && m_Host.HasRenderedScene())
@@ -94,6 +91,7 @@ namespace World
 			const bool nowUsing = Wui::ManipulateGizmo(m_Host.GetGizmoCamera(),
 				m_Host.GetGizmoOperation(), transform, sceneRect, ctx,
 				/*allowManipulation=*/!m_Host.IsReadOnlyMode());
+			gizmoEngaged = nowUsing;
 			if (!m_GizmoActive && nowUsing)
 			{
 				m_GizmoActive = true;
@@ -106,6 +104,11 @@ namespace World
 				if (after.Location != m_GizmoBefore.Location || after.Rotation != m_GizmoBefore.Rotation || after.Scale != m_GizmoBefore.Scale)
 					m_Host.MarkDocumentDirty();
 			}
+		}
+		if (ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged)
+		{
+			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
+			m_Host.SetSelectedEntity(m_Host.PickEntityAt(local));
 		}
 		(void)theme;
 	}
