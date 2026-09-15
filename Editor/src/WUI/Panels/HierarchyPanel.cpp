@@ -4,6 +4,8 @@
 #include "World/Core/KeyCodes.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
+#include "World/Core/Asset/ProjectManifest.h"
+#include "World/Gameplay/Prefab.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -167,6 +169,64 @@ namespace World
 					}
 				}
 			}
+			// W4-2b:内容浏览器拖来的 .wprefab 落在某一行 = 成为该实体的子节点。
+			if (dragging && hovered && dragPayload.rfind("file:", 0) == 0)
+			{
+				const std::string file = dragPayload.substr(5);
+				if (file.size() > 8 && file.compare(file.size() - 8, 8, ".wprefab") == 0)
+				{
+					ctx.DropTarget(rowRect, "file:");
+					m_PendingPrefabFile = file;
+					m_PendingDropHandle = m_RowEntities[i];
+					Wui::HighlightOutline(ctx, rowRect, theme.Accent, 2.0f, 2.0f);
+				}
+			}
+		}
+		// 拖到面板空白处:实例化为场景根。
+		if (dragging && ctx.IsHovered(rect) && dragPayload.rfind("file:", 0) == 0 &&
+			dragPayload.size() > 13 && dragPayload.compare(dragPayload.size() - 8, 8, ".wprefab") == 0)
+		{
+			ctx.DropTarget(rect, "file:");
+			m_PendingPrefabFile = dragPayload.substr(5);
+		}
+		if (!dragging && !m_PendingPrefabFile.empty())
+		{
+			// 内容浏览器载荷是"相对内容根"的路径:先按相对路径尝试,失败再用项目清单解析内容根。
+			std::filesystem::path prefabPath = m_PendingPrefabFile;
+			if (!std::filesystem::exists(prefabPath))
+			{
+				std::filesystem::path manifestPath;
+				if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+				{
+					std::string manifestError;
+					World::Asset::ProjectManifest manifest;
+					if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError))
+					{
+						const std::filesystem::path candidate =
+							manifest.ResolveContentRoot(manifestPath) / m_PendingPrefabFile;
+						if (std::filesystem::exists(candidate))
+							prefabPath = candidate;
+					}
+				}
+			}
+
+			const entt::entity parent = m_PendingDropHandle.IsValid()
+				? static_cast<entt::entity>(m_PendingDropHandle) : entt::null;
+			const Gameplay::PrefabInstanceResult instance =
+				Gameplay::InstantiateFromFile(prefabPath, *scene, parent);
+			if (instance.IsValid())
+			{
+				host.SetSelectedEntity(instance.Root);
+				host.MarkDocumentDirty();
+				WLD_CORE_INFO("Prefab '{0}' instantiated from hierarchy drop ({1} entities)",
+					prefabPath.generic_string(), instance.EntityCount);
+			}
+			else
+			{
+				WLD_CORE_WARN("Prefab drop rejected: '{0}'", prefabPath.generic_string());
+			}
+			m_PendingPrefabFile.clear();
+			m_PendingDropHandle = Entity();
 		}
 		if (!dragging && m_PendingDropHandle.IsValid() && m_PendingDropSource != 0)
 		{

@@ -30,6 +30,8 @@ namespace World
 		uint32_t m_PendingDropSource = 0;
 		// 0=插到目标之前 1=成为目标子节点 2=插到目标之后
 		uint32_t m_PendingDropZone = 1;
+		// W4-2b:从内容浏览器拖来的 .wprefab(相对内容根路径),松开时实例化。
+		std::string m_PendingPrefabFile;
 		glm::vec2 m_MenuPos {};
 		glm::vec2 m_BlankMenuPos {};
 	};
