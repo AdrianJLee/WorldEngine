@@ -67,5 +67,6 @@ namespace World
 		Ref<Framebuffer> m_FramebufferView;
 		// WLD_DEBUG_CUBE 用的调试网格(D2b:3D 通道双后端冒烟基线)。
 		Ref<Mesh> m_DebugCube;
+		Ref<Mesh> m_DebugPlane;
 	};
 }

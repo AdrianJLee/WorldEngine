@@ -5,6 +5,7 @@
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/Mesh.h"
+#include "World/Scene/Components.h"
 #include "World/RHI/RhiTextureBridge.h"
 #include "World/Core/Thread/JobSystem.h"
 
@@ -270,6 +271,38 @@ namespace World
 				Renderer3D::Submit(m_DebugCube, model, { 1.0f, 0.55f, 0.12f, 1.0f });
 				Renderer3D::EndScene();
 			}
+		}
+
+		// 场景驱动的 3D 网格(临时约定,D2c 的 MeshRendererComponent 会取代):
+		// Tag 以 "Mesh:Cube" / "Mesh:Plane" 开头的实体,用 Transform 作模型矩阵、Sprite.Color 作基色。
+		// 这样 3D 关卡可以**只用现有组件**在编辑器里搭出来(拖 Transform、改颜色即可)。
+		{
+			auto meshView = m_ActiveScene->m_Registry.view<TransformComponent, SpriteComponent, TagComponent>();
+			bool began = false;
+			for (auto entity : meshView)
+			{
+				const auto& [transform, sprite, tag] =
+					meshView.get<TransformComponent, SpriteComponent, TagComponent>(entity);
+				const bool cube = tag.Tag.rfind("Mesh:Cube", 0) == 0;
+				const bool plane = tag.Tag.rfind("Mesh:Plane", 0) == 0;
+				if (!cube && !plane)
+					continue;
+
+				Ref<Mesh>& mesh = cube ? m_DebugCube : m_DebugPlane;
+				if (!mesh)
+					mesh = cube ? Mesh::CreateUnitCube(1.0f) : Mesh::CreateUnitPlane(1.0f);
+				if (!mesh)
+					continue;
+
+				if (!began)
+				{
+					Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
+					began = true;
+				}
+				Renderer3D::Submit(mesh, transform.Transform, sprite.Color);
+			}
+			if (began)
+				Renderer3D::EndScene();
 		}
 
 		Renderer2D::StartBatch();

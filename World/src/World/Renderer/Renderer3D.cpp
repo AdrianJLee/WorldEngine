@@ -110,7 +110,9 @@ namespace World
 		pipelineDesc.VertexBindings = meshLayout.Bindings;
 		pipelineDesc.VertexAttributes = meshLayout.Attributes;
 		pipelineDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
-		pipelineDesc.Cull = Rhi::CullMode::Back;
+		// TODO(D2c):网格绕序与 FrontFace 约定统一后再打开背面剔除;
+		// 当前 CreateUnitCube/CreateUnitPlane 的索引绕序在两个后端下未统一,开剔除会剔掉正对相机的面。
+		pipelineDesc.Cull = Rhi::CullMode::None;
 		pipelineDesc.Front = Rhi::FrontFace::CounterClockwise;
 		pipelineDesc.DepthStencil.DepthTest = true;
 		pipelineDesc.DepthStencil.DepthWrite = true;
