@@ -3,6 +3,7 @@
 
 #include "World/Core/KeyCodes.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Hierarchy.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -138,7 +139,7 @@ namespace World
 		{
 			// 右键菜单走组件(ContextMenu):位置钉住 + 外部点击/Esc 关闭统一由组件处理。
 			Wui::WuiRect panel;
-			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 150.0f, 2, &panel, theme))
+			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 150.0f, 4, &panel, theme))
 			{
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.duplicate"),
 					{ panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Duplicate", theme))
@@ -150,6 +151,38 @@ namespace World
 					{ panel.X + 4, panel.Y + 26, panel.W - 8, 22 }, "Delete", theme))
 				{
 					Entity::DestroyEntity(scene.get(), m_Context);
+					host.MarkDocumentDirty();
+					ctx.CloseAllPopups();
+				}
+				// W3b-2:重设父级/解挂。拖拽交互需要行控件支持拖拽(UI 组件库改动,单独排期),
+				// 这里先提供等价入口:右键实体 -> 设为「当前选中实体」的子节点,或解除父子关系。
+				const Entity selected = host.GetSelectedEntity();
+				const bool canParent = selected.IsValid() && selected.GetScene() == scene.get() &&
+					static_cast<entt::entity>(selected) != static_cast<entt::entity>(m_Context);
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.setparent"),
+					{ panel.X + 4, panel.Y + 48, panel.W - 8, 22 },
+					canParent ? "Set Parent (Selected)" : "Set Parent (select another first)", theme))
+				{
+					if (canParent)
+					{
+						const entt::entity child = m_Context;
+						const entt::entity parent = selected;
+						// 结构写必须走延迟命令:循环依赖由 Hierarchy::SetParent 内核侧拒绝并告警。
+						scene->DeferStructuralChange([child, parent](Scene& s)
+							{
+								if (Hierarchy::SetParent(s.GetRegistry(), child, parent))
+									WLD_CORE_INFO("Hierarchy: '{0}' is now a child of '{1}'",
+										static_cast<uint32_t>(child), static_cast<uint32_t>(parent));
+							});
+						host.MarkDocumentDirty();
+					}
+					ctx.CloseAllPopups();
+				}
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.unparent"),
+					{ panel.X + 4, panel.Y + 70, panel.W - 8, 22 }, "Unparent", theme))
+				{
+					const entt::entity child = m_Context;
+					scene->DeferStructuralChange([child](Scene& s) { Hierarchy::ClearParent(s.GetRegistry(), child); });
 					host.MarkDocumentDirty();
 					ctx.CloseAllPopups();
 				}
