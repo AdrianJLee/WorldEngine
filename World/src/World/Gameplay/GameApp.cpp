@@ -121,6 +121,9 @@ namespace World::Gameplay
 			{
 				if (m_FixedUpdate)
 					m_FixedUpdate(Timestep(static_cast<float>(m_FixedStepSeconds)));
+				// W5:系统注册表的固定步长阶段(权威模拟)与回调同拍执行。
+				m_Systems.RunPhase(SystemPhase::PreFixed, Timestep(static_cast<float>(m_FixedStepSeconds)));
+				m_Systems.RunPhase(SystemPhase::Fixed, Timestep(static_cast<float>(m_FixedStepSeconds)));
 
 				m_Accumulator -= m_FixedStepSeconds;
 				++m_LastFixedSteps;
@@ -138,6 +141,7 @@ namespace World::Gameplay
 			{
 				const Clock::time_point start = Clock::now();
 				m_Update(frameTime);
+				m_Systems.RunPhase(SystemPhase::Update, frameTime);
 				m_FramePhases.push_back({ "Update", ElapsedMilliseconds(start) });
 			}
 
@@ -145,6 +149,7 @@ namespace World::Gameplay
 			{
 				const Clock::time_point start = Clock::now();
 				m_LateUpdate(frameTime);
+				m_Systems.RunPhase(SystemPhase::Late, frameTime);
 				m_FramePhases.push_back({ "LateUpdate", ElapsedMilliseconds(start) });
 			}
 		}

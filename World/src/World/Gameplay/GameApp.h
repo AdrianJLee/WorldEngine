@@ -4,6 +4,7 @@
 #include "World/Core/Timestep.h"
 #include "World/Gameplay/GameFlow.h"
 #include "World/Gameplay/LevelService.h"
+#include "World/Gameplay/SystemRegistry.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -53,6 +54,9 @@ namespace World::Gameplay
 		// W2:关卡服务(清单/加载状态机/场景栈)由会话持有,宿主只负责注入 SceneLoader。
 		LevelService& Levels() { return m_Levels; }
 		const LevelService& Levels() const { return m_Levels; }
+		// W5:系统注册表(阶段/顺序/并行标记/耗时)。Tick 会按阶段顺序派发它。
+		SystemRegistry& Systems() { return m_Systems; }
+		const SystemRegistry& Systems() const { return m_Systems; }
 
 		// 阶段回调:未设置时该阶段为空转。fixed 可能在一帧内被调用 0..MaxFixedStepsPerFrame 次。
 		void SetPhaseCallbacks(PhaseCallback fixedUpdate, PhaseCallback update, PhaseCallback lateUpdate);
@@ -73,6 +77,7 @@ namespace World::Gameplay
 		GameAppDesc m_Desc;
 		GameFlow m_Flow;
 		LevelService m_Levels;
+		SystemRegistry m_Systems;
 		double m_FixedStepSeconds = 1.0 / 60.0;
 		double m_Accumulator = 0.0;
 		uint32_t m_LastFixedSteps = 0;
