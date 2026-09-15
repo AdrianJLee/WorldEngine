@@ -262,6 +262,11 @@ namespace World
 				Gameplay::InstantiateFromFile(prefabPath, *scene, parent);
 			if (instance.IsValid())
 			{
+				// W4-3b:登记实例记录,供后续 Revert/Apply/Unpack 使用。
+				Gameplay::PrefabInstanceRecord record;
+				record.PrefabPath = prefabPath.string();
+				record.Root = static_cast<entt::entity>(instance.Root);
+				m_PrefabInstances[static_cast<uint32_t>(record.Root)] = record;
 				host.SetSelectedEntity(instance.Root);
 				host.MarkDocumentDirty();
 				WLD_CORE_INFO("Prefab '{0}' instantiated from hierarchy drop ({1} entities)",
@@ -342,7 +347,7 @@ namespace World
 		{
 			// 右键菜单走组件(ContextMenu):位置钉住 + 外部点击/Esc 关闭统一由组件处理。
 			Wui::WuiRect panel;
-			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 170.0f, 5, &panel, theme))
+			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 190.0f, 6, &panel, theme))
 			{
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.duplicate"),
 					{ panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Duplicate", theme))
@@ -417,6 +422,48 @@ namespace World
 							WLD_CORE_WARN("Export Prefab failed: {0}", error);
 					}
 					ctx.CloseAllPopups();
+				}
+				// W4-3b:prefab 实例的三个入口(仅当该实体确实是由拖拽实例化出来的实例时显示)。
+				{
+					const uint32_t contextHandle = static_cast<uint32_t>(static_cast<entt::entity>(m_Context));
+					const auto recordIt = m_PrefabInstances.find(contextHandle);
+					if (recordIt != m_PrefabInstances.end() &&
+						Gameplay::CanRevert(recordIt->second, *scene))
+					{
+						if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.prefabrevert"),
+							{ panel.X + 4, panel.Y + 114, panel.W - 8, 22 }, "Revert Prefab", theme))
+						{
+							if (Gameplay::RevertInstance(recordIt->second, *scene))
+							{
+								host.MarkDocumentDirty();
+								WLD_CORE_INFO("Prefab instance reverted from '{0}'", recordIt->second.PrefabPath);
+							}
+							ctx.CloseAllPopups();
+						}
+						if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.prefabapply"),
+							{ panel.X + 4, panel.Y + 136, panel.W - 8, 22 }, "Apply to Prefab", theme))
+						{
+							std::string applyError;
+							if (Gameplay::SaveFromScene(*scene, m_Context,
+								recordIt->second.PrefabPath, &applyError))
+							{
+								Gameplay::ClearOverrides(recordIt->second);
+								WLD_CORE_INFO("Prefab asset updated: {0}", recordIt->second.PrefabPath);
+							}
+							else
+							{
+								WLD_CORE_WARN("Apply to Prefab failed: {0}", applyError);
+							}
+							ctx.CloseAllPopups();
+						}
+						if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.prefabunpack"),
+							{ panel.X + 4, panel.Y + 158, panel.W - 8, 22 }, "Unpack Prefab", theme))
+						{
+							if (Gameplay::UnpackInstance(recordIt->second))
+								m_PrefabInstances.erase(recordIt);
+							ctx.CloseAllPopups();
+						}
+					}
 				}
 				if (ctx.IsKeyPressed(KeyCodes::Escape))
 					ctx.ClosePopup(popup);

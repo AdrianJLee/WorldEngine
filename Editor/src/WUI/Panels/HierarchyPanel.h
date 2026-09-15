@@ -2,8 +2,10 @@
 
 #include "EditorPanel.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/Gameplay/Prefab.h"
 
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace World
@@ -32,6 +34,9 @@ namespace World
 		uint32_t m_PendingDropZone = 1;
 		// W4-2b:从内容浏览器拖来的 .wprefab(相对内容根路径),松开时实例化。
 		std::string m_PendingPrefabFile;
+		// W4-3b:本场景里由拖拽实例化出来的 prefab 实例(实例根句柄 -> 记录)。
+		// 记录里含来源路径与覆盖集合,供 Revert/Apply/Unpack 使用。
+		std::unordered_map<uint32_t, Gameplay::PrefabInstanceRecord> m_PrefabInstances;
 		glm::vec2 m_MenuPos {};
 		glm::vec2 m_BlankMenuPos {};
 	};
