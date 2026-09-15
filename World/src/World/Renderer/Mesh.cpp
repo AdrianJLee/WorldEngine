@@ -151,8 +151,10 @@ namespace World
 		for (uint32_t face = 0; face < 6; ++face)
 		{
 			const uint32_t base = face * 4;
+			// 绕序:与管线约定的"正面 = 逆时针(从外侧看)"一致;写反会导致
+			// 剔除/深度都把内壁当正面(表现为"里外反了"、OpenGL 全黑)。
 			desc.Indices.insert(desc.Indices.end(),
-				{ base + 0, base + 1, base + 2, base + 2, base + 3, base + 0 });
+				{ base + 0, base + 2, base + 1, base + 2, base + 0, base + 3 });
 		}
 		return Create(desc);
 	}
@@ -169,7 +171,7 @@ namespace World
 		vertices[1] = { {  h, 0.0f, -h }, { 0, 1, 0 }, { 1, 1 } };
 		vertices[2] = { {  h, 0.0f,  h }, { 0, 1, 0 }, { 1, 0 } };
 		vertices[3] = { { -h, 0.0f,  h }, { 0, 1, 0 }, { 0, 0 } };
-		desc.Indices = { 0, 1, 2, 2, 3, 0 };
+		desc.Indices = { 0, 2, 1, 2, 0, 3 };
 		return Create(desc);
 	}
 }
