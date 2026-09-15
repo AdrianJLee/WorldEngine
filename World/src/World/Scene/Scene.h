@@ -17,6 +17,7 @@ namespace World
 {
 	class Entity;
 	namespace Gameplay { class SystemRegistry; }
+	namespace Gameplay { class SaveService; }   // P2a W8:存档服务需要只读遍历 registry
 	enum class SceneState { Stopped, Starting, Running, Stopping };
 
 	class Scene
@@ -82,6 +83,7 @@ namespace World
 		friend class SceneRenderer;
 		friend class SceneHierarchyPanel;
 		friend class SceneSerializer;
+		friend class Gameplay::SaveService;
 
 		struct ScriptSource
 		{
