@@ -41,10 +41,29 @@ namespace World
 		// 修复后再放回列表。面板实现与挂靠逻辑保留,便于继续排查。
 		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "windows", "stats", "memory", "operations", "input" };
 		m_Panels = panels;
-		const Wui::DockLayout fallback = Wui::DockLayout::Default(panels);
+		// W7-2:Input Map 设计为**独立窗口**(可按统一窗口模型挂靠到主窗口顶栏),
+		// 因此不进入默认停靠布局;仍保留在 m_Panels(Window 菜单可开关)。
+		std::vector<Wui::PanelId> dockedPanels = panels;
+		dockedPanels.erase(std::remove(dockedPanels.begin(), dockedPanels.end(), "input"), dockedPanels.end());
+		const Wui::DockLayout fallback = Wui::DockLayout::Default(dockedPanels);
 		std::string error;
 		if (!Wui::WuiLayoutStore::Load(m_LayoutPath, fallback, &m_Layout, &error))
 			WLD_CORE_WARN("Failed to load WUI layout, using default: {0}", error);
+
+		// 首次运行(或旧布局里没有该面板):把 Input Map 登记为浮动窗口,
+		// 下面的浮动分组循环会据此创建独立窗口。
+		// Input Map 设计为独立窗口:布局存档里可能残留"已挂靠到主窗口"的旧状态,
+		// 启动时清掉,避免它以挂靠标签的形式出现。
+		m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), "input"),
+			m_AttachedPanels.end());
+		if (!m_Layout.IsFloating("input") && !m_Layout.Contains("input"))
+		{
+			// 与 Window 菜单重开面板走同一条路径:登记浮动记录 + 直接创建独立窗口
+			// (仅登记记录不够——构造期的分组循环只处理此前已浮动的面板)。
+			const Wui::WuiRect inputRect { 140.0f, 140.0f, 440.0f, 340.0f };
+			m_Layout.Floating.push_back({ "input", inputRect });
+			AddFloatWindow("input", inputRect, "open");
+		}
 
 		// 尊重用户关闭的面板:仅当布局文件缺失/损坏时使用默认布局,
 		// 不把"已关闭"的面板强制补回。重新显示由 Window 菜单负责。
