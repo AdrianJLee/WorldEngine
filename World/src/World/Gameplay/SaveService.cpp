@@ -3,6 +3,7 @@
 
 #include "World/Schema/SchemaWriter.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -247,6 +248,7 @@ namespace World::Gameplay
 
 	bool SaveService::ApplyDocument(uint32_t slot)
 	{
+		m_LastLoadReport = {};
 		Scene* scene = m_Scene ? m_Scene() : nullptr;
 		if (!scene)
 		{
@@ -346,26 +348,45 @@ namespace World::Gameplay
 					continue;
 				const UUID uuid(entityNode["UUID"].as<uint64_t>());
 				const auto found = byUuid.find(uuid);
-				if (found == byUuid.end())
+				Entity entity;
+				if (found != byUuid.end())
 				{
-					WLD_CORE_WARN("[save] entity {} not present in the current scene; skipped",
-						static_cast<uint64_t>(uuid));
-					continue;
+					entity = found->second;
+					++m_LastLoadReport.EntitiesUpdated;
 				}
-				Entity entity = found->second;
+				else
+				{
+					// 存档里有、当前场景没有:按存档重建实体(只含 SaveTrait 组件 —— 表现类组件由场景资产负责)。
+					const entt::entity created = registry.create();
+					registry.emplace<UUIDComponent>(created, uuid);
+					entity = Entity(scene, created);
+					byUuid[uuid] = entity;
+					++m_LastLoadReport.EntitiesCreated;
+				}
 				for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
 				{
 					if (!schema || !schema->Storage || !IsSaveTrait(schema->Id.Name))
 						continue;
 					const YAML::Node componentNode = entityNode[schema->Id.Name];
-					if (!componentNode || !entity.HasComponent(schema->Storage->ComponentId))
+					if (!componentNode)
 						continue;
+					if (!entity.HasComponent(schema->Storage->ComponentId))
+					{
+						if (!schema->Storage->Add)
+							continue;
+						schema->Storage->Add(static_cast<void*>(&entity));
+					}
 					void* instance = entity.GetComponent(schema->Storage->ComponentId);
 					if (!instance)
 						continue;
-					if (!reader.ReadFields(*schema, instance, componentNode))
+					if (reader.ReadFields(*schema, instance, componentNode))
+						++m_LastLoadReport.ComponentsApplied;
+					else
+					{
+						++m_LastLoadReport.ComponentsFailed;
 						WLD_CORE_WARN("[save] component '{}' on entity {} failed to load",
 							schema->Id.Name, static_cast<uint64_t>(uuid));
+					}
 				}
 			}
 		}

@@ -36,6 +36,15 @@ namespace World::Gameplay
 		std::string Error;   // Valid=false 时的原因(坏档/缺失字段)
 	};
 
+	// 读档结果报告:面板/"失效引用可检出"的最小落点。
+	struct SaveLoadReport
+	{
+		uint32_t EntitiesUpdated = 0;   // 按 UUID 命中并覆盖
+		uint32_t EntitiesCreated = 0;   // 存档里有、当前场景没有 → 新建
+		uint32_t ComponentsApplied = 0;
+		uint32_t ComponentsFailed = 0;  // 字段读取失败(保留默认值并告警)
+	};
+
 	class WLD_API SaveService
 	{
 	public:
@@ -78,6 +87,7 @@ namespace World::Gameplay
 		const std::filesystem::path& GetSaveRoot() const { return m_SaveRoot; }
 		std::filesystem::path GetSlotPath(uint32_t slot) const;
 		const std::string& GetLastError() const { return m_LastError; }
+		const SaveLoadReport& GetLastLoadReport() const { return m_LastLoadReport; }
 
 	private:
 		bool WriteDocument(uint32_t slot, const std::string& levelId);
@@ -89,6 +99,7 @@ namespace World::Gameplay
 		std::map<std::string, GlobalValue> m_Globals;
 		std::unordered_map<uint32_t, MigrationFn> m_Migrations;
 		std::unordered_set<std::string> m_SaveTraits;
+		SaveLoadReport m_LastLoadReport;
 		mutable std::string m_LastError;
 	};
 }

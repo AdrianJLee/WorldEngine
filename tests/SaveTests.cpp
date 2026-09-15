@@ -2,6 +2,7 @@
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/SaveService.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 
 #include <cmath>
@@ -150,6 +151,37 @@ int main()
 		// 7. 删除槽位。
 		CHECK(saves.Delete(1));
 		CHECK(!std::filesystem::exists(saves.GetSlotPath(1)));
+
+		// 8. W8-2:实体在当前场景缺失 → 读档时按 UUID 重建(只含 SaveTrait 组件),并给出读档报告。
+		{
+			CHECK(saves.Save(6, "level-rebuild"));
+			Entity::DestroyEntity(&scene, Entity(&scene, handle));
+			scene.FlushStructuralChanges();   // 销毁是延迟的:先落结构变更,再验证"实体已不在场景里"
+			bool stillPresent = false;
+			for (const entt::entity candidate : registry.storage<entt::entity>())
+				if (registry.all_of<UUIDComponent>(candidate) &&
+					static_cast<uint64_t>(registry.get<UUIDComponent>(candidate).ID) == entityUuid)
+					stillPresent = true;
+			CHECK(!stillPresent);
+
+			CHECK(saves.Load(6));
+			const SaveLoadReport& report = saves.GetLastLoadReport();
+			CHECK(report.EntitiesCreated == 1);
+			CHECK(report.EntitiesUpdated == 0);
+			CHECK(report.ComponentsApplied >= 1);
+
+			bool rebuilt = false;
+			for (const entt::entity candidate : registry.storage<entt::entity>())
+			{
+				const UUIDComponent& id = registry.get<UUIDComponent>(candidate);
+				if (static_cast<uint64_t>(id.ID) != entityUuid)
+					continue;
+				rebuilt = true;
+				const TransformComponent& transform = registry.get<TransformComponent>(candidate);
+				CHECK(std::fabs(transform.Location.x - 7.0f) < 1e-4f);   // 上一步迁移后写入的值
+			}
+			CHECK(rebuilt);
+		}
 
 		std::filesystem::remove_all(root);
 		std::printf("World.Save: all checks passed\n");
