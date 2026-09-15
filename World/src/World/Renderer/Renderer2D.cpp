@@ -373,6 +373,28 @@ namespace World
 		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
 	{
 		WLD_PROFILE_FUNCTION();
+		glm::vec3 transformedPositions[4];
+		ComputeQuadPositions(transform, transformedPositions);
+		DrawQuadPositions(transformedPositions, texture, color, texCoords, tilingFactor, entityID);
+	}
+
+	// 只做"每实体独立"的顶点变换:可在工作线程调用(只读 s_Data.VertexPositions)。
+	void Renderer2D::ComputeQuadPositions(const glm::mat4& transform, glm::vec3 outPositions[4])
+	{
+		Math::MultiplyMat4ByVec4_SIMD_x4(transform, s_Data.VertexPositions, outPositions);
+	}
+
+	void Renderer2D::ComputeCirclePositions(const glm::mat4& transform, glm::vec3 outPositions[4])
+	{
+		for (uint32_t i = 0; i < 4; i++)
+			outPositions[i] = glm::vec3(transform * s_Data.VertexPositions[i]);
+	}
+
+	// 批次状态机部分(纹理槽/批缓冲指针):必须在主线程按原顺序执行。
+	void Renderer2D::DrawQuadPositions(const glm::vec3 positions[4], const Ref<Texture2D>& texture,
+		const glm::vec4& color, const glm::vec2* texCoords, float tilingFactor, int entityID)
+	{
+		WLD_PROFILE_FUNCTION();
 		if (s_Data.Quads.IndexCount >= MaxQuads * 6)
 			NextBatch();
 
@@ -400,11 +422,9 @@ namespace World
 			}
 		}
 
-		glm::vec3 transformedPositions[4];
-		Math::MultiplyMat4ByVec4_SIMD_x4(transform, s_Data.VertexPositions, transformedPositions);
 		for (uint32_t i = 0; i < 4; i++)
 		{
-			s_Data.Quads.Ptr->Position = transformedPositions[i];
+			s_Data.Quads.Ptr->Position = positions[i];
 			s_Data.Quads.Ptr->Color = color;
 			s_Data.Quads.Ptr->TexCoord = actualTexCoords[i];
 			s_Data.Quads.Ptr->TexIndex = textureIndex;
@@ -420,11 +440,20 @@ namespace World
 		float thickness, float fade, int entityID)
 	{
 		WLD_PROFILE_FUNCTION();
+		glm::vec3 positions[4];
+		ComputeCirclePositions(transform, positions);
+		DrawCirclePositions(positions, color, thickness, fade, entityID);
+	}
+
+	void Renderer2D::DrawCirclePositions(const glm::vec3 positions[4], const glm::vec4& color,
+		float thickness, float fade, int entityID)
+	{
+		WLD_PROFILE_FUNCTION();
 		if (s_Data.Circles.IndexCount >= MaxCircles * 6)
 			NextBatch();
 		for (uint32_t i = 0; i < 4; i++)
 		{
-			s_Data.Circles.Ptr->WorldPosition = transform * s_Data.VertexPositions[i];
+			s_Data.Circles.Ptr->WorldPosition = positions[i];
 			s_Data.Circles.Ptr->LocalPosition = s_Data.VertexPositions[i] * 2.0f;
 			s_Data.Circles.Ptr->Color = color;
 			s_Data.Circles.Ptr->Thickness = thickness;

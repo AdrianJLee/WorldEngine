@@ -29,6 +29,28 @@ namespace World
 		void OnUpdateEditor(Timestep ts, const EditorCamera& camera);
 		void OnUpdateRuntime(Timestep ts);
 		void OnUpdateSimulation(Timestep ts, const EditorCamera& camera);
+
+		// ---- B3 帧系统管线 ----
+		// 每个系统显式声明是否"并行安全"(只读写自己独占的数据,不触碰注册表结构):
+		// 并行安全系统先由 JobSystem 并发执行并汇合,独占系统再在主线程按注册顺序串行执行,
+		// 因此顺序与结果与纯串行实现一致。物理(Box2D)与脚本默认独占。
+		struct FrameSystem
+		{
+			std::string Name;
+			bool ParallelSafe = false;
+			std::function<void(Timestep)> Update;
+		};
+		struct FrameSystemTiming
+		{
+			std::string Name;
+			bool ParallelSafe = false;
+			double Milliseconds = 0.0;
+		};
+		void RegisterFrameSystem(FrameSystem system);
+		void RunFrameSystems(Timestep ts);
+		void EnsureDefaultFrameSystems();
+		const std::vector<FrameSystemTiming>& GetFrameSystemTimings() const { return m_FrameSystemTimings; }
+		static const char* GetFrameSystemStatsDescription(const Scene& scene);
 		void OnViewportResize(uint32_t width, uint32_t height);
 		void OnRuntimeStart();
 		void OnRuntimeStop();
@@ -95,6 +117,9 @@ namespace World
 		void OnUpdatePhysics2D(Timestep ts);
 		void OnPhysics2DStop();
 		void DestroyPhysicsBody(entt::entity entity);
+
+		std::vector<FrameSystem> m_FrameSystems;
+		std::vector<FrameSystemTiming> m_FrameSystemTimings;
 
 		entt::registry m_Registry;
 		WorldContext* m_Context = nullptr;

@@ -1,9 +1,16 @@
 #include "World/Core/Thread/JobSystem.h"
+#include "World/Renderer/Renderer2D.h"
 
+#include <array>
 #include <atomic>
+#include <chrono>
+#include <cstring>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <vector>
+
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace
 {
@@ -160,6 +167,36 @@ int main()
 			CHECK(stats.Executed > 0);
 			CHECK(stats.Waits >= 4);
 			CHECK(!World::JobSystem::DescribeStats().empty());
+		}
+
+		// B3 并行几何预处理:顶点变换是纯函数,并行结果必须与串行逐字节一致。
+		// 这里同时给出加速比读数(不作为断言,避免机器负载导致抖动)。
+		{
+			constexpr uint32_t kQuads = 20000;
+			std::vector<glm::mat4> transforms(kQuads);
+			for (uint32_t i = 0; i < kQuads; i++)
+				transforms[i] = glm::translate(glm::mat4(1.0f), glm::vec3(i * 0.01f, i * 0.02f, 0.0f))
+					* glm::rotate(glm::mat4(1.0f), i * 0.001f, glm::vec3(0.0f, 0.0f, 1.0f));
+			std::vector<std::array<glm::vec3, 4>> serial(kQuads), parallel(kQuads);
+
+			const auto serialBegin = std::chrono::steady_clock::now();
+			for (uint32_t i = 0; i < kQuads; i++)
+				World::Renderer2D::ComputeQuadPositions(transforms[i], serial[i].data());
+			const auto serialEnd = std::chrono::steady_clock::now();
+
+			const auto parallelBegin = std::chrono::steady_clock::now();
+			World::JobSystem::ParallelFor(kQuads, 32, [&](uint32_t i)
+			{
+				World::Renderer2D::ComputeQuadPositions(transforms[i], parallel[i].data());
+			});
+			const auto parallelEnd = std::chrono::steady_clock::now();
+
+			CHECK(std::memcmp(serial.data(), parallel.data(), serial.size() * sizeof(serial[0])) == 0);
+			const double serialMs = std::chrono::duration<double, std::milli>(serialEnd - serialBegin).count();
+			const double parallelMs = std::chrono::duration<double, std::milli>(parallelEnd - parallelBegin).count();
+			std::printf("World.Tasks: geometry prep serial=%.3f ms parallel=%.3f ms speedup=%.2fx (%u quads, %u workers)\n",
+				serialMs, parallelMs, serialMs / (parallelMs > 0.0 ? parallelMs : 1.0),
+				kQuads, World::JobSystem::WorkerCount());
 		}
 
 		World::JobSystem::Shutdown();

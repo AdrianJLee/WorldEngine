@@ -2,7 +2,9 @@
 #include "Scene.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Core/Thread/JobSystem.h"
 #include <box2d/box2d.h>
+#include <chrono>
 #include <stdexcept>
 
 namespace World
@@ -46,6 +48,79 @@ namespace World
 	{
 		if (m_OwnerThread != std::this_thread::get_id())
 			throw std::logic_error("Scene access must run on its owner thread");
+	}
+
+	void Scene::RegisterFrameSystem(FrameSystem system)
+	{
+		AssertOwnerThread();
+		if (system.Name.empty() || !system.Update)
+			throw std::invalid_argument("Scene frame system requires a name and an update function");
+		for (const FrameSystem& existing : m_FrameSystems)
+			if (existing.Name == system.Name)
+				throw std::invalid_argument("Scene frame system '" + system.Name + "' is already registered");
+		m_FrameSystems.push_back(std::move(system));
+	}
+
+	// B3 帧系统管线:并行安全系统先并发执行(JobSystem)并汇合,独占系统再在主线程串行执行。
+	// 时间片逐系统记录,供编辑器统计面板/日志观察并行收益与回归。
+	void Scene::RunFrameSystems(Timestep ts)
+	{
+		AssertOwnerThread();
+		m_FrameSystemTimings.clear();
+		m_FrameSystemTimings.reserve(m_FrameSystems.size());
+		if (m_FrameSystems.empty())
+			return;
+
+		// 并行阶段:各系统之间不得有依赖(注册时声明 parallel-safe 即为此契约);
+		// 用同一个计数器提交,等待一次即全部汇合。
+		const bool parallel = JobSystem::IsRunning() && m_FrameSystems.size() > 1;
+		if (parallel)
+		{
+			JobCounter counter;
+			for (FrameSystem& system : m_FrameSystems)
+			{
+				if (!system.ParallelSafe)
+					continue;
+				FrameSystem* target = &system;
+				JobDecl job;
+				job.Emplace(std::make_tuple(target, ts));
+				job.Entry = [](void* data)
+				{
+					auto* payload = static_cast<std::tuple<FrameSystem*, Timestep>*>(data);
+					std::get<0>(*payload)->Update(std::get<1>(*payload));
+				};
+				job.Priority = JobPriority::High;
+				job.Counter = &counter;
+				JobSystem::Kick(std::move(job));
+			}
+			JobSystem::Wait(&counter);
+		}
+
+		for (FrameSystem& system : m_FrameSystems)
+		{
+			if (parallel && system.ParallelSafe)
+				continue;   // 已在并行阶段执行
+			const auto begin = std::chrono::steady_clock::now();
+			system.Update(ts);
+			const auto end = std::chrono::steady_clock::now();
+			m_FrameSystemTimings.push_back({ system.Name, system.ParallelSafe,
+				std::chrono::duration<double, std::milli>(end - begin).count() });
+		}
+	}
+
+	const char* Scene::GetFrameSystemStatsDescription(const Scene& scene)
+	{
+		// 静态缓冲:仅供日志/调试打印,不做线程安全承诺。
+		static std::string description;
+		description.clear();
+		for (const FrameSystemTiming& timing : scene.m_FrameSystemTimings)
+		{
+			if (!description.empty())
+				description += ", ";
+			description += timing.Name + (timing.ParallelSafe ? "[par]" : "[excl]") + "=" +
+				std::to_string(timing.Milliseconds) + "ms";
+		}
+		return description.c_str();
 	}
 
 	void Scene::AssertStructuralWrite() const
@@ -347,8 +422,26 @@ namespace World
 	}
 
 	void Scene::OnUpdateEditor(Timestep, const EditorCamera&) { AssertOwnerThread(); }
-	void Scene::OnUpdateRuntime(Timestep ts) { OnScriptUpdate(ts); }
-	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera&) { OnScriptUpdate(ts); }
+	// 内置帧系统:运行/模拟更新保持"脚本 + 物理"的原有顺序与语义,标记为独占(主线程)。
+	// 宿主可再注册 parallel-safe 系统(不得触碰注册表结构),它们会在内置阶段之前并行执行。
+	void Scene::EnsureDefaultFrameSystems()
+	{
+		if (!m_FrameSystems.empty())
+			return;
+		RegisterFrameSystem({ "scene-update", false, [this](Timestep ts) { OnScriptUpdate(ts); } });
+	}
+
+	void Scene::OnUpdateRuntime(Timestep ts)
+	{
+		EnsureDefaultFrameSystems();
+		RunFrameSystems(ts);
+	}
+
+	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera&)
+	{
+		EnsureDefaultFrameSystems();
+		RunFrameSystems(ts);
+	}
 
 	void Scene::OnRuntimeStart()
 	{

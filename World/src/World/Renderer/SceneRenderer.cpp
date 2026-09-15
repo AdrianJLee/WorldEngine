@@ -4,8 +4,11 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/RHI/RhiTextureBridge.h"
+#include "World/Core/Thread/JobSystem.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+
+#include <array>
 
 namespace World
 {
@@ -276,20 +279,78 @@ namespace World
 
 	void SceneRenderer::RenderGeometry(const Camera&, const glm::mat4&)
 	{
+		// B3:每实体的顶点变换(纯数学,不触碰批次状态机)按阈值并行;
+		// 批次写入仍按原顺序在主线程执行,绘制顺序与像素结果与串行版本一致。
+		constexpr size_t kParallelPrepThreshold = 64;
 		{
 			auto group = m_ActiveScene->m_Registry.group<TransformComponent>(entt::get<SpriteComponent>);
+			std::vector<entt::entity> entities;
 			for (auto entity : group)
+				entities.push_back(entity);
+			const size_t count = entities.size();
+			if (count >= kParallelPrepThreshold && JobSystem::IsRunning())
 			{
-				auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
-				Renderer2D::DrawQuadCore(transform.Transform, sprite.Texture, sprite.Color, nullptr,
-					sprite.TilingFactor, static_cast<uint32_t>(entity));
+				std::vector<glm::mat4> transforms(count);
+				std::vector<std::array<glm::vec3, 4>> positions(count);
+				for (size_t i = 0; i < count; i++)
+					transforms[i] = std::get<0>(
+						group.get<TransformComponent, SpriteComponent>(entities[i])).Transform;
+
+				JobSystem::ParallelFor(static_cast<uint32_t>(count), 32, [&](uint32_t i)
+				{
+					Renderer2D::ComputeQuadPositions(transforms[i], positions[i].data());
+				});
+
+				for (size_t i = 0; i < count; i++)
+				{
+					auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entities[i]);
+					Renderer2D::DrawQuadPositions(positions[i].data(), sprite.Texture, sprite.Color,
+						nullptr, sprite.TilingFactor, static_cast<uint32_t>(entities[i]));
+				}
+			}
+			else
+			{
+				for (auto entity : entities)
+				{
+					auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
+					Renderer2D::DrawQuadCore(transform.Transform, sprite.Texture, sprite.Color, nullptr,
+						sprite.TilingFactor, static_cast<uint32_t>(entity));
+				}
 			}
 		}
 		{
 			auto view = m_ActiveScene->m_Registry.view<TransformComponent, CircleRendererComponent>();
-			for (auto [entity, transform, circle] : view.each())
-				Renderer2D::DrawCircleCore(transform.Transform, circle.Color, circle.Thickness,
-					circle.Fade, static_cast<uint32_t>(entity));
+			std::vector<entt::entity> entities;
+			for (auto entity : view)
+				entities.push_back(entity);
+			const size_t count = entities.size();
+			if (count >= kParallelPrepThreshold && JobSystem::IsRunning())
+			{
+				std::vector<glm::mat4> transforms(count);
+				std::vector<std::array<glm::vec3, 4>> positions(count);
+				for (size_t i = 0; i < count; i++)
+					transforms[i] = view.get<TransformComponent>(entities[i]).Transform;
+				JobSystem::ParallelFor(static_cast<uint32_t>(count), 32, [&](uint32_t i)
+				{
+					Renderer2D::ComputeCirclePositions(transforms[i], positions[i].data());
+				});
+				for (size_t i = 0; i < count; i++)
+				{
+					const auto& circle = view.get<CircleRendererComponent>(entities[i]);
+					Renderer2D::DrawCirclePositions(positions[i].data(), circle.Color, circle.Thickness,
+						circle.Fade, static_cast<uint32_t>(entities[i]));
+				}
+			}
+			else
+			{
+				for (auto entity : entities)
+				{
+					auto& transform = view.get<TransformComponent>(entity);
+					const auto& circle = view.get<CircleRendererComponent>(entity);
+					Renderer2D::DrawCircleCore(transform.Transform, circle.Color, circle.Thickness,
+						circle.Fade, static_cast<uint32_t>(entity));
+				}
+			}
 		}
 	}
 
