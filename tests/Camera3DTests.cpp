@@ -141,6 +141,41 @@ int main()
 			}
 		}
 
+		// 5c. 绕序约定:Vulkan 适配翻转 Y 行 ⇒ 屏幕空间绕序跟着反转 ⇒ Renderer3D 必须把
+		//     Vulkan 的正面判据设为 Clockwise(否则外壁被判成背面,Back 剔除后只剩内壁)。
+		//     这里用"已知 CCW 三角形"钉住这条依赖关系。
+		{
+			const glm::vec3 origin = camera.GetPosition();
+			const glm::vec3 right = camera.GetRight();
+			const glm::vec3 up = camera.GetUp();
+			const glm::vec3 forward = camera.GetForward();
+			const float distance = camera.GetDistance();
+			const float half = 0.5f;
+			// 相机前方面上、从相机看去逆时针的三个点。
+			const glm::vec3 a = origin + forward * distance - right * half - up * half;
+			const glm::vec3 b = origin + forward * distance + right * half - up * half;
+			const glm::vec3 c = origin + forward * distance - right * half + up * half;
+
+			const auto signedArea = [&](const glm::mat4& viewProjection)
+			{
+				const auto toNdc = [&](const glm::vec3& point)
+				{
+					const glm::vec4 clip = viewProjection * glm::vec4(point, 1.0f);
+					return glm::vec2(clip.x / clip.w, clip.y / clip.w);
+				};
+				const glm::vec2 p0 = toNdc(a);
+				const glm::vec2 p1 = toNdc(b);
+				const glm::vec2 p2 = toNdc(c);
+				return 0.5f * ((p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y));
+			};
+
+			const float glArea = signedArea(camera.GetViewProjectionMatrix(false));
+			const float vkArea = signedArea(camera.GetViewProjectionMatrix(true));
+			CHECK(glArea > 0.0f);   // GL:外壁 = 逆时针(CCW 即正面)
+			CHECK(vkArea < 0.0f);   // Vulkan:同一网格变成顺时针 ⇒ 正面判据必须是 Clockwise
+			CHECK(std::fabs(glArea + vkArea) < 1e-4f);
+		}
+
 		// 6. 射线与平面求交:命中 + 平行未命中 + 反方向未命中。
 		{
 			const Ray ray { { 0.0f, 1.0f, 0.0f }, { 0.0f, -1.0f, 0.0f } };

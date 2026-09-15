@@ -113,10 +113,12 @@ namespace World
 		pipelineDesc.VertexAttributes = meshLayout.Attributes;
 		pipelineDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
 		pipelineDesc.Cull = Rhi::CullMode::Back;
-		// 正面 = 逆时针(与网格绕序一致)。注意:Vulkan 后端为适配 2D 的 NDC +Y 向上约定会翻转
-		// 投影 Y 行,从而反转屏幕空间绕序 —— 因此这里**不能再**配合 CW,否则会剔除外壁、
-		// 只留下内壁(表现为"里外反了")。绕序问题一律在网格侧修正。
-		pipelineDesc.Front = Rhi::FrontFace::CounterClockwise;
+		// 网格外壁是标准 CCW(GL 约定)。Vulkan 适配会翻转投影 Y 行以保持画面方向
+		// (ProjectionConventions.h),这一步同时反转了屏幕空间绕序 —— 因此 Vulkan 必须把
+		// 正面判据改为 Clockwise,否则外壁被判成背面:Back 剔除后只剩内壁,表现为
+		// "看到 cube 内部"。两个后端的差异只在这一处,网格绕序保持标准 CCW 不动。
+		pipelineDesc.Front = Renderer::GetBackendName() == "vulkan"
+			? Rhi::FrontFace::Clockwise : Rhi::FrontFace::CounterClockwise;
 		pipelineDesc.DepthStencil.DepthTest = true;
 		pipelineDesc.DepthStencil.DepthWrite = true;
 		// 深度约定:清值 1.0 + LessOrEqual(近处深度小者胜)。Vulkan 的 NDC z∈[0,1] 由
