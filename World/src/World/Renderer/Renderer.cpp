@@ -279,12 +279,22 @@ namespace World
 
 	void Renderer::EndFrame()
 	{
-		// 兜底:本帧有提交但没有任何提交携带帧栅栏(例如无 UI 的纯场景帧)时,
-		// 直接等一次队列空闲,保证延迟释放不会回收仍在使用的资源。
 		const uint32_t slot = FrameSlot();
-		if (s_FrameHadSubmission && !s_FrameFenceSubmitted[slot] &&
-			m_Device && s_BackendName == "vulkan" && s_ActivePresent && s_ActivePresent->Queue)
-			s_ActivePresent->Queue->WaitIdle();
+		// 帧末挂帧栅栏:一次空提交(同队列有序,因此它的完成即代表本帧所有提交完成)。
+		// 这样一帧内无论有多少次 UI 提交(主窗口 + N 个独立窗口),fence 都只提交一次,
+		// 既保持"帧栅栏 = 整帧 GPU 工作"的语义,也不会撞上 VUID-vkQueueSubmit-fence-00063。
+		if (s_FrameHadSubmission && !s_FrameFenceSubmitted[slot]
+			&& m_Device && s_BackendName == "vulkan" && s_ActivePresent && s_ActivePresent->Queue)
+		{
+			// 提交栅栏必须未信号(创建时用 SIGNALED 会触发同一条 VUID);等待前由 BeginFrame
+			// 统一 Wait + Reset。
+			if (!s_FrameFences[slot])
+				s_FrameFences[slot] = m_Device->CreateFence(false);
+			Rhi::SubmitInfo submit;
+			submit.Fence = s_FrameFences[slot];
+			s_ActivePresent->Queue->Submit(submit);
+			s_FrameFenceSubmitted[slot] = true;
+		}
 		s_FrameHadSubmission = false;
 		++s_FrameNumber;
 	}
@@ -596,14 +606,9 @@ namespace World
 		const size_t imageIndex = std::min<size_t>(state.ImageIndex, state.RenderDone.empty() ? 0 : state.RenderDone.size() - 1);
 		if (!state.RenderDone.empty())
 			submit.SignalSemaphores = { state.RenderDone[imageIndex] };
-		// 帧栅栏挂在"本帧最后一次提交"上:场景提交(若有)与本次提交同队列有序,
-		// 因此该 fence 信号即代表整帧 GPU 工作完成。
-		if (!s_FrameFences[slot])
-			// 提交栅栏必须未信号(创建时就用 SIGNALED 会触发 VUID-vkQueueSubmit-fence-00063);
-			// 等待前由 BeginFrame 统一 Wait + Reset。
-			s_FrameFences[slot] = m_Device->CreateFence(false);
-		submit.Fence = s_FrameFences[slot];
-		s_FrameFenceSubmitted[slot] = true;
+		// 帧栅栏不在这里挂:一帧可能有多次 UI 提交(主窗口 + 每个独立窗口各一次),
+		// 重复提交同一个 fence 会触发 VUID-vkQueueSubmit-fence-00063(fence 已被信号)。
+		// 统一由 Renderer::EndFrame 在帧末用一个空提交挂上,语义仍是"整帧 GPU 工作完成"。
 		state.Queue->Submit(submit);
 		PresentTrace("[present] UI submitted frame={0} slot={1} imageIndex={2} fence=1",
 			s_FrameNumber, slot, state.ImageIndex);
