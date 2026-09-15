@@ -4,6 +4,7 @@
 #include "World/WUI/WuiWidget.h"
 
 #include <memory>
+#include <unordered_set>
 
 namespace World
 {
@@ -20,6 +21,8 @@ namespace World
 		std::shared_ptr<Wui::WuiScrollArea> m_Scroll;
 		std::vector<std::shared_ptr<Wui::WuiListRow>> m_Rows;
 		std::vector<Entity> m_RowEntities;
+		// 折叠状态按实体句柄保存(跨帧保持;实体销毁后残留项无害)。
+		std::unordered_set<uint32_t> m_Collapsed;
 		std::string m_LastOrderKey;
 		Entity m_Context;
 		// 拖拽设父的待提交落点(拖拽结束后统一提交)。

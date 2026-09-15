@@ -59,6 +59,9 @@ namespace World
 			const auto* hierarchy = registry.try_get<HierarchyComponent>(handle);
 			if (!hierarchy)
 				return;
+			// 折叠节点不展开子节点(但仍显示自身)。
+			if (m_Collapsed.find(static_cast<uint32_t>(handle)) != m_Collapsed.end())
+				return;
 			// 子节点顺序即 HierarchyComponent::Children 的顺序(同级重排会改它),不再按名字排序。
 			for (const entt::entity child : hierarchy->Children)
 				if (registry.valid(child))
@@ -100,7 +103,12 @@ namespace World
 				const size_t index = m_Rows.size();
 				const uint32_t depth = index < depths.size() ? depths[index] : 0;
 				row->Indent = static_cast<float>(depth) * 14.0f;
-				row->Text = labelOf(entity);
+				// 折叠标记直接放进文本(避免额外的行内热区绘制):有子节点显示 +/-。
+				const auto* hierarchy = registry.try_get<HierarchyComponent>(entity);
+				const bool hasChildren = hierarchy && !hierarchy->Children.empty();
+				const bool collapsed = m_Collapsed.find(static_cast<uint32_t>(static_cast<entt::entity>(entity)))
+					!= m_Collapsed.end();
+				row->Text = std::string(hasChildren ? (collapsed ? "+ " : "- ") : "  ") + labelOf(entity);
 				row->OnClick = [&host, entity] { host.SetSelectedEntity(entity); };
 				content->Add(row, { 0, 1e30f, 0, 22, 0 });
 				m_Rows.push_back(row);
@@ -187,6 +195,26 @@ namespace World
 			m_PendingDropHandle = Entity();
 			m_PendingDropSource = 0;
 			m_PendingDropZone = 1;
+		}
+
+		// ---- 折叠/展开:点击行首标记区(标记 14px + 缩进)切换,并把列表标脏以便重建行 ----
+		for (size_t i = 0; i < m_Rows.size(); ++i)
+		{
+			const Entity entity = m_RowEntities[i];
+			const auto* hierarchy = registry.try_get<HierarchyComponent>(entity);
+			if (!hierarchy || hierarchy->Children.empty())
+				continue;
+			const Wui::WuiRect rowRect = m_Rows[i]->Rect();
+			const Wui::WuiRect toggle { rowRect.X + m_Rows[i]->Indent, rowRect.Y, 16.0f, rowRect.H };
+			if (ctx.IsClicked(toggle))
+			{
+				const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
+				if (m_Collapsed.find(handle) != m_Collapsed.end())
+					m_Collapsed.erase(handle);
+				else
+					m_Collapsed.insert(handle);
+				m_LastOrderKey.clear();   // 强制下一帧重建行(折叠会改变可见行集合)
+			}
 		}
 
 		// ---- 右键菜单(瞬态 overlay,不参与布局)----
