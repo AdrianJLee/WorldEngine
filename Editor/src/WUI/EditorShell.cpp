@@ -46,11 +46,6 @@ namespace World
 		// W7-2:Input Map 设计为**独立窗口**(可按统一窗口模型挂靠到主窗口顶栏),
 		// 因此不进入默认停靠布局;仍保留在 m_Panels(Window 菜单可开关)。
 		std::vector<Wui::PanelId> dockedPanels = panels;
-		dockedPanels.erase(std::remove(dockedPanels.begin(), dockedPanels.end(), "input"), dockedPanels.end());
-		// "windows"(Independent Windows 面板)先从默认停靠布局里移除:它当前关闭时会崩溃,
-		// 不应在启动时就出现在 Properties 旁边;仍保留在 m_Panels(Window 菜单可打开),
-		// 待崩溃修好后决定是否放回默认布局。
-		dockedPanels.erase(std::remove(dockedPanels.begin(), dockedPanels.end(), "windows"), dockedPanels.end());
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(dockedPanels);
 		std::string error;
 		if (!Wui::WuiLayoutStore::Load(m_LayoutPath, fallback, &m_Layout, &error))
@@ -66,24 +61,10 @@ namespace World
 		// 因此这里在加载后强制摘除"不要出现在停靠区"的面板(仍可由 Window 菜单打开)。
 		if (m_Layout.Contains("windows"))
 			m_Layout.RemoveTab("windows");
-		// 以"独立窗口"存在的面板(设计约定):gallery = Widget Gallery(既有设计)、
-		// input = Input Map(用户指定)。每次启动强制收敛到唯一表示:
-		// 先清挂靠态、再从停靠树摘除(旧存档会把它停靠在某处)、最后无条件创建独立窗口。
-		// 这样无论存档怎么写,它们都不会出现在停靠区,也不会出现"停靠 + 浮动"双重表示。
-		struct FloatingPanelSpec { Wui::PanelId Id; Wui::WuiRect Rect; };
-		const FloatingPanelSpec floatingPanels[] = {
-			{ "gallery", { 120.0f, 120.0f, 520.0f, 400.0f } },
-			{ "input", { 660.0f, 120.0f, 440.0f, 340.0f } },
-		};
-		for (const FloatingPanelSpec& spec : floatingPanels)
-		{
-			m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), spec.Id),
-				m_AttachedPanels.end());
-			if (m_Layout.Contains(spec.Id))
-				m_Layout.RemoveTab(spec.Id);
-			m_Layout.Floating.push_back({ spec.Id, spec.Rect });
-			AddFloatWindow(spec.Id, spec.Rect, "open");
-		}
+		// 重要:启动期**不创建任何独立窗口**。面板一律按布局(默认=停靠)呈现,
+		// 独立窗口只在用户从 Window 菜单打开对应面板时创建(该路径待按预期行为重新实现)。
+		// 之前在这里"无条件登记浮动 + AddFloatWindow"导致启动弹出多个独立窗口,已移除。
+		(void)0;
 
 
 		// 尊重用户关闭的面板:仅当布局文件缺失/损坏时使用默认布局,
