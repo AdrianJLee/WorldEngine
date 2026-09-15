@@ -66,14 +66,23 @@ namespace World
 		// 因此这里在加载后强制摘除"不要出现在停靠区"的面板(仍可由 Window 菜单打开)。
 		if (m_Layout.Contains("windows"))
 			m_Layout.RemoveTab("windows");
-		// Input Map 固定为独立窗口:每次启动都强制收敛到"唯一表示"——
-		// 无论存档里它是停靠在左区、挂靠在主窗口、还是浮动,都先摘干净再无条件创建独立窗口。
-		// (之前只处理"未浮动"的情况,存档一旦把停靠记录写回来,它就会又出现在左侧。)
+		// 以"独立窗口"存在的面板(设计约定):gallery = Widget Gallery(既有设计)、
+		// input = Input Map(用户指定)。每次启动强制收敛到唯一表示:
+		// 先清挂靠态、再从停靠树摘除(旧存档会把它停靠在某处)、最后无条件创建独立窗口。
+		// 这样无论存档怎么写,它们都不会出现在停靠区,也不会出现"停靠 + 浮动"双重表示。
+		struct FloatingPanelSpec { Wui::PanelId Id; Wui::WuiRect Rect; };
+		const FloatingPanelSpec floatingPanels[] = {
+			{ "gallery", { 120.0f, 120.0f, 520.0f, 400.0f } },
+			{ "input", { 660.0f, 120.0f, 440.0f, 340.0f } },
+		};
+		for (const FloatingPanelSpec& spec : floatingPanels)
 		{
-			if (m_Layout.Contains("input"))
-				m_Layout.RemoveTab("input");
-			m_Layout.Floating.push_back({ "input", { 140.0f, 140.0f, 440.0f, 340.0f } });
-			AddFloatWindow("input", { 140.0f, 140.0f, 440.0f, 340.0f }, "open");
+			m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), spec.Id),
+				m_AttachedPanels.end());
+			if (m_Layout.Contains(spec.Id))
+				m_Layout.RemoveTab(spec.Id);
+			m_Layout.Floating.push_back({ spec.Id, spec.Rect });
+			AddFloatWindow(spec.Id, spec.Rect, "open");
 		}
 
 
