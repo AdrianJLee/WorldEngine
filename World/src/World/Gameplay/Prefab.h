@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace World::Gameplay
 {
@@ -37,4 +39,25 @@ namespace World::Gameplay
 		const std::filesystem::path& path, std::string* error = nullptr);
 	WLD_API PrefabInstanceResult InstantiateFromFile(const std::filesystem::path& path,
 		Scene& destination, entt::entity parent = entt::null);
+
+	// W4-3:实例覆盖记录。
+	// 由"改动发生处"登记(属性面板/脚本),而不是靠全量 diff 反推——这样覆盖信息永远与真实编辑一致。
+	struct PrefabInstanceRecord
+	{
+		std::string PrefabPath;                 // 来源 prefab(空 = 非 prefab 实例)
+		entt::entity Root = entt::null;         // 实例子树根
+		// 实体 -> 被覆盖的字段名(如 "TransformComponent.Location");空集合表示该实体无覆盖。
+		std::unordered_map<uint32_t, std::vector<std::string>> Overrides;
+
+		bool IsValid() const { return Root != entt::null; }
+	};
+
+	WLD_API void MarkOverride(PrefabInstanceRecord& record, entt::entity entity, const std::string& field);
+	WLD_API bool HasOverride(const PrefabInstanceRecord& record, entt::entity entity);
+	WLD_API size_t GetOverrideCount(const PrefabInstanceRecord& record);
+	WLD_API void ClearOverrides(PrefabInstanceRecord& record);
+
+	// 回滚实例:重新实例化来源 prefab 到临时场景,按树序把组件值拷回实例实体
+	// (契约:实例与 prefab 结构同构;整体回滚,字段级回滚需要 schema 字段访问,列入后续增量)。
+	WLD_API bool RevertInstance(PrefabInstanceRecord& record, Scene& scene);
 }

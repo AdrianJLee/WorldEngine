@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
+#include <algorithm>
 
 namespace
 {
@@ -139,6 +140,46 @@ int main()
 
 			// 缺失文件与非法来源都应安全失败(不抛异常)。
 			CHECK(!InstantiateFromFile(std::filesystem::temp_directory_path() / "missing.wprefab", loaded).IsValid());
+			std::filesystem::remove(prefabPath);
+		}
+		// 7. 覆盖记录与回滚:改动登记 -> HasOverride/计数 -> RevertInstance 恢复 prefab 原值。
+		{
+			const std::filesystem::path prefabPath =
+				std::filesystem::temp_directory_path() / "worldengine-prefab-override.wprefab";
+			std::string error;
+			CHECK(SaveFromScene(source, Entity(&source, root), prefabPath, &error));
+
+			Scene target(context);
+			const PrefabInstanceResult instance = InstantiateFromFile(prefabPath, target);
+			CHECK(instance.IsValid());
+			const entt::entity instanceRoot = static_cast<entt::entity>(instance.Root);
+			auto& targetRegistry = target.GetRegistry();
+
+			PrefabInstanceRecord record;
+			record.PrefabPath = prefabPath.string();
+			record.Root = instanceRoot;
+			CHECK(record.IsValid());
+			CHECK(!HasOverride(record, instanceRoot));
+
+			// 模拟属性面板改动:改 Tag 与 MeshRenderer 颜色并登记覆盖。
+			targetRegistry.get<TagComponent>(instanceRoot).Tag = "Edited Tag";
+			targetRegistry.get<MeshRendererComponent>(instanceRoot).Color = { 1.0f, 0.0f, 0.0f, 1.0f };
+			MarkOverride(record, instanceRoot, "TagComponent.Tag");
+			MarkOverride(record, instanceRoot, "MeshRendererComponent.Color");
+			MarkOverride(record, instanceRoot, "TagComponent.Tag");   // 重复登记不叠加
+			CHECK(HasOverride(record, instanceRoot));
+			CHECK(GetOverrideCount(record) == 2);
+
+			// 回滚:Tag 与颜色回到 prefab 原值,覆盖记录被清空。
+			CHECK(RevertInstance(record, target));
+			CHECK(targetRegistry.get<TagComponent>(instanceRoot).Tag == "Prefab Root");
+			CHECK(std::fabs(targetRegistry.get<MeshRendererComponent>(instanceRoot).Color.z - 0.9f) < 1e-5f);
+			CHECK(!HasOverride(record, instanceRoot));
+			CHECK(GetOverrideCount(record) == 0);
+
+			// 无来源的实例记录必须安全失败。
+			PrefabInstanceRecord empty;
+			CHECK(!RevertInstance(empty, target));
 			std::filesystem::remove(prefabPath);
 		}
 		std::printf("World.Prefab: all checks passed\n");
