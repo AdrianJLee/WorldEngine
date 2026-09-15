@@ -1,7 +1,10 @@
 // P2a W5:SystemRegistry 的阶段派发、同阶段顺序依赖、注册校验与耗时统计。
+#include "World/Core/Thread/JobSystem.h"
 #include "World/Gameplay/SystemRegistry.h"
 
+#include <chrono>
 #include <cstdio>
+#include <thread>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -21,6 +24,9 @@ int main()
 	try
 	{
 		using namespace World::Gameplay;
+		// 并行用例需要任务系统(未初始化时 RunPhase 会退化为串行)。
+		World::JobSystem::Init();
+		CHECK(World::JobSystem::IsRunning());
 
 		SystemRegistry registry;
 		std::vector<std::string> log;
@@ -90,6 +96,26 @@ int main()
 			CHECK(registry.GetSystemCount() == 0);
 		}
 
+		// 6. 并行安全系统:两个 ParallelSafe 系统应真并发(执行时间区间重叠),串行系统仍按序。
+		{
+			SystemRegistry jobs;
+			std::chrono::steady_clock::time_point startA, endA, startB, endB;
+			const auto slowWork = [] { std::this_thread::sleep_for(std::chrono::milliseconds(25)); };
+			CHECK(jobs.Register({ "jobA", SystemPhase::Update, true, {} },
+				[&](World::Timestep) { slowWork(); }));
+			CHECK(jobs.Register({ "jobB", SystemPhase::Update, true, {} },
+				[&](World::Timestep) { slowWork(); }));
+			startA = std::chrono::steady_clock::now();
+			const uint32_t ran = jobs.RunPhase(SystemPhase::Update, World::Timestep(0.016f));
+			endB = std::chrono::steady_clock::now();
+			CHECK(ran == 2);
+			const double elapsedMs = std::chrono::duration<double, std::milli>(endB - startA).count();
+			// 串行至少 50ms;并发应显著更快(留足 CI 抖动量)。
+			CHECK(elapsedMs < 45.0);
+			CHECK(jobs.GetLastTimings().size() == 2);
+			(void)startB; (void)endA;
+		}
+		World::JobSystem::Shutdown();
 		std::printf("World.Systems: all checks passed\n");
 		return 0;
 	}

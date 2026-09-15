@@ -2,6 +2,7 @@
 #include "World/Gameplay/SystemRegistry.h"
 
 #include "World/Core/Log.h"
+#include "World/Core/Thread/JobSystem.h"
 
 #include <algorithm>
 #include <chrono>
@@ -117,12 +118,13 @@ namespace World::Gameplay
 			}
 
 		uint32_t executed = 0;
+		// 依赖检查与筛选:并行安全系统之间声明为相互独立,可并发;其余按拓扑顺序串行。
+		std::vector<const Entry*> parallelEntries;
+		std::vector<const Entry*> serialEntries;
 		for (const Entry* entry : phaseEntries)
 		{
 			if (!entry->Update)
 				continue;
-			// 依赖必须存在于注册表(可跨阶段:阶段顺序本身已保证先后,例如 Fixed 先于 Update);
-			// 缺失说明依赖被注销或名字写错,跳过而不是执行错序逻辑。
 			bool dependenciesSatisfied = true;
 			for (const std::string& dependency : entry->Desc.After)
 			{
@@ -136,17 +138,75 @@ namespace World::Gameplay
 			}
 			if (!dependenciesSatisfied)
 				continue;
-			const auto begin = std::chrono::steady_clock::now();
-			entry->Update(dt);
-			const auto end = std::chrono::steady_clock::now();
-			executed++;
+			(entry->Desc.ParallelSafe ? parallelEntries : serialEntries).push_back(entry);
+		}
 
+		const auto pushTiming = [this, phase](const Entry* entry, double milliseconds)
+		{
 			SystemTiming timing;
 			timing.Name = entry->Desc.Name;
 			timing.Phase = phase;
 			timing.ParallelSafe = entry->Desc.ParallelSafe;
-			timing.Milliseconds = std::chrono::duration<double, std::milli>(end - begin).count();
+			timing.Milliseconds = milliseconds;
 			m_Timings.push_back(std::move(timing));
+		};
+
+		// 并行安全系统:交给 JobSystem 并发执行(相互独立由 ParallelSafe 声明保证),
+		// 主线程参与等待/帮忙执行;耗时按系统分别回收到 durations。
+		if (!parallelEntries.empty())
+		{
+			std::vector<double> durations(parallelEntries.size(), 0.0);
+			if (JobSystem::IsRunning() && parallelEntries.size() > 1)
+			{
+				struct Payload
+				{
+					const Entry* Target;
+					Timestep Dt;
+					double* Out;
+				};
+
+				JobCounter counter;
+				for (size_t i = 0; i < parallelEntries.size(); ++i)
+				{
+					JobDecl job;
+					job.Emplace(Payload { parallelEntries[i], dt, &durations[i] });
+					job.Entry = [](void* data)
+					{
+						auto* payload = static_cast<Payload*>(data);
+						const auto begin = std::chrono::steady_clock::now();
+						payload->Target->Update(payload->Dt);
+						const auto end = std::chrono::steady_clock::now();
+						*payload->Out = std::chrono::duration<double, std::milli>(end - begin).count();
+					};
+					job.Counter = &counter;
+					JobSystem::Kick(std::move(job));
+				}
+				JobSystem::Wait(&counter);
+			}
+			else
+			{
+				for (size_t i = 0; i < parallelEntries.size(); ++i)
+				{
+					const auto begin = std::chrono::steady_clock::now();
+					parallelEntries[i]->Update(dt);
+					const auto end = std::chrono::steady_clock::now();
+					durations[i] = std::chrono::duration<double, std::milli>(end - begin).count();
+				}
+			}
+			for (size_t i = 0; i < parallelEntries.size(); ++i)
+			{
+				pushTiming(parallelEntries[i], durations[i]);
+				executed++;
+			}
+		}
+
+		for (const Entry* entry : serialEntries)
+		{
+			const auto begin = std::chrono::steady_clock::now();
+			entry->Update(dt);
+			const auto end = std::chrono::steady_clock::now();
+			pushTiming(entry, std::chrono::duration<double, std::milli>(end - begin).count());
+			executed++;
 		}
 		if (executed > 0)
 			m_RunCount++;
