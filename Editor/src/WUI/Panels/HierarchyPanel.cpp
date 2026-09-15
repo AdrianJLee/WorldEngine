@@ -8,6 +8,8 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
+#include <functional>
+#include <unordered_set>
 
 namespace World
 {
@@ -22,20 +24,59 @@ namespace World
 		}
 
 		std::vector<Entity> entities;
+		std::vector<uint32_t> depths;
 		// 只读遍历必须走 const registry:运行中的场景拒绝非 const 访问(结构写保护)。
 		const entt::registry& registry = static_cast<const Scene*>(scene.get())->GetRegistry();
+
+		// W3b-2:按层级展平(根在前、子节点紧随父节点),而不是按名字平铺排序。
+		// 带访问集与深度上限,非法层级(环/断链)也能安全显示且不丢行。
+		const auto labelOf = [&registry](entt::entity handle) -> std::string
+		{
+			if (const auto* tag = registry.try_get<TagComponent>(handle))
+				return tag->Tag.empty() ? "Empty Entity" : tag->Tag;
+			return "Empty Entity";
+		};
+		std::vector<entt::entity> roots;
 		for (auto handle : registry.view<UUIDComponent>())
+		{
+			const auto* hierarchy = registry.try_get<HierarchyComponent>(handle);
+			if (!hierarchy || hierarchy->Parent == entt::null || !registry.valid(hierarchy->Parent))
+				roots.push_back(handle);
+		}
+		auto byLabel = [&labelOf](entt::entity a, entt::entity b) { return labelOf(a) < labelOf(b); };
+		std::sort(roots.begin(), roots.end(), byLabel);
+
+		std::unordered_set<uint32_t> visited;
+		std::function<void(entt::entity, uint32_t)> visit = [&](entt::entity handle, uint32_t depth)
+		{
+			constexpr uint32_t kMaxDisplayDepth = 64;
+			if (depth > kMaxDisplayDepth || !visited.insert(static_cast<uint32_t>(handle)).second)
+				return;
 			entities.push_back(Entity(scene.get(), handle));
-		std::sort(entities.begin(), entities.end(), [](Entity a, Entity b)
+			depths.push_back(depth);
+
+			const auto* hierarchy = registry.try_get<HierarchyComponent>(handle);
+			if (!hierarchy)
+				return;
+			std::vector<entt::entity> children = hierarchy->Children;
+			std::sort(children.begin(), children.end(), byLabel);
+			for (const entt::entity child : children)
+				if (registry.valid(child))
+					visit(child, depth + 1);
+		};
+		for (const entt::entity root : roots)
+			visit(root, 0);
+		for (auto handle : registry.view<UUIDComponent>())
+			if (visited.find(static_cast<uint32_t>(handle)) == visited.end())
 			{
-				return a.GetComponent<TagComponent>().Tag < b.GetComponent<TagComponent>().Tag;
-			});
+				entities.push_back(Entity(scene.get(), handle));
+				depths.push_back(0);
+			}
 
 		std::string orderKey;
-		for (Entity entity : entities)
+		for (size_t i = 0; i < entities.size(); ++i)
 		{
-			orderKey += entity.GetComponent<TagComponent>().Tag;
-			orderKey += '\n';
+			orderKey += std::to_string(depths[i]) + ":" + labelOf(entities[i]) + '\n';
 		}
 
 		if (!m_Root)
@@ -56,7 +97,10 @@ namespace World
 			for (Entity entity : entities)
 			{
 				auto row = std::make_shared<Wui::WuiListRow>();
-				row->Text = entity.GetComponent<TagComponent>().Tag.empty() ? "Empty Entity" : entity.GetComponent<TagComponent>().Tag;
+				// 缩进用空格前缀:WuiListRow 暂无 Indent 字段,加字段属 UI 组件库改动,单独排期。
+				const size_t index = m_Rows.size();
+				const uint32_t depth = index < depths.size() ? depths[index] : 0;
+				row->Text = std::string(depth * 4, ' ') + labelOf(entity);
 				row->OnClick = [&host, entity] { host.SetSelectedEntity(entity); };
 				content->Add(row, { 0, 1e30f, 0, 22, 0 });
 				m_Rows.push_back(row);
