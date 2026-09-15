@@ -42,6 +42,11 @@ namespace World::Wui
 		void Render(const std::vector<WuiDrawCommand>& commands, const std::vector<WuiDrawCommand>& overlayCommands) override;
 		void EndFrame(WuiCursor cursor = WuiCursor::Arrow) override;
 
+		// 宿主销毁前调用:注销"设备释放钩子"并释放本实例持有的 RHI 资源。
+		// 钩子捕获 this,若宿主先析构,Renderer::Shutdown 会对已释放对象调用 ReleaseResources()
+		// (实测退出码 0xC0000005)。独占各窗口的 WUI 后端必须显式走这一步。
+		void ReleaseDeviceResources();
+
 	private:
 		struct Glyph
 		{

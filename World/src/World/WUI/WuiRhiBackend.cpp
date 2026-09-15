@@ -68,9 +68,17 @@ namespace World::Wui
 
 	WuiRhiBackend::~WuiRhiBackend()
 	{
-		ReleaseResources();
+		ReleaseDeviceResources();
 		for (FontFace& face : m_Faces)
 			delete face.Info;
+	}
+
+	void WuiRhiBackend::ReleaseDeviceResources()
+	{
+		// 先摘钩子再放资源:钩子是 [this] 的 lambda,留在 Renderer 的钩子表里会在
+		// Renderer::Shutdown(设备销毁前)对已析构的后端调用 ReleaseResources()。
+		Renderer::UnregisterDeviceReleaseHook(this);
+		ReleaseResources();
 	}
 
 	void WuiRhiBackend::FeedKey(uint32_t keyCode, bool down, bool repeat) { s_Input.OnKey(keyCode, down, repeat); }

@@ -53,11 +53,28 @@ namespace World
 		// 本对象(或其成员),会造成访问违例。
 		if (m_Window)
 			m_Window->SetEventCallback(Window::EventCallbackFn {});
+		// 释放顺序(实测退出崩溃 0xC0000005 的根因):
+		//   ① 本窗口的 WUI 后端持有 RHI 资源,并注册了 Renderer 的设备释放钩子;
+		//   ② 成员析构发生在析构函数体之后,即"OS 窗口(及其 GL 上下文)已销毁"之后,
+		//      此时释放资源会在无当前上下文的条件下调用 glDelete*(GL),或让
+		//      Renderer::Shutdown 调用指向已释放对象的钩子(Vulkan/GL 均可触发);
+		//   ③ 因此必须在窗口存活、且其上下文为当前时先释放后端资源。
+		if (m_Window)
+		{
+			m_Window->MakeCurrent();
+			m_Backend.ReleaseDeviceResources();
+		}
 		// 诊断开关:WLD_FLOAT_LEAK_TARGET 跳过呈现目标销毁,用于区分
 		// "交换链销毁"与"窗口销毁"两类崩溃来源。
 		if (m_Target && !std::getenv("WLD_FLOAT_LEAK_TARGET"))
 			Renderer::DestroyPresentTarget(m_Target);
+		m_Target = nullptr;
 		delete m_Window;
+		m_Window = nullptr;
+		// 恢复主窗口上下文:退出路径上 Renderer::Shutdown 还会用当前上下文销毁 GL 资源,
+		// 若停在刚销毁的附加窗口上,就会重演"设备资源在无上下文时释放"的崩溃。
+		if (Application::HasInstance())
+			Application::Get().GetWindow().MakeCurrent();
 	}
 
 	bool FloatWindowHost::Render()
@@ -144,6 +161,10 @@ namespace World
 			Renderer::DestroyPresentTarget(m_Target);
 			m_Target = nullptr;
 		}
+		// 同一顺序要求:重建窗口前也要在本窗口的上下文里先放掉后端资源
+		// (新建窗口后 EnsureResources 会按需重建)。
+		m_Window->MakeCurrent();
+		m_Backend.ReleaseDeviceResources();
 		m_Window->SetEventCallback(Window::EventCallbackFn {});
 		delete m_Window;
 		m_Window = nullptr;
