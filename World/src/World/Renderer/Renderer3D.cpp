@@ -119,13 +119,10 @@ namespace World
 		pipelineDesc.Front = Rhi::FrontFace::CounterClockwise;
 		pipelineDesc.DepthStencil.DepthTest = true;
 		pipelineDesc.DepthStencil.DepthWrite = true;
-		// 深度比较方向:默认 LessOrEqual(清 1.0、近处深度小)。若换成 GreaterOrEqual 才能得到
-		// 正确前后关系,说明投影/清除值一侧是 reversed-Z 语义,需要在投影或清除值上统一,
-		// 而不是长期靠这里翻转(此处保留开关便于一键 A/B 定位)。
-		const char* compareOverride = std::getenv("WLD_3D_DEPTH_COMPARE");
-		pipelineDesc.DepthStencil.DepthCompare =
-			(compareOverride && std::string(compareOverride) == "greater")
-				? Rhi::CompareOp::GreaterOrEqual : Rhi::CompareOp::LessOrEqual;
+		// 深度约定:清值 1.0 + LessOrEqual(近处深度小者胜)。Vulkan 的 NDC z∈[0,1] 由
+		// `ProjectionConventions.h` 的深度重映射保证(近平面 → 0、远平面 → 1),
+		// 两个后端共用同一约定,因此**不再**保留比较方向的 A/B 开关。
+		pipelineDesc.DepthStencil.DepthCompare = Rhi::CompareOp::LessOrEqual;
 		state.Pipeline = Renderer::GetDevice()->CreatePipeline(pipelineDesc);
 	}
 

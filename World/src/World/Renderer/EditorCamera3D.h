@@ -10,8 +10,9 @@ namespace World
 	//
 	// 约定:
 	//  - yaw=0、pitch=0 时相机位于 Target 的 -Z 侧,视线指向 Target;
-	//  - 投影矩阵默认按 NDC +Y 向上编写;flipY=true 时对第 0..3 列的 Y 分量取反,
-	//    与 SceneRenderer 给 Vulkan 后端做的适配完全一致。
+	//  - 投影矩阵按 GL 约定编写(NDC +Y 向上、z∈[-1,1]);vulkan=true 时走
+	//    `ProjectionConventions.h` 的同一份适配(翻转 Y 行 + 把深度重映射到 [0,1]),
+	//    与 SceneRenderer 的渲染路径逐元素一致 —— 否则会出现"渲染对了、拾取反了"。
 	class WLD_API EditorCamera3D
 	{
 	public:
@@ -49,11 +50,11 @@ namespace World
 		glm::vec3 GetUp() const;
 
 		glm::mat4 GetViewMatrix() const;
-		glm::mat4 GetProjectionMatrix(bool flipY = false) const;
-		glm::mat4 GetViewProjectionMatrix(bool flipY = false) const;
+		glm::mat4 GetProjectionMatrix(bool vulkan = false) const;
+		glm::mat4 GetViewProjectionMatrix(bool vulkan = false) const;
 
 		// 供拾取使用:屏幕 NDC → 世界射线的逆矩阵。
-		glm::mat4 GetInverseViewProjectionMatrix(bool flipY = false) const;
+		glm::mat4 GetInverseViewProjectionMatrix(bool vulkan = false) const;
 
 	private:
 		void ClampPitch();

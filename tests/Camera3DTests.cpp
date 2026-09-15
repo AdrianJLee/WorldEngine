@@ -1,6 +1,7 @@
 // P1b D1:3D 相机与射线数学基线(纯 glm,无窗口/无设备)。
 #include "World/Renderer/CameraRay.h"
 #include "World/Renderer/EditorCamera3D.h"
+#include "World/Renderer/ProjectionConventions.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -90,15 +91,53 @@ int main()
 			CHECK(glm::length(centerRay.Direction - camera.GetForward()) < 1e-3f);
 		}
 
-		// 5. Vulkan 适配:flipY 只对 Y 分量取反。
+		// 5. 后端 NDC 适配:GL 保持原样,Vulkan = 翻转 Y 行 + 深度重映射(z'=0.5z+0.5w)。
 		{
-			const glm::mat4 normal = camera.GetProjectionMatrix(false);
-			const glm::mat4 flipped = camera.GetProjectionMatrix(true);
+			const glm::mat4 gl = camera.GetProjectionMatrix(false);
+			const glm::mat4 vk = camera.GetProjectionMatrix(true);
 			for (int column = 0; column < 4; ++column)
 			{
-				CHECK(std::fabs(flipped[column][1] + normal[column][1]) < 1e-6f);
-				for (int row : { 0, 2, 3 })
-					CHECK(std::fabs(flipped[column][row] - normal[column][row]) < 1e-6f);
+				CHECK(std::fabs(vk[column][1] + gl[column][1]) < 1e-6f);
+				CHECK(std::fabs(vk[column][2] - (0.5f * gl[column][2] + 0.5f * gl[column][3])) < 1e-6f);
+				CHECK(std::fabs(vk[column][3] - gl[column][3]) < 1e-6f);
+			}
+		}
+
+		// 5b. 深度端点:相机前方 near/far 处的点,裁剪空间 z/w 必须落在
+		//     GL:[-1,1](近=-1,远=+1)与 Vulkan:[0,1](近=0,远=1)内,并且单调递增。
+		//     这是"3D 深度/面朝向异常"的回归锚点:只翻 Y 不补 Z 时,Vulkan 下的近平面
+		//     端点会是 -1(落在合法范围外),近处几何被裁掉、深度比较失真。
+		{
+			const float nearClip = camera.GetNearClip();
+			const float farClip = camera.GetFarClip();
+			const glm::vec3 origin = camera.GetPosition();
+			const glm::vec3 forward = camera.GetForward();
+			const auto depthAt = [&](const glm::mat4& viewProjection, float distance)
+			{
+				const glm::vec4 clip = viewProjection * glm::vec4(origin + forward * distance, 1.0f);
+				return clip.z / clip.w;
+			};
+
+			const glm::mat4 gl = camera.GetViewProjectionMatrix(false);
+			CHECK(std::fabs(depthAt(gl, nearClip) + 1.0f) < 1e-3f);
+			CHECK(std::fabs(depthAt(gl, farClip) - 1.0f) < 1e-3f);
+			CHECK(depthAt(gl, nearClip) < depthAt(gl, 0.5f * (nearClip + farClip)));
+			CHECK(depthAt(gl, 0.5f * (nearClip + farClip)) < depthAt(gl, farClip));
+
+			const glm::mat4 vk = camera.GetViewProjectionMatrix(true);
+			CHECK(std::fabs(depthAt(vk, nearClip) - 0.0f) < 1e-3f);
+			CHECK(std::fabs(depthAt(vk, farClip) - 1.0f) < 1e-3f);
+			CHECK(depthAt(vk, nearClip) < depthAt(vk, 0.5f * (nearClip + farClip)));
+			CHECK(depthAt(vk, 0.5f * (nearClip + farClip)) < depthAt(vk, farClip));
+
+			// 同一世界点在两种约定下的深度都在各自合法范围内(不会再出现"一半深度越界")。
+			for (float t = 0.0f; t <= 1.0f; t += 0.1f)
+			{
+				const float distance = nearClip + (farClip - nearClip) * t;
+				const float glDepth = depthAt(gl, distance);
+				const float vkDepth = depthAt(vk, distance);
+				CHECK(glDepth >= -1.0f - 1e-3f && glDepth <= 1.0f + 1e-3f);
+				CHECK(vkDepth >= -1e-3f && vkDepth <= 1.0f + 1e-3f);
 			}
 		}
 

@@ -5,6 +5,7 @@
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/Mesh.h"
+#include "World/Renderer/ProjectionConventions.h"
 #include "World/Scene/Components.h"
 #include "World/RHI/RhiTextureBridge.h"
 #include "World/Core/Thread/JobSystem.h"
@@ -227,15 +228,10 @@ namespace World
 			return;
 
 		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
-		// 相机投影按"NDC +Y 向上"编写(GL 约定);Vulkan 的 NDC +Y 向下,
-		// 翻转投影的 Y 行,场景在两种后端保持同一方向。
-		if (Renderer::GetBackendName() == "vulkan")
-		{
-			viewProjection[0][1] = -viewProjection[0][1];
-			viewProjection[1][1] = -viewProjection[1][1];
-			viewProjection[2][1] = -viewProjection[2][1];
-			viewProjection[3][1] = -viewProjection[3][1];
-		}
+		// 后端 NDC 适配(Y 方向 + 深度范围)统一走 ProjectionConventions.h:
+		// Vulkan 需要翻转 Y 行 **并且** 把 z∈[-1,1] 重映射到 [0,1],漏掉后者会让
+		// 近处几何被裁掉、深度比较失真(3D 深度/面朝向异常的根因)。
+		viewProjection = AdaptViewProjectionToBackend(viewProjection, Renderer::GetBackendName() == "vulkan");
 		const uint32_t slot = FrameSlot();
 		m_CameraBuffers[slot]->SetData(&viewProjection, sizeof(glm::mat4));
 

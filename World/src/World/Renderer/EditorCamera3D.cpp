@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Renderer/EditorCamera3D.h"
+#include "World/Renderer/ProjectionConventions.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -119,27 +120,20 @@ namespace World
 		return glm::lookAt(GetPosition(), m_Target, glm::vec3(0.0f, 1.0f, 0.0f));
 	}
 
-	glm::mat4 EditorCamera3D::GetProjectionMatrix(bool flipY) const
+	glm::mat4 EditorCamera3D::GetProjectionMatrix(bool vulkan) const
 	{
 		glm::mat4 projection = glm::perspective(glm::radians(m_FOV), m_Aspect, m_Near, m_Far);
-		if (flipY)
-		{
-			// 与 SceneRenderer 适配 Vulkan NDC +Y 向下的做法逐元素一致。
-			projection[0][1] = -projection[0][1];
-			projection[1][1] = -projection[1][1];
-			projection[2][1] = -projection[2][1];
-			projection[3][1] = -projection[3][1];
-		}
-		return projection;
+		// 与渲染路径共用同一份适配(Y 翻转 + 深度范围重映射),避免"渲染对了、拾取反了"。
+		return AdaptViewProjectionToBackend(projection, vulkan);
 	}
 
-	glm::mat4 EditorCamera3D::GetViewProjectionMatrix(bool flipY) const
+	glm::mat4 EditorCamera3D::GetViewProjectionMatrix(bool vulkan) const
 	{
-		return GetProjectionMatrix(flipY) * GetViewMatrix();
+		return GetProjectionMatrix(vulkan) * GetViewMatrix();
 	}
 
-	glm::mat4 EditorCamera3D::GetInverseViewProjectionMatrix(bool flipY) const
+	glm::mat4 EditorCamera3D::GetInverseViewProjectionMatrix(bool vulkan) const
 	{
-		return glm::inverse(GetViewProjectionMatrix(flipY));
+		return glm::inverse(GetViewProjectionMatrix(vulkan));
 	}
 }
