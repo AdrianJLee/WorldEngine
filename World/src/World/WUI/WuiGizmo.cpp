@@ -102,11 +102,20 @@ namespace World::Wui
 		if (center.x < -1e8f)
 			return false;
 
-		// 关键:gizmo 的轴是**世界轴** X/Y/Z,不是相机基向量(相机基会把箭头顶到屏幕上,
-		// 看着就"方向不对"且退化)。相机基只用于深度排序。
-		const glm::vec3 axisWorld[3] = {
+		// 轴取**物体自身坐标系**(Local):从已缓存的变换矩阵取列向量并归一化,
+		// 这样箭头方向与物体朝向一致(用户反馈"与世界轴不一致");同时避免依赖欧拉角单位约定。
+		glm::vec3 axisWorld[3] = {
 			{ 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }
 		};
+		{
+			const glm::mat3 basis = glm::mat3(transform.Transform);
+			for (int i = 0; i < 3; ++i)
+			{
+				const float length = glm::length(basis[i]);
+				if (length > 1e-5f)
+					axisWorld[i] = basis[i] / length;
+			}
+		}
 		const float unit = kAxisPixels * WorldPerPixel(camera, viewport);
 
 		// 轴向屏幕方向(退化轴 = 与视线平行,长度近 0 → 不画也不可拖)。
@@ -201,11 +210,14 @@ namespace World::Wui
 		// ---- 拖拽 ----
 		static bool dragging = false;
 		static int activeAxis = -1;
-		static glm::vec2 lastMouse {};
+		static glm::vec2 startMouse {};
+		// 拖拽期间锁存参考系:轴/中心会随物体移动,若每帧重新采样就会形成反馈回路 → 抖动。
+		static glm::vec2 startAxisScreen[3] = {};
+		static glm::vec2 startCenter {};
 		static glm::vec3 startLocation {};
 		static glm::vec3 startScale {};
 		static float startAngle = 0.0f;
-		static float accumulatedAngle = 0.0f;
+		static float startPointerAngle = 0.0f;
 
 		if (!dragging && ctx.Input().MouseClicked[0] && ctx.IsHovered(viewport))
 		{
@@ -234,55 +246,53 @@ namespace World::Wui
 			{
 				dragging = true;
 				activeAxis = picked;
-				lastMouse = mouse;
+				startMouse = mouse;
+				startCenter = center;
+				for (int i = 0; i < 3; ++i)
+					startAxisScreen[i] = axisScreen[i];
 				startLocation = transform.Location;
 				startScale = transform.Scale;
 				startAngle = transform.Rotation.z;
-				accumulatedAngle = 0.0f;
+				startPointerAngle = std::atan2(mouse.y - startCenter.y, mouse.x - startCenter.x);
 			}
 		}
 
 		if (dragging && ctx.Input().MouseDown[0])
 		{
-			const glm::vec2 delta = mouse - lastMouse;
+			// 一律相对"按下时"的锁存状态计算(绝对量),不再逐帧累加 → 不抖。
+			const glm::vec2 delta = mouse - startMouse;
 			const float worldPerPixel = WorldPerPixel(camera, viewport);
 
 			if (operation == GizmoOperation::Translate && activeAxis >= 0 && activeAxis < 3)
 			{
-				const float pixels = glm::dot(delta, axisScreen[activeAxis]);
+				const float pixels = glm::dot(delta, startAxisScreen[activeAxis]);
 				transform.Location = startLocation + axisWorld[activeAxis] * (pixels * worldPerPixel);
 			}
 			else if (operation == GizmoOperation::Scale)
 			{
 				const float amount = 1.0f + (delta.x - delta.y) * 0.006f;
 				if (activeAxis == 0)
-					transform.Scale.x = std::max(0.01f, transform.Scale.x * amount);
+					transform.Scale.x = std::max(0.01f, startScale.x * amount);
 				else if (activeAxis == 1)
-					transform.Scale.y = std::max(0.01f, transform.Scale.y * amount);
+					transform.Scale.y = std::max(0.01f, startScale.y * amount);
 				else if (activeAxis == 2)
-					transform.Scale.z = std::max(0.01f, transform.Scale.z * amount);
+					transform.Scale.z = std::max(0.01f, startScale.z * amount);
 				else
 					transform.Scale = glm::max(startScale * amount, glm::vec3(0.01f));
 			}
 			else if (operation == GizmoOperation::Rotate)
 			{
-				// 拖动角度 = 鼠标绕 gizmo 中心的极角变化(对三轴都直观),按选中轴累加到对应欧拉角。
-				const glm::vec2 fromCenter = mouse - center;
-				const glm::vec2 previous = lastMouse - center;
-				const float angleDelta = std::atan2(
-					fromCenter.x * previous.y - fromCenter.y * previous.x,
-					glm::dot(fromCenter, previous));
-				accumulatedAngle += angleDelta;
-				const float degrees = glm::degrees(accumulatedAngle);
+				// 拖动角度 = 鼠标绕(锁存的)gizmo 中心的极角差,按选中轴作用到对应欧拉角。
+				const float pointerAngle = std::atan2(mouse.y - startCenter.y, mouse.x - startCenter.x);
+				const float degrees = glm::degrees(pointerAngle - startPointerAngle);
 				if (activeAxis == 0)
 					transform.Rotation.x = startAngle + degrees;
 				else if (activeAxis == 1)
-					transform.Rotation.y = degrees;
+					transform.Rotation.y = startAngle + degrees;
 				else if (activeAxis == 2)
 					transform.Rotation.z = startAngle + degrees;
 			}
 
-			lastMouse = mouse;
 			transform.RecalculateTransform();
 		}
 
