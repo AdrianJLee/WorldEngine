@@ -44,6 +44,14 @@ namespace World
 				scenePath = manifest.StartScene;
 				World::Renderer::SetRequestedRenderer(manifest.Renderer);
 			}
+			// 启动解析结果:定位到哪份清单/内容根/启动场景 —— 排查"跑了但没画面"的第一步。
+			WLD_CORE_INFO("[runtime] manifest '{0}' contentRoot '{1}' startScene '{2}'",
+				manifestPath.string(), desc.ContentRoot.string(), scenePath);
+		}
+		else
+		{
+			WLD_CORE_WARN("[runtime] no project.we.yaml found from cwd '{0}'; falling back to '{1}'",
+				std::filesystem::current_path().string(), scenePath);
 		}
 
 		m_SceneRenderer = CreateRef<SceneRenderer>();
