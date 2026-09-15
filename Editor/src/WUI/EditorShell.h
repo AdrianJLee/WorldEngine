@@ -6,6 +6,7 @@
 #include "Panels/PropertiesPanel.h"
 #include "Panels/ReadoutPanels.h"
 #include "Panels/SavePanel.h"
+#include "Panels/LevelPanel.h"
 #include "Panels/ViewportPanel.h"
 #include "Panels/WidgetGalleryPanel.h"
 #include "Panels/WindowsPanel.h"
