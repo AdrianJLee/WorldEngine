@@ -103,6 +103,10 @@ namespace World
 		}
 		ScriptEngine::Shutdown();
 		JobSystem::Shutdown();
+		// GL 语义:窗口(=GL 上下文)一旦销毁,RHI 里所有 GL 资源析构都会在没有上下文的
+		// 情况下调用 glDelete*(访问违例,实测退出码 0xC0000005)。因此必须在 m_Window.reset()
+		// 之前释放渲染器/设备;Vulkan 侧同样受益(设备与呈现目标先于窗口释放)。
+		Renderer::Shutdown();
 		m_Window.reset();
 		s_Instance = nullptr;
 	}
