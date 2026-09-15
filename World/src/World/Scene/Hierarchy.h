@@ -15,6 +15,10 @@ namespace World
 	namespace Hierarchy
 	{
 		WLD_API bool SetParent(entt::registry& registry, entt::entity child, entt::entity parent);
+		// 设父并把 child 插入 parent 的子节点列表指定位置(同级重排用);index 会被夹到合法范围。
+		WLD_API bool InsertChild(entt::registry& registry, entt::entity child, entt::entity parent,
+			size_t index);
+		WLD_API int32_t GetChildIndex(const entt::registry& registry, entt::entity child);
 		WLD_API void ClearParent(entt::registry& registry, entt::entity child);
 		WLD_API bool IsAncestorOf(const entt::registry& registry, entt::entity ancestor, entt::entity node);
 		WLD_API uint32_t GetDepth(const entt::registry& registry, entt::entity node);

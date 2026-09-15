@@ -25,6 +25,8 @@ namespace World
 		// 拖拽设父的待提交落点(拖拽结束后统一提交)。
 		Entity m_PendingDropHandle;
 		uint32_t m_PendingDropSource = 0;
+		// 0=插到目标之前 1=成为目标子节点 2=插到目标之后
+		uint32_t m_PendingDropZone = 1;
 		glm::vec2 m_MenuPos {};
 		glm::vec2 m_BlankMenuPos {};
 	};

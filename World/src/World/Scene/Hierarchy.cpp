@@ -91,6 +91,46 @@ namespace World::Hierarchy
 		SetParent(registry, child, entt::null);
 	}
 
+	int32_t GetChildIndex(const entt::registry& registry, entt::entity child)
+	{
+		const auto* hierarchy = registry.try_get<HierarchyComponent>(child);
+		if (!hierarchy || hierarchy->Parent == entt::null)
+			return -1;
+		const auto* parent = registry.try_get<HierarchyComponent>(hierarchy->Parent);
+		if (!parent)
+			return -1;
+		for (size_t i = 0; i < parent->Children.size(); ++i)
+			if (parent->Children[i] == child)
+				return static_cast<int32_t>(i);
+		return -1;
+	}
+
+	bool InsertChild(entt::registry& registry, entt::entity child, entt::entity parent, size_t index)
+	{
+		if (!SetParent(registry, child, parent))
+			return false;
+		if (parent == entt::null)
+			return true;   // 根节点顺序由显示侧决定(见面板说明)
+
+		auto* parentHierarchy = registry.try_get<HierarchyComponent>(parent);
+		if (!parentHierarchy)
+			return true;
+		auto& children = parentHierarchy->Children;
+		const auto it = std::find(children.begin(), children.end(), child);
+		if (it == children.end())
+			return true;
+		const size_t current = static_cast<size_t>(std::distance(children.begin(), it));
+		if (index > children.size())
+			index = children.size();
+		if (current == index)
+			return true;
+		children.erase(it);
+		// 删除后目标位置可能前移一位。
+		const size_t insertAt = current < index ? index - 1 : index;
+		children.insert(children.begin() + static_cast<std::ptrdiff_t>(std::min(insertAt, children.size())), child);
+		return true;
+	}
+
 	uint32_t UpdateWorldTransforms(entt::registry& registry)
 	{
 		// 先收集根节点(无父或父已失效),再逐个先序遍历。

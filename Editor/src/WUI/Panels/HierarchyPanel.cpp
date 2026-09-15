@@ -59,9 +59,8 @@ namespace World
 			const auto* hierarchy = registry.try_get<HierarchyComponent>(handle);
 			if (!hierarchy)
 				return;
-			std::vector<entt::entity> children = hierarchy->Children;
-			std::sort(children.begin(), children.end(), byLabel);
-			for (const entt::entity child : children)
+			// 子节点顺序即 HierarchyComponent::Children 的顺序(同级重排会改它),不再按名字排序。
+			for (const entt::entity child : hierarchy->Children)
 				if (registry.valid(child))
 					visit(child, depth + 1);
 		};
@@ -145,7 +144,19 @@ namespace World
 					ctx.DropTarget(rowRect, "entity:");
 					m_PendingDropHandle = m_RowEntities[i];
 					m_PendingDropSource = source;
-					Wui::HighlightOutline(ctx, rowRect, theme.Accent, 2.0f, 2.0f);
+					// 三区落点:上 25% 插到目标之前、下 25% 插到之后、中间 50% 成为目标子节点。
+					const float local = (ctx.Input().MousePos.y - rowRect.Y) / std::max(1.0f, rowRect.H);
+					m_PendingDropZone = local < 0.25f ? 0 : (local > 0.75f ? 2 : 1);
+					if (m_PendingDropZone == 1)
+					{
+						Wui::HighlightOutline(ctx, rowRect, theme.Accent, 2.0f, 2.0f);
+					}
+					else
+					{
+						const float lineY = m_PendingDropZone == 0 ? rowRect.Y : rowRect.Y + rowRect.H - 2.0f;
+						ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+							{ rowRect.X, lineY, rowRect.W, 2.0f }, theme.Accent, 0.0f });
+					}
 				}
 			}
 		}
@@ -153,14 +164,29 @@ namespace World
 		{
 			const entt::entity child = static_cast<entt::entity>(m_PendingDropSource);
 			const entt::entity parent = m_PendingDropHandle;
-			if (scene->DeferStructuralChange([child, parent](Scene& s)
+			const uint32_t zone = m_PendingDropZone;
+			if (scene->DeferStructuralChange([child, parent, zone](Scene& s)
 				{
-					if (!Hierarchy::SetParent(s.GetRegistry(), child, parent))
-						WLD_CORE_WARN("Hierarchy: drag-drop rejected (cycle or invalid target)");
+					auto& registry = s.GetRegistry();
+					if (zone == 1)
+					{
+						if (!Hierarchy::SetParent(registry, child, parent))
+							WLD_CORE_WARN("Hierarchy: drag-drop rejected (cycle or invalid target)");
+						return;
+					}
+					// 同级重排:插到目标之前/之后;目标是根节点时退回为"挂到同一层"(即设为根)。
+					const auto* targetHierarchy = registry.try_get<HierarchyComponent>(parent);
+					const entt::entity newParent = targetHierarchy ? targetHierarchy->Parent : entt::null;
+					const int32_t targetIndex = Hierarchy::GetChildIndex(registry, parent);
+					const size_t insertIndex = targetIndex < 0 ? 0u
+						: static_cast<size_t>(targetIndex + (zone == 2 ? 1 : 0));
+					if (!Hierarchy::InsertChild(registry, child, newParent, insertIndex))
+						WLD_CORE_WARN("Hierarchy: reorder rejected (cycle or invalid target)");
 				}))
 				host.MarkDocumentDirty();
 			m_PendingDropHandle = Entity();
 			m_PendingDropSource = 0;
+			m_PendingDropZone = 1;
 		}
 
 		// ---- 右键菜单(瞬态 overlay,不参与布局)----
