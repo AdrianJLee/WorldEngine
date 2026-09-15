@@ -114,8 +114,12 @@ namespace World
 		// 当前 CreateUnitCube/CreateUnitPlane 的索引绕序在两个后端下未统一,开剔除会剔掉正对相机的面。
 		pipelineDesc.Cull = Rhi::CullMode::None;
 		pipelineDesc.Front = Rhi::FrontFace::CounterClockwise;
-		pipelineDesc.DepthStencil.DepthTest = true;
-		pipelineDesc.DepthStencil.DepthWrite = true;
+		// 深度默认关闭:启用后几何会被吞掉(已验证 CPU 侧矩阵/颜色/索引正确、深度清除值链路正确,
+		// 关闭深度时场景完全正确),根因尚未定位,见任务文档 D2 待办。
+		// WLD_3D_DEPTH=1 可强制打开,用于后续排查。
+		const bool depthEnabled = std::getenv("WLD_3D_DEPTH") != nullptr;
+		pipelineDesc.DepthStencil.DepthTest = depthEnabled;
+		pipelineDesc.DepthStencil.DepthWrite = depthEnabled;
 		pipelineDesc.DepthStencil.DepthCompare = Rhi::CompareOp::LessOrEqual;
 		state.Pipeline = Renderer::GetDevice()->CreatePipeline(pipelineDesc);
 	}
@@ -216,6 +220,19 @@ namespace World
 
 		state.Stats.DrawCalls++;
 		state.Stats.Triangles += cached->second.IndexCount / 3;
+		// 诊断(WLD_TRACE_3D=1,只打印前 12 次提交):确认对象矩阵/颜色/缓冲是否真的送到 GPU。
+		if (std::getenv("WLD_TRACE_3D"))
+		{
+			static int traced = 0;
+			if (traced < 12)
+			{
+				traced++;
+				WLD_CORE_INFO("[3d] submit#{0} slot={1} index={2} indices={3} model=[{4} {5} {6}] color=({7},{8},{9},{10})",
+					traced, slot, index, cached->second.IndexCount,
+					transform[3][0], transform[3][1], transform[3][2],
+					baseColor.r, baseColor.g, baseColor.b, baseColor.a);
+			}
+		}
 		return index;
 	}
 
