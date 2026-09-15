@@ -205,6 +205,27 @@ namespace World
 			ctx.DropTarget(rect, "file:");
 			m_PendingPrefabFile = dragPayload.substr(5);
 		}
+		// 文档化路径:拖拽的"释放帧"由 AcceptDrop 交付载荷(此时 IsDragActive 已变 false),
+		// 前置条件是悬停期间调用过 DropTarget 完成武装。这里同时兜住两条路径。
+		std::string acceptedPayload;
+		if (ctx.AcceptDrop(&acceptedPayload, "file:"))
+		{
+			WLD_CORE_INFO("[drop] hierarchy accepted payload '{0}'", acceptedPayload);
+			if (acceptedPayload.size() > 13 &&
+				acceptedPayload.compare(acceptedPayload.size() - 8, 8, ".wprefab") == 0)
+				m_PendingPrefabFile = acceptedPayload.substr(5);
+		}
+		if (dragging && dragPayload.rfind("file:", 0) == 0)
+		{
+			static uint64_t s_LastLoggedHash = 0;
+			const uint64_t hash = std::hash<std::string> {}(dragPayload);
+			if (hash != s_LastLoggedHash)
+			{
+				s_LastLoggedHash = hash;
+				WLD_CORE_INFO("[drop] hierarchy sees drag payload '{0}' (hovering panel={1})",
+					dragPayload, static_cast<int>(ctx.IsHovered(rect)));
+			}
+		}
 		if (!dragging && !m_PendingPrefabFile.empty())
 		{
 			// 内容浏览器载荷是"相对内容根"的路径:先按相对路径尝试,失败再用项目清单解析内容根。
