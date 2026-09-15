@@ -377,7 +377,7 @@ namespace World::Wui
 		else if (hovered)
 			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, HoverFill, 2.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Text,
-			{ m_Rect.X + 6, m_Rect.Y + (m_Rect.H - FontSize) * 0.5f, 0, 0 },
+			{ m_Rect.X + 6 + Indent, m_Rect.Y + (m_Rect.H - FontSize) * 0.5f, 0, 0 },
 			WuiColor { 0.82f, 0.84f, 0.87f, 1 }, 0, 1.0f, Text, FontSize, false });
 		if (ctx.IsClicked(m_Rect) && OnClick)
 			OnClick();

@@ -249,6 +249,8 @@ namespace World::Wui
 		bool Selected = false;
 		std::function<void()> OnClick;
 		float FontSize = 14;
+		// 文本左侧缩进(层级树等场景用),不影响选中/悬停底色范围。
+		float Indent = 0.0f;
 		WuiColor IdleFill { 0, 0, 0, 0 };
 		WuiColor HoverFill { 1, 1, 1, 0.06f };
 		WuiColor SelectedFill { 0.28f, 0.45f, 0.85f, 0.35f };

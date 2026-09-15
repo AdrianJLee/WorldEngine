@@ -98,10 +98,10 @@ namespace World
 			for (Entity entity : entities)
 			{
 				auto row = std::make_shared<Wui::WuiListRow>();
-				// 缩进用空格前缀:WuiListRow 暂无 Indent 字段,加字段属 UI 组件库改动,单独排期。
 				const size_t index = m_Rows.size();
 				const uint32_t depth = index < depths.size() ? depths[index] : 0;
-				row->Text = std::string(depth * 4, ' ') + labelOf(entity);
+				row->Indent = static_cast<float>(depth) * 14.0f;
+				row->Text = labelOf(entity);
 				row->OnClick = [&host, entity] { host.SetSelectedEntity(entity); };
 				content->Add(row, { 0, 1e30f, 0, 22, 0 });
 				m_Rows.push_back(row);
