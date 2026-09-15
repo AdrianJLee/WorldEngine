@@ -25,8 +25,10 @@ cbuffer CameraUniforms : register(b0)
     float4x4 u_ViewProjection;
 };
 
-// set 1, binding 0:每对象数据(Renderer3D 在提交时写入对应帧槽位的 UBO)。
-cbuffer ObjectUniforms : register(b0, space1)
+// set 1, binding 1:每对象数据(Renderer3D 在提交时写入对应帧槽位的 UBO)。
+// binding 必须非 0:OpenGL 后端的描述符绑定单元 = binding(忽略 set 索引),
+// 用 b0 会与 set0/binding0 的相机 UBO 撞同一个 GL uniform buffer unit → GL 下 3D 全黑。
+cbuffer ObjectUniforms : register(b1, space1)
 {
     float4x4 u_Model;
     float4 u_BaseColor;

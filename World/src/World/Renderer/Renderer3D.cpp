@@ -62,9 +62,11 @@ namespace World
 		WLD_PROFILE_FUNCTION();
 		State& state = GetState();
 
-		// set 1:每对象 UBO(u_Model / u_BaseColor),顶点与像素阶段都要用。
+		// set 1, binding 1:每对象 UBO(u_Model / u_BaseColor),顶点与像素阶段都要用。
+		// binding 不能是 0:OpenGL 后端的 UBO 绑定单元 = binding(忽略 set 索引),
+		// 用 0 会和 set0/binding0 的相机 UBO 抢同一个 unit,导致 GL 下 3D 全黑。
 		Rhi::DescriptorSetLayoutDesc objectLayoutDesc;
-		objectLayoutDesc.Bindings.push_back({ 0, Rhi::DescriptorType::UniformBuffer,
+		objectLayoutDesc.Bindings.push_back({ 1, Rhi::DescriptorType::UniformBuffer,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex) | Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
 		state.ObjectLayout = Renderer::GetDevice()->CreateDescriptorSetLayout(objectLayoutDesc);
 
@@ -210,7 +212,7 @@ namespace World
 		const ObjectUniforms uniforms { transform, baseColor };
 		state.ObjectUniformBuffers[slot][index]->SetData(&uniforms, sizeof(uniforms));
 		Rhi::DescriptorWrite write;
-		write.Binding = 0;
+		write.Binding = 1;
 		write.Type = Rhi::DescriptorType::UniformBuffer;
 		write.Buffer = state.ObjectUniformBuffers[slot][index];
 		state.ObjectSets[slot][index]->Update({ write });
