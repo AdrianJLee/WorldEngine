@@ -3,14 +3,12 @@
 #include "World/Core/Export.h"
 #include "World/Core/Timestep.h"
 #include "World/Gameplay/EventBus.h"
+// 行为接口按值接收 Entity,默认实现体内联在本头文件 —— 必须提供完整定义,
+// 否则任何"先包含 Behavior.h 再包含 Entity.h"的使用方都会编译失败(实测踩过)。
+#include "World/Scene/Entity.h"
 
 #include <cstdint>
 #include <string>
-
-namespace World
-{
-	class Entity;
-}
 
 namespace World::Gameplay
 {
@@ -31,13 +29,16 @@ namespace World::Gameplay
 	class WLD_API IBehavior
 	{
 	public:
-		virtual ~IBehavior() = default;
+		// 注意:实现放在 Behavior.cpp(而不是内联)——IBehavior 标了 WLD_API,
+		// 导出的类若把成员只写在头里,DLL 消费者(如 Game.dll)会缺符号而链接失败(实测)。
+		IBehavior();
+		virtual ~IBehavior();
 
 		virtual const BehaviorDesc& GetDesc() const = 0;
-		virtual void OnCreate(Entity self) { (void)self; }
-		virtual void OnUpdate(Entity self, Timestep dt) { (void)self; (void)dt; }
-		virtual void OnFixedUpdate(Entity self, Timestep dt) { (void)self; (void)dt; }
-		virtual void OnEvent(Entity self, const EventValue& event) { (void)self; (void)event; }
-		virtual void OnDestroy(Entity self) { (void)self; }
+		virtual void OnCreate(Entity self);
+		virtual void OnUpdate(Entity self, Timestep dt);
+		virtual void OnFixedUpdate(Entity self, Timestep dt);
+		virtual void OnEvent(Entity self, const EventValue& event);
+		virtual void OnDestroy(Entity self);
 	};
 }
