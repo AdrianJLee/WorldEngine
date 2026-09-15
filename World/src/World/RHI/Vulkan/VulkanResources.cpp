@@ -142,6 +142,13 @@ namespace World::Rhi::Vulkan
 			device.GetPhysicalDevice(), requirements.memoryTypeBits,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 		vkAllocateMemory(device.GetNativeDevice(), &allocInfo, nullptr, &m_Memory);
+		m_AllocationSize = requirements.size;
+		{
+			VkPhysicalDeviceMemoryProperties memoryProperties{};
+			vkGetPhysicalDeviceMemoryProperties(device.GetPhysicalDevice(), &memoryProperties);
+			m_Coherent = (memoryProperties.memoryTypes[allocInfo.memoryTypeIndex].propertyFlags &
+				VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
+		}
 		vkBindBufferMemory(device.GetNativeDevice(), m_Buffer, m_Memory, 0);
 		vkMapMemory(device.GetNativeDevice(), m_Memory, 0, desc.Size, 0, &m_Mapped);
 		if (desc.InitialData)
@@ -168,11 +175,25 @@ namespace World::Rhi::Vulkan
 		std::memcpy(static_cast<uint8_t*>(m_Mapped) + offset, data, size);
 		// 即使申请的是 HOST_COHERENT 内存,也显式刷新一次:批绘制后端每帧
 		// 反复写入同一段映射内存,避免 GPU 读到陈旧数据。
+		//
+		// 刷新范围必须满足 VkMappedMemoryRange 的对齐规则:offset 按 nonCoherentAtomSize 对齐,
+		// size 要么是原子大小的整数倍,要么让范围末尾正好落在映射末尾。
+		// (此前用 VK_WHOLE_SIZE:当缓冲大小不是 64 的整数倍、且映射末尾不等于内存对象末尾时
+		//  会触发 VUID-VkMappedMemoryRange-size-01389,例如 80 字节的对象 UBO。)
+		const uint64_t atomSize = std::max<uint64_t>(1, m_Device.GetLimits().NonCoherentAtomSize);
+		if (m_Coherent)
+			return;   // 一致性内存:写入对设备立即可见,无需刷新(也避免对齐规则限制)
+		const uint64_t alignedOffset = offset / atomSize * atomSize;
+		uint64_t rangeEnd = (offset + size + atomSize - 1) / atomSize * atomSize;
+		if (rangeEnd > m_AllocationSize)
+			rangeEnd = m_AllocationSize / atomSize * atomSize;   // 只能刷到原子对齐的边界
 		VkMappedMemoryRange range{};
 		range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
 		range.memory = m_Memory;
-		range.offset = 0;
-		range.size = VK_WHOLE_SIZE;
+		range.offset = alignedOffset;
+		range.size = rangeEnd > alignedOffset ? rangeEnd - alignedOffset : 0;
+		if (range.size == 0)
+			return;   // 没有可刷新的原子块
 		vkFlushMappedMemoryRanges(m_Device.GetNativeDevice(), 1, &range);
 	}
 

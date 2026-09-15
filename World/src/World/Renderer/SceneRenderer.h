@@ -4,6 +4,7 @@
 #include "World/Renderer/EditorCamera.h"
 #include "World/Renderer/Framebuffer.h"
 #include "World/Renderer/Renderer.h"
+#include "World/Renderer/Mesh.h"
 #include "World/Scene/Scene.h"
 
 #include <glm/glm.hpp>
@@ -64,5 +65,7 @@ namespace World
 		Scene* m_ActiveScene = nullptr;
 		SceneRendererOptions m_Options;
 		Ref<Framebuffer> m_FramebufferView;
+		// WLD_DEBUG_CUBE 用的调试网格(D2b:3D 通道双后端冒烟基线)。
+		Ref<Mesh> m_DebugCube;
 	};
 }

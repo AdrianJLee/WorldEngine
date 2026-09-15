@@ -346,7 +346,6 @@ namespace World
 			writes.push_back(write);
 		}
 		s_Data.TextureDescriptorSet->Update(writes);
-		s_CurrentCommandBuffer->BindDescriptorSet(s_Data.TextureDescriptorSet, 1);
 
 		auto flushBatch = [&](auto& batch)
 		{
@@ -358,6 +357,9 @@ namespace World
 			// vkCmdUpdateBuffer/vkCmdCopyBuffer;缓冲按帧槽位环形化,上一轮 GPU 引用已由帧栅栏保证结束。
 			batch.VertexBuffer->SetData(batch.Base, size, 0);
 			s_CurrentCommandBuffer->BindPipeline(batch.Pipeline);
+			// set 1 必须在绑定本管线之后立即绑定:同帧若先提交了 3D 对象(其 set 1 是对象 UBO 布局),
+			// 提前绑定的纹理集与当前管线布局不兼容(VUID-vkCmdBindDescriptorSets-pDescriptorSets-00358)。
+			s_CurrentCommandBuffer->BindDescriptorSet(s_Data.TextureDescriptorSet, 1);
 			s_CurrentCommandBuffer->BindVertexBuffer(0, batch.VertexBuffer);
 			s_CurrentCommandBuffer->BindIndexBuffer(batch.IndexBuffer);
 			s_CurrentCommandBuffer->DrawIndexed(batch.IndexCount);

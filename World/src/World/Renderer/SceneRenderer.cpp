@@ -3,6 +3,8 @@
 
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
+#include "World/Renderer/Renderer3D.h"
+#include "World/Renderer/Mesh.h"
 #include "World/RHI/RhiTextureBridge.h"
 #include "World/Core/Thread/JobSystem.h"
 
@@ -250,6 +252,25 @@ namespace World
 		// (VUID-vkCmdDrawIndexed-None-07832:动态裁剪未设置时状态未定义)。
 		m_CommandBuffers[slot]->SetScissor({ 0, 0, m_Width, m_Height });
 		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot]);
+
+		// 开发钩子:WLD_DEBUG_CUBE=1 时在同一渲染通道里提交一个 3D 立方体,
+		// 作为 3D 通道(Pipeline/深度/网格缓冲)在双后端下的冒烟基线(D2b)。
+		if (std::getenv("WLD_DEBUG_CUBE"))
+		{
+			if (!m_DebugCube)
+				m_DebugCube = Mesh::CreateUnitCube(1.0f);
+			if (m_DebugCube)
+			{
+				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
+				// 放在画面右上方,避免与 2D 精灵基线区域重叠(便于像素校验)。
+				const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.78f, 0.62f, 0.0f))
+					* glm::rotate(glm::mat4(1.0f), glm::radians(35.0f), glm::vec3(0.0f, 1.0f, 0.0f))
+					* glm::rotate(glm::mat4(1.0f), glm::radians(22.0f), glm::vec3(1.0f, 0.0f, 0.0f))
+					* glm::scale(glm::mat4(1.0f), glm::vec3(0.42f));
+				Renderer3D::Submit(m_DebugCube, model, { 1.0f, 0.55f, 0.12f, 1.0f });
+				Renderer3D::EndScene();
+			}
+		}
 
 		Renderer2D::StartBatch();
 		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffers[slot]);

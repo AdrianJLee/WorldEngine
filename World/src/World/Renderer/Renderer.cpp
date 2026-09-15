@@ -7,6 +7,7 @@
 #include "World/Renderer/VertexArray.h"
 #include "World/Renderer/Shader.h"
 #include "World/Renderer/Renderer2D.h"
+#include "World/Renderer/Renderer3D.h"
 #include "World/RHI/Vulkan/VulkanSwapchain.h"
 #include "World/RHI/Vulkan/VulkanResources.h"
 
@@ -191,6 +192,7 @@ namespace World
 
 		RenderCommand::Init();
 		Renderer2D::Init();
+		Renderer3D::Init();
 		WLD_CORE_INFO("RHI backend initialized: {0}", s_BackendName);
 	}
 
@@ -220,6 +222,7 @@ namespace World
 			}
 		}
 		Renderer2D::Shutdown();
+		Renderer3D::Shutdown();
 		s_GlobalDescriptorSetLayout = nullptr;
 		s_PresentPass = nullptr;
 		// 主窗口与独立窗口的呈现目标保留对象本身(宿主持有 PresentTarget*),

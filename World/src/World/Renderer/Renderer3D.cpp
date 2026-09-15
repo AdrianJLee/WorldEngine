@@ -1,0 +1,239 @@
+#include "wldpch.h"
+#include "World/Renderer/Renderer3D.h"
+
+#include "World/Renderer/Renderer.h"
+#include "World/Renderer/ShaderUtils.h"
+
+#include <cstring>
+#include <unordered_map>
+
+namespace World
+{
+	namespace
+	{
+		// 每帧对象上限:对象 UBO/描述符集按"帧槽位 × 序号"预建,超出即拒绝(D8 用实例化替换)。
+		constexpr uint32_t kObjectsPerFrame = 32;
+
+		struct ObjectUniforms
+		{
+			glm::mat4 Model { 1.0f };
+			glm::vec4 BaseColor { 1.0f };
+		};
+		static_assert(sizeof(ObjectUniforms) == 80, "ObjectUniforms must match Renderer3D_Solid.hlsl");
+
+		struct MeshGpu
+		{
+			Rhi::Handle<Rhi::Buffer> VertexBuffer;
+			Rhi::Handle<Rhi::Buffer> IndexBuffer;
+			uint32_t IndexCount = 0;
+		};
+
+		struct State
+		{
+			Rhi::Handle<Rhi::RenderPass> RenderPass;
+			Rhi::Handle<Rhi::Pipeline> Pipeline;
+			Rhi::Handle<Rhi::DescriptorSetLayout> ObjectLayout;
+			Rhi::Handle<Rhi::CommandBuffer> CommandBuffer;
+			Rhi::Handle<Rhi::Buffer> ObjectUniformBuffers[Renderer::FramesInFlight][kObjectsPerFrame];
+			Rhi::Handle<Rhi::DescriptorSet> ObjectSets[Renderer::FramesInFlight][kObjectsPerFrame];
+			std::unordered_map<const Mesh*, MeshGpu> MeshCache;
+			uint32_t ObjectIndex = 0;
+			Renderer3D::Statistics Stats;
+		};
+
+		State& GetState()
+		{
+			static State state;
+			return state;
+		}
+
+		Rhi::Handle<Rhi::Shader> CreateSolidShader(const char* path, const char* debugName)
+		{
+			Rhi::ShaderDesc desc;
+			desc.DebugName = debugName;
+			desc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Vertex, path, "VSMain", "vs_6_0"));
+			desc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Fragment, path, "PSMain", "ps_6_0"));
+			return Renderer::GetDevice()->CreateShader(desc);
+		}
+	}
+
+	void Renderer3D::Init()
+	{
+		WLD_PROFILE_FUNCTION();
+		State& state = GetState();
+
+		// set 1:每对象 UBO(u_Model / u_BaseColor),顶点与像素阶段都要用。
+		Rhi::DescriptorSetLayoutDesc objectLayoutDesc;
+		objectLayoutDesc.Bindings.push_back({ 0, Rhi::DescriptorType::UniformBuffer,
+			Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex) | Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+		state.ObjectLayout = Renderer::GetDevice()->CreateDescriptorSetLayout(objectLayoutDesc);
+
+		// 与 SceneRenderer 目标结构一致的兼容渲染通道(颜色 + 实体 ID + 深度)。
+		Rhi::RenderPassDesc passDesc;
+		Rhi::RenderPassAttachment color;
+		color.Format = Rhi::Format::R8G8B8A8_UNORM;
+		color.Samples = Rhi::SampleCount::Count1;
+		color.Load = Rhi::LoadOp::Clear;
+		color.Store = Rhi::StoreOp::Store;
+		color.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		color.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		Rhi::RenderPassAttachment entityId;
+		entityId.Format = Rhi::Format::R32_SINT;
+		entityId.Samples = Rhi::SampleCount::Count1;
+		entityId.Load = Rhi::LoadOp::Clear;
+		entityId.Store = Rhi::StoreOp::Store;
+		entityId.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		entityId.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		Rhi::RenderPassAttachment depth;
+		depth.Format = Rhi::Format::D24_UNORM_S8_UINT;
+		depth.Samples = Rhi::SampleCount::Count1;
+		depth.Load = Rhi::LoadOp::Clear;
+		depth.Store = Rhi::StoreOp::Store;
+		depth.InitialLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
+		depth.FinalLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
+		passDesc.Attachments = { color, entityId, depth };
+		Rhi::SubpassDesc subpass;
+		subpass.ColorAttachments = {
+			{ 0, Rhi::AttachmentLayout::ColorAttachment },
+			{ 1, Rhi::AttachmentLayout::ColorAttachment },
+		};
+		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
+		passDesc.Subpasses = { subpass };
+		state.RenderPass = Renderer::GetDevice()->CreateRenderPass(passDesc);
+
+		const MeshVertexLayout meshLayout = Mesh::MakeStandardLayout();
+		Rhi::PipelineDesc pipelineDesc;
+		pipelineDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Solid.hlsl", "Renderer3D-Solid");
+		pipelineDesc.RenderPass = state.RenderPass;
+		// set 0 = 全局相机(SceneRenderer 绑定),set 1 = 每对象数据。
+		pipelineDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), state.ObjectLayout };
+		pipelineDesc.VertexBindings = meshLayout.Bindings;
+		pipelineDesc.VertexAttributes = meshLayout.Attributes;
+		pipelineDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
+		pipelineDesc.Cull = Rhi::CullMode::Back;
+		pipelineDesc.Front = Rhi::FrontFace::CounterClockwise;
+		pipelineDesc.DepthStencil.DepthTest = true;
+		pipelineDesc.DepthStencil.DepthWrite = true;
+		pipelineDesc.DepthStencil.DepthCompare = Rhi::CompareOp::LessOrEqual;
+		state.Pipeline = Renderer::GetDevice()->CreatePipeline(pipelineDesc);
+	}
+
+	void Renderer3D::Shutdown()
+	{
+		State& state = GetState();
+		for (auto& slot : state.ObjectUniformBuffers)
+			for (Rhi::Handle<Rhi::Buffer>& buffer : slot)
+				buffer = nullptr;
+		for (auto& slot : state.ObjectSets)
+			for (Rhi::Handle<Rhi::DescriptorSet>& set : slot)
+				set = nullptr;
+		state.MeshCache.clear();
+		state.Pipeline = nullptr;
+		state.RenderPass = nullptr;
+		state.ObjectLayout = nullptr;
+		state.CommandBuffer = nullptr;
+		state.ObjectIndex = 0;
+		state.Stats = {};
+	}
+
+	void Renderer3D::EnsureMeshBuffers(const Ref<Mesh>& mesh)
+	{
+		State& state = GetState();
+		if (state.MeshCache.find(mesh.get()) != state.MeshCache.end())
+			return;
+
+		const MeshDesc& desc = mesh->GetDesc();
+		Rhi::BufferDesc vertexDesc;
+		vertexDesc.Size = desc.VertexData.size();
+		vertexDesc.Usage = Rhi::BufferUsageVertex;
+		vertexDesc.InitialData = desc.VertexData.data();
+		vertexDesc.DebugName = desc.DebugName + ".VB";
+		Rhi::BufferDesc indexDesc;
+		indexDesc.Size = desc.Indices.size() * sizeof(uint32_t);
+		indexDesc.Usage = Rhi::BufferUsageIndex;
+		indexDesc.InitialData = desc.Indices.data();
+		indexDesc.DebugName = desc.DebugName + ".IB";
+
+		MeshGpu gpu;
+		gpu.VertexBuffer = Renderer::GetDevice()->CreateBuffer(vertexDesc);
+		gpu.IndexBuffer = Renderer::GetDevice()->CreateBuffer(indexDesc);
+		gpu.IndexCount = mesh->GetIndexCount();
+		state.MeshCache.emplace(mesh.get(), gpu);
+	}
+
+	void Renderer3D::BeginScene(const glm::mat4&, const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer)
+	{
+		// viewProjection 由全局相机 UBO 提供(SceneRenderer 已绑定 set 0),这里只需要命令缓冲与序号复位。
+		State& state = GetState();
+		state.CommandBuffer = commandBuffer;
+		state.ObjectIndex = 0;
+	}
+
+	uint32_t Renderer3D::Submit(const Ref<Mesh>& mesh, const glm::mat4& transform, const glm::vec4& baseColor)
+	{
+		State& state = GetState();
+		if (!mesh || !state.CommandBuffer || !state.Pipeline)
+			return UINT32_MAX;
+		if (state.ObjectIndex >= kObjectsPerFrame)
+			return UINT32_MAX;
+
+		EnsureMeshBuffers(mesh);
+		const auto cached = state.MeshCache.find(mesh.get());
+		if (cached == state.MeshCache.end() || !cached->second.VertexBuffer)
+			return UINT32_MAX;
+
+		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		const uint32_t index = state.ObjectIndex++;
+
+		// 每对象 UBO 独立分配:提交期写入不会与同帧其它对象互相覆盖。
+		if (!state.ObjectUniformBuffers[slot][index])
+		{
+			Rhi::BufferDesc uniformDesc;
+			uniformDesc.Size = sizeof(ObjectUniforms);
+			uniformDesc.Usage = Rhi::BufferUsageUniform;
+			uniformDesc.Memory = Rhi::MemoryHint::HostVisible;
+			uniformDesc.DebugName = "Renderer3D.ObjectUBO";
+			state.ObjectUniformBuffers[slot][index] = Renderer::GetDevice()->CreateBuffer(uniformDesc);
+		}
+		if (!state.ObjectSets[slot][index])
+			state.ObjectSets[slot][index] = Renderer::GetDevice()->CreateDescriptorSet(state.ObjectLayout);
+
+		const ObjectUniforms uniforms { transform, baseColor };
+		state.ObjectUniformBuffers[slot][index]->SetData(&uniforms, sizeof(uniforms));
+		Rhi::DescriptorWrite write;
+		write.Binding = 0;
+		write.Type = Rhi::DescriptorType::UniformBuffer;
+		write.Buffer = state.ObjectUniformBuffers[slot][index];
+		state.ObjectSets[slot][index]->Update({ write });
+
+		state.CommandBuffer->BindPipeline(state.Pipeline);
+		state.CommandBuffer->BindDescriptorSet(state.ObjectSets[slot][index], 1);
+		state.CommandBuffer->BindVertexBuffer(0, cached->second.VertexBuffer);
+		state.CommandBuffer->BindIndexBuffer(cached->second.IndexBuffer);
+		state.CommandBuffer->DrawIndexed(cached->second.IndexCount);
+
+		state.Stats.DrawCalls++;
+		state.Stats.Triangles += cached->second.IndexCount / 3;
+		return index;
+	}
+
+	void Renderer3D::EndScene()
+	{
+		GetState().CommandBuffer = nullptr;
+	}
+
+	Renderer3D::Statistics Renderer3D::GetStats()
+	{
+		return GetState().Stats;
+	}
+
+	void Renderer3D::ResetStats()
+	{
+		GetState().Stats = {};
+	}
+
+	uint32_t Renderer3D::GetObjectsPerFrameLimit()
+	{
+		return kObjectsPerFrame;
+	}
+}

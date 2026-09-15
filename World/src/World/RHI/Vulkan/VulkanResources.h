@@ -33,6 +33,11 @@ namespace World::Rhi::Vulkan
 		VkBuffer m_Buffer = VK_NULL_HANDLE;
 		VkDeviceMemory m_Memory = VK_NULL_HANDLE;
 		void* m_Mapped = nullptr;
+		// 分配信息:SetData 的刷新范围必须满足 VkMappedMemoryRange 对齐规则;
+		// HOST_COHERENT 内存按规范无需刷新(此前统一刷 VK_WHOLE_SIZE 会触发
+		// VUID-VkMappedMemoryRange-size-01389/01390,例如 80 字节的对象 UBO)。
+		uint64_t m_AllocationSize = 0;
+		bool m_Coherent = true;
 	};
 
 	class VulkanTexture final : public Texture
