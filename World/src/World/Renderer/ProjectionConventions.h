@@ -30,4 +30,21 @@ namespace World
 			adapted[column][2] = 0.5f * adapted[column][2] + 0.5f * adapted[column][3];
 		return adapted;
 	}
+
+	// 渲染到**离屏纹理**时用这个:Vulkan 只补深度范围(z' = 0.5z + 0.5w),**不翻 Y**。
+	//
+	// 为什么必须区分:Y 翻转是为了适配"呈现目标"的 NDC(Vulkan 的 +Y 指向屏幕下方);
+	// 而离屏纹理的朝向由**采样方**统一决定 —— 引擎里场景纹理固定由 WUI 以 UV {0,1,1,-1}
+	// 贴到视口上,两种后端共用同一次翻转。若离屏再翻一次,Vulkan 就会上下颠倒
+	// (实测:Vulkan 相机视角整体镜像,而 OpenGL 正常)。
+	inline glm::mat4 AdaptViewProjectionForOffscreen(const glm::mat4& viewProjection, bool vulkan)
+	{
+		if (!vulkan)
+			return viewProjection;
+
+		glm::mat4 adapted = viewProjection;
+		for (int column = 0; column < 4; ++column)
+			adapted[column][2] = 0.5f * adapted[column][2] + 0.5f * adapted[column][3];
+		return adapted;
+	}
 }

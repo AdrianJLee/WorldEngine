@@ -232,10 +232,9 @@ namespace World
 		// 编辑/运行期都会改 Transform:每帧先重算层级世界矩阵,子实体才会跟随父实体
 		// (此前只有序列化/Prefab 路径求解,见 Hierarchy.h)。
 		Hierarchy::UpdateWorldTransforms(m_ActiveScene->m_Registry);
-		// 后端 NDC 适配(Y 方向 + 深度范围)统一走 ProjectionConventions.h:
-		// Vulkan 需要翻转 Y 行 **并且** 把 z∈[-1,1] 重映射到 [0,1],漏掉后者会让
-		// 近处几何被裁掉、深度比较失真(3D 深度/面朝向异常的根因)。
-		viewProjection = AdaptViewProjectionToBackend(viewProjection, Renderer::GetBackendName() == "vulkan");
+		// 后端适配:场景渲染到**离屏纹理**(WUI 用固定 UV 贴到视口),
+		// 因此 Vulkan 只补深度范围、**不翻 Y**(翻了会在视口里上下颠倒,实测)。
+		viewProjection = AdaptViewProjectionForOffscreen(viewProjection, Renderer::GetBackendName() == "vulkan");
 		const uint32_t slot = FrameSlot();
 		m_CameraBuffers[slot]->SetData(&viewProjection, sizeof(glm::mat4));
 
