@@ -230,6 +230,33 @@ namespace World
 		m_Editor.ToggleViewportCamera3D();
 	}
 
+	Wui::GizmoCamera EditorShell::GetGizmoCamera() const
+	{
+		// gizmo 只依赖"投影 + 相机基向量 + 距离/FOV":2D 与 3D 视口各取一台相机。
+		Wui::GizmoCamera camera;
+		if (m_Editor.IsViewportCamera3D())
+		{
+			EditorCamera3D& source = m_Editor.GetEditorCamera3D();
+			camera.ViewProjection = source.GetViewProjectionMatrix(/*vulkan=*/false);
+			camera.Right = source.GetRight();
+			camera.Up = source.GetUp();
+			camera.Forward = source.GetForward();
+			camera.Distance = source.GetDistance();
+			camera.FovDegrees = source.GetFOV();
+		}
+		else
+		{
+			EditorCamera& source = m_Editor.GetEditorCamera();
+			camera.ViewProjection = source.GetViewProjection();
+			camera.Right = source.GetRightDirection();
+			camera.Up = source.GetUpDirection();
+			camera.Forward = source.GetForwardDirection();
+			camera.Distance = source.GetDistance();
+			camera.FovDegrees = source.GetFov();
+		}
+		return camera;
+	}
+
 	void EditorShell::ReleaseIndependentWindows()
 	{
 		// 退出时先显式销毁独立窗口:它们的 Vulkan 交换链/OS 窗口必须在

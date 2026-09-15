@@ -91,7 +91,7 @@ namespace World
 		{
 			auto& transform = selected.GetComponent<TransformComponent>();
 			const TransformComponent before = transform;
-			const bool nowUsing = Wui::ManipulateGizmo(m_Host.GetEditorCamera(),
+			const bool nowUsing = Wui::ManipulateGizmo(m_Host.GetGizmoCamera(),
 				m_Host.GetGizmoOperation(), transform, sceneRect, ctx,
 				/*allowManipulation=*/!m_Host.IsReadOnlyMode());
 			if (!m_GizmoActive && nowUsing)

@@ -1,3 +1,6 @@
+// D7-1b:真 3D gizmo(ImGuizmo 式)——屏幕空间恒定尺寸、深度排序、射线约束拖动。
+// 绘制走 WuiDrawKind::Quad(任意四边形):斜线/箭头/圆环都能正确成形,
+// 不再用轴对齐矩形近似(那样斜轴会画成斜边包围盒)。
 #include "wldpch.h"
 #include "WuiGizmo.h"
 
@@ -5,104 +8,90 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 namespace World::Wui
 {
 	namespace
 	{
-		constexpr float kAxisLengthPixels = 62.0f;   // 轴在屏幕上恒定长度(与世界距离无关)
-		constexpr float kAxisThickness = 3.0f;
-		constexpr float kHeadSize = 9.0f;
-		constexpr float kCenterSize = 13.0f;
+		constexpr float kAxisPixels = 64.0f;    // 轴长(屏幕像素)
+		constexpr float kLineThickness = 3.5f;
+		constexpr float kArrowSize = 12.0f;
+		constexpr float kBoxSize = 11.0f;
+		constexpr float kRingPixels = 52.0f;    // 旋转环半径(屏幕像素)
+		constexpr int kRingSegments = 40;
+		constexpr float kPickTolerance = 8.0f;  // 命中容差(像素)
 
-		struct AxisVisual
-		{
-			glm::vec2 Direction { 0.0f, 0.0f };   // 屏幕方向(已归一化;退化时为零)
-			WuiColor Color;
+		const WuiColor kAxisColors[3] = {
+			{ 0.92f, 0.30f, 0.30f, 1.0f },   // X 红
+			{ 0.38f, 0.88f, 0.42f, 1.0f },   // Y 绿
+			{ 0.36f, 0.58f, 0.96f, 1.0f },   // Z 蓝
 		};
+		const WuiColor kHighlight { 1.0f, 0.95f, 0.35f, 1.0f };
 
-		glm::vec2 WorldToScreen(const EditorCamera& camera, const glm::vec3& world, const WuiRect& viewport)
+		glm::vec2 WorldToScreen(const GizmoCamera& camera, const glm::vec3& world, const WuiRect& viewport)
 		{
-			const glm::vec4 clip = camera.GetViewProjection() * glm::vec4(world, 1.0f);
-			if (clip.w <= 0.0f)
+			const glm::vec4 clip = camera.ViewProjection * glm::vec4(world, 1.0f);
+			if (clip.w <= 1e-6f)
 				return { -1e9f, -1e9f };
 			const glm::vec3 ndc = glm::vec3(clip) / clip.w;
 			return { viewport.X + (ndc.x + 1.0f) * 0.5f * viewport.W,
 				viewport.Y + (1.0f - ndc.y) * 0.5f * viewport.H };
 		}
 
-		// 世界单位长度 → 屏幕像素:用相机距离与视口高度估算,保证 gizmo 大小稳定。
-		float WorldUnitToPixels(const EditorCamera& camera, const WuiRect& viewport)
+		float WorldPerPixel(const GizmoCamera& camera, const WuiRect& viewport)
 		{
-			const float worldPerPixel = 2.0f * camera.GetDistance() * glm::tan(glm::radians(camera.GetFov()) * 0.5f)
-				/ std::max(1.0f, viewport.H);
-			return kAxisLengthPixels * worldPerPixel;
+			const float height = std::max(1.0f, viewport.H);
+			return 2.0f * camera.Distance * std::tan(glm::radians(camera.FovDegrees) * 0.5f) / height;
 		}
 
-		// 把三个世界轴投影成屏幕方向(2D 场景里 Z 轴会退化成零长度 → 自动不画)。
-		std::array<AxisVisual, 3> BuildAxes(const EditorCamera& camera, const glm::vec3& origin,
-			const WuiRect& viewport)
+		void PushQuad(WuiContext& ctx, const glm::vec2& a, const glm::vec2& b, const glm::vec2& c,
+			const glm::vec2& d, const WuiColor& color)
 		{
-			const float unit = WorldUnitToPixels(camera, viewport);
-			const glm::vec3 directions[3] = {
-				camera.GetRightDirection(), camera.GetUpDirection(), camera.GetForwardDirection()
-			};
-			const WuiColor colors[3] = {
-				{ 0.90f, 0.28f, 0.28f, 1.0f },   // X 红
-				{ 0.35f, 0.85f, 0.40f, 1.0f },   // Y 绿
-				{ 0.35f, 0.55f, 0.95f, 1.0f },   // Z 蓝
-			};
-
-			const glm::vec2 center = WorldToScreen(camera, origin, viewport);
-			std::array<AxisVisual, 3> axes;
-			for (int i = 0; i < 3; ++i)
-			{
-				axes[i].Color = colors[i];
-				const glm::vec2 tip = WorldToScreen(camera, origin + directions[i] * unit, viewport);
-				const glm::vec2 delta = tip - center;
-				const float length = glm::length(delta);
-				if (length < 1.0f)
-					continue;   // 该轴与视线平行(2D 场景的 Z):退化,不画
-				axes[i].Direction = delta / length;
-			}
-			return axes;
+			WuiDrawCommand command;
+			command.Kind = WuiDrawKind::Quad;
+			command.Color = color;
+			command.Vertices = { a, b, c, d };
+			ctx.Commands().push_back(std::move(command));
 		}
 
-		void DrawLine(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, const WuiColor& color, float thickness)
+		// 任意方向线段 → 四边形。
+		void PushLine(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to,
+			const WuiColor& color, float thickness)
 		{
 			const glm::vec2 delta = to - from;
 			const float length = glm::length(delta);
 			if (length < 0.5f)
 				return;
-			const glm::vec2 dir = delta / length;
-			const glm::vec2 normal { -dir.y, dir.x };
-			// 用一条细长的实心矩形近似线段(命令只有矩形/文字/图片三种)。
-			ctx.Commands().push_back({ WuiDrawKind::Rect,
-				{ from.x - normal.x * thickness * 0.5f, from.y - normal.y * thickness * 0.5f,
-					std::fabs(delta.x) + thickness, std::fabs(delta.y) + thickness },
-				color, 0.0f });
-			(void)dir; (void)normal;
+			const glm::vec2 normal { -delta.y / length, delta.x / length };
+			const glm::vec2 offset = normal * (thickness * 0.5f);
+			PushQuad(ctx, from + offset, to + offset, to - offset, from - offset, color);
 		}
 
-		// 轴端点:平移画箭头(用方块近似),缩放画小方块,旋转不用。
-		void DrawHandle(WuiContext& ctx, const glm::vec2& center, const glm::vec2& direction,
-			const WuiColor& color, float size, bool filled)
+		// 箭头:线 + 三角(用两个顶点重合的四边形表示)。
+		void PushArrow(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, const WuiColor& color)
 		{
-			const WuiRect handle { center.x + direction.x * kAxisLengthPixels - size * 0.5f,
-				center.y + direction.y * kAxisLengthPixels - size * 0.5f, size, size };
-			if (filled)
-			{
-				ctx.Commands().push_back({ WuiDrawKind::Rect, handle, color, 0.0f });
-				ctx.Commands().push_back({ WuiDrawKind::RectOutline, handle, { 1, 1, 1, 0.75f }, 0.0f, 1.0f });
-			}
-			else
-			{
-				ctx.Commands().push_back({ WuiDrawKind::RectOutline, handle, color, 0.0f, 1.6f });
-			}
+			const glm::vec2 delta = to - from;
+			const float length = glm::length(delta);
+			if (length < 1.0f)
+				return;
+			const glm::vec2 dir = delta / length;
+			const glm::vec2 normal { -dir.y, dir.x };
+			const glm::vec2 base = to - dir * kArrowSize;
+			PushLine(ctx, from, base, color, kLineThickness);
+			PushQuad(ctx, to, base + normal * (kArrowSize * 0.45f), base + normal * (kArrowSize * 0.45f),
+				base - normal * (kArrowSize * 0.45f), color);
+		}
+
+		void PushBox(WuiContext& ctx, const glm::vec2& center, const WuiColor& color, float size)
+		{
+			const glm::vec2 half { size * 0.5f, size * 0.5f };
+			PushQuad(ctx, center - half, center + glm::vec2 { half.x, -half.y },
+				center + half, center + glm::vec2 { -half.x, half.y }, color);
 		}
 	}
 
-	bool ManipulateGizmo(const EditorCamera& camera, GizmoOperation operation,
+	bool ManipulateGizmo(const GizmoCamera& camera, GizmoOperation operation,
 		TransformComponent& transform, const WuiRect& viewport, WuiContext& ctx,
 		bool allowManipulation)
 	{
@@ -111,96 +100,157 @@ namespace World::Wui
 
 		const glm::vec2 center = WorldToScreen(camera, transform.Location, viewport);
 		if (center.x < -1e8f)
-			return false;   // 实体在相机后面
-		const std::array<AxisVisual, 3> axes = BuildAxes(camera, transform.Location, viewport);
+			return false;
 
-		// ---- 绘制 ----
-		const float centerHalf = kCenterSize * 0.5f;
-		const WuiRect centerHandle { center.x - centerHalf, center.y - centerHalf, kCenterSize, kCenterSize };
-		ctx.Commands().push_back({ WuiDrawKind::Rect, centerHandle,
-			operation == GizmoOperation::Scale ? WuiColor { 0.55f, 0.9f, 0.5f, 1.0f }
-			: (operation == GizmoOperation::Rotate ? WuiColor { 0.35f, 0.75f, 0.95f, 1.0f }
-				: WuiColor { 0.95f, 0.62f, 0.2f, 1.0f }), 0.0f });
-		ctx.Commands().push_back({ WuiDrawKind::RectOutline, centerHandle, { 1, 1, 1, 0.8f }, 0.0f, 1.0f });
+		const glm::vec3 axisWorld[3] = { camera.Right, camera.Up, camera.Forward };
+		const float unit = kAxisPixels * WorldPerPixel(camera, viewport);
 
-		for (const AxisVisual& axis : axes)
+		// 轴向屏幕方向(退化轴 = 与视线平行,长度近 0 → 不画也不可拖)。
+		glm::vec2 axisScreen[3] = {};
+		bool axisValid[3] = { false, false, false };
+		for (int i = 0; i < 3; ++i)
 		{
-			if (axis.Direction == glm::vec2 { 0.0f, 0.0f })
+			const glm::vec2 tip = WorldToScreen(camera, transform.Location + axisWorld[i] * unit, viewport);
+			const glm::vec2 delta = tip - center;
+			if (glm::length(delta) < 6.0f)
 				continue;
-			DrawLine(ctx, center, center + axis.Direction * kAxisLengthPixels, axis.Color, kAxisThickness);
+			axisScreen[i] = glm::normalize(delta);
+			axisValid[i] = true;
+		}
+
+		// 旋转环:每个轴一个圆,投影成椭圆;半径用屏幕像素估值(与轴长一致)。
+		auto ringRadiusFor = [&](int axisIndex)
+		{
+			const glm::vec3& normal = axisWorld[axisIndex];
+			const glm::vec3 tangentA = glm::normalize(glm::cross(normal, camera.Up + glm::vec3 { 0.001f, 0.0f, 0.0f }));
+			const glm::vec3 tangentB = glm::cross(normal, tangentA);
+			const float worldRadius = kRingPixels * WorldPerPixel(camera, viewport);
+			std::array<glm::vec2, kRingSegments> points;
+			for (int i = 0; i < kRingSegments; ++i)
+			{
+				const float angle = glm::two_pi<float>() * static_cast<float>(i) / kRingSegments;
+				points[i] = WorldToScreen(camera,
+					transform.Location + (tangentA * std::cos(angle) + tangentB * std::sin(angle)) * worldRadius,
+					viewport);
+			}
+			return points;
+		};
+
+		// ---- 命中判定(先算,再决定高亮与拖拽)----
+		const glm::vec2 mouse = ctx.Input().MousePos;
+		int hoveredAxis = -1;
+		if (ctx.IsHovered(viewport))
+		{
+			for (int i = 0; i < 3; ++i)
+			{
+				if (!axisValid[i])
+					continue;
+				const glm::vec2 toMouse = mouse - center;
+				const float along = glm::dot(toMouse, axisScreen[i]);
+				if (along < 10.0f || along > kAxisPixels + 12.0f)
+					continue;
+				const glm::vec2 closest = center + axisScreen[i] * along;
+				if (glm::length(mouse - closest) <= kPickTolerance)
+				{
+					hoveredAxis = i;
+					break;
+				}
+			}
+		}
+
+		// ---- 绘制(按轴与相机朝向排序:远的先画)----
+		int order[3] = { 0, 1, 2 };
+		std::sort(order, order + 3, [&](int a, int b)
+		{
+			return glm::dot(axisWorld[a], camera.Forward) > glm::dot(axisWorld[b], camera.Forward);
+		});
+
+		const bool centralHandle = operation == GizmoOperation::Scale || operation == GizmoOperation::Rotate;
+		if (centralHandle)
+			PushBox(ctx, center, hoveredAxis < 0 ? kAxisColors[1] : kHighlight, kArrowSize);
+
+		for (const int i : order)
+		{
+			const WuiColor color = (hoveredAxis == i) ? kHighlight : kAxisColors[i];
+			if (operation == GizmoOperation::Rotate)
+			{
+				const auto ring = ringRadiusFor(i);
+				for (int s = 0; s < kRingSegments; ++s)
+					PushLine(ctx, ring[s], ring[(s + 1) % kRingSegments], color, 2.5f);
+				continue;
+			}
+			if (!axisValid[i])
+				continue;
+			const glm::vec2 tip = center + axisScreen[i] * kAxisPixels;
 			if (operation == GizmoOperation::Translate)
-				DrawHandle(ctx, center, axis.Direction, axis.Color, kHeadSize, true);
-			else if (operation == GizmoOperation::Scale)
-				DrawHandle(ctx, center, axis.Direction, axis.Color, kHeadSize * 0.8f, true);
+				PushArrow(ctx, center, tip, color);
+			else
+			{
+				PushLine(ctx, center, tip, color, kLineThickness);
+				PushBox(ctx, tip, color, kBoxSize);
+			}
 		}
 
 		if (!allowManipulation)
-			return false;   // Play/Simulate:只读查看,画完就结束
+			return false;   // Play/Simulate:只读查看
 
-		// ---- 交互:轴约束拖拽(平移/缩放按轴,旋转按中心方块) ----
+		// ---- 拖拽 ----
 		static bool dragging = false;
 		static int activeAxis = -1;
 		static glm::vec2 lastMouse {};
 		static glm::vec3 startLocation {};
 		static glm::vec3 startScale {};
-		static float startRotation = 0.0f;
+		static float startAngle = 0.0f;
+		static float accumulatedAngle = 0.0f;
 
-		auto hoveredAxis = [&]() -> int
+		if (!dragging && ctx.Input().MouseClicked[0] && ctx.IsHovered(viewport))
 		{
-			const glm::vec2 mouse = ctx.Input().MousePos;
-			for (int i = 0; i < 3; ++i)
+			int picked = hoveredAxis;
+			if (picked < 0 && operation == GizmoOperation::Rotate)
 			{
-				if (axes[i].Direction == glm::vec2 { 0.0f, 0.0f })
-					continue;
-				const glm::vec2 toMouse = mouse - center;
-				const float along = glm::dot(toMouse, axes[i].Direction);
-				if (along < 8.0f || along > kAxisLengthPixels + 10.0f)
-					continue;
-				const glm::vec2 closest = center + axes[i].Direction * along;
-				if (glm::length(mouse - closest) <= 7.0f)
-					return i;
+				// 环命中:鼠标到中心的距离接近投影半径即可(足够稳定,不必解椭圆)。
+				for (int i = 0; i < 3; ++i)
+				{
+					const auto ring = ringRadiusFor(i);
+					const float radius = glm::length(ring[0] - center);
+					if (std::fabs(glm::length(mouse - center) - radius) <= kPickTolerance)
+					{
+						picked = i;
+						break;
+					}
+				}
 			}
-			return -1;
-		};
+			else if (picked < 0 && operation == GizmoOperation::Scale
+				&& glm::length(mouse - center) <= kArrowSize)
+			{
+				picked = -2;   // 中心方块 = 等比缩放
+			}
 
-		if (!dragging && ctx.Input().MouseClicked[0])
-		{
-			const int axis = hoveredAxis();
-			const bool centerClick = operation == GizmoOperation::Rotate && ctx.IsHovered(centerHandle);
-			const bool centerScale = operation == GizmoOperation::Scale && ctx.IsHovered(centerHandle);
-			if (axis >= 0 || centerClick || centerScale)
+			if (picked != -1)
 			{
 				dragging = true;
-				activeAxis = axis;
-				lastMouse = ctx.Input().MousePos;
+				activeAxis = picked;
+				lastMouse = mouse;
 				startLocation = transform.Location;
 				startScale = transform.Scale;
-				startRotation = transform.Rotation.z;
+				startAngle = transform.Rotation.z;
+				accumulatedAngle = 0.0f;
 			}
 		}
 
 		if (dragging && ctx.Input().MouseDown[0])
 		{
-			const glm::vec2 mouse = ctx.Input().MousePos;
-			const float worldPerPixel = 2.0f * camera.GetDistance() * glm::tan(glm::radians(camera.GetFov()) * 0.5f)
-				/ std::max(1.0f, viewport.H);
+			const glm::vec2 delta = mouse - lastMouse;
+			const float worldPerPixel = WorldPerPixel(camera, viewport);
 
-			if (operation == GizmoOperation::Translate)
+			if (operation == GizmoOperation::Translate && activeAxis >= 0 && activeAxis < 3)
 			{
-				if (activeAxis >= 0)
-				{
-					// 沿该轴的屏幕方向投影鼠标位移 → 世界位移(只改该轴对应的世界方向)。
-					const glm::vec2 axisScreen = axes[activeAxis].Direction;
-					const float pixels = glm::dot(mouse - lastMouse, axisScreen);
-					const glm::vec3 worldAxis = activeAxis == 0 ? camera.GetRightDirection()
-						: (activeAxis == 1 ? camera.GetUpDirection() : camera.GetForwardDirection());
-					transform.Location += worldAxis * (pixels * worldPerPixel);
-				}
+				const float pixels = glm::dot(delta, axisScreen[activeAxis]);
+				transform.Location = startLocation + axisWorld[activeAxis] * (pixels * worldPerPixel);
 			}
 			else if (operation == GizmoOperation::Scale)
 			{
-				const glm::vec2 delta = mouse - lastMouse;
-				const float amount = 1.0f + (delta.x - delta.y) * 0.005f;
+				const float amount = 1.0f + (delta.x - delta.y) * 0.006f;
 				if (activeAxis == 0)
 					transform.Scale.x = std::max(0.01f, transform.Scale.x * amount);
 				else if (activeAxis == 1)
@@ -210,13 +260,26 @@ namespace World::Wui
 				else
 					transform.Scale = glm::max(startScale * amount, glm::vec3(0.01f));
 			}
-			else
+			else if (operation == GizmoOperation::Rotate)
 			{
-				transform.Rotation.z = startRotation + (mouse.x - lastMouse.x) * 0.01f
-					+ glm::dot(mouse - lastMouse, axes[0].Direction) * 0.01f;
+				// 拖动角度 = 鼠标绕 gizmo 中心的极角变化(对三轴都直观),按选中轴累加到对应欧拉角。
+				const glm::vec2 fromCenter = mouse - center;
+				const glm::vec2 previous = lastMouse - center;
+				const float angleDelta = std::atan2(
+					fromCenter.x * previous.y - fromCenter.y * previous.x,
+					glm::dot(fromCenter, previous));
+				accumulatedAngle += angleDelta;
+				const float degrees = glm::degrees(accumulatedAngle);
+				if (activeAxis == 0)
+					transform.Rotation.x = startAngle + degrees;
+				else if (activeAxis == 1)
+					transform.Rotation.y = degrees;
+				else if (activeAxis == 2)
+					transform.Rotation.z = startAngle + degrees;
 			}
+
 			lastMouse = mouse;
-			transform.RecalculateTransform();   // 拖完立刻生效(缓存矩阵不会自动刷新)
+			transform.RecalculateTransform();
 		}
 
 		if (dragging && ctx.Input().MouseReleased[0])

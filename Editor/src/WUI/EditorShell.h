@@ -88,6 +88,7 @@ namespace World
 		// D7-1a:视口相机模式透传(视口面板的 2D/3D 切换按钮)。
 		bool IsViewportCamera3D() const override;
 		void ToggleViewportCamera3D() override;
+		Wui::GizmoCamera GetGizmoCamera() const override;
 		void AttachIndependentWindowToSlot(const std::string& panel) override;
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;
 		EditorCamera& GetEditorCamera() override;

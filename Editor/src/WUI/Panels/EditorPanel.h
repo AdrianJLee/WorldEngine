@@ -2,6 +2,7 @@
 
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/WuiGizmo.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 
@@ -45,6 +46,8 @@ namespace World
 		// D7-1a:视口相机模式(2D/3D)与切换 —— 视口面板用它画切换按钮。
 		virtual bool IsViewportCamera3D() const { return false; }
 		virtual void ToggleViewportCamera3D() {}
+		// D7-1b:gizmo 用的相机摘要(按当前视口模式由宿主提供 2D 或 3D 相机)。
+		virtual Wui::GizmoCamera GetGizmoCamera() const { return Wui::GizmoCamera {}; }
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。
