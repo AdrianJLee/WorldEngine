@@ -2,6 +2,7 @@
 
 #include "Panels/ContentBrowserPanel.h"
 #include "Panels/HierarchyPanel.h"
+#include "Panels/InputMapPanel.h"
 #include "Panels/PropertiesPanel.h"
 #include "Panels/ReadoutPanels.h"
 #include "Panels/ViewportPanel.h"

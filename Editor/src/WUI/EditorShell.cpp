@@ -39,7 +39,7 @@ namespace World
 		// 注意:"attach_slot" 暂不在默认面板列表/Window 菜单中暴露:
 		// W7.1 初版在"槽位面板存在 + 独立窗口创建"组合下会崩溃(已定位到槽位面板路径),
 		// 修复后再放回列表。面板实现与挂靠逻辑保留,便于继续排查。
-		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "windows", "stats", "memory", "operations" };
+		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "windows", "stats", "memory", "operations", "input" };
 		m_Panels = panels;
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(panels);
 		std::string error;
@@ -56,6 +56,7 @@ namespace World
 		m_PanelRegistry.emplace("stats", std::make_unique<StatsPanel>());
 		m_PanelRegistry.emplace("memory", std::make_unique<MemoryPanel>());
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
+		m_PanelRegistry.emplace("input", std::make_unique<InputMapPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 		m_PanelRegistry.emplace("windows", std::make_unique<WindowsPanel>());
 		// 独立窗口(与停靠面板是不同组件):按屏幕矩形分组重建,
