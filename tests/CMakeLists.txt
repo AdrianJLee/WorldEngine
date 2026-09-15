@@ -240,6 +240,26 @@ set_tests_properties(World.Mesh PROPERTIES
     TIMEOUT 60
 )
 
+# P2a W4:Prefab 子树实例化(深拷贝/UUID 重发/层级重建)。
+add_executable(WorldPrefabTests PrefabTests.cpp)
+target_link_libraries(WorldPrefabTests PRIVATE World)
+target_compile_features(WorldPrefabTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldPrefabTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldPrefabTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldPrefabTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Prefab COMMAND WorldPrefabTests)
+set_tests_properties(World.Prefab PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
 # P2a W5:SystemRegistry(阶段/顺序依赖/耗时,无设备依赖)。
 add_executable(WorldSystemTests SystemRegistryTests.cpp)
 target_link_libraries(WorldSystemTests PRIVATE World)
@@ -388,7 +408,7 @@ set_tests_properties(World.RendererHotswap PROPERTIES
     TIMEOUT 180
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldHierarchyTests WorldEventTests WorldSystemTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"
