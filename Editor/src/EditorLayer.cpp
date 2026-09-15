@@ -137,6 +137,20 @@ namespace World
 		}
 		if (!m_ActiveScene || !m_SceneRenderer)
 			return;
+		// 开发/验证钩子:WLD_AUTOPLAY=<帧数> 时在该帧自动进入 Play(等价于点视图口播放按钮),
+		// 供隐藏冒烟与回归脚本验证 Play 路径(与 WLD_START_SCENE/WLD_CAPTURE_FRAMES 同类)。
+		if (const char* autoPlayFrames = std::getenv("WLD_AUTOPLAY"))
+		{
+			static int devFrame = 0;
+			static bool devAutoPlayDone = false;
+			const int target = std::atoi(autoPlayFrames);
+			if (!devAutoPlayDone && target > 0 && ++devFrame >= target)
+			{
+				devAutoPlayDone = true;
+				TogglePlay();
+				WLD_CORE_INFO("[dev] WLD_AUTOPLAY: entered Play after {0} frames", devFrame);
+			}
+		}
 		//WLD_CORE_TRACE("Delta Time: {0} ({1} FPS)", ts.GetSeconds(), ts.GetFPS());
 
 		{
@@ -165,7 +179,9 @@ namespace World
 				case SceneState::Play:
 					if (!m_ScenePaused)
 					{
-						m_ActiveScene->OnUpdateRuntime(ts);
+						// 与 Runtime 同一条路径:GameApp 驱动阶段回调(GameHost 内注册的 update
+						// 会调用场景 OnUpdateRuntime);渲染仍由编辑器视图口统一提交(render=false)。
+						m_PlayHost.Tick(ts, /*render=*/false);
 					}
 					else
 						m_ActiveScene->FlushStructuralChanges();
@@ -674,7 +690,11 @@ namespace World
 		if (m_RuntimeScene)
 		{
 			if (m_SceneState == SceneState::Play)
-				m_RuntimeScene->OnRuntimeStop();
+			{
+				// Play 的运行时生命周期由 PlayHost(GameApp 会话)持有,不能在外部直接 StopScene。
+				m_PlayHost.StopRuntime();
+				m_PlayHost.Shutdown();
+			}
 			else if (m_SceneState == SceneState::Simulate)
 				m_RuntimeScene->OnSimulationStop();
 		}
@@ -691,11 +711,20 @@ namespace World
 			Ref<Scene> editorScene = m_Document.GetScene();
 			Scene::CopyScene(editorScene, m_RuntimeScene);
 			m_SceneState = state;
-			UpdateSceneContext(m_RuntimeScene);
 			if (state == SceneState::Play)
-				m_RuntimeScene->OnRuntimeStart();
+			{
+				// Play:接入 GameApp 会话(渲染器注入编辑器视图口渲染器,启动运行时)。
+				Gameplay::GameAppDesc desc;
+				desc.ProjectId = "worldengine-editor-play";
+				desc.FixedStepHz = 60;
+				m_PlayHost.Init(desc);
+				m_PlayHost.SetRenderer(m_SceneRenderer);
+				m_PlayHost.SetScene(m_RuntimeScene, /*startRuntime=*/true);
+			}
 			else
 				m_RuntimeScene->OnSimulationStart();
+			// 视口尺寸在 SetScene 之后覆盖:GameHost 默认按宿主窗口同步,编辑器要用视图口尺寸。
+			UpdateSceneContext(m_RuntimeScene);
 		}
 		catch (const std::exception& error)
 		{

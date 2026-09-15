@@ -1,5 +1,6 @@
 #pragma once
 #include "World.h"
+#include "World/Gameplay/GameHost.h"
 #include "World/Events/KeyEvent.h"
 #include "World/Events/ApplicationEvent.h"
 #include "World/Renderer/SceneRenderer.h"
@@ -106,6 +107,9 @@ namespace World
 
 		Ref<Scene> m_ActiveScene;
 		Ref<Scene> m_RuntimeScene;
+		// W1:Play 会话也走 GameApp/GameHost(与 Runtime 同一条更新路径);
+		// Simulate 仍是编辑器专有语义(OnSimulationStart/OnUpdateSimulation),留待 W5 并入阶段管线。
+		Gameplay::GameHost m_PlayHost;
 		EditorDocument m_Document;
 
 		EditorCamera m_EditorCamera;
