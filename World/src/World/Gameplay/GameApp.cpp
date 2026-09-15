@@ -38,6 +38,12 @@ namespace World::Gameplay
 		m_FramePhases.reserve(4);
 	}
 
+	void GameApp::CreateSaveService(SaveService::SceneProvider sceneProvider)
+	{
+		// 项目 id 来自会话描述;用户根默认 %LOCALAPPDATA%/<ProjectId>,测试可用 WLD_SAVE_DIR 覆盖。
+		m_Saves = std::make_unique<SaveService>(m_Desc.ProjectId, std::move(sceneProvider));
+	}
+
 	void GameApp::Create(const GameAppDesc& desc)
 	{
 		if (s_Instance)

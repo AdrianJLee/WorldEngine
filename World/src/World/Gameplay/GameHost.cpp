@@ -69,6 +69,11 @@ namespace World::Gameplay
 			GameApp::PhaseCallback());
 
 		InstallLevelServices(desc);
+
+		// W8-3:会话级存档服务接线 —— 场景来源就是本宿主持有的当前场景(编辑器/Runtime 共用)。
+		if (!app.Saves())
+			app.CreateSaveService([this] { return m_Scene.get(); });
+
 		m_Initialized = true;
 	}
 

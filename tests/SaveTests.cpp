@@ -1,5 +1,6 @@
 // P2a W8:存档服务(槽位/全局块/场景块往返、版本迁移、坏档保护)。
 #include "World/Core/WorldContext.h"
+#include "World/Gameplay/GameApp.h"
 #include "World/Gameplay/SaveService.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
@@ -181,6 +182,21 @@ int main()
 				CHECK(std::fabs(transform.Location.x - 7.0f) < 1e-4f);   // 上一步迁移后写入的值
 			}
 			CHECK(rebuilt);
+		}
+
+		// 9. W8-3 接线:GameApp 持有 SaveService(宿主注入场景来源),未注入前为空。
+		{
+			_putenv_s("WLD_SAVE_DIR", (root / "app-wired").string().c_str());   // 别写进真实用户目录
+			GameAppDesc desc;
+			desc.ProjectId = "wire.project";
+			GameApp::Create(desc);
+			CHECK(GameApp::Get().Saves() == nullptr);
+			GameApp::Get().CreateSaveService([&scene] { return &scene; });
+			CHECK(GameApp::Get().Saves() != nullptr);
+			CHECK(GameApp::Get().Saves()->Save(9, "wired"));
+			CHECK(GameApp::Get().Saves()->Load(9));
+			GameApp::Shutdown();
+			_putenv_s("WLD_SAVE_DIR", "");
 		}
 
 		std::filesystem::remove_all(root);

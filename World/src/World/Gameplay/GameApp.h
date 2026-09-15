@@ -6,6 +6,7 @@
 #include "World/Gameplay/LevelService.h"
 #include "World/Gameplay/SystemRegistry.h"
 #include "World/Gameplay/InputMap.h"
+#include "World/Gameplay/SaveService.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -61,6 +62,11 @@ namespace World::Gameplay
 		const InputService& Input() const { return m_Input; }
 		SystemRegistry& Systems() { return m_Systems; }
 		const SystemRegistry& Systems() const { return m_Systems; }
+		// W8:存档服务。场景来源由宿主注入(GameHost 持有当前场景):
+		// 未注入前 Saves() 返回 nullptr,宿主可在拿到场景后调用 CreateSaveService。
+		void CreateSaveService(SaveService::SceneProvider sceneProvider);
+		SaveService* Saves() { return m_Saves.get(); }
+		const SaveService* Saves() const { return m_Saves.get(); }
 
 		// 阶段回调:未设置时该阶段为空转。fixed 可能在一帧内被调用 0..MaxFixedStepsPerFrame 次。
 		void SetPhaseCallbacks(PhaseCallback fixedUpdate, PhaseCallback update, PhaseCallback lateUpdate);
@@ -82,6 +88,7 @@ namespace World::Gameplay
 		GameFlow m_Flow;
 		LevelService m_Levels;
 		SystemRegistry m_Systems;
+		std::unique_ptr<SaveService> m_Saves;
 		InputService m_Input;
 		double m_FixedStepSeconds = 1.0 / 60.0;
 		double m_Accumulator = 0.0;
