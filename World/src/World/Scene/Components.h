@@ -146,6 +146,22 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	// P1b D2c:3D 网格渲染组件。
+	// Primitive:内置网格名("cube"/"plane");MeshPath 预留给 glTF 导入的模型资产(D5),
+	// 届时 Primitive 会升级为资产引用,这里的字段 id 保持不变以便存档迁移。
+	struct MeshRendererComponent
+	{
+		std::string Primitive = "cube";
+		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
+		std::string MeshPath;
+
+		WE_SCHEMA_BODY(World, MeshRendererComponent, Component)
+			WE_FIELD(Primitive, String);
+			WE_FIELD(Color, Vec4);
+			WE_FIELD(MeshPath, String);
+		WE_SCHEMA_END
+	};
+
 	struct CameraComponent
 	{
 		CameraComponent() = default;

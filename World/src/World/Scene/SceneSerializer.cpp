@@ -397,6 +397,12 @@ namespace World
 			}
 		}
 
+		// 反序列化只写入 Location/Rotation/Scale 原始字段,不会触发缓存矩阵重算
+		// (schema 生成的 setter 直接赋值)。这里统一重算一次,否则所有实体(含相机)
+		// 会停在单位矩阵——表现为"相机在物体内部/物体全部堆在原点"。
+		for (const auto entity : m_Scene->m_Registry.view<TransformComponent>())
+			m_Scene->m_Registry.get<TransformComponent>(entity).RecalculateTransform();
+
 		return true;
 	}
 

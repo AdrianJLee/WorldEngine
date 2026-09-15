@@ -273,24 +273,19 @@ namespace World
 			}
 		}
 
-		// 场景驱动的 3D 网格(临时约定,D2c 的 MeshRendererComponent 会取代):
-		// Tag 以 "Mesh:Cube" / "Mesh:Plane" 开头的实体,用 Transform 作模型矩阵、Sprite.Color 作基色。
-		// 这样 3D 关卡可以**只用现有组件**在编辑器里搭出来(拖 Transform、改颜色即可)。
+		// 3D 网格通道(D2c):MeshRendererComponent 实体用 Transform 作模型矩阵、Color 作基色。
+		// Sprite 组件保持纯 2D,不再参与 3D 提交。
 		{
-			auto meshView = m_ActiveScene->m_Registry.view<TransformComponent, SpriteComponent, TagComponent>();
+			auto meshView = m_ActiveScene->m_Registry.view<TransformComponent, MeshRendererComponent>();
 			bool began = false;
 			for (auto entity : meshView)
 			{
-				const auto& [transform, sprite, tag] =
-					meshView.get<TransformComponent, SpriteComponent, TagComponent>(entity);
-				const bool cube = tag.Tag.rfind("Mesh:Cube", 0) == 0;
-				const bool plane = tag.Tag.rfind("Mesh:Plane", 0) == 0;
-				if (!cube && !plane)
-					continue;
-
-				Ref<Mesh>& mesh = cube ? m_DebugCube : m_DebugPlane;
+				const auto& [transform, meshComponent] =
+					meshView.get<TransformComponent, MeshRendererComponent>(entity);
+				const bool plane = meshComponent.Primitive == "plane";
+				Ref<Mesh>& mesh = plane ? m_DebugPlane : m_DebugCube;
 				if (!mesh)
-					mesh = cube ? Mesh::CreateUnitCube(1.0f) : Mesh::CreateUnitPlane(1.0f);
+					mesh = plane ? Mesh::CreateUnitPlane(1.0f) : Mesh::CreateUnitCube(1.0f);
 				if (!mesh)
 					continue;
 
@@ -299,7 +294,7 @@ namespace World
 					Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
 					began = true;
 				}
-				Renderer3D::Submit(mesh, transform.Transform, sprite.Color);
+				Renderer3D::Submit(mesh, transform.Transform, meshComponent.Color);
 			}
 			if (began)
 				Renderer3D::EndScene();

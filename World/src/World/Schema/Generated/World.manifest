@@ -3,6 +3,7 @@ struct World::TagComponent
 struct World::TransformComponent
 struct World::SpriteComponent
 struct World::CircleRendererComponent
+struct World::MeshRendererComponent
 struct World::CameraComponent
 struct World::NativeScriptComponent
 struct World::LuaScriptComponent

@@ -13,6 +13,7 @@ const TypeSchema& WeSchemaOf_TagComponent();
 const TypeSchema& WeSchemaOf_TransformComponent();
 const TypeSchema& WeSchemaOf_SpriteComponent();
 const TypeSchema& WeSchemaOf_CircleRendererComponent();
+const TypeSchema& WeSchemaOf_MeshRendererComponent();
 const TypeSchema& WeSchemaOf_CameraComponent();
 const TypeSchema& WeSchemaOf_NativeScriptComponent();
 const TypeSchema& WeSchemaOf_LuaScriptComponent();
@@ -525,6 +526,120 @@ struct GeneratedAccess<World::CircleRendererComponent>
                 Field_Color(),
                 Field_Thickness(),
                 Field_Fade(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+// MeshRendererComponent(P1b D2c):生成器不在仓库内,这里手写补充与生成结果同构的注册代码;
+// schema-compiler 就位后应重新生成并覆盖本段(字段 id 保持不变)。
+template <>
+struct GeneratedAccess<World::MeshRendererComponent>
+{
+    static Value Get_Primitive(const void* instance)
+    {
+        const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
+        return Value(self->Primitive);
+    }
+    static void Set_Primitive(void* instance, const Value& value)
+    {
+        World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
+        self->Primitive = std::get<std::string>(value);
+    }
+    static Value Get_Color(const void* instance)
+    {
+        const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
+        return Value(self->Color);
+    }
+    static void Set_Color(void* instance, const Value& value)
+    {
+        World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
+        self->Color = std::get<glm::vec4>(value);
+    }
+    static Value Get_MeshPath(const void* instance)
+    {
+        const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
+        return Value(self->MeshPath);
+    }
+    static void Set_MeshPath(void* instance, const Value& value)
+    {
+        World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
+        self->MeshPath = std::get<std::string>(value);
+    }
+    static const FieldSchema& Field_Primitive()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4D4553485052494Dull },
+            "Primitive",
+            Kind::String,
+            &Get_Primitive,
+            &Set_Primitive,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(std::string()),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Color()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4D455348434F4C52ull },
+            "Color",
+            Kind::Vec4,
+            &Get_Color,
+            &Set_Color,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(glm::vec4(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MeshPath()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4D45534850415448ull },
+            "MeshPath",
+            Kind::String,
+            &Get_MeshPath,
+            &Set_MeshPath,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(std::string()),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::MeshRendererComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::MeshRendererComponent" },
+            "MeshRendererComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::MeshRendererComponent),
+            TypeCategory::Component,
+            {
+                Field_Primitive(),
+                Field_Color(),
+                Field_MeshPath(),
             },
             &StorageBindingOf(),
             nullptr,
@@ -1587,6 +1702,7 @@ const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagC
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SpriteComponent() { return GeneratedAccess<World::SpriteComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleRendererComponent() { return GeneratedAccess<World::CircleRendererComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_MeshRendererComponent() { return GeneratedAccess<World::MeshRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraComponent() { return GeneratedAccess<World::CameraComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_NativeScriptComponent() { return GeneratedAccess<World::NativeScriptComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_LuaScriptComponent() { return GeneratedAccess<World::LuaScriptComponent>::WeSchema(); }
@@ -1609,6 +1725,7 @@ const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::
 			WeSchemaOf_TransformComponent(),
 			WeSchemaOf_SpriteComponent(),
 			WeSchemaOf_CircleRendererComponent(),
+			WeSchemaOf_MeshRendererComponent(),
 			WeSchemaOf_CameraComponent(),
 			WeSchemaOf_NativeScriptComponent(),
 			WeSchemaOf_LuaScriptComponent(),
