@@ -16,6 +16,7 @@
 namespace World
 {
 	class Entity;
+	namespace Gameplay { class SystemRegistry; }
 	enum class SceneState { Stopped, Starting, Running, Stopping };
 
 	class Scene
@@ -118,7 +119,10 @@ namespace World
 		void OnPhysics2DStop();
 		void DestroyPhysicsBody(entt::entity entity);
 
-		std::vector<FrameSystem> m_FrameSystems;
+		// W5-3:帧系统调度统一交给 Gameplay::SystemRegistry(阶段/依赖/并行/耗时),
+		// 用 pimpl 避免核心层头文件依赖 Gameplay 实现细节。
+		std::unique_ptr<Gameplay::SystemRegistry> m_FrameSystems;
+		std::vector<FrameSystem> m_FrameSystemDefinitions;
 		std::vector<FrameSystemTiming> m_FrameSystemTimings;
 
 		entt::registry m_Registry;

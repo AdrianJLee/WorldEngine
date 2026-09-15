@@ -3,6 +3,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Core/Thread/JobSystem.h"
+#include "World/Gameplay/SystemRegistry.h"
 #include <box2d/box2d.h>
 #include <chrono>
 #include <stdexcept>
@@ -55,59 +56,35 @@ namespace World
 		AssertOwnerThread();
 		if (system.Name.empty() || !system.Update)
 			throw std::invalid_argument("Scene frame system requires a name and an update function");
-		for (const FrameSystem& existing : m_FrameSystems)
+		for (const FrameSystem& existing : m_FrameSystemDefinitions)
 			if (existing.Name == system.Name)
 				throw std::invalid_argument("Scene frame system '" + system.Name + "' is already registered");
-		m_FrameSystems.push_back(std::move(system));
+
+		if (!m_FrameSystems)
+			m_FrameSystems = std::make_unique<Gameplay::SystemRegistry>();
+		Gameplay::SystemDesc desc;
+		desc.Name = system.Name;
+		desc.Phase = Gameplay::SystemPhase::Update;
+		desc.ParallelSafe = system.ParallelSafe;
+		Gameplay::SystemRegistry::UpdateFn update = std::move(system.Update);
+		if (!m_FrameSystems->Register(desc, std::move(update)))
+			throw std::invalid_argument("Scene frame system '" + desc.Name + "' rejected: " + m_FrameSystems->GetLastError());
+		m_FrameSystemDefinitions.push_back(std::move(system));
 	}
 
-	// B3 帧系统管线:并行安全系统先并发执行(JobSystem)并汇合,独占系统再在主线程串行执行。
-	// 时间片逐系统记录,供编辑器统计面板/日志观察并行收益与回归。
+	// W5-3:帧系统调度统一走 Gameplay::SystemRegistry
+	// (阶段/同阶段依赖/并行安全并行派发/逐系统耗时),Scene 只保留面向宿主的薄封装。
 	void Scene::RunFrameSystems(Timestep ts)
 	{
 		AssertOwnerThread();
 		m_FrameSystemTimings.clear();
-		m_FrameSystemTimings.reserve(m_FrameSystems.size());
-		if (m_FrameSystems.empty())
+		if (!m_FrameSystems)
 			return;
 
-		// 并行阶段:各系统之间不得有依赖(注册时声明 parallel-safe 即为此契约);
-		// 用同一个计数器提交,等待一次即全部汇合。
-		const bool parallel = JobSystem::IsRunning() && m_FrameSystems.size() > 1;
-		if (parallel)
-		{
-			JobCounter counter;
-			for (FrameSystem& system : m_FrameSystems)
-			{
-				if (!system.ParallelSafe)
-					continue;
-				FrameSystem* target = &system;
-				JobDecl job;
-				job.Emplace(std::make_tuple(target, ts));
-				job.Entry = [](void* data)
-				{
-					auto* payload = static_cast<std::tuple<FrameSystem*, Timestep>*>(data);
-					std::get<0>(*payload)->Update(std::get<1>(*payload));
-				};
-				job.Priority = JobPriority::High;
-				job.Counter = &counter;
-				JobSystem::Kick(std::move(job));
-			}
-			JobSystem::Wait(&counter);
-		}
-
-		for (FrameSystem& system : m_FrameSystems)
-		{
-			if (parallel && system.ParallelSafe)
-				continue;   // 已在并行阶段执行
-			const auto begin = std::chrono::steady_clock::now();
-			system.Update(ts);
-			const auto end = std::chrono::steady_clock::now();
-			m_FrameSystemTimings.push_back({ system.Name, system.ParallelSafe,
-				std::chrono::duration<double, std::milli>(end - begin).count() });
-		}
+		m_FrameSystems->RunPhase(Gameplay::SystemPhase::Update, ts);
+		for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
+			m_FrameSystemTimings.push_back({ timing.Name, timing.ParallelSafe, timing.Milliseconds });
 	}
-
 	const char* Scene::GetFrameSystemStatsDescription(const Scene& scene)
 	{
 		// 静态缓冲:仅供日志/调试打印,不做线程安全承诺。
@@ -426,7 +403,7 @@ namespace World
 	// 宿主可再注册 parallel-safe 系统(不得触碰注册表结构),它们会在内置阶段之前并行执行。
 	void Scene::EnsureDefaultFrameSystems()
 	{
-		if (!m_FrameSystems.empty())
+		if (!m_FrameSystemDefinitions.empty())
 			return;
 		RegisterFrameSystem({ "scene-update", false, [this](Timestep ts) { OnScriptUpdate(ts); } });
 	}
