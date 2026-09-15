@@ -240,6 +240,26 @@ set_tests_properties(World.Mesh PROPERTIES
     TIMEOUT 60
 )
 
+# P2a W7:输入映射资产 + InputService(动作/轴/多玩家/边沿判定)。
+add_executable(WorldInputTests InputTests.cpp)
+target_link_libraries(WorldInputTests PRIVATE World)
+target_compile_features(WorldInputTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldInputTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldInputTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldInputTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Input COMMAND WorldInputTests)
+set_tests_properties(World.Input PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
 # P2a W4:Prefab 子树实例化(深拷贝/UUID 重发/层级重建)。
 add_executable(WorldPrefabTests PrefabTests.cpp)
 target_link_libraries(WorldPrefabTests PRIVATE World)
@@ -408,7 +428,7 @@ set_tests_properties(World.RendererHotswap PROPERTIES
     TIMEOUT 180
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"
