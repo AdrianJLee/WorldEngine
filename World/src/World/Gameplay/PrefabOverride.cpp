@@ -86,6 +86,22 @@ namespace World::Gameplay
 		record.Overrides.clear();
 	}
 
+	bool CanRevert(const PrefabInstanceRecord& record, const Scene& scene)
+	{
+		return record.IsValid() && !record.PrefabPath.empty() && scene.GetRegistry().valid(record.Root);
+	}
+
+	bool UnpackInstance(PrefabInstanceRecord& record)
+	{
+		if (!record.IsValid())
+			return false;
+		ClearOverrides(record);
+		record.PrefabPath.clear();
+		WLD_CORE_INFO("Prefab::UnpackInstance: subtree at entity {0} is no longer a prefab instance",
+			static_cast<uint32_t>(record.Root));
+		return true;
+	}
+
 	bool RevertInstance(PrefabInstanceRecord& record, Scene& scene)
 	{
 		if (!record.IsValid() || record.PrefabPath.empty())

@@ -182,6 +182,42 @@ int main()
 			CHECK(!RevertInstance(empty, target));
 			std::filesystem::remove(prefabPath);
 		}
+		// 8. 断链(Unpack):解除 prefab 关联后不能再回滚,实体本身保持不变。
+		{
+			const std::filesystem::path prefabPath =
+				std::filesystem::temp_directory_path() / "worldengine-prefab-unpack.wprefab";
+			std::string error;
+			CHECK(SaveFromScene(source, Entity(&source, root), prefabPath, &error));
+
+			Scene target(context);
+			const PrefabInstanceResult instance = InstantiateFromFile(prefabPath, target);
+			CHECK(instance.IsValid());
+			const entt::entity instanceRoot = static_cast<entt::entity>(instance.Root);
+			auto& targetRegistry = target.GetRegistry();
+
+			PrefabInstanceRecord record;
+			record.PrefabPath = prefabPath.string();
+			record.Root = instanceRoot;
+			CHECK(CanRevert(record, target));
+
+			targetRegistry.get<TagComponent>(instanceRoot).Tag = "Edited Before Unpack";
+			MarkOverride(record, instanceRoot, "TagComponent.Tag");
+			CHECK(GetOverrideCount(record) == 1);
+
+			CHECK(UnpackInstance(record));
+			CHECK(record.PrefabPath.empty());
+			CHECK(GetOverrideCount(record) == 0);
+			CHECK(!CanRevert(record, target));
+			CHECK(!RevertInstance(record, target));                  // 断链后回滚安全失败
+			// 断链不影响实体本身:编辑过的值仍在。
+			CHECK(targetRegistry.get<TagComponent>(instanceRoot).Tag == "Edited Before Unpack");
+			CHECK(targetRegistry.get<HierarchyComponent>(instanceRoot).Children.size() == 1);
+
+			// 空记录断链也要安全返回 false。
+			PrefabInstanceRecord empty;
+			CHECK(!UnpackInstance(empty));
+			std::filesystem::remove(prefabPath);
+		}
 		std::printf("World.Prefab: all checks passed\n");
 		return 0;
 	}

@@ -60,4 +60,11 @@ namespace World::Gameplay
 	// 回滚实例:重新实例化来源 prefab 到临时场景,按树序把组件值拷回实例实体
 	// (契约:实例与 prefab 结构同构;整体回滚,字段级回滚需要 schema 字段访问,列入后续增量)。
 	WLD_API bool RevertInstance(PrefabInstanceRecord& record, Scene& scene);
+	// 断链(Unpack):把实例变成普通实体——解除 prefab 关联并清空覆盖记录。
+	// 之后编辑不再被登记为覆盖,Revert/Apply 也不再可用(实体本身保持不变)。
+	// 嵌套 prefab 的数据表达:实例记录本身可再引用其它 prefab(编辑器侧维护多份记录),
+	// 因此断链只需清掉本层关联,不影响其子实例。
+	WLD_API bool UnpackInstance(PrefabInstanceRecord& record);
+	// 是否还能回滚(有来源且根仍然有效)。
+	WLD_API bool CanRevert(const PrefabInstanceRecord& record, const Scene& scene);
 }
