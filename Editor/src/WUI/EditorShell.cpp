@@ -39,7 +39,9 @@ namespace World
 		// 注意:"attach_slot" 暂不在默认面板列表/Window 菜单中暴露:
 		// W7.1 初版在"槽位面板存在 + 独立窗口创建"组合下会崩溃(已定位到槽位面板路径),
 		// 修复后再放回列表。面板实现与挂靠逻辑保留,便于继续排查。
-		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "windows", "stats", "memory", "operations", "input" };
+		// 注意:"windows"(Independent Windows 面板)暂不放回列表——它当前关闭时会崩溃,且布局保存会把
+		// "已注册但无归属"的面板写回停靠树(实测 RemoveTab 无法让它消失)。待崩溃修好后重新加入。
+		const std::vector<Wui::PanelId> panels = { "hierarchy", "properties", "content_browser", "view", "gallery", "stats", "memory", "operations", "input" };
 		m_Panels = panels;
 		// W7-2:Input Map 设计为**独立窗口**(可按统一窗口模型挂靠到主窗口顶栏),
 		// 因此不进入默认停靠布局;仍保留在 m_Panels(Window 菜单可开关)。
@@ -60,6 +62,10 @@ namespace World
 		// 启动时清掉,避免它以挂靠标签的形式出现。
 		m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), "input"),
 			m_AttachedPanels.end());
+		// 同 Input Map:旧布局存档会把面板写回停靠树(默认布局改动对已存在的存档无效),
+		// 因此这里在加载后强制摘除"不要出现在停靠区"的面板(仍可由 Window 菜单打开)。
+		if (m_Layout.Contains("windows"))
+			m_Layout.RemoveTab("windows");
 		// Input Map 固定为独立窗口:每次启动都强制收敛到"唯一表示"——
 		// 无论存档里它是停靠在左区、挂靠在主窗口、还是浮动,都先摘干净再无条件创建独立窗口。
 		// (之前只处理"未浮动"的情况,存档一旦把停靠记录写回来,它就会又出现在左侧。)
@@ -83,7 +89,7 @@ namespace World
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("input", std::make_unique<InputMapPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
-		m_PanelRegistry.emplace("windows", std::make_unique<WindowsPanel>());
+		// "windows" 面板暂不注册(见上方注释):不注册才能保证布局保存/恢复都不会把它写回停靠区。
 		// 独立窗口(与停靠面板是不同组件):按屏幕矩形分组重建,
 		// 同一窗口的多个标签共享一个容器(多标签窗口)。
 		std::map<std::tuple<int, int, int, int>, std::vector<std::string>> floatGroups;
