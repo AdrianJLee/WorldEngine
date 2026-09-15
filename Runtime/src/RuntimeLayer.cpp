@@ -25,21 +25,28 @@ namespace World
 		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
 			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
 
+		// 会话描述:项目清单是唯一事实源(与 GameHost 共用同一份内容根/启动场景)。
+		Gameplay::GameAppDesc desc;
+		desc.ProjectId = "worldengine-runtime";
+		desc.FixedStepHz = 60;
+
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 
 		m_SceneRenderer->Init();
 		m_SceneTextureId = Wui::WuiTextureRegistry::Get().Register(m_SceneRenderer->GetColorTexture());
 
+		m_Host.Init(desc);
+		m_Host.SetRenderer(m_SceneRenderer);
 
-		LoadScene();
-
+		LoadLevel();
 	}
 	void RuntimeLayer::OnDetach()
 	{
 		WLD_PROFILE_FUNCTION();
-		if (m_ActiveScene)
-			m_ActiveScene->OnRuntimeStop();
-		m_ActiveScene.reset();
+		// 顺序与改造前一致:先停运行时并释放场景,再关闭渲染器。
+		m_Host.StopRuntime();
+		m_Host.Shutdown();
+		m_SceneTextureId = 0;
 		if (m_SceneRenderer)
 			m_SceneRenderer->Shutdown();
 		m_SceneRenderer.reset();
@@ -47,26 +54,9 @@ namespace World
 	void RuntimeLayer::OnUpdate(Timestep ts)
 	{
 		WLD_PROFILE_FUNCTION();
-		if (m_ActiveScene)
-		{
-			Renderer2D::ResetStats();
-
-			m_ActiveScene->OnUpdateRuntime(ts);
-			// Scripts may remove the camera or its entity during the update.
-			auto entity = m_ActiveScene->GetPrimaryCameraEntity();
-			if (m_SceneRenderer && entity && entity.HasComponent<CameraComponent>() && entity.HasComponent<TransformComponent>())
-			{
-				auto& camera = entity.GetComponent<CameraComponent>().Camera;
-				auto& transform = entity.GetComponent<TransformComponent>().Transform;
-
-				m_SceneRenderer->BeginScene(m_ActiveScene.get(), SceneRendererOptions());
-				m_SceneRenderer->SubmitScene(camera, transform);
-				m_SceneRenderer->EndScene();
-
-			}
-
-
-		}
+		Renderer2D::ResetStats();
+		// 场景更新(OnUpdateRuntime)+ 主相机提交渲染都在 GameHost 内完成,顺序与改造前一致。
+		m_Host.Tick(ts, true);
 
 		// 渲染基线捕获(仅开发验证):WLD_CAPTURE_FRAMES=N 后读默认帧缓冲写 PPM。
 		CaptureFrameIfRequested();
@@ -111,7 +101,7 @@ namespace World
 					m_SceneTextureId, { 0, 1, 1, -1 }, -1, -1, -1 });
 			// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
 			// 会触发结构写断言并抛异常。
-			const Scene* activeScene = m_ActiveScene.get();
+			const Scene* activeScene = m_Host.GetScene().get();
 			const size_t entityCount = activeScene ? activeScene->GetRegistry().view<UUIDComponent>().size() : 0;
 			DrawGameHud(wuiContext, entityCount);
 			wuiContext.EndFrame();
@@ -131,15 +121,13 @@ namespace World
 		if (e.GetWidth() == 0 || e.GetHeight() == 0)
 			return false; // 最小化时跳过
 
-		if (m_ActiveScene)
-			m_ActiveScene->OnViewportResize(e.GetWidth(), e.GetHeight());
+		if (const Ref<Scene> scene = m_Host.GetScene())
+			scene->OnViewportResize(e.GetWidth(), e.GetHeight());
 		return false;
 	}
 
-	void RuntimeLayer::LoadScene()
+	void RuntimeLayer::LoadLevel()
 	{
-		Ref<Scene> tempScene = CreateRef<Scene>(Application::Get().GetContext());
-		SceneSerializer serializer(tempScene);
 		// 启动场景:项目 manifest 的 start_scene;无 manifest 时回退默认。
 		std::string scenePath = "scenes/test.wd";
 		std::filesystem::path manifestPath;
@@ -153,28 +141,8 @@ namespace World
 				World::Renderer::SetRequestedRenderer(manifest.Renderer);
 			}
 		}
-		if (serializer.Deserialize(scenePath))
-		{
-			WLD_CORE_INFO("Scene loaded successfully from VFS or Disk!");
-			bool hasCamera = false;
-			for (auto handle : tempScene->GetRegistry().view<CameraComponent>())
-			{
-				(void)handle;
-				hasCamera = true;
-				break;
-			}
-			if (!hasCamera)
-				WLD_CORE_WARN("Scene has no CameraComponent entity; nothing will be rendered. Add a camera in the editor (Hierarchy -> Create Camera).");
-			m_ActiveScene = tempScene;
-
-			uint32_t width = Application::Get().GetWindow().GetWidth();
-			uint32_t height = Application::Get().GetWindow().GetHeight();
-			m_ActiveScene->OnViewportResize(width, height);
-			m_ActiveScene->OnRuntimeStart();
-		}
-		else
-		{
-			WLD_CORE_ERROR("Failed to load scene from VFS or Disk: {0}", scenePath);
-		}
+		// 加载 + 无相机告警 + 视口同步 + 运行时启动都由 GameHost 统一处理
+		// (失败时保持当前场景不变,与改造前的"加载失败不换场景"一致)。
+		m_Host.LoadLevel(scenePath, true);
 	}
 }

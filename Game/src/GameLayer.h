@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "GameAPI.h"
 #include "World.h"
+#include "World/Gameplay/GameHost.h"
 
 namespace World
 {
@@ -16,10 +17,11 @@ namespace World
 		virtual void OnEvent(Event& event) override;
 	private:
 		bool OnWindowResize(WindowResizeEvent& e);
-		void LoadScene();
+		void LoadLevel();
 	private:
 		WorldContext* m_Context = nullptr;
-		Ref<Scene> m_ActiveScene;
+		// W1:宿主收敛——场景加载/更新/渲染统一走 Gameplay::GameHost。
+		Gameplay::GameHost m_Host;
 		Ref<SceneRenderer> m_SceneRenderer;
 	};
 }

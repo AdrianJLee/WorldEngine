@@ -16,41 +16,30 @@ namespace World
 
 		m_SceneRenderer->Init();
 
+		// Game.dll 的宿主层与会话:与 RuntimeLayer 走同一条 GameApp/GameHost 路径。
+		Gameplay::GameAppDesc desc;
+		desc.ProjectId = "worldengine-game";
+		desc.FixedStepHz = 60;
+		desc.ContentRoot = std::filesystem::current_path();
+		m_Host.Init(desc);
+		m_Host.SetRenderer(m_SceneRenderer);
 
-		LoadScene();
+		LoadLevel();
 
 	}
 	void GameLayer::OnDetach()
 	{
 		WLD_PROFILE_FUNCTION();
+		m_Host.StopRuntime();
+		m_Host.Shutdown();
 		m_SceneRenderer->Shutdown();
 	}
 	void GameLayer::OnUpdate(Timestep ts)
 	{
 		WLD_PROFILE_FUNCTION();
-		if (m_ActiveScene)
-		{
-			Renderer2D::ResetStats();
-
-			auto entity = m_ActiveScene->GetPrimaryCameraEntity();
-			if (entity)
-			{
-				m_ActiveScene->OnUpdateRuntime(ts);
-				auto& camera = entity.GetComponent<CameraComponent>().Camera;
-				auto& transform = entity.GetComponent<TransformComponent>().Transform;
-
-				m_SceneRenderer->BeginScene(m_ActiveScene.get(), SceneRendererOptions());
-				m_SceneRenderer->SubmitScene(camera, transform);
-				m_SceneRenderer->EndScene();
-
-			}
-			else
-			{
-				m_ActiveScene->OnUpdateRuntime(ts);
-			}
-
-
-		}
+		Renderer2D::ResetStats();
+		// 与 RuntimeLayer 完全同路径:场景 OnUpdateRuntime → 主相机提交渲染。
+		m_Host.Tick(ts, true);
 	}
 	void GameLayer::OnUiFrame()
 	{
@@ -68,29 +57,17 @@ namespace World
 		if (e.GetWidth() == 0 || e.GetHeight() == 0)
 			return false; // 最小化时跳过
 
-		m_ActiveScene->OnViewportResize(e.GetWidth(), e.GetHeight());
+		if (const Ref<Scene> scene = m_Host.GetScene())
+			scene->OnViewportResize(e.GetWidth(), e.GetHeight());
 		return false;
 	}
 
-	void GameLayer::LoadScene()
+	void GameLayer::LoadLevel()
 	{
-		m_ActiveScene = CreateRef<Scene>(*m_Context);
-		SceneSerializer serializer(m_ActiveScene);
 		// During the cook process, scenes could be packed or placed in content folder.
 		// Assuming "Resource/Scenes/TestScene.wdscene" relative path is maintained or packed in pak.
 		std::string scenePath = "scenes/PhysicalTest.wd";
-		if (serializer.Deserialize(scenePath))
-		{
-			WLD_CORE_INFO("Scene loaded successfully from VFS or Disk!");
-
-			uint32_t width = Application::Get().GetWindow().GetWidth();
-			uint32_t height = Application::Get().GetWindow().GetHeight();
-			m_ActiveScene->OnViewportResize(width, height);
-			m_ActiveScene->OnRuntimeStart();
-		}
-		else
-		{
-			WLD_CORE_ERROR("Failed to load scene from VFS or Disk: {0}", scenePath);
-		}
+		// 加载失败时保持当前场景不变;无相机告警/视口同步/运行时启动由 GameHost 统一处理。
+		m_Host.LoadLevel(scenePath, true);
 	}
 }

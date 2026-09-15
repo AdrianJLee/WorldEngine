@@ -1,8 +1,10 @@
 ﻿#pragma once
 #include "World.h"
+#include "World/Gameplay/GameHost.h"
 
 namespace World
 {
+	// W1:宿主收敛——场景加载/更新/渲染统一走 Gameplay::GameHost(见 World/Gameplay/GameHost.h)。
 	class RuntimeLayer : public Layer
 	{
 	public:
@@ -15,10 +17,10 @@ namespace World
 		virtual void OnEvent(Event& event) override;
 	private:
 		bool OnWindowResize(WindowResizeEvent& e);
-		void LoadScene();
+		void LoadLevel();
 		void CaptureFrameIfRequested();
 	private:
-		Ref<Scene> m_ActiveScene;
+		Gameplay::GameHost m_Host;
 		Ref<SceneRenderer> m_SceneRenderer;
 		uint64_t m_SceneTextureId = 0;
 	};
