@@ -45,6 +45,10 @@ namespace World
 		// 因此不进入默认停靠布局;仍保留在 m_Panels(Window 菜单可开关)。
 		std::vector<Wui::PanelId> dockedPanels = panels;
 		dockedPanels.erase(std::remove(dockedPanels.begin(), dockedPanels.end(), "input"), dockedPanels.end());
+		// "windows"(Independent Windows 面板)先从默认停靠布局里移除:它当前关闭时会崩溃,
+		// 不应在启动时就出现在 Properties 旁边;仍保留在 m_Panels(Window 菜单可打开),
+		// 待崩溃修好后决定是否放回默认布局。
+		dockedPanels.erase(std::remove(dockedPanels.begin(), dockedPanels.end(), "windows"), dockedPanels.end());
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(dockedPanels);
 		std::string error;
 		if (!Wui::WuiLayoutStore::Load(m_LayoutPath, fallback, &m_Layout, &error))

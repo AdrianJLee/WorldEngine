@@ -1,0 +1,19 @@
+actions:
+  - name: Jump
+    bindings:
+      - device: key
+        code: 32
+  - name: MoveRight
+    bindings:
+      - device: key
+        code: 68
+  - name: MoveLeft
+    bindings:
+      - device: key
+        code: 65
+axes:
+  - name: Move
+    positive: MoveRight
+    negative: MoveLeft
+    gamepad: LX
+    deadzone: 0.150000006
