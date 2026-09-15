@@ -104,7 +104,13 @@ namespace World
 		if (!pathEnv || !pathEnv[0])
 			return;
 		if (m_SceneRenderer)
+		{
+			// 诊断:确认抓取用的 SceneRenderer 与 GameHost 实际渲染的是同一个实例。
+			WLD_CORE_INFO("[capture] runtime renderer={0} target={1}x{2}",
+				static_cast<const void*>(m_SceneRenderer.get()),
+				m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight());
 			m_SceneRenderer->CaptureFrame(pathEnv);
+		}
 	}
 	void RuntimeLayer::OnUiFrame()
 	{

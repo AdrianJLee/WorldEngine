@@ -315,6 +315,23 @@ namespace World::Gameplay
 		m_SceneRenderer->BeginScene(m_Scene.get(), SceneRendererOptions());
 		m_SceneRenderer->SubmitScene(camera->Camera, transform->Transform);
 		m_SceneRenderer->EndScene();
+
+		// 诊断(WLD_TRACE_HOST=1):确认"每帧都在提交"以及相机矩阵是否退化 ——
+		// Runtime 抓图只剩清屏色时,这两者是最可能的断点。
+		if (std::getenv("WLD_TRACE_HOST"))
+		{
+			static uint64_t calls = 0;
+			++calls;
+			if (calls <= 4 || calls % 120 == 0)
+			{
+				const glm::mat4& projection = camera->Camera.GetProjectionMatrix();
+				WLD_CORE_INFO("[host] SubmitSceneRender call#{0} renderer={9} target={1}x{2} projDiag=({3},{4},{5}) camPos=({6},{7},{8})",
+					calls, m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight(),
+					projection[0][0], projection[1][1], projection[2][2],
+					transform->Transform[3][0], transform->Transform[3][1], transform->Transform[3][2],
+					static_cast<const void*>(m_SceneRenderer.get()));
+			}
+		}
 	}
 
 	void GameHost::ApplyViewportToScene()
