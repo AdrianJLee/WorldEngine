@@ -66,7 +66,71 @@ namespace World::Gameplay
 			},
 			GameApp::PhaseCallback());
 
+		InstallLevelServices(desc);
 		m_Initialized = true;
+	}
+
+	void GameHost::InstallLevelServices(const GameAppDesc& desc)
+	{
+		LevelService& levels = GameApp::Get().Levels();
+
+		// 场景构造留在宿主侧(Scene 的 WorldContext 与注册表都必须在主线程使用)。
+		levels.SetSceneLoader([this](const std::string& scenePath, std::string* error) -> Ref<Scene>
+		{
+			WorldContext* context = Application::HasInstance() ? &Application::Get().GetContext() : m_OwnedContext.get();
+			if (!context)
+			{
+				if (error) *error = "no WorldContext available for level loading";
+				return nullptr;
+			}
+			Ref<Scene> scene = CreateRef<Scene>(*context);
+			SceneSerializer serializer(scene);
+			if (!serializer.Deserialize(scenePath))
+			{
+				if (error) *error = serializer.GetLastError().empty()
+					? ("failed to deserialize '" + scenePath + "'") : serializer.GetLastError();
+				return nullptr;
+			}
+			return scene;
+		});
+
+		levels.SetProgressCallback([this](const LevelLoadProgress& report)
+		{
+			m_LastLevelProgress = report;
+			if (report.State == LevelLoadState::Failed)
+			{
+				WLD_CORE_ERROR("GameHost: level '{0}' failed: {1}", report.LevelId, report.Error);
+				return;
+			}
+			// 关卡就绪:宿主接管场景并启动运行时(替换或叠加都由 LevelService 的场景栈决定)。
+			if (report.State == LevelLoadState::Idle && report.Progress >= 1.0f)
+			{
+				if (Ref<Scene> scene = GameApp::Get().Levels().FindScene(report.LevelId))
+					SetScene(scene, true);
+			}
+		});
+
+		// 清单查找顺序:内容根父目录(项目根)→ 内容根 → 当前工作目录;找不到就只用路径加载。
+		LevelList list;
+		std::string error;
+		const std::filesystem::path candidates[] = {
+			desc.ContentRoot.parent_path() / "levels.welevel",
+			desc.ContentRoot / "levels.welevel",
+			std::filesystem::current_path() / "levels.welevel",
+		};
+		for (const std::filesystem::path& candidate : candidates)
+		{
+			if (candidate.empty() || !std::filesystem::exists(candidate))
+				continue;
+			if (LevelList::Load(candidate, &list, &error))
+			{
+				WLD_CORE_INFO("GameHost: level list '{0}' loaded ({1} level(s))",
+					candidate.generic_string(), list.Entries().size());
+				levels.SetLevelList(std::move(list));
+				return;
+			}
+			WLD_CORE_WARN("GameHost: level list '{0}' rejected: {1}", candidate.generic_string(), error);
+		}
 	}
 
 	void GameHost::Shutdown()
@@ -103,6 +167,21 @@ namespace World::Gameplay
 		{
 			WLD_CORE_ERROR("GameHost::LoadLevel: empty scene path");
 			return false;
+		}
+
+		// W2:清单里存在同一场景的关卡时优先走关卡服务(统一走加载状态机/进度),
+		// 由 Tick 内的 Pump 完成激活;清单缺失或不匹配时退回直接路径加载。
+		if (startRuntime)
+		{
+			const LevelService& levels = GameApp::Get().Levels();
+			for (const LevelEntry& entry : levels.GetLevelList().Entries())
+			{
+				if (entry.ScenePath != scenePath)
+					continue;
+				if (LoadLevelById(entry.Id))
+					return true;
+				break;
+			}
 		}
 
 		WorldContext* context = Application::HasInstance() ? &Application::Get().GetContext() : m_OwnedContext.get();
@@ -168,6 +247,17 @@ namespace World::Gameplay
 		m_RuntimeStarted = true;
 	}
 
+	bool GameHost::LoadLevelById(const std::string& levelId, bool additive)
+	{
+		if (!m_Initialized)
+		{
+			WLD_CORE_ERROR("GameHost::LoadLevelById('{0}') called before Init()", levelId);
+			return false;
+		}
+		// 只登记请求:下一次 Tick 的 Pump 完成读取/反序列化/激活(进度经 GetLastLevelProgress 可查)。
+		return GameApp::Get().Levels().RequestLoad(levelId, additive);
+	}
+
 	void GameHost::StopRuntime()
 	{
 		if (!m_Scene || !m_RuntimeStarted)
@@ -182,6 +272,8 @@ namespace World::Gameplay
 		if (!m_Initialized)
 			return;
 
+		// W2:推进排队的关卡加载(读盘 → 反序列化 → 激活;激活时进度回调会把场景交给宿主)。
+		GameApp::Get().Levels().Pump();
 		GameApp::Get().Tick(frameTime);
 
 		if (render)

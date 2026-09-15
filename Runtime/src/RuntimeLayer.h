@@ -17,7 +17,6 @@ namespace World
 		virtual void OnEvent(Event& event) override;
 	private:
 		bool OnWindowResize(WindowResizeEvent& e);
-		void LoadLevel();
 		void CaptureFrameIfRequested();
 	private:
 		Gameplay::GameHost m_Host;

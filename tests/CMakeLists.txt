@@ -174,6 +174,27 @@ set_tests_properties(World.Gameplay PROPERTIES
     TIMEOUT 60
 )
 
+# P2a W2:关卡清单与关卡服务(加载状态机/进度/场景栈,含 YAML 往返)。
+add_executable(WorldLevelTests LevelTests.cpp)
+target_link_libraries(WorldLevelTests PRIVATE World)
+target_compile_features(WorldLevelTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldLevelTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldLevelTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldLevelTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Level COMMAND WorldLevelTests)
+set_tests_properties(World.Level PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P1b D1:3D 相机与射线数学(纯 glm,无窗口/无设备)。
 # 注意:源文件由 P1b D1 子 agent 产出中,文件落地后再打开本目标(临时禁用以免 configure 失败)。
 set(_we_optional_test_targets "")
@@ -284,7 +305,7 @@ set_tests_properties(World.RendererHotswap PROPERTIES
     TIMEOUT 180
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

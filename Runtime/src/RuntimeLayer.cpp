@@ -25,10 +25,26 @@ namespace World
 		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
 			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
 
-		// 会话描述:项目清单是唯一事实源(与 GameHost 共用同一份内容根/启动场景)。
+		// 会话描述:项目清单是唯一事实源(内容根/启动场景/后端),也是关卡清单(levels.welevel)的定位依据。
 		Gameplay::GameAppDesc desc;
 		desc.ProjectId = "worldengine-runtime";
 		desc.FixedStepHz = 60;
+		std::string scenePath = "scenes/test.wd";
+		std::filesystem::path manifestPath;
+		if (Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+		{
+			std::string manifestError;
+			Asset::ProjectManifest manifest;
+			if (Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError))
+			{
+				if (!manifest.Id.empty())
+					desc.ProjectId = manifest.Id;
+				desc.ContentRoot = manifest.ResolveContentRoot(manifestPath);
+				desc.StartLevel = manifest.StartScene;
+				scenePath = manifest.StartScene;
+				World::Renderer::SetRequestedRenderer(manifest.Renderer);
+			}
+		}
 
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 
@@ -38,7 +54,8 @@ namespace World
 		m_Host.Init(desc);
 		m_Host.SetRenderer(m_SceneRenderer);
 
-		LoadLevel();
+		// GameHost 内部:清单中存在同一场景的关卡时走 LevelService(加载状态机/进度),否则退回路径加载。
+		m_Host.LoadLevel(scenePath, true);
 	}
 	void RuntimeLayer::OnDetach()
 	{
@@ -126,23 +143,4 @@ namespace World
 		return false;
 	}
 
-	void RuntimeLayer::LoadLevel()
-	{
-		// 启动场景:项目 manifest 的 start_scene;无 manifest 时回退默认。
-		std::string scenePath = "scenes/test.wd";
-		std::filesystem::path manifestPath;
-		if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
-		{
-			std::string error;
-			World::Asset::ProjectManifest manifest;
-			if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
-			{
-				scenePath = manifest.StartScene;
-				World::Renderer::SetRequestedRenderer(manifest.Renderer);
-			}
-		}
-		// 加载 + 无相机告警 + 视口同步 + 运行时启动都由 GameHost 统一处理
-		// (失败时保持当前场景不变,与改造前的"加载失败不换场景"一致)。
-		m_Host.LoadLevel(scenePath, true);
-	}
 }

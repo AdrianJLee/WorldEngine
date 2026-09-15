@@ -38,6 +38,9 @@ namespace World::Gameplay
 
 		// W1:按路径加载场景并(默认)进入运行时。返回是否成功。
 		bool LoadLevel(const std::string& scenePath, bool startRuntime = true);
+		// W2:按关卡清单(levels.welevel)加载;请求在下一帧 Tick 内推进,进度经 GetLastLevelProgress 可查。
+		bool LoadLevelById(const std::string& levelId, bool additive = false);
+		const LevelLoadProgress& GetLastLevelProgress() const { return m_LastLevelProgress; }
 		// 编辑器 Play/Simulate:注入运行时场景副本;startRuntime=false 用于 Simulate 语义。
 		void SetScene(const Ref<Scene>& scene, bool startRuntime);
 
@@ -52,11 +55,14 @@ namespace World::Gameplay
 
 	private:
 		void SubmitSceneRender();
+		// W2:注入 SceneLoader + 进度回调,并尝试加载 levels.welevel(可选)。
+		void InstallLevelServices(const GameAppDesc& desc);
 		// 把视口尺寸同步给场景相机:优先宿主窗口,其次注入的渲染器,最后用默认 1280x720。
 		void ApplyViewportToScene();
 
 		Ref<Scene> m_Scene;
 		Ref<SceneRenderer> m_SceneRenderer;
+		LevelLoadProgress m_LastLevelProgress;
 		std::unique_ptr<WorldContext> m_OwnedContext;
 		std::string m_LoadedPath;
 		bool m_RuntimeStarted = false;
