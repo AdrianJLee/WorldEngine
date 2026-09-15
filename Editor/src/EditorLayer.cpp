@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <shellapi.h>
 #include <stdexcept>
+#include <chrono>
 namespace World
 {
 	EditorLayer::EditorLayer()
@@ -228,11 +229,24 @@ namespace World
 
 	void EditorLayer::CaptureFrameIfRequested()
 	{
+		static const auto startTime = std::chrono::steady_clock::now();
 		static int countdown = -1;
 		if (countdown == -1)
 		{
 			const char* frames = std::getenv("WLD_CAPTURE_FRAMES");
 			countdown = frames ? std::atoi(frames) : -2;
+		}
+		// 帧数不是时间:GL 无 VSync 时帧率远高于 Vulkan(实测同一帧数下 GL 还没建立视口、
+		// Vulkan 已经跑了 6 秒)。因此先等一段墙钟时间(默认 2s,可用
+		// WLD_CAPTURE_DELAY_SECONDS 覆盖)再开始按帧倒计时,两个后端才可比。
+		if (countdown > 0)
+		{
+			const char* delayEnv = std::getenv("WLD_CAPTURE_DELAY_SECONDS");
+			const double delay = delayEnv ? std::atof(delayEnv) : 2.0;
+			const double elapsed = std::chrono::duration<double>(
+				std::chrono::steady_clock::now() - startTime).count();
+			if (elapsed < delay)
+				return;
 		}
 		if (countdown > 0)
 		{
@@ -246,6 +260,9 @@ namespace World
 		const char* pathEnv = std::getenv("WLD_CAPTURE_PATH");
 		if (!pathEnv || !pathEnv[0] || !m_SceneRenderer)
 			return;
+		WLD_CORE_INFO("[capture] scene target {0}x{1}, viewport {2}x{3}",
+			m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight(),
+			static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y));
 		m_SceneRenderer->CaptureFrame(pathEnv);
 	}
 

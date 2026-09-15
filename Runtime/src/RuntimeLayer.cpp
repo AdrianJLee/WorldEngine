@@ -87,6 +87,10 @@ namespace World
 			const char* frames = std::getenv("WLD_CAPTURE_FRAMES");
 			countdown = frames ? std::atoi(frames) : -2;
 		}
+		// 帧数不是时间:先等关卡真正加载出场景,再开始倒计时(否则 GL 无 VSync 时
+		// 会在场景就绪前就截到"只有清屏色"的画面)。
+		if (countdown > 0 && !m_Host.GetScene())
+			return;
 		if (countdown > 0)
 		{
 			--countdown;
