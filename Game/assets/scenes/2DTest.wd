@@ -1,0 +1,62 @@
+FormatVersion: 2
+Scene: 2D Test
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 210000000000000001
+    World::TagComponent:
+      Tag: Sprite A
+    World::TransformComponent:
+      Location: [-0.6, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::SpriteComponent:
+      Color: [1, 0.55, 0.12, 1]
+      Texture: ""
+      TilingFactor: 1
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 210000000000000002
+    World::TagComponent:
+      Tag: Sprite B
+    World::TransformComponent:
+      Location: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::SpriteComponent:
+      Color: [0.25, 0.85, 0.45, 1]
+      Texture: ""
+      TilingFactor: 1
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 210000000000000003
+    World::TagComponent:
+      Tag: Sprite C
+    World::TransformComponent:
+      Location: [0.6, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::SpriteComponent:
+      Color: [0.35, 0.55, 1, 1]
+      Texture: ""
+      TilingFactor: 1
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 210000000000000010
+    World::TagComponent:
+      Tag: Camera2D
+    World::TransformComponent:
+      Location: [0, 0, 5.76]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::CameraComponent:
+      Camera:
+        m_ProjectionType: 1
+        m_OrthographicZoom: 1
+        m_OrthographicNearClip: -1
+        m_OrthographicFarClip: 1
+        m_PerspectiveFOV: 45
+        m_PerspectiveNearClip: 0.100000001
+        m_PerspectiveFarClip: 100
+      Primary: true
+      FixedAspectRatio: false
