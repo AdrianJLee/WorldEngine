@@ -33,6 +33,8 @@ namespace World
 	void PropertiesPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
+		// Play/Simulate = 只读查看:字段只显示不写回,并给出提示(用户确认的语义)。
+		m_ReadOnly = host.IsReadOnlyMode();
 		Entity entity = host.GetSelectedEntity();
 		if (!entity.IsValid() || entity.GetScene() != host.GetActiveScene().get())
 		{
@@ -41,9 +43,12 @@ namespace World
 		}
 		Scene* scene = entity.GetScene();
 		Schema::SchemaRegistry& schemas = scene->GetContext().Schemas();
+		if (m_ReadOnly)
+			Label(ctx, { rect.X + 8, rect.Y + 8 }, "Play/Simulate 运行中:只读查看(暂停或退出后可编辑)",
+				theme.TextMuted, 13.0f);
 
-		const Wui::WuiRect addButton { rect.X + 8, rect.Y + 8, 140, 24 };
-		if (Button(ctx, Wui::HashId("prop.add"), addButton, "Add Component", theme))
+		const Wui::WuiRect addButton { rect.X + 8, rect.Y + (m_ReadOnly ? 30.0f : 8.0f), 140, 24 };
+		if (!m_ReadOnly && Button(ctx, Wui::HashId("prop.add"), addButton, "Add Component", theme))
 			ctx.OpenPopup(Wui::HashId("prop.add.popup"));
 
 		const Wui::WuiId addPopup = Wui::HashId("prop.add.popup");
@@ -185,7 +190,7 @@ namespace World
 				continue;
 			}
 
-			if (field.Meta.ReadOnly || !field.Get || !field.Set)
+			if (m_ReadOnly || field.Meta.ReadOnly || !field.Get || !field.Set)
 			{
 				Label(ctx, { row.X + 4, row.Y + 3 }, label, theme.TextMuted, 13.0f);
 				y += 20;

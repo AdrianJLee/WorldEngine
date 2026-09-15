@@ -29,6 +29,8 @@ namespace World
 		float DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity, const Schema::TypeSchema& schema);
 
 		PanelHost& m_Host;
+		// Play/Simulate 期间为 true:字段只显示不落值(只读查看)。
+		bool m_ReadOnly = false;
 		std::shared_ptr<Wui::WuiBox> m_Root;
 		std::vector<SectionEntry> m_Sections;
 		std::vector<std::string> m_LastSchemaNames;

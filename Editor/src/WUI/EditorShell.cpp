@@ -214,6 +214,12 @@ namespace World
 		return m_Editor.GetSaveService();
 	}
 
+	bool EditorShell::IsReadOnlyMode() const
+	{
+		// Play/Simulate 期间面板只读查看:可选中/显示,但不改场景数据。
+		return m_Editor.IsPlaying() || m_Editor.IsSimulating();
+	}
+
 	void EditorShell::ReleaseIndependentWindows()
 	{
 		// 退出时先显式销毁独立窗口:它们的 Vulkan 交换链/OS 窗口必须在

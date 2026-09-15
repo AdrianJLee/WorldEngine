@@ -40,6 +40,8 @@ namespace World
 		virtual void AttachIndependentWindowToSlot(const std::string& panel) = 0;
 		// W8:存档服务(宿主注入;未就绪时返回 nullptr,面板据此显示提示)。
 		virtual Gameplay::SaveService* GetSaveService() { return nullptr; }
+		// Play/Simulate 期间为 true:面板只读查看(可选中/显示,但不改场景数据)。
+		virtual bool IsReadOnlyMode() const { return false; }
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。
