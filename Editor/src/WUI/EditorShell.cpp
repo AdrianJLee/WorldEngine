@@ -50,6 +50,7 @@ namespace World
 			{ "stats",           EditorShell::PanelForm::Docked, {} },
 			{ "memory",          EditorShell::PanelForm::Docked, {} },
 			{ "operations",      EditorShell::PanelForm::Docked, {} },
+			{ "save",            EditorShell::PanelForm::Docked, {} },
 			// 独立窗口(用户指定):Widget Gallery 与 Input Map。
 			{ "gallery",         EditorShell::PanelForm::Independent, { 120.0f, 120.0f, 520.0f, 400.0f } },
 			{ "input",           EditorShell::PanelForm::Independent, { 660.0f, 120.0f, 440.0f, 340.0f } },
@@ -87,6 +88,7 @@ namespace World
 		m_PanelRegistry.emplace("stats", std::make_unique<StatsPanel>());
 		m_PanelRegistry.emplace("memory", std::make_unique<MemoryPanel>());
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
+		m_PanelRegistry.emplace("save", std::make_unique<SavePanel>());
 		m_PanelRegistry.emplace("input", std::make_unique<InputMapPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 
@@ -203,6 +205,11 @@ namespace World
 		if (Application::HasInstance())
 			Application::Get().GetWindow().GetPosition(&windowX, &windowY);
 		return { static_cast<float>(windowX) + 140.0f, static_cast<float>(windowY) + 100.0f, 480.0f, 340.0f };
+	}
+
+	Gameplay::SaveService* EditorShell::GetSaveService()
+	{
+		return m_Editor.GetSaveService();
 	}
 
 	void EditorShell::ReleaseIndependentWindows()

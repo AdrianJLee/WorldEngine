@@ -5,6 +5,7 @@
 #include "Panels/InputMapPanel.h"
 #include "Panels/PropertiesPanel.h"
 #include "Panels/ReadoutPanels.h"
+#include "Panels/SavePanel.h"
 #include "Panels/ViewportPanel.h"
 #include "Panels/WidgetGalleryPanel.h"
 #include "Panels/WindowsPanel.h"
@@ -78,6 +79,8 @@ namespace World
 		bool IsDeclaredPanel(const std::string& panel) const;
 		bool IsIndependentPanel(const std::string& panel) const { return FormOf(panel) == PanelForm::Independent; }
 		bool AttachSlotHighlighted() const override { return m_AttachSlotHighlight; }
+		// W8:面板层拿到存档服务(由 EditorLayer 持有并注入场景)。
+		Gameplay::SaveService* GetSaveService() override;
 		void AttachIndependentWindowToSlot(const std::string& panel) override;
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;
 		EditorCamera& GetEditorCamera() override;

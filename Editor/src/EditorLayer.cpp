@@ -51,6 +51,22 @@ namespace World
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 		m_SceneRenderer->Init();
 
+		// W8-3:编辑器侧存档服务(与 Runtime/Play 共用同一实现):项目 id 取项目清单,
+		// 场景来源是当前活动场景 —— 内容作者可以在编辑态直接保存/读取状态做验证。
+		{
+			std::string projectId = "worldengine-editor";
+			std::filesystem::path manifestPath;
+			if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+			{
+				World::Asset::ProjectManifest manifest;
+				std::string manifestError;
+				if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError) && !manifest.Id.empty())
+					projectId = manifest.Id;
+			}
+			m_SaveService = std::make_unique<Gameplay::SaveService>(projectId,
+				[this] { return m_ActiveScene.get(); });
+		}
+
 		LoadIconTextures();
 		RegisterUiTextures();
 

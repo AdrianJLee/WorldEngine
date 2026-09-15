@@ -43,6 +43,8 @@ namespace World
 		void SetSelectedEntity(Entity entity) { m_SelectedEntity = entity; }
 		EditorCamera& GetEditorCamera() { return m_EditorCamera; }
 		Ref<SceneRenderer>& GetSceneRenderer() { return m_SceneRenderer; }
+		// W8:编辑器的存档服务(场景来源 = 当前活动场景),供存档面板使用。
+		Gameplay::SaveService* GetSaveService() { return m_SaveService.get(); }
 		bool IsPlaying() const { return m_SceneState == SceneState::Play; }
 		bool IsSimulating() const { return m_SceneState == SceneState::Simulate; }
 		bool IsPaused() const { return m_ScenePaused; }
@@ -105,6 +107,7 @@ namespace World
 		void CaptureFrameIfRequested();
 	private:
 		Ref<SceneRenderer> m_SceneRenderer;
+		std::unique_ptr<Gameplay::SaveService> m_SaveService;
 		SceneRendererOptions m_RendererOptions;
 
 		Ref<Scene> m_ActiveScene;

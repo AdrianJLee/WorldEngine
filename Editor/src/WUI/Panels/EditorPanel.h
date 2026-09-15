@@ -8,6 +8,7 @@
 namespace World
 {
 	class EditorLayer;
+	namespace Gameplay { class SaveService; }
 
 	// 面板间协作窄接口:面板只依赖这些能力,不依赖 EditorLayer 全部。
 	class PanelHost
@@ -37,6 +38,8 @@ namespace World
 		virtual bool AttachSlotHighlighted() const = 0;
 		// 把独立窗口挂靠到槽位:面板进入槽位所在标签组,OS 窗口销毁。
 		virtual void AttachIndependentWindowToSlot(const std::string& panel) = 0;
+		// W8:存档服务(宿主注入;未就绪时返回 nullptr,面板据此显示提示)。
+		virtual Gameplay::SaveService* GetSaveService() { return nullptr; }
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。
