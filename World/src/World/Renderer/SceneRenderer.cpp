@@ -7,6 +7,7 @@
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Hierarchy.h"
 #include "World/RHI/RhiTextureBridge.h"
 #include "World/Core/Thread/JobSystem.h"
 
@@ -228,6 +229,9 @@ namespace World
 			return;
 
 		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		// 编辑/运行期都会改 Transform:每帧先重算层级世界矩阵,子实体才会跟随父实体
+		// (此前只有序列化/Prefab 路径求解,见 Hierarchy.h)。
+		Hierarchy::UpdateWorldTransforms(m_ActiveScene->m_Registry);
 		// 后端 NDC 适配(Y 方向 + 深度范围)统一走 ProjectionConventions.h:
 		// Vulkan 需要翻转 Y 行 **并且** 把 z∈[-1,1] 重映射到 [0,1],漏掉后者会让
 		// 近处几何被裁掉、深度比较失真(3D 深度/面朝向异常的根因)。
@@ -290,7 +294,12 @@ namespace World
 					Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
 					began = true;
 				}
-				Renderer3D::Submit(mesh, transform.Transform, meshComponent.Color);
+				// 层级实体用求解后的世界矩阵:直接提交本地矩阵会让子实体不跟随父实体
+				// (实测"移动父项子项不动")。世界矩阵由本轮统一求解(见上方 UpdateWorldTransforms)。
+				const glm::mat4* modelMatrix = &transform.Transform;
+				if (m_ActiveScene && m_ActiveScene->m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &m_ActiveScene->m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				Renderer3D::Submit(mesh, *modelMatrix, meshComponent.Color);
 			}
 			if (began)
 				Renderer3D::EndScene();

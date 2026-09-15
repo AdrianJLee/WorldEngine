@@ -453,6 +453,11 @@ namespace World::Gameplay
 		}
 
 		WLD_CORE_INFO("[save] loaded slot {} (version {})", slot, version);
+		// 读档后必须重算缓存:TransformComponent 的缓存矩阵与层级世界矩阵不会自动刷新,
+		// 否则数据虽然还原了,画面/拾取仍停在旧状态(实测"读取没效果")。
+		for (const entt::entity handle : registry.view<TransformComponent>())
+			registry.get<TransformComponent>(handle).RecalculateTransform();
+		Hierarchy::UpdateWorldTransforms(registry);
 		return true;
 	}
 
