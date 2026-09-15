@@ -56,8 +56,12 @@ namespace World
 		// 启动时清掉,避免它以挂靠标签的形式出现。
 		m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), "input"),
 			m_AttachedPanels.end());
-		if (!m_Layout.IsFloating("input") && !m_Layout.Contains("input"))
+		if (!m_Layout.IsFloating("input"))
 		{
+			// 旧布局可能把它停靠在左侧:先从停靠树摘除,避免"停靠 + 浮动"双重表示
+			// (同一面板被两套容器持有 -> 关闭时重复释放,实测崩溃)。
+			if (m_Layout.Contains("input"))
+				m_Layout.RemoveTab("input");
 			// 与 Window 菜单重开面板走同一条路径:登记浮动记录 + 直接创建独立窗口
 			// (仅登记记录不够——构造期的分组循环只处理此前已浮动的面板)。
 			const Wui::WuiRect inputRect { 140.0f, 140.0f, 440.0f, 340.0f };
