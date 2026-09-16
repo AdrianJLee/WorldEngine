@@ -85,6 +85,10 @@ namespace World
 		// 双后端截图基线必须走这条(旧的 glReadPixels 路径在 Vulkan 下只能抓到全黑)。
 		static bool CaptureTexture(const std::filesystem::path& path,
 			const Rhi::Handle<Rhi::Texture>& texture, uint32_t width, uint32_t height);
+		// 开发诊断(GL):把当前上下文里挂起的 GL 错误全部取出并记日志。
+		// "命令录了但什么都没画出来"时,GL 只会把失败原因留在错误队列里(静默丢弃 draw),
+		// 所以判定"预览/离屏通道到底画没画进去"必须先看这里。返回清掉的错误个数。
+		static int DrainGLErrors(const char* tag);
 	private:
 		struct SceneData
 		{

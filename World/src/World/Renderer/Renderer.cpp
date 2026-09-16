@@ -878,6 +878,22 @@ namespace World
 		WLD_CORE_INFO("[capture] wrote texture {0} ({1}x{2})", path.string(), width, height);
 		return true;
 	}
+
+	int Renderer::DrainGLErrors(const char* tag)
+	{
+		if (s_BackendName == "vulkan")
+			return 0;
+		int count = 0;
+		for (GLenum error = glGetError(); error != GL_NO_ERROR; error = glGetError())
+		{
+			++count;
+			if (count <= 8)
+				WLD_CORE_WARN("[gl-error] tag={0} code=0x{1}", tag ? tag : "?", error);
+		}
+		if (count > 8)
+			WLD_CORE_WARN("[gl-error] tag={0} 共 {1} 个错误(只列出前 8 个)", tag ? tag : "?", count);
+		return count;
+	}
 }
 
 

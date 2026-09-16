@@ -14,6 +14,58 @@ namespace World::Rhi::OpenGL
 {
 	namespace
 	{
+		// ---- GL 渲染诊断(无障碍化的一部分:agent 看不到屏幕,只能靠数据判断"画没画进去") ----
+		// 诊断开关只读一次(逐 draw 调 getenv 会拖慢回放)。
+		bool TraceDraws()
+		{
+			static const bool enabled = std::getenv("WLD_GL_TRACE_DRAW") != nullptr;
+			return enabled;
+		}
+
+		const char* FboDumpDir()
+		{
+			static const char* dir = std::getenv("WLD_GL_DUMP_FBO");
+			return (dir && *dir) ? dir : nullptr;
+		}
+
+		// 把"刚结束的渲染通道"的颜色附件直接写 PPM(不经过 RHI 纹理读回),用于区分
+		// "通道根本没画进去"和"纹理读回读错了对象"。只抓 ≤512² 的离屏目标,每个 FBO 最多 2 张。
+		void DumpCurrentFramebuffer(const char* dir)
+		{
+			GLint fbo = 0;
+			GLint viewport[4] = { 0, 0, 0, 0 };
+			glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+			glGetIntegerv(GL_VIEWPORT, viewport);
+			const int width = viewport[2];
+			const int height = viewport[3];
+			if (fbo <= 0 || width <= 0 || height <= 0 || width > 512 || height > 512)
+				return;
+			static int dumped[128] = {};
+			if (fbo >= 128 || dumped[fbo] >= 2)
+				return;
+			++dumped[fbo];
+			GLint attached = 0;
+			glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+				GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attached);
+			WLD_CORE_INFO("[gl-dump] fbo={0} status=0x{1} colorAttachmentTexture={2}",
+				fbo, glCheckFramebufferStatus(GL_FRAMEBUFFER), attached);
+			std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 3);
+			glReadBuffer(GL_COLOR_ATTACHMENT0);
+			glPixelStorei(GL_PACK_ALIGNMENT, 1);
+			glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+			const std::string path = std::string(dir) + "/fbo-" + std::to_string(fbo) + "-"
+				+ std::to_string(width) + "x" + std::to_string(height) + ".ppm";
+			if (FILE* file = std::fopen(path.c_str(), "wb"))
+			{
+				std::fprintf(file, "P6\n%d %d\n255\n", width, height);
+				for (int row = 0; row < height; ++row)
+					std::fwrite(pixels.data() + static_cast<size_t>(height - 1 - row) * width * 3, 1,
+						static_cast<size_t>(width) * 3, file);
+				std::fclose(file);
+				WLD_CORE_INFO("[gl-dump] wrote {0}", path);
+			}
+		}
+
 		bool IsIntegerFormat(Format format)
 		{
 			switch (format)
@@ -371,6 +423,8 @@ namespace World::Rhi::OpenGL
 					break;
 				}
 				case GLCommandKind::EndRenderPass:
+					if (const char* dumpDir = FboDumpDir())
+						DumpCurrentFramebuffer(dumpDir);
 					glBindFramebuffer(GL_FRAMEBUFFER, 0);
 					break;
 				case GLCommandKind::SetViewport:
@@ -440,6 +494,33 @@ namespace World::Rhi::OpenGL
 					const void* offset = reinterpret_cast<const void*>(static_cast<uintptr_t>(indexBufferOffset) +
 						static_cast<uintptr_t>(command.Count2) *
 						(indexType == IndexType::UInt16 ? sizeof(uint16_t) : sizeof(uint32_t)));
+					// WLD_GL_TRACE_DRAW=1:记录一次绘制的 program/VAO/FBO/视口/裁剪与关键状态。
+					// "命令录了、没报错、画面却是清屏色"时,只有这些数据能区分
+					// "几何被剔除/深度拒绝/颜色写被关/画到了别的目标"。
+					if (TraceDraws())
+					{
+						static int traced = 0;
+						if (traced < 48)
+						{
+							GLint program = 0, vao = 0, fbo = 0, viewport[4] = { 0 }, scissor[4] = { 0 };
+							glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+							glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+							glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+							glGetIntegerv(GL_VIEWPORT, viewport);
+							glGetIntegerv(GL_SCISSOR_BOX, scissor);
+							GLint depthFunc = 0, colorMask[4] = { 0 };
+							glGetIntegerv(GL_DEPTH_FUNC, &depthFunc);
+							glGetIntegerv(GL_COLOR_WRITEMASK, colorMask);
+							WLD_CORE_INFO("[gl-draw] program={0} vao={1} fbo={2} count={3} vp=({4},{5},{6},{7}) "
+								"scissor=({8},{9},{10},{11}) blend0={12} depthTest={13} depthFunc=0x{14} colorMask={15}{16}{17}{18}",
+								program, vao, fbo, command.Count0, viewport[0], viewport[1], viewport[2], viewport[3],
+								scissor[0], scissor[1], scissor[2], scissor[3],
+								glIsEnabledi(GL_BLEND, 0) != GL_FALSE ? 1 : 0,
+								glIsEnabled(GL_DEPTH_TEST) != GL_FALSE ? 1 : 0, depthFunc,
+								colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
+							++traced;
+						}
+					}
 					glDrawElementsInstancedBaseVertexBaseInstance(topology, command.Count0, type, offset,
 						command.Count1, command.Signed0, command.Count3);
 					break;
@@ -526,6 +607,9 @@ namespace World::Rhi::OpenGL
 					if (!srcGl || !dstGl)
 						break;
 					const uint32_t mip = command.Count0;
+					if (TraceDraws())
+						WLD_CORE_INFO("[gl-readback] texture={0} mip={1} bytes={2}", srcGl->GetID(), mip,
+							dstGl->GetDesc().Size - command.OffsetA);
 					glBindBuffer(GL_PIXEL_PACK_BUFFER, dstGl->GetID());
 					glGetTextureImage(srcGl->GetID(), mip, ToGLDataFormat(srcGl->GetDesc().Format),
 						ToGLDataType(srcGl->GetDesc().Format),

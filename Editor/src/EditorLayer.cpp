@@ -678,6 +678,22 @@ namespace World
 				else
 					Wui::WuiTextureRegistry::Get().Update(m_PreviewTextureId, m_PreviewRenderer->GetColorTexture());
 			}
+			// 诊断:模拟"用户点开材质编辑器"(与内容浏览器同一条 OpenMaterialEditor 路径),
+			// 用于区分"启动时由布局恢复打开"与"运行期打开"两种场景的行为差异。
+			//   WLD_OPEN_MATERIAL_AT=<帧号> WLD_OPEN_MATERIAL_PATH=<材质路径>
+			{
+				static const char* openAt = std::getenv("WLD_OPEN_MATERIAL_AT");
+				static const char* openPath = std::getenv("WLD_OPEN_MATERIAL_PATH");
+				if (openAt && *openAt && openPath && *openPath)
+				{
+					static int openFrame = 0;
+					if (++openFrame == std::atoi(openAt))
+					{
+						WLD_CORE_INFO("[diag] open material editor at frame {0}: {1}", openFrame, openPath);
+						m_Shell.OpenMaterialEditor(openPath);
+					}
+				}
+			}
 			m_Shell.OnRender(m_WuiContext);
 			m_WuiContext.EndFrame();
 			wuiBackend.Render(m_WuiContext.Commands(), m_WuiContext.OverlayCommands());

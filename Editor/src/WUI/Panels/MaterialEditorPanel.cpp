@@ -332,7 +332,12 @@ namespace World
 		// 颜色附件已在 EndRenderPass 由渲染通道隐式转换为 FinalLayout(ShaderReadOnly),
 		// 这里不再需要额外的 PipelineBarrier。
 		m_PreviewCommandBuffer->End();
+		const bool checkGlErrors = std::getenv("WLD_GL_ERRORS") != nullptr;
+		if (checkGlErrors)
+			Renderer::DrainGLErrors("preview-before-submit");
 		Renderer::SubmitScene(m_PreviewCommandBuffer, m_PreviewColor);
+		if (checkGlErrors)
+			Renderer::DrainGLErrors("preview-after-submit");
 		CapturePreviewTextureSequence();
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (m_PreviewTextureId == 0 || registry.Generation() != m_UiTextureGeneration)
