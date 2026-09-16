@@ -294,6 +294,7 @@ namespace World
 		const uint32_t slotBase = Renderer3D::ReserveSlotBase(
 			static_cast<uint32_t>(Wui::HashId(m_PanelId.c_str()) ^ 0x9E37u));
 		const uint32_t previewIndex = Renderer3D::SubmitAtSlot(slotBase, m_PreviewSphere, m_Material, glm::mat4(1.0f), -1);
+		(void)previewIndex;
 		if (std::getenv("WLD_TRACE_3D"))
 		{
 			static int tracedPreviewSlots = 0;
@@ -485,7 +486,13 @@ namespace World
 		y += 16.0f;
 		if (Wui::SearchableCombo(ctx, Wui::HashId("material.albedo"), { x, y, width, 22.0f }, "",
 			albedoOptions, m_AlbedoPickIndex, theme))
-			m_Material->SetAlbedoTexture(m_AlbedoPickIndex <= 0 ? std::string() : albedoOptions[m_AlbedoPickIndex]);
+		{
+			// 只在**真的换了一张**时才写回材质:否则每帧调用会让 Revision 每帧 +1,
+			// 渲染侧每帧重建材质描述符集 → 预览逐帧闪(用户反馈"切换贴图后预览闪烁")。
+			const std::string chosen = m_AlbedoPickIndex <= 0 ? std::string() : albedoOptions[m_AlbedoPickIndex];
+			if (chosen != m_Material->GetDesc().AlbedoTexture)
+				m_Material->SetAlbedoTexture(chosen);
+		}
 		y += 28.0f;
 		std::vector<std::string> normalOptions = m_TexturePaths;
 		normalOptions.insert(normalOptions.begin(), "(无)");
@@ -493,7 +500,11 @@ namespace World
 		y += 16.0f;
 		if (Wui::SearchableCombo(ctx, Wui::HashId("material.normal"), { x, y, width, 22.0f }, "",
 			normalOptions, m_NormalPickIndex, theme))
-			m_Material->SetNormalTexture(m_NormalPickIndex <= 0 ? std::string() : normalOptions[m_NormalPickIndex]);
+		{
+			const std::string chosen = m_NormalPickIndex <= 0 ? std::string() : normalOptions[m_NormalPickIndex];
+			if (chosen != m_Material->GetDesc().NormalTexture)
+				m_Material->SetNormalTexture(chosen);
+		}
 		y += 28.0f;
 
 		// ---- 状态行 ----
