@@ -9,6 +9,7 @@
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/Widgets/WuiControls.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/Core/KeyCodes.h"
 
 #include <filesystem>
 #include <cstdio>
@@ -757,6 +758,101 @@ int main()
 				CHECK(result.CloseRect.X + result.CloseRect.W <= tag.X + tag.W);
 				ctx.EndFrame();
 			}
+		}
+
+		// D3:可搜索下拉(材质/贴图路径选择)的交互回归:
+		// 打开 → 在搜索框里点击/输入/退格 → 过滤 → 选中 → 回车确认 → Esc 关闭。
+		// 之前这里踩过"点击弹层里的搜索框被当成外部点击把弹层关掉"的坑。
+		{
+			WuiContext ctx;
+			WuiTheme theme;
+			const WuiRect rect { 100, 100, 240, 22 };
+			const std::vector<std::string> options {
+				"materials/glass_red.wmat", "materials/quadrants.wmat", "materials/satin_blue.wmat" };
+			const WuiId id = HashId("test.combo");
+			int selected = 0;
+
+			// 最小验证:先单独驱动 TextField 输入(隔离是否 SearchableCombo 的问题)。
+			{
+				std::string buffer = "abc";
+				WuiInputState input;
+				input.MousePos = { rect.X + 20, rect.Y + 10 };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				TextField(ctx, HashId("test.textfield"), rect, buffer, theme);
+				ctx.EndFrame();
+				input.MouseClicked[0] = false;
+				input.TextInput = { 's', 'a', 't' };
+				ctx.BeginFrame(input);
+				TextField(ctx, HashId("test.textfield"), rect, buffer, theme);
+				ctx.EndFrame();
+				CHECK(buffer.find("sat") != std::string::npos);
+			}
+
+			// 1) 点击下拉本体:弹层打开。
+			{
+				WuiInputState input;
+				input.MousePos = { rect.X + 20, rect.Y + rect.H * 0.5f };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				SearchableCombo(ctx, id, rect, "", options, selected, theme);
+				ctx.EndFrame();
+			}
+			CHECK(ctx.IsPopupOpen(id));
+
+			// 2) 点击弹层里的搜索框:弹层必须仍然打开(这一条曾经失败)。
+			{
+				WuiInputState input;
+				input.MousePos = { rect.X + 20, rect.Y + rect.H + 16.0f };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				SearchableCombo(ctx, id, rect, "", options, selected, theme);
+				ctx.EndFrame();
+			}
+			CHECK(ctx.IsPopupOpen(id));
+
+			// 3) 输入过滤词 "sat":应命中 satin_blue。
+			{
+				WuiInputState input;
+				input.MousePos = { rect.X + 20, rect.Y + rect.H + 16.0f };
+				input.TextInput = { 's', 'a', 't' };
+				ctx.BeginFrame(input);
+				SearchableCombo(ctx, id, rect, "", options, selected, theme);
+				ctx.EndFrame();
+			}
+			CHECK(ctx.IsPopupOpen(id));
+
+			// 4) 回车确认:选中过滤后的第一项,弹层关闭。
+			{
+				WuiInputState input;
+				input.MousePos = { rect.X + 20, rect.Y + rect.H + 16.0f };
+				input.KeyDown = { World::KeyCodes::Enter };
+				ctx.BeginFrame(input);
+				SearchableCombo(ctx, id, rect, "", options, selected, theme);
+				ctx.EndFrame();
+			}
+			CHECK(!ctx.IsPopupOpen(id));
+			CHECK(selected == 2);
+
+			// 5) 重新打开:过滤器应已重置(显示全部),Esc 关闭。
+			{
+				WuiInputState input;
+				input.MousePos = { rect.X + 20, rect.Y + rect.H * 0.5f };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				SearchableCombo(ctx, id, rect, "", options, selected, theme);
+				ctx.EndFrame();
+			}
+			CHECK(ctx.IsPopupOpen(id));
+			{
+				WuiInputState input;
+				input.MousePos = { rect.X + 20, rect.Y + rect.H + 16.0f };
+				input.KeyDown = { World::KeyCodes::Escape };
+				ctx.BeginFrame(input);
+				SearchableCombo(ctx, id, rect, "", options, selected, theme);
+				ctx.EndFrame();
+			}
+			CHECK(!ctx.IsPopupOpen(id));
 		}
 
 		std::printf("World.Wui: all checks passed\n");

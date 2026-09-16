@@ -622,7 +622,12 @@ namespace World::Wui
 	bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme)
 	{
-		std::string& filter = ctx.Persist<std::string>(id ^ 0x5A17u, std::string());
+		// 注意:过滤器状态与 TextField 的编辑状态必须用**不同**的持久化 ID。
+		// 曾经两者共用 id ^ 0x5A17:Persist 的类型检查失败后仍按错误类型解释内存,
+		// 输入时 cursor 变成垃圾值 → 访问越界直接崩溃(World.Wui 单测可复现)。
+		const WuiId filterId = id ^ 0x5A17u;
+		const WuiId editId = id ^ 0x5A19u;
+		std::string& filter = ctx.Persist<std::string>(filterId, std::string());
 		const bool open = ctx.IsPopupOpen(id);
 		const bool hovered = ctx.IsHovered(rect);
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, hovered || open ? theme.ButtonHover : theme.ButtonBg, 3.0f });
@@ -641,7 +646,7 @@ namespace World::Wui
 		{
 			filter.clear();
 			ctx.OpenPopup(id);
-			ctx.SetFocus(id ^ 0x5A17u);
+			ctx.SetFocus(editId);
 		}
 
 		bool changed = false;
@@ -679,13 +684,13 @@ namespace World::Wui
 		DrawPanelSurface(ctx, panel, theme);
 
 		const WuiRect searchRect { panel.X + 4.0f, panel.Y + 4.0f, panel.W - 8.0f, 22.0f };
-		TextField(ctx, id ^ 0x5A17u, searchRect, filter, theme);
-		// 输入框内的回车用 "输入" 语义:选中第一个匹配项。
-		bool submitted = false;
-		if (ctx.Focus() == static_cast<WuiId>(id ^ 0x5A17u) && ctx.IsKeyPressed(KeyCodes::Enter))
-			submitted = true;
+		// 注意:TextField 在回车/Esc 时会把焦点清 0(它的返回值是"输入结束"语义),
+		// 所以必须在调用**之前**记录搜索框是否有焦点,再用 Enter 判定"确认"。
+		const bool searchFocused = ctx.Focus() == static_cast<WuiId>(editId);
+		TextField(ctx, editId, searchRect, filter, theme);
+		const bool submitted = searchFocused && ctx.IsKeyPressed(KeyCodes::Enter);
 
-		float& scroll = ctx.Persist<float>(id ^ 0x5A18u, 0.0f);
+		float& scroll = ctx.Persist<float>(id ^ 0x5A1Bu, 0.0f);
 		const WuiRect listRect { panel.X + 4.0f, panel.Y + 30.0f, panel.W - 8.0f, rowH * static_cast<float>(visible) };
 		if (ctx.IsHovered(listRect) && ctx.Input().Wheel != 0.0f)
 			scroll = std::clamp(scroll - ctx.Input().Wheel * 24.0f, 0.0f,
@@ -717,6 +722,11 @@ namespace World::Wui
 		{
 			selected = matches.front();
 			changed = true;
+			ctx.ClosePopup(id);
+		}
+		else if (submitted)
+		{
+			// 没有匹配项时回车只关闭弹层,不改选中值。
 			ctx.ClosePopup(id);
 		}
 		if (visible < matches.size() && !changed)
