@@ -255,9 +255,39 @@ namespace World::Wui
 		// 旋转以 RotationQuat 为准(弧度):必须走 SetRotation,否则只改欧拉角不生效(实测"转不动")。
 		static glm::vec3 startEuler {};
 		static float startPointerAngle = 0.0f;
+		// 旋转角度必须用"鼠标射线 ∩ 环平面"求:屏幕极角在环被压扁(斜视角)时与真实角度不成比例,
+		// 三个轴会各转各的(实测"旋转是乱的")。
+		static glm::quat startRotationQuat { 1.0f, 0.0f, 0.0f, 0.0f };
+		static glm::vec3 rotatePlaneReference { 1.0f, 0.0f, 0.0f };
 		// 旋转方向符号:屏幕 Y 朝下(角度顺时针增长),而绕轴的正向是右手系 ——
 		// 轴指向相机时两者相反,必须取反,否则拖拽方向整体反着来(实测)。
 		static float rotateSign = 1.0f;
+
+		// 屏幕点 → 世界射线(用 gizmo 相机的 VP 反投影;GL 约定,深度 -1..1)。
+		const auto screenRay = [&](const glm::vec2& screen, glm::vec3* origin, glm::vec3* direction)
+		{
+			const glm::mat4 inverse = glm::inverse(camera.ViewProjection);
+			const float ndcX = (screen.x - viewport.X) / std::max(1.0f, viewport.W) * 2.0f - 1.0f;
+			const float ndcY = 1.0f - (screen.y - viewport.Y) / std::max(1.0f, viewport.H) * 2.0f;
+			const glm::vec4 nearClip = inverse * glm::vec4 { ndcX, ndcY, -1.0f, 1.0f };
+			const glm::vec4 farClip = inverse * glm::vec4 { ndcX, ndcY, 1.0f, 1.0f };
+			const glm::vec3 start = glm::vec3(nearClip) / nearClip.w;
+			const glm::vec3 end = glm::vec3(farClip) / farClip.w;
+			*origin = start;
+			*direction = glm::normalize(end - start);
+			return true;
+		};
+		// 射线 ∩ 平面:把鼠标映射到环所在平面上的点。
+		const auto intersectPlane = [](const glm::vec3& origin, const glm::vec3& direction,
+			const glm::vec3& planePoint, const glm::vec3& planeNormal, glm::vec3* hit)
+		{
+			const float denominator = glm::dot(direction, planeNormal);
+			if (std::fabs(denominator) < 1e-5f)
+				return false;
+			const float t = glm::dot(planePoint - origin, planeNormal) / denominator;
+			*hit = origin + direction * t;
+			return true;
+		};
 
 		if (!dragging && ctx.Input().MouseClicked[0] && ctx.IsHovered(viewport))
 		{
@@ -286,6 +316,18 @@ namespace World::Wui
 				startPointerAngle = std::atan2(mouse.y - startCenter.y, mouse.x - startCenter.x);
 				rotateSign = (activeAxis >= 0 && activeAxis < 3
 					&& glm::dot(axisWorld[activeAxis], -camera.Forward) > 0.0f) ? -1.0f : 1.0f;
+				if (operation == GizmoOperation::Rotate && activeAxis >= 0 && activeAxis < 3)
+				{
+					startRotationQuat = transform.RotationQuat;
+					glm::vec3 rayOrigin {}, rayDirection {}, hit {};
+					if (screenRay(mouse, &rayOrigin, &rayDirection)
+						&& intersectPlane(rayOrigin, rayDirection, startLocation, axisWorld[activeAxis], &hit))
+					{
+						const glm::vec3 offset = hit - startLocation;
+						if (glm::length(offset) > 1e-4f)
+							rotatePlaneReference = glm::normalize(offset);
+					}
+				}
 			}
 		}
 
@@ -330,18 +372,26 @@ namespace World::Wui
 			}
 			else if (operation == GizmoOperation::Rotate)
 			{
-				// 拖动角度 = 鼠标绕(锁存的)gizmo 中心的极角差(弧度),加到对应欧拉角后
-				// 经 SetRotation 写回(同时更新 RotationQuat 与缓存矩阵)。
-				const float pointerAngle = std::atan2(mouse.y - startCenter.y, mouse.x - startCenter.x);
-				const float radians = (pointerAngle - startPointerAngle) * rotateSign;
-				glm::vec3 euler = startEuler;
-				if (activeAxis == 0)
-					euler.x += radians;
-				else if (activeAxis == 1)
-					euler.y += radians;
-				else if (activeAxis == 2)
-					euler.z += radians;
-				transform.SetRotation(euler);
+				// 正解:鼠标射线 ∩ 环平面得到平面内向量,与"按下时的参考向量"求有符号角,
+				// 再以该轴构造四元数作用到按下时的姿态上(与欧拉角/gimbal 无关)。
+				glm::vec3 rayOrigin {}, rayDirection {}, hit {};
+				if (activeAxis >= 0 && activeAxis < 3
+					&& screenRay(mouse, &rayOrigin, &rayDirection)
+					&& intersectPlane(rayOrigin, rayDirection, startLocation, axisWorld[activeAxis], &hit))
+				{
+					const glm::vec3 current = hit - startLocation;
+					if (glm::length(current) > 1e-4f)
+					{
+						const glm::vec3 currentNormalized = glm::normalize(current);
+						const glm::vec3 axis = axisWorld[activeAxis];
+						const float angle = std::atan2(
+							glm::dot(glm::cross(rotatePlaneReference, currentNormalized), axis),
+							glm::dot(rotatePlaneReference, currentNormalized));
+						const glm::quat delta = glm::angleAxis(angle, axis);
+						transform.SetRotationQuat(delta * startRotationQuat);
+						transform.RecalculateTransform();
+					}
+				}
 			}
 
 			if (operation != GizmoOperation::Rotate)
