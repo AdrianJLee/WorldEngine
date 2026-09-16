@@ -345,6 +345,14 @@ namespace World
 		// B3:每实体的顶点变换(纯数学,不触碰批次状态机)按阈值并行;
 		// 批次写入仍按原顺序在主线程执行,绘制顺序与像素结果与串行版本一致。
 		constexpr size_t kParallelPrepThreshold = 64;
+		// 2D 精灵也要走层级世界矩阵:子实体跟随父实体。旧实现直接用子实体的**局部**矩阵,
+		// 表现为"移动父项、子项不动"(用户 2026-09-16 反馈,3D 网格路径早已用世界矩阵)。
+		const auto spriteMatrixOf = [this](entt::entity entity, const TransformComponent& transform) -> const glm::mat4&
+		{
+			if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
+				return world->Matrix;
+			return transform.Transform;
+		};
 		{
 			auto group = m_ActiveScene->m_Registry.group<TransformComponent>(entt::get<SpriteComponent>);
 			std::vector<entt::entity> entities;
@@ -356,8 +364,10 @@ namespace World
 				std::vector<glm::mat4> transforms(count);
 				std::vector<std::array<glm::vec3, 4>> positions(count);
 				for (size_t i = 0; i < count; i++)
-					transforms[i] = std::get<0>(
-						group.get<TransformComponent, SpriteComponent>(entities[i])).Transform;
+				{
+					const auto& transform = std::get<0>(group.get<TransformComponent, SpriteComponent>(entities[i]));
+					transforms[i] = spriteMatrixOf(entities[i], transform);
+				}
 
 				JobSystem::ParallelFor(static_cast<uint32_t>(count), 32, [&](uint32_t i)
 				{
@@ -376,7 +386,7 @@ namespace World
 				for (auto entity : entities)
 				{
 					auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
-					Renderer2D::DrawQuadCore(transform.Transform, sprite.Texture, sprite.Color, nullptr,
+					Renderer2D::DrawQuadCore(spriteMatrixOf(entity, transform), sprite.Texture, sprite.Color, nullptr,
 						sprite.TilingFactor, static_cast<uint32_t>(entity));
 				}
 			}

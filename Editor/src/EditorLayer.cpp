@@ -8,6 +8,7 @@
 #include "World/Core/Vfs/DirectoryProvider.h"
 #include "World/Core/Vfs/PackageProvider.h"
 #include "World/Modules/GameModuleHost.h"
+#include "World/Scene/Hierarchy.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/WUI/WuiTextureRegistry.h"
@@ -112,6 +113,65 @@ namespace World
 		m_EditorCamera3D = EditorCamera3D(60.0f, 1.6f / 0.9f, 0.1f, 2000.0f, 12.0f);
 		m_EditorCamera3D.SetViewportSize(1280, 720);
 		m_Viewport3D = std::getenv("WLD_VIEWPORT_3D") != nullptr;
+
+		// 开发验证:WLD_HIERARCHY_DEMO=1 现场造一个"父精灵 + 子精灵"的最小层级
+		// (子实体局部偏移 0.4):验证 2D 精灵子节点跟随父节点 —— 渲染路径必须消费
+		// WorldTransformComponent,而不是子实体自己的局部矩阵。
+		// 开发验证:WLD_HIERARCHY_DEMO=1 把场景里名为 "Sprite B" 的实体挂到 "Sprite A" 下
+		// (B 的局部变换保持不变)。用于验证 2D 精灵子节点跟随父节点:
+		// 修复前 B 画在局部位置(画面中央),修复后画在 A+B 的世界位置(A 的左侧)。
+		if (std::getenv("WLD_HIERARCHY_DEMO") && m_ActiveScene)
+		{
+			Entity parent, child;
+			const auto& registry = static_cast<const Scene*>(m_ActiveScene.get())->GetRegistry();
+			for (const entt::entity handle : registry.view<TagComponent>())
+			{
+				const std::string& tag = registry.get<TagComponent>(handle).Tag;
+				if (tag == "Sprite A")
+					parent = Entity(m_ActiveScene.get(), handle);
+				else if (tag == "Sprite B")
+					child = Entity(m_ActiveScene.get(), handle);
+			}
+			if (child.IsValid() && parent.IsValid())
+			{
+				m_ActiveScene->DeferStructuralChange([&child, &parent](Scene& scene)
+				{
+					Hierarchy::SetParent(scene.GetRegistry(), static_cast<entt::entity>(child),
+						static_cast<entt::entity>(parent));
+				});
+				WLD_CORE_INFO("[dev] hierarchy demo: '{0}' (handle={1}) is now a child of '{2}' (handle={3})",
+					"Sprite B", static_cast<uint32_t>(static_cast<entt::entity>(child)),
+					"Sprite A", static_cast<uint32_t>(static_cast<entt::entity>(parent)));
+			}
+			else
+			{
+				// 兜底:按句柄取前两个精灵(2DTest 的 A/B 就是 0/1)。标签查询在
+				// 场景刚反序列化时可能还没填好,这里保证验证脚本总能成立。
+				int found = 0;
+				for (const entt::entity handle : registry.view<SpriteComponent>())
+				{
+					if (found == 0)
+						parent = Entity(m_ActiveScene.get(), handle);
+					else if (found == 1)
+						child = Entity(m_ActiveScene.get(), handle);
+					if (++found >= 2)
+						break;
+				}
+				if (child.IsValid() && parent.IsValid())
+				{
+					m_ActiveScene->DeferStructuralChange([&child, &parent](Scene& scene)
+					{
+						Hierarchy::SetParent(scene.GetRegistry(), static_cast<entt::entity>(child),
+							static_cast<entt::entity>(parent));
+					});
+					WLD_CORE_INFO("[dev] hierarchy demo (by handle): child={0} -> parent={1}",
+						static_cast<uint32_t>(static_cast<entt::entity>(child)),
+						static_cast<uint32_t>(static_cast<entt::entity>(parent)));
+				}
+				else
+					WLD_CORE_WARN("[dev] hierarchy demo: fewer than two sprites in the scene");
+			}
+		}
 	}
 
 	// 图标是旧式(GL)纹理:窗口/上下文重建后必须重新加载,否则渲染出的图标会错乱。
