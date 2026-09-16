@@ -152,21 +152,56 @@ namespace World::Wui
 		// ---- 命中判定(先算,再决定高亮与拖拽)----
 		const glm::vec2 mouse = ctx.Input().MousePos;
 		int hoveredAxis = -1;
+		int hoveredRing = -1;
+		// 环到鼠标的最短距离(折线逐段):高亮、拾取、拖拽共用同一判定,
+		// 避免"看着在这个环上却不亮/点不中"。
+		const auto ringDistanceFor = [&](int axisIndex)
+		{
+			const auto ring = ringRadiusFor(axisIndex);
+			float best = 1e9f;
+			for (int s = 0; s < kRingSegments; ++s)
+			{
+				const glm::vec2& a = ring[s];
+				const glm::vec2& b = ring[(s + 1) % kRingSegments];
+				const glm::vec2 ab = b - a;
+				const float lengthSquared = glm::dot(ab, ab);
+				const float t = lengthSquared > 1e-6f
+					? glm::clamp(glm::dot(mouse - a, ab) / lengthSquared, 0.0f, 1.0f) : 0.0f;
+				best = std::min(best, glm::length(mouse - (a + ab * t)));
+			}
+			return best;
+		};
 		if (ctx.IsHovered(viewport))
 		{
-			for (int i = 0; i < 3; ++i)
+			if (operation == GizmoOperation::Rotate)
 			{
-				if (!axisValid[i])
-					continue;
-				const glm::vec2 toMouse = mouse - center;
-				const float along = glm::dot(toMouse, axisScreen[i]);
-				if (along < 10.0f || along > kAxisPixels + 12.0f)
-					continue;
-				const glm::vec2 closest = center + axisScreen[i] * along;
-				if (glm::length(mouse - closest) <= kPickTolerance)
+				float bestDistance = kPickTolerance + 4.0f;
+				for (int i = 0; i < 3; ++i)
 				{
-					hoveredAxis = i;
-					break;
+					const float distance = ringDistanceFor(i);
+					if (distance <= bestDistance)
+					{
+						bestDistance = distance;
+						hoveredRing = i;
+					}
+				}
+			}
+			else
+			{
+				for (int i = 0; i < 3; ++i)
+				{
+					if (!axisValid[i])
+						continue;
+					const glm::vec2 toMouse = mouse - center;
+					const float along = glm::dot(toMouse, axisScreen[i]);
+					if (along < 10.0f || along > kAxisPixels + 12.0f)
+						continue;
+					const glm::vec2 closest = center + axisScreen[i] * along;
+					if (glm::length(mouse - closest) <= kPickTolerance)
+					{
+						hoveredAxis = i;
+						break;
+					}
 				}
 			}
 		}
@@ -184,12 +219,13 @@ namespace World::Wui
 
 		for (const int i : order)
 		{
-			const WuiColor color = (hoveredAxis == i) ? kHighlight : kAxisColors[i];
+			const bool hovered = (operation == GizmoOperation::Rotate) ? (hoveredRing == i) : (hoveredAxis == i);
+			const WuiColor color = hovered ? kHighlight : kAxisColors[i];
 			if (operation == GizmoOperation::Rotate)
 			{
 				const auto ring = ringRadiusFor(i);
 				for (int s = 0; s < kRingSegments; ++s)
-					PushLine(ctx, ring[s], ring[(s + 1) % kRingSegments], color, 2.5f);
+					PushLine(ctx, ring[s], ring[(s + 1) % kRingSegments], color, hovered ? 3.5f : 2.5f);
 				continue;
 			}
 			if (!axisValid[i])
@@ -224,29 +260,7 @@ namespace World::Wui
 			int picked = hoveredAxis;
 			if (picked < 0 && operation == GizmoOperation::Rotate)
 			{
-				// 环命中:算鼠标到**投影环折线**的最短距离,取最近的那个环。
-				// (此前用"到中心的距离 ≈ 半径"近似,投影成椭圆后完全不准 → 很难选中对应轴。)
-				float bestDistance = kPickTolerance + 2.0f;
-				for (int i = 0; i < 3; ++i)
-				{
-					const auto ring = ringRadiusFor(i);
-					float ringDistance = 1e9f;
-					for (int s = 0; s < kRingSegments; ++s)
-					{
-						const glm::vec2& a = ring[s];
-						const glm::vec2& b = ring[(s + 1) % kRingSegments];
-						const glm::vec2 ab = b - a;
-						const float lengthSquared = glm::dot(ab, ab);
-						const float t = lengthSquared > 1e-6f
-							? glm::clamp(glm::dot(mouse - a, ab) / lengthSquared, 0.0f, 1.0f) : 0.0f;
-						ringDistance = std::min(ringDistance, glm::length(mouse - (a + ab * t)));
-					}
-					if (ringDistance <= kPickTolerance && ringDistance < bestDistance)
-					{
-						bestDistance = ringDistance;
-						picked = i;
-					}
-				}
+				picked = hoveredRing;   // 与高亮同一判定:亮点即点得中
 			}
 			else if (picked < 0 && operation == GizmoOperation::Scale
 				&& glm::length(mouse - center) <= kArrowSize)
@@ -330,6 +344,7 @@ namespace World::Wui
 		// 返回值 = "本帧 gizmo 是否占用鼠标":拖拽中,或指针正悬停在手柄/圆环/中心块上。
 		// 视口面板据此**优先于实体拾取**处理点击,否则点箭头会先被"点空白清除选择"吃掉(实测拖不动)。
 		const bool hoveringHandle = hoveredAxis >= 0
+			|| hoveredRing >= 0
 			|| (operation == GizmoOperation::Scale && glm::length(mouse - center) <= kArrowSize)
 			|| (operation == GizmoOperation::Rotate && glm::length(mouse - center) <= kArrowSize);
 		return dragging || (hoveringHandle && ctx.IsHovered(viewport));
