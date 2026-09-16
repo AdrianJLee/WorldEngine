@@ -4,6 +4,7 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Scene/Components.h"
@@ -275,11 +276,22 @@ namespace World
 			}
 		}
 
-		// 3D 网格通道(D2c):MeshRendererComponent 实体用 Transform 作模型矩阵、Color 作基色。
-		// Sprite 组件保持纯 2D,不再参与 3D 提交。
+		// 3D 网格通道(D2c/D3):MeshRendererComponent 实体用 Transform 作模型矩阵;
+		// 有 MaterialPath 时走材质(贴图/粗糙度/透明),否则沿用 Color 常量色(旧行为)。
+		// 提交顺序:D3 材质排序要求"先不透明、后透明",否则透明面会遮挡其后的不透明物体。
 		{
+			struct MeshDraw
+			{
+				entt::entity Entity;
+				const glm::mat4* Model = nullptr;
+				Ref<Mesh> MeshAsset;
+				Ref<Material> MaterialAsset;
+				glm::vec4 Color { 1.0f };
+				bool Transparent = false;
+			};
+			std::vector<MeshDraw> draws;
+
 			auto meshView = m_ActiveScene->m_Registry.view<TransformComponent, MeshRendererComponent>();
-			bool began = false;
 			for (auto entity : meshView)
 			{
 				const auto& [transform, meshComponent] =
@@ -291,22 +303,51 @@ namespace World
 				if (!mesh)
 					continue;
 
-				if (!began)
+				// 材质加载失败(路径写错/文件坏)时回退到 Color 路径并给出一次警告,
+				// 不阻断整帧渲染。
+				Ref<Material> material;
+				if (!meshComponent.MaterialPath.empty())
 				{
-					Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
-					began = true;
+					std::string error;
+					material = MaterialLibrary::Get().Load(meshComponent.MaterialPath, &error);
+					if (!material)
+						WLD_CORE_WARN("材质加载失败 '{0}': {1}(回退到 Color)", meshComponent.MaterialPath, error);
 				}
+				MeshDraw draw;
+				draw.Entity = entity;
 				// 层级实体用求解后的世界矩阵:直接提交本地矩阵会让子实体不跟随父实体
 				// (实测"移动父项子项不动")。世界矩阵由本轮统一求解(见上方 UpdateWorldTransforms)。
 				const glm::mat4* modelMatrix = &transform.Transform;
-				if (m_ActiveScene && m_ActiveScene->m_Registry.all_of<WorldTransformComponent>(entity))
+				if (m_ActiveScene->m_Registry.all_of<WorldTransformComponent>(entity))
 					modelMatrix = &m_ActiveScene->m_Registry.get<WorldTransformComponent>(entity).Matrix;
-				// D7-1c:把实体 id 一起提交,写进 entity-id 附件供视口点选读回。
-				Renderer3D::Submit(mesh, *modelMatrix, meshComponent.Color,
-					static_cast<int32_t>(static_cast<uint32_t>(entity)));
+				draw.Model = modelMatrix;
+				draw.MeshAsset = mesh;
+				draw.MaterialAsset = material;
+				draw.Color = meshComponent.Color;
+				draw.Transparent = material && material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+				draws.push_back(std::move(draw));
 			}
-			if (began)
+
+			if (!draws.empty())
+			{
+				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
+				// 稳定分组:不透明按原顺序,透明随后(同组内保持遍历顺序)。
+				for (const bool transparentPass : { false, true })
+				{
+					for (const MeshDraw& draw : draws)
+					{
+						if (draw.Transparent != transparentPass)
+							continue;
+						// D7-1c:把实体 id 一起提交,写进 entity-id 附件供视口点选读回。
+						const int32_t entityId = static_cast<int32_t>(static_cast<uint32_t>(draw.Entity));
+						if (draw.MaterialAsset)
+							Renderer3D::Submit(draw.MeshAsset, draw.MaterialAsset, *draw.Model, entityId);
+						else
+							Renderer3D::Submit(draw.MeshAsset, *draw.Model, draw.Color, entityId);
+					}
+				}
 				Renderer3D::EndScene();
+			}
 		}
 
 		Renderer2D::StartBatch();

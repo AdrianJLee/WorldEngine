@@ -6,6 +6,8 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 
+#include <string>
+
 namespace World
 {
 	class EditorLayer;
@@ -48,6 +50,9 @@ namespace World
 		virtual void ToggleViewportCamera3D() {}
 		// D7-1b:gizmo 用的相机摘要(按当前视口模式由宿主提供 2D 或 3D 相机)。
 		virtual Wui::GizmoCamera GetGizmoCamera() const { return Wui::GizmoCamera {}; }
+		// D3:在材质编辑器里打开指定 .wmat(内容浏览器双击/Window 菜单共用);
+		// 未注册材质面板时为空实现(不影响其它面板)。
+		virtual void OpenMaterialEditor(const std::string& path) {}
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

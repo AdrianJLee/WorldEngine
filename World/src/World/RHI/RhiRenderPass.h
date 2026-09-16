@@ -66,7 +66,7 @@ namespace World::Rhi
 		Handle<RenderPass> RenderPass;
 		Extent2D Extent;
 		uint32_t Layers = 1;
-		std::vector<Handle<Texture>> Attachments;   // 顺序对应 RenderPassDesc::Attachments
+		std::vector<Handle<Rhi::Texture>> Attachments;   // 顺序对应 RenderPassDesc::Attachments
 		std::string DebugName;
 	};
 

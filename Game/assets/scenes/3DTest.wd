@@ -86,3 +86,45 @@ Entities:
       Primitive: cube
       Color: [0.899999976, 0.25, 0.349999994, 1]
       MeshPath: ""
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 900000000000000007
+    World::TagComponent:
+      Tag: Mesh:Cube Textured (quadrants)
+    World::TransformComponent:
+      Location: [-1.2, 0.9, 1.0]
+      Rotation: [0, 35, 0]
+      Scale: [1.8, 1.8, 1.8]
+    World::MeshRendererComponent:
+      Primitive: cube
+      Color: [1, 1, 1, 1]
+      MeshPath: ""
+      MaterialPath: "materials/quadrants.wmat"
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 900000000000000008
+    World::TagComponent:
+      Tag: Mesh:Cube Glass (transparent, behind textured)
+    World::TransformComponent:
+      Location: [-1.2, 1.2, -1.0]
+      Rotation: [0, 0, 0]
+      Scale: [2.2, 2.2, 2.2]
+    World::MeshRendererComponent:
+      Primitive: cube
+      Color: [1, 1, 1, 1]
+      MeshPath: ""
+      MaterialPath: "materials/glass_red.wmat"
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 900000000000000009
+    World::TagComponent:
+      Tag: Mesh:Cube Satin Blue (material, no texture)
+    World::TransformComponent:
+      Location: [1.1, 0.6, 1.2]
+      Rotation: [0, -15, 0]
+      Scale: [1.2, 1.2, 1.2]
+    World::MeshRendererComponent:
+      Primitive: cube
+      Color: [1, 1, 1, 1]
+      MeshPath: ""
+      MaterialPath: "materials/satin_blue.wmat"

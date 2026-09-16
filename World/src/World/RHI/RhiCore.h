@@ -13,6 +13,14 @@
 
 #define WORLD_RHI_ABI_VERSION 2u
 
+// 前置声明(全限定):RHI 头会与旧渲染器的 World::Texture 同处一个翻译单元,
+// 裸名声明会解析到父命名空间的同名类,导致成员类型悄悄变成旧类型。
+namespace World::Rhi
+{
+	class Texture;
+	class Buffer;
+}
+
 namespace World::Rhi
 {
 	template <typename T>
@@ -196,8 +204,10 @@ namespace World::Rhi
 	// 资源屏障:GL 后端可降级为 no-op,合同语义仍要求正确排序。
 	struct ResourceBarrier
 	{
-		Handle<class Texture> Texture;
-		Handle<class Buffer> Buffer;
+		// 必须写全限定名:RHI 头经常与旧渲染器的 World::Texture(World/Renderer/Texture.h)
+		// 同处一个翻译单元,裸 "Texture" 会被外层命名空间解析成旧类型(实测报错)。
+		Handle<Rhi::Texture> Texture;
+		Handle<Rhi::Buffer> Buffer;
 		ResourceState Before = ResourceState::Undefined;
 		ResourceState After = ResourceState::Undefined;
 		uint32_t BaseMipLevel = 0;

@@ -3,6 +3,7 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <cstring>
 
 namespace World
@@ -174,6 +175,58 @@ namespace World
 		vertices[2] = { {  h, 0.0f,  h }, { 0, 1, 0 }, { 1, 0 } };
 		vertices[3] = { { -h, 0.0f,  h }, { 0, 1, 0 }, { 0, 0 } };
 		desc.Indices = { 0, 2, 1, 2, 0, 3 };
+		return Create(desc);
+	}
+
+	Ref<Mesh> Mesh::CreateUnitSphere(float size, uint32_t segments, uint32_t rings)
+	{
+		// D3:材质预览的标准球。角度约定与 Mesh::CreateUnitCube/Plane 一致(外法线朝外、
+		// 绕序从外侧看逆时针),这样 3D 管线用同一套 FrontFace/剔除设置即可。
+		segments = std::max(3u, segments);
+		rings = std::max(2u, rings);
+		const float radius = size * 0.5f;
+
+		MeshDesc desc;
+		desc.DebugName = "UnitSphere";
+		desc.Layout = MakeStandardLayout();
+
+		const uint32_t vertexColumns = segments + 1;
+		const uint32_t vertexRows = rings + 1;
+		desc.VertexData.resize(sizeof(StandardVertex) * vertexColumns * vertexRows);
+		auto* vertices = reinterpret_cast<StandardVertex*>(desc.VertexData.data());
+
+		constexpr float kPi = 3.14159265358979323846f;
+		for (uint32_t row = 0; row < vertexRows; ++row)
+		{
+			const float v = static_cast<float>(row) / static_cast<float>(rings);
+			const float phi = v * kPi;                  // 0(北极) → π(南极)
+			const float sinPhi = std::sin(phi);
+			const float cosPhi = std::cos(phi);
+			for (uint32_t column = 0; column < vertexColumns; ++column)
+			{
+				const float u = static_cast<float>(column) / static_cast<float>(segments);
+				const float theta = u * 2.0f * kPi;
+				const glm::vec3 normal { sinPhi * std::cos(theta), cosPhi, sinPhi * std::sin(theta) };
+				StandardVertex& vertex = vertices[row * vertexColumns + column];
+				vertex.Position = normal * radius;
+				vertex.Normal = normal;
+				vertex.TexCoord = { u, v };
+			}
+		}
+
+		desc.Indices.reserve(static_cast<size_t>(segments) * rings * 6);
+		for (uint32_t row = 0; row < rings; ++row)
+		{
+			for (uint32_t column = 0; column < segments; ++column)
+			{
+				const uint32_t a = row * vertexColumns + column;
+				const uint32_t b = a + 1;
+				const uint32_t c = a + vertexColumns;
+				const uint32_t d = c + 1;
+				// 从外侧看逆时针(与 cube/plane 的约定一致)。
+				desc.Indices.insert(desc.Indices.end(), { a, c, b, b, c, d });
+			}
+		}
 		return Create(desc);
 	}
 }

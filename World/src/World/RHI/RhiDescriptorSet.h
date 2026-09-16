@@ -29,7 +29,7 @@ namespace World::Rhi
 		Handle<Buffer> Buffer;             // Uniform/Storage
 		uint64_t BufferOffset = 0;
 		uint64_t BufferRange = 0;          // 0 = 全尺寸
-		Handle<Texture> Texture;           // Sampled/Storage/Input
+		Handle<Rhi::Texture> Texture;      // Sampled/Storage/Input
 		Handle<Sampler> Sampler;           // 独立 Sampler(可选)
 		uint32_t BaseMipLevel = 0;
 		uint32_t MipLevelCount = 1;

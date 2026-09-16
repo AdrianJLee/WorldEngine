@@ -1,0 +1,11 @@
+# WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。
+FormatVersion: 1
+Name: "Glass Red"
+BaseColor: [1, 0.15, 0.15, 0.45]
+Metallic: 0
+Roughness: 0.1
+Emissive: [0, 0, 0]
+AlbedoTexture: ""
+NormalTexture: ""
+BlendMode: Transparent
+DoubleSided: false

@@ -54,6 +54,8 @@ namespace World
 		// 便捷构造(编辑器默认物体与测试用)。
 		static Ref<Mesh> CreateUnitCube(float size = 1.0f);
 		static Ref<Mesh> CreateUnitPlane(float size = 1.0f);
+		// D3:材质预览用的标准球(UV 球,半径 = size/2,经纬分段)。
+		static Ref<Mesh> CreateUnitSphere(float size = 1.0f, uint32_t segments = 32, uint32_t rings = 16);
 
 		// 标准布局:location0=Position(float3) / 1=Normal(float3) / 2=TexCoord(float2),stride 32。
 		static MeshVertexLayout MakeStandardLayout();

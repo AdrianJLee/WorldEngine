@@ -306,6 +306,15 @@ namespace World
 		}
 		if (path.extension() == ".wd")
 			m_Host.OpenScene(path);
+		else if (path.extension() == ".wmat")
+		{
+			// D3:材质资产双击 → 材质编辑器(独立窗口)载入。
+			// 面板/渲染侧都按"相对 Game/assets"的路径引用,这里转成同一约定。
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			m_Host.OpenMaterialEditor(ec ? path.generic_string() : relative.generic_string());
+		}
 		else
 		{
 			const std::string cmd = "start \"\" \"" + std::filesystem::absolute(path).string() + "\"";

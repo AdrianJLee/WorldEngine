@@ -2,6 +2,7 @@
 
 #include "World/Core/Export.h"
 #include "World/RHI/Rhi.h"
+#include "World/Renderer/Material.h"
 #include "World/Renderer/Mesh.h"
 
 #include <glm/glm.hpp>
@@ -23,10 +24,20 @@ namespace World
 
 		// 开始一个 3D 批次:viewProjection 已按后端做过 NDC Y 适配。
 		static void BeginScene(const glm::mat4& viewProjection, const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer);
-		// 提交一个网格实例;返回分配到的对象序号,超出上限返回 UINT32_MAX(调用方应报错/跳帧)。
+		// 提交一个网格实例(旧接口:无材质,只用常量色,供预览/内部使用);
+		// 返回分配到的对象序号,超出上限返回 UINT32_MAX(调用方应报错/跳帧)。
 		// entityId:D7-1c 视口点选用,写进 entity-id 附件(SV_Target1);-1 = 不可拾取。
 		static uint32_t Submit(const Ref<Mesh>& mesh, const glm::mat4& transform,
 			const glm::vec4& baseColor = glm::vec4(1.0f), int32_t entityId = -1);
+
+		// D3:带材质的提交。材质为 null 时退化为"常量色"路径(与上面一致)。
+		// 透明材质走 Transparent 管线(混合 + 不写深度),由调用方负责排序(不透明先提交)。
+		static uint32_t Submit(const Ref<Mesh>& mesh, const Ref<Material>& material, const glm::mat4& transform,
+			int32_t entityId = -1);
+
+		// 材质 GPU 资源(贴图描述符集)在材质 Revision 变化时自动重建;
+		// 后端切换/设备重建后需要显式清空缓存。
+		static void InvalidateMaterialCache();
 		static void EndScene();
 
 		struct Statistics

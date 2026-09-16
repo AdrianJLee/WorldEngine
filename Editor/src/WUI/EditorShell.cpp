@@ -58,6 +58,8 @@ namespace World
 			// 独立窗口(用户指定):Widget Gallery 与 Input Map。
 			{ "gallery",         EditorShell::PanelForm::Independent, { 120.0f, 120.0f, 520.0f, 400.0f } },
 			{ "input",           EditorShell::PanelForm::Independent, { 660.0f, 120.0f, 440.0f, 340.0f } },
+			// D3 材质编辑器:默认独立窗口(用户 2026-09-16 指定),位置放在两块上方。
+			{ "material",        EditorShell::PanelForm::Independent, { 200.0f, 170.0f, 760.0f, 470.0f } },
 		};
 	}
 
@@ -96,6 +98,7 @@ namespace World
 		m_PanelRegistry.emplace("levels", std::make_unique<LevelPanel>());
 		m_PanelRegistry.emplace("input", std::make_unique<InputMapPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
+		m_PanelRegistry.emplace("material", std::make_unique<MaterialEditorPanel>());
 
 		// 恢复"上次退出时开着"的独立窗口:存档里仍有浮动记录 = 上次开着(关掉的不会自动弹出)。
 		// 按屏幕矩形分组重建:同一窗口的多个标签共享一个容器;AddFloatWindow 内部按面板去重。
@@ -1607,6 +1610,20 @@ namespace World
 	{
 		if (FloatWindowHost* host = FindFloatHost(panel))
 			host->Focus();
+	}
+
+	void EditorShell::OpenMaterialEditor(const std::string& path)
+	{
+		const auto it = m_PanelRegistry.find("material");
+		if (it == m_PanelRegistry.end())
+			return;
+		if (auto* panel = dynamic_cast<MaterialEditorPanel*>(it->second.get()))
+			panel->OpenMaterial(path);
+		// 材质编辑器默认形态是独立窗口:没开就打开(已开则只是前置焦点)。
+		if (!m_Layout.IsFloating("material"))
+			OpenIndependentPanel("material");
+		else
+			FocusIndependentWindow("material");
 	}
 
 	void EditorShell::DockBackIndependentWindow(const std::string& panel)

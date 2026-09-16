@@ -589,8 +589,6 @@ namespace World::Rhi::Vulkan
 		info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		info.bindingCount = static_cast<uint32_t>(bindings.size());
 		info.pBindings = bindings.empty() ? nullptr : bindings.data();
-		// 批绘制后端会在命令缓冲录制期间更新已绑定的描述符集(WUI 纹理/字体图集);
-		// 允许 UPDATE_AFTER_BIND,避免更新动作使在录制的命令缓冲失效。
 		std::vector<VkDescriptorBindingFlags> bindingFlags(bindings.size(),
 			VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT);
 		VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo{};
@@ -617,6 +615,10 @@ namespace World::Rhi::Vulkan
 		};
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		// 池标志必须与布局匹配:spirv-cross 为 combinedImageSampler 生成的布局带
+		// VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,池少了这个标志
+		// 会让 vkAllocateDescriptorSets 失败(返回空 set),随后 Update 直接崩
+		// (实测 VUID-VkDescriptorSetAllocateInfo-pSetLayouts-03044)。
 		poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
 		poolInfo.maxSets = 1;
 		poolInfo.poolSizeCount = 3;
@@ -629,7 +631,15 @@ namespace World::Rhi::Vulkan
 		allocInfo.descriptorPool = m_Pool;
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &nativeLayout;
-		vkAllocateDescriptorSets(device.GetNativeDevice(), &allocInfo, &m_Set);
+		const VkResult allocateResult = vkAllocateDescriptorSets(device.GetNativeDevice(), &allocInfo, &m_Set);
+		if (allocateResult != VK_SUCCESS)
+		{
+			// 分配失败时 m_Set 无效,后续 Update 会在驱动里解引用空句柄直接崩;
+			// 这里明确报错并保持 m_Set 为空,让 Update 能安全跳过。
+			WLD_CORE_ERROR("[RHI-VK] vkAllocateDescriptorSets failed (result={0}); descriptor writes will be skipped",
+				static_cast<int>(allocateResult));
+			m_Set = VK_NULL_HANDLE;
+		}
 	}
 
 	VulkanDescriptorSet::~VulkanDescriptorSet()
@@ -640,10 +650,18 @@ namespace World::Rhi::Vulkan
 
 	void VulkanDescriptorSet::Update(const std::vector<DescriptorWrite>& writes)
 	{
+		if (m_Set == VK_NULL_HANDLE)
+			return;   // 分配失败的 set:静默跳过,避免驱动解引用空句柄
 		std::vector<VkWriteDescriptorSet> out;
 		std::vector<VkDescriptorBufferInfo> buffers;
 		std::vector<VkDescriptorImageInfo> images;
 		out.reserve(writes.size());
+		// **必须预留到不会重分配**:entry.pBufferInfo/pImageInfo 指向下面容器里的元素,
+		// 边遍历边 push 一旦触发扩容,先前的指针就变悬垂 —— 驱动会读到已释放内存
+		// (实测:材质一次写 albedo+normal 两个 image info 时崩在 vkUpdateDescriptorSets,
+		//  验证层报 imageView=0xDDDDDDDD/imageLayout=堆毒)。
+		buffers.reserve(writes.size());
+		images.reserve(writes.size());
 		for (const DescriptorWrite& write : writes)
 		{
 			VkWriteDescriptorSet entry{};

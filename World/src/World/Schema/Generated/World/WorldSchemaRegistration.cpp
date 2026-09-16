@@ -657,6 +657,17 @@ struct GeneratedAccess<World::MeshRendererComponent>
         World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
         self->MeshPath = std::get<std::string>(value);
     }
+    // D3:材质资产引用(相对内容根;空 = 用 Color 常量色)。
+    static Value Get_MaterialPath(const void* instance)
+    {
+        const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
+        return Value(self->MaterialPath);
+    }
+    static void Set_MaterialPath(void* instance, const Value& value)
+    {
+        World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
+        self->MaterialPath = std::get<std::string>(value);
+    }
     static const FieldSchema& Field_Primitive()
     {
         static const FieldSchema schema = {
@@ -711,6 +722,24 @@ struct GeneratedAccess<World::MeshRendererComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_MaterialPath()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4D4154455249414Cull },
+            "MaterialPath",
+            Kind::String,
+            &Get_MaterialPath,
+            &Set_MaterialPath,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(std::string()),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::MeshRendererComponent>();
@@ -728,6 +757,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
                 Field_Primitive(),
                 Field_Color(),
                 Field_MeshPath(),
+                Field_MaterialPath(),
             },
             &StorageBindingOf(),
             nullptr,

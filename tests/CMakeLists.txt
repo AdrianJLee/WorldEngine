@@ -240,6 +240,27 @@ set_tests_properties(World.Mesh PROPERTIES
     TIMEOUT 60
 )
 
+# D3:材质资产(解析/版本/默认/夹紧/往返)+ 材质库(缓存/保存/热重载)。
+add_executable(WorldMaterialTests MaterialTests.cpp)
+target_link_libraries(WorldMaterialTests PRIVATE World)
+target_compile_features(WorldMaterialTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldMaterialTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldMaterialTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldMaterialTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Material COMMAND WorldMaterialTests)
+set_tests_properties(World.Material PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P2a W7:输入映射资产 + InputService(动作/轴/多玩家/边沿判定)。
 add_executable(WorldInputTests InputTests.cpp)
 target_link_libraries(WorldInputTests PRIVATE World)
@@ -470,7 +491,7 @@ set_tests_properties(World.Behavior PROPERTIES
     TIMEOUT 60
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

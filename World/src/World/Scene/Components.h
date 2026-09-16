@@ -174,11 +174,15 @@ namespace World
 		std::string Primitive = "cube";
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
 		std::string MeshPath;
+		// D3:材质资产路径(相对 Game/assets,形如 materials/steel.wmat)。
+		// 空 = 旧行为:用上面的 Color 直接作为基色。
+		std::string MaterialPath;
 
 		WE_SCHEMA_BODY(World, MeshRendererComponent, Component)
 			WE_FIELD(Primitive, String);
 			WE_FIELD(Color, Vec4);
 			WE_FIELD(MeshPath, String);
+			WE_FIELD(MaterialPath, String);
 		WE_SCHEMA_END
 	};
 
