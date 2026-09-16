@@ -273,6 +273,9 @@ namespace World
 		// 开发验证:像素基线截图(与 Runtime 同名开关)。走的是后端无关的 RHI 读回,
 		// Vulkan/GL 都能抓到本帧场景颜色附件。
 		CaptureFrameIfRequested();
+		// 点选校验必须在场景渲染之后:m_HasRenderedScene 在 OnUpdate 开头被复位,
+		// 放在前面会让 GetEntityAtMousePosition 直接早退(等于没测)。
+		RunPickCheck();
 	}
 
 	void EditorLayer::CaptureFrameIfRequested()
@@ -361,6 +364,81 @@ namespace World
 		}
 		WLD_CORE_INFO("[dev] hierarchy-click: invoked row 0 click after {0} Play frames", m_DevClickPlayFrames);
 		m_DevClickVerifyCountdown = 3;
+	}
+
+	void EditorLayer::RunPickCheck()
+	{
+		// D7-1c 自动化:WLD_PICK_AT="x,y;x,y;…"(视口局部坐标,左上角原点)。
+		// 渲染稳定后逐点拾取并打印 handle,随即退出 —— 双后端跑同一条命令,
+		// 输出必须逐点一致(否则就是行序/读回路径不对)。
+		if (m_DevPickFrames == -1)
+		{
+			const char* spec = std::getenv("WLD_PICK_AT");
+			if (!spec || !spec[0])
+			{
+				m_DevPickFrames = -2; // 未启用
+				return;
+			}
+			const char* framesEnv = std::getenv("WLD_PICK_FRAMES");
+			m_DevPickFrames = framesEnv ? std::atoi(framesEnv) : 30;
+			if (m_DevPickFrames < 3)
+				m_DevPickFrames = 3;
+			std::string text(spec);
+			size_t start = 0;
+			while (start <= text.size())
+			{
+				const size_t end = text.find(';', start);
+				const std::string point = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+				float x = 0.0f, y = 0.0f;
+				if (std::sscanf(point.c_str(), "%f,%f", &x, &y) == 2)
+					m_DevPickPoints.push_back({ x, y });
+				if (end == std::string::npos)
+					break;
+				start = end + 1;
+			}
+			if (m_DevPickPoints.empty())
+			{
+				WLD_CORE_ERROR("[dev] WLD_PICK_AT has no valid 'x,y' point: {0}", text);
+				m_DevPickFrames = -2;
+				return;
+			}
+		}
+		if (m_DevPickFrames == -2 || m_SceneState != SceneState::Edit)
+			return;
+		if (++m_DevPickFrameCount < m_DevPickFrames)
+			return;
+		// 帧数不够可靠:GL 无 VSync 时 40 帧可能只花 0.04s,视口目标的重建节流(0.1s)还没生效,
+		// 读回的 texel 与坐标会对不上。这里再等一段墙钟时间(默认 1s)。
+		{
+			static const auto s_Start = std::chrono::steady_clock::now();
+			const char* delayEnv = std::getenv("WLD_PICK_DELAY_SECONDS");
+			const double delay = delayEnv ? std::atof(delayEnv) : 1.0;
+			const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - s_Start).count();
+			if (elapsed < delay)
+				return;
+		}
+
+		for (const glm::vec2& point : m_DevPickPoints)
+		{
+			static bool s_EnvLogged = false;
+			if (!s_EnvLogged)
+			{
+				s_EnvLogged = true;
+				WLD_CORE_INFO("[dev] pick env: backend={0} window={1}x{2} viewport={3}x{4} target={5}x{6} bounds=({7},{8})-({9},{10})",
+					Renderer::GetBackendName(),
+					Application::Get().GetWindow().GetWidth(), Application::Get().GetWindow().GetHeight(),
+					static_cast<int>(m_ViewportSize.x), static_cast<int>(m_ViewportSize.y),
+					m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight(),
+					static_cast<int>(m_ViewportBounds[0].x), static_cast<int>(m_ViewportBounds[0].y),
+					static_cast<int>(m_ViewportBounds[1].x), static_cast<int>(m_ViewportBounds[1].y));
+			}
+			const Entity picked = GetEntityAtMousePosition(point);
+			WLD_CORE_INFO("[dev] pick at ({0},{1}) -> handle={2} valid={3}",
+				static_cast<int>(point.x), static_cast<int>(point.y),
+				picked.IsValid() ? static_cast<uint32_t>(static_cast<entt::entity>(picked)) : 0u,
+				picked.IsValid() ? 1 : 0);
+		}
+		Application::Get().Close();
 	}
 
 
@@ -777,8 +855,14 @@ namespace World
 		if (size.x > 0 && size.y > 0 && (m_ViewportSize.x != size.x || m_ViewportSize.y != size.y))
 		{
 			// 相机宽高比即时跟随,渲染目标延迟重建(见 OnUpdate)。
-			m_PendingViewportSize = size;
-			m_ViewportResizeDelay = 0.1f;
+			// 注意:节流窗口只在**尺寸变化时**重置。每帧无条件重置会让它永远不到期
+			// (帧间隔 < 0.1s 时,m_ViewportSize 又是在到期后才更新 → 死循环,
+			// 表现是 GL 无 VSync 下视口目标从不重建、尺寸永远停在初始值)。
+			if (m_PendingViewportSize != size)
+			{
+				m_PendingViewportSize = size;
+				m_ViewportResizeDelay = 0.1f;
+			}
 			m_EditorCamera.SetViewportSize(size.x, size.y);
 			m_EditorCamera3D.SetViewportSize(static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y));
 		}
@@ -837,20 +921,24 @@ namespace World
 
 		// 获取鼠标在屏幕上的绝对位置
 		glm::vec2 viewportSizeAvail = { m_ViewportBounds[1].x - m_ViewportBounds[0].x, m_ViewportBounds[1].y - m_ViewportBounds[0].y };
+		if (viewportSizeAvail.x <= 0.0f || viewportSizeAvail.y <= 0.0f)
+			return {};
 
-		// 转换到视口局部坐标 (0,0) 是左上角
-
-		// 翻转 Y 轴：GL 像素读回的 (0,0) 在左下角，UI 视口坐标在左上角
-		int mouseX = (int)viewportLocal.x;
-		int mouseY = (int)(viewportSizeAvail.y - viewportLocal.y);
+		// D7-1c:拾取走 SceneRenderer 的后端无关读回(左上角原点,内部处理 GL/VK 行序),
+		// 不再依赖 Framebuffer::ReadPixel —— 那条只有 OpenGL 实现,Vulkan 下拾取是坏的。
+		// 视口尺寸与渲染目标尺寸理论上一致,这里按比例换算以防两侧短暂不同步(拖分隔条)。
+		const float scaleX = static_cast<float>(m_SceneRenderer->GetWidth()) / viewportSizeAvail.x;
+		const float scaleY = static_cast<float>(m_SceneRenderer->GetHeight()) / viewportSizeAvail.y;
+		const int mouseX = static_cast<int>(viewportLocal.x * scaleX);
+		const int mouseY = static_cast<int>(viewportLocal.y * scaleY);
 
 		int pixelData = -1;
 		// 边界检查：只有当鼠标在黑色内容区内时才读取
-		if (mouseX >= 0 && mouseY >= 0 && mouseX < (int)viewportSizeAvail.x && mouseY < (int)viewportSizeAvail.y)
-		{
-			pixelData = m_SceneRenderer->GetTargetFramebuffer()->ReadPixel(1, mouseX, mouseY);
-			//WLD_CORE_TRACE("Pixel Data at ({0}, {1}): {2}", mouseX, mouseY, pixelData);
-		}
+		if (mouseX >= 0 && mouseY >= 0 && mouseX < (int)m_SceneRenderer->GetWidth() && mouseY < (int)m_SceneRenderer->GetHeight())
+			pixelData = m_SceneRenderer->ReadEntityIdAt(mouseX, mouseY);
+		if (std::getenv("WLD_TRACE_UI"))
+			WLD_CORE_INFO("[ui] pick viewport=({0},{1}) texel=({2},{3}) -> id={4}",
+				viewportLocal.x, viewportLocal.y, mouseX, mouseY, pixelData);
 
 		Entity result = pixelData == -1 ? Entity() : Entity(m_ActiveScene.get(), (entt::entity)pixelData);
 

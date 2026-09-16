@@ -115,6 +115,9 @@ namespace World
 		// 再等 3 帧断言选择仍属于活动场景,输出 "[dev] hierarchy-click check: PASS|FAIL" 后退出。
 		// 复现的是"Play 下点层级行 → 属性面板只有 No entity selected"这条路径。
 		void RunHierarchyClickCheck();
+		// 开发验证:WLD_PICK_AT="x,y;x,y;…"(视口局部坐标,左上角原点)在渲染稳定后逐点拾取,
+		// 打印 [dev] pick 结果并退出。用于双后端拾取回归(D7-1c:GL 与 Vulkan 必须一致)。
+		void RunPickCheck();
 	private:
 		Ref<SceneRenderer> m_SceneRenderer;
 		std::unique_ptr<Gameplay::SaveService> m_SaveService;
@@ -190,6 +193,10 @@ namespace World
 		int m_DevClickFramesAfterPlay = -1;
 		int m_DevClickPlayFrames = 0;
 		int m_DevClickVerifyCountdown = -1;
+		// WLD_PICK_AT 自动化状态:-2 = 未启用。
+		int m_DevPickFrames = -1;
+		int m_DevPickFrameCount = 0;
+		std::vector<glm::vec2> m_DevPickPoints;
 	};
 
 }

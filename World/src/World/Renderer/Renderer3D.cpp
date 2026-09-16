@@ -18,8 +18,11 @@ namespace World
 		{
 			glm::mat4 Model { 1.0f };
 			glm::vec4 BaseColor { 1.0f };
+			// D7-1c:视口点选用的实体 id(SV_Target1),用 int4 承载(见 hlsl 里的说明:
+			// 标量+短向量在 HLSL 与 std140 下偏移不一致,spirv-cross 会拒绝该块)。
+			glm::ivec4 EntityId { -1, 0, 0, 0 };
 		};
-		static_assert(sizeof(ObjectUniforms) == 80, "ObjectUniforms must match Renderer3D_Solid.hlsl");
+		static_assert(sizeof(ObjectUniforms) == 96, "ObjectUniforms must match Renderer3D_Solid.hlsl");
 
 		struct MeshGpu
 		{
@@ -180,7 +183,8 @@ namespace World
 		state.ObjectIndex = 0;
 	}
 
-	uint32_t Renderer3D::Submit(const Ref<Mesh>& mesh, const glm::mat4& transform, const glm::vec4& baseColor)
+	uint32_t Renderer3D::Submit(const Ref<Mesh>& mesh, const glm::mat4& transform, const glm::vec4& baseColor,
+		int32_t entityId)
 	{
 		State& state = GetState();
 		if (!mesh || !state.CommandBuffer || !state.Pipeline)
@@ -209,7 +213,10 @@ namespace World
 		if (!state.ObjectSets[slot][index])
 			state.ObjectSets[slot][index] = Renderer::GetDevice()->CreateDescriptorSet(state.ObjectLayout);
 
-		const ObjectUniforms uniforms { transform, baseColor };
+		ObjectUniforms uniforms;
+		uniforms.Model = transform;
+		uniforms.BaseColor = baseColor;
+		uniforms.EntityId = { entityId, 0, 0, 0 };
 		state.ObjectUniformBuffers[slot][index]->SetData(&uniforms, sizeof(uniforms));
 		Rhi::DescriptorWrite write;
 		write.Binding = 1;

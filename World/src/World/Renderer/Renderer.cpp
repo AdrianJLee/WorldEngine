@@ -823,13 +823,13 @@ namespace World
 			return false;
 		}
 		file << "P6\n" << width << " " << height << "\n255\n";
-		// GL 的纹理原点在左下(读回是自下而上),Vulkan 复制出来自顶向下 —— 统一成 PPM 的顶向下。
-		const bool flipRows = s_BackendName != "vulkan";
+		// D7-1c 实测修正:两个后端的读回都是"纹理第 0 行在前",而场景目标的第 0 行就是
+		// 画面顶部(离屏不做 Y 翻转)。此前只为 GL 翻行是错的 —— 会把 GL 截图上下镜像,
+		// 导致 GL/Vulkan 的像素基线在不对称场景下必然对不上。
 		std::vector<uint8_t> row(static_cast<size_t>(width) * 3);
 		for (uint32_t y = 0; y < height; ++y)
 		{
-			const uint32_t sourceRow = flipRows ? (height - 1 - y) : y;
-			const uint8_t* source = pixels + static_cast<size_t>(sourceRow) * width * 4;
+			const uint8_t* source = pixels + static_cast<size_t>(y) * width * 4;
 			for (uint32_t x = 0; x < width; ++x)
 			{
 				row[x * 3 + 0] = source[x * 4 + 0];

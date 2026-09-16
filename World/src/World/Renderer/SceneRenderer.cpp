@@ -298,7 +298,9 @@ namespace World
 				const glm::mat4* modelMatrix = &transform.Transform;
 				if (m_ActiveScene && m_ActiveScene->m_Registry.all_of<WorldTransformComponent>(entity))
 					modelMatrix = &m_ActiveScene->m_Registry.get<WorldTransformComponent>(entity).Matrix;
-				Renderer3D::Submit(mesh, *modelMatrix, meshComponent.Color);
+				// D7-1c:把实体 id 一起提交,写进 entity-id 附件供视口点选读回。
+				Renderer3D::Submit(mesh, *modelMatrix, meshComponent.Color,
+					static_cast<int32_t>(static_cast<uint32_t>(entity)));
 			}
 			if (began)
 				Renderer3D::EndScene();
@@ -436,6 +438,96 @@ namespace World
 		// 走后端无关的 RHI 读回:GL 的延迟命令列表与 Vulkan 的呈现路径下,
 		// 旧的 glReadPixels 版本分别只能抓到清屏色与全黑。
 		Renderer::CaptureTexture(path, m_ColorTexture, m_Width, m_Height);
+		// 诊断/验证(D7-1c):WLD_CAPTURE_ENTITY=<路径> 时把 entity-id 附件一起读回。
+		// 附件是 R32_SINT:0xFFFFFFFF(-1)读成白色 = 该像素没有实体,其它值就是实体句柄。
+		if (const char* entityPath = std::getenv("WLD_CAPTURE_ENTITY"))
+			Renderer::CaptureTexture(entityPath, m_EntityTexture, m_Width, m_Height);
+	}
+
+	// D7-1c:视口点选的后端无关读回。entity-id 附件是 R32_SINT 颜色附件,一帧结束停在
+	// ColorAttachment(见 Init() 里 RenderPassAttachment::FinalLayout)。这里复用截图那条
+	// RHI 通路(CopyTextureToBuffer + Map):整张附件拷到 host-visible buffer 后取目标像素。
+	// 旧实现走 Framebuffer::ReadPixel(glReadPixels),Vulkan 下读不到东西。
+	// 点击是低频操作,因此接受一次 WaitIdle + 全附件拷贝的代价。
+	int32_t SceneRenderer::ReadEntityIdAt(int32_t x, int32_t y)
+	{
+		if (!m_Device || !m_EntityTexture || m_Width == 0 || m_Height == 0)
+			return -1;
+		if (x < 0 || y < 0 || x >= static_cast<int32_t>(m_Width) || y >= static_cast<int32_t>(m_Height))
+			return -1;
+
+		Rhi::BufferDesc readbackDesc;
+		readbackDesc.Size = static_cast<uint64_t>(m_Width) * m_Height * 4;
+		readbackDesc.Usage = Rhi::BufferUsageTransferDst;
+		readbackDesc.Memory = Rhi::MemoryHint::HostVisible;
+		readbackDesc.DebugName = "PickReadback";
+		Rhi::Handle<Rhi::Buffer> readback = m_Device->CreateBuffer(readbackDesc);
+		if (!readback)
+		{
+			WLD_CORE_ERROR("[pick] failed to create readback buffer");
+			return -1;
+		}
+		// 与截图同样复用队列:每次点选都建队列会泄漏后端对象。
+		static Rhi::Handle<Rhi::CommandQueue> s_PickQueue;
+		if (!s_PickQueue)
+			s_PickQueue = m_Device->CreateQueue("Pick");
+		if (!s_PickQueue)
+			return -1;
+		// 先等干净:保证读到的是点击前最后一次提交的附件内容。
+		m_Device->WaitIdle();
+
+		s_PickQueue->ExecuteImmediate([&](Rhi::CommandBuffer& cmd)
+		{
+			Rhi::ResourceBarrier toCopy;
+			toCopy.Texture = m_EntityTexture;
+			toCopy.Before = Rhi::ResourceState::ColorAttachment;
+			toCopy.After = Rhi::ResourceState::CopySrc;
+			cmd.PipelineBarrier({ toCopy });
+			cmd.CopyTextureToBuffer(m_EntityTexture, readback, 0);
+			Rhi::ResourceBarrier back;
+			back.Texture = m_EntityTexture;
+			back.Before = Rhi::ResourceState::CopySrc;
+			back.After = Rhi::ResourceState::ColorAttachment;
+			cmd.PipelineBarrier({ back });
+		});
+
+		const int32_t* pixels = static_cast<const int32_t*>(readback->Map());
+		if (!pixels)
+		{
+			WLD_CORE_ERROR("[pick] readback buffer is not mappable on this backend");
+			return -1;
+		}
+		// 行序:两个后端的读回都是"纹理第 0 行在前",而场景目标的第 0 行就是画面顶部
+		// (离屏不做 Y 翻转,见 ProjectionConventions.h)。实测 GL/Vulkan 的 entity 附件
+		// 读回逐行一致,因此这里**不做**任何翻转 —— 旧代码为 GL 翻一次行是错的。
+		const size_t row = static_cast<size_t>(y);
+		const int32_t id = pixels[row * m_Width + static_cast<uint32_t>(x)];
+		if (std::getenv("WLD_TRACE_UI"))
+		{
+			// 临时诊断:确认读回缓冲里到底有什么(全 -1 = 拷到的是清屏值/空缓冲)。
+			int32_t minValue = INT32_MAX, maxValue = INT32_MIN;
+			size_t nonMinusOne = 0;
+			int32_t minX = INT32_MAX, minY = INT32_MAX, maxX = -1, maxY = -1;
+			const size_t total = static_cast<size_t>(m_Width) * m_Height;
+			for (size_t i = 0; i < total; ++i)
+			{
+				const int32_t value = pixels[i];
+				minValue = std::min(minValue, value);
+				maxValue = std::max(maxValue, value);
+				if (value != -1)
+				{
+					++nonMinusOne;
+					const int32_t px = static_cast<int32_t>(i % m_Width);
+					const int32_t py = static_cast<int32_t>(i / m_Width);
+					minX = std::min(minX, px); maxX = std::max(maxX, px);
+					minY = std::min(minY, py); maxY = std::max(maxY, py);
+				}
+			}
+			WLD_CORE_INFO("[pick] readback {0}x{1} min={2} max={3} hits={4} bbox=({5},{6})-({7},{8}) at({9},{10})row={11} id={12}",
+				m_Width, m_Height, minValue, maxValue, nonMinusOne, minX, minY, maxX, maxY, x, y, row, id);
+		}
+		readback->Unmap();
+		return id;
 	}
 }
 

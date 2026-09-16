@@ -80,32 +80,37 @@ namespace World::Rhi::OpenGL
 		{
 			case Format::R8_UNORM:
 			case Format::R8_SNORM:
-			case Format::R8_UINT:
-			case Format::R8_SINT:
 			case Format::R16_UNORM:
 			case Format::R16_SNORM:
-			case Format::R16_UINT:
-			case Format::R16_SINT:
 			case Format::R16_SFLOAT:
 			case Format::R32_SFLOAT:
-			case Format::R32_UINT:
-			case Format::R32_SINT:
 			case Format::D16_UNORM:
 			case Format::D32_SFLOAT:
 				return GL_RED;
+			// 整数纹理必须配 *_INTEGER 格式:glTextureSubImage*/glGetTextureImage 用
+			// GL_RED + GL_INT 这类组合是非法枚举(读回会直接失败)。
+			// entity-id 附件(R32_SINT)的拾取读回就依赖这一条。
+			case Format::R8_UINT:
+			case Format::R8_SINT:
+			case Format::R16_UINT:
+			case Format::R16_SINT:
+			case Format::R32_UINT:
+			case Format::R32_SINT:
+				return GL_RED_INTEGER;
 			case Format::R8G8_UNORM:
 			case Format::R8G8_SNORM:
-			case Format::R8G8_UINT:
-			case Format::R8G8_SINT:
 			case Format::R16G16_UNORM:
 			case Format::R16G16_SNORM:
-			case Format::R16G16_UINT:
-			case Format::R16G16_SINT:
 			case Format::R16G16_SFLOAT:
 			case Format::R32G32_SFLOAT:
+				return GL_RG;
+			case Format::R8G8_UINT:
+			case Format::R8G8_SINT:
+			case Format::R16G16_UINT:
+			case Format::R16G16_SINT:
 			case Format::R32G32_UINT:
 			case Format::R32G32_SINT:
-				return GL_RG;
+				return GL_RG_INTEGER;
 			case Format::R32G32B32_SFLOAT:
 			case Format::R11G11B10_SFLOAT:
 				return GL_RGB;
@@ -115,18 +120,19 @@ namespace World::Rhi::OpenGL
 			case Format::R8G8B8A8_UNORM:
 			case Format::R8G8B8A8_SRGB:
 			case Format::R8G8B8A8_SNORM:
-			case Format::R8G8B8A8_UINT:
-			case Format::R8G8B8A8_SINT:
 			case Format::R16G16B16A16_UNORM:
 			case Format::R16G16B16A16_SNORM:
-			case Format::R16G16B16A16_UINT:
-			case Format::R16G16B16A16_SINT:
 			case Format::R16G16B16A16_SFLOAT:
 			case Format::R32G32B32A32_SFLOAT:
-			case Format::R32G32B32A32_UINT:
-			case Format::R32G32B32A32_SINT:
 			case Format::R10G10B10A2_UNORM:
 				return GL_RGBA;
+			case Format::R8G8B8A8_UINT:
+			case Format::R8G8B8A8_SINT:
+			case Format::R16G16B16A16_UINT:
+			case Format::R16G16B16A16_SINT:
+			case Format::R32G32B32A32_UINT:
+			case Format::R32G32B32A32_SINT:
+				return GL_RGBA_INTEGER;
 			case Format::D24_UNORM_S8_UINT:
 			case Format::D32_SFLOAT_S8_UINT:
 				return GL_DEPTH_STENCIL;

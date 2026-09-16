@@ -24,8 +24,9 @@ namespace World
 		// 开始一个 3D 批次:viewProjection 已按后端做过 NDC Y 适配。
 		static void BeginScene(const glm::mat4& viewProjection, const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer);
 		// 提交一个网格实例;返回分配到的对象序号,超出上限返回 UINT32_MAX(调用方应报错/跳帧)。
+		// entityId:D7-1c 视口点选用,写进 entity-id 附件(SV_Target1);-1 = 不可拾取。
 		static uint32_t Submit(const Ref<Mesh>& mesh, const glm::mat4& transform,
-			const glm::vec4& baseColor = glm::vec4(1.0f));
+			const glm::vec4& baseColor = glm::vec4(1.0f), int32_t entityId = -1);
 		static void EndScene();
 
 		struct Statistics

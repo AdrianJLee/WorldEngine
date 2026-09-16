@@ -32,6 +32,10 @@ cbuffer ObjectUniforms : register(b1, space1)
 {
     float4x4 u_Model;
     float4 u_BaseColor;
+    // P1b D7-1c:视口点选用的实体 id(写进 SV_Target1);-1 = 不可拾取。
+    // 用 int4 而不是 int/int3:标量+短向量在 HLSL 与 std140 下的偏移不一致,
+    // spirv-cross 会直接拒绝这个块("Buffer block cannot be expressed as std140/std430")。
+    int4 u_EntityId;
 };
 
 VS_OUTPUT VSMain(VS_INPUT input)
@@ -51,6 +55,6 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     const float3 lightDirection = normalize(float3(0.35f, -0.7f, 0.6f));
     const float lambert = saturate(dot(normalize(input.v_Normal), -lightDirection));
     output.Color = float4(u_BaseColor.rgb * (0.25f + 0.75f * lambert), u_BaseColor.a);
-    output.EntityID = -1;
+    output.EntityID = u_EntityId.x;
     return output;
 }

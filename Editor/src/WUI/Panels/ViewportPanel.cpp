@@ -76,8 +76,12 @@ namespace World
 		if (ctx.IsClicked(rect))
 			ctx.SetFocus(Wui::HashId("viewport"));
 		const bool focused = ctx.Focus() == Wui::HashId("viewport");
-		glm::vec2 bounds[2] = { { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } };
-		m_Host.SetViewportState(focused, hovered, { rect.W, rect.H }, bounds);
+		// 视口尺寸/边界取**场景图像区域**(sceneRect),不是整块面板:面板底部还有 44px 工具栏,
+		// 用面板尺寸会让渲染目标比实际显示区域高(场景被纵向拉伸),拾取与 gizmo 的
+		// 屏幕↔世界映射也会跟画面错开(它们都按 sceneRect 算)。
+		glm::vec2 bounds[2] = { { sceneRect.X, sceneRect.Y },
+			{ sceneRect.X + sceneRect.W, sceneRect.Y + sceneRect.H } };
+		m_Host.SetViewportState(focused, hovered, { sceneRect.W, sceneRect.H }, bounds);
 
 		// 先跑 gizmo:它有"鼠标占用"语义(拖拽中/悬停在手柄上),必须优先于实体拾取 ——
 		// 否则点箭头会被"点空白清空选择"吃掉,表现为"拖不动箭头"。

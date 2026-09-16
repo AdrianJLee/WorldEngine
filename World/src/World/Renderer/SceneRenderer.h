@@ -35,6 +35,10 @@ namespace World
 		Rhi::Handle<Rhi::Framebuffer> GetRhiTarget() const { return m_Framebuffer; }
 		uint32_t GetWidth() const { return m_Width; }
 		uint32_t GetHeight() const { return m_Height; }
+		// D7-1c:后端无关地读回 entity-id 附件的一个像素(视口点选用)。
+		// 坐标以**左上角为原点**(与 WUI 视口一致),越界返回 -1;
+		// 返回 -1 也表示该像素没有实体(附件清屏值就是 -1)。
+		int32_t ReadEntityIdAt(int32_t x, int32_t y);
 		// 开发验证:把颜色附件读回写 PPM。
 		void CaptureFrame(const std::filesystem::path& path) const;
 
