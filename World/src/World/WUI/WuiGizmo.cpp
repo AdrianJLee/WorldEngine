@@ -252,7 +252,8 @@ namespace World::Wui
 		static glm::vec2 startCenter {};
 		static glm::vec3 startLocation {};
 		static glm::vec3 startScale {};
-		static float startAngle = 0.0f;
+		// 旋转以 RotationQuat 为准(弧度):必须走 SetRotation,否则只改欧拉角不生效(实测"转不动")。
+		static glm::vec3 startEuler {};
 		static float startPointerAngle = 0.0f;
 
 		if (!dragging && ctx.Input().MouseClicked[0] && ctx.IsHovered(viewport))
@@ -278,7 +279,7 @@ namespace World::Wui
 					startAxisScreen[i] = axisScreen[i];
 				startLocation = transform.Location;
 				startScale = transform.Scale;
-				startAngle = transform.Rotation.z;
+				startEuler = transform.Rotation;
 				startPointerAngle = std::atan2(mouse.y - startCenter.y, mouse.x - startCenter.x);
 			}
 		}
@@ -324,18 +325,22 @@ namespace World::Wui
 			}
 			else if (operation == GizmoOperation::Rotate)
 			{
-				// 拖动角度 = 鼠标绕(锁存的)gizmo 中心的极角差,按选中轴作用到对应欧拉角。
+				// 拖动角度 = 鼠标绕(锁存的)gizmo 中心的极角差(弧度),加到对应欧拉角后
+				// 经 SetRotation 写回(同时更新 RotationQuat 与缓存矩阵)。
 				const float pointerAngle = std::atan2(mouse.y - startCenter.y, mouse.x - startCenter.x);
-				const float degrees = glm::degrees(pointerAngle - startPointerAngle);
+				const float radians = pointerAngle - startPointerAngle;
+				glm::vec3 euler = startEuler;
 				if (activeAxis == 0)
-					transform.Rotation.x = startAngle + degrees;
+					euler.x += radians;
 				else if (activeAxis == 1)
-					transform.Rotation.y = startAngle + degrees;
+					euler.y += radians;
 				else if (activeAxis == 2)
-					transform.Rotation.z = startAngle + degrees;
+					euler.z += radians;
+				transform.SetRotation(euler);
 			}
 
-			transform.RecalculateTransform();
+			if (operation != GizmoOperation::Rotate)
+				transform.RecalculateTransform();
 		}
 
 		if (dragging && ctx.Input().MouseReleased[0])
