@@ -53,6 +53,16 @@ namespace World
 			WLD_CORE_WARN("[runtime] no project.we.yaml found from cwd '{0}'; falling back to '{1}'",
 				std::filesystem::current_path().string(), scenePath);
 		}
+		// 开发/验证钩子:WLD_START_SCENE 覆盖启动场景(与编辑器同名开关一致)。
+		// 端到端验收(verify-play-vs-runtime.ps1)要靠它让 Runtime 跑指定的测试关卡;
+		// 此前 Runtime 只认清单里的 start_scene,脚本传 2DTest 时它仍在跑 3DTest。
+		if (const char* fromEnvironment = std::getenv("WLD_START_SCENE"))
+			if (fromEnvironment[0])
+			{
+				scenePath = fromEnvironment;
+				desc.StartLevel = scenePath;
+				WLD_CORE_INFO("[runtime] WLD_START_SCENE override: {0}", scenePath);
+			}
 
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 
