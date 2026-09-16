@@ -39,6 +39,9 @@ namespace World
 	private:
 		void EnsureGpuResources();
 		void ReleaseGpuResources();
+		// 无障碍诊断:按 WLD_PREVIEW_TEX_CAPTURE + WLD_SCREEN_CAPTURE_START/_EVERY/_COUNT
+		// 把预览纹理连续写成 PPM(Vulkan 下唯一能"看到"预览内容的路径)。
+		void CapturePreviewTextureSequence();
 		// 渲染预览球到离屏目标;返回可交给 WuiImage 的纹理 id(0 = 不可用)。
 		uint64_t RenderPreview();
 		void DrawToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
@@ -66,6 +69,9 @@ namespace World
 		uint32_t m_PreviewSize = 256;
 		uint64_t m_PreviewTextureId = 0;
 		uint32_t m_UiTextureGeneration = 0;
+		// 预览纹理连续抓图(WLD_PREVIEW_TEX_CAPTURE):计数与写出张数,按面板各记一份。
+		int m_PreviewCaptureFrame = 0;
+		int m_PreviewCaptureWritten = 0;
 		void* m_GpuDevice = nullptr;        // 记录资源所属设备,设备重建时整体失效
 		bool m_Orbiting = false;
 		float m_OrbitYaw = 0.6f;            // 弧度:绕 Y

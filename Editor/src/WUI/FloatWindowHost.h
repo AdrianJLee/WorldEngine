@@ -79,6 +79,12 @@ namespace World
 		void OnEvent(Event& e);
 		void RenderTabBar(Wui::WuiContext& ctx, const Wui::WuiRect& area);
 		void RenderWindowMenu(Wui::WuiContext& ctx, const Wui::WuiRect& bar);
+		// 诊断(无障碍):按 WLD_SCREEN_CAPTURE_* 把本窗口的合成画面连续写成
+		// <dir>/float-<面板>-<n>.ppm,与主窗口的 screen-<n>.ppm 配套 ——
+		// "独立窗口里在闪什么"必须能像主窗口一样被逐帧比较。
+		void CaptureScreenSequence(float width, float height);
+		int m_CaptureFrame = 0;
+		int m_CaptureWritten = 0;
 		bool m_MenuOpen = false;
 		std::string TitleOf(const std::string& panel) const;
 

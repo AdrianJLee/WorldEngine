@@ -8,6 +8,7 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 
 namespace World
@@ -119,8 +120,34 @@ namespace World
 				Renderer::CaptureDefaultFramebuffer(std::string(capturePrefix) + m_Panel + ".ppm",
 					static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y));
 		}
+		CaptureScreenSequence(size.x, size.y);
 		m_Window->SwapBuffers();
 		return true;
+	}
+
+	void FloatWindowHost::CaptureScreenSequence(float width, float height)
+	{
+		// 与主窗口同一个开关(WLD_SCREEN_CAPTURE_DIR/_START/_EVERY/_COUNT):把**独立窗口**
+		// 的最终画面也连续抓成 PPM,否则"材质预览窗口在闪"这类问题在抓图里完全看不到。
+		static const char* dir = std::getenv("WLD_SCREEN_CAPTURE_DIR");
+		if (!dir || !*dir)
+			return;
+		static int every = std::getenv("WLD_SCREEN_CAPTURE_EVERY") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_EVERY")) : 1;
+		static int start = std::getenv("WLD_SCREEN_CAPTURE_START") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_START")) : 0;
+		static int count = std::getenv("WLD_SCREEN_CAPTURE_COUNT") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_COUNT")) : 60;
+		if (every <= 0)
+			every = 1;
+		++m_CaptureFrame;
+		if (m_CaptureFrame < start || m_CaptureWritten >= count || (m_CaptureFrame - start) % every != 0)
+			return;
+		// 面板 id 含 ':'/'/' 等路径字符,文件名里统一替换(否则会写进不存在的子目录)。
+		std::string stem;
+		stem.reserve(m_Panel.size());
+		for (char c : m_Panel)
+			stem += (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_') ? c : '_';
+		const std::string path = std::string(dir) + "/float-" + stem + "-" + std::to_string(m_CaptureWritten) + ".ppm";
+		Renderer::CaptureDefaultFramebuffer(path, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+		++m_CaptureWritten;
 	}
 
 	Wui::WuiRect FloatWindowHost::ScreenRect() const

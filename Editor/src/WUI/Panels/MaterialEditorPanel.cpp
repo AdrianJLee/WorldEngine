@@ -333,6 +333,7 @@ namespace World
 		// 这里不再需要额外的 PipelineBarrier。
 		m_PreviewCommandBuffer->End();
 		Renderer::SubmitScene(m_PreviewCommandBuffer, m_PreviewColor);
+		CapturePreviewTextureSequence();
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (m_PreviewTextureId == 0 || registry.Generation() != m_UiTextureGeneration)
 		{
@@ -343,6 +344,32 @@ namespace World
 				registry.Update(m_PreviewTextureId, m_PreviewColor);
 		}
 		return m_PreviewTextureId;
+	}
+
+	void MaterialEditorPanel::CapturePreviewTextureSequence()
+	{
+		// 无障碍诊断:把**预览纹理本身**连续写成 PPM(后端无关的 RHI 读回)。
+		// 主窗口/独立窗口的整窗抓图在 Vulkan 下抓不到(glReadPixels 路径),而材质预览恰好
+		// 只在 Vulkan 下有内容,所以"预览闪不闪"必须能直接读预览纹理:
+		//   WLD_PREVIEW_TEX_CAPTURE=<目录>  + WLD_SCREEN_CAPTURE_START/_EVERY/_COUNT
+		const char* dir = std::getenv("WLD_PREVIEW_TEX_CAPTURE");
+		if (!dir || !*dir)
+			return;
+		static const int every = std::getenv("WLD_SCREEN_CAPTURE_EVERY") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_EVERY")) : 1;
+		static const int start = std::getenv("WLD_SCREEN_CAPTURE_START") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_START")) : 0;
+		static const int count = std::getenv("WLD_SCREEN_CAPTURE_COUNT") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_COUNT")) : 60;
+		const int step = every > 0 ? every : 1;
+		++m_PreviewCaptureFrame;
+		if (m_PreviewCaptureFrame < start || m_PreviewCaptureWritten >= count
+			|| (m_PreviewCaptureFrame - start) % step != 0)
+			return;
+		std::string stem;
+		for (char c : m_PanelId)
+			stem += (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_') ? c : '_';
+		const std::string path = std::string(dir) + "/preview-" + stem + "-"
+			+ std::to_string(m_PreviewCaptureWritten) + ".ppm";
+		Renderer::CaptureTexture(path, m_PreviewColor, m_PreviewSize, m_PreviewSize);
+		++m_PreviewCaptureWritten;
 	}
 
 	void MaterialEditorPanel::SaveCurrent()
