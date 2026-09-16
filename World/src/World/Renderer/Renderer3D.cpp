@@ -14,7 +14,12 @@ namespace World
 	namespace
 	{
 		// 每帧对象上限:对象 UBO/描述符集按"帧槽位 × 序号"预建,超出即拒绝(D8 用实例化替换)。
-		constexpr uint32_t kObjectsPerFrame = 32;
+		//
+		// 注意 64 而不是 32:对象序号是**跨调用方共享**的(主场景渲染器 + 各材质预览面板
+		// 依次调用 BeginScene 复位序号)。如果序号空间不够,后来者会拿不到槽位;
+		// 更隐蔽的是"序号复用"会让不同调用方争用同一份 UBO/描述符集——当两者写入的内容
+		// 不同(例如两个材质面板各自的贴图),画面就会逐帧来回闪(用户实测"预览一直闪烁")。
+		constexpr uint32_t kObjectsPerFrame = 64;
 
 		struct ObjectUniforms
 		{
@@ -445,6 +450,30 @@ namespace World
 		BindObject(state, slot, index, cached->second, pipeline, state.ObjectSets[slot][index], materialSet);
 		TraceSubmit(index, slot, cached->second.IndexCount, transform, desc.BaseColor);
 		return index;
+	}
+
+	uint32_t Renderer3D::ReserveSlotBase(uint32_t identity, uint32_t span)
+	{
+		// 预留区:序号 0..kSceneSlotCount-1 归主场景的逐帧分配(SceneRenderer),
+		// 之上按 identity 稳定映射,保证同一调用方每帧写同一批槽位。
+		constexpr uint32_t kSceneSlotCount = 16;
+		const uint32_t usable = kObjectsPerFrame > kSceneSlotCount ? kObjectsPerFrame - kSceneSlotCount : 1;
+		const uint32_t count = span == 0 ? 1 : span;
+		const uint32_t base = identity % (usable > count ? usable - count + 1 : usable);
+		return kSceneSlotCount + base;
+	}
+
+	uint32_t Renderer3D::SubmitAtSlot(uint32_t slotBase, const Ref<Mesh>& mesh, const Ref<Material>& material,
+		const glm::mat4& transform, int32_t entityId)
+	{
+		// 用固定序号提交:直接把 state.ObjectIndex 顶到 slotBase,让后续分配落在该槽位。
+		State& state = GetState();
+		if (!state.CommandBuffer || !state.Pipeline || slotBase >= kObjectsPerFrame)
+			return UINT32_MAX;
+		state.ObjectIndex = slotBase;
+		const uint32_t result = Submit(mesh, material, transform, entityId);
+		state.ObjectIndex = slotBase + 1;   // 同一调用方若还要再画一个,落在下一个槽位
+		return result;
 	}
 
 	void Renderer3D::EndScene()

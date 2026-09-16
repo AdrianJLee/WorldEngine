@@ -136,14 +136,16 @@ namespace World
 		for (size_t i = 0; i < m_MaterialPaths.size(); ++i)
 			if (m_MaterialPaths[i] == m_Path)
 				m_MaterialPickIndex = static_cast<int>(i);
+		// 贴图下拉的选项是 "(无)" + m_TexturePaths,所以选中索引要 **+1** 对齐;
+		// 之前少了这个偏移,选了一张贴图后下一帧索引回算成 0/错位 → 显示/生效成另一张。
 		m_AlbedoPickIndex = 0;
 		for (size_t i = 0; i < m_TexturePaths.size(); ++i)
 			if (m_TexturePaths[i] == desc.AlbedoTexture)
-				m_AlbedoPickIndex = static_cast<int>(i);
+				m_AlbedoPickIndex = static_cast<int>(i) + 1;
 		m_NormalPickIndex = 0;
 		for (size_t i = 0; i < m_TexturePaths.size(); ++i)
 			if (m_TexturePaths[i] == desc.NormalTexture)
-				m_NormalPickIndex = static_cast<int>(i);
+				m_NormalPickIndex = static_cast<int>(i) + 1;
 	}
 
 	void MaterialEditorPanel::ReleaseGpuResources()
@@ -286,7 +288,22 @@ namespace World
 		m_PreviewCommandBuffer->SetScissor({ 0, 0, m_PreviewSize, m_PreviewSize });
 		m_PreviewCommandBuffer->BindDescriptorSet(m_PreviewCameraSet, 0);
 		Renderer3D::BeginScene(viewProjection, m_PreviewCommandBuffer);
-		Renderer3D::Submit(m_PreviewSphere, m_Material, glm::mat4(1.0f), -1);
+		// 预览用**固定对象槽位**(按面板身份映射):否则每个面板/主场景都从序号 0 开始分配,
+		// 会争用同一份对象 UBO 与材质描述符集,两个内容不同的材质面板就会逐帧互相覆盖
+		// (用户实测:预览一直闪烁)。
+		const uint32_t slotBase = Renderer3D::ReserveSlotBase(
+			static_cast<uint32_t>(Wui::HashId(m_PanelId.c_str()) ^ 0x9E37u));
+		const uint32_t previewIndex = Renderer3D::SubmitAtSlot(slotBase, m_PreviewSphere, m_Material, glm::mat4(1.0f), -1);
+		if (std::getenv("WLD_TRACE_3D"))
+		{
+			static int tracedPreviewSlots = 0;
+			if (tracedPreviewSlots < 4)
+			{
+				tracedPreviewSlots++;
+				WLD_CORE_INFO("[material-ui] preview slot panel='{0}' base={1} objectIndex={2}",
+					m_PanelId, slotBase, previewIndex);
+			}
+		}
 		Renderer3D::EndScene();
 		m_PreviewCommandBuffer->EndRenderPass();
 		{

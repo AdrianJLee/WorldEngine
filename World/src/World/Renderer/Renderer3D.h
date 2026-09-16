@@ -41,6 +41,13 @@ namespace World
 		// 透明材质走 Transparent 管线(混合 + 不写深度),由调用方负责排序(不透明先提交)。
 		static uint32_t Submit(const Ref<Mesh>& mesh, const Ref<Material>& material, const glm::mat4& transform,
 			int32_t entityId = -1);
+		// 用**持久槽位**提交(材质预览这类"每帧都画、但只画一两个物体"的调用方):
+		// 对象序号从 slotBase 开始分配,跨帧固定,避免与主场景/其它预览争用同一份
+		// UBO 与描述符集(争用会让画面逐帧来回闪 —— 用户实测"预览一直闪烁")。
+		static uint32_t SubmitAtSlot(uint32_t slotBase, const Ref<Mesh>& mesh, const Ref<Material>& material,
+			const glm::mat4& transform, int32_t entityId = -1);
+		// 预览/调试调用方按身份取一个稳定槽位(内部做环绕与保留区处理)。
+		static uint32_t ReserveSlotBase(uint32_t identity, uint32_t span = 1);
 
 		// 材质 GPU 资源(贴图描述符集)在材质 Revision 变化时自动重建;
 		// 后端切换/设备重建后需要显式清空缓存。
