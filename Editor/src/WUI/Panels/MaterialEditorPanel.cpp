@@ -201,7 +201,11 @@ namespace World
 		color.Load = Rhi::LoadOp::Clear;
 		color.Store = Rhi::StoreOp::Store;
 		color.InitialLayout = Rhi::AttachmentLayout::Undefined;
-		color.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		// 预览纹理在本通道结束后立刻被 WUI 当采样贴图使用,所以 FinalLayout 直接声明为
+		// ShaderReadOnly:渲染通道会做隐式转换。之前声明的是 ColorAttachment,文本又要
+		// 手动转一次 ShaderReadOnly,而后端只发隐式转换(手动屏障因布局一致被跳过),
+		// 于是 UI 采样到"布局未就绪"的纹理 → 预览闪烁(且抓图读到垃圾数据)。
+		color.FinalLayout = Rhi::AttachmentLayout::ShaderReadOnly;
 		color.Clear.Color = { 0.12f, 0.13f, 0.15f, 1.0f };
 		Rhi::RenderPassAttachment entityId;
 		entityId.Format = Rhi::Format::R32_SINT;
@@ -308,13 +312,8 @@ namespace World
 		}
 		Renderer3D::EndScene();
 		m_PreviewCommandBuffer->EndRenderPass();
-		{
-			Rhi::ResourceBarrier barrier;
-			barrier.Texture = m_PreviewColor;
-			barrier.Before = Rhi::ResourceState::ColorAttachment;
-			barrier.After = Rhi::ResourceState::ShaderReadOnly;
-			m_PreviewCommandBuffer->PipelineBarrier({ barrier });
-		}
+		// 颜色附件已在 EndRenderPass 由渲染通道隐式转换为 FinalLayout(ShaderReadOnly),
+		// 这里不再需要额外的 PipelineBarrier。
 		m_PreviewCommandBuffer->End();
 		Renderer::SubmitScene(m_PreviewCommandBuffer, m_PreviewColor);
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();

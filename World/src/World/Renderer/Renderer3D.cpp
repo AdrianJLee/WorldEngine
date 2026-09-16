@@ -118,9 +118,9 @@ namespace World
 			state.CommandBuffer->BindDescriptorSet(objectSet, 1);
 			if (materialSet)
 				state.CommandBuffer->BindDescriptorSet(materialSet, 2);
-			state.CommandBuffer->BindVertexBuffer(0, mesh.VertexBuffer);
-			state.CommandBuffer->BindIndexBuffer(mesh.IndexBuffer);
-			state.CommandBuffer->DrawIndexed(mesh.IndexCount);
+		state.CommandBuffer->BindVertexBuffer(0, mesh.VertexBuffer);
+		state.CommandBuffer->BindIndexBuffer(mesh.IndexBuffer);
+		state.CommandBuffer->DrawIndexed(mesh.IndexCount);
 			state.Stats.DrawCalls++;
 			state.Stats.Triangles += mesh.IndexCount / 3;
 			(void)slot; (void)index;
