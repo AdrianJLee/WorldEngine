@@ -175,6 +175,20 @@ namespace World
 			}
 		}
 		RunHierarchyClickCheck();
+		// 开发验证:WLD_AUTOPAUSE=<进入 Play 后的帧数> 在该帧自动暂停(验证 Play 暂停态的
+		// 覆盖层/相机切换:暂停时渲染会用回编辑器相机,见本函数末尾的相机分支)。
+		if (const char* autoPauseFrames = std::getenv("WLD_AUTOPAUSE"))
+		{
+			static int devPauseCounter = 0;
+			static bool devAutoPauseDone = false;
+			const int target = std::atoi(autoPauseFrames);
+			if (!devAutoPauseDone && m_SceneState == SceneState::Play && target > 0 && ++devPauseCounter >= target)
+			{
+				devAutoPauseDone = true;
+				TogglePause();
+				WLD_CORE_INFO("[dev] WLD_AUTOPAUSE: paused after {0} Play frames", devPauseCounter);
+			}
+		}
 		//WLD_CORE_TRACE("Delta Time: {0} ({1} FPS)", ts.GetSeconds(), ts.GetFPS());
 
 		{

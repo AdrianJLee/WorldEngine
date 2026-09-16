@@ -274,11 +274,20 @@ namespace World
 				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
 				if (std::getenv("WLD_TRACE_UI"))
 				{
+					// 句柄或矩形变化时打一行(上限 40 行):Play↔暂停会换相机,矩形必须跟着变,
+					// 自动化要能同时看到两种状态的框。
 					static uint32_t lastHandle = 0;
+					static Wui::WuiRect lastRect { 0, 0, 0, 0 };
+					static int traced = 0;
 					const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(selected));
-					if (handle != lastHandle)
+					const Wui::WuiRect rect { minScreen.x, minScreen.y, maxScreen.x - minScreen.x, maxScreen.y - minScreen.y };
+					const bool moved = std::abs(rect.X - lastRect.X) > 1.0f || std::abs(rect.Y - lastRect.Y) > 1.0f ||
+						std::abs(rect.W - lastRect.W) > 1.0f || std::abs(rect.H - lastRect.H) > 1.0f;
+					if ((handle != lastHandle || moved) && traced < 40)
 					{
 						lastHandle = handle;
+						lastRect = rect;
+						++traced;
 						const int visibleFaces = (faceVisible[0] ? 1 : 0) + (faceVisible[1] ? 1 : 0) +
 							(faceVisible[2] ? 1 : 0) + (faceVisible[3] ? 1 : 0) +
 							(faceVisible[4] ? 1 : 0) + (faceVisible[5] ? 1 : 0);

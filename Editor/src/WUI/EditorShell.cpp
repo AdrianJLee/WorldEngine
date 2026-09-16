@@ -237,10 +237,11 @@ namespace World
 	{
 		// gizmo 只依赖"投影 + 相机基向量 + 距离/FOV":2D 与 3D 视口各取一台相机。
 		Wui::GizmoCamera camera;
-		// Play:视口渲染走场景的**主相机实体**(见 EditorLayer::OnUpdate 的 Play 分支),
+		// Play(且未暂停):视口渲染走场景的**主相机实体**(见 EditorLayer::OnUpdate 的 Play 分支;
+		// 暂停时该分支会切回编辑器相机 —— 覆盖层必须跟渲染保持同一条件,否则暂停后又错位),
 		// 覆盖层(选中框/gizmo)必须跟着同一台相机,否则位置整体错位
 		// (用户 2026-09-16:"Play 后点物体,选中框位置不对")。
-		if (m_Editor.IsPlaying())
+		if (m_Editor.IsPlaying() && !m_Editor.IsPaused())
 		{
 			if (Ref<Scene> scene = m_Editor.GetActiveScene())
 			{
