@@ -87,6 +87,9 @@ namespace World
 		void CancelUnsavedModal();
 		bool HasRenderedScene() const { return m_HasRenderedScene; }
 		void ExportOperationLog();
+		// 屏幕快照钩子(诊断):WLD_SCREEN_CAPTURE_DIR 存在时,把用户看到的最终窗口
+		// 连续写成 PPM(screen-<n>.ppm),供自动化比对"闪烁"这类最终画面问题。
+		void CaptureScreenSequence();
 		Wui::WuiCommandRegistry& Commands() { return m_Commands; }
 
 		bool OnKeyPressed(KeyPressedEvent& e);

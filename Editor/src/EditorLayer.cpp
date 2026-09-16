@@ -682,7 +682,36 @@ namespace World
 			m_WuiContext.EndFrame();
 			wuiBackend.Render(m_WuiContext.Commands(), m_WuiContext.OverlayCommands());
 		}
+		// 屏幕快照钩子(诊断无障碍化):把**用户实际看到的整个窗口**连续写成 PPM,
+		// 用于自动化诊断"闪烁"这类只在最终画面里可见的问题。
+		//   WLD_SCREEN_CAPTURE_DIR=<目录>   输出目录
+		//   WLD_SCREEN_CAPTURE_START=<帧号>  从第几帧开始(默认 0,配合 WLD_CAPTURE_DELAY 无意义时用)
+		//   WLD_SCREEN_CAPTURE_EVERY=<n>    每 n 帧抓一张(默认 1)
+		//   WLD_SCREEN_CAPTURE_COUNT=<n>    共抓几张(默认 60)
+		CaptureScreenSequence();
 		wuiBackend.EndFrame(m_WuiContext.Cursor());
+	}
+
+	void EditorLayer::CaptureScreenSequence()
+	{
+		static const char* dir = std::getenv("WLD_SCREEN_CAPTURE_DIR");
+		if (!dir || !*dir)
+			return;
+		static int every = std::getenv("WLD_SCREEN_CAPTURE_EVERY") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_EVERY")) : 1;
+		static int start = std::getenv("WLD_SCREEN_CAPTURE_START") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_START")) : 0;
+		static int count = std::getenv("WLD_SCREEN_CAPTURE_COUNT") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_COUNT")) : 60;
+		static int captured = 0;
+		static int frame = 0;
+		if (every <= 0)
+			every = 1;
+		++frame;
+		if (frame < start || captured >= count || (frame - start) % every != 0)
+			return;
+		const std::string path = std::string(dir) + "/screen-" + std::to_string(captured) + ".ppm";
+		// CaptureFrame 用 glReadPixels 抓默认帧缓冲(两个后端下主窗口都有 GL 上下文),
+		// 抓的是"场景 + WUI 面板"的最终合成结果。
+		Renderer::CaptureFrame(path);
+		++captured;
 	}
 
 	void EditorLayer::ExportOperationLog()

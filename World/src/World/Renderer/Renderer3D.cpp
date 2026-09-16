@@ -58,7 +58,10 @@ namespace World
 			struct MaterialGpu
 			{
 				Rhi::Handle<Rhi::DescriptorSet> Sets[Renderer::FramesInFlight];
-				uint32_t Revision = 0;
+				// Revision 必须**按槽位**记录:三个帧槽位各自持有一份描述符集,只更新当前
+				// 槽位、共用一个 Revision 时,另外两个槽位会永远停留在编辑前的贴图绑定,
+				// 材质按 3 帧周期在新/旧贴图之间来回(用户实测"换贴图后预览一直闪烁")。
+				uint32_t Revision[Renderer::FramesInFlight] = {};
 			};
 			std::unordered_map<const Material*, MaterialGpu> MaterialCache;
 			// set 0(全局相机)描述符集:预览这类"非 SceneRenderer 调用方"通过
@@ -132,7 +135,7 @@ namespace World
 		{
 			const MaterialDesc& desc = material->GetDesc();
 			State::MaterialGpu& gpu = state.MaterialCache[material.get()];
-			if (gpu.Revision != material->GetRevision() || !gpu.Sets[slot])
+			if (gpu.Revision[slot] != material->GetRevision() || !gpu.Sets[slot])
 			{
 				if (!gpu.Sets[slot])
 					gpu.Sets[slot] = Renderer::GetDevice()->CreateDescriptorSet(state.MaterialLayout);
@@ -168,7 +171,7 @@ namespace World
 				normal.Texture = MaterialTextureCache::Get().Get(desc.NormalTexture, /*srgb*/ false);
 				normal.Sampler = state.MaterialSampler;
 				gpu.Sets[slot]->Update({ albedo, normal });
-				gpu.Revision = material->GetRevision();
+				gpu.Revision[slot] = material->GetRevision();
 			}
 			state.PendingMaterialUpdates.clear();
 			state.PendingMaterialSlots.clear();

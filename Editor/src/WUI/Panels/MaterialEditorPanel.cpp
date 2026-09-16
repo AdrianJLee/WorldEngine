@@ -300,6 +300,23 @@ namespace World
 			static_cast<uint32_t>(Wui::HashId(m_PanelId.c_str()) ^ 0x9E37u));
 		const uint32_t previewIndex = Renderer3D::SubmitAtSlot(slotBase, m_PreviewSphere, m_Material, glm::mat4(1.0f), -1);
 		(void)previewIndex;
+		// 诊断钩子(用户复现):WLD_MATERIAL_SWITCH_TEXTURE=<贴图路径> 在第 30 帧把指定面板的
+		// Albedo 切到该贴图;WLD_MATERIAL_SWITCH_PANEL 指定面板(空 = 第一个面板)。
+		if (const char* switchTo = std::getenv("WLD_MATERIAL_SWITCH_TEXTURE"))
+		{
+			const char* targetPanel = std::getenv("WLD_MATERIAL_SWITCH_PANEL");
+			const bool matchesPanel = targetPanel == nullptr || *targetPanel == 0 || m_PanelId == targetPanel;
+			if (matchesPanel)
+			{
+				static int switchCountdown = 30;
+				if (switchCountdown > 0 && --switchCountdown == 0)
+				{
+					m_Material->SetAlbedoTexture(switchTo);
+					WLD_CORE_INFO("[material-ui] diag switch albedo -> '{0}' panel='{1}' rev={2}",
+						switchTo, m_PanelId, m_Material->GetRevision());
+				}
+			}
+		}
 		if (std::getenv("WLD_TRACE_3D"))
 		{
 			static int tracedPreviewSlots = 0;
