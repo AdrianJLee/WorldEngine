@@ -530,6 +530,7 @@ namespace World
 		m_Ctx = &ctx;
 		m_ViewportRect = {};
 		ctx.ClearDropTarget();
+		m_DropPreviewActive = false;
 		const bool undoKey = ctx.Input().Ctrl && !ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z);
 		const bool redoKey = ctx.Input().Ctrl && (ctx.IsKeyPressed(KeyCodes::Y) || (ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z)));
 		if (undoKey)
@@ -559,7 +560,8 @@ namespace World
 			m_EdgeDropZone = Wui::DropZone::Center;
 			if (ctx.IsHovered(editorArea))
 			{
-				constexpr float edgeBand = 110.0f;
+				// 四边停靠判定带(用户 2026-09-16:110px 太大,压到面板中部)。
+				constexpr float edgeBand = 64.0f;
 				const glm::vec2 mouse = ctx.Input().MousePos;
 				if (mouse.x - editorArea.X <= edgeBand) m_EdgeDropZone = Wui::DropZone::Left;
 				else if (editorArea.X + editorArea.W - mouse.x <= edgeBand) m_EdgeDropZone = Wui::DropZone::Right;
@@ -603,7 +605,9 @@ namespace World
 			else if (m_EdgeDropZone == Wui::DropZone::Right) { zone.X = editorArea.X + editorArea.W * 0.75f; zone.W = editorArea.W * 0.25f; }
 			else if (m_EdgeDropZone == Wui::DropZone::Top) zone.H = editorArea.H * 0.25f;
 			else if (m_EdgeDropZone == Wui::DropZone::Bottom) { zone.Y = editorArea.Y + editorArea.H * 0.75f; zone.H = editorArea.H * 0.25f; }
-			Wui::DropZoneOverlay(ctx, zone, 0.30f, 3.0f);
+			// 预览延迟到 RenderFloating 里画(浮动面板之上),否则会被拖动中的面板盖住。
+			m_DropPreviewRect = zone;
+			m_DropPreviewActive = true;
 		}
 		// 下层绘制结束:解除遮挡,浮动面板/菜单/弹窗仍按真实光标命中。
 		ctx.ClearHoverBlockers();
@@ -767,6 +771,16 @@ namespace World
 			Label(ctx, ctx.Input().MousePos + glm::vec2 { 14, 14 }, label, m_Theme.Text, 13.0f);
 			ctx.PopOverlay();
 		}
+
+		// 遍历结束后再执行标签关闭请求:这样"关闭组内最后一个标签"引起的塌缩
+		// 不会打断正在进行的渲染遍历(修"关闭 Saves/Levels 等标签崩溃")。
+		for (const Wui::PanelId& panel : m_PendingPanelCloses)
+		{
+			const std::string before = m_Layout.Serialize();
+			if (m_Layout.RemoveTab(panel))
+				RecordDockChange(ctx, "close", panel, before);
+		}
+		m_PendingPanelCloses.clear();
 	}
 
 	void EditorShell::RenderNode(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -846,9 +860,10 @@ namespace World
 		}
 		if (tabResult.Closed >= 0 && static_cast<size_t>(tabResult.Closed) < node.Panels.size())
 		{
-			const std::string before = m_Layout.Serialize();
-			if (m_Layout.RemoveTab(node.Panels[tabResult.Closed]))
-				RecordDockChange(ctx, "close", node.Panels[tabResult.Closed], before);
+			// 只登记请求:此刻正在遍历停靠树,直接删标签会让本组(乃至父级分栏)
+			// 塌缩,RenderTabs/RenderSplit 手里的 node/children 引用立即失效。
+			// 真正删除在 OnRender 末尾统一执行(见 m_PendingPanelCloses)。
+			m_PendingPanelCloses.push_back(node.Panels[tabResult.Closed]);
 		}
 		if (tabResult.DragStart >= 0 && static_cast<size_t>(tabResult.DragStart) < node.Panels.size())
 		{
@@ -878,16 +893,8 @@ namespace World
 			else if (lx > 0.75f) targetZone = Wui::DropZone::Right;
 			else if (ly < 0.25f) targetZone = Wui::DropZone::Top;
 			else if (ly > 0.75f) targetZone = Wui::DropZone::Bottom;
-			// 浮动窗口只在"明确落区"上停靠:四边 25% 条带或 tab 栏(Center);
-			// 停在面板中部不会把浮动窗口吸回停靠,便于自由摆放。
-			const bool draggingFloating = m_Layout.IsFloating(dragPayload.substr(6));
-			const bool overTabBar = ctx.IsHovered({ area.X, area.Y, area.W, tabH });
-			if (draggingFloating && targetZone == Wui::DropZone::Center && !overTabBar)
-			{
-				m_DropTargetPanel.clear();
-				return;
-			}
-
+			// 中心区(面板主体或标签栏)= 合并进该组的标签页(用户 2026-09-16:
+			// 拖到另一个子面板上就应该变成同组标签,原来只认 24px 标签栏,很难命中)。
 			ctx.DropTarget(area, "panel:"); // 武装落点:仅面板拖拽在此生效
 			m_DropZone = targetZone;
 			Wui::WuiRect zone = area;
@@ -895,8 +902,10 @@ namespace World
 			else if (m_DropZone == Wui::DropZone::Right) { zone.X = area.X + area.W * 0.75f; zone.W = area.W * 0.25f; }
 			else if (m_DropZone == Wui::DropZone::Top) zone.H = area.H * 0.25f;
 			else if (m_DropZone == Wui::DropZone::Bottom) { zone.Y = area.Y + area.H * 0.75f; zone.H = area.H * 0.25f; }
-			// 落区预览走组件:与边缘停靠提示保持同一配色。
-			Wui::PanelBackground(ctx, zone, { 0.30f, 0.50f, 0.90f, 0.28f }, 3.0f);
+			else zone.H = tabH; // 中心落点:高亮该组标签栏(它会变成这里的一个标签页)
+			// 落区预览延迟到 RenderFloating 里画(浮动面板之上),否则会被拖动中的面板盖住。
+			m_DropPreviewRect = zone;
+			m_DropPreviewActive = true;
 			if (!node.Panels.empty())
 			{
 				const std::string target = node.Panels[node.Active];
@@ -1205,6 +1214,9 @@ namespace World
 			m_Layout.BringFloatToFront(m_BringFloatFront);
 			m_BringFloatFront.clear();
 		}
+		// 落点预览画在所有浮动面板之上:拖动中的面板正好盖在目标上。
+		if (m_DropPreviewActive)
+			Wui::DropZoneOverlay(ctx, m_DropPreviewRect, 0.30f, 3.0f);
 		// 跨窗口拖拽的目标命中与落点(在窗口渲染之后执行,便于统一改容器)。
 		UpdateCrossWindowDrag(ctx);
 		// 独立窗口渲染会把 GL 上下文切到各自窗口,这里恢复主窗口上下文,

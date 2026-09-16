@@ -175,6 +175,13 @@ namespace World
 		Wui::WuiRect m_AttachSlotScreenRect;
 		bool m_AttachSlotHighlight = false;
 		float m_AttachBarHeight = 26.0f;
+		// 本帧的落点预览:画在浮动面板之上。拖动中的浮动面板正好盖在目标上,
+		// 预览若跟停靠区一起画就会被它挡住(用户看不到"会落到哪")。
+		Wui::WuiRect m_DropPreviewRect;
+		bool m_DropPreviewActive = false;
+		// 标签 × 的关闭请求:渲染遍历期间不能动停靠树(关闭组内最后一个标签会让该组
+		// 塌缩,调用方持有的 children 引用随即失效)——统一在遍历结束后执行。
+		std::vector<Wui::PanelId> m_PendingPanelCloses;
 		// 已附加到主窗口的独立窗口(标签切换关系):"" = 主界面。
 		std::vector<std::string> m_AttachedPanels;
 		std::string m_ActiveWindowTag;
