@@ -19,7 +19,20 @@ namespace World::Wui
 		m_Commands.clear();
 		m_OverlayCommands.clear();
 		m_OverlayDepth = 0;
+		m_HoverBlockers.clear();
 		++m_Frame;
+	}
+
+	// 命中测试:矩形包含 + 不在上层遮挡区内。调用方(IsHovered/IsClicked/DropTarget/
+	// 弹窗外部点击)统一走这里,保证"上层浮动面板优先"一条规则。
+	bool WuiContext::HitTest(const WuiRect& rect, glm::vec2 point) const
+	{
+		if (!World::Wui::HitTest(rect, point))
+			return false;
+		for (const WuiRect& blocker : m_HoverBlockers)
+			if (blocker.Contains(point))
+				return false;
+		return true;
 	}
 
 	void WuiContext::EndFrame()
@@ -43,6 +56,8 @@ namespace World::Wui
 		{
 			m_DropAccepted = m_DropArmed;
 			RecordOp("drag", "release", m_DragPayload, m_DropArmed ? "armed" : "no-target");
+			if (std::getenv("WLD_TRACE_UI"))
+				WLD_CORE_INFO("[wui-drag] release consumed: payload={0}", m_DragPayload);
 			m_Dragging = false;
 			m_DragId = 0;
 			m_DropArmed = false;
@@ -51,6 +66,17 @@ namespace World::Wui
 		}
 		else
 		{
+			// 诊断:按钮已经不在按下,却既没有 down 也没有 release 标记(说明释放事件
+			// 没有传进本上下文),此时拖拽状态会挂死。
+			if (m_Dragging && !m_Input.MouseDown[0] && !m_Input.MouseReleased[0])
+			{
+				static int traced = 0;
+				if (std::getenv("WLD_TRACE_UI") && traced < 6)
+				{
+					++traced;
+					WLD_CORE_WARN("[wui-drag] STUCK: dragging with no down/up flag, payload={0}", m_DragPayload);
+				}
+			}
 			m_DropAccepted = false;
 			if (m_DragPending && m_Input.MouseReleased[0])
 			{

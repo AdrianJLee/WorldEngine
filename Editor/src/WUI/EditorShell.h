@@ -105,6 +105,9 @@ namespace World
 		void RenderPanelContent(Wui::WuiContext& ctx, const std::string& id, const Wui::WuiRect& rect);
 		// 浮动面板:在停靠区之上绘制,支持拖动/缩放/关闭与拖回停靠。
 		void RenderFloating(Wui::WuiContext& ctx);
+		// 单个"窗口内浮动面板"(停靠形态面板拖出后的形态):标题栏拖动、右下角缩放、
+		// 关闭回停靠位。独立窗口(Independent)不走这里,它们有自己的 OS 窗口。
+		void RenderFloatWindow(Wui::WuiContext& ctx, Wui::DockFloat& window, bool* closed);
 		// 跨窗口标签拖拽:全局光标追踪 + 目标高亮 + 附加/新建/挂靠落点。
 		void UpdateCrossWindowDrag(Wui::WuiContext& ctx);
 		// 挂靠栏:横跨主窗口的一条(类似菜单栏),独立窗口拖到其上即挂靠。

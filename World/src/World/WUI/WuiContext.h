@@ -160,7 +160,17 @@ namespace World::Wui
 		// 把 drop 留给声明了匹配前缀的其他消费者。
 		bool AcceptDrop(std::string* payload, const std::string& payloadPrefix);
 
+		// ---- 悬停遮挡区(叠放在上层的浮动面板用)----
+		// 本 UI 的命中测试就是矩形包含判定,没有 z 序;窗口内浮动面板画在停靠区之上时,
+		// 需要把它的矩形登记成遮挡区,让下面的面板在命中测试里判为未命中,
+		// 否则浮动面板与它下面的面板会同时响应同一次点击。
+		// 用法:画下层之前 Push,画浮动面板之前 Clear(浮动面板自身要能命中)。
+		void PushHoverBlocker(const WuiRect& rect) { m_HoverBlockers.push_back(rect); }
+		void ClearHoverBlockers() { m_HoverBlockers.clear(); }
+
 	private:
+		// 带遮挡区判定的命中测试:IsHovered/IsClicked/DropTarget 都走它。
+		bool HitTest(const WuiRect& rect, glm::vec2 point) const;
 		struct WuiStateBase
 		{
 			const char* TypeName = nullptr;
@@ -187,6 +197,7 @@ namespace World::Wui
 		bool m_DropArmed = false;
 		bool m_DropAccepted = false;
 		bool m_DragPending = false;
+		std::vector<WuiRect> m_HoverBlockers;
 		glm::vec2 m_DragPressPos { 0, 0 };
 		uint64_t m_Frame = 0;
 		WuiOperationLog m_Ops;

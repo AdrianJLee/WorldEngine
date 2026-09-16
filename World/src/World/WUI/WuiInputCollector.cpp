@@ -39,6 +39,14 @@ namespace World::Wui
 	{
 		if (button < 0 || button > 2)
 			return;
+		// 按键沿必须锁存:事件可能落在 BeginFrame 与 EndFrame 之间(例如拖动过程中
+		// 新建/激活窗口会泵消息),此时若只靠 down/prev 逐帧比较,这一次按下/抬起
+		// 会被整帧吞掉 —— 表现是拖拽状态永远结束不了、落点预览一直显示。
+		if (down != m_MouseDown[button])
+		{
+			if (down) m_MouseClicked[button] = true;
+			else m_MouseReleased[button] = true;
+		}
 		m_MouseDown[button] = down;
 		if (down)
 		{
@@ -72,9 +80,14 @@ namespace World::Wui
 		for (int i = 0; i < 3; ++i)
 		{
 			out.MouseDown[i] = m_MouseDown[i];
-			out.MouseClicked[i] = m_MouseDown[i] && !m_PrevMouseDown[i];
-			out.MouseReleased[i] = !m_MouseDown[i] && m_PrevMouseDown[i];
+			// 锁存的沿与"逐帧比较"取并集:前者覆盖"帧中途到达"的事件,后者覆盖
+			// 只更新了 m_MouseDown 没走 OnMouseButton 的路径(如系统同步)。
+			out.MouseClicked[i] = m_MouseClicked[i] || (m_MouseDown[i] && !m_PrevMouseDown[i]);
+			out.MouseReleased[i] = m_MouseReleased[i] || (!m_MouseDown[i] && m_PrevMouseDown[i]);
 			out.MouseDoubleClicked[i] = m_MouseDoubleClicked[i];
+			// 本帧交付后即消费:本帧中途才到达的事件留给下一帧,不丢。
+			m_MouseClicked[i] = false;
+			m_MouseReleased[i] = false;
 		}
 		out.KeyDown.assign(m_Down.begin(), m_Down.end());
 		out.TextInput = m_Chars;

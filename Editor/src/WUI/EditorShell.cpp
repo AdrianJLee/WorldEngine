@@ -1,5 +1,8 @@
 #include "wldpch.h"
 #include "EditorShell.h"
+
+#include <cstdio>
+#include <fstream>
 #include "../EditorLayer.h"
 
 #include "World/Core/Asset/ProjectManifest.h"
@@ -573,6 +576,12 @@ namespace World
 			}
 		}
 		// 拖拽结束的落位在下一帧消费,因此拖拽不活跃时保留上一帧的边缘落区状态。
+		// 窗口内浮动面板(停靠形态)画在停靠区之上,命中也要优先:先登记它们的矩形为
+		// 遮挡区,下面的面板就不会同时响应;正在拖动的那一个除外(它跟随光标,且必须
+		// 让下方的停靠落点能被命中)。
+		for (const Wui::DockFloat& entry : m_Layout.Floating)
+			if (!IsIndependentPanel(entry.Panel) && entry.Panel != m_MovingFloat)
+				ctx.PushHoverBlocker(entry.Rect);
 		// 已附加独立窗口时,主窗口作为"切换容器":当前标签是它,就显示它的内容。
 		if (!m_ActiveWindowTag.empty())
 		{
@@ -596,6 +605,8 @@ namespace World
 			else if (m_EdgeDropZone == Wui::DropZone::Bottom) { zone.Y = editorArea.Y + editorArea.H * 0.75f; zone.H = editorArea.H * 0.25f; }
 			Wui::DropZoneOverlay(ctx, zone, 0.30f, 3.0f);
 		}
+		// 下层绘制结束:解除遮挡,浮动面板/菜单/弹窗仍按真实光标命中。
+		ctx.ClearHoverBlockers();
 
 		std::string payload;
 		bool dropConsumed = false;
@@ -661,23 +672,19 @@ namespace World
 			if (!dropConsumed && m_AttachCooldownFrames <= 0 && m_Layout.Contains(m_DragPanel)
 				&& m_TabDragPanel == m_DragPanel)
 			{
-				// 拖出即成为独立 OS 窗口:按原停靠尺寸创建,放在鼠标所在的屏幕位置。
+				// T03 修订(用户 2026-09-16):子面板(停靠形态)拖出只在**主窗口内浮动**,
+				// 不创建 OS 窗口 —— 独立 OS 窗口只属于声明为 Independent 的面板
+				// (Widget Gallery / Input Map)。因此这里全部用主窗口客户区坐标。
 				Wui::WuiRect source { m_LastDragPos.x - 40.0f, m_LastDragPos.y - 12.0f, 480.0f, 320.0f };
 				if (const auto remembered = m_LastFloatRects.find(m_DragPanel); remembered != m_LastFloatRects.end())
 				{
 					source.W = remembered->second.W;
 					source.H = remembered->second.H;
 				}
-				// 屏幕坐标 = 主窗口位置 + 客户区鼠标位置。
-				int windowX = 0, windowY = 0;
-				if (Application::HasInstance())
-					Application::Get().GetWindow().GetPosition(&windowX, &windowY);
-				source.X += static_cast<float>(windowX);
-				source.Y += static_cast<float>(windowY);
-				std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> rects;
-				if (m_LastFloatRects.find(m_DragPanel) == m_LastFloatRects.end())
+				else
 				{
 					// 首次拖出:沿用原停靠区的尺寸作为初始浮动尺寸。
+					std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> rects;
 					m_Layout.ComputeRects({ 0, 26, viewport.x, viewport.y - 26 }, &rects);
 					for (const auto& entry : rects)
 					{
@@ -688,11 +695,35 @@ namespace World
 						break;
 					}
 				}
+				// 初始位置夹在编辑区里,标题栏必须可见(与 RenderFloatWindow 的约束一致)。
+				source.W = std::min(source.W, std::max(320.0f, viewport.x - 16.0f));
+				source.H = std::min(source.H, std::max(240.0f, viewport.y - editorTop - 16.0f));
+				source.X = std::max(8.0f, std::min(source.X, std::max(8.0f, viewport.x - source.W - 8.0f)));
+				source.Y = std::max(editorTop, std::min(source.Y, std::max(editorTop, viewport.y - source.H - 8.0f)));
 				const std::string before = m_Layout.Serialize();
 				if (m_Layout.Float(m_DragPanel, source))
 				{
 					RecordDockChange(ctx, "float", m_DragPanel, before);
-					AddFloatWindow(m_DragPanel, source, "drag-out");
+					// 拖动期间面板跟随光标:抓取点固定在标题栏左侧(贴近原标签位置)。
+					m_MovingFloat = m_DragPanel;
+					m_FloatGrabOffset = { 40.0f, 12.0f };
+					m_LastFloatRects[m_DragPanel] = source;
+				}
+				else if (std::getenv("WLD_TRACE_UI"))
+				{
+					WLD_CORE_WARN("[float] drag-out float() rejected for '{0}'", m_DragPanel);
+				}
+			}
+			else if (std::getenv("WLD_TRACE_UI"))
+			{
+				// 诊断:拖拽已激活但没有走拖出分支(供脚本/人工排查用,按面板去重打印)。
+				static std::string lastSkipped;
+				if (lastSkipped != m_DragPanel)
+				{
+					lastSkipped = m_DragPanel;
+					WLD_CORE_INFO("[float] drag-out skipped: panel={0} consumed={1} cooldown={2} contained={3} tabDrag={4}",
+						m_DragPanel, dropConsumed ? 1 : 0, m_AttachCooldownFrames,
+						m_Layout.Contains(m_DragPanel) ? 1 : 0, m_TabDragPanel);
 				}
 			}
 			else if (!m_DragPanel.empty() && m_Layout.Contains(m_DragPanel))
@@ -808,7 +839,11 @@ namespace World
 		const Wui::DockTabBarResult tabResult = Wui::DockTabBar(ctx, { area.X, area.Y, area.W, tabH }, tabs, m_Theme);
 
 		if (tabResult.Clicked >= 0 && static_cast<size_t>(tabResult.Clicked) < node.Panels.size())
+		{
 			m_Layout.Activate(node.Panels[tabResult.Clicked]);
+			// 单纯点击标签不是拖拽:清掉可能残留的拖拽来源记录。
+			m_TabDragPanel.clear();
+		}
 		if (tabResult.Closed >= 0 && static_cast<size_t>(tabResult.Closed) < node.Panels.size())
 		{
 			const std::string before = m_Layout.Serialize();
@@ -819,7 +854,11 @@ namespace World
 		{
 			const std::string& panel = node.Panels[tabResult.DragStart];
 			ctx.BeginDrag(Wui::HashId(("tab." + panel).c_str()), "panel:" + panel);
-			m_TabDragPanel = panel; // 记录本次拖拽的真实来源
+			// 记录本次拖拽的真实来源:只在还没有来源时记一次。拖动过程中经过别的标签页时
+			// DockTabBar 仍会报 DragStart,若覆盖会把真实来源记错 —— 拖出分支的
+			// "m_TabDragPanel == m_DragPanel" 守卫随即拒绝,表现是面板拖不出来。
+			if (m_TabDragPanel.empty())
+				m_TabDragPanel = panel;
 		}
 
 		const Wui::WuiRect content { area.X, area.Y + tabH, area.W, area.H - tabH };
@@ -1142,12 +1181,154 @@ namespace World
 			HideFloatPanel(panel, &ctx);
 		if (m_FloatHosts.empty())
 			m_AttachSlotHighlight = false;
+		// 停靠形态的"临时浮动"面板:在主窗口内绘制(OS 窗口只属于 Independent 面板)。
+		// 独立窗口渲染会把当前 GL 上下文切到各自窗口,先恢复主窗口上下文。
+		if (Application::HasInstance())
+			Application::Get().GetWindow().MakeCurrent();
+		for (size_t i = 0; i < m_Layout.Floating.size(); ++i)
+		{
+			const std::string panel = m_Layout.Floating[i].Panel;
+			if (IsIndependentPanel(panel))
+				continue; // 独立面板有自己的 OS 窗口
+			bool closed = false;
+			RenderFloatWindow(ctx, m_Layout.Floating[i], &closed);
+			if (closed)
+			{
+				// 停靠形态的浮动窗口关闭 = 回停靠位(D3),不是隐藏面板。
+				HideFloatPanel(panel, &ctx);
+				break; // 容器已改变,下一帧继续绘制其余窗口
+			}
+		}
+		// 置顶在绘制结束后应用,避免遍历中修改容器。
+		if (!m_BringFloatFront.empty())
+		{
+			m_Layout.BringFloatToFront(m_BringFloatFront);
+			m_BringFloatFront.clear();
+		}
 		// 跨窗口拖拽的目标命中与落点(在窗口渲染之后执行,便于统一改容器)。
 		UpdateCrossWindowDrag(ctx);
 		// 独立窗口渲染会把 GL 上下文切到各自窗口,这里恢复主窗口上下文,
 		// 否则主窗口后续的呈现/交换会作用在错误的上下文上(表现为主窗口不再刷新)。
 		if (Application::HasInstance())
 			Application::Get().GetWindow().MakeCurrent();
+	}
+
+	// 窗口内浮动面板(停靠形态面板拖出后的形态)的绘制与交互:
+	// 标题栏拖动 = 移动(拖动载荷仍是 "panel:",拖到停靠落点上即回停靠);
+	// 右下角 = 缩放;左上 × = 关闭浮动窗口(停靠形态 = 回停靠位,D3)。
+	// 独立窗口(Independent)不走这条路径,它们由 FloatWindowHost 的 OS 窗口渲染。
+	void EditorShell::RenderFloatWindow(Wui::WuiContext& ctx, Wui::DockFloat& window, bool* closed)
+	{
+		const float titleH = 24.0f;
+		const glm::vec2 viewport = ctx.ViewportSize();
+		const float topLimit = 26.0f + m_AttachBarHeight;
+		Wui::WuiRect& rect = window.Rect;
+
+		// 视口约束:窗口不能完全跑出编辑区,标题栏必须可见。
+		rect.W = std::max(240.0f, std::min(rect.W, std::max(240.0f, viewport.x - 16.0f)));
+		rect.H = std::max(160.0f, std::min(rect.H, std::max(160.0f, viewport.y - topLimit - 16.0f)));
+		rect.X = std::max(8.0f, std::min(rect.X, std::max(8.0f, viewport.x - rect.W - 8.0f)));
+		rect.Y = std::max(topLimit, std::min(rect.Y, std::max(topLimit, viewport.y - rect.H - 8.0f)));
+		if (std::getenv("WLD_TRACE_UI"))
+		{
+			// 诊断/自动化:窗口内浮动面板的实际矩形(客户区坐标),供脚本点击标题栏与关闭按钮。
+			static int traced = 0;
+			if (traced < 60)
+			{
+				++traced;
+				WLD_CORE_INFO("[float] in-window '{0}' rect=({1},{2},{3},{4})",
+					window.Panel, rect.X, rect.Y, rect.W, rect.H);
+			}
+		}
+
+		ctx.PushOverlay();
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, m_Theme.PanelBg, 5.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect, m_Theme.Border, 5.0f, 1.0f });
+		const Wui::WuiRect title { rect.X, rect.Y, rect.W, titleH };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, title, m_Theme.PanelHeader, 5.0f });
+		Label(ctx, { title.X + 10.0f, title.Y + 4.0f }, PanelTitle(window.Panel), m_Theme.Text, 14.0f);
+
+		// 关闭按钮
+		const Wui::WuiRect close { title.X + title.W - 22.0f, title.Y + 5.0f, 14.0f, 14.0f };
+		const bool overClose = ctx.IsHovered(close);
+		if (overClose)
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, close, m_Theme.ButtonHover, 2.0f });
+		Label(ctx, { close.X + 3.0f, close.Y - 2.0f }, "x", m_Theme.TextMuted, 13.0f);
+		const bool closeClicked = ctx.IsClicked(close);
+
+		// 标题栏拖动:置顶 + 跟随鼠标;松手落在停靠落点上则由外壳的落位逻辑回停靠。
+		if (!closeClicked && !overClose && ctx.IsClicked(title))
+		{
+			m_BringFloatFront = window.Panel;
+			m_MovingFloat = window.Panel;
+			m_FloatGrabOffset = ctx.Input().MousePos - glm::vec2 { rect.X, rect.Y };
+			m_FloatChangeBefore = m_Layout.Serialize();
+			ctx.BeginDrag(Wui::HashId(("float." + window.Panel).c_str()), "panel:" + window.Panel);
+		}
+		if (m_MovingFloat == window.Panel && ctx.IsDragActive(nullptr))
+		{
+			rect.X = std::max(8.0f, std::min(ctx.Input().MousePos.x - m_FloatGrabOffset.x,
+				std::max(8.0f, viewport.x - rect.W - 8.0f)));
+			rect.Y = std::max(topLimit, std::min(ctx.Input().MousePos.y - m_FloatGrabOffset.y,
+				std::max(topLimit, viewport.y - rect.H - 8.0f)));
+			ctx.SetCursor(Wui::WuiCursor::Hand);
+		}
+
+		// 右下角缩放
+		const Wui::WuiRect grip { rect.X + rect.W - 16.0f, rect.Y + rect.H - 16.0f, 16.0f, 16.0f };
+		if (ctx.IsHovered(grip))
+		{
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, grip, m_Theme.ButtonHover, 3.0f });
+			ctx.SetCursor(Wui::WuiCursor::ResizeEW);
+		}
+		if (ctx.IsClicked(grip))
+		{
+			m_BringFloatFront = window.Panel;
+			m_FloatResize = window.Panel;
+			m_FloatResizeStart = ctx.Input().MousePos;
+			m_FloatResizeRect = rect;
+			m_FloatChangeBefore = m_Layout.Serialize();
+		}
+		if (m_FloatResize == window.Panel && ctx.Input().MouseDown[0])
+		{
+			const glm::vec2 delta = ctx.Input().MousePos - m_FloatResizeStart;
+			rect.W = std::max(240.0f, m_FloatResizeRect.W + delta.x);
+			rect.H = std::max(160.0f, m_FloatResizeRect.H + delta.y);
+		}
+		if (m_FloatResize == window.Panel && ctx.Input().MouseReleased[0])
+		{
+			m_FloatResize.clear();
+			if (!m_FloatChangeBefore.empty())
+			{
+				RecordDockChange(ctx, "float-resize", window.Panel, m_FloatChangeBefore);
+				m_FloatChangeBefore.clear();
+			}
+		}
+		// 尺寸记忆:下次拖出沿用用户调好的大小(位置按当次拖拽点重新计算)。
+		m_LastFloatRects[window.Panel] = { 0.0f, 0.0f, rect.W, rect.H };
+
+		// 自动化钩子(开发验证):WLD_FLOAT_RECT_FILE=<路径> 时把浮动面板的客户区矩形
+		// 写进该文件(矩形变化才写),供脚本点击标题栏/关闭按钮。
+		if (const char* rectFile = std::getenv("WLD_FLOAT_RECT_FILE"))
+		{
+			char buffer[192];
+			std::snprintf(buffer, sizeof(buffer), "panel=%s\nx=%.1f\ny=%.1f\nw=%.1f\nh=%.1f\n",
+				window.Panel.c_str(), rect.X, rect.Y, rect.W, rect.H);
+			static std::string lastWritten;
+			if (lastWritten != buffer)
+			{
+				lastWritten = buffer;
+				std::ofstream(rectFile, std::ios::trunc) << buffer;
+			}
+		}
+
+		// 内容区(标题栏之下)
+		const Wui::WuiRect body { rect.X + 1.0f, rect.Y + titleH, rect.W - 2.0f, rect.H - titleH - 1.0f };
+		RenderPanelContent(ctx, window.Panel, body);
+		ctx.PopOverlay();
+
+		if (closeClicked && closed)
+			*closed = true;
 	}
 
 	// 跨窗口标签拖拽(浏览器式附加):源窗口标签按下拖动后,这里用全局光标轮询跟踪,
