@@ -255,6 +255,9 @@ namespace World::Wui
 		// 旋转以 RotationQuat 为准(弧度):必须走 SetRotation,否则只改欧拉角不生效(实测"转不动")。
 		static glm::vec3 startEuler {};
 		static float startPointerAngle = 0.0f;
+		// 旋转方向符号:屏幕 Y 朝下(角度顺时针增长),而绕轴的正向是右手系 ——
+		// 轴指向相机时两者相反,必须取反,否则拖拽方向整体反着来(实测)。
+		static float rotateSign = 1.0f;
 
 		if (!dragging && ctx.Input().MouseClicked[0] && ctx.IsHovered(viewport))
 		{
@@ -281,6 +284,8 @@ namespace World::Wui
 				startScale = transform.Scale;
 				startEuler = transform.Rotation;
 				startPointerAngle = std::atan2(mouse.y - startCenter.y, mouse.x - startCenter.x);
+				rotateSign = (activeAxis >= 0 && activeAxis < 3
+					&& glm::dot(axisWorld[activeAxis], -camera.Forward) > 0.0f) ? -1.0f : 1.0f;
 			}
 		}
 
@@ -328,7 +333,7 @@ namespace World::Wui
 				// 拖动角度 = 鼠标绕(锁存的)gizmo 中心的极角差(弧度),加到对应欧拉角后
 				// 经 SetRotation 写回(同时更新 RotationQuat 与缓存矩阵)。
 				const float pointerAngle = std::atan2(mouse.y - startCenter.y, mouse.x - startCenter.x);
-				const float radians = pointerAngle - startPointerAngle;
+				const float radians = (pointerAngle - startPointerAngle) * rotateSign;
 				glm::vec3 euler = startEuler;
 				if (activeAxis == 0)
 					euler.x += radians;
