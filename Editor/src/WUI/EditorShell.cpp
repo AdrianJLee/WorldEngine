@@ -524,7 +524,14 @@ namespace World
 			return;
 		}
 		{
-			const std::string anchor = m_Layout.FirstPanel();
+			// 优先回到该面板**上次所在的标签组**(RenderTabs 每帧刷新锚点表);
+			// 该组已不存在时再退回 FirstPanel,树为空则重建根组。
+			std::string anchor;
+			if (const auto remembered = m_LastDockAnchors.find(panel); remembered != m_LastDockAnchors.end() &&
+				m_Layout.Contains(remembered->second))
+				anchor = remembered->second;
+			else
+				anchor = m_Layout.FirstPanel();
 			if (anchor.empty())
 			{
 				Wui::DockLayout fresh;
@@ -908,6 +915,10 @@ namespace World
 	void EditorShell::RenderTabs(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
 	{
 		const float tabH = 24;
+		// 位置记忆:记下每个停靠标签所在组的首个面板(菜单重新打开该面板时回到这一组)。
+		if (!node.Panels.empty())
+			for (const std::string& panel : node.Panels)
+				m_LastDockAnchors[panel] = node.Panels.front();
 		// 停靠标签栏统一走组件(WuiChrome::DockTabBar),主窗口与独立窗口外观/交互一致。
 		std::vector<Wui::DockTab> tabs;
 		tabs.reserve(node.Panels.size());
@@ -1736,7 +1747,8 @@ namespace World
 			return;
 		}
 
-		struct MenuEntry { std::string Label; bool Checked; std::function<void()> Action; };
+		// Header = 分组小标题行:只显示、不响应悬停/点击(菜单里区分"独立窗口/停靠面板")。
+		struct MenuEntry { std::string Label; bool Checked; std::function<void()> Action; bool Header = false; };
 
 		const Wui::WuiId menuFile = Wui::HashId("menu.file");
 		const Wui::WuiId menuWindow = Wui::HashId("menu.window");
@@ -1795,6 +1807,12 @@ namespace World
 				for (size_t i = 0; i < entries.size(); ++i)
 				{
 					const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };
+					if (entries[i].Header)
+					{
+						// 分组标题:淡色小字,不可点击。
+						Label(ctx, { item.X + 4.0f, item.Y + 4.0f }, entries[i].Label, m_Theme.TextMuted, 12.0f);
+						continue;
+					}
 					const Wui::WuiId itemId = Wui::HashId((menuIdName + "." + entries[i].Label).c_str());
 					if (MenuItem(ctx, itemId, item, entries[i].Label, entries[i].Checked, true, m_Theme))
 					{
@@ -1836,12 +1854,24 @@ namespace World
 			{ "Exit", false, [this] { m_Editor.CloseAction(); } },
 		});
 
+		// 菜单分组:独立窗口(自带 OS 窗口)与停靠面板分开列,并给出不可点击的分组标题 ——
+		// 之前两类平铺在一起,用户看不出"Gallery/Input Map 是独立窗口,其余是停靠标签"。
 		std::vector<MenuEntry> windowEntries;
-		for (const std::string& panel : m_Panels)
+		const auto appendPanels = [this, &windowEntries, &ctx](bool independent)
 		{
-			const bool visible = m_Layout.Contains(panel) || m_Layout.IsFloating(panel);
-			windowEntries.push_back({ PanelTitle(panel), visible, [this, panel, &ctx] { TogglePanel(ctx, panel); } });
-		}
+			for (const std::string& panel : m_Panels)
+			{
+				if (IsIndependentPanel(panel) != independent)
+					continue;
+				const bool visible = m_Layout.Contains(panel) || m_Layout.IsFloating(panel) ||
+					std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) != m_AttachedPanels.end();
+				windowEntries.push_back({ PanelTitle(panel), visible, [this, panel, &ctx] { TogglePanel(ctx, panel); } });
+			}
+		};
+		windowEntries.push_back({ "独立窗口", false, {}, true });
+		appendPanels(/*independent=*/true);
+		windowEntries.push_back({ "停靠面板", false, {}, true });
+		appendPanels(/*independent=*/false);
 		windowEntries.push_back({ "Reset Layout", false, [this, &ctx] { ResetLayout(ctx); } });
 		drawMenu(menuWindow, "menu.window", windowEntries);
 	}

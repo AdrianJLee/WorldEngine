@@ -176,6 +176,9 @@ namespace World
 		Wui::DropZone m_LastDragZone = Wui::DropZone::Center;
 		// 独立窗口的"上次位置尺寸"记忆:收回停靠后再拖出沿用用户调好的尺寸。
 		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatRects;
+		// 停靠面板"上次所在标签组"记忆(组的首个面板 id):Window 菜单重新打开时回到原组,
+		// 而不是固定锚到 FirstPanel。每帧由 RenderTabs 按实际停靠树刷新。
+		std::unordered_map<std::string, std::string> m_LastDockAnchors;
 		// 挂靠槽位:屏幕矩形(每帧计算)与高亮状态。
 		Wui::WuiRect m_AttachSlotScreenRect;
 		bool m_AttachSlotHighlight = false;
