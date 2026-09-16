@@ -7,6 +7,7 @@
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/Renderer/Texture.h"
+#include "World/Renderer/Material.h"
 
 #include <algorithm>
 #include <cctype>
@@ -434,6 +435,35 @@ namespace World
 		{
 			WLD_CORE_ERROR("Could not create directory: {0}", error.what());
 		}
+	}
+
+	void ContentBrowserPanel::CreateMaterial(Wui::WuiContext& ctx)
+	{
+		// 新建材质资产:写一份默认 .wmat 模板到当前目录(重名自动编号),随后直接在材质编辑器里打开。
+		// 内容根 = 内容浏览器 Root;材质路径按"相对内容根"书写,与渲染侧引用约定一致。
+		std::filesystem::path target = m_Model.Current / "material.wmat";
+		int counter = 1;
+		while (std::filesystem::exists(target))
+			target = m_Model.Current / ("material (" + std::to_string(counter++) + ").wmat");
+
+		MaterialDesc desc;
+		desc.Name = target.stem().string();
+		std::string error;
+		if (!MaterialIO::WriteFileText(
+			std::filesystem::relative(target, m_Model.Root).generic_string(),
+			MaterialIO::Serialize(desc), &error))
+		{
+			WLD_CORE_ERROR("Could not create material: {0}", error);
+			return;
+		}
+		m_Model.Selected.clear();
+		m_Model.Selected.insert(target);
+		m_Model.LastSelected = target;
+		InvalidateContents();
+		SaveState();
+		if (m_Ctx) m_Ctx->RecordOp("browser", "new-material", target.filename().string(), "");
+		OpenItem(target);
+		(void)ctx;
 	}
 
 	void ContentBrowserPanel::ApplyRename(const std::filesystem::path& target, const std::string& newName)
@@ -939,6 +969,7 @@ namespace World
 				{ "Paste", [this] { PasteInto(std::filesystem::is_directory(m_Model.ContextMenuPath) ? m_Model.ContextMenuPath : m_Model.Current); } },
 				{ "Rename", [this, single] { if (single && m_Ctx) StartRename(*m_Ctx, m_Model.ContextMenuPath); } },
 				{ "New Folder", [this, &ctx] { CreateFolder(ctx); } },
+				{ "New Material", [this, &ctx] { CreateMaterial(ctx); } },
 				{ "Open in Explorer", [this] { OpenInExplorer(m_Model.ContextMenuPath); } },
 				{ "Delete", [this] { m_Model.ShowDeleteModal = true; } },
 			};
@@ -979,11 +1010,12 @@ namespace World
 		if (ctx.IsPopupOpen(blankPopup))
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect menuPanel { m_Model.BlankMenuPos.x, m_Model.BlankMenuPos.y, 180, 3 * 24 + 8 };
+			const Wui::WuiRect menuPanel { m_Model.BlankMenuPos.x, m_Model.BlankMenuPos.y, 180, 4 * 24 + 8 };
 			DrawPanelSurface(ctx, menuPanel, theme);
 			struct BlankItem { const char* Label; std::function<void()> Action; };
 			const std::vector<BlankItem> items = {
 				{ "New Folder", [this, &ctx] { CreateFolder(ctx); } },
+				{ "New Material", [this, &ctx] { CreateMaterial(ctx); } },
 				{ "Paste", [this] { PasteInto(m_Model.Current); } },
 				{ "Refresh", [this] { InvalidateContents(); if (m_Model.Search[0]) UpdateSearch(); } },
 			};

@@ -74,5 +74,6 @@ namespace World
 		// WLD_DEBUG_CUBE 用的调试网格(D2b:3D 通道双后端冒烟基线)。
 		Ref<Mesh> m_DebugCube;
 		Ref<Mesh> m_DebugPlane;
+		Ref<Mesh> m_DebugSphere;   // D3:sphere 原语的共享网格(材质预览/半球体实体)
 	};
 }

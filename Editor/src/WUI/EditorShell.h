@@ -80,6 +80,8 @@ namespace World
 		void DockBackIndependentWindow(const std::string& panel) override;
 		// D3:打开材质编辑器(必要时先打开独立窗口)并载入指定材质。
 		void OpenMaterialEditor(const std::string& path) override;
+		// 动态材质面板(每个材质一个 "material:<path>" 面板):从布局存档恢复时按 id 建实例。
+		void EnsureMaterialPanelFromId(const std::string& panelId);
 		// ---- 面板形态(单一事实源)----
 		// 每个面板要么是普通停靠面板,要么是"独立窗口"(自带 OS 窗口 + 标签栏)。
 		// 形态只在声明表里写一次,其余判定一律读 FormOf(),不再按面板名特判。

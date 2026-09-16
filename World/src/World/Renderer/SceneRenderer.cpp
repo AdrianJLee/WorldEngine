@@ -296,10 +296,13 @@ namespace World
 			{
 				const auto& [transform, meshComponent] =
 					meshView.get<TransformComponent, MeshRendererComponent>(entity);
+				// D3:支持 sphere 原语(材质预览用;编辑器中也可直接摆球)。
 				const bool plane = meshComponent.Primitive == "plane";
-				Ref<Mesh>& mesh = plane ? m_DebugPlane : m_DebugCube;
+				const bool sphere = meshComponent.Primitive == "sphere";
+				Ref<Mesh>& mesh = plane ? m_DebugPlane : (sphere ? m_DebugSphere : m_DebugCube);
 				if (!mesh)
-					mesh = plane ? Mesh::CreateUnitPlane(1.0f) : Mesh::CreateUnitCube(1.0f);
+					mesh = plane ? Mesh::CreateUnitPlane(1.0f)
+						: (sphere ? Mesh::CreateUnitSphere(1.0f, 32, 16) : Mesh::CreateUnitCube(1.0f));
 				if (!mesh)
 					continue;
 
@@ -325,11 +328,13 @@ namespace World
 				draw.MaterialAsset = material;
 				draw.Color = meshComponent.Color;
 				draw.Transparent = material && material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+
 				draws.push_back(std::move(draw));
 			}
 
 			if (!draws.empty())
 			{
+
 				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
 				// 稳定分组:不透明按原顺序,透明随后(同组内保持遍历顺序)。
 				for (const bool transparentPass : { false, true })
@@ -588,6 +593,4 @@ namespace World
 		return id;
 	}
 }
-
-
 

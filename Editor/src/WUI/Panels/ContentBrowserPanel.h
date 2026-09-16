@@ -81,6 +81,8 @@ namespace World
 		void GoBack();
 		void GoUp();
 		void CreateFolder(Wui::WuiContext& ctx);
+		// D3:新建材质资产(在当前目录写默认 .wmat 并在材质编辑器中打开)。
+		void CreateMaterial(Wui::WuiContext& ctx);
 		void ApplyRename(const std::filesystem::path& target, const std::string& newName);
 		void StartRename(Wui::WuiContext& ctx, const std::filesystem::path& path);
 		void RenderRenameField(Wui::WuiContext& ctx, const std::filesystem::path& path, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);

@@ -5,6 +5,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace World
 {
@@ -44,6 +45,9 @@ namespace World
 		// 最近一次加载该材质的警告(字段缺失/夹紧/未知取值);成功且无警告时为空。
 		// 编辑器面板用它显示黄色/红色提示。
 		std::string GetLoadWarning(const std::string& path) const;
+
+		// 内容根下所有 .wmat 的相对路径(升序,用于编辑器下拉列表/搜索)。
+		std::vector<std::string> ScanMaterials() const;
 
 	private:
 		MaterialLibrary() = default;

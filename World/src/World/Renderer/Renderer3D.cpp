@@ -56,6 +56,9 @@ namespace World
 				uint32_t Revision = 0;
 			};
 			std::unordered_map<const Material*, MaterialGpu> MaterialCache;
+			// set 0(全局相机)描述符集:预览这类"非 SceneRenderer 调用方"通过
+			// SetGlobalDescriptorSet 传入,在管线绑定后(布局可用时)统一绑定。
+			Rhi::Handle<Rhi::DescriptorSet> GlobalSet;
 			// 待补写的材质描述符(见 MaterialSetFor 的说明:录制渲染通道期间不能
 			// 调 vkUpdateDescriptorSets,否则驱动直接崩在 vkUpdateDescriptorSets)。
 			std::vector<std::pair<const Material*, Ref<Material>>> PendingMaterialUpdates;
@@ -351,6 +354,25 @@ namespace World
 		FlushMaterialUpdates(state);
 		state.CommandBuffer = commandBuffer;
 		state.ObjectIndex = 0;
+	}
+
+	void Renderer3D::BindPipelineForCurrentPass()
+	{
+		State& state = GetState();
+		if (state.CommandBuffer && state.Pipeline)
+		{
+			state.CommandBuffer->BindPipeline(state.Pipeline);
+			// 管线布局就绪后再绑 set 0:后端的描述符绑定需要布局,布局为空时绑定会被
+			// 推迟到下一次 BindPipeline(实测:预览相机矩阵因此丢失、几何不出现)。
+			if (state.GlobalSet)
+				state.CommandBuffer->BindDescriptorSet(state.GlobalSet, 0);
+		}
+	}
+
+	void Renderer3D::SetGlobalDescriptorSet(const Rhi::Handle<Rhi::DescriptorSet>& set)
+	{
+		// 只登记;真正的 vkCmdBindDescriptorSets 在管线绑定后进行(见 BindPipelineForCurrentPass)。
+		GetState().GlobalSet = set;
 	}
 
 	uint32_t Renderer3D::Submit(const Ref<Mesh>& mesh, const glm::mat4& transform, const glm::vec4& baseColor,

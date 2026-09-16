@@ -11,7 +11,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <filesystem>
 
 namespace World
 {
@@ -25,13 +27,57 @@ namespace World
 				return path;
 			return "…" + path.substr(path.size() - 45);
 		}
+
+		// 扫描内容根下的贴图资产(下拉选择用);按扩展名白名单过滤。
+		std::vector<std::string> ScanTextureCatalog()
+		{
+			std::vector<std::string> paths;
+			std::error_code ec;
+			const std::filesystem::path root = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+			if (!std::filesystem::exists(root, ec))
+				return paths;
+			for (const std::filesystem::directory_entry& entry :
+				std::filesystem::recursive_directory_iterator(root,
+					std::filesystem::directory_options::skip_permission_denied, ec))
+			{
+				if (!entry.is_regular_file(ec))
+					continue;
+				std::string extension = entry.path().extension().string();
+				std::transform(extension.begin(), extension.end(), extension.begin(),
+					[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+				if (extension != ".png" && extension != ".jpg" && extension != ".jpeg" && extension != ".tga")
+					continue;
+				const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, ec);
+				if (!ec)
+					paths.push_back(MaterialLibrary::NormalizePath(relative.generic_string()));
+			}
+			std::sort(paths.begin(), paths.end());
+			return paths;
+		}
 	}
 
 	MaterialEditorPanel::MaterialEditorPanel()
+		: MaterialEditorPanel(std::string())
+	{
+	}
+
+	MaterialEditorPanel::MaterialEditorPanel(std::string materialPath)
 	{
 		// 预览资源属于当前设备:设备释放(后端切换/关闭)前必须把句柄放掉,
 		// 否则会在设备之后析构(独立窗口崩溃那次的同类问题)。
 		Renderer::RegisterDeviceReleaseHook(this, [this] { ReleaseGpuResources(); });
+		SetMaterialPathForPanel(materialPath);
+	}
+
+	void MaterialEditorPanel::SetMaterialPathForPanel(const std::string& path)
+	{
+		const std::string key = path.empty() ? std::string("(unsaved)") : MaterialLibrary::NormalizePath(path);
+		m_PanelId = "material:" + key;
+		std::filesystem::path file(key);
+		std::string name = file.stem().string();
+		if (name.empty())
+			name = "Material";
+		m_PanelTitle = "Material - " + name;
 	}
 
 	MaterialEditorPanel::~MaterialEditorPanel()
@@ -63,9 +109,41 @@ namespace World
 		}
 		m_Material = material;
 		m_Path = material->GetPath();
-		m_AlbedoPathBuffer = material->GetDesc().AlbedoTexture;
-		m_NormalPathBuffer = material->GetDesc().NormalTexture;
-		m_ShowSaveAs = false;
+		SetMaterialPathForPanel(m_Path);
+		RefreshCatalog();
+		RefreshPickerIndices();
+		WLD_CORE_INFO("[material-ui] opened material '{0}'", m_Path);
+	}
+
+	void MaterialEditorPanel::RefreshCatalog()
+	{
+		const double now = std::chrono::duration<double>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+		if (now - m_CatalogRefreshTime < 1.5)
+			return;
+		m_CatalogRefreshTime = now;
+		m_MaterialPaths = MaterialLibrary::Get().ScanMaterials();
+		m_TexturePaths = ScanTextureCatalog();
+		RefreshPickerIndices();
+	}
+
+	void MaterialEditorPanel::RefreshPickerIndices()
+	{
+		if (!m_Material)
+			return;
+		const MaterialDesc& desc = m_Material->GetDesc();
+		m_MaterialPickIndex = -1;
+		for (size_t i = 0; i < m_MaterialPaths.size(); ++i)
+			if (m_MaterialPaths[i] == m_Path)
+				m_MaterialPickIndex = static_cast<int>(i);
+		m_AlbedoPickIndex = 0;
+		for (size_t i = 0; i < m_TexturePaths.size(); ++i)
+			if (m_TexturePaths[i] == desc.AlbedoTexture)
+				m_AlbedoPickIndex = static_cast<int>(i);
+		m_NormalPickIndex = 0;
+		for (size_t i = 0; i < m_TexturePaths.size(); ++i)
+			if (m_TexturePaths[i] == desc.NormalTexture)
+				m_NormalPickIndex = static_cast<int>(i);
 	}
 
 	void MaterialEditorPanel::ReleaseGpuResources()
@@ -183,7 +261,7 @@ namespace World
 		if (!m_PreviewFramebuffer || !m_PreviewCameraSet || !m_PreviewSphere)
 			return 0;
 
-		const float distance = 2.6f;
+		const float distance = m_CameraDistance;
 		const glm::vec3 eye {
 			distance * std::cos(m_OrbitPitch) * std::sin(m_OrbitYaw),
 			distance * std::sin(m_OrbitPitch),
@@ -233,14 +311,15 @@ namespace World
 		return m_PreviewTextureId;
 	}
 
-	void MaterialEditorPanel::SaveCurrent(bool saveAs)
+	void MaterialEditorPanel::SaveCurrent()
 	{
 		if (!m_Material)
 			return;
-		std::string path = saveAs ? m_SaveNameBuffer : m_Path;
+		// 新建材质走内容浏览器(Create → New Material);这里只保存已落盘的材质。
+		std::string path = m_Path.empty() ? m_NewPathBuffer : m_Path;
 		if (path.empty())
 		{
-			m_Status = "保存失败: 请填写路径(另存为需要形如 materials/xxx.wmat)";
+			m_Status = "保存失败: 未指定路径(新建材质请在内容浏览器里创建 .wmat)";
 			m_StatusIsError = true;
 			return;
 		}
@@ -252,8 +331,8 @@ namespace World
 			return;
 		}
 		m_Path = m_Material->GetPath();
-		m_SaveNameBuffer = m_Path;
-		m_ShowSaveAs = false;
+		SetMaterialPathForPanel(m_Path);
+		RefreshPickerIndices();
 		m_Status = "已保存 " + m_Path;
 		m_StatusIsError = false;
 	}
@@ -261,26 +340,18 @@ namespace World
 	void MaterialEditorPanel::DrawToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
+		// 材质/贴图下拉列表:节流刷新(新资产 ~1.5s 内出现在列表里)。
+		if (m_Material)
+			RefreshCatalog();
 		const float x = rect.X + 10.0f;
 		float y = rect.Y + 6.0f;
-		const float buttonW = 74.0f;
-		const float gap = 6.0f;
+		const float buttonW = 86.0f;
+		const float gap = 8.0f;
 
-		if (Wui::Button(ctx, Wui::HashId("material.new"), { x, y, buttonW, 22.0f }, "New", theme))
-		{
-			m_Material = MaterialLibrary::Get().CreateDefault("New Material");
-			m_Path.clear();
-			m_SaveNameBuffer = "materials/new_material.wmat";
-			m_AlbedoPathBuffer.clear();
-			m_NormalPathBuffer.clear();
-			m_Status = "已新建材质(保存后才会落盘)";
-			m_StatusIsError = false;
-		}
-		if (Wui::Button(ctx, Wui::HashId("material.save"), { x + (buttonW + gap), y, buttonW, 22.0f }, "Save", theme))
-			SaveCurrent(false);
-		if (Wui::Button(ctx, Wui::HashId("material.saveas"), { x + 2 * (buttonW + gap), y, buttonW, 22.0f }, "Save As", theme))
-			m_ShowSaveAs = !m_ShowSaveAs;
-		if (Wui::Button(ctx, Wui::HashId("material.revert"), { x + 3 * (buttonW + gap), y, buttonW, 22.0f }, "Revert", theme))
+		// 新建材质在内容浏览器(右键 → New Material)完成;面板只负责编辑与保存。
+		if (Wui::Button(ctx, Wui::HashId("material.save"), { x, y, buttonW, 22.0f }, "Save", theme))
+			SaveCurrent();
+		if (Wui::Button(ctx, Wui::HashId("material.revert"), { x + (buttonW + gap), y, buttonW, 22.0f }, "Revert", theme))
 		{
 			if (m_Path.empty())
 			{
@@ -292,8 +363,7 @@ namespace World
 				std::string error;
 				if (MaterialLibrary::Get().Reload(m_Path, &error))
 				{
-					m_AlbedoPathBuffer = m_Material->GetDesc().AlbedoTexture;
-					m_NormalPathBuffer = m_Material->GetDesc().NormalTexture;
+					RefreshPickerIndices();
 					m_Status = "已从磁盘重载 " + m_Path;
 					m_StatusIsError = false;
 				}
@@ -306,10 +376,12 @@ namespace World
 		}
 
 		y += 30.0f;
-		if (m_ShowSaveAs)
+		if (m_Path.empty())
 		{
+			Wui::Label(ctx, { x, y }, "尚未落盘:请在内容浏览器里新建材质", theme.TextMuted, 12.0f);
+			y += 16.0f;
 			const Wui::WuiRect field { x, y, rect.W - 20.0f, 22.0f };
-			Wui::TextField(ctx, Wui::HashId("material.saveas.path"), field, m_SaveNameBuffer, theme);
+			Wui::TextField(ctx, Wui::HashId("material.newpath"), field, m_NewPathBuffer, theme);
 			y += 28.0f;
 		}
 	}
@@ -386,17 +458,41 @@ namespace World
 			m_Material->SetDoubleSided(doubleSided);
 		y += 26.0f;
 
-		// ---- 贴图槽 ----
-		Wui::Label(ctx, { x, y }, "Albedo 贴图 (sRGB, 相对 Game/assets)", theme.TextMuted, 12.0f);
+		// ---- 打开/切换材质(可搜索下拉:选中项在它自己的独立窗口里打开) ----
+		Wui::Label(ctx, { x, y }, "材质 (打开到自己的窗口)", theme.TextMuted, 12.0f);
 		y += 16.0f;
-		if (Wui::TextField(ctx, Wui::HashId("material.albedo"), { x, y, width, 20.0f }, m_AlbedoPathBuffer, theme))
-			m_Material->SetAlbedoTexture(m_AlbedoPathBuffer);
-		y += 26.0f;
+		int materialPick = m_MaterialPickIndex;
+		if (Wui::SearchableCombo(ctx, Wui::HashId("material.pick"), { x, y, width, 22.0f }, "",
+			m_MaterialPaths, materialPick, theme))
+		{
+			if (materialPick >= 0 && materialPick < static_cast<int>(m_MaterialPaths.size())
+				&& m_MaterialPaths[materialPick] != m_Path)
+			{
+				host.OpenMaterialEditor(m_MaterialPaths[materialPick]);
+				m_Status = "已在新窗口打开 " + m_MaterialPaths[materialPick];
+				m_StatusIsError = false;
+			}
+			m_MaterialPickIndex = materialPick;
+		}
+		y += 28.0f;
+
+		// ---- 贴图槽(可搜索下拉) ----
+		std::vector<std::string> albedoOptions = m_TexturePaths;
+		albedoOptions.insert(albedoOptions.begin(), "(无)");
+		Wui::Label(ctx, { x, y }, "Albedo 贴图 (sRGB)", theme.TextMuted, 12.0f);
+		y += 16.0f;
+		if (Wui::SearchableCombo(ctx, Wui::HashId("material.albedo"), { x, y, width, 22.0f }, "",
+			albedoOptions, m_AlbedoPickIndex, theme))
+			m_Material->SetAlbedoTexture(m_AlbedoPickIndex <= 0 ? std::string() : albedoOptions[m_AlbedoPickIndex]);
+		y += 28.0f;
+		std::vector<std::string> normalOptions = m_TexturePaths;
+		normalOptions.insert(normalOptions.begin(), "(无)");
 		Wui::Label(ctx, { x, y }, "Normal 贴图 (线性)", theme.TextMuted, 12.0f);
 		y += 16.0f;
-		if (Wui::TextField(ctx, Wui::HashId("material.normal"), { x, y, width, 20.0f }, m_NormalPathBuffer, theme))
-			m_Material->SetNormalTexture(m_NormalPathBuffer);
-		y += 26.0f;
+		if (Wui::SearchableCombo(ctx, Wui::HashId("material.normal"), { x, y, width, 22.0f }, "",
+			normalOptions, m_NormalPickIndex, theme))
+			m_Material->SetNormalTexture(m_NormalPickIndex <= 0 ? std::string() : normalOptions[m_NormalPickIndex]);
+		y += 28.0f;
 
 		// ---- 状态行 ----
 		if (!m_Status.empty())
@@ -442,6 +538,13 @@ namespace World
 
 			// 左键拖拽旋转预览相机(与 3D 视口一致的直觉:拖拽转物体)。
 			const bool hovered = ctx.IsHovered(previewRect);
+			// 滚轮缩放(镜头远近):距离越小越近;越近步长越小,便于微调。
+			if (hovered && ctx.Input().Wheel != 0.0f)
+			{
+				const float step = std::max(0.1f, m_CameraDistance * 0.1f);
+				m_CameraDistance = std::clamp(m_CameraDistance - ctx.Input().Wheel * step, 1.6f, 20.0f);
+				WLD_CORE_INFO("[material-ui] preview zoom distance={0}", m_CameraDistance);
+			}
 			if (hovered && ctx.Input().MouseClicked[0])
 			{
 				m_Orbiting = true;

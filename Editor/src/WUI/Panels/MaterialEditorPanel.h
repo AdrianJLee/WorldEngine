@@ -7,6 +7,7 @@
 #include "World/RHI/Rhi.h"
 
 #include <string>
+#include <vector>
 
 namespace World
 {
@@ -14,26 +15,26 @@ namespace World
 	//
 	// 职责:
 	//  - 查看:显示材质路径、脏标记、加载警告;
-	//  - 预览:离屏渲染材质球(走与场景完全相同的 Renderer3D 管线/着色器),
-	//    左键拖拽旋转预览相机,参数改动即时反映到预览;
+	//  - 预览:离屏渲染材质球,左键拖拽旋转、滚轮缩放(镜头远近);
 	//  - 编辑:BaseColor/Metallic/Roughness/Emissive/BlendMode/DoubleSided + 两个贴图槽,
-	//    New/Save/Save As/Revert。
-	//
-	// 预览是只读用途的独立渲染目标,不依赖当前场景;面板不可见时不渲染预览。
+	//    Save/Revert;新建材质走内容浏览器(New Material)。
+	//  - 每个材质一个面板/窗口(id = "material:<path>"),可同时打开多个。
 	class MaterialEditorPanel final : public EditorPanel
 	{
 	public:
 		MaterialEditorPanel();
+		explicit MaterialEditorPanel(std::string materialPath);
 		~MaterialEditorPanel() override;
 
-		const char* Id() const override { return "material"; }
-		const char* Title() const override { return "Material"; }
+		const char* Id() const override { return m_PanelId.c_str(); }
+		const char* Title() const override { return m_PanelTitle.c_str(); }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 
 		// 由内容浏览器/Window 菜单调用:打开指定 .wmat(失败时面板显示错误而不是弹窗)。
 		void OpenMaterial(const std::string& path);
 		bool HasMaterial() const { return m_Material != nullptr; }
 		const std::string& GetMaterialPath() const { return m_Path; }
+		void SetMaterialPathForPanel(const std::string& path);
 
 	private:
 		void EnsureGpuResources();
@@ -42,17 +43,24 @@ namespace World
 		uint64_t RenderPreview();
 		void DrawToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
-		void SaveCurrent(bool saveAs);
+		void SaveCurrent();
+		void RefreshCatalog();
+		void RefreshPickerIndices();
 
 		// ---- 文档状态 ----
+		std::string m_PanelId = "material:";
+		std::string m_PanelTitle = "Material";
 		Ref<Material> m_Material;
 		std::string m_Path;                 // 当前材质路径(空 = 未落盘新材质)
-		std::string m_SaveNameBuffer;       // "另存为"输入缓冲
-		std::string m_AlbedoPathBuffer;
-		std::string m_NormalPathBuffer;
+		std::string m_NewPathBuffer;        // 未落盘时的目标路径输入
 		std::string m_Status;               // 最近一次操作结果
 		bool m_StatusIsError = false;
-		bool m_ShowSaveAs = false;
+		std::vector<std::string> m_MaterialPaths;
+		std::vector<std::string> m_TexturePaths;
+		int m_MaterialPickIndex = -1;
+		int m_AlbedoPickIndex = 0;
+		int m_NormalPickIndex = 0;
+		double m_CatalogRefreshTime = 0.0;
 
 		// ---- 预览状态 ----
 		uint32_t m_PreviewSize = 256;
@@ -62,6 +70,7 @@ namespace World
 		bool m_Orbiting = false;
 		float m_OrbitYaw = 0.6f;            // 弧度:绕 Y
 		float m_OrbitPitch = 0.25f;         // 弧度:绕 X
+		float m_CameraDistance = 2.6f;      // 预览相机距离(滚轮缩放)
 		glm::vec2 m_LastMouse { 0.0f };
 
 		// ---- GPU 资源(预览专用,惰性创建) ----

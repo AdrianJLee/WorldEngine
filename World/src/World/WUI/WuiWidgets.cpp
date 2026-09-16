@@ -617,6 +617,124 @@ namespace World::Wui
 		return changed;
 	}
 
+	// D3:可搜索下拉。选项多(材质/贴图路径)时,用输入框过滤 + 滚轮滚动选择,
+	// 交互与常见引擎的资源选择器一致。
+	bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		const std::vector<std::string>& options, int& selected, const WuiTheme& theme)
+	{
+		std::string& filter = ctx.Persist<std::string>(id ^ 0x5A17u, std::string());
+		const bool open = ctx.IsPopupOpen(id);
+		const bool hovered = ctx.IsHovered(rect);
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, hovered || open ? theme.ButtonHover : theme.ButtonBg, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
+
+		// 未展开时显示当前选中项;展开时输入框承担过滤。
+		const WuiRect fieldRect { rect.X + 1.0f, rect.Y + 1.0f, rect.W - 24.0f, rect.H - 2.0f };
+		const std::string current = (selected >= 0 && selected < static_cast<int>(options.size()))
+			? options[selected] : std::string();
+		if (!open)
+			ctx.Commands().push_back({ WuiDrawKind::Text, { fieldRect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
+				theme.Text, 0, 1.0f, current, 15.0f, false });
+		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + rect.W - 18.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
+			theme.TextMuted, 0, 1.0f, open ? "^" : "v", 14.0f, false });
+		if (ctx.IsClicked(rect) && !open)
+		{
+			filter.clear();
+			ctx.OpenPopup(id);
+			ctx.SetFocus(id ^ 0x5A17u);
+		}
+
+		bool changed = false;
+		if (!open)
+			return false;
+
+		ctx.PushOverlay();
+		const float rowH = 22.0f;
+		constexpr size_t kMaxVisible = 8;
+		// 过滤(大小写不敏感的子串匹配):空串 = 全部。
+		std::string needle = filter;
+		std::transform(needle.begin(), needle.end(), needle.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		std::vector<int> matches;
+		matches.reserve(options.size());
+		for (int i = 0; i < static_cast<int>(options.size()); ++i)
+		{
+			if (needle.empty())
+			{
+				matches.push_back(i);
+				continue;
+			}
+			std::string haystack = options[i];
+			std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			if (haystack.find(needle) != std::string::npos)
+				matches.push_back(i);
+		}
+
+		const size_t visible = std::min(matches.size(), kMaxVisible);
+		const float panelH = 30.0f + rowH * static_cast<float>(visible) + 6.0f;
+		// 弹层向上展开的条件:下方空间不够(用 UI 视口高度判断,避免被屏幕裁掉)。
+		const bool flipUp = rect.Y + rect.H + panelH > ctx.Input().ViewportSize.y;
+		const WuiRect panel { rect.X, flipUp ? rect.Y - panelH - 2.0f : rect.Y + rect.H + 2.0f, rect.W, panelH };
+		DrawPanelSurface(ctx, panel, theme);
+
+		const WuiRect searchRect { panel.X + 4.0f, panel.Y + 4.0f, panel.W - 8.0f, 22.0f };
+		TextField(ctx, id ^ 0x5A17u, searchRect, filter, theme);
+		// 输入框内的回车用 "输入" 语义:选中第一个匹配项。
+		bool submitted = false;
+		if (ctx.Focus() == static_cast<WuiId>(id ^ 0x5A17u) && ctx.IsKeyPressed(KeyCodes::Enter))
+			submitted = true;
+
+		float& scroll = ctx.Persist<float>(id ^ 0x5A18u, 0.0f);
+		const WuiRect listRect { panel.X + 4.0f, panel.Y + 30.0f, panel.W - 8.0f, rowH * static_cast<float>(visible) };
+		if (ctx.IsHovered(listRect) && ctx.Input().Wheel != 0.0f)
+			scroll = std::clamp(scroll - ctx.Input().Wheel * 24.0f, 0.0f,
+				std::max(0.0f, rowH * static_cast<float>(matches.size()) - listRect.H));
+
+		const size_t first = static_cast<size_t>(scroll / rowH);
+		for (size_t row = 0; row < visible; ++row)
+		{
+			const size_t matchIndex = first + row;
+			if (matchIndex >= matches.size())
+				break;
+			const int optionIndex = matches[matchIndex];
+			const WuiRect item { listRect.X, listRect.Y + rowH * static_cast<float>(row), listRect.W, rowH };
+			ctx.Commands().push_back({ WuiDrawKind::ClipPush, listRect });
+			if (ctx.IsHovered(item))
+				ctx.Commands().push_back({ WuiDrawKind::Rect, item, theme.ButtonHover, 2.0f });
+			ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + 6.0f, item.Y + 3.0f, 0, 0 },
+				theme.Text, 0, 1.0f, options[optionIndex], 15.0f, false });
+			ctx.Commands().push_back({ WuiDrawKind::ClipPop });
+			if (ctx.IsClicked(item))
+			{
+				selected = optionIndex;
+				changed = true;
+				ctx.ClosePopup(id);
+				break;
+			}
+		}
+		if (submitted && !matches.empty())
+		{
+			selected = matches.front();
+			changed = true;
+			ctx.ClosePopup(id);
+		}
+		if (visible < matches.size() && !changed)
+			ctx.Commands().push_back({ WuiDrawKind::Text,
+				{ panel.X + 6.0f, panel.Y + panel.H - 16.0f, 0, 0 }, theme.TextMuted, 0, 1.0f,
+				"显示前 " + std::to_string(visible) + " / " + std::to_string(matches.size()) + " 项(继续输入以缩小范围)",
+				12.0f, false });
+		if (matches.empty())
+			ctx.Commands().push_back({ WuiDrawKind::Text, { panel.X + 6.0f, panel.Y + 34.0f, 0, 0 },
+				theme.TextMuted, 0, 1.0f, "(无匹配项)", 13.0f, false });
+
+		ctx.ClosePopupsOnOutsideClick({ id }, panel);
+		if (ctx.IsKeyPressed(KeyCodes::Escape))
+			ctx.ClosePopup(id);
+		ctx.PopOverlay();
+		return changed;
+	}
+
 	bool TreeNode(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool leaf, const WuiTheme& theme)
 	{
 		bool& open = ctx.Persist<bool>(id, false);

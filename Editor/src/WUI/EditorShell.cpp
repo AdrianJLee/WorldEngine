@@ -58,9 +58,12 @@ namespace World
 			// 独立窗口(用户指定):Widget Gallery 与 Input Map。
 			{ "gallery",         EditorShell::PanelForm::Independent, { 120.0f, 120.0f, 520.0f, 400.0f } },
 			{ "input",           EditorShell::PanelForm::Independent, { 660.0f, 120.0f, 440.0f, 340.0f } },
-			// D3 材质编辑器:默认独立窗口(用户 2026-09-16 指定),位置放在两块上方。
-			{ "material",        EditorShell::PanelForm::Independent, { 200.0f, 170.0f, 760.0f, 470.0f } },
+			// 注:D3 材质编辑器是**动态面板**(每个材质一个 "material:<path>" 实例),
+			// 不在这张静态声明表里,由 IsMaterialPanel/EditorShell::OpenMaterialEditor 处理。
 		};
+
+		// 动态材质面板 id 前缀:每个材质一个面板/独立窗口(用户 2026-09-16 要求)。
+		constexpr const char* kMaterialPanelPrefix = "material:";
 	}
 
 	EditorShell::EditorShell(EditorLayer& editor)
@@ -118,6 +121,9 @@ namespace World
 				continue;
 			const Wui::WuiRect rect { static_cast<float>(std::get<0>(key)), static_cast<float>(std::get<1>(key)),
 				static_cast<float>(std::get<2>(key)), static_cast<float>(std::get<3>(key)) };
+			// 动态材质面板按上面白名单被判定为"已声明独立面板",这里补建实例(路径编码在 id 里)。
+			for (const std::string& panel : panels)
+				EnsureMaterialPanelFromId(panel);
 			AddFloatWindow(panels.front(), rect, "restore");
 			if (FloatWindowHost* host = m_FloatHosts.empty() ? nullptr : m_FloatHosts.back().get())
 			{
@@ -136,6 +142,9 @@ namespace World
 
 	EditorShell::PanelForm EditorShell::FormOf(const std::string& panel) const
 	{
+		// 动态材质面板:每个材质一个独立窗口(不在静态声明表里)。
+		if (panel.compare(0, std::strlen(kMaterialPanelPrefix), kMaterialPanelPrefix) == 0)
+			return PanelForm::Independent;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
 				return spec.Form;
@@ -144,6 +153,8 @@ namespace World
 
 	bool EditorShell::IsDeclaredPanel(const std::string& panel) const
 	{
+		if (panel.compare(0, std::strlen(kMaterialPanelPrefix), kMaterialPanelPrefix) == 0)
+			return true;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
 				return true;
@@ -1614,16 +1625,36 @@ namespace World
 
 	void EditorShell::OpenMaterialEditor(const std::string& path)
 	{
-		const auto it = m_PanelRegistry.find("material");
-		if (it == m_PanelRegistry.end())
-			return;
-		if (auto* panel = dynamic_cast<MaterialEditorPanel*>(it->second.get()))
+		// 每个材质一个面板 + 独立窗口:同一材质重复打开只是前置焦点(用户 2026-09-16)。
+		const std::string panelId = std::string(kMaterialPanelPrefix) + MaterialLibrary::NormalizePath(path);
+		if (m_PanelRegistry.find(panelId) == m_PanelRegistry.end())
+		{
+			auto panel = std::make_unique<MaterialEditorPanel>(path);
 			panel->OpenMaterial(path);
-		// 材质编辑器默认形态是独立窗口:没开就打开(已开则只是前置焦点)。
-		if (!m_Layout.IsFloating("material"))
-			OpenIndependentPanel("material");
+			m_PanelRegistry.emplace(panelId, std::move(panel));
+			m_Panels.push_back(panelId);
+			m_Layout.FloatMemory.push_back({ panelId, Wui::WuiRect { 200.0f, 170.0f, 760.0f, 470.0f } });
+		}
+		if (!m_Layout.IsFloating(panelId))
+			OpenIndependentPanel(panelId);
 		else
-			FocusIndependentWindow("material");
+			FocusIndependentWindow(panelId);
+	}
+
+	void EditorShell::EnsureMaterialPanelFromId(const std::string& panelId)
+	{
+		if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
+			return;
+		if (panelId.compare(0, std::strlen(kMaterialPanelPrefix), kMaterialPanelPrefix) != 0)
+			return;
+		const std::string path = panelId.substr(std::strlen(kMaterialPanelPrefix));
+		if (path == "(unsaved)")
+			return;   // 未落盘的临时面板无法跨会话恢复
+		auto panel = std::make_unique<MaterialEditorPanel>(path);
+		panel->OpenMaterial(path);
+		m_PanelRegistry.emplace(panelId, std::move(panel));
+		if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
+			m_Panels.push_back(panelId);
 	}
 
 	void EditorShell::DockBackIndependentWindow(const std::string& panel)

@@ -32,6 +32,10 @@ namespace World::Wui
 	void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme);
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);
+	// 可搜索下拉(资源选择用):点击/输入展开带输入框的弹层,按子串过滤选项,
+	// 滚轮滚动结果列表,回车选中第一个匹配项。返回 true 表示本帧选了新值(写入 selected)。
+	bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);
 	bool TreeNode(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool leaf, const WuiTheme& theme);
 
 	// 菜单与弹窗

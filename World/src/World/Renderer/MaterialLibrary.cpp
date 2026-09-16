@@ -199,4 +199,25 @@ namespace World
 		const auto it = m_Warnings.find(NormalizePath(path));
 		return it == m_Warnings.end() ? std::string() : it->second;
 	}
+
+	std::vector<std::string> MaterialLibrary::ScanMaterials() const
+	{
+		std::vector<std::string> paths;
+		std::error_code ec;
+		// 内容根 = Game/assets(与材质路径的书写约定一致);遍历失败时返回空列表。
+		const std::filesystem::path root = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+		if (!std::filesystem::exists(root, ec))
+			return paths;
+		for (const std::filesystem::directory_entry& entry :
+			std::filesystem::recursive_directory_iterator(root, std::filesystem::directory_options::skip_permission_denied, ec))
+		{
+			if (!entry.is_regular_file(ec) || entry.path().extension() != ".wmat")
+				continue;
+			const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, ec);
+			if (!ec)
+				paths.push_back(NormalizePath(relative.generic_string()));
+		}
+		std::sort(paths.begin(), paths.end());
+		return paths;
+	}
 }

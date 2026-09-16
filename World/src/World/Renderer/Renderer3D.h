@@ -24,6 +24,13 @@ namespace World
 
 		// 开始一个 3D 批次:viewProjection 已按后端做过 NDC Y 适配。
 		static void BeginScene(const glm::mat4& viewProjection, const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer);
+		// 在 BeginScene 之后、绑定 set 0/1/2 之前调用:显式绑定不透明管线,
+		// 让后端拿到管线布局(Vulkan 的 vkCmdBindDescriptorSets 需要它,否则 set 0
+		// 会被"延迟到下一次 BindPipeline"——预览相机矩阵因此丢失,几何不出现)。
+		static void BindPipelineForCurrentPass();
+		// 预览等非 SceneRenderer 调用方:登记 set 0(全局相机)描述符集,
+		// 会在管线绑定之后真正执行 vkCmdBindDescriptorSets。
+		static void SetGlobalDescriptorSet(const Rhi::Handle<Rhi::DescriptorSet>& set);
 		// 提交一个网格实例(旧接口:无材质,只用常量色,供预览/内部使用);
 		// 返回分配到的对象序号,超出上限返回 UINT32_MAX(调用方应报错/跳帧)。
 		// entityId:D7-1c 视口点选用,写进 entity-id 附件(SV_Target1);-1 = 不可拾取。
