@@ -121,7 +121,8 @@ namespace World
 			m_Host.SetSelectedEntity(picked);
 		}
 
-		// 3D 网格实体的选中框:按**投影包围盒**画在场景图之上。
+		// 3D 网格实体的选中框:投影单位网格包围盒的 12 条棱(真 3D 线框盒),画在场景图之上。
+		// 近的棱更实、远的棱更淡,按相机深度排序(远的先画);整体用 ClipPush 夹在场景图区域内。
 		// 旧实现是 SceneRenderer 里用 Renderer2D 按实体 Transform 画的一个 2D 方块 ——
 		// 在 3D 视口里看着就是"一个跟方块无关的方形,位置还不对"(用户 2026-09-16 反馈)。
 		if (selected.IsValid() && selected.HasComponent<MeshRendererComponent>() &&
@@ -132,48 +133,93 @@ namespace World
 			if (selected.HasComponent<WorldTransformComponent>())
 				world = selected.GetComponent<WorldTransformComponent>().Matrix;
 			const bool plane = selected.GetComponent<MeshRendererComponent>().Primitive == "plane";
-			// 单位网格尺寸:cube = [-0.5,0.5]^3;plane = XZ 平面上的 [-0.5,0.5],y = 0。
-			glm::vec2 minScreen { 1e30f, 1e30f };
-			glm::vec2 maxScreen { -1e30f, -1e30f };
-			bool anyVisible = false;
+
+			// 单位网格角点:bit0 = X、bit1 = Y、bit2 = Z;plane 只有 y = 0 的一层(z/x 四角)。
+			glm::vec2 screen[8];
+			float depth[8] = {};
+			bool valid[8] = {};
 			for (int i = 0; i < 8; ++i)
 			{
-				if (plane && (i & 1))
-					continue; // 平面只有 4 个角
 				const glm::vec3 corner { (i & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((i & 2) ? 0.5f : -0.5f),
 					(i & 4) ? 0.5f : -0.5f };
 				const glm::vec4 clip = gizmoCamera.ViewProjection * (world * glm::vec4 { corner, 1.0f });
 				if (clip.w <= 0.0001f)
 					continue; // 角点在相机背后:跳过(避免投影爆炸)
+				valid[i] = true;
 				const glm::vec3 ndc = glm::vec3(clip) / clip.w;
-				const glm::vec2 screen { sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
+				screen[i] = { sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
 					sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H };
-				minScreen = glm::min(minScreen, screen);
-				maxScreen = glm::max(maxScreen, screen);
-				anyVisible = true;
+				depth[i] = clip.w; // 视深度:同一投影下 w 与相机距离同序,用来排序/淡出
 			}
-			if (anyVisible)
+
+			struct Edge { int A = 0; int B = 0; float Depth = 0.0f; };
+			std::vector<Edge> edges;
+			const auto addEdge = [&](int a, int b)
 			{
-				Wui::WuiRect outline { minScreen.x, minScreen.y, maxScreen.x - minScreen.x, maxScreen.y - minScreen.y };
-				// 夹在场景图区域内,避免画到工具栏/别的面板上。
-				const float x0 = std::max(outline.X, sceneRect.X);
-				const float y0 = std::max(outline.Y, sceneRect.Y);
-				const float x1 = std::min(outline.X + outline.W, sceneRect.X + sceneRect.W);
-				const float y1 = std::min(outline.Y + outline.H, sceneRect.Y + sceneRect.H);
-				if (x1 > x0 && y1 > y0)
+				if (valid[a] && valid[b])
+					edges.push_back({ a, b, (depth[a] + depth[b]) * 0.5f });
+			};
+			if (plane)
+			{
+				// 平面只有 4 个角:i = 0/1(x)、4/5(z)→ {0,1},{1,5},{5,4},{4,0}
+				addEdge(0, 1); addEdge(1, 5); addEdge(5, 4); addEdge(4, 0);
+			}
+			else
+			{
+				const int cubeEdges[12][2] = {
+					{ 0, 1 }, { 1, 3 }, { 3, 2 }, { 2, 0 },   // y = -0.5 面
+					{ 4, 5 }, { 5, 7 }, { 7, 6 }, { 6, 4 },   // y = +0.5 面
+					{ 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 },   // 四条竖棱
+				};
+				for (const auto& edge : cubeEdges)
+					addEdge(edge[0], edge[1]);
+			}
+
+			if (!edges.empty())
+			{
+				glm::vec2 minScreen { 1e30f, 1e30f };
+				glm::vec2 maxScreen { -1e30f, -1e30f };
+				float minDepth = edges[0].Depth, maxDepth = edges[0].Depth;
+				for (const Edge& edge : edges)
 				{
-					outline = { x0, y0, x1 - x0, y1 - y0 };
-					Wui::HighlightOutline(ctx, outline, { 1.0f, 0.5f, 0.0f, 1.0f }, 1.5f, 2.0f);
-					if (std::getenv("WLD_TRACE_UI"))
+					minScreen = glm::min(minScreen, glm::min(screen[edge.A], screen[edge.B]));
+					maxScreen = glm::max(maxScreen, glm::max(screen[edge.A], screen[edge.B]));
+					minDepth = std::min(minDepth, edge.Depth);
+					maxDepth = std::max(maxDepth, edge.Depth);
+				}
+				// 远的先画(先画的被后画的盖住),并按视深度淡出:近实远淡。
+				std::sort(edges.begin(), edges.end(),
+					[](const Edge& a, const Edge& b) { return a.Depth > b.Depth; });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sceneRect, {} });
+				for (const Edge& edge : edges)
+				{
+					const float t = maxDepth > minDepth ? (edge.Depth - minDepth) / (maxDepth - minDepth) : 0.0f;
+					const Wui::WuiColor color { 1.0f, 0.55f, 0.12f, 1.0f - 0.6f * t };
+					const glm::vec2 from = screen[edge.A];
+					const glm::vec2 to = screen[edge.B];
+					const glm::vec2 delta = to - from;
+					const float length = glm::length(delta);
+					if (length < 0.5f)
+						continue;
+					const glm::vec2 normal { -delta.y / length, delta.x / length };
+					const glm::vec2 offset = normal * 0.9f; // 1.8px 宽
+					Wui::WuiDrawCommand command;
+					command.Kind = Wui::WuiDrawKind::Quad;
+					command.Color = color;
+					command.Vertices = { from + offset, to + offset, to - offset, from - offset };
+					ctx.Commands().push_back(std::move(command));
+				}
+				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
+				if (std::getenv("WLD_TRACE_UI"))
+				{
+					static uint32_t lastHandle = 0;
+					const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(selected));
+					if (handle != lastHandle)
 					{
-						static uint32_t lastHandle = 0;
-						const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(selected));
-						if (handle != lastHandle)
-						{
-							lastHandle = handle;
-							WLD_CORE_INFO("[ui] selection outline handle={0} rect=({1},{2},{3},{4})",
-								handle, outline.X, outline.Y, outline.W, outline.H);
-						}
+						lastHandle = handle;
+						WLD_CORE_INFO("[ui] selection box(3d) handle={0} bbox=({1},{2},{3},{4}) edges={5}",
+							handle, minScreen.x, minScreen.y, maxScreen.x - minScreen.x, maxScreen.y - minScreen.y,
+							edges.size());
 					}
 				}
 			}
