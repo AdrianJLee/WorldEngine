@@ -18,6 +18,10 @@ namespace World
 		const char* Title() const override { return "Scene Hierarchy"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 
+		// 开发/验证入口:按索引触发该行的点击回调(与 GUI 点击走同一个 OnClick),
+		// 供 WLD_HIERARCHY_CLICK 自动化复现"Play 下点击层级行"这条真实路径。
+		bool DebugInvokeRowClick(size_t index);
+
 	private:
 		std::shared_ptr<Wui::WuiBox> m_Root;
 		std::shared_ptr<Wui::WuiScrollArea> m_Scroll;

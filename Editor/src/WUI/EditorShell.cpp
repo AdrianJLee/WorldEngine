@@ -293,6 +293,15 @@ namespace World
 		m_Editor.SetSelectedEntity(entity);
 	}
 
+	bool EditorShell::DebugClickHierarchyRow(size_t index)
+	{
+		const auto it = m_PanelRegistry.find("hierarchy");
+		if (it == m_PanelRegistry.end() || !it->second)
+			return false;
+		auto* panel = dynamic_cast<HierarchyPanel*>(it->second.get());
+		return panel && panel->DebugInvokeRowClick(index);
+	}
+
 	void EditorShell::MarkDocumentDirty()
 	{
 		m_Editor.MarkDocumentDirty();

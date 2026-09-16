@@ -109,7 +109,21 @@ namespace World
 		}
 
 		// 实体集合/排序变化时重建行;否则只更新文本与选中态。
-		if (m_RowEntities.size() != entities.size() || orderKey != m_LastOrderKey)
+		// 场景对象本身更换(Edit↔Play:Play 走 CopyScene 的播放副本,是另一个 Scene)也必须重建:
+		// 副本的名字与层级和编辑场景完全相同,orderKey 一样,但实体归属的 Scene* 不同。
+		// 沿用旧行会让点击把"上一个场景的实体"设为选择,EditorLayer 的归属校验(实体必须属于
+		// 活动场景)随即清空选择 —— 表现就是 Play 下点层级行,属性面板只有 "No entity selected"。
+		bool rowsMatch = m_RowEntities.size() == entities.size();
+		if (rowsMatch)
+		{
+			for (size_t i = 0; i < entities.size(); ++i)
+				if (m_RowEntities[i] != entities[i])
+				{
+					rowsMatch = false;
+					break;
+				}
+		}
+		if (!rowsMatch || orderKey != m_LastOrderKey)
 		{
 			m_LastOrderKey = std::move(orderKey);
 			m_Rows.clear();
@@ -127,7 +141,20 @@ namespace World
 				const bool collapsed = m_Collapsed.find(static_cast<uint32_t>(static_cast<entt::entity>(entity)))
 					!= m_Collapsed.end();
 				row->Text = std::string(hasChildren ? (collapsed ? "+ " : "- ") : "  ") + labelOf(entity);
-				row->OnClick = [&host, entity] { host.SetSelectedEntity(entity); };
+				row->OnClick = [&host, entity]
+				{
+					if (std::getenv("WLD_TRACE_UI"))
+					{
+						// GetScene() 对无效句柄会抛异常,先判有效再取。
+						const void* rowScene = entity.IsValid()
+							? static_cast<const void*>(entity.GetScene()) : nullptr;
+						WLD_CORE_INFO("[ui] hierarchy row clicked: handle={0} rowScene={1} activeScene={2}",
+							static_cast<uint32_t>(static_cast<entt::entity>(entity)),
+							rowScene,
+							static_cast<const void*>(host.GetActiveScene().get()));
+					}
+					host.SetSelectedEntity(entity);
+				};
 				content->Add(row, { 0, 1e30f, 0, 22, 0 });
 				m_Rows.push_back(row);
 			}
@@ -539,5 +566,14 @@ namespace World
 				ctx.ClosePopup(blankPopup);
 			ctx.PopOverlay();
 		}
+	}
+
+	bool HierarchyPanel::DebugInvokeRowClick(size_t index)
+	{
+		// 直接调用行控件保存的 OnClick:与鼠标点击走完全相同的回调(含其捕获的实体)。
+		if (index >= m_Rows.size() || !m_Rows[index] || !m_Rows[index]->OnClick)
+			return false;
+		m_Rows[index]->OnClick();
+		return true;
 	}
 }

@@ -111,6 +111,10 @@ namespace World
 		void StartCooking(const std::string& target);
 		// 开发验证:WLD_CAPTURE_FRAMES=N 后把场景渲染目标写 PPM(后端无关 RHI 读回)。
 		void CaptureFrameIfRequested();
+		// 开发验证:WLD_HIERARCHY_CLICK=<进入 Play 后的帧数> 触发层级面板首行的真实点击回调,
+		// 再等 3 帧断言选择仍属于活动场景,输出 "[dev] hierarchy-click check: PASS|FAIL" 后退出。
+		// 复现的是"Play 下点层级行 → 属性面板只有 No entity selected"这条路径。
+		void RunHierarchyClickCheck();
 	private:
 		Ref<SceneRenderer> m_SceneRenderer;
 		std::unique_ptr<Gameplay::SaveService> m_SaveService;
@@ -182,6 +186,10 @@ namespace World
 		// 会在 GPU 仍采样旧纹理时释放资源(Vulkan 下会卡死)。尺寸稳定后再重建。
 		glm::vec2 m_PendingViewportSize { 0, 0 };
 		float m_ViewportResizeDelay = 0.0f;
+		// WLD_HIERARCHY_CLICK 自动化状态:-2 = 未启用。
+		int m_DevClickFramesAfterPlay = -1;
+		int m_DevClickPlayFrames = 0;
+		int m_DevClickVerifyCountdown = -1;
 	};
 
 }

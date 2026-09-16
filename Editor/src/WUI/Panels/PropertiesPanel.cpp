@@ -70,8 +70,25 @@ namespace World
 		Scene* scene = entity.GetScene();
 		Schema::SchemaRegistry& schemas = scene->GetContext().Schemas();
 		if (m_ReadOnly)
+		{
+			// 诊断(WLD_TRACE_UI=1):只读态确实解析到实体时打一行(选择变化才打)。
+			// 与 EditorLayer 的 "selection cleared" 对照即可判断选择是否被归属校验清掉。
+			if (std::getenv("WLD_TRACE_UI"))
+			{
+				static uint32_t lastHandle = ~0u;
+				static const void* lastScene = nullptr;
+				const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
+				if (handle != lastHandle || static_cast<const void*>(scene) != lastScene)
+				{
+					lastHandle = handle;
+					lastScene = static_cast<const void*>(scene);
+					WLD_CORE_INFO("[ui] properties resolved entity (read-only): handle={0} scene={1}",
+						handle, static_cast<const void*>(scene));
+				}
+			}
 			Label(ctx, { rect.X + 8, rect.Y + 8 }, "Play/Simulate 运行中:只读查看(暂停或退出后可编辑)",
 				theme.TextMuted, 13.0f);
+		}
 
 		const Wui::WuiRect addButton { rect.X + 8, rect.Y + (m_ReadOnly ? 30.0f : 8.0f), 140, 24 };
 		if (!m_ReadOnly && Button(ctx, Wui::HashId("prop.add"), addButton, "Add Component", theme))

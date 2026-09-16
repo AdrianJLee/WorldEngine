@@ -93,6 +93,9 @@ namespace World
 		Entity PickEntityAt(glm::vec2 viewportLocal) override;
 		EditorCamera& GetEditorCamera() override;
 		Wui::GizmoOperation GetGizmoOperation() const override;
+		// 开发/验证入口:触发层级面板第 index 行的真实点击回调
+		// (WLD_HIERARCHY_CLICK 自动化用它复现"Play 下点层级行",不是绕过面板的旁路)。
+		bool DebugClickHierarchyRow(size_t index);
 
 	private:
 		// 停靠

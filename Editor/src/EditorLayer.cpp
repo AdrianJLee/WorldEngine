@@ -174,6 +174,7 @@ namespace World
 				WLD_CORE_INFO("[dev] WLD_AUTOPLAY: entered Play after {0} frames", devFrame);
 			}
 		}
+		RunHierarchyClickCheck();
 		//WLD_CORE_TRACE("Delta Time: {0} ({1} FPS)", ts.GetSeconds(), ts.GetFPS());
 
 		{
@@ -230,6 +231,24 @@ namespace World
 		if (!selectedEntity.IsValid() || selectedEntity.GetScene() != m_ActiveScene.get() ||
 			m_ActiveScene->IsPendingDestroy(selectedEntity))
 		{
+			// 诊断(WLD_TRACE_UI=1):说明"点击层级后属性面板显示 No entity selected"是
+			// 哪一条校验把选择清掉了(Play 下活动场景是播放副本,指针会随播放切换)。
+			// 只在"确实有过一个选择"时打:空选择是正常态,不然每帧都会刷。
+			if (selectedEntity.IsValid() && std::getenv("WLD_TRACE_UI"))
+			{
+				static int traced = 0;
+				if (traced < 12)
+				{
+					++traced;
+					// 注意:spdlog 的实参会无条件求值,Entity::GetScene() 对无效句柄会抛异常
+					// (RequireValid),必须先把指针算好,否则这条诊断自己会把进程干掉。
+					WLD_CORE_INFO("[ui] selection cleared: valid={0} entityScene={1} activeScene={2} pendingDestroy={3}",
+						1,
+						static_cast<const void*>(selectedEntity.GetScene()),
+						static_cast<const void*>(m_ActiveScene.get()),
+						m_ActiveScene->IsPendingDestroy(selectedEntity) ? 1 : 0);
+				}
+			}
 			m_SelectedEntity = {};
 			selectedEntity = {};
 		}
@@ -293,6 +312,55 @@ namespace World
 			m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight(),
 			static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y));
 		m_SceneRenderer->CaptureFrame(pathEnv);
+	}
+
+	void EditorLayer::RunHierarchyClickCheck()
+	{
+		// 自动化复现:WLD_HIERARCHY_CLICK=<进入 Play 后的帧数>(缺省 30,最小 3)。
+		// 调用的是层级面板行控件真实的 OnClick 回调,再等 3 帧确认选择没有被
+		// "实体必须属于活动场景" 的校验清掉(Play 的活动场景是 CopyScene 的播放副本)。
+		if (m_DevClickFramesAfterPlay == -1)
+		{
+			const char* requested = std::getenv("WLD_HIERARCHY_CLICK");
+			if (!requested || !requested[0])
+			{
+				m_DevClickFramesAfterPlay = -2; // 未启用
+				return;
+			}
+			const int frames = std::atoi(requested);
+			m_DevClickFramesAfterPlay = frames < 3 ? 3 : frames;
+		}
+		if (m_DevClickFramesAfterPlay == -2 || m_SceneState != SceneState::Play)
+			return;
+
+		if (m_DevClickVerifyCountdown >= 0)
+		{
+			if (--m_DevClickVerifyCountdown > 0)
+				return;
+			const bool selected = m_SelectedEntity.IsValid() && m_SelectedEntity.GetScene() == m_ActiveScene.get();
+			if (selected)
+				WLD_CORE_INFO("[dev] hierarchy-click check: PASS (handle={0}, scene={1})",
+					static_cast<uint32_t>(static_cast<entt::entity>(m_SelectedEntity)),
+					static_cast<const void*>(m_SelectedEntity.GetScene()));
+			else
+				WLD_CORE_ERROR("[dev] hierarchy-click check: FAIL (valid={0}, selectedScene={1}, activeScene={2})",
+					m_SelectedEntity.IsValid() ? 1 : 0,
+					m_SelectedEntity.IsValid() ? static_cast<const void*>(m_SelectedEntity.GetScene()) : nullptr,
+					static_cast<const void*>(m_ActiveScene.get()));
+			Application::Get().Close();
+			return;
+		}
+
+		if (++m_DevClickPlayFrames < m_DevClickFramesAfterPlay)
+			return;
+		if (!m_Shell.DebugClickHierarchyRow(0))
+		{
+			WLD_CORE_ERROR("[dev] hierarchy-click check: FAIL (no hierarchy row available; panel hidden?)");
+			Application::Get().Close();
+			return;
+		}
+		WLD_CORE_INFO("[dev] hierarchy-click: invoked row 0 click after {0} Play frames", m_DevClickPlayFrames);
+		m_DevClickVerifyCountdown = 3;
 	}
 
 
