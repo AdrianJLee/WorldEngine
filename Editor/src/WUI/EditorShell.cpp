@@ -244,6 +244,7 @@ namespace World
 			camera.Right = source.GetRight();
 			camera.Up = source.GetUp();
 			camera.Forward = source.GetForward();
+			camera.Position = source.GetPosition();
 			camera.Distance = source.GetDistance();
 			camera.FovDegrees = source.GetFOV();
 		}
@@ -254,6 +255,7 @@ namespace World
 			camera.Right = source.GetRightDirection();
 			camera.Up = source.GetUpDirection();
 			camera.Forward = source.GetForwardDirection();
+			camera.Position = source.GetPosition();
 			camera.Distance = source.GetDistance();
 			camera.FovDegrees = source.GetFov();
 		}

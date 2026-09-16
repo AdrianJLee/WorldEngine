@@ -152,27 +152,49 @@ namespace World
 				depth[i] = clip.w; // 视深度:同一投影下 w 与相机距离同序,用来排序/淡出
 			}
 
+			// 面朝向判定:只画"至少依附一个朝向相机的面"的棱 —— 物体后面的棱不再出现
+			// (用户 2026-09-16:不要透视效果、别让我看到盒子后面的框)。
+			// 面索引:0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z。
+			const glm::mat3 normalMatrix = glm::mat3(world);
+			const glm::vec3 faceNormals[6] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 },
+				{ 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+			const glm::vec3 faceCenters[6] = { { 0.5f, 0, 0 }, { -0.5f, 0, 0 }, { 0, 0.5f, 0 },
+				{ 0, -0.5f, 0 }, { 0, 0, 0.5f }, { 0, 0, -0.5f } };
+			bool faceVisible[6] = {};
+			for (int i = 0; i < 6; ++i)
+			{
+				const glm::vec3 centerWorld = glm::vec3(world * glm::vec4 { faceCenters[i], 1.0f });
+				const glm::vec3 normalWorld = glm::normalize(normalMatrix * faceNormals[i]);
+				faceVisible[i] = glm::dot(normalWorld, gizmoCamera.Position - centerWorld) > 0.0f;
+			}
+
 			struct Edge { int A = 0; int B = 0; float Depth = 0.0f; };
 			std::vector<Edge> edges;
-			const auto addEdge = [&](int a, int b)
+			const auto addEdge = [&](int a, int b, int faceA, int faceB)
 			{
-				if (valid[a] && valid[b])
+				// 两条相邻面都背向相机 = 这条棱在物体后面,跳过。
+				if (valid[a] && valid[b] && (faceVisible[faceA] || faceVisible[faceB]))
 					edges.push_back({ a, b, (depth[a] + depth[b]) * 0.5f });
 			};
 			if (plane)
 			{
 				// 平面只有 4 个角:i = 0/1(x)、4/5(z)→ {0,1},{1,5},{5,4},{4,0}
-				addEdge(0, 1); addEdge(1, 5); addEdge(5, 4); addEdge(4, 0);
+				// 平面没有体积,不做面剔除(始终画它的 4 条边)。
+				const int planeEdges[4][2] = { { 0, 1 }, { 1, 5 }, { 5, 4 }, { 4, 0 } };
+				for (const auto& edge : planeEdges)
+					if (valid[edge[0]] && valid[edge[1]])
+						edges.push_back({ edge[0], edge[1], (depth[edge[0]] + depth[edge[1]]) * 0.5f });
 			}
 			else
 			{
-				const int cubeEdges[12][2] = {
-					{ 0, 1 }, { 1, 3 }, { 3, 2 }, { 2, 0 },   // y = -0.5 面
-					{ 4, 5 }, { 5, 7 }, { 7, 6 }, { 6, 4 },   // y = +0.5 面
-					{ 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 },   // 四条竖棱
+				// 12 条棱 + 每条棱的两个相邻面(见上面的面索引)。
+				const int cubeEdges[12][4] = {
+					{ 0, 1, 3, 5 }, { 2, 3, 2, 5 }, { 4, 5, 3, 4 }, { 6, 7, 2, 4 },   // 沿 X(角点 y/z 固定)
+					{ 0, 2, 1, 5 }, { 1, 3, 0, 5 }, { 4, 6, 1, 4 }, { 5, 7, 0, 4 },   // 沿 Y(角点 x/z 固定)
+					{ 0, 4, 1, 3 }, { 1, 5, 0, 3 }, { 2, 6, 1, 2 }, { 3, 7, 0, 2 },   // 沿 Z(角点 x/y 固定)
 				};
 				for (const auto& edge : cubeEdges)
-					addEdge(edge[0], edge[1]);
+					addEdge(edge[0], edge[1], edge[2], edge[3]);
 			}
 
 			if (!edges.empty())
@@ -193,8 +215,8 @@ namespace World
 				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sceneRect, {} });
 				for (const Edge& edge : edges)
 				{
-					const float t = maxDepth > minDepth ? (edge.Depth - minDepth) / (maxDepth - minDepth) : 0.0f;
-					const Wui::WuiColor color { 1.0f, 0.55f, 0.12f, 1.0f - 0.6f * t };
+					// 可见棱统一实色(不再做远近淡出:背面棱已经被剔除,不需要透视暗示)。
+					const Wui::WuiColor color { 1.0f, 0.55f, 0.12f, 1.0f };
 					const glm::vec2 from = screen[edge.A];
 					const glm::vec2 to = screen[edge.B];
 					const glm::vec2 delta = to - from;
@@ -217,9 +239,12 @@ namespace World
 					if (handle != lastHandle)
 					{
 						lastHandle = handle;
-						WLD_CORE_INFO("[ui] selection box(3d) handle={0} bbox=({1},{2},{3},{4}) edges={5}",
+						const int visibleFaces = (faceVisible[0] ? 1 : 0) + (faceVisible[1] ? 1 : 0) +
+							(faceVisible[2] ? 1 : 0) + (faceVisible[3] ? 1 : 0) +
+							(faceVisible[4] ? 1 : 0) + (faceVisible[5] ? 1 : 0);
+						WLD_CORE_INFO("[ui] selection box(3d) handle={0} bbox=({1},{2},{3},{4}) edges={5} faces={6}",
 							handle, minScreen.x, minScreen.y, maxScreen.x - minScreen.x, maxScreen.y - minScreen.y,
-							edges.size());
+							edges.size(), visibleFaces);
 					}
 				}
 			}

@@ -22,6 +22,8 @@ namespace World::Wui
 		glm::vec3 Right { 1.0f, 0.0f, 0.0f };
 		glm::vec3 Up { 0.0f, 1.0f, 0.0f };
 		glm::vec3 Forward { 0.0f, 0.0f, 1.0f };
+		// 相机世界位置:面朝向判定用(选中盒只画朝向相机的那几条棱)。
+		glm::vec3 Position { 0.0f, 0.0f, 0.0f };
 		float Distance = 10.0f;
 		float FovDegrees = 45.0f;
 	};
