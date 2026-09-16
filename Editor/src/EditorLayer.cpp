@@ -281,13 +281,28 @@ namespace World
 		if (const char* selectEnv = std::getenv("WLD_SELECT_HANDLE"))
 		{
 			static bool s_Selected = false;
-			if (!s_Selected && m_SceneState == SceneState::Edit && m_ActiveScene)
+			// WLD_SELECT_IN_PLAY=1 时等 Play 起来再选(验证 Play 下的覆盖层/HUD 坐标)。
+			const bool waitForPlay = std::getenv("WLD_SELECT_IN_PLAY") != nullptr;
+			const bool ready = waitForPlay ? (m_SceneState == SceneState::Play) : (m_SceneState == SceneState::Edit);
+			if (!s_Selected && ready && m_ActiveScene)
 			{
 				s_Selected = true;
 				Entity target(m_ActiveScene.get(), static_cast<entt::entity>(std::atoi(selectEnv)));
-				m_SelectedEntity = target.IsValid() ? target : Entity {};
-				WLD_CORE_INFO("[dev] select handle={0} -> valid={1}",
-					std::atoi(selectEnv), m_SelectedEntity.IsValid() ? 1 : 0);
+				if (!target.IsValid())
+				{
+					// 句柄在当前场景不存在(Play 用播放副本):退化为第一个网格实体。
+					const entt::registry& registry = static_cast<const Scene*>(m_ActiveScene.get())->GetRegistry();
+					for (const entt::entity entity : registry.view<TransformComponent, MeshRendererComponent>())
+					{
+						target = Entity(m_ActiveScene.get(), entity);
+						break;
+					}
+				}
+				m_SelectedEntity = target;
+				WLD_CORE_INFO("[dev] select handle={0} play={1} -> valid={2} handle={3}",
+					std::atoi(selectEnv), m_SceneState == SceneState::Play ? 1 : 0,
+					m_SelectedEntity.IsValid() ? 1 : 0,
+					m_SelectedEntity.IsValid() ? static_cast<uint32_t>(static_cast<entt::entity>(m_SelectedEntity)) : 0u);
 			}
 		}
 	}
@@ -387,8 +402,12 @@ namespace World
 		// 输出必须逐点一致(否则就是行序/读回路径不对)。
 		if (m_DevPickFrames == -1)
 		{
-			const char* spec = std::getenv("WLD_PICK_AT");
-			if (!spec || !spec[0])
+			// WLD_PICK_SELFTEST=1:不依赖硬编码坐标 —— 先扫描 entity 附件找出每个可见实体,
+			// 再对每个实体取一个**内部**像素走正常拾取路径,验证拿回的句柄与附件一致。
+			// 这样布局/场景变化都不会让验收失效(用户要求"点方块任意位置应该选中")。
+			m_DevPickSelfTest = std::getenv("WLD_PICK_SELFTEST") != nullptr;
+			const char* spec = m_DevPickSelfTest ? nullptr : std::getenv("WLD_PICK_AT");
+			if ((!spec || !spec[0]) && !m_DevPickSelfTest)
 			{
 				m_DevPickFrames = -2; // 未启用
 				return;
@@ -397,6 +416,11 @@ namespace World
 			m_DevPickFrames = framesEnv ? std::atoi(framesEnv) : 30;
 			if (m_DevPickFrames < 3)
 				m_DevPickFrames = 3;
+			if (m_DevPickSelfTest)
+			{
+				m_DevPickFrames = m_DevPickFrames < 3 ? 3 : m_DevPickFrames;
+				return;
+			}
 			std::string text(spec);
 			size_t start = 0;
 			while (start <= text.size())
@@ -430,6 +454,51 @@ namespace World
 			const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - s_Start).count();
 			if (elapsed < delay)
 				return;
+		}
+
+		if (m_DevPickSelfTest)
+		{
+			std::vector<int32_t> ids;
+			if (!m_SceneRenderer->ReadEntityIdBuffer(ids))
+			{
+				WLD_CORE_ERROR("[dev] pick self-test: FAIL (entity attachment readback failed)");
+				Application::Get().Close();
+				return;
+			}
+			const int32_t width = static_cast<int32_t>(m_SceneRenderer->GetWidth());
+			const int32_t height = static_cast<int32_t>(m_SceneRenderer->GetHeight());
+			// 每个实体取一个"内部"像素(四邻同 id):轮廓边缘 1px 可能因边界效应判空。
+			std::map<int32_t, glm::ivec2> sample;
+			for (int32_t y = 1; y < height - 1 && sample.size() < 64; ++y)
+				for (int32_t x = 1; x < width - 1; ++x)
+				{
+					const int32_t id = ids[static_cast<size_t>(y) * width + x];
+					if (id == -1 || sample.count(id))
+						continue;
+					if (ids[static_cast<size_t>(y) * width + x - 1] == id &&
+						ids[static_cast<size_t>(y) * width + x + 1] == id &&
+						ids[static_cast<size_t>(y - 1) * width + x] == id &&
+						ids[static_cast<size_t>(y + 1) * width + x] == id)
+						sample[id] = { x, y };
+				}
+			int checked = 0;
+			int failed = 0;
+			for (const auto& [id, point] : sample)
+			{
+				const Entity picked = GetEntityAtMousePosition({ static_cast<float>(point.x), static_cast<float>(point.y) });
+				const int32_t pickedId = picked.IsValid()
+					? static_cast<int32_t>(static_cast<uint32_t>(static_cast<entt::entity>(picked))) : -1;
+				const bool ok = pickedId == id;
+				++checked;
+				if (!ok)
+					++failed;
+				WLD_CORE_INFO("[dev] pick self-test: entity id={0} at ({1},{2}) -> picked={3} {4}",
+					id, point.x, point.y, pickedId, ok ? "PASS" : "FAIL");
+			}
+			WLD_CORE_INFO("[dev] pick self-test: {0} (checked={1} failed={2})",
+				failed == 0 && checked > 0 ? "PASS" : "FAIL", checked, failed);
+			Application::Get().Close();
+			return;
 		}
 
 		for (const glm::vec2& point : m_DevPickPoints)

@@ -237,6 +237,46 @@ namespace World
 	{
 		// gizmo 只依赖"投影 + 相机基向量 + 距离/FOV":2D 与 3D 视口各取一台相机。
 		Wui::GizmoCamera camera;
+		// Play:视口渲染走场景的**主相机实体**(见 EditorLayer::OnUpdate 的 Play 分支),
+		// 覆盖层(选中框/gizmo)必须跟着同一台相机,否则位置整体错位
+		// (用户 2026-09-16:"Play 后点物体,选中框位置不对")。
+		if (m_Editor.IsPlaying())
+		{
+			if (Ref<Scene> scene = m_Editor.GetActiveScene())
+			{
+				Entity cameraEntity = scene->GetPrimaryCameraEntity();
+				if (cameraEntity.IsValid() && cameraEntity.HasComponent<CameraComponent>() &&
+					cameraEntity.HasComponent<TransformComponent>())
+				{
+					glm::mat4 world = cameraEntity.GetComponent<TransformComponent>().Transform;
+					if (cameraEntity.HasComponent<WorldTransformComponent>())
+						world = cameraEntity.GetComponent<WorldTransformComponent>().Matrix;
+					const Camera& playCamera = cameraEntity.GetComponent<CameraComponent>().Camera;
+					camera.ViewProjection = playCamera.GetProjectionMatrix() * glm::inverse(world);
+					camera.Position = glm::vec3(world[3]);
+					// 与 EditorCamera3D 同约定:Forward = 看向场景内的方向(相机局部 -Z)。
+					camera.Forward = -glm::normalize(glm::vec3(world[2]));
+					camera.Right = glm::normalize(glm::vec3(world[0]));
+					camera.Up = glm::normalize(glm::vec3(world[1]));
+					// 透视投影反推竖直 FOV(gizmo 的"屏幕恒定尺寸"用);距离取相机到选中实体。
+					const glm::mat4& projection = playCamera.GetProjectionMatrix();
+					camera.FovDegrees = std::abs(projection[1][1]) > 1e-6f
+						? glm::degrees(2.0f * std::atan(1.0f / std::abs(projection[1][1]))) : 45.0f;
+					Entity selected = m_Editor.GetSelectedEntity();
+					if (selected.IsValid() && selected.GetScene() == scene.get() &&
+						selected.HasComponent<TransformComponent>())
+					{
+						glm::mat4 selectedWorld = selected.GetComponent<TransformComponent>().Transform;
+						if (selected.HasComponent<WorldTransformComponent>())
+							selectedWorld = selected.GetComponent<WorldTransformComponent>().Matrix;
+						camera.Distance = std::max(0.1f, glm::length(camera.Position - glm::vec3(selectedWorld[3])));
+					}
+					else
+						camera.Distance = 10.0f;
+					return camera;
+				}
+			}
+		}
 		if (m_Editor.IsViewportCamera3D())
 		{
 			EditorCamera3D& source = m_Editor.GetEditorCamera3D();

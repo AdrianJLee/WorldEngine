@@ -135,22 +135,29 @@ namespace World
 			const bool plane = selected.GetComponent<MeshRendererComponent>().Primitive == "plane";
 
 			// 单位网格角点:bit0 = X、bit1 = Y、bit2 = Z;plane 只有 y = 0 的一层(z/x 四角)。
-			glm::vec2 screen[8];
-			float depth[8] = {};
-			bool valid[8] = {};
+			// 保留**裁剪空间**坐标:大物体(例如地面平面)的角点会跑到相机后面,直接丢角点会让
+			// 框缺边/变形,这里按近平面 w 裁剪线段后再投影。
+			glm::vec4 clipPos[8];
 			for (int i = 0; i < 8; ++i)
 			{
 				const glm::vec3 corner { (i & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((i & 2) ? 0.5f : -0.5f),
 					(i & 4) ? 0.5f : -0.5f };
-				const glm::vec4 clip = gizmoCamera.ViewProjection * (world * glm::vec4 { corner, 1.0f });
-				if (clip.w <= 0.0001f)
-					continue; // 角点在相机背后:跳过(避免投影爆炸)
-				valid[i] = true;
-				const glm::vec3 ndc = glm::vec3(clip) / clip.w;
-				screen[i] = { sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
-					sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H };
-				depth[i] = clip.w; // 视深度:同一投影下 w 与相机距离同序,用来排序/淡出
+				clipPos[i] = gizmoCamera.ViewProjection * (world * glm::vec4 { corner, 1.0f });
 			}
+			const auto projectClip = [&sceneRect](const glm::vec4& clip)
+			{
+				const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+				return glm::vec2 { sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
+					sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H };
+			};
+			// 近平面裁剪后的端点可能落在极远处(大平面):夹到视口周围一个安全范围,
+			// 避免 WUI 批处理里出现 1e7 级坐标(方向几乎不变,绘制结果由 ClipPush 决定)。
+			const float clampPad = 10.0f * std::max(sceneRect.W, sceneRect.H);
+			const auto clampScreen = [&sceneRect, clampPad](const glm::vec2& point)
+			{
+				return glm::vec2 { glm::clamp(point.x, sceneRect.X - clampPad, sceneRect.X + sceneRect.W + clampPad),
+					glm::clamp(point.y, sceneRect.Y - clampPad, sceneRect.Y + sceneRect.H + clampPad) };
+			};
 
 			// 面朝向判定:只画"至少依附一个朝向相机的面"的棱 —— 物体后面的棱不再出现
 			// (用户 2026-09-16:不要透视效果、别让我看到盒子后面的框)。
@@ -168,13 +175,30 @@ namespace World
 				faceVisible[i] = glm::dot(normalWorld, gizmoCamera.Position - centerWorld) > 0.0f;
 			}
 
-			struct Edge { int A = 0; int B = 0; float Depth = 0.0f; };
+			struct Edge { glm::vec2 From { 0.0f, 0.0f }; glm::vec2 To { 0.0f, 0.0f }; float Depth = 0.0f; };
 			std::vector<Edge> edges;
 			const auto addEdge = [&](int a, int b, int faceA, int faceB)
 			{
 				// 两条相邻面都背向相机 = 这条棱在物体后面,跳过。
-				if (valid[a] && valid[b] && (faceVisible[faceA] || faceVisible[faceB]))
-					edges.push_back({ a, b, (depth[a] + depth[b]) * 0.5f });
+				if (!(faceVisible[faceA] || faceVisible[faceB]))
+					return;
+				glm::vec4 p0 = clipPos[a];
+				glm::vec4 p1 = clipPos[b];
+				constexpr float kMinW = 0.0001f;
+				if (p0.w < kMinW && p1.w < kMinW)
+					return; // 整条棱在相机后面
+				if (p0.w < kMinW)
+				{
+					const float t = (kMinW - p0.w) / (p1.w - p0.w);
+					p0 = glm::mix(p0, p1, t);
+				}
+				else if (p1.w < kMinW)
+				{
+					const float t = (kMinW - p1.w) / (p0.w - p1.w);
+					p1 = glm::mix(p1, p0, t);
+				}
+				edges.push_back({ clampScreen(projectClip(p0)), clampScreen(projectClip(p1)),
+					std::max(p0.w, p1.w) });
 			};
 			if (plane)
 			{
@@ -182,8 +206,24 @@ namespace World
 				// 平面没有体积,不做面剔除(始终画它的 4 条边)。
 				const int planeEdges[4][2] = { { 0, 1 }, { 1, 5 }, { 5, 4 }, { 4, 0 } };
 				for (const auto& edge : planeEdges)
-					if (valid[edge[0]] && valid[edge[1]])
-						edges.push_back({ edge[0], edge[1], (depth[edge[0]] + depth[edge[1]]) * 0.5f });
+				{
+					glm::vec4 p0 = clipPos[edge[0]];
+					glm::vec4 p1 = clipPos[edge[1]];
+					constexpr float kMinW = 0.0001f;
+					if (p0.w < kMinW && p1.w < kMinW)
+						continue;
+					if (p0.w < kMinW)
+					{
+						const float t = (kMinW - p0.w) / (p1.w - p0.w);
+						p0 = glm::mix(p0, p1, t);
+					}
+					else if (p1.w < kMinW)
+					{
+						const float t = (kMinW - p1.w) / (p0.w - p1.w);
+						p1 = glm::mix(p1, p0, t);
+					}
+					edges.push_back({ clampScreen(projectClip(p0)), clampScreen(projectClip(p1)), std::max(p0.w, p1.w) });
+				}
 			}
 			else
 			{
@@ -204,8 +244,8 @@ namespace World
 				float minDepth = edges[0].Depth, maxDepth = edges[0].Depth;
 				for (const Edge& edge : edges)
 				{
-					minScreen = glm::min(minScreen, glm::min(screen[edge.A], screen[edge.B]));
-					maxScreen = glm::max(maxScreen, glm::max(screen[edge.A], screen[edge.B]));
+					minScreen = glm::min(minScreen, glm::min(edge.From, edge.To));
+					maxScreen = glm::max(maxScreen, glm::max(edge.From, edge.To));
 					minDepth = std::min(minDepth, edge.Depth);
 					maxDepth = std::max(maxDepth, edge.Depth);
 				}
@@ -217,8 +257,8 @@ namespace World
 				{
 					// 可见棱统一实色(不再做远近淡出:背面棱已经被剔除,不需要透视暗示)。
 					const Wui::WuiColor color { 1.0f, 0.55f, 0.12f, 1.0f };
-					const glm::vec2 from = screen[edge.A];
-					const glm::vec2 to = screen[edge.B];
+					const glm::vec2 from = edge.From;
+					const glm::vec2 to = edge.To;
 					const glm::vec2 delta = to - from;
 					const float length = glm::length(delta);
 					if (length < 0.5f)

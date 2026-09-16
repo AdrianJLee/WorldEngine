@@ -457,12 +457,12 @@ namespace World
 	// RHI 通路(CopyTextureToBuffer + Map):整张附件拷到 host-visible buffer 后取目标像素。
 	// 旧实现走 Framebuffer::ReadPixel(glReadPixels),Vulkan 下读不到东西。
 	// 点击是低频操作,因此接受一次 WaitIdle + 全附件拷贝的代价。
-	int32_t SceneRenderer::ReadEntityIdAt(int32_t x, int32_t y)
+	// 整张 entity-id 附件的读回(显示朝向:第 0 行 = 画面顶部,见 ReadEntityIdAt 的说明)。
+	// 自动化自检用它扫描可见实体,再逐点走 ReadEntityIdAt 验证拾取路径。
+	bool SceneRenderer::ReadEntityIdBuffer(std::vector<int32_t>& outIds)
 	{
 		if (!m_Device || !m_EntityTexture || m_Width == 0 || m_Height == 0)
-			return -1;
-		if (x < 0 || y < 0 || x >= static_cast<int32_t>(m_Width) || y >= static_cast<int32_t>(m_Height))
-			return -1;
+			return false;
 
 		Rhi::BufferDesc readbackDesc;
 		readbackDesc.Size = static_cast<uint64_t>(m_Width) * m_Height * 4;
@@ -473,14 +473,14 @@ namespace World
 		if (!readback)
 		{
 			WLD_CORE_ERROR("[pick] failed to create readback buffer");
-			return -1;
+			return false;
 		}
 		// 与截图同样复用队列:每次点选都建队列会泄漏后端对象。
 		static Rhi::Handle<Rhi::CommandQueue> s_PickQueue;
 		if (!s_PickQueue)
 			s_PickQueue = m_Device->CreateQueue("Pick");
 		if (!s_PickQueue)
-			return -1;
+			return false;
 		// 先等干净:保证读到的是点击前最后一次提交的附件内容。
 		m_Device->WaitIdle();
 
@@ -503,40 +503,34 @@ namespace World
 		if (!pixels)
 		{
 			WLD_CORE_ERROR("[pick] readback buffer is not mappable on this backend");
-			return -1;
+			return false;
 		}
 		// 行序:必须和**显示**一致。场景纹理由 WUI 以 UV {0,1,1,-1} 贴到视口(上下翻转,
 		// 见 ViewportPanel 的 m_SceneImage->Uv),因此视口局部坐标 y 对应的是附件里的
 		// 第 (Height-1-y) 行 —— 两个后端都是这个约定(实测 GL/Vulkan 附件逐像素一致)。
 		// 不翻行的话可点区域就是画面上物体的**上下镜像**(用户 2026-09-16 反馈:
 		// "点方块任意位置应该选中,而且方形区域位置不对")。
-		const size_t row = m_Height - 1 - static_cast<uint32_t>(y);
-		const int32_t id = pixels[row * m_Width + static_cast<uint32_t>(x)];
-		if (std::getenv("WLD_TRACE_UI"))
+		outIds.resize(static_cast<size_t>(m_Width) * m_Height);
+		for (uint32_t row = 0; row < m_Height; ++row)
 		{
-			// 临时诊断:确认读回缓冲里到底有什么(全 -1 = 拷到的是清屏值/空缓冲)。
-			int32_t minValue = INT32_MAX, maxValue = INT32_MIN;
-			size_t nonMinusOne = 0;
-			int32_t minX = INT32_MAX, minY = INT32_MAX, maxX = -1, maxY = -1;
-			const size_t total = static_cast<size_t>(m_Width) * m_Height;
-			for (size_t i = 0; i < total; ++i)
-			{
-				const int32_t value = pixels[i];
-				minValue = std::min(minValue, value);
-				maxValue = std::max(maxValue, value);
-				if (value != -1)
-				{
-					++nonMinusOne;
-					const int32_t px = static_cast<int32_t>(i % m_Width);
-					const int32_t py = static_cast<int32_t>(i / m_Width);
-					minX = std::min(minX, px); maxX = std::max(maxX, px);
-					minY = std::min(minY, py); maxY = std::max(maxY, py);
-				}
-			}
-			WLD_CORE_INFO("[pick] readback {0}x{1} min={2} max={3} hits={4} bbox=({5},{6})-({7},{8}) at({9},{10})row={11} id={12}",
-				m_Width, m_Height, minValue, maxValue, nonMinusOne, minX, minY, maxX, maxY, x, y, row, id);
+			const size_t sourceRow = m_Height - 1 - row;
+			std::memcpy(outIds.data() + static_cast<size_t>(row) * m_Width,
+				pixels + sourceRow * m_Width, static_cast<size_t>(m_Width) * sizeof(int32_t));
 		}
 		readback->Unmap();
+		return true;
+	}
+
+	int32_t SceneRenderer::ReadEntityIdAt(int32_t x, int32_t y)
+	{
+		if (x < 0 || y < 0 || x >= static_cast<int32_t>(m_Width) || y >= static_cast<int32_t>(m_Height))
+			return -1;
+		std::vector<int32_t> ids;
+		if (!ReadEntityIdBuffer(ids))
+			return -1;
+		const int32_t id = ids[static_cast<size_t>(y) * m_Width + static_cast<uint32_t>(x)];
+		if (std::getenv("WLD_TRACE_UI"))
+			WLD_CORE_INFO("[pick] readback {0}x{1} at({2},{3}) id={4}", m_Width, m_Height, x, y, id);
 		return id;
 	}
 }

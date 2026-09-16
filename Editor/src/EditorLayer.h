@@ -196,6 +196,7 @@ namespace World
 		// WLD_PICK_AT 自动化状态:-2 = 未启用。
 		int m_DevPickFrames = -1;
 		int m_DevPickFrameCount = 0;
+		bool m_DevPickSelfTest = false;
 		std::vector<glm::vec2> m_DevPickPoints;
 	};
 

@@ -39,6 +39,8 @@ namespace World
 		// 坐标以**左上角为原点**(与 WUI 视口一致),越界返回 -1;
 		// 返回 -1 也表示该像素没有实体(附件清屏值就是 -1)。
 		int32_t ReadEntityIdAt(int32_t x, int32_t y);
+		// 读回整张 entity-id 附件(显示朝向,行优先):自动化自检用(扫描可见实体再逐点验证)。
+		bool ReadEntityIdBuffer(std::vector<int32_t>& outIds);
 		// 开发验证:把颜色附件读回写 PPM。
 		void CaptureFrame(const std::filesystem::path& path) const;
 
