@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <sstream>
 
 namespace World
 {
@@ -316,7 +317,6 @@ namespace World
 		}
 		m_PreviewCommandBuffer->End();
 		Renderer::SubmitScene(m_PreviewCommandBuffer, m_PreviewColor);
-
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (m_PreviewTextureId == 0 || registry.Generation() != m_UiTextureGeneration)
 		{

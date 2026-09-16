@@ -19,3 +19,5 @@ Editor/wui-layout.json.bak
 Editor/wui-browser.json
 # 材质单测的沙箱目录(World.Material 在其中写临时 .wmat;失败时可能留下残件)
 Game/material_tests_tmp/
+# 内容浏览器"New Material"测试产生的临时材质目录(内容根是 Game/assets,这里是测试残留)
+Game/materials/
