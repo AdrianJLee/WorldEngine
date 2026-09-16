@@ -120,6 +120,64 @@ namespace World
 					picked.IsValid() ? 1 : 0);
 			m_Host.SetSelectedEntity(picked);
 		}
+
+		// 3D 网格实体的选中框:按**投影包围盒**画在场景图之上。
+		// 旧实现是 SceneRenderer 里用 Renderer2D 按实体 Transform 画的一个 2D 方块 ——
+		// 在 3D 视口里看着就是"一个跟方块无关的方形,位置还不对"(用户 2026-09-16 反馈)。
+		if (selected.IsValid() && selected.HasComponent<MeshRendererComponent>() &&
+			selected.HasComponent<TransformComponent>() && m_Host.HasRenderedScene())
+		{
+			const Wui::GizmoCamera gizmoCamera = m_Host.GetGizmoCamera();
+			glm::mat4 world = selected.GetComponent<TransformComponent>().Transform;
+			if (selected.HasComponent<WorldTransformComponent>())
+				world = selected.GetComponent<WorldTransformComponent>().Matrix;
+			const bool plane = selected.GetComponent<MeshRendererComponent>().Primitive == "plane";
+			// 单位网格尺寸:cube = [-0.5,0.5]^3;plane = XZ 平面上的 [-0.5,0.5],y = 0。
+			glm::vec2 minScreen { 1e30f, 1e30f };
+			glm::vec2 maxScreen { -1e30f, -1e30f };
+			bool anyVisible = false;
+			for (int i = 0; i < 8; ++i)
+			{
+				if (plane && (i & 1))
+					continue; // 平面只有 4 个角
+				const glm::vec3 corner { (i & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((i & 2) ? 0.5f : -0.5f),
+					(i & 4) ? 0.5f : -0.5f };
+				const glm::vec4 clip = gizmoCamera.ViewProjection * (world * glm::vec4 { corner, 1.0f });
+				if (clip.w <= 0.0001f)
+					continue; // 角点在相机背后:跳过(避免投影爆炸)
+				const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+				const glm::vec2 screen { sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
+					sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H };
+				minScreen = glm::min(minScreen, screen);
+				maxScreen = glm::max(maxScreen, screen);
+				anyVisible = true;
+			}
+			if (anyVisible)
+			{
+				Wui::WuiRect outline { minScreen.x, minScreen.y, maxScreen.x - minScreen.x, maxScreen.y - minScreen.y };
+				// 夹在场景图区域内,避免画到工具栏/别的面板上。
+				const float x0 = std::max(outline.X, sceneRect.X);
+				const float y0 = std::max(outline.Y, sceneRect.Y);
+				const float x1 = std::min(outline.X + outline.W, sceneRect.X + sceneRect.W);
+				const float y1 = std::min(outline.Y + outline.H, sceneRect.Y + sceneRect.H);
+				if (x1 > x0 && y1 > y0)
+				{
+					outline = { x0, y0, x1 - x0, y1 - y0 };
+					Wui::HighlightOutline(ctx, outline, { 1.0f, 0.5f, 0.0f, 1.0f }, 1.5f, 2.0f);
+					if (std::getenv("WLD_TRACE_UI"))
+					{
+						static uint32_t lastHandle = 0;
+						const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(selected));
+						if (handle != lastHandle)
+						{
+							lastHandle = handle;
+							WLD_CORE_INFO("[ui] selection outline handle={0} rect=({1},{2},{3},{4})",
+								handle, outline.X, outline.Y, outline.W, outline.H);
+						}
+					}
+				}
+			}
+		}
 		(void)theme;
 	}
 }

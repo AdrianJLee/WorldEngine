@@ -311,8 +311,16 @@ namespace World
 
 		if (selectedEntity)
 		{
-			auto& transform = selectedEntity.GetComponent<TransformComponent>();
-			Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
+			// 2D 精灵:描边就画在精灵本身的四边形上(与物体重合)。
+			// 3D 网格实体**不在这里画**:用实体 Transform 画出来的是一个 2D 方块 ——
+			// 在 3D 视口里既不是物体轮廓、位置也不对(用户 2026-09-16 反馈)。
+			// 3D 的选中框改由编辑器 UI 按"投影包围盒"画在场景图之上(D7-1c)。
+			if (selectedEntity.HasComponent<SpriteComponent>() &&
+				!selectedEntity.HasComponent<MeshRendererComponent>())
+			{
+				auto& transform = selectedEntity.GetComponent<TransformComponent>();
+				Renderer2D::DrawRectCore(transform, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
+			}
 			RenderDebug(camera, cameraTransform);
 		}
 		RenderGeometry(camera, cameraTransform);
@@ -497,10 +505,12 @@ namespace World
 			WLD_CORE_ERROR("[pick] readback buffer is not mappable on this backend");
 			return -1;
 		}
-		// 行序:两个后端的读回都是"纹理第 0 行在前",而场景目标的第 0 行就是画面顶部
-		// (离屏不做 Y 翻转,见 ProjectionConventions.h)。实测 GL/Vulkan 的 entity 附件
-		// 读回逐行一致,因此这里**不做**任何翻转 —— 旧代码为 GL 翻一次行是错的。
-		const size_t row = static_cast<size_t>(y);
+		// 行序:必须和**显示**一致。场景纹理由 WUI 以 UV {0,1,1,-1} 贴到视口(上下翻转,
+		// 见 ViewportPanel 的 m_SceneImage->Uv),因此视口局部坐标 y 对应的是附件里的
+		// 第 (Height-1-y) 行 —— 两个后端都是这个约定(实测 GL/Vulkan 附件逐像素一致)。
+		// 不翻行的话可点区域就是画面上物体的**上下镜像**(用户 2026-09-16 反馈:
+		// "点方块任意位置应该选中,而且方形区域位置不对")。
+		const size_t row = m_Height - 1 - static_cast<uint32_t>(y);
 		const int32_t id = pixels[row * m_Width + static_cast<uint32_t>(x)];
 		if (std::getenv("WLD_TRACE_UI"))
 		{

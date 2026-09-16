@@ -276,6 +276,20 @@ namespace World
 		// 点选校验必须在场景渲染之后:m_HasRenderedScene 在 OnUpdate 开头被复位,
 		// 放在前面会让 GetEntityAtMousePosition 直接早退(等于没测)。
 		RunPickCheck();
+		// 开发验证:WLD_SELECT_HANDLE=<句柄> 在渲染稳定后直接选中该实体(不退出),
+		// 供"选中框/描边"这类 UI 覆盖层的自动化核对使用。
+		if (const char* selectEnv = std::getenv("WLD_SELECT_HANDLE"))
+		{
+			static bool s_Selected = false;
+			if (!s_Selected && m_SceneState == SceneState::Edit && m_ActiveScene)
+			{
+				s_Selected = true;
+				Entity target(m_ActiveScene.get(), static_cast<entt::entity>(std::atoi(selectEnv)));
+				m_SelectedEntity = target.IsValid() ? target : Entity {};
+				WLD_CORE_INFO("[dev] select handle={0} -> valid={1}",
+					std::atoi(selectEnv), m_SelectedEntity.IsValid() ? 1 : 0);
+			}
+		}
 	}
 
 	void EditorLayer::CaptureFrameIfRequested()

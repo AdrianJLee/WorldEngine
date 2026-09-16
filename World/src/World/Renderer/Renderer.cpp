@@ -823,13 +823,13 @@ namespace World
 			return false;
 		}
 		file << "P6\n" << width << " " << height << "\n255\n";
-		// D7-1c 实测修正:两个后端的读回都是"纹理第 0 行在前",而场景目标的第 0 行就是
-		// 画面顶部(离屏不做 Y 翻转)。此前只为 GL 翻行是错的 —— 会把 GL 截图上下镜像,
-		// 导致 GL/Vulkan 的像素基线在不对称场景下必然对不上。
+		// 行序:统一输出成**显示朝向**。场景纹理由 WUI 以 UV {0,1,1,-1} 贴到视口(上下翻转),
+		// 所以附件第 0 行实际显示在画面底部;这里翻一次,截图就是用户看到的方向。
+		// 两个后端用同一个约定(实测 GL/Vulkan 附件逐像素一致),因此双后端基线对比不受影响。
 		std::vector<uint8_t> row(static_cast<size_t>(width) * 3);
 		for (uint32_t y = 0; y < height; ++y)
 		{
-			const uint8_t* source = pixels + static_cast<size_t>(y) * width * 4;
+			const uint8_t* source = pixels + static_cast<size_t>(height - 1 - y) * width * 4;
 			for (uint32_t x = 0; x < width; ++x)
 			{
 				row[x * 3 + 0] = source[x * 4 + 0];
