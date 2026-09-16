@@ -328,8 +328,13 @@ namespace World
 			if (!s_Selected && ready && m_ActiveScene)
 			{
 				s_Selected = true;
-				Entity target(m_ActiveScene.get(), static_cast<entt::entity>(std::atoi(selectEnv)));
-				if (!target.IsValid())
+				Entity target;
+				// 支持 WLD_SELECT_HANDLE=camera:直接选中场景主相机(相机可视化验收用)。
+				if (std::strcmp(selectEnv, "camera") == 0)
+					target = m_ActiveScene->GetPrimaryCameraEntity();
+				else
+					target = Entity(m_ActiveScene.get(), static_cast<entt::entity>(std::atoi(selectEnv)));
+				if (!target.IsValid() && std::strcmp(selectEnv, "camera") != 0)
 				{
 					// 句柄在当前场景不存在(Play 用播放副本):退化为第一个网格实体。
 					const entt::registry& registry = static_cast<const Scene*>(m_ActiveScene.get())->GetRegistry();
@@ -389,7 +394,10 @@ namespace World
 		// 相机预览目标(相机可视化验收:预览图必须与"该相机看到的画面"一致)。
 		if (const char* previewPath = std::getenv("WLD_CAPTURE_PREVIEW"))
 		{
-			if (previewPath[0] && m_PreviewRenderer && m_CameraPreviewEnabled)
+			// 只有"确实在预览某台相机"时才写文件:未选中相机时预览目标里是空内容,
+			// 抓出来会误导(验收脚本据此判断"有没有预览")。
+			if (previewPath[0] && m_PreviewRenderer && m_CameraPreviewEnabled &&
+				GetPreviewCameraEntity().IsValid())
 			{
 				WLD_CORE_INFO("[capture] camera preview target {0}x{1}",
 					m_PreviewRenderer->GetWidth(), m_PreviewRenderer->GetHeight());
@@ -1075,9 +1083,8 @@ namespace World
 		if (selected.IsValid() && selected.GetScene() == m_ActiveScene.get() &&
 			selected.HasComponent<CameraComponent>() && selected.HasComponent<TransformComponent>())
 			return selected;
-		Entity primary = m_ActiveScene->GetPrimaryCameraEntity();
-		if (primary.IsValid() && primary.HasComponent<TransformComponent>())
-			return primary;
+		// 只在**选中相机实体**时才有预览/视锥:未选中相机时编辑器不做任何相机可视化
+		// (用户 2026-09-16:"相机预览视口应该只有在选中某个相机时候才展示吧")。
 		return {};
 	}
 
@@ -1101,7 +1108,7 @@ namespace World
 	{
 		Entity cameraEntity = GetPreviewCameraEntity();
 		if (!cameraEntity.IsValid())
-			return "(no camera)";
+			return {};   // 空串 = 当前没有相机预览(面板据此隐藏小窗)
 		if (cameraEntity.HasComponent<TagComponent>())
 		{
 			const std::string& tag = cameraEntity.GetComponent<TagComponent>().Tag;
