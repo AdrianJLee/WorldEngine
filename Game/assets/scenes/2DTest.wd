@@ -1,5 +1,5 @@
 FormatVersion: 2
-Scene: 2D Test
+Scene: Untitled
 Entities:
   - World::UUIDComponent:
       ID:
@@ -7,11 +7,11 @@ Entities:
     World::TagComponent:
       Tag: Sprite A
     World::TransformComponent:
-      Location: [-0.6, 0, 0]
+      Location: [-0.600000024, 0, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     World::SpriteComponent:
-      Color: [1, 0.55, 0.12, 1]
+      Color: [1, 0.550000012, 0.119999997, 1]
       Texture: ""
       TilingFactor: 1
   - World::UUIDComponent:
@@ -20,11 +20,11 @@ Entities:
     World::TagComponent:
       Tag: Sprite B
     World::TransformComponent:
-      Location: [0, 0, 0]
+      Location: [0, 0, 0.100000001]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     World::SpriteComponent:
-      Color: [0.25, 0.85, 0.45, 1]
+      Color: [0.25, 0.850000024, 0.449999988, 1]
       Texture: ""
       TilingFactor: 1
   - World::UUIDComponent:
@@ -33,11 +33,11 @@ Entities:
     World::TagComponent:
       Tag: Sprite C
     World::TransformComponent:
-      Location: [0.6, 0, 0]
+      Location: [0.600000024, 0, 0]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     World::SpriteComponent:
-      Color: [0.35, 0.55, 1, 1]
+      Color: [0.349999994, 0.550000012, 1, 1]
       Texture: ""
       TilingFactor: 1
   - World::UUIDComponent:
@@ -46,7 +46,7 @@ Entities:
     World::TagComponent:
       Tag: Camera2D
     World::TransformComponent:
-      Location: [0, 0, 5.76]
+      Location: [0, 0, 0.100000001]
       Rotation: [0, 0, 0]
       Scale: [1, 1, 1]
     World::CameraComponent:
