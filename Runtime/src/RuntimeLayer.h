@@ -22,5 +22,9 @@ namespace World
 		Gameplay::GameHost m_Host;
 		Ref<SceneRenderer> m_SceneRenderer;
 		uint64_t m_SceneTextureId = 0;
+		// 窗口尺寸跟随(0.1s 节流):尺寸稳定后再重建场景渲染目标。
+		uint32_t m_PendingWidth = 0;
+		uint32_t m_PendingHeight = 0;
+		float m_ResizeDelay = 0.0f;
 	};
 }

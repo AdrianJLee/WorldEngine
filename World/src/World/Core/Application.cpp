@@ -31,7 +31,21 @@ namespace World
 		s_Instance = this;
 		m_FrameAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("FrameAllocator", 1024 * 1024 * 10)); // 10 MB
 		m_EngineAllocator = std::unique_ptr<DualTrackAllocator>(new DualTrackAllocator("EngineAllocator", 1024 * 1024 * 50)); // 50 MB
-		m_Window = std::unique_ptr<Window>(Window::Create(WindowProps(name)));
+		// 开发/验证钩子:WLD_WINDOW_SIZE="宽x高" 覆盖主窗口尺寸。编辑器 Play 与打包 Runtime 的
+		// 一致性验收需要两边同分辨率(编辑器的场景目标尺寸由视口面板决定,不是窗口尺寸)。
+		uint32_t windowWidth = 1280, windowHeight = 720;
+		if (const char* sizeEnv = std::getenv("WLD_WINDOW_SIZE"))
+		{
+			unsigned int w = 0, h = 0;
+			if (std::sscanf(sizeEnv, "%ux%u", &w, &h) == 2 && w >= 64 && h >= 64)
+			{
+				windowWidth = w;
+				windowHeight = h;
+			}
+			else
+				WLD_CORE_WARN("WLD_WINDOW_SIZE ignored (expected \"WxH\", got '{0}')", sizeEnv);
+		}
+		m_Window = std::unique_ptr<Window>(Window::Create(WindowProps(name, windowWidth, windowHeight)));
 		m_Title = name;
 
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(Application::OnEvent));

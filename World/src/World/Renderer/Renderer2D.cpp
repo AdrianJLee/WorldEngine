@@ -74,6 +74,11 @@ namespace World
 			desc.LineWidth = lineWidth;
 			desc.VertexBindings.push_back({ 0, stride, false });
 			desc.VertexAttributes = attributes;
+			// 2D 批次不做背面剔除:quad/circle 都是单面精灵,负缩放(镜像精灵)会翻转绕序,
+			// 而且 Vulkan 的屏幕绕序与 GL 相反 —— 用默认的 Front=CCW + Cull=Back 会让
+			// **整块 2D 内容在 Vulkan 下被剔除**(2026-09-16 W10-3 双后端基线在 2DTest 发现:
+			// GL 三个实体、Vulkan 一个都没有)。
+			desc.Cull = Rhi::CullMode::None;
 			desc.Blends.push_back({
 				true,
 				Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,

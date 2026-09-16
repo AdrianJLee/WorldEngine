@@ -57,6 +57,14 @@ namespace World
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 
 		m_SceneRenderer->Init();
+		// 场景目标跟随窗口尺寸:SceneRenderer 默认 1280×720,窗口被 WLD_WINDOW_SIZE 或用户
+		// 缩放改变时必须跟上,否则画面被拉伸、与编辑器 Play 的像素对比也不成立。
+		{
+			const uint32_t width = Application::Get().GetWindow().GetWidth();
+			const uint32_t height = Application::Get().GetWindow().GetHeight();
+			if (width > 0 && height > 0)
+				m_SceneRenderer->OnResize(width, height);
+		}
 		m_SceneTextureId = Wui::WuiTextureRegistry::Get().Register(m_SceneRenderer->GetColorTexture());
 
 		m_Host.Init(desc);
@@ -79,6 +87,32 @@ namespace World
 	void RuntimeLayer::OnUpdate(Timestep ts)
 	{
 		WLD_PROFILE_FUNCTION();
+		// 窗口尺寸变化:等尺寸稳定约 0.1s 再重建渲染目标(拖拽缩放时逐帧重建会在 Vulkan 下
+		// 与在飞帧抢资源,和编辑器侧同一套节流策略)。
+		if (m_SceneRenderer)
+		{
+			const uint32_t width = Application::Get().GetWindow().GetWidth();
+			const uint32_t height = Application::Get().GetWindow().GetHeight();
+			if (width > 0 && height > 0 && (m_SceneRenderer->GetWidth() != width || m_SceneRenderer->GetHeight() != height))
+			{
+				if (m_PendingWidth != width || m_PendingHeight != height)
+				{
+					m_PendingWidth = width;
+					m_PendingHeight = height;
+					m_ResizeDelay = 0.1f;
+				}
+				else
+				{
+					m_ResizeDelay -= ts.GetSeconds();
+					if (m_ResizeDelay <= 0.0f)
+					{
+						m_SceneRenderer->OnResize(width, height);
+						if (m_SceneTextureId)
+							Wui::WuiTextureRegistry::Get().Update(m_SceneTextureId, m_SceneRenderer->GetColorTexture());
+					}
+				}
+			}
+		}
 		Renderer2D::ResetStats();
 		// 场景更新(OnUpdateRuntime)+ 主相机提交渲染都在 GameHost 内完成,顺序与改造前一致。
 		m_Host.Tick(ts, true);
