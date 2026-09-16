@@ -112,7 +112,13 @@ namespace World
 		if (ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged)
 		{
 			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
-			m_Host.SetSelectedEntity(m_Host.PickEntityAt(local));
+			const Entity picked = m_Host.PickEntityAt(local);
+			if (std::getenv("WLD_TRACE_UI"))
+				WLD_CORE_INFO("[ui] viewport click local=({0},{1}) sceneRect=({2},{3},{4},{5}) -> handle={6} valid={7}",
+					local.x, local.y, sceneRect.X, sceneRect.Y, sceneRect.W, sceneRect.H,
+					picked.IsValid() ? static_cast<uint32_t>(static_cast<entt::entity>(picked)) : 0u,
+					picked.IsValid() ? 1 : 0);
+			m_Host.SetSelectedEntity(picked);
 		}
 		(void)theme;
 	}
