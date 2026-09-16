@@ -457,9 +457,13 @@ namespace World
 		// 预留区:序号 0..kSceneSlotCount-1 归主场景的逐帧分配(SceneRenderer),
 		// 之上按 identity 稳定映射,保证同一调用方每帧写同一批槽位。
 		constexpr uint32_t kSceneSlotCount = 16;
-		const uint32_t usable = kObjectsPerFrame > kSceneSlotCount ? kObjectsPerFrame - kSceneSlotCount : 1;
 		const uint32_t count = span == 0 ? 1 : span;
-		const uint32_t base = identity % (usable > count ? usable - count + 1 : usable);
+		const uint32_t slotCount = kObjectsPerFrame - kSceneSlotCount;   // 48 个槽位可用
+		// 取模上界必须是"槽位总数 - 需要连续占用的数量 + 1",这样 base..base+count-1 不会越界;
+		// 之前写成 (identity % (usable - count + 1)) 之外的变体时,多个面板会撞到同一槽位、
+		// 互相覆盖 → 预览闪烁(用户实测"选贴图后任何材质都闪烁")。
+		const uint32_t range = slotCount > count ? slotCount - count + 1 : 1;
+		const uint32_t base = identity % range;
 		return kSceneSlotCount + base;
 	}
 

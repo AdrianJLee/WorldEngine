@@ -297,7 +297,7 @@ namespace World
 		if (std::getenv("WLD_TRACE_3D"))
 		{
 			static int tracedPreviewSlots = 0;
-			if (tracedPreviewSlots < 4)
+			if (tracedPreviewSlots < 24)
 			{
 				tracedPreviewSlots++;
 				WLD_CORE_INFO("[material-ui] preview slot panel='{0}' base={1} objectIndex={2}",
@@ -475,23 +475,8 @@ namespace World
 			m_Material->SetDoubleSided(doubleSided);
 		y += 26.0f;
 
-		// ---- 打开/切换材质(可搜索下拉:选中项在它自己的独立窗口里打开) ----
-		Wui::Label(ctx, { x, y }, "材质 (打开到自己的窗口)", theme.TextMuted, 12.0f);
-		y += 16.0f;
-		int materialPick = m_MaterialPickIndex;
-		if (Wui::SearchableCombo(ctx, Wui::HashId("material.pick"), { x, y, width, 22.0f }, "",
-			m_MaterialPaths, materialPick, theme))
-		{
-			if (materialPick >= 0 && materialPick < static_cast<int>(m_MaterialPaths.size())
-				&& m_MaterialPaths[materialPick] != m_Path)
-			{
-				host.OpenMaterialEditor(m_MaterialPaths[materialPick]);
-				m_Status = "已在新窗口打开 " + m_MaterialPaths[materialPick];
-				m_StatusIsError = false;
-			}
-			m_MaterialPickIndex = materialPick;
-		}
-		y += 28.0f;
+		// 注:面板不提供"切换材质"入口 —— 从内容浏览器/菜单打开哪个材质,这个窗口就是
+		// 哪个材质的编辑器(用户 2026-09-16 明确要求)。
 
 		// ---- 贴图槽(可搜索下拉) ----
 		std::vector<std::string> albedoOptions = m_TexturePaths;
@@ -521,11 +506,11 @@ namespace World
 		if (std::getenv("WLD_TRACE_3D"))
 		{
 			static int tracedPanel = 0;
-			if (tracedPanel < 3)
+			if (tracedPanel < 16)
 			{
 				tracedPanel++;
-				WLD_CORE_INFO("[material-ui] panel OnRender rect=({0},{1},{2},{3}) material={4}",
-					rect.X, rect.Y, rect.W, rect.H, static_cast<int>(m_Material ? 1 : 0));
+				WLD_CORE_INFO("[material-ui] panel OnRender panel='{0}' rect=({1},{2},{3},{4}) material={5}",
+					m_PanelId, rect.X, rect.Y, rect.W, rect.H, static_cast<int>(m_Material ? 1 : 0));
 			}
 		}
 		const Wui::WuiTheme& theme = host.Theme();
