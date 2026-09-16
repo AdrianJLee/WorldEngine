@@ -44,6 +44,10 @@ namespace World
 		const std::string& ActivePanel() const;
 		// 窗口承载的全部面板(即标签顺序);W7.3 跨窗口附加按此迁移。
 		const std::vector<std::string>& Panels() const { return m_Panels; }
+		// AI 控制通道:请求抓一张本窗口的合成画面(下一帧写盘,GL 路径)。
+		void RequestCapture(const std::string& path) { m_PendingCapture = path; }
+		// AI 控制通道:调整窗口客户区尺寸(等价于用户拖边框)。
+		void SetClientSize(uint32_t width, uint32_t height);
 		bool Contains(const std::string& panel) const;
 		bool Empty() const { return m_Panels.empty(); }
 		// 面板加入/移出本窗口:只维护标签集合与活动索引,
@@ -85,6 +89,7 @@ namespace World
 		void CaptureScreenSequence(float width, float height);
 		int m_CaptureFrame = 0;
 		int m_CaptureWritten = 0;
+		std::string m_PendingCapture;
 		bool m_MenuOpen = false;
 		std::string TitleOf(const std::string& panel) const;
 

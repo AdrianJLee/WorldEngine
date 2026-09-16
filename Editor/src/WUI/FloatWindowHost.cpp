@@ -6,6 +6,8 @@
 #include "World/Events/KeyEvent.h"
 #include "World/Events/MouseEvent.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiScriptedInput.h"
 
 #include <algorithm>
 #include <cctype>
@@ -99,6 +101,10 @@ namespace World
 		Wui::WuiInputState input;
 		if (!m_Backend.BeginFrame(input))
 			return true;
+		// AI 无障碍:本窗口的节点重新登记 + 注入脚本点击(与真实鼠标同一条输入路径)。
+		const std::string windowKey = "float:" + m_Panel;
+		Wui::WuiAccessibility::Get().BeginFrame(windowKey, { size.x, size.y });
+		Wui::WuiScriptedInput::Get().Apply(windowKey, input);
 		m_Context.BeginFrame(input);
 		RenderTabBar(m_Context, { 0.0f, 0.0f, size.x, size.y });
 		m_Context.EndFrame();
@@ -121,8 +127,22 @@ namespace World
 					static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y));
 		}
 		CaptureScreenSequence(size.x, size.y);
+		if (!m_PendingCapture.empty())
+		{
+			Renderer::CaptureDefaultFramebuffer(m_PendingCapture, static_cast<uint32_t>(size.x),
+				static_cast<uint32_t>(size.y));
+			WLD_CORE_INFO("[ai] float capture written: {0}", m_PendingCapture);
+			m_PendingCapture.clear();
+		}
 		m_Window->SwapBuffers();
 		return true;
+	}
+
+	void FloatWindowHost::SetClientSize(uint32_t width, uint32_t height)
+	{
+		if (!m_Window)
+			return;
+		m_Window->SetSize(width, height);
 	}
 
 	void FloatWindowHost::CaptureScreenSequence(float width, float height)

@@ -338,6 +338,13 @@ namespace World
 		Renderer::SubmitScene(m_PreviewCommandBuffer, m_PreviewColor);
 		if (checkGlErrors)
 			Renderer::DrainGLErrors("preview-after-submit");
+		// AI 控制通道的一次性抓图请求(与 WLD_PREVIEW_TEX_CAPTURE 同一条读回路径)。
+		if (!m_PendingPreviewCapture.empty())
+		{
+			if (Renderer::CaptureTexture(m_PendingPreviewCapture, m_PreviewColor, m_PreviewSize, m_PreviewSize))
+				WLD_CORE_INFO("[ai] preview capture written: {0}", m_PendingPreviewCapture);
+			m_PendingPreviewCapture.clear();
+		}
 		CapturePreviewTextureSequence();
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (m_PreviewTextureId == 0 || registry.Generation() != m_UiTextureGeneration)

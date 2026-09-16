@@ -30,6 +30,8 @@ target_sources(Editor PRIVATE ${EDITOR_SOURCES})
 
 target_link_libraries(Editor PRIVATE 
     World
+    # AI 控制通道(TCP 回环,JSON 行协议):winsock2。
+    ws2_32
 )
 
 add_custom_command(TARGET Editor POST_BUILD

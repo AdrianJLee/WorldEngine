@@ -12,6 +12,8 @@
 #include "World/Scene/ScriptEngine.h"
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/WUI/WuiTextureRegistry.h"
+#include "World/WUI/WuiScriptedInput.h"
+#include "World/WUI/WuiAccessibility.h"
 #include <filesystem>
 #include <shellapi.h>
 #include <stdexcept>
@@ -37,6 +39,24 @@ namespace World
 	void EditorLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();
+		// AI 控制通道:只有显式 --ai-control=<port> 时才监听(默认关闭,零行为变化)。
+		if (const int aiPort = Editor::AiControlPort(); aiPort > 0)
+		{
+			m_AiServer = std::make_unique<Editor::AiControlServer>();
+			if (!m_AiServer->Start(static_cast<uint16_t>(aiPort),
+				[this](const std::string& cmd, const std::map<std::string, std::string>& args,
+					std::string& result, std::string& error)
+				{
+					return ExecuteAiCommand(cmd, args, result, error);
+				}))
+			{
+				WLD_CORE_ERROR("[ai] failed to start control channel on port {0}", aiPort);
+				m_AiServer.reset();
+			}
+			else
+				// 无障碍树只在通道开启时登记(正常编辑零开销)。
+				Wui::WuiAccessibility::Get().SetEnabled(true);
+		}
 		// 主窗口无边框:顶部第一行(挂靠栏)即窗口栏位,可拖动/关闭;边缘缩放保留。
 		Application::Get().GetWindow().SetFrameless(true);
 		std::string moduleError;
@@ -193,6 +213,12 @@ namespace World
 	void EditorLayer::OnDetach()
 	{
 		WLD_PROFILE_FUNCTION();
+		// 控制通道先停:避免关停过程中还有命令进来(Pump 已经不会再被调用)。
+		if (m_AiServer)
+		{
+			m_AiServer->Stop();
+			m_AiServer.reset();
+		}
 		if (m_CookingThread.joinable())
 			m_CookingThread.join();
 		m_ShowCookingProgress = false;
@@ -655,9 +681,15 @@ namespace World
 		// 避免上一帧独立窗口渲染留下的上下文影响主窗口的绘制与交换。
 		Application::Get().GetWindow().MakeCurrent();
 
+		// AI 控制通道:命令在主线程帧内执行(与鼠标操作同一顺序);随后把排队的脚本点击
+		// 注入到本窗口的输入状态 —— 控件侧看到的仍是普通输入,不是测试专用分支。
+		if (m_AiServer)
+			m_AiServer->Pump();
+
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
 		{
+			Wui::WuiScriptedInput::Get().Apply("main", input);
 			m_WuiContext.BeginFrame(input);
 			// 注册表在设备切换/重建后会被清空(Generation 递增),此时需要
 			// 重新注册图标与场景纹理,否则图像命令解析不到贴图(图标消失)。

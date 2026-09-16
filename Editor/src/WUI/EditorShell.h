@@ -38,6 +38,19 @@ namespace World
 		void OnRender(Wui::WuiContext& ctx);
 		// 退出前释放独立窗口(释放其呈现目标/OS 窗口,必须在 RHI 设备销毁前调用)。
 		void ReleaseIndependentWindows();
+		// ---- AI 控制通道(与 Window 菜单 / 内容浏览器同一条开关路径)----
+		// 打开/关闭面板(独立窗口复用已隐藏窗口;材质面板按需创建实例)。
+		bool AiTogglePanel(const std::string& panel);
+		// 抓一张独立窗口的合成画面(下一帧写盘)。
+		bool AiRequestFloatCapture(const std::string& panel, const std::string& path);
+		// 抓一张材质面板的预览纹理(下一帧写盘;RHI 读回,双后端有效)。
+		bool AiRequestPreviewCapture(const std::string& panel, const std::string& path);
+		// 调整独立窗口尺寸(等价于用户拖动窗口边框)。
+		bool AiResizeWindow(const std::string& panel, float width, float height);
+		// 面板/窗口/材质面板状态(JSON 文本,供 state.dump)。
+		std::string AiDescribeState() const;
+		// 当前停靠布局(JSON 文本,供 ui.layout.get)。
+		std::string AiLayoutJson() const { return m_Layout.Serialize(); }
 		// 渲染后端切换后重建全部可见独立窗口(位置/尺寸/面板归属保留)。
 		void RecreateIndependentWindows();
 		Wui::WuiRect ViewportRect() const { return m_ViewportRect; }

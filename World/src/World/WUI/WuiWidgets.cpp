@@ -1,15 +1,46 @@
 #include "wldpch.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/Core/KeyCodes.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <string>
 
 namespace World::Wui
 {
 	namespace
 	{
+		// 控件绘制时登记无障碍节点(AI 控制通道的 ui.tree / ui.invoke 数据源)。
+		// 关闭控制通道时这一步只是往一个 vector 里追加,无额外分配以外的副作用。
+		void RegisterAccessNode(WuiId id, const char* kind, const WuiRect& rect,
+			const std::string& label, const std::string& value,
+			bool enabled = true, bool interactive = true, bool focused = false)
+		{
+			if (id == 0)
+				return;
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = kind;
+			node.Label = label;
+			node.Value = value;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = interactive;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
+
+		std::string FloatToText(float value)
+		{
+			char buffer[32] = {};
+			std::snprintf(buffer, sizeof(buffer), "%.3f", value);
+			return buffer;
+		}
+
 		void AppendUtf8(std::string& buffer, uint32_t codepoint)
 		{
 			if (codepoint < 0x80)
@@ -67,6 +98,7 @@ namespace World::Wui
 
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme)
 	{
+		RegisterAccessNode(id, "button", rect, label, std::string());
 		const bool hovered = ctx.IsHovered(rect);
 		const bool pressed = ctx.Input().MouseDown[0] && hovered;
 		const WuiColor fill = hovered ? theme.ButtonHover : theme.ButtonBg;
@@ -82,6 +114,7 @@ namespace World::Wui
 		bool& value = ctx.Persist<bool>(id, false);
 		if (ctx.IsClicked(rect))
 			value = !value;
+		RegisterAccessNode(id, "toggle", rect, label, value ? "on" : "off");
 
 		const WuiRect box { rect.X, rect.Y + (rect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
 		ctx.Commands().push_back({ WuiDrawKind::Rect, box, value ? theme.Accent : theme.ButtonBg, 3.0f });
@@ -94,6 +127,7 @@ namespace World::Wui
 	{
 		if (ctx.IsClicked(rect))
 			value = !value;
+		RegisterAccessNode(id, "checkbox", rect, label, value ? "true" : "false");
 		const WuiRect box { rect.X, rect.Y + (rect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
 		ctx.Commands().push_back({ WuiDrawKind::Rect, box, value ? theme.Accent : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box, theme.Border, 3.0f, 1.0f });
@@ -104,6 +138,7 @@ namespace World::Wui
 
 	void SliderFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float min, float max, const WuiTheme& theme)
 	{
+		RegisterAccessNode(id, "slider", rect, std::string(), FloatToText(value));
 		const float range = std::max(0.0001f, max - min);
 		if (ctx.Input().MouseDown[0] && ctx.IsHovered(rect))
 		{
@@ -308,6 +343,7 @@ namespace World::Wui
 
 	bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme)
 	{
+		RegisterAccessNode(id, "drag-float", rect, std::string(), FloatToText(value));
 		WuiNumericState& state = ctx.Persist<WuiNumericState>(id, {});
 		bool changed = false;
 		const bool hovered = ctx.IsHovered(rect);
@@ -407,6 +443,7 @@ namespace World::Wui
 
 	bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int64_t min, int64_t max, const WuiTheme& theme)
 	{
+		RegisterAccessNode(id, "drag-int", rect, std::string(), std::to_string(value));
 		WuiNumericState& state = ctx.Persist<WuiNumericState>(id, {});
 		bool changed = false;
 		const bool hovered = ctx.IsHovered(rect);
@@ -503,6 +540,7 @@ namespace World::Wui
 
 	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme, bool* cancelledOut)
 	{
+		RegisterAccessNode(id, "text-field", rect, std::string(), buffer, true, true, ctx.Focus() == id);
 		WuiEditState& state = ctx.Persist<WuiEditState>(id, {});
 		// 仅在按下的那一帧初始化拖选锚点;按住期间持续更新选区。
 		if (ctx.Input().MouseClicked[0] && ctx.IsHovered(rect))
@@ -575,6 +613,8 @@ namespace World::Wui
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme)
 	{
+		RegisterAccessNode(id, "combo", rect, label,
+			(selected >= 0 && selected < static_cast<int>(options.size())) ? options[selected] : std::string());
 		const bool hovered = ctx.IsHovered(rect);
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, hovered ? theme.ButtonHover : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
@@ -622,6 +662,9 @@ namespace World::Wui
 	bool SearchableCombo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme)
 	{
+		// 触发器本身也可被 ui.invoke 点击(等价于点开下拉)。
+		RegisterAccessNode(id, "search-combo", rect, label,
+			(selected >= 0 && selected < static_cast<int>(options.size())) ? options[selected] : std::string());
 		// 注意:过滤器状态与 TextField 的编辑状态必须用**不同**的持久化 ID。
 		// 曾经两者共用 id ^ 0x5A17:Persist 的类型检查失败后仍按错误类型解释内存,
 		// 输入时 cursor 变成垃圾值 → 访问越界直接崩溃(World.Wui 单测可复现)。
@@ -704,6 +747,10 @@ namespace World::Wui
 				break;
 			const int optionIndex = matches[matchIndex];
 			const WuiRect item { listRect.X, listRect.Y + rowH * static_cast<float>(row), listRect.W, rowH };
+			// 展开的候选项登记成可点节点:脚本先点开 search-combo,再按 label 点这一项。
+			const std::string itemKey = "combo-item:" + std::to_string(id) + ":" + std::to_string(optionIndex);
+			RegisterAccessNode(HashId(itemKey.c_str()),
+				"combo-item", item, options[optionIndex], std::string());
 			ctx.Commands().push_back({ WuiDrawKind::ClipPush, listRect });
 			if (ctx.IsHovered(item))
 				ctx.Commands().push_back({ WuiDrawKind::Rect, item, theme.ButtonHover, 2.0f });
@@ -750,6 +797,7 @@ namespace World::Wui
 		bool& open = ctx.Persist<bool>(id, false);
 		if (ctx.IsClicked(rect))
 			open = !leaf && !open;
+		RegisterAccessNode(id, "tree-node", rect, label, open ? "open" : "closed", true, !leaf);
 		const std::string marker = leaf ? "  " : (open ? "- " : "+ ");
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 4.0f, rect.Y + 2.0f, 0, 0 }, theme.TextMuted, 0, 1.0f, marker, 14.0f, false });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 22.0f, rect.Y + 2.0f, 0, 0 }, theme.Text, 0, 1.0f, label, 14.0f, false });
@@ -795,6 +843,7 @@ namespace World::Wui
 
 	bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool enabled, const WuiTheme& theme)
 	{
+		RegisterAccessNode(id, "menu-item", rect, label, std::string(), enabled);
 		if (ctx.IsHovered(rect) && enabled)
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 0.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, enabled ? theme.Text : theme.TextMuted, 0, 1.0f, label, 15.0f, false });
@@ -804,6 +853,7 @@ namespace World::Wui
 
 	bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool checked, bool enabled, const WuiTheme& theme)
 	{
+		RegisterAccessNode(id, "menu-item", rect, label, checked ? "checked" : "unchecked", enabled);
 		if (ctx.IsHovered(rect) && enabled)
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 0.0f });
 		// 复选风格(如 Window 菜单的可见性开关)显示 [x]/[ ];普通动作项走上面的重载。

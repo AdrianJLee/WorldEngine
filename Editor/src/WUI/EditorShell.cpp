@@ -10,7 +10,9 @@
 #include "World/Renderer/Renderer.h"
 #include "World/WUI/WuiLayoutStore.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "Panels/MaterialEditorPanel.h"
 
 #include <algorithm>
 #include <cstring>
@@ -612,6 +614,8 @@ namespace World
 	void EditorShell::OnRender(Wui::WuiContext& ctx)
 	{
 		m_Ctx = &ctx;
+		// AI 无障碍树:主窗口这一帧的节点从这里开始重新登记(见 WuiAccessibility)。
+		Wui::WuiAccessibility::Get().BeginFrame("main", ctx.ViewportSize());
 		m_ViewportRect = {};
 		ctx.ClearDropTarget();
 		m_DropPreviewActive = false;
@@ -1009,6 +1013,8 @@ namespace World
 	void EditorShell::RenderPanelContent(Wui::WuiContext& ctx, const std::string& id, const Wui::WuiRect& rect)
 	{
 		Wui::PanelBackground(ctx, rect, m_Theme.PanelBg);
+		// 无障碍树:此后登记的控件归属该面板(ui.tree/state.dump 靠它区分面板)。
+		Wui::WuiAccessibility::Get().SetPanel(id);
 		const auto it = m_PanelRegistry.find(id);
 		if (it != m_PanelRegistry.end())
 			it->second->OnRender(ctx, rect, *this);
@@ -1564,6 +1570,146 @@ namespace World
 			WLD_CORE_ERROR("[float] create failed for '{0}': {1}", panel, error.what());
 			m_Layout.CloseFloating(panel);
 		}
+	}
+
+	// ---- AI 控制通道 ----
+
+	bool EditorShell::AiTogglePanel(const std::string& panel)
+	{
+		if (panel.empty() || !IsDeclaredPanel(panel))
+			return false;
+		// 材质面板是动态实例:先按 id 建出面板对象,再走菜单同一条开关路径。
+		if (panel.rfind("material:", 0) == 0)
+		{
+			EnsureMaterialPanelFromId(panel);
+			// 与 OpenMaterialEditor 同一条默认尺寸:材质面板的窄布局会把贴图下拉挤到窗口外
+			// (实测 480x340 时 Albedo 组合框在 y=782 → 用户根本看不到)。
+			if (!m_Layout.FindFloatMemory(panel, nullptr))
+				m_Layout.FloatMemory.push_back({ panel, Wui::WuiRect { 200.0f, 170.0f, 760.0f, 470.0f } });
+		}
+		if (!m_Ctx)
+			return false;
+		TogglePanel(*m_Ctx, panel);
+		return true;
+	}
+
+	bool EditorShell::AiRequestFloatCapture(const std::string& panel, const std::string& path)
+	{
+		FloatWindowHost* host = FindFloatHost(panel);
+		if (!host || host->IsHidden() || path.empty())
+			return false;
+		host->RequestCapture(path);
+		return true;
+	}
+
+	bool EditorShell::AiRequestPreviewCapture(const std::string& panel, const std::string& path)
+	{
+		const auto found = m_PanelRegistry.find(panel);
+		if (found == m_PanelRegistry.end() || path.empty())
+			return false;
+		if (auto* material = dynamic_cast<MaterialEditorPanel*>(found->second.get()))
+		{
+			material->RequestPreviewCapture(path);
+			return true;
+		}
+		return false;
+	}
+
+	bool EditorShell::AiResizeWindow(const std::string& panel, float width, float height)
+	{
+		FloatWindowHost* host = FindFloatHost(panel);
+		if (!host || host->IsHidden())
+			return false;
+		const uint32_t targetWidth = static_cast<uint32_t>(std::max(240.0f, width));
+		const uint32_t targetHeight = static_cast<uint32_t>(std::max(160.0f, height));
+		host->SetClientSize(targetWidth, targetHeight);
+		m_LastFloatRects[panel] = Wui::WuiRect { host->ScreenRect().X, host->ScreenRect().Y,
+			static_cast<float>(targetWidth), static_cast<float>(targetHeight) };
+		return true;
+	}
+
+	std::string EditorShell::AiDescribeState() const
+	{
+		auto escape = [](const std::string& text)
+		{
+			std::string out;
+			out.reserve(text.size() + 8);
+			for (char c : text)
+			{
+				switch (c)
+				{
+					case '"': out += "\\\""; break;
+					case '\\': out += "\\\\"; break;
+					case '\n': out += "\\n"; break;
+					case '\r': out += "\\r"; break;
+					case '\t': out += "\\t"; break;
+					default: out += c; break;
+				}
+			}
+			return out;
+		};
+		std::ostringstream out;
+		out << "{";
+		out << "\"docked\":[";
+		bool first = true;
+		std::vector<Wui::PanelId> docked;
+		m_Layout.AllPanels(&docked);
+		for (const Wui::PanelId& id : docked)
+		{
+			if (!first)
+				out << ",";
+			first = false;
+			out << "\"" << escape(id) << "\"";
+		}
+		out << "],\"floating\":[";
+		first = true;
+		for (const Wui::DockFloat& entry : m_Layout.Floating)
+		{
+			if (!first)
+				out << ",";
+			first = false;
+			out << "{\"panel\":\"" << escape(entry.Panel) << "\",\"rect\":[" << entry.Rect.X << "," << entry.Rect.Y
+				<< "," << entry.Rect.W << "," << entry.Rect.H << "]}";
+		}
+		out << "],\"independentWindows\":[";
+		first = true;
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+		{
+			if (host->IsHidden())
+				continue;
+			if (!first)
+				out << ",";
+			first = false;
+			const Wui::WuiRect rect = host->ScreenRect();
+			out << "{\"panel\":\"" << escape(host->Panel()) << "\",\"rect\":[" << rect.X << "," << rect.Y
+				<< "," << rect.W << "," << rect.H << "],\"tabCount\":" << host->Panels().size() << "}";
+		}
+		out << "],\"materials\":[";
+		first = true;
+		for (const auto& entry : m_PanelRegistry)
+		{
+			const auto* material = dynamic_cast<const MaterialEditorPanel*>(entry.second.get());
+			if (!material)
+				continue;
+			const Ref<Material>& asset = material->GetMaterial();
+			if (!first)
+				out << ",";
+			first = false;
+			out << "{\"panel\":\"" << escape(entry.first) << "\",\"path\":\"" << escape(material->GetMaterialPath()) << "\"";
+			if (asset)
+			{
+				const MaterialDesc& desc = asset->GetDesc();
+				out << ",\"albedo\":\"" << escape(desc.AlbedoTexture) << "\""
+					<< ",\"normal\":\"" << escape(desc.NormalTexture) << "\""
+					<< ",\"revision\":" << asset->GetRevision()
+					<< ",\"baseColor\":[" << desc.BaseColor.r << "," << desc.BaseColor.g << ","
+					<< desc.BaseColor.b << "," << desc.BaseColor.a << "]"
+					<< ",\"blendMode\":" << static_cast<int>(desc.BlendMode);
+			}
+			out << "}";
+		}
+		out << "]}";
+		return out.str();
 	}
 
 	std::string EditorShell::IndependentWindowPanel(size_t index) const

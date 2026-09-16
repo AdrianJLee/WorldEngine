@@ -5,6 +5,10 @@
 #include "spdlog/spdlog.h"
 #include "spdlog/fmt/ostr.h"
 
+#include <cstddef>
+#include <string>
+#include <vector>
+
 namespace World
 {
 	class  Log
@@ -14,6 +18,9 @@ namespace World
 
 		inline static std::shared_ptr<spdlog::logger>& GetCoreLogger() { return s_CoreLogger; }
 		inline static std::shared_ptr<spdlog::logger>& GetClientLogger() { return s_ClientLogger; }
+		// 最近的日志行(环形缓冲,已格式化)。给 AI 控制通道的 log.tail 用:
+		// 没有它就只能靠 stdout 重定向,拿不到"运行时刚刚发生了什么"。
+		static std::vector<std::string> RecentLines(size_t maxLines);
 	private:
 		static WLD_API std::shared_ptr<spdlog::logger> s_CoreLogger;
 		static WLD_API std::shared_ptr<spdlog::logger> s_ClientLogger;

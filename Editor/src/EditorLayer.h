@@ -9,6 +9,7 @@
 #include "World/WUI/WuiCommand.h"
 #include "World/WUI/WuiGizmo.h"
 #include "WUI/EditorShell.h"
+#include "AiControl/AiControlServer.h"
 #include <atomic>
 #include <functional>
 #include <string>
@@ -197,6 +198,12 @@ namespace World
 
 		Wui::WuiCommandRegistry m_Commands;
 		EditorShell m_Shell;
+		// AI 控制通道(默认关闭;EditorApp 解析 --ai-control=<port> 后开启)。
+		std::unique_ptr<Editor::AiControlServer> m_AiServer;
+		// 命令分发:在主线程帧内执行,结果/错误以文本返回给控制通道。
+		bool ExecuteAiCommand(const std::string& cmd, const std::map<std::string, std::string>& args,
+			std::string& result, std::string& error);
+		std::string DescribeAiScene() const;
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;
 		std::string m_RendererChangeName;

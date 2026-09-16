@@ -21,4 +21,20 @@ namespace World::Editor
 	{
 		return StartupSceneStorage();
 	}
+
+	int& AiControlPortStorage()
+	{
+		static int port = 0;
+		return port;
+	}
+
+	void SetAiControlPort(int port)
+	{
+		AiControlPortStorage() = port;
+	}
+
+	int AiControlPort()
+	{
+		return AiControlPortStorage();
+	}
 }

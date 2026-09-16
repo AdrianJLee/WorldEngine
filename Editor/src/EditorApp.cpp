@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -34,15 +35,23 @@ namespace World
 		std::vector<std::string> arguments;
 		for (int i = 1; i < __argc; ++i)
 			arguments.emplace_back(__argv[i] ? __argv[i] : "");
-		for (size_t i = 0; i + 1 < arguments.size(); ++i)
+		// 注意:不能写成 `i + 1 < size` 的配对循环 —— `--ai-control=` 这类**自带数值**的
+		// 单个参数会让循环体一次都不执行(实测:通道端口永远是 0,脚本连不上)。
+		for (size_t i = 0; i < arguments.size(); ++i)
 		{
 			// 渲染后端切换后的自动重启会把当前场景带回来。
-			if (arguments[i] == "-scene")
+			if (arguments[i] == "-scene" && i + 1 < arguments.size())
 			{
-				World::Editor::SetStartupScenePath(arguments[i + 1]);
+				World::Editor::SetStartupScenePath(arguments[++i]);
 				continue;
 			}
-			if (arguments[i] != "--cook")
+			// AI 控制通道:`--ai-control=<port>`(默认关闭;只监听 127.0.0.1)。
+			if (arguments[i].rfind("--ai-control=", 0) == 0)
+			{
+				World::Editor::SetAiControlPort(std::atoi(arguments[i].c_str() + std::strlen("--ai-control=")));
+				continue;
+			}
+			if (arguments[i] != "--cook" || i + 1 >= arguments.size())
 				continue;
 			World::Editor::CookOptions options;
 			options.PublishDir = arguments[i + 1];

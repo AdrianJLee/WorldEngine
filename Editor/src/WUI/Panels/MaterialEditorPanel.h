@@ -35,6 +35,9 @@ namespace World
 		bool HasMaterial() const { return m_Material != nullptr; }
 		const std::string& GetMaterialPath() const { return m_Path; }
 		void SetMaterialPathForPanel(const std::string& path);
+		// AI 控制通道:请求抓一张预览纹理(下一帧写盘);材质状态供 state.dump 读取。
+		void RequestPreviewCapture(const std::string& path) { m_PendingPreviewCapture = path; }
+		const Ref<Material>& GetMaterial() const { return m_Material; }
 
 	private:
 		void EnsureGpuResources();
@@ -42,6 +45,9 @@ namespace World
 		// 无障碍诊断:按 WLD_PREVIEW_TEX_CAPTURE + WLD_SCREEN_CAPTURE_START/_EVERY/_COUNT
 		// 把预览纹理连续写成 PPM(Vulkan 下唯一能"看到"预览内容的路径)。
 		void CapturePreviewTextureSequence();
+		// AI 控制通道:请求把**本面板的预览纹理**写到 path(下一帧渲染后执行,
+		// 走 RHI 读回,双后端有效)。
+		std::string m_PendingPreviewCapture;
 		// 渲染预览球到离屏目标;返回可交给 WuiImage 的纹理 id(0 = 不可用)。
 		uint64_t RenderPreview();
 		void DrawToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
