@@ -82,6 +82,22 @@ namespace World::Rhi::Vulkan
 					return false;
 			}
 		}
+
+		// RenderPassDesc 声明的附件布局 → Vulkan 布局(通道首尾的真实布局,见 VulkanCommand 的同步)。
+		VkImageLayout AttachmentLayoutToVk(AttachmentLayout layout)
+		{
+			switch (layout)
+			{
+			case AttachmentLayout::ColorAttachment: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			case AttachmentLayout::DepthStencilAttachment: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			case AttachmentLayout::Present: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+			case AttachmentLayout::ShaderReadOnly: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			case AttachmentLayout::TransferSrc: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			case AttachmentLayout::TransferDst: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			case AttachmentLayout::Undefined: break;
+			}
+			return VK_IMAGE_LAYOUT_UNDEFINED;
+		}
 	}
 
 	VkFormat ToVkFormat(Format format) { return ToVkFormatInternal(format); }
@@ -481,8 +497,13 @@ namespace World::Rhi::Vulkan
 			out.storeOp = attachment.Store == StoreOp::Store ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
 			out.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 			out.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-			out.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			out.finalLayout = IsDepthFormat(attachment.Format) ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			// 使用描述声明的布局:调用方(SceneRenderer/WUI/Renderer)声明的 Initial/FinalLayout
+			// 就是附件在通道首尾的真实布局,VulkanCommandBuffer::Begin/EndRenderPass 会据此
+			// 同步纹理跟踪。此前硬编码 UNDEFINED + 颜色/深度最优布局,忽略了描述声明。
+			out.initialLayout = AttachmentLayoutToVk(attachment.InitialLayout);
+			out.finalLayout = attachment.FinalLayout == AttachmentLayout::Undefined
+				? (IsDepthFormat(attachment.Format) ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+				: AttachmentLayoutToVk(attachment.FinalLayout);
 			attachments.push_back(out);
 		}
 
@@ -493,8 +514,8 @@ namespace World::Rhi::Vulkan
 		{
 			const SubpassDesc& subpass = desc.Subpasses[i];
 			for (const AttachmentRef& ref : subpass.ColorAttachments)
-				colorRefs[i].push_back({ ref.Index, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
-			depthRefs[i] = { subpass.DepthStencilAttachment.Index, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+				colorRefs[i].push_back({ ref.Index, AttachmentLayoutToVk(ref.Layout) });
+			depthRefs[i] = { subpass.DepthStencilAttachment.Index, AttachmentLayoutToVk(subpass.DepthStencilAttachment.Layout) };
 			VkSubpassDescription out{};
 			out.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 			out.colorAttachmentCount = static_cast<uint32_t>(colorRefs[i].size());

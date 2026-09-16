@@ -63,6 +63,9 @@ namespace World::Rhi::Vulkan
 
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
+		void RecordImageLayoutTransition(const Handle<Texture>& texture, VkImageLayout oldLayout,
+			VkImageLayout newLayout, uint32_t mip, uint32_t layer);
+
 		VulkanDevice& m_Device;
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
 		VkCommandPool m_Pool = VK_NULL_HANDLE;   // 分配该命令缓冲的线程池
@@ -70,6 +73,9 @@ namespace World::Rhi::Vulkan
 		std::vector<std::pair<uint32_t, Handle<DescriptorSet>>> m_PendingDescriptorSets;
 		// UpdateBuffer 走 staging 时临时创建的源缓冲:复用到本槽位时(两帧后)释放。
 		std::vector<Handle<Buffer>> m_TransientBuffers;
+		// 当前渲染通道及其附件:Begin/EndRenderPass 之间用于把附件真实布局同步给纹理跟踪。
+		Handle<RenderPass> m_ActivePass;
+		std::vector<Handle<Texture>> m_ActivePassAttachments;
 	};
 
 	class VulkanCommandQueue final : public CommandQueue

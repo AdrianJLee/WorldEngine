@@ -77,7 +77,10 @@ namespace World
 		color.Samples = Rhi::SampleCount::Count1;
 		color.Load = Rhi::LoadOp::Clear;
 		color.Store = Rhi::StoreOp::Store;
-		color.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		// 三个附件都是"每帧 Clear、内容不保留":初始布局声明为 Undefined,让渲染通道
+		// 自己完成 隐式转换(如果声明成 ColorAttachment 而实际还在 Undefined,
+		// 渲染通道会跳过转换 → 附件被以 Undefined 布局使用,验证层报 vkCmdDraw-None-09600)。
+		color.InitialLayout = Rhi::AttachmentLayout::Undefined;
 		color.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
 		color.Clear.Color = { 0.1f, 0.1f, 0.1f, 1.0f };
 
@@ -86,7 +89,7 @@ namespace World
 		entityId.Samples = Rhi::SampleCount::Count1;
 		entityId.Load = Rhi::LoadOp::Clear;
 		entityId.Store = Rhi::StoreOp::Store;
-		entityId.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		entityId.InitialLayout = Rhi::AttachmentLayout::Undefined;
 		entityId.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
 		const int minusOne = -1;
 		std::memcpy(&entityId.Clear.Color, &minusOne, sizeof(int));
@@ -96,7 +99,7 @@ namespace World
 		depth.Samples = Rhi::SampleCount::Count1;
 		depth.Load = Rhi::LoadOp::Clear;
 		depth.Store = Rhi::StoreOp::Store;
-		depth.InitialLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
+		depth.InitialLayout = Rhi::AttachmentLayout::Undefined;
 		depth.FinalLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
 		depth.Clear.IsDepthStencil = true;
 		depth.Clear.DepthStencil.Depth = 1.0f;

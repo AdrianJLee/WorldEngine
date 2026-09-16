@@ -128,7 +128,7 @@ namespace World::Rhi
 	enum class BlendOp : uint8_t { Add = 0, Subtract, ReverseSubtract, Min, Max };
 	enum class LoadOp : uint8_t { Load = 0, Clear, DontCare };
 	enum class StoreOp : uint8_t { Store = 0, DontCare };
-	enum class AttachmentLayout : uint8_t { Undefined = 0, ColorAttachment, DepthStencilAttachment, Present, ShaderReadOnly, TransferDst };
+	enum class AttachmentLayout : uint8_t { Undefined = 0, ColorAttachment, DepthStencilAttachment, Present, ShaderReadOnly, TransferSrc, TransferDst };
 	enum class DescriptorType : uint8_t { Sampler = 0, CombinedImageSampler, SampledImage, StorageImage, UniformBuffer, StorageBuffer, InputAttachment };
 	enum class ResourceState : uint8_t
 	{

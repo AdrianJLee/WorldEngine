@@ -15,6 +15,45 @@ namespace World::Rhi::Vulkan
 		{
 			return type == IndexType::UInt16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
 		}
+
+		// RenderPassDesc 声明的布局 → Vulkan 布局。渲染通道开始/结束时会把**真实**布局
+		// 写回 VulkanTexture 的跟踪值,拷贝与描述符采样才有一致的布局事实源。
+		VkImageLayout AttachmentLayoutToVk(AttachmentLayout layout)
+		{
+			switch (layout)
+			{
+			case AttachmentLayout::ColorAttachment: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			case AttachmentLayout::DepthStencilAttachment: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			case AttachmentLayout::Present: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+			case AttachmentLayout::ShaderReadOnly: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			case AttachmentLayout::TransferSrc: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			case AttachmentLayout::TransferDst: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			case AttachmentLayout::Undefined: break;
+			}
+			return VK_IMAGE_LAYOUT_UNDEFINED;
+		}
+
+		// RHI 资源状态 → Vulkan 布局。PipelineBarrier 用它把"目标状态"翻译成真实转换,
+		// 源状态取纹理的跟踪布局(见 VulkanTexture::GetLayout),不再发 GENERAL→GENERAL 空操作。
+		VkImageLayout ResourceStateToVk(ResourceState state)
+		{
+			switch (state)
+			{
+			case ResourceState::General: return VK_IMAGE_LAYOUT_GENERAL;
+			case ResourceState::ColorAttachment: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			case ResourceState::DepthStencilAttachment: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			case ResourceState::Present: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+			case ResourceState::ShaderReadOnly: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			case ResourceState::CopySrc: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			case ResourceState::CopyDst: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			case ResourceState::Undefined:
+			case ResourceState::VertexBuffer:
+			case ResourceState::IndexBuffer:
+			case ResourceState::UniformBuffer:
+				break;
+			}
+			return VK_IMAGE_LAYOUT_GENERAL;
+		}
 	}
 
 	VulkanCommandBuffer::VulkanCommandBuffer(VulkanDevice& device) : m_Device(device)
@@ -38,6 +77,8 @@ namespace World::Rhi::Vulkan
 	{
 		m_PendingDescriptorSets.clear();
 		m_TransientBuffers.clear();   // 上一轮同槽位提交的 fence 已通过,临时 staging 可以释放
+		m_ActivePassAttachments.clear();
+		m_ActivePass = nullptr;
 		m_LastPipelineLayout = VK_NULL_HANDLE;
 		VkCommandBufferBeginInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -74,10 +115,38 @@ namespace World::Rhi::Vulkan
 		info.clearValueCount = static_cast<uint32_t>(clearValues.size());
 		info.pClearValues = clearValues.empty() ? nullptr : clearValues.data();
 		vkCmdBeginRenderPass(m_CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
+
+		// 通道开始后附件真实处于声明的 InitialLayout(spec:renderPass 会做隐式转换),
+		// 同步给纹理跟踪;结束后再同步 FinalLayout。
+		m_ActivePassAttachments.clear();
+		m_ActivePass = pass;
+		const RenderPassDesc& desc = vulkanPass->GetDesc();
+		const std::vector<Handle<Texture>>& attachments = framebuffer->GetDesc().Attachments;
+		m_ActivePassAttachments.insert(m_ActivePassAttachments.end(), attachments.begin(), attachments.end());
+		const size_t count = std::min(attachments.size(), desc.Attachments.size());
+		for (size_t i = 0; i < count; ++i)
+			if (const auto texture = std::dynamic_pointer_cast<VulkanTexture>(attachments[i]))
+				texture->SetLayout(AttachmentLayoutToVk(desc.Attachments[i].InitialLayout));
 	}
 
 	void VulkanCommandBuffer::NextSubpass() { vkCmdNextSubpass(m_CommandBuffer, VK_SUBPASS_CONTENTS_INLINE); }
-	void VulkanCommandBuffer::EndRenderPass() { vkCmdEndRenderPass(m_CommandBuffer); }
+
+	void VulkanCommandBuffer::EndRenderPass()
+	{
+		vkCmdEndRenderPass(m_CommandBuffer);
+		// 附件离场后停在 FinalLayout;跟踪必须跟着走,否则后续拷贝/采样会用错布局
+		// (实测症状:vkCmdCopyImageToBuffer-srcImageLayout-00189 与 vkCmdDraw-None-09600)。
+		if (const auto pass = std::dynamic_pointer_cast<VulkanRenderPass>(m_ActivePass))
+		{
+			const RenderPassDesc& desc = pass->GetDesc();
+			const size_t count = std::min(m_ActivePassAttachments.size(), desc.Attachments.size());
+			for (size_t i = 0; i < count; ++i)
+				if (const auto texture = std::dynamic_pointer_cast<VulkanTexture>(m_ActivePassAttachments[i]))
+					texture->SetLayout(AttachmentLayoutToVk(desc.Attachments[i].FinalLayout));
+		}
+		m_ActivePassAttachments.clear();
+		m_ActivePass = nullptr;
+	}
 
 	void VulkanCommandBuffer::SetViewport(const Viewport& viewport)
 	{
@@ -184,26 +253,36 @@ namespace World::Rhi::Vulkan
 
 	void VulkanCommandBuffer::PipelineBarrier(const std::vector<ResourceBarrier>& barriers)
 	{
-		std::vector<VkImageMemoryBarrier> images;
+		// 旧实现固定发 GENERAL→GENERAL(等于只做内存依赖、不转换布局),导致跟踪值、
+		// 渲染通道真实布局与调用方声明的 Before/After 三方不一致(实测触发
+		// VUID-VkImageMemoryBarrier-oldLayout-01197 与 vkCmdDraw-None-09600)。
+		// 现在按纹理跟踪的真实布局做转换,并把结果写回跟踪。
 		for (const ResourceBarrier& barrier : barriers)
 		{
 			const auto texture = std::dynamic_pointer_cast<VulkanTexture>(barrier.Texture);
 			if (!texture)
 				continue;
+			const VkImageLayout oldLayout = texture->GetLayout();
+			const VkImageLayout newLayout = ResourceStateToVk(barrier.After);
+			if (oldLayout == newLayout)
+				continue;
 			VkImageMemoryBarrier out{};
 			out.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 			out.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-			out.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-			out.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-			out.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+			out.dstAccessMask = newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+				? VK_ACCESS_TRANSFER_READ_BIT
+				: (newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+					? VK_ACCESS_SHADER_READ_BIT
+					: (VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT));
+			out.oldLayout = oldLayout;
+			out.newLayout = newLayout;
 			out.image = texture->GetImage();
 			out.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, barrier.BaseMipLevel, barrier.MipLevelCount,
 				barrier.BaseArrayLayer, barrier.ArrayLayerCount };
-			images.push_back(out);
+			vkCmdPipelineBarrier(m_CommandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &out);
+			texture->SetLayout(newLayout);
 		}
-		if (!images.empty())
-			vkCmdPipelineBarrier(m_CommandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-				0, 0, nullptr, 0, nullptr, static_cast<uint32_t>(images.size()), images.data());
 	}
 
 	void VulkanCommandBuffer::CopyBuffer(const Handle<Buffer>& src, const Handle<Buffer>& dst,
@@ -253,6 +332,12 @@ namespace World::Rhi::Vulkan
 		const auto dstVk = std::dynamic_pointer_cast<VulkanBuffer>(dst);
 		if (!srcVk || !dstVk)
 			return;
+		// 布局转换由本命令自己负责:调用方不需要(也不应该)依赖 PipelineBarrier —— 后者
+		// 目前是 GENERAL→GENERAL 的空操作,而拷贝必须使用 TRANSFER_SRC_OPTIMAL(VUID 00189)。
+		// 拷完还原到进入时的布局,保证后续采样/附件使用不受影响。
+		const VkImageLayout original = srcVk->GetLayout();
+		if (original != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+			RecordImageLayoutTransition(srcVk, original, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, mip, layer);
 		const TextureDesc& desc = srcVk->GetDesc();
 		VkBufferImageCopy region{};
 		region.bufferOffset = dstOffset;
@@ -266,6 +351,57 @@ namespace World::Rhi::Vulkan
 			std::max(1u, desc.Extent.Depth >> mip) };
 		vkCmdCopyImageToBuffer(m_CommandBuffer, srcVk->GetImage(),
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstVk->GetBuffer(), 1, &region);
+		if (original != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+			RecordImageLayoutTransition(srcVk, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, original, mip, layer);
+	}
+
+	void VulkanCommandBuffer::RecordImageLayoutTransition(const Handle<Texture>& texture,
+		VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mip, uint32_t layer)
+	{
+		const auto textureVk = std::dynamic_pointer_cast<VulkanTexture>(texture);
+		if (!textureVk || oldLayout == newLayout)
+			return;
+
+		const bool intoTransferSrc = newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		VkImageMemoryBarrier barrier{};
+		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barrier.oldLayout = oldLayout;
+		barrier.newLayout = newLayout;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.image = textureVk->GetImage();
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		barrier.subresourceRange.baseMipLevel = mip;
+		barrier.subresourceRange.levelCount = 1;
+		barrier.subresourceRange.baseArrayLayer = layer;
+		barrier.subresourceRange.layerCount = 1;
+		// 语义固定为"拷贝前进入 TRANSFER_SRC / 拷贝后还原":
+		// 进入时源域可能来自渲染通道或采样,统一用 ALL_COMMANDS 耗尽旧访问;
+		// 还原时源域是刚才的传输读,目的域按要还原到的布局选择,保证下一个使用者看到数据。
+		barrier.srcAccessMask = intoTransferSrc ? (VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT)
+			: VK_ACCESS_TRANSFER_READ_BIT;
+		switch (newLayout)
+		{
+		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+			barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			break;
+		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+			barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+			break;
+		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			break;
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+			barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			break;
+		default:
+			barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			break;
+		}
+		vkCmdPipelineBarrier(m_CommandBuffer,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			intoTransferSrc ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			0, 0, nullptr, 0, nullptr, 1, &barrier);
 	}
 	void VulkanCommandBuffer::CopyTexture(const Handle<Texture>&, const Handle<Texture>&, uint32_t, uint32_t, uint32_t, uint32_t) {}
 	void VulkanCommandBuffer::ResolveTexture(const Handle<Texture>&, const Handle<Texture>&, uint32_t, uint32_t, uint32_t) {}
@@ -317,6 +453,9 @@ namespace World::Rhi::Vulkan
 
 	void VulkanCommandQueue::Submit(const SubmitInfo& info)
 	{
+		// 设备已丢失(TDR/reset)时任何提交都只会连锁报错;直接跳过,由宿主决定恢复策略。
+		if (m_Device.IsDeviceLost())
+			return;
 		std::vector<VkCommandBuffer> commandBuffers;
 		for (const Handle<CommandBuffer>& commandBuffer : info.CommandBuffers)
 			if (const auto vulkan = std::dynamic_pointer_cast<VulkanCommandBuffer>(commandBuffer))
@@ -350,11 +489,15 @@ namespace World::Rhi::Vulkan
 
 	void VulkanCommandQueue::WaitIdle()
 	{
+		if (m_Device.IsDeviceLost())
+			return;
 		vkQueueWaitIdle(m_Device.GetGraphicsQueue());
 	}
 
 	void VulkanCommandQueue::ExecuteImmediate(const std::function<void(CommandBuffer&)>& record)
 	{
+		if (m_Device.IsDeviceLost())
+			return;
 		VulkanCommandBuffer buffer(m_Device);
 		buffer.Begin();
 		record(buffer);

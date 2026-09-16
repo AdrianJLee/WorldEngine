@@ -63,6 +63,10 @@ namespace World::Rhi::Vulkan
 		bool SubmitOneShot(const std::function<void(VkCommandBuffer)>& record, bool wait,
 			VkSemaphore waitSemaphore = VK_NULL_HANDLE, VkSemaphore signalSemaphore = VK_NULL_HANDLE);
 
+		// 设备已丢失(vkQueueSubmit 返回 VK_ERROR_DEVICE_LOST):
+		// GPU 已被 TDR/reset 重置,后续任何提交都只会连锁报错。宿主应按"设备失效"处理。
+		bool IsDeviceLost() const { return m_DeviceLost; }
+
 	private:
 		bool Initialize(const DeviceDesc& desc, std::string* error);
 
@@ -79,6 +83,7 @@ namespace World::Rhi::Vulkan
 		std::vector<VkCommandPool> m_ThreadPools;                // 每线程一个池(含主线程的第一个)
 		VkPipelineLayout m_LastPipelineLayout = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
+		bool m_DeviceLost = false;
 		std::unique_ptr<VulkanUploadRing> m_UploadRing;
 		struct OneShotSlot
 		{

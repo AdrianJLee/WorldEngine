@@ -85,26 +85,52 @@ namespace World::Rhi::Vulkan
 	AcquireResult VulkanSwapchain::AcquireNext(const Handle<Semaphore>& signalWhenReady)
 	{
 		AcquireResult result;
+		// 设备丢失后 acquire 无意义(不会再有可渲染图像,信号量也不会被 signal)。
+		if (m_Device.IsDeviceLost())
+		{
+			result.Failed = true;
+			return result;
+		}
+		// 失败路径只在调试时打印(启动期 surface 未稳定时偶发,见 Failed 字段说明)。
+		static const bool traceAcquire = std::getenv("WLD_VK_PRESENT_TRACE") != nullptr;
 		VkSemaphore semaphore = VK_NULL_HANDLE;
 		if (signalWhenReady)
 			semaphore = std::static_pointer_cast<VulkanSemaphore>(signalWhenReady)->GetSemaphore();
 		const VkResult status = vkAcquireNextImageKHR(m_Device.GetNativeDevice(), m_Swapchain,
 			UINT64_MAX, semaphore, VK_NULL_HANDLE, &result.ImageIndex);
+		if (traceAcquire && status != VK_SUCCESS && status != VK_SUBOPTIMAL_KHR)
+			WLD_CORE_WARN("[swapchain] acquire failed status={0}", static_cast<int>(status));
 		if (status == VK_ERROR_OUT_OF_DATE_KHR)
 		{
 			result.OutOfDate = true;
+			// OUT_OF_DATE 时信号量同样不会被 signal:调用方必须放弃本帧而不是去等它。
+			result.Failed = true;
 			return result;
 		}
 		if (status != VK_SUCCESS && status != VK_SUBOPTIMAL_KHR)
+		{
+			// 例如 VK_ERROR_SURFACE_LOST_KHR:不存在可渲染图像,且信号量不会被 signal。
+			// 旧实现静默返回空结果,调用方仍按"成功"继续,最终提交了一个永远等不到
+			// signal 的等待(VUID-vkQueueSubmit-pWaitSemaphores-03238,启动期约 1/6 复现)。
+			result.Failed = true;
 			return result;
+		}
+		result.Suboptimal = status == VK_SUBOPTIMAL_KHR;
 		m_CurrentImageIndex = result.ImageIndex;
-		if (result.ImageIndex < m_ImageTextures.size())
-			result.Image = m_ImageTextures[result.ImageIndex];
+		if (result.ImageIndex >= m_ImageTextures.size() || !m_ImageTextures[result.ImageIndex])
+		{
+			// 规范上不应发生;保守当失败,避免调用方拿到空图像却以为可以渲染。
+			result.Failed = true;
+			return result;
+		}
+		result.Image = m_ImageTextures[result.ImageIndex];
 		return result;
 	}
 
 	void VulkanSwapchain::Present(const Handle<Semaphore>& waitBeforePresent)
 	{
+		if (m_Device.IsDeviceLost())
+			return;
 		VkSemaphore wait = VK_NULL_HANDLE;
 		if (waitBeforePresent)
 			wait = std::static_pointer_cast<VulkanSemaphore>(waitBeforePresent)->GetSemaphore();
@@ -124,8 +150,16 @@ namespace World::Rhi::Vulkan
 	bool VulkanSwapchain::TransitionImage(uint32_t index, VkImageLayout layout,
 		const Handle<Semaphore>& signalAfter, const Handle<Semaphore>& waitBefore)
 	{
-		if (index >= m_ImageTextures.size() || !m_ImageTextures[index])
+		if (m_Device.IsDeviceLost())
 			return false;
+		static const bool traceFailure = std::getenv("WLD_VK_PRESENT_TRACE") != nullptr;
+		if (index >= m_ImageTextures.size() || !m_ImageTextures[index])
+		{
+			if (traceFailure)
+				WLD_CORE_WARN("[swapchain] transition: invalid image index={0} count={1}", index,
+					static_cast<uint32_t>(m_ImageTextures.size()));
+			return false;
+		}
 		// B0/B2:交换链图像布局转换是每帧两次的常驻操作,提交后不等待——
 		// 转换与后续渲染/呈现同队列,队列顺序保证可见性(旧实现在这里整队列排空两次)。
 		const auto texture = std::static_pointer_cast<VulkanTexture>(m_ImageTextures[index]);
@@ -162,6 +196,9 @@ namespace World::Rhi::Vulkan
 					? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 				0, 0, nullptr, 0, nullptr, 1, &barrier);
 		}, false, wait, signal);
+		if (!submitted && traceFailure)
+			WLD_CORE_WARN("[swapchain] transition submit failed index={0} needsBarrier={1}", index,
+				static_cast<int>(needsBarrier));
 		if (needsBarrier && submitted)
 			texture->SetLayout(layout);
 		// 返回 true 表示"调用方可以等待 signalAfter"。

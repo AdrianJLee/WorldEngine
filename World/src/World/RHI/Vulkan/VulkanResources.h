@@ -168,6 +168,8 @@ namespace World::Rhi::Vulkan
 		void Wait(uint64_t value = 0) override;
 		bool IsTimeline() const override { return m_Desc.Timeline; }
 		VkSemaphore GetSemaphore() const { return m_Semaphore; }
+		// 调试用:验证层报错只给原始句柄,追踪信号量身份时需要对上号。
+		uint64_t DebugHandle() const { return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(m_Semaphore)); }
 	private:
 		VulkanDevice& m_Device;
 		SemaphoreCreateDesc m_Desc;

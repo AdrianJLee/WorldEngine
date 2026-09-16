@@ -13,7 +13,7 @@ namespace World::Rhi::OpenGL
 		AcquireResult AcquireNext(const Handle<Semaphore>& signalWhenReady = nullptr) override
 		{
 			// GL 默认帧缓冲由宿主窗口交换;无独立交换链图像。
-			return AcquireResult{ 0, nullptr, false };
+			return AcquireResult{ 0, nullptr, false, false, false };
 		}
 		void Present(const Handle<Semaphore>& waitBeforePresent = nullptr) override
 		{

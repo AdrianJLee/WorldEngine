@@ -10,6 +10,7 @@
 #include "World/Renderer/Renderer3D.h"
 #include "World/RHI/Vulkan/VulkanSwapchain.h"
 #include "World/RHI/Vulkan/VulkanResources.h"
+#include "World/RHI/Vulkan/VulkanDevice.h"
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <glad/glad.h>
@@ -66,24 +67,6 @@ namespace World
 			return *hooks;
 		}
 
-		// ---- 帧槽位 / 栅栏 / 延迟释放(B0) ----
-		// 本帧第一个提交要等待的二进制信号量:优先 FrameStart(帧起始转换完成),
-		// 回退 acquire 信号量(转换提交失败时);二值信号量不能被等待两次,故取用即清标志。
-		Rhi::Handle<Rhi::Semaphore> TakePresentWait(PresentTarget& state, uint32_t slot)
-		{
-			if (state.FrameStartPending && !state.FrameStart.empty())
-			{
-				state.FrameStartPending = false;
-				return state.FrameStart[slot % state.FrameStart.size()];
-			}
-			if (!state.AcquireConsumed && !state.ImageReady.empty())
-			{
-				state.AcquireConsumed = true;
-				return state.ImageReady[slot % state.ImageReady.size()];
-			}
-			return nullptr;
-		}
-
 		// B0.2:场景/UI 的命令缓冲、UBO/描述符集、顶点索引缓冲按槽位环形化;
 		// 呈现信号量按"acquire 按帧槽位 + render-finished 按交换链图像"配对(Vulkan 规范做法)。
 		// B0 遗留评估:帧深 2 → 3(CPU/GPU 重叠更充分)。资源按槽位环形,信号量按
@@ -128,6 +111,24 @@ namespace World
 		{
 			if (PresentTraceEnabled())
 				WLD_CORE_INFO(format, std::forward<decltype(args)>(args)...);
+		}
+
+		// ---- 帧槽位 / 栅栏 / 延迟释放(B0) ----
+		// 本帧第一个提交要等待的二进制信号量:优先 FrameStart(帧起始转换完成),
+		// 回退 acquire 信号量(转换提交失败时);二值信号量不能被等待两次,故取用即清标志。
+		Rhi::Handle<Rhi::Semaphore> TakePresentWait(PresentTarget& state, uint32_t slot)
+		{
+			if (state.FrameStartPending && !state.FrameStart.empty())
+			{
+				state.FrameStartPending = false;
+				return state.FrameStart[slot % state.FrameStart.size()];
+			}
+			if (!state.AcquireConsumed && !state.ImageReady.empty())
+			{
+				state.AcquireConsumed = true;
+				return state.ImageReady[slot % state.ImageReady.size()];
+			}
+			return nullptr;
 		}
 
 		void ReleasePresentState(PresentTarget& state)
@@ -435,6 +436,11 @@ namespace World
 		s_ActivePresent = &state;
 		if (!m_Device || s_BackendName != "vulkan")
 			return true; // GL:渲染到各自窗口的默认帧缓冲,无需交换链
+		// 设备丢失后不再提交任何工作:继续提交只会产生成串的验证层报错(实测 126 条 VUID),
+		// 而 GPU 已经无法执行。宿主可据此走"设备重建/提示退出"策略。
+		if (const auto vulkanDevice = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanDevice>(m_Device);
+			vulkanDevice && vulkanDevice->IsDeviceLost())
+			return false;
 		if (state.Dirty || !state.Swapchain)
 		{
 			state.Dirty = false;
@@ -484,11 +490,26 @@ namespace World
 		PresentTrace("[present] frame={0} acquire image={1} outOfDate={2} swapchain={3}",
 			s_FrameNumber, acquired.ImageIndex, acquired.OutOfDate ? 1 : 0,
 			static_cast<int>(state.Swapchain ? 1 : 0));
-		if (acquired.OutOfDate)
+		PresentTrace("[present] semaphore handles: imageReady={0} frameStart={1}",
+			state.ImageReady.empty() ? 0ull : std::static_pointer_cast<Rhi::Vulkan::VulkanSemaphore>(
+				state.ImageReady[FrameSlot() % state.ImageReady.size()])->DebugHandle(),
+			state.FrameStart.empty() ? 0ull : std::static_pointer_cast<Rhi::Vulkan::VulkanSemaphore>(
+				state.FrameStart[FrameSlot() % state.FrameStart.size()])->DebugHandle());
+		// acquire 失败(SURFACE_LOST 等)或交换链过期:没有可继续渲染的图像,且规范保证
+		// acquire 的信号量**不会被 signal**。放弃本帧、不做任何提交(尤其不能提交对它的
+		// 等待,否则触发 VUID-vkQueueSubmit-pWaitSemaphores-03238),下一帧重建交换链。
+		if (acquired.Failed || acquired.OutOfDate)
 		{
+			state.FrameStartPending = false;
+			state.AcquireConsumed = true;
+			state.Image = nullptr;
+			state.Framebuffer = nullptr;
 			state.Dirty = true;
 			return false;
 		}
+		// 次优图像可用:照常渲染,但下一帧重建交换链。
+		if (acquired.Suboptimal)
+			state.Dirty = true;
 		state.Image = acquired.Image;
 		state.ImageIndex = acquired.ImageIndex;
 		state.FrameStartPending = false;
@@ -505,7 +526,22 @@ namespace World
 				? nullptr : state.FrameStart[startSlot % state.FrameStart.size()];
 			state.FrameStartPending = vulkanSwapchain->TransitionImage(state.ImageIndex,
 				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, frameStartSemaphore, acquireSemaphore);
+			PresentTrace("[present] transition submitted={0} acquireSem={1} frameStartSem={2}",
+				static_cast<int>(state.FrameStartPending),
+				acquireSemaphore ? static_cast<uint64_t>(std::static_pointer_cast<Rhi::Vulkan::VulkanSemaphore>(acquireSemaphore)->DebugHandle()) : 0ull,
+				frameStartSemaphore ? static_cast<uint64_t>(std::static_pointer_cast<Rhi::Vulkan::VulkanSemaphore>(frameStartSemaphore)->DebugHandle()) : 0ull);
 			state.AcquireConsumed = state.FrameStartPending;
+			if (!state.FrameStartPending)
+			{
+				// 转换提交失败:本帧没有可用的布局保证,不能继续渲染(渲染通道声明了
+				// 附件初始布局,若图像实际仍在 PRESENT 布局就是非法用法)。放弃本帧,
+				// 不做任何提交(此时 acquire 信号量的状态无法确认,再提交等待可能撞上
+				// VUID-vkQueueSubmit-pWaitSemaphores-03238),下一帧重建交换链。
+				state.Dirty = true;
+				state.Image = nullptr;
+				state.Framebuffer = nullptr;
+				return false;
+			}
 		}
 		if (state.Image)
 		{

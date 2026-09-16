@@ -25,6 +25,11 @@ namespace World::Rhi
 		uint32_t ImageIndex = 0;
 		Handle<Texture> Image;             // 当前可渲染图像(Present 布局前需 barrier)
 		bool OutOfDate = false;            // 尺寸/表面变化,需重建交换链
+		bool Suboptimal = false;           // 图像可用,但建议重建交换链
+		// acquire 真的失败了(如 SURFACE_LOST):此时 Image 为空,且传进去的信号量
+		// **不会被 signal**。调用方必须据此放弃本帧,不能再提交任何对该信号量的等待
+		// (否则触发 VUID-vkQueueSubmit-pWaitSemaphores-03238)。
+		bool Failed = false;
 	};
 
 	class WLD_API Swapchain

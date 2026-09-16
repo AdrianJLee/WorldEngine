@@ -381,8 +381,21 @@ namespace World::Rhi::Vulkan
 			submitInfo.signalSemaphoreCount = 1;
 			submitInfo.pSignalSemaphores = &signalSemaphore;
 		}
-		if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, slot->Fence) != VK_SUCCESS)
+		const VkResult submitResult = vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, slot->Fence);
+		if (submitResult != VK_SUCCESS)
+		{
+			// 提交失败会让调用方拿不到信号量/栅栏(实测:帧起始转换提交失败后,
+			// 后续提交等待一个永远不会有 signal 的信号量 → VUID-...-pWaitSemaphores-03238)。
+			// DEVICE_LOST 只报一次:设备已死,后续每帧的失败都是噪声。
+			if (submitResult == VK_ERROR_DEVICE_LOST && !m_DeviceLost)
+			{
+				m_DeviceLost = true;
+				WLD_CORE_ERROR("[RHI-VK] device lost (vkQueueSubmit VK_ERROR_DEVICE_LOST); GPU work stopped");
+			}
+			else if (!m_DeviceLost && std::getenv("WLD_VK_PRESENT_TRACE"))
+				WLD_CORE_ERROR("[RHI-VK] SubmitOneShot vkQueueSubmit failed result={0}", static_cast<int>(submitResult));
 			return false;
+		}
 
 		if (wait)
 			vkWaitForFences(m_Device, 1, &slot->Fence, VK_TRUE, UINT64_MAX);
