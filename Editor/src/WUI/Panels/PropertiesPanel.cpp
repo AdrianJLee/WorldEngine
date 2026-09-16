@@ -8,6 +8,32 @@ namespace World
 {
 	namespace
 	{
+		// 只读展示用:把 schema 值渲染成一行文本(交互路径的控件不参与)。
+		std::string FormatReadOnlyValue(const Schema::FieldSchema& field, const Schema::Value& value)
+		{
+			char buffer[160] = {};
+			switch (field.K)
+			{
+				case Schema::Kind::Bool: return std::get<bool>(value) ? "true" : "false";
+				case Schema::Kind::Int8: return std::to_string(std::get<int8_t>(value));
+				case Schema::Kind::Int16: return std::to_string(std::get<int16_t>(value));
+				case Schema::Kind::Int32: return std::to_string(std::get<int32_t>(value));
+				case Schema::Kind::Int64: return std::to_string(std::get<int64_t>(value));
+				case Schema::Kind::UInt8: return std::to_string(std::get<uint8_t>(value));
+				case Schema::Kind::UInt16: return std::to_string(std::get<uint16_t>(value));
+				case Schema::Kind::UInt32: return std::to_string(std::get<uint32_t>(value));
+				case Schema::Kind::UInt64: return std::to_string(std::get<uint64_t>(value));
+				case Schema::Kind::Float: std::snprintf(buffer, sizeof(buffer), "%.3f", std::get<float>(value)); return buffer;
+				case Schema::Kind::Double: std::snprintf(buffer, sizeof(buffer), "%.3f", std::get<double>(value)); return buffer;
+				case Schema::Kind::Vec2: { const glm::vec2 v = std::get<glm::vec2>(value); std::snprintf(buffer, sizeof(buffer), "(%.2f, %.2f)", v.x, v.y); return buffer; }
+				case Schema::Kind::Vec3: { const glm::vec3 v = std::get<glm::vec3>(value); std::snprintf(buffer, sizeof(buffer), "(%.2f, %.2f, %.2f)", v.x, v.y, v.z); return buffer; }
+				case Schema::Kind::Vec4: { const glm::vec4 v = std::get<glm::vec4>(value); std::snprintf(buffer, sizeof(buffer), "(%.2f, %.2f, %.2f, %.2f)", v.x, v.y, v.z, v.w); return buffer; }
+				case Schema::Kind::String: return std::get<std::string>(value);
+				case Schema::Kind::Enum: return std::to_string(std::get<int32_t>(value));
+				default: return "(...)";   // 资产/对象/矩阵等:只读态给出占位,避免误导
+			}
+		}
+
 		std::string ScriptStateName(ScriptInstanceState state)
 		{
 			switch (state)
@@ -192,7 +218,11 @@ namespace World
 
 			if (m_ReadOnly || field.Meta.ReadOnly || !field.Get || !field.Set)
 			{
-				Label(ctx, { row.X + 4, row.Y + 3 }, label, theme.TextMuted, 13.0f);
+				// 只读也要显示"值":否则 Play/Simulate 下属性面板只剩字段名,看起来像"什么都不显示"。
+				std::string text = label;
+				if (field.Get)
+					text += ": " + FormatReadOnlyValue(field, field.Get(instance));
+				Label(ctx, { row.X + 4, row.Y + 3 }, text, theme.TextMuted, 13.0f);
 				y += 20;
 				continue;
 			}
