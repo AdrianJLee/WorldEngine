@@ -27,6 +27,11 @@ namespace World
 		virtual Ref<Texture2D> GetIcon(int index) const = 0;
 		virtual uint64_t GetIconId(int index) const = 0;
 		virtual uint64_t GetSceneTextureId() const = 0;
+		// 相机可视化:预览小窗(用场景相机渲染的 PiP)与视锥显示开关。
+		virtual uint64_t GetCameraPreviewTextureId() const = 0;
+		virtual bool IsCameraPreviewEnabled() const = 0;
+		virtual void ToggleCameraPreview() = 0;
+		virtual std::string CameraPreviewLabel() const = 0;
 		virtual Entity PickEntityAt(glm::vec2 viewportLocal) = 0;
 		virtual EditorCamera& GetEditorCamera() = 0;
 		virtual Wui::GizmoOperation GetGizmoOperation() const = 0;

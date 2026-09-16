@@ -49,6 +49,11 @@ namespace World
 		void SetViewportCamera3D(bool enabled) { m_Viewport3D = enabled; }
 		void ToggleViewportCamera3D() { m_Viewport3D = !m_Viewport3D; }
 		Ref<SceneRenderer>& GetSceneRenderer() { return m_SceneRenderer; }
+		// 相机可视化:预览小窗(用场景相机渲一份 PiP)与视锥显示。
+		uint64_t GetCameraPreviewTextureId() const { return m_PreviewTextureId; }
+		bool IsCameraPreviewEnabled() const { return m_CameraPreviewEnabled; }
+		void ToggleCameraPreview() { m_CameraPreviewEnabled = !m_CameraPreviewEnabled; }
+		std::string CameraPreviewLabel() const;
 		// W8:编辑器的存档服务(场景来源 = 当前活动场景),供存档面板使用。
 		Gameplay::SaveService* GetSaveService() { return m_SaveService.get(); }
 		bool IsPlaying() const { return m_SceneState == SceneState::Play; }
@@ -94,6 +99,12 @@ namespace World
 		};
 	private:
 		Entity GetEntityAtMousePosition(glm::vec2 viewportLocal);
+		// 预览用相机:选中的相机实体(属于活动场景)优先,否则场景主相机;没有则无效实体。
+		Entity GetPreviewCameraEntity() const;
+		// 用预览相机渲染一份小尺寸画面(相机可视化 PiP)。
+		void RenderCameraPreview();
+		// 相机实体的世界矩阵(优先 WorldTransformComponent)。
+		static glm::mat4 EntityWorldMatrix(Entity entity);
 
 		void SetSceneState(SceneState state);
 		void UpdateSceneContext(Ref<Scene> scene);
@@ -120,6 +131,11 @@ namespace World
 		void RunPickCheck();
 	private:
 		Ref<SceneRenderer> m_SceneRenderer;
+		// 相机预览:独立的小尺寸渲染目标,与主视口共用同一条提交路径(同一台相机=同一张图)。
+		Ref<SceneRenderer> m_PreviewRenderer;
+		uint64_t m_PreviewTextureId = 0;
+		uint32_t m_PreviewTextureGeneration = 0;
+		bool m_CameraPreviewEnabled = true;
 		std::unique_ptr<Gameplay::SaveService> m_SaveService;
 		SceneRendererOptions m_RendererOptions;
 

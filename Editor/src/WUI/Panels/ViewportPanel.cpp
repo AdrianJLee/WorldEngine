@@ -7,6 +7,79 @@
 
 namespace World
 {
+	namespace
+	{
+		// 投影 + 近平面裁剪 + 线段四边形:相机视锥等覆盖层线段共用。
+		void PushProjectedSegment(Wui::WuiContext& ctx, const glm::mat4& viewProjection,
+			const Wui::WuiRect& viewport, const glm::vec4& clipA, const glm::vec4& clipB,
+			const Wui::WuiColor& color, float thickness,
+			glm::vec2* boundsMin = nullptr, glm::vec2* boundsMax = nullptr)
+		{
+			constexpr float kMinW = 0.0001f;
+			glm::vec4 a = clipA;
+			glm::vec4 b = clipB;
+			if (a.w < kMinW && b.w < kMinW)
+				return;
+			if (a.w < kMinW)
+			{
+				const float t = (kMinW - a.w) / (b.w - a.w);
+				a = glm::mix(a, b, t);
+			}
+			else if (b.w < kMinW)
+			{
+				const float t = (kMinW - b.w) / (a.w - b.w);
+				b = glm::mix(b, a, t);
+			}
+			const auto project = [&viewport](const glm::vec4& clip)
+			{
+				const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+				return glm::vec2 { viewport.X + (ndc.x + 1.0f) * 0.5f * viewport.W,
+					viewport.Y + (1.0f - ndc.y) * 0.5f * viewport.H };
+			};
+			const float pad = 10.0f * std::max(viewport.W, viewport.H);
+			const auto clampScreen = [&viewport, pad](const glm::vec2& point)
+			{
+				return glm::vec2 { glm::clamp(point.x, viewport.X - pad, viewport.X + viewport.W + pad),
+					glm::clamp(point.y, viewport.Y - pad, viewport.Y + viewport.H + pad) };
+			};
+			const glm::vec2 from = clampScreen(project(a));
+			const glm::vec2 to = clampScreen(project(b));
+			// 供"视锥覆盖范围"日志/自动化核对:统计端点与视口矩形的交叠范围(夹到视口内,
+			// 反映"用户在视口里能看到的这部分视锥"),而不是夹到 pad 之外的原始端点。
+			const auto clampToViewport = [&viewport](const glm::vec2& point)
+			{
+				return glm::vec2 { glm::clamp(point.x, viewport.X, viewport.X + viewport.W),
+					glm::clamp(point.y, viewport.Y, viewport.Y + viewport.H) };
+			};
+			const glm::vec2 visibleFrom = clampToViewport(from);
+			const glm::vec2 visibleTo = clampToViewport(to);
+			if (boundsMin)
+				*boundsMin = glm::min(*boundsMin, glm::min(visibleFrom, visibleTo));
+			if (boundsMax)
+				*boundsMax = glm::max(*boundsMax, glm::max(visibleFrom, visibleTo));
+			const glm::vec2 delta = to - from;
+			const float length = glm::length(delta);
+			if (length < 0.5f)
+				return;
+			const glm::vec2 normal { -delta.y / length, delta.x / length };
+			const glm::vec2 offset = normal * (thickness * 0.5f);
+			Wui::WuiDrawCommand command;
+			command.Kind = Wui::WuiDrawKind::Quad;
+			command.Color = color;
+			command.Vertices = { from + offset, to + offset, to - offset, from - offset };
+			ctx.Commands().push_back(std::move(command));
+		}
+
+		// 相机预览小窗位置:场景图左下角,宽取视口的 28%,16:9。
+		Wui::WuiRect CameraPreviewRect(const Wui::WuiRect& sceneRect)
+		{
+			const float width = std::max(160.0f, sceneRect.W * 0.28f);
+			const float height = width * 9.0f / 16.0f;
+			const float margin = 10.0f;
+			return { sceneRect.X + margin, sceneRect.Y + sceneRect.H - height - margin, width, height };
+		}
+	}
+
 	void ViewportPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost&)
 	{
 		const Wui::WuiTheme& theme = m_Host.Theme();
@@ -66,6 +139,11 @@ namespace World
 		if (Button(ctx, Wui::HashId("viewport.camera.mode"),
 			{ rect.X + 10.0f, rect.Y + 14.0f, 46.0f, 24.0f }, camera3D ? "3D" : "2D", theme))
 			m_Host.ToggleViewportCamera3D();
+		// 相机可视化开关:开关相机预览小窗(视锥线框始终显示)。
+		if (Button(ctx, Wui::HashId("viewport.camera.preview"),
+			{ rect.X + 62.0f, rect.Y + 14.0f, 52.0f, 24.0f },
+			m_Host.IsCameraPreviewEnabled() ? "Cam*" : "Cam", theme))
+			m_Host.ToggleCameraPreview();
 
 		Wui::LayoutWidgetTree(m_Root, rect);
 		Wui::WuiPaintContext paint(ctx);
@@ -109,7 +187,11 @@ namespace World
 					m_Host.MarkDocumentDirty();
 			}
 		}
-		if (ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged)
+		const Wui::WuiRect previewRect = CameraPreviewRect(sceneRect);
+		// 相机预览小窗挡住的位置不参与拾取(避免"点预览把背后物体选走")。
+		const bool overPreview = m_Host.IsCameraPreviewEnabled() &&
+			m_Host.GetCameraPreviewTextureId() != 0 && ctx.IsHovered(previewRect);
+		if (ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview)
 		{
 			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
 			const Entity picked = m_Host.PickEntityAt(local);
@@ -125,6 +207,95 @@ namespace World
 		// 近的棱更实、远的棱更淡,按相机深度排序(远的先画);整体用 ClipPush 夹在场景图区域内。
 		// 旧实现是 SceneRenderer 里用 Renderer2D 按实体 Transform 画的一个 2D 方块 ——
 		// 在 3D 视口里看着就是"一个跟方块无关的方形,位置还不对"(用户 2026-09-16 反馈)。
+
+		// ---- 相机可视化:视锥线框 ----
+		// 让用户直接看到"相机能看到的范围":透视 = 近/远矩形 + 4 条连线,正交 = 可视长方体前后矩形;
+		// 选中的相机亮橙,主相机淡青常驻,其余相机淡灰;整体夹在场景图区域内。
+		if (m_Host.HasRenderedScene() && m_Host.GetActiveScene())
+		{
+			const Wui::GizmoCamera frustumCamera = m_Host.GetGizmoCamera();
+			const Ref<Scene> frustumScene = m_Host.GetActiveScene();
+			const entt::registry& frustumRegistry = static_cast<const Scene*>(frustumScene.get())->GetRegistry();
+			const Entity selectedForCamera = m_Host.GetSelectedEntity();
+			Entity primaryCamera = frustumScene->GetPrimaryCameraEntity();
+			int frustumCount = 0;
+			glm::vec2 frustumMin { 1e30f, 1e30f };
+			glm::vec2 frustumMax { -1e30f, -1e30f };
+			ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sceneRect, {} });
+			for (const entt::entity handle : frustumRegistry.view<CameraComponent, TransformComponent>())
+			{
+				const SceneCamera& camera = frustumRegistry.get<CameraComponent>(handle).Camera;
+				glm::mat4 world = frustumRegistry.get<TransformComponent>(handle).Transform;
+				if (const auto* worldTransform = frustumRegistry.try_get<WorldTransformComponent>(handle))
+					world = worldTransform->Matrix;
+				// 相机看向 -Z(与 glm::perspective / glm::ortho 的约定一致)。
+				float hNear = 0.0f, wNear = 0.0f, hFar = 0.0f, wFar = 0.0f, zNear = 0.0f, zFar = 0.0f;
+				if (camera.GetProjectionType() == SceneCamera::ProjectionType::Perspective)
+				{
+					const float tanHalf = std::tan(glm::radians(camera.GetPerspectiveFOV()) * 0.5f);
+					zNear = -camera.GetPerspectiveNearClip();
+					zFar = -camera.GetPerspectiveFarClip();
+					hNear = tanHalf * std::abs(zNear);
+					wNear = hNear * camera.GetAspectRatio();
+					hFar = tanHalf * std::abs(zFar);
+					wFar = hFar * camera.GetAspectRatio();
+				}
+				else
+				{
+					zNear = -camera.GetOrthographicNearClip();
+					zFar = -camera.GetOrthographicFarClip();
+					hNear = hFar = camera.GetOrthographicZoom();
+					wNear = wFar = camera.GetOrthographicZoom() * camera.GetAspectRatio();
+				}
+				const glm::vec3 corners[8] = {
+					{ -wNear, -hNear, zNear }, { wNear, -hNear, zNear }, { wNear, hNear, zNear }, { -wNear, hNear, zNear },
+					{ -wFar, -hFar, zFar }, { wFar, -hFar, zFar }, { wFar, hFar, zFar }, { -wFar, hFar, zFar },
+				};
+				glm::vec4 clip[8];
+				for (int i = 0; i < 8; ++i)
+					clip[i] = frustumCamera.ViewProjection * (world * glm::vec4 { corners[i], 1.0f });
+				const bool isSelected = selectedForCamera.IsValid() &&
+					selectedForCamera.GetScene() == frustumScene.get() &&
+					static_cast<entt::entity>(selectedForCamera) == handle;
+				const bool isPrimary = primaryCamera.IsValid() &&
+					static_cast<entt::entity>(primaryCamera) == handle;
+				const Wui::WuiColor color = isSelected
+					? Wui::WuiColor { 1.0f, 0.55f, 0.12f, 0.95f }
+					: (isPrimary ? Wui::WuiColor { 0.35f, 0.75f, 1.0f, 0.55f }
+						: Wui::WuiColor { 0.78f, 0.78f, 0.84f, 0.26f });
+				const float thickness = isSelected ? 2.6f : 1.4f;
+				for (int i = 0; i < 4; ++i)
+				{
+					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[i], clip[(i + 1) % 4],
+						color, thickness, &frustumMin, &frustumMax);
+					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[4 + i], clip[4 + (i + 1) % 4],
+						color, thickness, &frustumMin, &frustumMax);
+					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[i], clip[4 + i],
+						color, thickness, &frustumMin, &frustumMax);
+				}
+				// 相机位置标记:原点 → 上方 0.25(相机本地 +Y)一小段,便于找到相机实体。
+				PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
+					frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.0f, 0.0f, 1.0f }),
+					frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.25f, 0.0f, 1.0f }),
+					color, thickness + 0.6f, &frustumMin, &frustumMax);
+				++frustumCount;
+			}
+			ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
+			if (frustumCount > 0 && std::getenv("WLD_TRACE_UI"))
+			{
+				// 每 ~2 秒打一行(帧号节流):自动化/人工都能核对"视锥覆盖范围"。
+				static uint64_t lastFrustumLog = ~0ull;
+				const uint64_t stamp = ctx.Frame() / 120;
+				if (stamp != lastFrustumLog)
+				{
+					lastFrustumLog = stamp;
+					WLD_CORE_INFO("[ui] camera frustum count={0} bbox=({1},{2},{3},{4}) viewport=({5},{6},{7},{8})",
+						frustumCount, frustumMin.x, frustumMin.y, frustumMax.x - frustumMin.x, frustumMax.y - frustumMin.y,
+						sceneRect.X, sceneRect.Y, sceneRect.W, sceneRect.H);
+				}
+			}
+		}
+
 		if (selected.IsValid() && selected.HasComponent<MeshRendererComponent>() &&
 			selected.HasComponent<TransformComponent>() && m_Host.HasRenderedScene())
 		{
@@ -297,6 +468,19 @@ namespace World
 					}
 				}
 			}
+		}
+
+		// ---- 相机预览小窗(PiP):直接显示"场景相机看到的东西" ----
+		if (m_Host.IsCameraPreviewEnabled() && m_Host.GetCameraPreviewTextureId() != 0)
+		{
+			const uint64_t previewTexture = m_Host.GetCameraPreviewTextureId();
+			Wui::PanelBackground(ctx, previewRect, { 0.05f, 0.05f, 0.06f, 0.92f }, 3.0f);
+			Label(ctx, { previewRect.X + 6.0f, previewRect.Y + 3.0f },
+				"相机: " + m_Host.CameraPreviewLabel(), theme.Text, 12.0f);
+			// UV 与主视口一致(场景纹理按 {0,1,1,-1} 贴,预览渲染器同一条路径)。
+			Image(ctx, { previewRect.X + 1.0f, previewRect.Y + 18.0f, previewRect.W - 2.0f, previewRect.H - 19.0f },
+				previewTexture, { 0, 1, 1, -1 }, theme);
+			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, previewRect, theme.Border, 3.0f, 1.0f });
 		}
 		(void)theme;
 	}

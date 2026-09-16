@@ -65,6 +65,11 @@ namespace World
 		uint64_t GetIconId(int index) const override;
 		uint32_t TextureEpoch() const override;
 		uint64_t GetSceneTextureId() const override;
+		// 相机可视化:预览小窗(PiP)的纹理/开关/标签。
+		uint64_t GetCameraPreviewTextureId() const override;
+		bool IsCameraPreviewEnabled() const override;
+		void ToggleCameraPreview() override;
+		std::string CameraPreviewLabel() const override;
 		// ---- 独立窗口(与停靠面板不同的组件)----
 		// 计数/索引均按"窗口"而不是"面板":一个窗口可承载多个面板(标签栏)。
 		size_t IndependentWindowCount() const override;

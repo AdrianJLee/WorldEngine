@@ -412,6 +412,26 @@ namespace World
 		return m_Editor.GetSceneTextureId();
 	}
 
+	uint64_t EditorShell::GetCameraPreviewTextureId() const
+	{
+		return m_Editor.GetCameraPreviewTextureId();
+	}
+
+	bool EditorShell::IsCameraPreviewEnabled() const
+	{
+		return m_Editor.IsCameraPreviewEnabled();
+	}
+
+	void EditorShell::ToggleCameraPreview()
+	{
+		m_Editor.ToggleCameraPreview();
+	}
+
+	std::string EditorShell::CameraPreviewLabel() const
+	{
+		return m_Editor.CameraPreviewLabel();
+	}
+
 	Entity EditorShell::PickEntityAt(glm::vec2 viewportLocal)
 	{
 		return m_Editor.PickEntityAt(viewportLocal);

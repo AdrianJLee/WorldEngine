@@ -51,6 +51,24 @@ namespace World
 
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 		m_SceneRenderer->Init();
+		// 相机可视化:预览目标(独立小尺寸 SceneRenderer,与主视口同一条提交路径)。
+		{
+			if (const char* previewEnv = std::getenv("WLD_CAMERA_PREVIEW"))
+				m_CameraPreviewEnabled = std::atoi(previewEnv) != 0;
+			uint32_t previewWidth = 480, previewHeight = 270;
+			if (const char* sizeEnv = std::getenv("WLD_CAMERA_PREVIEW_SIZE"))
+			{
+				unsigned int w = 0, h = 0;
+				if (std::sscanf(sizeEnv, "%ux%u", &w, &h) == 2 && w >= 32 && h >= 32)
+				{
+					previewWidth = w;
+					previewHeight = h;
+				}
+			}
+			m_PreviewRenderer = CreateRef<SceneRenderer>();
+			m_PreviewRenderer->Init();
+			m_PreviewRenderer->OnResize(previewWidth, previewHeight);
+		}
 
 		// W8-3:编辑器侧存档服务(与 Runtime/Play 共用同一实现):项目 id 取项目清单,
 		// 场景来源是当前活动场景 —— 内容作者可以在编辑态直接保存/读取状态做验证。
@@ -129,6 +147,11 @@ namespace World
 		{
 			m_SceneRenderer->Shutdown();
 			m_SceneRenderer.reset();
+		}
+		if (m_PreviewRenderer)
+		{
+			m_PreviewRenderer->Shutdown();
+			m_PreviewRenderer.reset();
 		}
 		// 独立窗口(含附加状态)必须先于 RHI 设备/主窗口销毁,否则关闭引擎时会崩。
 		m_Shell.ReleaseIndependentWindows();
@@ -283,6 +306,10 @@ namespace World
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
 		m_SceneRenderer->SubmitScene(*renderCamera, renderCameraTransform, selectedEntity);
 		m_SceneRenderer->EndScene();
+		// 相机可视化:同一帧再给"场景相机"渲一份小图(PiP)。Edit/Simulate 才有意义 ——
+		// Play 时主视口本身就是这台相机。
+		if (m_CameraPreviewEnabled && m_SceneState != SceneState::Play)
+			RenderCameraPreview();
 		m_HasRenderedScene = true;
 		// 开发验证:像素基线截图(与 Runtime 同名开关)。走的是后端无关的 RHI 读回,
 		// Vulkan/GL 都能抓到本帧场景颜色附件。
@@ -352,12 +379,23 @@ namespace World
 		countdown = -2;
 
 		const char* pathEnv = std::getenv("WLD_CAPTURE_PATH");
-		if (!pathEnv || !pathEnv[0] || !m_SceneRenderer)
-			return;
-		WLD_CORE_INFO("[capture] scene target {0}x{1}, viewport {2}x{3}",
-			m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight(),
-			static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y));
-		m_SceneRenderer->CaptureFrame(pathEnv);
+		if (pathEnv && pathEnv[0] && m_SceneRenderer)
+		{
+			WLD_CORE_INFO("[capture] scene target {0}x{1}, viewport {2}x{3}",
+				m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight(),
+				static_cast<uint32_t>(m_ViewportSize.x), static_cast<uint32_t>(m_ViewportSize.y));
+			m_SceneRenderer->CaptureFrame(pathEnv);
+		}
+		// 相机预览目标(相机可视化验收:预览图必须与"该相机看到的画面"一致)。
+		if (const char* previewPath = std::getenv("WLD_CAPTURE_PREVIEW"))
+		{
+			if (previewPath[0] && m_PreviewRenderer && m_CameraPreviewEnabled)
+			{
+				WLD_CORE_INFO("[capture] camera preview target {0}x{1}",
+					m_PreviewRenderer->GetWidth(), m_PreviewRenderer->GetHeight());
+				m_PreviewRenderer->CaptureFrame(previewPath);
+			}
+		}
 	}
 
 	void EditorLayer::RunHierarchyClickCheck()
@@ -563,6 +601,14 @@ namespace World
 					m_SceneTextureId = Wui::WuiTextureRegistry::Get().Register(m_SceneRenderer->GetColorTexture());
 				else
 					Wui::WuiTextureRegistry::Get().Update(m_SceneTextureId, m_SceneRenderer->GetColorTexture());
+			}
+			// 相机预览小窗的纹理(与主场景纹理同样按纪元重注册)。
+			if (m_CameraPreviewEnabled && m_PreviewRenderer && m_PreviewRenderer->GetColorTexture())
+			{
+				if (!m_PreviewTextureId)
+					m_PreviewTextureId = Wui::WuiTextureRegistry::Get().Register(m_PreviewRenderer->GetColorTexture());
+				else
+					Wui::WuiTextureRegistry::Get().Update(m_PreviewTextureId, m_PreviewRenderer->GetColorTexture());
 			}
 			m_Shell.OnRender(m_WuiContext);
 			m_WuiContext.EndFrame();
@@ -896,6 +942,8 @@ namespace World
 		auto& registry = Wui::WuiTextureRegistry::Get();
 		if (m_SceneRenderer && m_SceneRenderer->GetColorTexture())
 			m_SceneTextureId = registry.Register(m_SceneRenderer->GetColorTexture());
+		if (m_PreviewRenderer && m_PreviewRenderer->GetColorTexture())
+			m_PreviewTextureId = registry.Register(m_PreviewRenderer->GetColorTexture());
 		const Ref<Texture2D> icons[8] = {
 			m_IconPlay, m_IconStop, m_IconPause, m_IconContinue,
 			m_IconSimulate, m_IconSimulateStop, m_IconSimulatePause, m_IconSimulateContinue,
@@ -1010,6 +1058,61 @@ namespace World
 
 		return m_Commands.HandleKey(e.GetKeyCode(), control, shift);
 	}
+
+	glm::mat4 EditorLayer::EntityWorldMatrix(Entity entity)
+	{
+		glm::mat4 world = entity.GetComponent<TransformComponent>().Transform;
+		if (entity.HasComponent<WorldTransformComponent>())
+			world = entity.GetComponent<WorldTransformComponent>().Matrix;
+		return world;
+	}
+
+	Entity EditorLayer::GetPreviewCameraEntity() const
+	{
+		if (!m_ActiveScene)
+			return {};
+		Entity selected = m_SelectedEntity;
+		if (selected.IsValid() && selected.GetScene() == m_ActiveScene.get() &&
+			selected.HasComponent<CameraComponent>() && selected.HasComponent<TransformComponent>())
+			return selected;
+		Entity primary = m_ActiveScene->GetPrimaryCameraEntity();
+		if (primary.IsValid() && primary.HasComponent<TransformComponent>())
+			return primary;
+		return {};
+	}
+
+	void EditorLayer::RenderCameraPreview()
+	{
+		if (!m_PreviewRenderer || !m_ActiveScene)
+			return;
+		Entity cameraEntity = GetPreviewCameraEntity();
+		if (!cameraEntity.IsValid())
+			return;
+		// 与主视口完全同一条提交路径(同一套 SceneRenderer/管线/相机数据),因此
+		// "预览分辨率 = 视口分辨率"时,预览图就是该相机看到的画面(验收用的等式)。
+		const auto& camera = cameraEntity.GetComponent<CameraComponent>().Camera;
+		const glm::mat4 world = EntityWorldMatrix(cameraEntity);
+		m_PreviewRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
+		m_PreviewRenderer->SubmitScene(camera, world);
+		m_PreviewRenderer->EndScene();
+	}
+
+	std::string EditorLayer::CameraPreviewLabel() const
+	{
+		Entity cameraEntity = GetPreviewCameraEntity();
+		if (!cameraEntity.IsValid())
+			return "(no camera)";
+		if (cameraEntity.HasComponent<TagComponent>())
+		{
+			const std::string& tag = cameraEntity.GetComponent<TagComponent>().Tag;
+			if (!tag.empty())
+				return tag;
+		}
+		if (m_ActiveScene && cameraEntity == m_ActiveScene->GetPrimaryCameraEntity())
+			return "(primary camera)";
+		return "(camera)";
+	}
+
 	Entity EditorLayer::GetEntityAtMousePosition(glm::vec2 viewportLocal)
 	{
 		if (!m_HasRenderedScene || !m_ActiveScene || !m_SceneRenderer)
