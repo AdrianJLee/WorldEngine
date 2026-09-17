@@ -63,8 +63,7 @@ if(MSVC)
     target_compile_options(WorldBox2d PRIVATE /Wall /wd4820 /wd5045 /wd4061 /wd4711 /wd4710)
 endif()
 
-add_subdirectory(vendor/sol2)
-# P2 脚本前端:Luau(只编库,不编 CLI/tests/Web)。sol2 + PUC Lua 在 W2 迁移完成后删除。
+# P2 脚本前端:Luau(只编库,不编 CLI/tests/Web)。sol2 + PUC Lua 已在 W1b 移除。
 set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_WEB OFF CACHE BOOL "" FORCE)
@@ -147,8 +146,6 @@ target_include_directories(World PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/spdlog/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/sol2/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/lua/src"
 )
 
 # 递归获取源文件
@@ -159,9 +156,6 @@ file(GLOB_RECURSE WORLD_SOURCES
     "vendor/stb_image/*.cpp"
     "vendor/glm/glm/**.hpp"
 	"vendor/glm/glm/**.inl"
-    "vendor/sol2/include/**.hpp"
-    "vendor/lua/src/**.hpp"
-    "vendor/lua/src/**.c"
     "vendor/volk/*.c"
     "vendor/volk/*.h"
 
@@ -184,7 +178,6 @@ target_link_libraries(World PRIVATE
     # WindowsWindow/WindowsPlatformUtils 的 IME 接口(ImmGetContext 等);
     # 此前由已移除的第三方 UI 依赖传递链接,现需显式声明。
     imm32
-    sol2
     Luau.VM
     Luau.Compiler
     yaml-cpp
