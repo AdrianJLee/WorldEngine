@@ -3,6 +3,8 @@
 #include "Components.h"
 #include "LuaStubGenerator.h"
 #include "World/Core/Application.h"
+#include "World/Schema/SchemaRegistry.h"
+#include "World/Script/BehaviorRegistry.h"
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
@@ -15,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 
 namespace World
 {
@@ -508,6 +511,11 @@ namespace World
 
 			// 3. 构建字段：类型优先取注解，缺失注解走旧值推断兼容路径。
 			script.CachedFields = BuildFieldCache(table, schema, script);
+			// W2a：把该脚本登记成 Luau 行为描述（字段来自 CachedFields）。只写行为注册表，
+			// 不改变加载/预览语义：登记失败只记日志，返回值与状态机仍由下面的旧逻辑决定。
+			std::string behaviorError;
+			if (!EnsureLuaBehavior(script, &behaviorError) && Log::GetCoreLogger())
+				WLD_CORE_WARN("[Behavior] {0}", behaviorError);
 			script.LastError.clear();
 			script.State = ScriptInstanceState::Stopped;
 			return true;
@@ -611,5 +619,46 @@ namespace World
 		catch (...) { ReportLuaError(script, "OnDestroy", "Unknown exception"); faulted = true; }
 		ClearLuaReferences(script);
 		script.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
+	}
+
+	// ---- P2 W2a:行为注册层（只登记/查询，不参与调度）----
+
+	BehaviorRegistry& ScriptEngine::Behaviors()
+	{
+		return BehaviorRegistry::Instance();
+	}
+
+	bool ScriptEngine::EnsureLuaBehavior(LuaScriptComponent& script, std::string* error)
+	{
+		if (script.ScriptFilePath.empty())
+		{
+			if (error) *error = "lua behavior requires a non-empty script path";
+			return false;
+		}
+		BehaviorRegistry& registry = BehaviorRegistry::Instance();
+		BehaviorDesc desc = BehaviorRegistry::MakeLuaDesc(script);
+		const BehaviorDesc* existing = registry.Find(desc.ModuleId);
+		if (!existing) return registry.Register(std::move(desc), error);
+		if (BehaviorDescEquals(*existing, desc)) return true; // 幂等：同模块、同描述
+		return registry.Replace(std::move(desc), error);      // 脚本字段变化（编辑/热重载）→ 刷新
+	}
+
+	std::size_t ScriptEngine::EnsureSchemaBehaviors(const Schema::SchemaRegistry& schemas, std::vector<std::string>* errors)
+	{
+		BehaviorRegistry& registry = BehaviorRegistry::Instance();
+		std::size_t ensured = 0;
+		for (const Schema::TypeSchema* type : schemas.List(Schema::TypeCategory::Script))
+		{
+			std::string error;
+			BehaviorDesc desc = BehaviorRegistry::MakeNativeDesc(*type);
+			const BehaviorDesc* existing = registry.Find(desc.ModuleId);
+			bool ok = false;
+			if (!existing) ok = registry.Register(std::move(desc), &error);
+			else if (BehaviorDescEquals(*existing, desc)) ok = true;
+			else ok = registry.Replace(std::move(desc), &error);
+			if (ok) ++ensured;
+			else if (errors) errors->push_back(std::move(error));
+		}
+		return ensured;
 	}
 }
