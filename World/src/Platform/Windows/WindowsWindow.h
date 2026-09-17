@@ -53,6 +53,9 @@ namespace World
 		// 附加窗口:GL 共享上下文,不拥有 GLFW 初始化;Vulkan 窗口不建 GL 上下文。
 		bool m_Auxiliary = false;
 		bool m_HasGLContext = true;
+		// 进程级"隐藏运行"(WLD_WINDOW_HIDDEN 或 SW_HIDE 启动):所有窗口都不显示,
+		// 且显式 SetVisible(true) 也被吞掉(浮窗挂靠/摘出会调用它)。
+		bool m_ForceHidden = false;
 		GLFWwindow* m_ShareWindow = nullptr;
 		WNDPROC m_PrevWndProc = nullptr;
 		static LRESULT CALLBACK StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);

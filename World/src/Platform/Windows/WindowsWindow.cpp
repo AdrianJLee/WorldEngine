@@ -77,6 +77,22 @@ namespace World
 
 		{
 			WLD_PROFILE_SCOPE("glfwCreateWindow");
+			// 后台/自动化运行:窗口是否可见由本进程直接决定,而不是只依赖启动器的
+			// -WindowStyle Hidden(GLFW 默认仍会显示窗口,实测会让验证时弹窗到桌面)。
+			// 判定顺序:WLD_WINDOW_HIDDEN 环境变量 > 进程被以 SW_HIDE 启动。
+			bool hidden = false;
+			if (const char* env = std::getenv("WLD_WINDOW_HIDDEN"))
+				hidden = env[0] != '0';
+			if (!hidden)
+			{
+				STARTUPINFOW startupInfo{};
+				GetStartupInfoW(&startupInfo);
+				hidden = (startupInfo.dwFlags & STARTF_USESHOWWINDOW) != 0
+					&& startupInfo.wShowWindow == SW_HIDE;
+			}
+			if (hidden)
+				glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+			m_ForceHidden = hidden;
 			if (props.Frameless)
 				glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
 			// Vulkan 附加窗口用 GLFW_NO_API:该模式下 GLFW 要求 share 必须为空。
@@ -318,6 +334,8 @@ namespace World
 	{
 		if (!m_Window)
 			return;
+		if (m_ForceHidden && visible)
+			return; // 隐藏运行:不允许任何窗口被显式显示(自动化的窗口枚举/抓图依赖这一点)
 		if (visible)
 			glfwShowWindow(m_Window);
 		else
