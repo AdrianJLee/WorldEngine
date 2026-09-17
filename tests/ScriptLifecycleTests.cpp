@@ -6,11 +6,13 @@
 #include "World/Scene/ScriptEngine.h"
 #include "World/Scene/LuaStubGenerator.h"
 #include "World/Script/LuauVm.h"
+#include "World/Script/Sandbox.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptValue.h"
 
 #include <box2d/box2d.h>
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -1082,6 +1084,80 @@ namespace
         CHECK(LuaReflectionRegistry::GetTable().size() == count);
         RunLua("assert(mat3.new(1.0):determinant() == 1.0 and mat4.new(1.0):determinant() == 1.0 and Entity ~= nil)");
     }
+
+    std::string FirstLine(const std::string& text)
+    {
+        const std::size_t at = text.find('\n');
+        return at == std::string::npos ? text : text.substr(0, at);
+    }
+
+    // W6:沙箱预算(指令口径)。
+    // 1) BudgetSpin.lua 的 OnUpdate 死循环被预算中断:只有该实例 Faulted,同场景好脚本
+    //    继续更新、场景仍 active;诊断带路径 + phase=OnUpdate + stack traceback。
+    //    测试用 RAII 恢复默认策略(同进程共享 VM,后续组必须看到默认值)。
+    // 2) 默认预算(1e6 指令)余量标定:32 个真实夹具脚本一帧的总命中数。
+    void SandboxBudgetIsolationAndMargin()
+    {
+        const Sandbox::Policy defaultPolicy = ScriptEngine::GetSandboxPolicy();
+        CHECK(defaultPolicy.Instructions == 1000000);
+        CHECK(defaultPolicy.TimeMs == 0);
+
+        {
+            struct PolicyGuard
+            {
+                Sandbox::Policy Saved;
+                explicit PolicyGuard(const Sandbox::Policy& saved) : Saved(saved) {}
+                ~PolicyGuard() { ScriptEngine::SetSandboxPolicy(Saved); }
+            } guard(defaultPolicy);
+
+            // 收紧到 1e5:死循环在毫秒级被拦下,同时远高于夹具正常调用的用量。
+            ScriptEngine::SetSandboxPolicy(Sandbox::Policy{ 100000, 0 });
+            CHECK(ScriptEngine::GetSandboxPolicy().Instructions == 100000);
+
+            Fixture fixture;
+            auto spin = fixture.AddLua("scripts/tests/BudgetSpin.lua");
+            auto good = fixture.AddLua();
+            fixture.World->OnScriptStart();
+            fixture.Step();
+
+            auto& script = spin.GetComponent<LuaScriptComponent>();
+            CHECK(script.State == ScriptInstanceState::Faulted);
+            CHECK(script.LastError.find("script budget exceeded") != std::string::npos);
+            CHECK(script.LastError.find("scripts/tests/BudgetSpin.lua") != std::string::npos);
+            CHECK(script.LastError.find("instructions") != std::string::npos);
+            CHECK(script.LastError.find("phase=OnUpdate") != std::string::npos);
+            CHECK(script.LastError.find("stack traceback") != std::string::npos);
+            CheckLuaReleased(spin);
+            std::cout << "[W6] BudgetSpin fault: " << FirstLine(script.LastError) << '\n';
+
+            fixture.Step();
+            CHECK(fixture.Context.Lua.at(static_cast<uint32_t>(good)).Updates == 2);
+            CHECK(fixture.World->IsActive());
+            const std::string error = script.LastError;
+            fixture.Step();
+            CHECK(script.LastError == error);
+            fixture.Stop();
+        }
+        CHECK(ScriptEngine::GetSandboxPolicy().Instructions == defaultPolicy.Instructions);
+
+        // 标定:外层 Scope 只放大上限用于计数(命中数与上限无关),测 32 个 LifecycleProbe
+        // 的 OnCreate + OnUpdate 一帧总命中数;总量 < 默认预算 → 每个受保护调用都远低于预算。
+        {
+            Fixture fixture;
+            for (int index = 0; index < 32; ++index)
+                fixture.AddLua();
+            Sandbox::Scope measurement(ScriptEngine::GetState().State(), Sandbox::Policy{ 100000000, 0 });
+            fixture.World->OnScriptStart();
+            fixture.Step();
+            const std::uint64_t hits = measurement.Result().Used;
+            CHECK(!measurement.Exceeded());
+            CHECK(hits > 0);
+            CHECK(hits < defaultPolicy.Instructions);
+            std::cout << "[W6] calibration: 32 fixture scripts OnCreate+OnUpdate used " << hits
+                << " hits (default budget " << defaultPolicy.Instructions << ")\n";
+            fixture.Stop();
+        }
+    }
 }
 
 int main(int argc, char** argv)
@@ -1148,7 +1224,8 @@ int main(int argc, char** argv)
             { "syntax errors preserve preview cache", SyntaxErrorsAndPreviewCache },
             { "deterministic and atomic stub generation", StubGenerationContracts },
             { "real static-link bindings and template", RealBindingsAndTemplate },
-            { "VM restart keeps metadata unique", VmRestartKeepsUniqueMetadata }
+            { "VM restart keeps metadata unique", VmRestartKeepsUniqueMetadata },
+            { "sandbox budget isolation and headroom", SandboxBudgetIsolationAndMargin }
         };
         int failures = 0;
         for (const auto& [name, test] : tests)

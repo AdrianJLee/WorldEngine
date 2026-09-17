@@ -10,6 +10,7 @@
 #include "World/Script/BindServices.h"
 #include "World/Script/HotReload.h"
 #include "World/Script/LuauVm.h"
+#include "World/Script/Sandbox.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
 #include "World/WUI/WuiContext.h"
@@ -36,6 +37,9 @@ namespace World
 	{
 		std::unique_ptr<LuauVm> s_Vm;
 		std::unique_ptr<ScriptBindingContext> s_Bindings;
+		// W6:引擎默认预算(指令 1e6;时间关)。LuauVm 层保持 0 = 不限,
+		// 避免改变 World.LuauVm / World.LuauBinding 的既有语义。
+		Sandbox::Policy s_SandboxPolicy{ 1000000, 0 };
 		// 受保护的 `target[key]` 查找:脚本 __index 抛错时错误要变成可诊断文本,
 		// 不能 longjmp 穿过还活着的 C++ 局部对象(与 T1 的表写限制同源)。
 		ScriptFunctionRef s_LookupField;
@@ -488,6 +492,8 @@ namespace World
 		s_Vm = std::move(vm);
 		try
 		{
+			// W6:默认预算在 VM 建立后立即下发(所有绑定/脚本调用都在它之下)。
+			Sandbox::SetDefaultPolicy(s_Vm->State(), s_SandboxPolicy);
 			s_Bindings = std::make_unique<ScriptBindingContext>(*s_Vm);
 			if (!s_Bindings->IsValid())
 				throw std::runtime_error("[Lua] failed to create the script binding context");
@@ -543,6 +549,19 @@ namespace World
 		AssertOwnerThread();
 		if (!s_Bindings) throw std::logic_error("ScriptEngine is not initialized");
 		return *s_Bindings;
+	}
+
+	void ScriptEngine::SetSandboxPolicy(const Sandbox::Policy& policy)
+	{
+		if (IsInitialized()) AssertOwnerThread();
+		s_SandboxPolicy = policy;
+		if (s_Vm) Sandbox::SetDefaultPolicy(s_Vm->State(), policy);
+	}
+
+	Sandbox::Policy ScriptEngine::GetSandboxPolicy()
+	{
+		if (IsInitialized()) AssertOwnerThread();
+		return s_Vm ? Sandbox::GetDefaultPolicy(s_Vm->State()) : s_SandboxPolicy;
 	}
 
 	void ScriptEngine::DefineMathType()

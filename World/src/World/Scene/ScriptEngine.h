@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "World/Core/Export.h"
+#include "World/Script/Sandbox.h"
 #include "Scene.h"
 #include <algorithm>
 #include <cstddef>
@@ -153,5 +154,12 @@ namespace World
 		//     或 RuntimeEntity 所属场景不在安全点(Scene::CanApplyScriptReload()==false)。
 		// 宿主应在帧边界调用;引擎在能取到场景时会再校验一次安全点。
 		static bool ReloadScript(LuaScriptComponent& component, std::string* diagnostics = nullptr);
+
+		// ---- P2 W6:沙箱预算旋钮 ----
+		// 进程内默认策略(Init 时下发到 VM;不随 Shutdown 复位)。0 = 该维度不限;
+		// 引擎默认 Instructions = 1'000'000、TimeMs = 0(指令口径,确定性优先)。
+		// 已开始执行的受保护调用不受影响:策略在作用域开始时固定。
+		static void SetSandboxPolicy(const Sandbox::Policy& policy);
+		static Sandbox::Policy GetSandboxPolicy();
 	};
 }

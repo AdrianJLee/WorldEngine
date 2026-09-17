@@ -2,6 +2,7 @@
 
 #include "World/Script/LuauHeaders.h"
 #include "World/Script/LuauVm.h"
+#include "World/Script/Sandbox.h"
 #include "World/Script/ScriptRef.h"
 
 #include <utility>
@@ -192,6 +193,10 @@ namespace World
 			// 标准 msgh 布局:把 handler 插到"函数 + 参数"下面(errfunc 位置就是函数位置)。
 			lua_pushcfunction(state, &TracebackErrorHandler, "World.TracebackErrorHandler");
 			lua_insert(state, functionIndex);
+
+			// W6:整条宿主→Lua 的受保护调用套一层预算作用域(策略 = 该 VM 的默认策略)。
+			// 这是全引擎唯一的 lua_pcall,所有入口都经过这里;嵌套调用继承外层计数、不重置。
+			Sandbox::Scope budget(state, Sandbox::GetDefaultPolicy(state));
 
 			const int status = lua_pcall(state, nargs, nresults, functionIndex);
 			if (status != 0)

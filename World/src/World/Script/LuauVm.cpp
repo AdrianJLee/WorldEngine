@@ -3,6 +3,7 @@
 #include "World/Core/Log.h"
 
 #include "World/Script/LuauHeaders.h"
+#include "World/Script/Sandbox.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Script/ScriptValue.h"
 
@@ -135,6 +136,10 @@ namespace World
 		lua_pushlightuserdatatagged(state, m_Token.get(), kStateTokenTag);
 		lua_rawsetptagged(state, LUA_REGISTRYINDEX, &kStateTokenKey, kStateTokenTag);
 
+		// W6:预算/中断 hook 随 VM 一起建立(默认策略 0 = 不限,由 ScriptEngine 下发实际预算)。
+		// 必须在任何受保护调用之前安装,否则首次调用不受约束。
+		Sandbox::InstallHook(m_State);
+
 		OpenAllowedLibraries();
 		ApplySandbox();
 		WLD_CORE_INFO("[luau] vm initialized (libs=base/math/string/table/bit32/coroutine/utf8)");
@@ -147,6 +152,8 @@ namespace World
 			return;
 		lua_State* state = m_State;
 		m_State = nullptr;
+		// W6:hook 状态挂在 lua_callbacks()->userdata 上,必须在 lua_close 之前拆除。
+		Sandbox::DetachHook(state);
 		// 关键顺序:先把令牌里的 State 清空,再 lua_close。
 		// 这样即使还有 ScriptRef/ScriptValue 活着,它们的析构/查询也不会碰已释放的 registry。
 		if (m_Token)
