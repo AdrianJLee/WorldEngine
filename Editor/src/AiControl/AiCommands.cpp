@@ -326,16 +326,21 @@ namespace World
 				error = pathError;
 				return false;
 			}
-			// 整窗抓图目前只有 GL 路径:Vulkan 交换链图像不能在帧内这么简单地拷出来
-			// (实测:用 RHI 拷贝得到全黑,随后 vkQueueSubmit 报 VK_ERROR_DEVICE_LOST)。
-			// 需要专门的交换链抓图实现(正确的布局转换 + 队列所有权 + 不在帧内 WaitIdle),
-			// 在那之前明确报错,不给脚本一个"以为成功其实是黑图"的结果。
+			// 整窗抓图目前只有 GL 路径:Vulkan 交换链抓图三次实现尝试都是
+			// "全黑 + VK_ERROR_DEVICE_LOST"(见 Renderer::CapturePresentTarget 的说明),
+			// 所以这里明确报未实现,而不是给脚本一张黑图。
 			if (Renderer::GetBackendName() != "opengl")
 			{
-				error = "capture.screen is OpenGL-only for now (Vulkan swapchain capture not implemented)";
+				error = "capture.screen is OpenGL-only for now (Vulkan swapchain capture not implemented; "
+					"use capture.texture/capture.scene on Vulkan)";
 				return false;
 			}
-			Renderer::CaptureFrame(path);
+			if (!Renderer::CapturePresentTarget(path, Application::Get().GetWindow().GetWidth(),
+				Application::Get().GetWindow().GetHeight()))
+			{
+				error = "capture.screen failed (present target not capturable this frame)";
+				return false;
+			}
 			result = path.string();
 			return true;
 		}

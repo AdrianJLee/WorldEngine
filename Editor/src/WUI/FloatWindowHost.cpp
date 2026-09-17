@@ -138,13 +138,14 @@ namespace World
 		CaptureScreenSequence(size.x, size.y);
 		if (!m_PendingCapture.empty())
 		{
-			// 独立窗口整窗抓图同样只有 GL 路径(见 AiCommands 里 capture.screen 的说明);
-			// Vulkan 下改抓窗口内的画面元素(材质预览纹理走 RHI 读回,双后端都有效)。
+			// 独立窗口整窗抓图同样只有 GL 路径(Vulkan 交换链抓图未实现,见
+			// Renderer::CapturePresentTarget);Vulkan 下改抓窗口内的画面元素 ——
+			// 材质预览纹理走 RHI 读回,双后端都有效。
 			if (Renderer::GetBackendName() == "opengl")
 				Renderer::CaptureDefaultFramebuffer(m_PendingCapture, static_cast<uint32_t>(size.x),
 					static_cast<uint32_t>(size.y));
 			else
-				WLD_CORE_WARN("[ai] float capture skipped: Vulkan swapchain capture not implemented");
+				WLD_CORE_WARN("[ai] float capture skipped on Vulkan (swapchain capture not implemented)");
 			WLD_CORE_INFO("[ai] float capture written: {0}", m_PendingCapture);
 			m_PendingCapture.clear();
 		}

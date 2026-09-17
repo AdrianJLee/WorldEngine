@@ -801,6 +801,27 @@ namespace World
 
 	// 后端无关的纹理读回:CopyTextureToBuffer(RHI) → Map → PPM。
 	// 与上面三个 GL 专用函数不同,这条路径在 Vulkan 下同样有效,是"双后端截图基线"的基础。
+	bool Renderer::CapturePresentTarget(const std::filesystem::path& path, uint32_t width, uint32_t height)
+	{
+		if (!m_Device || width == 0 || height == 0)
+			return false;
+		if (s_BackendName != "vulkan")
+		{
+			// OpenGL:默认帧缓冲读回(与旧路径一致)。
+			CaptureFrame(path);
+			return true;
+		}
+		// Vulkan 交换链抓图**暂时不做**:三次实现尝试都是"全黑 + VK_ERROR_DEVICE_LOST",
+		// 分别验证过 (a) 用独立抓图队列 + 假定 ShaderReadOnly 的屏障、(b) 同队列 ExecuteImmediate、
+		// (c) 同队列 + 等本帧 FrameStart 信号量 + fence。数据回来是黑的说明拷贝跑在了帧渲染
+		// 之前/之外,而设备丢失说明还有一处布局或队列所有权没对齐。要继续做需要有专门的
+		// 交换链抓图通道(在 EndFramePresent 里、按当前图像的实际布局插入转换,并复用
+		// 该帧的等待/呈现信号量),不能借用通用纹理读回。在那之前这里明确返回失败,
+		// 让调用方拿到"未实现"而不是一张黑图。
+		WLD_CORE_WARN("[capture] present-target capture on Vulkan is not implemented yet");
+		return false;
+	}
+
 	bool Renderer::CaptureTexture(const std::filesystem::path& path,
 		const Rhi::Handle<Rhi::Texture>& texture, uint32_t width, uint32_t height)
 	{
