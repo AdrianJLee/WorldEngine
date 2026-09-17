@@ -70,7 +70,9 @@ namespace World
 			Shutdown();
 		m_Device = Renderer::GetDevice();
 		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
 			m_CommandBuffers[slot] = m_Device->CreateCommandBuffer("SceneRenderer");
+		}
 
 		Rhi::RenderPassDesc passDesc;
 		Rhi::RenderPassAttachment color;
@@ -593,4 +595,3 @@ namespace World
 		return id;
 	}
 }
-

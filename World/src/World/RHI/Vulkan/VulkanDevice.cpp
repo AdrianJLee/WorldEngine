@@ -409,9 +409,17 @@ namespace World::Rhi::Vulkan
 	VkCommandPool VulkanDevice::GetThreadCommandPool()
 	{
 		// 每线程一个池:命令缓冲分配/释放必须在创建它的池所属线程上进行。
-		static thread_local VkCommandPool cached = VK_NULL_HANDLE;
-		if (cached != VK_NULL_HANDLE)
-			return cached;
+		// **必须按设备缓存**:后端热切换(Renderer::Shutdown → Init)会销毁旧设备及其命令池,
+		// 线程局部缓存若跨设备复用,vkAllocateCommandBuffers 会拿到已销毁设备上的池
+		// (实测:World.RendererHotswap 在第二次 Vulkan Init 时段错误)。
+		struct ThreadPoolCache
+		{
+			const VulkanDevice* Device = nullptr;
+			VkCommandPool Pool = VK_NULL_HANDLE;
+		};
+		static thread_local ThreadPoolCache cached;
+		if (cached.Pool != VK_NULL_HANDLE && cached.Device == this)
+			return cached.Pool;
 
 		VkCommandPoolCreateInfo poolInfo {};
 		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -420,7 +428,8 @@ namespace World::Rhi::Vulkan
 		VkCommandPool pool = VK_NULL_HANDLE;
 		if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
 			return m_CommandPool;   // 退化为设备级池(单线程录制仍可用)
-		cached = pool;
+		cached.Device = this;
+		cached.Pool = pool;
 		std::lock_guard<std::mutex> lock(m_PoolMutex);
 		m_ThreadPools.push_back(pool);
 		return pool;

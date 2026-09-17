@@ -53,6 +53,10 @@ namespace World
 			Rhi::Handle<Rhi::CommandBuffer> CommandBuffer;
 			Rhi::Handle<Rhi::Buffer> ObjectUniformBuffers[Renderer::FramesInFlight][kObjectsPerFrame];
 			Rhi::Handle<Rhi::DescriptorSet> ObjectSets[Renderer::FramesInFlight][kObjectsPerFrame];
+			// 无材质绘制(Color 路径)也要绑定 set 2:管线/着色器**静态**使用材质贴图,
+			// 不绑就是 VUID-vkCmdDrawIndexed-None-08600(set 2 越界),GL 侧虽然宽容但同样是隐患。
+			// 内容无所谓(着色器在 Flags=0 时不采样),用白色兜底贴图保证描述符合法。
+			Rhi::Handle<Rhi::DescriptorSet> DefaultMaterialSets[Renderer::FramesInFlight];
 			std::unordered_map<const Mesh*, MeshGpu> MeshCache;
 			// 每材质 × 帧槽位的贴图描述符集;材质 Revision 变化时重建。
 			struct MaterialGpu
@@ -121,6 +125,8 @@ namespace World
 			state.CommandBuffer->BindDescriptorSet(objectSet, 1);
 			if (materialSet)
 				state.CommandBuffer->BindDescriptorSet(materialSet, 2);
+			else if (state.DefaultMaterialSets[slot % Renderer::FramesInFlight])
+				state.CommandBuffer->BindDescriptorSet(state.DefaultMaterialSets[slot % Renderer::FramesInFlight], 2);
 		state.CommandBuffer->BindVertexBuffer(0, mesh.VertexBuffer);
 		state.CommandBuffer->BindIndexBuffer(mesh.IndexBuffer);
 		state.CommandBuffer->DrawIndexed(mesh.IndexCount);
@@ -226,6 +232,26 @@ namespace World
 		materialSamplerDesc.DebugName = "Renderer3D.MaterialSampler";
 		state.MaterialSampler = Renderer::GetDevice()->CreateSampler(materialSamplerDesc);
 
+		// 无材质绘制用的默认材质描述符集(白色 albedo + 白色 normal;着色器在 Flags=0 时不采样,
+		// 这里只要保证 set 2 有合法绑定,避免"管线静态使用 set 2 而绘制只绑了 0..1"的 VUID)。
+		for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
+		{
+			state.DefaultMaterialSets[slot] = Renderer::GetDevice()->CreateDescriptorSet(state.MaterialLayout);
+			if (!state.DefaultMaterialSets[slot])
+				continue;
+			Rhi::DescriptorWrite albedo;
+			albedo.Binding = 1;
+			albedo.Type = Rhi::DescriptorType::CombinedImageSampler;
+			albedo.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ true);
+			albedo.Sampler = state.MaterialSampler;
+			Rhi::DescriptorWrite normal;
+			normal.Binding = 2;
+			normal.Type = Rhi::DescriptorType::CombinedImageSampler;
+			normal.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ false);
+			normal.Sampler = state.MaterialSampler;
+			state.DefaultMaterialSets[slot]->Update({ albedo, normal });
+		}
+
 		// 与 SceneRenderer 目标结构一致的兼容渲染通道(颜色 + 实体 ID + 深度)。
 		Rhi::RenderPassDesc passDesc;
 		Rhi::RenderPassAttachment color;
@@ -312,6 +338,8 @@ namespace World
 		for (auto& slot : state.ObjectSets)
 			for (Rhi::Handle<Rhi::DescriptorSet>& set : slot)
 				set = nullptr;
+		for (Rhi::Handle<Rhi::DescriptorSet>& set : state.DefaultMaterialSets)
+			set = nullptr;
 		state.MeshCache.clear();
 		state.MaterialCache.clear();
 		// 材质贴图缓存持有 RHI 纹理句柄:必须在设备销毁前放掉,否则退出时
