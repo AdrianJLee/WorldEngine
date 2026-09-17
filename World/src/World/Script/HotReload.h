@@ -4,7 +4,7 @@
 //
 // 本文件只做三件与 VM 无关的事:
 //   1. 脚本源指纹:内容 FNV-1a64 优先,mtime+size 兜底(同一内容不重载);
-//   2. 逻辑脚本路径 → 源码文本:VFS 优先、磁盘回退(与 ScriptEngine 既有读取语义一致);
+//   2. 逻辑脚本路径 → 原始字节/源码文本:VFS 优先、磁盘回退(与 ScriptEngine 读取语义一致);
 //   3. 实例字段迁移诊断:LuaFieldId 派生的稳定 id + 类型兼容规则的可读说明。
 //
 // 真正的重载编排(读取 → 编译 → 回调校验 → 字段迁移 → 整体交换 → generation)
@@ -46,6 +46,13 @@ namespace World
 	// 逻辑脚本路径 → 指纹:VFS 优先,磁盘回退;内容读不到时用 size+mtime 兜底。
 	// 两者都拿不到 → Exists=false / Value=0(可读 error 说明失败原因,可为 null)。
 	WLD_API ScriptSourceFingerprint FingerprintScriptSource(const std::string& logicalPath,
+		std::string* error = nullptr);
+
+	// W7-3:逻辑脚本路径 → **原始字节**(VFS 优先,磁盘回退到 WLD_ASSETPATH/<path>)。
+	// 与 ResolveScriptSource 同一解析顺序,但不做文本转换:容器字节里的 '\0' 必须原样保留
+	// (指纹/装载都吃这一份字节)。失败返回 false、out 保持调用前内容,
+	// error 写 "script not found: <path>" 一类的可读文本(可为 null)。
+	WLD_API bool ResolveScriptSourceBytes(const std::string& logicalPath, std::vector<uint8_t>& out,
 		std::string* error = nullptr);
 
 	// 逻辑脚本路径 → 源码文本(VFS 优先,磁盘回退到 WLD_ASSETPATH/<path>)。

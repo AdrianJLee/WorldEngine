@@ -3,6 +3,7 @@
 #include "Components.h"
 #include "LuaStubGenerator.h"
 #include "World/Core/Application.h"
+#include "World/Core/Asset/ScriptArtifact.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/BehaviorRegistry.h"
 #include "World/Script/BindEvents.h"
@@ -37,6 +38,9 @@ namespace World
 	{
 		std::unique_ptr<LuauVm> s_Vm;
 		std::unique_ptr<ScriptBindingContext> s_Bindings;
+		// W7-3:登记的内容上下文(宿主/U3 注入)。null = 回退 Application::HasInstance()。
+		// 只保存指针、不拥有;Shutdown() 清空,宿主不需要反登记。
+		WorldContext* s_ContentContext = nullptr;
 		// W6:引擎默认预算(指令 1e6;时间关)。LuauVm 层保持 0 = 不限,
 		// 避免改变 World.LuauVm / World.LuauBinding 的既有语义。
 		Sandbox::Policy s_SandboxPolicy{ 1000000, 0 };
@@ -80,15 +84,22 @@ namespace World
 			script.CreateEntered = false;
 		}
 
-		// VFS 优先读脚本源码;未命中回退磁盘;找不到抛 logic_error。
-		std::string ReadScriptSource(const std::string& scriptFilePath)
+		// W7-3:脚本读取的单一入口(二进制安全,容器字节里的 '\0' 原样保留)。
+		// 顺序:登记的内容上下文 VFS(未登记时用既有 Application VFS)→ 磁盘
+		// WLD_ASSETPATH/<逻辑路径>;两者都没命中抛可读错误(文本与既有 ReadScriptSource 一致)。
+		std::vector<uint8_t> ReadScriptBytes(const std::string& scriptFilePath)
 		{
-			if (Application::HasInstance())
+			const Vfs::Vfs* vfs = nullptr;
+			if (s_ContentContext)
+				vfs = &s_ContentContext->Vfs();          // U3:headless 只挂包 provider
+			else if (Application::HasInstance())
+				vfs = &Application::Get().GetContext().Vfs();
+			if (vfs)
 			{
 				std::error_code ec;
 				std::vector<uint8_t> bytes;
-				if (Application::Get().GetContext().Vfs().Read(scriptFilePath, bytes, ec) && !bytes.empty())
-					return std::string(bytes.begin(), bytes.end());
+				if (vfs->Read(scriptFilePath, bytes, ec) && !bytes.empty())
+					return bytes;
 			}
 			const std::filesystem::path diskPath =
 				WLD_ASSETPATH + std::string("/") + scriptFilePath;
@@ -97,9 +108,17 @@ namespace World
 			{
 				std::stringstream buffer;
 				buffer << file.rdbuf();
-				return buffer.str();
+				const std::string text = buffer.str();
+				return std::vector<uint8_t>(text.begin(), text.end());
 			}
 			throw std::logic_error("Script not found: " + scriptFilePath);
+		}
+
+		// 既有签名/错误文本保留:仅供"确定是源码文本"的路径使用(容器字节不经过它)。
+		std::string ReadScriptSource(const std::string& scriptFilePath)
+		{
+			const std::vector<uint8_t> bytes = ReadScriptBytes(scriptFilePath);
+			return std::string(bytes.begin(), bytes.end());
 		}
 
 		LuaTypeReflection VectorDescription(const char* name, size_t dimensions)
@@ -144,6 +163,15 @@ namespace World
 				schema[name] = type;
 			}
 			return schema;
+		}
+
+		// W7-3:容器字节(不嵌源码)跳过 `---@field` 注解解析 → 字段类型走"旧值推断"回退;
+		// 源码字节保持既有注解解析。判定只看前 4 字节 magic(与 LoadChunk 同一条判定)。
+		std::unordered_map<std::string, std::string> ParseAnnotationsForBytes(const std::vector<uint8_t>& bytes)
+		{
+			if (Asset::ScriptArtifact::IsArtifactBytes(bytes.data(), bytes.size()))
+				return {};
+			return ParseFieldAnnotationsInternal(std::string(bytes.begin(), bytes.end()));
 		}
 
 		LuaFieldType AnnotationToFieldTypeInternal(const std::string& typeName, const ScriptValue& value)
@@ -405,14 +433,16 @@ namespace World
 			}
 		}
 
-		// 编译并在**独立 environment** 里执行脚本,取出返回的表。
+		// W7-3:编译并在**独立 environment** 里执行脚本(容器/源码统一走 LuauVm::LoadChunk),
+		// 取出返回的表。容器头命中但校验失败时 LoadChunk 硬失败 → 这里抛它的原始错误文本
+		// (绝不回退按源码编译)。
 		// chunkName 用逻辑脚本路径:错误文本里的文件/行号要能被编辑器直接定位。
-		ScriptTableRef InstantiateScriptTable(const std::string& source, const char* chunkName,
+		ScriptTableRef InstantiateScriptTable(const std::vector<uint8_t>& bytes, const char* chunkName,
 			const ScriptTableRef& environment)
 		{
 			ScriptTableRef table;
 			std::string error;
-			ScriptFunctionRef chunk = s_Vm->CompileFunction(source, chunkName, environment, &error);
+			ScriptFunctionRef chunk = s_Vm->LoadChunk(bytes, chunkName, environment, &error);
 			if (!chunk.IsValid())
 				throw std::runtime_error(error.empty() ? "Script failed to compile" : error);
 			ScriptValue result;
@@ -532,10 +562,21 @@ namespace World
 
 	void ScriptEngine::Shutdown()
 	{
-		if (!s_Vm) return;
-		AssertOwnerThread();
-		// Hosts release all scene/preview references before entering this function.
-		ShutdownInternal();
+		if (s_Vm)
+		{
+			AssertOwnerThread();
+			// Hosts release all scene/preview references before entering this function.
+			ShutdownInternal();
+		}
+		// W7-3:登记不要求宿主反登记,但引擎关闭后不能再持有宿主的内容上下文
+		// (宿主可能随后销毁 WorldContext;下一次 Init() 后如需包内容请重新登记)。
+		s_ContentContext = nullptr;
+	}
+
+	void ScriptEngine::Init(WorldContext& context)
+	{
+		// W7-3:只登记内容上下文,不触碰 VM 生命周期(可在 Init() 之前或之后调用;可重复覆盖)。
+		s_ContentContext = &context;
 	}
 
 	LuauVm& ScriptEngine::GetState()
@@ -662,14 +703,14 @@ namespace World
 			script.State == ScriptInstanceState::Running || script.State == ScriptInstanceState::Destroying) return false;
 		try
 		{
-			// 1. 读取脚本源码，静态解析 ---@field 注解（不执行脚本顶层代码）。
-			const std::string source = ReadScriptSource(script.ScriptFilePath);
-			std::unordered_map<std::string, std::string> schema = ParseFieldAnnotationsInternal(source);
+			// 1. 读取脚本字节;源码才静态解析 ---@field 注解(容器不嵌源码,跳过注解)。
+			const std::vector<uint8_t> bytes = ReadScriptBytes(script.ScriptFilePath);
+			std::unordered_map<std::string, std::string> schema = ParseAnnotationsForBytes(bytes);
 
 			// 2. 在独立 environment 里执行脚本，获取默认值表（不保留引用：编辑器预览只缓存字段）。
 			ScriptTableRef environment = s_Vm->CreateEnvironment();
 			if (!environment.IsValid()) throw std::logic_error("Cannot create a script environment");
-			ScriptTableRef table = InstantiateScriptTable(source, script.ScriptFilePath.c_str(), environment);
+			ScriptTableRef table = InstantiateScriptTable(bytes, script.ScriptFilePath.c_str(), environment);
 
 			// 3. 构建字段：类型优先取注解，缺失注解走旧值推断兼容路径。
 			script.CachedFields = BuildFieldCache(table, schema, script);
@@ -680,8 +721,9 @@ namespace World
 				WLD_CORE_WARN("[Behavior] {0}", behaviorError);
 			script.LastError.clear();
 			script.State = ScriptInstanceState::Stopped;
-			// W5a-2:加载成功即建立源指纹基线,并清掉上一次遗留的重载诊断。
-			script.SourceFingerprint = FingerprintScriptSource(script.ScriptFilePath).Value;
+			// W5a-2/W7-3:加载成功即建立源指纹基线(容器 = 容器字节,源码 = 源码字节),
+			// 并清掉上一次遗留的重载诊断。基线必须与本次装载用的是同一份字节。
+			script.SourceFingerprint = FingerprintScriptBytes(bytes.data(), bytes.size());
 			script.ReloadDiagnostic.clear();
 			return true;
 		}
@@ -702,10 +744,11 @@ namespace World
 		const char* phase = "Load";
 		try
 		{
-			const std::string source = ReadScriptSource(script.ScriptFilePath);
+			// W7-3:读取原始字节;容器 → 跳过注解解析,源码 → 既有注解解析。
+			const std::vector<uint8_t> bytes = ReadScriptBytes(script.ScriptFilePath);
 			ScriptTableRef environment = s_Vm->CreateEnvironment();
 			if (!environment.IsValid()) throw std::logic_error("Cannot create a script environment");
-			ScriptTableRef table = InstantiateScriptTable(source, script.ScriptFilePath.c_str(), environment);
+			ScriptTableRef table = InstantiateScriptTable(bytes, script.ScriptFilePath.c_str(), environment);
 			script.LuaEnv = environment;
 			script.ScriptTable = table;
 
@@ -740,8 +783,9 @@ namespace World
 					throw std::runtime_error(error);
 			}
 			script.State = ScriptInstanceState::Running;
-			// W5a-2:运行期首次加载成功同样建立指纹基线(监听器不改文件时不产生假阳性)。
-			script.SourceFingerprint = FingerprintScriptSource(script.ScriptFilePath).Value;
+			// W5a-2/W7-3:运行期首次加载成功同样建立指纹基线(与本次装载同一份字节;
+			// 监听器不改文件时不产生假阳性)。
+			script.SourceFingerprint = FingerprintScriptBytes(bytes.data(), bytes.size());
 			script.ReloadDiagnostic.clear();
 		}
 		catch (const std::exception& error) { ReportLuaError(script, phase, error.what()); }
@@ -939,11 +983,12 @@ namespace World
 					"the owning scene is inside a script callback, a structural commit, or the stop flow");
 		}
 
-		std::string source;
-		std::string readError;
-		if (!ResolveScriptSource(script.ScriptFilePath, source, &readError))
-			return reject("read", readError);
-		const uint64_t fingerprint = FingerprintScriptText(source);
+		// W7-3:重载读的也是原始字节(容器 → 字节码;源码 → 文本),指纹与本次装载同一份字节。
+		std::vector<uint8_t> bytes;
+		try { bytes = ReadScriptBytes(script.ScriptFilePath); }
+		catch (const std::exception& error) { return reject("read", error.what()); }
+		catch (...) { return reject("read", "unknown exception while reading the script bytes"); }
+		const uint64_t fingerprint = FingerprintScriptBytes(bytes.data(), bytes.size());
 
 		// 新版本的所有产物先落在局部变量里;任何一步失败都不触碰组件现有引用(失败保留旧版本)。
 		ScriptTableRef newEnvironment;
@@ -954,7 +999,7 @@ namespace World
 			catch (...) { return reject("environment", "unknown exception while creating a script environment"); }
 			if (!newEnvironment.IsValid())
 				return reject("environment", "cannot create a script environment");
-			try { newTable = InstantiateScriptTable(source, script.ScriptFilePath.c_str(), newEnvironment); }
+			try { newTable = InstantiateScriptTable(bytes, script.ScriptFilePath.c_str(), newEnvironment); }
 			catch (const std::exception& error) { return reject("load", error.what()); }
 			catch (...) { return reject("load", "unknown exception while compiling the new script version"); }
 		}
@@ -988,7 +1033,7 @@ namespace World
 
 			// 字段迁移:当前活表优先(运行期 self.X=... 只存在于这里),缺失/类型不符再回退 CachedFields,
 			// 两者都没有才用新脚本默认值。
-			newFields = BuildFieldCache(newTable, ParseFieldAnnotationsInternal(source), script, &script.ScriptTable);
+			newFields = BuildFieldCache(newTable, ParseAnnotationsForBytes(bytes), script, &script.ScriptTable);
 			DescribeScriptFieldMigration(script.CachedFields, newFields, script.ScriptFilePath, &warnings);
 
 			// 把合并后的字段写进**新表**(旧表保持原值,直到整体交换成功)。

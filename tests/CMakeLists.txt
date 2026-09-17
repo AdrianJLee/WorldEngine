@@ -295,6 +295,28 @@ set_tests_properties(World.ScriptArtifact PROPERTIES
     TIMEOUT 90
 )
 
+# P2 W7-3:运行时分流(容器/源码字节;U3 无源码树 headless:只挂包 provider)。
+add_executable(WorldScriptBinaryLoadTests ScriptBinaryLoadTests.cpp)
+target_link_libraries(WorldScriptBinaryLoadTests PRIVATE World)
+target_compile_features(WorldScriptBinaryLoadTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldScriptBinaryLoadTests PRIVATE
+    WORLD_SCRIPT_BINARY_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}/artifacts/$<CONFIG>"
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldScriptBinaryLoadTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldScriptBinaryLoadTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.ScriptBinaryLoad COMMAND WorldScriptBinaryLoadTests)
+set_tests_properties(World.ScriptBinaryLoad PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
 add_executable(WorldScriptTests ScriptLifecycleTests.cpp)
 target_link_libraries(WorldScriptTests PRIVATE World)
 target_compile_features(WorldScriptTests PRIVATE cxx_std_17)
@@ -788,7 +810,7 @@ set_tests_properties(World.Behavior PROPERTIES
     TIMEOUT 60
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests WorldLuauCameraBindingTests WorldLuauPhysicsBindingTests WorldLuauEventBindingTests WorldLuauSandboxTests WorldScriptArtifactTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests WorldLuauCameraBindingTests WorldLuauPhysicsBindingTests WorldLuauEventBindingTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptBinaryLoadTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

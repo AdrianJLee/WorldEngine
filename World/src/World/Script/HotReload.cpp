@@ -70,7 +70,7 @@ namespace World
 		return FingerprintScriptBytes(text.data(), text.size());
 	}
 
-	bool ResolveScriptSource(const std::string& logicalPath, std::string& source, std::string* error)
+	bool ResolveScriptSourceBytes(const std::string& logicalPath, std::vector<uint8_t>& out, std::string* error)
 	{
 		if (logicalPath.empty())
 		{
@@ -85,21 +85,30 @@ namespace World
 			std::vector<uint8_t> bytes;
 			if (Application::Get().GetContext().Vfs().Read(logicalPath, bytes, ec) && !bytes.empty())
 			{
-				source.assign(bytes.begin(), bytes.end());
+				out = std::move(bytes);
 				if (error) error->clear();
 				return true;
 			}
 		}
 
-		// 2) 磁盘回退(与既有 ScriptEngine::ReadScriptSource 同一位置)。
+		// 2) 磁盘回退(与 ScriptEngine::ReadScriptBytes 同一位置)。
 		std::string diskSource;
 		if (!ReadDiskFile(DiskPathFor(logicalPath), diskSource))
 		{
 			if (error) *error = "script not found: " + logicalPath;
 			return false;
 		}
-		source = std::move(diskSource);
+		out.assign(diskSource.begin(), diskSource.end());
 		if (error) error->clear();
+		return true;
+	}
+
+	bool ResolveScriptSource(const std::string& logicalPath, std::string& source, std::string* error)
+	{
+		std::vector<uint8_t> bytes;
+		if (!ResolveScriptSourceBytes(logicalPath, bytes, error))
+			return false;
+		source.assign(bytes.begin(), bytes.end());
 		return true;
 	}
 
@@ -112,12 +121,12 @@ namespace World
 			return result;
 		}
 
-		// 内容哈希优先:同内容重写(只动 mtime)不产生变化。
-		std::string source;
+		// 内容哈希优先(容器字节/源码字节都走同一份字节):同内容重写(只动 mtime)不产生变化。
+		std::vector<uint8_t> bytes;
 		std::string readError;
-		if (ResolveScriptSource(logicalPath, source, &readError))
+		if (ResolveScriptSourceBytes(logicalPath, bytes, &readError))
 		{
-			result.Value = FingerprintScriptText(source);
+			result.Value = FingerprintScriptBytes(bytes.data(), bytes.size());
 			result.FromContent = true;
 			result.Exists = true;
 			if (error) error->clear();

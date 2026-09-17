@@ -14,6 +14,7 @@ namespace World
 	class LuauVm;
 	class ScriptBindingContext;
 	class BehaviorRegistry;
+	class WorldContext;
 
 	namespace Schema { class SchemaRegistry; }
 	// W3c:宿主 UI 阶段入口只需要 WuiContext 的引用,避免在此处引入 WUI 重头。
@@ -94,6 +95,12 @@ namespace World
 	{
 	public:
 		static void Init();      // 在 Application 启动时调用：建立 Luau VM、沙箱、绑定层与 API 注册
+		// P2 W7-3:登记"内容上下文" —— 脚本字节读取(ReadScriptBytes)优先用它做 VFS 查询;
+		// 未登记时回退 Application::HasInstance() 的既有行为,两者都没命中再回退磁盘
+		// (WLD_ASSETPATH/<逻辑路径>)。可重复调用(覆盖登记),宿主不需要反登记;
+		// 进程内登记随 Shutdown() 失效(避免宿主销毁 WorldContext 后留下悬垂指针)。
+		// U3:无源码树 headless(只挂包 provider)靠它把包内容接进 ScriptEngine。
+		static void Init(World::WorldContext& context);
 		static void Shutdown();  // 在 Application 关闭时调用
 		static bool IsInitialized();
 		static void AssertOwnerThread();
