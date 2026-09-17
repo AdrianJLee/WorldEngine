@@ -278,6 +278,9 @@ namespace World
 		ScriptFunctionRef OnCreateFunc;
 		ScriptFunctionRef OnUpdateFunc;
 		ScriptFunctionRef OnDestroyFunc;
+		// W3c:UI 阶段的每帧回调(命令式脚本 UI)。宿主在 UI 阶段调用它,
+		// 脚本在其中用 ui.* 画控件;热重载时与新表一起整体交换。
+		ScriptFunctionRef OnUiFunc;
 
 		std::unordered_map<std::string, LuaScriptField> CachedFields;
 		std::filesystem::file_time_type LastModifiedTime;
