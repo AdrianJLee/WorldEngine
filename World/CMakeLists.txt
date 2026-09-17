@@ -64,6 +64,11 @@ if(MSVC)
 endif()
 
 add_subdirectory(vendor/sol2)
+# P2 脚本前端:Luau(只编库,不编 CLI/tests/Web)。sol2 + PUC Lua 在 W2 迁移完成后删除。
+set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
+set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LUAU_BUILD_WEB OFF CACHE BOOL "" FORCE)
+add_subdirectory(vendor/luau)
 add_library(World SHARED)
 set_target_properties(World PROPERTIES
     OUTPUT_NAME "WorldRuntime"
@@ -180,6 +185,8 @@ target_link_libraries(World PRIVATE
     # 此前由已移除的第三方 UI 依赖传递链接,现需显式声明。
     imm32
     sol2
+    Luau.VM
+    Luau.Compiler
     yaml-cpp
     spdlog::spdlog
 )

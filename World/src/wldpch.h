@@ -25,6 +25,5 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <sol/sol.hpp>
 
 #endif // __cplusplus

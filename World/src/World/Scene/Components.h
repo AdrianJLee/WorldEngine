@@ -8,6 +8,10 @@
 #include "World/Scene/ScriptableEntity.h"
 #include "World/Renderer/Texture.h"
 #include "World/Schema/Schema.h"
+// 临时:脚本组件目前仍直接持有 sol2 类型(W2 迁移到 Luau 后删除这两行与相关成员)。
+// 之前靠 wldpch.h 的强制包含间接拿到 sol2;为了给 Luau 头文件腾出干净的命名空间
+// (两者都有 lua.h),sol2 改为在真正需要它的文件里显式包含。
+#include <sol/sol.hpp>
 #include "World/Schema/BuiltinAssetOps.h"
 
 #include <any>

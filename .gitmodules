@@ -19,3 +19,6 @@
 [submodule "World/vendor/sol2"]
 	path = World/vendor/sol2
 	url = https://github.com/ThePhD/sol2.git
+[submodule "World/vendor/luau"]
+	path = World/vendor/luau
+	url = https://github.com/luau-lang/luau.git
