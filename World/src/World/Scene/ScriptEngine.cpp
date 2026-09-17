@@ -6,6 +6,7 @@
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/BehaviorRegistry.h"
 #include "World/Script/BindServices.h"
+#include "World/Script/HotReload.h"
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
@@ -692,5 +693,151 @@ namespace World
 			else if (errors) errors->push_back(std::move(error));
 		}
 		return ensured;
+	}
+
+	// ---- P2 W5:L2 脚本热重载(引擎侧)----
+
+	namespace
+	{
+		// 热重载后的 generation 必须与 Scene 启动期分配的 generation 不同,否则排队中的旧命令
+		// 会被 Scene::IsSourceAlive 误判为"仍然有效"(判活条件是 组件 + Generation 相等 + Running)。
+		// Scene 的计数器从 1 开始、每次脚本启动 +1(Scene::StartPendingScripts),所以这里把最高位当作
+		// "ScriptEngine 热重载域"标记 + 进程内单调序号:
+		//   - 与任何 Scene 分配值都不同(Scene 要启动 2^63 次才会撞上);
+		//   - 同一组件连续两次重载的 generation 也不同(每次 +1)。
+		uint64_t NextReloadGeneration()
+		{
+			static uint64_t s_ReloadGeneration = 0;
+			++s_ReloadGeneration;
+			return (uint64_t(1) << 63) | s_ReloadGeneration;
+		}
+
+		std::string JoinDiagnosticLines(const std::vector<std::string>& lines)
+		{
+			std::string text;
+			for (const std::string& line : lines)
+			{
+				if (!text.empty()) text += "\n";
+				text += line;
+			}
+			return text;
+		}
+	}
+
+	bool ScriptEngine::ReloadScript(LuaScriptComponent& script, std::string* diagnostics)
+	{
+		AssertOwnerThread();
+
+		const auto reject = [&](const char* phase, const std::string& error)
+		{
+			script.ReloadDiagnostic = FormatScriptReloadFailure(script.ScriptFilePath, phase, error);
+			if (diagnostics) *diagnostics = script.ReloadDiagnostic;
+			return false;
+		};
+
+		if (script.ScriptFilePath.empty())
+			return reject("path check", "script path is empty");
+
+		if (script.State == ScriptInstanceState::Creating)
+			return reject("state check", "reload is refused while the instance state is Creating");
+		if (script.State == ScriptInstanceState::Destroying)
+			return reject("state check", "reload is refused while the instance state is Destroying");
+
+		// 热重载的前提是"有可回滚的旧版本":必须已经加载并且正在运行。
+		if (script.State != ScriptInstanceState::Running || !script.IsLoaded ||
+			!script.ScriptTable.IsValid() || !script.LuaEnv.IsValid())
+			return reject("state check", "reload requires a running script instance; there is no old version to keep");
+
+		// 安全点双保险:宿主应先用 Scene::CanApplyScriptReload() 判定;这里在能取到场景时再校验一次,
+		// 避免回调内/结构提交点内/停止流程中把实例引用换掉。
+		if (script.RuntimeEntity)
+		{
+			Scene* scene = script.RuntimeEntity.GetScene();
+			if (scene && !scene->CanApplyScriptReload())
+				return reject("safe point",
+					"the owning scene is inside a script callback, a structural commit, or the stop flow");
+		}
+
+		std::string source;
+		std::string readError;
+		if (!ResolveScriptSource(script.ScriptFilePath, source, &readError))
+			return reject("read", readError);
+		const uint64_t fingerprint = FingerprintScriptText(source);
+
+		// 新版本的所有产物先落在局部变量里;任何一步失败都不触碰组件现有引用(失败保留旧版本)。
+		ScriptTableRef newEnvironment;
+		ScriptTableRef newTable;
+		{
+			try { newEnvironment = s_Vm->CreateEnvironment(); }
+			catch (const std::exception& error) { return reject("environment", error.what()); }
+			catch (...) { return reject("environment", "unknown exception while creating a script environment"); }
+			if (!newEnvironment.IsValid())
+				return reject("environment", "cannot create a script environment");
+			try { newTable = InstantiateScriptTable(source, script.ScriptFilePath.c_str(), newEnvironment); }
+			catch (const std::exception& error) { return reject("load", error.what()); }
+			catch (...) { return reject("load", "unknown exception while compiling the new script version"); }
+		}
+
+		ScriptFunctionRef newCreate;
+		ScriptFunctionRef newUpdate;
+		ScriptFunctionRef newDestroy;
+		try
+		{
+			std::string callbackError;
+			if (!ReadCallback(newTable, "OnCreate", &newCreate, &callbackError) ||
+				!ReadCallback(newTable, "OnUpdate", &newUpdate, &callbackError) ||
+				!ReadCallback(newTable, "OnDestroy", &newDestroy, &callbackError))
+				return reject("callbacks", callbackError);
+		}
+		catch (const std::exception& error) { return reject("callbacks", error.what()); }
+		catch (...) { return reject("callbacks", "unknown exception while reading the lifecycle callbacks"); }
+
+		std::unordered_map<std::string, LuaScriptField> newFields;
+		std::vector<std::string> warnings;
+		try
+		{
+			// entity 句柄:与 OnCreateScript 同一条路径(三个名字都是同一个非 owning 句柄)。
+			const ScriptValue entityValue = MakeEntityValue(*s_Bindings, script.RuntimeEntity);
+			if (!newTable.SetField("entity", entityValue) ||
+				!newTable.SetField("__Entity", entityValue) ||
+				!newTable.SetField("__EntityID", entityValue))
+				return reject("bind", "cannot assign the entity handle");
+
+			// 字段迁移:BuildFieldCache 对"同名 + 同类型"复用旧值,新增/类型变化取新脚本默认值。
+			newFields = BuildFieldCache(newTable, ParseFieldAnnotationsInternal(source), script);
+			DescribeScriptFieldMigration(script.CachedFields, newFields, script.ScriptFilePath, &warnings);
+
+			// 把合并后的字段写进**新表**(旧表保持原值,直到整体交换成功)。
+			LuaScriptComponent staging;
+			staging.ScriptTable = newTable;
+			staging.CachedFields = newFields;
+			ApplyCachedFields(staging);
+		}
+		catch (const std::exception& error) { return reject("migration", error.what()); }
+		catch (...) { return reject("migration", "unknown exception while migrating the script fields"); }
+
+		// 行为描述刷新:先按"新字段 + 同一路径"替换;失败说明描述非法,旧版本(含旧描述)原样保留。
+		{
+			LuaScriptComponent staging;
+			staging.ScriptFilePath = script.ScriptFilePath;
+			staging.CachedFields = newFields;
+			std::string behaviorError;
+			if (!BehaviorRegistry::Instance().Replace(BehaviorRegistry::MakeLuaDesc(staging), &behaviorError))
+				return reject("behavior", behaviorError);
+		}
+
+		// 整体交换:引用(环境/脚本表/三个回调)+ 字段 + 指纹 + generation。
+		// State / IsLoaded / CreateEntered / LastError 语义不动(失败路径也从未碰过它们)。
+		script.LuaEnv = newEnvironment;
+		script.ScriptTable = newTable;
+		script.OnCreateFunc = newCreate;
+		script.OnUpdateFunc = newUpdate;
+		script.OnDestroyFunc = newDestroy;
+		script.CachedFields = newFields;
+		script.SourceFingerprint = fingerprint;
+		script.Generation = NextReloadGeneration();
+		script.ReloadDiagnostic.clear();
+		if (diagnostics) *diagnostics = JoinDiagnosticLines(warnings);
+		return true;
 	}
 }

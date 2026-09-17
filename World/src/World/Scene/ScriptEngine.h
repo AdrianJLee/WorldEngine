@@ -124,5 +124,17 @@ namespace World
 		// 返回已登记/已确认的模块数，失败项写入 errors（可为 null）。
 		static std::size_t EnsureSchemaBehaviors(const Schema::SchemaRegistry& schemas,
 			std::vector<std::string>* errors = nullptr);
+
+		// ---- P2 W5:L2 脚本热重载(引擎侧)----
+		// 重新加载组件当前脚本并**整体交换**实例引用(环境/脚本表/三个回调),字段按
+		// 同名+同类型迁移(见 Script/HotReload.h),成功后 generation 进入热重载域并刷新
+		// BehaviorRegistry 描述;任一步失败都保留旧版本,只写 ReloadDiagnostic。
+		//   - 成功:ReloadDiagnostic 清空;diagnostics(可空)收迁移警告(类型变化/字段删除);
+		//   - 失败:ReloadDiagnostic 与 diagnostics 都是可读诊断(含脚本路径,编译器给了行号时
+		//     行号原样保留);State 不会被置 Faulted,旧引用不会被清;
+		//   - 拒绝:State ∈ {Creating, Destroying}、没有活动实例(Running+IsLoaded)、
+		//     或 RuntimeEntity 所属场景不在安全点(Scene::CanApplyScriptReload()==false)。
+		// 宿主应在帧边界调用;引擎在能取到场景时会再校验一次安全点。
+		static bool ReloadScript(LuaScriptComponent& component, std::string* diagnostics = nullptr);
 	};
 }
