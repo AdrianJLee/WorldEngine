@@ -13,6 +13,8 @@
 #include "World/Scene/LuaStubGenerator.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Script/BindComponentAccess.h"
+#include "World/Script/BindServices.h"
+#include "World/Script/BindUI.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -280,6 +282,50 @@ namespace
 		CHECK(withoutComponents == reflectionOnly);
 	}
 
+	// 4b.W3c:UI 块(ui)渲染在服务块之后、schema 组件块之前,既有块保持纯追加。
+	void UiBlockSitsBetweenServicesAndComponents()
+	{
+		WorldContext& context = TestContext();
+		const std::vector<const Schema::TypeSchema*> components = context.Schemas().List(Schema::TypeCategory::Component);
+
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* services = GameplayServiceBindings(&serviceCount);
+		std::size_t uiCount = 0;
+		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);
+		CHECK(serviceCount == 3);
+		CHECK(uiCount == 1);
+
+		std::vector<const ScriptServiceBinding*> serviceList;
+		serviceList.reserve(serviceCount);
+		for (std::size_t index = 0; index < serviceCount; ++index)
+			serviceList.push_back(&services[index]);
+		std::vector<const ScriptServiceBinding*> uiList;
+		uiList.reserve(uiCount);
+		for (std::size_t index = 0; index < uiCount; ++index)
+			uiList.push_back(&uiTables[index]);
+
+		std::string stub, error;
+		CHECK(LuaStubGenerator::Render(LuaReflectionRegistry::GetTable(), components, serviceList, uiList, stub, error));
+
+		const size_t inputPosition = stub.find("-- Global service table 'Input'");
+		const size_t uiPosition = stub.find("-- Global script UI table 'ui'");
+		const size_t componentsPosition = stub.find("-- Component fields are exposed");
+		const size_t worldScriptPosition = stub.find("---Annotation-only shape");
+		CHECK(inputPosition != std::string::npos && uiPosition != std::string::npos);
+		CHECK(componentsPosition != std::string::npos && worldScriptPosition != std::string::npos);
+		CHECK(inputPosition < uiPosition && uiPosition < componentsPosition && componentsPosition < worldScriptPosition);
+		CHECK(stub.find("function ui:panel(") != std::string::npos);
+		CHECK(stub.find("function ui:columns(") != std::string::npos);
+		CHECK(stub.find("---@return integer|nil") != std::string::npos);
+
+		// 纯追加:删掉"服务块 + UI 块 + 组件块"区段后,与只渲染 Lua 类型的输出逐字节一致。
+		std::string reflectionOnly;
+		CHECK(LuaStubGenerator::Render(LuaReflectionRegistry::GetTable(), reflectionOnly, error));
+		std::string withoutAdditions = stub;
+		withoutAdditions.erase(inputPosition, worldScriptPosition - inputPosition);
+		CHECK(withoutAdditions == reflectionOnly);
+	}
+
 	// 5.Generate():同内容短路(时间戳不变)、失败保留上次有效文件、无临时残留;组件块落盘。
 	void GenerateKeepsShortCircuitAndAtomicSemantics()
 	{
@@ -333,6 +379,7 @@ int main()
 			{ "adding and removing a schema field changes the stub", FieldAddRemoveChangesOutput },
 			{ "stub rendering is deterministic and order-independent", RenderingIsDeterministic },
 			{ "registered schema components render with unchanged Lua type blocks", RealRegistryComponentsRender },
+			{ "UI block renders between services and components", UiBlockSitsBetweenServicesAndComponents },
 			{ "stub generation short-circuits and keeps the last valid file", GenerateKeepsShortCircuitAndAtomicSemantics },
 		};
 		int failures = 0;

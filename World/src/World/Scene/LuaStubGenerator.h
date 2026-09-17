@@ -34,6 +34,13 @@ namespace World
 			const std::vector<const ScriptServiceBinding*>& services,
 			std::string& output, std::string& error);
 
+		// W3c:把脚本 UI 表(ui)渲染成注解块,追加在服务块之后、schema 组件块之前。
+		static bool Render(const std::vector<LuaTypeReflection>& types,
+			const std::vector<const Schema::TypeSchema*>& components,
+			const std::vector<const ScriptServiceBinding*>& services,
+			const std::vector<const ScriptServiceBinding*>& uiTables,
+			std::string& output, std::string& error);
+
 		// A successful unchanged generation leaves the destination timestamp intact.
 		// A failed generation retains the last valid destination and reports its path.
 		static bool Generate(const std::filesystem::path& outputPath, std::string& error);
@@ -43,5 +50,9 @@ namespace World
 		static bool Generate(const std::filesystem::path& outputPath, const std::vector<LuaTypeReflection>& types,
 			const std::vector<const Schema::TypeSchema*>& components,
 			const std::vector<const ScriptServiceBinding*>& services, std::string& error);
+		static bool Generate(const std::filesystem::path& outputPath, const std::vector<LuaTypeReflection>& types,
+			const std::vector<const Schema::TypeSchema*>& components,
+			const std::vector<const ScriptServiceBinding*>& services,
+			const std::vector<const ScriptServiceBinding*>& uiTables, std::string& error);
 	};
 }

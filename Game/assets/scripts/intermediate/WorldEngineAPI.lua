@@ -300,6 +300,116 @@ function Save:GetGlobal(key) end
 ---@return string
 function Save:LastError() end
 
+-- Global script UI table 'ui': read-only; there is no runtime constructor.
+---Immediate-mode script UI table; draw calls are rebuilt every frame and there is no long-lived callback registration.
+---@class ui
+ui = {}
+
+---Draw a panel background with a title.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param title string Panel title.
+function ui:panel(x, y, w, h, title) end
+
+---Draw a single line of text.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param text string Single-line text.
+---@param fontSize number? Font size in pixels; defaults to 15.
+function ui:text(x, y, text, fontSize) end
+
+---Draw a button and return whether it was clicked this frame.
+---@param id string Non-empty widget id; the script path is prepended before hashing.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param label string Button label.
+---@return boolean
+function ui:button(id, x, y, w, h, label) end
+
+---Draw a checkbox; the script owns the value and stores the returned state.
+---@param id string Non-empty widget id; the script path is prepended before hashing.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param label string Checkbox label.
+---@param value boolean Current value supplied by the script.
+---@return boolean
+function ui:checkbox(id, x, y, w, h, label, value) end
+
+---Draw a slider and return the value after this frame's input.
+---@param id string Non-empty widget id; the script path is prepended before hashing.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param value number Current value supplied by the script.
+---@param min number Minimum value.
+---@param max number Maximum value.
+---@return number
+function ui:slider(id, x, y, w, h, value, min, max) end
+
+---Draw a texture from an asset path; the UV rectangle defaults to the full texture.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param path string Logical asset path resolved through the VFS.
+---@param u0 number? Left UV; defaults to 0.
+---@param v0 number? Top UV; defaults to 0.
+---@param u1 number? Right UV; defaults to 1.
+---@param v1 number? Bottom UV; defaults to 1.
+function ui:image(x, y, w, h, path, u0, v0, u1, v1) end
+
+---Draw a scrollable list; returns the clicked 1-based row, or the clamped selection when selectedIndex is out of range.
+---@param id string Non-empty widget id; the script path is prepended before hashing.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param items string[] Array of row labels.
+---@param rowHeight number Row height in pixels; must be positive.
+---@param selectedIndex integer 1-based selected row used for highlighting.
+---@return integer|nil
+function ui:list(id, x, y, w, h, items, rowHeight, selectedIndex) end
+
+---Draw a scrollable grid; returns the clicked 1-based cell, or the clamped selection when selectedIndex is out of range.
+---@param id string Non-empty widget id; the script path is prepended before hashing.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param items string[] Array of cell labels.
+---@param cellW number Cell width in pixels; must be positive.
+---@param cellH number Cell height in pixels; must be positive.
+---@param selectedIndex integer 1-based selected cell used for highlighting.
+---@return integer|nil
+function ui:grid(id, x, y, w, h, items, cellW, cellH, selectedIndex) end
+
+---Split a rectangle into a row of cells; returns {x, y, w, h} tables.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param count integer Number of cells; zero yields an empty table.
+---@param gap number? Gap between cells in pixels; defaults to 0.
+---@return table
+function ui:rows(x, y, w, h, count, gap) end
+
+---Split a rectangle into a column of cells; returns {x, y, w, h} tables.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param count integer Number of cells; zero yields an empty table.
+---@param gap number? Gap between cells in pixels; defaults to 0.
+---@return table
+function ui:columns(x, y, w, h, count, gap) end
+
 -- Component fields are exposed through Entity:GetComponent("BoxCollider2DComponent"); there is no runtime global named BoxCollider2DComponent.
 ---@class BoxCollider2DComponent
 ---@field Friction number

@@ -5,11 +5,13 @@
 #include "World/Core/Application.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/BehaviorRegistry.h"
+#include "World/Script/BindUI.h"
 #include "World/Script/BindServices.h"
 #include "World/Script/HotReload.h"
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
+#include "World/WUI/WuiContext.h"
 
 #include <any>
 #include <cmath>
@@ -65,6 +67,7 @@ namespace World
 			script.OnCreateFunc.Release();
 			script.OnUpdateFunc.Release();
 			script.OnDestroyFunc.Release();
+			script.OnUiFunc.Release();
 			script.ScriptTable.Release();
 			script.LuaEnv.Release();
 			script.RuntimeEntity = {};
@@ -491,6 +494,9 @@ namespace World
 			// W3b:游戏服务面(Input/Level/Save 三个只读全局表;参数与失败语义见 Script/BindServices.h)。
 			if (!RegisterGameplayServiceBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the gameplay service bindings: " + error);
+			// W3c:UI 面(只读全局表 `ui`;宿主入口 DrawScriptUi 见 Script/BindUI.h)。
+			if (!RegisterUiBindings(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the UI bindings: " + error);
 		}
 		catch (...)
 		{
@@ -586,7 +592,14 @@ namespace World
 		serviceList.reserve(serviceCount);
 		for (std::size_t index = 0; index < serviceCount; ++index)
 			serviceList.push_back(&services[index]);
-		if (!LuaStubGenerator::Generate(path, LuaReflectionRegistry::GetTable(), components, serviceList, error))
+		// W3c:UI 块渲染在服务块之后、组件块之前(与脚本可见的全局表顺序一致)。
+		std::size_t uiCount = 0;
+		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);
+		std::vector<const ScriptServiceBinding*> uiList;
+		uiList.reserve(uiCount);
+		for (std::size_t index = 0; index < uiCount; ++index)
+			uiList.push_back(&uiTables[index]);
+		if (!LuaStubGenerator::Generate(path, LuaReflectionRegistry::GetTable(), components, serviceList, uiList, error))
 		{
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("[Lua] {0}", error);
 			return false;
@@ -668,6 +681,9 @@ namespace World
 				throw std::runtime_error(error);
 			if (!ReadCallback(script.ScriptTable, "OnDestroy", &script.OnDestroyFunc, &error))
 				throw std::runtime_error(error);
+			// W3c:UI 阶段回调;缺失与其它三个一致(nil = 不调用,不是错误)。
+			if (!ReadCallback(script.ScriptTable, "OnUI", &script.OnUiFunc, &error))
+				throw std::runtime_error(error);
 
 			script.IsLoaded = true;
 			script.CreateEntered = true;
@@ -710,7 +726,8 @@ namespace World
 		// Empty/stopped components can outlive the VM; live references cannot.
 		if (IsInitialized()) AssertOwnerThread();
 		else if (script.IsLoaded || script.LuaEnv.IsValid() || script.ScriptTable.IsValid() ||
-			script.OnCreateFunc.IsValid() || script.OnUpdateFunc.IsValid() || script.OnDestroyFunc.IsValid())
+			script.OnCreateFunc.IsValid() || script.OnUpdateFunc.IsValid() || script.OnDestroyFunc.IsValid() ||
+			script.OnUiFunc.IsValid())
 			throw std::logic_error("Script references must be released before ScriptEngine::Shutdown");
 		if (script.State == ScriptInstanceState::Destroying) return;
 		bool faulted = script.State == ScriptInstanceState::Faulted;
@@ -731,6 +748,36 @@ namespace World
 		catch (...) { ReportLuaError(script, "OnDestroy", "Unknown exception"); faulted = true; }
 		ClearLuaReferences(script);
 		script.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
+	}
+
+	std::size_t ScriptEngine::DrawScriptUi(Scene& scene, Wui::WuiContext& context)
+	{
+		AssertOwnerThread();
+		std::size_t failures = 0;
+		// 只读枚举必须走 const 路径:Running/活动场景上的非 const GetRegistry() 会触发结构写断言。
+		const entt::registry& registry = static_cast<const Scene&>(scene).GetRegistry();
+		const auto view = registry.view<LuaScriptComponent>();
+		for (const entt::entity handle : view)
+		{
+			// 引用本身来自 const view,但这里只写组件的运行态字段(State/LastError),
+			// 不会增删实体或组件,因此不会触发结构写断言。
+			LuaScriptComponent& script =
+				const_cast<LuaScriptComponent&>(view.get<LuaScriptComponent>(handle));
+			if (!script.IsLoaded || script.State != ScriptInstanceState::Running ||
+				!script.ScriptTable.IsValid() || !script.OnUiFunc.IsValid())
+				continue;
+			try
+			{
+				ScriptUiScope scope(context, script.ScriptFilePath);
+				std::string error;
+				const ScriptValue args[] = { script.ScriptTable.ToValue() };
+				if (!script.OnUiFunc.Call(args, 1, nullptr, &error))
+					throw std::runtime_error(error);
+			}
+			catch (const std::exception& error) { ReportLuaError(script, "OnUI", error.what()); ++failures; }
+			catch (...) { ReportLuaError(script, "OnUI", "Unknown exception"); ++failures; }
+		}
+		return failures;
 	}
 
 	// ---- P2 W2a:行为注册层（只登记/查询，不参与调度）----
@@ -860,12 +907,14 @@ namespace World
 		ScriptFunctionRef newCreate;
 		ScriptFunctionRef newUpdate;
 		ScriptFunctionRef newDestroy;
+		ScriptFunctionRef newUi;
 		try
 		{
 			std::string callbackError;
 			if (!ReadCallback(newTable, "OnCreate", &newCreate, &callbackError) ||
 				!ReadCallback(newTable, "OnUpdate", &newUpdate, &callbackError) ||
-				!ReadCallback(newTable, "OnDestroy", &newDestroy, &callbackError))
+				!ReadCallback(newTable, "OnDestroy", &newDestroy, &callbackError) ||
+				!ReadCallback(newTable, "OnUI", &newUi, &callbackError))
 				return reject("callbacks", callbackError);
 		}
 		catch (const std::exception& error) { return reject("callbacks", error.what()); }
@@ -906,13 +955,14 @@ namespace World
 				return reject("behavior", behaviorError);
 		}
 
-		// 整体交换:引用(环境/脚本表/三个回调)+ 字段 + 指纹 + generation。
+		// 整体交换:引用(环境/脚本表/四个回调)+ 字段 + 指纹 + generation。
 		// State / IsLoaded / CreateEntered / LastError 语义不动(失败路径也从未碰过它们)。
 		script.LuaEnv = newEnvironment;
 		script.ScriptTable = newTable;
 		script.OnCreateFunc = newCreate;
 		script.OnUpdateFunc = newUpdate;
 		script.OnDestroyFunc = newDestroy;
+		script.OnUiFunc = newUi;
 		script.CachedFields = newFields;
 		script.SourceFingerprint = fingerprint;
 		script.Generation = NextReloadGeneration();

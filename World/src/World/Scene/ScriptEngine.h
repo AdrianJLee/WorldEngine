@@ -2,6 +2,7 @@
 #include "World/Core/Export.h"
 #include "Scene.h"
 #include <algorithm>
+#include <cstddef>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -14,6 +15,8 @@ namespace World
 	class BehaviorRegistry;
 
 	namespace Schema { class SchemaRegistry; }
+	// W3c:宿主 UI 阶段入口只需要 WuiContext 的引用,避免在此处引入 WUI 重头。
+	namespace Wui { class WuiContext; }
 
 	// 描述数学类的一个属性（变量或函数）
 	struct LuaPropDesc
@@ -109,6 +112,13 @@ namespace World
 		static void OnUpdateScript(LuaScriptComponent& scriptComponent, Timestep ts);
 		static void OnDestroyScript(LuaScriptComponent& scriptComponent);
 
+		// ---- P2 W3c:脚本 UI 的宿主入口(UI 阶段每帧一次) ----
+		// 遍历场景里"已运行且带 OnUI 回调"的 LuaScriptComponent,逐个建立当前 UI 上下文
+		// (ui.* 读取的 WuiContext + 脚本逻辑路径前缀)并调用 OnUI(self)。
+		// 单个脚本回调出错只把该实例置 Faulted(ReportLuaError),其它实例继续绘制;
+		// 返回本帧出错的脚本数(0 = 全部成功)。
+		static std::size_t DrawScriptUi(Scene& scene, Wui::WuiContext& context);
+
 		// 方便获取全局状态（W1b 起返回 Luau VM 门面；未初始化时抛 logic_error）
 		static LuauVm& GetState();
 		// 当前 VM 的绑定上下文（类型注册/宿主函数装箱；未初始化时抛 logic_error）
@@ -126,7 +136,7 @@ namespace World
 			std::vector<std::string>* errors = nullptr);
 
 		// ---- P2 W5:L2 脚本热重载(引擎侧)----
-		// 重新加载组件当前脚本并**整体交换**实例引用(环境/脚本表/三个回调),字段按
+		// 重新加载组件当前脚本并**整体交换**实例引用(环境/脚本表/四个回调),字段按
 		// 同名+同类型迁移(见 Script/HotReload.h),成功后 generation 进入热重载域并刷新
 		// BehaviorRegistry 描述;任一步失败都保留旧版本,只写 ReloadDiagnostic。
 		//   - 成功:ReloadDiagnostic 清空;diagnostics(可空)收迁移警告(类型变化/字段删除);

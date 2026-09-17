@@ -292,7 +292,7 @@ namespace World
 		// W3b:服务表(Input/Level/Save)的存根块。类注解行 + 每个方法一段
 		// `---@param/---@return` + `function <表>:<方法>(...) end`,与既有类型块同一风格。
 		bool WriteServiceBlock(std::ostringstream& output, const ScriptServiceBinding& service,
-			const std::set<std::string>& knownTypes, std::string& error)
+			const std::set<std::string>& knownTypes, const char* heading, std::string& error)
 		{
 			const std::string name = service.Name ? service.Name : "";
 			if (!IsIdentifier(name))
@@ -304,7 +304,8 @@ namespace World
 
 			std::set<std::string> methodNames;
 			std::ostringstream block;
-			block << "-- Global service table '" << name << "': read-only; there is no runtime constructor.\n";
+			block << "-- " << (heading ? heading : "Global table") << " '" << name
+				<< "': read-only; there is no runtime constructor.\n";
 			if (service.Description && service.Description[0])
 				block << "---" << service.Description << "\n";
 			block << "---@class " << name << "\n"
@@ -396,6 +397,15 @@ namespace World
 		const std::vector<const Schema::TypeSchema*>& components,
 		const std::vector<const ScriptServiceBinding*>& services, std::string& output, std::string& error)
 	{
+		static const std::vector<const ScriptServiceBinding*> noUiTables;
+		return Render(types, components, services, noUiTables, output, error);
+	}
+
+	bool LuaStubGenerator::Render(const std::vector<LuaTypeReflection>& types,
+		const std::vector<const Schema::TypeSchema*>& components,
+		const std::vector<const ScriptServiceBinding*>& services,
+		const std::vector<const ScriptServiceBinding*>& uiTables, std::string& output, std::string& error)
+	{
 		error.clear();
 		std::set<std::string> knownTypes { "any", "unknown", "nil", "boolean", "number", "integer", "string", "table", "function", "thread", "userdata" };
 		std::map<std::string, const LuaTypeReflection*> sortedTypes;
@@ -434,6 +444,21 @@ namespace World
 				return Fail(error, "service table", "invalid or reserved class name '" + name + "'");
 			if (knownTypes.count(name))
 				return Fail(error, "service table '" + name + "'", "class name collides with a bound Lua type");
+		}
+		// W3c:UI 表与 Lua 类型/服务表同池校验;存根里不能出现两个同名全局表。
+		std::set<std::string> globalTableNames;
+		for (const ScriptServiceBinding* service : services)
+			globalTableNames.insert(service->Name ? service->Name : "");
+		for (const ScriptServiceBinding* table : uiTables)
+		{
+			if (!table) return Fail(error, "script UI tables", "null UI binding entry");
+			const std::string name = table->Name ? table->Name : "";
+			if (!IsIdentifier(name) || name == "WorldScript")
+				return Fail(error, "script UI table", "invalid or reserved class name '" + name + "'");
+			if (knownTypes.count(name))
+				return Fail(error, "script UI table '" + name + "'", "class name collides with a bound Lua type");
+			if (!globalTableNames.insert(name).second)
+				return Fail(error, "script UI table '" + name + "'", "global table name is already in use");
 		}
 
 		std::ostringstream rendered;
@@ -488,7 +513,10 @@ namespace World
 		}
 		// W3b:服务块在既有 Lua 类型块之后、schema 组件块之前(组件块区段保持连续)。
 		for (const ScriptServiceBinding* service : services)
-			if (!WriteServiceBlock(rendered, *service, knownTypes, error)) return false;
+			if (!WriteServiceBlock(rendered, *service, knownTypes, "Global service table", error)) return false;
+		// W3c:UI 块紧随服务块之后、组件块之前。
+		for (const ScriptServiceBinding* table : uiTables)
+			if (!WriteServiceBlock(rendered, *table, knownTypes, "Global script UI table", error)) return false;
 		// W3a-A2:组件块追加在既有 Lua 类型块之后(既有块内容与顺序不变),组件之间按短名升序。
 		for (const auto& [name, component] : sortedComponents)
 			if (!WriteComponentBlock(rendered, *component, knownTypes, error)) return false;
@@ -529,8 +557,17 @@ namespace World
 		const std::vector<const Schema::TypeSchema*>& components,
 		const std::vector<const ScriptServiceBinding*>& services, std::string& error)
 	{
+		static const std::vector<const ScriptServiceBinding*> noUiTables;
+		return Generate(outputPath, types, components, services, noUiTables, error);
+	}
+
+	bool LuaStubGenerator::Generate(const std::filesystem::path& outputPath, const std::vector<LuaTypeReflection>& types,
+		const std::vector<const Schema::TypeSchema*>& components,
+		const std::vector<const ScriptServiceBinding*>& services,
+		const std::vector<const ScriptServiceBinding*>& uiTables, std::string& error)
+	{
 		std::string content;
-		if (!Render(types, components, services, content, error))
+		if (!Render(types, components, services, uiTables, content, error))
 		{
 			error = outputPath.u8string() + ": " + error;
 			return false;

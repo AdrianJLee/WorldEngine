@@ -124,6 +124,27 @@ set_tests_properties(World.LuauServiceBinding PROPERTIES
     TIMEOUT 90
 )
 
+# P2 W3c:UI 面的脚本绑定(ui.* 立即模式控件;headless 手工输入 + WuiContext 命令断言)。
+add_executable(WorldLuauUiBindingTests LuauUiBindingTests.cpp)
+target_link_libraries(WorldLuauUiBindingTests PRIVATE World)
+target_compile_features(WorldLuauUiBindingTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldLuauUiBindingTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldLuauUiBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldLuauUiBindingTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.LuauUiBinding COMMAND WorldLuauUiBindingTests)
+set_tests_properties(World.LuauUiBinding PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
 # P2 W5:L2 脚本热重载(源指纹/字段迁移/失败回滚/轮询监听;headless,脚本写构建产物临时目录)。
 add_executable(WorldScriptHotReloadTests ScriptHotReloadTests.cpp)
 target_link_libraries(WorldScriptHotReloadTests PRIVATE World)
@@ -639,7 +660,7 @@ set_tests_properties(World.Behavior PROPERTIES
     TIMEOUT 60
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldScriptHotReloadTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"
