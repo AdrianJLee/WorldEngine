@@ -1,5 +1,6 @@
 #include "World/Script/LuauVm.h"
 
+#include "World/Core/Asset/ScriptArtifact.h"
 #include "World/Core/Log.h"
 
 #include "World/Script/LuauHeaders.h"
@@ -74,6 +75,76 @@ namespace World
 			"rawlen",
 			"newproxy",
 		};
+
+		// W7-1:environment 校验(原 CompileFunction 的语义原样收敛到这里)。
+		// 区分"没有 environment"(空引用 → 线程全局)与"environment 已失效"(必须报错);
+		// 否则宿主以为脚本跑在隔离环境里,实际静默落到线程全局。
+		bool ValidateEnvironment(lua_State* state, const ScriptTableRef& environment, std::string* error)
+		{
+			if (environment.Payload() && !environment.IsValid())
+			{
+				if (error)
+					*error = "environment reference is no longer valid";
+				return false;
+			}
+			if (environment.IsValid())
+			{
+				if (environment.State() != state)
+				{
+					if (error)
+						*error = "environment belongs to a different vm";
+					return false;
+				}
+				if (environment.Type() != ScriptValueType::Table)
+				{
+					if (error)
+						*error = "environment must be a table";
+					return false;
+				}
+			}
+			return true;
+		}
+
+		// W7-1:全工程**唯一**的 luau_load 出口。bytecode 必须是字节码
+		// (ScriptArtifact 的 payload 或 Luau::compile 的产物);源码在调用方先编译。
+		ScriptFunctionRef LoadBytecodeFunction(lua_State* state, const ScriptTableRef& environment,
+			const uint8_t* bytecode, size_t bytecodeSize, const char* chunkName, std::string* error)
+		{
+			ScriptFunctionRef function;
+			const int base = lua_gettop(state);
+			int environmentIndex = 0;
+			if (environment.IsValid())
+			{
+				if (!environment.Push(state))
+				{
+					if (error)
+						*error = "failed to push environment";
+					lua_settop(state, base);
+					return function;
+				}
+				environmentIndex = lua_gettop(state);
+			}
+
+			const char* name = chunkName ? chunkName : "chunk";
+			const int loadResult = luau_load(state, name,
+				reinterpret_cast<const char*>(bytecode), bytecodeSize, environmentIndex);
+			if (loadResult != 0 || lua_type(state, -1) != LUA_TFUNCTION)
+			{
+				if (error)
+				{
+					const char* message = lua_tostring(state, -1);
+					*error = message ? message : "compile error";
+				}
+				lua_settop(state, base);
+				return function;
+			}
+
+			ScriptValue value = ScriptValue::FromStack(state, -1);
+			lua_settop(state, base);
+			if (!value.AsFunction(&function) && error)
+				*error = "compiled chunk is not a function";
+			return function;
+		}
 	}
 
 	namespace LuauDetail
@@ -196,43 +267,12 @@ namespace World
 
 	bool LuauVm::RunString(const std::string& source, const char* chunkName, std::string* error)
 	{
-		if (!m_State)
-		{
-			if (error)
-				*error = "vm not initialized";
+		// W7-1:薄壳 —— 编译/装载统一在 LoadChunk;执行仍走 ScriptFunctionRef::Call
+		// (内部是唯一的受保护调用 ProtectedCall,错误带 chunk 名 + 行号 + stack traceback)。
+		ScriptFunctionRef function = LoadChunk(std::string_view(source), chunkName, ScriptTableRef(), error);
+		if (!function.IsValid())
 			return false;
-		}
-		const char* name = chunkName ? chunkName : "chunk";
-		// 注意:luau_load 吃的是**字节码**,不是源码;源码要先经 Luau::compile
-		// (直接用源码调用会得到 "bytecode version mismatch" 一类错误)。
-		std::string bytecode;
-		try
-		{
-			bytecode = Luau::compile(source, {});
-		}
-		catch (const std::exception& exception)
-		{
-			if (error)
-				*error = std::string("compile error: ") + exception.what();
-			return false;
-		}
-		lua_State* state = m_State;
-		const int base = lua_gettop(state);
-		const int loadResult = luau_load(state, name, bytecode.data(), bytecode.size(), 0);
-		if (loadResult != 0 || lua_type(state, -1) != LUA_TFUNCTION)
-		{
-			if (error)
-			{
-				const char* message = lua_tostring(state, -1);
-				*error = message ? message : "compile error";
-			}
-			lua_settop(state, base);
-			return false;
-		}
-		// 与绑定层走同一条受保护调用路径:错误带 chunk 名 + 行号 + stack traceback。
-		const bool ok = LuauDetail::ProtectedCall(state, 0, 0, error);
-		lua_settop(state, base);
-		return ok;
+		return function.Call(nullptr, 0, nullptr, error);
 	}
 
 	bool LuauVm::SetGlobal(const char* name, const ScriptValue& value)
@@ -309,6 +349,13 @@ namespace World
 	ScriptFunctionRef LuauVm::CompileFunction(const std::string& source, const char* chunkName,
 		const ScriptTableRef& environment, std::string* error)
 	{
+		// W7-1:薄壳 —— 装载统一走 LoadChunk 的源码重载(环境校验/错误文本不变)。
+		return LoadChunk(std::string_view(source), chunkName, environment, error);
+	}
+
+	ScriptFunctionRef LuauVm::LoadChunk(std::string_view source, const char* chunkName,
+		const ScriptTableRef& environment, std::string* error)
+	{
 		ScriptFunctionRef function;
 		if (!m_State)
 		{
@@ -316,36 +363,15 @@ namespace World
 				*error = "vm not initialized";
 			return function;
 		}
-		// 区分"没有 environment"(空引用 → 线程全局)与"environment 已失效"(必须报错);
-		// 否则宿主以为脚本跑在隔离环境里,实际静默落到线程全局。
-		if (environment.Payload() && !environment.IsValid())
-		{
-			if (error)
-				*error = "environment reference is no longer valid";
+		if (!ValidateEnvironment(m_State, environment, error))
 			return function;
-		}
-		if (environment.IsValid())
-		{
-			if (environment.State() != m_State)
-			{
-				if (error)
-					*error = "environment belongs to a different vm";
-				return function;
-			}
-			if (environment.Type() != ScriptValueType::Table)
-			{
-				if (error)
-					*error = "environment must be a table";
-				return function;
-			}
-		}
 
 		// luau_load 吃字节码;源码先经 Luau::compile。编译失败会以版本 0 的错误装载体返回,
-		// 由 luau_load 解码成带 chunk 名与行号的错误文本(见 RunString 的同一约定)。
+		// 由 luau_load 解码成带 chunk 名与行号的错误文本(与 RunString 的同一约定)。
 		std::string bytecode;
 		try
 		{
-			bytecode = Luau::compile(source, {});
+			bytecode = Luau::compile(std::string(source), {});
 		}
 		catch (const std::exception& exception)
 		{
@@ -353,40 +379,36 @@ namespace World
 				*error = std::string("compile error: ") + exception.what();
 			return function;
 		}
+		return LoadBytecodeFunction(m_State, environment,
+			reinterpret_cast<const uint8_t*>(bytecode.data()), bytecode.size(), chunkName, error);
+	}
 
-		lua_State* state = m_State;
-		const int base = lua_gettop(state);
-		int environmentIndex = 0;
-		if (environment.IsValid())
-		{
-			if (!environment.Push(state))
-			{
-				if (error)
-					*error = "failed to push environment";
-				lua_settop(state, base);
-				return function;
-			}
-			environmentIndex = lua_gettop(state);
-		}
-
-		const char* name = chunkName ? chunkName : "chunk";
-		const int loadResult = luau_load(state, name, bytecode.data(), bytecode.size(), environmentIndex);
-		if (loadResult != 0 || lua_type(state, -1) != LUA_TFUNCTION)
+	ScriptFunctionRef LuauVm::LoadChunk(const std::vector<uint8_t>& bytes, const char* chunkName,
+		const ScriptTableRef& environment, std::string* error)
+	{
+		ScriptFunctionRef function;
+		if (!m_State)
 		{
 			if (error)
-			{
-				const char* message = lua_tostring(state, -1);
-				*error = message ? message : "compile error";
-			}
-			lua_settop(state, base);
+				*error = "vm not initialized";
 			return function;
 		}
+		if (!ValidateEnvironment(m_State, environment, error))
+			return function;
 
-		ScriptValue value = ScriptValue::FromStack(state, -1);
-		lua_settop(state, base);
-		if (!value.AsFunction(&function) && error)
-			*error = "compiled chunk is not a function";
-		return function;
+		const char* name = chunkName ? chunkName : "chunk";
+		if (Asset::ScriptArtifact::IsArtifactBytes(bytes.data(), bytes.size()))
+		{
+			// 容器分支:逐项校验;头命中后的任何校验失败都是硬失败(绝不回退按源码编译)。
+			std::vector<uint8_t> payload;
+			if (!Asset::ScriptArtifact::Unpack(name, bytes.data(), bytes.size(), payload, error))
+				return function;
+			return LoadBytecodeFunction(m_State, environment, payload.data(), payload.size(), name, error);
+		}
+
+		// 非容器 → 源码分支(开发树里的 .lua/.luau 原样走这条路径)。
+		const char* data = bytes.empty() ? "" : reinterpret_cast<const char*>(bytes.data());
+		return LoadChunk(std::string_view(data, bytes.size()), name, environment, error);
 	}
 
 	bool LuauVm::RunStringInEnvironment(const std::string& source, const char* chunkName,

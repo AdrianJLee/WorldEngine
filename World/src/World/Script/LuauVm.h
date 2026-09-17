@@ -3,8 +3,11 @@
 #include "World/Core/Export.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <vector>
 
 struct lua_State;
 
@@ -45,6 +48,7 @@ namespace World
 	//   - 建立 VM、只开**受控标准库**、沙箱化(全局表冻结 + 禁用文件/加载/环境 API);
 	//   - 提供"跑一段源码并返回错误(chunk 名 + 行号)"的最小入口(工具/测试用);
 	//   - W1b 起:per-instance environment、宿主全局注入、编译成函数、受保护调用(含 traceback);
+	//   - W7 起:LoadChunk 是源码/字节码容器的**唯一**装载入口(luau_load 只留一处);
 	//   - W2+ 的行为注册、绑定、句柄、事件、热重载都建在它之上。
 	//
 	// 为什么不用 luaL_openlibs:它会开 os/debug 并保留 getfenv/setfenv 等逃逸面;
@@ -84,11 +88,26 @@ namespace World
 
 		// 把源码编译成函数(不执行)。environment 的有效引用决定闭包的 env;
 		// 传空引用时用线程全局(等价于 RunString 的行为)。
+		// W7-1 起是 LoadChunk(源码) 的薄壳,环境语义不变。
 		ScriptFunctionRef CompileFunction(const std::string& source, const char* chunkName,
 			const ScriptTableRef& environment, std::string* error = nullptr);
 
 		// 编译并在指定 environment 里执行一段 chunk。
 		bool RunStringInEnvironment(const std::string& source, const char* chunkName,
+			const ScriptTableRef& environment, std::string* error = nullptr);
+
+		// ---- W7-1:统一装载入口(源码 / 容器) ----
+
+		// 从字节装载体加载函数(不执行),环境语义与 CompileFunction 完全一致:
+		//   - 前 4 字节 == "WSL1" → 容器分支:ScriptArtifact::Unpack 逐项校验;
+		//     头命中但任一校验失败 → **硬失败**,绝不回退按源码编译;
+		//   - 其它字节 → 源码分支:按 Luau 源码编译(与下面的 string_view 重载同一路径)。
+		ScriptFunctionRef LoadChunk(const std::vector<uint8_t>& bytes, const char* chunkName,
+			const ScriptTableRef& environment, std::string* error = nullptr);
+
+		// 从源码加载函数(不执行)。CompileFunction / RunString / RunStringInEnvironment
+		// 都经由它落到同一处 luau_load;W6 预算仍由执行路径(ProtectedCall)施加。
+		ScriptFunctionRef LoadChunk(std::string_view source, const char* chunkName,
 			const ScriptTableRef& environment, std::string* error = nullptr);
 
 		// 被禁用的全局名(沙箱收口清单,测试与文档共用一份事实源)。
