@@ -5,6 +5,7 @@
 #include "World/Events/ApplicationEvent.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Renderer/EditorCamera3D.h"
+#include "World/Script/ScriptFileWatch.h"
 #include "Document/EditorDocument.h"
 #include "World/WUI/WuiCommand.h"
 #include "World/WUI/WuiGizmo.h"
@@ -16,6 +17,9 @@
 #include <thread>
 namespace World
 {
+	// P2 W5b:脚本热重载只按引用操作组件(完整定义在 Scene/Components.h)。
+	struct LuaScriptComponent;
+
 	class EditorLayer : public Layer
 	{
 	public:
@@ -93,6 +97,16 @@ namespace World
 		void CaptureScreenSequence();
 		Wui::WuiCommandRegistry& Commands() { return m_Commands; }
 
+		// ---- P2 W5b:脚本热重载(编辑器侧接线)----
+		// 唯一的重载入口:帧边界轮询、属性面板 Reload 按钮、AI 通道 script.reload 共用。
+		//   - Running + IsLoaded:ScriptEngine::ReloadScript(失败保留旧版本,诊断写进组件);
+		//   - Faulted/未加载:复位 Pending(IsLoaded=false、清 LastError,保留 CachedFields 与
+		//     ScriptFilePath),交给 Scene 既有的 pending 机制在下一个安全点重新实例化 —— 也就是
+		//     "把脚本写坏 → 改好 → Reload 救回来";
+		//   - Creating/Destroying:拒绝(不打断生命周期)。
+		// scene 只用于把"编辑态场景不跑脚本"写进 message,可为 null。
+		static bool ReloadLuaScriptComponent(LuaScriptComponent& script, Scene* scene, std::string* message = nullptr);
+
 		bool OnKeyPressed(KeyPressedEvent& e);
 		bool OnWindowClose(WindowCloseEvent& e);
 
@@ -112,6 +126,9 @@ namespace World
 
 		void SetSceneState(SceneState state);
 		void UpdateSceneContext(Ref<Scene> scene);
+		// P2 W5b:每帧在帧边界轮询脚本文件监听(编辑态=文档场景,Play/Simulate=正在跑的场景),
+		// 安全点不满足时把变化顺延到下一帧,不丢。
+		void PollScriptHotReload(float deltaSeconds);
 		void DoNewScene();
 		void DoOpenScene(const std::filesystem::path& path);
 		bool TrySave();
@@ -210,6 +227,13 @@ namespace World
 		void AiRecordCommand(const std::string& cmd, const std::map<std::string, std::string>& args);
 		std::string m_AiRecordPath;
 		size_t m_AiRecordCount = 0;
+		// P2 W5b:脚本文件监听(轮询式,150ms debounce)与"不安全顺延"的未决变化集合。
+		ScriptFileWatch m_ScriptWatch;
+		// ScriptFileWatch 没有枚举接口,这里镜像"当前登记过的逻辑路径"以便换场景/改路径时 Unwatch。
+		std::vector<std::string> m_WatchedScriptPaths;
+		std::vector<std::string> m_PendingScriptReloads;
+		// 监听目标场景:换场景(进入/退出 Play、开关文档)时必须重建基线,不能跨场景复用。
+		Scene* m_ScriptWatchScene = nullptr;
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;
 		std::string m_RendererChangeName;

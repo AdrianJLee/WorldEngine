@@ -63,6 +63,21 @@ namespace World
 			return mismatch.first == normalizedParent.end();
 		}
 
+		// P2 W5b:脚本实例状态名(script.status/script.reload 的 JSON 字段)。
+		const char* ScriptStateLabel(ScriptInstanceState state)
+		{
+			switch (state)
+			{
+				case ScriptInstanceState::Pending: return "Pending";
+				case ScriptInstanceState::Creating: return "Creating";
+				case ScriptInstanceState::Running: return "Running";
+				case ScriptInstanceState::Destroying: return "Destroying";
+				case ScriptInstanceState::Stopped: return "Stopped";
+				case ScriptInstanceState::Faulted: return "Faulted";
+				default: return "?";
+			}
+		}
+
 		// 写文件类命令的路径白名单:相对路径落在构建输出目录,绝对路径必须位于
 		// 临时目录或当前工作目录之内 —— 控制通道不接受"写到系统任意位置"。
 		std::filesystem::path ResolveCapturePath(const std::string& raw, std::string* error)
@@ -670,6 +685,132 @@ namespace World
 				m_Shell.TogglePause();
 			result = "playState=" + std::to_string(static_cast<int>(m_SceneState))
 				+ " paused=" + (m_ScenePaused ? "true" : "false");
+			return true;
+		}
+		// ---- P2 W5b:脚本热重载 ----
+		// 命令格式(字段全部扁平):
+		//   script.status [handle=<id>|name=<tag>|path=<逻辑脚本路径>]   只读状态(缺省=当前选中实体)
+		//   script.reload [handle=<id>|name=<tag>|path=<逻辑脚本路径>]   触发一次重载(缺省=当前选中实体)
+		// reload 与帧边界轮询、属性面板的 Reload 按钮共用 EditorLayer::ReloadLuaScriptComponent:
+		// Running 实例走 ScriptEngine::ReloadScript(失败保留旧版本),Faulted/未加载的实例复位成
+		// Pending 交给 Scene 在下一帧重建。单个实例重载失败(语法错误等)不算命令失败:结果 JSON
+		// 带着 state/lastError/reloadDiagnostic 供脚本断言。
+		if (cmd == "script.status" || cmd == "script.reload")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+			const bool reload = cmd == "script.reload";
+			if (reload && !m_ActiveScene->CanApplyScriptReload())
+			{
+				error = "not at a script reload safe point (callback/structural commit/stopping); retry next frame";
+				return false;
+			}
+			// 只读枚举必须走 const registry:Play/Simulate 下活动场景的非 const GetRegistry()
+			// 会触发"活动场景禁止结构写"断言。
+			const Scene& scene = *m_ActiveScene;
+			const entt::registry& registry = scene.GetRegistry();
+			std::vector<entt::entity> targets;
+			if (!arg("handle").empty())
+			{
+				const entt::entity handle = static_cast<entt::entity>(std::strtoul(arg("handle").c_str(), nullptr, 10));
+				if (!registry.valid(handle))
+				{
+					error = "entity not found: handle=" + arg("handle");
+					return false;
+				}
+				if (!registry.all_of<LuaScriptComponent>(handle))
+				{
+					error = "entity has no LuaScriptComponent: handle=" + arg("handle");
+					return false;
+				}
+				targets.push_back(handle);
+			}
+			else if (!arg("name").empty())
+			{
+				for (const entt::entity handle : registry.view<TagComponent>())
+					if (registry.get<TagComponent>(handle).Tag == arg("name") &&
+						registry.all_of<LuaScriptComponent>(handle))
+						targets.push_back(handle);
+				if (targets.empty())
+				{
+					error = "no entity with a LuaScriptComponent named '" + arg("name") + "'";
+					return false;
+				}
+			}
+			else if (!arg("path").empty())
+			{
+				for (const entt::entity handle : registry.view<LuaScriptComponent>())
+					if (registry.get<LuaScriptComponent>(handle).ScriptFilePath == arg("path"))
+						targets.push_back(handle);
+				if (targets.empty())
+				{
+					error = "no Lua script component uses path=" + arg("path");
+					return false;
+				}
+			}
+			else
+			{
+				if (!m_SelectedEntity.IsValid() || m_SelectedEntity.GetScene() != m_ActiveScene.get())
+				{
+					error = "no entity selected; pass handle=/name=/path= (or select one first)";
+					return false;
+				}
+				const entt::entity handle = static_cast<entt::entity>(m_SelectedEntity);
+				if (!registry.all_of<LuaScriptComponent>(handle))
+				{
+					error = "selected entity has no LuaScriptComponent; pass handle=/name=/path=";
+					return false;
+				}
+				targets.push_back(handle);
+			}
+
+			size_t succeeded = 0;
+			size_t failed = 0;
+			std::ostringstream out;
+			out << "{\"command\":\"" << cmd << "\""
+				<< ",\"playState\":" << static_cast<int>(m_SceneState)
+				<< ",\"targets\":" << targets.size()
+				<< ",\"components\":[";
+			for (size_t index = 0; index < targets.size(); ++index)
+			{
+				const entt::entity handle = targets[index];
+				Entity entity(m_ActiveScene.get(), handle);
+				auto* script = static_cast<LuaScriptComponent*>(
+					entity.GetComponent(entt::type_id<LuaScriptComponent>().hash()));
+				if (index)
+					out << ",";
+				if (!script)
+				{
+					++failed;
+					out << "{\"handle\":" << static_cast<uint32_t>(handle) << ",\"ok\":false"
+						<< ",\"message\":\"component disappeared\"}";
+					continue;
+				}
+				std::string message;
+				bool ok = true;
+				if (reload)
+					ok = EditorLayer::ReloadLuaScriptComponent(*script, m_ActiveScene.get(), &message);
+				if (ok)
+					++succeeded;
+				else
+					++failed;
+				out << "{\"handle\":" << static_cast<uint32_t>(handle)
+					<< ",\"ok\":" << (ok ? "true" : "false")
+					<< ",\"name\":\"" << JsonEscape(
+						registry.all_of<TagComponent>(handle) ? registry.get<TagComponent>(handle).Tag : std::string())
+					<< "\",\"path\":\"" << JsonEscape(script->ScriptFilePath)
+					<< "\",\"state\":\"" << ScriptStateLabel(script->State)
+					<< "\",\"loaded\":" << (script->IsLoaded ? "true" : "false")
+					<< ",\"generation\":" << script->Generation
+					<< ",\"reloadDiagnostic\":\"" << JsonEscape(script->ReloadDiagnostic)
+					<< "\",\"lastError\":\"" << JsonEscape(script->LastError)
+					<< "\",\"message\":\"" << JsonEscape(message) << "\"}";
+			}
+			out << "],\"succeeded\":" << succeeded << ",\"failed\":" << failed << "}";
+			result = out.str();
 			return true;
 		}
 		// ---- 资产 / 材质 ----

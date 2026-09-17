@@ -1,6 +1,10 @@
 #include "wldpch.h"
 #include "PropertiesPanel.h"
 
+// P2 W5b:Reload 按钮要复用 EditorLayer 的热重载入口(与帧边界轮询、AI 通道 script.reload
+// 同一条语义)。PanelHost 是跨任务冻结的窄接口,本包文件边界内不能扩展它,因此只 include。
+#include "../../EditorLayer.h"
+
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiWidgets.h"
 
@@ -46,6 +50,16 @@ namespace World
 				case ScriptInstanceState::Faulted: return "Faulted";
 				default: return "?";
 			}
+		}
+
+		// 面板里诊断/错误只显示第一行并截断;完整文本由 AI 通道 script.status 提供。
+		std::string TruncateForPanel(const std::string& text, size_t limit = 72)
+		{
+			const size_t newline = text.find('\n');
+			std::string line = text.substr(0, newline == std::string::npos ? text.size() : newline);
+			if (line.size() > limit)
+				line = line.substr(0, limit) + "...";
+			return line;
 		}
 
 		// 字符串字段的编辑期缓冲区:Enter/失焦提交,Escape 丢弃。
@@ -164,7 +178,10 @@ namespace World
 		for (size_t i = 0; i < m_Sections.size(); ++i)
 		{
 			const Schema::TypeSchema* schema = componentSchemas[i];
-			bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), false);
+			// P2 W5b:Lua 脚本分区默认展开 —— 诊断与 Reload 按钮必须真的在无障碍树里,
+			// 才能被 AI 通道 ui.invoke 无鼠标驱动(其它组件分区保持默认折叠)。
+			const bool defaultOpen = schema->Id.Name == "World::LuaScriptComponent";
+			bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), defaultOpen);
 			m_Sections[i].Section->Open = open;
 			m_Sections[i].Section->DrawContent = [this, entity, schema, &m_HeightCache = m_Sections[i].Section](Wui::WuiContext& drawCtx, const Wui::WuiRect& inner)
 			{
@@ -487,8 +504,46 @@ namespace World
 			TextField(ctx, base ^ 1u, { rect.X, rect.Y, rect.W, 22 }, script->ScriptFilePath, theme);
 			if (script->ScriptFilePath != before)
 				m_Host.MarkDocumentDirty();
-			Label(ctx, { rect.X, rect.Y + 26 }, "state: " + ScriptStateName(script->State), theme.TextMuted, 13.0f);
-			return 46;
+
+			// P2 W5b:状态 + 重载诊断 + 脚本错误 + Reload 按钮(稳定 id → 进无障碍树,
+			// 可被 AI 通道 ui.invoke 无鼠标驱动)。
+			const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
+			float y = 26;
+			std::string state = "state: " + std::string(ScriptStateName(script->State));
+			state += script->IsLoaded ? " (loaded)" : " (not loaded)";
+			Label(ctx, { rect.X, rect.Y + y }, state, theme.TextMuted, 13.0f);
+			y += 18;
+			if (!script->ReloadDiagnostic.empty())
+			{
+				Label(ctx, { rect.X, rect.Y + y }, "[reload] " + TruncateForPanel(script->ReloadDiagnostic),
+					{ 1.0f, 0.75f, 0.3f, 1 }, 12.0f);
+				y += 16;
+			}
+			if (!script->LastError.empty())
+			{
+				Label(ctx, { rect.X, rect.Y + y }, "[error] " + TruncateForPanel(script->LastError),
+					{ 1, 0.4f, 0.4f, 1 }, 12.0f);
+				y += 16;
+			}
+			if (Button(ctx, Wui::HashId("lua.reload"), { rect.X, rect.Y + y, std::min(rect.W, 160.0f), 22 },
+				"Reload Script", theme))
+			{
+				std::string message;
+				const bool ok = EditorLayer::ReloadLuaScriptComponent(*script, entity.GetScene(), &message);
+				m_LuaReloadOk = ok;
+				m_LuaReloadMessage = ok ? message : ("failed: " + message);
+				m_LuaReloadHandle = handle;
+				WLD_CORE_INFO("[hot-reload] properties button (handle={0}, path='{1}'): {2}",
+					handle, script->ScriptFilePath, m_LuaReloadMessage);
+			}
+			y += 26;
+			if (m_LuaReloadHandle == handle && !m_LuaReloadMessage.empty())
+			{
+				Label(ctx, { rect.X, rect.Y + y }, TruncateForPanel(m_LuaReloadMessage),
+					m_LuaReloadOk ? theme.TextMuted : Wui::WuiColor { 1, 0.4f, 0.4f, 1 }, 12.0f);
+				y += 16;
+			}
+			return y + 4;
 		}
 
 		return DrawSchemaFields(ctx, base, rect, instance, schema.DisplayName, schema);

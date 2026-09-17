@@ -4,6 +4,7 @@
 #include "World/Scene/Components.h"
 #include "World/WUI/WuiWidget.h"
 
+#include <cstdint>
 #include <memory>
 
 namespace World
@@ -34,5 +35,9 @@ namespace World
 		std::shared_ptr<Wui::WuiBox> m_Root;
 		std::vector<SectionEntry> m_Sections;
 		std::vector<std::string> m_LastSchemaNames;
+		// P2 W5b:Lua 脚本 Reload 按钮的最近一次结果(按实体句柄区分,切换选择后不再显示)。
+		std::string m_LuaReloadMessage;
+		uint32_t m_LuaReloadHandle = ~0u;
+		bool m_LuaReloadOk = true;
 	};
 }
