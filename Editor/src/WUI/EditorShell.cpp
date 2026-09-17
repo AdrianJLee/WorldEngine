@@ -1598,7 +1598,9 @@ namespace World
 		FloatWindowHost* host = FindFloatHost(panel);
 		if (!host || host->IsHidden() || path.empty())
 			return false;
-		host->RequestCapture(path);
+		// 只登记整窗抓图请求:该窗口自己的帧循环会在"UI 提交之后、呈现之前"执行它。
+		Renderer::RequestPresentCapture(host->GetPresentTarget(), path,
+			static_cast<uint32_t>(host->ScreenRect().W), static_cast<uint32_t>(host->ScreenRect().H));
 		return true;
 	}
 

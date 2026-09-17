@@ -48,6 +48,8 @@ namespace World
 		void RequestCapture(const std::string& path) { m_PendingCapture = path; }
 		// AI 控制通道:调整窗口客户区尺寸(等价于用户拖边框)。
 		void SetClientSize(uint32_t width, uint32_t height);
+		// AI 控制通道:整窗抓图登记用的呈现目标(该窗口自己的交换链)。
+		PresentTarget* GetPresentTarget() const { return m_Target; }
 		bool Contains(const std::string& panel) const;
 		bool Empty() const { return m_Panels.empty(); }
 		// 面板加入/移出本窗口:只维护标签集合与活动索引,

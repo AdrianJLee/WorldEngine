@@ -326,22 +326,11 @@ namespace World
 				error = pathError;
 				return false;
 			}
-			// 整窗抓图目前只有 GL 路径:Vulkan 交换链抓图三次实现尝试都是
-			// "全黑 + VK_ERROR_DEVICE_LOST"(见 Renderer::CapturePresentTarget 的说明),
-			// 所以这里明确报未实现,而不是给脚本一张黑图。
-			if (Renderer::GetBackendName() != "opengl")
-			{
-				error = "capture.screen is OpenGL-only for now (Vulkan swapchain capture not implemented; "
-					"use capture.texture/capture.scene on Vulkan)";
-				return false;
-			}
-			if (!Renderer::CapturePresentTarget(path, Application::Get().GetWindow().GetWidth(),
-				Application::Get().GetWindow().GetHeight()))
-			{
-				error = "capture.screen failed (present target not capturable this frame)";
-				return false;
-			}
-			result = path.string();
+			// 只登记请求:引擎会在"UI 通道已提交、EndFramePresent 之前"执行抓取
+			// (见 Renderer::FlushPresentCaptures 的说明 —— 提前抓会拍到空白并破坏后续布局)。
+			Renderer::RequestPresentCapture(nullptr, path,
+				Application::Get().GetWindow().GetWidth(), Application::Get().GetWindow().GetHeight());
+			result = "queued (written at end of frame): " + path.string();
 			return true;
 		}
 		if (cmd == "capture.scene")

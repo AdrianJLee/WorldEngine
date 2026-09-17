@@ -801,25 +801,112 @@ namespace World
 
 	// 后端无关的纹理读回:CopyTextureToBuffer(RHI) → Map → PPM。
 	// 与上面三个 GL 专用函数不同,这条路径在 Vulkan 下同样有效,是"双后端截图基线"的基础。
-	bool Renderer::CapturePresentTarget(const std::filesystem::path& path, uint32_t width, uint32_t height)
+	namespace
 	{
-		if (!m_Device || width == 0 || height == 0)
-			return false;
-		if (s_BackendName != "vulkan")
+		struct PendingPresentCapture
 		{
-			// OpenGL:默认帧缓冲读回(与旧路径一致)。
-			CaptureFrame(path);
-			return true;
+			void* Target = nullptr;             // PresentTarget*;nullptr = 主窗口
+			std::filesystem::path Path;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+		};
+
+		std::vector<PendingPresentCapture>& PendingCaptures()
+		{
+			static auto* pending = new std::vector<PendingPresentCapture>();
+			return *pending;
 		}
-		// Vulkan 交换链抓图**暂时不做**:三次实现尝试都是"全黑 + VK_ERROR_DEVICE_LOST",
-		// 分别验证过 (a) 用独立抓图队列 + 假定 ShaderReadOnly 的屏障、(b) 同队列 ExecuteImmediate、
-		// (c) 同队列 + 等本帧 FrameStart 信号量 + fence。数据回来是黑的说明拷贝跑在了帧渲染
-		// 之前/之外,而设备丢失说明还有一处布局或队列所有权没对齐。要继续做需要有专门的
-		// 交换链抓图通道(在 EndFramePresent 里、按当前图像的实际布局插入转换,并复用
-		// 该帧的等待/呈现信号量),不能借用通用纹理读回。在那之前这里明确返回失败,
-		// 让调用方拿到"未实现"而不是一张黑图。
-		WLD_CORE_WARN("[capture] present-target capture on Vulkan is not implemented yet");
-		return false;
+	}
+
+	void Renderer::RequestPresentCapture(PresentTarget* target, const std::filesystem::path& path,
+		uint32_t width, uint32_t height)
+	{
+		if (path.empty() || width == 0 || height == 0)
+			return;
+		PendingCaptures().push_back({ static_cast<void*>(target), path, width, height });
+	}
+
+	void Renderer::FlushPresentCaptures()
+	{
+		if (PendingCaptures().empty() || !m_Device)
+			return;
+		PresentTarget& active = s_ActivePresent ? *s_ActivePresent : s_MainPresent;
+		const bool mainTarget = (&active == &s_MainPresent);
+		for (size_t i = 0; i < PendingCaptures().size();)
+		{
+			const PendingPresentCapture pending = PendingCaptures()[i];
+			const bool matches = (pending.Target == nullptr) ? mainTarget
+				: (pending.Target == static_cast<void*>(&active));
+			if (!matches)
+			{
+				++i;
+				continue;
+			}
+			PendingCaptures().erase(PendingCaptures().begin() + static_cast<std::ptrdiff_t>(i));
+			// OpenGL:默认帧缓冲读回(此时 UI 已经提交/交换前)。
+			if (s_BackendName != "vulkan")
+			{
+				CaptureFrame(pending.Path);
+				continue;
+			}
+			if (!active.Image || !active.Queue || active.QueueDevice != m_Device.get())
+			{
+				WLD_CORE_WARN("[capture] present target not ready for capture");
+				continue;
+			}
+			Rhi::BufferDesc readbackDesc;
+			readbackDesc.Size = static_cast<uint64_t>(pending.Width) * pending.Height * 4;
+			readbackDesc.Usage = Rhi::BufferUsageTransferDst;
+			readbackDesc.Memory = Rhi::MemoryHint::HostVisible;
+			readbackDesc.DebugName = "PresentCaptureReadback";
+			Rhi::Handle<Rhi::Buffer> readback = m_Device->CreateBuffer(readbackDesc);
+			if (!readback)
+				continue;
+			// 与帧渲染**同队列**提交(队列顺序保证拷贝在 UI 提交之后),不加额外等待信号量:
+			// FrameStart 是二值信号量,已被本帧渲染提交消费,再等一次会破坏语义(实测设备丢失)。
+			// 屏障走 RHI:后端以纹理**跟踪布局**做 oldLayout(此时 UI 通道 EndRenderPass 已把
+			// FinalLayout=Present 同步进跟踪),拷贝后停在 CopySrc,随后引擎的 →Present 转换
+			// 从该布局继续,天然合法。
+			active.Queue->ExecuteImmediate([&](Rhi::CommandBuffer& cmd)
+			{
+				Rhi::ResourceBarrier toCopy;
+				toCopy.Texture = active.Image;
+				toCopy.Before = Rhi::ResourceState::ShaderReadOnly;   // 说明性字段:后端以跟踪布局为准
+				toCopy.After = Rhi::ResourceState::CopySrc;
+				cmd.PipelineBarrier({ toCopy });
+				cmd.CopyTextureToBuffer(active.Image, readback, 0);
+			});
+
+			const uint8_t* pixels = static_cast<const uint8_t*>(readback->Map());
+			if (!pixels)
+			{
+				WLD_CORE_ERROR("[capture] present readback buffer is not mappable");
+				continue;
+			}
+			std::ofstream file(pending.Path, std::ios::binary | std::ios::trunc);
+			if (!file)
+			{
+				readback->Unmap();
+				WLD_CORE_ERROR("[capture] cannot open {0}", pending.Path.string());
+				continue;
+			}
+			file << "P6\n" << pending.Width << " " << pending.Height << "\n255\n";
+			std::vector<uint8_t> row(static_cast<size_t>(pending.Width) * 3);
+			for (uint32_t y = 0; y < pending.Height; ++y)
+			{
+				const uint8_t* source = pixels + static_cast<size_t>(pending.Height - 1 - y) * pending.Width * 4;
+				for (uint32_t x = 0; x < pending.Width; ++x)
+				{
+					row[x * 3 + 0] = source[x * 4 + 0];
+					row[x * 3 + 1] = source[x * 4 + 1];
+					row[x * 3 + 2] = source[x * 4 + 2];
+				}
+				file.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size()));
+			}
+			readback->Unmap();
+			WLD_CORE_INFO("[capture] wrote present target {0} ({1}x{2})",
+				pending.Path.string(), pending.Width, pending.Height);
+		}
 	}
 
 	bool Renderer::CaptureTexture(const std::filesystem::path& path,

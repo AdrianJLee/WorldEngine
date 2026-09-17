@@ -732,6 +732,8 @@ namespace World
 			m_Shell.OnRender(m_WuiContext);
 			m_WuiContext.EndFrame();
 			wuiBackend.Render(m_WuiContext.Commands(), m_WuiContext.OverlayCommands());
+			// AI 控制通道的整窗抓图:UI 已提交、尚未做 →Present 布局转换/呈现。
+			Renderer::FlushPresentCaptures();
 		}
 		// 屏幕快照钩子(诊断无障碍化):把**用户实际看到的整个窗口**连续写成 PPM,
 		// 用于自动化诊断"闪烁"这类只在最终画面里可见的问题。
