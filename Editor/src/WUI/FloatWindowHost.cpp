@@ -97,6 +97,15 @@ namespace World
 		if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000))
 			m_PressSeenInWindow = false;
 
+		// 关键:面板内容(Renderer3D 预览通道、相机预览等)必须跑在**主窗口的 GL 上下文**里。
+		// RHI 管线/VAO 是主上下文创建并共享给所有窗口的,而 VAO 不随窗口共享上下文共享:
+		// 之前这里依赖"上一个窗口留下的当前上下文",于是**第二个及以后的独立窗口**会拿到
+		// 别的窗口的上下文 → 预览通道的绘制被静默丢弃(只剩清屏色,用户实测);
+		// 附加到主窗口时面板在主窗口里渲染,所以看起来正常。
+		Window* mainWindow = Application::HasInstance() ? &Application::Get().GetWindow() : nullptr;
+		if (mainWindow && mainWindow != m_Window)
+			mainWindow->MakeCurrent();
+
 		m_Backend.SetViewportSize(size);
 		Wui::WuiInputState input;
 		if (!m_Backend.BeginFrame(input))

@@ -33,6 +33,12 @@ namespace World::Rhi::OpenGL
 					static_cast<GLsizei>(desc.Extent.Depth));
 				break;
 		}
+		// 诊断(WLD_GL_TRACE_DRAW):把纹理 id/格式/尺寸记下来,便于和 FBO 附件、读回 id 对上号。
+		static const bool traceTextures = std::getenv("WLD_GL_TRACE_DRAW") != nullptr;
+		if (traceTextures)
+			WLD_CORE_INFO("[gl-tex] id={0} name='{1}' format={2} extent={3}x{4} ctx={5}", m_ID, desc.DebugName,
+				static_cast<int>(desc.Format), desc.Extent.Width, desc.Extent.Height,
+				reinterpret_cast<uintptr_t>(wglGetCurrentContext()));
 	}
 
 	OpenGLTexture::~OpenGLTexture()

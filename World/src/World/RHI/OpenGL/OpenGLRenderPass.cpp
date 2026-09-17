@@ -45,6 +45,21 @@ namespace World::Rhi::OpenGL
 
 		if (glCheckNamedFramebufferStatus(m_ID, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 			WLD_CORE_WARN("OpenGL framebuffer '{0}' is incomplete", desc.DebugName);
+		// 诊断(WLD_GL_TRACE_DRAW):把 FBO id 与它挂的纹理对起来 ——
+		// "预览画到了哪个目标、读回读的是哪张纹理"必须能对上号。
+		static const bool traceFramebuffers = std::getenv("WLD_GL_TRACE_DRAW") != nullptr;
+		if (traceFramebuffers)
+		{
+			std::string attachments;
+			for (size_t i = 0; i < m_AttachmentIDs.size(); ++i)
+			{
+				if (i)
+					attachments += ",";
+				attachments += std::to_string(m_AttachmentIDs[i]);
+			}
+			WLD_CORE_INFO("[gl-fbo] id={0} name='{1}' attachments=[{2}] ctx={3}", m_ID, desc.DebugName,
+				attachments, reinterpret_cast<uintptr_t>(wglGetCurrentContext()));
+		}
 	}
 
 	OpenGLFramebuffer::~OpenGLFramebuffer()

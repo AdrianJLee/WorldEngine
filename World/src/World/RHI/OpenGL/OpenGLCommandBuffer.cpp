@@ -30,7 +30,7 @@ namespace World::Rhi::OpenGL
 
 		// 把"刚结束的渲染通道"的颜色附件直接写 PPM(不经过 RHI 纹理读回),用于区分
 		// "通道根本没画进去"和"纹理读回读错了对象"。只抓 ≤512² 的离屏目标,每个 FBO 最多 2 张。
-		void DumpCurrentFramebuffer(const char* dir)
+		void DumpCurrentFramebuffer(const char* dir, const char* passName)
 		{
 			GLint fbo = 0;
 			GLint viewport[4] = { 0, 0, 0, 0 };
@@ -38,7 +38,7 @@ namespace World::Rhi::OpenGL
 			glGetIntegerv(GL_VIEWPORT, viewport);
 			const int width = viewport[2];
 			const int height = viewport[3];
-			if (fbo <= 0 || width <= 0 || height <= 0 || width > 512 || height > 512)
+			if (fbo <= 0 || width <= 0 || height <= 0 || width > 1024 || height > 1024)
 				return;
 			static int dumped[128] = {};
 			if (fbo >= 128 || dumped[fbo] >= 2)
@@ -47,8 +47,29 @@ namespace World::Rhi::OpenGL
 			GLint attached = 0;
 			glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 				GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attached);
-			WLD_CORE_INFO("[gl-dump] fbo={0} status=0x{1} colorAttachmentTexture={2}",
-				fbo, glCheckFramebufferStatus(GL_FRAMEBUFFER), attached);
+			GLint depthAttached = 0;
+			GLint depthType = 0;
+			glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+				GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &depthAttached);
+			glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+				GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &depthType);
+			WLD_CORE_INFO("[gl-dump] pass='{0}' fbo={1} depthAttachment=name:{2} type:0x{3}",
+				passName ? passName : "?", fbo, depthAttached, depthType);
+			// 深度范围:min < 清值(1.0) 说明**有片元真的过了深度测试**,
+			// 可用来区分"几何根本没光栅化"与"光栅化了但颜色没写进去"。
+			std::vector<float> depth(static_cast<size_t>(width) * height);
+			glReadPixels(0, 0, width, height, GL_DEPTH_COMPONENT, GL_FLOAT, depth.data());
+			float depthMin = 1.0f;
+			float depthMax = 0.0f;
+			for (float value : depth)
+			{
+				depthMin = std::min(depthMin, value);
+				depthMax = std::max(depthMax, value);
+			}
+			WLD_CORE_INFO("[gl-dump] pass='{0}' fbo={1} status=0x{2} colorAttachmentTexture={3}",
+				passName ? passName : "?", fbo, glCheckFramebufferStatus(GL_FRAMEBUFFER), attached);
+			WLD_CORE_INFO("[gl-dump] pass='{0}' fbo={1} depthRange=[{2}, {3}]",
+				passName ? passName : "?", fbo, depthMin, depthMax);
 			std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 3);
 			glReadBuffer(GL_COLOR_ATTACHMENT0);
 			glPixelStorei(GL_PACK_ALIGNMENT, 1);
@@ -362,6 +383,7 @@ namespace World::Rhi::OpenGL
 		Handle<Pipeline> currentPipeline;
 		IndexType indexType = IndexType::UInt32;
 		uint64_t indexBufferOffset = 0;
+		const char* currentPassName = nullptr;
 
 		for (const GLCommand& command : m_Commands)
 		{
@@ -382,6 +404,7 @@ namespace World::Rhi::OpenGL
 					if (!command.Pass)
 						break;
 					const auto& desc = command.Pass->GetDesc();
+					currentPassName = desc.DebugName.c_str();
 					if (desc.Subpasses.empty())
 						break;
 					const auto& subpass = desc.Subpasses[0];
@@ -400,31 +423,44 @@ namespace World::Rhi::OpenGL
 						const auto& attachment = desc.Attachments[attachmentIndex];
 						if (attachment.Load != LoadOp::Clear)
 							continue;
+						// 关键:glClearBuffer* 受**写入掩码**影响 —— 上一个绑定管线的 colorMask/depthMask
+						// 会静默吞掉这次 clear(实测:透明管线留下 depthMask=FALSE 后,下一个通道的
+						// 深度清零被跳过 → 深度全是 0 → LEQUAL 拒绝所有片元 → 画面只剩清屏色)。
+						// 清除前显式打开写掩码,后续管线绑定会重新设置自己的状态。
+						glColorMaski(static_cast<GLuint>(i), GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 						ClearColor color {};
 						if (attachmentIndex < clearCount)
 							color = command.Clears[attachmentIndex].Color;
 						if (IsIntegerFormat(attachment.Format))
-							glClearBufferiv(GL_COLOR, static_cast<GLint>(i), reinterpret_cast<const GLint*>(&color));
+							glClearNamedFramebufferiv(fbo, GL_COLOR, static_cast<GLint>(i),
+								reinterpret_cast<const GLint*>(&color));
 						else
-							glClearBufferfv(GL_COLOR, static_cast<GLint>(i), &color.R);
+							glClearNamedFramebufferfv(fbo, GL_COLOR, static_cast<GLint>(i), &color.R);
 					}
 					if (subpass.HasDepthStencil())
 					{
 						const auto& attachment = desc.Attachments[subpass.DepthStencilAttachment.Index];
 						if (attachment.Load == LoadOp::Clear)
 						{
+							// 同上:深度/模板清零同样受 depthMask / stencilMask 影响。
+							glDepthMask(GL_TRUE);
+							glStencilMask(0xFF);
 							ClearDepthStencil ds {};
 							if (subpass.DepthStencilAttachment.Index < clearCount &&
 								command.Clears[subpass.DepthStencilAttachment.Index].IsDepthStencil)
 								ds = command.Clears[subpass.DepthStencilAttachment.Index].DepthStencil;
-							glClearBufferfi(GL_DEPTH_STENCIL, 0, ds.Depth, static_cast<GLint>(ds.Stencil));
+							if (TraceDraws())
+								WLD_CORE_INFO("[gl-clear] fbo={0} depthIndex={1} clearCount={2} depth={3} stencil={4}",
+									fbo, subpass.DepthStencilAttachment.Index, clearCount, ds.Depth, ds.Stencil);
+							// 用 DSA 版本按 FBO 直接清除(不依赖当前绑定的 draw framebuffer 状态)。
+							glClearNamedFramebufferfi(fbo, GL_DEPTH_STENCIL, 0, ds.Depth, static_cast<GLint>(ds.Stencil));
 						}
 					}
 					break;
 				}
 				case GLCommandKind::EndRenderPass:
 					if (const char* dumpDir = FboDumpDir())
-						DumpCurrentFramebuffer(dumpDir);
+						DumpCurrentFramebuffer(dumpDir, currentPassName);
 					glBindFramebuffer(GL_FRAMEBUFFER, 0);
 					break;
 				case GLCommandKind::SetViewport:
@@ -497,28 +533,46 @@ namespace World::Rhi::OpenGL
 					// WLD_GL_TRACE_DRAW=1:记录一次绘制的 program/VAO/FBO/视口/裁剪与关键状态。
 					// "命令录了、没报错、画面却是清屏色"时,只有这些数据能区分
 					// "几何被剔除/深度拒绝/颜色写被关/画到了别的目标"。
+					GLint traceFbo = 0;
+					GLint traceViewport[4] = { 0, 0, 0, 0 };
 					if (TraceDraws())
 					{
-						static int traced = 0;
-						if (traced < 48)
+						glGetIntegerv(GL_FRAMEBUFFER_BINDING, &traceFbo);
+						glGetIntegerv(GL_VIEWPORT, traceViewport);
+						// 只记录离屏目标(场景目标 / 预览目标 / 独立窗口后端目标),
+						// 窗口默认帧缓冲(fbo=0)的 UI 绘制会瞬间打满条数上限。
+						// 大网格(预览球 6912 索引)单独计数,避免被 UI 绘制挤掉。
+						static int tracedOther = 0;
+						static std::unordered_map<GLint, int> tracedMeshPerFbo;
+						const bool bigMesh = command.Count0 >= 4096;
+						// 大网格(预览球)按 FBO 分别限流:每个离屏目标都能留下前 10 次绘制,
+						// 否则第一个面板的逐帧绘制会把条数吃光,看不到第二个面板。
+						const bool log = traceFbo != 0
+							&& (bigMesh ? tracedMeshPerFbo[traceFbo] < 10 : tracedOther < 120);
+						if (log)
 						{
 							GLint program = 0, vao = 0, fbo = 0, viewport[4] = { 0 }, scissor[4] = { 0 };
 							glGetIntegerv(GL_CURRENT_PROGRAM, &program);
 							glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
-							glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
-							glGetIntegerv(GL_VIEWPORT, viewport);
+							fbo = traceFbo;
+							for (int i = 0; i < 4; ++i)
+								viewport[i] = traceViewport[i];
 							glGetIntegerv(GL_SCISSOR_BOX, scissor);
 							GLint depthFunc = 0, colorMask[4] = { 0 };
 							glGetIntegerv(GL_DEPTH_FUNC, &depthFunc);
 							glGetIntegerv(GL_COLOR_WRITEMASK, colorMask);
 							WLD_CORE_INFO("[gl-draw] program={0} vao={1} fbo={2} count={3} vp=({4},{5},{6},{7}) "
-								"scissor=({8},{9},{10},{11}) blend0={12} depthTest={13} depthFunc=0x{14} colorMask={15}{16}{17}{18}",
+								"scissor=({8},{9},{10},{11}) blend0={12} depthTest={13} depthFunc=0x{14} colorMask={15}{16}{17}{18} ctx={19}",
 								program, vao, fbo, command.Count0, viewport[0], viewport[1], viewport[2], viewport[3],
 								scissor[0], scissor[1], scissor[2], scissor[3],
 								glIsEnabledi(GL_BLEND, 0) != GL_FALSE ? 1 : 0,
 								glIsEnabled(GL_DEPTH_TEST) != GL_FALSE ? 1 : 0, depthFunc,
-								colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
-							++traced;
+								colorMask[0], colorMask[1], colorMask[2], colorMask[3],
+								reinterpret_cast<uintptr_t>(wglGetCurrentContext()));
+							if (bigMesh)
+								++tracedMeshPerFbo[traceFbo];
+							else
+								++tracedOther;
 						}
 					}
 					glDrawElementsInstancedBaseVertexBaseInstance(topology, command.Count0, type, offset,
