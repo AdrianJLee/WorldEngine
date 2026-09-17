@@ -10,6 +10,14 @@ Entity = {}
 ---@param componentType string Registered component type name.
 function Entity:AddComponent(componentType) end
 
+---Apply a force to this entity's dynamic 2D rigid body (also wakes it); raises when the entity has no live body or the 2D physics world is not running.
+---@param force vec2 Force vector in newtons, applied at the centre of mass for one step.
+function Entity:ApplyForce(force) end
+
+---Apply a linear impulse to this entity's dynamic 2D rigid body (also wakes it); raises when the entity has no live body or the 2D physics world is not running.
+---@param impulse vec2 Impulse vector in kilogram-metres per second, applied at the centre of mass.
+function Entity:ApplyLinearImpulse(impulse) end
+
 ---Detach this entity to the scene root synchronously; returns false when the handle is invalid.
 ---@return boolean
 function Entity:ClearParent() end
@@ -29,6 +37,10 @@ function Entity:Destroy() end
 ---@return Entity|nil
 function Entity:FindByName(name) end
 
+---Return the Box2D angular velocity (radians per second) of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running.
+---@return number
+function Entity:GetAngularVelocity() end
+
 ---Return direct children in HierarchyComponent order (immediate live query).
 ---@return Entity[]
 function Entity:GetChildren() end
@@ -41,6 +53,10 @@ function Entity:GetComponent(componentType) end
 ---Return this entity's runtime handle (including its generation), not a persistent UUID.
 ---@return integer
 function Entity:GetID() end
+
+---Return the Box2D linear velocity (metres per second) of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running.
+---@return vec2
+function Entity:GetLinearVelocity() end
 
 ---Return the TagComponent name; raises a readable error when the tag is missing.
 ---@return string
@@ -68,6 +84,14 @@ function Entity:IsValid() end
 ---@param componentType string Registered component type name.
 function Entity:RemoveComponent(componentType) end
 
+---Set the angular velocity of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running.
+---@param velocity number New angular velocity in radians per second.
+function Entity:SetAngularVelocity(velocity) end
+
+---Set the linear velocity of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running.
+---@param velocity vec2 New linear velocity in metres per second.
+function Entity:SetLinearVelocity(velocity) end
+
 ---Set the TagComponent name immediately; this is data, not a structural write.
 ---@param name string New TagComponent name.
 function Entity:SetName(name) end
@@ -76,6 +100,9 @@ function Entity:SetName(name) end
 ---@param parent Entity New parent entity in the same scene.
 ---@return boolean
 function Entity:SetParent(parent) end
+
+---Teleport this entity's 2D rigid body to the current Transform location/rotation (Z radian) and wake it; used for kinematic/static bodies; raises when the entity has no live body or the 2D physics world is not running.
+function Entity:SyncPhysicsBody() end
 
 ---@class mat3
 ---@field [integer] vec3 Column access uses zero-based indices 0 through 2; other indices raise a Lua error.

@@ -11,6 +11,7 @@
 #include "World/Script/ScriptValue.h"
 #include "LuaTypeHelpers.h"
 
+#include <box2d/box2d.h>
 #include <filesystem>
 #include <new>
 #include <stdexcept>
@@ -58,6 +59,14 @@ namespace World
 				|| component == entt::type_id<HierarchyComponent>().hash();
 		}
 
+		// W3f:2D 物理组件在脚本回调内也允许同步新增(实体层补建 Box2D 刚体)。
+		bool IsPhysicsComponent(entt::id_type component)
+		{
+			return component == entt::type_id<RigidBody2DComponent>().hash()
+				|| component == entt::type_id<BoxCollider2DComponent>().hash()
+				|| component == entt::type_id<CircleCollider2DComponent>().hash();
+		}
+
 		// 相对路径先按内容根解析;绝对路径原样使用(与 ScriptEngine 读脚本源码同一口径)。
 		std::string ResolvePrefabPath(const std::string& path)
 		{
@@ -80,6 +89,58 @@ namespace World
 				return fn();
 			}
 			return fn();
+		}
+
+		// ---- W3f:2D 物理运行时 API 的参数/前置条件 ----
+		// 错误文本与 Entity 其它方法的既有口径一致:Entity:<方法名> + 可读原因。
+		// 返回 Box2D 刚体句柄(不是组件引用):调用方只读组件,避免在回调内触发结构写检查。
+		b2BodyId RequirePhysicsBody(Entity& entity, const char* operation)
+		{
+			if (!entity.IsValid())
+				throw std::logic_error(std::string("Entity:") + operation + " requires a live entity");
+			// 用 const registry:非 const 重载带 AssertStructuralWrite,而物理读写可以从脚本回调内调用。
+			const Scene& scene = *entity.GetScene();
+			auto* body = scene.GetRegistry().try_get<RigidBody2DComponent>(static_cast<entt::entity>(entity));
+			if (!body)
+				throw std::logic_error(std::string("Entity:") + operation +
+					" requires a 2D rigid body; this entity has no RigidBody2DComponent");
+			if (!scene.IsPhysics2DRunning())
+				throw std::logic_error(std::string("Entity:") + operation +
+					" requires a running 2D physics world; start the runtime first");
+			if (!b2Body_IsValid(body->RuntimeBodyId))
+				throw std::logic_error(std::string("Entity:") + operation +
+					" has a RigidBody2DComponent but no live Box2D body; this entity was not added to the running world");
+			return body->RuntimeBodyId;
+		}
+
+		glm::vec2 RequireVec2(const ScriptValue* args, std::size_t count, const char* operation, std::size_t index)
+		{
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			glm::vec2* value = nullptr;
+			if (count <= index || !bindings.Unwrap<glm::vec2>("vec2", args[index], &value) || !value)
+				throw std::logic_error(std::string("Entity:") + operation + " expects a vec2");
+			return *value;
+		}
+
+		float RequireFiniteFloat(const ScriptValue* args, std::size_t count, const char* operation, std::size_t index)
+		{
+			if (count <= index || !args[index].IsNumber())
+				throw std::logic_error(std::string("Entity:") + operation + " expects a number");
+			const double number = RequireNumber(args[index], operation);
+			if (!std::isfinite(number))
+				throw std::logic_error(std::string("Entity:") + operation + " expects a finite number");
+			return static_cast<float>(number);
+		}
+
+		ScriptValue Box2DVec2ToScript(const b2Vec2& value)
+		{
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			ScriptValue result = bindings.NewUserdata("vec2");
+			glm::vec2* target = nullptr;
+			if (!bindings.Unwrap<glm::vec2>("vec2", result, &target) || !target)
+				throw std::logic_error("vec2: failed to allocate a script value");
+			new (target) glm::vec2(value.x, value.y);
+			return result;
 		}
 	}
 
@@ -104,7 +165,14 @@ namespace World
 			{ "GetComponent", { { "componentType", "string", "Registered component type name." } }, "userdata|nil", "Return a schema-driven field proxy, or nil when the component is absent. Every field access re-checks the entity and component; writes type-check against the schema." },
 			{ "AddComponent", { { "componentType", "string", "Registered component type name." } }, "", "Add a default component. Pure-data components (Transform/Sprite/Circle/MeshRenderer/Camera/Hierarchy) commit synchronously inside callbacks; script/physics components keep their existing deferred or rejected rules." },
 			{ "RemoveComponent", { { "componentType", "string", "Registered component type name." } }, "", "Remove the component through scene cleanup; requests during callbacks are deferred and duplicates are ignored." },
-			{ "Destroy", {}, "", "Destroy this entity through scene cleanup; requests during callbacks are deferred and duplicates are ignored." }
+			{ "Destroy", {}, "", "Destroy this entity through scene cleanup; requests during callbacks are deferred and duplicates are ignored." },
+			{ "GetLinearVelocity", {}, "vec2", "Return the Box2D linear velocity (metres per second) of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running." },
+			{ "SetLinearVelocity", { { "velocity", "vec2", "New linear velocity in metres per second." } }, "", "Set the linear velocity of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running." },
+			{ "GetAngularVelocity", {}, "number", "Return the Box2D angular velocity (radians per second) of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running." },
+			{ "SetAngularVelocity", { { "velocity", "number", "New angular velocity in radians per second." } }, "", "Set the angular velocity of this entity's 2D rigid body; raises when the entity has no live body or the 2D physics world is not running." },
+			{ "ApplyLinearImpulse", { { "impulse", "vec2", "Impulse vector in kilogram-metres per second, applied at the centre of mass." } }, "", "Apply a linear impulse to this entity's dynamic 2D rigid body (also wakes it); raises when the entity has no live body or the 2D physics world is not running." },
+			{ "ApplyForce", { { "force", "vec2", "Force vector in newtons, applied at the centre of mass for one step." } }, "", "Apply a force to this entity's dynamic 2D rigid body (also wakes it); raises when the entity has no live body or the 2D physics world is not running." },
+			{ "SyncPhysicsBody", {}, "", "Teleport this entity's 2D rigid body to the current Transform location/rotation (Z radian) and wake it; used for kinematic/static bodies; raises when the entity has no live body or the 2D physics world is not running." }
 		};
 		type.BindFunc = [](ScriptBindingContext& bindings)
 		{
@@ -301,14 +369,15 @@ namespace World
 						if (scene->IsActive())
 						{
 							// W3d:白名单纯数据组件在回调内同步提交,当帧即可读/渲染;
+							// W3f:2D 物理组件(刚性体/碰撞体)走同一条白名单路径,由实体层立即补建 Box2D 刚体;
 							// 其余组件保持既有延迟提交(提交点/下一帧生效)。
-							if (scene->IsInsideScriptCallback() && IsSynchronousScriptComponent(componentId))
+							// 注意:实体层的 CheckAdd 只在回调内放行物理组件,提交点仍按既有规则拒绝。
+							if (scene->IsInsideScriptCallback() &&
+								(IsSynchronousScriptComponent(componentId) || IsPhysicsComponent(componentId)))
 							{
 								Scene::ScriptWriteScope scope(*scene);
 								Entity handle = *entity;
-								if (!schema.Storage->Add)
-									throw std::logic_error("Entity:AddComponent '" + typeName + "' has no storage binding");
-								schema.Storage->Add(static_cast<void*>(&handle));
+								handle.AddComponent(componentId);
 								return ScriptValue::Nil();
 							}
 							// Capture only a lifetime-checked handle and a type ID, never a component pointer.
@@ -338,6 +407,58 @@ namespace World
 						Entity* entity = Receiver(context, args, count, "Destroy");
 						RequireEntity(*entity, "Destroy");
 						Entity::DestroyEntity(entity->GetScene(), *entity);
+						return ScriptValue::Nil();
+					} },
+				{ "GetLinearVelocity", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "GetLinearVelocity");
+						return Box2DVec2ToScript(b2Body_GetLinearVelocity(RequirePhysicsBody(*entity, "GetLinearVelocity")));
+					} },
+				{ "SetLinearVelocity", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "SetLinearVelocity");
+						const glm::vec2 velocity = RequireVec2(args, count, "SetLinearVelocity", 1);
+						b2Body_SetLinearVelocity(RequirePhysicsBody(*entity, "SetLinearVelocity"), { velocity.x, velocity.y });
+						return ScriptValue::Nil();
+					} },
+				{ "GetAngularVelocity", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "GetAngularVelocity");
+						return ScriptValue::Number(b2Body_GetAngularVelocity(RequirePhysicsBody(*entity, "GetAngularVelocity")));
+					} },
+				{ "SetAngularVelocity", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "SetAngularVelocity");
+						const float velocity = RequireFiniteFloat(args, count, "SetAngularVelocity", 1);
+						b2Body_SetAngularVelocity(RequirePhysicsBody(*entity, "SetAngularVelocity"), velocity);
+						return ScriptValue::Nil();
+					} },
+				{ "ApplyLinearImpulse", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "ApplyLinearImpulse");
+						const glm::vec2 impulse = RequireVec2(args, count, "ApplyLinearImpulse", 1);
+						b2Body_ApplyLinearImpulseToCenter(RequirePhysicsBody(*entity, "ApplyLinearImpulse"), { impulse.x, impulse.y }, true);
+						return ScriptValue::Nil();
+					} },
+				{ "ApplyForce", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "ApplyForce");
+						const glm::vec2 force = RequireVec2(args, count, "ApplyForce", 1);
+						b2Body_ApplyForceToCenter(RequirePhysicsBody(*entity, "ApplyForce"), { force.x, force.y }, true);
+						return ScriptValue::Nil();
+					} },
+				{ "SyncPhysicsBody", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "SyncPhysicsBody");
+						RequirePhysicsBody(*entity, "SyncPhysicsBody");
+						entity->GetScene()->SyncPhysicsBodyFromTransform(static_cast<entt::entity>(*entity));
 						return ScriptValue::Nil();
 					} },
 			};

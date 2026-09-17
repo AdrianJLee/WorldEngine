@@ -81,7 +81,11 @@ namespace World
 			return Reject(reason, "Stop the scene or remove the old script before replacing its configuration");
 		const bool physics = component == entt::type_id<RigidBody2DComponent>().hash() ||
 			component == entt::type_id<BoxCollider2DComponent>().hash() || component == entt::type_id<CircleCollider2DComponent>().hash();
-		if (m_Scene->IsActive() && physics)
+		// W3f 例外:脚本生命周期回调内新增刚性体/碰撞体允许同步提交并立即补建 Box2D 刚体
+		// (与 W3d 纯数据组件同一条 ScriptWriteScope 白名单路径);其它活动场景入口保持既有拒绝。
+		const bool physicsRuntimeAdd = physics && m_Scene->IsActive() &&
+			(m_Scene->IsInsideScriptCallback() || m_Scene->IsInsideScriptWriteScope());
+		if (m_Scene->IsActive() && physics && !physicsRuntimeAdd)
 			return Reject(reason, "Adding or replacing physics components requires a stopped scene");
 		if (requireDependencies && (physics || component == entt::type_id<CameraComponent>().hash()) && !HasComponent<TransformComponent>())
 			return Reject(reason, "This component requires a Transform component");
@@ -119,11 +123,17 @@ namespace World
 	void Entity::AddComponent(entt::id_type componentId, const void* data)
 	{
 		RequireValid();
+		const bool physicsComponent = componentId == entt::type_id<RigidBody2DComponent>().hash() ||
+			componentId == entt::type_id<BoxCollider2DComponent>().hash() ||
+			componentId == entt::type_id<CircleCollider2DComponent>().hash();
 		std::string reason;
 		if (!CheckAdd(componentId, false, true, &reason)) throw std::logic_error(reason);
 		const Schema::TypeSchema* schema = FindComponentSchema(m_Scene, componentId);
 		if (!schema || !schema->Storage || !schema->Storage->Add) throw std::logic_error("Type is not a registered component");
-		if (!data && m_Scene->m_CallbackDepth)
+		// W3f:脚本回调内或 ScriptWriteScope(结构提交点白名单)内的新增走下面的同步路径
+		// (当帧可见);其余情况保持既有延迟语义。
+		if (!data && m_Scene->m_CallbackDepth && !m_Scene->IsInsideScriptCallback() &&
+			!m_Scene->IsInsideScriptWriteScope())
 		{
 			Entity target = *this;
 			if (!m_Scene->DeferStructuralChange([target, componentId](Scene&) mutable
@@ -132,13 +142,36 @@ namespace World
 				})) throw std::logic_error("Scene rejected the component addition request");
 			return;
 		}
-		m_Scene->AssertStructuralWrite();
-		if (data)
+		// W3f:活动场景里的物理组件同步新增只允许在脚本回调内(CheckAdd 已放行),
+		// 并且新增后立即补建 Box2D 刚体;碰撞体要求同实体已有 RigidBody2DComponent。
+		// 抛异常的位置都放在 ScriptWriteScope 之外,避免把异常从析构路径带出去。
+		auto* componentStorage = data ? m_Scene->m_Registry.storage(componentId) : nullptr;
+		if (data && !componentStorage) throw std::logic_error("Data-bearing component addition requires existing storage");
+		const bool physicsRuntimeAdd = physicsComponent && m_Scene->IsActive();
+		if (physicsRuntimeAdd && !m_Scene->IsInsideScriptCallback() && !m_Scene->IsInsideScriptWriteScope())
+			throw std::logic_error("Adding physics components at runtime is only allowed inside script callbacks or an explicit script write scope");
+		if (physicsRuntimeAdd && componentId != entt::type_id<RigidBody2DComponent>().hash())
 		{
-			auto* storage = m_Scene->m_Registry.storage(componentId);
-			if (!storage) throw std::logic_error("Data-bearing component addition requires existing storage");
-			storage->push(m_EntityHandle, data);
+			const Schema::TypeSchema* bodySchema = FindComponentSchema(m_Scene, entt::type_id<RigidBody2DComponent>().hash());
+			auto* bodyStorage = bodySchema && bodySchema->Storage
+				? m_Scene->m_Registry.storage(bodySchema->Storage->ComponentId)
+				: nullptr;
+			if (!bodyStorage || !bodyStorage->contains(m_EntityHandle))
+				throw std::logic_error("Adding a 2D collider at runtime requires the entity to already have a RigidBody2DComponent");
 		}
+
+		if (physicsRuntimeAdd)
+		{
+			// ScriptWriteScope 放行脚本回调内的同步结构写(与 W3d 纯数据组件同一条路径)。
+			Scene::ScriptWriteScope scope(*m_Scene);
+			if (data) componentStorage->push(m_EntityHandle, data);
+			else schema->Storage->Add(static_cast<void*>(this));
+			m_Scene->EnsurePhysicsBody(m_EntityHandle);
+			return;
+		}
+
+		m_Scene->AssertStructuralWrite();
+		if (data) componentStorage->push(m_EntityHandle, data);
 		else schema->Storage->Add(static_cast<void*>(this));
 	}
 

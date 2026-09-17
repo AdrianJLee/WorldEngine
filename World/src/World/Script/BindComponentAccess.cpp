@@ -7,6 +7,7 @@
 #include "World/Script/ScriptBindingContext.h"
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <new>
 #include <stdexcept>
@@ -14,20 +15,29 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace World
 {
 	namespace
 	{
-		// 字段代理载荷:只存"弱生命周期实体句柄 + 组件 id + 诊断用类型名"。
-		// 每次字段访问都重新解析 schema 与组件地址,所以实体销毁/组件移除/场景析构之后
-		// 访问代理只会得到可读错误,不会留下悬垂指针(schema 注册表也用 id 反查,
-		// 不缓存 TypeSchema* —— SchemaRegistry 的条目存在 vector 里,追加注册会让旧指针失效)。
+		// W3e:嵌套对象字段代理的最大深度(字段段数)。SceneCamera 这类一层嵌套远低于上限;
+		// 上限存在的意义是给"自引用/环形嵌套"一个确定的可读错误,而不是无限递归。
+		constexpr std::size_t kMaxNestedProxyDepth = 4;
+
+		// 字段代理载荷:只存"弱生命周期实体句柄 + 组件 id + 诊断用类型名 + 嵌套字段路径"。
+		// 每次字段访问都重新从根组件沿路径解析 schema 与实例地址,所以实体销毁/组件移除/
+		// 场景析构/嵌套链中途换类型之后访问代理只会得到可读错误,不会留下悬垂指针
+		// (schema 注册表也用 id/名字反查,不缓存 TypeSchema* —— SchemaRegistry 的条目存在
+		// vector 里,追加注册会让旧指针失效)。
 		struct ComponentProxy
 		{
 			Entity Owner;
 			uint32_t ComponentId = 0;
 			std::string ComponentName;
+			// 空 = 组件根代理(Entity:GetComponent 的返回值);非空 = 从 ComponentName 起逐层
+			// 解引用的 Object 字段路径(例:{"Camera"})。路径长度 <= kMaxNestedProxyDepth。
+			std::vector<std::string> Path;
 		};
 
 		struct ResolvedProxy
@@ -35,6 +45,7 @@ namespace World
 			ComponentProxy* Proxy = nullptr;
 			const Schema::TypeSchema* Type = nullptr;
 			void* Instance = nullptr;
+			Scene* OwnerScene = nullptr;
 		};
 
 		const char* SchemaKindName(Schema::Kind kind)
@@ -73,9 +84,17 @@ namespace World
 			return "Unknown";
 		}
 
+		std::string DescribeProxy(const ComponentProxy& proxy)
+		{
+			std::string name = proxy.ComponentName;
+			for (const std::string& segment : proxy.Path)
+				name += "." + segment;
+			return name;
+		}
+
 		[[noreturn]] void Fail(const ComponentProxy& proxy, const std::string& message)
 		{
-			throw std::logic_error("ComponentProxy(" + proxy.ComponentName + "): " + message);
+			throw std::logic_error("ComponentProxy(" + DescribeProxy(proxy) + "): " + message);
 		}
 
 		const Schema::FieldSchema* FindField(const Schema::TypeSchema& type, const std::string& name)
@@ -127,7 +146,76 @@ namespace World
 			void* instance = proxy->Owner.GetComponent(proxy->ComponentId);
 			if (!instance)
 				Fail(*proxy, "the component was removed from the entity; call Entity:GetComponent again");
-			return { proxy, type, instance };
+
+			// W3e:嵌套代理逐段重解析。链中任一段不再是同一个已注册嵌套类型 → 可读错误
+			// (不做静默回退,避免脚本拿到一个语义不明的旧值)。
+			for (std::size_t index = 0; index < proxy->Path.size(); ++index)
+			{
+				const Schema::FieldSchema* field = FindField(*type, proxy->Path[index]);
+				if (!field || field->K != Schema::Kind::Object)
+					Fail(*proxy, "nested field '" + proxy->Path[index] + "' is no longer a schema object field; call Entity:GetComponent again");
+				if (!field->GetPtr || !field->GetPtrConst || !field->GetNested)
+					Fail(*proxy, "nested field '" + proxy->Path[index] + "' has no schema accessors; call Entity:GetComponent again");
+				const Schema::TypeSchema* nested = field->GetNested();
+				if (!nested)
+					Fail(*proxy, "nested field '" + proxy->Path[index] + "' has no registered nested type; call Entity:GetComponent again");
+				void* nestedInstance = field->GetPtr(instance);
+				if (!nestedInstance)
+					Fail(*proxy, "nested field '" + proxy->Path[index] + "' is no longer available on the component; call Entity:GetComponent again");
+				type = nested;
+				instance = nestedInstance;
+			}
+			return { proxy, type, instance, scene };
+		}
+
+		// 字段是否是"可代理的嵌套对象":Object + 已注册嵌套类型 + 有字段。
+		// UUID 身份字段的嵌套类型没有字段,因此这里天然为 false(走既有的只读字符串路径)。
+		bool IsProxyObject(const ComponentProxy& proxy, const Schema::FieldSchema& field, Scene& scene)
+		{
+			if (field.K != Schema::Kind::Object)
+				return false;
+			const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
+			if (!nested || nested->Fields.empty())
+				return false;
+			// UUID 身份字段由 DescribeScriptField 判定(只读字符串),永远不做嵌套代理。
+			if (nested->Id.Name == "World::UUID" || nested->DisplayName == "UUID")
+				return false;
+			// 只有当前场景注册表里存在的类型才能被代理:未注册类型保持"可读错误",不静默给 nil 代理。
+			const Schema::TypeSchema* registered = scene.GetContext().Schemas().Find(nested->Id.Name);
+			if (!registered || registered->Id.Hash != nested->Id.Hash)
+				return false;
+			// 类型自引用/环形嵌套:深度上限给出确定错误,不做无限解引用。
+			if (proxy.Path.size() >= kMaxNestedProxyDepth)
+				Fail(proxy, "nested object field '" + field.Name + "' exceeds the maximum nested proxy depth (" +
+					std::to_string(kMaxNestedProxyDepth) +
+					" field segments); deeply nested or self-referencing schema objects are not exposed to scripts");
+			return true;
+		}
+
+		// 为 Object 字段构造嵌套代理(路径追加一段)。立即解析一次:结构异常在字段访问处就报错,
+		// 而不是留一个后续才失败的"僵尸代理"。
+		ScriptValue MakeNestedProxy(ScriptBindingContext& bindings, const ComponentProxy& parent,
+			const Schema::FieldSchema& field, const ResolvedProxy& resolved)
+		{
+			if (!field.GetPtr || !field.GetPtrConst || !field.GetNested)
+				Fail(parent, "nested object field '" + field.Name + "' has no schema accessors");
+			void* nestedInstance = field.GetPtr(resolved.Instance);
+			if (!nestedInstance)
+				Fail(parent, "nested object field '" + field.Name + "' is not available on the component");
+
+			ComponentProxy payload;
+			payload.Owner = parent.Owner;
+			payload.ComponentId = parent.ComponentId;
+			payload.ComponentName = parent.ComponentName;
+			payload.Path = parent.Path;
+			payload.Path.push_back(field.Name);
+
+			const ScriptValue value = bindings.NewUserdata(ComponentProxyLuaTypeName);
+			ComponentProxy* target = nullptr;
+			if (!bindings.Unwrap<ComponentProxy>(ComponentProxyLuaTypeName, value, &target) || !target)
+				throw std::logic_error("ComponentProxy: failed to allocate the nested component proxy userdata");
+			new (target) ComponentProxy(std::move(payload));
+			return value;
 		}
 
 		std::string RequireFieldName(const ScriptValue* args, std::size_t argCount, const ComponentProxy& proxy)
@@ -157,11 +245,15 @@ namespace World
 		// 字段写入后的派生状态刷新。与 PropertiesPanel::DrawComponentInspector 的既有约定一致:
 		// TransformComponent 的 Transform 矩阵是派生缓存(Hierarchy.cpp 用 transform->Transform 计算
 		// 世界矩阵),只改 Location/Rotation/Scale 必须重算,否则层次与渲染仍读到旧矩阵。
+		// W3e:CameraComponent.Camera(SceneCamera 嵌套结构)的投影矩阵同样要在字段写入后重算,
+		// 所以这里按"叶实例的类型"判定 —— 嵌套写入时传的就是解析后的 SceneCamera 实例。
 		// 遗留:这是按类型名的表;后续应把 PostSet/OnChanged 钩子放进 schema,见 W3a-1 报告。
-		void NotifyComponentFieldsChanged(const Schema::TypeSchema& type, void* instance)
+		void NotifyComponentFieldsChanged(const Schema::TypeSchema& leafType, void* leafInstance)
 		{
-			if (type.Id.Name == "World::TransformComponent")
-				static_cast<TransformComponent*>(instance)->RecalculateTransform();
+			if (leafType.Id.Name == "World::TransformComponent")
+				static_cast<TransformComponent*>(leafInstance)->RecalculateTransform();
+			else if (leafType.Id.Name == "World::SceneCamera")
+				static_cast<SceneCamera*>(leafInstance)->ApplyEdit();
 		}
 
 		ScriptValue ComponentProxyIndex(const ScriptValue* args, std::size_t argCount)
@@ -172,12 +264,16 @@ namespace World
 			const Schema::FieldSchema* field = FindField(*resolved.Type, name);
 			if (!field)
 				Fail(*resolved.Proxy, "no field '" + name + "'; schema fields: " + DescribeFields(*resolved.Type));
+			// UUID 身份字段排在嵌套代理之前:它的 Object 只是值的包装,脚本侧语义仍是只读十进制字符串。
 			const ScriptFieldMapping mapping = DescribeScriptField(*field);
+			if (mapping.UuidIdentity)
+				return ScriptValue::String(ReadUuidIdentity(*resolved.Proxy, *field, resolved.Instance));
+			// W3e:嵌套对象字段在读路径上先于叶值映射判定,返回嵌套字段代理。
+			if (IsProxyObject(*resolved.Proxy, *field, *resolved.OwnerScene))
+				return MakeNestedProxy(bindings, *resolved.Proxy, *field, resolved);
 			if (!mapping.LuaTypeName)
 				Fail(*resolved.Proxy, "field '" + name + "' has schema kind '" + SchemaKindName(field->K) +
 					"' which has no script mapping yet");
-			if (mapping.UuidIdentity)
-				return ScriptValue::String(ReadUuidIdentity(*resolved.Proxy, *field, resolved.Instance));
 			if (!field->Get)
 				Fail(*resolved.Proxy, "field '" + name + "' has no schema getter");
 			return SchemaValueToScript(bindings, *field, field->Get(resolved.Instance));
@@ -193,6 +289,16 @@ namespace World
 			const Schema::FieldSchema* field = FindField(*resolved.Type, name);
 			if (!field)
 				Fail(*resolved.Proxy, "no field '" + name + "'; schema fields: " + DescribeFields(*resolved.Type));
+			// W3e:嵌套对象字段是只读的结构入口(读它拿嵌套代理,写它只会得到可读错误)。
+			if (IsProxyObject(*resolved.Proxy, *field, *resolved.OwnerScene))
+			{
+				if (field->Meta.ReadOnly)
+					Fail(*resolved.Proxy, "field '" + name + "' is marked ReadOnly by its schema");
+				if (field->Meta.Transient)
+					Fail(*resolved.Proxy, "field '" + name + "' is transient (derived state); write its source field instead");
+				Fail(*resolved.Proxy, "field '" + name + "' is a nested schema object and is read-only for scripts; " +
+					"write one of its leaf fields instead (for example component.<field>.<leaf>)");
+			}
 			const ScriptFieldMapping mapping = DescribeScriptField(*field);
 			if (!mapping.LuaTypeName)
 				Fail(*resolved.Proxy, "field '" + name + "' has schema kind '" + SchemaKindName(field->K) +
@@ -220,6 +326,7 @@ namespace World
 				Fail(*resolved.Proxy, error.what());
 			}
 			field->Set(resolved.Instance, value);
+			// 派生状态按"叶实例的类型"刷新:组件根写入传组件实例,嵌套写入传嵌套实例。
 			NotifyComponentFieldsChanged(*resolved.Type, resolved.Instance);
 			return ScriptValue::Nil();
 		}
@@ -230,7 +337,7 @@ namespace World
 			ComponentProxy* proxy = nullptr;
 			if (argCount < 1 || !bindings.Unwrap<ComponentProxy>(ComponentProxyLuaTypeName, args[0], &proxy) || !proxy)
 				return ScriptValue::String("ComponentProxy");
-			return ScriptValue::String("ComponentProxy(" + proxy->ComponentName + ")");
+			return ScriptValue::String("ComponentProxy(" + DescribeProxy(*proxy) + ")");
 		}
 
 		bool RequireBool(const Schema::FieldSchema& field, const ScriptValue& value)
@@ -345,7 +452,11 @@ namespace World
 				mapping.ReadOnly = true;
 				mapping.UuidIdentity = true;
 			}
-			break;   // 其它嵌套结构本包未映射
+			// W3e:其它嵌套结构是"可代理"的 Object(具体是否可用还要看嵌套类型是否在当前
+			// 场景注册表里);LuaTypeName 保持 nullptr,由代理读路径返回嵌套代理而不是叶值。
+			else if (nested && !nested->Fields.empty())
+				mapping.NestedObject = true;
+			break;   // 空嵌套结构(未注册类型)仍无脚本映射
 		}
 		default:
 			break;   // None / IVec* / UVec* / Quat:本包未映射(读写都会给出可读错误)

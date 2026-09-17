@@ -18,12 +18,18 @@ namespace World
 		const char* LuaTypeName = nullptr;   // nullptr = 本包未映射:读/写都会给出可读错误
 		bool ReadOnly = false;               // 脚本侧只读(身份类字段);读仍然可用
 		bool UuidIdentity = false;           // Object(UUID):读=十进制字符串(与 PropertiesPanel 同口径)
+		// W3e:Object(嵌套 Struct/Component)字段。读返回嵌套字段代理(同一套 schema 驱动读写),
+		// 不是叶值;具体可用性还要求嵌套 TypeSchema 已在当前场景注册(见代理 __index/__newindex)。
+		// 注意:LuaTypeName 对这类字段保持 nullptr,存根注解沿用既有的 "unknown + no script mapping"
+		// 占位口径(存量基线断言不变),嵌套能力只体现在运行时字段代理上。
+		bool NestedObject = false;
 	};
 
 	// Entity:GetComponent 返回的字段代理在 Lua 里的类型名(typeof 见 __type)。
 	inline constexpr const char* ComponentProxyLuaTypeName = "ComponentProxy";
 
-	// Kind → 脚本类型;Object 只在嵌套类型是 UUID(实体身份)时映射成只读字符串,其余未映射。
+	// Kind → 脚本类型;Object 在嵌套类型是 UUID(实体身份)时映射成只读字符串,
+	// 其余已注册的嵌套结构置 NestedObject(读返回嵌套字段代理,不是叶值映射)。
 	WLD_API ScriptFieldMapping DescribeScriptField(const Schema::FieldSchema& field);
 
 	// 读路径:Schema::Value → 脚本值(vec/mat 复用现有脚本可见的 userdata 类型)。

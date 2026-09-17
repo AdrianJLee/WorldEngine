@@ -189,6 +189,48 @@ set_tests_properties(World.ScriptHotReload PROPERTIES
     TIMEOUT 90
 )
 
+# P2 W3e:相机字段的嵌套对象代理(CameraComponent.Camera → SceneCamera;headless)。
+add_executable(WorldLuauCameraBindingTests LuauCameraBindingTests.cpp)
+target_link_libraries(WorldLuauCameraBindingTests PRIVATE World)
+target_compile_features(WorldLuauCameraBindingTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldLuauCameraBindingTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldLuauCameraBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldLuauCameraBindingTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.LuauCameraBinding COMMAND WorldLuauCameraBindingTests)
+set_tests_properties(World.LuauCameraBinding PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
+# P2 W3f:2D 物理运行时 API(速度/冲量/力/运动学同步/运行时建刚体;headless)。
+add_executable(WorldLuauPhysicsBindingTests LuauPhysicsBindingTests.cpp)
+target_link_libraries(WorldLuauPhysicsBindingTests PRIVATE World)
+target_compile_features(WorldLuauPhysicsBindingTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldLuauPhysicsBindingTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldLuauPhysicsBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldLuauPhysicsBindingTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.LuauPhysicsBinding COMMAND WorldLuauPhysicsBindingTests)
+set_tests_properties(World.LuauPhysicsBinding PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
 add_executable(WorldScriptTests ScriptLifecycleTests.cpp)
 target_link_libraries(WorldScriptTests PRIVATE World)
 target_compile_features(WorldScriptTests PRIVATE cxx_std_17)
@@ -682,7 +724,7 @@ set_tests_properties(World.Behavior PROPERTIES
     TIMEOUT 60
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests WorldLuauCameraBindingTests WorldLuauPhysicsBindingTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

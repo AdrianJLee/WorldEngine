@@ -29,6 +29,60 @@ namespace World
 		{
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("{0}", error);
 		}
+
+		// W3f:刚体创建的唯一实现(世界启动与运行时 AddComponent 共用)。
+		// 形状/质量折算与 OnPhysics2DStart 的既有口径一致:位置/旋转取 Transform,尺寸乘 Scale。
+		bool BuildRuntimeBody(b2WorldId worldId, entt::registry& registry, entt::entity entity)
+		{
+			if (!b2World_IsValid(worldId)) return false;
+			auto* rb = registry.try_get<RigidBody2DComponent>(entity);
+			if (!rb || b2Body_IsValid(rb->RuntimeBodyId)) return false;
+			auto toBox2DType = [](RigidBody2DComponent::BodyType type)
+			{
+				switch (type)
+				{
+					case RigidBody2DComponent::BodyType::Static: return b2_staticBody;
+					case RigidBody2DComponent::BodyType::Dynamic: return b2_dynamicBody;
+					case RigidBody2DComponent::BodyType::Kinematic: return b2_kinematicBody;
+				}
+				return b2_staticBody;
+			};
+			auto* transform = registry.try_get<TransformComponent>(entity);
+			if (!transform)
+			{
+				Report("[Physics] Missing Transform for rigid body entity=" + std::to_string(static_cast<uint32_t>(entity)));
+				return false;
+			}
+			b2BodyDef bodyDef = b2DefaultBodyDef();
+			bodyDef.type = toBox2DType(rb->Type);
+			bodyDef.position = { transform->Location.x, transform->Location.y };
+			bodyDef.rotation = b2MakeRot(transform->Rotation.z);
+			bodyDef.motionLocks.angularZ = rb->FixedRotation;
+			rb->RuntimeBodyId = b2CreateBody(worldId, &bodyDef);
+			if (const auto* box = registry.try_get<BoxCollider2DComponent>(entity))
+			{
+				b2ShapeDef shapeDef = b2DefaultShapeDef();
+				shapeDef.density = box->Density;
+				shapeDef.material.friction = box->Friction;
+				shapeDef.material.restitution = box->Restitution;
+				b2Polygon polygon = b2MakeOffsetBox(transform->Scale.x * box->Size.x, transform->Scale.y * box->Size.y,
+					{ box->Offset.x, box->Offset.y }, b2MakeRot(0.0f));
+				b2CreatePolygonShape(rb->RuntimeBodyId, &shapeDef, &polygon);
+			}
+			if (const auto* circle = registry.try_get<CircleCollider2DComponent>(entity))
+			{
+				b2Circle shape;
+				shape.center = { circle->Offset.x, circle->Offset.y };
+				shape.radius = circle->Radius * transform->Scale.x;
+				b2ShapeDef shapeDef = b2DefaultShapeDef();
+				shapeDef.density = circle->Density;
+				shapeDef.material.friction = circle->Friction;
+				shapeDef.material.restitution = circle->Restitution;
+				b2CreateCircleShape(rb->RuntimeBodyId, &shapeDef, &shape);
+			}
+			return true;
+		}
+
 	}
 
 	Scene::Scene(WorldContext& context) : m_Context(&context), m_OwnerThread(std::this_thread::get_id()) {}
@@ -409,11 +463,83 @@ namespace World
 
 	void Scene::DestroyPhysicsBody(entt::entity entity)
 	{
-		if (auto* body = m_Registry.try_get<RigidBody2DComponent>(entity))
+		auto* body = m_Registry.try_get<RigidBody2DComponent>(entity);
+		if (!body) return;
+		b2BodyId bodyId = body->RuntimeBodyId;
+		// 先把组件切到"无刚体"状态,再销毁 Box2D 刚体(失败/重入都不会留下悬垂句柄)。
+		body->RuntimeBodyId = b2_nullBodyId;
+		if (b2Body_IsValid(bodyId)) b2DestroyBody(bodyId);
+	}
+
+	// ---- W3f:2D 物理运行时 API ----
+	bool Scene::IsPhysics2DRunning() const
+	{
+		return b2World_IsValid(m_PhysicsWorldId);
+	}
+
+	// 组件 id 走 schema 的 StorageBinding(entt 类型 hash 已隐式注册,取不到不代表"没有该组件")。
+	bool Scene::TryGetPhysicsBody(entt::entity entity, b2BodyId* bodyId, std::string* error)
+	{
+		auto Fail = [&](const std::string& message)
 		{
-			if (b2Body_IsValid(body->RuntimeBodyId)) b2DestroyBody(body->RuntimeBodyId);
-			body->RuntimeBodyId = b2_nullBodyId;
+			if (error) *error = message;
+			return false;
+		};
+		if (bodyId) *bodyId = b2_nullBodyId;
+		if (error) error->clear();
+		if (!m_Registry.valid(entity))
+			return Fail("requires a live entity");
+		const Schema::TypeSchema* schema = m_Context->Schemas().Find("World::RigidBody2DComponent");
+		if (!schema || !schema->Storage)
+			return Fail("requires the RigidBody2DComponent schema to be registered");
+		if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+			return Fail("requires a 2D rigid body; this entity has no RigidBody2DComponent");
+		if (!b2World_IsValid(m_PhysicsWorldId))
+			return Fail("requires a running 2D physics world; start the runtime (Scene:OnRuntimeStart) first");
+		const RigidBody2DComponent& rigidBody = m_Registry.get<RigidBody2DComponent>(entity);
+		if (!b2Body_IsValid(rigidBody.RuntimeBodyId))
+			return Fail("has a RigidBody2DComponent but no live Box2D body; the component was not added to the running world");
+		if (bodyId) *bodyId = rigidBody.RuntimeBodyId;
+		return true;
+	}
+
+	void Scene::SyncPhysicsBodyFromTransform(entt::entity entity)
+	{
+		b2BodyId bodyId = b2_nullBodyId;
+		std::string error;
+		if (!TryGetPhysicsBody(entity, &bodyId, &error))
+			throw std::logic_error("Entity:SyncPhysicsBody " + error);
+		auto* transform = m_Registry.try_get<TransformComponent>(entity);
+		if (!transform)
+			throw std::logic_error("Entity:SyncPhysicsBody requires a TransformComponent");
+		b2Body_SetTransform(bodyId, { transform->Location.x, transform->Location.y }, b2MakeRot(transform->Rotation.z));
+		b2Body_SetAwake(bodyId, true);
+	}
+
+	void Scene::EnsurePhysicsBody(entt::entity entity)
+	{
+		if (!m_Registry.valid(entity)) return;
+		auto* rigidBody = m_Registry.try_get<RigidBody2DComponent>(entity);
+		if (!rigidBody) return;
+		if (!b2World_IsValid(m_PhysicsWorldId))
+		{
+			// 世界未启动:AddComponent 只落组件配置;下一次 OnRuntimeStart 会照配置建刚体。
+			rigidBody->RuntimeBodyId = b2_nullBodyId;
+			return;
 		}
+		if (BuildRuntimeBody(m_PhysicsWorldId, m_Registry, entity)) return;
+		// 已存在的刚体:组件是唯一事实源,类型在脚本侧改过后同步给 Box2D
+		// (含 shape 的质量/惯量重算)。Transform 保持 Box2D 的权威状态,不在这里回推。
+		if (!b2Body_IsValid(rigidBody->RuntimeBodyId)) return;
+		b2BodyType box2dType = b2_staticBody;
+		switch (rigidBody->Type)
+		{
+			case RigidBody2DComponent::BodyType::Static: box2dType = b2_staticBody; break;
+			case RigidBody2DComponent::BodyType::Dynamic: box2dType = b2_dynamicBody; break;
+			case RigidBody2DComponent::BodyType::Kinematic: box2dType = b2_kinematicBody; break;
+		}
+		if (b2Body_GetType(rigidBody->RuntimeBodyId) != box2dType)
+			b2Body_SetType(rigidBody->RuntimeBodyId, box2dType);
 	}
 
 	void Scene::DestroyEntityNow(entt::entity entity)
@@ -688,40 +814,8 @@ namespace World
 		{
 			auto& rb = m_Registry.get<RigidBody2DComponent>(entity);
 			rb.RuntimeBodyId = b2_nullBodyId;
-			auto* transform = m_Registry.try_get<TransformComponent>(entity);
-			if (!transform) { Report("[Physics] Missing Transform for rigid body entity=" + std::to_string(static_cast<uint32_t>(entity))); continue; }
-			b2BodyDef bodyDef = b2DefaultBodyDef();
-			switch (rb.Type)
-			{
-				case RigidBody2DComponent::BodyType::Static: bodyDef.type = b2_staticBody; break;
-				case RigidBody2DComponent::BodyType::Dynamic: bodyDef.type = b2_dynamicBody; break;
-				case RigidBody2DComponent::BodyType::Kinematic: bodyDef.type = b2_kinematicBody; break;
-			}
-			bodyDef.position = { transform->Location.x, transform->Location.y };
-			bodyDef.rotation = b2MakeRot(transform->Rotation.z);
-			bodyDef.motionLocks.angularZ = rb.FixedRotation;
-			rb.RuntimeBodyId = b2CreateBody(m_PhysicsWorldId, &bodyDef);
-			if (const auto* box = m_Registry.try_get<BoxCollider2DComponent>(entity))
-			{
-				b2ShapeDef shapeDef = b2DefaultShapeDef();
-				shapeDef.density = box->Density;
-				shapeDef.material.friction = box->Friction;
-				shapeDef.material.restitution = box->Restitution;
-				b2Polygon polygon = b2MakeOffsetBox(transform->Scale.x * box->Size.x, transform->Scale.y * box->Size.y,
-					{ box->Offset.x, box->Offset.y }, b2MakeRot(0.0f));
-				b2CreatePolygonShape(rb.RuntimeBodyId, &shapeDef, &polygon);
-			}
-			if (const auto* circle = m_Registry.try_get<CircleCollider2DComponent>(entity))
-			{
-				b2Circle shape;
-				shape.center = { circle->Offset.x, circle->Offset.y };
-				shape.radius = circle->Radius * transform->Scale.x;
-				b2ShapeDef shapeDef = b2DefaultShapeDef();
-				shapeDef.density = circle->Density;
-				shapeDef.material.friction = circle->Friction;
-				shapeDef.material.restitution = circle->Restitution;
-				b2CreateCircleShape(rb.RuntimeBodyId, &shapeDef, &shape);
-			}
+			// W3f:创建逻辑抽到 BuildRuntimeBody,与运行时 AddComponent 补建共用同一套形状/质量口径。
+			BuildRuntimeBody(m_PhysicsWorldId, m_Registry, entity);
 		}
 	}
 

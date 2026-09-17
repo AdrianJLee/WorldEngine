@@ -65,6 +65,21 @@ namespace World
 		bool IsActive() const { return m_State != SceneState::Stopped; }
 		bool IsRunning() const { return m_State == SceneState::Running; }
 		bool IsPendingDestroy(entt::entity entity) const;
+		// ---- W3f:2D 物理运行时 API(仅"世界已启动"时可用) ----
+		// 世界只在 OnRuntimeStart/OnSimulationStart → OnRuntimeStop 之间存在;
+		// 停止态的刚体只保留组件配置,运行时查询/驱动一律给可读错误(不静默)。
+		// 脚本侧入口是 Entity:GetLinearVelocity/SetLinearVelocity/GetAngularVelocity/
+		// SetAngularVelocity/ApplyLinearImpulse/ApplyForce/SyncPhysicsBody。
+		// 实现在 Scene.cpp(Scene.h 只带 box2d/id.h,b2World_IsValid 的声明在完整 API 头里)。
+		bool IsPhysics2DRunning() const;
+		// 按实体拿运行中的 Box2D 刚体;没有刚体组件/世界未启动/刚体无效 → false + 可读 error。
+		bool TryGetPhysicsBody(entt::entity entity, b2BodyId* bodyId, std::string* error = nullptr);
+		// 运动学/静态同步:把当前 Transform 推给 Box2D 刚体(teleport + 唤醒)。
+		// 要求世界已启动且有有效刚体;否则抛可读错误。
+		void SyncPhysicsBodyFromTransform(entt::entity entity);
+		// 运行时建刚体:AddComponent 的 schema 存储绑定只写入组件数据,Box2D 刚体由这里补建
+		// (与 OnPhysics2DStart 同一套形状/质量创建逻辑);世界未启动 → 只保留组件配置。
+		void EnsurePhysicsBody(entt::entity entity);
 		// ---- W3d:脚本回调内的白名单同步结构写 ----
 		// 只建实体槽并挂 Tag+UUID(不挂 Transform),返回的句柄当帧有效。
 		// 与 Entity::CreateEntity 的差别:回调内绕过 AssertStructuralWrite 的回调深度检查,
@@ -87,6 +102,9 @@ namespace World
 		private:
 			Scene* m_Scene = nullptr;
 		};
+		// 当前是否在 ScriptWriteScope 内(脚本回调或结构提交点的白名单结构写窗口)。
+		// Entity 的动态 AddComponent 用它区分"外部调用(延迟提交)"与"窗口内(同步提交)"。
+		bool IsInsideScriptWriteScope() const { return m_ScriptWriteDepth != 0; }
 		// W5:脚本热重载只允许在安全点提交——不在脚本回调内、不在结构提交点内、
 		// 也不在 Stop 流程中。宿主(编辑器/Runtime)应在帧边界调用,并以此判定是否可重载。
 		bool CanApplyScriptReload() const;
