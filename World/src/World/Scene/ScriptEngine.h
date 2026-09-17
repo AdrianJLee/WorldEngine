@@ -1,5 +1,4 @@
 ﻿#pragma once
-#include <sol/sol.hpp>
 #include "Scene.h"
 #include <algorithm>
 #include <functional>
@@ -9,6 +8,9 @@
 
 namespace World
 {
+	class LuauVm;
+	class ScriptBindingContext;
+
 	// 描述数学类的一个属性（变量或函数）
 	struct LuaPropDesc
 	{
@@ -38,7 +40,8 @@ namespace World
 	{
 		std::string ClassName;
 		std::vector<LuaPropDesc> Properties;  // 属性列表
-		std::function<void(sol::state&)> BindFunc; // 核心：闭包包裹的 sol2 编译期绑定逻辑
+		// 核心：把该类型注册进当前 VM 的绑定上下文（W1b 起不再依赖 sol2）。
+		std::function<void(ScriptBindingContext&)> BindFunc;
 		std::vector<LuaFunctionDesc> Methods;
 		std::vector<LuaFunctionDesc> Constructors;
 		std::vector<LuaOperatorDesc> Operators;
@@ -71,12 +74,16 @@ namespace World
 	void RegisterBuiltinEntityLuaType();
 	void RegisterBuiltinMat3LuaType();
 	void RegisterBuiltinMat4LuaType();
+	// vec2/vec3/vec4 的绑定实现位于 LuaType/Vec2.cpp、Vec3.cpp、Vec4.cpp。
+	void RegisterBuiltinVec2Binding(ScriptBindingContext& bindings);
+	void RegisterBuiltinVec3Binding(ScriptBindingContext& bindings);
+	void RegisterBuiltinVec4Binding(ScriptBindingContext& bindings);
 
 	struct LuaScriptComponent;
 	class ScriptEngine
 	{
 	public:
-		static void Init();      // 在 Application 启动时调用，初始化 sol::state 和注册 API
+		static void Init();      // 在 Application 启动时调用：建立 Luau VM、沙箱、绑定层与 API 注册
 		static void Shutdown();  // 在 Application 关闭时调用
 		static bool IsInitialized();
 		static void AssertOwnerThread();
@@ -93,7 +100,9 @@ namespace World
 		static void OnUpdateScript(LuaScriptComponent& scriptComponent, Timestep ts);
 		static void OnDestroyScript(LuaScriptComponent& scriptComponent);
 
-		// 方便获取全局状态
-		static sol::state& GetState();
+		// 方便获取全局状态（W1b 起返回 Luau VM 门面；未初始化时抛 logic_error）
+		static LuauVm& GetState();
+		// 当前 VM 的绑定上下文（类型注册/宿主函数装箱；未初始化时抛 logic_error）
+		static ScriptBindingContext& GetBindingContext();
 	};
 }

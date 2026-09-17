@@ -3,16 +3,25 @@
 #include "World/Core/Log.h"
 
 #include "World/Script/LuauHeaders.h"
+#include "World/Script/ScriptRef.h"
+#include "World/Script/ScriptValue.h"
 
 #include <Luau/Common.h>
 #include <Luau/Compiler.h>
 
 #include <cstring>
+#include <memory>
 
 namespace World
 {
 	namespace
 	{
+		// registry 私有键:用静态变量地址当 key,同一个 VM 生命周期内唯一。
+		// 值是指向 LuauDetail::LuauVmState 的 tagged light userdata,供
+		// "只有 lua_State*" 的场合(绑定 trampoline、值装箱)反查 VM 状态。
+		char kStateTokenKey = 0;
+		constexpr int kStateTokenTag = 1;   // light userdata tag,与 tag 0(默认)区分开
+
 		// Luau 的断言走 Luau::assertCallHandler;默认只写 stderr(Debug 下还带 DebugBreak)。
 		// 接入引擎日志:脚本/沙箱层的断言必须能被编辑器诊断面板看到。
 		int LuauAssertHandler(const char* expression, const char* file, int line, const char* function)
@@ -66,6 +75,26 @@ namespace World
 		};
 	}
 
+	namespace LuauDetail
+	{
+		std::shared_ptr<LuauVmState> VmStateFromLuaState(lua_State* state)
+		{
+			if (!state)
+				return nullptr;
+			if (lua_rawgetptagged(state, LUA_REGISTRYINDEX, &kStateTokenKey, kStateTokenTag) != LUA_TLIGHTUSERDATA)
+			{
+				lua_pop(state, 1);
+				return nullptr;
+			}
+			auto* token = static_cast<LuauVmState*>(lua_tolightuserdatatagged(state, -1, kStateTokenTag));
+			lua_pop(state, 1);
+			if (!token)
+				return nullptr;
+			// 令牌自己持有 weak_ptr:VM 对象销毁后拿不回 shared_ptr,调用方据此判定"不是活着的 VM"。
+			return token->Self.lock();
+		}
+	}
+
 	LuauVm::~LuauVm()
 	{
 		Shutdown();
@@ -90,13 +119,22 @@ namespace World
 		if (m_State)
 			return true;
 		Luau::assertHandler() = &LuauAssertHandler;
-		m_State = luaL_newstate();
-		if (!m_State)
+		lua_State* state = luaL_newstate();
+		if (!state)
 		{
 			if (error)
 				*error = "luaL_newstate failed";
 			return false;
 		}
+
+		// 先登记状态令牌:沙箱化之后 registry 仍是 C++ 侧可写的(脚本够不到 registry)。
+		m_State = state;
+		m_Token = std::make_shared<LuauDetail::LuauVmState>();
+		m_Token->State = state;
+		m_Token->Self = m_Token;
+		lua_pushlightuserdatatagged(state, m_Token.get(), kStateTokenTag);
+		lua_rawsetptagged(state, LUA_REGISTRYINDEX, &kStateTokenKey, kStateTokenTag);
+
 		OpenAllowedLibraries();
 		ApplySandbox();
 		WLD_CORE_INFO("[luau] vm initialized (libs=base/math/string/table/bit32/coroutine/utf8)");
@@ -107,8 +145,14 @@ namespace World
 	{
 		if (!m_State)
 			return;
-		lua_close(m_State);
+		lua_State* state = m_State;
 		m_State = nullptr;
+		// 关键顺序:先把令牌里的 State 清空,再 lua_close。
+		// 这样即使还有 ScriptRef/ScriptValue 活着,它们的析构/查询也不会碰已释放的 registry。
+		if (m_Token)
+			m_Token->State = nullptr;
+		lua_close(state);
+		WLD_CORE_INFO("[luau] vm shutdown");
 	}
 
 	void LuauVm::OpenAllowedLibraries()
@@ -165,27 +209,185 @@ namespace World
 				*error = std::string("compile error: ") + exception.what();
 			return false;
 		}
-		const int loadResult = luau_load(m_State, name, bytecode.data(), bytecode.size(), 0);
-		if (loadResult != 0)
+		lua_State* state = m_State;
+		const int base = lua_gettop(state);
+		const int loadResult = luau_load(state, name, bytecode.data(), bytecode.size(), 0);
+		if (loadResult != 0 || lua_type(state, -1) != LUA_TFUNCTION)
 		{
 			if (error)
 			{
-				const char* message = lua_tostring(m_State, -1);
+				const char* message = lua_tostring(state, -1);
 				*error = message ? message : "compile error";
 			}
-			lua_pop(m_State, 1);
+			lua_settop(state, base);
 			return false;
 		}
-		if (lua_pcall(m_State, 0, 0, 0) != 0)
+		// 与绑定层走同一条受保护调用路径:错误带 chunk 名 + 行号 + stack traceback。
+		const bool ok = LuauDetail::ProtectedCall(state, 0, 0, error);
+		lua_settop(state, base);
+		return ok;
+	}
+
+	bool LuauVm::SetGlobal(const char* name, const ScriptValue& value)
+	{
+		if (!m_State || !name || !name[0])
+			return false;
+		std::string pushError;
+		if (!LuauDetail::PushValueToStack(m_State, value, &pushError))
+		{
+			WLD_CORE_WARN("[luau] SetGlobal('{0}') failed: {1}", name, pushError);
+			return false;
+		}
+		lua_setfield(m_State, LUA_GLOBALSINDEX, name);
+		return true;
+	}
+
+	bool LuauVm::ClearGlobal(const char* name)
+	{
+		if (!m_State || !name || !name[0])
+			return false;
+		lua_pushnil(m_State);
+		lua_setfield(m_State, LUA_GLOBALSINDEX, name);
+		return true;
+	}
+
+	ScriptValue LuauVm::GetGlobal(const char* name) const
+	{
+		if (!m_State || !name)
+			return ScriptValue();
+		lua_State* state = m_State;
+		lua_getfield(state, LUA_GLOBALSINDEX, name);
+		ScriptValue value = ScriptValue::FromStack(state, -1);
+		lua_pop(state, 1);
+		return value;
+	}
+
+	ScriptTableRef LuauVm::CreateTable()
+	{
+		ScriptTableRef table;
+		if (!m_State)
+			return table;
+		lua_State* state = m_State;
+		lua_createtable(state, 0, 0);
+		ScriptValue value = ScriptValue::FromStack(state, -1);
+		lua_pop(state, 1);
+		value.AsTable(&table);
+		return table;
+	}
+
+	ScriptTableRef LuauVm::CreateEnvironment()
+	{
+		ScriptTableRef environment;
+		if (!m_State)
+			return environment;
+
+		lua_State* state = m_State;
+		const int base = lua_gettop(state);
+
+		lua_newtable(state);                // 实例 environment:可写
+		lua_newtable(state);                // metatable
+		// __index 必须回退到**线程全局表**:luaL_sandboxthread 之后它是
+		// "可写代理 → 只读真全局",C++ 注册的库/类型与宿主注入的全局都在那一条链上。
+		lua_pushvalue(state, LUA_GLOBALSINDEX);
+		lua_setfield(state, -2, "__index");
+		lua_setreadonly(state, -1, true);   // 元表只读:脚本不能改掉回退目标
+		lua_setmetatable(state, -2);
+
+		ScriptValue value = ScriptValue::FromStack(state, -1);
+		lua_settop(state, base);
+		value.AsTable(&environment);
+		return environment;
+	}
+
+	ScriptFunctionRef LuauVm::CompileFunction(const std::string& source, const char* chunkName,
+		const ScriptTableRef& environment, std::string* error)
+	{
+		ScriptFunctionRef function;
+		if (!m_State)
+		{
+			if (error)
+				*error = "vm not initialized";
+			return function;
+		}
+		// 区分"没有 environment"(空引用 → 线程全局)与"environment 已失效"(必须报错);
+		// 否则宿主以为脚本跑在隔离环境里,实际静默落到线程全局。
+		if (environment.Payload() && !environment.IsValid())
+		{
+			if (error)
+				*error = "environment reference is no longer valid";
+			return function;
+		}
+		if (environment.IsValid())
+		{
+			if (environment.State() != m_State)
+			{
+				if (error)
+					*error = "environment belongs to a different vm";
+				return function;
+			}
+			if (environment.Type() != ScriptValueType::Table)
+			{
+				if (error)
+					*error = "environment must be a table";
+				return function;
+			}
+		}
+
+		// luau_load 吃字节码;源码先经 Luau::compile。编译失败会以版本 0 的错误装载体返回,
+		// 由 luau_load 解码成带 chunk 名与行号的错误文本(见 RunString 的同一约定)。
+		std::string bytecode;
+		try
+		{
+			bytecode = Luau::compile(source, {});
+		}
+		catch (const std::exception& exception)
+		{
+			if (error)
+				*error = std::string("compile error: ") + exception.what();
+			return function;
+		}
+
+		lua_State* state = m_State;
+		const int base = lua_gettop(state);
+		int environmentIndex = 0;
+		if (environment.IsValid())
+		{
+			if (!environment.Push(state))
+			{
+				if (error)
+					*error = "failed to push environment";
+				lua_settop(state, base);
+				return function;
+			}
+			environmentIndex = lua_gettop(state);
+		}
+
+		const char* name = chunkName ? chunkName : "chunk";
+		const int loadResult = luau_load(state, name, bytecode.data(), bytecode.size(), environmentIndex);
+		if (loadResult != 0 || lua_type(state, -1) != LUA_TFUNCTION)
 		{
 			if (error)
 			{
-				const char* message = lua_tostring(m_State, -1);
-				*error = message ? message : "runtime error";
+				const char* message = lua_tostring(state, -1);
+				*error = message ? message : "compile error";
 			}
-			lua_pop(m_State, 1);
-			return false;
+			lua_settop(state, base);
+			return function;
 		}
-		return true;
+
+		ScriptValue value = ScriptValue::FromStack(state, -1);
+		lua_settop(state, base);
+		if (!value.AsFunction(&function) && error)
+			*error = "compiled chunk is not a function";
+		return function;
+	}
+
+	bool LuauVm::RunStringInEnvironment(const std::string& source, const char* chunkName,
+		const ScriptTableRef& environment, std::string* error)
+	{
+		ScriptFunctionRef function = CompileFunction(source, chunkName, environment, error);
+		if (!function.IsValid())
+			return false;
+		return function.Call(nullptr, 0, nullptr, error);
 	}
 }

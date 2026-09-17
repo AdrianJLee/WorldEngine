@@ -1,10 +1,26 @@
 #include "wldpch.h"
 #include "World/Scene/ScriptEngine.h"
+#include "LuaTypeHelpers.h"
 
-#include <stdexcept>
+#include <glm/glm.hpp>
 
 namespace World
 {
+	using namespace LuaTypeDetail;
+
+	namespace
+	{
+		glm::mat4* Receiver(ScriptBindingContext& bindings, const ScriptValue* args, std::size_t count, const char* method)
+		{
+			return RequireReceiver<glm::mat4>(bindings, "mat4", args, count, method);
+		}
+
+		ScriptValue MakeMat4(ScriptBindingContext& bindings, const glm::mat4& value)
+		{
+			return NewUserdataOf(bindings, "mat4", value);
+		}
+	}
+
 	void RegisterBuiltinMat4LuaType()
 	{
 		LuaTypeReflection type;
@@ -26,31 +42,99 @@ namespace World
 			{ "mul", "vec4", "vec4" },
 			{ "mul", "number", "mat4" }
 		};
-		type.BindFunc = [](sol::state& lua)
+		type.BindFunc = [](ScriptBindingContext& bindings)
 		{
-			lua.new_usertype<glm::mat4>(
-				"mat4", sol::constructors<glm::mat4(), glm::mat4(float)>(),
-				sol::meta_function::multiplication, sol::overload(
-					[](const glm::mat4& a, const glm::mat4& b) -> glm::mat4 { return a * b; },
-					[](const glm::mat4& a, const glm::vec4& b) -> glm::vec4 { return a * b; },
-					[](const glm::mat4& a, float b) -> glm::mat4 { return a * b; }
-				),
-				sol::meta_function::index, [](glm::mat4& matrix, int index) -> glm::vec4&
+			const ScriptMethodBinding methods[] = {
+				{ "inverse", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						return MakeMat4(context, glm::inverse(*Receiver(context, args, count, "mat4:inverse")));
+					} },
+				{ "transpose", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						return MakeMat4(context, glm::transpose(*Receiver(context, args, count, "mat4:transpose")));
+					} },
+				{ "determinant", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						return ScriptValue::Number(glm::determinant(*Receiver(context, args, count, "mat4:determinant")));
+					} },
+			};
+
+			const ScriptMetaMethodBinding metaMethods[] = {
+				{ "__index", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						glm::mat4* self = Receiver(context, args, count, "mat4:__index");
+						if (count < 2)
+							return ScriptValue::Nil();
+						double numeric = 0.0;
+						if (args[1].AsNumber(&numeric))
+						{
+							const int index = RequireColumnIndex(args[1], 4, "mat4");
+							return NewUserdataOf(context, "vec4", (*self)[index]);
+						}
+						std::string key;
+						if (args[1].AsString(&key))
+							return context.MethodsTable("mat4").GetField(key.c_str());
+						return ScriptValue::Nil();
+					} },
+				{ "__newindex", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						glm::mat4* self = Receiver(context, args, count, "mat4:__newindex");
+						if (count < 3)
+							throw std::logic_error("mat4 column assignment needs a value");
+						const int index = RequireColumnIndex(args[1], 4, "mat4");
+						glm::vec4* value = TryUnwrap<glm::vec4>(context, "vec4", args[2]);
+						if (!value)
+							throw std::logic_error("mat4 column " + std::to_string(index) + " expects a vec4");
+						(*self)[index] = *value;
+						return ScriptValue::Nil();
+					} },
+				{ "__mul", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						glm::mat4* left = count > 0 ? TryUnwrap<glm::mat4>(context, "mat4", args[0]) : nullptr;
+						if (!left || count < 2)
+							throw std::logic_error("mat4 * ... expects a mat4 on the left");
+						if (glm::mat4* other = TryUnwrap<glm::mat4>(context, "mat4", args[1]))
+							return MakeMat4(context, (*left) * (*other));
+						if (glm::vec4* vector = TryUnwrap<glm::vec4>(context, "vec4", args[1]))
+							return NewUserdataOf(context, "vec4", (*left) * (*vector));
+						double scalar = 0.0;
+						if (args[1].AsNumber(&scalar))
+							return MakeMat4(context, (*left) * static_cast<float>(scalar));
+						throw std::logic_error("mat4 * ... expects mat4, vec4 or number");
+					} },
+			};
+
+			ScriptUserTypeDesc desc;
+			desc.Name = "mat4";
+			desc.UserdataSize = sizeof(glm::mat4);
+			desc.Constructor = [](void* data, const ScriptValue* args, std::size_t count)
 				{
-					if (index < 0 || index >= 4)
-						throw std::out_of_range("mat4 column index " + std::to_string(index) + " is outside [0, 3]");
-					return matrix[index];
-				},
-				sol::meta_function::new_index, [](glm::mat4& matrix, int index, const glm::vec4& value)
-				{
-					if (index < 0 || index >= 4)
-						throw std::out_of_range("mat4 column index " + std::to_string(index) + " is outside [0, 3]");
-					matrix[index] = value;
-				},
-				"inverse", [](const glm::mat4& matrix) -> glm::mat4 { return glm::inverse(matrix); },
-				"transpose", [](const glm::mat4& matrix) -> glm::mat4 { return glm::transpose(matrix); },
-				"determinant", [](const glm::mat4& matrix) -> float { return glm::determinant(matrix); }
-			);
+					if (count == 0)
+					{
+						new (data) glm::mat4();
+						return;
+					}
+					if (count == 1)
+					{
+						new (data) glm::mat4(RequireFloat(args[0], "mat4.new"));
+						return;
+					}
+					throw std::logic_error("mat4.new expects 0 or 1 arguments");
+				};
+			desc.Methods = methods;
+			desc.MethodCount = sizeof(methods) / sizeof(methods[0]);
+			desc.MetaMethods = metaMethods;
+			desc.MetaMethodCount = sizeof(metaMethods) / sizeof(metaMethods[0]);
+
+			std::string error;
+			if (!bindings.RegisterUserType(desc, &error))
+				throw std::logic_error("mat4 registration failed: " + error);
 		};
 		LuaReflectionRegistry::Register(type);
 	}

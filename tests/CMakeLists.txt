@@ -19,6 +19,27 @@ set_tests_properties(World.LuauVm PROPERTIES
     TIMEOUT 90
 )
 
+# P2 W1b:绑定层地基(environment/全局注入/受保护调用+traceback/引用失效/usertype)。
+add_executable(WorldLuauBindingTests LuauBindingTests.cpp)
+target_link_libraries(WorldLuauBindingTests PRIVATE World)
+target_compile_features(WorldLuauBindingTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldLuauBindingTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldLuauBindingTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldLuauBindingTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.LuauBinding COMMAND WorldLuauBindingTests)
+set_tests_properties(World.LuauBinding PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
 add_executable(WorldScriptTests ScriptLifecycleTests.cpp)
 target_link_libraries(WorldScriptTests PRIVATE World)
 target_compile_features(WorldScriptTests PRIVATE cxx_std_17)
@@ -512,7 +533,7 @@ set_tests_properties(World.Behavior PROPERTIES
     TIMEOUT 60
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

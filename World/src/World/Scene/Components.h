@@ -6,12 +6,9 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneCamera.h"
 #include "World/Scene/ScriptableEntity.h"
+#include "World/Script/ScriptRef.h"
 #include "World/Renderer/Texture.h"
 #include "World/Schema/Schema.h"
-// 临时:脚本组件目前仍直接持有 sol2 类型(W2 迁移到 Luau 后删除这两行与相关成员)。
-// 之前靠 wldpch.h 的强制包含间接拿到 sol2;为了给 Luau 头文件腾出干净的命名空间
-// (两者都有 lua.h),sol2 改为在真正需要它的文件里显式包含。
-#include <sol/sol.hpp>
 #include "World/Schema/BuiltinAssetOps.h"
 
 #include <any>
@@ -19,8 +16,6 @@
 #include <filesystem>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <sol/sol.hpp>
-
 #include <string>
 #include <unordered_map>
 
@@ -277,12 +272,12 @@ namespace World
 	{
 		std::string ScriptFilePath = ""; // 例如 "assets/scripts/Player.lua"
 
-		// 每个实体独立的 Lua 环境,防止变量冲突。
-		sol::environment LuaEnv;
-		sol::table ScriptTable;
-		sol::protected_function OnCreateFunc;
-		sol::protected_function OnUpdateFunc;
-		sol::protected_function OnDestroyFunc;
+		// 每个实体独立的 Luau environment,防止变量冲突(W1b 起为绑定层引用)。
+		ScriptTableRef LuaEnv;
+		ScriptTableRef ScriptTable;
+		ScriptFunctionRef OnCreateFunc;
+		ScriptFunctionRef OnUpdateFunc;
+		ScriptFunctionRef OnDestroyFunc;
 
 		std::unordered_map<std::string, LuaScriptField> CachedFields;
 		std::filesystem::file_time_type LastModifiedTime;

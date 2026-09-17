@@ -2,12 +2,17 @@
 #include "World/Scene/ScriptEngine.h"
 #include "World/Scene/Entity.h"
 #include "World/Core/WorldContext.h"
+#include "World/Script/ScriptBindingContext.h"
+#include "World/Script/ScriptValue.h"
+#include "LuaTypeHelpers.h"
 
-#include <any>
 #include <stdexcept>
+#include <string>
 
 namespace World
 {
+	using namespace LuaTypeDetail;
+
 	namespace
 	{
 		void RequireEntity(const Entity& entity, const char* operation)
@@ -25,6 +30,14 @@ namespace World
 				throw std::logic_error(std::string("Entity:") + operation + " requires a registered component type; got '" + name + "'");
 			return *type;
 		}
+
+		Entity* Receiver(ScriptBindingContext& bindings, const ScriptValue* args, std::size_t count, const char* operation)
+		{
+			Entity* self = nullptr;
+			if (count < 1 || !bindings.Unwrap<Entity>("Entity", args[0], &self) || !self)
+				throw std::logic_error(std::string("Entity:") + operation + " requires an Entity receiver");
+			return self;
+		}
 	}
 
 	void RegisterBuiltinEntityLuaType()
@@ -40,62 +53,98 @@ namespace World
 			{ "RemoveComponent", { { "componentType", "string", "Registered component type name." } }, "", "Remove the component through scene cleanup; requests during callbacks are deferred and duplicates are ignored." },
 			{ "Destroy", {}, "", "Destroy this entity through scene cleanup; requests during callbacks are deferred and duplicates are ignored." }
 		};
-		type.BindFunc = [](sol::state& lua)
+		type.BindFunc = [](ScriptBindingContext& bindings)
 		{
-			lua.new_usertype<Entity>("Entity", sol::no_constructor,
-				"IsValid", [](const Entity& entity) -> bool
-				{
-					ScriptEngine::AssertOwnerThread();
-					return entity.IsValid();
-				},
-				"GetID", [](const Entity& entity) -> uint32_t
-				{
-					RequireEntity(entity, "GetID");
-					return static_cast<uint32_t>(entity);
-				},
-				"HasComponent", [](const Entity& entity, const std::string& typeName) -> bool
-				{
-					RequireEntity(entity, "HasComponent");
-					return entity.HasComponent(RequireComponentType(entity, typeName, "HasComponent").Storage->ComponentId);
-				},
-				"GetComponent", [](Entity& entity, const std::string& typeName) -> sol::object
-				{
-					RequireEntity(entity, "GetComponent");
-					const auto componentId = RequireComponentType(entity, typeName, "GetComponent").Storage->ComponentId;
-					if (!entity.HasComponent(componentId)) return sol::nil;
-					return sol::make_object(ScriptEngine::GetState(), entity.GetComponent(componentId));
-				},
-				"AddComponent", [](Entity& entity, const std::string& typeName)
-				{
-					RequireEntity(entity, "AddComponent");
-					const auto componentId = RequireComponentType(entity, typeName, "AddComponent").Storage->ComponentId;
-					std::string reason;
-					if (!entity.CanAddComponent(componentId, &reason))
-						throw std::logic_error("Entity:AddComponent '" + typeName + "': " + reason);
-					Scene* scene = entity.GetScene();
-					if (scene->IsActive())
+			const ScriptMethodBinding methods[] = {
+				{ "IsValid", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 					{
-						// Capture only a lifetime-checked handle and a type ID, never a component pointer.
-						if (!scene->DeferStructuralChange([entity, componentId](Scene& targetScene) mutable
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "IsValid");
+						return ScriptValue::Boolean(entity->IsValid());
+					} },
+				{ "GetID", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "GetID");
+						RequireEntity(*entity, "GetID");
+						return ScriptValue::Number(static_cast<double>(static_cast<uint32_t>(*entity)));
+					} },
+				{ "HasComponent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "HasComponent");
+						RequireEntity(*entity, "HasComponent");
+						const std::string typeName = RequireStringArgument(args, count, 1, "Entity:HasComponent");
+						return ScriptValue::Boolean(entity->HasComponent(RequireComponentType(*entity, typeName, "HasComponent").Storage->ComponentId));
+					} },
+				{ "GetComponent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "GetComponent");
+						RequireEntity(*entity, "GetComponent");
+						const std::string typeName = RequireStringArgument(args, count, 1, "Entity:GetComponent");
+						const entt::id_type componentId = RequireComponentType(*entity, typeName, "GetComponent").Storage->ComponentId;
+						if (!entity->HasComponent(componentId))
+							return ScriptValue::Nil();
+						// 与 sol2 时期一致:脚本只拿到不透明指针,不暴露组件字段。
+						void* pointer = entity->GetComponent(componentId);
+						return context.NewOpaqueUserdata(&pointer, sizeof(pointer));
+					} },
+				{ "AddComponent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "AddComponent");
+						RequireEntity(*entity, "AddComponent");
+						const std::string typeName = RequireStringArgument(args, count, 1, "Entity:AddComponent");
+						const entt::id_type componentId = RequireComponentType(*entity, typeName, "AddComponent").Storage->ComponentId;
+						std::string reason;
+						if (!entity->CanAddComponent(componentId, &reason))
+							throw std::logic_error("Entity:AddComponent '" + typeName + "': " + reason);
+						Scene* scene = entity->GetScene();
+						if (scene->IsActive())
 						{
-							if (entity.IsValid() && !targetScene.IsPendingDestroy(static_cast<entt::entity>(entity)))
-								entity.AddComponent(componentId);
-						}))
-							throw std::logic_error("Entity:AddComponent '" + typeName + "' was rejected during scene/script shutdown");
-					}
-					else entity.AddComponent(componentId);
-				},
-				"RemoveComponent", [](Entity& entity, const std::string& typeName)
-				{
-					RequireEntity(entity, "RemoveComponent");
-					entity.RemoveComponent(RequireComponentType(entity, typeName, "RemoveComponent").Storage->ComponentId);
-				},
-				"Destroy", [](Entity& entity)
-				{
-					RequireEntity(entity, "Destroy");
-					Entity::DestroyEntity(entity.GetScene(), entity);
-				}
-			);
+							// Capture only a lifetime-checked handle and a type ID, never a component pointer.
+							Entity handle = *entity;
+							if (!scene->DeferStructuralChange([handle, componentId](Scene& targetScene) mutable
+							{
+								if (handle.IsValid() && !targetScene.IsPendingDestroy(static_cast<entt::entity>(handle)))
+									handle.AddComponent(componentId);
+							}))
+								throw std::logic_error("Entity:AddComponent '" + typeName + "' was rejected during scene/script shutdown");
+						}
+						else entity->AddComponent(componentId);
+						return ScriptValue::Nil();
+					} },
+				{ "RemoveComponent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "RemoveComponent");
+						RequireEntity(*entity, "RemoveComponent");
+						const std::string typeName = RequireStringArgument(args, count, 1, "Entity:RemoveComponent");
+						entity->RemoveComponent(RequireComponentType(*entity, typeName, "RemoveComponent").Storage->ComponentId);
+						return ScriptValue::Nil();
+					} },
+				{ "Destroy", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+					{
+						ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+						Entity* entity = Receiver(context, args, count, "Destroy");
+						RequireEntity(*entity, "Destroy");
+						Entity::DestroyEntity(entity->GetScene(), *entity);
+						return ScriptValue::Nil();
+					} },
+			};
+
+			ScriptUserTypeDesc desc;
+			desc.Name = "Entity";
+			desc.UserdataSize = sizeof(Entity);
+			desc.Methods = methods;
+			desc.MethodCount = sizeof(methods) / sizeof(methods[0]);
+			// Entity 里有 std::weak_ptr 生命周期令牌:必须登记析构,否则每次 GC 都泄漏控制块。
+			desc.Destructor = [](void* data) { static_cast<Entity*>(data)->~Entity(); };
+
+			std::string error;
+			if (!bindings.RegisterUserType(desc, &error))
+				throw std::logic_error("Entity registration failed: " + error);
 		};
 		LuaReflectionRegistry::Register(type);
 	}

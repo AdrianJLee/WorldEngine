@@ -5,6 +5,9 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Scene/LuaStubGenerator.h"
+#include "World/Script/LuauVm.h"
+#include "World/Script/ScriptBindingContext.h"
+#include "World/Script/ScriptValue.h"
 
 #include <box2d/box2d.h>
 #include <atomic>
@@ -43,12 +46,29 @@ namespace
 
     void RunLua(const std::string& source)
     {
-        auto result = ScriptEngine::GetState().safe_script(source, sol::script_pass_on_error);
-        if (!result.valid())
-        {
-            sol::error error = result;
-            throw std::runtime_error(error.what());
-        }
+        std::string error;
+        if (!ScriptEngine::GetState().RunString(source, "T02Test", &error))
+            throw std::runtime_error(error);
+    }
+
+    // W1b:测试宿主的注入门面 —— 把 C++ 值装箱成 Luau 值(与真实的 Entity 绑定同一路径)。
+    World::ScriptValue MakeEntityValue(Entity entity)
+    {
+        auto& bindings = ScriptEngine::GetBindingContext();
+        World::ScriptValue value = bindings.NewUserdata("Entity");
+        Entity* target = nullptr;
+        CHECK(bindings.Unwrap("Entity", value, &target) && target != nullptr);
+        new (target) Entity(entity);
+        return value;
+    }
+
+    Entity ReadEntityValue(const World::ScriptValue& value)
+    {
+        Entity* entity = nullptr;
+        ScriptEngine::GetBindingContext().Unwrap("Entity", value, &entity);
+        if (!entity)
+            throw std::runtime_error("expected an Entity userdata");
+        return *entity;
     }
 
     struct Counts
@@ -148,25 +168,43 @@ namespace
             CHECK(s_ProbeContext == nullptr);
             s_ProbeContext = &Context;
             auto& lua = ScriptEngine::GetState();
-            lua.set_function("T02Record", [this](uint32_t id, const std::string& phase, int localUpdates) {
-                Context.Record(true, id, phase, localUpdates);
-            });
-            lua.set_function("T02Action", [this](Entity entity, const std::string& phase) {
-                if (Context.LuaAction) Context.LuaAction(entity, phase);
-            });
-            lua["T02LoadMode"] = sol::nil;
-            lua["T02Inheritance"] = sol::nil;
+            auto& bindings = ScriptEngine::GetBindingContext();
+            lua.SetGlobal("T02Record", bindings.CreateFunction("T02Record",
+                [](const World::ScriptValue* args, std::size_t count) -> World::ScriptValue {
+                    if (!s_ProbeContext || count < 3)
+                        throw std::runtime_error("T02Record expects (id, phase, localUpdates)");
+                    double id = 0.0;
+                    double localUpdates = 0.0;
+                    std::string phase;
+                    if (!args[0].AsNumber(&id) || !args[1].AsString(&phase) || !args[2].AsNumber(&localUpdates))
+                        throw std::runtime_error("T02Record argument types");
+                    s_ProbeContext->Record(true, static_cast<uint32_t>(id), phase, static_cast<int>(localUpdates));
+                    return World::ScriptValue::Nil();
+                }));
+            lua.SetGlobal("T02Action", bindings.CreateFunction("T02Action",
+                [](const World::ScriptValue* args, std::size_t count) -> World::ScriptValue {
+                    if (!s_ProbeContext || count < 2)
+                        throw std::runtime_error("T02Action expects (entity, phase)");
+                    const Entity entity = ReadEntityValue(args[0]);
+                    std::string phase;
+                    if (!args[1].AsString(&phase))
+                        throw std::runtime_error("T02Action phase must be a string");
+                    if (s_ProbeContext->LuaAction) s_ProbeContext->LuaAction(entity, phase);
+                    return World::ScriptValue::Nil();
+                }));
+            lua.ClearGlobal("T02LoadMode");
+            lua.ClearGlobal("T02Inheritance");
         }
         ~Fixture()
         {
             // Callback captures and counters outlive all scene cleanup, also on a failed CHECK.
             World.reset();
             auto& lua = ScriptEngine::GetState();
-            lua["T02Record"] = sol::nil;
-            lua["T02Action"] = sol::nil;
-            lua["T02LoadMode"] = sol::nil;
-            lua["T02Inheritance"] = sol::nil;
-            lua["T02Entity"] = sol::nil;
+            lua.ClearGlobal("T02Record");
+            lua.ClearGlobal("T02Action");
+            lua.ClearGlobal("T02LoadMode");
+            lua.ClearGlobal("T02Inheritance");
+            lua.ClearGlobal("T02Entity");
             s_ProbeContext = nullptr;
         }
         Entity AddNative()
@@ -199,11 +237,11 @@ namespace
         const auto& script = entity.GetComponent<LuaScriptComponent>();
         CHECK(!script.IsLoaded);
         CHECK(!script.CreateEntered);
-        CHECK(!script.LuaEnv.valid());
-        CHECK(!script.ScriptTable.valid());
-        CHECK(!script.OnCreateFunc.valid());
-        CHECK(!script.OnUpdateFunc.valid());
-        CHECK(!script.OnDestroyFunc.valid());
+        CHECK(!script.LuaEnv.IsValid());
+        CHECK(!script.ScriptTable.IsValid());
+        CHECK(!script.OnCreateFunc.IsValid());
+        CHECK(!script.OnUpdateFunc.IsValid());
+        CHECK(!script.OnDestroyFunc.IsValid());
         CHECK(!script.RuntimeEntity);
     }
 
@@ -597,7 +635,7 @@ namespace
         for (const std::string mode : { "load", "return", "callback" })
         {
             Fixture fixture;
-            ScriptEngine::GetState()["T02LoadMode"] = mode;
+            ScriptEngine::GetState().SetGlobal("T02LoadMode", World::ScriptValue::String(mode));
             auto bad = fixture.AddLua("scripts/tests/CallbackErrors.lua");
             auto good = fixture.AddLua();
             fixture.World->OnScriptStart();
@@ -647,7 +685,7 @@ namespace
     {
         {
             Fixture fixture;
-            ScriptEngine::GetState()["T02Inheritance"] = true;
+            ScriptEngine::GetState().SetGlobal("T02Inheritance", World::ScriptValue::Boolean(true));
             const auto first = fixture.AddLua();
             const auto second = fixture.AddLua();
             fixture.World->OnScriptStart();
@@ -665,7 +703,7 @@ namespace
         }
         {
             Fixture fixture;
-            ScriptEngine::GetState()["T02LoadMode"] = "index";
+            ScriptEngine::GetState().SetGlobal("T02LoadMode", World::ScriptValue::String("index"));
             auto bad = fixture.AddLua("scripts/tests/CallbackErrors.lua");
             auto healthy = fixture.AddLua();
             fixture.World->OnScriptStart();
@@ -745,7 +783,7 @@ namespace
         {
             auto shortScene = CreateRef<Scene>(TestContext());
             old = Entity::CreateEntity(shortScene.get());
-            ScriptEngine::GetState()["T02Entity"] = old;
+            ScriptEngine::GetState().SetGlobal("T02Entity", MakeEntityValue(old));
         }
         CHECK(!old.IsValid());
         CHECK(RejectsLogic([&] { old.GetScene(); }));
@@ -860,7 +898,7 @@ namespace
         CHECK(!ScriptEngine::InitScriptForEditor(script));
         CHECK(std::any_cast<std::string>(script.CachedFields.at("FailStage").Value) == "Saved editor value");
         CHECK(script.State == ScriptInstanceState::Faulted && !script.IsLoaded);
-        CHECK(!script.LuaEnv.valid() && !script.ScriptTable.valid());
+        CHECK(!script.LuaEnv.IsValid() && !script.ScriptTable.IsValid());
     }
 
     void StubGenerationContracts()
@@ -932,7 +970,7 @@ namespace
     {
         Fixture fixture;
         auto entity = fixture.AddLua("scripts/templates/WorldScript.lua");
-        ScriptEngine::GetState()["T02Entity"] = entity;
+        ScriptEngine::GetState().SetGlobal("T02Entity", MakeEntityValue(entity));
         RunLua(R"lua(
             assert(WorldScript == nil)
             assert(T02Entity:IsValid() and type(T02Entity:GetID()) == "number")
