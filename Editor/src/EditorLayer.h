@@ -204,6 +204,12 @@ namespace World
 		bool ExecuteAiCommand(const std::string& cmd, const std::map<std::string, std::string>& args,
 			std::string& result, std::string& error);
 		std::string DescribeAiScene() const;
+		// 录制:把一次通道会话写成可回放的 JSON 行脚本(record.start/stop)。
+		void StartAiRecording(const std::string& path);
+		size_t StopAiRecording();
+		void AiRecordCommand(const std::string& cmd, const std::map<std::string, std::string>& args);
+		std::string m_AiRecordPath;
+		size_t m_AiRecordCount = 0;
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;
 		std::string m_RendererChangeName;

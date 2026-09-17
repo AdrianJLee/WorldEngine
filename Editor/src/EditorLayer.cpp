@@ -47,7 +47,10 @@ namespace World
 				[this](const std::string& cmd, const std::map<std::string, std::string>& args,
 					std::string& result, std::string& error)
 				{
-					return ExecuteAiCommand(cmd, args, result, error);
+					const bool ok = ExecuteAiCommand(cmd, args, result, error);
+					if (ok)
+						AiRecordCommand(cmd, args);
+					return ok;
 				}))
 			{
 				WLD_CORE_ERROR("[ai] failed to start control channel on port {0}", aiPort);

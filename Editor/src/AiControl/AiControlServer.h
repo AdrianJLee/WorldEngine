@@ -30,6 +30,9 @@ namespace World::Editor
 		using Handler = std::function<bool(const std::string& cmd, const Args& args,
 			std::string& result, std::string& error)>;
 
+		// 解析扁平 JSON 请求(暴露给命令实现:回放脚本时按行解析同一套格式)。
+		static bool ParseFlatJson(const std::string& text, Args* fields, std::string* error);
+
 		AiControlServer() = default;
 		~AiControlServer();
 

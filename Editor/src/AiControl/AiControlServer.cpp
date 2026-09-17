@@ -25,7 +25,7 @@ namespace World::Editor
 		// ---- 极简 JSON:只解析我们自己的**扁平**请求对象 ----
 		// 支持 {"key":value,...},value 为字符串/数字/true/false/null;不支持嵌套。
 		// 这样脚本侧仍然是标准 JSON,而引擎侧不需要引入完整 JSON 库。
-		bool ParseFlatJson(const std::string& text, std::map<std::string, std::string>* out, std::string* error)
+		bool ParseFlatJsonImpl(const std::string& text, std::map<std::string, std::string>* out, std::string* error)
 		{
 			size_t i = 0;
 			auto skipSpace = [&]() { while (i < text.size() && std::isspace(static_cast<unsigned char>(text[i]))) ++i; };
@@ -161,6 +161,11 @@ namespace World::Editor
 		Stop();
 	}
 
+	bool AiControlServer::ParseFlatJson(const std::string& text, Args* fields, std::string* error)
+	{
+		return ParseFlatJsonImpl(text, fields, error);
+	}
+
 	bool AiControlServer::Start(uint16_t port, Handler handler)
 	{
 		if (m_Running)
@@ -257,7 +262,7 @@ namespace World::Editor
 				std::map<std::string, std::string> fields;
 				std::string parseError;
 				std::string response;
-				if (!ParseFlatJson(line, &fields, &parseError))
+				if (!ParseFlatJsonImpl(line, &fields, &parseError))
 					response = "{\"seq\":0,\"ok\":false,\"error\":\"bad json: " + EscapeJson(parseError) + "\"}\n";
 				else
 				{
@@ -301,7 +306,24 @@ namespace World::Editor
 			std::string error;
 			bool ok = false;
 			if (m_Handler)
-				ok = m_Handler(request->Command, request->Arguments, result, error);
+			{
+				// 命令实现会触碰场景/渲染器,任何异常都必须变成"错误响应"而不是把编辑器带走
+				// (实测:Play 期间读场景触发了结构写断言,异常逃逸 → std::terminate)。
+				try
+				{
+					ok = m_Handler(request->Command, request->Arguments, result, error);
+				}
+				catch (const std::exception& exception)
+				{
+					ok = false;
+					error = std::string("command threw: ") + exception.what();
+				}
+				catch (...)
+				{
+					ok = false;
+					error = "command threw an unknown exception";
+				}
+			}
 			std::ostringstream out;
 			out << "{\"seq\":" << request->Seq << ",\"ok\":" << (ok ? "true" : "false");
 			if (ok)

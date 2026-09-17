@@ -4,12 +4,14 @@
 
 #include "World/Core/Log.h"
 #include "World/Renderer/Renderer.h"
+#include "World/Renderer/MaterialLibrary.h"
 #include "World/Scene/Components.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiScriptedInput.h"
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 
 namespace World
@@ -85,6 +87,61 @@ namespace World
 			}
 			return std::filesystem::path(WLD_OUTPUT_DIR) / path;
 		}
+
+		bool ParseFloat3(const std::string& text, glm::vec3* out)
+		{
+			std::stringstream stream(text);
+			std::string part;
+			glm::vec3 value { 0.0f };
+			int index = 0;
+			while (std::getline(stream, part, ',') && index < 3)
+				value[index++] = std::strtof(part.c_str(), nullptr);
+			if (index < 3)
+				return false;
+			*out = value;
+			return true;
+		}
+	}
+
+	void EditorLayer::StartAiRecording(const std::string& path)
+	{
+		m_AiRecordPath = path;
+		m_AiRecordCount = 0;
+		// 覆盖式开始:录制文件代表"从现在起的会话"。
+		std::ofstream file(path, std::ios::trunc);
+	}
+
+	size_t EditorLayer::StopAiRecording()
+	{
+		const size_t count = m_AiRecordCount;
+		m_AiRecordPath.clear();
+		m_AiRecordCount = 0;
+		return count;
+	}
+
+	void EditorLayer::AiRecordCommand(const std::string& cmd, const std::map<std::string, std::string>& args)
+	{
+		if (m_AiRecordPath.empty())
+			return;
+		// 录制/回放/退出类命令不进脚本:回放时会跳过它们,写进去只会让脚本难以阅读。
+		if (cmd == "record.start" || cmd == "record.stop" || cmd == "replay" || cmd == "quit")
+			return;
+		std::ofstream file(m_AiRecordPath, std::ios::app);
+		if (!file)
+		{
+			WLD_CORE_WARN("[ai] cannot append to record file '{0}'", m_AiRecordPath);
+			m_AiRecordPath.clear();
+			return;
+		}
+		file << "{\"cmd\":\"" << cmd << "\"";
+		for (const auto& entry : args)
+		{
+			if (entry.first == "seq" || entry.first == "cmd")
+				continue;
+			file << ",\"" << entry.first << "\":\"" << entry.second << "\"";
+		}
+		file << "}\n";
+		++m_AiRecordCount;
 	}
 
 	std::string EditorLayer::DescribeAiScene() const
@@ -103,7 +160,10 @@ namespace World
 		bool first = true;
 		if (m_ActiveScene)
 		{
-			auto& registry = m_ActiveScene->GetRegistry();
+			// 只读枚举必须走 const 视图:Play/Simulate 下活动场景的**非 const** GetRegistry()
+			// 会触发"活动场景禁止结构写"断言(实测会让异常逃逸并终止进程)。
+			const Scene& scene = *m_ActiveScene;
+			const entt::registry& registry = scene.GetRegistry();
 			for (auto handle : registry.view<TagComponent>())
 			{
 				if (!first)
@@ -266,6 +326,15 @@ namespace World
 				error = pathError;
 				return false;
 			}
+			// 整窗抓图目前只有 GL 路径:Vulkan 交换链图像不能在帧内这么简单地拷出来
+			// (实测:用 RHI 拷贝得到全黑,随后 vkQueueSubmit 报 VK_ERROR_DEVICE_LOST)。
+			// 需要专门的交换链抓图实现(正确的布局转换 + 队列所有权 + 不在帧内 WaitIdle),
+			// 在那之前明确报错,不给脚本一个"以为成功其实是黑图"的结果。
+			if (Renderer::GetBackendName() != "opengl")
+			{
+				error = "capture.screen is OpenGL-only for now (Vulkan swapchain capture not implemented)";
+				return false;
+			}
 			Renderer::CaptureFrame(path);
 			result = path.string();
 			return true;
@@ -339,6 +408,410 @@ namespace World
 		{
 			result = "closing";
 			Application::Get().Close();
+			return true;
+		}
+		// ---- 场景(实体树/选中/属性/Play) ----
+		if (cmd == "scene.list")
+		{
+			std::ostringstream out;
+			out << "[";
+			bool first = true;
+			if (m_ActiveScene)
+			{
+				const Scene& scene = *m_ActiveScene;
+				const entt::registry& registry = scene.GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+				{
+					if (!first)
+						out << ",";
+					first = false;
+					out << "{\"handle\":" << static_cast<uint32_t>(handle)
+						<< ",\"name\":\"" << JsonEscape(registry.get<TagComponent>(handle).Tag) << "\""
+						<< ",\"selected\":" << (handle == static_cast<entt::entity>(m_SelectedEntity) ? "true" : "false")
+						<< "}";
+				}
+			}
+			out << "]";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "scene.select")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+			Entity target;
+			if (!arg("handle").empty())
+			{
+				target = Entity(m_ActiveScene.get(),
+					static_cast<entt::entity>(std::strtoul(arg("handle").c_str(), nullptr, 10)));
+			}
+			else if (!arg("name").empty())
+			{
+				auto& registry = m_ActiveScene->GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+					if (registry.get<TagComponent>(handle).Tag == arg("name"))
+					{
+						target = Entity(m_ActiveScene.get(), handle);
+						break;
+					}
+			}
+			if (!target.IsValid())
+			{
+				error = "entity not found (need handle=<id> or name=<tag>); call scene.list first";
+				return false;
+			}
+			m_Shell.SetSelectedEntity(target);
+			m_SelectedEntity = target;
+			result = "selected handle=" + std::to_string(static_cast<uint32_t>(static_cast<entt::entity>(target)));
+			return true;
+		}
+		if (cmd == "scene.get")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+			Entity target = m_SelectedEntity;
+			if (!arg("handle").empty())
+				target = Entity(m_ActiveScene.get(),
+					static_cast<entt::entity>(std::strtoul(arg("handle").c_str(), nullptr, 10)));
+			else if (!arg("name").empty())
+			{
+				target = Entity {};
+				const Scene& scene = *m_ActiveScene;
+				const entt::registry& registry = scene.GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+					if (registry.get<TagComponent>(handle).Tag == arg("name"))
+					{
+						target = Entity(m_ActiveScene.get(), handle);
+						break;
+					}
+			}
+			if (!target.IsValid())
+			{
+				error = "entity not found (need handle=/name=, or select one first)";
+				return false;
+			}
+			const Scene& sceneRef = *m_ActiveScene;
+			const entt::registry& registry = sceneRef.GetRegistry();
+			const entt::entity handle = static_cast<entt::entity>(target);
+			std::ostringstream out;
+			out << "{\"handle\":" << static_cast<uint32_t>(handle);
+			if (const auto* tag = registry.try_get<TagComponent>(handle))
+				out << ",\"name\":\"" << JsonEscape(tag->Tag) << "\"";
+			if (const auto* transform = registry.try_get<TransformComponent>(handle))
+			{
+				const glm::vec3 location = transform->Location;
+				const glm::vec3 rotation = transform->Rotation;
+				const glm::vec3 scale = transform->Scale;
+				out << ",\"location\":[" << location.x << "," << location.y << "," << location.z << "]"
+					<< ",\"rotation\":[" << rotation.x << "," << rotation.y << "," << rotation.z << "]"
+					<< ",\"scale\":[" << scale.x << "," << scale.y << "," << scale.z << "]";
+			}
+			if (const auto* mesh = registry.try_get<MeshRendererComponent>(handle))
+				out << ",\"primitive\":\"" << JsonEscape(mesh->Primitive) << "\""
+					<< ",\"material\":\"" << JsonEscape(mesh->MaterialPath) << "\""
+					<< ",\"color\":[" << mesh->Color.r << "," << mesh->Color.g << ","
+					<< mesh->Color.b << "," << mesh->Color.a << "]";
+			out << "}";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "scene.set")
+		{
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+			// Play/Simulate 是只读查看(与属性面板同一条规则):活动场景的结构写必须走命令提交,
+			// 编辑器的 AI 通道不越权改写。
+			if (m_SceneState != SceneState::Edit)
+			{
+				error = "scene is read-only in Play/Simulate; exit Play first";
+				return false;
+			}
+			Entity target = m_SelectedEntity;
+			if (!arg("handle").empty())
+				target = Entity(m_ActiveScene.get(),
+					static_cast<entt::entity>(std::strtoul(arg("handle").c_str(), nullptr, 10)));
+			else if (!arg("name").empty())
+			{
+				auto& registry = m_ActiveScene->GetRegistry();
+				target = Entity {};
+				for (auto handle : registry.view<TagComponent>())
+					if (registry.get<TagComponent>(handle).Tag == arg("name"))
+					{
+						target = Entity(m_ActiveScene.get(), handle);
+						break;
+					}
+			}
+			if (!target.IsValid())
+			{
+				error = "entity not found (need handle=/name=, or select one first)";
+				return false;
+			}
+			const std::string property = arg("property");
+			const std::string value = arg("value");
+			auto& registry = m_ActiveScene->GetRegistry();
+			const entt::entity handle = static_cast<entt::entity>(target);
+			if (property == "Tag")
+			{
+				if (auto* tag = registry.try_get<TagComponent>(handle))
+				{
+					tag->Tag = value;
+					MarkDocumentDirty();
+					result = "Tag='" + value + "'";
+					return true;
+				}
+			}
+			if (auto* transform = registry.try_get<TransformComponent>(handle))
+			{
+				glm::vec3 vector { 0.0f };
+				if (property == "Location" || property == "Rotation" || property == "Scale")
+				{
+					if (!ParseFloat3(value, &vector))
+					{
+						error = "value must be 'x,y,z'";
+						return false;
+					}
+					if (property == "Location")
+						transform->SetLocation(vector);
+					else if (property == "Rotation")
+						transform->SetRotation(vector);
+					else
+						transform->SetScale(vector);
+					MarkDocumentDirty();
+					result = property + "=(" + value + ")";
+					return true;
+				}
+			}
+			if (auto* mesh = registry.try_get<MeshRendererComponent>(handle))
+			{
+				if (property == "Material")
+				{
+					mesh->MaterialPath = value;
+					MarkDocumentDirty();
+					result = "Material='" + value + "'";
+					return true;
+				}
+				if (property == "Primitive")
+				{
+					mesh->Primitive = value;
+					MarkDocumentDirty();
+					result = "Primitive='" + value + "'";
+					return true;
+				}
+				if (property == "Color")
+				{
+					glm::vec3 rgb { 1.0f };
+					if (!ParseFloat3(value, &rgb))
+					{
+						error = "value must be 'r,g,b'";
+						return false;
+					}
+					mesh->Color = glm::vec4 { rgb, 1.0f };
+					MarkDocumentDirty();
+					result = "Color=(" + value + ")";
+					return true;
+				}
+			}
+			error = "unsupported property '" + property + "' (Tag/Location/Rotation/Scale/Material/Primitive/Color)";
+			return false;
+		}
+		if (cmd == "scene.open")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			OpenScene(std::filesystem::path(path));
+			result = "opened " + path;
+			return true;
+		}
+		if (cmd == "scene.save")
+		{
+			// 只允许写到白名单路径(默认沿用当前文档路径)。
+			if (arg("path").empty())
+			{
+				if (!SaveScene())
+				{
+					error = "save failed (no document path?)";
+					return false;
+				}
+				result = "saved current document";
+				return true;
+			}
+			std::string pathError;
+			const std::filesystem::path path = ResolveCapturePath(arg("path"), &pathError);
+			if (path.empty())
+			{
+				error = pathError;
+				return false;
+			}
+			if (!m_Document.SaveTo(path))
+			{
+				error = "save failed: " + m_Document.GetLastError();
+				return false;
+			}
+			result = "saved " + path.string();
+			return true;
+		}
+		if (cmd == "play.enter" || cmd == "play.exit" || cmd == "play.pause" || cmd == "play.resume")
+		{
+			const bool playing = m_SceneState == SceneState::Play;
+			if (cmd == "play.enter" && !playing)
+				m_Shell.TogglePlay();
+			else if (cmd == "play.exit" && playing)
+				m_Shell.TogglePlay();
+			else if (cmd == "play.pause" && playing && !m_ScenePaused)
+				m_Shell.TogglePause();
+			else if (cmd == "play.resume" && playing && m_ScenePaused)
+				m_Shell.TogglePause();
+			result = "playState=" + std::to_string(static_cast<int>(m_SceneState))
+				+ " paused=" + (m_ScenePaused ? "true" : "false");
+			return true;
+		}
+		// ---- 资产 / 材质 ----
+		if (cmd == "asset.open_material")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			m_Shell.OpenMaterialEditor(path);
+			result = "opened material editor for " + path;
+			return true;
+		}
+		if (cmd == "material.get")
+		{
+			const std::string path = arg("path");
+			const Ref<Material> material = path.empty() ? nullptr : MaterialLibrary::Get().Load(path);
+			if (!material)
+			{
+				error = "material not found: " + path;
+				return false;
+			}
+			const MaterialDesc& desc = material->GetDesc();
+			std::ostringstream out;
+			out << "{\"path\":\"" << JsonEscape(material->GetPath()) << "\""
+				<< ",\"albedo\":\"" << JsonEscape(desc.AlbedoTexture) << "\""
+				<< ",\"normal\":\"" << JsonEscape(desc.NormalTexture) << "\""
+				<< ",\"baseColor\":[" << desc.BaseColor.r << "," << desc.BaseColor.g << ","
+				<< desc.BaseColor.b << "," << desc.BaseColor.a << "]"
+				<< ",\"metallic\":" << desc.Metallic << ",\"roughness\":" << desc.Roughness
+				<< ",\"blendMode\":" << static_cast<int>(desc.BlendMode)
+				<< ",\"doubleSided\":" << (desc.DoubleSided ? "true" : "false")
+				<< ",\"revision\":" << material->GetRevision() << "}";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "material.set")
+		{
+			const std::string path = arg("path");
+			const Ref<Material> material = path.empty() ? nullptr : MaterialLibrary::Get().Load(path);
+			if (!material)
+			{
+				error = "material not found: " + path;
+				return false;
+			}
+			std::vector<std::string> applied;
+			if (args.count("albedo")) { material->SetAlbedoTexture(arg("albedo")); applied.push_back("albedo"); }
+			if (args.count("normal")) { material->SetNormalTexture(arg("normal")); applied.push_back("normal"); }
+			if (args.count("baseColor"))
+			{
+				float rgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				std::stringstream stream(arg("baseColor"));
+				std::string part;
+				int index = 0;
+				while (std::getline(stream, part, ',') && index < 4)
+					rgba[index++] = std::strtof(part.c_str(), nullptr);
+				material->SetBaseColor(glm::vec4 { rgba[0], rgba[1], rgba[2], rgba[3] });
+				applied.push_back("baseColor");
+			}
+			if (args.count("metallic")) { material->SetMetallic(std::strtof(arg("metallic").c_str(), nullptr)); applied.push_back("metallic"); }
+			if (args.count("roughness")) { material->SetRoughness(std::strtof(arg("roughness").c_str(), nullptr)); applied.push_back("roughness"); }
+			if (args.count("blendMode"))
+				material->SetBlendMode(static_cast<MaterialBlendMode>(std::atoi(arg("blendMode").c_str())));
+			if (args.count("doubleSided"))
+				material->SetDoubleSided(arg("doubleSided") == "1" || arg("doubleSided") == "true");
+			if (applied.empty() && !args.count("blendMode") && !args.count("doubleSided"))
+			{
+				error = "nothing to set (albedo/normal/baseColor/metallic/roughness/blendMode/doubleSided)";
+				return false;
+			}
+			bool saved = false;
+			if (arg("save") == "1" || arg("save") == "true")
+				saved = MaterialLibrary::Get().Save(material, path, nullptr);
+			result = "revision=" + std::to_string(material->GetRevision()) + " saved=" + (saved ? "true" : "false");
+			return true;
+		}
+		// ---- 录制 / 回放(把一次通道会话变成可复现脚本) ----
+		if (cmd == "record.start" || cmd == "record.stop" || cmd == "replay")
+		{
+			if (cmd == "record.start")
+			{
+				const std::string path = arg("path");
+				if (path.empty())
+				{
+					error = "missing path";
+					return false;
+				}
+				StartAiRecording(path);
+				result = "recording to " + path;
+				return true;
+			}
+			if (cmd == "record.stop")
+			{
+				const size_t count = StopAiRecording();
+				result = "recorded " + std::to_string(count) + " commands";
+				return true;
+			}
+			// replay:按行读取 JSON 脚本并逐条执行(跳过录制/回放/退出类命令,防递归)。
+			const std::string path = arg("path");
+			std::ifstream file(path);
+			if (!file)
+			{
+				error = "cannot open script: " + path;
+				return false;
+			}
+			size_t executed = 0;
+			size_t skipped = 0;
+			std::string line;
+			while (std::getline(file, line))
+			{
+				const auto objectStart = line.find('{');
+				if (objectStart == std::string::npos)
+					continue;
+				std::map<std::string, std::string> fields;
+				if (!Editor::AiControlServer::ParseFlatJson(line.substr(objectStart), &fields, nullptr))
+				{
+					++skipped;
+					continue;
+				}
+				const std::string nested = fields.count("cmd") ? fields["cmd"] : std::string();
+				if (nested.empty() || nested == "record.start" || nested == "record.stop"
+					|| nested == "replay" || nested == "quit")
+				{
+					++skipped;
+					continue;
+				}
+				std::string nestedResult;
+				std::string nestedError;
+				if (ExecuteAiCommand(nested, fields, nestedResult, nestedError))
+					++executed;
+				else
+					++skipped;
+			}
+			result = "replayed executed=" + std::to_string(executed) + " skipped=" + std::to_string(skipped);
 			return true;
 		}
 		error = "unknown command '" + cmd + "'";
