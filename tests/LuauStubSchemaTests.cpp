@@ -262,15 +262,21 @@ namespace
 			"---@field Camera unknown no script mapping for schema kind 'Object'") != std::string::npos);
 		CHECK(stub.find("TransformComponent = {}") == std::string::npos);
 
-		// 既有块不变:把组件块区段删掉后,与"不传组件"的渲染结果逐字节一致。
+		// 既有块不变:把组件块区段(以及 W3b 的服务块,若该重载带了服务表)删掉后,
+		// 与"不传组件"的渲染结果逐字节一致。服务块由 W3b 追加在 Lua 类型块与组件块之间,
+		// 组件块区段保持连续。
 		std::string reflectionOnly, error;
 		CHECK(LuaStubGenerator::Render(LuaReflectionRegistry::GetTable(), reflectionOnly, error));
 		std::string withoutComponents = stub;
+		const size_t servicesBegin = withoutComponents.find("-- Global service table '");
 		const size_t componentsBegin = withoutComponents.find("-- Component fields are exposed");
 		const size_t worldScriptBegin = withoutComponents.find("---Annotation-only shape");
 		CHECK(componentsBegin != std::string::npos && worldScriptBegin != std::string::npos);
+		const size_t sectionBegin = servicesBegin != std::string::npos ? servicesBegin : componentsBegin;
+		if (servicesBegin != std::string::npos)
+			CHECK(servicesBegin < componentsBegin);
 		CHECK(componentsBegin < worldScriptBegin);
-		withoutComponents.erase(componentsBegin, worldScriptBegin - componentsBegin);
+		withoutComponents.erase(sectionBegin, worldScriptBegin - sectionBegin);
 		CHECK(withoutComponents == reflectionOnly);
 	}
 

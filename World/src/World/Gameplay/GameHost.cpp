@@ -286,21 +286,32 @@ namespace World::Gameplay
 			const Gameplay::InputMap& mapInput = input.GetMap();
 			if (input.GetPlayerCount() == 0)
 				input.SetPlayerCount(1);
-			for (const Gameplay::InputAction& action : mapInput.Actions())
-				for (const Gameplay::InputBinding& binding : action.Bindings)
-				{
-					const bool down = binding.Device == Gameplay::InputDevice::Mouse
-						? Input::IsMouseButtonPressed(binding.Code)
-						: (binding.Device == Gameplay::InputDevice::Key
-							? Input::IsKeyPressed(binding.Code) : false);
-					input.SetKeyState(0, binding.Device, binding.Code, down);
-				}
+			// 无 Application/窗口的宿主(测试、工具、专用服务器)没有 GLFW 句柄:
+			// 这里必须保留调用方直接喂进 InputService 的状态,不能去轮询一个不存在的窗口
+			// (真实故障:headless 下 Input::IsKeyPressed 走 Application::Get() 空实例 →
+			//  glfwGetKey 拿到野指针,0xC0000005;在"有实例但无真实窗口"时也会把注入状态覆盖成抬起)。
+			const bool hasEngineWindow = Application::HasInstance();
+			if (hasEngineWindow)
+			{
+				for (const Gameplay::InputAction& action : mapInput.Actions())
+					for (const Gameplay::InputBinding& binding : action.Bindings)
+					{
+						const bool down = binding.Device == Gameplay::InputDevice::Mouse
+							? Input::IsMouseButtonPressed(binding.Code)
+							: (binding.Device == Gameplay::InputDevice::Key
+								? Input::IsKeyPressed(binding.Code) : false);
+						input.SetKeyState(0, binding.Device, binding.Code, down);
+					}
+			}
 			input.BuildSnapshot(0);
 		}
 
 		// W2:推进排队的关卡加载(读盘 → 反序列化 → 激活;激活时进度回调会把场景交给宿主)。
 		GameApp::Get().Levels().Pump();
 		GameApp::Get().Tick(frameTime);
+		// W7-6/P2 W3b:帧末把"当前按下"滚成"上一帧按下",下一帧的 Pressed/Released 才有真实边沿。
+		// 必须在本帧脚本/玩法读取之后调用,否则同一帧内刚按下的键会被立刻滚走。
+		GameApp::Get().Input().EndFrame();
 
 		if (render)
 			SubmitSceneRender();

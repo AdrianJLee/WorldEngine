@@ -3,6 +3,7 @@
 #include "ScriptEngine.h"
 #include "World/Schema/Schema.h"
 #include "World/Script/BindComponentAccess.h"
+#include "World/Script/BindServices.h"
 
 #include <atomic>
 #include <fstream>
@@ -287,6 +288,95 @@ namespace World
 			output << block.str();
 			return true;
 		}
+
+		// W3b:服务表(Input/Level/Save)的存根块。类注解行 + 每个方法一段
+		// `---@param/---@return` + `function <表>:<方法>(...) end`,与既有类型块同一风格。
+		bool WriteServiceBlock(std::ostringstream& output, const ScriptServiceBinding& service,
+			const std::set<std::string>& knownTypes, std::string& error)
+		{
+			const std::string name = service.Name ? service.Name : "";
+			if (!IsIdentifier(name))
+				return Fail(error, "service table", "invalid or missing table name '" + name + "'");
+			if (!IsDescription(service.Description ? service.Description : ""))
+				return Fail(error, name, "description must be a single comment line");
+			if (!service.Methods && service.MethodCount > 0)
+				return Fail(error, name, "service table has no method descriptors");
+
+			std::set<std::string> methodNames;
+			std::ostringstream block;
+			block << "-- Global service table '" << name << "': read-only; there is no runtime constructor.\n";
+			if (service.Description && service.Description[0])
+				block << "---" << service.Description << "\n";
+			block << "---@class " << name << "\n"
+				<< name << " = {}\n\n";
+			for (std::size_t index = 0; index < service.MethodCount; ++index)
+			{
+				const ScriptServiceMethod& method = service.Methods[index];
+				const std::string location = name + "." + (method.Name ? method.Name : std::string("<null>"));
+				if (!method.Name || !IsIdentifier(method.Name))
+					return Fail(error, location, "invalid function name");
+				if (!methodNames.insert(method.Name).second)
+					return Fail(error, location, "duplicate function name");
+				if (!IsDescription(method.Description ? method.Description : ""))
+					return Fail(error, location, "description must be a single comment line");
+				if (!method.Function)
+					return Fail(error, location, "method has no implementation");
+				if (method.ExpectedArgs > method.ParamCount)
+					return Fail(error, location, "expected argument count exceeds the parameter descriptor");
+
+				bool sawOptional = false;
+				std::size_t required = 0;
+				for (std::size_t paramIndex = 0; paramIndex < method.ParamCount; ++paramIndex)
+				{
+					const ScriptServiceParam& parameter = method.Params[paramIndex];
+					if (!parameter.Name || !IsIdentifier(parameter.Name))
+						return Fail(error, location, "parameter " + std::to_string(paramIndex + 1) + " has an invalid name");
+					if (!parameter.LuaType || !IsType(parameter.LuaType, knownTypes))
+						return Fail(error, location, "parameter '" + std::string(parameter.Name) +
+							"' has an invalid or unregistered type");
+					if (!IsDescription(parameter.Description ? parameter.Description : ""))
+						return Fail(error, location, "parameter '" + std::string(parameter.Name) +
+							"' description must be a single comment line");
+					if (parameter.Required)
+					{
+						if (sawOptional)
+							return Fail(error, location, "required parameter '" + std::string(parameter.Name) +
+								"' follows an optional parameter");
+						++required;
+					}
+					else
+					{
+						sawOptional = true;
+					}
+				}
+				if (required > method.ExpectedArgs)
+					return Fail(error, location, "required parameter count exceeds the expected argument count");
+				if (!method.ReturnType || (method.ReturnType[0] && !IsType(method.ReturnType, knownTypes)))
+					return Fail(error, location, "invalid or unregistered return type");
+
+				if (method.Description && method.Description[0])
+					block << "---" << method.Description << "\n";
+				for (std::size_t paramIndex = 0; paramIndex < method.ParamCount; ++paramIndex)
+				{
+					const ScriptServiceParam& parameter = method.Params[paramIndex];
+					block << "---@param " << parameter.Name << " " << parameter.LuaType;
+					if (!parameter.Required) block << "?";
+					WriteDescription(block, parameter.Description ? parameter.Description : "");
+					block << "\n";
+				}
+				if (method.ReturnType && method.ReturnType[0])
+					block << "---@return " << method.ReturnType << "\n";
+				block << "function " << name << ":" << method.Name << "(";
+				for (std::size_t paramIndex = 0; paramIndex < method.ParamCount; ++paramIndex)
+				{
+					if (paramIndex) block << ", ";
+					block << method.Params[paramIndex].Name;
+				}
+				block << ") end\n\n";
+			}
+			output << block.str();
+			return true;
+		}
 	}
 
 	bool LuaStubGenerator::Render(const std::vector<LuaTypeReflection>& types, std::string& output, std::string& error)
@@ -297,6 +387,14 @@ namespace World
 
 	bool LuaStubGenerator::Render(const std::vector<LuaTypeReflection>& types,
 		const std::vector<const Schema::TypeSchema*>& components, std::string& output, std::string& error)
+	{
+		static const std::vector<const ScriptServiceBinding*> noServices;
+		return Render(types, components, noServices, output, error);
+	}
+
+	bool LuaStubGenerator::Render(const std::vector<LuaTypeReflection>& types,
+		const std::vector<const Schema::TypeSchema*>& components,
+		const std::vector<const ScriptServiceBinding*>& services, std::string& output, std::string& error)
 	{
 		error.clear();
 		std::set<std::string> knownTypes { "any", "unknown", "nil", "boolean", "number", "integer", "string", "table", "function", "thread", "userdata" };
@@ -326,6 +424,17 @@ namespace World
 				return Fail(error, location, "duplicate component class name '" + name + "'");
 		}
 		for (const auto& entry : sortedComponents) knownTypes.insert(entry.first);
+
+		// W3b:服务表先整体校验(名字/方法/参数/返回类型)再渲染,失败不留半截输出。
+		for (const ScriptServiceBinding* service : services)
+		{
+			if (!service) return Fail(error, "script services", "null service binding entry");
+			const std::string name = service->Name ? service->Name : "";
+			if (!IsIdentifier(name) || name == "WorldScript")
+				return Fail(error, "service table", "invalid or reserved class name '" + name + "'");
+			if (knownTypes.count(name))
+				return Fail(error, "service table '" + name + "'", "class name collides with a bound Lua type");
+		}
 
 		std::ostringstream rendered;
 		rendered << "---@meta\n\n-- Generated by WorldEngine LuaStubGenerator. Do not edit.\n"
@@ -377,6 +486,9 @@ namespace World
 			rendered << name << " = {}\n\n";
 			for (const auto& [functionName, overloads] : groups) WriteFunction(rendered, name, overloads);
 		}
+		// W3b:服务块在既有 Lua 类型块之后、schema 组件块之前(组件块区段保持连续)。
+		for (const ScriptServiceBinding* service : services)
+			if (!WriteServiceBlock(rendered, *service, knownTypes, error)) return false;
 		// W3a-A2:组件块追加在既有 Lua 类型块之后(既有块内容与顺序不变),组件之间按短名升序。
 		for (const auto& [name, component] : sortedComponents)
 			if (!WriteComponentBlock(rendered, *component, knownTypes, error)) return false;
@@ -409,8 +521,16 @@ namespace World
 	bool LuaStubGenerator::Generate(const std::filesystem::path& outputPath, const std::vector<LuaTypeReflection>& types,
 		const std::vector<const Schema::TypeSchema*>& components, std::string& error)
 	{
+		static const std::vector<const ScriptServiceBinding*> noServices;
+		return Generate(outputPath, types, components, noServices, error);
+	}
+
+	bool LuaStubGenerator::Generate(const std::filesystem::path& outputPath, const std::vector<LuaTypeReflection>& types,
+		const std::vector<const Schema::TypeSchema*>& components,
+		const std::vector<const ScriptServiceBinding*>& services, std::string& error)
+	{
 		std::string content;
-		if (!Render(types, components, content, error))
+		if (!Render(types, components, services, content, error))
 		{
 			error = outputPath.u8string() + ": " + error;
 			return false;

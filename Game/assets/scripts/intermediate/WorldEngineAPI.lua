@@ -185,6 +185,121 @@ function vec4:length() end
 ---@return vec4
 function vec4.new() end
 
+-- Global service table 'Input': read-only; there is no runtime constructor.
+---Read-only input service table; no raw key/device feed is exposed to scripts.
+---@class Input
+Input = {}
+
+---Whether any binding for the action is held; unknown actions and out-of-range players return false.
+---@param action string Registered action name.
+---@param player integer? Player slot; 0 is the primary player.
+---@return boolean
+function Input:Down(action, player) end
+
+---Whether the action went down this frame; requires the host's end-of-frame update.
+---@param action string Registered action name.
+---@param player integer? Player slot; 0 is the primary player.
+---@return boolean
+function Input:Pressed(action, player) end
+
+---Whether the action went up this frame; requires the host's end-of-frame update.
+---@param action string Registered action name.
+---@param player integer? Player slot; 0 is the primary player.
+---@return boolean
+function Input:Released(action, player) end
+
+---Axis value in [-1, 1]; unknown axes and out-of-range players return 0.
+---@param axis string Registered axis name.
+---@param player integer? Player slot; 0 is the primary player.
+---@return number
+function Input:Axis(axis, player) end
+
+---Number of configured player slots.
+---@return integer
+function Input:PlayerCount() end
+
+-- Global service table 'Level': read-only; there is no runtime constructor.
+---Read-only level/flow service table; scene handles and host callbacks are not exposed.
+---@class Level
+Level = {}
+
+---Request a level load; the next host frame pumps it. Unknown ids return false and set LastError.
+---@param id string Level id from the level list.
+---@param additive boolean? Push the level on top of the current stack instead of replacing it.
+---@return boolean
+function Level:Request(id, additive) end
+
+---Whether a level request is being processed.
+---@return boolean
+function Level:IsLoading() end
+
+---Current load state: Idle/Reading/Deserializing/Activating/Failed.
+---@return string
+function Level:State() end
+
+---Last level-load error; empty when the last request succeeded.
+---@return string
+function Level:LastError() end
+
+---Id of the primary (index 0) active level; empty when nothing is active.
+---@return string
+function Level:Primary() end
+
+---Active level ids, primary level first.
+---@return string[]
+function Level:ActiveLevels() end
+
+---Unload one active level; unknown ids are a no-op.
+---@param id string Active level id to unload.
+function Level:Unload(id) end
+
+---Unload every active level.
+function Level:UnloadAll() end
+
+---Level list entries as {Id, Name, Scene} tables.
+---@return table
+function Level:Entries() end
+
+-- Global service table 'Save': read-only; there is no runtime constructor.
+---Read-only save service table; migrations, traits and paths are not exposed.
+---@class Save
+Save = {}
+
+---Write a save slot; the level id defaults to the current primary level. Failure returns false and sets LastError.
+---@param slot integer Save slot index.
+---@param levelId string? Level id written into the save header; defaults to Level.Primary().
+---@return boolean
+function Save:Save(slot, levelId) end
+
+---Load a save slot into the active scene. Failure returns false and sets LastError.
+---@param slot integer Save slot index.
+---@return boolean
+function Save:Load(slot) end
+
+---Delete one save slot.
+---@param slot integer Save slot index.
+---@return boolean
+function Save:Delete(slot) end
+
+---Existing save slots as {slot, level_id, version, timestamp, valid, error} tables.
+---@return table
+function Save:List() end
+
+---Store a typed global value; the type is preserved across save/load.
+---@param key string Global value key.
+---@param value number|boolean|string Typed global value.
+---@return boolean
+function Save:SetGlobal(key, value) end
+
+---Read a stored global value; missing keys return nil.
+---@param key string Global value key.
+---@return number|boolean|string|nil
+function Save:GetGlobal(key) end
+
+---Last save/load error; empty when the last operation succeeded.
+---@return string
+function Save:LastError() end
+
 -- Component fields are exposed through Entity:GetComponent("BoxCollider2DComponent"); there is no runtime global named BoxCollider2DComponent.
 ---@class BoxCollider2DComponent
 ---@field Friction number

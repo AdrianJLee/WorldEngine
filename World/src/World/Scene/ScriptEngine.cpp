@@ -5,6 +5,7 @@
 #include "World/Core/Application.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/BehaviorRegistry.h"
+#include "World/Script/BindServices.h"
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
@@ -413,6 +414,9 @@ namespace World
 			// W3a-A1:组件字段代理类型(Entity:GetComponent 的返回值;映射表见 Script/BindComponentAccess.h)。
 			if (!RegisterComponentProxyBinding(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the component proxy binding: " + error);
+			// W3b:游戏服务面(Input/Level/Save 三个只读全局表;参数与失败语义见 Script/BindServices.h)。
+			if (!RegisterGameplayServiceBindings(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the gameplay service bindings: " + error);
 		}
 		catch (...)
 		{
@@ -502,7 +506,13 @@ namespace World
 		std::string error;
 		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.lua"));
 		const std::vector<const Schema::TypeSchema*> components = schemas.List(Schema::TypeCategory::Component);
-		if (!LuaStubGenerator::Generate(path, LuaReflectionRegistry::GetTable(), components, error))
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* services = GameplayServiceBindings(&serviceCount);
+		std::vector<const ScriptServiceBinding*> serviceList;
+		serviceList.reserve(serviceCount);
+		for (std::size_t index = 0; index < serviceCount; ++index)
+			serviceList.push_back(&services[index]);
+		if (!LuaStubGenerator::Generate(path, LuaReflectionRegistry::GetTable(), components, serviceList, error))
 		{
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("[Lua] {0}", error);
 			return false;
