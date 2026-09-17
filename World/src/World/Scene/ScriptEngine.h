@@ -98,6 +98,9 @@ namespace World
 		static void RegisterMathTypes();
 
 		static bool GenerateLuaStubs();
+		// W3a-A2(追加):带显式 schema 注册表的存根生成;组件块来自
+		// schemas.List(TypeCategory::Component)。零参调用在宿主上下文中委托到这里。
+		static bool GenerateLuaStubs(const Schema::SchemaRegistry& schemas);
 		static bool InitScriptForEditor(LuaScriptComponent& component);
 		// 从 Lua 脚本源码文本静态解析 `---@field Name Type` 注解，返回字段名到 Lua 类型名的映射（不执行脚本）。
 		static std::unordered_map<std::string, std::string> ParseFieldAnnotations(const std::string& scriptText);

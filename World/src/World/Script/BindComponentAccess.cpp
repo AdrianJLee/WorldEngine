@@ -488,4 +488,20 @@ namespace World
 		new (target) ComponentProxy(std::move(payload));
 		return value;
 	}
+
+	// W3a-A2:存根注解 —— 类型走 DescribeScriptField(唯一映射表),标注只描述脚本侧读写规则:
+	// 未映射 Kind 是占位(unknown)、Transient 与 ReadOnly 是"脚本可读、写会被拒"的既有语义。
+	ScriptFieldAnnotation DescribeScriptFieldAnnotation(const Schema::FieldSchema& field)
+	{
+		const ScriptFieldMapping mapping = DescribeScriptField(field);
+		ScriptFieldAnnotation annotation;
+		annotation.LuaType = mapping.LuaTypeName ? mapping.LuaTypeName : "unknown";
+		if (!mapping.LuaTypeName)
+			annotation.Note = std::string("no script mapping for schema kind '") + SchemaKindName(field.K) + "'";
+		if (field.Meta.Transient)
+			annotation.Note += annotation.Note.empty() ? "transient" : "; transient";
+		if (field.Meta.ReadOnly || mapping.ReadOnly)
+			annotation.Note += annotation.Note.empty() ? "read-only" : "; read-only";
+		return annotation;
+	}
 }

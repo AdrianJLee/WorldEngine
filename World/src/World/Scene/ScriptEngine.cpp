@@ -481,9 +481,28 @@ namespace World
 	bool ScriptEngine::GenerateLuaStubs()
 	{
 		AssertOwnerThread();
+		// W3a-A2:宿主存在时把 schema 注册表带进生成链路,组件块随 WE_FIELD 自动更新;
+		// 无 Application 的纯工具/测试进程没有注册表,保持既有"仅 Lua 类型"输出。
+		if (Application::HasInstance())
+			return GenerateLuaStubs(Application::Get().GetContext().Schemas());
+
 		std::string error;
 		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.lua"));
 		if (!LuaStubGenerator::Generate(path, error))
+		{
+			if (Log::GetCoreLogger()) WLD_CORE_ERROR("[Lua] {0}", error);
+			return false;
+		}
+		return true;
+	}
+
+	bool ScriptEngine::GenerateLuaStubs(const Schema::SchemaRegistry& schemas)
+	{
+		AssertOwnerThread();
+		std::string error;
+		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.lua"));
+		const std::vector<const Schema::TypeSchema*> components = schemas.List(Schema::TypeCategory::Component);
+		if (!LuaStubGenerator::Generate(path, LuaReflectionRegistry::GetTable(), components, error))
 		{
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("[Lua] {0}", error);
 			return false;

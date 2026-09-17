@@ -43,4 +43,16 @@ namespace World
 	// Entity:GetComponent 的返回值:字段代理(组件存在时)。不做存活检查,检查在每次字段访问时做。
 	WLD_API ScriptValue MakeComponentProxy(ScriptBindingContext& bindings,
 		const Entity& entity, const Schema::TypeSchema& type);
+
+	// ---- W3a-A2:存根注解辅助(只追加) ----
+	// LuaStubGenerator 渲染 `---@field <Name> <LuaType> <Note>` 时使用本结构。
+	// LuaType 只从 DescribeScriptField 这一张表派生,不新开第二份 Kind → Lua 类型映射;
+	// 未映射的 Kind 用占位类型 "unknown",并在 Note 里说明原因。
+	struct ScriptFieldAnnotation
+	{
+		std::string LuaType;   // 已映射的脚本类型名;未映射 Kind = "unknown"
+		std::string Note;      // 空,或 ";" 分隔的稳定标注(no script mapping… / transient / read-only)
+	};
+
+	WLD_API ScriptFieldAnnotation DescribeScriptFieldAnnotation(const Schema::FieldSchema& field);
 }

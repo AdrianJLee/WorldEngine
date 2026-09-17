@@ -185,6 +185,94 @@ function vec4:length() end
 ---@return vec4
 function vec4.new() end
 
+-- Component fields are exposed through Entity:GetComponent("BoxCollider2DComponent"); there is no runtime global named BoxCollider2DComponent.
+---@class BoxCollider2DComponent
+---@field Friction number
+---@field ShowCollider boolean
+---@field Density number
+---@field Size vec2
+---@field Offset vec2
+---@field Restitution number
+
+-- Component fields are exposed through Entity:GetComponent("CameraComponent"); there is no runtime global named CameraComponent.
+---@class CameraComponent
+---@field Camera unknown no script mapping for schema kind 'Object'
+---@field FixedAspectRatio boolean
+---@field Primary boolean
+
+-- Component fields are exposed through Entity:GetComponent("CircleCollider2DComponent"); there is no runtime global named CircleCollider2DComponent.
+---@class CircleCollider2DComponent
+---@field Restitution number
+---@field Radius number
+---@field Friction number
+---@field Offset vec2
+---@field Density number
+---@field ShowCollider boolean
+
+-- Component fields are exposed through Entity:GetComponent("CircleRendererComponent"); there is no runtime global named CircleRendererComponent.
+---@class CircleRendererComponent
+---@field Fade number
+---@field Thickness number
+---@field Color vec4
+
+-- Component fields are exposed through Entity:GetComponent("HierarchyComponent"); there is no runtime global named HierarchyComponent.
+---@class HierarchyComponent
+---@field Parent number
+---@field InheritTransform boolean
+
+-- Component fields are exposed through Entity:GetComponent("LuaScriptComponent"); there is no runtime global named LuaScriptComponent.
+---@class LuaScriptComponent
+---@field ScriptFilePath string
+
+-- Component fields are exposed through Entity:GetComponent("MeshRendererComponent"); there is no runtime global named MeshRendererComponent.
+---@class MeshRendererComponent
+---@field MaterialPath string
+---@field Color vec4
+---@field MeshPath string
+---@field Primitive string
+
+-- Component fields are exposed through Entity:GetComponent("NativeScriptComponent"); there is no runtime global named NativeScriptComponent.
+---@class NativeScriptComponent
+---@field ScriptName string
+
+-- Component fields are exposed through Entity:GetComponent("RigidBody2DComponent"); there is no runtime global named RigidBody2DComponent.
+---@class RigidBody2DComponent
+---@field FixedRotation boolean
+---@field Type number
+
+-- Component fields are exposed through Entity:GetComponent("SampleDataComponent"); there is no runtime global named SampleDataComponent.
+---@class SampleDataComponent
+---@field Count number
+---@field Health number
+---@field Tags string
+---@field Offset vec2
+---@field Opacity number
+---@field Enabled boolean
+---@field Speed number
+---@field DisplayName string read-only
+
+-- Component fields are exposed through Entity:GetComponent("SpriteComponent"); there is no runtime global named SpriteComponent.
+---@class SpriteComponent
+---@field TilingFactor number
+---@field Color vec4
+---@field Texture string
+
+-- Component fields are exposed through Entity:GetComponent("TagComponent"); there is no runtime global named TagComponent.
+---@class TagComponent
+---@field Tag string
+
+-- Component fields are exposed through Entity:GetComponent("TransformComponent"); there is no runtime global named TransformComponent.
+---@class TransformComponent
+---@field Transform mat4 transient
+---@field Scale vec3
+---@field RotationQuat unknown no script mapping for schema kind 'Quat'; transient
+---@field Rotation vec3
+---@field Location vec3
+
+-- Component fields are exposed through Entity:GetComponent("UUIDComponent"); there is no runtime global named UUIDComponent.
+---@class UUIDComponent
+---@field ID string read-only
+
 ---Annotation-only shape of a script table; there is no WorldScript runtime global or constructor.
 ---@class WorldScript
 ---@field entity Entity Entity owning this script instance.
