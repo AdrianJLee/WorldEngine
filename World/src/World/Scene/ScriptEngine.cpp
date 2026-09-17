@@ -169,9 +169,68 @@ namespace World
 			return true;
 		}
 
+		// W5a-2:从"当前脚本表"读一个字段的运行期值,并转成新版本声明的字段类型。
+		// 迁移优先级:活表(同名且类型兼容)→ CachedFields(同名同类型)→ 新脚本默认值。
+		// 只有 rawget 非 nil(真正的自有字段)才算"当前表里有";类型兼容只放宽 number 域:
+		//   声明 Int   → 活值必须是整数值且在 int 范围内;
+		//   声明 Float → 活值可以是任何 number(整数也可以);
+		//   Bool/String → 严格同类型。
+		bool TryReadLiveField(const ScriptTableRef& table, const std::string& name, LuaFieldType type,
+			LuaScriptField* out)
+		{
+			if (!out || !table.IsValid() || !table.HasField(name.c_str()))
+				return false;
+
+			const ScriptValue value = table.GetField(name.c_str());
+			LuaScriptField field;
+			field.Type = type;
+			switch (type)
+			{
+				case LuaFieldType::Int:
+				{
+					double number = 0.0;
+					if (!value.AsNumber(&number) || !std::isfinite(number) || number != std::floor(number) ||
+						number < (std::numeric_limits<int>::min)() || number > (std::numeric_limits<int>::max)())
+						return false;
+					field.Value = static_cast<int>(number);
+					break;
+				}
+				case LuaFieldType::Float:
+				{
+					double number = 0.0;
+					if (!value.AsNumber(&number))
+						return false;
+					field.Value = static_cast<float>(number);
+					break;
+				}
+				case LuaFieldType::Bool:
+				{
+					bool boolean = false;
+					if (!value.AsBool(&boolean))
+						return false;
+					field.Value = boolean;
+					break;
+				}
+				case LuaFieldType::String:
+				{
+					std::string text;
+					if (!value.AsString(&text))
+						return false;
+					field.Value = std::move(text);
+					break;
+				}
+				default:
+					return false;
+			}
+			*out = std::move(field);
+			return true;
+		}
+
 		// 脚本返回表 -> 内存字段缓存(键仍是字段名;同类型才复用旧值 —— 与 sol2 时期一致)。
+		// liveTable(可空)只用于热重载:活表同名兼容值优先于 CachedFields。
 		std::unordered_map<std::string, LuaScriptField> BuildFieldCache(const ScriptTableRef& table,
-			const std::unordered_map<std::string, std::string>& schema, const LuaScriptComponent& script)
+			const std::unordered_map<std::string, std::string>& schema, const LuaScriptComponent& script,
+			const ScriptTableRef* liveTable = nullptr)
 		{
 			std::unordered_map<std::string, LuaScriptField> fields;
 			std::vector<std::string> names;
@@ -256,9 +315,23 @@ namespace World
 				}
 				if (field.Type == LuaFieldType::None)
 					continue;
-				const auto old = script.CachedFields.find(name);
-				if (old != script.CachedFields.end() && old->second.Type == field.Type)
-					field.Value = old->second.Value;
+				// W5a-2 迁移源优先级:活表(运行期 self.X=... 的真实状态)→ CachedFields → 新默认值。
+				bool migrated = false;
+				if (liveTable)
+				{
+					LuaScriptField live;
+					if (TryReadLiveField(*liveTable, name, field.Type, &live))
+					{
+						field.Value = std::move(live.Value);
+						migrated = true;
+					}
+				}
+				if (!migrated)
+				{
+					const auto old = script.CachedFields.find(name);
+					if (old != script.CachedFields.end() && old->second.Type == field.Type)
+						field.Value = old->second.Value;
+				}
 				fields.emplace(name, std::move(field));
 			}
 			return fields;
@@ -551,6 +624,9 @@ namespace World
 				WLD_CORE_WARN("[Behavior] {0}", behaviorError);
 			script.LastError.clear();
 			script.State = ScriptInstanceState::Stopped;
+			// W5a-2:加载成功即建立源指纹基线,并清掉上一次遗留的重载诊断。
+			script.SourceFingerprint = FingerprintScriptSource(script.ScriptFilePath).Value;
+			script.ReloadDiagnostic.clear();
 			return true;
 		}
 		catch (const std::exception& error) { script.LastError.clear(); ReportLuaError(script, "EditorLoad", error.what()); }
@@ -603,6 +679,9 @@ namespace World
 					throw std::runtime_error(error);
 			}
 			script.State = ScriptInstanceState::Running;
+			// W5a-2:运行期首次加载成功同样建立指纹基线(监听器不改文件时不产生假阳性)。
+			script.SourceFingerprint = FingerprintScriptSource(script.ScriptFilePath).Value;
+			script.ReloadDiagnostic.clear();
 		}
 		catch (const std::exception& error) { ReportLuaError(script, phase, error.what()); }
 		catch (...) { ReportLuaError(script, phase, "Unknown exception"); }
@@ -803,8 +882,9 @@ namespace World
 				!newTable.SetField("__EntityID", entityValue))
 				return reject("bind", "cannot assign the entity handle");
 
-			// 字段迁移:BuildFieldCache 对"同名 + 同类型"复用旧值,新增/类型变化取新脚本默认值。
-			newFields = BuildFieldCache(newTable, ParseFieldAnnotationsInternal(source), script);
+			// 字段迁移:当前活表优先(运行期 self.X=... 只存在于这里),缺失/类型不符再回退 CachedFields,
+			// 两者都没有才用新脚本默认值。
+			newFields = BuildFieldCache(newTable, ParseFieldAnnotationsInternal(source), script, &script.ScriptTable);
 			DescribeScriptFieldMigration(script.CachedFields, newFields, script.ScriptFilePath, &warnings);
 
 			// 把合并后的字段写进**新表**(旧表保持原值,直到整体交换成功)。

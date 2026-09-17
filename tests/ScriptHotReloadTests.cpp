@@ -8,6 +8,8 @@
 //   5. 轮询监听:改内容恰好一次重载、不改零次、连续写 debounce 归并成一次;
 //   6. 拒绝语义:State ∈ {Creating, Destroying} 与回调内(非安全点)拒绝,帧边界可重载;
 //   7. generation:热重载后进入独立域(最高位置位),与 Scene 启动期分配值及上一次重载值都不同。
+//   8. 活字段迁移:OnUpdate 里 self.X = ... 的运行期值(活表)优先于 CachedFields,活表缺失才回退缓存;
+//   9. 指纹基线:编辑器预览与运行期两条加载路径成功后 SourceFingerprint 与当前文件一致,不改文件零次重载。
 //
 // headless:真实 Scene 调度(OnScriptStart/OnScriptUpdate),脚本写在构建产物的临时目录里,
 // 逻辑路径是相对 WLD_ASSETPATH 的带 ".." 路径(与 ScriptLifecycleTests 同一模式)。
@@ -274,6 +276,38 @@ return {
 			"}\n";
 	}
 
+	// 活字段迁移:OnUpdate 里 self.X = ... 只写当前脚本表,注解默认值与 CachedFields 保持原样。
+	const char* const kLiveFieldV1 = R"LUA(---@field A integer
+---@field B integer
+return {
+    A = 1,
+    B = 2,
+    OnCreate = function(self) HotReloadProbe("create:live:v1") end,
+    OnUpdate = function(self)
+        self.A = 123
+        self.B = 456
+        HotReloadProbe("update:live:v1")
+    end,
+    OnDestroy = function(self) HotReloadProbe("destroy:live:v1") end,
+}
+)LUA";
+
+	// v2:新行为读到的 A/B 应是迁移后的运行期值,不是新默认值 1/2。
+	const char* const kLiveFieldV2 = R"LUA(---@field A integer
+---@field B integer
+return {
+    A = 1,
+    B = 2,
+    OnCreate = function(self) HotReloadProbe("create:live:v2") end,
+    OnUpdate = function(self)
+        HotReloadProbe("update:live:v2")
+        HotReloadProbe("A=" .. tostring(self.A))
+        HotReloadProbe("B=" .. tostring(self.B))
+    end,
+    OnDestroy = function(self) HotReloadProbe("destroy:live:v2") end,
+}
+)LUA";
+
 	// ---- 1. 指纹 + 字段迁移 ----
 
 	void FingerprintAndFieldMigration()
@@ -313,9 +347,10 @@ return {
 		CHECK(ProbeCalled("update:v1"));
 		CHECK(script.LastError.empty());
 
-		// 改 A(实例状态由 CachedFields 持有,迁移以它为准)。
+		// 改 A:运行期赋值落在当前脚本表(W5a-2 起活表是首选迁移源);CachedFields 仍是注解默认值 1。
 		const int tableRefBefore = script.ScriptTable.RefId();
-		std::any_cast<int&>(FIELD(script.CachedFields, "A").Value) = 41;
+		CHECK(script.ScriptTable.SetField("A", ScriptValue::Number(41)));
+		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "A").Value) == 1);
 
 		WriteScript(file, kMigrateV2);
 		const ScriptSourceFingerprint fingerprintV2 = FingerprintScriptSource(logical);
@@ -656,6 +691,141 @@ return {
 
 		scene.OnRuntimeStop();
 	}
+
+	// ---- 6. 活字段迁移:活表优先,CachedFields 兜底 ----
+
+	void LiveFieldsTakePriorityOverCachedFields()
+	{
+		const fs::path file = ScriptPath("hotreload_live_fields.lua");
+		WriteScript(file, kLiveFieldV1);
+		const std::string logical = LogicalPath(file);
+
+		Scene scene(TestContext());
+		Entity entity = Entity::CreateEntity(&scene, "live field probe");
+		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
+		CHECK(ScriptEngine::InitScriptForEditor(script));   // CachedFields 初始为 {A=1,B=2}
+		scene.OnScriptStart();
+		CHECK(script.State == ScriptInstanceState::Running);
+
+		// 缓存值与运行期值刻意不同:重载必须以活表为准。
+		std::any_cast<int&>(FIELD(script.CachedFields, "A").Value) = 7;
+		std::any_cast<int&>(FIELD(script.CachedFields, "B").Value) = 8;
+
+		g_ProbeCalls.clear();
+		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCalled("update:live:v1"));
+
+		// 活表里是 OnUpdate 写入的运行期值,缓存仍是 7/8。
+		double liveA = 0.0;
+		CHECK(script.ScriptTable.GetField("A").AsNumber(&liveA));
+		CHECK(liveA == 123.0);
+		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "A").Value) == 7);
+
+		// 当前表没有 B(运行期把它置 nil)→ B 只能回退 CachedFields(8),不是新默认 2。
+		CHECK(script.ScriptTable.SetField("B", ScriptValue::Nil()));
+		CHECK(!script.ScriptTable.HasField("B"));
+
+		WriteScript(file, kLiveFieldV2);
+		std::string diagnostic;
+		CHECK(ScriptEngine::ReloadScript(script, &diagnostic));
+		CHECK(diagnostic.empty());
+		CHECK(FIELD(script.CachedFields, "A").Type == LuaFieldType::Int);
+		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "A").Value) == 123);   // 活表优先
+		CHECK(FIELD(script.CachedFields, "B").Type == LuaFieldType::Int);
+		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "B").Value) == 8);     // 活表缺失 → 缓存
+
+		g_ProbeCalls.clear();
+		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCount("update:live:v2") == 1);
+		CHECK(ProbeCalled("A=123"));
+		CHECK(ProbeCalled("B=8"));
+		CHECK(script.LastError.empty());
+		scene.OnRuntimeStop();
+
+		// 真实宿主不调用 InitScriptForEditor:CachedFields 为空,首次加载后的运行期赋值同样要能迁移。
+		const fs::path runtimeFile = ScriptPath("hotreload_live_runtime.lua");
+		WriteScript(runtimeFile, kLiveFieldV1);
+		const std::string runtimeLogical = LogicalPath(runtimeFile);
+
+		Scene runtimeScene(TestContext());
+		Entity runtimeEntity = Entity::CreateEntity(&runtimeScene, "runtime live probe");
+		LuaScriptComponent& runtimeScript = runtimeEntity.AddComponent<LuaScriptComponent>(runtimeLogical);
+		CHECK(runtimeScript.CachedFields.empty());
+		runtimeScene.OnScriptStart();
+		CHECK(runtimeScript.State == ScriptInstanceState::Running);
+		g_ProbeCalls.clear();
+		runtimeScene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCalled("update:live:v1"));
+
+		WriteScript(runtimeFile, kLiveFieldV2);
+		diagnostic.clear();
+		CHECK(ScriptEngine::ReloadScript(runtimeScript, &diagnostic));
+		CHECK(std::any_cast<int>(FIELD(runtimeScript.CachedFields, "A").Value) == 123);
+		CHECK(std::any_cast<int>(FIELD(runtimeScript.CachedFields, "B").Value) == 456);
+		g_ProbeCalls.clear();
+		runtimeScene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCalled("A=123"));
+		CHECK(ProbeCalled("B=456"));
+		CHECK(runtimeScript.LastError.empty());
+		runtimeScene.OnRuntimeStop();
+	}
+
+	// ---- 7. 指纹基线:两条加载路径 + 监听零假阳性 ----
+
+	void LoadPathsEstablishFingerprintBaseline()
+	{
+		const fs::path file = ScriptPath("hotreload_baseline.lua");
+		WriteScript(file, WatchScriptSource(1));
+		const std::string logical = LogicalPath(file);
+		const ScriptSourceFingerprint expected = FingerprintScriptSource(logical);
+		CHECK(expected.Exists);
+		CHECK(expected.FromContent);
+		CHECK(expected.Value != 0);
+
+		// 1) 编辑器预览路径:成功后写入当前文件指纹,并清掉遗留诊断。
+		Scene editorScene(TestContext());
+		Entity editorEntity = Entity::CreateEntity(&editorScene, "baseline preview");
+		LuaScriptComponent& preview = editorEntity.AddComponent<LuaScriptComponent>(logical);
+		preview.ReloadDiagnostic = "stale preview diagnostic";
+		CHECK(ScriptEngine::InitScriptForEditor(preview));
+		CHECK(preview.SourceFingerprint != 0);
+		CHECK(preview.SourceFingerprint == expected.Value);
+		CHECK(preview.SourceFingerprint == FingerprintScriptSource(logical).Value);   // 宿主比较口径
+		CHECK(preview.ReloadDiagnostic.empty());
+
+		// 2) 运行期路径:不经过 InitScriptForEditor,OnCreateScript 成功后同样建立基线。
+		Scene runtimeScene(TestContext());
+		Entity runtimeEntity = Entity::CreateEntity(&runtimeScene, "baseline runtime");
+		LuaScriptComponent& runtime = runtimeEntity.AddComponent<LuaScriptComponent>(logical);
+		runtime.ReloadDiagnostic = "stale runtime diagnostic";
+		runtimeScene.OnScriptStart();
+		CHECK(runtime.State == ScriptInstanceState::Running);
+		CHECK(runtime.SourceFingerprint != 0);
+		CHECK(runtime.SourceFingerprint == expected.Value);
+		CHECK(runtime.ReloadDiagnostic.empty());
+
+		// 3) 不改文件跑监听:基线已建立,零次重载;宿主用"组件指纹 != 文件指纹"触发也不会假阳性。
+		ScriptFileWatch watch;
+		watch.Watch(logical);
+		int reloads = 0;
+		for (int step = 0; step < 4; ++step)
+		{
+			for (const std::string& path : watch.Poll(0.2))
+			{
+				CHECK(path == logical);
+				++reloads;
+				std::string diagnostic;
+				CHECK(ScriptEngine::ReloadScript(runtime, &diagnostic));
+			}
+		}
+		CHECK(reloads == 0);
+		CHECK(runtime.SourceFingerprint == FingerprintScriptSource(logical).Value);
+		CHECK(preview.SourceFingerprint == FingerprintScriptSource(logical).Value);
+		CHECK(runtime.LastError.empty());
+
+		runtimeScene.OnRuntimeStop();
+		editorScene.OnRuntimeStop();
+	}
 }
 
 int main()
@@ -678,6 +848,8 @@ int main()
 			{ "failed reload keeps the old version and its behaviour", FailedReloadKeepsOldVersion },
 			{ "watcher ignores same content and debounces consecutive writes", WatcherDebouncesAndIgnoresSameContent },
 			{ "unsafe states and in-callback reloads are rejected", RejectsUnsafeStatesAndCallbackReload },
+			{ "live script table wins field migration and cache is the fallback", LiveFieldsTakePriorityOverCachedFields },
+			{ "both load paths establish the source fingerprint baseline", LoadPathsEstablishFingerprintBaseline },
 		};
 
 		int failures = 0;
