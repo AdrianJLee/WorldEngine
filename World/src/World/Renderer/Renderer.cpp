@@ -899,7 +899,11 @@ namespace World
 			std::vector<uint8_t> row(static_cast<size_t>(pending.Width) * 3);
 			for (uint32_t y = 0; y < pending.Height; ++y)
 			{
-				const uint8_t* source = pixels + static_cast<size_t>(pending.Height - 1 - y) * pending.Width * 4;
+				// 行序:Vulkan 的 vkCmdCopyImageToBuffer 第 0 行就是图像**顶部**
+				// (与 OpenGL glReadPixels 的"第 0 行是底部"相反),这里不能翻转。
+				// 历史 bug:此前照 GL 约定多翻一次,导致 Vulkan 抓图整幅纵向镜像
+				// (曾误判为 WUI/投影问题;实测"翻转行序后与 OpenGL 只差 0.013%")。
+				const uint8_t* source = pixels + static_cast<size_t>(y) * pending.Width * 4;
 				for (uint32_t x = 0; x < pending.Width; ++x)
 				{
 					row[x * 3 + 0] = sourceIsBgra ? source[x * 4 + 2] : source[x * 4 + 0];
