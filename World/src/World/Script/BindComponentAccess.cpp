@@ -197,6 +197,10 @@ namespace World
 			if (!mapping.LuaTypeName)
 				Fail(*resolved.Proxy, "field '" + name + "' has schema kind '" + SchemaKindName(field->K) +
 					"' which has no script mapping yet");
+			// W3d:HierarchyComponent.Parent 由 Hierarchy::SetParent/ClearParent 维护双向表,
+			// 直接写字段会绕过环检测/自身校验/深度上限;这里给出可读错误并指向正门。
+			if (resolved.Type->Id.Name == "World::HierarchyComponent" && field->Name == "Parent")
+				Fail(*resolved.Proxy, "field 'Parent' is managed by the hierarchy and is read-only for scripts; use Entity:SetParent or Entity:ClearParent");
 			if (mapping.ReadOnly)
 				Fail(*resolved.Proxy, "field '" + name + "' is read-only for scripts (identity field)");
 			if (field->Meta.ReadOnly)

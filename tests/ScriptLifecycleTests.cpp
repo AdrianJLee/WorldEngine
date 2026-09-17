@@ -427,30 +427,97 @@ namespace
         }
     }
 
-    void RejectSynchronousCallbackWrites()
+    void SynchronousWhitelistAndDeferredCleanup()
     {
-        Fixture fixture;
-        auto source = fixture.AddNative();
-        fixture.Context.NativeAction = [&fixture](Entity entity, const std::string& phase) {
-            if (phase != "update") return;
-            auto* scene = entity.GetScene();
-            fixture.Context.Observed["rejections"] += RejectsLogic([&] { Entity::CreateEntity(scene); });
-            fixture.Context.Observed["rejections"] += RejectsLogic([&] { entity.AddComponent<TransformComponent>(); });
-            fixture.Context.Observed["rejections"] += RejectsLogic([&] { scene->GetRegistry(); });
-            fixture.Context.Observed["rejections"] += RejectsLogic([&] { entity.AddOrReplaceComponent<NativeScriptComponent>(); });
-        };
-        fixture.World->OnScriptStart();
-        fixture.Step();
-        CHECK(fixture.Context.Observed["rejections"] == 4);
-        CHECK(!source.HasComponent<TransformComponent>());
-        CHECK(source.GetComponent<NativeScriptComponent>().State == ScriptInstanceState::Running);
-        auto lua = Entity{};
-        CHECK(fixture.World->DeferStructuralChange([&](Scene&) { lua = fixture.AddLua(); SetLuaString(lua, "Mode", "add"); }));
-        fixture.World->FlushStructuralChanges();
-        fixture.Step();
-        fixture.Step();
-        CHECK(lua.HasComponent<TransformComponent>()); // Actual Lua AddComponent queues a type, not a raw pointer.
-        CHECK(lua.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+        // C++ 类型化结构写模板仍不在白名单:回调内继续拒绝;
+        // 只有 Lua 动态绑定与 Scene::CreateEntityShell 走 W3d 的同步白名单。
+        {
+            Fixture fixture;
+            auto source = fixture.AddNative();
+            fixture.Context.NativeAction = [&fixture](Entity entity, const std::string& phase) {
+                if (phase != "update") return;
+                auto* scene = entity.GetScene();
+                fixture.Context.Observed["rejections"] += RejectsLogic([&] { Entity::CreateEntity(scene); });
+                fixture.Context.Observed["rejections"] += RejectsLogic([&] { entity.AddComponent<TransformComponent>(); });
+                fixture.Context.Observed["rejections"] += RejectsLogic([&] { scene->GetRegistry(); });
+                fixture.Context.Observed["rejections"] += RejectsLogic([&] { entity.AddOrReplaceComponent<NativeScriptComponent>(); });
+            };
+            fixture.World->OnScriptStart();
+            fixture.Step();
+            CHECK(fixture.Context.Observed["rejections"] == 4);
+            CHECK(!source.HasComponent<TransformComponent>());
+            CHECK(source.GetComponent<NativeScriptComponent>().State == ScriptInstanceState::Running);
+        }
+
+        // Lua 白名单:OnUpdate 内 CreateChild/AddComponent 当帧同步生效,
+        // 同帧第二个脚本按快照语义看不到新实体(它自己的 assert 失败会置 Faulted)。
+        {
+            Fixture fixture;
+            auto spawner = fixture.AddLua("scripts/tests/EntitySpawnProbe.lua");
+            auto observer = fixture.AddLua("scripts/tests/EntitySpawnProbe.lua");
+            SetLuaString(spawner, "Mode", "spawn");
+            SetLuaString(observer, "Mode", "query");
+            fixture.World->OnScriptStart();
+            fixture.Step();
+            CHECK(spawner.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+            CHECK(spawner.GetComponent<LuaScriptComponent>().LastError.empty());
+            CHECK(observer.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+            CHECK(observer.GetComponent<LuaScriptComponent>().LastError.empty());
+
+            // OnScriptUpdate 结束后、渲染前实体与组件已经在场景里(当帧可见)。
+            const auto& registry = static_cast<const Scene&>(*fixture.World).GetRegistry();
+            Entity child;
+            for (const entt::entity handle : registry.view<TagComponent>())
+                if (registry.get<TagComponent>(handle).Tag == "A")
+                {
+                    child = Entity(fixture.World.get(), handle);
+                    break;
+                }
+            CHECK(child && child.IsValid());
+            CHECK(child.HasComponent<TransformComponent>());
+            CHECK(child.HasComponent<SpriteComponent>());
+            const auto& transform = child.GetComponent<TransformComponent>();
+            CHECK(transform.Location.x == 1.0f && transform.Location.y == 2.0f && transform.Location.z == 3.0f);
+            CHECK(child.GetComponent<HierarchyComponent>().Parent == static_cast<entt::entity>(spawner));
+        }
+
+        // Lua 动态 AddComponent 在同一个 OnUpdate 内提交:一次 Step 后 C++ 侧可见。
+        {
+            Fixture fixture;
+            auto lua = fixture.AddLua();
+            SetLuaString(lua, "Mode", "add");
+            fixture.World->OnScriptStart();
+            fixture.Step();
+            CHECK(lua.HasComponent<TransformComponent>());
+            CHECK(lua.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+            CHECK(lua.GetComponent<LuaScriptComponent>().LastError.empty());
+            fixture.Stop();
+        }
+
+        // Destroy/RemoveComponent 仍延迟:回调内句柄/组件保持可见,帧末提交后才消失。
+        {
+            Fixture destroyFixture;
+            auto destroyer = destroyFixture.AddLua("scripts/tests/EntitySpawnProbe.lua");
+            SetLuaString(destroyer, "Mode", "destroy");
+            destroyFixture.World->OnScriptStart();
+            destroyFixture.Step();
+            CHECK(destroyer.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+            const auto& registry = static_cast<const Scene&>(*destroyFixture.World).GetRegistry();
+            bool doomedAlive = false;
+            for (const entt::entity handle : registry.view<TagComponent>())
+                doomedAlive |= registry.get<TagComponent>(handle).Tag == "Doomed";
+            CHECK(!doomedAlive);
+        }
+
+        {
+            Fixture removeFixture;
+            auto remover = removeFixture.AddLua("scripts/tests/EntitySpawnProbe.lua");
+            SetLuaString(remover, "Mode", "remove");
+            removeFixture.World->OnScriptStart();
+            removeFixture.Step();
+            CHECK(remover.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+            CHECK(!remover.HasComponent<TransformComponent>());
+        }
     }
 
     void NestedCommandsRetainScriptSource()
@@ -1067,7 +1134,7 @@ int main(int argc, char** argv)
             { "deferred creation, batch boundary and paused flush", DeferredCreationAndPausedFlush },
             { "cancel work from destroyed, removed and faulted sources", CancelCommandsFromEndedSources },
             { "nested commands retain the original script source", NestedCommandsRetainScriptSource },
-            { "synchronous write rejection and Lua dynamic add", RejectSynchronousCallbackWrites },
+            { "synchronous whitelist and deferred cleanup", SynchronousWhitelistAndDeferredCleanup },
             { "replace rejection and remove-then-add", ReplacementRequiresCleanup },
             { "stop inside create and pending cancellation", StopFromCallbackAndPendingCancellation },
             { "native errors and exactly-once cleanup", NativeErrorsReleaseExactlyOnce },

@@ -6,12 +6,32 @@
 ---@class Entity
 Entity = {}
 
----Request a default component. Active scenes commit at a safe point; invalid requests raise an error.
+---Add a default component. Pure-data components (Transform/Sprite/Circle/MeshRenderer/Camera/Hierarchy) commit synchronously inside callbacks; script/physics components keep their existing deferred or rejected rules.
 ---@param componentType string Registered component type name.
 function Entity:AddComponent(componentType) end
 
+---Detach this entity to the scene root synchronously; returns false when the handle is invalid.
+---@return boolean
+function Entity:ClearParent() end
+
+---Create a child shell (Tag+UUID only) and attach it under this entity in the current frame.
+---Overload CreateChild(name): Create a named child shell (Tag+UUID only) and attach it under this entity in the current frame.
+---name: Optional child name; defaults to Empty Entity.
+---@overload fun(self: Entity, name: string): Entity
+---@return Entity
+function Entity:CreateChild() end
+
 ---Destroy this entity through scene cleanup; requests during callbacks are deferred and duplicates are ignored.
 function Entity:Destroy() end
+
+---Find the first matching entity in the scene. Entities synchronously created during the current script update stay hidden until the next frame.
+---@param name string TagComponent name to find.
+---@return Entity|nil
+function Entity:FindByName(name) end
+
+---Return direct children in HierarchyComponent order (immediate live query).
+---@return Entity[]
+function Entity:GetChildren() end
 
 ---Return a schema-driven field proxy, or nil when the component is absent. Every field access re-checks the entity and component; writes type-check against the schema.
 ---@param componentType string Registered component type name.
@@ -22,10 +42,23 @@ function Entity:GetComponent(componentType) end
 ---@return integer
 function Entity:GetID() end
 
+---Return the TagComponent name; raises a readable error when the tag is missing.
+---@return string
+function Entity:GetName() end
+
+---Return the current parent handle immediately, or nil when this entity is a scene root.
+---@return Entity|nil
+function Entity:GetParent() end
+
 ---Check whether this entity has the component; invalid entities or non-component types raise an error.
 ---@param componentType string Registered component type name.
 ---@return boolean
 function Entity:HasComponent(componentType) end
+
+---Instantiate a .wprefab synchronously and return its root handle. Synchronous I/O: large prefabs can stall the frame; raises on a missing or invalid prefab.
+---@param path string Prefab path; relative paths resolve under the content root (WLD_ASSETPATH).
+---@return Entity
+function Entity:InstantiatePrefab(path) end
 
 ---Whether this handle and its scene still exist; safe to call on an expired entity.
 ---@return boolean
@@ -34,6 +67,15 @@ function Entity:IsValid() end
 ---Remove the component through scene cleanup; requests during callbacks are deferred and duplicates are ignored.
 ---@param componentType string Registered component type name.
 function Entity:RemoveComponent(componentType) end
+
+---Set the TagComponent name immediately; this is data, not a structural write.
+---@param name string New TagComponent name.
+function Entity:SetName(name) end
+
+---Attach under parent synchronously; cycles, self-parenting and depth overflow return false. HierarchyComponent.Parent stays read-only.
+---@param parent Entity New parent entity in the same scene.
+---@return boolean
+function Entity:SetParent(parent) end
 
 ---@class mat3
 ---@field [integer] vec3 Column access uses zero-based indices 0 through 2; other indices raise a Lua error.

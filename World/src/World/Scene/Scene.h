@@ -65,6 +65,28 @@ namespace World
 		bool IsActive() const { return m_State != SceneState::Stopped; }
 		bool IsRunning() const { return m_State == SceneState::Running; }
 		bool IsPendingDestroy(entt::entity entity) const;
+		// ---- W3d:脚本回调内的白名单同步结构写 ----
+		// 只建实体槽并挂 Tag+UUID(不挂 Transform),返回的句柄当帧有效。
+		// 与 Entity::CreateEntity 的差别:回调内绕过 AssertStructuralWrite 的回调深度检查,
+		// 但仍拒绝 Stop 流程/回调外活动场景的结构写。
+		Entity CreateEntityShell(const std::string& name = "Empty Entity");
+		// 当前是否在脚本生命周期回调(OnCreate/OnUpdate/OnDestroy)内。
+		bool IsInsideScriptCallback() const;
+		// OnScriptUpdate 的实体可见性快照:回调内同步创建的新实体当帧对其它脚本的
+		// FindByName 不可见,下一帧自动进入快照。没有活动快照时一律可见。
+		bool IsVisibleToCurrentScriptUpdate(entt::entity entity) const;
+		// 白名单同步结构写的临时窗口。只在回调内或结构提交点内可构造,否则抛可读错误;
+		// 窗口内 AssertStructuralWrite 放行回调深度/活动场景检查(嵌套按深度恢复)。
+		class ScriptWriteScope
+		{
+		public:
+			explicit ScriptWriteScope(Scene& scene);
+			~ScriptWriteScope();
+			ScriptWriteScope(const ScriptWriteScope&) = delete;
+			ScriptWriteScope& operator=(const ScriptWriteScope&) = delete;
+		private:
+			Scene* m_Scene = nullptr;
+		};
 		// W5:脚本热重载只允许在安全点提交——不在脚本回调内、不在结构提交点内、
 		// 也不在 Stop 流程中。宿主(编辑器/Runtime)应在帧边界调用,并以此判定是否可重载。
 		bool CanApplyScriptReload() const;
@@ -115,6 +137,8 @@ namespace World
 		void InvokeCallback(const ScriptSource& source, const std::function<void()>& callback);
 		void StartPendingScripts();
 		void UpdateScriptSnapshot(Timestep ts, const std::vector<entt::entity>& native, const std::vector<entt::entity>& lua);
+		void BeginScriptUpdateSnapshot();
+		void EndScriptUpdateSnapshot();
 		void DestroyNativeScript(entt::entity entity, bool faulted = false);
 		void DestroyLuaScript(entt::entity entity, bool faulted = false);
 		void FaultSource(const ScriptSource& source, const std::string& error);
@@ -138,6 +162,9 @@ namespace World
 		bool m_StopRequested = false;
 		bool m_Committing = false;
 		unsigned m_CallbackDepth = 0;
+		unsigned m_ScriptWriteDepth = 0;
+		bool m_ScriptUpdateSnapshotActive = false;
+		std::unordered_set<entt::entity> m_ScriptUpdateSnapshot;
 		uint64_t m_NextGeneration = 0;
 		ScriptSource m_CallbackSource;
 		std::vector<StructuralChange> m_Changes;

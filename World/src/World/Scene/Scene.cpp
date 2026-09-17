@@ -103,10 +103,55 @@ namespace World
 	void Scene::AssertStructuralWrite() const
 	{
 		AssertOwnerThread();
-		if (m_CallbackDepth)
+		if (m_CallbackDepth && m_ScriptWriteDepth == 0)
 			throw std::logic_error("Synchronous structural writes are forbidden in lifecycle callbacks; use DeferStructuralChange");
-		if (m_State == SceneState::Stopping || (IsActive() && !m_Committing))
+		if (m_State == SceneState::Stopping || (IsActive() && !m_Committing && m_ScriptWriteDepth == 0))
 			throw std::logic_error("An active scene accepts structural writes only while committing a command");
+	}
+
+	Scene::ScriptWriteScope::ScriptWriteScope(Scene& scene) : m_Scene(&scene)
+	{
+		scene.AssertOwnerThread();
+		if (scene.m_State == SceneState::Stopping || scene.m_StopRequested)
+			throw std::logic_error("Script structural writes are forbidden while the scene is stopping");
+		// 只放行生命周期回调内的白名单写;回调外仍需走既有的结构提交点。
+		if (scene.m_CallbackDepth == 0 && !scene.m_Committing)
+			throw std::logic_error("Script structural writes are only allowed inside lifecycle callbacks or structural commits");
+		++scene.m_ScriptWriteDepth;
+	}
+
+	Scene::ScriptWriteScope::~ScriptWriteScope()
+	{
+		if (m_Scene && m_Scene->m_ScriptWriteDepth)
+			--m_Scene->m_ScriptWriteDepth;
+	}
+
+	Entity Scene::CreateEntityShell(const std::string& name)
+	{
+		AssertOwnerThread();
+		if (m_State == SceneState::Stopping || m_StopRequested)
+			throw std::logic_error("Cannot create an entity shell while the scene is stopping");
+		// 回调深度是本契约唯一放行的检查;活动场景在回调外仍只接受提交点写入。
+		if (m_CallbackDepth == 0 && IsActive() && !m_Committing)
+			throw std::logic_error("An active scene accepts structural writes only while committing a command or inside a script callback");
+		const entt::entity handle = m_Registry.create();
+		m_Registry.emplace<TagComponent>(handle, name);
+		m_Registry.emplace<UUIDComponent>(handle, UUID());
+		return Entity(this, handle);
+	}
+
+	bool Scene::IsInsideScriptCallback() const
+	{
+		AssertOwnerThread();
+		return m_CallbackDepth != 0;
+	}
+
+	bool Scene::IsVisibleToCurrentScriptUpdate(entt::entity entity) const
+	{
+		AssertOwnerThread();
+		if (!m_ScriptUpdateSnapshotActive)
+			return true;
+		return m_ScriptUpdateSnapshot.count(entity) != 0;
 	}
 
 	entt::registry& Scene::GetRegistry() { AssertStructuralWrite(); return m_Registry; }
@@ -182,14 +227,15 @@ namespace World
 	{
 		// 与 FlushStructuralChanges 的守卫同源:回调内/结构提交点内禁止改脚本实例,
 		// 停止流程中也不允许(即将销毁全部实例)。
-		return m_CallbackDepth == 0 && !m_Committing && !m_StopRequested
+		return m_CallbackDepth == 0 && !m_Committing && m_ScriptWriteDepth == 0 && !m_StopRequested
 			&& m_State != SceneState::Stopping;
 	}
 
 	void Scene::FlushStructuralChanges()
 	{
 		AssertOwnerThread();
-		if (m_CallbackDepth || m_Committing) throw std::logic_error("Structural changes cannot be recursively committed");
+		if (m_CallbackDepth || m_Committing || m_ScriptWriteDepth)
+			throw std::logic_error("Structural changes cannot be recursively committed");
 		if (m_StopRequested) { StopScene(); return; }
 		std::vector<StructuralChange> batch;
 		batch.swap(m_Changes);
@@ -479,9 +525,37 @@ namespace World
 		StartPendingScripts();
 		if (m_StopRequested) { StopScene(); return; }
 		OnUpdatePhysics2D(ts);
-		UpdateScriptSnapshot(ts, native, lua);
+		// W3d:回调内同步创建的新实体本帧对其它脚本的 FindByName 不可见,
+		// 快照在开始执行 OnUpdate 前冻结,下一帧重新收集。
+		// 没有 Lua 更新实例时不建快照(native-only 场景保持原开销)。
+		const bool snapshotActive = !lua.empty();
+		if (snapshotActive) BeginScriptUpdateSnapshot();
+		try { UpdateScriptSnapshot(ts, native, lua); }
+		catch (...)
+		{
+			if (snapshotActive) EndScriptUpdateSnapshot();
+			throw;
+		}
+		if (snapshotActive) EndScriptUpdateSnapshot();
 		if (m_StopRequested) StopScene();
 		else FlushStructuralChanges();
+	}
+
+	void Scene::BeginScriptUpdateSnapshot()
+	{
+		AssertOwnerThread();
+		m_ScriptUpdateSnapshot.clear();
+		const auto view = m_Registry.view<TagComponent>();
+		for (const entt::entity entity : view)
+			m_ScriptUpdateSnapshot.insert(entity);
+		m_ScriptUpdateSnapshotActive = true;
+	}
+
+	void Scene::EndScriptUpdateSnapshot()
+	{
+		AssertOwnerThread();
+		m_ScriptUpdateSnapshotActive = false;
+		m_ScriptUpdateSnapshot.clear();
 	}
 
 	void Scene::UpdateScriptSnapshot(Timestep ts, const std::vector<entt::entity>& native, const std::vector<entt::entity>& lua)
