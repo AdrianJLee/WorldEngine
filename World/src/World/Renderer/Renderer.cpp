@@ -891,15 +891,20 @@ namespace World
 				continue;
 			}
 			file << "P6\n" << pending.Width << " " << pending.Height << "\n255\n";
+			// 通道顺序:Vulkan 交换链是 B8G8R8A8(实测面板底色被抓成 (33,32,31),
+			// 正确值是 (31,32,33)),必须按源格式把 B/R 换回 PPM 的 R,G,B。
+			const Rhi::Format sourceFormat = active.Image->GetDesc().Format;
+			const bool sourceIsBgra = sourceFormat == Rhi::Format::B8G8R8A8_UNORM
+				|| sourceFormat == Rhi::Format::B8G8R8A8_SRGB;
 			std::vector<uint8_t> row(static_cast<size_t>(pending.Width) * 3);
 			for (uint32_t y = 0; y < pending.Height; ++y)
 			{
 				const uint8_t* source = pixels + static_cast<size_t>(pending.Height - 1 - y) * pending.Width * 4;
 				for (uint32_t x = 0; x < pending.Width; ++x)
 				{
-					row[x * 3 + 0] = source[x * 4 + 0];
+					row[x * 3 + 0] = sourceIsBgra ? source[x * 4 + 2] : source[x * 4 + 0];
 					row[x * 3 + 1] = source[x * 4 + 1];
-					row[x * 3 + 2] = source[x * 4 + 2];
+					row[x * 3 + 2] = sourceIsBgra ? source[x * 4 + 0] : source[x * 4 + 2];
 				}
 				file.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size()));
 			}
