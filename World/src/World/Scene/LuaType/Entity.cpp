@@ -2,6 +2,7 @@
 #include "World/Scene/ScriptEngine.h"
 #include "World/Scene/Entity.h"
 #include "World/Core/WorldContext.h"
+#include "World/Script/BindComponentAccess.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptValue.h"
 #include "LuaTypeHelpers.h"
@@ -48,7 +49,7 @@ namespace World
 			{ "IsValid", {}, "boolean", "Whether this handle and its scene still exist; safe to call on an expired entity." },
 			{ "GetID", {}, "integer", "Return this entity's runtime handle (including its generation), not a persistent UUID." },
 			{ "HasComponent", { { "componentType", "string", "Registered component type name." } }, "boolean", "Check whether this entity has the component; invalid entities or non-component types raise an error." },
-			{ "GetComponent", { { "componentType", "string", "Registered component type name." } }, "userdata|nil", "Return an opaque component pointer, or nil when absent. Component fields are not exposed; do not retain across structural changes." },
+			{ "GetComponent", { { "componentType", "string", "Registered component type name." } }, "userdata|nil", "Return a schema-driven field proxy, or nil when the component is absent. Every field access re-checks the entity and component; writes type-check against the schema." },
 			{ "AddComponent", { { "componentType", "string", "Registered component type name." } }, "", "Request a default component. Active scenes commit at a safe point; invalid requests raise an error." },
 			{ "RemoveComponent", { { "componentType", "string", "Registered component type name." } }, "", "Remove the component through scene cleanup; requests during callbacks are deferred and duplicates are ignored." },
 			{ "Destroy", {}, "", "Destroy this entity through scene cleanup; requests during callbacks are deferred and duplicates are ignored." }
@@ -83,12 +84,11 @@ namespace World
 						Entity* entity = Receiver(context, args, count, "GetComponent");
 						RequireEntity(*entity, "GetComponent");
 						const std::string typeName = RequireStringArgument(args, count, 1, "Entity:GetComponent");
-						const entt::id_type componentId = RequireComponentType(*entity, typeName, "GetComponent").Storage->ComponentId;
-						if (!entity->HasComponent(componentId))
+						const Schema::TypeSchema& schema = RequireComponentType(*entity, typeName, "GetComponent");
+						if (!entity->HasComponent(schema.Storage->ComponentId))
 							return ScriptValue::Nil();
-						// 与 sol2 时期一致:脚本只拿到不透明指针,不暴露组件字段。
-						void* pointer = entity->GetComponent(componentId);
-						return context.NewOpaqueUserdata(&pointer, sizeof(pointer));
+						// W3a-A1:返回 schema 驱动的字段代理(读写按 FieldSchema::Get/Set,零 per-field 生成物)。
+						return MakeComponentProxy(context, *entity, schema);
 					} },
 				{ "AddComponent", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 					{

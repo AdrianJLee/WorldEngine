@@ -13,7 +13,7 @@ function Entity:AddComponent(componentType) end
 ---Destroy this entity through scene cleanup; requests during callbacks are deferred and duplicates are ignored.
 function Entity:Destroy() end
 
----Return an opaque component pointer, or nil when absent. Component fields are not exposed; do not retain across structural changes.
+---Return a schema-driven field proxy, or nil when the component is absent. Every field access re-checks the entity and component; writes type-check against the schema.
 ---@param componentType string Registered component type name.
 ---@return userdata|nil
 function Entity:GetComponent(componentType) end

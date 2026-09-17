@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "World/Core/Export.h"
 #include "Scene.h"
 #include <algorithm>
 #include <functional>
@@ -81,6 +82,8 @@ namespace World
 	void RegisterBuiltinVec2Binding(ScriptBindingContext& bindings);
 	void RegisterBuiltinVec3Binding(ScriptBindingContext& bindings);
 	void RegisterBuiltinVec4Binding(ScriptBindingContext& bindings);
+	// W3a-A1:组件字段代理(Entity:GetComponent 的返回值;Kind → Lua 映射表见 Script/BindComponentAccess.h)。
+	WLD_API bool RegisterComponentProxyBinding(ScriptBindingContext& bindings, std::string* error);
 
 	struct LuaScriptComponent;
 	class ScriptEngine

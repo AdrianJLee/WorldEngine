@@ -410,6 +410,9 @@ namespace World
 				throw std::runtime_error("[Lua] failed to create script helpers: " + error);
 
 			RegisterMathTypes();
+			// W3a-A1:组件字段代理类型(Entity:GetComponent 的返回值;映射表见 Script/BindComponentAccess.h)。
+			if (!RegisterComponentProxyBinding(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the component proxy binding: " + error);
 		}
 		catch (...)
 		{
