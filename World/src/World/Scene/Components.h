@@ -281,6 +281,10 @@ namespace World
 
 		std::unordered_map<std::string, LuaScriptField> CachedFields;
 		std::filesystem::file_time_type LastModifiedTime;
+		// W5:热重载用的源指纹(优先内容哈希,退化为 mtime+size)与最近一次重载诊断。
+		// 都是运行期状态,不进 schema、不参与序列化;克隆配置时只带指纹(源文件身份)。
+		uint64_t SourceFingerprint = 0;
+		std::string ReloadDiagnostic;
 
 		bool IsLoaded = false;
 		ScriptInstanceState State = ScriptInstanceState::Pending;

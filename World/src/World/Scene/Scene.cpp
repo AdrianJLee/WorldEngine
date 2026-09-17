@@ -178,6 +178,14 @@ namespace World
 		if (!IsActive() && !m_CallbackDepth && !m_Committing) FlushStructuralChanges();
 	}
 
+	bool Scene::CanApplyScriptReload() const
+	{
+		// 与 FlushStructuralChanges 的守卫同源:回调内/结构提交点内禁止改脚本实例,
+		// 停止流程中也不允许(即将销毁全部实例)。
+		return m_CallbackDepth == 0 && !m_Committing && !m_StopRequested
+			&& m_State != SceneState::Stopping;
+	}
+
 	void Scene::FlushStructuralChanges()
 	{
 		AssertOwnerThread();

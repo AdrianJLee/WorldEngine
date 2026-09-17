@@ -19,6 +19,7 @@ namespace World
 		copy.ScriptFilePath = source.ScriptFilePath;
 		copy.CachedFields = source.CachedFields;
 		copy.LastModifiedTime = source.LastModifiedTime;
+		copy.SourceFingerprint = source.SourceFingerprint;
 		return copy;
 	}
 
