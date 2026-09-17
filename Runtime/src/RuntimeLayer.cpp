@@ -1,14 +1,21 @@
 ﻿#include "RuntimeLayer.h"
 #include "GameHud.h"
 #include "World/Core/Asset/ProjectManifest.h"
+#include "World/Core/Log.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/RHI/RhiTextureBridge.h"
+#include "World/Scene/ScriptEngine.h"
 #include "World/WUI/WuiRhiBackend.h"
+#include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiTextureRegistry.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <string>
 
 namespace World
 {
@@ -168,9 +175,14 @@ namespace World
 	{
 		static Wui::WuiContext wuiContext;
 		static Wui::WuiRhiBackend wuiBackend;
+		++m_UiFrame;
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))
 		{
+			// 开发钩子:脚本点击注入 → 本窗口输入状态。必须在 BeginFrame 之后、控件绘制之前,
+			// 走的是和鼠标同一条输入路径(不是测试专用分支)。
+			ApplyDevUiActions();
+			Wui::WuiScriptedInput::Get().Apply("main", input);
 			wuiContext.BeginFrame(input);
 			// 场景全屏显示:离屏颜色附件作为图像画进呈现目标,HUD 随后叠画。
 			if (m_SceneTextureId)
@@ -178,6 +190,16 @@ namespace World
 					{ 0, 0, input.ViewportSize.x, input.ViewportSize.y },
 					{ 1, 1, 1, 1 }, 0, 1.0f, "", 15.0f, false,
 					m_SceneTextureId, { 0, 1, 1, -1 }, -1, -1, -1 });
+			// 脚本 UI(W3c):在场景纹理之后、游戏 HUD 之前画;HUD 作为最上层覆盖,
+			// 与编辑器侧"场景 → 面板 → 覆盖层"的层次一致。单个脚本出错只停自身。
+			if (Scene* activeScene = m_Host.GetScene().get())
+			{
+				const std::size_t commandCountBefore = wuiContext.Commands().size();
+				const std::size_t scriptUiFailures = ScriptEngine::DrawScriptUi(*activeScene, wuiContext);
+				// 只有"脚本真的提交了控件且没有出错"才算画过(用于报告/自动化断言)。
+				if (wuiContext.Commands().size() > commandCountBefore && scriptUiFailures == 0)
+					m_ScriptUiDrawn = true;
+			}
 			// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
 			// 会触发结构写断言并抛异常。
 			const Scene* activeScene = m_Host.GetScene().get();
@@ -185,8 +207,133 @@ namespace World
 			DrawGameHud(wuiContext, entityCount);
 			wuiContext.EndFrame();
 			wuiBackend.Render(wuiContext.Commands(), wuiContext.OverlayCommands());
+			// 整窗抓图:UI 通道已提交、→Present 尚未执行 —— 与 EditorLayer 同一调用点
+			// (见 Renderer::FlushPresentCaptures 的说明;提前抓会拍到空白并破坏布局)。
+			Renderer::FlushPresentCaptures();
+			FinishDevUiFrame();
 		}
 		wuiBackend.EndFrame(wuiContext.Cursor());
+	}
+
+	namespace
+	{
+		// W3c 宿主接线:纯开发开关(命名沿用 Editor 侧习惯),发布路径默认全部关闭。
+		//   WLD_UI_CLICK="x,y"            注入一次脚本点击(press + release 两帧,与编辑器一致)
+		//   WLD_UI_CLICK_FRAME=<n>        点击发生在第 n 个 UI 帧(1 基;第 1 个 UI 帧 = 1)
+		//   WLD_UI_CLICK_QUIT=<n>         点击后第 n 个 UI 帧自动退出
+		//   WLD_CAPTURE_PRESENT=<path>    整窗抓图写 PPM(绝对路径,或相对当前工作目录)
+		//   WLD_CAPTURE_PRESENT_FRAME=<n> 抓图发生在第 n 个 UI 帧
+		//   WLD_CAPTURE_PRESENT_QUIT=<n>  抓图落盘后第 n 个 UI 帧自动退出(0 = 落盘即退)
+		struct DevUiConfig
+		{
+			glm::vec2 ClickPosition { 0, 0 };
+			bool HasClick = false;
+			int ClickFrame = 30;
+			int ClickQuit = 0;
+			std::string CapturePath;
+			int CaptureFrame = 40;
+			int CaptureQuit = 0;
+		};
+
+		struct DevUiState
+		{
+			DevUiConfig Config;
+			bool ClickInjected = false;
+			bool CaptureRequested = false;
+		};
+
+		// 进程内单例:Runtime 只有一个 RuntimeLayer,环境变量在进程生命周期内不变。
+		DevUiState& DevUi()
+		{
+			static DevUiState state = []()
+			{
+				DevUiState fresh;
+				DevUiConfig& config = fresh.Config;
+				if (const char* click = std::getenv("WLD_UI_CLICK"))
+				{
+					float x = 0.0f;
+					float y = 0.0f;
+					if (std::sscanf(click, "%f,%f", &x, &y) == 2)
+					{
+						config.ClickPosition = { x, y };
+						config.HasClick = true;
+					}
+					else
+					{
+						WLD_CORE_WARN("[dev-ui] WLD_UI_CLICK='{0}' is not \"x,y\"; click injection disabled", click);
+					}
+				}
+				if (const char* frame = std::getenv("WLD_UI_CLICK_FRAME"))
+					config.ClickFrame = std::atoi(frame);
+				if (const char* quit = std::getenv("WLD_UI_CLICK_QUIT"))
+					config.ClickQuit = std::atoi(quit);
+				if (const char* capture = std::getenv("WLD_CAPTURE_PRESENT"))
+					config.CapturePath = capture;
+				if (const char* frame = std::getenv("WLD_CAPTURE_PRESENT_FRAME"))
+					config.CaptureFrame = std::atoi(frame);
+				if (const char* quit = std::getenv("WLD_CAPTURE_PRESENT_QUIT"))
+					config.CaptureQuit = std::atoi(quit);
+
+				if (config.HasClick)
+					WLD_CORE_INFO("[dev-ui] click ({0},{1}) queued at UI frame {2} (quit +{3})",
+						config.ClickPosition.x, config.ClickPosition.y, config.ClickFrame, config.ClickQuit);
+				if (!config.CapturePath.empty())
+					WLD_CORE_INFO("[dev-ui] present capture '{0}' requested at UI frame {1} (quit +{2})",
+						config.CapturePath, config.CaptureFrame, config.CaptureQuit);
+				return fresh;
+			}();
+			return state;
+		}
+	}
+
+	void RuntimeLayer::ApplyDevUiActions()
+	{
+		DevUiState& devUi = DevUi();
+
+		if (devUi.Config.HasClick && !devUi.ClickInjected &&
+			static_cast<int>(m_UiFrame) >= devUi.Config.ClickFrame)
+		{
+			Wui::WuiScriptedInput::Get().QueueClick("main", devUi.Config.ClickPosition);
+			devUi.ClickInjected = true;
+			// 自动退出安排在点击被消费之后足够帧数(默认 0 → 下一个 UI 帧),让脚本状态先落盘。
+			m_DevUiArmedFrame = m_UiFrame + 1 + static_cast<uint32_t>(std::max(devUi.Config.ClickQuit, 0));
+			WLD_CORE_INFO("[dev-ui] injected scripted UI click at ({0},{1}) on UI frame {2}",
+				devUi.Config.ClickPosition.x, devUi.Config.ClickPosition.y, m_UiFrame);
+		}
+
+		// 抓图请求:与编辑器同样的"登记 + 帧末 flush"两步,不在这里读像素。
+		if (!devUi.Config.CapturePath.empty() && !devUi.CaptureRequested &&
+			static_cast<int>(m_UiFrame) >= devUi.Config.CaptureFrame)
+		{
+			devUi.CaptureRequested = true;
+			m_DevUiCapturePending = true;
+			m_DevUiArmedFrame = m_UiFrame + 1 + static_cast<uint32_t>(std::max(devUi.Config.CaptureQuit, 0));
+			Renderer::RequestPresentCapture(nullptr, devUi.Config.CapturePath,
+				Application::Get().GetWindow().GetWidth(), Application::Get().GetWindow().GetHeight());
+			WLD_CORE_INFO("[dev-ui] present capture queued on UI frame {0}: {1}", m_UiFrame, devUi.Config.CapturePath);
+		}
+	}
+
+	void RuntimeLayer::FinishDevUiFrame()
+	{
+		if (!m_DevUiCapturePending || m_UiFrame < m_DevUiArmedFrame)
+			return;
+
+		const std::string& capturePath = DevUi().Config.CapturePath;
+		std::error_code fileError;
+		const uintmax_t size = std::filesystem::file_size(capturePath, fileError);
+		if (fileError || size == 0)
+		{
+			// 抓图没落盘(例如 Vulkan 呈现目标尚未就绪)时不要静默退出:留下证据、
+			// 保持挂起等下一帧重试,由验证脚本判定"没有 PPM = 失败"。
+			WLD_CORE_ERROR("[dev-ui] present capture '{0}' was not written (ui frame {1})", capturePath, m_UiFrame);
+			m_DevUiArmedFrame = m_UiFrame + 1;
+			return;
+		}
+		WLD_CORE_INFO("[dev-ui] present capture written (ui frame {0}, {1} bytes): {2}",
+			m_UiFrame, size, capturePath);
+		m_DevUiCapturePending = false;
+		Application::Get().Close();
 	}
 	void RuntimeLayer::OnEvent(Event& event)
 	{

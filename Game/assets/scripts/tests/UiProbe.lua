@@ -16,6 +16,7 @@
 ---@field columnsCount integer
 ---@field columnsH number
 ---@field columnsY2 number
+---@field savedClicks integer
 local UiProbe = {}
 
 UiProbe.clicks = 0
@@ -32,6 +33,7 @@ UiProbe.rowsX2 = 0
 UiProbe.columnsCount = 0
 UiProbe.columnsH = 0
 UiProbe.columnsY2 = 0
+UiProbe.savedClicks = -1
 
 function UiProbe:OnCreate()
     self.clicks = 0
@@ -42,6 +44,7 @@ function UiProbe:OnCreate()
     self.failOnImage = false
     self.rowsCount = 0
     self.columnsCount = 0
+    self.savedClicks = -1
 end
 
 function UiProbe:OnUI()
@@ -55,7 +58,10 @@ function UiProbe:OnUI()
         ui.button("", 0, 0, 10, 10, "bad")
     end
 
+    -- W3c 宿主接线:两个标记的屏幕位置是自动化像素断言的锚点
+    -- (面板底色 (31,32,33) 在 (40..260, 150..190) 内;标记按钮底色 (51,54,59) 在 (981..1187, 481..517) 内)。
     ui.panel(10, 10, 300, 200, "HUD")
+    ui.button("marker", 980, 480, 210, 40, "SCRIPT-UI")
     ui.text(20, 40, "Hello", 16)
     if ui.button("go", 20, 60, 100, 24, "Go") then
         self.clicks = self.clicks + 1
@@ -85,6 +91,23 @@ function UiProbe:OnUI()
     if columns[1] then
         self.columnsH = columns[1].h
         self.columnsY2 = columns[2].y
+    end
+
+    -- W3c 宿主接线:把脚本状态变成宿主/自动化可观测的副作用。
+    --   WLD_SAVE_DIR=<dir> 时 Save.Save(0) 落盘 <dir>/saves/slot-0.wsave,其中的
+    --   Globals["ui.clicks"] 就是"注入的点击真的驱动了脚本 UI 回调"的证据。
+    -- 沙箱里 os/io 都不可用,不能靠环境变量开开关;这里的判据是"服务能不能真的落盘":
+    -- headless 夹具没有 GameApp 会话,Save.Save 会抛 Lua error,pcall 吃掉后保持 -1
+    -- (不误报成功、也不能把 OnUI 打成 Faulted);宿主里成功才推进 savedClicks。
+    if self.clicks ~= self.savedClicks then
+        local clicks = self.clicks
+        local ok, saved = pcall(function()
+            Save.SetGlobal("ui.clicks", clicks)
+            return Save.Save(0)
+        end)
+        if ok == true and saved == true then
+            self.savedClicks = clicks
+        end
     end
 end
 
