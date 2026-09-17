@@ -77,9 +77,9 @@ namespace World::Rhi::Vulkan
 			m_OneShotSlots.clear();
 			if (m_TransientPool)
 				vkDestroyCommandPool(m_Device, m_TransientPool, nullptr);
-			for (VkCommandPool pool : m_ThreadPools)
-				if (pool)
-					vkDestroyCommandPool(m_Device, pool, nullptr);
+			for (const auto& threadPool : m_ThreadPools)
+				if (threadPool.second)
+					vkDestroyCommandPool(m_Device, threadPool.second, nullptr);
 			m_ThreadPools.clear();
 			if (m_CommandPool)
 				vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
@@ -409,17 +409,15 @@ namespace World::Rhi::Vulkan
 	VkCommandPool VulkanDevice::GetThreadCommandPool()
 	{
 		// 每线程一个池:命令缓冲分配/释放必须在创建它的池所属线程上进行。
-		// **必须按设备缓存**:后端热切换(Renderer::Shutdown → Init)会销毁旧设备及其命令池,
-		// 线程局部缓存若跨设备复用,vkAllocateCommandBuffers 会拿到已销毁设备上的池
-		// (实测:World.RendererHotswap 在第二次 Vulkan Init 时段错误)。
-		struct ThreadPoolCache
-		{
-			const VulkanDevice* Device = nullptr;
-			VkCommandPool Pool = VK_NULL_HANDLE;
-		};
-		static thread_local ThreadPoolCache cached;
-		if (cached.Pool != VK_NULL_HANDLE && cached.Device == this)
-			return cached.Pool;
+		// 池按 thread::id 归属设备自身(见 VulkanDevice.h 的 m_ThreadPools)。
+		// 历史教训:曾用 thread_local{Device 指针, Pool} 做跨调用缓存并按指针判等,
+		// 但热切换销毁旧设备后,新 VulkanDevice 常被分配在**同一地址**(分配器复用),
+		// 指针比较通过 → 返回已销毁设备上的池 → vkAllocateCommandBuffers 在 NVIDIA
+		// 驱动内 0xC0000005(World.RendererHotswap 连跑数轮必现的偶发崩溃)。
+		const std::thread::id threadId = std::this_thread::get_id();
+		std::lock_guard<std::mutex> lock(m_PoolMutex);
+		if (const auto found = m_ThreadPools.find(threadId); found != m_ThreadPools.end())
+			return found->second;
 
 		VkCommandPoolCreateInfo poolInfo {};
 		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -428,10 +426,7 @@ namespace World::Rhi::Vulkan
 		VkCommandPool pool = VK_NULL_HANDLE;
 		if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
 			return m_CommandPool;   // 退化为设备级池(单线程录制仍可用)
-		cached.Device = this;
-		cached.Pool = pool;
-		std::lock_guard<std::mutex> lock(m_PoolMutex);
-		m_ThreadPools.push_back(pool);
+		m_ThreadPools.emplace(threadId, pool);
 		return pool;
 	}
 	Handle<CommandBuffer> VulkanDevice::CreateCommandBuffer(const std::string&) { return CreateRef<VulkanCommandBuffer>(*this); }

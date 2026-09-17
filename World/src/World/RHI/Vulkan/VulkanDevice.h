@@ -7,6 +7,8 @@
 #include <memory>
 #include <functional>
 #include <mutex>
+#include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace World::Rhi::Vulkan
@@ -80,7 +82,9 @@ namespace World::Rhi::Vulkan
 		uint32_t m_GraphicsFamily = 0;
 		VkCommandPool m_CommandPool = VK_NULL_HANDLE;
 		std::mutex m_PoolMutex;                                  // 保护 m_ThreadPools 的创建
-		std::vector<VkCommandPool> m_ThreadPools;                // 每线程一个池(含主线程的第一个)
+		// 每线程一个池(含主线程的第一个),按 thread::id 归属**设备自身**:
+		// 池与设备同生共死,不允许存在跨设备的线程局部缓存(地址复用会伪造"同一设备")。
+		std::unordered_map<std::thread::id, VkCommandPool> m_ThreadPools;
 		VkPipelineLayout m_LastPipelineLayout = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
 		bool m_DeviceLost = false;
