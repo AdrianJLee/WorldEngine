@@ -5,6 +5,7 @@
 #include "World/Core/Application.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/BehaviorRegistry.h"
+#include "World/Script/BindEvents.h"
 #include "World/Script/BindUI.h"
 #include "World/Script/BindServices.h"
 #include "World/Script/HotReload.h"
@@ -370,6 +371,18 @@ namespace World
 			return value;
 		}
 
+		// W4:四个生命周期回调(OnCreate/OnUpdate/OnDestroy/OnUI)周围的"当前脚本实例"作用域。
+		// events:on / timers:after/every 借它把订阅归属到 (场景令牌, 实体句柄含版本, 组件 id, Generation)。
+		ScriptEventOwner MakeScriptEventOwner(const Entity& entity, uint64_t generation)
+		{
+			ScriptEventOwner owner;
+			owner.EntityRef = entity;
+			owner.ScenePtr = entity.IsValid() ? entity.GetScene() : nullptr;
+			owner.Component = entt::type_id<LuaScriptComponent>().hash();
+			owner.Generation = generation;
+			return owner;
+		}
+
 		void ApplyCachedFields(LuaScriptComponent& script)
 		{
 			for (const auto& [name, field] : script.CachedFields)
@@ -444,6 +457,8 @@ namespace World
 
 		void ShutdownInternal()
 		{
+			// W4:VM 关闭前先丢弃事件/计时器订阅(引用在 VM 关闭后一律失效)。
+			ResetScriptEventSubscriptions();
 			s_LookupField.Release();
 			s_CollectFieldNames.Release();
 			s_Bindings.reset();
@@ -497,6 +512,9 @@ namespace World
 			// W3c:UI 面(只读全局表 `ui`;宿主入口 DrawScriptUi 见 Script/BindUI.h)。
 			if (!RegisterUiBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the UI bindings: " + error);
+			// W4:事件/计时器面(只读全局表 `events`/`timers`;见 Script/BindEvents.h)。
+			if (!RegisterEventBindings(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the event/timer bindings: " + error);
 		}
 		catch (...)
 		{
@@ -599,6 +617,12 @@ namespace World
 		uiList.reserve(uiCount);
 		for (std::size_t index = 0; index < uiCount; ++index)
 			uiList.push_back(&uiTables[index]);
+		// W4:events/timers 与 Input/Level/Save 同属"全局只读表",沿用服务块的渲染链路
+		// (描述表在 BindEvents.cpp,不改 LuaStubGenerator)。
+		std::size_t eventCount = 0;
+		const ScriptServiceBinding* eventTables = ScriptEventBindings(&eventCount);
+		for (std::size_t index = 0; index < eventCount; ++index)
+			serviceList.push_back(&eventTables[index]);
 		if (!LuaStubGenerator::Generate(path, LuaReflectionRegistry::GetTable(), components, serviceList, uiList, error))
 		{
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("[Lua] {0}", error);
@@ -690,6 +714,8 @@ namespace World
 			phase = "OnCreate";
 			if (script.OnCreateFunc.IsValid())
 			{
+				// W4:回调期间 events:on / timers:after/every 归属本实例。
+				const ScriptEventOwnerScope ownerScope(MakeScriptEventOwner(script.RuntimeEntity, script.Generation));
 				const ScriptValue args[] = { script.ScriptTable.ToValue() };
 				if (!script.OnCreateFunc.Call(args, 1, nullptr, &error))
 					throw std::runtime_error(error);
@@ -711,6 +737,8 @@ namespace World
 		{
 			if (script.OnUpdateFunc.IsValid())
 			{
+				// W4:回调期间 events:on / timers:after/every 归属本实例。
+				const ScriptEventOwnerScope ownerScope(MakeScriptEventOwner(script.RuntimeEntity, script.Generation));
 				std::string error;
 				const ScriptValue args[] = { script.ScriptTable.ToValue(), ScriptValue::Number(ts.GetSeconds()) };
 				if (!script.OnUpdateFunc.Call(args, 2, nullptr, &error))
@@ -732,12 +760,16 @@ namespace World
 		if (script.State == ScriptInstanceState::Destroying) return;
 		bool faulted = script.State == ScriptInstanceState::Faulted;
 		script.State = ScriptInstanceState::Destroying;
+		// W4:实例销毁时批量退订它的事件/计时器订阅(OnDestroy 里新建的订阅也一并丢弃)。
+		const Entity ownerEntity = script.RuntimeEntity;
+		const uint64_t ownerGeneration = script.Generation;
 		try
 		{
 			const bool entered = script.CreateEntered;
 			script.CreateEntered = false;
 			if (entered && script.OnDestroyFunc.IsValid())
 			{
+				const ScriptEventOwnerScope ownerScope(MakeScriptEventOwner(ownerEntity, ownerGeneration));
 				std::string error;
 				const ScriptValue args[] = { script.ScriptTable.ToValue() };
 				if (!script.OnDestroyFunc.Call(args, 1, nullptr, &error))
@@ -746,6 +778,7 @@ namespace World
 		}
 		catch (const std::exception& error) { ReportLuaError(script, "OnDestroy", error.what()); faulted = true; }
 		catch (...) { ReportLuaError(script, "OnDestroy", "Unknown exception"); faulted = true; }
+		ReleaseScriptEventOwners(ownerEntity, ownerGeneration);
 		ClearLuaReferences(script);
 		script.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
 	}
@@ -769,6 +802,9 @@ namespace World
 			try
 			{
 				ScriptUiScope scope(context, script.ScriptFilePath);
+				// W4:OnUI 期间 events:on / timers:after/every 同样归属本实例。
+				const ScriptEventOwnerScope ownerScope(
+					MakeScriptEventOwner(Entity(&scene, handle), script.Generation));
 				std::string error;
 				const ScriptValue args[] = { script.ScriptTable.ToValue() };
 				if (!script.OnUiFunc.Call(args, 1, nullptr, &error))
@@ -957,6 +993,7 @@ namespace World
 
 		// 整体交换:引用(环境/脚本表/四个回调)+ 字段 + 指纹 + generation。
 		// State / IsLoaded / CreateEntered / LastError 语义不动(失败路径也从未碰过它们)。
+		const uint64_t previousGeneration = script.Generation;
 		script.LuaEnv = newEnvironment;
 		script.ScriptTable = newTable;
 		script.OnCreateFunc = newCreate;
@@ -967,7 +1004,34 @@ namespace World
 		script.SourceFingerprint = fingerprint;
 		script.Generation = NextReloadGeneration();
 		script.ReloadDiagnostic.clear();
+		// W4:热重载成功 = 旧 instance 的事件/计时器订阅整体作废(旧闭包绝不能再被调用);
+		// 新订阅由新版本的 OnCreate 在下一次实例创建/复活(Pending 路径)时建立。
+		// 失败路径在上面已经 return,旧订阅与旧回调原样保留。
+		ReleaseScriptEventOwners(script.RuntimeEntity, previousGeneration);
 		if (diagnostics) *diagnostics = JoinDiagnosticLines(warnings);
 		return true;
+	}
+
+	// ---- P2 W4:事件/计时器回调的失败落点 ----
+
+	void ScriptEngine::FaultScriptInstance(Entity entity, uint64_t generation, const char* phase,
+		const std::string& error)
+	{
+		if (!IsInitialized())
+			return;
+		AssertOwnerThread();
+		if (!entity.IsValid())
+			return;
+		Scene* scene = entity.GetScene();
+		if (!scene)
+			return;
+		// 只写组件的运行态字段(State/LastError),不增删实体/组件:与 DrawScriptUi 相同,
+		// 走 const registry 取引用再 const_cast,避免在活动场景上触发结构写断言。
+		const entt::registry& registry = static_cast<const Scene&>(*scene).GetRegistry();
+		const LuaScriptComponent* script =
+			registry.try_get<LuaScriptComponent>(static_cast<entt::entity>(entity));
+		if (!script || script->Generation != generation)
+			return;
+		ReportLuaError(const_cast<LuaScriptComponent&>(*script), phase, error);
 	}
 }

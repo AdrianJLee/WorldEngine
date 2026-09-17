@@ -119,6 +119,13 @@ namespace World
 		// 返回本帧出错的脚本数(0 = 全部成功)。
 		static std::size_t DrawScriptUi(Scene& scene, Wui::WuiContext& context);
 
+		// ---- P2 W4:事件/计时器的实例收口 ----
+		// 事件/计时器回调(由 Script/BindEvents 的桥层驱动)失败时把该实例置 Faulted,
+		// 与 OnUpdate 失败同一落点(State=Faulted + LastError);generation 不匹配
+		// (已热重载/已重建)或实例无效时静默忽略。
+		static void FaultScriptInstance(Entity entity, uint64_t generation, const char* phase,
+			const std::string& error);
+
 		// 方便获取全局状态（W1b 起返回 Luau VM 门面；未初始化时抛 logic_error）
 		static LuauVm& GetState();
 		// 当前 VM 的绑定上下文（类型注册/宿主函数装箱；未初始化时抛 logic_error）

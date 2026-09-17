@@ -180,6 +180,41 @@ namespace World
 			--m_Scene->m_ScriptWriteDepth;
 	}
 
+	// W4:事件/计时器回调的派发作用域。与生命周期回调的 InvokeCallback 同源地抬升
+	// m_CallbackDepth 并设置"当前脚本来源",同时打开白名单结构写窗口(m_ScriptWriteDepth),
+	// 使 CreateEntityShell / AddComponent / SetParent 在事件/计时器回调里当帧生效。
+	// owner(句柄含场景令牌 + generation)不可用时 IsValid()==false,调用方不得执行回调体。
+	Scene::ScriptCallbackScope::ScriptCallbackScope(Scene& scene, Entity owner, entt::id_type component,
+		uint64_t generation)
+		: m_Scene(&scene)
+	{
+		scene.AssertOwnerThread();
+		if (!owner.IsValid() || owner.GetScene() != &scene)
+			return;
+		if (scene.m_State == SceneState::Stopping || scene.m_StopRequested)
+			return;
+		const ScriptSource source { static_cast<entt::entity>(owner), component, generation, false };
+		if (!scene.IsSourceAlive(source))
+			return;
+		m_PreviousSource = scene.m_CallbackSource;
+		scene.m_CallbackSource = source;
+		++scene.m_CallbackDepth;
+		++scene.m_ScriptWriteDepth;
+		m_Valid = true;
+	}
+
+	Scene::ScriptCallbackScope::~ScriptCallbackScope()
+	{
+		if (!m_Valid || !m_Scene)
+			return;
+		m_Scene->m_CallbackSource = m_PreviousSource;
+		if (m_Scene->m_CallbackDepth)
+			--m_Scene->m_CallbackDepth;
+		if (m_Scene->m_ScriptWriteDepth)
+			--m_Scene->m_ScriptWriteDepth;
+		m_Valid = false;
+	}
+
 	Entity Scene::CreateEntityShell(const std::string& name)
 	{
 		AssertOwnerThread();

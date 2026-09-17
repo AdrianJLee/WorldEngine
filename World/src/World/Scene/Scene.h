@@ -22,6 +22,18 @@ namespace World
 
 	class Scene
 	{
+	private:
+		// 脚本回调/派发作用域的归属令牌:实体句柄(含版本位)+ 组件 id + 实例 generation。
+		// 生命周期的 InvokeCallback 与 W4 的 ScriptCallbackScope 共用它做判活
+		// (IsSourceAlive:注册表有效 + 未排队销毁/移除 + generation 相等 + State==Running)。
+		struct ScriptSource
+		{
+			entt::entity EntityHandle = entt::null;
+			entt::id_type Component = 0;
+			uint64_t Generation = 0;
+			bool Destroying = false;
+		};
+
 	public:
 		explicit Scene(WorldContext& context);
 		~Scene();
@@ -105,6 +117,27 @@ namespace World
 		// 当前是否在 ScriptWriteScope 内(脚本回调或结构提交点的白名单结构写窗口)。
 		// Entity 的动态 AddComponent 用它区分"外部调用(延迟提交)"与"窗口内(同步提交)"。
 		bool IsInsideScriptWriteScope() const { return m_ScriptWriteDepth != 0; }
+		// ---- W4:事件/计时器派发作用域 ----
+		// 事件/计时器回调不在生命周期回调里,但语义要与脚本回调一致:抬升回调深度、
+		// 设置"当前脚本来源",并进入白名单结构写窗口(与 ScriptWriteScope 同源),
+		// 使 CreateEntityShell / AddComponent / SetParent 在回调里可用且当帧可见。
+		// 构造时按 owner(场景令牌 + 实体句柄含版本 + 组件 id + generation)判活:
+		// 实例已销毁/已热重载/非 Running/场景正在停止 → IsValid()==false,调用方不得执行回调体。
+		class ScriptCallbackScope
+		{
+		public:
+			ScriptCallbackScope(Scene& scene, Entity owner, entt::id_type component, uint64_t generation);
+			~ScriptCallbackScope();
+			ScriptCallbackScope(const ScriptCallbackScope&) = delete;
+			ScriptCallbackScope& operator=(const ScriptCallbackScope&) = delete;
+			ScriptCallbackScope(ScriptCallbackScope&&) = delete;
+			ScriptCallbackScope& operator=(ScriptCallbackScope&&) = delete;
+			bool IsValid() const { return m_Valid; }
+		private:
+			Scene* m_Scene = nullptr;
+			ScriptSource m_PreviousSource;
+			bool m_Valid = false;
+		};
 		// W5:脚本热重载只允许在安全点提交——不在脚本回调内、不在结构提交点内、
 		// 也不在 Stop 流程中。宿主(编辑器/Runtime)应在帧边界调用,并以此判定是否可重载。
 		bool CanApplyScriptReload() const;
@@ -128,13 +161,6 @@ namespace World
 		friend class SceneSerializer;
 		friend class Gameplay::SaveService;
 
-		struct ScriptSource
-		{
-			entt::entity EntityHandle = entt::null;
-			entt::id_type Component = 0;
-			uint64_t Generation = 0;
-			bool Destroying = false;
-		};
 		enum class ChangeKind { General, DestroyEntity, RemoveComponent };
 		struct StructuralChange
 		{

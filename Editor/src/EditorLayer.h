@@ -162,8 +162,9 @@ namespace World
 
 		Ref<Scene> m_ActiveScene;
 		Ref<Scene> m_RuntimeScene;
-		// W1:Play 会话也走 GameApp/GameHost(与 Runtime 同一条更新路径);
-		// Simulate 仍是编辑器专有语义(OnSimulationStart/OnUpdateSimulation),留待 W5 并入阶段管线。
+		// W1:Play 会话走 GameApp/GameHost(与 Runtime 同一条更新路径)。
+		// P2 W4:Simulate 并入同一条会话路径 —— 事件/计时器/固定步长只在 GameApp::Tick 里推进,
+		// 编辑器不再单独调用 OnUpdateSimulation(视图口仍按 m_SceneState 选择相机)。
 		Gameplay::GameHost m_PlayHost;
 		EditorDocument m_Document;
 

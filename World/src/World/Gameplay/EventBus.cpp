@@ -43,8 +43,7 @@ namespace World::Gameplay
 				static_cast<const uint8_t*>(data) + size);
 
 		m_Emitted++;
-		const bool wasDispatching = m_Dispatching;
-		m_Dispatching = true;
+		const DispatchGuard guard(*this);
 		// 按订阅顺序派发;派发期间新增的订阅不会收到本条事件(与常见引擎一致)。
 		const size_t count = m_Entries.size();
 		for (size_t i = 0; i < count && i < m_Entries.size(); ++i)
@@ -52,9 +51,11 @@ namespace World::Gameplay
 			Entry& entry = m_Entries[i];
 			if (entry.Removed || entry.TypeId != typeId || !entry.Callback)
 				continue;
-			entry.Callback(value);
+			// 拷贝 handler:回调里 SubscribeRaw 会让 m_Entries 重新分配,
+			// 正在执行的 std::function 不能被移动/析构。
+			const Handler callback = entry.Callback;
+			InvokeHandlerGuarded(callback, value);
 		}
-		m_Dispatching = wasDispatching;
 		if (!m_Dispatching)
 			m_Entries.erase(std::remove_if(m_Entries.begin(), m_Entries.end(),
 				[](const Entry& e) { return e.Removed; }), m_Entries.end());
@@ -80,8 +81,7 @@ namespace World::Gameplay
 		std::vector<EventValue> batch;
 		batch.swap(m_Pending);
 
-		const bool wasDispatching = m_Dispatching;
-		m_Dispatching = true;
+		const DispatchGuard guard(*this);
 		for (const EventValue& value : batch)
 		{
 			m_Emitted++;
@@ -91,14 +91,36 @@ namespace World::Gameplay
 				Entry& entry = m_Entries[i];
 				if (entry.Removed || entry.TypeId != value.TypeId || !entry.Callback)
 					continue;
-				entry.Callback(value);
+				const Handler callback = entry.Callback;
+				InvokeHandlerGuarded(callback, value);
 			}
 		}
-		m_Dispatching = wasDispatching;
 		if (!m_Dispatching)
 			m_Entries.erase(std::remove_if(m_Entries.begin(), m_Entries.end(),
 				[](const Entry& e) { return e.Removed; }), m_Entries.end());
 		return static_cast<uint32_t>(batch.size());
+	}
+
+	void EventBus::InvokeHandlerGuarded(const Handler& handler, const EventValue& value)
+	{
+		try
+		{
+			handler(value);
+		}
+		catch (const std::exception& error)
+		{
+			++m_HandlerErrors;
+			m_LastHandlerError = error.what();
+			if (Log::GetCoreLogger())
+				WLD_CORE_ERROR("[EventBus] handler threw (typeId={0}): {1}", value.TypeId, error.what());
+		}
+		catch (...)
+		{
+			++m_HandlerErrors;
+			m_LastHandlerError = "unknown exception";
+			if (Log::GetCoreLogger())
+				WLD_CORE_ERROR("[EventBus] handler threw an unknown exception (typeId={0})", value.TypeId);
+		}
 	}
 
 	size_t EventBus::GetSubscriberCount(uint32_t typeId) const
@@ -156,31 +178,96 @@ namespace World::Gameplay
 	{
 		if (fixedStepSeconds <= 0.0)
 			return 0;
+		// 浮点边界容差:0.5s @60Hz 的 30 次减法会留下 ~1e-16 的正残差,
+		// 严格 <=0 会让触发整体延后一整步(实测 31 步)。容差远小于一个固定步。
+		constexpr double kFireTolerance = 1e-9;
+		// 回调内再调 Advance 属于宿主用法错误:直接忽略,避免嵌套推进破坏步进语义。
+		if (m_Advancing)
+		{
+			if (Log::GetCoreLogger())
+				WLD_CORE_WARN("[TimerService] Advance ignored: callbacks must not advance timers recursively");
+			return 0;
+		}
+		// 即使内部出现非回调异常(极少见的分配失败),也要复位重入标志。
+		struct AdvanceGuard
+		{
+			bool& Flag;
+			explicit AdvanceGuard(bool& flag) : Flag(flag) { Flag = true; }
+			~AdvanceGuard() { Flag = false; }
+			AdvanceGuard(const AdvanceGuard&) = delete;
+			AdvanceGuard& operator=(const AdvanceGuard&) = delete;
+		} advanceGuard(m_Advancing);
 
 		uint32_t fired = 0;
+		// 阶段 1:只推进计时并收集本步到期条目(不回调用户代码,可以安全地按引用遍历)。
+		std::vector<uint64_t> due;
+		due.reserve(m_Entries.size());
 		for (Entry& entry : m_Entries)
 		{
 			if (entry.Cancelled)
 				continue;
 			entry.Remaining -= fixedStepSeconds;
 			// 单次 Advance 内最多触发一次(步长小于间隔时行为稳定;间隔为 0 时每步触发一次)。
-			if (entry.Interval > 0.0 && entry.Remaining > 0.0)
-				continue;
 			if (!entry.Callback)
 				continue;
+			if (entry.Interval > 0.0 && entry.Remaining > kFireTolerance)
+				continue;
+			due.push_back(entry.Id);
+		}
 
-			entry.Callback();
-			m_Fired++;
-			fired++;
-			if (entry.RemainingRepeats > 0)
+		// 阶段 2:逐条目触发。回调里 After/Every/Cancel/Clear 会改 m_Entries,
+		// 所以每次触发前按 Id 重新查找,绝不持有跨回调的 Entry&。
+		const auto findEntry = [this](uint64_t id) -> Entry*
+		{
+			for (Entry& entry : m_Entries)
+				if (entry.Id == id)
+					return &entry;
+			return nullptr;
+		};
+		for (const uint64_t id : due)
+		{
+			Entry* entry = findEntry(id);
+			if (!entry || entry->Cancelled || !entry->Callback)
+				continue;
+			// 拷贝回调:回调内 Clear/覆盖条目也不会让正在调用的对象失效。
+			const Callback callback = entry->Callback;
+			++m_Fired;
+			++fired;
+			try
 			{
-				entry.RemainingRepeats--;
-				if (entry.RemainingRepeats == 0)
-					entry.Cancelled = true;
+				callback();
 			}
-			entry.Remaining += entry.Interval;
-			if (entry.Remaining <= -entry.Interval)
-				entry.Remaining = entry.Interval;   // 防止长时间挂起后一次性补跑
+			catch (const std::exception& error)
+			{
+				++m_CallbackErrors;
+				m_LastCallbackError = error.what();
+				if (Log::GetCoreLogger())
+					WLD_CORE_ERROR("[TimerService] timer callback threw: {0}", error.what());
+			}
+			catch (...)
+			{
+				++m_CallbackErrors;
+				m_LastCallbackError = "unknown exception";
+				if (Log::GetCoreLogger())
+					WLD_CORE_ERROR("[TimerService] timer callback threw an unknown exception");
+			}
+
+			// 回调可能已经 Clear()/Cancel() 掉自己或整张表:按 Id 重新解析。
+			entry = findEntry(id);
+			if (!entry || entry->Cancelled)
+				continue;
+			if (entry->RemainingRepeats > 0)
+			{
+				entry->RemainingRepeats--;
+				if (entry->RemainingRepeats == 0)
+				{
+					entry->Cancelled = true;
+					continue;
+				}
+			}
+			entry->Remaining += entry->Interval;
+			if (entry->Remaining <= -entry->Interval)
+				entry->Remaining = entry->Interval;   // 防止长时间挂起后一次性补跑
 		}
 
 		m_Entries.erase(std::remove_if(m_Entries.begin(), m_Entries.end(),

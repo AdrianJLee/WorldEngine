@@ -2,6 +2,7 @@
 
 #include "World/Core/Export.h"
 #include "World/Core/Timestep.h"
+#include "World/Gameplay/EventBus.h"
 #include "World/Gameplay/GameFlow.h"
 #include "World/Gameplay/LevelService.h"
 #include "World/Gameplay/SystemRegistry.h"
@@ -62,6 +63,16 @@ namespace World::Gameplay
 		const InputService& Input() const { return m_Input; }
 		SystemRegistry& Systems() { return m_Systems; }
 		const SystemRegistry& Systems() const { return m_Systems; }
+		// P2 W4:事件总线与计时器服务(会话级;脚本事件桥与 C++ 宿主共用同一个实例)。
+		//   - Timers().Advance 在每个固定步内、FixedUpdate/Systems 之前调用(暂停即冻结);
+		//   - Events().DispatchPending 在帧末(Update+Late 之后)调用,且**暂停时也投递**。
+		EventBus& Events() { return m_Events; }
+		const EventBus& Events() const { return m_Events; }
+		TimerService& Timers() { return m_Timers; }
+		const TimerService& Timers() const { return m_Timers; }
+		// 会话身份:GameApp(含其 EventBus/TimerService)重建后必然变化。
+		// 脚本事件桥用它判断"绑定的总线是否还是同一个会话",不能只比较对象指针(地址可能被复用)。
+		uint64_t SessionId() const { return m_SessionId; }
 		// W8:存档服务。场景来源由宿主注入(GameHost 持有当前场景):
 		// 未注入前 Saves() 返回 nullptr,宿主可在拿到场景后调用 CreateSaveService。
 		void CreateSaveService(SaveService::SceneProvider sceneProvider);
@@ -88,8 +99,11 @@ namespace World::Gameplay
 		GameFlow m_Flow;
 		LevelService m_Levels;
 		SystemRegistry m_Systems;
+		EventBus m_Events;
+		TimerService m_Timers;
 		std::unique_ptr<SaveService> m_Saves;
 		InputService m_Input;
+		uint64_t m_SessionId = 0;
 		double m_FixedStepSeconds = 1.0 / 60.0;
 		double m_Accumulator = 0.0;
 		uint32_t m_LastFixedSteps = 0;

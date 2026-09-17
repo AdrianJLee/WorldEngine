@@ -13,6 +13,8 @@ namespace World::Gameplay
 	namespace
 	{
 		std::unique_ptr<GameApp> s_Instance;
+		// 会话身份计数器:脚本事件桥用它识别"总线被重建"(指针可能落在同一地址)。
+		uint64_t s_NextSessionId = 0;
 
 		// 单帧推进上限:断点、窗口拖动或首次加载产生的巨大 dt 不应一次性灌进固定步长循环。
 		constexpr double kMaxFrameSeconds = 0.25;
@@ -54,6 +56,7 @@ namespace World::Gameplay
 		}
 
 		s_Instance = std::unique_ptr<GameApp>(new GameApp(desc));
+		s_Instance->m_SessionId = ++s_NextSessionId;
 		// 会话创建即进入 Boot:宿主随后按需 Request(Playing)/Request(MainMenu)。
 		s_Instance->m_Flow.Start(FlowState::Boot, 0);
 
@@ -125,6 +128,9 @@ namespace World::Gameplay
 			m_Accumulator += frameSeconds;
 			while (m_Accumulator >= m_FixedStepSeconds && m_LastFixedSteps < m_Desc.MaxFixedStepsPerFrame)
 			{
+				// P2 W4:计时器只跟随固定步长推进(确定性);回调里的 After/Every/Cancel/Clear
+				// 与回调异常都由 TimerService 自己隔离(见 EventBus.h 契约)。
+				m_Timers.Advance(m_FixedStepSeconds);
 				if (m_FixedUpdate)
 					m_FixedUpdate(Timestep(static_cast<float>(m_FixedStepSeconds)));
 				// W5:系统注册表的固定步长阶段(权威模拟)与回调同拍执行。
@@ -158,6 +164,14 @@ namespace World::Gameplay
 				m_Systems.RunPhase(SystemPhase::Late, frameTime);
 				m_FramePhases.push_back({ "LateUpdate", ElapsedMilliseconds(start) });
 			}
+		}
+
+		// 4. 帧末事件派发:队列式事件在 Update/Late 之后统一投递。
+		//    放在暂停判定之外 —— 事件是"事实通知",暂停也要送达;派发中 emit 的新事件留到下一批。
+		{
+			const Clock::time_point start = Clock::now();
+			m_Events.DispatchPending();
+			m_FramePhases.push_back({ "Events", ElapsedMilliseconds(start) });
 		}
 	}
 }

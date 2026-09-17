@@ -369,6 +369,50 @@ function Save:GetGlobal(key) end
 ---@return string
 function Save:LastError() end
 
+-- Global service table 'events': read-only; there is no runtime constructor.
+---Read-only event table; subscriptions belong to the calling script instance.
+---@class events
+events = {}
+
+---Subscribe to a registered event; returns an opaque handle owned by the calling script instance.
+---@param name string Registered event name.
+---@param fn function Handler called at the frame-end dispatch.
+---@return number
+function events:on(name, fn) end
+
+---Unsubscribe a handle returned by events.on; false when the handle is unknown.
+---@param handle number Handle returned by events.on.
+---@return boolean
+function events:off(handle) end
+
+---Queue a registered event (delivered at the frame end by GameApp::Tick); extra arguments must match the signature registered with RegisterScriptEventName.
+---@param name string Registered event name.
+---@return boolean
+function events:emit(name) end
+
+-- Global service table 'timers': read-only; there is no runtime constructor.
+---Read-only timer table; timers advance on the fixed step and freeze while paused.
+---@class timers
+timers = {}
+
+---Run a callback once after the given delay; returns an opaque handle owned by the calling script instance.
+---@param seconds number Delay in seconds; fires once on the fixed step that reaches it.
+---@param fn function Handler called on the fixed step that reaches the delay.
+---@return number
+function timers:after(seconds, fn) end
+
+---Run a callback every interval on the fixed step (optional repeat count; 0 = forever).
+---@param seconds number Interval in seconds on the fixed step.
+---@param fn function Repeated handler.
+---@param count number? Repeat count; 0 or omitted = forever.
+---@return number
+function timers:every(seconds, fn, count) end
+
+---Cancel a handle returned by timers.after/every; false when the handle is unknown.
+---@param handle number Handle returned by timers.after/every.
+---@return boolean
+function timers:cancel(handle) end
+
 -- Global script UI table 'ui': read-only; there is no runtime constructor.
 ---Immediate-mode script UI table; draw calls are rebuilt every frame and there is no long-lived callback registration.
 ---@class ui

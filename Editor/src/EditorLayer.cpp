@@ -291,6 +291,23 @@ namespace World
 				WLD_CORE_INFO("[dev] WLD_AUTOPLAY: entered Play after {0} frames", devFrame);
 			}
 		}
+		// 开发/验证钩子:WLD_AUTOSIMULATE=<帧数> 时在该帧自动进入 Simulate(等价于点视图口
+		// Simulate 按钮)。P2 W4 起 Simulate 也走 GameApp/GameHost 会话,这里把"会话是否真的
+		// 建立"和当前场景状态一起打进日志,供隐藏冒烟断言。
+		if (const char* autoSimulateFrames = std::getenv("WLD_AUTOSIMULATE"))
+		{
+			static int devSimulateFrame = 0;
+			static bool devAutoSimulateDone = false;
+			const int target = std::atoi(autoSimulateFrames);
+			if (!devAutoSimulateDone && target > 0 && ++devSimulateFrame >= target)
+			{
+				devAutoSimulateDone = true;
+				ToggleSimulate();
+				WLD_CORE_INFO("[dev] WLD_AUTOSIMULATE: entered Simulate after {0} frames (scene state {1}, GameApp session {2})",
+					devSimulateFrame, static_cast<int>(m_SceneState),
+					Gameplay::GameApp::Exists() ? "active" : "missing");
+			}
+		}
 		RunHierarchyClickCheck();
 		// 开发验证:WLD_AUTOPAUSE=<进入 Play 后的帧数> 在该帧自动暂停(验证 Play 暂停态的
 		// 覆盖层/相机切换:暂停时渲染会用回编辑器相机,见本函数末尾的相机分支)。
@@ -339,21 +356,18 @@ namespace World
 					m_ActiveScene->OnUpdateEditor(ts, m_EditorCamera);
 					break;
 				case SceneState::Play:
-					if (!m_ScenePaused)
-					{
-						// 与 Runtime 同一条路径:GameApp 驱动阶段回调(GameHost 内注册的 update
-						// 会调用场景 OnUpdateRuntime);渲染仍由编辑器视图口统一提交(render=false)。
-						m_PlayHost.Tick(ts, /*render=*/false);
-					}
-					else
-						m_ActiveScene->FlushStructuralChanges();
-					break;
 				case SceneState::Simulate:
-					if (!m_ScenePaused)
-						m_ActiveScene->OnUpdateSimulation(ts, m_EditorCamera);
-					else
+				{
+					// 与 Runtime 同一条路径:GameApp 驱动阶段回调(GameHost 内注册的 update
+					// 会调用场景 OnUpdateRuntime);渲染仍由编辑器视图口统一提交(render=false)。
+					// P2 W4:Simulate 并入同一条会话路径(事件/计时器/输入/关卡随之生效);
+					// 暂停时仍 Tick 会话,让 queued 事件在暂停下也投递,而固定步长/计时器由
+					// GameApp 的暂停标志冻结(见 GameApp::Tick 契约)。
+					m_PlayHost.Tick(ts, /*render=*/false);
+					if (m_ScenePaused)
 						m_ActiveScene->FlushStructuralChanges();
 					break;
+				}
 			}
 
 		}
@@ -1128,7 +1142,13 @@ namespace World
 	void EditorLayer::TogglePause()
 	{
 		if (m_SceneState == SceneState::Play || m_SceneState == SceneState::Simulate)
+		{
 			m_ScenePaused = !m_ScenePaused;
+			// P2 W4:暂停时仍在帧内 Tick 会话(帧末事件派发),但固定步长(计时器/系统)与
+			// 可变阶段由 GameApp 的暂停标志冻结,二者必须同步。
+			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+				app->SetPaused(m_ScenePaused);
+		}
 	}
 
 	Ref<Texture2D> EditorLayer::GetIcon(int index) const
@@ -1470,14 +1490,14 @@ namespace World
 		// End the previous mode before replacing any scene references.
 		if (m_RuntimeScene)
 		{
-			if (m_SceneState == SceneState::Play)
+			// P2 W4:Play 与 Simulate 都由 PlayHost(GameApp 会话)持有运行时生命周期。
+			if (m_SceneState == SceneState::Play || m_SceneState == SceneState::Simulate)
 			{
-				// Play 的运行时生命周期由 PlayHost(GameApp 会话)持有,不能在外部直接 StopScene。
 				m_PlayHost.StopRuntime();
 				m_PlayHost.Shutdown();
 			}
-			else if (m_SceneState == SceneState::Simulate)
-				m_RuntimeScene->OnSimulationStop();
+			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+				app->SetPaused(false);
 		}
 		m_SceneState = SceneState::Edit;
 		m_ScenePaused = false;
@@ -1492,18 +1512,16 @@ namespace World
 			Ref<Scene> editorScene = m_Document.GetScene();
 			Scene::CopyScene(editorScene, m_RuntimeScene);
 			m_SceneState = state;
-			if (state == SceneState::Play)
-			{
-				// Play:接入 GameApp 会话(渲染器注入编辑器视图口渲染器,启动运行时)。
-				Gameplay::GameAppDesc desc;
-				desc.ProjectId = "worldengine-editor-play";
-				desc.FixedStepHz = 60;
-				m_PlayHost.Init(desc);
-				m_PlayHost.SetRenderer(m_SceneRenderer);
-				m_PlayHost.SetScene(m_RuntimeScene, /*startRuntime=*/true);
-			}
-			else
-				m_RuntimeScene->OnSimulationStart();
+			// P2 W4:Play 与 Simulate 都接入 GameApp 会话(事件/计时器/输入/关卡同一条路径),
+			// 两者的差别只在视图口使用哪台相机(Simulate 保持编辑器相机)。
+			Gameplay::GameAppDesc desc;
+			desc.ProjectId = "worldengine-editor-play";
+			desc.FixedStepHz = 60;
+			m_PlayHost.Init(desc);
+			m_PlayHost.SetRenderer(m_SceneRenderer);
+			m_PlayHost.SetScene(m_RuntimeScene, /*startRuntime=*/true);
+			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+				app->SetPaused(false);
 			// 视口尺寸在 SetScene 之后覆盖:GameHost 默认按宿主窗口同步,编辑器要用视图口尺寸。
 			UpdateSceneContext(m_RuntimeScene);
 		}
