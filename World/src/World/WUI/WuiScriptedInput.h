@@ -28,6 +28,8 @@ namespace World::Wui
 		// 中文等非 ASCII 按 UTF-8 解码成码点写入 input.TextInput —— 与真实键盘上屏同一条路径。
 		// 同一窗口同时只有一份待注入输入;ui.type = QueueClick(聚焦) + QueueType。
 		void QueueType(const std::string& windowKey, std::string text);
+		// 注入一次按键(第 1 帧按下、第 2 帧释放):用于 AI 复现方向键/Enter 等键路。
+		void QueueKey(const std::string& windowKey, uint32_t keyCode);
 		// 是否还有待注入事件(供自动化等待"注入被消费")。
 		bool HasPending() const;
 		// 每个窗口每帧调用一次:把待注入事件写进该窗口的输入状态。
@@ -42,6 +44,9 @@ namespace World::Wui
 			// 文本阶段(点击完成后开始):按行拆分的码点,每帧消费一段。
 			std::vector<std::vector<uint32_t>> TextFrames;
 			size_t NextTextFrame = 0;
+			// 按键注入(0 = 无;1 = 待按下的帧;2 = 待释放的帧)。
+			uint32_t Key = 0;
+			int KeyPhase = 0;
 		};
 		std::unordered_map<std::string, Pending> m_Pending;
 	};

@@ -105,9 +105,17 @@ namespace World::Wui
 	bool WuiScriptedInput::HasPending() const
 	{
 		for (const auto& entry : m_Pending)
-			if (entry.second.FramesLeft > 0 || entry.second.NextTextFrame < entry.second.TextFrames.size())
+			if (entry.second.FramesLeft > 0 || entry.second.KeyPhase > 0
+				|| entry.second.NextTextFrame < entry.second.TextFrames.size())
 				return true;
 		return false;
+	}
+
+	void WuiScriptedInput::QueueKey(const std::string& windowKey, uint32_t keyCode)
+	{
+		Pending& pending = m_Pending[windowKey];
+		pending.Key = keyCode;
+		pending.KeyPhase = 1;
 	}
 
 	void WuiScriptedInput::Apply(const std::string& windowKey, WuiInputState& input)
@@ -116,6 +124,22 @@ namespace World::Wui
 		if (entry == m_Pending.end())
 			return;
 		Pending& pending = entry->second;
+		if (pending.KeyPhase > 0)
+		{
+			input.WantKeyboard = true;
+			if (pending.KeyPhase == 1)
+			{
+				input.KeyDown.push_back(pending.Key);
+				input.KeyPressed.push_back(pending.Key);
+				pending.KeyPhase = 2;
+			}
+			else
+			{
+				pending.KeyPhase = 0;
+				pending.Key = 0;
+			}
+			return;   // 按键注入独立占一帧:不与点击/文本同帧,时序更接近真实键盘
+		}
 		if (pending.FramesLeft > 0)
 		{
 			// 点击阶段:第 1 帧 press、第 2 帧 release(与鼠标操作一致的帧序列)。

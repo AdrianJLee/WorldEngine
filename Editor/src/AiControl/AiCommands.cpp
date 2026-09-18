@@ -339,6 +339,46 @@ namespace World
 				+ node->Kind + " '" + node->Label + "' window=" + node->Window;
 			return true;
 		}
+		// ---- W9.8:注入一次按键(方向键/Enter/Tab/Esc 等),用于复现键路与自动化 ----
+		if (cmd == "ui.key")
+		{
+			std::string message;
+			const Wui::WuiAccessNode* node = resolveNode(message);
+			if (!node)
+			{
+				error = message;
+				return false;
+			}
+			const std::string keyName = arg("key");
+			uint32_t keyCode = 0;
+			if (keyName == "Up") keyCode = KeyCodes::Up;
+			else if (keyName == "Down") keyCode = KeyCodes::Down;
+			else if (keyName == "Left") keyCode = KeyCodes::Left;
+			else if (keyName == "Right") keyCode = KeyCodes::Right;
+			else if (keyName == "Home") keyCode = KeyCodes::Home;
+			else if (keyName == "End") keyCode = KeyCodes::End;
+			else if (keyName == "PageUp") keyCode = KeyCodes::PageUp;
+			else if (keyName == "PageDown") keyCode = KeyCodes::PageDown;
+			else if (keyName == "Enter") keyCode = KeyCodes::Enter;
+			else if (keyName == "Tab") keyCode = KeyCodes::Tab;
+			else if (keyName == "Escape") keyCode = KeyCodes::Escape;
+			else if (keyName == "Backspace") keyCode = KeyCodes::Backspace;
+			else if (keyName == "Delete") keyCode = KeyCodes::Delete;
+			else if (keyName == "Space") keyCode = KeyCodes::Space;
+			else if (keyName.size() == 1 && keyName[0] >= 'A' && keyName[0] <= 'Z')
+				keyCode = static_cast<uint32_t>(KeyCodes::A) + static_cast<uint32_t>(keyName[0] - 'A');
+			else if (keyName.size() == 1 && keyName[0] >= '0' && keyName[0] <= '9')
+				keyCode = static_cast<uint32_t>(KeyCodes::D0) + static_cast<uint32_t>(keyName[0] - '0');
+			else
+			{
+				error = "unknown key: " + keyName + " (Up/Down/Left/Right/Home/End/PageUp/PageDown/Enter/Tab/Escape/Backspace/Delete/Space/A-Z/0-9)";
+				return false;
+			}
+			Wui::WuiScriptedInput::Get().QueueKey(node->Window, keyCode);
+			result = "queued key " + keyName + " to " + node->Kind + " '" + node->Label
+				+ "' window=" + node->Window;
+			return true;
+		}
 		if (cmd == "ui.open" || cmd == "ui.toggle" || cmd == "ui.close")
 		{
 			const std::string panel = normalizePanel(arg("panel"));
