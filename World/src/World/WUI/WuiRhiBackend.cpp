@@ -315,13 +315,17 @@ namespace World::Wui
 		return primary ? primary : fallback;
 	}
 
-	WuiRhiBackend::Glyph& WuiRhiBackend::Bake(FontFace& face, uint32_t codepoint)
+	WuiRhiBackend::Glyph& WuiRhiBackend::Bake(FontFace& face, uint32_t codepoint, float pixelSize)
 	{
-		auto it = face.Glyphs.find(codepoint);
+		// 字号按整数分桶:缓存数量可控,误差 <0.5px 的缩放肉眼看不出。
+		const uint32_t sizeKey = static_cast<uint32_t>(std::max(6.0f, std::round(pixelSize)));
+		const uint64_t key = (static_cast<uint64_t>(sizeKey) << 32) | codepoint;
+		auto it = face.Glyphs.find(key);
 		if (it != face.Glyphs.end())
 			return it->second;
 		Glyph glyph;
-		const float scale = stbtt_ScaleForPixelHeight(face.Info, face.BaseSize);
+		glyph.PixelSize = static_cast<float>(sizeKey);
+		const float scale = stbtt_ScaleForPixelHeight(face.Info, glyph.PixelSize);
 		int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
 		stbtt_GetCodepointBitmapBox(face.Info, codepoint, scale, scale, &x0, &y0, &x1, &y1);
 		const int width = x1 - x0;
@@ -357,12 +361,22 @@ namespace World::Wui
 				face.AtlasDirty = true;
 			}
 		}
+		if (glyph.W <= 0.0f || glyph.H <= 0.0f)
+		{
+			// 图集满(或该码点无位图):回退到同码点已缓存的任意字号,宁可轻微缩放也不要缺字。
+			for (auto& entry : face.Glyphs)
+				if ((entry.first & 0xFFFFFFFFull) == codepoint)
+					return entry.second;
+			if (width > 0 && height > 0)
+				WLD_CORE_WARN("[wui-font] glyph atlas full for U+{0:X} at {1}px (size buckets too many?)",
+					codepoint, sizeKey);
+		}
 		glyph.OffsetX = static_cast<float>(x0);
 		glyph.OffsetY = static_cast<float>(y0);
 		int advance = 0;
 		stbtt_GetCodepointHMetrics(face.Info, codepoint, &advance, nullptr);
 		glyph.Advance = advance * scale;
-		const auto result = face.Glyphs.emplace(codepoint, glyph);
+		const auto result = face.Glyphs.emplace(key, glyph);
 		return result.first->second;
 	}
 
@@ -568,8 +582,9 @@ namespace World::Wui
 			// '\t' 按 4 空格推进但无字形;'\r'/'\n' 不可见。
 			if (face && face->Info && cp != '\t' && cp != '\r' && cp != '\n')
 			{
-				Glyph& glyph = Bake(*face, cp);
-				const float sizeRatio = fontSize / face->BaseSize;
+				Glyph& glyph = Bake(*face, cp, fontSize);
+				// 按烘焙像素尺寸缩放;字号分桶后 sizeRatio≈1(大字号不再被放大糊)。
+				const float sizeRatio = fontSize / (glyph.PixelSize > 0.0f ? glyph.PixelSize : face->BaseSize);
 				const float w = glyph.W * sizeRatio;
 				const float h = glyph.H * sizeRatio;
 				if (w > 0 && h > 0)
@@ -749,7 +764,7 @@ namespace World::Wui
 							continue;
 						FontFace* face = FaceForCodepoint(command.Family, command.Bold, cp);
 						if (face && face->Info)
-							Bake(*face, cp);
+							Bake(*face, cp, command.FontSize > 0.0f ? command.FontSize : 15.0f);
 					}
 				}
 		};

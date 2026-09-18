@@ -53,6 +53,7 @@ namespace World::Wui
 			float X = 0, Y = 0, W = 0, H = 0;   // 图集内像素坐标
 			float OffsetX = 0, OffsetY = 0;     // 相对笔尖/基线偏移(基字号)
 			float Advance = 0;                  // 基字号下步进
+			float PixelSize = 16.0f;            // 烘焙该字形时的像素高度(按字号分桶,避免放大糊)
 		};
 		struct FontFace
 		{
@@ -64,7 +65,9 @@ namespace World::Wui
 			uint32_t CursorX = 1, CursorY = 1, RowH = 0;
 			bool AtlasDirty = false;
 			Rhi::Handle<Rhi::Texture> AtlasTexture;
-			std::unordered_map<uint32_t, Glyph> Glyphs;
+			// 键 = (烘焙像素高度 << 32) | 码点:字号缩放时按目标尺寸重新烘焙,
+			// 否则大字号会复用基字号位图被放大成模糊(用户实测"放大字体后有点模糊")。
+			std::unordered_map<uint64_t, Glyph> Glyphs;
 		};
 
 		void EnsureResources();
@@ -84,7 +87,7 @@ namespace World::Wui
 		FontFace* PrimaryFace(WuiFontFamily family, bool bold);
 		// 逐码点选面:主面缺该字形时回落 Noto('\t'/'\r'/'\n' 一律走主面,advance 特判)。
 		FontFace* FaceForCodepoint(WuiFontFamily family, bool bold, uint32_t codepoint);
-		Glyph& Bake(FontFace& face, uint32_t codepoint);
+		Glyph& Bake(FontFace& face, uint32_t codepoint, float pixelSize);
 		float AdvanceOf(FontFace* face, uint32_t codepoint, float fontSize);
 		// 逐码点选面的度量;byteOffset >= 0 时只累计 [0, byteOffset) 的宽度。
 		float MeasureText(std::string_view text, float fontSize, WuiFontFamily family, bool bold, int byteOffset = -1);

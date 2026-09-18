@@ -621,6 +621,8 @@ namespace World::Wui
 				options.Completion(linePrefix, items);
 			if (!items.empty())
 			{
+				if (!state.PopupVisible)
+					WLD_CORE_INFO("[wui] completion popup: {0} items, prefix '{1}'", items.size(), linePrefix);
 				state.PopupVisible = true;
 				state.ReplaceStart = replaceStart;
 				state.CaretAtOpen = caretNow;
