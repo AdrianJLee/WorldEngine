@@ -252,12 +252,15 @@ namespace World::Asset::WModelIO
 			// Meta
 			out.Meta.Valid = true;
 			uint32_t metaReserved = 0;
+			uint32_t sourcePathLength = 0;
 			if (!reader.ReadU64(out.Meta.SourceFingerprint, "meta.sourceFingerprint")
 				|| !reader.ReadU32(out.Meta.ImporterVersion, "meta.importerVersion")
 				|| !reader.ReadU64(out.Meta.SettingsHash, "meta.settingsHash")
 				|| !reader.ReadU8(out.Meta.UpAxis, "meta.upAxis")
 				|| !reader.ReadF32(out.Meta.Scale, "meta.scale")
-				|| !reader.ReadU32(metaReserved, "meta.reserved"))
+				|| !reader.ReadU32(metaReserved, "meta.reserved")
+				|| !reader.ReadU32(sourcePathLength, "meta.sourcePathLength")
+				|| !reader.ReadString(out.Meta.SourcePath, sourcePathLength, "meta.sourcePath"))
 			{
 				error = reader.Error;
 				return false;
@@ -436,6 +439,7 @@ namespace World::Asset::WModelIO
 	{
 		std::vector<uint8_t> out;
 		out.reserve(static_cast<size_t>(kHeaderSize + kMetaSize)
+			+ data.Meta.SourcePath.size() + 4u
 			+ data.Vertices.size() * sizeof(WModelVertex)
 			+ data.Indices.size() * sizeof(uint32_t)
 			+ data.Submeshes.size() * (3u * 4u + 6u * 4u)
@@ -461,6 +465,7 @@ namespace World::Asset::WModelIO
 		AppendU8(out, data.Meta.UpAxis);
 		AppendF32(out, data.Meta.Scale);
 		AppendU32(out, 0u);   // meta reserved
+		AppendString(out, data.Meta.SourcePath);   // v3:源逻辑路径
 		AppendVec3(out, data.Bounds.Min);
 		AppendVec3(out, data.Bounds.Max);
 

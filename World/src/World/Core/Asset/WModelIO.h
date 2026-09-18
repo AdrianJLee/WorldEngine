@@ -69,6 +69,9 @@ namespace World::Asset
 			uint64_t SettingsHash = 0;        // ModelImportSettings::Hash
 			uint8_t UpAxis = 0;               // 0 = Y;1 = Z(导入期已绕 X 轴 -90° 烘焙)
 			float Scale = 1.0f;               // 导入期统一缩放(已烘焙)
+			// 源资产逻辑路径(相对内容根,如 "models/tests/rock.gltf";空 = 非导入产物/无源)。
+			// 有它才能做"源改了/设置改了 → 需要重导",不必靠"同目录同名"去猜。
+			std::string SourcePath;
 		};
 		MetaData Meta;
 
@@ -85,18 +88,20 @@ namespace World::Asset
 
 	// .wmodel v2 读写。格式是小端、版本化且**严格**的:
 	//  - 未知 magic / 未知版本 / 截断 / 越界引用一律返回可读错误,绝不"尽力解析";
-	//  - v1 **不再兼容**:读到 version 1 时返回"请重新导入"的可读错误(重导会写出 v2);
+	//  - v1/v2 **不再兼容**:读到旧版本返回"请重新导入"的可读错误(重导会写出 v3);
 	//  - Serialize 确定性:同一份数据结构两次序列化逐字节相同(无时间戳、无填充差异)。
 	//
 	// 字节布局(plan §D5b-1 冻结格式):
 	//   Header{ magic 'WMDL' / version / flags / vertexLayoutId / reserved / vertexCount /
 	//           indexCount / meshCount / submeshCount / nodeCount / materialSlotCount }
-	//   Meta{sourceFingerprint(u64) / importerVersion(u32) / settingsHash(u64) / upAxis(u8) / scale(f32)}
+	//   Meta{sourceFingerprint(u64) / importerVersion(u32) / settingsHash(u64) / upAxis(u8) / scale(f32) /
+	//        reserved(u32) / sourcePath(长度前缀字符串,相对内容根)}
 	//   Bounds{min,max} → Submeshes[] → Meshes[] → Nodes[] → MaterialSlots[] →
 	//   VertexData(vertexCount × 32B) → Indices(u32 × indexCount)
 	namespace WModelIO
 	{
-		constexpr uint32_t kFormatVersion = 2;
+		// v3:D5b-2 起 meta 记录**源资产逻辑路径**(Reimport/“需要重导”判断的依据)。
+		constexpr uint32_t kFormatVersion = 3;
 		constexpr uint32_t kVertexLayoutStandard = 1;
 
 		WLD_API std::vector<uint8_t> Serialize(const WModelData& data);

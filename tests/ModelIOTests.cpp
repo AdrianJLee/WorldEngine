@@ -509,8 +509,8 @@ namespace
 		fs::create_directories(root);
 		const fs::path fixture = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
 		CHECK(fs::exists(fixture));
-		// 该用例比较的是"内核字节"与"ImportFile 写盘字节":两条路径都走默认设置
-		// (ImportFile 固定默认;内核显式传 Default()),不受 .wimport 内容影响。
+		// 该用例比较的是"内核字节"与"ImportFile 写盘字节":夹具 .wimport 与 Default()
+		// 同值,两条路径的设置保持一致。
 
 		Asset::GltfImportResult fileResult;
 		std::string error;
@@ -526,6 +526,17 @@ namespace
 		metadata.SettingsHash = Asset::ModelImportSettings::Hash(settings);
 		metadata.UpAxis = settings.UpAxis;
 		metadata.Scale = settings.Scale;
+		// v3 meta 内嵌源逻辑路径(ImportFile 按"源相对输出根"自动算)。内核调用必须
+		// 传入同一个值,字节才能逐项一致 —— 直接从 ImportFile 的产物读出来复用,
+		// 避免在测试里复制该路径规则;同时证明它确实被写进了盘上产物。
+		{
+			Asset::WModelData fileModel;
+			CHECK(Asset::WModelIO::ReadFile((root / fileResult.WModelPath).string(), fileModel, &error));
+			CHECK(error.empty());
+			CHECK(fileModel.Meta.Valid);
+			CHECK(!fileModel.Meta.SourcePath.empty());
+			metadata.SourceLogicalPath = fileModel.Meta.SourcePath;
+		}
 		Asset::GltfImportBytesResult bytes;
 		CHECK(Asset::GltfImporter::ImportAsBytes(fixture.string(), settings, metadata, &bytes, &error));
 		CHECK(error.empty());
@@ -689,12 +700,12 @@ namespace
 		CHECK(results.size() == 1u && !results[0].Failed);
 
 		const fs::path cooked = root / "out" / "cooked";
-		const fs::path modelFile = cooked / "models" / "tests" / "D5Fixture.wmodel";
+		const fs::path modelFile = cooked / "models" / "D5Fixture.wmodel";
 		CHECK(fs::exists(modelFile));
 		// 默认设置:材质与贴图都产出。
-		CHECK(fs::exists(cooked / "models" / "tests" / "materials" / "D5Fixture_Tex.wmat"));
-		CHECK(fs::exists(cooked / "models" / "tests" / "materials" / "D5Fixture_Solid.wmat"));
-		CHECK(fs::exists(cooked / "models" / "tests" / "textures" / "D5Fixture_0.png"));
+		CHECK(fs::exists(cooked / "materials" / "D5Fixture_Tex.wmat"));
+		CHECK(fs::exists(cooked / "materials" / "D5Fixture_Solid.wmat"));
+		CHECK(fs::exists(cooked / "textures" / "D5Fixture_0.png"));
 
 		Asset::WModelData model;
 		std::string error;
@@ -710,16 +721,17 @@ namespace
 		CHECK(Nearly(model.Bounds.Max.x, 1.0f) && Nearly(model.Bounds.Max.y, 1.0f)
 			&& Nearly(model.Bounds.Max.z, 1.0f));
 		CHECK(model.MaterialSlots.size() == 2u);
-		CHECK(model.MaterialSlots[0] == "models/tests/materials/D5Fixture_Tex.wmat");
+		CHECK(model.MaterialSlots[0] == "materials/D5Fixture_Tex.wmat");
+		// v3 meta 记录源逻辑路径(编辑器"需要重导"判断的依据)。
+		CHECK(model.Meta.SourcePath == "models/tests/D5Fixture.gltf");
 		// 贴图路径指向导出的贴图(默认 exportTextures=true)。
 		{
 			MaterialDesc desc;
 			std::string parseError;
 			const MaterialLoadResult parsed =
-				MaterialIO::Parse(ReadText(cooked / "models" / "tests" / "materials" /
-					"D5Fixture_Tex.wmat"), desc, &parseError);
+				MaterialIO::Parse(ReadText(cooked / "materials" / "D5Fixture_Tex.wmat"), desc, &parseError);
 			CHECK(parsed.Success);
-			CHECK(desc.AlbedoTexture == "models/tests/textures/D5Fixture_0.png");
+			CHECK(desc.AlbedoTexture == "textures/D5Fixture_0.png");
 			CHECK(desc.NormalTexture.empty());
 		}
 
@@ -740,7 +752,7 @@ namespace
 		const fs::path content = root / "content";
 		CopyFixture(content);
 		const fs::path output = root / "out";
-		const fs::path modelFile = output / "cooked" / "models" / "tests" / "D5Fixture.wmodel";
+		const fs::path modelFile = output / "cooked" / "models" / "D5Fixture.wmodel";
 		const fs::path settingsPath = content / "models" / "tests" / "D5Fixture.wimport";
 
 		const Asset::CookSummary first =
@@ -804,12 +816,14 @@ namespace
 			RunCook(content, root, output);
 		CHECK(summary.Changed == 1u && summary.Failed == 0u);
 		const fs::path cooked = output / "cooked";
-		CHECK(fs::exists(cooked / "models" / "tests" / "D5Fixture.wmodel"));
-		CHECK(!fs::exists(cooked / "models" / "tests" / "materials" / "D5Fixture_Tex.wmat"));
+		// 产物布局与默认设置一致:模型固定 models/<stem>.wmodel,材质/贴图平铺在各自目录。
+		CHECK(fs::exists(cooked / "models" / "D5Fixture.wmodel"));
+		CHECK(!fs::exists(cooked / "materials" / "D5Fixture_Tex.wmat"));
 		Asset::WModelData model;
 		std::string error;
-		CHECK(Asset::WModelIO::ReadFile((cooked / "models" / "tests" / "D5Fixture.wmodel").string(),
+		CHECK(Asset::WModelIO::ReadFile((cooked / "models" / "D5Fixture.wmodel").string(),
 			model, &error));
+		CHECK(model.Meta.SourcePath == "models/tests/D5Fixture.gltf");
 		CHECK(model.MaterialSlots.size() == 2u);
 		CHECK(model.MaterialSlots[0].empty() && model.MaterialSlots[1].empty());
 		for (const Asset::WModelSubmesh& submesh : model.Submeshes)
@@ -836,8 +850,10 @@ namespace
 			Asset::GltfImportMetadata metadata;
 			metadata.ImporterVersion = 1;
 			metadata.SettingsHash = Asset::ModelImportSettings::Hash(Asset::ModelImportSettings::Default());
-			// 与 cook 的 ModelImporter 相同:模型与源同目录同名 → 派生产物全部在该目录下。
-			metadata.LogicalModelPath = "models/tests/D5Fixture.wmodel";
+			// 与 cook 的 ModelImporter 相同:扁平布局(models/ + materials/ + textures/),
+			// 源逻辑路径由 SourceLogicalPath 记录进 meta(不参与产物路径)。
+			metadata.LogicalModelPath.clear();
+			metadata.SourceLogicalPath = "models/tests/D5Fixture.gltf";
 			CHECK(Asset::GltfImporter::ImportAsBytes(
 				(content / "models" / "tests" / "D5Fixture.gltf").string(),
 				Asset::ModelImportSettings::Default(), metadata, &bytes, &importError));
@@ -845,10 +861,9 @@ namespace
 			for (size_t index = 0; index + 1 < bytes.Outputs.size(); ++index)
 			{
 				const std::string& path = bytes.Outputs[index].LogicalPath;
-				CHECK(path.rfind("models/tests/textures/", 0) == 0
-					|| path.rfind("models/tests/materials/", 0) == 0);
+				CHECK(path.rfind("textures/", 0) == 0 || path.rfind("materials/", 0) == 0);
 			}
-			CHECK(bytes.Outputs.back().LogicalPath == "models/tests/D5Fixture.wmodel");
+			CHECK(bytes.Outputs.back().LogicalPath == "models/D5Fixture.wmodel");
 		}
 
 		std::string parseError;

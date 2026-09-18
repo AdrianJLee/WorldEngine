@@ -39,6 +39,9 @@ namespace World::Asset
 		// .wmodel 的逻辑路径(相对内容根);材质/贴图与它同目录。空 = 默认按源文件所在目录
 		// 推导(与源同目录同名,见 plan §D5b-1 多产物落盘规则)。
 		std::string LogicalModelPath;
+		// 源资产的逻辑路径(相对内容根,如 "models/tests/rock.gltf"):写进 .wmodel meta,
+		// 供编辑器判断"源/设置是否已变 → 需要重导"。空 = 调用方没有源上下文(测试自造)。
+		std::string SourceLogicalPath;
 	};
 
 	// D5b-1:内存产物(LogicalPath 与 ImportFile 写出的磁盘布局一致,相对 outputRoot)。

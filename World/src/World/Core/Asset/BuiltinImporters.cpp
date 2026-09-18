@@ -165,12 +165,11 @@ namespace World::Asset
 				metadata.SettingsHash = ModelImportSettings::Hash(settings);
 				metadata.UpAxis = settings.UpAxis;
 				metadata.Scale = settings.Scale;
-				// 多产物落盘规则:.wmodel 与源同目录同名(源 models/x.gltf → models/x.wmodel)。
-				{
-					std::filesystem::path logicalModel(request.LogicalPath);
-					logicalModel.replace_extension(".wmodel");
-					metadata.LogicalModelPath = logicalModel.generic_string();
-				}
+				// 布局与编辑器导入(GltfImporter::ImportFile)同一条:扁平
+				// `models/<源 stem>.wmodel` + `materials/` + `textures/`;
+				// 源逻辑路径写进 meta,编辑器据此判断"源/设置已变 → 需要重导"。
+				metadata.LogicalModelPath.clear();
+				metadata.SourceLogicalPath = request.LogicalPath;
 
 				GltfImportBytesResult bytes;
 				std::string importError;

@@ -778,6 +778,7 @@ namespace World::Asset
 		model.Meta.SettingsHash = metadata.SettingsHash;
 		model.Meta.UpAxis = metadata.UpAxis;
 		model.Meta.Scale = metadata.Scale;
+		model.Meta.SourcePath = metadata.SourceLogicalPath;
 		if (model.Meta.UpAxis > 1u)
 			return fail("glTF import failed: invalid upAxis metadata value "
 				+ std::to_string(model.Meta.UpAxis));
@@ -844,6 +845,24 @@ namespace World::Asset
 		metadata.SettingsHash = ModelImportSettings::Hash(settings);
 		metadata.UpAxis = settings.UpAxis;
 		metadata.Scale = settings.Scale;
+		// 产物布局与 cook 的 ModelImporter **同一条规则**:`.wmodel` 固定落在
+		// `models/<源 stem>.wmodel`(材质 `materials/`、贴图 `textures/`,名字带模型前缀避免碰撞)。
+		// 源的位置记进 meta.SourcePath(而不是靠"同目录同名"去猜),编辑器据此判断"需要重导"。
+		metadata.LogicalModelPath.clear();
+		{
+			std::error_code ec;
+			const std::filesystem::path sourceAbsolute = std::filesystem::absolute(std::filesystem::path(sourcePath), ec);
+			std::error_code rootError;
+			const std::filesystem::path rootAbsolute = std::filesystem::absolute(std::filesystem::path(outputRoot), rootError);
+			std::filesystem::path relative = (!ec && !rootError)
+				? std::filesystem::relative(sourceAbsolute, rootAbsolute, ec)
+				: std::filesystem::path();
+			if (ec || relative.empty() || relative.is_absolute())
+			{
+				relative = std::filesystem::path(sourcePath).filename();
+			}
+			metadata.SourceLogicalPath = relative.generic_string();
+		}
 
 		GltfImportBytesResult bytes;
 		std::string importError;
