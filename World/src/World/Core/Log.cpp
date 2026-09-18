@@ -86,7 +86,7 @@ namespace World
 			}
 			std::abort();
 		});
-		s_CoreLogger = spdlog::stdout_color_mt("HAZEL");
+		s_CoreLogger = spdlog::stdout_color_mt("WE");
 		s_CoreLogger->set_level(spdlog::level::trace);
 		s_CoreLogger->sinks().push_back(recent);
 		// 断言/错误立即落盘:崩溃与断言对话框场景下 FIFO 缓冲会吞掉最后的日志。

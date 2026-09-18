@@ -8,15 +8,15 @@ int main(int argc, char** argv)
 
 	World::WorldContext context;
 
-	WLD_PROFILE_BEGIN_SESSION("Startup", "HazelProfile-Startup.json");
+	WLD_PROFILE_BEGIN_SESSION("Startup", "WEProfile-Startup.json");
 	auto app = World::CreateApplication(context);
 	WLD_PROFILE_END_SESSION();
 
-	WLD_PROFILE_BEGIN_SESSION("Runtime", "HazelProfile-Runtime.json");
+	WLD_PROFILE_BEGIN_SESSION("Runtime", "WEProfile-Runtime.json");
 	app->Run();
 	WLD_PROFILE_END_SESSION();
 
-	WLD_PROFILE_BEGIN_SESSION("Shutdown", "HazelProfile-Shutdown.json");
+	WLD_PROFILE_BEGIN_SESSION("Shutdown", "WEProfile-Shutdown.json");
 	delete app;
 	WLD_PROFILE_END_SESSION();
 }
