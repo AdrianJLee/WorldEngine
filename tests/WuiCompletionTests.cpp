@@ -245,6 +245,41 @@ int main()
 			CHECK(buffer.Caret() == std::string("entity:GetComponent(").size());   // caret 在括号内
 		}
 
+		// ---- 1c. 文件中间接受函数:补完整的一对括号(修复 `self.OnCreate)`) ----
+		{
+			WuiContext ctx;
+			WuiTextBuffer buffer;
+			SetTextAtEnd(buffer, "local a = 1\nself.OnC\nprint(a)\n");
+			buffer.SetCaret(std::string("local a = 1\nself.OnC").size(), false);   // 光标在第二行行尾
+			ProviderProbe probe;
+			probe.Items.push_back(MakeItem("OnCreate", "fun(self: WorldScript)",
+				World::LuauCompletionItem::KindType::Field));
+			WuiCodeEditorOptions options = OptionsWith(probe);
+			ctx.SetFocus(HashId("test.editor"));
+			TypeChars(ctx, buffer, editorRect, options, { 'x' });   // 触发查询(前缀 OnCx)
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Tab);
+			CHECK(buffer.Text() == "local a = 1\nself.OnCreate()\nprint(a)\n");
+			CHECK(buffer.Caret() == std::string("local a = 1\nself.OnCreate(").size());
+		}
+
+		// ---- 1d. 已有调用括号:只补名字,不重复插括号 ----
+		{
+			WuiContext ctx;
+			WuiTextBuffer buffer;
+			SetTextAtEnd(buffer, "ui.pan(1)");
+			buffer.SetCaret(std::string("ui.pan").size(), false);   // 光标在 '(' 前
+			ProviderProbe probe;
+			probe.Items.push_back(MakeItem("panel", "fun(x: number)",
+				World::LuauCompletionItem::KindType::Method));
+			WuiCodeEditorOptions options = OptionsWith(probe);
+			ctx.SetFocus(HashId("test.editor"));
+			TypeChars(ctx, buffer, editorRect, options, { 'x' });   // 触发查询(前缀 panx)
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Tab);
+			CHECK(buffer.Text() == "ui.panel(1)");
+		}
+
 		// ---- 2. Up/Down 移动选择(不改 caret),Enter 接受插入名字且 caret 位置正确 ----
 		{
 			WuiContext ctx;

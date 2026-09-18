@@ -501,20 +501,27 @@ namespace World::Wui
 						state.PopupItems[static_cast<std::size_t>(state.PopupSelected)];
 					std::string inserted = CompletionInsertName(item.Name);
 					const bool call = InsertAsCall(item);
-					if (call && caretNow >= text.size())
-						inserted += "(";   // caret 在行尾:补 "(" 等待后续参数
+					// 光标后同行若已经是 '('(在已有调用里补名字)就只插名字;否则补完整的一对
+					// "name()" 并把 caret 放进括号。修复:此前只在整个**文件末尾**才补 '(',
+					// 文件中间接受函数会得到 "Name)"(用户实测 `self.OnCreate)`)。
+					bool hasCallParens = false;
+					for (std::size_t i = caretNow; i < text.size(); ++i)
+					{
+						if (text[i] == ' ' || text[i] == '\t')
+							continue;
+						hasCallParens = (text[i] == '(');
+						break;
+					}
+					if (call && !hasCallParens)
+						inserted += "(";
 					buffer.SetCaret(replaceStart, false);
 					buffer.SetCaret(caretNow, true);
 					buffer.InsertAtCaret(inserted);
-					if (call)
+					if (call && !hasCallParens)
 					{
-						const std::size_t afterName = replaceStart + inserted.size();
-						if (afterName > text.size() || text[afterName] != ')')
-						{
-							const std::size_t caretAfterName = buffer.Caret();
-							buffer.InsertAtCaret(")");
-							buffer.SetCaret(caretAfterName, false);
-						}
+						const std::size_t caretAfterName = buffer.Caret();
+						buffer.InsertAtCaret(")");
+						buffer.SetCaret(caretAfterName, false);
 					}
 				}
 				state.PopupVisible = false;
