@@ -255,6 +255,28 @@ namespace World
 		m_ItemByName.clear();
 		m_StubClasses.clear();
 
+		// `---@` 标签候选(只在注解上下文出现,不混进普通代码补全)。
+		struct TagSpec { const char* Name; const char* Doc; };
+		static const TagSpec kAnnotationTags[] = {
+			{ "class", "声明一个类(---@class Name[: Base])。" },
+			{ "field", "给当前类声明字段(---@field name[?] type 说明)。" },
+			{ "param", "说明函数参数(---@param name type 说明)。" },
+			{ "return", "说明返回值类型(---@return type)。" },
+			{ "type", "给变量/局部量标注类型(---@type Type)。" },
+			{ "overload", "补充一个函数重载签名(---@overload fun(...))。" },
+			{ "meta", "把文件标记为仅供类型检查的存根(---@meta)。" },
+			{ "diagnostic", "调整本文件的诊断开关(---@diagnostic disable: ...)。" },
+		};
+		m_Tags.clear();
+		for (const TagSpec& spec : kAnnotationTags)
+		{
+			LuauCompletionItem tag;
+			tag.Name = spec.Name;
+			tag.Doc = spec.Doc;
+			tag.Kind = LuauCompletionItem::KindType::Keyword;
+			m_Tags.push_back(std::move(tag));
+		}
+
 		ParseStubText(text);
 
 		auto addBuiltin = [&](std::string_view name, std::string_view doc,
@@ -766,6 +788,31 @@ namespace World
 		std::vector<LuauCompletionItem>& out) const
 	{
 		out.clear();
+
+		// 注解上下文:`---@` 之后到光标之间没有空白 → 只给注解标签(用户实测:"注释的 @
+		// 后面的关键字没有智能提示")。标签名不带 '@',接受后光标停在标签后。
+		{
+			const std::size_t at = linePrefix.rfind("---@");
+			if (at != std::string_view::npos)
+			{
+				const std::string_view tail = linePrefix.substr(at + 4);
+				bool isTagPrefix = true;
+				for (const char c : tail)
+					if (!IsIdentPart(c))
+						isTagPrefix = false;
+				if (isTagPrefix)
+				{
+					for (const LuauCompletionItem& tag : m_Tags)
+						if (StartsWithIgnoreCase(tag.Name, tail))
+							out.push_back(tag);
+					std::sort(out.begin(), out.end(),
+						[](const LuauCompletionItem& l, const LuauCompletionItem& r) { return l.Name < r.Name; });
+					if (maxItems != 0 && out.size() > maxItems)
+						out.resize(maxItems);
+					return;
+				}
+			}
+		}
 
 		std::string receiver;
 		std::string prefix;

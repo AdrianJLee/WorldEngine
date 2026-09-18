@@ -286,6 +286,19 @@ int main()
 			CHECK(receiver == "ui" && separator == '.' && prefix == "bu");
 		}
 
+		// ---- 2b. `---@` 注解标签:只在注解上下文给候选 ----
+		{
+			std::vector<LuauCompletionItem> items;
+			index.Query("---@fie", 20, items);
+			CHECK(HasName(items, "field"));
+			index.Query("---@", 20, items);
+			CHECK(HasName(items, "class") && HasName(items, "field") && HasName(items, "param")
+				&& HasName(items, "return") && HasName(items, "type"));
+			// 普通代码上下文不给注解标签(避免噪声)
+			index.Query("fie", 100, items);
+			CHECK(!HasName(items, "field"));
+		}
+
 		// ---- 3. 查询:接收者成员 / 过滤 / 大小写 / 排序 / 截断 ----
 		{
 			std::vector<LuauCompletionItem> items;

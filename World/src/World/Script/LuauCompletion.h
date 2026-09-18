@@ -101,6 +101,7 @@ namespace World
 		void CollectGlobals(std::vector<const LuauCompletionItem*>& out, bool includeKeywords) const;
 
 		std::vector<LuauCompletionItem> m_Items;   // 存根顶层项 + 关键字 + 沙箱内置
+		std::vector<LuauCompletionItem> m_Tags;    // `---@` 注解标签(只在注解上下文给候选)
 		std::vector<ClassInfo> m_StubClasses;
 		std::vector<LuauCompletionItem> m_FileItems;   // 文件内符号(SetFileSource)
 		std::vector<ClassInfo> m_FileClasses;          // 文件内 ---@class(通常 1 个)

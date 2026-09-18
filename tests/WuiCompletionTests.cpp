@@ -302,6 +302,13 @@ int main()
 			PressKey(ctx, comment, editorRect, options, World::KeyCodes::End);
 			TypeChars(ctx, comment, editorRect, options, { 'x' });
 			CHECK(FindSuggest(HashId("test.suggest.status")) == nullptr);
+
+			// 注解行例外:`---@fie` 是注释,但要给 `---@field` 之类的标签候选。
+			WuiTextBuffer annotation;
+			SetTextAtEnd(annotation, "");
+			TypeChars(ctx, annotation, editorRect, options, { '-', '-', '-', '@', 'f', 'i', 'e' });
+			CHECK(probe.Prefixes.back() == "---@fie");
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
 		}
 		WuiAccessibility::Get().Clear();
 

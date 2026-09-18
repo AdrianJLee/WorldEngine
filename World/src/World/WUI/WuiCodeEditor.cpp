@@ -624,7 +624,23 @@ namespace World::Wui
 				}
 			}
 		}
-		if (completionRequest.Wanted && focused && options.Completion && !readOnly && !caretInStringOrComment)
+		// 注解上下文:`---@` 之后没有空白——注释行里也要给 `---@class/@field/...` 标签候选。
+		bool annotationContext = false;
+		{
+			const size_t localCaret = std::min(buffer.Caret(), caretLineStart + caretLineText.size())
+				- caretLineStart;
+			const std::string_view caretLinePrefixBytes = caretLineText.substr(0, localCaret);
+			const std::size_t at = caretLinePrefixBytes.rfind("---@");
+			if (at != std::string_view::npos)
+			{
+				annotationContext = true;
+				for (const char c : caretLinePrefixBytes.substr(at + 4))
+					if (!IsIdentByte(c))
+						annotationContext = false;
+			}
+		}
+		if (completionRequest.Wanted && focused && options.Completion && !readOnly
+			&& (!caretInStringOrComment || annotationContext))
 		{
 			const std::size_t caretNow = std::min(buffer.Caret(), buffer.Text().size());
 			const std::size_t replaceStart = CompletionReplaceStart(buffer.Text(), caretNow);
@@ -635,7 +651,8 @@ namespace World::Wui
 			// 行首到现在的纯空白(空行/自动缩进)不查询:全量候选既没有信息量,又会让
 			// 随后的 Enter 被当成"接受候选"(实测:注入多行文本时插入了 assert)。
 			const bool meaningfulPrefix = !linePrefix.empty()
-				&& (IsIdentByte(linePrefix.back()) || linePrefix.back() == '.' || linePrefix.back() == ':');
+				&& (IsIdentByte(linePrefix.back()) || linePrefix.back() == '.' || linePrefix.back() == ':'
+					|| annotationContext);
 			if (meaningfulPrefix)
 				options.Completion(linePrefix, items);
 			if (!items.empty())
@@ -674,7 +691,8 @@ namespace World::Wui
 			}
 		}
 		// ReadOnly / 未聚焦 / 无 provider / 光标落在字符串·注释内:一律不弹。
-		if (state.PopupVisible && (!focused || readOnly || !options.Completion || caretInStringOrComment))
+		if (state.PopupVisible && (!focused || readOnly || !options.Completion
+			|| (caretInStringOrComment && !annotationContext)))
 			state.PopupVisible = false;
 
 		// ---- caret 跟随:滚动到刚移动/编辑的 caret 行 ----
