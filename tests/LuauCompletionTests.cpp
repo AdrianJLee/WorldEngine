@@ -299,6 +299,18 @@ int main()
 			CHECK(!HasName(items, "field"));
 		}
 
+		// ---- 2c. 悬停提示 Describe:按上下文给出 名称/类型/文档 ----
+		{
+			LuauCompletionItem described;
+			CHECK(index.Describe("self:", "OnDestroy", described));
+			CHECK(described.Type == "fun(self: WorldScript)");
+			CHECK(described.Doc.find("Cleanup callback") != std::string::npos);
+			CHECK(index.Describe("ui.", "panel", described));
+			CHECK(described.Name == "panel" && !described.Doc.empty());
+			LuauCompletionItem missing;
+			CHECK(!index.Describe("ui.", "definitely_not_a_symbol", missing));
+		}
+
 		// ---- 3. 查询:接收者成员 / 过滤 / 大小写 / 排序 / 截断 ----
 		{
 			std::vector<LuauCompletionItem> items;

@@ -913,6 +913,30 @@ namespace World
 			out.push_back(*matched[i]);
 	}
 
+	bool LuauCompletionIndex::Describe(std::string_view linePrefix, std::string_view word,
+		LuauCompletionItem& out) const
+	{
+		if (word.empty())
+			return false;
+		// 直接复用 Query 的上下文/合并/排序:同名成员已经按"信息更全"合并过,
+		// 这里只挑出与 word 同名的那一条。
+		std::vector<LuauCompletionItem> items;
+		Query(linePrefix, 0, items);
+		for (const LuauCompletionItem& item : items)
+			if (item.Name == word)
+			{
+				out = item;
+				return true;
+			}
+		for (const LuauCompletionItem& item : items)
+			if (EqualsIgnoreCase(item.Name, word))
+			{
+				out = item;
+				return true;
+			}
+		return false;
+	}
+
 	void LuauCompletionIndex::ParseContext(std::string_view linePrefix, std::string& receiver,
 		char& separator, std::string& prefix)
 	{

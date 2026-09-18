@@ -79,6 +79,10 @@ namespace World
 		void Query(std::string_view linePrefix, std::size_t maxItems,
 			std::vector<LuauCompletionItem>& out) const;
 
+		// 悬停提示:按上下文(linePrefix = 词之前的整行片段)解析 word 的类型与文档。
+		// 找到返回 true 并填 out;未找到返回 false。
+		bool Describe(std::string_view linePrefix, std::string_view word, LuauCompletionItem& out) const;
+
 		// 光标前片段 → 接收者 / 分隔符('.',':') / 前缀标识符。无接收者时 separator='\0'。
 		// 例:"ui.bu" → ("ui",'.',"bu");"entity:Get" → ("entity",':',"Get");
 		// "local x = en" → ("",'\0',"en");"for i = 1, " → ("",'\0',"")。

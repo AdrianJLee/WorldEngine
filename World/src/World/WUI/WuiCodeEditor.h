@@ -50,6 +50,10 @@ namespace World::Wui
 			std::vector<World::LuauCompletionItem>& out)> Completion;
 		// 补全浮层的无障碍节点 id 前缀:<前缀>.<i>(候选)、<前缀>.status(状态)。
 		std::string CompletionIdPrefix = "editor.suggest";
+		// W9.6 悬停提示 provider:linePrefix = 鼠标所在词之前的整行片段(含接收者),
+		// word = 鼠标下的标识符。返回 true 时用 out 的 Name/Type/Doc 画提示框;空 = 不提示。
+		std::function<bool(std::string_view linePrefix, std::string_view word,
+			World::LuauCompletionItem& out)> Hover;
 	};
 
 	struct WuiCodeEditorResult

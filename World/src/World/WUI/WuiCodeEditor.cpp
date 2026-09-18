@@ -69,6 +69,15 @@ namespace World::Wui
 			bool PopupAcceptEnter = false;
 			bool PopupVisibleLastFrame = false;
 			WuiRect PopupBounds {};
+			// ---- W9.6 悬停提示(名称/类型/文档) ----
+			bool HoverVisible = false;
+			uint64_t HoverSinceFrame = 0;
+			std::size_t HoverWordStart = 0;   // buffer 字节偏移
+			std::size_t HoverWordEnd = 0;
+			glm::vec2 HoverMousePos { 0, 0 };
+			std::string HoverName;
+			std::string HoverType;
+			std::string HoverDoc;
 		};
 
 		size_t CodepointLength(unsigned char lead)
@@ -237,6 +246,87 @@ namespace World::Wui
 			while (start > 0 && IsIdentByte(text[start - 1]))
 				--start;
 			return start;
+		}
+
+		// 上一个码点边界(string_view 版:悬停取词用,避免为每帧扫描构造 std::string)。
+		std::size_t PrevBoundary(std::string_view text, std::size_t offset)
+		{
+			if (offset == 0)
+				return 0;
+			std::size_t i = offset - 1;
+			while (i > 0 && (static_cast<unsigned char>(text[i]) & 0xC0u) == 0x80u)
+				--i;
+			return i;
+		}
+
+		// W9.6 悬停/文档:按像素宽度截断(超宽补 '…')。
+		std::string EllipsizeToWidth(const WuiContext& ctx, std::string_view text, float maxWidth,
+			float fontSize)
+		{
+			if (text.empty() || maxWidth <= 0.0f)
+				return std::string(text);
+			if (ctx.MeasureTextWidth(text, fontSize, WuiFontFamily::Ui) <= maxWidth)
+				return std::string(text);
+			std::string out;
+			size_t i = 0;
+			while (i < text.size())
+			{
+				const size_t begin = i;
+				size_t length = 1;
+				DecodeCodepoint(text, i, length);
+				i += length;
+				std::string candidate = out;
+				candidate.append(text.substr(begin, i - begin));
+				if (ctx.MeasureTextWidth(candidate, fontSize, WuiFontFamily::Ui) + 12.0f > maxWidth)
+					break;
+				out = std::move(candidate);
+			}
+			out += "…";
+			return out;
+		}
+
+		// W9.6 悬停/文档:按像素宽度折行(最多 maxLines 行,最后一行超长时省略)。
+		std::vector<std::string> WrapToWidth(const WuiContext& ctx, std::string_view text,
+			float maxWidth, float fontSize, size_t maxLines)
+		{
+			std::vector<std::string> lines;
+			if (text.empty() || maxLines == 0)
+				return lines;
+			std::string current;
+			size_t i = 0;
+			while (i < text.size())
+			{
+				const size_t begin = i;
+				size_t length = 1;
+				DecodeCodepoint(text, i, length);
+				i += length;
+				const std::string_view piece = text.substr(begin, i - begin);
+				if (piece[0] == '\n')
+				{
+					lines.push_back(std::move(current));
+					current.clear();
+					if (lines.size() >= maxLines)
+						break;
+					continue;
+				}
+				std::string candidate = current;
+				candidate.append(piece);
+				if (ctx.MeasureTextWidth(candidate, fontSize, WuiFontFamily::Ui) > maxWidth
+					&& !current.empty())
+				{
+					lines.push_back(std::move(current));
+					current.assign(piece);
+					if (lines.size() >= maxLines)
+						break;
+				}
+				else
+					current = std::move(candidate);
+			}
+			if (lines.size() < maxLines && !current.empty())
+				lines.push_back(std::move(current));
+			if (lines.size() == maxLines && i < text.size() && !lines.empty())
+				lines.back() = EllipsizeToWidth(ctx, lines.back(), maxWidth, fontSize);
+			return lines;
 		}
 	}
 
@@ -695,6 +785,85 @@ namespace World::Wui
 			|| (caretInStringOrComment && !annotationContext)))
 			state.PopupVisible = false;
 
+		// ---- W9.6 悬停提示:同一标识符静止停留 ~0.4s → 名称/类型/文档 ----
+		{
+			constexpr uint64_t kHoverDelayFrames = 24;
+			const bool inputQuiet = input.TextInput.empty() && input.KeyPressed.empty()
+				&& input.KeyRepeated.empty() && input.Wheel == 0.0f;
+			const bool candidate = options.Hover && ctx.IsHovered(textRect) && !state.PopupVisible
+				&& inputQuiet && !state.MouseSelecting;
+			size_t wordStart = 0;
+			size_t wordEnd = 0;
+			std::string linePrefix;
+			std::string word;
+			if (candidate)
+			{
+				const size_t hoverOffset = HitOffset(input.MousePos.y, input.MousePos.x);
+				const int hoverLine = buffer.LineOfOffset(hoverOffset);
+				size_t hoverLineStart = 0;
+				const std::string_view hoverLineText = LineView(buffer, hoverLine, hoverLineStart);
+				const size_t local = std::min(hoverOffset - hoverLineStart, hoverLineText.size());
+				size_t start = local;
+				while (start > 0)
+				{
+					const size_t prev = PrevBoundary(hoverLineText, start);
+					size_t length = 1;
+					if (!IsWordCodepoint(DecodeCodepoint(hoverLineText, prev, length)))
+						break;
+					start = prev;
+				}
+				size_t end = start;
+				while (end < hoverLineText.size())
+				{
+					size_t length = 1;
+					if (!IsWordCodepoint(DecodeCodepoint(hoverLineText, end, length)))
+						break;
+					end += length;
+				}
+				if (end > start && local >= start && local <= end)
+				{
+					wordStart = hoverLineStart + start;
+					wordEnd = hoverLineStart + end;
+					linePrefix.assign(buffer.Text(), hoverLineStart, start);
+					word.assign(hoverLineText, start, end - start);
+				}
+			}
+			if (!word.empty())
+			{
+				const bool sameWord = state.HoverWordStart == wordStart && state.HoverWordEnd == wordEnd;
+				const bool samePos = std::fabs(input.MousePos.x - state.HoverMousePos.x) <= 4.0f
+					&& std::fabs(input.MousePos.y - state.HoverMousePos.y) <= 4.0f;
+				if (!sameWord || !samePos)
+				{
+					state.HoverSinceFrame = ctx.Frame();
+					state.HoverWordStart = wordStart;
+					state.HoverWordEnd = wordEnd;
+					state.HoverMousePos = input.MousePos;
+					state.HoverVisible = false;
+				}
+				else if (ctx.Frame() >= state.HoverSinceFrame + kHoverDelayFrames)
+				{
+					World::LuauCompletionItem item;
+					if (options.Hover(linePrefix, word, item) && !item.Name.empty())
+					{
+						state.HoverName = item.Name;
+						state.HoverType = item.Type;
+						state.HoverDoc = item.Doc;
+						state.HoverVisible = true;
+					}
+					else
+						state.HoverVisible = false;
+				}
+			}
+			else
+			{
+				state.HoverWordStart = state.HoverWordEnd = 0;
+				state.HoverVisible = false;
+			}
+			if (!candidate)
+				state.HoverVisible = false;
+		}
+
 		// ---- caret 跟随:滚动到刚移动/编辑的 caret 行 ----
 		if (state.FollowCaret && maxScroll > 0.0f)
 		{
@@ -1051,10 +1220,91 @@ namespace World::Wui
 				docCommand.Rect = { state.PopupBounds.X + 8.0f,
 					state.PopupBounds.Y + state.PopupBounds.H - 21.0f, 0.0f, 0.0f };
 				docCommand.Color = kSuggestDoc;
-				docCommand.Text = TruncateBytes(item.Doc, 60);
+				docCommand.Text = EllipsizeToWidth(ctx, item.Doc, state.PopupBounds.W - 16.0f,
+					kSuggestDocFontSize);
 				docCommand.FontSize = kSuggestDocFontSize;
 				docCommand.Family = WuiFontFamily::Ui;
 				ctx.Commands().push_back(std::move(docCommand));
+			}
+		}
+
+		// ---- W9.6 悬停提示绘制(同样必须在正文之后) ----
+		if (state.HoverVisible && !state.HoverName.empty())
+		{
+			constexpr float kHoverFontSize = 13.0f;
+			constexpr float kHoverTitleSize = 14.0f;
+			constexpr float kHoverLineH = 16.0f;
+			const float maxTextWidth = std::min(400.0f, std::max(160.0f, rect.W - 24.0f));
+			const std::vector<std::string> docLines = state.HoverDoc.empty()
+				? std::vector<std::string> {}
+				: WrapToWidth(ctx, state.HoverDoc, maxTextWidth, kHoverFontSize, 4);
+			const float width = std::min(maxTextWidth + 16.0f, rect.W);
+			const float height = 8.0f + kHoverLineH
+				+ (state.HoverType.empty() ? 0.0f : kHoverLineH)
+				+ static_cast<float>(docLines.size()) * kHoverLineH + 4.0f;
+			float x = input.MousePos.x + 14.0f;
+			float y = input.MousePos.y + 18.0f;
+			if (x + width > rect.X + rect.W)
+				x = input.MousePos.x - width - 8.0f;
+			if (y + height > rect.Y + rect.H)
+				y = input.MousePos.y - height - 8.0f;
+			x = std::max(rect.X, std::min(x, rect.X + rect.W - width));
+			y = std::max(rect.Y, std::min(y, rect.Y + rect.H - height));
+			const WuiRect tooltip { x, y, width, height };
+			ctx.Commands().push_back({ WuiDrawKind::Rect, tooltip, { 0.10f, 0.11f, 0.13f, 0.98f }, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, tooltip, kSuggestBorder, 3.0f, 1.0f });
+			float lineY = tooltip.Y + 4.0f;
+			{
+				WuiDrawCommand title;
+				title.Kind = WuiDrawKind::Text;
+				title.Rect = { tooltip.X + 8.0f, lineY, 0.0f, 0.0f };
+				title.Color = kSuggestName;
+				title.Text = EllipsizeToWidth(ctx, state.HoverName, maxTextWidth, kHoverTitleSize);
+				title.FontSize = kHoverTitleSize;
+				title.Family = WuiFontFamily::Monospace;
+				ctx.Commands().push_back(std::move(title));
+			}
+			lineY += kHoverLineH;
+			if (!state.HoverType.empty())
+			{
+				WuiDrawCommand type;
+				type.Kind = WuiDrawKind::Text;
+				type.Rect = { tooltip.X + 8.0f, lineY, 0.0f, 0.0f };
+				type.Color = kSuggestType;
+				type.Text = EllipsizeToWidth(ctx, state.HoverType, maxTextWidth, kHoverFontSize);
+				type.FontSize = kHoverFontSize;
+				type.Family = WuiFontFamily::Monospace;
+				ctx.Commands().push_back(std::move(type));
+				lineY += kHoverLineH;
+			}
+			for (const std::string& docLine : docLines)
+			{
+				WuiDrawCommand doc;
+				doc.Kind = WuiDrawKind::Text;
+				doc.Rect = { tooltip.X + 8.0f, lineY, 0.0f, 0.0f };
+				doc.Color = kSuggestDoc;
+				doc.Text = docLine;
+				doc.FontSize = kHoverFontSize;
+				doc.Family = WuiFontFamily::Ui;
+				ctx.Commands().push_back(std::move(doc));
+				lineY += kHoverLineH;
+			}
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			if (accessibility.Enabled())
+			{
+				const std::string prefix = options.CompletionIdPrefix.empty()
+					? std::string("editor.suggest") : options.CompletionIdPrefix;
+				WuiAccessNode node;
+				node.Id = HashId((prefix + ".hover").c_str());
+				node.Window = accessibility.CurrentWindow();
+				node.Panel = accessibility.CurrentPanel();
+				node.Kind = "hover";
+				node.Label = state.HoverName;
+				node.Value = state.HoverType.empty() ? state.HoverDoc
+					: state.HoverType + (state.HoverDoc.empty() ? "" : " | " + state.HoverDoc);
+				node.Rect = tooltip;
+				node.Interactive = false;
+				accessibility.Register(node);
 			}
 		}
 

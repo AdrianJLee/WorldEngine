@@ -227,6 +227,24 @@ int main()
 		}
 		WuiAccessibility::Get().Clear();
 
+		// ---- 1b. 函数/方法用 Tab 接受:插入 name() 且 caret 在括号内 ----
+		{
+			WuiContext ctx;
+			WuiTextBuffer buffer;
+			SetTextAtEnd(buffer, "entity:Get");
+			ProviderProbe probe;
+			probe.Items.push_back(MakeItem("GetComponent", "fun(componentType: string)",
+				World::LuauCompletionItem::KindType::Method));
+			WuiCodeEditorOptions options = OptionsWith(probe);
+			ctx.SetFocus(HashId("test.editor"));
+			TypeChars(ctx, buffer, editorRect, options, { 'x' });   // 触发查询并打开浮层
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Tab);
+			std::printf("[wui] tab accept function: '%s' caret=%zu\n", buffer.Text().c_str(), buffer.Caret());
+			CHECK(buffer.Text() == "entity:GetComponent()");
+			CHECK(buffer.Caret() == std::string("entity:GetComponent(").size());   // caret 在括号内
+		}
+
 		// ---- 2. Up/Down 移动选择(不改 caret),Enter 接受插入名字且 caret 位置正确 ----
 		{
 			WuiContext ctx;
@@ -311,6 +329,84 @@ int main()
 			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
 		}
 		WuiAccessibility::Get().Clear();
+
+		// ---- 4b. 悬停提示:停留 ~0.4s → 名称/类型/文档;移开消失 ----
+		{
+			WuiContext ctx;
+			WuiTextBuffer buffer;
+			SetTextAtEnd(buffer, "local ui = {}\nui.panel");
+			ProviderProbe probe;
+			probe.Items.push_back(MakeItem("panel", "fun(x: number)",
+				World::LuauCompletionItem::KindType::Method, "Draw a panel."));
+			WuiCodeEditorOptions options = OptionsWith(probe);
+			options.GutterWidth = 40.0f;
+			std::vector<std::string> hoverWords;
+			std::vector<std::string> hoverPrefixes;
+			options.Hover = [&](std::string_view linePrefix, std::string_view word,
+				World::LuauCompletionItem& out)
+			{
+				hoverPrefixes.emplace_back(linePrefix);
+				hoverWords.emplace_back(word);
+				out = probe.Items[0];
+				return true;
+			};
+			ctx.SetFocus(HashId("test.editor"));
+			WuiInputState hoverInput;
+			hoverInput.MousePos = { editorRect.X + 40.0f + 24.0f, editorRect.Y + 35.0f };
+			for (int frame = 0; frame < 30; ++frame)
+				RunFrame(ctx, buffer, editorRect, options, hoverInput);
+			CHECK(!hoverWords.empty() && hoverWords.back() == "panel");
+			CHECK(hoverPrefixes.back() == "ui.");
+			const WuiAccessNode* hoverNode = FindSuggest(HashId("test.suggest.hover"));
+			CHECK(hoverNode != nullptr);
+			CHECK(hoverNode->Label == "panel");
+			CHECK(hoverNode->Value.find("Draw a panel.") != std::string::npos);
+
+			// 鼠标移开 → 提示消失
+			WuiInputState away;
+			away.MousePos = { editorRect.X + 5.0f, editorRect.Y + 5.0f };
+			RunFrame(ctx, buffer, editorRect, options, away);
+			CHECK(FindSuggest(HashId("test.suggest.hover")) == nullptr);
+		}
+
+		// ---- 4c. 绘制分段无缝隙:拼接 == 行文本,相邻命令 x 差 == 前一段测宽 ----
+		{
+			WuiContext ctx;
+			WuiTextBuffer buffer;
+			const std::string line = "local PlayerScript = { Speed = 5.0, Name = \"Player\" }";
+			SetTextAtEnd(buffer, line);
+			WuiCodeEditorOptions options;
+			options.GutterWidth = 40.0f;
+			options.Highlight = [](std::string_view text, std::vector<WuiCodeToken>& out)
+			{
+				World::LuauHighlightState state;
+				World::LuauHighlighter::HighlightLine(text, state, out);
+			};
+			WuiInputState idle;
+			RunFrame(ctx, buffer, editorRect, options, idle);
+			std::string joined;
+			float prevX = 0.0f;
+			float prevWidth = 0.0f;
+			bool first = true;
+			bool consistent = true;
+			for (const WuiDrawCommand& command : ctx.Commands())
+			{
+				if (command.Kind != WuiDrawKind::Text)
+					continue;
+				if (command.Rect.X < editorRect.X + 40.0f)   // 行号(gutter 内)
+					continue;
+				if (command.Rect.Y < editorRect.Y || command.Rect.Y > editorRect.Y + 20.0f)   // 只看第一行
+					continue;
+				if (!first && std::fabs(command.Rect.X - (prevX + prevWidth)) > 0.51f)
+					consistent = false;
+				joined += command.Text;
+				prevX = command.Rect.X;
+				prevWidth = ctx.MeasureTextWidth(command.Text, command.FontSize, command.Family);
+				first = false;
+			}
+			CHECK(joined == line);
+			CHECK(consistent);
+		}
 
 		// ---- 5. Esc 只关浮层、保持焦点;空候选不弹;ReadOnly 不弹 ----
 		{

@@ -565,6 +565,12 @@ namespace World
 			{
 				m_Completion.Query(linePrefix, 50, out);
 			};
+			// W9.6 悬停提示:同一符号表,按上下文给出 名称/类型/文档。
+			options.Hover = [this](std::string_view linePrefix, std::string_view word,
+				World::LuauCompletionItem& out)
+			{
+				return m_Completion.Describe(linePrefix, word, out);
+			};
 		}
 		const Wui::WuiCodeEditorResult result =
 			Wui::CodeEditor(ctx, Wui::HashId("script.editor"), editorRect, m_Buffer, options);
