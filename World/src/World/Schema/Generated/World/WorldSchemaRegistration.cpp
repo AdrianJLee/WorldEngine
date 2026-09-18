@@ -24,10 +24,17 @@ const TypeSchema& WeSchemaOf_LuaScriptComponent();
 const TypeSchema& WeSchemaOf_RigidBody2DComponent();
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent();
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent();
+const TypeSchema& WeSchemaOf_RigidBody3DComponent();
+const TypeSchema& WeSchemaOf_BoxCollider3DComponent();
+const TypeSchema& WeSchemaOf_SphereCollider3DComponent();
+const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent();
+const TypeSchema& WeSchemaOf_MeshCollider3DComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_SceneCamera();
 const EnumSchema& WeEnumSchemaOf_BodyType();
 const EnumSchema& WeEnumSchemaOf_ProjectionType();
+const EnumSchema& WeEnumSchemaOf_MotionType();
+const EnumSchema& WeEnumSchemaOf_ColliderMode();
 
 	namespace
 	{
@@ -1837,6 +1844,603 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
 };
 
 template <>
+struct GeneratedAccess<World::RigidBody3DComponent>
+{
+    static Value Get_Type(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(static_cast<int64_t>(self->Type));
+    }
+    static void Set_Type(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->Type = static_cast<World::RigidBody3DComponent::MotionType>(std::get<int64_t>(value));
+    }
+    static const EnumSchema* GetEnum_Type()
+    {
+        return &WeEnumSchemaOf_MotionType();
+    }
+    static Value Get_Mass(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->Mass);
+    }
+    static void Set_Mass(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->Mass = std::get<float>(value);
+    }
+    static Value Get_LinearDamping(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->LinearDamping);
+    }
+    static void Set_LinearDamping(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->LinearDamping = std::get<float>(value);
+    }
+    static Value Get_AngularDamping(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->AngularDamping);
+    }
+    static void Set_AngularDamping(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->AngularDamping = std::get<float>(value);
+    }
+    static Value Get_Friction(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->Friction);
+    }
+    static void Set_Friction(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->Friction = std::get<float>(value);
+    }
+    static Value Get_Restitution(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->Restitution);
+    }
+    static void Set_Restitution(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->Restitution = std::get<float>(value);
+    }
+    static Value Get_UseGravity(const void* instance)
+    {
+        const World::RigidBody3DComponent* self = static_cast<const World::RigidBody3DComponent*>(instance);
+        return Value(self->UseGravity);
+    }
+    static void Set_UseGravity(void* instance, const Value& value)
+    {
+        World::RigidBody3DComponent* self = static_cast<World::RigidBody3DComponent*>(instance);
+        self->UseGravity = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Type()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5242334454595045ull },
+            "Type",
+            Kind::Enum,
+            &Get_Type,
+            &Set_Type,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_Type,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(static_cast<int64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Mass()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x524233444D415353ull },
+            "Mass",
+            Kind::Float,
+            &Get_Mass,
+            &Set_Mass,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LinearDamping()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x524233444C4E4450ull },
+            "LinearDamping",
+            Kind::Float,
+            &Get_LinearDamping,
+            &Set_LinearDamping,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AngularDamping()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x52423344414E4744ull },
+            "AngularDamping",
+            Kind::Float,
+            &Get_AngularDamping,
+            &Set_AngularDamping,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Friction()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5242334446524943ull },
+            "Friction",
+            Kind::Float,
+            &Get_Friction,
+            &Set_Friction,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Restitution()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5242334452455354ull },
+            "Restitution",
+            Kind::Float,
+            &Get_Restitution,
+            &Set_Restitution,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_UseGravity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5242334447525654ull },
+            "UseGravity",
+            Kind::Bool,
+            &Get_UseGravity,
+            &Set_UseGravity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::RigidBody3DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::RigidBody3DComponent" },
+            "RigidBody3DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::RigidBody3DComponent),
+            TypeCategory::Component,
+            {
+                Field_Type(),
+                Field_Mass(),
+                Field_LinearDamping(),
+                Field_AngularDamping(),
+                Field_Friction(),
+                Field_Restitution(),
+                Field_UseGravity(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::BoxCollider3DComponent>
+{
+    static Value Get_HalfExtents(const void* instance)
+    {
+        const World::BoxCollider3DComponent* self = static_cast<const World::BoxCollider3DComponent*>(instance);
+        return Value(self->HalfExtents);
+    }
+    static void Set_HalfExtents(void* instance, const Value& value)
+    {
+        World::BoxCollider3DComponent* self = static_cast<World::BoxCollider3DComponent*>(instance);
+        self->HalfExtents = std::get<glm::vec3>(value);
+    }
+    static Value Get_Offset(const void* instance)
+    {
+        const World::BoxCollider3DComponent* self = static_cast<const World::BoxCollider3DComponent*>(instance);
+        return Value(self->Offset);
+    }
+    static void Set_Offset(void* instance, const Value& value)
+    {
+        World::BoxCollider3DComponent* self = static_cast<World::BoxCollider3DComponent*>(instance);
+        self->Offset = std::get<glm::vec3>(value);
+    }
+    static const FieldSchema& Field_HalfExtents()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x42334448414C4658ull },
+            "HalfExtents",
+            Kind::Vec3,
+            &Get_HalfExtents,
+            &Set_HalfExtents,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Offset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4233444F46465354ull },
+            "Offset",
+            Kind::Vec3,
+            &Get_Offset,
+            &Set_Offset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::BoxCollider3DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::BoxCollider3DComponent" },
+            "BoxCollider3DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::BoxCollider3DComponent),
+            TypeCategory::Component,
+            {
+                Field_HalfExtents(),
+                Field_Offset(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::SphereCollider3DComponent>
+{
+    static Value Get_Radius(const void* instance)
+    {
+        const World::SphereCollider3DComponent* self = static_cast<const World::SphereCollider3DComponent*>(instance);
+        return Value(self->Radius);
+    }
+    static void Set_Radius(void* instance, const Value& value)
+    {
+        World::SphereCollider3DComponent* self = static_cast<World::SphereCollider3DComponent*>(instance);
+        self->Radius = std::get<float>(value);
+    }
+    static Value Get_Offset(const void* instance)
+    {
+        const World::SphereCollider3DComponent* self = static_cast<const World::SphereCollider3DComponent*>(instance);
+        return Value(self->Offset);
+    }
+    static void Set_Offset(void* instance, const Value& value)
+    {
+        World::SphereCollider3DComponent* self = static_cast<World::SphereCollider3DComponent*>(instance);
+        self->Offset = std::get<glm::vec3>(value);
+    }
+    static const FieldSchema& Field_Radius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5333445241444955ull },
+            "Radius",
+            Kind::Float,
+            &Get_Radius,
+            &Set_Radius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Offset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x5333444F46465354ull },
+            "Offset",
+            Kind::Vec3,
+            &Get_Offset,
+            &Set_Offset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::SphereCollider3DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::SphereCollider3DComponent" },
+            "SphereCollider3DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::SphereCollider3DComponent),
+            TypeCategory::Component,
+            {
+                Field_Radius(),
+                Field_Offset(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::CapsuleCollider3DComponent>
+{
+    static Value Get_Radius(const void* instance)
+    {
+        const World::CapsuleCollider3DComponent* self = static_cast<const World::CapsuleCollider3DComponent*>(instance);
+        return Value(self->Radius);
+    }
+    static void Set_Radius(void* instance, const Value& value)
+    {
+        World::CapsuleCollider3DComponent* self = static_cast<World::CapsuleCollider3DComponent*>(instance);
+        self->Radius = std::get<float>(value);
+    }
+    static Value Get_HalfHeight(const void* instance)
+    {
+        const World::CapsuleCollider3DComponent* self = static_cast<const World::CapsuleCollider3DComponent*>(instance);
+        return Value(self->HalfHeight);
+    }
+    static void Set_HalfHeight(void* instance, const Value& value)
+    {
+        World::CapsuleCollider3DComponent* self = static_cast<World::CapsuleCollider3DComponent*>(instance);
+        self->HalfHeight = std::get<float>(value);
+    }
+    static Value Get_Offset(const void* instance)
+    {
+        const World::CapsuleCollider3DComponent* self = static_cast<const World::CapsuleCollider3DComponent*>(instance);
+        return Value(self->Offset);
+    }
+    static void Set_Offset(void* instance, const Value& value)
+    {
+        World::CapsuleCollider3DComponent* self = static_cast<World::CapsuleCollider3DComponent*>(instance);
+        self->Offset = std::get<glm::vec3>(value);
+    }
+    static const FieldSchema& Field_Radius()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4333445241444955ull },
+            "Radius",
+            Kind::Float,
+            &Get_Radius,
+            &Set_Radius,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_HalfHeight()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x43334448414C4648ull },
+            "HalfHeight",
+            Kind::Float,
+            &Get_HalfHeight,
+            &Set_HalfHeight,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Offset()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4333444F46465354ull },
+            "Offset",
+            Kind::Vec3,
+            &Get_Offset,
+            &Set_Offset,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::CapsuleCollider3DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::CapsuleCollider3DComponent" },
+            "CapsuleCollider3DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::CapsuleCollider3DComponent),
+            TypeCategory::Component,
+            {
+                Field_Radius(),
+                Field_HalfHeight(),
+                Field_Offset(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::MeshCollider3DComponent>
+{
+    static Value Get_Mode(const void* instance)
+    {
+        const World::MeshCollider3DComponent* self = static_cast<const World::MeshCollider3DComponent*>(instance);
+        return Value(static_cast<int64_t>(self->Mode));
+    }
+    static void Set_Mode(void* instance, const Value& value)
+    {
+        World::MeshCollider3DComponent* self = static_cast<World::MeshCollider3DComponent*>(instance);
+        self->Mode = static_cast<World::MeshCollider3DComponent::ColliderMode>(std::get<int64_t>(value));
+    }
+    static const EnumSchema* GetEnum_Mode()
+    {
+        return &WeEnumSchemaOf_ColliderMode();
+    }
+    static Value Get_MeshPath(const void* instance)
+    {
+        const World::MeshCollider3DComponent* self = static_cast<const World::MeshCollider3DComponent*>(instance);
+        return Value(self->MeshPath);
+    }
+    static void Set_MeshPath(void* instance, const Value& value)
+    {
+        World::MeshCollider3DComponent* self = static_cast<World::MeshCollider3DComponent*>(instance);
+        self->MeshPath = std::get<std::string>(value);
+    }
+    static const FieldSchema& Field_Mode()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4D33444D4F444530ull },
+            "Mode",
+            Kind::Enum,
+            &Get_Mode,
+            &Set_Mode,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_Mode,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(static_cast<int64_t>(0)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MeshPath()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4D33445041544830ull },
+            "MeshPath",
+            Kind::String,
+            &Get_MeshPath,
+            &Set_MeshPath,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(std::string()),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::MeshCollider3DComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::MeshCollider3DComponent" },
+            "MeshCollider3DComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::MeshCollider3DComponent),
+            TypeCategory::Component,
+            {
+                Field_Mode(),
+                Field_MeshPath(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -2178,6 +2782,43 @@ struct GeneratedEnum<World::SceneCamera::ProjectionType>
     }
 };
 
+template <>
+struct GeneratedEnum<World::RigidBody3DComponent::MotionType>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "MotionType",
+            true,
+            4,
+            {
+                { "Static", static_cast<int64_t>(World::RigidBody3DComponent::MotionType::Static) },
+                { "Kinematic", static_cast<int64_t>(World::RigidBody3DComponent::MotionType::Kinematic) },
+                { "Dynamic", static_cast<int64_t>(World::RigidBody3DComponent::MotionType::Dynamic) },
+            },
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>
+{
+    static const EnumSchema& WeEnumSchema()
+    {
+        static const EnumSchema schema = {
+            "ColliderMode",
+            true,
+            4,
+            {
+                { "ConvexHull", static_cast<int64_t>(World::MeshCollider3DComponent::ColliderMode::ConvexHull) },
+                { "StaticTriangles", static_cast<int64_t>(World::MeshCollider3DComponent::ColliderMode::StaticTriangles) },
+            },
+        };
+        return schema;
+    }
+};
+
 const TypeSchema& WeSchemaOf_UUIDComponent() { return GeneratedAccess<World::UUIDComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
@@ -2194,16 +2835,25 @@ const TypeSchema& WeSchemaOf_LuaScriptComponent() { return GeneratedAccess<World
 const TypeSchema& WeSchemaOf_RigidBody2DComponent() { return GeneratedAccess<World::RigidBody2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BoxCollider2DComponent() { return GeneratedAccess<World::BoxCollider2DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleCollider2DComponent() { return GeneratedAccess<World::CircleCollider2DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_RigidBody3DComponent() { return GeneratedAccess<World::RigidBody3DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_BoxCollider3DComponent() { return GeneratedAccess<World::BoxCollider3DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_SphereCollider3DComponent() { return GeneratedAccess<World::SphereCollider3DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_CapsuleCollider3DComponent() { return GeneratedAccess<World::CapsuleCollider3DComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_MeshCollider3DComponent() { return GeneratedAccess<World::MeshCollider3DComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SceneCamera() { return GeneratedAccess<World::SceneCamera>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_BodyType() { return GeneratedEnum<World::RigidBody2DComponent::BodyType>::WeEnumSchema(); }
 const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::SceneCamera::ProjectionType>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_MotionType() { return GeneratedEnum<World::RigidBody3DComponent::MotionType>::WeEnumSchema(); }
+const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>::WeEnumSchema(); }
 
 	bool RegisterWorldSchemaModule(SchemaRegistry& registry)
 	{
 		bool ok = true;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_BodyType()) != SchemaRegistry::Status::Ok) ok = false;
 		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ProjectionType()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_MotionType()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ColliderMode()) != SchemaRegistry::Status::Ok) ok = false;
 		const std::vector<TypeSchema> schemas = {
 			WeSchemaOf_UUIDComponent(),
 			WeSchemaOf_TagComponent(),
@@ -2221,6 +2871,11 @@ const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::
 			WeSchemaOf_RigidBody2DComponent(),
 			WeSchemaOf_BoxCollider2DComponent(),
 			WeSchemaOf_CircleCollider2DComponent(),
+			WeSchemaOf_RigidBody3DComponent(),
+			WeSchemaOf_BoxCollider3DComponent(),
+			WeSchemaOf_SphereCollider3DComponent(),
+			WeSchemaOf_CapsuleCollider3DComponent(),
+			WeSchemaOf_MeshCollider3DComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_SceneCamera(),
 		};

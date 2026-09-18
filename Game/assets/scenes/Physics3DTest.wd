@@ -1,0 +1,89 @@
+FormatVersion: 2
+Scene: Physics3DTest
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 960000000000000001
+    World::TagComponent:
+      Tag: Camera3D
+    World::TransformComponent:
+      Location: [0, 3, 10]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::CameraComponent:
+      Camera:
+        m_ProjectionType: 0
+        m_OrthographicZoom: 1
+        m_OrthographicNearClip: -1
+        m_OrthographicFarClip: 1
+        m_PerspectiveFOV: 45
+        m_PerspectiveNearClip: 0.100000001
+        m_PerspectiveFarClip: 500
+      Primary: true
+      FixedAspectRatio: false
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 960000000000000002
+    World::TagComponent:
+      Tag: Sun (directional, casts shadow)
+    World::TransformComponent:
+      Location: [0, 6, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::DirectionalLightComponent:
+      Color: [1, 0.970000029, 0.899999976]
+      Intensity: 1.20000005
+      Direction: [-0.400000006, -0.800000012, -0.449999988]
+      CastShadow: true
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 960000000000000003
+    World::TagComponent:
+      Tag: Floor (static 3D box)
+    World::TransformComponent:
+      Location: [0, -0.5, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::MeshRendererComponent:
+      Primitive: cube
+      Color: [0.300000012, 0.330000013, 0.379999995, 1]
+      MeshPath: ""
+      MaterialPath: ""
+      MeshIndex: 0
+    World::RigidBody3DComponent:
+      Type: 0
+      Mass: 1
+      LinearDamping: 0
+      AngularDamping: 0
+      Friction: 0.5
+      Restitution: 0
+      UseGravity: true
+    World::BoxCollider3DComponent:
+      HalfExtents: [12, 0.5, 12]
+      Offset: [0, 0, 0]
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 960000000000000004
+    World::TagComponent:
+      Tag: Floating Box (dynamic 3D box)
+    World::TransformComponent:
+      Location: [0, 4, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::MeshRendererComponent:
+      Primitive: cube
+      Color: [0.850000024, 0.550000012, 0.25, 1]
+      MeshPath: ""
+      MaterialPath: ""
+      MeshIndex: 0
+    World::RigidBody3DComponent:
+      Type: 2
+      Mass: 1
+      LinearDamping: 0
+      AngularDamping: 0
+      Friction: 0.5
+      Restitution: 0.1
+      UseGravity: true
+    World::BoxCollider3DComponent:
+      HalfExtents: [0.5, 0.5, 0.5]
+      Offset: [0, 0, 0]

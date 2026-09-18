@@ -4,6 +4,7 @@
 #include "World/WUI/WuiGizmo.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiAccessibility.h"
+#include "World/Physics/Physics3D.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
 namespace World
@@ -515,6 +516,44 @@ namespace World
 		}
 
 		// ---- 相机预览小窗(PiP):直接显示"场景相机看到的东西" ----
+		if (std::getenv("WLD_PHYSICS_DEBUG"))
+		{
+			// P1b D6:3D 物理调试线框(碰撞体世界空间线段,复用视锥那套投影/裁剪)。
+			// 只在世界已启动(Play/Simulate)时存在;缓冲按帧复用,避免每帧分配。
+			const Ref<Scene> physicsScene = m_Host.GetActiveScene();
+			if (physicsScene && physicsScene->IsPhysics3DRunning())
+			{
+				static std::vector<DebugLine> physicsLines;
+				physicsLines.clear();
+				physicsScene->GetPhysics3DWorld()->CollectDebugLines(physicsLines);
+				if (!physicsLines.empty())
+				{
+					const Wui::GizmoCamera debugCamera = m_Host.GetGizmoCamera();
+					const Wui::WuiColor physicsColor { 0.20f, 0.90f, 0.40f, 0.90f };
+					ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sceneRect, {} });
+					for (const DebugLine& line : physicsLines)
+					{
+						PushProjectedSegment(ctx, debugCamera.ViewProjection, sceneRect,
+							debugCamera.ViewProjection * glm::vec4 { line.Begin, 1.0f },
+							debugCamera.ViewProjection * glm::vec4 { line.End, 1.0f },
+							physicsColor, 1.4f);
+					}
+					ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
+					if (std::getenv("WLD_TRACE_UI"))
+					{
+						static uint64_t lastPhysicsLog = ~0ull;
+						const uint64_t stamp = ctx.Frame() / 120;
+						if (stamp != lastPhysicsLog)
+						{
+							lastPhysicsLog = stamp;
+							WLD_CORE_INFO("[ui] physics debug lines={0} viewport=({1},{2},{3},{4})",
+								physicsLines.size(), sceneRect.X, sceneRect.Y, sceneRect.W, sceneRect.H);
+						}
+					}
+				}
+			}
+		}
+
 		if (previewVisible)
 		{
 			const uint64_t previewTexture = m_Host.GetCameraPreviewTextureId();

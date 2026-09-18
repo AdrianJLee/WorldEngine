@@ -537,11 +537,22 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Offset vec2
 ---@field Restitution number
 
+-- Component fields are exposed through Entity:GetComponent("BoxCollider3DComponent"); there is no runtime global named BoxCollider3DComponent.
+---@class BoxCollider3DComponent
+---@field HalfExtents vec3
+---@field Offset vec3
+
 -- Component fields are exposed through Entity:GetComponent("CameraComponent"); there is no runtime global named CameraComponent.
 ---@class CameraComponent
 ---@field Camera unknown no script mapping for schema kind 'Object'
 ---@field FixedAspectRatio boolean
 ---@field Primary boolean
+
+-- Component fields are exposed through Entity:GetComponent("CapsuleCollider3DComponent"); there is no runtime global named CapsuleCollider3DComponent.
+---@class CapsuleCollider3DComponent
+---@field HalfHeight number
+---@field Offset vec3
+---@field Radius number
 
 -- Component fields are exposed through Entity:GetComponent("CircleCollider2DComponent"); there is no runtime global named CircleCollider2DComponent.
 ---@class CircleCollider2DComponent
@@ -574,6 +585,11 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@class LuaScriptComponent
 ---@field ScriptFilePath string
 
+-- Component fields are exposed through Entity:GetComponent("MeshCollider3DComponent"); there is no runtime global named MeshCollider3DComponent.
+---@class MeshCollider3DComponent
+---@field Mode number
+---@field MeshPath string
+
 -- Component fields are exposed through Entity:GetComponent("MeshRendererComponent"); there is no runtime global named MeshRendererComponent.
 ---@class MeshRendererComponent
 ---@field MaterialPath string
@@ -597,6 +613,16 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field FixedRotation boolean
 ---@field Type number
 
+-- Component fields are exposed through Entity:GetComponent("RigidBody3DComponent"); there is no runtime global named RigidBody3DComponent.
+---@class RigidBody3DComponent
+---@field AngularDamping number
+---@field Friction number
+---@field UseGravity boolean
+---@field LinearDamping number
+---@field Mass number
+---@field Restitution number
+---@field Type number
+
 -- Component fields are exposed through Entity:GetComponent("SampleDataComponent"); there is no runtime global named SampleDataComponent.
 ---@class SampleDataComponent
 ---@field Count number
@@ -607,6 +633,11 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Enabled boolean
 ---@field Speed number
 ---@field DisplayName string read-only
+
+-- Component fields are exposed through Entity:GetComponent("SphereCollider3DComponent"); there is no runtime global named SphereCollider3DComponent.
+---@class SphereCollider3DComponent
+---@field Offset vec3
+---@field Radius number
 
 -- Component fields are exposed through Entity:GetComponent("SpriteComponent"); there is no runtime global named SpriteComponent.
 ---@class SpriteComponent

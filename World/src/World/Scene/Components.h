@@ -423,6 +423,105 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	// P1b D6:3D 物理(Jolt)组件。字段 id 全部显式钉住("RB3D…"/"…3D…" ASCII):
+	// 组件一旦写进 .wd 存档就不能再改 id,否则旧场景迁移语义会漂移,--check 门禁也要求
+	// 生成物与注解逐字节一致。
+	struct RigidBody3DComponent
+	{
+		// 枚举名必须模块内唯一(schema-compiler 的 WE_ENUM_SCHEMA 只接受单个标识符,
+		// 不能写成 RigidBody3DComponent::BodyType);2D 已经占用了 BodyType。
+		enum class MotionType
+		{
+			Static = 0, Kinematic, Dynamic
+		};
+		WE_ENUM_SCHEMA(World, MotionType, Int32)
+			WE_ENUM_VALUE(Static);
+			WE_ENUM_VALUE(Kinematic);
+			WE_ENUM_VALUE(Dynamic);
+		WE_ENUM_END
+
+		// 默认 Static(与 RigidBody2DComponent 同口径:挂上不会自己掉下去)。
+		MotionType Type = MotionType::Static;
+		// Dynamic 刚体的质量(由形状质量属性折算惯量);Static/Kinematic 忽略。
+		float Mass = 1.0f;
+		float LinearDamping = 0.0f;
+		float AngularDamping = 0.0f;
+		float Friction = 0.5f;
+		float Restitution = 0.2f;
+		bool UseGravity = true;
+
+		WE_SCHEMA_BODY(World, RigidBody3DComponent, Component)
+			WE_FIELD(Type, Enum, Id(0x5242334454595045), Of(MotionType));
+			WE_FIELD(Mass, Float, Id(0x524233444D415353), Range(0.0f, 100000.0f));
+			WE_FIELD(LinearDamping, Float, Id(0x524233444C4E4450), Range(0.0f, 100.0f));
+			WE_FIELD(AngularDamping, Float, Id(0x52423344414E4744), Range(0.0f, 100.0f));
+			WE_FIELD(Friction, Float, Id(0x5242334446524943), Range(0.0f, 1.0f));
+			WE_FIELD(Restitution, Float, Id(0x5242334452455354), Range(0.0f, 1.0f));
+			WE_FIELD(UseGravity, Bool, Id(0x5242334447525654));
+		WE_SCHEMA_END
+	};
+
+	// 盒体碰撞:HalfExtents 是**局部半尺寸**,随 TransformComponent.Scale 缩放;Offset 是局部偏移(不缩放)。
+	struct BoxCollider3DComponent
+	{
+		glm::vec3 HalfExtents { 0.5f, 0.5f, 0.5f };
+		glm::vec3 Offset { 0.0f, 0.0f, 0.0f };
+
+		WE_SCHEMA_BODY(World, BoxCollider3DComponent, Component)
+			WE_FIELD(HalfExtents, Vec3, Id(0x42334448414C4658));
+			WE_FIELD(Offset, Vec3, Id(0x4233444F46465354));
+		WE_SCHEMA_END
+	};
+
+	struct SphereCollider3DComponent
+	{
+		float Radius = 0.5f;
+		glm::vec3 Offset { 0.0f, 0.0f, 0.0f };
+
+		WE_SCHEMA_BODY(World, SphereCollider3DComponent, Component)
+			WE_FIELD(Radius, Float, Id(0x5333445241444955), Range(0.0f, 100000.0f));
+			WE_FIELD(Offset, Vec3, Id(0x5333444F46465354));
+		WE_SCHEMA_END
+	};
+
+	// 胶囊:轴沿实体的局部 Y 轴(与 Jolt CapsuleShape 的约定一致),HalfHeight 是圆柱段半高(不含两端半球)。
+	struct CapsuleCollider3DComponent
+	{
+		float Radius = 0.5f;
+		float HalfHeight = 0.5f;
+		glm::vec3 Offset { 0.0f, 0.0f, 0.0f };
+
+		WE_SCHEMA_BODY(World, CapsuleCollider3DComponent, Component)
+			WE_FIELD(Radius, Float, Id(0x4333445241444955), Range(0.0f, 100000.0f));
+			WE_FIELD(HalfHeight, Float, Id(0x43334448414C4648), Range(0.0f, 100000.0f));
+			WE_FIELD(Offset, Vec3, Id(0x4333444F46465354));
+		WE_SCHEMA_END
+	};
+
+	// 网格碰撞:MeshPath 空 = 用同实体 MeshRendererComponent.MeshPath(相对内容根的 .wmodel 路径);
+	// ConvexHull 可挂 Static/Kinematic/Dynamic,StaticTriangles 只允许 Static 刚体(运行时拒绝)。
+	struct MeshCollider3DComponent
+	{
+		// 枚举名不能叫 Mode:字段也叫 Mode,同名成员变量会遮蔽嵌套类型名
+		// (生成代码里的 static_cast<MeshCollider3DComponent::Mode> 会解析成非静态成员)。
+		enum class ColliderMode
+		{
+			ConvexHull = 0, StaticTriangles
+		};
+		WE_ENUM_SCHEMA(World, ColliderMode, Int32)
+			WE_ENUM_VALUE(ConvexHull);
+			WE_ENUM_VALUE(StaticTriangles);
+		WE_ENUM_END
+
+		ColliderMode Mode = ColliderMode::ConvexHull;
+		std::string MeshPath;
+
+		WE_SCHEMA_BODY(World, MeshCollider3DComponent, Component)
+			WE_FIELD(Mode, Enum, Id(0x4D33444D4F444530), Of(ColliderMode));
+			WE_FIELD(MeshPath, String, Id(0x4D33445041544830));
+		WE_SCHEMA_END
+	};
+
 	// 组件配置克隆特化(剔除运行态)。
 	NativeScriptComponent CloneComponentConfiguration(const NativeScriptComponent& source);
 	LuaScriptComponent CloneComponentConfiguration(const LuaScriptComponent& source);

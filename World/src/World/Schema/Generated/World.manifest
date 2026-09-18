@@ -14,7 +14,14 @@ struct World::LuaScriptComponent
 struct World::RigidBody2DComponent
 struct World::BoxCollider2DComponent
 struct World::CircleCollider2DComponent
+struct World::RigidBody3DComponent
+struct World::BoxCollider3DComponent
+struct World::SphereCollider3DComponent
+struct World::CapsuleCollider3DComponent
+struct World::MeshCollider3DComponent
 struct World::UUID
 struct World::SceneCamera
 enum World::RigidBody2DComponent::BodyType
 enum World::SceneCamera::ProjectionType
+enum World::RigidBody3DComponent::MotionType
+enum World::MeshCollider3DComponent::ColliderMode

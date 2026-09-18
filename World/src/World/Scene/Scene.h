@@ -6,6 +6,8 @@
 #include <box2d/id.h>
 #include <entt.hpp>
 #include <functional>
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <memory>
 #include <string>
 #include <thread>
@@ -16,6 +18,7 @@
 namespace World
 {
 	class Entity;
+	class Physics3DWorld;
 	namespace Gameplay { class SystemRegistry; }
 	namespace Gameplay { class SaveService; }   // P2a W8:存档服务需要只读遍历 registry
 	enum class SceneState { Stopped, Starting, Running, Stopping };
@@ -92,6 +95,21 @@ namespace World
 		// 运行时建刚体:AddComponent 的 schema 存储绑定只写入组件数据,Box2D 刚体由这里补建
 		// (与 OnPhysics2DStart 同一套形状/质量创建逻辑);世界未启动 → 只保留组件配置。
 		void EnsurePhysicsBody(entt::entity entity);
+		// ---- P1b D6:3D 物理(Jolt)运行时接口 ----
+		// 与 2D 相同的生命周期:世界只在 OnRuntimeStart/OnSimulationStart → OnRuntimeStop 之间存在。
+		// 同一实体同时挂 2D 与 3D 物理组件 → OnRuntimeStart 抛可读 std::logic_error(整场景拒绝启动,
+		// 校验发生在创建任何物理世界之前;编辑器 Play 会捕获并写日志)。
+		bool IsPhysics3DRunning() const { return m_Physics3D != nullptr; }
+		// 未启动时返回 nullptr;编辑器调试绘制(WLD_PHYSICS_DEBUG)从这里取世界。
+		Physics3DWorld* GetPhysics3DWorld() { return m_Physics3D.get(); }
+		const Physics3DWorld* GetPhysics3DWorld() const { return m_Physics3D.get(); }
+		// 3D 接触事件的引擎侧钩子(脚本面 events:emit 接线留后续);回调里不得增删钩子表。
+		void AddPhysics3DContactCallback(std::function<void(bool added, entt::entity entityA, entt::entity entityB)> callback);
+		void ClearPhysics3DContactCallbacks();
+		// Physics3DWorld::SyncTransforms 的写口:只在位姿变化时写 TransformComponent
+		// (避免每帧标脏/打断层级);Static 由调用方过滤;PendingDestroy/PendingRemoval 跳过。
+		// 返回是否真的写了。
+		bool SyncPhysics3DTransform(entt::entity entity, const glm::vec3& location, const glm::quat& rotation);
 		// ---- W3d:脚本回调内的白名单同步结构写 ----
 		// 只建实体槽并挂 Tag+UUID(不挂 Transform),返回的句柄当帧有效。
 		// 与 Entity::CreateEntity 的差别:回调内绕过 AssertStructuralWrite 的回调深度检查,
@@ -191,6 +209,9 @@ namespace World
 		void OnUpdatePhysics2D(Timestep ts);
 		void OnPhysics2DStop();
 		void DestroyPhysicsBody(entt::entity entity);
+		void OnPhysics3DStart();
+		void OnUpdatePhysics3D(Timestep ts);
+		void OnPhysics3DStop();
 
 		// W5-3:帧系统调度统一交给 Gameplay::SystemRegistry(阶段/依赖/并行/耗时),
 		// 用 pimpl 避免核心层头文件依赖 Gameplay 实现细节。
@@ -216,6 +237,9 @@ namespace World
 		std::unordered_map<entt::entity, std::unordered_set<entt::id_type>> m_PendingRemove;
 		uint32_t m_ViewportWidth = 0, m_ViewportHeight = 0;
 		b2WorldId m_PhysicsWorldId = b2_nullWorldId;
+		// P1b D6:opaque 3D 物理世界(Physics3D.h 不暴露 Jolt;unique_ptr 的删除由 Scene.cpp 承担)。
+		std::unique_ptr<Physics3DWorld> m_Physics3D;
+		std::vector<std::function<void(bool added, entt::entity entityA, entt::entity entityB)>> m_Physics3DContactCallbacks;
 		// 上次反序列化时未能识别的组件节点（按实体 UUID 保存原始 YAML 片段），供保存时回写，避免缺插件静默丢数据。
 		std::unordered_map<UUID, std::string> m_UnknownComponentNodes;
 	};

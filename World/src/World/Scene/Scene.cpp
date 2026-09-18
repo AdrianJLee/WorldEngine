@@ -4,8 +4,10 @@
 #include "World/Scene/ScriptEngine.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Gameplay/SystemRegistry.h"
+#include "World/Physics/Physics3D.h"
 #include <box2d/box2d.h>
 #include <chrono>
+#include <cmath>
 #include <stdexcept>
 
 namespace World
@@ -584,6 +586,7 @@ namespace World
 			DestroyNativeScript(entity);
 			DestroyLuaScript(entity);
 			DestroyPhysicsBody(entity);
+			if (m_Physics3D) m_Physics3D->DestroyBody(entity);
 			m_Registry.destroy(entity);
 		}
 		m_PendingDestroy.erase(entity);
@@ -601,6 +604,7 @@ namespace World
 				if (component == entt::type_id<NativeScriptComponent>().hash()) DestroyNativeScript(entity);
 				else if (component == entt::type_id<LuaScriptComponent>().hash()) DestroyLuaScript(entity);
 				else if (component == entt::type_id<RigidBody2DComponent>().hash()) DestroyPhysicsBody(entity);
+				else if (component == entt::type_id<RigidBody3DComponent>().hash()) { if (m_Physics3D) m_Physics3D->DestroyBody(entity); }
 				if (auto* storage = m_Registry.storage(component)) storage->remove(entity);
 			}
 			else if (!reason.empty()) Report("[Scene] RemoveComponent: " + reason);
@@ -639,7 +643,16 @@ namespace World
 	{
 		AssertOwnerThread();
 		if (IsActive()) return;
+		// P1b D6:2D/3D 物理同实体互斥 —— 在创建任何物理世界之前校验;失败时场景保持 Stopped
+		// 并抛出可读错误(编辑器 Play 捕获后回 Edit,日志里能看到原因)。
+		std::string physicsError;
+		if (!Physics3DWorld::ValidateScene(*this, &physicsError))
+		{
+			Report("[Physics3D] " + physicsError);
+			throw std::logic_error(physicsError);
+		}
 		OnPhysics2DStart();
+		OnPhysics3DStart();
 		OnScriptStart();
 	}
 	void Scene::OnSimulationStart() { OnRuntimeStart(); }
@@ -686,6 +699,8 @@ namespace World
 		StartPendingScripts();
 		if (m_StopRequested) { StopScene(); return; }
 		OnUpdatePhysics2D(ts);
+		// P1b D6:3D 物理与 2D 走同一条固定步路径(同一个 OnScriptUpdate 调用点,紧邻 2D 那一段)。
+		OnUpdatePhysics3D(ts);
 		// W3d:回调内同步创建的新实体本帧对其它脚本的 FindByName 不可见,
 		// 快照在开始执行 OnUpdate 前冻结,下一帧重新收集。
 		// 没有 Lua 更新实例时不建快照(native-only 场景保持原开销)。
@@ -764,6 +779,7 @@ namespace World
 		for (const auto entity : Snapshot<NativeScriptComponent>(m_Registry)) DestroyNativeScript(entity);
 		for (const auto entity : Snapshot<LuaScriptComponent>(m_Registry)) DestroyLuaScript(entity);
 		OnPhysics2DStop();
+		OnPhysics3DStop();
 		// Destruction callbacks may request further idempotent deletes/removals, but no general work.
 		while (!m_PendingDestroy.empty() || !m_PendingRemove.empty())
 		{
@@ -880,5 +896,72 @@ namespace World
 		m_PhysicsWorldId = b2_nullWorldId;
 		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
 			m_Registry.get<RigidBody2DComponent>(entity).RuntimeBodyId = b2_nullBodyId;
+	}
+
+	// ---- P1b D6:3D 物理(Jolt) ----
+	void Scene::AddPhysics3DContactCallback(std::function<void(bool added, entt::entity entityA, entt::entity entityB)> callback)
+	{
+		AssertOwnerThread();
+		if (!callback) throw std::invalid_argument("Physics3D contact callback must be callable");
+		m_Physics3DContactCallbacks.push_back(std::move(callback));
+	}
+
+	void Scene::ClearPhysics3DContactCallbacks()
+	{
+		AssertOwnerThread();
+		m_Physics3DContactCallbacks.clear();
+	}
+
+	bool Scene::SyncPhysics3DTransform(entt::entity entity, const glm::vec3& location, const glm::quat& rotation)
+	{
+		AssertOwnerThread();
+		if (!m_Registry.valid(entity)) return false;
+		if (IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<RigidBody3DComponent>().hash())) return false;
+		auto* transform = m_Registry.try_get<TransformComponent>(entity);
+		if (!transform) return false;
+		// 位姿变化才写:位置用绝对容差、旋转用四元数点积(避免浮点噪声导致每帧重算 Transform 矩阵、
+		// 打断层级/标脏)。
+		const bool locationChanged = glm::distance(transform->Location, location) > 1e-4f;
+		const bool rotationChanged = std::fabs(glm::dot(transform->RotationQuat, rotation)) < 1.0f - 1e-4f;
+		if (!locationChanged && !rotationChanged) return false;
+		transform->Location = location;
+		transform->RotationQuat = rotation;
+		transform->Rotation = glm::eulerAngles(rotation);
+		transform->RecalculateTransform();
+		return true;
+	}
+
+	void Scene::OnPhysics3DStart()
+	{
+		if (m_Physics3D) return;
+		auto world = std::make_unique<Physics3DWorld>();
+		// 引擎侧钩子表:物理步进里的回调只做转发,钩子抛异常不能带走物理步进。
+		world->SetContactCallback([this](bool added, entt::entity entityA, entt::entity entityB)
+		{
+			for (std::size_t index = 0; index < m_Physics3DContactCallbacks.size(); ++index)
+			{
+				const auto& hook = m_Physics3DContactCallbacks[index];
+				if (!hook) continue;
+				try { hook(added, entityA, entityB); }
+				catch (const std::exception& error) { Report(std::string("[Physics3D] contact hook failed: ") + error.what()); }
+				catch (...) { Report("[Physics3D] contact hook failed: unknown exception"); }
+			}
+		});
+		world->Start(*this);
+		m_Physics3D = std::move(world);
+	}
+
+	void Scene::OnUpdatePhysics3D(Timestep ts)
+	{
+		if (!m_Physics3D) return;
+		m_Physics3D->Step(ts.GetSeconds());
+		m_Physics3D->SyncTransforms();
+	}
+
+	void Scene::OnPhysics3DStop()
+	{
+		if (!m_Physics3D) return;
+		m_Physics3D->Stop();
+		m_Physics3D.reset();
 	}
 }

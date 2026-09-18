@@ -19,3 +19,6 @@
 [submodule "World/vendor/luau"]
 	path = World/vendor/luau
 	url = https://github.com/luau-lang/luau.git
+[submodule "World/vendor/Jolt"]
+	path = World/vendor/Jolt
+	url = https://github.com/jrouwe/JoltPhysics.git
