@@ -177,6 +177,31 @@ int main()
 			CHECK(FindSuggest(HashId("test.suggest.1")) != nullptr);
 			const WuiAccessNode* status = FindSuggest(HashId("test.suggest.status"));
 			CHECK(status != nullptr);
+			// 浮层必须真的发出绘制命令(用户实测:节点有、画面无;这条断言防止再次回归)。
+			bool popupBackgroundDrawn = false;
+			int popupIndex = -1;
+			int editorBodyIndex = -1;
+			int commandIndex = 0;
+			for (const WuiDrawCommand& command : ctx.Commands())
+			{
+				if (command.Kind == WuiDrawKind::Rect
+					&& std::fabs(command.Rect.X - status->Rect.X) < 0.5f
+					&& std::fabs(command.Rect.W - status->Rect.W) < 0.5f
+					&& std::fabs(command.Rect.H - status->Rect.H) < 0.5f)
+				{
+					popupBackgroundDrawn = true;
+					popupIndex = commandIndex;
+				}
+				// 编辑区主体背景:与 editorRect 同尺寸的实心矩形。
+				if (command.Kind == WuiDrawKind::Rect
+					&& std::fabs(command.Rect.X - editorRect.X) < 0.5f
+					&& std::fabs(command.Rect.W - editorRect.W) < 0.5f
+					&& std::fabs(command.Rect.H - editorRect.H) < 0.5f)
+					editorBodyIndex = commandIndex;
+				++commandIndex;
+			}
+			CHECK(popupBackgroundDrawn);
+			CHECK(editorBodyIndex >= 0 && popupIndex > editorBodyIndex);   // 顺序 = 绘制顺序:浮层必须在正文之后
 			CHECK(status->Value.find("2 items") != std::string::npos);
 			CHECK(status->Value.find("panel") != std::string::npos);
 			const WuiAccessNode* first = FindSuggest(HashId("test.suggest.0"));

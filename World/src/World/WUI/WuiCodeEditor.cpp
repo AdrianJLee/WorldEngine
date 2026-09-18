@@ -768,66 +768,8 @@ namespace World::Wui
 				}
 				if (state.PopupVisible)
 				{
-					// 面板 + 行(名称左、类型右 muted、选中行高亮、底部一行 Doc)。
-					ctx.Commands().push_back({ WuiDrawKind::Rect, state.PopupBounds, kSuggestBackground, 4.0f });
-					ctx.Commands().push_back({ WuiDrawKind::RectOutline, state.PopupBounds, kSuggestBorder, 4.0f, 1.0f });
-					for (int row = 0; row < rows; ++row)
-					{
-						const int itemIndex = state.PopupScroll + row;
-						if (itemIndex >= itemCount)
-							break;
-						const World::LuauCompletionItem& item =
-							state.PopupItems[static_cast<std::size_t>(itemIndex)];
-						const WuiRect rowRect { state.PopupBounds.X + 3.0f,
-							firstRowY + static_cast<float>(row) * kSuggestRowHeight,
-							state.PopupBounds.W - 6.0f, kSuggestRowHeight };
-						if (itemIndex == state.PopupSelected)
-							ctx.Commands().push_back({ WuiDrawKind::Rect, rowRect, kSuggestSelected, 3.0f });
-						const float textY = rowRect.Y + (kSuggestRowHeight - kSuggestFontSize) * 0.5f;
-						{
-							WuiDrawCommand nameCommand;
-							nameCommand.Kind = WuiDrawKind::Text;
-							nameCommand.Rect = { rowRect.X + 8.0f, textY, 0.0f, 0.0f };
-							nameCommand.Color = kSuggestName;
-							nameCommand.Text = TruncateBytes(item.Name, 34);
-							nameCommand.FontSize = kSuggestFontSize;
-							nameCommand.Family = WuiFontFamily::Monospace;
-							ctx.Commands().push_back(std::move(nameCommand));
-						}
-						if (!item.Type.empty())
-						{
-							const float typeWidth = ctx.MeasureTextWidth(item.Type, kSuggestFontSize,
-								WuiFontFamily::Monospace);
-							WuiDrawCommand typeCommand;
-							typeCommand.Kind = WuiDrawKind::Text;
-							typeCommand.Rect = { rowRect.X + rowRect.W - 8.0f - typeWidth, textY, 0.0f, 0.0f };
-							typeCommand.Color = kSuggestType;
-							typeCommand.Text = TruncateBytes(item.Type, 24);
-							typeCommand.FontSize = kSuggestFontSize;
-							typeCommand.Family = WuiFontFamily::Monospace;
-							ctx.Commands().push_back(std::move(typeCommand));
-						}
-					}
-					if (showDoc)
-					{
-						const World::LuauCompletionItem& item =
-							state.PopupItems[static_cast<std::size_t>(state.PopupSelected)];
-						ctx.Commands().push_back({ WuiDrawKind::Rect,
-							{ state.PopupBounds.X + 1.0f,
-								state.PopupBounds.Y + state.PopupBounds.H - 25.0f,
-								state.PopupBounds.W - 2.0f, 24.0f },
-							{ 0.10f, 0.11f, 0.12f, 0.98f }, 0.0f });
-						WuiDrawCommand docCommand;
-						docCommand.Kind = WuiDrawKind::Text;
-						docCommand.Rect = { state.PopupBounds.X + 8.0f,
-							state.PopupBounds.Y + state.PopupBounds.H - 21.0f, 0.0f, 0.0f };
-						docCommand.Color = kSuggestDoc;
-						docCommand.Text = TruncateBytes(item.Doc, 60);
-						docCommand.FontSize = kSuggestDocFontSize;
-						docCommand.Family = WuiFontFamily::Ui;
-						ctx.Commands().push_back(std::move(docCommand));
-					}
-
+					// 绘制放在编辑区主体之后(函数末尾):否则会被正文背景/文本盖住
+					// (用户实测:能 Tab 补全但看不到候选列表)。
 					// 无障碍:仅浮层可见期间登记 <前缀>.<i>(Interactive,点击=接受)
 					// 与 <前缀>.status(只读)。
 					WuiAccessibility& accessibility = WuiAccessibility::Get();
@@ -1020,6 +962,74 @@ namespace World::Wui
 			ctx.Commands().push_back({ WuiDrawKind::Rect, track, kScrollbarTrack, 0.0f });
 			ctx.Commands().push_back({ WuiDrawKind::Rect,
 				{ track.X + 2.0f, thumbY, track.W - 4.0f, thumbHeight }, kScrollbarThumb, 2.0f });
+		}
+
+		// ---- W9.5 补全浮层绘制:必须在编辑区主体之后(顺序 = 绘制顺序,先画会被正文盖掉) ----
+		if (state.PopupVisible && !state.PopupItems.empty())
+		{
+			const int itemCount = static_cast<int>(state.PopupItems.size());
+			const int rows = std::min(itemCount, kSuggestMaxRows);
+			const bool showDoc = state.PopupSelected >= 0 && state.PopupSelected < itemCount
+				&& !state.PopupItems[static_cast<std::size_t>(state.PopupSelected)].Doc.empty();
+			const float firstRowY = state.PopupBounds.Y + 3.0f;
+			ctx.Commands().push_back({ WuiDrawKind::Rect, state.PopupBounds, kSuggestBackground, 4.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, state.PopupBounds, kSuggestBorder, 4.0f, 1.0f });
+			for (int row = 0; row < rows; ++row)
+			{
+				const int itemIndex = state.PopupScroll + row;
+				if (itemIndex >= itemCount)
+					break;
+				const World::LuauCompletionItem& item =
+					state.PopupItems[static_cast<std::size_t>(itemIndex)];
+				const WuiRect rowRect { state.PopupBounds.X + 3.0f,
+					firstRowY + static_cast<float>(row) * kSuggestRowHeight,
+					state.PopupBounds.W - 6.0f, kSuggestRowHeight };
+				if (itemIndex == state.PopupSelected)
+					ctx.Commands().push_back({ WuiDrawKind::Rect, rowRect, kSuggestSelected, 3.0f });
+				const float textY = rowRect.Y + (kSuggestRowHeight - kSuggestFontSize) * 0.5f;
+				{
+					WuiDrawCommand nameCommand;
+					nameCommand.Kind = WuiDrawKind::Text;
+					nameCommand.Rect = { rowRect.X + 8.0f, textY, 0.0f, 0.0f };
+					nameCommand.Color = kSuggestName;
+					nameCommand.Text = TruncateBytes(item.Name, 34);
+					nameCommand.FontSize = kSuggestFontSize;
+					nameCommand.Family = WuiFontFamily::Monospace;
+					ctx.Commands().push_back(std::move(nameCommand));
+				}
+				if (!item.Type.empty())
+				{
+					const float typeWidth = ctx.MeasureTextWidth(item.Type, kSuggestFontSize,
+						WuiFontFamily::Monospace);
+					WuiDrawCommand typeCommand;
+					typeCommand.Kind = WuiDrawKind::Text;
+					typeCommand.Rect = { rowRect.X + rowRect.W - 8.0f - typeWidth, textY, 0.0f, 0.0f };
+					typeCommand.Color = kSuggestType;
+					typeCommand.Text = TruncateBytes(item.Type, 24);
+					typeCommand.FontSize = kSuggestFontSize;
+					typeCommand.Family = WuiFontFamily::Monospace;
+					ctx.Commands().push_back(std::move(typeCommand));
+				}
+			}
+			if (showDoc)
+			{
+				const World::LuauCompletionItem& item =
+					state.PopupItems[static_cast<std::size_t>(state.PopupSelected)];
+				ctx.Commands().push_back({ WuiDrawKind::Rect,
+					{ state.PopupBounds.X + 1.0f,
+						state.PopupBounds.Y + state.PopupBounds.H - 25.0f,
+						state.PopupBounds.W - 2.0f, 24.0f },
+					{ 0.10f, 0.11f, 0.12f, 0.98f }, 0.0f });
+				WuiDrawCommand docCommand;
+				docCommand.Kind = WuiDrawKind::Text;
+				docCommand.Rect = { state.PopupBounds.X + 8.0f,
+					state.PopupBounds.Y + state.PopupBounds.H - 21.0f, 0.0f, 0.0f };
+				docCommand.Color = kSuggestDoc;
+				docCommand.Text = TruncateBytes(item.Doc, 60);
+				docCommand.FontSize = kSuggestDocFontSize;
+				docCommand.Family = WuiFontFamily::Ui;
+				ctx.Commands().push_back(std::move(docCommand));
+			}
 		}
 
 		result.Changed = buffer.Revision() != revisionAtStart;
