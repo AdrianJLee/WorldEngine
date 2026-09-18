@@ -3,6 +3,7 @@
 
 #include "World/Core/Memory/MemoryTracker.h"
 #include "World/Renderer/Renderer2D.h"
+#include "World/Renderer/Renderer3D.h"
 #include "World/WUI/WuiWidget.h"
 
 namespace World
@@ -43,7 +44,7 @@ namespace World
 		{
 			m_Root = std::make_shared<Wui::WuiBox>();
 			m_Root->Gap = 2;
-			for (int i = 0; i < 7; ++i)
+			for (int i = 0; i < 10; ++i)
 			{
 				auto label = std::make_shared<Wui::WuiLabel>();
 				label->FontSize = 14;
@@ -61,6 +62,16 @@ namespace World
 		m_Lines[4]->Text = "Circles: " + std::to_string(stats.CircleCount);
 		m_Lines[5]->Text = "Vertices: " + std::to_string(stats.GetTotalVertexCount());
 		m_Lines[6]->Text = "Indices: " + std::to_string(stats.GetTotalIndexCount());
+
+		// P1b D4:光照数量上限与阴影耗时可见(验收条款)。
+		const auto& stats3d = Renderer3D::GetStats();
+		m_Lines[7]->Text = "Renderer3D Stats:";
+		m_Lines[7]->Color = { 0.55f, 0.58f, 0.62f, 1 };
+		m_Lines[8]->Text = "Lights: " + std::to_string(stats3d.Lights) + "/" + std::to_string(stats3d.MaxLights)
+			+ (stats3d.DroppedLights ? " (+" + std::to_string(stats3d.DroppedLights) + " dropped)" : "");
+		char shadowText[64] = {};
+		std::snprintf(shadowText, sizeof(shadowText), "Shadow pass: %.2f ms", stats3d.ShadowPassMilliseconds);
+		m_Lines[9]->Text = shadowText;
 
 		Wui::LayoutWidgetTree(m_Root, { rect.X + 8, rect.Y + 8, rect.W - 16, rect.H - 16 });
 		Wui::WuiPaintContext paint(ctx);

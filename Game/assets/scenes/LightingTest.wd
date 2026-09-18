@@ -1,0 +1,114 @@
+FormatVersion: 2
+Scene: LightingTest
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 940000000000000001
+    World::TagComponent:
+      Tag: Camera3D
+    World::TransformComponent:
+      Location: [0, 1.5, 8]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::CameraComponent:
+      Camera:
+        m_ProjectionType: 0
+        m_OrthographicZoom: 1
+        m_OrthographicNearClip: -1
+        m_OrthographicFarClip: 1
+        m_PerspectiveFOV: 45
+        m_PerspectiveNearClip: 0.100000001
+        m_PerspectiveFarClip: 200
+      Primary: true
+      FixedAspectRatio: false
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 940000000000000002
+    World::TagComponent:
+      Tag: Floor
+    World::TransformComponent:
+      Location: [0, -2.5, 0]
+      Rotation: [0, 0, 0]
+      Scale: [24, 1, 24]
+    World::MeshRendererComponent:
+      Primitive: plane
+      Color: [0.300000012, 0.330000013, 0.379999995, 1]
+      MeshPath: ""
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 940000000000000003
+    World::TagComponent:
+      Tag: Shadow Wall
+    World::TransformComponent:
+      Location: [0, 0.5, -3.5]
+      Rotation: [0, 0, 0]
+      Scale: [12, 7, 1]
+    World::MeshRendererComponent:
+      Primitive: plane
+      Color: [0.550000012, 0.569999993, 0.620000005, 1]
+      MeshPath: ""
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 940000000000000004
+    World::TagComponent:
+      Tag: Shadow Caster
+    World::TransformComponent:
+      Location: [0, -1, 0.5]
+      Rotation: [0, 18, 0]
+      Scale: [3, 3, 3]
+    World::MeshRendererComponent:
+      Primitive: cube
+      Color: [0.850000024, 0.550000012, 0.25, 1]
+      MeshPath: ""
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 940000000000000005
+    World::TagComponent:
+      Tag: Point Lit Cube
+    World::TransformComponent:
+      Location: [2.79999995, -1.70000005, 1.39999998]
+      Rotation: [0, -15, 0]
+      Scale: [1.60000002, 1.60000002, 1.60000002]
+    World::MeshRendererComponent:
+      Primitive: cube
+      Color: [0.720000029, 0.75999999, 0.819999993, 1]
+      MeshPath: ""
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 940000000000000006
+    World::TagComponent:
+      Tag: Sun (directional, casts shadow)
+    World::TransformComponent:
+      Location: [0, 4, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::DirectionalLightComponent:
+      Color: [1, 0.970000029, 0.899999976]
+      Intensity: 1.20000005
+      Direction: [-0.850000024, -0.150000006, -0.5]
+      CastShadow: true
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 940000000000000007
+    World::TagComponent:
+      Tag: Lamp (point)
+    World::TransformComponent:
+      Location: [3.5999999, -1.20000005, 2.20000005]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::PointLightComponent:
+      Color: [1, 0.720000029, 0.419999987]
+      Intensity: 5
+      Range: 6
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 940000000000000008
+    World::TagComponent:
+      Tag: Ambient
+    World::TransformComponent:
+      Location: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::AmbientLightComponent:
+      Color: [0.649999976, 0.699999988, 0.800000012]
+      Intensity: 0.25

@@ -208,6 +208,54 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	// P1b D4:灯光组件(前向渲染,每帧打包进全局 set0 的灯光 UBO)。
+	// 上限:方向光 1 盏(只取第一盏,阴影也只做它)、点光 7 盏、合计 8 个 UBO 槽位;
+	// 超出的按 registry 遍历顺序截断,截断数进 Renderer3D::Statistics 与 [lighting] 日志。
+	// Color 是**线性 sRGB 数值**(与材质 BaseColor 同一约定:着色器里 pow(2.2) 解码)。
+	struct DirectionalLightComponent
+	{
+		glm::vec3 Color { 1.0f, 1.0f, 1.0f };
+		float Intensity = 1.0f;
+		// 光的**传播方向**(从光源指向场景,世界空间;打包时归一化,零向量回退 -Y)。
+		glm::vec3 Direction { 0.35f, -0.7f, 0.6f };
+		// 主方向光是否跑阴影通道(2048² 深度图,3×3 PCF)。
+		bool CastShadow = false;
+
+		WE_SCHEMA_BODY(World, DirectionalLightComponent, Component)
+			WE_FIELD(Color, Vec3, Group("Light"));
+			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f));
+			WE_FIELD(Direction, Vec3, Group("Light"));
+			WE_FIELD(CastShadow, Bool, Group("Light"));
+		WE_SCHEMA_END
+	};
+
+	struct PointLightComponent
+	{
+		glm::vec3 Color { 1.0f, 1.0f, 1.0f };
+		float Intensity = 1.0f;
+		// 衰减范围(世界单位):衰减系数 = saturate(1 - d/range)^2。
+		float Range = 10.0f;
+
+		WE_SCHEMA_BODY(World, PointLightComponent, Component)
+			WE_FIELD(Color, Vec3, Group("Light"));
+			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f));
+			WE_FIELD(Range, Float, Group("Light"), Range(0.0f, 1000.0f));
+		WE_SCHEMA_END
+	};
+
+	// 场景级环境光:多盏时**第一盏**生效;没有该组件时用 0.25 灰默认值
+	// (与 D4 之前的占位实现同观感,既有场景不会突然全黑)。
+	struct AmbientLightComponent
+	{
+		glm::vec3 Color { 1.0f, 1.0f, 1.0f };
+		float Intensity = 0.25f;
+
+		WE_SCHEMA_BODY(World, AmbientLightComponent, Component)
+			WE_FIELD(Color, Vec3, Group("Light"));
+			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f));
+		WE_SCHEMA_END
+	};
+
 	enum class ScriptInstanceState { Pending, Creating, Running, Destroying, Stopped, Faulted };
 
 	struct NativeScriptComponent

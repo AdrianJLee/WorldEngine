@@ -6,6 +6,9 @@ struct World::CircleRendererComponent
 struct World::MeshRendererComponent
 struct World::HierarchyComponent
 struct World::CameraComponent
+struct World::DirectionalLightComponent
+struct World::PointLightComponent
+struct World::AmbientLightComponent
 struct World::NativeScriptComponent
 struct World::LuaScriptComponent
 struct World::RigidBody2DComponent

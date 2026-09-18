@@ -249,11 +249,18 @@ namespace World
 		m_PreviewCameraSet = device->CreateDescriptorSet(Renderer::GetGlobalDescriptorSetLayout());
 		if (m_PreviewCameraSet)
 		{
-			Rhi::DescriptorWrite write;
-			write.Binding = 0;
-			write.Type = Rhi::DescriptorType::UniformBuffer;
-			write.Buffer = m_PreviewCameraBuffer;
-			m_PreviewCameraSet->Update({ write });
+			// P1b D4:set0 现在还有 binding 2(灯光 UBO)与 binding 3(阴影贴图),3D 管线静态使用它们;
+			// 必须与相机(binding 0)**同一次 Update** 写完 —— GL 后端的 Update 是整体替换语义,
+			// 分两次写会把相机绑定冲掉(实测 Vulkan 预览球体几乎全黑)。
+			std::vector<Rhi::DescriptorWrite> writes;
+			Rhi::DescriptorWrite camera;
+			camera.Binding = 0;
+			camera.Type = Rhi::DescriptorType::UniformBuffer;
+			camera.Buffer = m_PreviewCameraBuffer;
+			writes.push_back(camera);
+			for (Rhi::DescriptorWrite& lighting : Renderer3D::MakeGlobalLightingWrites(nullptr))
+				writes.push_back(std::move(lighting));
+			m_PreviewCameraSet->Update(writes);
 		}
 
 		if (!m_PreviewSphere)

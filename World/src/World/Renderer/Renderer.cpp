@@ -356,6 +356,16 @@ namespace World
 			Rhi::DescriptorSetLayoutDesc desc;
 			desc.Bindings.push_back({ 0, Rhi::DescriptorType::UniformBuffer,
 				Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex), 1 });
+			// D4:set0 全局布局新增两个 binding(所有用该布局的管线共享,未用到的 binding
+			// 由各自调用方决定是否写入):
+			//   binding 2 = 灯光 UBO(顶点阶段读阴影矩阵,片元阶段做光照/阴影);
+			//   binding 3 = 方向光阴影贴图(仅片元)。
+			// GL 后端的 UBO/纹理绑定单元 = binding,2/3 与既有 0/1 不冲突。
+			desc.Bindings.push_back({ 2, Rhi::DescriptorType::UniformBuffer,
+				Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex) | Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+			desc.Bindings.push_back({ 3, Rhi::DescriptorType::CombinedImageSampler,
+				Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+			desc.DebugName = "Global.Set0";
 			s_GlobalDescriptorSetLayout = m_Device->CreateDescriptorSetLayout(desc);
 		}
 		return s_GlobalDescriptorSetLayout;

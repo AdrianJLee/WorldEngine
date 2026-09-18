@@ -53,6 +53,29 @@ namespace World
 			Rhi::Handle<Rhi::CommandBuffer> CommandBuffer;
 			Rhi::Handle<Rhi::Buffer> ObjectUniformBuffers[Renderer::FramesInFlight][kObjectsPerFrame];
 			Rhi::Handle<Rhi::DescriptorSet> ObjectSets[Renderer::FramesInFlight][kObjectsPerFrame];
+			// ---- D4:方向光阴影 ----
+			// 阴影通道:2048² 深度附件 + 一个"凑数"颜色附件。颜色附件不是画东西用的:
+			// OpenGL 的 FBO 完整性要求每个 draw buffer 都有附件(默认 draw buffer 是
+			// COLOR_ATTACHMENT0),纯深度通道在 GL 下会 INCOMPLETE_DRAW_BUFFER、所有绘制被丢弃。
+			// 该附件 LoadOp/StoreOp 都是 DontCare,不产生内存流量,也从不被采样。
+			Rhi::Handle<Rhi::RenderPass> ShadowPass;
+			Rhi::Handle<Rhi::Framebuffer> ShadowFramebuffer;
+			Rhi::Handle<Rhi::Texture> ShadowMapTexture;
+			Rhi::Handle<Rhi::Texture> ShadowColorTexture;
+			Rhi::Handle<Rhi::Sampler> ShadowSampler;
+			Rhi::Handle<Rhi::Pipeline> ShadowPipeline;
+			// 投影者用独立的对象槽位区:不消耗主通道的对象序号(否则阴影 + 主通道的
+			// 提交数会让 64 个对象槽位提前耗尽)。
+			Rhi::Handle<Rhi::Buffer> ShadowUniformBuffers[Renderer::FramesInFlight][kObjectsPerFrame];
+			Rhi::Handle<Rhi::DescriptorSet> ShadowObjectSets[Renderer::FramesInFlight][kObjectsPerFrame];
+			uint32_t ShadowObjectIndex = 0;
+			// 自建 set0 的调用方(材质预览)用的默认灯光 UBO:占位实现同款方向光 + 0.25 环境光。
+			Rhi::Handle<Rhi::Buffer> DefaultLightBuffer;
+			// [lighting] 日志去重(首帧或数量/阴影开关变化时才打)。
+			uint32_t LastLoggedDirectional = UINT32_MAX;
+			uint32_t LastLoggedPoint = UINT32_MAX;
+			uint32_t LastLoggedDropped = UINT32_MAX;
+			int32_t LastLoggedShadow = -1;
 			// 无材质绘制(Color 路径)也要绑定 set 2:管线/着色器**静态**使用材质贴图,
 			// 不绑就是 VUID-vkCmdDrawIndexed-None-08600(set 2 越界),GL 侧虽然宽容但同样是隐患。
 			// 内容无所谓(着色器在 Flags=0 时不采样),用白色兜底贴图保证描述符合法。
@@ -95,26 +118,27 @@ namespace World
 		}
 
 		// ---- D3 提交辅助(把三处重复代码收敛到一处) ----
-		void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const ObjectUniforms& uniforms)
+		void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const ObjectUniforms& uniforms,
+			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set)
 		{
 			// 每对象 UBO 独立分配:提交期写入不会与同帧其它对象互相覆盖。
-			if (!state.ObjectUniformBuffers[slot][index])
+			if (!buffer)
 			{
 				Rhi::BufferDesc uniformDesc;
 				uniformDesc.Size = sizeof(ObjectUniforms);
 				uniformDesc.Usage = Rhi::BufferUsageUniform;
 				uniformDesc.Memory = Rhi::MemoryHint::HostVisible;
 				uniformDesc.DebugName = "Renderer3D.ObjectUBO";
-				state.ObjectUniformBuffers[slot][index] = Renderer::GetDevice()->CreateBuffer(uniformDesc);
+				buffer = Renderer::GetDevice()->CreateBuffer(uniformDesc);
 			}
-			if (!state.ObjectSets[slot][index])
-				state.ObjectSets[slot][index] = Renderer::GetDevice()->CreateDescriptorSet(state.ObjectLayout);
-			state.ObjectUniformBuffers[slot][index]->SetData(&uniforms, sizeof(uniforms));
+			if (!set)
+				set = Renderer::GetDevice()->CreateDescriptorSet(state.ObjectLayout);
+			buffer->SetData(&uniforms, sizeof(uniforms));
 			Rhi::DescriptorWrite write;
 			write.Binding = 1;
 			write.Type = Rhi::DescriptorType::UniformBuffer;
-			write.Buffer = state.ObjectUniformBuffers[slot][index];
-			state.ObjectSets[slot][index]->Update({ write });
+			write.Buffer = buffer;
+			set->Update({ write });
 		}
 
 		void BindObject(State& state, uint32_t slot, uint32_t index, const MeshGpu& mesh,
@@ -327,6 +351,106 @@ namespace World
 		idBlend.BlendEnable = false;
 		transparentDesc.Blends = { blend, idBlend };
 		state.TransparentPipeline = Renderer::GetDevice()->CreatePipeline(transparentDesc);
+
+		// ---- D4:方向光阴影(2048² 深度通道 + 全局 set0 的 binding 3 采样) ----
+		Rhi::TextureDesc shadowColorDesc;
+		shadowColorDesc.Type = Rhi::TextureType::Texture2D;
+		shadowColorDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+		shadowColorDesc.Extent = { ShadowMapSize, ShadowMapSize, 1 };
+		shadowColorDesc.Usage = Rhi::TextureUsageColorAttachment;
+		shadowColorDesc.DebugName = "Renderer3D.ShadowColor";
+		state.ShadowColorTexture = Renderer::GetDevice()->CreateTexture(shadowColorDesc);
+
+		Rhi::TextureDesc shadowDepthDesc;
+		shadowDepthDesc.Type = Rhi::TextureType::Texture2D;
+		// 格式必须用 **D32_SFLOAT** 而不是 D24_UNORM_S8_UINT:后者在 RHI 的
+		// VulkanTexture 里创建成 DEPTH|STENCIL 双 aspect 的 image view,附件用途没问题,
+		// 但作为采样描述符会被验证层判为非法(VUID-VkDescriptorImageInfo-imageView-01976:
+		// 深度/模板视图的 aspectMask 必须二选一),驱动采样出来的深度因此是错的
+		// (实测表现:Vulkan 下近处几何全部误判为阴影,GL 正常)。
+		// D32_SFLOAT 的视图只含 DEPTH aspect,且是 Vulkan 强制支持采样的深度格式。
+		shadowDepthDesc.Format = Rhi::Format::D32_SFLOAT;
+		shadowDepthDesc.Extent = { ShadowMapSize, ShadowMapSize, 1 };
+		// 既是深度附件(阴影通道写)又要被主通道采样:两个 usage 都必须声明,
+		// 否则 Vulkan 创建镜像时缺 SAMPLED_BIT,描述符写入即非法。
+		shadowDepthDesc.Usage = Rhi::TextureUsageDepthStencilAttachment | Rhi::TextureUsageSampled;
+		shadowDepthDesc.DebugName = "Renderer3D.ShadowMap";
+		state.ShadowMapTexture = Renderer::GetDevice()->CreateTexture(shadowDepthDesc);
+
+		Rhi::SamplerDesc shadowSamplerDesc;
+		shadowSamplerDesc.MinFilter = Rhi::Filter::Nearest;
+		shadowSamplerDesc.MagFilter = Rhi::Filter::Nearest;
+		shadowSamplerDesc.MipmapMode = Rhi::SamplerMipmapMode::Nearest;
+		shadowSamplerDesc.AddressU = Rhi::SamplerAddressMode::ClampToEdge;
+		shadowSamplerDesc.AddressV = Rhi::SamplerAddressMode::ClampToEdge;
+		shadowSamplerDesc.AddressW = Rhi::SamplerAddressMode::ClampToEdge;
+		shadowSamplerDesc.DebugName = "Renderer3D.ShadowSampler";
+		state.ShadowSampler = Renderer::GetDevice()->CreateSampler(shadowSamplerDesc);
+
+		Rhi::RenderPassDesc shadowPassDesc;
+		Rhi::RenderPassAttachment shadowColor;
+		shadowColor.Format = Rhi::Format::R8G8B8A8_UNORM;
+		shadowColor.Samples = Rhi::SampleCount::Count1;
+		// 凑数颜色附件:不画颜色也不清(README 见 State 里的说明 —— GL 的 FBO 完整性要求
+		// 默认 draw buffer(GL_COLOR_ATTACHMENT0)有附件,否则整个深度通道在 GL 下被静默丢弃)。
+		shadowColor.Load = Rhi::LoadOp::DontCare;
+		shadowColor.Store = Rhi::StoreOp::DontCare;
+		shadowColor.InitialLayout = Rhi::AttachmentLayout::Undefined;
+		shadowColor.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		Rhi::RenderPassAttachment shadowDepth;
+		shadowDepth.Format = Rhi::Format::D32_SFLOAT;   // 与 ShadowMapTexture 同格式(见上)
+		shadowDepth.Samples = Rhi::SampleCount::Count1;
+		shadowDepth.Load = Rhi::LoadOp::Clear;
+		shadowDepth.Store = Rhi::StoreOp::Store;                       // 主通道要采样
+		shadowDepth.InitialLayout = Rhi::AttachmentLayout::Undefined;  // 每帧整体重写,内容不保留
+		// 离场即转 SHADER_READ_ONLY:主通道的采样描述符按这个布局写入,渲染通道自己
+		// 隐式转换并同步纹理跟踪。**不要**再补 PipelineBarrier:RHI 的屏障目前固定按
+		// COLOR aspect 发(VulkanCommand.cpp),对深度图会直接触发验证层错误(越界文件,
+		// 已在报告里记给主 agent)。
+		shadowDepth.FinalLayout = Rhi::AttachmentLayout::ShaderReadOnly;
+		shadowDepth.Clear.IsDepthStencil = true;
+		shadowDepth.Clear.DepthStencil.Depth = 1.0f;
+		shadowPassDesc.Attachments = { shadowColor, shadowDepth };
+		Rhi::SubpassDesc shadowSubpass;
+		shadowSubpass.ColorAttachments = { { 0, Rhi::AttachmentLayout::ColorAttachment } };
+		shadowSubpass.DepthStencilAttachment = { 1, Rhi::AttachmentLayout::DepthStencilAttachment };
+		shadowPassDesc.Subpasses = { shadowSubpass };
+		shadowPassDesc.DebugName = "Renderer3D.ShadowPass";
+		state.ShadowPass = Renderer::GetDevice()->CreateRenderPass(shadowPassDesc);
+
+		Rhi::FramebufferDesc shadowFramebufferDesc;
+		shadowFramebufferDesc.RenderPass = state.ShadowPass;
+		shadowFramebufferDesc.Extent = { ShadowMapSize, ShadowMapSize };
+		shadowFramebufferDesc.Attachments = { state.ShadowColorTexture, state.ShadowMapTexture };
+		shadowFramebufferDesc.DebugName = "Renderer3D.ShadowFramebuffer";
+		state.ShadowFramebuffer = Renderer::GetDevice()->CreateFramebuffer(shadowFramebufferDesc);
+
+		Rhi::PipelineDesc shadowPipelineDesc = pipelineDesc;
+		shadowPipelineDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.hlsl", "Renderer3D-Shadow");
+		shadowPipelineDesc.RenderPass = state.ShadowPass;
+		// 阴影通道只绑 set0(灯光 UBO 提供 u_ShadowViewProjection)与 set1(对象 u_Model)。
+		shadowPipelineDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), state.ObjectLayout };
+		shadowPipelineDesc.Blends = { Rhi::BlendAttachmentState {} };
+		// 写**背面**(Cull=Front):闭合网格的自阴影 acne 天然消失,单面网格(地板/墙)
+		// 不写深度、自然不投出自己的阴影。
+		shadowPipelineDesc.Cull = Rhi::CullMode::Front;
+		shadowPipelineDesc.DebugName = "Renderer3D.ShadowPipeline";
+		state.ShadowPipeline = Renderer::GetDevice()->CreatePipeline(shadowPipelineDesc);
+
+		// 预览用默认灯光(材质预览自建 set0 时绑定):占位实现同款方向光 + 0.25 环境光,
+		// 保证 D4 之后预览观感不变(预览不进场景灯光收集)。
+		{
+			const bool glDepthConvention = Renderer::GetBackendName() != "vulkan";
+			LightRig previewRig = BuildLightRig({ DirectionalLightData {} }, {}, nullptr, glDepthConvention);
+			Rhi::BufferDesc lightDesc;
+			lightDesc.Size = sizeof(LightUniforms);
+			lightDesc.Usage = Rhi::BufferUsageUniform;
+			lightDesc.Memory = Rhi::MemoryHint::HostVisible;
+			lightDesc.DebugName = "Renderer3D.DefaultLightUBO";
+			state.DefaultLightBuffer = Renderer::GetDevice()->CreateBuffer(lightDesc);
+			if (state.DefaultLightBuffer)
+				state.DefaultLightBuffer->SetData(&previewRig.Uniforms, sizeof(previewRig.Uniforms));
+		}
 	}
 
 	void Renderer3D::Shutdown()
@@ -338,6 +462,14 @@ namespace World
 		for (auto& slot : state.ObjectSets)
 			for (Rhi::Handle<Rhi::DescriptorSet>& set : slot)
 				set = nullptr;
+		for (auto& slot : state.ShadowUniformBuffers)
+			for (Rhi::Handle<Rhi::Buffer>& buffer : slot)
+				buffer = nullptr;
+		for (auto& slot : state.ShadowObjectSets)
+			for (Rhi::Handle<Rhi::DescriptorSet>& set : slot)
+				set = nullptr;
+		state.ShadowObjectIndex = 0;
+		state.DefaultLightBuffer = nullptr;
 		for (Rhi::Handle<Rhi::DescriptorSet>& set : state.DefaultMaterialSets)
 			set = nullptr;
 		state.MeshCache.clear();
@@ -347,6 +479,13 @@ namespace World
 		MaterialTextureCache::Get().Clear();
 		state.Pipeline = nullptr;
 		state.TransparentPipeline = nullptr;
+		// D4:阴影资源必须在设备销毁前放掉(与材质贴图缓存同理)。
+		state.ShadowPipeline = nullptr;
+		state.ShadowFramebuffer = nullptr;
+		state.ShadowMapTexture = nullptr;
+		state.ShadowColorTexture = nullptr;
+		state.ShadowSampler = nullptr;
+		state.ShadowPass = nullptr;
 		state.RenderPass = nullptr;
 		state.ObjectLayout = nullptr;
 		state.MaterialLayout = nullptr;
@@ -354,6 +493,10 @@ namespace World
 		state.CommandBuffer = nullptr;
 		state.ObjectIndex = 0;
 		state.Stats = {};
+		state.LastLoggedDirectional = UINT32_MAX;
+		state.LastLoggedPoint = UINT32_MAX;
+		state.LastLoggedDropped = UINT32_MAX;
+		state.LastLoggedShadow = -1;
 	}
 
 	void Renderer3D::EnsureMeshBuffers(const Ref<Mesh>& mesh)
@@ -435,7 +578,8 @@ namespace World
 		uniforms.Emissive = { 0.0f, 0.0f, 0.0f, 0.0f };
 		uniforms.Flags = { 0.0f, 0.0f, 0.0f, 0.0f };
 		uniforms.EntityId = { entityId, 0, 0, 0 };
-		WriteObjectUniforms(state, slot, index, uniforms);
+		WriteObjectUniforms(state, slot, index, uniforms,
+			state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index]);
 
 		BindObject(state, slot, index, cached->second, state.Pipeline, state.ObjectSets[slot][index], nullptr);
 		TraceSubmit(index, slot, cached->second.IndexCount, transform, baseColor);
@@ -473,7 +617,8 @@ namespace World
 			desc.DoubleSided ? 1.0f : 0.0f,
 			0.0f };
 		uniforms.EntityId = { entityId, 0, 0, 0 };
-		WriteObjectUniforms(state, slot, index, uniforms);
+		WriteObjectUniforms(state, slot, index, uniforms,
+			state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index]);
 
 		Rhi::Handle<Rhi::DescriptorSet> materialSet = MaterialSetFor(state, material, slot);
 		const Rhi::Handle<Rhi::Pipeline>& pipeline = desc.BlendMode == MaterialBlendMode::Transparent
@@ -521,6 +666,197 @@ namespace World
 	{
 		GetState().MaterialCache.clear();
 		MaterialTextureCache::Get().Clear();
+	}
+
+	// ---- D4:灯光收集/打包(纯函数部分) ----
+	LightRig Renderer3D::BuildLightRig(const std::vector<DirectionalLightData>& directionalLights,
+		const std::vector<PointLightData>& pointLights, const AmbientLightData* ambient,
+		bool glDepthConvention)
+	{
+		LightRig rig;
+		// 深度约定:Vulkan 的裁剪空间 z∈[0,1] 直接就是深度缓冲值;GL 的 z∈[-1,1] 会被
+		// 硬编码的 window-depth 映射成 (z+1)/2。着色器按这个标志换算(见 u_LightCounts.z)。
+		rig.Uniforms.LightCounts.z = glDepthConvention ? 1u : 0u;
+		if (ambient)
+			rig.Uniforms.Ambient = { ambient->Color.r, ambient->Color.g, ambient->Color.b, ambient->Intensity };
+		// ambient == nullptr:用结构体里的默认值(0.25 灰、强度 1)——
+		// 与 D4 之前的占位实现同观感,既有场景(没有任何灯光组件)不会突然全黑。
+
+		// 观感不回退:场景里**没有任何方向光**时,注入一盏与 D4 之前占位实现逐位一致的
+		// 默认主光(DirectionalLightData 的默认值 = 方向 (0.35,-0.7,0.6) 归一化 / 白 / 1.0 / 不投影);
+		// 一旦场景里存在方向光,默认主光立即让位(哪怕那盏灯强度为 0)。
+		std::vector<DirectionalLightData> fallbackDirectional;
+		const std::vector<DirectionalLightData>* directional = &directionalLights;
+		if (directionalLights.empty())
+		{
+			fallbackDirectional.push_back(DirectionalLightData {});
+			directional = &fallbackDirectional;
+		}
+
+		const uint32_t directionalCount = std::min<uint32_t>(
+			static_cast<uint32_t>(directional->size()), MaxDirectionalLights);
+		const uint32_t pointCount = std::min<uint32_t>(
+			static_cast<uint32_t>(pointLights.size()), MaxPointLights);
+
+		uint32_t slot = 0;
+		for (uint32_t index = 0; index < directionalCount; ++index)
+		{
+			const DirectionalLightData& source = (*directional)[index];
+			// 方向归一化;零向量(组件刚加上、还没填方向)回退 -Y,避免 NaN 光照。
+			const glm::vec3 direction = glm::length(source.Direction) > 1e-5f
+				? glm::normalize(source.Direction) : glm::vec3(0.0f, -1.0f, 0.0f);
+			LightUniforms::Light& light = rig.Uniforms.Lights[slot++];
+			light.PositionType = { 0.0f, 0.0f, 0.0f, 1.0f };   // w = 1 → 方向光
+			light.ColorIntensity = { source.Color.r, source.Color.g, source.Color.b, source.Intensity };
+			light.DirectionRange = { direction.x, direction.y, direction.z, 0.0f };
+			if (source.CastShadow)
+				rig.ShadowCaster = true;
+		}
+		for (uint32_t index = 0; index < pointCount; ++index)
+		{
+			const PointLightData& source = pointLights[index];
+			LightUniforms::Light& light = rig.Uniforms.Lights[slot++];
+			light.PositionType = { source.Position.x, source.Position.y, source.Position.z, 0.0f };
+			light.ColorIntensity = { source.Color.r, source.Color.g, source.Color.b, source.Intensity };
+			light.DirectionRange = { source.Range, 0.0f, 0.0f, 0.0f };
+		}
+
+		rig.DirectionalLights = directionalCount;
+		rig.PointLights = pointCount;
+		rig.TotalLights = directionalCount + pointCount;
+		// 截断数按**场景来源**计:默认主光是引擎注入的观感补偿,不算来源、也不算被丢弃。
+		const uint32_t sourceDirectional = static_cast<uint32_t>(directionalLights.size());
+		const uint32_t sourcePoint = static_cast<uint32_t>(pointLights.size());
+		rig.DroppedLights = (sourceDirectional - std::min(sourceDirectional, MaxDirectionalLights))
+			+ (sourcePoint - std::min(sourcePoint, MaxPointLights));
+		rig.Uniforms.LightCounts.x = directionalCount;
+		rig.Uniforms.LightCounts.y = pointCount;
+		return rig;
+	}
+
+	void Renderer3D::ApplyShadowCaster(LightRig& rig, const glm::mat4& lightViewProjection)
+	{
+		rig.Uniforms.ShadowViewProjection = lightViewProjection;
+		rig.Uniforms.ShadowParams.x = 1.0f;
+	}
+
+	void Renderer3D::ReportLighting(const LightRig& rig, double shadowPassMilliseconds)
+	{
+		State& state = GetState();
+		state.Stats.Lights = rig.TotalLights;
+		state.Stats.MaxLights = MaxLights;
+		state.Stats.DroppedLights = rig.DroppedLights;
+		state.Stats.ShadowPassMilliseconds = shadowPassMilliseconds;
+
+		// 首帧或"数量/截断/阴影开关"变化时打一行(自动化断言用;逐帧刷屏没有信息量)。
+		const uint32_t directional = rig.Uniforms.LightCounts.x;
+		const uint32_t point = rig.Uniforms.LightCounts.y;
+		const int32_t shadow = rig.Uniforms.ShadowParams.x > 0.5f ? 1 : 0;
+		if (directional == state.LastLoggedDirectional && point == state.LastLoggedPoint &&
+			rig.DroppedLights == state.LastLoggedDropped && shadow == state.LastLoggedShadow)
+			return;
+		state.LastLoggedDirectional = directional;
+		state.LastLoggedPoint = point;
+		state.LastLoggedDropped = rig.DroppedLights;
+		state.LastLoggedShadow = shadow;
+		WLD_CORE_INFO("[lighting] directional={0} point={1} dropped={2} shadowMs={3:.3f} shadow={4}",
+			directional, point, rig.DroppedLights, shadowPassMilliseconds, shadow);
+	}
+
+	std::vector<Rhi::DescriptorWrite> Renderer3D::MakeGlobalLightingWrites(
+		const Rhi::Handle<Rhi::Buffer>& lightUniformBuffer)
+	{
+		State& state = GetState();
+		std::vector<Rhi::DescriptorWrite> writes;
+		const Rhi::Handle<Rhi::Buffer> buffer = lightUniformBuffer ? lightUniformBuffer : state.DefaultLightBuffer;
+		if (buffer)
+		{
+			Rhi::DescriptorWrite light;
+			light.Binding = 2;
+			light.Type = Rhi::DescriptorType::UniformBuffer;
+			light.Buffer = buffer;
+			writes.push_back(light);
+		}
+		if (state.ShadowMapTexture)
+		{
+			Rhi::DescriptorWrite shadow;
+			shadow.Binding = 3;
+			shadow.Type = Rhi::DescriptorType::CombinedImageSampler;
+			shadow.Texture = state.ShadowMapTexture;
+			shadow.Sampler = state.ShadowSampler;
+			writes.push_back(shadow);
+		}
+		return writes;
+	}
+
+	Rhi::Handle<Rhi::RenderPass> Renderer3D::GetShadowRenderPass()
+	{
+		return GetState().ShadowPass;
+	}
+
+	Rhi::Handle<Rhi::Framebuffer> Renderer3D::GetShadowFramebuffer()
+	{
+		return GetState().ShadowFramebuffer;
+	}
+
+	Rhi::Handle<Rhi::Texture> Renderer3D::GetShadowMapTexture()
+	{
+		return GetState().ShadowMapTexture;
+	}
+
+	Rhi::Handle<Rhi::Sampler> Renderer3D::GetShadowMapSampler()
+	{
+		return GetState().ShadowSampler;
+	}
+
+	void Renderer3D::BeginShadowPass(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer)
+	{
+		State& state = GetState();
+		state.CommandBuffer = commandBuffer;
+		state.ShadowObjectIndex = 0;
+		if (!commandBuffer)
+			return;
+		// 阴影贴图是固定尺寸的离屏目标,视口/裁剪按贴图边长设置(管线是动态视口状态)。
+		commandBuffer->SetViewport({ 0.0f, 0.0f, static_cast<float>(ShadowMapSize),
+			static_cast<float>(ShadowMapSize) });
+		commandBuffer->SetScissor({ 0, 0, ShadowMapSize, ShadowMapSize });
+	}
+
+	uint32_t Renderer3D::SubmitShadow(const Ref<Mesh>& mesh, const glm::mat4& transform)
+	{
+		State& state = GetState();
+		if (!mesh || !state.CommandBuffer || !state.ShadowPipeline)
+			return UINT32_MAX;
+		if (state.ShadowObjectIndex >= kObjectsPerFrame)
+			return UINT32_MAX;
+
+		EnsureMeshBuffers(mesh);
+		const auto cached = state.MeshCache.find(mesh.get());
+		if (cached == state.MeshCache.end() || !cached->second.VertexBuffer)
+			return UINT32_MAX;
+
+		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		const uint32_t index = state.ShadowObjectIndex++;
+
+		// 阴影只需要 u_Model(顶点按 u_ShadowViewProjection × u_Model 变换),其余字段留默认。
+		ObjectUniforms uniforms;
+		uniforms.Model = transform;
+		WriteObjectUniforms(state, slot, index, uniforms,
+			state.ShadowUniformBuffers[slot][index], state.ShadowObjectSets[slot][index]);
+
+		state.CommandBuffer->BindPipeline(state.ShadowPipeline);
+		state.CommandBuffer->BindDescriptorSet(state.ShadowObjectSets[slot][index], 1);
+		state.CommandBuffer->BindVertexBuffer(0, cached->second.VertexBuffer);
+		state.CommandBuffer->BindIndexBuffer(cached->second.IndexBuffer);
+		state.CommandBuffer->DrawIndexed(cached->second.IndexCount);
+		return index;
+	}
+
+	void Renderer3D::EndShadowPass()
+	{
+		State& state = GetState();
+		state.CommandBuffer = nullptr;
+		state.ShadowObjectIndex = 0;
 	}
 
 	Renderer3D::Statistics Renderer3D::GetStats()

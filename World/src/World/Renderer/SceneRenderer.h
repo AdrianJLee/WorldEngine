@@ -62,6 +62,8 @@ namespace World
 		Rhi::Handle<Rhi::Texture> m_EntityTexture;
 		Rhi::Handle<Rhi::Texture> m_DepthTexture;
 		Rhi::Handle<Rhi::Buffer> m_CameraBuffers[kFramesInFlight];
+		// D4:每帧槽位的灯光 UBO(方向光/点光/环境光/阴影矩阵,std140;见 Renderer3D.h)。
+		Rhi::Handle<Rhi::Buffer> m_LightBuffers[kFramesInFlight];
 		Rhi::Handle<Rhi::DescriptorSet> m_GlobalDescriptorSets[kFramesInFlight];
 
 		uint32_t FrameSlot() const;

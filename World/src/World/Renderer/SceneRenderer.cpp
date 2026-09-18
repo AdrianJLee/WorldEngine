@@ -15,6 +15,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <array>
+#include <chrono>
+#include <cfloat>
 
 namespace World
 {
@@ -121,16 +123,29 @@ namespace World
 		cameraDesc.Size = sizeof(glm::mat4);
 		cameraDesc.Usage = Rhi::BufferUsageUniform;
 		cameraDesc.Memory = Rhi::MemoryHint::HostVisible;
+		// D4:灯光 UBO(std140,496 字节:阴影矩阵 + 阴影参数 + 环境光 + 数量 + 8 盏灯)。
+		Rhi::BufferDesc lightDesc;
+		lightDesc.Size = sizeof(LightUniforms);
+		lightDesc.Usage = Rhi::BufferUsageUniform;
+		lightDesc.Memory = Rhi::MemoryHint::HostVisible;
+		lightDesc.DebugName = "SceneRenderer.LightUBO";
 		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
 		{
 			m_CameraBuffers[slot] = m_Device->CreateBuffer(cameraDesc);
+			m_LightBuffers[slot] = m_Device->CreateBuffer(lightDesc);
 			m_GlobalDescriptorSets[slot] = m_Device->CreateDescriptorSet(
 				Renderer::GetGlobalDescriptorSetLayout());
+			// set0 的全部 binding 必须**一次**写完:GL 后端的描述符集 Update 是"整体替换"
+			// 语义(binding 2 = 灯光 UBO、binding 3 = 阴影贴图,见 Renderer::GetGlobalDescriptorSetLayout)。
+			std::vector<Rhi::DescriptorWrite> writes;
 			Rhi::DescriptorWrite cameraWrite;
 			cameraWrite.Binding = 0;
 			cameraWrite.Type = Rhi::DescriptorType::UniformBuffer;
 			cameraWrite.Buffer = m_CameraBuffers[slot];
-			m_GlobalDescriptorSets[slot]->Update({ cameraWrite });
+			writes.push_back(cameraWrite);
+			for (const Rhi::DescriptorWrite& extra : Renderer3D::MakeGlobalLightingWrites(m_LightBuffers[slot]))
+				writes.push_back(extra);
+			m_GlobalDescriptorSets[slot]->Update(writes);
 		}
 
 		m_FramebufferView = CreateRef<RhiFramebufferAdapter>();
@@ -152,6 +167,7 @@ namespace World
 		{
 			m_CommandBuffers[slot] = nullptr;
 			m_CameraBuffers[slot] = nullptr;
+			m_LightBuffers[slot] = nullptr;
 			m_GlobalDescriptorSets[slot] = nullptr;
 		}
 		m_FramebufferView = nullptr;
@@ -244,55 +260,20 @@ namespace World
 		const uint32_t slot = FrameSlot();
 		m_CameraBuffers[slot]->SetData(&viewProjection, sizeof(glm::mat4));
 
-		std::vector<Rhi::ClearValue> clears(3);
-		clears[0].Color = { 0.1f, 0.1f, 0.1f, 1.0f };
-		const int minusOne = -1;
-		std::memcpy(&clears[1].Color, &minusOne, sizeof(int));
-		clears[2].IsDepthStencil = true;
-		clears[2].DepthStencil.Depth = 1.0f;
-
-		m_CommandBuffers[slot]->Begin();
-		m_CommandBuffers[slot]->BeginRenderPass(m_RenderPass, m_Framebuffer, clears);
-		m_CommandBuffers[slot]->SetViewport({ 0, 0, static_cast<float>(m_Width), static_cast<float>(m_Height) });
-		// 管线把视口/裁剪都设为动态状态,绑定后必须先设置再绘制
-		// (VUID-vkCmdDrawIndexed-None-07832:动态裁剪未设置时状态未定义)。
-		m_CommandBuffers[slot]->SetScissor({ 0, 0, m_Width, m_Height });
-		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot]);
-
-		// 开发钩子:WLD_DEBUG_CUBE=1 时在同一渲染通道里提交一个 3D 立方体,
-		// 作为 3D 通道(Pipeline/深度/网格缓冲)在双后端下的冒烟基线(D2b)。
-		if (std::getenv("WLD_DEBUG_CUBE"))
-		{
-			if (!m_DebugCube)
-				m_DebugCube = Mesh::CreateUnitCube(1.0f);
-			if (m_DebugCube)
-			{
-				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
-				// 放在画面右上方,避免与 2D 精灵基线区域重叠(便于像素校验)。
-				const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.78f, 0.62f, 0.0f))
-					* glm::rotate(glm::mat4(1.0f), glm::radians(35.0f), glm::vec3(0.0f, 1.0f, 0.0f))
-					* glm::rotate(glm::mat4(1.0f), glm::radians(22.0f), glm::vec3(1.0f, 0.0f, 0.0f))
-					* glm::scale(glm::mat4(1.0f), glm::vec3(0.42f));
-				Renderer3D::Submit(m_DebugCube, model, { 1.0f, 0.55f, 0.12f, 1.0f });
-				Renderer3D::EndScene();
-			}
-		}
-
-		// 3D 网格通道(D2c/D3):MeshRendererComponent 实体用 Transform 作模型矩阵;
+		// ---- 3D 网格收集(D2c/D3) ----
+		// 收集前移到阴影通道之前:方向光阴影的正交矩阵要覆盖本帧所有网格实体的世界包围盒。
 		// 有 MaterialPath 时走材质(贴图/粗糙度/透明),否则沿用 Color 常量色(旧行为)。
-		// 提交顺序:D3 材质排序要求"先不透明、后透明",否则透明面会遮挡其后的不透明物体。
+		struct MeshDraw
 		{
-			struct MeshDraw
-			{
-				entt::entity Entity;
-				const glm::mat4* Model = nullptr;
-				Ref<Mesh> MeshAsset;
-				Ref<Material> MaterialAsset;
-				glm::vec4 Color { 1.0f };
-				bool Transparent = false;
-			};
-			std::vector<MeshDraw> draws;
-
+			entt::entity Entity;
+			const glm::mat4* Model = nullptr;
+			Ref<Mesh> MeshAsset;
+			Ref<Material> MaterialAsset;
+			glm::vec4 Color { 1.0f };
+			bool Transparent = false;
+		};
+		std::vector<MeshDraw> draws;
+		{
 			auto meshView = m_ActiveScene->m_Registry.view<TransformComponent, MeshRendererComponent>();
 			for (auto entity : meshView)
 			{
@@ -333,7 +314,144 @@ namespace World
 
 				draws.push_back(std::move(draw));
 			}
+		}
 
+		// ---- D4:灯光收集(registry 遍历顺序 = 截断顺序)+ 方向光阴影矩阵 + 灯光 UBO ----
+		LightRig lightRig;
+		{
+			std::vector<DirectionalLightData> directionalLights;
+			for (auto entity : m_ActiveScene->m_Registry.view<DirectionalLightComponent>())
+			{
+				const auto& light = m_ActiveScene->m_Registry.get<DirectionalLightComponent>(entity);
+				directionalLights.push_back({ light.Color, light.Intensity, light.Direction, light.CastShadow });
+			}
+			std::vector<PointLightData> pointLights;
+			for (auto entity : m_ActiveScene->m_Registry.view<PointLightComponent>())
+			{
+				const auto& light = m_ActiveScene->m_Registry.get<PointLightComponent>(entity);
+				// 点光位置取实体世界位置(有层级时用求解后的世界矩阵,与网格同一约定)。
+				glm::vec3 position { 0.0f };
+				if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
+					position = glm::vec3(world->Matrix[3]);
+				else if (const auto* transform = m_ActiveScene->m_Registry.try_get<TransformComponent>(entity))
+					position = transform->Location;
+				pointLights.push_back({ light.Color, light.Intensity, position, light.Range });
+			}
+			AmbientLightData ambientLight;
+			bool hasAmbient = false;
+			for (auto entity : m_ActiveScene->m_Registry.view<AmbientLightComponent>())
+			{
+				// 场景级:多盏时第一盏生效(与上限截断同一"registry 顺序"语义)。
+				const auto& light = m_ActiveScene->m_Registry.get<AmbientLightComponent>(entity);
+				ambientLight = { light.Color, light.Intensity };
+				hasAmbient = true;
+				break;
+			}
+			const bool glDepthConvention = Renderer::GetBackendName() != "vulkan";
+			lightRig = Renderer3D::BuildLightRig(directionalLights, pointLights,
+				hasAmbient ? &ambientLight : nullptr, glDepthConvention);
+		}
+
+		// 阴影矩阵:主方向光的正交视图(沿传播方向的反方向退到世界包围球外),盒子覆盖
+		// 本帧全部网格实体。没有网格或没有 CastShadow 的主方向光时保持阴影禁用。
+		if (lightRig.ShadowCaster && !draws.empty())
+		{
+			glm::vec3 boundsMin { FLT_MAX, FLT_MAX, FLT_MAX };
+			glm::vec3 boundsMax { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+			for (const MeshDraw& draw : draws)
+			{
+				const MeshBounds& bounds = draw.MeshAsset->GetBounds();
+				for (uint32_t corner = 0; corner < 8; ++corner)
+				{
+					const glm::vec3 local {
+						(corner & 1u) ? bounds.Max.x : bounds.Min.x,
+						(corner & 2u) ? bounds.Max.y : bounds.Min.y,
+						(corner & 4u) ? bounds.Max.z : bounds.Min.z };
+					const glm::vec3 world = glm::vec3((*draw.Model) * glm::vec4(local, 1.0f));
+					boundsMin = glm::min(boundsMin, world);
+					boundsMax = glm::max(boundsMax, world);
+				}
+			}
+			const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+			const float radius = std::max(0.5f, glm::length((boundsMax - boundsMin) * 0.5f));
+			const glm::vec3 direction = glm::vec3(lightRig.Uniforms.Lights[0].DirectionRange);
+			const glm::vec3 up = std::fabs(direction.y) > 0.9f
+				? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+			const glm::mat4 lightView = glm::lookAt(center - direction * (radius * 2.0f), center, up);
+			const glm::mat4 lightProjection = glm::ortho(-radius, radius, -radius, radius,
+				0.1f, radius * 4.0f);
+			// 与离屏场景同一条投影适配:Vulkan 只补深度范围(z∈[0,1]),不翻 Y ——
+			// 阴影 UV(depth 贴图行序)与主场景纹理同一约定,两个后端像素一致。
+			glm::mat4 shadowViewProjection = AdaptViewProjectionForOffscreen(
+				lightProjection * lightView, Renderer::GetBackendName() == "vulkan");
+			Renderer3D::ApplyShadowCaster(lightRig, shadowViewProjection);
+		}
+		m_LightBuffers[slot]->SetData(&lightRig.Uniforms, sizeof(lightRig.Uniforms));
+
+		m_CommandBuffers[slot]->Begin();
+
+		// D4:方向光阴影通道(本帧 3D 主通道**之前**,同一命令缓冲):
+		// depth-only 管线把投影者写进 2048² 深度图,主通道按 PCF 采样。
+		// CPU 侧 steady_clock 计时进 Stats/日志("光照数量上限与耗时可见"验收条款)。
+		double shadowPassMilliseconds = 0.0;
+		if (lightRig.Uniforms.ShadowParams.x > 0.5f)
+		{
+			const auto shadowStart = std::chrono::steady_clock::now();
+			std::vector<Rhi::ClearValue> shadowClears(2);
+			shadowClears[1].IsDepthStencil = true;
+			shadowClears[1].DepthStencil.Depth = 1.0f;
+			m_CommandBuffers[slot]->BeginRenderPass(Renderer3D::GetShadowRenderPass(),
+				Renderer3D::GetShadowFramebuffer(), shadowClears);
+			// set0(相机 + 灯光 UBO):binding 2 提供 u_ShadowViewProjection;
+			// 阴影管线不用 set2(材质),调用方只绑 0/1。
+			m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
+			Renderer3D::BeginShadowPass(m_CommandBuffers[slot]);
+			for (const MeshDraw& draw : draws)
+				Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
+			Renderer3D::EndShadowPass();
+			m_CommandBuffers[slot]->EndRenderPass();
+			shadowPassMilliseconds = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - shadowStart).count();
+		}
+		Renderer3D::ReportLighting(lightRig, shadowPassMilliseconds);
+
+		std::vector<Rhi::ClearValue> clears(3);
+		clears[0].Color = { 0.1f, 0.1f, 0.1f, 1.0f };
+		const int minusOne = -1;
+		std::memcpy(&clears[1].Color, &minusOne, sizeof(int));
+		clears[2].IsDepthStencil = true;
+		clears[2].DepthStencil.Depth = 1.0f;
+
+		m_CommandBuffers[slot]->BeginRenderPass(m_RenderPass, m_Framebuffer, clears);
+		m_CommandBuffers[slot]->SetViewport({ 0, 0, static_cast<float>(m_Width), static_cast<float>(m_Height) });
+		// 管线把视口/裁剪都设为动态状态,绑定后必须先设置再绘制
+		// (VUID-vkCmdDrawIndexed-None-07832:动态裁剪未设置时状态未定义)。
+		m_CommandBuffers[slot]->SetScissor({ 0, 0, m_Width, m_Height });
+		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot]);
+
+		// 开发钩子:WLD_DEBUG_CUBE=1 时在同一渲染通道里提交一个 3D 立方体,
+		// 作为 3D 通道(Pipeline/深度/网格缓冲)在双后端下的冒烟基线(D2b)。
+		if (std::getenv("WLD_DEBUG_CUBE"))
+		{
+			if (!m_DebugCube)
+				m_DebugCube = Mesh::CreateUnitCube(1.0f);
+			if (m_DebugCube)
+			{
+				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
+				// 放在画面右上方,避免与 2D 精灵基线区域重叠(便于像素校验)。
+				const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.78f, 0.62f, 0.0f))
+					* glm::rotate(glm::mat4(1.0f), glm::radians(35.0f), glm::vec3(0.0f, 1.0f, 0.0f))
+					* glm::rotate(glm::mat4(1.0f), glm::radians(22.0f), glm::vec3(1.0f, 0.0f, 0.0f))
+					* glm::scale(glm::mat4(1.0f), glm::vec3(0.42f));
+				Renderer3D::Submit(m_DebugCube, model, { 1.0f, 0.55f, 0.12f, 1.0f });
+				Renderer3D::EndScene();
+			}
+		}
+
+		// 3D 网格通道(D2c/D3):MeshRendererComponent 实体用 Transform 作模型矩阵;
+		// 提交顺序:D3 材质排序要求"先不透明、后透明",否则透明面会遮挡其后的不透明物体。
+		// 收集阶段已在阴影通道之前完成(见上方的 `draws`)。
+		{
 			if (!draws.empty())
 			{
 

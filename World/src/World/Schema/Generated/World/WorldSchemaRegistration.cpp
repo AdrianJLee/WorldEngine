@@ -16,6 +16,9 @@ const TypeSchema& WeSchemaOf_CircleRendererComponent();
 const TypeSchema& WeSchemaOf_MeshRendererComponent();
 const TypeSchema& WeSchemaOf_HierarchyComponent();
 const TypeSchema& WeSchemaOf_CameraComponent();
+const TypeSchema& WeSchemaOf_DirectionalLightComponent();
+const TypeSchema& WeSchemaOf_PointLightComponent();
+const TypeSchema& WeSchemaOf_AmbientLightComponent();
 const TypeSchema& WeSchemaOf_NativeScriptComponent();
 const TypeSchema& WeSchemaOf_LuaScriptComponent();
 const TypeSchema& WeSchemaOf_RigidBody2DComponent();
@@ -867,6 +870,342 @@ struct GeneratedAccess<World::CameraComponent>
                 Field_Camera(),
                 Field_Primary(),
                 Field_FixedAspectRatio(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::DirectionalLightComponent>
+{
+    static Value Get_Color(const void* instance)
+    {
+        const World::DirectionalLightComponent* self = static_cast<const World::DirectionalLightComponent*>(instance);
+        return Value(self->Color);
+    }
+    static void Set_Color(void* instance, const Value& value)
+    {
+        World::DirectionalLightComponent* self = static_cast<World::DirectionalLightComponent*>(instance);
+        self->Color = std::get<glm::vec3>(value);
+    }
+    static Value Get_Intensity(const void* instance)
+    {
+        const World::DirectionalLightComponent* self = static_cast<const World::DirectionalLightComponent*>(instance);
+        return Value(self->Intensity);
+    }
+    static void Set_Intensity(void* instance, const Value& value)
+    {
+        World::DirectionalLightComponent* self = static_cast<World::DirectionalLightComponent*>(instance);
+        self->Intensity = std::get<float>(value);
+    }
+    static Value Get_Direction(const void* instance)
+    {
+        const World::DirectionalLightComponent* self = static_cast<const World::DirectionalLightComponent*>(instance);
+        return Value(self->Direction);
+    }
+    static void Set_Direction(void* instance, const Value& value)
+    {
+        World::DirectionalLightComponent* self = static_cast<World::DirectionalLightComponent*>(instance);
+        self->Direction = std::get<glm::vec3>(value);
+    }
+    static Value Get_CastShadow(const void* instance)
+    {
+        const World::DirectionalLightComponent* self = static_cast<const World::DirectionalLightComponent*>(instance);
+        return Value(self->CastShadow);
+    }
+    static void Set_CastShadow(void* instance, const Value& value)
+    {
+        World::DirectionalLightComponent* self = static_cast<World::DirectionalLightComponent*>(instance);
+        self->CastShadow = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Color()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3F6608D335810DAFull },
+            "Color",
+            Kind::Vec3,
+            &Get_Color,
+            &Set_Color,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Intensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x59A94509BB12C479ull },
+            "Intensity",
+            Kind::Float,
+            &Get_Intensity,
+            &Set_Intensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Direction()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x88C57E34ECEAF4E9ull },
+            "Direction",
+            Kind::Vec3,
+            &Get_Direction,
+            &Set_Direction,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_CastShadow()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x75CD3232D927EDAFull },
+            "CastShadow",
+            Kind::Bool,
+            &Get_CastShadow,
+            &Set_CastShadow,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            Value(false),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::DirectionalLightComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::DirectionalLightComponent" },
+            "DirectionalLightComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::DirectionalLightComponent),
+            TypeCategory::Component,
+            {
+                Field_Color(),
+                Field_Intensity(),
+                Field_Direction(),
+                Field_CastShadow(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::PointLightComponent>
+{
+    static Value Get_Color(const void* instance)
+    {
+        const World::PointLightComponent* self = static_cast<const World::PointLightComponent*>(instance);
+        return Value(self->Color);
+    }
+    static void Set_Color(void* instance, const Value& value)
+    {
+        World::PointLightComponent* self = static_cast<World::PointLightComponent*>(instance);
+        self->Color = std::get<glm::vec3>(value);
+    }
+    static Value Get_Intensity(const void* instance)
+    {
+        const World::PointLightComponent* self = static_cast<const World::PointLightComponent*>(instance);
+        return Value(self->Intensity);
+    }
+    static void Set_Intensity(void* instance, const Value& value)
+    {
+        World::PointLightComponent* self = static_cast<World::PointLightComponent*>(instance);
+        self->Intensity = std::get<float>(value);
+    }
+    static Value Get_Range(const void* instance)
+    {
+        const World::PointLightComponent* self = static_cast<const World::PointLightComponent*>(instance);
+        return Value(self->Range);
+    }
+    static void Set_Range(void* instance, const Value& value)
+    {
+        World::PointLightComponent* self = static_cast<World::PointLightComponent*>(instance);
+        self->Range = std::get<float>(value);
+    }
+    static const FieldSchema& Field_Color()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF59A3802E5E460CDull },
+            "Color",
+            Kind::Vec3,
+            &Get_Color,
+            &Set_Color,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Intensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD129F491260324EBull },
+            "Intensity",
+            Kind::Float,
+            &Get_Intensity,
+            &Set_Intensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Range()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x279D515C9A54F7E7ull },
+            "Range",
+            Kind::Float,
+            &Get_Range,
+            &Set_Range,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(1000.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::PointLightComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::PointLightComponent" },
+            "PointLightComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::PointLightComponent),
+            TypeCategory::Component,
+            {
+                Field_Color(),
+                Field_Intensity(),
+                Field_Range(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::AmbientLightComponent>
+{
+    static Value Get_Color(const void* instance)
+    {
+        const World::AmbientLightComponent* self = static_cast<const World::AmbientLightComponent*>(instance);
+        return Value(self->Color);
+    }
+    static void Set_Color(void* instance, const Value& value)
+    {
+        World::AmbientLightComponent* self = static_cast<World::AmbientLightComponent*>(instance);
+        self->Color = std::get<glm::vec3>(value);
+    }
+    static Value Get_Intensity(const void* instance)
+    {
+        const World::AmbientLightComponent* self = static_cast<const World::AmbientLightComponent*>(instance);
+        return Value(self->Intensity);
+    }
+    static void Set_Intensity(void* instance, const Value& value)
+    {
+        World::AmbientLightComponent* self = static_cast<World::AmbientLightComponent*>(instance);
+        self->Intensity = std::get<float>(value);
+    }
+    static const FieldSchema& Field_Color()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xBB83B51C3B10E123ull },
+            "Color",
+            Kind::Vec3,
+            &Get_Color,
+            &Set_Color,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Intensity()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2F2E4D1FC35BF04Dull },
+            "Intensity",
+            Kind::Float,
+            &Get_Intensity,
+            &Set_Intensity,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            Value(0.0),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::AmbientLightComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::AmbientLightComponent" },
+            "AmbientLightComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::AmbientLightComponent),
+            TypeCategory::Component,
+            {
+                Field_Color(),
+                Field_Intensity(),
             },
             &StorageBindingOf(),
             nullptr,
@@ -1818,6 +2157,9 @@ const TypeSchema& WeSchemaOf_CircleRendererComponent() { return GeneratedAccess<
 const TypeSchema& WeSchemaOf_MeshRendererComponent() { return GeneratedAccess<World::MeshRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_HierarchyComponent() { return GeneratedAccess<World::HierarchyComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraComponent() { return GeneratedAccess<World::CameraComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_DirectionalLightComponent() { return GeneratedAccess<World::DirectionalLightComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_PointLightComponent() { return GeneratedAccess<World::PointLightComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_AmbientLightComponent() { return GeneratedAccess<World::AmbientLightComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_NativeScriptComponent() { return GeneratedAccess<World::NativeScriptComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_LuaScriptComponent() { return GeneratedAccess<World::LuaScriptComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_RigidBody2DComponent() { return GeneratedAccess<World::RigidBody2DComponent>::WeSchema(); }
@@ -1842,6 +2184,9 @@ const EnumSchema& WeEnumSchemaOf_ProjectionType() { return GeneratedEnum<World::
 			WeSchemaOf_MeshRendererComponent(),
 			WeSchemaOf_HierarchyComponent(),
 			WeSchemaOf_CameraComponent(),
+			WeSchemaOf_DirectionalLightComponent(),
+			WeSchemaOf_PointLightComponent(),
+			WeSchemaOf_AmbientLightComponent(),
 			WeSchemaOf_NativeScriptComponent(),
 			WeSchemaOf_LuaScriptComponent(),
 			WeSchemaOf_RigidBody2DComponent(),

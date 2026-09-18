@@ -29,6 +29,32 @@ cbuffer CameraUniforms : register(b0)
     float4x4 u_ViewProjection;
 };
 
+// P1b D4:set 0, binding 2 的灯光系统(方向光 + 点光 + 环境光 + 方向光阴影矩阵)。
+// 布局与 C++ 的 LightUniforms(std140,496 字节)逐字段对应,详见 Renderer3D.h。
+struct GpuLight
+{
+    float4 PositionType;      // xyz = 位置(点光) / w = 0 点光 | 1 方向光
+    float4 ColorIntensity;    // rgb = 线性色, a = 强度
+    float4 DirectionRange;    // 方向光:xyz = 传播方向(已归一化);点光:x = 范围
+};
+
+cbuffer LightUniforms : register(b2)
+{
+    float4x4 u_ShadowViewProjection;
+    // x = 启用阴影, y = 深度 bias, z = 贴图边长, w = PCF 半径(纹素)。
+    float4 u_ShadowParams;
+    // rgb = 环境光线性色, a = 强度(无 AmbientLightComponent 时是 0.25 灰默认值)。
+    float4 u_Ambient;
+    // x = 方向光数, y = 点光数, z = 深度约定(0 = Vulkan 的 [0,1] 裁剪深度,
+    // 1 = OpenGL 的 [-1,1] 裁剪深度 → 深度缓冲存 (z+1)/2)。
+    uint4 u_LightCounts;
+    GpuLight u_Lights[8];
+};
+
+// set 0, binding 3:方向光阴影贴图(D24,点采样 + ClampToEdge;值域 [0,1] 的深度)。
+[[vk::combinedImageSampler]] Texture2D u_ShadowMap : register(t3, space0);
+[[vk::combinedImageSampler]] SamplerState u_ShadowSampler : register(s3, space0);
+
 // set 1, binding 1:每对象数据(Renderer3D 在提交时写入对应帧槽位的 UBO)。
 // binding 必须非 0:OpenGL 后端的描述符绑定单元 = binding(忽略 set 索引),
 // 用 b0 会与 set0/binding0 的相机 UBO 撞同一个 GL uniform buffer unit → GL 下 3D 全黑。
@@ -66,6 +92,38 @@ VS_OUTPUT VSMain(VS_INPUT input)
     return output;
 }
 
+// 方向光 3×3 PCF:返回 1 = 完全受光,0 = 完全在阴影里。
+// 深度空间换算必须区分后端:Vulkan 的裁剪空间 z∈[0,1] 就是深度缓冲值;OpenGL 的
+// z∈[-1,1] 会被固定管线映射成 (z+1)/2。由 u_LightCounts.z 在运行时选择,
+// 两个后端共用同一份着色器(SceneRenderer 已按后端决定是否补 z 重映射)。
+float SampleDirectionalShadow(float3 worldPosition, float3 normal, float3 toLightDirection)
+{
+    const float4 shadowPosition = mul(u_ShadowViewProjection, float4(worldPosition, 1.0f));
+    if (shadowPosition.w <= 0.0f)
+        return 1.0f;
+    const float3 projected = shadowPosition.xyz / shadowPosition.w;
+    const float depth = (u_LightCounts.z > 0u) ? (projected.z * 0.5f + 0.5f) : projected.z;
+    const float2 uv = projected.xy * 0.5f + 0.5f;
+    // 阴影体积外不投影(ClampToEdge 采样会返回边缘深度,直接判受光更稳)。
+    if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f)
+        return 1.0f;
+    // 斜率相关 bias:掠射角(dot 小)时加深偏移,避免自阴影条纹。
+    const float cosTheta = saturate(dot(normal, toLightDirection));
+    const float bias = max(u_ShadowParams.y * (1.0f - cosTheta), u_ShadowParams.y * 0.25f);
+    const float2 texel = u_ShadowParams.w / max(u_ShadowParams.z, 1.0f);
+    float visible = 0.0f;
+    [unroll] for (int offsetY = -1; offsetY <= 1; ++offsetY)
+    {
+        [unroll] for (int offsetX = -1; offsetX <= 1; ++offsetX)
+        {
+            const float sampledDepth = u_ShadowMap.Sample(u_ShadowSampler,
+                uv + float2(offsetX, offsetY) * texel).r;
+            visible += (depth - bias <= sampledDepth) ? 1.0f : 0.0f;
+        }
+    }
+    return visible / 9.0f;
+}
+
 PS_OUTPUT PSMain(VS_OUTPUT input)
 {
     PS_OUTPUT output;
@@ -93,21 +151,57 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
         normal = normalize(tangent * sampled.x + bitangent * sampled.y + normal * sampled.z);
     }
 
-    // 占位光照(固定方向光 + 环境项):D4 会替换为真正的光照系统。
-    const float3 lightDirection = normalize(float3(0.35f, -0.7f, 0.6f));
-    const float lambert = saturate(dot(normal, -lightDirection));
-    // 粗糙度只做最轻的视觉反馈(高光收窄),避免在 D4 之前引入半成品 BRDF。
-    const float3 halfVector = normalize(-lightDirection + float3(0.0f, 0.0f, 1.0f));
-    const float specularPower = lerp(8.0f, 128.0f, saturate(1.0f - u_MetallicRoughness.y));
-    const float specular = pow(saturate(dot(normal, halfVector)), specularPower)
-        * lerp(0.04f, 1.0f, saturate(u_MetallicRoughness.x));
+    // P1b D4:环境项 + 方向光/点光(Lambert + 以 metallic/roughness 调的简化高光)
+    // + 方向光 PCF 阴影(只作用于主方向光的漫反射/高光)。
+    //
+    // 视线方向固定用 (0,0,1):真实视线方向需要相机位置 uniform,而冻结的 496 字节
+    // 灯光布局里没有它的位置 —— 沿用占位实现的"简化高光"口径(高光只做粗糙度反馈),
+    // 后续要精确高光时再加相机位置字段。
+    const float3 viewDirection = float3(0.0f, 0.0f, 1.0f);
+    float3 litColor = albedo * u_Ambient.rgb * u_Ambient.a;
 
-    const float3 ambient = albedo * 0.25f;
-    const float3 diffuse = albedo * lambert * lerp(1.0f, 0.35f, saturate(u_MetallicRoughness.x));
+    const uint lightCount = u_LightCounts.x + u_LightCounts.y;
+    for (uint lightIndex = 0; lightIndex < lightCount; ++lightIndex)
+    {
+        const GpuLight light = u_Lights[lightIndex];
+        const bool isDirectional = light.PositionType.w > 0.5f;
+        float3 toLight;
+        float attenuation = 1.0f;
+        if (isDirectional)
+        {
+            // DirectionRange.xyz 是光的传播方向(从光源指向场景),入射方向取反。
+            toLight = -normalize(light.DirectionRange.xyz);
+        }
+        else
+        {
+            const float3 offset = light.PositionType.xyz - input.v_WorldPosition;
+            const float distanceToLight = length(offset);
+            toLight = distanceToLight > 1e-5f ? offset / distanceToLight : float3(0.0f, 0.0f, 0.0f);
+            // 衰减:saturate(1 - d/range)^2(范围内平滑到 0,范围外不发散)。
+            const float falloff = saturate(1.0f - distanceToLight / max(light.DirectionRange.x, 1e-4f));
+            attenuation = falloff * falloff;
+        }
+
+        const float lambert = saturate(dot(normal, toLight));
+        float visibility = 1.0f;
+        if (isDirectional && u_ShadowParams.x > 0.5f)
+            visibility = SampleDirectionalShadow(input.v_WorldPosition, normal, toLight);
+
+        const float3 radiance = light.ColorIntensity.rgb * light.ColorIntensity.a * attenuation * visibility;
+        const float diffuse = lambert * lerp(1.0f, 0.35f, saturate(u_MetallicRoughness.x));
+        const float3 halfVector = normalize(toLight + viewDirection + 1e-5f);
+        const float specularPower = lerp(8.0f, 128.0f, saturate(1.0f - u_MetallicRoughness.y));
+        const float specular = lambert > 0.0f
+            ? pow(saturate(dot(normal, halfVector)), specularPower)
+                * lerp(0.04f, 1.0f, saturate(u_MetallicRoughness.x))
+            : 0.0f;
+        litColor += albedo * radiance * diffuse + radiance * specular;
+    }
+
     const float3 emissive = pow(saturate(u_Emissive.rgb), 2.2f);
+    litColor += emissive;
     // 变量名不能叫 linear:spirv-cross 生成的 GLSL 里 "linear" 是插值修饰符关键字,
     // GL 侧着色器编译会直接报 "modifiers must appear before type"(实测)。
-    const float3 litColor = ambient + diffuse + specular + emissive;
 
     // 线性 → 显示空间(与 2D/WUI 的显示空间书写保持同一最终空间)。
     output.Color = float4(pow(saturate(litColor), 1.0f / 2.2f), u_BaseColor.a);

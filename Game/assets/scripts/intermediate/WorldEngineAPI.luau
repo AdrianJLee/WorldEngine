@@ -523,6 +523,11 @@ function ui:rows(x, y, w, h, count, gap) end
 ---@return table
 function ui:columns(x, y, w, h, count, gap) end
 
+-- Component fields are exposed through Entity:GetComponent("AmbientLightComponent"); there is no runtime global named AmbientLightComponent.
+---@class AmbientLightComponent
+---@field Intensity number
+---@field Color vec3
+
 -- Component fields are exposed through Entity:GetComponent("BoxCollider2DComponent"); there is no runtime global named BoxCollider2DComponent.
 ---@class BoxCollider2DComponent
 ---@field Friction number
@@ -553,6 +558,13 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Thickness number
 ---@field Color vec4
 
+-- Component fields are exposed through Entity:GetComponent("DirectionalLightComponent"); there is no runtime global named DirectionalLightComponent.
+---@class DirectionalLightComponent
+---@field Color vec3
+---@field Intensity number
+---@field CastShadow boolean
+---@field Direction vec3
+
 -- Component fields are exposed through Entity:GetComponent("HierarchyComponent"); there is no runtime global named HierarchyComponent.
 ---@class HierarchyComponent
 ---@field Parent number
@@ -572,6 +584,12 @@ function ui:columns(x, y, w, h, count, gap) end
 -- Component fields are exposed through Entity:GetComponent("NativeScriptComponent"); there is no runtime global named NativeScriptComponent.
 ---@class NativeScriptComponent
 ---@field ScriptName string
+
+-- Component fields are exposed through Entity:GetComponent("PointLightComponent"); there is no runtime global named PointLightComponent.
+---@class PointLightComponent
+---@field Range number
+---@field Intensity number
+---@field Color vec3
 
 -- Component fields are exposed through Entity:GetComponent("RigidBody2DComponent"); there is no runtime global named RigidBody2DComponent.
 ---@class RigidBody2DComponent
