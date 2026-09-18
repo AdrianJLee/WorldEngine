@@ -456,6 +456,18 @@ int main()
 			CHECK(!readOnlyResult.Changed);
 			CHECK(!readOnlyResult.SaveRequested);
 
+			// W9 review:ReadOnly 下 Ctrl+Z/Y 同样不得改动 buffer。
+			for (const uint32_t historyKey : { World::KeyCodes::Z, World::KeyCodes::Y })
+			{
+				WuiInputState readOnlyHistory;
+				readOnlyHistory.KeyDown = { historyKey };
+				readOnlyHistory.Ctrl = true;
+				const WuiCodeEditorResult historyResult =
+					RunEditorFrame(ctx, buffer, editorRect, readOnly, readOnlyHistory);
+				CHECK(buffer.Text() == u8"alpha beta");
+				CHECK(!historyResult.Changed);
+			}
+
 			// 剪贴板注入:Ctrl+C / Ctrl+V / Ctrl+Z
 			std::string clip;
 			WuiCodeEditorOptions clipboardOptions = editorOptions;
@@ -494,6 +506,47 @@ int main()
 			escapeInput.KeyDown = { World::KeyCodes::Escape };
 			RunEditorFrame(ctx, buffer, editorRect, editorOptions, escapeInput);
 			CHECK(ctx.Focus() == 0);
+			CHECK(!WuiTextFocus::Get().Active());
+		}
+
+		// ---- 8b. Tab 显示列与后端"固定 4 空格宽"同口径 ----
+		{
+			WuiTextBuffer buffer;
+			buffer.SetText(u8"ab\tX");
+			CHECK(buffer.ColumnOfOffset(2) == 2);   // '\t' 之前
+			CHECK(buffer.ColumnOfOffset(3) == 6);   // 'ab' + 4 空格宽
+			CHECK(buffer.ColumnOfOffset(4) == 7);   // 'X'
+		}
+
+		// ---- 8c. 文本焦点登记:多上下文互相独立(每帧按上下文重建) ----
+		{
+			WuiTextFocus::Get().Clear();
+			WuiContext a;
+			WuiContext b;
+			a.SetWindowKey("main");
+			a.SetPanelId("panel.a");
+			b.SetWindowKey("float:panel.b");
+			b.SetPanelId("panel.b");
+			WuiInputState empty;
+			a.BeginFrame(empty);
+			b.BeginFrame(empty);
+			CHECK(!WuiTextFocus::Get().Active());
+			a.SetFocus(42);
+			a.SetTextInputActive(true);
+			CHECK(WuiTextFocus::Get().Active());
+			CHECK(WuiTextFocus::Get().Id() == 42);
+			CHECK(WuiTextFocus::Get().Window() == "main");
+			CHECK(WuiTextFocus::Get().Panel() == "panel.a");
+			// 另一个上下文开新帧不应清掉 A 的登记(条目按上下文独立)。
+			b.BeginFrame(empty);
+			CHECK(WuiTextFocus::Get().Active());
+			b.SetFocus(7);
+			b.SetTextInputActive(true);
+			CHECK(WuiTextFocus::Get().Id() == 7);
+			CHECK(WuiTextFocus::Get().Panel() == "panel.b");
+			WuiTextFocus::Get().BeginContextFrame(&a);
+			CHECK(WuiTextFocus::Get().Active() && WuiTextFocus::Get().Id() == 7);
+			WuiTextFocus::Get().BeginContextFrame(&b);
 			CHECK(!WuiTextFocus::Get().Active());
 		}
 

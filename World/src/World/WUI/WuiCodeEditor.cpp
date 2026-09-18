@@ -285,12 +285,12 @@ namespace World::Wui
 							buffer.Paste(clip);
 						caretAction = true;
 					}
-					if (ctx.IsKeyPressed(KeyCodes::Z))
+					if (!readOnly && ctx.IsKeyPressed(KeyCodes::Z))
 					{
 						shift ? buffer.Redo() : buffer.Undo();
 						caretAction = true;
 					}
-					if (ctx.IsKeyPressed(KeyCodes::Y))
+					if (!readOnly && ctx.IsKeyPressed(KeyCodes::Y))
 					{
 						buffer.Redo();
 						caretAction = true;
@@ -511,9 +511,12 @@ namespace World::Wui
 			{
 				const size_t tokenStart = std::min<size_t>(token.StartByte, lineView.size());
 				const size_t tokenEnd = std::max(tokenStart, std::min<size_t>(token.EndByte, lineView.size()));
-				if (tokenStart > cursor)
-					drawSegment(cursor, tokenStart, WuiCodeTokenKind::Default);
-				drawSegment(tokenStart, tokenEnd, token.Kind);
+				// W9 review:重叠/乱序 token 只画尚未消费的部分,避免同一段重复绘制。
+				const size_t start = std::max(tokenStart, cursor);
+				if (start > cursor)
+					drawSegment(cursor, start, WuiCodeTokenKind::Default);
+				if (start < tokenEnd)
+					drawSegment(start, tokenEnd, token.Kind);
 				cursor = std::max(cursor, tokenEnd);
 			}
 			drawSegment(cursor, lineView.size(), WuiCodeTokenKind::Default);

@@ -169,6 +169,12 @@ namespace World::Wui
 
 		void SetFocus(WuiId id) { m_Focus = id; }
 		WuiId Focus() const { return m_Focus; }
+		// W9 review:窗口/面板身份由宿主显式告知,不依赖仅在 --ai-control 下才启用的
+		// WuiAccessibility(否则日常会话里文本焦点登记的 Window/Panel 为空,快捷键路由错位)。
+		void SetWindowKey(std::string windowKey) { m_WindowKey = std::move(windowKey); }
+		void SetPanelId(std::string panelId) { m_PanelId = std::move(panelId); }
+		const std::string& WindowKey() const { return m_WindowKey; }
+		const std::string& PanelId() const { return m_PanelId; }
 		// 文本输入态 + 全局文本焦点登记(聚焦的文本控件每帧调用一次 SetTextInputActive(true))。
 		void SetTextInputActive(bool active);
 		bool IsTextInputActive() const { return m_TextInputActive; }
@@ -248,6 +254,8 @@ namespace World::Wui
 		WuiStyleSheet m_Sheet;
 		WuiId m_Focus = 0;
 		bool m_TextInputActive = false;
+		std::string m_WindowKey;
+		std::string m_PanelId;
 		WuiCursor m_Cursor = WuiCursor::Arrow;
 		std::vector<WuiId> m_OpenPopups;
 		std::unordered_map<WuiId, uint64_t> m_PopupOpenFrame;

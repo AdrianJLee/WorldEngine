@@ -10,8 +10,9 @@ namespace World::Wui
 	{
 		struct TextMeasureHookState
 		{
-			void* Owner = nullptr;
-			WuiTextMeasureFn Fn;
+			// W9 review:多 owner(每个 WuiRhiBackend 一个)。后注册者优先;注销后自动回退到
+			// 仍存活的上一个,避免"任一 backend 析构就把度量清成估算"造成命中/光标错位。
+			std::vector<std::pair<void*, WuiTextMeasureFn>> Entries;
 		};
 
 		TextMeasureHookState& MeasureHook()
@@ -54,23 +55,24 @@ namespace World::Wui
 
 	void SetTextMeasureHook(void* owner, WuiTextMeasureFn fn)
 	{
-		MeasureHook().Owner = owner;
-		MeasureHook().Fn = std::move(fn);
+		auto& entries = MeasureHook().Entries;
+		entries.erase(std::remove_if(entries.begin(), entries.end(),
+			[&](const auto& entry) { return entry.first == owner; }), entries.end());
+		entries.emplace_back(owner, std::move(fn));
 	}
 
 	void ClearTextMeasureHook(void* owner)
 	{
-		if (MeasureHook().Owner == owner)
-		{
-			MeasureHook().Owner = nullptr;
-			MeasureHook().Fn = nullptr;
-		}
+		auto& entries = MeasureHook().Entries;
+		entries.erase(std::remove_if(entries.begin(), entries.end(),
+			[&](const auto& entry) { return entry.first == owner; }), entries.end());
 	}
 
 	float MeasureTextWithHook(std::string_view utf8, float fontSize, WuiFontFamily family)
 	{
-		if (MeasureHook().Fn)
-			return MeasureHook().Fn(utf8, fontSize, family);
+		const auto& entries = MeasureHook().Entries;
+		if (!entries.empty() && entries.back().second)
+			return entries.back().second(utf8, fontSize, family);
 		float width = 0;
 		ForEachCodepoint(utf8, [&](uint32_t cp) { width += FallbackAdvance(cp, fontSize); });
 		return width;
@@ -148,7 +150,7 @@ namespace World::Wui
 	{
 		m_TextInputActive = active;
 		if (active && m_Focus != 0)
-			WuiTextFocus::Get().Set(this, m_Focus, WuiAccessibility::Get().CurrentWindow(), WuiAccessibility::Get().CurrentPanel());
+			WuiTextFocus::Get().Set(this, m_Focus, m_WindowKey, m_PanelId);
 		else if (!active)
 			WuiTextFocus::Get().BeginContextFrame(this);
 	}

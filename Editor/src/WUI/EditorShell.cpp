@@ -646,6 +646,8 @@ namespace World
 		m_Ctx = &ctx;
 		// AI 无障碍树:主窗口这一帧的节点从这里开始重新登记(见 WuiAccessibility)。
 		Wui::WuiAccessibility::Get().BeginFrame("main", ctx.ViewportSize());
+		// W9 review:文本焦点登记用宿主显式身份,不依赖无障碍开关。
+		ctx.SetWindowKey("main");
 		m_ViewportRect = {};
 		ctx.ClearDropTarget();
 		m_DropPreviewActive = false;
@@ -1057,6 +1059,7 @@ namespace World
 		Wui::PanelBackground(ctx, rect, m_Theme.PanelBg);
 		// 无障碍树:此后登记的控件归属该面板(ui.tree/state.dump 靠它区分面板)。
 		Wui::WuiAccessibility::Get().SetPanel(id);
+		ctx.SetPanelId(id);
 		const auto it = m_PanelRegistry.find(id);
 		if (it != m_PanelRegistry.end())
 			it->second->OnRender(ctx, rect, *this);

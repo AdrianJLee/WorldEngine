@@ -113,6 +113,7 @@ namespace World
 		// AI 无障碍:本窗口的节点重新登记 + 注入脚本点击(与真实鼠标同一条输入路径)。
 		const std::string windowKey = "float:" + m_Panel;
 		Wui::WuiAccessibility::Get().BeginFrame(windowKey, { size.x, size.y });
+		m_Context.SetWindowKey(windowKey);
 		Wui::WuiScriptedInput::Get().Apply(windowKey, input);
 		m_Context.BeginFrame(input);
 		RenderTabBar(m_Context, { 0.0f, 0.0f, size.x, size.y });

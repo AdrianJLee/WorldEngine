@@ -130,7 +130,9 @@ namespace World::Wui
 	int WuiTextBuffer::AdvanceColumn(int column, uint32_t codepoint) const
 	{
 		if (codepoint == '\t')
-			return (column / 4 + 1) * 4;
+			// W9 review:后端按"固定 4 空格宽"度量 tab(无列上下文),这里必须同口径,
+			// 否则含 tab 的行列号/上下移动与渲染不一致。
+			return column + 4;
 		if (codepoint == '\r')
 			return column;
 		return column + 1;
