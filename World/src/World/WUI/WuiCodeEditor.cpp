@@ -591,6 +591,14 @@ namespace World::Wui
 			completionRequest = { true, true, true };
 		else if (focused && (textHadSeparator || typedVisible || keepPopupOpen))
 			completionRequest = { true, false, textHadSeparator };
+		else if (focused && popupVisibleAtFrameStart
+			&& (ctx.WasKeyTriggered(KeyCodes::Backspace) || ctx.WasKeyTriggered(KeyCodes::Delete)))
+		{
+			// 删除同样要刷新候选:否则删掉一个字母后列表还停在旧前缀的候选
+			// (用户实测"输入一个字母后删除,提示还是原来的")。前缀变空/不再有意义时,
+			// 下面的 meaningfulPrefix 检查会让列表自动关闭。
+			completionRequest = { true, false, false };
+		}
 
 		// ---- W9.5 补全查询:字符串/注释内不弹(用高亮 token 判定,不数引号)----
 		const int caretLine = buffer.LineOfOffset(buffer.Caret());

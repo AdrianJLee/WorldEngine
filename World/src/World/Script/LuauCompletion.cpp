@@ -809,11 +809,28 @@ namespace World
 		if (dedupe)
 		{
 			unique.reserve(pool.size());
-			std::unordered_set<std::string> seen;
-			seen.reserve(pool.size() * 2);
+			std::unordered_map<std::string, std::size_t> indexByName;
+			indexByName.reserve(pool.size() * 2);
+			// 同名成员取"信息更全"的一条:文件类里裸写的 `function PlayerScript:OnDestroy()`
+			// 没有类型/文档,不能盖掉 WorldScript 注解里带 `fun(self)` 与说明的同名条目
+			// (用户实测:列表里 OnDestroy 没有类型也没有注释)。
+			const auto infoScore = [](const LuauCompletionItem& item)
+			{
+				return (item.Doc.empty() ? 0 : 2) + (item.Type.empty() ? 0 : 1);
+			};
 			for (const LuauCompletionItem* item : pool)
-				if (seen.insert(LowerCopy(item->Name)).second)
+			{
+				const std::string key = LowerCopy(item->Name);
+				const auto found = indexByName.find(key);
+				if (found == indexByName.end())
+				{
+					indexByName.emplace(key, unique.size());
 					unique.push_back(item);
+					continue;
+				}
+				if (infoScore(*item) > infoScore(*unique[found->second]))
+					unique[found->second] = item;
+			}
 			candidates = &unique;
 		}
 

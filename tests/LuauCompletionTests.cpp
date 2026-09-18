@@ -410,6 +410,8 @@ int main()
 				"    local foo = 1\n"
 				"end\n"
 				"\n"
+				"function ExampleScript:OnDestroy() end\n"
+				"\n"
 				"function bar() end\n"
 				"Thing = {}\n"
 				"return ExampleScript\n";
@@ -429,6 +431,12 @@ int main()
 			CHECK(HasName(items, "Speed"));        // 文件 ---@field
 			CHECK(HasName(items, "OnUpdate"));     // 文件方法
 			CHECK(HasName(items, "OnDestroy"));    // WorldScript 基类成员
+			const LuauCompletionItem* onDestroy = FindName(items, "OnDestroy");
+			CHECK(onDestroy != nullptr);
+			// 文件里裸写的 OnDestroy 没有类型/文档:合并后必须保留 WorldScript 注解里的信息
+			// (用户实测:列表里 OnDestroy 曾经没有类型也没有注释——同名成员"先到先得"把它盖掉了)。
+			CHECK(onDestroy->Type == "fun(self: WorldScript)");
+			CHECK(onDestroy->Doc.find("Cleanup callback") != std::string::npos);
 			CHECK(HasName(items, "entity"));       // WorldScript 字段
 			const LuauCompletionItem* speed = FindName(items, "Speed");
 			CHECK(speed != nullptr);

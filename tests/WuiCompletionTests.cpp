@@ -212,6 +212,18 @@ int main()
 			TypeChars(ctx, buffer, editorRect, options, { 'b' });
 			CHECK(probe.Prefixes.back() == "ui.b");
 			CHECK(FindSuggest(HashId("test.suggest.0")) != nullptr);
+
+			// 删除同样要刷新候选(用户实测:输入一个字母后删除,列表还停在旧前缀)。
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Backspace);
+			CHECK(buffer.Text() == "local ui = {}\nui.");
+			CHECK(probe.Prefixes.back() == "ui.");
+			CHECK(FindSuggest(HashId("test.suggest.0")) != nullptr);
+			// 删到空前缀 → 列表关闭(空行/无意义前缀不查询)。
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Backspace);   // 删 '.'
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Backspace);   // 删 'i'
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Backspace);   // 删 'u'
+			CHECK(buffer.Text() == "local ui = {}\n");
+			CHECK(FindSuggest(HashId("test.suggest.status")) == nullptr);
 		}
 		WuiAccessibility::Get().Clear();
 
