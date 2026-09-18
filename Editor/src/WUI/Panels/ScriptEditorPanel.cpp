@@ -188,6 +188,10 @@ namespace World
 	{
 		m_Status = std::move(text);
 		m_StatusIsError = error;
+		// 任何显式状态都接管状态行:语法检查的"通过"提示只用于收尾它自己先前的错误,
+		// 不得覆盖保存/重载/冲突等用户动作反馈(实测:自动重载提示 0.3s 后被
+		// "语法检查通过"吃掉,用户看不到文件已被外部改动重新载入)。
+		m_StatusIsSyntax = false;
 	}
 
 	void ScriptEditorPanel::LoadFromDisk()
@@ -465,10 +469,7 @@ namespace World
 			{
 				m_ErrorLine = 0;
 				if (m_StatusIsSyntax)
-				{
-					m_StatusIsSyntax = false;
 					SetStatus("语法检查通过", false);
-				}
 			}
 			else
 			{
@@ -476,13 +477,13 @@ namespace World
 				m_ErrorLine = syntaxError.Line > 0
 					? std::max(1, std::min(syntaxError.Line, static_cast<int>(m_Buffer.LineCount())))
 					: 1;
-				m_StatusIsSyntax = true;
 				std::string message = "语法错误";
 				if (syntaxError.Line > 0)
 					message += " L" + std::to_string(syntaxError.Line);
 				if (!syntaxError.Message.empty())
 					message += ": " + syntaxError.Message;
 				SetStatus(std::move(message), true);
+				m_StatusIsSyntax = true;
 			}
 		}
 

@@ -64,12 +64,10 @@ namespace World::Wui
 	WuiRhiBackend::WuiRhiBackend()
 	{
 		m_Faces.resize(5);
-		// 真实字形度量钩子:WuiContext::MeasureTextWidth / WuiCodeEditor 的命中测试、
-		// 行宽与 caret 定位都走这里;headless 测试可注入假度量。
-		SetTextMeasureHook(this, [this](std::string_view text, float fontSize, WuiFontFamily family)
-		{
-			return MeasureText(text, fontSize, family, false);
-		});
+		// 度量钩子**不在这里注册**:构造时字体还没加载(EnsureResources 才加载),
+		// 未加载字体的后端会让 MeasureText 退化成 0.6em 估算;如果它最后注册,
+		// 整个编辑器的排版/光标就都用估算值,而绘制用真实字形 → 每个 token 前出现
+		// 累积空隙(用户实测:代码里操作符前像多了两三个空格)。见 EnsureResources。
 	}
 
 	WuiRhiBackend::~WuiRhiBackend()
@@ -285,6 +283,12 @@ namespace World::Wui
 			atlasDesc.Usage = Rhi::TextureUsageSampled;
 			face.AtlasTexture = device->CreateTexture(atlasDesc);
 		}
+		// 字体加载完成后再注册度量钩子(WuiContext::MeasureTextWidth / WuiCodeEditor 的
+		// 命中测试、行宽与 caret 定位都走这里);幂等:设备重建时重新注册。
+		SetTextMeasureHook(this, [this](std::string_view text, float fontSize, WuiFontFamily family)
+		{
+			return MeasureText(text, fontSize, family, false);
+		});
 		m_Vertices.clear();
 		m_Indices.clear();
 		m_ActiveTexture = m_WhiteTexture;
