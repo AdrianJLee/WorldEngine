@@ -92,7 +92,7 @@ namespace World::Wui
 		struct Entry
 		{
 			WuiId Id = 0;
-			std::string Window; // "main" / "float:<面板>"(来自 WuiAccessibility,关闭控制通道时可能为空)
+			std::string Window; // "main" / "float:<面板>"(WuiContext::SetWindowKey 显式登记,不依赖控制通道)
 			std::string Panel;  // 面板 id
 		};
 
