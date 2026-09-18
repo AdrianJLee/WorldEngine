@@ -89,6 +89,33 @@ namespace World::Wui
 		m_SavedState = m_CurrentState;
 	}
 
+	bool WuiTextBuffer::ReplaceAll(std::string text)
+	{
+		if (text == m_Text)
+			return false;
+		const auto isContinuation = [](char c) { return (static_cast<unsigned char>(c) & 0xC0u) == 0x80u; };
+		// 最长公共前缀/后缀(不在 UTF-8 序列中间断开),中间差异作为一次 Replace 提交。
+		size_t prefix = 0;
+		const size_t maxPrefix = std::min(m_Text.size(), text.size());
+		while (prefix < maxPrefix && m_Text[prefix] == text[prefix])
+			++prefix;
+		while (prefix > 0 && (prefix >= m_Text.size() || prefix >= text.size()
+			|| isContinuation(m_Text[prefix]) || isContinuation(text[prefix])))
+			--prefix;
+		size_t suffix = 0;
+		while (suffix < m_Text.size() - prefix && suffix < text.size() - prefix
+			&& m_Text[m_Text.size() - 1 - suffix] == text[text.size() - 1 - suffix])
+			++suffix;
+		while (suffix > 0 && (isContinuation(text[text.size() - suffix])
+			|| isContinuation(m_Text[m_Text.size() - suffix])))
+			--suffix;
+		std::string erased = m_Text.substr(prefix, m_Text.size() - prefix - suffix);
+		std::string inserted = text.substr(prefix, text.size() - prefix - suffix);
+		CommitEdit(EditKind::Replace, prefix, std::move(erased), std::move(inserted),
+			std::min(m_Caret, text.size()), std::min(m_Anchor, text.size()));
+		return true;
+	}
+
 	void WuiTextBuffer::RebuildLines()
 	{
 		m_LineStarts.clear();

@@ -96,6 +96,8 @@ namespace World::Wui
 		bool Redo();
 		// 关闭当前合并组:下一次编辑另起一步。
 		void BreakUndoGroup() { m_UndoOpen = false; }
+		// 整篇替换(格式化等批量改写):只产生**一次**撤销步;返回是否有变化。
+		bool ReplaceAll(std::string text);
 
 		// 码点边界(offset 必须落在边界上;不在边界上时向前对齐)。
 		static size_t PrevCodepointBoundary(const std::string& text, size_t offset);

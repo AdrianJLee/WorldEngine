@@ -53,6 +53,8 @@ namespace World
 		void ReloadSceneInstances(PanelHost& host);
 		// W9.5:懒加载入库 WorldEngineAPI.luau 补全索引;失败只报一次并关闭补全。
 		void EnsureCompletionReady();
+		// W9.7:轻量格式化(4 空格缩进 + 去行尾空白),整篇一次撤销步。
+		void ApplyFormat();
 		void SetStatus(std::string text, bool error);
 
 		std::string m_PanelId;      // "script:<逻辑路径>"
@@ -76,6 +78,13 @@ namespace World
 		bool m_CompletionStubFailed = false;
 		// W9:代码字号(会话内记忆)。Ctrl+滚轮 / Ctrl+± / Ctrl+0 调整。
 		float m_FontSize = 14.0f;
+		// W9.7:防抖语法检查与出错行标记(1-based;0 = 无错误)。
+		int m_ErrorLine = 0;
+		uint64_t m_SyntaxCheckedRevision = ~0ull;
+		uint64_t m_SyntaxDueFrame = 0;
+		bool m_SyntaxScheduled = false;
+		bool m_StatusIsSyntax = false;
+		bool m_PendingFormat = false;
 		// OnShortcut 只置位,帧内消费。
 		bool m_PendingSave = false;
 		bool m_PendingReload = false;

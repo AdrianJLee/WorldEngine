@@ -1095,6 +1095,15 @@ namespace World::Wui
 			const std::string_view lineView = LineView(buffer, line, lineStart);
 			if (line == drawCaretLine)
 				ctx.Commands().push_back({ WuiDrawKind::Rect, { textRect.X, lineY, textRect.W, lineHeight }, kCurrentLine, 0.0f });
+			// W9.7 语法错误行:红色底 + 下划线(与当前行高亮叠加,顺序在后更醒目)。
+			if (line == options.ErrorLine)
+			{
+				ctx.Commands().push_back({ WuiDrawKind::Rect, { textRect.X, lineY, textRect.W, lineHeight },
+					{ 0.55f, 0.16f, 0.16f, 0.22f }, 0.0f });
+				ctx.Commands().push_back({ WuiDrawKind::Rect,
+					{ textRect.X, lineY + lineHeight - 2.0f, textRect.W, 2.0f },
+					{ 0.85f, 0.25f, 0.25f, 0.9f }, 0.0f });
+			}
 
 			// 行号栏
 			const std::string number = std::to_string(line + 1);

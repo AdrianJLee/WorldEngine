@@ -5,6 +5,8 @@
 #include "World/Core/KeyCodes.h"
 #include "World/Scene/Components.h"
 #include "World/Script/HotReload.h"
+#include "World/Script/LuauFormatter.h"
+#include "World/Script/LuauSyntax.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
@@ -319,6 +321,22 @@ namespace World
 		ReloadSceneInstances(host);
 	}
 
+	void ScriptEditorPanel::ApplyFormat()
+	{
+		if (!m_DiskBacked)
+			return;
+		const std::size_t beforeBytes = m_Buffer.Text().size();
+		const std::string formatted = FormatLuauSource(m_Buffer.Text());
+		if (m_Buffer.ReplaceAll(formatted))
+		{
+			SetStatus("已格式化(4 空格缩进 + 去行尾空白)", false);
+			WLD_CORE_INFO("[script-editor] formatted '{0}' ({1} -> {2} bytes)",
+				m_LogicalPath, beforeBytes, m_Buffer.Text().size());
+		}
+		else
+			SetStatus("格式无变化", false);
+	}
+
 	void ScriptEditorPanel::ApplyReloadFromDisk(PanelHost& host)
 	{
 		if (!m_DiskBacked)
@@ -389,16 +407,21 @@ namespace World
 
 	bool ScriptEditorPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
 	{
-		if (!ctrl || shift || alt)
+		if (!ctrl || alt)
 			return false;
-		if (keyCode == KeyCodes::S)
+		if (keyCode == KeyCodes::S && !shift)
 		{
 			m_PendingSave = true; // 事件派发期只置位:文档修改统一在 UI 帧内(OnRender)执行
 			return true;
 		}
-		if (keyCode == KeyCodes::R)
+		if (keyCode == KeyCodes::R && !shift)
 		{
 			m_PendingReload = true;
+			return true;
+		}
+		if (keyCode == KeyCodes::F && shift)
+		{
+			m_PendingFormat = true;   // Ctrl+Shift+F:轻量格式化
 			return true;
 		}
 		return false;
@@ -420,7 +443,48 @@ namespace World
 			m_PendingSave = false;
 			ApplySave(host);
 		}
+		if (m_PendingFormat)
+		{
+			m_PendingFormat = false;
+			ApplyFormat();
+		}
 		PollExternalChange();
+
+		// W9.7 编辑防抖语法检查(≈300ms @60fps):状态行给出第一条错误,出错行由编辑器标红。
+		if (!readOnly && m_Buffer.Revision() != m_SyntaxCheckedRevision)
+		{
+			m_SyntaxCheckedRevision = m_Buffer.Revision();
+			m_SyntaxDueFrame = ctx.Frame() + 18;
+			m_SyntaxScheduled = true;
+		}
+		if (m_SyntaxScheduled && ctx.Frame() >= m_SyntaxDueFrame)
+		{
+			m_SyntaxScheduled = false;
+			LuauSyntaxError syntaxError;
+			if (CheckLuauSyntax(m_Buffer.Text(), m_LogicalPath.c_str(), &syntaxError))
+			{
+				m_ErrorLine = 0;
+				if (m_StatusIsSyntax)
+				{
+					m_StatusIsSyntax = false;
+					SetStatus("语法检查通过", false);
+				}
+			}
+			else
+			{
+				// Luau 的 "got <eof>" 会报到尾换行后的空行:按缓冲行数夹取,保证标记行存在。
+				m_ErrorLine = syntaxError.Line > 0
+					? std::max(1, std::min(syntaxError.Line, static_cast<int>(m_Buffer.LineCount())))
+					: 1;
+				m_StatusIsSyntax = true;
+				std::string message = "语法错误";
+				if (syntaxError.Line > 0)
+					message += " L" + std::to_string(syntaxError.Line);
+				if (!syntaxError.Message.empty())
+					message += ": " + syntaxError.Message;
+				SetStatus(std::move(message), true);
+			}
+		}
 
 		Wui::PanelBackground(ctx, rect, { 0.09f, 0.095f, 0.105f, 1.0f });
 
@@ -440,6 +504,8 @@ namespace World
 			ApplySave(host);
 		if (button("script.revert", 80.0f, "Revert", !readOnly && m_DiskBacked))
 			ApplyReloadFromDisk(host);
+		if (button("script.format", 82.0f, "Format", !readOnly))
+			ApplyFormat();
 		if (button("script.close", 74.0f, "Close", true))
 			host.CloseEditorPanel(m_PanelId); // 与 Window 菜单同一条开关路径(附加中 → 关闭并摘标签)
 
@@ -523,6 +589,7 @@ namespace World
 		Wui::WuiCodeEditorOptions options;
 		options.FontSize = m_FontSize;
 		options.LineHeight = std::round(m_FontSize * (20.0f / 14.0f));
+		options.ErrorLine = (m_ErrorLine > 0) ? m_ErrorLine - 1 : -1;
 		options.ReadOnly = readOnly;
 		options.Highlight = [this](std::string_view text, std::vector<Wui::WuiCodeToken>& out)
 		{

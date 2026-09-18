@@ -54,6 +54,8 @@ namespace World::Wui
 		// word = 鼠标下的标识符。返回 true 时用 out 的 Name/Type/Doc 画提示框;空 = 不提示。
 		std::function<bool(std::string_view linePrefix, std::string_view word,
 			World::LuauCompletionItem& out)> Hover;
+		// W9.7 语法错误行(0-based;-1 = 无):画红色底 + 下划线。
+		int ErrorLine = -1;
 	};
 
 	struct WuiCodeEditorResult

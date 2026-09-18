@@ -20,6 +20,9 @@
 #include "World/Script/BindServices.h"
 #include "World/Script/BindUI.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Script/LuauFormatter.h"
+#include "World/Script/LuauSyntax.h"
+#include "World/WUI/WuiTextBuffer.h"
 
 #include "Generated/Game/GameSchemaRegistration.h"
 
@@ -261,6 +264,61 @@ namespace
 		World::Schema::UnregisterGameSchemaModule(context.Schemas());
 	}
 
+	// ---- W9.7:语法检查 + 轻量格式化 ----
+
+	void LuauSyntaxFlagsErrors()
+	{
+		World::LuauSyntaxError error;
+		CHECK(World::CheckLuauSyntax("local x = 1\nreturn x\n", "probe", &error));
+		CHECK(!World::CheckLuauSyntax("local x = 1\nlocal y = \n", "probe", &error));
+		// Luau 对 "got <eof>" 报的是 EOF 所在行(带尾换行 = 第 3 行);调用方按缓冲行数夹取。
+		CHECK(error.Line == 3);
+		CHECK(!error.Message.empty());
+	}
+
+	void LuauFormatterReindentsAndTrims()
+	{
+		const std::string messy =
+			"   local a = 1   \n"
+			" function f()\n"
+			"      if a then\n"
+			"    return a\n"
+			"   else\n"
+			" return 0\n"
+			"     end\n"
+			"end\n";
+		const std::string formatted = World::FormatLuauSource(messy);
+		const std::string expected =
+			"local a = 1\n"
+			"function f()\n"
+			"    if a then\n"
+			"        return a\n"
+			"    else\n"
+			"        return 0\n"
+			"    end\n"
+			"end\n";
+		CHECK(formatted == expected);
+
+		// 长字符串内部原样保留(缩进/行尾空白都不改)。
+		const std::string raw =
+			"local s = [[\n"
+			"   keep   me   \n"
+			"]]\n";
+		CHECK(World::FormatLuauSource(raw) == raw);
+	}
+
+	void ReplaceAllIsSingleUndo()
+	{
+		World::Wui::WuiTextBuffer buffer;
+		buffer.SetText("a\nb\n");
+		CHECK(buffer.ReplaceAll("a\nB\n"));
+		CHECK(buffer.Text() == "a\nB\n");
+		CHECK(buffer.Undo());
+		CHECK(buffer.Text() == "a\nb\n");
+		CHECK(buffer.Redo());
+		CHECK(buffer.Text() == "a\nB\n");
+	}
+
 	int RunAll()
 	{
 		const std::pair<const char*, void(*)()> tests[] = {
@@ -270,6 +328,9 @@ namespace
 			{ "ResolveScriptDiskPath rejects package-sourced scripts", ResolveDiskPathRejectsPackageSource },
 			{ "LSP scaffold is created if missing and never overwritten", ScaffoldCreateIfMissing },
 			{ "committed WorldEngineAPI.luau matches the editor renderer", CommittedStubMatchesEditorRendering },
+			{ "CheckLuauSyntax flags the error line", LuauSyntaxFlagsErrors },
+			{ "FormatLuauSource reindents/trims but keeps long strings", LuauFormatterReindentsAndTrims },
+			{ "WuiTextBuffer::ReplaceAll is a single undo step", ReplaceAllIsSingleUndo },
 		};
 		int failures = 0;
 		for (const auto& [name, test] : tests)
