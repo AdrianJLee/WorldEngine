@@ -61,6 +61,14 @@ namespace World::Wui
 		Hand,
 	};
 
+	// 文本绘制/度量用的字体族:Ui = Montserrat(+Noto 回落),Monospace = JetBrains Mono(+Noto 回落)。
+	// 后端按 family 选面;缺字形的码点回落 Noto(逐码点选面,中英混排不会用错宽度)。
+	enum class WuiFontFamily : uint8_t
+	{
+		Ui,
+		Monospace,
+	};
+
 	// ---- 样式与级联 ----
 	struct WuiStyle
 	{

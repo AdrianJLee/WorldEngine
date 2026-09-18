@@ -25,7 +25,7 @@ namespace World::Wui
 	{
 		constexpr uint32_t MaxQuads = 20000;
 
-		void DecodeUtf8(const std::string& text, std::vector<uint32_t>& codepoints, std::vector<int>& byteOffsets)
+		void DecodeUtf8(std::string_view text, std::vector<uint32_t>& codepoints, std::vector<int>& byteOffsets)
 		{
 			codepoints.clear();
 			byteOffsets.clear();
@@ -63,12 +63,19 @@ namespace World::Wui
 
 	WuiRhiBackend::WuiRhiBackend()
 	{
-		m_Faces.resize(3);
+		m_Faces.resize(5);
+		// 真实字形度量钩子:WuiContext::MeasureTextWidth / WuiCodeEditor 的命中测试、
+		// 行宽与 caret 定位都走这里;headless 测试可注入假度量。
+		SetTextMeasureHook(this, [this](std::string_view text, float fontSize, WuiFontFamily family)
+		{
+			return MeasureText(text, fontSize, family, false);
+		});
 	}
 
 	WuiRhiBackend::~WuiRhiBackend()
 	{
 		ReleaseDeviceResources();
+		ClearTextMeasureHook(this);
 		for (FontFace& face : m_Faces)
 			delete face.Info;
 	}
@@ -251,10 +258,12 @@ namespace World::Wui
 		const unsigned char white[4] = { 255, 255, 255, 255 };
 		m_WhiteTexture->SetData(white, 4);
 
-		const std::string fontPaths[3] = {
+		const std::string fontPaths[5] = {
 			std::string(WLD_EDITOR_DIR) + "assets/fonts/Montserrat/static/Montserrat-Regular.ttf",
 			std::string(WLD_EDITOR_DIR) + "assets/fonts/Montserrat/static/Montserrat-Bold.ttf",
 			std::string(WLD_EDITOR_DIR) + "assets/fonts/NotoSansSC/NotoSansSC-Subset.ttf",
+			std::string(WLD_EDITOR_DIR) + "assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf",
+			std::string(WLD_EDITOR_DIR) + "assets/fonts/JetBrainsMono/JetBrainsMono-Bold.ttf",
 		};
 		for (size_t i = 0; i < m_Faces.size(); ++i)
 		{
@@ -282,12 +291,28 @@ namespace World::Wui
 		m_TextureChanged = true;
 	}
 
-	WuiRhiBackend::FontFace& WuiRhiBackend::FaceFor(const std::string& text, bool bold)
+	WuiRhiBackend::FontFace* WuiRhiBackend::PrimaryFace(WuiFontFamily family, bool bold)
 	{
-		for (unsigned char c : text)
-			if (c > 127)
-				return m_Faces[2];
-		return bold ? m_Faces[1] : m_Faces[0];
+		if (m_Faces.size() < 5)
+			return nullptr;
+		if (family == WuiFontFamily::Monospace)
+			return &m_Faces[bold ? 4 : 3];
+		return &m_Faces[bold ? 1 : 0];
+	}
+
+	WuiRhiBackend::FontFace* WuiRhiBackend::FaceForCodepoint(WuiFontFamily family, bool bold, uint32_t codepoint)
+	{
+		FontFace* primary = PrimaryFace(family, bold);
+		// '\t' 的 advance 是特判的(4 空格),'\r'/'\n' 不可见:一律走主面。
+		if (codepoint == '\t' || codepoint == '\r' || codepoint == '\n' || codepoint == 0)
+			return primary;
+		// 主面缺该字形时回落 Noto(CJK、以及 JetBrains Mono 未覆盖的码位)。
+		if (primary && primary->Info && stbtt_FindGlyphIndex(primary->Info, static_cast<int>(codepoint)) != 0)
+			return primary;
+		FontFace* fallback = m_Faces.size() > 2 ? &m_Faces[2] : nullptr;
+		if (fallback && fallback->Info)
+			return fallback;
+		return primary ? primary : fallback;
 	}
 
 	WuiRhiBackend::Glyph& WuiRhiBackend::Bake(FontFace& face, uint32_t codepoint)
@@ -341,16 +366,23 @@ namespace World::Wui
 		return result.first->second;
 	}
 
-	float WuiRhiBackend::AdvanceOf(FontFace& face, uint32_t codepoint, float fontSize)
+	float WuiRhiBackend::AdvanceOf(FontFace* face, uint32_t codepoint, float fontSize)
 	{
-		if (!face.Info)
-			return fontSize * 0.5f;
+		// CRLF 的 '\r' 原样保留在文本里,但不占宽度(渲染与列计算都视为不可见)。
+		if (codepoint == '\r' || codepoint == '\n')
+			return 0.0f;
+		if (!face || !face->Info)
+			return fontSize * (codepoint < 0x80 ? 0.6f : 1.0f);
 		int advance = 0;
-		stbtt_GetCodepointHMetrics(face.Info, codepoint, &advance, nullptr);
-		return advance * stbtt_ScaleForPixelHeight(face.Info, fontSize);
+		// Tab 策略:文件里已有的 '\t' 原样保留,度量按 4 空格宽度。
+		stbtt_GetCodepointHMetrics(face->Info, codepoint == '\t' ? ' ' : static_cast<int>(codepoint), &advance, nullptr);
+		float width = advance * stbtt_ScaleForPixelHeight(face->Info, fontSize);
+		if (codepoint == '\t')
+			width *= 4.0f;
+		return width;
 	}
 
-	float WuiRhiBackend::Measure(FontFace& face, const std::string& text, float fontSize, int byteOffset)
+	float WuiRhiBackend::MeasureText(std::string_view text, float fontSize, WuiFontFamily family, bool bold, int byteOffset)
 	{
 		std::vector<uint32_t> codepoints;
 		std::vector<int> offsets;
@@ -360,7 +392,7 @@ namespace World::Wui
 		{
 			if (byteOffset >= 0 && offsets[i] >= byteOffset)
 				break;
-			width += AdvanceOf(face, codepoints[i], fontSize);
+			width += AdvanceOf(FaceForCodepoint(family, bold, codepoints[i]), codepoints[i], fontSize);
 		}
 		return width;
 	}
@@ -507,20 +539,20 @@ namespace World::Wui
 
 	void WuiRhiBackend::DrawText(const WuiDrawCommand& command)
 	{
-		FontFace& face = FaceFor(command.Text, command.Bold);
-		if (!face.Info)
-			return;
 		const float fontSize = command.FontSize > 0 ? command.FontSize : 15.0f;
-		const float scale = stbtt_ScaleForPixelHeight(face.Info, fontSize);
-		const float sizeRatio = fontSize / face.BaseSize;
-		int ascent = 0;
-		stbtt_GetFontVMetrics(face.Info, &ascent, nullptr, nullptr);
-		const float baseline = command.Rect.Y + ascent * scale;
+		FontFace* baselineFace = PrimaryFace(command.Family, command.Bold);
+		float baseline = command.Rect.Y + fontSize * 0.8f;
+		if (baselineFace && baselineFace->Info)
+		{
+			int ascent = 0;
+			stbtt_GetFontVMetrics(baselineFace->Info, &ascent, nullptr, nullptr);
+			baseline = command.Rect.Y + ascent * stbtt_ScaleForPixelHeight(baselineFace->Info, fontSize);
+		}
 
 		if (command.TextSelStart >= 0 && command.TextSelEnd > command.TextSelStart)
 		{
-			const float x0 = Measure(face, command.Text, fontSize, command.TextSelStart);
-			const float x1 = Measure(face, command.Text, fontSize, command.TextSelEnd);
+			const float x0 = MeasureText(command.Text, fontSize, command.Family, command.Bold, command.TextSelStart);
+			const float x1 = MeasureText(command.Text, fontSize, command.Family, command.Bold, command.TextSelEnd);
 			PushSolidQuad({ command.Rect.X + x0, command.Rect.Y, x1 - x0, fontSize },
 				{ 0.3f, 0.5f, 0.9f, 0.45f });
 		}
@@ -529,22 +561,40 @@ namespace World::Wui
 		std::vector<int> offsets;
 		DecodeUtf8(command.Text, codepoints, offsets);
 		float pen = command.Rect.X;
-		SetActiveTexture(face.AtlasTexture);
 		for (uint32_t cp : codepoints)
 		{
-			Glyph& glyph = Bake(face, cp);
-			const float w = glyph.W * sizeRatio;
-			const float h = glyph.H * sizeRatio;
-			if (w > 0 && h > 0)
-				PushQuad({ pen + glyph.OffsetX * sizeRatio, baseline + glyph.OffsetY * sizeRatio, w, h },
-					command.Color,
-					{ glyph.X / face.AtlasW, glyph.Y / face.AtlasH, glyph.W / face.AtlasW, glyph.H / face.AtlasH });
-			pen += glyph.Advance * sizeRatio;
+			FontFace* face = FaceForCodepoint(command.Family, command.Bold, cp);
+			const float advance = AdvanceOf(face, cp, fontSize);
+			// '\t' 按 4 空格推进但无字形;'\r'/'\n' 不可见。
+			if (face && face->Info && cp != '\t' && cp != '\r' && cp != '\n')
+			{
+				Glyph& glyph = Bake(*face, cp);
+				const float sizeRatio = fontSize / face->BaseSize;
+				const float w = glyph.W * sizeRatio;
+				const float h = glyph.H * sizeRatio;
+				if (w > 0 && h > 0)
+				{
+					SetActiveTexture(face->AtlasTexture);
+					PushQuad({ pen + glyph.OffsetX * sizeRatio, baseline + glyph.OffsetY * sizeRatio, w, h },
+						command.Color,
+						{ glyph.X / face->AtlasW, glyph.Y / face->AtlasH, glyph.W / face->AtlasW, glyph.H / face->AtlasH });
+				}
+			}
+			pen += advance;
+		}
+
+		// W9 代码编辑器 caret:按真实度量定位,0.5s 闪烁,1.5px 宽。
+		if (command.TextCaretByte >= 0)
+		{
+			const float caretX = command.Rect.X + MeasureText(command.Text, fontSize, command.Family, command.Bold, command.TextCaretByte);
+			const bool visible = std::fmod(glfwGetTime(), 1.0) < 0.5;
+			if (visible)
+				PushSolidQuad({ caretX, command.Rect.Y, 1.5f, fontSize }, command.Color);
 		}
 
 		if (command.TextCursorByte >= 0)
 		{
-			const float cursorX = command.Rect.X + Measure(face, command.Text, fontSize, command.TextCursorByte);
+			const float cursorX = command.Rect.X + MeasureText(command.Text, fontSize, command.Family, command.Bold, command.TextCursorByte);
 			PushSolidQuad({ cursorX, command.Rect.Y, 1.0f, fontSize }, command.Color);
 		}
 	}
@@ -693,10 +743,14 @@ namespace World::Wui
 					std::vector<uint32_t> codepoints;
 					std::vector<int> offsets;
 					DecodeUtf8(command.Text, codepoints, offsets);
-					FontFace& face = FaceFor(command.Text, command.Bold);
-					if (face.Info)
-						for (uint32_t cp : codepoints)
-							Bake(face, cp);
+					for (uint32_t cp : codepoints)
+					{
+						if (cp == '\t' || cp == '\r' || cp == '\n')
+							continue;
+						FontFace* face = FaceForCodepoint(command.Family, command.Bold, cp);
+						if (face && face->Info)
+							Bake(*face, cp);
+					}
 				}
 		};
 		prebake(commands);

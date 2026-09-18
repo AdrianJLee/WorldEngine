@@ -79,10 +79,15 @@ namespace World::Wui
 		void ApplyScissor(const WuiRect& rect);
 		Rhi::Handle<Rhi::DescriptorSet> TextureSetFor(const Rhi::Handle<Rhi::Texture>& texture);
 
-		FontFace& FaceFor(const std::string& text, bool bold);
+		// 字体面索引:0 = Montserrat Regular,1 = Montserrat Bold,2 = NotoSansSC 子集(回落),
+		// 3 = JetBrains Mono Regular,4 = JetBrains Mono Bold。
+		FontFace* PrimaryFace(WuiFontFamily family, bool bold);
+		// 逐码点选面:主面缺该字形时回落 Noto('\t'/'\r'/'\n' 一律走主面,advance 特判)。
+		FontFace* FaceForCodepoint(WuiFontFamily family, bool bold, uint32_t codepoint);
 		Glyph& Bake(FontFace& face, uint32_t codepoint);
-		float Measure(FontFace& face, const std::string& text, float fontSize, int byteOffset = -1);
-		float AdvanceOf(FontFace& face, uint32_t codepoint, float fontSize);
+		float AdvanceOf(FontFace* face, uint32_t codepoint, float fontSize);
+		// 逐码点选面的度量;byteOffset >= 0 时只累计 [0, byteOffset) 的宽度。
+		float MeasureText(std::string_view text, float fontSize, WuiFontFamily family, bool bold, int byteOffset = -1);
 		void DrawText(const WuiDrawCommand& command);
 		void DrawRectCommand(const WuiDrawCommand& command, bool outline);
 		void DrawImageCommand(const WuiDrawCommand& command);

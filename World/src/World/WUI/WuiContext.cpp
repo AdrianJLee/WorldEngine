@@ -1,13 +1,132 @@
 #include "wldpch.h"
 #include "World/WUI/WuiContext.h"
+#include "World/WUI/WuiAccessibility.h"
 
 #include <chrono>
 
 namespace World::Wui
 {
+	namespace
+	{
+		struct TextMeasureHookState
+		{
+			void* Owner = nullptr;
+			WuiTextMeasureFn Fn;
+		};
+
+		TextMeasureHookState& MeasureHook()
+		{
+			static TextMeasureHookState hook;
+			return hook;
+		}
+
+		// 无钩子时的回退度量:ASCII 0.6em,其余 1.0em(与旧 CursorAtX 的启发式一致,
+		// 但按码点解码,不会把多字节串算成多个 ASCII)。
+		float FallbackAdvance(uint32_t codepoint, float fontSize)
+		{
+			return fontSize * (codepoint < 0x80 ? 0.6f : 1.0f);
+		}
+
+		template <typename Fn>
+		void ForEachCodepoint(std::string_view text, Fn&& fn)
+		{
+			size_t i = 0;
+			while (i < text.size())
+			{
+				const unsigned char c = static_cast<unsigned char>(text[i]);
+				uint32_t cp = c;
+				size_t length = 1;
+				if (c >= 0xF0) { length = 4; cp = c & 0x07u; }
+				else if (c >= 0xE0) { length = 3; cp = c & 0x0Fu; }
+				else if (c >= 0xC0) { length = 2; cp = c & 0x1Fu; }
+				if (i + length > text.size())
+				{
+					cp = 0xFFFD;
+					length = 1;
+				}
+				for (size_t k = 1; k < length; ++k)
+					cp = (cp << 6) | (static_cast<unsigned char>(text[i + k]) & 0x3Fu);
+				fn(cp);
+				i += length;
+			}
+		}
+	}
+
+	void SetTextMeasureHook(void* owner, WuiTextMeasureFn fn)
+	{
+		MeasureHook().Owner = owner;
+		MeasureHook().Fn = std::move(fn);
+	}
+
+	void ClearTextMeasureHook(void* owner)
+	{
+		if (MeasureHook().Owner == owner)
+		{
+			MeasureHook().Owner = nullptr;
+			MeasureHook().Fn = nullptr;
+		}
+	}
+
+	float MeasureTextWithHook(std::string_view utf8, float fontSize, WuiFontFamily family)
+	{
+		if (MeasureHook().Fn)
+			return MeasureHook().Fn(utf8, fontSize, family);
+		float width = 0;
+		ForEachCodepoint(utf8, [&](uint32_t cp) { width += FallbackAdvance(cp, fontSize); });
+		return width;
+	}
+
+	WuiTextFocus& WuiTextFocus::Get()
+	{
+		static WuiTextFocus instance;
+		return instance;
+	}
+
+	void WuiTextFocus::BeginContextFrame(const void* context)
+	{
+		m_Entries.erase(std::remove_if(m_Entries.begin(), m_Entries.end(),
+			[&](const Item& item) { return item.Context == context; }), m_Entries.end());
+	}
+
+	void WuiTextFocus::Set(const void* context, WuiId id, std::string window, std::string panel)
+	{
+		BeginContextFrame(context);
+		if (id == 0)
+			return;
+		Item item;
+		item.Context = context;
+		item.Info.Id = id;
+		item.Info.Window = std::move(window);
+		item.Info.Panel = std::move(panel);
+		m_Entries.push_back(std::move(item));
+	}
+
+	void WuiTextFocus::Clear()
+	{
+		m_Entries.clear();
+	}
+
+	const std::string& WuiTextFocus::Window() const
+	{
+		static const std::string empty;
+		return m_Entries.empty() ? empty : m_Entries.back().Info.Window;
+	}
+
+	const std::string& WuiTextFocus::Panel() const
+	{
+		static const std::string empty;
+		return m_Entries.empty() ? empty : m_Entries.back().Info.Panel;
+	}
+
 	WuiContext::WuiContext()
 	{
 		m_StyleStack.push_back({});
+	}
+
+	WuiContext::~WuiContext()
+	{
+		// 宿主销毁(窗口关闭)后不再有 BeginFrame 来重建登记,必须在这里摘掉。
+		WuiTextFocus::Get().BeginContextFrame(this);
 	}
 
 	void WuiContext::BeginFrame(const WuiInputState& input)
@@ -15,12 +134,28 @@ namespace World::Wui
 		m_Input = input;
 		m_ViewportSize = input.ViewportSize;
 		m_TextInputActive = false;
+		// 文本焦点每帧重建:上一帧的登记先失效,本帧聚焦的文本控件再登记。
+		WuiTextFocus::Get().BeginContextFrame(this);
 		m_Cursor = WuiCursor::Arrow;
 		m_Commands.clear();
 		m_OverlayCommands.clear();
 		m_OverlayDepth = 0;
 		m_HoverBlockers.clear();
 		++m_Frame;
+	}
+
+	void WuiContext::SetTextInputActive(bool active)
+	{
+		m_TextInputActive = active;
+		if (active && m_Focus != 0)
+			WuiTextFocus::Get().Set(this, m_Focus, WuiAccessibility::Get().CurrentWindow(), WuiAccessibility::Get().CurrentPanel());
+		else if (!active)
+			WuiTextFocus::Get().BeginContextFrame(this);
+	}
+
+	float WuiContext::MeasureTextWidth(std::string_view utf8, float fontSize, WuiFontFamily family) const
+	{
+		return World::Wui::MeasureTextWithHook(utf8, fontSize, family);
 	}
 
 	// 命中测试:矩形包含 + 不在上层遮挡区内。调用方(IsHovered/IsClicked/DropTarget/

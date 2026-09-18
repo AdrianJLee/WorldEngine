@@ -3,13 +3,16 @@
 #include "World/WUI/WuiCore.h"
 #include "World/WUI/WuiOperationLog.h"
 #include "World/WUI/WuiUndoStack.h"
+#include "World/Core/Export.h"
 #include "World/Core/Log.h"
 
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <typeinfo>
 #include <unordered_map>
 #include <vector>
@@ -62,6 +65,60 @@ namespace World::Wui
 		int TextCursorByte = -1;
 		// Quad 命令的 4 个顶点(屏幕坐标);其余命令忽略。
 		std::array<glm::vec2, 4> Vertices { glm::vec2 { 0, 0 }, glm::vec2 { 0, 0 }, glm::vec2 { 0, 0 }, glm::vec2 { 0, 0 } };
+		// W9:字体族选择(默认 Ui,追加在末尾保持既有聚合初始化兼容)。
+		WuiFontFamily Family = WuiFontFamily::Ui;
+		// W9:代码编辑器的闪烁 caret(逐行局部字节偏移,-1 = 不画)。与 TextCursorByte
+		// 的区别:该字段由后端做 0.5s 闪烁,且按真实度量画 1.5px。
+		int TextCaretByte = -1;
+	};
+
+	// ---- 文本度量钩子 ----
+	// WUI 核心是纯逻辑,不知道字体;渲染后端在初始化时注册真实字形度量,headless
+	// 测试可注入假度量(逐码点宽度自定)。未注册时回退为估算宽度(ASCII 0.6em,
+	// 其余 1.0em),保证纯逻辑路径不依赖后端。
+	using WuiTextMeasureFn = std::function<float(std::string_view utf8, float fontSize, WuiFontFamily family)>;
+	// owner 用于注销:只有注册者本人可以清除钩子(多后端/多窗口下不会互相踩)。
+	void WLD_API SetTextMeasureHook(void* owner, WuiTextMeasureFn fn);
+	void WLD_API ClearTextMeasureHook(void* owner);
+	float WLD_API MeasureTextWithHook(std::string_view utf8, float fontSize, WuiFontFamily family);
+
+	// ---- 全局文本焦点登记 ----
+	// 仿 WuiAccessibility:多个窗口(WuiContext 实例)共享一份登记,每帧由各窗口重建。
+	// 用途:GLFW 事件在 UI 帧之后分发,EditorLayer::OnKeyPressed 只能用"上一帧登记的
+	// 文本焦点"决定按键是给文本控件还是引擎全局快捷键(W9-2 的三层路由)。
+	class WLD_API WuiTextFocus
+	{
+	public:
+		struct Entry
+		{
+			WuiId Id = 0;
+			std::string Window; // "main" / "float:<面板>"(来自 WuiAccessibility,关闭控制通道时可能为空)
+			std::string Panel;  // 面板 id
+		};
+
+		static WuiTextFocus& Get();
+
+		// 每个窗口(上下文)在 BeginFrame 时调用:清掉本上下文上一帧的登记。
+		void BeginContextFrame(const void* context);
+		// 取得焦点的文本控件在绘制时调用(每帧重建)。
+		void Set(const void* context, WuiId id, std::string window, std::string panel);
+		void Clear();
+
+		// 当前是否存在持有焦点的文本控件。
+		bool Active() const { return !m_Entries.empty(); }
+		// 最近登记的文本焦点(多窗口同时有文本焦点时,以最后一次绘制登记为准);无则 nullptr。
+		const Entry* Current() const { return m_Entries.empty() ? nullptr : &m_Entries.back().Info; }
+		WuiId Id() const { return m_Entries.empty() ? 0 : m_Entries.back().Info.Id; }
+		const std::string& Window() const;
+		const std::string& Panel() const;
+
+	private:
+		struct Item
+		{
+			const void* Context = nullptr;
+			Entry Info;
+		};
+		std::vector<Item> m_Entries;
 	};
 
 	// 帧级上下文:输入、持久状态、样式栈、焦点、绘制命令。
@@ -69,6 +126,8 @@ namespace World::Wui
 	{
 	public:
 		WuiContext();
+		// 销毁时清掉本窗口的文本焦点登记:否则关掉的窗口会永远吞掉全局快捷键。
+		~WuiContext();
 
 		void BeginFrame(const WuiInputState& input);
 		void EndFrame();
@@ -110,8 +169,11 @@ namespace World::Wui
 
 		void SetFocus(WuiId id) { m_Focus = id; }
 		WuiId Focus() const { return m_Focus; }
-		void SetTextInputActive(bool active) { m_TextInputActive = active; }
+		// 文本输入态 + 全局文本焦点登记(聚焦的文本控件每帧调用一次 SetTextInputActive(true))。
+		void SetTextInputActive(bool active);
 		bool IsTextInputActive() const { return m_TextInputActive; }
+		// 文本度量(命中测试/行宽/横向滚动)。family 决定字体族,后端注册真实度量。
+		float MeasureTextWidth(std::string_view utf8, float fontSize, WuiFontFamily family = WuiFontFamily::Ui) const;
 		void SetCursor(WuiCursor cursor) { m_Cursor = cursor; }
 		WuiCursor Cursor() const { return m_Cursor; }
 		uint64_t Frame() const { return m_Frame; }
