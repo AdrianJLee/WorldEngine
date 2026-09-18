@@ -6,6 +6,7 @@
 #include "World/WUI/WuiDock.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLayoutStore.h"
+#include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/Widgets/WuiControls.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <functional>
+#include <initializer_list>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -29,6 +31,12 @@ namespace
 			throw std::runtime_error(std::string("line ") + std::to_string(line) + ": " + expression);
 	}
 #define CHECK(expression) Check(static_cast<bool>(expression), #expression, __LINE__)
+
+	// 码点序列字面量(CHECK 是宏,直接写 vector{...} 的花括号不会保护其中的逗号)。
+	std::vector<uint32_t> Codepoints(std::initializer_list<uint32_t> values)
+	{
+		return std::vector<uint32_t>(values);
+	}
 
 	bool Near(float a, float b)
 	{
@@ -853,6 +861,80 @@ int main()
 				ctx.EndFrame();
 			}
 			CHECK(!ctx.IsPopupOpen(id));
+		}
+
+		// 18. W9-3 脚本化文本注入:点击聚焦(两帧)→ 逐行注入字符。
+		{
+			WuiScriptedInput& scripted = WuiScriptedInput::Get();
+			WuiInputState input;
+
+			// 只有文本待注入的窗口(没有点击):下一帧直接写 TextInput,中文按码点写入。
+			scripted.QueueType("main", u8"你好");
+			CHECK(scripted.HasPending());
+			scripted.Apply("main", input);
+			CHECK(input.TextInput == Codepoints({ 0x4F60u, 0x597Du }));
+			CHECK(input.KeyDown.empty());
+			CHECK(!input.MouseClicked[0] && !input.MouseReleased[0]);
+			CHECK(!scripted.HasPending());
+			input = WuiInputState {};
+			scripted.Apply("main", input);
+			CHECK(input.TextInput.empty()); // 消费完即清空:没有注入时零行为变化
+
+			// 点击 + 多行文本:第 1 帧 press、第 2 帧 release、第 3 帧起每帧一行,
+			// 第 2 行起该帧先注入 Enter 键再写该行码点(多行内容走控件的换行路径)。
+			input = WuiInputState {};
+			scripted.QueueClick("main", { 40.0f, 50.0f });
+			scripted.QueueType("main", u8"ab\ncd\tef");
+			CHECK(scripted.HasPending());
+			scripted.Apply("main", input);
+			CHECK(input.MouseDown[0] && input.MouseClicked[0] && !input.MouseReleased[0]);
+			CHECK(Near(input.MousePos.x, 40.0f) && Near(input.MousePos.y, 50.0f));
+			CHECK(input.TextInput.empty()); // 文本不和点击同帧
+			input = WuiInputState {};
+			scripted.Apply("main", input);
+			CHECK(!input.MouseDown[0] && input.MouseReleased[0]);
+			CHECK(input.TextInput.empty());
+			CHECK(scripted.HasPending());
+			input = WuiInputState {};
+			scripted.Apply("main", input);
+			CHECK(input.TextInput == Codepoints({ 'a', 'b' }));
+			CHECK(input.KeyDown.empty()); // 第一行不注入 Enter
+			CHECK(scripted.HasPending());
+			input = WuiInputState {};
+			scripted.Apply("main", input);
+			CHECK(input.TextInput == Codepoints({ 'c', 'd', '\t', 'e', 'f' }));
+			CHECK(input.KeyDown == Codepoints({ World::KeyCodes::Enter }));
+			CHECK(!scripted.HasPending());
+			input = WuiInputState {};
+			scripted.Apply("main", input);
+			CHECK(input.TextInput.empty() && input.KeyDown.empty());
+
+			// CRLF:'\r' 并入换行、不写进 TextInput;别的窗口没有待注入内容时不受影响。
+			input = WuiInputState {};
+			scripted.QueueType("panel", u8"x\r\ny");
+			scripted.Apply("other", input);
+			CHECK(input.TextInput.empty());
+			CHECK(scripted.HasPending());
+			scripted.Apply("panel", input);
+			CHECK(input.TextInput == Codepoints({ 'x' }));
+			input = WuiInputState {};
+			scripted.Apply("panel", input);
+			CHECK(input.KeyDown == Codepoints({ World::KeyCodes::Enter }));
+			CHECK(input.TextInput == Codepoints({ 'y' }));
+			CHECK(!scripted.HasPending());
+
+			// 既有 click 逐帧语义不变(单独 QueueClick):press → release → 清空。
+			input = WuiInputState {};
+			scripted.QueueClick("win", { 1.0f, 2.0f });
+			scripted.Apply("win", input);
+			CHECK(input.MouseClicked[0] && !input.MouseReleased[0]);
+			input = WuiInputState {};
+			scripted.Apply("win", input);
+			CHECK(input.MouseReleased[0] && !input.MouseClicked[0]);
+			CHECK(!scripted.HasPending());
+			input = WuiInputState {};
+			scripted.Apply("win", input);
+			CHECK(!input.MouseClicked[0] && !input.MouseReleased[0] && input.TextInput.empty());
 		}
 
 		std::printf("World.Wui: all checks passed\n");

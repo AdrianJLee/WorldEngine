@@ -78,6 +78,17 @@ namespace World
 			}
 		}
 
+		// ui.type 的返回文案用"字符数":统计 UTF-8 码点数(中文按 1 个字符),与控件
+		// 收到的 TextInput 数量一致。
+		size_t Utf8CodepointCount(const std::string& text)
+		{
+			size_t count = 0;
+			for (char byte : text)
+				if ((static_cast<unsigned char>(byte) & 0xC0u) != 0x80u)
+					++count;
+			return count;
+		}
+
 		// 写文件类命令的路径白名单:相对路径落在构建输出目录,绝对路径必须位于
 		// 临时目录或当前工作目录之内 —— 控制通道不接受"写到系统任意位置"。
 		std::filesystem::path ResolveCapturePath(const std::string& raw, std::string* error)
@@ -215,6 +226,31 @@ namespace World
 				panel = "material:" + panel;
 			return panel;
 		};
+		// ui.invoke / ui.type 共用的无障碍节点解析(id 优先,其次 label(+kind));
+		// 失败时把与 ui.invoke 逐字相同的错误文案写进 message。
+		auto resolveNode = [&](std::string& message) -> const Wui::WuiAccessNode*
+		{
+			const Wui::WuiAccessibility& tree = Wui::WuiAccessibility::Get();
+			const Wui::WuiAccessNode* node = nullptr;
+			if (!arg("id").empty())
+				node = tree.Find(static_cast<Wui::WuiId>(std::strtoull(arg("id").c_str(), nullptr, 10)));
+			else
+				node = tree.FindByLabel(arg("label"), arg("kind"));
+			if (!node)
+			{
+				message = "no matching ui node (id/label); call ui.tree first";
+				return nullptr;
+			}
+			if (!node->Interactive || !node->Enabled)
+			{
+				message = node->Visible
+					? ("ui node is not interactive/enabled: " + node->Kind + " '" + node->Label + "'")
+					: ("ui node is off-screen (中心点不在窗口客户区内,窗口太小): " + node->Kind
+						+ " '" + node->Label + "' — 先 ui.resize 放大窗口");
+				return nullptr;
+			}
+			return node;
+		};
 
 		if (cmd == "hello")
 		{
@@ -259,23 +295,11 @@ namespace World
 		}
 		if (cmd == "ui.invoke")
 		{
-			const Wui::WuiAccessibility& tree = Wui::WuiAccessibility::Get();
-			const Wui::WuiAccessNode* node = nullptr;
-			if (!arg("id").empty())
-				node = tree.Find(static_cast<Wui::WuiId>(std::strtoull(arg("id").c_str(), nullptr, 10)));
-			else
-				node = tree.FindByLabel(arg("label"), arg("kind"));
+			std::string message;
+			const Wui::WuiAccessNode* node = resolveNode(message);
 			if (!node)
 			{
-				error = "no matching ui node (id/label); call ui.tree first";
-				return false;
-			}
-			if (!node->Interactive || !node->Enabled)
-			{
-				error = node->Visible
-					? ("ui node is not interactive/enabled: " + node->Kind + " '" + node->Label + "'")
-					: ("ui node is off-screen (中心点不在窗口客户区内,窗口太小): " + node->Kind
-						+ " '" + node->Label + "' — 先 ui.resize 放大窗口");
+				error = message;
 				return false;
 			}
 			const glm::vec2 center { node->Rect.X + node->Rect.W * 0.5f, node->Rect.Y + node->Rect.H * 0.5f };
@@ -283,6 +307,36 @@ namespace World
 			result = "queued " + node->Kind + " '" + node->Label + "' at ("
 				+ std::to_string(static_cast<int>(center.x)) + "," + std::to_string(static_cast<int>(center.y))
 				+ ") window=" + node->Window;
+			return true;
+		}
+		// ---- W9-3:向文本控件注入真实键入(点击聚焦 → 下一帧起逐帧写入字符)----
+		if (cmd == "ui.type")
+		{
+			std::string message;
+			const Wui::WuiAccessNode* node = resolveNode(message);
+			if (!node)
+			{
+				error = message;
+				return false;
+			}
+			if (node->Kind != "editor" && node->Kind != "text-field")
+			{
+				error = "node is not a text input: " + node->Kind;
+				return false;
+			}
+			const std::string text = arg("text");
+			if (text.empty())
+			{
+				error = "ui.type needs text";
+				return false;
+			}
+			const glm::vec2 center { node->Rect.X + node->Rect.W * 0.5f, node->Rect.Y + node->Rect.H * 0.5f };
+			// 聚焦点击复用既有 click 队列(与 ui.invoke 同一个节拍);文本挂在它后面:
+			// 点击完成后的下一帧开始注入,走 WuiCodeEditor/TextField 的真实输入路径。
+			Wui::WuiScriptedInput::Get().QueueClick(node->Window, center);
+			Wui::WuiScriptedInput::Get().QueueType(node->Window, text);
+			result = "queued type " + std::to_string(Utf8CodepointCount(text)) + " chars into "
+				+ node->Kind + " '" + node->Label + "' window=" + node->Window;
 			return true;
 		}
 		if (cmd == "ui.open" || cmd == "ui.toggle" || cmd == "ui.close")
