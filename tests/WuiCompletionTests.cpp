@@ -385,10 +385,11 @@ int main()
 			CHECK(buffer.Text() == "end\n");
 			CHECK(FindSuggest(HashId("test.suggest.status")) == nullptr);   // 空行不弹浮层
 
-			// 第 2 帧:输入字母 → 不重开浮层;再按 Enter 必须是换行,不是接受候选。
+			// 第 2 帧:输入字母 → 自动弹出候选(W9.5 方案 A:输入 ≥1 字符)。
 			TypeChars(ctx, buffer, editorRect, options, { 'l', 'o', 'c', 'a', 'l' });
 			CHECK(buffer.Text() == "end\nlocal");
-			CHECK(FindSuggest(HashId("test.suggest.status")) == nullptr);
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+			CHECK(probe.Prefixes.back() == "local");
 
 			// 第 3 帧:'.' 触发 → 浮层打开。
 			TypeChars(ctx, buffer, editorRect, options, { '.' });
@@ -407,6 +408,33 @@ int main()
 			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Enter);
 			CHECK(buffer.Text() == "end\nlocal.panel");
 			CHECK(buffer.Text().find('\n') == 3 && buffer.Text().size() == 15);
+		}
+
+		// ---- 7b. 自动提示不吞 Enter:普通打字弹出的浮层里 Enter=换行,Tab=接受 ----
+		{
+			WuiContext ctx;
+			WuiTextBuffer buffer;
+			SetTextAtEnd(buffer, "en");
+			ProviderProbe probe;
+			probe.Items.push_back(MakeItem("panel", "Panel", World::LuauCompletionItem::KindType::Field));
+			probe.Items.push_back(MakeItem("enabled", "boolean", World::LuauCompletionItem::KindType::Field));
+			WuiCodeEditorOptions options = OptionsWith(probe);
+			ctx.SetFocus(HashId("test.editor"));
+			TypeChars(ctx, buffer, editorRect, options, { 'a', 'b' });
+			CHECK(buffer.Text() == "enab");
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+
+			// 自动弹出的浮层:Enter 必须换行(不把 Enter 当接受候选)。
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Enter);
+			CHECK(buffer.Text() == "enab\n");
+			CHECK(FindSuggest(HashId("test.suggest.status")) == nullptr);
+
+			// Tab 仍然接受候选(替换前缀)。
+			TypeChars(ctx, buffer, editorRect, options, { 'p', 'a' });
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Tab);
+			CHECK(buffer.Text() == "enab\npanel");
+			CHECK(FindSuggest(HashId("test.suggest.status")) == nullptr);
 		}
 		WuiAccessibility::Get().Clear();
 

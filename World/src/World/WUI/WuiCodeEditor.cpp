@@ -64,6 +64,9 @@ namespace World::Wui
 			float PopupAnchorY = 0.0f;
 			int PopupSelected = 0;
 			int PopupScroll = 0;
+			// Enter 是否算"接受":点号/冒号、Ctrl+Space 或手动 Up/Down 之后为 true;
+			// 普通打字自动弹出的浮层里 Enter 仍是换行(避免吞换行/把 Enter 当接受)。
+			bool PopupAcceptEnter = false;
 			bool PopupVisibleLastFrame = false;
 			WuiRect PopupBounds {};
 		};
@@ -327,6 +330,7 @@ namespace World::Wui
 		{
 			bool Wanted = false;
 			bool CtrlSpace = false;
+			bool Explicit = false;   // 点号/冒号或 Ctrl+Space:Enter 可以接受
 		};
 		CompletionRequest completionRequest;
 
@@ -355,6 +359,7 @@ namespace World::Wui
 				else if (ctx.WasKeyTriggered(KeyCodes::Up))
 				{
 					popupConsumedKey = true;
+					state.PopupAcceptEnter = true;   // 手动选过之后 Enter 才可以接受
 					if (count > 0)
 						state.PopupSelected = (state.PopupSelected - 1 + count) % count;
 					state.PopupScroll = std::max(0, std::min(
@@ -363,6 +368,7 @@ namespace World::Wui
 				else if (ctx.WasKeyTriggered(KeyCodes::Down))
 				{
 					popupConsumedKey = true;
+					state.PopupAcceptEnter = true;
 					if (count > 0)
 						state.PopupSelected = (state.PopupSelected + 1) % count;
 					state.PopupScroll = std::max(0, std::min(
@@ -385,9 +391,14 @@ namespace World::Wui
 				}
 			}
 			// 接受:浮层可见时 Enter/Tab 优先给补全(不换行/不缩进)。
+			// Tab 永远接受;Enter 只在"用户明确召唤过浮层"时接受(点号/冒号、Ctrl+Space 或
+			// Up/Down 选过)——普通打字自动弹出的浮层里 Enter 保持换行语义。
+			if (state.PopupVisible && ctx.WasKeyTriggered(KeyCodes::Enter) && !state.PopupAcceptEnter)
+				state.PopupVisible = false;
 			bool acceptedCompletion = false;
 			if (state.PopupVisible
-				&& (ctx.WasKeyTriggered(KeyCodes::Enter) || ctx.WasKeyTriggered(KeyCodes::Tab)))
+				&& (ctx.WasKeyTriggered(KeyCodes::Tab)
+					|| (state.PopupAcceptEnter && ctx.WasKeyTriggered(KeyCodes::Enter))))
 			{
 				acceptedCompletion = true;
 				const std::string& text = buffer.Text();
@@ -551,9 +562,9 @@ namespace World::Wui
 		// 注意顺序:必须在补全查询**之前**插入并刷新 caret,否则 linePrefix 是插入前的行内容。
 		bool keepPopupOpen = false;
 		bool textHadSeparator = false;
+		bool typedVisible = false;
 		if (focused && !readOnly && !input.Ctrl)
 		{
-			bool typedVisible = false;
 			for (uint32_t codepoint : input.TextInput)
 			{
 				// Enter/Tab/Escape 的 char 事件走按键分支,这里只收可见字符。
@@ -568,18 +579,18 @@ namespace World::Wui
 			}
 			if (typedVisible)
 			{
-				// 浮层原本打开 → 输入后按新前缀刷新;原本关闭 → 输入字母不重新弹出
-				// (只有下面的 '.'/':' 分支才自动弹)。
+				// 输入可见字符:浮层原本打开 → 按新前缀刷新;原本关闭 → 由下面的查询决定
+				// 是否弹出(输入 ≥1 字符自动提示,无候选不弹——W9.5 方案 A)。
 				keepPopupOpen = popupVisibleAtFrameStart;
 				state.PopupVisible = false;
 				state.FollowCaret = true;
 			}
 		}
-		// 补全触发:Ctrl+Space 手动;'.'/':' 自动;普通打字只在浮层已打开时刷新候选。
+		// 补全触发:Ctrl+Space 手动;'.'/':' 自动;普通可见字符也自动(方案 A)。
 		if (focused && input.Ctrl && ctx.WasKeyTriggered(KeyCodes::Space))
-			completionRequest = { true, true };
-		else if (focused && (textHadSeparator || keepPopupOpen))
-			completionRequest = { true, false };
+			completionRequest = { true, true, true };
+		else if (focused && (textHadSeparator || typedVisible || keepPopupOpen))
+			completionRequest = { true, false, textHadSeparator };
 
 		// ---- W9.5 补全查询:字符串/注释内不弹(用高亮 token 判定,不数引号)----
 		const int caretLine = buffer.LineOfOffset(buffer.Caret());
@@ -622,7 +633,13 @@ namespace World::Wui
 			if (!items.empty())
 			{
 				if (!state.PopupVisible)
+				{
+					// 打开/刷新时决定 Enter 语义:显式召唤(点号/冒号/Ctrl+Space)才接受;自动提示不吞 Enter。
+					// 刷新(上一帧本已打开)时保留已经升级过的语义(例如打完 "." 再打字母)。
+					state.PopupAcceptEnter = completionRequest.Explicit
+						|| (popupVisibleAtFrameStart && state.PopupAcceptEnter);
 					WLD_CORE_INFO("[wui] completion popup: {0} items, prefix '{1}'", items.size(), linePrefix);
+				}
 				state.PopupVisible = true;
 				state.ReplaceStart = replaceStart;
 				state.CaretAtOpen = caretNow;
