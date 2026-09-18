@@ -1,7 +1,9 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Core/Asset/ModelImportSettings.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -23,6 +25,35 @@ namespace World::Asset
 		uint32_t SubmeshCount = 0;
 		uint32_t NodeCount = 0;
 		uint32_t MaterialSlotCount = 0;
+		uint64_t SourceFingerprint = 0;            // 源文件内容 FNV-1a64(写入 .wmodel meta)
+		uint8_t UpAxis = 0;                        // 0 = Y;1 = Z(与 meta 一致)
+	};
+
+	// D5b-1:导入器要写进 .wmodel meta 的身份(源指纹由内核按源字节算,不在这里传)。
+	struct GltfImportMetadata
+	{
+		uint32_t ImporterVersion = 1;
+		uint64_t SettingsHash = 0;
+		uint8_t UpAxis = 0;      // 0 = Y;1 = Z(调用方必须与 settings 一致)
+		float Scale = 1.0f;
+		// .wmodel 的逻辑路径(相对内容根);材质/贴图与它同目录。空 = 默认按源文件所在目录
+		// 推导(与源同目录同名,见 plan §D5b-1 多产物落盘规则)。
+		std::string LogicalModelPath;
+	};
+
+	// D5b-1:内存产物(LogicalPath 与 ImportFile 写出的磁盘布局一致,相对 outputRoot)。
+	struct GltfInMemoryOutput
+	{
+		std::string LogicalPath;
+		std::vector<uint8_t> Data;
+	};
+
+	// D5b-1:内存导入结果。Outputs 已按"贴图 → 材质 → 模型"排序,模型最后写(见 ImportFile)。
+	struct GltfImportBytesResult
+	{
+		GltfImportResult Summary;
+		GltfImportMetadata Metadata;
+		std::vector<GltfInMemoryOutput> Outputs;
 	};
 
 	// glTF 2.0(.gltf / .glb)→ .wmodel + .wmat + 贴图。**CPU-only**:不依赖 RHI 设备或窗口,
@@ -41,6 +72,13 @@ namespace World::Asset
 	class WLD_API GltfImporter
 	{
 	public:
+		// D5b-1 内核(cook 复用):只产出内存字节,不写盘;失败返回 false + error。
+		// .wmodel 字节在返回前用 WModelIO::Parse 自校验(坏模型在 cook 期报错)。
+		// ImportFile 是本函数的薄壳(逐项落盘,行为不变)。
+		static bool ImportAsBytes(const std::string& sourcePath,
+			const ModelImportSettings& settings, const GltfImportMetadata& metadata,
+			GltfImportBytesResult* result, std::string* error);
+
 		static bool ImportFile(const std::string& sourcePath, const std::string& outputRoot,
 			GltfImportResult* result, std::string* error);
 	};

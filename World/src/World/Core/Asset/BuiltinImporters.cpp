@@ -1,6 +1,8 @@
 #include "wldpch.h"
 #include "World/Core/Asset/BuiltinImporters.h"
 
+#include "World/Core/Asset/GltfImporter.h"
+#include "World/Core/Asset/ModelImportSettings.h"
 #include "World/Core/Asset/ScriptArtifact.h"
 
 #include <fstream>
@@ -131,14 +133,79 @@ namespace World::Asset
 				return result;
 			}
 		};
+
+		// D5b:模型导入器(.gltf/.glb → .wmodel + .wmat + 贴图,单一源产出多产物)。
+		//  - 复用 GltfImporter::ImportAsBytes(与编辑器导入/单测同一条内核);
+		//  - .wimport 缺失/坏 JSON → 默认值 + Warnings 记录,不失败;
+		//  - .wmodel 字节在返回前已由内核用 WModelIO::Parse 自校验,坏模型在 cook 期报错;
+		//  - Outputs 顺序 = 贴图 → 材质 → 模型(.wmodel 最后写,cook 失败时不留半成品模型)。
+		class ModelImporter final : public IAssetImporter
+		{
+		public:
+			std::string Name() const override { return "Model"; }
+			uint32_t Version() const override { return 1; }
+			bool Matches(const std::filesystem::path& source) const override
+			{
+				const std::filesystem::path extension = source.extension();
+				return extension == ".gltf" || extension == ".glb";
+			}
+
+			ImportResult Import(const ImportRequest& request, std::error_code& ec) const override
+			{
+				ImportResult result;
+
+				std::string settingsWarning;
+				const ModelImportSettings settings =
+					ModelImportSettings::Load(request.Source.string(), &settingsWarning);
+				if (!settingsWarning.empty())
+					result.Warnings.push_back(settingsWarning);
+
+				GltfImportMetadata metadata;
+				metadata.ImporterVersion = Version();
+				metadata.SettingsHash = ModelImportSettings::Hash(settings);
+				metadata.UpAxis = settings.UpAxis;
+				metadata.Scale = settings.Scale;
+				// 多产物落盘规则:.wmodel 与源同目录同名(源 models/x.gltf → models/x.wmodel)。
+				{
+					std::filesystem::path logicalModel(request.LogicalPath);
+					logicalModel.replace_extension(".wmodel");
+					metadata.LogicalModelPath = logicalModel.generic_string();
+				}
+
+				GltfImportBytesResult bytes;
+				std::string importError;
+				if (!GltfImporter::ImportAsBytes(request.Source.string(), settings, metadata,
+					&bytes, &importError))
+				{
+					result.Error = importError.empty() ? "glTF import failed" : importError;
+					ec = std::make_error_code(std::errc::invalid_argument);
+					return result;
+				}
+				if (bytes.Outputs.empty())
+				{
+					result.Error = "model import produced no outputs: " + request.LogicalPath;
+					ec = std::make_error_code(std::errc::invalid_argument);
+					return result;
+				}
+				for (const std::string& warning : bytes.Summary.Warnings)
+					result.Warnings.push_back(warning);
+				result.Fingerprint = bytes.Summary.SourceFingerprint;
+				result.Outputs.reserve(bytes.Outputs.size());
+				for (GltfInMemoryOutput& output : bytes.Outputs)
+					result.Outputs.push_back({ std::move(output.LogicalPath), std::move(output.Data) });
+				result.Ok = true;
+				return result;
+			}
+		};
 	}
 
 	std::vector<std::shared_ptr<IAssetImporter>> DefaultImporters()
 	{
-		// 注册顺序不变:特定类型在前,PassThrough 兜底。
+		// 注册顺序:特定类型在前,PassThrough 兜底;模型在 Scene/Script 之后、PassThrough 之前。
 		return {
 			std::make_shared<ExtensionImporter>("Scene", 1, std::vector<std::string>{ ".wd" }),
 			std::make_shared<ScriptImporter>(),
+			std::make_shared<ModelImporter>(),
 			std::make_shared<PassThroughImporter>(),
 		};
 	}

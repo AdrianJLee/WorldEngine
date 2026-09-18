@@ -4,6 +4,7 @@
 #include "wldpch.h"
 #include "World/Core/Asset/GltfImporter.h"
 
+#include "World/Core/Asset/ModelImportSettings.h"
 #include "World/Core/Asset/WModelIO.h"
 #include "World/Core/Log.h"
 #include "World/Renderer/Material.h"
@@ -299,13 +300,35 @@ namespace World::Asset
 			out = { values[0], values[1] };
 			return true;
 		}
+
+		uint64_t Fnv1a64(const void* data, size_t size)
+		{
+			uint64_t hash = 14695981039346656037ULL;
+			const auto* bytes = static_cast<const uint8_t*>(data);
+			for (size_t index = 0; index < size; ++index)
+			{
+				hash ^= bytes[index];
+				hash *= 1099511628211ULL;
+			}
+			return hash;
+		}
+
+		bool ReadSourceBytes(const std::string& sourcePath, std::vector<uint8_t>& out)
+		{
+			std::ifstream file(sourcePath, std::ios::binary);
+			if (!file)
+				return false;
+			out.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+			return true;
+		}
 	}
 
-	bool GltfImporter::ImportFile(const std::string& sourcePath, const std::string& outputRoot,
-		GltfImportResult* result, std::string* error)
+	bool GltfImporter::ImportAsBytes(const std::string& sourcePath,
+		const ModelImportSettings& settings, const GltfImportMetadata& metadata,
+		GltfImportBytesResult* result, std::string* error)
 	{
 		if (result)
-			*result = GltfImportResult {};
+			*result = GltfImportBytesResult {};
 		const auto fail = [error](const std::string& message)
 		{
 			if (error) *error = message;
@@ -319,11 +342,14 @@ namespace World::Asset
 
 		if (sourcePath.empty())
 			return fail("glTF import failed: source path is empty");
-		if (outputRoot.empty())
-			return fail("glTF import failed: output root is empty");
 		std::error_code ec;
 		if (!std::filesystem::is_regular_file(std::filesystem::path(sourcePath), ec))
 			return fail("glTF import failed: source file not found: " + sourcePath);
+
+		std::vector<uint8_t> sourceBytes;
+		if (!ReadSourceBytes(sourcePath, sourceBytes))
+			return fail("glTF import failed: cannot read source file: " + sourcePath);
+		const uint64_t sourceFingerprint = Fnv1a64(sourceBytes.data(), sourceBytes.size());
 
 		cgltf_options options {};
 		cgltf_data* data = nullptr;
@@ -391,8 +417,20 @@ namespace World::Asset
 		// ---- 输出命名(相对内容根) ----
 		const std::filesystem::path source(sourcePath);
 		const std::filesystem::path sourceDirectory = source.parent_path();
-		const std::filesystem::path root(outputRoot);
 		const std::string modelName = SanitizeName(source.stem().string(), "model");
+		// 多产物落盘规则:模型与源同目录同名;材质/贴图与模型同目录。LogicalModelPath 由
+		// 调用方给出(cook 用相对内容根的源逻辑路径;ImportFile 用默认 models/<name>.wmodel)。
+		std::string modelDirectory;
+		if (!metadata.LogicalModelPath.empty())
+		{
+			// 用 generic_string 手工取目录:Windows 上 path("models/x.wmodel") 的
+			// parent_path() 是 "models"(可拼接),但对外路径统一正斜杠。
+			const std::string logicalText =
+				std::filesystem::path(metadata.LogicalModelPath).generic_string();
+			const size_t slash = logicalText.find_last_of('/');
+			if (slash != std::string::npos)
+				modelDirectory = logicalText.substr(0, slash + 1);
+		}
 
 		// ---- 材质 + 贴图(全部先在内存里准备,验证通过后才落盘)----
 		std::vector<MaterialDesc> materialDescs;
@@ -413,6 +451,12 @@ namespace World::Asset
 		{
 			if (texture == nullptr)
 				return true;   // 未引用
+			if (!settings.ExportTextures)
+			{
+				// 设置要求不导出贴图:材质仍可导出,但贴图路径留空(不读源贴图字节)。
+				outRelative.clear();
+				return true;
+			}
 			if (texture->has_basisu || texture->basisu_image != nullptr)
 			{
 				why = "KTX2/Basis texture is not supported (" + purpose + ")";
@@ -437,7 +481,7 @@ namespace World::Asset
 				why = readError + " (" + purpose + ")";
 				return false;
 			}
-			const std::string relative = "textures/" + modelName + "_" + std::to_string(imageIndex)
+			const std::string relative = modelDirectory + "textures/" + modelName + "_" + std::to_string(imageIndex)
 				+ "." + payload.Extension;
 			writtenImages.emplace(imageIndex, relative);
 			pendingTextures.push_back({ relative, std::move(payload) });
@@ -498,7 +542,7 @@ namespace World::Asset
 			if (count > 0)
 				fileName += "_" + std::to_string(count);
 			++count;
-			materialPaths.push_back("materials/" + fileName + ".wmat");
+			materialPaths.push_back(modelDirectory + "materials/" + fileName + ".wmat");
 			materialDescs.push_back(std::move(desc));
 		}
 
@@ -563,6 +607,9 @@ namespace World::Asset
 				}
 				else
 				{
+					if (!settings.GenerateNormals)
+						return fail("glTF import failed: " + label
+							+ " has no NORMAL and generateNormals is disabled in the import settings");
 					++primitivesMissingNormals;
 					GenerateFaceNormals(localPositions, localIndices, localNormals);
 				}
@@ -612,6 +659,41 @@ namespace World::Asset
 			warn(warnings, std::to_string(primitivesMissingUv)
 				+ " primitive(s) have no TEXCOORD_0; UVs were set to zero");
 
+		// ---- 导入设置烘焙(plan §D5b-1):scale 与 upAxis 在导入期烘进几何/节点 ----
+		// scale:顶点/法线/节点 TRS/包围盒统一 ×Scale;upAxis=Z:绕 X 轴 -90°,法线用同一
+		// 旋转矩阵(纯旋转,无需逆转置)。几何已带轴校正,所有节点 TRS 原样保留(否则
+		// 渲染时节点会再转一次 → 双旋转);scale 是均匀缩放,烘焙进 TRS 与顶点等价。
+		{
+			const float scale = settings.Scale;
+			glm::mat4 axisMatrix(1.0f);
+			if (settings.UpAxis == 1u)
+			{
+				axisMatrix = glm::rotate(axisMatrix, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+			}
+			const auto transformVec = [&](const glm::vec3& value)
+			{
+				return glm::vec3(axisMatrix * glm::vec4(value * scale, 0.0f));
+			};
+			const auto transformBounds = [&](WModelBounds& bounds)
+			{
+				if (bounds.Min == bounds.Max)
+					return;   // 空模型/空子网格的默认值,不参与变换
+				const glm::vec3 first = transformVec(bounds.Min);
+				const glm::vec3 second = transformVec(bounds.Max);
+				bounds.Min = glm::min(first, second);
+				bounds.Max = glm::max(first, second);
+			};
+
+			for (WModelVertex& vertex : model.Vertices)
+			{
+				vertex.Position = transformVec(vertex.Position);
+				vertex.Normal = glm::vec3(axisMatrix * glm::vec4(vertex.Normal, 0.0f));
+			}
+			for (WModelSubmesh& submesh : model.Submeshes)
+				transformBounds(submesh.Bounds);
+			model.Bounds = ComputeBounds(model.Vertices);
+		}
+
 		// ---- 节点树 ----
 		model.Nodes.reserve(data->nodes_count);
 		for (cgltf_size index = 0; index < data->nodes_count; ++index)
@@ -651,46 +733,142 @@ namespace World::Asset
 			model.Nodes.push_back(std::move(node));
 		}
 
-		// ---- 落盘(全部验证通过后):贴图 → 材质 → 模型 ----
+		// ---- 产物字节(全部验证通过后):贴图 → 材质 → 模型 ----
+		// D5b:不再直接落盘,先在内存准备 ImportOutput 列表(ImportFile 逐项落盘;
+		// ModelImporter 直接复用同一批字节,顺序保证 .wmodel 最后写 —— 缺件时不留半成品模型)。
+		const std::string modelRelative = metadata.LogicalModelPath.empty()
+			? ("models/" + modelName + ".wmodel") : metadata.LogicalModelPath;
+		std::vector<GltfInMemoryOutput> outputs;
+		outputs.reserve(pendingTextures.size() + materialDescs.size() + 1u);
+
+		if (!settings.ExportMaterials)
+		{
+			// 设置要求不导出材质:不产出 .wmat,材质槽留空(-1 = 渲染走 Color 常量色路径)。
+			warn(warnings, "exportMaterials is disabled: no .wmat files were produced; "
+				"mesh material slots are empty");
+			const size_t materialCount = materialPaths.size();
+			model.MaterialSlots.assign(materialCount, std::string());
+			materialPaths.clear();
+			materialPaths.resize(materialCount);
+			for (WModelSubmesh& submesh : model.Submeshes)
+				submesh.MaterialSlot = -1;
+		}
 		for (const PendingTexture& texture : pendingTextures)
 		{
-			std::string writeError;
-			if (!WriteFileBytes(root / texture.RelativePath, texture.Payload.Bytes.data(),
-				texture.Payload.Bytes.size(), &writeError))
-				return fail("glTF import failed: cannot write " + texture.RelativePath + ": " + writeError);
+			GltfInMemoryOutput output;
+			output.LogicalPath = texture.RelativePath;
+			output.Data = texture.Payload.Bytes;
+			outputs.push_back(std::move(output));
 		}
 		for (size_t index = 0; index < materialDescs.size(); ++index)
 		{
-			std::string writeError;
+			if (materialPaths[index].empty())
+				continue;
 			const std::string text = MaterialIO::Serialize(materialDescs[index]);
-			if (!WriteFileBytes(root / materialPaths[index], text.data(), text.size(), &writeError))
-				return fail("glTF import failed: cannot write " + materialPaths[index] + ": " + writeError);
+			GltfInMemoryOutput output;
+			output.LogicalPath = materialPaths[index];
+			output.Data.assign(text.begin(), text.end());
+			outputs.push_back(std::move(output));
 		}
-		const std::string modelRelative = "models/" + modelName + ".wmodel";
+
+		// meta 必须由导入器写入(源指纹/导入器版本/设置哈希/轴/缩放)。
+		model.Meta.Valid = true;
+		model.Meta.SourceFingerprint = sourceFingerprint;
+		model.Meta.ImporterVersion = metadata.ImporterVersion;
+		model.Meta.SettingsHash = metadata.SettingsHash;
+		model.Meta.UpAxis = metadata.UpAxis;
+		model.Meta.Scale = metadata.Scale;
+		if (model.Meta.UpAxis > 1u)
+			return fail("glTF import failed: invalid upAxis metadata value "
+				+ std::to_string(model.Meta.UpAxis));
+		if (!std::isfinite(model.Meta.Scale) || model.Meta.Scale <= 0.0f)
+			return fail("glTF import failed: invalid scale metadata value "
+				+ std::to_string(model.Meta.Scale));
 		{
-			std::string writeError;
-			if (!WModelIO::WriteFile((root / modelRelative).string(), model, &writeError))
-				return fail("glTF import failed: cannot write " + modelRelative + ": " + writeError);
+			const std::vector<uint8_t> modelBytes = WModelIO::Serialize(model);
+			WModelData verified;
+			std::string verifyError;
+			if (!WModelIO::Parse(modelBytes.data(), modelBytes.size(), verified, &verifyError))
+				return fail("glTF import failed: produced .wmodel is invalid: " + verifyError);
+			GltfInMemoryOutput output;
+			output.LogicalPath = modelRelative;
+			output.Data = modelBytes;
+			outputs.push_back(std::move(output));
 		}
 
 		if (result)
 		{
-			result->WModelPath = modelRelative;
-			result->MaterialPaths = materialPaths;
-			result->TexturePaths.reserve(pendingTextures.size());
+			result->Summary.WModelPath = modelRelative;
+			result->Summary.MaterialPaths = materialPaths;
+			result->Summary.TexturePaths.reserve(pendingTextures.size());
 			for (const PendingTexture& texture : pendingTextures)
-				result->TexturePaths.push_back(texture.RelativePath);
-			result->Warnings = warnings;
-			result->VertexCount = static_cast<uint32_t>(model.Vertices.size());
-			result->IndexCount = static_cast<uint32_t>(model.Indices.size());
-			result->MeshCount = static_cast<uint32_t>(model.Meshes.size());
-			result->SubmeshCount = static_cast<uint32_t>(model.Submeshes.size());
-			result->NodeCount = static_cast<uint32_t>(model.Nodes.size());
-			result->MaterialSlotCount = static_cast<uint32_t>(model.MaterialSlots.size());
+				result->Summary.TexturePaths.push_back(texture.RelativePath);
+			result->Summary.Warnings = warnings;
+			result->Summary.VertexCount = static_cast<uint32_t>(model.Vertices.size());
+			result->Summary.IndexCount = static_cast<uint32_t>(model.Indices.size());
+			result->Summary.MeshCount = static_cast<uint32_t>(model.Meshes.size());
+			result->Summary.SubmeshCount = static_cast<uint32_t>(model.Submeshes.size());
+			result->Summary.NodeCount = static_cast<uint32_t>(model.Nodes.size());
+			result->Summary.MaterialSlotCount = static_cast<uint32_t>(model.MaterialSlots.size());
+			result->Summary.SourceFingerprint = sourceFingerprint;
+			result->Summary.UpAxis = metadata.UpAxis;
+			result->Metadata = metadata;
+			result->Outputs = std::move(outputs);
 		}
-		WLD_CORE_INFO("[gltf] imported '{0}' -> {1} (meshes={2} submeshes={3} nodes={4} materials={5} textures={6} warnings={7})",
+		WLD_CORE_INFO("[gltf] imported '{0}' -> {1} (meshes={2} submeshes={3} nodes={4} materials={5} textures={6} warnings={7}, bytes)",
 			sourcePath, modelRelative, model.Meshes.size(), model.Submeshes.size(), model.Nodes.size(),
 			model.MaterialSlots.size(), pendingTextures.size(), warnings.size());
+		return true;
+	}
+
+	bool GltfImporter::ImportFile(const std::string& sourcePath, const std::string& outputRoot,
+		GltfImportResult* result, std::string* error)
+	{
+		if (result)
+			*result = GltfImportResult {};
+		if (outputRoot.empty())
+		{
+			if (error) *error = "glTF import failed: output root is empty";
+			return false;
+		}
+
+		// 设置来源与 cook 的 ModelImporter **同源**:与源同目录同名的 `.wimport`
+		// (缺失/坏 JSON → 默认值 + warning)。否则"改设置 → Reimport 生效"在编辑器路径不成立,
+		// 而且 dev 树里的产物会和打包产物不一致(实测:夹具 sidecar 只有 cook 生效)。
+		std::string settingsWarning;
+		const ModelImportSettings settings = ModelImportSettings::Load(sourcePath, &settingsWarning);
+		if (result && !settingsWarning.empty())
+			result->Warnings.push_back(settingsWarning);
+		GltfImportMetadata metadata;
+		metadata.ImporterVersion = 1;
+		metadata.SettingsHash = ModelImportSettings::Hash(settings);
+		metadata.UpAxis = settings.UpAxis;
+		metadata.Scale = settings.Scale;
+
+		GltfImportBytesResult bytes;
+		std::string importError;
+		if (!ImportAsBytes(sourcePath, settings, metadata, &bytes, &importError))
+		{
+			if (error) *error = importError;
+			return false;
+		}
+
+		// 逐项落盘:贴图 → 材质 → 模型(.wmodel 最后写,失败时不留半个模型)。
+		const std::filesystem::path root(outputRoot);
+		for (const GltfInMemoryOutput& output : bytes.Outputs)
+		{
+			std::string writeError;
+			if (!WriteFileBytes(root / output.LogicalPath, output.Data.data(), output.Data.size(), &writeError))
+			{
+				if (error)
+					*error = "glTF import failed: cannot write " + output.LogicalPath + ": " + writeError;
+				return false;
+			}
+		}
+		if (result)
+			*result = bytes.Summary;
+		if (error)
+			error->clear();
 		return true;
 	}
 

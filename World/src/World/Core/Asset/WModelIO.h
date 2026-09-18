@@ -11,7 +11,7 @@
 
 namespace World::Asset
 {
-	// P1b D5:.wmodel v1 —— glTF 导入产出的 CPU 侧模型资产(不可变)。
+	// P1b D5b:.wmodel v2 —— glTF 导入产出的 CPU 侧模型资产(不可变)。
 	// GPU 资源由 Renderer3D 首次提交时创建,本文件与加载器**不依赖 RHI 设备**,可 headless 使用。
 	//
 	// 顶点布局固定为 standard(position/normal/uv,stride 32,vertexLayoutId = 1),
@@ -60,6 +60,18 @@ namespace World::Asset
 
 	struct WModelData
 	{
+		// D5b v2:`meta` 区块。Valid 只在解析 v2 时置位;WriteFile 要求 Valid(导入器必须写)。
+		struct MetaData
+		{
+			bool Valid = false;
+			uint64_t SourceFingerprint = 0;   // 源文件内容 FNV-1a64
+			uint32_t ImporterVersion = 0;     // ModelImporter 版本(当前 1)
+			uint64_t SettingsHash = 0;        // ModelImportSettings::Hash
+			uint8_t UpAxis = 0;               // 0 = Y;1 = Z(导入期已绕 X 轴 -90° 烘焙)
+			float Scale = 1.0f;               // 导入期统一缩放(已烘焙)
+		};
+		MetaData Meta;
+
 		uint32_t Flags = 0;   // 保留字段(当前恒 0)
 		std::vector<WModelVertex> Vertices;
 		std::vector<uint32_t> Indices;
@@ -71,18 +83,20 @@ namespace World::Asset
 		std::vector<std::string> MaterialSlots;
 	};
 
-	// .wmodel v1 读写。格式是小端、版本化且**严格**的:
+	// .wmodel v2 读写。格式是小端、版本化且**严格**的:
 	//  - 未知 magic / 未知版本 / 截断 / 越界引用一律返回可读错误,绝不"尽力解析";
+	//  - v1 **不再兼容**:读到 version 1 时返回"请重新导入"的可读错误(重导会写出 v2);
 	//  - Serialize 确定性:同一份数据结构两次序列化逐字节相同(无时间戳、无填充差异)。
 	//
-	// 字节布局(plan §D5 冻结格式):
+	// 字节布局(plan §D5b-1 冻结格式):
 	//   Header{ magic 'WMDL' / version / flags / vertexLayoutId / reserved / vertexCount /
 	//           indexCount / meshCount / submeshCount / nodeCount / materialSlotCount }
+	//   Meta{sourceFingerprint(u64) / importerVersion(u32) / settingsHash(u64) / upAxis(u8) / scale(f32)}
 	//   Bounds{min,max} → Submeshes[] → Meshes[] → Nodes[] → MaterialSlots[] →
 	//   VertexData(vertexCount × 32B) → Indices(u32 × indexCount)
 	namespace WModelIO
 	{
-		constexpr uint32_t kFormatVersion = 1;
+		constexpr uint32_t kFormatVersion = 2;
 		constexpr uint32_t kVertexLayoutStandard = 1;
 
 		WLD_API std::vector<uint8_t> Serialize(const WModelData& data);

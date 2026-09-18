@@ -3,6 +3,7 @@
 
 #include "World/Core/Application.h"
 
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -16,6 +17,9 @@ namespace World::Asset::WModelIO
 		constexpr char kMagic[4] = { 'W', 'M', 'D', 'L' };
 		// magic(4) + version/flags/vertexLayoutId/reserved + 6 个计数。
 		constexpr uint64_t kHeaderSize = 4u + 10u * 4u;
+		// v2 meta: sourceFingerprint(u64) + importerVersion(u32) + settingsHash(u64) +
+		//          upAxis(u8) + scale(f32) + reserved(u32);全部显式小端字节,无 C++ 结构体填充。
+		constexpr uint64_t kMetaSize = 8u + 4u + 8u + 1u + 4u + 4u;
 
 		void AppendU32(std::vector<uint8_t>& out, uint32_t value)
 		{
@@ -35,6 +39,17 @@ namespace World::Asset::WModelIO
 			uint32_t bits = 0;
 			std::memcpy(&bits, &value, sizeof(bits));
 			AppendU32(out, bits);
+		}
+
+		void AppendU8(std::vector<uint8_t>& out, uint8_t value)
+		{
+			out.push_back(value);
+		}
+
+		void AppendU64(std::vector<uint8_t>& out, uint64_t value)
+		{
+			AppendU32(out, static_cast<uint32_t>(value & 0xFFFFFFFFu));
+			AppendU32(out, static_cast<uint32_t>((value >> 32) & 0xFFFFFFFFu));
 		}
 
 		void AppendVec3(std::vector<uint8_t>& out, const glm::vec3& value)
@@ -109,6 +124,25 @@ namespace World::Asset::WModelIO
 				return true;
 			}
 
+			bool ReadU64(uint64_t& out, const char* what)
+			{
+				uint32_t low = 0;
+				uint32_t high = 0;
+				if (!ReadU32(low, what) || !ReadU32(high, what))
+					return false;
+				out = static_cast<uint64_t>(low) | (static_cast<uint64_t>(high) << 32);
+				return true;
+			}
+
+			bool ReadU8(uint8_t& out, const char* what)
+			{
+				if (!Ensure(1, what))
+					return false;
+				out = Data[Offset];
+				++Offset;
+				return true;
+			}
+
 			bool ReadVec3(glm::vec3& out, const char* what)
 			{
 				return ReadF32(out.x, what) && ReadF32(out.y, what) && ReadF32(out.z, what);
@@ -129,7 +163,7 @@ namespace World::Asset::WModelIO
 			out = WModelData {};
 			if (bytes == nullptr || size < kHeaderSize)
 			{
-				error = "truncated: file is smaller than the .wmodel v1 header";
+				error = "truncated: file is smaller than the .wmodel v2 header";
 				return false;
 			}
 
@@ -145,6 +179,13 @@ namespace World::Asset::WModelIO
 
 			uint32_t version = 0;
 			reader.ReadU32(version, "version");
+			if (version == 1u)
+			{
+				// v1 没有 meta(源指纹/设置哈希),无法判断是否需要重导 —— 一律拒绝。
+				error = ".wmodel version 1 is no longer supported (missing meta block); "
+					"please re-import the source asset (请重新导入)";
+				return false;
+			}
 			if (version != kFormatVersion)
 			{
 				error = "unsupported .wmodel version " + std::to_string(version)
@@ -183,6 +224,11 @@ namespace World::Asset::WModelIO
 				error = reader.Error;
 				return false;
 			}
+			if (size < kHeaderSize + kMetaSize)
+			{
+				error = "truncated: file is smaller than the .wmodel v2 meta block";
+				return false;
+			}
 
 			// 计数保护:声明的顶点/索引数据必须能在文件总大小内放下(先校验再分配)。
 			if (static_cast<uint64_t>(vertexCount) * sizeof(WModelVertex) > size)
@@ -202,6 +248,32 @@ namespace World::Asset::WModelIO
 			}
 
 			out.Flags = flags;
+
+			// Meta
+			out.Meta.Valid = true;
+			uint32_t metaReserved = 0;
+			if (!reader.ReadU64(out.Meta.SourceFingerprint, "meta.sourceFingerprint")
+				|| !reader.ReadU32(out.Meta.ImporterVersion, "meta.importerVersion")
+				|| !reader.ReadU64(out.Meta.SettingsHash, "meta.settingsHash")
+				|| !reader.ReadU8(out.Meta.UpAxis, "meta.upAxis")
+				|| !reader.ReadF32(out.Meta.Scale, "meta.scale")
+				|| !reader.ReadU32(metaReserved, "meta.reserved"))
+			{
+				error = reader.Error;
+				return false;
+			}
+			(void)metaReserved;
+			if (out.Meta.UpAxis > 1u)
+			{
+				error = "invalid meta.upAxis " + std::to_string(out.Meta.UpAxis) + " (expected 0 or 1)";
+				return false;
+			}
+			if (!std::isfinite(out.Meta.Scale) || out.Meta.Scale <= 0.0f)
+			{
+				error = "invalid meta.scale " + std::to_string(out.Meta.Scale)
+					+ " (expected a positive finite number)";
+				return false;
+			}
 
 			// Bounds
 			if (!reader.ReadVec3(out.Bounds.Min, "bounds.min") || !reader.ReadVec3(out.Bounds.Max, "bounds.max"))
@@ -363,7 +435,7 @@ namespace World::Asset::WModelIO
 	std::vector<uint8_t> Serialize(const WModelData& data)
 	{
 		std::vector<uint8_t> out;
-		out.reserve(static_cast<size_t>(kHeaderSize)
+		out.reserve(static_cast<size_t>(kHeaderSize + kMetaSize)
 			+ data.Vertices.size() * sizeof(WModelVertex)
 			+ data.Indices.size() * sizeof(uint32_t)
 			+ data.Submeshes.size() * (3u * 4u + 6u * 4u)
@@ -383,6 +455,12 @@ namespace World::Asset::WModelIO
 		AppendU32(out, static_cast<uint32_t>(data.Nodes.size()));
 		AppendU32(out, static_cast<uint32_t>(data.MaterialSlots.size()));
 
+		AppendU64(out, data.Meta.SourceFingerprint);
+		AppendU32(out, data.Meta.ImporterVersion);
+		AppendU64(out, data.Meta.SettingsHash);
+		AppendU8(out, data.Meta.UpAxis);
+		AppendF32(out, data.Meta.Scale);
+		AppendU32(out, 0u);   // meta reserved
 		AppendVec3(out, data.Bounds.Min);
 		AppendVec3(out, data.Bounds.Max);
 
@@ -444,6 +522,14 @@ namespace World::Asset::WModelIO
 		if (path.empty())
 		{
 			if (error) *error = "path is empty";
+			return false;
+		}
+		if (!data.Meta.Valid)
+		{
+			// v2 契约:meta 必须由导入器写入(源指纹/导入器版本/设置哈希);手写数据不得绕过。
+			if (error)
+				*error = "refusing to write .wmodel v2 without a valid meta block "
+					"(importer must set sourceFingerprint/importerVersion/settingsHash)";
 			return false;
 		}
 		const std::vector<uint8_t> bytes = Serialize(data);

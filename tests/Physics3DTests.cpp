@@ -96,6 +96,15 @@ namespace
 		for (const uint32_t index : indices)
 			model.Indices.push_back(index);
 
+		// D5b:`.wmodel` v2 要求 meta 有效(sourceFingerprint/importerVersion/settingsHash);
+		// 这里是测试自造的模型,不是导入产物 —— 填一组自洽值即可(与运行时加载契约一致)。
+		model.Meta.SourceFingerprint = 0xD6C0BEull;
+		model.Meta.Valid = true;
+		model.Meta.ImporterVersion = 1;
+		model.Meta.SettingsHash = 0;
+		model.Meta.UpAxis = 0;
+		model.Meta.Scale = 1.0f;
+
 		model.Bounds.Min = glm::vec3(-halfExtent);
 		model.Bounds.Max = glm::vec3(halfExtent);
 		Asset::WModelSubmesh submesh;

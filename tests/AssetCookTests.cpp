@@ -200,9 +200,11 @@ int main()
 		// 4. W7-2:Script 导入器 v2(.lua + .luau)→ WSL1 容器;可 Unpack / LoadChunk;增量稳定。
 		{
 			const std::vector<std::shared_ptr<IAssetImporter>> importers = DefaultImporters();
-			CHECK(importers.size() == 3);
+			// D5b-1:Model 导入器(.gltf/.glb)注册在 Script 之后、PassThrough 之前。
+			CHECK(importers.size() == 4);
 			CHECK(importers[0]->Name() == "Scene" && importers[0]->Version() == 1);
-			CHECK(importers[2]->Name() == "PassThrough");
+			CHECK(importers[2]->Name() == "Model" && importers[2]->Version() == 1);
+			CHECK(importers[3]->Name() == "PassThrough");
 			const std::shared_ptr<IAssetImporter> script = FindImporter(importers, "Script");
 			CHECK(script != nullptr);
 			CHECK(script->Version() == 2);

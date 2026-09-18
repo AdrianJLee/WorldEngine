@@ -1,16 +1,23 @@
 // P1b D5:模型导入 headless 回归。
 //
 // 覆盖:
-//   1. 标准顶点布局契约(stride 32 的 position/normal/uv,.wmodel v1 依赖它);
-//   2. .wmodel 往返:写→读全字段一致 + 确定性(两次序列化逐字节相同);
-//   3. 坏 magic / 未知版本 / 截断 / 越界引用 → 可读错误(硬失败,不"尽力解析");
+//   1. 标准顶点布局契约(stride 32 的 position/normal/uv,.wmodel v2 依赖它);
+//   2. .wmodel v2 往返:写→读全字段(含 meta)一致 + 确定性(两次序列化逐字节相同);
+//   3. 坏 magic / 未知版本 / v1 / 截断 / 越界引用 / 缺 meta → 可读错误(硬失败,不"尽力解析");
 //   4. 真实 glTF 夹具导入(2 primitive + 内嵌贴图 + 嵌套节点):节点树、submesh、
 //      材质槽、贴图原样写出、缺法线按面法线补齐、Mesh::LoadWModel 读回校验 + 进程内缓存;
-//   5. 不支持特性(skin/动画)硬报错;
-//   6. MeshRendererComponent.MeshIndex 的 schema 往返(SceneSerializer)+ 存根出现该字段。
+//   5. D5b:.wimport 设置 Load/Save/Hash;ImportAsBytes 内核 = ImportFile 的字节来源;
+//      cook 从源-only 项目产出多产物(.wmodel/.wmat)、增量 0 changed、设置变化重烘、
+//      scale/upAxis 烘焙、exportMaterials/exportTextures 开关、坏源 cook 非零失败;
+//   6. 不支持特性(skin/动画)硬报错;
+//   7. MeshRendererComponent.MeshIndex 的 schema 往返(SceneSerializer)+ 存根出现该字段。
 #include "wldpch.h"
 
+#include "World/Core/Asset/BuiltinImporters.h"
+#include "World/Core/Asset/CookPipeline.h"
 #include "World/Core/Asset/GltfImporter.h"
+#include "World/Core/Asset/ModelImportSettings.h"
+#include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Asset/WModelIO.h"
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/ModelInstance.h"
@@ -19,6 +26,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/SceneSerializer.h"
+#include "World/WUI/WuiJson.h"
 
 #include <cmath>
 #include <cstdio>
@@ -127,6 +135,13 @@ namespace
 		child.Translation = { 0.0f, 1.0f, 0.0f };
 		data.Nodes = { root, child };
 		data.MaterialSlots = { "materials/unit_a.wmat", "materials/unit_b.wmat" };
+		// D5b v2:meta 必须由导入器写入;手工构造的用例同样给一套可区分的值。
+		data.Meta.Valid = true;
+		data.Meta.SourceFingerprint = 0x1122334455667788ULL;
+		data.Meta.ImporterVersion = 1;
+		data.Meta.SettingsHash = 0x99AABBCCDDEEFF00ULL;
+		data.Meta.UpAxis = 0;
+		data.Meta.Scale = 1.0f;
 		return data;
 	}
 
@@ -160,6 +175,13 @@ namespace
 		Asset::WModelData loaded;
 		CHECK(Asset::WModelIO::ReadFile(file.string(), loaded, &error));
 		CHECK(error.empty());
+		// D5b v2:meta 全字段往返(源指纹/导入器版本/设置哈希/轴/缩放)。
+		CHECK(loaded.Meta.Valid);
+		CHECK(loaded.Meta.SourceFingerprint == source.Meta.SourceFingerprint);
+		CHECK(loaded.Meta.ImporterVersion == source.Meta.ImporterVersion);
+		CHECK(loaded.Meta.SettingsHash == source.Meta.SettingsHash);
+		CHECK(loaded.Meta.UpAxis == source.Meta.UpAxis);
+		CHECK(Nearly(loaded.Meta.Scale, source.Meta.Scale));
 		CHECK(loaded.Vertices.size() == source.Vertices.size());
 		CHECK(loaded.Indices == source.Indices);
 		for (size_t index = 0; index < loaded.Vertices.size(); ++index)
@@ -250,6 +272,25 @@ namespace
 			std::string error;
 			CHECK(!Asset::WModelIO::WriteFile((root / "invalid.wmodel").string(), invalid, &error));
 			CHECK(Contains(error, "submesh"));
+		}
+		{
+			// v1 拒绝:旧格式没有 meta(源指纹/设置哈希),必须报"请重新导入"而不是猜。
+			std::vector<uint8_t> version1 = bytes;
+			version1[4] = 1;   // version = 1(小端)
+			version1[5] = 0;
+			version1[6] = 0;
+			version1[7] = 0;
+			const std::string error = readFailure(version1, "version1.wmodel");
+			CHECK(Contains(error, "version 1"));
+			CHECK(Contains(error, "re-import"));
+		}
+		{
+			// v2 契约:没有 meta 的 WModelData 不允许写出(导入器必须先填 meta)。
+			Asset::WModelData noMeta = MakeSmallModel();
+			noMeta.Meta = Asset::WModelData::MetaData {};
+			std::string error;
+			CHECK(!Asset::WModelIO::WriteFile((root / "no-meta.wmodel").string(), noMeta, &error));
+			CHECK(Contains(error, "meta"));
 		}
 		fs::remove_all(root);
 	}
@@ -368,6 +409,157 @@ namespace
 		fs::remove_all(root);
 	}
 
+	// D5b-1 通用工具:测试自己的路径后缀替换(不依赖引擎内部实现)。
+	std::filesystem::path WithSuffix(const std::filesystem::path& path, const char* suffix)
+	{
+		std::filesystem::path copy = path;
+		copy.replace_extension(suffix);
+		return copy;
+	}
+
+	uint64_t Fnv1a64(const std::vector<uint8_t>& bytes)
+	{
+		uint64_t hash = 14695981039346656037ULL;
+		for (const uint8_t byte : bytes)
+		{
+			hash ^= byte;
+			hash *= 1099511628211ULL;
+		}
+		return hash;
+	}
+
+	// 5.D5b 导入设置:.wimport Load/Save/Hash(缺省不失败、坏 JSON 回默认、哈希覆盖字段)。
+	void ModelImportSettingsRoundTrip()
+	{
+		const fs::path root = TestRoot() / "settings";
+		fs::remove_all(root);
+		fs::create_directories(root);
+
+		// 缺文件 → Default() + 不报错。
+		{
+			std::string reason = "not cleared";
+			const Asset::ModelImportSettings settings =
+				Asset::ModelImportSettings::Load((root / "missing.gltf").string(), &reason);
+			CHECK(reason.empty());
+			CHECK(Nearly(settings.Scale, 1.0f));
+			CHECK(settings.UpAxis == 0u);
+			CHECK(settings.ExportMaterials);
+			CHECK(settings.ExportTextures);
+			CHECK(settings.ImportAnimations);
+			CHECK(settings.GenerateNormals);
+		}
+		{
+			// 坏 JSON → 默认值 + 可读 reason(不失败、不抛异常)。
+			const fs::path source = root / "broken.gltf";
+			WriteBytes(source, std::vector<uint8_t> { '{', '"', 's' });
+			// .wimport 与源同目录同名 —— 测试自己写一份坏 JSON 版本。
+			WriteBytes(WithSuffix(source, ".wimport"), std::vector<uint8_t> { '{', '"', 's' });
+			std::string reason;
+			const Asset::ModelImportSettings settings =
+				Asset::ModelImportSettings::Load(source.string(), &reason);
+			CHECK(!reason.empty());
+			CHECK(Nearly(settings.Scale, 1.0f));
+			CHECK(Asset::ModelImportSettings::Hash(settings) == Asset::ModelImportSettings::Hash(
+				Asset::ModelImportSettings::Default()));
+		}
+		{
+			// Save → Load 往返,且 Hash 覆盖每个字段。
+			const fs::path source = root / "roundtrip.gltf";
+			WriteBytes(source, std::vector<uint8_t> { ' ' });
+			Asset::ModelImportSettings settings = Asset::ModelImportSettings::Default();
+			settings.Scale = 2.0f;
+			settings.UpAxis = 1;
+			settings.ExportTextures = false;
+			settings.GenerateNormals = true;   // 非默认值用例只覆盖 scale/upAxis/贴图开关
+			std::string reason;
+			CHECK(Asset::ModelImportSettings::Save(source.string(), settings, &reason));
+			CHECK(reason.empty());
+			const fs::path settingsPath = WithSuffix(source, ".wimport");
+			CHECK(fs::exists(settingsPath));
+
+			const Asset::ModelImportSettings loaded =
+				Asset::ModelImportSettings::Load(source.string(), &reason);
+			CHECK(reason.empty());
+			CHECK(Nearly(loaded.Scale, 2.0f));
+			CHECK(loaded.UpAxis == 1u);
+			CHECK(loaded.ExportMaterials);
+			CHECK(!loaded.ExportTextures);
+			CHECK(loaded.GenerateNormals);
+			CHECK(loaded.ImportAnimations);   // 默认 true,未被 Save 改动
+			CHECK(Asset::ModelImportSettings::Hash(loaded) == Asset::ModelImportSettings::Hash(settings));
+
+			Asset::ModelImportSettings changed = settings;
+			changed.ExportTextures = true;
+			CHECK(Asset::ModelImportSettings::Hash(changed) != Asset::ModelImportSettings::Hash(settings));
+			changed = settings;
+			changed.ImportAnimations = false;
+			CHECK(Asset::ModelImportSettings::Hash(changed) != Asset::ModelImportSettings::Hash(settings));
+			changed = settings;
+			changed.UpAxis = 0;
+			CHECK(Asset::ModelImportSettings::Hash(changed) != Asset::ModelImportSettings::Hash(settings));
+		}
+		fs::remove_all(root);
+	}
+
+	// 6.D5b 内核:ImportAsBytes = ImportFile 的字节来源(同源同设置 → 逐字节一致)+ meta 契约。
+	void GltfImportKernelMatchesFileImport()
+	{
+		const fs::path root = TestRoot() / "kernel";
+		fs::remove_all(root);
+		fs::create_directories(root);
+		const fs::path fixture = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
+		CHECK(fs::exists(fixture));
+		// 该用例比较的是"内核字节"与"ImportFile 写盘字节":两条路径都走默认设置
+		// (ImportFile 固定默认;内核显式传 Default()),不受 .wimport 内容影响。
+
+		Asset::GltfImportResult fileResult;
+		std::string error;
+		CHECK(Asset::GltfImporter::ImportFile(fixture.string(), root.string(), &fileResult, &error));
+		CHECK(error.empty());
+		const std::vector<uint8_t> sourceBytes = ReadBytes(fixture);
+		CHECK(fileResult.SourceFingerprint == Fnv1a64(sourceBytes));
+		CHECK(fileResult.UpAxis == 0u);
+
+		const Asset::ModelImportSettings settings = Asset::ModelImportSettings::Default();
+		Asset::GltfImportMetadata metadata;
+		metadata.ImporterVersion = 1;
+		metadata.SettingsHash = Asset::ModelImportSettings::Hash(settings);
+		metadata.UpAxis = settings.UpAxis;
+		metadata.Scale = settings.Scale;
+		Asset::GltfImportBytesResult bytes;
+		CHECK(Asset::GltfImporter::ImportAsBytes(fixture.string(), settings, metadata, &bytes, &error));
+		CHECK(error.empty());
+		CHECK(bytes.Summary.WModelPath == fileResult.WModelPath);
+		CHECK(bytes.Summary.SourceFingerprint == fileResult.SourceFingerprint);
+		CHECK(bytes.Summary.VertexCount == fileResult.VertexCount);
+		CHECK(bytes.Summary.IndexCount == fileResult.IndexCount);
+		CHECK(bytes.Metadata.SettingsHash == metadata.SettingsHash);
+		CHECK(bytes.Metadata.ImporterVersion == 1u);
+		// ImportFile 路径固定在 models/ 下(与 D5 编辑器导入行为一致)。
+		CHECK(fileResult.WModelPath == "models/D5Fixture.wmodel");
+		CHECK(fileResult.MaterialPaths[0] == "materials/D5Fixture_Tex.wmat");
+
+		// 内存产物 → 逐项与落盘字节一致;模型必须是最后一项(.wmodel 作为提交标记)。
+		CHECK(!bytes.Outputs.empty());
+		CHECK(bytes.Outputs.back().LogicalPath == fileResult.WModelPath);
+		for (const Asset::GltfInMemoryOutput& output : bytes.Outputs)
+			CHECK(ReadBytes(root / output.LogicalPath) == output.Data);
+
+		// .wmodel meta:内核用源文件内容算指纹;解析回来与传入 metadata 一致。
+		Asset::WModelData model;
+		CHECK(Asset::WModelIO::ReadFile((root / fileResult.WModelPath).string(), model, &error));
+		CHECK(model.Meta.Valid);
+		CHECK(model.Meta.SourceFingerprint == fileResult.SourceFingerprint);
+		CHECK(model.Meta.ImporterVersion == metadata.ImporterVersion);
+		CHECK(model.Meta.SettingsHash == metadata.SettingsHash);
+		CHECK(model.Meta.UpAxis == metadata.UpAxis);
+		CHECK(Nearly(model.Meta.Scale, metadata.Scale));
+		// ImportFile 的薄壳契约:字节与磁盘逐项一致(见上面的循环),路径集合也一致。
+		CHECK(fileResult.MaterialPaths.size() == 2u);
+		CHECK(fileResult.TexturePaths.size() == 1u);
+		fs::remove_all(root);
+	}
+
 	// 4b.节点树实例化:3 个节点 → 3 个实体,Tag/TRS/MeshPath/MeshIndex/层级与世界矩阵正确。
 	void ModelInstanceBuildsNodeTree()
 	{
@@ -415,7 +607,271 @@ namespace
 		fs::remove_all(root);
 	}
 
-	// 5.不支持特性硬报错(不生成半成品)。
+	// D5b 工具:把真实夹具复制进临时内容根(源-only 项目:只有 .gltf + .wimport)。
+	void CopyFixture(const fs::path& content)
+	{
+		const fs::path source = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
+		CHECK(fs::exists(source));
+		fs::create_directories(content / "models" / "tests");
+		fs::copy_file(source, content / "models" / "tests" / "D5Fixture.gltf",
+			fs::copy_options::overwrite_existing);
+		const fs::path settings = WithSuffix(source, ".wimport");
+		CHECK(fs::exists(settings));
+		fs::copy_file(settings, content / "models" / "tests" / "D5Fixture.wimport",
+			fs::copy_options::overwrite_existing);
+	}
+
+	Asset::CookSummary RunCook(const fs::path& content, const fs::path& project,
+		const fs::path& output)
+	{
+		(void)content;   // 内容已在磁盘准备;这里只保证清单与内容根一致。
+		std::string error;
+		Asset::ProjectManifest manifest;
+		manifest.Id = "com.test.model";
+		manifest.ContentRoot = "content";
+		manifest.StartScene = "models/tests/D5Fixture.gltf";
+		manifest.Packages = { "packages/Base.wpak" };
+		CHECK(Asset::ProjectManifest::Save(project / "project.we.yaml", manifest, &error));
+		CHECK(error.empty());
+
+		Asset::CookPipeline pipeline(Asset::DefaultImporters());
+		Asset::CookSummary summary;
+		pipeline.Cook(manifest, project / "project.we.yaml", output, false, &summary);
+		return summary;
+	}
+
+	// 6.D5b cook:cook 期坏源 → 非零失败 + 可读错误(不写半成品)。
+	void CookFailsOnBrokenSource()
+	{
+		const fs::path root = TestRoot() / "cook-broken";
+		fs::remove_all(root);
+		fs::create_directories(root);
+		const fs::path content = root / "content";
+		fs::create_directories(content / "models");
+		// 截断的 JSON:先被 cgltf 解析拒绝,报可读错误(不静默生成空模型)。
+		WriteBytes(content / "models" / "Broken.gltf", std::vector<uint8_t> { '{', ' ', '"' });
+
+		Asset::CookPipeline pipeline(Asset::DefaultImporters());
+		Asset::CookSummary summary;
+		Asset::ProjectManifest manifest;
+		manifest.Id = "com.test.broken";
+		manifest.ContentRoot = "content";
+		manifest.StartScene = "models/Broken.gltf";
+		manifest.Packages = { "packages/Base.wpak" };
+		const std::vector<Asset::CookEntryResult> results =
+			pipeline.Cook(manifest, root / "project.we.yaml", root / "cooked-output", false, &summary);
+		CHECK(summary.Failed == 1u);
+		CHECK(results.size() == 1u && results[0].Failed);
+		CHECK(Contains(results[0].Error, "glTF import failed"));
+		CHECK(!fs::exists(root / "cooked-output" / "cooked" / "models" / "Broken.wmodel"));
+		fs::remove_all(root);
+	}
+
+	// 7.D5b cook:源-only 项目 → 多产物(.wmodel/.wmat/贴图)+ 增量 0 changed。
+	// 夹具 `.wimport` 是**默认值**(与源同目录,验证 sidecar 解析路径;非默认路径见用例 8/9/10)。
+	void CookModelSourceProducesArtifacts()
+	{
+		const fs::path root = TestRoot() / "cook";
+		fs::remove_all(root);
+		fs::create_directories(root);
+		const fs::path content = root / "content";
+		CopyFixture(content);
+		Asset::CookPipeline pipeline(Asset::DefaultImporters());
+		Asset::CookSummary summary;
+		Asset::ProjectManifest manifest;
+		manifest.Id = "com.test.model";
+		manifest.ContentRoot = "content";
+		manifest.StartScene = "models/tests/D5Fixture.gltf";
+		manifest.Packages = { "packages/Base.wpak" };
+		const std::vector<Asset::CookEntryResult> results =
+			pipeline.Cook(manifest, root / "project.we.yaml", root / "out", false, &summary);
+		CHECK(summary.Total == 1u && summary.Changed == 1u && summary.Failed == 0u);
+		CHECK(results.size() == 1u && !results[0].Failed);
+
+		const fs::path cooked = root / "out" / "cooked";
+		const fs::path modelFile = cooked / "models" / "tests" / "D5Fixture.wmodel";
+		CHECK(fs::exists(modelFile));
+		// 默认设置:材质与贴图都产出。
+		CHECK(fs::exists(cooked / "models" / "tests" / "materials" / "D5Fixture_Tex.wmat"));
+		CHECK(fs::exists(cooked / "models" / "tests" / "materials" / "D5Fixture_Solid.wmat"));
+		CHECK(fs::exists(cooked / "models" / "tests" / "textures" / "D5Fixture_0.png"));
+
+		Asset::WModelData model;
+		std::string error;
+		CHECK(Asset::WModelIO::ReadFile(modelFile.string(), model, &error));
+		CHECK(error.empty());
+		CHECK(model.Meta.Valid);
+		CHECK(model.Meta.ImporterVersion == 1u);
+		CHECK(model.Meta.Scale == 1.0f);
+		CHECK(model.Meta.SourceFingerprint == Fnv1a64(ReadBytes(content / "models" / "tests" / "D5Fixture.gltf")));
+		// 默认 scale=1:包围盒与源几何一致 [-1,0,0]~[1,1,1]。
+		CHECK(Nearly(model.Bounds.Min.x, -1.0f) && Nearly(model.Bounds.Min.y, 0.0f)
+			&& Nearly(model.Bounds.Min.z, 0.0f));
+		CHECK(Nearly(model.Bounds.Max.x, 1.0f) && Nearly(model.Bounds.Max.y, 1.0f)
+			&& Nearly(model.Bounds.Max.z, 1.0f));
+		CHECK(model.MaterialSlots.size() == 2u);
+		CHECK(model.MaterialSlots[0] == "models/tests/materials/D5Fixture_Tex.wmat");
+		// 贴图路径指向导出的贴图(默认 exportTextures=true)。
+		{
+			MaterialDesc desc;
+			std::string parseError;
+			const MaterialLoadResult parsed =
+				MaterialIO::Parse(ReadText(cooked / "models" / "tests" / "materials" /
+					"D5Fixture_Tex.wmat"), desc, &parseError);
+			CHECK(parsed.Success);
+			CHECK(desc.AlbedoTexture == "models/tests/textures/D5Fixture_0.png");
+			CHECK(desc.NormalTexture.empty());
+		}
+
+		// 增量:同一输入第二次 cook 必须 0 changed。
+		Asset::CookPipeline second(Asset::DefaultImporters());
+		Asset::CookSummary secondSummary;
+		second.Cook(manifest, root / "project.we.yaml", root / "out", false, &secondSummary);
+		CHECK(secondSummary.Changed == 0u && secondSummary.Skipped == 1u && secondSummary.Failed == 0u);
+		fs::remove_all(root);
+	}
+
+	// 8.D5b cook:改 .wimport → 重烘;scale/upAxis 烘焙改包围盒轴映射+尺寸。
+	void CookReactsToImportSettings()
+	{
+		const fs::path root = TestRoot() / "cook-settings";
+		fs::remove_all(root);
+		fs::create_directories(root);
+		const fs::path content = root / "content";
+		CopyFixture(content);
+		const fs::path output = root / "out";
+		const fs::path modelFile = output / "cooked" / "models" / "tests" / "D5Fixture.wmodel";
+		const fs::path settingsPath = content / "models" / "tests" / "D5Fixture.wimport";
+
+		const Asset::CookSummary first =
+			RunCook(content, root, output);
+		CHECK(first.Changed == 1u && first.Failed == 0u);
+
+		std::string error;
+		Wui::JsonValue rootSettings;
+		rootSettings.type = Wui::JsonValue::Type::Object;
+		rootSettings.Object.push_back({ "scale", Wui::JsonValue::MakeNumber(2.0) });
+		rootSettings.Object.push_back({ "upAxis", Wui::JsonValue::MakeString("Z") });
+		rootSettings.Object.push_back({ "exportTextures", Wui::JsonValue::MakeBool(false) });
+		{
+			std::ofstream file(settingsPath, std::ios::binary | std::ios::trunc);
+			file << rootSettings.Dump();
+		}
+
+		const Asset::CookSummary second =
+			RunCook(content, root, output);
+		CHECK(second.Changed == 1u && second.Failed == 0u);
+		Asset::WModelData model;
+		CHECK(Asset::WModelIO::ReadFile(modelFile.string(), model, &error));
+		CHECK(error.empty());
+		CHECK(model.Meta.UpAxis == 1u);
+		CHECK(model.Meta.Scale == 2.0f);
+		// upAxis=Z:-90° 绕 X 轴,(x,y,z) → (x,z,-y);源 [-1,0,0]~[1,1,1] → [-2,0,-2]~[2,2,0]。
+		CHECK(Nearly(model.Bounds.Min.x, -2.0f) && Nearly(model.Bounds.Min.y, 0.0f)
+			&& Nearly(model.Bounds.Min.z, -2.0f));
+		CHECK(Nearly(model.Bounds.Max.x, 2.0f) && Nearly(model.Bounds.Max.y, 2.0f)
+			&& Nearly(model.Bounds.Max.z, 0.0f));
+
+		// 未改设置 → 0 changed(设置哈希参与复合指纹,值相同不重烘)。
+		const Asset::CookSummary third =
+			RunCook(content, root, output);
+		CHECK(third.Changed == 0u && third.Skipped == 1u && third.Failed == 0u);
+		fs::remove_all(root);
+	}
+
+	// 9.D5b cook:exportMaterials=false → 不产出 .wmat、材质槽留空。
+	void CookWithoutMaterials()
+	{
+		const fs::path root = TestRoot() / "cook-nomat";
+		fs::remove_all(root);
+		fs::create_directories(root);
+		const fs::path content = root / "content";
+		CopyFixture(content);
+		Wui::JsonValue settings;
+		settings.type = Wui::JsonValue::Type::Object;
+		settings.Object.push_back({ "scale", Wui::JsonValue::MakeNumber(1.0) });
+		settings.Object.push_back({ "upAxis", Wui::JsonValue::MakeString("Y") });
+		settings.Object.push_back({ "exportMaterials", Wui::JsonValue::MakeBool(false) });
+		settings.Object.push_back({ "exportTextures", Wui::JsonValue::MakeBool(true) });
+		{
+			std::ofstream file(content / "models" / "tests" / "D5Fixture.wimport",
+				std::ios::binary | std::ios::trunc);
+			file << settings.Dump();
+		}
+
+		const fs::path output = root / "out";
+		const Asset::CookSummary summary =
+			RunCook(content, root, output);
+		CHECK(summary.Changed == 1u && summary.Failed == 0u);
+		const fs::path cooked = output / "cooked";
+		CHECK(fs::exists(cooked / "models" / "tests" / "D5Fixture.wmodel"));
+		CHECK(!fs::exists(cooked / "models" / "tests" / "materials" / "D5Fixture_Tex.wmat"));
+		Asset::WModelData model;
+		std::string error;
+		CHECK(Asset::WModelIO::ReadFile((cooked / "models" / "tests" / "D5Fixture.wmodel").string(),
+			model, &error));
+		CHECK(model.MaterialSlots.size() == 2u);
+		CHECK(model.MaterialSlots[0].empty() && model.MaterialSlots[1].empty());
+		for (const Asset::WModelSubmesh& submesh : model.Submeshes)
+			CHECK(submesh.MaterialSlot == -1);
+		fs::remove_all(root);
+	}
+
+	// 10.D5b:派生产物在内存产物里可枚举(材质/贴图在前、模型最后);cook.db 记录源、
+	// 不把 .wimport 当资产;.wimport 变化触发重烘(复合指纹,见用例 8)。
+	void CookDatabaseTracksSettingsDependency()
+	{
+		const fs::path root = TestRoot() / "cook-db";
+		fs::remove_all(root);
+		fs::create_directories(root);
+		const fs::path content = root / "content";
+		CopyFixture(content);
+		const fs::path output = root / "out";
+		RunCook(content, root, output);
+
+		// 内存产物枚举:贴图/材质在前,模型最后(.wmodel 作为提交标记)。
+		{
+			Asset::GltfImportBytesResult bytes;
+			std::string importError;
+			Asset::GltfImportMetadata metadata;
+			metadata.ImporterVersion = 1;
+			metadata.SettingsHash = Asset::ModelImportSettings::Hash(Asset::ModelImportSettings::Default());
+			// 与 cook 的 ModelImporter 相同:模型与源同目录同名 → 派生产物全部在该目录下。
+			metadata.LogicalModelPath = "models/tests/D5Fixture.wmodel";
+			CHECK(Asset::GltfImporter::ImportAsBytes(
+				(content / "models" / "tests" / "D5Fixture.gltf").string(),
+				Asset::ModelImportSettings::Default(), metadata, &bytes, &importError));
+			CHECK(importError.empty());
+			for (size_t index = 0; index + 1 < bytes.Outputs.size(); ++index)
+			{
+				const std::string& path = bytes.Outputs[index].LogicalPath;
+				CHECK(path.rfind("models/tests/textures/", 0) == 0
+					|| path.rfind("models/tests/materials/", 0) == 0);
+			}
+			CHECK(bytes.Outputs.back().LogicalPath == "models/tests/D5Fixture.wmodel");
+		}
+
+		std::string parseError;
+		const std::optional<Wui::JsonValue> database =
+			Wui::JsonValue::Parse(ReadText(output / "cook.db.json"), &parseError);
+		CHECK(database.has_value());
+		const Wui::JsonValue* entries = database->Find("entries");
+		CHECK(entries != nullptr && entries->type == Wui::JsonValue::Type::Array);
+		bool hasSource = false;
+		for (const Wui::JsonValue& entry : entries->Array)
+		{
+			const Wui::JsonValue* path = entry.Find("path");
+			CHECK(path != nullptr);
+			if (path->AsString() == "models/tests/D5Fixture.gltf")
+				hasSource = true;
+			CHECK(path->AsString() != "models/tests/D5Fixture.wimport");   // 设置文件不是资产
+			CHECK(path->AsString() != "models/tests/D5Fixture.wmodel");    // 派生产物不进内容根清单
+		}
+		CHECK(hasSource);
+		fs::remove_all(root);
+	}
+
+	// 11.不支持特性硬报错(不生成半成品)。
 	void UnsupportedFeaturesHardFail()
 	{
 		const fs::path root = TestRoot() / "unsupported";
@@ -526,6 +982,9 @@ int main(int argc, char** argv)
 	try
 	{
 		std::setvbuf(stdout, nullptr, _IONBF, 0);
+		// 每次运行从干净沙箱开始(失败时留下的半成品不参与下一次断言)。
+		std::error_code cleanupEc;
+		std::filesystem::remove_all(TestRoot(), cleanupEc);
 
 		// 无窗口导入模式(与编辑器 --import-gltf 同一条引擎路径):
 		// WorldModelTests --import <source.gltf> <outputRoot>
@@ -574,7 +1033,14 @@ int main(int argc, char** argv)
 			{ ".wmodel round trip is complete and deterministic", WModelRoundTripIsDeterministic },
 			{ ".wmodel rejects bad magic / version / truncation / out-of-range refs", WModelRejectsCorruptFiles },
 			{ "glTF fixture imports (2 submeshes, embedded texture, nested nodes, face normals)", GltfFixtureImportsAndLoadsBack },
+			{ "D5b import settings .wimport round trip + hash covers fields", ModelImportSettingsRoundTrip },
+			{ "D5b glTF kernel bytes match ImportFile output + v2 meta contract", GltfImportKernelMatchesFileImport },
 			{ "model node tree instantiates as entities (TRS / MeshIndex / hierarchy)", ModelInstanceBuildsNodeTree },
+			{ "D5b cook fails on broken source with a readable error", CookFailsOnBrokenSource },
+			{ "D5b cook produces .wmodel/.wmat from source-only project + incremental 0 changed", CookModelSourceProducesArtifacts },
+			{ "D5b cook reacts to .wimport scale/upAxis changes with baked geometry", CookReactsToImportSettings },
+			{ "D5b cook without exported materials leaves empty slots", CookWithoutMaterials },
+			{ "D5b derived outputs are enumerable and ordered (model last)", CookDatabaseTracksSettingsDependency },
 			{ "unsupported glTF features fail hard (skin / animation)", UnsupportedFeaturesHardFail },
 			{ "MeshIndex schema round trip + committed Lua stub", MeshIndexSchemaRoundTrip },
 		};

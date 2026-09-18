@@ -43,14 +43,42 @@ namespace World::Asset
 			return buffer;
 		}
 
+		// D5b:导入设置的旁路文件(与源同目录同名,如 models/x.wimport)。属主是源 + 设置,
+		// 自身不是可导入资产(缺省 = 默认值),但内容变化必须让源重烘 —— 复合指纹带上它。
+		constexpr const char* kImportSettingsExtension = ".wimport";
+
+		std::filesystem::path ImportSettingsPath(const std::filesystem::path& source)
+		{
+			std::filesystem::path path = source;
+			path.replace_extension(kImportSettingsExtension);
+			return path;
+		}
+
+		void MixFileFingerprint(uint64_t& hash, const std::filesystem::path& path, const char* salt)
+		{
+			hash ^= Fnv1a64String(salt);
+			hash *= 1099511628211ULL;
+			std::ifstream stream(path, std::ios::binary);
+			if (!stream)
+				return;
+			const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(stream)),
+				std::istreambuf_iterator<char>());
+			hash ^= Fnv1a64(bytes.data(), bytes.size());
+			hash *= 1099511628211ULL;
+		}
+
 		// 源内容指纹复合导入器身份:导入器升级时所有产物失效重烘焙。
-		uint64_t CompositeFingerprint(const IAssetImporter& importer, const std::vector<uint8_t>& bytes)
+		uint64_t CompositeFingerprint(const IAssetImporter& importer, const std::vector<uint8_t>& bytes,
+			const std::filesystem::path& source)
 		{
 			uint64_t hash = Fnv1a64(bytes.data(), bytes.size());
 			hash ^= Fnv1a64String(importer.Name());
 			hash *= 1099511628211ULL;
 			hash ^= importer.Version();
 			hash *= 1099511628211ULL;
+
+			// 导入设置的旁路文件(.wimport):存在才参与(CookPipeline 不关心扩展名含义)。
+			MixFileFingerprint(hash, ImportSettingsPath(source), kImportSettingsExtension);
 			return hash;
 		}
 
@@ -173,6 +201,9 @@ namespace World::Asset
 			std::error_code fileEc;
 			if (!entry.is_regular_file(fileEc))
 				continue;
+			// D5b:.wimport 是源的导入设置(复合指纹里已带上),不是独立资产 —— 不产出 cooked 项。
+			if (entry.path().extension() == kImportSettingsExtension)
+				continue;
 
 			std::filesystem::path relative;
 			{
@@ -214,7 +245,7 @@ namespace World::Asset
 			}
 			std::vector<uint8_t> sourceBytes((std::istreambuf_iterator<char>(sourceStream)),
 				std::istreambuf_iterator<char>());
-			const uint64_t fingerprint = CompositeFingerprint(*importer, sourceBytes);
+			const uint64_t fingerprint = CompositeFingerprint(*importer, sourceBytes, entry.path());
 
 			const auto existing = database.find(logical);
 			if (!force && existing != database.end() && existing->second.Fingerprint == fingerprint)
@@ -240,17 +271,59 @@ namespace World::Asset
 				results.push_back(std::move(result));
 				continue;
 			}
-			if (!WriteArtifact(outputDir, logical, imported.Data))
+
+			// D5b 多产物契约:Outputs 非空时 Data 必须为空(单产物路径行为不变)。
+			std::vector<std::pair<std::string, const std::vector<uint8_t>*>> artifacts;
+			artifacts.reserve(imported.Outputs.empty() ? 1u : imported.Outputs.size());
+			if (!imported.Outputs.empty())
 			{
-				result.Failed = true;
-				result.Error = "cannot write cooked artifact for " + logical;
+				if (!imported.Data.empty())
+				{
+					result.Failed = true;
+					result.Error = "importer '" + importer->Name() + "' returned both Data and Outputs for "
+						+ logical + " (contract: Outputs non-empty requires Data empty)";
+					++stats.Failed;
+					results.push_back(std::move(result));
+					continue;
+				}
+				for (const ImportOutput& output : imported.Outputs)
+					artifacts.emplace_back(output.LogicalPath, &output.Data);
+			}
+			else
+			{
+				artifacts.emplace_back(logical, &imported.Data);
+			}
+
+			bool writeFailed = false;
+			for (const auto& [logicalOutput, data] : artifacts)
+			{
+				if (logicalOutput.empty() || !data)
+				{
+					result.Failed = true;
+					result.Error = "importer '" + importer->Name() + "' produced an empty logical path for "
+						+ logical;
+					writeFailed = true;
+					break;
+				}
+				if (!WriteArtifact(outputDir, logicalOutput, *data))
+				{
+					result.Failed = true;
+					result.Error = "cannot write cooked artifact for " + logicalOutput;
+					writeFailed = true;
+					break;
+				}
+			}
+			if (writeFailed)
+			{
 				++stats.Failed;
 				results.push_back(std::move(result));
 				continue;
 			}
+
 			DatabaseEntry stored;
 			stored.Fingerprint = fingerprint;
-			stored.Size = imported.Data.size();
+			stored.Size = imported.Outputs.empty() ? imported.Data.size()
+				: static_cast<uint64_t>(imported.Outputs.size());
 			nextDatabase[logical] = stored;
 			result.Changed = true;
 			++stats.Changed;
