@@ -325,6 +325,19 @@ namespace World
 			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
 			m_Host.OpenScriptEditor(ec ? path.generic_string() : relative.generic_string());
 		}
+		else if (path.extension() == ".wmodel")
+		{
+			// P1b D5:模型双击 → 把节点树实例化进当前(编辑态)场景;逻辑路径相对内容根。
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			std::string message;
+			if (!m_Host.InstantiateModelFile(logical, &message))
+				WLD_CORE_WARN("[model] instantiate '{0}' failed: {1}", logical, message);
+			else
+				WLD_CORE_INFO("[model] {0}", message);
+		}
 		else
 		{
 			const std::string cmd = "start \"\" \"" + std::filesystem::absolute(path).string() + "\"";

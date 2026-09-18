@@ -122,6 +122,10 @@ namespace World
 		bool ExternalSceneChanged() const { return m_ExternalSceneChanged; }
 		void ReopenExternalScene();
 
+		// ---- P1b D5:模型资产(.wmodel)实例化 ----
+		// 内容浏览器双击调用:把 .wmodel 的节点树实例化进当前文档场景(仅编辑态)。
+		bool InstantiateModelFile(const std::string& logicalPath, std::string* message = nullptr);
+
 		bool OnKeyPressed(KeyPressedEvent& e);
 		bool OnWindowClose(WindowCloseEvent& e);
 

@@ -88,6 +88,15 @@ namespace World
 		// 磁盘上的 .wd 内容变化 → 视口顶部提示条 + "重新打开"按钮;**不自动替换**文档。
 		virtual bool ExternalSceneChanged() const { return false; }
 		virtual void ReopenExternalScene() {}
+		// ---- P1b D5:模型资产(.wmodel)实例化 ----
+		// 内容浏览器双击 .wmodel → 把节点树实例化进当前文档场景(编辑态);
+		// 默认未接线 = false + 可读 message。
+		virtual bool InstantiateModelFile(const std::string& logicalPath, std::string* message = nullptr)
+		{
+			(void)logicalPath;
+			if (message) *message = "model instantiation is not wired to a host";
+			return false;
+		}
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

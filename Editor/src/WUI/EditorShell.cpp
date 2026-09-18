@@ -1958,6 +1958,11 @@ namespace World
 		m_Editor.ReopenExternalScene();
 	}
 
+	bool EditorShell::InstantiateModelFile(const std::string& logicalPath, std::string* message)
+	{
+		return m_Editor.InstantiateModelFile(logicalPath, message);
+	}
+
 	EditorPanel* EditorShell::FocusedPanel()
 	{
 		// ① 主窗口处于"已附加面板"模式(顶栏标签):该面板就是焦点面板。

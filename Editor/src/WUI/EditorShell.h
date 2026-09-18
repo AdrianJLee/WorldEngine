@@ -108,6 +108,8 @@ namespace World
 		// ---- W5-L1:文档场景外部改动提示(转发 EditorLayer)----
 		bool ExternalSceneChanged() const override;
 		void ReopenExternalScene() override;
+		// P1b D5:内容浏览器双击 .wmodel → 实例化进当前文档场景。
+		bool InstantiateModelFile(const std::string& logicalPath, std::string* message = nullptr) override;
 		// W9-2 三层快捷键路由第 2 层:当前焦点面板。
 		//   ① 主窗口处于"已附加面板"模式(顶栏标签)→ 该面板;
 		//   ② 否则某个独立窗口在前台 → 该窗口的当前标签;

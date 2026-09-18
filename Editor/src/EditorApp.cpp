@@ -2,6 +2,7 @@
 #include "EditorCooker.h"
 #include "EditorStartup.h"
 #include "EditorLayer.h"
+#include "World/Core/Asset/GltfImporter.h"
 
 // 这个文件是整个 Editor 程序的入口，定义了 EditorApp 类并实现了 CreateApplication 函数
 #include "World/Core/EntryPoint.h"
@@ -51,6 +52,31 @@ namespace World
 			{
 				World::Editor::SetAiControlPort(std::atoi(arguments[i].c_str() + std::strlen("--ai-control=")));
 				continue;
+			}
+			// P1b D5:无窗口 glTF 导入 —— `--import-gltf <file> [--out <dir>]`。
+			// 产出 `.wmodel` + `.wmat` + 贴图;失败写 stderr 并以非零码退出(与 --cook 同一风格)。
+			if (arguments[i] == "--import-gltf" && i + 1 < arguments.size())
+			{
+				const std::filesystem::path source = arguments[i + 1];
+				std::filesystem::path outputRoot = std::filesystem::path(WLD_ASSETPATH);
+				if (i + 2 < arguments.size() && arguments[i + 2] == "--out" && i + 3 < arguments.size())
+					outputRoot = arguments[i + 3];
+
+				World::Asset::GltfImportResult imported;
+				std::string importError;
+				if (!World::Asset::ImportFile(source, outputRoot, &imported, &importError))
+				{
+					std::fprintf(stderr, "[import-gltf] FAILED: %s\n", importError.c_str());
+					std::exit(1);
+				}
+				std::printf("[import-gltf] OK: %s (meshes=%u submeshes=%u nodes=%u, materials=%zu, textures=%zu)\n",
+					imported.WModelPath.c_str(), imported.MeshCount, imported.SubmeshCount, imported.NodeCount,
+					imported.MaterialPaths.size(), imported.TexturePaths.size());
+				for (const std::string& material : imported.MaterialPaths)
+					std::printf("[import-gltf]   material: %s\n", material.c_str());
+				for (const std::string& texture : imported.TexturePaths)
+					std::printf("[import-gltf]   texture:  %s\n", texture.c_str());
+				std::exit(0);
 			}
 			if (arguments[i] != "--cook" || i + 1 >= arguments.size())
 				continue;

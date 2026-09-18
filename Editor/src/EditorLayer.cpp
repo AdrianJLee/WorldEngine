@@ -7,6 +7,7 @@
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Vfs/DirectoryProvider.h"
 #include "World/Core/Vfs/PackageProvider.h"
+#include "World/Gameplay/ModelInstance.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
@@ -1683,6 +1684,27 @@ namespace World
 		// dirty → 复用未保存确认模态(保存/放弃后才重开);clean → 直接重开。
 		// 成功重开会在 DoOpenScene 里重建基线并清掉提示。
 		RequestAction([this, target]() { DoOpenScene(target); });
+	}
+
+	bool EditorLayer::InstantiateModelFile(const std::string& logicalPath, std::string* message)
+	{
+		if (m_SceneState != SceneState::Edit || !m_ActiveScene)
+		{
+			if (message) *message = "模型只能在编辑态实例化(Play/Simulate 下请先退出)";
+			return false;
+		}
+		std::string error;
+		const std::size_t created = Gameplay::InstantiateModel(logicalPath, *m_ActiveScene, entt::null, &error);
+		if (created == 0)
+		{
+			if (message) *message = error.empty() ? ("模型里没有可实例化的节点: " + logicalPath) : error;
+			return false;
+		}
+		m_Document.MarkDirty();
+		if (message)
+			*message = "已实例化 " + std::to_string(created) + " 个实体: " + logicalPath;
+		WLD_CORE_INFO("[model] instantiated '{0}': {1} entities", logicalPath, created);
+		return true;
 	}
 
 	void EditorLayer::PollAssetHotReload(float deltaSeconds)
