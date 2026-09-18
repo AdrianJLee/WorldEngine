@@ -4,6 +4,7 @@
 
 #include "World/Core/Log.h"
 #include "World/Renderer/Renderer.h"
+#include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Scene/Components.h"
 #include "World/WUI/WuiAccessibility.h"
@@ -265,6 +266,25 @@ namespace World
 		if (cmd == "state.dump")
 		{
 			result = DescribeAiScene();
+			return true;
+		}
+		if (cmd == "stats.scene")
+		{
+			// P1b D8a:场景渲染统计(剔除/提交规模/CPU 耗时),压力场景脚本与 Stats 面板同源。
+			const Renderer3D::SceneStatistics scene = Renderer3D::GetSceneStatistics();
+			std::ostringstream out;
+			out << "{\"objects\":" << scene.Objects
+				<< ",\"visible\":" << scene.Submitted
+				<< ",\"culled\":" << scene.Culled
+				<< ",\"shadowCasters\":" << scene.ShadowCasters
+				<< ",\"drawCalls\":" << scene.DrawCalls
+				<< ",\"triangles\":" << scene.Triangles
+				<< ",\"droppedObjects\":" << scene.DroppedObjects
+				<< ",\"culling\":" << (scene.CullingEnabled ? "true" : "false")
+				<< ",\"sceneMs\":" << scene.SceneMilliseconds
+				<< ",\"cullMs\":" << scene.CullMilliseconds
+				<< ",\"fps\":" << m_WuiContext.Input().FPS << "}";
+			result = out.str();
 			return true;
 		}
 		if (cmd == "log.tail")

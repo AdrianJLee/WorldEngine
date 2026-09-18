@@ -651,6 +651,27 @@ set_tests_properties(World.Camera3D PROPERTIES
     TIMEOUT 60
 )
 
+# P1b D8a:视锥剔除数学(平面抽取/AABB 变换/相交判定)。
+add_executable(WorldFrustumCullTests FrustumCullTests.cpp)
+target_link_libraries(WorldFrustumCullTests PRIVATE World)
+target_compile_features(WorldFrustumCullTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldFrustumCullTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldFrustumCullTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldFrustumCullTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Frustum COMMAND WorldFrustumCullTests)
+set_tests_properties(World.Frustum PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P1b D2:网格资产模型(布局/包围盒/索引校验/默认物体)。
 add_executable(WorldMeshTests MeshTests.cpp)
 target_link_libraries(WorldMeshTests PRIVATE World)

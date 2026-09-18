@@ -13,13 +13,18 @@ namespace World
 {
 	namespace
 	{
-		// 每帧对象上限:对象 UBO/描述符集按"帧槽位 × 序号"预建,超出即拒绝(D8 用实例化替换)。
+		// 每帧对象上限:对象 UBO/描述符集按"帧槽位 × 序号"**按需**创建(首次用到才建),
+		// 超出即拒绝并计入 Statistics.DroppedObjects(D8b 用实例化替换)。
 		//
 		// 注意 64 而不是 32:对象序号是**跨调用方共享**的(主场景渲染器 + 各材质预览面板
 		// 依次调用 BeginScene 复位序号)。如果序号空间不够,后来者会拿不到槽位;
 		// 更隐蔽的是"序号复用"会让不同调用方争用同一份 UBO/描述符集——当两者写入的内容
 		// 不同(例如两个材质面板各自的贴图),画面就会逐帧来回闪(用户实测"预览一直闪烁")。
-		constexpr uint32_t kObjectsPerFrame = 64;
+		//
+		// D8a 起 64 → 1024:压力场景要求"≥1000 个网格实例"能全部提交(剔除前),
+		// 64 会让第 65 个之后的物体静默消失。代价只是首帧按需创建的 UBO/描述符集
+		// (144B × 3 帧槽位 × 1024 ≈ 440KB),没有预分配成本;真正的合并进 D8b 实例化。
+		constexpr uint32_t kObjectsPerFrame = 1024;
 
 		struct ObjectUniforms
 		{
@@ -104,6 +109,8 @@ namespace World
 			std::vector<uint32_t> PendingMaterialSlots;
 			uint32_t ObjectIndex = 0;
 			Renderer3D::Statistics Stats;
+			// D8a:场景级统计由 SceneRenderer 每帧覆盖报告(不随预览的 BeginScene 复位)。
+			Renderer3D::SceneStatistics SceneStats;
 		};
 
 		State& GetState()
@@ -266,7 +273,10 @@ namespace World
 			if (!mesh || !state.CommandBuffer || !state.Pipeline)
 				return UINT32_MAX;
 			if (state.ObjectIndex >= kObjectsPerFrame)
+			{
+				state.Stats.DroppedObjects++;
 				return UINT32_MAX;
+			}
 			if (indexCount == 0)
 				return UINT32_MAX;
 
@@ -956,6 +966,16 @@ namespace World
 	void Renderer3D::ResetStats()
 	{
 		GetState().Stats = {};
+	}
+
+	void Renderer3D::ReportSceneStatistics(const SceneStatistics& statistics)
+	{
+		GetState().SceneStats = statistics;
+	}
+
+	Renderer3D::SceneStatistics Renderer3D::GetSceneStatistics()
+	{
+		return GetState().SceneStats;
 	}
 
 	uint32_t Renderer3D::GetObjectsPerFrameLimit()

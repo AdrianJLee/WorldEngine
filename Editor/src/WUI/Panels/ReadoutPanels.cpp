@@ -5,6 +5,7 @@
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/WUI/WuiAccessibility.h"
 
 namespace World
 {
@@ -44,7 +45,7 @@ namespace World
 		{
 			m_Root = std::make_shared<Wui::WuiBox>();
 			m_Root->Gap = 2;
-			for (int i = 0; i < 10; ++i)
+			for (int i = 0; i < 12; ++i)
 			{
 				auto label = std::make_shared<Wui::WuiLabel>();
 				label->FontSize = 14;
@@ -72,6 +73,43 @@ namespace World
 		char shadowText[64] = {};
 		std::snprintf(shadowText, sizeof(shadowText), "Shadow pass: %.2f ms", stats3d.ShadowPassMilliseconds);
 		m_Lines[9]->Text = shadowText;
+
+		// P1b D8a:剔除/提交规模/场景提交 CPU 耗时(压力场景验收条款"帧时间可量化")。
+		const auto& scene3d = Renderer3D::GetSceneStatistics();
+		m_Lines[10]->Text = "Objects: " + std::to_string(scene3d.Submitted) + "/"
+			+ std::to_string(scene3d.Objects)
+			+ (scene3d.Culled ? " (culled " + std::to_string(scene3d.Culled) + ")" : "")
+			+ (scene3d.CullingEnabled ? "" : " [cull off]");
+		char sceneText[128] = {};
+		std::snprintf(sceneText, sizeof(sceneText), "Draws %u  Tris %u  Scene %.2f ms (cull %.3f ms)",
+			scene3d.DrawCalls, scene3d.Triangles, scene3d.SceneMilliseconds, scene3d.CullMilliseconds);
+		m_Lines[11]->Text = sceneText;
+
+		// 同一份数据的无障碍节点:自动化(ui.tree / 压测脚本)不必解析像素或文本行。
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("stats.scene");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "status";
+			node.Label = "scene stats";
+			node.Value = "objects=" + std::to_string(scene3d.Objects)
+				+ " visible=" + std::to_string(scene3d.Submitted)
+				+ " culled=" + std::to_string(scene3d.Culled)
+				+ " draws=" + std::to_string(scene3d.DrawCalls)
+				+ " tris=" + std::to_string(scene3d.Triangles)
+				+ " shadow=" + std::to_string(scene3d.ShadowCasters)
+				+ " dropped=" + std::to_string(scene3d.DroppedObjects)
+				+ " culling=" + (scene3d.CullingEnabled ? "1" : "0")
+				+ " fps=" + std::to_string(ctx.Input().FPS);
+			char timing[96] = {};
+			std::snprintf(timing, sizeof(timing), " sceneMs=%.3f cullMs=%.3f",
+				scene3d.SceneMilliseconds, scene3d.CullMilliseconds);
+			node.Value += timing;
+			node.Rect = { rect.X + 8.0f, rect.Y + 8.0f, rect.W - 16.0f, 16.0f };
+			node.Interactive = false;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
 
 		Wui::LayoutWidgetTree(m_Root, { rect.X + 8, rect.Y + 8, rect.W - 16, rect.H - 16 });
 		Wui::WuiPaintContext paint(ctx);

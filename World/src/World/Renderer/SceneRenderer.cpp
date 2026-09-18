@@ -7,6 +7,7 @@
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/ProjectionConventions.h"
+#include "World/Renderer/FrustumCull.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/RHI/RhiTextureBridge.h"
@@ -250,6 +251,9 @@ namespace World
 		if (!m_ActiveScene)
 			return;
 
+		// D8a:场景提交总耗时(统计阈值起点,与 Renderer 的帧时间口径不同:
+		// 这里只量"收集 → 剔除 → 阴影 → 主通道 → 命令缓冲提交"这一段 CPU 时间)。
+		const auto sceneStart = std::chrono::steady_clock::now();
 		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
 		// 编辑/运行期都会改 Transform:每帧先重算层级世界矩阵,子实体才会跟随父实体
 		// (此前只有序列化/Prefab 路径求解,见 Hierarchy.h)。
@@ -274,6 +278,9 @@ namespace World
 			Ref<Material> MaterialAsset;
 			glm::vec4 Color { 1.0f };
 			bool Transparent = false;
+			// D8a:世界空间 AABB(逐子网格;视锥剔除用)。
+			glm::vec3 WorldMin { 0.0f };
+			glm::vec3 WorldMax { 0.0f };
 		};
 		std::vector<MeshDraw> draws;
 		{
@@ -335,6 +342,13 @@ namespace World
 					draw.Color = meshComponent.Color;
 					draw.Transparent = material
 						&& material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+					// D8a:世界 AABB(逐子网格用子网格局部盒;整网格用整体盒)。
+					const MeshBounds& localBounds = (submeshIndex != UINT32_MAX
+						&& submeshIndex < mesh->GetSubmeshes().size())
+						? mesh->GetSubmeshes()[submeshIndex].Bounds
+						: mesh->GetBounds();
+					TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max,
+						draw.WorldMin, draw.WorldMax);
 					draws.push_back(std::move(draw));
 				};
 
@@ -374,6 +388,29 @@ namespace World
 			}
 		}
 
+		// ---- D8a:相机视锥剔除 ----
+		// 主通道只提交视锥内的 draw;剔除掉的物体**不进阴影通道的判断**(见下:阴影用
+		// 光源自己的正交视锥,否则"相机看不见但影子投进画面"的投影者会丢)。
+		// WLD_NO_CULL=1 关剔除:压力场景的 A/B 基线(剔除前后 draw 数与帧时间对照)。
+		const bool cullingEnabled = std::getenv("WLD_NO_CULL") == nullptr;
+		std::vector<uint32_t> visibleDraws;
+		visibleDraws.reserve(draws.size());
+		double cullMilliseconds = 0.0;
+		{
+			const auto cullStart = std::chrono::steady_clock::now();
+			const FrustumPlanes cameraFrustum = ExtractFrustumPlanes(viewProjection);
+			for (uint32_t index = 0; index < draws.size(); ++index)
+			{
+				const MeshDraw& draw = draws[index];
+				if (!cullingEnabled
+					|| AabbInFrustum(cameraFrustum, draw.WorldMin, draw.WorldMax))
+					visibleDraws.push_back(index);
+			}
+			cullMilliseconds = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - cullStart).count();
+		}
+		uint32_t shadowCasters = 0;
+
 		// ---- D4:灯光收集(registry 遍历顺序 = 截断顺序)+ 方向光阴影矩阵 + 灯光 UBO ----
 		LightRig lightRig;
 		{
@@ -412,23 +449,16 @@ namespace World
 
 		// 阴影矩阵:主方向光的正交视图(沿传播方向的反方向退到世界包围球外),盒子覆盖
 		// 本帧全部网格实体。没有网格或没有 CastShadow 的主方向光时保持阴影禁用。
+		std::vector<uint32_t> shadowDraws;
 		if (lightRig.ShadowCaster && !draws.empty())
 		{
 			glm::vec3 boundsMin { FLT_MAX, FLT_MAX, FLT_MAX };
 			glm::vec3 boundsMax { -FLT_MAX, -FLT_MAX, -FLT_MAX };
 			for (const MeshDraw& draw : draws)
 			{
-				const MeshBounds& bounds = draw.MeshAsset->GetBounds();
-				for (uint32_t corner = 0; corner < 8; ++corner)
-				{
-					const glm::vec3 local {
-						(corner & 1u) ? bounds.Max.x : bounds.Min.x,
-						(corner & 2u) ? bounds.Max.y : bounds.Min.y,
-						(corner & 4u) ? bounds.Max.z : bounds.Min.z };
-					const glm::vec3 world = glm::vec3((*draw.Model) * glm::vec4(local, 1.0f));
-					boundsMin = glm::min(boundsMin, world);
-					boundsMax = glm::max(boundsMax, world);
-				}
+				// D8a:直接用收集期算好的世界 AABB(逐子网格,更紧)。
+				boundsMin = glm::min(boundsMin, draw.WorldMin);
+				boundsMax = glm::max(boundsMax, draw.WorldMax);
 			}
 			const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
 			const float radius = std::max(0.5f, glm::length((boundsMax - boundsMin) * 0.5f));
@@ -443,9 +473,33 @@ namespace World
 			glm::mat4 shadowViewProjection = AdaptViewProjectionForOffscreen(
 				lightProjection * lightView, Renderer::GetBackendName() == "vulkan");
 			Renderer3D::ApplyShadowCaster(lightRig, shadowViewProjection);
+
+			// D8a:阴影通道按**光源正交视锥**剔除(相机视锥在这里不适用:视锥外的
+			// 投影者仍可能把影子投进画面)。WLD_NO_CULL=1 时不做(与主通道同步 A/B)。
+			if (cullingEnabled)
+			{
+				const FrustumPlanes lightFrustum = ExtractFrustumPlanes(shadowViewProjection);
+				shadowDraws.reserve(draws.size());
+				for (uint32_t index = 0; index < draws.size(); ++index)
+				{
+					const MeshDraw& draw = draws[index];
+					if (AabbInFrustum(lightFrustum, draw.WorldMin, draw.WorldMax))
+						shadowDraws.push_back(index);
+				}
+			}
 		}
+		if (!cullingEnabled && lightRig.ShadowCaster)
+		{
+			shadowDraws.clear();
+			shadowDraws.reserve(draws.size());
+			for (uint32_t index = 0; index < draws.size(); ++index)
+				shadowDraws.push_back(index);
+		}
+		shadowCasters = static_cast<uint32_t>(shadowDraws.size());
 		m_LightBuffers[slot]->SetData(&lightRig.Uniforms, sizeof(lightRig.Uniforms));
 
+		// D8a:场景提交前后的 Renderer3D 计数器快照(单调累计)→ 差值即本帧增量。
+		const Renderer3D::Statistics statsBeforeScene = Renderer3D::GetStats();
 		m_CommandBuffers[slot]->Begin();
 
 		// D4:方向光阴影通道(本帧 3D 主通道**之前**,同一命令缓冲):
@@ -464,8 +518,9 @@ namespace World
 			// 阴影管线不用 set2(材质),调用方只绑 0/1。
 			m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
 			Renderer3D::BeginShadowPass(m_CommandBuffers[slot]);
-			for (const MeshDraw& draw : draws)
+			for (const uint32_t drawIndex : shadowDraws)
 			{
+				const MeshDraw& draw = draws[drawIndex];
 				// D5:逐 submesh 提交(每条独立对象槽位),多材质模型的投影才完整。
 				if (draw.SubmeshIndex == UINT32_MAX)
 					Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
@@ -523,8 +578,9 @@ namespace World
 				// 稳定分组:不透明按原顺序,透明随后(同组内保持遍历顺序)。
 				for (const bool transparentPass : { false, true })
 				{
-					for (const MeshDraw& draw : draws)
+					for (const uint32_t drawIndex : visibleDraws)
 					{
+						const MeshDraw& draw = draws[drawIndex];
 						if (draw.Transparent != transparentPass)
 							continue;
 						// D7-1c:把实体 id 一起提交,写进 entity-id 附件供视口点选读回。
@@ -580,6 +636,24 @@ namespace World
 		}
 		m_CommandBuffers[slot]->End();
 		Renderer::SubmitScene(m_CommandBuffers[slot], m_ColorTexture);
+
+		// D8a:场景统计(编辑器 Stats 面板 / AI `stats.scene` / 压力场景脚本读取)。
+		{
+			Renderer3D::SceneStatistics stats;
+			stats.Objects = static_cast<uint32_t>(draws.size());
+			stats.Submitted = static_cast<uint32_t>(visibleDraws.size());
+			stats.Culled = stats.Objects - stats.Submitted;
+			stats.ShadowCasters = shadowCasters;
+			const Renderer3D::Statistics statsNow = Renderer3D::GetStats();
+			stats.DrawCalls = statsNow.DrawCalls - statsBeforeScene.DrawCalls;
+			stats.Triangles = statsNow.Triangles - statsBeforeScene.Triangles;
+			stats.DroppedObjects = statsNow.DroppedObjects - statsBeforeScene.DroppedObjects;
+			stats.CullingEnabled = cullingEnabled;
+			stats.CullMilliseconds = cullMilliseconds;
+			stats.SceneMilliseconds = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - sceneStart).count();
+			Renderer3D::ReportSceneStatistics(stats);
+		}
 	}
 
 	void SceneRenderer::RenderGeometry(const Camera&, const glm::mat4&)

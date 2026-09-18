@@ -176,6 +176,8 @@ namespace World
 		{
 			uint32_t DrawCalls = 0;
 			uint32_t Triangles = 0;
+			// D8a:对象槽位耗尽被拒绝的提交数(>0 = 画面缺物体,压力场景会断言它为 0)。
+			uint32_t DroppedObjects = 0;
 			// D4:本帧灯光数量/上限/截断数与阴影通道 CPU 耗时(编辑器 Stats 面板读取)。
 			uint32_t Lights = 0;
 			uint32_t MaxLights = Renderer3D::MaxLights;
@@ -184,6 +186,31 @@ namespace World
 		};
 		static Statistics GetStats();
 		static void ResetStats();
+
+		// ---- P1b D8a:场景级统计(视锥剔除/提交规模/CPU 耗时)----
+		//
+		// 为什么与 Statistics 分开:BeginScene 会清 Statistics(材质预览等调用方每帧也会
+		// BeginScene),场景统计若放在里面会被预览擦掉;这里由 SceneRenderer 每帧
+		// **覆盖报告**一次,不随预览复位。
+		struct SceneStatistics
+		{
+			uint32_t Objects = 0;         // 收集到的 draw 数(含逐子网格展开,剔除前)
+			uint32_t Submitted = 0;       // 主通道实际提交数(相机视锥剔除后)
+			uint32_t Culled = 0;          // 被相机视锥剔除的 draw 数
+			uint32_t ShadowCasters = 0;   // 阴影通道提交数(光源视锥剔除后;无阴影通道时 0)
+			// 本帧**增量**(Statistics 里的 DrawCalls/Triangles 是单调累计,只有 Shutdown/
+			// ResetStats 才清零 —— 面板直接读它会看到数字一直涨)。这里由 SceneRenderer
+			// 在场景提交前后取差值,给出真正的每帧口径。
+			uint32_t DrawCalls = 0;
+			uint32_t Triangles = 0;
+			uint32_t DroppedObjects = 0;  // >0 = 对象槽位不够,画面缺物体
+			bool CullingEnabled = true;   // WLD_NO_CULL 关剔除时为 false(A/B 测量用)
+			double CullMilliseconds = 0.0;    // 剔除(含世界 AABB)CPU 耗时
+			double SceneMilliseconds = 0.0;   // 整个 3D 场景提交(收集→阴影→主通道)CPU 耗时
+		};
+		static void ReportSceneStatistics(const SceneStatistics& statistics);
+		static SceneStatistics GetSceneStatistics();
+
 		static uint32_t GetObjectsPerFrameLimit();
 
 	private:
