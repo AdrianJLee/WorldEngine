@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "ContentBrowserPanel.h"
+#include "EditorAssetTypes.h"
 
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiJson.h"
@@ -888,7 +889,10 @@ namespace World
 				Wui::ListViewItem item;
 				item.Id = Wui::HashId(("browser.item." + rel.generic_string()).c_str());
 				item.Label = path.filename().string();
-				item.SubLabel = isDir ? "Folder" : size;
+				// P1b D5b:副标题带资产类型(模型/材质/场景…),不再只有大小 —— 用户一眼能分辨
+				// `.wmodel`(引擎模型)与 `.gltf`(源)这类同一家族的资产。
+				const EditorAssetType type = DescribeAssetType(path, isDir);
+				item.SubLabel = isDir ? std::string(type.Name) : (std::string(type.Name) + " · " + size);
 				item.Icon = isDir ? m_DirIconId : m_FileIconId;
 				item.Uv = { 0, 1, 1, -1 };
 				item.Selected = m_Model.Selected.find(path) != m_Model.Selected.end();
