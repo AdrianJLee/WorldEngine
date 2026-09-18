@@ -150,6 +150,25 @@ namespace World
 		}
 	}
 
+	void ScriptEditorPanel::EnsureCompletionReady()
+	{
+		if (m_CompletionStubReady || m_CompletionStubFailed)
+			return;
+		const std::string stubPath =
+			std::string(WLD_ASSETPATH) + "/scripts/intermediate/WorldEngineAPI.luau";
+		std::string error;
+		if (!m_Completion.LoadStubFile(stubPath, &error))
+		{
+			m_CompletionStubFailed = true;
+			SetStatus(error.empty() ? ("补全不可用: 缺少 " + stubPath) : ("补全不可用: " + error), true);
+			WLD_CORE_WARN("[script-editor] completion index unavailable: {0}",
+				error.empty() ? stubPath : error);
+			return;
+		}
+		m_CompletionStubReady = true;
+		WLD_CORE_INFO("[script-editor] completion index loaded ({0} symbols)", m_Completion.SymbolCount());
+	}
+
 	ScriptEditorPanel::ScriptEditorPanel(std::string logicalPath)
 		: m_LogicalPath(NormalizeLogicalPath(logicalPath))
 	{
@@ -494,6 +513,13 @@ namespace World
 		accessibility.Register(editorNode);
 
 		m_Highlight.Update(m_Buffer);
+		// W9.5:懒加载补全索引 + 同步当前脚本文件符号(Revision 变化才重建)。
+		EnsureCompletionReady();
+		if (m_CompletionStubReady && m_CompletionFileRevision != m_Buffer.Revision())
+		{
+			m_CompletionFileRevision = m_Buffer.Revision();
+			m_Completion.SetFileSource(m_Buffer.Text());
+		}
 		Wui::WuiCodeEditorOptions options;
 		options.FontSize = m_FontSize;
 		options.LineHeight = std::round(m_FontSize * (20.0f / 14.0f));
@@ -530,6 +556,16 @@ namespace World
 			Application::Get().GetWindow().SetClipboardText(std::string(text));
 			return true;
 		};
+		// W9.5:补全 provider(入库 API 存根 + 当前文件符号);候选/过滤由索引负责。
+		if (m_CompletionStubReady)
+		{
+			options.CompletionIdPrefix = "script.suggest";
+			options.Completion = [this](std::string_view linePrefix,
+				std::vector<World::LuauCompletionItem>& out)
+			{
+				m_Completion.Query(linePrefix, 50, out);
+			};
+		}
 		const Wui::WuiCodeEditorResult result =
 			Wui::CodeEditor(ctx, Wui::HashId("script.editor"), editorRect, m_Buffer, options);
 		if (result.SaveRequested)

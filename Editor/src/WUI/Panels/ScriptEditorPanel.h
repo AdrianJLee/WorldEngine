@@ -2,6 +2,7 @@
 
 #include "EditorPanel.h"
 
+#include "World/Script/LuauCompletion.h"
 #include "World/Script/LuauHighlighter.h"
 #include "World/WUI/WuiCodeEditor.h"
 #include "World/WUI/WuiTextBuffer.h"
@@ -50,6 +51,8 @@ namespace World
 		void ApplyReloadFromDisk(PanelHost& host);
 		// 编辑态下把场景里同一逻辑路径的 LuaScriptComponent 走唯一重载入口刷新。
 		void ReloadSceneInstances(PanelHost& host);
+		// W9.5:懒加载入库 WorldEngineAPI.luau 补全索引;失败只报一次并关闭补全。
+		void EnsureCompletionReady();
 		void SetStatus(std::string text, bool error);
 
 		std::string m_PanelId;      // "script:<逻辑路径>"
@@ -66,6 +69,11 @@ namespace World
 		double m_NextDiskCheck = 0.0;
 		std::string m_Status;
 		bool m_StatusIsError = false;
+		// W9.5 补全:入库存根索引 + buffer 源码同步 + 失败只报一次。
+		World::LuauCompletionIndex m_Completion;
+		uint64_t m_CompletionFileRevision = ~0ull;
+		bool m_CompletionStubReady = false;
+		bool m_CompletionStubFailed = false;
 		// W9:代码字号(会话内记忆)。Ctrl+滚轮 / Ctrl+± / Ctrl+0 调整。
 		float m_FontSize = 14.0f;
 		// OnShortcut 只置位,帧内消费。

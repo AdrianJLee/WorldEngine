@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Script/LuauCompletion.h"
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiTextBuffer.h"
 
@@ -43,6 +44,12 @@ namespace World::Wui
 		// 剪贴板注入(W9-2 接系统剪贴板;测试注入内存串)。返回 false 表示无剪贴板内容。
 		std::function<bool(std::string& out)> GetClipboard;
 		std::function<bool(std::string_view text)> SetClipboard;
+		// W9.5 补全 provider:linePrefix = 光标所在行、行首到光标处的 UTF-8 片段;
+		// 返回空 = 不弹浮层。空 = 本控件不做补全(默认)。
+		std::function<void(std::string_view linePrefix,
+			std::vector<World::LuauCompletionItem>& out)> Completion;
+		// 补全浮层的无障碍节点 id 前缀:<前缀>.<i>(候选)、<前缀>.status(状态)。
+		std::string CompletionIdPrefix = "editor.suggest";
 	};
 
 	struct WuiCodeEditorResult
