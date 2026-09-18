@@ -335,6 +335,48 @@ namespace
 		CHECK(script.State == ScriptInstanceState::Faulted);
 		CHECK(script.LastError.find("initialized renderer device") != std::string::npos);
 	}
+
+	// 8.W3c/OnUI 快照化 + 结构写:活动场景里 OnUI 能做白名单结构写(建子实体 + 挂纯数据
+	//   组件,与事件/计时器回调同一口径),并且一趟 UI 阶段遍历的是**句柄快照**:
+	//   多个实例各跑一次,回调里的同步增删不会改写正在跑的列表。
+	void OnUiStructuralWritesAreSnapshotSafe()
+	{
+		Ref<Scene> scene = CreateRef<Scene>(TestContext());
+		Entity spawner = Entity::CreateEntity(scene.get(), "ui spawner");
+		spawner.AddComponent<LuaScriptComponent>("scripts/tests/UiSpawn.lua");
+		Entity ticker = Entity::CreateEntity(scene.get(), "ui ticker");
+		ticker.AddComponent<LuaScriptComponent>("scripts/tests/UiTick.lua");
+
+		// 活动场景:回调外的结构写被拒绝(既有契约),OnUI 必须拿到与生命周期回调同样的写窗口。
+		scene->OnRuntimeStart();
+		CHECK(scene->IsActive());
+
+		WuiContext context;
+		WuiInputState input;
+		input.ViewportSize = { 800, 600 };
+		CHECK(DrawFrame(*scene, context, input) == 0);
+
+		LuaScriptComponent& spawnScript = spawner.GetComponent<LuaScriptComponent>();
+		CHECK(NumberField(spawnScript, "spawned") == 1.0);
+		CHECK(BoolField(spawnScript, "childVisible"));   // 结构写同帧可见
+		CHECK(NumberField(spawnScript, "uiTicks") == 1.0);
+		LuaScriptComponent& tickScript = ticker.GetComponent<LuaScriptComponent>();
+		CHECK(NumberField(tickScript, "uiTicks") == 1.0);   // 同一趟里另一个实例也照常跑
+
+		// Tag + Transform 都真的落进注册表(同步提交,不是延迟到下一帧)。
+		const entt::registry& registry = static_cast<const Scene&>(*scene).GetRegistry();
+		bool childFound = false;
+		for (const entt::entity handle : registry.view<TagComponent, TransformComponent>())
+			if (registry.get<TagComponent>(handle).Tag == "OnUi Child")
+				childFound = true;
+		CHECK(childFound);
+
+		// 下一帧:两实例再各跑一次(快照不漏、不重复);spawned 不重复建。
+		CHECK(DrawFrame(*scene, context, input) == 0);
+		CHECK(NumberField(spawnScript, "uiTicks") == 2.0);
+		CHECK(NumberField(tickScript, "uiTicks") == 2.0);
+		CHECK(NumberField(spawnScript, "spawned") == 1.0);
+	}
 }
 
 int main()
@@ -353,6 +395,7 @@ int main()
 			{ "ui.* outside the UI phase fails readably", UiOutsideUiPhaseFails },
 			{ "reload swaps the OnUI callback", ReloadSwapsUiCallback },
 			{ "ui.image without a renderer fails readably", ImageWithoutRendererFailsReadably },
+			{ "OnUI structural writes are snapshot-safe on a running scene", OnUiStructuralWritesAreSnapshotSafe },
 		};
 		int failures = 0;
 		for (const auto& [name, test] : tests)

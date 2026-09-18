@@ -906,19 +906,37 @@ namespace World
 		std::size_t failures = 0;
 		// 只读枚举必须走 const 路径:Running/活动场景上的非 const GetRegistry() 会触发结构写断言。
 		const entt::registry& registry = static_cast<const Scene&>(scene).GetRegistry();
-		const auto view = registry.view<LuaScriptComponent>();
-		for (const entt::entity handle : view)
+		// W3c/OnUI 快照化:UI 阶段与事件/计时器回调同一口径(允许白名单结构写),因此遍历
+		// **必须先取句柄快照** —— 活 view 会被回调里的同步增删改写(实例化带脚本的 prefab 会
+		// 在遍历中往组件池里追加;移除则会让 swap-and-pop 跳过/重复条目)。
+		std::vector<entt::entity> entities;
 		{
-			// 引用本身来自 const view,但这里只写组件的运行态字段(State/LastError),
+			const auto view = registry.view<LuaScriptComponent>();
+			entities.assign(view.begin(), view.end());
+		}
+		for (const entt::entity handle : entities)
+		{
+			// 本轮开始后被销毁/移除的实例:跳过它的 OnUI(不补跑、不崩)。
+			if (!registry.valid(handle) || scene.IsPendingDestroy(handle))
+				continue;
+			// 引用来自 const registry,但这里只写组件的运行态字段(State/LastError),
 			// 不会增删实体或组件,因此不会触发结构写断言。
-			LuaScriptComponent& script =
-				const_cast<LuaScriptComponent&>(view.get<LuaScriptComponent>(handle));
+			const LuaScriptComponent* probe = registry.try_get<LuaScriptComponent>(handle);
+			if (!probe)
+				continue;
+			LuaScriptComponent& script = const_cast<LuaScriptComponent&>(*probe);
 			if (!script.IsLoaded || script.State != ScriptInstanceState::Running ||
 				!script.ScriptTable.IsValid() || !script.OnUiFunc.IsValid())
 				continue;
 			try
 			{
 				ScriptUiScope scope(context, script.ScriptFilePath);
+				// OnUI 与生命周期回调/事件/计时器同源:抬回调深度 + 打开白名单结构写窗口,
+				// 使 self.entity:CreateChild(...) / AddComponent(纯数据) 在 UI 阶段同样可用。
+				const Scene::ScriptCallbackScope callbackScope(scene, Entity(&scene, handle),
+					entt::type_id<LuaScriptComponent>().hash(), script.Generation);
+				if (!callbackScope.IsValid())
+					continue;   // 实例已销毁/已热重载/非 Running:不调用旧闭包
 				// W4:OnUI 期间 events:on / timers:after/every 同样归属本实例。
 				const ScriptEventOwnerScope ownerScope(
 					MakeScriptEventOwner(Entity(&scene, handle), script.Generation));
