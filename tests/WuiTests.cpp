@@ -898,12 +898,13 @@ int main()
 			input = WuiInputState {};
 			scripted.Apply("main", input);
 			CHECK(input.TextInput == Codepoints({ 'a', 'b' }));
-			CHECK(input.KeyDown.empty()); // 第一行不注入 Enter
+			CHECK(input.KeyDown.empty() && input.KeyPressed.empty()); // 第一行不注入 Enter
 			CHECK(scripted.HasPending());
 			input = WuiInputState {};
 			scripted.Apply("main", input);
 			CHECK(input.TextInput == Codepoints({ 'c', 'd', '\t', 'e', 'f' }));
 			CHECK(input.KeyDown == Codepoints({ World::KeyCodes::Enter }));
+			CHECK(input.KeyPressed == Codepoints({ World::KeyCodes::Enter })); // 沿:编辑器按"一次动作"消费
 			CHECK(!scripted.HasPending());
 			input = WuiInputState {};
 			scripted.Apply("main", input);
@@ -920,6 +921,7 @@ int main()
 			input = WuiInputState {};
 			scripted.Apply("panel", input);
 			CHECK(input.KeyDown == Codepoints({ World::KeyCodes::Enter }));
+			CHECK(input.KeyPressed == Codepoints({ World::KeyCodes::Enter }));
 			CHECK(input.TextInput == Codepoints({ 'y' }));
 			CHECK(!scripted.HasPending());
 

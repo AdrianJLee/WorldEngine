@@ -443,6 +443,7 @@ namespace World
 			status += "  *";
 		if (readOnly)
 			status += "  [只读]";
+		status += "  " + std::to_string(static_cast<int>(std::round(m_FontSize))) + "px";
 		if (!m_Status.empty())
 			status += "   |   " + m_Status;
 		RegisterReadonlyNode(Wui::HashId("script.status"), "status", "script status", status, statusRect);
@@ -470,6 +471,15 @@ namespace World
 		// ---- 正文:代码编辑器(语法高亮 / 行号 / 选区 / 撤销 / 滚动条)----
 		const Wui::WuiRect editorRect { rect.X + 8.0f, rect.Y + kToolbarHeight, rect.W - 16.0f,
 			std::max(0.0f, rect.H - kToolbarHeight - kStatusHeight) };
+		// ---- 字号缩放(W9 追加):Ctrl+滚轮 / Ctrl+= / Ctrl+- / Ctrl+0 复位 ----
+		if (ctx.IsHovered(editorRect) && ctx.Input().Ctrl && ctx.Input().Wheel != 0.0f)
+			m_FontSize = std::max(10.0f, std::min(32.0f, m_FontSize + ctx.Input().Wheel * 1.0f));
+		if (ctx.Input().Ctrl && ctx.WasKeyTriggered(World::KeyCodes::Equal))
+			m_FontSize = std::min(32.0f, m_FontSize + 1.0f);
+		if (ctx.Input().Ctrl && ctx.WasKeyTriggered(World::KeyCodes::Minus))
+			m_FontSize = std::max(10.0f, m_FontSize - 1.0f);
+		if (ctx.Input().Ctrl && ctx.WasKeyTriggered(World::KeyCodes::D0))
+			m_FontSize = 14.0f;
 		auto& accessibility = Wui::WuiAccessibility::Get();
 		Wui::WuiAccessNode editorNode;
 		editorNode.Id = Wui::HashId("script.editor");
@@ -485,8 +495,8 @@ namespace World
 
 		m_Highlight.Update(m_Buffer);
 		Wui::WuiCodeEditorOptions options;
-		options.FontSize = 14.0f;
-		options.LineHeight = 20.0f;
+		options.FontSize = m_FontSize;
+		options.LineHeight = std::round(m_FontSize * (20.0f / 14.0f));
 		options.ReadOnly = readOnly;
 		options.Highlight = [this](std::string_view text, std::vector<Wui::WuiCodeToken>& out)
 		{

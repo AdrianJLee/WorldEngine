@@ -30,6 +30,10 @@ namespace World::Wui
 		bool WantKeyboard = false;
 		bool Ctrl = false, Shift = false, Alt = false;
 		std::vector<uint32_t> KeyDown;   // 引擎 KeyCodes
+		// 本帧新按下(沿)与 OS 重复事件:文本编辑器这类"按键=一次动作"的控件必须用它们,
+		// 否则一次按下会跨多帧重复触发(实测:一次回车插入多行)。
+		std::vector<uint32_t> KeyPressed;
+		std::vector<uint32_t> KeyRepeated;
 		std::vector<uint32_t> TextInput; // 本帧输入字符(UTF-32)
 		glm::vec2 ViewportSize { 1280, 720 };
 		float FPS = 0;
@@ -191,6 +195,18 @@ namespace World::Wui
 		{
 			return std::find(m_Input.KeyDown.begin(), m_Input.KeyDown.end(), keyCode) != m_Input.KeyDown.end();
 		}
+		// 本帧新按下(不含长按重复) / 本帧 OS 重复事件 / 两者取并(一次动作)。
+		bool WasKeyPressed(uint32_t keyCode) const
+		{
+			return std::find(m_Input.KeyPressed.begin(), m_Input.KeyPressed.end(), keyCode)
+				!= m_Input.KeyPressed.end();
+		}
+		bool WasKeyRepeated(uint32_t keyCode) const
+		{
+			return std::find(m_Input.KeyRepeated.begin(), m_Input.KeyRepeated.end(), keyCode)
+				!= m_Input.KeyRepeated.end();
+		}
+		bool WasKeyTriggered(uint32_t keyCode) const { return WasKeyPressed(keyCode) || WasKeyRepeated(keyCode); }
 		bool IsHovered(const WuiRect& rect) const { return HitTest(rect, m_Input.MousePos); }
 		bool IsClicked(const WuiRect& rect, int button = 0) const
 		{

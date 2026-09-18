@@ -34,5 +34,7 @@ namespace World::Wui
 		glm::vec2 m_MousePos {};
 		float m_Wheel = 0;
 		std::vector<uint32_t> m_Chars;
+		std::vector<uint32_t> m_Pressed;   // 本帧新按下(沿)
+		std::vector<uint32_t> m_Repeated;  // 本帧 OS 重复事件
 	};
 }

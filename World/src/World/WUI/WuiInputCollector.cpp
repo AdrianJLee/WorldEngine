@@ -24,8 +24,14 @@ namespace World::Wui
 
 	void WuiInputCollector::OnKey(uint32_t keyCode, bool down, bool repeat)
 	{
-		(void)repeat;
-		if (down) m_Down.insert(keyCode);
+		if (down)
+		{
+			// 沿与重复分开锁存:控件按"一次动作"消费沿,长按由 OS 重复事件驱动。
+			if (m_Down.insert(keyCode).second)
+				m_Pressed.push_back(keyCode);
+			else if (repeat)
+				m_Repeated.push_back(keyCode);
+		}
 		else m_Down.erase(keyCode);
 	}
 
@@ -90,6 +96,10 @@ namespace World::Wui
 			m_MouseReleased[i] = false;
 		}
 		out.KeyDown.assign(m_Down.begin(), m_Down.end());
+		out.KeyPressed = m_Pressed;
+		out.KeyRepeated = m_Repeated;
+		m_Pressed.clear();
+		m_Repeated.clear();
 		out.TextInput = m_Chars;
 		out.Ctrl = Has(m_Down, KeyCodes::LeftControl) || Has(m_Down, KeyCodes::RightControl);
 		out.Shift = Has(m_Down, KeyCodes::LeftShift) || Has(m_Down, KeyCodes::RightShift);

@@ -66,6 +66,8 @@ namespace World
 		double m_NextDiskCheck = 0.0;
 		std::string m_Status;
 		bool m_StatusIsError = false;
+		// W9:代码字号(会话内记忆)。Ctrl+滚轮 / Ctrl+± / Ctrl+0 调整。
+		float m_FontSize = 14.0f;
 		// OnShortcut 只置位,帧内消费。
 		bool m_PendingSave = false;
 		bool m_PendingReload = false;

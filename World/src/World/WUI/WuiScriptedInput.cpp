@@ -144,7 +144,11 @@ namespace World::Wui
 			// 走控件自己的换行路径(与真实键入一致),而不是把 '\n' 当字符塞给控件。
 			input.WantKeyboard = true;
 			if (pending.NextTextFrame > 0)
+			{
 				input.KeyDown.push_back(KeyCodes::Enter);
+				// 沿:代码编辑器等"一次按键=一次动作"的控件按 KeyPressed 消费(电平会跨帧重复)。
+				input.KeyPressed.push_back(KeyCodes::Enter);
+			}
 			const std::vector<uint32_t>& codepoints = pending.TextFrames[pending.NextTextFrame];
 			input.TextInput.insert(input.TextInput.end(), codepoints.begin(), codepoints.end());
 			++pending.NextTextFrame;

@@ -78,6 +78,7 @@ namespace
 	{
 		WuiInputState input;
 		input.KeyDown = keys;
+		input.KeyPressed = keys;   // 真实输入里"按下"同时产生电平与沿
 		input.TextInput = chars;
 		input.Ctrl = ctrl;
 		input.Shift = shift;
@@ -440,6 +441,7 @@ int main()
 
 			WuiInputState saveInput;
 			saveInput.KeyDown = { World::KeyCodes::S };
+			saveInput.KeyPressed = saveInput.KeyDown;
 			saveInput.Ctrl = true;
 			const WuiCodeEditorResult saveResult = RunEditorFrame(ctx, buffer, editorRect, editorOptions, saveInput);
 			CHECK(saveResult.SaveRequested);
@@ -450,6 +452,7 @@ int main()
 			readOnly.ReadOnly = true;
 			WuiInputState editInput;
 			editInput.KeyDown = { World::KeyCodes::Backspace, World::KeyCodes::Enter, World::KeyCodes::Tab };
+			editInput.KeyPressed = editInput.KeyDown;
 			editInput.TextInput = { 'x' };
 			const WuiCodeEditorResult readOnlyResult = RunEditorFrame(ctx, buffer, editorRect, readOnly, editInput);
 			CHECK(buffer.Text() == u8"alpha beta");
@@ -461,6 +464,7 @@ int main()
 			{
 				WuiInputState readOnlyHistory;
 				readOnlyHistory.KeyDown = { historyKey };
+				readOnlyHistory.KeyPressed = readOnlyHistory.KeyDown;
 				readOnlyHistory.Ctrl = true;
 				const WuiCodeEditorResult historyResult =
 					RunEditorFrame(ctx, buffer, editorRect, readOnly, readOnlyHistory);
@@ -477,17 +481,20 @@ int main()
 			buffer.SetCaret(5, true);
 			WuiInputState copyInput;
 			copyInput.KeyDown = { World::KeyCodes::C };
+			copyInput.KeyPressed = copyInput.KeyDown;
 			copyInput.Ctrl = true;
 			RunEditorFrame(ctx, buffer, editorRect, clipboardOptions, copyInput);
 			CHECK(clip == u8"alpha");
 			buffer.SetCaret(buffer.Text().size(), false);
 			WuiInputState pasteInput;
 			pasteInput.KeyDown = { World::KeyCodes::V };
+			pasteInput.KeyPressed = pasteInput.KeyDown;
 			pasteInput.Ctrl = true;
 			RunEditorFrame(ctx, buffer, editorRect, clipboardOptions, pasteInput);
 			CHECK(buffer.Text() == u8"alpha betaalpha");
 			WuiInputState undoInput;
 			undoInput.KeyDown = { World::KeyCodes::Z };
+			undoInput.KeyPressed = undoInput.KeyDown;
 			undoInput.Ctrl = true;
 			RunEditorFrame(ctx, buffer, editorRect, clipboardOptions, undoInput);
 			CHECK(buffer.Text() == u8"alpha beta");
@@ -504,6 +511,7 @@ int main()
 			// Escape 失焦:文本焦点登记随之清空。
 			WuiInputState escapeInput;
 			escapeInput.KeyDown = { World::KeyCodes::Escape };
+			escapeInput.KeyPressed = escapeInput.KeyDown;
 			RunEditorFrame(ctx, buffer, editorRect, editorOptions, escapeInput);
 			CHECK(ctx.Focus() == 0);
 			CHECK(!WuiTextFocus::Get().Active());
@@ -548,6 +556,33 @@ int main()
 			CHECK(WuiTextFocus::Get().Active() && WuiTextFocus::Get().Id() == 7);
 			WuiTextFocus::Get().BeginContextFrame(&b);
 			CHECK(!WuiTextFocus::Get().Active());
+		}
+
+		// ---- 8d. 按键沿:按住跨帧只动作一次(修复"一次回车插多行") ----
+		{
+			WuiContext ctx;
+			WuiTextBuffer buffer;
+			buffer.SetText(u8"a");
+			WuiCodeEditorOptions options = editorOptions;
+			ClickAt(ctx, buffer, editorRect, options, 31.0f, 5.0f);
+			buffer.SetCaret(buffer.Text().size(), false);
+
+			WuiInputState first;   // 第 1 帧:沿 + 电平
+			first.KeyDown = { World::KeyCodes::Enter };
+			first.KeyPressed = { World::KeyCodes::Enter };
+			RunEditorFrame(ctx, buffer, editorRect, options, first);
+			CHECK(buffer.Text() == u8"a\n");
+
+			WuiInputState held;    // 第 2 帧:按住(电平,无 OS 重复事件)
+			held.KeyDown = { World::KeyCodes::Enter };
+			RunEditorFrame(ctx, buffer, editorRect, options, held);
+			CHECK(buffer.Text() == u8"a\n");
+
+			WuiInputState repeat;  // 第 3 帧:OS 重复事件 → 允许再次动作
+			repeat.KeyDown = { World::KeyCodes::Enter };
+			repeat.KeyRepeated = { World::KeyCodes::Enter };
+			RunEditorFrame(ctx, buffer, editorRect, options, repeat);
+			CHECK(buffer.Text() == u8"a\n\n");
 		}
 
 		// ---- 9. 滚轮滚动:只画滚动后的可见行 ----

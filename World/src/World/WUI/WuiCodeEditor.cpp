@@ -235,7 +235,8 @@ namespace World::Wui
 		}
 
 		// ---- 滚轮(悬停文本区):只滚动,不动 caret ----
-		if (ctx.IsHovered(textRect) && input.Wheel != 0.0f)
+		// Ctrl+滚轮留给宿主做字号缩放(见 ScriptEditorPanel):这里不滚动。
+		if (ctx.IsHovered(textRect) && input.Wheel != 0.0f && !input.Ctrl)
 			state.ScrollY -= input.Wheel * lineHeight * 3.0f;
 
 		// ---- 键盘(仅聚焦时) ----
@@ -249,7 +250,7 @@ namespace World::Wui
 			const int pageLines = std::max(1, static_cast<int>(rect.H / lineHeight) - 1);
 			bool caretAction = false;
 
-			if (ctx.IsKeyPressed(KeyCodes::Escape))
+			if (ctx.WasKeyTriggered(KeyCodes::Escape))
 			{
 				// Escape 失焦:后续输入回到引擎全局快捷键。
 				ctx.SetFocus(0);
@@ -261,36 +262,36 @@ namespace World::Wui
 				using Motion = WuiTextBuffer::Motion;
 				if (ctrl)
 				{
-					if (ctx.IsKeyPressed(KeyCodes::S) && !readOnly)
+					if (ctx.WasKeyTriggered(KeyCodes::S) && !readOnly)
 						result.SaveRequested = true;
-					if (ctx.IsKeyPressed(KeyCodes::A))
+					if (ctx.WasKeyTriggered(KeyCodes::A))
 						buffer.SelectAll();
-					if (ctx.IsKeyPressed(KeyCodes::C) && options.GetClipboard)
+					if (ctx.WasKeyTriggered(KeyCodes::C) && options.GetClipboard)
 					{
 						std::string selection;
 						if (buffer.Copy(selection) && options.SetClipboard)
 							options.SetClipboard(selection);
 					}
-					if (!readOnly && ctx.IsKeyPressed(KeyCodes::X))
+					if (!readOnly && ctx.WasKeyTriggered(KeyCodes::X))
 					{
 						std::string selection;
 						if (buffer.Cut(selection) && options.SetClipboard)
 							options.SetClipboard(selection);
 						caretAction = true;
 					}
-					if (!readOnly && ctx.IsKeyPressed(KeyCodes::V) && options.GetClipboard)
+					if (!readOnly && ctx.WasKeyTriggered(KeyCodes::V) && options.GetClipboard)
 					{
 						std::string clip;
 						if (options.GetClipboard(clip))
 							buffer.Paste(clip);
 						caretAction = true;
 					}
-					if (!readOnly && ctx.IsKeyPressed(KeyCodes::Z))
+					if (!readOnly && ctx.WasKeyTriggered(KeyCodes::Z))
 					{
 						shift ? buffer.Redo() : buffer.Undo();
 						caretAction = true;
 					}
-					if (!readOnly && ctx.IsKeyPressed(KeyCodes::Y))
+					if (!readOnly && ctx.WasKeyTriggered(KeyCodes::Y))
 					{
 						buffer.Redo();
 						caretAction = true;
@@ -299,22 +300,22 @@ namespace World::Wui
 				// 编辑键;ReadOnly 只导航/选择/复制。
 				if (!readOnly && !ctrl)
 				{
-					if (ctx.IsKeyPressed(KeyCodes::Enter))
+					if (ctx.WasKeyTriggered(KeyCodes::Enter))
 					{
 						buffer.InsertNewline();
 						caretAction = true;
 					}
-					if (ctx.IsKeyPressed(KeyCodes::Backspace))
+					if (ctx.WasKeyTriggered(KeyCodes::Backspace))
 					{
 						buffer.Backspace();
 						caretAction = true;
 					}
-					if (ctx.IsKeyPressed(KeyCodes::Delete))
+					if (ctx.WasKeyTriggered(KeyCodes::Delete))
 					{
 						buffer.DeleteForward();
 						caretAction = true;
 					}
-					if (ctx.IsKeyPressed(KeyCodes::Tab))
+					if (ctx.WasKeyTriggered(KeyCodes::Tab))
 					{
 						buffer.IndentSelection(shift);
 						caretAction = true;
@@ -331,42 +332,42 @@ namespace World::Wui
 					}
 				}
 				// 导航键(ReadOnly 同样可用)。
-				if (ctx.IsKeyPressed(KeyCodes::Left))
+				if (ctx.WasKeyTriggered(KeyCodes::Left))
 				{
 					buffer.MoveCaret(ctrl ? Motion::WordLeft : Motion::Left, shift);
 					caretAction = true;
 				}
-				if (ctx.IsKeyPressed(KeyCodes::Right))
+				if (ctx.WasKeyTriggered(KeyCodes::Right))
 				{
 					buffer.MoveCaret(ctrl ? Motion::WordRight : Motion::Right, shift);
 					caretAction = true;
 				}
-				if (ctx.IsKeyPressed(KeyCodes::Up))
+				if (ctx.WasKeyTriggered(KeyCodes::Up))
 				{
 					buffer.MoveCaret(Motion::Up, shift);
 					caretAction = true;
 				}
-				if (ctx.IsKeyPressed(KeyCodes::Down))
+				if (ctx.WasKeyTriggered(KeyCodes::Down))
 				{
 					buffer.MoveCaret(Motion::Down, shift);
 					caretAction = true;
 				}
-				if (ctx.IsKeyPressed(KeyCodes::Home))
+				if (ctx.WasKeyTriggered(KeyCodes::Home))
 				{
 					buffer.MoveCaret(Motion::LineStart, shift);
 					caretAction = true;
 				}
-				if (ctx.IsKeyPressed(KeyCodes::End))
+				if (ctx.WasKeyTriggered(KeyCodes::End))
 				{
 					buffer.MoveCaret(Motion::LineEnd, shift);
 					caretAction = true;
 				}
-				if (ctx.IsKeyPressed(KeyCodes::PageUp))
+				if (ctx.WasKeyTriggered(KeyCodes::PageUp))
 				{
 					buffer.MoveCaret(Motion::PageUp, shift, pageLines);
 					caretAction = true;
 				}
-				if (ctx.IsKeyPressed(KeyCodes::PageDown))
+				if (ctx.WasKeyTriggered(KeyCodes::PageDown))
 				{
 					buffer.MoveCaret(Motion::PageDown, shift, pageLines);
 					caretAction = true;
