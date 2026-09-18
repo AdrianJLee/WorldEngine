@@ -81,8 +81,9 @@ namespace World
 			+ (scene3d.Culled ? " (culled " + std::to_string(scene3d.Culled) + ")" : "")
 			+ (scene3d.CullingEnabled ? "" : " [cull off]");
 		char sceneText[128] = {};
-		std::snprintf(sceneText, sizeof(sceneText), "Draws %u  Tris %u  Scene %.2f ms (cull %.3f ms)",
-			scene3d.DrawCalls, scene3d.Triangles, scene3d.SceneMilliseconds, scene3d.CullMilliseconds);
+		std::snprintf(sceneText, sizeof(sceneText), "Draws %u  Tris %u  Scene %.2f ms (cull %.3f / gpu %.2f ms)",
+			scene3d.DrawCalls, scene3d.Triangles, scene3d.SceneMilliseconds,
+			scene3d.CullMilliseconds, scene3d.GpuMilliseconds);
 		m_Lines[11]->Text = sceneText;
 
 		// 同一份数据的无障碍节点:自动化(ui.tree / 压测脚本)不必解析像素或文本行。
@@ -101,10 +102,13 @@ namespace World
 				+ " shadow=" + std::to_string(scene3d.ShadowCasters)
 				+ " dropped=" + std::to_string(scene3d.DroppedObjects)
 				+ " culling=" + (scene3d.CullingEnabled ? "1" : "0")
+				+ " instancing=" + (scene3d.InstancingEnabled ? "1" : "0")
+				+ " batches=" + std::to_string(scene3d.InstancedBatches)
+				+ " batched=" + std::to_string(scene3d.InstancedObjects)
 				+ " fps=" + std::to_string(ctx.Input().FPS);
 			char timing[96] = {};
-			std::snprintf(timing, sizeof(timing), " sceneMs=%.3f cullMs=%.3f",
-				scene3d.SceneMilliseconds, scene3d.CullMilliseconds);
+			std::snprintf(timing, sizeof(timing), " sceneMs=%.3f cullMs=%.3f gpuMs=%.3f",
+				scene3d.SceneMilliseconds, scene3d.CullMilliseconds, scene3d.GpuMilliseconds);
 			node.Value += timing;
 			node.Rect = { rect.X + 8.0f, rect.Y + 8.0f, rect.W - 16.0f, 16.0f };
 			node.Interactive = false;

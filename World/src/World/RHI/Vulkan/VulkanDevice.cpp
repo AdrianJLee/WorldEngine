@@ -253,6 +253,9 @@ namespace World::Rhi::Vulkan
 		m_Capabilities.AnisotropicFiltering = features.samplerAnisotropy == VK_TRUE;
 		m_Capabilities.DepthBiasClamp = features.depthBiasClamp == VK_TRUE;
 		m_Capabilities.TimestampQueries = properties.limits.timestampComputeAndGraphics == VK_TRUE;
+		// D8b:时间戳时基(0 是非法值,退回 1ns/tick)。
+		m_TimestampPeriodNs = properties.limits.timestampPeriod > 0.0f
+			? static_cast<double>(properties.limits.timestampPeriod) : 1.0;
 		m_Capabilities.DescriptorIndexing = v12.descriptorIndexing == VK_TRUE;
 		m_Capabilities.BindlessTextures = v12.descriptorIndexing == VK_TRUE;
 		m_Capabilities.TextureCompressionBC = features.textureCompressionBC == VK_TRUE;

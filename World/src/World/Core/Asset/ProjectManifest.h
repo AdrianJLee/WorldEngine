@@ -24,6 +24,8 @@ namespace World::Asset
 		uint32_t ShadowMapSize = 2048;    // 阴影贴图边长(启动时生效)
 		uint32_t MaxDirectionalLights = 1;
 		uint32_t MaxPointLights = 7;
+		bool GpuTiming = false;           // D8b:GPU 时间戳(Stats 面板/AI 显示 gpuMs;有读回开销)
+		bool Instancing = true;           // D8b:同网格+材质的实例合批
 	};
 
 	// 项目清单(project.we.yaml):资产内容根、启动场景与发行包列表的单一事实源。

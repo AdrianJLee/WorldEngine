@@ -281,8 +281,12 @@ namespace World
 				<< ",\"triangles\":" << scene.Triangles
 				<< ",\"droppedObjects\":" << scene.DroppedObjects
 				<< ",\"culling\":" << (scene.CullingEnabled ? "true" : "false")
+				<< ",\"instancing\":" << (scene.InstancingEnabled ? "true" : "false")
+				<< ",\"instancedBatches\":" << scene.InstancedBatches
+				<< ",\"instancedObjects\":" << scene.InstancedObjects
 				<< ",\"sceneMs\":" << scene.SceneMilliseconds
 				<< ",\"cullMs\":" << scene.CullMilliseconds
+				<< ",\"gpuMs\":" << scene.GpuMilliseconds
 				<< ",\"fps\":" << m_WuiContext.Input().FPS << "}";
 			result = out.str();
 			return true;

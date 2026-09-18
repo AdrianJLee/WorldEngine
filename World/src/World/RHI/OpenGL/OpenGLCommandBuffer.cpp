@@ -726,6 +726,11 @@ namespace World::Rhi::OpenGL
 					const auto glPool = std::dynamic_pointer_cast<OpenGLQueryPool>(command.QueryPool_);
 					if (!glPool)
 						break;
+					// D8b:时间戳查询**不能**用 glBeginQuery 重置 —— GL_TIMESTAMP 不是
+					// glBeginQuery 的合法 target,强行 begin/end 会让查询对象绑定到错误的
+					// target,之后的 glQueryCounter 直接失效。时间戳每次写入都是覆盖,无需重置。
+					if (glPool->GetType() == QueryType::Timestamp)
+						break;
 					const uint32_t end = command.Count1 == 0 ? glPool->GetCount()
 						: std::min(glPool->GetCount(), command.Count0 + command.Count1);
 					for (uint32_t i = command.Count0; i < end; i++)

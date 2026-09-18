@@ -72,6 +72,19 @@ namespace World
 
 		uint32_t FrameSlot() const;
 
+		// ---- P1b D8b:GPU 时间戳(rendering.gpu_timing,默认关)----
+		// 每帧槽位一套查询池 + 读回缓冲:本帧写时间戳、该槽位 3 帧后被复用时才读上一轮
+		// 结果,所以测量本身不需要 WaitIdle(代价只有一次 16B 拷贝与一次 Map)。
+		void InitGpuTiming();
+		void BeginGpuTiming(uint32_t slot);
+		void EndGpuTiming(uint32_t slot);
+		double ReadGpuTiming(uint32_t slot);
+		bool m_GpuTiming = false;
+		Rhi::Handle<Rhi::QueryPool> m_TimestampPools[kFramesInFlight];
+		Rhi::Handle<Rhi::Buffer> m_TimestampBuffers[kFramesInFlight];
+		bool m_TimestampPending[kFramesInFlight] = {};
+		double m_LastGpuMilliseconds = 0.0;
+
 		uint32_t m_Width = 1280;
 		uint32_t m_Height = 720;
 		Scene* m_ActiveScene = nullptr;

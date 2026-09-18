@@ -54,6 +54,10 @@ namespace World::Rhi
 		virtual Handle<Fence> CreateFence(bool signaled = false) = 0;
 		virtual Handle<Semaphore> CreateSemaphore(const SemaphoreCreateDesc& desc = {}) = 0;
 		virtual Handle<QueryPool> CreateQueryPool(QueryType type, uint32_t count) = 0;
+		// 时间戳查询的时基:一次 tick 等于多少纳秒(Vulkan = limits.timestampPeriod;
+		// OpenGL 的 glQueryCounter 直接把纳秒写进查询对象,因此默认 1.0)。
+		// D8b:GPU 耗时(GpuTimer)用它把 tick 差换算成毫秒。
+		virtual double GetTimestampPeriodNanoseconds() const { return 1.0; }
 
 		// 帧资源回收:渲染器完成 fence 后调用,释放该帧标记的临时资源。
 		virtual void BeginFrame() = 0;

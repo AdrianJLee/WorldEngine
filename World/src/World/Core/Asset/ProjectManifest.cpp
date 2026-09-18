@@ -146,6 +146,8 @@ namespace World::Asset
 					readU32("max_directional_lights", manifest.Rendering.MaxDirectionalLights);
 				manifest.Rendering.MaxPointLights =
 					readU32("max_point_lights", manifest.Rendering.MaxPointLights);
+				manifest.Rendering.GpuTiming = readBool("gpu_timing", manifest.Rendering.GpuTiming);
+				manifest.Rendering.Instancing = readBool("instancing", manifest.Rendering.Instancing);
 			}
 			if (!ValidateManifest(manifest, error))
 				return false;
@@ -179,6 +181,8 @@ namespace World::Asset
 			out << YAML::Key << "shadow_map_size" << YAML::Value << copy.Rendering.ShadowMapSize;
 			out << YAML::Key << "max_directional_lights" << YAML::Value << copy.Rendering.MaxDirectionalLights;
 			out << YAML::Key << "max_point_lights" << YAML::Value << copy.Rendering.MaxPointLights;
+			out << YAML::Key << "gpu_timing" << YAML::Value << copy.Rendering.GpuTiming;
+			out << YAML::Key << "instancing" << YAML::Value << copy.Rendering.Instancing;
 			out << YAML::EndMap;
 			out << YAML::Key << "packages" << YAML::Value << YAML::BeginSeq;
 			for (const std::string& package : copy.Packages)

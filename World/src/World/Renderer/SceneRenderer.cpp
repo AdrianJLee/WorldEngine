@@ -27,6 +27,70 @@ namespace World
 		return static_cast<uint32_t>(Renderer::FrameSlot());
 	}
 
+	// ---- P1b D8b:GPU 时间戳 ----
+
+	void SceneRenderer::InitGpuTiming()
+	{
+		m_GpuTiming = RenderSettings::Get().GpuTiming;
+		if (!m_GpuTiming)
+			return;
+		const Rhi::Handle<Rhi::Device>& device = Renderer::GetDevice();
+		if (!device || !device->GetCapabilities().TimestampQueries)
+		{
+			// 设备不支持时间戳 → 明确退回关闭,而不是返回 0 让上层误以为"GPU 不耗时"。
+			if (device && !device->GetCapabilities().TimestampQueries)
+				WLD_CORE_WARN("rendering.gpu_timing 已开启,但当前设备不支持时间戳查询;GPU 耗时保持 0");
+			m_GpuTiming = false;
+			return;
+		}
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_TimestampPools[slot] = device->CreateQueryPool(Rhi::QueryType::Timestamp, 2);
+			Rhi::BufferDesc bufferDesc;
+			bufferDesc.Size = sizeof(uint64_t) * 2;
+			bufferDesc.Usage = Rhi::BufferUsageTransferDst;
+			bufferDesc.Memory = Rhi::MemoryHint::HostVisible;
+			bufferDesc.DebugName = "SceneRenderer.GpuTimestamps";
+			m_TimestampBuffers[slot] = device->CreateBuffer(bufferDesc);
+			m_TimestampPending[slot] = false;
+		}
+	}
+
+	void SceneRenderer::BeginGpuTiming(uint32_t slot)
+	{
+		if (!m_GpuTiming || !m_TimestampPools[slot])
+			return;
+		m_CommandBuffers[slot]->ResetQueryPool(m_TimestampPools[slot], 0, 2);
+		m_CommandBuffers[slot]->WriteTimestamp(m_TimestampPools[slot], 0);
+	}
+
+	void SceneRenderer::EndGpuTiming(uint32_t slot)
+	{
+		if (!m_GpuTiming || !m_TimestampPools[slot])
+			return;
+		m_CommandBuffers[slot]->WriteTimestamp(m_TimestampPools[slot], 1);
+		m_CommandBuffers[slot]->CopyQueryResults(m_TimestampPools[slot], m_TimestampBuffers[slot], 0, 2);
+		m_TimestampPending[slot] = true;
+	}
+
+	double SceneRenderer::ReadGpuTiming(uint32_t slot)
+	{
+		if (!m_GpuTiming || !m_TimestampPending[slot] || !m_TimestampBuffers[slot])
+			return m_LastGpuMilliseconds;
+		uint64_t stamps[2] = {};
+		if (void* mapped = m_TimestampBuffers[slot]->Map(0, sizeof(stamps)))
+		{
+			std::memcpy(stamps, mapped, sizeof(stamps));
+			m_TimestampBuffers[slot]->Unmap();
+		}
+		m_TimestampPending[slot] = false;
+		if (stamps[1] <= stamps[0])
+			return m_LastGpuMilliseconds;
+		const double periodNs = Renderer::GetDevice() ? Renderer::GetDevice()->GetTimestampPeriodNanoseconds() : 1.0;
+		m_LastGpuMilliseconds = static_cast<double>(stamps[1] - stamps[0]) * periodNs / 1.0e6;
+		return m_LastGpuMilliseconds;
+	}
+
 	namespace
 	{
 		// 旧 Framebuffer 接口适配器:编辑器显示/拾取仍走 GL id,迁到 RHI 后移除。
@@ -73,6 +137,8 @@ namespace World
 		if (m_Device)
 			Shutdown();
 		m_Device = Renderer::GetDevice();
+		// D8b:GPU 时间戳池/读回缓冲(rendering.gpu_timing;设备不支持时自降级为关闭)。
+		InitGpuTiming();
 		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
 		{
 			m_CommandBuffers[slot] = m_Device->CreateCommandBuffer("SceneRenderer");
@@ -171,7 +237,13 @@ namespace World
 			m_CameraBuffers[slot] = nullptr;
 			m_LightBuffers[slot] = nullptr;
 			m_GlobalDescriptorSets[slot] = nullptr;
+			// D8b:时间戳查询池/读回缓冲必须在设备销毁前释放(同 D4 阴影资源的口径)。
+			m_TimestampPools[slot] = nullptr;
+			m_TimestampBuffers[slot] = nullptr;
+			m_TimestampPending[slot] = false;
 		}
+		m_GpuTiming = false;
+		m_LastGpuMilliseconds = 0.0;
 		m_FramebufferView = nullptr;
 		m_Device = nullptr;
 	}
@@ -263,6 +335,8 @@ namespace World
 		// 因此 Vulkan 只补深度范围、**不翻 Y**(翻了会在视口里上下颠倒,实测)。
 		viewProjection = AdaptViewProjectionForOffscreen(viewProjection, Renderer::GetBackendName() == "vulkan");
 		const uint32_t slot = FrameSlot();
+		// D8b:该槽位 3 帧后被复用,上一轮提交的 GPU 工作已完成(帧栅栏)→ 读回上一轮时间戳。
+		const double gpuMilliseconds = ReadGpuTiming(slot);
 		m_CameraBuffers[slot]->SetData(&viewProjection, sizeof(glm::mat4));
 
 		// ---- 3D 网格收集(D2c/D3) ----
@@ -551,6 +625,8 @@ namespace World
 		clears[2].IsDepthStencil = true;
 		clears[2].DepthStencil.Depth = 1.0f;
 
+		// D8b:起始时间戳在渲染通道**之外**写(vkCmdWriteTimestamp 不能在 render pass 内)。
+		BeginGpuTiming(slot);
 		m_CommandBuffers[slot]->BeginRenderPass(m_RenderPass, m_Framebuffer, clears);
 		m_CommandBuffers[slot]->SetViewport({ 0, 0, static_cast<float>(m_Width), static_cast<float>(m_Height) });
 		// 管线把视口/裁剪都设为动态状态,绑定后必须先设置再绘制
@@ -635,6 +711,9 @@ namespace World
 
 		Renderer2D::EndScene();
 		m_CommandBuffers[slot]->EndRenderPass();
+		// D8b:GPU 时间戳必须写在渲染通道之外(vkCmdWriteTimestamp 不能在 render pass 内),
+		// 因此这一段量的是"3D+2D 主通道"从 BeginRenderPass 到 EndRenderPass 的 GPU 时间。
+		EndGpuTiming(slot);
 		// 场景颜色附件在命令缓冲内转为可采样布局:提交方无需再 WaitIdle 做外部转换,
 		// 同一队列上后续提交(UI)按顺序即可安全采样。
 		{
@@ -659,6 +738,8 @@ namespace World
 			stats.Triangles = statsNow.Triangles - statsBeforeScene.Triangles;
 			stats.DroppedObjects = statsNow.DroppedObjects - statsBeforeScene.DroppedObjects;
 			stats.CullingEnabled = cullingEnabled;
+			stats.InstancingEnabled = RenderSettings::Get().Instancing;
+			stats.GpuMilliseconds = gpuMilliseconds;
 			stats.CullMilliseconds = cullMilliseconds;
 			stats.SceneMilliseconds = std::chrono::duration<double, std::milli>(
 				std::chrono::steady_clock::now() - sceneStart).count();

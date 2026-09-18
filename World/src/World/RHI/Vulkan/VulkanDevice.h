@@ -41,6 +41,8 @@ namespace World::Rhi::Vulkan
 		Handle<Fence> CreateFence(bool signaled = false) override;
 		Handle<Semaphore> CreateSemaphore(const SemaphoreCreateDesc& desc = {}) override;
 		Handle<QueryPool> CreateQueryPool(QueryType type, uint32_t count) override;
+		// D8b:VkPhysicalDeviceLimits::timestampPeriod = 一次 tick 的纳秒数。
+		double GetTimestampPeriodNanoseconds() const override { return m_TimestampPeriodNs; }
 		void BeginFrame() override {}
 		void EndFrame() override {}
 
@@ -75,6 +77,7 @@ namespace World::Rhi::Vulkan
 		DeviceDesc m_Desc;
 		Capabilities m_Capabilities;
 		DeviceLimits m_Limits;
+		double m_TimestampPeriodNs = 1.0;   // D8b:limits.timestampPeriod(ns / tick)
 		VkInstance m_Instance = VK_NULL_HANDLE;
 		VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
 		VkDevice m_Device = VK_NULL_HANDLE;

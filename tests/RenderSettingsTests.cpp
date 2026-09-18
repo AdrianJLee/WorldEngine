@@ -64,6 +64,9 @@ namespace
 		CHECK(manifest.Rendering.ShadowMapSize == 2048u);
 		CHECK(manifest.Rendering.MaxDirectionalLights == 1u);
 		CHECK(manifest.Rendering.MaxPointLights == 7u);
+		// D8b:GPU 时间戳默认关(读回有代价);实例合批默认开。
+		CHECK(!manifest.Rendering.GpuTiming);
+		CHECK(manifest.Rendering.Instancing);
 		fs::remove_all(root);
 	}
 
@@ -77,7 +80,9 @@ namespace
 			"  shadows: false\n"
 			"  shadow_map_size: 1024\n"
 			"  max_directional_lights: 2\n"
-			"  max_point_lights: 4\n"));
+			"  max_point_lights: 4\n"
+			"  gpu_timing: true\n"
+			"  instancing: false\n"));
 
 		World::Asset::ProjectManifest manifest;
 		std::string error;
@@ -87,6 +92,8 @@ namespace
 		CHECK(manifest.Rendering.ShadowMapSize == 1024u);
 		CHECK(manifest.Rendering.MaxDirectionalLights == 2u);
 		CHECK(manifest.Rendering.MaxPointLights == 4u);
+		CHECK(manifest.Rendering.GpuTiming);
+		CHECK(!manifest.Rendering.Instancing);
 
 		// 写盘往返:rendering 区块落地,其它字段不丢。
 		CHECK(World::Asset::ProjectManifest::Save(manifestPath, manifest, &error));
@@ -102,6 +109,8 @@ namespace
 		CHECK(reloaded.Rendering.ShadowMapSize == 1024u);
 		CHECK(reloaded.Rendering.MaxDirectionalLights == 2u);
 		CHECK(reloaded.Rendering.MaxPointLights == 4u);
+		CHECK(reloaded.Rendering.GpuTiming);
+		CHECK(!reloaded.Rendering.Instancing);
 		fs::remove_all(root);
 	}
 

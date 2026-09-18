@@ -212,6 +212,11 @@ namespace World
 			uint32_t Triangles = 0;
 			uint32_t DroppedObjects = 0;  // >0 = 对象槽位不够,画面缺物体
 			bool CullingEnabled = true;   // WLD_NO_CULL 关剔除时为 false(A/B 测量用)
+			bool InstancingEnabled = true;// D8b:实例合批开关(rendering.instancing)
+			uint32_t InstancedBatches = 0;    // 本帧合批次数
+			uint32_t InstancedObjects = 0;    // 被合批覆盖的实例数
+			// D8b:GPU 时间戳测得的 3D 主通道耗时(ms);rendering.gpu_timing 关闭时 0。
+			double GpuMilliseconds = 0.0;
 			double CullMilliseconds = 0.0;    // 剔除(含世界 AABB)CPU 耗时
 			double SceneMilliseconds = 0.0;   // 整个 3D 场景提交(收集→阴影→主通道)CPU 耗时
 		};
