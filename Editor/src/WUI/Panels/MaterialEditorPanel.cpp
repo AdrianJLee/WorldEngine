@@ -476,6 +476,16 @@ namespace World
 		const float width = rect.W - 20.0f;
 		float y = rect.Y + 6.0f;
 
+		// W5-L1:本帧任何参数写入 = "未保存修改"(以 Revision 是否前进为准,避免每帧误标)。
+		// 资产热重载对 dirty 材质只报告不覆盖(SkippedDirty),不能静默丢掉面板里的改动。
+		const auto applyEdit = [this](auto&& setter)
+		{
+			const uint32_t revision = m_Material->GetRevision();
+			setter();
+			if (m_Material->GetRevision() != revision)
+				m_Material->MarkDirty(true);
+		};
+
 		Wui::Label(ctx, { x, y }, ShortenPath(m_Path.empty() ? "(未保存的新材质)" : m_Path)
 			+ (m_Material->IsDirty() ? "  *" : ""), theme.Text, 13.0f);
 		y += 20.0f;
@@ -492,19 +502,19 @@ namespace World
 		colorChanged |= Wui::DragFloat(ctx, Wui::HashId("material.base.a"), { x + 3 * (colorW + 4.0f), y, colorW, 20.0f }, baseColor.a, 0.01f, 0.0f, 1.0f, theme);
 		y += 26.0f;
 		if (colorChanged)
-			m_Material->SetBaseColor(baseColor);
+			applyEdit([&] { m_Material->SetBaseColor(baseColor); });
 
 		float metallic = desc.Metallic;
 		Wui::Label(ctx, { x, y }, "Metallic", theme.TextMuted, 12.0f);
 		Wui::SliderFloat(ctx, Wui::HashId("material.metallic"), { x + 70.0f, y - 2.0f, width - 70.0f, 18.0f }, metallic, 0.0f, 1.0f, theme);
 		y += 24.0f;
-		m_Material->SetMetallic(metallic);
+		applyEdit([&] { m_Material->SetMetallic(metallic); });
 
 		float roughness = desc.Roughness;
 		Wui::Label(ctx, { x, y }, "Roughness", theme.TextMuted, 12.0f);
 		Wui::SliderFloat(ctx, Wui::HashId("material.roughness"), { x + 70.0f, y - 2.0f, width - 70.0f, 18.0f }, roughness, 0.02f, 1.0f, theme);
 		y += 24.0f;
-		m_Material->SetRoughness(roughness);
+		applyEdit([&] { m_Material->SetRoughness(roughness); });
 
 		Wui::Label(ctx, { x, y }, "Emissive", theme.TextMuted, 12.0f);
 		y += 16.0f;
@@ -516,19 +526,19 @@ namespace World
 		emissiveChanged |= Wui::DragFloat(ctx, Wui::HashId("material.emissive.b"), { x + 2 * (emissiveW + 4.0f), y, emissiveW, 20.0f }, emissive.z, 0.01f, 0.0f, 8.0f, theme);
 		y += 26.0f;
 		if (emissiveChanged)
-			m_Material->SetEmissive(emissive);
+			applyEdit([&] { m_Material->SetEmissive(emissive); });
 
 		// ---- 混合 / 双面 ----
 		static const std::vector<std::string> blendModes { "Opaque", "Transparent" };
 		int blendIndex = desc.BlendMode == MaterialBlendMode::Transparent ? 1 : 0;
 		Wui::Label(ctx, { x, y }, "BlendMode", theme.TextMuted, 12.0f);
 		if (Wui::Combo(ctx, Wui::HashId("material.blend"), { x + 70.0f, y - 4.0f, 140.0f, 20.0f }, blendModes[blendIndex], blendModes, blendIndex, theme))
-			m_Material->SetBlendMode(blendIndex == 1 ? MaterialBlendMode::Transparent : MaterialBlendMode::Opaque);
+			applyEdit([&] { m_Material->SetBlendMode(blendIndex == 1 ? MaterialBlendMode::Transparent : MaterialBlendMode::Opaque); });
 		y += 26.0f;
 
 		bool doubleSided = desc.DoubleSided;
 		if (Wui::Checkbox(ctx, Wui::HashId("material.doublesided"), { x, y, 120.0f, 18.0f }, "Double Sided", doubleSided, theme))
-			m_Material->SetDoubleSided(doubleSided);
+			applyEdit([&] { m_Material->SetDoubleSided(doubleSided); });
 		y += 26.0f;
 
 		// 注:面板不提供"切换材质"入口 —— 从内容浏览器/菜单打开哪个材质,这个窗口就是
@@ -546,7 +556,7 @@ namespace World
 			// 渲染侧每帧重建材质描述符集 → 预览逐帧闪(用户反馈"切换贴图后预览闪烁")。
 			const std::string chosen = m_AlbedoPickIndex <= 0 ? std::string() : albedoOptions[m_AlbedoPickIndex];
 			if (chosen != m_Material->GetDesc().AlbedoTexture)
-				m_Material->SetAlbedoTexture(chosen);
+				applyEdit([&] { m_Material->SetAlbedoTexture(chosen); });
 		}
 		y += 28.0f;
 		std::vector<std::string> normalOptions = m_TexturePaths;
@@ -558,7 +568,7 @@ namespace World
 		{
 			const std::string chosen = m_NormalPickIndex <= 0 ? std::string() : normalOptions[m_NormalPickIndex];
 			if (chosen != m_Material->GetDesc().NormalTexture)
-				m_Material->SetNormalTexture(chosen);
+				applyEdit([&] { m_Material->SetNormalTexture(chosen); });
 		}
 		y += 28.0f;
 

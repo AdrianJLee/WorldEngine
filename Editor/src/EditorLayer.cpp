@@ -292,6 +292,8 @@ namespace World
 		// P2 W5b:帧边界(不在任何脚本回调内)轮询脚本热重载。编辑态轮询文档场景,
 		// Play/Simulate 轮询正在跑的那个副本 —— 改盘即生效,用户当场看到结果。
 		PollScriptHotReload(ts.GetSeconds());
+		// P2 W5-L1:同一帧边界轮询资产外部改动(材质/贴图自动;文档场景只提示)。
+		PollAssetHotReload(ts.GetSeconds());
 		// 开发/验证钩子:WLD_AUTOPLAY=<帧数> 时在该帧自动进入 Play(等价于点视图口播放按钮),
 		// 供隐藏冒烟与回归脚本验证 Play 路径(与 WLD_START_SCENE/WLD_CAPTURE_FRAMES 同类)。
 		if (const char* autoPlayFrames = std::getenv("WLD_AUTOPLAY"))
@@ -906,6 +908,8 @@ namespace World
 		}
 		SetSceneState(SceneState::Edit);
 		UpdateSceneContext(m_Document.GetScene());
+		// W5-L1:重开/打开成功即用磁盘内容重建外部改动基线(并清掉提示)。
+		RebaselineExternalSceneWatch();
 	}
 	bool EditorLayer::SaveScene()
 	{
@@ -1233,9 +1237,15 @@ namespace World
 			std::string path = FileDialogs::SaveFile("Scene File (*.wd)\0*.wd\0");
 			if (path.empty())
 				return false;
-			return m_Document.SaveTo(std::filesystem::path(path));
+			const bool saved = m_Document.SaveTo(std::filesystem::path(path));
+			if (saved)
+				RebaselineExternalSceneWatch();   // W5-L1:自己写出的内容不该被当成外部改动
+			return saved;
 		}
-		return m_Document.SaveTo(m_Document.GetPath());
+		const bool saved = m_Document.SaveTo(m_Document.GetPath());
+		if (saved)
+			RebaselineExternalSceneWatch();   // W5-L1:同上
+		return saved;
 	}
 	bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
 	{
@@ -1626,6 +1636,98 @@ namespace World
 			}
 			if (!matched)
 				WLD_CORE_INFO("[hot-reload] changed script '{0}' is no longer used by the current scene; dropped", path);
+		}
+	}
+
+	std::string EditorLayer::CurrentDocumentLogicalPath() const
+	{
+		if (!m_Document.HasPath())
+			return {};
+		const std::filesystem::path documentPath = m_Document.GetPath();
+		std::error_code ec;
+		std::filesystem::path relative;
+		if (documentPath.is_absolute())
+		{
+			relative = std::filesystem::relative(documentPath, std::filesystem::path(WLD_ASSETPATH), ec);
+			if (ec || relative.empty() || relative.is_absolute())
+				return {};
+		}
+		else
+		{
+			// 相对路径按引擎约定就是"相对内容根"的逻辑路径(与 manifest start_scene 一致)。
+			relative = documentPath;
+		}
+		// 文档在内容根之外(文件对话框里开到别处):只做内存态编辑,不参与外部改动提示。
+		if (*relative.begin() == std::filesystem::path(".."))
+			return {};
+		return relative.generic_string();
+	}
+
+	void EditorLayer::RebaselineExternalSceneWatch()
+	{
+		const std::string logical = CurrentDocumentLogicalPath();
+		m_SceneWatch.Clear();
+		m_WatchedSceneLogicalPath.clear();
+		m_ExternalSceneChanged = false;
+		if (logical.empty())
+			return;
+		m_SceneWatch.Watch(logical);
+		m_WatchedSceneLogicalPath = logical;
+	}
+
+	void EditorLayer::ReopenExternalScene()
+	{
+		if (!m_ExternalSceneChanged || !m_Document.HasPath())
+			return;
+		const std::filesystem::path target = m_Document.GetPath();
+		// dirty → 复用未保存确认模态(保存/放弃后才重开);clean → 直接重开。
+		// 成功重开会在 DoOpenScene 里重建基线并清掉提示。
+		RequestAction([this, target]() { DoOpenScene(target); });
+	}
+
+	void EditorLayer::PollAssetHotReload(float deltaSeconds)
+	{
+		// 开关:WLD_ASSET_HOTRELOAD=0 整体关闭(默认开)。
+		if (const char* switchValue = std::getenv("WLD_ASSET_HOTRELOAD"))
+			if (std::string(switchValue) == "0")
+				return;
+
+		// 1) 材质/贴图:库内轮询缓存里的 .wmat 与它们引用的贴图(150ms / 500ms)。
+		AssetHotReloadReport report;
+		MaterialLibrary::Get().PollAssetChanges(static_cast<double>(deltaSeconds), report);
+		for (const std::string& path : report.ReloadedMaterials)
+			WLD_CORE_INFO("[asset-hot-reload] reloaded material '{0}'", path);
+		for (const std::string& path : report.SkippedDirtyMaterials)
+			WLD_CORE_INFO("[asset-hot-reload] skipped dirty material '{0}' (unsaved edits kept)", path);
+		for (const AssetReloadFailure& failure : report.FailedMaterials)
+			WLD_CORE_WARN("[asset-hot-reload] material reload failed '{0}': {1}", failure.Path, failure.Error);
+		for (const std::string& path : report.InvalidatedTextures)
+			WLD_CORE_INFO("[asset-hot-reload] texture invalidated '{0}'", path);
+
+		// 2) 文档场景(.wd):内容变化只提示 + 一键重开,**不自动替换**(会丢未保存修改,
+		//    选择/面板也仍指向旧 Scene 实例)。
+		const std::string logical = CurrentDocumentLogicalPath();
+		if (logical.empty())
+		{
+			m_SceneWatch.Clear();
+			m_WatchedSceneLogicalPath.clear();
+			m_ExternalSceneChanged = false;
+			return;
+		}
+		if (m_WatchedSceneLogicalPath != logical)
+		{
+			// 换文档:重建基线,不把上一个文档的变化带过来。
+			m_SceneWatch.Clear();
+			m_SceneWatch.Watch(logical);
+			m_WatchedSceneLogicalPath = logical;
+			m_ExternalSceneChanged = false;
+			return;
+		}
+		for (const std::string& changed : m_SceneWatch.Poll(static_cast<double>(deltaSeconds)))
+		{
+			if (!m_ExternalSceneChanged)
+				WLD_CORE_INFO("[asset-hot-reload] scene changed '{0}' -> reopen prompt (document kept)", changed);
+			m_ExternalSceneChanged = true;
 		}
 	}
 

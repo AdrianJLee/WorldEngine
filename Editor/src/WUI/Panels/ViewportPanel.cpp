@@ -3,6 +3,7 @@
 
 #include "World/WUI/WuiGizmo.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
 namespace World
@@ -77,6 +78,22 @@ namespace World
 			const float height = width * 9.0f / 16.0f;
 			const float margin = 10.0f;
 			return { sceneRect.X + margin, sceneRect.Y + sceneRect.H - height - margin, width, height };
+		}
+
+		// 只读节点(status):AI 能读到,ui.invoke 不会去点它(与脚本面板同一约定)。
+		void RegisterReadonlyNode(Wui::WuiId id, const char* kind, const std::string& label,
+			const std::string& value, const Wui::WuiRect& rect)
+		{
+			Wui::WuiAccessNode node;
+			node.Id = id;
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = kind;
+			node.Label = label;
+			node.Value = value;
+			node.Rect = rect;
+			node.Interactive = false;
+			Wui::WuiAccessibility::Get().Register(node);
 		}
 	}
 
@@ -161,6 +178,14 @@ namespace World
 			{ sceneRect.X + sceneRect.W, sceneRect.Y + sceneRect.H } };
 		m_Host.SetViewportState(focused, hovered, { sceneRect.W, sceneRect.H }, bounds);
 
+		// W5-L1:磁盘场景改动提示条(顶部居中)。先算矩形:它要参与"点提示条不吃实体拾取"的判定;
+		// 真正绘制在 OnRender 末尾,保证盖在选中框/视锥覆盖层之上。
+		const bool bannerVisible = m_Host.ExternalSceneChanged() && !m_Host.IsPlaying() && !m_Host.IsSimulating();
+		const float bannerWidth = std::min(sceneRect.W - 24.0f, 470.0f);
+		const Wui::WuiRect bannerRect { sceneRect.X + (sceneRect.W - bannerWidth) * 0.5f, sceneRect.Y + 10.0f,
+			bannerWidth, 26.0f };
+		const bool overBanner = bannerVisible && ctx.IsHovered(bannerRect);
+
 		// 先跑 gizmo:它有"鼠标占用"语义(拖拽中/悬停在手柄上),必须优先于实体拾取 ——
 		// 否则点箭头会被"点空白清空选择"吃掉,表现为"拖不动箭头"。
 		bool gizmoEngaged = false;
@@ -194,7 +219,7 @@ namespace World
 			m_Host.GetCameraPreviewTextureId() != 0 && !previewLabel.empty();
 		// 相机预览小窗挡住的位置不参与拾取(避免"点预览把背后物体选走")。
 		const bool overPreview = previewVisible && ctx.IsHovered(previewRect);
-		if (ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview)
+		if (ctx.IsClicked(sceneRect) && !m_GizmoActive && !gizmoEngaged && !overPreview && !overBanner)
 		{
 			const glm::vec2 local = ctx.Input().MousePos - glm::vec2 { sceneRect.X, sceneRect.Y };
 			const Entity picked = m_Host.PickEntityAt(local);
@@ -500,6 +525,20 @@ namespace World
 			Image(ctx, { previewRect.X + 1.0f, previewRect.Y + 18.0f, previewRect.W - 2.0f, previewRect.H - 19.0f },
 				previewTexture, { 0, 1, 1, -1 }, theme);
 			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, previewRect, theme.Border, 3.0f, 1.0f });
+		}
+
+		// ---- W5-L1:文档场景外部改动提示:只提示 + 一键重开,**不自动替换**文档 ----
+		if (bannerVisible)
+		{
+			Wui::PanelBackground(ctx, bannerRect, { 0.30f, 0.24f, 0.08f, 0.96f }, 3.0f);
+			RegisterReadonlyNode(Wui::HashId("scene.external.changed"), "status", "scene external change",
+				"场景文件已在磁盘上被外部修改(未自动替换)", bannerRect);
+			Label(ctx, { bannerRect.X + 10.0f, bannerRect.Y + 6.0f },
+				"场景已在磁盘上改动", Wui::WuiColor { 1.0f, 0.86f, 0.55f, 1.0f }, 12.0f);
+			if (Button(ctx, Wui::HashId("scene.external.reopen"),
+				{ bannerRect.X + bannerRect.W - 104.0f, bannerRect.Y + 3.0f, 96.0f, 20.0f }, "重新打开", theme))
+				m_Host.ReopenExternalScene();
+			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, bannerRect, theme.Border, 3.0f, 1.0f });
 		}
 		(void)theme;
 	}

@@ -1,12 +1,18 @@
 // D3:材质资产(解析/版本/默认值/夹紧/往返)与材质库(缓存/保存/热重载)回归。
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
+#include "World/Renderer/MaterialTextureCache.h"
+#include "World/Renderer/TextureData.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace
 {
@@ -177,6 +183,291 @@ int main()
 			std::filesystem::remove(directory / "library_copy.wmat", ec);
 			std::filesystem::remove(directory / "library_copy.wmat.tmp", ec);
 			std::filesystem::remove(directory, ec);
+		}
+
+		// 8. W5-L1:AssetFileWatch 语义与 AssetFingerprint(基线/未决 debounce/同内容重写/
+		// 改回已确认值撤销/集合同步升序)。测试文件落在 Game/assets 下的临时子目录,
+		// 与引擎用同一条"相对内容根"的解析路径。
+		{
+			CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
+			std::error_code ec;
+			const std::filesystem::path directory = std::filesystem::current_path() / "Game" / "assets"
+				/ "material_hotreload_tmp";
+			std::filesystem::create_directories(directory, ec);
+			const std::string relative = "material_hotreload_tmp/watch_probe.txt";
+			const std::filesystem::path full = std::filesystem::current_path() / "Game" / "assets" / relative;
+			const auto writeText = [&full](const std::string& text)
+			{
+				std::ofstream file(full, std::ios::binary | std::ios::trunc);
+				file << text;
+				file.flush();
+			};
+
+			writeText("version A");
+			const AssetFingerprint baseline = FingerprintAsset(relative);
+			CHECK(baseline.Exists);
+			CHECK(baseline.FromContent);
+
+			// 首登记只建立基线,不报告;重复 Watch 用当前内容重置基线。
+			AssetFileWatch watch(AssetFileWatch::kDefaultDebounceSeconds);
+			watch.Watch(relative);
+			watch.Watch(relative);
+			CHECK(watch.Size() == 1);
+			CHECK(watch.IsWatched(relative));
+			CHECK(watch.Poll(1.0).empty());
+
+			// 同内容重写(只动 mtime)不算变化:指纹仍是内容哈希且完全一致。
+			std::this_thread::sleep_for(std::chrono::milliseconds(30));
+			writeText("version A");
+			const AssetFingerprint rewritten = FingerprintAsset(relative);
+			CHECK(rewritten.Exists && rewritten.FromContent);
+			CHECK(rewritten.Value == baseline.Value);
+			CHECK(watch.Poll(1.0).empty());
+
+			// 内容变化:必须连续稳定 debounce 秒后才报告一次(期间内容再变则重启计时)。
+			writeText("version B");
+			CHECK(watch.Poll(0.05).empty());   // 观察到新内容:建立未决,elapsed=0
+			CHECK(watch.Poll(0.05).empty());   // 0.05s < 0.15s:继续等待
+			CHECK(watch.Poll(0.05).empty());   // 0.10s < 0.15s:继续等待
+			const std::vector<std::string> reported = watch.Poll(0.05);   // 0.15s:报告一次
+			CHECK(reported.size() == 1);
+			CHECK(reported[0] == relative);
+			CHECK(watch.Poll(1.0).empty());    // 报告后该内容成为新基线
+
+			// Watch() 重置基线 + 内容改回已确认值 → 撤销未决变化,不报告。
+			writeText("version C");
+			watch.Watch(relative);
+			CHECK(watch.Poll(1.0).empty());
+			writeText("version D");
+			CHECK(watch.Poll(0.05).empty());   // 未决(尚未到 debounce)
+			writeText("version C");            // 改回已确认内容
+			CHECK(watch.Poll(1.0).empty());    // 撤销未决,不报告
+
+			// WatchedPaths() 升序 + 集合同步。
+			writeText("version E");
+			watch.Watch("material_hotreload_tmp/watch_probe_extra.txt");
+			const std::vector<std::string> watched = watch.WatchedPaths();
+			CHECK(watched.size() == 2);
+			CHECK(std::is_sorted(watched.begin(), watched.end()));
+			CHECK(watched[0] == "material_hotreload_tmp/watch_probe.txt");
+
+			// 空路径不产生条目。
+			watch.Watch(std::string());
+			CHECK(watch.Size() == 2);
+
+			// 内容变化(内容 A 的哈希与基准不同):首次 Poll 建立未决,第二次过 debounce 报告。
+			writeText("version F");
+			CHECK(watch.Poll(0.05).empty());
+			const std::vector<std::string> changedAgain = watch.Poll(0.5);
+			CHECK(changedAgain.size() == 1);
+			CHECK(changedAgain[0] == "material_hotreload_tmp/watch_probe.txt");
+
+			watch.Clear();
+			CHECK(watch.Size() == 0);
+			CHECK(!watch.IsWatched(relative));
+
+			std::filesystem::remove_all(directory, ec);
+		}
+
+		// 9. W5-L1:clean 材质的外部内容变化 → 自动原地重载(Ref 同一性保持、Revision 前进、
+		// GetDesc() 为新内容;mtime 不变也靠内容哈希检出)。
+		{
+			std::error_code ec;
+			const std::filesystem::path directory = std::filesystem::current_path() / "Game" / "assets"
+				/ "material_hotreload_tmp";
+			std::filesystem::create_directories(directory, ec);
+			const std::string relative = "material_hotreload_tmp/hot_clean.wmat";
+			const std::filesystem::path full = std::filesystem::current_path() / "Game" / "assets" / relative;
+			MaterialDesc desc;
+			desc.Name = "HotClean";
+			desc.Roughness = 0.1f;
+			{
+				std::ofstream file(full, std::ios::binary | std::ios::trunc);
+				file << MaterialIO::Serialize(desc);
+			}
+
+			MaterialLibrary& library = MaterialLibrary::Get();
+			Ref<Material> material = library.Load(relative, nullptr);
+			CHECK(material != nullptr);
+			CHECK(material->GetDesc().Name == "HotClean");
+			const Ref<Material> sameInstance = material;
+			const uint32_t revisionBefore = material->GetRevision();
+
+			// 先建立基线(首登记不报告),再模拟外部改写。
+			library.PollAssetChanges(0.0, AssetHotReloadReport {});
+
+			// 外部改写内容:显式把 mtime 设回原值,证明检测口径是内容哈希而不是时间戳。
+			desc.Name = "HotCleanV2";
+			desc.Roughness = 0.75f;
+			const auto originalTime = std::filesystem::last_write_time(full);
+			{
+				std::ofstream file(full, std::ios::binary | std::ios::trunc);
+				file << MaterialIO::Serialize(desc);
+			}
+			std::filesystem::last_write_time(full, originalTime, ec);
+			CHECK(!ec);
+
+			AssetHotReloadReport report;
+			library.PollAssetChanges(0.0, report);
+			CHECK(report.ReloadedMaterials.empty());   // 首次看到变化:只是未决
+			CHECK(material->GetDesc().Name == "HotClean");
+			report = AssetHotReloadReport {};
+			library.PollAssetChanges(0.05, report);
+			CHECK(report.ReloadedMaterials.empty());   // 0.05s 仍 < debounce
+			report = AssetHotReloadReport {};
+			library.PollAssetChanges(0.2, report);     // 过 debounce → 一次重载
+			CHECK(report.ReloadedMaterials.size() == 1);
+			CHECK(report.ReloadedMaterials[0] == relative);
+			CHECK(report.SkippedDirtyMaterials.empty());
+			CHECK(report.FailedMaterials.empty());
+			CHECK(material == sameInstance);           // Ref 同一性保持
+			CHECK(material->GetDesc().Name == "HotCleanV2");
+			CHECK(material->GetDesc().Roughness > 0.74f);
+			CHECK(material->GetRevision() > revisionBefore);
+
+			// 同一内容轮询不再报告(该内容已成为新基线)。
+			report = AssetHotReloadReport {};
+			library.PollAssetChanges(1.0, report);
+			CHECK(!report.Any());
+
+			std::filesystem::remove_all(directory, ec);
+			library.Shutdown();   // 清缓存,避免删除的临时资产污染后续用例
+		}
+
+		// 10. W5-L1:dirty 材质的外部变化只报告不覆盖;坏文件失败保留旧 desc。
+		{
+			std::error_code ec;
+			const std::filesystem::path directory = std::filesystem::current_path() / "Game" / "assets"
+				/ "material_hotreload_tmp";
+			std::filesystem::create_directories(directory, ec);
+			const std::string dirtyPath = "material_hotreload_tmp/hot_dirty.wmat";
+			const std::string brokenPath = "material_hotreload_tmp/hot_broken.wmat";
+			const std::filesystem::path dirtyFull = std::filesystem::current_path() / "Game" / "assets" / dirtyPath;
+			const std::filesystem::path brokenFull = std::filesystem::current_path() / "Game" / "assets" / brokenPath;
+
+			MaterialDesc dirtyDesc;
+			dirtyDesc.Name = "DirtyBase";
+			{
+				std::ofstream file(dirtyFull, std::ios::binary | std::ios::trunc);
+				file << MaterialIO::Serialize(dirtyDesc);
+			}
+			MaterialDesc brokenDesc;
+			brokenDesc.Name = "BrokenBase";
+			{
+				std::ofstream file(brokenFull, std::ios::binary | std::ios::trunc);
+				file << MaterialIO::Serialize(brokenDesc);
+			}
+
+			MaterialLibrary& library = MaterialLibrary::Get();
+			Ref<Material> dirty = library.Load(dirtyPath, nullptr);
+			Ref<Material> broken = library.Load(brokenPath, nullptr);
+			CHECK(dirty != nullptr && broken != nullptr);
+
+			// 先跑一次轮询让两个新路径进入监听集合(首登记只建立基线,不报告)——
+			// 之后的磁盘改写才会被检出。
+			library.PollAssetChanges(0.0, AssetHotReloadReport {});
+
+			// 外部改写两份文件;dirty 材质带未保存修改(编辑器面板语义)。
+			dirtyDesc.Name = "DiskDirty";
+			brokenDesc.Name = "DiskBroken";
+			{
+				std::ofstream file(dirtyFull, std::ios::binary | std::ios::trunc);
+				file << MaterialIO::Serialize(dirtyDesc);
+			}
+			{
+				std::ofstream file(brokenFull, std::ios::binary | std::ios::trunc);
+				file << MaterialIO::Serialize(brokenDesc);
+			}
+			dirty->SetRoughness(0.33f);
+			dirty->MarkDirty(true);
+			const std::string dirtyInMemoryName = dirty->GetDesc().Name;
+
+			library.PollAssetChanges(0.05, AssetHotReloadReport {});
+			AssetHotReloadReport report;
+			library.PollAssetChanges(0.5, report);
+			CHECK(report.SkippedDirtyMaterials.size() == 1);
+			CHECK(report.SkippedDirtyMaterials[0] == dirtyPath);
+			CHECK(std::find(report.ReloadedMaterials.begin(), report.ReloadedMaterials.end(), dirtyPath)
+				== report.ReloadedMaterials.end());
+			CHECK(report.ReloadedMaterials.size() == 1);   // broken 材质是 clean → 自动重载
+			CHECK(report.ReloadedMaterials[0] == brokenPath);
+			CHECK(report.FailedMaterials.empty());
+			CHECK(dirty->GetDesc().Name == dirtyInMemoryName);   // 内存态未被覆盖
+			CHECK(dirty->IsDirty());                              // 脏标记保持
+
+			// 坏文件:替换为无法解析的内容 → FailedMaterials + 保留旧 desc。
+			{
+				std::ofstream file(brokenFull, std::ios::binary | std::ios::trunc);
+				file << "this is not a valid material\n";
+			}
+			const std::string brokenName = broken->GetDesc().Name;
+			library.PollAssetChanges(0.05, AssetHotReloadReport {});
+			report = AssetHotReloadReport {};
+			library.PollAssetChanges(0.5, report);
+			CHECK(report.FailedMaterials.size() == 1);
+			CHECK(report.FailedMaterials[0].Path == brokenPath);
+			CHECK(!report.FailedMaterials[0].Error.empty());
+			CHECK(broken->GetDesc().Name == brokenName);   // 旧 desc 保留
+
+			std::filesystem::remove_all(directory, ec);
+			library.Shutdown();   // 清缓存 + 监听集合在下一轮清空
+		}
+
+		// 11. W5-L1 路径 bug 回归:普通 xxx.wmat(相对内容根)在文件更新后 IsFileNewer == true。
+		// 修复前 FileWriteTime 拼的是 Game/ 而不是 Game/assets/,时间戳恒为 min()。
+		{
+			std::error_code ec;
+			const std::filesystem::path directory = std::filesystem::current_path() / "Game" / "assets"
+				/ "material_hotreload_tmp";
+			std::filesystem::create_directories(directory, ec);
+			const std::string relative = "material_hotreload_tmp/mtime_probe.wmat";
+			const std::filesystem::path full = std::filesystem::current_path() / "Game" / "assets" / relative;
+			MaterialDesc desc;
+			desc.Name = "MtimeProbe";
+			{
+				std::ofstream file(full, std::ios::binary | std::ios::trunc);
+				file << MaterialIO::Serialize(desc);
+			}
+
+			MaterialLibrary& library = MaterialLibrary::Get();
+			Ref<Material> material = library.Load(relative, nullptr);
+			CHECK(material != nullptr);
+			CHECK(!library.IsFileNewer(*material));   // 刚加载:磁盘不比内存新
+
+			std::this_thread::sleep_for(std::chrono::milliseconds(30));
+			desc.Roughness = 0.42f;
+			{
+				std::ofstream file(full, std::ios::binary | std::ios::trunc);
+				file << MaterialIO::Serialize(desc);
+			}
+			CHECK(library.IsFileNewer(*material));    // 修复后:磁盘时间戳真的比 m_FileTime 新
+
+			std::filesystem::remove_all(directory, ec);
+		}
+
+		// 12. W5-L1 路径 bug 回归:无 Application 实例时 TextureData 的磁盘回退能吃内容根。
+		// 修复前拼的是 Game/textures/Icon.png(不存在)→ 1x1 白纹理兜底(Valid=false)。
+		{
+			const TextureData data = LoadTextureData("textures/Icon.png", /*flipVertically*/ false);
+			CHECK(data.Valid);
+			CHECK(data.Width == 640);
+			CHECK(data.Height == 640);
+			CHECK(data.Pixels.size() == static_cast<size_t>(640) * 640 * 4);
+
+			const TextureData missing = LoadTextureData("textures/__no_such_texture__.png", false);
+			CHECK(!missing.Valid);
+			CHECK(missing.Width == 1 && missing.Height == 1);
+			CHECK(missing.Pixels.size() == 4);
+		}
+
+		// 13. W5-L1:MaterialTextureCache::Invalidate 在无设备环境下安全 no-op(不崩、不误清)。
+		{
+			MaterialTextureCache& cache = MaterialTextureCache::Get();
+			cache.Invalidate(std::string());                  // 空路径拒绝
+			cache.Invalidate("textures/Icon.png");            // 未命中:安全
+			cache.Invalidate("material_hotreload_tmp/none.png");
+			cache.Clear();                                    // 无设备的 Clear 同样安全
+			CHECK(true);                                      // 运行到这里 = 没有崩溃/未定义行为
 		}
 
 		std::printf("MaterialTests: all checks passed\n");

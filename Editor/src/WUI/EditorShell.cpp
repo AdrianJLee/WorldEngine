@@ -1947,6 +1947,17 @@ namespace World
 		TogglePanel(*m_Ctx, panel);
 	}
 
+	// W5-L1:文档场景外部改动提示(视口面板读;按钮触发重开,未保存时走确认模态)。
+	bool EditorShell::ExternalSceneChanged() const
+	{
+		return m_Editor.ExternalSceneChanged();
+	}
+
+	void EditorShell::ReopenExternalScene()
+	{
+		m_Editor.ReopenExternalScene();
+	}
+
 	EditorPanel* EditorShell::FocusedPanel()
 	{
 		// ① 主窗口处于"已附加面板"模式(顶栏标签):该面板就是焦点面板。

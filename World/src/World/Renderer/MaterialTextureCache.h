@@ -24,6 +24,11 @@ namespace World
 		Rhi::Handle<Rhi::Texture> Get(const std::string& path, bool srgb);
 		void Clear();
 
+		// W5-L1:按路径失效(该路径的 sRGB/线性两份都清,空路径拒绝)。
+		// 旧句柄交给 Renderer::QueueRelease 延迟释放;之后第一次 Get() 会重新读盘上传,
+		// 因此"先失败兜底成 1x1 白纹理 → 文件后来变好"也能被这次失效救回来。
+		void Invalidate(const std::string& path);
+
 	private:
 		MaterialTextureCache() = default;
 

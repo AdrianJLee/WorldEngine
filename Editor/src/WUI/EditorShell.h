@@ -105,6 +105,9 @@ namespace World
 		void EnsureScriptPanelFromId(const std::string& panelId);
 		// 关闭动态面板(脚本编辑器工具栏 Close):与 Window 菜单同一条 TogglePanel 路径。
 		void CloseEditorPanel(const std::string& panelId) override;
+		// ---- W5-L1:文档场景外部改动提示(转发 EditorLayer)----
+		bool ExternalSceneChanged() const override;
+		void ReopenExternalScene() override;
 		// W9-2 三层快捷键路由第 2 层:当前焦点面板。
 		//   ① 主窗口处于"已附加面板"模式(顶栏标签)→ 该面板;
 		//   ② 否则某个独立窗口在前台 → 该窗口的当前标签;

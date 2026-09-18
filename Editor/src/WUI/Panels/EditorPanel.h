@@ -84,6 +84,10 @@ namespace World
 		virtual void OpenScriptEditor(const std::string& logicalPath) { (void)logicalPath; }
 		// 关闭一个动态面板(脚本编辑器工具栏 Close 按钮)。默认空实现。
 		virtual void CloseEditorPanel(const std::string& panelId) { (void)panelId; }
+		// ---- W5-L1:文档场景的外部改动提示(EditorShell 转发 EditorLayer;默认未接线)----
+		// 磁盘上的 .wd 内容变化 → 视口顶部提示条 + "重新打开"按钮;**不自动替换**文档。
+		virtual bool ExternalSceneChanged() const { return false; }
+		virtual void ReopenExternalScene() {}
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

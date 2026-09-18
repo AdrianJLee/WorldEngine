@@ -5,6 +5,7 @@
 #include "World/Events/ApplicationEvent.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/Renderer/EditorCamera3D.h"
+#include "World/Renderer/AssetHotReload.h"
 #include "World/Script/ScriptFileWatch.h"
 #include "Document/EditorDocument.h"
 #include "World/WUI/WuiCommand.h"
@@ -116,6 +117,11 @@ namespace World
 		// 从 scripts/templates/WorldScript.lua 复制出 scripts/script_<n>.lua(冲突递增、永不覆盖)。
 		bool ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message = nullptr);
 
+		// ---- P2 W5-L1:资产热重载(材质/贴图自动重载;文档场景只提示 + 一键重开)----
+		// 文档场景(.wd)在磁盘上被外部改动 → 视口提示条;重开会走未保存确认(不静默丢弃修改)。
+		bool ExternalSceneChanged() const { return m_ExternalSceneChanged; }
+		void ReopenExternalScene();
+
 		bool OnKeyPressed(KeyPressedEvent& e);
 		bool OnWindowClose(WindowCloseEvent& e);
 
@@ -138,6 +144,12 @@ namespace World
 		// P2 W5b:每帧在帧边界轮询脚本文件监听(编辑态=文档场景,Play/Simulate=正在跑的场景),
 		// 安全点不满足时把变化顺延到下一帧,不丢。
 		void PollScriptHotReload(float deltaSeconds);
+		// W5-L1:帧边界轮询资产外部改动(材质/贴图自动;文档场景置 externalSceneChanged)。
+		void PollAssetHotReload(float deltaSeconds);
+		// 用当前文档路径重建场景监听基线(打开/保存/重开成功后调用;换路径时也清提示)。
+		void RebaselineExternalSceneWatch();
+		// 当前文档场景的逻辑路径(相对内容根;不在内容根内/无路径 → 空)。
+		std::string CurrentDocumentLogicalPath() const;
 		void DoNewScene();
 		void DoOpenScene(const std::filesystem::path& path);
 		bool TrySave();
@@ -244,6 +256,11 @@ namespace World
 		std::vector<std::string> m_PendingScriptReloads;
 		// 监听目标场景:换场景(进入/退出 Play、开关文档)时必须重建基线,不能跨场景复用。
 		Scene* m_ScriptWatchScene = nullptr;
+		// W5-L1:文档场景(.wd)外部改动监听(150ms)与提示状态。
+		AssetFileWatch m_SceneWatch;
+		// 当前监听的文档场景逻辑路径(空 = 未监听);镜像它以便换文档时重设基线。
+		std::string m_WatchedSceneLogicalPath;
+		bool m_ExternalSceneChanged = false;
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;
 		std::string m_RendererChangeName;

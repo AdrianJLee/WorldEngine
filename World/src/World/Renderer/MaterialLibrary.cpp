@@ -2,20 +2,60 @@
 
 #include "World/Renderer/MaterialLibrary.h"
 
+#include "World/Core/Log.h"
+#include "World/Renderer/MaterialTextureCache.h"
+
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <unordered_set>
 
 namespace World
 {
 	namespace
 	{
+		// 磁盘位置:先内容根(Game/assets,与 MaterialIO::ReadFileText 一致),再 Game/ 布局。
+		// 修复前这里只拼 WLD_GAME_DIR / path,普通材质("xxx.wmat" 相对内容根)恒取不到时间戳,
+		// IsFileNewer() 因此永远返回 false。
+		std::filesystem::path ResolveMaterialDiskPath(const std::string& path)
+		{
+			std::error_code ec;
+			std::filesystem::path candidate = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
+			if (std::filesystem::exists(candidate, ec))
+				return candidate;
+			candidate = std::filesystem::path(std::string(WLD_GAME_DIR)) / path;
+			if (std::filesystem::exists(candidate, ec))
+				return candidate;
+			return {};
+		}
+
 		std::filesystem::file_time_type FileWriteTime(const std::string& path)
 		{
 			std::error_code ec;
-			const std::filesystem::path target = std::filesystem::path(std::string(WLD_GAME_DIR)) / path;
+			const std::filesystem::path target = ResolveMaterialDiskPath(path);
+			if (target.empty())
+				return std::filesystem::file_time_type::min();
 			const auto time = std::filesystem::last_write_time(target, ec);
 			return ec ? std::filesystem::file_time_type::min() : time;
+		}
+
+		bool AssetHotReloadEnabled()
+		{
+			const char* value = std::getenv("WLD_ASSET_HOTRELOAD");
+			return !(value && *value && std::string(value) == "0");
+		}
+
+		bool AssetHotReloadTraceEnabled()
+		{
+			const char* value = std::getenv("WLD_ASSET_HOTRELOAD_TRACE");
+			return value && *value && std::string(value) != "0";
+		}
+
+		void PrintHotReloadTrace(const char* format, const std::string& path)
+		{
+			if (AssetHotReloadTraceEnabled())
+				WLD_CORE_INFO("[asset-hot-reload] {0} {1}", format, path);
 		}
 	}
 
@@ -192,6 +232,120 @@ namespace World
 		if (time == std::filesystem::file_time_type::min())
 			return false;
 		return time > material.m_FileTime;
+	}
+
+	void MaterialLibrary::PollAssetChanges(double deltaSeconds, AssetHotReloadReport& report)
+	{
+		if (!AssetHotReloadEnabled())
+		{
+			// 整体关闭:不建立也不推进监听(重新开启时重新建立基线)。
+			m_MaterialWatch.Clear();
+			m_TextureWatch.Clear();
+			return;
+		}
+
+		// ---- 监听集合同步:材质 = 当前缓存;贴图 = 缓存材质引用的 Albedo/Normal ----
+		std::vector<std::string> wantedMaterials;
+		wantedMaterials.reserve(m_Cache.size());
+		std::vector<std::string> wantedTextures;
+		const auto addTexture = [&wantedTextures](const std::string& path)
+		{
+			if (path.empty())
+				return;
+			const std::string normalized = MaterialLibrary::NormalizePath(path);
+			if (normalized.empty())
+				return;
+			if (std::find(wantedTextures.begin(), wantedTextures.end(), normalized) == wantedTextures.end())
+				wantedTextures.push_back(normalized);
+		};
+		for (const auto& [key, material] : m_Cache)
+		{
+			wantedMaterials.push_back(key);
+			if (!material)
+				continue;
+			addTexture(material->GetDesc().AlbedoTexture);
+			addTexture(material->GetDesc().NormalTexture);
+		}
+		std::sort(wantedMaterials.begin(), wantedMaterials.end());
+		std::sort(wantedTextures.begin(), wantedTextures.end());
+
+		const std::vector<std::string> watchedMaterials = m_MaterialWatch.WatchedPaths();
+		for (const std::string& path : wantedMaterials)
+			if (std::find(watchedMaterials.begin(), watchedMaterials.end(), path) == watchedMaterials.end())
+				m_MaterialWatch.Watch(path);
+		for (const std::string& path : watchedMaterials)
+			if (std::find(wantedMaterials.begin(), wantedMaterials.end(), path) == wantedMaterials.end())
+				m_MaterialWatch.Unwatch(path);
+
+		const std::vector<std::string> watchedTextures = m_TextureWatch.WatchedPaths();
+		for (const std::string& path : wantedTextures)
+			if (std::find(watchedTextures.begin(), watchedTextures.end(), path) == watchedTextures.end())
+				m_TextureWatch.Watch(path);
+		for (const std::string& path : watchedTextures)
+			if (std::find(wantedTextures.begin(), wantedTextures.end(), path) == wantedTextures.end())
+				m_TextureWatch.Unwatch(path);
+		if (AssetHotReloadTraceEnabled())
+			WLD_CORE_INFO("[asset-hot-reload] watching {0} material(s), {1} texture(s)",
+				wantedMaterials.size(), wantedTextures.size());
+
+		// ---- 材质:.wmat 内容变化(已过 debounce)→ clean 原地重载 / dirty 只报告 ----
+		for (const std::string& path : m_MaterialWatch.Poll(deltaSeconds))
+		{
+			const auto entry = m_Cache.find(path);
+			if (entry == m_Cache.end() || !entry->second)
+				continue;   // 已不在缓存(轮询与缓存同步之间消失)
+			if (entry->second->IsDirty())
+			{
+				// 有未保存修改:只报告,绝不覆盖(面板的脏标记由编辑器维护)。
+				report.SkippedDirtyMaterials.push_back(path);
+				PrintHotReloadTrace("skip dirty material", path);
+				continue;
+			}
+			std::string error;
+			if (Reload(path, &error))
+			{
+				report.ReloadedMaterials.push_back(path);
+				PrintHotReloadTrace("reloaded material", path);
+			}
+			else
+			{
+				// 读取/解析失败:保留旧内存态(Reload 失败不改实例)。
+				report.FailedMaterials.push_back(AssetReloadFailure { path, error });
+				PrintHotReloadTrace("failed material", path);
+			}
+		}
+
+		// ---- 贴图:内容变化 → 清 s:/l: 缓存 + 引用方 Revision 前进(旧句柄延迟释放) ----
+		const std::vector<std::string> changedTextures = m_TextureWatch.Poll(deltaSeconds);
+		if (!changedTextures.empty())
+		{
+			std::unordered_set<std::string> changed(changedTextures.begin(), changedTextures.end());
+			for (const std::string& path : changedTextures)
+			{
+				const std::string normalized = MaterialLibrary::NormalizePath(path);
+				// 清 s:/l: 两份;旧句柄由缓存内部按 Renderer::QueueRelease 延迟释放
+				// (GL 立即、Vulkan 三帧/fence 后;无设备时安全 no-op)。
+				MaterialTextureCache::Get().Invalidate(normalized);
+			}
+
+			for (const auto& [key, material] : m_Cache)
+			{
+				if (!material)
+					continue;
+				const MaterialDesc& desc = material->GetDesc();
+				const bool albedoChanged = !desc.AlbedoTexture.empty()
+					&& changed.count(MaterialLibrary::NormalizePath(desc.AlbedoTexture)) != 0;
+				const bool normalChanged = !desc.NormalTexture.empty()
+					&& changed.count(MaterialLibrary::NormalizePath(desc.NormalTexture)) != 0;
+				if (albedoChanged || normalChanged)
+					material->InvalidateTextures();
+			}
+			for (const std::string& normalized : changedTextures)
+			{
+				report.InvalidatedTextures.push_back(normalized);
+				PrintHotReloadTrace("invalidated texture", normalized);
+			}
+		}
 	}
 
 	std::string MaterialLibrary::GetLoadWarning(const std::string& path) const

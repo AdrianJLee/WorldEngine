@@ -7,6 +7,8 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/TextureData.h"
 
+#include <vector>
+
 namespace World
 {
 	MaterialTextureCache& MaterialTextureCache::Get()
@@ -24,6 +26,31 @@ namespace World
 	{
 		m_Entries.clear();
 		m_Device = nullptr;
+	}
+
+	void MaterialTextureCache::Invalidate(const std::string& path)
+	{
+		// 空路径 = 共享白纹理,没有磁盘来源,拒绝失效(避免误清兜底资源)。
+		const std::string normalized = path.empty() ? std::string() : MaterialLibrary::NormalizePath(path);
+		if (normalized.empty())
+			return;
+
+		std::vector<Rhi::Handle<Rhi::Texture>> oldHandles;
+		for (const bool srgb : { true, false })
+		{
+			const std::string key = (srgb ? "s:" : "l:") + normalized;
+			const auto cached = m_Entries.find(key);
+			if (cached == m_Entries.end())
+				continue;
+			oldHandles.push_back(cached->second.Texture);
+			m_Entries.erase(cached);
+		}
+		if (oldHandles.empty())
+			return;   // 无设备/未命中:安全 no-op(下次 Get() 走首次加载路径)
+
+		// 旧句柄按 SceneRenderer 同款捕获式延迟释放:GL 立即执行,Vulkan 三帧/fence 后执行;
+		// 无设备时 Renderer::QueueRelease 直接执行,Handle 析构本身安全。
+		Renderer::QueueRelease([oldHandles]() {});
 	}
 
 	Rhi::Handle<Rhi::Texture> MaterialTextureCache::CreateWhite()
