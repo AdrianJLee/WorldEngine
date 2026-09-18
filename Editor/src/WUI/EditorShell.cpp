@@ -13,6 +13,7 @@
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "Panels/MaterialEditorPanel.h"
+#include "Panels/ModelPreviewPanel.h"
 
 #include <algorithm>
 #include <cstring>
@@ -68,6 +69,8 @@ namespace World
 
 		// 动态材质面板 id 前缀:每个材质一个面板/独立窗口(用户 2026-09-16 要求)。
 		constexpr const char* kMaterialPanelPrefix = "material:";
+		// P1b D5:模型预览面板(每个 .wmodel 一个,打开=只读预览,不改场景)。
+		constexpr const char* kModelPanelPrefix = "model:";
 		// W9-2:动态脚本编辑器面板 id 前缀:每个脚本一个 "script:<逻辑路径>" 面板。
 		constexpr const char* kScriptPanelPrefix = "script:";
 	}
@@ -133,6 +136,7 @@ namespace World
 			{
 				EnsureMaterialPanelFromId(panel);
 				EnsureScriptPanelFromId(panel);
+				EnsureModelPanelFromId(panel);
 			}
 			AddFloatWindow(panels.front(), rect, "restore");
 			if (FloatWindowHost* host = m_FloatHosts.empty() ? nullptr : m_FloatHosts.back().get())
@@ -155,6 +159,8 @@ namespace World
 		// 动态材质面板:每个材质一个独立窗口(不在静态声明表里)。
 		if (panel.compare(0, std::strlen(kMaterialPanelPrefix), kMaterialPanelPrefix) == 0)
 			return PanelForm::Independent;
+		if (panel.compare(0, std::strlen(kModelPanelPrefix), kModelPanelPrefix) == 0)
+			return PanelForm::Independent;
 		// W9-2:动态脚本编辑器面板同上(打开后默认附加到主窗口,仍属"独立窗口"形态:
 		// 可拖出为 OS 窗口 / 再挂靠回主窗口)。
 		if (panel.compare(0, std::strlen(kScriptPanelPrefix), kScriptPanelPrefix) == 0)
@@ -168,6 +174,8 @@ namespace World
 	bool EditorShell::IsDeclaredPanel(const std::string& panel) const
 	{
 		if (panel.compare(0, std::strlen(kMaterialPanelPrefix), kMaterialPanelPrefix) == 0)
+			return true;
+		if (panel.compare(0, std::strlen(kModelPanelPrefix), kModelPanelPrefix) == 0)
 			return true;
 		if (panel.compare(0, std::strlen(kScriptPanelPrefix), kScriptPanelPrefix) == 0)
 			return true;
@@ -1640,6 +1648,12 @@ namespace World
 			if (!m_Layout.FindFloatMemory(panel, nullptr))
 				m_Layout.FloatMemory.push_back({ panel, Wui::WuiRect { 200.0f, 170.0f, 760.0f, 470.0f } });
 		}
+		if (panel.rfind(kModelPanelPrefix, 0) == 0)
+		{
+			EnsureModelPanelFromId(panel);
+			if (!m_Layout.FindFloatMemory(panel, nullptr))
+				m_Layout.FloatMemory.push_back({ panel, Wui::WuiRect { 220.0f, 160.0f, 620.0f, 660.0f } });
+		}
 		// W9-2:动态脚本面板 —— 未打开 → 走 OpenScriptEditor(默认附加到主窗口);
 		// 已打开(附加标签或可见独立窗口)→ 走菜单同一条开关路径关闭。
 		if (panel.rfind(kScriptPanelPrefix, 0) == 0)
@@ -1874,6 +1888,45 @@ namespace World
 			m_Panels.push_back(panelId);
 	}
 
+	// ---- P1b D5:模型预览面板(动态实例,id = "model:<逻辑路径>")----
+
+	void EditorShell::OpenModelPreview(const std::string& logicalPath)
+	{
+		// 每个模型一个面板 + 独立窗口:重复双击只是前置焦点(与材质编辑器同款;
+		// 用户反馈"多次打开会多次叠加"—— 现在打开预览不改场景,放进场景在预览里显式点)。
+		std::string path = logicalPath;
+		std::replace(path.begin(), path.end(), '\\', '/');
+		if (path.empty())
+			return;
+		const std::string panelId = std::string(kModelPanelPrefix) + path;
+		if (m_PanelRegistry.find(panelId) == m_PanelRegistry.end())
+		{
+			auto panel = std::make_unique<ModelPreviewPanel>(path);
+			m_PanelRegistry.emplace(panelId, std::move(panel));
+			m_Panels.push_back(panelId);
+			m_Layout.FloatMemory.push_back({ panelId, Wui::WuiRect { 220.0f, 160.0f, 620.0f, 660.0f } });
+		}
+		if (!m_Layout.IsFloating(panelId))
+			OpenIndependentPanel(panelId);
+		else
+			FocusIndependentWindow(panelId);
+	}
+
+	void EditorShell::EnsureModelPanelFromId(const std::string& panelId)
+	{
+		if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
+			return;
+		if (panelId.compare(0, std::strlen(kModelPanelPrefix), kModelPanelPrefix) != 0)
+			return;
+		const std::string path = panelId.substr(std::strlen(kModelPanelPrefix));
+		if (path.empty())
+			return;
+		auto panel = std::make_unique<ModelPreviewPanel>(path);
+		m_PanelRegistry.emplace(panelId, std::move(panel));
+		if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
+			m_Panels.push_back(panelId);
+	}
+
 	// ---- W9-2:脚本编辑器面板(动态实例,id = "script:<逻辑路径>")----
 
 	void EditorShell::EnsureScriptPanelFromId(const std::string& panelId)
@@ -1963,9 +2016,10 @@ namespace World
 		return m_Editor.InstantiateModelFile(logicalPath, message);
 	}
 
-	bool EditorShell::ImportModelFile(const std::string& sourcePath, std::string* message)
+	bool EditorShell::ImportModelFile(const std::string& sourcePath, std::string* message,
+		std::string* outLogicalModel)
 	{
-		return m_Editor.ImportModelFile(sourcePath, message);
+		return m_Editor.ImportModelFile(sourcePath, message, outLogicalModel);
 	}
 
 	EditorPanel* EditorShell::FocusedPanel()

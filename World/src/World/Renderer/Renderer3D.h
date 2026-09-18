@@ -161,6 +161,9 @@ namespace World
 		// UBO 与描述符集(争用会让画面逐帧来回闪 —— 用户实测"预览一直闪烁")。
 		static uint32_t SubmitAtSlot(uint32_t slotBase, const Ref<Mesh>& mesh, const Ref<Material>& material,
 			const glm::mat4& transform, int32_t entityId = -1);
+		// 同上,但只画一个 submesh(模型预览这类"逐 submesh + 固定槽位"的调用方用)。
+		static uint32_t SubmitSubmeshAtSlot(uint32_t slotBase, const Ref<Mesh>& mesh, uint32_t submeshIndex,
+			const Ref<Material>& material, const glm::mat4& transform, int32_t entityId = -1);
 		// 预览/调试调用方按身份取一个稳定槽位(内部做环绕与保留区处理)。
 		static uint32_t ReserveSlotBase(uint32_t identity, uint32_t span = 1);
 

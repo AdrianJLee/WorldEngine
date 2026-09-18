@@ -97,6 +97,8 @@ namespace World
 		void OpenMaterialEditor(const std::string& path) override;
 		// 动态材质面板(每个材质一个 "material:<path>" 面板):从布局存档恢复时按 id 建实例。
 		void EnsureMaterialPanelFromId(const std::string& panelId);
+		// P1b D5:动态模型预览面板("model:<逻辑路径>")从布局存档恢复时按 id 建实例。
+		void EnsureModelPanelFromId(const std::string& panelId);
 		// W9-2:打开脚本编辑器(每个脚本一个 "script:<逻辑路径>" 面板,创建后默认附加到主窗口)。
 		void OpenScriptEditor(const std::string& logicalPath) override;
 		// 帧边界执行版:内部使用(AI 通道在帧首、OnRender 开头处理待办时)。
@@ -110,8 +112,11 @@ namespace World
 		void ReopenExternalScene() override;
 		// P1b D5:内容浏览器双击 .wmodel → 实例化进当前文档场景。
 		bool InstantiateModelFile(const std::string& logicalPath, std::string* message = nullptr) override;
-		// P1b D5:内容浏览器双击 .gltf/.glb → 导入 + 实例化。
-		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr) override;
+		// P1b D5:内容浏览器双击 .gltf/.glb → 导入(不实例化);回传 .wmodel 逻辑路径供打开预览。
+		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr,
+			std::string* outLogicalModel = nullptr) override;
+		// P1b D5:打开模型预览(每个 .wmodel 一个独立窗口;**只读预览,不改场景**)。
+		void OpenModelPreview(const std::string& logicalPath) override;
 		// W9-2 三层快捷键路由第 2 层:当前焦点面板。
 		//   ① 主窗口处于"已附加面板"模式(顶栏标签)→ 该面板;
 		//   ② 否则某个独立窗口在前台 → 该窗口的当前标签;

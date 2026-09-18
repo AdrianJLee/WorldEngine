@@ -1708,7 +1708,8 @@ namespace World
 		return true;
 	}
 
-	bool EditorLayer::ImportModelFile(const std::string& sourcePath, std::string* message)
+	bool EditorLayer::ImportModelFile(const std::string& sourcePath, std::string* message,
+		std::string* outLogicalModel)
 	{
 		if (sourcePath.empty())
 		{
@@ -1738,29 +1739,13 @@ namespace World
 				logicalModel = relative.generic_string();
 		}
 
+		if (outLogicalModel)
+			*outLogicalModel = logicalModel;
 		std::string text = "已导入 " + logicalModel + " (mesh " + std::to_string(imported.MeshCount)
 			+ " / submesh " + std::to_string(imported.SubmeshCount)
 			+ " / 节点 " + std::to_string(imported.NodeCount)
-			+ " / 材质 " + std::to_string(imported.MaterialPaths.size()) + ")";
-		if (m_SceneState == SceneState::Edit && m_ActiveScene)
-		{
-			std::string instantiateError;
-			const std::size_t created = Gameplay::InstantiateModel(logicalModel, *m_ActiveScene, entt::null,
-				&instantiateError);
-			if (created > 0)
-			{
-				m_Document.MarkDirty();
-				text += ";已实例化 " + std::to_string(created) + " 个实体(文档已标脏)";
-			}
-			else
-			{
-				text += ";实例化失败: " + (instantiateError.empty() ? std::string("模型没有节点") : instantiateError);
-			}
-		}
-		else
-		{
-			text += ";Play/Simulate 下只导入,不实例化";
-		}
+			+ " / 材质 " + std::to_string(imported.MaterialPaths.size())
+			+ ");已打开模型预览(要放进场景在预览里点'放进当前场景')";
 		if (message) *message = text;
 		WLD_CORE_INFO("[model] {0}", text);
 		return true;
@@ -1773,7 +1758,9 @@ namespace World
 		if (path.empty())
 			return;
 		std::string message;
-		ImportModelFile(path, &message);
+		std::string logicalModel;
+		if (ImportModelFile(path, &message, &logicalModel) && !logicalModel.empty())
+			m_Shell.OpenModelPreview(logicalModel);   // 与内容浏览器双击同一条:导入 → 打开预览
 	}
 
 	void EditorLayer::PollAssetHotReload(float deltaSeconds)

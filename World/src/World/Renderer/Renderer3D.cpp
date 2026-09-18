@@ -585,6 +585,9 @@ namespace World
 		state.MaterialLayout = nullptr;
 		state.MaterialSampler = nullptr;
 		state.CommandBuffer = nullptr;
+		// 预览类调用方会把自己的 set0 登记进来(SetGlobalDescriptorSet):
+		// 这里必须一并清掉,否则设备销毁后该句柄悬空,退出期会崩(实测 0xC0000005)。
+		state.GlobalSet = nullptr;
 		state.ObjectIndex = 0;
 		state.Stats = {};
 		state.LastLoggedDirectional = UINT32_MAX;
@@ -690,6 +693,19 @@ namespace World
 		state.ObjectIndex = slotBase;
 		const uint32_t result = Submit(mesh, material, transform, entityId);
 		state.ObjectIndex = slotBase + 1;   // 同一调用方若还要再画一个,落在下一个槽位
+		return result;
+	}
+
+	uint32_t Renderer3D::SubmitSubmeshAtSlot(uint32_t slotBase, const Ref<Mesh>& mesh, uint32_t submeshIndex,
+		const Ref<Material>& material, const glm::mat4& transform, int32_t entityId)
+	{
+		// 与 SubmitAtSlot 同款:固定序号提交,避免预览与主场景争用对象槽位。
+		State& state = GetState();
+		if (!state.CommandBuffer || !state.Pipeline || slotBase >= kObjectsPerFrame)
+			return UINT32_MAX;
+		state.ObjectIndex = slotBase;
+		const uint32_t result = SubmitSubmesh(mesh, submeshIndex, material, transform, entityId);
+		state.ObjectIndex = slotBase + 1;
 		return result;
 	}
 

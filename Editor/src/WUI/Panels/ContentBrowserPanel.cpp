@@ -327,23 +327,22 @@ namespace World
 		}
 		else if (path.extension() == ".wmodel")
 		{
-			// P1b D5:模型双击 → 把节点树实例化进当前(编辑态)场景;逻辑路径相对内容根。
+			// P1b D5:模型双击 → **打开只读预览**(不改场景);要放进场景在预览里点按钮。
+			// 用户反馈"多次打开会多次叠加":打开动作不应有场景副作用。
 			const std::filesystem::path contentRoot = m_Model.Root;
 			std::error_code ec;
 			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
 			const std::string logical = ec ? path.generic_string() : relative.generic_string();
-			std::string message;
-			if (!m_Host.InstantiateModelFile(logical, &message))
-				WLD_CORE_WARN("[model] instantiate '{0}' failed: {1}", logical, message);
-			else
-				WLD_CORE_INFO("[model] {0}", message);
+			m_Host.OpenModelPreview(logical);
+			WLD_CORE_INFO("[model] preview opened: {0}", logical);
 		}
 		else if (path.extension() == ".gltf" || path.extension() == ".glb")
 		{
-			// P1b D5:glTF 双击 → 导入(.wmodel/.wmat/贴图)并实例化进当前编辑态场景。
+			// P1b D5:glTF 双击 → 导入(.wmodel/.wmat/贴图)并**打开模型预览**(不实例化)。
 			// 导入后立刻刷新列表,新产出的 .wmodel/.wmat 马上可见。
 			std::string message;
-			if (!m_Host.ImportModelFile(path.string(), &message))
+			std::string logicalModel;
+			if (!m_Host.ImportModelFile(path.string(), &message, &logicalModel))
 				WLD_CORE_WARN("[model] import '{0}' failed: {1}", path.string(), message);
 			else
 			{
@@ -351,6 +350,8 @@ namespace World
 				InvalidateContents();
 				if (m_Model.Search[0])
 					UpdateSearch();
+				if (!logicalModel.empty())
+					m_Host.OpenModelPreview(logicalModel);
 			}
 		}
 		else

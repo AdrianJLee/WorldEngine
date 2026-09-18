@@ -125,9 +125,10 @@ namespace World
 		// ---- P1b D5:模型资产(.wmodel)实例化 ----
 		// 内容浏览器双击调用:把 .wmodel 的节点树实例化进当前文档场景(仅编辑态)。
 		bool InstantiateModelFile(const std::string& logicalPath, std::string* message = nullptr);
-		// P1b D5:导入 glTF 并实例化(内容浏览器双击 .gltf / File 菜单 / AI 命令共用同一条路径)。
-		// 导入与编辑状态无关(Play 下只导入);实例化仅编辑态。失败给可读 message。
-		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr);
+		// P1b D5:导入 glTF(内容浏览器双击 .gltf / File 菜单 / AI 命令共用同一条路径)。
+		// **只导入,不改场景**;outLogicalModel 回传写出的 .wmodel 逻辑路径(供打开预览)。
+		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr,
+			std::string* outLogicalModel = nullptr);
 		// File ▸ Import glTF...:原生文件对话框选文件后走 ImportModelFile。
 		void ImportModelDialog();
 

@@ -1,0 +1,80 @@
+#pragma once
+
+#include "EditorPanel.h"
+#include "World/Renderer/Material.h"
+#include "World/Renderer/Mesh.h"
+#include "World/RHI/Rhi.h"
+
+#include <glm/glm.hpp>
+
+#include <string>
+#include <vector>
+
+namespace World
+{
+	// P1b D5:模型预览面板 —— 每个 `.wmodel` 一个独立窗口(id = "model:<逻辑路径>")。
+	//
+	// 用户反馈"双击 .wmodel 每次都往场景里叠一份"之后的口径(draft → 2026-09-18):
+	//   - **双击 `.wmodel` 只打开本预览,不改场景**;要放进场景请在预览里点"放进当前场景";
+	//   - 预览用轨道相机(拖拽旋转 / 滚轮缩放),按 .wmodel 的节点树逐 submesh + 材质槽绘制;
+	//   - 统计行给出节点/mesh/submesh/顶点/索引/包围盒,便于排查导入结果。
+	class ModelPreviewPanel final : public EditorPanel
+	{
+	public:
+		explicit ModelPreviewPanel(std::string logicalPath);
+		~ModelPreviewPanel() override;
+
+		const char* Id() const override { return m_PanelId.c_str(); }
+		const char* Title() const override { return m_PanelTitle.c_str(); }
+		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
+
+		const std::string& LogicalPath() const { return m_LogicalPath; }
+		// 重新从磁盘读模型(导入覆盖后手动刷新用)。
+		void Reload();
+
+	private:
+		void EnsureGpuResources();
+		void ReleaseGpuResources();
+		// 渲染预览到离屏目标;返回可交给 WuiImage 的纹理 id(0 = 不可用)。
+		uint64_t RenderPreview();
+		// 无障碍诊断:WLD_PREVIEW_TEX_CAPTURE=<目录> 把预览纹理连续写成 PPM(后端无关 RHI 读回)。
+		void CapturePreviewTextureSequence();
+		// 节点树 × 各 mesh 局部包围盒 → 世界空间包围盒(相机取景用)。
+		MeshBounds ComputeWorldBounds() const;
+
+		std::string m_PanelId = "model:";
+		std::string m_PanelTitle = "Model";
+		std::string m_LogicalPath;
+		std::string m_Status;
+		bool m_StatusIsError = false;
+		Ref<Mesh> m_Mesh;
+		// 按 .wmodel 材质槽下标缓存材质(加载失败保持 null → 走常量色)。
+		std::vector<Ref<Material>> m_SlotMaterials;
+
+		// ---- 预览状态 ----
+		uint32_t m_PreviewSize = 384;
+		uint64_t m_PreviewTextureId = 0;
+		uint32_t m_UiTextureGeneration = 0;
+		int m_PreviewCaptureFrame = 0;
+		int m_PreviewCaptureWritten = 0;
+		void* m_GpuDevice = nullptr;
+		bool m_Orbiting = false;
+		float m_OrbitYaw = 0.6f;
+		float m_OrbitPitch = 0.25f;
+		float m_CameraDistance = 4.0f;
+		float m_MinDistance = 0.5f;
+		float m_MaxDistance = 200.0f;
+		glm::vec3 m_Focus { 0.0f };
+		glm::vec2 m_LastMouse { 0.0f };
+
+		// ---- GPU 资源(预览专用,惰性创建) ----
+		Rhi::Handle<Rhi::RenderPass> m_PreviewPass;
+		Rhi::Handle<Rhi::Framebuffer> m_PreviewFramebuffer;
+		Rhi::Handle<Rhi::Texture> m_PreviewColor;
+		Rhi::Handle<Rhi::Texture> m_PreviewEntityId;
+		Rhi::Handle<Rhi::Texture> m_PreviewDepth;
+		Rhi::Handle<Rhi::CommandBuffer> m_PreviewCommandBuffer;
+		Rhi::Handle<Rhi::Buffer> m_PreviewCameraBuffer;
+		Rhi::Handle<Rhi::DescriptorSet> m_PreviewCameraSet;
+	};
+}
