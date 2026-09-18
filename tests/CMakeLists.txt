@@ -672,6 +672,27 @@ set_tests_properties(World.Frustum PROPERTIES
     TIMEOUT 60
 )
 
+# P1b D8a2:项目渲染设置(清单 rendering 区块 / 运行期生效值 / 环境变量覆盖)。
+add_executable(WorldRenderSettingsTests RenderSettingsTests.cpp)
+target_link_libraries(WorldRenderSettingsTests PRIVATE World)
+target_compile_features(WorldRenderSettingsTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldRenderSettingsTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldRenderSettingsTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldRenderSettingsTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.RenderSettings COMMAND WorldRenderSettingsTests)
+set_tests_properties(World.RenderSettings PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P1b D2:网格资产模型(布局/包围盒/索引校验/默认物体)。
 add_executable(WorldMeshTests MeshTests.cpp)
 target_link_libraries(WorldMeshTests PRIVATE World)

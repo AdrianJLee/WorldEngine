@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Renderer/RenderSettings.h"
 
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/MaterialTextureCache.h"
@@ -7,6 +8,7 @@
 #include "World/Renderer/ShaderUtils.h"
 
 #include <cstring>
+#include <filesystem>
 #include <unordered_map>
 
 namespace World
@@ -111,6 +113,8 @@ namespace World
 			Renderer3D::Statistics Stats;
 			// D8a:场景级统计由 SceneRenderer 每帧覆盖报告(不随预览的 BeginScene 复位)。
 			Renderer3D::SceneStatistics SceneStats;
+			// D8a2:阴影贴图边长(Init 时从项目清单取;清单校验保证是 2 的幂)。
+			uint32_t ShadowMapSize = Renderer3D::DefaultShadowMapSize;
 		};
 
 		State& GetState()
@@ -332,6 +336,11 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 		State& state = GetState();
+		// D8a2:阴影贴图边长来自项目清单(rendering.shadow_map_size);资源在这里按它创建,
+		// 因此该字段**启动时生效**。清单校验已保证 2 的幂且 ∈[256,4096]。
+		// 先按工作目录装载一次(宿主没提前 Apply 时也能拿到用户设置)。
+		RenderSettings::LoadFromProject(std::filesystem::current_path());
+		state.ShadowMapSize = RenderSettings::Get().ShadowMapSize;
 
 		// set 1, binding 1:每对象 UBO(u_Model / u_BaseColor),顶点与像素阶段都要用。
 		// binding 不能是 0:OpenGL 后端的 UBO 绑定单元 = binding(忽略 set 索引),
@@ -460,7 +469,7 @@ namespace World
 		Rhi::TextureDesc shadowColorDesc;
 		shadowColorDesc.Type = Rhi::TextureType::Texture2D;
 		shadowColorDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
-		shadowColorDesc.Extent = { ShadowMapSize, ShadowMapSize, 1 };
+		shadowColorDesc.Extent = { state.ShadowMapSize, state.ShadowMapSize, 1 };
 		shadowColorDesc.Usage = Rhi::TextureUsageColorAttachment;
 		shadowColorDesc.DebugName = "Renderer3D.ShadowColor";
 		state.ShadowColorTexture = Renderer::GetDevice()->CreateTexture(shadowColorDesc);
@@ -474,7 +483,7 @@ namespace World
 		// (实测表现:Vulkan 下近处几何全部误判为阴影,GL 正常)。
 		// D32_SFLOAT 的视图只含 DEPTH aspect,且是 Vulkan 强制支持采样的深度格式。
 		shadowDepthDesc.Format = Rhi::Format::D32_SFLOAT;
-		shadowDepthDesc.Extent = { ShadowMapSize, ShadowMapSize, 1 };
+		shadowDepthDesc.Extent = { state.ShadowMapSize, state.ShadowMapSize, 1 };
 		// 既是深度附件(阴影通道写)又要被主通道采样:两个 usage 都必须声明,
 		// 否则 Vulkan 创建镜像时缺 SAMPLED_BIT,描述符写入即非法。
 		shadowDepthDesc.Usage = Rhi::TextureUsageDepthStencilAttachment | Rhi::TextureUsageSampled;
@@ -524,7 +533,7 @@ namespace World
 
 		Rhi::FramebufferDesc shadowFramebufferDesc;
 		shadowFramebufferDesc.RenderPass = state.ShadowPass;
-		shadowFramebufferDesc.Extent = { ShadowMapSize, ShadowMapSize };
+		shadowFramebufferDesc.Extent = { state.ShadowMapSize, state.ShadowMapSize };
 		shadowFramebufferDesc.Attachments = { state.ShadowColorTexture, state.ShadowMapTexture };
 		shadowFramebufferDesc.DebugName = "Renderer3D.ShadowFramebuffer";
 		state.ShadowFramebuffer = Renderer::GetDevice()->CreateFramebuffer(shadowFramebufferDesc);
@@ -756,10 +765,15 @@ namespace World
 			directional = &fallbackDirectional;
 		}
 
+		// D8a2:上限来自项目清单(引擎用户可配置),各字段在清单校验里已限幅到容量内;
+		// 这里再 clamp 一次,防止运行期用 RenderSettings::Set 传入越界值(编辑器面板即时预览)。
+		const Asset::RenderingSettings& settings = RenderSettings::Get();
+		const uint32_t maxDirectional = std::min(settings.MaxDirectionalLights, MaxDirectionalLightCapacity);
+		const uint32_t maxPoint = std::min(settings.MaxPointLights, MaxPointLightCapacity);
 		const uint32_t directionalCount = std::min<uint32_t>(
-			static_cast<uint32_t>(directional->size()), MaxDirectionalLights);
+			static_cast<uint32_t>(directional->size()), maxDirectional);
 		const uint32_t pointCount = std::min<uint32_t>(
-			static_cast<uint32_t>(pointLights.size()), MaxPointLights);
+			static_cast<uint32_t>(pointLights.size()), maxPoint);
 
 		uint32_t slot = 0;
 		for (uint32_t index = 0; index < directionalCount; ++index)
@@ -790,10 +804,12 @@ namespace World
 		// 截断数按**场景来源**计:默认主光是引擎注入的观感补偿,不算来源、也不算被丢弃。
 		const uint32_t sourceDirectional = static_cast<uint32_t>(directionalLights.size());
 		const uint32_t sourcePoint = static_cast<uint32_t>(pointLights.size());
-		rig.DroppedLights = (sourceDirectional - std::min(sourceDirectional, MaxDirectionalLights))
-			+ (sourcePoint - std::min(sourcePoint, MaxPointLights));
+		rig.DroppedLights = (sourceDirectional - std::min(sourceDirectional, maxDirectional))
+			+ (sourcePoint - std::min(sourcePoint, maxPoint));
 		rig.Uniforms.LightCounts.x = directionalCount;
 		rig.Uniforms.LightCounts.y = pointCount;
+		// D8a2:阴影贴图边长参与 PCF 纹素换算,必须与 Init 创建的资源一致(项目清单可改)。
+		rig.Uniforms.ShadowParams.z = static_cast<float>(GetShadowMapSize());
 		return rig;
 	}
 
@@ -807,7 +823,7 @@ namespace World
 	{
 		State& state = GetState();
 		state.Stats.Lights = rig.TotalLights;
-		state.Stats.MaxLights = MaxLights;
+		state.Stats.MaxLights = GetMaxDirectionalLights() + GetMaxPointLights();
 		state.Stats.DroppedLights = rig.DroppedLights;
 		state.Stats.ShadowPassMilliseconds = shadowPassMilliseconds;
 
@@ -880,9 +896,9 @@ namespace World
 		if (!commandBuffer)
 			return;
 		// 阴影贴图是固定尺寸的离屏目标,视口/裁剪按贴图边长设置(管线是动态视口状态)。
-		commandBuffer->SetViewport({ 0.0f, 0.0f, static_cast<float>(ShadowMapSize),
-			static_cast<float>(ShadowMapSize) });
-		commandBuffer->SetScissor({ 0, 0, ShadowMapSize, ShadowMapSize });
+		commandBuffer->SetViewport({ 0.0f, 0.0f, static_cast<float>(state.ShadowMapSize),
+			static_cast<float>(state.ShadowMapSize) });
+		commandBuffer->SetScissor({ 0, 0, state.ShadowMapSize, state.ShadowMapSize });
 	}
 
 	uint32_t Renderer3D::SubmitShadow(const Ref<Mesh>& mesh, const glm::mat4& transform)
@@ -981,5 +997,21 @@ namespace World
 	uint32_t Renderer3D::GetObjectsPerFrameLimit()
 	{
 		return kObjectsPerFrame;
+	}
+
+	uint32_t Renderer3D::GetShadowMapSize()
+	{
+		// Init 之前/未初始化时退回默认值(测试直接调 BuildLightRig 也走这条)。
+		return GetState().ShadowMapSize;
+	}
+
+	uint32_t Renderer3D::GetMaxDirectionalLights()
+	{
+		return std::min(RenderSettings::Get().MaxDirectionalLights, MaxDirectionalLightCapacity);
+	}
+
+	uint32_t Renderer3D::GetMaxPointLights()
+	{
+		return std::min(RenderSettings::Get().MaxPointLights, MaxPointLightCapacity);
 	}
 }

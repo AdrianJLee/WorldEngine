@@ -8,6 +8,7 @@
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/FrustumCull.h"
+#include "World/Renderer/RenderSettings.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/RHI/RhiTextureBridge.h"
@@ -391,8 +392,9 @@ namespace World
 		// ---- D8a:相机视锥剔除 ----
 		// 主通道只提交视锥内的 draw;剔除掉的物体**不进阴影通道的判断**(见下:阴影用
 		// 光源自己的正交视锥,否则"相机看不见但影子投进画面"的投影者会丢)。
-		// WLD_NO_CULL=1 关剔除:压力场景的 A/B 基线(剔除前后 draw 数与帧时间对照)。
-		const bool cullingEnabled = std::getenv("WLD_NO_CULL") == nullptr;
+		// D8a2:开关来自项目清单 `rendering.culling`(引擎用户可配置);
+		// WLD_NO_CULL=1 仍可强制关闭(压力场景 A/B 基线用)。
+		const bool cullingEnabled = RenderSettings::CullingEnabled();
 		std::vector<uint32_t> visibleDraws;
 		visibleDraws.reserve(draws.size());
 		double cullMilliseconds = 0.0;
@@ -445,6 +447,14 @@ namespace World
 			const bool glDepthConvention = Renderer::GetBackendName() != "vulkan";
 			lightRig = Renderer3D::BuildLightRig(directionalLights, pointLights,
 				hasAmbient ? &ambientLight : nullptr, glDepthConvention);
+		}
+
+		// D8a2:项目清单 `rendering.shadows=false` → 整条阴影通道关掉(投影者不提交、
+		// 主通道不采样)。WLD_NO_SHADOWS=1 同样强制关闭(自动化)。
+		if (!RenderSettings::ShadowsEnabled() && lightRig.ShadowCaster)
+		{
+			lightRig.ShadowCaster = false;
+			lightRig.Uniforms.ShadowParams.x = 0.0f;
 		}
 
 		// 阴影矩阵:主方向光的正交视图(沿传播方向的反方向退到世界包围球外),盒子覆盖

@@ -3,6 +3,7 @@
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Log.h"
 #include "World/Renderer/Renderer.h"
+#include "World/Renderer/RenderSettings.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
 #include "World/RHI/RhiTextureBridge.h"
@@ -50,6 +51,9 @@ namespace World
 				desc.StartLevel = manifest.StartScene;
 				scenePath = manifest.StartScene;
 				World::Renderer::SetRequestedRenderer(manifest.Renderer);
+				// D8a2:项目级渲染设置(rendering.*)对打包运行同样生效 —— 打包产物里没有
+				// 环境变量,用户只能通过清单配置,所以这条路径必须显式 Apply。
+				World::RenderSettings::Apply(manifest);
 			}
 			// 启动解析结果:定位到哪份清单/内容根/启动场景 —— 排查"跑了但没画面"的第一步。
 			WLD_CORE_INFO("[runtime] manifest '{0}' contentRoot '{1}' startScene '{2}'",

@@ -3,6 +3,7 @@
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiGizmo.h"
+#include "World/Core/Asset/ProjectManifest.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 
@@ -76,6 +77,15 @@ namespace World
 		{
 			(void)outLogicalPath;
 			if (message) *message = "scripts panel create is not wired to a host";
+			return false;
+		}
+		// ---- P1b D8a2:项目渲染设置(Project Settings 面板)----
+		// 把设置写回 project.we.yaml。默认未接线 = false + 可读 message。
+		// (面板即时预览走 World::RenderSettings::Set,不需要宿主。)
+		virtual bool SaveProjectRenderSettings(const Asset::RenderingSettings& settings, std::string* message = nullptr)
+		{
+			(void)settings;
+			if (message) *message = "settings panel is not wired to a host";
 			return false;
 		}
 		// ---- W9-2:内置脚本编辑器 ----

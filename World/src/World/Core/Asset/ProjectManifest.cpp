@@ -66,6 +66,33 @@ namespace World::Asset
 				if (error) *error = "renderer must be 'opengl' or 'vulkan': " + manifest.Renderer;
 				return false;
 			}
+			// rendering 区块(可缺省):数值范围与 2 的幂约束在这里统一拒绝,
+			// 避免"贴图尺寸 100"这类值到初始化期才炸在 GPU 资源创建里。
+			const RenderingSettings& rendering = manifest.Rendering;
+			const uint32_t shadowSize = rendering.ShadowMapSize;
+			if (shadowSize < 256 || shadowSize > 4096 || (shadowSize & (shadowSize - 1)) != 0)
+			{
+				if (error) *error = "rendering.shadow_map_size must be a power of two in [256, 4096]: "
+					+ std::to_string(shadowSize);
+				return false;
+			}
+			if (rendering.MaxDirectionalLights < 1 || rendering.MaxDirectionalLights > 2)
+			{
+				if (error) *error = "rendering.max_directional_lights must be in [1, 2]: "
+					+ std::to_string(rendering.MaxDirectionalLights);
+				return false;
+			}
+			if (rendering.MaxPointLights > 7)
+			{
+				if (error) *error = "rendering.max_point_lights must be in [0, 7]: "
+					+ std::to_string(rendering.MaxPointLights);
+				return false;
+			}
+			if (rendering.MaxDirectionalLights + rendering.MaxPointLights > 8)
+			{
+				if (error) *error = "rendering light limits exceed the 8-light UBO capacity";
+				return false;
+			}
 			for (std::string& package : manifest.Packages)
 				if (!ValidateRelativePath(package, &package, error))
 					return false;
@@ -97,6 +124,29 @@ namespace World::Asset
 			if (const YAML::Node packages = root["packages"])
 				for (const YAML::Node& item : packages)
 					manifest.Packages.push_back(item.as<std::string>(""));
+			if (const YAML::Node rendering = root["rendering"])
+			{
+				if (!rendering.IsMap())
+				{
+					if (error) *error = "manifest 'rendering' must be a map: " + path.string();
+					return false;
+				}
+				auto readBool = [&rendering](const char* key, bool fallback)
+				{
+					return rendering[key] ? rendering[key].as<bool>(fallback) : fallback;
+				};
+				auto readU32 = [&rendering](const char* key, uint32_t fallback)
+				{
+					return rendering[key] ? rendering[key].as<uint32_t>(fallback) : fallback;
+				};
+				manifest.Rendering.Culling = readBool("culling", manifest.Rendering.Culling);
+				manifest.Rendering.Shadows = readBool("shadows", manifest.Rendering.Shadows);
+				manifest.Rendering.ShadowMapSize = readU32("shadow_map_size", manifest.Rendering.ShadowMapSize);
+				manifest.Rendering.MaxDirectionalLights =
+					readU32("max_directional_lights", manifest.Rendering.MaxDirectionalLights);
+				manifest.Rendering.MaxPointLights =
+					readU32("max_point_lights", manifest.Rendering.MaxPointLights);
+			}
 			if (!ValidateManifest(manifest, error))
 				return false;
 			*out = std::move(manifest);
@@ -123,6 +173,13 @@ namespace World::Asset
 			out << YAML::Key << "content_root" << YAML::Value << copy.ContentRoot.generic_string();
 			out << YAML::Key << "start_scene" << YAML::Value << copy.StartScene;
 			out << YAML::Key << "renderer" << YAML::Value << copy.Renderer;
+			out << YAML::Key << "rendering" << YAML::Value << YAML::BeginMap;
+			out << YAML::Key << "culling" << YAML::Value << copy.Rendering.Culling;
+			out << YAML::Key << "shadows" << YAML::Value << copy.Rendering.Shadows;
+			out << YAML::Key << "shadow_map_size" << YAML::Value << copy.Rendering.ShadowMapSize;
+			out << YAML::Key << "max_directional_lights" << YAML::Value << copy.Rendering.MaxDirectionalLights;
+			out << YAML::Key << "max_point_lights" << YAML::Value << copy.Rendering.MaxPointLights;
+			out << YAML::EndMap;
 			out << YAML::Key << "packages" << YAML::Value << YAML::BeginSeq;
 			for (const std::string& package : copy.Packages)
 				out << package;

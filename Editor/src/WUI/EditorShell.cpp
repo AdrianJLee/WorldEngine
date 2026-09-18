@@ -14,6 +14,7 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "Panels/MaterialEditorPanel.h"
 #include "Panels/ModelPreviewPanel.h"
+#include "Panels/SettingsPanel.h"
 
 #include <algorithm>
 #include <cstring>
@@ -54,6 +55,7 @@ namespace World
 			{ "content_browser", EditorShell::PanelForm::Docked, {} },
 			{ "view",            EditorShell::PanelForm::Docked, {} },
 			{ "stats",           EditorShell::PanelForm::Docked, {} },
+			{ "settings",        EditorShell::PanelForm::Docked, {} },
 			{ "memory",          EditorShell::PanelForm::Docked, {} },
 			{ "operations",      EditorShell::PanelForm::Docked, {} },
 			{ "save",            EditorShell::PanelForm::Docked, {} },
@@ -104,6 +106,8 @@ namespace World
 		m_PanelRegistry.emplace("content_browser", std::make_unique<ContentBrowserPanel>(*this));
 		m_PanelRegistry.emplace("view", std::make_unique<ViewportPanel>(*this));
 		m_PanelRegistry.emplace("stats", std::make_unique<StatsPanel>());
+		// D8a2:项目渲染设置(引擎用户可配置;停靠面板,可拖成独立窗口)。
+		m_PanelRegistry.emplace("settings", std::make_unique<SettingsPanel>());
 		m_PanelRegistry.emplace("memory", std::make_unique<MemoryPanel>());
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("save", std::make_unique<SavePanel>());
@@ -2014,6 +2018,34 @@ namespace World
 	bool EditorShell::InstantiateModelFile(const std::string& logicalPath, std::string* message)
 	{
 		return m_Editor.InstantiateModelFile(logicalPath, message);
+	}
+
+	bool EditorShell::SaveProjectRenderSettings(const Asset::RenderingSettings& settings, std::string* message)
+	{
+		// 写盘口径与其它"回写清单"的地方一致:先 Load(保留 id/场景/包列表等字段),
+		// 只覆盖 rendering,再 Validate + Save。
+		std::filesystem::path manifestPath;
+		if (!Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+		{
+			if (message) *message = "找不到 project.we.yaml(工作目录下没有清单)";
+			return false;
+		}
+		Asset::ProjectManifest manifest;
+		std::string error;
+		if (!Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+		{
+			if (message) *message = "清单读取失败: " + error;
+			return false;
+		}
+		manifest.Rendering = settings;
+		if (!Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+		{
+			if (message) *message = "清单写入失败: " + error;
+			return false;
+		}
+		if (message)
+			*message = "已保存渲染设置到 " + manifestPath.filename().string();
+		return true;
 	}
 
 	bool EditorShell::ImportModelFile(const std::string& sourcePath, std::string* message,

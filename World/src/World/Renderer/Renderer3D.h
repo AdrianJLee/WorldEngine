@@ -90,11 +90,18 @@ namespace World
 		static void Init();
 		static void Shutdown();
 
-		// ---- D4:光照上限与阴影贴图规格 ----
-		static constexpr uint32_t MaxDirectionalLights = 1;   // 主方向光(阴影只做它)
-		static constexpr uint32_t MaxPointLights = 7;
-		static constexpr uint32_t MaxLights = MaxDirectionalLights + MaxPointLights;
-		static constexpr uint32_t ShadowMapSize = 2048;
+		// ---- D4/D8a2:光照上限与阴影贴图规格 ----
+		// 这里只声明**容量**(UBO 数组大小与资源硬上限);实际生效的上限由项目清单的
+		// `rendering.max_directional_lights` / `max_point_lights` / `shadow_map_size`
+		// 决定(引擎用户可改,见 RenderSettings),一定 ≤ 容量。
+		static constexpr uint32_t MaxDirectionalLightCapacity = 2;
+		static constexpr uint32_t MaxPointLightCapacity = 7;
+		static constexpr uint32_t MaxLights = 8;                 // UBO 容量(static_assert 的一部分)
+		static constexpr uint32_t DefaultShadowMapSize = 2048;
+		// 生效值(启动时从项目清单装载;Stats 面板/脚本可读)。
+		static uint32_t GetShadowMapSize();
+		static uint32_t GetMaxDirectionalLights();
+		static uint32_t GetMaxPointLights();
 
 		// 灯光打包(纯函数,无 GPU/Scene 依赖):方向光取前 1、点光取前 7、合计 ≤ 8,
 		// 超出的进 DroppedLights;方向做归一化(零向量回退 -Y);ambient == nullptr 时

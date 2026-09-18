@@ -10,6 +10,7 @@
 #include "World/Core/Vfs/PackageProvider.h"
 #include "World/Gameplay/ModelInstance.h"
 #include "World/Modules/GameModuleHost.h"
+#include "World/Renderer/RenderSettings.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/ScriptEngine.h"
@@ -123,7 +124,12 @@ namespace World
 				World::Asset::ProjectManifest manifest;
 				std::string manifestError;
 				if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError) && !manifest.Id.empty())
+				{
 					projectId = manifest.Id;
+					// D8a2:项目级渲染设置(rendering.*)随清单一起生效;渲染器 Init 也会
+					// 自己装载一次,这里补上"运行中重新加载项目清单"的路径。
+					World::RenderSettings::Apply(manifest);
+				}
 			}
 			m_SaveService = std::make_unique<Gameplay::SaveService>(projectId,
 				[this] { return m_ActiveScene.get(); });

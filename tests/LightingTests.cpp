@@ -188,8 +188,8 @@ namespace
 		// 默认值:阴影参数是"关闭 + 2048² + PCF 半径 1",预览/无阴影场景直接可用。
 		const LightUniforms defaults;
 		CHECK(defaults.ShadowParams.x == 0.0f);
-		CHECK(defaults.ShadowParams.z == static_cast<float>(Renderer3D::ShadowMapSize));
-		CHECK(Renderer3D::ShadowMapSize == 2048u);
+		CHECK(defaults.ShadowParams.z == static_cast<float>(Renderer3D::DefaultShadowMapSize));
+		CHECK(Renderer3D::DefaultShadowMapSize == 2048u);
 		CHECK(Renderer3D::MaxLights == 8u);
 	}
 
