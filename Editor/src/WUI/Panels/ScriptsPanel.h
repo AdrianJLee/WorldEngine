@@ -15,7 +15,8 @@ namespace World
 	//      LastError / ReloadDiagnostic + 每行 Reload 按钮(经 PanelHost,最终复用
 	//      EditorLayer::ReloadLuaScriptComponent 这条唯一重载入口);
 	//   ② 磁盘脚本:扫 WLD_ASSETPATH/scripts(0.5s 节流,排除 intermediate/),按逻辑路径
-	//      排序,每行 Open 按钮(系统默认程序打开)+ 顶部 New(从 templates/WorldScript.lua
+	//      排序,每行主按钮"在引擎内打开"(W9-2:EditorShell::OpenScriptEditor,默认附加到
+	//      主窗口)+ 次按钮 External(系统默认程序打开)+ 顶部 New(从 templates/WorldScript.lua
 	//      复制成 scripts/script_<n>.lua,磁盘冲突递增、不覆盖)。
 	//
 	// 动作控件绘制时登记无障碍节点(scripts.*),AI 通道的 ui.tree / ui.invoke 能驱动它们;

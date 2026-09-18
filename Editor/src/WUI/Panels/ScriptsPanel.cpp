@@ -268,14 +268,24 @@ namespace World
 			Wui::Label(ctx, { rowRect.X + 8.0f, rowRect.Y + 3.0f },
 				TruncateUtf8(script.LogicalPath, 76), selected ? theme.Accent : theme.Text, 12.0f);
 
+			// W9-2:主按钮 = 在引擎内打开(脚本编辑器面板,默认附加到主窗口);
+			// 次按钮 = External(系统默认程序,原 Open 语义)。
+			const Wui::WuiRect externalRect {
+				rowRect.X + rowRect.W - 70.0f, rowRect.Y + 1.0f, 66.0f, 20.0f };
 			const Wui::WuiRect openRect {
-				rowRect.X + rowRect.W - 56.0f, rowRect.Y + 1.0f, 52.0f, 20.0f };
+				externalRect.X - 102.0f, rowRect.Y + 1.0f, 96.0f, 20.0f };
 			if (Wui::Button(ctx, Wui::HashId(("scripts.open." + std::to_string(index)).c_str()),
-				openRect, "Open", theme))
+				openRect, "在引擎内打开", theme))
+			{
+				host.OpenScriptEditor(script.LogicalPath);
+				SetStatus("open in editor: " + script.LogicalPath, false);
+			}
+			if (Wui::Button(ctx, Wui::HashId(("scripts.external." + std::to_string(index)).c_str()),
+				externalRect, "External", theme))
 			{
 				std::string message;
 				const bool ok = host.ScriptsOpenExternal(script.LogicalPath, &message);
-				SetStatus("open: " + (message.empty() ? (ok ? std::string("ok") : std::string("failed")) : message), !ok);
+				SetStatus("external: " + (message.empty() ? (ok ? std::string("ok") : std::string("failed")) : message), !ok);
 			}
 			y += kDiskRowHeight;
 		}

@@ -68,6 +68,8 @@ namespace World
 
 		// 动态材质面板 id 前缀:每个材质一个面板/独立窗口(用户 2026-09-16 要求)。
 		constexpr const char* kMaterialPanelPrefix = "material:";
+		// W9-2:动态脚本编辑器面板 id 前缀:每个脚本一个 "script:<逻辑路径>" 面板。
+		constexpr const char* kScriptPanelPrefix = "script:";
 	}
 
 	EditorShell::EditorShell(EditorLayer& editor)
@@ -128,7 +130,10 @@ namespace World
 				static_cast<float>(std::get<2>(key)), static_cast<float>(std::get<3>(key)) };
 			// 动态材质面板按上面白名单被判定为"已声明独立面板",这里补建实例(路径编码在 id 里)。
 			for (const std::string& panel : panels)
+			{
 				EnsureMaterialPanelFromId(panel);
+				EnsureScriptPanelFromId(panel);
+			}
 			AddFloatWindow(panels.front(), rect, "restore");
 			if (FloatWindowHost* host = m_FloatHosts.empty() ? nullptr : m_FloatHosts.back().get())
 			{
@@ -150,6 +155,10 @@ namespace World
 		// 动态材质面板:每个材质一个独立窗口(不在静态声明表里)。
 		if (panel.compare(0, std::strlen(kMaterialPanelPrefix), kMaterialPanelPrefix) == 0)
 			return PanelForm::Independent;
+		// W9-2:动态脚本编辑器面板同上(打开后默认附加到主窗口,仍属"独立窗口"形态:
+		// 可拖出为 OS 窗口 / 再挂靠回主窗口)。
+		if (panel.compare(0, std::strlen(kScriptPanelPrefix), kScriptPanelPrefix) == 0)
+			return PanelForm::Independent;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
 				return spec.Form;
@@ -159,6 +168,8 @@ namespace World
 	bool EditorShell::IsDeclaredPanel(const std::string& panel) const
 	{
 		if (panel.compare(0, std::strlen(kMaterialPanelPrefix), kMaterialPanelPrefix) == 0)
+			return true;
+		if (panel.compare(0, std::strlen(kScriptPanelPrefix), kScriptPanelPrefix) == 0)
 			return true;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
@@ -638,8 +649,16 @@ namespace World
 		m_ViewportRect = {};
 		ctx.ClearDropTarget();
 		m_DropPreviewActive = false;
-		const bool undoKey = ctx.Input().Ctrl && !ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z);
-		const bool redoKey = ctx.Input().Ctrl && (ctx.IsKeyPressed(KeyCodes::Y) || (ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z)));
+		// W9-2:Ctrl+Z/Y 与脚本编辑器的 buffer 撤销/重做冲突 —— 文本焦点活跃(上一帧快照)
+		// 或焦点面板是脚本编辑器时,场景撤销/重做让位(WuiCodeEditor 自己消费这组键)。
+		EditorPanel* const focusPanelAtFrameStart = FocusedPanel();
+		const bool scriptEditorFocused = focusPanelAtFrameStart
+			&& std::strncmp(focusPanelAtFrameStart->Id(), kScriptPanelPrefix, std::strlen(kScriptPanelPrefix)) == 0;
+		const bool sceneUndoAllowed = !m_TextFocusLatched && !scriptEditorFocused;
+		const bool undoKey = sceneUndoAllowed && ctx.Input().Ctrl && !ctx.Input().Shift
+			&& ctx.IsKeyPressed(KeyCodes::Z);
+		const bool redoKey = sceneUndoAllowed && ctx.Input().Ctrl
+			&& (ctx.IsKeyPressed(KeyCodes::Y) || (ctx.Input().Shift && ctx.IsKeyPressed(KeyCodes::Z)));
 		if (undoKey)
 		{
 			if (ctx.History().Undo())
@@ -888,6 +907,10 @@ namespace World
 				RecordDockChange(ctx, "close", panel, before);
 		}
 		m_PendingPanelCloses.clear();
+
+		// W9-2:本帧(含所有独立窗口)结束时的文本焦点快照。UI 帧开始时各窗口的登记
+		// 已被 BeginFrame 清空,所以帧内 Ctrl+Z/Y 判定必须用"上一帧结束"的这份状态。
+		m_TextFocusLatched = Wui::WuiTextFocus::Get().Active();
 	}
 
 	void EditorShell::RenderNode(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -1606,6 +1629,22 @@ namespace World
 			if (!m_Layout.FindFloatMemory(panel, nullptr))
 				m_Layout.FloatMemory.push_back({ panel, Wui::WuiRect { 200.0f, 170.0f, 760.0f, 470.0f } });
 		}
+		// W9-2:动态脚本面板 —— 未打开 → 走 OpenScriptEditor(默认附加到主窗口);
+		// 已打开(附加标签或可见独立窗口)→ 走菜单同一条开关路径关闭。
+		if (panel.rfind(kScriptPanelPrefix, 0) == 0)
+		{
+			EnsureScriptPanelFromId(panel);
+			if (!m_Ctx)
+				return false;
+			const auto attached = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
+			FloatWindowHost* host = FindFloatHost(panel);
+			const bool visibleWindow = host && !host->IsHidden();
+			if (attached != m_AttachedPanels.end() || visibleWindow)
+				TogglePanel(*m_Ctx, panel);
+			else
+				OpenScriptEditor(panel.substr(std::strlen(kScriptPanelPrefix)));
+			return true;
+		}
 		if (!m_Ctx)
 			return false;
 		TogglePanel(*m_Ctx, panel);
@@ -1822,6 +1861,92 @@ namespace World
 		m_PanelRegistry.emplace(panelId, std::move(panel));
 		if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
 			m_Panels.push_back(panelId);
+	}
+
+	// ---- W9-2:脚本编辑器面板(动态实例,id = "script:<逻辑路径>")----
+
+	void EditorShell::EnsureScriptPanelFromId(const std::string& panelId)
+	{
+		if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
+			return;
+		if (panelId.compare(0, std::strlen(kScriptPanelPrefix), kScriptPanelPrefix) != 0)
+			return;
+		const std::string path = panelId.substr(std::strlen(kScriptPanelPrefix));
+		if (path.empty())
+			return;
+		auto panel = std::make_unique<ScriptEditorPanel>(path);
+		m_PanelRegistry.emplace(panelId, std::move(panel));
+		if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
+			m_Panels.push_back(panelId);
+		// 默认窗口尺寸:代码编辑器需要足够宽高(自动 gutter + 状态行 + 工具栏都在默认客户区内)。
+		if (m_LastFloatRects.find(panelId) == m_LastFloatRects.end())
+			m_LastFloatRects[panelId] = Wui::WuiRect { 220.0f, 150.0f, 900.0f, 620.0f };
+		if (!m_Layout.FindFloatMemory(panelId, nullptr))
+			m_Layout.FloatMemory.push_back({ panelId, m_LastFloatRects[panelId] });
+	}
+
+	void EditorShell::OpenScriptEditor(const std::string& logicalPath)
+	{
+		// 用户决定(2026-09-18 C):打开即**默认直接附加到主窗口** —— OS 窗口保持隐藏,
+		// 主窗口顶栏出现切换标签(点击在主界面/脚本内容之间切换);用户仍可把它拖出成独立窗口。
+		std::string normalized = logicalPath;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		if (normalized.empty())
+			return;
+		const std::string panelId = std::string(kScriptPanelPrefix) + normalized;
+		EnsureScriptPanelFromId(panelId);
+		if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panelId) != m_AttachedPanels.end())
+		{
+			m_ActiveWindowTag = panelId; // 已打开:重复打开只是激活该标签
+			return;
+		}
+		// 尚未附加:先按独立窗口建出(必要时复用已隐藏的窗口),随后立即挂靠到主窗口。
+		if (!FindFloatHost(panelId))
+			OpenIndependentPanel(panelId);
+		AttachIndependentWindowToSlot(panelId);
+	}
+
+	void EditorShell::CloseEditorPanel(const std::string& panel)
+	{
+		if (!m_Ctx || panel.empty())
+			return;
+		// 与 Window 菜单/顶栏标签关闭同一条路径:已附加 → 摘标签并隐藏窗口;
+		// 已浮动 → 隐藏复用;未打开 → 不做事(按钮只在面板可见时存在)。
+		const auto attached = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
+		FloatWindowHost* host = FindFloatHost(panel);
+		const bool visibleWindow = host && !host->IsHidden();
+		if (attached == m_AttachedPanels.end() && !visibleWindow)
+			return;
+		TogglePanel(*m_Ctx, panel);
+	}
+
+	EditorPanel* EditorShell::FocusedPanel()
+	{
+		// ① 主窗口处于"已附加面板"模式(顶栏标签):该面板就是焦点面板。
+		if (!m_ActiveWindowTag.empty())
+		{
+			const auto found = m_PanelRegistry.find(m_ActiveWindowTag);
+			if (found != m_PanelRegistry.end())
+				return found->second.get();
+		}
+		// ② 独立窗口在前台:该窗口当前标签的面板。
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+		{
+			if (host->IsHidden() || !host->IsFocused())
+				continue;
+			const auto found = m_PanelRegistry.find(host->ActivePanel());
+			if (found != m_PanelRegistry.end())
+				return found->second.get();
+		}
+		// ③ 文本焦点所属面板(脚本编辑器 / 搜索框 / 重命名框等)。
+		const std::string& textPanel = Wui::WuiTextFocus::Get().Panel();
+		if (!textPanel.empty())
+		{
+			const auto found = m_PanelRegistry.find(textPanel);
+			if (found != m_PanelRegistry.end())
+				return found->second.get();
+		}
+		return nullptr;
 	}
 
 	void EditorShell::DockBackIndependentWindow(const std::string& panel)

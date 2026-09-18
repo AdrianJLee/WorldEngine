@@ -1244,8 +1244,32 @@ namespace World
 
 		bool control = Input::IsKeyPressed(KeyCodes::LeftControl) || Input::IsKeyPressed(KeyCodes::RightControl);
 		bool shift = Input::IsKeyPressed(KeyCodes::LeftShift) || Input::IsKeyPressed(KeyCodes::RightShift);
+		bool alt = Input::IsKeyPressed(KeyCodes::LeftAlt) || Input::IsKeyPressed(KeyCodes::RightAlt);
 
-
+		// ---- W9-2:三层快捷键路由(plan B)----
+		// GLFW 事件在 UI 帧之后分发,这里读到的 WuiTextFocus 就是"上一帧登记的文本焦点"
+		// (各窗口 BeginFrame 清空、渲染期间重新登记)。
+		//   ① 文本编辑层(最高):文本控件持有焦点时不触发任何引擎全局命令;
+		//      只有 Ctrl 组合键可以下探到第 2 层(脚本编辑器 Ctrl+S/Ctrl+R 等)。
+		//   ② 焦点窗口/面板层:EditorShell::FocusedPanel() 的 OnShortcut。
+		//   ③ 引擎全局层:未被上面两层消费的按键仍走现有命令表。
+		if (Wui::WuiTextFocus::Get().Active())
+		{
+			if (control)
+			{
+				if (EditorPanel* panel = m_Shell.FocusedPanel())
+				{
+					if (panel->OnShortcut(e.GetKeyCode(), control, shift, alt))
+						return true;
+				}
+			}
+			return false; // 文本焦点下全局命令一律不触发
+		}
+		if (EditorPanel* panel = m_Shell.FocusedPanel())
+		{
+			if (panel->OnShortcut(e.GetKeyCode(), control, shift, alt))
+				return true;
+		}
 		return m_Commands.HandleKey(e.GetKeyCode(), control, shift);
 	}
 

@@ -6,6 +6,7 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 
+#include <cstdint>
 #include <string>
 
 namespace World
@@ -77,6 +78,12 @@ namespace World
 			if (message) *message = "scripts panel create is not wired to a host";
 			return false;
 		}
+		// ---- W9-2:内置脚本编辑器 ----
+		// 打开脚本编辑器(逻辑路径;每个脚本一个 "script:<逻辑路径>" 面板)。默认空实现。
+		// 实现必须是"创建后默认附加到主窗口"(用户 2026-09-18 决定)。
+		virtual void OpenScriptEditor(const std::string& logicalPath) { (void)logicalPath; }
+		// 关闭一个动态面板(脚本编辑器工具栏 Close 按钮)。默认空实现。
+		virtual void CloseEditorPanel(const std::string& panelId) { (void)panelId; }
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。
@@ -87,5 +94,15 @@ namespace World
 		virtual const char* Id() const = 0;
 		virtual const char* Title() const = 0;
 		virtual void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) = 0;
+		// W9-2:面板级快捷键(三层路由的第 2 层)。默认不消费,由宿主(EditorShell)按焦点
+		// 面板分派;返回 true = 已消费,不再下探到引擎全局命令表。
+		virtual bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
+		{
+			(void)keyCode;
+			(void)ctrl;
+			(void)shift;
+			(void)alt;
+			return false;
+		}
 	};
 }

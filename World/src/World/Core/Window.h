@@ -69,6 +69,13 @@ namespace World
 		virtual void MaximizeOrRestore() = 0;
 		virtual bool IsMaximized() const = 0;
 
+		// ---- W9-2:系统剪贴板与窗口焦点(最小封装)----
+		// 供脚本编辑器把 Ctrl+C/X/V 接到系统剪贴板、把快捷键路由接到"窗口是否在前台"。
+		// 无窗口/平台不支持时返回空串 / false(宿主不需要额外判空)。
+		virtual std::string GetClipboardText() const { return std::string(); }
+		virtual void SetClipboardText(const std::string& text) { (void)text; }
+		virtual bool IsFocused() const { return false; }
+
 		// Creates a window
 		static Window* Create(const WindowProps& props = WindowProps());
 		// 创建共享主窗口图形资源(GL 共享上下文 / Vulkan 同设备)的附加窗口。

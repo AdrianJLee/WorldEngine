@@ -402,6 +402,31 @@ namespace World
 		return m_Window && glfwGetWindowAttrib(m_Window, GLFW_MAXIMIZED);
 	}
 
+	// ---- W9-2:系统剪贴板与窗口焦点 ----
+	// GLFW 3.4 自带跨平台的剪贴板实现(Windows 后端走 CF_UNICODETEXT)。
+	// 无窗口(构造失败/已销毁)时返回空串,不抛异常:调用方(脚本编辑器)按"无可粘贴内容"处理。
+	std::string WindowsWindow::GetClipboardText() const
+	{
+		if (!m_Window)
+			return std::string();
+		const char* text = glfwGetClipboardString(m_Window);
+		return text ? std::string(text) : std::string();
+	}
+
+	void WindowsWindow::SetClipboardText(const std::string& text)
+	{
+		if (!m_Window)
+			return;
+		glfwSetClipboardString(m_Window, text.c_str());
+	}
+
+	bool WindowsWindow::IsFocused() const
+	{
+		if (!m_Window)
+			return false;
+		return glfwGetWindowAttrib(m_Window, GLFW_FOCUSED) != 0;
+	}
+
 	LRESULT CALLBACK WindowsWindow::StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	{
 		WindowsWindow* self = reinterpret_cast<WindowsWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));

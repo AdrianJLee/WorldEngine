@@ -251,6 +251,12 @@ namespace World
 	void FloatWindowHost::SetHidden(bool hidden)
 	{
 		m_Hidden = hidden;
+		// W9-2:隐藏窗口不再渲染,它的文本焦点登记不会被 BeginFrame 清掉(WuiTextFocus 只按
+		// "正在渲染的上下文"重建)。不摘掉的话,在独立窗口里聚焦过脚本编辑器再关掉窗口,
+		// EditorLayer::OnKeyPressed 会认为"文本焦点一直活跃" → 引擎全局快捷键(Ctrl+S/Q/W/E/R、
+		// F5-F7…)全部被吞掉。隐藏 = 该窗口的键盘上下文不再成立,这里显式清掉。
+		if (hidden)
+			Wui::WuiTextFocus::Get().BeginContextFrame(&m_Context);
 		if (!m_Window)
 			return;
 		m_PressSeenInWindow = false;
@@ -271,6 +277,13 @@ namespace World
 	{
 		if (m_Window)
 			m_Window->Focus();
+	}
+
+	bool FloatWindowHost::IsFocused() const
+	{
+		if (!m_Window || m_Hidden)
+			return false;
+		return m_Window->IsFocused();
 	}
 
 	// ---- 窗口内的面板集合(标签栏模型) ----

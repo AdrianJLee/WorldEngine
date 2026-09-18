@@ -42,6 +42,11 @@ namespace World
 		void MaximizeOrRestore() override;
 		bool IsMaximized() const override;
 
+		// W9-2:系统剪贴板(glfwGet/SetClipboardString)与窗口焦点(glfwGetWindowAttrib(GLFW_FOCUSED))。
+		std::string GetClipboardText() const override;
+		void SetClipboardText(const std::string& text) override;
+		bool IsFocused() const override;
+
 	private:
 		virtual void Init(const WindowProps& props);
 		virtual void Shutdown();

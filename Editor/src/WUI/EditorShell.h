@@ -8,6 +8,7 @@
 #include "Panels/SavePanel.h"
 #include "Panels/LevelPanel.h"
 #include "Panels/MaterialEditorPanel.h"
+#include "Panels/ScriptEditorPanel.h"
 #include "Panels/ScriptsPanel.h"
 #include "Panels/ViewportPanel.h"
 #include "Panels/WidgetGalleryPanel.h"
@@ -96,6 +97,19 @@ namespace World
 		void OpenMaterialEditor(const std::string& path) override;
 		// 动态材质面板(每个材质一个 "material:<path>" 面板):从布局存档恢复时按 id 建实例。
 		void EnsureMaterialPanelFromId(const std::string& panelId);
+		// W9-2:打开脚本编辑器(每个脚本一个 "script:<逻辑路径>" 面板,创建后默认附加到主窗口)。
+		void OpenScriptEditor(const std::string& logicalPath) override;
+		// 动态脚本面板:从布局存档/AI ui.open 的 "script:<逻辑路径>" id 建实例。
+		void EnsureScriptPanelFromId(const std::string& panelId);
+		// 关闭动态面板(脚本编辑器工具栏 Close):与 Window 菜单同一条 TogglePanel 路径。
+		void CloseEditorPanel(const std::string& panelId) override;
+		// W9-2 三层快捷键路由第 2 层:当前焦点面板。
+		//   ① 主窗口处于"已附加面板"模式(顶栏标签)→ 该面板;
+		//   ② 否则某个独立窗口在前台 → 该窗口的当前标签;
+		//   ③ 否则 WUI 文本焦点所属面板(脚本编辑器/搜索框等);都没有 → nullptr。
+		EditorPanel* FocusedPanel();
+		// 上一帧(完整 UI 帧)结束时的文本焦点快照:UI 帧内判定 Ctrl+Z/Y 是否要让位给文本控件。
+		bool TextFocusLatched() const { return m_TextFocusLatched; }
 		// ---- 面板形态(单一事实源)----
 		// 每个面板要么是普通停靠面板,要么是"独立窗口"(自带 OS 窗口 + 标签栏)。
 		// 形态只在声明表里写一次,其余判定一律读 FormOf(),不再按面板名特判。
@@ -216,6 +230,8 @@ namespace World
 		// 已附加到主窗口的独立窗口(标签切换关系):"" = 主界面。
 		std::vector<std::string> m_AttachedPanels;
 		std::string m_ActiveWindowTag;
+		// W9-2:上一帧结束时的"WUI 有文本焦点"快照(见 TextFocusLatched)。
+		bool m_TextFocusLatched = false;
 		// 附加标签的拖动状态:按下 / 正在拖 / 按下位置。
 		std::string m_AttachTagPress;
 		std::string m_AttachTagDrag;

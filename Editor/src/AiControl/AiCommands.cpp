@@ -813,6 +813,22 @@ namespace World
 			result = out.str();
 			return true;
 		}
+		// ---- W9-2:内置脚本编辑器 ----
+		// 打开脚本编辑器(逻辑路径;每个脚本一个 "script:<逻辑路径>" 面板)。
+		// 与用户入口(内容浏览器双击 .lua/.luau、Scripts 面板"在引擎内打开")同一条
+		// EditorShell::OpenScriptEditor 路径 —— 默认直接附加到主窗口。
+		if (cmd == "script.open_editor")
+		{
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "script.open_editor needs path";
+				return false;
+			}
+			m_Shell.OpenScriptEditor(path);
+			result = "opened script editor for " + path;
+			return true;
+		}
 		// ---- 资产 / 材质 ----
 		if (cmd == "asset.open_material")
 		{

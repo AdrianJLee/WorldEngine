@@ -316,6 +316,15 @@ namespace World
 			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
 			m_Host.OpenMaterialEditor(ec ? path.generic_string() : relative.generic_string());
 		}
+		else if (path.extension() == ".lua" || path.extension() == ".luau")
+		{
+			// W9-2:脚本双击 → 内置脚本编辑器(与双击材质同一条路:逻辑路径相对 Game/assets,
+			// 默认附加到主窗口;解析失败时面板自身显示只读 + 错误文本)。
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			m_Host.OpenScriptEditor(ec ? path.generic_string() : relative.generic_string());
+		}
 		else
 		{
 			const std::string cmd = "start \"\" \"" + std::filesystem::absolute(path).string() + "\"";

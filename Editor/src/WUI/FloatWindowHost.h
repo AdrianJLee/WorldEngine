@@ -72,6 +72,8 @@ namespace World
 		void SetHidden(bool hidden);
 		// 渲染后端切换:重建 OS 窗口与呈现目标(GL 上下文/ Vulkan 表面与窗口绑定)。
 		void RecreateWindow();
+		// W9-2:本独立窗口是否在前台(GLFW GLFW_FOCUSED);隐藏/无窗口时 false。
+		bool IsFocused() const;
 
 		// 渲染该独立窗口;返回 false 表示 OS 窗口已关闭(其全部面板应隐藏)。
 		bool Render();
