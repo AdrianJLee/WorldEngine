@@ -19,6 +19,8 @@
 #include <array>
 #include <chrono>
 #include <cfloat>
+#include <map>
+#include <tuple>
 
 namespace World
 {
@@ -602,14 +604,50 @@ namespace World
 			// 阴影管线不用 set2(材质),调用方只绑 0/1。
 			m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
 			Renderer3D::BeginShadowPass(m_CommandBuffers[slot]);
+			// D8b-2:投影者按 (mesh, submesh) 分桶,桶内 ≥4 个实例才合批(阴影不看材质)。
+			std::map<std::pair<const Mesh*, uint32_t>, std::vector<uint32_t>> shadowBuckets;
+			if (RenderSettings::Get().Instancing)
+			{
+				for (const uint32_t drawIndex : shadowDraws)
+				{
+					const MeshDraw& draw = draws[drawIndex];
+					shadowBuckets[{ draw.MeshAsset.get(), draw.SubmeshIndex }].push_back(drawIndex);
+				}
+			}
 			for (const uint32_t drawIndex : shadowDraws)
 			{
 				const MeshDraw& draw = draws[drawIndex];
+				const auto found = shadowBuckets.find({ draw.MeshAsset.get(), draw.SubmeshIndex });
+				if (found != shadowBuckets.end() && found->second.size() >= 4)
+					continue;   // 交给下面的实例化提交
 				// D5:逐 submesh 提交(每条独立对象槽位),多材质模型的投影才完整。
 				if (draw.SubmeshIndex == UINT32_MAX)
 					Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
 				else
 					Renderer3D::SubmitShadowSubmesh(draw.MeshAsset, draw.SubmeshIndex, *draw.Model);
+			}
+			std::vector<glm::mat4> shadowTransforms;
+			for (auto& [key, indices] : shadowBuckets)
+			{
+				if (indices.size() < 4)
+					continue;
+				shadowTransforms.clear();
+				shadowTransforms.reserve(indices.size());
+				for (const uint32_t drawIndex : indices)
+					shadowTransforms.push_back(*draws[drawIndex].Model);
+				const Ref<Mesh>& shadowMesh = draws[indices.front()].MeshAsset;
+				if (Renderer3D::SubmitShadowInstanced(shadowMesh, key.second, shadowTransforms.data(),
+					static_cast<uint32_t>(indices.size())) != 0)
+					continue;
+				// 回退:逐物体补交这一桶(与上面同一条路径)。
+				for (const uint32_t drawIndex : indices)
+				{
+					const MeshDraw& draw = draws[drawIndex];
+					if (draw.SubmeshIndex == UINT32_MAX)
+						Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
+					else
+						Renderer3D::SubmitShadowSubmesh(draw.MeshAsset, draw.SubmeshIndex, *draw.Model);
+				}
 			}
 			Renderer3D::EndShadowPass();
 			m_CommandBuffers[slot]->EndRenderPass();
@@ -661,15 +699,100 @@ namespace World
 			{
 
 				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
+				// D8b-2:不透明 draw 按"同网格 + 同 submesh + 同材质 + 同色"分桶,
+				// 桶内 ≥4 个实例才用实例化合批(一次 DrawIndexed 画完整桶);不够 4 个的
+				// 继续逐物体提交(状态切换更少)。透明物体一律走原路径(排序语义优先)。
+				struct BatchKey
+				{
+					const Mesh* MeshPtr = nullptr;
+					uint32_t Submesh = 0;
+					const Material* MaterialPtr = nullptr;
+					glm::vec4 Color { 1.0f };
+					bool operator<(const BatchKey& other) const
+					{
+						return std::tie(MeshPtr, Submesh, MaterialPtr, Color.x, Color.y, Color.z, Color.w)
+							< std::tie(other.MeshPtr, other.Submesh, other.MaterialPtr,
+								other.Color.x, other.Color.y, other.Color.z, other.Color.w);
+					}
+				};
+				constexpr size_t kMinBatchInstances = 4;
+				std::map<BatchKey, std::vector<uint32_t>> buckets;
+				if (RenderSettings::Get().Instancing)
+				{
+					for (const uint32_t drawIndex : visibleDraws)
+					{
+						const MeshDraw& draw = draws[drawIndex];
+						if (draw.Transparent)
+							continue;
+						buckets[{ draw.MeshAsset.get(), draw.SubmeshIndex, draw.MaterialAsset.get(),
+							draw.Color }].push_back(drawIndex);
+					}
+				}
+				const auto batchEligible = [&buckets, kMinBatchInstances](const MeshDraw& draw)
+				{
+					const auto found = buckets.find({ draw.MeshAsset.get(), draw.SubmeshIndex,
+						draw.MaterialAsset.get(), draw.Color });
+					return found != buckets.end() && found->second.size() >= kMinBatchInstances;
+				};
 				// 稳定分组:不透明按原顺序,透明随后(同组内保持遍历顺序)。
 				for (const bool transparentPass : { false, true })
 				{
 					for (const uint32_t drawIndex : visibleDraws)
 					{
 						const MeshDraw& draw = draws[drawIndex];
+						// D8b-2:属于合批桶的不透明 draw 交给下面的实例化提交(避免重复画)。
+						if (!draw.Transparent && batchEligible(draw))
+							continue;
 						if (draw.Transparent != transparentPass)
 							continue;
 						// D7-1c:把实体 id 一起提交,写进 entity-id 附件供视口点选读回。
+						const int32_t entityId = static_cast<int32_t>(static_cast<uint32_t>(draw.Entity));
+						if (draw.SubmeshIndex == UINT32_MAX)
+						{
+							if (draw.MaterialAsset)
+								Renderer3D::Submit(draw.MeshAsset, draw.MaterialAsset, *draw.Model, entityId);
+							else
+								Renderer3D::Submit(draw.MeshAsset, *draw.Model, draw.Color, entityId);
+						}
+						else if (draw.MaterialAsset)
+							Renderer3D::SubmitSubmesh(draw.MeshAsset, draw.SubmeshIndex, draw.MaterialAsset,
+								*draw.Model, entityId);
+						else
+							Renderer3D::SubmitSubmesh(draw.MeshAsset, draw.SubmeshIndex, draw.Color,
+								*draw.Model, entityId);
+					}
+				}
+				// ② 合批桶整桶提交;失败(实例缓冲/对象槽位满)整桶回退逐物体,绝不丢物体。
+				std::vector<glm::mat4> batchTransforms;
+				std::vector<glm::vec4> batchColors;
+				std::vector<int32_t> batchEntityIds;
+				for (auto& [key, indices] : buckets)
+				{
+					if (indices.size() < kMinBatchInstances)
+						continue;
+					batchTransforms.clear();
+					batchColors.clear();
+					batchEntityIds.clear();
+					batchTransforms.reserve(indices.size());
+					batchColors.reserve(indices.size());
+					batchEntityIds.reserve(indices.size());
+					for (const uint32_t drawIndex : indices)
+					{
+						const MeshDraw& draw = draws[drawIndex];
+						batchTransforms.push_back(*draw.Model);
+						batchColors.push_back(draw.Color);
+						batchEntityIds.push_back(static_cast<int32_t>(static_cast<uint32_t>(draw.Entity)));
+					}
+					const Ref<Mesh>& batchMesh = draws[indices.front()].MeshAsset;
+					const Ref<Material>& batchMaterial = draws[indices.front()].MaterialAsset;
+					const uint32_t submitted = Renderer3D::SubmitInstanced(batchMesh, key.Submesh, batchMaterial,
+						batchTransforms.data(), batchColors.data(), batchEntityIds.data(),
+						static_cast<uint32_t>(indices.size()));
+					if (submitted != 0)
+						continue;
+					for (const uint32_t drawIndex : indices)
+					{
+						const MeshDraw& draw = draws[drawIndex];
 						const int32_t entityId = static_cast<int32_t>(static_cast<uint32_t>(draw.Entity));
 						if (draw.SubmeshIndex == UINT32_MAX)
 						{
@@ -737,6 +860,8 @@ namespace World
 			stats.DrawCalls = statsNow.DrawCalls - statsBeforeScene.DrawCalls;
 			stats.Triangles = statsNow.Triangles - statsBeforeScene.Triangles;
 			stats.DroppedObjects = statsNow.DroppedObjects - statsBeforeScene.DroppedObjects;
+			stats.InstancedBatches = statsNow.InstancedBatches - statsBeforeScene.InstancedBatches;
+			stats.InstancedObjects = statsNow.InstancedObjects - statsBeforeScene.InstancedObjects;
 			stats.CullingEnabled = cullingEnabled;
 			stats.InstancingEnabled = RenderSettings::Get().Instancing;
 			stats.GpuMilliseconds = gpuMilliseconds;

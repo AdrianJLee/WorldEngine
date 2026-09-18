@@ -174,6 +174,19 @@ namespace World
 		// 预览/调试调用方按身份取一个稳定槽位(内部做环绕与保留区处理)。
 		static uint32_t ReserveSlotBase(uint32_t identity, uint32_t span = 1);
 
+		// ---- P1b D8b-2:实例化合批 ----
+		// 一次调用 = **一次** DrawIndexed(instanceCount = count):桶内所有实例共享同一份
+		// 材质常量(占一个对象槽位),per-instance 数据(模型矩阵/基础色/实体 id)走
+		// binding 1 的实例缓冲(PerInstance 顶点属性)。失败(实例缓冲/对象槽位/几何不合法)
+		// 返回 0,调用方必须回退逐物体路径 —— 不静默丢物体。
+		// transforms/entityIds 为 count 长;colors 可为 nullptr(白色)。
+		static uint32_t SubmitInstanced(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+			const Ref<Material>& material, const glm::mat4* transforms, const glm::vec4* colors,
+			const int32_t* entityIds, uint32_t count);
+		// 阴影通道的实例化提交(只读模型矩阵)。
+		static uint32_t SubmitShadowInstanced(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+			const glm::mat4* transforms, uint32_t count);
+
 		// 材质 GPU 资源(贴图描述符集)在材质 Revision 变化时自动重建;
 		// 后端切换/设备重建后需要显式清空缓存。
 		static void InvalidateMaterialCache();
@@ -183,6 +196,9 @@ namespace World
 		{
 			uint32_t DrawCalls = 0;
 			uint32_t Triangles = 0;
+			// D8b-2:实例化合批统计(本帧增量由 SceneRenderer 差值给出)。
+			uint32_t InstancedBatches = 0;
+			uint32_t InstancedObjects = 0;
 			// D8a:对象槽位耗尽被拒绝的提交数(>0 = 画面缺物体,压力场景会断言它为 0)。
 			uint32_t DroppedObjects = 0;
 			// D4:本帧灯光数量/上限/截断数与阴影通道 CPU 耗时(编辑器 Stats 面板读取)。

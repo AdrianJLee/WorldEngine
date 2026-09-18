@@ -15,6 +15,24 @@ struct VS_OUTPUT
     [[vk::location(0)]] float3 v_Normal : NORMAL;
     [[vk::location(1)]] float3 v_WorldPosition : POSITION1;
     [[vk::location(2)]] float2 v_TexCoord : TEXCOORD0;
+    // D8b-2:基础色与实体 id 改成**插值量** —— 实例化合批时它们来自 per-instance 属性,
+    // 逐物体路径从对象 UBO 填同样的值,两条路径共用同一个 PSMain(像素与拾取不变)。
+    // nointerpolation:整物体/整批常量,平直插值既省又避免浮点插值误差(id 要精确整数)。
+    [[vk::location(3)]] nointerpolation float4 v_BaseColor : BASECOLOR;
+    [[vk::location(4)]] nointerpolation float v_EntityId : ENTITYID;
+};
+
+// D8b-2:实例属性(binding 1 = PerInstance;stride 96B,与 C++ Renderer3D::InstanceData 一致)。
+// 模型矩阵按**行**上传(glm 的 row0..row3),HLSL 的 float4x4(...) 构造按行取值,
+// 这样与 cbuffer 路径的 mul(matrix, vector) 语义完全一致。
+struct VS_INSTANCE_INPUT
+{
+    [[vk::location(3)]] float4 i_Row0 : INSTANCE0;
+    [[vk::location(4)]] float4 i_Row1 : INSTANCE1;
+    [[vk::location(5)]] float4 i_Row2 : INSTANCE2;
+    [[vk::location(6)]] float4 i_Row3 : INSTANCE3;
+    [[vk::location(7)]] float4 i_Color : INSTANCE4;
+    [[vk::location(8)]] float4 i_EntityId : INSTANCE5;
 };
 
 struct PS_OUTPUT
@@ -89,6 +107,25 @@ VS_OUTPUT VSMain(VS_INPUT input)
     output.v_Normal = normalize(mul(normalMatrix, input.a_Normal));
     output.v_WorldPosition = worldPosition.xyz;
     output.v_TexCoord = input.a_TexCoord;
+    output.v_BaseColor = u_BaseColor;
+    output.v_EntityId = (float)u_EntityId.x;
+    return output;
+}
+
+// D8b-2:实例化合批入口(一次绘制画 N 个实例;per-draw 常量仍来自 set1 的对象 UBO)。
+VS_OUTPUT VSMainInstanced(VS_INPUT input, VS_INSTANCE_INPUT instance)
+{
+    VS_OUTPUT output;
+    const float4x4 model = float4x4(instance.i_Row0, instance.i_Row1,
+        instance.i_Row2, instance.i_Row3);
+    const float4 worldPosition = mul(model, float4(input.a_Position, 1.0f));
+    output.Position = mul(u_ViewProjection, worldPosition);
+    const float3x3 normalMatrix = (float3x3)transpose((float3x3)model);
+    output.v_Normal = normalize(mul(normalMatrix, input.a_Normal));
+    output.v_WorldPosition = worldPosition.xyz;
+    output.v_TexCoord = input.a_TexCoord;
+    output.v_BaseColor = instance.i_Color;
+    output.v_EntityId = instance.i_EntityId.x;
     return output;
 }
 
@@ -131,7 +168,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     // D3 材质:albedo(贴图已由硬件 sRGB 解码,基础色是 sRGB 数值需手动解码)。
     // 注意:场景目标是 UNORM(不是 sRGB 目标),所以这里显式做"线性光照 → 显示空间"的
     // 编码;2D/WUI 通道的颜色本就按显示空间书写,不参与这条管线。
-    const float3 baseColorLinear = pow(saturate(u_BaseColor.rgb), 2.2f);
+    const float3 baseColorLinear = pow(saturate(input.v_BaseColor.rgb), 2.2f);
     float3 albedo = baseColorLinear;
     if (u_Flags.x > 0.5f)
         albedo *= u_AlbedoTexture.Sample(u_AlbedoSampler, input.v_TexCoord).rgb;
@@ -204,7 +241,9 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     // GL 侧着色器编译会直接报 "modifiers must appear before type"(实测)。
 
     // 线性 → 显示空间(与 2D/WUI 的显示空间书写保持同一最终空间)。
-    output.Color = float4(pow(saturate(litColor), 1.0f / 2.2f), u_BaseColor.a);
-    output.EntityID = u_EntityId.x;
+    output.Color = float4(pow(saturate(litColor), 1.0f / 2.2f), input.v_BaseColor.a);
+    // 实体 id 由顶点阶段按实例给出(浮点承载,id < 2^24 精确);round 保证 -1(不可拾取)
+    // 与正数都还原成精确整数(直接截断会把 -1 变成 0,点选会误命中 0 号实体)。
+    output.EntityID = (int)round(input.v_EntityId);
     return output;
 }

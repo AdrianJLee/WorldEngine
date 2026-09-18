@@ -11,6 +11,8 @@
 #include <filesystem>
 #include <unordered_map>
 
+#include <glm/gtc/matrix_access.hpp>
+
 namespace World
 {
 	namespace
@@ -42,6 +44,24 @@ namespace World
 		};
 		static_assert(sizeof(ObjectUniforms) == 144, "ObjectUniforms must match Renderer3D_Solid.hlsl");
 
+		// D8b-2:实例数据(96B;与 Renderer3D_Solid.hlsl 的 VS_INSTANCE_INPUT 逐字段对应)。
+		// 模型矩阵按**行**上传(HLSL 的 float4x4(a,b,c,d) 按行构造),避免列/行主序歧义。
+		// 实体 id 用 float 承载而不是整数属性:GL 后端建属性走 glVertexArrayAttribFormat
+		// (不是 I 版),整数属性会被当浮点读,拾取 id 直接烂掉。
+		struct InstanceData
+		{
+			glm::vec4 Row0 { 1.0f, 0.0f, 0.0f, 0.0f };
+			glm::vec4 Row1 { 0.0f, 1.0f, 0.0f, 0.0f };
+			glm::vec4 Row2 { 0.0f, 0.0f, 1.0f, 0.0f };
+			glm::vec4 Row3 { 0.0f, 0.0f, 0.0f, 1.0f };
+			glm::vec4 Color { 1.0f };
+			glm::vec4 EntityId { -1.0f, 0.0f, 0.0f, 0.0f };
+		};
+		static_assert(sizeof(InstanceData) == 96, "InstanceData must match VS_INSTANCE_INPUT (96B)");
+
+		// 每帧实例缓冲容量(4096 × 96B ≈ 384KB/帧槽位):超出即拒绝,由调用方回退逐物体路径。
+		constexpr uint32_t kInstanceCapacity = 4096;
+
 		struct MeshGpu
 		{
 			Rhi::Handle<Rhi::Buffer> VertexBuffer;
@@ -62,6 +82,11 @@ namespace World
 			Rhi::Handle<Rhi::DescriptorSetLayout> MaterialLayout;
 			Rhi::Handle<Rhi::Sampler> MaterialSampler;
 			Rhi::Handle<Rhi::CommandBuffer> CommandBuffer;
+			// D8b-2:实例化合批(管线 + 每帧槽位的实例缓冲/游标)。
+			Rhi::Handle<Rhi::Pipeline> InstancedPipeline;
+			Rhi::Handle<Rhi::Pipeline> InstancedShadowPipeline;
+			Rhi::Handle<Rhi::Buffer> InstanceBuffers[Renderer::FramesInFlight];
+			uint32_t InstanceCursor = 0;
 			Rhi::Handle<Rhi::Buffer> ObjectUniformBuffers[Renderer::FramesInFlight][kObjectsPerFrame];
 			Rhi::Handle<Rhi::DescriptorSet> ObjectSets[Renderer::FramesInFlight][kObjectsPerFrame];
 			// ---- D4:方向光阴影 ----
@@ -123,13 +148,24 @@ namespace World
 			return state;
 		}
 
-		Rhi::Handle<Rhi::Shader> CreateSolidShader(const char* path, const char* debugName)
+		Rhi::Handle<Rhi::Shader> CreateSolidShader(const char* path, const char* debugName,
+			const char* vertexEntry = "VSMain")
 		{
 			Rhi::ShaderDesc desc;
 			desc.DebugName = debugName;
-			desc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Vertex, path, "VSMain", "vs_6_0"));
+			desc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Vertex, path, vertexEntry, "vs_6_0"));
 			desc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Fragment, path, "PSMain", "ps_6_0"));
 			return Renderer::GetDevice()->CreateShader(desc);
+		}
+
+		// D8b-2:在网格布局后追加实例绑定(binding 1,PerInstance;6 × float4,stride 96B)。
+		MeshVertexLayout WithInstanceBinding(const MeshVertexLayout& layout)
+		{
+			MeshVertexLayout result = layout;
+			result.Bindings.push_back({ 1, sizeof(InstanceData), true });
+			for (uint32_t index = 0; index < 6; ++index)
+				result.Attributes.push_back({ 3 + index, 1, Rhi::Format::R32G32B32A32_SFLOAT, index * 16u });
+			return result;
 		}
 
 		// ---- D3 提交辅助(把三处重复代码收敛到一处) ----
@@ -447,6 +483,19 @@ namespace World
 		pipelineDesc.DepthStencil.DepthCompare = Rhi::CompareOp::LessOrEqual;
 		state.Pipeline = Renderer::GetDevice()->CreatePipeline(pipelineDesc);
 
+		// D8b-2:实例化合批管线(同一份 PSMain;VS 换成读 per-instance 模型矩阵的入口)。
+		// 现有逐物体管线**不动**:预览/gizmo/透明物体继续走它。
+		{
+			Rhi::PipelineDesc instancedDesc = pipelineDesc;
+			instancedDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Solid.hlsl",
+				"Renderer3D-Solid-Instanced", "VSMainInstanced");
+			const MeshVertexLayout instancedLayout = WithInstanceBinding(meshLayout);
+			instancedDesc.VertexBindings = instancedLayout.Bindings;
+			instancedDesc.VertexAttributes = instancedLayout.Attributes;
+			instancedDesc.DebugName = "Renderer3D.SolidPipeline.Instanced";
+			state.InstancedPipeline = Renderer::GetDevice()->CreatePipeline(instancedDesc);
+		}
+
 		// D3 透明管线:同着色器,+ alpha 混合、不写深度(深度测试仍然开,避免透明面互相穿透)。
 		Rhi::PipelineDesc transparentDesc = pipelineDesc;
 		transparentDesc.DepthStencil.DepthWrite = false;
@@ -550,6 +599,18 @@ namespace World
 		shadowPipelineDesc.DebugName = "Renderer3D.ShadowPipeline";
 		state.ShadowPipeline = Renderer::GetDevice()->CreatePipeline(shadowPipelineDesc);
 
+		// D8b-2:实例化阴影管线(投影者按 (mesh,submesh) 合批,一次画 N 个)。
+		{
+			Rhi::PipelineDesc instancedShadowDesc = shadowPipelineDesc;
+			instancedShadowDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.hlsl",
+				"Renderer3D-Shadow-Instanced", "VSMainInstanced");
+			const MeshVertexLayout instancedLayout = WithInstanceBinding(meshLayout);
+			instancedShadowDesc.VertexBindings = instancedLayout.Bindings;
+			instancedShadowDesc.VertexAttributes = instancedLayout.Attributes;
+			instancedShadowDesc.DebugName = "Renderer3D.ShadowPipeline.Instanced";
+			state.InstancedShadowPipeline = Renderer::GetDevice()->CreatePipeline(instancedShadowDesc);
+		}
+
 		// 预览用默认灯光(材质预览自建 set0 时绑定):占位实现同款方向光 + 0.25 环境光,
 		// 保证 D4 之后预览观感不变(预览不进场景灯光收集)。
 		{
@@ -592,6 +653,12 @@ namespace World
 		MaterialTextureCache::Get().Clear();
 		state.Pipeline = nullptr;
 		state.TransparentPipeline = nullptr;
+		// D8b-2:实例化管线与实例缓冲也要在设备销毁前放掉。
+		state.InstancedPipeline = nullptr;
+		state.InstancedShadowPipeline = nullptr;
+		for (Rhi::Handle<Rhi::Buffer>& buffer : state.InstanceBuffers)
+			buffer = nullptr;
+		state.InstanceCursor = 0;
 		// D4:阴影资源必须在设备销毁前放掉(与材质贴图缓存同理)。
 		state.ShadowPipeline = nullptr;
 		state.ShadowFramebuffer = nullptr;
@@ -630,6 +697,8 @@ namespace World
 		FlushMaterialUpdates(state);
 		state.CommandBuffer = commandBuffer;
 		state.ObjectIndex = 0;
+		// D8b-2:每批场景从这里开始重新分配实例缓冲区(帧槽位由帧栅栏保护)。
+		state.InstanceCursor = 0;
 	}
 
 	void Renderer3D::BindPipelineForCurrentPass()
@@ -685,6 +754,189 @@ namespace World
 		const MeshSubmesh& submesh = mesh->GetSubmeshes()[submeshIndex];
 		return SubmitObject(GetState(), mesh, nullptr, baseColor, transform, entityId,
 			submesh.IndexCount, submesh.IndexOffset);
+	}
+
+	// ---- P1b D8b-2:实例化合批 ----
+	namespace
+	{
+		// 把一批实例打包写进当前帧槽位的实例缓冲;失败(容量不够/缓冲创建失败)返回 false。
+		bool UploadInstances(State& state, uint32_t slot, const glm::mat4* transforms,
+			const glm::vec4* colors, const int32_t* entityIds, uint32_t count, uint64_t* outOffset)
+		{
+			if (count == 0 || !transforms || state.InstanceCursor + count > kInstanceCapacity)
+				return false;
+			if (!state.InstanceBuffers[slot])
+			{
+				Rhi::BufferDesc desc;
+				desc.Size = sizeof(InstanceData) * kInstanceCapacity;
+				desc.Usage = Rhi::BufferUsageVertex;
+				desc.Memory = Rhi::MemoryHint::HostVisible;
+				desc.DebugName = "Renderer3D.InstanceBuffer";
+				state.InstanceBuffers[slot] = Renderer::GetDevice()->CreateBuffer(desc);
+				if (!state.InstanceBuffers[slot])
+					return false;
+			}
+			std::vector<InstanceData> batch(count);
+			for (uint32_t index = 0; index < count; ++index)
+			{
+				const glm::mat4& transform = transforms[index];
+				// 按行上传:HLSL 侧 float4x4(a,b,c,d) 按行构造,与 mul(matrix, vector) 配套。
+				batch[index].Row0 = glm::row(transform, 0);
+				batch[index].Row1 = glm::row(transform, 1);
+				batch[index].Row2 = glm::row(transform, 2);
+				batch[index].Row3 = glm::row(transform, 3);
+				batch[index].Color = colors ? colors[index] : glm::vec4(1.0f);
+				batch[index].EntityId = glm::vec4(
+					static_cast<float>(entityIds ? entityIds[index] : -1), 0.0f, 0.0f, 0.0f);
+			}
+			// 与对象 UBO 同一写入时机:录制期直写宿主可见内存,帧槽位由帧栅栏保护。
+			*outOffset = static_cast<uint64_t>(state.InstanceCursor) * sizeof(InstanceData);
+			state.InstanceBuffers[slot]->SetData(batch.data(), batch.size() * sizeof(InstanceData), *outOffset);
+			state.InstanceCursor += count;
+			return true;
+		}
+
+		// 一次 DrawIndexed(instanceCount = count):共享一个对象槽位(整批材质常量),
+		// per-instance 数据来自 binding 1 的实例缓冲。
+		void DrawInstancedBatch(State& state, const MeshGpu& mesh, uint32_t indexCount, uint32_t firstIndex,
+			const Rhi::Handle<Rhi::Buffer>& instanceBuffer, uint64_t instanceOffset, uint32_t count,
+			const Rhi::Handle<Rhi::Pipeline>& pipeline, const Rhi::Handle<Rhi::DescriptorSet>& objectSet,
+			const Rhi::Handle<Rhi::DescriptorSet>& materialSet, uint32_t slot, bool bindMaterialStates)
+		{
+			state.CommandBuffer->BindPipeline(pipeline);
+			state.CommandBuffer->BindDescriptorSet(objectSet, 1);
+			// 阴影管线的布局只有 set0/set1:多绑一个 set2 在 Vulkan 下是非法绑定(实测直接崩)。
+			if (bindMaterialStates)
+			{
+				if (materialSet)
+					state.CommandBuffer->BindDescriptorSet(materialSet, 2);
+				else if (state.DefaultMaterialSets[slot % Renderer::FramesInFlight])
+					state.CommandBuffer->BindDescriptorSet(state.DefaultMaterialSets[slot % Renderer::FramesInFlight], 2);
+			}
+			state.CommandBuffer->BindVertexBuffer(0, mesh.VertexBuffer);
+			state.CommandBuffer->BindVertexBuffer(1, instanceBuffer, instanceOffset);
+			state.CommandBuffer->BindIndexBuffer(mesh.IndexBuffer);
+			state.CommandBuffer->DrawIndexed(indexCount, count, firstIndex);
+			state.Stats.DrawCalls++;
+			state.Stats.Triangles += (indexCount / 3) * count;
+			state.Stats.InstancedBatches++;
+			state.Stats.InstancedObjects += count;
+		}
+	}
+
+	uint32_t Renderer3D::SubmitInstanced(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+		const Ref<Material>& material, const glm::mat4* transforms, const glm::vec4* colors,
+		const int32_t* entityIds, uint32_t count)
+	{
+		State& state = GetState();
+		if (!mesh || !state.CommandBuffer || !state.InstancedPipeline || count == 0 || !transforms)
+			return 0;
+		// UINT32_MAX = 整网格提交(内置 primitive / 无 submesh 的资产,与逐物体路径同语义)。
+		const bool wholeMesh = submeshIndex == UINT32_MAX;
+		if (!wholeMesh && submeshIndex >= mesh->GetSubmeshes().size())
+			return 0;
+		if (state.ObjectIndex >= kObjectsPerFrame)
+		{
+			state.Stats.DroppedObjects++;
+			return 0;
+		}
+		EnsureMeshBuffersFor(state, mesh);
+		const auto cached = state.MeshCache.find(mesh.get());
+		if (cached == state.MeshCache.end() || !cached->second.VertexBuffer)
+			return 0;
+		uint32_t indexCount = cached->second.IndexCount;
+		uint32_t firstIndex = 0;
+		if (!wholeMesh)
+		{
+			const MeshSubmesh& submesh = mesh->GetSubmeshes()[submeshIndex];
+			indexCount = submesh.IndexCount;
+			firstIndex = submesh.IndexOffset;
+		}
+		if (indexCount == 0)
+			return 0;
+
+		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		uint64_t instanceOffset = 0;
+		if (!UploadInstances(state, slot, transforms, colors, entityIds, count, &instanceOffset))
+			return 0;
+
+		// 整批共享的对象槽位:材质标量来自 material,模型矩阵用单位阵(真实模型矩阵在实例属性里),
+		// 实体 id 用 -1(per-instance 给出)。
+		const uint32_t index = state.ObjectIndex++;
+		ObjectUniforms uniforms;
+		uniforms.Model = glm::mat4(1.0f);
+		uniforms.EntityId = { -1, 0, 0, 0 };
+		const MaterialDesc* desc = material ? &material->GetDesc() : nullptr;
+		if (desc)
+		{
+			uniforms.BaseColor = desc->BaseColor;
+			uniforms.MetallicRoughness = { desc->Metallic, desc->Roughness, 0.0f, 0.0f };
+			uniforms.Emissive = { desc->Emissive.x, desc->Emissive.y, desc->Emissive.z, 0.0f };
+			uniforms.Flags = {
+				desc->AlbedoTexture.empty() ? 0.0f : 1.0f,
+				desc->NormalTexture.empty() ? 0.0f : 1.0f,
+				desc->DoubleSided ? 1.0f : 0.0f,
+				0.0f };
+		}
+		else
+		{
+			// 纯色物体:颜色走 per-instance 属性,这里只给中性的标量(与旧路径同款默认)。
+			uniforms.BaseColor = glm::vec4(1.0f);
+			uniforms.MetallicRoughness = { 0.0f, 0.5f, 0.0f, 0.0f };
+			uniforms.Emissive = { 0.0f, 0.0f, 0.0f, 0.0f };
+			uniforms.Flags = { 0.0f, 0.0f, 0.0f, 0.0f };
+		}
+		WriteObjectUniforms(state, slot, index, uniforms,
+			state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index]);
+
+		Rhi::Handle<Rhi::DescriptorSet> materialSet;
+		if (desc)
+			materialSet = MaterialSetFor(state, material, slot);
+		DrawInstancedBatch(state, cached->second, indexCount, firstIndex,
+			state.InstanceBuffers[slot], instanceOffset, count, state.InstancedPipeline,
+			state.ObjectSets[slot][index], materialSet, slot, true);
+		return count;
+	}
+
+	uint32_t Renderer3D::SubmitShadowInstanced(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+		const glm::mat4* transforms, uint32_t count)
+	{
+		State& state = GetState();
+		if (!mesh || !state.CommandBuffer || !state.InstancedShadowPipeline || count == 0 || !transforms)
+			return 0;
+		const bool wholeMesh = submeshIndex == UINT32_MAX;
+		if (!wholeMesh && submeshIndex >= mesh->GetSubmeshes().size())
+			return 0;
+		if (state.ShadowObjectIndex >= kObjectsPerFrame)
+			return 0;
+		EnsureMeshBuffersFor(state, mesh);
+		const auto cached = state.MeshCache.find(mesh.get());
+		if (cached == state.MeshCache.end() || !cached->second.VertexBuffer)
+			return 0;
+		uint32_t indexCount = cached->second.IndexCount;
+		uint32_t firstIndex = 0;
+		if (!wholeMesh)
+		{
+			const MeshSubmesh& submesh = mesh->GetSubmeshes()[submeshIndex];
+			indexCount = submesh.IndexCount;
+			firstIndex = submesh.IndexOffset;
+		}
+		if (indexCount == 0)
+			return 0;
+		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		uint64_t instanceOffset = 0;
+		if (!UploadInstances(state, slot, transforms, nullptr, nullptr, count, &instanceOffset))
+			return 0;
+		// 阴影通道只读 u_ShadowViewProjection 与实例矩阵;对象 UBO 仍要给一个合法的单位阵。
+		const uint32_t shadowIndex = state.ShadowObjectIndex++;
+		ObjectUniforms uniforms;
+		uniforms.Model = glm::mat4(1.0f);
+		WriteObjectUniforms(state, slot, shadowIndex, uniforms,
+			state.ShadowUniformBuffers[slot][shadowIndex], state.ShadowObjectSets[slot][shadowIndex]);
+		DrawInstancedBatch(state, cached->second, indexCount, firstIndex,
+			state.InstanceBuffers[slot], instanceOffset, count, state.InstancedShadowPipeline,
+			state.ShadowObjectSets[slot][shadowIndex], nullptr, slot, false);
+		return count;
 	}
 
 	uint32_t Renderer3D::ReserveSlotBase(uint32_t identity, uint32_t span)

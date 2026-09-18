@@ -50,6 +50,26 @@ VS_OUTPUT VSMain(VS_INPUT input)
     return output;
 }
 
+// D8b-2:实例化合批入口。属性布局与 Renderer3D_Solid.hlsl 的 VS_INSTANCE_INPUT 一致
+// (同一个实例缓冲,只是这里只用到模型矩阵 4 行;颜色/实体 id 由主通道的着色器使用)。
+struct VS_INSTANCE_INPUT
+{
+    [[vk::location(3)]] float4 i_Row0 : INSTANCE0;
+    [[vk::location(4)]] float4 i_Row1 : INSTANCE1;
+    [[vk::location(5)]] float4 i_Row2 : INSTANCE2;
+    [[vk::location(6)]] float4 i_Row3 : INSTANCE3;
+};
+
+VS_OUTPUT VSMainInstanced(VS_INPUT input, VS_INSTANCE_INPUT instance)
+{
+    VS_OUTPUT output;
+    const float4x4 model = float4x4(instance.i_Row0, instance.i_Row1,
+        instance.i_Row2, instance.i_Row3);
+    const float4 worldPosition = mul(model, float4(input.a_Position, 1.0f));
+    output.Position = mul(u_ShadowViewProjection, worldPosition);
+    return output;
+}
+
 void PSMain(VS_OUTPUT input)
 {
     // 空片元阶段:阴影通道只写深度。
