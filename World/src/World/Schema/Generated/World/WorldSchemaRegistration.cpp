@@ -535,95 +535,6 @@ struct GeneratedAccess<World::CircleRendererComponent>
     }
 };
 
-// HierarchyComponent(P2a W3b):同样手写补充。Parent 以 UInt64 承载 32 位实体句柄,
-// Children 不入库(读档后按 Parent 重建)。
-template <>
-struct GeneratedAccess<World::HierarchyComponent>
-{
-    static Value Get_Parent(const void* instance)
-    {
-        const World::HierarchyComponent* self = static_cast<const World::HierarchyComponent*>(instance);
-        return Value(static_cast<uint64_t>(static_cast<uint32_t>(self->Parent)));
-    }
-    static void Set_Parent(void* instance, const Value& value)
-    {
-        World::HierarchyComponent* self = static_cast<World::HierarchyComponent*>(instance);
-        const uint64_t raw = std::get<uint64_t>(value);
-        self->Parent = raw == static_cast<uint64_t>(entt::null)
-            ? entt::null : static_cast<entt::entity>(static_cast<uint32_t>(raw));
-    }
-    static Value Get_InheritTransform(const void* instance)
-    {
-        const World::HierarchyComponent* self = static_cast<const World::HierarchyComponent*>(instance);
-        return Value(self->InheritTransform);
-    }
-    static void Set_InheritTransform(void* instance, const Value& value)
-    {
-        World::HierarchyComponent* self = static_cast<World::HierarchyComponent*>(instance);
-        self->InheritTransform = std::get<bool>(value);
-    }
-    static const FieldSchema& Field_Parent()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x4849455241524331ull },
-            "Parent",
-            Kind::UInt64,
-            &Get_Parent,
-            &Set_Parent,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
-            Value(static_cast<uint64_t>(static_cast<uint32_t>(entt::null))),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_InheritTransform()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x4849455241524332ull },
-            "InheritTransform",
-            Kind::Bool,
-            &Get_InheritTransform,
-            &Set_InheritTransform,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
-            Value(true),
-        };
-        return schema;
-    }
-    static const StorageBinding& StorageBindingOf()
-    {
-        static const StorageBinding binding = MakeComponentStorage<World::HierarchyComponent>();
-        return binding;
-    }
-    static const TypeSchema& WeSchema()
-    {
-        static const TypeSchema schema = {
-            TypeId{ "World::HierarchyComponent" },
-            "HierarchyComponent",
-            WE_SCHEMA_ABI_VERSION,
-            sizeof(World::HierarchyComponent),
-            TypeCategory::Component,
-            {
-                Field_Parent(),
-                Field_InheritTransform(),
-            },
-            &StorageBindingOf(),
-            nullptr,
-        };
-        return schema;
-    }
-};
-
-// MeshRendererComponent(P1b D2c):生成器不在仓库内,这里手写补充与生成结果同构的注册代码;
-// schema-compiler 就位后应重新生成并覆盖本段(字段 id 保持不变)。
 template <>
 struct GeneratedAccess<World::MeshRendererComponent>
 {
@@ -657,7 +568,6 @@ struct GeneratedAccess<World::MeshRendererComponent>
         World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
         self->MeshPath = std::get<std::string>(value);
     }
-    // D3:材质资产引用(相对内容根;空 = 用 Color 常量色)。
     static Value Get_MaterialPath(const void* instance)
     {
         const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
@@ -758,6 +668,91 @@ struct GeneratedAccess<World::MeshRendererComponent>
                 Field_Color(),
                 Field_MeshPath(),
                 Field_MaterialPath(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::HierarchyComponent>
+{
+    static Value Get_Parent(const void* instance)
+    {
+        const World::HierarchyComponent* self = static_cast<const World::HierarchyComponent*>(instance);
+        return Value(static_cast<uint64_t>(static_cast<uint32_t>(self->Parent)));
+    }
+    static void Set_Parent(void* instance, const Value& value)
+    {
+        World::HierarchyComponent* self = static_cast<World::HierarchyComponent*>(instance);
+        const uint64_t raw = std::get<uint64_t>(value);
+        self->Parent = raw == static_cast<uint64_t>(entt::null)
+            ? entt::null : static_cast<entt::entity>(static_cast<uint32_t>(raw));
+    }
+    static Value Get_InheritTransform(const void* instance)
+    {
+        const World::HierarchyComponent* self = static_cast<const World::HierarchyComponent*>(instance);
+        return Value(self->InheritTransform);
+    }
+    static void Set_InheritTransform(void* instance, const Value& value)
+    {
+        World::HierarchyComponent* self = static_cast<World::HierarchyComponent*>(instance);
+        self->InheritTransform = std::get<bool>(value);
+    }
+    static const FieldSchema& Field_Parent()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4849455241524331ull },
+            "Parent",
+            Kind::UInt64,
+            &Get_Parent,
+            &Set_Parent,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(static_cast<uint64_t>(static_cast<uint32_t>(entt::null))),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_InheritTransform()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4849455241524332ull },
+            "InheritTransform",
+            Kind::Bool,
+            &Get_InheritTransform,
+            &Set_InheritTransform,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(true),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::HierarchyComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::HierarchyComponent" },
+            "HierarchyComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::HierarchyComponent),
+            TypeCategory::Component,
+            {
+                Field_Parent(),
+                Field_InheritTransform(),
             },
             &StorageBindingOf(),
             nullptr,

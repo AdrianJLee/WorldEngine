@@ -156,8 +156,11 @@ namespace World
 		bool InheritTransform = true;
 
 		WE_SCHEMA_BODY(World, HierarchyComponent, Component)
-			WE_FIELD(Parent, UInt64);
-			WE_FIELD(InheritTransform, Bool);
+			// P2 W3a:字段 id 显式钉住(schema-compiler 的公式值会改写这两个 id,
+			// 而它们已经写进存档;显式 Id 让生成物与既有存档迁移语义一致,--check 门禁才可能为绿)。
+			// Entity32:Parent 在 C++ 侧是 entt::entity(32 位句柄),schema 存 64 位整数。
+			WE_FIELD(Parent, UInt64, Id(0x4849455241524331), Entity32);
+			WE_FIELD(InheritTransform, Bool, Id(0x4849455241524332), Default(true));
 		WE_SCHEMA_END
 	};
 
@@ -178,10 +181,11 @@ namespace World
 		std::string MaterialPath;
 
 		WE_SCHEMA_BODY(World, MeshRendererComponent, Component)
-			WE_FIELD(Primitive, String);
-			WE_FIELD(Color, Vec4);
-			WE_FIELD(MeshPath, String);
-			WE_FIELD(MaterialPath, String);
+			// 同上:四个字段 id 已随存档/材质资产落盘(D2c/D3 期间手写),显式钉住。
+			WE_FIELD(Primitive, String, Id(0x4D4553485052494D));
+			WE_FIELD(Color, Vec4, Id(0x4D455348434F4C52));
+			WE_FIELD(MeshPath, String, Id(0x4D45534850415448));
+			WE_FIELD(MaterialPath, String, Id(0x4D4154455249414C));
 		WE_SCHEMA_END
 	};
 

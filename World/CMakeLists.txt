@@ -183,3 +183,8 @@ target_link_libraries(World PRIVATE
     yaml-cpp
     spdlog::spdlog
 )
+
+# P2 W3a:schema 生成器(纯 C++17 小工具,不参与产品二进制)。
+# 生成物提交进仓库,产品构建不依赖本工具;它的用途是 --check 门禁(tests 里的
+# World.SchemaDrift)——字段注解改了但没重跑生成器时直接红灯。
+add_subdirectory(schema-compiler)

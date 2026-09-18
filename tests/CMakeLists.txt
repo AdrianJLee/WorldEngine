@@ -923,6 +923,25 @@ set_tests_properties(World.Behavior PROPERTIES
     TIMEOUT 60
 )
 
+# P2 W3a:字段 id / 生成物漂移门禁。schema-compiler --check 逐字节比较生成物;
+# 注解(含显式 Id(...))改了却没重跑生成器 → 此测试红灯。生成器只构建、不参与产品二进制。
+add_test(NAME World.SchemaDrift
+    COMMAND schema-compiler
+        --input "${CMAKE_SOURCE_DIR}/World/src/World/Scene/Components.h"
+        --input "${CMAKE_SOURCE_DIR}/World/src/World/Core/UUID.h"
+        --input "${CMAKE_SOURCE_DIR}/World/src/World/Scene/SceneCamera.h"
+        --module World
+        --output "${CMAKE_SOURCE_DIR}/World/src/World/Schema/Generated"
+        --manifest "${CMAKE_SOURCE_DIR}/World/src/World/Schema/Generated/World.manifest"
+        --reg-include "World/Scene/Components.h"
+        --reg-include "World/Core/UUID.h"
+        --reg-include "World/Scene/SceneCamera.h"
+        --check)
+set_tests_properties(World.SchemaDrift PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests WorldLuauCameraBindingTests WorldLuauPhysicsBindingTests WorldLuauEventBindingTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptBinaryLoadTests WorldScriptWorkflowTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
