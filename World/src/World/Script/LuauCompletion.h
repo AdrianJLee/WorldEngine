@@ -36,6 +36,9 @@ namespace World
 		std::string Name;
 		std::string Type;
 		std::string Doc;
+		// W9.8:函数/方法的参数名(`---@param` 顺序,已去掉 self)。接受补全时插入
+		// `name(p1, p2)` 并选中第一个参数。
+		std::vector<std::string> Params;
 
 		enum class Kind : uint8_t
 		{

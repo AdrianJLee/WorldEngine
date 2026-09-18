@@ -21,6 +21,7 @@
 #include "World/Script/BindUI.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Script/LuauFormatter.h"
+#include "World/Script/LuauHighlighter.h"
 #include "World/Script/LuauSyntax.h"
 #include "World/WUI/WuiTextBuffer.h"
 
@@ -305,6 +306,12 @@ namespace
 			"   keep   me   \n"
 			"]]\n";
 		CHECK(World::FormatLuauSource(raw) == raw);
+
+		// 行内多余空格折叠(用户实测:多打几个空格格式化没效果)。
+		CHECK(World::FormatLuauSource("local   a =    1\n") == "local a = 1\n");
+		CHECK(World::FormatLuauSource("f( a ,  b )\n") == "f(a, b)\n");
+		// 字符串内部空白不动。
+		CHECK(World::FormatLuauSource("local s = \"a   b\"\n") == "local s = \"a   b\"\n");
 	}
 
 	void ReplaceAllIsSingleUndo()

@@ -245,6 +245,44 @@ int main()
 			CHECK(buffer.Caret() == std::string("entity:GetComponent(").size());   // caret 在括号内
 		}
 
+		// ---- 1b-2. 带参数的函数:插入 name(p1, p2) 并自动选中第一个参数,Tab 跳下一个 ----
+		{
+			WuiContext ctx;
+			WuiTextBuffer buffer;
+			SetTextAtEnd(buffer, "entity:Get");
+			ProviderProbe probe;
+			probe.Items.push_back(MakeItem("GetComponent", "fun(componentType: string)",
+				World::LuauCompletionItem::KindType::Method));
+			probe.Items[0].Params = { "componentType" };
+			WuiCodeEditorOptions options = OptionsWith(probe);
+			ctx.SetFocus(HashId("test.editor"));
+			TypeChars(ctx, buffer, editorRect, options, { 'x' });
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+			PressKey(ctx, buffer, editorRect, options, World::KeyCodes::Tab);
+			CHECK(buffer.Text() == "entity:GetComponent(componentType)");
+			const auto [selStart, selEnd] = buffer.Selection();
+			CHECK(selStart == std::string("entity:GetComponent(").size());
+			CHECK(buffer.Text().substr(selStart, selEnd - selStart) == "componentType");
+
+			// 两个参数:Tab 从第一个跳到第二个。
+			WuiTextBuffer two;
+			SetTextAtEnd(two, "body:Move");
+			ProviderProbe twoProbe;
+			twoProbe.Items.push_back(MakeItem("MoveTo", "fun(x: number, y: number)",
+				World::LuauCompletionItem::KindType::Method));
+			twoProbe.Items[0].Params = { "x", "y" };
+			WuiCodeEditorOptions twoOptions = OptionsWith(twoProbe);
+			TypeChars(ctx, two, editorRect, twoOptions, { 'x' });
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+			PressKey(ctx, two, editorRect, twoOptions, World::KeyCodes::Tab);
+			CHECK(two.Text() == "body:MoveTo(x, y)");
+			auto [twoStart, twoEnd] = two.Selection();
+			CHECK(two.Text().substr(twoStart, twoEnd - twoStart) == "x");
+			PressKey(ctx, two, editorRect, twoOptions, World::KeyCodes::Tab);
+			auto [secondStart, secondEnd] = two.Selection();
+			CHECK(two.Text().substr(secondStart, secondEnd - secondStart) == "y");
+		}
+
 		// ---- 1c. 文件中间接受函数:补完整的一对括号(修复 `self.OnCreate)`) ----
 		{
 			WuiContext ctx;

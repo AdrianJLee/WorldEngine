@@ -60,6 +60,63 @@ namespace World
 			}
 			return delta;
 		}
+
+		// 行内空白折叠:token(串/注释/算子等)原样保留,只归一化 token 之间的空隙 ——
+		// 连续空白折成一个空格;括号/方括号/花括号内侧、逗号分号前后的空隙直接去掉。
+		std::string NormalizeInnerSpacing(std::string_view line,
+			const std::vector<Wui::WuiCodeToken>& tokens)
+		{
+			std::string out;
+			out.reserve(line.size());
+			std::size_t pos = 0;
+			std::size_t tokenIndex = 0;
+			while (pos < line.size())
+			{
+				if (tokenIndex < tokens.size()
+					&& static_cast<std::size_t>(tokens[tokenIndex].StartByte) <= pos)
+				{
+					const Wui::WuiCodeToken& token = tokens[tokenIndex];
+					const std::size_t end = std::min<std::size_t>(token.EndByte, line.size());
+					if (end > pos)
+					{
+						out.append(line.substr(pos, end - pos));
+						pos = end;
+					}
+					++tokenIndex;
+					continue;
+				}
+				const std::size_t nextTokenStart = tokenIndex < tokens.size()
+					? std::min<std::size_t>(tokens[tokenIndex].StartByte, line.size())
+					: line.size();
+				const std::string_view gap = line.substr(pos, nextTokenStart - pos);
+				// 逐段处理:空白段与非空白段分开(例如 "   a " 里的 'a' 两侧各是一段空白,
+				// 不能合并成一次折叠,否则 `a =` 会变成 `a=`——用户实测)。
+				std::size_t i = 0;
+				while (i < gap.size())
+				{
+					const char c = gap[i];
+					if (c != ' ' && c != '\t')
+					{
+						out.push_back(c);
+						++i;
+						continue;
+					}
+					std::size_t j = i;
+					while (j < gap.size() && (gap[j] == ' ' || gap[j] == '\t'))
+						++j;
+					const char prev = out.empty() ? '\0' : out.back();
+					const char next = j < gap.size() ? gap[j]
+						: (nextTokenStart < line.size() ? line[nextTokenStart] : '\0');
+					const bool drop = out.empty() || prev == '(' || prev == '[' || prev == '{'
+						|| next == ')' || next == ']' || next == '}' || next == ',' || next == ';';
+					if (!drop)
+						out.push_back(' ');
+					i = j;
+				}
+				pos = nextTokenStart;
+			}
+			return out;
+		}
 	}
 
 	std::string FormatLuauSource(std::string_view source, int indentSize)
@@ -97,7 +154,8 @@ namespace World
 			{
 				const int lineDepth = StartsClosed(tokens, line) ? std::max(0, depth - 1) : depth;
 				out.append(static_cast<std::size_t>(lineDepth * indentSize), ' ');
-				out.append(trimmed);
+				const std::string normalized = NormalizeInnerSpacing(line, tokens);
+				out.append(TrimView(normalized));
 				depth = std::max(0, depth + BlockDelta(tokens, line));
 			}
 			state = scanning;

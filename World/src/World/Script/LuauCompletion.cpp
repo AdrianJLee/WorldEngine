@@ -189,6 +189,52 @@ namespace World
 			std::string_view Desc;
 		};
 
+		// `fun(self: X, dt: number)` → {"dt"}(跳过 self/.../空名;支持嵌套括号里的逗号)。
+		std::vector<std::string> ExtractFunParams(std::string_view type)
+		{
+			std::vector<std::string> params;
+			const std::size_t open = type.find('(');
+			if (open == std::string_view::npos)
+				return params;
+			std::size_t depth = 0;
+			std::size_t end = open;
+			for (; end < type.size(); ++end)
+			{
+				if (type[end] == '(')
+					++depth;
+				else if (type[end] == ')')
+				{
+					--depth;
+					if (depth == 0)
+						break;
+				}
+			}
+			const std::string_view inner = type.substr(open + 1,
+				std::min(end, type.size()) - (open + 1));
+			std::size_t start = 0;
+			depth = 0;
+			for (std::size_t i = 0; i <= inner.size(); ++i)
+			{
+				const bool atEnd = i == inner.size();
+				const char c = atEnd ? ',' : inner[i];
+				if (!atEnd && (c == '(' || c == '{'))
+					++depth;
+				else if (!atEnd && (c == ')' || c == '}'))
+					--depth;
+				if (c != ',' || depth != 0)
+					continue;
+				std::string_view part = Trim(inner.substr(start, i - start));
+				start = i + 1;
+				const std::size_t colon = part.find(':');
+				if (colon != std::string_view::npos)
+					part = Trim(part.substr(0, colon));
+				if (part.empty() || part == "self" || part == "...")
+					continue;
+				params.emplace_back(part);
+			}
+			return params;
+		}
+
 		// `---@field <name> <type> <desc>`:name 允许可选后缀 '?';type 形如 fun(self: X)
 		// 时按平衡括号取整(里面的空格不能把类型截成两段),其余取下一个空白词。
 		FieldSpec ParseFieldSpec(std::string_view rest)
@@ -326,6 +372,7 @@ namespace World
 		bool docTaken = false;
 		std::string blockDoc;
 		std::string blockReturn;
+		std::vector<std::string> blockParams;   // W9.8:---@param 顺序(去 self)
 		std::size_t currentClass = kNone;
 
 		auto resetBlock = [&]()
@@ -334,6 +381,7 @@ namespace World
 			docTaken = false;
 			blockDoc.clear();
 			blockReturn.clear();
+			blockParams.clear();
 		};
 
 		auto ensureClass = [&](std::string_view name, std::string_view base) -> std::size_t
@@ -383,7 +431,8 @@ namespace World
 		};
 
 		auto addMember = [&](std::size_t classIndex, std::string_view name, std::string_view type,
-			std::string_view doc, LuauCompletionItem::KindType kind)
+			std::string_view doc, LuauCompletionItem::KindType kind,
+			const std::vector<std::string>& params = {})
 		{
 			ClassInfo& info = m_StubClasses[classIndex];
 			for (const LuauCompletionItem& member : info.Members)
@@ -393,6 +442,7 @@ namespace World
 			item.Name.assign(name);
 			item.Type.assign(type);
 			item.Doc.assign(doc);
+			item.Params = params;
 			item.Kind = kind;
 			info.Members.push_back(std::move(item));
 		};
@@ -441,7 +491,7 @@ namespace World
 							const FieldSpec spec = ParseFieldSpec(rest);
 							if (!spec.Name.empty() && IsIdentStart(spec.Name.front()))
 								addMember(currentClass, spec.Name, spec.Type, spec.Desc,
-									LuauCompletionItem::KindType::Field);
+									LuauCompletionItem::KindType::Field, ExtractFunParams(spec.Type));
 						}
 					}
 					else if (tag == "return")
@@ -453,7 +503,14 @@ namespace World
 								blockReturn.assign(type);
 						}
 					}
-					// @param/@overload/@operator/@meta 与未知 tag:忽略,不打断注释块
+					else if (tag == "param")
+					{
+						// W9.8:参数名进补全项,接受时插 `name(p1, p2)` 并选中第一个参数。
+						const std::string_view name = FirstWord(rest);
+						if (!name.empty() && name != "self" && name != "...")
+							blockParams.emplace_back(name);
+					}
+					// @overload/@operator/@meta 与未知 tag:忽略,不打断注释块
 				}
 				else
 				{
@@ -486,7 +543,7 @@ namespace World
 							rest.substr(ownerEnd + 1, methodEnd - (ownerEnd + 1));
 						if (!method.empty())
 							addMember(ensureClass(owner, std::string_view()), method, blockReturn,
-								blockDoc, LuauCompletionItem::KindType::Method);
+								blockDoc, LuauCompletionItem::KindType::Method, blockParams);
 					}
 				}
 				else

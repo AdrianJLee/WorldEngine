@@ -78,6 +78,9 @@ namespace World::Wui
 			std::string HoverName;
 			std::string HoverType;
 			std::string HoverDoc;
+			// W9.8:补全函数参数占位(交替 start/end buffer 偏移)与当前选中的参数序号。
+			std::vector<std::size_t> SnippetRanges;
+			std::size_t SnippetIndex = 0;
 		};
 
 		size_t CodepointLength(unsigned char lead)
@@ -499,7 +502,8 @@ namespace World::Wui
 				{
 					const World::LuauCompletionItem& item =
 						state.PopupItems[static_cast<std::size_t>(state.PopupSelected)];
-					std::string inserted = CompletionInsertName(item.Name);
+					const std::string insertName = CompletionInsertName(item.Name);
+					std::string inserted = insertName;
 					const bool call = InsertAsCall(item);
 					// 光标后同行若已经是 '('(在已有调用里补名字)就只插名字;否则补完整的一对
 					// "name()" 并把 caret 放进括号。修复:此前只在整个**文件末尾**才补 '(',
@@ -513,7 +517,16 @@ namespace World::Wui
 						break;
 					}
 					if (call && !hasCallParens)
+					{
 						inserted += "(";
+						// W9.8:参数占位(---@param 顺序),接受后自动选中第一个参数。
+						for (std::size_t i = 0; i < item.Params.size(); ++i)
+						{
+							if (i > 0)
+								inserted += ", ";
+							inserted += item.Params[i];
+						}
+					}
 					buffer.SetCaret(replaceStart, false);
 					buffer.SetCaret(caretNow, true);
 					buffer.InsertAtCaret(inserted);
@@ -521,11 +534,50 @@ namespace World::Wui
 					{
 						const std::size_t caretAfterName = buffer.Caret();
 						buffer.InsertAtCaret(")");
-						buffer.SetCaret(caretAfterName, false);
+						// 参数区起点 = replaceStart + name + '(';逐个记录 [start,end)。
+						state.SnippetRanges.clear();
+						state.SnippetIndex = 0;
+						std::size_t paramCursor = replaceStart + insertName.size() + 1;
+						for (std::size_t i = 0; i < item.Params.size(); ++i)
+						{
+							state.SnippetRanges.push_back(paramCursor);
+							state.SnippetRanges.push_back(paramCursor + item.Params[i].size());
+							paramCursor += item.Params[i].size() + (i + 1 < item.Params.size() ? 2 : 0);
+						}
+						if (state.SnippetRanges.size() >= 2)
+						{
+							buffer.SetCaret(state.SnippetRanges[0], false);
+							buffer.SetCaret(state.SnippetRanges[1], true);   // 选中第一个参数
+						}
+						else
+							buffer.SetCaret(caretAfterName, false);          // 无参数:caret 在括号内
 					}
 				}
 				state.PopupVisible = false;
 				state.FollowCaret = true;
+			}
+			// W9.8:参数占位导航 —— 仍选中参数时 Tab 跳到下一个参数;输入/点击/滚动/Esc 取消。
+			if (!state.SnippetRanges.empty() && !acceptedCompletion)
+			{
+				if (ctx.WasKeyTriggered(KeyCodes::Tab))
+				{
+					popupConsumedKey = true;   // 不落到编辑分支当缩进
+					const std::size_t count = state.SnippetRanges.size() / 2;
+					++state.SnippetIndex;
+					if (state.SnippetIndex < count)
+					{
+						buffer.SetCaret(state.SnippetRanges[state.SnippetIndex * 2], false);
+						buffer.SetCaret(state.SnippetRanges[state.SnippetIndex * 2 + 1], true);
+					}
+					else
+					{
+						buffer.SetCaret(state.SnippetRanges.back(), false);
+						state.SnippetRanges.clear();
+					}
+				}
+				else if (!input.TextInput.empty() || escapeTriggered
+					|| input.MouseClicked[0] || input.Wheel != 0.0f)
+					state.SnippetRanges.clear();
 			}
 			if (escapeTriggered && !escapeHandledByPopup && focused)
 			{
