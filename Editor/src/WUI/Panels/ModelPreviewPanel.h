@@ -1,6 +1,8 @@
 #pragma once
 
 #include "EditorPanel.h"
+#include "World/Core/Asset/ModelImportSettings.h"
+#include "World/Core/Asset/WModelIO.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/Mesh.h"
 #include "World/RHI/Rhi.h"
@@ -31,6 +33,9 @@ namespace World
 		const std::string& LogicalPath() const { return m_LogicalPath; }
 		// 重新从磁盘读模型(导入覆盖后手动刷新用)。
 		void Reload();
+		// P1b D5b-2:用当前 `.wimport` 重新导入并刷新(与内容浏览器双击/CLI 同一条 `Asset::ImportFile` 路径)。
+		bool Reimport(std::string* message = nullptr);
+		const std::string& StatusText() const { return m_Status; }
 
 	private:
 		void EnsureGpuResources();
@@ -41,6 +46,11 @@ namespace World
 		void CapturePreviewTextureSequence();
 		// 节点树 × 各 mesh 局部包围盒 → 世界空间包围盒(相机取景用)。
 		MeshBounds ComputeWorldBounds() const;
+		// 由 `.wmodel` 逻辑路径推源路径(同目录同名 `.gltf`/`.glb`;引擎导入约定)。
+		void ResolveSource();
+		// 刷新"需要重导"判断(源内容指纹 + 设置哈希 + 导入器版本)。
+		void RefreshSyncState();
+		void DrawAssetView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 
 		std::string m_PanelId = "model:";
 		std::string m_PanelTitle = "Model";
@@ -50,6 +60,20 @@ namespace World
 		Ref<Mesh> m_Mesh;
 		// 按 .wmodel 材质槽下标缓存材质(加载失败保持 null → 走常量色)。
 		std::vector<Ref<Material>> m_SlotMaterials;
+		// D5b-2:磁盘上的 .wmodel 数据(meta/节点/子网格/材质槽;与 m_Mesh 同源,取元信息用)。
+		Asset::WModelData m_Data;
+		bool m_DataValid = false;
+		// 源与设置状态。
+		std::string m_SourceLogical;                 // models/x.gltf(空 = 找不到源)
+		bool m_SourceExists = false;
+		bool m_NeedsReimport = false;
+		std::string m_SyncDetail;                    // 需要重导的原因(给 UI/自动化看)
+		Asset::ModelImportSettings m_Settings;       // 当前 .wimport(可编辑 → 保存 → 重导)
+		bool m_SettingsLoaded = false;
+		// 上次读入 `.wimport` 时的内容指纹:外部改动自动重载(用户正在编辑但未保存的字段不被覆盖)。
+		uint64_t m_SettingsFileFingerprint = 0;
+		// "需要重导"状态的轮询节流(秒;源文件很小,1s 读一次足够)。
+		double m_NextSyncCheck = 0.0;
 
 		// ---- 预览状态 ----
 		uint32_t m_PreviewSize = 384;

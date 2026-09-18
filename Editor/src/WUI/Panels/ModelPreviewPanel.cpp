@@ -5,7 +5,10 @@
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Renderer/AssetHotReload.h"
+#include "World/Core/Asset/GltfImporter.h"
 #include "World/WUI/WuiTextureRegistry.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
 
@@ -121,6 +124,7 @@ namespace World
 		m_SlotMaterials.clear();
 		std::string error;
 		m_Mesh = Mesh::LoadWModel(m_LogicalPath, &error);
+		m_DataValid = Asset::WModelIO::ReadFile(m_LogicalPath, m_Data, &error);
 		if (!m_Mesh)
 		{
 			m_Status = "模型加载失败: " + (error.empty() ? m_LogicalPath : error);
@@ -157,9 +161,143 @@ namespace World
 			<< " / 索引 " << m_Mesh->GetIndexCount();
 		m_Status = text.str();
 		m_StatusIsError = false;
+		ResolveSource();
+		RefreshSyncState();
 		WLD_CORE_INFO("[model] preview '{0}': nodes={1} meshes={2} submeshes={3} vertices={4}",
 			m_LogicalPath, m_Mesh->GetNodes().size(), m_Mesh->GetMeshes().size(),
 			m_Mesh->GetSubmeshes().size(), m_Mesh->GetVertexCount());
+	}
+
+	void ModelPreviewPanel::ResolveSource()
+	{
+		m_SourceLogical.clear();
+		m_SourceExists = false;
+		m_SettingsLoaded = false;
+		// 首选:`.wmodel` meta 里记录的源逻辑路径(导入产物自报家门,不靠猜)。
+		if (m_DataValid && !m_Data.Meta.SourcePath.empty())
+		{
+			const AssetFingerprint fingerprint = FingerprintAsset(m_Data.Meta.SourcePath, nullptr);
+			if (fingerprint.Exists)
+			{
+				m_SourceLogical = m_Data.Meta.SourcePath;
+				m_SourceExists = true;
+			}
+		}
+		// 兜底:旧产物没有 SourcePath 时按"同目录同名 .gltf/.glb"探测。
+		std::filesystem::path modelPath(m_LogicalPath);
+		for (const char* extension : { ".gltf", ".glb" })
+		{
+			if (m_SourceExists)
+				break;
+			std::filesystem::path candidate = modelPath;
+			candidate.replace_extension(extension);
+			const std::string logical = candidate.generic_string();
+			std::string error;
+			const AssetFingerprint fingerprint = FingerprintAsset(logical, &error);
+			if (fingerprint.Exists)
+			{
+				m_SourceLogical = logical;
+				m_SourceExists = true;
+				break;
+			}
+		}
+		if (m_SourceExists)
+		{
+			std::string settingsWarning;
+			m_Settings = Asset::ModelImportSettings::Load(
+				(std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical).string(), &settingsWarning);
+			m_SettingsLoaded = true;
+			std::filesystem::path sidecar(m_SourceLogical);
+			sidecar.replace_extension(".wimport");
+			const AssetFingerprint fingerprint = FingerprintAsset(sidecar.generic_string(), nullptr);
+			m_SettingsFileFingerprint = fingerprint.Exists ? fingerprint.Value : 0;
+		}
+	}
+
+	void ModelPreviewPanel::RefreshSyncState()
+	{
+		m_NeedsReimport = false;
+		m_SyncDetail.clear();
+		if (!m_DataValid)
+		{
+			m_SyncDetail = "无法读取 .wmodel 元信息";
+			m_NeedsReimport = true;
+			return;
+		}
+		if (!m_SourceExists)
+		{
+			m_SyncDetail = "找不到源文件(同目录同名 .gltf/.glb)";
+			return;   // 没有源 = 无法重导,但也谈不上"过时"
+		}
+		const AssetFingerprint fingerprint = FingerprintAsset(m_SourceLogical, nullptr);
+		if (fingerprint.FromContent && fingerprint.Value != m_Data.Meta.SourceFingerprint)
+		{
+			m_NeedsReimport = true;
+			m_SyncDetail = "源文件已改动";
+			return;
+		}
+		// `.wimport` 被外部改动 → 重新读设置(用户正在编辑但未保存的字段以文件为准)。
+		std::filesystem::path sidecar(m_SourceLogical);
+		sidecar.replace_extension(".wimport");
+		const AssetFingerprint settingsFingerprint = FingerprintAsset(sidecar.generic_string(), nullptr);
+		if (settingsFingerprint.Exists && settingsFingerprint.Value != m_SettingsFileFingerprint)
+		{
+			m_Settings = Asset::ModelImportSettings::Load(
+				(std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical).string(), nullptr);
+			m_SettingsLoaded = true;
+			m_SettingsFileFingerprint = settingsFingerprint.Value;
+		}
+		if (m_SettingsLoaded)
+		{
+			const uint64_t settingsHash = Asset::ModelImportSettings::Hash(m_Settings);
+			if (settingsHash != m_Data.Meta.SettingsHash)
+			{
+				m_NeedsReimport = true;
+				m_SyncDetail = "导入设置已改动";
+				return;
+			}
+		}
+		if (m_Data.Meta.ImporterVersion != 1u)
+		{
+			m_NeedsReimport = true;
+			m_SyncDetail = "导入器版本已升级";
+		}
+	}
+
+	bool ModelPreviewPanel::Reimport(std::string* message)
+	{
+		if (!m_SourceExists)
+		{
+			const std::string text = "重导失败: 找不到源文件(" + m_LogicalPath + " 同目录同名 .gltf/.glb)";
+			if (message) *message = text;
+			m_Status = text;
+			m_StatusIsError = true;
+			return false;
+		}
+		const std::filesystem::path source = std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical;
+		Asset::GltfImportResult imported;
+		std::string error;
+		if (!Asset::ImportFile(source, std::filesystem::path(WLD_ASSETPATH), &imported, &error))
+		{
+			const std::string text = "重导失败: " + (error.empty() ? std::string("未知错误") : error);
+			if (message) *message = text;
+			m_Status = text;
+			m_StatusIsError = true;
+			return false;
+		}
+		// .wmodel 缓存会让旧网格继续被场景引用 —— 重导后清缓存,重新读盘。
+		Mesh::ClearWModelCache();
+		Reload();
+		const std::string text = "已重导 " + m_LogicalPath + "(mesh " + std::to_string(imported.MeshCount)
+			+ " / submesh " + std::to_string(imported.SubmeshCount)
+			+ " / 节点 " + std::to_string(imported.NodeCount)
+			+ " / 材质 " + std::to_string(imported.MaterialPaths.size()) + ")";
+		if (message) *message = text;
+		m_Status = text;
+		m_StatusIsError = false;
+		WLD_CORE_INFO("[model] reimported '{0}' from '{1}' (nodes={2} submeshes={3})",
+			m_LogicalPath, m_SourceLogical, imported.NodeCount, imported.SubmeshCount);
+		return true;
 	}
 
 	void ModelPreviewPanel::EnsureGpuResources()
@@ -440,14 +578,26 @@ namespace World
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, { 0.09f, 0.095f, 0.105f, 1.0f });
 
+		// D5b-2:轻量轮询"需要重导"状态(1s 节流):外部改源/改 `.wimport` 后不需要手动刷新。
+		const double now = std::chrono::duration<double>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+		if (m_SettingsLoaded || m_SourceExists)
+		{
+			if (now >= m_NextSyncCheck)
+			{
+				m_NextSyncCheck = now + 1.0;
+				RefreshSyncState();
+			}
+		}
+
 		const float x = rect.X + 10.0f;
 		const float width = rect.W - 20.0f;
 		float y = rect.Y + 8.0f;
 		Wui::Label(ctx, { x, y }, ShortenPath(m_LogicalPath), theme.Text, 13.0f);
 		y += 22.0f;
 
-		// 预览区:上=图,下=统计/动作。
-		const float previewSide = std::min(width, rect.H - 150.0f);
+		// 预览区:上=图(约占四成高),下=资产视图(状态/设置/依赖/节点树)。
+		const float previewSide = std::min(width, std::max(160.0f, rect.H * 0.40f));
 		const Wui::WuiRect previewRect { x, y, std::max(64.0f, previewSide), std::max(64.0f, previewSide) };
 		const uint64_t textureId = RenderPreview();
 		if (textureId != 0)
@@ -480,10 +630,45 @@ namespace World
 			Wui::Label(ctx, { previewRect.X + 10.0f, previewRect.Y + 10.0f },
 				"预览不可用(模型未加载或 RHI 设备未就绪)", theme.TextMuted, 12.0f);
 		}
-		y += previewRect.H + 10.0f;
+		y += previewRect.H + 8.0f;
+		DrawAssetView(ctx, { x, y, width, std::max(0.0f, rect.Y + rect.H - y - 6.0f) }, host);
+	}
 
-		const float buttonW = (width - 8.0f) * 0.5f;
-		if (Wui::Button(ctx, Wui::HashId("model.instance"), { x, y, buttonW, 24.0f },
+	// P1b D5b-2:模型资产视图 —— 同步状态(是否需要重导)/ 导入设置 / 依赖清单 / 节点树,
+	// 以及"放进当前场景 / Reimport / 保存导入设置"三个动作。状态文本登记成只读无障碍节点,
+	// E2E 可以直接断言(不需要鼠标)。
+	void ModelPreviewPanel::DrawAssetView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		const float x = rect.X;
+		const float width = rect.W;
+		float y = rect.Y;
+		if (rect.H < 40.0f)
+			return;
+
+		std::string statusText;
+		if (m_NeedsReimport)
+			statusText = "需要重导: " + (m_SyncDetail.empty() ? std::string("产物与源不一致") : m_SyncDetail);
+		else if (!m_SourceExists)
+			statusText = "已同步(没找到源文件,无法重导)";
+		else
+			statusText = "已同步(源与设置未变)";
+		Wui::WuiAccessNode statusNode;
+		statusNode.Id = Wui::HashId("model.status");
+		statusNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+		statusNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+		statusNode.Kind = "status";
+		statusNode.Label = "model status";
+		statusNode.Value = statusText;
+		statusNode.Rect = { x, y, width, 16.0f };
+		statusNode.Interactive = false;
+		Wui::WuiAccessibility::Get().Register(statusNode);
+		Wui::Label(ctx, { x, y }, statusText,
+			m_NeedsReimport ? Wui::WuiColor { 1.0f, 0.72f, 0.30f, 1.0f } : theme.TextMuted, 12.0f);
+		y += 18.0f;
+
+		const float buttonW = (width - 16.0f) / 3.0f;
+		if (Wui::Button(ctx, Wui::HashId("model.instance"), { x, y, buttonW, 22.0f },
 			"放进当前场景", theme))
 		{
 			std::string message;
@@ -498,17 +683,144 @@ namespace World
 				m_StatusIsError = false;
 			}
 		}
-		if (Wui::Button(ctx, Wui::HashId("model.reload"), { x + buttonW + 8.0f, y, buttonW, 24.0f },
-			"重新读取", theme))
+		if (Wui::Button(ctx, Wui::HashId("model.reimport"), { x + buttonW + 8.0f, y, buttonW, 22.0f },
+			m_NeedsReimport ? "Reimport *" : "Reimport", theme))
 		{
-			Reload();
+			std::string message;
+			Reimport(&message);
 		}
-		y += 30.0f;
-		if (!m_Status.empty())
+		if (Wui::Button(ctx, Wui::HashId("model.settings.save"), { x + 2.0f * (buttonW + 8.0f), y, buttonW, 22.0f },
+			"保存导入设置", theme))
+		{
+			if (!m_SourceExists)
+			{
+				m_Status = "保存设置失败: 没有源文件";
+				m_StatusIsError = true;
+			}
+			else
+			{
+				std::string error;
+				if (Asset::ModelImportSettings::Save(
+					(std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical).string(), m_Settings, &error))
+				{
+					m_Status = "已保存导入设置(.wimport);点 Reimport 生效";
+					m_StatusIsError = false;
+					RefreshSyncState();
+				}
+				else
+				{
+					m_Status = "保存设置失败: " + error;
+					m_StatusIsError = true;
+				}
+			}
+		}
+		y += 28.0f;
+
+		if (m_SourceExists && m_SettingsLoaded)
+		{
+			const float halfW = (width - 8.0f) * 0.5f;
+			Wui::Label(ctx, { x, y + 4.0f }, "Scale", theme.TextMuted, 11.0f);
+			Wui::DragFloat(ctx, Wui::HashId("model.import.scale"), { x + 46.0f, y, halfW - 50.0f, 18.0f },
+				m_Settings.Scale, 0.05f, 0.01f, 100.0f, theme);
+			static const std::vector<std::string> upAxes { "Y", "Z" };
+			int upAxisIndex = m_Settings.UpAxis == 0 ? 0 : 1;
+			if (Wui::Combo(ctx, Wui::HashId("model.import.upaxis"),
+				{ x + halfW + 54.0f, y - 2.0f, width - halfW - 54.0f, 18.0f },
+				"Up " + upAxes[upAxisIndex], upAxes, upAxisIndex, theme))
+				m_Settings.UpAxis = upAxisIndex == 0 ? 0 : 1;
+			y += 22.0f;
+			bool exportMaterials = m_Settings.ExportMaterials;
+			if (Wui::Checkbox(ctx, Wui::HashId("model.import.materials"), { x, y, 140.0f, 16.0f },
+				"导出材质", exportMaterials, theme))
+				m_Settings.ExportMaterials = exportMaterials;
+			bool exportTextures = m_Settings.ExportTextures;
+			if (Wui::Checkbox(ctx, Wui::HashId("model.import.textures"), { x + 150.0f, y, 160.0f, 16.0f },
+				"导出贴图", exportTextures, theme))
+				m_Settings.ExportTextures = exportTextures;
+			bool generateNormals = m_Settings.GenerateNormals;
+			if (Wui::Checkbox(ctx, Wui::HashId("model.import.normals"), { x + 320.0f, y, 170.0f, 16.0f },
+				"缺法线自动生成", generateNormals, theme))
+				m_Settings.GenerateNormals = generateNormals;
+			y += 20.0f;
+		}
+
+		if (m_Mesh && y < rect.Y + rect.H - 16.0f)
+		{
+			const MeshBounds& bounds = m_Mesh->GetBounds();
+			char stats[192] = {};
+			std::snprintf(stats, sizeof(stats),
+				"节点 %zu / mesh %zu / submesh %zu / 顶点 %u / 索引 %u | bounds (%.2f,%.2f,%.2f)~(%.2f,%.2f,%.2f)",
+				m_Mesh->GetNodes().size(), m_Mesh->GetMeshes().size(), m_Mesh->GetSubmeshes().size(),
+				m_Mesh->GetVertexCount(), m_Mesh->GetIndexCount(),
+				bounds.Min.x, bounds.Min.y, bounds.Min.z, bounds.Max.x, bounds.Max.y, bounds.Max.z);
+			Wui::Label(ctx, { x, y }, stats, theme.TextMuted, 11.0f);
+			y += 16.0f;
+		}
+
+		if (m_Mesh && !m_Mesh->GetNodes().empty() && y < rect.Y + rect.H - 20.0f)
+		{
+			Wui::Label(ctx, { x, y }, "节点树:", theme.TextMuted, 11.0f);
+			y += 14.0f;
+			const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
+			for (size_t index = 0; index < nodes.size() && index < 8; ++index)
+			{
+				const MeshNode& treeNode = nodes[index];
+				int depth = 0;
+				for (int32_t parent = treeNode.Parent; parent >= 0 && depth < 8;
+					parent = nodes[static_cast<size_t>(parent)].Parent)
+					++depth;
+				std::string text = std::string(static_cast<size_t>(depth) * 2, ' ') + "- " + treeNode.Name;
+				if (treeNode.MeshIndex >= 0)
+					text += "  [mesh " + std::to_string(treeNode.MeshIndex) + "]";
+				Wui::Label(ctx, { x, y }, text, theme.Text, 11.0f);
+				y += 13.0f;
+				if (y > rect.Y + rect.H - 30.0f)
+					break;
+			}
+		}
+
+		if (m_Mesh && !m_Mesh->GetMaterialSlots().empty() && y < rect.Y + rect.H - 20.0f)
+		{
+			Wui::Label(ctx, { x, y }, "依赖:", theme.TextMuted, 11.0f);
+			y += 14.0f;
+			const std::vector<std::string>& slots = m_Mesh->GetMaterialSlots();
+			for (size_t index = 0; index < slots.size() && index < 6; ++index)
+			{
+				const std::string& slot = slots[index];
+				if (slot.empty())
+				{
+					Wui::Label(ctx, { x, y }, "- (空材质槽)", theme.TextMuted, 11.0f);
+					y += 13.0f;
+					continue;
+				}
+				const Ref<Material> material = MaterialLibrary::Get().Load(slot);
+				const bool missing = material == nullptr;
+				Wui::Label(ctx, { x, y }, (missing ? "[缺失] " : "- ") + slot,
+					missing ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.Text, 11.0f);
+				y += 13.0f;
+				if (material)
+				{
+					const MaterialDesc& desc = material->GetDesc();
+					const std::string textures[2] = { desc.AlbedoTexture, desc.NormalTexture };
+					for (const std::string& texture : textures)
+					{
+						if (texture.empty())
+							continue;
+						const AssetFingerprint fingerprint = FingerprintAsset(texture, nullptr);
+						Wui::Label(ctx, { x + 12.0f, y },
+							(fingerprint.Exists ? "  tex " : "  [缺失] tex ") + texture,
+							fingerprint.Exists ? theme.TextMuted
+								: Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f }, 11.0f);
+						y += 13.0f;
+					}
+				}
+				if (y > rect.Y + rect.H - 14.0f)
+					break;
+			}
+		}
+
+		if (!m_Status.empty() && y < rect.Y + rect.H - 13.0f)
 			Wui::Label(ctx, { x, y }, m_Status,
-				m_StatusIsError ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.TextMuted, 12.0f);
-		y += 18.0f;
-		Wui::Label(ctx, { x, y }, "拖拽旋转 · 滚轮缩放 · 双击内容浏览器里的 .wmodel 只是预览,不改场景",
-			theme.TextMuted, 11.0f);
+				m_StatusIsError ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.TextMuted, 11.0f);
 	}
 }
