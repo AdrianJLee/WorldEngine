@@ -97,6 +97,13 @@ namespace World
 			if (message) *message = "model instantiation is not wired to a host";
 			return false;
 		}
+		// 内容浏览器双击 .gltf/.glb → 导入并实例化(与 File 菜单同一条宿主路径)。
+		virtual bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr)
+		{
+			(void)sourcePath;
+			if (message) *message = "glTF import is not wired to a host";
+			return false;
+		}
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

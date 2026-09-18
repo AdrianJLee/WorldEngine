@@ -3,6 +3,7 @@
 #include "EditorStartup.h"
 #include "World/Core/Asset/BuiltinImporters.h"
 #include "World/Core/Asset/CookPipeline.h"
+#include "World/Core/Asset/GltfImporter.h"
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Vfs/DirectoryProvider.h"
@@ -1705,6 +1706,74 @@ namespace World
 			*message = "已实例化 " + std::to_string(created) + " 个实体: " + logicalPath;
 		WLD_CORE_INFO("[model] instantiated '{0}': {1} entities", logicalPath, created);
 		return true;
+	}
+
+	bool EditorLayer::ImportModelFile(const std::string& sourcePath, std::string* message)
+	{
+		if (sourcePath.empty())
+		{
+			if (message) *message = "导入失败: 空路径";
+			return false;
+		}
+		const std::filesystem::path source = std::filesystem::absolute(sourcePath);
+		World::Asset::GltfImportResult imported;
+		std::string error;
+		if (!World::Asset::ImportFile(source, std::filesystem::path(WLD_ASSETPATH), &imported, &error))
+		{
+			const std::string failure = "glTF 导入失败: " + (error.empty() ? std::string("未知错误") : error);
+			if (message) *message = failure;
+			ShowError(failure);   // 菜单/双击都要看得见失败原因
+			return false;
+		}
+		// WModelPath 按约定就是"相对内容根"的逻辑路径(如 models/rock.wmodel);
+		// 只有将来它变成绝对路径时才需要再相对化 —— 对相对路径调用 relative() 会得到空串(实测)。
+		std::string logicalModel = imported.WModelPath;
+		std::replace(logicalModel.begin(), logicalModel.end(), '\\', '/');
+		if (std::filesystem::path(logicalModel).is_absolute())
+		{
+			std::error_code ec;
+			const std::filesystem::path relative =
+				std::filesystem::relative(logicalModel, std::filesystem::path(WLD_ASSETPATH), ec);
+			if (!ec && !relative.empty())
+				logicalModel = relative.generic_string();
+		}
+
+		std::string text = "已导入 " + logicalModel + " (mesh " + std::to_string(imported.MeshCount)
+			+ " / submesh " + std::to_string(imported.SubmeshCount)
+			+ " / 节点 " + std::to_string(imported.NodeCount)
+			+ " / 材质 " + std::to_string(imported.MaterialPaths.size()) + ")";
+		if (m_SceneState == SceneState::Edit && m_ActiveScene)
+		{
+			std::string instantiateError;
+			const std::size_t created = Gameplay::InstantiateModel(logicalModel, *m_ActiveScene, entt::null,
+				&instantiateError);
+			if (created > 0)
+			{
+				m_Document.MarkDirty();
+				text += ";已实例化 " + std::to_string(created) + " 个实体(文档已标脏)";
+			}
+			else
+			{
+				text += ";实例化失败: " + (instantiateError.empty() ? std::string("模型没有节点") : instantiateError);
+			}
+		}
+		else
+		{
+			text += ";Play/Simulate 下只导入,不实例化";
+		}
+		if (message) *message = text;
+		WLD_CORE_INFO("[model] {0}", text);
+		return true;
+	}
+
+	void EditorLayer::ImportModelDialog()
+	{
+		std::string path = FileDialogs::OpenFile(
+			"glTF Model (*.gltf;*.glb)\0*.gltf;*.glb\0All Files (*.*)\0*.*\0");
+		if (path.empty())
+			return;
+		std::string message;
+		ImportModelFile(path, &message);
 	}
 
 	void EditorLayer::PollAssetHotReload(float deltaSeconds)

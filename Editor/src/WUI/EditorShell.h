@@ -110,6 +110,8 @@ namespace World
 		void ReopenExternalScene() override;
 		// P1b D5:内容浏览器双击 .wmodel → 实例化进当前文档场景。
 		bool InstantiateModelFile(const std::string& logicalPath, std::string* message = nullptr) override;
+		// P1b D5:内容浏览器双击 .gltf/.glb → 导入 + 实例化。
+		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr) override;
 		// W9-2 三层快捷键路由第 2 层:当前焦点面板。
 		//   ① 主窗口处于"已附加面板"模式(顶栏标签)→ 该面板;
 		//   ② 否则某个独立窗口在前台 → 该窗口的当前标签;

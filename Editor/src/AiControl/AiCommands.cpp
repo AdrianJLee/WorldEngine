@@ -936,6 +936,28 @@ namespace World
 			result = "opened material editor for " + path;
 			return true;
 		}
+		if (cmd == "asset.import_gltf")
+		{
+			// P1b D5:与"内容浏览器双击 .gltf"同一条路径(导入 + 实例化),
+			// 供自动化验证编辑器内的导入交互;相对路径按内容根解析。
+			std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			std::filesystem::path resolved(path);
+			if (!resolved.is_absolute())
+				resolved = std::filesystem::path(WLD_ASSETPATH) / resolved;
+			std::string message;
+			if (!ImportModelFile(resolved.string(), &message))
+			{
+				error = message.empty() ? "glTF import failed" : message;
+				return false;
+			}
+			result = message;
+			return true;
+		}
 		if (cmd == "material.get")
 		{
 			const std::string path = arg("path");

@@ -338,6 +338,21 @@ namespace World
 			else
 				WLD_CORE_INFO("[model] {0}", message);
 		}
+		else if (path.extension() == ".gltf" || path.extension() == ".glb")
+		{
+			// P1b D5:glTF 双击 → 导入(.wmodel/.wmat/贴图)并实例化进当前编辑态场景。
+			// 导入后立刻刷新列表,新产出的 .wmodel/.wmat 马上可见。
+			std::string message;
+			if (!m_Host.ImportModelFile(path.string(), &message))
+				WLD_CORE_WARN("[model] import '{0}' failed: {1}", path.string(), message);
+			else
+			{
+				WLD_CORE_INFO("[model] {0}", message);
+				InvalidateContents();
+				if (m_Model.Search[0])
+					UpdateSearch();
+			}
+		}
 		else
 		{
 			const std::string cmd = "start \"\" \"" + std::filesystem::absolute(path).string() + "\"";

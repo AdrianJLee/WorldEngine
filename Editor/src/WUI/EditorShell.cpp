@@ -1963,6 +1963,11 @@ namespace World
 		return m_Editor.InstantiateModelFile(logicalPath, message);
 	}
 
+	bool EditorShell::ImportModelFile(const std::string& sourcePath, std::string* message)
+	{
+		return m_Editor.ImportModelFile(sourcePath, message);
+	}
+
 	EditorPanel* EditorShell::FocusedPanel()
 	{
 		// ① 主窗口处于"已附加面板"模式(顶栏标签):该面板就是焦点面板。
@@ -2219,6 +2224,7 @@ namespace World
 			{ "New", false, [this] { m_Editor.NewScene(); } },
 			{ "Open", false, [this] { m_Editor.OpenScene(); } },
 			{ "Save", false, [this] { m_Editor.SaveScene(); } },
+			{ "Import glTF...", false, [this] { m_Editor.ImportModelDialog(); } },
 			{ "Project Settings", false, [this]
 				{
 					std::string error;
