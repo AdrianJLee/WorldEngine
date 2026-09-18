@@ -11,7 +11,7 @@ end
 function ExampleScript:OnUpdate(dt)
     local direction = vec3.new(1.0, 0.0, 0.0)
     local distance = direction:length() * self.Speed * dt
-    -- 在此编写行为；API 提示来自生成的 WorldEngineAPI.lua。
+    -- 在此编写行为；API 提示来自生成的 WorldEngineAPI.luau（见 .luau-lsp 配置）。
 end
 
 function ExampleScript:OnDestroy()

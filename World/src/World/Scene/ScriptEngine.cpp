@@ -3,6 +3,7 @@
 #include "Components.h"
 #include "LuaStubGenerator.h"
 #include "World/Core/Application.h"
+#include "World/Core/Vfs/Vfs.h"
 #include "World/Core/Asset/ScriptArtifact.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/BehaviorRegistry.h"
@@ -579,6 +580,59 @@ namespace World
 		s_ContentContext = &context;
 	}
 
+	// P2 W8:逻辑脚本路径 → 可编辑的磁盘绝对路径(声明见 Script/HotReload.h)。
+	// 实现落在本文件是为了复用 ReadScriptBytes 的 VFS 选择顺序:登记的内容上下文优先,
+	// 未登记回退 Application(s_ContentContext 是本文件的文件内静态)。
+	// 语义:Vfs::Normalize 校验(拒绝绝对路径/盘符/"."/".." 段)→ VFS 命中且来源是 Package
+	// → 报"包内不可编辑";否则要求 WLD_ASSETPATH/<path> 是常规文件,成功时返回其绝对路径。
+	bool ResolveScriptDiskPath(std::string_view logicalPath, std::filesystem::path& out, std::string* error)
+	{
+		Vfs::Path normalized;
+		std::error_code normalizeError;
+		if (!Vfs::Normalize(logicalPath, normalized, normalizeError))
+		{
+			if (error)
+				*error = "invalid script path (absolute paths and `.`/`..` segments are rejected): "
+					+ std::string(logicalPath);
+			return false;
+		}
+
+		const Vfs::Vfs* vfs = nullptr;
+		if (s_ContentContext)
+			vfs = &s_ContentContext->Vfs();          // U3:headless 只挂包 provider
+		else if (Application::HasInstance())
+			vfs = &Application::Get().GetContext().Vfs();
+		if (vfs)
+		{
+			// 包内脚本是编译产物:没有可编辑的源文件,只有磁盘(开发树)上的脚本可写/可打开。
+			Vfs::StatInfo stat;
+			std::error_code statError;
+			if (vfs->Resolve(normalized, stat, statError) && stat.source == Vfs::Source::Package)
+			{
+				if (error)
+					*error = "包内不可编辑(脚本来自包): " + normalized;
+				return false;
+			}
+		}
+
+		const std::filesystem::path diskPath =
+			std::filesystem::path(WLD_ASSETPATH) / std::filesystem::path(normalized);
+		std::error_code fileError;
+		if (!std::filesystem::is_regular_file(diskPath, fileError))
+		{
+			if (error)
+				*error = "script file not found on disk: " + diskPath.string();
+			return false;
+		}
+
+		std::error_code absoluteError;
+		const std::filesystem::path absolute = std::filesystem::absolute(diskPath, absoluteError);
+		out = absoluteError ? diskPath : absolute;
+		if (error)
+			error->clear();
+		return true;
+	}
+
 	LuauVm& ScriptEngine::GetState()
 	{
 		AssertOwnerThread();
@@ -649,7 +703,7 @@ namespace World
 			return GenerateLuaStubs(Application::Get().GetContext().Schemas());
 
 		std::string error;
-		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.lua"));
+		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.luau"));
 		if (!LuaStubGenerator::Generate(path, error))
 		{
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("[Lua] {0}", error);
@@ -662,7 +716,7 @@ namespace World
 	{
 		AssertOwnerThread();
 		std::string error;
-		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.lua"));
+		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.luau"));
 		const std::vector<const Schema::TypeSchema*> components = schemas.List(Schema::TypeCategory::Component);
 		std::size_t serviceCount = 0;
 		const ScriptServiceBinding* services = GameplayServiceBindings(&serviceCount);

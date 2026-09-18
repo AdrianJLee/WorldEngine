@@ -11,6 +11,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Script/HotReload.h"
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/WuiScriptedInput.h"
@@ -74,6 +75,20 @@ namespace World
 		// Application initialized Lua before attach; Game registration is now merged.
 		if (!ScriptEngine::GenerateLuaStubs())
 			WLD_CORE_ERROR("Automatic Lua API stub generation failed; keeping the last valid declarations.");
+
+		// W8:Luau LSP 脚手架(.vscode/settings.json + .luau-lsp/config.json):create-if-missing,
+		// 磁盘已有(用户改过的)配置绝不覆盖。
+		{
+			// 工作区根 = 项目清单所在目录(Game/;清单里的 content_root = assets),与
+			// 入库的 Game/.vscode、Game/.luau-lsp 一致;没有清单时退回内容根。
+			std::filesystem::path scaffoldRoot = std::filesystem::path(WLD_ASSETPATH);
+			std::filesystem::path manifestPath;
+			if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+				scaffoldRoot = manifestPath.parent_path();
+			std::string scaffoldError;
+			if (!EnsureScriptEditorScaffold(scaffoldRoot, &scaffoldError))
+				WLD_CORE_ERROR("Luau LSP scaffold creation failed: {0}", scaffoldError);
+		}
 
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 		m_SceneRenderer->Init();
@@ -1384,6 +1399,113 @@ namespace World
 		else
 			report("reset to Pending for rebuild");
 		return true;
+	}
+
+	// ---- P2 W8:Scripts 面板的宿主能力 ----
+
+	bool EditorLayer::ScriptsReloadInstance(entt::entity handle, std::string* message)
+	{
+		auto report = [message](const std::string& text)
+		{
+			if (message)
+				*message = text;
+		};
+		if (!m_ActiveScene)
+		{
+			report("no active scene");
+			return false;
+		}
+		if (m_ActiveScene->IsPendingDestroy(handle))
+		{
+			report("entity is pending destroy");
+			return false;
+		}
+		// Play/Simulate 下活动场景不能用非 const GetRegistry()(断言):与帧边界轮询一样,
+		// 走 Entity 的组件指针入口拿到可变组件。
+		Entity entity(m_ActiveScene.get(), handle);
+		auto* script = static_cast<LuaScriptComponent*>(
+			entity.GetComponent(entt::type_id<LuaScriptComponent>().hash()));
+		if (!script)
+		{
+			report("entity has no Lua script component");
+			return false;
+		}
+		const bool ok = ReloadLuaScriptComponent(*script, m_ActiveScene.get(), message);
+		WLD_CORE_INFO("[scripts-panel] reload script (handle={0}): {1} ({2})",
+			static_cast<uint32_t>(handle), ok ? "applied" : "rejected",
+			message ? *message : std::string());
+		return ok;
+	}
+
+	bool EditorLayer::ScriptsOpenExternal(const std::string& logicalPath, std::string* message)
+	{
+		auto report = [message](const std::string& text)
+		{
+			if (message)
+				*message = text;
+		};
+		std::filesystem::path diskPath;
+		std::string resolveError;
+		if (!ResolveScriptDiskPath(logicalPath, diskPath, &resolveError))
+		{
+			report(resolveError.empty() ? ("cannot resolve script path: " + logicalPath) : resolveError);
+			return false;
+		}
+		// 先把解析到的绝对路径写进日志/状态:外部程序是否真的起来依赖系统关联,
+		// "打开去哪儿"这件事以这里的绝对路径为准(自动化断言它)。
+		WLD_CORE_INFO("[scripts-panel] open external: {0} (logical '{1}')", diskPath.string(), logicalPath);
+		const HINSTANCE result = ShellExecuteW(nullptr, L"open", diskPath.wstring().c_str(),
+			nullptr, nullptr, SW_SHOWNORMAL);
+		if (reinterpret_cast<INT_PTR>(result) <= 32)
+		{
+			report("ShellExecuteW failed (code "
+				+ std::to_string(static_cast<long long>(reinterpret_cast<INT_PTR>(result)))
+				+ ") for " + diskPath.string());
+			return false;
+		}
+		report("opened " + diskPath.string());
+		return true;
+	}
+
+	bool EditorLayer::ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message)
+	{
+		auto report = [message](const std::string& text)
+		{
+			if (message)
+				*message = text;
+		};
+		const std::filesystem::path contentRoot = std::filesystem::path(WLD_ASSETPATH);
+		const std::filesystem::path templatePath = contentRoot / "scripts" / "templates" / "WorldScript.lua";
+		std::error_code templateError;
+		if (!std::filesystem::is_regular_file(templatePath, templateError))
+		{
+			report("script template not found: " + templatePath.string());
+			return false;
+		}
+		for (int index = 1; index <= 10000; ++index)
+		{
+			const std::string logicalPath = "scripts/script_" + std::to_string(index) + ".lua";
+			const std::filesystem::path target = contentRoot / std::filesystem::path(logicalPath);
+			std::error_code existsError;
+			if (std::filesystem::exists(target, existsError))
+				continue;   // 名字已被占用:递增,绝不覆盖
+			std::error_code copyError;
+			// copy_options::none 在目标存在时失败 —— 这里同时是"不覆盖"的第二道保险。
+			std::filesystem::copy_file(templatePath, target, std::filesystem::copy_options::none, copyError);
+			if (!copyError)
+			{
+				outLogicalPath = logicalPath;
+				report("created " + logicalPath + " (from templates/WorldScript.lua)");
+				WLD_CORE_INFO("[scripts-panel] created script '{0}' from template", logicalPath);
+				return true;
+			}
+			if (copyError == std::make_error_condition(std::errc::file_exists))
+				continue;   // 竞态:刚被别处创建 → 名字递增重试
+			report("create failed for " + target.string() + ": " + copyError.message());
+			return false;
+		}
+		report("could not find a free scripts/script_<n>.lua name under " + contentRoot.string());
+		return false;
 	}
 
 	void EditorLayer::PollScriptHotReload(float deltaSeconds)

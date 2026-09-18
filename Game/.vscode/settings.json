@@ -1,0 +1,11 @@
+{
+  "luau-lsp.types.definitionFiles": [
+    "assets/scripts/intermediate/WorldEngineAPI.luau"
+  ],
+  "luau-lsp.types.ignoreGlobs": [
+    "assets/scripts/intermediate/**"
+  ],
+  "files.associations": {
+    "*.luau": "luau"
+  }
+}

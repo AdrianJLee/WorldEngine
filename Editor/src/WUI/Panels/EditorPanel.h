@@ -53,6 +53,30 @@ namespace World
 		// D3:在材质编辑器里打开指定 .wmat(内容浏览器双击/Window 菜单共用);
 		// 未注册材质面板时为空实现(不影响其它面板)。
 		virtual void OpenMaterialEditor(const std::string& path) {}
+		// ---- W8:脚本面板(Panels/ScriptsPanel)协作;默认空实现 = 宿主未接线 ----
+		// 重载一个场景脚本实例。实现必须复用 EditorLayer::ReloadLuaScriptComponent ——
+		// 与属性面板 Reload 按钮、帧边界轮询、AI script.reload 同一条入口,面板不自己编排重载。
+		virtual bool ScriptsReloadInstance(entt::entity handle, std::string* message = nullptr)
+		{
+			(void)handle;
+			if (message) *message = "scripts panel reload is not wired to a host";
+			return false;
+		}
+		// 用系统默认程序打开磁盘上的脚本(逻辑路径;包内来源/非法路径 → false + 可读文本)。
+		virtual bool ScriptsOpenExternal(const std::string& logicalPath, std::string* message = nullptr)
+		{
+			(void)logicalPath;
+			if (message) *message = "scripts panel open is not wired to a host";
+			return false;
+		}
+		// 从 scripts/templates/WorldScript.lua 复制出 scripts/script_<n>.lua(磁盘冲突递增、永不覆盖);
+		// 成功时 outLogicalPath = 新脚本的逻辑路径,并把提示写进 message。
+		virtual bool ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message = nullptr)
+		{
+			(void)outLogicalPath;
+			if (message) *message = "scripts panel create is not wired to a host";
+			return false;
+		}
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

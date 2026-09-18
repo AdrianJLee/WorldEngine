@@ -618,4 +618,5 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field __EntityID Entity Deprecated compatibility alias for the Entity object, not a UUID; use entity.
 ---@field OnCreate? fun(self: WorldScript) Called once when the instance starts.
 ---@field OnUpdate? fun(self: WorldScript, dt: number) Updated on the scene thread; dt is elapsed seconds.
+---@field OnUI? fun(self: WorldScript) Called once per UI frame while the instance is running.
 ---@field OnDestroy? fun(self: WorldScript) Cleanup callback, attempted at most once after creation begins.

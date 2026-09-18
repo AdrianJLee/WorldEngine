@@ -56,6 +56,55 @@ namespace World
 			out = buffer.str();
 			return true;
 		}
+
+		// W8 脚手架固定内容:与入库的 Game/.vscode/settings.json、Game/.luau-lsp/config.json
+		// 逐字节一致(World.LuauStubSchema 的漂移门禁只盯存根,这两份由 World.ScriptWorkflow 对照)。
+		// luau-lsp 的路径相对工作区根(Game/):存根在 assets/scripts/intermediate/ 下。
+		constexpr const char* kEditorVsCodeSettings =
+			"{\n"
+			"  \"luau-lsp.types.definitionFiles\": [\n"
+			"    \"assets/scripts/intermediate/WorldEngineAPI.luau\"\n"
+			"  ],\n"
+			"  \"luau-lsp.types.ignoreGlobs\": [\n"
+			"    \"assets/scripts/intermediate/**\"\n"
+			"  ],\n"
+			"  \"files.associations\": {\n"
+			"    \"*.luau\": \"luau\"\n"
+			"  }\n"
+			"}\n";
+		constexpr const char* kEditorLuauLspConfig =
+			"{\n"
+			"  \"definitions\": [\n"
+			"    \"assets/scripts/intermediate/WorldEngineAPI.luau\"\n"
+			"  ],\n"
+			"  \"ignoreGlobs\": [\n"
+			"    \"assets/scripts/intermediate/**\"\n"
+			"  ]\n"
+			"}\n";
+
+		bool WriteFileIfMissing(const std::filesystem::path& path, const char* content, std::string* error)
+		{
+			std::error_code existsError;
+			if (std::filesystem::exists(path, existsError))
+				return true;   // 已存在(无论内容)= 用户文件:create-if-missing 绝不覆盖
+			std::error_code directoryError;
+			if (!path.parent_path().empty())
+				std::filesystem::create_directories(path.parent_path(), directoryError);
+			std::ofstream file(path, std::ios::binary | std::ios::out | std::ios::trunc);
+			if (!file.is_open())
+			{
+				if (error) *error = "cannot create " + path.string();
+				return false;
+			}
+			file << content;
+			file.flush();
+			if (!file.good())
+			{
+				if (error) *error = "cannot write " + path.string();
+				return false;
+			}
+			return true;
+		}
 	}
 
 	uint64_t FingerprintScriptBytes(const void* data, std::size_t size)
@@ -109,6 +158,24 @@ namespace World
 		if (!ResolveScriptSourceBytes(logicalPath, bytes, error))
 			return false;
 		source.assign(bytes.begin(), bytes.end());
+		return true;
+	}
+
+	// W8:ResolveScriptDiskPath 的实现放在 Scene/ScriptEngine.cpp —— 它要复用 ReadScriptBytes
+	// 的"内容上下文优先"VFS 选择顺序,而登记的内容上下文是 ScriptEngine.cpp 的文件内静态。
+
+	bool EnsureScriptEditorScaffold(const std::filesystem::path& contentRoot, std::string* error)
+	{
+		if (contentRoot.empty())
+		{
+			if (error) *error = "content root is empty";
+			return false;
+		}
+		if (!WriteFileIfMissing(contentRoot / ".vscode" / "settings.json", kEditorVsCodeSettings, error))
+			return false;
+		if (!WriteFileIfMissing(contentRoot / ".luau-lsp" / "config.json", kEditorLuauLspConfig, error))
+			return false;
+		if (error) error->clear();
 		return true;
 	}
 

@@ -8,6 +8,7 @@
 #include "Panels/SavePanel.h"
 #include "Panels/LevelPanel.h"
 #include "Panels/MaterialEditorPanel.h"
+#include "Panels/ScriptsPanel.h"
 #include "Panels/ViewportPanel.h"
 #include "Panels/WidgetGalleryPanel.h"
 #include "Panels/WindowsPanel.h"
@@ -105,6 +106,10 @@ namespace World
 		bool AttachSlotHighlighted() const override { return m_AttachSlotHighlight; }
 		// W8:面板层拿到存档服务(由 EditorLayer 持有并注入场景)。
 		Gameplay::SaveService* GetSaveService() override;
+		// W8:脚本面板的三个宿主能力(转发给 EditorLayer;面板只依赖 PanelHost)。
+		bool ScriptsReloadInstance(entt::entity handle, std::string* message) override;
+		bool ScriptsOpenExternal(const std::string& logicalPath, std::string* message) override;
+		bool ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message) override;
 		// Play/Simulate = 只读查看(用户 2026-09-15 确认:Play 下属性面板可查看不可改)。
 		// 定义放 .cpp:本头文件只有 EditorLayer 的前置声明。
 		bool IsReadOnlyMode() const override;

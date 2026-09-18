@@ -60,6 +60,8 @@ namespace World
 			// 独立窗口(用户指定):Widget Gallery 与 Input Map。
 			{ "gallery",         EditorShell::PanelForm::Independent, { 120.0f, 120.0f, 520.0f, 400.0f } },
 			{ "input",           EditorShell::PanelForm::Independent, { 660.0f, 120.0f, 440.0f, 340.0f } },
+			// W8:Scripts 面板(独立窗口,诊断行/按钮在默认客户区内,便于无鼠标自动化)。
+			{ "scripts",         EditorShell::PanelForm::Independent, { 120.0f, 160.0f, 760.0f, 470.0f } },
 			// 注:D3 材质编辑器是**动态面板**(每个材质一个 "material:<path>" 实例),
 			// 不在这张静态声明表里,由 IsMaterialPanel/EditorShell::OpenMaterialEditor 处理。
 		};
@@ -104,6 +106,7 @@ namespace World
 		m_PanelRegistry.emplace("input", std::make_unique<InputMapPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 		m_PanelRegistry.emplace("material", std::make_unique<MaterialEditorPanel>());
+		m_PanelRegistry.emplace("scripts", std::make_unique<ScriptsPanel>());
 
 		// 恢复"上次退出时开着"的独立窗口:存档里仍有浮动记录 = 上次开着(关掉的不会自动弹出)。
 		// 按屏幕矩形分组重建:同一窗口的多个标签共享一个容器;AddFloatWindow 内部按面板去重。
@@ -231,6 +234,22 @@ namespace World
 	Gameplay::SaveService* EditorShell::GetSaveService()
 	{
 		return m_Editor.GetSaveService();
+	}
+
+	// W8:Scripts 面板的三个宿主能力 —— 只做转发,策略全部留在 EditorLayer(路径解析/唯一重载入口)。
+	bool EditorShell::ScriptsReloadInstance(entt::entity handle, std::string* message)
+	{
+		return m_Editor.ScriptsReloadInstance(handle, message);
+	}
+
+	bool EditorShell::ScriptsOpenExternal(const std::string& logicalPath, std::string* message)
+	{
+		return m_Editor.ScriptsOpenExternal(logicalPath, message);
+	}
+
+	bool EditorShell::ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message)
+	{
+		return m_Editor.ScriptsCreateFromTemplate(outLogicalPath, message);
 	}
 
 	bool EditorShell::IsReadOnlyMode() const

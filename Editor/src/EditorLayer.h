@@ -107,6 +107,15 @@ namespace World
 		// scene 只用于把"编辑态场景不跑脚本"写进 message,可为 null。
 		static bool ReloadLuaScriptComponent(LuaScriptComponent& script, Scene* scene, std::string* message = nullptr);
 
+		// ---- P2 W8:Scripts 面板的宿主能力(EditorShell 作为 PanelHost 转发到这里)----
+		// 重载指定实体的脚本:组件查找走 Entity 的组件指针入口(Play/Simulate 下也不触发
+		// "活动场景禁止结构写"断言),重载本身仍复用上面的唯一入口。
+		bool ScriptsReloadInstance(entt::entity handle, std::string* message = nullptr);
+		// 用系统默认程序打开磁盘上的脚本(ResolveScriptDiskPath 解析;包内/非法路径 → false)。
+		bool ScriptsOpenExternal(const std::string& logicalPath, std::string* message = nullptr);
+		// 从 scripts/templates/WorldScript.lua 复制出 scripts/script_<n>.lua(冲突递增、永不覆盖)。
+		bool ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message = nullptr);
+
 		bool OnKeyPressed(KeyPressedEvent& e);
 		bool OnWindowClose(WindowCloseEvent& e);
 
