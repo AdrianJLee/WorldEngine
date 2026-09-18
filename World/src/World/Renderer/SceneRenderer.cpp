@@ -734,10 +734,33 @@ namespace World
 						draw.MaterialAsset.get(), draw.Color });
 					return found != buckets.end() && found->second.size() >= kMinBatchInstances;
 				};
-				// 稳定分组:不透明按原顺序,透明随后(同组内保持遍历顺序)。
+				// 稳定分组:不透明按原顺序;**透明按"到相机距离从远到近"**(D8 收尾 ——
+				// 不排序时后画的近物体会被先画的远物体混合盖掉,画面随视角抖)。
+				std::vector<uint32_t> transparentOrder;
+				{
+					const glm::vec3 cameraPosition = glm::vec3(cameraTransform[3]);
+					std::vector<std::pair<float, uint32_t>> sorted;
+					for (const uint32_t drawIndex : visibleDraws)
+					{
+						const MeshDraw& draw = draws[drawIndex];
+						if (!draw.Transparent)
+							continue;
+						const glm::vec3 center = (draw.WorldMin + draw.WorldMax) * 0.5f;
+						const glm::vec3 delta = center - cameraPosition;
+						sorted.emplace_back(glm::dot(delta, delta), drawIndex);
+					}
+					std::stable_sort(sorted.begin(), sorted.end(),
+						[](const std::pair<float, uint32_t>& left, const std::pair<float, uint32_t>& right)
+						{
+							return left.first > right.first;   // 远的先画
+						});
+					transparentOrder.reserve(sorted.size());
+					for (const auto& [distance, drawIndex] : sorted)
+						transparentOrder.push_back(drawIndex);
+				}
 				for (const bool transparentPass : { false, true })
 				{
-					for (const uint32_t drawIndex : visibleDraws)
+					for (const uint32_t drawIndex : (transparentPass ? transparentOrder : visibleDraws))
 					{
 						const MeshDraw& draw = draws[drawIndex];
 						// D8b-2:属于合批桶的不透明 draw 交给下面的实例化提交(避免重复画)。
