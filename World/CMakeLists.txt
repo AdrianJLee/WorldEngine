@@ -63,6 +63,15 @@ if(MSVC)
     target_compile_options(WorldBox2d PRIVATE /Wall /wd4820 /wd5045 /wd4061 /wd4711 /wd4710)
 endif()
 
+# P1b D5:glTF 2.0 导入(cgltf,锁定 v1.15)。单头库 + 本地包装源,与 stb_image 同款
+# "普通 vendor 目录"做法(不进 submodule);include 只暴露给 World。
+add_library(cgltf STATIC vendor/cgltf/cgltf.c)
+target_include_directories(cgltf PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/vendor/cgltf")
+set_target_properties(cgltf PROPERTIES
+    C_STANDARD 17
+    C_STANDARD_REQUIRED YES
+)
+
 # P2 脚本前端:Luau(只编库,不编 CLI/tests/Web)。sol2 + PUC Lua 已在 W1b 移除。
 set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -178,6 +187,7 @@ target_link_libraries(World PRIVATE
     # WindowsWindow/WindowsPlatformUtils 的 IME 接口(ImmGetContext 等);
     # 此前由已移除的第三方 UI 依赖传递链接,现需显式声明。
     imm32
+    cgltf
     Luau.VM
     Luau.Compiler
     yaml-cpp

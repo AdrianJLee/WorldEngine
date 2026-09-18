@@ -1,0 +1,91 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "WorldEngine D5 headless fixture (pure text; binary buffer is an inline base64 data URI)"
+  },
+  "scene": 0,
+  "scenes": [
+    { "name": "D5Scene", "nodes": [0] }
+  ],
+  "nodes": [
+    { "name": "Root", "translation": [1.0, 2.0, 3.0], "children": [1] },
+    {
+      "name": "Child",
+      "mesh": 0,
+      "translation": [0.0, 1.0, 0.0],
+      "rotation": [0.0, 0.70710678, 0.0, 0.70710678],
+      "children": [2]
+    },
+    { "name": "Grandchild", "mesh": 0, "scale": [0.5, 0.5, 0.5] }
+  ],
+  "meshes": [
+    {
+      "name": "D5Mesh",
+      "primitives": [
+        {
+          "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 },
+          "indices": 3,
+          "material": 0
+        },
+        {
+          "attributes": { "POSITION": 4, "TEXCOORD_0": 5 },
+          "indices": 6,
+          "material": 1
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "name": "Tex",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+        "metallicFactor": 0.0,
+        "roughnessFactor": 0.8,
+        "baseColorTexture": { "index": 0 }
+      }
+    },
+    {
+      "name": "Solid",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [0.25, 0.5, 1.0, 1.0],
+        "metallicFactor": 0.2,
+        "roughnessFactor": 0.6
+      }
+    }
+  ],
+  "textures": [
+    { "source": 0, "sampler": 0 }
+  ],
+  "images": [
+    { "name": "Pixel", "bufferView": 7, "mimeType": "image/png" }
+  ],
+  "samplers": [
+    { "magFilter": 9729, "minFilter": 9729, "wrapS": 10497, "wrapT": 10497 }
+  ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [-1.0, 0.0, 0.0], "max": [1.0, 1.0, 0.0] },
+    { "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3" },
+    { "bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2" },
+    { "bufferView": 3, "componentType": 5125, "count": 3, "type": "SCALAR" },
+    { "bufferView": 4, "componentType": 5126, "count": 4, "type": "VEC3", "min": [-1.0, 0.0, 1.0], "max": [1.0, 1.0, 1.0] },
+    { "bufferView": 5, "componentType": 5126, "count": 4, "type": "VEC2" },
+    { "bufferView": 6, "componentType": 5125, "count": 6, "type": "SCALAR" }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962 },
+    { "buffer": 0, "byteOffset": 36, "byteLength": 36, "target": 34962 },
+    { "buffer": 0, "byteOffset": 72, "byteLength": 24, "target": 34962 },
+    { "buffer": 0, "byteOffset": 96, "byteLength": 12, "target": 34963 },
+    { "buffer": 0, "byteOffset": 108, "byteLength": 48, "target": 34962 },
+    { "buffer": 0, "byteOffset": 156, "byteLength": 32, "target": 34962 },
+    { "buffer": 0, "byteOffset": 188, "byteLength": 24, "target": 34963 },
+    { "buffer": 0, "byteOffset": 212, "byteLength": 69 }
+  ],
+  "buffers": [
+    {
+      "byteLength": 284,
+      "uri": "data:application/octet-stream;base64,AACAvwAAAAAAAAAAAAAAAAAAgD8AAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAAA/AACAPwAAgD8AAAAAAAAAAAEAAAACAAAAAACAvwAAAAAAAIA/AACAPwAAAAAAAIA/AACAPwAAgD8AAIA/AACAvwAAgD8AAIA/AAAAAAAAAAAAAIA/AAAAAAAAgD8AAIA/AAAAAAAAgD8AAAAAAQAAAAIAAAAAAAAAAgAAAAMAAACJUE5HDQoaCgAAAA1JSERSAAAAAQAAAAEIAgAAAJB3U94AAAAMSURBVHjaY/jPwAAAAwEBAPcDQUMAAAAASUVORK5CYIIAAAA="
+    }
+  ]
+}

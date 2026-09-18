@@ -40,6 +40,10 @@ namespace World
 			Rhi::Handle<Rhi::Buffer> VertexBuffer;
 			Rhi::Handle<Rhi::Buffer> IndexBuffer;
 			uint32_t IndexCount = 0;
+			// D5:持有 Mesh 的强引用。MeshCache 按裸指针做键,而 .wmodel 的进程内缓存可以被
+			// ClearWModelCache 清空(或资产热重载释放旧 Mesh)——若不做这个防重,新 Mesh 复用
+			// 同一地址时会命中旧 GPU 缓冲(索引数/顶点数据全部串味)。持有 Owner 后地址唯一。
+			Ref<Mesh> Owner;
 		};
 
 		struct State
@@ -143,7 +147,7 @@ namespace World
 
 		void BindObject(State& state, uint32_t slot, uint32_t index, const MeshGpu& mesh,
 			const Rhi::Handle<Rhi::Pipeline>& pipeline, const Rhi::Handle<Rhi::DescriptorSet>& objectSet,
-			const Rhi::Handle<Rhi::DescriptorSet>& materialSet)
+			const Rhi::Handle<Rhi::DescriptorSet>& materialSet, uint32_t indexCount, uint32_t firstIndex)
 		{
 			state.CommandBuffer->BindPipeline(pipeline);
 			state.CommandBuffer->BindDescriptorSet(objectSet, 1);
@@ -151,11 +155,13 @@ namespace World
 				state.CommandBuffer->BindDescriptorSet(materialSet, 2);
 			else if (state.DefaultMaterialSets[slot % Renderer::FramesInFlight])
 				state.CommandBuffer->BindDescriptorSet(state.DefaultMaterialSets[slot % Renderer::FramesInFlight], 2);
-		state.CommandBuffer->BindVertexBuffer(0, mesh.VertexBuffer);
-		state.CommandBuffer->BindIndexBuffer(mesh.IndexBuffer);
-		state.CommandBuffer->DrawIndexed(mesh.IndexCount);
+			state.CommandBuffer->BindVertexBuffer(0, mesh.VertexBuffer);
+			state.CommandBuffer->BindIndexBuffer(mesh.IndexBuffer);
+			// D5:firstIndex 让"一个顶点/索引缓冲 + 多个 submesh"共用同一份 GPU 资源,
+			// 每个 submesh 仍是独立绘制与独立对象槽位(后端已支持 BaseVertex 语义)。
+			state.CommandBuffer->DrawIndexed(indexCount, 1, firstIndex);
 			state.Stats.DrawCalls++;
-			state.Stats.Triangles += mesh.IndexCount / 3;
+			state.Stats.Triangles += indexCount / 3;
 			(void)slot; (void)index;
 		}
 
@@ -221,6 +227,94 @@ namespace World
 				traced, slot, index, indexCount,
 				transform[3][0], transform[3][1], transform[3][2],
 				color.r, color.g, color.b, color.a);
+		}
+
+		// D2b/D3/D5 的三条提交路径(整网格常量色 / 整网格材质 / 逐 submesh)共用同一实现,
+		// 保证对象槽位分配、材质描述符、统计口径完全一致。
+		// 网格 GPU 缓冲的惰性创建放在匿名命名空间里(成员 EnsureMeshBuffers 只是转发),
+		// 这样本辅助函数与成员提交路径共用同一份实现。
+		void EnsureMeshBuffersFor(State& state, const Ref<Mesh>& mesh)
+		{
+			if (!mesh || state.MeshCache.find(mesh.get()) != state.MeshCache.end())
+				return;
+
+			const MeshDesc& desc = mesh->GetDesc();
+			Rhi::BufferDesc vertexDesc;
+			vertexDesc.Size = desc.VertexData.size();
+			vertexDesc.Usage = Rhi::BufferUsageVertex;
+			vertexDesc.InitialData = desc.VertexData.data();
+			vertexDesc.DebugName = desc.DebugName + ".VB";
+			Rhi::BufferDesc indexDesc;
+			indexDesc.Size = desc.Indices.size() * sizeof(uint32_t);
+			indexDesc.Usage = Rhi::BufferUsageIndex;
+			indexDesc.InitialData = desc.Indices.data();
+			indexDesc.DebugName = desc.DebugName + ".IB";
+
+			MeshGpu gpu;
+			gpu.VertexBuffer = Renderer::GetDevice()->CreateBuffer(vertexDesc);
+			gpu.IndexBuffer = Renderer::GetDevice()->CreateBuffer(indexDesc);
+			gpu.IndexCount = mesh->GetIndexCount();
+			// D5:缓存按裸指针做键 —— 必须持有 Mesh 强引用,防止 Mesh 被释放后新对象复用同一地址。
+			gpu.Owner = mesh;
+			state.MeshCache.emplace(mesh.get(), gpu);
+		}
+
+		uint32_t SubmitObject(State& state, const Ref<Mesh>& mesh, const Ref<Material>& material,
+			const glm::vec4& baseColor, const glm::mat4& transform, int32_t entityId,
+			uint32_t indexCount, uint32_t firstIndex)
+		{
+			if (!mesh || !state.CommandBuffer || !state.Pipeline)
+				return UINT32_MAX;
+			if (state.ObjectIndex >= kObjectsPerFrame)
+				return UINT32_MAX;
+			if (indexCount == 0)
+				return UINT32_MAX;
+
+			EnsureMeshBuffersFor(state, mesh);
+			const auto cached = state.MeshCache.find(mesh.get());
+			if (cached == state.MeshCache.end() || !cached->second.VertexBuffer)
+				return UINT32_MAX;
+
+			const MaterialDesc* desc = material ? &material->GetDesc() : nullptr;
+			const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+			const uint32_t index = state.ObjectIndex++;
+
+			ObjectUniforms uniforms;
+			uniforms.Model = transform;
+			uniforms.EntityId = { entityId, 0, 0, 0 };
+			if (desc)
+			{
+				uniforms.BaseColor = desc->BaseColor;
+				uniforms.MetallicRoughness = { desc->Metallic, desc->Roughness, 0.0f, 0.0f };
+				uniforms.Emissive = { desc->Emissive.x, desc->Emissive.y, desc->Emissive.z, 0.0f };
+				uniforms.Flags = {
+					desc->AlbedoTexture.empty() ? 0.0f : 1.0f,
+					desc->NormalTexture.empty() ? 0.0f : 1.0f,
+					desc->DoubleSided ? 1.0f : 0.0f,
+					0.0f };
+			}
+			else
+			{
+				uniforms.BaseColor = baseColor;
+				uniforms.MetallicRoughness = { 0.0f, 0.5f, 0.0f, 0.0f };
+				uniforms.Emissive = { 0.0f, 0.0f, 0.0f, 0.0f };
+				uniforms.Flags = { 0.0f, 0.0f, 0.0f, 0.0f };
+			}
+			WriteObjectUniforms(state, slot, index, uniforms,
+				state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index]);
+
+			Rhi::Handle<Rhi::DescriptorSet> materialSet;
+			const Rhi::Handle<Rhi::Pipeline>* pipeline = &state.Pipeline;
+			if (desc)
+			{
+				materialSet = MaterialSetFor(state, material, slot);
+				if (desc->BlendMode == MaterialBlendMode::Transparent)
+					pipeline = &state.TransparentPipeline;
+			}
+			BindObject(state, slot, index, cached->second, *pipeline, state.ObjectSets[slot][index],
+				materialSet, indexCount, firstIndex);
+			TraceSubmit(index, slot, indexCount, transform, uniforms.BaseColor);
+			return index;
 		}
 	}
 
@@ -501,27 +595,8 @@ namespace World
 
 	void Renderer3D::EnsureMeshBuffers(const Ref<Mesh>& mesh)
 	{
-		State& state = GetState();
-		if (state.MeshCache.find(mesh.get()) != state.MeshCache.end())
-			return;
-
-		const MeshDesc& desc = mesh->GetDesc();
-		Rhi::BufferDesc vertexDesc;
-		vertexDesc.Size = desc.VertexData.size();
-		vertexDesc.Usage = Rhi::BufferUsageVertex;
-		vertexDesc.InitialData = desc.VertexData.data();
-		vertexDesc.DebugName = desc.DebugName + ".VB";
-		Rhi::BufferDesc indexDesc;
-		indexDesc.Size = desc.Indices.size() * sizeof(uint32_t);
-		indexDesc.Usage = Rhi::BufferUsageIndex;
-		indexDesc.InitialData = desc.Indices.data();
-		indexDesc.DebugName = desc.DebugName + ".IB";
-
-		MeshGpu gpu;
-		gpu.VertexBuffer = Renderer::GetDevice()->CreateBuffer(vertexDesc);
-		gpu.IndexBuffer = Renderer::GetDevice()->CreateBuffer(indexDesc);
-		gpu.IndexCount = mesh->GetIndexCount();
-		state.MeshCache.emplace(mesh.get(), gpu);
+		// 实现在匿名命名空间的 EnsureMeshBuffersFor(逐 submesh 的提交辅助函数也要用它)。
+		EnsureMeshBuffersFor(GetState(), mesh);
 	}
 
 	void Renderer3D::BeginScene(const glm::mat4&, const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer)
@@ -557,33 +632,8 @@ namespace World
 	uint32_t Renderer3D::Submit(const Ref<Mesh>& mesh, const glm::mat4& transform, const glm::vec4& baseColor,
 		int32_t entityId)
 	{
-		State& state = GetState();
-		if (!mesh || !state.CommandBuffer || !state.Pipeline)
-			return UINT32_MAX;
-		if (state.ObjectIndex >= kObjectsPerFrame)
-			return UINT32_MAX;
-
-		EnsureMeshBuffers(mesh);
-		const auto cached = state.MeshCache.find(mesh.get());
-		if (cached == state.MeshCache.end() || !cached->second.VertexBuffer)
-			return UINT32_MAX;
-
-		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
-		const uint32_t index = state.ObjectIndex++;
-
-		ObjectUniforms uniforms;
-		uniforms.Model = transform;
-		uniforms.BaseColor = baseColor;
-		uniforms.MetallicRoughness = { 0.0f, 0.5f, 0.0f, 0.0f };
-		uniforms.Emissive = { 0.0f, 0.0f, 0.0f, 0.0f };
-		uniforms.Flags = { 0.0f, 0.0f, 0.0f, 0.0f };
-		uniforms.EntityId = { entityId, 0, 0, 0 };
-		WriteObjectUniforms(state, slot, index, uniforms,
-			state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index]);
-
-		BindObject(state, slot, index, cached->second, state.Pipeline, state.ObjectSets[slot][index], nullptr);
-		TraceSubmit(index, slot, cached->second.IndexCount, transform, baseColor);
-		return index;
+		return SubmitObject(GetState(), mesh, nullptr, baseColor, transform, entityId,
+			mesh ? mesh->GetIndexCount() : 0u, 0u);
 	}
 
 	uint32_t Renderer3D::Submit(const Ref<Mesh>& mesh, const Ref<Material>& material, const glm::mat4& transform,
@@ -591,41 +641,28 @@ namespace World
 	{
 		if (!material)
 			return Submit(mesh, transform, glm::vec4(1.0f), entityId);
-		State& state = GetState();
-		if (!mesh || !state.CommandBuffer || !state.Pipeline)
+		return SubmitObject(GetState(), mesh, material, glm::vec4(1.0f), transform, entityId,
+			mesh ? mesh->GetIndexCount() : 0u, 0u);
+	}
+
+	uint32_t Renderer3D::SubmitSubmesh(const Ref<Mesh>& mesh, uint32_t submeshIndex, const Ref<Material>& material,
+		const glm::mat4& transform, int32_t entityId)
+	{
+		if (!mesh || submeshIndex >= mesh->GetSubmeshes().size())
 			return UINT32_MAX;
-		if (state.ObjectIndex >= kObjectsPerFrame)
+		const MeshSubmesh& submesh = mesh->GetSubmeshes()[submeshIndex];
+		return SubmitObject(GetState(), mesh, material, glm::vec4(1.0f), transform, entityId,
+			submesh.IndexCount, submesh.IndexOffset);
+	}
+
+	uint32_t Renderer3D::SubmitSubmesh(const Ref<Mesh>& mesh, uint32_t submeshIndex, const glm::vec4& baseColor,
+		const glm::mat4& transform, int32_t entityId)
+	{
+		if (!mesh || submeshIndex >= mesh->GetSubmeshes().size())
 			return UINT32_MAX;
-
-		EnsureMeshBuffers(mesh);
-		const auto cached = state.MeshCache.find(mesh.get());
-		if (cached == state.MeshCache.end() || !cached->second.VertexBuffer)
-			return UINT32_MAX;
-
-		const MaterialDesc& desc = material->GetDesc();
-		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
-		const uint32_t index = state.ObjectIndex++;
-
-		ObjectUniforms uniforms;
-		uniforms.Model = transform;
-		uniforms.BaseColor = desc.BaseColor;
-		uniforms.MetallicRoughness = { desc.Metallic, desc.Roughness, 0.0f, 0.0f };
-		uniforms.Emissive = { desc.Emissive.x, desc.Emissive.y, desc.Emissive.z, 0.0f };
-		uniforms.Flags = {
-			desc.AlbedoTexture.empty() ? 0.0f : 1.0f,
-			desc.NormalTexture.empty() ? 0.0f : 1.0f,
-			desc.DoubleSided ? 1.0f : 0.0f,
-			0.0f };
-		uniforms.EntityId = { entityId, 0, 0, 0 };
-		WriteObjectUniforms(state, slot, index, uniforms,
-			state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index]);
-
-		Rhi::Handle<Rhi::DescriptorSet> materialSet = MaterialSetFor(state, material, slot);
-		const Rhi::Handle<Rhi::Pipeline>& pipeline = desc.BlendMode == MaterialBlendMode::Transparent
-			? state.TransparentPipeline : state.Pipeline;
-		BindObject(state, slot, index, cached->second, pipeline, state.ObjectSets[slot][index], materialSet);
-		TraceSubmit(index, slot, cached->second.IndexCount, transform, desc.BaseColor);
-		return index;
+		const MeshSubmesh& submesh = mesh->GetSubmeshes()[submeshIndex];
+		return SubmitObject(GetState(), mesh, nullptr, baseColor, transform, entityId,
+			submesh.IndexCount, submesh.IndexOffset);
 	}
 
 	uint32_t Renderer3D::ReserveSlotBase(uint32_t identity, uint32_t span)
@@ -849,6 +886,42 @@ namespace World
 		state.CommandBuffer->BindVertexBuffer(0, cached->second.VertexBuffer);
 		state.CommandBuffer->BindIndexBuffer(cached->second.IndexBuffer);
 		state.CommandBuffer->DrawIndexed(cached->second.IndexCount);
+		return index;
+	}
+
+	uint32_t Renderer3D::SubmitShadowSubmesh(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+		const glm::mat4& transform)
+	{
+		State& state = GetState();
+		if (!mesh || !state.CommandBuffer || !state.ShadowPipeline)
+			return UINT32_MAX;
+		if (submeshIndex >= mesh->GetSubmeshes().size())
+			return UINT32_MAX;
+		if (state.ShadowObjectIndex >= kObjectsPerFrame)
+			return UINT32_MAX;
+		const MeshSubmesh& submesh = mesh->GetSubmeshes()[submeshIndex];
+		if (submesh.IndexCount == 0)
+			return UINT32_MAX;
+
+		EnsureMeshBuffers(mesh);
+		const auto cached = state.MeshCache.find(mesh.get());
+		if (cached == state.MeshCache.end() || !cached->second.VertexBuffer)
+			return UINT32_MAX;
+
+		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		const uint32_t index = state.ShadowObjectIndex++;
+
+		// 阴影只需要 u_Model(顶点按 u_ShadowViewProjection × u_Model 变换),其余字段留默认。
+		ObjectUniforms uniforms;
+		uniforms.Model = transform;
+		WriteObjectUniforms(state, slot, index, uniforms,
+			state.ShadowUniformBuffers[slot][index], state.ShadowObjectSets[slot][index]);
+
+		state.CommandBuffer->BindPipeline(state.ShadowPipeline);
+		state.CommandBuffer->BindDescriptorSet(state.ShadowObjectSets[slot][index], 1);
+		state.CommandBuffer->BindVertexBuffer(0, cached->second.VertexBuffer);
+		state.CommandBuffer->BindIndexBuffer(cached->second.IndexBuffer);
+		state.CommandBuffer->DrawIndexed(submesh.IndexCount, 1, submesh.IndexOffset);
 		return index;
 	}
 

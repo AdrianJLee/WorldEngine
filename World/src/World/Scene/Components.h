@@ -13,6 +13,7 @@
 
 #include <any>
 #include <box2d/id.h>
+#include <cstdint>
 #include <filesystem>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -179,6 +180,9 @@ namespace World
 		// D3:材质资产路径(相对 Game/assets,形如 materials/steel.wmat)。
 		// 空 = 旧行为:用上面的 Color 直接作为基色。
 		std::string MaterialPath;
+		// D5:.wmodel 有节点树时,选择"第几个 mesh"(节点引用 mesh 下标);
+		// 内置 primitive(cube/plane/sphere)与无 submesh 的网格忽略该字段。
+		int32_t MeshIndex = 0;
 
 		WE_SCHEMA_BODY(World, MeshRendererComponent, Component)
 			// 同上:四个字段 id 已随存档/材质资产落盘(D2c/D3 期间手写),显式钉住。
@@ -186,6 +190,8 @@ namespace World
 			WE_FIELD(Color, Vec4, Id(0x4D455348434F4C52));
 			WE_FIELD(MeshPath, String, Id(0x4D45534850415448));
 			WE_FIELD(MaterialPath, String, Id(0x4D4154455249414C));
+			// D5:字段 id 显式钉住("MESHINDX"),默认 0;.wmodel 节点树选择 mesh 用。
+			WE_FIELD(MeshIndex, Int32, Id(0x4D455348494E4458), Default(0));
 		WE_SCHEMA_END
 	};
 

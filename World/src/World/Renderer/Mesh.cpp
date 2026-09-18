@@ -1,10 +1,15 @@
 #include "wldpch.h"
 #include "World/Renderer/Mesh.h"
 
+#include "World/Core/Asset/WModelIO.h"
+
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <unordered_map>
 
 namespace World
 {
@@ -30,6 +35,15 @@ namespace World
 			case Format::R32G32B32A32_SFLOAT: return 16;
 			default: return 0;
 			}
+		}
+
+		// .wmodel 进程内缓存(键 = 规范化路径)。不导出:生命周期与进程一致,
+		// Renderer3D 的 GPU 缓冲缓存按 Mesh 指针做键,因此 MeshGpu 里持有 Owner Ref,
+		// 保证"缓存被清空后新 Mesh 复用同一地址"不会命中旧 GPU 资源。
+		std::unordered_map<std::string, Ref<Mesh>>& WModelCache()
+		{
+			static std::unordered_map<std::string, Ref<Mesh>> cache;
+			return cache;
 		}
 	}
 
@@ -93,6 +107,100 @@ namespace World
 	}
 
 	Mesh::Mesh(MeshDesc desc, MeshBounds bounds) : m_Desc(std::move(desc)), m_Bounds(bounds) {}
+
+	Mesh::Mesh(MeshDesc desc, MeshBounds bounds, std::vector<MeshSubmesh> submeshes,
+		std::vector<MeshRange> meshes, std::vector<MeshNode> nodes, std::vector<std::string> materialSlots)
+		: m_Desc(std::move(desc)), m_Bounds(bounds), m_Submeshes(std::move(submeshes)),
+		m_Meshes(std::move(meshes)), m_Nodes(std::move(nodes)), m_MaterialSlots(std::move(materialSlots))
+	{
+	}
+
+	Ref<Mesh> Mesh::LoadWModel(const std::string& path, std::string* error)
+	{
+		if (path.empty())
+		{
+			if (error) *error = "path is empty";
+			return nullptr;
+		}
+
+		const std::string key = std::filesystem::path(path).lexically_normal().generic_string();
+		auto& cache = WModelCache();
+		const auto cached = cache.find(key);
+		if (cached != cache.end())
+		{
+			if (error) error->clear();
+			return cached->second;
+		}
+
+		Asset::WModelData data;
+		std::string loadError;
+		if (!Asset::WModelIO::ReadFile(path, data, &loadError))
+		{
+			if (error) *error = loadError;
+			return nullptr;
+		}
+		if (data.Vertices.empty() || data.Indices.empty())
+		{
+			if (error) *error = "'" + path + "': .wmodel has no geometry";
+			return nullptr;
+		}
+		// 包围盒健全性:格式里存了 min/max,坏值(反向/NaN)会让阴影正交矩阵与后续剔除失真,
+		// 属于"坏文件硬报错"的一部分。
+		const auto finite = [](const glm::vec3& value)
+		{
+			return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+		};
+		if (!finite(data.Bounds.Min) || !finite(data.Bounds.Max)
+			|| data.Bounds.Min.x > data.Bounds.Max.x
+			|| data.Bounds.Min.y > data.Bounds.Max.y
+			|| data.Bounds.Min.z > data.Bounds.Max.z)
+		{
+			if (error) *error = "'" + path + "': .wmodel has invalid bounds";
+			return nullptr;
+		}
+
+		MeshDesc desc;
+		desc.DebugName = std::filesystem::path(path).stem().string();
+		desc.Layout = MakeStandardLayout();
+		desc.VertexData.resize(data.Vertices.size() * sizeof(StandardVertex));
+		std::memcpy(desc.VertexData.data(), data.Vertices.data(), desc.VertexData.size());
+		desc.Indices = std::move(data.Indices);
+
+		Ref<Mesh> mesh = Create(desc);
+		if (!mesh)
+		{
+			if (error) *error = "'" + path + "': .wmodel geometry is invalid (index out of range)";
+			return nullptr;
+		}
+
+		std::vector<MeshSubmesh> submeshes;
+		submeshes.reserve(data.Submeshes.size());
+		for (const Asset::WModelSubmesh& source : data.Submeshes)
+			submeshes.push_back({ source.IndexOffset, source.IndexCount, source.MaterialSlot,
+				MeshBounds { source.Bounds.Min, source.Bounds.Max } });
+		std::vector<MeshRange> ranges;
+		ranges.reserve(data.Meshes.size());
+		for (const Asset::WModelMeshRange& source : data.Meshes)
+			ranges.push_back({ source.FirstSubmesh, source.SubmeshCount });
+		std::vector<MeshNode> nodes;
+		nodes.reserve(data.Nodes.size());
+		for (const Asset::WModelNode& source : data.Nodes)
+			nodes.push_back({ source.Parent, source.MeshIndex, source.Translation, source.Rotation,
+				source.Scale, source.Name });
+
+		// 文件里的包围盒即资产契约(导入器按几何算出);Create 已按顶点重算一遍,
+		// 这里用文件值覆盖,保持 .wmodel 的"存什么读什么"语义。
+		Ref<Mesh> result(new Mesh(std::move(desc), MeshBounds { data.Bounds.Min, data.Bounds.Max },
+			std::move(submeshes), std::move(ranges), std::move(nodes), data.MaterialSlots));
+		cache.emplace(key, result);
+		if (error) error->clear();
+		return result;
+	}
+
+	void Mesh::ClearWModelCache()
+	{
+		WModelCache().clear();
+	}
 
 	Ref<Mesh> Mesh::Create(const MeshDesc& desc)
 	{

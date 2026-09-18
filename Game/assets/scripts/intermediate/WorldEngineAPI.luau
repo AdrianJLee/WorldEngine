@@ -578,6 +578,7 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@class MeshRendererComponent
 ---@field MaterialPath string
 ---@field Color vec4
+---@field MeshIndex number
 ---@field MeshPath string
 ---@field Primitive string
 

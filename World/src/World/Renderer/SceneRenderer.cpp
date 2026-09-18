@@ -268,6 +268,9 @@ namespace World
 			entt::entity Entity;
 			const glm::mat4* Model = nullptr;
 			Ref<Mesh> MeshAsset;
+			// D5:UINT32_MAX = 整网格提交(内置 primitive / 无 submesh 的资产);
+			// 否则只提交该 submesh(独立对象槽位 + 该 submesh 槽位的材质)。
+			uint32_t SubmeshIndex = UINT32_MAX;
 			Ref<Material> MaterialAsset;
 			glm::vec4 Color { 1.0f };
 			bool Transparent = false;
@@ -279,40 +282,95 @@ namespace World
 			{
 				const auto& [transform, meshComponent] =
 					meshView.get<TransformComponent, MeshRendererComponent>(entity);
-				// D3:支持 sphere 原语(材质预览用;编辑器中也可直接摆球)。
-				const bool plane = meshComponent.Primitive == "plane";
-				const bool sphere = meshComponent.Primitive == "sphere";
-				Ref<Mesh>& mesh = plane ? m_DebugPlane : (sphere ? m_DebugSphere : m_DebugCube);
+				// D5:MeshPath 指向 .wmodel 时优先加载(进程内缓存);坏文件/读不到时回退到
+				// 内置 primitive 并只警告一次,不阻断整帧渲染。
+				Ref<Mesh> mesh;
+				if (!meshComponent.MeshPath.empty())
+				{
+					std::string meshError;
+					mesh = Mesh::LoadWModel(meshComponent.MeshPath, &meshError);
+					if (!mesh)
+						WarnOnce(meshComponent.MeshPath, "网格加载失败 '" + meshComponent.MeshPath + "': "
+							+ meshError + "(回退到 Primitive)");
+				}
 				if (!mesh)
-					mesh = plane ? Mesh::CreateUnitPlane(1.0f)
-						: (sphere ? Mesh::CreateUnitSphere(1.0f, 32, 16) : Mesh::CreateUnitCube(1.0f));
+				{
+					// D3:支持 sphere 原语(材质预览用;编辑器中也可直接摆球)。
+					const bool plane = meshComponent.Primitive == "plane";
+					const bool sphere = meshComponent.Primitive == "sphere";
+					Ref<Mesh>& primitive = plane ? m_DebugPlane : (sphere ? m_DebugSphere : m_DebugCube);
+					if (!primitive)
+						primitive = plane ? Mesh::CreateUnitPlane(1.0f)
+							: (sphere ? Mesh::CreateUnitSphere(1.0f, 32, 16) : Mesh::CreateUnitCube(1.0f));
+					mesh = primitive;
+				}
 				if (!mesh)
 					continue;
 
-				// 材质加载失败(路径写错/文件坏)时回退到 Color 路径并给出一次警告,
-				// 不阻断整帧渲染。
-				Ref<Material> material;
+				// 实体级材质:非空 = **覆盖**该网格全部 submesh 的材质槽。
+				// 加载失败(路径写错/文件坏)时回退到 Color/材质槽路径,不阻断整帧渲染。
+				Ref<Material> overrideMaterial;
 				if (!meshComponent.MaterialPath.empty())
 				{
 					std::string error;
-					material = MaterialLibrary::Get().Load(meshComponent.MaterialPath, &error);
-					if (!material)
-						WLD_CORE_WARN("材质加载失败 '{0}': {1}(回退到 Color)", meshComponent.MaterialPath, error);
+					overrideMaterial = MaterialLibrary::Get().Load(meshComponent.MaterialPath, &error);
+					if (!overrideMaterial)
+						WarnOnce(meshComponent.MaterialPath, "材质加载失败 '" + meshComponent.MaterialPath
+							+ "': " + error + "(回退到 Color/材质槽)");
 				}
-				MeshDraw draw;
-				draw.Entity = entity;
 				// 层级实体用求解后的世界矩阵:直接提交本地矩阵会让子实体不跟随父实体
 				// (实测"移动父项子项不动")。世界矩阵由本轮统一求解(见上方 UpdateWorldTransforms)。
 				const glm::mat4* modelMatrix = &transform.Transform;
 				if (m_ActiveScene->m_Registry.all_of<WorldTransformComponent>(entity))
 					modelMatrix = &m_ActiveScene->m_Registry.get<WorldTransformComponent>(entity).Matrix;
-				draw.Model = modelMatrix;
-				draw.MeshAsset = mesh;
-				draw.MaterialAsset = material;
-				draw.Color = meshComponent.Color;
-				draw.Transparent = material && material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
 
-				draws.push_back(std::move(draw));
+				const auto makeDraw = [&](uint32_t submeshIndex, const Ref<Material>& material)
+				{
+					MeshDraw draw;
+					draw.Entity = entity;
+					draw.Model = modelMatrix;
+					draw.MeshAsset = mesh;
+					draw.SubmeshIndex = submeshIndex;
+					draw.MaterialAsset = material;
+					draw.Color = meshComponent.Color;
+					draw.Transparent = material
+						&& material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+					draws.push_back(std::move(draw));
+				};
+
+				if (mesh->HasSubmeshes() && !mesh->GetMeshes().empty())
+				{
+					// MeshIndex 越界(资产被替换/手填)回退到 mesh 0,不让实体整帧消失。
+					uint32_t meshIndex = 0;
+					if (meshComponent.MeshIndex > 0
+						&& static_cast<size_t>(meshComponent.MeshIndex) < mesh->GetMeshes().size())
+						meshIndex = static_cast<uint32_t>(meshComponent.MeshIndex);
+					const MeshRange& range = mesh->GetMeshes()[meshIndex];
+					const std::vector<std::string>& slots = mesh->GetMaterialSlots();
+					for (uint32_t offset = 0; offset < range.SubmeshCount; ++offset)
+					{
+						const uint32_t submeshIndex = range.FirstSubmesh + offset;
+						if (submeshIndex >= mesh->GetSubmeshes().size())
+							break;
+						Ref<Material> material = overrideMaterial;
+						if (!material)
+						{
+							const int32_t slot = mesh->GetSubmeshes()[submeshIndex].MaterialSlot;
+							if (slot >= 0 && static_cast<size_t>(slot) < slots.size() && !slots[slot].empty())
+							{
+								std::string slotError;
+								material = MaterialLibrary::Get().Load(slots[slot], &slotError);
+								if (!material)
+									WarnOnce(slots[slot], "材质槽加载失败 '" + slots[slot] + "': " + slotError);
+							}
+						}
+						makeDraw(submeshIndex, material);
+					}
+				}
+				else
+				{
+					makeDraw(UINT32_MAX, overrideMaterial);
+				}
 			}
 		}
 
@@ -407,7 +465,13 @@ namespace World
 			m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
 			Renderer3D::BeginShadowPass(m_CommandBuffers[slot]);
 			for (const MeshDraw& draw : draws)
-				Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
+			{
+				// D5:逐 submesh 提交(每条独立对象槽位),多材质模型的投影才完整。
+				if (draw.SubmeshIndex == UINT32_MAX)
+					Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
+				else
+					Renderer3D::SubmitShadowSubmesh(draw.MeshAsset, draw.SubmeshIndex, *draw.Model);
+			}
 			Renderer3D::EndShadowPass();
 			m_CommandBuffers[slot]->EndRenderPass();
 			shadowPassMilliseconds = std::chrono::duration<double, std::milli>(
@@ -465,10 +529,19 @@ namespace World
 							continue;
 						// D7-1c:把实体 id 一起提交,写进 entity-id 附件供视口点选读回。
 						const int32_t entityId = static_cast<int32_t>(static_cast<uint32_t>(draw.Entity));
-						if (draw.MaterialAsset)
-							Renderer3D::Submit(draw.MeshAsset, draw.MaterialAsset, *draw.Model, entityId);
+						if (draw.SubmeshIndex == UINT32_MAX)
+						{
+							if (draw.MaterialAsset)
+								Renderer3D::Submit(draw.MeshAsset, draw.MaterialAsset, *draw.Model, entityId);
+							else
+								Renderer3D::Submit(draw.MeshAsset, *draw.Model, draw.Color, entityId);
+						}
+						else if (draw.MaterialAsset)
+							Renderer3D::SubmitSubmesh(draw.MeshAsset, draw.SubmeshIndex, draw.MaterialAsset,
+								*draw.Model, entityId);
 						else
-							Renderer3D::Submit(draw.MeshAsset, *draw.Model, draw.Color, entityId);
+							Renderer3D::SubmitSubmesh(draw.MeshAsset, draw.SubmeshIndex, draw.Color,
+								*draw.Model, entityId);
 					}
 				}
 				Renderer3D::EndScene();
@@ -711,5 +784,11 @@ namespace World
 		if (std::getenv("WLD_TRACE_UI"))
 			WLD_CORE_INFO("[pick] readback {0}x{1} at({2},{3}) id={4}", m_Width, m_Height, x, y, id);
 		return id;
+	}
+
+	void SceneRenderer::WarnOnce(const std::string& key, const std::string& message)
+	{
+		if (m_WarnedPaths.insert(key).second)
+			WLD_CORE_WARN("{0}", message);
 	}
 }

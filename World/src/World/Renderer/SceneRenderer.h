@@ -9,6 +9,8 @@
 
 #include <glm/glm.hpp>
 
+#include <unordered_set>
+
 namespace World
 {
 	struct SceneRendererOptions
@@ -49,6 +51,8 @@ namespace World
 		void RecordSubmit(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity);
 		void RenderGeometry(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderDebug(const Camera& camera, const glm::mat4& cameraTransform);
+		// D5:网格/材质资产加载失败只警告一次(按路径去重),避免逐帧刷屏。
+		void WarnOnce(const std::string& key, const std::string& message);
 
 	private:
 		Rhi::Handle<Rhi::Device> m_Device;
@@ -77,5 +81,6 @@ namespace World
 		Ref<Mesh> m_DebugCube;
 		Ref<Mesh> m_DebugPlane;
 		Ref<Mesh> m_DebugSphere;   // D3:sphere 原语的共享网格(材质预览/半球体实体)
+		std::unordered_set<std::string> m_WarnedPaths;
 	};
 }

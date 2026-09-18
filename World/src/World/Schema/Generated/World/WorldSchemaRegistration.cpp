@@ -581,6 +581,16 @@ struct GeneratedAccess<World::MeshRendererComponent>
         World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
         self->MaterialPath = std::get<std::string>(value);
     }
+    static Value Get_MeshIndex(const void* instance)
+    {
+        const World::MeshRendererComponent* self = static_cast<const World::MeshRendererComponent*>(instance);
+        return Value(self->MeshIndex);
+    }
+    static void Set_MeshIndex(void* instance, const Value& value)
+    {
+        World::MeshRendererComponent* self = static_cast<World::MeshRendererComponent*>(instance);
+        self->MeshIndex = std::get<int32_t>(value);
+    }
     static const FieldSchema& Field_Primitive()
     {
         static const FieldSchema schema = {
@@ -653,6 +663,24 @@ struct GeneratedAccess<World::MeshRendererComponent>
         };
         return schema;
     }
+    static const FieldSchema& Field_MeshIndex()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x4D455348494E4458ull },
+            "MeshIndex",
+            Kind::Int32,
+            &Get_MeshIndex,
+            &Set_MeshIndex,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(0),
+        };
+        return schema;
+    }
     static const StorageBinding& StorageBindingOf()
     {
         static const StorageBinding binding = MakeComponentStorage<World::MeshRendererComponent>();
@@ -671,6 +699,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
                 Field_Color(),
                 Field_MeshPath(),
                 Field_MaterialPath(),
+                Field_MeshIndex(),
             },
             &StorageBindingOf(),
             nullptr,

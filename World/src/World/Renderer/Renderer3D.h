@@ -146,6 +146,16 @@ namespace World
 		// 透明材质走 Transparent 管线(混合 + 不写深度),由调用方负责排序(不透明先提交)。
 		static uint32_t Submit(const Ref<Mesh>& mesh, const Ref<Material>& material, const glm::mat4& transform,
 			int32_t entityId = -1);
+		// ---- P1b D5:.wmodel 逐 submesh 提交 ----
+		// 每次调用占一个**独立对象槽位**(调用方每条 submesh 调一次;阴影通道同样逐 submesh),
+		// 材质为该 submesh 槽位对应的材质,为空时走常量色路径。submeshIndex 越界/空几何
+		// 返回 UINT32_MAX(调用方跳过,不崩)。
+		static uint32_t SubmitSubmesh(const Ref<Mesh>& mesh, uint32_t submeshIndex, const Ref<Material>& material,
+			const glm::mat4& transform, int32_t entityId = -1);
+		static uint32_t SubmitSubmesh(const Ref<Mesh>& mesh, uint32_t submeshIndex, const glm::vec4& baseColor,
+			const glm::mat4& transform, int32_t entityId = -1);
+		// 阴影通道的逐 submesh 提交(与 SubmitShadow 共用投影者槽位区)。
+		static uint32_t SubmitShadowSubmesh(const Ref<Mesh>& mesh, uint32_t submeshIndex, const glm::mat4& transform);
 		// 用**持久槽位**提交(材质预览这类"每帧都画、但只画一两个物体"的调用方):
 		// 对象序号从 slotBase 开始分配,跨帧固定,避免与主场景/其它预览争用同一份
 		// UBO 与描述符集(争用会让画面逐帧来回闪 —— 用户实测"预览一直闪烁")。

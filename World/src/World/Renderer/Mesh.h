@@ -3,6 +3,8 @@
 #include "World/Core/Export.h"
 #include "World/RHI/RhiPipeline.h"
 
+#include <glm/gtc/quaternion.hpp>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -26,6 +28,34 @@ namespace World
 		glm::vec3 GetCenter() const { return (Min + Max) * 0.5f; }
 		glm::vec3 GetExtents() const { return (Max - Min) * 0.5f; }
 		float GetRadius() const { return glm::length(GetExtents()); }
+	};
+
+	// ---- P1b D5:.wmodel 的附加数据(内置 primitive 为空) ----
+	// 子网格:一段连续索引 + 材质槽(-1 = 无材质)+ 局部包围盒。
+	struct MeshSubmesh
+	{
+		uint32_t IndexOffset = 0;
+		uint32_t IndexCount = 0;
+		int32_t MaterialSlot = -1;
+		MeshBounds Bounds;
+	};
+
+	// 一个 mesh = 一段连续 submesh(下标 = glTF mesh 下标 = MeshRendererComponent::MeshIndex)。
+	struct MeshRange
+	{
+		uint32_t FirstSubmesh = 0;
+		uint32_t SubmeshCount = 0;
+	};
+
+	// 节点树(实例化 ModelInstance 用):Parent/MeshIndex 为下标,-1 = 无;Rotation 为四元数。
+	struct MeshNode
+	{
+		int32_t Parent = -1;
+		int32_t MeshIndex = -1;
+		glm::vec3 Translation { 0.0f };
+		glm::quat Rotation { 1.0f, 0.0f, 0.0f, 0.0f };
+		glm::vec3 Scale { 1.0f };
+		std::string Name;
 	};
 
 	// 网格数据(P1b D2):CPU 侧不可变数据 + 布局 + 包围盒。
@@ -62,10 +92,32 @@ namespace World
 		// 按 layout 从顶点数据里取 Position(location 0)算包围盒;找不到 Position 时返回全零包围盒。
 		static MeshBounds ComputeBounds(const MeshVertexLayout& layout, const std::vector<uint8_t>& vertexData);
 
+		// ---- P1b D5:.wmodel 加载 ----
+		// 从磁盘加载 .wmodel(纯 CPU,不依赖 RHI 设备,可 headless)并做**进程内缓存**:
+		// 同一路径永远返回同一个 Ref<Mesh>(每个实体重复提交不会重复读盘/重复上传 GPU 缓冲)。
+		// 失败(坏 magic/版本/截断/越界/坏包围盒)返回 nullptr,error 给可读原因,绝不"尽力解析"。
+		static Ref<Mesh> LoadWModel(const std::string& path, std::string* error = nullptr);
+		// 清空进程内缓存(重新导入/热重载后调用);已经取出的 Ref 仍然有效。
+		static void ClearWModelCache();
+
+		// 子网格/节点树访问器:HasSubmeshes() == false 时按"整网格 + 单材质"提交(内置 cube/plane/sphere)。
+		bool HasSubmeshes() const { return !m_Submeshes.empty(); }
+		const std::vector<MeshSubmesh>& GetSubmeshes() const { return m_Submeshes; }
+		const std::vector<MeshRange>& GetMeshes() const { return m_Meshes; }
+		const std::vector<MeshNode>& GetNodes() const { return m_Nodes; }
+		// submesh.MaterialSlot 指向这里的下标;路径相对内容根(如 "materials/rock.wmat")。
+		const std::vector<std::string>& GetMaterialSlots() const { return m_MaterialSlots; }
+
 	private:
 		explicit Mesh(MeshDesc desc, MeshBounds bounds);
+		Mesh(MeshDesc desc, MeshBounds bounds, std::vector<MeshSubmesh> submeshes,
+			std::vector<MeshRange> meshes, std::vector<MeshNode> nodes, std::vector<std::string> materialSlots);
 
 		MeshDesc m_Desc;
 		MeshBounds m_Bounds;
+		std::vector<MeshSubmesh> m_Submeshes;
+		std::vector<MeshRange> m_Meshes;
+		std::vector<MeshNode> m_Nodes;
+		std::vector<std::string> m_MaterialSlots;
 	};
 }
