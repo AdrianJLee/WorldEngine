@@ -644,6 +644,14 @@ namespace World
 	void EditorShell::OnRender(Wui::WuiContext& ctx)
 	{
 		m_Ctx = &ctx;
+		// W9-2 修复:上一帧被推迟的脚本编辑器打开请求,在帧边界统一执行(安全点)。
+		if (!m_PendingScriptOpen.empty())
+		{
+			std::vector<std::string> pending;
+			pending.swap(m_PendingScriptOpen);
+			for (const std::string& path : pending)
+				OpenScriptEditorNow(path);
+		}
 		// AI 无障碍树:主窗口这一帧的节点从这里开始重新登记(见 WuiAccessibility)。
 		Wui::WuiAccessibility::Get().BeginFrame("main", ctx.ViewportSize());
 		// W9 review:文本焦点登记用宿主显式身份,不依赖无障碍开关。
@@ -1645,7 +1653,7 @@ namespace World
 			if (attached != m_AttachedPanels.end() || visibleWindow)
 				TogglePanel(*m_Ctx, panel);
 			else
-				OpenScriptEditor(panel.substr(std::strlen(kScriptPanelPrefix)));
+				OpenScriptEditorNow(panel.substr(std::strlen(kScriptPanelPrefix)));
 			return true;
 		}
 		if (!m_Ctx)
@@ -1889,6 +1897,22 @@ namespace World
 	}
 
 	void EditorShell::OpenScriptEditor(const std::string& logicalPath)
+	{
+		// 面板渲染中途(内容浏览器双击 / Scripts 面板按钮)不能立刻"建新窗口(新 Vulkan
+		// 交换链)+ 改附加标签":用户实测双击 .lua 会触发 vkQueueSubmit 设备丢失、界面黑屏。
+		// 统一推迟到下一帧 OnRender 开头(与 AI 通道的帧首执行同为安全点)。
+		std::string normalized = logicalPath;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		if (normalized.empty())
+			return;
+		if (std::find(m_PendingScriptOpen.begin(), m_PendingScriptOpen.end(), normalized) == m_PendingScriptOpen.end())
+		{
+			m_PendingScriptOpen.push_back(std::move(normalized));
+			WLD_CORE_INFO("[script-editor] open request deferred to frame boundary");
+		}
+	}
+
+	void EditorShell::OpenScriptEditorNow(const std::string& logicalPath)
 	{
 		// 用户决定(2026-09-18 C):打开即**默认直接附加到主窗口** —— OS 窗口保持隐藏,
 		// 主窗口顶栏出现切换标签(点击在主界面/脚本内容之间切换);用户仍可把它拖出成独立窗口。

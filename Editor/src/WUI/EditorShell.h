@@ -99,6 +99,8 @@ namespace World
 		void EnsureMaterialPanelFromId(const std::string& panelId);
 		// W9-2:打开脚本编辑器(每个脚本一个 "script:<逻辑路径>" 面板,创建后默认附加到主窗口)。
 		void OpenScriptEditor(const std::string& logicalPath) override;
+		// 帧边界执行版:内部使用(AI 通道在帧首、OnRender 开头处理待办时)。
+		void OpenScriptEditorNow(const std::string& logicalPath);
 		// 动态脚本面板:从布局存档/AI ui.open 的 "script:<逻辑路径>" id 建实例。
 		void EnsureScriptPanelFromId(const std::string& panelId);
 		// 关闭动态面板(脚本编辑器工具栏 Close):与 Window 菜单同一条 TogglePanel 路径。
@@ -227,6 +229,9 @@ namespace World
 		// 标签 × 的关闭请求:渲染遍历期间不能动停靠树(关闭组内最后一个标签会让该组
 		// 塌缩,调用方持有的 children 引用随即失效)——统一在遍历结束后执行。
 		std::vector<Wui::PanelId> m_PendingPanelCloses;
+		// W9-2 修复:面板渲染中途请求打开脚本编辑器(内容浏览器双击/Scripts 按钮)——
+		// 建新窗口(新 Vulkan 交换链)+附加标签不能在帧内做,统一推迟到下一帧开头。
+		std::vector<std::string> m_PendingScriptOpen;
 		// 已附加到主窗口的独立窗口(标签切换关系):"" = 主界面。
 		std::vector<std::string> m_AttachedPanels;
 		std::string m_ActiveWindowTag;
