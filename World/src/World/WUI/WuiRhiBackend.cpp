@@ -140,7 +140,7 @@ namespace World::Wui
 		m_ActiveTexture = nullptr;
 		for (FontFace& face : m_Faces)
 			face.AtlasTexture = nullptr;
-		++m_TextureGeneration;
+		++m_TextureContentRevision;   // 资源已释放:下一帧强制重建描述符集缓存
 		m_TextureChanged = true;
 		m_DeviceKey = nullptr;
 	}
@@ -701,12 +701,15 @@ namespace World::Wui
 		// 之前会把宿主在 OnAttach 里注册好的图标/场景纹理全部清掉。
 		if (m_DeviceKey && Renderer::GetDevice().get() != m_DeviceKey)
 			WuiTextureRegistry::Get().Clear();
-		// 注册表重建后,按纹理缓存的描述符集会指向已销毁的贴图,需要一并失效。
-		if (WuiTextureRegistry::Get().Generation() != m_TextureGeneration)
+		// 注册表内容变化(重建/换句柄)后,按纹理缓存的描述符集会指向已销毁的贴图,需要一并失效。
+		// 用 ContentRevision(而不是 Generation):Generation 只在整表清空时 +1,而视口 resize
+		// 是 Update 换句柄 —— 描述符集缓存的键是纹理对象**地址**,分配器复用地址后会命中
+		// 旧贴图的 set(野 imageView)→ 反复拉伸窗口必现 vkQueueSubmit DEVICE_LOST。
+		if (WuiTextureRegistry::Get().ContentRevision() != m_TextureContentRevision)
 		{
 			for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
 				m_TextureSets[slot].clear();
-			m_TextureGeneration = WuiTextureRegistry::Get().Generation();
+			m_TextureContentRevision = WuiTextureRegistry::Get().ContentRevision();
 		}
 		EnsureResources();
 		const uint32_t slot = FrameSlot();

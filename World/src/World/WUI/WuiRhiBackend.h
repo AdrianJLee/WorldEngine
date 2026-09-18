@@ -142,6 +142,8 @@ namespace World::Wui
 		// 每个纹理一份描述符集:一个描述符集在一帧内被多次改写时,GPU 执行
 		// 整条命令缓冲只能看到最后一次写入,导致除最后一张外的贴图全部采样错误。
 		std::unordered_map<const void*, Rhi::Handle<Rhi::DescriptorSet>> m_TextureSets[kFramesInFlight];
-		uint32_t m_TextureGeneration = 0;
+		// 见构造函数/EnsureResources:描述符集缓存按纹理对象地址做键,地址会被复用,
+		// 因此用注册表的内容代(任何"真的换了句柄"都 +1)失效缓存。
+		uint32_t m_TextureContentRevision = 0;
 	};
 }

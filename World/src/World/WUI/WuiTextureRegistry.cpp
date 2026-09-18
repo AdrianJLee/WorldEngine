@@ -33,6 +33,7 @@ namespace World::Wui
 		const uint64_t id = m_NextId++;
 		m_Textures[id] = { texture, nullptr };
 		m_TextureIds[texture.get()] = id;
+		++m_ContentRevision;
 		return id;
 	}
 
@@ -42,6 +43,7 @@ namespace World::Wui
 			return 0;
 		const uint64_t id = m_NextId++;
 		m_Textures[id] = { nullptr, texture };
+		++m_ContentRevision;
 		return id;
 	}
 
@@ -52,12 +54,15 @@ namespace World::Wui
 		const auto it = m_Textures.find(id);
 		if (it == m_Textures.end())
 			return;
+		if (texture && it->second.Texture.get() == texture.get())
+			return;   // 同一对象重复 Update:内容没变,不制造每帧失效
 		if (it->second.Texture)
 			m_TextureIds.erase(it->second.Texture.get());
 		it->second.Texture = texture;
 		it->second.Source = nullptr;
 		if (texture)
 			m_TextureIds[texture.get()] = id;
+		++m_ContentRevision;
 	}
 
 	Rhi::Handle<Rhi::Texture> WuiTextureRegistry::Resolve(uint64_t id)
@@ -82,5 +87,6 @@ namespace World::Wui
 		m_Textures.clear();
 		m_TextureIds.clear();
 		++m_Generation;
+		++m_ContentRevision;
 	}
 }
