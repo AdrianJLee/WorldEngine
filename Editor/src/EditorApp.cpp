@@ -30,7 +30,8 @@ namespace World
 
 	Application* CreateApplication(World::WorldContext& context)
 	{
-		// 无窗口打包:`Editor.exe --cook <publishDir> [--scene <relative>]`。
+		// 无窗口打包:`Editor.exe --cook <publishDir> [--scene <relative>] [--check]`。
+		// `--check` 只跑资产预检(含脚本编译门),不写发行目录。
 		// 与编辑器 Cook 按钮共用 EditorCooker,供 CI/命令行使用(不创建窗口)。
 		std::vector<std::string> arguments;
 		for (int i = 1; i < __argc; ++i)
@@ -55,8 +56,14 @@ namespace World
 				continue;
 			World::Editor::CookOptions options;
 			options.PublishDir = arguments[i + 1];
-			if (i + 3 < arguments.size() && arguments[i + 2] == "--scene")
-				options.StartSceneOverride = arguments[i + 3];
+			size_t next = i + 2;
+			if (next + 1 < arguments.size() && arguments[next] == "--scene")
+			{
+				options.StartSceneOverride = arguments[next + 1];
+				next += 2;
+			}
+			if (next < arguments.size() && arguments[next] == "--check")
+				options.CheckOnly = true;
 
 			std::printf("[cook] publish dir: %s\n", options.PublishDir.string().c_str());
 			const World::Editor::CookResult cooked = World::Editor::CookProject(options);

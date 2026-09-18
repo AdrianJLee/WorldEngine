@@ -1,14 +1,21 @@
 #include "World/Core/Asset/BuiltinImporters.h"
 #include "World/Core/Asset/CookPipeline.h"
 #include "World/Core/Asset/ProjectManifest.h"
+#include "World/Core/Asset/ScriptArtifact.h"
+#include "World/Core/Log.h"
 #include "World/Core/Vfs/PackageProvider.h"
+#include "World/Script/LuauVm.h"
+#include "World/Script/ScriptRef.h"
+#include "World/Script/ScriptValue.h"
 
 #include <chrono>
+#include <cstring>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace
@@ -62,10 +69,46 @@ namespace
 		std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 		return text;
 	}
+
+	std::vector<uint8_t> ReadBytes(const std::filesystem::path& path)
+	{
+		std::ifstream in(path, std::ios::binary);
+		if (!in)
+			throw std::runtime_error("failed to open " + path.string());
+		std::vector<uint8_t> bytes;
+		char buffer[4096];
+		while (in.read(buffer, sizeof(buffer)) || in.gcount() > 0)
+		{
+			const size_t count = static_cast<size_t>(in.gcount());
+			for (size_t index = 0; index < count; ++index)
+				bytes.push_back(static_cast<uint8_t>(buffer[index]));
+		}
+		return bytes;
+	}
+
+	bool Contains(const std::string& haystack, const std::string& needle)
+	{
+		return haystack.find(needle) != std::string::npos;
+	}
+
+	std::shared_ptr<IAssetImporter> FindImporter(
+		const std::vector<std::shared_ptr<IAssetImporter>>& importers, const std::string& name)
+	{
+		for (const std::shared_ptr<IAssetImporter>& candidate : importers)
+			if (candidate && candidate->Name() == name)
+				return candidate;
+		return nullptr;
+	}
+
+	bool StartsWithWsl1(const std::vector<uint8_t>& bytes)
+	{
+		return bytes.size() > 28 && std::memcmp(bytes.data(), "WSL1", 4) == 0;
+	}
 }
 
 int main()
 {
+	World::Log::Init();
 	try
 	{
 		TempDir temp;
@@ -152,6 +195,132 @@ int main()
 			std::vector<uint8_t> bytes;
 			CHECK(provider->Open("scenes/a.wd", bytes, pakEc));
 			CHECK(std::string(bytes.begin(), bytes.end()) == "scene-v2");
+		}
+
+		// 4. W7-2:Script 导入器 v2(.lua + .luau)→ WSL1 容器;可 Unpack / LoadChunk;增量稳定。
+		{
+			const std::vector<std::shared_ptr<IAssetImporter>> importers = DefaultImporters();
+			CHECK(importers.size() == 3);
+			CHECK(importers[0]->Name() == "Scene" && importers[0]->Version() == 1);
+			CHECK(importers[2]->Name() == "PassThrough");
+			const std::shared_ptr<IAssetImporter> script = FindImporter(importers, "Script");
+			CHECK(script != nullptr);
+			CHECK(script->Version() == 2);
+			CHECK(script->Matches("scripts/Test.lua"));
+			CHECK(script->Matches("scripts/Typed.luau"));
+			CHECK(!script->Matches("scenes/a.wd"));
+			CHECK(!script->Matches("textures/x.png"));
+			CHECK(!importers[0]->Matches("scripts/Typed.luau"));   // Scene 不吞脚本扩展名
+
+			const std::filesystem::path content = temp.path / "script-content";
+			const std::string luaSource = "local W7 = 41\nreturn W7 + 1\n";
+			const std::string luauSource = "local n: number = 2\nreturn n * 3\n";
+			WriteBytes(content / "scripts" / "Test.lua", luaSource);
+			WriteBytes(content / "scripts" / "Typed.luau", luauSource);
+
+			std::string error;
+			ProjectManifest manifest;
+			manifest.Id = "com.test.scripts";
+			manifest.ContentRoot = "script-content";
+			manifest.StartScene = "scripts/Test.lua";
+			manifest.Packages = { "packages/Base.wpak" };
+			const std::filesystem::path manifestPath = temp.path / "scripts.we.yaml";
+			CHECK(ProjectManifest::Save(manifestPath, manifest, &error));
+			const std::filesystem::path outputDir = temp.path / "script-cooked";
+
+			CookPipeline pipeline(DefaultImporters());
+			CookSummary summary;
+			std::vector<CookEntryResult> results =
+				pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Total == 2 && summary.Changed == 2 && summary.Skipped == 0 && summary.Failed == 0);
+			CHECK(results.size() == 2 && !results[0].Failed && !results[1].Failed);
+
+			const std::filesystem::path luaArtifact = outputDir / "cooked" / "scripts" / "Test.lua";
+			const std::filesystem::path luauArtifact = outputDir / "cooked" / "scripts" / "Typed.luau";
+			const std::vector<uint8_t> luaBytes = ReadBytes(luaArtifact);
+			const std::vector<uint8_t> luauBytes = ReadBytes(luauArtifact);
+			CHECK(StartsWithWsl1(luaBytes));
+			CHECK(StartsWithWsl1(luauBytes));
+			CHECK(luaBytes.size() != luaSource.size());   // 包内不再是源码副本
+			CHECK(luauBytes.size() != luauSource.size());
+			std::printf("[W7-2] (4) containers: Test.lua %zu bytes (source %zu), Typed.luau %zu bytes (source %zu)\n",
+				luaBytes.size(), luaSource.size(), luauBytes.size(), luauSource.size());
+
+			// Unpack 取出 payload,并经统一入口 LoadChunk 实际装载执行。
+			std::vector<uint8_t> payload;
+			CHECK(ScriptArtifact::Unpack("scripts/Test.lua", luaBytes.data(), luaBytes.size(), payload, &error));
+			CHECK(!payload.empty());
+			CHECK(payload.size() == luaBytes.size() - 28);
+			World::LuauVm vm;
+			CHECK(vm.Init(&error));
+			const World::ScriptTableRef environment = vm.CreateEnvironment();
+			CHECK(environment.IsValid());
+			World::ScriptFunctionRef function =
+				vm.LoadChunk(luaBytes, "scripts/Test.lua", environment, &error);
+			CHECK(function.IsValid());
+			World::ScriptValue returned;
+			CHECK(function.Call(nullptr, 0, &returned, &error));
+			double value = 0.0;
+			CHECK(returned.AsNumber(&value));
+			CHECK(value == 42.0);
+			vm.Shutdown();
+
+			// 增量:未变化 → skip(指纹稳定);改源码 → 只有它 changed。
+			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Changed == 0 && summary.Skipped == 2 && summary.Failed == 0);
+			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Changed == 0 && summary.Skipped == 2);
+			WriteBytes(content / "scripts" / "Test.lua", "return 7\n");
+			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Changed == 1 && summary.Skipped == 1 && summary.Failed == 0);
+			const std::vector<uint8_t> changedBytes = ReadBytes(luaArtifact);
+			CHECK(StartsWithWsl1(changedBytes));
+			CHECK(changedBytes != luaBytes);
+			CHECK(ReadBytes(luauArtifact) == luauBytes);
+			std::printf("[W7-2] (4) incremental: 2 changed -> 2 skipped -> 1 changed/1 skipped\n");
+		}
+
+		// 5. W7-2:坏脚本 → Import 失败(ec = invalid_argument、Data 空、诊断带路径与 compile error),
+		//    同一条门禁在 cook 上表现为 Failed 且不落产物。
+		{
+			const std::filesystem::path badSource = temp.path / "bad-content" / "scripts" / "Broken.lua";
+			WriteBytes(badSource, "local x = \n");
+
+			const std::shared_ptr<IAssetImporter> script = FindImporter(DefaultImporters(), "Script");
+			CHECK(script != nullptr);
+			ImportRequest request;
+			request.LogicalPath = "scripts/Broken.lua";
+			request.Source = badSource;
+			std::error_code importEc;
+			const ImportResult imported = script->Import(request, importEc);
+			CHECK(!imported.Ok);
+			CHECK(imported.Data.empty());
+			CHECK(imported.Fingerprint == 0);   // 导入器不写 Fingerprint(复合指纹归 CookPipeline)
+			CHECK(Contains(imported.Error, "compile error"));
+			CHECK(Contains(imported.Error, "scripts/Broken.lua"));
+			CHECK(importEc == std::make_error_code(std::errc::invalid_argument));
+			std::printf("[W7-2] (5) bad script: ec=%s | error=%s\n",
+				importEc.message().c_str(), imported.Error.c_str());
+
+			std::string error;
+			ProjectManifest manifest;
+			manifest.Id = "com.test.badscripts";
+			manifest.ContentRoot = "bad-content";
+			manifest.StartScene = "scripts/Broken.lua";
+			manifest.Packages = { "packages/Base.wpak" };
+			const std::filesystem::path manifestPath = temp.path / "bad-scripts.we.yaml";
+			CHECK(ProjectManifest::Save(manifestPath, manifest, &error));
+			const std::filesystem::path outputDir = temp.path / "bad-script-cooked";
+
+			CookPipeline pipeline(DefaultImporters());
+			CookSummary summary;
+			const std::vector<CookEntryResult> results =
+				pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Total == 1 && summary.Failed == 1 && summary.Changed == 0);
+			CHECK(results.size() == 1 && results[0].Failed);
+			CHECK(Contains(results[0].Error, "compile error"));
+			CHECK(!std::filesystem::exists(outputDir / "cooked" / "scripts" / "Broken.lua"));
+			std::printf("[W7-2] (5) cook gate: 1/1 failed, no artifact written\n");
 		}
 
 		std::printf("World.Asset: all checks passed\n");

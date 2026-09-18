@@ -19,7 +19,11 @@ namespace World::Editor
 		CookResult result;
 		try
 		{
-			fs::create_directories(options.PublishDir);
+			// W7-2 `--check`:只做资产预检(脚本在这里就会被编译把关),不碰发行目录。
+			if (options.CheckOnly)
+				WLD_CORE_INFO("Check-only cook: shader bake, package, runtime copy and release manifest are skipped");
+			else
+				fs::create_directories(options.PublishDir);
 
 			// 1. 项目清单(单一事实源)。
 			const fs::path projectManifestPath = std::string(WLD_GAME_DIR) + "project.we.yaml";
@@ -40,16 +44,29 @@ namespace World::Editor
 			World::Asset::CookSummary summary;
 			const std::vector<World::Asset::CookEntryResult> results =
 				pipeline.Cook(manifest, projectManifestPath, cookedDir, false, &summary);
+			std::string failedList;
 			for (const World::Asset::CookEntryResult& entry : results)
 				if (entry.Failed)
+				{
 					WLD_CORE_ERROR("Cook failed: {0}: {1}", entry.Path, entry.Error);
+					if (!failedList.empty())
+						failedList += "; ";
+					failedList += entry.Path + ": " + entry.Error;
+				}
 			WLD_CORE_INFO("Cooked {0} assets ({1} changed, {2} skipped, {3} failed)",
 				summary.Total, summary.Changed, summary.Skipped, summary.Failed);
 			if (summary.Failed)
-				throw std::runtime_error("Asset cooking failed");
+				throw std::runtime_error("Asset cooking failed (" + std::to_string(summary.Failed)
+					+ " failed): " + failedList);
 			result.AssetsTotal = summary.Total;
 			result.AssetsChanged = summary.Changed;
 			result.AssetsSkipped = summary.Skipped;
+			if (options.CheckOnly)
+			{
+				// 预检成功:摘要已填好,不创建发行目录、不烘焙着色器、不打包、不拷运行时。
+				result.Ok = true;
+				return result;
+			}
 
 			// 4. 着色器烘焙:引擎 HLSL → SPIR-V + GLSL 产物写入 cooked 目录,
 			// 随内容包发布 —— 发行版 Runtime 不再依赖源码树与 dxc。
