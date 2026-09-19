@@ -1764,28 +1764,10 @@ namespace World
 			"glTF Model (*.gltf;*.glb)\0*.gltf;*.glb\0All Files (*.*)\0*.*\0");
 		if (path.empty())
 			return;
-		// D10(用户 Q3:每次都弹):选完源文件再选**导入位置**(文件夹),产物落在它里面。
-		// 位置必须在内容根内 —— 否则场景/打包都引用不到,这里直接挡住并给出可读原因。
-		const std::string folder = FileDialogs::SelectFolder("选择导入位置(必须在本项目内容根内)");
-		if (folder.empty())
-			return;   // 用户取消
-		std::string logicalDir;
-		{
-			std::error_code ec;
-			const std::filesystem::path relative =
-				std::filesystem::relative(std::filesystem::path(folder), std::filesystem::path(WLD_ASSETPATH), ec);
-			const std::string text = ec ? std::string() : relative.generic_string();
-			if (ec || text.empty() || text == "." || text.rfind("..", 0) == 0)
-			{
-				ShowError("导入位置必须在内容根内: " + folder);
-				return;
-			}
-			logicalDir = text;
-		}
-		std::string message;
-		std::string logicalModel;
-		if (ImportModelFile(path, &message, &logicalModel, logicalDir) && !logicalModel.empty())
-			m_Shell.OpenModelPreview(logicalModel);   // 与内容浏览器双击同一条:导入 → 打开预览
+		// D10(用户 2026-09-19):选完源文件后,导入位置由**内容浏览器的树状选择器**选
+		// (范围限定在内容根内,不再用原生文件夹对话框 —— 后者可能选到工作区外,
+		// 那种位置场景与打包都引用不到)。选中确认后由内容浏览器回调同一条导入路径。
+		m_Shell.RequestImportDestination(path);
 	}
 
 	void EditorLayer::PollAssetHotReload(float deltaSeconds)

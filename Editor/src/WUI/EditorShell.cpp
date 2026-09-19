@@ -1936,6 +1936,20 @@ namespace World
 		OpenPanelAttached(panelId);
 	}
 
+	void EditorShell::RequestImportDestination(const std::string& sourcePath)
+	{
+		// D10(用户 2026-09-19):导入位置用**引擎内的树状选择器**(内容浏览器面板负责),
+		// 不再用原生文件夹对话框 —— 后者能选到工作区外,而内容根外的位置场景/打包都引用不到。
+		const std::string panel = "content_browser";
+		if (!m_Layout.Contains(panel))
+			DockPanelBackToTree(panel);   // 内容浏览器被关掉时先让它回到停靠树
+		const auto found = m_PanelRegistry.find(panel);
+		if (found == m_PanelRegistry.end())
+			return;
+		if (auto* browser = dynamic_cast<ContentBrowserPanel*>(found->second.get()))
+			browser->OpenImportDestination(sourcePath);
+	}
+
 	void EditorShell::EnsureModelPanelFromId(const std::string& panelId)
 	{
 		if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())

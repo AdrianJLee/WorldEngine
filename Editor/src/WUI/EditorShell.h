@@ -123,6 +123,8 @@ namespace World
 			std::string* message = nullptr, std::string* outLogicalModel = nullptr) override;
 		// P1b D5:打开模型预览(每个 .wmodel 一个独立窗口;**只读预览,不改场景**)。
 		void OpenModelPreview(const std::string& logicalPath) override;
+		// D10:把"选导入位置"交给内容浏览器(引擎内树状选择器,范围限定内容根内)。
+		void RequestImportDestination(const std::string& sourcePath) override;
 		// W9-2 三层快捷键路由第 2 层:当前焦点面板。
 		//   ① 主窗口处于"已附加面板"模式(顶栏标签)→ 该面板;
 		//   ② 否则某个独立窗口在前台 → 该窗口的当前标签;
