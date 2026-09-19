@@ -201,6 +201,31 @@ namespace World
 		// 同上,但只画一个 submesh(模型预览这类"逐 submesh + 固定槽位"的调用方用)。
 		static uint32_t SubmitSubmeshAtSlot(uint32_t slotBase, const Ref<Mesh>& mesh, uint32_t submeshIndex,
 			const Ref<Material>& material, const glm::mat4& transform, int32_t entityId = -1);
+		// D5c-4c:持久槽位版蒙皮提交(预览/调试这类"每帧都画、固定几个物体"的调用方):
+		// 对象槽位从 slotBase 起固定分配(与 SubmitSubmeshAtSlot 同一保护),骨骼调色板也必须
+		// 落在**保留区**,不与主场景的顺序分配互相覆盖。
+		//
+		// 为什么需要它:SubmitSkinned 用共享游标顺序分配(PaletteCursor++ + ObjectIndex++),
+		// 而预览的 BeginScene 会把两个游标清零;预览与主场景同帧同 frame slot 时(尤其 Vulkan
+		// 场景提交是异步的),顺序分配会让预览覆盖主场景前若干对象的对象 UBO 与骨骼 UBO。
+		// 这里的两段调色板池互不重叠:顺序分配区 [0, MaxSkinnedDrawsPerFrame),保留区
+		// = MaxSkinnedDrawsPerFrame + slotBase(键 = 对象槽位,slotBase < 对象槽位上限,当前 1024)。
+		// 顺序游标上界恰是保留区起点,所以两段下标**永不重叠**;本调用也不消耗顺序游标。
+		//
+		// 返回分配到的对象槽位(= slotBase);失败(不绘制)返回 UINT32_MAX:
+		//   slotBase ≥ 对象槽位上限 / palette == nullptr / paletteCount == 0 / paletteCount > MaxBonePalette;
+		//   mesh 为空或不是布局 2(Mesh::kVertexLayoutSkinned);材质是透明(本阶段只建了不透明蒙皮管线);
+		//   调用不在 BeginScene..EndScene 之间(或蒙皮管线不可用)。
+		// 调用口径(主 agent 已定,预览面板按此接线):
+		//   1. 有 skin 的 mesh 一律走蒙皮提交(包括暂停时用当前时间算出的调色板)——静态管线是
+		//      32B stride、布局 2 是 64B stride,混用会画出乱几何;
+		//   2. 透明材质 submesh:跳过 + warn 一次(SubmitSkinned 本身只是拒绝返回 UINT32_MAX,
+		//      "一次性 warn"由调用方做,与 SceneRenderer::WarnOnce 同款);
+		//   3. dt 由调用方自己算(预览面板用 steady_clock 帧间差,clamp [0,0.25]),引擎不提供。
+		// 阴影通道不需要保留位版本:SubmitShadowSkinned 即可。
+		static uint32_t SubmitSkinnedAtSlot(uint32_t slotBase, const Ref<Mesh>& mesh, uint32_t submeshIndex,
+			const Ref<Material>& material, const glm::mat4& transform, const glm::mat4* palette,
+			uint32_t paletteCount, int32_t entityId = -1);
 		// 预览/调试调用方按身份取一个稳定槽位(内部做环绕与保留区处理)。
 		static uint32_t ReserveSlotBase(uint32_t identity, uint32_t span = 1);
 
@@ -274,8 +299,11 @@ namespace World
 	private:
 		static void EnsureMeshBuffers(const Ref<Mesh>& mesh);
 		// D5c-3b:主通道/阴影通道共用的蒙皮绘制核心(shadow = true 时走阴影管线与槽位区)。
+		// D5c-4c:reservedPalette = true 时调色板走保留区(键 = 对象槽位),且不消耗顺序游标
+		// (由 SubmitSkinnedAtSlot 在把 ObjectIndex 顶到 slotBase 之后调用)。
 		static uint32_t SubmitSkinnedInternal(const Ref<Mesh>& mesh, uint32_t submeshIndex,
 			const Ref<Material>& material, const glm::vec4* baseColor, const glm::mat4& transform,
-			const glm::mat4* palette, uint32_t paletteCount, int32_t entityId, bool shadow);
+			const glm::mat4* palette, uint32_t paletteCount, int32_t entityId, bool shadow,
+			bool reservedPalette = false);
 	};
 }

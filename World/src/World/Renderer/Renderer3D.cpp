@@ -30,6 +30,16 @@ namespace World
 		// (144B × 3 帧槽位 × 1024 ≈ 440KB),没有预分配成本;真正的合并进 D8b 实例化。
 		constexpr uint32_t kObjectsPerFrame = 1024;
 
+		// D5c-4c:蒙皮调色板池分成互不重叠的两段(每份 8KB 的 BoneUniforms UBO)。
+		//  - 顺序分配区 [0, MaxSkinnedDrawsPerFrame):SubmitSkinned / SubmitShadowSkinned 用
+		//    PaletteCursor 自增取号,游标在 BeginScene / BeginShadowPass 复位(主场景路径);
+		//  - 持久槽位保留区 [MaxSkinnedDrawsPerFrame, MaxSkinnedDrawsPerFrame + kObjectsPerFrame):
+		//    SubmitSkinnedAtSlot 用**对象槽位**当键(paletteSlot = 保留区起点 + slotBase),
+		//    跨帧稳定。顺序游标被拒绝时的上界恰是保留区起点(游标最大用到 255),
+		//    所以"预览覆盖主场景调色板"在这两段下标上不可能发生。
+		constexpr uint32_t kPaletteReservedBase = Renderer3D::MaxSkinnedDrawsPerFrame;
+		constexpr uint32_t kPaletteSlotCount = kPaletteReservedBase + kObjectsPerFrame;
+
 		struct ObjectUniforms
 		{
 			glm::mat4 Model { 1.0f };
@@ -128,11 +138,13 @@ namespace World
 			// vkCmdDrawIndexed 会被验证层判为 VUID-vkCmdDrawIndexed-None-08600。
 			// 内容在 Init 写一次,之后不再变(按声明长度固定分配 8KB)。
 			Rhi::Handle<Rhi::Buffer> DefaultPaletteBuffer;
-			// 蒙皮绘制:每帧槽位最多 MaxSkinnedDrawsPerFrame 份 8KB 调色板 UBO + 对应描述符集,
-			// 按需惰性创建(帧栅栏保护:BeginFrame 等到本槽位上轮提交完成,重写同一份才安全)。
+			// 蒙皮绘制:每份 8KB 调色板 UBO + 对应描述符集都按需惰性创建
+			// (帧栅栏保护:BeginFrame 等到本槽位上轮提交完成,重写同一份才安全)。
 			// 主通道与阴影通道**共用**这一池;每帧槽位的游标在 BeginScene/BeginShadowPass 复位。
-			Rhi::Handle<Rhi::Buffer> PaletteBuffers[Renderer::FramesInFlight][Renderer3D::MaxSkinnedDrawsPerFrame];
-			Rhi::Handle<Rhi::DescriptorSet> PaletteSets[Renderer::FramesInFlight][Renderer3D::MaxSkinnedDrawsPerFrame];
+			// D5c-4c:池 = 顺序分配区 + 持久槽位保留区(互不重叠,见 kPaletteReservedBase);
+			// 顺序区仍是最多 MaxSkinnedDrawsPerFrame 份,保留区按对象槽位惰性使用。
+			Rhi::Handle<Rhi::Buffer> PaletteBuffers[Renderer::FramesInFlight][kPaletteSlotCount];
+			Rhi::Handle<Rhi::DescriptorSet> PaletteSets[Renderer::FramesInFlight][kPaletteSlotCount];
 			uint32_t PaletteCursor = 0;
 			// 自建 set0 的调用方(材质预览)用的默认灯光 UBO:占位实现同款方向光 + 0.25 环境光。
 			Rhi::Handle<Rhi::Buffer> DefaultLightBuffer;
@@ -307,14 +319,14 @@ namespace World
 		// 阴影管线的布局只有 set0/set1:多绑一个 set2 在 Vulkan 下是非法绑定(实测直接崩)。
 		void DrawSkinnedObject(State& state, const MeshGpu& mesh, const glm::mat4& transform, int32_t entityId,
 			const glm::vec4* baseColor, const glm::mat4* palette, uint32_t paletteCount, uint32_t objectIndex,
-			uint32_t indexCount, uint32_t firstIndex,
+			uint32_t paletteSlot, uint32_t indexCount, uint32_t firstIndex,
 			const Rhi::Handle<Rhi::Pipeline>& pipeline, const Ref<Material>& material, uint32_t slot,
 			bool shadow)
 		{
 			if (!mesh.VertexBuffer || !pipeline)
 				return;
-			// 调色板占一份独立的 8KB UBO:调用方已校验游标 < MaxSkinnedDrawsPerFrame,这里取用后自增。
-			const uint32_t paletteSlot = state.PaletteCursor++;
+			// 调色板占一份独立的 8KB UBO:槽位由调用方定 —— 顺序模式已取号游标,保留模式
+			// 与对象槽位一一对应(见 SubmitSkinnedInternal 的两段划分)。
 			Rhi::Handle<Rhi::Buffer>& boneBuffer = state.PaletteBuffers[slot][paletteSlot];
 			Rhi::Handle<Rhi::DescriptorSet>& boneSet = state.PaletteSets[slot][paletteSlot];
 			WriteBoneUniforms(state, slot, palette, paletteCount, boneBuffer, boneSet);
@@ -1006,7 +1018,8 @@ namespace World
 
 	uint32_t Renderer3D::SubmitSkinnedInternal(const Ref<Mesh>& mesh, uint32_t submeshIndex,
 		const Ref<Material>& material, const glm::vec4* baseColor, const glm::mat4& transform,
-		const glm::mat4* palette, uint32_t paletteCount, int32_t entityId, bool shadow)
+		const glm::mat4* palette, uint32_t paletteCount, int32_t entityId, bool shadow,
+		bool reservedPalette)
 	{
 		State& state = GetState();
 		const Rhi::Handle<Rhi::Pipeline>& pipeline = shadow ? state.SkinnedShadowPipeline : state.SkinnedPipeline;
@@ -1034,7 +1047,8 @@ namespace World
 			return UINT32_MAX;
 		}
 		// 每帧的蒙皮调色板配额(每份 8KB UBO):主通道与阴影通道共用,由 BeginScene/BeginShadowPass 复位。
-		if (state.PaletteCursor >= MaxSkinnedDrawsPerFrame)
+		// 只约束**顺序分配区**;保留区调用(SubmitSkinnedAtSlot)不消耗该游标(见 kPaletteReservedBase)。
+		if (!reservedPalette && state.PaletteCursor >= MaxSkinnedDrawsPerFrame)
 		{
 			state.Stats.DroppedObjects++;
 			return UINT32_MAX;
@@ -1057,9 +1071,22 @@ namespace World
 			return UINT32_MAX;
 
 		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		// 调色板槽位:
+		//  - 顺序模式:取游标后自增(只有真走到绘制才占一份,与旧版一致);
+		//  - 保留模式:键 = 对象槽位(此处 objectIndex 尚未自增,就是本次分配到的序号;
+		//    SubmitSkinnedAtSlot 已把 ObjectIndex 顶到 slotBase,所以恒有 paletteSlot < kPaletteSlotCount)。
+		uint32_t paletteSlot = 0;
+		if (reservedPalette)
+		{
+			paletteSlot = kPaletteReservedBase + objectIndex;
+			if (paletteSlot >= kPaletteSlotCount)
+				return UINT32_MAX;
+		}
+		else
+			paletteSlot = state.PaletteCursor++;
 		const uint32_t index = objectIndex++;
 		DrawSkinnedObject(state, cached->second, transform, entityId, baseColor, palette, paletteCount, index,
-			indexCount, firstIndex, pipeline, material, slot, shadow);
+			paletteSlot, indexCount, firstIndex, pipeline, material, slot, shadow);
 		return index;
 	}
 
@@ -1284,6 +1311,23 @@ namespace World
 		state.ObjectIndex = slotBase;
 		const uint32_t result = SubmitSubmesh(mesh, submeshIndex, material, transform, entityId);
 		state.ObjectIndex = slotBase + 1;
+		return result;
+	}
+
+	uint32_t Renderer3D::SubmitSkinnedAtSlot(uint32_t slotBase, const Ref<Mesh>& mesh, uint32_t submeshIndex,
+		const Ref<Material>& material, const glm::mat4& transform, const glm::mat4* palette,
+		uint32_t paletteCount, int32_t entityId)
+	{
+		// 与 SubmitSubmeshAtSlot 同款:把对象序号顶到 slotBase(持久槽位),并让调色板走保留区
+		// (键 = 对象槽位)。顺序分配的调色板游标与保留区互不重叠 —— 预览的 BeginScene 清零
+		// 游标也不会碰主场景已写好的对象 UBO/调色板(见 kPaletteReservedBase)。
+		State& state = GetState();
+		if (!state.CommandBuffer || !state.SkinnedPipeline || slotBase >= kObjectsPerFrame)
+			return UINT32_MAX;
+		state.ObjectIndex = slotBase;
+		const uint32_t result = SubmitSkinnedInternal(mesh, submeshIndex, material, nullptr, transform,
+			palette, paletteCount, entityId, /*shadow*/ false, /*reservedPalette*/ true);
+		state.ObjectIndex = slotBase + 1;   // 同一调用方若还要再画一个 submesh,落在下一个槽位
 		return result;
 	}
 
