@@ -426,6 +426,29 @@ namespace World
 			result = "toggled " + panel;
 			return true;
 		}
+		// ---- P3-1②:脚本化的"分离 / 挂回"(独立窗口形态的面板)----
+		// 与顶部挂靠栏拖拽、窗口菜单走同一对既有路径(OpenIndependentPanel /
+		// AttachIndependentWindowToSlot);已处于目标状态时幂等,message 即结果文案。
+		if (cmd == "ui.detach" || cmd == "ui.attach")
+		{
+			const std::string panel = normalizePanel(arg("panel"));
+			if (panel.empty())
+			{
+				error = "missing panel";
+				return false;
+			}
+			std::string message;
+			const bool ok = cmd == "ui.detach"
+				? m_Shell.AiDetachPanel(panel, &message)
+				: m_Shell.AiAttachPanel(panel, &message);
+			if (!ok)
+			{
+				error = message.empty() ? ("cannot " + cmd + " panel '" + panel + "'") : message;
+				return false;
+			}
+			result = message;
+			return true;
+		}
 		if (cmd == "ui.focus")
 		{
 			const std::string panel = normalizePanel(arg("panel"));

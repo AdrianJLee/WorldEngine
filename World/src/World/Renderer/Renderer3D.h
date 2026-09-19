@@ -175,13 +175,15 @@ namespace World
 		// ---- P1b D5c-3b:GPU 蒙皮提交 ----
 		// mesh 必须是**布局 2**(Mesh::GetVertexLayoutId() == 2)的资产,palette 是该 skin 的
 		// 关节矩阵(CPU 侧由 World::BuildJointMatrices 算好,长度 = 该 skin 的关节数)。
-		// 整块调色板随这一次 draw 写进 set 1 binding 3 的 UBO(u_Bones[paletteCount]),
+		// 整块调色板随这一次 draw 写进 set 1 binding 3 的 UBO(u_Bones[128]),
 		// 顶点阶段按 joints/weights 混合 4 个矩阵。返回分配到的对象序号。
 		// 拒绝条件(一律返回 UINT32_MAX 且**不绘制**,由调用方决定回退):
 		//   paletteCount == 0 / > MaxBonePalette / palette == nullptr;mesh 为空或不是布局 2;
 		//   材质是透明(本阶段只建了不透明蒙皮管线);
 		//   调用不在 BeginScene..EndScene 之间;对象槽位或每帧蒙皮配额耗尽。
-		// 越界关节下标在着色器里被 clamp 到调色板末尾(不越界读 UBO)。
+		// 越界关节下标在着色器里被 clamp 到 [0,127](不越界读 UBO);写入时 UBO 的
+		// [paletteCount, 128) 尾段按 palette[paletteCount-1] 填充,所以越界关节等价于
+		// min(joint, paletteCount-1),不会读到上一次绘制的残留(P3-1③)。
 		// 已知限制:与实例化合批(SubmitInstanced)不叠加(蒙皮实例走逐物体路径);
 		// 透明材质不支持(见上)。阴影通道请用 SubmitShadowSkinned。
 		static uint32_t SubmitSkinned(const Ref<Mesh>& mesh, uint32_t submeshIndex, const Ref<Material>& material,

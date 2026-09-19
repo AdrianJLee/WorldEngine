@@ -138,13 +138,14 @@ namespace World
 			// vkCmdDrawIndexed 会被验证层判为 VUID-vkCmdDrawIndexed-None-08600。
 			// 内容在 Init 写一次,之后不再变(按声明长度固定分配 8KB)。
 			Rhi::Handle<Rhi::Buffer> DefaultPaletteBuffer;
-			// 蒙皮绘制:每份 8KB 调色板 UBO + 对应描述符集都按需惰性创建
+			// 蒙皮绘制:每份 8KB 调色板 UBO 按需惰性创建
 			// (帧栅栏保护:BeginFrame 等到本槽位上轮提交完成,重写同一份才安全)。
 			// 主通道与阴影通道**共用**这一池;每帧槽位的游标在 BeginScene/BeginShadowPass 复位。
 			// D5c-4c:池 = 顺序分配区 + 持久槽位保留区(互不重叠,见 kPaletteReservedBase);
 			// 顺序区仍是最多 MaxSkinnedDrawsPerFrame 份,保留区按对象槽位惰性使用。
+			// P3-1③:这里**不需要**单独的骨骼描述符集 —— binding 3 统一写进该次绘制的
+			// set 1 对象集(WriteObjectUniforms;GL 的 Update 是整体替换语义,必须同一次写)。
 			Rhi::Handle<Rhi::Buffer> PaletteBuffers[Renderer::FramesInFlight][kPaletteSlotCount];
-			Rhi::Handle<Rhi::DescriptorSet> PaletteSets[Renderer::FramesInFlight][kPaletteSlotCount];
 			uint32_t PaletteCursor = 0;
 			// 自建 set0 的调用方(材质预览)用的默认灯光 UBO:占位实现同款方向光 + 0.25 环境光。
 			Rhi::Handle<Rhi::Buffer> DefaultLightBuffer;
@@ -268,10 +269,15 @@ namespace World
 		}
 
 		// D5c-3b:把 CPU 侧的关节调色板写进当前帧槽位的调色板 UBO。
-		// 调色板长度超过 MaxBonePalette / 为空的话由调用方在更早处拒绝,这里是"已校验"路径:
-		// 只拷贝 paletteCount 个矩阵,剩余部分保持上一次的内容(着色器按 paletteCount clamp 下标)。
+		// 调色板长度超过 MaxBonePalette / 为空的话由调用方在更早处拒绝,这里是"已校验"路径。
+		// P3-1③:着色器把关节下标 clamp 到 [0,127],它拿不到 paletteCount;所以这里把
+		// [paletteCount, MaxBonePalette) 的尾段全部填成 palette[paletteCount-1] —— 越界关节
+		// (含 >127)读到的就是最后一个有效矩阵,等价于 min(joint, paletteCount-1),也不会
+		// 读到这份复用 8KB 缓冲里上一次绘制的残留(P3-1③ 之前的已知限制)。
+		// 代价:每次蒙皮绘制上传完整 8KB 而不是 paletteCount×64B;换来的是与绘制顺序无关的
+		// 确定性结果,且不需要改 HLSL 的 u_Bones[128] 布局(着色器不在本任务文件边界内)。
 		void WriteBoneUniforms(State& state, uint32_t slot, const glm::mat4* palette, uint32_t paletteCount,
-			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set)
+			Rhi::Handle<Rhi::Buffer>& buffer)
 		{
 			if (!buffer)
 			{
@@ -282,16 +288,15 @@ namespace World
 				desc.DebugName = "Renderer3D.BoneUBO";
 				buffer = Renderer::GetDevice()->CreateBuffer(desc);
 			}
-			if (!set)
-				set = Renderer::GetDevice()->CreateDescriptorSet(state.ObjectLayout);
-			if (!buffer || !set)
+			if (!buffer)
 				return;
-			buffer->SetData(palette, static_cast<uint64_t>(paletteCount) * sizeof(glm::mat4));
-			Rhi::DescriptorWrite bones;
-			bones.Binding = 3;
-			bones.Type = Rhi::DescriptorType::UniformBuffer;
-			bones.Buffer = buffer;
-			set->Update({ bones });
+			BoneUniforms padded;
+			std::memcpy(padded.Bones, palette, static_cast<size_t>(paletteCount) * sizeof(glm::mat4));
+			const glm::mat4& last = palette[paletteCount - 1];
+			for (uint32_t bone = paletteCount; bone < Renderer3D::MaxBonePalette; ++bone)
+				padded.Bones[bone] = last;
+			buffer->SetData(&padded, sizeof(padded));
+			(void)state; (void)slot;
 		}
 
 		void BindObject(State& state, uint32_t slot, uint32_t index, const MeshGpu& mesh,
@@ -328,8 +333,7 @@ namespace World
 			// 调色板占一份独立的 8KB UBO:槽位由调用方定 —— 顺序模式已取号游标,保留模式
 			// 与对象槽位一一对应(见 SubmitSkinnedInternal 的两段划分)。
 			Rhi::Handle<Rhi::Buffer>& boneBuffer = state.PaletteBuffers[slot][paletteSlot];
-			Rhi::Handle<Rhi::DescriptorSet>& boneSet = state.PaletteSets[slot][paletteSlot];
-			WriteBoneUniforms(state, slot, palette, paletteCount, boneBuffer, boneSet);
+			WriteBoneUniforms(state, slot, palette, paletteCount, boneBuffer);
 
 			Rhi::Handle<Rhi::Buffer>& objectBuffer = shadow
 				? state.ShadowUniformBuffers[slot][objectIndex]
@@ -888,9 +892,6 @@ namespace World
 		for (auto& slot : state.PaletteBuffers)
 			for (Rhi::Handle<Rhi::Buffer>& buffer : slot)
 				buffer = nullptr;
-		for (auto& slot : state.PaletteSets)
-			for (Rhi::Handle<Rhi::DescriptorSet>& set : slot)
-				set = nullptr;
 		state.PaletteCursor = 0;
 		// D4:阴影资源必须在设备销毁前放掉(与材质贴图缓存同理)。
 		state.ShadowPipeline = nullptr;

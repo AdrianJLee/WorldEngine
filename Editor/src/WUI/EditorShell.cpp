@@ -40,6 +40,27 @@ namespace World
 			}
 		}
 
+		// P3-1②:挂靠标签(AttachTag)的无障碍登记 —— 稳定 id `shell.attach.<panel>`,
+		// value 标明面板当前是"附加态(attached)"还是"浮动态(floating)",脚本据此断言
+		// ui.detach / ui.attach 的结果,与 state.dump 的 "attach" 段同源(PanelStateLabel)。
+		// Window 显式写 "main":登记发生在挂靠栏绘制时,但这一枚标签属于主窗口
+		// (ui.invoke 的注入点击必须送到主窗口,而不是本轮最后一个渲染过的独立窗口)。
+		void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, const char* state,
+			std::string label, bool interactive)
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId(("shell.attach." + panel).c_str());
+			node.Window = "main";
+			node.Panel = panel;
+			node.Kind = "attach-tag";
+			node.Label = std::move(label);
+			node.Value = state;
+			node.Rect = rect;
+			node.Enabled = true;
+			node.Interactive = interactive;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
 		// 面板形态声明(单一事实源):Id 同时用于 Window 菜单、面板注册表与布局存档。
 		// Independent = "独立窗口"(自带 OS 窗口 + 标签栏;只能挂靠到主窗口顶部挂靠栏)。
 		struct PanelSpec
@@ -543,6 +564,67 @@ namespace World
 		SaveLayout();
 	}
 
+	// ---- P3-1①:面板拖拽状态归零(唯一出口)----
+	// "这次拖拽是谁":拖起手标签 / 跟随窗口 / 落点位置。松手那一帧也要清 ——
+	// 残留的 m_TabDragPanel/m_DragPanel 会让面板一回到停靠树就被再次浮出(P3-1① 的 bug)。
+	void EditorShell::ClearPanelDragIdentity()
+	{
+		m_DragPanel.clear();
+		m_LastDragPos = { 0.0f, 0.0f };
+		m_TabDragPanel.clear();
+		m_MovingFloat.clear();
+		m_FloatGrabOffset = { 0.0f, 0.0f };
+	}
+
+	// 完整归零:身份成员 + 落点成员 + 挂靠标签拖拽。
+	// 落点成员(m_DropTargetPanel/m_EdgeDockActive/…)是"最后一帧武装的目标",WuiContext 要到
+	// **下一帧**才交付 AcceptDrop —— 所以在"释放沿"那一帧只能清身份成员(见状态机里结束分支的
+	// 说明),只有落点已消费或显式取消(Esc)时才走这个完整版本。
+	void EditorShell::ClearPanelDragState()
+	{
+		ClearPanelDragIdentity();
+		m_DropTargetPanel.clear();
+		m_DropZone = Wui::DropZone::Center;
+		m_EdgeDockActive = false;
+		m_EdgeDropZone = Wui::DropZone::Center;
+		m_LastDragTarget.clear();
+		m_LastDragZone = Wui::DropZone::Center;
+		m_DropPreviewActive = false;
+		m_AttachTagPress.clear();
+		m_AttachTagDrag.clear();
+	}
+
+	// 拖拽确定已经结束(drop 已消费 / 松手未落点 / Esc 取消 / 左键已抬起)时的收口。
+	void EditorShell::EndPanelDrag(Wui::WuiContext& ctx)
+	{
+		ClearPanelDragState();
+		// ctx 里的 dragging/pending/payload/drop 标记一起清:否则下一条命令/下一帧仍会看到
+		// "payload 是 panel:xxx"的残留拖拽(正是"面板刚回到停靠树就再次浮出"的原料)。
+		ctx.EndDrag();
+	}
+
+	// 面板当前形态标签(单一事实源):AiDetachPanel/AiAttachPanel 的幂等判定、state.dump 的
+	// "attach" 段、AttachTag 无障碍节点的 value 都用它,避免三处各写一套判定。
+	const char* EditorShell::PanelStateLabel(const std::string& panel) const
+	{
+		if (IsIndependentPanel(panel))
+		{
+			// 独立窗口形态只有三种状态:顶栏标签(attached)/ 真 OS 窗口(floating)/ 关闭。
+			if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) != m_AttachedPanels.end())
+				return "attached";
+			for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+				if (host->Contains(panel) && !host->IsHidden())
+					return "floating";
+			return "hidden";
+		}
+		// 停靠形态面板:docked(在停靠树里)/ floating(主窗口内临时浮动)/ hidden。
+		if (m_Layout.Contains(panel))
+			return "docked";
+		if (m_Layout.IsFloating(panel))
+			return "floating";
+		return "hidden";
+	}
+
 	void EditorShell::TogglePanel(Wui::WuiContext& ctx, const std::string& panel)
 	{
 		const std::string before = m_Layout.Serialize();
@@ -842,11 +924,9 @@ namespace World
 				}
 			}
 			// 只在落位消费后清空,避免下一帧 AcceptDrop 读取时目标已被清。
-			m_DropTargetPanel.clear();
-			m_DropZone = Wui::DropZone::Center;
-			m_EdgeDockActive = false;
-			m_EdgeDropZone = Wui::DropZone::Center;
-			m_MovingFloat.clear();
+			// P3-1①:落点是拖拽的**正常出口**,这里一次性把外壳与 WuiContext 的拖拽
+			// 状态全部归零(payload 刚被 AcceptDrop 消费,清掉不会丢落点)。
+			EndPanelDrag(ctx);
 		}
 		// 拖拽结束且本帧未消费落点时,清除四边高亮:
 		// 否则四边预览框会残留,表现成"启动/平时自动出现一个框"。
@@ -858,8 +938,24 @@ namespace World
 
 		// ---- 面板拖拽状态机:停靠面板一旦进入拖拽即"拖出"为浮动窗口 ----
 		// 拖到落点上释放会重新停靠(DockFloating*),否则保持浮动并跟随鼠标。
+		// P3-1①:状态机的四个出口(落点消费 / 松手未落点 / Esc 取消 / 左键已抬)都必须
+		// 让拖拽状态归零 —— 否则残留的 m_TabDragPanel/m_DragPanel 会在面板**回到停靠树**
+		// 的那一帧再次执行拖出分支(实测表现:浮窗刚被 ✕ 关掉又跳回来,第一次点 ✕ 被吃掉)。
+		// 左键**物理**状态是不依赖事件送达的判据:释放落在别的窗口/窗口外时,本窗口的
+		// 释放事件可能永远不到(与 WuiInputCollector::SyncButtonsWithSystem、
+		// FloatWindowHost::Render 同一口径)。
+		const bool leftButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+		{
+			// Esc = 取消(左键可能还按着):一次把 WuiContext 与外壳状态都归零,
+			// 之后即使按键还按着,也不会因为"按住即报"的 DragStart 被重新武装(见 RenderTabs)。
+			std::string escPayload;
+			const bool panelDragInFlight = !m_DragPanel.empty()
+				|| (ctx.IsDragActive(&escPayload) && escPayload.rfind("panel:", 0) == 0);
+			if (panelDragInFlight && ctx.WasKeyPressed(KeyCodes::Escape))
+				EndPanelDrag(ctx);
+		}
 		std::string activePayload;
-		if (ctx.IsDragActive(&activePayload) && activePayload.rfind("panel:", 0) == 0)
+		if (leftButtonDown && ctx.IsDragActive(&activePayload) && activePayload.rfind("panel:", 0) == 0)
 		{
 			m_DragPanel = activePayload.substr(6);
 			m_LastDragPos = ctx.Input().MousePos;
@@ -904,6 +1000,9 @@ namespace World
 					m_MovingFloat = m_DragPanel;
 					m_FloatGrabOffset = { 40.0f, 12.0f };
 					m_LastFloatRects[m_DragPanel] = source;
+					// P3-1①:拖出已经完成,消费掉"本次拖拽的起手标签"标记 —— 同一个拖拽里
+					// 面板若又回到停靠树(例如点浮窗 ✕ 收回停靠位),不允许再浮出一次。
+					m_TabDragPanel.clear();
 				}
 				else if (std::getenv("WLD_TRACE_UI"))
 				{
@@ -927,20 +1026,24 @@ namespace World
 				// 拖出条件未满足:保持原状(用于人工排查,不打印高频日志)。
 			}
 		}
-		else if (ctx.IsDragActive(nullptr))
+		else if (leftButtonDown && ctx.IsDragActive(nullptr))
 		{
 			// 其他类型的拖拽(file: 等)不参与面板浮动。
 			m_DragPanel.clear();
 			m_TabDragPanel.clear();
 		}
-		else if (!m_DragPanel.empty())
+		else if (!m_DragPanel.empty() || !m_MovingFloat.empty() || !m_TabDragPanel.empty())
 		{
-			// 拖拽结束:落点已在上方处理;未回收则保持浮动位置。
-			m_DragPanel.clear();
-			// 拖拽起点标记必须一起清掉:残留会让下一次"拖出"把已经收回停靠的面板
-			// 立刻再次浮出(表现为关闭临时窗口后窗口又跳出来)。
-			m_TabDragPanel.clear();
-			m_MovingFloat.clear();
+			// 拖拽结束(松手 / 释放事件丢失):清"拖拽身份"成员 —— 拖拽起点标记残留会让
+			// 已经收回停靠的面板立刻再次浮出。**落点成员必须留到下一帧**:WuiContext 下一帧
+			// 才交付 AcceptDrop,落位用的就是这一帧武装好的目标;这里清掉会把落点整个吃掉。
+			ClearPanelDragIdentity();
+			// ctx 侧的拖拽结束由 WuiContext::EndFrame 负责:它要把"本帧已武装的落点"转成
+			// 可消费的 m_DropAccepted(见 WuiContext.cpp 的 release 分支)。在"释放沿"这一帧
+			// 调 EndDrag 会把这次落点整个吃掉(拖回停靠位失效),所以只在 ctx 已经不在拖拽时
+			// 清残留 payload。
+			if (!ctx.IsDragActive(nullptr))
+				ctx.EndDrag();
 		}
 
 		// 浮动面板绘制在停靠区之上、菜单/模态之下。
@@ -980,6 +1083,17 @@ namespace World
 				RecordDockChange(ctx, "close", panel, before);
 		}
 		m_PendingPanelCloses.clear();
+
+		// P3-1①:挂靠标签拖拽(不经过 WuiContext)的收口 —— 左键已经抬起,而
+		// DrawAttachBar 这一帧没收到释放沿(释放落在别的窗口/窗口外)时,残留会让顶栏
+		// 一直停在"正在拖标签"的状态。正常路径上 DrawAttachBar 已消费并清空,这里不会再触发;
+		// 只收口"已经在拖"的状态:m_AttachTagPress 要留给 DrawAttachBar 的"单击=切换视图"
+		// 释放沿消费(脚本注入的点击没有物理按键,不能在这里被判成残留)。
+		if (!leftButtonDown && !m_AttachTagDrag.empty())
+		{
+			m_AttachTagPress.clear();
+			m_AttachTagDrag.clear();
+		}
 
 		// W9-2:本帧(含所有独立窗口)结束时的文本焦点快照。UI 帧开始时各窗口的登记
 		// 已被 BeginFrame 清空,所以帧内 Ctrl+Z/Y 判定必须用"上一帧结束"的这份状态。
@@ -1075,12 +1189,20 @@ namespace World
 		if (tabResult.DragStart >= 0 && static_cast<size_t>(tabResult.DragStart) < node.Panels.size())
 		{
 			const std::string& panel = node.Panels[tabResult.DragStart];
-			ctx.BeginDrag(Wui::HashId(("tab." + panel).c_str()), "panel:" + panel);
-			// 记录本次拖拽的真实来源:只在还没有来源时记一次。拖动过程中经过别的标签页时
-			// DockTabBar 仍会报 DragStart,若覆盖会把真实来源记错 —— 拖出分支的
-			// "m_TabDragPanel == m_DragPanel" 守卫随即拒绝,表现是面板拖不出来。
-			if (m_TabDragPanel.empty())
-				m_TabDragPanel = panel;
+			// P3-1①:拖拽只能在**按下沿**起手。DockTabBar 的 DragStart 是"按住即报",
+			// 若照单全收,一次点击在"面板刚回到停靠树、标签正好画在光标下、按键还没抬"时
+			// (典型场景:点浮窗 ✕ → 面板收回停靠位)会被当成新的拖拽,面板立刻被再次浮出 ——
+			// 这正是"第一次点 ✕ 被'重新浮出'吃掉"的机制。独立窗口的标签早就是按下沿起手
+			// (见 FloatWindowHost::RenderTabBar),这里补齐同一条规则。
+			if (ctx.Input().MouseClicked[0])
+			{
+				ctx.BeginDrag(Wui::HashId(("tab." + panel).c_str()), "panel:" + panel);
+				// 记录本次拖拽的真实来源:只在还没有来源时记一次。拖动过程中经过别的标签页时
+				// DockTabBar 仍会报 DragStart,若覆盖会把真实来源记错 —— 拖出分支的
+				// "m_TabDragPanel == m_DragPanel" 守卫随即拒绝,表现是面板拖不出来。
+				if (m_TabDragPanel.empty())
+					m_TabDragPanel = panel;
+			}
 		}
 
 		const Wui::WuiRect content { area.X, area.Y + tabH, area.W, area.H - tabH };
@@ -1180,6 +1302,9 @@ namespace World
 			// 标签 chip 走组件:活动/悬停底色与关闭 x 的外观统一。
 			if (Wui::AttachTag(ctx, tab, "Main", active, false, m_Theme).Clicked)
 				m_ActiveWindowTag.clear();
+			// P3-1②:Main 标签同样登记(稳定 id `shell.attach.main`)—— 脚本可以在
+			// ui.attach 把视图切到某个附加窗口之后,再读/点这一枚标签切回主界面。
+			RegisterAttachNode("main", tab, active ? "active" : "inactive", "Main", true);
 			x += 96.0f;
 		}
 		x += 4.0f;
@@ -1194,6 +1319,8 @@ namespace World
 			const bool active = m_ActiveWindowTag == panel;
 			const Wui::WuiRect tab { x, bar.Y + 3.0f, 140.0f, bar.H - 6.0f };
 			const Wui::AttachTagResult tag = Wui::AttachTag(ctx, tab, PanelTitle(panel), active, true, m_Theme);
+			// P3-1②:同一 id 在浮动态由下面的浮窗分支登记(value=floating),这里登记附加态。
+			RegisterAttachNode(panel, tab, "attached", PanelTitle(panel), true);
 			if (tag.CloseClicked)
 				closeRequest = panel;
 			// 按下(非关闭键)记录起点;移动超过阈值进入拖动。
@@ -1219,6 +1346,25 @@ namespace World
 			}
 			tagHits.push_back({ panel, tab });
 			x += 144.0f;
+		}
+
+		// P3-1②:可见的独立窗口 = 浮动态。节点与顶栏标签共用 id(`shell.attach.<panel>`),
+		// value=floating;rect 由窗口屏幕矩形换算到主窗口客户区,只用于"读状态",因此
+		// Interactive=false(点它不应该落到主窗口上,也不参与 ui.invoke)。
+		{
+			int mainX = 0, mainY = 0;
+			if (Application::HasInstance())
+				Application::Get().GetWindow().GetPosition(&mainX, &mainY);
+			for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+			{
+				if (host->IsHidden())
+					continue;
+				const Wui::WuiRect screen = host->ScreenRect();
+				const Wui::WuiRect local { screen.X - static_cast<float>(mainX),
+					screen.Y - static_cast<float>(mainY), screen.W, screen.H };
+				for (const std::string& panel : host->Panels())
+					RegisterAttachNode(panel, local, "floating", PanelTitle(panel), false);
+			}
 		}
 
 		if (!closeRequest.empty())
@@ -1731,6 +1877,101 @@ namespace World
 		return true;
 	}
 
+	// P3-1②:脚本化"分离 / 挂回"。与顶部挂靠栏拖拽、窗口菜单走同一对既有路径:
+	//   分离 = OpenIndependentPanel(复用已隐藏的窗口 / 必要时新建),附加态先把顶栏标签摘掉;
+	//   挂回 = AttachIndependentWindowToSlot(OS 窗口隐藏 + 顶栏出现切换标签)。
+	// 已处于目标状态时幂等,可读结果写进 message(供脚本直接断言,不必解析布局 JSON)。
+	bool EditorShell::AiDetachPanel(const std::string& panel, std::string* message)
+	{
+		auto fail = [message](const std::string& text)
+		{
+			if (message)
+				*message = text;
+			return false;
+		};
+		if (panel.empty() || !IsDeclaredPanel(panel))
+			return fail("unknown panel '" + panel + "'");
+		// 形态规则(T03):只有声明为独立窗口的面板才有"附加态/浮动态";停靠形态面板的
+		// 拖出是主窗口内的临时浮动,不在这两个命令的语义里(用 ui.open/拖拽改它的位置)。
+		if (!IsIndependentPanel(panel))
+			return fail("panel '" + panel + "' is a docked panel; ui.detach/ui.attach only apply to independent windows");
+
+		const char* const state = PanelStateLabel(panel);
+		if (std::strcmp(state, "floating") == 0)
+		{
+			// 幂等:已经是目标状态(真 OS 窗口)时不做任何事,只回报现状。
+			if (message)
+				*message = "already floating: " + panel + " (independent OS window)";
+			return true;
+		}
+		const bool wasAttached = std::strcmp(state, "attached") == 0;
+		const std::string before = m_Layout.Serialize();
+		OpenIndependentPanel(panel); // 复用已隐藏的窗口;从未打开过则新建(位置走 FloatRectFor 记忆)
+		FloatWindowHost* host = FindFloatHost(panel);
+		if (!host || host->IsHidden())
+		{
+			// 窗口没建起来:附加态/标签保持原样,命令可重试(不制造"既没标签也没窗口"的半状态)。
+			return fail("cannot show independent window for '" + panel + "'");
+		}
+		if (wasAttached)
+		{
+			// 摘掉顶栏标签(与顶栏 ✕ 之后的清理同一份状态):窗口本体保持不变。
+			m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel),
+				m_AttachedPanels.end());
+			if (m_ActiveWindowTag == panel)
+				m_ActiveWindowTag.clear();
+		}
+		if (m_Ctx)
+			RecordDockChange(*m_Ctx, "detach", panel, before);
+		// 与顶栏拖出同一条操作记录(category/action/target 口径一致)。
+		if (m_Ctx)
+			m_Ctx->RecordOp("float", "detach", panel, wasAttached ? "attached" : "opened");
+		const Wui::WuiRect rect = host->ScreenRect();
+		if (message)
+		{
+			std::ostringstream text;
+			text << (wasAttached ? "detached " : "opened floating ") << panel
+				<< " (independent window at " << static_cast<int>(rect.X) << "," << static_cast<int>(rect.Y)
+				<< " " << static_cast<int>(rect.W) << "x" << static_cast<int>(rect.H) << ")";
+			*message = text.str();
+		}
+		return true;
+	}
+
+	bool EditorShell::AiAttachPanel(const std::string& panel, std::string* message)
+	{
+		auto fail = [message](const std::string& text)
+		{
+			if (message)
+				*message = text;
+			return false;
+		};
+		if (panel.empty() || !IsDeclaredPanel(panel))
+			return fail("unknown panel '" + panel + "'");
+		if (!IsIndependentPanel(panel))
+			return fail("panel '" + panel + "' is a docked panel; ui.detach/ui.attach only apply to independent windows");
+
+		if (std::strcmp(PanelStateLabel(panel), "attached") == 0)
+		{
+			// 幂等:已经是目标状态(顶栏标签 + 隐藏的 OS 窗口)时不做任何事,只回报现状。
+			if (message)
+				*message = "already attached: " + panel + " (top-bar tag active, OS window hidden)";
+			return true;
+		}
+		const std::string before = m_Layout.Serialize();
+		if (!FindFloatHost(panel))
+			OpenIndependentPanel(panel); // 未打开过:先按独立窗口建出,再走同一条挂靠路径
+		AttachIndependentWindowToSlot(panel);
+		if (!FindFloatHost(panel) || std::strcmp(PanelStateLabel(panel), "attached") != 0)
+			return fail("cannot attach panel '" + panel + "'");
+		if (m_Ctx)
+			RecordDockChange(*m_Ctx, "attach", panel, before);
+		if (message)
+			*message = std::string("attached ") + panel + " (independent window hidden; top-bar tag = "
+				+ PanelTitle(panel) + ")";
+		return true;
+	}
+
 	bool EditorShell::AiRequestFloatCapture(const std::string& panel, const std::string& path)
 	{
 		FloatWindowHost* host = FindFloatHost(panel);
@@ -1847,6 +2088,29 @@ namespace World
 					<< ",\"blendMode\":" << static_cast<int>(desc.BlendMode);
 			}
 			out << "}";
+		}
+		// P3-1②:"附加/浮动态"是第一手断言目标(ui.open → ui.detach → ui.attach 的验收),
+		// 这里按面板 id 列出形态(attached/floating/hidden),与 AttachTag 无障碍节点的
+		// value 走同一个 PanelStateLabel —— 脚本不必去解析 floating/independentWindows 记录。
+		std::vector<std::string> attachPanels = m_Panels;
+		for (const auto& entry : m_PanelRegistry)
+			if (std::find(attachPanels.begin(), attachPanels.end(), entry.first) == attachPanels.end())
+				attachPanels.push_back(entry.first);
+		for (const std::string& id : m_AttachedPanels)
+			if (std::find(attachPanels.begin(), attachPanels.end(), id) == attachPanels.end())
+				attachPanels.push_back(id);
+		out << "],\"attach\":[";
+		first = true;
+		for (const std::string& id : attachPanels)
+		{
+			// 只有独立窗口形态的面板才有 attached/floating 两态;停靠面板的浮动是主窗口内
+			// 临时浮动,不属于本清单(形态规则见 T03 / PanelStateLabel)。
+			if (!IsDeclaredPanel(id) || !IsIndependentPanel(id))
+				continue;
+			if (!first)
+				out << ",";
+			first = false;
+			out << "{\"panel\":\"" << escape(id) << "\",\"state\":\"" << PanelStateLabel(id) << "\"}";
 		}
 		out << "]}";
 		return out.str();

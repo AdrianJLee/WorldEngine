@@ -44,6 +44,12 @@ namespace World
 		// ---- AI 控制通道(与 Window 菜单 / 内容浏览器同一条开关路径)----
 		// 打开/关闭面板(独立窗口复用已隐藏窗口;材质面板按需创建实例)。
 		bool AiTogglePanel(const std::string& panel);
+		// P3-1②:脚本化的"分离 / 挂回"(只对声明为独立窗口形态的面板有意义)。
+		// 内部复用既有 OpenIndependentPanel / AttachIndependentWindowToSlot 一对路径:
+		//   分离 = 独立 OS 窗口显示(附加态先摘掉顶栏标签);挂回 = OS 窗口隐藏 + 顶栏标签。
+		// 已处于目标状态时幂等,可读结果写进 message(供脚本直接断言)。
+		bool AiDetachPanel(const std::string& panel, std::string* message);
+		bool AiAttachPanel(const std::string& panel, std::string* message);
 		// 抓一张独立窗口的合成画面(下一帧写盘)。
 		bool AiRequestFloatCapture(const std::string& panel, const std::string& path);
 		// 抓一张材质面板的预览纹理(下一帧写盘;RHI 读回,双后端有效)。
@@ -293,6 +299,21 @@ namespace World
 		std::string m_FloatChangeBefore;    // 浮动移动/缩放前的布局快照(操作日志)
 		std::string m_BringFloatFront;      // 本帧请求置顶的浮动面板(下一帧生效)
 		std::vector<std::unique_ptr<FloatWindowHost>> m_FloatHosts;
+
+		// ---- P3-1①:面板拖拽状态归零(唯一出口)----
+		// ClearPanelDragIdentity:清"这次拖拽是谁"的成员(起手标签/跟随窗口/落点位置)——
+		// 它们是"面板刚回到停靠树就再次浮出"的原料,松手那一帧也必须清;
+		// ClearPanelDragState:在上面基础上再清落点成员(目标面板/四边高亮/预览)与挂靠标签
+		// 拖拽 —— 落点成员要留到下一帧 AcceptDrop 消费,所以只有"拖拽确定结束"时(落点已消费、
+		// Esc 取消)才用这个完整版本;
+		// EndPanelDrag:完整版本 + WuiContext 的 dragging/payload/drop 标记一起清。
+		void ClearPanelDragIdentity();
+		void ClearPanelDragState();
+		void EndPanelDrag(Wui::WuiContext& ctx);
+		// 面板当前形态(attach/detach 的幂等判定 + state.dump 的 "attach" 段 +
+		// AttachTag 无障碍节点的 value):独立形态 = attached / floating / hidden;
+		// 停靠形态 = docked / floating(主窗口内临时浮动)/ hidden。
+		const char* PanelStateLabel(const std::string& panel) const;
 
 		// 菜单栏(保留模式树)。
 		std::shared_ptr<Wui::WuiBox> m_MenuBar;

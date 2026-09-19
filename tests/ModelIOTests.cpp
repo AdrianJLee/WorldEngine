@@ -395,6 +395,8 @@ namespace
 		CHECK(mesh->GetNodes()[2].Parent == 1 && mesh->GetNodes()[2].MeshIndex == 0);
 		CHECK(NearlyVec3(mesh->GetNodes()[2].Scale, glm::vec3(0.5f)));
 		// 顶点:primitive 0 的 NORMAL 原样保留;primitive 1 缺法线 → 面法线 = +Z。
+		// (2026-09-19 修绕序:primitive 0 的索引由 0,1,2 改为 0,2,1,使 cross = +Z 与
+		// 上面的 +Z 法线一致;索引内容本身不在断言范围内,故下面的读回断言不变。)
 		struct FixtureVertex
 		{
 			glm::vec3 Position;
