@@ -81,12 +81,17 @@ namespace World
 		void GoBack();
 		void GoUp();
 		void CreateFolder(Wui::WuiContext& ctx);
+		// D10-6:在指定目录下新建文件夹(树行右键菜单与工具栏/内容区菜单共用同一套命名/去重规则)。
+		// 返回新建目录路径;创建失败返回空路径。
+		std::filesystem::path CreateFolderIn(Wui::WuiContext& ctx, const std::filesystem::path& parentDir);
 		// D3:新建材质资产(在当前目录写默认 .wmat 并在材质编辑器中打开)。
 		void CreateMaterial(Wui::WuiContext& ctx);
 		void ApplyRename(const std::filesystem::path& target, const std::string& newName);
 		void StartRename(Wui::WuiContext& ctx, const std::filesystem::path& path);
 		void RenderRenameField(Wui::WuiContext& ctx, const std::filesystem::path& path, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
 		void OpenInExplorer(const std::filesystem::path& path);
+		// D10-6:树行菜单「在资源管理器打开」——直接打开该目录本身(不是 /select 选中它)。
+		void OpenFolderInExplorer(const std::filesystem::path& path);
 		void Cut();
 		void Copy();
 		void SelectAll(const std::vector<std::filesystem::path>& paths);
@@ -99,6 +104,11 @@ namespace World
 
 		PanelHost& m_Host;
 		ContentBrowserModel m_Model;
+		// D10-6:树行右键菜单的目标路径与钉住位置(跨帧保留,菜单关闭后清空)。
+		std::filesystem::path m_TreeMenuPath;
+		glm::vec2 m_TreeMenuPos {};
+		// D10-6:从树行菜单发起的重命名目标;它的输入框画在树行上,内容区不再重复画。
+		std::filesystem::path m_TreeRenameTarget;
 		// D10:根文件夹行只自动展开一次(用户手动折叠后不再被强制展开)。
 		bool m_RootRowSeeded = false;
 		Ref<Texture2D> m_DirIcon;

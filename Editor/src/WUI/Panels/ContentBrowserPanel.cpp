@@ -3,6 +3,7 @@
 #include "EditorAssetTypes.h"
 
 #include "World/Core/KeyCodes.h"
+#include "World/Core/Application.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiTextureRegistry.h"
@@ -459,6 +460,7 @@ namespace World
 			m_Model.RenameTarget.clear();
 			m_Model.RenameEdit.clear();
 			m_Model.RenameActive = false;
+			m_TreeRenameTarget.clear();
 		}
 		if (!m_Model.PendingDropDest.empty() && referenced(m_Model.PendingDropDest))
 			m_Model.PendingDropDest.clear();
@@ -476,10 +478,15 @@ namespace World
 
 	void ContentBrowserPanel::CreateFolder(Wui::WuiContext& ctx)
 	{
-		std::filesystem::path newPath = m_Model.Current / "New Folder";
+		CreateFolderIn(ctx, m_Model.Current);
+	}
+
+	std::filesystem::path ContentBrowserPanel::CreateFolderIn(Wui::WuiContext& ctx, const std::filesystem::path& parentDir)
+	{
+		std::filesystem::path newPath = parentDir / "New Folder";
 		int counter = 1;
 		while (std::filesystem::exists(newPath))
-			newPath = m_Model.Current / ("New Folder (" + std::to_string(counter++) + ")");
+			newPath = parentDir / ("New Folder (" + std::to_string(counter++) + ")");
 		try
 		{
 			std::filesystem::create_directory(newPath);
@@ -490,10 +497,12 @@ namespace World
 			SaveState();
 			if (m_Ctx) m_Ctx->RecordOp("browser", "mkdir", newPath.filename().string(), "");
 			StartRename(ctx, newPath);
+			return newPath;
 		}
 		catch (const std::exception& error)
 		{
 			WLD_CORE_ERROR("Could not create directory: {0}", error.what());
+			return {};
 		}
 	}
 
@@ -532,6 +541,7 @@ namespace World
 		{
 			m_Model.RenameTarget.clear();
 			m_Model.RenameActive = false;
+			m_TreeRenameTarget.clear();
 			return;
 		}
 		const std::filesystem::path newPath = target.parent_path() / newName;
@@ -543,6 +553,7 @@ namespace World
 		}
 		m_Model.RenameTarget.clear();
 		m_Model.RenameActive = false;
+		m_TreeRenameTarget.clear();
 		InvalidateContents();
 		SaveState();
 		if (m_Model.Search[0])
@@ -574,6 +585,7 @@ namespace World
 			m_Model.RenameTarget.clear();
 			m_Model.RenameEdit.clear();
 			m_Model.RenameActive = false;
+			m_TreeRenameTarget.clear();
 		}
 		else if (m_Model.RenameActive && ctx.Focus() != renameId)
 		{
@@ -589,6 +601,13 @@ namespace World
 		const HINSTANCE result = ShellExecuteW(nullptr, L"open", L"explorer.exe", parameters.c_str(), nullptr, SW_SHOWNORMAL);
 		if (reinterpret_cast<intptr_t>(result) <= 32)
 			WLD_CORE_WARN("Could not open Explorer for '{0}' (error {1})", path.string(), reinterpret_cast<intptr_t>(result));
+	}
+
+	void ContentBrowserPanel::OpenFolderInExplorer(const std::filesystem::path& path)
+	{
+		// D10-6:直接打开该目录本身(面板既有的系统调用风格,见 OpenItem 的兜底分支)。
+		const std::string cmd = "start \"\" explorer.exe \"" + std::filesystem::absolute(path).string() + "\"";
+		system(cmd.c_str());
 	}
 
 	void ContentBrowserPanel::Cut()
@@ -615,6 +634,53 @@ namespace World
 	{
 		m_Ctx = &ctx;
 		const Wui::WuiTheme& theme = host.Theme();
+		// D10:OS 文件拖放(资源管理器 → 窗口)。平台层把拖入路径记在**收到拖放的窗口**上,
+		// 这里消费主窗口的队列:`.gltf/.glb` → 导入到**当前文件夹**(用户 Q1/Q2);
+		// 其它类型明确提示"不支持该类型",不静默丢弃。
+		{
+			std::vector<std::string> dropped = Application::Get().GetWindow().ConsumeDroppedFiles();
+			for (const std::string& droppedPath : dropped)
+			{
+				const std::filesystem::path source(droppedPath);
+				const std::string extension = source.extension().string();
+				if (extension == ".gltf" || extension == ".glb")
+				{
+					std::error_code destError;
+					const std::filesystem::path destRelative =
+						std::filesystem::relative(m_Model.Current, m_Model.Root, destError);
+					const std::string destination =
+						destError ? std::string() : destRelative.generic_string();
+					std::string message;
+					std::string logicalModel;
+					if (!m_Host.ImportModelFileTo(source.string(), destination, &message, &logicalModel))
+					{
+						WLD_CORE_WARN("[drop] 导入 '{0}' 失败: {1}", droppedPath, message);
+						if (m_Ctx) m_Ctx->RecordOp("browser", "drop-import-failed",
+							source.filename().string(), message);
+					}
+					else
+					{
+						WLD_CORE_INFO("[drop] {0}", message);
+						if (m_Ctx) m_Ctx->RecordOp("browser", "drop-import",
+							source.filename().string(), message);
+						InvalidateContents();
+						if (m_Model.Search[0])
+							UpdateSearch();
+						if (!logicalModel.empty())
+							m_Host.OpenModelPreview(logicalModel);
+					}
+				}
+				else
+				{
+					// Q2:非 glTF 类型不支持(不复制、不静默)。
+					const std::string message = "不支持该类型: " + extension
+						+ "(当前只支持拖入 .gltf / .glb 导入)";
+					WLD_CORE_WARN("[drop] {0}", message);
+					if (m_Ctx) m_Ctx->RecordOp("browser", "drop-rejected",
+						source.filename().string(), message);
+				}
+			}
+		}
 		// 窗口/GL 上下文重建后旧图标纹理失效:丢弃缓存,重新加载并注册。
 		if (m_TextureEpoch != host.TextureEpoch())
 		{
@@ -778,8 +844,18 @@ namespace World
 			visibleNodes.push_back(&node);
 			treeItems.push_back(std::move(item));
 		}
+		bool treeRenameDrawn = false;
 		{
 			Wui::TreeViewResult tree = Wui::TreeView(ctx, treeRect, treeItems, 20.0f, m_Model.TreeScroll, theme);
+			// D10-6:树行右键 → 打开树菜单(命中由 TreeView 的 ContextClicked 提供,不自己写命中检测)。
+			if (tree.ContextClicked >= 0 && tree.ContextClicked < static_cast<int>(visibleNodes.size()))
+			{
+				// 与内容区菜单互斥:开新菜单前关掉旧菜单,避免两个菜单叠在一起。
+				ctx.CloseAllPopups();
+				m_TreeMenuPath = visibleNodes[tree.ContextClicked]->Path;
+				m_TreeMenuPos = ctx.Input().MousePos;
+				ctx.OpenPopup(Wui::HashId("browser.tree.context"));
+			}
 			for (size_t i = 0; i < visibleNodes.size(); ++i)
 			{
 				const BrowserDirNode& node = *visibleNodes[i];
@@ -794,7 +870,19 @@ namespace World
 					SaveState();
 				}
 				else if (tree.Clicked == static_cast<int>(i))
-					Navigate(node.Path);
+				{
+					// 树菜单发起的重命名:点击落在该行输入框上时不要顺带导航进这个目录。
+					if (!(m_Model.RenameActive && m_Model.RenameTarget == node.Path && m_TreeRenameTarget == node.Path))
+						Navigate(node.Path);
+				}
+				// D10-6:从树菜单发起的重命名,输入框画在树行上(内容区那一份跳过,避免同一 id 画两份)。
+				if (!treeRenameDrawn && m_Model.RenameTarget == node.Path && m_TreeRenameTarget == node.Path
+					&& !(row.Y + row.H < treeRect.Y || row.Y > treeRect.Y + treeRect.H))
+				{
+					RenderRenameField(ctx, node.Path,
+						{ row.X + 18.0f, row.Y + 1.0f, std::max(60.0f, row.W - 22.0f), row.H - 2.0f }, theme);
+					treeRenameDrawn = true;
+				}
 				if (ctx.Input().MouseDown[0] && hovered && node.Path != m_Model.Root)
 				{
 					const std::filesystem::path rel = node.Path.lexically_relative(m_Model.Root);
@@ -808,6 +896,82 @@ namespace World
 					Wui::HighlightOutline(ctx, row, theme.Accent, 2.0f, 2.0f);
 				}
 			}
+		}
+
+		// ---- 树行右键菜单(D10-6:基础操作;每个菜单项带稳定无障碍 id,AI 可点) ----
+		const Wui::WuiId treePopup = Wui::HashId("browser.tree.context");
+		if (ctx.IsPopupOpen(treePopup) && !m_TreeMenuPath.empty())
+		{
+			// 根行可新建/刷新/打开,但重命名/删除内容根会让整棵树失效 → 这两项对根行禁用。
+			const bool treeRoot = m_TreeMenuPath == m_Model.Root;
+			struct TreeMenuItem
+			{
+				const char* Label;
+				Wui::WuiId Id;
+				bool Enabled;
+				std::function<void()> Action;
+			};
+			const std::vector<TreeMenuItem> items = {
+				{ "New Folder", Wui::HashId("browser.tree.menu.newfolder"), true,
+					[this, &ctx]
+					{
+						const std::filesystem::path parent = m_TreeMenuPath;
+						// 父行刚被右键过说明它已可见;展开它保证新建的子行能看到(重命名输入框画在那里)。
+						m_Model.TreeOpen.insert(parent);
+						const std::filesystem::path created = CreateFolderIn(ctx, parent);
+						if (!created.empty())
+							m_TreeRenameTarget = created;
+					} },
+				{ "Rename", Wui::HashId("browser.tree.menu.rename"), !treeRoot,
+					[this, &ctx]
+					{
+						StartRename(ctx, m_TreeMenuPath);
+						m_TreeRenameTarget = m_TreeMenuPath;
+					} },
+				{ "Delete", Wui::HashId("browser.tree.menu.delete"), !treeRoot,
+					[this]
+					{
+						// 复用内容区删除流程:选中该行 → 现有删除确认弹窗 → DeleteSelection。
+						m_Model.Selected.clear();
+						m_Model.Selected.insert(m_TreeMenuPath);
+						m_Model.LastSelected = m_TreeMenuPath;
+						m_Model.ShowDeleteModal = true;
+					} },
+				{ "Open in Explorer", Wui::HashId("browser.tree.menu.openinexplorer"), true,
+					[this] { OpenFolderInExplorer(m_TreeMenuPath); } },
+				{ "Refresh", Wui::HashId("browser.tree.menu.refresh"), true,
+					[this]
+					{
+						InvalidateContents();
+						if (m_Model.Search[0])
+							UpdateSearch();
+					} },
+			};
+			// 与内容区两个菜单同一套组件:位置钉住 + 外部点击/Esc 关闭。
+			Wui::WuiRect menuPanel;
+			if (Wui::BeginContextMenu(ctx, treePopup, m_TreeMenuPos, 180.0f, items.size(), &menuPanel, theme))
+			{
+				for (size_t i = 0; i < items.size(); ++i)
+				{
+					const Wui::WuiRect item { menuPanel.X + 4, menuPanel.Y + 4 + i * 22, menuPanel.W - 8, 22 };
+					if (Wui::ContextMenuItem(ctx, items[i].Id, item, items[i].Label, theme, items[i].Enabled))
+					{
+						items[i].Action();
+						if (m_Ctx) m_Ctx->RecordOp("menu", "item", items[i].Label, "browser-tree");
+						ctx.CloseAllPopups();
+					}
+				}
+				if (ctx.IsKeyPressed(KeyCodes::Escape))
+					ctx.ClosePopup(treePopup);
+				Wui::EndContextMenu(ctx, treePopup, menuPanel, theme);
+			}
+		}
+		else
+		{
+			// 菜单已关闭/无目标 → 清掉跨帧目标,避免下一帧按旧位置画出孤儿菜单。
+			m_TreeMenuPath.clear();
+			if (ctx.IsPopupOpen(treePopup))
+				ctx.ClosePopup(treePopup);
 		}
 
 		// ---- 右侧内容区 ----
@@ -933,7 +1097,8 @@ namespace World
 				std::error_code dirError;
 				const bool isDir = std::filesystem::is_directory(paths[i], dirError);
 				interact(paths[i], lv.ItemRects[i], isDir);
-				if (m_Model.RenameTarget == paths[i])
+				// D10-6:从树菜单发起的重命名画在树行上,内容区不再重复画同 id 输入框。
+				if (!treeRenameDrawn && m_Model.RenameTarget == paths[i])
 					RenderRenameField(ctx, paths[i], { lv.ItemRects[i].X + 26, lv.ItemRects[i].Y + 2, 160, 20 }, theme);
 			}
 		}
@@ -964,7 +1129,8 @@ namespace World
 				std::error_code dirError;
 				const bool isDir = std::filesystem::is_directory(paths[i], dirError);
 				interact(paths[i], gv.ItemRects[i], isDir);
-				if (m_Model.RenameTarget == paths[i])
+				// D10-6:同上,树行已画则不重复。
+				if (!treeRenameDrawn && m_Model.RenameTarget == paths[i])
 					RenderRenameField(ctx, paths[i],
 						{ gv.ItemRects[i].X, gv.ItemRects[i].Y + gv.ItemRects[i].H + 2.0f, 128, 22 }, theme);
 			}

@@ -564,8 +564,10 @@ namespace World
 				HideFloatPanel(panel, &ctx);
 				return;
 			}
-			OpenIndependentPanel(panel);
-			RecordDockChange(ctx, "float", panel, before);
+			// D10:默认打开 = **附加到主窗口**(用户 2026-09-19)。Window 菜单与 AI `ui.open`
+			// 都走这条,所以这一处覆盖所有"声明为独立形态"的面板(gallery/input/scripts)。
+			OpenPanelAttached(panel);
+			RecordDockChange(ctx, "attach", panel, before);
 			return;
 		}
 		// 停靠形态面板:临时浮动着 → 回停靠位(D3);已停靠 → 隐藏;两者都不是 → 回到停靠树。
@@ -639,6 +641,28 @@ namespace World
 			m_Layout.Floating.push_back({ panel, rect });
 		m_LastFloatRects[panel] = rect;
 		AddFloatWindow(panel, rect, "open");
+	}
+
+	void EditorShell::OpenPanelAttached(const std::string& panel)
+	{
+		// D10(用户 2026-09-19):**所有独立窗口默认附加到主窗口**。
+		//  - 已经附加 → 只激活对应标签;
+		//  - 用户此前把它拖成了独立窗口(布局里有浮动记录)→ 尊重现状,只前置焦点;
+		//  - 否则先按独立窗口建出(复用已隐藏的窗口),随后立即挂靠到主窗口。
+		// 显式分离(拖出/菜单)仍然可用 —— 这个函数只改"默认打开"的落点。
+		if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) != m_AttachedPanels.end())
+		{
+			m_ActiveWindowTag = panel;
+			return;
+		}
+		if (m_Layout.IsFloating(panel))
+		{
+			FocusIndependentWindow(panel);
+			return;
+		}
+		if (!FindFloatHost(panel))
+			OpenIndependentPanel(panel);
+		AttachIndependentWindowToSlot(panel);
 	}
 
 	void EditorShell::ResetLayout(Wui::WuiContext& ctx)
@@ -1870,10 +1894,8 @@ namespace World
 			m_Panels.push_back(panelId);
 			m_Layout.FloatMemory.push_back({ panelId, Wui::WuiRect { 200.0f, 170.0f, 760.0f, 470.0f } });
 		}
-		if (!m_Layout.IsFloating(panelId))
-			OpenIndependentPanel(panelId);
-		else
-			FocusIndependentWindow(panelId);
+		// D10:默认附加到主窗口(用户 2026-09-19);已拖成独立窗口的按原样只前置焦点。
+		OpenPanelAttached(panelId);
 	}
 
 	void EditorShell::EnsureMaterialPanelFromId(const std::string& panelId)
@@ -1910,10 +1932,8 @@ namespace World
 			m_Panels.push_back(panelId);
 			m_Layout.FloatMemory.push_back({ panelId, Wui::WuiRect { 220.0f, 160.0f, 620.0f, 660.0f } });
 		}
-		if (!m_Layout.IsFloating(panelId))
-			OpenIndependentPanel(panelId);
-		else
-			FocusIndependentWindow(panelId);
+		// D10:默认附加到主窗口(用户 2026-09-19);已拖成独立窗口的按原样只前置焦点。
+		OpenPanelAttached(panelId);
 	}
 
 	void EditorShell::EnsureModelPanelFromId(const std::string& panelId)

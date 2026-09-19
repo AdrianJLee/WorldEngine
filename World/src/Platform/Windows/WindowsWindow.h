@@ -47,6 +47,10 @@ namespace World
 		void SetClipboardText(const std::string& text) override;
 		bool IsFocused() const override;
 
+		// ---- D10:OS 文件拖放(资源管理器 → 窗口)----
+		// 本窗口自己的队列:WndProc 收 WM_DROPFILES 时写入,这里取出并清空。
+		std::vector<std::string> ConsumeDroppedFiles() override;
+
 	private:
 		virtual void Init(const WindowProps& props);
 		virtual void Shutdown();
@@ -63,8 +67,16 @@ namespace World
 		bool m_ForceHidden = false;
 		GLFWwindow* m_ShareWindow = nullptr;
 		WNDPROC m_PrevWndProc = nullptr;
+		// D10:拖入本窗口的文件(绝对路径,UTF-8)。只由创建/销毁窗口的线程访问:
+		// WM_DROPFILES 在 glfwPollEvents 里派发,ConsumeDroppedFiles 由宿主同线程调用。
+		std::vector<std::string> m_DroppedFiles;
+		// 无边框窗口才接管 WM_NCHITTEST(边缘缩放命中);有系统标题栏时必须交还
+		// GLFW/系统,否则标题栏拖动与系统按钮会失效。
+		bool m_Frameless = false;
 		static LRESULT CALLBACK StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 		LRESULT HitTestNc(LPARAM lParam);
+		// D10:WM_DROPFILES:用 DragQueryFileW 逐项取路径进 m_DroppedFiles,再 DragFinish。
+		LRESULT HandleDroppedFiles(WPARAM wParam);
 
 		struct WindowData
 		{

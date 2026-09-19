@@ -4,6 +4,9 @@
 #include "World/Core/Core.h"
 #include "World/Events/Event.h"
 
+#include <string>
+#include <vector>
+
 namespace World
 {
 	struct WindowProps
@@ -75,6 +78,11 @@ namespace World
 		virtual std::string GetClipboardText() const { return std::string(); }
 		virtual void SetClipboardText(const std::string& text) { (void)text; }
 		virtual bool IsFocused() const { return false; }
+
+		// ---- D10:OS 文件拖放(资源管理器 → 窗口)----
+		// 返回自上次调用以来拖入的文件绝对路径并清空队列;没有拖放时返回空 vector。
+		// 主窗口与独立窗口各自维护自己的队列。
+		virtual std::vector<std::string> ConsumeDroppedFiles() { return std::vector<std::string>(); }
 
 		// Creates a window
 		static Window* Create(const WindowProps& props = WindowProps());

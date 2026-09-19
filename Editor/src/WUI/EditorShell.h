@@ -191,6 +191,8 @@ namespace World
 		bool DockPanelBackToTree(const std::string& panel);
 		// Window 菜单:打开/复用独立形态面板的窗口(已隐藏的窗口直接复用)。
 		void OpenIndependentPanel(const std::string& panel);
+		// D10:默认"打开 = 附加到主窗口"(用户 2026-09-19);显式分离/已保存的浮动记录不受影响。
+		void OpenPanelAttached(const std::string& panel);
 		// 独立窗口的屏幕矩形:优先用跨会话位置记忆,其次用声明表里的默认值。
 		Wui::WuiRect FloatRectFor(const std::string& panel) const;
 		// 承载指定面板的独立窗口查找入口(W7.3 跨窗口附加按它定位目标/源窗口)。
