@@ -275,6 +275,8 @@ namespace World
 	void EditorLayer::OnUpdate(Timestep ts)
 	{
 		WLD_PROFILE_FUNCTION();
+		// D5c-4a:渲染发生在面板绘制里(RenderScene),那里拿不到 Timestep —— 先缓存一帧。
+		m_LastDeltaSeconds = ts.GetSeconds();
 		ProcessPendingRendererChange();
 		m_HasRenderedScene = false;
 		// 视口目标重建节流:尺寸稳定(约 100ms)后再真正重建渲染目标。
@@ -437,6 +439,8 @@ namespace World
 		}
 
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
+		// D5c-4a:骨骼动画步长(编辑态也推进,便于在视口里直接看动画;Play 时同一口径)。
+		m_SceneRenderer->SetDeltaSeconds(m_LastDeltaSeconds);
 		m_SceneRenderer->SubmitScene(*renderCamera, renderCameraTransform, selectedEntity);
 		m_SceneRenderer->EndScene();
 		// 相机可视化:同一帧再给"场景相机"渲一份小图(PiP)。Edit/Simulate 才有意义 ——

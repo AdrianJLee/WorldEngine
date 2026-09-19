@@ -67,6 +67,8 @@ namespace World::Gameplay
 		std::string m_LoadedPath;
 		bool m_RuntimeStarted = false;
 		bool m_Initialized = false;
+		// D5c-4a:本帧秒数(骨骼动画步长;SubmitSceneRender 在 Tick 之后调用)。
+		float m_LastTickSeconds = 0.0f;
 		// 只销毁自己创建的会话:复用他人会话的宿主不应该把会话一起带走。
 		bool m_CreatedSession = false;
 	};

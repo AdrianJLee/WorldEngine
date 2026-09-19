@@ -215,6 +215,8 @@ namespace World
 
 		bool m_ViewportFocused = false, m_ViewportHovered = false;
 		bool m_HasRenderedScene = false;
+		// D5c-4a:最近一帧的秒数(渲染在面板绘制里发生,那里拿不到 Timestep)。
+		float m_LastDeltaSeconds = 0.0f;
 
 		// Gizmo operation type
 		Wui::GizmoOperation m_CurrentGizmoOperation = Wui::GizmoOperation::None;

@@ -819,6 +819,27 @@ set_tests_properties(World.Skinning PROPERTIES
     TIMEOUT 60
 )
 
+# D5c-4a:骨骼动画系统(节点树采样/时间推进/调色板缓存;headless 纯 CPU)。
+add_executable(WorldAnimationTests AnimationTests.cpp)
+target_link_libraries(WorldAnimationTests PRIVATE World)
+target_compile_features(WorldAnimationTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldAnimationTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldAnimationTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldAnimationTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Animation COMMAND WorldAnimationTests)
+set_tests_properties(World.Animation PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P1b D6:3D 物理(Jolt)落体/堆叠/共存/接触/调试线段。
 add_executable(WorldPhysics3DTests Physics3DTests.cpp)
 target_link_libraries(WorldPhysics3DTests PRIVATE World)
@@ -1089,7 +1110,7 @@ set_tests_properties(World.SchemaDrift PROPERTIES
     TIMEOUT 60
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldPhysics3DTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests WorldLuauCameraBindingTests WorldLuauPhysicsBindingTests WorldLuauEventBindingTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptBinaryLoadTests WorldScriptWorkflowTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests WorldLuauCameraBindingTests WorldLuauPhysicsBindingTests WorldLuauEventBindingTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptBinaryLoadTests WorldScriptWorkflowTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"

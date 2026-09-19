@@ -634,6 +634,17 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Speed number
 ---@field DisplayName string read-only
 
+-- Component fields are exposed through Entity:GetComponent("SkinnedMeshRendererComponent"); there is no runtime global named SkinnedMeshRendererComponent.
+---@class SkinnedMeshRendererComponent
+---@field AnimationClip string
+---@field Loop boolean
+---@field MaterialPath string
+---@field MeshIndex number
+---@field MeshPath string
+---@field Playing boolean
+---@field Speed number
+---@field Time number
+
 -- Component fields are exposed through Entity:GetComponent("SphereCollider3DComponent"); there is no runtime global named SphereCollider3DComponent.
 ---@class SphereCollider3DComponent
 ---@field Offset vec3

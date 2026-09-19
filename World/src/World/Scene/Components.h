@@ -195,6 +195,36 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	// P1b D5c-4a:蒙皮网格渲染组件(骨骼动画)。
+	// 路径语义与 MeshRendererComponent 一致:.wmodel 是**相对内容根**的逻辑路径
+	// (如 models/rock.wmodel),MeshIndex 选择模型里的第几个 mesh(该 mesh 的 SkinIndex
+	// 决定用哪套骨架);MaterialPath 空 = 走模型的材质槽/Color 回退。
+	// AnimationClip 空 = 第 0 条 clip;Time 是动画系统每帧写入的运行态(允许进 schema,
+	// Play/Simulate 下由 AnimationSystem 写,属性面板只读)。
+	// 字段 id 全部显式钉住("SK…" ASCII):一旦写进 .wd 存档就不能再改,否则旧场景迁移语义漂移。
+	struct SkinnedMeshRendererComponent
+	{
+		std::string MeshPath;
+		int32_t MeshIndex = 0;
+		std::string MaterialPath;
+		std::string AnimationClip;
+		bool Playing = true;
+		float Speed = 1.0f;
+		bool Loop = true;
+		float Time = 0.0f;
+
+		WE_SCHEMA_BODY(World, SkinnedMeshRendererComponent, Component)
+			WE_FIELD(MeshPath, String, Id(0x534B4D4553485041));
+			WE_FIELD(MeshIndex, Int32, Id(0x534B4D4553484958), Default(0));
+			WE_FIELD(MaterialPath, String, Id(0x534B4D4154505448));
+			WE_FIELD(AnimationClip, String, Id(0x534B414E494D434C));
+			WE_FIELD(Playing, Bool, Id(0x534B504C4159494E), Default(true));
+			WE_FIELD(Speed, Float, Id(0x534B535045454430), Default(1.0f));
+			WE_FIELD(Loop, Bool, Id(0x534B4C4F4F503030), Default(true));
+			WE_FIELD(Time, Float, Id(0x534B54494D453030), Default(0.0f));
+		WE_SCHEMA_END
+	};
+
 	struct CameraComponent
 	{
 		CameraComponent() = default;

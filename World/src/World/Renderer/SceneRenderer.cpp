@@ -4,6 +4,7 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/ProjectionConventions.h"
@@ -333,6 +334,9 @@ namespace World
 		// 编辑/运行期都会改 Transform:每帧先重算层级世界矩阵,子实体才会跟随父实体
 		// (此前只有序列化/Prefab 路径求解,见 Hierarchy.h)。
 		Hierarchy::UpdateWorldTransforms(m_ActiveScene->m_Registry);
+		// D5c-4a:先推进骨骼动画(写回 Time + 采样 → 节点世界矩阵 → 调色板),再收集绘制 ——
+		// 蒙皮提交拿的是本帧的调色板。步长来自宿主 SetDeltaSeconds(默认 0 = 不推进)。
+		AnimationSystem::Update(*m_ActiveScene, m_DeltaSeconds);
 		// 后端适配:场景渲染到**离屏纹理**(WUI 用固定 UV 贴到视口),
 		// 因此 Vulkan 只补深度范围、**不翻 Y**(翻了会在视口里上下颠倒,实测)。
 		viewProjection = AdaptViewProjectionForOffscreen(viewProjection, Renderer::GetBackendName() == "vulkan");
@@ -355,6 +359,10 @@ namespace World
 			Ref<Material> MaterialAsset;
 			glm::vec4 Color { 1.0f };
 			bool Transparent = false;
+			// D5c-4a:蒙皮绘制(走 Renderer3D::SubmitSkinned/SubmitShadowSkinned;不进实例化合批)。
+			// Palette 是 AnimationSystem 当帧缓存的该实体调色板;nullptr = 该实体本帧没有蒙皮结果。
+			bool Skinned = false;
+			const std::vector<glm::mat4>* Palette = nullptr;
 			// D8a:世界空间 AABB(逐子网格;视锥剔除用)。
 			glm::vec3 WorldMin { 0.0f };
 			glm::vec3 WorldMax { 0.0f };
@@ -364,6 +372,10 @@ namespace World
 			auto meshView = m_ActiveScene->m_Registry.view<TransformComponent, MeshRendererComponent>();
 			for (auto entity : meshView)
 			{
+				// D5c-4a:同时挂 SkinnedMeshRendererComponent 的实体交给下面的蒙皮收集块,
+				// 这里跳过以免同一个实体画两遍(只挂 MeshRendererComponent 的实体逐字节不变)。
+				if (m_ActiveScene->m_Registry.all_of<SkinnedMeshRendererComponent>(entity))
+					continue;
 				const auto& [transform, meshComponent] =
 					meshView.get<TransformComponent, MeshRendererComponent>(entity);
 				// D5:MeshPath 指向 .wmodel 时优先加载(进程内缓存);坏文件/读不到时回退到
@@ -461,6 +473,104 @@ namespace World
 				else
 				{
 					makeDraw(UINT32_MAX, overrideMaterial);
+				}
+			}
+		}
+
+		// ---- D5c-4a:蒙皮网格收集(SkinnedMeshRendererComponent) ----
+		// 与静态路径同一套网格/材质/层级矩阵口径,只是多了"该实体本帧的调色板"并标记 Skinned。
+		// 组件没有 Color 字段:常量色路径用白色(等价于 Renderer3D::Submit 的默认基色)。
+		{
+			auto skinnedView = m_ActiveScene->m_Registry.view<TransformComponent, SkinnedMeshRendererComponent>();
+			for (auto entity : skinnedView)
+			{
+				const auto& [transform, skinned] =
+					skinnedView.get<TransformComponent, SkinnedMeshRendererComponent>(entity);
+				if (skinned.MeshPath.empty())
+				{
+					WarnOnce("skinned-path:" + std::to_string(static_cast<uint32_t>(entity)),
+						"蒙皮网格缺少 MeshPath(实体 " + std::to_string(static_cast<uint32_t>(entity))
+							+ "):跳过该实体的绘制");
+					continue;
+				}
+				std::string meshError;
+				Ref<Mesh> mesh = Mesh::LoadWModel(skinned.MeshPath, &meshError);
+				if (!mesh)
+				{
+					WarnOnce(skinned.MeshPath, "网格加载失败 '" + skinned.MeshPath + "': " + meshError);
+					continue;
+				}
+				// 实体级材质:非空 = 覆盖该网格全部 submesh 的材质槽(与静态路径同语义)。
+				Ref<Material> overrideMaterial;
+				if (!skinned.MaterialPath.empty())
+				{
+					std::string error;
+					overrideMaterial = MaterialLibrary::Get().Load(skinned.MaterialPath, &error);
+					if (!overrideMaterial)
+						WarnOnce(skinned.MaterialPath, "材质加载失败 '" + skinned.MaterialPath
+							+ "': " + error + "(回退到 Color/材质槽)");
+				}
+				// 层级实体用求解后的世界矩阵(与静态路径同一约定)。
+				const glm::mat4* modelMatrix = &transform.Transform;
+				if (m_ActiveScene->m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &m_ActiveScene->m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				// AnimationSystem::Update 当帧算好的调色板;nullptr = 本帧取不到(读失败/非蒙皮)。
+				const std::vector<glm::mat4>* palette = AnimationSystem::GetPalette(entity);
+
+				const auto makeSkinnedDraw = [&](uint32_t submeshIndex, const Ref<Material>& material)
+				{
+					MeshDraw draw;
+					draw.Entity = entity;
+					draw.Model = modelMatrix;
+					draw.MeshAsset = mesh;
+					draw.SubmeshIndex = submeshIndex;
+					draw.MaterialAsset = material;
+					draw.Color = glm::vec4(1.0f);
+					draw.Transparent = material
+						&& material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+					draw.Skinned = true;
+					draw.Palette = palette;
+					const MeshBounds& localBounds = (submeshIndex != UINT32_MAX
+						&& submeshIndex < mesh->GetSubmeshes().size())
+						? mesh->GetSubmeshes()[submeshIndex].Bounds
+						: mesh->GetBounds();
+					TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max,
+						draw.WorldMin, draw.WorldMax);
+					draws.push_back(std::move(draw));
+				};
+
+				if (mesh->HasSubmeshes() && !mesh->GetMeshes().empty())
+				{
+					// MeshIndex 越界回退到 mesh 0(与静态路径同一规则)。
+					uint32_t meshIndex = 0;
+					if (skinned.MeshIndex > 0
+						&& static_cast<size_t>(skinned.MeshIndex) < mesh->GetMeshes().size())
+						meshIndex = static_cast<uint32_t>(skinned.MeshIndex);
+					const MeshRange& range = mesh->GetMeshes()[meshIndex];
+					const std::vector<std::string>& slots = mesh->GetMaterialSlots();
+					for (uint32_t offset = 0; offset < range.SubmeshCount; ++offset)
+					{
+						const uint32_t submeshIndex = range.FirstSubmesh + offset;
+						if (submeshIndex >= mesh->GetSubmeshes().size())
+							break;
+						Ref<Material> material = overrideMaterial;
+						if (!material)
+						{
+							const int32_t slot = mesh->GetSubmeshes()[submeshIndex].MaterialSlot;
+							if (slot >= 0 && static_cast<size_t>(slot) < slots.size() && !slots[slot].empty())
+							{
+								std::string slotError;
+								material = MaterialLibrary::Get().Load(slots[slot], &slotError);
+								if (!material)
+									WarnOnce(slots[slot], "材质槽加载失败 '" + slots[slot] + "': " + slotError);
+							}
+						}
+						makeSkinnedDraw(submeshIndex, material);
+					}
+				}
+				else
+				{
+					makeSkinnedDraw(UINT32_MAX, overrideMaterial);
 				}
 			}
 		}
@@ -611,12 +721,29 @@ namespace World
 				for (const uint32_t drawIndex : shadowDraws)
 				{
 					const MeshDraw& draw = draws[drawIndex];
+					// D5c-4a:蒙皮投影者不参与实例化合批(调色板逐物体,per-instance 通道里没有它)。
+					if (draw.Skinned)
+						continue;
 					shadowBuckets[{ draw.MeshAsset.get(), draw.SubmeshIndex }].push_back(drawIndex);
 				}
 			}
 			for (const uint32_t drawIndex : shadowDraws)
 			{
 				const MeshDraw& draw = draws[drawIndex];
+				// D5c-4a:蒙皮投影者走蒙皮入口(否则影子留在绑定姿态)。调色板本帧取不到时:
+				// 布局 1(模型没有 skin 数据)回退静态入口;布局 2 只跳过 —— 静态管线的顶点
+				// 布局是 stride 32,读布局 2 的顶点缓冲会画出垃圾。
+				if (draw.Skinned)
+				{
+					if (draw.Palette && !draw.Palette->empty())
+					{
+						Renderer3D::SubmitShadowSkinned(draw.MeshAsset, draw.SubmeshIndex, *draw.Model,
+							draw.Palette->data(), static_cast<uint32_t>(draw.Palette->size()));
+						continue;
+					}
+					if (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned)
+						continue;
+				}
 				const auto found = shadowBuckets.find({ draw.MeshAsset.get(), draw.SubmeshIndex });
 				if (found != shadowBuckets.end() && found->second.size() >= 4)
 					continue;   // 交给下面的实例化提交
@@ -722,7 +849,8 @@ namespace World
 					for (const uint32_t drawIndex : visibleDraws)
 					{
 						const MeshDraw& draw = draws[drawIndex];
-						if (draw.Transparent)
+						// D5c-4a:蒙皮 draw 不进实例化桶(调色板逐物体,合批没有 per-instance 通道)。
+						if (draw.Transparent || draw.Skinned)
 							continue;
 						buckets[{ draw.MeshAsset.get(), draw.SubmeshIndex, draw.MaterialAsset.get(),
 							draw.Color }].push_back(drawIndex);
@@ -770,6 +898,34 @@ namespace World
 							continue;
 						// D7-1c:把实体 id 一起提交,写进 entity-id 附件供视口点选读回。
 						const int32_t entityId = static_cast<int32_t>(static_cast<uint32_t>(draw.Entity));
+						// D5c-4a:蒙皮实体走蒙皮管线(透明材质本阶段被 SubmitSkinned 拒绝)。
+						// 调色板/提交不可用时:布局 1(模型没有 skin 数据)回退静态路径,不丢物体;
+						// 布局 2 的顶点 stride 是 64,不能进静态管线,只跳过并 warn 一次。
+						if (draw.Skinned)
+						{
+							uint32_t submitted = UINT32_MAX;
+							const uint32_t paletteCount = draw.Palette
+								? static_cast<uint32_t>(draw.Palette->size()) : 0;
+							if (paletteCount > 0)
+							{
+								if (draw.MaterialAsset)
+									submitted = Renderer3D::SubmitSkinned(draw.MeshAsset, draw.SubmeshIndex,
+										draw.MaterialAsset, *draw.Model, draw.Palette->data(), paletteCount, entityId);
+								else
+									submitted = Renderer3D::SubmitSkinned(draw.MeshAsset, draw.SubmeshIndex,
+										draw.Color, *draw.Model, draw.Palette->data(), paletteCount, entityId);
+							}
+							if (submitted != UINT32_MAX)
+								continue;
+							if (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned)
+							{
+								const std::string meshName = draw.MeshAsset->GetDesc().DebugName;
+								WarnOnce("skinned-draw:" + meshName, draw.Transparent
+									? ("透明材质的蒙皮网格本阶段不支持(跳过 '" + meshName + "')")
+									: ("蒙皮提交被拒绝(调色板/对象槽位/每帧配额;跳过 '" + meshName + "')"));
+								continue;
+							}
+						}
 						if (draw.SubmeshIndex == UINT32_MAX)
 						{
 							if (draw.MaterialAsset)

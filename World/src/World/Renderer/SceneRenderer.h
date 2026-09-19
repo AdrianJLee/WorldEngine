@@ -27,6 +27,12 @@ namespace World
 		void BeginScene(Scene* scene, const SceneRendererOptions& options);
 		void EndScene();
 
+		// D5c-4a:骨骼动画的时间推进步长(秒)。宿主每帧在 SubmitScene 之前设置;
+		// SceneRenderer 在收集 3D 绘制前调用 AnimationSystem::Update 推进
+		// SkinnedMeshRendererComponent 的 Time 并刷新调色板。默认 0 = 不推进
+		// (相机预览等"同一场景的第二个 SceneRenderer"保持 0,否则同帧会推进两次)。
+		void SetDeltaSeconds(float deltaSeconds) { m_DeltaSeconds = deltaSeconds; }
+
 		void SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity entity);
 		void SubmitScene(const Camera& camera, const glm::mat4& cameraTransform);
 
@@ -87,6 +93,8 @@ namespace World
 
 		uint32_t m_Width = 1280;
 		uint32_t m_Height = 720;
+		// D5c-4a:骨骼动画步长(SetDeltaSeconds;默认 0 = 不推进)。
+		float m_DeltaSeconds = 0.0f;
 		Scene* m_ActiveScene = nullptr;
 		SceneRendererOptions m_Options;
 		Ref<Framebuffer> m_FramebufferView;

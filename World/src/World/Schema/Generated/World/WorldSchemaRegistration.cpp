@@ -14,6 +14,7 @@ const TypeSchema& WeSchemaOf_TransformComponent();
 const TypeSchema& WeSchemaOf_SpriteComponent();
 const TypeSchema& WeSchemaOf_CircleRendererComponent();
 const TypeSchema& WeSchemaOf_MeshRendererComponent();
+const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent();
 const TypeSchema& WeSchemaOf_HierarchyComponent();
 const TypeSchema& WeSchemaOf_CameraComponent();
 const TypeSchema& WeSchemaOf_DirectionalLightComponent();
@@ -707,6 +708,263 @@ struct GeneratedAccess<World::MeshRendererComponent>
                 Field_MeshPath(),
                 Field_MaterialPath(),
                 Field_MeshIndex(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::SkinnedMeshRendererComponent>
+{
+    static Value Get_MeshPath(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return Value(self->MeshPath);
+    }
+    static void Set_MeshPath(void* instance, const Value& value)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        self->MeshPath = std::get<std::string>(value);
+    }
+    static Value Get_MeshIndex(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return Value(self->MeshIndex);
+    }
+    static void Set_MeshIndex(void* instance, const Value& value)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        self->MeshIndex = std::get<int32_t>(value);
+    }
+    static Value Get_MaterialPath(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return Value(self->MaterialPath);
+    }
+    static void Set_MaterialPath(void* instance, const Value& value)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        self->MaterialPath = std::get<std::string>(value);
+    }
+    static Value Get_AnimationClip(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return Value(self->AnimationClip);
+    }
+    static void Set_AnimationClip(void* instance, const Value& value)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        self->AnimationClip = std::get<std::string>(value);
+    }
+    static Value Get_Playing(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return Value(self->Playing);
+    }
+    static void Set_Playing(void* instance, const Value& value)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        self->Playing = std::get<bool>(value);
+    }
+    static Value Get_Speed(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return Value(self->Speed);
+    }
+    static void Set_Speed(void* instance, const Value& value)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        self->Speed = std::get<float>(value);
+    }
+    static Value Get_Loop(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return Value(self->Loop);
+    }
+    static void Set_Loop(void* instance, const Value& value)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        self->Loop = std::get<bool>(value);
+    }
+    static Value Get_Time(const void* instance)
+    {
+        const World::SkinnedMeshRendererComponent* self = static_cast<const World::SkinnedMeshRendererComponent*>(instance);
+        return Value(self->Time);
+    }
+    static void Set_Time(void* instance, const Value& value)
+    {
+        World::SkinnedMeshRendererComponent* self = static_cast<World::SkinnedMeshRendererComponent*>(instance);
+        self->Time = std::get<float>(value);
+    }
+    static const FieldSchema& Field_MeshPath()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x534B4D4553485041ull },
+            "MeshPath",
+            Kind::String,
+            &Get_MeshPath,
+            &Set_MeshPath,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(std::string()),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MeshIndex()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x534B4D4553484958ull },
+            "MeshIndex",
+            Kind::Int32,
+            &Get_MeshIndex,
+            &Set_MeshIndex,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_MaterialPath()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x534B4D4154505448ull },
+            "MaterialPath",
+            Kind::String,
+            &Get_MaterialPath,
+            &Set_MaterialPath,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(std::string()),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_AnimationClip()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x534B414E494D434Cull },
+            "AnimationClip",
+            Kind::String,
+            &Get_AnimationClip,
+            &Set_AnimationClip,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(std::string()),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Playing()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x534B504C4159494Eull },
+            "Playing",
+            Kind::Bool,
+            &Get_Playing,
+            &Set_Playing,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Speed()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x534B535045454430ull },
+            "Speed",
+            Kind::Float,
+            &Get_Speed,
+            &Set_Speed,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Loop()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x534B4C4F4F503030ull },
+            "Loop",
+            Kind::Bool,
+            &Get_Loop,
+            &Set_Loop,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Time()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x534B54494D453030ull },
+            "Time",
+            Kind::Float,
+            &Get_Time,
+            &Set_Time,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::SkinnedMeshRendererComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::SkinnedMeshRendererComponent" },
+            "SkinnedMeshRendererComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::SkinnedMeshRendererComponent),
+            TypeCategory::Component,
+            {
+                Field_MeshPath(),
+                Field_MeshIndex(),
+                Field_MaterialPath(),
+                Field_AnimationClip(),
+                Field_Playing(),
+                Field_Speed(),
+                Field_Loop(),
+                Field_Time(),
             },
             &StorageBindingOf(),
             nullptr,
@@ -2825,6 +3083,7 @@ const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World
 const TypeSchema& WeSchemaOf_SpriteComponent() { return GeneratedAccess<World::SpriteComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleRendererComponent() { return GeneratedAccess<World::CircleRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshRendererComponent() { return GeneratedAccess<World::MeshRendererComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_SkinnedMeshRendererComponent() { return GeneratedAccess<World::SkinnedMeshRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_HierarchyComponent() { return GeneratedAccess<World::HierarchyComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraComponent() { return GeneratedAccess<World::CameraComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_DirectionalLightComponent() { return GeneratedAccess<World::DirectionalLightComponent>::WeSchema(); }
@@ -2861,6 +3120,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_SpriteComponent(),
 			WeSchemaOf_CircleRendererComponent(),
 			WeSchemaOf_MeshRendererComponent(),
+			WeSchemaOf_SkinnedMeshRendererComponent(),
 			WeSchemaOf_HierarchyComponent(),
 			WeSchemaOf_CameraComponent(),
 			WeSchemaOf_DirectionalLightComponent(),

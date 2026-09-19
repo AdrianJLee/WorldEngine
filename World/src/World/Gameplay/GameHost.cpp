@@ -313,6 +313,8 @@ namespace World::Gameplay
 		// 必须在本帧脚本/玩法读取之后调用,否则同一帧内刚按下的键会被立刻滚走。
 		GameApp::Get().Input().EndFrame();
 
+		// D5c-4a:缓存本帧秒数给 SubmitSceneRender 用(骨骼动画步长)。
+		m_LastTickSeconds = frameTime.GetSeconds();
 		if (render)
 			SubmitSceneRender();
 	}
@@ -329,6 +331,8 @@ namespace World::Gameplay
 			return;
 
 		m_SceneRenderer->BeginScene(m_Scene.get(), SceneRendererOptions());
+		// D5c-4a:骨骼动画步长(与编辑器同一口径:推进组件 Time)。
+		m_SceneRenderer->SetDeltaSeconds(m_LastTickSeconds);
 		m_SceneRenderer->SubmitScene(camera->Camera, transform->Transform);
 		m_SceneRenderer->EndScene();
 

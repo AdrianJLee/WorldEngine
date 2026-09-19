@@ -4,6 +4,7 @@ struct World::TransformComponent
 struct World::SpriteComponent
 struct World::CircleRendererComponent
 struct World::MeshRendererComponent
+struct World::SkinnedMeshRendererComponent
 struct World::HierarchyComponent
 struct World::CameraComponent
 struct World::DirectionalLightComponent
