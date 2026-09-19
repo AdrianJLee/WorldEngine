@@ -77,12 +77,16 @@ namespace World
 			{ "content_browser", EditorShell::PanelForm::Docked, {} },
 			{ "view",            EditorShell::PanelForm::Docked, {} },
 			{ "stats",           EditorShell::PanelForm::Docked, {} },
-			{ "settings",        EditorShell::PanelForm::Docked, {} },
+			// 项目设置(用户 2026-09-20:应为独立窗口):声明为独立窗口形态 —— 默认打开仍走
+			// TogglePanel → OpenPanelAttached(附加到主窗口的标签切换),可拖出为独立 OS 窗口。
+			// 布局存档里的旧停靠记录由 StripIndependentPanelsFromTree 丢弃(不会再停靠回树)。
+			{ "settings",        EditorShell::PanelForm::Independent, { 220.0f, 140.0f, 560.0f, 460.0f } },
 			{ "memory",          EditorShell::PanelForm::Docked, {} },
 			{ "operations",      EditorShell::PanelForm::Docked, {} },
 			{ "save",            EditorShell::PanelForm::Docked, {} },
 			{ "levels",          EditorShell::PanelForm::Docked, {} },
-			// 独立窗口(用户指定):Widget Gallery 与 Input Map。
+			// 独立窗口(用户指定):Widget Gallery、Input Map、Scripts(与 2026-09-20 起的
+			// Project Settings)。
 			{ "gallery",         EditorShell::PanelForm::Independent, { 120.0f, 120.0f, 520.0f, 400.0f } },
 			{ "input",           EditorShell::PanelForm::Independent, { 660.0f, 120.0f, 440.0f, 340.0f } },
 			// W8:Scripts 面板(独立窗口,诊断行/按钮在默认客户区内,便于无鼠标自动化)。
@@ -128,7 +132,8 @@ namespace World
 		m_PanelRegistry.emplace("content_browser", std::make_unique<ContentBrowserPanel>(*this));
 		m_PanelRegistry.emplace("view", std::make_unique<ViewportPanel>(*this));
 		m_PanelRegistry.emplace("stats", std::make_unique<StatsPanel>());
-		// D8a2:项目渲染设置(引擎用户可配置;停靠面板,可拖成独立窗口)。
+		// D8a2:项目渲染设置(引擎用户可配置)。用户 2026-09-20 指定为独立窗口形态:
+		// 默认打开 = 附加到主窗口(见 PanelSpec),可拖出为独立 OS 窗口 / ui.detach。
 		m_PanelRegistry.emplace("settings", std::make_unique<SettingsPanel>());
 		m_PanelRegistry.emplace("memory", std::make_unique<MemoryPanel>());
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
@@ -1032,7 +1037,17 @@ namespace World
 			m_DragPanel.clear();
 			m_TabDragPanel.clear();
 		}
-		else if (!m_DragPanel.empty() || !m_MovingFloat.empty() || !m_TabDragPanel.empty())
+		// P3-1① 修订(用户 2026-09-20 报"子栏不能拖拽了"):出口收口只在**物理左键已经抬起**
+		// 时执行。WuiContext 的拖拽是两段式:按下沿的 BeginDrag 只进入 pending(记下
+		// m_DragPressPos),移动超过 4px 后(WuiContext::EndFrame / 下一次 BeginDrag)才置
+		// m_Dragging —— 期间 IsDragActive() 恒为 false。而 m_TabDragPanel / m_MovingFloat 在
+		// **按下沿当帧**就已经写入;若这时按"拖拽结束"收口,ClearPanelDragIdentity() 会清掉
+		// 起手标记、ctx.EndDrag() 会直接撤销 pending —— 面板再也进不了拖拽(实测表现:按住
+		// 标签拖动,面板完全不动)。pending 期间这些身份成员是拖拽必需的,所以收口条件加上
+		// !leftButtonDown:松手 / 释放事件丢失(由 WuiInputCollector::SyncButtonsWithSystem
+		// 补发释放)时左键已抬起,收口照常发生,P3-1 的"拖出后一次点 ✕ 就关闭"不受影响。
+		else if (!leftButtonDown
+			&& (!m_DragPanel.empty() || !m_MovingFloat.empty() || !m_TabDragPanel.empty()))
 		{
 			// 拖拽结束(松手 / 释放事件丢失):清"拖拽身份"成员 —— 拖拽起点标记残留会让
 			// 已经收回停靠的面板立刻再次浮出。**落点成员必须留到下一帧**:WuiContext 下一帧

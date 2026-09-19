@@ -640,7 +640,12 @@ namespace World::Wui
 			{
 				const WuiRect item { panel.X + 4.0f, panel.Y + 4.0f + itemH * static_cast<float>(i), panel.W - 8.0f, itemH };
 				if (ctx.IsHovered(item))
+				{
 					ctx.Commands().push_back({ WuiDrawKind::Rect, item, theme.ButtonHover, 2.0f });
+					// ③ 弹层内光标归弹层:候选行是弹层自己的可点控件,显式声明 Hand,
+					// 不再让"更早绘制的控件"留下的光标形状代表弹层。
+					ctx.SetCursor(WuiCursor::Hand);
+				}
 				if (ctx.IsClicked(item))
 				{
 					selected = static_cast<int>(i);
@@ -652,6 +657,14 @@ namespace World::Wui
 			ctx.ClosePopupsOnOutsideClick({ id }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(id);
+			// ③ 弹层打开期间:把弹层矩形登记为悬停遮挡区 —— 本帧**之后**绘制的下层控件
+			// (同一面板下方的输入框/滑杆/下拉,或后画的兄弟面板)在 HitTest 里判为未命中,
+			// 鼠标形状与点击都不再"穿透"弹层落到下层控件上。顺序要求:必须在弹层自己的
+			// 条目命中测试与 ClosePopupsOnOutsideClick 之后登记,否则会把弹层自身的点击挡掉、
+			// 或把弹层内点击误判成"外部点击"而关掉弹层。BeginFrame 每帧清空遮挡区,弹层开着
+			// 时这里每帧重新登记;弹层外不登记,既有"点击弹层外关闭"语义不变。
+			if (ctx.IsPopupOpen(id))
+				ctx.PushHoverBlocker(panel);
 			ctx.PopOverlay();
 		}
 		return changed;
@@ -753,7 +766,12 @@ namespace World::Wui
 				"combo-item", item, options[optionIndex], std::string());
 			ctx.Commands().push_back({ WuiDrawKind::ClipPush, listRect });
 			if (ctx.IsHovered(item))
+			{
 				ctx.Commands().push_back({ WuiDrawKind::Rect, item, theme.ButtonHover, 2.0f });
+				// ③ 弹层内光标归弹层:候选行给 Hand。搜索框与 listRect 不重叠,它是 TextField
+				// 自己的 IBeam(更早绘制),不会被这里覆盖。
+				ctx.SetCursor(WuiCursor::Hand);
+			}
 			ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + 6.0f, item.Y + 3.0f, 0, 0 },
 				theme.Text, 0, 1.0f, options[optionIndex], 15.0f, false });
 			ctx.Commands().push_back({ WuiDrawKind::ClipPop });
@@ -788,6 +806,11 @@ namespace World::Wui
 		ctx.ClosePopupsOnOutsideClick({ id }, panel);
 		if (ctx.IsKeyPressed(KeyCodes::Escape))
 			ctx.ClosePopup(id);
+		// ③ 弹层打开期间:弹层矩形登记为悬停遮挡区(含向上展开 flipUp 的情况)—— 本帧之后
+		// 绘制的下层控件/面板在 HitTest 里判为未命中,光标与点击不再穿透弹层。顺序与 Combo
+		// 一致:必须在弹层自身命中测试与"点外关闭"之后登记。BeginFrame 每帧清空遮挡区。
+		if (ctx.IsPopupOpen(id))
+			ctx.PushHoverBlocker(panel);
 		ctx.PopOverlay();
 		return changed;
 	}
