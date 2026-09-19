@@ -11,6 +11,7 @@
 //      scale/upAxis 烘焙、exportMaterials/exportTextures 开关、坏源 cook 非零失败;
 //   6. 不支持特性硬报错(morph/sparse/Draco/KTX2/必须的不支持扩展),源文件缺失可读失败;
 //   6b. D5c-2:glTF skins/animations 导入(夹具、importSkins 开关、动画采样率与 settingsHash);
+//   6c. D5c-3a:JointNodes(关节集合下标 → 节点下标)的 wire 位置、往返与越界拒绝;
 //   7. MeshRendererComponent.MeshIndex 的 schema 往返(SceneSerializer)+ 存根出现该字段。
 #include "wldpch.h"
 
@@ -1066,6 +1067,8 @@ namespace
 		// 唯一字符串:拒绝用例靠它定位 jointCount 字段(容器里不存在同名节点/关节/材质)。
 		skin.Name = "SkinJointLimitProbe";
 		skin.JointNames = { "Hips", "Spine" };
+		// D5c-3a:关节集合下标 → Nodes[] 下标(本夹具用 0/1;MakeSmallModel 正好有 2 个节点)。
+		skin.JointNodes = { 0u, 1u };
 		skin.JointParents = { -1, 0 };
 		glm::mat4 spineBind(1.0f);
 		spineBind[3][1] = 1.0f;   // 关节 1 的绑定姿态:父关节上方 1 单位
@@ -1143,6 +1146,7 @@ namespace
 		const Asset::WModelSkin& sourceSkin = source.Skins[0];
 		CHECK(skin.Name == sourceSkin.Name);
 		CHECK(skin.JointNames == sourceSkin.JointNames);
+		CHECK(skin.JointNodes == sourceSkin.JointNodes);   // D5c-3a:关节 → 节点映射必须往返
 		CHECK(skin.JointParents == sourceSkin.JointParents);
 		CHECK(skin.InverseBindMatrices.size() == sourceSkin.InverseBindMatrices.size());
 		CHECK(skin.BindTranslations.size() == sourceSkin.BindTranslations.size());
@@ -1311,6 +1315,65 @@ namespace
 	}
 
 	// ---------------------------------------------------------------------------------------------
+	// D5c-3a:JointNodes(关节集合下标 → 节点下标)的容器层回归。
+	// ---------------------------------------------------------------------------------------------
+
+	// 覆盖 wire 位置、往返、长度不一致与越界节点引用。
+	void WModelV4JointNodesMapJointSetToNodes()
+	{
+		const Asset::WModelData source = MakeSkinnedModel();
+		const std::vector<uint8_t> bytes = Asset::WModelIO::Serialize(source);
+		CHECK(bytes.size() > 64u);
+
+		// wire 位置:name → jointCount(u32) → jointNames[] → **jointNodes[]** → jointParents[]。
+		// 夹具里 name "SkinJointLimitProbe" 之后是 jointCount(4B)、"Hips"(4B 长度前缀 + 4B)、
+		// "Spine"(4B + 5B),所以 jointNodes 从 jointCount 之后 21B 开始。
+		const size_t nameOffset = FindBytes(bytes, "SkinJointLimitProbe");
+		CHECK(nameOffset != std::string::npos);
+		const size_t jointCountOffset = nameOffset + std::strlen("SkinJointLimitProbe");
+		const size_t jointNodesOffset = jointCountOffset + 4u + (4u + 4u) + (4u + 5u);
+		CHECK(jointNodesOffset + 8u <= bytes.size());
+		// 小端 u32:关节 0 → 节点 0,关节 1 → 节点 1。
+		CHECK(bytes[jointNodesOffset] == 0u && bytes[jointNodesOffset + 1u] == 0u
+			&& bytes[jointNodesOffset + 2u] == 0u && bytes[jointNodesOffset + 3u] == 0u);
+		CHECK(bytes[jointNodesOffset + 4u] == 1u && bytes[jointNodesOffset + 5u] == 0u
+			&& bytes[jointNodesOffset + 6u] == 0u && bytes[jointNodesOffset + 7u] == 0u);
+
+		// 读回确实取自该位置:把两个关节的节点映射对调后按原样读回。
+		std::vector<uint8_t> swapped = bytes;
+		swapped[jointNodesOffset] = 1u;
+		swapped[jointNodesOffset + 4u] = 0u;
+		Asset::WModelData swappedLoaded;
+		std::string error;
+		CHECK(Asset::WModelIO::Parse(swapped.data(), swapped.size(), swappedLoaded, &error));
+		CHECK(error.empty());
+		CHECK(swappedLoaded.Skins.size() == 1u);
+		CHECK(swappedLoaded.Skins[0].JointNodes.size() == 2u);
+		CHECK(swappedLoaded.Skins[0].JointNodes[0] == 1u);
+		CHECK(swappedLoaded.Skins[0].JointNodes[1] == 0u);
+
+		{
+			// 数组长度不齐(缺一条 JointNodes)→ WriteFile 拒绝,不写静默错映射。
+			Asset::WModelData shortJoints = MakeSkinnedModel();
+			shortJoints.Skins[0].JointNodes.resize(1u);
+			std::string writeError;
+			CHECK(!Asset::WModelIO::WriteFile((TestRoot() / "joint-nodes-short.wmodel").string(),
+				shortJoints, &writeError));
+			CHECK(Contains(writeError, "JointNodes"));
+		}
+		{
+			// 越界节点引用(JointNodes[1] = 2,但 nodeCount = 2)→ Parse 可读错误,不留给运行时。
+			std::vector<uint8_t> badNode = bytes;
+			badNode[jointNodesOffset + 4u] = 2u;
+			Asset::WModelData rejected;
+			std::string parseError;
+			CHECK(!Asset::WModelIO::Parse(badNode.data(), badNode.size(), rejected, &parseError));
+			CHECK(Contains(parseError, "node"));
+			CHECK(Contains(parseError, "nodeCount"));
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------------
 	// D5c-2:glTF skins/animations 导入(夹具、importSkins 开关、动画采样率)。
 	// ---------------------------------------------------------------------------------------------
 
@@ -1388,6 +1451,10 @@ namespace
 		CHECK(skin.JointParents.size() == 2u);
 		CHECK(skin.JointParents[0] == -1);
 		CHECK(skin.JointParents[1] == 0);   // Forearm 是 UpperArm 的子节点
+		// D5c-3a:关节 → 节点映射(夹具的关节 0/1 就是节点 1/2;动画 TargetNode 用同一套节点下标)。
+		CHECK(skin.JointNodes.size() == 2u);
+		CHECK(skin.JointNodes[0] == 1u);   // 关节 0 = glTF 节点 1(UpperArm)
+		CHECK(skin.JointNodes[1] == 2u);   // 关节 1 = glTF 节点 2(Forearm)
 		CHECK(skin.InverseBindMatrices.size() == 2u);
 		const glm::mat4 identity(1.0f);
 		for (int column = 0; column < 4; ++column)
@@ -1576,6 +1643,7 @@ int main(int argc, char** argv)
 			{ "D5c .wmodel v4 skin/animation round trip is complete and deterministic", WModelV4SkinnedRoundTripIsComplete },
 			{ "D5c .wmodel v4 vertex strides (32/64/0) + MeshRange.SkinIndex round trip", WModelV4VertexLayoutsAndSkinIndex },
 			{ "D5c .wmodel v4 rejects v3 bytes / truncated skins / jointCount 129", WModelV4RejectsLegacyAndCorruptSkinData },
+			{ "D5c-3a .wmodel v4 JointNodes map the joint set to Nodes[] (wire position + bounds)", WModelV4JointNodesMapJointSetToNodes },
 			{ "D5c-2 glTF skin fixture imports (skin/joints/weights/inverse bind + baked animation)", GltfSkinFixtureImports },
 			{ "D5c-2 importSkins=false keeps the static layout + 1 warning", GltfSkinImportCanBeDisabled },
 			{ "D5c-2 animationSampleRate participates in settingsHash and drives baked keys", GltfAnimationSampleRateIsBaked },

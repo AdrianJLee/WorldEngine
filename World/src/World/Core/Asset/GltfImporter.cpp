@@ -1165,6 +1165,8 @@ namespace World::Asset
 
 		// ---- D5c-2:骨架(glTF skin → WModelSkin) ----
 		// 关节下标空间 = **本 skin 的关节集合**(JointParents/顶点 Joints 都是这套下标);
+		// D5c-3a:JointNodes 另存每个关节对应的 glTF 节点下标(动画通道 TargetNode 是节点下标,
+		// 两者在关节顺序与节点顺序不一致的资产上会分叉,不能靠"下标恰好重合")。
 		// 绑定姿态取关节节点的局部 TRS(与 Node 的 TRS 同一份值,不含轴/缩放烘焙:
 		// 几何与节点都按 upAxis 旋转,关节局部姿态在绑定姿态里不做额外变换)。
 		if (!settings.ImportSkins && data->skins_count > 0)
@@ -1188,6 +1190,7 @@ namespace World::Asset
 				skin.Name = sourceSkin.name ? sourceSkin.name : ("Skin " + std::to_string(skinIndex));
 				const size_t jointCount = static_cast<size_t>(sourceSkin.joints_count);
 				skin.JointNames.resize(jointCount);
+				skin.JointNodes.resize(jointCount);
 				skin.JointParents.assign(jointCount, -1);
 				skin.InverseBindMatrices.assign(jointCount, glm::mat4(1.0f));
 				// glTF 的 TRS 分量都是**可选**的:缺省 = 单位值(平移 0 / 旋转 identity / 缩放 1)。
@@ -1196,11 +1199,15 @@ namespace World::Asset
 				skin.BindRotations.assign(jointCount, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 				skin.BindScales.assign(jointCount, glm::vec3(1.0f));
 
-				// 关节节点 → 本 skin 关节集合内的下标(父关节用它换算 JointParents)。
+				// 关节节点 → 本 skin 关节集合内的下标(父关节用它换算 JointParents);
+				// 反向的 JointNodes = 关节 → 节点下标(节点数组就是 data->nodes)。
 				std::unordered_map<const cgltf_node*, int32_t> jointIndices;
 				jointIndices.reserve(jointCount);
 				for (size_t joint = 0; joint < jointCount; ++joint)
+				{
 					jointIndices.emplace(sourceSkin.joints[joint], static_cast<int32_t>(joint));
+					skin.JointNodes[joint] = static_cast<uint32_t>(sourceSkin.joints[joint] - data->nodes);
+				}
 
 				if (sourceSkin.inverse_bind_matrices != nullptr)
 				{

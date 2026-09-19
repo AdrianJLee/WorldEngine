@@ -798,6 +798,27 @@ set_tests_properties(World.Model PROPERTIES
     TIMEOUT 60
 )
 
+# D5c-3a:CPU 蒙皮/动画数学(SampleAnimation / BuildJointMatrices 纯函数,headless)。
+add_executable(WorldSkinningTests SkinningTests.cpp)
+target_link_libraries(WorldSkinningTests PRIVATE World)
+target_compile_features(WorldSkinningTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldSkinningTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldSkinningTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldSkinningTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Skinning COMMAND WorldSkinningTests)
+set_tests_properties(World.Skinning PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P1b D6:3D 物理(Jolt)落体/堆叠/共存/接触/调试线段。
 add_executable(WorldPhysics3DTests Physics3DTests.cpp)
 target_link_libraries(WorldPhysics3DTests PRIVATE World)

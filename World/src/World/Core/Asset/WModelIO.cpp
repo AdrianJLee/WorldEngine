@@ -553,6 +553,18 @@ namespace World::Asset::WModelIO
 					}
 				}
 
+				// JointNodes[](D5c-3a):关节集合下标 → Nodes[] 下标,跨表引用在下面统一校验。
+				skin.JointNodes.resize(jointCount);
+				for (uint32_t joint = 0; joint < jointCount; ++joint)
+				{
+					if (!reader.ReadU32(skin.JointNodes[joint],
+						(label + " joint " + std::to_string(joint) + ".node").c_str()))
+					{
+						error = reader.Error;
+						return false;
+					}
+				}
+
 				skin.JointParents.resize(jointCount);
 				for (uint32_t joint = 0; joint < jointCount; ++joint)
 				{
@@ -616,6 +628,13 @@ namespace World::Asset::WModelIO
 					{
 						error = jointLabel + " has out-of-range parent " + std::to_string(parent)
 							+ " (jointCount = " + std::to_string(jointCount) + ")";
+						return false;
+					}
+					// JointNodes 是关节 → 节点的引用:必须是有效节点下标(越界 = 坏文件,不留给运行时)。
+					if (skin.JointNodes[joint] >= nodeCount)
+					{
+						error = jointLabel + " references node " + std::to_string(skin.JointNodes[joint])
+							+ " (nodeCount = " + std::to_string(nodeCount) + ")";
 						return false;
 					}
 					// 逆绑定/绑定姿态里的 NaN 会污染所有蒙皮矩阵,与"坏文件硬报错"同一口径拒绝。
@@ -881,6 +900,9 @@ namespace World::Asset::WModelIO
 			AppendU32(out, static_cast<uint32_t>(skin.JointNames.size()));
 			for (const std::string& jointName : skin.JointNames)
 				AppendString(out, jointName);
+			// JointNodes 紧跟在 jointNames 之后、jointParents 之前(每条 4B;D5c-3a 追加)。
+			for (const uint32_t jointNode : skin.JointNodes)
+				AppendU32(out, jointNode);
 			for (const int32_t parent : skin.JointParents)
 				AppendI32(out, parent);
 			for (const glm::mat4& inverseBind : skin.InverseBindMatrices)
@@ -990,18 +1012,20 @@ namespace World::Asset::WModelIO
 					+ std::to_string(data.SkinVertices.size()) + ")";
 			return false;
 		}
-		// skin 的六个数组必须同长(jointCount 由 JointNames.size() 推出,长度不齐会写错位数据)。
+		// skin 的七个数组必须同长(jointCount 由 JointNames.size() 推出,长度不齐会写错位数据)。
 		for (size_t index = 0; index < data.Skins.size(); ++index)
 		{
 			const WModelSkin& skin = data.Skins[index];
 			const size_t jointCount = skin.JointNames.size();
-			if (skin.JointParents.size() != jointCount || skin.InverseBindMatrices.size() != jointCount
+			if (skin.JointNodes.size() != jointCount || skin.JointParents.size() != jointCount
+				|| skin.InverseBindMatrices.size() != jointCount
 				|| skin.BindTranslations.size() != jointCount || skin.BindRotations.size() != jointCount
 				|| skin.BindScales.size() != jointCount)
 			{
 				if (error)
 					*error = "refusing to write .wmodel v4: skin " + std::to_string(index)
-						+ " joint arrays have different lengths";
+						+ " joint arrays have different lengths (jointCount = " + std::to_string(jointCount)
+						+ ", JointNodes = " + std::to_string(skin.JointNodes.size()) + ")";
 				return false;
 			}
 		}

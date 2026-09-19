@@ -91,13 +91,17 @@ namespace World::Asset
 		std::string Name;
 	};
 
-	// v4:骨架。关节下标空间就是本区块的下标:JointParents[i] 是父关节下标(-1 = 根),
-	// 顶点里的 joints 与动画通道的 TargetNode 用的也是同一套下标(下游自行解释)。
-	// JointNames / JointParents / InverseBindMatrices / Bind* 长度必须一致 = 该 skin 的 jointCount。
+	// v4:骨架。JointParents / 顶点里的 joints 用**本 skin 关节集合**下标;动画通道的 TargetNode
+	// 用**节点**下标(与 glTF 一致,运行时节点树就是 Nodes[])。
+	// JointNodes[j] 是关节 j 对应的节点下标 —— "关节集合下标 ↔ 节点下标"的唯一映射来源
+	// (D5c-3a 冻结):调色板取 nodeWorld[JointNodes[j]],不再靠"两种下标恰好重合"。
+	// JointNames / JointNodes / JointParents / InverseBindMatrices / Bind* 长度必须一致 = 该 skin 的 jointCount。
 	struct WModelSkin
 	{
 		std::string Name;
 		std::vector<std::string> JointNames;
+		// 关节 j → Nodes[] 下标(必须是有效节点下标 0..nodeCount-1;Parse 拒绝越界引用)。
+		std::vector<uint32_t> JointNodes;
 		std::vector<int32_t> JointParents;
 		std::vector<glm::mat4> InverseBindMatrices;
 		std::vector<glm::vec3> BindTranslations;
@@ -178,7 +182,7 @@ namespace World::Asset
 	//   Skins[] → Animations[] →
 	//   VertexData(vertexCount × stride:布局 1 = 32B,布局 2 = 64B) → Indices(u32 × indexCount)
 	//   Meshes[]:firstSubmesh(u32) / submeshCount(u32) / skinIndex(i32,-1 = 非蒙皮)
-	//   Skins[]:name / jointCount(u32,≤128) / jointNames[] / jointParents[i32] /
+	//   Skins[]:name / jointCount(u32,≤128) / jointNames[] / jointNodes[u32] / jointParents[i32] /
 	//           inverseBind[jointCount × mat4(f32×16)] / bindTranslation[jointCount × vec3] /
 	//           bindRotation[jointCount × quat(f32×4)] / bindScale[jointCount × vec3]
 	//   Animations[]:name / duration(f32) / channelCount(u32) /
