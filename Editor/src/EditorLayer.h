@@ -53,7 +53,17 @@ namespace World
 		EditorCamera3D& GetEditorCamera3D() { return m_EditorCamera3D; }
 		bool IsViewportCamera3D() const { return m_Viewport3D; }
 		void SetViewportCamera3D(bool enabled) { m_Viewport3D = enabled; }
-		void ToggleViewportCamera3D() { m_Viewport3D = !m_Viewport3D; }
+		// D5c-5:切到 3D 档时把轨道相机**对齐当前 2D 视角**(见 .cpp 里的 AlignEditorCamera3DWithView)——
+		// EditorCamera3D 默认 yaw=pitch=0 朝 +Z,而场景/2D 相机在 +Z 朝 -Z,直接切过去会
+		// 从"背面"看场景(蒙皮/单面网格被背面剔除,实测 3D 档整块不显示)。
+		void ToggleViewportCamera3D()
+		{
+			m_Viewport3D = !m_Viewport3D;
+			if (m_Viewport3D)
+				AlignEditorCamera3DWithView();
+		}
+		// 让 3D 轨道相机与当前 2D 视图同向、同目标(进入 3D 档时调用一次)。
+		void AlignEditorCamera3DWithView();
 		Ref<SceneRenderer>& GetSceneRenderer() { return m_SceneRenderer; }
 		// 相机可视化:预览小窗(用场景相机渲一份 PiP)与视锥显示。
 		uint64_t GetCameraPreviewTextureId() const { return m_PreviewTextureId; }

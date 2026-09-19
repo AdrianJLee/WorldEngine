@@ -161,6 +161,9 @@ namespace World
 		m_EditorCamera3D = EditorCamera3D(60.0f, 1.6f / 0.9f, 0.1f, 2000.0f, 12.0f);
 		m_EditorCamera3D.SetViewportSize(1280, 720);
 		m_Viewport3D = std::getenv("WLD_VIEWPORT_3D") != nullptr;
+		// D5c-5:从 3D 档起步(自动化入口)时同样先对齐 2D 视角,避免"从背面看场景"。
+		if (m_Viewport3D)
+			AlignEditorCamera3DWithView();
 
 		// 开发验证:WLD_HIERARCHY_DEMO=1 现场造一个"父精灵 + 子精灵"的最小层级
 		// (子实体局部偏移 0.4):验证 2D 精灵子节点跟随父节点 —— 渲染路径必须消费
@@ -1107,6 +1110,14 @@ namespace World
 #else
 		WLD_CORE_WARN("Renderer change requires an editor restart on this platform.");
 #endif
+	}
+
+	// D5c-5:把 3D 轨道相机对齐到当前 2D 视图 —— EditorCamera3D 默认朝向(yaw=pitch=0 → +Z)
+	// 与场景/2D 相机(+Z 处朝 -Z)相反,直接切 3D 档会从"背面"看场景,单面几何/蒙皮网格被背面剔除。
+	void EditorLayer::AlignEditorCamera3DWithView()
+	{
+		m_EditorCamera3D.SetYawPitch(180.0f, 0.0f);
+		m_EditorCamera3D.FocusOn(glm::vec3(0.0f), 12.0f);
 	}
 
 	void EditorLayer::ProcessPendingRendererChange()
