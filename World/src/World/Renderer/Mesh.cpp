@@ -24,6 +24,23 @@ namespace World
 		};
 		static_assert(sizeof(StandardVertex) == 32, "StandardVertex must stay 32 bytes (stride contract)");
 
+		// D5c-3b 布局 2 顶点:标准 32B + joints/weights 32B = 64B。
+		// 与 WModelIO::WModelVertex + WModelIO::WModelSkinVertex 逐字段对应(memcpy 逐块拷贝)。
+		struct SkinnedVertex
+		{
+			glm::vec3 Position;
+			glm::vec3 Normal;
+			glm::vec2 TexCoord;
+			glm::vec4 Joints;
+			glm::vec4 Weights;
+		};
+		static_assert(sizeof(SkinnedVertex) == 64, "SkinnedVertex must stay 64 bytes (stride contract)");
+		static_assert(offsetof(SkinnedVertex, Joints) == 32, "SkinnedVertex joints must start at byte 32");
+		// joints+weights 块大小用本地布局表达(不再引用 Asset 侧类型:Mesh.cpp 只依赖自己的
+		// 顶点布局,避免跨模块头文件/PCH 的可见性问题——实测引用 Asset::WModelIO::WModelSkinVertex 编译不过)。
+		static_assert(sizeof(SkinnedVertex) - offsetof(SkinnedVertex, Joints) == 32,
+			"skin vertex block (joints+weights) must be 32 bytes");
+
 		uint32_t FormatSize(Rhi::Format format)
 		{
 			using Rhi::Format;
@@ -73,6 +90,20 @@ namespace World
 			{ 2, 0, Rhi::Format::R32G32_SFLOAT, static_cast<uint32_t>(offsetof(StandardVertex, TexCoord)) },
 		};
 		layout.Bindings = { { 0, static_cast<uint32_t>(sizeof(StandardVertex)), false } };
+		return layout;
+	}
+
+	MeshVertexLayout Mesh::MakeSkinnedLayout()
+	{
+		MeshVertexLayout layout;
+		layout.Attributes = {
+			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, static_cast<uint32_t>(offsetof(SkinnedVertex, Position)) },
+			{ 1, 0, Rhi::Format::R32G32B32_SFLOAT, static_cast<uint32_t>(offsetof(SkinnedVertex, Normal)) },
+			{ 2, 0, Rhi::Format::R32G32_SFLOAT, static_cast<uint32_t>(offsetof(SkinnedVertex, TexCoord)) },
+			{ 3, 0, Rhi::Format::R32G32B32A32_SFLOAT, static_cast<uint32_t>(offsetof(SkinnedVertex, Joints)) },
+			{ 4, 0, Rhi::Format::R32G32B32A32_SFLOAT, static_cast<uint32_t>(offsetof(SkinnedVertex, Weights)) },
+		};
+		layout.Bindings = { { 0, static_cast<uint32_t>(sizeof(SkinnedVertex)), false } };
 		return layout;
 	}
 
@@ -161,9 +192,36 @@ namespace World
 
 		MeshDesc desc;
 		desc.DebugName = std::filesystem::path(path).stem().string();
-		desc.Layout = MakeStandardLayout();
-		desc.VertexData.resize(data.Vertices.size() * sizeof(StandardVertex));
-		std::memcpy(desc.VertexData.data(), data.Vertices.data(), desc.VertexData.size());
+		desc.VertexLayoutId = data.VertexLayoutId;
+		if (data.VertexLayoutId == kVertexLayoutSkinned)
+		{
+			// 布局 2:解析器已保证 SkinVertices 与 Vertices 一一对应(长度不齐时 Parse 就报错),
+			// 这里再挡一次,避免手工构造的 WModelData 越界读。
+			if (data.SkinVertices.size() != data.Vertices.size())
+			{
+				if (error) *error = "'" + path + "': skinned .wmodel has mismatched joints/weights count";
+				return nullptr;
+			}
+			desc.Layout = MakeSkinnedLayout();
+			desc.VertexData.resize(data.Vertices.size() * sizeof(SkinnedVertex));
+			// 逐顶点拼接(标准 32B + skin 32B):WModelVertex 与 StandardVertex,
+			// WModelSkinVertex 与 SkinnedVertex 的后半段逐字段一致,整块 memcpy 即可。
+			for (size_t vertex = 0; vertex < data.Vertices.size(); ++vertex)
+			{
+				auto* target = reinterpret_cast<SkinnedVertex*>(
+					desc.VertexData.data() + vertex * sizeof(SkinnedVertex));
+				std::memcpy(&target->Position, &data.Vertices[vertex], sizeof(StandardVertex));
+				std::memcpy(&target->Joints, &data.SkinVertices[vertex],
+					sizeof(SkinnedVertex) - offsetof(SkinnedVertex, Joints));
+			}
+		}
+		else
+		{
+			// 布局 1 逐字节不变:同一份 MakeStandardLayout + StandardVertex 直拷。
+			desc.Layout = MakeStandardLayout();
+			desc.VertexData.resize(data.Vertices.size() * sizeof(StandardVertex));
+			std::memcpy(desc.VertexData.data(), data.Vertices.data(), desc.VertexData.size());
+		}
 		desc.Indices = std::move(data.Indices);
 
 		Ref<Mesh> mesh = Create(desc);

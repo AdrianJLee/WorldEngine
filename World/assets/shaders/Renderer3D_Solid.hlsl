@@ -1,6 +1,8 @@
 // P1b D2b + D3:3D 网格着色器。
 //  - set 0 = 全局相机 UBO(u_ViewProjection)
 //  - set 1 = 每对象 UBO(u_Model / 材质标量 / u_EntityId)
+//            + binding 3 = 骨骼调色板 UBO(u_Bones[128],D5c-3b GPU 蒙皮;不能放 binding 2:
+//            GL 后端描述符单元 = binding(忽略 set),binding 2 已被 set0 的灯光 UBO 占用)
 //  - set 2 = 材质贴图(Albedo = sRGB, Normal = 线性)
 struct VS_INPUT
 {
@@ -33,6 +35,18 @@ struct VS_INSTANCE_INPUT
     [[vk::location(6)]] float4 i_Row3 : INSTANCE3;
     [[vk::location(7)]] float4 i_Color : INSTANCE4;
     [[vk::location(8)]] float4 i_EntityId : INSTANCE5;
+};
+
+// D5c-3b:蒙皮顶点输入(.wmodel 顶点布局 2:标准 32B + joints/weights 32B,stride 64)。
+// 关节下标用 float 承载(0..127 精确可表示),与容器/网格一致 —— 不引入整数顶点属性,
+// GL 后端的 glVertexArrayAttribFormat 会把整数属性按浮点读(D8b-2 实例化已踩过)。
+struct VS_SKINNED_INPUT
+{
+    [[vk::location(0)]] float3 a_Position : POSITION;
+    [[vk::location(1)]] float3 a_Normal : NORMAL;
+    [[vk::location(2)]] float2 a_TexCoord : TEXCOORD0;
+    [[vk::location(3)]] float4 a_Joints : JOINTS;
+    [[vk::location(4)]] float4 a_Weights : WEIGHTS;
 };
 
 struct PS_OUTPUT
@@ -90,6 +104,19 @@ cbuffer ObjectUniforms : register(b1, space1)
     int4 u_EntityId;
 };
 
+// D5c-3b:set 1, binding 3 = 骨骼调色板(每绘制的 8KB UBO;非蒙皮绘制绑默认调色板)。
+// 为什么不是 binding 2(2026-09-19 回归修复):GL 后端绑定单元 = binding(忽略 set),
+// 与 set0/binding2 的 LightUniforms 同号,glBindBufferRange 会互相覆盖(实测像素基线失败)。
+// GL UBO 单元占用表:0 = 相机、1 = 物体、2 = 灯光、3 = 骨骼;贴图走 GL 纹理单元(独立命名空间)。
+// 与 C++ 的 Renderer3D::BoneUniforms(128 × float4x4,std140 8192B)逐字段对应。
+// 为什么是 UBO 而不是 SSBO(主 agent 2026-09-19 冻结):GL 后端的 SSBO 描述符绑定支持
+// 未经验证,而"每绘制写 UBO"是本项目对象 UBO 已有的路径;128 × 64B 在 UBO 上限内。
+// 下标必须**动态**合法:调用方保证 paletteCount ≤ 128,顶点里的关节下标在这里 clamp。
+cbuffer BoneUniforms : register(b3, space1)
+{
+    float4x4 u_Bones[128];
+};
+
 // set 2:材质贴图。albedo 以 sRGB 格式创建(硬件解码到线性),
 // 法线贴图是线性数据(不解码)。
 [[vk::combinedImageSampler]] Texture2D u_AlbedoTexture : register(t1, space2);
@@ -126,6 +153,50 @@ VS_OUTPUT VSMainInstanced(VS_INPUT input, VS_INSTANCE_INPUT instance)
     output.v_TexCoord = input.a_TexCoord;
     output.v_BaseColor = instance.i_Color;
     output.v_EntityId = instance.i_EntityId.x;
+    return output;
+}
+
+// D5c-3b:蒙皮的线性混合(4 关节/顶点,与容器布局一致)。
+// - 关节下标 clamp 到 [0,127]:越界数据在 GL 上不会报错,不 clamp 会读到 UBO 之外(未定义值);
+// - weights 全 0(或全非有限)退化为"不蒙皮":直接用 u_Model。没有这条,坏数据/未赋权顶点
+//   会被 (0,0,0) 矩阵打成退化点,整块网格消失 —— 反而更难排查;
+// - 法线用调色板矩阵的 3×3 部分混合后**重新归一化**(参考实现口径;非均匀缩放下不精确,
+//   与"顶点布局里没有切线/逆转置"的既有约定一致)。
+// 注意:spirv-cross 生成的 GLSL 里 "linear" 是插值修饰符关键字,不能用作变量名(实测)。
+float4x4 ComputeSkinPalette(VS_SKINNED_INPUT input)
+{
+    const int4 joints = (int4)round(input.a_Joints);
+    float4x4 blended = (float4x4)0;
+    [unroll] for (int index = 0; index < 4; ++index)
+    {
+        const uint boneIndex = (uint)clamp(joints[index], 0, 127);
+        blended += u_Bones[boneIndex] * input.a_Weights[index];
+    }
+    return blended;
+}
+
+// D5c-3b:蒙皮顶点入口(顶点属性 = 布局 2,stride 64)。PSMain 与静态路径共用。
+VS_OUTPUT VSMainSkinned(VS_SKINNED_INPUT input)
+{
+    VS_OUTPUT output;
+    const float4x4 palette = ComputeSkinPalette(input);
+    const float4 skinnedPosition = mul(palette, float4(input.a_Position, 1.0f));
+    const float3 skinnedNormal = mul((float3x3)palette, input.a_Normal);
+    const float3 localNormal = dot(skinnedNormal, skinnedNormal) > 1e-12f
+        ? normalize(skinnedNormal) : input.a_Normal;
+    // weights 全 0(或结果非有限)退化为"不蒙皮":没有这条,坏数据/未赋权顶点会被
+    // (0,0,0) 矩阵打成退化点,整块网格消失 —— 反而更难排查。
+    const bool hasWeights = any(input.a_Weights != 0.0f) && all(isfinite(skinnedPosition));
+    const float4 localPosition = hasWeights ? skinnedPosition : float4(input.a_Position, 1.0f);
+
+    const float4 worldPosition = mul(u_Model, localPosition);
+    output.Position = mul(u_ViewProjection, worldPosition);
+    const float3x3 normalMatrix = (float3x3)transpose((float3x3)u_Model);
+    output.v_Normal = normalize(mul(normalMatrix, localNormal));
+    output.v_WorldPosition = worldPosition.xyz;
+    output.v_TexCoord = input.a_TexCoord;
+    output.v_BaseColor = u_BaseColor;
+    output.v_EntityId = (float)u_EntityId.x;
     return output;
 }
 

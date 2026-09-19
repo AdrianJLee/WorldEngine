@@ -44,6 +44,19 @@ namespace World
 		};
 		static_assert(sizeof(ObjectUniforms) == 144, "ObjectUniforms must match Renderer3D_Solid.hlsl");
 
+		// D5c-3b:骨骼调色板(set 1 binding 3,b0 = u_Model 之外的第二个 UBO)。
+		// 与 Renderer3D_Solid.hlsl / Renderer3D_Shadow.hlsl 的 `cbuffer BoneUniforms : register(b3, space1)`
+		// 逐字段对应:float4x4 u_Bones[128],行主序上传(mat4 的 16 个 float 按列主序存放,
+		// 与 u_Model 同一条路径 —— 见 WriteObjectUniforms 的 SetData 与实例化 Row0..Row3 的对照)。
+		// 尺寸 = 128 × 64B = 8KB < UBO 上限(16KB)。
+		struct BoneUniforms
+		{
+			glm::mat4 Bones[Renderer3D::MaxBonePalette];
+		};
+		static_assert(sizeof(BoneUniforms) == Renderer3D::MaxBonePalette * 64,
+			"BoneUniforms must be MaxBonePalette × mat4 (8KB)");
+		static_assert(sizeof(BoneUniforms) == 8192, "u_Bones[128] must be 8192 bytes");
+
 		// D8b-2:实例数据(96B;与 Renderer3D_Solid.hlsl 的 VS_INSTANCE_INPUT 逐字段对应)。
 		// 模型矩阵按**行**上传(HLSL 的 float4x4(a,b,c,d) 按行构造),避免列/行主序歧义。
 		// 实体 id 用 float 承载而不是整数属性:GL 后端建属性走 glVertexArrayAttribFormat
@@ -100,11 +113,27 @@ namespace World
 			Rhi::Handle<Rhi::Texture> ShadowColorTexture;
 			Rhi::Handle<Rhi::Sampler> ShadowSampler;
 			Rhi::Handle<Rhi::Pipeline> ShadowPipeline;
+			// D5c-3b:蒙皮变体(顶点入口 VSMainSkinned,顶点属性用布局 2)。现有管线/路径不动。
+			Rhi::Handle<Rhi::Pipeline> SkinnedPipeline;
+			Rhi::Handle<Rhi::Pipeline> SkinnedShadowPipeline;
 			// 投影者用独立的对象槽位区:不消耗主通道的对象序号(否则阴影 + 主通道的
 			// 提交数会让 64 个对象槽位提前耗尽)。
 			Rhi::Handle<Rhi::Buffer> ShadowUniformBuffers[Renderer::FramesInFlight][kObjectsPerFrame];
 			Rhi::Handle<Rhi::DescriptorSet> ShadowObjectSets[Renderer::FramesInFlight][kObjectsPerFrame];
 			uint32_t ShadowObjectIndex = 0;
+			// ---- D5c-3b:骨骼调色板(set 1 binding 3)----
+			// 默认调色板缓冲(128 个单位阵)。Vulkan 下蒙皮管线静态使用 set 1
+			// binding 3(着色器里声明了 u_Bones),所以每个 set 1 都必须更新 binding 3:
+			// 非蒙皮绘制在 WriteObjectUniforms 里把 binding 3 指向这份默认缓冲,否则
+			// vkCmdDrawIndexed 会被验证层判为 VUID-vkCmdDrawIndexed-None-08600。
+			// 内容在 Init 写一次,之后不再变(按声明长度固定分配 8KB)。
+			Rhi::Handle<Rhi::Buffer> DefaultPaletteBuffer;
+			// 蒙皮绘制:每帧槽位最多 MaxSkinnedDrawsPerFrame 份 8KB 调色板 UBO + 对应描述符集,
+			// 按需惰性创建(帧栅栏保护:BeginFrame 等到本槽位上轮提交完成,重写同一份才安全)。
+			// 主通道与阴影通道**共用**这一池;每帧槽位的游标在 BeginScene/BeginShadowPass 复位。
+			Rhi::Handle<Rhi::Buffer> PaletteBuffers[Renderer::FramesInFlight][Renderer3D::MaxSkinnedDrawsPerFrame];
+			Rhi::Handle<Rhi::DescriptorSet> PaletteSets[Renderer::FramesInFlight][Renderer3D::MaxSkinnedDrawsPerFrame];
+			uint32_t PaletteCursor = 0;
 			// 自建 set0 的调用方(材质预览)用的默认灯光 UBO:占位实现同款方向光 + 0.25 环境光。
 			Rhi::Handle<Rhi::Buffer> DefaultLightBuffer;
 			// [lighting] 日志去重(首帧或数量/阴影开关变化时才打)。
@@ -169,8 +198,29 @@ namespace World
 		}
 
 		// ---- D3 提交辅助(把三处重复代码收敛到一处) ----
+		// D5c-3b:7 参数版本(带骨骼调色板)先声明 —— 6 参数的便捷重载在它之后定义,
+		// 否则"后定义先调用"过不了编译(实测 C2660)。
 		void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const ObjectUniforms& uniforms,
-			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set)
+			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set,
+			Rhi::Handle<Rhi::Buffer>& boneBuffer);
+
+		// D5c-3b:蒙皮提交会用到材质描述符集,而它的定义在下方(实测 C3861)→ 先声明。
+		Rhi::Handle<Rhi::DescriptorSet> MaterialSetFor(State& state, const Ref<Material>& material,
+			uint32_t slot);
+
+		// D5c-3b:同一份对象 UBO 写入 + 把骨骼调色板写进 set 1 binding 3。
+		// boneBuffer 为空 = 非蒙皮绘制:binding 3 用 State::DefaultPaletteBuffer 兜底,
+		// 保证**每一个** set 1 都同时更新 binding 1 和 binding 3 —— Vulkan 的管线静态使用
+		// u_Bones(声明在着色器里),一个只写了 binding 1 的描述符集在 vkCmdDrawIndexed 时
+		// 会被验证层判为 VUID-vkCmdDrawIndexed-None-08600。
+		// **GL 后端的 DescriptorSet::Update 是"整体替换"语义**(OpenGLDescriptorSet::Update 直接
+		// 覆盖 m_Writes),分两次写会丢掉对象绑定 —— 所以 binding 1/3 必须在同一次 Update 里提交。
+		// **GL 的 UBO 单元号 = binding(忽略 set)**:binding 3 是全局唯一的骨骼单元,
+		// 曾经的 binding 2 与 set0 的灯光 UBO 同号,每个物体的 set1 绑定都会覆盖灯光 UBO
+		// (GL 像素基线打红、实体 id 附件却一致)。占用表:0=相机、1=物体、2=灯光、3=骨骼。
+		void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const ObjectUniforms& uniforms,
+			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set,
+			Rhi::Handle<Rhi::Buffer>& boneBuffer)
 		{
 			// 每对象 UBO 独立分配:提交期写入不会与同帧其它对象互相覆盖。
 			if (!buffer)
@@ -189,7 +239,47 @@ namespace World
 			write.Binding = 1;
 			write.Type = Rhi::DescriptorType::UniformBuffer;
 			write.Buffer = buffer;
-			set->Update({ write });
+			Rhi::DescriptorWrite bones;
+			bones.Binding = 3;
+			bones.Type = Rhi::DescriptorType::UniformBuffer;
+			bones.Buffer = boneBuffer ? boneBuffer : state.DefaultPaletteBuffer;
+			set->Update({ write, bones });
+			(void)slot; (void)index;
+		}
+
+		// 非蒙皮路径的便捷重载:binding 3 交给默认调色板(7 参数版里 boneBuffer == nullptr 的分支)。
+		void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const ObjectUniforms& uniforms,
+			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set)
+		{
+			Rhi::Handle<Rhi::Buffer> noPalette;
+			WriteObjectUniforms(state, slot, index, uniforms, buffer, set, noPalette);
+		}
+
+		// D5c-3b:把 CPU 侧的关节调色板写进当前帧槽位的调色板 UBO。
+		// 调色板长度超过 MaxBonePalette / 为空的话由调用方在更早处拒绝,这里是"已校验"路径:
+		// 只拷贝 paletteCount 个矩阵,剩余部分保持上一次的内容(着色器按 paletteCount clamp 下标)。
+		void WriteBoneUniforms(State& state, uint32_t slot, const glm::mat4* palette, uint32_t paletteCount,
+			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set)
+		{
+			if (!buffer)
+			{
+				Rhi::BufferDesc desc;
+				desc.Size = sizeof(BoneUniforms);
+				desc.Usage = Rhi::BufferUsageUniform;
+				desc.Memory = Rhi::MemoryHint::HostVisible;
+				desc.DebugName = "Renderer3D.BoneUBO";
+				buffer = Renderer::GetDevice()->CreateBuffer(desc);
+			}
+			if (!set)
+				set = Renderer::GetDevice()->CreateDescriptorSet(state.ObjectLayout);
+			if (!buffer || !set)
+				return;
+			buffer->SetData(palette, static_cast<uint64_t>(paletteCount) * sizeof(glm::mat4));
+			Rhi::DescriptorWrite bones;
+			bones.Binding = 3;
+			bones.Type = Rhi::DescriptorType::UniformBuffer;
+			bones.Buffer = buffer;
+			set->Update({ bones });
 		}
 
 		void BindObject(State& state, uint32_t slot, uint32_t index, const MeshGpu& mesh,
@@ -210,6 +300,76 @@ namespace World
 			state.Stats.DrawCalls++;
 			state.Stats.Triangles += indexCount / 3;
 			(void)slot; (void)index;
+		}
+
+		// D5c-3b:蒙皮绘制核心。主通道与阴影通道只有"管线/对象槽位区/是否绑材质"三处差异,
+		// 统一走这里,保证调色板绑定与统计口径一致。
+		// 阴影管线的布局只有 set0/set1:多绑一个 set2 在 Vulkan 下是非法绑定(实测直接崩)。
+		void DrawSkinnedObject(State& state, const MeshGpu& mesh, const glm::mat4& transform, int32_t entityId,
+			const glm::vec4* baseColor, const glm::mat4* palette, uint32_t paletteCount, uint32_t objectIndex,
+			uint32_t indexCount, uint32_t firstIndex,
+			const Rhi::Handle<Rhi::Pipeline>& pipeline, const Ref<Material>& material, uint32_t slot,
+			bool shadow)
+		{
+			if (!mesh.VertexBuffer || !pipeline)
+				return;
+			// 调色板占一份独立的 8KB UBO:调用方已校验游标 < MaxSkinnedDrawsPerFrame,这里取用后自增。
+			const uint32_t paletteSlot = state.PaletteCursor++;
+			Rhi::Handle<Rhi::Buffer>& boneBuffer = state.PaletteBuffers[slot][paletteSlot];
+			Rhi::Handle<Rhi::DescriptorSet>& boneSet = state.PaletteSets[slot][paletteSlot];
+			WriteBoneUniforms(state, slot, palette, paletteCount, boneBuffer, boneSet);
+
+			Rhi::Handle<Rhi::Buffer>& objectBuffer = shadow
+				? state.ShadowUniformBuffers[slot][objectIndex]
+				: state.ObjectUniformBuffers[slot][objectIndex];
+			Rhi::Handle<Rhi::DescriptorSet>& objectSet = shadow
+				? state.ShadowObjectSets[slot][objectIndex]
+				: state.ObjectSets[slot][objectIndex];
+			ObjectUniforms uniforms;
+			uniforms.Model = transform;
+			uniforms.EntityId = { entityId, 0, 0, 0 };
+			// 与 SubmitObject 同口径:有材质时标量/贴图标志从材质描述填,
+			// 否则用常量色 + 中性标量(SubmitSkinned 的 vec4 重载)。
+			const MaterialDesc* desc = material ? &material->GetDesc() : nullptr;
+			if (desc)
+			{
+				uniforms.BaseColor = desc->BaseColor;
+				uniforms.MetallicRoughness = { desc->Metallic, desc->Roughness, 0.0f, 0.0f };
+				uniforms.Emissive = { desc->Emissive.x, desc->Emissive.y, desc->Emissive.z, 0.0f };
+				uniforms.Flags = {
+					desc->AlbedoTexture.empty() ? 0.0f : 1.0f,
+					desc->NormalTexture.empty() ? 0.0f : 1.0f,
+					desc->DoubleSided ? 1.0f : 0.0f,
+					0.0f };
+			}
+			else
+			{
+				uniforms.BaseColor = baseColor ? *baseColor : glm::vec4(1.0f);
+				uniforms.MetallicRoughness = { 0.0f, 0.5f, 0.0f, 0.0f };
+				uniforms.Emissive = { 0.0f, 0.0f, 0.0f, 0.0f };
+				uniforms.Flags = { 0.0f, 0.0f, 0.0f, 0.0f };
+			}
+			// 对象 UBO(binding 1)与调色板(binding 3)必须在同一次 Update 里写(见上面的说明)。
+			WriteObjectUniforms(state, slot, objectIndex, uniforms, objectBuffer, objectSet, boneBuffer);
+
+			Rhi::Handle<Rhi::DescriptorSet> materialSet;
+			if (!shadow && material)
+				materialSet = MaterialSetFor(state, material, slot);
+
+			state.CommandBuffer->BindPipeline(pipeline);
+			state.CommandBuffer->BindDescriptorSet(objectSet, 1);
+			if (!shadow)
+			{
+				if (materialSet)
+					state.CommandBuffer->BindDescriptorSet(materialSet, 2);
+				else if (state.DefaultMaterialSets[slot])
+					state.CommandBuffer->BindDescriptorSet(state.DefaultMaterialSets[slot], 2);
+			}
+			state.CommandBuffer->BindVertexBuffer(0, mesh.VertexBuffer);
+			state.CommandBuffer->BindIndexBuffer(mesh.IndexBuffer);
+			state.CommandBuffer->DrawIndexed(indexCount, 1, firstIndex);
+			state.Stats.DrawCalls++;
+			state.Stats.Triangles += indexCount / 3;
 		}
 
 		// 每材质 × 帧槽位的贴图描述符集。材质 Revision 变化(编辑参数/换贴图/热重载)
@@ -384,6 +544,18 @@ namespace World
 		Rhi::DescriptorSetLayoutDesc objectLayoutDesc;
 		objectLayoutDesc.Bindings.push_back({ 1, Rhi::DescriptorType::UniformBuffer,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex) | Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+		// D5c-3b:binding 3 = 骨骼调色板(u_Bones[128],8KB),**只有顶点阶段**用。
+		// 为什么不是 binding 2(2026-09-19 回归修复):GL 后端的绑定单元 = binding(忽略 set),
+		// set0/binding2 已是灯光 UBO(u_ShadowViewProjection/u_Ambient/u_Lights);同号时
+		// 每个物体的 set1 绑定会把灯光 UBO 从 GL 单元 2 上挤掉(颜色附件与 Vulkan 不一致,
+		// 实体 id 附件仍一致 —— 像素基线失败的正是这个签名)。3 在整条管线里空闲:
+		// UBO 单元 0=相机、1=物体、2=灯光、3=骨骼;贴图用的是 GL 纹理单元命名空间。
+		// 冻结决定(主 agent 2026-09-19):调色板走每绘制的 UBO 而不是 SSBO —— GL 后端的
+		// SSBO 描述符绑定支持未经验证,而"每绘制写 UBO"是本项目对象 UBO 已有的路径,
+		// 不引入新的后端能力要求;128 × 64B = 8KB 在 UBO 上限(16KB)内。
+		objectLayoutDesc.Bindings.push_back({ 3, Rhi::DescriptorType::UniformBuffer,
+			Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex), 1 });
+		objectLayoutDesc.DebugName = "Renderer3D.Object";
 		state.ObjectLayout = Renderer::GetDevice()->CreateDescriptorSetLayout(objectLayoutDesc);
 
 		// D3 set 2:材质贴图(albedo = sRGB 贴图,normal = 线性贴图)。
@@ -423,6 +595,23 @@ namespace World
 			normal.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ false);
 			normal.Sampler = state.MaterialSampler;
 			state.DefaultMaterialSets[slot]->Update({ albedo, normal });
+		}
+
+		// D5c-3b:默认骨骼调色板(set 1 binding 3)。内容无所谓(非蒙皮顶点入口根本不读 u_Bones),
+		// 但 Vulkan 的管线**静态**使用该 binding,不绑就是 VUID-vkCmdDrawIndexed-None-08600;
+		// 这里用"128 个单位阵"的 8KB 缓冲:每个对象描述符集在 WriteObjectUniforms 里把它
+		// 写进 binding 3(蒙皮绘制写自己的调色板),不需要每帧更新。
+		{
+			BoneUniforms identityPalette;
+			for (uint32_t joint = 0; joint < Renderer3D::MaxBonePalette; ++joint)
+				identityPalette.Bones[joint] = glm::mat4(1.0f);
+			Rhi::BufferDesc paletteDesc;
+			paletteDesc.Size = sizeof(BoneUniforms);
+			paletteDesc.Usage = Rhi::BufferUsageUniform;
+			paletteDesc.Memory = Rhi::MemoryHint::HostVisible;
+			paletteDesc.DebugName = "Renderer3D.DefaultBoneUBO";
+			paletteDesc.InitialData = &identityPalette;
+			state.DefaultPaletteBuffer = Renderer::GetDevice()->CreateBuffer(paletteDesc);
 		}
 
 		// 与 SceneRenderer 目标结构一致的兼容渲染通道(颜色 + 实体 ID + 深度)。
@@ -611,6 +800,27 @@ namespace World
 			state.InstancedShadowPipeline = Renderer::GetDevice()->CreatePipeline(instancedShadowDesc);
 		}
 
+		// D5c-3b:蒙皮管线(主通道 + 阴影)。只有"顶点入口 = VSMainSkinned + 顶点属性 = 布局 2"
+		// 与现有管线不同:剔除/深度/混合/描述符布局全部沿用,**现有管线与路径完全不动**。
+		{
+			const MeshVertexLayout skinnedLayout = Mesh::MakeSkinnedLayout();
+			Rhi::PipelineDesc skinnedDesc = pipelineDesc;
+			skinnedDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Solid.hlsl",
+				"Renderer3D-Solid-Skinned", "VSMainSkinned");
+			skinnedDesc.VertexBindings = skinnedLayout.Bindings;
+			skinnedDesc.VertexAttributes = skinnedLayout.Attributes;
+			skinnedDesc.DebugName = "Renderer3D.SolidPipeline.Skinned";
+			state.SkinnedPipeline = Renderer::GetDevice()->CreatePipeline(skinnedDesc);
+
+			Rhi::PipelineDesc skinnedShadowDesc = shadowPipelineDesc;
+			skinnedShadowDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.hlsl",
+				"Renderer3D-Shadow-Skinned", "VSMainSkinned");
+			skinnedShadowDesc.VertexBindings = skinnedLayout.Bindings;
+			skinnedShadowDesc.VertexAttributes = skinnedLayout.Attributes;
+			skinnedShadowDesc.DebugName = "Renderer3D.ShadowPipeline.Skinned";
+			state.SkinnedShadowPipeline = Renderer::GetDevice()->CreatePipeline(skinnedShadowDesc);
+		}
+
 		// 预览用默认灯光(材质预览自建 set0 时绑定):占位实现同款方向光 + 0.25 环境光,
 		// 保证 D4 之后预览观感不变(预览不进场景灯光收集)。
 		{
@@ -659,6 +869,17 @@ namespace World
 		for (Rhi::Handle<Rhi::Buffer>& buffer : state.InstanceBuffers)
 			buffer = nullptr;
 		state.InstanceCursor = 0;
+		// D5c-3b:骨骼调色板资源(默认 8KB 缓冲 + 每帧槽位的蒙皮调色板 UBO/描述符集)。
+		state.SkinnedPipeline = nullptr;
+		state.SkinnedShadowPipeline = nullptr;
+		state.DefaultPaletteBuffer = nullptr;
+		for (auto& slot : state.PaletteBuffers)
+			for (Rhi::Handle<Rhi::Buffer>& buffer : slot)
+				buffer = nullptr;
+		for (auto& slot : state.PaletteSets)
+			for (Rhi::Handle<Rhi::DescriptorSet>& set : slot)
+				set = nullptr;
+		state.PaletteCursor = 0;
 		// D4:阴影资源必须在设备销毁前放掉(与材质贴图缓存同理)。
 		state.ShadowPipeline = nullptr;
 		state.ShadowFramebuffer = nullptr;
@@ -699,6 +920,8 @@ namespace World
 		state.ObjectIndex = 0;
 		// D8b-2:每批场景从这里开始重新分配实例缓冲区(帧槽位由帧栅栏保护)。
 		state.InstanceCursor = 0;
+		// D5c-3b:蒙皮调色板游标(帧槽位由帧栅栏保护,见 State::PaletteBuffers 的说明)。
+		state.PaletteCursor = 0;
 	}
 
 	void Renderer3D::BindPipelineForCurrentPass()
@@ -754,6 +977,90 @@ namespace World
 		const MeshSubmesh& submesh = mesh->GetSubmeshes()[submeshIndex];
 		return SubmitObject(GetState(), mesh, nullptr, baseColor, transform, entityId,
 			submesh.IndexCount, submesh.IndexOffset);
+	}
+
+	// ---- P1b D5c-3b:GPU 蒙皮 ----
+	uint32_t Renderer3D::SubmitSkinned(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+		const Ref<Material>& material, const glm::mat4& transform, const glm::mat4* palette,
+		uint32_t paletteCount, int32_t entityId)
+	{
+		// 材质为空:退化成常量色(与 Submit(mesh, material, …) 同款约定)。
+		return SubmitSkinnedInternal(mesh, submeshIndex, material, nullptr, transform, palette,
+			paletteCount, entityId, /*shadow*/ false);
+	}
+
+	uint32_t Renderer3D::SubmitSkinned(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+		const glm::vec4& baseColor, const glm::mat4& transform, const glm::mat4* palette,
+		uint32_t paletteCount, int32_t entityId)
+	{
+		return SubmitSkinnedInternal(mesh, submeshIndex, nullptr, &baseColor, transform, palette,
+			paletteCount, entityId, /*shadow*/ false);
+	}
+
+	uint32_t Renderer3D::SubmitShadowSkinned(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+		const glm::mat4& transform, const glm::mat4* palette, uint32_t paletteCount)
+	{
+		return SubmitSkinnedInternal(mesh, submeshIndex, nullptr, nullptr, transform, palette,
+			paletteCount, -1, /*shadow*/ true);
+	}
+
+	uint32_t Renderer3D::SubmitSkinnedInternal(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+		const Ref<Material>& material, const glm::vec4* baseColor, const glm::mat4& transform,
+		const glm::mat4* palette, uint32_t paletteCount, int32_t entityId, bool shadow)
+	{
+		State& state = GetState();
+		const Rhi::Handle<Rhi::Pipeline>& pipeline = shadow ? state.SkinnedShadowPipeline : state.SkinnedPipeline;
+		if (!mesh || !state.CommandBuffer || !pipeline)
+			return UINT32_MAX;
+		// 调色板约束:整块 ≤ MaxBonePalette 个矩阵;为空/超限一律拒绝(不绘制)。
+		if (!palette || paletteCount == 0 || paletteCount > MaxBonePalette)
+			return UINT32_MAX;
+		// 布局约束:只有 .wmodel 布局 2(顶点带 joints/weights)能走蒙皮管线。
+		// 布局 1 的顶点里没有关节数据,用蒙皮管线读会读越界 —— 明确拒绝,由调用方回退静态路径。
+		if (mesh->GetVertexLayoutId() != Mesh::kVertexLayoutSkinned)
+			return UINT32_MAX;
+		// 透明材质约束:本阶段只建了蒙皮不透明管线(透明要另建混合/不写深度的变体,排序语义
+		// 也不同)。这里拒绝而不是当不透明画 —— 由调用方决定回退,或等后续工作包补透明变体。
+		if (material && material->GetDesc().BlendMode == MaterialBlendMode::Transparent)
+			return UINT32_MAX;
+		const bool wholeMesh = submeshIndex == UINT32_MAX;
+		if (!wholeMesh && submeshIndex >= mesh->GetSubmeshes().size())
+			return UINT32_MAX;
+
+		uint32_t& objectIndex = shadow ? state.ShadowObjectIndex : state.ObjectIndex;
+		if (objectIndex >= kObjectsPerFrame)
+		{
+			state.Stats.DroppedObjects++;
+			return UINT32_MAX;
+		}
+		// 每帧的蒙皮调色板配额(每份 8KB UBO):主通道与阴影通道共用,由 BeginScene/BeginShadowPass 复位。
+		if (state.PaletteCursor >= MaxSkinnedDrawsPerFrame)
+		{
+			state.Stats.DroppedObjects++;
+			return UINT32_MAX;
+		}
+
+		uint32_t indexCount = mesh->GetIndexCount();
+		uint32_t firstIndex = 0;
+		if (!wholeMesh)
+		{
+			const MeshSubmesh& submesh = mesh->GetSubmeshes()[submeshIndex];
+			indexCount = submesh.IndexCount;
+			firstIndex = submesh.IndexOffset;
+		}
+		if (indexCount == 0)
+			return UINT32_MAX;
+
+		EnsureMeshBuffersFor(state, mesh);
+		const auto cached = state.MeshCache.find(mesh.get());
+		if (cached == state.MeshCache.end() || !cached->second.VertexBuffer)
+			return UINT32_MAX;
+
+		const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
+		const uint32_t index = objectIndex++;
+		DrawSkinnedObject(state, cached->second, transform, entityId, baseColor, palette, paletteCount, index,
+			indexCount, firstIndex, pipeline, material, slot, shadow);
+		return index;
 	}
 
 	// ---- P1b D8b-2:实例化合批 ----
@@ -1145,6 +1452,8 @@ namespace World
 		State& state = GetState();
 		state.CommandBuffer = commandBuffer;
 		state.ShadowObjectIndex = 0;
+		// D5c-3b:阴影通道与主通道共用蒙皮调色板池,游标同样从 0 起(两者同属一次提交)。
+		state.PaletteCursor = 0;
 		if (!commandBuffer)
 			return;
 		// 阴影贴图是固定尺寸的离屏目标,视口/裁剪按贴图边长设置(管线是动态视口状态)。

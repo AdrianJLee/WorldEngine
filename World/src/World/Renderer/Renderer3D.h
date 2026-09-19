@@ -82,7 +82,10 @@ namespace World
 	//      必须用 D32 而不是 D24S8 —— 后者在 RHI 里的视图是 DEPTH|STENCIL 双 aspect,
 	//      不能作为采样描述符,见 Renderer3D.cpp Init 的说明);
 	//  - set 1 = 每对象 UBO(u_Model / u_BaseColor),按"帧槽位 × 对象序号"各一份,
-	//    提交时直接映射写入(帧槽位由帧栅栏保护,不会在 GPU 使用中被覆盖)。
+	//    提交时直接映射写入(帧槽位由帧栅栏保护,不会在 GPU 使用中被覆盖);
+	//    D5c-3b 追加 binding 3 = 骨骼调色板 UBO(u_Bones[128],顶点阶段;≤8KB):
+	//    蒙皮绘制每次写一份,非蒙皮绘制写默认调色板(State::DefaultPaletteBuffer,128 个单位阵)。
+	//    必须是 3 而不是 2:GL 后端描述符单元 = binding(忽略 set),set0 的灯光 UBO 占 2。
 	// 首期每帧对象上限 D2bObjectsPerFrame;实例化/剔除/多材质在 D8 扩展。
 	class WLD_API Renderer3D
 	{
@@ -98,6 +101,11 @@ namespace World
 		static constexpr uint32_t MaxPointLightCapacity = 7;
 		static constexpr uint32_t MaxLights = 8;                 // UBO 容量(static_assert 的一部分)
 		static constexpr uint32_t DefaultShadowMapSize = 2048;
+		// D5c-3b:骨骼调色板上限(与 WModelIO::kMaxJointsPerSkin 一致;u_Bones[128] = 8KB)。
+		static constexpr uint32_t MaxBonePalette = 128;
+		// 每个帧槽位最多缓存多少份蒙皮调色板(超出返回 UINT32_MAX 并不绘制)。与
+		// kObjectsPerFrame(1024)同数量级,只是调色板 UBO 是 8KB 一份,所以单独设上限。
+		static constexpr uint32_t MaxSkinnedDrawsPerFrame = 256;
 		// 生效值(启动时从项目清单装载;Stats 面板/脚本可读)。
 		static uint32_t GetShadowMapSize();
 		static uint32_t GetMaxDirectionalLights();
@@ -163,6 +171,28 @@ namespace World
 			const glm::mat4& transform, int32_t entityId = -1);
 		// 阴影通道的逐 submesh 提交(与 SubmitShadow 共用投影者槽位区)。
 		static uint32_t SubmitShadowSubmesh(const Ref<Mesh>& mesh, uint32_t submeshIndex, const glm::mat4& transform);
+
+		// ---- P1b D5c-3b:GPU 蒙皮提交 ----
+		// mesh 必须是**布局 2**(Mesh::GetVertexLayoutId() == 2)的资产,palette 是该 skin 的
+		// 关节矩阵(CPU 侧由 World::BuildJointMatrices 算好,长度 = 该 skin 的关节数)。
+		// 整块调色板随这一次 draw 写进 set 1 binding 3 的 UBO(u_Bones[paletteCount]),
+		// 顶点阶段按 joints/weights 混合 4 个矩阵。返回分配到的对象序号。
+		// 拒绝条件(一律返回 UINT32_MAX 且**不绘制**,由调用方决定回退):
+		//   paletteCount == 0 / > MaxBonePalette / palette == nullptr;mesh 为空或不是布局 2;
+		//   材质是透明(本阶段只建了不透明蒙皮管线);
+		//   调用不在 BeginScene..EndScene 之间;对象槽位或每帧蒙皮配额耗尽。
+		// 越界关节下标在着色器里被 clamp 到调色板末尾(不越界读 UBO)。
+		// 已知限制:与实例化合批(SubmitInstanced)不叠加(蒙皮实例走逐物体路径);
+		// 透明材质不支持(见上)。阴影通道请用 SubmitShadowSkinned。
+		static uint32_t SubmitSkinned(const Ref<Mesh>& mesh, uint32_t submeshIndex, const Ref<Material>& material,
+			const glm::mat4& transform, const glm::mat4* palette, uint32_t paletteCount, int32_t entityId = -1);
+		static uint32_t SubmitSkinned(const Ref<Mesh>& mesh, uint32_t submeshIndex, const glm::vec4& baseColor,
+			const glm::mat4& transform, const glm::mat4* palette, uint32_t paletteCount, int32_t entityId = -1);
+		// 阴影通道的蒙皮提交:同一套调色板/布局约束(材质/透明无关),顶点入口换成
+		// Renderer3D_Shadow.hlsl 的 VSMainSkinned,不写蒙皮姿态的话影子会留在绑定姿态。
+		// 与 SubmitShadow* 共用投影者槽位区与蒙皮配额。
+		static uint32_t SubmitShadowSkinned(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+			const glm::mat4& transform, const glm::mat4* palette, uint32_t paletteCount);
 		// 用**持久槽位**提交(材质预览这类"每帧都画、但只画一两个物体"的调用方):
 		// 对象序号从 slotBase 开始分配,跨帧固定,避免与主场景/其它预览争用同一份
 		// UBO 与描述符集(争用会让画面逐帧来回闪 —— 用户实测"预览一直闪烁")。
@@ -243,5 +273,9 @@ namespace World
 
 	private:
 		static void EnsureMeshBuffers(const Ref<Mesh>& mesh);
+		// D5c-3b:主通道/阴影通道共用的蒙皮绘制核心(shadow = true 时走阴影管线与槽位区)。
+		static uint32_t SubmitSkinnedInternal(const Ref<Mesh>& mesh, uint32_t submeshIndex,
+			const Ref<Material>& material, const glm::vec4* baseColor, const glm::mat4& transform,
+			const glm::mat4* palette, uint32_t paletteCount, int32_t entityId, bool shadow);
 	};
 }

@@ -66,17 +66,25 @@ namespace World
 		std::vector<uint8_t> VertexData;
 		std::vector<uint32_t> Indices;
 		MeshVertexLayout Layout;
+		// D5c-3b:与 .wmodel 的 WModelIO::kVertexLayout* 同口径(1 = 标准、2 = 蒙皮)。
+		// 内置 primitive 与手工描述默认 1;布局 2 时顶点里有 joints/weights(location 3/4)。
+		uint32_t VertexLayoutId = 1;
 	};
 
 	class WLD_API Mesh
 	{
 	public:
+		// D5c-3b:顶点布局 id(1 = 标准、2 = 蒙皮)。Renderer3D 据此决定走静态还是蒙皮管线。
+		static constexpr uint32_t kVertexLayoutStandard = 1;
+		static constexpr uint32_t kVertexLayoutSkinned = 2;
+
 		// 校验布局/数据一致性(顶点数据必须是 stride 的整数倍、索引必须在范围内);
 		// 不合法的描述返回 nullptr,由调用方决定回退(导入器会报错并跳过该网格)。
 		static Ref<Mesh> Create(const MeshDesc& desc);
 
 		const MeshDesc& GetDesc() const { return m_Desc; }
 		const MeshVertexLayout& GetLayout() const { return m_Desc.Layout; }
+		uint32_t GetVertexLayoutId() const { return m_Desc.VertexLayoutId; }
 		uint32_t GetVertexCount() const;
 		uint32_t GetIndexCount() const { return static_cast<uint32_t>(m_Desc.Indices.size()); }
 		const MeshBounds& GetBounds() const { return m_Bounds; }
@@ -89,6 +97,11 @@ namespace World
 
 		// 标准布局:location0=Position(float3) / 1=Normal(float3) / 2=TexCoord(float2),stride 32。
 		static MeshVertexLayout MakeStandardLayout();
+		// D5c-3b 布局 2:标准 32B 之后追加 location3=Joints(float4)/location4=Weights(float4),
+		// stride 64(与 WModelIO 的 WModelVertex + WModelSkinVertex 逐字段一致)。
+		// 关节下标用 float 承载,不引入整数顶点属性(GL 后端的 glVertexArrayAttribFormat 会把
+		// 整数属性按浮点读,D8b-2 实例化已踩过同一个坑)。
+		static MeshVertexLayout MakeSkinnedLayout();
 		// 按 layout 从顶点数据里取 Position(location 0)算包围盒;找不到 Position 时返回全零包围盒。
 		static MeshBounds ComputeBounds(const MeshVertexLayout& layout, const std::vector<uint8_t>& vertexData);
 
