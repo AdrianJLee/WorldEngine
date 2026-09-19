@@ -190,6 +190,11 @@ namespace World::Rhi::Vulkan
 		// 需要 independentBlend。
 		if (supportedFeatures.independentBlend)
 			enabledFeatures.independentBlend = VK_TRUE;
+		// P4-2:各向异性过滤必须**在这里启用**才合法 —— 之前只在能力表里查询、没启用,
+		// 一旦 sampler 真的开各向异性就撞 VUID-VkSamplerCreateInfo-anisotropyEnable-01070
+		// (实测:rendering.anisotropy=16 时 Editor/Runtime 各 1 条)。
+		if (supportedFeatures.samplerAnisotropy)
+			enabledFeatures.samplerAnisotropy = VK_TRUE;
 		deviceInfo.pEnabledFeatures = &enabledFeatures;
 		// 批绘制后端( WUI 字体图集 / Renderer2D 纹理槽 )在命令缓冲录制期间更新
 		// 已绑定的描述符集,需要 UPDATE_AFTER_BIND;先在物理设备上查询支持情况。
@@ -251,6 +256,9 @@ namespace World::Rhi::Vulkan
 		m_Capabilities.PushConstants = true;
 		m_Capabilities.TimelineSemaphores = v12.timelineSemaphore == VK_TRUE;
 		m_Capabilities.AnisotropicFiltering = features.samplerAnisotropy == VK_TRUE;
+		// P4-2:设备各向异性上限(maxSamplerAnisotropy);不支持时按 1 上报。
+		m_Capabilities.MaxSamplerAnisotropy = m_Capabilities.AnisotropicFiltering
+			? properties.limits.maxSamplerAnisotropy : 1.0f;
 		m_Capabilities.DepthBiasClamp = features.depthBiasClamp == VK_TRUE;
 		m_Capabilities.TimestampQueries = properties.limits.timestampComputeAndGraphics == VK_TRUE;
 		// D8b:时间戳时基(0 是非法值,退回 1ns/tick)。

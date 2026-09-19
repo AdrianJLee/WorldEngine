@@ -587,6 +587,7 @@ namespace World
 		// 材质采样器:重复寻址(平铺贴图常见需求)+ 线性过滤;mip 由贴图自带(当前单级)。
 		// P4-1:最大各向异性来自项目清单(rendering.anisotropy,1..16,启动时生效);
 		// 设备不支持各向异性过滤时退化到 1 并 warn 一次,避免渲染器反复刷日志。
+		// P4-2:超过设备上限(Rhi::Capabilities::MaxSamplerAnisotropy)时按上限 clamp 并 warn 一次。
 		Rhi::SamplerDesc materialSamplerDesc;
 		materialSamplerDesc.MinFilter = Rhi::Filter::Linear;
 		materialSamplerDesc.MagFilter = Rhi::Filter::Linear;
@@ -595,7 +596,8 @@ namespace World
 		{
 			const float requested = static_cast<float>(RenderSettings::Get().Anisotropy);
 			float anisotropy = std::max(1.0f, std::min(16.0f, requested));
-			if (anisotropy > 1.0f && !Renderer::GetDevice()->GetCapabilities().AnisotropicFiltering)
+			const Rhi::Capabilities& capabilities = Renderer::GetDevice()->GetCapabilities();
+			if (anisotropy > 1.0f && !capabilities.AnisotropicFiltering)
 			{
 				static bool s_AnisotropyWarned = false;
 				if (!s_AnisotropyWarned)
@@ -605,6 +607,19 @@ namespace World
 						requested);
 				}
 				anisotropy = 1.0f;
+			}
+			else if (anisotropy > capabilities.MaxSamplerAnisotropy)
+			{
+				// P4-2:设置值超过设备上限时按上限 clamp(否则 Vulkan 会撞
+				// VUID-VkSamplerCreateInfo-anisotropyEnable-01071),warn 一次。
+				static bool s_AnisotropyClampWarned = false;
+				if (!s_AnisotropyClampWarned)
+				{
+					s_AnisotropyClampWarned = true;
+					WLD_CORE_WARN("Renderer3D: rendering.anisotropy={0} 超过设备上限 {1},已限制到设备上限",
+						requested, capabilities.MaxSamplerAnisotropy);
+				}
+				anisotropy = std::max(1.0f, capabilities.MaxSamplerAnisotropy);
 			}
 			materialSamplerDesc.MaxAnisotropy = anisotropy;
 		}

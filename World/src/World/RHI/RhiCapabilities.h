@@ -20,6 +20,9 @@ namespace World::Rhi
 		bool PushConstants = false;
 		bool TimelineSemaphores = false;
 		bool AnisotropicFiltering = false;
+		// 各向异性上限(设备限制);不支持或取不到时为 1。sampler 创建前按
+		// min(设置值, 上限) clamp,避免超过 VkPhysicalDeviceLimits::maxSamplerAnisotropy。
+		float MaxSamplerAnisotropy = 1.0f;
 		bool DepthBiasClamp = false;
 		bool TimestampQueries = false;
 		bool MeshShaders = false;
