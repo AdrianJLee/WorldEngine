@@ -1,6 +1,8 @@
 #include "wldpch.h"
 #include "WuiChrome.h"
 
+#include "World/WUI/WuiAccessibility.h"
+
 #include <algorithm>
 
 namespace World::Wui
@@ -453,7 +455,8 @@ namespace World::Wui
 		for (size_t i = 0; i < items.size(); ++i)
 		{
 			const TreeViewItem& item = items[i];
-			const float indent = 6.0f + static_cast<float>(std::max(0, item.Depth)) * 12.0f;
+			const int depth = std::max(0, item.Depth);
+			const float indent = 6.0f + static_cast<float>(depth) * 12.0f;
 			const WuiRect row { area.X + 2.0f + indent, area.Y + 4.0f + rowHeight * static_cast<float>(i) - scrollY,
 				std::max(0.0f, area.W - 4.0f - indent), rowHeight };
 			// D10:箭头列**固定宽度**。过去"没有子节点的行"不给箭头列、标签起点少 16px,
@@ -464,6 +467,33 @@ namespace World::Wui
 			result.ArrowRects.push_back(arrow);
 			if (row.Y + row.H < area.Y || row.Y > area.Y + area.H)
 				continue;
+
+			// D10-12:树行登记无障碍节点(AI 控制通道 ui.tree / ui.invoke 的数据源)。
+			// Rect 用"标签区"而不是整行:标签区不含展开箭头,脚本按它注入的点击正好
+			// 落在行主体(点箭头只会展开/折叠,不会开菜单)。只登记**行中心确实落在
+			// 树可视区内**的行 —— 半滚出视口的行中心可能压在树下面的控件上,注入的
+			// 点击会打错目标(导入目的地选择器的手工登记出于同一条理由)。
+			const float labelX = row.X + 18.0f;
+			const WuiRect labelRect { labelX, row.Y, std::max(0.0f, row.W - (labelX - row.X)), row.H };
+			const float rowCenterY = row.Y + row.H * 0.5f;
+			if (item.Id != 0 && rowCenterY >= area.Y && rowCenterY <= area.Y + area.H)
+			{
+				WuiAccessNode node;
+				node.Id = item.Id;
+				node.Window = WuiAccessibility::Get().CurrentWindow();
+				node.Panel = WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "tree-item";
+				node.Label = item.Label;
+				// depth/expanded/children 让脚本不用猜层级与展开态(与画出来的缩进一致,
+				// depth 同样取 max(0, ...))。
+				node.Value = "depth=" + std::to_string(depth)
+					+ " expanded=" + (item.Expanded ? "1" : "0")
+					+ " children=" + (item.HasChildren ? "1" : "0");
+				node.Rect = labelRect;
+				node.Enabled = !item.Disabled;
+				node.Interactive = !item.Disabled;
+				WuiAccessibility::Get().Register(node);
+			}
 
 			const bool hovered = !item.Disabled && ctx.IsHovered(row);
 			if (item.Selected)
@@ -484,13 +514,11 @@ namespace World::Wui
 				PushText(ctx, { row.X + 5.0f, row.Y + (row.H - 13.0f) * 0.5f },
 					".", theme.TextMuted, 12.0f);
 			}
-			const float labelX = row.X + 18.0f;
 			PushText(ctx, { labelX, row.Y + (row.H - 13.0f) * 0.5f }, item.Label,
 				item.Disabled ? theme.TextMuted : theme.Text, 13.0f, item.Selected);
 
 			if (item.Disabled)
 				continue;
-			const WuiRect labelRect { labelX, row.Y, std::max(0.0f, row.W - (labelX - row.X)), row.H };
 			if (ctx.Input().MouseClicked[1] && hovered)
 				result.ContextClicked = static_cast<int>(i);
 			if (ctx.IsDoubleClicked(labelRect))

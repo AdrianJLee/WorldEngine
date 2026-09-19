@@ -8,6 +8,7 @@
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/Widgets/WuiModal.h"
 #include "World/Renderer/Texture.h"
 #include "World/Renderer/Material.h"
 
@@ -1292,26 +1293,30 @@ namespace World
 		else if (!m_Model.ShowDeleteModal && ctx.Modal() == deleteModal)
 			ctx.ClearModal();
 		Wui::WuiRect panel;
-		if (BeginModal(ctx, deleteModal, "Delete Confirmation", { 380, 160 }, &panel, theme))
+		bool escapePressed = false;
+		// D10-11:与导入位置模态共用 WuiModal 组件(居中/遮罩/标题栏/Esc/按钮条);
+		// 文案与 id 逐字不变(Yes → DeleteSelection,No/Esc → 关)。
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = deleteModal;
+		frameDesc.Title = "Delete Confirmation";
+		frameDesc.Size = { 380.0f, 160.0f };
+		if (Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, theme))
 		{
 			Label(ctx, { panel.X + 16, panel.Y + 48 }, "Delete " + std::to_string(m_Model.Selected.size()) + " item(s)? This cannot be undone.", theme.Text, 14.0f);
-			if (Button(ctx, Wui::HashId("browser.delete.yes"), { panel.X + 20, panel.Y + 110, 110, 28 }, "Yes", theme))
+			const Wui::ModalResult result = Wui::ModalFooter(ctx, panel, "Yes", "No",
+				Wui::HashId("browser.delete.yes"), Wui::HashId("browser.delete.no"), true, theme);
+			if (result == Wui::ModalResult::Confirm)
 			{
 				DeleteSelection();
 				m_Model.ShowDeleteModal = false;
 				ctx.ClearModal();
 			}
-			if (Button(ctx, Wui::HashId("browser.delete.no"), { panel.X + 150, panel.Y + 110, 110, 28 }, "No", theme))
+			else if (result == Wui::ModalResult::Cancel || escapePressed)
 			{
 				m_Model.ShowDeleteModal = false;
 				ctx.ClearModal();
 			}
-			if (ctx.IsKeyPressed(KeyCodes::Escape))
-			{
-				m_Model.ShowDeleteModal = false;
-				ctx.ClearModal();
-			}
-			EndModal(ctx, deleteModal);
+			Wui::EndModalFrame(ctx);
 		}
 	}
 }

@@ -327,7 +327,14 @@ namespace World
 				return false;
 			}
 			const glm::vec2 center { node->Rect.X + node->Rect.W * 0.5f, node->Rect.Y + node->Rect.H * 0.5f };
-			Wui::WuiScriptedInput::Get().QueueClick(node->Window, center);
+			// D10:可选 button(0=左键默认 / 1=右键 / 2=中键)—— 右键用于脚本化开上下文菜单
+			// (树行右键菜单等);树行现在是注册过的无障碍节点,可以按 id 直接点。
+			int button = 0;
+			if (args.count("button"))
+				button = std::atoi(arg("button").c_str());
+			if (button < 0 || button > 2)
+				button = 0;
+			Wui::WuiScriptedInput::Get().QueueClick(node->Window, center, button);
 			result = "queued " + node->Kind + " '" + node->Label + "' at ("
 				+ std::to_string(static_cast<int>(center.x)) + "," + std::to_string(static_cast<int>(center.y))
 				+ ") window=" + node->Window;

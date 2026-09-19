@@ -209,8 +209,9 @@ namespace World
 		// 菜单 / 模态 / 布局
 		void DrawMenuBar(Wui::WuiContext& ctx);
 		void DrawModals(Wui::WuiContext& ctx);
-		// D10-10(用户 2026-09-19):导入位置选择器改成**窗口级模态** —— shell 自己持有
-		// 源路径/选中目录/状态/展开集合/滚动,用 BeginModal 居中显示;面板内覆盖层已删除。
+		// D10-10/D10-11(用户 2026-09-19):导入位置选择器是**窗口级模态** —— shell 自己持有
+		// 源路径/选中目录/状态/展开集合/滚动;外框(居中/遮罩/标题栏/Esc)与按钮条走
+		// World/WUI/Widgets/WuiModal.* 组件,整窗输入封锁由 OnRender 的 Begin/EndModalInputBlock 成对完成。
 		void RenderImportDestinationModal(Wui::WuiContext& ctx);
 		// 打开模态时扫一遍内容根(WLD_ASSETPATH)的目录树(低频操作;权限错误跳过)。
 		void ScanImportTree();

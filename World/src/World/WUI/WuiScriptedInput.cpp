@@ -3,6 +3,7 @@
 
 #include "World/Core/KeyCodes.h"
 
+#include <algorithm>
 #include <string_view>
 
 namespace World::Wui
@@ -69,10 +70,11 @@ namespace World::Wui
 		return instance;
 	}
 
-	void WuiScriptedInput::QueueClick(const std::string& windowKey, glm::vec2 position)
+	void WuiScriptedInput::QueueClick(const std::string& windowKey, glm::vec2 position, int button)
 	{
 		Pending& pending = m_Pending[windowKey];
 		pending.Position = position;
+		pending.Button = std::clamp(button, 0, 2);
 		pending.Phase = 0;
 		pending.FramesLeft = 2;   // press 帧 + release 帧
 		// 同一窗口同时只有一份待注入输入:新的点击丢弃上一份还没注入完的文本。
@@ -144,17 +146,20 @@ namespace World::Wui
 		{
 			// 点击阶段:第 1 帧 press、第 2 帧 release(与鼠标操作一致的帧序列)。
 			// 注入期间把键盘焦点交给 WUI,否则菜单/下拉的"点外关闭"逻辑会先把它关掉。
+			// 按键由注入时指定的 button 决定(0 = 左键,1 = 右键):写进对应的下标,
+			// 控件侧走的就是普通鼠标路径。
+			const int button = std::clamp(pending.Button, 0, 2);
 			input.MousePos = pending.Position;
 			input.WantKeyboard = true;
 			if (pending.Phase == 0)
 			{
-				input.MouseDown[0] = true;
-				input.MouseClicked[0] = true;
+				input.MouseDown[button] = true;
+				input.MouseClicked[button] = true;
 			}
 			else
 			{
-				input.MouseDown[0] = false;
-				input.MouseReleased[0] = true;
+				input.MouseDown[button] = false;
+				input.MouseReleased[button] = true;
 			}
 			++pending.Phase;
 			--pending.FramesLeft;

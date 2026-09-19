@@ -22,7 +22,10 @@ namespace World::Wui
 		static WuiScriptedInput& Get();
 
 		// 在指定窗口的指定客户区坐标点一次(1 次点击 = press → release)。
-		void QueueClick(const std::string& windowKey, glm::vec2 position);
+		// button 与 WuiInputState 的 MouseDown/Clicked/Released 下标一致:0 = 左键(默认,
+		// 保持既有调用语义),1 = 右键,2 = 中键。控件侧读到的仍是普通输入 —— 右键用来
+		// 复现控件自己的上下文菜单路径(TreeView/ListView/GridView 的 ContextClicked)。
+		void QueueClick(const std::string& windowKey, glm::vec2 position, int button = 0);
 		// 在指定窗口注入一段文本(UTF-8)。语义:点击(QueueClick)完成后**下一帧**开始注入,
 		// 按 '\n' 分行、每帧一段(第 2 段起该帧先注入 Enter 键再写该行码点),'\r' 并入换行;
 		// 中文等非 ASCII 按 UTF-8 解码成码点写入 input.TextInput —— 与真实键盘上屏同一条路径。
@@ -39,6 +42,7 @@ namespace World::Wui
 		struct Pending
 		{
 			glm::vec2 Position { 0, 0 };
+			int Button = 0;  // 注入的鼠标键:与 MouseDown/Clicked/Released 下标一致
 			int FramesLeft = 0;
 			int Phase = 0;   // 0 = press, 1 = release
 			// 文本阶段(点击完成后开始):按行拆分的码点,每帧消费一段。

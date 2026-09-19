@@ -12,6 +12,7 @@
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/Widgets/WuiModal.h"
 #include "Panels/MaterialEditorPanel.h"
 #include "Panels/ModelPreviewPanel.h"
 #include "Panels/SettingsPanel.h"
@@ -716,11 +717,12 @@ namespace World
 				ctx.RecordOp("undo", "redo", ctx.History().RedoName(), "");
 		}
 		const glm::vec2 viewport = ctx.ViewportSize();
-		// D10-10(用户 2026-09-19):导入位置是**窗口级模态** —— 开帧先把整个客户区登记成
-		// 遮挡区,后面画的所有面板照常显示但收不到命中(点击/悬停/拖放都走 HitTest)。
+		// D10-11(用户 2026-09-19"这种窗口也该抽象出来"):导入位置是**窗口级模态** ——
+		// 开帧用 WuiModal 的输入封锁把整个客户区登记成遮挡区,后面画的所有面板照常显示但
+		// 收不到命中(点击/悬停/拖放都走 HitTest);画模态本体之前 EndModalInputBlock 解开。
 		const bool importModalOpen = m_ImportModalOpen;
 		if (importModalOpen)
-			ctx.PushHoverBlocker({ 0.0f, 0.0f, viewport.x, viewport.y });
+			Wui::BeginModalInputBlock(ctx);
 		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
 		// 停靠区(而不是只切分鼠标所在的面板组)。需在渲染面板前判定,以便
 		// RenderTabs 跳过面板内的落区逻辑。
@@ -787,11 +789,14 @@ namespace World
 			m_DropPreviewActive = true;
 		}
 		// 下层绘制结束:解除遮挡,浮动面板/菜单/弹窗仍按真实光标命中。
-		ctx.ClearHoverBlockers();
-		// D10-10:导入模态之下还有浮动面板与菜单栏要画,继续挡住它们的命中(它们照常显示,
+		if (importModalOpen)
+			Wui::EndModalInputBlock(ctx);   // 与上面的 BeginModalInputBlock 成对
+		else
+			ctx.ClearHoverBlockers();       // 无模态:清掉窗口内浮动面板的遮挡区(原行为)
+		// 导入模态之下还有浮动面板与菜单栏要画,继续挡住它们的命中(它们照常显示,
 		// 但点不到);到画模态前再解除(见 DrawModals 前后)。
 		if (importModalOpen)
-			ctx.PushHoverBlocker({ 0.0f, 0.0f, viewport.x, viewport.y });
+			Wui::BeginModalInputBlock(ctx);
 
 		std::string payload;
 		bool dropConsumed = false;
@@ -940,9 +945,12 @@ namespace World
 		// 挂靠栏:横条形式(排在菜单栏下方),独立窗口可挂靠至此。
 		DrawAttachBar(ctx);
 
-		// D10-10:模态绘制前解除遮挡(对话框自身要能命中),画完再清一次,
+		// D10-11:模态绘制前解除遮挡(对话框自身要能命中);画完再清一次,
 		// 确保本帧结束时不留 blocker(下一帧开帧也会清,这里是双保险)。
-		ctx.ClearHoverBlockers();
+		if (importModalOpen)
+			Wui::EndModalInputBlock(ctx);
+		else
+			ctx.ClearHoverBlockers();
 		DrawModals(ctx);
 		ctx.ClearHoverBlockers();
 
@@ -2037,8 +2045,9 @@ namespace World
 		m_ImportTree.insert(m_ImportTree.begin(), std::move(rootRow));
 	}
 
-	// D10-10:窗口级"选择导入位置"模态。居中与 50% 黑遮罩由 Wui::BeginModal 负责;
-	// "挡住后面所有面板的命中"由 OnRender 的 PushHoverBlocker 负责(见那里的顺序说明)。
+	// D10-11:窗口级"选择导入位置"模态 —— 居中/遮罩/标题栏/Esc/按钮条走 WuiModal 组件;
+	// "挡住后面所有面板的命中"由 OnRender 的 BeginModalInputBlock/EndModalInputBlock 成对负责
+	// (见那里的顺序说明)。状态行仍归 shell(它有稳定的无障碍 id import.dest.status)。
 	void EditorShell::RenderImportDestinationModal(Wui::WuiContext& ctx)
 	{
 		const Wui::WuiId modalId = Wui::HashId("modal.importdest");
@@ -2054,7 +2063,12 @@ namespace World
 		};
 
 		Wui::WuiRect panel;
-		if (!Wui::BeginModal(ctx, modalId, "选择导入位置", { 560.0f, 440.0f }, &panel, m_Theme))
+		bool escapePressed = false;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = "选择导入位置";
+		frameDesc.Size = { 560.0f, 440.0f };
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, m_Theme))
 			return;
 
 		const float pad = 16.0f;
@@ -2063,12 +2077,11 @@ namespace World
 				+ " · 导入到: " + logicalText(m_ImportDestDir),
 			m_Theme.TextMuted, 13.0f);
 
-		const float buttonsH = 30.0f;
 		const float statusH = 20.0f;
-		const float statusY = panel.Y + panel.H - pad - statusH;
-		const float buttonsY = statusY - buttonsH - 6.0f;
+		// 按钮条固定贴 frame 底部(ModalFooter 画),状态行排在它上方。
+		const float statusY = panel.Y + panel.H - Wui::ModalFooterPadding - Wui::ModalFooterHeight - 6.0f - statusH;
 		const Wui::WuiRect treeArea { panel.X + pad, panel.Y + 62.0f, panel.W - pad * 2.0f,
-			std::max(40.0f, buttonsY - 8.0f - (panel.Y + 62.0f)) };
+			std::max(40.0f, statusY - 8.0f - (panel.Y + 62.0f)) };
 		Wui::PanelBackground(ctx, treeArea, { 0.09f, 0.095f, 0.10f, 1 });
 
 		// 可见行:父行折叠 → 整棵子树不显示(m_ImportTree 是"父在子前"的预排序)。
@@ -2147,8 +2160,9 @@ namespace World
 		}
 
 		bool closeRequested = false;
-		if (Wui::Button(ctx, Wui::HashId("import.dest.ok"), { panel.X + pad, buttonsY, 150.0f, buttonsH },
-			"导入到此文件夹", m_Theme))
+		const Wui::ModalResult footerResult = Wui::ModalFooter(ctx, panel, "导入到此文件夹", "取消",
+			Wui::HashId("import.dest.ok"), Wui::HashId("import.dest.cancel"), true, m_Theme);
+		if (footerResult == Wui::ModalResult::Confirm)
 		{
 			// 目的地 = 选中目录相对内容根的路径;**内容根本身传空串**(与内核/cook 约定一致)。
 			const std::filesystem::path destRelative = m_ImportDestDir.lexically_relative(m_ImportTreeRoot);
@@ -2178,13 +2192,12 @@ namespace World
 				WLD_CORE_WARN("[import] 导入 '{0}' 失败: {1}", m_ImportSourcePath.string(), m_ImportStatus);
 			}
 		}
-		if (Wui::Button(ctx, Wui::HashId("import.dest.cancel"), { panel.X + pad + 158.0f, buttonsY, 90.0f, buttonsH },
-			"取消", m_Theme))
+		else if (footerResult == Wui::ModalResult::Cancel)
 		{
 			ctx.RecordOp("import", "dest-cancel", m_ImportSourcePath.filename().string(), "");
 			closeRequested = true;
 		}
-		if (ctx.IsKeyPressed(KeyCodes::Escape))
+		if (escapePressed)
 			closeRequested = true;
 
 		// 状态行:选中目录 + 上一次导入的可读结果(失败原因也写在这里)。
@@ -2211,7 +2224,7 @@ namespace World
 			m_ImportStatus.clear();
 			ctx.ClearModal();
 		}
-		Wui::EndModal(ctx, modalId);
+		Wui::EndModalFrame(ctx);
 	}
 
 	void EditorShell::EnsureModelPanelFromId(const std::string& panelId)
