@@ -119,6 +119,21 @@ namespace World
 			m_Model.DirTree.push_back(std::move(node));
 		}
 		std::sort(m_Model.DirTree.begin(), m_Model.DirTree.end(), [](const BrowserDirNode& a, const BrowserDirNode& b) { return a.Path < b.Path; });
+		// D10:树里**显示根文件夹**(内容根那一行,Depth 0)。以前树从内容根的子目录开始,
+		// 用户看不到"这些目录挂在谁下面";根行同时是导航/拖放/右键的对象。
+		{
+			BrowserDirNode rootNode;
+			rootNode.Path = m_Model.Root;
+			rootNode.Depth = 0;
+			rootNode.HasChildren = !m_Model.DirTree.empty();
+			m_Model.DirTree.insert(m_Model.DirTree.begin(), std::move(rootNode));
+			// 根行**首次**默认展开(之后尊重用户手动折叠)。
+			if (!m_RootRowSeeded)
+			{
+				m_Model.TreeOpen.insert(m_Model.Root);
+				m_RootRowSeeded = true;
+			}
+		}
 		m_Model.TreeStamp = stamp;
 		m_Model.DirTreeDirty = false;
 	}

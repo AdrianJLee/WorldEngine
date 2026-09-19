@@ -456,7 +456,10 @@ namespace World::Wui
 			const float indent = 6.0f + static_cast<float>(std::max(0, item.Depth)) * 12.0f;
 			const WuiRect row { area.X + 2.0f + indent, area.Y + 4.0f + rowHeight * static_cast<float>(i) - scrollY,
 				std::max(0.0f, area.W - 4.0f - indent), rowHeight };
-			const WuiRect arrow { row.X, row.Y, item.HasChildren ? 16.0f : 0.0f, rowHeight };
+			// D10:箭头列**固定宽度**。过去"没有子节点的行"不给箭头列、标签起点少 16px,
+			// 同一层级的行因此对不齐 —— 用户实测"有的前面有 +-、分不清层级"。
+			// 现在所有行都保留同一列,叶子行画一个弱化占位符。
+			const WuiRect arrow { row.X, row.Y, 16.0f, rowHeight };
 			result.ItemRects.push_back(row);
 			result.ArrowRects.push_back(arrow);
 			if (row.Y + row.H < area.Y || row.Y > area.Y + area.H)
@@ -475,7 +478,13 @@ namespace World::Wui
 				if (ctx.IsClicked(arrow))
 					result.ClickedArrow = static_cast<int>(i);
 			}
-			const float labelX = row.X + (item.HasChildren ? 18.0f : 2.0f);
+			else
+			{
+				// 叶子占位符:让"有没有子节点"一眼可辨,但不影响对齐。
+				PushText(ctx, { row.X + 5.0f, row.Y + (row.H - 13.0f) * 0.5f },
+					".", theme.TextMuted, 12.0f);
+			}
+			const float labelX = row.X + 18.0f;
 			PushText(ctx, { labelX, row.Y + (row.H - 13.0f) * 0.5f }, item.Label,
 				item.Disabled ? theme.TextMuted : theme.Text, 13.0f, item.Selected);
 
