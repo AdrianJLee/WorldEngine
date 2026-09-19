@@ -7,12 +7,57 @@
 #include "World/Core/Vfs/PackageProvider.h"
 #include "World/Renderer/ShaderUtils.h"
 
+#include <chrono>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
 namespace World::Editor
 {
 	namespace fs = std::filesystem;
+
+	namespace
+	{
+		// `--cook --check` 的一次性输出目录:CookPipeline 的产物与 cook.db.json 都写进这里,
+		// 函数返回(含异常路径)时整体删除 —— check 因此不会触碰 build 树里的增量判定事实源。
+		class CookCheckScratch
+		{
+		public:
+			CookCheckScratch()
+			{
+				const fs::path tempRoot = fs::temp_directory_path();
+				for (int attempt = 0; attempt < 64; ++attempt)
+				{
+					const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+					const fs::path candidate = tempRoot
+						/ ("wld-cook-check-" + std::to_string(::GetCurrentProcessId()) + "-"
+							+ std::to_string(tick) + "-" + std::to_string(attempt));
+					std::error_code createEc;
+					if (fs::create_directory(candidate, createEc) && !createEc)
+					{
+						m_Path = candidate;
+						return;
+					}
+				}
+				throw std::runtime_error("cannot create cook check scratch directory under "
+					+ tempRoot.string());
+			}
+
+			~CookCheckScratch()
+			{
+				std::error_code removeEc;
+				fs::remove_all(m_Path, removeEc);
+			}
+
+			CookCheckScratch(const CookCheckScratch&) = delete;
+			CookCheckScratch& operator=(const CookCheckScratch&) = delete;
+
+			const fs::path& Path() const { return m_Path; }
+
+		private:
+			fs::path m_Path;
+		};
+	}
 
 	CookResult CookProject(const CookOptions& options)
 	{
@@ -38,8 +83,17 @@ namespace World::Editor
 			if (!options.StartSceneOverride.empty())
 				manifest.StartScene = options.StartSceneOverride.generic_string();
 
-			// 3. 增量资产烘焙(构建期缓存目录,仅此一处使用构建路径)。
-			const fs::path cookedDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "cooked");
+			// 3. 增量资产烘焙。正常 cook 用构建期缓存目录;check 用一次性 scratch,
+			//    跑完(含失败/异常)即删除,不写 cooked/、不写 cook.db.json。
+			fs::path cookedDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "cooked");
+			std::unique_ptr<CookCheckScratch> checkScratch;
+			if (options.CheckOnly)
+			{
+				checkScratch = std::make_unique<CookCheckScratch>();
+				cookedDir = checkScratch->Path();
+				WLD_CORE_INFO("Check-only cook: artifacts go to scratch directory {0} (removed on exit)",
+					cookedDir.string());
+			}
 			World::Asset::CookPipeline pipeline(World::Asset::DefaultImporters());
 			World::Asset::CookSummary summary;
 			const std::vector<World::Asset::CookEntryResult> results =
