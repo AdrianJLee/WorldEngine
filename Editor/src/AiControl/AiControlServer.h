@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -38,7 +39,7 @@ namespace World::Editor
 
 		bool Start(uint16_t port, Handler handler);
 		void Stop();
-		bool Running() const { return m_Running; }
+		bool Running() const { return m_Running.load(); }
 		uint16_t Port() const { return m_Port; }
 		// 当前是否有等不到主线程处理的命令(供脚本等待注入被消费)。
 		bool HasPending() const;
@@ -61,10 +62,15 @@ namespace World::Editor
 		void ListenLoop();
 		void SessionLoop(void* clientSocket);
 
+		static constexpr uintptr_t kInvalidSocket = static_cast<uintptr_t>(~0ull);
+
 		Handler m_Handler;
-		bool m_Running = false;
+		std::atomic<bool> m_Running { false };
 		uint16_t m_Port = 0;
-		uintptr_t m_ListenSocket = static_cast<uintptr_t>(~0ull);
+		uintptr_t m_ListenSocket = kInvalidSocket;
+		// 监听线程与内联的会话线程用 select 的 100ms 时间片轮询 m_Running(见 .cpp 说明):
+		// 这样 Stop() 只需置标志再 join,不依赖任何跨线程 socket 操作。
+		// m_ListenSocket 由 Start() 写入、由 Stop() 在 join 之后清空,故读写无需加锁。
 		std::thread m_ListenThread;
 		mutable std::mutex m_QueueMutex;
 		std::condition_variable m_QueueCv;
