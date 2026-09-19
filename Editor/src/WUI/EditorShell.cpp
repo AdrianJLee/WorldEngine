@@ -720,8 +720,14 @@ namespace World
 		// D10-11(用户 2026-09-19"这种窗口也该抽象出来"):导入位置是**窗口级模态** ——
 		// 开帧用 WuiModal 的输入封锁把整个客户区登记成遮挡区,后面画的所有面板照常显示但
 		// 收不到命中(点击/悬停/拖放都走 HitTest);画模态本体之前 EndModalInputBlock 解开。
-		const bool importModalOpen = m_ImportModalOpen;
-		if (importModalOpen)
+		// D10-15:shell 的四个模态(未保存/错误/打包/项目设置)同样是真模态,同一口径挡输入。
+		// 项目设置用"请求标志 || 当前模态 id"判定:菜单点击发生在同一帧的 DrawMenuBar,
+		// 请求标志当帧为真;之后由 ctx 里留着的模态 id 负责(DrawModals 才消费请求标志)。
+		const Wui::WuiId projectSettingsModalId = Wui::HashId("modal.projectsettings");
+		const bool shellModalOpen = m_ImportModalOpen || m_Editor.ShowUnsavedModal()
+			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress() || m_ShowProjectSettings
+			|| ctx.Modal() == projectSettingsModalId;
+		if (shellModalOpen)
 			Wui::BeginModalInputBlock(ctx);
 		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
 		// 停靠区(而不是只切分鼠标所在的面板组)。需在渲染面板前判定,以便
@@ -789,13 +795,13 @@ namespace World
 			m_DropPreviewActive = true;
 		}
 		// 下层绘制结束:解除遮挡,浮动面板/菜单/弹窗仍按真实光标命中。
-		if (importModalOpen)
+		if (shellModalOpen)
 			Wui::EndModalInputBlock(ctx);   // 与上面的 BeginModalInputBlock 成对
 		else
 			ctx.ClearHoverBlockers();       // 无模态:清掉窗口内浮动面板的遮挡区(原行为)
-		// 导入模态之下还有浮动面板与菜单栏要画,继续挡住它们的命中(它们照常显示,
+		// 模态之下还有浮动面板与菜单栏要画,继续挡住它们的命中(它们照常显示,
 		// 但点不到);到画模态前再解除(见 DrawModals 前后)。
-		if (importModalOpen)
+		if (shellModalOpen)
 			Wui::BeginModalInputBlock(ctx);
 
 		std::string payload;
@@ -945,9 +951,9 @@ namespace World
 		// 挂靠栏:横条形式(排在菜单栏下方),独立窗口可挂靠至此。
 		DrawAttachBar(ctx);
 
-		// D10-11:模态绘制前解除遮挡(对话框自身要能命中);画完再清一次,
+		// D10-11/D10-15:模态绘制前解除遮挡(对话框自身要能命中);画完再清一次,
 		// 确保本帧结束时不留 blocker(下一帧开帧也会清,这里是双保险)。
-		if (importModalOpen)
+		if (shellModalOpen)
 			Wui::EndModalInputBlock(ctx);
 		else
 			ctx.ClearHoverBlockers();
@@ -2679,63 +2685,102 @@ namespace World
 		const Wui::WuiId unsaved = Wui::HashId("modal.unsaved");
 		if (m_Editor.ShowUnsavedModal()) ctx.SetModal(unsaved);
 		else if (ctx.Modal() == unsaved) ctx.ClearModal();
-		Wui::WuiRect panel;
-		if (BeginModal(ctx, unsaved, "Unsaved Changes", { 460, 150 }, &panel, m_Theme))
 		{
-			Label(ctx, { panel.X + 16, panel.Y + 48 }, "The current scene has unsaved changes.", m_Theme.Text, 14.0f);
-			if (Button(ctx, Wui::HashId("modal.unsaved.save"), { panel.X + 20, panel.Y + 100, 110, 28 }, "Save", m_Theme))
+			Wui::WuiRect panel;
+			bool escapePressed = false;
+			Wui::ModalFrameDesc frameDesc;
+			frameDesc.Id = unsaved;
+			frameDesc.Title = "Unsaved Changes";
+			frameDesc.Size = { 460.0f, 150.0f };
+			if (Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, m_Theme))
 			{
-				m_Editor.ResolveUnsavedModal(true);
-				ctx.ClearModal();
+				Label(ctx, { panel.X + 16, panel.Y + 48 }, "The current scene has unsaved changes.", m_Theme.Text, 14.0f);
+				// 三按钮:Save / Don't Save / Cancel(Esc = Cancel),文案与顺序逐字保留。
+				const Wui::ModalButtonDesc buttons[3] = {
+					{ "Save", Wui::HashId("modal.unsaved.save"), true },
+					{ "Don't Save", Wui::HashId("modal.unsaved.nosave"), true },
+					{ "Cancel", Wui::HashId("modal.unsaved.cancel"), true },
+				};
+				const int clicked = Wui::ModalButtons(ctx, panel, buttons, 3, m_Theme);
+				if (clicked == 0)
+				{
+					m_Editor.ResolveUnsavedModal(true);
+					ctx.ClearModal();
+				}
+				else if (clicked == 1)
+				{
+					m_Editor.ResolveUnsavedModal(false);
+					ctx.ClearModal();
+				}
+				else if (clicked == 2 || escapePressed)
+				{
+					m_Editor.CancelUnsavedModal();
+					ctx.ClearModal();
+				}
+				Wui::EndModalFrame(ctx);
 			}
-			if (Button(ctx, Wui::HashId("modal.unsaved.nosave"), { panel.X + 145, panel.Y + 100, 120, 28 }, "Don't Save", m_Theme))
-			{
-				m_Editor.ResolveUnsavedModal(false);
-				ctx.ClearModal();
-			}
-			if (Button(ctx, Wui::HashId("modal.unsaved.cancel"), { panel.X + 280, panel.Y + 100, 100, 28 }, "Cancel", m_Theme))
-			{
-				m_Editor.CancelUnsavedModal();
-				ctx.ClearModal();
-			}
-			EndModal(ctx, unsaved);
 		}
 
 		const Wui::WuiId error = Wui::HashId("modal.error");
 		if (m_Editor.ShowErrorModal()) ctx.SetModal(error);
 		else if (ctx.Modal() == error) ctx.ClearModal();
-		if (BeginModal(ctx, error, "Error", { 460, 150 }, &panel, m_Theme))
 		{
-			Label(ctx, { panel.X + 16, panel.Y + 48 }, m_Editor.ErrorText(), m_Theme.Text, 14.0f);
-			if (Button(ctx, Wui::HashId("modal.error.ok"), { panel.X + 180, panel.Y + 100, 100, 28 }, "OK", m_Theme))
+			Wui::WuiRect panel;
+			bool escapePressed = false;
+			Wui::ModalFrameDesc frameDesc;
+			frameDesc.Id = error;
+			frameDesc.Title = "Error";
+			frameDesc.Size = { 460.0f, 150.0f };
+			if (Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, m_Theme))
 			{
-				m_Editor.ShowErrorModal() = false;
-				m_Editor.ErrorText().clear();
-				ctx.ClearModal();
+				Label(ctx, { panel.X + 16, panel.Y + 48 }, m_Editor.ErrorText(), m_Theme.Text, 14.0f);
+				const Wui::ModalButtonDesc buttons[1] = {
+					{ "OK", Wui::HashId("modal.error.ok"), true },
+				};
+				const int clicked = Wui::ModalButtons(ctx, panel, buttons, 1, m_Theme);
+				if (clicked == 0 || escapePressed)   // Esc = OK
+				{
+					m_Editor.ShowErrorModal() = false;
+					m_Editor.ErrorText().clear();
+					ctx.ClearModal();
+				}
+				Wui::EndModalFrame(ctx);
 			}
-			EndModal(ctx, error);
 		}
 
 		const Wui::WuiId cooking = Wui::HashId("modal.cooking");
 		if (m_Editor.ShowCookingProgress()) ctx.SetModal(cooking);
 		else if (ctx.Modal() == cooking) ctx.ClearModal();
-		if (BeginModal(ctx, cooking, "Packaging", { 420, 140 }, &panel, m_Theme))
 		{
-			if (m_Editor.CookingFinished())
+			Wui::WuiRect panel;
+			bool escapePressed = false;
+			Wui::ModalFrameDesc frameDesc;
+			frameDesc.Id = cooking;
+			frameDesc.Title = "Packaging";
+			frameDesc.Size = { 420.0f, 140.0f };
+			if (Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, m_Theme))
 			{
-				const std::string message = m_Editor.CookingSucceeded() ? "Packaging finished." : "Packaging failed: " + m_Editor.CookingError();
-				Label(ctx, { panel.X + 16, panel.Y + 48 }, message, m_Theme.Text, 14.0f);
-				if (Button(ctx, Wui::HashId("modal.cooking.ok"), { panel.X + 160, panel.Y + 95, 100, 28 }, "OK", m_Theme))
+				if (m_Editor.CookingFinished())
 				{
-					m_Editor.ShowCookingProgress() = false;
-					ctx.ClearModal();
+					const std::string message = m_Editor.CookingSucceeded() ? "Packaging finished." : "Packaging failed: " + m_Editor.CookingError();
+					Label(ctx, { panel.X + 16, panel.Y + 48 }, message, m_Theme.Text, 14.0f);
+					const Wui::ModalButtonDesc buttons[1] = {
+						{ "OK", Wui::HashId("modal.cooking.ok"), true },
+					};
+					const int clicked = Wui::ModalButtons(ctx, panel, buttons, 1, m_Theme);
+					if (clicked == 0 || escapePressed)   // 完成态才关(Esc = OK)
+					{
+						m_Editor.ShowCookingProgress() = false;
+						ctx.ClearModal();
+					}
 				}
+				else
+				{
+					Label(ctx, { panel.X + 16, panel.Y + 52 }, "Packaging...", m_Theme.Text, 14.0f);
+					// 进度中不允许 Esc:不消费 escapePressed。
+				}
+				Wui::EndModalFrame(ctx);
 			}
-			else
-			{
-				Label(ctx, { panel.X + 16, panel.Y + 52 }, "Packaging...", m_Theme.Text, 14.0f);
-			}
-			EndModal(ctx, cooking);
 		}
 
 		// ---- 项目设置 ----
@@ -2745,38 +2790,49 @@ namespace World
 			ctx.SetModal(projectSettings);
 			m_ShowProjectSettings = false;
 		}
-		if (BeginModal(ctx, projectSettings, "Project Settings", { 380, 190 }, &panel, m_Theme))
 		{
-			Label(ctx, { panel.X + 16, panel.Y + 48 }, "Renderer", m_Theme.TextMuted, 13.0f);
-			std::vector<std::string> options = { "OpenGL", "Vulkan" };
-			Combo(ctx, Wui::HashId("project.renderer"), { panel.X + 110, panel.Y + 46, 220, 24 },
-				"", options, m_ProjectRendererIndex, m_Theme);
-			if (Button(ctx, Wui::HashId("project.save"), { panel.X + 60, panel.Y + 125, 110, 28 }, "Save", m_Theme))
+			Wui::WuiRect panel;
+			bool escapePressed = false;
+			Wui::ModalFrameDesc frameDesc;
+			frameDesc.Id = projectSettings;
+			frameDesc.Title = "Project Settings";
+			frameDesc.Size = { 380.0f, 190.0f };
+			if (Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, m_Theme))
 			{
-				std::string error;
-				World::Asset::ProjectManifest manifest;
-				const std::filesystem::path manifestPath =
-					std::string(WLD_GAME_DIR) + "project.we.yaml";
-				if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+				Label(ctx, { panel.X + 16, panel.Y + 48 }, "Renderer", m_Theme.TextMuted, 13.0f);
+				std::vector<std::string> options = { "OpenGL", "Vulkan" };
+				Combo(ctx, Wui::HashId("project.renderer"), { panel.X + 110, panel.Y + 46, 220, 24 },
+					"", options, m_ProjectRendererIndex, m_Theme);
+				const Wui::ModalButtonDesc buttons[2] = {
+					{ "Save", Wui::HashId("project.save"), true },
+					{ "Cancel", Wui::HashId("project.cancel"), true },
+				};
+				const int clicked = Wui::ModalButtons(ctx, panel, buttons, 2, m_Theme);
+				if (clicked == 0)
 				{
-					manifest.Renderer = m_ProjectRendererIndex == 1 ? "vulkan" : "opengl";
-					if (World::Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+					std::string error;
+					World::Asset::ProjectManifest manifest;
+					const std::filesystem::path manifestPath =
+						std::string(WLD_GAME_DIR) + "project.we.yaml";
+					if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
 					{
-						WLD_CORE_INFO("Project settings saved: renderer={0}", manifest.Renderer);
-						m_Editor.ApplyRendererChange(manifest.Renderer);
+						manifest.Renderer = m_ProjectRendererIndex == 1 ? "vulkan" : "opengl";
+						if (World::Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+						{
+							WLD_CORE_INFO("Project settings saved: renderer={0}", manifest.Renderer);
+							m_Editor.ApplyRendererChange(manifest.Renderer);
+						}
+						else
+							WLD_CORE_ERROR("Failed to save project manifest: {0}", error);
 					}
 					else
-						WLD_CORE_ERROR("Failed to save project manifest: {0}", error);
+						WLD_CORE_ERROR("Failed to load project manifest: {0}", error);
+					ctx.ClearModal();
 				}
-				else
-					WLD_CORE_ERROR("Failed to load project manifest: {0}", error);
-				ctx.ClearModal();
+				else if (clicked == 1 || escapePressed)   // Esc = Cancel
+					ctx.ClearModal();
+				Wui::EndModalFrame(ctx);
 			}
-			if (Button(ctx, Wui::HashId("project.cancel"), { panel.X + 190, panel.Y + 125, 110, 28 }, "Cancel", m_Theme))
-				ctx.ClearModal();
-			if (ctx.IsKeyPressed(KeyCodes::Escape))
-				ctx.ClearModal();
-			EndModal(ctx, projectSettings);
 		}
 	}
 }

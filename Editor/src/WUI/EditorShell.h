@@ -212,6 +212,8 @@ namespace World
 		// D10-10/D10-11(用户 2026-09-19):导入位置选择器是**窗口级模态** —— shell 自己持有
 		// 源路径/选中目录/状态/展开集合/滚动;外框(居中/遮罩/标题栏/Esc)与按钮条走
 		// World/WUI/Widgets/WuiModal.* 组件,整窗输入封锁由 OnRender 的 Begin/EndModalInputBlock 成对完成。
+		// D10-15:DrawModals 里另外四个模态(unsaved/error/cooking/projectsettings)也走同一套
+		// BeginModalFrame + ModalButtons/ModalFooter,并由同一组 Begin/EndModalInputBlock 挡输入。
 		void RenderImportDestinationModal(Wui::WuiContext& ctx);
 		// 打开模态时扫一遍内容根(WLD_ASSETPATH)的目录树(低频操作;权限错误跳过)。
 		void ScanImportTree();

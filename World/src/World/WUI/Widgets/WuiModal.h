@@ -11,6 +11,7 @@
 
 #include "World/WUI/WuiWidgets.h"
 
+#include <cstddef>
 #include <string>
 
 namespace World::Wui
@@ -46,7 +47,24 @@ namespace World::Wui
 	// ModalFooter 占用的内边距与按钮高度:宿主用它给状态行等 body 预留底部空间。
 	inline constexpr float ModalFooterPadding = 16.0f;
 	inline constexpr float ModalFooterHeight = 30.0f;
+	// ModalFooter 内部转调 ModalButtons(固定宽度口径不变),自身签名/语义保持原样。
 	ModalResult ModalFooter(WuiContext& ctx, const WuiRect& frameRect, const std::string& confirmLabel,
 		const std::string& cancelLabel, WuiId confirmId, WuiId cancelId, bool confirmEnabled,
 		const WuiTheme& theme);
+
+	// 通用底部按钮条(任意按钮数):按传入顺序从左到右水平排布,默认在可用宽度里等分
+	// (所以单按钮不会横跨整个框),贴 frame 底部(与 ModalFooter 同一内边距/按钮高度)。
+	// 返回被点击按钮的下标,没有点击返回 -1。每个按钮都自动登记无障碍节点;Enabled=false
+	// 的按钮弱化绘制,登记 enabled=false / interactive=false(ui.invoke 不会点到它)。
+	struct ModalButtonDesc
+	{
+		std::string Label;
+		WuiId Id = 0;
+		bool Enabled = true;
+		// 0 = 与其它 Width==0 的按钮等分可用宽度;> 0 = 固定宽度(ModalFooter 用它保留
+		// 原有两按钮宽度口径,不参与均分)。
+		float Width = 0.0f;
+	};
+	int ModalButtons(WuiContext& ctx, const WuiRect& frameRect, const ModalButtonDesc* buttons,
+		std::size_t count, const WuiTheme& theme);
 }
