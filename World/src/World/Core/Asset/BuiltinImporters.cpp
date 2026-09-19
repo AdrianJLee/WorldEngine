@@ -170,6 +170,14 @@ namespace World::Asset
 				// 源逻辑路径写进 meta,编辑器据此判断"源/设置已变 → 需要重导"。
 				metadata.LogicalModelPath.clear();
 				metadata.SourceLogicalPath = request.LogicalPath;
+				// D10:内容根绝对路径(去重要读盘上已有的材质/贴图):源绝对路径去掉逻辑
+				// 路径的每一级就是内容根。产物目的地留空 = 源所在目录(cook 与编辑器同规则)。
+				{
+					std::filesystem::path root = request.Source;
+					for (const std::filesystem::path& part : std::filesystem::path(request.LogicalPath))
+						root = root.parent_path();
+					metadata.ContentRootAbsolute = root.string();
+				}
 
 				GltfImportBytesResult bytes;
 				std::string importError;

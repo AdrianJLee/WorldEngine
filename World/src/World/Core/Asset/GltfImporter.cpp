@@ -313,6 +313,62 @@ namespace World::Asset
 			return hash;
 		}
 
+		// ---- D10:导入内容去重(材质/贴图复用)----
+		//
+		// 背景(用户 2026-09-19):同一份源材质被多个模型引用时,过去每个模型都会生成
+		// 一份自己的 `<模型名>_<材质名>.wmat`,改一份不影响其它模型 —— 等于没有复用。
+		// 这里在落盘前先按**内容哈希**在候选目录里找同内容文件,找到就复用它的路径。
+		//
+		// 只扫描指定目录里的同扩展名文件(不递归),先比大小再比哈希;目录不存在/读不动
+		// 一律当作"没找到"(不影响导入本身)。
+		std::string FindReusableFile(const std::filesystem::path& contentRoot,
+			const std::vector<std::string>& logicalDirectories, const std::string& extension,
+			const std::vector<uint8_t>& data)
+		{
+			if (contentRoot.empty() || data.empty())
+				return {};
+			const uint64_t hash = Fnv1a64(data.data(), data.size());
+			for (const std::string& directory : logicalDirectories)
+			{
+				if (directory.empty())
+					continue;
+				std::error_code ec;
+				const std::filesystem::path dir = contentRoot / std::filesystem::path(directory);
+				std::filesystem::directory_iterator it(dir, std::filesystem::directory_options::skip_permission_denied, ec);
+				if (ec)
+					continue;
+				for (const std::filesystem::directory_entry& entry : it)
+				{
+					std::error_code typeError;
+					if (!entry.is_regular_file(typeError))
+						continue;
+					if (entry.path().extension().string() != extension)
+						continue;
+					std::error_code sizeError;
+					const uintmax_t size = entry.file_size(sizeError);
+					if (sizeError || size != data.size())
+						continue;
+					// 就地读一遍(与 ReadSourceBytes 同一逻辑,这里内联避免前向声明)。
+					std::ifstream file(entry.path(), std::ios::binary);
+					if (!file)
+						continue;
+					const std::vector<uint8_t> candidate { std::istreambuf_iterator<char>(file),
+						std::istreambuf_iterator<char>() };
+					if (candidate.size() != data.size()
+						|| Fnv1a64(candidate.data(), candidate.size()) != hash)
+						continue;
+					// 命中:转成相对内容根的逻辑路径(统一正斜杠)。
+					std::error_code relativeError;
+					const std::filesystem::path relative =
+						std::filesystem::relative(entry.path(), contentRoot, relativeError);
+					if (relativeError || relative.empty())
+						continue;
+					return relative.generic_string();
+				}
+			}
+			return {};
+		}
+
 		bool ReadSourceBytes(const std::string& sourcePath, std::vector<uint8_t>& out)
 		{
 			std::ifstream file(sourcePath, std::ios::binary);
@@ -418,23 +474,71 @@ namespace World::Asset
 		const std::filesystem::path source(sourcePath);
 		const std::filesystem::path sourceDirectory = source.parent_path();
 		const std::string modelName = SanitizeName(source.stem().string(), "model");
-		// 多产物落盘规则:模型与源同目录同名;材质/贴图与模型同目录。LogicalModelPath 由
-		// 调用方给出(cook 用相对内容根的源逻辑路径;ImportFile 用默认 models/<name>.wmodel)。
+		// ---- 产物目的地(D10 / 用户决定 Q1=方案 A)----
+		// 规则:产物落在**调用方指定的目的地目录**里;没指定时退回"源所在目录"(cook 与
+		// CLI 的默认语义),再退回 models/。材质/贴图在目的地目录的 materials//textures/ 子目录。
+		//
+		// 优先级:DestinationLogicalDir(用户选的文件夹)> LogicalModelPath 的目录(兼容旧调用)
+		//        > SourceLogicalPath 的目录(源相对,cook 用)> "models"。
 		std::string modelDirectory;
-		if (!metadata.LogicalModelPath.empty())
 		{
-			// 用 generic_string 手工取目录:Windows 上 path("models/x.wmodel") 的
-			// parent_path() 是 "models"(可拼接),但对外路径统一正斜杠。
-			const std::string logicalText =
-				std::filesystem::path(metadata.LogicalModelPath).generic_string();
-			const size_t slash = logicalText.find_last_of('/');
-			if (slash != std::string::npos)
-				modelDirectory = logicalText.substr(0, slash + 1);
+			// 先归一化成"目录"(末尾带 '/');入参可能是文件路径(models/x.wmodel)。
+			const auto normalizeDirectory = [](std::string text)
+			{
+				std::replace(text.begin(), text.end(), '\\', '/');
+				if (text.empty())
+					return std::string();
+				if (text.size() >= 7 && text.compare(text.size() - 7, 7, ".wmodel") == 0)
+				{
+					const size_t slash = text.find_last_of('/');
+					text = slash == std::string::npos ? std::string() : text.substr(0, slash + 1);
+				}
+				if (!text.empty() && text.back() != '/')
+					text.push_back('/');
+				return text;
+			};
+
+			modelDirectory = normalizeDirectory(metadata.DestinationLogicalDir);
+			if (modelDirectory.empty())
+				modelDirectory = normalizeDirectory(metadata.LogicalModelPath);
+			if (modelDirectory.empty())
+			{
+				// 源在内容根内(相对路径带目录、且没有 "..")才用它推导;源在根外或不带目录
+				// (跨盘 relative 的兜底只剩文件名)一律退回 models/ —— 否则会写出
+				// "../../../x.wmodel" 或把文件名当成目录。
+				std::string sourceText = metadata.SourceLogicalPath;
+				std::replace(sourceText.begin(), sourceText.end(), '\\', '/');
+				const size_t slash = sourceText.find_last_of('/');
+				if (slash != std::string::npos)
+				{
+					std::string sourceDirectory = sourceText.substr(0, slash + 1);
+					if (sourceDirectory.find("..") == std::string::npos)
+						modelDirectory = std::move(sourceDirectory);
+				}
+			}
+			if (modelDirectory.empty())
+				modelDirectory = "models/";
 		}
+		// 去重的候选目录:目的地目录 + 可选的共享目录(相对内容根)。
+		std::vector<std::string> materialLookupDirs { modelDirectory + "materials/" };
+		std::vector<std::string> textureLookupDirs { modelDirectory + "textures/" };
+		if (!settings.SharedMaterialFolder.empty())
+		{
+			std::string shared = settings.SharedMaterialFolder;
+			std::replace(shared.begin(), shared.end(), '\\', '/');
+			if (!shared.empty() && shared.back() != '/')
+				shared.push_back('/');
+			materialLookupDirs.insert(materialLookupDirs.begin(), shared);
+			textureLookupDirs.insert(textureLookupDirs.begin(), shared);
+		}
+		const std::filesystem::path dedupRoot = metadata.ContentRootAbsolute.empty()
+			? std::filesystem::path() : std::filesystem::path(metadata.ContentRootAbsolute);
 
 		// ---- 材质 + 贴图(全部先在内存里准备,验证通过后才落盘)----
 		std::vector<MaterialDesc> materialDescs;
 		std::vector<std::string> materialPaths;
+		// D10:命名阶段就序列化好的材质字节(去重需要哈希),产物阶段直接复用。
+		std::vector<std::vector<uint8_t>> materialBytes;
 		materialDescs.reserve(data->materials_count);
 		materialPaths.reserve(data->materials_count);
 		struct PendingTexture
@@ -481,8 +585,16 @@ namespace World::Asset
 				why = readError + " (" + purpose + ")";
 				return false;
 			}
-			const std::string relative = modelDirectory + "textures/" + modelName + "_" + std::to_string(imageIndex)
-				+ "." + payload.Extension;
+			std::string relative = modelDirectory + "textures/" + modelName + "_"
+				+ std::to_string(imageIndex) + "." + payload.Extension;
+			// D10:同内容贴图复用(两个模型引用同一张贴图 → 只留一份)。
+			if (settings.ReuseTextures)
+			{
+				const std::string reused = FindReusableFile(dedupRoot, textureLookupDirs,
+					"." + payload.Extension, payload.Bytes);
+				if (!reused.empty())
+					relative = reused;
+			}
 			writtenImages.emplace(imageIndex, relative);
 			pendingTextures.push_back({ relative, std::move(payload) });
 			outRelative = relative;
@@ -542,7 +654,18 @@ namespace World::Asset
 			if (count > 0)
 				fileName += "_" + std::to_string(count);
 			++count;
-			materialPaths.push_back(modelDirectory + "materials/" + fileName + ".wmat");
+			// D10:同内容材质复用。序列化提到这里(去重要哈希字节),产物阶段直接复用这份字节。
+			const std::string text = MaterialIO::Serialize(desc);
+			std::vector<uint8_t> bytes(text.begin(), text.end());
+			std::string materialPath = modelDirectory + "materials/" + fileName + ".wmat";
+			if (settings.ReuseMaterials)
+			{
+				const std::string reused = FindReusableFile(dedupRoot, materialLookupDirs, ".wmat", bytes);
+				if (!reused.empty())
+					materialPath = reused;
+			}
+			materialPaths.push_back(materialPath);
+			materialBytes.push_back(std::move(bytes));
 			materialDescs.push_back(std::move(desc));
 		}
 
@@ -736,8 +859,8 @@ namespace World::Asset
 		// ---- 产物字节(全部验证通过后):贴图 → 材质 → 模型 ----
 		// D5b:不再直接落盘,先在内存准备 ImportOutput 列表(ImportFile 逐项落盘;
 		// ModelImporter 直接复用同一批字节,顺序保证 .wmodel 最后写 —— 缺件时不留半成品模型)。
-		const std::string modelRelative = metadata.LogicalModelPath.empty()
-			? ("models/" + modelName + ".wmodel") : metadata.LogicalModelPath;
+		// D10:模型固定在目的地目录里(与材质/贴图的模型前缀同一规则)。
+		const std::string modelRelative = modelDirectory + modelName + ".wmodel";
 		std::vector<GltfInMemoryOutput> outputs;
 		outputs.reserve(pendingTextures.size() + materialDescs.size() + 1u);
 
@@ -764,10 +887,10 @@ namespace World::Asset
 		{
 			if (materialPaths[index].empty())
 				continue;
-			const std::string text = MaterialIO::Serialize(materialDescs[index]);
 			GltfInMemoryOutput output;
 			output.LogicalPath = materialPaths[index];
-			output.Data.assign(text.begin(), text.end());
+			// D10:命名阶段已经序列化过(去重用),这里直接用同一份字节。
+			output.Data = materialBytes[index];
 			outputs.push_back(std::move(output));
 		}
 
@@ -823,7 +946,7 @@ namespace World::Asset
 	}
 
 	bool GltfImporter::ImportFile(const std::string& sourcePath, const std::string& outputRoot,
-		GltfImportResult* result, std::string* error)
+		GltfImportResult* result, std::string* error, const std::string& destinationLogicalDir)
 	{
 		if (result)
 			*result = GltfImportResult {};
@@ -845,10 +968,12 @@ namespace World::Asset
 		metadata.SettingsHash = ModelImportSettings::Hash(settings);
 		metadata.UpAxis = settings.UpAxis;
 		metadata.Scale = settings.Scale;
-		// 产物布局与 cook 的 ModelImporter **同一条规则**:`.wmodel` 固定落在
-		// `models/<源 stem>.wmodel`(材质 `materials/`、贴图 `textures/`,名字带模型前缀避免碰撞)。
-		// 源的位置记进 meta.SourcePath(而不是靠"同目录同名"去猜),编辑器据此判断"需要重导"。
+		// D10:产物落在**调用方指定的目的地目录**(用户在内容浏览器里选/拖到哪个文件夹);
+		// 不指定时内核退回"源所在目录",因此 cook 与编辑器天然同规则。源的位置照旧记进
+		// meta.SourcePath,编辑器据此判断"需要重导"。
 		metadata.LogicalModelPath.clear();
+		metadata.DestinationLogicalDir = destinationLogicalDir;
+		metadata.ContentRootAbsolute = std::filesystem::absolute(std::filesystem::path(outputRoot)).string();
 		{
 			std::error_code ec;
 			const std::filesystem::path sourceAbsolute = std::filesystem::absolute(std::filesystem::path(sourcePath), ec);

@@ -20,6 +20,13 @@ namespace World::Asset
 		bool ExportTextures = true;          // false = 不产出贴图(材质贴图路径留空)
 		bool ImportAnimations = true;        // D5c 用;本包只存不改行为
 		bool GenerateNormals = true;         // true = 源缺法线时按面法线补齐;false = 缺法线硬报错
+		// D10（材质复用）：导出前算内容哈希，目标目录已有**同内容**文件就复用它的路径，
+		// 不再为每个模型复制一份材质/贴图（关掉保留旧行为：每个模型一份副本）。
+		bool ReuseMaterials = true;
+		bool ReuseTextures = true;
+		// 复用查找范围（相对**内容根**的逻辑目录，如 "materials/shared"）。空 = 只在本次
+		// 导入的目的地目录里找。填了就先在它里面找，找不到再落到目的地目录。
+		std::string SharedMaterialFolder;
 
 		static ModelImportSettings Default() { return ModelImportSettings {}; }
 

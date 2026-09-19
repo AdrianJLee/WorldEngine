@@ -316,10 +316,12 @@ namespace
 		CHECK(result.VertexCount == 7u);
 		CHECK(result.IndexCount == 9u);
 		CHECK(result.MaterialPaths.size() == 2u);
-		CHECK(result.MaterialPaths[0] == "materials/D5Fixture_Tex.wmat");
-		CHECK(result.MaterialPaths[1] == "materials/D5Fixture_Solid.wmat");
+		// D10:没给目的地(源在内容根外)时退回 models/ 作为目的地 —— 材质/贴图落在
+		// 目的地的 materials//textures/ 子目录里,而不是内容根的同名目录。
+		CHECK(result.MaterialPaths[0] == "models/materials/D5Fixture_Tex.wmat");
+		CHECK(result.MaterialPaths[1] == "models/materials/D5Fixture_Solid.wmat");
 		CHECK(result.TexturePaths.size() == 1u);
-		CHECK(result.TexturePaths[0] == "textures/D5Fixture_0.png");
+		CHECK(result.TexturePaths[0] == "models/textures/D5Fixture_0.png");
 		// 唯一允许的降级:primitive 1 没有 NORMAL → 面法线补齐 + 一条 warning。
 		bool hasNormalWarning = false;
 		for (const std::string& warning : result.Warnings)
@@ -546,9 +548,9 @@ namespace
 		CHECK(bytes.Summary.IndexCount == fileResult.IndexCount);
 		CHECK(bytes.Metadata.SettingsHash == metadata.SettingsHash);
 		CHECK(bytes.Metadata.ImporterVersion == 1u);
-		// ImportFile 路径固定在 models/ 下(与 D5 编辑器导入行为一致)。
+		// D10:没给目的地时退回 models/(源在内容根外);材质/贴图在它的子目录里。
 		CHECK(fileResult.WModelPath == "models/D5Fixture.wmodel");
-		CHECK(fileResult.MaterialPaths[0] == "materials/D5Fixture_Tex.wmat");
+		CHECK(fileResult.MaterialPaths[0] == "models/materials/D5Fixture_Tex.wmat");
 
 		// 内存产物 → 逐项与落盘字节一致;模型必须是最后一项(.wmodel 作为提交标记)。
 		CHECK(!bytes.Outputs.empty());
@@ -700,12 +702,13 @@ namespace
 		CHECK(results.size() == 1u && !results[0].Failed);
 
 		const fs::path cooked = root / "out" / "cooked";
-		const fs::path modelFile = cooked / "models" / "D5Fixture.wmodel";
+		// D10(方案 A):产物落在**源所在目录**里(cook 的目的地 = 源的逻辑目录)。
+		const fs::path modelFile = cooked / "models" / "tests" / "D5Fixture.wmodel";
 		CHECK(fs::exists(modelFile));
 		// 默认设置:材质与贴图都产出。
-		CHECK(fs::exists(cooked / "materials" / "D5Fixture_Tex.wmat"));
-		CHECK(fs::exists(cooked / "materials" / "D5Fixture_Solid.wmat"));
-		CHECK(fs::exists(cooked / "textures" / "D5Fixture_0.png"));
+		CHECK(fs::exists(cooked / "models" / "tests" / "materials" / "D5Fixture_Tex.wmat"));
+		CHECK(fs::exists(cooked / "models" / "tests" / "materials" / "D5Fixture_Solid.wmat"));
+		CHECK(fs::exists(cooked / "models" / "tests" / "textures" / "D5Fixture_0.png"));
 
 		Asset::WModelData model;
 		std::string error;
@@ -721,7 +724,7 @@ namespace
 		CHECK(Nearly(model.Bounds.Max.x, 1.0f) && Nearly(model.Bounds.Max.y, 1.0f)
 			&& Nearly(model.Bounds.Max.z, 1.0f));
 		CHECK(model.MaterialSlots.size() == 2u);
-		CHECK(model.MaterialSlots[0] == "materials/D5Fixture_Tex.wmat");
+		CHECK(model.MaterialSlots[0] == "models/tests/materials/D5Fixture_Tex.wmat");
 		// v3 meta 记录源逻辑路径(编辑器"需要重导"判断的依据)。
 		CHECK(model.Meta.SourcePath == "models/tests/D5Fixture.gltf");
 		// 贴图路径指向导出的贴图(默认 exportTextures=true)。
@@ -729,9 +732,10 @@ namespace
 			MaterialDesc desc;
 			std::string parseError;
 			const MaterialLoadResult parsed =
-				MaterialIO::Parse(ReadText(cooked / "materials" / "D5Fixture_Tex.wmat"), desc, &parseError);
+				MaterialIO::Parse(ReadText(cooked / "models" / "tests" / "materials" / "D5Fixture_Tex.wmat"),
+					desc, &parseError);
 			CHECK(parsed.Success);
-			CHECK(desc.AlbedoTexture == "textures/D5Fixture_0.png");
+			CHECK(desc.AlbedoTexture == "models/tests/textures/D5Fixture_0.png");
 			CHECK(desc.NormalTexture.empty());
 		}
 
@@ -752,7 +756,7 @@ namespace
 		const fs::path content = root / "content";
 		CopyFixture(content);
 		const fs::path output = root / "out";
-		const fs::path modelFile = output / "cooked" / "models" / "D5Fixture.wmodel";
+		const fs::path modelFile = output / "cooked" / "models" / "tests" / "D5Fixture.wmodel";
 		const fs::path settingsPath = content / "models" / "tests" / "D5Fixture.wimport";
 
 		const Asset::CookSummary first =
@@ -817,17 +821,54 @@ namespace
 		CHECK(summary.Changed == 1u && summary.Failed == 0u);
 		const fs::path cooked = output / "cooked";
 		// 产物布局与默认设置一致:模型固定 models/<stem>.wmodel,材质/贴图平铺在各自目录。
-		CHECK(fs::exists(cooked / "models" / "D5Fixture.wmodel"));
-		CHECK(!fs::exists(cooked / "materials" / "D5Fixture_Tex.wmat"));
+		CHECK(fs::exists(cooked / "models" / "tests" / "D5Fixture.wmodel"));
+		CHECK(!fs::exists(cooked / "models" / "tests" / "materials" / "D5Fixture_Tex.wmat"));
 		Asset::WModelData model;
 		std::string error;
-		CHECK(Asset::WModelIO::ReadFile((cooked / "models" / "D5Fixture.wmodel").string(),
+		CHECK(Asset::WModelIO::ReadFile((cooked / "models" / "tests" / "D5Fixture.wmodel").string(),
 			model, &error));
 		CHECK(model.Meta.SourcePath == "models/tests/D5Fixture.gltf");
 		CHECK(model.MaterialSlots.size() == 2u);
 		CHECK(model.MaterialSlots[0].empty() && model.MaterialSlots[1].empty());
 		for (const Asset::WModelSubmesh& submesh : model.Submeshes)
 			CHECK(submesh.MaterialSlot == -1);
+		fs::remove_all(root);
+	}
+
+	// 11.D10:导入落点 = 调用方指定的目的地目录;同内容材质/贴图复用(不再每个模型一份副本)。
+	void DestinationLayoutAndReuse()
+	{
+		const fs::path root = TestRoot() / "destination";
+		fs::remove_all(root);
+		fs::create_directories(root);
+		const fs::path fixture = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
+		CHECK(fs::exists(fixture));
+
+		// ① 目的地目录:产物必须落在 models/props/(模型 + 它的 materials//textures/ 子目录)。
+		Asset::GltfImportResult first;
+		std::string error;
+		CHECK(Asset::GltfImporter::ImportFile(fixture.string(), root.string(), &first, &error,
+			"models/props"));
+		CHECK(error.empty());
+		CHECK(first.WModelPath == "models/props/D5Fixture.wmodel");
+		CHECK(fs::exists(root / first.WModelPath));
+		CHECK(first.MaterialPaths[0] == "models/props/materials/D5Fixture_Tex.wmat");
+		CHECK(first.TexturePaths[0] == "models/props/textures/D5Fixture_0.png");
+		const size_t materialCountAfterFirst = static_cast<size_t>(
+			std::distance(fs::directory_iterator(root / "models" / "props" / "materials"),
+				fs::directory_iterator()));
+
+		// ② 同源同目的地再导一次:同内容材质/贴图**复用同一批文件**(D10 去重)。
+		Asset::GltfImportResult second;
+		CHECK(Asset::GltfImporter::ImportFile(fixture.string(), root.string(), &second, &error,
+			"models/props"));
+		CHECK(error.empty());
+		CHECK(second.MaterialPaths == first.MaterialPaths);
+		CHECK(second.TexturePaths == first.TexturePaths);
+		const size_t materialCountAfterSecond = static_cast<size_t>(
+			std::distance(fs::directory_iterator(root / "models" / "props" / "materials"),
+				fs::directory_iterator()));
+		CHECK(materialCountAfterSecond == materialCountAfterFirst);
 		fs::remove_all(root);
 	}
 
@@ -850,8 +891,9 @@ namespace
 			Asset::GltfImportMetadata metadata;
 			metadata.ImporterVersion = 1;
 			metadata.SettingsHash = Asset::ModelImportSettings::Hash(Asset::ModelImportSettings::Default());
-			// 与 cook 的 ModelImporter 相同:扁平布局(models/ + materials/ + textures/),
-			// 源逻辑路径由 SourceLogicalPath 记录进 meta(不参与产物路径)。
+			// 与 cook 的 ModelImporter 相同(D10 方案 A):产物落在**源所在目录**
+			// (models/tests/ + 它的 materials//textures/ 子目录),
+			// 源逻辑路径由 SourceLogicalPath 记录进 meta(同时决定目的地)。
 			metadata.LogicalModelPath.clear();
 			metadata.SourceLogicalPath = "models/tests/D5Fixture.gltf";
 			CHECK(Asset::GltfImporter::ImportAsBytes(
@@ -861,9 +903,10 @@ namespace
 			for (size_t index = 0; index + 1 < bytes.Outputs.size(); ++index)
 			{
 				const std::string& path = bytes.Outputs[index].LogicalPath;
-				CHECK(path.rfind("textures/", 0) == 0 || path.rfind("materials/", 0) == 0);
+				CHECK(path.rfind("models/tests/textures/", 0) == 0
+					|| path.rfind("models/tests/materials/", 0) == 0);
 			}
-			CHECK(bytes.Outputs.back().LogicalPath == "models/D5Fixture.wmodel");
+			CHECK(bytes.Outputs.back().LogicalPath == "models/tests/D5Fixture.wmodel");
 		}
 
 		std::string parseError;
@@ -1056,6 +1099,7 @@ int main(int argc, char** argv)
 			{ "D5b cook reacts to .wimport scale/upAxis changes with baked geometry", CookReactsToImportSettings },
 			{ "D5b cook without exported materials leaves empty slots", CookWithoutMaterials },
 			{ "D5b derived outputs are enumerable and ordered (model last)", CookDatabaseTracksSettingsDependency },
+			{ "D10 destination folder layout + content-hash material/texture reuse", DestinationLayoutAndReuse },
 			{ "unsupported glTF features fail hard (skin / animation)", UnsupportedFeaturesHardFail },
 			{ "MeshIndex schema round trip + committed Lua stub", MeshIndexSchemaRoundTrip },
 		};

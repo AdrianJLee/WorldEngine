@@ -156,6 +156,30 @@ namespace World::Asset
 				Warn(reason, "import settings '" + path.string()
 					+ "': generateNormals is not a bool; using true");
 		}
+		if (const Wui::JsonValue* node = root->Find("reuseMaterials"))
+		{
+			if (node->type == Wui::JsonValue::Type::Bool)
+				settings.ReuseMaterials = node->Bool;
+			else
+				Warn(reason, "import settings '" + path.string()
+					+ "': reuseMaterials is not a bool; using true");
+		}
+		if (const Wui::JsonValue* node = root->Find("reuseTextures"))
+		{
+			if (node->type == Wui::JsonValue::Type::Bool)
+				settings.ReuseTextures = node->Bool;
+			else
+				Warn(reason, "import settings '" + path.string()
+					+ "': reuseTextures is not a bool; using true");
+		}
+		if (const Wui::JsonValue* node = root->Find("sharedMaterialFolder"))
+		{
+			if (node->type == Wui::JsonValue::Type::String)
+				settings.SharedMaterialFolder = node->String;
+			else
+				Warn(reason, "import settings '" + path.string()
+					+ "': sharedMaterialFolder is not a string; using empty");
+		}
 		return settings;
 	}
 
@@ -180,6 +204,9 @@ namespace World::Asset
 		root.Object.push_back({ "exportTextures", Wui::JsonValue::MakeBool(settings.ExportTextures) });
 		root.Object.push_back({ "importAnimations", Wui::JsonValue::MakeBool(settings.ImportAnimations) });
 		root.Object.push_back({ "generateNormals", Wui::JsonValue::MakeBool(settings.GenerateNormals) });
+		root.Object.push_back({ "reuseMaterials", Wui::JsonValue::MakeBool(settings.ReuseMaterials) });
+		root.Object.push_back({ "reuseTextures", Wui::JsonValue::MakeBool(settings.ReuseTextures) });
+		root.Object.push_back({ "sharedMaterialFolder", Wui::JsonValue::MakeString(settings.SharedMaterialFolder) });
 
 		std::error_code ec;
 		if (!path.parent_path().empty())
@@ -211,6 +238,12 @@ namespace World::Asset
 			| (settings.ImportAnimations ? 4u : 0u)
 			| (settings.GenerateNormals ? 8u : 0u);
 		hash = HashBytes(hash, &flags, sizeof(flags));
+		// D10:复用开关与共享目录也参与哈希(改了 → 需要重导)。
+		const uint8_t reuseFlags =
+			(settings.ReuseMaterials ? 1u : 0u)
+			| (settings.ReuseTextures ? 2u : 0u);
+		hash = HashBytes(hash, &reuseFlags, sizeof(reuseFlags));
+		hash = HashBytes(hash, settings.SharedMaterialFolder.data(), settings.SharedMaterialFolder.size());
 		return hash;
 	}
 }

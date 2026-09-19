@@ -42,6 +42,13 @@ namespace World::Asset
 		// 源资产的逻辑路径(相对内容根,如 "models/tests/rock.gltf"):写进 .wmodel meta,
 		// 供编辑器判断"源/设置是否已变 → 需要重导"。空 = 调用方没有源上下文(测试自造)。
 		std::string SourceLogicalPath;
+		// D10(用户 2026-09-19 决定 Q1=方案 A):**产物目的地**(相对内容根的逻辑目录,
+		// 如 "models/props")。空 = 按源所在目录(SouceLogicalPath 的目录)推导,cook 与
+		// 编辑器因此天然同一条规则:产物始终落在"用户选的那个文件夹"里。
+		std::string DestinationLogicalDir;
+		// D10:内容根的**绝对路径**,只有做"同内容复用"(材质/贴图去重)时才需要。
+		// 空 = 跳过复用查找(行为退化为每个模型一份副本)。
+		std::string ContentRootAbsolute;
 	};
 
 	// D5b-1:内存产物(LogicalPath 与 ImportFile 写出的磁盘布局一致,相对 outputRoot)。
@@ -82,8 +89,11 @@ namespace World::Asset
 			const ModelImportSettings& settings, const GltfImportMetadata& metadata,
 			GltfImportBytesResult* result, std::string* error);
 
+		// destinationLogicalDir(相对 outputRoot 的逻辑目录,如 "models/props";空 = 源所在目录)
+		// 决定产物落点 —— 用户决定 Q1=方案 A:导入到哪个文件夹就落在哪个文件夹。
 		static bool ImportFile(const std::string& sourcePath, const std::string& outputRoot,
-			GltfImportResult* result, std::string* error);
+			GltfImportResult* result, std::string* error,
+			const std::string& destinationLogicalDir = std::string());
 	};
 
 	// 便捷入口(编辑器 `--import-gltf` 等调用方持有 filesystem::path):
