@@ -11,6 +11,7 @@
 #include "World/Gameplay/ModelInstance.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/RenderSettings.h"
+#include "World/Renderer/AnimationSystem.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/ScriptEngine.h"
@@ -1769,6 +1770,9 @@ namespace World
 			+ " / 材质 " + std::to_string(imported.MaterialPaths.size())
 			+ ");已打开模型预览(要放进场景在预览里点'放进当前场景')";
 		if (message) *message = text;
+		// D5c-4b 收尾:导入/重导后清进程级动画模型缓存(AnimationSystem 按 MeshPath 缓存
+		// WModelData;不清会让"改了源 → 重导 → 动画还是旧的")。
+		AnimationSystem::ClearCache();
 		WLD_CORE_INFO("[model] {0}", text);
 		return true;
 	}
