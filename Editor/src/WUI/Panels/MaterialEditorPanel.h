@@ -91,6 +91,12 @@ namespace World
 		Rhi::Handle<Rhi::Texture> m_PreviewColor;
 		Rhi::Handle<Rhi::Texture> m_PreviewEntityId;
 		Rhi::Handle<Rhi::Texture> m_PreviewDepth;
+		// P4-4b:rendering.msaa>1 时的多采样附件(颜色 / 实体 id / 深度)。上面三张单采样
+		// 纹理保持原角色:WUI 采样纹理、抓图目标与 resolve 目标(m_PreviewColor 也是
+		// WLD_PREVIEW_TEX_CAPTURE / capture.texture 读的那张)。
+		Rhi::Handle<Rhi::Texture> m_PreviewColorMsaa;
+		Rhi::Handle<Rhi::Texture> m_PreviewEntityMsaa;
+		Rhi::Handle<Rhi::Texture> m_PreviewDepthMsaa;
 		Rhi::Handle<Rhi::CommandBuffer> m_PreviewCommandBuffer;
 		Rhi::Handle<Rhi::Buffer> m_PreviewCameraBuffer;
 		Rhi::Handle<Rhi::DescriptorSet> m_PreviewCameraSet;

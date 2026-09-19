@@ -148,10 +148,16 @@ namespace World
 			m_CommandBuffers[slot] = m_Device->CreateCommandBuffer("SceneRenderer");
 		}
 
+		// P4-4b:MSAA 生效采样数(启动期参数;设备上限已在 RenderSettings::Msaa 里折算)。
+		// msaa==1 时下面的一切与旧代码逐字节一致:三附件全 Count1、ResolveAttachments 为空。
+		m_Samples = RenderSettings::Msaa();
+		const Rhi::SampleCount sceneSamples = static_cast<Rhi::SampleCount>(m_Samples);
+		const bool multisampled = m_Samples > 1;
+
 		Rhi::RenderPassDesc passDesc;
 		Rhi::RenderPassAttachment color;
 		color.Format = Rhi::Format::R8G8B8A8_UNORM;
-		color.Samples = Rhi::SampleCount::Count1;
+		color.Samples = sceneSamples;
 		color.Load = Rhi::LoadOp::Clear;
 		color.Store = Rhi::StoreOp::Store;
 		// 三个附件都是"每帧 Clear、内容不保留":初始布局声明为 Undefined,让渲染通道
@@ -163,7 +169,7 @@ namespace World
 
 		Rhi::RenderPassAttachment entityId;
 		entityId.Format = Rhi::Format::R32_SINT;
-		entityId.Samples = Rhi::SampleCount::Count1;
+		entityId.Samples = sceneSamples;
 		entityId.Load = Rhi::LoadOp::Clear;
 		entityId.Store = Rhi::StoreOp::Store;
 		entityId.InitialLayout = Rhi::AttachmentLayout::Undefined;
@@ -173,7 +179,7 @@ namespace World
 
 		Rhi::RenderPassAttachment depth;
 		depth.Format = Rhi::Format::D24_UNORM_S8_UINT;
-		depth.Samples = Rhi::SampleCount::Count1;
+		depth.Samples = sceneSamples;
 		depth.Load = Rhi::LoadOp::Clear;
 		depth.Store = Rhi::StoreOp::Store;
 		depth.InitialLayout = Rhi::AttachmentLayout::Undefined;
@@ -188,6 +194,38 @@ namespace World
 			{ 1, Rhi::AttachmentLayout::ColorAttachment },
 		};
 		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
+		if (multisampled)
+		{
+			// P4-4b:五附件结构(与 Renderer2D/3D 的兼容通道、两个预览面板逐项一致,
+			// 这是 Vulkan 复用同一批管线的前提):
+			//   0 = 多采样颜色(R8G8B8A8_UNORM)   1 = 多采样实体 id(R32_SINT)
+			//   2 = 多采样深度(D24_UNORM_S8_UINT,不 resolve)
+			//   3 = 单采样颜色 resolve 目标(= 现有 m_ColorTexture)
+			//   4 = 单采样实体 id resolve 目标(= 现有 m_EntityTexture)
+			// resolve 目标必须出现在 FramebufferDesc::Attachments 的**同一附件下标**上。
+			// 布局声明与旧的单采样颜色/实体附件一致(Initial Undefined = 每帧整体重写,
+			// Final ColorAttachment = 帧末那条 ColorAttachment→ShaderReadOnly 屏障的前态)。
+			Rhi::RenderPassAttachment colorResolve;
+			colorResolve.Format = Rhi::Format::R8G8B8A8_UNORM;
+			colorResolve.Samples = Rhi::SampleCount::Count1;
+			colorResolve.Load = Rhi::LoadOp::DontCare;   // resolve 会整体覆盖
+			colorResolve.Store = Rhi::StoreOp::Store;
+			colorResolve.InitialLayout = Rhi::AttachmentLayout::Undefined;
+			colorResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			Rhi::RenderPassAttachment entityResolve;
+			entityResolve.Format = Rhi::Format::R32_SINT;
+			entityResolve.Samples = Rhi::SampleCount::Count1;
+			entityResolve.Load = Rhi::LoadOp::DontCare;
+			entityResolve.Store = Rhi::StoreOp::Store;
+			entityResolve.InitialLayout = Rhi::AttachmentLayout::Undefined;
+			entityResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			passDesc.Attachments.push_back(colorResolve);    // 3
+			passDesc.Attachments.push_back(entityResolve);   // 4
+			subpass.ResolveAttachments = { 3, 4 };
+			passDesc.DebugName = "SceneRenderer.ScenePass";
+			WLD_CORE_INFO("[msaa] 场景渲染通道:颜色 / 实体 id / 深度 {0}x 多采样,resolve 到单采样颜色 / 实体 id 目标",
+				m_Samples);
+		}
 		passDesc.Subpasses = { subpass };
 		m_RenderPass = m_Device->CreateRenderPass(passDesc);
 
@@ -236,6 +274,10 @@ namespace World
 		m_ColorTexture = nullptr;
 		m_EntityTexture = nullptr;
 		m_DepthTexture = nullptr;
+		// P4-4b:多采样附件(msaa>1 时才有)同样在设备销毁前放掉。
+		m_ColorMsaaTexture = nullptr;
+		m_EntityMsaaTexture = nullptr;
+		m_DepthMsaaTexture = nullptr;
 		m_RenderPass = nullptr;
 		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
 		{
@@ -289,13 +331,18 @@ namespace World
 		m_Width = std::max(1u, width);
 		m_Height = std::max(1u, height);
 		// 旧目标可能仍被在飞的帧引用:交给延迟释放队列,在栅栏通过后回收。
-		if (m_Framebuffer || m_ColorTexture || m_EntityTexture || m_DepthTexture)
+		if (m_Framebuffer || m_ColorTexture || m_EntityTexture || m_DepthTexture ||
+			m_ColorMsaaTexture || m_EntityMsaaTexture || m_DepthMsaaTexture)
 		{
 			auto oldFramebuffer = m_Framebuffer;
 			auto oldColor = m_ColorTexture;
 			auto oldEntity = m_EntityTexture;
 			auto oldDepth = m_DepthTexture;
-			Renderer::QueueRelease([oldFramebuffer, oldColor, oldEntity, oldDepth]() {});
+			auto oldColorMsaa = m_ColorMsaaTexture;
+			auto oldEntityMsaa = m_EntityMsaaTexture;
+			auto oldDepthMsaa = m_DepthMsaaTexture;
+			Renderer::QueueRelease([oldFramebuffer, oldColor, oldEntity, oldDepth,
+				oldColorMsaa, oldEntityMsaa, oldDepthMsaa]() {});
 		}
 
 		Rhi::TextureDesc colorDesc;
@@ -322,7 +369,32 @@ namespace World
 		Rhi::FramebufferDesc framebufferDesc;
 		framebufferDesc.RenderPass = m_RenderPass;
 		framebufferDesc.Extent = { m_Width, m_Height };
-		framebufferDesc.Attachments = { m_ColorTexture, m_EntityTexture, m_DepthTexture };
+		if (m_Samples > 1)
+		{
+			// P4-4b:三类附件按生效采样数创建(resolve 目标仍是上面两张单采样纹理)。
+			// 顺序必须与渲染通道附件表一致:0 颜色 / 1 实体 id / 2 深度 / 3 颜色 resolve / 4 实体 id resolve。
+			const Rhi::SampleCount sceneSamples = static_cast<Rhi::SampleCount>(m_Samples);
+			Rhi::TextureDesc msaaColorDesc = colorDesc;
+			msaaColorDesc.Samples = sceneSamples;
+			// 多采样颜色只做绘制附件(内容由 resolve 写入 m_ColorTexture,WUI/抓图不采样它)。
+			msaaColorDesc.Usage = Rhi::TextureUsageColorAttachment;
+			msaaColorDesc.DebugName = "SceneRenderer.ColorMSAA";
+			m_ColorMsaaTexture = m_Device->CreateTexture(msaaColorDesc);
+			Rhi::TextureDesc msaaEntityDesc = entityDesc;
+			msaaEntityDesc.Samples = sceneSamples;
+			msaaEntityDesc.DebugName = "SceneRenderer.EntityIdMSAA";
+			m_EntityMsaaTexture = m_Device->CreateTexture(msaaEntityDesc);
+			Rhi::TextureDesc msaaDepthDesc = depthDesc;
+			msaaDepthDesc.Samples = sceneSamples;
+			msaaDepthDesc.DebugName = "SceneRenderer.DepthMSAA";
+			m_DepthMsaaTexture = m_Device->CreateTexture(msaaDepthDesc);
+			framebufferDesc.Attachments = { m_ColorMsaaTexture, m_EntityMsaaTexture, m_DepthMsaaTexture,
+				m_ColorTexture, m_EntityTexture };
+		}
+		else
+		{
+			framebufferDesc.Attachments = { m_ColorTexture, m_EntityTexture, m_DepthTexture };
+		}
 		m_Framebuffer = m_Device->CreateFramebuffer(framebufferDesc);
 
 		if (m_FramebufferView)

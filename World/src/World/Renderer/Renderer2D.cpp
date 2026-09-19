@@ -3,12 +3,14 @@
 
 #include "World/Math/Math.h"
 #include "World/Renderer/Renderer.h"
+#include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/ShaderUtils.h"
 #include "World/RHI/RhiTextureBridge.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <array>
+#include <filesystem>
 
 namespace World
 {
@@ -72,6 +74,11 @@ namespace World
 			desc.RenderPass = s_RenderPass;
 			desc.Topology = topology;
 			desc.LineWidth = lineWidth;
+			// P4-4b:管线采样数跟随 rendering.msaa —— 必须与该管线实际绘制的渲染通道
+			// (SceneRenderer 的场景通道)逐项一致,否则 Vulkan 的
+			// VUID-VkGraphicsPipelineCreateInfo-subpass-00757(rasterizationSamples 必须
+			// 等于子通道采样数)会在建管线/绘制时失败。GL 后端不看这个字段(由 FBO 驱动)。
+			desc.Samples = static_cast<Rhi::SampleCount>(RenderSettings::Msaa());
 			desc.VertexBindings.push_back({ 0, stride, false });
 			desc.VertexAttributes = attributes;
 			// 2D 批次不做背面剔除:quad/circle 都是单面精灵,负缩放(镜像精灵)会翻转绕序,
@@ -185,6 +192,12 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
+		// P4-4b:渲染通道结构与渲染器管线的采样数都来自 rendering.msaa。Renderer2D::Init
+		// 是 Renderer::Init 里最早的渲染器初始化(Renderer3D::Init 的清单装载在它之后),
+		// 这里先按工作目录装载一次,保证 2D 管线与随后创建的 3D 管线/场景通道拿到同一个
+		// 生效采样数(否则 msaa>1 时 2D 管线在场景通道里绘制会被判为不兼容)。
+		RenderSettings::LoadFromProject(std::filesystem::current_path());
+
 		// 纹理描述符(绑定 0 = t0~t31;GLSL 未显式声明 layout,默认单元 0..31)。
 		Rhi::DescriptorSetLayoutDesc textureLayout;
 		textureLayout.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
@@ -205,24 +218,29 @@ namespace World
 
 		// Renderer2D 管线渲染进 SceneRenderer 目标;创建结构相同的渲染通道,
 		// Vulkan 只要求管线与帧缓冲使用的 pass 兼容,无需同一实例。
+		// P4-4b:结构必须跟随 rendering.msaa,与 SceneRenderer 的场景通道逐项一致
+		// (msaa==1 时就是原来的三附录;>1 时是"3 个多采样附件 + 2 个单采样 resolve 目标"。
+		// Vulkan 的渲染通道兼容性比较颜色/深度/resolve 引用的格式与采样数,少一项都不兼容)。
+		const Rhi::SampleCount sceneSamples = static_cast<Rhi::SampleCount>(RenderSettings::Msaa());
+		const bool multisampled = sceneSamples != Rhi::SampleCount::Count1;
 		Rhi::RenderPassDesc passDesc;
 		Rhi::RenderPassAttachment color;
 		color.Format = Rhi::Format::R8G8B8A8_UNORM;
-		color.Samples = Rhi::SampleCount::Count1;
+		color.Samples = sceneSamples;
 		color.Load = Rhi::LoadOp::Clear;
 		color.Store = Rhi::StoreOp::Store;
 		color.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
 		color.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
 		Rhi::RenderPassAttachment entityId;
 		entityId.Format = Rhi::Format::R32_SINT;
-		entityId.Samples = Rhi::SampleCount::Count1;
+		entityId.Samples = sceneSamples;
 		entityId.Load = Rhi::LoadOp::Clear;
 		entityId.Store = Rhi::StoreOp::Store;
 		entityId.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
 		entityId.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
 		Rhi::RenderPassAttachment depth;
 		depth.Format = Rhi::Format::D24_UNORM_S8_UINT;
-		depth.Samples = Rhi::SampleCount::Count1;
+		depth.Samples = sceneSamples;
 		depth.Load = Rhi::LoadOp::Clear;
 		depth.Store = Rhi::StoreOp::Store;
 		depth.InitialLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
@@ -234,6 +252,28 @@ namespace World
 			{ 1, Rhi::AttachmentLayout::ColorAttachment },
 		};
 		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
+		if (multisampled)
+		{
+			// 3 = 单采样颜色 resolve / 4 = 单采样实体 id resolve;本通道只用于建管线,
+			// 不挂帧缓冲,但 resolve 引用必须与场景通道相同才能保持兼容。
+			Rhi::RenderPassAttachment colorResolve;
+			colorResolve.Format = Rhi::Format::R8G8B8A8_UNORM;
+			colorResolve.Samples = Rhi::SampleCount::Count1;
+			colorResolve.Load = Rhi::LoadOp::DontCare;
+			colorResolve.Store = Rhi::StoreOp::Store;
+			colorResolve.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+			colorResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			Rhi::RenderPassAttachment entityResolve;
+			entityResolve.Format = Rhi::Format::R32_SINT;
+			entityResolve.Samples = Rhi::SampleCount::Count1;
+			entityResolve.Load = Rhi::LoadOp::DontCare;
+			entityResolve.Store = Rhi::StoreOp::Store;
+			entityResolve.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+			entityResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			passDesc.Attachments.push_back(colorResolve);
+			passDesc.Attachments.push_back(entityResolve);
+			subpass.ResolveAttachments = { 3, 4 };
+		}
 		passDesc.Subpasses = { subpass };
 		s_RenderPass = Renderer::GetDevice()->CreateRenderPass(passDesc);
 

@@ -100,6 +100,14 @@ namespace World::Asset
 					+ std::to_string(rendering.Anisotropy);
 				return false;
 			}
+			// P4-4b:MSAA 采样数只接受 1/2/4/8;非法值必须在加载期拒绝(3/0/16 这类值
+			// 直接创建 VkSampleCountFlagBits/GL 附件的非法采样数)。
+			if (!RenderingSettings::IsValidMsaa(rendering.Msaa))
+			{
+				if (error) *error = "rendering.msaa must be 1, 2, 4 or 8: "
+					+ std::to_string(rendering.Msaa);
+				return false;
+			}
 			// P4-3:渲染分辨率倍率(0.25..2.0;含 NaN/inf 拒绝)。非法值必须在加载期
 			// 拒绝:0 或负数会被换算成 0 尺寸的纹理/帧缓冲,到 GPU 资源创建才炸。
 			if (!std::isfinite(rendering.RenderScale) ||
@@ -178,6 +186,7 @@ namespace World::Asset
 				manifest.Rendering.GpuTiming = readBool("gpu_timing", manifest.Rendering.GpuTiming);
 				manifest.Rendering.Instancing = readBool("instancing", manifest.Rendering.Instancing);
 				manifest.Rendering.Anisotropy = readU32("anisotropy", manifest.Rendering.Anisotropy);
+				manifest.Rendering.Msaa = readU32("msaa", manifest.Rendering.Msaa);
 				if (rendering["render_scale"])
 					manifest.Rendering.RenderScale =
 						rendering["render_scale"].as<float>(manifest.Rendering.RenderScale);
@@ -229,6 +238,7 @@ namespace World::Asset
 			out << YAML::Key << "gpu_timing" << YAML::Value << copy.Rendering.GpuTiming;
 			out << YAML::Key << "instancing" << YAML::Value << copy.Rendering.Instancing;
 			out << YAML::Key << "anisotropy" << YAML::Value << copy.Rendering.Anisotropy;
+			out << YAML::Key << "msaa" << YAML::Value << copy.Rendering.Msaa;
 			out << YAML::Key << "render_scale" << YAML::Value << copy.Rendering.RenderScale;
 			out << YAML::EndMap;
 			out << YAML::Key << "physics" << YAML::Value << YAML::BeginMap;

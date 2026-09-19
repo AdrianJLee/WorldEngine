@@ -1,7 +1,9 @@
 #include "wldpch.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Core/PhysicsSettings.h"
+#include "World/Renderer/Renderer.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 
@@ -89,5 +91,40 @@ namespace World
 	float RenderSettings::RenderScale()
 	{
 		return Store().RenderScale;
+	}
+
+	uint32_t RenderSettings::Msaa()
+	{
+		const uint32_t requested = Store().Msaa;
+		// 默认/关闭:不进设备查询、不告警、不冻结 —— msaa==1 与旧路径逐字节一致。
+		if (requested <= 1)
+			return 1;
+		const Rhi::Handle<Rhi::Device> device = Renderer::GetDevice();
+		// 设备未就绪(纯逻辑测试/资源未初始化):返回请求值本身(加载期已校验 1/2/4/8)。
+		if (!device)
+			return requested;
+
+		// 有设备时**按设备冻结**首个生效值:渲染通道/管线只在 Init 建一次,而预览面板
+		// 可能到运行中才第一次创建自己的通道 —— 两边必须用同一个采样数(Vulkan 的渲染
+		// 通道兼容性逐项比较采样数与 resolve 引用)。清单改值重启生效(见头文件口径)。
+		static const void* frozenDevice = nullptr;
+		static uint32_t frozenValue = 1;
+		if (frozenDevice == device.get())
+			return frozenValue;
+
+		const Rhi::Capabilities& capabilities = device->GetCapabilities();
+		// 两类上限取交集:颜色附件(R8G8B8A8_UNORM)与整数颜色附件(R32_SINT 实体 id)。
+		uint32_t limit = std::min(requested, std::max(1u, capabilities.MaxSampleCount));
+		limit = std::min(limit, std::max(1u, capabilities.MaxIntegerSampleCount));
+		// 向下取到 2 的幂(设备上限不保证是 2 的幂;请求值本身已是 1/2/4/8)。
+		uint32_t effective = 1;
+		while (effective * 2 <= limit)
+			effective *= 2;
+		if (effective != requested)
+			WLD_CORE_WARN("rendering.msaa {0} 被设备上限压低为 {1}(颜色上限 {2} / 整数颜色上限 {3})",
+				requested, effective, capabilities.MaxSampleCount, capabilities.MaxIntegerSampleCount);
+		frozenDevice = device.get();
+		frozenValue = effective;
+		return effective;
 	}
 }

@@ -29,6 +29,17 @@ namespace World::Asset
 		bool Instancing = true;           // D8b:同网格+材质的实例合批
 		// P4-1:纹理各向异性上限(1..16;设备不支持时引擎退化为 1 并 warn)。
 		uint32_t Anisotropy = 1;
+		// P4-4b:MSAA 采样数(1/2/4/8;其它值在加载期拒绝)。1 = 关闭,默认值与旧行为
+		// 逐字节一致(不建多采样附件、无 resolve)。作用范围是**场景渲染通道**的三类附件
+		// (颜色 / 实体 id / 深度)与使用它的管线(Renderer2D/3D 及两个预览面板)。
+		// 启动期参数:渲染器 Init 读一次(改值重启生效,与 shadow_map_size 同款口径);
+		// 设备上限更低时引擎按颜色/整数颜色两类上限取交集、向下取 2 的幂并 warn 一次。
+		uint32_t Msaa = 1;
+		// P4-4b:msaa 的合法取值(清单校验、编辑器面板控件与渲染器共用同一口径)。
+		static constexpr bool IsValidMsaa(uint32_t samples)
+		{
+			return samples == 1 || samples == 2 || samples == 4 || samples == 8;
+		}
 		// P4-3:渲染分辨率倍率。只缩放**场景渲染目标**(SceneRenderer 的离屏颜色/
 		// 实体 id/深度附件):窗口尺寸、WUI/UI 与编辑器视口在屏幕上的占位都不变,
 		// 视口把缩放后的纹理拉伸显示(与显示任意尺寸目标同一条路径)。默认 1.0 =

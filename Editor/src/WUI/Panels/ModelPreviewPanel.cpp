@@ -5,6 +5,7 @@
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/AssetHotReload.h"
 #include "World/Core/Asset/GltfImporter.h"
@@ -317,10 +318,16 @@ namespace World
 		ReleaseGpuResources();
 		m_GpuDevice = device.get();
 
+		// P4-4b:rendering.msaa>1 时预览通道升级为与场景通道**完全相同**的五附件结构
+		// (颜色 / 实体 id / 深度多采样 + 颜色 / 实体 id resolve 到各自的单采样纹理);
+		// WUI 采样与 WLD_PREVIEW_TEX_CAPTURE 读的仍是单采样 m_PreviewColor,语义不变。
+		const Rhi::SampleCount previewSamples = static_cast<Rhi::SampleCount>(RenderSettings::Msaa());
+		const bool multisampled = previewSamples != Rhi::SampleCount::Count1;
+
 		Rhi::RenderPassDesc passDesc;
 		Rhi::RenderPassAttachment color;
 		color.Format = Rhi::Format::R8G8B8A8_UNORM;
-		color.Samples = Rhi::SampleCount::Count1;
+		color.Samples = previewSamples;
 		color.Load = Rhi::LoadOp::Clear;
 		color.Store = Rhi::StoreOp::Store;
 		color.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
@@ -329,7 +336,7 @@ namespace World
 
 		Rhi::RenderPassAttachment entityId;
 		entityId.Format = Rhi::Format::R32_SINT;
-		entityId.Samples = Rhi::SampleCount::Count1;
+		entityId.Samples = previewSamples;
 		entityId.Load = Rhi::LoadOp::Clear;
 		entityId.Store = Rhi::StoreOp::Store;
 		entityId.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
@@ -339,7 +346,7 @@ namespace World
 
 		Rhi::RenderPassAttachment depth;
 		depth.Format = Rhi::Format::D24_UNORM_S8_UINT;
-		depth.Samples = Rhi::SampleCount::Count1;
+		depth.Samples = previewSamples;
 		depth.Load = Rhi::LoadOp::Clear;
 		depth.Store = Rhi::StoreOp::Store;
 		depth.InitialLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
@@ -354,6 +361,28 @@ namespace World
 			{ 1, Rhi::AttachmentLayout::ColorAttachment },
 		};
 		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
+		if (multisampled)
+		{
+			// 3 = 单采样颜色 resolve(即 m_PreviewColor,离场隐式转 ShaderReadOnly 供 WUI 采样),
+			// 4 = 单采样实体 id resolve;与场景通道 / Renderer2D / Renderer3D 兼容通道同结构。
+			Rhi::RenderPassAttachment colorResolve;
+			colorResolve.Format = Rhi::Format::R8G8B8A8_UNORM;
+			colorResolve.Samples = Rhi::SampleCount::Count1;
+			colorResolve.Load = Rhi::LoadOp::DontCare;   // resolve 会整体覆盖
+			colorResolve.Store = Rhi::StoreOp::Store;
+			colorResolve.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+			colorResolve.FinalLayout = Rhi::AttachmentLayout::ShaderReadOnly;
+			Rhi::RenderPassAttachment entityResolve;
+			entityResolve.Format = Rhi::Format::R32_SINT;
+			entityResolve.Samples = Rhi::SampleCount::Count1;
+			entityResolve.Load = Rhi::LoadOp::DontCare;
+			entityResolve.Store = Rhi::StoreOp::Store;
+			entityResolve.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+			entityResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			passDesc.Attachments.push_back(colorResolve);    // 3
+			passDesc.Attachments.push_back(entityResolve);   // 4
+			subpass.ResolveAttachments = { 3, 4 };
+		}
 		passDesc.Subpasses = { subpass };
 		passDesc.DebugName = "Model.PreviewPass";
 		m_PreviewPass = device->CreateRenderPass(passDesc);
@@ -380,12 +409,39 @@ namespace World
 		depthDesc.Extent = { m_PreviewSize, m_PreviewSize, 1 };
 		depthDesc.Usage = Rhi::TextureUsageDepthStencilAttachment;
 		depthDesc.DebugName = "Model.PreviewDepth";
-		m_PreviewDepth = device->CreateTexture(depthDesc);
+		if (multisampled)
+		{
+			// 多采样附件(只做绘制附件,内容由通道末的 resolve 写进上面的单采样纹理)。
+			Rhi::TextureDesc msaaColorDesc = colorDesc;
+			msaaColorDesc.Samples = previewSamples;
+			msaaColorDesc.Usage = Rhi::TextureUsageColorAttachment;
+			msaaColorDesc.DebugName = "Model.PreviewColorMSAA";
+			m_PreviewColorMsaa = device->CreateTexture(msaaColorDesc);
+			Rhi::TextureDesc msaaEntityDesc = msaaColorDesc;
+			msaaEntityDesc.Format = Rhi::Format::R32_SINT;
+			msaaEntityDesc.DebugName = "Model.PreviewEntityIdMSAA";
+			m_PreviewEntityMsaa = device->CreateTexture(msaaEntityDesc);
+			Rhi::TextureDesc msaaDepthDesc = msaaColorDesc;
+			msaaDepthDesc.Format = Rhi::Format::D24_UNORM_S8_UINT;
+			msaaDepthDesc.Usage = Rhi::TextureUsageDepthStencilAttachment;
+			msaaDepthDesc.DebugName = "Model.PreviewDepthMSAA";
+			m_PreviewDepthMsaa = device->CreateTexture(msaaDepthDesc);
+		}
+		else
+		{
+			// msaa==1:单采样深度就是附件(与旧代码逐字节一致)。
+			m_PreviewDepth = device->CreateTexture(depthDesc);
+		}
 
 		Rhi::FramebufferDesc framebufferDesc;
 		framebufferDesc.RenderPass = m_PreviewPass;
 		framebufferDesc.Extent = { m_PreviewSize, m_PreviewSize };
-		framebufferDesc.Attachments = { m_PreviewColor, m_PreviewEntityId, m_PreviewDepth };
+		// 顺序必须与渲染通道附件表 1:1(Vulkan 要求 framebuffer 附件数/顺序与通道一致)。
+		if (multisampled)
+			framebufferDesc.Attachments = { m_PreviewColorMsaa, m_PreviewEntityMsaa, m_PreviewDepthMsaa,
+				m_PreviewColor, m_PreviewEntityId };
+		else
+			framebufferDesc.Attachments = { m_PreviewColor, m_PreviewEntityId, m_PreviewDepth };
 		framebufferDesc.DebugName = "Model.PreviewFramebuffer";
 		m_PreviewFramebuffer = device->CreateFramebuffer(framebufferDesc);
 
@@ -421,6 +477,9 @@ namespace World
 		m_PreviewColor = nullptr;
 		m_PreviewEntityId = nullptr;
 		m_PreviewDepth = nullptr;
+		m_PreviewColorMsaa = nullptr;
+		m_PreviewEntityMsaa = nullptr;
+		m_PreviewDepthMsaa = nullptr;
 		m_PreviewCommandBuffer = nullptr;
 		m_PreviewCameraBuffer = nullptr;
 		m_PreviewCameraSet = nullptr;

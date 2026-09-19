@@ -79,6 +79,15 @@ namespace World
 		Rhi::Handle<Rhi::Texture> m_ColorTexture;
 		Rhi::Handle<Rhi::Texture> m_EntityTexture;
 		Rhi::Handle<Rhi::Texture> m_DepthTexture;
+		// ---- P4-4b:MSAA(rendering.msaa;启动期参数)----
+		// Init 时从 RenderSettings::Msaa() 记录一次(设备上限已折算)。==1 时上面三张
+		// 单采样纹理就是全部附件(与旧结构逐字节一致);>1 时颜色 / 实体 id / 深度三类
+		// 附件按生效采样数创建在下面三个句柄里,并把结果 resolve 到单采样的
+		// m_ColorTexture / m_EntityTexture(渲染通道附件下标 3/4)。
+		uint32_t m_Samples = 1;
+		Rhi::Handle<Rhi::Texture> m_ColorMsaaTexture;
+		Rhi::Handle<Rhi::Texture> m_EntityMsaaTexture;
+		Rhi::Handle<Rhi::Texture> m_DepthMsaaTexture;
 		Rhi::Handle<Rhi::Buffer> m_CameraBuffers[kFramesInFlight];
 		// D4:每帧槽位的灯光 UBO(方向光/点光/环境光/阴影矩阵,std140;见 Renderer3D.h)。
 		Rhi::Handle<Rhi::Buffer> m_LightBuffers[kFramesInFlight];

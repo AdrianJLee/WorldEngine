@@ -4,6 +4,7 @@
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Renderer/RenderSettings.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
@@ -156,6 +157,9 @@ namespace World
 		m_PreviewColor = nullptr;
 		m_PreviewEntityId = nullptr;
 		m_PreviewDepth = nullptr;
+		m_PreviewColorMsaa = nullptr;
+		m_PreviewEntityMsaa = nullptr;
+		m_PreviewDepthMsaa = nullptr;
 		m_PreviewCommandBuffer = nullptr;
 		m_PreviewCameraBuffer = nullptr;
 		m_PreviewCameraSet = nullptr;
@@ -173,8 +177,14 @@ namespace World
 		ReleaseGpuResources();
 		m_GpuDevice = device.get();
 
-		// 预览目标:与 SceneRenderer 同样的三附件结构(颜色 + entity id + 深度),
+		// 预览目标:与 SceneRenderer 同样的结构(颜色 + entity id + 深度),
 		// 这样 Renderer3D 的管线(它就是按这个结构建的)可以直接用。
+		// P4-4b:rendering.msaa>1 时升级为与场景通道**完全相同**的五附件结构 ——
+		// 颜色 / 实体 id / 深度多采样,再把颜色 / 实体 id resolve 到各自的单采样纹理;
+		// WUI 采样与抓图读的仍是单采样 m_PreviewColor,语义不变。
+		const Rhi::SampleCount previewSamples = static_cast<Rhi::SampleCount>(RenderSettings::Msaa());
+		const bool multisampled = previewSamples != Rhi::SampleCount::Count1;
+
 		Rhi::TextureDesc colorDesc;
 		colorDesc.Type = Rhi::TextureType::Texture2D;
 		colorDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
@@ -193,22 +203,49 @@ namespace World
 		depthDesc.Format = Rhi::Format::D24_UNORM_S8_UINT;
 		depthDesc.Usage = Rhi::TextureUsageDepthStencilAttachment;
 		depthDesc.DebugName = "Material.Preview.Depth";
-		m_PreviewDepth = device->CreateTexture(depthDesc);
+		if (multisampled)
+		{
+			// 多采样附件(只做绘制附件,内容由通道末的 resolve 写进上面的单采样纹理)。
+			Rhi::TextureDesc msaaColorDesc = colorDesc;
+			msaaColorDesc.Samples = previewSamples;
+			msaaColorDesc.Usage = Rhi::TextureUsageColorAttachment;
+			msaaColorDesc.DebugName = "Material.Preview.ColorMSAA";
+			m_PreviewColorMsaa = device->CreateTexture(msaaColorDesc);
+			Rhi::TextureDesc msaaEntityDesc = msaaColorDesc;
+			msaaEntityDesc.Format = Rhi::Format::R32_SINT;
+			msaaEntityDesc.DebugName = "Material.Preview.EntityIdMSAA";
+			m_PreviewEntityMsaa = device->CreateTexture(msaaEntityDesc);
+			Rhi::TextureDesc msaaDepthDesc = msaaColorDesc;
+			msaaDepthDesc.Format = Rhi::Format::D24_UNORM_S8_UINT;
+			msaaDepthDesc.Usage = Rhi::TextureUsageDepthStencilAttachment;
+			msaaDepthDesc.DebugName = "Material.Preview.DepthMSAA";
+			m_PreviewDepthMsaa = device->CreateTexture(msaaDepthDesc);
+		}
+		else
+		{
+			// msaa==1:单采样深度就是附件(与旧代码逐字节一致)。
+			m_PreviewDepth = device->CreateTexture(depthDesc);
+		}
 
 		Rhi::RenderPassDesc passDesc;
 		Rhi::RenderPassAttachment color;
 		color.Format = Rhi::Format::R8G8B8A8_UNORM;
+		color.Samples = previewSamples;
 		color.Load = Rhi::LoadOp::Clear;
 		color.Store = Rhi::StoreOp::Store;
 		color.InitialLayout = Rhi::AttachmentLayout::Undefined;
-		// 预览纹理在本通道结束后立刻被 WUI 当采样贴图使用,所以 FinalLayout 直接声明为
-		// ShaderReadOnly:渲染通道会做隐式转换。之前声明的是 ColorAttachment,文本又要
-		// 手动转一次 ShaderReadOnly,而后端只发隐式转换(手动屏障因布局一致被跳过),
-		// 于是 UI 采样到"布局未就绪"的纹理 → 预览闪烁(且抓图读到垃圾数据)。
-		color.FinalLayout = Rhi::AttachmentLayout::ShaderReadOnly;
+		// 预览纹理在本通道结束后立刻被 WUI 当采样贴图使用,所以"可采样"的那张附件
+		// FinalLayout 直接声明为 ShaderReadOnly:渲染通道会做隐式转换。之前声明的是
+		// ColorAttachment,文本又要手动转一次 ShaderReadOnly,而后端只发隐式转换
+		// (手动屏障因布局一致被跳过),于是 UI 采样到"布局未就绪"的纹理 → 预览闪烁
+		// (且抓图读到垃圾数据)。msaa>1 时被采样的是 resolve 目标(附件 3),多采样
+		// 颜色附件只做绘制,因此停在 ColorAttachment。
+		color.FinalLayout = multisampled ? Rhi::AttachmentLayout::ColorAttachment
+			: Rhi::AttachmentLayout::ShaderReadOnly;
 		color.Clear.Color = { 0.12f, 0.13f, 0.15f, 1.0f };
 		Rhi::RenderPassAttachment entityId;
 		entityId.Format = Rhi::Format::R32_SINT;
+		entityId.Samples = previewSamples;
 		entityId.Load = Rhi::LoadOp::Clear;
 		entityId.Store = Rhi::StoreOp::Store;
 		entityId.InitialLayout = Rhi::AttachmentLayout::Undefined;
@@ -217,6 +254,7 @@ namespace World
 		std::memcpy(&entityId.Clear.Color, &minusOne, sizeof(int));
 		Rhi::RenderPassAttachment depth;
 		depth.Format = Rhi::Format::D24_UNORM_S8_UINT;
+		depth.Samples = previewSamples;
 		depth.Load = Rhi::LoadOp::Clear;
 		depth.Store = Rhi::StoreOp::Store;
 		depth.InitialLayout = Rhi::AttachmentLayout::Undefined;
@@ -227,6 +265,28 @@ namespace World
 		Rhi::SubpassDesc subpass;
 		subpass.ColorAttachments = { { 0, Rhi::AttachmentLayout::ColorAttachment }, { 1, Rhi::AttachmentLayout::ColorAttachment } };
 		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
+		if (multisampled)
+		{
+			// 3 = 单采样颜色 resolve(即 m_PreviewColor,离场隐式转 ShaderReadOnly 供 WUI 采样),
+			// 4 = 单采样实体 id resolve;与场景通道 / Renderer2D / Renderer3D 兼容通道同结构。
+			Rhi::RenderPassAttachment colorResolve;
+			colorResolve.Format = Rhi::Format::R8G8B8A8_UNORM;
+			colorResolve.Samples = Rhi::SampleCount::Count1;
+			colorResolve.Load = Rhi::LoadOp::DontCare;   // resolve 会整体覆盖
+			colorResolve.Store = Rhi::StoreOp::Store;
+			colorResolve.InitialLayout = Rhi::AttachmentLayout::Undefined;
+			colorResolve.FinalLayout = Rhi::AttachmentLayout::ShaderReadOnly;
+			Rhi::RenderPassAttachment entityResolve;
+			entityResolve.Format = Rhi::Format::R32_SINT;
+			entityResolve.Samples = Rhi::SampleCount::Count1;
+			entityResolve.Load = Rhi::LoadOp::DontCare;
+			entityResolve.Store = Rhi::StoreOp::Store;
+			entityResolve.InitialLayout = Rhi::AttachmentLayout::Undefined;
+			entityResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			passDesc.Attachments.push_back(colorResolve);    // 3
+			passDesc.Attachments.push_back(entityResolve);   // 4
+			subpass.ResolveAttachments = { 3, 4 };
+		}
 		passDesc.Subpasses = { subpass };
 		passDesc.DebugName = "Material.PreviewPass";
 		m_PreviewPass = device->CreateRenderPass(passDesc);
@@ -234,7 +294,12 @@ namespace World
 		Rhi::FramebufferDesc framebufferDesc;
 		framebufferDesc.RenderPass = m_PreviewPass;
 		framebufferDesc.Extent = { m_PreviewSize, m_PreviewSize };
-		framebufferDesc.Attachments = { m_PreviewColor, m_PreviewEntityId, m_PreviewDepth };
+		// 顺序必须与渲染通道附件表 1:1(Vulkan 要求 framebuffer 附件数/顺序与通道一致)。
+		if (multisampled)
+			framebufferDesc.Attachments = { m_PreviewColorMsaa, m_PreviewEntityMsaa, m_PreviewDepthMsaa,
+				m_PreviewColor, m_PreviewEntityId };
+		else
+			framebufferDesc.Attachments = { m_PreviewColor, m_PreviewEntityId, m_PreviewDepth };
 		framebufferDesc.DebugName = "Material.PreviewFramebuffer";
 		m_PreviewFramebuffer = device->CreateFramebuffer(framebufferDesc);
 

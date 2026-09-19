@@ -89,6 +89,7 @@ namespace
 			"  instancing: false\n"
 			"  anisotropy: 8\n"
 			"  render_scale: 0.5\n"
+			"  msaa: 4\n"
 			"physics:\n"
 			"  fixed_step_hz: 120\n"
 			"  gravity: -2.5\n"));
@@ -106,6 +107,7 @@ namespace
 		// P4-1:各向异性 + 物理设置解析。
 		CHECK(manifest.Rendering.Anisotropy == 8u);
 		CHECK(manifest.Rendering.RenderScale > 0.49f && manifest.Rendering.RenderScale < 0.51f);
+		CHECK(manifest.Rendering.Msaa == 4u);
 		CHECK(manifest.Physics.FixedStepHz == 120u);
 		CHECK(manifest.Physics.Gravity < -2.4f && manifest.Physics.Gravity > -2.6f);
 
@@ -128,6 +130,7 @@ namespace
 		// P4-1:往返后各向异性与物理设置不丢。
 		CHECK(reloaded.Rendering.Anisotropy == 8u);
 		CHECK(reloaded.Rendering.RenderScale > 0.49f && reloaded.Rendering.RenderScale < 0.51f);
+		CHECK(reloaded.Rendering.Msaa == 4u);
 		CHECK(reloaded.Physics.FixedStepHz == 120u);
 		CHECK(reloaded.Physics.Gravity < -2.4f && reloaded.Physics.Gravity > -2.6f);
 		fs::remove_all(root);
@@ -170,6 +173,12 @@ namespace
 		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
 		CHECK(error.find("render_scale") != std::string::npos);
 		WriteText(manifestPath, BaseManifest("rendering:\n  render_scale: 2.5\n"));
+		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+		// P4-4:MSAA 只允许 1/2/4/8(3 与 16 必须被拒)。
+		WriteText(manifestPath, BaseManifest("rendering:\n  msaa: 3\n"));
+		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+		CHECK(error.find("msaa") != std::string::npos);
+		WriteText(manifestPath, BaseManifest("rendering:\n  msaa: 16\n"));
 		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
 
 		// 单字段不超限,但"方向光 + 点光"合计超过 UBO 容量(8)。

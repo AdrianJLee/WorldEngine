@@ -120,6 +120,24 @@ namespace World
 			y += 26.0f;
 		}
 
+		// P4-4:MSAA(1/2/4/8;**启动期生效** —— 渲染通道的采样数在渲染器 Init 时确定,
+		// 预览面板也必须与场景通道同采样数,故不支持运行期切换)。
+		{
+			const std::vector<std::string> msaaOptions { "1", "2", "4", "8" };
+			int selected = 0;
+			if (m_Edit.Msaa >= 8u) selected = 3;
+			else if (m_Edit.Msaa >= 4u) selected = 2;
+			else if (m_Edit.Msaa >= 2u) selected = 1;
+			if (Wui::Combo(ctx, Wui::HashId("settings3d.msaa"), { x + 170.0f, y, 110.0f, 20.0f },
+				"MSAA", msaaOptions, selected, theme))
+			{
+				m_Edit.Msaa = static_cast<uint32_t>(std::stoul(msaaOptions[static_cast<size_t>(selected)]));
+				changed = true;
+			}
+			Wui::Label(ctx, { x, y + 3.0f }, "MSAA(重启生效)", theme.Text, 13.0f);
+			y += 26.0f;
+		}
+
 		// P4-1:物理(固定步长 1..240Hz;重力 = Y 轴加速度)。
 		Wui::Label(ctx, { x, y }, "Physics (project.we.yaml → physics:)", theme.TextMuted, 12.0f);
 		y += 20.0f;

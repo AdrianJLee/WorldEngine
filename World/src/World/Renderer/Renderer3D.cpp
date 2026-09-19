@@ -553,6 +553,11 @@ namespace World
 		// 先按工作目录装载一次(宿主没提前 Apply 时也能拿到用户设置)。
 		RenderSettings::LoadFromProject(std::filesystem::current_path());
 		state.ShadowMapSize = RenderSettings::Get().ShadowMapSize;
+		// P4-4b:MSAA 生效采样数(启动期参数;设备上限已在 RenderSettings::Msaa 里折算)。
+		// 主通道的兼容渲染通道与所有主通道管线用它;阴影通道保持单采样(见下面的
+		// shadowPipelineDesc.Samples),否则 rasterizationSamples 与阴影子通道不匹配。
+		const Rhi::SampleCount sceneSamples = static_cast<Rhi::SampleCount>(RenderSettings::Msaa());
+		const bool multisampled = sceneSamples != Rhi::SampleCount::Count1;
 
 		// set 1, binding 1:每对象 UBO(u_Model / u_BaseColor),顶点与像素阶段都要用。
 		// binding 不能是 0:OpenGL 后端的 UBO 绑定单元 = binding(忽略 set 索引),
@@ -667,21 +672,21 @@ namespace World
 		Rhi::RenderPassDesc passDesc;
 		Rhi::RenderPassAttachment color;
 		color.Format = Rhi::Format::R8G8B8A8_UNORM;
-		color.Samples = Rhi::SampleCount::Count1;
+		color.Samples = sceneSamples;
 		color.Load = Rhi::LoadOp::Clear;
 		color.Store = Rhi::StoreOp::Store;
 		color.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
 		color.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
 		Rhi::RenderPassAttachment entityId;
 		entityId.Format = Rhi::Format::R32_SINT;
-		entityId.Samples = Rhi::SampleCount::Count1;
+		entityId.Samples = sceneSamples;
 		entityId.Load = Rhi::LoadOp::Clear;
 		entityId.Store = Rhi::StoreOp::Store;
 		entityId.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
 		entityId.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
 		Rhi::RenderPassAttachment depth;
 		depth.Format = Rhi::Format::D24_UNORM_S8_UINT;
-		depth.Samples = Rhi::SampleCount::Count1;
+		depth.Samples = sceneSamples;
 		depth.Load = Rhi::LoadOp::Clear;
 		depth.Store = Rhi::StoreOp::Store;
 		depth.InitialLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
@@ -693,6 +698,27 @@ namespace World
 			{ 1, Rhi::AttachmentLayout::ColorAttachment },
 		};
 		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
+		if (multisampled)
+		{
+			// P4-4b:与场景通道/两个预览面板完全相同的五附件结构(见 SceneRenderer::Init)。
+			Rhi::RenderPassAttachment colorResolve;
+			colorResolve.Format = Rhi::Format::R8G8B8A8_UNORM;
+			colorResolve.Samples = Rhi::SampleCount::Count1;
+			colorResolve.Load = Rhi::LoadOp::DontCare;
+			colorResolve.Store = Rhi::StoreOp::Store;
+			colorResolve.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+			colorResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			Rhi::RenderPassAttachment entityResolve;
+			entityResolve.Format = Rhi::Format::R32_SINT;
+			entityResolve.Samples = Rhi::SampleCount::Count1;
+			entityResolve.Load = Rhi::LoadOp::DontCare;
+			entityResolve.Store = Rhi::StoreOp::Store;
+			entityResolve.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+			entityResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			passDesc.Attachments.push_back(colorResolve);
+			passDesc.Attachments.push_back(entityResolve);
+			subpass.ResolveAttachments = { 3, 4 };
+		}
 		passDesc.Subpasses = { subpass };
 		state.RenderPass = Renderer::GetDevice()->CreateRenderPass(passDesc);
 
@@ -719,6 +745,8 @@ namespace World
 		// `ProjectionConventions.h` 的深度重映射保证(近平面 → 0、远平面 → 1),
 		// 两个后端共用同一约定,因此**不再**保留比较方向的 A/B 开关。
 		pipelineDesc.DepthStencil.DepthCompare = Rhi::CompareOp::LessOrEqual;
+		// P4-4b:主通道管线采样数跟随 rendering.msaa(与 state.RenderPass 的子通道一致)。
+		pipelineDesc.Samples = sceneSamples;
 		state.Pipeline = Renderer::GetDevice()->CreatePipeline(pipelineDesc);
 
 		// D8b-2:实例化合批管线(同一份 PSMain;VS 换成读 per-instance 模型矩阵的入口)。
@@ -828,6 +856,10 @@ namespace World
 		Rhi::PipelineDesc shadowPipelineDesc = pipelineDesc;
 		shadowPipelineDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.hlsl", "Renderer3D-Shadow");
 		shadowPipelineDesc.RenderPass = state.ShadowPass;
+		// P4-4b:阴影通道是单采样(`ShadowPass` 的两个附件都是 Count1),必须显式覆盖
+		// pipelineDesc.Samples(它现在跟随主通道的 MSAA);否则 Vulkan 的
+		// VUID-VkGraphicsPipelineCreateInfo-subpass-00757 会拒绝这条管线。
+		shadowPipelineDesc.Samples = Rhi::SampleCount::Count1;
 		// 阴影通道只绑 set0(灯光 UBO 提供 u_ShadowViewProjection)与 set1(对象 u_Model)。
 		shadowPipelineDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), state.ObjectLayout };
 		shadowPipelineDesc.Blends = { Rhi::BlendAttachmentState {} };
