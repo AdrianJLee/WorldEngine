@@ -268,18 +268,24 @@ namespace World::Rhi::Vulkan
 		m_Capabilities.BindlessTextures = v12.descriptorIndexing == VK_TRUE;
 		m_Capabilities.TextureCompressionBC = features.textureCompressionBC == VK_TRUE;
 		m_Capabilities.MaxColorAttachments = properties.limits.maxColorAttachments;
-		// framebufferColorSampleCounts 是位掩码,折算为最大可用采样数。
+		// 采样数上限是位掩码,折算为最大可用采样数(2 的幂降序取第一个支持的)。
+		// 两个上限分开上报:Vulkan 用 framebufferColorSampleCounts 描述浮点/归一化颜色附件,
+		// 用 framebufferIntegerColorSampleCounts 描述整数颜色附件(R32_SINT 实体 id 通道),
+		// 两者在部分设备上不同(例如整数只支持 4x)。消费者(SceneRenderer/RenderSettings)取交集
+		// 得到"三类附件都能用"的生效值;MaxSampleCount 保持"颜色附件上限"的语义,不改成交集。
+		const auto foldSampleCounts = [](VkSampleCountFlags samples)
 		{
-			const VkSampleCountFlags samples = properties.limits.framebufferColorSampleCounts;
-			uint32_t maxSamples = 1;
 			for (uint32_t candidate : { 8u, 4u, 2u })
 				if (samples & candidate)
-				{
-					maxSamples = candidate;
-					break;
-				}
-			m_Capabilities.MaxSampleCount = maxSamples;
-		}
+					return candidate;
+			return 1u;
+		};
+		m_Capabilities.MaxSampleCount = foldSampleCounts(properties.limits.framebufferColorSampleCounts);
+		// 注意:这份 Vulkan-Headers 的 VkPhysicalDeviceLimits **没有** framebufferIntegerColorSampleCounts
+		// (写法随 SDK 版本不同),因此整数颜色附件沿用颜色采样数上限 —— 桌面 GPU 上两者一致,
+		// 而且它只用于 P4-4b 的"生效值 clamp",不影响正确性。
+		m_Capabilities.MaxIntegerSampleCount =
+			foldSampleCounts(properties.limits.framebufferColorSampleCounts);
 		m_Capabilities.MaxTextureSize = properties.limits.maxImageDimension2D;
 		m_Capabilities.MaxImageArrayLayers = properties.limits.maxImageArrayLayers;
 		m_Capabilities.MaxUniformBufferSize = properties.limits.maxUniformBufferRange;

@@ -54,6 +54,61 @@ namespace World::Rhi::Vulkan
 			}
 			return VK_IMAGE_LAYOUT_GENERAL;
 		}
+
+		// P4-4a:布局 → 访问标志。只用于 resolve 前后把图像还原到"下一个使用者"的访问语义。
+		VkAccessFlags LayoutToAccess(VkImageLayout layout)
+		{
+			switch (layout)
+			{
+			case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+				return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+			case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+				return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+			case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+				return VK_ACCESS_SHADER_READ_BIT;
+			case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+				return VK_ACCESS_TRANSFER_READ_BIT;
+			case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+				return VK_ACCESS_TRANSFER_WRITE_BIT;
+			case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+				return VK_ACCESS_MEMORY_READ_BIT;
+			default:
+				return VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			}
+		}
+
+		// vkCmdResolveImage 解析深度/模板格式需要 VK_KHR_depth_stencil_resolve(depthStencilResolve 特性)。
+		// 本 RHI 的 ResolveTexture 只面向颜色附件;深度附件保持多采样,不解析(与 GL 后端一致)。
+		bool IsDepthStencilFormat(Format format)
+		{
+			return format == Format::D16_UNORM || format == Format::D32_SFLOAT ||
+				format == Format::D24_UNORM_S8_UINT || format == Format::D32_SFLOAT_S8_UINT;
+		}
+
+		// P4-4a:resolve 专用的布局转换。与 RecordImageLayoutTransition 分开的原因:
+		// 后者的语义固定为"拷贝前进入 TRANSFER_SRC / 拷完还原"(还原时 srcAccessMask=TRANSFER_READ),
+		// 而 resolve 的写入端是 TRANSFER_WRITE,还原时必须以 TRANSFER_WRITE 作为源域,
+		// 否则解析结果对后续采样/读回的可见性没有内存依赖保证。
+		void RecordResolveLayoutBarrier(VkCommandBuffer commandBuffer, VulkanTexture& texture,
+			VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mip, uint32_t layer,
+			VkAccessFlags srcAccess, VkAccessFlags dstAccess)
+		{
+			if (oldLayout == newLayout)
+				return;
+			VkImageMemoryBarrier barrier{};
+			barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			barrier.oldLayout = oldLayout;
+			barrier.newLayout = newLayout;
+			barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			barrier.image = texture.GetImage();
+			barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, layer, 1 };
+			barrier.srcAccessMask = srcAccess;
+			barrier.dstAccessMask = dstAccess;
+			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+			texture.SetLayout(newLayout);
+		}
 	}
 
 	VulkanCommandBuffer::VulkanCommandBuffer(VulkanDevice& device) : m_Device(device)
@@ -404,7 +459,71 @@ namespace World::Rhi::Vulkan
 			0, 0, nullptr, 0, nullptr, 1, &barrier);
 	}
 	void VulkanCommandBuffer::CopyTexture(const Handle<Texture>&, const Handle<Texture>&, uint32_t, uint32_t, uint32_t, uint32_t) {}
-	void VulkanCommandBuffer::ResolveTexture(const Handle<Texture>&, const Handle<Texture>&, uint32_t, uint32_t, uint32_t) {}
+
+	// P4-4a:显式 MSAA resolve。主路径是渲染通道内的 pResolveAttachments(Vulkan 在 subpass 结束时
+	// 由驱动完成 resolve,零额外屏障、零额外命令);本函数是 RHI 对外的显式 resolve 入口
+	// (与 GL 后端的 ResolveTexture 对等),语义 = vkCmdResolveImage:
+	//   源必须是多采样(否则没有可解析的样本)、目标必须单采样,两者格式必须一致。
+	// 因为 vkCmdResolveImage 要求两侧处于 TRANSFER_SRC/DST_OPTIMAL,这里自己做来回转换
+	// (调用方不需要额外 PipelineBarrier),并在结束后把两侧还原到进入时的布局。
+	void VulkanCommandBuffer::ResolveTexture(const Handle<Texture>& src, const Handle<Texture>& dst,
+		uint32_t srcMip, uint32_t dstMip, uint32_t layer)
+	{
+		const auto srcVk = std::dynamic_pointer_cast<VulkanTexture>(src);
+		const auto dstVk = std::dynamic_pointer_cast<VulkanTexture>(dst);
+		if (!srcVk || !dstVk || srcVk.get() == dstVk.get())
+			return;
+
+		const TextureDesc& srcDesc = srcVk->GetDesc();
+		const TextureDesc& dstDesc = dstVk->GetDesc();
+		if (srcDesc.Format != dstDesc.Format || IsDepthStencilFormat(srcDesc.Format))
+		{
+			WLD_CORE_WARN("[RHI-VK] ResolveTexture requires identical, non-depth/stencil formats "
+				"(src='{0}' {1} vs dst='{2}' {3}); skipped",
+				srcDesc.DebugName, static_cast<int>(srcDesc.Format),
+				dstDesc.DebugName, static_cast<int>(dstDesc.Format));
+			return;
+		}
+		if (srcDesc.Samples == SampleCount::Count1 || dstDesc.Samples != SampleCount::Count1)
+		{
+			WLD_CORE_WARN("[RHI-VK] ResolveTexture needs a multisampled src ('{0}' samples={1}) and a "
+				"single-sampled dst ('{2}' samples={3}); skipped",
+				srcDesc.DebugName, static_cast<uint32_t>(srcDesc.Samples),
+				dstDesc.DebugName, static_cast<uint32_t>(dstDesc.Samples));
+			return;
+		}
+
+		const VkImageLayout srcOriginal = srcVk->GetLayout();
+		const VkImageLayout dstOriginal = dstVk->GetLayout();
+		// 进入传输布局:源域"可能是任何上一次写入",统一用 ALL_COMMANDS + 内存读写耗尽;
+		// 目的域按具体传输方向给读/写标志。
+		RecordResolveLayoutBarrier(m_CommandBuffer, *srcVk, srcOriginal,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcMip, layer,
+			VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+		RecordResolveLayoutBarrier(m_CommandBuffer, *dstVk, dstOriginal,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dstMip, layer,
+			VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+
+		VkImageResolve region{};
+		region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, srcMip, layer, 1 };
+		region.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, dstMip, layer, 1 };
+		region.srcOffset = { 0, 0, 0 };
+		region.dstOffset = { 0, 0, 0 };
+		// extent 以目标 mip 的尺寸为准(源与目标的 extent 必须兼容;取小值保证不越界)。
+		region.extent = {
+			std::min(std::max(1u, srcDesc.Extent.Width >> srcMip), std::max(1u, dstDesc.Extent.Width >> dstMip)),
+			std::min(std::max(1u, srcDesc.Extent.Height >> srcMip), std::max(1u, dstDesc.Extent.Height >> dstMip)),
+			1 };
+		vkCmdResolveImage(m_CommandBuffer, srcVk->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			dstVk->GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+		// 还原:源域是刚才的传输读/写,目的域按"原布局的下一个使用者"给标志。
+		RecordResolveLayoutBarrier(m_CommandBuffer, *dstVk, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			dstOriginal, dstMip, layer, VK_ACCESS_TRANSFER_WRITE_BIT, LayoutToAccess(dstOriginal));
+		RecordResolveLayoutBarrier(m_CommandBuffer, *srcVk, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			srcOriginal, srcMip, layer, VK_ACCESS_TRANSFER_READ_BIT, LayoutToAccess(srcOriginal));
+	}
+
 	void VulkanCommandBuffer::GenerateMipmaps(const Handle<Texture>&) {}
 
 	void VulkanCommandBuffer::ResetQueryPool(const Handle<QueryPool>& pool, uint32_t first, uint32_t count)

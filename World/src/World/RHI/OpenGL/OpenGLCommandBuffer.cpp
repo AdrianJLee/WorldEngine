@@ -40,6 +40,12 @@ namespace World::Rhi::OpenGL
 			const int height = viewport[3];
 			if (fbo <= 0 || width <= 0 || height <= 0 || width > 1024 || height > 1024)
 				return;
+			// P4-4a:多采样 FBO 不能用 glReadPixels 直接读(一律 GL_INVALID_OPERATION)。
+			// MSAA 通道的读回走 resolve 后的单采样目标,这里直接跳过,避免诊断开关被 MSAA 打成一片 GL 错误。
+			GLint sampleCount = 0;
+			glGetIntegerv(GL_SAMPLES, &sampleCount);
+			if (sampleCount > 0)
+				return;
 			static int dumped[128] = {};
 			if (fbo >= 128 || dumped[fbo] >= 2)
 				return;
@@ -112,6 +118,84 @@ namespace World::Rhi::OpenGL
 					return true;
 				default:
 					return false;
+			}
+		}
+
+		// P4-4a:多采样 → 单采样的一次 blit。GL 的 MSAA resolve 就是这条路径:
+		// 源 FBO 是多采样(GL_SAMPLES > 0)、目标 FBO 是单采样时,glBlitFramebuffer 会做 resolve
+		// (采样数不同是合法的,只有"两个都是多采样且采样数不同"才报错)。
+		// 用 DSA 命名版本:不读也不改当前绑定的 FBO/read buffer 状态,可与通道回放交错执行。
+		void BlitResolveTexture(const OpenGLTexture& src, const OpenGLTexture& dst,
+			uint32_t srcMip, uint32_t dstMip)
+		{
+			// MSAA resolve 分支比普通 blit 更严(OpenGL 4.6 §18.3.1):两侧内部格式必须一致,
+			// 且源/目的矩形必须同界 —— 尺寸不一致时驱动直接 INVALID_OPERATION。这里先给出告警,
+			// 免得只在"画面黑/没解析"时才被发现。
+			if (src.GetDesc().Samples != SampleCount::Count1 &&
+				dst.GetDesc().Samples == SampleCount::Count1 &&
+				(src.GetDesc().Format != dst.GetDesc().Format ||
+					src.GetDesc().Extent.Width != dst.GetDesc().Extent.Width ||
+					src.GetDesc().Extent.Height != dst.GetDesc().Extent.Height))
+				WLD_CORE_WARN("[gl-resolve] MSAA resolve needs identical format and extent on both sides "
+					"(src '{0}' {1} {2}x{3} samples={4} -> dst '{5}' {6} {7}x{8} samples={9})",
+					src.GetDesc().DebugName, static_cast<int>(src.GetDesc().Format),
+					src.GetDesc().Extent.Width, src.GetDesc().Extent.Height,
+					static_cast<uint32_t>(src.GetDesc().Samples),
+					dst.GetDesc().DebugName, static_cast<int>(dst.GetDesc().Format),
+					dst.GetDesc().Extent.Width, dst.GetDesc().Extent.Height,
+					static_cast<uint32_t>(dst.GetDesc().Samples));
+
+			GLuint readFbo = 0;
+			GLuint drawFbo = 0;
+			glCreateFramebuffers(1, &readFbo);
+			glCreateFramebuffers(1, &drawFbo);
+			glNamedFramebufferTexture(readFbo, GL_COLOR_ATTACHMENT0, src.GetID(), srcMip);
+			glNamedFramebufferTexture(drawFbo, GL_COLOR_ATTACHMENT0, dst.GetID(), dstMip);
+			const auto extent = dst.GetDesc().Extent;
+			glBlitNamedFramebuffer(readFbo, drawFbo, 0, 0,
+				static_cast<GLint>(std::max(1u, src.GetDesc().Extent.Width >> srcMip)),
+				static_cast<GLint>(std::max(1u, src.GetDesc().Extent.Height >> srcMip)),
+				0, 0, static_cast<GLint>(std::max(1u, extent.Width >> dstMip)),
+				static_cast<GLint>(std::max(1u, extent.Height >> dstMip)),
+				GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			glDeleteFramebuffers(1, &readFbo);
+			glDeleteFramebuffers(1, &drawFbo);
+		}
+
+		// P4-4a:渲染通道末的附件 resolve。语义与 Vulkan 后端的 pResolveAttachments 对齐:
+		// SubpassDesc::ResolveAttachments 与同 subpass 的 ColorAttachments **按下标一一对应**
+		// (第 k 项是第 k 个颜色附件的 resolve 目标),值是**渲染通道级**附件索引;
+		// UINT32_MAX 表示该颜色附件不 resolve。GL 只支持单子通道,因此统一在通道末做一次。
+		void ResolvePassAttachments(const RenderPass& pass, const Framebuffer& framebuffer)
+		{
+			const RenderPassDesc& passDesc = pass.GetDesc();
+			const std::vector<Handle<Texture>>& attachments = framebuffer.GetDesc().Attachments;
+			for (const SubpassDesc& subpass : passDesc.Subpasses)
+			{
+				const size_t count = std::min(subpass.ResolveAttachments.size(),
+					subpass.ColorAttachments.size());
+				for (size_t k = 0; k < count; ++k)
+				{
+					const uint32_t resolveIndex = subpass.ResolveAttachments[k];
+					const uint32_t colorIndex = subpass.ColorAttachments[k].Index;
+					if (resolveIndex == UINT32_MAX ||
+						resolveIndex >= attachments.size() || colorIndex >= attachments.size())
+						continue;
+					const auto src = std::dynamic_pointer_cast<OpenGLTexture>(attachments[colorIndex]);
+					const auto dst = std::dynamic_pointer_cast<OpenGLTexture>(attachments[resolveIndex]);
+					if (!src || !dst || src.get() == dst.get())
+						continue;
+					// 合同检查(与 Vulkan 的 pResolveAttachments 约束一致:多采样颜色 + 单采样目标)。
+					// GL 本身允许 单采样→单采样 的 blit,因此这里只告警不拦截,便于定位配置错误。
+					if (src->GetDesc().Samples == SampleCount::Count1 ||
+						dst->GetDesc().Samples != SampleCount::Count1)
+						WLD_CORE_WARN("[gl-resolve] pass '{0}' color#{1}->resolve#{2}: expected a multisampled color "
+							"attachment resolved into a single-sampled target (samples {3} -> {4})",
+							passDesc.DebugName, colorIndex, resolveIndex,
+							static_cast<uint32_t>(src->GetDesc().Samples),
+							static_cast<uint32_t>(dst->GetDesc().Samples));
+					BlitResolveTexture(*src, *dst, 0, 0);
+				}
 			}
 		}
 	}
@@ -384,6 +468,9 @@ namespace World::Rhi::OpenGL
 		IndexType indexType = IndexType::UInt32;
 		uint64_t indexBufferOffset = 0;
 		const char* currentPassName = nullptr;
+		// P4-4a:通道末 resolve 需要"当前通道 + 当前 framebuffer"的附件表。
+		Handle<RenderPass> currentPass;
+		Handle<Framebuffer> currentFramebuffer;
 
 		for (const GLCommand& command : m_Commands)
 		{
@@ -401,6 +488,9 @@ namespace World::Rhi::OpenGL
 					const auto glFramebuffer = std::dynamic_pointer_cast<OpenGLFramebuffer>(command.Framebuffer_);
 					const GLuint fbo = glFramebuffer ? glFramebuffer->GetID() : 0;
 					glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+					// P4-4a:end-of-pass resolve 的输入。只有声明了 ResolveAttachments 的通道才会用到。
+					currentPass = command.Pass;
+					currentFramebuffer = command.Framebuffer_;
 					if (!command.Pass)
 						break;
 					const auto& desc = command.Pass->GetDesc();
@@ -459,6 +549,12 @@ namespace World::Rhi::OpenGL
 					break;
 				}
 				case GLCommandKind::EndRenderPass:
+					// P4-4a:通道末一次性 resolve(多采样附件 → 单采样目标)。
+					// 单采样通道(ResolveAttachments 为空)逐字节等价于改动前:一次 blit 都不发。
+					if (currentPass && currentFramebuffer)
+						ResolvePassAttachments(*currentPass, *currentFramebuffer);
+					currentPass = nullptr;
+					currentFramebuffer = nullptr;
 					if (const char* dumpDir = FboDumpDir())
 						DumpCurrentFramebuffer(dumpDir, currentPassName);
 					glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -697,21 +793,9 @@ namespace World::Rhi::OpenGL
 					const auto dstGl = std::dynamic_pointer_cast<OpenGLTexture>(command.TextureB);
 					if (!srcGl || !dstGl)
 						break;
-					const uint32_t srcMip = command.Count0;
-					const uint32_t dstMip = command.Count1;
-					GLuint readFbo = 0, drawFbo = 0;
-					glCreateFramebuffers(1, &readFbo);
-					glCreateFramebuffers(1, &drawFbo);
-					glNamedFramebufferTexture(readFbo, GL_COLOR_ATTACHMENT0, srcGl->GetID(), srcMip);
-					glNamedFramebufferTexture(drawFbo, GL_COLOR_ATTACHMENT0, dstGl->GetID(), dstMip);
-					const auto extent = dstGl->GetDesc().Extent;
-					glBlitNamedFramebuffer(readFbo, drawFbo, 0, 0,
-						std::max(1u, srcGl->GetDesc().Extent.Width >> srcMip),
-						std::max(1u, srcGl->GetDesc().Extent.Height >> srcMip),
-						0, 0, std::max(1u, extent.Width >> dstMip), std::max(1u, extent.Height >> dstMip),
-						GL_COLOR_BUFFER_BIT, GL_NEAREST);
-					glDeleteFramebuffers(1, &readFbo);
-					glDeleteFramebuffers(1, &drawFbo);
+					// 与通道末 resolve 共用同一条 blit(见 BlitResolveTexture);
+					// layer 参数暂不支持 —— 多采样附件的 resolve 目标一律是 layer 0。
+					BlitResolveTexture(*srcGl, *dstGl, command.Count0, command.Count1);
 					break;
 				}
 				case GLCommandKind::GenerateMipmaps:

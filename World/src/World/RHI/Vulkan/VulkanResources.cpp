@@ -509,6 +509,9 @@ namespace World::Rhi::Vulkan
 
 		std::vector<VkSubpassDescription> subpasses;
 		std::vector<std::vector<VkAttachmentReference>> colorRefs(desc.Subpasses.size());
+		// P4-4a:resolve 引用数组。pResolveAttachments 的长度**必须**等于 colorAttachmentCount,
+		// 因此这里按颜色附件数量分配,未声明的项留 VK_ATTACHMENT_UNUSED。
+		std::vector<std::vector<VkAttachmentReference>> resolveRefs(desc.Subpasses.size());
 		std::vector<VkAttachmentReference> depthRefs(desc.Subpasses.size());
 		for (size_t i = 0; i < desc.Subpasses.size(); ++i)
 		{
@@ -521,6 +524,41 @@ namespace World::Rhi::Vulkan
 			out.colorAttachmentCount = static_cast<uint32_t>(colorRefs[i].size());
 			out.pColorAttachments = colorRefs[i].empty() ? nullptr : colorRefs[i].data();
 			out.pDepthStencilAttachment = subpass.HasDepthStencil() ? &depthRefs[i] : nullptr;
+
+			// P4-4a:接上 SubpassDesc::ResolveAttachments。
+			// 索引语义与 ColorAttachments/DepthStencilAttachment 一致:**渲染通道级**附件索引,
+			// 位置语义是"与同 subpass 的 ColorAttachments 按下标一一对应"(第 k 项是第 k 个颜色
+			// 附件的 resolve 目标);UINT32_MAX = VK_ATTACHMENT_UNUSED = 该颜色附件不 resolve。
+			// 空数组 → pResolveAttachments 保持 nullptr,与改动前逐字节一致(单采样通道零影响)。
+			if (!subpass.ResolveAttachments.empty())
+			{
+				resolveRefs[i].assign(colorRefs[i].size(),
+					{ VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL });
+				const size_t resolveCount = std::min(subpass.ResolveAttachments.size(), colorRefs[i].size());
+				for (size_t k = 0; k < resolveCount; ++k)
+				{
+					const uint32_t resolveIndex = subpass.ResolveAttachments[k];
+					if (resolveIndex == UINT32_MAX)
+						continue;
+					resolveRefs[i][k] = { resolveIndex, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+					// 合同检查(resolve 的 Vulkan 硬约束,违反时 vkCreateRenderPass 直接失败):
+					// 颜色附件多采样 + resolve 目标单采样。这里给出能定位到具体通道/附件的日志。
+					const bool indicesValid = resolveIndex < desc.Attachments.size() &&
+						colorRefs[i][k].attachment < desc.Attachments.size();
+					const bool samplesValid = indicesValid &&
+						desc.Attachments[resolveIndex].Samples == SampleCount::Count1 &&
+						desc.Attachments[colorRefs[i][k].attachment].Samples != SampleCount::Count1;
+					if (!samplesValid)
+						WLD_CORE_WARN("[RHI-VK] render pass '{0}' subpass {1} color#{2}: resolve target #{3} must be a "
+							"single-sampled attachment resolved from a multisampled color attachment",
+							desc.DebugName, i, k, resolveIndex);
+				}
+				if (subpass.ResolveAttachments.size() != colorRefs[i].size())
+					WLD_CORE_WARN("[RHI-VK] render pass '{0}' subpass {1}: ResolveAttachments has {2} entries but "
+						"there are {3} color attachments; missing entries are treated as VK_ATTACHMENT_UNUSED",
+						desc.DebugName, i, subpass.ResolveAttachments.size(), colorRefs[i].size());
+				out.pResolveAttachments = resolveRefs[i].empty() ? nullptr : resolveRefs[i].data();
+			}
 			subpasses.push_back(out);
 		}
 

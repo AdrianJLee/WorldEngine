@@ -21,11 +21,24 @@ namespace World::Rhi::OpenGL
 		WLD_CORE_ASSERT(desc.RenderPass, "FramebufferDesc requires a render pass");
 		const auto& passDesc = desc.RenderPass->GetDesc();
 
+		// P4-4a:resolve 目标(SubpassDesc::ResolveAttachments 指向的单采样附件)不是绘制附件。
+		// GL 要求同一个 FBO 里所有附件的采样数一致,把单采样 resolve 目标挂进来必然
+		// GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE —— 该通道的全部绘制被静默丢弃。
+		// 它们只在通道末由 OpenGLCommandBuffer 的 blit resolve 写入(见 EndRenderPass 回放),
+		// 因此这里既不挂载、也不进 draw buffers。
+		std::vector<bool> isResolveTarget(passDesc.Attachments.size(), false);
+		for (const SubpassDesc& subpass : passDesc.Subpasses)
+			for (uint32_t index : subpass.ResolveAttachments)
+				if (index < isResolveTarget.size())
+					isResolveTarget[index] = true;
+
 		glCreateFramebuffers(1, &m_ID);
 		m_AttachmentIDs.resize(passDesc.Attachments.size(), 0);
 		std::vector<GLenum> drawBuffers;
 		for (size_t i = 0; i < passDesc.Attachments.size() && i < desc.Attachments.size(); i++)
 		{
+			if (isResolveTarget[i])
+				continue;
 			const auto& attachment = passDesc.Attachments[i];
 			const auto texture = std::dynamic_pointer_cast<OpenGLTexture>(desc.Attachments[i]);
 			if (!texture)
@@ -94,6 +107,17 @@ namespace World::Rhi::OpenGL
 	{
 		if (attachmentIndex >= m_AttachmentIDs.size())
 			return -1;
+		// P4-4a:多采样附件不能 glReadPixels(一律 GL_INVALID_OPERATION,读回的是垃圾值)。
+		// 读回请用"resolve 目标(单采样)对应的附件下标",或走 RHI 的
+		// CopyTextureToBuffer(拾取路径就是这么做的:读 EntityTexture)。
+		if (attachmentIndex < m_Desc.Attachments.size())
+			if (const auto texture = std::dynamic_pointer_cast<OpenGLTexture>(m_Desc.Attachments[attachmentIndex]))
+				if (texture->GetDesc().Samples != SampleCount::Count1)
+				{
+					WLD_CORE_WARN("ReadPixel on multisampled attachment {0} of framebuffer '{1}' is not supported; "
+						"read the single-sampled resolve target instead", attachmentIndex, m_Desc.DebugName);
+					return -1;
+				}
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, m_ID);
 		glReadBuffer(GL_COLOR_ATTACHMENT0 + attachmentIndex);
 		int pixel = -1;

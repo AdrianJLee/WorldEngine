@@ -36,6 +36,9 @@ namespace World::Rhi
 		bool TextureCompressionBC = false;
 		uint32_t MaxColorAttachments = 4;
 		uint32_t MaxSampleCount = 1;
+		// P4-4a:整数颜色附件(R32_SINT 等,实体 id 通道用)的采样数上限 —— 与 MaxSampleCount
+		// 分开:Vulkan 由 framebufferIntegerColorSampleCounts 折算,MSAA 的生效值取两者交集。
+		uint32_t MaxIntegerSampleCount = 1;
 		uint32_t MaxTextureSize = 4096;
 		uint32_t MaxImageArrayLayers = 256;
 		uint32_t MaxUniformBufferSize = 64 * 1024;

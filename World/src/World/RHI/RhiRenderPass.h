@@ -29,6 +29,9 @@ namespace World::Rhi
 	{
 		std::vector<AttachmentRef> ColorAttachments;
 		AttachmentRef DepthStencilAttachment;   // Index == UINT32_MAX 表示无
+		// P4-4a:与 ColorAttachments **位置对应** —— 第 k 项 = 第 k 个颜色附件的 resolve 目标,
+		// 值是**渲染通道级**附件索引;UINT32_MAX = 该附件不 resolve。深度不做 resolve。
+		// 两个后端都要求:被 resolve 的颜色附件与 resolve 目标同格式(采样数不同)。
 		std::vector<uint32_t> ResolveAttachments;
 		std::vector<uint32_t> PreserveAttachments;
 		std::vector<uint32_t> InputAttachments;

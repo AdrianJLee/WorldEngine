@@ -80,6 +80,8 @@ namespace World::Rhi::OpenGL
 		m_Capabilities.MaxColorAttachments = static_cast<uint32_t>(value);
 		glGetIntegerv(GL_MAX_SAMPLES, &value);
 		m_Capabilities.MaxSampleCount = value >= 8 ? 8u : static_cast<uint32_t>(value);
+		// P4-4a:GL 只有 GL_MAX_SAMPLES 一个查询 —— 整数颜色附件(实体 id 通道)与颜色同上限。
+		m_Capabilities.MaxIntegerSampleCount = m_Capabilities.MaxSampleCount;
 		glGetIntegerv(GL_MAX_TEXTURE_SIZE, &value);
 		m_Capabilities.MaxTextureSize = static_cast<uint32_t>(value);
 		glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &value);
