@@ -1,5 +1,6 @@
 #include "World/Gameplay/GameHost.h"
 #include "World/Core/Input.h"
+#include "World/Core/PhysicsSettings.h"
 #include "World/Gameplay/InputMap.h"
 
 #include "World/Core/Application.h"
@@ -46,13 +47,20 @@ namespace World::Gameplay
 		if (m_Initialized)
 			return;
 
+		// P4-1:物理固定步长来自项目清单(physics.fixed_step_hz)。这里按工作目录重新装载一次,
+		// 保证"改了清单 → 下次进入 Play/Runtime 生效"(Renderer3D::Init 只在启动/设备重建时装载)。
+		// 区间钳制在 GameApp 构造函数里统一做(1..240)。
+		PhysicsSettings::LoadFromProject(std::filesystem::current_path());
+		GameAppDesc effectiveDesc = desc;
+		effectiveDesc.FixedStepHz = PhysicsSettings::Get().FixedStepHz;
+
 		// 有 Application 时复用它的 WorldContext;无 Application(测试/工具)时自持一份。
 		if (!Application::HasInstance() && !m_OwnedContext)
 			m_OwnedContext = std::make_unique<WorldContext>();
 
 		if (!GameApp::Exists())
 		{
-			GameApp::Create(desc);
+			GameApp::Create(effectiveDesc);
 			m_CreatedSession = true;
 		}
 

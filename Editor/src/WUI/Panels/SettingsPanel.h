@@ -26,6 +26,9 @@ namespace World
 		// (每帧回读会把用户正在拖动的值覆盖掉)。
 		bool m_Initialized = false;
 		Asset::RenderingSettings m_Edit;
+		// P4-1:物理设置(与渲染设置同一个面板)。
+		Asset::PhysicsSettingsData m_Physics;
+		bool m_PhysicsChanged = false;
 		std::string m_Status = "渲染设置来自 project.we.yaml 的 `rendering` 区块";
 		bool m_StatusIsError = false;
 	};

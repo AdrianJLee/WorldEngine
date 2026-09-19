@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Renderer/RenderSettings.h"
+#include "World/Core/PhysicsSettings.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -35,6 +36,9 @@ namespace World
 	void RenderSettings::Apply(const Asset::ProjectManifest& manifest)
 	{
 		Store() = WithEnvironmentOverrides(manifest.Rendering);
+		// P4-1:物理设置与渲染设置同源(都来自项目清单),绑定在同一个入口上,
+		// 这样 Editor / Runtime / Renderer3D::Init 三条装载路径都不会漏掉物理。
+		PhysicsSettings::Apply(manifest);
 	}
 
 	bool RenderSettings::LoadFromProject(const std::filesystem::path& workingDirectory)

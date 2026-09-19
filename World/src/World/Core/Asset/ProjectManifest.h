@@ -26,6 +26,15 @@ namespace World::Asset
 		uint32_t MaxPointLights = 7;
 		bool GpuTiming = false;           // D8b:GPU 时间戳(Stats 面板/AI 显示 gpuMs;有读回开销)
 		bool Instancing = true;           // D8b:同网格+材质的实例合批
+		// P4-1:纹理各向异性上限(1..16;设备不支持时引擎退化为 1 并 warn)。
+		uint32_t Anisotropy = 1;
+	};
+
+	// P4-1:物理设置(project.we.yaml 的 `physics:` 区块)。
+	struct PhysicsSettingsData
+	{
+		uint32_t FixedStepHz = 60;   // 固定步长频率(1..240)
+		float Gravity = -9.81f;      // 重力加速度(Y 轴,有限值)
 	};
 
 	// 项目清单(project.we.yaml):资产内容根、启动场景与发行包列表的单一事实源。
@@ -41,6 +50,8 @@ namespace World::Asset
 		std::vector<std::string> Packages;
 		// D8a2:渲染设置(缺省 = 引擎默认;`rendering:` 区块缺失时保持默认)。
 		RenderingSettings Rendering;
+		// P4-1:物理设置(缺省 = 引擎默认;`physics:` 区块缺失时保持默认)。
+		PhysicsSettingsData Physics;
 
 		// 加载并校验;error 为空表示成功。
 		static bool Load(const std::filesystem::path& path, ProjectManifest* out, std::string* error);

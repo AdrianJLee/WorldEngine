@@ -10,6 +10,7 @@ renderer: vulkan
 #  - max_directional_lights / max_point_lights:每帧灯光上限(合计 ≤ 8)。
 #  - gpu_timing:GPU 时间戳统计(Stats 面板/AI 读 gpuMs;默认关,读回有一点代价)。
 #  - instancing:同网格 + 同材质的实例合批(默认开;关掉用于 A/B 对照)。
+#  - anisotropy:纹理各向异性上限 1..16(设备不支持时引擎退化 1 并 warn)。
 rendering:
   culling: true
   shadows: true
@@ -18,5 +19,12 @@ rendering:
   max_point_lights: 7
   gpu_timing: false
   instancing: true
+  anisotropy: 1
+# 物理设置(引擎用户可直接改;编辑器 Window ▸ Project Settings 面板等价)。
+#  - fixed_step_hz:固定步长频率 1..240(下一次 Play / 运行 Runtime 生效)。
+#  - gravity:重力加速度(Y 轴;默认 -9.81)。
+physics:
+  fixed_step_hz: 60
+  gravity: -9.81
 packages:
   - packages/Base.wpak

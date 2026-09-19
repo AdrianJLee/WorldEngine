@@ -88,6 +88,13 @@ namespace World
 			if (message) *message = "settings panel is not wired to a host";
 			return false;
 		}
+		// P4-1:物理设置(与渲染设置同一个面板/同一次保存)。
+		virtual bool SaveProjectPhysicsSettings(const Asset::PhysicsSettingsData& settings, std::string* message = nullptr)
+		{
+			(void)settings;
+			if (message) *message = "settings panel is not wired to a host";
+			return false;
+		}
 		// ---- W9-2:内置脚本编辑器 ----
 		// 打开脚本编辑器(逻辑路径;每个脚本一个 "script:<逻辑路径>" 面板)。默认空实现。
 		// 实现必须是"创建后默认附加到主窗口"(用户 2026-09-18 决定)。

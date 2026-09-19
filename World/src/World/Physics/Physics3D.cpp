@@ -2,6 +2,8 @@
 #include "World/Physics/Physics3D.h"
 
 #include "World/Core/Asset/WModelIO.h"
+#include "World/Core/PhysicsSettings.h"
+#include "World/Core/Log.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
 
@@ -382,7 +384,16 @@ namespace World
 		{
 			m_System.Init(kMaxBodies, /*inNumBodyMutexes=*/0, kMaxBodyPairs, kMaxContactConstraints,
 				m_BroadPhaseLayers, m_ObjectVsBroadPhaseFilter, m_ObjectLayerPairFilter);
-			m_System.SetGravity(JPH::Vec3(0.0f, Physics3DWorld::kGravity, 0.0f));
+			// P4-1:重力来自项目清单 `physics.gravity`(PhysicsSettings);非法值(非有限)退化到
+			// 引擎默认 kGravity,保证"清单没写/写坏"时行为与旧版一致。
+			float gravity = PhysicsSettings::Get().Gravity;
+			if (!std::isfinite(gravity))
+			{
+				WLD_CORE_WARN("Physics3D: physics.gravity 非有限({0}),退回默认 {1}",
+					gravity, Physics3DWorld::kGravity);
+				gravity = Physics3DWorld::kGravity;
+			}
+			m_System.SetGravity(JPH::Vec3(0.0f, gravity, 0.0f));
 			m_System.SetContactListener(&m_ContactListener);
 		}
 

@@ -3,6 +3,7 @@
 
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Core/PhysicsSettings.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiWidget.h"
 
@@ -26,6 +27,7 @@ namespace World
 		if (!m_Initialized)
 		{
 			m_Edit = RenderSettings::Get();
+			m_Physics = PhysicsSettings::Get();
 			m_Initialized = true;
 		}
 
@@ -92,9 +94,49 @@ namespace World
 			changed = true;
 		}
 
+		// P4-1:纹理各向异性(1..16;设备不支持时引擎退化 1 + warn)。
+		{
+			int64_t value = static_cast<int64_t>(m_Edit.Anisotropy);
+			if (Wui::DragInt(ctx, Wui::HashId("settings3d.anisotropy"), { x + 170.0f, y, 110.0f, 20.0f },
+				value, 1, 16, theme))
+			{
+				m_Edit.Anisotropy = static_cast<uint32_t>(value);
+				changed = true;
+			}
+			Wui::Label(ctx, { x, y + 3.0f }, "纹理各向异性", theme.Text, 13.0f);
+			y += 26.0f;
+		}
+
+		// P4-1:物理(固定步长 1..240Hz;重力 = Y 轴加速度)。
+		Wui::Label(ctx, { x, y }, "Physics (project.we.yaml → physics:)", theme.TextMuted, 12.0f);
+		y += 20.0f;
+		{
+			int64_t value = static_cast<int64_t>(m_Physics.FixedStepHz);
+			if (Wui::DragInt(ctx, Wui::HashId("settings.physics.fixed_step"), { x + 170.0f, y, 110.0f, 20.0f },
+				value, 1, 240, theme))
+			{
+				m_Physics.FixedStepHz = static_cast<uint32_t>(value);
+				changed = true;
+			}
+			Wui::Label(ctx, { x, y + 3.0f }, "固定步长 (Hz)", theme.Text, 13.0f);
+			y += 26.0f;
+		}
+		{
+			float value = m_Physics.Gravity;
+			if (Wui::DragFloat(ctx, Wui::HashId("settings.physics.gravity"), { x + 170.0f, y, 110.0f, 20.0f },
+				value, 0.1f, -50.0f, 50.0f, theme))
+			{
+				m_Physics.Gravity = value;
+				changed = true;
+			}
+			Wui::Label(ctx, { x, y + 3.0f }, "重力 (Y)", theme.Text, 13.0f);
+			y += 26.0f;
+		}
+
 		if (changed)
 		{
 			RenderSettings::Set(m_Edit);
+			PhysicsSettings::Set(m_Physics);
 			m_Status = "已应用(未保存到 project.we.yaml)";
 			m_StatusIsError = false;
 		}
@@ -105,7 +147,7 @@ namespace World
 			"保存到 project.we.yaml", theme))
 		{
 			std::string message;
-			if (host.SaveProjectRenderSettings(m_Edit, &message))
+			if (host.SaveProjectRenderSettings(m_Edit, &message) && host.SaveProjectPhysicsSettings(m_Physics, &message))
 			{
 				m_Status = message.empty() ? "已保存到 project.we.yaml" : message;
 				m_StatusIsError = false;
@@ -136,6 +178,12 @@ namespace World
 				Renderer3D::GetShadowMapSize(),
 				Renderer3D::GetMaxDirectionalLights(), Renderer3D::GetMaxPointLights());
 			Wui::Label(ctx, { x, y }, buffer, theme.TextMuted, 12.0f);
+			y += 18.0f;
+			char physicsText[128] = {};
+			std::snprintf(physicsText, sizeof(physicsText), "生效中物理:步长=%u Hz 重力=%.2f 各向异性=%u",
+				PhysicsSettings::Get().FixedStepHz, PhysicsSettings::Get().Gravity,
+				RenderSettings::Get().Anisotropy);
+			Wui::Label(ctx, { x, y }, physicsText, theme.TextMuted, 12.0f);
 			y += 18.0f;
 		}
 		Wui::Label(ctx, { x, y }, "提示:阴影贴图尺寸在下次启动/重载渲染器后生效;其它项立即生效。",

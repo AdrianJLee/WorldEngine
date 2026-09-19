@@ -2629,6 +2629,33 @@ namespace World
 		return true;
 	}
 
+	bool EditorShell::SaveProjectPhysicsSettings(const Asset::PhysicsSettingsData& settings, std::string* message)
+	{
+		// 与渲染设置同一套"回写清单"口径:Load → 只覆盖 physics → Validate + Save。
+		std::filesystem::path manifestPath;
+		if (!Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+		{
+			if (message) *message = "找不到 project.we.yaml(工作目录下没有清单)";
+			return false;
+		}
+		Asset::ProjectManifest manifest;
+		std::string error;
+		if (!Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+		{
+			if (message) *message = "清单读取失败: " + error;
+			return false;
+		}
+		manifest.Physics = settings;
+		if (!Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+		{
+			if (message) *message = "清单写入失败: " + error;
+			return false;
+		}
+		if (message)
+			*message = "已保存物理设置到 " + manifestPath.filename().string();
+		return true;
+	}
+
 	bool EditorShell::ImportModelFile(const std::string& sourcePath, std::string* message,
 		std::string* outLogicalModel)
 	{

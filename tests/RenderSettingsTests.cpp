@@ -67,6 +67,10 @@ namespace
 		// D8b:GPU 时间戳默认关(读回有代价);实例合批默认开。
 		CHECK(!manifest.Rendering.GpuTiming);
 		CHECK(manifest.Rendering.Instancing);
+		// P4-1:各向异性与物理设置的默认值。
+		CHECK(manifest.Rendering.Anisotropy == 1u);
+		CHECK(manifest.Physics.FixedStepHz == 60u);
+		CHECK(manifest.Physics.Gravity < -9.7f && manifest.Physics.Gravity > -9.9f);
 		fs::remove_all(root);
 	}
 
@@ -82,7 +86,11 @@ namespace
 			"  max_directional_lights: 2\n"
 			"  max_point_lights: 4\n"
 			"  gpu_timing: true\n"
-			"  instancing: false\n"));
+			"  instancing: false\n"
+			"  anisotropy: 8\n"
+			"physics:\n"
+			"  fixed_step_hz: 120\n"
+			"  gravity: -2.5\n"));
 
 		World::Asset::ProjectManifest manifest;
 		std::string error;
@@ -94,6 +102,10 @@ namespace
 		CHECK(manifest.Rendering.MaxPointLights == 4u);
 		CHECK(manifest.Rendering.GpuTiming);
 		CHECK(!manifest.Rendering.Instancing);
+		// P4-1:各向异性 + 物理设置解析。
+		CHECK(manifest.Rendering.Anisotropy == 8u);
+		CHECK(manifest.Physics.FixedStepHz == 120u);
+		CHECK(manifest.Physics.Gravity < -2.4f && manifest.Physics.Gravity > -2.6f);
 
 		// 写盘往返:rendering 区块落地,其它字段不丢。
 		CHECK(World::Asset::ProjectManifest::Save(manifestPath, manifest, &error));
@@ -111,6 +123,10 @@ namespace
 		CHECK(reloaded.Rendering.MaxPointLights == 4u);
 		CHECK(reloaded.Rendering.GpuTiming);
 		CHECK(!reloaded.Rendering.Instancing);
+		// P4-1:往返后各向异性与物理设置不丢。
+		CHECK(reloaded.Rendering.Anisotropy == 8u);
+		CHECK(reloaded.Physics.FixedStepHz == 120u);
+		CHECK(reloaded.Physics.Gravity < -2.4f && reloaded.Physics.Gravity > -2.6f);
 		fs::remove_all(root);
 	}
 
@@ -133,6 +149,18 @@ namespace
 		CHECK(error.find("max_point_lights") != std::string::npos);
 
 		WriteText(manifestPath, BaseManifest("rendering:\n  max_directional_lights: 3\n"));
+		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+
+		// P4-1:各向异性越界(0 / 17)与物理越界(0 / 241)都必须被拒。
+		WriteText(manifestPath, BaseManifest("rendering:\n  anisotropy: 17\n"));
+		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+		CHECK(error.find("anisotropy") != std::string::npos);
+		WriteText(manifestPath, BaseManifest("rendering:\n  anisotropy: 0\n"));
+		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+		WriteText(manifestPath, BaseManifest("physics:\n  fixed_step_hz: 0\n"));
+		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+		CHECK(error.find("fixed_step_hz") != std::string::npos);
+		WriteText(manifestPath, BaseManifest("physics:\n  fixed_step_hz: 241\n"));
 		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
 
 		// 单字段不超限,但"方向光 + 点光"合计超过 UBO 容量(8)。

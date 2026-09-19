@@ -93,6 +93,25 @@ namespace World::Asset
 				if (error) *error = "rendering light limits exceed the 8-light UBO capacity";
 				return false;
 			}
+			// P4-1:各向异性上限(1..16)——超过设备能力时引擎内部再退化。
+			if (rendering.Anisotropy < 1 || rendering.Anisotropy > 16)
+			{
+				if (error) *error = "rendering.anisotropy must be in [1, 16]: "
+					+ std::to_string(rendering.Anisotropy);
+				return false;
+			}
+			// P4-1:物理设置范围校验。
+			if (manifest.Physics.FixedStepHz < 1 || manifest.Physics.FixedStepHz > 240)
+			{
+				if (error) *error = "physics.fixed_step_hz must be in [1, 240]: "
+					+ std::to_string(manifest.Physics.FixedStepHz);
+				return false;
+			}
+			if (!std::isfinite(manifest.Physics.Gravity))
+			{
+				if (error) *error = "physics.gravity must be a finite number";
+				return false;
+			}
 			for (std::string& package : manifest.Packages)
 				if (!ValidateRelativePath(package, &package, error))
 					return false;
@@ -148,6 +167,19 @@ namespace World::Asset
 					readU32("max_point_lights", manifest.Rendering.MaxPointLights);
 				manifest.Rendering.GpuTiming = readBool("gpu_timing", manifest.Rendering.GpuTiming);
 				manifest.Rendering.Instancing = readBool("instancing", manifest.Rendering.Instancing);
+				manifest.Rendering.Anisotropy = readU32("anisotropy", manifest.Rendering.Anisotropy);
+			}
+			if (const YAML::Node physics = root["physics"])
+			{
+				if (!physics.IsMap())
+				{
+					if (error) *error = "manifest 'physics' must be a map: " + path.string();
+					return false;
+				}
+				if (physics["fixed_step_hz"])
+					manifest.Physics.FixedStepHz = physics["fixed_step_hz"].as<uint32_t>(manifest.Physics.FixedStepHz);
+				if (physics["gravity"])
+					manifest.Physics.Gravity = physics["gravity"].as<float>(manifest.Physics.Gravity);
 			}
 			if (!ValidateManifest(manifest, error))
 				return false;
@@ -183,6 +215,11 @@ namespace World::Asset
 			out << YAML::Key << "max_point_lights" << YAML::Value << copy.Rendering.MaxPointLights;
 			out << YAML::Key << "gpu_timing" << YAML::Value << copy.Rendering.GpuTiming;
 			out << YAML::Key << "instancing" << YAML::Value << copy.Rendering.Instancing;
+			out << YAML::Key << "anisotropy" << YAML::Value << copy.Rendering.Anisotropy;
+			out << YAML::EndMap;
+			out << YAML::Key << "physics" << YAML::Value << YAML::BeginMap;
+			out << YAML::Key << "fixed_step_hz" << YAML::Value << copy.Physics.FixedStepHz;
+			out << YAML::Key << "gravity" << YAML::Value << copy.Physics.Gravity;
 			out << YAML::EndMap;
 			out << YAML::Key << "packages" << YAML::Value << YAML::BeginSeq;
 			for (const std::string& package : copy.Packages)

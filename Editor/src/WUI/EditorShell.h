@@ -122,6 +122,9 @@ namespace World
 		// D8a2:把项目渲染设置写回 project.we.yaml(Project Settings 面板的"保存")。
 		bool SaveProjectRenderSettings(const Asset::RenderingSettings& settings,
 			std::string* message = nullptr) override;
+		// P4-1:物理设置写回 project.we.yaml(同一个面板的"保存")。
+		bool SaveProjectPhysicsSettings(const Asset::PhysicsSettingsData& settings,
+			std::string* message = nullptr) override;
 		// P1b D5:内容浏览器双击 .gltf/.glb → 导入(不实例化);回传 .wmodel 逻辑路径供打开预览。
 		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr,
 			std::string* outLogicalModel = nullptr) override;

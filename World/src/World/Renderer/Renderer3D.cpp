@@ -585,11 +585,29 @@ namespace World
 		state.MaterialLayout = Renderer::GetDevice()->CreateDescriptorSetLayout(materialLayoutDesc);
 
 		// 材质采样器:重复寻址(平铺贴图常见需求)+ 线性过滤;mip 由贴图自带(当前单级)。
+		// P4-1:最大各向异性来自项目清单(rendering.anisotropy,1..16,启动时生效);
+		// 设备不支持各向异性过滤时退化到 1 并 warn 一次,避免渲染器反复刷日志。
 		Rhi::SamplerDesc materialSamplerDesc;
 		materialSamplerDesc.MinFilter = Rhi::Filter::Linear;
 		materialSamplerDesc.MagFilter = Rhi::Filter::Linear;
 		materialSamplerDesc.AddressU = Rhi::SamplerAddressMode::Repeat;
 		materialSamplerDesc.AddressV = Rhi::SamplerAddressMode::Repeat;
+		{
+			const float requested = static_cast<float>(RenderSettings::Get().Anisotropy);
+			float anisotropy = std::max(1.0f, std::min(16.0f, requested));
+			if (anisotropy > 1.0f && !Renderer::GetDevice()->GetCapabilities().AnisotropicFiltering)
+			{
+				static bool s_AnisotropyWarned = false;
+				if (!s_AnisotropyWarned)
+				{
+					s_AnisotropyWarned = true;
+					WLD_CORE_WARN("Renderer3D: 设备不支持各向异性过滤,rendering.anisotropy={0} 退化为 1",
+						requested);
+				}
+				anisotropy = 1.0f;
+			}
+			materialSamplerDesc.MaxAnisotropy = anisotropy;
+		}
 		materialSamplerDesc.DebugName = "Renderer3D.MaterialSampler";
 		state.MaterialSampler = Renderer::GetDevice()->CreateSampler(materialSamplerDesc);
 

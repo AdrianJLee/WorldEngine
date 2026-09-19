@@ -31,8 +31,9 @@ namespace World::Gameplay
 		: m_Desc(desc)
 	{
 		// 参数消毒:0 Hz 会让步长变成无穷,0 步上限会让模拟彻底停摆。
-		if (m_Desc.FixedStepHz == 0)
-			m_Desc.FixedStepHz = 60;
+		// P4-1:固定步长频率的合法区间是 [1, 240](与清单校验同口径);这里再钳一次,
+		// 防止宿主/测试直接构造越界 desc。0 保持旧的"回落到 60 Hz"语义(既有测试依赖)。
+		m_Desc.FixedStepHz = m_Desc.FixedStepHz == 0 ? 60u : std::clamp(m_Desc.FixedStepHz, 1u, 240u);
 		if (m_Desc.MaxFixedStepsPerFrame == 0)
 			m_Desc.MaxFixedStepsPerFrame = 1;
 
