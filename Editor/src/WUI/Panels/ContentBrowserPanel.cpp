@@ -691,6 +691,8 @@ namespace World
 				}, 58);
 
 			m_SearchField = std::make_shared<Wui::WuiTextField>();
+			// D10:给搜索框一个稳定 id —— AI/脚本可以 ui.type 驱动它(以前只能手点)。
+			m_SearchField->SetId(Wui::HashId("browser.search"));
 			m_SearchField->Buffer = &m_Model.SearchEdit;
 			m_SearchField->OnCommit = [this]
 				{
@@ -826,6 +828,11 @@ namespace World
 		}
 
 		bool itemRightClicked = false;
+		// D10:双击"进入文件夹/打开资产"必须**延迟到遍历结束**再执行 ——
+		// `paths` 是 m_Model.SearchResults 的引用(Navigate→UpdateSearch 会清空重填),
+		// 在循环里直接 OpenItem 会把正在遍历的容器清掉(迭代器失效 → 崩溃;
+		// 用户实测"搜索后点击进入文件夹会报错")。
+		std::optional<std::filesystem::path> pendingOpen;
 		auto interact = [&](const std::filesystem::path& path, const Wui::WuiRect& itemRect, bool isDir)
 		{
 			const bool selected = m_Model.Selected.find(path) != m_Model.Selected.end();
@@ -843,7 +850,7 @@ namespace World
 				ctx.SetCursor(Wui::WuiCursor::Hand);
 			}
 			if (ctx.IsDoubleClicked(itemRect))
-				OpenItem(path);
+				pendingOpen = path;
 			else if (ctx.IsClicked(itemRect))
 			{
 				if (ctx.Input().Ctrl)
@@ -956,6 +963,11 @@ namespace World
 						{ gv.ItemRects[i].X, gv.ItemRects[i].Y + gv.ItemRects[i].H + 2.0f, 128, 22 }, theme);
 			}
 		}
+
+		// D10:遍历结束后再执行"双击打开" —— 此时 Navigate→UpdateSearch 清空/重填
+		// SearchResults 不会再破坏正在遍历的容器(见 pendingOpen 处的说明)。
+		if (pendingOpen.has_value())
+			OpenItem(*pendingOpen);
 
 		if (ctx.AcceptDrop(&filePayload, "file:"))
 		{
