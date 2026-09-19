@@ -118,6 +118,9 @@ namespace World
 		// P1b D5:内容浏览器双击 .gltf/.glb → 导入(不实例化);回传 .wmodel 逻辑路径供打开预览。
 		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr,
 			std::string* outLogicalModel = nullptr) override;
+		// D10:导入到指定逻辑目录(内容浏览器当前文件夹 / 拖放命中文件夹)。
+		bool ImportModelFileTo(const std::string& sourcePath, const std::string& destinationLogicalDir,
+			std::string* message = nullptr, std::string* outLogicalModel = nullptr) override;
 		// P1b D5:打开模型预览(每个 .wmodel 一个独立窗口;**只读预览,不改场景**)。
 		void OpenModelPreview(const std::string& logicalPath) override;
 		// W9-2 三层快捷键路由第 2 层:当前焦点面板。

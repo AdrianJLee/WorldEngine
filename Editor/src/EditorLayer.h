@@ -127,8 +127,10 @@ namespace World
 		bool InstantiateModelFile(const std::string& logicalPath, std::string* message = nullptr);
 		// P1b D5:导入 glTF(内容浏览器双击 .gltf / File 菜单 / AI 命令共用同一条路径)。
 		// **只导入,不改场景**;outLogicalModel 回传写出的 .wmodel 逻辑路径(供打开预览)。
+		// destinationLogicalDir:D10 —— 产物落在哪个**逻辑目录**(相对内容根,如 "models/props");
+		// 空 = 内核默认(源所在目录;源在内容根外时退回 models/)。
 		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr,
-			std::string* outLogicalModel = nullptr);
+			std::string* outLogicalModel = nullptr, const std::string& destinationLogicalDir = std::string());
 		// File ▸ Import glTF...:原生文件对话框选文件后走 ImportModelFile。
 		void ImportModelDialog();
 

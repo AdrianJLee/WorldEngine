@@ -1017,8 +1017,9 @@ namespace World::Asset
 	}
 
 	bool ImportFile(const std::filesystem::path& sourcePath, const std::filesystem::path& outputRoot,
-		GltfImportResult* result, std::string* error)
+		GltfImportResult* result, std::string* error, const std::string& destinationLogicalDir)
 	{
-		return GltfImporter::ImportFile(sourcePath.string(), outputRoot.string(), result, error);
+		return GltfImporter::ImportFile(sourcePath.string(), outputRoot.string(), result, error,
+			destinationLogicalDir);
 	}
 }

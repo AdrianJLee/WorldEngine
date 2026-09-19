@@ -975,7 +975,9 @@ namespace World
 				resolved = std::filesystem::path(WLD_ASSETPATH) / resolved;
 			std::string message;
 			std::string logicalModel;
-			if (!ImportModelFile(resolved.string(), &message, &logicalModel))
+			// D10:可选 dest = 目标逻辑目录(相对内容根,如 "models/props");空 = 源所在目录。
+			const std::string destination = arg("dest");
+			if (!ImportModelFile(resolved.string(), &message, &logicalModel, destination))
 			{
 				error = message.empty() ? "glTF import failed" : message;
 				return false;

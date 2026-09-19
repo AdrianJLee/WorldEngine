@@ -358,7 +358,13 @@ namespace World
 			// 导入后立刻刷新列表,新产出的 .wmodel/.wmat 马上可见。
 			std::string message;
 			std::string logicalModel;
-			if (!m_Host.ImportModelFile(path.string(), &message, &logicalModel))
+			// D10:导入到**当前文件夹**(用户 Q1=方案 A:导入物落在当前目录里,
+			// 材质/贴图在它的 materials//textures/ 子目录)。
+			std::error_code destError;
+			const std::filesystem::path destRelative =
+				std::filesystem::relative(m_Model.Current, m_Model.Root, destError);
+			const std::string destination = destError ? std::string() : destRelative.generic_string();
+			if (!m_Host.ImportModelFileTo(path.string(), destination, &message, &logicalModel))
 				WLD_CORE_WARN("[model] import '{0}' failed: {1}", path.string(), message);
 			else
 			{

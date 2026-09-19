@@ -117,6 +117,14 @@ namespace World
 			if (message) *message = "glTF import is not wired to a host";
 			return false;
 		}
+		// D10:带**目的地**的导入(逻辑目录,相对内容根;空 = 内核默认 = 源所在目录)。
+		// 内容浏览器双击/拖放与"导入到当前文件夹"用这条;默认未接线 = 回退到上面那条。
+		virtual bool ImportModelFileTo(const std::string& sourcePath, const std::string& destinationLogicalDir,
+			std::string* message = nullptr, std::string* outLogicalModel = nullptr)
+		{
+			(void)destinationLogicalDir;
+			return ImportModelFile(sourcePath, message, outLogicalModel);
+		}
 		// 打开模型预览(独立窗口,只读;不改场景)。默认未接线 = 无操作。
 		virtual void OpenModelPreview(const std::string& logicalPath) { (void)logicalPath; }
 	};

@@ -1715,7 +1715,7 @@ namespace World
 	}
 
 	bool EditorLayer::ImportModelFile(const std::string& sourcePath, std::string* message,
-		std::string* outLogicalModel)
+		std::string* outLogicalModel, const std::string& destinationLogicalDir)
 	{
 		if (sourcePath.empty())
 		{
@@ -1725,7 +1725,8 @@ namespace World
 		const std::filesystem::path source = std::filesystem::absolute(sourcePath);
 		World::Asset::GltfImportResult imported;
 		std::string error;
-		if (!World::Asset::ImportFile(source, std::filesystem::path(WLD_ASSETPATH), &imported, &error))
+		if (!World::Asset::ImportFile(source, std::filesystem::path(WLD_ASSETPATH), &imported, &error,
+			destinationLogicalDir))
 		{
 			const std::string failure = "glTF 导入失败: " + (error.empty() ? std::string("未知错误") : error);
 			if (message) *message = failure;
@@ -1763,9 +1764,27 @@ namespace World
 			"glTF Model (*.gltf;*.glb)\0*.gltf;*.glb\0All Files (*.*)\0*.*\0");
 		if (path.empty())
 			return;
+		// D10(用户 Q3:每次都弹):选完源文件再选**导入位置**(文件夹),产物落在它里面。
+		// 位置必须在内容根内 —— 否则场景/打包都引用不到,这里直接挡住并给出可读原因。
+		const std::string folder = FileDialogs::SelectFolder("选择导入位置(必须在本项目内容根内)");
+		if (folder.empty())
+			return;   // 用户取消
+		std::string logicalDir;
+		{
+			std::error_code ec;
+			const std::filesystem::path relative =
+				std::filesystem::relative(std::filesystem::path(folder), std::filesystem::path(WLD_ASSETPATH), ec);
+			const std::string text = ec ? std::string() : relative.generic_string();
+			if (ec || text.empty() || text == "." || text.rfind("..", 0) == 0)
+			{
+				ShowError("导入位置必须在内容根内: " + folder);
+				return;
+			}
+			logicalDir = text;
+		}
 		std::string message;
 		std::string logicalModel;
-		if (ImportModelFile(path, &message, &logicalModel) && !logicalModel.empty())
+		if (ImportModelFile(path, &message, &logicalModel, logicalDir) && !logicalModel.empty())
 			m_Shell.OpenModelPreview(logicalModel);   // 与内容浏览器双击同一条:导入 → 打开预览
 	}
 

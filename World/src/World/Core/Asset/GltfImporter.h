@@ -99,5 +99,6 @@ namespace World::Asset
 	// 便捷入口(编辑器 `--import-gltf` 等调用方持有 filesystem::path):
 	// 等价于 GltfImporter::ImportFile(source.string(), outputRoot.string(), ...)。
 	WLD_API bool ImportFile(const std::filesystem::path& sourcePath,
-		const std::filesystem::path& outputRoot, GltfImportResult* result, std::string* error);
+		const std::filesystem::path& outputRoot, GltfImportResult* result, std::string* error,
+		const std::string& destinationLogicalDir = std::string());
 }

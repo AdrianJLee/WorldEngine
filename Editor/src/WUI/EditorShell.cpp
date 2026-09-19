@@ -2054,6 +2054,12 @@ namespace World
 		return m_Editor.ImportModelFile(sourcePath, message, outLogicalModel);
 	}
 
+	bool EditorShell::ImportModelFileTo(const std::string& sourcePath, const std::string& destinationLogicalDir,
+		std::string* message, std::string* outLogicalModel)
+	{
+		return m_Editor.ImportModelFile(sourcePath, message, outLogicalModel, destinationLogicalDir);
+	}
+
 	EditorPanel* EditorShell::FocusedPanel()
 	{
 		// ① 主窗口处于"已附加面板"模式(顶栏标签):该面板就是焦点面板。

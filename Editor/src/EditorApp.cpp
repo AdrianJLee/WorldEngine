@@ -53,18 +53,25 @@ namespace World
 				World::Editor::SetAiControlPort(std::atoi(arguments[i].c_str() + std::strlen("--ai-control=")));
 				continue;
 			}
-			// P1b D5:无窗口 glTF 导入 —— `--import-gltf <file> [--out <dir>]`。
+			// P1b D5:无窗口 glTF 导入 —— `--import-gltf <file> [--out <dir>] [--logical <dir>]`。
+			// D10:--logical 指定产物**逻辑目录**(相对内容根,如 models/props);
+			// 省略 = 源所在目录(源在内容根外时退回 models/)。
 			// 产出 `.wmodel` + `.wmat` + 贴图;失败写 stderr 并以非零码退出(与 --cook 同一风格)。
 			if (arguments[i] == "--import-gltf" && i + 1 < arguments.size())
 			{
 				const std::filesystem::path source = arguments[i + 1];
 				std::filesystem::path outputRoot = std::filesystem::path(WLD_ASSETPATH);
+				std::string destinationLogicalDir;
 				if (i + 2 < arguments.size() && arguments[i + 2] == "--out" && i + 3 < arguments.size())
 					outputRoot = arguments[i + 3];
+				for (size_t extra = i + 2; extra + 1 < arguments.size(); ++extra)
+					if (arguments[extra] == "--logical")
+						destinationLogicalDir = arguments[extra + 1];
 
 				World::Asset::GltfImportResult imported;
 				std::string importError;
-				if (!World::Asset::ImportFile(source, outputRoot, &imported, &importError))
+				if (!World::Asset::ImportFile(source, outputRoot, &imported, &importError,
+					destinationLogicalDir))
 				{
 					std::fprintf(stderr, "[import-gltf] FAILED: %s\n", importError.c_str());
 					std::exit(1);
