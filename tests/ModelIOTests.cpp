@@ -1033,6 +1033,283 @@ namespace
 		CHECK(Contains(stubText, "MeshRenderer"));
 		CHECK(Contains(stubText, "MeshIndex"));
 	}
+
+	// ---------------------------------------------------------------------------------------------
+	// D5c-1:.wmodel v4 容器(skin / animations / 布局 2 的 joints+weights)。只追加,不改既有断言。
+	// ---------------------------------------------------------------------------------------------
+
+	size_t FindBytes(const std::vector<uint8_t>& bytes, const char* needle)
+	{
+		const size_t length = std::strlen(needle);
+		if (length == 0u || bytes.size() < length)
+			return std::string::npos;
+		for (size_t offset = 0; offset + length <= bytes.size(); ++offset)
+			if (std::memcmp(bytes.data() + offset, needle, length) == 0)
+				return offset;
+		return std::string::npos;
+	}
+
+	// 手工构造 v4 蒙皮模型:4 个布局 2 顶点 + 1 个 skin(2 关节)+ 1 个动画(2 通道 × 3 关键帧)。
+	Asset::WModelData MakeSkinnedModel()
+	{
+		Asset::WModelData data = MakeSmallModel();
+		data.VertexLayoutId = Asset::WModelIO::kVertexLayoutSkinned;
+		data.SkinVertices = {
+			{ { 0.0f, 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f, 0.0f } },
+			{ { 0.0f, 1.0f, 0.0f, 0.0f }, { 0.5f, 0.5f, 0.0f, 0.0f } },
+			{ { 1.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f, 0.0f } },
+			{ { 1.0f, 1.0f, 0.0f, 0.0f }, { 0.25f, 0.75f, 0.0f, 0.0f } },
+		};
+		CHECK(data.SkinVertices.size() == data.Vertices.size());
+		data.Meshes[0].SkinIndex = 0;
+
+		Asset::WModelSkin skin;
+		// 唯一字符串:拒绝用例靠它定位 jointCount 字段(容器里不存在同名节点/关节/材质)。
+		skin.Name = "SkinJointLimitProbe";
+		skin.JointNames = { "Hips", "Spine" };
+		skin.JointParents = { -1, 0 };
+		glm::mat4 spineBind(1.0f);
+		spineBind[3][1] = 1.0f;   // 关节 1 的绑定姿态:父关节上方 1 单位
+		skin.InverseBindMatrices = { glm::mat4(1.0f), spineBind };
+		skin.BindTranslations = { glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f) };
+		skin.BindRotations = { glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+			glm::quat(0.70710678f, 0.0f, 0.70710678f, 0.0f) };
+		skin.BindScales = { glm::vec3(1.0f), glm::vec3(2.0f, 2.0f, 2.0f) };
+		data.Skins = { skin };
+
+		Asset::WModelAnimationChannel translation;
+		translation.TargetNode = 1;
+		translation.Path = Asset::WModelIO::WModelAnimationPath::Translation;
+		translation.Keys = {
+			{ 0.0f, { 0.0f, 0.0f, 0.0f, 0.0f } },
+			{ 1.0f, { 0.0f, 1.0f, 0.0f, 0.0f } },
+			{ 2.0f, { 0.0f, 2.0f, 0.0f, 0.0f } },
+		};
+		Asset::WModelAnimationChannel rotation;
+		rotation.TargetNode = 0;
+		rotation.Path = Asset::WModelIO::WModelAnimationPath::Rotation;
+		rotation.Keys = {
+			{ 0.0f, { 0.0f, 0.0f, 0.0f, 1.0f } },
+			{ 0.5f, { 0.0f, 0.38268343f, 0.0f, 0.92387953f } },
+			{ 1.0f, { 0.0f, 0.70710678f, 0.0f, 0.70710678f } },
+		};
+		Asset::WModelAnimation clip;
+		clip.Name = "Wave";
+		clip.Duration = 2.0f;
+		clip.Channels = { translation, rotation };
+		data.Animations = { clip };
+		return data;
+	}
+
+	// D5c-1:v4 蒙皮往返(布局 2 + skin + animation 逐字段相等)+ 确定性(两次序列化逐字节一致)。
+	void WModelV4SkinnedRoundTripIsComplete()
+	{
+		const Asset::WModelData source = MakeSkinnedModel();
+		CHECK(source.VertexLayoutId == Asset::WModelIO::kVertexLayoutSkinned);
+
+		const std::vector<uint8_t> first = Asset::WModelIO::Serialize(source);
+		const std::vector<uint8_t> second = Asset::WModelIO::Serialize(source);
+		CHECK(first == second);
+		CHECK(first.size() > 64u);
+		// header:magic(4) + version(u32,小端)。
+		CHECK(first[4] == static_cast<uint8_t>(Asset::WModelIO::kFormatVersion));
+		CHECK(first[5] == 0u && first[6] == 0u && first[7] == 0u);
+
+		Asset::WModelData loaded;
+		std::string error = "not cleared";
+		CHECK(Asset::WModelIO::Parse(first.data(), first.size(), loaded, &error));
+		CHECK(error.empty());
+		CHECK(loaded.VertexLayoutId == source.VertexLayoutId);
+		CHECK(loaded.Meta.Valid);
+		CHECK(loaded.Meta.SourceFingerprint == source.Meta.SourceFingerprint);
+		CHECK(loaded.Meta.SettingsHash == source.Meta.SettingsHash);
+		CHECK(loaded.Meta.SourcePath == source.Meta.SourcePath);
+		CHECK(loaded.Vertices.size() == source.Vertices.size());
+		CHECK(loaded.SkinVertices.size() == source.SkinVertices.size());
+		for (size_t index = 0; index < source.Vertices.size(); ++index)
+		{
+			CHECK(std::memcmp(&loaded.Vertices[index], &source.Vertices[index],
+				sizeof(Asset::WModelVertex)) == 0);
+			CHECK(std::memcmp(&loaded.SkinVertices[index], &source.SkinVertices[index],
+				sizeof(Asset::WModelSkinVertex)) == 0);
+		}
+		CHECK(loaded.Indices == source.Indices);
+		CHECK(loaded.Meshes.size() == source.Meshes.size());
+		for (size_t index = 0; index < source.Meshes.size(); ++index)
+			CHECK(loaded.Meshes[index].SkinIndex == source.Meshes[index].SkinIndex);
+		CHECK(loaded.MaterialSlots == source.MaterialSlots);
+
+		CHECK(loaded.Skins.size() == 1u);
+		const Asset::WModelSkin& skin = loaded.Skins[0];
+		const Asset::WModelSkin& sourceSkin = source.Skins[0];
+		CHECK(skin.Name == sourceSkin.Name);
+		CHECK(skin.JointNames == sourceSkin.JointNames);
+		CHECK(skin.JointParents == sourceSkin.JointParents);
+		CHECK(skin.InverseBindMatrices.size() == sourceSkin.InverseBindMatrices.size());
+		CHECK(skin.BindTranslations.size() == sourceSkin.BindTranslations.size());
+		CHECK(skin.BindRotations.size() == sourceSkin.BindRotations.size());
+		CHECK(skin.BindScales.size() == sourceSkin.BindScales.size());
+		for (size_t joint = 0; joint < sourceSkin.JointNames.size(); ++joint)
+		{
+			for (int column = 0; column < 4; ++column)
+				for (int row = 0; row < 4; ++row)
+					CHECK(Nearly(skin.InverseBindMatrices[joint][column][row],
+						sourceSkin.InverseBindMatrices[joint][column][row]));
+			CHECK(NearlyVec3(skin.BindTranslations[joint], sourceSkin.BindTranslations[joint]));
+			CHECK(Nearly(skin.BindRotations[joint].x, sourceSkin.BindRotations[joint].x));
+			CHECK(Nearly(skin.BindRotations[joint].y, sourceSkin.BindRotations[joint].y));
+			CHECK(Nearly(skin.BindRotations[joint].z, sourceSkin.BindRotations[joint].z));
+			CHECK(Nearly(skin.BindRotations[joint].w, sourceSkin.BindRotations[joint].w));
+			CHECK(NearlyVec3(skin.BindScales[joint], sourceSkin.BindScales[joint]));
+		}
+
+		CHECK(loaded.Animations.size() == 1u);
+		const Asset::WModelAnimation& clip = loaded.Animations[0];
+		const Asset::WModelAnimation& sourceClip = source.Animations[0];
+		CHECK(clip.Name == sourceClip.Name);
+		CHECK(Nearly(clip.Duration, sourceClip.Duration));
+		CHECK(clip.Channels.size() == sourceClip.Channels.size());
+		for (size_t channelIndex = 0; channelIndex < sourceClip.Channels.size(); ++channelIndex)
+		{
+			const Asset::WModelAnimationChannel& channel = clip.Channels[channelIndex];
+			const Asset::WModelAnimationChannel& sourceChannel = sourceClip.Channels[channelIndex];
+			CHECK(channel.TargetNode == sourceChannel.TargetNode);
+			CHECK(channel.Path == sourceChannel.Path);
+			CHECK(channel.Keys.size() == sourceChannel.Keys.size());
+			for (size_t keyIndex = 0; keyIndex < sourceChannel.Keys.size(); ++keyIndex)
+			{
+				CHECK(Nearly(channel.Keys[keyIndex].Time, sourceChannel.Keys[keyIndex].Time));
+				for (int component = 0; component < 4; ++component)
+					CHECK(Nearly(channel.Keys[keyIndex].Value[component],
+						sourceChannel.Keys[keyIndex].Value[component]));
+			}
+		}
+		// 读回再写出必须与首次写出逐字节一致(确定性覆盖整条往返)。
+		CHECK(Asset::WModelIO::Serialize(loaded) == first);
+	}
+
+	// D5c-1:GetVertexStride 契约(1 → 32、2 → 64、0/3 → 0)+ MeshRange.SkinIndex 的 -1 / 0 往返。
+	void WModelV4VertexLayoutsAndSkinIndex()
+	{
+		CHECK(Asset::WModelIO::GetVertexStride(1u) == 32u);
+		CHECK(Asset::WModelIO::GetVertexStride(2u) == 64u);
+		CHECK(Asset::WModelIO::GetVertexStride(0u) == 0u);
+		CHECK(Asset::WModelIO::GetVertexStride(3u) == 0u);
+
+		// 静态模型(默认布局 1):SkinIndex = -1、无蒙皮记录、无 skin/动画区块。
+		const Asset::WModelData plain = MakeSmallModel();
+		CHECK(plain.VertexLayoutId == Asset::WModelIO::kVertexLayoutStandard);
+		CHECK(plain.SkinVertices.empty());
+		const std::vector<uint8_t> plainBytes = Asset::WModelIO::Serialize(plain);
+		Asset::WModelData plainLoaded;
+		std::string error;
+		CHECK(Asset::WModelIO::Parse(plainBytes.data(), plainBytes.size(), plainLoaded, &error));
+		CHECK(error.empty());
+		CHECK(plainLoaded.Meshes.size() == 1u);
+		CHECK(plainLoaded.Meshes[0].SkinIndex == -1);
+		CHECK(plainLoaded.SkinVertices.empty());
+		CHECK(plainLoaded.Skins.empty());
+		CHECK(plainLoaded.Animations.empty());
+
+		// 同一份几何切到布局 2:文件正好多出 vertexCount × 32B(joints + weights = 64B stride)。
+		Asset::WModelData skinned = MakeSmallModel();
+		skinned.VertexLayoutId = Asset::WModelIO::kVertexLayoutSkinned;
+		skinned.SkinVertices.assign(skinned.Vertices.size(), Asset::WModelSkinVertex {});
+		const std::vector<uint8_t> skinnedBytes = Asset::WModelIO::Serialize(skinned);
+		CHECK(skinnedBytes.size() == plainBytes.size() + skinned.Vertices.size() * 32u);
+
+		// SkinIndex = 0 往返(蒙皮模型)。
+		const Asset::WModelData source = MakeSkinnedModel();
+		const std::vector<uint8_t> bytes = Asset::WModelIO::Serialize(source);
+		Asset::WModelData loaded;
+		CHECK(Asset::WModelIO::Parse(bytes.data(), bytes.size(), loaded, &error));
+		CHECK(error.empty());
+		CHECK(loaded.Meshes.size() == 1u);
+		CHECK(loaded.Meshes[0].SkinIndex == 0);
+		CHECK(loaded.Skins.size() == 1u);
+	}
+
+	// D5c-1:拒绝 v3 字节、截断的 skin 块、jointCount > 128 与未知顶点布局 —— 全部可读错误。
+	void WModelV4RejectsLegacyAndCorruptSkinData()
+	{
+		const Asset::WModelData source = MakeSkinnedModel();
+		const std::vector<uint8_t> bytes = Asset::WModelIO::Serialize(source);
+		CHECK(bytes.size() > 64u);
+
+		const auto parseFailure = [](const std::vector<uint8_t>& content)
+		{
+			Asset::WModelData loaded;
+			std::string error;
+			const bool ok = Asset::WModelIO::Parse(content.data(), content.size(), loaded, &error);
+			CHECK(!ok);
+			CHECK(!error.empty());
+			return error;
+		};
+
+		{
+			// version=3 的字节 → false + 提示"请重新导入"(v1–v3 一律拒绝)。
+			std::vector<uint8_t> version3 = bytes;
+			version3[4] = 3;
+			version3[5] = 0;
+			version3[6] = 0;
+			version3[7] = 0;
+			const std::string error = parseFailure(version3);
+			CHECK(Contains(error, "version 3"));
+			CHECK(Contains(error, "重新导入"));
+		}
+		{
+			// 未知顶点布局 id(header 偏移 12)→ 可读错误,不按错误 stride 解析。
+			std::vector<uint8_t> badLayout = bytes;
+			badLayout[12] = 3;
+			badLayout[13] = 0;
+			badLayout[14] = 0;
+			badLayout[15] = 0;
+			const std::string error = parseFailure(badLayout);
+			CHECK(Contains(error, "vertex layout id 3"));
+		}
+		{
+			// 截断在 skin 区块内部(计数保护之后、关节数据中间)→ false + "truncated",不"尽力解析"。
+			const size_t nameOffset = FindBytes(bytes, "SkinJointLimitProbe");
+			CHECK(nameOffset != std::string::npos);
+			CHECK(nameOffset >= 4u);
+			const size_t skinBlockStart = nameOffset - 4u;   // nameLength 前缀的位置
+			std::vector<uint8_t> truncated(bytes.data(), bytes.data() + skinBlockStart + 40u);
+			const std::string error = parseFailure(truncated);
+			CHECK(Contains(error, "truncated"));
+			CHECK(Contains(error, "skin"));
+		}
+		{
+			// jointCount = 129(name 之后紧跟的 u32)→ false + 可读错误,指出 128 上限。
+			const size_t nameOffset = FindBytes(bytes, "SkinJointLimitProbe");
+			CHECK(nameOffset != std::string::npos);
+			const size_t jointCountOffset = nameOffset + std::strlen("SkinJointLimitProbe");
+			CHECK(jointCountOffset + 4u <= bytes.size());
+			std::vector<uint8_t> tooManyJoints = bytes;
+			tooManyJoints[jointCountOffset] = 129;
+			tooManyJoints[jointCountOffset + 1u] = 0;
+			tooManyJoints[jointCountOffset + 2u] = 0;
+			tooManyJoints[jointCountOffset + 3u] = 0;
+			const std::string error = parseFailure(tooManyJoints);
+			CHECK(Contains(error, "jointCount"));
+			CHECK(Contains(error, "128"));
+		}
+		{
+			// 布局 2 缺每顶点 joints/weights → WriteFile 拒绝(不写静默错数据),Parse 仍是门禁之外的第二道。
+			Asset::WModelData missingSkinVertices = MakeSkinnedModel();
+			missingSkinVertices.SkinVertices.clear();
+			std::string error;
+			CHECK(!Asset::WModelIO::WriteFile((TestRoot() / "missing-skin-vertices.wmodel").string(),
+				missingSkinVertices, &error));
+			CHECK(Contains(error, "joints/weights"));
+
+			// 布局 1 却带蒙皮记录 → 同样拒绝。
+			Asset::WModelData straySkinVertices = MakeSmallModel();
+			straySkinVertices.SkinVertices.assign(1u, Asset::WModelSkinVertex {});
+			CHECK(!Asset::WModelIO::WriteFile((TestRoot() / "stray-skin-vertices.wmodel").string(),
+				straySkinVertices, &error));
+			CHECK(Contains(error, "does not carry joints/weights"));
+		}
+	}
 }
 
 int main(int argc, char** argv)
@@ -1102,6 +1379,9 @@ int main(int argc, char** argv)
 			{ "D10 destination folder layout + content-hash material/texture reuse", DestinationLayoutAndReuse },
 			{ "unsupported glTF features fail hard (skin / animation)", UnsupportedFeaturesHardFail },
 			{ "MeshIndex schema round trip + committed Lua stub", MeshIndexSchemaRoundTrip },
+			{ "D5c .wmodel v4 skin/animation round trip is complete and deterministic", WModelV4SkinnedRoundTripIsComplete },
+			{ "D5c .wmodel v4 vertex strides (32/64/0) + MeshRange.SkinIndex round trip", WModelV4VertexLayoutsAndSkinIndex },
+			{ "D5c .wmodel v4 rejects v3 bytes / truncated skins / jointCount 129", WModelV4RejectsLegacyAndCorruptSkinData },
 		};
 		int failures = 0;
 		for (const auto& [name, test] : tests)
