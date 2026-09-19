@@ -20,6 +20,7 @@
 #include <array>
 #include <chrono>
 #include <cfloat>
+#include <cmath>
 #include <map>
 #include <tuple>
 
@@ -221,7 +222,9 @@ namespace World
 
 		m_FramebufferView = CreateRef<RhiFramebufferAdapter>();
 		static_cast<RhiFramebufferAdapter*>(m_FramebufferView.get())->Owner = this;
-		RecreateTargets(m_Width, m_Height);
+		// P4-3:目标尺寸 = 请求尺寸 × rendering.render_scale。默认 1.0 时第一次换算
+		// 得到的就是原来的 1280×720(同尺寸、同一条创建路径)。
+		ApplyRenderScale();
 	}
 
 	void SceneRenderer::Shutdown()
@@ -249,6 +252,36 @@ namespace World
 		m_LastGpuMilliseconds = 0.0;
 		m_FramebufferView = nullptr;
 		m_Device = nullptr;
+	}
+
+	namespace
+	{
+		// P4-3:请求尺寸 → 渲染目标尺寸(宽高都乘倍率,四舍五入,最少 1 像素)。
+		// 取整口径固定为 std::lround(0.5 远离零),再 clamp 到 ≥1 —— 倍率 0.25 时
+		// 再小的请求尺寸也不会变成 0(0 尺寸纹理/帧缓冲非法)。
+		uint32_t ScaleRenderExtent(uint32_t extent, float scale)
+		{
+			const long scaled = std::lround(static_cast<double>(extent) * static_cast<double>(scale));
+			return static_cast<uint32_t>(std::max(1L, scaled));
+		}
+	}
+
+	void SceneRenderer::ApplyRenderScale()
+	{
+		// 设备未就绪(Init 之前 / Shutdown 之后)不碰目标;Init 末尾会自己调一次。
+		if (!m_Device)
+			return;
+		// 夹取:清单加载期已拒绝越界值(ProjectManifest::ValidateManifest);这里再夹一次,
+		// 避免"直接 RenderSettings::Set 出 0/负数"把目标算成 0 尺寸。
+		const float scale = std::clamp(RenderSettings::RenderScale(),
+			Asset::RenderingSettings::MinRenderScale, Asset::RenderingSettings::MaxRenderScale);
+		const uint32_t width = ScaleRenderExtent(m_RequestedWidth, scale);
+		const uint32_t height = ScaleRenderExtent(m_RequestedHeight, scale);
+		// 无变化(默认倍率 1.0 的常见路径):不创建也不释放任何资源,与旧代码同一条路径。
+		if (m_Framebuffer && m_AppliedRenderScale == scale && width == m_Width && height == m_Height)
+			return;
+		m_AppliedRenderScale = scale;
+		RecreateTargets(width, height);
 	}
 
 	void SceneRenderer::RecreateTargets(uint32_t width, uint32_t height)
@@ -303,6 +336,10 @@ namespace World
 
 	void SceneRenderer::BeginScene(Scene* scene, const SceneRendererOptions& options)
 	{
+		// P4-3:帧起点重查 rendering.render_scale —— 编辑器面板改倍率后不重启、不缩放
+		// 视口也能生效(BeginScene 在任何目标使用之前、上一帧提交之后运行)。倍率与尺寸
+		// 都没变时 ApplyRenderScale 直接返回,不产生任何资源操作。
+		ApplyRenderScale();
 		m_ActiveScene = scene;
 		m_Options = options;
 	}
@@ -1159,7 +1196,12 @@ namespace World
 
 	void SceneRenderer::OnResize(uint32_t width, uint32_t height)
 	{
-		RecreateTargets(width, height);
+		// P4-3:宿主传进来的是**请求/显示尺寸**(编辑器视口/运行时窗口)。渲染目标按
+		// rendering.render_scale 换算;窗口尺寸、WUI/UI 与视口在屏幕上的占位都不受影响
+		// —— 视口照旧把这张纹理拉伸显示(与显示任意尺寸目标同一条路径)。
+		m_RequestedWidth = std::max(1u, width);
+		m_RequestedHeight = std::max(1u, height);
+		ApplyRenderScale();
 	}
 
 	void SceneRenderer::CaptureFrame(const std::filesystem::path& path) const

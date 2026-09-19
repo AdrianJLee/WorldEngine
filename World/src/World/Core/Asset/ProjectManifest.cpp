@@ -100,6 +100,16 @@ namespace World::Asset
 					+ std::to_string(rendering.Anisotropy);
 				return false;
 			}
+			// P4-3:渲染分辨率倍率(0.25..2.0;含 NaN/inf 拒绝)。非法值必须在加载期
+			// 拒绝:0 或负数会被换算成 0 尺寸的纹理/帧缓冲,到 GPU 资源创建才炸。
+			if (!std::isfinite(rendering.RenderScale) ||
+				rendering.RenderScale < RenderingSettings::MinRenderScale ||
+				rendering.RenderScale > RenderingSettings::MaxRenderScale)
+			{
+				if (error) *error = "rendering.render_scale must be in [0.25, 2.0]: "
+					+ std::to_string(rendering.RenderScale);
+				return false;
+			}
 			// P4-1:物理设置范围校验。
 			if (manifest.Physics.FixedStepHz < 1 || manifest.Physics.FixedStepHz > 240)
 			{
@@ -168,6 +178,9 @@ namespace World::Asset
 				manifest.Rendering.GpuTiming = readBool("gpu_timing", manifest.Rendering.GpuTiming);
 				manifest.Rendering.Instancing = readBool("instancing", manifest.Rendering.Instancing);
 				manifest.Rendering.Anisotropy = readU32("anisotropy", manifest.Rendering.Anisotropy);
+				if (rendering["render_scale"])
+					manifest.Rendering.RenderScale =
+						rendering["render_scale"].as<float>(manifest.Rendering.RenderScale);
 			}
 			if (const YAML::Node physics = root["physics"])
 			{
@@ -216,6 +229,7 @@ namespace World::Asset
 			out << YAML::Key << "gpu_timing" << YAML::Value << copy.Rendering.GpuTiming;
 			out << YAML::Key << "instancing" << YAML::Value << copy.Rendering.Instancing;
 			out << YAML::Key << "anisotropy" << YAML::Value << copy.Rendering.Anisotropy;
+			out << YAML::Key << "render_scale" << YAML::Value << copy.Rendering.RenderScale;
 			out << YAML::EndMap;
 			out << YAML::Key << "physics" << YAML::Value << YAML::BeginMap;
 			out << YAML::Key << "fixed_step_hz" << YAML::Value << copy.Physics.FixedStepHz;

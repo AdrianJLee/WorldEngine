@@ -107,6 +107,19 @@ namespace World
 			y += 26.0f;
 		}
 
+		// P4-3:渲染分辨率倍率(0.25..2.0;只缩放场景渲染目标,不动窗口/UI)。
+		{
+			float value = m_Edit.RenderScale;
+			if (Wui::DragFloat(ctx, Wui::HashId("settings3d.render_scale"), { x + 170.0f, y, 110.0f, 20.0f },
+				value, 0.05f, 0.25f, 2.0f, theme))
+			{
+				m_Edit.RenderScale = value;
+				changed = true;
+			}
+			Wui::Label(ctx, { x, y + 3.0f }, "渲染分辨率倍率", theme.Text, 13.0f);
+			y += 26.0f;
+		}
+
 		// P4-1:物理(固定步长 1..240Hz;重力 = Y 轴加速度)。
 		Wui::Label(ctx, { x, y }, "Physics (project.we.yaml → physics:)", theme.TextMuted, 12.0f);
 		y += 20.0f;

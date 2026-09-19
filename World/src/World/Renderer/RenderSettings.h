@@ -32,5 +32,8 @@ namespace World
 		// 便捷读法(带环境变量覆盖的结果,等价于 Get().Culling)。
 		static bool CullingEnabled();
 		static bool ShadowsEnabled();
+		// P4-3:场景渲染目标倍率(只缩放 SceneRenderer 的离屏目标;窗口/UI 不变)。
+		// 清单加载期已校验范围,便捷读法返回原值,夹取由消费方(SceneRenderer)负责。
+		static float RenderScale();
 	};
 }

@@ -85,4 +85,9 @@ namespace World
 	{
 		return Store().Shadows;
 	}
+
+	float RenderSettings::RenderScale()
+	{
+		return Store().RenderScale;
+	}
 }

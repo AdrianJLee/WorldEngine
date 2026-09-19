@@ -88,6 +88,7 @@ namespace
 			"  gpu_timing: true\n"
 			"  instancing: false\n"
 			"  anisotropy: 8\n"
+			"  render_scale: 0.5\n"
 			"physics:\n"
 			"  fixed_step_hz: 120\n"
 			"  gravity: -2.5\n"));
@@ -104,6 +105,7 @@ namespace
 		CHECK(!manifest.Rendering.Instancing);
 		// P4-1:各向异性 + 物理设置解析。
 		CHECK(manifest.Rendering.Anisotropy == 8u);
+		CHECK(manifest.Rendering.RenderScale > 0.49f && manifest.Rendering.RenderScale < 0.51f);
 		CHECK(manifest.Physics.FixedStepHz == 120u);
 		CHECK(manifest.Physics.Gravity < -2.4f && manifest.Physics.Gravity > -2.6f);
 
@@ -125,6 +127,7 @@ namespace
 		CHECK(!reloaded.Rendering.Instancing);
 		// P4-1:往返后各向异性与物理设置不丢。
 		CHECK(reloaded.Rendering.Anisotropy == 8u);
+		CHECK(reloaded.Rendering.RenderScale > 0.49f && reloaded.Rendering.RenderScale < 0.51f);
 		CHECK(reloaded.Physics.FixedStepHz == 120u);
 		CHECK(reloaded.Physics.Gravity < -2.4f && reloaded.Physics.Gravity > -2.6f);
 		fs::remove_all(root);
@@ -161,6 +164,12 @@ namespace
 		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
 		CHECK(error.find("fixed_step_hz") != std::string::npos);
 		WriteText(manifestPath, BaseManifest("physics:\n  fixed_step_hz: 241\n"));
+		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+		// P4-3:渲染倍率越界(0.1 / 2.5)必须被拒。
+		WriteText(manifestPath, BaseManifest("rendering:\n  render_scale: 0.1\n"));
+		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+		CHECK(error.find("render_scale") != std::string::npos);
+		WriteText(manifestPath, BaseManifest("rendering:\n  render_scale: 2.5\n"));
 		CHECK(!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
 
 		// 单字段不超限,但"方向光 + 点光"合计超过 UBO 容量(8)。

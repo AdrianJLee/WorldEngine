@@ -17,6 +17,7 @@ namespace World::Asset
 	// 约束(ValidateManifest 会拒绝越界值):
 	//  - ShadowMapSize:2 的幂,256..4096;
 	//  - MaxDirectionalLights:1..2;MaxPointLights:0..7;两者之和 ≤ 8(UBO 容量)。
+	//  - RenderScale(P4-3):0.25..2.0。
 	struct RenderingSettings
 	{
 		bool Culling = true;              // 视锥剔除(主通道按相机、阴影通道按光源)
@@ -28,6 +29,15 @@ namespace World::Asset
 		bool Instancing = true;           // D8b:同网格+材质的实例合批
 		// P4-1:纹理各向异性上限(1..16;设备不支持时引擎退化为 1 并 warn)。
 		uint32_t Anisotropy = 1;
+		// P4-3:渲染分辨率倍率。只缩放**场景渲染目标**(SceneRenderer 的离屏颜色/
+		// 实体 id/深度附件):窗口尺寸、WUI/UI 与编辑器视口在屏幕上的占位都不变,
+		// 视口把缩放后的纹理拉伸显示(与显示任意尺寸目标同一条路径)。默认 1.0 =
+		// 与旧行为逐字节一致(同一尺寸、同一条路径)。
+		float RenderScale = 1.0f;
+		// P4-3:render_scale 的合法范围。清单校验、编辑器面板控件与渲染器共用同一口径,
+		// 避免三处各写一份数字后漂移。
+		static constexpr float MinRenderScale = 0.25f;
+		static constexpr float MaxRenderScale = 2.0f;
 	};
 
 	// P4-1:物理设置(project.we.yaml 的 `physics:` 区块)。

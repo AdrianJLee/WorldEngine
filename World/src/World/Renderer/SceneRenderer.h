@@ -41,6 +41,11 @@ namespace World
 		Ref<Framebuffer> GetTargetFramebuffer() const { return m_FramebufferView; }
 		Rhi::Handle<Rhi::Texture> GetColorTexture() const { return m_ColorTexture; }
 		Rhi::Handle<Rhi::Framebuffer> GetRhiTarget() const { return m_Framebuffer; }
+		// P4-3:GetWidth/GetHeight 返回**渲染目标**尺寸(请求尺寸 × rendering.render_scale),
+		// 拾取/读回/抓图都按它换算;需要"宿主请求的显示尺寸"的调用方(例如按窗口尺寸做
+		// 节流判断的 Runtime)用下面两个请求尺寸读法,否则倍率非 1 时会误判尺寸一直变化。
+		uint32_t GetRequestedWidth() const { return m_RequestedWidth; }
+		uint32_t GetRequestedHeight() const { return m_RequestedHeight; }
 		uint32_t GetWidth() const { return m_Width; }
 		uint32_t GetHeight() const { return m_Height; }
 		// D7-1c:后端无关地读回 entity-id 附件的一个像素(视口点选用)。
@@ -54,6 +59,9 @@ namespace World
 
 	private:
 		void RecreateTargets(uint32_t width, uint32_t height);
+		// P4-3:把"请求尺寸"按当前 render_scale 换算成渲染目标尺寸,尺寸/倍率变化时才重建;
+		// 默认倍率 1.0 且尺寸未变时直接返回,不产生任何资源操作(基线逐字节不变)。
+		void ApplyRenderScale();
 		void RecordSubmit(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity);
 		void RenderGeometry(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderDebug(const Camera& camera, const glm::mat4& cameraTransform);
@@ -91,8 +99,14 @@ namespace World
 		bool m_TimestampPending[kFramesInFlight] = {};
 		double m_LastGpuMilliseconds = 0.0;
 
+		// m_Width/m_Height = 渲染目标尺寸(实际创建的附件/视口尺寸)。
 		uint32_t m_Width = 1280;
 		uint32_t m_Height = 720;
+		// P4-3:宿主请求的显示尺寸(OnResize 记录;编辑器视口/运行时窗口)与已套用的倍率
+		// (哨兵初值 0 不在合法范围;Init 第一次是否创建由"目标还不存在"本身决定)。
+		uint32_t m_RequestedWidth = 1280;
+		uint32_t m_RequestedHeight = 720;
+		float m_AppliedRenderScale = 0.0f;
 		// D5c-4a:骨骼动画步长(SetDeltaSeconds;默认 0 = 不推进)。
 		float m_DeltaSeconds = 0.0f;
 		Scene* m_ActiveScene = nullptr;

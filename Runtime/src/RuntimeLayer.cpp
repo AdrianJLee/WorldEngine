@@ -114,7 +114,10 @@ namespace World
 		{
 			const uint32_t width = Application::Get().GetWindow().GetWidth();
 			const uint32_t height = Application::Get().GetWindow().GetHeight();
-			if (width > 0 && height > 0 && (m_SceneRenderer->GetWidth() != width || m_SceneRenderer->GetHeight() != height))
+			// P4-3:比较**请求尺寸**,不是渲染目标尺寸 —— 目标尺寸会被 rendering.render_scale
+			// 缩放,用 GetWidth/GetHeight 会在倍率非 1 时永远判成"窗口一直在变",每帧重进节流路径。
+			if (width > 0 && height > 0
+				&& (m_SceneRenderer->GetRequestedWidth() != width || m_SceneRenderer->GetRequestedHeight() != height))
 			{
 				if (m_PendingWidth != width || m_PendingHeight != height)
 				{
