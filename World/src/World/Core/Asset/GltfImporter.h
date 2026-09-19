@@ -75,8 +75,12 @@ namespace World::Asset
 	//  - 贴图**原样字节**写出(不重编码);external uri 相对 glTF 文件所在目录解析;
 	//  - 静态网格:节点树/TRS、多 mesh/多 primitive → meshes/submeshes + 材质槽;
 	//    pbrMetallicRoughness(baseColor/metallic/roughness/emissive)、alphaMode、doubleSided;
-	//  - 不支持特性(skin/动画/morph/sparse/Draco/KTX2/非三角图元/必须的不支持扩展)
-	//    **硬报错**;唯一降级:顶点没有 NORMAL 时按面法线补齐并记一条 warning;
+	//  - D5c:glTF skins → .wmodel Skins[](关节名/父级/反绑定矩阵/绑定 TRS),节点 mesh+skin
+	//    → MeshRange.SkinIndex,顶点 JOINTS_0/WEIGHTS_0 → 布局 2 的 SkinVertices;
+	//    glTF animations → Animations[](按 settings.AnimationSampleRate 烘等间隔关键帧);
+	//  - 不支持特性(morph/sparse/Draco/KTX2/非三角图元/必须的不支持扩展)**硬报错**;
+	//    降级:顶点没有 NORMAL 时按面法线补齐、STEP/CUBICSPLINE 按采样率烘线性关键帧,
+	//    各记一条 warning;
 	//  - 失败返回 false + error 可读原因;校验阶段失败时**不写出**任何输出文件
 	//    (贴图/材质/模型全部先在内存准备,最后才落盘;落盘中途 IO 失败可能留下已写出的前几个文件)。
 	class WLD_API GltfImporter

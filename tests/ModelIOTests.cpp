@@ -9,7 +9,8 @@
 //   5. D5b:.wimport 设置 Load/Save/Hash;ImportAsBytes 内核 = ImportFile 的字节来源;
 //      cook 从源-only 项目产出多产物(.wmodel/.wmat)、增量 0 changed、设置变化重烘、
 //      scale/upAxis 烘焙、exportMaterials/exportTextures 开关、坏源 cook 非零失败;
-//   6. 不支持特性(skin/动画)硬报错;
+//   6. 不支持特性硬报错(morph/sparse/Draco/KTX2/必须的不支持扩展),源文件缺失可读失败;
+//   6b. D5c-2:glTF skins/animations 导入(夹具、importSkins 开关、动画采样率与 settingsHash);
 //   7. MeshRendererComponent.MeshIndex 的 schema 往返(SceneSerializer)+ 存根出现该字段。
 #include "wldpch.h"
 
@@ -448,6 +449,8 @@ namespace
 			CHECK(settings.ExportMaterials);
 			CHECK(settings.ExportTextures);
 			CHECK(settings.ImportAnimations);
+			CHECK(settings.ImportSkins);
+			CHECK(Nearly(settings.AnimationSampleRate, 30.0f));
 			CHECK(settings.GenerateNormals);
 		}
 		{
@@ -488,6 +491,8 @@ namespace
 			CHECK(!loaded.ExportTextures);
 			CHECK(loaded.GenerateNormals);
 			CHECK(loaded.ImportAnimations);   // 默认 true,未被 Save 改动
+			CHECK(loaded.ImportSkins);        // D5c-2 默认 true
+			CHECK(Nearly(loaded.AnimationSampleRate, 30.0f));   // D5c-2 默认 30Hz
 			CHECK(Asset::ModelImportSettings::Hash(loaded) == Asset::ModelImportSettings::Hash(settings));
 
 			Asset::ModelImportSettings changed = settings;
@@ -495,6 +500,13 @@ namespace
 			CHECK(Asset::ModelImportSettings::Hash(changed) != Asset::ModelImportSettings::Hash(settings));
 			changed = settings;
 			changed.ImportAnimations = false;
+			CHECK(Asset::ModelImportSettings::Hash(changed) != Asset::ModelImportSettings::Hash(settings));
+			// D5c-2:importSkins 与 animationSampleRate 都参与 settingsHash。
+			changed = settings;
+			changed.ImportSkins = false;
+			CHECK(Asset::ModelImportSettings::Hash(changed) != Asset::ModelImportSettings::Hash(settings));
+			changed = settings;
+			changed.AnimationSampleRate = 10.0f;
 			CHECK(Asset::ModelImportSettings::Hash(changed) != Asset::ModelImportSettings::Hash(settings));
 			changed = settings;
 			changed.UpAxis = 0;
@@ -929,43 +941,30 @@ namespace
 		fs::remove_all(root);
 	}
 
-	// 11.不支持特性硬报错(不生成半成品)。
-	void UnsupportedFeaturesHardFail()
+	// 11.仍不支持的**必须**扩展硬报错(不生成半成品);源文件缺失 → 可读失败。
+	void UnsupportedRequiredExtensionHardFails()
 	{
 		const fs::path root = TestRoot() / "unsupported";
 		fs::remove_all(root);
 		fs::create_directories(root);
-		const fs::path skinPath = root / "skinned.gltf";
-		const std::string skinJson =
-			"{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
-			"\"scenes\":[{\"nodes\":[0]}],"
-			"\"nodes\":[{\"name\":\"Joint\"}],"
-			"\"skins\":[{\"joints\":[0]}],"
+		const fs::path extensionPath = root / "draco.gltf";
+		const std::string extensionJson =
+			"{\"asset\":{\"version\":\"2.0\"},"
+			"\"extensionsRequired\":[\"KHR_draco_mesh_compression\"],"
+			"\"scene\":0,\"scenes\":[{\"nodes\":[0]}],"
+			"\"nodes\":[{\"name\":\"Root\",\"mesh\":0}],"
 			"\"meshes\":[{\"name\":\"M\",\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
 			"\"accessors\":[{\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"}],"
-			"\"buffers\":[{\"byteLength\":36,\"uri\":\"missing.bin\"}]}";
+			"\"buffers\":[{\"byteLength\":36}]}";
 		{
-			std::ofstream file(skinPath, std::ios::binary | std::ios::trunc);
-			file << skinJson;
+			std::ofstream file(extensionPath, std::ios::binary | std::ios::trunc);
+			file << extensionJson;
 		}
 		Asset::GltfImportResult result;
 		std::string error;
-		CHECK(!Asset::GltfImporter::ImportFile(skinPath.string(), root.string(), &result, &error));
-		CHECK(Contains(error, "skin"));
-
-		const fs::path animationPath = root / "animated.gltf";
-		const std::string animationJson =
-			"{\"asset\":{\"version\":\"2.0\"},\"scene\":0,"
-			"\"scenes\":[{\"nodes\":[0]}],"
-			"\"nodes\":[{\"name\":\"Root\"}],"
-			"\"animations\":[{\"name\":\"Clip\",\"channels\":[],\"samplers\":[]}],"
-			"\"meshes\":[],\"buffers\":[]}";
-		{
-			std::ofstream file(animationPath, std::ios::binary | std::ios::trunc);
-			file << animationJson;
-		}
-		CHECK(!Asset::GltfImporter::ImportFile(animationPath.string(), root.string(), &result, &error));
-		CHECK(Contains(error, "animation"));
+		CHECK(!Asset::GltfImporter::ImportFile(extensionPath.string(), root.string(), &result, &error));
+		CHECK(Contains(error, "unsupported required extension"));
+		CHECK(Contains(error, "KHR_draco_mesh_compression"));
 
 		// 源文件不存在 → 可读失败(不抛异常)。
 		CHECK(!Asset::GltfImporter::ImportFile((root / "missing.gltf").string(), root.string(), &result, &error));
@@ -1310,6 +1309,201 @@ namespace
 			CHECK(Contains(error, "does not carry joints/weights"));
 		}
 	}
+
+	// ---------------------------------------------------------------------------------------------
+	// D5c-2:glTF skins/animations 导入(夹具、importSkins 开关、动画采样率)。
+	// ---------------------------------------------------------------------------------------------
+
+	// 夹具导入辅助:设置由调用方显式传入(ImportFile 从 .wimport 读设置,所以这里不用 ImportFile)。
+	bool ImportSkinFixture(const fs::path& root, const Asset::ModelImportSettings& settings,
+		Asset::GltfImportBytesResult& bytes, Asset::WModelData& model, std::string& error)
+	{
+		const fs::path fixture = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5SkinFixture.gltf";
+		if (!fs::exists(fixture))
+		{
+			error = "fixture not found: " + fixture.string();
+			return false;
+		}
+		Asset::GltfImportMetadata metadata;
+		metadata.ImporterVersion = 1;
+		metadata.SettingsHash = Asset::ModelImportSettings::Hash(settings);
+		metadata.UpAxis = settings.UpAxis;
+		metadata.Scale = settings.Scale;
+		metadata.DestinationLogicalDir = "models/tests";
+		metadata.SourceLogicalPath = "models/tests/D5SkinFixture.gltf";
+		if (!Asset::GltfImporter::ImportAsBytes(fixture.string(), settings, metadata, &bytes, &error))
+			return false;
+		CHECK(bytes.Outputs.size() == 1u);   // 夹具没有材质/贴图,只有 .wmodel
+		CHECK(bytes.Outputs.back().LogicalPath == "models/tests/D5SkinFixture.wmodel");
+		(void)root;
+		return Asset::WModelIO::Parse(bytes.Outputs.back().Data.data(),
+			bytes.Outputs.back().Data.size(), model, &error);
+	}
+
+	// D5c-2:蒙皮 + 动画夹具能成功导入;skin/顶点/动画字段逐项断言(默认设置)。
+	void GltfSkinFixtureImports()
+	{
+		const fs::path root = TestRoot() / "skin-fixture";
+		fs::remove_all(root);
+		fs::create_directories(root);
+
+		Asset::GltfImportBytesResult bytes;
+		Asset::WModelData model;
+		std::string error;
+		const auto settings = Asset::ModelImportSettings::Default();
+		CHECK(ImportSkinFixture(root, settings, bytes, model, error));
+		CHECK(error.empty());
+		// 权重按作者数据原样写出(夹具的权重和正好是 1 → 不产生 warning)。
+		for (const std::string& warning : bytes.Summary.Warnings)
+			CHECK(!Contains(warning, "weights"));
+
+		// 顶点布局 2:顶点与蒙皮顶点一一对应。
+		CHECK(model.VertexLayoutId == Asset::WModelIO::kVertexLayoutSkinned);
+		CHECK(model.Vertices.size() == 3u);
+		CHECK(model.SkinVertices.size() == model.Vertices.size());
+		// JOINTS_0 是 u16(节点里的关节下标),WEIGHTS_0 是归一化 u8(191/255 = 0.749)。
+		CHECK(NearlyVec3(glm::vec3(model.SkinVertices[0].Joints.x, model.SkinVertices[0].Joints.y,
+			model.SkinVertices[0].Joints.z), glm::vec3(0.0f, 1.0f, 0.0f)));
+		CHECK(Nearly(model.SkinVertices[0].Joints.w, 0.0f));
+		CHECK(Nearly(model.SkinVertices[0].Weights.x, 191.0f / 255.0f, 1e-6f));
+		CHECK(Nearly(model.SkinVertices[0].Weights.y, 64.0f / 255.0f, 1e-6f));
+		CHECK(Nearly(model.SkinVertices[1].Joints.x, 1.0f));
+		CHECK(Nearly(model.SkinVertices[1].Joints.y, 0.0f));
+		CHECK(Nearly(model.SkinVertices[1].Weights.x, 64.0f / 255.0f, 1e-6f));
+		CHECK(Nearly(model.SkinVertices[1].Weights.y, 191.0f / 255.0f, 1e-6f));
+		CHECK(Nearly(model.SkinVertices[2].Joints.x, 0.0f));
+		CHECK(Nearly(model.SkinVertices[2].Weights.x, 1.0f, 1e-6f));
+
+		// 网格绑定:节点 0(mesh 0 + skin 0)→ MeshRange.SkinIndex = 0。
+		CHECK(model.Meshes.size() == 1u);
+		CHECK(model.Meshes[0].SkinIndex == 0);
+
+		// 骨架:关节名/父级(在 skin 关节集合内)/反绑定矩阵/绑定 TRS。
+		CHECK(model.Skins.size() == 1u);
+		const Asset::WModelSkin& skin = model.Skins[0];
+		CHECK(skin.Name == "TwoBoneSkin");
+		CHECK(skin.JointNames.size() == 2u);
+		CHECK(skin.JointNames[0] == "UpperArm");
+		CHECK(skin.JointNames[1] == "Forearm");
+		CHECK(skin.JointParents.size() == 2u);
+		CHECK(skin.JointParents[0] == -1);
+		CHECK(skin.JointParents[1] == 0);   // Forearm 是 UpperArm 的子节点
+		CHECK(skin.InverseBindMatrices.size() == 2u);
+		const glm::mat4 identity(1.0f);
+		for (int column = 0; column < 4; ++column)
+			for (int row = 0; row < 4; ++row)
+				CHECK(Nearly(skin.InverseBindMatrices[0][column][row],
+					identity[column][row]));
+		CHECK(Nearly(skin.InverseBindMatrices[1][3][1], 1.0f));
+		CHECK(skin.BindTranslations.size() == 2u);
+		CHECK(NearlyVec3(skin.BindTranslations[0], glm::vec3(0.0f, 1.0f, 0.0f)));
+		CHECK(NearlyVec3(skin.BindTranslations[1], glm::vec3(0.0f, 0.5f, 0.0f)));
+		CHECK(skin.BindRotations.size() == 2u);
+		CHECK(skin.BindScales.size() == 2u);
+		CHECK(NearlyVec3(skin.BindScales[0], glm::vec3(1.0f)));
+
+		// 动画:2 通道 × 31 帧(时长 1s、采样率 30Hz);targetNode = glTF 节点下标。
+		CHECK(model.Animations.size() == 1u);
+		const Asset::WModelAnimation& clip = model.Animations[0];
+		CHECK(clip.Name == "Move");
+		CHECK(Nearly(clip.Duration, 1.0f, 1e-5f));
+		CHECK(clip.Channels.size() == 2u);
+		const Asset::WModelAnimationChannel& translation = clip.Channels[0];
+		CHECK(translation.TargetNode == 1u);   // UpperArm 是节点 1
+		CHECK(translation.Path == Asset::WModelIO::WModelAnimationPath::Translation);
+		CHECK(translation.Keys.size() == 31u);
+		CHECK(Nearly(translation.Keys.front().Time, 0.0f));
+		CHECK(Nearly(translation.Keys.back().Time, 1.0f, 1e-5f));
+		// 夹具的 translation 关键帧是 (0,0,0) → (0,1,0)(沿 y,见夹具生成脚本/字节校验)。
+		CHECK(NearlyVec3(glm::vec3(translation.Keys.front().Value), glm::vec3(0.0f)));
+		CHECK(Nearly(translation.Keys.back().Value.y, 1.0f, 1e-5f));
+		// 线性采样:1/3 处正好是 1/3。
+		const float oneThird = 1.0f / 3.0f;
+		CHECK(Nearly(translation.Keys[10].Time, oneThird, 1e-5f));
+		CHECK(Nearly(translation.Keys[10].Value.y, oneThird, 1e-5f));
+		const Asset::WModelAnimationChannel& rotation = clip.Channels[1];
+		CHECK(rotation.TargetNode == 2u);   // Forearm 是节点 2
+		CHECK(rotation.Path == Asset::WModelIO::WModelAnimationPath::Rotation);
+		CHECK(rotation.Keys.size() == 31u);
+		CHECK(Nearly(rotation.Keys.front().Value.w, 1.0f, 1e-5f));
+		// 0→90° 的 slerp:第 15 帧(t=0.5)正好是 45°。
+		CHECK(Nearly(rotation.Keys[15].Time, 0.5f, 1e-5f));
+		CHECK(Nearly(rotation.Keys[15].Value.y, std::sin(glm::radians(45.0f) * 0.5f), 1e-4f));
+		CHECK(Nearly(rotation.Keys[15].Value.w, std::cos(glm::radians(45.0f) * 0.5f), 1e-4f));
+		CHECK(Nearly(rotation.Keys.back().Value.y, 0.70710678f, 1e-4f));
+		CHECK(Nearly(rotation.Keys.back().Value.w, 0.70710678f, 1e-4f));
+
+		fs::remove_all(root);
+	}
+
+	// D5c-2:importSkins=false → 不写 skin 数据、网格按静态处理(布局 1)、记 warning、
+	// 不再因 skin 存在而硬报错;动画仍按 importAnimations 导入。
+	void GltfSkinImportCanBeDisabled()
+	{
+		const fs::path root = TestRoot() / "skin-disabled";
+		fs::remove_all(root);
+		fs::create_directories(root);
+
+		Asset::ModelImportSettings settings = Asset::ModelImportSettings::Default();
+		settings.ImportSkins = false;
+		Asset::GltfImportBytesResult bytes;
+		Asset::WModelData model;
+		std::string error;
+		CHECK(ImportSkinFixture(root, settings, bytes, model, error));
+		CHECK(error.empty());
+
+		CHECK(model.VertexLayoutId == Asset::WModelIO::kVertexLayoutStandard);
+		CHECK(model.SkinVertices.empty());
+		CHECK(model.Skins.empty());
+		CHECK(model.Vertices.size() == 3u);
+		CHECK(model.Meshes.size() == 1u);
+		CHECK(model.Meshes[0].SkinIndex == -1);
+		bool hasWarning = false;
+		for (const std::string& warning : bytes.Summary.Warnings)
+			if (Contains(warning, "importSkins")) hasWarning = true;
+		CHECK(hasWarning);
+		// 动画独立于 skin 开关(节点下标照旧可解析)。
+		CHECK(model.Animations.size() == 1u);
+		CHECK(model.Animations[0].Channels.size() == 2u);
+		CHECK(model.Animations[0].Channels[0].Keys.size() == 31u);
+
+		fs::remove_all(root);
+	}
+
+	// D5c-2:animationSampleRate 参与 settingsHash,并决定烘焙出的关键帧数(10Hz → 11 帧)。
+	void GltfAnimationSampleRateIsBaked()
+	{
+		const fs::path root = TestRoot() / "skin-sample-rate";
+		fs::remove_all(root);
+		fs::create_directories(root);
+
+		Asset::ModelImportSettings slow = Asset::ModelImportSettings::Default();
+		slow.AnimationSampleRate = 10.0f;
+		CHECK(Asset::ModelImportSettings::Hash(slow)
+			!= Asset::ModelImportSettings::Hash(Asset::ModelImportSettings::Default()));
+		Asset::GltfImportBytesResult bytes;
+		Asset::WModelData model;
+		std::string error;
+		CHECK(ImportSkinFixture(root, slow, bytes, model, error));
+		CHECK(error.empty());
+		CHECK(model.Animations.size() == 1u);
+		CHECK(model.Animations[0].Channels.size() == 2u);
+		CHECK(model.Animations[0].Channels[0].Keys.size() == 11u);
+		CHECK(model.Animations[0].Channels[1].Keys.size() == 11u);
+		CHECK(Nearly(model.Animations[0].Channels[0].Keys.back().Time, 1.0f, 1e-5f));
+		CHECK(Nearly(model.Animations[0].Duration, 1.0f, 1e-5f));
+
+		// importAnimations=false → 不导入动画(其余照旧)。
+		Asset::ModelImportSettings noAnimations = Asset::ModelImportSettings::Default();
+		noAnimations.ImportAnimations = false;
+		Asset::GltfImportBytesResult noAnimationBytes;
+		Asset::WModelData noAnimationModel;
+		CHECK(ImportSkinFixture(root, noAnimations, noAnimationBytes, noAnimationModel, error));
+		CHECK(noAnimationModel.Animations.empty());
+		CHECK(noAnimationModel.Skins.size() == 1u);
+
+		fs::remove_all(root);
+	}
 }
 
 int main(int argc, char** argv)
@@ -1377,11 +1571,14 @@ int main(int argc, char** argv)
 			{ "D5b cook without exported materials leaves empty slots", CookWithoutMaterials },
 			{ "D5b derived outputs are enumerable and ordered (model last)", CookDatabaseTracksSettingsDependency },
 			{ "D10 destination folder layout + content-hash material/texture reuse", DestinationLayoutAndReuse },
-			{ "unsupported glTF features fail hard (skin / animation)", UnsupportedFeaturesHardFail },
+			{ "unsupported required glTF extension (Draco) fails hard", UnsupportedRequiredExtensionHardFails },
 			{ "MeshIndex schema round trip + committed Lua stub", MeshIndexSchemaRoundTrip },
 			{ "D5c .wmodel v4 skin/animation round trip is complete and deterministic", WModelV4SkinnedRoundTripIsComplete },
 			{ "D5c .wmodel v4 vertex strides (32/64/0) + MeshRange.SkinIndex round trip", WModelV4VertexLayoutsAndSkinIndex },
 			{ "D5c .wmodel v4 rejects v3 bytes / truncated skins / jointCount 129", WModelV4RejectsLegacyAndCorruptSkinData },
+			{ "D5c-2 glTF skin fixture imports (skin/joints/weights/inverse bind + baked animation)", GltfSkinFixtureImports },
+			{ "D5c-2 importSkins=false keeps the static layout + 1 warning", GltfSkinImportCanBeDisabled },
+			{ "D5c-2 animationSampleRate participates in settingsHash and drives baked keys", GltfAnimationSampleRateIsBaked },
 		};
 		int failures = 0;
 		for (const auto& [name, test] : tests)

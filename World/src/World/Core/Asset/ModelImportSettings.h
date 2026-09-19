@@ -18,7 +18,11 @@ namespace World::Asset
 		uint8_t UpAxis = 0;                  // 0 = Y(引擎坐标,不做转换);1 = Z(绕 X 轴 -90° 烘焙)
 		bool ExportMaterials = true;         // false = 不产出 .wmat(材质槽留空)
 		bool ExportTextures = true;          // false = 不产出贴图(材质贴图路径留空)
-		bool ImportAnimations = true;        // D5c 用;本包只存不改行为
+		bool ImportAnimations = true;        // false = 不导入 glTF animations(模型仍可导入)
+		bool ImportSkins = true;             // D5c-2:false = 不导入骨架;蒙皮网格按静态处理
+		// D5c-2:动画导入的固定采样率(Hz,clamp 1..120)。导入期按它把 glTF 关键帧
+		// 烘成等间隔关键帧,运行时不解析插值器。
+		float AnimationSampleRate = 30.0f;
 		bool GenerateNormals = true;         // true = 源缺法线时按面法线补齐;false = 缺法线硬报错
 		// D10（材质复用）：导出前算内容哈希，目标目录已有**同内容**文件就复用它的路径，
 		// 不再为每个模型复制一份材质/贴图（关掉保留旧行为：每个模型一份副本）。

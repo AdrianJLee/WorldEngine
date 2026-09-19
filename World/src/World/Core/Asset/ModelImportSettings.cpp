@@ -3,6 +3,7 @@
 
 #include "World/WUI/WuiJson.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -148,6 +149,37 @@ namespace World::Asset
 				Warn(reason, "import settings '" + path.string()
 					+ "': importAnimations is not a bool; using true");
 		}
+		if (const Wui::JsonValue* node = root->Find("importSkins"))
+		{
+			if (node->type == Wui::JsonValue::Type::Bool)
+				settings.ImportSkins = node->Bool;
+			else
+				Warn(reason, "import settings '" + path.string()
+					+ "': importSkins is not a bool; using true");
+		}
+		if (const Wui::JsonValue* node = root->Find("animationSampleRate"))
+		{
+			if (node->type == Wui::JsonValue::Type::Number)
+			{
+				const double value = node->AsNumber(30.0);
+				if (std::isfinite(value))
+				{
+					// D5c-2:采样率 clamp 到 1..120(0/负数/过大都钳制,不失败)。
+					const double clamped = std::min(120.0, std::max(1.0, value));
+					if (clamped != value)
+						Warn(reason, "import settings '" + path.string()
+							+ "': animationSampleRate " + std::to_string(value)
+							+ " was clamped to " + std::to_string(clamped));
+					settings.AnimationSampleRate = static_cast<float>(clamped);
+				}
+				else
+					Warn(reason, "import settings '" + path.string()
+						+ "': animationSampleRate must be a finite number; using 30");
+			}
+			else
+				Warn(reason, "import settings '" + path.string()
+					+ "': animationSampleRate is not a number; using 30");
+		}
 		if (const Wui::JsonValue* node = root->Find("generateNormals"))
 		{
 			if (node->type == Wui::JsonValue::Type::Bool)
@@ -203,6 +235,9 @@ namespace World::Asset
 		root.Object.push_back({ "exportMaterials", Wui::JsonValue::MakeBool(settings.ExportMaterials) });
 		root.Object.push_back({ "exportTextures", Wui::JsonValue::MakeBool(settings.ExportTextures) });
 		root.Object.push_back({ "importAnimations", Wui::JsonValue::MakeBool(settings.ImportAnimations) });
+		root.Object.push_back({ "importSkins", Wui::JsonValue::MakeBool(settings.ImportSkins) });
+		root.Object.push_back({ "animationSampleRate",
+			Wui::JsonValue::MakeNumber(settings.AnimationSampleRate) });
 		root.Object.push_back({ "generateNormals", Wui::JsonValue::MakeBool(settings.GenerateNormals) });
 		root.Object.push_back({ "reuseMaterials", Wui::JsonValue::MakeBool(settings.ReuseMaterials) });
 		root.Object.push_back({ "reuseTextures", Wui::JsonValue::MakeBool(settings.ReuseTextures) });
@@ -238,6 +273,10 @@ namespace World::Asset
 			| (settings.ImportAnimations ? 4u : 0u)
 			| (settings.GenerateNormals ? 8u : 0u);
 		hash = HashBytes(hash, &flags, sizeof(flags));
+		// D5c-2:skin 开关与动画采样率也参与哈希(改了 → 需要重导)。
+		const uint8_t skinFlags = settings.ImportSkins ? 1u : 0u;
+		hash = HashBytes(hash, &skinFlags, sizeof(skinFlags));
+		hash = HashF32(hash, settings.AnimationSampleRate);
 		// D10:复用开关与共享目录也参与哈希(改了 → 需要重导)。
 		const uint8_t reuseFlags =
 			(settings.ReuseMaterials ? 1u : 0u)

@@ -423,13 +423,8 @@ namespace World::Asset
 
 		// ---- 不支持特性:硬报错(不写半成品,也不"尽力解析")----
 		// 这些检查全部只看解析结果,不依赖 buffer 数据 —— 故意放在 load_buffers 之前:
-		// 缺 .bin 的 skin/动画文件也要报"不支持特性",而不是先报一个误导性的 buffer 错误。
-		if (data->skins_count > 0)
-			return fail("glTF import failed: unsupported feature: skinning (skins count = "
-				+ std::to_string(data->skins_count) + "); D5 imports static meshes only");
-		if (data->animations_count > 0)
-			return fail("glTF import failed: unsupported feature: animation (animations count = "
-				+ std::to_string(data->animations_count) + ")");
+		// 缺 .bin 的 morph/sparse 文件也要报"不支持特性",而不是先报一个误导性的 buffer 错误。
+		// D5c-2:skin/动画已从这份清单移除(改为导入);其余仍硬报错。
 		for (cgltf_size index = 0; index < data->accessors_count; ++index)
 			if (data->accessors[index].is_sparse)
 				return fail("glTF import failed: unsupported feature: sparse accessor #" + std::to_string(index));
@@ -469,6 +464,271 @@ namespace World::Asset
 		if (bufferResult != cgltf_result_success)
 			return fail("glTF import failed: cannot load buffers (missing external .bin or bad data URI; cgltf code "
 				+ std::to_string(static_cast<int>(bufferResult)) + ")");
+
+		// ---- D5c-2:蒙皮顶点属性(JOINTS_0 / WEIGHTS_0 → float4)----
+		// 关节下标用 float 存(与容器布局 2 一致);权重 u8/u16 的归一化由 cgltf 转成 0..1 的 float。
+		// 只在**真的绑到 skin 的网格**上读取与校验:importSkins=false 时这些属性按静态网格忽略。
+		// 不重排、不重归一化:权重和偏离 1 超过 0.01 只记 warning,数据原样写出(下游自行解释)。
+		struct SkinVertexData
+		{
+			std::vector<glm::vec4> Joints;
+			std::vector<glm::vec4> Weights;
+		};
+		const auto readSkinVertices = [&fail, &warn](const cgltf_primitive& primitive,
+			const std::string& label, SkinVertexData& out,
+			std::vector<std::string>& warnings) -> bool
+		{
+			out = SkinVertexData {};
+			const cgltf_accessor* joints = FindAttribute(primitive, cgltf_attribute_type_joints, 0);
+			const cgltf_accessor* weights = FindAttribute(primitive, cgltf_attribute_type_weights, 0);
+			if (joints == nullptr || weights == nullptr)
+				return fail("glTF import failed: " + label
+					+ " is bound to a skin but is missing JOINTS_0 or WEIGHTS_0");
+			if (joints->type != cgltf_type_vec4)
+				return fail("glTF import failed: " + label + " JOINTS_0 must be VEC4");
+			if (joints->component_type != cgltf_component_type_r_8u
+				&& joints->component_type != cgltf_component_type_r_16u)
+				return fail("glTF import failed: " + label
+					+ " JOINTS_0 must use unsigned byte or unsigned short components");
+			if (weights->type != cgltf_type_vec4 || weights->component_type != cgltf_component_type_r_32f)
+			{
+				// glTF 只允许 WEIGHTS_0 为 float 或归一化 u8/u16;cgltf 读归一化整数时已转回 0..1。
+				const bool normalizedInteger = (weights->component_type == cgltf_component_type_r_8u
+					|| weights->component_type == cgltf_component_type_r_16u) && weights->normalized != 0;
+				if (weights->type != cgltf_type_vec4 || !normalizedInteger)
+					return fail("glTF import failed: " + label
+						+ " WEIGHTS_0 must be VEC4 float or normalized u8/u16");
+			}
+			if (joints->count != weights->count)
+				return fail("glTF import failed: " + label
+					+ " JOINTS_0 and WEIGHTS_0 have different vertex counts");
+
+			out.Joints.assign(static_cast<size_t>(joints->count), glm::vec4(0.0f));
+			out.Weights.assign(static_cast<size_t>(weights->count), glm::vec4(0.0f));
+			uint32_t nonCanonicalWeights = 0;
+			for (cgltf_size vertex = 0; vertex < joints->count; ++vertex)
+			{
+				cgltf_float jointValues[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				cgltf_float weightValues[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				if (!cgltf_accessor_read_float(joints, vertex, jointValues, 4)
+					|| !cgltf_accessor_read_float(weights, vertex, weightValues, 4))
+					return fail("glTF import failed: cannot read JOINTS_0/WEIGHTS_0 (" + label + ")");
+				glm::vec4& joint = out.Joints[static_cast<size_t>(vertex)];
+				glm::vec4& weight = out.Weights[static_cast<size_t>(vertex)];
+				joint = { jointValues[0], jointValues[1], jointValues[2], jointValues[3] };
+				weight = { weightValues[0], weightValues[1], weightValues[2], weightValues[3] };
+				for (int component = 0; component < 4; ++component)
+				{
+					// 容器布局 2 用 float 存关节下标,上限 kMaxJointsPerSkin(更大的调色板不成立)。
+					if (joint[component] < 0.0f
+						|| joint[component] > static_cast<float>(WModelIO::kMaxJointsPerSkin - 1u)
+						|| std::floor(joint[component]) != joint[component])
+						return fail("glTF import failed: " + label + " JOINTS_0 contains joint index "
+							+ std::to_string(joint[component]) + " (must be an integer in 0.."
+							+ std::to_string(WModelIO::kMaxJointsPerSkin - 1u) + ")");
+				}
+				const float weightSum = weight.x + weight.y + weight.z + weight.w;
+				if (std::fabs(weightSum - 1.0f) > 0.01f)
+					++nonCanonicalWeights;
+			}
+			if (nonCanonicalWeights > 0)
+				warn(warnings, label + ": " + std::to_string(nonCanonicalWeights)
+					+ " vertex/vertices have weights summing to != 1 (>0.01 off); "
+					"weights are written as authored (no re-normalization)");
+			return true;
+		};
+
+		// ---- D5c-2:动画烘焙 ----
+		// 每条 glTF animation → WModelAnimation:duration = 所有通道输入时间的最大值;
+		// 按 settings.AnimationSampleRate 在 t = 0..duration 等间隔采样(运行时不解析插值器)。
+		const auto bakeAnimations = [&fail, &warn, &warnings, &settings](
+			const cgltf_data& source, std::vector<WModelAnimation>& outAnimations) -> bool
+		{
+			const float sampleRate = settings.AnimationSampleRate > 0.0f
+				? settings.AnimationSampleRate : 30.0f;
+			const float scale = std::isfinite(settings.Scale) && settings.Scale > 0.0f
+				? settings.Scale : 1.0f;
+			outAnimations.clear();
+			outAnimations.reserve(source.animations_count);
+			for (cgltf_size animationIndex = 0; animationIndex < source.animations_count; ++animationIndex)
+			{
+				const cgltf_animation& sourceAnimation = source.animations[animationIndex];
+				const std::string label = "animation " + std::to_string(animationIndex)
+					+ (sourceAnimation.name != nullptr
+						? std::string(" ('") + sourceAnimation.name + "')" : std::string());
+				WModelAnimation animation;
+				animation.Name = sourceAnimation.name ? sourceAnimation.name
+					: ("Animation " + std::to_string(animationIndex));
+
+				// 插值器降级只报一次(每条动画/每种插值类型)。
+				bool warnedStep = false;
+				bool warnedCubic = false;
+				float duration = 0.0f;
+				for (cgltf_size channelIndex = 0; channelIndex < sourceAnimation.channels_count; ++channelIndex)
+				{
+					const cgltf_animation_channel& sourceChannel = sourceAnimation.channels[channelIndex];
+					if (sourceChannel.sampler == nullptr)
+					{
+						warn(warnings, label + " channel " + std::to_string(channelIndex)
+							+ " has no sampler; channel was skipped");
+						continue;
+					}
+					if (sourceChannel.target_node == nullptr)
+					{
+						warn(warnings, label + " channel " + std::to_string(channelIndex)
+							+ " has no target node; channel was skipped");
+						continue;
+					}
+					if (sourceChannel.target_path != cgltf_animation_path_type_translation
+						&& sourceChannel.target_path != cgltf_animation_path_type_rotation
+						&& sourceChannel.target_path != cgltf_animation_path_type_scale)
+					{
+						warn(warnings, label + " channel " + std::to_string(channelIndex)
+							+ " targets an unsupported path (morph weights); channel was skipped");
+						continue;
+					}
+					const cgltf_animation_sampler& sampler = *sourceChannel.sampler;
+					if (sampler.input == nullptr || sampler.output == nullptr)
+						return fail("glTF import failed: " + label + " channel "
+							+ std::to_string(channelIndex) + " has no input/output accessor");
+					const cgltf_size keyCount = sampler.input->count;
+					if (keyCount == 0)
+						return fail("glTF import failed: " + label + " channel "
+							+ std::to_string(channelIndex) + " has no keyframes");
+
+					const bool cubic = sampler.interpolation == cgltf_interpolation_type_cubic_spline;
+					if (sampler.interpolation == cgltf_interpolation_type_step)
+					{
+						if (!warnedStep)
+						{
+							warnedStep = true;
+							warn(warnings, label + " uses STEP interpolation; "
+								"keys are baked at the sample rate");
+						}
+					}
+					else if (cubic && !warnedCubic)
+					{
+						warnedCubic = true;
+						warn(warnings, label + " uses CUBICSPLINE interpolation; the value part of each key "
+							"is baked linearly (tangents are ignored)");
+					}
+
+					std::vector<float> times(static_cast<size_t>(keyCount), 0.0f);
+					std::vector<glm::vec4> values(static_cast<size_t>(keyCount), glm::vec4(0.0f));
+					for (cgltf_size key = 0; key < keyCount; ++key)
+					{
+						cgltf_float time = 0.0f;
+						if (!cgltf_accessor_read_float(sampler.input, key, &time, 1))
+							return fail("glTF import failed: cannot read " + label
+								+ " channel input (key " + std::to_string(key) + ")");
+						times[static_cast<size_t>(key)] = time;
+						// CUBICSPLINE 的 output 是 3 个元素一组(a, value, b),取中间的 value。
+						const cgltf_size outputIndex = cubic ? key * 3u + 1u : key;
+						cgltf_float value[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+						if (!cgltf_accessor_read_float(sampler.output, outputIndex, value, 4))
+							return fail("glTF import failed: cannot read " + label
+								+ " channel output (key " + std::to_string(key) + ")");
+						values[static_cast<size_t>(key)] = { value[0], value[1], value[2], value[3] };
+					}
+					// D5c-2:times 必须与 values **同步**排序 —— 只排 times 会把"时间→取值"
+					// 的配对打乱(实测:夹具按降序写关键帧时,最后一个采样取到了第一帧的值)。
+					{
+						std::vector<size_t> order(times.size());
+						for (size_t index = 0; index < order.size(); ++index)
+							order[index] = index;
+						std::stable_sort(order.begin(), order.end(),
+							[&times](size_t left, size_t right) { return times[left] < times[right]; });
+						std::vector<float> sortedTimes(times.size());
+						std::vector<glm::vec4> sortedValues(values.size());
+						for (size_t index = 0; index < order.size(); ++index)
+						{
+							sortedTimes[index] = times[order[index]];
+							sortedValues[index] = values[order[index]];
+						}
+						times.swap(sortedTimes);
+						values.swap(sortedValues);
+					}
+					duration = std::max(duration, times.back());
+
+					WModelAnimationChannel channel;
+					channel.TargetNode = static_cast<uint32_t>(sourceChannel.target_node - source.nodes);
+					switch (sourceChannel.target_path)
+					{
+					case cgltf_animation_path_type_translation:
+						channel.Path = WModelIO::WModelAnimationPath::Translation;
+						break;
+					case cgltf_animation_path_type_rotation:
+						channel.Path = WModelIO::WModelAnimationPath::Rotation;
+						break;
+					default:
+						channel.Path = WModelIO::WModelAnimationPath::Scale;
+						break;
+					}
+
+					const uint32_t sampleCount = static_cast<uint32_t>(duration * sampleRate) + 1u;
+					channel.Keys.reserve(sampleCount);
+					for (uint32_t sample = 0; sample < sampleCount; ++sample)
+					{
+						const float time = static_cast<float>(sample) / sampleRate;
+						// 采样时间严格递增 → 用 upper_bound 找区间,线性插值(旋转用 slerp)。
+						const auto upper = std::upper_bound(times.begin(), times.end(), time);
+						const size_t rightIndex = std::min(
+							static_cast<size_t>(upper - times.begin()), times.size() - 1u);
+						const size_t leftIndex = rightIndex > 0u ? rightIndex - 1u : 0u;
+						const glm::vec4& left = values[leftIndex];
+						const glm::vec4& right = values[rightIndex];
+						float factor = 0.0f;
+						if (rightIndex != leftIndex)
+						{
+							const float span = times[rightIndex] - times[leftIndex];
+							if (span > 0.0f)
+								factor = std::min(1.0f,
+									std::max(0.0f, (time - times[leftIndex]) / span));
+						}
+						glm::vec4 value = left;
+						if (factor > 0.0f)
+						{
+							if (channel.Path == WModelIO::WModelAnimationPath::Rotation)
+							{
+								const glm::quat leftRotation { left.w, left.x, left.y, left.z };
+								const glm::quat rightRotation { right.w, right.x, right.y, right.z };
+								const glm::quat blended = glm::normalize(
+									glm::slerp(leftRotation, rightRotation, factor));
+								value = { blended.x, blended.y, blended.z, blended.w };
+							}
+							else
+							{
+								value = left + (right - left) * factor;
+							}
+						}
+						WModelAnimationKey key;
+						key.Time = time;
+						key.Value = value;
+						if (channel.Path == WModelIO::WModelAnimationPath::Translation)
+						{
+							// plan §D5b-1:scale 烘焙进几何/节点 TRS,平移关键帧同步缩放。
+							key.Value.x *= scale;
+							key.Value.y *= scale;
+							key.Value.z *= scale;
+						}
+						else if (channel.Path == WModelIO::WModelAnimationPath::Scale)
+						{
+							// 均匀缩放与 TRS 的 S 可交换,直接缩放三个分量。
+							key.Value.x *= scale;
+							key.Value.y *= scale;
+							key.Value.z *= scale;
+						}
+						channel.Keys.push_back(key);
+					}
+					animation.Channels.push_back(std::move(channel));
+				}
+				animation.Duration = duration;
+				if (animation.Channels.empty())
+					warn(warnings, label + " has no importable channels");
+				outAnimations.push_back(std::move(animation));
+			}
+			return true;
+		};
 
 		// ---- 输出命名(相对内容根) ----
 		const std::filesystem::path source(sourcePath);
@@ -672,6 +932,35 @@ namespace World::Asset
 		// ---- 几何:meshes → submeshes;缺法线按面法线补齐(唯一允许的降级)----
 		WModelData model;
 		model.MaterialSlots = materialPaths;
+		// D5c-2:节点带 mesh + skin → 该 mesh 绑到 skin 下标(容器 MeshRange.SkinIndex)。
+		// 同一 mesh 被多个节点引用且 skin 不同 → 取第一个并 warn(容器一个 mesh 只有一个 SkinIndex)。
+		std::unordered_map<cgltf_size, int32_t> meshSkinBindings;
+		if (settings.ImportSkins)
+		{
+			std::unordered_map<cgltf_size, cgltf_size> meshSkinFirstNode;
+			for (cgltf_size nodeIndex = 0; nodeIndex < data->nodes_count; ++nodeIndex)
+			{
+				const cgltf_node& sourceNode = data->nodes[nodeIndex];
+				if (sourceNode.mesh == nullptr || sourceNode.skin == nullptr)
+					continue;
+				const cgltf_size meshIndex = static_cast<cgltf_size>(sourceNode.mesh - data->meshes);
+				const cgltf_size skinIndex = static_cast<cgltf_size>(sourceNode.skin - data->skins);
+				const auto existing = meshSkinBindings.find(meshIndex);
+				if (existing == meshSkinBindings.end())
+				{
+					meshSkinBindings.emplace(meshIndex, static_cast<int32_t>(skinIndex));
+					meshSkinFirstNode.emplace(meshIndex, nodeIndex);
+				}
+				else if (existing->second != static_cast<int32_t>(skinIndex))
+				{
+					warn(warnings, "mesh " + std::to_string(meshIndex)
+						+ " is referenced by node " + std::to_string(meshSkinFirstNode[meshIndex])
+						+ " (skin " + std::to_string(existing->second) + ") and node "
+						+ std::to_string(nodeIndex) + " (skin " + std::to_string(skinIndex)
+						+ "); the first skin is used");
+				}
+			}
+		}
 		uint32_t primitivesMissingNormals = 0;
 		uint32_t primitivesMissingUv = 0;
 		for (cgltf_size meshIndex = 0; meshIndex < data->meshes_count; ++meshIndex)
@@ -679,6 +968,8 @@ namespace World::Asset
 			const cgltf_mesh& sourceMesh = data->meshes[meshIndex];
 			WModelMeshRange range;
 			range.FirstSubmesh = static_cast<uint32_t>(model.Submeshes.size());
+			const auto skinBinding = meshSkinBindings.find(meshIndex);
+			range.SkinIndex = skinBinding != meshSkinBindings.end() ? skinBinding->second : -1;
 			for (cgltf_size primitiveIndex = 0; primitiveIndex < sourceMesh.primitives_count; ++primitiveIndex)
 			{
 				const cgltf_primitive& primitive = sourceMesh.primitives[primitiveIndex];
@@ -754,9 +1045,25 @@ namespace World::Asset
 
 				const uint32_t vertexBase = static_cast<uint32_t>(model.Vertices.size());
 				const uint32_t indexBase = static_cast<uint32_t>(model.Indices.size());
+				// D5c-2:只有绑到 skin 的网格才读 JOINTS_0/WEIGHTS_0(缺一 → 硬报错)。
+				SkinVertexData skinVertices;
+				if (range.SkinIndex >= 0)
+				{
+					if (!readSkinVertices(primitive, label, skinVertices, warnings))
+						return false;
+					if (skinVertices.Joints.size() != localPositions.size())
+						return fail("glTF import failed: " + label
+							+ " JOINTS_0 vertex count does not match POSITION");
+				}
 				model.Vertices.reserve(model.Vertices.size() + localPositions.size());
 				for (size_t vertex = 0; vertex < localPositions.size(); ++vertex)
 					model.Vertices.push_back({ localPositions[vertex], localNormals[vertex], localUvs[vertex] });
+				if (range.SkinIndex >= 0)
+				{
+					model.SkinVertices.reserve(model.SkinVertices.size() + skinVertices.Joints.size());
+					for (size_t vertex = 0; vertex < skinVertices.Joints.size(); ++vertex)
+						model.SkinVertices.push_back({ skinVertices.Joints[vertex], skinVertices.Weights[vertex] });
+				}
 				model.Indices.reserve(model.Indices.size() + localIndices.size());
 				for (const uint32_t index : localIndices)
 					model.Indices.push_back(vertexBase + index);
@@ -855,6 +1162,120 @@ namespace World::Asset
 			}
 			model.Nodes.push_back(std::move(node));
 		}
+
+		// ---- D5c-2:骨架(glTF skin → WModelSkin) ----
+		// 关节下标空间 = **本 skin 的关节集合**(JointParents/顶点 Joints 都是这套下标);
+		// 绑定姿态取关节节点的局部 TRS(与 Node 的 TRS 同一份值,不含轴/缩放烘焙:
+		// 几何与节点都按 upAxis 旋转,关节局部姿态在绑定姿态里不做额外变换)。
+		if (!settings.ImportSkins && data->skins_count > 0)
+			warn(warnings, "importSkins is disabled: " + std::to_string(data->skins_count)
+				+ " skin(s) were skipped and skinned meshes are imported as static");
+		else if (settings.ImportSkins)
+		{
+			model.Skins.reserve(data->skins_count);
+			for (cgltf_size skinIndex = 0; skinIndex < data->skins_count; ++skinIndex)
+			{
+				const cgltf_skin& sourceSkin = data->skins[skinIndex];
+				if (sourceSkin.joints_count == 0)
+					return fail("glTF import failed: skin " + std::to_string(skinIndex)
+						+ " has no joints");
+				if (sourceSkin.joints_count > WModelIO::kMaxJointsPerSkin)
+					return fail("glTF import failed: skin " + std::to_string(skinIndex) + " has "
+						+ std::to_string(sourceSkin.joints_count) + " joints, above the per-skin limit of "
+						+ std::to_string(WModelIO::kMaxJointsPerSkin));
+
+				WModelSkin skin;
+				skin.Name = sourceSkin.name ? sourceSkin.name : ("Skin " + std::to_string(skinIndex));
+				const size_t jointCount = static_cast<size_t>(sourceSkin.joints_count);
+				skin.JointNames.resize(jointCount);
+				skin.JointParents.assign(jointCount, -1);
+				skin.InverseBindMatrices.assign(jointCount, glm::mat4(1.0f));
+				// glTF 的 TRS 分量都是**可选**的:缺省 = 单位值(平移 0 / 旋转 identity / 缩放 1)。
+				// 不预置就会留下 0,绑定姿态直接坏掉(实测:夹具关节没写 scale → BindScales[0] 为 0)。
+				skin.BindTranslations.assign(jointCount, glm::vec3(0.0f));
+				skin.BindRotations.assign(jointCount, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+				skin.BindScales.assign(jointCount, glm::vec3(1.0f));
+
+				// 关节节点 → 本 skin 关节集合内的下标(父关节用它换算 JointParents)。
+				std::unordered_map<const cgltf_node*, int32_t> jointIndices;
+				jointIndices.reserve(jointCount);
+				for (size_t joint = 0; joint < jointCount; ++joint)
+					jointIndices.emplace(sourceSkin.joints[joint], static_cast<int32_t>(joint));
+
+				if (sourceSkin.inverse_bind_matrices != nullptr)
+				{
+					for (size_t joint = 0; joint < jointCount; ++joint)
+					{
+						cgltf_float values[16] = {};
+						if (!cgltf_accessor_read_float(sourceSkin.inverse_bind_matrices, joint, values, 16))
+							return fail("glTF import failed: cannot read skin "
+								+ std::to_string(skinIndex) + " inverseBindMatrices (joint "
+								+ std::to_string(joint) + ")");
+						skin.InverseBindMatrices[joint] = glm::make_mat4(values);
+					}
+				}
+
+				for (size_t joint = 0; joint < jointCount; ++joint)
+				{
+					const cgltf_node& jointNode = *sourceSkin.joints[joint];
+					skin.JointNames[joint] = jointNode.name != nullptr
+						? jointNode.name : ("joint_" + std::to_string(joint));
+					if (jointNode.parent != nullptr)
+					{
+						const auto parent = jointIndices.find(jointNode.parent);
+						if (parent != jointIndices.end())
+							skin.JointParents[joint] = parent->second;
+					}
+					if (jointNode.has_matrix)
+					{
+						const glm::mat4 matrix = glm::make_mat4(jointNode.matrix);
+						glm::vec3 translation { 0.0f };
+						glm::vec3 scale { 1.0f };
+						glm::vec3 skew { 0.0f };
+						glm::vec4 perspective { 0.0f };
+						glm::quat rotation { 1.0f, 0.0f, 0.0f, 0.0f };
+						if (!glm::decompose(matrix, scale, rotation, translation, skew, perspective))
+							return fail("glTF import failed: skin " + std::to_string(skinIndex)
+								+ " joint " + std::to_string(joint)
+								+ " matrix cannot be decomposed into TRS (shear is not supported)");
+						skin.BindTranslations[joint] = translation;
+						skin.BindRotations[joint] = rotation;
+						skin.BindScales[joint] = scale;
+					}
+					else
+					{
+						if (jointNode.has_translation)
+							skin.BindTranslations[joint] = { jointNode.translation[0],
+								jointNode.translation[1], jointNode.translation[2] };
+						if (jointNode.has_rotation)
+							skin.BindRotations[joint] = glm::quat(jointNode.rotation[3],
+								jointNode.rotation[0], jointNode.rotation[1], jointNode.rotation[2]);
+						if (jointNode.has_scale)
+							skin.BindScales[joint] = { jointNode.scale[0], jointNode.scale[1],
+								jointNode.scale[2] };
+					}
+				}
+				model.Skins.push_back(std::move(skin));
+			}
+		}
+
+		// ---- D5c-2:动画(glTF animation → WModelAnimation,导入期烘关键帧)----
+		if (settings.ImportAnimations)
+		{
+			if (!bakeAnimations(*data, model.Animations))
+				return false;
+		}
+		else if (data->animations_count > 0)
+		{
+			warn(warnings, "importAnimations is disabled: " + std::to_string(data->animations_count)
+				+ " animation(s) were skipped");
+		}
+
+		// 有任何蒙皮网格 → 顶点布局 2;否则保持标准布局 1(静态资产零回归)。
+		if (!model.SkinVertices.empty())
+			model.VertexLayoutId = WModelIO::kVertexLayoutSkinned;
+		if ((!model.SkinVertices.empty()) != (model.VertexLayoutId == WModelIO::kVertexLayoutSkinned))
+			return fail("glTF import failed: internal error building the skinned vertex layout");
 
 		// ---- 产物字节(全部验证通过后):贴图 → 材质 → 模型 ----
 		// D5b:不再直接落盘,先在内存准备 ImportOutput 列表(ImportFile 逐项落盘;
