@@ -22,6 +22,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -208,6 +209,11 @@ namespace World
 		// 菜单 / 模态 / 布局
 		void DrawMenuBar(Wui::WuiContext& ctx);
 		void DrawModals(Wui::WuiContext& ctx);
+		// D10-10(用户 2026-09-19):导入位置选择器改成**窗口级模态** —— shell 自己持有
+		// 源路径/选中目录/状态/展开集合/滚动,用 BeginModal 居中显示;面板内覆盖层已删除。
+		void RenderImportDestinationModal(Wui::WuiContext& ctx);
+		// 打开模态时扫一遍内容根(WLD_ASSETPATH)的目录树(低频操作;权限错误跳过)。
+		void ScanImportTree();
 		void RestoreLayout(const std::string& json);
 		void RecordDockChange(Wui::WuiContext& ctx, const std::string& action, const std::string& target, const std::string& before);
 		void TogglePanel(Wui::WuiContext& ctx, const std::string& panel);
@@ -292,5 +298,21 @@ namespace World
 		Wui::WuiId m_OpenMenu = 0;
 		Wui::WuiRect m_MenuHeaderRect;
 		Wui::WuiContext* m_Ctx = nullptr;
+
+		// D10-10:导入位置模态的状态与目录树行(打开时重建;根行 Depth 0,其余按路径排序)。
+		struct ImportTreeRow
+		{
+			std::filesystem::path Path;
+			int Depth = 0;
+			bool HasChildren = false;
+		};
+		bool m_ImportModalOpen = false;
+		std::filesystem::path m_ImportTreeRoot;   // 内容根(WLD_ASSETPATH),打开模态时写入
+		std::filesystem::path m_ImportSourcePath; // 已选好的源文件(来自 File ▸ Import glTF...)
+		std::filesystem::path m_ImportDestDir;    // 选中目录(默认 = 打开时的内容浏览器当前文件夹)
+		std::string m_ImportStatus;               // 状态行附加文本(成功/失败的可读信息)
+		std::set<std::filesystem::path> m_ImportTreeOpen; // 模态自己的树展开集合
+		std::vector<ImportTreeRow> m_ImportTree;
+		float m_ImportTreeScroll = 0.0f;
 	};
 }

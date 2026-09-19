@@ -70,9 +70,12 @@ namespace World
 		const char* Id() const override { return "content_browser"; }
 		const char* Title() const override { return "Content Browser"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
-		// D10(用户 2026-09-19):打开"选择导入位置"选择器(引擎内的目录树;范围限定内容根内)。
-		// 由 PanelHost::RequestImportDestination 调用;sourcePath 为空时忽略。
-		void OpenImportDestination(const std::string& sourcePath);
+		// D10-10(用户 2026-09-19):导入位置选择器已搬到 EditorShell 的窗口级模态
+		// (居中 + 全窗口挡输入),面板不再画自己的覆盖层;只保留 shell 需要的两个入口:
+		// 导入成功后刷新列表(与工具栏 Refresh 同一条路径)。
+		void RefreshContents();
+		// 当前浏览目录:shell 打开导入模态时用它作默认落点(与双击导入/拖放同一约定)。
+		const std::filesystem::path& CurrentDirectory() const { return m_Model.Current; }
 
 	private:
 		void UpdateSearch();
@@ -104,8 +107,6 @@ namespace World
 		void InvalidateContents();
 		void SaveState();
 		void LoadState();
-		// D10-9:导入位置选择器的覆盖层绘制(内容区之上;树选中 + 确认/取消 + 状态行)。
-		void RenderImportDestinationPicker(Wui::WuiContext& ctx, const Wui::WuiRect& area, const Wui::WuiTheme& theme);
 
 		PanelHost& m_Host;
 		ContentBrowserModel m_Model;
@@ -116,12 +117,6 @@ namespace World
 		std::filesystem::path m_TreeRenameTarget;
 		// D10:根文件夹行只自动展开一次(用户手动折叠后不再被强制展开)。
 		bool m_RootRowSeeded = false;
-		// D10-9:导入位置选择器(替代原生文件夹对话框;范围限定内容根内)。
-		bool m_ImportPickerOpen = false;
-		std::filesystem::path m_ImportSourcePath;  // 已选好的源文件(来自 File ▸ Import glTF...)
-		std::filesystem::path m_ImportDestDir;     // 当前选中目录(默认 = 打开时的当前文件夹)
-		std::string m_ImportStatus;                // 状态行附加文本(成功/失败的可读信息)
-		float m_ImportTreeScroll = 0.0f;           // 选择器自己的树滚动(不与左侧树共享)
 		Ref<Texture2D> m_DirIcon;
 		Ref<Texture2D> m_FileIcon;
 		uint64_t m_DirIconId = 0;

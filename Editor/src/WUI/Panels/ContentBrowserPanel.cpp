@@ -6,7 +6,6 @@
 #include "World/Core/Application.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiWidgets.h"
-#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/Renderer/Texture.h"
@@ -631,197 +630,19 @@ namespace World
 			m_Model.LastSelected = paths.back();
 	}
 
-	// D10(用户 2026-09-19):菜单导入的"选择导入位置"——引擎内的树状选择器。
-	// 调用链:File ▸ Import glTF... → EditorLayer::ImportModelDialog(选源文件)
-	// → EditorShell::RequestImportDestination → 本方法。范围限定内容根内
-	// (原生文件夹对话框能选到工作区外,那种位置场景/打包都引用不到)。
-	void ContentBrowserPanel::OpenImportDestination(const std::string& sourcePath)
+	// D10-10(用户 2026-09-19):导入位置选择器已搬到 EditorShell 的窗口级模态(居中 + 全窗口挡输入)。
+	// 面板这里只保留 shell 需要的刷新入口(与工具栏 Refresh / 内容区菜单同一条路径)。
+	void ContentBrowserPanel::RefreshContents()
 	{
-		if (sourcePath.empty())
-			return;
-		m_ImportSourcePath = std::filesystem::path(sourcePath);
-		// 默认落点 = 内容浏览器当前文件夹(与双击导入/拖放同一条约定)。
-		m_ImportDestDir = m_Model.Current;
-		m_ImportStatus.clear();
-		m_ImportPickerOpen = true;
-		if (m_Ctx)
-		{
-			// 打开前清掉可能悬着的树/内容区菜单,避免与覆盖层叠在一起。
-			m_Ctx->CloseAllPopups();
-			m_Ctx->RecordOp("browser", "import-dest-open", m_ImportSourcePath.filename().string(), "");
-		}
-		WLD_CORE_INFO("[import] 选择导入位置: {0}", sourcePath);
-	}
-
-	void ContentBrowserPanel::RenderImportDestinationPicker(Wui::WuiContext& ctx, const Wui::WuiRect& area,
-		const Wui::WuiTheme& theme)
-	{
-		// 逻辑路径文本(相对内容根;根目录显示"(内容根)")。
-		const auto logicalText = [this](const std::filesystem::path& dir)
-		{
-			const std::string relative = dir.lexically_relative(m_Model.Root).generic_string();
-			return (relative.empty() || relative == ".") ? std::string("(内容根)") : relative;
-		};
-
-		// 覆盖层画在内容区之上(不超出面板)。
-		ctx.PushOverlay();
-		Wui::DrawPanelSurface(ctx, area, theme);
-		Wui::HighlightOutline(ctx, area, theme.Accent, 0.0f, 2.0f);
-
-		const float pad = 12.0f;
-		const float x = area.X + pad;
-		const float w = std::max(140.0f, area.W - pad * 2.0f);
-		const float buttonsH = 30.0f;
-		const float statusH = 20.0f;
-		float yy = area.Y + pad;
-		Label(ctx, { x, yy }, "选择导入位置", theme.Text, 16.0f);
-		yy += 24.0f;
-		// 一行:源文件名 + 当前选中的逻辑路径(相对内容根;根目录显示"(内容根)")。
-		Label(ctx, { x, yy }, "源文件: " + m_ImportSourcePath.filename().string()
-			+ " · 导入到: " + logicalText(m_ImportDestDir), theme.TextMuted, 13.0f);
-		yy += 19.0f;
-
-		const float buttonsY = area.Y + area.H - pad - statusH - buttonsH - 4.0f;
-		const float treeBottom = std::min(area.Y + area.H - pad, std::max(yy + 24.0f, buttonsY - 6.0f));
-		const Wui::WuiRect treeArea { x, yy, w, treeBottom - yy };
-		Wui::PanelBackground(ctx, treeArea, { 0.09f, 0.095f, 0.10f, 1 });
-
-		// 树:复用面板目录树数据(含根行);**点击行 = 选中(不导航)**,展开状态沿用 m_Model.TreeOpen。
-		std::vector<const BrowserDirNode*> visibleNodes;
-		std::vector<Wui::TreeViewItem> treeItems;
-		std::vector<Wui::WuiId> treeItemIds;
-		for (const BrowserDirNode& node : m_Model.DirTree)
-		{
-			if (node.Depth > 1 && m_Model.TreeOpen.find(node.Path.parent_path()) == m_Model.TreeOpen.end())
-				continue;
-			const std::filesystem::path rel = node.Path.lexically_relative(m_Model.Root);
-			const std::string relText = (rel == ".") ? std::string() : rel.generic_string();
-			Wui::TreeViewItem item;
-			// 无障碍 id 约定(逐字):根行 = import.dest.tree.root,其它 = import.dest.tree.<相对路径>。
-			item.Id = Wui::HashId(relText.empty() ? "import.dest.tree.root"
-				: ("import.dest.tree." + relText).c_str());
-			item.Label = node.Path.filename().string();
-			item.Depth = node.Depth;
-			item.HasChildren = node.HasChildren;
-			item.Expanded = m_Model.TreeOpen.find(node.Path) != m_Model.TreeOpen.end();
-			item.Selected = m_ImportDestDir == node.Path;
-			visibleNodes.push_back(&node);
-			treeItemIds.push_back(item.Id);
-			treeItems.push_back(std::move(item));
-		}
-		const Wui::TreeViewResult tree = Wui::TreeView(ctx, treeArea, treeItems, 20.0f, m_ImportTreeScroll, theme);
-		for (size_t i = 0; i < visibleNodes.size(); ++i)
-		{
-			const BrowserDirNode& node = *visibleNodes[i];
-			if (tree.ClickedArrow == static_cast<int>(i))
-			{
-				if (treeItems[i].Expanded) m_Model.TreeOpen.erase(node.Path);
-				else m_Model.TreeOpen.insert(node.Path);
-				SaveState();
-			}
-			else if (tree.Clicked == static_cast<int>(i))
-			{
-				// 单选一个文件夹;不导航、不打开(选择器里点击 ≠ 内容浏览器导航)。
-				m_ImportDestDir = node.Path;
-			}
-			// TreeView 自身不登记行节点(已知限制),这里按上面的 id 约定手动登记:
-			// AI 可读可点;只有落在树可视区内的行才登记,避免点到看不见的行。
-			if (i < tree.ItemRects.size() && treeItemIds[i] != 0)
-			{
-				const Wui::WuiRect& row = tree.ItemRects[i];
-				if (row.W > 0.0f && row.H > 0.0f
-					&& row.Y + row.H > treeArea.Y && row.Y < treeArea.Y + treeArea.H)
-				{
-					Wui::WuiAccessNode rowNode;
-					rowNode.Id = treeItemIds[i];
-					rowNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-					rowNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-					rowNode.Kind = "tree-item";
-					rowNode.Label = treeItems[i].Label;
-					rowNode.Value = logicalText(node.Path);
-					rowNode.Rect = row;
-					rowNode.Interactive = true;
-					Wui::WuiAccessibility::Get().Register(rowNode);
-				}
-			}
-		}
-
-		// 按钮行 + 状态行。
-		const Wui::WuiRect okRect { x, buttonsY, 150.0f, buttonsH };
-		const Wui::WuiRect cancelRect { x + okRect.W + 8.0f, buttonsY, 80.0f, buttonsH };
-		bool closeRequested = false;
-		if (Button(ctx, Wui::HashId("import.dest.ok"), okRect, "导入到此文件夹", theme))
-		{
-			// 目的地 = 选中的逻辑目录;**内容根本身传空串**(与宿主/内核约定一致)。
-			const std::filesystem::path destRelative = m_ImportDestDir.lexically_relative(m_Model.Root);
-			const std::string destRelativeText = destRelative.generic_string();
-			const std::string destination =
-				(destRelativeText.empty() || destRelativeText == ".") ? std::string() : destRelativeText;
-			std::string message;
-			std::string logicalModel;
-			if (m_Host.ImportModelFileTo(m_ImportSourcePath.string(), destination, &message, &logicalModel))
-			{
-				m_ImportStatus = message.empty() ? ("已导入到 " + logicalText(m_ImportDestDir)) : message;
-				if (m_Ctx)
-					m_Ctx->RecordOp("browser", "import-dest-ok", m_ImportSourcePath.filename().string(), m_ImportStatus);
-				WLD_CORE_INFO("[import] {0}", m_ImportStatus);
-				InvalidateContents();
-				if (m_Model.Search[0])
-					UpdateSearch();
-				if (!logicalModel.empty())
-					m_Host.OpenModelPreview(logicalModel);
-				closeRequested = true;   // 成功后关闭;失败保持打开,用户可改选目录重试。
-			}
-			else
-			{
-				m_ImportStatus = message.empty() ? std::string("导入失败(宿主未给出原因)") : message;
-				if (m_Ctx)
-					m_Ctx->RecordOp("browser", "import-dest-failed", m_ImportSourcePath.filename().string(), m_ImportStatus);
-				WLD_CORE_WARN("[import] 导入 '{0}' 失败: {1}", m_ImportSourcePath.string(), m_ImportStatus);
-			}
-		}
-		if (Button(ctx, Wui::HashId("import.dest.cancel"), cancelRect, "取消", theme))
-		{
-			if (m_Ctx)
-				m_Ctx->RecordOp("browser", "import-dest-cancel", m_ImportSourcePath.filename().string(), "");
-			closeRequested = true;
-		}
-		if (ctx.IsKeyPressed(KeyCodes::Escape))
-			closeRequested = true;
-
-		// 状态行:值里带选中目录(+ 上一次导入的可读结果)。
-		const std::string statusText = "选中: " + logicalText(m_ImportDestDir)
-			+ (m_ImportStatus.empty() ? std::string() : (" · " + m_ImportStatus));
-		{
-			Wui::WuiAccessNode statusNode;
-			statusNode.Id = Wui::HashId("import.dest.status");
-			statusNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-			statusNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-			statusNode.Kind = "status";
-			statusNode.Label = "import destination status";
-			statusNode.Value = statusText;
-			statusNode.Rect = { x, buttonsY + buttonsH + 2.0f, w, statusH };
-			statusNode.Interactive = false;
-			Wui::WuiAccessibility::Get().Register(statusNode);
-		}
-		Label(ctx, { x, buttonsY + buttonsH + 2.0f }, statusText,
-			m_ImportStatus.empty() ? theme.TextMuted : theme.Text, 13.0f);
-
-		if (closeRequested)
-		{
-			m_ImportPickerOpen = false;
-			m_ImportStatus.clear();
-		}
-		ctx.PopOverlay();
+		InvalidateContents();
+		if (m_Model.Search[0])
+			UpdateSearch();
 	}
 
 	void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		m_Ctx = &ctx;
 		const Wui::WuiTheme& theme = host.Theme();
-		// D10-9:导入位置选择器打开期间,内容区/树/拖放/删除等交互一律早退(见各处的 !importPicker),
-		// 选择只在覆盖层里进行(覆盖层绘制见 RenderImportDestinationPicker)。
-		const bool importPicker = m_ImportPickerOpen;
 		// D10:OS 文件拖放(资源管理器 → 窗口)。平台层把拖入路径记在**收到拖放的窗口**上,
 		// 这里消费主窗口的队列:`.gltf/.glb` → 导入到**当前文件夹**(用户 Q1/Q2);
 		// 其它类型明确提示"不支持该类型",不静默丢弃。
@@ -829,16 +650,6 @@ namespace World
 			std::vector<std::string> dropped = Application::Get().GetWindow().ConsumeDroppedFiles();
 			for (const std::string& droppedPath : dropped)
 			{
-				if (importPicker)
-				{
-					// 选择器打开时不接受新的拖入(避免两次导入抢同一个落点);提示先完成当前选择。
-					m_ImportStatus = "已忽略拖入(先完成当前导入选择): "
-						+ std::filesystem::path(droppedPath).filename().string();
-					if (m_Ctx)
-						m_Ctx->RecordOp("browser", "drop-ignored",
-							std::filesystem::path(droppedPath).filename().string(), m_ImportStatus);
-					continue;
-				}
 				const std::filesystem::path source(droppedPath);
 				const std::string extension = source.extension().string();
 				if (extension == ".gltf" || extension == ".glb")
@@ -952,8 +763,7 @@ namespace World
 					m_Model.ListMode = !m_Model.ListMode;
 					SaveState();
 				}, 58);
-			// D10-9:选择器打开时不要从工具栏建目录 —— 新建后的重命名输入框会被覆盖层挡住。
-			addButton("+ Folder", [this, &ctx] { if (!m_ImportPickerOpen) CreateFolder(ctx); }, 70);
+			addButton("+ Folder", [this, &ctx] { CreateFolder(ctx); }, 70);
 			addButton("Refresh", [this]
 				{
 					InvalidateContents();
@@ -974,10 +784,9 @@ namespace World
 			m_Toolbar->Add(m_SearchField, { 162, 162, 0, 24, 0 });
 		}
 
-		// D10-9:选择器打开时导航按钮禁用(覆盖层下面的导航对用户不可见)。
-		m_BackButton->Enabled = !importPicker && m_Model.HistoryIndex > 0;
-		m_ForwardButton->Enabled = !importPicker && m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1;
-		m_UpButton->Enabled = !importPicker && m_Model.Current != m_Model.Root;
+		m_BackButton->Enabled = m_Model.HistoryIndex > 0;
+		m_ForwardButton->Enabled = m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1;
+		m_UpButton->Enabled = m_Model.Current != m_Model.Root;
 		m_ViewModeButton->Label = m_Model.ListMode ? "Grid" : "List";
 
 		// 面包屑随路径变化重建。
@@ -1009,7 +818,7 @@ namespace World
 		Wui::WuiPaintContext toolbarPaint(ctx);
 		m_Toolbar->Paint(toolbarPaint);
 
-		if (fileDrag && !importPicker)
+		if (fileDrag)
 			for (size_t i = 0; i < m_CrumbButtons.size(); ++i)
 				if (ctx.IsHovered(m_CrumbButtons[i]->Rect()))
 				{
@@ -1048,7 +857,7 @@ namespace World
 		{
 			Wui::TreeViewResult tree = Wui::TreeView(ctx, treeRect, treeItems, 20.0f, m_Model.TreeScroll, theme);
 			// D10-6:树行右键 → 打开树菜单(命中由 TreeView 的 ContextClicked 提供,不自己写命中检测)。
-			if (!importPicker && tree.ContextClicked >= 0 && tree.ContextClicked < static_cast<int>(visibleNodes.size()))
+			if (tree.ContextClicked >= 0 && tree.ContextClicked < static_cast<int>(visibleNodes.size()))
 			{
 				// 与内容区菜单互斥:开新菜单前关掉旧菜单,避免两个菜单叠在一起。
 				ctx.CloseAllPopups();
@@ -1063,11 +872,7 @@ namespace World
 					break;
 				const Wui::WuiRect& row = tree.ItemRects[i];
 				const bool hovered = ctx.IsHovered(row);
-				if (importPicker)
-				{
-					// D10-9:选择器打开时左侧树不导航/不展开/不起拖 —— 选择在覆盖层的树里做。
-				}
-				else if (tree.ClickedArrow == static_cast<int>(i))
+				if (tree.ClickedArrow == static_cast<int>(i))
 				{
 					if (treeItems[i].Expanded) m_Model.TreeOpen.erase(node.Path);
 					else m_Model.TreeOpen.insert(node.Path);
@@ -1087,13 +892,13 @@ namespace World
 						{ row.X + 18.0f, row.Y + 1.0f, std::max(60.0f, row.W - 22.0f), row.H - 2.0f }, theme);
 					treeRenameDrawn = true;
 				}
-				if (!importPicker && ctx.Input().MouseDown[0] && hovered && node.Path != m_Model.Root)
+				if (ctx.Input().MouseDown[0] && hovered && node.Path != m_Model.Root)
 				{
 					const std::filesystem::path rel = node.Path.lexically_relative(m_Model.Root);
 					ctx.BeginDrag(Wui::HashId(("browser.drag." + rel.string()).c_str()), "file:" + rel.string());
 					ctx.SetCursor(Wui::WuiCursor::Hand);
 				}
-				if (fileDrag && !importPicker && hovered)
+				if (fileDrag && hovered)
 				{
 					ctx.DropTarget(row, "file:");
 					m_Model.PendingDropDest = node.Path;
@@ -1104,7 +909,7 @@ namespace World
 
 		// ---- 树行右键菜单(D10-6:基础操作;每个菜单项带稳定无障碍 id,AI 可点) ----
 		const Wui::WuiId treePopup = Wui::HashId("browser.tree.context");
-		if (!importPicker && ctx.IsPopupOpen(treePopup) && !m_TreeMenuPath.empty())
+		if (ctx.IsPopupOpen(treePopup) && !m_TreeMenuPath.empty())
 		{
 			// 根行可新建/刷新/打开,但重命名/删除内容根会让整棵树失效 → 这两项对根行禁用。
 			const bool treeRoot = m_TreeMenuPath == m_Model.Root;
@@ -1185,16 +990,16 @@ namespace World
 			RefreshListing();
 		const std::vector<std::filesystem::path>& paths = searching ? m_Model.SearchResults : m_Model.Listing;
 
-		if (!importPicker && ctx.Input().Ctrl && ctx.IsKeyPressed(KeyCodes::A) && ctx.IsHovered(content))
+		if (ctx.Input().Ctrl && ctx.IsKeyPressed(KeyCodes::A) && ctx.IsHovered(content))
 			SelectAll(paths);
-		if (!importPicker && ctx.IsKeyPressed(KeyCodes::Delete) && !m_Model.Selected.empty() && ctx.IsHovered(content))
+		if (ctx.IsKeyPressed(KeyCodes::Delete) && !m_Model.Selected.empty() && ctx.IsHovered(content))
 			m_Model.ShowDeleteModal = true;
-		if (!importPicker && ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
+		if (ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
 		{
 			StartRename(ctx, *m_Model.Selected.begin());
 		}
 
-		if (fileDrag && !importPicker && ctx.IsHovered(content))
+		if (fileDrag && ctx.IsHovered(content))
 		{
 			ctx.DropTarget(content, "file:");
 			m_Model.PendingDropDest = m_Model.Current;
@@ -1209,8 +1014,6 @@ namespace World
 		std::optional<std::filesystem::path> pendingOpen;
 		auto interact = [&](const std::filesystem::path& path, const Wui::WuiRect& itemRect, bool isDir)
 		{
-			if (importPicker)
-				return false;   // D10-9:选择器覆盖内容区时不响应双击/拖拽/右键/选中。
 			const bool selected = m_Model.Selected.find(path) != m_Model.Selected.end();
 			const bool hovered = ctx.IsHovered(itemRect);
 			if (isDir && fileDrag && hovered)
@@ -1347,7 +1150,7 @@ namespace World
 		if (pendingOpen.has_value())
 			OpenItem(*pendingOpen);
 
-		if (!importPicker && ctx.AcceptDrop(&filePayload, "file:"))
+		if (ctx.AcceptDrop(&filePayload, "file:"))
 		{
 			if (!m_Model.PendingDropDest.empty())
 			{
@@ -1403,13 +1206,9 @@ namespace World
 			m_Model.PendingDropDest.clear();
 		}
 
-		// ---- D10-9:导入位置选择器(覆盖在内容区之上;内容区交互已全部早退) ----
-		if (m_ImportPickerOpen)
-			RenderImportDestinationPicker(ctx, content, theme);
-
 		// ---- 右键菜单 ----
 		const Wui::WuiId popup = Wui::HashId("browser.context");
-		if (!importPicker && ctx.IsPopupOpen(popup) && !m_Model.ContextMenuPath.empty())
+		if (ctx.IsPopupOpen(popup) && !m_Model.ContextMenuPath.empty())
 		{
 			struct BrowserItem { const char* Label; std::function<void()> Action; };
 			const bool single = m_Model.Selected.size() == 1;
@@ -1452,13 +1251,13 @@ namespace World
 		}
 
 		// ---- 内容区空白处右键 ----
-		if (!importPicker && ctx.Input().MouseClicked[1] && ctx.IsHovered(content) && !itemRightClicked)
+		if (ctx.Input().MouseClicked[1] && ctx.IsHovered(content) && !itemRightClicked)
 		{
 			m_Model.BlankMenuPos = ctx.Input().MousePos;
 			ctx.OpenPopup(Wui::HashId("browser.blankcontext"));
 		}
 		const Wui::WuiId blankPopup = Wui::HashId("browser.blankcontext");
-		if (!importPicker && ctx.IsPopupOpen(blankPopup))
+		if (ctx.IsPopupOpen(blankPopup))
 		{
 			ctx.PushOverlay();
 			const Wui::WuiRect menuPanel { m_Model.BlankMenuPos.x, m_Model.BlankMenuPos.y, 180, 4 * 24 + 8 };

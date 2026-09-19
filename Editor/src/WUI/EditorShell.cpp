@@ -716,6 +716,11 @@ namespace World
 				ctx.RecordOp("undo", "redo", ctx.History().RedoName(), "");
 		}
 		const glm::vec2 viewport = ctx.ViewportSize();
+		// D10-10(用户 2026-09-19):导入位置是**窗口级模态** —— 开帧先把整个客户区登记成
+		// 遮挡区,后面画的所有面板照常显示但收不到命中(点击/悬停/拖放都走 HitTest)。
+		const bool importModalOpen = m_ImportModalOpen;
+		if (importModalOpen)
+			ctx.PushHoverBlocker({ 0.0f, 0.0f, viewport.x, viewport.y });
 		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
 		// 停靠区(而不是只切分鼠标所在的面板组)。需在渲染面板前判定,以便
 		// RenderTabs 跳过面板内的落区逻辑。
@@ -783,6 +788,10 @@ namespace World
 		}
 		// 下层绘制结束:解除遮挡,浮动面板/菜单/弹窗仍按真实光标命中。
 		ctx.ClearHoverBlockers();
+		// D10-10:导入模态之下还有浮动面板与菜单栏要画,继续挡住它们的命中(它们照常显示,
+		// 但点不到);到画模态前再解除(见 DrawModals 前后)。
+		if (importModalOpen)
+			ctx.PushHoverBlocker({ 0.0f, 0.0f, viewport.x, viewport.y });
 
 		std::string payload;
 		bool dropConsumed = false;
@@ -931,7 +940,11 @@ namespace World
 		// 挂靠栏:横条形式(排在菜单栏下方),独立窗口可挂靠至此。
 		DrawAttachBar(ctx);
 
+		// D10-10:模态绘制前解除遮挡(对话框自身要能命中),画完再清一次,
+		// 确保本帧结束时不留 blocker(下一帧开帧也会清,这里是双保险)。
+		ctx.ClearHoverBlockers();
 		DrawModals(ctx);
+		ctx.ClearHoverBlockers();
 
 		std::string dragPayload;
 		if (ctx.IsDragActive(&dragPayload))
@@ -1938,16 +1951,267 @@ namespace World
 
 	void EditorShell::RequestImportDestination(const std::string& sourcePath)
 	{
-		// D10(用户 2026-09-19):导入位置用**引擎内的树状选择器**(内容浏览器面板负责),
-		// 不再用原生文件夹对话框 —— 后者能选到工作区外,而内容根外的位置场景/打包都引用不到。
+		// D10-10(用户 2026-09-19):导入位置选择器改成**窗口级模态**(此前是内容浏览器面板
+		// 内的一层覆盖:位置偏、挡不住后面的输入)。范围仍限定内容根内 —— 原生文件夹对话框
+		// 能选到工作区外,那种位置场景/打包都引用不到。状态与目录树由 shell 持有。
+		if (sourcePath.empty())
+			return;
+		m_ImportSourcePath = std::filesystem::path(sourcePath);
+		m_ImportStatus.clear();
+		m_ImportTreeRoot = std::filesystem::path(WLD_ASSETPATH);
+		m_ImportDestDir = m_ImportTreeRoot;
 		const std::string panel = "content_browser";
 		if (!m_Layout.Contains(panel))
-			DockPanelBackToTree(panel);   // 内容浏览器被关掉时先让它回到停靠树
+			DockPanelBackToTree(panel);   // 内容浏览器被关掉时先让它回到停靠树(导入完能直接看到新文件)
 		const auto found = m_PanelRegistry.find(panel);
-		if (found == m_PanelRegistry.end())
+		if (found != m_PanelRegistry.end())
+			if (auto* browser = dynamic_cast<ContentBrowserPanel*>(found->second.get()))
+				m_ImportDestDir = browser->CurrentDirectory();   // 默认落点 = 当前文件夹
+		// 打开时扫一次内容根 + 重置模态自己的树状态(根行默认展开)。
+		ScanImportTree();
+		m_ImportTreeOpen.clear();
+		// 默认落点(内容浏览器当前文件夹)可能在深层:把它的祖先链一起展开,
+		// 打开时就能看到"选中"的那一行(只展开,不改选中)。
+		for (std::filesystem::path dir = m_ImportDestDir; dir != m_ImportTreeRoot && dir.has_relative_path();)
+		{
+			m_ImportTreeOpen.insert(dir);
+			const std::filesystem::path parent = dir.parent_path();
+			if (parent == dir)
+				break;   // 防御:到达盘符根仍不等于内容根时停止
+			dir = parent;
+		}
+		m_ImportTreeOpen.insert(m_ImportTreeRoot);
+		m_ImportTreeScroll = 0.0f;
+		m_ImportModalOpen = true;
+		if (m_Ctx)
+		{
+			// 打开前清掉悬着的弹窗;清文本焦点,否则后面面板里已聚焦的输入框还会继续吃键盘输入。
+			m_Ctx->CloseAllPopups();
+			m_Ctx->SetFocus(0);
+			m_Ctx->RecordOp("import", "dest-open", m_ImportSourcePath.filename().string(), "");
+		}
+		WLD_CORE_INFO("[import] 选择导入位置(窗口级模态): {0}", sourcePath);
+	}
+
+	// D10-10:扫内容根下的全部子目录(低频操作:只在打开导入模态时跑一次)。
+	// 与内容浏览器左侧树同一套数据形态:按路径排序 + 根行在最前(Depth 0)。
+	void EditorShell::ScanImportTree()
+	{
+		m_ImportTree.clear();
+		std::error_code scanError;
+		std::filesystem::recursive_directory_iterator scanIt(m_ImportTreeRoot,
+			std::filesystem::directory_options::skip_permission_denied, scanError);
+		const std::filesystem::recursive_directory_iterator scanEnd;
+		for (; scanIt != scanEnd; scanIt.increment(scanError))
+		{
+			if (scanError)
+				break;   // 权限错误等:已扫到的部分照常可用(不抛异常、不中断整个选择器)
+			const std::filesystem::directory_entry& entry = *scanIt;
+			std::error_code entryError;
+			if (!entry.is_directory(entryError))
+				continue;
+			ImportTreeRow row;
+			row.Path = entry.path();
+			row.Depth = scanIt.depth() + 1;
+			std::error_code childError;
+			for (const std::filesystem::directory_entry& child : std::filesystem::directory_iterator(row.Path,
+				std::filesystem::directory_options::skip_permission_denied, childError))
+			{
+				if (childError)
+					break;
+				std::error_code childDirError;
+				if (child.is_directory(childDirError))
+				{
+					row.HasChildren = true;
+					break;
+				}
+			}
+			m_ImportTree.push_back(std::move(row));
+		}
+		std::sort(m_ImportTree.begin(), m_ImportTree.end(),
+			[](const ImportTreeRow& a, const ImportTreeRow& b) { return a.Path < b.Path; });
+		ImportTreeRow rootRow;
+		rootRow.Path = m_ImportTreeRoot;
+		rootRow.Depth = 0;
+		rootRow.HasChildren = !m_ImportTree.empty();
+		m_ImportTree.insert(m_ImportTree.begin(), std::move(rootRow));
+	}
+
+	// D10-10:窗口级"选择导入位置"模态。居中与 50% 黑遮罩由 Wui::BeginModal 负责;
+	// "挡住后面所有面板的命中"由 OnRender 的 PushHoverBlocker 负责(见那里的顺序说明)。
+	void EditorShell::RenderImportDestinationModal(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiId modalId = Wui::HashId("modal.importdest");
+		if (m_ImportModalOpen)
+			ctx.SetModal(modalId);
+		else if (ctx.Modal() == modalId)
+			ctx.ClearModal();
+
+		const auto logicalText = [this](const std::filesystem::path& dir)
+		{
+			const std::string relative = dir.lexically_relative(m_ImportTreeRoot).generic_string();
+			return (relative.empty() || relative == ".") ? std::string("(内容根)") : relative;
+		};
+
+		Wui::WuiRect panel;
+		if (!Wui::BeginModal(ctx, modalId, "选择导入位置", { 560.0f, 440.0f }, &panel, m_Theme))
 			return;
-		if (auto* browser = dynamic_cast<ContentBrowserPanel*>(found->second.get()))
-			browser->OpenImportDestination(sourcePath);
+
+		const float pad = 16.0f;
+		Wui::Label(ctx, { panel.X + pad, panel.Y + 40.0f },
+			"源文件: " + m_ImportSourcePath.filename().string()
+				+ " · 导入到: " + logicalText(m_ImportDestDir),
+			m_Theme.TextMuted, 13.0f);
+
+		const float buttonsH = 30.0f;
+		const float statusH = 20.0f;
+		const float statusY = panel.Y + panel.H - pad - statusH;
+		const float buttonsY = statusY - buttonsH - 6.0f;
+		const Wui::WuiRect treeArea { panel.X + pad, panel.Y + 62.0f, panel.W - pad * 2.0f,
+			std::max(40.0f, buttonsY - 8.0f - (panel.Y + 62.0f)) };
+		Wui::PanelBackground(ctx, treeArea, { 0.09f, 0.095f, 0.10f, 1 });
+
+		// 可见行:父行折叠 → 整棵子树不显示(m_ImportTree 是"父在子前"的预排序)。
+		std::vector<const ImportTreeRow*> visibleRows;
+		std::vector<Wui::TreeViewItem> treeItems;
+		std::vector<Wui::WuiId> treeItemIds;
+		std::vector<bool> openAtDepth;
+		for (const ImportTreeRow& row : m_ImportTree)
+		{
+			if (row.Depth > 0)
+			{
+				if (row.Depth - 1 >= static_cast<int>(openAtDepth.size()))
+					continue;   // 祖先行没显示 → 本行也不显示
+				if (!openAtDepth[row.Depth - 1])
+					continue;   // 直接父行折叠
+			}
+			if (static_cast<int>(openAtDepth.size()) > row.Depth)
+				openAtDepth.resize(static_cast<size_t>(row.Depth));
+			const bool expanded = m_ImportTreeOpen.find(row.Path) != m_ImportTreeOpen.end();
+			openAtDepth.push_back(expanded);
+
+			const std::filesystem::path rel = row.Path.lexically_relative(m_ImportTreeRoot);
+			const std::string relText = (rel == ".") ? std::string() : rel.generic_string();
+			Wui::TreeViewItem item;
+			// 无障碍 id 约定(逐字,与 D10-9 一致):根行 = import.dest.tree.root,
+			// 其它 = import.dest.tree.<相对路径>。
+			item.Id = Wui::HashId(relText.empty() ? "import.dest.tree.root"
+				: ("import.dest.tree." + relText).c_str());
+			item.Label = row.Path.filename().string();   // 根行 = 内容根目录名
+			item.Depth = row.Depth;
+			item.HasChildren = row.HasChildren;
+			item.Expanded = expanded;
+			item.Selected = m_ImportDestDir == row.Path;
+			visibleRows.push_back(&row);
+			treeItemIds.push_back(item.Id);
+			treeItems.push_back(std::move(item));
+		}
+		const Wui::TreeViewResult tree = Wui::TreeView(ctx, treeArea, treeItems, 20.0f, m_ImportTreeScroll, m_Theme);
+		for (size_t i = 0; i < visibleRows.size(); ++i)
+		{
+			const ImportTreeRow& row = *visibleRows[i];
+			if (tree.ClickedArrow == static_cast<int>(i))
+			{
+				if (treeItems[i].Expanded)
+					m_ImportTreeOpen.erase(row.Path);
+				else
+					m_ImportTreeOpen.insert(row.Path);
+			}
+			else if (tree.Clicked == static_cast<int>(i))
+			{
+				m_ImportDestDir = row.Path;   // 单选:点行只改选中,不导航
+			}
+			// TreeView 自身不登记行节点(已知限制),按上面的 id 约定手动登记:
+			// AI 可读可点;只登记落在树可视区内的行,避免点到看不见的行。
+			if (i < tree.ItemRects.size() && treeItemIds[i] != 0)
+			{
+				const Wui::WuiRect& rowRect = tree.ItemRects[i];
+				// 只登记"行中心确实落在树可视区内"的行:AI 注入的点击打在行中心,
+				// 半滚出视口的行中心可能压到按钮行,点了会打错目标。
+				const float rowCenterY = rowRect.Y + rowRect.H * 0.5f;
+				if (rowRect.W > 0.0f && rowRect.H > 0.0f
+					&& rowCenterY >= treeArea.Y && rowCenterY <= treeArea.Y + treeArea.H)
+				{
+					Wui::WuiAccessNode rowNode;
+					rowNode.Id = treeItemIds[i];
+					rowNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+					rowNode.Panel = "shell";
+					rowNode.Kind = "tree-item";
+					rowNode.Label = treeItems[i].Label;
+					rowNode.Value = logicalText(row.Path);
+					rowNode.Rect = rowRect;
+					rowNode.Interactive = true;
+					Wui::WuiAccessibility::Get().Register(rowNode);
+				}
+			}
+		}
+
+		bool closeRequested = false;
+		if (Wui::Button(ctx, Wui::HashId("import.dest.ok"), { panel.X + pad, buttonsY, 150.0f, buttonsH },
+			"导入到此文件夹", m_Theme))
+		{
+			// 目的地 = 选中目录相对内容根的路径;**内容根本身传空串**(与内核/cook 约定一致)。
+			const std::filesystem::path destRelative = m_ImportDestDir.lexically_relative(m_ImportTreeRoot);
+			const std::string destRelativeText = destRelative.generic_string();
+			const std::string destination =
+				(destRelativeText.empty() || destRelativeText == ".") ? std::string() : destRelativeText;
+			std::string message;
+			std::string logicalModel;
+			if (m_Editor.ImportModelFile(m_ImportSourcePath.string(), &message, &logicalModel, destination))
+			{
+				m_ImportStatus = message.empty() ? ("已导入到 " + logicalText(m_ImportDestDir)) : message;
+				ctx.RecordOp("import", "dest-ok", m_ImportSourcePath.filename().string(), m_ImportStatus);
+				WLD_CORE_INFO("[import] {0}", m_ImportStatus);
+				// 内容浏览器刷新(它自己的公开入口)+ 模型预览。
+				const auto browserFound = m_PanelRegistry.find("content_browser");
+				if (browserFound != m_PanelRegistry.end())
+					if (auto* browser = dynamic_cast<ContentBrowserPanel*>(browserFound->second.get()))
+						browser->RefreshContents();
+				if (!logicalModel.empty())
+					OpenModelPreview(logicalModel);
+				closeRequested = true;   // 成功后关闭;失败保持打开,用户可改选目录重试。
+			}
+			else
+			{
+				m_ImportStatus = message.empty() ? std::string("导入失败(宿主未给出原因)") : message;
+				ctx.RecordOp("import", "dest-failed", m_ImportSourcePath.filename().string(), m_ImportStatus);
+				WLD_CORE_WARN("[import] 导入 '{0}' 失败: {1}", m_ImportSourcePath.string(), m_ImportStatus);
+			}
+		}
+		if (Wui::Button(ctx, Wui::HashId("import.dest.cancel"), { panel.X + pad + 158.0f, buttonsY, 90.0f, buttonsH },
+			"取消", m_Theme))
+		{
+			ctx.RecordOp("import", "dest-cancel", m_ImportSourcePath.filename().string(), "");
+			closeRequested = true;
+		}
+		if (ctx.IsKeyPressed(KeyCodes::Escape))
+			closeRequested = true;
+
+		// 状态行:选中目录 + 上一次导入的可读结果(失败原因也写在这里)。
+		const std::string statusText = "选中: " + logicalText(m_ImportDestDir)
+			+ (m_ImportStatus.empty() ? std::string() : (" · " + m_ImportStatus));
+		{
+			Wui::WuiAccessNode statusNode;
+			statusNode.Id = Wui::HashId("import.dest.status");
+			statusNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			statusNode.Panel = "shell";
+			statusNode.Kind = "status";
+			statusNode.Label = "import destination status";
+			statusNode.Value = statusText;
+			statusNode.Rect = { panel.X + pad, statusY, panel.W - pad * 2.0f, statusH };
+			statusNode.Interactive = false;
+			Wui::WuiAccessibility::Get().Register(statusNode);
+		}
+		Wui::Label(ctx, { panel.X + pad, statusY }, statusText,
+			m_ImportStatus.empty() ? m_Theme.TextMuted : m_Theme.Text, 13.0f);
+
+		if (closeRequested)
+		{
+			m_ImportModalOpen = false;
+			m_ImportStatus.clear();
+			ctx.ClearModal();
+		}
+		Wui::EndModal(ctx, modalId);
 	}
 
 	void EditorShell::EnsureModelPanelFromId(const std::string& panelId)
@@ -2393,6 +2657,12 @@ namespace World
 
 	void EditorShell::DrawModals(Wui::WuiContext& ctx)
 	{
+		// ---- D10-10:导入位置(窗口级模态) ----
+		// 放在这里(其余模态之前)是故意的:导入失败时 EditorLayer 会弹它自己的 Error 模态,
+		// 那份错误框必须画在选择器**之上**才看得见(与 D10-9 面板内选择器时期的行为一致);
+		// 选择器保持打开并把失败原因写进 import.dest.status。
+		RenderImportDestinationModal(ctx);
+
 		const Wui::WuiId unsaved = Wui::HashId("modal.unsaved");
 		if (m_Editor.ShowUnsavedModal()) ctx.SetModal(unsaved);
 		else if (ctx.Modal() == unsaved) ctx.ClearModal();
