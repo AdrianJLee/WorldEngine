@@ -51,6 +51,13 @@ namespace World
 		// 刷新"需要重导"判断(源内容指纹 + 设置哈希 + 导入器版本)。
 		void RefreshSyncState();
 		void DrawAssetView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// D5c-4b:动画控制条(有 skin + ≥1 条动画时显示)。返回控制条之后的 y。
+		float DrawAnimationControls(Wui::WuiContext& ctx, float x, float y, float width,
+			const Wui::WuiTheme& theme);
+		// 资产里是否存在绑定到有效 skin 的 mesh(决定是否显示控制条)。
+		bool HasSkinnedMesh() const;
+		// 预览播放的是第 0 条 clip(与状态行/时间滑杆同一来源)。
+		float AnimationClipDuration() const;
 
 		std::string m_PanelId = "model:";
 		std::string m_PanelTitle = "Model";
@@ -90,6 +97,18 @@ namespace World
 		float m_MaxDistance = 200.0f;
 		glm::vec3 m_Focus { 0.0f };
 		glm::vec2 m_LastMouse { 0.0f };
+
+		// ---- D5c-4b:动画播放状态(全部只在面板内,不改场景) ----
+		bool m_AnimPlaying = false;
+		bool m_AnimLoop = true;
+		float m_AnimSpeed = 1.0f;
+		float m_AnimTime = 0.0f;
+		// 面板自己的帧间 dt:首帧 0,clamp [0,0.25](不动 EditorLayer/PanelHost 接口)。
+		double m_LastAnimClock = 0.0;
+		bool m_AnimClockValid = false;
+		// 蒙皮提交被拒的一次性 warn 去重(透明材质 / 调色板不可用)。
+		bool m_TransparentSkipWarned = false;
+		bool m_SkinnedSubmitWarned = false;
 
 		// ---- GPU 资源(预览专用,惰性创建) ----
 		Rhi::Handle<Rhi::RenderPass> m_PreviewPass;

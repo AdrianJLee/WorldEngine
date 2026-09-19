@@ -5,6 +5,7 @@
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
+#include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/AssetHotReload.h"
 #include "World/Core/Asset/GltfImporter.h"
 #include "World/WUI/WuiTextureRegistry.h"
@@ -121,6 +122,12 @@ namespace World
 
 	void ModelPreviewPanel::Reload()
 	{
+		// D5c-4b:重导/重载后清进程级动画模型缓存(含失败标记与 warn 去重),与 Mesh::ClearWModelCache 同款口径。
+		AnimationSystem::ClearCache();
+		m_AnimTime = 0.0f;
+		m_AnimClockValid = false;
+		m_TransparentSkipWarned = false;
+		m_SkinnedSubmitWarned = false;
 		m_SlotMaterials.clear();
 		std::string error;
 		m_Mesh = Mesh::LoadWModel(m_LogicalPath, &error);
@@ -421,6 +428,25 @@ namespace World
 		++m_UiTextureGeneration;
 	}
 
+	// D5c-4b:资产里是否有绑定到有效 skin 的 mesh。
+	bool ModelPreviewPanel::HasSkinnedMesh() const
+	{
+		if (!m_DataValid || m_Data.Skins.empty())
+			return false;
+		for (const Asset::WModelMeshRange& mesh : m_Data.Meshes)
+		{
+			if (mesh.SkinIndex >= 0 && static_cast<size_t>(mesh.SkinIndex) < m_Data.Skins.size())
+				return true;
+		}
+		return false;
+	}
+
+	// D5c-4b:预览只播第 0 条 clip(控件/状态行/滑杆同一来源)。
+	float ModelPreviewPanel::AnimationClipDuration() const
+	{
+		return (m_DataValid && !m_Data.Animations.empty()) ? m_Data.Animations[0].Duration : 0.0f;
+	}
+
 	uint64_t ModelPreviewPanel::RenderPreview()
 	{
 		if (!m_Mesh)
@@ -470,43 +496,105 @@ namespace World
 		const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
 		const std::vector<MeshRange>& meshes = m_Mesh->GetMeshes();
 		const std::vector<MeshSubmesh>& submeshes = m_Mesh->GetSubmeshes();
-		const auto submitMesh = [&](int32_t meshIndex, const glm::mat4& transform)
+
+		// D5c-4b:布局 2(蒙皮)的 mesh 一律走蒙皮提交 —— 静态管线按 32B stride 读 64B 顶点会画乱几何。
+		// 调色板按当前 m_AnimTime 算(暂停/未播放时就是当前时间的姿态),按 mesh 下标缓存一份。
+		const bool skinnedLayout = m_Mesh->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned;
+		std::vector<std::vector<glm::mat4>> skinPalettes;
+		if (skinnedLayout && m_DataValid)
 		{
-			if (meshIndex < 0 || static_cast<size_t>(meshIndex) >= meshes.size())
-				return;
-			const MeshRange& range = meshes[static_cast<size_t>(meshIndex)];
-			for (uint32_t sub = 0; sub < range.SubmeshCount; ++sub)
+			skinPalettes.resize(meshes.size());
+			static const Asset::WModelAnimation kEmptyClip;
+			const Asset::WModelAnimation& clip = m_Data.Animations.empty() ? kEmptyClip : m_Data.Animations[0];
+			for (size_t meshIndex = 0; meshIndex < meshes.size() && meshIndex < m_Data.Meshes.size(); ++meshIndex)
 			{
-				const uint32_t submeshIndex = range.FirstSubmesh + sub;
-				if (submeshIndex >= submeshes.size())
-					break;
-				const int32_t slot = submeshes[submeshIndex].MaterialSlot;
-				const Ref<Material> material =
-					(slot >= 0 && static_cast<size_t>(slot) < m_SlotMaterials.size())
-						? m_SlotMaterials[static_cast<size_t>(slot)] : nullptr;
-				Renderer3D::SubmitSubmeshAtSlot(slotBase + drawIndex, m_Mesh, submeshIndex, material, transform, -1);
-				++drawIndex;
+				const int32_t skinIndex = m_Data.Meshes[meshIndex].SkinIndex;
+				if (skinIndex < 0 || static_cast<size_t>(skinIndex) >= m_Data.Skins.size())
+					continue;
+				skinPalettes[meshIndex] = AnimationSystem::ComputePalette(m_Data,
+					static_cast<uint32_t>(skinIndex), clip, m_AnimTime);
 			}
+		}
+
+		const std::vector<std::string>& materialSlots = m_Mesh->GetMaterialSlots();
+		const auto submitSubmesh = [&](int32_t meshIndex, uint32_t submeshIndex, const glm::mat4& transform)
+		{
+			const int32_t slot = submeshes[submeshIndex].MaterialSlot;
+			const Ref<Material> material =
+				(slot >= 0 && static_cast<size_t>(slot) < m_SlotMaterials.size())
+					? m_SlotMaterials[static_cast<size_t>(slot)] : nullptr;
+			const bool skinned = skinnedLayout && meshIndex >= 0
+				&& static_cast<size_t>(meshIndex) < skinPalettes.size()
+				&& !skinPalettes[static_cast<size_t>(meshIndex)].empty();
+			if (skinned)
+			{
+				const std::vector<glm::mat4>& palette = skinPalettes[static_cast<size_t>(meshIndex)];
+				// 蒙皮管线本阶段只支持不透明材质:透明 submesh 跳过(引擎只拒绝不 warn,面板一次性 warn)。
+				if (material && material->GetDesc().BlendMode == MaterialBlendMode::Transparent)
+				{
+					if (!m_TransparentSkipWarned)
+					{
+						m_TransparentSkipWarned = true;
+						const std::string materialPath =
+							(slot >= 0 && static_cast<size_t>(slot) < materialSlots.size())
+								? materialSlots[static_cast<size_t>(slot)] : std::string("(unknown)");
+						WLD_CORE_WARN("[model] preview skips transparent skinned submesh in '{0}' (材质 '{1}'):"
+							"蒙皮管线暂不支持透明材质", m_LogicalPath, materialPath);
+					}
+					++drawIndex;
+					return;
+				}
+				const uint32_t result = Renderer3D::SubmitSkinnedAtSlot(slotBase + drawIndex, m_Mesh,
+					submeshIndex, material, transform, palette.data(),
+					static_cast<uint32_t>(palette.size()), -1);
+				if (result == UINT32_MAX && !m_SkinnedSubmitWarned)
+				{
+					m_SkinnedSubmitWarned = true;
+					WLD_CORE_WARN("[model] preview skinned submit failed for '{0}' submesh {1} "
+						"(layout={2} joints={3});该 submesh 未绘制",
+						m_LogicalPath, submeshIndex, m_Mesh->GetVertexLayoutId(), palette.size());
+				}
+				++drawIndex;
+				return;
+			}
+			Renderer3D::SubmitSubmeshAtSlot(slotBase + drawIndex, m_Mesh, submeshIndex, material, transform, -1);
+			++drawIndex;
 		};
+
 		if (nodes.empty())
 		{
 			// 没有节点树(理论上 v1 格式总有):退化为整体绘制。
 			if (!m_Mesh->HasSubmeshes())
 			{
-				Renderer3D::SubmitAtSlot(slotBase, m_Mesh, nullptr, glm::mat4(1.0f), -1);
+				const bool skinned = skinnedLayout && !skinPalettes.empty() && !skinPalettes[0].empty();
+				if (skinned)
+				{
+					const std::vector<glm::mat4>& palette = skinPalettes[0];
+					const uint32_t result = Renderer3D::SubmitSkinnedAtSlot(slotBase, m_Mesh, UINT32_MAX,
+						nullptr, glm::mat4(1.0f), palette.data(), static_cast<uint32_t>(palette.size()), -1);
+					if (result == UINT32_MAX && !m_SkinnedSubmitWarned)
+					{
+						m_SkinnedSubmitWarned = true;
+						WLD_CORE_WARN("[model] preview whole-mesh skinned submit failed for '{0}'", m_LogicalPath);
+					}
+				}
+				else if (!skinnedLayout)
+				{
+					Renderer3D::SubmitAtSlot(slotBase, m_Mesh, nullptr, glm::mat4(1.0f), -1);
+				}
+				else if (!m_SkinnedSubmitWarned)
+				{
+					// 布局 2 但没有可用调色板(容器数据不完整):静态管线按 32B stride 读 64B 顶点会画乱,宁可跳过。
+					m_SkinnedSubmitWarned = true;
+					WLD_CORE_WARN("[model] preview skips skinned whole-mesh '{0}':调色板不可用(layout={1})",
+						m_LogicalPath, m_Mesh->GetVertexLayoutId());
+				}
 			}
 			else
 			{
+				const int32_t meshIndex = meshes.empty() ? -1 : 0;
 				for (uint32_t submeshIndex = 0; submeshIndex < submeshes.size(); ++submeshIndex)
-				{
-					const int32_t slot = submeshes[submeshIndex].MaterialSlot;
-					const Ref<Material> material =
-						(slot >= 0 && static_cast<size_t>(slot) < m_SlotMaterials.size())
-							? m_SlotMaterials[static_cast<size_t>(slot)] : nullptr;
-					Renderer3D::SubmitSubmeshAtSlot(slotBase + drawIndex, m_Mesh, submeshIndex, material,
-						glm::mat4(1.0f), -1);
-					++drawIndex;
-				}
+					submitSubmesh(meshIndex, submeshIndex, glm::mat4(1.0f));
 			}
 		}
 		else
@@ -521,7 +609,17 @@ namespace World
 					* glm::scale(glm::mat4(1.0f), node.Scale);
 				world[index] = (node.Parent >= 0 && static_cast<size_t>(node.Parent) < index)
 					? world[static_cast<size_t>(node.Parent)] * local : local;
-				submitMesh(node.MeshIndex, world[index]);
+				const int32_t meshIndex = node.MeshIndex;
+				if (meshIndex < 0 || static_cast<size_t>(meshIndex) >= meshes.size())
+					continue;
+				const MeshRange& range = meshes[static_cast<size_t>(meshIndex)];
+				for (uint32_t sub = 0; sub < range.SubmeshCount; ++sub)
+				{
+					const uint32_t submeshIndex = range.FirstSubmesh + sub;
+					if (submeshIndex >= submeshes.size())
+						break;
+					submitSubmesh(meshIndex, submeshIndex, world[index]);
+				}
 			}
 		}
 		Renderer3D::EndScene();
@@ -590,6 +688,20 @@ namespace World
 			}
 		}
 
+		// D5c-4b:播放时间用面板自己的帧间 dt(首帧 0、clamp [0,0.25]),不依赖 EditorLayer/PanelHost。
+		const bool showAnimControls = m_DataValid && HasSkinnedMesh() && !m_Data.Animations.empty();
+		float animDelta = 0.0f;
+		if (m_AnimClockValid)
+			animDelta = std::clamp(static_cast<float>(now - m_LastAnimClock), 0.0f, 0.25f);
+		m_LastAnimClock = now;
+		m_AnimClockValid = true;
+		const float animDuration = AnimationClipDuration();
+		if (showAnimControls && animDuration > 0.0f)
+			m_AnimTime = std::clamp(AnimationSystem::AdvanceTime(m_AnimTime, animDelta, m_AnimSpeed,
+				m_AnimPlaying, m_AnimLoop, animDuration), 0.0f, animDuration);
+		else if (showAnimControls)
+			m_AnimTime = 0.0f;
+
 		const float x = rect.X + 10.0f;
 		const float width = rect.W - 20.0f;
 		float y = rect.Y + 8.0f;
@@ -631,6 +743,8 @@ namespace World
 				"预览不可用(模型未加载或 RHI 设备未就绪)", theme.TextMuted, 12.0f);
 		}
 		y += previewRect.H + 8.0f;
+		if (showAnimControls)
+			y = DrawAnimationControls(ctx, x, y, width, theme);
 		DrawAssetView(ctx, { x, y, width, std::max(0.0f, rect.Y + rect.H - y - 6.0f) }, host);
 	}
 
@@ -822,5 +936,66 @@ namespace World
 		if (!m_Status.empty() && y < rect.Y + rect.H - 13.0f)
 			Wui::Label(ctx, { x, y }, m_Status,
 				m_StatusIsError ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.TextMuted, 11.0f);
+	}
+
+	// D5c-4b:动画控制条 —— play/loop/speed/time + 只读状态行。
+	// 只在"有 skin + ≥1 条动画"时由 OnRender 调用;没有动画的资产这条路径完全不进(旧行为不变)。
+	float ModelPreviewPanel::DrawAnimationControls(Wui::WuiContext& ctx, float x, float y, float width,
+		const Wui::WuiTheme& theme)
+	{
+		const Asset::WModelAnimation* clip = m_Data.Animations.empty() ? nullptr : &m_Data.Animations[0];
+		const float duration = clip ? clip->Duration : 0.0f;
+
+		// 第一行:播放/暂停 + 循环 + 速度(0.1..4)。
+		const float playWidth = 56.0f;
+		if (Wui::Button(ctx, Wui::HashId("model.anim.play"), { x, y, playWidth, 20.0f },
+			m_AnimPlaying ? "暂停" : "播放", theme))
+			m_AnimPlaying = !m_AnimPlaying;
+		bool loop = m_AnimLoop;
+		if (Wui::Checkbox(ctx, Wui::HashId("model.anim.loop"),
+			{ x + playWidth + 8.0f, y + 2.0f, 56.0f, 16.0f }, "循环", loop, theme))
+			m_AnimLoop = loop;
+		Wui::Label(ctx, { x + playWidth + 72.0f, y + 3.0f }, "速度", theme.TextMuted, 11.0f);
+		Wui::DragFloat(ctx, Wui::HashId("model.anim.speed"),
+			{ x + playWidth + 100.0f, y, std::max(48.0f, width - playWidth - 100.0f), 18.0f },
+			m_AnimSpeed, 0.05f, 0.1f, 4.0f, theme);
+		y += 22.0f;
+
+		// 第二行:时间滑杆(0..duration;零时长 clip 用退化范围,值固定 0)。
+		Wui::Label(ctx, { x, y + 3.0f }, "时间", theme.TextMuted, 11.0f);
+		float time = std::clamp(m_AnimTime, 0.0f, duration > 0.0f ? duration : 0.0f);
+		Wui::SliderFloat(ctx, Wui::HashId("model.anim.time"),
+			{ x + 40.0f, y, std::max(40.0f, width - 40.0f), 18.0f }, time, 0.0f,
+			duration > 0.0f ? duration : 0.001f, theme);
+		m_AnimTime = duration > 0.0f ? time : 0.0f;
+		y += 20.0f;
+
+		// 状态行:clip/t/playing 来自面板状态;skin=骨架数、joints=该 mesh 所用 skin 的关节数。
+		size_t jointCount = 0;
+		for (const Asset::WModelMeshRange& mesh : m_Data.Meshes)
+		{
+			if (mesh.SkinIndex >= 0 && static_cast<size_t>(mesh.SkinIndex) < m_Data.Skins.size())
+			{
+				jointCount = m_Data.Skins[static_cast<size_t>(mesh.SkinIndex)].JointNodes.size();
+				break;
+			}
+		}
+		char status[192] = {};
+		std::snprintf(status, sizeof(status), "clip=%s t=%.2f/%.2f playing=%d skin=%zu joints=%zu",
+			(clip && !clip->Name.empty()) ? clip->Name.c_str() : "-", m_AnimTime, duration,
+			m_AnimPlaying ? 1 : 0, m_Data.Skins.size(), jointCount);
+		Wui::WuiAccessNode statusNode;
+		statusNode.Id = Wui::HashId("model.anim.status");
+		statusNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+		statusNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+		statusNode.Kind = "status";
+		statusNode.Label = "model animation";
+		statusNode.Value = status;
+		statusNode.Rect = { x, y, width, 16.0f };
+		statusNode.Interactive = false;
+		Wui::WuiAccessibility::Get().Register(statusNode);
+		Wui::Label(ctx, { x, y }, status, theme.TextMuted, 11.0f);
+		y += 16.0f;
+		return y;
 	}
 }
