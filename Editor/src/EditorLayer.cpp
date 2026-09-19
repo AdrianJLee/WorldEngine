@@ -668,6 +668,15 @@ namespace World
 			}
 			const int32_t width = static_cast<int32_t>(m_SceneRenderer->GetWidth());
 			const int32_t height = static_cast<int32_t>(m_SceneRenderer->GetHeight());
+			// P4-3:附件 texel 坐标 → 视口局部坐标。上面扫描用的是**渲染目标**像素
+			// (GetWidth/GetHeight = 请求尺寸 × rendering.render_scale),而
+			// GetEntityAtMousePosition 收的是视口坐标;render_scale ≠ 1 时两者差一个
+			// "请求尺寸 / 目标尺寸"倍率。倍率 1.0 时两尺寸相等、乘数为 1.0f,
+			// 行为与旧代码逐字节一致(同一条拾取路径)。
+			const float texelToViewportX =
+				static_cast<float>(m_SceneRenderer->GetRequestedWidth()) / static_cast<float>(width);
+			const float texelToViewportY =
+				static_cast<float>(m_SceneRenderer->GetRequestedHeight()) / static_cast<float>(height);
 			// 每个实体取一个"内部"像素(四邻同 id):轮廓边缘 1px 可能因边界效应判空。
 			std::map<int32_t, glm::ivec2> sample;
 			for (int32_t y = 1; y < height - 1 && sample.size() < 64; ++y)
@@ -686,7 +695,8 @@ namespace World
 			int failed = 0;
 			for (const auto& [id, point] : sample)
 			{
-				const Entity picked = GetEntityAtMousePosition({ static_cast<float>(point.x), static_cast<float>(point.y) });
+				const Entity picked = GetEntityAtMousePosition({ static_cast<float>(point.x) * texelToViewportX,
+					static_cast<float>(point.y) * texelToViewportY });
 				const int32_t pickedId = picked.IsValid()
 					? static_cast<int32_t>(static_cast<uint32_t>(static_cast<entt::entity>(picked))) : -1;
 				const bool ok = pickedId == id;
