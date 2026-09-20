@@ -297,6 +297,14 @@ namespace World::Wui
 			{
 				WLD_CORE_WARN("WUI backend failed to load font {0}(回退 {1} 也不可用)",
 					fontPaths[i][0], fontPaths[i][1].empty() ? "<none>" : fontPaths[i][1]);
+				// P4-UX3a(独立验证者实测 0xC0000005):加载失败必须把字面置成"不可用"——
+				// 旧写法只是 continue,留下一个**已分配但未初始化**的 stbtt_fontinfo,
+				// 下游 FaceForCodepoint 仍会把它交出去,解引用后访问冲突。
+				// 置空指针后:AdvanceOf 走等宽回退、DrawText/Bake 按 Info != nullptr 跳过,
+				// 表现是"没有文字"而不是崩溃。
+				delete face.Info;
+				face.Info = nullptr;
+				face.Ttf.clear();
 				continue;
 			}
 			face.Atlas.assign(static_cast<size_t>(face.AtlasW) * face.AtlasH * 4, 0);
