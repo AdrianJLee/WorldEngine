@@ -68,6 +68,9 @@ namespace World
 		virtual void Focus() = 0;
 		// 显示/隐藏窗口(独立窗口复用:避免运行期销毁窗口)。
 		virtual void SetVisible(bool visible) = 0;
+		// P4-UX10:显示但不激活(不抢焦点)。恢复上次开着的浮窗时用 —— 用户正在主窗口
+		// 工作,不该被一个"恢复出来"的窗口打断;平台不支持时退回 SetVisible。
+		virtual void SetVisibleNoActivate(bool visible) { SetVisible(visible); }
 		// 无边框窗口自定义标题栏:让系统进入"窗口移动"循环。
 		virtual void BeginSystemDrag() = 0;
 		// ---- P4-UX9:拖动期间的"投放提示"(不动窗口位置)----

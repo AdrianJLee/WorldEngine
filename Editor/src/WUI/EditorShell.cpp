@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include "../EditorPreferences.h"
 #include "../EditorLayer.h"
 
 #include "World/Core/Asset/ProjectManifest.h"
@@ -25,10 +26,19 @@
 #include <map>
 #include <tuple>
 
+#include <chrono>
+
 namespace World
 {
 	namespace
 	{
+		// P4-UX10:状态栏提示的计时(悬停暂停/移出宽限/淡出都要秒级精度)。
+		double ShellNowSeconds()
+		{
+			return std::chrono::duration<double>(
+				std::chrono::steady_clock::now().time_since_epoch()).count();
+		}
+
 		const char* ZoneName(Wui::DropZone zone)
 		{
 			switch (zone)
@@ -153,9 +163,12 @@ namespace World
 		m_PanelRegistry.emplace("material", std::make_unique<MaterialEditorPanel>());
 		m_PanelRegistry.emplace("scripts", std::make_unique<ScriptsPanel>());
 
-		// 恢复"上次退出时开着"的独立窗口:存档里仍有浮动记录 = 上次开着(关掉的不会自动弹出)。
-		// 按屏幕矩形分组重建:同一窗口的多个标签共享一个容器;AddFloatWindow 内部按面板去重。
-		std::map<std::tuple<int, int, int, int>, std::vector<std::string>> floatGroups;
+		// P4-UX10:恢复"上次退出时开着"的独立窗口。
+		// 存档里仍有浮动记录 = 上次开着(关掉的不会自动弹出);同时记了上次形态(挂靠 chip / 浮窗)。
+		// 策略(EditorPreferences::RestoreWindowsMode):默认 **Ask 询问** —— 引擎不该替用户决定
+		// 他此刻需不需要这些窗口;询问里可以"记住我的选择"。
+		std::vector<PendingFloatRestore> restoreItems;
+		std::map<std::tuple<int, int, int, int>, size_t> floatGroups;
 		for (const Wui::DockFloat& entry : m_Layout.Floating)
 		{
 			if (!IsIndependentPanel(entry.Panel))
@@ -163,31 +176,48 @@ namespace World
 			const auto key = std::make_tuple(
 				static_cast<int>(entry.Rect.X), static_cast<int>(entry.Rect.Y),
 				static_cast<int>(entry.Rect.W), static_cast<int>(entry.Rect.H));
-			floatGroups[key].push_back(entry.Panel);
-		}
-		for (const auto& [key, panels] : floatGroups)
-		{
-			if (panels.empty())
-				continue;
-			const Wui::WuiRect rect { static_cast<float>(std::get<0>(key)), static_cast<float>(std::get<1>(key)),
-				static_cast<float>(std::get<2>(key)), static_cast<float>(std::get<3>(key)) };
-			// 动态材质面板按上面白名单被判定为"已声明独立面板",这里补建实例(路径编码在 id 里)。
-			for (const std::string& panel : panels)
+			auto found = floatGroups.find(key);
+			if (found == floatGroups.end())
 			{
-				EnsureMaterialPanelFromId(panel);
-				EnsureScriptPanelFromId(panel);
-				EnsureModelPanelFromId(panel);
+				PendingFloatRestore item;
+				item.Rect = entry.Rect;
+				item.Attached = entry.Attached;
+				floatGroups.emplace(key, restoreItems.size());
+				restoreItems.push_back(std::move(item));
+				found = floatGroups.find(key);
 			}
-			AddFloatWindow(panels.front(), rect, "restore");
-			if (FloatWindowHost* host = m_FloatHosts.empty() ? nullptr : m_FloatHosts.back().get())
-			{
-				for (size_t i = 1; i < panels.size(); ++i)
-					host->AddPanel(panels[i], false);
-			}
+			restoreItems[found->second].Panels.push_back(entry.Panel);
+			// 同一窗口里只要有一页是浮窗,整窗就按浮窗恢复(挂靠信息含混时取更保守的一方)。
+			restoreItems[found->second].Attached = restoreItems[found->second].Attached && entry.Attached;
 		}
 		// 跨会话记忆:曾经作为独立窗口存在过的面板,其屏幕矩形用于下次打开。
 		for (const Wui::DockFloat& entry : m_Layout.FloatMemory)
 			m_LastFloatRects[entry.Panel] = entry.Rect;
+
+		if (!restoreItems.empty())
+		{
+			switch (Editor::EditorPreferences::Get().Data().RestoreWindows)
+			{
+				case Editor::RestoreWindowsMode::None:
+					// "不恢复" = 以后也不再问:清掉待恢复记录(位置记忆仍在,可从 Window 菜单重开)。
+					m_Layout.Floating.clear();
+					SaveLayout();   // 立刻落盘,别把"待恢复"留在文件里等下次换策略又冒出来
+					WLD_CORE_INFO("[float] restore skipped by preference ({0} windows forgotten)", restoreItems.size());
+					break;
+				case Editor::RestoreWindowsMode::Tabs:
+					RestoreIndependentWindows(restoreItems, true);
+					break;
+				case Editor::RestoreWindowsMode::Layout:
+					RestoreIndependentWindows(restoreItems, false);
+					break;
+				case Editor::RestoreWindowsMode::Ask:
+				default:
+					m_PendingFloatRestore = std::move(restoreItems);   // 首个 UI 帧弹询问
+					WLD_CORE_INFO("[float] {0} windows from last session waiting for the restore prompt",
+						m_PendingFloatRestore.size());
+					break;
+			}
+		}
 	}
 
 	EditorShell::~EditorShell() = default;
@@ -274,6 +304,11 @@ namespace World
 		Wui::DockLayout out = m_Layout;
 		StripIndependentPanelsFromTree(out);
 		RestoreDockedPanelsFromFloat(out);
+		// P4-UX10:记录每个独立窗口的**上次形态**(挂靠 chip / 浮窗)——下次启动据此恢复或询问。
+		// 判定统一走 PanelStateLabel(单一事实源),覆盖顶栏挂靠、拖动脱出、菜单与 AI 命令各条路径,
+		// 不需要在每个状态变更点手写标志位。
+		for (Wui::DockFloat& entry : out.Floating)
+			entry.Attached = std::strcmp(PanelStateLabel(entry.Panel), "attached") == 0;
 		return out;
 	}
 
@@ -880,7 +915,8 @@ namespace World
 		const Wui::WuiId projectSettingsModalId = Wui::HashId("modal.projectsettings");
 		const bool shellModalOpen = m_ImportModalOpen || m_Editor.ShowUnsavedModal()
 			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress() || m_ShowProjectSettings
-			|| ctx.Modal() == projectSettingsModalId;
+			|| ctx.Modal() == projectSettingsModalId
+			|| !m_PendingFloatRestore.empty() || ctx.Modal() == Wui::HashId("modal.restorewindows");
 		if (shellModalOpen)
 			Wui::BeginModalInputBlock(ctx);
 		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
@@ -1235,6 +1271,7 @@ namespace World
 		node.Interactive = false;
 		node.Visible = true;
 		Wui::WuiAccessibility::Get().Register(node);
+		DrawStatusNotice(ctx, rect);
 	}
 
 	void EditorShell::RenderNode(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -1243,6 +1280,90 @@ namespace World
 			RenderTabs(ctx, node, area);
 		else
 			RenderSplit(ctx, node, area);
+	}
+
+	// P4-UX10:状态栏提示(人类交互细节都是刻意的,别当装饰):
+	//   · 鼠标停在提示上 = **暂停倒计时**,不会读到一半消失(用户明确要求);
+	//   · 鼠标移开 = 再给 1.2s 宽限,然后 0.25s 淡出(即使悬停超过 4s 再移开也一样);
+	//   · 悬停时右侧出现 ×,点提示或按 Esc 立即关闭(可撤销/可控);
+	//   · 悬停期间光标变手型,告诉用户"这块是可以点的"。
+	void EditorShell::DrawStatusNotice(Wui::WuiContext& ctx, const Wui::WuiRect& statusBar)
+	{
+		if (!m_Notice.Active || m_Notice.Text.empty())
+			return;
+		if (ctx.WasKeyPressed(KeyCodes::Escape))
+		{
+			m_Notice.Active = false;
+			return;
+		}
+		const double now = ShellNowSeconds();
+		const float textWidth = ctx.MeasureTextWidth(m_Notice.Text, 12.0f);
+		const Wui::WuiRect chip { statusBar.X + statusBar.W - 210.0f - textWidth, statusBar.Y + 2.0f,
+			textWidth + 30.0f, statusBar.H - 4.0f };
+		const bool hovered = ctx.IsHovered(chip);
+		if (hovered)
+		{
+			m_Notice.ShownAt = now;      // 悬停 = 冻结倒计时
+			m_Notice.LeaveAt = 0.0;
+			ctx.SetCursor(Wui::WuiCursor::Hand);
+		}
+		else if (m_Notice.Hovered)
+		{
+			m_Notice.LeaveAt = now;      // 刚移开:进入宽限期
+		}
+		m_Notice.Hovered = hovered;
+
+		constexpr double kStaySeconds = 4.0;    // 默认停留
+		constexpr double kGraceSeconds = 1.2;   // 移开后的宽限
+		constexpr double kFadeSeconds = 0.25;
+		float alpha = 1.0f;
+		if (!hovered)
+		{
+			const bool leaving = m_Notice.LeaveAt > 0.0;
+			const double elapsed = now - (leaving ? m_Notice.LeaveAt : m_Notice.ShownAt);
+			const double limit = leaving ? kGraceSeconds : kStaySeconds;
+			if (elapsed >= limit + kFadeSeconds)
+			{
+				m_Notice.Active = false;
+				return;
+			}
+			if (elapsed > limit)
+				alpha = 1.0f - static_cast<float>((elapsed - limit) / kFadeSeconds);
+		}
+		alpha = std::clamp(alpha, 0.0f, 1.0f);
+
+		const Wui::WuiColor background { m_Theme.ActiveBg.R, m_Theme.ActiveBg.G, m_Theme.ActiveBg.B,
+			(hovered ? 0.95f : 0.75f) * alpha };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, chip, background, 3.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, chip,
+			{m_Theme.Accent.R, m_Theme.Accent.G, m_Theme.Accent.B, alpha}, 3.0f, 1.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { chip.X + 10.0f, chip.Y + 3.0f, 0, 0 },
+			{m_Theme.Text.R, m_Theme.Text.G, m_Theme.Text.B, alpha}, 0.0f, 1.0f, m_Notice.Text, 12.0f, false });
+		if (hovered)
+		{
+			const Wui::WuiRect close { chip.X + chip.W - 18.0f, chip.Y + 2.0f, 14.0f, chip.H - 4.0f };
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { close.X + 3.0f, close.Y + 2.0f, 0, 0 },
+				m_Theme.TextMuted, 0.0f, 1.0f, "x", 12.0f, false });
+			if (ctx.IsClicked(close) || ctx.IsClicked(chip))
+			{
+				m_Notice.Active = false;
+				return;
+			}
+		}
+		// 无障碍:脚本/读屏能读到这条提示,也能点它关掉。
+		Wui::WuiAccessNode node;
+		node.Id = Wui::HashId("shell.notice");
+		node.Window = "main";
+		node.Panel = "shell";
+		node.Kind = "notice";
+		node.Label = Wui::Tr("notice.label", "Status notice");
+		node.Value = m_Notice.Text;
+		node.Rect = chip;
+		node.Enabled = true;
+		node.Interactive = true;
+		node.Visible = true;
+		node.Tooltip = Wui::Tr("notice.tooltip", "Click to dismiss (Esc). It stays while the pointer is on it.");
+		Wui::WuiAccessibility::Get().Register(node);
 	}
 
 	void EditorShell::RenderSplit(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -1588,6 +1709,7 @@ namespace World
 						m_ActiveWindowTag.clear();
 				}
 				ctx.RecordOp("float", "detach", dragged, "");
+				SaveLayout();   // 形态变了(挂靠 → 浮窗),立刻落盘(P4-UX10)
 			}
 			m_AttachTagPress.clear();
 			m_AttachTagDrag.clear();
@@ -1912,7 +2034,8 @@ namespace World
 			m_Ctx->RecordOp("float", "move", panel, "");
 	}
 
-	void EditorShell::AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect, const char* origin)
+	void EditorShell::AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect, const char* origin,
+		bool startHidden)
 	{
 		WLD_CORE_INFO("[float] AddFloatWindow panel={0} origin={1} rect=({2},{3},{4},{5})",
 			panel, origin, screenRect.X, screenRect.Y, screenRect.W, screenRect.H);
@@ -1922,7 +2045,7 @@ namespace World
 		{
 			existing->SetScreenPosition(screenRect.X, screenRect.Y);
 			existing->ActivatePanel(panel);
-			existing->SetHidden(false);
+			existing->SetHidden(startHidden);
 			WLD_CORE_INFO("[float] reused existing window for panel={0}", panel);
 			return;
 		}
@@ -1936,7 +2059,7 @@ namespace World
 				continue;
 			host->SetScreenPosition(screenRect.X, screenRect.Y);
 			host->AddPanel(panel, true);
-			host->SetHidden(false);
+			host->SetHidden(startHidden);
 			WLD_CORE_INFO("[float] reused hidden window for panel={0}", panel);
 			return;
 		}
@@ -1958,12 +2081,72 @@ namespace World
 		try
 		{
 			m_FloatHosts.push_back(std::make_unique<FloatWindowHost>(panel, PanelTitle(panel), screenRect, std::move(callbacks)));
+			if (startHidden)
+				m_FloatHosts.back()->SetHidden(true);   // 恢复成顶栏标签:不闪窗口
 		}
 		catch (const std::exception& error)
 		{
 			WLD_CORE_ERROR("[float] create failed for '{0}': {1}", panel, error.what());
 			m_Layout.CloseFloating(panel);
 		}
+	}
+
+	// P4-UX10:按策略恢复上次的独立窗口。
+	// forceTabs = 一律恢复成顶栏标签(不弹 OS 窗口、不抢焦点);否则按每项上次形态。
+	void EditorShell::RestoreIndependentWindows(const std::vector<PendingFloatRestore>& items, bool forceTabs)
+	{
+		uint32_t restored = 0;
+		uint32_t asTabs = 0;
+		for (const PendingFloatRestore& item : items)
+		{
+			if (item.Panels.empty())
+				continue;
+			// 动态面板(材质/脚本/模型)按 id 补建实例。
+			for (const std::string& panel : item.Panels)
+			{
+				EnsureMaterialPanelFromId(panel);
+				EnsureScriptPanelFromId(panel);
+				EnsureModelPanelFromId(panel);
+			}
+			const bool attach = forceTabs || item.Attached;
+			// 先隐藏着建出来:恢复成 chip 时不会"闪一下窗口",恢复成浮窗时下一步再显示。
+			AddFloatWindow(item.Panels.front(), item.Rect, "restore", true);
+			FloatWindowHost* host = m_FloatHosts.empty() ? nullptr : m_FloatHosts.back().get();
+			if (!host)
+				continue;
+			for (size_t i = 1; i < item.Panels.size(); ++i)
+				host->AddPanel(item.Panels[i], false);
+			if (attach)
+			{
+				AttachIndependentWindowToSlot(item.Panels.front());
+				++asTabs;
+			}
+			else
+			{
+				host->ShowWithoutActivation();   // 浮窗按上次位置回来,但不抢焦点
+			}
+			++restored;
+		}
+		if (restored > 0)
+		{
+			std::string text = Wui::Tr("notice.restore", "Restored last session's windows") + ": "
+				+ std::to_string(restored);
+			if (asTabs == restored)
+				text += "  ·  " + Wui::Tr("notice.restore.tabs", "they are in the top bar");
+			PushNotice(text);
+		}
+	}
+
+	// 状态栏提示:给"刚刚发生了什么"一个不打断的表达。
+	void EditorShell::PushNotice(const std::string& text)
+	{
+		m_Notice.Text = text;
+		m_Notice.Active = true;
+		m_Notice.ShownAt = ShellNowSeconds();
+		m_Notice.LeaveAt = 0.0;
+		m_Notice.Alpha = 1.0f;
+		m_Notice.Hovered = false;
+		WLD_CORE_INFO("[notice] {0}", text);
 	}
 
 	// ---- AI 控制通道 ----
@@ -2058,6 +2241,7 @@ namespace World
 		// 与顶栏拖出同一条操作记录(category/action/target 口径一致)。
 		if (m_Ctx)
 			m_Ctx->RecordOp("float", "detach", panel, wasAttached ? "attached" : "opened");
+		SaveLayout();   // 形态变了(挂靠 → 浮窗),立刻落盘(P4-UX10)
 		const Wui::WuiRect rect = host->ScreenRect();
 		if (message)
 		{
@@ -2891,6 +3075,7 @@ namespace World
 		m_LastDragPos = { 0, 0 };
 		m_AttachCooldownFrames = 45;
 		WLD_CORE_INFO("Independent window attached to slot: {0} ({1} panels)", panel, panels.size());
+		SaveLayout();   // 立刻落盘"这次是挂靠形态",下次启动才能按形态恢复/询问(P4-UX10)
 	}
 
 	// 隐藏单个面板(标签栏 x / Window 菜单):从所属窗口摘除,窗口为空则销毁。
@@ -3114,6 +3299,75 @@ namespace World
 		// 那份错误框必须画在选择器**之上**才看得见(与 D10-9 面板内选择器时期的行为一致);
 		// 选择器保持打开并把失败原因写进 import.dest.status。
 		RenderImportDestinationModal(ctx);
+
+		// ---- P4-UX10:启动询问"要不要恢复上次开着的独立窗口" ----
+		// 用户 2026-09-20:"默认设置应该是询问" —— 引擎不知道用户此刻需不需要这些窗口,
+		// 与其替他决定(全弹出来/全丢掉),不如问一次,并允许"记住我的选择"。
+		{
+			const Wui::WuiId restoreModal = Wui::HashId("modal.restorewindows");
+			if (!m_PendingFloatRestore.empty())
+				ctx.SetModal(restoreModal);
+			Wui::WuiRect panel;
+			bool escapePressed = false;
+			Wui::ModalFrameDesc frameDesc;
+			frameDesc.Id = restoreModal;
+			frameDesc.Title = Wui::Tr("modal.restore.title", "Restore Independent Windows");
+			frameDesc.Size = { 470.0f, 218.0f };
+			if (Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, m_Theme))
+			{
+				const size_t count = m_PendingFloatRestore.size();
+				std::string body = Wui::Tr("modal.restore.body", "Last session left these windows open:");
+				for (size_t i = 0; i < count && i < 3; ++i)
+					body += std::string(i == 0 ? " " : ", ") + std::string(PanelTitle(m_PendingFloatRestore[i].Panels.front()));
+				if (count > 3)
+					body += Wui::Tr("modal.restore.more", " …");
+				Wui::Label(ctx, { panel.X + 16.0f, panel.Y + 46.0f }, body, m_Theme.Text, 13.0f);
+				Wui::Label(ctx, { panel.X + 16.0f, panel.Y + 70.0f },
+					Wui::Tr("modal.restore.hint",
+						"Top-bar tabs keep the desktop clean and never steal focus; floating windows come back without focus too."),
+					m_Theme.TextMuted, 12.0f);
+				const Wui::LocalizedLabel remember = Wui::TrLabel("modal.restore.remember", "Remember my choice");
+				Wui::Checkbox(ctx, Wui::HashId("modal.restore.remember"),
+					{ panel.X + 16.0f, panel.Y + 96.0f, 280.0f, 20.0f },
+					remember.Text, remember.Term, m_RestoreAskRemember, m_Theme);
+				const Wui::ModalButtonDesc buttons[3] = {
+					{ Wui::Tr("modal.restore.tabs", "Restore as Tabs"), Wui::HashId("modal.restore.tabs"), true },
+					{ Wui::Tr("modal.restore.layout", "Restore Layout"), Wui::HashId("modal.restore.layout"), true },
+					{ Wui::Tr("modal.restore.none", "Don't Restore"), Wui::HashId("modal.restore.none"), true },
+				};
+				const int clicked = Wui::ModalButtons(ctx, panel, buttons, 3, m_Theme);
+				if (clicked >= 0 || escapePressed)
+				{
+					std::vector<PendingFloatRestore> pending = std::move(m_PendingFloatRestore);
+					m_PendingFloatRestore.clear();
+					ctx.ClearModal();
+					Editor::EditorPreferences& preferences = Editor::EditorPreferences::Get();
+					if (clicked == 0)
+					{
+						RestoreIndependentWindows(pending, true);
+						if (m_RestoreAskRemember)
+							preferences.SetRestoreWindows(Editor::RestoreWindowsMode::Tabs);
+					}
+					else if (clicked == 1)
+					{
+						RestoreIndependentWindows(pending, false);
+						if (m_RestoreAskRemember)
+							preferences.SetRestoreWindows(Editor::RestoreWindowsMode::Layout);
+					}
+					else
+					{
+						// 不恢复(本次 / Esc 也是这条):记住了就同时清掉记录,下次不再问。
+						if (m_RestoreAskRemember)
+						{
+							preferences.SetRestoreWindows(Editor::RestoreWindowsMode::None);
+							m_Layout.Floating.clear();
+						}
+						WLD_CORE_INFO("[float] restore declined for this session ({0} windows kept in layout)", pending.size());
+					}
+				}
+				Wui::EndModalFrame(ctx);
+			}
+		}
 
 		const Wui::WuiId unsaved = Wui::HashId("modal.unsaved");
 		if (m_Editor.ShowUnsavedModal()) ctx.SetModal(unsaved);

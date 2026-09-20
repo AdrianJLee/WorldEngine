@@ -288,6 +288,15 @@ namespace World
 			m_Window->Focus();
 	}
 
+	void FloatWindowHost::ShowWithoutActivation()
+	{
+		m_Hidden = false;
+		if (!m_Window)
+			return;
+		m_Window->SetShouldClose(false);
+		m_Window->SetVisibleNoActivate(true);
+	}
+
 	bool FloatWindowHost::IsFocused() const
 	{
 		if (!m_Window || m_Hidden)

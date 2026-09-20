@@ -75,6 +75,8 @@ namespace World
 		// 隐藏/复用:关闭或挂靠时隐藏窗口而不是销毁(运行期销毁在 Vulkan 下会崩)。
 		bool IsHidden() const { return m_Hidden; }
 		void SetHidden(bool hidden);
+		// P4-UX10:显示窗口但**不抢焦点**(恢复上次的浮窗用;`SetHidden(false)` 会激活窗口)。
+		void ShowWithoutActivation();
 		// 渲染后端切换:重建 OS 窗口与呈现目标(GL 上下文/ Vulkan 表面与窗口绑定)。
 		void RecreateWindow();
 		// W9-2:本独立窗口是否在前台(GLFW GLFW_FOCUSED);隐藏/无窗口时 false。

@@ -36,6 +36,26 @@ namespace World::Editor
 			return Wui::WuiThemeMode::Dark;
 		}
 
+		const char* RestoreModeToString(RestoreWindowsMode mode)
+		{
+			switch (mode)
+			{
+				case RestoreWindowsMode::Tabs: return "tabs";
+				case RestoreWindowsMode::Layout: return "layout";
+				case RestoreWindowsMode::None: return "none";
+				case RestoreWindowsMode::Ask:
+				default: return "ask";
+			}
+		}
+
+		RestoreWindowsMode RestoreModeFromString(const std::string& value)
+		{
+			if (value == "tabs") return RestoreWindowsMode::Tabs;
+			if (value == "layout") return RestoreWindowsMode::Layout;
+			if (value == "none") return RestoreWindowsMode::None;
+			return RestoreWindowsMode::Ask;
+		}
+
 		// 日志级别:偏好文件里存可读字符串("info"),面板用下拉;索引 = 下拉选项下标。
 		struct LogLevelOption
 		{
@@ -125,6 +145,8 @@ namespace World::Editor
 						m_Data.ScriptFontSize = std::clamp(static_cast<float>(value.Number), 10.0f, 32.0f);
 					else if (key == "asset_hot_reload" && isBool)
 						m_Data.AssetHotReload = value.Bool;
+					else if (key == "restore_windows" && isString)
+						m_Data.RestoreWindows = RestoreModeFromString(value.String);
 					else if (key == "ai_control_port" && isNumber)
 						m_Data.AiControlPort = std::clamp(static_cast<int>(value.Number), 0, 65535);
 					else if (key == "log_level" && isString)
@@ -160,6 +182,10 @@ namespace World::Editor
 		}
 		if (const char* hints = std::getenv("WLD_UI_TERM_HINTS"))
 			m_Data.TermHints = !(hints[0] == '0' || hints[0] == '\0');
+		// 启动恢复策略:自动化/脚本可钉死(ask 会让无人值守的启动弹出一个模态)。
+		if (const char* restore = std::getenv("WLD_RESTORE_WINDOWS"))
+			if (restore[0])
+				m_Data.RestoreWindows = RestoreModeFromString(restore);
 		WLD_CORE_INFO("编辑器偏好已加载: {0}(language={1} theme={2} scale={3:.2f} termHints={4} scriptFont={5:.0f} hotReload={6} aiPort={7} log={8})",
 			path.string(), m_Data.Language, ThemeToString(m_Data.Theme), m_Data.UiScale,
 			m_Data.TermHints ? 1 : 0, m_Data.ScriptFontSize, m_Data.AssetHotReload ? 1 : 0,
@@ -217,6 +243,7 @@ namespace World::Editor
 			<< "  \"term_hints\": " << FormatBool(m_Data.TermHints) << ",\n"
 			<< "  \"script_font_size\": " << FormatFloat(m_Data.ScriptFontSize) << ",\n"
 			<< "  \"asset_hot_reload\": " << FormatBool(m_Data.AssetHotReload) << ",\n"
+			<< "  \"restore_windows\": \"" << RestoreModeToString(m_Data.RestoreWindows) << "\",\n"
 			<< "  \"ai_control_port\": " << m_Data.AiControlPort << ",\n"
 			<< "  \"log_level\": \"" << kLogLevels[ClampLogLevel(m_Data.LogLevel)].Value << "\",\n"
 			<< "  \"diag_frame_timing\": " << FormatBool(m_Data.DiagFrameTiming) << ",\n"
@@ -287,6 +314,14 @@ namespace World::Editor
 		if (m_Data.AssetHotReload == enabled)
 			return;
 		m_Data.AssetHotReload = enabled;
+		Commit();
+	}
+
+	void EditorPreferences::SetRestoreWindows(RestoreWindowsMode mode)
+	{
+		if (m_Data.RestoreWindows == mode)
+			return;
+		m_Data.RestoreWindows = mode;
 		Commit();
 	}
 
@@ -487,6 +522,19 @@ namespace World::Editor
 			[&prefs] { prefs.SetAssetHotReload(true); return true; });
 
 		// ---- 自动化 Automation ----
+		// 启动恢复上次的独立窗口:默认 Ask(用户 2026-09-20:"默认设置应该是询问")。
+		addEnum("editor.workflow.restore_windows", "Workflow", SettingApply::Restart, "Restore Open Windows",
+			"启动时如何处理上次开着的独立窗口\n默认:询问(启动时问一次,可勾\"记住我的选择\")。\n"
+			"恢复为顶栏标签 = 不弹窗口、不抢焦点;按上次形态 = 浮窗仍在但不会抢焦点。\n重启编辑器后生效",
+			{ SettingOption { "ask", "Ask Every Time" },
+				SettingOption { "tabs", "Restore as Top-Bar Tabs" },
+				SettingOption { "layout", "Restore Previous Layout" },
+				SettingOption { "none", "Don't Restore" } },
+			[&prefs] { return std::string(RestoreModeToString(prefs.Data().RestoreWindows)); },
+			[&prefs](const std::string& value, std::string*) { prefs.SetRestoreWindows(RestoreModeFromString(value)); return true; },
+			[&prefs] { return prefs.Data().RestoreWindows == RestoreWindowsMode::Ask; },
+			[&prefs] { prefs.SetRestoreWindows(RestoreWindowsMode::Ask); return true; });
+
 		addNumber("editor.automation.ai_control_port", "Automation", SettingType::Int, SettingApply::Restart,
 			"AI Control Port",
 			"AI control port\nListens on 127.0.0.1 only; lets scripts/AI read the accessibility tree and take screenshots; 0 = off. The --ai-control=<port> argument takes precedence.\nDefault: 0 (off). Takes effect after restarting the editor.",

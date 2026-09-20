@@ -8,6 +8,17 @@
 
 namespace World::Editor
 {
+	// P4-UX10:启动时如何处理"上次还开着的独立窗口"。
+	// 默认 Ask —— 用户 2026-09-20 明确要求"默认设置应该是询问":引擎不知道用户当下
+	// 需不需要这些窗口,与其替他决定(全弹出来 / 全丢掉),不如问一次并允许记住选择。
+	enum class RestoreWindowsMode : int
+	{
+		Ask = 0,     // 启动时询问(默认;可勾"记住我的选择"写成下面三种之一)
+		Tabs = 1,    // 一律恢复为顶栏标签(零噪声:不弹 OS 窗口、不抢焦点)
+		Layout = 2,  // 按上次形态:挂靠过的恢复成 chip,浮窗恢复成窗口但**不抢焦点**
+		None = 3,    // 不恢复(并把记录清掉,下次不再问)
+	};
+
 	// 编辑器用户偏好(P4-UX1):用户级、不随项目提交 —— 存 `Editor/editor-prefs.json`。
 	// 与 `Game/project.we.yaml`(项目级)严格分家:语言/主题/密度/字号属于"这台机器上的这个人"。
 	//
@@ -26,6 +37,8 @@ namespace World::Editor
 		// ---- P4-UX7:编辑器 / 工作流 / 自动化 / 诊断 ----
 		float ScriptFontSize = 14.0f;                   // 10..32,脚本编辑器初始字号(用户明确要过)
 		bool AssetHotReload = true;                     // 资产/材质热重载;WLD_ASSET_HOTRELOAD 覆盖
+		// 启动恢复策略(见 RestoreWindowsMode);`WLD_RESTORE_WINDOWS=ask|tabs|layout|none` 覆盖。
+		RestoreWindowsMode RestoreWindows = RestoreWindowsMode::Ask;
 		// AI 控制通道端口:0 = 关闭。服务器在启动时创建 → 重启生效
 		// (`--ai-control=<port>` 命令行优先级更高,自动化脚本不受偏好影响)。
 		int AiControlPort = 0;                          // 0..65535
@@ -57,6 +70,7 @@ namespace World::Editor
 		void SetShowTermHints(bool enabled);
 		void SetScriptFontSize(float size);
 		void SetAssetHotReload(bool enabled);
+		void SetRestoreWindows(RestoreWindowsMode mode);
 		void SetAiControlPort(int port);
 		void SetLogLevel(int level);
 		void SetDiagFrameTiming(bool enabled);

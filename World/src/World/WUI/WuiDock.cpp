@@ -534,6 +534,9 @@ namespace World::Wui
 				JsonValue item;
 				item.type = JsonValue::Type::Object;
 				item.Object.push_back({ "panel", JsonValue::MakeString(entry.Panel) });
+				// 只在挂靠时写字段,老存档/浮窗保持干净(缺字段 = 浮窗)。
+				if (entry.Attached)
+					item.Object.push_back({ "attached", JsonValue::MakeBool(true) });
 				JsonValue rect;
 				rect.type = JsonValue::Type::Array;
 				rect.Array.push_back(JsonValue::MakeNumber(entry.Rect.X));
@@ -665,6 +668,10 @@ namespace World::Wui
 							window.Rect = defaults.Rect;
 					}
 				}
+				// P4-UX10:缺字段 = 浮窗(与老存档兼容)。
+				if (const JsonValue* attached = entry.Find("attached"))
+					if (attached->type == JsonValue::Type::Bool)
+						window.Attached = attached->Bool;
 				layout.Floating.push_back(std::move(window));
 			}
 		}

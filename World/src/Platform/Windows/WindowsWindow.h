@@ -35,6 +35,7 @@ namespace World
 		void SetShouldClose(bool shouldClose) override;
 		void Focus() override;
 		void SetVisible(bool visible) override;
+		void SetVisibleNoActivate(bool visible) override;
 		void BeginSystemDrag() override;
 		// P4-UX9:拖动期间光标进入挂靠栏时,在栏上画一层独立提示(见 Window::SetSystemDragDropHint)。
 		void SetSystemDragDropHint(const glm::vec4& zoneScreenRect) override;

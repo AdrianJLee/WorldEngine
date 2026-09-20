@@ -44,6 +44,10 @@ namespace World::Wui
 	{
 		PanelId Panel;
 		WuiRect Rect { 220, 140, 480, 320 };
+		// P4-UX10:上次退出时这个窗口是**挂靠在顶栏(chip)**还是**浮在桌面上**。
+		// 挂靠只是"隐藏 OS 窗口 + 顶栏标签",以前存档不区分两者,于是下次启动会把
+		// 挂靠过的窗口全当浮窗弹出来(用户 2026-09-20 反馈)。
+		bool Attached = false;
 	};
 
 	class DockLayout

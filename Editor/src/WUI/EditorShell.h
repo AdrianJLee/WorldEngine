@@ -186,7 +186,9 @@ namespace World
 		// 挂靠栏:横跨主窗口的一条(类似菜单栏),独立窗口拖到其上即挂靠。
 		void DrawAttachBar(Wui::WuiContext& ctx);
 		// 独立窗口组件:创建/销毁(与停靠面板不同,各自拥有 OS 窗口)。
-		void AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect, const char* origin);
+		// startHidden:创建后立刻隐藏(恢复为顶栏标签时用,避免窗口"闪一下就消失")。
+		void AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect, const char* origin,
+			bool startHidden = false);
 		// 整窗关闭(OS 窗口关闭或渲染失败):窗口内全部面板隐藏并写回布局。
 		void CloseFloatWindow(const std::string& panel, bool recordChange, Wui::WuiContext* ctx);
 		// 隐藏单个面板(标签栏 x 或 Window 菜单):窗口为空时销毁该窗口。
@@ -289,6 +291,31 @@ namespace World
 		std::string m_TabDragPanel;     // 本次拖拽真正起手于哪个标签页(tab 按下)
 		// P4-UX9:拖动独立窗口 = 预置位置 + 系统移动循环(SC_MOVE) + 落点判定,见实现注释。
 		void PerformIndependentWindowDrag(const std::string& panel);
+		// ---- P4-UX10:启动恢复上次开着的独立窗口 ----
+		struct PendingFloatRestore
+		{
+			std::vector<std::string> Panels;   // 同一窗口的标签页(首标签 = 窗口 key)
+			Wui::WuiRect Rect { 0, 0, 0, 0 };
+			bool Attached = false;             // 上次是挂靠(chip)还是浮窗
+		};
+		// forceTabs = 一律恢复成顶栏标签(不弹窗口);否则按每项的 Attached 决定。
+		void RestoreIndependentWindows(const std::vector<PendingFloatRestore>& items, bool forceTabs);
+		std::vector<PendingFloatRestore> m_PendingFloatRestore;   // Ask 模式:等用户回答
+		bool m_RestoreAskRemember = false;                        // 询问框里的"记住我的选择"
+
+		// 状态栏提示(人类交互:悬停暂停计时 / 移出给宽限再淡出 / 可点可 Esc)。
+		struct StatusNotice
+		{
+			std::string Text;
+			double ShownAt = 0.0;
+			double LeaveAt = 0.0;     // 悬停结束的时刻(0 = 没离开过)
+			float Alpha = 1.0f;
+			bool Active = false;
+			bool Hovered = false;
+		};
+		StatusNotice m_Notice;
+		void PushNotice(const std::string& text);
+		void DrawStatusNotice(Wui::WuiContext& ctx, const Wui::WuiRect& statusBar);
 		// 上一帧各独立窗口的位置(用于判断"停稳在槽位上")。
 		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatScreenRects;
 

@@ -406,6 +406,17 @@ namespace World
 			glfwHideWindow(m_Window);
 	}
 
+	void WindowsWindow::SetVisibleNoActivate(bool visible)
+	{
+		if (!m_Window)
+			return;
+		if (m_ForceHidden && visible)
+			return;
+		// SW_SHOWNOACTIVATE:窗口出现但不抢前台/焦点(恢复上次的浮窗时用)。
+		if (const HWND hwnd = glfwGetWin32Window(m_Window))
+			ShowWindow(hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
+	}
+
 	void WindowsWindow::BeginSystemDrag()
 	{
 		if (const HWND hwnd = glfwGetWin32Window(m_Window))

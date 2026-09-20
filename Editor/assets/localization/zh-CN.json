@@ -357,5 +357,26 @@
 
   "menu.file.lua_stubs": "生成 Lua API 存根",
   "menu.file.cooking": "烘焙(Cook)",
-  "menu.file.export_ops": "导出操作日志"
+  "menu.file.export_ops": "导出操作日志",
+
+  "modal.restore.title": "恢复独立窗口",
+  "modal.restore.body": "上次退出时这些窗口是开着的:",
+  "modal.restore.more": " 等",
+  "modal.restore.hint": "恢复为顶栏标签最干净:不弹窗口、不抢焦点;按上次形态恢复时,浮窗也不会抢焦点。",
+  "modal.restore.remember": "记住我的选择",
+  "modal.restore.tabs": "恢复为顶栏标签",
+  "modal.restore.layout": "按上次形态恢复",
+  "modal.restore.none": "不恢复",
+
+  "notice.restore": "已恢复上次的窗口",
+  "notice.restore.tabs": "在顶栏可以找到",
+  "notice.label": "状态提示",
+  "notice.tooltip": "点一下或按 Esc 关闭;鼠标停在这里时不会自动消失",
+
+  "settings.editor.workflow.restore_windows": "恢复上次的独立窗口",
+  "settings.editor.workflow.restore_windows.tooltip": "启动时如何处理上次开着的独立窗口\n默认:询问(启动时问一次,可勾\"记住我的选择\")。\n恢复为顶栏标签 = 不弹窗口、不抢焦点;按上次形态 = 浮窗仍在但不会抢焦点。\n重启编辑器后生效",
+  "settings.editor.workflow.restore_windows.option.ask": "每次询问",
+  "settings.editor.workflow.restore_windows.option.tabs": "恢复为顶栏标签",
+  "settings.editor.workflow.restore_windows.option.layout": "按上次形态恢复",
+  "settings.editor.workflow.restore_windows.option.none": "不恢复"
 }
