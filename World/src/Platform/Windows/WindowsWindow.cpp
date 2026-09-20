@@ -412,6 +412,12 @@ namespace World
 		}
 	}
 
+	void WindowsWindow::SetSystemDragParkZone(const glm::vec4& parkScreenRect, float parkTopY)
+	{
+		m_DragParkZone = parkScreenRect;
+		m_DragParkTop = parkTopY;
+	}
+
 	void WindowsWindow::SetFrameless(bool frameless)
 	{
 		if (!m_Window)
@@ -548,6 +554,24 @@ namespace World
 			// 返回 0 = 客户区覆盖整个窗口矩形(边缘缩放仍由上面的 WM_NCHITTEST 负责)。
 			if (msg == WM_NCCALCSIZE && self->m_Frameless && wParam)
 				return 0;
+			// P4-UX9:系统移动循环(SC_MOVE)期间,若光标进了挂靠栏,就把窗口压到栏下方
+			// —— 用户看到"窗口停在栏下"= 松手即挂靠,目标始终可见。
+			if (msg == WM_MOVING && self->m_DragParkZone.z > 0.0f)
+			{
+				RECT* moving = reinterpret_cast<RECT*>(lParam);
+				POINT cursor { 0, 0 };
+				GetCursorPos(&cursor);
+				const bool overPark = static_cast<float>(cursor.x) >= self->m_DragParkZone.x
+					&& static_cast<float>(cursor.x) <= self->m_DragParkZone.x + self->m_DragParkZone.z
+					&& static_cast<float>(cursor.y) <= self->m_DragParkZone.y + self->m_DragParkZone.w;
+				if (overPark && self->m_DragParkTop > 0.0f)
+				{
+					const int height = moving->bottom - moving->top;
+					moving->top = static_cast<int>(self->m_DragParkTop);
+					moving->bottom = moving->top + height;
+					return TRUE;
+				}
+			}
 		}
 		const WNDPROC previous = self ? self->m_PrevWndProc : nullptr;
 		return previous ? CallWindowProcW(previous, hwnd, msg, wParam, lParam)

@@ -4,6 +4,8 @@
 #include "World/Core/Core.h"
 #include "World/Events/Event.h"
 
+#include <glm/glm.hpp>
+
 #include <string>
 #include <vector>
 
@@ -68,6 +70,15 @@ namespace World
 		virtual void SetVisible(bool visible) = 0;
 		// 无边框窗口自定义标题栏:让系统进入"窗口移动"循环。
 		virtual void BeginSystemDrag() = 0;
+		// ---- P4-UX9:系统移动循环期间的"停靠让位区" ----
+		// 拖动窗口靠系统自己的移动循环(SC_MOVE)才可能 1:1 跟手:它由系统按输入频率移动窗口,
+		// 不依赖宿主是否在跑渲染帧(本引擎 Debug 下一帧 50ms,帧驱动拖动必然发飘)。
+		// parkScreenRect = 挂靠栏所在的屏幕矩形(x,y,w,h;w<=0 = 无);光标进入它时,
+		// 移动中的窗口会被压到 parkTopY 之下 —— 用户看到"窗口停在栏下方"= 松手即挂靠。
+		virtual void SetSystemDragParkZone(const glm::vec4& parkScreenRect, float parkTopY)
+		{
+			(void)parkScreenRect; (void)parkTopY;
+		}
 		// 运行时切换无边框(去掉系统标题栏),并安装边缘缩放的命中测试。
 		virtual void SetFrameless(bool frameless) = 0;
 		virtual bool IsFrameless() const = 0;

@@ -668,8 +668,18 @@ namespace World
 			if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) != m_AttachedPanels.end())
 				return "attached";
 			for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
-				if (host->Contains(panel) && !host->IsHidden())
+			{
+				if (!host->Contains(panel))
+					continue;
+				if (!host->IsHidden())
 					return "floating";
+				// 隐藏宿主:窗口里只要有一个标签在附加列表里,本面板就属于那枚顶栏标签
+				// (窗口被拆成多个标签页时,state.dump / 无障碍节点都要说真话)。
+				for (const std::string& id : host->Panels())
+					if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), id) != m_AttachedPanels.end())
+						return "attached";
+				break;
+			}
 			return "hidden";
 		}
 		// 停靠形态面板:docked(在停靠树里)/ floating(主窗口内临时浮动)/ hidden。
@@ -1475,6 +1485,21 @@ namespace World
 			x += 144.0f;
 		}
 
+		// 同一窗口的其它标签页:顶栏只给窗口一枚 chip(拖出=整个窗口),但它们的形态
+		// 也要能从无障碍树读到 —— 注册成只读节点(Interactive=false,共用同一 chip 矩形)。
+		for (const AttachTagHit& hit : tagHits)
+		{
+			FloatWindowHost* host = FindFloatHost(hit.Panel);
+			if (!host)
+				continue;
+			for (const std::string& panel : host->Panels())
+			{
+				if (panel == hit.Panel)
+					continue;
+				RegisterAttachNode(panel, hit.Rect, "attached-tab", PanelTitle(panel), false);
+			}
+		}
+
 		// P3-1②:可见的独立窗口 = 浮动态。节点与顶栏标签共用 id(`shell.attach.<panel>`),
 		// value=floating;rect 由窗口屏幕矩形换算到主窗口客户区,只用于"读状态",因此
 		// Interactive=false(点它不应该落到主窗口上,也不参与 ui.invoke)。
@@ -1497,11 +1522,20 @@ namespace World
 		if (!closeRequest.empty())
 		{
 			// × = 关闭:隐藏该窗口的面板(可从 Window 菜单重新打开),并把标签移出栏。
+			// 一窗口一枚标签:关掉的是整个窗口,该窗口所有标签页的记录一起摘掉。
+			std::vector<std::string> closingPanels;
+			if (FloatWindowHost* host = FindFloatHost(closeRequest))
+				closingPanels = host->Panels();
+			if (closingPanels.empty())
+				closingPanels.push_back(closeRequest);
 			CloseFloatWindow(closeRequest, true, &ctx);
-			m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), closeRequest),
-				m_AttachedPanels.end());
-			if (m_ActiveWindowTag == closeRequest)
-				m_ActiveWindowTag.clear();
+			for (const std::string& id : closingPanels)
+			{
+				m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), id),
+					m_AttachedPanels.end());
+				if (m_ActiveWindowTag == id)
+					m_ActiveWindowTag.clear();
+			}
 		}
 		// 拖动结束:在栏内 → 换位;在栏外 → 拖出为独立窗口。
 		if (m_AttachTagDrag.empty() && !m_AttachTagPress.empty() && ctx.Input().MouseReleased[0])
@@ -1536,16 +1570,23 @@ namespace World
 			else if (FloatWindowHost* host = FindFloatHost(dragged))
 			{
 				// 拖出:恢复为独立窗口,窗口放到光标附近(屏幕坐标)。
+				const std::vector<std::string> hostPanels = host->Panels();
 				int mainX = 0, mainY = 0;
 				if (Application::HasInstance())
 					Application::Get().GetWindow().GetPosition(&mainX, &mainY);
 				host->SetScreenPosition(static_cast<float>(mainX) + ctx.Input().MousePos.x - 60.0f,
 					static_cast<float>(mainY) + ctx.Input().MousePos.y - 12.0f);
+				// 拖出来的是**这个窗口**,窗口显示用户拖的那一页(标签页可能被切过)。
+				host->ActivatePanel(dragged);
 				host->SetHidden(false);
-				m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), dragged),
-					m_AttachedPanels.end());
-				if (m_ActiveWindowTag == dragged)
-					m_ActiveWindowTag.clear();
+				// 整窗离槽:把该窗口里所有标签页的附加记录一次性摘干净(不留下悬空 chip)。
+				for (const std::string& id : hostPanels)
+				{
+					m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), id),
+						m_AttachedPanels.end());
+					if (m_ActiveWindowTag == id)
+						m_ActiveWindowTag.clear();
+				}
 				ctx.RecordOp("float", "detach", dragged, "");
 			}
 			m_AttachTagPress.clear();
@@ -1570,7 +1611,11 @@ namespace World
 		const glm::vec2 viewport = ctx.ViewportSize();
 		std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> dockRects;
 		// 挂靠栏的屏幕矩形(横条):客户区坐标 -> 屏幕坐标。
-		m_AttachSlotScreenRect = { 0, 0.0f, viewport.x, m_AttachBarHeight };
+		// 注意:viewport 是**设计单位**(= 物理像素 / UiScale),而这里要和 GetCursorPos /
+		// 窗口屏幕矩形(都是物理像素)比较 —— 必须乘回 UiScale,否则 UI 缩放 1.3 时
+		// 命中区只有真实栏高的 77%,"拖到栏上"会时灵时不灵。
+		const float uiScale = Wui::UiScale();
+		m_AttachSlotScreenRect = { 0, 0.0f, viewport.x * uiScale, m_AttachBarHeight * uiScale };
 		int windowX = 0, windowY = 0;
 		if (Application::HasInstance())
 			Application::Get().GetWindow().GetPosition(&windowX, &windowY);
@@ -1581,34 +1626,14 @@ namespace World
 		// 标签栏 x 只登记关闭请求,统一在遍历结束后处理,避免边遍历边改 m_FloatHosts。
 		std::vector<std::string> closeRequests;
 		// 收集新发起的标签拖拽(跨窗口附加);同帧只接受一个。
-		if (!m_CrossDragActive)
+		// 独立窗口标签被拖过阈值 → 交给系统移动循环(阻塞到松手,见 PerformIndependentWindowDrag)。
+		for (const std::unique_ptr<FloatWindowHost>& candidate : m_FloatHosts)
 		{
-			for (const std::unique_ptr<FloatWindowHost>& candidate : m_FloatHosts)
+			if (const std::string drag = candidate->TakePendingTabDrag(); !drag.empty())
 			{
-				if (const std::string drag = candidate->TakePendingTabDrag(); !drag.empty())
-				{
-					m_CrossDragActive = true;
-					m_CrossDragPanel = drag;
-					m_CrossDragSourceKey = candidate->Panels().front();
-					m_CrossDragTargetKey.clear();
-					candidate->SetTabDragActive(true);
-					POINT cursor { 0, 0 };
-					GetCursorPos(&cursor);
-					const Wui::WuiRect rect = candidate->ScreenRect();
-					m_CrossDragGrab = { static_cast<float>(cursor.x) - rect.X,
-						static_cast<float>(cursor.y) - rect.Y };
-					break;
-				}
+				PerformIndependentWindowDrag(drag);
+				break;
 			}
-		}
-		// 拖拽期间窗口位置在渲染前更新,避免"渲染一帧后窗口才动"的迟滞感。
-		if (m_CrossDragActive)
-		{
-			POINT cursor { 0, 0 };
-			GetCursorPos(&cursor);
-			if (FloatWindowHost* source = FindFloatHost(m_CrossDragPanel))
-				source->SetScreenPosition(static_cast<float>(cursor.x) - m_CrossDragGrab.x,
-					static_cast<float>(cursor.y) - m_CrossDragGrab.y);
 		}
 		for (size_t i = 0; i < m_FloatHosts.size(); )
 		{
@@ -1651,21 +1676,16 @@ namespace World
 				if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
 					entry->Rect = rect;
 
-			// 挂靠栏高亮**只由跨窗口拖拽**点亮(见 UpdateCrossWindowDrag):
-			// 以前这里额外做了一次"光标落在顶栏上就点亮"的判断,于是一开独立窗口、
-			// 鼠标随手移到主窗口顶部栏,整条栏就变蓝 —— 用户 2026-09-20 反馈"条件不对",
-			// 而且独立窗口压在顶栏上时,光标明明在浮窗里也会点亮它下面的栏("会穿透")。
-			// 位置记忆仍然要写回布局,所以这段只保留 rect 记录。
+			// 位置记忆写回布局(拖动由系统移动循环负责,这里只记录最终矩形)。
 			const std::string windowKey = host.Panels().front();
 			m_LastFloatScreenRects[windowKey] = rect;
 			++i;
 		}
 		for (const std::string& panel : closeRequests)
 			HideFloatPanel(panel, &ctx);
-		// 没有跨窗口拖拽在飞 = 挂靠栏不该保持点亮(拖拽结束时 UpdateCrossWindowDrag 也会清,
-		// 这里是防止状态残留的第二道保险)。
-		if (!m_CrossDragActive || m_FloatHosts.empty())
-			m_AttachSlotHighlight = false;
+		// 挂靠栏高亮只可能由"正在拖窗口"点亮(P4-UX9 起拖动走系统移动循环,循环期间不渲染,
+		// 松手后由 PerformIndependentWindowDrag 收口)—— 空闲时一律熄灭,避免残留。
+		m_AttachSlotHighlight = false;
 		// 停靠形态的"临时浮动"面板:在主窗口内绘制(OS 窗口只属于 Independent 面板)。
 		// 独立窗口渲染会把当前 GL 上下文切到各自窗口,先恢复主窗口上下文。
 		if (Application::HasInstance())
@@ -1694,7 +1714,6 @@ namespace World
 		if (m_DropPreviewActive)
 			Wui::DropZoneOverlay(ctx, m_DropPreviewRect, 0.30f, 3.0f);
 		// 跨窗口拖拽的目标命中与落点(在窗口渲染之后执行,便于统一改容器)。
-		UpdateCrossWindowDrag(ctx);
 		// 独立窗口渲染会把 GL 上下文切到各自窗口,这里恢复主窗口上下文,
 		// 否则主窗口后续的呈现/交换会作用在错误的上下文上(表现为主窗口不再刷新)。
 		if (Application::HasInstance())
@@ -1819,88 +1838,78 @@ namespace World
 			*closed = true;
 	}
 
-	// 跨窗口标签拖拽(浏览器式附加):源窗口标签按下拖动后,这里用全局光标轮询跟踪,
-	// 悬停到其他独立窗口标签栏时高亮,松手后按落点执行 附加/新建窗口/挂靠回主窗口。
-	void EditorShell::UpdateCrossWindowDrag(Wui::WuiContext& ctx)
+	// P4-UX9:拖动独立窗口(在标签栏/空白区按下并越过阈值后进入)。
+	//
+	// 手感设计(用户 2026-09-20:"独立窗口拖拽手感差,鼠标滑动一快就会出现偏移"):
+	//   ① 窗口移动交给**系统移动循环**(SC_MOVE):系统按输入频率移动窗口,与渲染帧率无关
+	//      —— 本引擎 Debug 下一帧 50ms,"每帧轮询光标"必然发飘,再怎么调都追不上;
+	//      它同时自带 Esc 取消与系统吸附,是 Windows 上拖标题栏的工业标准做法。
+	//   ② 进入循环前把窗口"预置"到 光标 - 按下瞬间的抓取偏移:补偿"按下 → 识别到拖动"
+	//      之间已经发生的位移。否则系统会把那段位移吸收进抓取偏移,快速甩动时窗口不跟手。
+	//   ③ 拖动期间光标进入挂靠栏 → 窗口被压到栏下方(SetSystemDragParkZone):
+	//      "窗口停在栏下"就是"松手即挂靠"的可见提示,目标不会被窗口自己挡住。
+	//   ④ 松手按真实落点判定:挂靠栏上 → 整窗挂靠;Esc → 回到拖动前的位置(取消);
+	//      其它位置 → 就停在那里(位置由 OnRender 里既有的写回逻辑进布局)。
+	void EditorShell::PerformIndependentWindowDrag(const std::string& panel)
 	{
-		if (!m_CrossDragActive)
+		FloatWindowHost* host = FindFloatHost(panel);
+		if (!host)
 			return;
+		Window* window = host->NativeWindow();
+		if (!window)
+			return;
+
+		const glm::vec2 grab = host->TakePendingTabDragGrab();
+		const Wui::WuiRect startRect = host->ScreenRect();
 		POINT cursor { 0, 0 };
 		GetCursorPos(&cursor);
-		const glm::vec2 pos { static_cast<float>(cursor.x), static_cast<float>(cursor.y) };
 
-		// 拖拽指示:按光标位置显示被拖动标签的名称(主窗口客户区坐标)。
 		int mainX = 0, mainY = 0;
+		float mainW = static_cast<float>(cursor.x + 1280);
 		if (Application::HasInstance())
+		{
 			Application::Get().GetWindow().GetPosition(&mainX, &mainY);
-		ctx.PushOverlay();
-		Label(ctx, { pos.x - static_cast<float>(mainX) + 14.0f, pos.y - static_cast<float>(mainY) + 14.0f },
-			PanelTitle(m_CrossDragPanel), m_Theme.Text, 13.0f);
-		ctx.PopOverlay();
+			mainW = static_cast<float>(Application::Get().GetWindow().GetWidth());
+		}
+		const float barPixels = m_AttachBarHeight * Wui::UiScale();
 
-		// 独立窗口之间不是合法落点(T03:只能挂靠到顶部挂靠栏,不能互相附加标签)。
-		m_CrossDragTargetKey.clear();
-		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
-			host->SetTabDropHighlight(false);
+		window->SetPosition(static_cast<int>(static_cast<float>(cursor.x) - grab.x),
+			static_cast<int>(static_cast<float>(cursor.y) - grab.y));
+		window->SetSystemDragParkZone(
+			{ static_cast<float>(mainX), static_cast<float>(mainY), mainW, barPixels },
+			static_cast<float>(mainY) + barPixels + 6.0f);
+		host->SetTabDragActive(true);
+		window->BeginSystemDrag();          // 阻塞:系统移动循环,回到这里就是松手
+		window->SetSystemDragParkZone({ 0.0f, 0.0f, 0.0f, 0.0f }, 0.0f);
+		host->SetTabDragActive(false);
 
-		// 挂靠栏(主窗口)也是有效落点,优先级高于其他独立窗口。
-		const bool overAttachBar = IsIndependentPanel(m_CrossDragPanel)
-			&& m_AttachSlotScreenRect.W > 0.0f
-			&& pos.x >= m_AttachSlotScreenRect.X && pos.x <= m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W
-			&& pos.y >= m_AttachSlotScreenRect.Y && pos.y <= m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H;
-		m_AttachSlotHighlight = overAttachBar;
-		if (overAttachBar)
-			m_CrossDragTargetKey.clear();
-
-		// 松手(左键释放)才落点。
-		if (GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+		if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+		{
+			// Esc = 取消(系统只保证回到循环起点,也就是预置后的位置;这里再放回按下前的位置)。
+			host->SetScreenPosition(startRect.X, startRect.Y);
+			WLD_CORE_INFO("[float] drag cancelled by Esc: {0}", panel);
 			return;
+		}
 
-		const std::string panel = m_CrossDragPanel;
-		FloatWindowHost* source = FindFloatHost(panel);
-		if (source)
-			source->SetTabDragActive(false);
-
-		// 整窗挂靠到顶部挂靠栏(唯一合法落点)。
+		POINT released { 0, 0 };
+		GetCursorPos(&released);
+		const bool overAttachBar = IsIndependentPanel(panel)
+			&& m_AttachSlotScreenRect.W > 0.0f
+			&& static_cast<float>(released.x) >= m_AttachSlotScreenRect.X
+			&& static_cast<float>(released.x) <= m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W
+			&& static_cast<float>(released.y) >= m_AttachSlotScreenRect.Y
+			&& static_cast<float>(released.y) <= m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H;
+		// 落点诊断(拖拽是模态循环,出问题时日志是唯一现场)。
+		WLD_CORE_INFO("[float] drag end: panel={0} released=({1},{2}) slot=({3:.0f},{4:.0f},{5:.0f},{6:.0f}) attach={7}",
+			panel, released.x, released.y, m_AttachSlotScreenRect.X, m_AttachSlotScreenRect.Y,
+			m_AttachSlotScreenRect.W, m_AttachSlotScreenRect.H, overAttachBar ? 1 : 0);
 		if (overAttachBar)
 		{
 			AttachIndependentWindowToSlot(panel);
+			return;
 		}
-		else if (source)
-		{
-			// 松手仍在本窗口标签栏上:标签重排(浏览器式拖动标签换位)。
-			const Wui::WuiRect sourceRect = source->ScreenRect();
-			const Wui::WuiRect sourceTabs { sourceRect.X, sourceRect.Y, sourceRect.W, 24.0f };
-			if (pos.x >= sourceTabs.X && pos.x <= sourceTabs.X + sourceTabs.W
-				&& pos.y >= sourceTabs.Y && pos.y <= sourceTabs.Y + sourceTabs.H)
-			{
-				const size_t count = source->Panels().size();
-				const float slot = std::max(1.0f, (sourceRect.W - 8.0f) / static_cast<float>(count));
-				const size_t index = static_cast<size_t>(std::max(0.0f,
-					(pos.x - sourceRect.X - 4.0f) / std::min(150.0f, slot)));
-				source->MovePanelTo(panel, index);
-				ctx.RecordOp("float", "reorder", panel, std::to_string(index));
-			}
-			// 桌面空白:若源窗口还有其他标签,拆分为新独立窗口;单标签窗口只算移动。
-			else if (source->Panels().size() > 1)
-			{
-				source->RemovePanel(panel);
-				const Wui::WuiRect rect { pos.x - m_CrossDragGrab.x, pos.y - m_CrossDragGrab.y, 520.0f, 400.0f };
-				AddFloatWindow(panel, rect, "detach");
-				if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
-					entry->Rect = rect;
-				ctx.RecordOp("float", "detach", panel, "");
-			}
-		}
-
-		// 清理:高亮与跨窗口拖拽状态全部复位。
-		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
-			host->SetTabDropHighlight(false);
-		m_CrossDragActive = false;
-		m_CrossDragPanel.clear();
-		m_CrossDragSourceKey.clear();
-		m_CrossDragTargetKey.clear();
-		m_AttachSlotHighlight = false;
+		if (m_Ctx)
+			m_Ctx->RecordOp("float", "move", panel, "");
 	}
 
 	void EditorShell::AddFloatWindow(const std::string& panel, const Wui::WuiRect& screenRect, const char* origin)
@@ -1920,7 +1929,10 @@ namespace World
 		// 复用已隐藏的独立窗口:运行期销毁窗口在 Vulkan 下会崩,因此"关闭/挂靠"只隐藏。
 		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
 		{
-			if (!host->IsHidden())
+			// P4-UX9:只复用**空窗**(面板全部关掉了的"壳")。以前会把新面板塞进一个还挂着
+			// 别的面板的隐藏窗口里,于是"一个 OS 窗口 + 两枚顶栏标签",拖出左侧那枚会把整个
+			// 窗口(含另一个面板)一起拔出来,另一枚标签的状态就悬空了(用户 2026-09-20 复现)。
+			if (!host->IsHidden() || !host->Panels().empty())
 				continue;
 			host->SetScreenPosition(screenRect.X, screenRect.Y);
 			host->AddPanel(panel, true);
@@ -2861,8 +2873,12 @@ namespace World
 		// 附加 = 与主窗口建立"标签切换"关系:窗口与其面板保持不变,只隐藏 OS 窗口;
 		// 主窗口顶栏出现该标签,点击即在 主界面 / 该窗口内容 之间切换。
 		host->SetHidden(true);
-		if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) == m_AttachedPanels.end())
-			m_AttachedPanels.push_back(panel);
+		// 顶栏标签 = 一枚 OS 窗口(不是一枚面板):先把同一窗口里其它标签页的旧记录摘掉,
+		// 再补上本次的面板 —— 否则会出现"一个窗口两枚 chip",拖出其中一枚会把整个窗口拔走。
+		for (const std::string& id : panels)
+			m_AttachedPanels.erase(std::remove(m_AttachedPanels.begin(), m_AttachedPanels.end(), id),
+				m_AttachedPanels.end());
+		m_AttachedPanels.push_back(panel);
 		m_ActiveWindowTag = panel;
 		WLD_CORE_INFO("Independent window attached as switch tab: {0} (still in dock tree: {1})",
 			panel, m_Layout.Contains(panel) ? "yes" : "no");

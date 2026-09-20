@@ -63,6 +63,11 @@ namespace World
 		std::string TakeCloseRequest();
 		// 标签拖拽请求(一次性):Render 后由 EditorShell 取走并进入跨窗口拖拽。
 		std::string TakePendingTabDrag();
+		// 本次拖拽的抓取偏移(物理像素,窗口客户区原点起算)。
+		// 必须在**按下标签那一刻**取:拖拽要等移动超过阈值才被识别,如果那时才用
+		// "当前光标 - 窗口位置"算抓取偏移,鼠标快速滑动的那段位移会被吸收进去,
+		// 表现就是"甩得快窗口不跟手"(用户 2026-09-20)。
+		glm::vec2 TakePendingTabDragGrab() const;
 		// 其他窗口正在被拖拽悬停:高亮本窗口的标签栏(放置目标指示)。
 		void SetTabDropHighlight(bool highlighted) { m_TabDropHighlight = highlighted; }
 		// 跨窗口拖拽期间置位:抑制本窗口的标签按下与空区系统拖动,避免叠加。
@@ -81,6 +86,8 @@ namespace World
 		Wui::WuiRect ScreenRect() const;
 		// 拖动标签时让窗口跟随光标(跨窗口拖拽期间由外壳驱动)。
 		void SetScreenPosition(float x, float y);
+		// P4-UX9:把 OS 窗口交给外壳做"捕获 + 逐消息移动"(平滑拖动);无窗口时 nullptr。
+		Window* NativeWindow() const { return m_Window; }
 		void Focus();
 
 	private:
@@ -106,6 +113,11 @@ namespace World
 		std::string m_PressedTab;
 		bool m_TabPressArmed = false;
 		glm::vec2 m_TabPressPos { 0, 0 };
+		glm::vec2 m_TabDragGrab { 0, 0 };   // 按下瞬间的光标位置(设计单位)
+		// 按下瞬间的**屏幕**光标坐标:阈值必须按全局位移判断 —— 窗口拖动期间鼠标一旦移出
+		// 本窗口就收不到 mousemove,只按窗口内相对位移会出现"向上拖永远不启动"(实测)。
+		glm::vec2 m_TabPressGlobal { 0, 0 };
+		bool m_TabPressGlobalValid = false;
 		bool m_TabDropHighlight = false;
 		// 左键按下必须发生在本窗口内,才允许解读为拖拽:
 		// 避免主窗口拖动时,经过本窗口的"悬空按键"被误当成新的拖拽。

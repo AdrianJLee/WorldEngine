@@ -384,6 +384,12 @@ namespace World
 		return request;
 	}
 
+	glm::vec2 FloatWindowHost::TakePendingTabDragGrab() const
+	{
+		// 面板的 MousePos 是"设计单位"(整块 UI 按 UiScale 缩放),而窗口位置/光标都是物理像素。
+		return m_TabDragGrab * Wui::UiScale();
+	}
+
 	std::string FloatWindowHost::TitleOf(const std::string& panel) const
 	{
 		return m_Callbacks.Title ? m_Callbacks.Title(panel) : panel;
@@ -470,6 +476,11 @@ namespace World
 				m_TabPressArmed = true;
 				m_PressedTab = m_Panels[static_cast<size_t>(bar.DragStart)];
 				m_TabPressPos = ctx.Input().MousePos;
+				m_TabDragGrab = ctx.Input().MousePos;
+				POINT global { 0, 0 };
+				GetCursorPos(&global);
+				m_TabPressGlobal = { static_cast<float>(global.x), static_cast<float>(global.y) };
+				m_TabPressGlobalValid = true;
 			}
 			const float width = std::min(150.0f,
 				std::max(1.0f, (area.W - 8.0f) / static_cast<float>(m_Panels.size())));
@@ -493,6 +504,11 @@ namespace World
 			m_PressedTab = m_Panels.empty() ? std::string() : m_Panels.front();
 			m_TabPressArmed = true;
 			m_TabPressPos = ctx.Input().MousePos;
+			m_TabDragGrab = ctx.Input().MousePos;
+			POINT global { 0, 0 };
+			GetCursorPos(&global);
+			m_TabPressGlobal = { static_cast<float>(global.x), static_cast<float>(global.y) };
+			m_TabPressGlobalValid = true;
 		}
 
 		// 拖拽阈值:按下后移动超过 4px 即发起一次跨窗口拖拽请求。
@@ -503,15 +519,29 @@ namespace World
 				m_TabPressArmed = false;
 				m_PressedTab.clear();
 			}
-			else if (glm::length(ctx.Input().MousePos - m_TabPressPos) > 2.0f)
+			else
 			{
-				m_TabPressArmed = false;
-				// 自定义拖拽:窗口每帧跟随光标(不阻塞主循环),因此拖动期间
-				// 主窗口能实时高亮挂靠栏;松手时按落点挂靠/附加/留在原地。
-				m_PendingTabDrag = m_PressedTab;
-				if (m_Callbacks.TabDragStart)
-					m_Callbacks.TabDragStart(m_PressedTab);
-				m_PressedTab.clear();
+				// 阈值按**全局光标位移**判断,而不是窗口内相对位移:拖动窗口时鼠标很快会移出
+				// 本窗口(窗口还没跟上来),那时窗口收不到 mousemove —— 只按相对位移判会让
+				// "向上/向外拖"永远启动不了(实测 E 步骤与用户反馈的"甩一下没反应")。
+				float moved = glm::length(ctx.Input().MousePos - m_TabPressPos);
+				if (m_TabPressGlobalValid)
+				{
+					POINT global { 0, 0 };
+					GetCursorPos(&global);
+					moved = std::max(moved, glm::length(glm::vec2(
+						static_cast<float>(global.x), static_cast<float>(global.y)) - m_TabPressGlobal));
+				}
+				if (moved > 3.0f)
+				{
+					m_TabPressArmed = false;
+					// 越过阈值:交给外壳进入"系统移动循环"(见 EditorShell::PerformIndependentWindowDrag)
+					// —— 窗口跟随由系统按输入频率负责,与渲染帧率无关。
+					m_PendingTabDrag = m_PressedTab;
+					if (m_Callbacks.TabDragStart)
+						m_Callbacks.TabDragStart(m_PressedTab);
+					m_PressedTab.clear();
+				}
 			}
 		}
 
