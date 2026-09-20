@@ -4,18 +4,69 @@
 
 namespace World::Wui
 {
-	// 默认主题;应用可覆盖后传入控件。
+	// P4-UX1:主题模式。默认暗色;浅色与"跟随系统"已可用(系统判定在 WuiTheme.cpp)。
+	enum class WuiThemeMode : uint8_t
+	{
+		Dark = 0,
+		Light = 1,
+		System = 2,
+	};
+
+	// 设计令牌(P4-UX1)。控件只读这里,不再自带魔法数字。
+	// 结构保持向后兼容:旧字段(PanelBg/PanelHeader/Border/Text/TextMuted/ButtonBg/
+	// ButtonHover/Accent)继续有效,新增字段带默认值。
 	struct WuiTheme
 	{
-		WuiColor PanelBg { 0.12f, 0.125f, 0.13f, 1.0f };
-		WuiColor PanelHeader { 0.16f, 0.165f, 0.17f, 1.0f };
-		WuiColor Border { 0.25f, 0.26f, 0.28f, 1.0f };
-		WuiColor Text { 0.82f, 0.84f, 0.87f, 1.0f };
-		WuiColor TextMuted { 0.55f, 0.58f, 0.62f, 1.0f };
-		WuiColor ButtonBg { 0.20f, 0.21f, 0.23f, 1.0f };
-		WuiColor ButtonHover { 0.27f, 0.28f, 0.31f, 1.0f };
-		WuiColor Accent { 0.30f, 0.50f, 0.90f, 1.0f };
+		// ---- 颜色:中性色阶 ----
+		WuiColor WindowBg { 0.059f, 0.067f, 0.082f, 1.0f };      // #0F1115 面板之间的空隙
+		WuiColor PanelBg { 0.078f, 0.090f, 0.110f, 1.0f };       // #14171C
+		WuiColor PanelHeader { 0.102f, 0.118f, 0.141f, 1.0f };   // #1A1E24
+		WuiColor ContentBg { 0.063f, 0.075f, 0.094f, 1.0f };     // #101318 列表/输入框
+		WuiColor HoverBg { 0.133f, 0.153f, 0.184f, 1.0f };       // #22272F
+		WuiColor ActiveBg { 0.165f, 0.188f, 0.220f, 1.0f };      // #2A3038
+		WuiColor Border { 0.169f, 0.192f, 0.220f, 1.0f };        // #2B3138
+		WuiColor BorderStrong { 0.227f, 0.259f, 0.298f, 1.0f };  // #3A424C
+		WuiColor Text { 0.843f, 0.863f, 0.890f, 1.0f };          // #D7DCE3
+		WuiColor TextMuted { 0.545f, 0.584f, 0.639f, 1.0f };     // #8B95A3
+		WuiColor TextDisabled { 0.353f, 0.384f, 0.427f, 1.0f };  // #5A626D
+		// ---- 颜色:语义 ----
+		WuiColor Accent { 0.298f, 0.553f, 1.0f, 1.0f };          // #4C8DFF
+		WuiColor Success { 0.247f, 0.725f, 0.314f, 1.0f };       // #3FB950
+		WuiColor Warning { 0.824f, 0.600f, 0.133f, 1.0f };       // #D29922
+		WuiColor Danger { 0.973f, 0.318f, 0.286f, 1.0f };        // #F85149
+		WuiColor Selection { 0.298f, 0.553f, 1.0f, 0.22f };      // Accent @22%
+		WuiColor FocusRing { 0.298f, 0.553f, 1.0f, 1.0f };
+		// ---- 兼容字段(旧调用点仍在使用) ----
+		WuiColor ButtonBg { 0.133f, 0.153f, 0.184f, 1.0f };
+		WuiColor ButtonHover { 0.165f, 0.188f, 0.220f, 1.0f };
+		// ---- 排版与尺寸 ----
+		float FontSizeCaption = 11.0f;
+		float FontSizeSmall = 12.0f;
+		float FontSizeBody = 14.0f;
+		float FontSizeTitle = 15.0f;
+		float FontSizeHeading = 18.0f;
+		float RowHeight = 26.0f;        // 常规密度行高(紧凑 22 / 舒适 30)
+		float ControlHeight = 24.0f;
+		float Pad = 8.0f;
+		float PadSmall = 4.0f;
+		float Radius = 4.0f;
+		float AnimFastMs = 120.0f;
+		float AnimPanelMs = 180.0f;
 	};
+
+	// 当前主题与模式。`WLD_UI_THEME=dark|light|system` 覆盖默认(暗色)。
+	WLD_API const WuiTheme& CurrentTheme();
+	// 解析模式 → 主题(system 会查询操作系统设置)。
+	WLD_API WuiTheme ResolveTheme(WuiThemeMode mode);
+	WLD_API void SetThemeMode(WuiThemeMode mode);
+	WLD_API WuiThemeMode GetThemeMode();
+	// 模式每变一次 +1;宿主(EditorShell/独立窗口)据此刷新自己缓存的主题副本。
+	WLD_API uint32_t ThemeGeneration();
+	WLD_API bool IsDarkTheme();
+	// UI 字号缩放(编辑器偏好"UI 缩放";`WLD_UI_SCALE` 覆盖,范围 0.8..1.5,默认 1.15)。
+	// 只作用于文字绘制与度量(布局数值不变),因此不会改变面板结构。
+	WLD_API float UiFontScale();
+	WLD_API void SetUiFontScale(float scale);
 
 	void Panel(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiTheme& theme);
 	void Label(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const WuiColor& color, float fontSize);

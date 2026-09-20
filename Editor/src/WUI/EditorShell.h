@@ -237,6 +237,8 @@ namespace World
 		std::filesystem::path m_LayoutPath;
 		std::vector<std::string> m_Panels;
 		Wui::WuiTheme m_Theme;
+		// P4-UX1:主题模式变化(暗/浅/跟随系统)时按代刷新 m_Theme。
+		uint32_t m_ThemeGeneration = 0;
 		std::unordered_map<std::string, std::unique_ptr<EditorPanel>> m_PanelRegistry;
 		Wui::WuiRect m_ViewportRect;
 

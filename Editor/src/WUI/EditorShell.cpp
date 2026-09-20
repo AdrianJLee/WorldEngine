@@ -128,6 +128,9 @@ namespace World
 		RestoreDockedPanelsFromFloat(m_Layout);
 
 		m_PanelRegistry.emplace("hierarchy", std::make_unique<HierarchyPanel>());
+		// P4-UX1:主题来源单一化 —— 默认暗色,`WLD_UI_THEME=light|system` 可覆盖。
+		m_Theme = Wui::CurrentTheme();
+		m_ThemeGeneration = Wui::ThemeGeneration();
 		m_PanelRegistry.emplace("properties", std::make_unique<PropertiesPanel>(*this));
 		m_PanelRegistry.emplace("content_browser", std::make_unique<ContentBrowserPanel>(*this));
 		m_PanelRegistry.emplace("view", std::make_unique<ViewportPanel>(*this));
@@ -768,6 +771,13 @@ namespace World
 	void EditorShell::OnRender(Wui::WuiContext& ctx)
 	{
 		m_Ctx = &ctx;
+		// P4-UX1:主题模式(暗/浅/跟随系统)变化时刷新本地副本;独立窗口在下次创建/附加时
+		// 取到新主题(它们的 callbacks.Theme 是创建期快照)。
+		if (m_ThemeGeneration != Wui::ThemeGeneration())
+		{
+			m_Theme = Wui::CurrentTheme();
+			m_ThemeGeneration = Wui::ThemeGeneration();
+		}
 		// W9-2 修复:上一帧被推迟的脚本编辑器打开请求,在帧边界统一执行(安全点)。
 		if (!m_PendingScriptOpen.empty())
 		{

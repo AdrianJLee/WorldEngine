@@ -5,6 +5,7 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Core/PhysicsSettings.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiWidget.h"
 
@@ -38,23 +39,25 @@ namespace World
 		float y = rect.Y + 10.0f;
 		bool changed = false;
 
-		Wui::Label(ctx, { x, y }, "Rendering (project.we.yaml → rendering:)", theme.TextMuted, 12.0f);
+		// P4-UX1:本地化试点 —— 源码内联中文是默认语言,en.json 提供英文覆盖。
+		Wui::Label(ctx, { x, y }, Wui::Tr("settings.group.rendering", "渲染 (project.we.yaml → rendering:)"),
+			theme.TextMuted, 12.0f);
 		y += 20.0f;
 
 		if (Wui::Checkbox(ctx, Wui::HashId("settings3d.culling"), { x, y, width, 18.0f },
-			"视锥剔除 (culling)", m_Edit.Culling, theme))
+			Wui::Tr("settings.culling", "视锥剔除 (culling)"), m_Edit.Culling, theme))
 			changed = true;
 		y += 24.0f;
 
 		if (Wui::Checkbox(ctx, Wui::HashId("settings3d.shadows"), { x, y, width, 18.0f },
-			"方向光阴影 (shadows)", m_Edit.Shadows, theme))
+			Wui::Tr("settings.shadows", "方向光阴影 (shadows)"), m_Edit.Shadows, theme))
 			changed = true;
 		y += 26.0f;
 
 		// P4-perf:垂直同步/呈现模式。Vulkan 下改这一项会重建交换链(下一帧生效),
 		// GL 下立刻改 swap interval;两者都不需要重启,方便直接对比帧率。
 		if (Wui::Checkbox(ctx, Wui::HashId("settings3d.vsync"), { x, y, width, 18.0f },
-			"垂直同步 (vsync)", m_Edit.Vsync, theme))
+			Wui::Tr("settings.vsync", "垂直同步 (vsync)"), m_Edit.Vsync, theme))
 		{
 			changed = true;
 			Renderer::SetVsync(m_Edit.Vsync);
@@ -70,7 +73,7 @@ namespace World
 				m_Edit.ShadowMapSize = kShadowMapSizes[selected];
 				changed = true;
 			}
-			Wui::Label(ctx, { x, y + 3.0f }, "阴影贴图尺寸", theme.Text, 13.0f);
+			Wui::Label(ctx, { x, y + 3.0f }, Wui::Tr("settings.shadow_map", "阴影贴图尺寸"), theme.Text, 13.0f);
 			y += 26.0f;
 		}
 
@@ -150,7 +153,8 @@ namespace World
 		}
 
 		// P4-1:物理(固定步长 1..240Hz;重力 = Y 轴加速度)。
-		Wui::Label(ctx, { x, y }, "Physics (project.we.yaml → physics:)", theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { x, y }, Wui::Tr("settings.group.physics", "物理 (project.we.yaml → physics:)"),
+			theme.TextMuted, 12.0f);
 		y += 20.0f;
 		{
 			int64_t value = static_cast<int64_t>(m_Physics.FixedStepHz);

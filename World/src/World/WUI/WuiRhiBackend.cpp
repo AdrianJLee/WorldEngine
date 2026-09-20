@@ -6,6 +6,7 @@
 #include "World/Renderer/ShaderUtils.h"
 #include "World/RHI/RhiTextureBridge.h"
 #include "WuiTextureRegistry.h"
+#include "World/WUI/WuiWidgets.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
@@ -287,7 +288,8 @@ namespace World::Wui
 		// 命中测试、行宽与 caret 定位都走这里);幂等:设备重建时重新注册。
 		SetTextMeasureHook(this, [this](std::string_view text, float fontSize, WuiFontFamily family)
 		{
-			return MeasureText(text, fontSize, family, false);
+			// P4-UX1:UI 字号缩放对"度量"和"绘制"必须同时生效,否则 caret/命中会错位。
+			return MeasureText(text, fontSize * UiFontScale(), family, false);
 		});
 		m_Vertices.clear();
 		m_Indices.clear();
@@ -574,7 +576,8 @@ namespace World::Wui
 
 	void WuiRhiBackend::DrawText(const WuiDrawCommand& command)
 	{
-		const float fontSize = command.FontSize > 0 ? command.FontSize : 15.0f;
+		// P4-UX1:统一字号缩放(编辑器偏好"UI 缩放";默认 1.15,用户反馈字体偏小)。
+		const float fontSize = (command.FontSize > 0 ? command.FontSize : 15.0f) * UiFontScale();
 		FontFace* baselineFace = PrimaryFace(command.Family, command.Bold);
 		float baseline = command.Rect.Y + fontSize * 0.8f;
 		if (baselineFace && baselineFace->Info)
