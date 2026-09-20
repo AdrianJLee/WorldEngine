@@ -1436,6 +1436,8 @@ namespace World
 			item(7, Wui::Tr("panel.content_browser.menu.up", "Up") + "   (Alt+↑)",
 				m_Model.Current != m_Model.Root, [this] { GoUp(); });
 			ctx.PopOverlay();
+			// P4-UX15:点面板里其它任何地方都收起 `…` 菜单(用户实测:以前点外面不关)。
+			ctx.ClosePopupsOnOutsideClick({ toolbarPopup }, menuRect);
 		}
 
 		const Wui::WuiId treePopup = Wui::HashId("browser.tree.context");
@@ -1519,18 +1521,6 @@ namespace World
 		if (!searching)
 			RefreshListing();
 		const std::vector<std::filesystem::path>& paths = searching ? m_Model.SearchResults : m_Model.Listing;
-
-		// P4-UX15:**有文本焦点时面板级快捷键一律让位** —— 否则在重命名框里按 Ctrl+A
-		// 会去选中整个文件夹里的文件(用户实测:"很低级的作用域问题")。
-		const bool textFocusActive = Wui::WuiTextFocus::Get().Active();
-		if (!textFocusActive && ctx.Input().Ctrl && ctx.IsKeyPressed(KeyCodes::A) && ctx.IsHovered(content))
-			SelectAll(paths);
-		if (!textFocusActive && ctx.IsKeyPressed(KeyCodes::Delete) && !m_Model.Selected.empty() && ctx.IsHovered(content))
-			m_Model.ShowDeleteModal = true;
-		if (!textFocusActive && ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
-		{
-			StartRename(ctx, *m_Model.Selected.begin());
-		}
 
 		if (fileDrag && ctx.IsHovered(content))
 		{
@@ -1843,7 +1833,7 @@ namespace World
 					ctx.CloseAllPopups();
 				}
 			}
-			ctx.ClosePopupsOnOutsideClick({ blankPopup }, menuPanel);
+					ctx.ClosePopupsOnOutsideClick({ blankPopup }, menuPanel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(blankPopup);
 			ctx.PopOverlay();
@@ -1881,6 +1871,20 @@ namespace World
 			}
 			Wui::EndModalFrame(ctx);
 		}
+
+		// ---- 面板级快捷键(放在**最后**判定)----
+		// 关键:重命名输入框是在本函数后半段才绘制的,`SetTextInputActive` 也是那时才登记
+		// 文本焦点;若在前面判定,本帧的 WuiTextFocus 还是空的 → Ctrl+A 会去全选文件夹
+		// (用户实测两次)。放到函数末尾,读到的就是本帧已经登记好的焦点状态。
+		const std::vector<std::filesystem::path>& shortcutPaths =
+			searching ? m_Model.SearchResults : m_Model.Listing;
+		const bool textFocusActive = Wui::WuiTextFocus::Get().Active();
+		if (!textFocusActive && ctx.Input().Ctrl && ctx.IsKeyPressed(KeyCodes::A) && ctx.IsHovered(content))
+			SelectAll(shortcutPaths);
+		if (!textFocusActive && ctx.IsKeyPressed(KeyCodes::Delete) && !m_Model.Selected.empty() && ctx.IsHovered(content))
+			m_Model.ShowDeleteModal = true;
+		if (!textFocusActive && ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
+			StartRename(ctx, *m_Model.Selected.begin());
 	}
 }
 
