@@ -30,7 +30,15 @@ namespace World::Wui
 
 		// ---- 独立窗口支持:本实例单独收集输入与视口,不与主窗口共享 ----
 		void UseLocalInput(glm::vec2 viewport);
-		void SetViewportSize(glm::vec2 viewport) { m_Viewport = viewport; }
+		// P4-UX2f:调用方传的是**物理像素**客户区(独立窗口每帧都会刷新尺寸)。
+		// 必须同时更新 m_PhysicalViewport 与设计视口 —— 只写 m_Viewport 会让 RHI 视口
+		// 停留在旧尺寸(浮窗 resize 后视口与帧缓冲不匹配,Vulkan 下报错甚至 device lost)。
+		void SetViewportSize(glm::vec2 viewport)
+		{
+			m_PhysicalViewport = viewport;
+			const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+			m_Viewport = viewport / scale;
+		}
 		void SetCursorWindow(void* nativeWindow) { m_CursorWindow = nativeWindow; }
 		void LocalKey(uint32_t keyCode, bool down, bool repeat) { m_LocalInput.OnKey(keyCode, down, repeat); }
 		void LocalChar(uint32_t codepoint) { m_LocalInput.OnChar(codepoint); }

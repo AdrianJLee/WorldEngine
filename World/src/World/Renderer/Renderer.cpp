@@ -301,9 +301,17 @@ namespace World
 			backend == "vulkan" ? Rhi::Backend::Vulkan : Rhi::Backend::OpenGL;
 		std::string error;
 		Rhi::DeviceDesc deviceDesc;
-		// 开发期可选:WLD_VULKAN_VALIDATION=1 打开验证层(仅当层可用)。
+		// P4-UX2f:Debug 构建**默认打开** Vulkan 验证层 —— 偶发 device lost 只有验证层能给出
+		// 具体 VUID 与对象;WLD_VULKAN_VALIDATION=0 可关(Release 默认关)。
+		bool enableValidation = false;
+#if defined(WLD_DEBUG)
+		enableValidation = true;
+#endif
 		if (const char* validation = std::getenv("WLD_VULKAN_VALIDATION"))
-			deviceDesc.EnableValidation = validation[0] != '0';
+			enableValidation = validation[0] != '0';
+		deviceDesc.EnableValidation = enableValidation;
+		if (enableValidation)
+			WLD_CORE_INFO("[rhi] Vulkan 验证层已请求(层不可用时设备创建会忽略)");
 		m_Device = Rhi::CreateDevice(requestedBackend, deviceDesc, &error);
 		if (!m_Device)
 		{

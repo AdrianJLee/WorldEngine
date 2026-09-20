@@ -111,6 +111,12 @@ namespace World::Rhi::Vulkan
 		app.apiVersion = VK_API_VERSION_1_3;
 
 		const bool enableValidation = desc.EnableValidation && HasValidationLayer();
+		// 取证友好:P4-UX2f 起日志里要能一眼看出"验证层到底有没有真的启用"
+		// (只写"已请求"没法区分"层没装"与"层已生效但 0 条消息")。
+		if (desc.EnableValidation && !enableValidation)
+			WLD_CORE_WARN("[vk-validation] 验证层不可用(VK_LAYER_KHRONOS_validation 未安装?)");
+		else if (enableValidation)
+			WLD_CORE_INFO("[vk-validation] 验证层已启用(VK_LAYER_KHRONOS_validation)");
 		VkInstanceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		createInfo.pApplicationInfo = &app;

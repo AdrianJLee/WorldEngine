@@ -23,6 +23,11 @@ Editor/editor-prefs.json
 Game/material_tests_tmp/
 # 内容浏览器"New Material"测试产生的临时材质目录(内容根是 Game/assets,这里是测试残留)
 Game/materials/
+# glTF 导入产物(.wmodel / .wmat / 贴图)由导入器生成:夹具只提交 .gltf 与 .wimport,
+# 导入结果由测试/编辑器首次导入时重建(2026-09-20 误提交过一次,已改回忽略)。
+Game/assets/models/**/*.wmodel
+Game/assets/models/**/materials/
+Game/assets/models/**/textures/
 
 # W8:编辑器脚本工作区脚手架(create-if-missing 生成;用户改过的配置不入库即保留)。
 # 上面的 `.vscode` 忽略规则会连带排除父目录,必须先把目录本身取消忽略,再放行其内容。

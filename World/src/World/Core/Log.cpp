@@ -2,11 +2,20 @@
 #include "Log.h"
 
 #include "spdlog/sinks/base_sink.h"
+#include "spdlog/sinks/rotating_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
 #include <deque>
 #include <exception>
+#include <filesystem>
 #include <mutex>
+
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>
+#endif
 
 namespace World
 {
@@ -95,5 +104,37 @@ namespace World
 		s_ClientLogger = spdlog::stdout_color_mt("APP");
 		s_ClientLogger->set_level(spdlog::level::trace);
 		s_ClientLogger->flush_on(spdlog::level::err);
+
+		// P4-UX2f:**默认写日志文件** —— 偶发 device lost / 崩溃时用户往往只看到控制台最后一行,
+		// 而我们拿不到他们的控制台(AttachConsole 会被拒绝)。文件日志让下次复现自带现场:
+		//   * 路径:WLD_LOG_FILE 指定,或默认 <WLD_OUTPUT_DIR><exe名>.log(5MB x 3 轮转);
+		//   * WLD_LOG_FILE=0 关闭。
+		const char* request = std::getenv("WLD_LOG_FILE");
+		if (request && request[0] == '0' && request[1] == '\0')
+			return;
+		std::filesystem::path logPath;
+		if (request && request[0])
+			logPath = request;
+		if (logPath.empty())
+		{
+			wchar_t modulePath[MAX_PATH] = {};
+			const DWORD length = GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+			std::filesystem::path exePath = length ? std::filesystem::path(modulePath) : std::filesystem::path("Editor");
+			logPath = std::filesystem::path(WLD_OUTPUT_DIR) / (exePath.stem().string() + ".log");
+		}
+		try
+		{
+			auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+				logPath.string(), 5 * 1024 * 1024, 3);
+			fileSink->set_pattern("%^[%Y-%m-%d %T] %n: %v%$");
+			fileSink->set_level(spdlog::level::trace);
+			s_CoreLogger->sinks().push_back(fileSink);
+			s_ClientLogger->sinks().push_back(fileSink);
+			WLD_CORE_INFO("日志文件: {0}", logPath.string());
+		}
+		catch (const std::exception& exception)
+		{
+			WLD_CORE_WARN("日志文件不可用({0}): {1}", logPath.string(), exception.what());
+		}
 	}
 }
