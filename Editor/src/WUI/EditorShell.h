@@ -303,17 +303,26 @@ namespace World
 		std::vector<PendingFloatRestore> m_PendingFloatRestore;   // Ask 模式:等用户回答
 		bool m_RestoreAskRemember = false;                        // 询问框里的"记住我的选择"
 
-		// 状态栏提示(人类交互:悬停暂停计时 / 移出给宽限再淡出 / 可点可 Esc)。
-		struct StatusNotice
+		// 可超时的非模态提示(人类交互:悬停暂停计时 / 移出给宽限再淡出)。
+		// 状态栏提示与"恢复询问条"共用这一套节拍,时间参数各自传。
+		struct TimedNotice
 		{
-			std::string Text;
 			double ShownAt = 0.0;
 			double LeaveAt = 0.0;     // 悬停结束的时刻(0 = 没离开过)
 			float Alpha = 1.0f;
-			bool Active = false;
 			bool Hovered = false;
+			// 返回 false = 这次该收起来了(调用方负责关闭)。
+			bool Update(double now, bool hovered, double staySeconds, double graceSeconds, double fadeSeconds);
+		};
+		struct StatusNotice
+		{
+			std::string Text;
+			TimedNotice Timing;
+			bool Active = false;
 		};
 		StatusNotice m_Notice;
+		// 恢复询问条的节拍(与状态栏提示同一套规则,只是停留更久:那是个需要阅读的决定)。
+		TimedNotice m_RestorePromptTiming;
 		void PushNotice(const std::string& text);
 		void DrawStatusNotice(Wui::WuiContext& ctx, const Wui::WuiRect& statusBar);
 		// 启动询问:贴在状态栏上方的一条非模态通知(不压暗、不挡操作)。

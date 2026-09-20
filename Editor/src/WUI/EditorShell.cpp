@@ -1311,35 +1311,13 @@ namespace World
 			textWidth + 30.0f, statusBar.H - 4.0f };
 		const bool hovered = ctx.IsHovered(chip);
 		if (hovered)
-		{
-			m_Notice.ShownAt = now;      // 悬停 = 冻结倒计时
-			m_Notice.LeaveAt = 0.0;
 			ctx.SetCursor(Wui::WuiCursor::Hand);
-		}
-		else if (m_Notice.Hovered)
+		if (!m_Notice.Timing.Update(now, hovered, 4.0, 1.2, 0.25))
 		{
-			m_Notice.LeaveAt = now;      // 刚移开:进入宽限期
+			m_Notice.Active = false;
+			return;
 		}
-		m_Notice.Hovered = hovered;
-
-		constexpr double kStaySeconds = 4.0;    // 默认停留
-		constexpr double kGraceSeconds = 1.2;   // 移开后的宽限
-		constexpr double kFadeSeconds = 0.25;
-		float alpha = 1.0f;
-		if (!hovered)
-		{
-			const bool leaving = m_Notice.LeaveAt > 0.0;
-			const double elapsed = now - (leaving ? m_Notice.LeaveAt : m_Notice.ShownAt);
-			const double limit = leaving ? kGraceSeconds : kStaySeconds;
-			if (elapsed >= limit + kFadeSeconds)
-			{
-				m_Notice.Active = false;
-				return;
-			}
-			if (elapsed > limit)
-				alpha = 1.0f - static_cast<float>((elapsed - limit) / kFadeSeconds);
-		}
-		alpha = std::clamp(alpha, 0.0f, 1.0f);
+		const float alpha = m_Notice.Timing.Alpha;
 
 		const Wui::WuiColor background { m_Theme.ActiveBg.R, m_Theme.ActiveBg.G, m_Theme.ActiveBg.B,
 			(hovered ? 0.95f : 0.75f) * alpha };
@@ -1393,11 +1371,37 @@ namespace World
 
 		const Wui::WuiRect panel = RestorePromptRect(statusBar);
 		const float height = panel.H;
+		// 询问条也按时间收(用户 2026-09-20:"这个提示不会随时间消失"):停留 15s(要读要选,
+		// 比状态栏提示的 4s 长得多),悬停暂停、移开给宽限、最后整条淡出。
+		const double now = ShellNowSeconds();
+		if (m_RestorePromptTiming.ShownAt <= 0.0)
+			m_RestorePromptTiming.ShownAt = now;   // 首帧才开始计时(0 会被当成"已经过了很久")
+		const bool promptHovered = ctx.IsHovered(panel);
+		if (!m_RestorePromptTiming.Update(now, promptHovered, 15.0, 1.5, 0.3))
+		{
+			// 超时 = 本次不恢复(和 × / Esc 同义):记录保留,下次启动还会问。
+			m_PendingFloatRestore.clear();
+			m_RestorePromptTiming = TimedNotice {};
+			PushNotice(Wui::Tr("notice.restore.skipped", "Skipped restoring last session's windows"));
+			WLD_CORE_INFO("[float] restore prompt timed out (windows kept in layout for next start)");
+			return;
+		}
+		const float alpha = m_RestorePromptTiming.Alpha;
+		// 淡出阶段连控件一起淡:复制一份主题,把颜色 alpha 缩掉再交给按钮/勾选框。
+		Wui::WuiTheme promptTheme = m_Theme;
+		if (alpha < 0.999f)
+		{
+			auto fade = [alpha](Wui::WuiColor& color) { color.A *= alpha; };
+			fade(promptTheme.PanelBg); fade(promptTheme.PanelHeader); fade(promptTheme.Border);
+			fade(promptTheme.Text); fade(promptTheme.TextMuted); fade(promptTheme.TextDisabled);
+			fade(promptTheme.Accent); fade(promptTheme.ButtonBg); fade(promptTheme.ButtonHover);
+			fade(promptTheme.ActiveBg);
+		}
 		ctx.PushOverlay();
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, panel, m_Theme.PanelBg, 5.0f });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, panel, m_Theme.Border, 5.0f, 1.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, panel, promptTheme.PanelBg, 5.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, panel, promptTheme.Border, 5.0f, 1.0f });
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { panel.X, panel.Y, panel.W, 3.0f },
-			m_Theme.Accent, 2.0f });
+			promptTheme.Accent, 2.0f });
 
 		const size_t count = m_PendingFloatRestore.size();
 		std::string names;
@@ -1406,31 +1410,31 @@ namespace World
 		if (count > 3)
 			names += Wui::Tr("modal.restore.more", " …");
 		Wui::Label(ctx, { panel.X + 12.0f, panel.Y + 10.0f },
-			Wui::Tr("modal.restore.body", "Last session left these windows open:"), m_Theme.Text, 13.0f);
-		Wui::Label(ctx, { panel.X + 12.0f, panel.Y + 28.0f }, names, m_Theme.TextMuted, 12.0f);
+			Wui::Tr("modal.restore.body", "Last session left these windows open:"), promptTheme.Text, 13.0f);
+		Wui::Label(ctx, { panel.X + 12.0f, panel.Y + 28.0f }, names, promptTheme.TextMuted, 12.0f);
 
 		// × 关闭 = 本次不恢复(下次再问;想彻底不问就勾"记住")。
 		const Wui::WuiRect closeRect { panel.X + panel.W - 20.0f, panel.Y + 6.0f, 14.0f, 14.0f };
 		const bool closeHovered = ctx.IsHovered(closeRect);
 		if (closeHovered)
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, closeRect, m_Theme.ButtonHover, 2.0f });
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, closeRect, promptTheme.ButtonHover, 2.0f });
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { closeRect.X + 3.0f, closeRect.Y - 1.0f, 0, 0 },
-			closeHovered ? m_Theme.Text : m_Theme.TextMuted, 0.0f, 1.0f, "x", 12.0f, false });
+			closeHovered ? promptTheme.Text : promptTheme.TextMuted, 0.0f, 1.0f, "x", 12.0f, false });
 
 		const float rowY = panel.Y + height - 28.0f;
 		const bool tabsClicked = Wui::Button(ctx, Wui::HashId("restore.prompt.tabs"),
 			{ panel.X + 12.0f, rowY, 132.0f, 22.0f },
-			Wui::Tr("modal.restore.tabs", "Restore as Tabs"), m_Theme);
+			Wui::Tr("modal.restore.tabs", "Restore as Tabs"), promptTheme);
 		const bool layoutClicked = Wui::Button(ctx, Wui::HashId("restore.prompt.layout"),
 			{ panel.X + 150.0f, rowY, 140.0f, 22.0f },
-			Wui::Tr("modal.restore.layout", "Restore Layout"), m_Theme);
+			Wui::Tr("modal.restore.layout", "Restore Layout"), promptTheme);
 		const bool noneClicked = Wui::Button(ctx, Wui::HashId("restore.prompt.none"),
 			{ panel.X + 296.0f, rowY, 104.0f, 22.0f },
-			Wui::Tr("modal.restore.none", "Don't Restore"), m_Theme);
+			Wui::Tr("modal.restore.none", "Don't Restore"), promptTheme);
 		const Wui::LocalizedLabel remember = Wui::TrLabel("modal.restore.remember", "Remember");
 		Wui::Checkbox(ctx, Wui::HashId("restore.prompt.remember"),
 			{ panel.X + panel.W - 112.0f, rowY + 1.0f, 104.0f, 20.0f },
-			remember.Text, remember.Term, m_RestoreAskRemember, m_Theme);
+			remember.Text, remember.Term, m_RestoreAskRemember, promptTheme);
 
 		const bool escape = ctx.WasKeyPressed(KeyCodes::Escape);
 		const bool dismiss = closeHovered && ctx.Input().MouseClicked[0];
@@ -2260,11 +2264,42 @@ namespace World
 	{
 		m_Notice.Text = text;
 		m_Notice.Active = true;
-		m_Notice.ShownAt = ShellNowSeconds();
-		m_Notice.LeaveAt = 0.0;
-		m_Notice.Alpha = 1.0f;
-		m_Notice.Hovered = false;
+		m_Notice.Timing = TimedNotice {};
+		m_Notice.Timing.ShownAt = ShellNowSeconds();
 		WLD_CORE_INFO("[notice] {0}", text);
+	}
+
+	// 提示节拍(状态栏提示与恢复询问条共用):
+	//   · 悬停 = 冻结倒计时(用户要读/要点,不能读一半消失);
+	//   · 移开 = 再给宽限,然后淡出 —— 悬停超过停留时长再移开也是这个节奏;
+	//   · 返回 false 表示"该收了",由调用方决定收起来后做什么。
+	bool EditorShell::TimedNotice::Update(double now, bool hovered, double staySeconds, double graceSeconds,
+		double fadeSeconds)
+	{
+		if (hovered)
+		{
+			ShownAt = now;
+			LeaveAt = 0.0;
+		}
+		else if (Hovered)
+		{
+			LeaveAt = now;
+		}
+		Hovered = hovered;
+		if (hovered)
+		{
+			Alpha = 1.0f;
+			return true;
+		}
+		const bool leaving = LeaveAt > 0.0;
+		const double elapsed = now - (leaving ? LeaveAt : ShownAt);
+		const double limit = leaving ? graceSeconds : staySeconds;
+		if (elapsed >= limit + fadeSeconds)
+			return false;
+		Alpha = elapsed <= limit ? 1.0f
+			: 1.0f - static_cast<float>((elapsed - limit) / fadeSeconds);
+		Alpha = std::clamp(Alpha, 0.0f, 1.0f);
+		return true;
 	}
 
 	// ---- AI 控制通道 ----
