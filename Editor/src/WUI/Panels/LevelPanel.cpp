@@ -3,6 +3,7 @@
 
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Gameplay/LevelList.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
 namespace World
@@ -56,8 +57,10 @@ namespace World
 		if (m_Entries.empty())
 		{
 			Label(ctx, { rect.X + 10.0f, y },
-				m_ListPath.empty() ? "未找到 levels.welevel(项目清单同级的关卡清单)。"
-					: "关卡清单为空。", theme.TextMuted, 13.0f);
+				m_ListPath.empty()
+					? Wui::Tr("panel.levels.not_found",
+						"levels.welevel not found (the level list next to the project manifest).")
+					: Wui::Tr("panel.levels.empty", "The level list is empty."), theme.TextMuted, 13.0f);
 			return;
 		}
 

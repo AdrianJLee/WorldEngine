@@ -5,6 +5,7 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/RenderSettings.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/WuiWidgets.h"
@@ -94,19 +95,20 @@ namespace World
 		Ref<Material> material = MaterialLibrary::Get().Load(path, &error);
 		if (!material)
 		{
-			m_Status = "加载失败: " + error;
+			m_Status = Wui::Tr("panel.material.status.load_failed", "Load failed: ") + error;
 			m_StatusIsError = true;
 			return;
 		}
 		// 已有未保存改动时换目标:提示并保留原材质(不自动丢弃用户改动)。
 		if (m_Material && m_Material->IsDirty() && m_Material->GetPath() != path)
 		{
-			m_Status = "当前材质有未保存改动(已切到新材质,原改动保留在内存)";
+			m_Status = Wui::Tr("panel.material.status.unsaved_switch",
+				"Current material has unsaved changes (switched to the new material; the old edits are kept in memory)");
 			m_StatusIsError = true;
 		}
 		else
 		{
-			m_Status = "已打开 " + path;
+			m_Status = Wui::Tr("panel.material.status.opened", "Opened ") + path;
 			m_StatusIsError = false;
 		}
 		m_Material = material;
@@ -464,21 +466,22 @@ namespace World
 		std::string path = m_Path.empty() ? m_NewPathBuffer : m_Path;
 		if (path.empty())
 		{
-			m_Status = "保存失败: 未指定路径(新建材质请在内容浏览器里创建 .wmat)";
+			m_Status = Wui::Tr("panel.material.status.no_path",
+				"Save failed: no path (create new materials as .wmat in the Content Browser)");
 			m_StatusIsError = true;
 			return;
 		}
 		std::string error;
 		if (!MaterialLibrary::Get().Save(m_Material, path, &error))
 		{
-			m_Status = "保存失败: " + error;
+			m_Status = Wui::Tr("panel.material.status.save_failed", "Save failed: ") + error;
 			m_StatusIsError = true;
 			return;
 		}
 		m_Path = m_Material->GetPath();
 		SetMaterialPathForPanel(m_Path);
 		RefreshPickerIndices();
-		m_Status = "已保存 " + m_Path;
+		m_Status = Wui::Tr("panel.material.status.saved", "Saved ") + m_Path;
 		m_StatusIsError = false;
 	}
 
@@ -500,7 +503,8 @@ namespace World
 		{
 			if (m_Path.empty())
 			{
-				m_Status = "Revert 失败: 尚未落盘的材质没有可回退的磁盘版本";
+				m_Status = Wui::Tr("panel.material.status.revert_failed",
+					"Revert failed: this material has never been saved to disk");
 				m_StatusIsError = true;
 			}
 			else
@@ -509,12 +513,12 @@ namespace World
 				if (MaterialLibrary::Get().Reload(m_Path, &error))
 				{
 					RefreshPickerIndices();
-					m_Status = "已从磁盘重载 " + m_Path;
+					m_Status = Wui::Tr("panel.material.status.reloaded", "Reloaded from disk ") + m_Path;
 					m_StatusIsError = false;
 				}
 				else
 				{
-					m_Status = "重载失败: " + error;
+					m_Status = Wui::Tr("panel.material.status.reload_failed", "Reload failed: ") + error;
 					m_StatusIsError = true;
 				}
 			}
@@ -523,7 +527,9 @@ namespace World
 		y += 30.0f;
 		if (m_Path.empty())
 		{
-			Wui::Label(ctx, { x, y }, "尚未落盘:请在内容浏览器里新建材质", theme.TextMuted, 12.0f);
+			Wui::Label(ctx, { x, y },
+				Wui::Tr("panel.material.not_saved",
+					"Not saved to disk yet: create a material in the Content Browser"), theme.TextMuted, 12.0f);
 			y += 16.0f;
 			const Wui::WuiRect field { x, y, rect.W - 20.0f, 22.0f };
 			Wui::TextField(ctx, Wui::HashId("material.newpath"), field, m_NewPathBuffer, theme);
@@ -537,7 +543,8 @@ namespace World
 		if (!m_Material)
 		{
 			Wui::Label(ctx, { rect.X + 10.0f, rect.Y + 8.0f },
-				"未打开材质:在内容浏览器双击 .wmat 文件", theme.TextMuted, 13.0f);
+				Wui::Tr("panel.material.none_open",
+					"No material open: double-click a .wmat file in the Content Browser"), theme.TextMuted, 13.0f);
 			return;
 		}
 
@@ -558,7 +565,8 @@ namespace World
 				m_Material->MarkDirty(true);
 		};
 
-		Wui::Label(ctx, { x, y }, ShortenPath(m_Path.empty() ? "(未保存的新材质)" : m_Path)
+		Wui::Label(ctx, { x, y }, ShortenPath(m_Path.empty()
+				? Wui::Tr("panel.material.unsaved_new", "(unsaved new material)") : m_Path)
 			+ (m_Material->IsDirty() ? "  *" : ""), theme.Text, 13.0f);
 		y += 20.0f;
 
@@ -618,8 +626,9 @@ namespace World
 
 		// ---- 贴图槽(可搜索下拉) ----
 		std::vector<std::string> albedoOptions = m_TexturePaths;
-		albedoOptions.insert(albedoOptions.begin(), "(无)");
-		Wui::Label(ctx, { x, y }, "Albedo 贴图 (sRGB)", theme.TextMuted, 12.0f);
+		albedoOptions.insert(albedoOptions.begin(), Wui::Tr("panel.material.texture_none", "(none)"));
+		Wui::Label(ctx, { x, y }, Wui::Tr("panel.material.albedo", "Albedo Texture (sRGB)"),
+			theme.TextMuted, 12.0f);
 		y += 16.0f;
 		if (Wui::SearchableCombo(ctx, Wui::HashId("material.albedo"), { x, y, width, 22.0f }, "",
 			albedoOptions, m_AlbedoPickIndex, theme))
@@ -632,8 +641,9 @@ namespace World
 		}
 		y += 28.0f;
 		std::vector<std::string> normalOptions = m_TexturePaths;
-		normalOptions.insert(normalOptions.begin(), "(无)");
-		Wui::Label(ctx, { x, y }, "Normal 贴图 (线性)", theme.TextMuted, 12.0f);
+		normalOptions.insert(normalOptions.begin(), Wui::Tr("panel.material.texture_none", "(none)"));
+		Wui::Label(ctx, { x, y }, Wui::Tr("panel.material.normal", "Normal Texture (Linear)"),
+			theme.TextMuted, 12.0f);
 		y += 16.0f;
 		if (Wui::SearchableCombo(ctx, Wui::HashId("material.normal"), { x, y, width, 22.0f }, "",
 			normalOptions, m_NormalPickIndex, theme))
@@ -712,7 +722,9 @@ namespace World
 		}
 		else
 		{
-			Wui::Label(ctx, { previewRect.X + 10.0f, previewRect.Y + 10.0f }, "预览不可用(RHI 设备未就绪)", theme.TextMuted, 12.0f);
+			Wui::Label(ctx, { previewRect.X + 10.0f, previewRect.Y + 10.0f },
+				Wui::Tr("panel.material.preview_unavailable", "Preview unavailable (RHI device not ready)"),
+				theme.TextMuted, 12.0f);
 		}
 
 		DrawToolbar(ctx, parameterRect, host);

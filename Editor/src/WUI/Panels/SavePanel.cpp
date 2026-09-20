@@ -2,6 +2,7 @@
 #include "SavePanel.h"
 
 #include "World/Gameplay/SaveService.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include <ctime>
@@ -33,7 +34,8 @@ namespace World
 		if (!saves)
 		{
 			Label(ctx, { rect.X + 10.0f, rect.Y + 10.0f },
-				"存档服务未就绪(需要项目清单与活动场景)。", theme.TextMuted, 14.0f);
+				Wui::Tr("panel.save.service_unavailable",
+					"Save service unavailable (needs project manifest and active scene)."), theme.TextMuted, 14.0f);
 			return;
 		}
 
@@ -75,9 +77,9 @@ namespace World
 				const std::string before = saves->GetLastError();
 				(void)before;
 				if (saves->Save(slot, "current"))
-					m_Status = "已保存到 slot " + std::to_string(slot);
+					m_Status = Wui::Tr("panel.save.status.saved", "Saved to slot ") + std::to_string(slot);
 				else
-					m_Status = "保存失败: " + saves->GetLastError();
+					m_Status = Wui::Tr("panel.save.status.save_failed", "Save failed: ") + saves->GetLastError();
 				m_StatusUntil = static_cast<double>(ctx.Frame()) + 300.0;
 			}
 			buttonX += actionW + 4.0f;
@@ -85,24 +87,29 @@ namespace World
 				{ buttonX, buttonY, actionW, 22.0f }, "Load", theme))
 			{
 				if (!exists)
-					m_Status = "slot " + std::to_string(slot) + " 为空";
+					m_Status = Wui::Tr("panel.save.status.empty_slot", "Slot ") + std::to_string(slot)
+						+ Wui::Tr("panel.save.status.empty_slot_suffix", " is empty");
 				else if (saves->Load(slot))
 				{
 					const Gameplay::SaveLoadReport& report = saves->GetLastLoadReport();
-					m_Status = "已读取 slot " + std::to_string(slot) + ": 更新 " + std::to_string(report.EntitiesUpdated)
-						+ " / 新建 " + std::to_string(report.EntitiesCreated)
-						+ " / 组件 " + std::to_string(report.ComponentsApplied)
-						+ (report.ComponentsFailed ? " / 失败 " + std::to_string(report.ComponentsFailed) : "");
+					m_Status = Wui::Tr("panel.save.status.loaded", "Loaded slot ") + std::to_string(slot)
+						+ Wui::Tr("panel.save.status.loaded_stats", ": updated ") + std::to_string(report.EntitiesUpdated)
+						+ Wui::Tr("panel.save.status.loaded_created", " / created ") + std::to_string(report.EntitiesCreated)
+						+ Wui::Tr("panel.save.status.loaded_components", " / components ") + std::to_string(report.ComponentsApplied)
+						+ (report.ComponentsFailed ? Wui::Tr("panel.save.status.loaded_failed", " / failed ")
+							+ std::to_string(report.ComponentsFailed) : "");
 				}
 				else
-					m_Status = "读取失败: " + saves->GetLastError();
+					m_Status = Wui::Tr("panel.save.status.load_failed", "Load failed: ") + saves->GetLastError();
 				m_StatusUntil = static_cast<double>(ctx.Frame()) + 300.0;
 			}
 			buttonX += actionW + 4.0f;
 			if (Button(ctx, Wui::HashId(("delete.slot." + std::to_string(slot)).c_str()),
 				{ buttonX, buttonY, actionW, 22.0f }, "Delete", theme))
 			{
-				m_Status = saves->Delete(slot) ? "已删除 slot " + std::to_string(slot) : "删除失败(槽位为空)";
+				m_Status = saves->Delete(slot)
+					? Wui::Tr("panel.save.status.deleted", "Deleted slot ") + std::to_string(slot)
+					: Wui::Tr("panel.save.status.delete_failed", "Delete failed (slot is empty)");
 				m_StatusUntil = static_cast<double>(ctx.Frame()) + 300.0;
 			}
 			y += rowH + 6.0f;
@@ -112,6 +119,6 @@ namespace World
 			Label(ctx, { rect.X + 10.0f, y + 4.0f }, m_Status, theme.TextMuted, 13.0f);
 
 		Label(ctx, { rect.X + 10.0f, rect.Y + rect.H - 22.0f },
-			"目录: " + saves->GetSaveRoot().string(), theme.TextMuted, 12.0f);
+			Wui::Tr("panel.save.dir", "Directory: ") + saves->GetSaveRoot().string(), theme.TextMuted, 12.0f);
 	}
 }

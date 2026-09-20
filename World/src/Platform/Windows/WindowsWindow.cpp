@@ -543,6 +543,11 @@ namespace World
 			// HTCAPTION/HTCLOSE 等,否则标题栏拖动与系统按钮失效。
 			if (msg == WM_NCHITTEST && self->m_Frameless)
 				return self->HitTestNc(lParam);
+			// P4-UX3b(用户反馈"全屏四周漏缝"):无边框窗口补了 WS_THICKFRAME 之后
+			// 系统会留一圈非客户区边框,最大化时就是四周那圈缝。
+			// 返回 0 = 客户区覆盖整个窗口矩形(边缘缩放仍由上面的 WM_NCHITTEST 负责)。
+			if (msg == WM_NCCALCSIZE && self->m_Frameless && wParam)
+				return 0;
 		}
 		const WNDPROC previous = self ? self->m_PrevWndProc : nullptr;
 		return previous ? CallWindowProcW(previous, hwnd, msg, wParam, lParam)

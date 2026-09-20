@@ -70,6 +70,14 @@ namespace World::Wui
 	// 用于中文界面下的有歧义条目;英文界面传空 term 即可。
 	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
 		const WuiColor& color, float fontSize, const WuiTheme& theme);
+
+	// P4-UX4 悬停提示(用户 2026-09-20:"鼠标悬停在一个设置里的选项是不是得有介绍"):
+	//  - `Tooltip(ctx, hoverRect, text)`:鼠标在该矩形内时登记文本(后登记覆盖先登记);
+	//  - `DrawTooltip(ctx, theme)`:宿主在**画完所有面板之后**调用一次,画到 overlay 层
+	//    (不受面板裁剪、永远在最上层);文本支持 '\n' 与按宽度自动换行。
+	// 文案约定(见 skill engine-ui-patterns):名称 + 一句用途 + 默认值/范围 + 生效时机 + 禁用原因。
+	void Tooltip(WuiContext& ctx, const WuiRect& hoverRect, const std::string& text);
+	void DrawTooltip(WuiContext& ctx, const WuiTheme& theme);
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	bool Toggle(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	// 值驱动的勾选框(供 Inspector 等绑定外部状态):状态写回 value;

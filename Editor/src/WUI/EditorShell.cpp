@@ -1169,6 +1169,8 @@ namespace World
 
 		// W9-2:本帧(含所有独立窗口)结束时的文本焦点快照。UI 帧开始时各窗口的登记
 		// 已被 BeginFrame 清空,所以帧内 Ctrl+Z/Y 判定必须用"上一帧结束"的这份状态。
+		// P4-UX4:悬停提示最后画 —— 面板/模态都已登记完,这里统一画到 overlay 层。
+		Wui::DrawTooltip(ctx, m_Theme);
 		m_TextFocusLatched = Wui::WuiTextFocus::Get().Active();
 	}
 

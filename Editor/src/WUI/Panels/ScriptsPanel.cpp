@@ -3,6 +3,7 @@
 
 #include "World/Scene/Components.h"
 #include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
@@ -275,7 +276,7 @@ namespace World
 			const Wui::WuiRect openRect {
 				externalRect.X - 102.0f, rowRect.Y + 1.0f, 96.0f, 20.0f };
 			if (Wui::Button(ctx, Wui::HashId(("scripts.open." + std::to_string(index)).c_str()),
-				openRect, "在引擎内打开", theme))
+				openRect, Wui::Tr("panel.scripts.open_in_engine", "Open in Editor"), theme))
 			{
 				host.OpenScriptEditor(script.LogicalPath);
 				SetStatus("open in editor: " + script.LogicalPath, false);

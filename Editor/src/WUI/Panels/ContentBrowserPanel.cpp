@@ -5,6 +5,7 @@
 #include "World/Core/KeyCodes.h"
 #include "World/Core/Application.h"
 #include "World/WUI/WuiJson.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -683,8 +684,10 @@ namespace World
 				else
 				{
 					// Q2:非 glTF 类型不支持(不复制、不静默)。
-					const std::string message = "不支持该类型: " + extension
-						+ "(当前只支持拖入 .gltf / .glb 导入)";
+					const std::string message = Wui::Tr("panel.content_browser.drop.unsupported",
+						"Unsupported file type: ") + extension
+						+ Wui::Tr("panel.content_browser.drop.unsupported_hint",
+							"(only .gltf / .glb can be dropped for import)");
 					WLD_CORE_WARN("[drop] {0}", message);
 					if (m_Ctx) m_Ctx->RecordOp("browser", "drop-rejected",
 						source.filename().string(), message);

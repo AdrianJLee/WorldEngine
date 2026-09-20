@@ -55,6 +55,9 @@ namespace World
 				label.Text, label.Term, m_Edit.Culling, theme))
 				changed = true;
 		}
+		// P4-UX4:设置项悬停说明(名称/用途/默认值/生效时机)—— 用户明确要求"悬停要有介绍"。
+		Wui::Tooltip(ctx, { x, y, width, 20.0f }, Wui::Tr("settings.culling.tooltip",
+			"Frustum culling\nSkip objects outside the camera view.\nDefault: on. Applies immediately."));
 		y += 24.0f;
 
 		{
@@ -63,6 +66,8 @@ namespace World
 				label.Text, label.Term, m_Edit.Shadows, theme))
 				changed = true;
 		}
+		Wui::Tooltip(ctx, { x, y, width, 20.0f }, Wui::Tr("settings.shadows.tooltip",
+			"Directional shadows\nRender a shadow map from the main directional light.\nDefault: on. Applies immediately."));
 		y += 26.0f;
 
 		// P4-perf:垂直同步/呈现模式。Vulkan 下改这一项会重建交换链(下一帧生效),
@@ -76,6 +81,8 @@ namespace World
 				Renderer::SetVsync(m_Edit.Vsync);
 			}
 		}
+		Wui::Tooltip(ctx, { x, y, width, 20.0f }, Wui::Tr("settings.vsync.tooltip",
+			"Vertical sync\nWait for the display refresh before presenting (prevents tearing; caps FPS at the refresh rate).\nDefault: on. Applies immediately (swapchain is recreated)."));
 		y += 26.0f;
 
 		{
@@ -91,6 +98,8 @@ namespace World
 				const Wui::LocalizedLabel label = Wui::TrLabel("settings.shadow_map", "Shadow Map Size");
 				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
 			}
+			Wui::Tooltip(ctx, { x, y, width, 22.0f }, Wui::Tr("settings.shadow_map.tooltip",
+				"Shadow map size\nResolution of the directional shadow map (512-4096, power of two).\nTakes effect on next start."));
 			y += 26.0f;
 		}
 
@@ -106,6 +115,8 @@ namespace World
 				const Wui::LocalizedLabel label = Wui::TrLabel("settings.max_directional", "Max Directional Lights");
 				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
 			}
+			Wui::Tooltip(ctx, { x, y, width, 22.0f }, Wui::Tr("settings.max_directional.tooltip",
+				"Max directional lights\nHow many directional lights are packed into the frame (1-2, shared budget of 8 with point lights).\nApplies immediately."));
 			y += 26.0f;
 		}
 
@@ -121,6 +132,8 @@ namespace World
 				const Wui::LocalizedLabel label = Wui::TrLabel("settings.max_point", "Max Point Lights");
 				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
 			}
+			Wui::Tooltip(ctx, { x, y, width, 22.0f }, Wui::Tr("settings.max_point.tooltip",
+				"Max point lights\nHow many point lights are packed into the frame (0-7, shared budget of 8).\nApplies immediately."));
 			y += 26.0f;
 		}
 
@@ -144,6 +157,8 @@ namespace World
 				const Wui::LocalizedLabel label = Wui::TrLabel("settings.anisotropy", "Texture Anisotropy");
 				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
 			}
+			Wui::Tooltip(ctx, { x, y, width, 22.0f }, Wui::Tr("settings.anisotropy.tooltip",
+				"Texture anisotropy\nMax anisotropy for scene textures (1-16; clamped to the device limit, 1 keeps it off).\nApplies immediately."));
 			y += 26.0f;
 		}
 
@@ -160,6 +175,8 @@ namespace World
 				const Wui::LocalizedLabel label = Wui::TrLabel("settings.render_scale", "Render Scale");
 				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
 			}
+			Wui::Tooltip(ctx, { x, y, width, 22.0f }, Wui::Tr("settings.render_scale.tooltip",
+				"Render scale\nResolution factor for the scene target only (0.25-2.0); the window and UI stay unchanged.\nApplies immediately."));
 			y += 26.0f;
 		}
 
@@ -181,6 +198,8 @@ namespace World
 				const Wui::LocalizedLabel label = Wui::TrLabel("settings.msaa", "MSAA (restart)");
 				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
 			}
+			Wui::Tooltip(ctx, { x, y, width, 22.0f }, Wui::Tr("settings.msaa.tooltip",
+				"MSAA\nMultisampling for the scene pass (1/2/4/8). Pipelines are created at startup, so a restart is required."));
 			y += 26.0f;
 		}
 
@@ -202,6 +221,8 @@ namespace World
 				const Wui::LocalizedLabel label = Wui::TrLabel("settings.physics.fixed_step", "Fixed Timestep");
 				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
 			}
+			Wui::Tooltip(ctx, { x, y, width, 22.0f }, Wui::Tr("settings.physics.fixed_step.tooltip",
+				"Fixed timestep\nPhysics update rate in Hz (1-240). Takes effect on the next Play / Runtime start.\nDefault: 60."));
 			y += 26.0f;
 		}
 		{
@@ -216,6 +237,8 @@ namespace World
 				const Wui::LocalizedLabel label = Wui::TrLabel("settings.physics.gravity", "Gravity");
 				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
 			}
+			Wui::Tooltip(ctx, { x, y, width, 22.0f }, Wui::Tr("settings.physics.gravity.tooltip",
+				"Gravity\nAcceleration on the Y axis (m/s²). Takes effect on the next Play / Runtime start.\nDefault: -9.81."));
 			y += 26.0f;
 		}
 

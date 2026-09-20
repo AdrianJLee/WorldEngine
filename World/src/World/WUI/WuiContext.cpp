@@ -142,6 +142,7 @@ namespace World::Wui
 		m_OverlayCommands.clear();
 		m_OverlayDepth = 0;
 		m_HoverBlockers.clear();
+		m_Tooltip.clear();
 		++m_Frame;
 	}
 

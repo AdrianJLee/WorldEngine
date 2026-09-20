@@ -151,6 +151,12 @@ namespace World::Wui
 		void PopOverlay() { if (m_OverlayDepth > 0) --m_OverlayDepth; }
 		WuiStyleSheet& Sheet() { return m_Sheet; }
 
+		// P4-UX4:悬停提示(tooltip)。控件在悬停时登记文本(后登记覆盖先登记),
+		// 宿主画完面板后调用 `Wui::DrawTooltip` 把它画到 overlay 层 —— 这样提示不被
+		// 面板裁剪、也不会压住后续控件。BeginFrame 清空,所以只有"本帧仍悬停"的项会显示。
+		void SetTooltip(std::string text) { m_Tooltip = std::move(text); }
+		const std::string& Tooltip() const { return m_Tooltip; }
+
 		template <typename T>
 		T& Persist(WuiId id, const T& initial)
 		{
@@ -278,6 +284,7 @@ namespace World::Wui
 		bool m_TextInputActive = false;
 		std::string m_WindowKey;
 		std::string m_PanelId;
+		std::string m_Tooltip;
 		WuiCursor m_Cursor = WuiCursor::Arrow;
 		std::vector<WuiId> m_OpenPopups;
 		std::unordered_map<WuiId, uint64_t> m_PopupOpenFrame;

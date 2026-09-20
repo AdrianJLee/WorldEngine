@@ -117,6 +117,8 @@ namespace World
 		Wui::WuiScriptedInput::Get().Apply(windowKey, input);
 		m_Context.BeginFrame(input);
 		RenderTabBar(m_Context, { 0.0f, 0.0f, size.x, size.y });
+		// P4-UX4:独立窗口里的悬停提示(同一套控件/主题)。
+		Wui::DrawTooltip(m_Context, m_Callbacks.Theme);
 		m_Context.EndFrame();
 
 		if (m_Target)

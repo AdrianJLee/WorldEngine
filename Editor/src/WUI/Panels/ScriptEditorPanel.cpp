@@ -8,6 +8,7 @@
 #include "World/Script/LuauFormatter.h"
 #include "World/Script/LuauSyntax.h"
 #include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
@@ -62,7 +63,7 @@ namespace World
 			if (!input)
 			{
 				if (error)
-					*error = "无法读取脚本文件: " + path.string();
+					*error = Wui::Tr("panel.script.error.open_failed", "Cannot read script file: ") + path.string();
 				return false;
 			}
 			std::ostringstream buffer;
@@ -70,7 +71,7 @@ namespace World
 			if (input.bad())
 			{
 				if (error)
-					*error = "读取脚本文件失败: " + path.string();
+					*error = Wui::Tr("panel.script.error.read_failed", "Failed to read script file: ") + path.string();
 				return false;
 			}
 			out = buffer.str();
@@ -86,7 +87,8 @@ namespace World
 				MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
 				return true;
 			if (error)
-				*error = "保存失败(替换目标失败,文件可能被占用): " + target.string()
+				*error = Wui::Tr("panel.script.error.replace_failed",
+					"Save failed (could not replace target; the file may be in use): ") + target.string()
 					+ " (Win32 " + std::to_string(static_cast<unsigned long>(GetLastError())) + ")";
 			return false;
 #else
@@ -95,7 +97,7 @@ namespace World
 			if (ec)
 			{
 				if (error)
-					*error = "保存失败: " + ec.message();
+					*error = Wui::Tr("panel.script.error.save_failed", "Save failed: ") + ec.message();
 				return false;
 			}
 			return true;
@@ -162,7 +164,8 @@ namespace World
 		if (!m_Completion.LoadStubFile(stubPath, &error))
 		{
 			m_CompletionStubFailed = true;
-			SetStatus(error.empty() ? ("补全不可用: 缺少 " + stubPath) : ("补全不可用: " + error), true);
+			SetStatus(Wui::Tr("panel.script.completion.unavailable", "Completion unavailable: ")
+				+ (error.empty() ? Wui::Tr("panel.script.completion.missing_stub", "missing ") + stubPath : error), true);
 			WLD_CORE_WARN("[script-editor] completion index unavailable: {0}",
 				error.empty() ? stubPath : error);
 			return;
@@ -208,7 +211,9 @@ namespace World
 		{
 			// 包内/非法/不存在:面板仍显示,只读 + 状态行错误文本(不伪造占位内容)。
 			m_Buffer.SetText(std::string());
-			SetStatus(resolveError.empty() ? ("脚本不可编辑: " + m_LogicalPath) : resolveError, true);
+			SetStatus(resolveError.empty()
+				? Wui::Tr("panel.script.not_editable", "Script is not editable: ") + m_LogicalPath
+				: resolveError, true);
 			WLD_CORE_INFO("[script-editor] '{0}' opened read-only: {1}", m_LogicalPath,
 				resolveError.empty() ? std::string("not a disk script") : resolveError);
 			return;
@@ -225,7 +230,7 @@ namespace World
 		m_DiskBacked = true;
 		m_Buffer.SetText(std::move(text));
 		m_DiskFingerprint = FingerprintText(m_Buffer.Text());
-		SetStatus("已从磁盘载入 " + m_LogicalPath, false);
+		SetStatus(Wui::Tr("panel.script.status.loaded", "Loaded from disk ") + m_LogicalPath, false);
 		WLD_CORE_INFO("[script-editor] loaded '{0}' from {1} ({2} bytes)", m_LogicalPath,
 			m_DiskPath.string(), m_Buffer.Text().size());
 	}
@@ -258,29 +263,33 @@ namespace World
 			m_DiskFingerprint = hash;
 			m_IgnoredFingerprint = 0;
 			m_ExternalConflict = false;
-			SetStatus("磁盘已变化:已自动重新载入", false);
+			SetStatus(Wui::Tr("panel.script.status.auto_reloaded",
+				"File changed on disk: reloaded automatically"), false);
 			return;
 		}
 		m_ExternalConflict = true;
 		m_ConflictFingerprint = hash;
-		SetStatus("磁盘已变化:Reload = 用磁盘版本覆盖编辑内容,Keep = 继续编辑", true);
+		SetStatus(Wui::Tr("panel.script.status.external_conflict",
+			"File changed on disk: Reload = overwrite with the disk version, Keep = continue editing"), true);
 	}
 
 	void ScriptEditorPanel::ApplySave(PanelHost& host)
 	{
 		if (host.IsReadOnlyMode())
 		{
-			SetStatus("只读(Play/Simulate):脚本不可保存", true);
+			SetStatus(Wui::Tr("panel.script.status.readonly_save",
+				"Read-only (Play/Simulate): the script cannot be saved"), true);
 			return;
 		}
 		if (!m_DiskBacked)
 		{
-			SetStatus("不是磁盘脚本,无法保存: " + m_LogicalPath, true);
+			SetStatus(Wui::Tr("panel.script.status.not_disk_backed", "Not a disk script, cannot save: ")
+				+ m_LogicalPath, true);
 			return;
 		}
 		if (!m_Buffer.Dirty())
 		{
-			SetStatus("没有未保存的修改", false);
+			SetStatus(Wui::Tr("panel.script.status.no_changes", "No unsaved changes"), false);
 			return;
 		}
 
@@ -292,7 +301,8 @@ namespace World
 			std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
 			if (!output)
 			{
-				SetStatus("无法创建临时文件: " + tempPath.string(), true);
+				SetStatus(Wui::Tr("panel.script.error.temp_create", "Cannot create temporary file: ")
+					+ tempPath.string(), true);
 				return;
 			}
 			output.write(text.data(), static_cast<std::streamsize>(text.size()));
@@ -302,7 +312,8 @@ namespace World
 				output.close();
 				std::error_code cleanup;
 				std::filesystem::remove(tempPath, cleanup);
-				SetStatus("写入临时文件失败(编辑器内容保留): " + tempPath.string(), true);
+				SetStatus(Wui::Tr("panel.script.error.temp_write",
+					"Failed to write temporary file (editor content preserved): ") + tempPath.string(), true);
 				return;
 			}
 		}
@@ -320,7 +331,7 @@ namespace World
 		m_IgnoredFingerprint = 0;
 		m_ConflictFingerprint = 0;
 		m_ExternalConflict = false;
-		SetStatus("已保存 " + m_LogicalPath, false);
+		SetStatus(Wui::Tr("panel.script.status.saved", "Saved ") + m_LogicalPath, false);
 		WLD_CORE_INFO("[script-editor] saved '{0}' ({1} bytes)", m_LogicalPath, m_Buffer.Text().size());
 		ReloadSceneInstances(host);
 	}
@@ -333,12 +344,13 @@ namespace World
 		const std::string formatted = FormatLuauSource(m_Buffer.Text());
 		if (m_Buffer.ReplaceAll(formatted))
 		{
-			SetStatus("已格式化(4 空格缩进 + 去行尾空白)", false);
+			SetStatus(Wui::Tr("panel.script.status.formatted",
+				"Formatted (4-space indent + trailing whitespace removed)"), false);
 			WLD_CORE_INFO("[script-editor] formatted '{0}' ({1} -> {2} bytes)",
 				m_LogicalPath, beforeBytes, m_Buffer.Text().size());
 		}
 		else
-			SetStatus("格式无变化", false);
+			SetStatus(Wui::Tr("panel.script.status.format_unchanged", "No formatting changes"), false);
 	}
 
 	void ScriptEditorPanel::ApplyReloadFromDisk(PanelHost& host)
@@ -351,7 +363,8 @@ namespace World
 		}
 		if (host.IsReadOnlyMode())
 		{
-			SetStatus("只读(Play/Simulate):不可从磁盘重载", true);
+			SetStatus(Wui::Tr("panel.script.status.readonly_reload",
+				"Read-only (Play/Simulate): cannot reload from disk"), true);
 			return;
 		}
 		std::string text;
@@ -366,7 +379,8 @@ namespace World
 		m_IgnoredFingerprint = 0;
 		m_ConflictFingerprint = 0;
 		m_ExternalConflict = false;
-		SetStatus("已从磁盘重新载入(撤销历史已重置)", false);
+		SetStatus(Wui::Tr("panel.script.status.reloaded",
+			"Reloaded from disk (undo history reset)"), false);
 	}
 
 	void ScriptEditorPanel::ReloadSceneInstances(PanelHost& host)
@@ -397,16 +411,22 @@ namespace World
 		}
 		if (matched == 0)
 		{
-			SetStatus("已保存 " + m_LogicalPath + "(当前场景没有使用该脚本的实例)", false);
+			SetStatus(Wui::Tr("panel.script.status.saved_no_instances", "Saved ") + m_LogicalPath
+				+ Wui::Tr("panel.script.status.no_instances_suffix",
+					" (the current scene has no instances using this script)"), false);
 			return;
 		}
 		if (failed > 0)
 		{
-			SetStatus("已保存,但 " + std::to_string(failed) + "/" + std::to_string(matched)
-				+ " 个实例重载失败: " + lastError, true);
+			SetStatus(Wui::Tr("panel.script.status.saved_reload_failed", "Saved, but ")
+				+ std::to_string(failed) + "/" + std::to_string(matched)
+				+ Wui::Tr("panel.script.status.reload_failed_suffix", " instances failed to reload: ")
+				+ lastError, true);
 			return;
 		}
-		SetStatus("已保存并热重载 " + std::to_string(matched) + " 个场景实例", false);
+		SetStatus(Wui::Tr("panel.script.status.saved_hot_reloaded", "Saved and hot-reloaded ")
+			+ std::to_string(matched)
+			+ Wui::Tr("panel.script.status.instances_suffix", " scene instance(s)"), false);
 	}
 
 	bool ScriptEditorPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
@@ -469,7 +489,7 @@ namespace World
 			{
 				m_ErrorLine = 0;
 				if (m_StatusIsSyntax)
-					SetStatus("语法检查通过", false);
+					SetStatus(Wui::Tr("panel.script.syntax.ok", "Syntax check passed"), false);
 			}
 			else
 			{
@@ -477,7 +497,7 @@ namespace World
 				m_ErrorLine = syntaxError.Line > 0
 					? std::max(1, std::min(syntaxError.Line, static_cast<int>(m_Buffer.LineCount())))
 					: 1;
-				std::string message = "语法错误";
+				std::string message = Wui::Tr("panel.script.syntax.error", "Syntax error");
 				if (syntaxError.Line > 0)
 					message += " L" + std::to_string(syntaxError.Line);
 				if (!syntaxError.Message.empty())
@@ -512,7 +532,7 @@ namespace World
 
 		std::string toolbarHint = m_LogicalPath;
 		if (readOnly)
-			toolbarHint += "   [只读]";
+			toolbarHint += Wui::Tr("panel.script.readonly_tag", "   [read-only]");
 		if (m_Buffer.Dirty())
 			toolbarHint += "   *";
 		Wui::Label(ctx, { x + 4.0f, toolbarY + 4.0f }, TruncateUtf8(toolbarHint, 96),
@@ -528,7 +548,7 @@ namespace World
 		if (m_Buffer.Dirty())
 			status += "  *";
 		if (readOnly)
-			status += "  [只读]";
+			status += Wui::Tr("panel.script.readonly_tag_short", "  [read-only]");
 		status += "  " + std::to_string(static_cast<int>(std::round(m_FontSize))) + "px";
 		if (!m_Status.empty())
 			status += "   |   " + m_Status;
@@ -550,7 +570,8 @@ namespace World
 			{
 				m_IgnoredFingerprint = m_ConflictFingerprint;
 				m_ExternalConflict = false;
-				SetStatus("已保留编辑内容(忽略磁盘上的这个版本)", false);
+				SetStatus(Wui::Tr("panel.script.status.keep_local",
+					"Kept your edits (ignoring this version on disk)"), false);
 			}
 		}
 

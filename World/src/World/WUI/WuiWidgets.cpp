@@ -114,6 +114,100 @@ namespace World::Wui
 			theme.TextMuted, 0, 1.0f, term, termSize, false });
 	}
 
+	namespace
+	{
+		// 按绘制宽度折行:支持 '\n' 硬换行;对 CJK(无空格)按字符断行。
+		std::vector<std::string> WrapTooltipText(WuiContext& ctx, const std::string& text,
+			float fontSize, float maxWidth)
+		{
+			std::vector<std::string> lines;
+			const auto emit = [&](const std::string& paragraph)
+			{
+				std::string current;
+				size_t index = 0;
+				while (index < paragraph.size())
+				{
+					// 取一个 UTF-8 字符
+					const unsigned char lead = static_cast<unsigned char>(paragraph[index]);
+					size_t length = 1;
+					if ((lead & 0xE0) == 0xC0) length = 2;
+					else if ((lead & 0xF0) == 0xE0) length = 3;
+					else if ((lead & 0xF8) == 0xF0) length = 4;
+					length = std::min(length, paragraph.size() - index);
+					std::string candidate = current + paragraph.substr(index, length);
+					if (!current.empty() && ctx.MeasureTextWidth(candidate, fontSize) > maxWidth)
+					{
+						lines.push_back(current);
+						current.clear();
+						continue;   // 重新尝试放这个字符
+					}
+					current = std::move(candidate);
+					// 西文按空格优先断行:遇到空格且下一段超宽时在此断开
+					index += length;
+				}
+				if (!current.empty())
+					lines.push_back(current);
+			};
+			std::string paragraph;
+			for (size_t i = 0; i < text.size(); ++i)
+			{
+				if (text[i] == '\n')
+				{
+					emit(paragraph);
+					paragraph.clear();
+					continue;
+				}
+				paragraph.push_back(text[i]);
+			}
+			emit(paragraph);
+			if (lines.empty())
+				lines.push_back(std::string());
+			return lines;
+		}
+	}
+
+	void Tooltip(WuiContext& ctx, const WuiRect& hoverRect, const std::string& text)
+	{
+		if (text.empty() || !ctx.IsHovered(hoverRect))
+			return;
+		ctx.SetTooltip(text);
+	}
+
+	void DrawTooltip(WuiContext& ctx, const WuiTheme& theme)
+	{
+		const std::string& text = ctx.Tooltip();
+		if (text.empty())
+			return;
+		const float fontSize = theme.FontSizeSmall;
+		const float padding = 8.0f;
+		const float lineHeight = fontSize + 6.0f;
+		const float maxTextWidth = 380.0f;
+		const std::vector<std::string> lines = WrapTooltipText(ctx, text, fontSize, maxTextWidth);
+		float textWidth = 0.0f;
+		for (const std::string& line : lines)
+			textWidth = std::max(textWidth, ctx.MeasureTextWidth(line, fontSize));
+		const float height = static_cast<float>(lines.size()) * lineHeight + padding * 2.0f;
+		const glm::vec2 viewport = ctx.ViewportSize();
+		// 跟随光标右下 16/20,贴边时翻到另一侧,保证整块提示在视口内可见。
+		glm::vec2 pos { ctx.Input().MousePos.x + 16.0f, ctx.Input().MousePos.y + 20.0f };
+		const float panelWidth = textWidth + padding * 2.0f;
+		if (pos.x + panelWidth > viewport.x - 4.0f)
+			pos.x = std::max(4.0f, ctx.Input().MousePos.x - panelWidth - 12.0f);
+		if (pos.y + height > viewport.y - 4.0f)
+			pos.y = std::max(4.0f, ctx.Input().MousePos.y - height - 12.0f);
+		const WuiRect panel { pos.x, pos.y, panelWidth, height };
+		ctx.PushOverlay();
+		DrawPanelSurface(ctx, panel, theme);
+		float y = panel.Y + padding;
+		for (const std::string& line : lines)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Text, { panel.X + padding, y, 0, 0 },
+				theme.Text, 0, 1.0f, line, fontSize, false });
+			y += lineHeight;
+		}
+		ctx.PopOverlay();
+	}
+
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme)
 	{
 		RegisterAccessNode(id, "button", rect, label, std::string());

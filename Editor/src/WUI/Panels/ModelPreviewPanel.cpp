@@ -9,6 +9,7 @@
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/AssetHotReload.h"
 #include "World/Core/Asset/GltfImporter.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -20,6 +21,7 @@
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
+#include <iomanip>
 #include <sstream>
 
 namespace World
@@ -135,7 +137,8 @@ namespace World
 		m_DataValid = Asset::WModelIO::ReadFile(m_LogicalPath, m_Data, &error);
 		if (!m_Mesh)
 		{
-			m_Status = "模型加载失败: " + (error.empty() ? m_LogicalPath : error);
+			m_Status = Wui::Tr("panel.model.status.load_failed", "Model load failed: ")
+				+ (error.empty() ? m_LogicalPath : error);
 			m_StatusIsError = true;
 			WLD_CORE_WARN("[model] preview load failed '{0}': {1}", m_LogicalPath, error);
 			return;
@@ -162,11 +165,12 @@ namespace World
 			m_Focus.y + bounds.GetExtents().y, m_Focus.z + bounds.GetExtents().z,
 			m_Focus.x, m_Focus.y, m_Focus.z, radius, m_CameraDistance);
 		std::ostringstream text;
-		text << "已加载 " << m_LogicalPath << " | 节点 " << m_Mesh->GetNodes().size()
-			<< " / mesh " << m_Mesh->GetMeshes().size()
+		text << Wui::Tr("panel.model.status.loaded", "Loaded ") << m_LogicalPath
+			<< Wui::Tr("panel.model.status.stats_nodes", " | nodes ") << m_Mesh->GetNodes().size()
+			<< Wui::Tr("panel.model.status.stats_meshes", " / mesh ") << m_Mesh->GetMeshes().size()
 			<< " / submesh " << m_Mesh->GetSubmeshes().size()
-			<< " / 顶点 " << m_Mesh->GetVertexCount()
-			<< " / 索引 " << m_Mesh->GetIndexCount();
+			<< Wui::Tr("panel.model.status.stats_vertices", " / vertices ") << m_Mesh->GetVertexCount()
+			<< Wui::Tr("panel.model.status.stats_indices", " / indices ") << m_Mesh->GetIndexCount();
 		m_Status = text.str();
 		m_StatusIsError = false;
 		ResolveSource();
@@ -228,20 +232,21 @@ namespace World
 		m_SyncDetail.clear();
 		if (!m_DataValid)
 		{
-			m_SyncDetail = "无法读取 .wmodel 元信息";
+			m_SyncDetail = Wui::Tr("panel.model.sync.meta_unreadable", "Cannot read .wmodel metadata");
 			m_NeedsReimport = true;
 			return;
 		}
 		if (!m_SourceExists)
 		{
-			m_SyncDetail = "找不到源文件(同目录同名 .gltf/.glb)";
+			m_SyncDetail = Wui::Tr("panel.model.sync.source_missing",
+				"Source file not found (same name .gltf/.glb in the same folder)");
 			return;   // 没有源 = 无法重导,但也谈不上"过时"
 		}
 		const AssetFingerprint fingerprint = FingerprintAsset(m_SourceLogical, nullptr);
 		if (fingerprint.FromContent && fingerprint.Value != m_Data.Meta.SourceFingerprint)
 		{
 			m_NeedsReimport = true;
-			m_SyncDetail = "源文件已改动";
+			m_SyncDetail = Wui::Tr("panel.model.sync.source_changed", "Source file changed");
 			return;
 		}
 		// `.wimport` 被外部改动 → 重新读设置(用户正在编辑但未保存的字段以文件为准)。
@@ -261,14 +266,14 @@ namespace World
 			if (settingsHash != m_Data.Meta.SettingsHash)
 			{
 				m_NeedsReimport = true;
-				m_SyncDetail = "导入设置已改动";
+				m_SyncDetail = Wui::Tr("panel.model.sync.settings_changed", "Import settings changed");
 				return;
 			}
 		}
 		if (m_Data.Meta.ImporterVersion != 1u)
 		{
 			m_NeedsReimport = true;
-			m_SyncDetail = "导入器版本已升级";
+			m_SyncDetail = Wui::Tr("panel.model.sync.importer_upgraded", "Importer version upgraded");
 		}
 	}
 
@@ -276,7 +281,9 @@ namespace World
 	{
 		if (!m_SourceExists)
 		{
-			const std::string text = "重导失败: 找不到源文件(" + m_LogicalPath + " 同目录同名 .gltf/.glb)";
+			const std::string text = Wui::Tr("panel.model.reimport.source_missing",
+				"Reimport failed: source file not found (same name .gltf/.glb next to ")
+				+ m_LogicalPath + ")";
 			if (message) *message = text;
 			m_Status = text;
 			m_StatusIsError = true;
@@ -287,7 +294,8 @@ namespace World
 		std::string error;
 		if (!Asset::ImportFile(source, std::filesystem::path(WLD_ASSETPATH), &imported, &error))
 		{
-			const std::string text = "重导失败: " + (error.empty() ? std::string("未知错误") : error);
+			const std::string text = Wui::Tr("panel.model.reimport.failed", "Reimport failed: ")
+				+ (error.empty() ? Wui::Tr("panel.model.reimport.unknown_error", "unknown error") : error);
 			if (message) *message = text;
 			m_Status = text;
 			m_StatusIsError = true;
@@ -296,10 +304,12 @@ namespace World
 		// .wmodel 缓存会让旧网格继续被场景引用 —— 重导后清缓存,重新读盘。
 		Mesh::ClearWModelCache();
 		Reload();
-		const std::string text = "已重导 " + m_LogicalPath + "(mesh " + std::to_string(imported.MeshCount)
+		const std::string text = Wui::Tr("panel.model.reimport.done", "Reimported ") + m_LogicalPath
+			+ "(mesh " + std::to_string(imported.MeshCount)
 			+ " / submesh " + std::to_string(imported.SubmeshCount)
-			+ " / 节点 " + std::to_string(imported.NodeCount)
-			+ " / 材质 " + std::to_string(imported.MaterialPaths.size()) + ")";
+			+ Wui::Tr("panel.model.stats.nodes", " / nodes ") + std::to_string(imported.NodeCount)
+			+ Wui::Tr("panel.model.stats.materials", " / materials ")
+			+ std::to_string(imported.MaterialPaths.size()) + ")";
 		if (message) *message = text;
 		m_Status = text;
 		m_StatusIsError = false;
@@ -799,7 +809,8 @@ namespace World
 		else
 		{
 			Wui::Label(ctx, { previewRect.X + 10.0f, previewRect.Y + 10.0f },
-				"预览不可用(模型未加载或 RHI 设备未就绪)", theme.TextMuted, 12.0f);
+				Wui::Tr("panel.model.preview_unavailable", "Preview unavailable (model not loaded or RHI device not ready)"),
+				theme.TextMuted, 12.0f);
 		}
 		y += previewRect.H + 8.0f;
 		if (showAnimControls)
@@ -821,11 +832,15 @@ namespace World
 
 		std::string statusText;
 		if (m_NeedsReimport)
-			statusText = "需要重导: " + (m_SyncDetail.empty() ? std::string("产物与源不一致") : m_SyncDetail);
+			statusText = Wui::Tr("panel.model.sync.needs_reimport", "Reimport needed: ")
+				+ (m_SyncDetail.empty()
+					? Wui::Tr("panel.model.sync.asset_stale", "asset is out of date with its source")
+					: m_SyncDetail);
 		else if (!m_SourceExists)
-			statusText = "已同步(没找到源文件,无法重导)";
+			statusText = Wui::Tr("panel.model.sync.in_sync_no_source",
+				"In sync (no source file found, reimport unavailable)");
 		else
-			statusText = "已同步(源与设置未变)";
+			statusText = Wui::Tr("panel.model.sync.in_sync", "In sync (source and settings unchanged)");
 		Wui::WuiAccessNode statusNode;
 		statusNode.Id = Wui::HashId("model.status");
 		statusNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
@@ -842,7 +857,7 @@ namespace World
 
 		const float buttonW = (width - 16.0f) / 3.0f;
 		if (Wui::Button(ctx, Wui::HashId("model.instance"), { x, y, buttonW, 22.0f },
-			"放进当前场景", theme))
+			Wui::Tr("panel.model.instance", "Place in Scene"), theme))
 		{
 			std::string message;
 			if (!host.InstantiateModelFile(m_LogicalPath, &message))
@@ -863,11 +878,12 @@ namespace World
 			Reimport(&message);
 		}
 		if (Wui::Button(ctx, Wui::HashId("model.settings.save"), { x + 2.0f * (buttonW + 8.0f), y, buttonW, 22.0f },
-			"保存导入设置", theme))
+			Wui::Tr("panel.model.import_settings.save", "Save Import Settings"), theme))
 		{
 			if (!m_SourceExists)
 			{
-				m_Status = "保存设置失败: 没有源文件";
+				m_Status = Wui::Tr("panel.model.import_settings.no_source",
+					"Failed to save settings: no source file");
 				m_StatusIsError = true;
 			}
 			else
@@ -876,13 +892,14 @@ namespace World
 				if (Asset::ModelImportSettings::Save(
 					(std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical).string(), m_Settings, &error))
 				{
-					m_Status = "已保存导入设置(.wimport);点 Reimport 生效";
+					m_Status = Wui::Tr("panel.model.import_settings.saved",
+						"Import settings saved (.wimport); click Reimport to apply");
 					m_StatusIsError = false;
 					RefreshSyncState();
 				}
 				else
 				{
-					m_Status = "保存设置失败: " + error;
+					m_Status = Wui::Tr("panel.model.import_settings.save_failed", "Failed to save settings: ") + error;
 					m_StatusIsError = true;
 				}
 			}
@@ -906,15 +923,16 @@ namespace World
 			y += 22.0f;
 			bool exportMaterials = m_Settings.ExportMaterials;
 			if (Wui::Checkbox(ctx, Wui::HashId("model.import.materials"), { x, y, 140.0f, 16.0f },
-				"导出材质", exportMaterials, theme))
+				Wui::Tr("panel.model.import_settings.export_materials", "Export Materials"), exportMaterials, theme))
 				m_Settings.ExportMaterials = exportMaterials;
 			bool exportTextures = m_Settings.ExportTextures;
 			if (Wui::Checkbox(ctx, Wui::HashId("model.import.textures"), { x + 150.0f, y, 160.0f, 16.0f },
-				"导出贴图", exportTextures, theme))
+				Wui::Tr("panel.model.import_settings.export_textures", "Export Textures"), exportTextures, theme))
 				m_Settings.ExportTextures = exportTextures;
 			bool generateNormals = m_Settings.GenerateNormals;
 			if (Wui::Checkbox(ctx, Wui::HashId("model.import.normals"), { x + 320.0f, y, 170.0f, 16.0f },
-				"缺法线自动生成", generateNormals, theme))
+				Wui::Tr("panel.model.import_settings.generate_normals", "Generate Missing Normals"),
+				generateNormals, theme))
 				m_Settings.GenerateNormals = generateNormals;
 			y += 20.0f;
 		}
@@ -922,19 +940,26 @@ namespace World
 		if (m_Mesh && y < rect.Y + rect.H - 16.0f)
 		{
 			const MeshBounds& bounds = m_Mesh->GetBounds();
-			char stats[192] = {};
-			std::snprintf(stats, sizeof(stats),
-				"节点 %zu / mesh %zu / submesh %zu / 顶点 %u / 索引 %u | bounds (%.2f,%.2f,%.2f)~(%.2f,%.2f,%.2f)",
-				m_Mesh->GetNodes().size(), m_Mesh->GetMeshes().size(), m_Mesh->GetSubmeshes().size(),
-				m_Mesh->GetVertexCount(), m_Mesh->GetIndexCount(),
-				bounds.Min.x, bounds.Min.y, bounds.Min.z, bounds.Max.x, bounds.Max.y, bounds.Max.z);
-			Wui::Label(ctx, { x, y }, stats, theme.TextMuted, 11.0f);
+			// 数值统计行同样走本地化:标签/分隔符都来自目录,数字与格式保持原样。
+			std::ostringstream stats;
+			stats << Wui::Tr("panel.model.stats.nodes_label", "nodes ") << m_Mesh->GetNodes().size()
+				<< Wui::Tr("panel.model.stats.sep", " / ") << "mesh " << m_Mesh->GetMeshes().size()
+				<< Wui::Tr("panel.model.stats.sep", " / ") << "submesh " << m_Mesh->GetSubmeshes().size()
+				<< Wui::Tr("panel.model.stats.sep", " / ")
+				<< Wui::Tr("panel.model.stats.vertices", "vertices ") << m_Mesh->GetVertexCount()
+				<< Wui::Tr("panel.model.stats.sep", " / ")
+				<< Wui::Tr("panel.model.stats.indices", "indices ") << m_Mesh->GetIndexCount()
+				<< Wui::Tr("panel.model.stats.bounds", " | bounds (")
+				<< std::fixed << std::setprecision(2)
+				<< bounds.Min.x << "," << bounds.Min.y << "," << bounds.Min.z << ")~("
+				<< bounds.Max.x << "," << bounds.Max.y << "," << bounds.Max.z << ")";
+			Wui::Label(ctx, { x, y }, stats.str(), theme.TextMuted, 11.0f);
 			y += 16.0f;
 		}
 
 		if (m_Mesh && !m_Mesh->GetNodes().empty() && y < rect.Y + rect.H - 20.0f)
 		{
-			Wui::Label(ctx, { x, y }, "节点树:", theme.TextMuted, 11.0f);
+			Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.node_tree", "Node tree:"), theme.TextMuted, 11.0f);
 			y += 14.0f;
 			const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
 			for (size_t index = 0; index < nodes.size() && index < 8; ++index)
@@ -956,7 +981,7 @@ namespace World
 
 		if (m_Mesh && !m_Mesh->GetMaterialSlots().empty() && y < rect.Y + rect.H - 20.0f)
 		{
-			Wui::Label(ctx, { x, y }, "依赖:", theme.TextMuted, 11.0f);
+			Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.dependencies", "Dependencies:"), theme.TextMuted, 11.0f);
 			y += 14.0f;
 			const std::vector<std::string>& slots = m_Mesh->GetMaterialSlots();
 			for (size_t index = 0; index < slots.size() && index < 6; ++index)
@@ -964,13 +989,15 @@ namespace World
 				const std::string& slot = slots[index];
 				if (slot.empty())
 				{
-					Wui::Label(ctx, { x, y }, "- (空材质槽)", theme.TextMuted, 11.0f);
+					Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.empty_slot", "- (empty material slot)"),
+						theme.TextMuted, 11.0f);
 					y += 13.0f;
 					continue;
 				}
 				const Ref<Material> material = MaterialLibrary::Get().Load(slot);
 				const bool missing = material == nullptr;
-				Wui::Label(ctx, { x, y }, (missing ? "[缺失] " : "- ") + slot,
+				Wui::Label(ctx, { x, y },
+					(missing ? Wui::Tr("panel.model.missing", "[missing] ") : std::string("- ")) + slot,
 					missing ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.Text, 11.0f);
 				y += 13.0f;
 				if (material)
@@ -983,7 +1010,8 @@ namespace World
 							continue;
 						const AssetFingerprint fingerprint = FingerprintAsset(texture, nullptr);
 						Wui::Label(ctx, { x + 12.0f, y },
-							(fingerprint.Exists ? "  tex " : "  [缺失] tex ") + texture,
+							(fingerprint.Exists ? std::string("  tex ")
+								: Wui::Tr("panel.model.missing_texture", "  [missing] tex ")) + texture,
 							fingerprint.Exists ? theme.TextMuted
 								: Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f }, 11.0f);
 						y += 13.0f;
@@ -1010,20 +1038,23 @@ namespace World
 		// 第一行:播放/暂停 + 循环 + 速度(0.1..4)。
 		const float playWidth = 56.0f;
 		if (Wui::Button(ctx, Wui::HashId("model.anim.play"), { x, y, playWidth, 20.0f },
-			m_AnimPlaying ? "暂停" : "播放", theme))
+			m_AnimPlaying ? Wui::Tr("panel.model.anim.pause", "Pause")
+				: Wui::Tr("panel.model.anim.play", "Play"), theme))
 			m_AnimPlaying = !m_AnimPlaying;
 		bool loop = m_AnimLoop;
 		if (Wui::Checkbox(ctx, Wui::HashId("model.anim.loop"),
-			{ x + playWidth + 8.0f, y + 2.0f, 56.0f, 16.0f }, "循环", loop, theme))
+			{ x + playWidth + 8.0f, y + 2.0f, 56.0f, 16.0f },
+			Wui::Tr("panel.model.anim.loop", "Loop"), loop, theme))
 			m_AnimLoop = loop;
-		Wui::Label(ctx, { x + playWidth + 72.0f, y + 3.0f }, "速度", theme.TextMuted, 11.0f);
+		Wui::Label(ctx, { x + playWidth + 72.0f, y + 3.0f },
+			Wui::Tr("panel.model.anim.speed", "Speed"), theme.TextMuted, 11.0f);
 		Wui::DragFloat(ctx, Wui::HashId("model.anim.speed"),
 			{ x + playWidth + 100.0f, y, std::max(48.0f, width - playWidth - 100.0f), 18.0f },
 			m_AnimSpeed, 0.05f, 0.1f, 4.0f, theme);
 		y += 22.0f;
 
 		// 第二行:时间滑杆(0..duration;零时长 clip 用退化范围,值固定 0)。
-		Wui::Label(ctx, { x, y + 3.0f }, "时间", theme.TextMuted, 11.0f);
+		Wui::Label(ctx, { x, y + 3.0f }, Wui::Tr("panel.model.anim.time", "Time"), theme.TextMuted, 11.0f);
 		float time = std::clamp(m_AnimTime, 0.0f, duration > 0.0f ? duration : 0.0f);
 		Wui::SliderFloat(ctx, Wui::HashId("model.anim.time"),
 			{ x + 40.0f, y, std::max(40.0f, width - 40.0f), 18.0f }, time, 0.0f,
