@@ -913,10 +913,17 @@ namespace World
 		// 项目设置用"请求标志 || 当前模态 id"判定:菜单点击发生在同一帧的 DrawMenuBar,
 		// 请求标志当帧为真;之后由 ctx 里留着的模态 id 负责(DrawModals 才消费请求标志)。
 		const Wui::WuiId projectSettingsModalId = Wui::HashId("modal.projectsettings");
+		// P4-UX10:启动询问是浮在停靠区上的**非模态**通知 —— 帧初先登记它的遮挡,
+		// 下面的面板才不会吃到落在提示上的点击(提示内控件在绘制时仍然可命中)。
+		if (!m_PendingFloatRestore.empty())
+		{
+			const float statusBarHeight = 22.0f;
+			const Wui::WuiRect statusBarRect { 0, viewport.y - statusBarHeight, viewport.x, statusBarHeight };
+			ctx.PushHoverBlocker(RestorePromptRect(statusBarRect));
+		}
 		const bool shellModalOpen = m_ImportModalOpen || m_Editor.ShowUnsavedModal()
 			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress() || m_ShowProjectSettings
-			|| ctx.Modal() == projectSettingsModalId
-			|| !m_PendingFloatRestore.empty() || ctx.Modal() == Wui::HashId("modal.restorewindows");
+			|| ctx.Modal() == projectSettingsModalId;
 		if (shellModalOpen)
 			Wui::BeginModalInputBlock(ctx);
 		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
@@ -1221,6 +1228,8 @@ namespace World
 		// 已被 BeginFrame 清空,所以帧内 Ctrl+Z/Y 判定必须用"上一帧结束"的这份状态。
 		// P4-UX4:悬停提示最后画 —— 面板/模态都已登记完,这里统一画到 overlay 层。
 		DrawStatusBar(ctx, statusBar);
+		// P4-UX10:启动询问贴状态栏上方(非模态;不压暗、不挡操作)。
+		DrawRestorePrompt(ctx, statusBar);
 		Wui::DrawTooltip(ctx, m_Theme);
 		m_TextFocusLatched = Wui::WuiTextFocus::Get().Active();
 	}
@@ -1364,6 +1373,115 @@ namespace World
 		node.Visible = true;
 		node.Tooltip = Wui::Tr("notice.tooltip", "Click to dismiss (Esc). It stays while the pointer is on it.");
 		Wui::WuiAccessibility::Get().Register(node);
+	}
+
+	// P4-UX10:启动询问 —— **非模态通知**,贴在状态栏正上方(与状态栏同一条右边界)。
+	// 之前这里做成了模态对话框 + 全屏遮罩,用户反馈"怎么有个选项霸屏"(2026-09-20):
+	// 询问必须让人能一边干活一边决定,所以改成通知条 —— 不压暗、不挡面板操作,
+	// 只挡自己那一小块(登记 hover blocker);不回答就一直留着,回答/关闭即消失。
+	Wui::WuiRect EditorShell::RestorePromptRect(const Wui::WuiRect& statusBar) const
+	{
+		constexpr float width = 520.0f;
+		constexpr float height = 84.0f;
+		return { statusBar.X + statusBar.W - width - 12.0f, statusBar.Y - height - 8.0f, width, height };
+	}
+
+	void EditorShell::DrawRestorePrompt(Wui::WuiContext& ctx, const Wui::WuiRect& statusBar)
+	{
+		if (m_PendingFloatRestore.empty())
+			return;
+
+		const Wui::WuiRect panel = RestorePromptRect(statusBar);
+		const float height = panel.H;
+		ctx.PushOverlay();
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, panel, m_Theme.PanelBg, 5.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, panel, m_Theme.Border, 5.0f, 1.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { panel.X, panel.Y, panel.W, 3.0f },
+			m_Theme.Accent, 2.0f });
+
+		const size_t count = m_PendingFloatRestore.size();
+		std::string names;
+		for (size_t i = 0; i < count && i < 3; ++i)
+			names += std::string(i == 0 ? "" : ", ") + std::string(PanelTitle(m_PendingFloatRestore[i].Panels.front()));
+		if (count > 3)
+			names += Wui::Tr("modal.restore.more", " …");
+		Wui::Label(ctx, { panel.X + 12.0f, panel.Y + 10.0f },
+			Wui::Tr("modal.restore.body", "Last session left these windows open:"), m_Theme.Text, 13.0f);
+		Wui::Label(ctx, { panel.X + 12.0f, panel.Y + 28.0f }, names, m_Theme.TextMuted, 12.0f);
+
+		// × 关闭 = 本次不恢复(下次再问;想彻底不问就勾"记住")。
+		const Wui::WuiRect closeRect { panel.X + panel.W - 20.0f, panel.Y + 6.0f, 14.0f, 14.0f };
+		const bool closeHovered = ctx.IsHovered(closeRect);
+		if (closeHovered)
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, closeRect, m_Theme.ButtonHover, 2.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { closeRect.X + 3.0f, closeRect.Y - 1.0f, 0, 0 },
+			closeHovered ? m_Theme.Text : m_Theme.TextMuted, 0.0f, 1.0f, "x", 12.0f, false });
+
+		const float rowY = panel.Y + height - 28.0f;
+		const bool tabsClicked = Wui::Button(ctx, Wui::HashId("restore.prompt.tabs"),
+			{ panel.X + 12.0f, rowY, 132.0f, 22.0f },
+			Wui::Tr("modal.restore.tabs", "Restore as Tabs"), m_Theme);
+		const bool layoutClicked = Wui::Button(ctx, Wui::HashId("restore.prompt.layout"),
+			{ panel.X + 150.0f, rowY, 140.0f, 22.0f },
+			Wui::Tr("modal.restore.layout", "Restore Layout"), m_Theme);
+		const bool noneClicked = Wui::Button(ctx, Wui::HashId("restore.prompt.none"),
+			{ panel.X + 296.0f, rowY, 104.0f, 22.0f },
+			Wui::Tr("modal.restore.none", "Don't Restore"), m_Theme);
+		const Wui::LocalizedLabel remember = Wui::TrLabel("modal.restore.remember", "Remember");
+		Wui::Checkbox(ctx, Wui::HashId("restore.prompt.remember"),
+			{ panel.X + panel.W - 112.0f, rowY + 1.0f, 104.0f, 20.0f },
+			remember.Text, remember.Term, m_RestoreAskRemember, m_Theme);
+
+		const bool escape = ctx.WasKeyPressed(KeyCodes::Escape);
+		const bool dismiss = closeHovered && ctx.Input().MouseClicked[0];
+		ctx.PopOverlay();
+
+		// 无障碍:整条询问登记成节点(动作按钮/勾选框由控件自己登记,脚本都能点)。
+		Wui::WuiAccessNode node;
+		node.Id = Wui::HashId("shell.restore.prompt");
+		node.Window = "main";
+		node.Panel = "shell";
+		node.Kind = "notice";
+		node.Label = Wui::Tr("modal.restore.title", "Restore Independent Windows");
+		node.Value = names;
+		node.Rect = panel;
+		node.Enabled = true;
+		node.Interactive = false;
+		node.Visible = true;
+		node.Tooltip = Wui::Tr("modal.restore.hint",
+			"Top-bar tabs keep the desktop clean and never steal focus; floating windows come back without focus too.");
+		Wui::WuiAccessibility::Get().Register(node);
+
+		if (!(tabsClicked || layoutClicked || noneClicked || dismiss || escape))
+			return;
+
+		std::vector<PendingFloatRestore> pending = std::move(m_PendingFloatRestore);
+		m_PendingFloatRestore.clear();
+		Editor::EditorPreferences& preferences = Editor::EditorPreferences::Get();
+		if (tabsClicked)
+		{
+			RestoreIndependentWindows(pending, true);
+			if (m_RestoreAskRemember)
+				preferences.SetRestoreWindows(Editor::RestoreWindowsMode::Tabs);
+		}
+		else if (layoutClicked)
+		{
+			RestoreIndependentWindows(pending, false);
+			if (m_RestoreAskRemember)
+				preferences.SetRestoreWindows(Editor::RestoreWindowsMode::Layout);
+		}
+		else
+		{
+			// 不恢复 / × / Esc:本次跳过;勾了"记住"才清掉记录并停止再问。
+			if (m_RestoreAskRemember)
+			{
+				preferences.SetRestoreWindows(Editor::RestoreWindowsMode::None);
+				m_Layout.Floating.clear();
+				SaveLayout();
+			}
+			PushNotice(Wui::Tr("notice.restore.skipped", "Skipped restoring last session's windows"));
+			WLD_CORE_INFO("[float] restore declined ({0} windows kept in layout)", pending.size());
+		}
 	}
 
 	void EditorShell::RenderSplit(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -3299,75 +3417,6 @@ namespace World
 		// 那份错误框必须画在选择器**之上**才看得见(与 D10-9 面板内选择器时期的行为一致);
 		// 选择器保持打开并把失败原因写进 import.dest.status。
 		RenderImportDestinationModal(ctx);
-
-		// ---- P4-UX10:启动询问"要不要恢复上次开着的独立窗口" ----
-		// 用户 2026-09-20:"默认设置应该是询问" —— 引擎不知道用户此刻需不需要这些窗口,
-		// 与其替他决定(全弹出来/全丢掉),不如问一次,并允许"记住我的选择"。
-		{
-			const Wui::WuiId restoreModal = Wui::HashId("modal.restorewindows");
-			if (!m_PendingFloatRestore.empty())
-				ctx.SetModal(restoreModal);
-			Wui::WuiRect panel;
-			bool escapePressed = false;
-			Wui::ModalFrameDesc frameDesc;
-			frameDesc.Id = restoreModal;
-			frameDesc.Title = Wui::Tr("modal.restore.title", "Restore Independent Windows");
-			frameDesc.Size = { 470.0f, 218.0f };
-			if (Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, m_Theme))
-			{
-				const size_t count = m_PendingFloatRestore.size();
-				std::string body = Wui::Tr("modal.restore.body", "Last session left these windows open:");
-				for (size_t i = 0; i < count && i < 3; ++i)
-					body += std::string(i == 0 ? " " : ", ") + std::string(PanelTitle(m_PendingFloatRestore[i].Panels.front()));
-				if (count > 3)
-					body += Wui::Tr("modal.restore.more", " …");
-				Wui::Label(ctx, { panel.X + 16.0f, panel.Y + 46.0f }, body, m_Theme.Text, 13.0f);
-				Wui::Label(ctx, { panel.X + 16.0f, panel.Y + 70.0f },
-					Wui::Tr("modal.restore.hint",
-						"Top-bar tabs keep the desktop clean and never steal focus; floating windows come back without focus too."),
-					m_Theme.TextMuted, 12.0f);
-				const Wui::LocalizedLabel remember = Wui::TrLabel("modal.restore.remember", "Remember my choice");
-				Wui::Checkbox(ctx, Wui::HashId("modal.restore.remember"),
-					{ panel.X + 16.0f, panel.Y + 96.0f, 280.0f, 20.0f },
-					remember.Text, remember.Term, m_RestoreAskRemember, m_Theme);
-				const Wui::ModalButtonDesc buttons[3] = {
-					{ Wui::Tr("modal.restore.tabs", "Restore as Tabs"), Wui::HashId("modal.restore.tabs"), true },
-					{ Wui::Tr("modal.restore.layout", "Restore Layout"), Wui::HashId("modal.restore.layout"), true },
-					{ Wui::Tr("modal.restore.none", "Don't Restore"), Wui::HashId("modal.restore.none"), true },
-				};
-				const int clicked = Wui::ModalButtons(ctx, panel, buttons, 3, m_Theme);
-				if (clicked >= 0 || escapePressed)
-				{
-					std::vector<PendingFloatRestore> pending = std::move(m_PendingFloatRestore);
-					m_PendingFloatRestore.clear();
-					ctx.ClearModal();
-					Editor::EditorPreferences& preferences = Editor::EditorPreferences::Get();
-					if (clicked == 0)
-					{
-						RestoreIndependentWindows(pending, true);
-						if (m_RestoreAskRemember)
-							preferences.SetRestoreWindows(Editor::RestoreWindowsMode::Tabs);
-					}
-					else if (clicked == 1)
-					{
-						RestoreIndependentWindows(pending, false);
-						if (m_RestoreAskRemember)
-							preferences.SetRestoreWindows(Editor::RestoreWindowsMode::Layout);
-					}
-					else
-					{
-						// 不恢复(本次 / Esc 也是这条):记住了就同时清掉记录,下次不再问。
-						if (m_RestoreAskRemember)
-						{
-							preferences.SetRestoreWindows(Editor::RestoreWindowsMode::None);
-							m_Layout.Floating.clear();
-						}
-						WLD_CORE_INFO("[float] restore declined for this session ({0} windows kept in layout)", pending.size());
-					}
-				}
-				Wui::EndModalFrame(ctx);
-			}
-		}
 
 		const Wui::WuiId unsaved = Wui::HashId("modal.unsaved");
 		if (m_Editor.ShowUnsavedModal()) ctx.SetModal(unsaved);

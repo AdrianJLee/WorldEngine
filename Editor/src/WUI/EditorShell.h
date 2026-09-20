@@ -316,6 +316,9 @@ namespace World
 		StatusNotice m_Notice;
 		void PushNotice(const std::string& text);
 		void DrawStatusNotice(Wui::WuiContext& ctx, const Wui::WuiRect& statusBar);
+		// 启动询问:贴在状态栏上方的一条非模态通知(不压暗、不挡操作)。
+		Wui::WuiRect RestorePromptRect(const Wui::WuiRect& statusBar) const;
+		void DrawRestorePrompt(Wui::WuiContext& ctx, const Wui::WuiRect& statusBar);
 		// 上一帧各独立窗口的位置(用于判断"停稳在槽位上")。
 		std::unordered_map<std::string, Wui::WuiRect> m_LastFloatScreenRects;
 
