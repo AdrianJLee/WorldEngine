@@ -13,6 +13,7 @@
   "panel.gallery": "控件库",
   "panel.input": "输入映射",
   "panel.scripts": "脚本",
+  "panel.properties.readonly_notice": "Play/Simulate 运行中:只读查看(暂停或退出后可编辑)",
   "menu.file": "文件",
   "menu.window": "窗口",
   "menu.file.new": "新建",

@@ -95,8 +95,8 @@ namespace World::Wui
 		// Renderer::QueueRelease 延迟到该槽位 GPU 工作完成之后。
 		void ReleaseStaleTextureSets();
 
-		// 字体面索引:0 = Montserrat Regular,1 = Montserrat Bold,2 = NotoSansSC 子集(回落),
-		// 3 = JetBrains Mono Regular,4 = JetBrains Mono Bold。
+		// 字体面索引(P4-UX3 起):0 = Inter Regular(缺失回落 Montserrat),1 = Inter Bold(同),
+		// 2 = NotoSansSC 子集(CJK 回落),3 = JetBrains Mono Regular,4 = JetBrains Mono Bold。
 		FontFace* PrimaryFace(WuiFontFamily family, bool bold);
 		// 逐码点选面:主面缺该字形时回落 Noto('\t'/'\r'/'\n' 一律走主面,advance 特判)。
 		FontFace* FaceForCodepoint(WuiFontFamily family, bool bold, uint32_t codepoint);

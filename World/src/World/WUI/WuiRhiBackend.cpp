@@ -262,12 +262,17 @@ namespace World::Wui
 		const unsigned char white[4] = { 255, 255, 255, 255 };
 		m_WhiteTexture->SetData(white, 4);
 
-		const std::string fontPaths[5] = {
-			std::string(WLD_EDITOR_DIR) + "assets/fonts/Montserrat/static/Montserrat-Regular.ttf",
-			std::string(WLD_EDITOR_DIR) + "assets/fonts/Montserrat/static/Montserrat-Bold.ttf",
-			std::string(WLD_EDITOR_DIR) + "assets/fonts/NotoSansSC/NotoSansSC-Subset.ttf",
-			std::string(WLD_EDITOR_DIR) + "assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf",
-			std::string(WLD_EDITOR_DIR) + "assets/fonts/JetBrainsMono/JetBrainsMono-Bold.ttf",
+		// P4-UX3(用户 2026-09-20 决策):UI 正文换成 Inter(中性、小字号清晰、数字整齐),
+		// CJK 仍回落 Noto Sans SC,代码保持 JetBrains Mono;Montserrat 保留给大标题/欢迎页,
+		// 这里作为**回退**:Inter 缺失时不会导致整个 UI 没字。
+		const std::string fontPaths[5][2] = {
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/Inter/Inter-Regular.ttf",
+			  std::string(WLD_EDITOR_DIR) + "assets/fonts/Montserrat/static/Montserrat-Regular.ttf" },
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/Inter/Inter-Bold.ttf",
+			  std::string(WLD_EDITOR_DIR) + "assets/fonts/Montserrat/static/Montserrat-Bold.ttf" },
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/NotoSansSC/NotoSansSC-Subset.ttf", "" },
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf", "" },
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/JetBrainsMono/JetBrainsMono-Bold.ttf", "" },
 		};
 		for (size_t i = 0; i < m_Faces.size(); ++i)
 		{
@@ -275,10 +280,23 @@ namespace World::Wui
 			face.Glyphs.clear();
 			if (!face.Info)
 				face.Info = new stbtt_fontinfo;
-			if (!LoadFile(fontPaths[i], face.Ttf) || !stbtt_InitFont(face.Info, face.Ttf.data(),
-				stbtt_GetFontOffsetForIndex(face.Ttf.data(), 0)))
+			bool loaded = false;
+			for (const std::string& candidate : fontPaths[i])
 			{
-				WLD_CORE_WARN("WUI backend failed to load font {0}", fontPaths[i]);
+				if (candidate.empty())
+					continue;
+				if (!LoadFile(candidate, face.Ttf))
+					continue;
+				if (stbtt_InitFont(face.Info, face.Ttf.data(), stbtt_GetFontOffsetForIndex(face.Ttf.data(), 0)))
+				{
+					loaded = true;
+					break;
+				}
+			}
+			if (!loaded)
+			{
+				WLD_CORE_WARN("WUI backend failed to load font {0}(回退 {1} 也不可用)",
+					fontPaths[i][0], fontPaths[i][1].empty() ? "<none>" : fontPaths[i][1]);
 				continue;
 			}
 			face.Atlas.assign(static_cast<size_t>(face.AtlasW) * face.AtlasH * 4, 0);

@@ -7,6 +7,7 @@
 
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
 
 namespace World
@@ -251,7 +252,10 @@ namespace World
 						handle, static_cast<const void*>(scene));
 				}
 			}
-			Label(ctx, { rect.X + 8, rect.Y + 8 }, "Play/Simulate 运行中:只读查看(暂停或退出后可编辑)",
+			// 用户可见文案走本地化表:内联英文 = 默认语言,zh-CN 目录提供中文覆盖。
+			Label(ctx, { rect.X + 8, rect.Y + 8 },
+				Wui::Tr("panel.properties.readonly_notice",
+					"Play/Simulate running: read-only (pause or exit to edit)"),
 				theme.TextMuted, 13.0f);
 		}
 
