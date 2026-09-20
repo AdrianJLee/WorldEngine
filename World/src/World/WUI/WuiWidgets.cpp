@@ -1491,6 +1491,355 @@ namespace World::Wui
 		return { x, table.Y + rowHeight * static_cast<float>(row), width, rowHeight };
 	}
 
+	// ---- P4-UX7 / U2B:表头排序 / 颜色字段 / 分隔条 ----
+	namespace
+	{
+		// 颜色字段:hex 编辑缓冲(只在弹层内使用)+ 首帧初始化标记(首帧用当前色填缓冲)。
+		struct WuiColorFieldState
+		{
+			std::string Hex;
+			bool Initialized = false;
+		};
+
+		// 分隔条:拖动锚点(按下那一帧的值与轴向坐标)。拖动期间按"锚点 + 轴向位移"累加,
+		// 所以鼠标离开 6px 命中带(调用方每帧按新 value 重新摆放带)也不会中断拖动。
+		struct WuiSplitterState
+		{
+			bool Dragging = false;
+			float PressValue = 0.0f;
+			float PressAxis = 0.0f;
+		};
+
+		// 颜色字段几何(派工确认的尺寸,设计单位):
+		constexpr float kColorSwatchWidth = 6.0f;      // 折叠态左侧色块宽
+		constexpr float kColorCheckerSize = 4.0f;      // 棋盘格方块边长
+		constexpr float kColorSwatchInset = 3.0f;      // 色块相对字段上下内缩
+		constexpr float kColorPopupWidth = 220.0f;     // 弹层宽
+		constexpr float kColorPopupHeight = 132.0f;    // 弹层高:8 + hex 22 + 14 + 4×22 = 132
+		constexpr float kColorHexRowHeight = 22.0f;    // 弹层顶部 hex 输入行高
+		constexpr float kColorChannelRowHeight = 22.0f;// R/G/B/A 每行高
+		constexpr float kColorChannelLabelWidth = 14.0f;
+		constexpr float kColorChannelValueWidth = 40.0f;
+
+		// 分隔条:命中带宽与线宽(派工确认:6px 命中带、视觉 1px、悬停加粗)。
+		constexpr float kSplitterHitWidth = 6.0f;
+		constexpr float kSplitterLineWidth = 1.0f;
+		constexpr float kSplitterActiveWidth = 3.0f;
+
+		// 表头:列名右侧给排序箭头保留的宽度(派工确认 14px)。
+		constexpr float kTableSortArrowReserve = 14.0f;
+
+		// 当前色的规范 hex 文本:6 位 = 不透明,带 alpha(未满)时 8 位,与解析规则对称。
+		std::string FormatColorHex(const glm::vec4& rgba)
+		{
+			const auto channel = [](float value)
+			{
+				return static_cast<unsigned>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+			};
+			char buffer[16] = {};
+			const bool opaque = rgba.a >= 0.999f;
+			std::snprintf(buffer, sizeof(buffer), opaque ? "#%02X%02X%02X" : "#%02X%02X%02X%02X",
+				channel(rgba.r), channel(rgba.g), channel(rgba.b), channel(rgba.a));
+			return buffer;
+		}
+
+		// 解析 "#RRGGBB" / "#RRGGBBAA":允许省略 '#'、允许首尾空白、大小写均可。
+		// 6 位 = RGB + alpha 归 1;8 位 = RGBA。非法输入返回 false 且**不改动** out
+		// (调用方据此"保持原值"),与 ColorField 的"非法输入保持原值"契约一致。
+		bool ParseColorHex(std::string_view text, glm::vec4& out)
+		{
+			size_t begin = 0;
+			size_t end = text.size();
+			while (begin < end && (text[begin] == ' ' || text[begin] == '\t'))
+				++begin;
+			while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t'))
+				--end;
+			if (begin < end && text[begin] == '#')
+				++begin;
+			const size_t digits = end - begin;
+			if (digits != 6 && digits != 8)
+				return false;
+			for (size_t i = begin; i < end; ++i)
+			{
+				const char c = text[i];
+				const bool hexDigit = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+				if (!hexDigit)
+					return false;
+			}
+			const auto byteAt = [&text, begin](size_t offset)
+			{
+				const char pair[3] = { text[begin + offset], text[begin + offset + 1], 0 };
+				return static_cast<float>(std::strtoul(pair, nullptr, 16)) / 255.0f;
+			};
+			out = glm::vec4 { byteAt(0), byteAt(2), byteAt(4), digits == 8 ? byteAt(6) : 1.0f };
+			return true;
+		}
+
+		bool SameColor(const glm::vec4& a, const glm::vec4& b)
+		{
+			return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+		}
+	}
+
+	bool TableHeader(WuiContext& ctx, WuiId id, const WuiRect& table, const std::vector<std::string>& columns,
+		const std::vector<float>& columnWidths, int& sortColumn, bool& ascending, const WuiTheme& theme)
+	{
+		// 常驻表头的底板 + 底部 1px 分隔线(表格行的网格线由调用方画,这里只负责"常驻表头")。
+		ctx.Commands().push_back({ WuiDrawKind::Rect, table, theme.PanelHeader, 0.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Rect,
+			{ table.X, table.Y + std::max(0.0f, table.H - 1.0f), table.W, 1.0f }, theme.BorderStrong, 0.0f });
+
+		const float fontSize = theme.FontSizeBody;
+		const float arrowSize = theme.FontSizeCaption;
+		const float textPad = theme.PadSmall * 1.5f;   // 列名左侧内边距(6 设计单位,与表体文本一致)
+		bool changed = false;
+		// 列宽表比列名短时以两者较小值为准(Table.Cell 对缺失列会回退整表宽,故先夹住数量)。
+		const size_t count = std::min(columns.size(), columnWidths.size());
+		for (size_t i = 0; i < count; ++i)
+		{
+			const WuiRect cell = TableCell(table, columnWidths, 0, i, table.H);
+			const WuiId columnId = DerivedChildId(id, ".col.", i);
+			const bool sorted = sortColumn == static_cast<int>(i);
+			const bool focused = ctx.Focus() == columnId;
+			RegisterAccessNode(columnId, "table-header", cell, columns[i],
+				sorted ? (ascending ? "asc" : "desc") : std::string(), true, true, focused);
+			ctx.RegisterFocusable(columnId, cell);
+			const bool hovered = ctx.IsHovered(cell);
+			if (hovered)
+			{
+				// 悬停底留出底部 1px:不要盖住常驻表头的分隔线。
+				ctx.Commands().push_back({ WuiDrawKind::Rect,
+					{ cell.X, cell.Y, cell.W, std::max(0.0f, cell.H - 1.0f) }, theme.HoverBg, 0.0f });
+				ctx.SetCursor(WuiCursor::Hand);
+			}
+			// 列名左对齐,右侧给排序箭头留 14px;超宽按省略号裁剪,不压到箭头/相邻列。
+			const float labelBudget = std::max(0.0f, cell.W - textPad - kTableSortArrowReserve);
+			const std::string label = EllipsizeToWidth(ctx, columns[i], labelBudget, fontSize);
+			ctx.Commands().push_back({ WuiDrawKind::Text,
+				{ cell.X + textPad, cell.Y + (cell.H - fontSize) * 0.5f, 0, 0 },
+				sorted ? theme.Text : theme.TextMuted, 0, 1.0f, label, fontSize, false });
+			if (sorted)
+			{
+				// ▲/▼ 在 Noto 回退列里;排在保留区内居中,不用字体里的箭头字形拼线。
+				const std::string arrow = ascending ? "▲" : "▼";
+				const float arrowWidth = ctx.MeasureTextWidth(arrow, arrowSize);
+				ctx.Commands().push_back({ WuiDrawKind::Text,
+					{ cell.X + cell.W - kTableSortArrowReserve + std::max(0.0f, (kTableSortArrowReserve - arrowWidth) * 0.5f),
+					  cell.Y + (cell.H - arrowSize) * 0.5f, 0, 0 },
+					theme.Text, 0, 1.0f, arrow, arrowSize, false });
+			}
+			DrawFocusRing(ctx, cell, columnId, theme);
+			// 点击与键盘(Enter/Space)访问同一个状态改动;脚本 ui.invoke 注入的也是这里。
+			const bool activated = ctx.IsClicked(cell)
+				|| (focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space)));
+			if (activated)
+			{
+				if (sorted)
+					ascending = !ascending;
+				else
+					sortColumn = static_cast<int>(i);
+				changed = true;
+			}
+		}
+		return changed;
+	}
+
+	bool ColorField(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& rgba, const WuiTheme& theme)
+	{
+		WuiColorFieldState& state = ctx.Persist<WuiColorFieldState>(id, {});
+		if (!state.Initialized)
+		{
+			state.Hex = FormatColorHex(rgba);
+			state.Initialized = true;
+		}
+		const WuiId hexId = DerivedChildId(id, ".hex.", 0);
+		const bool focused = ctx.Focus() == id;
+		const bool hovered = ctx.IsHovered(rect);
+		const bool open = ctx.IsPopupOpen(id);
+		const std::string canonical = FormatColorHex(rgba);
+		RegisterAccessNode(id, "color-field", rect, std::string(), canonical, true, true, focused);
+		ctx.RegisterFocusable(id, rect);
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect,
+			(hovered || open) ? theme.ButtonHover : theme.ButtonBg, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
+			focused ? theme.Accent : theme.Border, 3.0f, focused ? 1.5f : 1.0f });
+
+		// 左侧 6px 色块:棋盘格底(ButtonBg/ButtonHover 两色交替)+ 当前色覆盖(保留 alpha)。
+		const WuiRect swatch { rect.X + kColorSwatchInset, rect.Y + kColorSwatchInset, kColorSwatchWidth,
+			std::max(0.0f, rect.H - kColorSwatchInset * 2.0f) };
+		ctx.Commands().push_back({ WuiDrawKind::Rect, swatch, theme.ButtonBg, theme.Radius });
+		for (int cx = 0; kColorCheckerSize * static_cast<float>(cx) < swatch.W; ++cx)
+		{
+			for (int cy = 0; kColorCheckerSize * static_cast<float>(cy) < swatch.H; ++cy)
+			{
+				if (((cx + cy) & 1) == 0)
+					continue;
+				const float offsetX = kColorCheckerSize * static_cast<float>(cx);
+				const float offsetY = kColorCheckerSize * static_cast<float>(cy);
+				const WuiRect square { swatch.X + offsetX, swatch.Y + offsetY,
+					std::min(kColorCheckerSize, swatch.W - offsetX), std::min(kColorCheckerSize, swatch.H - offsetY) };
+				ctx.Commands().push_back({ WuiDrawKind::Rect, square, theme.ButtonHover, 0.0f });
+			}
+		}
+		ctx.Commands().push_back({ WuiDrawKind::Rect, swatch,
+			WuiColor { std::clamp(rgba.r, 0.0f, 1.0f), std::clamp(rgba.g, 0.0f, 1.0f),
+				std::clamp(rgba.b, 0.0f, 1.0f), std::clamp(rgba.a, 0.0f, 1.0f) }, theme.Radius });
+
+		// 右侧色值文本:折叠态永远显示"当前值"的规范写法(编辑中的非法文本不会显示在这里)。
+		ctx.Commands().push_back({ WuiDrawKind::Text,
+			{ swatch.X + swatch.W + theme.PadSmall, rect.Y + (rect.H - theme.FontSizeBody) * 0.5f, 0, 0 },
+			theme.Text, 0, 1.0f, canonical, theme.FontSizeBody, false });
+		DrawFocusRing(ctx, rect, id, theme);
+
+		bool changed = false;
+		const bool keyToggle = focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		if (ctx.IsClicked(rect) || keyToggle)
+		{
+			if (open)
+				ctx.ClosePopup(id);
+			else
+			{
+				state.Hex = canonical;
+				ctx.OpenPopup(id);
+			}
+		}
+		if (!ctx.IsPopupOpen(id))
+			return false;
+
+		// ---- 弹层(与 Combo 同一套 ctx.OpenPopup/ClosePopup/IsPopupOpen,不自造)----
+		ctx.PushOverlay();
+		WuiRect panel { rect.X, rect.Y + rect.H + 2.0f, kColorPopupWidth, kColorPopupHeight };
+		// 下方空间不够时向上展开(与 SearchableCombo 同一判据:用 UI 视口高度判断)。
+		if (panel.Y + panel.H > ctx.Input().ViewportSize.y)
+			panel.Y = std::max(4.0f, rect.Y - panel.H - 2.0f);
+		DrawPanelSurface(ctx, panel, theme);
+
+		const WuiRect hexRect { panel.X + theme.Pad, panel.Y + theme.Pad,
+			panel.W - theme.Pad * 2.0f, kColorHexRowHeight };
+		const bool hexFocused = ctx.Focus() == hexId;
+		// 失焦即把缓冲同步回规范值:非法输入不残留(值本身从来不被非法文本改写)。
+		if (!hexFocused)
+			state.Hex = FormatColorHex(rgba);
+		glm::vec4 parsed = rgba;
+		const bool validBeforeInput = ParseColorHex(state.Hex, parsed);
+		TextFieldEx(ctx, hexId, hexRect, state.Hex, theme,
+			validBeforeInput ? std::string() : std::string("Invalid hex (use #RRGGBB or #RRGGBBAA)"));
+		// 只在编辑中(本帧之前 hex 行有焦点)把合法文本写回 rgba,避免"点到滑杆那帧"被旧缓冲覆盖。
+		if (hexFocused && ParseColorHex(state.Hex, parsed) && !SameColor(parsed, rgba))
+		{
+			rgba = parsed;
+			changed = true;
+		}
+
+		// R/G/B/A 四条滑杆(0..1,右侧显示两位小数)。几何:hex 行之后先留一行行内错误的位置
+		// (TextFieldEx 的错误行:Caption 字号 + 3px 间距),四行滑杆总高 4×22,合计正好 132。
+		float rowY = hexRect.Y + hexRect.H + theme.FontSizeCaption + 3.0f;
+		for (int i = 0; i < 4; ++i)
+		{
+			const WuiRect row { panel.X + theme.Pad, rowY,
+				panel.W - theme.Pad * 2.0f, kColorChannelRowHeight };
+			const std::string channel(1, "RGBA"[i]);
+			ctx.Commands().push_back({ WuiDrawKind::Text,
+				{ row.X, row.Y + (row.H - theme.FontSizeCaption) * 0.5f, 0, 0 },
+				theme.TextMuted, 0, 1.0f, channel, theme.FontSizeCaption, false });
+			const WuiRect sliderRect { row.X + kColorChannelLabelWidth, row.Y,
+				std::max(20.0f, row.W - kColorChannelLabelWidth - kColorChannelValueWidth), row.H };
+			const float before = rgba[i];
+			SliderFloat(ctx, DerivedChildId(id, ".slider.", static_cast<size_t>(i)), sliderRect,
+				rgba[i], 0.0f, 1.0f, theme);
+			if (rgba[i] != before)
+				changed = true;
+			char valueText[16] = {};
+			std::snprintf(valueText, sizeof(valueText), "%.2f", rgba[i]);
+			ctx.Commands().push_back({ WuiDrawKind::Text,
+				{ row.X + row.W - kColorChannelValueWidth + theme.PadSmall,
+				  row.Y + (row.H - theme.FontSizeCaption) * 0.5f, 0, 0 },
+				theme.Text, 0, 1.0f, valueText, theme.FontSizeCaption, false });
+			rowY += row.H;
+		}
+
+		ctx.ClosePopupsOnOutsideClick({ id }, panel);
+		// hex 行有焦点时 Escape 归它(取消本次编辑、弹层保持展开);弹层内其它地方 Escape 关弹层。
+		if (ctx.IsKeyPressed(KeyCodes::Escape) && !hexFocused)
+			ctx.ClosePopup(id);
+		// 弹层打开期间登记悬停遮挡区(顺序与 Combo 一致:必须在弹层自身命中测试与"点外关闭"之后),
+		// 否则本帧之后绘制的下层控件会穿过弹层收到点击。
+		if (ctx.IsPopupOpen(id))
+			ctx.PushHoverBlocker(panel);
+		ctx.PopOverlay();
+		return changed;
+	}
+
+	bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, float& value,
+		float minValue, float maxValue, const WuiTheme& theme)
+	{
+		const float lo = std::min(minValue, maxValue);
+		const float hi = std::max(minValue, maxValue);
+		const float centerX = rect.X + rect.W * 0.5f;
+		const float centerY = rect.Y + rect.H * 0.5f;
+		// 命中带宽固定 6px、居中于传入 rect 的轴线:调用方只需把 rect 摆在"线的位置",
+		// 带由控件自己撑开(传 1px 或 6px 宽都得到同一条 6px 命中带)。
+		const WuiRect band = vertical
+			? WuiRect { centerX - kSplitterHitWidth * 0.5f, rect.Y, kSplitterHitWidth, rect.H }
+			: WuiRect { rect.X, centerY - kSplitterHitWidth * 0.5f, rect.W, kSplitterHitWidth };
+
+		WuiSplitterState& state = ctx.Persist<WuiSplitterState>(id, {});
+		const bool focused = ctx.Focus() == id;
+		RegisterAccessNode(id, "splitter", band, std::string(), FloatToText(value), true, true, focused);
+		ctx.RegisterFocusable(id, band);
+
+		const bool hovered = ctx.IsHovered(band);
+		bool changed = false;
+		if (ctx.Input().MouseClicked[0] && hovered)
+		{
+			state.Dragging = true;
+			state.PressValue = value;
+			state.PressAxis = vertical ? ctx.Input().MousePos.x : ctx.Input().MousePos.y;
+			ctx.SetFocus(id);
+		}
+		if (state.Dragging)
+		{
+			const float axis = vertical ? ctx.Input().MousePos.x : ctx.Input().MousePos.y;
+			const float next = std::clamp(state.PressValue + (axis - state.PressAxis), lo, hi);
+			if (next != value)
+			{
+				value = next;
+				changed = true;
+			}
+			if (ctx.Input().MouseReleased[0])
+				state.Dragging = false;
+		}
+		// 键盘:焦点在分隔条上时按轴向箭头 ±theme.Pad(与鼠标同一条写值/夹取路径)。
+		if (focused && !state.Dragging)
+		{
+			const float step = theme.Pad;
+			const float delta = vertical
+				? ((ctx.WasKeyPressed(KeyCodes::Left) ? -step : 0.0f) + (ctx.WasKeyPressed(KeyCodes::Right) ? step : 0.0f))
+				: ((ctx.WasKeyPressed(KeyCodes::Up) ? -step : 0.0f) + (ctx.WasKeyPressed(KeyCodes::Down) ? step : 0.0f));
+			if (delta != 0.0f)
+			{
+				const float next = std::clamp(value + delta, lo, hi);
+				if (next != value)
+				{
+					value = next;
+					changed = true;
+				}
+			}
+		}
+
+		// 视觉:默认 1px 线(theme.Border);悬停 3px(theme.BorderStrong);拖动中 3px(theme.Accent)。
+		const float thickness = (hovered || state.Dragging) ? kSplitterActiveWidth : kSplitterLineWidth;
+		const WuiColor color = state.Dragging ? theme.Accent : (hovered ? theme.BorderStrong : theme.Border);
+		const WuiRect line = vertical
+			? WuiRect { centerX - thickness * 0.5f, rect.Y, thickness, rect.H }
+			: WuiRect { rect.X, centerY - thickness * 0.5f, rect.W, thickness };
+		ctx.Commands().push_back({ WuiDrawKind::Rect, line, color, 0.0f });
+		if (hovered || state.Dragging)
+			ctx.SetCursor(vertical ? WuiCursor::ResizeEW : WuiCursor::ResizeNS);
+		DrawFocusRing(ctx, band, id, theme);
+		return changed;
+	}
+
 	WindowControl WindowControls(WuiContext& ctx, const WuiRect& bar, const WuiTheme& theme, bool maximized)
 	{
 		constexpr float buttonW = 34.0f;

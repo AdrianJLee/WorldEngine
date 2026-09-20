@@ -155,6 +155,35 @@ namespace World::Wui
 	// 表格单元矩形(按列宽累计)。
 	WuiRect TableCell(const WuiRect& table, const std::vector<float>& columns, size_t row, size_t column, float rowHeight);
 
+	// ---- P4-UX7 / U2B:表头排序 / 颜色字段 / 分隔条 ----
+	// 表头 + 排序:一行常驻表头,列矩形按 TableCell 口径用 columnWidths 累计排布。
+	//  绘制:列名左对齐(右侧 14px 留给排序箭头,超宽按省略号裁剪);排序列文字 theme.Text 且右侧
+	//  画 ▲(升)/▼(降),其余列 theme.TextMuted;悬停列底色 theme.HoverBg;底部 1px 线用
+	//  theme.BorderStrong(与"表头常驻"的表格约定一致)。
+	//  交互:点击列 = sortColumn 切到该列;再点同一列 = ascending 取反(换列不重置 ascending);
+	//  焦点列上 Enter/Space 等价于点击。
+	//  无障碍:每列一个节点 kind="table-header"、label=列名、value="asc"/"desc"/""、interactive=true,
+	//  节点 id 由父 id 派生(稳定);脚本 ui.invoke 注入坐标后走与鼠标同一条 ctx.IsClicked 路径。
+	//  返回 true = 本次改动了排序状态(sortColumn 或 ascending)。
+	bool TableHeader(WuiContext& ctx, WuiId id, const WuiRect& table, const std::vector<std::string>& columns,
+		const std::vector<float>& columnWidths, int& sortColumn, bool& ascending, const WuiTheme& theme);
+	// 颜色字段:折叠态 = rect(建议 22 高) 内左侧 6px 圆角色块(棋盘格底 + 当前色)+ 右侧色值文本。
+	//  点击(或焦点上 Enter/Space)用 ctx.OpenPopup/ClosePopup 展开 220×132 弹层:R/G/B/A 四条
+	//  SliderFloat(0..1,两位小数)+ 顶部 hex 输入(#RRGGBB / #RRGGBBAA,允许省略 '#' 与大小写;
+	//  6 位 = 不透明)。非法输入保持原值,并由 TextFieldEx 标红边 + 行内说明,失焦回到规范值。
+	//  无障碍:字段本身 kind="color-field"、value="#RRGGBB"(带 alpha 时 8 位);弹层内的滑杆与
+	//  hex 输入各自登记节点(走控件自身的登记,不需要额外节点)。
+	//  返回 true = 本次通过滑杆或 hex 改动了 rgba。
+	bool ColorField(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& rgba, const WuiTheme& theme);
+	// 分隔条:vertical=true = 竖向条(左右拖动改 value,光标 ResizeEW);false = 横向条(上下拖动,
+	//  ResizeNS)。命中带宽固定 6px、居中于传入 rect 的轴线;视觉线默认 1px(theme.Border),
+	//  悬停 3px(theme.BorderStrong),拖动中 3px(theme.Accent)。拖动按"按下时的 value + 轴向位移"
+	//  累加并 clamp 到 [minValue,maxValue];焦点上按轴向箭头 ±theme.Pad。双击复位由调用方决定。
+	//  无障碍:kind="splitter"、value=当前值字符串、interactive=true。
+	//  返回 true = 本次改动了 value。
+	bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, float& value,
+		float minValue, float maxValue, const WuiTheme& theme);
+
 	// 标准窗口控制(最小化/最大化或还原/关闭),绘制在 bar 右侧;返回被点击的按钮。
 	enum class WindowControl : uint8_t
 	{

@@ -193,6 +193,7 @@ namespace World
 			(28.0f + 66.0f) +                            // Chrome:工具栏/面包屑/搜索
 			(28.0f + 116.0f + 34.0f) +                   // Chrome:列表/网格/树/标签条/右键菜单
 			(28.0f + 26.0f + gap + rowH + gap + rowH + gap + rowH + 18.0f + gap) + // Controls 2
+			(28.0f + 24.0f + 22.0f * 4.0f + gap + 22.0f + gap + 84.0f + gap) + // Table / Color / Splitter
 			40.0f;
 
 		Wui::BeginScrollArea(ctx, rect, contentHeight, m_ScrollY, theme);
@@ -489,6 +490,75 @@ namespace World
 			Wui::Label(ctx, { x0 + 272.0f, y + 5.0f }, "inline error (clear the text to fix)",
 				theme.TextMuted, 13.0f);
 			y += rowH + 18.0f + gap;
+		}
+
+		// ---- U2B 新控件:表头排序 / 颜色字段 / 分隔条 ----
+		section("Table / Color / Splitter");
+		{
+			// 表头 + 排序:三列小表格(4 行假数据),按当前排序状态重排显示顺序(不做真实比较,
+			// 只演示点击表头 → 排序状态变化 → 表格可见变化)。
+			int& sortColumn = ctx.Persist<int>(Wui::HashId("gallery.ux2b.table.sortColumn"), 0);
+			bool& ascending = ctx.Persist<bool>(Wui::HashId("gallery.ux2b.table.ascending"), true);
+			const std::vector<std::string> columns { "Name", "Type", "Size" };
+			const std::vector<float> widths { 150.0f, 110.0f, 70.0f };
+			const float tableW = 330.0f;
+			const float tableRowH = 22.0f;
+			const Wui::WuiRect header { x0, y, tableW, 24.0f };
+			if (Wui::TableHeader(ctx, Wui::HashId("gallery.ux2b.table"), header, columns, widths,
+				sortColumn, ascending, theme))
+			{
+				m_LastAction = "TableHeader: sort column " + std::to_string(sortColumn)
+					+ (ascending ? " asc" : " desc");
+			}
+			const Wui::WuiRect body { x0, y + header.H, tableW, tableRowH * 4.0f };
+			static const char* rows[4][3] = {
+				{ "Player", "Mesh", "12 KB" },
+				{ "Ground", "Mesh", "48 KB" },
+				{ "Sky", "Texture", "256 KB" },
+				{ "Camera", "Entity", "-" },
+			};
+			for (int row = 0; row < 4; ++row)
+			{
+				int source = (ascending ? row : 3 - row) + sortColumn;
+				source %= 4;
+				for (size_t col = 0; col < columns.size(); ++col)
+				{
+					const Wui::WuiRect cell = Wui::TableCell(body, widths, static_cast<size_t>(row), col, tableRowH);
+					Wui::Label(ctx, { cell.X + 8.0f, cell.Y + 4.0f }, rows[source][col],
+						col == 0 ? theme.Text : theme.TextMuted, 13.0f);
+				}
+			}
+			y += header.H + body.H + gap;
+
+			// 颜色字段:折叠态一块色块 + 色值;点击展开 R/G/B/A 滑杆 + hex 输入。
+			glm::vec4& demoColor = ctx.Persist<glm::vec4>(Wui::HashId("gallery.ux2b.color"),
+				glm::vec4 { 0.298f, 0.553f, 1.0f, 1.0f });
+			if (Wui::ColorField(ctx, Wui::HashId("gallery.ux2b.colorfield"),
+				{ x0, y, 200.0f, 22.0f }, demoColor, theme))
+				m_LastAction = "ColorField: value changed";
+			y += 22.0f + gap;
+
+			// 分隔条:一条横向演示带,左右两块按 value 分宽(竖向条 = 左右拖动,光标 ResizeEW)。
+			float& split = ctx.Persist<float>(Wui::HashId("gallery.ux2b.split"), 150.0f);
+			const float stripW = std::min(width, 330.0f);
+			const float minSplit = 60.0f;
+			const float maxSplit = std::max(minSplit + 20.0f, stripW - 90.0f);
+			split = std::clamp(split, minSplit, maxSplit);
+			const Wui::WuiRect strip { x0, y, stripW, 84.0f };
+			const Wui::WuiRect leftBlock { strip.X, strip.Y, split, strip.H };
+			const Wui::WuiRect rightBlock { strip.X + split + 6.0f, strip.Y,
+				std::max(0.0f, strip.W - split - 6.0f), strip.H };
+			Wui::PanelBackground(ctx, leftBlock, theme.ContentBg, theme.Radius);
+			Wui::PanelBackground(ctx, rightBlock, theme.ContentBg, theme.Radius);
+			Wui::Label(ctx, { leftBlock.X + 8.0f, leftBlock.Y + 8.0f },
+				"Left " + std::to_string(static_cast<int>(split)), theme.TextMuted, 12.0f);
+			Wui::Label(ctx, { rightBlock.X + 8.0f, rightBlock.Y + 8.0f }, "Right", theme.TextMuted, 12.0f);
+			// 分隔条带 6px 宽、摆在边界上;控件内部自己把命中带撑到 6px(视觉线居中)。
+			const Wui::WuiRect splitterBand { strip.X + split, strip.Y, 6.0f, strip.H };
+			if (Wui::Splitter(ctx, Wui::HashId("gallery.ux2b.splitter"), splitterBand, true,
+				split, minSplit, maxSplit, theme))
+				m_LastAction = "Splitter: " + std::to_string(static_cast<int>(split));
+			y += strip.H + gap;
 		}
 
 		Wui::EndScrollArea(ctx);
