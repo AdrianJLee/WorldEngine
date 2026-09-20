@@ -32,6 +32,15 @@ namespace World::Editor
 			return "settings." + descriptor.Id;
 		}
 
+		// 控件/无障碍节点 id:默认 "settings.<Id>";迁移过来的行可以给 AccessId 顶掉整串,
+		// 保住既有脚本按老 id(`settings3d.msaa` 之类)读写的能力。
+		Wui::WuiId SettingAccessId(const SettingDescriptor& descriptor)
+		{
+			if (!descriptor.AccessId.empty())
+				return Wui::HashId(descriptor.AccessId.c_str());
+			return Wui::HashId(("settings." + descriptor.Id).c_str());
+		}
+
 		// 存盘值 → 选项下标(找不到时回落到 0)。
 		int OptionIndex(const SettingDescriptor& descriptor, const std::string& value)
 		{
@@ -80,7 +89,7 @@ namespace World::Editor
 			float x, float y, float width, std::string* error)
 		{
 			const std::string key = SettingKey(descriptor);
-			const Wui::WuiId id = Wui::HashId(key.c_str());
+			const Wui::WuiId id = SettingAccessId(descriptor);
 			const Wui::LocalizedLabel label = Wui::TrLabel(key, descriptor.Label);
 			std::string tooltip = Wui::Tr(key + ".tooltip", descriptor.Tooltip);
 			const std::string current = descriptor.Read ? descriptor.Read() : std::string();
@@ -140,8 +149,10 @@ namespace World::Editor
 					for (const Settings::SettingOption& option : descriptor.Options)
 						options.push_back(Wui::Tr(key + ".option." + option.Value, option.Label));
 					int selected = OptionIndex(descriptor, current);
-					if (Wui::Combo(ctx, id, controlRect, label.Text, options, selected, theme)
-						&& selected >= 0 && selected < static_cast<int>(descriptor.Options.size()))
+					const bool picked = descriptor.Searchable
+						? Wui::SearchableCombo(ctx, id, controlRect, label.Text, options, selected, theme)
+						: Wui::Combo(ctx, id, controlRect, label.Text, options, selected, theme);
+					if (picked && selected >= 0 && selected < static_cast<int>(descriptor.Options.size()))
 					{
 						newValue = descriptor.Options[static_cast<size_t>(selected)].Value;
 						changed = true;
@@ -185,7 +196,11 @@ namespace World::Editor
 				{
 					Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme,
 						kLabelColumn - 16.0f);
-					std::string& buffer = ctx.Persist<std::string>(id, current);
+					// 缓冲用**派生 id**:TextField 内部会拿控件 id 存自己的编辑态(WuiEditState),
+					// 同一个 id 再存 std::string 会类型冲突(实测:日志刷 "persisted state id reused
+					// with different types",退出时 0xC0000005)。
+					std::string& buffer = ctx.Persist<std::string>(
+						Wui::HashId((key + ".buffer").c_str()), current);
 					if (Wui::TextField(ctx, id, controlRect, buffer, theme))
 					{
 						newValue = buffer;
@@ -237,7 +252,10 @@ namespace World::Editor
 			node.Id = id;
 			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-			node.Kind = AccessKind(descriptor.Type);
+			// 可搜索下拉的触发器 kind 是 "search-combo"(控件自己登记的),这里的覆盖必须尊重它,
+			// 否则脚本按 kind 找控件会落空(实测被这一行覆盖回 "combo")。
+			node.Kind = (descriptor.Type == SettingType::Enum && descriptor.Searchable)
+				? "search-combo" : AccessKind(descriptor.Type);
 			node.Label = AccessLabel(label);
 			node.Value = current;
 			node.Rect = descriptor.Type == SettingType::Bool

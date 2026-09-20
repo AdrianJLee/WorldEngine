@@ -3186,6 +3186,32 @@ namespace World
 		m_Editor.ApplyRendererChange(renderer);
 	}
 
+	bool EditorShell::SaveProjectPackages(const std::vector<std::string>& packages, std::string* message)
+	{
+		std::filesystem::path manifestPath;
+		if (!Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+		{
+			if (message) *message = "找不到 project.we.yaml(工作目录下没有清单)";
+			return false;
+		}
+		Asset::ProjectManifest manifest;
+		std::string error;
+		if (!Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+		{
+			if (message) *message = "清单读取失败: " + error;
+			return false;
+		}
+		manifest.Packages = packages;
+		if (!Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+		{
+			if (message) *message = "清单写入失败: " + error;
+			return false;
+		}
+		if (message)
+			*message = "已保存发行包列表(" + std::to_string(packages.size()) + " 项)";
+		return true;
+	}
+
 	bool EditorShell::ImportModelFile(const std::string& sourcePath, std::string* message,
 		std::string* outLogicalModel)
 	{

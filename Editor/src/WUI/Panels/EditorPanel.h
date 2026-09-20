@@ -106,6 +106,13 @@ namespace World
 		}
 		// 内容根下的场景(逻辑路径,如 "scenes/3DTest.wd"),给"启动场景"下拉用。
 		virtual std::vector<std::string> ListProjectScenes() { return {}; }
+		// P4-UX11:发行包列表(project.we.yaml 的 `packages:`,打包产物里的相对路径)。
+		virtual bool SaveProjectPackages(const std::vector<std::string>& packages, std::string* message = nullptr)
+		{
+			(void)packages;
+			if (message) *message = "settings panel is not wired to a host";
+			return false;
+		}
 		// 切换渲染后端 = 需要重启编辑器(运行中热切换会串资源):面板改完立刻生效。
 		virtual void ApplyProjectRendererChange(const std::string& renderer) { (void)renderer; }
 		// ---- W9-2:内置脚本编辑器 ----

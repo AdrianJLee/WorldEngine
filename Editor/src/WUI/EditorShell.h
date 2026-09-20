@@ -128,6 +128,7 @@ namespace World
 		bool SaveProjectStartupSettings(const std::string& renderer, const std::string& startScene,
 			const std::string& contentRoot, std::string* message = nullptr) override;
 		std::vector<std::string> ListProjectScenes() override;
+		bool SaveProjectPackages(const std::vector<std::string>& packages, std::string* message = nullptr) override;
 		void ApplyProjectRendererChange(const std::string& renderer) override;
 		// P1b D5:内容浏览器双击 .gltf/.glb → 导入(不实例化);回传 .wmodel 逻辑路径供打开预览。
 		bool ImportModelFile(const std::string& sourcePath, std::string* message = nullptr,

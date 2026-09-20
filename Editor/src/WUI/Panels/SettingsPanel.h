@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorPanel.h"
+#include "../SettingsUi.h"
 #include "World/Core/Asset/ProjectManifest.h"
 
 #include <string>
@@ -26,6 +27,10 @@ namespace World
 		// 控件值从 RenderSettings::Get() 初始化一次,之后由控件驱动
 		// (每帧回读会把用户正在拖动的值覆盖掉)。
 		bool m_Initialized = false;
+		// P4-UX12:整个面板由设置注册表渲染(描述符在 RegisterProjectSettings 里注册一次)。
+		bool m_Registered = false;
+		PanelHost* m_Host = nullptr;
+		Editor::SettingsPageState m_Page;
 		Asset::RenderingSettings m_Edit;
 		// P4-1:物理设置(与渲染设置同一个面板)。
 		Asset::PhysicsSettingsData m_Physics;
@@ -40,11 +45,14 @@ namespace World
 		};
 		StartupSettings m_Startup;
 		std::vector<std::string> m_SceneOptions;
+		// 发行包列表(project.we.yaml 的 packages:):列表编辑不走注册表(它是"一行一个值"的模型)。
+		std::vector<std::string> m_Packages;
 		std::string m_StartupContentRootBuffer;
 		std::string m_Status = "渲染设置来自 project.we.yaml 的 `rendering` 区块";
 		bool m_StatusIsError = false;
 		// 自动保存防抖:拖拽控件时每帧都会 changed,不能每帧写盘。
 		bool m_PendingSave = false;
 		double m_LastChangeSeconds = 0.0;
+		void RegisterProjectSettings();
 	};
 }

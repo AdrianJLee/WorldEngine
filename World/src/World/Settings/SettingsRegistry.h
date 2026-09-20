@@ -59,6 +59,9 @@ namespace World::Settings
 		// 稳定 id,建议 "<作用域>.<分组>.<键>"(如 "editor.editor.script_font_size")。
 		// 它同时是无障碍节点 id 的一部分,改名等于破坏脚本兼容。
 		std::string Id;
+		// 可选:无障碍节点/控件 id 的**完整**覆盖("settings.<Id>" 之外的老 id,例如迁移过来的
+		// "settings3d.msaa")。设置面板迁移时靠它保住既有脚本的 id 兼容;空 = 用 "settings.<Id>"。
+		std::string AccessId;
 		// 分类名(英文,如 "Appearance"/"Workflow"/"Diagnostics")。面板按它分页。
 		std::string Group;
 		SettingType Type = SettingType::Bool;
@@ -76,6 +79,8 @@ namespace World::Settings
 		double Step = 0.0;
 		std::vector<SettingOption> Options;   // Type == Enum
 		bool Advanced = false;                 // 归入"高级/诊断"折叠区
+		// Enum 行用可搜索下拉(选项多时用:场景/资产列表)。默认 false = 普通 Combo。
+		bool Searchable = false;
 
 		// 存取绑定(必填)。Read 返回字符串化当前值;Write 写回真实存储
 		// (立即生效 + 落盘由存储负责),失败时把原因写进 error。
