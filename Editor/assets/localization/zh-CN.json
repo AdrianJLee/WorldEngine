@@ -392,6 +392,10 @@
   "panel.content_browser.refresh.tooltip": "重新扫描当前文件夹(热重载之外的兜底)",
   "panel.content_browser.search.hint": "搜索资产…",
   "panel.content_browser.search.clear.tooltip": "清除搜索",
+  "panel.content_browser.column.name": "名称",
+  "panel.content_browser.column.type": "类型",
+  "panel.content_browser.column.size": "大小",
+  "panel.content_browser.slice.folder": "文件夹",
 
   "menu.file.lua_stubs": "生成 Lua API 存根",
   "menu.file.cooking": "烘焙(Cook)",

@@ -5,7 +5,9 @@
 #include "World/WUI/WuiWidget.h"
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -62,6 +64,19 @@ namespace World
 		std::map<std::filesystem::path, std::pair<std::filesystem::file_time_type, uintmax_t>> SizeCache;
 	};
 
+	// P4-UX14:内容区一个"切片"(网格格子 / 列表行)的展示数据。
+	// 排序与绘制共用同一份,避免重复做类型推断与 stat;大小按需填充(网格只统计可见切片)。
+	struct BrowserSlice
+	{
+		std::filesystem::path Path;
+		bool IsDir = false;
+		uintmax_t Size = 0;    // 仅 SizeKnown = true 时有效
+		bool SizeKnown = false;
+		std::string Name;      // 文件名(不含目录)
+		std::string Type;      // EditorAssetTypes 的类型名(Folder / Scene / Material / …)
+		std::string Extension; // 小写扩展名(含点);文件夹为空
+	};
+
 	class ContentBrowserPanel final : public EditorPanel
 	{
 	public:
@@ -107,6 +122,16 @@ namespace World
 		void InvalidateContents();
 		void SaveState();
 		void LoadState();
+		// P4-UX14:内容区统一切片的两个绘制入口(网格 / 列表 + 常驻表头)。
+		// interact = 面板既有的选中/双击/拖拽/右键处理,按切片路径调用。
+		void RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiRect& area, const Wui::WuiTheme& theme,
+			const std::vector<BrowserSlice>& slices,
+			const std::function<void(const std::filesystem::path&, const Wui::WuiRect&, bool)>& interact,
+			bool treeRenameDrawn);
+		void RenderListSlices(Wui::WuiContext& ctx, const Wui::WuiRect& area, const Wui::WuiTheme& theme,
+			const std::vector<BrowserSlice>& slices, int& sortColumn, bool& sortAscending,
+			const std::function<void(const std::filesystem::path&, const Wui::WuiRect&, bool)>& interact,
+			bool treeRenameDrawn);
 
 		PanelHost& m_Host;
 		ContentBrowserModel m_Model;
@@ -126,13 +151,10 @@ namespace World
 		std::shared_ptr<Wui::WuiBox> m_Toolbar;
 		std::shared_ptr<Wui::WuiBox> m_Breadcrumbs;
 		std::shared_ptr<Wui::WuiTextField> m_SearchField;
-		std::shared_ptr<Wui::WuiButton> m_BackButton;
-		std::shared_ptr<Wui::WuiButton> m_ForwardButton;
-		std::shared_ptr<Wui::WuiButton> m_UpButton;
-		std::shared_ptr<Wui::WuiButton> m_ViewModeButton;
-		// P4-UX13:工具条为每个按钮登记悬停说明,需要持有指针(以前是匿名创建)。
-		std::shared_ptr<Wui::WuiButton> m_FolderButton;
-		std::shared_ptr<Wui::WuiButton> m_RefreshButton;
+		// P4-UX14:工具条只剩「面包屑 + 搜索 + ⋯」;低频动作收进 ⋯ 菜单。
+		std::shared_ptr<Wui::WuiButton> m_MoreButton;
+		bool m_ToolbarMenuOpen = false;
+		glm::vec2 m_ToolbarMenuPos { 0, 0 };
 		std::vector<std::shared_ptr<Wui::WuiButton>> m_CrumbButtons;
 		std::vector<std::filesystem::path> m_CrumbDests;
 		std::filesystem::path m_LastCrumbPath;

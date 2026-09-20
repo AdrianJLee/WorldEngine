@@ -2,6 +2,7 @@
 #include "WuiChrome.h"
 
 #include "World/WUI/WuiAccessibility.h"
+#include "World/Core/KeyCodes.h"
 
 #include <algorithm>
 
@@ -445,13 +446,22 @@ namespace World::Wui
 	// ---- 树视图 ----
 
 	TreeViewResult TreeView(WuiContext& ctx, const WuiRect& area, const std::vector<TreeViewItem>& items,
-		float rowHeight, float& scrollY, const WuiTheme& theme)
+		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id)
 	{
 		TreeViewResult result;
 		const float contentHeight = rowHeight * static_cast<float>(items.size()) + 8.0f;
 		result.ItemRects.reserve(items.size());
 		result.ArrowRects.reserve(items.size());
 		BeginScrollArea(ctx, area, contentHeight, scrollY, theme);
+		// U2e:整棵树作为一个可聚焦控件(Tab 能到、能被 ui.focus),焦点环画在滚动裁剪区内
+		// (BeginScrollArea 的裁剪还在栈上,环不会漂到树外面去)。
+		const bool focused = id != 0 && ctx.Focus() == id;
+		if (id != 0)
+		{
+			ctx.RegisterFocusable(id, area);
+			if (focused)
+				DrawFocusRing(ctx, area, id, theme);
+		}
 		for (size_t i = 0; i < items.size(); ++i)
 		{
 			const TreeViewItem& item = items[i];
@@ -537,6 +547,78 @@ namespace World::Wui
 				result.DoubleClicked = static_cast<int>(i);
 			else if (ctx.IsClicked(labelRect))
 				result.Clicked = static_cast<int>(i);
+		}
+		// U2e 键盘导航:焦点在树上时才吃键,且只**报告**目标下标 —— 由调用方改
+		// Selection/Expanded/激活语义(控件不自己动模型)。
+		// 导航跳过 Disabled 行(与鼠标命中一致:禁用行点不动);当前项取第一个 Selected。
+		if (focused && !items.empty())
+		{
+			int current = -1;
+			for (size_t i = 0; i < items.size(); ++i)
+			{
+				if (items[i].Selected)
+				{
+					current = static_cast<int>(i);
+					break;
+				}
+			}
+			const auto enabledAt = [&items](int index)
+			{
+				return index >= 0 && index < static_cast<int>(items.size()) && !items[static_cast<size_t>(index)].Disabled;
+			};
+
+			// 没有当前项时(调用方还没选中任何行):↓/Home 落到第一项,↑/End 落到最后一项。
+			if (ctx.WasKeyPressed(KeyCodes::Down))
+			{
+				int target = -1;
+				for (int i = (current < 0 ? 0 : current + 1); i < static_cast<int>(items.size()); ++i)
+				{
+					if (enabledAt(i)) { target = i; break; }
+				}
+				if (target >= 0 && target != current)
+					result.KeyMoveTo = target;
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::Up))
+			{
+				int target = -1;
+				for (int i = (current < 0 ? static_cast<int>(items.size()) - 1 : current - 1); i >= 0; --i)
+				{
+					if (enabledAt(i)) { target = i; break; }
+				}
+				if (target >= 0 && target != current)
+					result.KeyMoveTo = target;
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::Home))
+			{
+				int target = -1;
+				for (int i = 0; i < static_cast<int>(items.size()); ++i)
+				{
+					if (enabledAt(i)) { target = i; break; }
+				}
+				if (target >= 0 && target != current)
+					result.KeyMoveTo = target;
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::End))
+			{
+				int target = -1;
+				for (int i = static_cast<int>(items.size()) - 1; i >= 0; --i)
+				{
+					if (enabledAt(i)) { target = i; break; }
+				}
+				if (target >= 0 && target != current)
+					result.KeyMoveTo = target;
+			}
+			// ←/→ 只对可展开行报 KeyToggleExpand(叶子行没有可切换的展开态,与鼠标
+			// 只给 HasChildren 行画箭头一致)。展开/折叠后**可见项集合变化由调用方重建**;
+			// 本控件按它当帧拿到的 items 报告,不自己滚动。
+			if (result.KeyMoveTo < 0 && current >= 0 && items[static_cast<size_t>(current)].HasChildren
+				&& (ctx.WasKeyPressed(KeyCodes::Left) || ctx.WasKeyPressed(KeyCodes::Right)))
+			{
+				result.KeyToggleExpand = current;
+			}
+			// Enter 激活当前项;Disabled 行不可激活(与鼠标点击一致)。
+			if (result.KeyMoveTo < 0 && enabledAt(current) && ctx.WasKeyPressed(KeyCodes::Enter))
+				result.KeyActivate = current;
 		}
 		EndScrollArea(ctx);
 		return result;

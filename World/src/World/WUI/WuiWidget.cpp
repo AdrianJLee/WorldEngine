@@ -2,6 +2,7 @@
 #include "WuiWidget.h"
 
 #include "World/WUI/WuiWidgets.h"
+#include "World/Core/KeyCodes.h"
 
 #include <algorithm>
 
@@ -44,6 +45,23 @@ namespace World::Wui
 		if (!wasDirty)
 			if (const WuiWidgetPtr parent = m_Parent.lock())
 			parent->Invalidate();
+	}
+
+	// ---- 对象式控件焦点(U2e)----
+
+	void WuiWidget::RegisterFocusable(WuiPaintContext& context)
+	{
+		if (m_Id == 0)
+			return;
+		context.Context().RegisterFocusable(m_Id, m_Rect);
+	}
+
+	void WuiWidget::PaintFocusRing(WuiPaintContext& context)
+	{
+		if (m_Id == 0)
+			return;
+		// 与立即模式控件同一套语义:环画在 overlay 层、滚动裁剪区外不画。
+		Wui::DrawFocusRing(context.Context(), m_Rect, m_Id, Wui::CurrentTheme());
 	}
 
 	// ---- WuiBox ----
@@ -190,17 +208,24 @@ namespace World::Wui
 	void WuiButton::Paint(WuiPaintContext& context)
 	{
 		WuiContext& ctx = context.Context();
+		// U2e:对象式按钮接入 P4-UX6 焦点体系(Tab 顺序 + 焦点环 + 键盘激活),
+		// 与 Wui::Button 的立即模式实现同语义 —— 以前只有立即模式控件能被 Tab 到。
+		RegisterFocusable(context);
+		const bool focused = Id() != 0 && ctx.Focus() == Id();
 		// P4-UX13:按钮样式统一走主题令牌 —— 以前这里是硬编码色 + **每颗按钮都描一圈蓝边**,
 		// 工具条看起来像一排"空盒子"(用户:"顶部一系列按钮" 就是它)。
 		const WuiTheme& theme = CurrentTheme();
 		const bool hovered = ctx.IsHovered(m_Rect);
 		const bool pressed = hovered && ctx.Input().MouseDown[0];
+		// 键盘激活:焦点在本按钮上时 Enter / Space = 点击一次(KeyPressed 只含本帧新按下,长按不连发)。
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
 		const WuiColor fill = !Enabled ? theme.ContentBg
 			: (pressed ? theme.ActiveBg : (hovered ? theme.ButtonHover : theme.ButtonBg));
 		const WuiColor text = Enabled ? theme.Text : theme.TextDisabled;
 		ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, fill, theme.Radius });
 		// 只在悬停/按下时给一圈边:默认态干净,悬停态才有"可点"的反馈。
-		if (Enabled && (hovered || pressed))
+		if (Enabled && (hovered || pressed || focused))
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline, m_Rect, theme.BorderStrong, theme.Radius, 1.0f });
 		float textX = m_Rect.X + 8.0f;
 		if (CenterLabel)
@@ -210,9 +235,10 @@ namespace World::Wui
 		}
 		ctx.Commands().push_back({ WuiDrawKind::Text, { textX, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 },
 			text, 0, 1.0f, Label, 15.0f, false });
+		PaintFocusRing(context);
 		if (Enabled && hovered)
 			ctx.SetCursor(WuiCursor::Hand);
-		if (Enabled && ctx.IsClicked(m_Rect) && OnClick)
+		if (Enabled && (ctx.IsClicked(m_Rect) || keyActivated) && OnClick)
 			OnClick();
 	}
 
@@ -228,12 +254,20 @@ namespace World::Wui
 	void WuiCheckbox::Paint(WuiPaintContext& context)
 	{
 		WuiContext& ctx = context.Context();
+		// U2e:焦点登记 + 焦点环 + Enter/Space 切换(对象式勾选框此前完全不吃键盘)。
+		RegisterFocusable(context);
+		const bool focused = Id() != 0 && ctx.Focus() == Id();
+		const bool keyToggled = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
 		const WuiRect box { m_Rect.X, m_Rect.Y + (m_Rect.H - 18.0f) * 0.5f, 18, 18 };
 		const bool value = Value ? *Value : false;
 		ctx.Commands().push_back({ WuiDrawKind::Rect, box, value ? WuiColor { 0.3f, 0.5f, 0.9f, 1 } : WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box, WuiColor { 0.3f, 0.3f, 0.32f, 1 }, 3.0f, 1.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { box.X + 24, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 }, WuiColor { 0.82f, 0.84f, 0.87f, 1 }, 0, 1.0f, Label, 15.0f, false });
-		if (Value && ctx.IsClicked(m_Rect))
+		PaintFocusRing(context);
+		if (ctx.IsHovered(m_Rect))
+			ctx.SetCursor(WuiCursor::Hand);
+		if (Value && (ctx.IsClicked(m_Rect) || keyToggled))
 			*Value = !*Value;
 	}
 
@@ -257,6 +291,9 @@ namespace World::Wui
 	{
 		if (!Buffer)
 			return;
+		// U2e:输入框同样进焦点表(以前对象式输入框只能靠鼠标点,Tab 到不了)。
+		// Enter 提交 / Escape 取消沿用立即模式 TextField 的既有实现,这里不重复一套。
+		RegisterFocusable(context);
 		bool cancelled = false;
 		if (TextField(context.Context(), Id(), m_Rect, *Buffer, Theme ? *Theme : WuiDefaultTheme(), &cancelled))
 		{
@@ -266,6 +303,7 @@ namespace World::Wui
 		{
 			if (OnCancel) OnCancel();
 		}
+		PaintFocusRing(context);
 	}
 
 	// ---- WuiDragFloat ----
@@ -281,7 +319,9 @@ namespace World::Wui
 	{
 		if (!Value)
 			return;
+		RegisterFocusable(context);
 		DragFloat(context.Context(), Id(), m_Rect, *Value, Speed, Min, Max, Theme ? *Theme : WuiDefaultTheme());
+		PaintFocusRing(context);
 	}
 
 	// ---- WuiDragInt ----
@@ -297,7 +337,9 @@ namespace World::Wui
 	{
 		if (!Value)
 			return;
+		RegisterFocusable(context);
 		DragInt(context.Context(), Id(), m_Rect, *Value, Min, Max, Theme ? *Theme : WuiDefaultTheme());
+		PaintFocusRing(context);
 	}
 
 	// ---- WuiCombo ----

@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iterator>
 #include <shellapi.h>
+#include <string_view>
 
 #pragma comment(lib, "shell32.lib")
 
@@ -95,6 +96,69 @@ namespace World
 						"An item with this name already exists in this folder");
 			}
 			return {};
+		}
+
+		// ---- P4-UX14:内容区统一切片的几何与文本工具 ----
+		// 间距/颜色/字号一律取 WuiTheme 令牌;这里只放派工确认的固定尺寸
+		// (切片最小 96、列表行高与树一致的 22、行内图标 16、网格图标 = 切片的一半)。
+		constexpr float kSliceMinSize = 96.0f;         // 网格切片最小边长
+		constexpr float kSliceIconSize = 48.0f;        // 网格图标基准边长
+		constexpr float kSliceHoverIconScale = 1.04f;  // 悬停图标放大(≤4%)
+		constexpr float kSelectedHoverLighten = 0.25f; // 选中 + 悬停时描边向白提亮的比例
+		constexpr float kListRowHeight = 22.0f;        // 列表数据行高(与树行一致)
+		constexpr float kListIconSize = 16.0f;         // 列表行内图标
+		constexpr float kTableHeaderHeight = 22.0f;    // 常驻表头行高
+		constexpr float kListTypeColumnWidth = 96.0f;  // 类型列基准宽
+		constexpr float kListSizeColumnWidth = 96.0f;  // 大小列基准宽
+		constexpr float kListColumnShare = 0.24f;      // 窄面板时列宽占面板宽的上限
+
+		Wui::WuiColor MixColor(const Wui::WuiColor& from, const Wui::WuiColor& to, float amount)
+		{
+			return { from.R + (to.R - from.R) * amount, from.G + (to.G - from.G) * amount,
+				from.B + (to.B - from.B) * amount, from.A + (to.A - from.A) * amount };
+		}
+
+		std::string LowerAscii(std::string text)
+		{
+			for (char& character : text)
+				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+			return text;
+		}
+
+		// 文本按像素宽度截断(超宽补 '…')。与 WuiWidgets.cpp 内部同名实现同语义
+		// (那边是文件内匿名实现,不可跨 TU 复用):逐码点累加,候选宽度 + 12px 余量超过
+		// maxWidth 就停;maxWidth <= 0 时不裁剪。放不下一个字符时返回空串。
+		std::string EllipsizeToWidth(const Wui::WuiContext& ctx, std::string_view text, float maxWidth,
+			float fontSize)
+		{
+			if (maxWidth <= 0.0f || text.empty())
+				return std::string(text);
+			if (ctx.MeasureTextWidth(text, fontSize) <= maxWidth)
+				return std::string(text);
+			std::string out;
+			size_t index = 0;
+			bool any = false;
+			while (index < text.size())
+			{
+				const size_t begin = index;
+				size_t length = 1;
+				const unsigned char lead = static_cast<unsigned char>(text[index]);
+				if ((lead & 0xE0) == 0xC0) length = 2;
+				else if ((lead & 0xF0) == 0xE0) length = 3;
+				else if ((lead & 0xF8) == 0xF0) length = 4;
+				length = std::min(length, text.size() - index);
+				index += length;
+				std::string candidate = out;
+				candidate.append(text.substr(begin, length));
+				if (ctx.MeasureTextWidth(candidate, fontSize) + 12.0f > maxWidth)
+					break;
+				any = true;
+				out = std::move(candidate);
+			}
+			if (!any)
+				return std::string();
+			out += "…";
+			return out;
 		}
 	}
 
@@ -708,6 +772,186 @@ namespace World
 			UpdateSearch();
 	}
 
+	// ---- P4-UX14:内容区统一切片(网格)----
+	// 每格 = 图标 → 名称(居中、超宽省略号)→ 次级信息(文件夹 / 扩展名 · 大小)。
+	// 悬停 = BorderStrong 描边 + 图标轻微放大(≤4%);选中 = 2px Accent 描边 + 名称 Selection 底。
+	// 尺寸:切片最小 96×96,列数随面板宽度自适应,间距一律 theme.Pad。
+	void ContentBrowserPanel::RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiRect& area,
+		const Wui::WuiTheme& theme, const std::vector<BrowserSlice>& slices,
+		const std::function<void(const std::filesystem::path&, const Wui::WuiRect&, bool)>& interact,
+		bool treeRenameDrawn)
+	{
+		const float gap = theme.Pad;
+		const int columns = std::max(1, static_cast<int>((area.W + gap) / (kSliceMinSize + gap)));
+		const float cellW = std::max(kSliceMinSize,
+			(area.W - gap * static_cast<float>(columns - 1)) / static_cast<float>(columns));
+		const float cellH = std::max(kSliceMinSize, cellW);
+		const size_t rowCount = (slices.size() + static_cast<size_t>(columns) - 1) / static_cast<size_t>(columns);
+		const float contentHeight = gap + static_cast<float>(rowCount) * (cellH + gap);
+		Wui::BeginScrollArea(ctx, area, contentHeight, m_Model.ContentScroll, theme);
+		const float nameSize = theme.FontSizeBody;
+		const float infoSize = theme.FontSizeCaption;
+		const float textBudget = std::max(0.0f, cellW - gap * 2.0f);
+		for (size_t i = 0; i < slices.size(); ++i)
+		{
+			const BrowserSlice& slice = slices[i];
+			const int column = static_cast<int>(i % static_cast<size_t>(columns));
+			const int rowIndex = static_cast<int>(i / static_cast<size_t>(columns));
+			const Wui::WuiRect cell {
+				area.X + (cellW + gap) * static_cast<float>(column),
+				area.Y + gap + (cellH + gap) * static_cast<float>(rowIndex) - m_Model.ContentScroll,
+				cellW, cellH };
+			if (cell.Y + cell.H < area.Y || cell.Y > area.Y + area.H)
+				continue; // 视野外:不绘制也不命中(与旧 GridView 相同)
+			const bool selected = m_Model.Selected.find(slice.Path) != m_Model.Selected.end();
+			const bool hovered = ctx.IsHovered(cell);
+
+			// 图标:悬停时绕自身中心轻微放大,名称/信息的基线不动。
+			const float iconSize = kSliceIconSize * (hovered ? kSliceHoverIconScale : 1.0f);
+			const uint64_t icon = slice.IsDir ? m_DirIconId : m_FileIconId;
+			if (icon != 0)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Image,
+					{ cell.X + cell.W * 0.5f - iconSize * 0.5f,
+					  cell.Y + gap - (iconSize - kSliceIconSize) * 0.5f, iconSize, iconSize },
+					Wui::WuiColor { 1, 1, 1, 1 }, 0.0f, 1.0f, "", nameSize, false, icon, { 0, 1, 1, -1 } });
+
+			// 名称(居中;选中时先铺一层 Selection 底再画文字)。
+			const float infoY = cell.Y + cell.H - gap - infoSize;
+			const float nameY = infoY - theme.PadSmall - nameSize;
+			const std::string nameText = EllipsizeToWidth(ctx, slice.Name, textBudget, nameSize);
+			const float nameW = ctx.MeasureTextWidth(nameText, nameSize);
+			const float nameX = cell.X + (cell.W - nameW) * 0.5f;
+			if (selected)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+					{ nameX - theme.PadSmall, nameY - 1.0f, nameW + theme.PadSmall * 2.0f, nameSize + 4.0f },
+					theme.Selection, theme.Radius });
+			if (!nameText.empty())
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { nameX, nameY, 0.0f, 0.0f },
+					theme.Text, 0.0f, 1.0f, nameText, nameSize, false });
+
+			// 次级信息:文件夹 = "文件夹";文件 = 扩展名 · 大小。
+			// 大小按需 stat,只统计**可见**切片(大目录在网格模式下不再每帧全量 stat)。
+			const uintmax_t bytes = slice.IsDir ? 0 : (slice.SizeKnown ? slice.Size : FileSize(slice.Path));
+			const std::string info = slice.IsDir
+				? Wui::Tr("panel.content_browser.slice.folder", "Folder")
+				: (slice.Extension.empty() ? slice.Type : slice.Extension) + " · "
+					+ FormatBytes(static_cast<size_t>(bytes));
+			const std::string infoText = EllipsizeToWidth(ctx, info, textBudget, infoSize);
+			if (!infoText.empty())
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ cell.X + (cell.W - ctx.MeasureTextWidth(infoText, infoSize)) * 0.5f, infoY, 0.0f, 0.0f },
+					theme.TextMuted, 0.0f, 1.0f, infoText, infoSize, false });
+
+			// 描边:常驻 1px Border → 悬停 BorderStrong → 选中 2px Accent(选中 + 悬停再提亮一档)。
+			Wui::WuiColor stroke = theme.Border;
+			float thickness = 1.0f;
+			if (selected)
+			{
+				stroke = hovered
+					? MixColor(theme.Accent, Wui::WuiColor { 1, 1, 1, 1 }, kSelectedHoverLighten)
+					: theme.Accent;
+				thickness = 2.0f;
+			}
+			else if (hovered)
+				stroke = theme.BorderStrong;
+			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, cell, stroke, theme.Radius, thickness });
+
+			interact(slice.Path, cell, slice.IsDir);
+			// D10-6:从树菜单发起的重命名画在树行上;内容区这一份画在名称位置上。
+			if (!treeRenameDrawn && m_Model.RenameTarget == slice.Path)
+				RenderRenameField(ctx, slice.Path,
+					{ cell.X + gap, nameY - 1.0f, textBudget, nameSize + 4.0f }, theme);
+		}
+		Wui::EndScrollArea(ctx);
+	}
+
+	// ---- P4-UX14:内容区统一切片(列表 + 常驻表头)----
+	// 表头用 Wui::TableHeader(列节点由控件自己登记,点击列头排序);
+	// 数据行 = 图标(16px) + 名称 + 类型 + 大小,行高 22;悬停 HoverBg,
+	// 选中 = Selection 底 + 左侧 2px Accent 条(与树一致)。
+	void ContentBrowserPanel::RenderListSlices(Wui::WuiContext& ctx, const Wui::WuiRect& area,
+		const Wui::WuiTheme& theme, const std::vector<BrowserSlice>& slices, int& sortColumn, bool& sortAscending,
+		const std::function<void(const std::filesystem::path&, const Wui::WuiRect&, bool)>& interact,
+		bool treeRenameDrawn)
+	{
+		// 列宽:名称列吃掉剩余宽度;面板很窄时先压类型/大小列(名称列保底 theme.Pad * 10)。
+		const float typeW = std::min(kListTypeColumnWidth, std::max(theme.Pad * 4.0f, area.W * kListColumnShare));
+		const float sizeW = std::min(kListSizeColumnWidth, std::max(theme.Pad * 4.0f, area.W * kListColumnShare));
+		const float nameW = std::max(theme.Pad * 10.0f, area.W - typeW - sizeW);
+		const std::vector<std::string> columns {
+			Wui::Tr("panel.content_browser.column.name", "Name"),
+			Wui::Tr("panel.content_browser.column.type", "Type"),
+			Wui::Tr("panel.content_browser.column.size", "Size") };
+		const std::vector<float> columnWidths { nameW, typeW, sizeW };
+		Wui::TableHeader(ctx, Wui::HashId("browser.list.header"),
+			{ area.X, area.Y, area.W, kTableHeaderHeight }, columns, columnWidths, sortColumn, sortAscending, theme);
+
+		const Wui::WuiRect body { area.X, area.Y + kTableHeaderHeight, area.W,
+			std::max(0.0f, area.H - kTableHeaderHeight) };
+		const float contentHeight = theme.PadSmall * 2.0f + kListRowHeight * static_cast<float>(slices.size());
+		Wui::BeginScrollArea(ctx, body, contentHeight, m_Model.ContentScroll, theme);
+		const float typeX = body.X + nameW;
+		const float sizeX = typeX + typeW;
+		const float smallSize = theme.FontSizeSmall;
+		for (size_t i = 0; i < slices.size(); ++i)
+		{
+			const BrowserSlice& slice = slices[i];
+			const Wui::WuiRect row { body.X,
+				body.Y + theme.PadSmall + kListRowHeight * static_cast<float>(i) - m_Model.ContentScroll,
+				body.W, kListRowHeight };
+			if (row.Y + row.H < body.Y || row.Y > body.Y + body.H)
+				continue;
+			const bool selected = m_Model.Selected.find(slice.Path) != m_Model.Selected.end();
+			const bool hovered = ctx.IsHovered(row);
+			if (selected)
+			{
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.Selection, theme.Radius });
+				// 左侧 2px 强调条:与树的选中语言一致(行内上下各留 1px)。
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+					{ row.X, row.Y + 1.0f, 2.0f, row.H - 2.0f }, theme.Accent, 1.0f });
+			}
+			else if (hovered)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.HoverBg, theme.Radius });
+
+			const uint64_t icon = slice.IsDir ? m_DirIconId : m_FileIconId;
+			if (icon != 0)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Image,
+					{ row.X + theme.PadSmall, row.Y + (row.H - kListIconSize) * 0.5f, kListIconSize, kListIconSize },
+					Wui::WuiColor { 1, 1, 1, 1 }, 0.0f, 1.0f, "", smallSize, false, icon, { 0, 1, 1, -1 } });
+
+			const float nameX = row.X + theme.PadSmall * 2.0f + kListIconSize;
+			const float nameBudget = std::max(0.0f, nameW - (nameX - row.X) - theme.PadSmall);
+			const std::string nameText = EllipsizeToWidth(ctx, slice.Name, nameBudget, theme.FontSizeBody);
+			if (!nameText.empty())
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ nameX, row.Y + (row.H - theme.FontSizeBody) * 0.5f, 0.0f, 0.0f },
+					theme.Text, 0.0f, 1.0f, nameText, theme.FontSizeBody, false });
+
+			const std::string typeText = EllipsizeToWidth(ctx, slice.Type,
+				std::max(0.0f, typeW - theme.PadSmall * 2.0f), smallSize);
+			if (!typeText.empty())
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ typeX + theme.PadSmall, row.Y + (row.H - smallSize) * 0.5f, 0.0f, 0.0f },
+					theme.TextMuted, 0.0f, 1.0f, typeText, smallSize, false });
+
+			const std::string sizeText = slice.IsDir
+				? std::string("-")
+				: FormatBytes(static_cast<size_t>(slice.SizeKnown ? slice.Size : FileSize(slice.Path)));
+			const std::string sizeShown = EllipsizeToWidth(ctx, sizeText,
+				std::max(0.0f, sizeW - theme.PadSmall * 2.0f), smallSize);
+			if (!sizeShown.empty())
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ sizeX + theme.PadSmall, row.Y + (row.H - smallSize) * 0.5f, 0.0f, 0.0f },
+					theme.TextMuted, 0.0f, 1.0f, sizeShown, smallSize, false });
+
+			interact(slice.Path, row, slice.IsDir);
+			// D10-6:从树菜单发起的重命名画在树行上,内容区不再重复画同 id 输入框。
+			if (!treeRenameDrawn && m_Model.RenameTarget == slice.Path)
+				RenderRenameField(ctx, slice.Path, { nameX, row.Y + 1.0f, nameBudget, row.H - 2.0f }, theme);
+		}
+		Wui::EndScrollArea(ctx);
+	}
+
 	void ContentBrowserPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		m_Ctx = &ctx;
@@ -785,7 +1029,14 @@ namespace World
 		std::string filePayload;
 		const bool fileDrag = ctx.IsDragActive(&filePayload) && filePayload.rfind("file:", 0) == 0;
 
-		// ---- 工具栏(布局树):后退/前进/上级 + 面包屑 + 视图/新建/刷新/搜索 ----
+		// ---- 工具栏(P4-UX14 重新设计)----
+		// 用户:"顶部那排按钮真的有必要存在吗?" —— 结论:**只留三样**。
+		//   ① 面包屑(路径本身就是导航,点任意一级直接跳);
+		//   ② 搜索(常驻,高频);
+		//   ③ 一个 `⋯` 菜单(新建/刷新/视图切换/在资源管理器中打开/后退前进上一级)。
+		// 为什么删掉那六个动作按钮:后退/前进/上一级在树和面包屑里都有等价入口,
+		// 新建/刷新/视图是低频动作 —— 六个常驻按钮换一个菜单,工具栏从"一排控件"回到"一行路径",
+		// 与 VS Code 资源管理器/Blender 浏览器一致(导航靠树,动作靠菜单 + 快捷键)。
 		if (!m_Toolbar)
 		{
 			m_Toolbar = std::make_shared<Wui::WuiBox>();
@@ -803,27 +1054,6 @@ namespace World
 				m_Toolbar->Add(button, { width, width, 0, 24, 0 });
 				return button;
 			};
-			// P4-UX13:导航组用**字形 + tooltip**(‹ › ↑),不再用 "<"/">"/"Up" 这种词与符号混排;
-			// 图标按钮靠悬停说明自解释,右侧动作组才用文字(新建文件夹一次就能看懂)。
-			m_BackButton = addButton("‹", [this] { if (m_Model.HistoryIndex > 0) GoBack(); }, 24, true);
-			m_ForwardButton = addButton("›", [this]
-				{
-					if (m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1)
-					{
-						++m_Model.HistoryIndex;
-						m_Model.Current = m_Model.History[m_Model.HistoryIndex];
-						m_Model.Selected.clear();
-						m_Model.LastSelected.clear();
-						Reveal(m_Model.Current);
-						m_Model.ListingDirty = true;
-						m_Model.ListingStamp = {};
-						SaveState();
-						if (m_Model.Search[0])
-							UpdateSearch();
-					}
-				}, 24, true);
-			m_UpButton = addButton("↑", [this] { if (m_Model.Current != m_Model.Root) GoUp(); }, 26, true);
-
 			m_Breadcrumbs = std::make_shared<Wui::WuiBox>();
 			m_Breadcrumbs->Direction = Wui::WuiDirection::Row;
 			m_Breadcrumbs->Gap = 4;
@@ -832,18 +1062,9 @@ namespace World
 			// 而不是把右侧的搜索框/动作挤出画面(实测 890px 宽时搜索框整个看不见)。
 			m_Toolbar->Add(m_Breadcrumbs, { 0, 1e30f, 0, 24, 1 });
 
-			m_ViewModeButton = addButton(m_Model.ListMode ? "Grid" : "List", [this]
-				{
-					m_Model.ListMode = !m_Model.ListMode;
-					SaveState();
-				}, 58);
-			m_FolderButton = addButton("+ " + Wui::Tr("panel.content_browser.new_folder", "Folder"), [this, &ctx] { CreateFolder(ctx); }, 76);
-			m_RefreshButton = addButton(Wui::Tr("panel.content_browser.refresh", "Refresh"), [this]
-				{
-					InvalidateContents();
-					if (m_Model.Search[0])
-						UpdateSearch();
-				}, 58);
+			// `⋯` 菜单:动作收进一处,低频动作不再占用常驻空间。
+			m_MoreButton = addButton("⋯", [this] { m_ToolbarMenuOpen = true; }, 30, true);
+			m_MoreButton->CenterLabel = true;
 
 			m_SearchField = std::make_shared<Wui::WuiTextField>();
 			// D10:给搜索框一个稳定 id —— AI/脚本可以 ui.type 驱动它(以前只能手点)。
@@ -858,10 +1079,29 @@ namespace World
 			m_Toolbar->Add(m_SearchField, { 140, 162, 0, 24, 0 });
 		}
 
-		m_BackButton->Enabled = m_Model.HistoryIndex > 0;
-		m_ForwardButton->Enabled = m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1;
-		m_UpButton->Enabled = m_Model.Current != m_Model.Root;
-		m_ViewModeButton->Label = m_Model.ListMode ? "Grid" : "List";
+		// 导航快捷键(工具栏删掉三个导航按钮后的补偿):Alt+←/→ 后退/前进、Alt+↑ 上一级。
+		// 文本控件持焦点时不抢(否则在搜索框里按方向键会跳目录)。
+		if (!Wui::WuiTextFocus::Get().Active() && ctx.Input().Alt)
+		{
+			if (ctx.WasKeyPressed(KeyCodes::Left) && m_Model.HistoryIndex > 0)
+				GoBack();
+			else if (ctx.WasKeyPressed(KeyCodes::Right)
+				&& m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1)
+			{
+				++m_Model.HistoryIndex;
+				m_Model.Current = m_Model.History[m_Model.HistoryIndex];
+				m_Model.Selected.clear();
+				m_Model.LastSelected.clear();
+				Reveal(m_Model.Current);
+				m_Model.ListingDirty = true;
+				m_Model.ListingStamp = {};
+				SaveState();
+				if (m_Model.Search[0])
+					UpdateSearch();
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::Up) && m_Model.Current != m_Model.Root)
+				GoUp();
+		}
 
 		// 面包屑随路径变化重建。
 		if (m_LastCrumbPath != m_Model.Current)
@@ -917,20 +1157,12 @@ namespace World
 			};
 			separator(m_Breadcrumbs->Rect());
 			separator(m_SearchField->Rect());
-			separator(m_ViewModeButton->Rect());
+			if (m_MoreButton)
+				separator(m_MoreButton->Rect());
 
-			Wui::Tooltip(ctx, m_BackButton->Rect(), Wui::Tr("panel.content_browser.back.tooltip", "后退"));
-			Wui::Tooltip(ctx, m_ForwardButton->Rect(), Wui::Tr("panel.content_browser.forward.tooltip", "前进"));
-			Wui::Tooltip(ctx, m_UpButton->Rect(), Wui::Tr("panel.content_browser.up.tooltip", "上一级"));
-			Wui::Tooltip(ctx, m_ViewModeButton->Rect(), m_Model.ListMode
-				? Wui::Tr("panel.content_browser.view.grid.tooltip", "切换到网格视图")
-				: Wui::Tr("panel.content_browser.view.list.tooltip", "切换到列表视图"));
-			if (m_FolderButton)
-				Wui::Tooltip(ctx, m_FolderButton->Rect(), Wui::Tr("panel.content_browser.new_folder.tooltip",
-					"在当前文件夹里新建子文件夹"));
-			if (m_RefreshButton)
-				Wui::Tooltip(ctx, m_RefreshButton->Rect(), Wui::Tr("panel.content_browser.refresh.tooltip",
-					"重新扫描当前文件夹(热重载之外的兜底)"));
+			if (m_MoreButton)
+				Wui::Tooltip(ctx, m_MoreButton->Rect(), Wui::Tr("panel.content_browser.more.tooltip",
+					"更多动作:新建 / 刷新 / 视图切换 / 后退前进(Alt+←/→/↑)"));
 			// 搜索框:空时给占位提示,有内容时右侧给"清除"(与浏览器/编辑器的搜索框一致)。
 			const Wui::WuiRect searchRect = m_SearchField->Rect();
 			if (m_Model.SearchEdit.empty())
@@ -986,7 +1218,28 @@ namespace World
 		}
 		bool treeRenameDrawn = false;
 		{
-			Wui::TreeViewResult tree = Wui::TreeView(ctx, treeRect, treeItems, 22.0f, m_Model.TreeScroll, theme);
+			// P4-UX14:传 id 之后树才有键盘(Tab 停在这里时 ↑↓←→/Enter 生效)。
+			Wui::TreeViewResult tree = Wui::TreeView(ctx, treeRect, treeItems, 22.0f, m_Model.TreeScroll, theme,
+				Wui::HashId("browser.tree"));
+			// 键盘导航:控件只报"想做什么",改模型仍走与鼠标同一条路径。
+			if (tree.KeyMoveTo >= 0 && tree.KeyMoveTo < static_cast<int>(visibleNodes.size()))
+			{
+				Navigate(visibleNodes[tree.KeyMoveTo]->Path);
+				m_Model.TreeScroll = std::max(0.0f, 22.0f * static_cast<float>(tree.KeyMoveTo) - treeRect.H * 0.5f);
+			}
+			else if (tree.KeyToggleExpand >= 0 && tree.KeyToggleExpand < static_cast<int>(visibleNodes.size()))
+			{
+				const std::filesystem::path& path = visibleNodes[tree.KeyToggleExpand]->Path;
+				if (treeItems[tree.KeyToggleExpand].Expanded)
+					m_Model.TreeOpen.erase(path);
+				else
+					m_Model.TreeOpen.insert(path);
+				SaveState();
+			}
+			else if (tree.KeyActivate >= 0 && tree.KeyActivate < static_cast<int>(visibleNodes.size()))
+			{
+				Navigate(visibleNodes[tree.KeyActivate]->Path);
+			}
 			// D10-6:树行右键 → 打开树菜单(命中由 TreeView 的 ContextClicked 提供,不自己写命中检测)。
 			if (tree.ContextClicked >= 0 && tree.ContextClicked < static_cast<int>(visibleNodes.size()))
 			{
@@ -1039,6 +1292,77 @@ namespace World
 		}
 
 		// ---- 树行右键菜单(D10-6:基础操作;每个菜单项带稳定无障碍 id,AI 可点) ----
+		// ---- `⋯` 工具栏菜单(P4-UX14):新建/刷新/视图切换/打开/导航都收在这里 ----
+		const Wui::WuiId toolbarPopup = Wui::HashId("browser.toolbar.menu");
+		if (m_ToolbarMenuOpen)
+		{
+			m_ToolbarMenuOpen = false;
+			ctx.CloseAllPopups();
+			m_ToolbarMenuPos = m_MoreButton
+				? glm::vec2 { m_MoreButton->Rect().X, m_MoreButton->Rect().Y + m_MoreButton->Rect().H + 2.0f }
+				: glm::vec2 { rect.X + 6.0f, rect.Y + 32.0f };
+			ctx.OpenPopup(toolbarPopup);
+		}
+		if (ctx.IsPopupOpen(toolbarPopup))
+		{
+			const float menuW = 236.0f;
+			const float itemH = 22.0f;
+			const int itemCount = 8;
+			const Wui::WuiRect menuRect { m_ToolbarMenuPos.x, m_ToolbarMenuPos.y, menuW,
+				itemH * static_cast<float>(itemCount) + 8.0f };
+			const auto goForward = [this]
+			{
+				if (m_Model.HistoryIndex >= static_cast<int>(m_Model.History.size()) - 1)
+					return;
+				++m_Model.HistoryIndex;
+				m_Model.Current = m_Model.History[m_Model.HistoryIndex];
+				m_Model.Selected.clear();
+				m_Model.LastSelected.clear();
+				Reveal(m_Model.Current);
+				m_Model.ListingDirty = true;
+				m_Model.ListingStamp = {};
+				SaveState();
+				if (m_Model.Search[0])
+					UpdateSearch();
+			};
+			ctx.PushOverlay();
+			Wui::DrawPanelSurface(ctx, menuRect, theme);
+			auto item = [&](int index, const std::string& label, bool enabled, std::function<void()> action)
+			{
+				const Wui::WuiRect row { menuRect.X + 4.0f,
+					menuRect.Y + 4.0f + itemH * static_cast<float>(index), menuW - 8.0f, itemH };
+				const Wui::WuiId itemId = Wui::HashId(("browser.toolbar.menu." + std::to_string(index)).c_str());
+				if (Wui::MenuItem(ctx, itemId, row, label, enabled, theme) && enabled)
+				{
+					action();
+					ctx.ClosePopup(toolbarPopup);
+				}
+			};
+			item(0, Wui::Tr("panel.content_browser.menu.new_folder", "New Folder"), true,
+				[this, &ctx] { CreateFolder(ctx); });
+			item(1, Wui::Tr("panel.content_browser.menu.new_material", "New Material"), true,
+				[this, &ctx] { CreateMaterial(ctx); });
+			item(2, Wui::Tr("panel.content_browser.refresh", "Refresh"), true, [this]
+				{
+					InvalidateContents();
+					if (m_Model.Search[0])
+						UpdateSearch();
+				});
+			item(3, m_Model.ListMode
+					? Wui::Tr("panel.content_browser.menu.to_grid", "View: Switch to Grid")
+					: Wui::Tr("panel.content_browser.menu.to_list", "View: Switch to List"),
+				true, [this] { m_Model.ListMode = !m_Model.ListMode; SaveState(); });
+			item(4, Wui::Tr("panel.content_browser.menu.reveal", "Open in Explorer"),
+				m_Model.Current != m_Model.Root, [this] { OpenFolderInExplorer(m_Model.Current); });
+			item(5, Wui::Tr("panel.content_browser.menu.back", "Back") + "   (Alt+←)",
+				m_Model.HistoryIndex > 0, [this] { GoBack(); });
+			item(6, Wui::Tr("panel.content_browser.menu.forward", "Forward") + "   (Alt+→)",
+				m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1, goForward);
+			item(7, Wui::Tr("panel.content_browser.menu.up", "Up") + "   (Alt+↑)",
+				m_Model.Current != m_Model.Root, [this] { GoUp(); });
+			ctx.PopOverlay();
+		}
+
 		const Wui::WuiId treePopup = Wui::HashId("browser.tree.context");
 		if (ctx.IsPopupOpen(treePopup) && !m_TreeMenuPath.empty())
 		{
@@ -1137,6 +1461,64 @@ namespace World
 			Wui::HighlightOutline(ctx, content, theme.Accent, 0.0f, 2.0f);
 		}
 
+		// ---- P4-UX14:内容区统一切片 ----
+		// 网格与列表共用同一份切片数据(图标 + 名称 + 类型/大小);排序与绘制都基于它。
+		// 排序状态走 ctx.Persist(与控件状态同一条路):0=名称 1=类型 2=大小,-1=未排序。
+		int& sortColumn = ctx.Persist<int>(Wui::HashId("browser.list.sort"), -1);
+		bool& sortAscending = ctx.Persist<bool>(Wui::HashId("browser.list.sort.asc"), true);
+		std::vector<BrowserSlice> slices;
+		slices.reserve(paths.size());
+		for (const std::filesystem::path& path : paths)
+		{
+			std::error_code dirError;
+			BrowserSlice slice;
+			slice.Path = path;
+			slice.IsDir = std::filesystem::is_directory(path, dirError);
+			slice.Name = path.filename().string();
+			const EditorAssetType type = DescribeAssetType(path, slice.IsDir);
+			slice.Type = type.Name;
+			slice.Extension = LowerExtension(path);
+			// 列表模式本来就要显示"大小"列:整表统计沿用旧行为;
+			// 网格模式只对**可见**切片按需 stat(见 RenderGridSlices),大目录不做全量 stat。
+			if (m_Model.ListMode)
+			{
+				slice.Size = slice.IsDir ? 0 : FileSize(path);
+				slice.SizeKnown = true;
+			}
+			slices.push_back(std::move(slice));
+		}
+
+		// 本次只排"面板内这一份显示顺序":m_Model.Listing 与磁盘顺序都不动;
+		// 搜索结果保持命中顺序,不参与排序(派工:只在 m_Model.Listing 上排序)。
+		if (m_Model.ListMode && !searching && sortColumn >= 0 && slices.size() > 1)
+		{
+			std::stable_sort(slices.begin(), slices.end(),
+				[&](const BrowserSlice& left, const BrowserSlice& right)
+				{
+					// 大小列:文件夹恒排前(升/降序都成立),只在同组内按字节数比较。
+					if (sortColumn == 2 && left.IsDir != right.IsDir)
+						return left.IsDir;
+					int order = 0;
+					if (sortColumn == 0)
+					{
+						// 名称 = 字典序(ASCII 大小写不敏感;全等时用原文做稳定补充)。
+						order = LowerAscii(left.Name).compare(LowerAscii(right.Name));
+						if (order == 0)
+							order = left.Name.compare(right.Name);
+					}
+					else if (sortColumn == 1)
+						order = left.Extension.compare(right.Extension);
+					else
+						order = left.Size < right.Size ? -1 : (left.Size > right.Size ? 1 : 0);
+					// 同键时按名称、再按完整路径收尾:顺序稳定、可复现(不依赖扫描顺序)。
+					if (order == 0)
+						order = LowerAscii(left.Name).compare(LowerAscii(right.Name));
+					if (order == 0)
+						order = left.Path.generic_string().compare(right.Path.generic_string());
+					return sortAscending ? order < 0 : order > 0;
+				});
+		}
+
 		bool itemRightClicked = false;
 		// D10:双击"进入文件夹/打开资产"必须**延迟到遍历结束**再执行 ——
 		// `paths` 是 m_Model.SearchResults 的引用(Navigate→UpdateSearch 会清空重填),
@@ -1170,13 +1552,16 @@ namespace World
 				}
 				else if (ctx.Input().Shift && !m_Model.LastSelected.empty())
 				{
-					auto start = std::find(paths.begin(), paths.end(), m_Model.LastSelected);
-					auto end = std::find(paths.begin(), paths.end(), path);
-					if (start != paths.end() && end != paths.end())
+					// 范围选择按**当前显示顺序**(列表排序后就是用户看到的顺序)取区间。
+					auto start = std::find_if(slices.begin(), slices.end(),
+						[&](const BrowserSlice& slice) { return slice.Path == m_Model.LastSelected; });
+					auto end = std::find_if(slices.begin(), slices.end(),
+						[&](const BrowserSlice& slice) { return slice.Path == path; });
+					if (start != slices.end() && end != slices.end())
 					{
 						if (std::distance(start, end) < 0) std::swap(start, end);
 						for (auto it = start; it <= end; ++it)
-							m_Model.Selected.insert(*it);
+							m_Model.Selected.insert(it->Path);
 					}
 				}
 				else
@@ -1238,78 +1623,11 @@ namespace World
 			}
 		}
 		else if (m_Model.ListMode)
-		{
-			const float rowH = 24;
-			Label(ctx, { content.X + 8, content.Y + 4 }, "Name / Type / Size", theme.TextMuted, 13.0f);
-			// 列表模式走 ListView 组件;拖拽/选中/重命名仍由面板处理——
-			// 组件返回每行矩形(ItemRects),面板据此调用既有 interact/RenderRenameField。
-			std::vector<Wui::ListViewItem> items;
-			items.reserve(paths.size());
-			for (const std::filesystem::path& path : paths)
-			{
-				std::error_code dirError;
-				const bool isDir = std::filesystem::is_directory(path, dirError);
-				std::string size = "-";
-				if (!isDir)
-					size = FormatBytes(static_cast<size_t>(FileSize(path)));
-				const std::filesystem::path rel = path.lexically_relative(m_Model.Root);
-				Wui::ListViewItem item;
-				item.Id = Wui::HashId(("browser.item." + rel.generic_string()).c_str());
-				item.Label = path.filename().string();
-				// P1b D5b:副标题带资产类型(模型/材质/场景…),不再只有大小 —— 用户一眼能分辨
-				// `.wmodel`(引擎模型)与 `.gltf`(源)这类同一家族的资产。
-				const EditorAssetType type = DescribeAssetType(path, isDir);
-				item.SubLabel = isDir ? std::string(type.Name) : (std::string(type.Name) + " · " + size);
-				item.Icon = isDir ? m_DirIconId : m_FileIconId;
-				item.Uv = { 0, 1, 1, -1 };
-				item.Selected = m_Model.Selected.find(path) != m_Model.Selected.end();
-				items.push_back(std::move(item));
-			}
-			const Wui::ListViewResult lv = Wui::ListView(ctx,
-				{ content.X, content.Y + 22, content.W, content.H - 22 }, items, rowH, m_Model.ContentScroll, theme);
-			for (size_t i = 0; i < paths.size() && i < lv.ItemRects.size(); ++i)
-			{
-				std::error_code dirError;
-				const bool isDir = std::filesystem::is_directory(paths[i], dirError);
-				interact(paths[i], lv.ItemRects[i], isDir);
-				// D10-6:从树菜单发起的重命名画在树行上,内容区不再重复画同 id 输入框。
-				if (!treeRenameDrawn && m_Model.RenameTarget == paths[i])
-					RenderRenameField(ctx, paths[i], { lv.ItemRects[i].X + 26, lv.ItemRects[i].Y + 2, 160, 20 }, theme);
-			}
-		}
+			// 列表:常驻表头(名称/类型/大小,点击列头在面板内排序)+ 图标/名称/类型/大小四列。
+			RenderListSlices(ctx, content, theme, slices, sortColumn, sortAscending, interact, treeRenameDrawn);
 		else
-		{
-			const float cell = 142;
-			// 网格模式走 GridView 组件(缩略图/选中/悬停由组件绘制);
-			// 拖拽/选中/重命名仍由面板处理(使用组件返回的 ItemRects)。
-			std::vector<Wui::GridViewItem> items;
-			items.reserve(paths.size());
-			for (const std::filesystem::path& path : paths)
-			{
-				std::error_code dirError;
-				const bool isDir = std::filesystem::is_directory(path, dirError);
-				const std::filesystem::path rel = path.lexically_relative(m_Model.Root);
-				Wui::GridViewItem item;
-				item.Id = Wui::HashId(("browser.cell." + rel.generic_string()).c_str());
-				item.Label = path.filename().string();
-				item.Icon = isDir ? m_DirIconId : m_FileIconId;
-				item.Uv = { 0, 1, 1, -1 };
-				item.Selected = m_Model.Selected.find(path) != m_Model.Selected.end();
-				items.push_back(std::move(item));
-			}
-			const Wui::GridViewResult gv = Wui::GridView(ctx, content, items, cell, cell + 30.0f,
-				m_Model.ContentScroll, theme);
-			for (size_t i = 0; i < paths.size() && i < gv.ItemRects.size(); ++i)
-			{
-				std::error_code dirError;
-				const bool isDir = std::filesystem::is_directory(paths[i], dirError);
-				interact(paths[i], gv.ItemRects[i], isDir);
-				// D10-6:同上,树行已画则不重复。
-				if (!treeRenameDrawn && m_Model.RenameTarget == paths[i])
-					RenderRenameField(ctx, paths[i],
-						{ gv.ItemRects[i].X, gv.ItemRects[i].Y + gv.ItemRects[i].H + 2.0f, 128, 22 }, theme);
-			}
-		}
+			// 网格:图标 → 名称 → 次级信息(扩展名 · 大小 / 文件夹),切片 ≥96×96。
+			RenderGridSlices(ctx, content, theme, slices, interact, treeRenameDrawn);
 
 		// D10:遍历结束后再执行"双击打开" —— 此时 Navigate→UpdateSearch 清空/重填
 		// SearchResults 不会再破坏正在遍历的容器(见 pendingOpen 处的说明)。

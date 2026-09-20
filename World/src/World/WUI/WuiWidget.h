@@ -67,6 +67,17 @@ namespace World::Wui
 	protected:
 		void MarkClean() { m_Dirty = false; }
 
+		// U2e:对象式控件的公共焦点处理 —— 在第 1 帧绘制时把这颗控件登记进
+		// WuiContext 的焦点表(登记顺序 = 绘制顺序 = 视觉顺序,Tab / Shift+Tab 由它统一排序),
+		// 并在自身绘制末尾画焦点环。
+		// 只做登记,不抢焦点:获得焦点仍靠点击或 Tab。Id()==0 的控件(未命名的叶控件)
+		// 完全不参与焦点体系,既有命令流逐字节不变。
+		// 派生类在各自 Paint 的开头调用 RegisterFocusable(),末尾调用 PaintFocusRing()。
+		// (刻意不叫 DrawFocusRing:成员名会遮蔽同命名空间的自由函数,虽然仍能编译,
+		//  但读代码的人容易以为它调的是自己。)
+		void RegisterFocusable(WuiPaintContext& context);
+		void PaintFocusRing(WuiPaintContext& context);
+
 		WuiRect m_Rect;
 		WuiId m_Id = 0;
 		std::weak_ptr<WuiWidget> m_Parent;

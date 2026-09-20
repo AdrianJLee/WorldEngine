@@ -178,9 +178,16 @@ namespace World::Wui
 		int Clicked = -1;                 // 点击行(调用方导航/选中)
 		int DoubleClicked = -1;
 		int ContextClicked = -1;
+		// U2e 键盘导航(id != 0 时才有意义):控件只报告"要做什么",不动调用方的模型 ——
+		// 当前项由调用方通过 items[i].Selected 传入,改选中/展开/激活都由调用方决定。
+		int KeyActivate = -1;      // Enter:激活当前项(打开/重命名等,语义由调用方定)
+		int KeyToggleExpand = -1;  // Left/Right:切换当前项展开态(调用方按 item.Expanded 处理)
+		int KeyMoveTo = -1;        // Up/Down/Home/End:把选中移到该下标(夹取到两端 | 跳过 Disabled)
 	};
 
 	// 目录/层级树:行 = 缩进 + 展开箭头 + 标题,自带滚动裁剪。
+	// id != 0 时整棵树进焦点表(Tab 可达)并画焦点环,同时吃 ↑/↓/←/→/Home/End/Enter 键,
+	// 结果写进 KeyMoveTo / KeyToggleExpand / KeyActivate(旧调用点不传 id,行为不变)。
 	TreeViewResult TreeView(WuiContext& ctx, const WuiRect& area, const std::vector<TreeViewItem>& items,
-		float rowHeight, float& scrollY, const WuiTheme& theme);
+		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id = 0);
 }
