@@ -190,6 +190,9 @@ namespace World
 			(28.0f + 26.0f + rowH) +                     // 标签页
 			(28.0f + 22.0f * 3.0f + gap + 22.0f * 2.0f + gap) + // 列表与树
 			(28.0f + 120.0f + gap + 10.0f) +             // 滚动区
+			(28.0f + 66.0f) +                            // Chrome:工具栏/面包屑/搜索
+			(28.0f + 116.0f + 34.0f) +                   // Chrome:列表/网格/树/标签条/右键菜单
+			(28.0f + 26.0f + gap + rowH + gap + rowH + gap + rowH + 18.0f + gap) + // Controls 2
 			40.0f;
 
 		Wui::BeginScrollArea(ctx, rect, contentHeight, m_ScrollY, theme);
@@ -449,6 +452,43 @@ namespace World
 				}
 				Wui::EndContextMenu(ctx, menuId, menuPanel, theme);
 			}
+		}
+
+		// ---- U2A 新控件:标签条 / 分段按钮 / 混合勾选 / 行内错误 ----
+		section("Controls 2");
+		{
+			int& tabIndex = ctx.Persist<int>(Wui::HashId("gallery.controls2.tab.state"), 0);
+			int closeRequest = -1;
+			if (Wui::TabBar(ctx, Wui::HashId("gallery.controls2.tabbar"), { x0, y, width * 0.5f, 26.0f },
+				{ "General", "Controls 2", "Stats" }, tabIndex, theme, &closeRequest))
+				m_LastAction = "TabBar: tab " + std::to_string(tabIndex);
+			if (closeRequest >= 0)
+				m_LastAction = "TabBar close requested: " + std::to_string(closeRequest);
+			y += 26.0f + gap;
+
+			int& segmented = ctx.Persist<int>(Wui::HashId("gallery.controls2.segment.state"), 0);
+			if (Wui::Segmented(ctx, Wui::HashId("gallery.controls2.segmented"), { x0, y, width * 0.5f, rowH },
+				{ "Left", "Center", "Right" }, segmented, theme))
+				m_LastAction = "Segmented: " + std::to_string(segmented);
+			y += rowH + gap;
+
+			// 混合 = 管辖的多个对象取值不同;点击后由调用方把 value 统一写给自己管辖的对象。
+			bool& mixedValue = ctx.Persist<bool>(Wui::HashId("gallery.controls2.mixed.value"), false);
+			bool& mixedFlag = ctx.Persist<bool>(Wui::HashId("gallery.controls2.mixed.flag"), true);
+			if (Wui::CheckboxMixed(ctx, Wui::HashId("gallery.controls2.mixed"), { x0, y, 240.0f, rowH },
+				"Mixed rows", mixedValue, mixedFlag, theme))
+			{
+				mixedFlag = false;
+				m_LastAction = "CheckboxMixed: all rows selected";
+			}
+			y += rowH + gap;
+
+			std::string& errorText = ctx.Persist<std::string>(Wui::HashId("gallery.controls2.field"), std::string());
+			const std::string error = errorText.empty() ? "Name is required" : std::string();
+			Wui::TextFieldEx(ctx, Wui::HashId("gallery.controls2.fieldex"), { x0, y, 260.0f, rowH }, errorText, theme, error);
+			Wui::Label(ctx, { x0 + 272.0f, y + 5.0f }, "inline error (clear the text to fix)",
+				theme.TextMuted, 13.0f);
+			y += rowH + 18.0f + gap;
 		}
 
 		Wui::EndScrollArea(ctx);

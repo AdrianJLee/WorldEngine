@@ -78,6 +78,8 @@ namespace World
 		bool m_CompletionStubFailed = false;
 		// W9:代码字号(会话内记忆)。Ctrl+滚轮 / Ctrl+± / Ctrl+0 调整。
 		float m_FontSize = 14.0f;
+		// P4-UX7:上一次套用过的偏好字号(偏好改了才覆盖会话内的 Ctrl+滚轮缩放)。
+		float m_PreferenceFontSize = -1.0f;
 		// W9.7:防抖语法检查与出错行标记(1-based;0 = 无错误)。
 		int m_ErrorLine = 0;
 		uint64_t m_SyntaxCheckedRevision = ~0ull;

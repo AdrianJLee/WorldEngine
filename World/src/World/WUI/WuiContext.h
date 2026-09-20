@@ -39,6 +39,14 @@ namespace World::Wui
 		float FPS = 0;
 	};
 
+	// 可聚焦控件的登记项(P4-UX6 焦点顺序表):控件在绘制时登记,登记顺序 = 视觉顺序。
+	// Rect 保留给宿主做"把获得焦点的控件滚进视野"之类后续用途,当前只参与登记。
+	struct WuiFocusable
+	{
+		WuiId Id = 0;
+		WuiRect Rect { 0, 0, 0, 0 };
+	};
+
 	enum class WuiDrawKind : uint8_t
 	{
 		Rect,
@@ -185,6 +193,19 @@ namespace World::Wui
 
 		void SetFocus(WuiId id) { m_Focus = id; }
 		WuiId Focus() const { return m_Focus; }
+		// ---- 焦点顺序与键盘导航(P4-UX6 / U2A)----
+		// 可聚焦控件在**绘制时**调用:注册顺序即视觉顺序,Tab / Shift+Tab 按它移动焦点、末尾回卷
+		// (回卷与"当前焦点不在表里"的取法复用 WuiCore 的 NextFocus)。
+		// BeginFrame 把上一帧的表挪走并清空本帧表 → 每帧重建;EndFrame 时"上一帧登记过、本帧没再登记"
+		// 的焦点 id 自动清除(面板关闭/控件消失不留幽灵焦点)。代码编辑器、视口这类由面板自管焦点的
+		// id 从不在表里,不受这条规则影响 —— 它们的 Tab/Escape 语义由自己处理。
+		void RegisterFocusable(WuiId id, const WuiRect& rect);
+		// ---- 滚动裁剪栈(U2A 补)----
+		// BeginScrollArea/EndScrollArea 压栈/出栈;焦点环画在 overlay 层(不受普通裁剪影响),
+		// 需要用它判断"这个矩形还看得见吗",否则滚出视口的控件会留下漂在外面的焦点环。
+		void PushClipRect(const WuiRect& rect);
+		void PopClipRect();
+		bool ClipAllows(const WuiRect& rect) const;
 		// W9 review:窗口/面板身份由宿主显式告知,不依赖仅在 --ai-control 下才启用的
 		// WuiAccessibility(否则日常会话里文本焦点登记的 Window/Panel 为空,快捷键路由错位)。
 		void SetWindowKey(std::string windowKey) { m_WindowKey = std::move(windowKey); }
@@ -267,6 +288,9 @@ namespace World::Wui
 	private:
 		// 带遮挡区判定的命中测试:IsHovered/IsClicked/DropTarget 都走它。
 		bool HitTest(const WuiRect& rect, glm::vec2 point) const;
+		// Tab / Shift+Tab / Escape 的焦点导航(在 BeginFrame 里、清空本帧登记之后调用)。
+		// textFocusActive = 上一帧结束时文本控件仍持有焦点 → 这些键全归文本控件,焦点表不抢。
+		void NavigateFocus(const WuiInputState& input, bool textFocusActive);
 		struct WuiStateBase
 		{
 			const char* TypeName = nullptr;
@@ -281,6 +305,9 @@ namespace World::Wui
 		std::vector<WuiStyle> m_StyleStack;
 		WuiStyleSheet m_Sheet;
 		WuiId m_Focus = 0;
+		std::vector<WuiFocusable> m_Focusables;     // 本帧(绘制中累加)
+		std::vector<WuiFocusable> m_FocusablesPrev; // 上一帧(Tab 顺序 + "消失即失焦"判定)
+		std::vector<WuiRect> m_ClipStack;           // 滚动区裁剪栈(空 = 不裁剪)
 		bool m_TextInputActive = false;
 		std::string m_WindowKey;
 		std::string m_PanelId;

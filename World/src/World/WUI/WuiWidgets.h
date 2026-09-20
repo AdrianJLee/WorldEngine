@@ -87,20 +87,45 @@ namespace World::Wui
 	// 文案约定(见 skill engine-ui-patterns):名称 + 一句用途 + 默认值/范围 + 生效时机 + 禁用原因。
 	void Tooltip(WuiContext& ctx, const WuiRect& hoverRect, const std::string& text);
 	void DrawTooltip(WuiContext& ctx, const WuiTheme& theme);
+	// P4-UX6 焦点环:id 是当前焦点控件时,按主题令牌画 1.5px 圆角描边(颜色 = theme.FocusRing)。
+	// 控件在**自身绘制末尾**调用;环走 overlay 命令层(与 tooltip 同一机制),因此后画的兄弟控件
+	// 不会盖住它。没有焦点时什么都不画,既有控件的命令流逐字节不变。
+	void DrawFocusRing(WuiContext& ctx, const WuiRect& rect, WuiId id, const WuiTheme& theme);
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	bool Toggle(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
+	// P4-UX6 单行标签条:每个标签等分 rect.W,活跃标签 = ActiveBg 填充 + 底部 2px Accent 下划线;
+	// 每个标签登记无障碍节点 kind="tab"、value=(active==i),可被 ui.invoke 点击。
+	// 返回值 = 本帧选中项是否变化;中键点击某个标签把它的下标写进 *closeRequested(可选),
+	// 控件**不自行关闭**(由调用方决定:关面板 / 提示未保存 / 忽略)。
+	bool TabBar(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::vector<std::string>& tabs,
+		int& active, const WuiTheme& theme, int* closeRequested = nullptr);
+	// P4-UX6 分段按钮(用法约定 2–4 项,代码对任意数量都按等分处理,空表直接返回 false):
+	// 同一圆角外壳内等分,选中项 ActiveBg + Accent 文本。无障碍节点 kind="segmented"(组,value=下标)
+	// + 子项 kind="segmented-option"(value=(selected==i))。返回值 = 选中项是否变化。
+	bool Segmented(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::vector<std::string>& options,
+		int& selected, const WuiTheme& theme);
 	// 值驱动的勾选框(供 Inspector 等绑定外部状态):状态写回 value;
 	// 返回值 = 本帧是否被点击改值(与 Combo/DragInt/DragFloat 同约定)。
 	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool& value, const WuiTheme& theme);
 	// 同上,带英文术语对照(中文界面下显示 "垂直同步  Vertical Sync")。
 	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::string& term,
 		bool& value, const WuiTheme& theme);
+	// P4-UX6 多选行的三态勾选:mixed=true 画水平短横(—)而不是勾;点击后按"全部选中"处理
+	// (mixed 是按值传入的,本控件内部按 mixed=false、value=true 绘制并返回 true,由调用方把 value
+	// 写给它管辖的多个对象)。无障碍节点 value = "mixed" / "true" / "false",kind 与 Checkbox 相同。
+	bool CheckboxMixed(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		bool& value, bool mixed, const WuiTheme& theme);
 	void SliderFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float min, float max, const WuiTheme& theme);
 	// 数值编辑:点击进入文本输入,按住左右拖动微调;Enter 提交,Escape 取消。
 	bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme);
 	bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int64_t min, int64_t max, const WuiTheme& theme);
 	// 文本输入:UTF-8 追加/退格;回车提交返回 true,Escape 失焦。
 	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme, bool* cancelledOut = nullptr);
+	// P4-UX6 带行内错误的文本字段:error 非空时描边用 theme.Danger,并在控件下方画一行 Caption
+	// 字号的 Danger 说明(调用方负责给这一行留高度;文案超宽按省略号裁剪)。
+	// 返回值与 TextField 相同(回车提交)。无障碍节点 value 追加 " error=<文本>"。
+	bool TextFieldEx(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
+		const WuiTheme& theme, const std::string& error);
 	void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme);
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);

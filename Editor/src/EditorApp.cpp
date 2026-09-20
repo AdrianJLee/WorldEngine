@@ -117,6 +117,17 @@ namespace World
 		World::Wui::SetLocalizationDirectory(std::filesystem::path(WLD_EDITOR_DIR) / "assets" / "localization");
 		World::Editor::EditorPreferences::Get().Load(
 			std::filesystem::path(WLD_EDITOR_DIR) / "editor-prefs.json");
+		// P4-UX7:AI 控制通道端口 —— 命令行 `--ai-control=<port>` 优先(自动化脚本),
+		// 没给命令行时用编辑器偏好里的端口(面板可见、重启生效)。
+		if (World::Editor::AiControlPort() <= 0)
+		{
+			const int preferencePort = World::Editor::EditorPreferences::Get().Data().AiControlPort;
+			if (preferencePort > 0)
+			{
+				World::Editor::SetAiControlPort(preferencePort);
+				WLD_CORE_INFO("AI 控制通道端口来自编辑器偏好: {0}", preferencePort);
+			}
+		}
 		return new EditorApp(context);
 	}
 }

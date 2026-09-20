@@ -74,12 +74,34 @@ namespace World::Wui
 				buffer.pop_back();
 		}
 
-		// 弹层条目的无障碍 id:由父控件 id + 选项下标派生(与 Wui::HashId 同一套 FNV-1a)。
-		// 不用选项文本参与哈希:同一下拉里"两个选项文案相同"时 id 仍各自独立。
+		// 子控件(弹层条目 / 标签 / 分段项)的无障碍 id:由父控件 id + 类别 + 下标派生
+		// (与 Wui::HashId 同一套 FNV-1a)。不用文本参与哈希:同名条目仍有各自独立的 id。
+		WuiId DerivedChildId(WuiId parent, const char* category, size_t index)
+		{
+			const std::string key = std::to_string(parent) + category + std::to_string(index);
+			return HashId(key.c_str());
+		}
+
+		// 弹层条目的无障碍 id:父控件 id + 选项下标(既有约定,逐字节保持 —— 脚本按它算 id)。
 		WuiId ComboOptionId(WuiId comboId, size_t index)
 		{
-			const std::string key = std::to_string(comboId) + ".option." + std::to_string(index);
-			return HashId(key.c_str());
+			return DerivedChildId(comboId, ".option.", index);
+		}
+
+		// 两点 + 线宽 → 一个任意四边形命令(勾、斜线这类轴对齐矩形覆盖不到的形状)。
+		// 顶点顺序遵循 WuiDrawKind::Quad 约定(左上/右上/右下/左下)。
+		void PushLineQuad(WuiContext& ctx, glm::vec2 from, glm::vec2 to, float thickness, const WuiColor& color)
+		{
+			const glm::vec2 delta = to - from;
+			const float length = glm::length(delta);
+			if (length <= 0.0001f)
+				return;
+			const glm::vec2 normal { -delta.y / length * thickness * 0.5f, delta.x / length * thickness * 0.5f };
+			WuiDrawCommand command;
+			command.Kind = WuiDrawKind::Quad;
+			command.Color = color;
+			command.Vertices = { from + normal, to + normal, to - normal, from - normal };
+			ctx.Commands().push_back(std::move(command));
 		}
 
 		// 文本按像素宽度截断(超宽补 '…')。语义与 WuiCodeEditor 的 EllipsizeToWidth 一致
@@ -287,31 +309,158 @@ namespace World::Wui
 		ctx.PopOverlay();
 	}
 
+	void DrawFocusRing(WuiContext& ctx, const WuiRect& rect, WuiId id, const WuiTheme& theme)
+	{
+		if (id == 0 || ctx.Focus() != id)
+			return;
+		// 滚出滚动区视口的控件不画环(overlay 不受 ClipPush 影响,必须自己问裁剪栈)。
+		if (!ctx.ClipAllows(rect))
+			return;
+		// 走 overlay 命令层:焦点环在全部普通控件之后绘制,后画的兄弟控件不会盖住它
+		// (与 tooltip 同一套机制,不新增层级)。1.5px 描边、圆角取主题令牌。
+		ctx.PushOverlay();
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.FocusRing, theme.Radius, 1.5f });
+		ctx.PopOverlay();
+	}
+
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme)
 	{
-		RegisterAccessNode(id, "button", rect, label, std::string());
+		const bool focused = ctx.Focus() == id;
+		RegisterAccessNode(id, "button", rect, label, std::string(), true, true, focused);
+		ctx.RegisterFocusable(id, rect);
 		const bool hovered = ctx.IsHovered(rect);
 		const bool pressed = ctx.Input().MouseDown[0] && hovered;
+		// U2A 键盘激活:焦点在按钮上时 Enter/Space = 点击一次(KeyPressed 只含本帧新按下,长按不连发)。
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
 		const WuiColor fill = hovered ? theme.ButtonHover : theme.ButtonBg;
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, pressed ? theme.Accent : theme.Text, 0, 1.0f, label, 15.0f, false });
-		(void)id;
-		return hovered && ctx.Input().MouseClicked[0];
+		DrawFocusRing(ctx, rect, id, theme);
+		return (hovered && ctx.Input().MouseClicked[0]) || keyActivated;
 	}
 
 	bool Toggle(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme)
 	{
 		bool& value = ctx.Persist<bool>(id, false);
-		if (ctx.IsClicked(rect))
+		const bool focused = ctx.Focus() == id;
+		// U2A 键盘激活:焦点在开关上时 Enter/Space = 切换。
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		if (ctx.IsClicked(rect) || keyActivated)
 			value = !value;
-		RegisterAccessNode(id, "toggle", rect, label, value ? "on" : "off");
+		RegisterAccessNode(id, "toggle", rect, label, value ? "on" : "off", true, true, focused);
+		ctx.RegisterFocusable(id, rect);
 
 		const WuiRect box { rect.X, rect.Y + (rect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
 		ctx.Commands().push_back({ WuiDrawKind::Rect, box, value ? theme.Accent : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box, theme.Border, 3.0f, 1.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 24.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, label, 15.0f, false });
+		DrawFocusRing(ctx, rect, id, theme);
 		return value;
+	}
+
+	bool TabBar(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::vector<std::string>& tabs,
+		int& active, const WuiTheme& theme, int* closeRequested)
+	{
+		if (closeRequested)
+			*closeRequested = -1;
+		if (id == 0 || tabs.empty())
+			return false;
+		if (active < 0 || active >= static_cast<int>(tabs.size()))
+			active = 0;
+		bool changed = false;
+		const float tabW = rect.W / static_cast<float>(tabs.size());
+		// 整条底边线:让标签条与下方内容有分界(取面板边框色,不新增样式常量)。
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y + rect.H - 1.0f, rect.W, 1.0f }, theme.Border, 0.0f });
+		for (size_t i = 0; i < tabs.size(); ++i)
+		{
+			const WuiRect tab { rect.X + tabW * static_cast<float>(i), rect.Y, tabW, rect.H };
+			const WuiId tabId = DerivedChildId(id, ".tab.", i);
+			const bool isActive = static_cast<int>(i) == active;
+			const bool hovered = ctx.IsHovered(tab);
+			RegisterAccessNode(tabId, "tab", tab, tabs[i], isActive ? "true" : "false");
+			ctx.RegisterFocusable(tabId, tab);
+			if (isActive)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, tab, theme.ActiveBg, 0.0f });
+			else if (hovered)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, tab, theme.HoverBg, 0.0f });
+			if (hovered)
+				ctx.SetCursor(WuiCursor::Hand);
+			const std::string text = EllipsizeToWidth(ctx, tabs[i], std::max(0.0f, tab.W - theme.Pad * 2.0f), theme.FontSizeBody);
+			if (!text.empty())
+				ctx.Commands().push_back({ WuiDrawKind::Text,
+					{ tab.X + theme.Pad, tab.Y + (tab.H - theme.FontSizeBody) * 0.5f, 0, 0 },
+					isActive ? theme.Text : theme.TextMuted, 0, 1.0f, text, theme.FontSizeBody, false });
+			if (isActive)
+			{
+				// 活跃标签:底部 2px 强调色下划线。
+				ctx.Commands().push_back({ WuiDrawKind::Rect,
+					{ tab.X, tab.Y + tab.H - 2.0f, tab.W, 2.0f }, theme.Accent, 0.0f });
+			}
+			DrawFocusRing(ctx, tab, tabId, theme);
+			const bool keyActivated = ctx.Focus() == tabId
+				&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+			if (ctx.IsClicked(tab) || keyActivated)
+			{
+				if (!isActive)
+				{
+					active = static_cast<int>(i);
+					changed = true;
+				}
+			}
+			else if (closeRequested && ctx.IsClicked(tab, 2))
+				*closeRequested = static_cast<int>(i);   // 中键:只上报请求,不自行关闭
+		}
+		return changed;
+	}
+
+	bool Segmented(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::vector<std::string>& options,
+		int& selected, const WuiTheme& theme)
+	{
+		if (options.empty())
+			return false;
+		if (selected < 0 || selected >= static_cast<int>(options.size()))
+			selected = 0;
+		bool changed = false;
+		// 组节点:组本身不是可点控件(interactive=false),脚本按 kind="segmented-option" 点具体分段。
+		RegisterAccessNode(id, "segmented", rect, std::string(), options[static_cast<size_t>(selected)], true, false);
+		// 同一圆角外壳:铺底 + 1px 描边,内部等分(选中项 ActiveBg + Accent 文本)。
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonBg, theme.Radius });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, theme.Radius, 1.0f });
+		const float optionW = rect.W / static_cast<float>(options.size());
+		for (size_t i = 0; i < options.size(); ++i)
+		{
+			const WuiRect option { rect.X + optionW * static_cast<float>(i), rect.Y, optionW, rect.H };
+			const WuiId optionId = DerivedChildId(id, ".segment.", i);
+			const bool isSelected = static_cast<int>(i) == selected;
+			const bool hovered = ctx.IsHovered(option);
+			RegisterAccessNode(optionId, "segmented-option", option, options[i], isSelected ? "true" : "false");
+			ctx.RegisterFocusable(optionId, option);
+			const WuiRect inner { option.X + 1.0f, option.Y + 1.0f,
+				std::max(0.0f, option.W - 2.0f), std::max(0.0f, option.H - 2.0f) };
+			if (isSelected)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, inner, theme.ActiveBg, std::max(0.0f, theme.Radius - 1.0f) });
+			else if (hovered)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, inner, theme.HoverBg, std::max(0.0f, theme.Radius - 1.0f) });
+			if (hovered)
+				ctx.SetCursor(WuiCursor::Hand);
+			const std::string text = EllipsizeToWidth(ctx, options[i], std::max(0.0f, option.W - theme.Pad * 2.0f), theme.FontSizeSmall);
+			if (!text.empty())
+				ctx.Commands().push_back({ WuiDrawKind::Text,
+					{ option.X + theme.Pad, option.Y + (option.H - theme.FontSizeSmall) * 0.5f, 0, 0 },
+					isSelected ? theme.Accent : theme.Text, 0, 1.0f, text, theme.FontSizeSmall, false });
+			DrawFocusRing(ctx, option, optionId, theme);
+			const bool keyActivated = ctx.Focus() == optionId
+				&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+			if ((ctx.IsClicked(option) || keyActivated) && !isSelected)
+			{
+				selected = static_cast<int>(i);
+				changed = true;
+			}
+		}
+		return changed;
 	}
 
 	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool& value, const WuiTheme& theme)
@@ -326,14 +475,19 @@ namespace World::Wui
 		// 导致 `if (Checkbox(...))` 的调用点在**勾选时每帧触发、取消勾选时反而不触发**)。
 		// 控件状态本身仍然写回 value 引用,并在无障碍节点里记录。
 		bool changed = false;
-		if (ctx.IsClicked(rect))
+		const bool focused = ctx.Focus() == id;
+		// U2A 键盘激活:焦点在勾选框上时 Enter/Space = 切换。
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		if (ctx.IsClicked(rect) || keyActivated)
 		{
 			value = !value;
 			changed = true;
 		}
 		// 无障碍节点带上英文术语:脚本/自动化在中文界面下也能按英文检索。
 		RegisterAccessNode(id, "checkbox", rect,
-			term.empty() ? label : (label + " (" + term + ")"), value ? "true" : "false");
+			term.empty() ? label : (label + " (" + term + ")"), value ? "true" : "false", true, true, focused);
+		ctx.RegisterFocusable(id, rect);
 		const WuiRect box { rect.X, rect.Y + (rect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
 		ctx.Commands().push_back({ WuiDrawKind::Rect, box, value ? theme.Accent : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box, theme.Border, 3.0f, 1.0f });
@@ -342,25 +496,84 @@ namespace World::Wui
 			theme.Text, 0, 1.0f, label, labelSize, false });
 		if (!term.empty())
 		{
-			// 英文术语对照:Caption/次要色;右侧放不下就省略。
+			// 英文术语对照:Caption/次要色。放不下时与 LabelWithTerm 同族降级 —— 先按可用宽度
+			// 省略号截断(而不是整段不画);连一个字符加省略号都放不下才不画。
 			const float termSize = theme.FontSizeCaption;
 			const float termX = rect.X + 24.0f + ctx.MeasureTextWidth(label, labelSize) + 6.0f;
-			if (termX + ctx.MeasureTextWidth(term, termSize) <= rect.X + rect.W)
+			const float termBudget = (rect.X + rect.W) - termX;
+			const std::string shownTerm = termBudget <= 0.0f
+				? std::string()
+				: (ctx.MeasureTextWidth(term, termSize) <= termBudget
+					? term
+					: EllipsizeToWidth(ctx, term, termBudget, termSize));
+			if (!shownTerm.empty())
 				ctx.Commands().push_back({ WuiDrawKind::Text, { termX, rect.Y + (rect.H - termSize) * 0.5f, 0, 0 },
-					theme.TextMuted, 0, 1.0f, term, termSize, false });
+					theme.TextMuted, 0, 1.0f, shownTerm, termSize, false });
 		}
-		(void)id;
+		DrawFocusRing(ctx, rect, id, theme);
+		return changed;
+	}
+
+	bool CheckboxMixed(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		bool& value, bool mixed, const WuiTheme& theme)
+	{
+		bool changed = false;
+		const bool focused = ctx.Focus() == id;
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		if (ctx.IsClicked(rect) || keyActivated)
+		{
+			// 多选行的语义:混合态被点击 = "全部选中"(value 写回,调用方再分发给它管辖的对象)。
+			mixed = false;
+			value = true;
+			changed = true;
+		}
+		// 无障碍节点:混合态 value="mixed",与 Checkbox 的 true/false 区分开(脚本据此判断三态)。
+		RegisterAccessNode(id, "checkbox", rect, label,
+			mixed ? "mixed" : (value ? "true" : "false"), true, true, focused);
+		ctx.RegisterFocusable(id, rect);
+		const WuiRect box { rect.X, rect.Y + (rect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
+		ctx.Commands().push_back({ WuiDrawKind::Rect, box, (value || mixed) ? theme.Accent : theme.ButtonBg, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box, theme.Border, 3.0f, 1.0f });
+		if (mixed)
+		{
+			// 混合:水平短横(—),而不是勾。
+			ctx.Commands().push_back({ WuiDrawKind::Rect,
+				{ box.X + 4.0f, box.Y + box.H * 0.5f - 1.0f, box.W - 8.0f, 2.0f }, theme.Text, 1.0f });
+		}
+		else if (value)
+		{
+			// 勾:两段斜线(Quad),不依赖字体里有没有 '✓' 字形。
+			PushLineQuad(ctx, { box.X + 4.0f, box.Y + 8.5f }, { box.X + 7.0f, box.Y + 11.5f }, 2.0f, theme.Text);
+			PushLineQuad(ctx, { box.X + 7.0f, box.Y + 11.5f }, { box.X + 12.0f, box.Y + 5.0f }, 2.0f, theme.Text);
+		}
+		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 24.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
+			theme.Text, 0, 1.0f, label, 15.0f, false });
+		DrawFocusRing(ctx, rect, id, theme);
 		return changed;
 	}
 
 	void SliderFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float min, float max, const WuiTheme& theme)
 	{
-		RegisterAccessNode(id, "slider", rect, std::string(), FloatToText(value));
+		// U2A 键盘微调步长:滑杆没有 drag 步长参数,按值域的 1%(0–1 滑杆 = 0.01/次)。
+		constexpr float kKeyboardStepFraction = 0.01f;
+		const bool focused = ctx.Focus() == id;
+		RegisterAccessNode(id, "slider", rect, std::string(), FloatToText(value), true, true, focused);
+		ctx.RegisterFocusable(id, rect);
 		const float range = std::max(0.0001f, max - min);
 		if (ctx.Input().MouseDown[0] && ctx.IsHovered(rect))
 		{
 			const float fraction = (ctx.Input().MousePos.x - rect.X) / std::max(1.0f, rect.W);
 			value = min + std::max(0.0f, std::min(1.0f, fraction)) * range;
+		}
+		// U2A 键盘微调:焦点在滑杆上时左右箭头 ±1% 值域,并夹在 [min,max] 内。
+		if (focused)
+		{
+			const float step = range * kKeyboardStepFraction;
+			if (ctx.WasKeyPressed(KeyCodes::Left))
+				value = std::max(min, value - step);
+			if (ctx.WasKeyPressed(KeyCodes::Right))
+				value = std::min(max, value + step);
 		}
 
 		const float trackH = 4.0f;
@@ -369,7 +582,7 @@ namespace World::Wui
 		const float fraction = (value - min) / range;
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, trackY, rect.W * fraction, trackH }, theme.Accent, 2.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X + rect.W * fraction - 4.0f, rect.Y + (rect.H - 12.0f) * 0.5f, 8.0f, 12.0f }, theme.Text, 2.0f });
-		(void)id;
+		DrawFocusRing(ctx, rect, id, theme);
 	}
 
 	namespace
@@ -560,7 +773,9 @@ namespace World::Wui
 
 	bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme)
 	{
-		RegisterAccessNode(id, "drag-float", rect, std::string(), FloatToText(value));
+		const bool focused = ctx.Focus() == id;
+		RegisterAccessNode(id, "drag-float", rect, std::string(), FloatToText(value), true, true, focused);
+		ctx.RegisterFocusable(id, rect);
 		WuiNumericState& state = ctx.Persist<WuiNumericState>(id, {});
 		bool changed = false;
 		const bool hovered = ctx.IsHovered(rect);
@@ -641,6 +856,23 @@ namespace World::Wui
 				ctx.SetCursor(WuiCursor::ResizeEW);
 		}
 
+		// U2A 键盘微调:焦点在字段上、且不在文本编辑态时,左右箭头 = 现有 drag 步长(±speed)。
+		// 编辑态下左右箭头归文本光标(EditUpdate 已消费),这里不抢。
+		if (focused && !state.Editing)
+		{
+			const float step = std::fabs(speed) > 0.0f ? std::fabs(speed) : 1.0f;
+			if (ctx.WasKeyPressed(KeyCodes::Left))
+			{
+				value = std::max(lo, value - step);
+				changed = true;
+			}
+			if (ctx.WasKeyPressed(KeyCodes::Right))
+			{
+				value = std::min(hi, value + step);
+				changed = true;
+			}
+		}
+
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, state.Editing ? theme.ButtonHover : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, (state.Editing || hovered || state.Dragging) ? theme.Accent : theme.Border, 3.0f, 1.0f });
 		std::string text;
@@ -655,12 +887,15 @@ namespace World::Wui
 		else if (state.Editing)
 			command.TextCursorByte = static_cast<int>(Utf8Offset(state.Buffer, state.Cursor));
 		ctx.Commands().push_back(std::move(command));
+		DrawFocusRing(ctx, rect, id, theme);
 		return changed;
 	}
 
 	bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int64_t min, int64_t max, const WuiTheme& theme)
 	{
-		RegisterAccessNode(id, "drag-int", rect, std::string(), std::to_string(value));
+		const bool focused = ctx.Focus() == id;
+		RegisterAccessNode(id, "drag-int", rect, std::string(), std::to_string(value), true, true, focused);
+		ctx.RegisterFocusable(id, rect);
 		WuiNumericState& state = ctx.Persist<WuiNumericState>(id, {});
 		bool changed = false;
 		const bool hovered = ctx.IsHovered(rect);
@@ -738,6 +973,21 @@ namespace World::Wui
 				ctx.SetCursor(WuiCursor::ResizeEW);
 		}
 
+		// U2A 键盘微调:焦点在字段上、且不在文本编辑态时,左右箭头 ±1(与拖拽的 1 单位/像素同量级)。
+		if (focused && !state.Editing)
+		{
+			if (ctx.WasKeyPressed(KeyCodes::Left))
+			{
+				value = std::max(lo, value - 1);
+				changed = true;
+			}
+			if (ctx.WasKeyPressed(KeyCodes::Right))
+			{
+				value = std::min(hi, value + 1);
+				changed = true;
+			}
+		}
+
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, state.Editing ? theme.ButtonHover : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, (state.Editing || hovered || state.Dragging) ? theme.Accent : theme.Border, 3.0f, 1.0f });
 		std::string text;
@@ -752,76 +1002,111 @@ namespace World::Wui
 		else if (state.Editing)
 			command.TextCursorByte = static_cast<int>(Utf8Offset(state.Buffer, state.Cursor));
 		ctx.Commands().push_back(std::move(command));
+		DrawFocusRing(ctx, rect, id, theme);
 		return changed;
+	}
+
+	namespace
+	{
+		// TextField / TextFieldEx 的共同实现(旧签名语义逐条不变,只是多了 error 参数):
+		// error 非空时描边用 theme.Danger,并把 "error=<文本>" 追加进无障碍节点 value(TextFieldEx 的契约)。
+		bool TextFieldCore(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
+			const WuiTheme& theme, bool* cancelledOut, const std::string& error)
+		{
+			RegisterAccessNode(id, "text-field", rect, std::string(),
+				error.empty() ? buffer : (buffer + " error=" + error), true, true, ctx.Focus() == id);
+			ctx.RegisterFocusable(id, rect);
+			WuiEditState& state = ctx.Persist<WuiEditState>(id, {});
+			// 仅在按下的那一帧初始化拖选锚点;按住期间持续更新选区。
+			if (ctx.Input().MouseClicked[0] && ctx.IsHovered(rect))
+			{
+				ctx.SetFocus(id);
+				const int clicked = CursorAtX(buffer, ctx.Input().MousePos.x - (rect.X + 6.0f), 15.0f);
+				state.Cursor = clicked;
+				state.DragAnchor = clicked;
+				state.MouseSelecting = true;
+				state.SelStart = -1;
+				state.SelEnd = -1;
+			}
+			if (state.MouseSelecting && ctx.Input().MouseDown[0])
+			{
+				const int current = CursorAtX(buffer, ctx.Input().MousePos.x - (rect.X + 6.0f), 15.0f);
+				state.Cursor = current;
+				if (current != state.DragAnchor)
+				{
+					state.SelStart = std::min(state.DragAnchor, current);
+					state.SelEnd = std::max(state.DragAnchor, current);
+				}
+				else
+				{
+					state.SelStart = -1;
+					state.SelEnd = -1;
+				}
+			}
+			if (state.MouseSelecting && ctx.Input().MouseReleased[0])
+				state.MouseSelecting = false;
+			const bool focused = ctx.Focus() == id;
+			if (focused) ctx.SetTextInputActive(true);
+			bool submitted = false;
+			if (focused)
+			{
+				bool cancelled = false;
+				if (EditUpdate(ctx, buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
+					ctx.SetFocus(0);
+				else if (ctx.Input().MouseClicked[0] && !ctx.IsHovered(rect))
+					ctx.SetFocus(0);
+				if (cancelledOut)
+					*cancelledOut = cancelled;
+				// 焦点字段只有在鼠标悬停其上时才显示 I 型光标。
+				if (ctx.IsHovered(rect))
+					ctx.SetCursor(WuiCursor::IBeam);
+			}
+			else if (cancelledOut)
+				*cancelledOut = false;
+			else if (ctx.IsHovered(rect))
+				ctx.SetCursor(WuiCursor::IBeam);
+			const bool hasSelection = focused && state.SelStart >= 0 && state.SelEnd > state.SelStart;
+			const std::string text = buffer;
+			WuiDrawCommand command { WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 15.0f, false };
+			if (hasSelection)
+			{
+				command.TextSelStart = static_cast<int>(Utf8Offset(buffer, state.SelStart));
+				command.TextSelEnd = static_cast<int>(Utf8Offset(buffer, state.SelEnd));
+			}
+			else if (focused)
+				command.TextCursorByte = static_cast<int>(Utf8Offset(buffer, state.Cursor));
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonBg, 3.0f });
+			// 有错误时描边用 Danger(焦点态也一样):行内校验错误比焦点色更需要被看到。
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
+				error.empty() ? (focused ? theme.Accent : theme.Border) : theme.Danger, 3.0f, focused ? 1.5f : 1.0f });
+			ctx.Commands().push_back(std::move(command));
+			DrawFocusRing(ctx, rect, id, theme);
+			return submitted;
+		}
 	}
 
 	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme, bool* cancelledOut)
 	{
-		RegisterAccessNode(id, "text-field", rect, std::string(), buffer, true, true, ctx.Focus() == id);
-		WuiEditState& state = ctx.Persist<WuiEditState>(id, {});
-		// 仅在按下的那一帧初始化拖选锚点;按住期间持续更新选区。
-		if (ctx.Input().MouseClicked[0] && ctx.IsHovered(rect))
+		// 旧签名语义不变:与 TextFieldEx 共用同一条实现,error 恒为空。
+		return TextFieldCore(ctx, id, rect, buffer, theme, cancelledOut, std::string());
+	}
+
+	bool TextFieldEx(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
+		const WuiTheme& theme, const std::string& error)
+	{
+		// 返回值与 TextField 相同(回车提交)。错误说明画在控件下方一行(Caption 字号、Danger 色),
+		// 超宽按省略号裁剪;调用方负责给这一行留出高度。
+		const bool submitted = TextFieldCore(ctx, id, rect, buffer, theme, nullptr, error);
+		if (!error.empty())
 		{
-			ctx.SetFocus(id);
-			const int clicked = CursorAtX(buffer, ctx.Input().MousePos.x - (rect.X + 6.0f), 15.0f);
-			state.Cursor = clicked;
-			state.DragAnchor = clicked;
-			state.MouseSelecting = true;
-			state.SelStart = -1;
-			state.SelEnd = -1;
+			const std::string shown = EllipsizeToWidth(ctx, error, rect.W, theme.FontSizeCaption);
+			if (!shown.empty())
+				ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X, rect.Y + rect.H + 2.0f, 0, 0 },
+					theme.Danger, 0, 1.0f, shown, theme.FontSizeCaption, false });
 		}
-		if (state.MouseSelecting && ctx.Input().MouseDown[0])
-		{
-			const int current = CursorAtX(buffer, ctx.Input().MousePos.x - (rect.X + 6.0f), 15.0f);
-			state.Cursor = current;
-			if (current != state.DragAnchor)
-			{
-				state.SelStart = std::min(state.DragAnchor, current);
-				state.SelEnd = std::max(state.DragAnchor, current);
-			}
-			else
-			{
-				state.SelStart = -1;
-				state.SelEnd = -1;
-			}
-		}
-		if (state.MouseSelecting && ctx.Input().MouseReleased[0])
-			state.MouseSelecting = false;
-		const bool focused = ctx.Focus() == id;
-		if (focused) ctx.SetTextInputActive(true);
-		bool submitted = false;
-		if (focused)
-		{
-			bool cancelled = false;
-			if (EditUpdate(ctx, buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
-				ctx.SetFocus(0);
-			else if (ctx.Input().MouseClicked[0] && !ctx.IsHovered(rect))
-				ctx.SetFocus(0);
-			if (cancelledOut)
-				*cancelledOut = cancelled;
-			// 焦点字段只有在鼠标悬停其上时才显示 I 型光标。
-			if (ctx.IsHovered(rect))
-				ctx.SetCursor(WuiCursor::IBeam);
-		}
-		else if (cancelledOut)
-			*cancelledOut = false;
-		else if (ctx.IsHovered(rect))
-			ctx.SetCursor(WuiCursor::IBeam);
-		const bool hasSelection = focused && state.SelStart >= 0 && state.SelEnd > state.SelStart;
-		const std::string text = buffer;
-		WuiDrawCommand command { WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 15.0f, false };
-		if (hasSelection)
-		{
-			command.TextSelStart = static_cast<int>(Utf8Offset(buffer, state.SelStart));
-			command.TextSelEnd = static_cast<int>(Utf8Offset(buffer, state.SelEnd));
-		}
-		else if (focused)
-			command.TextCursorByte = static_cast<int>(Utf8Offset(buffer, state.Cursor));
-		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonBg, 3.0f });
-		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, focused ? theme.Accent : theme.Border, 3.0f, focused ? 1.5f : 1.0f });
-		ctx.Commands().push_back(std::move(command));
 		return submitted;
 	}
+
 	void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme)
 	{
 		ctx.Commands().push_back({ WuiDrawKind::Image, rect, theme.Text, 0, 1.0f, "", 15.0f, false, textureId, uv });
@@ -830,8 +1115,11 @@ namespace World::Wui
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme)
 	{
+		const bool focused = ctx.Focus() == id;
 		RegisterAccessNode(id, "combo", rect, label,
-			(selected >= 0 && selected < static_cast<int>(options.size())) ? options[selected] : std::string());
+			(selected >= 0 && selected < static_cast<int>(options.size())) ? options[selected] : std::string(),
+			true, true, focused);
+		ctx.RegisterFocusable(id, rect);
 		const bool hovered = ctx.IsHovered(rect);
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, hovered ? theme.ButtonHover : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
@@ -845,8 +1133,11 @@ namespace World::Wui
 		const float caretY = rect.Y + rect.H * 0.5f - 3.0f;
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX, caretY, 7.0f, 1.5f }, theme.TextMuted, 1.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX + 1.5f, caretY + 3.0f, 4.0f, 1.5f }, theme.TextMuted, 1.0f });
+		DrawFocusRing(ctx, rect, id, theme);
 
-		if (ctx.IsClicked(rect))
+		// U2A 键盘:焦点在下拉触发器上时 Enter/Space = 点击一次(开/关弹层,与鼠标同一条路径)。
+		const bool keyToggle = focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		if (ctx.IsClicked(rect) || keyToggle)
 		{
 			if (ctx.IsPopupOpen(id))
 				ctx.ClosePopup(id);
@@ -909,8 +1200,11 @@ namespace World::Wui
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme)
 	{
 		// 触发器本身也可被 ui.invoke 点击(等价于点开下拉)。
-		RegisterAccessNode(id, "search-combo", rect, label,
-			(selected >= 0 && selected < static_cast<int>(options.size())) ? options[selected] : std::string());
+		const bool focused = ctx.Focus() == id;
+		const std::string current = (selected >= 0 && selected < static_cast<int>(options.size()))
+			? options[selected] : std::string();
+		RegisterAccessNode(id, "search-combo", rect, label, current, true, true, focused);
+		ctx.RegisterFocusable(id, rect);
 		// 注意:过滤器状态与 TextField 的编辑状态必须用**不同**的持久化 ID。
 		// 曾经两者共用 id ^ 0x5A17:Persist 的类型检查失败后仍按错误类型解释内存,
 		// 输入时 cursor 变成垃圾值 → 访问越界直接崩溃(World.Wui 单测可复现)。
@@ -924,14 +1218,21 @@ namespace World::Wui
 
 		// 未展开时显示当前选中项;展开时输入框承担过滤。
 		const WuiRect fieldRect { rect.X + 1.0f, rect.Y + 1.0f, rect.W - 24.0f, rect.H - 2.0f };
-		const std::string current = (selected >= 0 && selected < static_cast<int>(options.size()))
-			? options[selected] : std::string();
 		if (!open)
 			ctx.Commands().push_back({ WuiDrawKind::Text, { fieldRect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
 				theme.Text, 0, 1.0f, current, 15.0f, false });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + rect.W - 18.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
 			theme.TextMuted, 0, 1.0f, open ? "^" : "v", 14.0f, false });
+		DrawFocusRing(ctx, rect, id, theme);
 		if (ctx.IsClicked(rect) && !open)
+		{
+			filter.clear();
+			ctx.OpenPopup(id);
+			ctx.SetFocus(editId);
+		}
+		// U2A 键盘:焦点在触发器上、弹层未展开时 Enter/Space = 点开(与鼠标同一条路径 ——
+		// 打开后焦点交给弹层里的搜索框,后续输入/回车归它)。
+		else if (focused && !open && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space)))
 		{
 			filter.clear();
 			ctx.OpenPopup(id);
@@ -994,6 +1295,13 @@ namespace World::Wui
 			const int optionIndex = matches[matchIndex];
 			const WuiRect item { listRect.X, listRect.Y + rowH * static_cast<float>(row), listRect.W, rowH };
 			// 展开的候选项登记成可点节点:脚本先点开 search-combo,再按 label 点这一项。
+			// U2A:与 Combo 用同一条约定 —— id = ComboOptionId(父 id, 选项下标)、kind="combo-option",
+			// value = 该选项是否为当前值。上一条遗留项(可搜索下拉的条目对脚本不可见)由此补齐。
+			RegisterAccessNode(ComboOptionId(id, static_cast<size_t>(optionIndex)), "combo-option", item,
+				options[optionIndex], (selected == optionIndex) ? "true" : "false");
+			// 兼容既有端到端脚本:tools/codex/skills/worldengine-dev/scripts/verify-ai-control.py 按
+			// kind="combo-item" 检索候选项,而该脚本不在本任务的文件边界内,所以同一条目保留旧节点。
+			// 两个节点的矩形/标签一致,点击注入的坐标相同 → 走的是同一条命中路径。
 			const std::string itemKey = "combo-item:" + std::to_string(id) + ":" + std::to_string(optionIndex);
 			RegisterAccessNode(HashId(itemKey.c_str()),
 				"combo-item", item, options[optionIndex], std::string());
@@ -1051,12 +1359,20 @@ namespace World::Wui
 	bool TreeNode(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool leaf, const WuiTheme& theme)
 	{
 		bool& open = ctx.Persist<bool>(id, false);
-		if (ctx.IsClicked(rect))
+		const bool focused = ctx.Focus() == id;
+		// U2A 键盘:焦点在节点上时 Enter/Space = 展开/收起。
+		const bool keyToggle = focused && !leaf
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		if (ctx.IsClicked(rect) || keyToggle)
 			open = !leaf && !open;
-		RegisterAccessNode(id, "tree-node", rect, label, open ? "open" : "closed", true, !leaf);
+		RegisterAccessNode(id, "tree-node", rect, label, open ? "open" : "closed", true, !leaf, focused);
+		// 叶子不进 Tab 顺序:与无障碍节点的 interactive=!leaf 保持同一条规则。
+		if (!leaf)
+			ctx.RegisterFocusable(id, rect);
 		const std::string marker = leaf ? "  " : (open ? "- " : "+ ");
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 4.0f, rect.Y + 2.0f, 0, 0 }, theme.TextMuted, 0, 1.0f, marker, 14.0f, false });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 22.0f, rect.Y + 2.0f, 0, 0 }, theme.Text, 0, 1.0f, label, 14.0f, false });
+		DrawFocusRing(ctx, rect, id, theme);
 		return open;
 	}
 
@@ -1099,24 +1415,32 @@ namespace World::Wui
 
 	bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool enabled, const WuiTheme& theme)
 	{
-		RegisterAccessNode(id, "menu-item", rect, label, std::string(), enabled);
+		const bool focused = ctx.Focus() == id;
+		RegisterAccessNode(id, "menu-item", rect, label, std::string(), enabled, true, focused);
+		if (enabled)
+			ctx.RegisterFocusable(id, rect);
 		if (ctx.IsHovered(rect) && enabled)
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 0.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, enabled ? theme.Text : theme.TextMuted, 0, 1.0f, label, 15.0f, false });
-		(void)id;
-		return enabled && ctx.IsClicked(rect);
+		DrawFocusRing(ctx, rect, id, theme);
+		return enabled && (ctx.IsClicked(rect)
+			|| (focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))));
 	}
 
 	bool MenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool checked, bool enabled, const WuiTheme& theme)
 	{
-		RegisterAccessNode(id, "menu-item", rect, label, checked ? "checked" : "unchecked", enabled);
+		const bool focused = ctx.Focus() == id;
+		RegisterAccessNode(id, "menu-item", rect, label, checked ? "checked" : "unchecked", enabled, true, focused);
+		if (enabled)
+			ctx.RegisterFocusable(id, rect);
 		if (ctx.IsHovered(rect) && enabled)
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 0.0f });
 		// 复选风格(如 Window 菜单的可见性开关)显示 [x]/[ ];普通动作项走上面的重载。
 		const std::string text = std::string(checked ? "[x] " : "[ ] ") + label;
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, enabled ? theme.Text : theme.TextMuted, 0, 1.0f, text, 15.0f, false });
-		(void)id;
-		return enabled && ctx.IsClicked(rect);
+		DrawFocusRing(ctx, rect, id, theme);
+		return enabled && (ctx.IsClicked(rect)
+			|| (focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))));
 	}
 
 	bool BeginModal(WuiContext& ctx, WuiId id, const std::string& title, const glm::vec2& size, WuiRect* panel, const WuiTheme& theme)
@@ -1148,12 +1472,14 @@ namespace World::Wui
 			scrollY -= ctx.Input().Wheel * 40.0f;
 		scrollY = std::max(0.0f, std::min(scrollY, std::max(0.0f, contentHeight - viewport.H)));
 		ctx.Commands().push_back({ WuiDrawKind::ClipPush, viewport, theme.PanelBg });
+		ctx.PushClipRect(viewport);
 		return true;
 	}
 
 	void EndScrollArea(WuiContext& ctx)
 	{
 		ctx.Commands().push_back({ WuiDrawKind::ClipPop });
+		ctx.PopClipRect();
 	}
 
 	WuiRect TableCell(const WuiRect& table, const std::vector<float>& columns, size_t row, size_t column, float rowHeight)

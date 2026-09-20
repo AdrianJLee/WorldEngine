@@ -259,7 +259,13 @@ namespace World
 		// EditorLayer::OnKeyPressed 会认为"文本焦点一直活跃" → 引擎全局快捷键(Ctrl+S/Q/W/E/R、
 		// F5-F7…)全部被吞掉。隐藏 = 该窗口的键盘上下文不再成立,这里显式清掉。
 		if (hidden)
+		{
 			Wui::WuiTextFocus::Get().BeginContextFrame(&m_Context);
+			// P4-UX7:隐藏 = 不再渲染 → 该窗口上一帧登记的无障碍节点必须丢掉,
+			// 否则 ui.tree 会一直显示幽灵行,ui.invoke 还会把点击投给这个已经看不见的窗口
+			// (实测:挂靠到主窗口后,点"分类"会落到隐藏窗口的旧矩形上,主窗口那份纹丝不动)。
+			Wui::WuiAccessibility::Get().ClearWindow("float:" + m_Panel);
+		}
 		if (!m_Window)
 			return;
 		m_PressSeenInWindow = false;

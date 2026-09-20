@@ -21,6 +21,9 @@ namespace World::Wui
 		std::string Kind;         // button/slider/combo/text-field/menu-item/...
 		std::string Label;        // 人类可读名称(通常就是控件文字)
 		std::string Value;        // 当前值(数值/选项/文本)
+		// 悬停说明(P4-UX7):只能靠鼠标悬停看到的信息(用途/默认值/生效时机/禁用原因)
+		// 必须同时进节点 —— 脚本与读屏拿不到 tooltip 的话,设置类控件就是"不可读"的。
+		std::string Tooltip;
 		WuiRect Rect;             // 窗口客户区坐标
 		bool Enabled = true;
 		bool Focused = false;
@@ -45,6 +48,10 @@ namespace World::Wui
 		void BeginFrame(const std::string& windowKey, glm::vec2 clientSize = { 0.0f, 0.0f });
 		// 面板内容绘制前调用:此后登记的节点归属该面板(rect 为窗口客户区坐标)。
 		void SetPanel(const std::string& panelId);
+		// 丢弃某个窗口的全部节点(P4-UX7):独立窗口"隐藏复用"后不再渲染,它上一帧登记的
+		// 节点会一直留在树里 —— ui.tree 出现幽灵行,ui.invoke 会把点击投给已经不存在的窗口。
+		// 与 BeginFrame 的区别:不动"当前窗口/面板"状态,可以在任意时刻调用。
+		void ClearWindow(const std::string& windowKey);
 		// 控件绘制时调用(重复 id 以最后一次为准)。
 		void Register(const WuiAccessNode& node);
 

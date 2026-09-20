@@ -63,7 +63,7 @@ namespace World
 			{
 				using T = std::decay_t<decltype(item)>;
 				if constexpr (std::is_same_v<T, std::monostate>)
-					return "(none)";
+					return Wui::Tr("panel.properties.value_none", "(none)");
 				else if constexpr (std::is_same_v<T, bool>)
 					return item ? "true" : "false";
 				else if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t>
@@ -94,7 +94,7 @@ namespace World
 				else if constexpr (std::is_same_v<T, std::string>)
 					return item;
 				else
-					return "(...)";   // 对象/矩阵/四元数等:只读态给出占位,避免误导
+					return Wui::Tr("panel.properties.value_complex", "(...)");   // 对象/矩阵/四元数等:只读态给出占位,避免误导
 			}, value);
 		}
 
@@ -189,28 +189,46 @@ namespace World
 			return out;
 		}
 
-		// 组件分区标题 / "Add Component" 菜单项的显示文案(键用短类型名,标识仍用 schema->DisplayName)。
-		std::string SchemaComponentLabel(const Schema::TypeSchema& schema)
+		// 术语对照:中文界面下把英文术语以 Caption/次要色画在主文案之后(方案 §7.8);
+		// 无障碍节点 label 一律写成 "中文 (English)",id / 控件 hash / PropPath 不受影响。
+		std::string TermText(const Wui::LocalizedLabel& label)
 		{
-			return Wui::Tr("schema.component." + SchemaTypeKeyName(schema), schema.DisplayName);
+			return label.Term.empty() ? label.Text : label.Text + " (" + label.Term + ")";
+		}
+
+		// 组件分区标题 / "Add Component" 菜单项的显示文案(键用短类型名,标识仍用 schema->DisplayName)。
+		Wui::LocalizedLabel SchemaComponentLabel(const Schema::TypeSchema& schema)
+		{
+			return Wui::TrLabel("schema.component." + SchemaTypeKeyName(schema), schema.DisplayName);
 		}
 
 		// 字段标签显示文案:Meta.DisplayName 优先,空则人类可读化 C++ 字段名;
 		// 键分别用 DisplayName / 字段名(两者都是生成物里的稳定标识)。
-		std::string SchemaFieldLabel(const Schema::FieldSchema& field)
+		Wui::LocalizedLabel SchemaFieldLabel(const Schema::FieldSchema& field)
 		{
 			if (!field.Meta.DisplayName.empty())
-				return Wui::Tr("schema.field." + field.Meta.DisplayName, field.Meta.DisplayName);
-			return Wui::Tr("schema.field." + field.Name, HumanizeIdentifier(field.Name));
+				return Wui::TrLabel("schema.field." + field.Meta.DisplayName, field.Meta.DisplayName);
+			return Wui::TrLabel("schema.field." + field.Name, HumanizeIdentifier(field.Name));
 		}
 
 		// 自定义检查器按字段名取 schema 字段,与通用路径共用同一显示文案(找不到字段时仍可读)。
-		std::string SchemaFieldLabel(const Schema::TypeSchema& schema, const std::string& fieldName)
+		Wui::LocalizedLabel SchemaFieldLabel(const Schema::TypeSchema& schema, const std::string& fieldName)
 		{
 			for (const Schema::FieldSchema& field : schema.Fields)
 				if (field.Name == fieldName)
 					return SchemaFieldLabel(field);
-			return Wui::Tr("schema.field." + fieldName, HumanizeIdentifier(fieldName));
+			return Wui::TrLabel("schema.field." + fieldName, HumanizeIdentifier(fieldName));
+		}
+
+		// 自定义检查器的枚举 → 显示文案(下拉选项与只读值共用):键 panel.properties.camera.<name>;
+		// 写回相机的仍是 schema 枚举 raw 值 —— 枚举名只用来查显示文案,不参与任何比较。
+		std::string CameraProjectionLabel(const std::string& enumName)
+		{
+			if (enumName == "Perspective")
+				return Wui::Tr("panel.properties.camera.perspective", "Perspective");
+			if (enumName == "Orthographic")
+				return Wui::Tr("panel.properties.camera.orthographic", "Orthographic");
+			return enumName;   // 未知枚举名原样显示,不猜翻译
 		}
 
 		Wui::WuiRect ComponentRect(const Wui::WuiRect& rect, int index, float height)
@@ -226,9 +244,12 @@ namespace World
 
 		// 自定义检查器的 Vec3 行(度/单位由调用方处理),返回本帧是否有编辑。
 		bool DrawVec3Row(Wui::WuiContext& ctx, const std::string& baseId, const Wui::WuiRect& row,
-			const std::string& label, glm::vec3& value, const Wui::WuiTheme& theme, bool reachable)
+			const Wui::LocalizedLabel& label, glm::vec3& value, const Wui::WuiTheme& theme, bool reachable)
 		{
-			Label(ctx, { row.X + 4, row.Y + 3 }, label, theme.TextMuted, 13.0f);
+			// 术语对照的文本预算 = 本行真实标签列宽(控件列起点 - 标签起点),窄处自动省略。
+			const float labelBudget = std::min(140.0f, row.W * 0.45f) - 4.0f;
+			const std::string labelText = TermText(label);
+			Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f, theme, labelBudget);
 			const Wui::WuiRect ctrl { row.X + std::min(140.0f, row.W * 0.45f), row.Y + 1,
 				row.W - std::min(140.0f, row.W * 0.45f) - 4, 20 };
 			static const char* const kSuffix[3] = { ".x", ".y", ".z" };
@@ -245,31 +266,33 @@ namespace World
 					changed = true;
 				}
 				RegisterNode(Wui::HashId((baseId + kSuffix[c]).c_str()), "drag-float", slot,
-					label + "." + kShort[c], FormatFloatText(component), reachable);
+					labelText + "." + kShort[c], FormatFloatText(component), reachable);
 			}
 			return changed;
 		}
 
 		// 浮点行(带范围;无范围时用 1/-1 哨兵,与 schema 字段路径一致)。
 		bool DrawFloatRow(Wui::WuiContext& ctx, const std::string& idText, const Wui::WuiRect& row,
-			const std::string& label, float& value, float lo, float hi, const Wui::WuiTheme& theme, bool reachable)
+			const Wui::LocalizedLabel& label, float& value, float lo, float hi, const Wui::WuiTheme& theme, bool reachable)
 		{
-			Label(ctx, { row.X + 4, row.Y + 3 }, label, theme.TextMuted, 13.0f);
+			const float labelBudget = std::min(140.0f, row.W * 0.45f) - 4.0f;
+			Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f, theme, labelBudget);
 			const Wui::WuiRect ctrl { row.X + std::min(140.0f, row.W * 0.45f), row.Y + 1,
 				row.W - std::min(140.0f, row.W * 0.45f) - 4, 20 };
 			const float before = value;
 			Wui::DragFloat(ctx, Wui::HashId(idText.c_str()), ctrl, value, 0.01f, lo, hi, theme);
-			RegisterNode(Wui::HashId(idText.c_str()), "drag-float", ctrl, label, FormatFloatText(value), reachable);
+			RegisterNode(Wui::HashId(idText.c_str()), "drag-float", ctrl, TermText(label), FormatFloatText(value), reachable);
 			return value != before;
 		}
 
 		// 只读行(登记 properties.<...> 文本节点,enabled=false,不可点击)。
 		void DrawReadOnlyRow(Wui::WuiContext& ctx, const std::string& idText, const Wui::WuiRect& row,
-			const std::string& label, const std::string& value, const Wui::WuiTheme& theme)
+			const Wui::LocalizedLabel& label, const std::string& value, const Wui::WuiTheme& theme)
 		{
-			Label(ctx, { row.X + 4, row.Y + 3 }, label, theme.TextMuted, 13.0f);
+			const float labelBudget = std::min(140.0f, row.W * 0.45f) - 4.0f;
+			Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f, theme, labelBudget);
 			Label(ctx, { row.X + std::min(140.0f, row.W * 0.45f), row.Y + 3 }, value, theme.Text, 13.0f);
-			RegisterNode(Wui::HashId(idText.c_str()), "text", row, label, value, false);
+			RegisterNode(Wui::HashId(idText.c_str()), "text", row, TermText(label), value, false);
 		}
 
 		std::string ScriptStateName(ScriptInstanceState state)
@@ -284,6 +307,15 @@ namespace World
 				case ScriptInstanceState::Faulted: return "Faulted";
 				default: return "?";
 			}
+		}
+
+		// 状态名显示文案(仅用于显示):拼接结果不参与任何比较/存储,id/hash 也不用状态文本。
+		std::string ScriptStateLabel(ScriptInstanceState state)
+		{
+			const std::string name = ScriptStateName(state);
+			if (name == "?")
+				return name;   // 未知状态保持原占位符
+			return Wui::Tr("panel.properties.script_state." + name, name);
 		}
 
 		// 面板里诊断/错误只显示第一行并截断;完整文本由 AI 通道 script.status 提供。
@@ -312,7 +344,8 @@ namespace World
 		Entity entity = host.GetSelectedEntity();
 		if (!entity.IsValid() || entity.GetScene() != host.GetActiveScene().get())
 		{
-			Label(ctx, { rect.X + 8, rect.Y + 8 }, "No entity selected", theme.TextMuted, 14.0f);
+			Label(ctx, { rect.X + 8, rect.Y + 8 },
+				Wui::Tr("panel.properties.no_entity_selected", "No entity selected"), theme.TextMuted, 14.0f);
 			return;
 		}
 		Scene* scene = entity.GetScene();
@@ -342,7 +375,8 @@ namespace World
 		}
 
 		const Wui::WuiRect addButton { rect.X + 8, rect.Y + (m_ReadOnly ? 30.0f : 8.0f), 140, 24 };
-		if (!m_ReadOnly && Button(ctx, Wui::HashId("prop.add"), addButton, "Add Component", theme))
+		if (!m_ReadOnly && Button(ctx, Wui::HashId("prop.add"), addButton,
+			Wui::Tr("panel.properties.add_component", "Add Component"), theme))
 			ctx.OpenPopup(Wui::HashId("prop.add.popup"));
 
 		const Wui::WuiId addPopup = Wui::HashId("prop.add.popup");
@@ -360,7 +394,7 @@ namespace World
 				const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };
 				// 菜单项 id 仍是 prop.add.<DisplayName>(稳定标识);只有菜单文案走本地化。
 				if (MenuItem(ctx, Wui::HashId(("prop.add." + candidates[i]->DisplayName).c_str()), item,
-					SchemaComponentLabel(*candidates[i]), true, theme))
+					SchemaComponentLabel(*candidates[i]).Text, true, theme))
 				{
 					const uint32_t componentId = candidates[i]->Storage->ComponentId;
 					const entt::entity handle = entity;
@@ -457,11 +491,13 @@ namespace World
 			const float rowY = contentRect.Y + sectionY;
 			const Wui::WuiRect header { contentRect.X, rowY, contentRect.W, kSectionHeader };
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, header, open ? Wui::WuiColor { 0.27f, 0.28f, 0.31f, 1 } : Wui::WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 2.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { header.X + 6, header.Y + 3, 0, 0 },
-				theme.Text, 0, 1.0f, (open ? "- " : "+ ") + SchemaComponentLabel(*schema), 14.0f, false });
-			// 无障碍 id / 操作记录仍用 section.Title(=<DisplayName>),只有标题文案本地化。
+			// 标题 = 主文案(中文界面为译文)+ 英文术语(Caption/次要色,窄处自动省略);前缀仍是展开标记。
+			const Wui::LocalizedLabel sectionLabel = SchemaComponentLabel(*schema);
+			Wui::LabelWithTerm(ctx, { header.X + 6, header.Y + 3 }, (open ? "- " : "+ ") + sectionLabel.Text,
+				sectionLabel.Term, theme.Text, 14.0f, theme, header.W - 12.0f);
+			// 无障碍 id / 操作记录仍用 section.Title(=<DisplayName>),节点 id 逐字节不变。
 			const std::string headerId = "properties.section." + section.Title;
-			RegisterNode(Wui::HashId(headerId.c_str()), "button", header, headerId, open ? "open" : "closed");
+			RegisterNode(Wui::HashId(headerId.c_str()), "button", header, TermText(sectionLabel), open ? "open" : "closed");
 			if (ctx.IsClicked(header))
 			{
 				open = !open;
@@ -551,6 +587,8 @@ namespace World
 		float y = 0;
 		bool changed = false;
 		const float labelWidth = std::min(140.0f, rect.W * 0.45f);
+		// 术语对照的文本预算:标签从 +4 起画,到控件列起点为止(窄处自动省略,不压控件)。
+		const float labelBudget = labelWidth - 4.0f;
 		// 稳定无障碍 id 契约:properties.<TypeDisplayName>.<字段名>(脚本用同样字符串算 HashId)。
 		const auto propId = [](const std::string& type, const std::string& field)
 		{ return "properties." + type + "." + field; };
@@ -572,7 +610,9 @@ namespace World
 			const Wui::WuiRect ctrl { row.X + labelWidth, row.Y + 1, row.W - labelWidth - 4, 20 };
 			// 显示文案:Meta.DisplayName 优先,空则人类可读化 C++ 字段名后查目录;
 			// 行 id(fid / propId)与持久化仍用 field.Name,不受影响。
-			const std::string label = SchemaFieldLabel(field);
+			const Wui::LocalizedLabel label = SchemaFieldLabel(field);
+			// 无障碍节点 label 按约定写成 "中文 (English)";显示值/句子本身不加英文。
+			const std::string labelText = TermText(label);
 
 			if (field.K == Schema::Kind::Object)
 			{
@@ -582,7 +622,7 @@ namespace World
 				// UUID 等身份标识只读展示,不提供编辑控件。
 				if (nested && nestedInstance && (nested->Id.Name == "World::UUID" || nested->DisplayName == "UUID"))
 				{
-					std::string display = "(invalid)";
+					std::string display = Wui::Tr("panel.properties.invalid_value", "(invalid)");
 					if (!nested->Fields.empty() && nested->Fields[0].Get)
 					{
 						const Schema::Value inner = nested->Fields[0].Get(nestedInstance);
@@ -593,17 +633,19 @@ namespace World
 							display = buffer;
 						}
 					}
-					Label(ctx, { row.X + 4, row.Y + 3 }, label, theme.TextMuted, 13.0f);
+					Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f,
+						theme, labelBudget);
 					Label(ctx, { ctrl.X, row.Y + 3 }, display, theme.Text, 13.0f);
-					RegisterNode(Wui::HashId(idText.c_str()), "text", row, label, display, false);
+					RegisterNode(Wui::HashId(idText.c_str()), "text", row, labelText, display, false);
 					y += 20;
 					continue;
 				}
 				bool& open = ctx.Persist<bool>(fid, false);
 				if (ctx.IsClicked(row))
 					open = !open;
-				Label(ctx, { row.X + 4, row.Y + 3 }, (open ? "- " : "+ ") + label, theme.Text, 13.0f);
-				RegisterNode(Wui::HashId(idText.c_str()), "button", row, label, open ? "open" : "closed", reachable(row));
+				Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, (open ? "- " : "+ ") + label.Text, label.Term,
+					theme.Text, 13.0f, theme, labelBudget);
+				RegisterNode(Wui::HashId(idText.c_str()), "button", row, labelText, open ? "open" : "closed", reachable(row));
 				y += 20;
 				if (open && nested && nestedInstance)
 					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u, { row.X + 10, row.Y + 20, row.W - 10, 0 },
@@ -615,13 +657,15 @@ namespace World
 			{
 				const std::string idText = propId(typeName, field.Name);
 				// 只读也要显示"值":否则 Play/Simulate 下属性面板只剩字段名,看起来像"什么都不显示"。
-				std::string text = label;
+				std::string text = label.Text;
 				if (field.Get)
 					text += ": " + FormatReadOnlyValue(field, field.Get(instance));
-				Label(ctx, { row.X + 4, row.Y + 3 }, text, theme.TextMuted, 13.0f);
+				// 值行整行可用;术语作为行尾 Caption 对照(句子/值本身不加英文)。
+				Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, text, label.Term, theme.TextMuted, 13.0f, theme,
+					row.W - 8.0f);
 				// 只读字段登记为不可交互文本节点:ui.tree 能断言"可见但禁用"。
 				RegisterNode(Wui::HashId(idText.c_str()), "text", row,
-					label, field.Get ? FormatReadOnlyValue(field, field.Get(instance)) : std::string(),
+					labelText, field.Get ? FormatReadOnlyValue(field, field.Get(instance)) : std::string(),
 					false);
 				y += 20;
 				continue;
@@ -630,8 +674,9 @@ namespace World
 			// 交互字段:标签登记为静态节点(不可点),控件本体按真实 kind 登记
 			// (脚本用 properties.<Type>.<Field> 直接 ui.invoke)。
 			const std::string idText = propId(typeName, field.Name);
-			RegisterNode(Wui::HashId(idText.c_str()), "label", row, label, std::string(), false);
-			Label(ctx, { row.X + 4, row.Y + 3 }, label, theme.TextMuted, 13.0f);
+			RegisterNode(Wui::HashId(idText.c_str()), "label", row, labelText, std::string(), false);
+			Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f,
+				theme, labelBudget);
 			Schema::Value value = field.Get(instance);
 			bool fieldChanged = false;
 			switch (field.K)
@@ -643,7 +688,7 @@ namespace World
 					Checkbox(ctx, fid, ctrl, "", b, theme);
 					fieldChanged = b != before;
 					if (fieldChanged) value = b;
-					RegisterNode(Wui::HashId(idText.c_str()), "checkbox", ctrl, label, b ? "true" : "false", reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "checkbox", ctrl, labelText, b ? "true" : "false", reachable(ctrl));
 					break;
 				}
 				case Schema::Kind::Int8:
@@ -666,7 +711,7 @@ namespace World
 						else if (field.K == Schema::Kind::Int32) value = static_cast<int32_t>(raw);
 						else value = raw;
 					}
-					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, label, std::to_string(raw), reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, labelText, std::to_string(raw), reachable(ctrl));
 					break;
 				}
 				case Schema::Kind::UInt8:
@@ -690,7 +735,7 @@ namespace World
 						else if (field.K == Schema::Kind::UInt32) value = static_cast<uint32_t>(signedRaw);
 						else value = static_cast<uint64_t>(signedRaw);
 					}
-					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, label, std::to_string(signedRaw), reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, labelText, std::to_string(signedRaw), reachable(ctrl));
 					break;
 				}
 				case Schema::Kind::Float:
@@ -703,7 +748,7 @@ namespace World
 					DragFloat(ctx, fid, ctrl, f, 0.01f, lo, hi, theme);
 					fieldChanged = f != before;
 					if (fieldChanged) value = field.K == Schema::Kind::Float ? Schema::Value(f) : Schema::Value(static_cast<double>(f));
-					RegisterNode(Wui::HashId(idText.c_str()), "drag-float", ctrl, label, FormatFloatText(f), reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "drag-float", ctrl, labelText, FormatFloatText(f), reachable(ctrl));
 					break;
 				}
 				case Schema::Kind::Vec2:
@@ -730,7 +775,7 @@ namespace World
 						const std::string componentId = idText + kSuffix[c];
 						const Wui::WuiRect slotRect { ctrl.X + slot * static_cast<float>(c), ctrl.Y, slot - 2, ctrl.H };
 						RegisterNode(Wui::HashId(componentId.c_str()), "drag-float", slotRect,
-							label + "." + kShort[c], FormatFloatText(f), reachable(slotRect));
+							labelText + "." + kShort[c], FormatFloatText(f), reachable(slotRect));
 					}
 					break;
 				}
@@ -775,7 +820,7 @@ namespace World
 					// 本次点击进入编辑
 					if (!state.Editing && ctx.Focus() == fid)
 						state.Editing = true;
-					RegisterNode(Wui::HashId(idText.c_str()), "text-field", ctrl, label, current, reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "text-field", ctrl, labelText, current, reachable(ctrl));
 					break;
 				}
 				case Schema::Kind::Enum:
@@ -797,15 +842,17 @@ namespace World
 						fieldChanged = selected != before;
 						if (fieldChanged)
 							value = es->IsSigned ? Schema::Value(es->Values[selected].second) : Schema::Value(static_cast<uint64_t>(es->Values[selected].second));
-						RegisterNode(Wui::HashId(idText.c_str()), "combo", ctrl, label,
+						RegisterNode(Wui::HashId(idText.c_str()), "combo", ctrl, labelText,
 							(selected >= 0 && selected < static_cast<int>(names.size())) ? names[selected] : std::string(),
 							reachable(ctrl));
 					}
 					break;
 				}
 				default:
-					Label(ctx, { ctrl.X, ctrl.Y + 3 }, "(unsupported)", theme.TextMuted, 12.0f);
-					RegisterNode(Wui::HashId(idText.c_str()), "text", row, label, "(unsupported)", false);
+					Label(ctx, { ctrl.X, ctrl.Y + 3 },
+						Wui::Tr("panel.properties.unsupported", "(unsupported)"), theme.TextMuted, 12.0f);
+					RegisterNode(Wui::HashId(idText.c_str()), "text", row, labelText,
+						Wui::Tr("panel.properties.unsupported", "(unsupported)"), false);
 					break;
 			}
 			if (fieldChanged)
@@ -845,6 +892,8 @@ namespace World
 			Schema::SchemaRegistry& schemas = scene->GetContext().Schemas();
 			std::vector<std::string> names;    // 原始脚本名:匹配与写回都用它(稳定标识)
 			std::vector<std::string> labels;   // 下拉显示文案(可本地化)
+			// 下拉 label 只进无障碍节点(Combo 只画当前值):按术语约定写成 "脚本 (Script)"。
+			const Wui::LocalizedLabel scriptFieldLabel = Wui::TrLabel("panel.properties.native_script", "Script");
 			std::vector<const Schema::TypeSchema*> scripts = schemas.List(Schema::TypeCategory::Script);
 			int selected = -1;
 			for (size_t i = 0; i < scripts.size(); ++i)
@@ -854,7 +903,8 @@ namespace World
 				if (scripts[i]->DisplayName == script->ScriptName)
 					selected = static_cast<int>(i);
 			}
-			if (Combo(ctx, base ^ 1u, { rect.X, rect.Y, rect.W, 22 }, "Script", labels, selected, theme) && selected >= 0)
+			if (Combo(ctx, base ^ 1u, { rect.X, rect.Y, rect.W, 22 }, TermText(scriptFieldLabel), labels, selected, theme)
+				&& selected >= 0)
 			{
 				if (scripts[selected]->Script)
 					scripts[selected]->Script->Bind(static_cast<void*>(script));
@@ -864,7 +914,9 @@ namespace World
 				m_Host.MarkDocumentDirty();
 			}
 			float y = 26;
-			Label(ctx, { rect.X, rect.Y + y }, "state: " + ScriptStateName(script->State), theme.TextMuted, 13.0f);
+			Label(ctx, { rect.X, rect.Y + y },
+				Wui::Tr("panel.properties.script_state", "state") + ": " + ScriptStateLabel(script->State),
+				theme.TextMuted, 13.0f);
 			y += 18;
 			if (!script->LastError.empty())
 			{
@@ -901,29 +953,34 @@ namespace World
 			// 可被 AI 通道 ui.invoke 无鼠标驱动)。
 			const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
 			float y = 26;
-			std::string state = "state: " + std::string(ScriptStateName(script->State));
-			state += script->IsLoaded ? " (loaded)" : " (not loaded)";
+			// 状态行只走 Tr(状态词,不加英文术语);状态名/前后缀都不参与比较或存储。
+			std::string state = Wui::Tr("panel.properties.script_state", "state") + ": " + ScriptStateLabel(script->State);
+			state += " " + (script->IsLoaded
+				? Wui::Tr("panel.properties.script_loaded", "(loaded)")
+				: Wui::Tr("panel.properties.script_not_loaded", "(not loaded)"));
 			Label(ctx, { rect.X, rect.Y + y }, state, theme.TextMuted, 13.0f);
 			y += 18;
 			if (!script->ReloadDiagnostic.empty())
 			{
-				Label(ctx, { rect.X, rect.Y + y }, "[reload] " + TruncateForPanel(script->ReloadDiagnostic),
+				Label(ctx, { rect.X, rect.Y + y },
+					Wui::Tr("panel.properties.reload_prefix", "[reload]") + " " + TruncateForPanel(script->ReloadDiagnostic),
 					{ 1.0f, 0.75f, 0.3f, 1 }, 12.0f);
 				y += 16;
 			}
 			if (!script->LastError.empty())
 			{
-				Label(ctx, { rect.X, rect.Y + y }, "[error] " + TruncateForPanel(script->LastError),
+				Label(ctx, { rect.X, rect.Y + y },
+					Wui::Tr("panel.properties.error_prefix", "[error]") + " " + TruncateForPanel(script->LastError),
 					{ 1, 0.4f, 0.4f, 1 }, 12.0f);
 				y += 16;
 			}
 			if (Button(ctx, Wui::HashId("lua.reload"), { rect.X, rect.Y + y, std::min(rect.W, 160.0f), 22 },
-				"Reload Script", theme))
+				Wui::Tr("panel.properties.reload_script", "Reload Script"), theme))
 			{
 				std::string message;
 				const bool ok = EditorLayer::ReloadLuaScriptComponent(*script, entity.GetScene(), &message);
 				m_LuaReloadOk = ok;
-				m_LuaReloadMessage = ok ? message : ("failed: " + message);
+				m_LuaReloadMessage = ok ? message : (Wui::Tr("panel.properties.reload_failed", "failed:") + " " + message);
 				m_LuaReloadHandle = handle;
 				WLD_CORE_INFO("[hot-reload] properties button (handle={0}, path='{1}'): {2}",
 					handle, script->ScriptFilePath, m_LuaReloadMessage);
@@ -948,9 +1005,9 @@ namespace World
 		const std::string& typeName = schema.DisplayName;
 		const bool writable = !m_ReadOnly;
 		// 自定义检查器也走同一份字段标签(schema 字段名 → 显示文案),id 仍是 PropPath。
-		const std::string locationLabel = SchemaFieldLabel(schema, "Location");
-		const std::string rotationLabel = SchemaFieldLabel(schema, "Rotation");
-		const std::string scaleLabel = SchemaFieldLabel(schema, "Scale");
+		const Wui::LocalizedLabel locationLabel = SchemaFieldLabel(schema, "Location");
+		const Wui::LocalizedLabel rotationLabel = SchemaFieldLabel(schema, "Rotation");
+		const Wui::LocalizedLabel scaleLabel = SchemaFieldLabel(schema, "Scale");
 
 		if (!writable)
 		{
@@ -1026,17 +1083,19 @@ namespace World
 		bool changed = false;
 
 		const Wui::WuiRect primaryRow { rect.X, rect.Y + y, rect.W, kRowHeight };
-		const std::string primaryLabel = SchemaFieldLabel(*primaryField);
+		const Wui::LocalizedLabel primaryLabel = SchemaFieldLabel(*primaryField);
 		if (writable)
 		{
 			bool primary = std::get<bool>(primaryField->Get(instance));
 			const bool before = primary;
-			Label(ctx, { primaryRow.X + 4, primaryRow.Y + 3 }, primaryLabel, theme.TextMuted, 13.0f);
+			// 复选框列固定在 +140(标签列宽 140):术语对照预算 136,不压到控件上。
+			Wui::LabelWithTerm(ctx, { primaryRow.X + 4, primaryRow.Y + 3 }, primaryLabel.Text, primaryLabel.Term,
+				theme.TextMuted, 13.0f, theme, 136.0f);
 			Wui::Checkbox(ctx, Wui::HashId(PropPath(typeName, "Primary").c_str()),
 				{ primaryRow.X + 140.0f, primaryRow.Y + 1, 20, 20 }, "", primary, theme);
 			const Wui::WuiRect primaryBox { primaryRow.X + 140.0f, primaryRow.Y + 1, 20, 20 };
 			RegisterNode(Wui::HashId(PropPath(typeName, "Primary").c_str()), "checkbox",
-				primaryBox, primaryLabel, primary ? "true" : "false", reachable(primaryBox));
+				primaryBox, TermText(primaryLabel), primary ? "true" : "false", reachable(primaryBox));
 			if (primary != before)
 			{
 				primaryField->Set(instance, Schema::Value(primary));
@@ -1051,17 +1110,18 @@ namespace World
 		y += kRowHeight;
 
 		const Wui::WuiRect fixedRow { rect.X, rect.Y + y, rect.W, kRowHeight };
-		const std::string fixedLabel = SchemaFieldLabel(*fixedField);
+		const Wui::LocalizedLabel fixedLabel = SchemaFieldLabel(*fixedField);
 		if (writable)
 		{
 			bool fixed = std::get<bool>(fixedField->Get(instance));
 			const bool before = fixed;
-			Label(ctx, { fixedRow.X + 4, fixedRow.Y + 3 }, fixedLabel, theme.TextMuted, 13.0f);
+			Wui::LabelWithTerm(ctx, { fixedRow.X + 4, fixedRow.Y + 3 }, fixedLabel.Text, fixedLabel.Term,
+				theme.TextMuted, 13.0f, theme, 136.0f);
 			Wui::Checkbox(ctx, Wui::HashId(PropPath(typeName, "FixedAspectRatio").c_str()),
 				{ fixedRow.X + 140.0f, fixedRow.Y + 1, 20, 20 }, "", fixed, theme);
 			const Wui::WuiRect fixedBox { fixedRow.X + 140.0f, fixedRow.Y + 1, 20, 20 };
 			RegisterNode(Wui::HashId(PropPath(typeName, "FixedAspectRatio").c_str()), "checkbox",
-				fixedBox, fixedLabel, fixed ? "true" : "false", reachable(fixedBox));
+				fixedBox, TermText(fixedLabel), fixed ? "true" : "false", reachable(fixedBox));
 			if (fixed != before)
 			{
 				fixedField->Set(instance, Schema::Value(fixed));
@@ -1084,6 +1144,7 @@ namespace World
 			}
 		const std::string projectionId = PropPath(cameraType, "ProjectionType");
 		const Wui::WuiRect projectionRow { rect.X, rect.Y + y, rect.W, kRowHeight };
+		const Wui::LocalizedLabel projectionLabel = Wui::TrLabel("panel.properties.camera.projection", "Projection");
 		SceneCamera::ProjectionType projection = camera->GetProjectionType();
 		if (projectionField && projectionField->GetEnum && projectionField->Set && writable)
 		{
@@ -1095,12 +1156,14 @@ namespace World
 			{
 				for (size_t i = 0; i < enumSchema->Values.size(); ++i)
 				{
-					names.push_back(enumSchema->Values[i].first);
+					// 选项文案可本地化;写回仍按下标取 enumSchema->Values[i].second(raw 枚举值)。
+					names.push_back(CameraProjectionLabel(enumSchema->Values[i].first));
 					if (enumSchema->Values[i].second == raw)
 						selected = static_cast<int>(i);
 				}
 			}
-			Label(ctx, { projectionRow.X + 4, projectionRow.Y + 3 }, "Projection", theme.TextMuted, 13.0f);
+			Wui::LabelWithTerm(ctx, { projectionRow.X + 4, projectionRow.Y + 3 }, projectionLabel.Text,
+				projectionLabel.Term, theme.TextMuted, 13.0f, theme, 136.0f);
 			const Wui::WuiRect comboRect { projectionRow.X + 140.0f, projectionRow.Y + 1, projectionRow.W - 144.0f, 20 };
 			if (Wui::Combo(ctx, Wui::HashId(projectionId.c_str()), comboRect, "", names, selected, theme))
 			{
@@ -1108,14 +1171,15 @@ namespace World
 				projection = camera->GetProjectionType();
 				changed = true;
 			}
-			RegisterNode(Wui::HashId(projectionId.c_str()), "combo", comboRect, "Projection",
+			RegisterNode(Wui::HashId(projectionId.c_str()), "combo", comboRect, TermText(projectionLabel),
 				(selected >= 0 && selected < static_cast<int>(names.size())) ? names[selected] : std::string(),
 				reachable(comboRect));
 		}
 		else
 		{
-			DrawReadOnlyRow(ctx, projectionId, projectionRow, "Projection",
-				projection == SceneCamera::ProjectionType::Perspective ? "Perspective" : "Orthographic", theme);
+			DrawReadOnlyRow(ctx, projectionId, projectionRow, projectionLabel,
+				CameraProjectionLabel(projection == SceneCamera::ProjectionType::Perspective ? "Perspective" : "Orthographic"),
+				theme);
 		}
 		y += kRowHeight;
 
@@ -1125,17 +1189,19 @@ namespace World
 			float fov = camera->GetPerspectiveFOV();
 			const Wui::WuiRect fovRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool fovChanged = DrawFloatRow(ctx, PropPath(cameraType, "Perspective.FOV"),
-				fovRow, "FOV", fov, 1.0f, -1.0f, theme, reachable(fovRow));
+				fovRow, Wui::TrLabel("panel.properties.camera.fov", "FOV"), fov, 1.0f, -1.0f, theme, reachable(fovRow));
 			y += kRowHeight;
 			float nearClip = camera->GetPerspectiveNearClip();
 			const Wui::WuiRect nearRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool nearChanged = DrawFloatRow(ctx, PropPath(cameraType, "Perspective.NearClip"),
-				nearRow, "NearClip", nearClip, 1.0f, -1.0f, theme, reachable(nearRow));
+				nearRow, Wui::TrLabel("panel.properties.camera.near_clip", "NearClip"), nearClip, 1.0f, -1.0f, theme,
+				reachable(nearRow));
 			y += kRowHeight;
 			float farClip = camera->GetPerspectiveFarClip();
 			const Wui::WuiRect farRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool farChanged = DrawFloatRow(ctx, PropPath(cameraType, "Perspective.FarClip"),
-				farRow, "FarClip", farClip, 1.0f, -1.0f, theme, reachable(farRow));
+				farRow, Wui::TrLabel("panel.properties.camera.far_clip", "FarClip"), farClip, 1.0f, -1.0f, theme,
+				reachable(farRow));
 			y += kRowHeight;
 			if (fovChanged)
 			{
@@ -1158,17 +1224,19 @@ namespace World
 			float zoom = camera->GetOrthographicZoom();
 			const Wui::WuiRect zoomRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool zoomChanged = DrawFloatRow(ctx, PropPath(cameraType, "Orthographic.Zoom"),
-				zoomRow, "Zoom", zoom, 1.0f, -1.0f, theme, reachable(zoomRow));
+				zoomRow, Wui::TrLabel("panel.properties.camera.zoom", "Zoom"), zoom, 1.0f, -1.0f, theme, reachable(zoomRow));
 			y += kRowHeight;
 			float nearClip = camera->GetOrthographicNearClip();
 			const Wui::WuiRect nearRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool nearChanged = DrawFloatRow(ctx, PropPath(cameraType, "Orthographic.NearClip"),
-				nearRow, "NearClip", nearClip, 1.0f, -1.0f, theme, reachable(nearRow));
+				nearRow, Wui::TrLabel("panel.properties.camera.near_clip", "NearClip"), nearClip, 1.0f, -1.0f, theme,
+				reachable(nearRow));
 			y += kRowHeight;
 			float farClip = camera->GetOrthographicFarClip();
 			const Wui::WuiRect farRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 			const bool farChanged = DrawFloatRow(ctx, PropPath(cameraType, "Orthographic.FarClip"),
-				farRow, "FarClip", farClip, 1.0f, -1.0f, theme, reachable(farRow));
+				farRow, Wui::TrLabel("panel.properties.camera.far_clip", "FarClip"), farClip, 1.0f, -1.0f, theme,
+				reachable(farRow));
 			y += kRowHeight;
 			if (zoomChanged)
 			{

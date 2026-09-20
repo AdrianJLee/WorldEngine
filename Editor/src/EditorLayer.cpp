@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 #include "EditorCooker.h"
+#include "EditorPreferences.h"
 #include "EditorStartup.h"
 #include "World/Core/Asset/BuiltinImporters.h"
 #include "World/Core/Asset/CookPipeline.h"
@@ -1876,10 +1877,18 @@ namespace World
 
 	void EditorLayer::PollAssetHotReload(float deltaSeconds)
 	{
-		// 开关:WLD_ASSET_HOTRELOAD=0 整体关闭(默认开)。
+		// 开关(环境变量 > 偏好文件):
+		//  - WLD_ASSET_HOTRELOAD=0 整体关闭(默认开;自动化脚本用);
+		//  - 否则读编辑器偏好"资产热重载"(P4-UX7:以前只能靠环境变量,现在有面板入口)。
 		if (const char* switchValue = std::getenv("WLD_ASSET_HOTRELOAD"))
+		{
 			if (std::string(switchValue) == "0")
 				return;
+		}
+		else if (!Editor::EditorPreferences::Get().Data().AssetHotReload)
+		{
+			return;
+		}
 
 		// 1) 材质/贴图:库内轮询缓存里的 .wmat 与它们引用的贴图(150ms / 500ms)。
 		AssetHotReloadReport report;

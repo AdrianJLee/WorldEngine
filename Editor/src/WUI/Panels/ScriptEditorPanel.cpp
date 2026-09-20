@@ -1,6 +1,7 @@
 #include "wldpch.h"
 #include "ScriptEditorPanel.h"
 
+#include "../../EditorPreferences.h"
 #include "World/Core/Application.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Scene/Components.h"
@@ -13,6 +14,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -456,6 +458,17 @@ namespace World
 		const Wui::WuiTheme& theme = host.Theme();
 		const bool readOnly = host.IsReadOnlyMode() || !m_DiskBacked;
 
+		// P4-UX7:字号来自编辑器偏好(用户明确要过"希望能自由调整代码字体大小")。
+		// 只在偏好值本身变化时套用 —— 否则改主题/缩放这类无关偏好会把 Ctrl+滚轮的临时缩放顶掉。
+		{
+			const float preferenceFontSize = Editor::EditorPreferences::Get().Data().ScriptFontSize;
+			if (std::abs(preferenceFontSize - m_PreferenceFontSize) > 0.01f)
+			{
+				m_PreferenceFontSize = preferenceFontSize;
+				m_FontSize = std::max(10.0f, std::min(32.0f, preferenceFontSize));
+			}
+		}
+
 		// OnShortcut 只是置位(事件派发发生在 UI 帧之外);这里与工具栏按钮同一条路径消费。
 		if (m_PendingReload)
 		{
@@ -586,7 +599,7 @@ namespace World
 		if (ctx.Input().Ctrl && ctx.WasKeyTriggered(World::KeyCodes::Minus))
 			m_FontSize = std::max(10.0f, m_FontSize - 1.0f);
 		if (ctx.Input().Ctrl && ctx.WasKeyTriggered(World::KeyCodes::D0))
-			m_FontSize = 14.0f;
+			m_FontSize = Editor::EditorPreferences::Get().Data().ScriptFontSize;
 		auto& accessibility = Wui::WuiAccessibility::Get();
 		Wui::WuiAccessNode editorNode;
 		editorNode.Id = Wui::HashId("script.editor");

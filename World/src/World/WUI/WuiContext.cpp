@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/WUI/WuiContext.h"
+#include "World/Core/KeyCodes.h"
 
 #include <chrono>
 
@@ -134,6 +135,9 @@ namespace World::Wui
 	{
 		m_Input = input;
 		m_ViewportSize = input.ViewportSize;
+		// 文本控件是否仍持焦点:登记每帧重建,所以判定必须赶在 BeginContextFrame 清掉本上下文的
+		// 登记**之前**取值 —— 否则本窗口自己的文本焦点已经被抹掉,一按 Tab 就会被焦点表抢走。
+		const bool textFocusActive = m_TextInputActive || WuiTextFocus::Get().Active();
 		m_TextInputActive = false;
 		// 文本焦点每帧重建:上一帧的登记先失效,本帧聚焦的文本控件再登记。
 		WuiTextFocus::Get().BeginContextFrame(this);
@@ -143,7 +147,87 @@ namespace World::Wui
 		m_OverlayDepth = 0;
 		m_HoverBlockers.clear();
 		m_Tooltip.clear();
+		// 焦点顺序表每帧重建:上一帧的表挪到 Prev(Tab 顺序与"消失即失焦"都基于它)。
+		m_FocusablesPrev = std::move(m_Focusables);
+		m_Focusables.clear();
+		NavigateFocus(m_Input, textFocusActive);
 		++m_Frame;
+	}
+
+	void WuiContext::RegisterFocusable(WuiId id, const WuiRect& rect)
+	{
+		if (id == 0)
+			return;
+		// 同一 id 在一帧里只保留一条:重复绘制时以最后一次登记的矩形为准,顺序仍按首次登记的位置。
+		for (WuiFocusable& entry : m_Focusables)
+			if (entry.Id == id)
+			{
+				entry.Rect = rect;
+				return;
+			}
+		m_Focusables.push_back(WuiFocusable { id, rect });
+	}
+
+	void WuiContext::PushClipRect(const WuiRect& rect)
+	{
+		m_ClipStack.push_back(rect);
+	}
+
+	void WuiContext::PopClipRect()
+	{
+		if (!m_ClipStack.empty())
+			m_ClipStack.pop_back();
+	}
+
+	// 与**最内层**裁剪区相交才算可见:滚动区里被滚出视口的控件不画焦点环。
+	// 没有裁剪区(不在滚动区里)时一律可见。
+	bool WuiContext::ClipAllows(const WuiRect& rect) const
+	{
+		if (m_ClipStack.empty())
+			return true;
+		const WuiRect& clip = m_ClipStack.back();
+		return rect.X + rect.W > clip.X && rect.X < clip.X + clip.W
+			&& rect.Y + rect.H > clip.Y && rect.Y < clip.Y + clip.H;
+	}
+
+	void WuiContext::NavigateFocus(const WuiInputState& input, bool textFocusActive)
+	{
+		// 文本控件正在编辑:Tab(代码编辑器里是缩进 / 接受补全候选)与 Escape 都归它,焦点表不抢。
+		if (textFocusActive)
+			return;
+		bool forward = false;
+		bool backward = false;
+		for (uint32_t key : input.KeyPressed)
+		{
+			if (key != KeyCodes::Tab)
+				continue;
+			// 只用 KeyPressed(本帧新按下):按住 Tab 不会因 KeyDown/KeyRepeated 连跳到表尾。
+			if (input.Shift)
+				backward = true;
+			else
+				forward = true;
+		}
+		// Escape 清焦点,但只清"由焦点顺序表拥有"的焦点(上一帧登记过的控件)。焦点在代码编辑器/
+		// 视口这类自管 id 上时不动它:它们的 Escape 语义(关补全浮层但保留焦点等)由自己处理。
+		const bool escapePressed = std::find(input.KeyPressed.begin(), input.KeyPressed.end(), KeyCodes::Escape)
+			!= input.KeyPressed.end();
+		const bool focusOwnedByTable = std::any_of(m_FocusablesPrev.begin(), m_FocusablesPrev.end(),
+			[&](const WuiFocusable& entry) { return entry.Id == m_Focus; });
+		if (!forward && !backward)
+		{
+			if (escapePressed && focusOwnedByTable)
+				SetFocus(0);
+			return;
+		}
+		if (m_FocusablesPrev.empty())
+			return;
+		std::vector<WuiId> order;
+		order.reserve(m_FocusablesPrev.size());
+		for (const WuiFocusable& entry : m_FocusablesPrev)
+			order.push_back(entry.Id);
+		// NextFocus(WuiCore):线性遍历、末尾回卷;当前焦点不在表里时正向取第一个、反向取最后一个。
+		if (const std::optional<WuiId> next = NextFocus(order, m_Focus, backward))
+			SetFocus(*next);
 	}
 
 	void WuiContext::SetTextInputActive(bool active)
@@ -221,6 +305,17 @@ namespace World::Wui
 				m_DragPayload.clear();
 				m_DragId = 0;
 			}
+		}
+		// 焦点顺序表的"消失即失焦":上一帧登记过、本帧没有再登记的控件(面板关闭、控件隐藏、
+		// 条件绘制分支不再走)不留幽灵焦点。自管焦点的 id(代码编辑器/视口)从不在表里,不受影响。
+		if (m_Focus != 0)
+		{
+			const bool wasRegistered = std::any_of(m_FocusablesPrev.begin(), m_FocusablesPrev.end(),
+				[&](const WuiFocusable& entry) { return entry.Id == m_Focus; });
+			const bool stillRegistered = std::any_of(m_Focusables.begin(), m_Focusables.end(),
+				[&](const WuiFocusable& entry) { return entry.Id == m_Focus; });
+			if (wasRegistered && !stillRegistered)
+				SetFocus(0);
 		}
 	}
 

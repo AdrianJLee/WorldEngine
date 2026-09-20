@@ -66,6 +66,12 @@ namespace World::Wui
 		m_Panel = panelId;
 	}
 
+	void WuiAccessibility::ClearWindow(const std::string& windowKey)
+	{
+		m_Nodes.erase(std::remove_if(m_Nodes.begin(), m_Nodes.end(),
+			[&](const WuiAccessNode& node) { return node.Window == windowKey; }), m_Nodes.end());
+	}
+
 	void WuiAccessibility::Register(const WuiAccessNode& node)
 	{
 		if (!m_Enabled || node.Id == 0)
@@ -151,6 +157,7 @@ namespace World::Wui
 				<< ",\"focused\":" << (node.Focused ? "true" : "false")
 				<< ",\"visible\":" << (node.Visible ? "true" : "false")
 				<< ",\"interactive\":" << (node.Interactive ? "true" : "false")
+				<< ",\"tooltip\":\"" << EscapeJson(node.Tooltip) << "\""
 				<< "}";
 		}
 		out << "]";
