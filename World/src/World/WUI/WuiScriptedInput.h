@@ -32,7 +32,10 @@ namespace World::Wui
 		// 同一窗口同时只有一份待注入输入;ui.type = QueueClick(聚焦) + QueueType。
 		void QueueType(const std::string& windowKey, std::string text);
 		// 注入一次按键(第 1 帧按下、第 2 帧释放):用于 AI 复现方向键/Enter 等键路。
-		void QueueKey(const std::string& windowKey, uint32_t keyCode);
+		// ctrl/shift = 注入这两帧的修饰键状态。真实键盘的 Ctrl+A 在 ctx.Input().Ctrl 上,
+		// 而 keybd_event 合成的 Ctrl **到不了 WUI 的输入状态**(两次实测),所以组合键只能
+		// 从这里注入 —— 否则"框内 Ctrl+A"这类作用域问题永远只能靠人眼观察。
+		void QueueKey(const std::string& windowKey, uint32_t keyCode, bool ctrl = false, bool shift = false);
 		// 是否还有待注入事件(供自动化等待"注入被消费")。
 		bool HasPending() const;
 		// 每个窗口每帧调用一次:把待注入事件写进该窗口的输入状态。
@@ -51,6 +54,8 @@ namespace World::Wui
 			// 按键注入(0 = 无;1 = 待按下的帧;2 = 待释放的帧)。
 			uint32_t Key = 0;
 			int KeyPhase = 0;
+			bool KeyCtrl = false;
+			bool KeyShift = false;
 		};
 		std::unordered_map<std::string, Pending> m_Pending;
 	};

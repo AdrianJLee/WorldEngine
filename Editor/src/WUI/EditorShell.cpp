@@ -2453,8 +2453,17 @@ namespace World
 		};
 		if (activateInTree(m_Layout.Root))
 		{
+			// P4-UX16:主窗口正被"已附加的独立窗口"占用时(顶栏标签模式,m_ActiveWindowTag 非空),
+			// 停靠区根本不渲染 —— 此时只回 "activated (dock tab)" 就是假话:实测在内容浏览器里
+			// 新建材质(顺带打开材质编辑器,它默认附加到主窗口)之后,ui.activate content_browser
+			// 返回成功,但面板一个无障碍节点都不回来,后续 ui.invoke 全部落空。
+			// 所以切停靠面板时顺手退回停靠视图(用户点顶栏标签的等效动作)。
+			const bool leftAttachedView = !m_ActiveWindowTag.empty();
+			m_ActiveWindowTag.clear();
 			SaveLayout();
-			if (message) *message = "activated " + panel + " (dock tab)";
+			if (message)
+				*message = "activated " + panel + " (dock tab)"
+					+ (leftAttachedView ? "; left the attached-window view" : "");
 			return true;
 		}
 		if (m_Ctx)
@@ -2794,6 +2803,13 @@ namespace World
 			m_Ctx->RecordOp("import", "dest-open", m_ImportSourcePath.filename().string(), "");
 		}
 		WLD_CORE_INFO("[import] 选择导入位置(窗口级模态): {0}", sourcePath);
+	}
+
+	void EditorShell::Notify(const std::string& message)
+	{
+		// P4-UX16:面板级短反馈统一进状态栏提示(4s 停留 / 悬停冻结 / 移开 2.6s 宽限后淡出)。
+		// 走同一条 PushNotice = 同一条无障碍节点,脚本与读屏也能读到这句话。
+		PushNotice(message);
 	}
 
 	// D10-10:扫内容根下的全部子目录(低频操作:只在打开导入模态时跑一次)。

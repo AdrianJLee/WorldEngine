@@ -405,9 +405,20 @@ namespace World
 				error = "unknown key: " + keyName + " (Up/Down/Left/Right/Home/End/PageUp/PageDown/Enter/Tab/Escape/Backspace/Delete/Space/A-Z/0-9)";
 				return false;
 			}
-			Wui::WuiScriptedInput::Get().QueueKey(node->Window, keyCode);
-			result = "queued key " + keyName + " to " + node->Kind + " '" + node->Label
-				+ "' window=" + node->Window;
+			// P4-UX16:可选 ctrl=/shift=(1/true/yes)→ 注入组合键。真实键盘的 Ctrl 无法通过
+			// keybd_event 进到 WUI 输入状态,组合键只能走这里(否则"框内 Ctrl+A"无法脚本复现)。
+			const auto flag = [&args](const char* name)
+			{
+				if (!args.count(name))
+					return false;
+				const std::string value = args.at(name);
+				return value == "1" || value == "true" || value == "yes";
+			};
+			const bool ctrl = flag("ctrl");
+			const bool shift = flag("shift");
+			Wui::WuiScriptedInput::Get().QueueKey(node->Window, keyCode, ctrl, shift);
+			result = "queued key " + keyName + (ctrl ? " +Ctrl" : "") + (shift ? " +Shift" : "")
+				+ " to " + node->Kind + " '" + node->Label + "' window=" + node->Window;
 			return true;
 		}
 		if (cmd == "ui.open" || cmd == "ui.toggle" || cmd == "ui.close")

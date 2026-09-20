@@ -113,11 +113,13 @@ namespace World::Wui
 		return false;
 	}
 
-	void WuiScriptedInput::QueueKey(const std::string& windowKey, uint32_t keyCode)
+	void WuiScriptedInput::QueueKey(const std::string& windowKey, uint32_t keyCode, bool ctrl, bool shift)
 	{
 		Pending& pending = m_Pending[windowKey];
 		pending.Key = keyCode;
 		pending.KeyPhase = 1;
+		pending.KeyCtrl = ctrl;
+		pending.KeyShift = shift;
 	}
 
 	void WuiScriptedInput::Apply(const std::string& windowKey, WuiInputState& input)
@@ -129,6 +131,9 @@ namespace World::Wui
 		if (pending.KeyPhase > 0)
 		{
 			input.WantKeyboard = true;
+			// 组合键:按下的那一帧与释放的那一帧都保持修饰键按下(与真实"Ctrl↓ → A↓ → A↑ → Ctrl↑"一致)。
+			input.Ctrl = pending.KeyCtrl;
+			input.Shift = pending.KeyShift;
 			if (pending.KeyPhase == 1)
 			{
 				input.KeyDown.push_back(pending.Key);
@@ -139,6 +144,8 @@ namespace World::Wui
 			{
 				pending.KeyPhase = 0;
 				pending.Key = 0;
+				pending.KeyCtrl = false;
+				pending.KeyShift = false;
 			}
 			return;   // 按键注入独立占一帧:不与点击/文本同帧,时序更接近真实键盘
 		}

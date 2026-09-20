@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorPanel.h"
+#include "World/Core/Asset/AssetTypeRegistry.h"
 #include "World/Renderer/Texture.h"
 #include "World/WUI/WuiWidget.h"
 
@@ -87,6 +88,9 @@ namespace World
 		const char* Id() const override { return "content_browser"; }
 		const char* Title() const override { return "Content Browser"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
+		// P4-UX16:面板级快捷键(三层路由的第 2 层)——内容浏览器有焦点时,
+		// Ctrl+N / Ctrl+Shift+N 在本层被消费,不会落到引擎全局的 Ctrl+N(File ▸ New Scene)。
+		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
 		// D10-10(用户 2026-09-19):导入位置选择器已搬到 EditorShell 的窗口级模态
 		// (居中 + 全窗口挡输入),面板不再画自己的覆盖层;只保留 shell 需要的两个入口:
 		// 导入成功后刷新列表(与工具栏 Refresh 同一条路径)。
@@ -107,8 +111,31 @@ namespace World
 		// D10-6:在指定目录下新建文件夹(树行右键菜单与工具栏/内容区菜单共用同一套命名/去重规则)。
 		// 返回新建目录路径;创建失败返回空路径。
 		std::filesystem::path CreateFolderIn(Wui::WuiContext& ctx, const std::filesystem::path& parentDir);
-		// D3:新建材质资产(在当前目录写默认 .wmat 并在材质编辑器中打开)。
-		void CreateMaterial(Wui::WuiContext& ctx);
+		// ---- P4-UX16:"新建资产"注册表 ----
+		// 默认四类(Folder / Material / Scene / Script)只注册一次;菜单/右键菜单/快捷键
+		// 全部读同一张表 —— 以后加类型不再改这里的 UI 代码。
+		void RegisterDefaultAssetTypes();
+		void UnregisterDefaultAssetTypes();
+		// 按类型 id 在当前目录创建(菜单与快捷键共用的唯一入口);失败写 error。
+		bool CreateAssetFromRegistry(const std::string& typeId, std::string* error);
+		// 各类型的真正实现(注册表回调指向它们;dir = 目标目录,必须已存在)。
+		bool CreateMaterialAsset(const std::filesystem::path& dir, std::string* error,
+			std::filesystem::path* outPath);
+		bool CreateSceneAsset(const std::filesystem::path& dir, std::string* error,
+			std::filesystem::path* outPath);
+		bool CreateScriptAsset(const std::filesystem::path& dir, std::string* error,
+			std::filesystem::path* outPath);
+		// "New ▶" 子菜单:画行 / 画展开的类型列表(工具条 `…` 与内容区空白右键共用)。
+		// owner = 1(工具条菜单)/ 2(空白右键菜单);0 = 未展开。同一时刻只可能开一个菜单。
+		bool RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId rowId, const Wui::WuiRect& row,
+			const Wui::WuiTheme& theme);
+		// idPrefix 决定子菜单项的无障碍 id(如 "browser.toolbar.menu.new." / "browser.blank.new.")。
+		Wui::WuiRect RenderNewAssetItems(Wui::WuiContext& ctx, const char* idPrefix,
+			const Wui::WuiRect& parentMenu, const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme);
+		// 失败提示统一入口(面板不自己弹模态)。
+		void NotifyAssetFailure(const std::string& error);
+		// 选中刚创建的资产(各类型共用;顺带让"新建后立刻改名/打开"有统一落点)。
+		void SelectCreated(const std::filesystem::path& path, const char* op);
 		void ApplyRename(const std::filesystem::path& target, const std::string& newName);
 		void StartRename(Wui::WuiContext& ctx, const std::filesystem::path& path);
 		void RenderRenameField(Wui::WuiContext& ctx, const std::filesystem::path& path, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
@@ -157,6 +184,13 @@ namespace World
 		std::shared_ptr<Wui::WuiButton> m_MoreButton;
 		bool m_ToolbarMenuOpen = false;
 		glm::vec2 m_ToolbarMenuPos { 0, 0 };
+		// P4-UX16:"New ▶" 子菜单当前归属(0 = 未展开;1 = 工具条 `…` 菜单;2 = 内容区空白右键菜单)。
+		int m_NewMenuOwner = 0;
+		// OnShortcut 在渲染之外触发 → 只排队,真正的动作在下一帧的 OnRender 里做(那时有 ctx)。
+		// 1 = 打开"新建"列表,2 = 直接新建文件夹。
+		int m_PendingNewShortcut = 0;
+		// 注册表登记状态:析构时必须反注册,否则回调会指向已销毁的面板。
+		bool m_AssetTypesRegistered = false;
 		std::vector<std::shared_ptr<Wui::WuiButton>> m_CrumbButtons;
 		std::vector<std::filesystem::path> m_CrumbDests;
 		// P4-UX15:面包屑改立即模式绘制,标签单独存一份(不再依赖嵌套 Box 的布局)。

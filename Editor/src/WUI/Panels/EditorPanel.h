@@ -158,6 +158,9 @@ namespace World
 		// 范围限定在内容根内(不用原生文件夹对话框,避免选到工作区外)。
 		// sourcePath = 已选好的源文件;默认未接线 = 无操作(调用方应给出可读提示)。
 		virtual void RequestImportDestination(const std::string& sourcePath) { (void)sourcePath; }
+		// P4-UX16:面板向状态栏推一条短提示(新建资产失败等)。默认空实现 = 宿主未接线。
+		// 不要用它做模态:失败信息是"说出来"而不是"挡住用户"。
+		virtual void Notify(const std::string& message) { (void)message; }
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

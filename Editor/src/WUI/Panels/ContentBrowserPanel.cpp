@@ -13,6 +13,7 @@
 #include "World/WUI/Widgets/WuiModal.h"
 #include "World/Renderer/Texture.h"
 #include "World/Renderer/Material.h"
+#include "World/Scene/SceneSerializer.h"
 
 #include <algorithm>
 #include <cctype>
@@ -169,6 +170,19 @@ namespace World
 			out += "…";
 			return out;
 		}
+
+		// P4-UX16:新建资产的默认名候选:"<base><ext>" → "<base> (1)<ext>" → …
+		// (与既有"New Folder (1)" / "material (1).wmat"同一套命名,冲突时永不覆盖)。
+		std::filesystem::path MakeUniqueAssetPath(const std::filesystem::path& dir,
+			const std::string& base, const std::string& extension)
+		{
+			std::filesystem::path candidate = dir / (base + extension);
+			int counter = 1;
+			std::error_code existsError;
+			while (std::filesystem::exists(candidate, existsError))
+				candidate = dir / (base + " (" + std::to_string(counter++) + ")" + extension);
+			return candidate;
+		}
 	}
 
 	ContentBrowserPanel::ContentBrowserPanel(PanelHost& host)
@@ -176,10 +190,13 @@ namespace World
 	{
 		m_Model.Current = m_Model.Root;
 		LoadState();
+		RegisterDefaultAssetTypes();
 	}
 
 	ContentBrowserPanel::~ContentBrowserPanel()
 	{
+		// 注册表里的 Create 回调捕获了 this:必须先反注册再让面板析构,否则回调悬空。
+		UnregisterDefaultAssetTypes();
 		SaveState();
 	}
 
@@ -625,33 +642,305 @@ namespace World
 		}
 	}
 
-	void ContentBrowserPanel::CreateMaterial(Wui::WuiContext& ctx)
+	// ---- P4-UX16:"新建资产"注册表 ----
+	// 用户 2026-09-20:「不能每加一个类似的资产就新增一个按钮」。
+	// 这里把"有哪些资产类型、怎么创建"收敛成**一次注册**;菜单/右键菜单/快捷键只读注册表,
+	// 以后加 Model / Texture 等类型 → 再 Register 一条,内容浏览器的 UI 代码不动。
+	// 生命周期:Create 回调捕获 this,析构必须反注册(见 ~ContentBrowserPanel)。
+	void ContentBrowserPanel::RegisterDefaultAssetTypes()
 	{
-		// 新建材质资产:写一份默认 .wmat 模板到当前目录(重名自动编号),随后直接在材质编辑器里打开。
-		// 内容根 = 内容浏览器 Root;材质路径按"相对内容根"书写,与渲染侧引用约定一致。
-		std::filesystem::path target = m_Model.Current / "material.wmat";
-		int counter = 1;
-		while (std::filesystem::exists(target))
-			target = m_Model.Current / ("material (" + std::to_string(counter++) + ").wmat");
-
-		MaterialDesc desc;
-		desc.Name = target.stem().string();
-		std::string error;
-		if (!MaterialIO::WriteFileText(
-			std::filesystem::relative(target, m_Model.Root).generic_string(),
-			MaterialIO::Serialize(desc), &error))
-		{
-			WLD_CORE_ERROR("Could not create material: {0}", error);
+		if (m_AssetTypesRegistered)
 			return;
+		m_AssetTypesRegistered = true;
+
+		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
+		auto add = [&registry](const char* id, const char* label, const char* extension, int order,
+			bool isFolder, std::function<bool(const std::filesystem::path&, std::string*)> create)
+		{
+			AssetTypeDesc desc;
+			desc.Id = id;
+			desc.Label = label;
+			desc.Extension = extension;
+			desc.SortOrder = order;
+			desc.IsFolder = isFolder;
+			desc.Create = std::move(create);
+			registry.Register(std::move(desc));
+		};
+
+		// Folder:唯一"建完立刻改名"的类型(与资源管理器同款手感,沿用 D10-6 的既有路径)。
+		add("folder", "Folder", "", 0, true,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				if (!m_Ctx)
+				{
+					if (error) *error = "content browser has no active UI context";
+					return false;
+				}
+				if (CreateFolderIn(*m_Ctx, dir).empty())
+				{
+					if (error) *error = "could not create a folder under " + dir.string();
+					return false;
+				}
+				return true;
+			});
+		// Material:新建后直接在材质编辑器打开(既有行为,用户已验收)。
+		add("material", "Material", ".wmat", 10, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				std::filesystem::path created;
+				if (!CreateMaterialAsset(dir, error, &created))
+					return false;
+				OpenItem(created);
+				return true;
+			});
+		// Scene:只创建 + 选中,**不自动打开** —— 打开会直接替换当前文档
+		// (EditorLayer::DoOpenScene 不拦未保存改动),"新建资产"不该顺带丢掉用户正在编辑的场景。
+		add("scene", "Scene", ".wd", 20, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				std::filesystem::path created;
+				return CreateSceneAsset(dir, error, &created);
+			});
+		// Script:从 templates/WorldScript.lua 复制(与 Scripts 面板"新建脚本"同一份模板),
+		// 随后在脚本编辑器里打开 —— 脚本面板不动文档,没有上面那条顾虑。
+		add("script", "Script", ".lua", 30, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				std::filesystem::path created;
+				if (!CreateScriptAsset(dir, error, &created))
+					return false;
+				std::error_code relativeError;
+				const std::filesystem::path relative =
+					std::filesystem::relative(created, m_Model.Root, relativeError);
+				m_Host.OpenScriptEditor(relativeError ? created.generic_string() : relative.generic_string());
+				return true;
+			});
+	}
+
+	void ContentBrowserPanel::UnregisterDefaultAssetTypes()
+	{
+		if (!m_AssetTypesRegistered)
+			return;
+		m_AssetTypesRegistered = false;
+		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
+		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
+		for (const char* id : { "folder", "material", "scene", "script" })
+			registry.Unregister(id);
+	}
+
+	bool ContentBrowserPanel::CreateAssetFromRegistry(const std::string& typeId, std::string* error)
+	{
+		const AssetTypeDesc* desc = AssetTypeRegistry::Get().Find(typeId);
+		if (!desc || !desc->Create)
+		{
+			if (error) *error = "asset type is not registered: " + typeId;
+			return false;
 		}
+		std::error_code dirError;
+		if (!std::filesystem::is_directory(m_Model.Current, dirError))
+		{
+			if (error) *error = "target folder does not exist: " + m_Model.Current.string();
+			return false;
+		}
+		std::string localError;
+		if (!desc->Create(m_Model.Current, &localError))
+		{
+			if (error) *error = localError.empty() ? ("could not create " + typeId) : localError;
+			return false;
+		}
+		return true;
+	}
+
+	void ContentBrowserPanel::SelectCreated(const std::filesystem::path& path, const char* op)
+	{
 		m_Model.Selected.clear();
-		m_Model.Selected.insert(target);
-		m_Model.LastSelected = target;
+		m_Model.Selected.insert(path);
+		m_Model.LastSelected = path;
 		InvalidateContents();
 		SaveState();
-		if (m_Ctx) m_Ctx->RecordOp("browser", "new-material", target.filename().string(), "");
-		OpenItem(target);
-		(void)ctx;
+		if (m_Ctx && op)
+			m_Ctx->RecordOp("browser", op, path.filename().string(), "");
+	}
+
+	bool ContentBrowserPanel::CreateMaterialAsset(const std::filesystem::path& dir, std::string* error,
+		std::filesystem::path* outPath)
+	{
+		// 写一份默认 .wmat 模板(重名自动编号)。
+		// 关键:MateriaIO 的路径解析是 `<Game>/assets/<path>` 存在就用它,否则回退 `<Game>/<path>` ——
+		// 相对逻辑路径**新建**时会落到 `Game/<path>`(实测:内容浏览器新建材质写进了 Game/_ux_probe)。
+		// 绝对路径两种情况都原样命中,所以这里传绝对路径(旧 CreateMaterial 的同一个坑)。
+		const std::filesystem::path target = MakeUniqueAssetPath(dir, "material", ".wmat");
+		MaterialDesc desc;
+		desc.Name = target.stem().string();
+		std::string localError;
+		if (!MaterialIO::WriteFileText(target.generic_string(), MaterialIO::Serialize(desc), &localError))
+		{
+			WLD_CORE_ERROR("Could not create material: {0}", localError);
+			if (error) *error = localError;
+			return false;
+		}
+		SelectCreated(target, "new-material");
+		if (outPath) *outPath = target;
+		return true;
+	}
+
+	bool ContentBrowserPanel::CreateSceneAsset(const std::filesystem::path& dir, std::string* error,
+		std::filesystem::path* outPath)
+	{
+		// 用引擎自己的 SceneSerializer 写"空场景",而不是手写模板字符串:
+		// 产物与编辑器另存出来的场景同格式(FormatVersion/Entities),格式演进时不会两处漂移。
+		const Ref<Scene> active = m_Host.GetActiveScene();
+		if (!active)
+		{
+			if (error) *error = "no active scene to derive a world context from";
+			return false;
+		}
+		const std::filesystem::path target = MakeUniqueAssetPath(dir, "scene", ".wd");
+		SceneSerializer serializer(CreateRef<Scene>(active->GetContext()));
+		if (!serializer.Serialize(target.string()))
+		{
+			const std::string localError = serializer.GetLastError().empty()
+				? ("could not write " + target.string()) : serializer.GetLastError();
+			WLD_CORE_ERROR("Could not create scene: {0}", localError);
+			if (error) *error = localError;
+			return false;
+		}
+		SelectCreated(target, "new-scene");
+		if (outPath) *outPath = target;
+		return true;
+	}
+
+	bool ContentBrowserPanel::CreateScriptAsset(const std::filesystem::path& dir, std::string* error,
+		std::filesystem::path* outPath)
+	{
+		// 与 Scripts 面板"从模板新建"同一份磁盘模板;模板缺失时退回最小骨架(不阻断新建)。
+		const std::filesystem::path target = MakeUniqueAssetPath(dir, "script", ".lua");
+		const std::filesystem::path templatePath = m_Model.Root / "scripts" / "templates" / "WorldScript.lua";
+		std::error_code templateError;
+		if (std::filesystem::is_regular_file(templatePath, templateError))
+		{
+			std::error_code copyError;
+			std::filesystem::copy_file(templatePath, target, std::filesystem::copy_options::none, copyError);
+			if (copyError)
+			{
+				WLD_CORE_ERROR("Could not create script: {0}", copyError.message());
+				if (error) *error = copyError.message();
+				return false;
+			}
+		}
+		else
+		{
+			std::ofstream out(target, std::ios::binary | std::ios::trunc);
+			if (!out.is_open())
+			{
+				if (error) *error = "could not write " + target.string();
+				return false;
+			}
+			out << "---@class NewScript : WorldScript\nlocal NewScript = {}\n\n"
+				"function NewScript:OnCreate()\nend\n\n"
+				"function NewScript:OnUpdate(dt)\nend\n\n"
+				"function NewScript:OnDestroy()\nend\n\nreturn NewScript\n";
+		}
+		SelectCreated(target, "new-script");
+		if (outPath) *outPath = target;
+		return true;
+	}
+
+	bool ContentBrowserPanel::RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId rowId,
+		const Wui::WuiRect& row, const Wui::WuiTheme& theme)
+	{
+		// 子菜单指示三角用 ▶(U+25B6):字体子集里验证过的字形(树用 ▼/▶);
+		// "▸"(U+25B8)与"⋯"(U+22EF)一样不在子集里,会画成乱码。
+		const std::string label = Wui::Tr("panel.content_browser.menu.new", "New") + "  ▶";
+		return Wui::MenuItem(ctx, rowId, row, label, true, theme);
+	}
+
+	Wui::WuiRect ContentBrowserPanel::RenderNewAssetItems(Wui::WuiContext& ctx, const char* idPrefix,
+		const Wui::WuiRect& parentMenu, const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme)
+	{
+		// 清单 = 资产类型注册表(排序在注册表里定:Folder 恒第一 → SortOrder → Id)。
+		// 这里**没有任何按类型分支** —— 新类型注册进来就自动出现在菜单里。
+		const std::vector<AssetTypeDesc> types = AssetTypeRegistry::Get().Sorted();
+		if (types.empty())
+			return {};
+
+		const float itemH = 22.0f;
+		Wui::WuiRect panel { parentMenu.X + parentMenu.W - 4.0f, parentMenu.Y + 4.0f, 236.0f,
+			itemH * static_cast<float>(types.size()) + 8.0f };
+		// 贴边翻转:右侧放不下就摆到父菜单左侧;再夹进面板可视区(子菜单永远不出画面)。
+		if (panel.X + panel.W > clampArea.X + clampArea.W - 4.0f)
+			panel.X = parentMenu.X - panel.W + 4.0f;
+		panel.X = std::max(clampArea.X + 4.0f,
+			std::min(panel.X, clampArea.X + clampArea.W - panel.W - 4.0f));
+		panel.Y = std::max(clampArea.Y + 4.0f,
+			std::min(panel.Y, clampArea.Y + clampArea.H - panel.H - 4.0f));
+		Wui::DrawPanelSurface(ctx, panel, theme);
+
+		const std::string tooltip = Wui::Tr("panel.content_browser.new.tooltip", "Create in the current folder");
+		for (size_t index = 0; index < types.size(); ++index)
+		{
+			const AssetTypeDesc& desc = types[index];
+			const Wui::WuiRect row { panel.X + 4.0f, panel.Y + 4.0f + itemH * static_cast<float>(index),
+				panel.W - 8.0f, itemH };
+			const std::string label = Wui::Tr(("asset.type." + desc.Id).c_str(), desc.Label.c_str());
+			const Wui::WuiId itemId = Wui::HashId((std::string(idPrefix) + desc.Id).c_str());
+			const bool clicked = Wui::MenuItem(ctx, itemId, row, label, true, theme);
+			// MenuItem 登记的无障碍节点只有"文字标签";这里用同一个 id 再登记一次(后写覆盖),
+			// 把**扩展名**与**创建位置**写进 Value/Tooltip —— 右侧那行扩展名提示是画出来的,
+			// 读屏与脚本读不到,必须同时进节点(用户 2026-09-18:「引擎的 UI 对 AI 要无障碍」)。
+			{
+				Wui::WuiAccessNode node;
+				node.Id = itemId;
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "menu-item";
+				node.Label = label;
+				// 文件夹没有扩展名 → 值写明 "(folder)",脚本据此区分"目录"与"文件类型"。
+				node.Value = desc.Extension.empty() ? "(folder)" : desc.Extension;
+				node.Tooltip = tooltip;
+				node.Rect = row;
+				Wui::WuiAccessibility::Get().Register(node);
+			}
+			if (clicked)
+			{
+				std::string error;
+				if (!CreateAssetFromRegistry(desc.Id, &error))
+					NotifyAssetFailure(error);
+				m_NewMenuOwner = 0;
+				ctx.CloseAllPopups();
+				break;
+			}
+			// 右侧扩展名提示(材料 → .wmat / 场景 → .wd / 脚本 → .lua),一眼可辨且与"另存为"同名。
+			if (!desc.Extension.empty())
+			{
+				const float textWidth = ctx.MeasureTextWidth(desc.Extension, 12.0f);
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ row.X + row.W - textWidth - 8.0f, row.Y + (row.H - 15.0f) * 0.5f, 0, 0 },
+					theme.TextMuted, 0, 1.0f, desc.Extension, 12.0f, false });
+			}
+			Wui::Tooltip(ctx, row, tooltip);
+		}
+		return panel;
+	}
+
+	void ContentBrowserPanel::NotifyAssetFailure(const std::string& error)
+	{
+		const std::string text = Wui::Tr("panel.content_browser.new.failed", "Could not create asset: ") + error;
+		WLD_CORE_ERROR("[content-browser] {0}", text);
+		m_Host.Notify(text);
+	}
+
+	bool ContentBrowserPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
+	{
+		(void)alt;
+		// P4-UX16:Ctrl+N = 打开"新建"清单;Ctrl+Shift+N = 新建文件夹(资源管理器同款)。
+		// 本函数是三层路由的第 2 层:内容浏览器**有焦点**时优先于引擎全局 Ctrl+N
+		// (File ▸ New Scene);没焦点时那条全局命令照旧生效,不抢别处。
+		if (!ctrl || keyCode != KeyCodes::N)
+			return false;
+		// 快捷键在渲染之外到达(拿不到 ctx),只排队;真正的动作在下一帧 OnRender 里做。
+		m_PendingNewShortcut = shift ? 2 : 1;
+		return true;
 	}
 
 	void ContentBrowserPanel::ApplyRename(const std::filesystem::path& target, const std::string& newName)
@@ -1237,12 +1526,29 @@ namespace World
 
 			if (m_MoreButton)
 				Wui::Tooltip(ctx, m_MoreButton->Rect(), Wui::Tr("panel.content_browser.more.tooltip",
-					"更多动作:新建 / 刷新 / 视图切换 / 后退前进(Alt+←/→/↑)"));
+					"More actions: New / Refresh / View / Back-Forward (Alt+←/→/↑)"));
+			// P4-UX16:`…` 是工具条上唯一的"动作入口",但对象式 WuiButton 不进无障碍树 ——
+			// 结果脚本只能靠猜坐标点它(实测:布局一变就点空)。这里按面包屑同款做法补一个稳定节点,
+			// `ui.invoke id=browser.more` 就能打开菜单(与真实点击同一条输入路径)。
+			if (m_MoreButton)
+			{
+				Wui::WuiAccessNode node;
+				node.Id = Wui::HashId("browser.more");
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "button";
+				node.Label = "…";
+				node.Value = ctx.IsPopupOpen(Wui::HashId("browser.toolbar.menu")) ? "open" : "closed";
+				node.Tooltip = Wui::Tr("panel.content_browser.more.tooltip",
+					"More actions: New / Refresh / View / Back-Forward (Alt+←/→/↑)");
+				node.Rect = m_MoreButton->Rect();
+				Wui::WuiAccessibility::Get().Register(node);
+			}
 			// 搜索框:空时给占位提示,有内容时右侧给"清除"(与浏览器/编辑器的搜索框一致)。
 			const Wui::WuiRect searchRect = m_SearchField->Rect();
 			if (m_Model.SearchEdit.empty())
 				Wui::Label(ctx, { searchRect.X + 8.0f, searchRect.Y + 5.0f },
-					Wui::Tr("panel.content_browser.search.hint", "搜索资产…"), theme.TextDisabled, 12.0f);
+					Wui::Tr("panel.content_browser.search.hint", "Search assets…"), theme.TextDisabled, 12.0f);
 			else
 			{
 				const Wui::WuiRect clearRect { searchRect.X + searchRect.W - 20.0f, searchRect.Y + 2.0f, 18.0f, 20.0f };
@@ -1252,7 +1558,7 @@ namespace World
 					m_Model.Search[0] = 0;
 					UpdateSearch();
 				}
-				Wui::Tooltip(ctx, clearRect, Wui::Tr("panel.content_browser.search.clear.tooltip", "清除搜索"));
+				Wui::Tooltip(ctx, clearRect, Wui::Tr("panel.content_browser.search.clear.tooltip", "Clear search"));
 			}
 		}
 
@@ -1382,7 +1688,8 @@ namespace World
 		{
 			const float menuW = 236.0f;
 			const float itemH = 22.0f;
-			const int itemCount = 8;
+			// P4-UX16:新建从"两条硬编码项"变成一行 "New ▶" + 注册表驱动的子菜单 → 项数 8 → 7。
+			const int itemCount = 7;
 			const Wui::WuiRect menuRect { m_ToolbarMenuPos.x, m_ToolbarMenuPos.y, menuW,
 				itemH * static_cast<float>(itemCount) + 8.0f };
 			const auto goForward = [this]
@@ -1402,10 +1709,13 @@ namespace World
 			};
 			ctx.PushOverlay();
 			Wui::DrawPanelSurface(ctx, menuRect, theme);
+			int hoveredIndex = -1;
 			auto item = [&](int index, const std::string& label, bool enabled, std::function<void()> action)
 			{
 				const Wui::WuiRect row { menuRect.X + 4.0f,
 					menuRect.Y + 4.0f + itemH * static_cast<float>(index), menuW - 8.0f, itemH };
+				if (enabled && ctx.IsHovered(row))
+					hoveredIndex = index;
 				const Wui::WuiId itemId = Wui::HashId(("browser.toolbar.menu." + std::to_string(index)).c_str());
 				if (Wui::MenuItem(ctx, itemId, row, label, enabled, theme) && enabled)
 				{
@@ -1413,31 +1723,64 @@ namespace World
 					ctx.ClosePopup(toolbarPopup);
 				}
 			};
-			item(0, Wui::Tr("panel.content_browser.menu.new_folder", "New Folder"), true,
-				[this, &ctx] { CreateFolder(ctx); });
-			item(1, Wui::Tr("panel.content_browser.menu.new_material", "New Material"), true,
-				[this, &ctx] { CreateMaterial(ctx); });
-			item(2, Wui::Tr("panel.content_browser.refresh", "Refresh"), true, [this]
+			// 0 = 新建(展开的清单 = 资产类型注册表,不再硬编码类型)
+			const Wui::WuiRect newRow { menuRect.X + 4.0f, menuRect.Y + 4.0f, menuW - 8.0f, itemH };
+			if (RenderNewAssetRow(ctx, Wui::HashId("browser.toolbar.menu.0"), newRow, theme))
+				m_NewMenuOwner = (m_NewMenuOwner == 1) ? 0 : 1;
+			if (ctx.IsHovered(newRow))
+				hoveredIndex = 0;
+			item(1, Wui::Tr("panel.content_browser.refresh", "Refresh"), true, [this]
 				{
 					InvalidateContents();
 					if (m_Model.Search[0])
 						UpdateSearch();
 				});
-			item(3, m_Model.ListMode
+			item(2, m_Model.ListMode
 					? Wui::Tr("panel.content_browser.menu.to_grid", "View: Switch to Grid")
 					: Wui::Tr("panel.content_browser.menu.to_list", "View: Switch to List"),
 				true, [this] { m_Model.ListMode = !m_Model.ListMode; SaveState(); });
-			item(4, Wui::Tr("panel.content_browser.menu.reveal", "Open in Explorer"),
+			item(3, Wui::Tr("panel.content_browser.menu.reveal", "Open in Explorer"),
 				m_Model.Current != m_Model.Root, [this] { OpenFolderInExplorer(m_Model.Current); });
-			item(5, Wui::Tr("panel.content_browser.menu.back", "Back") + "   (Alt+←)",
+			item(4, Wui::Tr("panel.content_browser.menu.back", "Back") + "   (Alt+←)",
 				m_Model.HistoryIndex > 0, [this] { GoBack(); });
-			item(6, Wui::Tr("panel.content_browser.menu.forward", "Forward") + "   (Alt+→)",
+			item(5, Wui::Tr("panel.content_browser.menu.forward", "Forward") + "   (Alt+→)",
 				m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1, goForward);
-			item(7, Wui::Tr("panel.content_browser.menu.up", "Up") + "   (Alt+↑)",
+			item(6, Wui::Tr("panel.content_browser.menu.up", "Up") + "   (Alt+↑)",
 				m_Model.Current != m_Model.Root, [this] { GoUp(); });
+			// 展开的"新建"清单(右/左侧贴边翻转);idx>0 的行被悬停 = 用户离开了新建行 → 收起。
+			Wui::WuiRect newMenuRect;
+			if (m_NewMenuOwner == 1)
+				newMenuRect = RenderNewAssetItems(ctx, "browser.toolbar.menu.new.", menuRect, rect, theme);
 			ctx.PopOverlay();
+			if (m_NewMenuOwner == 1 && hoveredIndex > 0)
+				m_NewMenuOwner = 0;
+			// Esc:先收子菜单,再收父菜单(与右键菜单一致)。
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+			{
+				if (m_NewMenuOwner == 1)
+					m_NewMenuOwner = 0;
+				else
+					ctx.ClosePopup(toolbarPopup);
+			}
 			// P4-UX15:点面板里其它任何地方都收起 `…` 菜单(用户实测:以前点外面不关)。
-			ctx.ClosePopupsOnOutsideClick({ toolbarPopup }, menuRect);
+			// P4-UX16:展开的"新建"清单与父菜单算**同一块**点击区 —— 否则点子菜单里的项会
+			// 被当成"点到了外面"而先把父菜单关掉。
+			Wui::WuiRect clickBlock = menuRect;
+			if (newMenuRect.W > 0.0f)
+			{
+				const float right = std::max(menuRect.X + menuRect.W, newMenuRect.X + newMenuRect.W);
+				const float bottom = std::max(menuRect.Y + menuRect.H, newMenuRect.Y + newMenuRect.H);
+				clickBlock.X = std::min(clickBlock.X, newMenuRect.X);
+				clickBlock.Y = std::min(clickBlock.Y, newMenuRect.Y);
+				clickBlock.W = right - clickBlock.X;
+				clickBlock.H = bottom - clickBlock.Y;
+			}
+			ctx.ClosePopupsOnOutsideClick({ toolbarPopup }, clickBlock);
+		}
+		else if (m_NewMenuOwner == 1)
+		{
+			// 父菜单被关掉(点外面/Esc/执行了菜单项)→ 子菜单不能再留着。
+			m_NewMenuOwner = 0;
 		}
 
 		const Wui::WuiId treePopup = Wui::HashId("browser.tree.context");
@@ -1766,14 +2109,14 @@ namespace World
 		{
 			struct BrowserItem { const char* Label; std::function<void()> Action; };
 			const bool single = m_Model.Selected.size() == 1;
+			// P4-UX16:"新建 X"不再挂在**条目**右键菜单上 —— 它建在"当前文件夹",和条目无关
+			// (资源管理器同款:新建属于空白处,条目菜单只做对该条目本身的操作)。
 			const std::vector<BrowserItem> items = {
 				{ "Open", [this] { OpenItem(m_Model.ContextMenuPath); } },
 				{ "Cut", [this] { Cut(); } },
 				{ "Copy", [this] { Copy(); } },
 				{ "Paste", [this] { PasteInto(std::filesystem::is_directory(m_Model.ContextMenuPath) ? m_Model.ContextMenuPath : m_Model.Current); } },
 				{ "Rename", [this, single] { if (single && m_Ctx) StartRename(*m_Ctx, m_Model.ContextMenuPath); } },
-				{ "New Folder", [this, &ctx] { CreateFolder(ctx); } },
-				{ "New Material", [this, &ctx] { CreateMaterial(ctx); } },
 				{ "Open in Explorer", [this] { OpenInExplorer(m_Model.ContextMenuPath); } },
 				{ "Delete", [this] { m_Model.ShowDeleteModal = true; } },
 			};
@@ -1814,18 +2157,20 @@ namespace World
 		if (ctx.IsPopupOpen(blankPopup))
 		{
 			ctx.PushOverlay();
-			const Wui::WuiRect menuPanel { m_Model.BlankMenuPos.x, m_Model.BlankMenuPos.y, 180, 4 * 24 + 8 };
+			// P4-UX16:新建收成一行 "New ▶"(清单来自注册表)+ Paste + Refresh。
+			const Wui::WuiRect menuPanel { m_Model.BlankMenuPos.x, m_Model.BlankMenuPos.y, 180, 3 * 24 + 8 };
 			DrawPanelSurface(ctx, menuPanel, theme);
+			const Wui::WuiRect newRow { menuPanel.X + 4, menuPanel.Y + 4, menuPanel.W - 8, 22 };
+			if (RenderNewAssetRow(ctx, Wui::HashId("browser.blank.new"), newRow, theme))
+				m_NewMenuOwner = (m_NewMenuOwner == 2) ? 0 : 2;
 			struct BlankItem { const char* Label; std::function<void()> Action; };
 			const std::vector<BlankItem> items = {
-				{ "New Folder", [this, &ctx] { CreateFolder(ctx); } },
-				{ "New Material", [this, &ctx] { CreateMaterial(ctx); } },
 				{ "Paste", [this] { PasteInto(m_Model.Current); } },
 				{ "Refresh", [this] { InvalidateContents(); if (m_Model.Search[0]) UpdateSearch(); } },
 			};
 			for (size_t i = 0; i < items.size(); ++i)
 			{
-				const Wui::WuiRect item { menuPanel.X + 4, menuPanel.Y + 4 + i * 24, menuPanel.W - 8, 22 };
+				const Wui::WuiRect item { menuPanel.X + 4, menuPanel.Y + 4 + (i + 1) * 24, menuPanel.W - 8, 22 };
 				if (MenuItem(ctx, Wui::HashId(("browser.blank." + std::string(items[i].Label)).c_str()), item, items[i].Label, true, theme))
 				{
 					items[i].Action();
@@ -1833,10 +2178,33 @@ namespace World
 					ctx.CloseAllPopups();
 				}
 			}
-					ctx.ClosePopupsOnOutsideClick({ blankPopup }, menuPanel);
+			Wui::WuiRect newMenuRect;
+			if (m_NewMenuOwner == 2)
+				newMenuRect = RenderNewAssetItems(ctx, "browser.blank.new.", menuPanel, rect, theme);
+			// 父菜单 + 展开的"新建"清单算同一块点击区(否则点子菜单会把父菜单一起关掉)。
+			Wui::WuiRect clickBlock = menuPanel;
+			if (newMenuRect.W > 0.0f)
+			{
+				const float right = std::max(menuPanel.X + menuPanel.W, newMenuRect.X + newMenuRect.W);
+				const float bottom = std::max(menuPanel.Y + menuPanel.H, newMenuRect.Y + newMenuRect.H);
+				clickBlock.X = std::min(clickBlock.X, newMenuRect.X);
+				clickBlock.Y = std::min(clickBlock.Y, newMenuRect.Y);
+				clickBlock.W = right - clickBlock.X;
+				clickBlock.H = bottom - clickBlock.Y;
+			}
+			ctx.ClosePopupsOnOutsideClick({ blankPopup }, clickBlock);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
-				ctx.ClosePopup(blankPopup);
+			{
+				if (m_NewMenuOwner == 2)
+					m_NewMenuOwner = 0;
+				else
+					ctx.ClosePopup(blankPopup);
+			}
 			ctx.PopOverlay();
+		}
+		else if (m_NewMenuOwner == 2)
+		{
+			m_NewMenuOwner = 0;
 		}
 
 		// ---- 删除确认 ----
@@ -1885,6 +2253,27 @@ namespace World
 			m_Model.ShowDeleteModal = true;
 		if (!textFocusActive && ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
 			StartRename(ctx, *m_Model.Selected.begin());
+
+		// ---- P4-UX16:由 OnShortcut(第 2 层路由)排队的"新建"动作 ----
+		// 快捷键事件在渲染之外到达,那里没有 ctx;这里执行真正的动作,与菜单走同一条
+		// CreateAssetFromRegistry 路径(所以注册表里新增的类型同样自动获得快捷键语义)。
+		if (m_PendingNewShortcut != 0)
+		{
+			const int request = m_PendingNewShortcut;
+			m_PendingNewShortcut = 0;
+			if (request == 2)
+			{
+				std::string error;
+				if (!CreateAssetFromRegistry("folder", &error))
+					NotifyAssetFailure(error);
+			}
+			else
+			{
+				// Ctrl+N:打开 `…` 菜单并直接展开"新建"清单(键盘可达,不必先点 ⋯)。
+				m_ToolbarMenuOpen = true;
+				m_NewMenuOwner = 1;
+			}
+		}
 	}
 }
 

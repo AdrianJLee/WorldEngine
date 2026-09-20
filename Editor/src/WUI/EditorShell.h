@@ -142,6 +142,8 @@ namespace World
 		void OpenModelPreview(const std::string& logicalPath) override;
 		// D10:把"选导入位置"交给内容浏览器(引擎内树状选择器,范围限定内容根内)。
 		void RequestImportDestination(const std::string& sourcePath) override;
+		// P4-UX16:面板级短提示统一进状态栏(见 PushNotice 的 4s/悬停冻结/移开宽限节奏)。
+		void Notify(const std::string& message) override;
 		// W9-2 三层快捷键路由第 2 层:当前焦点面板。
 		//   ① 主窗口处于"已附加面板"模式(顶栏标签)→ 该面板;
 		//   ② 否则某个独立窗口在前台 → 该窗口的当前标签;
