@@ -1840,6 +1840,332 @@ namespace World::Wui
 		return changed;
 	}
 
+	// ---- P4-UX12 / U2C:向量字段 / 空状态 ----
+	namespace
+	{
+		// 向量字段的持久化状态:同一时刻只可能有一个分量处于"按下/拖动/编辑",所以三个分量共用一份
+		// 状态,用 Axis 记住是哪一个(与 DragFloat 的 WuiNumericState 同族,但**不能**共用 id ——
+		// Persist 用同一 id 换类型会按错误类型解释内存)。
+		struct WuiVec3FieldState
+		{
+			bool Pressed = false;
+			bool Dragging = false;
+			bool Editing = false;
+			int Axis = 0;                // 当前轴:按下/拖动/编辑/键盘微调作用的分量
+			float PressX = 0.0f;         // 拖动锚点:按下瞬间的光标 x
+			float PressValue = 0.0f;     // 拖动锚点:按下瞬间该分量的值
+			std::string Buffer;          // 文本编辑缓冲(只在 Editing 期间有效)
+			int Cursor = -1;
+			int SelStart = -1;
+			int SelEnd = -1;
+		};
+
+		// 分量左侧的轴标签列宽(派工确认 12px):属于控件几何,不进主题令牌(与 U2B 的
+		// kColorSwatchWidth / kSplitterHitWidth 同一处理)。
+		constexpr float kVec3AxisLabelWidth = 12.0f;
+		// 空状态左右安全边距与 action 按钮的内边距(派工确认 24px)。
+		constexpr float kEmptyStateSideMargin = 24.0f;
+		constexpr float kEmptyStateButtonPad = 24.0f;
+
+		// 分量数值文本:两位小数(派工确认)。显示与编辑缓冲共用同一套文本,
+		// 避免"看到的数"与"点进去的数"不一致(DragFloat 用同一策略,只是三位小数)。
+		std::string Vec3AxisText(float value)
+		{
+			char buffer[32] = {};
+			std::snprintf(buffer, sizeof(buffer), "%.2f", value);
+			return buffer;
+		}
+
+		// 整体无障碍节点的 value:"x,y,z"(分量顺序固定,脚本可直接按 ',' 切分)。
+		std::string Vec3Text(const glm::vec3& value)
+		{
+			return Vec3AxisText(value.x) + "," + Vec3AxisText(value.y) + "," + Vec3AxisText(value.z);
+		}
+	}
+
+	bool Vec3Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec3& value, float speed,
+		float minValue, float maxValue, const WuiTheme& theme, int layout)
+	{
+		const bool focused = ctx.Focus() == id;
+		WuiVec3FieldState& state = ctx.Persist<WuiVec3FieldState>(id, {});
+		if (state.Axis < 0 || state.Axis > 2)
+			state.Axis = 0;
+		// min >= max = 无界(与 DragFloat 的哨兵逐条一致:既有调用点的 (-1, 1) 写法不必改)。
+		const float lo = minValue < maxValue ? minValue : -1e30f;
+		const float hi = minValue < maxValue ? maxValue : 1e30f;
+		// 键盘步长取 speed 的绝对值(与 DragFloat 一致;speed 传 0 时退化为 1)。
+		const float keyboardStep = std::fabs(speed) > 0.0f ? std::fabs(speed) : 1.0f;
+		const bool vertical = layout == 1;
+		RegisterAccessNode(id, "vec3-field", rect, std::string(), Vec3Text(value), true, true, focused);
+		ctx.RegisterFocusable(id, rect);
+		bool changed = false;
+
+		// 每个分量的槽 = 轴标签(12px)+ 输入框;横排三等分(分量之间留 PadSmall),竖排三行等分高度。
+		const float axisGap = vertical ? 0.0f : theme.PadSmall;
+		const auto slotRect = [&](int axis) -> WuiRect
+		{
+			if (vertical)
+			{
+				const float rowH = rect.H / 3.0f;
+				return { rect.X, rect.Y + rowH * static_cast<float>(axis), rect.W, rowH };
+			}
+			const float slotW = std::max(0.0f, (rect.W - axisGap * 2.0f) / 3.0f);
+			return { rect.X + (slotW + axisGap) * static_cast<float>(axis), rect.Y, slotW, rect.H };
+		};
+		const auto fieldRect = [&](const WuiRect& slot) -> WuiRect
+		{
+			const float labelW = std::min(kVec3AxisLabelWidth, slot.W);
+			return { slot.X + labelW, slot.Y, std::max(0.0f, slot.W - labelW), slot.H };
+		};
+
+		// 拖动锚点/编辑缓冲都按"当前轴"落到 value 的分量上;命中范围是整个槽位(含轴标签,点标签
+		// 与点输入框等价 —— 标签只是 12px 的视觉前缀,不是独立控件)。
+		const bool activeHovered = ctx.IsHovered(slotRect(state.Axis));
+		if (state.Editing)
+		{
+			bool submitted = false, cancelled = false;
+			if (EditUpdate(ctx, state.Buffer, state.Cursor, state.SelStart, state.SelEnd, submitted, cancelled))
+			{
+				if (submitted)
+				{
+					char* end = nullptr;
+					const float parsed = std::strtof(state.Buffer.c_str(), &end);
+					if (end && *end == 0)
+					{
+						const float next = std::max(lo, std::min(hi, parsed));
+						if (next != value[state.Axis])
+						{
+							value[state.Axis] = next;
+							changed = true;
+						}
+					}
+				}
+				state.Editing = false;
+				state.Cursor = -1;
+				state.SelStart = -1;
+				state.SelEnd = -1;
+			}
+			else if (ctx.Input().MouseClicked[0] && !activeHovered)
+			{
+				// 点别处 = 提交并结束(与 DragFloat 一致:Enter/Esc 之外的退出路径同样落值)。
+				char* end = nullptr;
+				const float parsed = std::strtof(state.Buffer.c_str(), &end);
+				if (end && *end == 0)
+				{
+					const float next = std::max(lo, std::min(hi, parsed));
+					if (next != value[state.Axis])
+					{
+						value[state.Axis] = next;
+						changed = true;
+					}
+				}
+				state.Editing = false;
+				state.Cursor = -1;
+				state.SelStart = -1;
+				state.SelEnd = -1;
+			}
+		}
+		else
+		{
+			if (ctx.Input().MouseClicked[0])
+			{
+				for (int axis = 0; axis < 3; ++axis)
+				{
+					if (!ctx.IsHovered(slotRect(axis)))
+						continue;
+					state.Pressed = true;
+					state.Axis = axis;
+					state.PressX = ctx.Input().MousePos.x;
+					state.PressValue = value[axis];
+					// 按下即取焦点(DragFloat 只在开始拖动/进入编辑时取):随后 Up/Down 立刻
+					// 作用于刚点的这个分量,不需要先拖一下。
+					ctx.SetFocus(id);
+					break;
+				}
+			}
+			if (state.Pressed)
+			{
+				const float dx = ctx.Input().MousePos.x - state.PressX;
+				if (std::fabs(dx) > 1.5f)
+					state.Dragging = true;
+				if (state.Dragging)
+				{
+					const float next = std::max(lo, std::min(hi, static_cast<float>(state.PressValue + dx * speed)));
+					if (next != value[state.Axis])
+					{
+						value[state.Axis] = next;
+						changed = true;
+					}
+					ctx.SetCursor(WuiCursor::ResizeEW);
+				}
+				if (ctx.Input().MouseReleased[0])
+				{
+					if (!state.Dragging)
+					{
+						state.Editing = true;
+						state.Buffer = Vec3AxisText(value[state.Axis]);
+						state.Cursor = -1;
+						state.SelStart = 0;
+						state.SelEnd = Utf8Count(state.Buffer);
+						ctx.SetFocus(id);
+						ctx.SetTextInputActive(true);
+					}
+					state.Pressed = false;
+					state.Dragging = false;
+				}
+			}
+		}
+
+		// 键盘微调:焦点在整体上、且不在文本编辑态时,Up/Down 按 |speed| 调当前轴
+		// (编辑态下这两个键留给别处,不抢)。
+		if (focused && !state.Editing)
+		{
+			const float delta = (ctx.WasKeyPressed(KeyCodes::Up) ? keyboardStep : 0.0f)
+				+ (ctx.WasKeyPressed(KeyCodes::Down) ? -keyboardStep : 0.0f);
+			if (delta != 0.0f)
+			{
+				const float next = std::clamp(value[state.Axis] + delta, lo, hi);
+				if (next != value[state.Axis])
+				{
+					value[state.Axis] = next;
+					changed = true;
+				}
+			}
+		}
+
+		static const char* const kAxisLabels[3] = { "X", "Y", "Z" };
+		const float textSize = theme.FontSizeBody;
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			const WuiRect slot = slotRect(axis);
+			const WuiRect field = fieldRect(slot);
+			const bool axisCurrent = state.Axis == axis;
+			const bool axisDragging = state.Dragging && axisCurrent;
+			const bool axisEditing = state.Editing && axisCurrent;
+			const bool hovered = ctx.IsHovered(slot);
+			// 子节点:交互可点(脚本注入坐标 = 鼠标点该分量),但不是独立焦点项(焦点始终在整体上)。
+			RegisterAccessNode(DerivedChildId(id, ".axis.", static_cast<size_t>(axis)), "vec3-axis", slot,
+				kAxisLabels[axis], Vec3AxisText(value[axis]));
+			if (hovered)
+				ctx.SetCursor(axisEditing ? WuiCursor::IBeam : WuiCursor::ResizeEW);
+			// 轴标签:拖动中的分量用强调色高亮,其余 = 次要色 + Caption 字号。
+			ctx.Commands().push_back({ WuiDrawKind::Text,
+				{ slot.X, slot.Y + (slot.H - theme.FontSizeCaption) * 0.5f, 0, 0 },
+				axisDragging ? theme.Accent : theme.TextMuted, 0, 1.0f, kAxisLabels[axis],
+				theme.FontSizeCaption, false });
+			ctx.Commands().push_back({ WuiDrawKind::Rect, field,
+				axisEditing ? theme.ButtonHover : theme.ButtonBg, theme.Radius });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, field,
+				(axisEditing || hovered || axisDragging) ? theme.Accent : theme.Border, theme.Radius, 1.0f });
+			const std::string text = axisEditing ? state.Buffer : Vec3AxisText(value[axis]);
+			WuiDrawCommand command { WuiDrawKind::Text,
+				{ field.X + 5.0f, field.Y + (field.H - textSize) * 0.5f, 0, 0 },
+				axisDragging ? theme.Accent : theme.Text, 0, 1.0f, text, textSize, false };
+			if (axisEditing && state.SelStart >= 0 && state.SelEnd > state.SelStart)
+			{
+				command.TextSelStart = static_cast<int>(Utf8Offset(state.Buffer, state.SelStart));
+				command.TextSelEnd = static_cast<int>(Utf8Offset(state.Buffer, state.SelEnd));
+			}
+			else if (axisEditing)
+				command.TextCursorByte = static_cast<int>(Utf8Offset(state.Buffer, state.Cursor));
+			ctx.Commands().push_back(std::move(command));
+		}
+		DrawFocusRing(ctx, rect, id, theme);
+		return changed;
+	}
+
+	bool EmptyState(WuiContext& ctx, const WuiRect& rect, const std::string& glyph, const std::string& title,
+		const std::string& hint, const std::string& actionLabel, WuiId actionId, const WuiTheme& theme)
+	{
+		// 左右安全边距:rect 比 2×边距还窄时退化成"以中线为界",内容仍不出客户区。
+		const float margin = std::min(kEmptyStateSideMargin, std::max(0.0f, rect.W * 0.5f));
+		const float contentX = rect.X + margin;
+		const float contentW = std::max(0.0f, rect.W - margin * 2.0f);
+		const auto centered = [&](float width) { return contentX + std::max(0.0f, (contentW - width) * 0.5f); };
+
+		// 节点 id:EmptyState 没有自己的 id 参数(派工签名),因此有 action 时挂在 action id 的派生 id 上
+		// (稳定,且与按钮自身 id 不冲突);没有 action 时按 title 内容派生 —— 同一面板里两个同标题的
+		// 空状态会共用 id,请给它们不同的文案。
+		const WuiId nodeId = actionId != 0
+			? DerivedChildId(actionId, ".empty-state.", 0)
+			: HashId(("empty-state:" + title).c_str());
+		RegisterAccessNode(nodeId, "empty-state", rect, title, hint, true, false);
+
+		// hint 折行复用 tooltip 的折行器(支持 '\n' 与 CJK 逐字符断行),最多两行;被砍掉后续内容时
+		// 在末行补 '…'(与 EllipsizeToWidth 的截断语义一致)。
+		std::vector<std::string> hintLines;
+		if (!hint.empty() && contentW > 0.0f)
+		{
+			hintLines = WrapTooltipText(ctx, hint, theme.FontSizeSmall, contentW);
+			const bool clipped = hintLines.size() > 2;
+			if (clipped)
+				hintLines.resize(2);
+			for (size_t i = 0; i < hintLines.size(); ++i)
+			{
+				const bool last = i + 1 == hintLines.size();
+				const std::string source = (clipped && last) ? (hintLines[i] + "…") : hintLines[i];
+				hintLines[i] = EllipsizeToWidth(ctx, source, contentW, theme.FontSizeSmall);
+			}
+		}
+
+		const std::string shownTitle = EllipsizeToWidth(ctx, title, contentW, theme.FontSizeTitle);
+		const float blockGap = theme.Pad;   // 块与块之间的间隔
+		const float glyphH = glyph.empty() ? 0.0f : theme.FontSizeHeading + theme.PadSmall;
+		const float titleH = title.empty() ? 0.0f : theme.FontSizeTitle + theme.PadSmall;
+		const float hintH = static_cast<float>(hintLines.size()) * (theme.FontSizeSmall + theme.PadSmall);
+		float buttonW = 0.0f;
+		float buttonH = 0.0f;
+		if (!actionLabel.empty())
+		{
+			buttonW = std::min(contentW, ctx.MeasureTextWidth(actionLabel, theme.FontSizeBody) + kEmptyStateButtonPad);
+			buttonH = theme.ControlHeight;
+		}
+		const int blocks = (glyphH > 0.0f ? 1 : 0) + (titleH > 0.0f ? 1 : 0)
+			+ (hintH > 0.0f ? 1 : 0) + (buttonH > 0.0f ? 1 : 0);
+		const float totalH = glyphH + titleH + hintH + buttonH
+			+ blockGap * static_cast<float>(std::max(0, blocks - 1));
+		// 垂直居中;内容比 rect 还高时从 rect 顶部开始(不往客户区外画)。
+		float y = rect.Y + std::max(0.0f, (rect.H - totalH) * 0.5f);
+
+		if (glyphH > 0.0f)
+		{
+			const float width = ctx.MeasureTextWidth(glyph, theme.FontSizeHeading);
+			ctx.Commands().push_back({ WuiDrawKind::Text,
+				{ centered(width), y + (glyphH - theme.FontSizeHeading) * 0.5f, 0, 0 },
+				theme.TextMuted, 0, 1.0f, glyph, theme.FontSizeHeading, false });
+			y += glyphH + blockGap;
+		}
+		if (titleH > 0.0f)
+		{
+			const float width = ctx.MeasureTextWidth(shownTitle, theme.FontSizeTitle);
+			ctx.Commands().push_back({ WuiDrawKind::Text,
+				{ centered(width), y + (titleH - theme.FontSizeTitle) * 0.5f, 0, 0 },
+				theme.Text, 0, 1.0f, shownTitle, theme.FontSizeTitle, false });
+			y += titleH + blockGap;
+		}
+		for (const std::string& line : hintLines)
+		{
+			if (!line.empty())
+			{
+				const float width = ctx.MeasureTextWidth(line, theme.FontSizeSmall);
+				ctx.Commands().push_back({ WuiDrawKind::Text,
+					{ centered(width), y + theme.PadSmall * 0.5f, 0, 0 },
+					theme.TextMuted, 0, 1.0f, line, theme.FontSizeSmall, false });
+			}
+			y += theme.FontSizeSmall + theme.PadSmall;
+		}
+
+		bool activated = false;
+		if (buttonH > 0.0f && buttonW > 0.0f)
+		{
+			if (hintH > 0.0f)
+				y += blockGap;   // 按钮与上一块之间的间隔(上面的 hint 循环没补)
+			const WuiRect button { centered(buttonW), y, buttonW, buttonH };
+			activated = Button(ctx, actionId, button, actionLabel, theme);
+		}
+		return activated;
+	}
+
 	WindowControl WindowControls(WuiContext& ctx, const WuiRect& bar, const WuiTheme& theme, bool maximized)
 	{
 		constexpr float buttonW = 34.0f;

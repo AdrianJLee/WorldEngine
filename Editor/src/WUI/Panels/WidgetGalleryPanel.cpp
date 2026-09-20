@@ -2,6 +2,7 @@
 #include "WidgetGalleryPanel.h"
 
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
@@ -194,6 +195,7 @@ namespace World
 			(28.0f + 116.0f + 34.0f) +                   // Chrome:列表/网格/树/标签条/右键菜单
 			(28.0f + 26.0f + gap + rowH + gap + rowH + gap + rowH + 18.0f + gap) + // Controls 2
 			(28.0f + 24.0f + 22.0f * 4.0f + gap + 22.0f + gap + 84.0f + gap) + // Table / Color / Splitter
+			(28.0f + rowH * 3.0f + gap + 120.0f + gap) + // Vector / Empty
 			40.0f;
 
 		Wui::BeginScrollArea(ctx, rect, contentHeight, m_ScrollY, theme);
@@ -205,7 +207,8 @@ namespace World
 			widget->Arrange(widgetRect);
 			widget->Paint(paint);
 		};
-		const auto section = [&](const char* title)
+		// title 收 std::string(而不是 const char*):U2C 起段落标题走 Wui::Tr 的返回值。
+		const auto section = [&](const std::string& title)
 		{
 			Wui::SectionHeader(ctx, { x0, y, width, 24.0f }, title, theme.Accent, theme, 15.0f);
 			y += 28.0f;
@@ -559,6 +562,41 @@ namespace World
 				split, minSplit, maxSplit, theme))
 				m_LastAction = "Splitter: " + std::to_string(static_cast<int>(split));
 			y += strip.H + gap;
+		}
+
+		// ---- U2C 新控件:向量字段 / 空状态(本段新增文案走 Tr,内联英文默认;
+		// 中文键由主 agent 统一并入 Editor/assets/localization/zh-CN.json) ----
+		section(Wui::Tr("panel.gallery.section.vector_empty", "Vector / Empty"));
+		{
+			// 向量字段:横排(宽)与竖排(窄面板,宽 140)。
+			glm::vec3& vectorWide = ctx.Persist<glm::vec3>(Wui::HashId("gallery.ux2c.vec.wide"),
+				glm::vec3 { 1.0f, 2.5f, 0.0f });
+			if (Wui::Vec3Field(ctx, Wui::HashId("gallery.ux2c.vecfield.wide"), { x0, y, 300.0f, rowH },
+				vectorWide, 0.05f, -100.0f, 100.0f, theme))
+				m_LastAction = "Vec3Field (horizontal) changed";
+			Wui::Label(ctx, { x0 + 312.0f, y + 5.0f },
+				Wui::Tr("panel.gallery.vec3.horizontal", "horizontal 300px"), theme.TextMuted, 13.0f);
+
+			glm::vec3& vectorNarrow = ctx.Persist<glm::vec3>(Wui::HashId("gallery.ux2c.vec.narrow"),
+				glm::vec3 { 0.25f, 1.0f, -3.5f });
+			if (Wui::Vec3Field(ctx, Wui::HashId("gallery.ux2c.vecfield.narrow"), { x0 + 430.0f, y, 140.0f, rowH * 3.0f },
+				vectorNarrow, 0.05f, -100.0f, 100.0f, theme, 1))
+				m_LastAction = "Vec3Field (vertical) changed";
+			Wui::Label(ctx, { x0 + 580.0f, y + 5.0f },
+				Wui::Tr("panel.gallery.vec3.vertical", "vertical 140px"), theme.TextMuted, 13.0f);
+			y += rowH * 3.0f + gap;
+
+			// 空状态:240×120,带 action 按钮(点击写 m_LastAction)。
+			const Wui::WuiRect emptyRect { x0, y, 240.0f, 120.0f };
+			if (Wui::EmptyState(ctx, emptyRect, "◇",
+				Wui::Tr("panel.gallery.empty.title", "No items yet"),
+				Wui::Tr("panel.gallery.empty.hint", "Create an item and it will show up in this list."),
+				Wui::Tr("panel.gallery.empty.action", "New Item"),
+				Wui::HashId("gallery.ux2c.empty.action"), theme))
+				m_LastAction = "EmptyState action";
+			Wui::Label(ctx, { x0 + 260.0f, y + 8.0f },
+				Wui::Tr("panel.gallery.empty.caption", "EmptyState 240x120"), theme.TextMuted, 13.0f);
+			y += emptyRect.H + gap;
 		}
 
 		Wui::EndScrollArea(ctx);

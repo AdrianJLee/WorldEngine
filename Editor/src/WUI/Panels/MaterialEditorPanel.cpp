@@ -31,6 +31,34 @@ namespace World
 			return "…" + path.substr(path.size() - 45);
 		}
 
+		// U2d:未落盘材质的"另存为"目标路径校验,返回给用户看的具体原因(空字符串 = 可提交)。
+		// 与 MaterialLibrary::Save + MaterialIO::WriteFileText 的落盘规则一致:
+		//  - 缺 .wmat 后缀会自动补;  - 写入目标为内容根 Game/assets,其次 Game/ 旧布局(都不存在时写 Game/<key>)。
+		// 名字里真正非法的只有 < > : " | ? *(反斜杠/斜杠是路径分隔符,不是非法字符)。
+		std::string NewMaterialPathError(const std::string& raw)
+		{
+			if (raw.empty())
+				return Wui::Tr("panel.material.newpath.error.empty", "Path cannot be empty");
+			for (const char character : raw)
+			{
+				if (character == '<' || character == '>' || character == ':' || character == '"'
+					|| character == '|' || character == '?' || character == '*')
+					return Wui::Tr("panel.material.newpath.error.illegal",
+						"Path contains illegal characters (< > : \" | ? *)");
+			}
+			std::string key = MaterialLibrary::NormalizePath(raw);
+			if (key.size() < 5 || key.substr(key.size() - 5) != ".wmat")
+				key.append(".wmat");
+			std::error_code existsError;
+			const std::filesystem::path contentRoot = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+			if (std::filesystem::exists(contentRoot / key, existsError))
+				return Wui::Tr("panel.material.newpath.error.exists", "A file already exists at this path");
+			std::error_code legacyError;
+			if (std::filesystem::exists(std::filesystem::path(std::string(WLD_GAME_DIR)) / key, legacyError))
+				return Wui::Tr("panel.material.newpath.error.exists", "A file already exists at this path");
+			return {};
+		}
+
 		// 扫描内容根下的贴图资产(下拉选择用);按扩展名白名单过滤。
 		std::vector<std::string> ScanTextureCatalog()
 		{
@@ -76,6 +104,8 @@ namespace World
 	{
 		const std::string key = path.empty() ? std::string("(unsaved)") : MaterialLibrary::NormalizePath(path);
 		m_PanelId = "material:" + key;
+		// U2d:换文档(打开/首次保存)后重置"路径校验已被触发"状态 —— 面板一进来不该标红空路径。
+		m_NewPathAttempted = false;
 		std::filesystem::path file(key);
 		std::string name = file.stem().string();
 		if (name.empty())
@@ -464,8 +494,20 @@ namespace World
 			return;
 		// 新建材质走内容浏览器(Create → New Material);这里只保存已落盘的材质。
 		std::string path = m_Path.empty() ? m_NewPathBuffer : m_Path;
+		// U2d:未落盘材质的"另存为"路径先过行内校验(空 / 非法字符 / 目标已存在)→ 拒绝保存。
+		if (m_Path.empty() && !path.empty())
+		{
+			const std::string pathError = NewMaterialPathError(path);
+			if (!pathError.empty())
+			{
+				m_Status = Wui::Tr("panel.material.status.save_failed", "Save failed: ") + pathError;
+				m_StatusIsError = true;
+				return;
+			}
+		}
 		if (path.empty())
 		{
+			m_NewPathAttempted = true;   // 让行内也标出"路径不能为空"
 			m_Status = Wui::Tr("panel.material.status.no_path",
 				"Save failed: no path (create new materials as .wmat in the Content Browser)");
 			m_StatusIsError = true;
@@ -532,7 +574,12 @@ namespace World
 					"Not saved to disk yet: create a material in the Content Browser"), theme.TextMuted, 12.0f);
 			y += 16.0f;
 			const Wui::WuiRect field { x, y, rect.W - 20.0f, 22.0f };
-			Wui::TextField(ctx, Wui::HashId("material.newpath"), field, m_NewPathBuffer, theme);
+			// U2d:目标路径行内校验(空 / 非法字符 / 目标已存在)。空路径只在用户点过一次 Save
+			// 之后才标红(字段初始就是空的,不算用户输错);错误行由 TextFieldEx 画在字段下方。
+			const std::string pathError = NewMaterialPathError(m_NewPathBuffer);
+			const std::string shownError = m_NewPathBuffer.empty()
+				? (m_NewPathAttempted ? pathError : std::string()) : pathError;
+			Wui::TextFieldEx(ctx, Wui::HashId("material.newpath"), field, m_NewPathBuffer, theme, shownError);
 			y += 28.0f;
 		}
 	}
@@ -728,6 +775,10 @@ namespace World
 		}
 
 		DrawToolbar(ctx, parameterRect, host);
-		DrawParameters(ctx, { parameterRect.X, parameterRect.Y + 56.0f, parameterRect.W, parameterRect.H - 56.0f }, host);
+		// U2d:未落盘材质的"另存为"字段(22px)与它的行内错误行(Caption+3px)都占工具栏区,
+		// 参数区按这段高度整体下移,错误行才不会被参数内容盖住(该字段只在 m_Path 为空时出现)。
+		const float unsavedPathReserve = m_Path.empty() ? 22.0f + theme.FontSizeCaption + 5.0f : 0.0f;
+		DrawParameters(ctx, { parameterRect.X, parameterRect.Y + 56.0f + unsavedPathReserve,
+			parameterRect.W, parameterRect.H - 56.0f - unsavedPathReserve }, host);
 	}
 }

@@ -62,6 +62,7 @@ namespace World
 		Ref<Material> m_Material;
 		std::string m_Path;                 // 当前材质路径(空 = 未落盘新材质)
 		std::string m_NewPathBuffer;        // 未落盘时的目标路径输入
+		bool m_NewPathAttempted = false;    // U2d:点过 Save 之后才把"路径不能为空"标成行内错误
 		std::string m_Status;               // 最近一次操作结果
 		bool m_StatusIsError = false;
 		std::vector<std::string> m_MaterialPaths;

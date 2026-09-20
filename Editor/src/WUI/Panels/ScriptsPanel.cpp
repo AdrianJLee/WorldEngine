@@ -195,6 +195,31 @@ namespace World
 				[](const SceneRow& left, const SceneRow& right) { return left.Tag < right.Tag; });
 		}
 
+		// ---- 底部状态行(也是无障碍节点,便于 AI 断言动作结果);空状态分支与正常分支共用 ----
+		const auto drawStatusLine = [&]()
+		{
+			const Wui::WuiRect statusRect { rect.X + 8.0f, rect.Y + rect.H - 22.0f, rect.W - 16.0f, 20.0f };
+			const std::string status = m_Status.empty() ? std::string("idle") : m_Status;
+			RegisterReadonlyNode(Wui::HashId("scripts.status"), "status", "scripts status", status, statusRect);
+			Wui::Label(ctx, { statusRect.X + 2.0f, statusRect.Y + 3.0f },
+				TruncateUtf8(status, 150), m_StatusIsError ? theme.Accent : theme.TextMuted, 12.0f);
+		};
+
+		// ---- U2d:场景里没有脚本、磁盘上也没有脚本 → 统一空状态 ----
+		// 工具栏与底部状态行保持原样;有任一脚本时下面两段与改动前逐帧一致。
+		if (sceneRows.empty() && m_DiskScripts.empty())
+		{
+			const Wui::WuiRect emptyRect { rect.X + 8.0f, y, std::max(0.0f, rect.W - 16.0f),
+				std::max(0.0f, rect.Y + rect.H - kStatusReserve - y - 8.0f) };
+			(void)Wui::EmptyState(ctx, emptyRect, std::string(),
+				Wui::Tr("panel.scripts.empty.title", "No scripts yet"),
+				Wui::Tr("panel.scripts.empty.hint",
+					"Create a .luau script in the Content Browser, then open it here."),
+				std::string(), 0, theme);
+			drawStatusLine();
+			return;
+		}
+
 		const std::string sceneHeader = "Scene Scripts (" + std::to_string(sceneRows.size()) + ")";
 		Wui::SectionHeader(ctx, { rect.X + 8.0f, y, rect.W - 16.0f, 20.0f }, sceneHeader, theme.Accent, theme);
 		y += 22.0f;
@@ -297,11 +322,6 @@ namespace World
 			y += 16.0f;
 		}
 
-		// ---- 底部状态行(也是无障碍节点,便于 AI 断言动作结果)----
-		const Wui::WuiRect statusRect { rect.X + 8.0f, rect.Y + rect.H - 22.0f, rect.W - 16.0f, 20.0f };
-		const std::string status = m_Status.empty() ? std::string("idle") : m_Status;
-		RegisterReadonlyNode(Wui::HashId("scripts.status"), "status", "scripts status", status, statusRect);
-		Wui::Label(ctx, { statusRect.X + 2.0f, statusRect.Y + 3.0f },
-			TruncateUtf8(status, 150), m_StatusIsError ? theme.Accent : theme.TextMuted, 12.0f);
+		drawStatusLine();
 	}
 }

@@ -7,6 +7,7 @@
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Gameplay/Prefab.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
@@ -171,6 +172,31 @@ namespace World
 		Wui::LayoutWidgetTree(m_Root, { rect.X + 4, rect.Y + 4, rect.W - 8, rect.H - 8 });
 		Wui::WuiPaintContext paint(ctx);
 		m_Root->Paint(paint);
+
+		// ---- U2d:场景里没有任何实体 → 统一空状态 ----
+		// 只替换"列表内容"的表达;拖拽设父/拖入 .wprefab/空白处右键等既有入口全部保留在下面。
+		if (entities.empty())
+		{
+			const Wui::WuiRect emptyRect { rect.X + 8.0f, rect.Y + 8.0f,
+				std::max(0.0f, rect.W - 16.0f), std::max(0.0f, rect.H - 16.0f) };
+			const bool createRequested = Wui::EmptyState(ctx, emptyRect, std::string(),
+				Wui::Tr("panel.hierarchy.empty.title", "No entities in this scene"),
+				Wui::Tr("panel.hierarchy.empty.hint",
+					"Drag a model in from the Content Browser, or create an entity here."),
+				Wui::Tr("panel.hierarchy.empty.action", "Create Empty Entity"),
+				Wui::HashId("hierarchy.empty.create"), theme);
+			if (createRequested)
+			{
+				// 与空白处右键菜单的 "Create Empty Entity" 同一条路径(结构写走延迟命令)。
+				Entity created;
+				if (scene->DeferStructuralChange([&created](Scene& s)
+					{ created = Entity::CreateEntity(&s, "Empty Entity"); }) && created.IsValid())
+				{
+					host.SetSelectedEntity(created);
+					host.MarkDocumentDirty();
+				}
+			}
+		}
 
 		// ---- W3b-2:拖拽设父(目标行 = 成为其子节点;非法目标由内核环路检测拒绝)----
 		// 交互范式与 ContentBrowser 一致:按下即 BeginDrag(移动 >4px 才真正激活),

@@ -5,6 +5,7 @@
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
+#include <algorithm>
 #include <ctime>
 
 namespace World
@@ -46,6 +47,43 @@ namespace World
 		float y = rect.Y + 8.0f;
 		Label(ctx, { rect.X + 10.0f, y }, "Save Slots", theme.Text, 15.0f);
 		y += 26.0f;
+
+		// 底部状态行 + 存档目录:空状态分支与槽位分支共用(正常分支的绘制顺序不变)。
+		const auto drawFooter = [&]()
+		{
+			if (!m_Status.empty() && static_cast<double>(ctx.Frame()) < m_StatusUntil)
+				Label(ctx, { rect.X + 10.0f, y + 4.0f }, m_Status, theme.TextMuted, 13.0f);
+			Label(ctx, { rect.X + 10.0f, rect.Y + rect.H - 22.0f },
+				Wui::Tr("panel.save.dir", "Directory: ") + saves->GetSaveRoot().string(), theme.TextMuted, 12.0f);
+		};
+
+		// ---- U2d:一个存档都没有 → 统一空状态 ----
+		// 槽位行只在真的有存档内容时出现(否则"5 行 (empty)"与空状态是两套重复表达)。
+		if (bySlot.empty())
+		{
+			const float emptyTop = y;
+			const float emptyBottom = rect.Y + rect.H - 26.0f;   // 底部目录行上方
+			const Wui::WuiRect emptyRect { rect.X + 8.0f, emptyTop, std::max(0.0f, rect.W - 16.0f),
+				std::max(0.0f, emptyBottom - emptyTop) };
+			const bool saveRequested = Wui::EmptyState(ctx, emptyRect, std::string(),
+				Wui::Tr("panel.save.empty.title", "No saves yet"),
+				Wui::Tr("panel.save.empty.hint",
+					"Save the current scene to create the first save slot."),
+				Wui::Tr("panel.save.empty.action", "Save to Slot 0"),
+				Wui::HashId("save.empty.create"), theme);
+			if (saveRequested)
+			{
+				// 与槽位行的 Save 按钮同一条路径。
+				if (saves->Save(0, "current"))
+					m_Status = Wui::Tr("panel.save.status.saved", "Saved to slot ") + std::to_string(0);
+				else
+					m_Status = Wui::Tr("panel.save.status.save_failed", "Save failed: ") + saves->GetLastError();
+				m_StatusUntil = static_cast<double>(ctx.Frame()) + 300.0;
+			}
+			y = rect.Y + rect.H - 46.0f;   // 状态行落在目录行上方
+			drawFooter();
+			return;
+		}
 
 		const float actionW = 62.0f;
 		const float rowH = 26.0f;
@@ -115,10 +153,6 @@ namespace World
 			y += rowH + 6.0f;
 		}
 
-		if (!m_Status.empty() && static_cast<double>(ctx.Frame()) < m_StatusUntil)
-			Label(ctx, { rect.X + 10.0f, y + 4.0f }, m_Status, theme.TextMuted, 13.0f);
-
-		Label(ctx, { rect.X + 10.0f, rect.Y + rect.H - 22.0f },
-			Wui::Tr("panel.save.dir", "Directory: ") + saves->GetSaveRoot().string(), theme.TextMuted, 12.0f);
+		drawFooter();
 	}
 }

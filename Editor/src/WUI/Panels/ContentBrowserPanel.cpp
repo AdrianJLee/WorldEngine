@@ -52,6 +52,50 @@ namespace World
 			const std::string text = relative.generic_string();
 			return !text.empty() && text.rfind("..", 0) != 0;
 		}
+
+		// 仅按 ASCII 大小写比较:重命名到"仅大小写不同"的名字在 Windows 上是合法操作,
+		// 不能把它当成"同目录已有同名文件"拦掉。
+		bool EqualsNoCaseAscii(const std::string& left, const std::string& right)
+		{
+			if (left.size() != right.size())
+				return false;
+			for (size_t index = 0; index < left.size(); ++index)
+			{
+				const auto lower = [](unsigned char value) -> unsigned char
+				{
+					return value >= 'A' && value <= 'Z'
+						? static_cast<unsigned char>(value - 'A' + 'a') : value;
+				};
+				if (lower(static_cast<unsigned char>(left[index]))
+					!= lower(static_cast<unsigned char>(right[index])))
+					return false;
+			}
+			return true;
+		}
+
+		// U2d 重命名校验:空 / 非法字符 / 同目录重名 → 返回给用户看的具体原因(空字符串 = 可提交)。
+		// 与目标同名(含仅大小写不同)合法:ApplyRename 对它是无操作或只改文件名大小写。
+		std::string RenameErrorFor(const std::filesystem::path& target, const std::string& newName)
+		{
+			if (newName.empty())
+				return Wui::Tr("panel.content_browser.rename.error.empty", "Name cannot be empty");
+			for (const char character : newName)
+			{
+				if (character == '\\' || character == '/' || character == ':' || character == '*'
+					|| character == '?' || character == '"' || character == '<' || character == '>'
+					|| character == '|')
+					return Wui::Tr("panel.content_browser.rename.error.illegal",
+						"Name contains illegal characters (\\ / : * ? \" < > |)");
+			}
+			if (!EqualsNoCaseAscii(newName, target.filename().string()))
+			{
+				std::error_code existsError;
+				if (std::filesystem::exists(target.parent_path() / newName, existsError))
+					return Wui::Tr("panel.content_browser.rename.error.duplicate",
+						"An item with this name already exists in this folder");
+			}
+			return {};
+		}
 	}
 
 	ContentBrowserPanel::ContentBrowserPanel(PanelHost& host)
@@ -575,24 +619,47 @@ namespace World
 	void ContentBrowserPanel::RenderRenameField(Wui::WuiContext& ctx, const std::filesystem::path& path, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
 	{
 		const Wui::WuiId renameId = Wui::HashId("browser.rename");
-		bool cancelled = false;
-		if (TextField(ctx, renameId, rect, m_Model.RenameEdit, theme, &cancelled))
+		// U2d:输入非法(空 / 非法字符 / 同目录重名)时用 TextFieldEx 行内显示原因并拒绝提交。
+		// TextFieldEx 没有 cancelled 回调,所以 Esc 取消在这里先于控件处理(否则会把"取消"
+		// 当成失焦提交,把非法名字写进 ApplyRename —— 语义就变了)。
+		const bool cancelRequested = ctx.Focus() == renameId && ctx.IsKeyPressed(KeyCodes::Escape);
+		const std::string error = RenameErrorFor(path, m_Model.RenameEdit);
+		const bool submitted = Wui::TextFieldEx(ctx, renameId, rect, m_Model.RenameEdit, theme, error);
+		if (cancelRequested)
 		{
-			// 回车提交
-			ApplyRename(path, m_Model.RenameEdit);
-		}
-		else if (cancelled)
-		{
-			// Escape 丢弃
+			// Escape 丢弃(与旧 TextField 的 cancelled 语义相同)。
 			m_Model.RenameTarget.clear();
 			m_Model.RenameEdit.clear();
 			m_Model.RenameActive = false;
 			m_TreeRenameTarget.clear();
 		}
+		else if (submitted)
+		{
+			// 回车提交:非法名字拒绝提交。TextFieldCore 在提交帧会自己失焦,这里把焦点还给
+			// 输入框 —— 否则下一帧就按"失焦提交"把框收掉,错误只闪一帧、也没法继续改。
+			if (error.empty())
+				ApplyRename(path, m_Model.RenameEdit);
+			else
+			{
+				WLD_CORE_WARN("[browser] rename rejected: {0}", error);
+				ctx.SetFocus(renameId);
+				ctx.SetTextInputActive(true);
+			}
+		}
 		else if (m_Model.RenameActive && ctx.Focus() != renameId)
 		{
-			// 失焦提交:点选其他条目或空白处时收起重命名框。
-			ApplyRename(path, m_Model.RenameEdit);
+			// 失焦提交:点选其他条目或空白处时收起重命名框。非法名字不提交(原名字不变,
+			// 也不留一个失去焦点、无法继续编辑的输入框)。
+			if (error.empty())
+				ApplyRename(path, m_Model.RenameEdit);
+			else
+			{
+				WLD_CORE_WARN("[browser] rename rejected on blur: {0}", error);
+				m_Model.RenameTarget.clear();
+				m_Model.RenameEdit.clear();
+				m_Model.RenameActive = false;
+				m_TreeRenameTarget.clear();
+			}
 		}
 	}
 
@@ -1075,7 +1142,42 @@ namespace World
 			return selected || hovered;
 		};
 
-		if (m_Model.ListMode)
+		if (paths.empty())
+		{
+			// U2d:两种"空"分开表达 —— "目录本身为空"与"搜索无结果"不是一回事。
+			const Wui::WuiRect emptyRect { content.X + 12.0f, content.Y + 12.0f,
+				std::max(0.0f, content.W - 24.0f), std::max(0.0f, content.H - 24.0f) };
+			if (searching)
+			{
+				const bool clearRequested = Wui::EmptyState(ctx, emptyRect, std::string(),
+					Wui::Tr("panel.content_browser.search.empty_title", "No search results"),
+					Wui::Tr("panel.content_browser.search.empty_hint",
+						"Nothing matches in this folder or its subfolders. Try another keyword, or clear the search."),
+					Wui::Tr("panel.content_browser.search.empty_action", "Clear Search"),
+					Wui::HashId("browser.search.clear"), theme);
+				if (clearRequested)
+				{
+					// 真的清掉搜索词并让下一帧重新扫描目录(搜索框缓冲与提交值一起清)。
+					m_Model.Search[0] = 0;
+					m_Model.SearchEdit.clear();
+					m_Model.SearchResults.clear();
+					m_Model.ListingDirty = true;
+					m_Model.ListingStamp = {};
+				}
+			}
+			else
+			{
+				const bool createRequested = Wui::EmptyState(ctx, emptyRect, std::string(),
+					Wui::Tr("panel.content_browser.empty.title", "This folder is empty"),
+					Wui::Tr("panel.content_browser.empty.hint",
+						"Create a folder here, or drop a .gltf / .glb model into the window to import it."),
+					Wui::Tr("panel.content_browser.empty.action", "New Folder"),
+					Wui::HashId("browser.empty.newfolder"), theme);
+				if (createRequested)
+					CreateFolder(ctx);
+			}
+		}
+		else if (m_Model.ListMode)
 		{
 			const float rowH = 24;
 			Label(ctx, { content.X + 8, content.Y + 4 }, "Name / Type / Size", theme.TextMuted, 13.0f);

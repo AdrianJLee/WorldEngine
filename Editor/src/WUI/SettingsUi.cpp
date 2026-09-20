@@ -248,6 +248,9 @@ namespace World::Editor
 
 			// 无障碍节点:在控件自己登记之后**覆盖**同 id 节点,补上设置名/tooltip/术语写法
 			// (控件自带的节点不含描述符信息,脚本按 "settings.<id>" 找不到语义)。
+			// 但 value 要用**控件自己登记的**那份:文本行的"正在编辑的缓冲"只有控件知道,
+			// 用描述符的已提交值会把实时输入藏起来(实测:ui.type 后树里看不到变化)。
+			const Wui::WuiAccessNode* live = Wui::WuiAccessibility::Get().Find(id);
 			Wui::WuiAccessNode node;
 			node.Id = id;
 			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
@@ -257,7 +260,7 @@ namespace World::Editor
 			node.Kind = (descriptor.Type == SettingType::Enum && descriptor.Searchable)
 				? "search-combo" : AccessKind(descriptor.Type);
 			node.Label = AccessLabel(label);
-			node.Value = current;
+			node.Value = live ? live->Value : current;
 			node.Rect = descriptor.Type == SettingType::Bool
 				? Wui::WuiRect { x, y + 3.0f, kLabelColumn - 8.0f, 20.0f }
 				: controlRect;

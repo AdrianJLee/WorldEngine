@@ -184,6 +184,32 @@ namespace World::Wui
 	bool Splitter(WuiContext& ctx, WuiId id, const WuiRect& rect, bool vertical, float& value,
 		float minValue, float maxValue, const WuiTheme& theme);
 
+	// ---- P4-UX12 / U2C:向量字段 / 空状态 ----
+	// 向量字段:三个分量同格(`X [ ]  Y [ ]  Z [ ]`),点进去输入、按住拖动微调(复用 DragFloat 的手感)。
+	//  layout 0 = 横排(默认,放得下时用):三个分量按 rect.W 等分,分量之间留 theme.PadSmall;
+	//  layout 1 = 竖排(窄面板):每行"标签 + 输入",三行等分 rect.H。
+	//  每个分量左侧 12px 画 X/Y/Z 标签(theme.TextMuted + Caption 字号);拖动中的分量用 theme.Accent
+	//  高亮(轴标签 + 输入框描边 + 数值文本)。
+	//  数值文本与编辑缓冲都是两位小数(同一套文本,避免"看到的数"和"点进去的数"不一致)。
+	//  交互:按下即取焦点;水平位移 > 1.5px 进入拖动(值 = 按下瞬间的值 + 位移 × speed,夹在
+	//  [minValue,maxValue]);没拖动就松手 = 进入文本编辑(Enter 提交 / Escape 取消 / 点别处提交,
+	//  复用 DragFloat 的同一套实现);焦点在整体上且不在编辑态时,Up/Down 按 |speed| 调"当前轴"
+	//  (最近一次按下的分量,默认第一个)。minValue >= maxValue = 无界(与 DragFloat 的哨兵约定一致)。
+	//  无障碍:整体 kind="vec3-field"、value="x,y,z";三个分量各登记一个 kind="vec3-axis" 子节点
+	//  (id = DerivedChildId(id, ".axis.", i)、label="X"/"Y"/"Z"、value = 该分量的字符串化数值、
+	//  interactive=true、不是独立焦点项)。返回值 = 本帧 value 是否真的被改动。
+	bool Vec3Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec3& value, float speed,
+		float minValue, float maxValue, const WuiTheme& theme, int layout = 0);
+	// 空状态(列表/面板没有内容时的统一表达):垂直居中依次排 glyph(可空,FontSizeHeading +
+	//  theme.TextMuted)→ title(FontSizeTitle + theme.Text)→ hint(可空,FontSizeSmall + theme.TextMuted,
+	//  按 rect 宽度自动换行、最多两行、超宽按 EllipsizeToWidth 语义补 '…')→ action 按钮(可空,
+	//  居中,宽 = 文案宽 + 24px 内边距)。左右各留 24px 安全边距;内容装不下时从 rect 顶部开始。
+	//  视觉克制:**不画**外框/背景块(面板自己已经有背景),只画文字与按钮。
+	//  无障碍:一个 kind="empty-state" 节点(label=title、value=hint、interactive=false);有 action 时
+	//  按钮由 Button 自己登记(可脚本点击)。返回值 = 用户点了 action 按钮。
+	bool EmptyState(WuiContext& ctx, const WuiRect& rect, const std::string& glyph, const std::string& title,
+		const std::string& hint, const std::string& actionLabel, WuiId actionId, const WuiTheme& theme);
+
 	// 标准窗口控制(最小化/最大化或还原/关闭),绘制在 bar 右侧;返回被点击的按钮。
 	enum class WindowControl : uint8_t
 	{
