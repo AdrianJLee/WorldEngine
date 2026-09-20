@@ -97,9 +97,12 @@ namespace World::Wui
 	{
 		if (Application::HasInstance() && !m_UseLocalInput)
 		{
-			m_Viewport = { static_cast<float>(Application::Get().GetWindow().GetWidth()),
+			m_PhysicalViewport = { static_cast<float>(Application::Get().GetWindow().GetWidth()),
 				static_cast<float>(Application::Get().GetWindow().GetHeight()) };
 		}
+		// P4-UX2c:面板按**设计单位**布局(物理像素 / 内容缩放),渲染时由视口映射放大。
+		const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+		m_Viewport = m_PhysicalViewport / scale;
 		const double now = glfwGetTime();
 		if (m_LastTime > 0 && now > m_LastTime)
 			m_Fps = static_cast<float>(1.0 / (now - m_LastTime));
@@ -114,7 +117,9 @@ namespace World::Wui
 	void WuiRhiBackend::UseLocalInput(glm::vec2 viewport)
 	{
 		m_UseLocalInput = true;
-		m_Viewport = viewport;
+		// 调用方传的是窗口客户区(物理像素);设计单位在 BeginFrame 里换算。
+		m_PhysicalViewport = viewport;
+		m_Viewport = viewport / (UiScale() > 0.0f ? UiScale() : 1.0f);
 		m_CursorWindow = nullptr;
 	}
 
@@ -288,8 +293,10 @@ namespace World::Wui
 		// 命中测试、行宽与 caret 定位都走这里);幂等:设备重建时重新注册。
 		SetTextMeasureHook(this, [this](std::string_view text, float fontSize, WuiFontFamily family)
 		{
-			// P4-UX1:UI 字号缩放对"度量"和"绘制"必须同时生效,否则 caret/命中会错位。
-			return MeasureText(text, fontSize * UiFontScale(), family, false);
+			// P4-UX2c:度量也要在"设计单位"上回答:按物理像素量完再除以缩放,
+			// 与 DrawText 的摆放口径一致(caret/命中才不会错位)。
+			const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+			return MeasureText(text, fontSize * scale, family, false) / scale;
 		});
 		m_Vertices.clear();
 		m_Indices.clear();
@@ -557,41 +564,50 @@ namespace World::Wui
 		const uint32_t slot = FrameSlot();
 		if (!m_Cmds[slot])
 			return;
+		// 设计单位 → 物理像素(P4-UX2c 内容缩放)。
+		const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+		const float px = rect.X * scale;
+		const float py = rect.Y * scale;
+		const float pw = rect.W * scale;
+		const float ph = rect.H * scale;
 		Rhi::Scissor scissor;
-		scissor.X = std::max(0, static_cast<int32_t>(rect.X));
-		scissor.Width = static_cast<uint32_t>(std::max(0.0f, rect.W));
+		scissor.X = std::max(0, static_cast<int32_t>(px));
+		scissor.Width = static_cast<uint32_t>(std::max(0.0f, pw));
 		if (m_IsVulkan)
 		{
-			scissor.Y = std::max(0, static_cast<int32_t>(rect.Y));
+			scissor.Y = std::max(0, static_cast<int32_t>(py));
 		}
 		else
 		{
-			const int32_t top = static_cast<int32_t>(rect.Y);
-			const int32_t height = std::max(0, static_cast<int32_t>(rect.H));
-			scissor.Y = std::max(0, static_cast<int32_t>(m_Viewport.y) - top - height);
+			const int32_t top = static_cast<int32_t>(py);
+			const int32_t height = std::max(0, static_cast<int32_t>(ph));
+			scissor.Y = std::max(0, static_cast<int32_t>(m_PhysicalViewport.y) - top - height);
 		}
-		scissor.Height = static_cast<uint32_t>(std::max(0.0f, rect.H));
+		scissor.Height = static_cast<uint32_t>(std::max(0.0f, ph));
 			m_Cmds[slot]->SetScissor(scissor);
 	}
 
 	void WuiRhiBackend::DrawText(const WuiDrawCommand& command)
 	{
-		// P4-UX1:统一字号缩放(编辑器偏好"UI 缩放";默认 1.15,用户反馈字体偏小)。
-		const float fontSize = (command.FontSize > 0 ? command.FontSize : 15.0f) * UiFontScale();
+		// P4-UX2c:命令里的字号是**设计单位**;栅格化按物理像素(design * UiScale),
+		// 摆放/推进仍用设计单位(视口映射负责放大),否则字与布局会错位。
+		const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+		const float designSize = command.FontSize > 0 ? command.FontSize : 15.0f;
+		const float pixelSize = designSize * scale;
 		FontFace* baselineFace = PrimaryFace(command.Family, command.Bold);
-		float baseline = command.Rect.Y + fontSize * 0.8f;
+		float baseline = command.Rect.Y + designSize * 0.8f;
 		if (baselineFace && baselineFace->Info)
 		{
 			int ascent = 0;
 			stbtt_GetFontVMetrics(baselineFace->Info, &ascent, nullptr, nullptr);
-			baseline = command.Rect.Y + ascent * stbtt_ScaleForPixelHeight(baselineFace->Info, fontSize);
+			baseline = command.Rect.Y + ascent * stbtt_ScaleForPixelHeight(baselineFace->Info, pixelSize) / scale;
 		}
 
 		if (command.TextSelStart >= 0 && command.TextSelEnd > command.TextSelStart)
 		{
-			const float x0 = MeasureText(command.Text, fontSize, command.Family, command.Bold, command.TextSelStart);
-			const float x1 = MeasureText(command.Text, fontSize, command.Family, command.Bold, command.TextSelEnd);
-			PushSolidQuad({ command.Rect.X + x0, command.Rect.Y, x1 - x0, fontSize },
+			const float x0 = MeasureText(command.Text, pixelSize, command.Family, command.Bold, command.TextSelStart) / scale;
+			const float x1 = MeasureText(command.Text, pixelSize, command.Family, command.Bold, command.TextSelEnd) / scale;
+			PushSolidQuad({ command.Rect.X + x0, command.Rect.Y, x1 - x0, designSize },
 				{ 0.3f, 0.5f, 0.9f, 0.45f });
 		}
 
@@ -602,19 +618,19 @@ namespace World::Wui
 		for (uint32_t cp : codepoints)
 		{
 			FontFace* face = FaceForCodepoint(command.Family, command.Bold, cp);
-			const float advance = AdvanceOf(face, cp, fontSize);
+			const float advance = AdvanceOf(face, cp, pixelSize) / scale;
 			// '\t' 按 4 空格推进但无字形;'\r'/'\n' 不可见。
 			if (face && face->Info && cp != '\t' && cp != '\r' && cp != '\n')
 			{
-				Glyph& glyph = Bake(*face, cp, fontSize);
+				Glyph& glyph = Bake(*face, cp, pixelSize);
 				// 按烘焙像素尺寸缩放;字号分桶后 sizeRatio≈1(大字号不再被放大糊)。
-				const float sizeRatio = fontSize / (glyph.PixelSize > 0.0f ? glyph.PixelSize : face->BaseSize);
-				const float w = glyph.W * sizeRatio;
-				const float h = glyph.H * sizeRatio;
+				const float sizeRatio = pixelSize / (glyph.PixelSize > 0.0f ? glyph.PixelSize : face->BaseSize);
+				const float w = glyph.W * sizeRatio / scale;
+				const float h = glyph.H * sizeRatio / scale;
 				if (w > 0 && h > 0)
 				{
 					SetActiveTexture(face->AtlasTexture);
-					PushQuad({ pen + glyph.OffsetX * sizeRatio, baseline + glyph.OffsetY * sizeRatio, w, h },
+					PushQuad({ pen + glyph.OffsetX * sizeRatio / scale, baseline + glyph.OffsetY * sizeRatio / scale, w, h },
 						command.Color,
 						{ glyph.X / face->AtlasW, glyph.Y / face->AtlasH, glyph.W / face->AtlasW, glyph.H / face->AtlasH });
 				}
@@ -625,16 +641,18 @@ namespace World::Wui
 		// W9 代码编辑器 caret:按真实度量定位,0.5s 闪烁,1.5px 宽。
 		if (command.TextCaretByte >= 0)
 		{
-			const float caretX = command.Rect.X + MeasureText(command.Text, fontSize, command.Family, command.Bold, command.TextCaretByte);
+			const float caretX = command.Rect.X +
+				MeasureText(command.Text, pixelSize, command.Family, command.Bold, command.TextCaretByte) / scale;
 			const bool visible = std::fmod(glfwGetTime(), 1.0) < 0.5;
 			if (visible)
-				PushSolidQuad({ caretX, command.Rect.Y, 1.5f, fontSize }, command.Color);
+				PushSolidQuad({ caretX, command.Rect.Y, 1.5f, designSize }, command.Color);
 		}
 
 		if (command.TextCursorByte >= 0)
 		{
-			const float cursorX = command.Rect.X + MeasureText(command.Text, fontSize, command.Family, command.Bold, command.TextCursorByte);
-			PushSolidQuad({ cursorX, command.Rect.Y, 1.0f, fontSize }, command.Color);
+			const float cursorX = command.Rect.X +
+				MeasureText(command.Text, pixelSize, command.Family, command.Bold, command.TextCursorByte) / scale;
+			PushSolidQuad({ cursorX, command.Rect.Y, 1.0f, designSize }, command.Color);
 		}
 	}
 
@@ -746,8 +764,10 @@ namespace World::Wui
 		}
 		else
 		{
-			const uint32_t width = std::max(1u, static_cast<uint32_t>(m_Viewport.x));
-			const uint32_t height = std::max(1u, static_cast<uint32_t>(m_Viewport.y));
+			// GL 走"离屏 UI 目标 + blit 到后缓冲":目标尺寸必须是**物理像素**,
+			// 否则内容缩放后 UI 只占左上角一小块(P4-UX2c)。
+			const uint32_t width = std::max(1u, static_cast<uint32_t>(m_PhysicalViewport.x));
+			const uint32_t height = std::max(1u, static_cast<uint32_t>(m_PhysicalViewport.y));
 			if (m_UiWidth != width || m_UiHeight != height || !m_UiFramebuffer)
 			{
 				m_UiWidth = width;
@@ -833,7 +853,8 @@ namespace World::Wui
 		Rhi::ClearValue clear;
 		clear.Color = { 0, 0, 0, 0 };
 		m_Cmds[slot]->BeginRenderPass(pass, framebuffer, { clear });
-		m_Cmds[slot]->SetViewport({ 0, 0, m_Viewport.x, m_Viewport.y, 0.0f, 1.0f });
+		// RHI 视口用**物理像素**:设计单位 → 像素的放大由视口/投影映射完成(P4-UX2c)。
+		m_Cmds[slot]->SetViewport({ 0, 0, m_PhysicalViewport.x, m_PhysicalViewport.y, 0.0f, 1.0f });
 		ApplyScissor(m_CurrentClip);
 		DrawList(commands);
 		DrawList(overlayCommands);

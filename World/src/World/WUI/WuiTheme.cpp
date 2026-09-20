@@ -94,8 +94,16 @@ namespace World::Wui
 					return parsed;
 				WLD_CORE_WARN("WLD_UI_SCALE 忽略(期望 0.5..2.0,收到 '{0}')", text);
 			}
-			// 默认 1.15:用户反馈"当前引擎字体偏小"。UI 缩放只改字,不改布局。
-			return 1.15f;
+			// 默认随显示 DPI 走(96 DPI → 1.30):用户反馈"全屏后 UI 还是有点小"。
+			// 这是**内容缩放**(布局 + 控件 + 文字一起),不是只放大文字。
+			float dpi = 96.0f;
+#if defined(_WIN32)
+			const UINT systemDpi = GetDpiForSystem();
+			if (systemDpi > 0)
+				dpi = static_cast<float>(systemDpi);
+#endif
+			const float recommended = 1.30f * (dpi / 96.0f);
+			return std::clamp(recommended, 1.0f, 1.8f);
 		}
 
 		struct ThemeState
@@ -167,12 +175,12 @@ namespace World::Wui
 		return luminance < 0.5f;
 	}
 
-	float UiFontScale()
+	float UiScale()
 	{
 		return State().FontScale;
 	}
 
-	void SetUiFontScale(float scale)
+	void SetUiScale(float scale)
 	{
 		ThemeState& state = State();
 		state.FontScale = std::clamp(scale, 0.5f, 2.0f);

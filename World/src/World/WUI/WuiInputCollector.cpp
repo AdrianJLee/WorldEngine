@@ -67,7 +67,10 @@ namespace World::Wui
 
 	void WuiInputCollector::OnMouseMove(float x, float y)
 	{
-		m_MousePos = { x, y };
+		// P4-UX2c:输入是物理像素,面板布局是设计单位(window / UiScale) → 这里换算,
+		// 否则内容缩放后所有命中都会偏移。
+		const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+		m_MousePos = { x / scale, y / scale };
 	}
 
 	void WuiInputCollector::OnMouseScroll(float dx, float dy)

@@ -63,10 +63,6 @@ namespace World::Wui
 	// 模式每变一次 +1;宿主(EditorShell/独立窗口)据此刷新自己缓存的主题副本。
 	WLD_API uint32_t ThemeGeneration();
 	WLD_API bool IsDarkTheme();
-	// UI 字号缩放(编辑器偏好"UI 缩放";`WLD_UI_SCALE` 覆盖,范围 0.8..1.5,默认 1.15)。
-	// 只作用于文字绘制与度量(布局数值不变),因此不会改变面板结构。
-	WLD_API float UiFontScale();
-	WLD_API void SetUiFontScale(float scale);
 
 	void Panel(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiTheme& theme);
 	void Label(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const WuiColor& color, float fontSize);

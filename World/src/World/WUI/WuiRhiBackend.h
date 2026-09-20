@@ -105,7 +105,9 @@ namespace World::Wui
 		bool m_UseLocalInput = false;
 		void* m_CursorWindow = nullptr;
 
+		// 设计单位视口(= 物理像素 / UiScale)用于布局与投影;物理视口用于 RHI 视口/裁剪。
 		glm::vec2 m_Viewport {};
+		glm::vec2 m_PhysicalViewport {};
 		float m_Fps = 0;
 		double m_LastTime = -1;
 		void* m_DeviceKey = nullptr;

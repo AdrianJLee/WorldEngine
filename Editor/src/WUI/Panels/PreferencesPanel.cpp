@@ -25,13 +25,18 @@ namespace World
 		}
 
 		// 一行"标签 + 控件"的标准排版(标签左、控件右、说明在更右)。
-		// 排版约定:标签 x,控件 x+300(宽 180),说明文字 x+500。
-		void Row(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, float x, float y,
+		// 排版约定:标签 x,控件 x+300(宽 180),说明文字右对齐到行尾(放不下就省略)。
+		void Row(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, float x, float y, float rowWidth,
 			const Wui::LocalizedLabel& label, const std::string& note = std::string())
 		{
 			Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
 			if (!note.empty())
-				Wui::Label(ctx, { x + 500.0f, y + 3.0f }, note, theme.TextMuted, 12.0f);
+			{
+				const float noteWidth = ctx.MeasureTextWidth(note, 12.0f);
+				const float noteX = x + rowWidth - noteWidth;
+				if (noteX >= x + 490.0f)   // 与控件列(到 x+480)保持间距
+					Wui::Label(ctx, { noteX, y + 3.0f }, note, theme.TextMuted, 12.0f);
+			}
 		}
 	}
 
@@ -95,7 +100,7 @@ namespace World
 			for (const LanguageOption& option : kLanguages)
 				options.push_back(Wui::Tr(option.LabelKey, option.EnglishLabel));
 			int selected = LanguageIndex(preferences.Data().Language);
-			Row(ctx, theme, x, y, Wui::TrLabel("prefs.language", "Language"),
+			Row(ctx, theme, x, y, rect.W, Wui::TrLabel("prefs.language", "Language"),
 				Wui::Tr("prefs.language.note", "Applies immediately"));
 			if (Wui::Combo(ctx, Wui::HashId("prefs.language"), { x + 300.0f, y, 180.0f, 24.0f },
 				"Language", options, selected, theme))
@@ -124,9 +129,13 @@ namespace World
 					m_Status = Wui::Tr("prefs.autosave", "Saved automatically");
 				}
 			}
-			Wui::Label(ctx, { x + 500.0f, y + 3.0f },
-				Wui::Tr("prefs.term_hints.note", "Appears when the UI language is not English"),
-				theme.TextMuted, 12.0f);
+			{
+				const std::string note = Wui::Tr("prefs.term_hints.note", "Appears when the UI language is not English");
+				const float noteWidth = ctx.MeasureTextWidth(note, 12.0f);
+				const float noteX = x + rect.W - noteWidth;
+				if (noteX >= x + 490.0f)
+					Wui::Label(ctx, { noteX, y + 3.0f }, note, theme.TextMuted, 12.0f);
+			}
 			y += 32.0f;
 		}
 
@@ -148,7 +157,7 @@ namespace World
 				Wui::Tr("prefs.theme.system", "Follow System"),
 			};
 			int selected = static_cast<int>(preferences.Data().Theme);
-			Row(ctx, theme, x, y, Wui::TrLabel("prefs.theme", "Theme"));
+			Row(ctx, theme, x, y, rect.W, Wui::TrLabel("prefs.theme", "Theme"));
 			if (Wui::Combo(ctx, Wui::HashId("prefs.theme"), { x + 300.0f, y, 180.0f, 24.0f },
 				"Theme", options, selected, theme))
 			{
@@ -159,11 +168,11 @@ namespace World
 		}
 
 		{
-			Row(ctx, theme, x, y, Wui::TrLabel("prefs.ui_scale", "UI Scale"),
-				Wui::Tr("prefs.ui_scale.note", "Text only; layout is unchanged"));
+			Row(ctx, theme, x, y, rect.W, Wui::TrLabel("prefs.ui_scale", "UI Scale"),
+				Wui::Tr("prefs.ui_scale.note", "Scales layout, controls and text"));
 			float value = preferences.Data().UiScale;
 			if (Wui::DragFloat(ctx, Wui::HashId("prefs.ui_scale"), { x + 300.0f, y, 180.0f, 24.0f },
-				value, 0.01f, 0.8f, 1.5f, theme))
+				value, 0.01f, 0.8f, 1.8f, theme))
 				preferences.SetUiScale(value);
 			y += 32.0f;
 		}

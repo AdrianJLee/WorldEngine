@@ -60,16 +60,30 @@ namespace World::Editor
 					else if (key == "theme" && value.type == Wui::JsonValue::Type::String)
 						m_Data.Theme = ThemeFromString(value.String);
 					else if (key == "ui_scale" && value.type == Wui::JsonValue::Type::Number)
-						m_Data.UiScale = std::clamp(static_cast<float>(value.Number), 0.8f, 1.5f);
+						m_Data.UiScale = std::clamp(static_cast<float>(value.Number), 0.8f, 1.8f);
 					else if (key == "term_hints" && value.type == Wui::JsonValue::Type::Bool)
 						m_Data.TermHints = value.Bool;
 				}
 		}
-		// 开发/自动化覆盖:`WLD_LANG` 优先于**偏好文件**(与渲染设置的"环境变量 > 清单"同口径);
-		// 必须在解析之后再套用,否则会被文件里的值覆盖(实测踩过)。
+		// 开发/自动化覆盖:环境变量优先于**偏好文件**(与渲染设置的"环境变量 > 清单"同口径);
+		// 必须在解析之后再套用,否则会被文件/默认值覆盖(实测踩过:WLD_LANG 与 WLD_UI_SCALE 都踩过)。
 		if (const char* language = std::getenv("WLD_LANG"))
 			if (language[0])
 				m_Data.Language = language;
+		if (const char* theme = std::getenv("WLD_UI_THEME"))
+		{
+			if (std::strcmp(theme, "light") == 0) m_Data.Theme = Wui::WuiThemeMode::Light;
+			else if (std::strcmp(theme, "system") == 0) m_Data.Theme = Wui::WuiThemeMode::System;
+			else if (std::strcmp(theme, "dark") == 0) m_Data.Theme = Wui::WuiThemeMode::Dark;
+		}
+		if (const char* scale = std::getenv("WLD_UI_SCALE"))
+		{
+			const float parsed = static_cast<float>(std::atof(scale));
+			if (parsed >= 0.5f && parsed <= 2.0f)
+				m_Data.UiScale = parsed;
+		}
+		if (const char* hints = std::getenv("WLD_UI_TERM_HINTS"))
+			m_Data.TermHints = !(hints[0] == '0' || hints[0] == '\0');
 		WLD_CORE_INFO("编辑器偏好已加载: {0}(language={1} theme={2} scale={3:.2f} termHints={4})",
 			path.string(), m_Data.Language, ThemeToString(m_Data.Theme), m_Data.UiScale,
 			m_Data.TermHints ? 1 : 0);
@@ -80,7 +94,7 @@ namespace World::Editor
 	{
 		Wui::SetLanguage(m_Data.Language);
 		Wui::SetThemeMode(m_Data.Theme);
-		Wui::SetUiFontScale(m_Data.UiScale);
+		Wui::SetUiScale(m_Data.UiScale);
 		Wui::SetShowTermHints(m_Data.TermHints);
 	}
 
@@ -130,7 +144,7 @@ namespace World::Editor
 
 	void EditorPreferences::SetUiScale(float scale)
 	{
-		const float clamped = std::clamp(scale, 0.8f, 1.5f);
+		const float clamped = std::clamp(scale, 0.8f, 1.8f);
 		if (std::abs(m_Data.UiScale - clamped) < 0.001f)
 			return;
 		m_Data.UiScale = clamped;

@@ -86,6 +86,12 @@ namespace World::Wui
 	void WLD_API ClearTextMeasureHook(void* owner);
 	float WLD_API MeasureTextWithHook(std::string_view utf8, float fontSize, WuiFontFamily family);
 
+	// P4-UX2c:UI 内容缩放(用户反馈"全屏后 UI 还是有点小")。
+	// 语义是"整块 UI 的缩放":布局坐标 = 物理像素 / UiScale,渲染时由视口映射放大,
+	// 文字按 UiScale 栅格化后仍以设计单位摆放。输入坐标必须除以它,否则命中会偏。
+	WLD_API float UiScale();
+	WLD_API void SetUiScale(float scale);
+
 	// ---- 全局文本焦点登记 ----
 	// 仿 WuiAccessibility:多个窗口(WuiContext 实例)共享一份登记,每帧由各窗口重建。
 	// 用途:GLFW 事件在 UI 帧之后分发,EditorLayer::OnKeyPressed 只能用"上一帧登记的

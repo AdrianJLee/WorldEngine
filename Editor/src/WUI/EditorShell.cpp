@@ -85,7 +85,7 @@ namespace World
 			{ "settings",        EditorShell::PanelForm::Independent, { 220.0f, 140.0f, 560.0f, 460.0f } },
 			// P4-UX1:编辑器偏好(用户级,自动保存):语言/主题/缩放/术语对照。
 			// P4-UX2:左侧分类 + 右侧内容,默认尺寸更大;位置由 FloatRectFor 居中。
-			{ "prefs",           EditorShell::PanelForm::Independent, { 0.0f, 0.0f, 780.0f, 520.0f } },
+			{ "prefs",           EditorShell::PanelForm::Independent, { 0.0f, 0.0f, 900.0f, 560.0f } },
 			{ "memory",          EditorShell::PanelForm::Docked, {} },
 			{ "operations",      EditorShell::PanelForm::Docked, {} },
 			{ "save",            EditorShell::PanelForm::Docked, {} },
@@ -298,6 +298,11 @@ namespace World
 		}
 		if (rect.W <= 0.0f || rect.H <= 0.0f)
 			rect = { 0.0f, 0.0f, 480.0f, 340.0f };
+		// P4-UX2c:默认矩形是**设计单位**,窗口是物理像素:按内容缩放放大,
+		// 否则 1.3 缩放下面板只有 77% 的设计空间(实测偏好面板右侧说明被裁掉)。
+		const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+		rect.W *= uiScale;
+		rect.H *= uiScale;
 		// P4-UX2(用户反馈"全屏时位置太靠左"):没有位置记忆的面板默认落在**主窗口客户区正中**;
 		// 用户拖过之后走 m_LastFloatRects / FloatMemory,不会再被居中覆盖。
 		rect.X = static_cast<float>(windowX) + (clientW > rect.W ? (clientW - rect.W) * 0.5f : 40.0f);

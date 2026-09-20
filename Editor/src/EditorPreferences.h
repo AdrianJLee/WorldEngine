@@ -16,7 +16,9 @@ namespace World::Editor
 	{
 		std::string Language = "en";                    // en / zh-CN(目录见 Editor/assets/localization)
 		Wui::WuiThemeMode Theme = Wui::WuiThemeMode::Dark;
-		float UiScale = 1.15f;                          // 0.8..1.5
+		// P4-UX2c:内容缩放(布局 + 控件 + 文字一起)。默认值由 DPI 推定(96 DPI → 1.30,
+		// 见 WuiTheme.cpp 的 ScaleFromEnvironment);这里是偏好文件缺失时的兜底值。
+		float UiScale = 1.30f;                          // 0.8..1.8
 		bool TermHints = true;                          // 非英文界面下显示英文术语对照
 	};
 
@@ -44,4 +46,3 @@ namespace World::Editor
 		EditorPreferencesData m_Data;
 	};
 }
-
