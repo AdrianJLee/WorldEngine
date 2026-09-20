@@ -111,7 +111,8 @@ namespace World::Rhi::Vulkan
 		}
 	}
 
-	VulkanCommandBuffer::VulkanCommandBuffer(VulkanDevice& device) : m_Device(device)
+	VulkanCommandBuffer::VulkanCommandBuffer(VulkanDevice& device, std::string debugName)
+		: m_Device(device), m_DebugName(std::move(debugName))
 	{
 		VkCommandBufferAllocateInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -603,7 +604,30 @@ namespace World::Rhi::Vulkan
 		submit.pSignalSemaphores = signalSemaphores.empty() ? nullptr : signalSemaphores.data();
 		const VkFence fence = info.Fence
 			? std::dynamic_pointer_cast<VulkanFence>(info.Fence)->GetFence() : VK_NULL_HANDLE;
-		vkQueueSubmit(m_Device.GetGraphicsQueue(), 1, &submit, fence);
+		const VkResult result = vkQueueSubmit(m_Device.GetGraphicsQueue(), 1, &submit, fence);
+		// P4-UX5:以前这里**完全没检查**返回值 —— device lost 只会从一次性的 SubmitOneShot 里报出来,
+		// 场景/UI 提交死掉时是静默的。现在两条路径都报,并带上命令缓冲名作为出处。
+		if (result != VK_SUCCESS)
+		{
+			std::string names;
+			for (const Handle<CommandBuffer>& commandBuffer : info.CommandBuffers)
+				if (const auto vulkan = std::dynamic_pointer_cast<VulkanCommandBuffer>(commandBuffer))
+				{
+					if (!names.empty()) names += ", ";
+					names += vulkan->DebugName().empty() ? "<unnamed>" : vulkan->DebugName();
+				}
+			if (result == VK_ERROR_DEVICE_LOST)
+			{
+				WLD_CORE_ERROR("[RHI-VK] device lost in queue submit (commandBuffers=[{0}]); GPU work stopped",
+					names);
+				m_Device.LogDeviceFault(names.empty() ? "queue-submit" : names.c_str());
+			}
+			else
+			{
+				WLD_CORE_ERROR("[RHI-VK] vkQueueSubmit failed result={0} (commandBuffers=[{1}])",
+					static_cast<int>(result), names);
+			}
+		}
 	}
 
 	void VulkanCommandQueue::WaitIdle()

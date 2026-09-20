@@ -65,11 +65,16 @@ namespace World::Rhi::Vulkan
 		// 槽位都在飞时只等待最老的一个,替代"每次提交都 vkQueueWaitIdle"。
 		// waitSemaphore/signalSemaphore 用于需要与渲染提交排序的场景(如呈现前的布局转换)。
 		bool SubmitOneShot(const std::function<void(VkCommandBuffer)>& record, bool wait,
-			VkSemaphore waitSemaphore = VK_NULL_HANDLE, VkSemaphore signalSemaphore = VK_NULL_HANDLE);
+			VkSemaphore waitSemaphore = VK_NULL_HANDLE, VkSemaphore signalSemaphore = VK_NULL_HANDLE,
+			const char* label = nullptr);
 
 		// 设备已丢失(vkQueueSubmit 返回 VK_ERROR_DEVICE_LOST):
 		// GPU 已被 TDR/reset 重置,后续任何提交都只会连锁报错。宿主应按"设备失效"处理。
 		bool IsDeviceLost() const { return m_DeviceLost; }
+		// P4-UX5:设备丢失取证(VK_EXT_device_fault)。故障发生时把地址/引擎/厂商数据写进日志,
+		// 并把厂商二进制落到文件里 —— 没有验证层 VUID 的 GPU 引擎错误(如 nvlddmkm Event 153)
+		// 只有这里能给出线索。
+		void LogDeviceFault(const char* where);
 
 	private:
 		bool Initialize(const DeviceDesc& desc, std::string* error);
@@ -91,6 +96,7 @@ namespace World::Rhi::Vulkan
 		VkPipelineLayout m_LastPipelineLayout = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
 		bool m_DeviceLost = false;
+		bool m_DeviceFaultSupported = false;
 		std::unique_ptr<VulkanUploadRing> m_UploadRing;
 		struct OneShotSlot
 		{

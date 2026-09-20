@@ -249,8 +249,15 @@ namespace World::Rhi::Vulkan
 		// 栅栏初始为"已信号"(表示空闲):提交前必须复位,否则 VUID-vkQueueSubmit-fence-00063。
 		if (segment.OwnFence)
 			vkResetFences(m_Device.GetNativeDevice(), 1, &segment.OwnFence);
-		if (vkQueueSubmit(m_Device.GetGraphicsQueue(), 1, &submitInfo, segment.OwnFence) != VK_SUCCESS)
+		const VkResult submitResult = vkQueueSubmit(m_Device.GetGraphicsQueue(), 1, &submitInfo, segment.OwnFence);
+		if (submitResult != VK_SUCCESS)
+		{
+			// P4-UX5:上传环也要报出处(历史上 device lost 可能来自一次性提交)。
+			WLD_CORE_ERROR("[RHI-VK] vkQueueSubmit failed in upload-ring result={0}", static_cast<int>(submitResult));
+			if (submitResult == VK_ERROR_DEVICE_LOST)
+				m_Device.LogDeviceFault("upload-ring");
 			return false;
+		}
 		m_SubmitCount++;
 
 		// 本批命令缓冲引用到的所有段(含跨段分配)统一由这次提交的栅栏守护。

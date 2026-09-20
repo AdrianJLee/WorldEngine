@@ -132,7 +132,7 @@ namespace World::Rhi::Vulkan
 	// 不再每次新建命令池 + vkQueueWaitIdle。
 	void ExecuteOneShot(VulkanDevice& device, const std::function<void(VkCommandBuffer)>& record)
 	{
-		device.SubmitOneShot(record, true);
+		device.SubmitOneShot(record, true, VK_NULL_HANDLE, VK_NULL_HANDLE, "resource-one-shot");
 	}
 
 	// ---- Buffer ----

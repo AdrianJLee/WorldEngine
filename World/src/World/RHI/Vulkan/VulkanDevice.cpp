@@ -44,6 +44,21 @@ namespace World::Rhi::Vulkan
 			return false;
 		}
 
+		// P4-UX5:设备级扩展是否可用 —— VK_EXT_device_fault 给 device lost 取证用。
+		bool HasDeviceExtension(VkPhysicalDevice device, const char* name)
+		{
+			uint32_t count = 0;
+			vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr);
+			if (count == 0)
+				return false;
+			std::vector<VkExtensionProperties> properties(count);
+			vkEnumerateDeviceExtensionProperties(device, nullptr, &count, properties.data());
+			for (const VkExtensionProperties& property : properties)
+				if (std::strcmp(property.extensionName, name) == 0)
+					return true;
+			return false;
+		}
+
 		int GraphicsQueueFamily(VkPhysicalDevice device)
 		{
 			uint32_t count = 0;
@@ -221,9 +236,13 @@ namespace World::Rhi::Vulkan
 		enabledIndexing.descriptorBindingStorageImageUpdateAfterBind =
 			supportedIndexing.descriptorBindingStorageImageUpdateAfterBind;
 		deviceInfo.pNext = &enabledIndexing;
-		static const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-		deviceInfo.enabledExtensionCount = 1;
-		deviceInfo.ppEnabledExtensionNames = extensions;
+		// P4-UX5:请求 VK_EXT_device_fault(可用时)—— device lost 时能拿到故障地址/引擎/厂商数据。
+		std::vector<const char*> extensions { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+		m_DeviceFaultSupported = HasDeviceExtension(m_PhysicalDevice, VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+		if (m_DeviceFaultSupported)
+			extensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+		deviceInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+		deviceInfo.ppEnabledExtensionNames = extensions.data();
 		if (vkCreateDevice(m_PhysicalDevice, &deviceInfo, nullptr, &m_Device) != VK_SUCCESS)
 		{
 			if (error) *error = "vkCreateDevice failed";
@@ -304,6 +323,11 @@ namespace World::Rhi::Vulkan
 		if (Log::GetCoreLogger())
 			WLD_CORE_INFO("Vulkan device created: {0} ({1}.{2})", properties.deviceName,
 				m_Capabilities.ApiMajor, m_Capabilities.ApiMinor);
+		// P4-UX5:明确报告 device lost 取证能力是否可用(可用 = 故障时能给出地址/厂商数据)。
+		if (Log::GetCoreLogger())
+			WLD_CORE_INFO("[RHI-VK] VK_EXT_device_fault {0}",
+				m_DeviceFaultSupported ? "已启用(device lost 会输出故障地址/厂商数据)"
+					: "不可用(device lost 只能给出'GPU work stopped')");
 
 		// B2:异步上传基座。段大小 4 MiB × 最多 8 段,按需扩容;失败时上传回退同步路径。
 		m_UploadRing = std::make_unique<VulkanUploadRing>(*this);
@@ -316,8 +340,62 @@ namespace World::Rhi::Vulkan
 			vkDeviceWaitIdle(m_Device);
 	}
 
+	// P4-UX5:device lost 取证。用户实测的两次事故都只有驱动级 nvlddmkm Event 153
+	// (引擎错误)、没有任何验证层 VUID —— 这种"硬件/驱动层面"的故障只有 VK_EXT_device_fault
+	// 能给出可分析的现场:故障地址类型与精度、厂商故障码,以及 NVIDIA 的厂商二进制数据。
+	void VulkanDevice::LogDeviceFault(const char* where)
+	{
+		if (!m_Device || !m_DeviceFaultSupported || !vkGetDeviceFaultInfoEXT)
+		{
+			WLD_CORE_ERROR("[RHI-VK] device fault at '{0}':VK_EXT_device_fault 不可用,无故障细节",
+				where ? where : "?");
+			return;
+		}
+		VkDeviceFaultCountsEXT counts{};
+		counts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
+		VkDeviceFaultInfoEXT info{};
+		info.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT;
+		if (vkGetDeviceFaultInfoEXT(m_Device, &counts, &info) != VK_SUCCESS)
+		{
+			WLD_CORE_ERROR("[RHI-VK] device fault at '{0}':vkGetDeviceFaultInfoEXT 失败",
+				where ? where : "?");
+			return;
+		}
+		std::vector<VkDeviceFaultAddressInfoEXT> addresses(counts.addressInfoCount);
+		std::vector<VkDeviceFaultVendorInfoEXT> vendors(counts.vendorInfoCount);
+		std::vector<uint8_t> vendorBinary(counts.vendorBinarySize);
+		info.pAddressInfos = addresses.empty() ? nullptr : addresses.data();
+		info.pVendorInfos = vendors.empty() ? nullptr : vendors.data();
+		info.pVendorBinaryData = vendorBinary.empty() ? nullptr : vendorBinary.data();
+		vkGetDeviceFaultInfoEXT(m_Device, &counts, &info);
+		WLD_CORE_ERROR("[RHI-VK] device fault details: where='{0}' desc='{1}' addressInfos={2} vendorInfos={3} vendorBinary={4}B",
+			where ? where : "?", info.description, counts.addressInfoCount, counts.vendorInfoCount,
+			static_cast<uint32_t>(vendorBinary.size()));
+		for (size_t i = 0; i < addresses.size(); ++i)
+			WLD_CORE_ERROR("[RHI-VK]   fault address[{0}]: type={1} address=0x{2:x} precision=0x{3:x}",
+				i, static_cast<int>(addresses[i].addressType),
+				static_cast<uint64_t>(addresses[i].reportedAddress),
+				static_cast<uint64_t>(addresses[i].addressPrecision));
+		for (size_t i = 0; i < vendors.size(); ++i)
+			WLD_CORE_ERROR("[RHI-VK]   vendor fault[{0}]: '{1}' code={2} data=0x{3:x}",
+				i, vendors[i].description, vendors[i].vendorFaultCode,
+				static_cast<uint64_t>(vendors[i].vendorFaultData));
+		if (!vendorBinary.empty())
+		{
+			const std::filesystem::path path =
+				std::filesystem::path(WLD_OUTPUT_DIR) / "device-fault-vendor.bin";
+			std::ofstream file(path, std::ios::binary | std::ios::trunc);
+			if (file)
+			{
+				file.write(reinterpret_cast<const char*>(vendorBinary.data()),
+					static_cast<std::streamsize>(vendorBinary.size()));
+				WLD_CORE_ERROR("[RHI-VK]   vendor binary dumped to {0}", path.string());
+			}
+		}
+	}
+
 	bool VulkanDevice::SubmitOneShot(const std::function<void(VkCommandBuffer)>& record, bool wait,
-		VkSemaphore waitSemaphore, VkSemaphore signalSemaphore)
+		VkSemaphore waitSemaphore, VkSemaphore signalSemaphore, const char* label)
 	{
 		if (!m_Device || !record)
 			return false;
@@ -413,7 +491,9 @@ namespace World::Rhi::Vulkan
 			if (submitResult == VK_ERROR_DEVICE_LOST && !m_DeviceLost)
 			{
 				m_DeviceLost = true;
-				WLD_CORE_ERROR("[RHI-VK] device lost (vkQueueSubmit VK_ERROR_DEVICE_LOST); GPU work stopped");
+				WLD_CORE_ERROR("[RHI-VK] device lost in one-shot submit '{0}'; GPU work stopped",
+					label ? label : "unlabelled");
+				LogDeviceFault(label ? label : "SubmitOneShot");
 			}
 			else if (!m_DeviceLost && std::getenv("WLD_VK_PRESENT_TRACE"))
 				WLD_CORE_ERROR("[RHI-VK] SubmitOneShot vkQueueSubmit failed result={0}", static_cast<int>(submitResult));
@@ -452,7 +532,10 @@ namespace World::Rhi::Vulkan
 		m_ThreadPools.emplace(threadId, pool);
 		return pool;
 	}
-	Handle<CommandBuffer> VulkanDevice::CreateCommandBuffer(const std::string&) { return CreateRef<VulkanCommandBuffer>(*this); }
+	Handle<CommandBuffer> VulkanDevice::CreateCommandBuffer(const std::string& name)
+	{
+		return CreateRef<VulkanCommandBuffer>(*this, name);
+	}
 	Handle<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc& desc) { return CreateRef<VulkanSwapchain>(*this, desc); }
 	Handle<RenderPass> VulkanDevice::CreateRenderPass(const RenderPassDesc& desc) { return CreateRef<VulkanRenderPass>(*this, desc); }
 	Handle<Framebuffer> VulkanDevice::CreateFramebuffer(const FramebufferDesc& desc) { return CreateRef<VulkanFramebuffer>(*this, desc); }

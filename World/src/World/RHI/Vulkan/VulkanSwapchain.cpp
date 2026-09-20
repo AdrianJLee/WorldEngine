@@ -195,7 +195,7 @@ namespace World::Rhi::Vulkan
 				(layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
 					? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 				0, 0, nullptr, 0, nullptr, 1, &barrier);
-		}, false, wait, signal);
+		}, false, wait, signal, "swapchain-layout-transition");
 		if (!submitted && traceFailure)
 			WLD_CORE_WARN("[swapchain] transition submit failed index={0} needsBarrier={1}", index,
 				static_cast<int>(needsBarrier));

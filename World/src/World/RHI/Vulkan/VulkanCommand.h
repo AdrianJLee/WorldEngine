@@ -12,7 +12,9 @@ namespace World::Rhi::Vulkan
 	class VulkanCommandBuffer final : public CommandBuffer
 	{
 	public:
-		VulkanCommandBuffer(VulkanDevice& device);
+		// P4-UX5:带上调试名 —— device lost 日志里直接给出"是哪条命令缓冲提交时死的"。
+		explicit VulkanCommandBuffer(VulkanDevice& device, std::string debugName = std::string());
+		const std::string& DebugName() const { return m_DebugName; }
 		~VulkanCommandBuffer() override;
 
 		void Begin() override;
@@ -76,6 +78,7 @@ namespace World::Rhi::Vulkan
 		// 当前渲染通道及其附件:Begin/EndRenderPass 之间用于把附件真实布局同步给纹理跟踪。
 		Handle<RenderPass> m_ActivePass;
 		std::vector<Handle<Texture>> m_ActivePassAttachments;
+		std::string m_DebugName;
 	};
 
 	class VulkanCommandQueue final : public CommandQueue
