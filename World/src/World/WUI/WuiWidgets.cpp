@@ -74,6 +74,51 @@ namespace World::Wui
 				buffer.pop_back();
 		}
 
+		// 弹层条目的无障碍 id:由父控件 id + 选项下标派生(与 Wui::HashId 同一套 FNV-1a)。
+		// 不用选项文本参与哈希:同一下拉里"两个选项文案相同"时 id 仍各自独立。
+		WuiId ComboOptionId(WuiId comboId, size_t index)
+		{
+			const std::string key = std::to_string(comboId) + ".option." + std::to_string(index);
+			return HashId(key.c_str());
+		}
+
+		// 文本按像素宽度截断(超宽补 '…')。语义与 WuiCodeEditor 的 EllipsizeToWidth 一致
+		// (那边是文件内匿名实现,不可跨 TU 复用,故在此按同一语义重写一份):
+		// 逐码点累加,候选宽度 + 12px 余量超过 maxWidth 就停;maxWidth <= 0 时不裁剪。
+		std::string EllipsizeToWidth(const WuiContext& ctx, std::string_view text, float maxWidth,
+			float fontSize)
+		{
+			if (maxWidth <= 0.0f || text.empty())
+				return std::string(text);
+			if (ctx.MeasureTextWidth(text, fontSize) <= maxWidth)
+				return std::string(text);
+			std::string out;
+			size_t i = 0;
+			bool any = false;
+			while (i < text.size())
+			{
+				const size_t begin = i;
+				size_t length = 1;
+				const unsigned char lead = static_cast<unsigned char>(text[i]);
+				if ((lead & 0xE0) == 0xC0) length = 2;
+				else if ((lead & 0xF0) == 0xE0) length = 3;
+				else if ((lead & 0xF8) == 0xF0) length = 4;
+				length = std::min(length, text.size() - i);
+				i += length;
+				std::string candidate = out;
+				candidate.append(text.substr(begin, length));
+				if (ctx.MeasureTextWidth(candidate, fontSize) + 12.0f > maxWidth)
+					break;
+				any = true;
+				out = std::move(candidate);
+			}
+			// 连一个字符都放不下(只够 '…')时返回空串:调用方据此干脆不画,而不是画一个孤立省略号。
+			if (!any)
+				return std::string();
+			out += "…";
+			return out;
+		}
+
 	}
 
 	void DrawPanelSurface(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme)
@@ -99,19 +144,53 @@ namespace World::Wui
 	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
 		const WuiColor& color, float fontSize, const WuiTheme& theme)
 	{
-		if (term.empty())
+		// 兼容重载:旧调用点不带宽度,按标签列的默认预算裁剪(否则长术语会压住右侧控件)。
+		LabelWithTerm(ctx, pos, text, term, color, fontSize, theme, LabelDefaultWidth);
+	}
+
+	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
+		const WuiColor& color, float fontSize, const WuiTheme& theme, float width)
+	{
+		// P4-UX5 标签列裁剪(验证者指出"FixedAspectRatio"这类长术语会压住右侧控件):
+		// width = 本标签可用的设计单位宽度(含术语),超出时按优先级降级 ——
+		// ① 术语缩略('…');② 仍放不下就不画术语(保住主文案);③ 主文案自己超宽时同样截断。
+		const float gap = 6.0f;
+		const float termSize = theme.FontSizeCaption;
+		const bool hasTerm = !term.empty();
+		const bool limited = width > 0.0f;
+		const float textWidth = ctx.MeasureTextWidth(text, fontSize);
+		const float termWidth = hasTerm ? ctx.MeasureTextWidth(term, termSize) : 0.0f;
+		const bool overflows = limited && textWidth + (hasTerm ? gap + termWidth : 0.0f) > width;
+
+		if (!overflows)
 		{
+			// 放得下:原样绘制(与旧行为逐字节一致)。
 			Label(ctx, pos, text, color, fontSize);
+			if (hasTerm)
+				ctx.Commands().push_back({ WuiDrawKind::Text, { pos.x + textWidth + gap, pos.y + (fontSize - termSize) * 0.5f, 0, 0 },
+					theme.TextMuted, 0, 1.0f, term, termSize, false });
 			return;
 		}
-		// P4-UX1:主文案后 6px 接小号术语(Caption + 次要色)。术语"退后一层"阅读,
-		// 不换行、不加括号堆叠;右侧空间不够时直接省略(窄面板不硬塞)。
-		const float textWidth = ctx.MeasureTextWidth(text, fontSize);
-		const float termSize = theme.FontSizeCaption;
-		const float termX = pos.x + textWidth + 6.0f;
-		ctx.Commands().push_back({ WuiDrawKind::Text, { pos.x, pos.y, 0, 0 }, color, 0, 1.0f, text, fontSize, false });
+
+		// 主文案优先:只给它留出术语的剩余空间(没有术语就整列归主文案)。
+		const float textBudget = hasTerm ? std::max(0.0f, width - gap - termWidth) : width;
+		const std::string shownText = textWidth > textBudget ? EllipsizeToWidth(ctx, text, textBudget, fontSize) : text;
+		const float shownTextWidth = ctx.MeasureTextWidth(shownText, fontSize);
+		Label(ctx, pos, shownText, color, fontSize);
+		if (!hasTerm)
+			return;
+
+		const float termX = pos.x + shownTextWidth + gap;
+		const float termBudget = width - (shownTextWidth + gap);
+		if (termBudget <= 0.0f)
+			return;   // ② 主文案已占满:不画术语
+		const std::string shownTerm = ctx.MeasureTextWidth(term, termSize) <= termBudget
+			? term
+			: EllipsizeToWidth(ctx, term, termBudget, termSize);
+		if (shownTerm.empty())
+			return;   // ① 连一个字符加省略号都放不下:不画术语,而不是画一个孤立 '…'
 		ctx.Commands().push_back({ WuiDrawKind::Text, { termX, pos.y + (fontSize - termSize) * 0.5f, 0, 0 },
-			theme.TextMuted, 0, 1.0f, term, termSize, false });
+			theme.TextMuted, 0, 1.0f, shownTerm, termSize, false });
 	}
 
 	namespace
@@ -785,6 +864,14 @@ namespace World::Wui
 			for (size_t i = 0; i < options.size(); ++i)
 			{
 				const WuiRect item { panel.X + 4.0f, panel.Y + 4.0f + itemH * static_cast<float>(i), panel.W - 8.0f, itemH };
+				// P4-UX5:每个条目登记一个无障碍节点(验证者指出 MSAA/阴影贴图这类下拉的选项
+				// 点不到 —— 只有触发器登记过)。节点 id = ComboOptionId(parent, i),弹层关闭时
+				// 本段代码不执行,下一帧 BeginFrame 清掉本窗口旧节点 → 节点随弹层自然消失。
+				// 点击等价性:ui.invoke 只是把点击注入条目矩形中心,WuiScriptedInput 按坐标注入
+				// hover/press/release;条目自己的 ctx.IsHovered/IsClicked 读的仍是面板输入状态,
+				// 与用户鼠标点同一行完全同一条路径(与 Checkbox/MenuItem 的可脚本化方式一致)。
+				RegisterAccessNode(ComboOptionId(id, i), "combo-option", item,
+					options[i], (selected >= 0 && i == static_cast<size_t>(selected)) ? "true" : "false");
 				if (ctx.IsHovered(item))
 				{
 					ctx.Commands().push_back({ WuiDrawKind::Rect, item, theme.ButtonHover, 2.0f });

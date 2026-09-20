@@ -10,6 +10,8 @@
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
 
+#include <cctype>
+
 namespace World
 {
 	namespace
@@ -129,6 +131,86 @@ namespace World
 		std::string PropPath(const std::string& typeName, const std::string& fieldName)
 		{
 			return "properties." + typeName + "." + fieldName;
+		}
+
+		// ---- schema 显示点本地化 ----
+		// DisplayName / 字段名是生成文件里的**稳定标识**:属性行 id(properties.<Type>.<Field>)、
+		// 分区折叠键(prop.open.<DisplayName>)、控件 hash、Lua 代理名都由它派生,所以这里
+		// 只翻译**显示文案**,一律不回写 schema,也不改任何 id / 持久化 key / hash。
+		// 目录键用短类型名:World::TransformComponent → schema.component.TransformComponent。
+		std::string SchemaTypeKeyName(const Schema::TypeSchema& schema)
+		{
+			const std::string& name = schema.Id.Name;
+			const size_t separator = name.rfind("::");
+			return separator == std::string::npos ? name : name.substr(separator + 2);
+		}
+
+		// C++ 标识符 → 人类可读英文(仅在显示点;不改 schema):
+		//  - 驼峰/下划线分词:TilingFactor → "Tiling Factor"、ShowCollider → "Show Collider";
+		//  - 全大写缩写整体保留:ID → "ID"、PersistenceID → "Persistence ID";
+		//  - 缩写后接单词:"FOVValue" → "FOV Value"(带 islower 前瞻,不拆开缩写);
+		//  - 成员前缀 m_/s_/g_(生成物里 SceneCamera 用 m_ 前缀)不作为字段语义:
+		//    m_PerspectiveFOV → "Perspective FOV"。
+		std::string HumanizeIdentifier(const std::string& name)
+		{
+			std::string text = name;
+			if (text.size() > 2 && text[1] == '_'
+				&& (text[0] == 'm' || text[0] == 's' || text[0] == 'g')
+				&& std::isupper(static_cast<unsigned char>(text[2])))
+				text.erase(0, 2);
+
+			std::string out;
+			out.reserve(text.size() + 4);
+			bool previousUpper = false;
+			for (size_t i = 0; i < text.size(); ++i)
+			{
+				const char c = text[i];
+				if (c == '_' || c == '-' || c == ' ')
+				{
+					if (!out.empty() && out.back() != ' ')
+						out.push_back(' ');
+					previousUpper = false;
+					continue;
+				}
+				const bool upper = std::isupper(static_cast<unsigned char>(c)) != 0;
+				const char prev = out.empty() ? '\0' : out.back();
+				const bool prevLowerOrDigit = prev != '\0' && prev != ' '
+					&& (std::islower(static_cast<unsigned char>(prev)) || std::isdigit(static_cast<unsigned char>(prev)));
+				if (upper && prevLowerOrDigit)
+					out.push_back(' ');
+				else if (upper && previousUpper && i + 1 < text.size()
+					&& std::islower(static_cast<unsigned char>(text[i + 1])))
+					out.push_back(' ');
+				out.push_back(c);
+				previousUpper = upper;
+			}
+			while (!out.empty() && out.back() == ' ')
+				out.pop_back();
+			return out;
+		}
+
+		// 组件分区标题 / "Add Component" 菜单项的显示文案(键用短类型名,标识仍用 schema->DisplayName)。
+		std::string SchemaComponentLabel(const Schema::TypeSchema& schema)
+		{
+			return Wui::Tr("schema.component." + SchemaTypeKeyName(schema), schema.DisplayName);
+		}
+
+		// 字段标签显示文案:Meta.DisplayName 优先,空则人类可读化 C++ 字段名;
+		// 键分别用 DisplayName / 字段名(两者都是生成物里的稳定标识)。
+		std::string SchemaFieldLabel(const Schema::FieldSchema& field)
+		{
+			if (!field.Meta.DisplayName.empty())
+				return Wui::Tr("schema.field." + field.Meta.DisplayName, field.Meta.DisplayName);
+			return Wui::Tr("schema.field." + field.Name, HumanizeIdentifier(field.Name));
+		}
+
+		// 自定义检查器按字段名取 schema 字段,与通用路径共用同一显示文案(找不到字段时仍可读)。
+		std::string SchemaFieldLabel(const Schema::TypeSchema& schema, const std::string& fieldName)
+		{
+			for (const Schema::FieldSchema& field : schema.Fields)
+				if (field.Name == fieldName)
+					return SchemaFieldLabel(field);
+			return Wui::Tr("schema.field." + fieldName, HumanizeIdentifier(fieldName));
 		}
 
 		Wui::WuiRect ComponentRect(const Wui::WuiRect& rect, int index, float height)
@@ -276,7 +358,9 @@ namespace World
 			for (size_t i = 0; i < candidates.size(); ++i)
 			{
 				const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };
-				if (MenuItem(ctx, Wui::HashId(("prop.add." + candidates[i]->DisplayName).c_str()), item, candidates[i]->DisplayName, true, theme))
+				// 菜单项 id 仍是 prop.add.<DisplayName>(稳定标识);只有菜单文案走本地化。
+				if (MenuItem(ctx, Wui::HashId(("prop.add." + candidates[i]->DisplayName).c_str()), item,
+					SchemaComponentLabel(*candidates[i]), true, theme))
 				{
 					const uint32_t componentId = candidates[i]->Storage->ComponentId;
 					const entt::entity handle = entity;
@@ -374,7 +458,8 @@ namespace World
 			const Wui::WuiRect header { contentRect.X, rowY, contentRect.W, kSectionHeader };
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, header, open ? Wui::WuiColor { 0.27f, 0.28f, 0.31f, 1 } : Wui::WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 2.0f });
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { header.X + 6, header.Y + 3, 0, 0 },
-				theme.Text, 0, 1.0f, (open ? "- " : "+ ") + section.Title, 14.0f, false });
+				theme.Text, 0, 1.0f, (open ? "- " : "+ ") + SchemaComponentLabel(*schema), 14.0f, false });
+			// 无障碍 id / 操作记录仍用 section.Title(=<DisplayName>),只有标题文案本地化。
 			const std::string headerId = "properties.section." + section.Title;
 			RegisterNode(Wui::HashId(headerId.c_str()), "button", header, headerId, open ? "open" : "closed");
 			if (ctx.IsClicked(header))
@@ -485,7 +570,9 @@ namespace World
 			const Wui::WuiId fid = Wui::HashId(("f." + typeName + "." + field.Name).c_str()) ^ base;
 			const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, 22 };
 			const Wui::WuiRect ctrl { row.X + labelWidth, row.Y + 1, row.W - labelWidth - 4, 20 };
-			const std::string label = field.Meta.DisplayName.empty() ? field.Name : field.Meta.DisplayName;
+			// 显示文案:Meta.DisplayName 优先,空则人类可读化 C++ 字段名后查目录;
+			// 行 id(fid / propId)与持久化仍用 field.Name,不受影响。
+			const std::string label = SchemaFieldLabel(field);
 
 			if (field.K == Schema::Kind::Object)
 			{
@@ -756,19 +843,22 @@ namespace World
 			auto* script = static_cast<NativeScriptComponent*>(instance);
 			Scene* scene = entity.GetScene();
 			Schema::SchemaRegistry& schemas = scene->GetContext().Schemas();
-			std::vector<std::string> names;
+			std::vector<std::string> names;    // 原始脚本名:匹配与写回都用它(稳定标识)
+			std::vector<std::string> labels;   // 下拉显示文案(可本地化)
 			std::vector<const Schema::TypeSchema*> scripts = schemas.List(Schema::TypeCategory::Script);
 			int selected = -1;
 			for (size_t i = 0; i < scripts.size(); ++i)
 			{
 				names.push_back(scripts[i]->DisplayName);
+				labels.push_back(Wui::Tr("schema.script." + scripts[i]->DisplayName, scripts[i]->DisplayName));
 				if (scripts[i]->DisplayName == script->ScriptName)
 					selected = static_cast<int>(i);
 			}
-			if (Combo(ctx, base ^ 1u, { rect.X, rect.Y, rect.W, 22 }, "Script", names, selected, theme) && selected >= 0)
+			if (Combo(ctx, base ^ 1u, { rect.X, rect.Y, rect.W, 22 }, "Script", labels, selected, theme) && selected >= 0)
 			{
 				if (scripts[selected]->Script)
 					scripts[selected]->Script->Bind(static_cast<void*>(script));
+				// 写回原字符串而不是显示文案:ScriptName 必须与 schema 名逐字一致。
 				script->ScriptName = names[selected];
 				script->ResetEditorFieldState();
 				m_Host.MarkDocumentDirty();
@@ -857,19 +947,23 @@ namespace World
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		const std::string& typeName = schema.DisplayName;
 		const bool writable = !m_ReadOnly;
+		// 自定义检查器也走同一份字段标签(schema 字段名 → 显示文案),id 仍是 PropPath。
+		const std::string locationLabel = SchemaFieldLabel(schema, "Location");
+		const std::string rotationLabel = SchemaFieldLabel(schema, "Rotation");
+		const std::string scaleLabel = SchemaFieldLabel(schema, "Scale");
 
 		if (!writable)
 		{
 			// Play/Simulate:只读展示(与通用只读字段同一契约:properties.<...> 文本节点)。
 			DrawReadOnlyRow(ctx, PropPath(typeName, "Location"), ComponentRect(rect, 0, 20),
-				"Location", FormatFloatText(transform.Location.x, 2) + ", "
+				locationLabel, FormatFloatText(transform.Location.x, 2) + ", "
 					+ FormatFloatText(transform.Location.y, 2) + ", " + FormatFloatText(transform.Location.z, 2), theme);
 			const glm::vec3 degrees = glm::degrees(transform.Rotation);
 			DrawReadOnlyRow(ctx, PropPath(typeName, "Rotation"), ComponentRect(rect, 1, 20),
-				"Rotation", FormatFloatText(degrees.x, 2) + ", " + FormatFloatText(degrees.y, 2) + ", "
+				rotationLabel, FormatFloatText(degrees.x, 2) + ", " + FormatFloatText(degrees.y, 2) + ", "
 					+ FormatFloatText(degrees.z, 2), theme);
 			DrawReadOnlyRow(ctx, PropPath(typeName, "Scale"), ComponentRect(rect, 2, 20),
-				"Scale", FormatFloatText(transform.Scale.x, 2) + ", " + FormatFloatText(transform.Scale.y, 2) + ", "
+				scaleLabel, FormatFloatText(transform.Scale.x, 2) + ", " + FormatFloatText(transform.Scale.y, 2) + ", "
 					+ FormatFloatText(transform.Scale.z, 2), theme);
 			return 66.0f;
 		}
@@ -887,9 +981,9 @@ namespace World
 		const Wui::WuiRect locationRow = ComponentRect(rect, 0, 20);
 		const Wui::WuiRect rotationRow = ComponentRect(rect, 1, 20);
 		const Wui::WuiRect scaleRow = ComponentRect(rect, 2, 20);
-		changed |= DrawVec3Row(ctx, PropPath(typeName, "Location"), locationRow, "Location", transform.Location, theme, reachable(locationRow));
-		changed |= DrawVec3Row(ctx, PropPath(typeName, "Rotation"), rotationRow, "Rotation", rotationDegrees, theme, reachable(rotationRow));
-		changed |= DrawVec3Row(ctx, PropPath(typeName, "Scale"), scaleRow, "Scale", transform.Scale, theme, reachable(scaleRow));
+		changed |= DrawVec3Row(ctx, PropPath(typeName, "Location"), locationRow, locationLabel, transform.Location, theme, reachable(locationRow));
+		changed |= DrawVec3Row(ctx, PropPath(typeName, "Rotation"), rotationRow, rotationLabel, rotationDegrees, theme, reachable(rotationRow));
+		changed |= DrawVec3Row(ctx, PropPath(typeName, "Scale"), scaleRow, scaleLabel, transform.Scale, theme, reachable(scaleRow));
 		if (changed)
 		{
 			transform.SetTransform(transform.Location, glm::radians(rotationDegrees), transform.Scale);
@@ -932,16 +1026,17 @@ namespace World
 		bool changed = false;
 
 		const Wui::WuiRect primaryRow { rect.X, rect.Y + y, rect.W, kRowHeight };
+		const std::string primaryLabel = SchemaFieldLabel(*primaryField);
 		if (writable)
 		{
 			bool primary = std::get<bool>(primaryField->Get(instance));
 			const bool before = primary;
-			Label(ctx, { primaryRow.X + 4, primaryRow.Y + 3 }, "Primary", theme.TextMuted, 13.0f);
+			Label(ctx, { primaryRow.X + 4, primaryRow.Y + 3 }, primaryLabel, theme.TextMuted, 13.0f);
 			Wui::Checkbox(ctx, Wui::HashId(PropPath(typeName, "Primary").c_str()),
 				{ primaryRow.X + 140.0f, primaryRow.Y + 1, 20, 20 }, "", primary, theme);
 			const Wui::WuiRect primaryBox { primaryRow.X + 140.0f, primaryRow.Y + 1, 20, 20 };
 			RegisterNode(Wui::HashId(PropPath(typeName, "Primary").c_str()), "checkbox",
-				primaryBox, "Primary", primary ? "true" : "false", reachable(primaryBox));
+				primaryBox, primaryLabel, primary ? "true" : "false", reachable(primaryBox));
 			if (primary != before)
 			{
 				primaryField->Set(instance, Schema::Value(primary));
@@ -950,22 +1045,23 @@ namespace World
 		}
 		else
 		{
-			DrawReadOnlyRow(ctx, PropPath(typeName, "Primary"), primaryRow, "Primary",
+			DrawReadOnlyRow(ctx, PropPath(typeName, "Primary"), primaryRow, primaryLabel,
 				std::get<bool>(primaryField->Get(instance)) ? "true" : "false", theme);
 		}
 		y += kRowHeight;
 
 		const Wui::WuiRect fixedRow { rect.X, rect.Y + y, rect.W, kRowHeight };
+		const std::string fixedLabel = SchemaFieldLabel(*fixedField);
 		if (writable)
 		{
 			bool fixed = std::get<bool>(fixedField->Get(instance));
 			const bool before = fixed;
-			Label(ctx, { fixedRow.X + 4, fixedRow.Y + 3 }, "FixedAspectRatio", theme.TextMuted, 13.0f);
+			Label(ctx, { fixedRow.X + 4, fixedRow.Y + 3 }, fixedLabel, theme.TextMuted, 13.0f);
 			Wui::Checkbox(ctx, Wui::HashId(PropPath(typeName, "FixedAspectRatio").c_str()),
 				{ fixedRow.X + 140.0f, fixedRow.Y + 1, 20, 20 }, "", fixed, theme);
 			const Wui::WuiRect fixedBox { fixedRow.X + 140.0f, fixedRow.Y + 1, 20, 20 };
 			RegisterNode(Wui::HashId(PropPath(typeName, "FixedAspectRatio").c_str()), "checkbox",
-				fixedBox, "FixedAspectRatio", fixed ? "true" : "false", reachable(fixedBox));
+				fixedBox, fixedLabel, fixed ? "true" : "false", reachable(fixedBox));
 			if (fixed != before)
 			{
 				fixedField->Set(instance, Schema::Value(fixed));
@@ -974,7 +1070,7 @@ namespace World
 		}
 		else
 		{
-			DrawReadOnlyRow(ctx, PropPath(typeName, "FixedAspectRatio"), fixedRow, "FixedAspectRatio",
+			DrawReadOnlyRow(ctx, PropPath(typeName, "FixedAspectRatio"), fixedRow, fixedLabel,
 				std::get<bool>(fixedField->Get(instance)) ? "true" : "false", theme);
 		}
 		y += kRowHeight;

@@ -877,7 +877,11 @@ namespace World
 		// 停靠区(而不是只切分鼠标所在的面板组)。需在渲染面板前判定,以便
 		// RenderTabs 跳过面板内的落区逻辑。
 		const float editorTop = 26.0f + m_AttachBarHeight;
-		const Wui::WuiRect editorArea { 0, editorTop, viewport.x, viewport.y - editorTop };
+		// P4-UX6:底部留出状态栏(场景/选择/后端/帧率)——面板不再压到它上面。
+		constexpr float statusBarHeight = 22.0f;
+		const Wui::WuiRect statusBar { 0, viewport.y - statusBarHeight, viewport.x, statusBarHeight };
+		const Wui::WuiRect editorArea { 0, editorTop, viewport.x,
+			viewport.y - editorTop - statusBarHeight };
 		std::string edgePayload;
 		const bool edgeDragActive = ctx.IsDragActive(&edgePayload) && edgePayload.rfind("panel:", 0) == 0;
 		// 独立窗口不参与四边停靠:它只能挂靠到顶部挂靠栏。
@@ -1170,8 +1174,57 @@ namespace World
 		// W9-2:本帧(含所有独立窗口)结束时的文本焦点快照。UI 帧开始时各窗口的登记
 		// 已被 BeginFrame 清空,所以帧内 Ctrl+Z/Y 判定必须用"上一帧结束"的这份状态。
 		// P4-UX4:悬停提示最后画 —— 面板/模态都已登记完,这里统一画到 overlay 层。
+		DrawStatusBar(ctx, statusBar);
 		Wui::DrawTooltip(ctx, m_Theme);
 		m_TextFocusLatched = Wui::WuiTextFocus::Get().Active();
+	}
+
+	// P4-UX6:状态栏 —— 一眼看到"当前场景有没有改、选中了什么、跑在哪个后端、多少帧"。
+	// 全部取自既有状态(文档/选择/Input().FPS),不做任何额外计算或分配。
+	void EditorShell::DrawStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& rect)
+	{
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, m_Theme.PanelHeader, 0.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { rect.X, rect.Y, rect.W, 1.0f },
+			m_Theme.Border, 0.0f });
+
+		EditorDocument& document = m_Editor.GetDocument();
+		const std::string sceneName = document.HasPath()
+			? document.GetPath().filename().string() : std::string("Untitled");
+		std::string left = std::string(Wui::Tr("status.scene", "Scene")) + ": " + sceneName;
+		if (document.IsDirty())
+			left += " *";
+		Entity selected = GetSelectedEntity();
+		left += "   |   " + std::string(Wui::Tr("status.selection", "Selection")) + ": ";
+		if (selected && selected.HasComponent<TagComponent>())
+			left += selected.GetComponent<TagComponent>().Tag;
+		else
+			left += Wui::Tr("status.selection.none", "none");
+		if (!m_ActiveWindowTag.empty())
+			left += "   |   " + std::string(Wui::Tr("status.view", "View")) + ": " + PanelTitle(m_ActiveWindowTag);
+
+		const float fps = ctx.Input().FPS;
+		char right[96] = {};
+		std::snprintf(right, sizeof(right), "%s   %.1f FPS (%.1f ms)", Renderer::GetBackendName().c_str(),
+			static_cast<double>(fps), fps > 0.0f ? 1000.0 / static_cast<double>(fps) : 0.0);
+		const std::string rightText = right;
+		const float rightWidth = ctx.MeasureTextWidth(rightText, 12.0f);
+		const float textY = rect.Y + (rect.H - 14.0f) * 0.5f;
+		Wui::Label(ctx, { rect.X + 10.0f, textY }, left, m_Theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { rect.X + rect.W - rightWidth - 10.0f, textY }, rightText,
+			m_Theme.TextMuted, 12.0f);
+		// 无障碍:脚本/AI 通道可直接读整条状态(不依赖像素)。
+		Wui::WuiAccessNode node;
+		node.Id = Wui::HashId("shell.status");
+		node.Window = "main";
+		node.Panel = "shell";
+		node.Kind = "status";
+		node.Label = "editor status bar";
+		node.Value = left + "   |   " + rightText;
+		node.Rect = rect;
+		node.Enabled = false;
+		node.Interactive = false;
+		node.Visible = true;
+		Wui::WuiAccessibility::Get().Register(node);
 	}
 
 	void EditorShell::RenderNode(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)

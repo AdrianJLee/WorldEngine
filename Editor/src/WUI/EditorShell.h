@@ -232,6 +232,8 @@ namespace World
 		void ResetLayout(Wui::WuiContext& ctx);
 		// P4-UX1:面板标题走本地化(标签 / Window 菜单 / 挂靠标签共用同一来源)。
 		std::string PanelTitle(const std::string& id) const;
+		// P4-UX6:主窗口底部状态栏(场景/选择/后端/帧率),同时登记无障碍节点 `shell.status`。
+		void DrawStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& rect);
 
 		EditorLayer& m_Editor;
 		Wui::DockLayout m_Layout;

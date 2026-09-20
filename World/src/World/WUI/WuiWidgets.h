@@ -66,8 +66,17 @@ namespace World::Wui
 
 	void Panel(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiTheme& theme);
 	void Label(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const WuiColor& color, float fontSize);
-	// P4-UX1 术语对照:主文案后追加英文术语(Caption + 次要色),右侧空间不足时自动省略。
-	// 用于中文界面下的有歧义条目;英文界面传空 term 即可。
+	// 标签列的默认宽度预算(设计单位)。旧调用点(不传 width)按它裁剪,而不是让文字压到
+	// 右侧控件上;面板有更精确的列宽时显式传 width。
+	// 150 = 现有面板最紧的标签列(SettingsPanel 的控件列在 x+170,标签列到 164)+ 余量。
+	inline constexpr float LabelDefaultWidth = 150.0f;
+	// P4-UX1 术语对照:主文案后追加英文术语(Caption + 次要色)。用于中文界面下的有歧义条目;
+	// 英文界面传空 term 即可。P4-UX5 起显式裁剪:超出 width(设计单位,= 标签列宽)时按优先级降级 ——
+	// ① 术语省略号、② 去掉术语只留主文案、③ 主文案本身按 EllipsizeToWidth 语义截断。
+	// width 省略时用 LabelDefaultWidth;传 0 = 不做宽度裁剪(仅按自身文本绘制)。
+	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
+		const WuiColor& color, float fontSize, const WuiTheme& theme, float width);
+	// 兼容重载:旧调用点(Editor 侧 12 处)语义不变,内部按 LabelDefaultWidth 裁剪。
 	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
 		const WuiColor& color, float fontSize, const WuiTheme& theme);
 
