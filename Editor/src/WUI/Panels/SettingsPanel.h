@@ -4,6 +4,7 @@
 #include "World/Core/Asset/ProjectManifest.h"
 
 #include <string>
+#include <vector>
 
 namespace World
 {
@@ -29,6 +30,17 @@ namespace World
 		// P4-1:物理设置(与渲染设置同一个面板)。
 		Asset::PhysicsSettingsData m_Physics;
 		bool m_PhysicsChanged = false;
+		// P4-UX11:启动与内容(renderer / start_scene / content_root)—— 来自 project.we.yaml,
+		// 以前只能手改文件;这三项各自生效时机不同(见面板 tooltip 与重启入口)。
+		struct StartupSettings
+		{
+			std::string Renderer = "opengl";
+			std::string StartScene;
+			std::string ContentRoot;
+		};
+		StartupSettings m_Startup;
+		std::vector<std::string> m_SceneOptions;
+		std::string m_StartupContentRootBuffer;
 		std::string m_Status = "渲染设置来自 project.we.yaml 的 `rendering` 区块";
 		bool m_StatusIsError = false;
 		// 自动保存防抖:拖拽控件时每帧都会 changed,不能每帧写盘。

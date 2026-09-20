@@ -3125,6 +3125,71 @@ namespace World
 		return true;
 	}
 
+	// P4-UX11:项目启动项(renderer / start_scene / content_root)。
+	// 与渲染/物理同一套"回写清单"口径:Load(保留其它字段与注释风格) → 只覆盖这三项 → Save。
+	bool EditorShell::SaveProjectStartupSettings(const std::string& renderer, const std::string& startScene,
+		const std::string& contentRoot, std::string* message)
+	{
+		std::filesystem::path manifestPath;
+		if (!Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+		{
+			if (message) *message = "找不到 project.we.yaml(工作目录下没有清单)";
+			return false;
+		}
+		Asset::ProjectManifest manifest;
+		std::string error;
+		if (!Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+		{
+			if (message) *message = "清单读取失败: " + error;
+			return false;
+		}
+		if (!renderer.empty())
+			manifest.Renderer = renderer;
+		manifest.StartScene = startScene;
+		if (!contentRoot.empty())
+			manifest.ContentRoot = contentRoot;
+		if (!Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+		{
+			if (message) *message = "清单写入失败: " + error;
+			return false;
+		}
+		if (message)
+			*message = "已保存启动项到 " + manifestPath.filename().string();
+		return true;
+	}
+
+	std::vector<std::string> EditorShell::ListProjectScenes()
+	{
+		// 内容根下的 .wd 场景(逻辑路径,与 manifest 的 start_scene 同一口径:相对 content_root)。
+		std::vector<std::string> scenes;
+		std::filesystem::path manifestPath;
+		if (!Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+			return scenes;
+		Asset::ProjectManifest manifest;
+		std::string error;
+		if (!Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+			return scenes;
+		const std::filesystem::path root = manifest.ResolveContentRoot(manifestPath);
+		std::error_code code;
+		for (const std::filesystem::directory_entry& entry :
+			std::filesystem::recursive_directory_iterator(root, code))
+		{
+			if (code)
+				break;
+			if (!entry.is_regular_file(code) || entry.path().extension() != ".wd")
+				continue;
+			scenes.push_back(std::filesystem::relative(entry.path(), root, code).generic_string());
+		}
+		std::sort(scenes.begin(), scenes.end());
+		return scenes;
+	}
+
+	void EditorShell::ApplyProjectRendererChange(const std::string& renderer)
+	{
+		// 运行中热切换会串资源(GL 名字/描述符集跨上下文复用) → EditorLayer 会写回请求并重启编辑器。
+		m_Editor.ApplyRendererChange(renderer);
+	}
+
 	bool EditorShell::ImportModelFile(const std::string& sourcePath, std::string* message,
 		std::string* outLogicalModel)
 	{

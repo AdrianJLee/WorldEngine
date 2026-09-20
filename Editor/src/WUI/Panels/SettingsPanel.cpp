@@ -24,6 +24,20 @@ namespace World
 					return index;
 			return 2;   // 2048 默认
 		}
+
+		// P4-UX11:一行设置说明既要能鼠标悬停看到,也要写进无障碍节点 ——
+		// 脚本/读屏拿不到鼠标悬停,只能读 `ui.tree`,否则"说明"对它们等于不存在。
+		// (注册表渲染的设置页已内置这条;这里是手写行共用的收口。)
+		void RowTooltip(Wui::WuiContext& ctx, Wui::WuiId id, const Wui::WuiRect& rect, const std::string& text)
+		{
+			Wui::Tooltip(ctx, rect, text);
+			if (const Wui::WuiAccessNode* node = Wui::WuiAccessibility::Get().Find(id))
+			{
+				Wui::WuiAccessNode copy = *node;
+				copy.Tooltip = text;
+				Wui::WuiAccessibility::Get().Register(copy);
+			}
+		}
 	}
 
 	void SettingsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
@@ -32,6 +46,28 @@ namespace World
 		{
 			m_Edit = RenderSettings::Get();
 			m_Physics = PhysicsSettings::Get();
+			// P4-UX11:启动项来自清单(以前只能手改 project.we.yaml)。
+			// 找不到清单时留空,面板显示当前运行后端,不让用户面对空白控件。
+			m_Startup.Renderer = Renderer::GetBackendName();
+			m_Startup.StartScene.clear();
+			m_Startup.ContentRoot.clear();
+			std::filesystem::path manifestPath;
+			Asset::ProjectManifest manifest;
+			std::string manifestError;
+			if (Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath)
+				&& Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError))
+			{
+				if (!manifest.Renderer.empty())
+					m_Startup.Renderer = manifest.Renderer;
+				m_Startup.StartScene = manifest.StartScene;
+				m_Startup.ContentRoot = manifest.ContentRoot.generic_string();
+			}
+			else
+			{
+				WLD_CORE_WARN("项目设置面板:读取 project.we.yaml 失败({0})", manifestError);
+			}
+			m_SceneOptions = host.ListProjectScenes();
+			m_StartupContentRootBuffer = m_Startup.ContentRoot;
 			m_Initialized = true;
 		}
 
@@ -83,6 +119,29 @@ namespace World
 		}
 		Wui::Tooltip(ctx, { x, y, width, 20.0f }, Wui::Tr("settings.vsync.tooltip",
 			"Vertical sync\nWait for the display refresh before presenting (prevents tearing; caps FPS at the refresh rate).\nDefault: on. Applies immediately (swapchain is recreated)."));
+		y += 26.0f;
+
+		// P4-UX11:实例合批与 GPU 计时(以前只在 project.we.yaml 里,没有界面)。
+		{
+			const Wui::LocalizedLabel label = Wui::TrLabel("settings.instancing", "GPU Instancing");
+			if (Wui::Checkbox(ctx, Wui::HashId("settings3d.instancing"), { x, y, width, 18.0f },
+				label.Text, label.Term, m_Edit.Instancing, theme))
+				changed = true;
+		}
+		RowTooltip(ctx, Wui::HashId("settings3d.instancing"), { x, y, width, 20.0f }, Wui::Tr("settings.instancing.tooltip",
+			"GPU instancing\nBatches meshes that share mesh + material (big win on repeated props).\n"
+			"Default: on. Applies immediately; turn it off for A/B comparisons."));
+		y += 26.0f;
+
+		{
+			const Wui::LocalizedLabel label = Wui::TrLabel("settings.gpu_timing", "GPU Timing");
+			if (Wui::Checkbox(ctx, Wui::HashId("settings3d.gpu_timing"), { x, y, width, 18.0f },
+				label.Text, label.Term, m_Edit.GpuTiming, theme))
+				changed = true;
+		}
+		RowTooltip(ctx, Wui::HashId("settings3d.gpu_timing"), { x, y, width, 20.0f }, Wui::Tr("settings.gpu_timing.tooltip",
+			"GPU timing\nTimestamp queries for the scene pass; Stats and the AI channel can then read gpuMs.\n"
+			"Default: off (the readback has a small cost). Applies immediately."));
 		y += 26.0f;
 
 		{
@@ -239,6 +298,118 @@ namespace World
 			}
 			Wui::Tooltip(ctx, { x, y, width, 22.0f }, Wui::Tr("settings.physics.gravity.tooltip",
 				"Gravity\nAcceleration on the Y axis (m/s²). Takes effect on the next Play / Runtime start.\nDefault: -9.81."));
+			y += 26.0f;
+		}
+
+		// ---- P4-UX11:启动与内容(以前只能改 project.we.yaml 的三个字段) ----
+		{
+			const Wui::LocalizedLabel header = Wui::TrLabel("settings.group.startup", "Startup & Content");
+			Wui::LabelWithTerm(ctx, { x, y }, header.Text, header.Term, theme.TextMuted, 12.0f, theme);
+		}
+		y += 20.0f;
+		// 渲染后端:写清单 + 显式"立即重启"(运行中热切换会串资源,编辑器不替用户重启)。
+		{
+			const std::vector<std::string> options { "OpenGL", "Vulkan" };
+			int selected = m_Startup.Renderer == "vulkan" ? 1 : 0;
+			if (Wui::Combo(ctx, Wui::HashId("settings.project.renderer"), { x + 170.0f, y, 150.0f, 20.0f },
+				"Renderer", options, selected, theme))
+			{
+				const std::string wanted = selected == 1 ? "vulkan" : "opengl";
+				std::string message;
+				if (host.SaveProjectStartupSettings(wanted, m_Startup.StartScene, m_Startup.ContentRoot, &message))
+				{
+					m_Startup.Renderer = wanted;
+					m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
+					m_StatusIsError = false;
+				}
+				else
+				{
+					m_Status = message;
+					m_StatusIsError = true;
+				}
+			}
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.project.renderer", "Renderer");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
+			RowTooltip(ctx, Wui::HashId("settings.project.renderer"), { x, y, width, 22.0f }, Wui::Tr("settings.project.renderer.tooltip",
+				"Renderer backend\nWhich RHI backend the editor and Runtime start with (OpenGL / Vulkan).\n"
+				"Switching at runtime would mix GL names/descriptor sets, so a restart is required."));
+			// 只在"清单里的后端 ≠ 当前跑着的后端"时给出重启入口(不替用户重启)。
+			if (m_Startup.Renderer != Renderer::GetBackendName())
+			{
+				if (Wui::Button(ctx, Wui::HashId("settings.project.renderer.restart"), { x + 328.0f, y, 150.0f, 20.0f },
+					Wui::Tr("settings.project.renderer.restart", "Restart Now to Apply"), theme))
+					host.ApplyProjectRendererChange(m_Startup.Renderer);
+			}
+			y += 26.0f;
+		}
+		// 启动场景(打包/Runtime 启动时加载的场景):下拉选内容根下的 .wd。
+		{
+			std::vector<std::string> options = m_SceneOptions;
+			if (options.empty())
+				options.push_back(m_Startup.StartScene);
+			int selected = 0;
+			for (size_t i = 0; i < options.size(); ++i)
+				if (options[i] == m_Startup.StartScene)
+					selected = static_cast<int>(i);
+			if (Wui::SearchableCombo(ctx, Wui::HashId("settings.project.start_scene"), { x + 170.0f, y, 190.0f, 20.0f },
+				"Start Scene", options, selected, theme))
+			{
+				if (selected >= 0 && selected < static_cast<int>(options.size()))
+				{
+					std::string message;
+					if (host.SaveProjectStartupSettings(m_Startup.Renderer, options[static_cast<size_t>(selected)],
+						m_Startup.ContentRoot, &message))
+					{
+						m_Startup.StartScene = options[static_cast<size_t>(selected)];
+						m_Status = Wui::Tr("settings.status.saved", "Saved automatically");
+						m_StatusIsError = false;
+					}
+					else
+					{
+						m_Status = message;
+						m_StatusIsError = true;
+					}
+				}
+			}
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.project.start_scene", "Start Scene");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
+			RowTooltip(ctx, Wui::HashId("settings.project.start_scene"), { x, y, width, 22.0f }, Wui::Tr("settings.project.start_scene.tooltip",
+				"Start scene\nScene loaded by the packaged Runtime (path relative to the content root).\n"
+				"Takes effect on the next Runtime start / packaging."));
+			y += 26.0f;
+		}
+		// 内容根(资产目录):改完需要重启(挂载点在启动时建立)。
+		{
+			if (m_StartupContentRootBuffer.empty())
+				m_StartupContentRootBuffer = m_Startup.ContentRoot;
+			if (Wui::TextField(ctx, Wui::HashId("settings.project.content_root"), { x + 170.0f, y, 190.0f, 20.0f },
+				m_StartupContentRootBuffer, theme) && m_StartupContentRootBuffer != m_Startup.ContentRoot)
+			{
+				std::string message;
+				if (host.SaveProjectStartupSettings(m_Startup.Renderer, m_Startup.StartScene,
+					m_StartupContentRootBuffer, &message))
+				{
+					m_Startup.ContentRoot = m_StartupContentRootBuffer;
+					m_Status = Wui::Tr("settings.project.content_root.restart", "Applied — restart to mount the new content root");
+					m_StatusIsError = false;
+				}
+				else
+				{
+					m_Status = message;
+					m_StatusIsError = true;
+				}
+			}
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.project.content_root", "Content Root");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
+			RowTooltip(ctx, Wui::HashId("settings.project.content_root"), { x, y, width, 22.0f }, Wui::Tr("settings.project.content_root.tooltip",
+				"Content root\nFolder that holds the project assets (relative to project.we.yaml).\n"
+				"Applies after restarting the editor (the mount point is created at startup)."));
 			y += 26.0f;
 		}
 

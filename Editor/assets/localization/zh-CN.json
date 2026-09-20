@@ -370,6 +370,7 @@
 
   "notice.restore": "已恢复上次的窗口",
   "notice.restore.tabs": "在顶栏可以找到",
+  "notice.restore.skipped": "已跳过恢复上次的窗口(下次启动还会询问)",
   "notice.label": "状态提示",
   "notice.tooltip": "点一下或按 Esc 关闭;鼠标停在这里时不会自动消失",
 
@@ -378,5 +379,18 @@
   "settings.editor.workflow.restore_windows.option.ask": "每次询问",
   "settings.editor.workflow.restore_windows.option.tabs": "恢复为顶栏标签",
   "settings.editor.workflow.restore_windows.option.layout": "按上次形态恢复",
-  "settings.editor.workflow.restore_windows.option.none": "不恢复"
+  "settings.editor.workflow.restore_windows.option.none": "不恢复",
+  "settings.group.startup": "启动与内容",
+  "settings.project.renderer": "渲染后端",
+  "settings.project.renderer.tooltip": "渲染后端\n编辑器与 Runtime 启动时使用的 RHI 后端(OpenGL / Vulkan)。\n运行中热切换会串资源,因此需要重启编辑器。",
+  "settings.project.renderer.restart": "立即重启以生效",
+  "settings.project.start_scene": "启动场景",
+  "settings.project.start_scene.tooltip": "启动场景\n打包后的 Runtime 启动时加载的场景(路径相对内容根)。\n下次启动 Runtime / 打包时生效。",
+  "settings.project.content_root": "内容根",
+  "settings.project.content_root.tooltip": "内容根\n存放项目资产的目录(相对 project.we.yaml)。\n挂载点在启动时建立,改完需要重启编辑器。",
+  "settings.project.content_root.restart": "已写入,重启编辑器后挂载新内容根",
+  "settings.instancing": "GPU 实例合批",
+  "settings.instancing.tooltip": "GPU 实例合批\n同网格 + 同材质的物体合批绘制(重复道具收益最大)。\n默认:开。立即生效;关掉可做 A/B 对照。",
+  "settings.gpu_timing": "GPU 计时",
+  "settings.gpu_timing.tooltip": "GPU 计时\n用时间戳查询统计场景通道耗时,Stats 面板与 AI 通道可读 gpuMs。\n默认:关(读回有一点代价)。立即生效。"
 }

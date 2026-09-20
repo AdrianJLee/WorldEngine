@@ -95,6 +95,19 @@ namespace World
 			if (message) *message = "settings panel is not wired to a host";
 			return false;
 		}
+		// P4-UX11:项目启动项(renderer / start_scene / content_root)—— 与渲染/物理同一份清单,
+		// 只覆盖这三个字段(Load 后局部改,保留 id/包列表/注释)。
+		virtual bool SaveProjectStartupSettings(const std::string& renderer, const std::string& startScene,
+			const std::string& contentRoot, std::string* message = nullptr)
+		{
+			(void)renderer; (void)startScene; (void)contentRoot;
+			if (message) *message = "settings panel is not wired to a host";
+			return false;
+		}
+		// 内容根下的场景(逻辑路径,如 "scenes/3DTest.wd"),给"启动场景"下拉用。
+		virtual std::vector<std::string> ListProjectScenes() { return {}; }
+		// 切换渲染后端 = 需要重启编辑器(运行中热切换会串资源):面板改完立刻生效。
+		virtual void ApplyProjectRendererChange(const std::string& renderer) { (void)renderer; }
 		// ---- W9-2:内置脚本编辑器 ----
 		// 打开脚本编辑器(逻辑路径;每个脚本一个 "script:<逻辑路径>" 面板)。默认空实现。
 		// 实现必须是"创建后默认附加到主窗口"(用户 2026-09-18 决定)。
