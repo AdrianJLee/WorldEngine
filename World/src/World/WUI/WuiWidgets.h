@@ -70,11 +70,18 @@ namespace World::Wui
 
 	void Panel(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiTheme& theme);
 	void Label(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const WuiColor& color, float fontSize);
+	// P4-UX1 术语对照:主文案后追加英文术语(Caption + 次要色),右侧空间不足时自动省略。
+	// 用于中文界面下的有歧义条目;英文界面传空 term 即可。
+	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
+		const WuiColor& color, float fontSize, const WuiTheme& theme);
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	bool Toggle(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	// 值驱动的勾选框(供 Inspector 等绑定外部状态):状态写回 value;
 	// 返回值 = 本帧是否被点击改值(与 Combo/DragInt/DragFloat 同约定)。
 	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool& value, const WuiTheme& theme);
+	// 同上,带英文术语对照(中文界面下显示 "垂直同步  Vertical Sync")。
+	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::string& term,
+		bool& value, const WuiTheme& theme);
 	void SliderFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float min, float max, const WuiTheme& theme);
 	// 数值编辑:点击进入文本输入,按住左右拖动微调;Enter 提交,Escape 取消。
 	bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme);

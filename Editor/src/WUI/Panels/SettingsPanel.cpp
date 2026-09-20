@@ -39,28 +39,40 @@ namespace World
 		float y = rect.Y + 10.0f;
 		bool changed = false;
 
-		// P4-UX1:本地化试点 —— 源码内联中文是默认语言,en.json 提供英文覆盖。
-		Wui::Label(ctx, { x, y }, Wui::Tr("settings.group.rendering", "渲染 (project.we.yaml → rendering:)"),
-			theme.TextMuted, 12.0f);
+		// P4-UX1:本地化试点 —— 源码内联英文是默认语言,zh-CN.json 提供中文覆盖;
+		// 中文界面下用 LabelWithTerm/Checkbox(term) 带上英文术语对照(不堆括号、窄处自动省略)。
+		{
+			const Wui::LocalizedLabel header = Wui::TrLabel("settings.group.rendering", "Rendering");
+			Wui::LabelWithTerm(ctx, { x, y }, header.Text, header.Term, theme.TextMuted, 12.0f, theme);
+		}
 		y += 20.0f;
 
-		if (Wui::Checkbox(ctx, Wui::HashId("settings3d.culling"), { x, y, width, 18.0f },
-			Wui::Tr("settings.culling", "视锥剔除 (culling)"), m_Edit.Culling, theme))
-			changed = true;
+		{
+			const Wui::LocalizedLabel label = Wui::TrLabel("settings.culling", "Frustum Culling");
+			if (Wui::Checkbox(ctx, Wui::HashId("settings3d.culling"), { x, y, width, 18.0f },
+				label.Text, label.Term, m_Edit.Culling, theme))
+				changed = true;
+		}
 		y += 24.0f;
 
-		if (Wui::Checkbox(ctx, Wui::HashId("settings3d.shadows"), { x, y, width, 18.0f },
-			Wui::Tr("settings.shadows", "方向光阴影 (shadows)"), m_Edit.Shadows, theme))
-			changed = true;
+		{
+			const Wui::LocalizedLabel label = Wui::TrLabel("settings.shadows", "Directional Shadows");
+			if (Wui::Checkbox(ctx, Wui::HashId("settings3d.shadows"), { x, y, width, 18.0f },
+				label.Text, label.Term, m_Edit.Shadows, theme))
+				changed = true;
+		}
 		y += 26.0f;
 
 		// P4-perf:垂直同步/呈现模式。Vulkan 下改这一项会重建交换链(下一帧生效),
 		// GL 下立刻改 swap interval;两者都不需要重启,方便直接对比帧率。
-		if (Wui::Checkbox(ctx, Wui::HashId("settings3d.vsync"), { x, y, width, 18.0f },
-			Wui::Tr("settings.vsync", "垂直同步 (vsync)"), m_Edit.Vsync, theme))
 		{
-			changed = true;
-			Renderer::SetVsync(m_Edit.Vsync);
+			const Wui::LocalizedLabel label = Wui::TrLabel("settings.vsync", "Vertical Sync");
+			if (Wui::Checkbox(ctx, Wui::HashId("settings3d.vsync"), { x, y, width, 18.0f },
+				label.Text, label.Term, m_Edit.Vsync, theme))
+			{
+				changed = true;
+				Renderer::SetVsync(m_Edit.Vsync);
+			}
 		}
 		y += 26.0f;
 
@@ -73,7 +85,10 @@ namespace World
 				m_Edit.ShadowMapSize = kShadowMapSizes[selected];
 				changed = true;
 			}
-			Wui::Label(ctx, { x, y + 3.0f }, Wui::Tr("settings.shadow_map", "阴影贴图尺寸"), theme.Text, 13.0f);
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.shadow_map", "Shadow Map Size");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
 			y += 26.0f;
 		}
 
@@ -153,8 +168,10 @@ namespace World
 		}
 
 		// P4-1:物理(固定步长 1..240Hz;重力 = Y 轴加速度)。
-		Wui::Label(ctx, { x, y }, Wui::Tr("settings.group.physics", "物理 (project.we.yaml → physics:)"),
-			theme.TextMuted, 12.0f);
+		{
+			const Wui::LocalizedLabel header = Wui::TrLabel("settings.group.physics", "Physics");
+			Wui::LabelWithTerm(ctx, { x, y }, header.Text, header.Term, theme.TextMuted, 12.0f, theme);
+		}
 		y += 20.0f;
 		{
 			int64_t value = static_cast<int64_t>(m_Physics.FixedStepHz);
@@ -164,7 +181,10 @@ namespace World
 				m_Physics.FixedStepHz = static_cast<uint32_t>(value);
 				changed = true;
 			}
-			Wui::Label(ctx, { x, y + 3.0f }, "固定步长 (Hz)", theme.Text, 13.0f);
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.physics.fixed_step", "Fixed Timestep");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
 			y += 26.0f;
 		}
 		{
@@ -175,7 +195,10 @@ namespace World
 				m_Physics.Gravity = value;
 				changed = true;
 			}
-			Wui::Label(ctx, { x, y + 3.0f }, "重力 (Y)", theme.Text, 13.0f);
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.physics.gravity", "Gravity");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
 			y += 26.0f;
 		}
 
@@ -183,34 +206,35 @@ namespace World
 		{
 			RenderSettings::Set(m_Edit);
 			PhysicsSettings::Set(m_Physics);
-			m_Status = "已应用(未保存到 project.we.yaml)";
+			m_Status = Wui::Tr("settings.status.applied", "Applied (not saved to project.we.yaml)");
 			m_StatusIsError = false;
 		}
 
 		y += 4.0f;
 		const float buttonWidth = (width - 12.0f) / 2.0f;
 		if (Wui::Button(ctx, Wui::HashId("settings3d.save"), { x, y, buttonWidth, 24.0f },
-			"保存到 project.we.yaml", theme))
+			Wui::Tr("settings.save", "Save to project.we.yaml"), theme))
 		{
 			std::string message;
 			if (host.SaveProjectRenderSettings(m_Edit, &message) && host.SaveProjectPhysicsSettings(m_Physics, &message))
 			{
-				m_Status = message.empty() ? "已保存到 project.we.yaml" : message;
+				m_Status = message.empty()
+					? Wui::Tr("settings.status.saved", "Saved to project.we.yaml") : message;
 				m_StatusIsError = false;
 			}
 			else
 			{
-				m_Status = message.empty() ? "保存失败" : message;
+				m_Status = message.empty() ? Wui::Tr("settings.status.save_failed", "Save failed") : message;
 				m_StatusIsError = true;
 			}
 		}
 		if (Wui::Button(ctx, Wui::HashId("settings3d.reset"), { x + buttonWidth + 12.0f, y, buttonWidth, 24.0f },
-			"恢复默认(不写盘)", theme))
+			Wui::Tr("settings.reset", "Restore Defaults"), theme))
 		{
 			m_Edit = Asset::RenderingSettings {};
 			RenderSettings::Set(m_Edit);
 			Renderer::SetVsync(m_Edit.Vsync);
-			m_Status = "已恢复内置默认值(未保存)";
+			m_Status = Wui::Tr("settings.status.defaults", "Restored built-in defaults (not saved)");
 			m_StatusIsError = false;
 		}
 		y += 32.0f;

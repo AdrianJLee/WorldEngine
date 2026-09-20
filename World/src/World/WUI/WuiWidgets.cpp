@@ -96,6 +96,24 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Text, { pos.x, pos.y, 0, 0 }, color, 0, 1.0f, text, fontSize, false });
 	}
 
+	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
+		const WuiColor& color, float fontSize, const WuiTheme& theme)
+	{
+		if (term.empty())
+		{
+			Label(ctx, pos, text, color, fontSize);
+			return;
+		}
+		// P4-UX1:主文案后 6px 接小号术语(Caption + 次要色)。术语"退后一层"阅读,
+		// 不换行、不加括号堆叠;右侧空间不够时直接省略(窄面板不硬塞)。
+		const float textWidth = ctx.MeasureTextWidth(text, fontSize);
+		const float termSize = theme.FontSizeCaption;
+		const float termX = pos.x + textWidth + 6.0f;
+		ctx.Commands().push_back({ WuiDrawKind::Text, { pos.x, pos.y, 0, 0 }, color, 0, 1.0f, text, fontSize, false });
+		ctx.Commands().push_back({ WuiDrawKind::Text, { termX, pos.y + (fontSize - termSize) * 0.5f, 0, 0 },
+			theme.TextMuted, 0, 1.0f, term, termSize, false });
+	}
+
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme)
 	{
 		RegisterAccessNode(id, "button", rect, label, std::string());
@@ -125,6 +143,12 @@ namespace World::Wui
 
 	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, bool& value, const WuiTheme& theme)
 	{
+		return Checkbox(ctx, id, rect, label, std::string(), value, theme);
+	}
+
+	bool Checkbox(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const std::string& term,
+		bool& value, const WuiTheme& theme)
+	{
 		// 返回"本帧是否被点击改值",与 Combo/DragInt/DragFloat 的约定一致(旧版返回 value,
 		// 导致 `if (Checkbox(...))` 的调用点在**勾选时每帧触发、取消勾选时反而不触发**)。
 		// 控件状态本身仍然写回 value 引用,并在无障碍节点里记录。
@@ -134,11 +158,24 @@ namespace World::Wui
 			value = !value;
 			changed = true;
 		}
-		RegisterAccessNode(id, "checkbox", rect, label, value ? "true" : "false");
+		// 无障碍节点带上英文术语:脚本/自动化在中文界面下也能按英文检索。
+		RegisterAccessNode(id, "checkbox", rect,
+			term.empty() ? label : (label + " (" + term + ")"), value ? "true" : "false");
 		const WuiRect box { rect.X, rect.Y + (rect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
 		ctx.Commands().push_back({ WuiDrawKind::Rect, box, value ? theme.Accent : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box, theme.Border, 3.0f, 1.0f });
-		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 24.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, label, 15.0f, false });
+		const float labelSize = 15.0f;
+		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 24.0f, rect.Y + (rect.H - labelSize) * 0.5f, 0, 0 },
+			theme.Text, 0, 1.0f, label, labelSize, false });
+		if (!term.empty())
+		{
+			// 英文术语对照:Caption/次要色;右侧放不下就省略。
+			const float termSize = theme.FontSizeCaption;
+			const float termX = rect.X + 24.0f + ctx.MeasureTextWidth(label, labelSize) + 6.0f;
+			if (termX + ctx.MeasureTextWidth(term, termSize) <= rect.X + rect.W)
+				ctx.Commands().push_back({ WuiDrawKind::Text, { termX, rect.Y + (rect.H - termSize) * 0.5f, 0, 0 },
+					theme.TextMuted, 0, 1.0f, term, termSize, false });
+		}
 		(void)id;
 		return changed;
 	}
