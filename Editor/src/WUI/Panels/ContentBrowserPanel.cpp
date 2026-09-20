@@ -1060,10 +1060,12 @@ namespace World
 			m_Breadcrumbs->AlignCross = Wui::WuiAlign::Center;
 			// P4-UX13:面包屑**吃掉剩余宽度**(以前靠 spacer 顶到右边),这样面板变窄时先挤的是路径,
 			// 而不是把右侧的搜索框/动作挤出画面(实测 890px 宽时搜索框整个看不见)。
-			m_Toolbar->Add(m_Breadcrumbs, { 0, 1e30f, 0, 24, 1 });
+			// min 120:否则面板一窄,布局会把面包屑压成 0 宽 —— 路径整条消失(用户实测)。
+			m_Toolbar->Add(m_Breadcrumbs, { 120, 1e30f, 0, 24, 1 });
 
 			// `⋯` 菜单:动作收进一处,低频动作不再占用常驻空间。
-			m_MoreButton = addButton("⋯", [this] { m_ToolbarMenuOpen = true; }, 30, true);
+			// "…"(U+2026)在字体子集里有;"⋯"(U+22EF)没有 → 会画成乱码(用户实测)。
+			m_MoreButton = addButton("…", [this] { m_ToolbarMenuOpen = true; }, 30, true);
 			m_MoreButton->CenterLabel = true;
 
 			m_SearchField = std::make_shared<Wui::WuiTextField>();
@@ -1131,15 +1133,34 @@ namespace World
 				m_Breadcrumbs->Add(separator, { 12.0f, 12.0f, 0, 24, 0 });
 			};
 			std::filesystem::path accumulated = m_Model.Root;
+			// 路径太深时只显示最后两级 + "...":整条路径铺不下会把面包屑挤爆(面板一窄就"消失")。
+			std::vector<std::string> parts;
 			for (const auto& part : m_Model.Current.lexically_relative(m_Model.Root))
 			{
-				accumulated /= part;
 				// 根目录自身的相对路径是 ".":它不是一个真实层级,别画成一枚空的 crumb
 				// (实测工具条最右侧出现一个 "." 按钮,看起来像坏掉的控件)。
 				if (part == "." || part.empty())
 					continue;
+				parts.push_back(part.string());
+			}
+			const size_t firstShown = parts.size() > 3 ? parts.size() - 2 : 0;
+			if (firstShown > 0)
+			{
+				// 前面被折叠的部分不再逐级列出,直接给一个不可点的省略号占位。
+				auto dots = std::make_shared<Wui::WuiLabel>();
+				dots->Text = "…";
+				dots->Color = theme.TextMuted;
+				dots->FontSize = 13.0f;
+				dots->FixedWidth = 14.0f;
+				m_Breadcrumbs->Add(dots, { 14.0f, 14.0f, 0, 24, 0 });
+				for (size_t i = 0; i < firstShown; ++i)
+					accumulated /= parts[i];
+			}
+			for (size_t i = firstShown; i < parts.size(); ++i)
+			{
+				accumulated /= parts[i];
 				addCrumbSeparator();
-				addCrumb(part.string(), accumulated);
+				addCrumb(parts[i], accumulated);
 			}
 		}
 
@@ -1474,7 +1495,9 @@ namespace World
 			BrowserSlice slice;
 			slice.Path = path;
 			slice.IsDir = std::filesystem::is_directory(path, dirError);
-			slice.Name = path.filename().string();
+			// P4-UX14:后缀已经在切片底部单独一行显示,名字里就不再重复
+			// (用户:"后缀名放底部这个设计很好,所以文件名部分就不需要再显示后缀名了")。
+			slice.Name = path.extension().empty() ? path.filename().string() : path.stem().string();
 			const EditorAssetType type = DescribeAssetType(path, slice.IsDir);
 			slice.Type = type.Name;
 			slice.Extension = LowerExtension(path);

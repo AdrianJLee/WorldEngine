@@ -679,6 +679,14 @@ namespace World::Wui
 			submitted = false;
 			cancelled = false;
 			if (cursor < 0) cursor = Utf8Count(buffer);
+			// P4-UX14:Ctrl+A 全选(用户实测"重命名时 Ctrl+A 失效")。放在插入之前,
+			// 与后续的字符插入/光标移动互不干扰。
+			if (ctx.Input().Ctrl && ctx.WasKeyPressed(KeyCodes::A))
+			{
+				selStart = 0;
+				selEnd = Utf8Count(buffer);
+				cursor = selEnd;
+			}
 			for (uint32_t codepoint : ctx.Input().TextInput)
 			{
 				if (selStart >= 0 && selEnd > selStart)
