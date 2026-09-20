@@ -76,6 +76,10 @@ namespace World
 		static LRESULT CALLBACK StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 		LRESULT HitTestNc(LPARAM lParam);
 		int ResizeBorderPixels() const override;
+		// P4-UX2e:无边框窗口补上 WS_THICKFRAME —— GLFW 的 getWindowStyle() 对
+		// undecorated 只给 WS_POPUP(即使 resizable),没有 thick frame 时 Windows
+		// 的缩放循环根本不会启动,边缘拖拽表现为"不能伸缩"。
+		void EnsureFramelessResizableStyle();
 		// D10:WM_DROPFILES:用 DragQueryFileW 逐项取路径进 m_DroppedFiles,再 DragFinish。
 		LRESULT HandleDroppedFiles(WPARAM wParam);
 

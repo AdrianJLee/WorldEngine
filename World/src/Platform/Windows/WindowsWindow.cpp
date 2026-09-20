@@ -306,6 +306,12 @@ namespace World
 	{
 		WLD_PROFILE_FUNCTION();
 
+		// 无边框窗口要保证 WS_THICKFRAME 在位:GLFW 在 maximize/restore 等路径会重算样式
+		// 并抹掉它(updateWindowStyles 先清 WS_OVERLAPPEDWINDOW 再按 decorated 重加)。
+		// 这里每帧只做两次轻量 Win32 调用,代价可忽略,但能保证拖拽缩放始终可用。
+		if (m_Frameless)
+			EnsureFramelessResizableStyle();
+
 		// Poll for and process events
 		glfwPollEvents();
 
@@ -416,6 +422,26 @@ namespace World
 		// GLFW 切换 GLFW_DECORATED 只改窗口样式(updateWindowStyles),不会重建 HWND,
 		// 所以子类过程与 DragAcceptFiles 都保持有效。
 		m_Frameless = frameless;
+		if (frameless)
+			EnsureFramelessResizableStyle();
+	}
+
+	void WindowsWindow::EnsureFramelessResizableStyle()
+	{
+		if (!m_Window)
+			return;
+		const HWND hwnd = glfwGetWin32Window(m_Window);
+		if (!hwnd)
+			return;
+		LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+		const LONG_PTR wanted = WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU;
+		if ((style & wanted) == wanted)
+			return;
+		style |= wanted;
+		SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+		// SWP_FRAMECHANGED 让系统重新计算非客户区(否则新样式不生效)。
+		SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 	}
 
 	bool WindowsWindow::IsFrameless() const
