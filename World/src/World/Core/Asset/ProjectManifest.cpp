@@ -184,6 +184,7 @@ namespace World::Asset
 				manifest.Rendering.MaxPointLights =
 					readU32("max_point_lights", manifest.Rendering.MaxPointLights);
 				manifest.Rendering.GpuTiming = readBool("gpu_timing", manifest.Rendering.GpuTiming);
+				manifest.Rendering.Vsync = readBool("vsync", manifest.Rendering.Vsync);
 				manifest.Rendering.Instancing = readBool("instancing", manifest.Rendering.Instancing);
 				manifest.Rendering.Anisotropy = readU32("anisotropy", manifest.Rendering.Anisotropy);
 				manifest.Rendering.Msaa = readU32("msaa", manifest.Rendering.Msaa);
@@ -236,6 +237,7 @@ namespace World::Asset
 			out << YAML::Key << "max_directional_lights" << YAML::Value << copy.Rendering.MaxDirectionalLights;
 			out << YAML::Key << "max_point_lights" << YAML::Value << copy.Rendering.MaxPointLights;
 			out << YAML::Key << "gpu_timing" << YAML::Value << copy.Rendering.GpuTiming;
+			out << YAML::Key << "vsync" << YAML::Value << copy.Rendering.Vsync;
 			out << YAML::Key << "instancing" << YAML::Value << copy.Rendering.Instancing;
 			out << YAML::Key << "anisotropy" << YAML::Value << copy.Rendering.Anisotropy;
 			out << YAML::Key << "msaa" << YAML::Value << copy.Rendering.Msaa;

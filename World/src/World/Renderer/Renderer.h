@@ -55,6 +55,12 @@ namespace World
 		static void SubmitUi(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer);
 		static void SubmitScene(const Rhi::Handle<Rhi::CommandBuffer>& commandBuffer,
 			const Rhi::Handle<Rhi::Texture>& colorTexture);
+		// ---- P4-perf:垂直同步 / 交换链呈现模式 ----
+		// 生效顺序:环境变量 `WLD_VK_PRESENT_MODE`(fifo|mailbox|immediate,本次运行强制)
+		//   > 本函数的运行期覆盖 > 清单 `rendering.vsync`(默认 true = FIFO)。
+		// 调用后:Vulkan 侧标记主交换链重建(下一帧生效);GL 侧立刻改 swap interval。
+		static void SetVsync(bool enabled);
+		static bool IsVsyncEnabled();
 
 		static void Submit(const Ref<class Shader>& shader, const Ref<class VertexArray>& vertexArray, const  glm::mat4& transform = glm::mat4(1.0));
 

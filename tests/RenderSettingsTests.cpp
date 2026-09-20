@@ -66,6 +66,8 @@ namespace
 		CHECK(manifest.Rendering.MaxPointLights == 7u);
 		// D8b:GPU 时间戳默认关(读回有代价);实例合批默认开。
 		CHECK(!manifest.Rendering.GpuTiming);
+		// P4-perf:垂直同步默认开(游戏防撕裂;关闭走 Immediate 呈现)。
+		CHECK(manifest.Rendering.Vsync);
 		CHECK(manifest.Rendering.Instancing);
 		// P4-1:各向异性与物理设置的默认值。
 		CHECK(manifest.Rendering.Anisotropy == 1u);
@@ -86,6 +88,7 @@ namespace
 			"  max_directional_lights: 2\n"
 			"  max_point_lights: 4\n"
 			"  gpu_timing: true\n"
+			"  vsync: false\n"
 			"  instancing: false\n"
 			"  anisotropy: 8\n"
 			"  render_scale: 0.5\n"
@@ -103,6 +106,7 @@ namespace
 		CHECK(manifest.Rendering.MaxDirectionalLights == 2u);
 		CHECK(manifest.Rendering.MaxPointLights == 4u);
 		CHECK(manifest.Rendering.GpuTiming);
+		CHECK(!manifest.Rendering.Vsync);
 		CHECK(!manifest.Rendering.Instancing);
 		// P4-1:各向异性 + 物理设置解析。
 		CHECK(manifest.Rendering.Anisotropy == 8u);
@@ -126,6 +130,7 @@ namespace
 		CHECK(reloaded.Rendering.MaxDirectionalLights == 2u);
 		CHECK(reloaded.Rendering.MaxPointLights == 4u);
 		CHECK(reloaded.Rendering.GpuTiming);
+		CHECK(!reloaded.Rendering.Vsync);
 		CHECK(!reloaded.Rendering.Instancing);
 		// P4-1:往返后各向异性与物理设置不丢。
 		CHECK(reloaded.Rendering.Anisotropy == 8u);

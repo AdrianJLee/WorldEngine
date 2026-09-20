@@ -483,6 +483,23 @@ namespace World::Wui
 		return static_cast<uint32_t>(Renderer::FrameSlot()) % kFramesInFlight;
 	}
 
+	void WuiRhiBackend::ReleaseStaleTextureSets()
+	{
+		std::vector<std::unordered_map<const void*, Rhi::Handle<Rhi::DescriptorSet>>> stale;
+		stale.reserve(kFramesInFlight);
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			if (m_TextureSets[slot].empty())
+				continue;
+			stale.push_back(std::move(m_TextureSets[slot]));
+			m_TextureSets[slot].clear();
+		}
+		if (stale.empty())
+			return;
+		// 句柄在回调里析构(=vkDestroyDescriptorPool);GL 立即执行,语义与旧代码一致。
+		Renderer::QueueRelease([stale = std::move(stale)]() mutable { stale.clear(); });
+	}
+
 	uint64_t WuiRhiBackend::SlotVertexBase() const
 	{
 		return static_cast<uint64_t>(FrameSlot()) * MaxQuads * 4 * sizeof(Vertex);
@@ -707,8 +724,7 @@ namespace World::Wui
 		// 旧贴图的 set(野 imageView)→ 反复拉伸窗口必现 vkQueueSubmit DEVICE_LOST。
 		if (WuiTextureRegistry::Get().ContentRevision() != m_TextureContentRevision)
 		{
-			for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
-				m_TextureSets[slot].clear();
+			ReleaseStaleTextureSets();
 			m_TextureContentRevision = WuiTextureRegistry::Get().ContentRevision();
 		}
 		EnsureResources();

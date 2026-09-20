@@ -88,6 +88,11 @@ namespace World
 		return Store().Shadows;
 	}
 
+	bool RenderSettings::VsyncEnabled()
+	{
+		return Store().Vsync;
+	}
+
 	float RenderSettings::RenderScale()
 	{
 		return Store().RenderScale;

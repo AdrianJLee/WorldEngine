@@ -81,6 +81,11 @@ namespace World::Wui
 		void Flush();
 		void ApplyScissor(const WuiRect& rect);
 		Rhi::Handle<Rhi::DescriptorSet> TextureSetFor(const Rhi::Handle<Rhi::Texture>& texture);
+		// 内容代变化时丢弃"按纹理缓存"的描述符集。Vulkan 下每个描述符集自带一个
+		// descriptor pool,立即析构会在旧命令缓冲仍在飞时触发
+		// VUID-vkDestroyDescriptorPool-descriptorPool-00303,因此统一走
+		// Renderer::QueueRelease 延迟到该槽位 GPU 工作完成之后。
+		void ReleaseStaleTextureSets();
 
 		// 字体面索引:0 = Montserrat Regular,1 = Montserrat Bold,2 = NotoSansSC 子集(回落),
 		// 3 = JetBrains Mono Regular,4 = JetBrains Mono Bold。

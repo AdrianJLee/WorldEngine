@@ -2,6 +2,7 @@
 #include "SettingsPanel.h"
 
 #include "World/Renderer/RenderSettings.h"
+#include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Core/PhysicsSettings.h"
 #include "World/WUI/WuiAccessibility.h"
@@ -48,6 +49,16 @@ namespace World
 		if (Wui::Checkbox(ctx, Wui::HashId("settings3d.shadows"), { x, y, width, 18.0f },
 			"方向光阴影 (shadows)", m_Edit.Shadows, theme))
 			changed = true;
+		y += 26.0f;
+
+		// P4-perf:垂直同步/呈现模式。Vulkan 下改这一项会重建交换链(下一帧生效),
+		// GL 下立刻改 swap interval;两者都不需要重启,方便直接对比帧率。
+		if (Wui::Checkbox(ctx, Wui::HashId("settings3d.vsync"), { x, y, width, 18.0f },
+			"垂直同步 (vsync)", m_Edit.Vsync, theme))
+		{
+			changed = true;
+			Renderer::SetVsync(m_Edit.Vsync);
+		}
 		y += 26.0f;
 
 		{
@@ -194,6 +205,7 @@ namespace World
 		{
 			m_Edit = Asset::RenderingSettings {};
 			RenderSettings::Set(m_Edit);
+			Renderer::SetVsync(m_Edit.Vsync);
 			m_Status = "已恢复内置默认值(未保存)";
 			m_StatusIsError = false;
 		}
@@ -203,9 +215,10 @@ namespace World
 		{
 			char buffer[256] = {};
 			std::snprintf(buffer, sizeof(buffer),
-				"生效中:剔除=%s 阴影=%s 贴图=%u 光=%u+%u",
+				"生效中:剔除=%s 阴影=%s vsync=%s 贴图=%u 光=%u+%u",
 				RenderSettings::CullingEnabled() ? "on" : "off",
 				RenderSettings::ShadowsEnabled() ? "on" : "off",
+				Renderer::IsVsyncEnabled() ? "on" : "off",
 				Renderer3D::GetShadowMapSize(),
 				Renderer3D::GetMaxDirectionalLights(), Renderer3D::GetMaxPointLights());
 			Wui::Label(ctx, { x, y }, buffer, theme.TextMuted, 12.0f);

@@ -26,6 +26,11 @@ namespace World::Asset
 		uint32_t MaxDirectionalLights = 1;
 		uint32_t MaxPointLights = 7;
 		bool GpuTiming = false;           // D8b:GPU 时间戳(Stats 面板/AI 显示 gpuMs;有读回开销)
+		// P4-perf:垂直同步(交换链呈现模式)。true = FIFO(vsync,防撕裂,默认);
+		// false = Immediate(不等 vblank,帧率最高、可能撕裂)。
+		// 运行期可切:编辑器 Project Settings 改动会重建交换链,不需要重启。
+		// 开发覆盖:`WLD_VK_PRESENT_MODE=fifo|mailbox|immediate`(只影响本次运行)。
+		bool Vsync = true;
 		bool Instancing = true;           // D8b:同网格+材质的实例合批
 		// P4-1:纹理各向异性上限(1..16;设备不支持时引擎退化为 1 并 warn)。
 		uint32_t Anisotropy = 1;

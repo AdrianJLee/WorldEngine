@@ -28,6 +28,66 @@
 #include "World/Events/MouseEvent.h"
 namespace World
 {
+	namespace
+	{
+		// WLD_FRAME_TIMING=1:把编辑器一帧拆成"场景更新 / AI+WUI 起帧 / 面板逻辑 / WUI 录制提交"
+		// 四段(默认关;只做诊断,不改变行为)。配合 Renderer 的 [frame-timing] 使用:
+		// Renderer 那条覆盖交换链/present,这条覆盖层栈内部。
+		struct LayerTiming
+		{
+			bool Enabled = false;
+			double Update = 0, UiFrame = 0, Begin = 0, Shell = 0, WuiRender = 0;
+			uint32_t Frames = 0;
+		};
+
+		LayerTiming& LayerTimingState()
+		{
+			static LayerTiming timing = [] {
+				LayerTiming out;
+				const char* env = std::getenv("WLD_FRAME_TIMING");
+				out.Enabled = env && env[0] != '\0' && env[0] != '0';
+				return out;
+			}();
+			return timing;
+		}
+
+		double LayerTimingNowMs()
+		{
+			return std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now().time_since_epoch()).count();
+		}
+
+		struct LayerTimingScope
+		{
+			explicit LayerTimingScope(double& sink) : m_Sink(&sink), m_Start(0.0)
+			{
+				if (LayerTimingState().Enabled)
+					m_Start = LayerTimingNowMs();
+			}
+			~LayerTimingScope()
+			{
+				if (m_Sink && LayerTimingState().Enabled)
+					*m_Sink += LayerTimingNowMs() - m_Start;
+			}
+			double* m_Sink;
+			double m_Start;
+		};
+
+		void LayerTimingFlush()
+		{
+			LayerTiming& timing = LayerTimingState();
+			if (!timing.Enabled || ++timing.Frames < 120)
+				return;
+			const double frames = static_cast<double>(timing.Frames);
+			WLD_CORE_INFO("[layer-timing] update={0:.2f} uiFrame={1:.2f} (begin={2:.2f} shell={3:.2f} wuiRender={4:.2f}) "
+				"ms/frame, n={5}",
+				timing.Update / frames, timing.UiFrame / frames, timing.Begin / frames,
+				timing.Shell / frames, timing.WuiRender / frames, timing.Frames);
+			timing.Update = timing.UiFrame = timing.Begin = timing.Shell = timing.WuiRender = 0.0;
+			timing.Frames = 0;
+		}
+	}
+
 	EditorLayer::EditorLayer()
 		: Layer("EditorLayer"), m_Document(Application::Get().GetContext()), m_Shell(*this)
 	{
@@ -279,6 +339,7 @@ namespace World
 	void EditorLayer::OnUpdate(Timestep ts)
 	{
 		WLD_PROFILE_FUNCTION();
+		LayerTimingScope updateScope(LayerTimingState().Update);
 		// D5c-4a:渲染发生在面板绘制里(RenderScene),那里拿不到 Timestep —— 先缓存一帧。
 		m_LastDeltaSeconds = ts.GetSeconds();
 		ProcessPendingRendererChange();
@@ -739,6 +800,10 @@ namespace World
 	void EditorLayer::OnUiFrame()
 	{
 		WLD_PROFILE_FUNCTION();
+		LayerTimingScope uiFrameScope(LayerTimingState().UiFrame);
+		// 手动打点(三段之间夹着"面板逻辑"与"WUI 录制",各自还要在末尾一次性累加)。
+		const bool timingEnabled = LayerTimingState().Enabled;
+		const double uiStart = timingEnabled ? LayerTimingNowMs() : 0.0;
 
 		static Wui::WuiRhiBackend wuiBackend;
 
@@ -791,11 +856,20 @@ namespace World
 					}
 				}
 			}
+			const double beginEnd = timingEnabled ? LayerTimingNowMs() : 0.0;
 			m_Shell.OnRender(m_WuiContext);
 			m_WuiContext.EndFrame();
+			const double shellEnd = timingEnabled ? LayerTimingNowMs() : 0.0;
 			wuiBackend.Render(m_WuiContext.Commands(), m_WuiContext.OverlayCommands());
 			// AI 控制通道的整窗抓图:UI 已提交、尚未做 →Present 布局转换/呈现。
 			Renderer::FlushPresentCaptures();
+			if (timingEnabled)
+			{
+				LayerTiming& timing = LayerTimingState();
+				timing.Begin += beginEnd - uiStart;
+				timing.Shell += shellEnd - beginEnd;
+				timing.WuiRender += LayerTimingNowMs() - shellEnd;
+			}
 		}
 		// 屏幕快照钩子(诊断无障碍化):把**用户实际看到的整个窗口**连续写成 PPM,
 		// 用于自动化诊断"闪烁"这类只在最终画面里可见的问题。
@@ -805,6 +879,7 @@ namespace World
 		//   WLD_SCREEN_CAPTURE_COUNT=<n>    共抓几张(默认 60)
 		CaptureScreenSequence();
 		wuiBackend.EndFrame(m_WuiContext.Cursor());
+		LayerTimingFlush();
 	}
 
 	void EditorLayer::CaptureScreenSequence()

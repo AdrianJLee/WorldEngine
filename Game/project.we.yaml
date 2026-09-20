@@ -9,6 +9,9 @@ renderer: vulkan
 #  - shadow_map_size:阴影贴图边长(2 的幂,256..4096;**下次启动生效**)。
 #  - max_directional_lights / max_point_lights:每帧灯光上限(合计 ≤ 8)。
 #  - gpu_timing:GPU 时间戳统计(Stats 面板/AI 读 gpuMs;默认关,读回有一点代价)。
+#  - vsync:垂直同步/交换链呈现模式。true = FIFO(防撕裂,默认);false = Immediate
+#    (不等 vblank,帧率最高、可能撕裂)。运行期可切(编辑器 Project Settings 勾选,
+#    Vulkan 下一帧重建交换链生效),无需重启;开发覆盖 WLD_VK_PRESENT_MODE=fifo|mailbox|immediate。
 #  - instancing:同网格 + 同材质的实例合批(默认开;关掉用于 A/B 对照)。
 #  - anisotropy:纹理各向异性上限 1..16(设备不支持时引擎退化 1 并 warn)。
 #  - render_scale:场景渲染分辨率倍率 0.25..2.0(只缩放场景目标,不动窗口/UI;默认 1.0)。
@@ -21,6 +24,7 @@ rendering:
   max_directional_lights: 1
   max_point_lights: 7
   gpu_timing: false
+  vsync: true
   instancing: true
   anisotropy: 1
   render_scale: 1.0
