@@ -1875,12 +1875,12 @@ namespace World
 
 		window->SetPosition(static_cast<int>(static_cast<float>(cursor.x) - grab.x),
 			static_cast<int>(static_cast<float>(cursor.y) - grab.y));
-		window->SetSystemDragParkZone(
-			{ static_cast<float>(mainX), static_cast<float>(mainY), mainW, barPixels },
-			static_cast<float>(mainY) + barPixels + 6.0f);
+		// 投放提示:光标进挂靠栏 → 栏上亮一层半透明提示(不改窗口位置,窗口全程跟手)。
+		window->SetSystemDragDropHint(
+			{ static_cast<float>(mainX), static_cast<float>(mainY), mainW, barPixels });
 		host->SetTabDragActive(true);
 		window->BeginSystemDrag();          // 阻塞:系统移动循环,回到这里就是松手
-		window->SetSystemDragParkZone({ 0.0f, 0.0f, 0.0f, 0.0f }, 0.0f);
+		window->SetSystemDragDropHint({ 0.0f, 0.0f, 0.0f, 0.0f });
 		host->SetTabDragActive(false);
 
 		if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)

@@ -36,8 +36,8 @@ namespace World
 		void Focus() override;
 		void SetVisible(bool visible) override;
 		void BeginSystemDrag() override;
-		// P4-UX9:拖动期间光标进入挂靠栏时,把窗口压在栏下方(见 Window::SetSystemDragParkZone)。
-		void SetSystemDragParkZone(const glm::vec4& parkScreenRect, float parkTopY) override;
+		// P4-UX9:拖动期间光标进入挂靠栏时,在栏上画一层独立提示(见 Window::SetSystemDragDropHint)。
+		void SetSystemDragDropHint(const glm::vec4& zoneScreenRect) override;
 		void SetFrameless(bool frameless) override;
 		bool IsFrameless() const override;
 		void Minimize() override;
@@ -75,9 +75,13 @@ namespace World
 		// 无边框窗口才接管 WM_NCHITTEST(边缘缩放命中);有系统标题栏时必须交还
 		// GLFW/系统,否则标题栏拖动与系统按钮会失效。
 		bool m_Frameless = false;
-		// 系统移动循环期间的"停靠让位区"(屏幕坐标;w<=0 = 无)。
-		glm::vec4 m_DragParkZone { 0.0f, 0.0f, 0.0f, 0.0f };
-		float m_DragParkTop = 0.0f;
+		// 系统移动循环期间的"投放提示区"(屏幕坐标;z<=0 = 无)。
+		glm::vec4 m_DragDropZone { 0.0f, 0.0f, 0.0f, 0.0f };
+		// 提示窗口:独立的置顶分层窗口(WS_EX_TRANSPARENT = 点击穿透),不需要宿主渲染帧,
+		// 因此系统模态移动循环期间照样能实时显示/隐藏。
+		HWND m_DropHint = nullptr;
+		void ShowDropHint(const glm::vec4& screenRect);
+		void HideDropHint();
 		static LRESULT CALLBACK StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 		LRESULT HitTestNc(LPARAM lParam);
 		int ResizeBorderPixels() const override;

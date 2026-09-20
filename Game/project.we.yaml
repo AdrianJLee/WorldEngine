@@ -19,7 +19,7 @@ renderer: vulkan
 #    启动期生效,预览面板同步)。
 rendering:
   culling: true
-  shadows: true
+  shadows: false
   shadow_map_size: 2048
   max_directional_lights: 1
   max_point_lights: 7

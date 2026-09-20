@@ -72,6 +72,11 @@ namespace World
 
 	WindowsWindow::~WindowsWindow()
 	{
+		if (m_DropHint)
+		{
+			DestroyWindow(m_DropHint);
+			m_DropHint = nullptr;
+		}
 		Shutdown();
 	}
 
@@ -412,10 +417,81 @@ namespace World
 		}
 	}
 
-	void WindowsWindow::SetSystemDragParkZone(const glm::vec4& parkScreenRect, float parkTopY)
+	namespace
 	{
-		m_DragParkZone = parkScreenRect;
-		m_DragParkTop = parkTopY;
+		constexpr wchar_t kDropHintClass[] = L"WorldEngineDropHint";
+
+		LRESULT CALLBACK DropHintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+		{
+			switch (msg)
+			{
+				case WM_ERASEBKGND:
+					return 1;   // 自己画,避免闪烁
+				case WM_PAINT:
+				{
+					PAINTSTRUCT ps {};
+					HDC dc = BeginPaint(hwnd, &ps);
+					RECT rect {};
+					GetClientRect(hwnd, &rect);
+					HBRUSH fill = CreateSolidBrush(RGB(76, 141, 255));   // Accent #4C8DFF
+					FillRect(dc, &rect, fill);
+					DeleteObject(fill);
+					RECT inner = rect;
+					InflateRect(&inner, -1, -1);
+					HBRUSH border = CreateSolidBrush(RGB(176, 212, 255));
+					FrameRect(dc, &inner, border);
+					DeleteObject(border);
+					EndPaint(hwnd, &ps);
+					return 0;
+				}
+				default:
+					break;
+			}
+			return DefWindowProcW(hwnd, msg, wParam, lParam);
+		}
+	}
+
+	void WindowsWindow::ShowDropHint(const glm::vec4& screenRect)
+	{
+		static bool registered = false;
+		if (!registered)
+		{
+			WNDCLASSEXW wc {};
+			wc.cbSize = sizeof(wc);
+			wc.style = CS_HREDRAW | CS_VREDRAW;
+			wc.lpfnWndProc = DropHintWndProc;
+			wc.hInstance = GetModuleHandleW(nullptr);
+			wc.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
+			wc.lpszClassName = kDropHintClass;
+			RegisterClassExW(&wc);
+			registered = true;
+		}
+		if (!m_DropHint)
+		{
+			// 置顶 + 分层(半透明) + 点击穿透:它绝不吃鼠标事件,也不会盖住被拖窗口的输入。
+			m_DropHint = CreateWindowExW(
+				WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+				kDropHintClass, L"", WS_POPUP, 0, 0, 16, 16, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+			if (!m_DropHint)
+				return;
+			SetLayeredWindowAttributes(m_DropHint, 0, 150, LWA_ALPHA);
+		}
+		SetWindowPos(m_DropHint, HWND_TOPMOST, static_cast<int>(screenRect.x), static_cast<int>(screenRect.y),
+			static_cast<int>(screenRect.z), static_cast<int>(screenRect.w),
+			SWP_NOACTIVATE | SWP_SHOWWINDOW);
+	}
+
+	void WindowsWindow::HideDropHint()
+	{
+		if (m_DropHint)
+			ShowWindow(m_DropHint, SW_HIDE);
+	}
+
+	void WindowsWindow::SetSystemDragDropHint(const glm::vec4& zoneScreenRect)
+	{
+		m_DragDropZone = zoneScreenRect;
+		if (zoneScreenRect.z <= 0.0f)
+			HideDropHint();
 	}
 
 	void WindowsWindow::SetFrameless(bool frameless)
@@ -554,23 +630,20 @@ namespace World
 			// 返回 0 = 客户区覆盖整个窗口矩形(边缘缩放仍由上面的 WM_NCHITTEST 负责)。
 			if (msg == WM_NCCALCSIZE && self->m_Frameless && wParam)
 				return 0;
-			// P4-UX9:系统移动循环(SC_MOVE)期间,若光标进了挂靠栏,就把窗口压到栏下方
-			// —— 用户看到"窗口停在栏下"= 松手即挂靠,目标始终可见。
-			if (msg == WM_MOVING && self->m_DragParkZone.z > 0.0f)
+			// P4-UX9:系统移动循环(SC_MOVE)期间,光标进挂靠栏就点亮提示层。
+			// **不修改**移动矩形:窗口照常跟手,提示只表达"松手会挂靠到这里"。
+			if (msg == WM_MOVING && self->m_DragDropZone.z > 0.0f)
 			{
-				RECT* moving = reinterpret_cast<RECT*>(lParam);
 				POINT cursor { 0, 0 };
 				GetCursorPos(&cursor);
-				const bool overPark = static_cast<float>(cursor.x) >= self->m_DragParkZone.x
-					&& static_cast<float>(cursor.x) <= self->m_DragParkZone.x + self->m_DragParkZone.z
-					&& static_cast<float>(cursor.y) <= self->m_DragParkZone.y + self->m_DragParkZone.w;
-				if (overPark && self->m_DragParkTop > 0.0f)
-				{
-					const int height = moving->bottom - moving->top;
-					moving->top = static_cast<int>(self->m_DragParkTop);
-					moving->bottom = moving->top + height;
-					return TRUE;
-				}
+				const bool overZone = static_cast<float>(cursor.x) >= self->m_DragDropZone.x
+					&& static_cast<float>(cursor.x) <= self->m_DragDropZone.x + self->m_DragDropZone.z
+					&& static_cast<float>(cursor.y) >= self->m_DragDropZone.y
+					&& static_cast<float>(cursor.y) <= self->m_DragDropZone.y + self->m_DragDropZone.w;
+				if (overZone)
+					self->ShowDropHint(self->m_DragDropZone);
+				else
+					self->HideDropHint();
 			}
 		}
 		const WNDPROC previous = self ? self->m_PrevWndProc : nullptr;
