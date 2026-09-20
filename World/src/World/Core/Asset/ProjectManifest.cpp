@@ -3,8 +3,10 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <charconv>
 #include <fstream>
 #include <sstream>
+#include <string_view>
 
 namespace World::Asset
 {
@@ -135,6 +137,429 @@ namespace World::Asset
 					return false;
 			return true;
 		}
+
+		// ---- U2e:清单文本合并 ----------------------------------------------------
+		//
+		// 为什么不全量重写:设置面板是"改一个开关 → 400ms 防抖自动写盘",而旧实现用
+		// YAML::Emitter 重新序列化整份清单 —— 一次误触就会抹掉清单里给引擎用户看的
+		// 中文注释,还会把 `render_scale: 1.0` 写成 `1`、`-9.81` 写成 `-9.810000`。
+		// 注释是产品资产,所以文件已存在时只做 key 级文本合并:命中
+		// `^(\s*)<key>:\s*.*$` 就只换值(保留缩进、值后空白、行尾注释与行尾符);
+		// 缺的 key 追加到所属区块尾;`packages:` 这种序列整块重写。文件不存在或为空时
+		// 仍走全量序列化(与旧行为逐字节一致)。
+
+		constexpr size_t kNoLine = static_cast<size_t>(-1);
+
+		bool IsBlankOrComment(const std::string& text)
+		{
+			size_t offset = 0;
+			while (offset < text.size() && (text[offset] == ' ' || text[offset] == '\t'))
+				++offset;
+			return offset >= text.size() || text[offset] == '#';
+		}
+
+		struct TextLine
+		{
+			std::string Text;   // 行内容(不含行尾符)
+			std::string Eol;    // "\n" / "\r\n" / ""(文件最后一行没有换行)
+		};
+
+		// 逐行切开并保留每行自己的行尾符:清单在 Windows 上是 CRLF,不能被换成 LF。
+		std::vector<TextLine> SplitLines(const std::string& text)
+		{
+			std::vector<TextLine> lines;
+			size_t offset = 0;
+			while (offset < text.size())
+			{
+				const size_t newline = text.find('\n', offset);
+				if (newline == std::string::npos)
+				{
+					lines.push_back({ text.substr(offset), std::string() });
+					break;
+				}
+				size_t end = newline;
+				std::string eol = "\n";
+				if (end > offset && text[end - 1] == '\r')
+				{
+					--end;
+					eol = "\r\n";
+				}
+				lines.push_back({ text.substr(offset, end - offset), eol });
+				offset = newline + 1;
+			}
+			return lines;
+		}
+
+		std::string JoinLines(const std::vector<TextLine>& lines)
+		{
+			std::string text;
+			for (const TextLine& line : lines)
+			{
+				text += line.Text;
+				text += line.Eol;
+			}
+			return text;
+		}
+
+		// 追加行沿用文件自己已有的行尾符(第一行有行尾符的那个)。
+		std::string FileEol(const std::vector<TextLine>& lines)
+		{
+			for (const TextLine& line : lines)
+				if (!line.Eol.empty())
+					return line.Eol;
+			return "\n";
+		}
+
+		// 命中 `^(\s*)<key>:\s*.*$` 时给出缩进宽度、值起点与行尾注释起点。
+		// `<key>` 后必须紧跟 ':'(避免 `shadow_map_size_x` 命中 `shadow_map_size`)。
+		bool MatchKeyLine(const std::string& text, std::string_view key, size_t* indent,
+			size_t* valueStart, size_t* commentStart)
+		{
+			size_t offset = 0;
+			while (offset < text.size() && (text[offset] == ' ' || text[offset] == '\t'))
+				++offset;
+			if (text.compare(offset, key.size(), key) != 0)
+				return false;
+			const size_t colon = offset + key.size();
+			if (colon >= text.size() || text[colon] != ':')
+				return false;
+			size_t value = colon + 1;
+			while (value < text.size() && (text[value] == ' ' || text[value] == '\t'))
+				++value;
+			size_t comment = text.size();
+			bool inSingle = false;
+			bool inDouble = false;
+			for (size_t i = value; i < text.size(); ++i)
+			{
+				const char c = text[i];
+				if (c == '\'' && !inDouble)
+					inSingle = !inSingle;
+				else if (c == '"' && !inSingle)
+					inDouble = !inDouble;
+				else if (c == '#' && !inSingle && !inDouble &&
+					(i == value || text[i - 1] == ' ' || text[i - 1] == '\t'))
+				{
+					comment = i;
+					break;
+				}
+			}
+			if (indent) *indent = offset;
+			if (valueStart) *valueStart = value;
+			if (commentStart) *commentStart = comment;
+			return true;
+		}
+
+		// 只换值:缩进、`key:` 后的空白、值后的空白、行尾注释与行尾符全部保留。
+		std::string ReplaceKeyLineValue(const std::string& text, std::string_view key, const std::string& value)
+		{
+			size_t valueStart = 0;
+			size_t commentStart = 0;
+			if (!MatchKeyLine(text, key, nullptr, &valueStart, &commentStart))
+				return text;
+			size_t valueEnd = commentStart;
+			while (valueEnd > valueStart && (text[valueEnd - 1] == ' ' || text[valueEnd - 1] == '\t'))
+				--valueEnd;
+			std::string updated = text.substr(0, valueStart);
+			if (updated.empty() || (updated.back() != ' ' && updated.back() != '\t'))
+				updated += ' ';   // `key:` 后没空白时补一个(`culling:` → `culling: true`)
+			updated += value;
+			const std::string tail = text.substr(valueEnd);
+			if (!tail.empty() && tail[0] == '#')
+				updated += ' ';   // `culling: # 说明` 这类"值就是注释"的行
+			updated += tail;
+			return updated;
+		}
+
+		std::string FormatBoolValue(bool value)
+		{
+			return value ? "true" : "false";
+		}
+
+		// 数值写"最短往返"格式:`std::to_string` 会把 float 写成 `-9.810000`,
+		// 而 1.0f 的最短往返表示就是 `1` —— 直接写回会让 render_scale 看起来成了整数,
+		// 所以缺小数点时补 `.0` 保住浮点写法(`1.0`→`1.0`,`-9.81`→`-9.81`,不丢精度)。
+		std::string FormatFloatValue(float value)
+		{
+			char buffer[64];
+			const std::to_chars_result result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+			std::string text;
+			if (result.ec == std::errc())
+				text.assign(buffer, result.ptr);
+			else
+				text = std::to_string(value);
+			if (text.find_first_of(".eE") == std::string::npos &&
+				text.find("inf") == std::string::npos && text.find("nan") == std::string::npos)
+				text += ".0";
+			return text;
+		}
+
+		size_t FindTopLevelKey(const std::vector<TextLine>& lines, std::string_view key)
+		{
+			for (size_t i = 0; i < lines.size(); ++i)
+			{
+				size_t indent = 0;
+				if (MatchKeyLine(lines[i].Text, key, &indent, nullptr, nullptr) && indent == 0)
+					return i;
+			}
+			return kNoLine;
+		}
+
+		// 区块内的子键(缩进 > 0,不会和顶层同名键混起来)。
+		size_t FindBlockKey(const std::vector<TextLine>& lines, size_t blockStart, size_t blockEnd,
+			std::string_view key)
+		{
+			for (size_t i = blockStart + 1; i < blockEnd; ++i)
+			{
+				size_t indent = 0;
+				if (MatchKeyLine(lines[i].Text, key, &indent, nullptr, nullptr) && indent > 0)
+					return i;
+			}
+			return kNoLine;
+		}
+
+		// 区块范围:区块头之后到下一个顶格行(下一个顶层键)或文件末尾。
+		size_t BlockEnd(const std::vector<TextLine>& lines, size_t blockStart)
+		{
+			for (size_t i = blockStart + 1; i < lines.size(); ++i)
+				if (!IsBlankOrComment(lines[i].Text) && lines[i].Text[0] != ' ' && lines[i].Text[0] != '\t')
+					return i;
+			return lines.size();
+		}
+
+		// 区块内最后一个"内容行"之后的位置:缺的 key 追加在这里 —— 区块尾随的
+		// 空行/注释行往往是下一块的说明,不能被插到中间去。
+		size_t BlockContentEnd(const std::vector<TextLine>& lines, size_t blockStart, size_t blockEnd)
+		{
+			size_t end = blockStart + 1;
+			for (size_t i = blockStart + 1; i < blockEnd; ++i)
+				if (!IsBlankOrComment(lines[i].Text))
+					end = i + 1;
+			return end;
+		}
+
+		// 追加的 key 沿用区块里已有的缩进,没有可参照的行时用 2 空格。
+		std::string BlockIndent(const std::vector<TextLine>& lines, size_t blockStart, size_t blockEnd)
+		{
+			for (size_t i = blockStart + 1; i < blockEnd; ++i)
+			{
+				const std::string& text = lines[i].Text;
+				if (IsBlankOrComment(text))
+					continue;
+				size_t indent = 0;
+				while (indent < text.size() && (text[indent] == ' ' || text[indent] == '\t'))
+					++indent;
+				if (indent > 0)
+					return text.substr(0, indent);
+				break;
+			}
+			return "  ";
+		}
+
+		struct ManifestKeyValue
+		{
+			const char* Key;
+			std::string Value;
+		};
+
+		std::vector<ManifestKeyValue> TopLevelKeyValues(const ProjectManifest& manifest)
+		{
+			return {
+				{ "id", manifest.Id },
+				{ "version", manifest.Version },
+				{ "content_root", manifest.ContentRoot.generic_string() },
+				{ "start_scene", manifest.StartScene },
+				{ "renderer", manifest.Renderer },
+			};
+		}
+
+		// 顺序与旧的全量序列化一致(值没变时合并结果逐字节相同)。
+		std::vector<ManifestKeyValue> RenderingKeyValues(const ProjectManifest& manifest)
+		{
+			return {
+				{ "culling", FormatBoolValue(manifest.Rendering.Culling) },
+				{ "shadows", FormatBoolValue(manifest.Rendering.Shadows) },
+				{ "shadow_map_size", std::to_string(manifest.Rendering.ShadowMapSize) },
+				{ "max_directional_lights", std::to_string(manifest.Rendering.MaxDirectionalLights) },
+				{ "max_point_lights", std::to_string(manifest.Rendering.MaxPointLights) },
+				{ "gpu_timing", FormatBoolValue(manifest.Rendering.GpuTiming) },
+				{ "vsync", FormatBoolValue(manifest.Rendering.Vsync) },
+				{ "instancing", FormatBoolValue(manifest.Rendering.Instancing) },
+				{ "anisotropy", std::to_string(manifest.Rendering.Anisotropy) },
+				{ "msaa", std::to_string(manifest.Rendering.Msaa) },
+				{ "render_scale", FormatFloatValue(manifest.Rendering.RenderScale) },
+			};
+		}
+
+		std::vector<ManifestKeyValue> PhysicsKeyValues(const ProjectManifest& manifest)
+		{
+			return {
+				{ "fixed_step_hz", std::to_string(manifest.Physics.FixedStepHz) },
+				{ "gravity", FormatFloatValue(manifest.Physics.Gravity) },
+			};
+		}
+
+		struct TextEdit
+		{
+			size_t Start = 0;    // 原始行下标
+			size_t Count = 0;    // 被替换掉的行数
+			std::vector<TextLine> Replacement;
+		};
+
+		// `rendering:` / `physics:` 区块:逐 key 换值,缺的 key 追加到区块内容末尾;
+		// 整个区块缺失时补一整块(追加到文件末尾)。
+		void MergeManifestBlock(std::vector<TextLine>& lines, std::vector<TextEdit>& edits,
+			std::vector<TextLine>& appended, std::string_view blockKey,
+			const std::vector<ManifestKeyValue>& entries, const std::string& eol)
+		{
+			const size_t blockStart = FindTopLevelKey(lines, blockKey);
+			if (blockStart == kNoLine)
+			{
+				appended.push_back({ std::string(blockKey) + ":", eol });
+				for (const ManifestKeyValue& entry : entries)
+					appended.push_back({ "  " + std::string(entry.Key) + ": " + entry.Value, eol });
+				return;
+			}
+
+			// 区块头带内联值(`rendering: {}` 或整块写在一行)时追加子键会写出非法 YAML,
+			// 先归一成裸区块头(行尾注释保留)。
+			size_t headerValue = 0;
+			size_t headerComment = 0;
+			if (MatchKeyLine(lines[blockStart].Text, blockKey, nullptr, &headerValue, &headerComment))
+			{
+				size_t headerEnd = headerComment;
+				while (headerEnd > headerValue &&
+					(lines[blockStart].Text[headerEnd - 1] == ' ' || lines[blockStart].Text[headerEnd - 1] == '\t'))
+					--headerEnd;
+				if (headerEnd > headerValue)
+					lines[blockStart].Text = std::string(blockKey) + ":" +
+						(headerComment < lines[blockStart].Text.size()
+							? " " + lines[blockStart].Text.substr(headerComment)
+							: std::string());
+			}
+
+			const size_t blockEnd = BlockEnd(lines, blockStart);
+			const size_t insertAt = BlockContentEnd(lines, blockStart, blockEnd);
+			const std::string indent = BlockIndent(lines, blockStart, blockEnd);
+			std::vector<TextLine> missing;
+			for (const ManifestKeyValue& entry : entries)
+			{
+				const size_t index = FindBlockKey(lines, blockStart, blockEnd, entry.Key);
+				if (index == kNoLine)
+					missing.push_back({ indent + std::string(entry.Key) + ": " + entry.Value, eol });
+				else
+					lines[index].Text = ReplaceKeyLineValue(lines[index].Text, entry.Key, entry.Value);
+			}
+			if (!missing.empty())
+				edits.push_back({ insertAt, 0, std::move(missing) });
+		}
+
+		std::string MergeManifestText(const std::string& original, const ProjectManifest& manifest)
+		{
+			std::vector<TextLine> lines = SplitLines(original);
+			const std::string eol = FileEol(lines);
+			std::vector<TextEdit> edits;
+			std::vector<TextLine> appended;   // 追加到文件末尾的新行
+
+			for (const ManifestKeyValue& entry : TopLevelKeyValues(manifest))
+			{
+				const size_t index = FindTopLevelKey(lines, entry.Key);
+				if (index == kNoLine)
+					appended.push_back({ std::string(entry.Key) + ": " + entry.Value, eol });
+				else
+					lines[index].Text = ReplaceKeyLineValue(lines[index].Text, entry.Key, entry.Value);
+			}
+
+			MergeManifestBlock(lines, edits, appended, "rendering", RenderingKeyValues(manifest), eol);
+			MergeManifestBlock(lines, edits, appended, "physics", PhysicsKeyValues(manifest), eol);
+
+			// `packages:` 是序列:key 级合并对列表项没有意义,整块按当前值重写
+			// (块前的注释行不在块内,自然保留)。
+			std::vector<TextLine> packages;
+			packages.push_back({ "packages:", eol });
+			for (const std::string& package : manifest.Packages)
+				packages.push_back({ "  - " + package, eol });
+			const size_t packagesIndex = FindTopLevelKey(lines, "packages");
+			if (packagesIndex == kNoLine)
+				appended.insert(appended.end(), packages.begin(), packages.end());
+			else
+			{
+				const size_t contentEnd = BlockContentEnd(lines, packagesIndex, BlockEnd(lines, packagesIndex));
+				edits.push_back({ packagesIndex, contentEnd - packagesIndex, std::move(packages) });
+			}
+
+			// 从后往前应用:前面的行下标不受后面的增删影响;同一起点时先做整块替换/删除,
+			// 这样"插在这个位置"的行(前一个区块缺的 key)才会落在被替换内容的前面。
+			std::sort(edits.begin(), edits.end(), [](const TextEdit& left, const TextEdit& right)
+			{
+				if (left.Start != right.Start)
+					return left.Start > right.Start;
+				return left.Count > right.Count;
+			});
+			for (const TextEdit& edit : edits)
+			{
+				const auto begin = lines.begin() + static_cast<std::ptrdiff_t>(edit.Start);
+				lines.erase(begin, begin + static_cast<std::ptrdiff_t>(edit.Count));
+				lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(edit.Start),
+					edit.Replacement.begin(), edit.Replacement.end());
+			}
+
+			// 缺的顶层键/整块补在文件末尾:先给最后一行补行尾符(与全量序列化"末尾一定有
+			// 换行"的口径一致),再追加。
+			if (!appended.empty())
+			{
+				if (!lines.empty() && lines.back().Eol.empty())
+					lines.back().Eol = eol;
+				lines.insert(lines.end(), appended.begin(), appended.end());
+			}
+			return JoinLines(lines);
+		}
+
+		bool ReadTextFile(const std::filesystem::path& path, std::string* out)
+		{
+			std::ifstream stream(path, std::ios::binary);
+			if (!stream)
+				return false;
+			std::ostringstream buffer;
+			buffer << stream.rdbuf();
+			*out = buffer.str();
+			return true;
+		}
+
+		// 合并的前提是既有内容真的是一份清单(map):损坏文件或无关文件仍旧走全量序列化,
+		// 免得写出"半旧半新"的混合体。
+		bool IsYamlMapText(const std::string& text)
+		{
+			try
+			{
+				return YAML::Load(text).IsMap();
+			}
+			catch (const std::exception&)
+			{
+				return false;
+			}
+		}
+
+		bool WriteTextFile(const std::filesystem::path& path, const std::string& text, std::string* error)
+		{
+			if (!path.parent_path().empty())
+			{
+				std::error_code ec;
+				std::filesystem::create_directories(path.parent_path(), ec);
+				if (ec)
+				{
+					if (error) *error = ec.message();
+					return false;
+				}
+			}
+			std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+			if (!stream)
+			{
+				if (error) *error = "cannot open manifest for writing: " + path.string();
+				return false;
+			}
+			stream << text;
+			return static_cast<bool>(stream);
+		}
 	}
 
 	bool ProjectManifest::Load(const std::filesystem::path& path, ProjectManifest* out, std::string* error)
@@ -223,6 +648,12 @@ namespace World::Asset
 			return false;
 		try
 		{
+			// U2e:文件已存在时只做 key 级文本合并(保留注释/排版/数值写法);
+			// 文件不存在或为空时走下面的全量序列化(与旧行为逐字节一致)。
+			std::string existing;
+			if (ReadTextFile(path, &existing) && !existing.empty() && IsYamlMapText(existing))
+				return WriteTextFile(path, MergeManifestText(existing, copy), error);
+
 			YAML::Emitter out;
 			out << YAML::BeginMap;
 			out << YAML::Key << "id" << YAML::Value << copy.Id;
@@ -253,25 +684,8 @@ namespace World::Asset
 			out << YAML::EndSeq;
 			out << YAML::EndMap;
 
-			if (!path.parent_path().empty())
-			{
-				std::error_code ec;
-				std::filesystem::create_directories(path.parent_path(), ec);
-				if (ec)
-				{
-					if (error) *error = ec.message();
-					return false;
-				}
-			}
-			std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-			if (!stream)
-			{
-				if (error) *error = "cannot open manifest for writing: " + path.string();
-				return false;
-			}
-			stream << out.c_str();
-			stream << '\n';   // YAML 文件保持行尾换行(git 差异干净)
-			return static_cast<bool>(stream);
+			// YAML 文件保持行尾换行(git 差异干净)。
+			return WriteTextFile(path, std::string(out.c_str()) + '\n', error);
 		}
 		catch (const std::exception& exception)
 		{

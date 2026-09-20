@@ -10,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -34,6 +35,34 @@ namespace
 	{
 		std::ofstream file(path, std::ios::binary | std::ios::trunc);
 		file << text;
+	}
+
+	std::string ReadText(const fs::path& path)
+	{
+		std::ifstream file(path, std::ios::binary);
+		std::ostringstream buffer;
+		buffer << file.rdbuf();
+		return buffer.str();
+	}
+
+	// 按行切开(去掉行尾符),用于"只有哪几行变了"的断言。
+	std::vector<std::string> SplitLinesOf(const std::string& text)
+	{
+		std::vector<std::string> lines;
+		std::string current;
+		for (const char c : text)
+		{
+			if (c == '\n')
+			{
+				lines.push_back(current);
+				current.clear();
+			}
+			else if (c != '\r')
+				current += c;
+		}
+		if (!current.empty())
+			lines.push_back(current);
+		return lines;
 	}
 
 	std::string BaseManifest(const std::string& renderingBlock)
@@ -141,6 +170,161 @@ namespace
 		fs::remove_all(root);
 	}
 
+	// U2e:设置面板是"改一个开关 → 400ms 防抖自动写盘",不能再整份重排清单 ——
+	// 清单里的注释是给引擎用户看的产品资产,改动之外的行必须逐字节不动。
+	void TestSaveKeepsCommentsAndUnchangedLines()
+	{
+		const fs::path root = TestRoot();
+		const fs::path manifestPath = root / "project.we.yaml";
+		// 与 Game/project.we.yaml 同构:区块前的中文注释 + 规范数值 + packages 序列。
+		const std::string original =
+			"id: com.example.test\n"
+			"version: 2.0.0\n"
+			"content_root: assets\n"
+			"start_scene: scenes/main.wd\n"
+			"renderer: vulkan\n"
+			"# 3D 渲染设置(引擎用户可直接改)\n"
+			"rendering:\n"
+			"  culling: true\n"
+			"  shadows: true   # 方向光阴影通道\n"
+			"  shadow_map_size: 2048\n"
+			"  max_directional_lights: 1\n"
+			"  max_point_lights: 7\n"
+			"  gpu_timing: false\n"
+			"  vsync: true\n"
+			"  instancing: true\n"
+			"  anisotropy: 1\n"
+			"  render_scale: 1.0\n"
+			"  msaa: 1\n"
+			"# 物理设置(引擎用户可直接改)\n"
+			"physics:\n"
+			"  fixed_step_hz: 60\n"
+			"  gravity: -9.81\n"
+			"# 发行包\n"
+			"packages:\n"
+			"  - packages/Base.wpak\n";
+		WriteText(manifestPath, original);
+
+		World::Asset::ProjectManifest manifest;
+		std::string error;
+		CHECK(World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+		CHECK(error.empty());
+
+		// 1) 值没变:写盘结果与原文件逐字节一致(注释、排版、数值写法都不动)。
+		CHECK(World::Asset::ProjectManifest::Save(manifestPath, manifest, &error));
+		CHECK(ReadText(manifestPath) == original);
+
+		// 2) 改两个值(开关取反 + 重力):只有这两行变,其余行逐字节一致。
+		manifest.Rendering.Shadows = false;
+		manifest.Physics.Gravity = -2.5f;
+		CHECK(World::Asset::ProjectManifest::Save(manifestPath, manifest, &error));
+		const std::string merged = ReadText(manifestPath);
+
+		std::string expected = original;
+		const std::string shadowFrom = "  shadows: true   # 方向光阴影通道\n";
+		const size_t shadowAt = expected.find(shadowFrom);
+		CHECK(shadowAt != std::string::npos);
+		expected.replace(shadowAt, shadowFrom.size(), "  shadows: false   # 方向光阴影通道\n");
+		const std::string gravityFrom = "  gravity: -9.81\n";
+		const size_t gravityAt = expected.find(gravityFrom);
+		CHECK(gravityAt != std::string::npos);
+		expected.replace(gravityAt, gravityFrom.size(), "  gravity: -2.5\n");
+		CHECK(merged == expected);
+
+		// 3) 关键点单独断言(失败时比整串比较好定位)。
+		CHECK(merged.find("# 3D 渲染设置(引擎用户可直接改)\n") != std::string::npos);
+		CHECK(merged.find("# 物理设置(引擎用户可直接改)\n") != std::string::npos);
+		CHECK(merged.find("# 发行包\n") != std::string::npos);
+		// a) 行尾注释与缩进保留;b) 只有被改的那一行变化。
+		CHECK(merged.find("  shadows: false   # 方向光阴影通道\n") != std::string::npos);
+		CHECK(merged.find("  gravity: -2.5\n") != std::string::npos);
+		// c) 未动的行逐字节一致:render_scale 不能被写成 `1`,gravity 也不能变成 -9.810000。
+		CHECK(merged.find("  render_scale: 1.0\n") != std::string::npos);
+		CHECK(merged.find("  culling: true\n") != std::string::npos);
+		CHECK(merged.find("  - packages/Base.wpak\n") != std::string::npos);
+		CHECK(merged.find("-9.810000") == std::string::npos);
+		CHECK(merged.find("render_scale: 1\n") == std::string::npos);
+
+		// 4) 行序与行数不变,且差异行数正好是 2。
+		const std::vector<std::string> before = SplitLinesOf(original);
+		const std::vector<std::string> after = SplitLinesOf(merged);
+		CHECK(before.size() == after.size());
+		size_t changed = 0;
+		for (size_t i = 0; i < before.size(); ++i)
+			if (before[i] != after[i])
+				++changed;
+		CHECK(changed == 2u);
+
+		// 5) 合并后的清单仍能读回同样的值。
+		World::Asset::ProjectManifest reloaded;
+		CHECK(World::Asset::ProjectManifest::Load(manifestPath, &reloaded, &error));
+		CHECK(!reloaded.Rendering.Shadows);
+		CHECK(reloaded.Rendering.Culling);
+		CHECK(reloaded.Rendering.RenderScale > 0.99f && reloaded.Rendering.RenderScale < 1.01f);
+		CHECK(reloaded.Rendering.Msaa == 1u);
+		CHECK(reloaded.Physics.FixedStepHz == 60u);
+		CHECK(reloaded.Physics.Gravity < -2.4f && reloaded.Physics.Gravity > -2.6f);
+		CHECK(reloaded.Packages.size() == 1u);
+		fs::remove_all(root);
+	}
+
+	// U2e:文件里缺的 key/区块要被补上(而不是丢),缺的 rendering key 追加在所属区块内。
+	void TestSaveAppendsMissingKeys()
+	{
+		const fs::path root = TestRoot();
+		const fs::path manifestPath = root / "project.we.yaml";
+		WriteText(manifestPath,
+			"id: com.example.test\n"
+			"content_root: assets\n"
+			"start_scene: scenes/main.wd\n"
+			"# 渲染设置\n"
+			"rendering:\n"
+			"  shadows: false\n");
+
+		World::Asset::ProjectManifest manifest;
+		std::string error;
+		CHECK(World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error));
+		manifest.Packages.push_back("packages/Base.wpak");   // 文件里没有 packages 区块 → 补一整块
+		CHECK(World::Asset::ProjectManifest::Save(manifestPath, manifest, &error));
+		const std::string text = ReadText(manifestPath);
+
+		// 原有注释与原有行都没被动。
+		CHECK(text.find("# 渲染设置\n") != std::string::npos);
+		CHECK(text.find("  shadows: false\n") != std::string::npos);
+		// 缺的 rendering key 按清单顺序追加在 rendering 区块末尾(2 空格缩进,仍在区块内)。
+		CHECK(text.find(
+			"  shadows: false\n"
+			"  culling: true\n"
+			"  shadow_map_size: 2048\n"
+			"  max_directional_lights: 1\n"
+			"  max_point_lights: 7\n"
+			"  gpu_timing: false\n"
+			"  vsync: true\n"
+			"  instancing: true\n"
+			"  anisotropy: 1\n"
+			"  msaa: 1\n"
+			"  render_scale: 1.0\n") != std::string::npos);
+		// 缺的顶层键追加到文件末尾;缺的 physics / packages 区块整块补上。
+		CHECK(text.find("version: 1.0.0\n") != std::string::npos);
+		CHECK(text.find("renderer: opengl\n") != std::string::npos);
+		CHECK(text.find("physics:\n  fixed_step_hz: 60\n  gravity: -9.81\n") != std::string::npos);
+		CHECK(text.find("packages:\n  - packages/Base.wpak\n") != std::string::npos);
+		// 追加后仍是合法清单,值与原对象一致。
+		World::Asset::ProjectManifest reloaded;
+		CHECK(World::Asset::ProjectManifest::Load(manifestPath, &reloaded, &error));
+		CHECK(!reloaded.Rendering.Shadows);
+		CHECK(reloaded.Rendering.Culling);
+		CHECK(reloaded.Rendering.ShadowMapSize == 2048u);
+		CHECK(reloaded.Rendering.Msaa == 1u);
+		CHECK(reloaded.Rendering.RenderScale > 0.99f && reloaded.Rendering.RenderScale < 1.01f);
+		CHECK(reloaded.Physics.FixedStepHz == 60u);
+		CHECK(reloaded.Physics.Gravity < -9.7f && reloaded.Physics.Gravity > -9.9f);
+		CHECK(reloaded.Packages.size() == 1u && reloaded.Packages[0] == "packages/Base.wpak");
+		CHECK(reloaded.Renderer == "opengl");
+		CHECK(reloaded.Version == "1.0.0");
+		fs::remove_all(root);
+	}
+
 	void TestRejectsInvalidValues()
 	{
 		const fs::path root = TestRoot();
@@ -235,6 +419,8 @@ int main()
 	{
 		TestDefaultsWhenBlockMissing();
 		TestParsesAndRoundTrips();
+		TestSaveKeepsCommentsAndUnchangedLines();
+		TestSaveAppendsMissingKeys();
 		TestRejectsInvalidValues();
 		TestRuntimeApplyAndEnvironmentOverride();
 	}
