@@ -1091,9 +1091,17 @@ namespace World
 				continue;
 			// 与帧渲染**同队列**提交(队列顺序保证拷贝在 UI 提交之后),不加额外等待信号量:
 			// FrameStart 是二值信号量,已被本帧渲染提交消费,再等一次会破坏语义(实测设备丢失)。
-			// 屏障走 RHI:后端以纹理**跟踪布局**做 oldLayout(此时 UI 通道 EndRenderPass 已把
-			// FinalLayout=Present 同步进跟踪),拷贝后停在 CopySrc,随后引擎的 →Present 转换
-			// 从该布局继续,天然合法。
+			//
+			// 布局契约(2026-09-20 修,DEF-2):本函数跑在"UI 已提交、尚未呈现"之间,
+			// 而 EndFramePresent 在本帧走过 UI 通道时**直接 present**(它假定 UI 通道的
+			// FinalLayout=Present 已经把图像留在 PRESENT 布局,不再补转换)。所以抓图这里
+			// 借走布局必须**还回去**:
+			//   Present → CopySrc(显式屏障)→ 拷贝 → CopySrc → Present(显式屏障)。
+			// 旧实现只做了前半段,拷完把交换链图留在 TRANSFER_SRC_OPTIMAL → 每次
+			// vkQueuePresentKHR 报一条 VUID-VkPresentInfoKHR-pImageIndices-01430
+			// (实测 7 次抓图 7 条)。屏障走 RHI 的跟踪布局,不还会让跟踪值与真实值一起跑偏。
+			// 注:CopyTextureToBuffer 自带"进入前是什么布局就还原成什么布局",这里进入前是
+			// CopySrc,所以它本身不会替我们还 —— 必须显式补第二条屏障。
 			active.Queue->ExecuteImmediate([&](Rhi::CommandBuffer& cmd)
 			{
 				Rhi::ResourceBarrier toCopy;
@@ -1102,6 +1110,11 @@ namespace World
 				toCopy.After = Rhi::ResourceState::CopySrc;
 				cmd.PipelineBarrier({ toCopy });
 				cmd.CopyTextureToBuffer(active.Image, readback, 0);
+				Rhi::ResourceBarrier backToPresent;
+				backToPresent.Texture = active.Image;
+				backToPresent.Before = Rhi::ResourceState::CopySrc;   // 说明性字段:后端以跟踪布局为准
+				backToPresent.After = Rhi::ResourceState::Present;
+				cmd.PipelineBarrier({ backToPresent });
 			});
 
 			const uint8_t* pixels = static_cast<const uint8_t*>(readback->Map());
