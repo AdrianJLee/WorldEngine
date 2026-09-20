@@ -910,9 +910,6 @@ namespace World
 		// 开帧用 WuiModal 的输入封锁把整个客户区登记成遮挡区,后面画的所有面板照常显示但
 		// 收不到命中(点击/悬停/拖放都走 HitTest);画模态本体之前 EndModalInputBlock 解开。
 		// D10-15:shell 的四个模态(未保存/错误/打包/项目设置)同样是真模态,同一口径挡输入。
-		// 项目设置用"请求标志 || 当前模态 id"判定:菜单点击发生在同一帧的 DrawMenuBar,
-		// 请求标志当帧为真;之后由 ctx 里留着的模态 id 负责(DrawModals 才消费请求标志)。
-		const Wui::WuiId projectSettingsModalId = Wui::HashId("modal.projectsettings");
 		// P4-UX10:启动询问是浮在停靠区上的**非模态**通知 —— 帧初先登记它的遮挡,
 		// 下面的面板才不会吃到落在提示上的点击(提示内控件在绘制时仍然可命中)。
 		if (!m_PendingFloatRestore.empty())
@@ -922,8 +919,7 @@ namespace World
 			ctx.PushHoverBlocker(RestorePromptRect(statusBarRect));
 		}
 		const bool shellModalOpen = m_ImportModalOpen || m_Editor.ShowUnsavedModal()
-			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress() || m_ShowProjectSettings
-			|| ctx.Modal() == projectSettingsModalId;
+			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress();
 		if (shellModalOpen)
 			Wui::BeginModalInputBlock(ctx);
 		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
@@ -3466,15 +3462,10 @@ namespace World
 			{ Wui::Tr("menu.file.import", "Import glTF..."), false, [this] { m_Editor.ImportModelDialog(); } },
 			{ Wui::Tr("menu.file.project_settings", "Project Settings"), false, [this]
 				{
-					std::string error;
-					World::Asset::ProjectManifest manifest;
-					const std::filesystem::path manifestPath =
-						std::string(WLD_GAME_DIR) + "project.we.yaml";
-					if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
-						m_ProjectRendererIndex = manifest.Renderer == "vulkan" ? 1 : 0;
-					else
-						WLD_CORE_WARN("Failed to load project manifest: {0}", error);
-					m_ShowProjectSettings = true;
+					// P4-UX11:项目设置只有一处入口 = 独立窗口的 Settings 面板(渲染/物理/启动与内容)。
+					// 旧的"只有渲染后端一项"的模态框已删除,避免两套界面互相打架。
+					if (m_Ctx)
+						TogglePanel(*m_Ctx, "settings");
 				} },
 			{ Wui::Tr("menu.file.editor_settings", "Editor Preferences"), false, [this, &ctx]
 				{
@@ -3619,57 +3610,8 @@ namespace World
 			}
 		}
 
-		// ---- 项目设置 ----
-		const Wui::WuiId projectSettings = Wui::HashId("modal.projectsettings");
-		if (m_ShowProjectSettings)
-		{
-			ctx.SetModal(projectSettings);
-			m_ShowProjectSettings = false;
-		}
-		{
-			Wui::WuiRect panel;
-			bool escapePressed = false;
-			Wui::ModalFrameDesc frameDesc;
-			frameDesc.Id = projectSettings;
-			frameDesc.Title = "Project Settings";
-			frameDesc.Size = { 380.0f, 190.0f };
-			if (Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, m_Theme))
-			{
-				Label(ctx, { panel.X + 16, panel.Y + 48 }, "Renderer", m_Theme.TextMuted, 13.0f);
-				std::vector<std::string> options = { "OpenGL", "Vulkan" };
-				Combo(ctx, Wui::HashId("project.renderer"), { panel.X + 110, panel.Y + 46, 220, 24 },
-					"", options, m_ProjectRendererIndex, m_Theme);
-				const Wui::ModalButtonDesc buttons[2] = {
-					{ "Save", Wui::HashId("project.save"), true },
-					{ "Cancel", Wui::HashId("project.cancel"), true },
-				};
-				const int clicked = Wui::ModalButtons(ctx, panel, buttons, 2, m_Theme);
-				if (clicked == 0)
-				{
-					std::string error;
-					World::Asset::ProjectManifest manifest;
-					const std::filesystem::path manifestPath =
-						std::string(WLD_GAME_DIR) + "project.we.yaml";
-					if (World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
-					{
-						manifest.Renderer = m_ProjectRendererIndex == 1 ? "vulkan" : "opengl";
-						if (World::Asset::ProjectManifest::Save(manifestPath, manifest, &error))
-						{
-							WLD_CORE_INFO("Project settings saved: renderer={0}", manifest.Renderer);
-							m_Editor.ApplyRendererChange(manifest.Renderer);
-						}
-						else
-							WLD_CORE_ERROR("Failed to save project manifest: {0}", error);
-					}
-					else
-						WLD_CORE_ERROR("Failed to load project manifest: {0}", error);
-					ctx.ClearModal();
-				}
-				else if (clicked == 1 || escapePressed)   // Esc = Cancel
-					ctx.ClearModal();
-				Wui::EndModalFrame(ctx);
-			}
-		}
+		// P4-UX11:旧的"项目设置"模态框已删除 —— 项目设置统一进独立窗口的 Settings 面板
+		// (File ▸ Project Settings 改为打开该面板),避免两套界面互相打架。
 	}
 }
 

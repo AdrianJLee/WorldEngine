@@ -251,8 +251,6 @@ namespace World
 		Wui::WuiRect m_ViewportRect;
 
 		bool m_SplitterDragging = false;
-		bool m_ShowProjectSettings = false;
-		int m_ProjectRendererIndex = 0;
 		Wui::DockNode* m_DragSplitNode = nullptr;
 		bool m_DragSplitRow = true;
 		std::string m_SplitterBeforeJson;
