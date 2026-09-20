@@ -35,6 +35,8 @@ namespace World
 		std::filesystem::path RenameTarget;
 		char RenameBuffer[256] = { 0 };
 		std::string RenameEdit;
+		// P4-UX15:重命名时被"藏起来"的后缀(提交时若用户没写后缀就补回)。
+		std::string RenameExtension;
 		bool RenameActive = false;
 		std::string SearchEdit;
 		std::filesystem::path ContextMenuPath;
@@ -157,6 +159,8 @@ namespace World
 		glm::vec2 m_ToolbarMenuPos { 0, 0 };
 		std::vector<std::shared_ptr<Wui::WuiButton>> m_CrumbButtons;
 		std::vector<std::filesystem::path> m_CrumbDests;
+		// P4-UX15:面包屑改立即模式绘制,标签单独存一份(不再依赖嵌套 Box 的布局)。
+		std::vector<std::string> m_CrumbLabels;
 		std::filesystem::path m_LastCrumbPath;
 		std::filesystem::path m_StatePath;
 		Wui::WuiContext* m_Ctx = nullptr;

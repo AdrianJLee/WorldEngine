@@ -456,6 +456,20 @@ namespace World
 			result = "focused " + panel;
 			return true;
 		}
+		// P4-UX15:把**停靠面板**切到前台(选中它所在的标签页)。此前没有稳定入口,
+		// 后台标签不渲染 → 树里没有它的节点,内容浏览器一类停靠面板无法被脚本驱动。
+		if (cmd == "ui.activate")
+		{
+			const std::string panel = normalizePanel(arg("panel"));
+			std::string message;
+			if (!m_Shell.AiActivatePanel(panel, &message))
+			{
+				error = message.empty() ? ("cannot activate panel '" + panel + "'") : message;
+				return false;
+			}
+			result = message;
+			return true;
+		}
 		if (cmd == "ui.resize")
 		{
 			const std::string panel = normalizePanel(arg("panel"));

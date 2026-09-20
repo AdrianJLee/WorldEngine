@@ -2403,6 +2403,66 @@ namespace World
 		return true;
 	}
 
+	// P4-UX15:把停靠面板切到前台。以前只有 ui.focus(独立窗口),后台标签不渲染 →
+	// 树里没有它的节点,内容浏览器这类停靠面板无法被脚本驱动。
+	bool EditorShell::AiActivatePanel(const std::string& panel, std::string* message)
+	{
+		auto fail = [message](const std::string& text)
+		{
+			if (message) *message = text;
+			return false;
+		};
+		if (panel.empty() || !IsDeclaredPanel(panel))
+			return fail("unknown panel '" + panel + "'");
+		if (IsIndependentPanel(panel))
+		{
+			if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel) != m_AttachedPanels.end())
+			{
+				m_ActiveWindowTag = panel;
+				if (message) *message = "activated " + panel + " (top-bar tab)";
+				return true;
+			}
+			if (FloatWindowHost* host = FindFloatHost(panel))
+			{
+				host->ActivatePanel(panel);
+				host->Focus();
+				if (message) *message = "activated " + panel + " (independent window)";
+				return true;
+			}
+			OpenPanelAttached(panel);
+			if (message) *message = "opened and activated " + panel;
+			return true;
+		}
+		// 停靠面板:把它所在标签组的 Active 指到它(树里没有 = 先按 Window 菜单同一条路打开)。
+		std::function<bool(Wui::DockNode&)> activateInTree = [&](Wui::DockNode& node) -> bool
+		{
+			if (node.IsTabs())
+			{
+				for (size_t i = 0; i < node.Panels.size(); ++i)
+					if (node.Panels[i] == panel)
+					{
+						node.Active = i;
+						return true;
+					}
+				return false;
+			}
+			for (Wui::DockNode& child : node.Children)
+				if (activateInTree(child))
+					return true;
+			return false;
+		};
+		if (activateInTree(m_Layout.Root))
+		{
+			SaveLayout();
+			if (message) *message = "activated " + panel + " (dock tab)";
+			return true;
+		}
+		if (m_Ctx)
+			TogglePanel(*m_Ctx, panel);
+		if (message) *message = "opened " + panel;
+		return true;
+	}
+
 	bool EditorShell::AiAttachPanel(const std::string& panel, std::string* message)
 	{
 		auto fail = [message](const std::string& text)

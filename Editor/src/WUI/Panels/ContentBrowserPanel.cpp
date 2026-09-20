@@ -6,6 +6,7 @@
 #include "World/Core/Application.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -56,6 +57,14 @@ namespace World
 
 		// 仅按 ASCII 大小写比较:重命名到"仅大小写不同"的名字在 Windows 上是合法操作,
 		// 不能把它当成"同目录已有同名文件"拦掉。
+		// P4-UX15:重命名框默认只编辑主名(后缀藏起来),提交时如果用户没写后缀就补回原名后缀。
+		std::string RenameNameWithExtension(const std::filesystem::path& target, const std::string& stemEdit)
+		{
+			if (target.extension().empty() || std::filesystem::path(stemEdit).has_extension())
+				return stemEdit;
+			return stemEdit + target.extension().string();
+		}
+
 		bool EqualsNoCaseAscii(const std::string& left, const std::string& right)
 		{
 			if (left.size() != right.size())
@@ -673,7 +682,10 @@ namespace World
 	void ContentBrowserPanel::StartRename(Wui::WuiContext& ctx, const std::filesystem::path& path)
 	{
 		m_Model.RenameTarget = path;
-		m_Model.RenameEdit = path.filename().string();
+		// P4-UX15:重命名默认只编辑**主名**,后缀单独保留 —— 与资源管理器一致
+		// (用户:"重命名时还是会显示后缀名")。提交时若用户没写后缀,自动补回原名后缀。
+		m_Model.RenameExtension = path.extension().string();
+		m_Model.RenameEdit = m_Model.RenameExtension.empty() ? path.filename().string() : path.stem().string();
 		std::strncpy(m_Model.RenameBuffer, m_Model.RenameEdit.c_str(), sizeof(m_Model.RenameBuffer) - 1);
 		m_Model.RenameActive = true;
 		ctx.SetFocus(Wui::HashId("browser.rename"));
@@ -702,7 +714,7 @@ namespace World
 			// 回车提交:非法名字拒绝提交。TextFieldCore 在提交帧会自己失焦,这里把焦点还给
 			// 输入框 —— 否则下一帧就按"失焦提交"把框收掉,错误只闪一帧、也没法继续改。
 			if (error.empty())
-				ApplyRename(path, m_Model.RenameEdit);
+				ApplyRename(path, RenameNameWithExtension(path, m_Model.RenameEdit));
 			else
 			{
 				WLD_CORE_WARN("[browser] rename rejected: {0}", error);
@@ -715,7 +727,7 @@ namespace World
 			// 失焦提交:点选其他条目或空白处时收起重命名框。非法名字不提交(原名字不变,
 			// 也不留一个失去焦点、无法继续编辑的输入框)。
 			if (error.empty())
-				ApplyRename(path, m_Model.RenameEdit);
+				ApplyRename(path, RenameNameWithExtension(path, m_Model.RenameEdit));
 			else
 			{
 				WLD_CORE_WARN("[browser] rename rejected on blur: {0}", error);
@@ -1060,8 +1072,11 @@ namespace World
 			m_Breadcrumbs->AlignCross = Wui::WuiAlign::Center;
 			// P4-UX13:面包屑**吃掉剩余宽度**(以前靠 spacer 顶到右边),这样面板变窄时先挤的是路径,
 			// 而不是把右侧的搜索框/动作挤出画面(实测 890px 宽时搜索框整个看不见)。
-			// min 120:否则面板一窄,布局会把面包屑压成 0 宽 —— 路径整条消失(用户实测)。
-			m_Toolbar->Add(m_Breadcrumbs, { 120, 1e30f, 0, 24, 1 });
+			// P4-UX15:面包屑**不再进布局树**(嵌套 Box 的宽度预算在窄面板/深路径下不可控,
+			// 实测路径会整条消失)。这里只放一个占位 spacer,真正的面包屑在工具栏画完后
+			// 用立即模式逐枚画(见下方"面包屑(立即模式)")。
+			auto toolbarSpacer = std::make_shared<Wui::WuiSpacer>();
+			m_Toolbar->Add(toolbarSpacer, { 8, 1e30f, 0, 24, 1 });
 
 			// `⋯` 菜单:动作收进一处,低频动作不再占用常驻空间。
 			// "…"(U+2026)在字体子集里有;"⋯"(U+22EF)没有 → 会画成乱码(用户实测)。
@@ -1111,6 +1126,7 @@ namespace World
 			m_LastCrumbPath = m_Model.Current;
 			m_CrumbButtons.clear();
 			m_CrumbDests.clear();
+			m_CrumbLabels.clear();
 			m_Breadcrumbs->Clear();
 			const auto addCrumb = [&](const std::string& label, const std::filesystem::path& destination)
 			{
@@ -1120,6 +1136,7 @@ namespace World
 				m_Breadcrumbs->Add(button, { static_cast<float>(label.size() * 8 + 20), static_cast<float>(label.size() * 8 + 20), 0, 24, 0 });
 				m_CrumbButtons.push_back(button);
 				m_CrumbDests.push_back(destination);
+				m_CrumbLabels.push_back(label);
 			};
 			addCrumb(Wui::Tr("panel.content_browser.root", "Root"), m_Model.Root);
 			// 面包屑用 › 分隔而不是一串等距按钮:路径的"层级感"来自分隔符与当前段的高亮。
@@ -1167,6 +1184,44 @@ namespace World
 		Wui::LayoutWidgetTree(m_Toolbar, { rect.X + 6, rect.Y + 6, rect.W - 12, 24 });
 		Wui::WuiPaintContext toolbarPaint(ctx);
 		m_Toolbar->Paint(toolbarPaint);
+		// ---- 面包屑(立即模式)----
+		// P4-UX15:不再依赖嵌套 Box —— 显式按 x 预算排布,放不下的中间层级收成 "…",
+		// 保证"进入任意深度的文件夹,路径都看得见"(用户实测:以前一进目录整条路径消失)。
+		{
+			const float budgetRight = m_SearchField->Rect().X - 12.0f;
+			float x = rect.X + 6.0f;
+			for (size_t i = 0; i < m_CrumbLabels.size(); ++i)
+			{
+				const std::string& label = m_CrumbLabels[i];
+				const bool last = (i + 1) == m_CrumbLabels.size();
+				const float width = std::min(180.0f, ctx.MeasureTextWidth(label, 13.0f) + 18.0f);
+				if (!last && x + width > budgetRight)
+				{
+					Wui::Label(ctx, { x, rect.Y + 11.0f }, "…", theme.TextMuted, 12.0f);
+					x += 16.0f;
+					continue;
+				}
+				const Wui::WuiRect crumb { x, rect.Y + 6.0f, width, 24.0f };
+				const Wui::WuiId crumbId = Wui::HashId(("browser.crumb." + std::to_string(i)).c_str());
+				if (Wui::Button(ctx, crumbId, crumb, label, theme) && !last)
+					Navigate(m_CrumbDests[i]);
+				Wui::WuiAccessNode node;
+				node.Id = crumbId;
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "crumb";
+				node.Label = label;
+				node.Value = last ? "current" : "parent";
+				node.Rect = crumb;
+				node.Enabled = true;
+				node.Interactive = !last;
+				node.Visible = true;
+				Wui::WuiAccessibility::Get().Register(node);
+				if (!last)
+					Wui::Label(ctx, { crumb.X + crumb.W + 2.0f, rect.Y + 11.0f }, "›", theme.TextMuted, 12.0f);
+				x += width + 14.0f;
+			}
+		}
 
 		// P4-UX13:工具条 = 四组(导航 | 路径 | 搜索 | 视图与动作),组间画 1px 分隔线;
 		// 每个图标按钮都登记悬停说明 —— 图标没有 tooltip 就等于没解释。
@@ -1176,7 +1231,6 @@ namespace World
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
 					{ firstOfGroup.X - 8.0f, rect.Y + 9.0f, 1.0f, 18.0f }, theme.Border, 0.0f });
 			};
-			separator(m_Breadcrumbs->Rect());
 			separator(m_SearchField->Rect());
 			if (m_MoreButton)
 				separator(m_MoreButton->Rect());
@@ -1466,11 +1520,14 @@ namespace World
 			RefreshListing();
 		const std::vector<std::filesystem::path>& paths = searching ? m_Model.SearchResults : m_Model.Listing;
 
-		if (ctx.Input().Ctrl && ctx.IsKeyPressed(KeyCodes::A) && ctx.IsHovered(content))
+		// P4-UX15:**有文本焦点时面板级快捷键一律让位** —— 否则在重命名框里按 Ctrl+A
+		// 会去选中整个文件夹里的文件(用户实测:"很低级的作用域问题")。
+		const bool textFocusActive = Wui::WuiTextFocus::Get().Active();
+		if (!textFocusActive && ctx.Input().Ctrl && ctx.IsKeyPressed(KeyCodes::A) && ctx.IsHovered(content))
 			SelectAll(paths);
-		if (ctx.IsKeyPressed(KeyCodes::Delete) && !m_Model.Selected.empty() && ctx.IsHovered(content))
+		if (!textFocusActive && ctx.IsKeyPressed(KeyCodes::Delete) && !m_Model.Selected.empty() && ctx.IsHovered(content))
 			m_Model.ShowDeleteModal = true;
-		if (ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
+		if (!textFocusActive && ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
 		{
 			StartRename(ctx, *m_Model.Selected.begin());
 		}
