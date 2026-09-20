@@ -58,6 +58,8 @@ namespace World::Wui
 		IBeam,
 		ResizeEW,
 		ResizeNS,
+		ResizeNWSE,   // 左上/右下角(无边框窗口边缘缩放)
+		ResizeNESW,   // 右上/左下角
 		Hand,
 	};
 

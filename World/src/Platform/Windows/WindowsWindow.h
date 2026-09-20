@@ -75,6 +75,7 @@ namespace World
 		bool m_Frameless = false;
 		static LRESULT CALLBACK StaticWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 		LRESULT HitTestNc(LPARAM lParam);
+		int ResizeBorderPixels() const override;
 		// D10:WM_DROPFILES:用 DragQueryFileW 逐项取路径进 m_DroppedFiles,再 DragFinish。
 		LRESULT HandleDroppedFiles(WPARAM wParam);
 

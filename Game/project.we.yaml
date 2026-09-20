@@ -3,20 +3,6 @@ version: 1.0.0
 content_root: assets
 start_scene: scenes/3DTest.wd
 renderer: vulkan
-# 3D 渲染设置(引擎用户可直接改;编辑器 Window ▸ Project Settings 面板等价)。
-#  - culling:视锥剔除(主通道按相机、阴影通道按光源);关掉 = 更慢但便于排查"物体消失"。
-#  - shadows:方向光阴影通道。
-#  - shadow_map_size:阴影贴图边长(2 的幂,256..4096;**下次启动生效**)。
-#  - max_directional_lights / max_point_lights:每帧灯光上限(合计 ≤ 8)。
-#  - gpu_timing:GPU 时间戳统计(Stats 面板/AI 读 gpuMs;默认关,读回有一点代价)。
-#  - vsync:垂直同步/交换链呈现模式。true = FIFO(防撕裂,默认);false = Immediate
-#    (不等 vblank,帧率最高、可能撕裂)。运行期可切(编辑器 Project Settings 勾选,
-#    Vulkan 下一帧重建交换链生效),无需重启;开发覆盖 WLD_VK_PRESENT_MODE=fifo|mailbox|immediate。
-#  - instancing:同网格 + 同材质的实例合批(默认开;关掉用于 A/B 对照)。
-#  - anisotropy:纹理各向异性上限 1..16(设备不支持时引擎退化 1 并 warn)。
-#  - render_scale:场景渲染分辨率倍率 0.25..2.0(只缩放场景目标,不动窗口/UI;默认 1.0)。
-#  - msaa:多重采样 1/2/4/8(颜色/实体 id/深度三类附件同采样数并 resolve 到单采样纹理;
-#    启动期生效,预览面板同步)。
 rendering:
   culling: true
   shadows: true
@@ -27,13 +13,10 @@ rendering:
   vsync: true
   instancing: true
   anisotropy: 1
-  render_scale: 1.0
   msaa: 1
-# 物理设置(引擎用户可直接改;编辑器 Window ▸ Project Settings 面板等价)。
-#  - fixed_step_hz:固定步长频率 1..240(下一次 Play / 运行 Runtime 生效)。
-#  - gravity:重力加速度(Y 轴;默认 -9.81)。
+  render_scale: 1
 physics:
   fixed_step_hz: 60
-  gravity: -9.81
+  gravity: -9.81000042
 packages:
   - packages/Base.wpak

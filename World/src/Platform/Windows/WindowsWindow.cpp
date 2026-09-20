@@ -530,7 +530,7 @@ namespace World
 		const int y = static_cast<int>(static_cast<short>(HIWORD(lParam)));
 		RECT rect {};
 		GetWindowRect(glfwGetWin32Window(m_Window), &rect);
-		constexpr int border = 6;
+		const int border = ResizeBorderPixels();
 		const bool left = x < rect.left + border;
 		const bool right = x >= rect.right - border;
 		const bool top = y < rect.top + border;
@@ -544,6 +544,14 @@ namespace World
 		if (top) return HTTOP;
 		if (bottom) return HTBOTTOM;
 		return HTCLIENT;
+	}
+
+	int WindowsWindow::ResizeBorderPixels() const
+	{
+		// P4-UX2d(用户反馈"主窗口不能自由伸缩"):原实现只有 6px,几乎抓不住。
+		// 用系统度量(SM_CXSIZEFRAME + SM_CXPADDEDBORDER,Win10/11 典型 8)并保底 8px。
+		const int frame = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+		return frame > 8 ? frame : 8;
 	}
 
 	bool WindowsWindow::IsVsync() const

@@ -882,6 +882,27 @@ namespace World::Wui
 				: nullptr);
 		if (!window)
 			return;
+		// P4-UX2d:无边框主窗口的缩放带要给出缩放光标 —— 否则用户看不出边缘可以拖
+		// (实测以前只有 6px 命中带且没有任何视觉反馈,用户反馈"主窗口不能自由伸缩")。
+		if (!m_UseLocalInput && Application::HasInstance())
+		{
+			const int border = Application::Get().GetWindow().ResizeBorderPixels();
+			if (border > 0)
+			{
+				double mouseX = 0.0, mouseY = 0.0;
+				int windowWidth = 0, windowHeight = 0;
+				glfwGetCursorPos(window, &mouseX, &mouseY);
+				glfwGetWindowSize(window, &windowWidth, &windowHeight);
+				const bool left = mouseX < border;
+				const bool right = mouseX >= windowWidth - border;
+				const bool top = mouseY < border;
+				const bool bottom = mouseY >= windowHeight - border;
+				if ((left && top) || (right && bottom)) cursor = WuiCursor::ResizeNWSE;
+				else if ((right && top) || (left && bottom)) cursor = WuiCursor::ResizeNESW;
+				else if (left || right) cursor = WuiCursor::ResizeEW;
+				else if (top || bottom) cursor = WuiCursor::ResizeNS;
+			}
+		}
 		int index = 0;
 		int shape = GLFW_ARROW_CURSOR;
 		switch (cursor)
@@ -889,10 +910,12 @@ namespace World::Wui
 			case WuiCursor::IBeam: index = 1; shape = GLFW_IBEAM_CURSOR; break;
 			case WuiCursor::ResizeEW: index = 2; shape = GLFW_HRESIZE_CURSOR; break;
 			case WuiCursor::ResizeNS: index = 3; shape = GLFW_VRESIZE_CURSOR; break;
-			case WuiCursor::Hand: index = 4; shape = GLFW_HAND_CURSOR; break;
+			case WuiCursor::ResizeNWSE: index = 4; shape = GLFW_RESIZE_NWSE_CURSOR; break;
+			case WuiCursor::ResizeNESW: index = 5; shape = GLFW_RESIZE_NESW_CURSOR; break;
+			case WuiCursor::Hand: index = 6; shape = GLFW_HAND_CURSOR; break;
 			default: index = 0; shape = GLFW_ARROW_CURSOR; break;
 		}
-		static GLFWcursor* cursors[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+		static GLFWcursor* cursors[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
 		// 只在形状变化时写入,避免每帧重复设置造成光标闪烁。
 		static int currentIndex = -1;
 		if (index != currentIndex)

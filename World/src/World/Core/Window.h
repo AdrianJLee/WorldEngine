@@ -49,6 +49,9 @@ namespace World
 
 
 		virtual void* GetNativeWindow() const = 0;
+		// 无边框窗口的"边缘缩放带"厚度(物理像素);0 = 平台不提供/窗口有系统边框。
+		// WUI 用它来给出 ResizeEW/NS/NWSE 光标 —— 否则用户看不出边缘可以拖。
+		virtual int ResizeBorderPixels() const { return 0; }
 
 		// ---- 多窗口(独立浮动窗口)支持 ----
 		// GL:把该窗口的上下文设为当前;其他后端为 no-op。
