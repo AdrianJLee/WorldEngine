@@ -130,6 +130,9 @@ namespace World
 		std::shared_ptr<Wui::WuiButton> m_ForwardButton;
 		std::shared_ptr<Wui::WuiButton> m_UpButton;
 		std::shared_ptr<Wui::WuiButton> m_ViewModeButton;
+		// P4-UX13:工具条为每个按钮登记悬停说明,需要持有指针(以前是匿名创建)。
+		std::shared_ptr<Wui::WuiButton> m_FolderButton;
+		std::shared_ptr<Wui::WuiButton> m_RefreshButton;
 		std::vector<std::shared_ptr<Wui::WuiButton>> m_CrumbButtons;
 		std::vector<std::filesystem::path> m_CrumbDests;
 		std::filesystem::path m_LastCrumbPath;

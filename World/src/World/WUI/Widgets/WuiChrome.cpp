@@ -456,13 +456,17 @@ namespace World::Wui
 		{
 			const TreeViewItem& item = items[i];
 			const int depth = std::max(0, item.Depth);
-			const float indent = 6.0f + static_cast<float>(depth) * 12.0f;
+			// P4-UX13:层级语言 —— 每级 14px、箭头列固定 18px、同级对齐;
+			// 深度 > 0 的行给祖先级画**竖向引导线**(0.4 透明度),让"我在第几层"一眼可读。
+			constexpr float kIndentStep = 14.0f;
+			constexpr float kArrowColumn = 18.0f;
+			const float indent = 6.0f + static_cast<float>(depth) * kIndentStep;
 			const WuiRect row { area.X + 2.0f + indent, area.Y + 4.0f + rowHeight * static_cast<float>(i) - scrollY,
 				std::max(0.0f, area.W - 4.0f - indent), rowHeight };
 			// D10:箭头列**固定宽度**。过去"没有子节点的行"不给箭头列、标签起点少 16px,
 			// 同一层级的行因此对不齐 —— 用户实测"有的前面有 +-、分不清层级"。
 			// 现在所有行都保留同一列,叶子行画一个弱化占位符。
-			const WuiRect arrow { row.X, row.Y, 16.0f, rowHeight };
+			const WuiRect arrow { row.X, row.Y, kArrowColumn, rowHeight };
 			result.ItemRects.push_back(row);
 			result.ArrowRects.push_back(arrow);
 			if (row.Y + row.H < area.Y || row.Y > area.Y + area.H)
@@ -496,24 +500,32 @@ namespace World::Wui
 			}
 
 			const bool hovered = !item.Disabled && ctx.IsHovered(row);
+			// 祖先引导线:从当前行往上,每一级画一条 1px 竖线(与缩进步长对齐)。
+			for (int level = 1; level <= depth; ++level)
+			{
+				const float lineX = area.X + 2.0f + 6.0f + static_cast<float>(level - 1) * kIndentStep + 7.0f;
+				ctx.Commands().push_back({ WuiDrawKind::Rect, { lineX, row.Y, 1.0f, row.H },
+					{ theme.Border.R, theme.Border.G, theme.Border.B, 0.45f }, 0.0f });
+			}
+			// 选中 = 中性底 + **左侧 2px 强调条**(与悬停区分开:悬停只有一层很淡的底)。
 			if (item.Selected)
-				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.ButtonHover, 2.0f });
+			{
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.Selection, 2.0f });
+				ctx.Commands().push_back({ WuiDrawKind::Rect, { row.X, row.Y + 1.0f, 2.0f, row.H - 2.0f },
+					theme.Accent, 1.0f });
+			}
 			else if (hovered)
 				ctx.Commands().push_back({ WuiDrawKind::Rect, row, WuiColor { 1, 1, 1, 0.06f }, 2.0f });
 
 			if (item.HasChildren)
 			{
-				PushText(ctx, { row.X + 2.0f, row.Y + (row.H - 13.0f) * 0.5f },
-					item.Expanded ? "[-]" : "[+]", theme.TextMuted, 12.0f);
+				// 展开标记用三角(▼/▶)而不是 [+]/[-]:更轻、更像编辑器,也不会和文字挤在一起。
+				PushText(ctx, { row.X + 4.0f, row.Y + (row.H - 12.0f) * 0.5f },
+					item.Expanded ? "▼" : "▶", theme.TextMuted, 10.0f);
 				if (ctx.IsClicked(arrow))
 					result.ClickedArrow = static_cast<int>(i);
 			}
-			else
-			{
-				// 叶子占位符:让"有没有子节点"一眼可辨,但不影响对齐。
-				PushText(ctx, { row.X + 5.0f, row.Y + (row.H - 13.0f) * 0.5f },
-					".", theme.TextMuted, 12.0f);
-			}
+			// 叶子行不再画占位符:箭头列**留白**同样保证对齐(占位点比留白更脏)。
 			PushText(ctx, { labelX, row.Y + (row.H - 13.0f) * 0.5f }, item.Label,
 				item.Disabled ? theme.TextMuted : theme.Text, 13.0f, item.Selected);
 

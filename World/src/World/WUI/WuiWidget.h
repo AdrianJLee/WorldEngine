@@ -134,6 +134,8 @@ namespace World::Wui
 		std::string Label;
 		std::function<void()> OnClick;
 		bool Enabled = true;
+		// P4-UX13:图标按钮(‹ › ↑ 这类单字形)需要**居中**;文字按钮保持左对齐(默认)。
+		bool CenterLabel = false;
 
 		WuiMeasure Measure(const WuiConstraints& constraints) override;
 		void Paint(WuiPaintContext& context) override;

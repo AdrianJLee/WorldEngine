@@ -190,13 +190,28 @@ namespace World::Wui
 	void WuiButton::Paint(WuiPaintContext& context)
 	{
 		WuiContext& ctx = context.Context();
+		// P4-UX13:按钮样式统一走主题令牌 —— 以前这里是硬编码色 + **每颗按钮都描一圈蓝边**,
+		// 工具条看起来像一排"空盒子"(用户:"顶部一系列按钮" 就是它)。
+		const WuiTheme& theme = CurrentTheme();
 		const bool hovered = ctx.IsHovered(m_Rect);
 		const bool pressed = hovered && ctx.Input().MouseDown[0];
-		const WuiColor fill = !Enabled ? WuiColor { 0.17f, 0.175f, 0.18f, 1 } : (pressed ? WuiColor { 0.16f, 0.16f, 0.17f, 1 } : WuiColor { 0.2f, 0.21f, 0.23f, 1 });
-		const WuiColor text = Enabled ? WuiColor { 0.82f, 0.84f, 0.87f, 1 } : WuiColor { 0.5f, 0.52f, 0.55f, 1 };
-		ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, fill, 3.0f });
-		ctx.Commands().push_back({ WuiDrawKind::RectOutline, m_Rect, WuiColor { 0.3f, 0.5f, 0.9f, 0.8f }, 3.0f, 1.0f });
-		ctx.Commands().push_back({ WuiDrawKind::Text, { m_Rect.X + 8, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 }, text, 0, 1.0f, Label, 15.0f, false });
+		const WuiColor fill = !Enabled ? theme.ContentBg
+			: (pressed ? theme.ActiveBg : (hovered ? theme.ButtonHover : theme.ButtonBg));
+		const WuiColor text = Enabled ? theme.Text : theme.TextDisabled;
+		ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, fill, theme.Radius });
+		// 只在悬停/按下时给一圈边:默认态干净,悬停态才有"可点"的反馈。
+		if (Enabled && (hovered || pressed))
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, m_Rect, theme.BorderStrong, theme.Radius, 1.0f });
+		float textX = m_Rect.X + 8.0f;
+		if (CenterLabel)
+		{
+			const float width = ctx.MeasureTextWidth(Label, 15.0f);
+			textX = m_Rect.X + std::max(2.0f, (m_Rect.W - width) * 0.5f);
+		}
+		ctx.Commands().push_back({ WuiDrawKind::Text, { textX, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 },
+			text, 0, 1.0f, Label, 15.0f, false });
+		if (Enabled && hovered)
+			ctx.SetCursor(WuiCursor::Hand);
 		if (Enabled && ctx.IsClicked(m_Rect) && OnClick)
 			OnClick();
 	}

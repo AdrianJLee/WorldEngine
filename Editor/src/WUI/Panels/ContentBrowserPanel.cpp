@@ -793,16 +793,20 @@ namespace World
 			m_Toolbar->Gap = 6;
 			m_Toolbar->AlignCross = Wui::WuiAlign::Center;
 
-			auto addButton = [&](const std::string& label, std::function<void()> action, float width)
+			auto addButton = [&](const std::string& label, std::function<void()> action, float width,
+				bool centerLabel = false)
 			{
 				auto button = std::make_shared<Wui::WuiButton>();
 				button->Label = label;
+				button->CenterLabel = centerLabel;
 				button->OnClick = std::move(action);
 				m_Toolbar->Add(button, { width, width, 0, 24, 0 });
 				return button;
 			};
-			m_BackButton = addButton("<", [this] { if (m_Model.HistoryIndex > 0) GoBack(); }, 24);
-			m_ForwardButton = addButton(">", [this]
+			// P4-UX13:导航组用**字形 + tooltip**(‹ › ↑),不再用 "<"/">"/"Up" 这种词与符号混排;
+			// 图标按钮靠悬停说明自解释,右侧动作组才用文字(新建文件夹一次就能看懂)。
+			m_BackButton = addButton("‹", [this] { if (m_Model.HistoryIndex > 0) GoBack(); }, 24, true);
+			m_ForwardButton = addButton("›", [this]
 				{
 					if (m_Model.HistoryIndex < static_cast<int>(m_Model.History.size()) - 1)
 					{
@@ -817,25 +821,24 @@ namespace World
 						if (m_Model.Search[0])
 							UpdateSearch();
 					}
-				}, 24);
-			m_UpButton = addButton("Up", [this] { if (m_Model.Current != m_Model.Root) GoUp(); }, 32);
+				}, 24, true);
+			m_UpButton = addButton("↑", [this] { if (m_Model.Current != m_Model.Root) GoUp(); }, 26, true);
 
 			m_Breadcrumbs = std::make_shared<Wui::WuiBox>();
 			m_Breadcrumbs->Direction = Wui::WuiDirection::Row;
 			m_Breadcrumbs->Gap = 4;
 			m_Breadcrumbs->AlignCross = Wui::WuiAlign::Center;
-			m_Toolbar->Add(m_Breadcrumbs);
-
-			auto spacer = std::make_shared<Wui::WuiSpacer>();
-			m_Toolbar->Add(spacer, { 0, 1e30f, 0, 1e30f, 1 });
+			// P4-UX13:面包屑**吃掉剩余宽度**(以前靠 spacer 顶到右边),这样面板变窄时先挤的是路径,
+			// 而不是把右侧的搜索框/动作挤出画面(实测 890px 宽时搜索框整个看不见)。
+			m_Toolbar->Add(m_Breadcrumbs, { 0, 1e30f, 0, 24, 1 });
 
 			m_ViewModeButton = addButton(m_Model.ListMode ? "Grid" : "List", [this]
 				{
 					m_Model.ListMode = !m_Model.ListMode;
 					SaveState();
 				}, 58);
-			addButton("+ Folder", [this, &ctx] { CreateFolder(ctx); }, 70);
-			addButton("Refresh", [this]
+			m_FolderButton = addButton("+ " + Wui::Tr("panel.content_browser.new_folder", "Folder"), [this, &ctx] { CreateFolder(ctx); }, 76);
+			m_RefreshButton = addButton(Wui::Tr("panel.content_browser.refresh", "Refresh"), [this]
 				{
 					InvalidateContents();
 					if (m_Model.Search[0])
@@ -852,7 +855,7 @@ namespace World
 					m_Model.Search[sizeof(m_Model.Search) - 1] = 0;
 					UpdateSearch();
 				};
-			m_Toolbar->Add(m_SearchField, { 162, 162, 0, 24, 0 });
+			m_Toolbar->Add(m_SearchField, { 140, 162, 0, 24, 0 });
 		}
 
 		m_BackButton->Enabled = m_Model.HistoryIndex > 0;
@@ -876,11 +879,26 @@ namespace World
 				m_CrumbButtons.push_back(button);
 				m_CrumbDests.push_back(destination);
 			};
-			addCrumb("Root", m_Model.Root);
+			addCrumb(Wui::Tr("panel.content_browser.root", "Root"), m_Model.Root);
+			// 面包屑用 › 分隔而不是一串等距按钮:路径的"层级感"来自分隔符与当前段的高亮。
+			const auto addCrumbSeparator = [&]()
+			{
+				auto separator = std::make_shared<Wui::WuiLabel>();
+				separator->Text = "›";
+				separator->Color = theme.TextMuted;
+				separator->FontSize = 13.0f;
+				separator->FixedWidth = 12.0f;
+				m_Breadcrumbs->Add(separator, { 12.0f, 12.0f, 0, 24, 0 });
+			};
 			std::filesystem::path accumulated = m_Model.Root;
 			for (const auto& part : m_Model.Current.lexically_relative(m_Model.Root))
 			{
 				accumulated /= part;
+				// 根目录自身的相对路径是 ".":它不是一个真实层级,别画成一枚空的 crumb
+				// (实测工具条最右侧出现一个 "." 按钮,看起来像坏掉的控件)。
+				if (part == "." || part.empty())
+					continue;
+				addCrumbSeparator();
 				addCrumb(part.string(), accumulated);
 			}
 		}
@@ -888,6 +906,48 @@ namespace World
 		Wui::LayoutWidgetTree(m_Toolbar, { rect.X + 6, rect.Y + 6, rect.W - 12, 24 });
 		Wui::WuiPaintContext toolbarPaint(ctx);
 		m_Toolbar->Paint(toolbarPaint);
+
+		// P4-UX13:工具条 = 四组(导航 | 路径 | 搜索 | 视图与动作),组间画 1px 分隔线;
+		// 每个图标按钮都登记悬停说明 —— 图标没有 tooltip 就等于没解释。
+		{
+			const auto separator = [&](const Wui::WuiRect& firstOfGroup)
+			{
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+					{ firstOfGroup.X - 8.0f, rect.Y + 9.0f, 1.0f, 18.0f }, theme.Border, 0.0f });
+			};
+			separator(m_Breadcrumbs->Rect());
+			separator(m_SearchField->Rect());
+			separator(m_ViewModeButton->Rect());
+
+			Wui::Tooltip(ctx, m_BackButton->Rect(), Wui::Tr("panel.content_browser.back.tooltip", "后退"));
+			Wui::Tooltip(ctx, m_ForwardButton->Rect(), Wui::Tr("panel.content_browser.forward.tooltip", "前进"));
+			Wui::Tooltip(ctx, m_UpButton->Rect(), Wui::Tr("panel.content_browser.up.tooltip", "上一级"));
+			Wui::Tooltip(ctx, m_ViewModeButton->Rect(), m_Model.ListMode
+				? Wui::Tr("panel.content_browser.view.grid.tooltip", "切换到网格视图")
+				: Wui::Tr("panel.content_browser.view.list.tooltip", "切换到列表视图"));
+			if (m_FolderButton)
+				Wui::Tooltip(ctx, m_FolderButton->Rect(), Wui::Tr("panel.content_browser.new_folder.tooltip",
+					"在当前文件夹里新建子文件夹"));
+			if (m_RefreshButton)
+				Wui::Tooltip(ctx, m_RefreshButton->Rect(), Wui::Tr("panel.content_browser.refresh.tooltip",
+					"重新扫描当前文件夹(热重载之外的兜底)"));
+			// 搜索框:空时给占位提示,有内容时右侧给"清除"(与浏览器/编辑器的搜索框一致)。
+			const Wui::WuiRect searchRect = m_SearchField->Rect();
+			if (m_Model.SearchEdit.empty())
+				Wui::Label(ctx, { searchRect.X + 8.0f, searchRect.Y + 5.0f },
+					Wui::Tr("panel.content_browser.search.hint", "搜索资产…"), theme.TextDisabled, 12.0f);
+			else
+			{
+				const Wui::WuiRect clearRect { searchRect.X + searchRect.W - 20.0f, searchRect.Y + 2.0f, 18.0f, 20.0f };
+				if (Wui::Button(ctx, Wui::HashId("browser.search.clearfield"), clearRect, "x", theme))
+				{
+					m_Model.SearchEdit.clear();
+					m_Model.Search[0] = 0;
+					UpdateSearch();
+				}
+				Wui::Tooltip(ctx, clearRect, Wui::Tr("panel.content_browser.search.clear.tooltip", "清除搜索"));
+			}
+		}
 
 		if (fileDrag)
 			for (size_t i = 0; i < m_CrumbButtons.size(); ++i)
@@ -926,7 +986,7 @@ namespace World
 		}
 		bool treeRenameDrawn = false;
 		{
-			Wui::TreeViewResult tree = Wui::TreeView(ctx, treeRect, treeItems, 20.0f, m_Model.TreeScroll, theme);
+			Wui::TreeViewResult tree = Wui::TreeView(ctx, treeRect, treeItems, 22.0f, m_Model.TreeScroll, theme);
 			// D10-6:树行右键 → 打开树菜单(命中由 TreeView 的 ContextClicked 提供,不自己写命中检测)。
 			if (tree.ContextClicked >= 0 && tree.ContextClicked < static_cast<int>(visibleNodes.size()))
 			{
