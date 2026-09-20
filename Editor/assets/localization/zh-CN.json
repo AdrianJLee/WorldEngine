@@ -311,8 +311,7 @@
   "settings.group.Diagnostics": "诊断",
   "settings.search.hint": "搜索设置…",
   "settings.only_modified": "只看已修改",
-  "settings.reset": "重置",
-  "settings.reset_scope": "恢复默认",
+  "settings.reset_row": "重置",
   "settings.empty": "该分类暂无设置。",
   "settings.empty.filtered": "没有符合当前筛选的设置。",
   "settings.apply.restart": "重启生效",
@@ -354,5 +353,9 @@
   "settings.editor.diagnostics.asset_trace": "热重载日志",
   "settings.editor.diagnostics.asset_trace.tooltip": "热重载日志\n打印每次热重载判定(内容哈希/重新导入)的细节(WLD_ASSET_HOTRELOAD_TRACE)。调试用。\n默认:关\n重启编辑器后生效",
   "settings.editor.diagnostics.vulkan_validation": "Vulkan 验证层",
-  "settings.editor.diagnostics.vulkan_validation.tooltip": "Vulkan 验证层\n打印 VUID 违规与对象名(WLD_VULKAN_VALIDATION);device lost 取证依赖它,除性能测量外建议保持开启。\n默认:开\n重启编辑器后生效"
+  "settings.editor.diagnostics.vulkan_validation.tooltip": "Vulkan 验证层\n打印 VUID 违规与对象名(WLD_VULKAN_VALIDATION);device lost 取证依赖它,除性能测量外建议保持开启。\n默认:开\n重启编辑器后生效",
+
+  "menu.file.lua_stubs": "生成 Lua API 存根",
+  "menu.file.cooking": "烘焙(Cook)",
+  "menu.file.export_ops": "导出操作日志"
 }

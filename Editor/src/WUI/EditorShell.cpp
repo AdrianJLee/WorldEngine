@@ -1651,27 +1651,20 @@ namespace World
 				if (Wui::DockFloat* entry = m_Layout.FindFloat(panel))
 					entry->Rect = rect;
 
-			// 挂靠判定:拖动结束后光标落在主窗口顶栏(挂靠栏)上 → 挂靠;
-			// 判定只在"拖动经过顶部栏"时点亮提示;真正的挂靠动作发生在松手时
-			// (UpdateCrossWindowDrag)——悬停即挂靠会让拖动路径经过顶部栏时被截断。
+			// 挂靠栏高亮**只由跨窗口拖拽**点亮(见 UpdateCrossWindowDrag):
+			// 以前这里额外做了一次"光标落在顶栏上就点亮"的判断,于是一开独立窗口、
+			// 鼠标随手移到主窗口顶部栏,整条栏就变蓝 —— 用户 2026-09-20 反馈"条件不对",
+			// 而且独立窗口压在顶栏上时,光标明明在浮窗里也会点亮它下面的栏("会穿透")。
+			// 位置记忆仍然要写回布局,所以这段只保留 rect 记录。
 			const std::string windowKey = host.Panels().front();
 			m_LastFloatScreenRects[windowKey] = rect;
-			POINT cursor { 0, 0 };
-			GetCursorPos(&cursor);
-			// 挂靠栏只接受独立窗口:停靠形态的临时浮动不参与挂靠(高亮也不点亮)。
-			const bool cursorOverSlot = IsIndependentPanel(windowKey)
-				&& m_AttachSlotScreenRect.W > 0.0f && m_AttachSlotScreenRect.H > 0.0f
-				&& cursor.x >= static_cast<LONG>(m_AttachSlotScreenRect.X)
-				&& cursor.x <= static_cast<LONG>(m_AttachSlotScreenRect.X + m_AttachSlotScreenRect.W)
-				&& cursor.y >= static_cast<LONG>(m_AttachSlotScreenRect.Y)
-				&& cursor.y <= static_cast<LONG>(m_AttachSlotScreenRect.Y + m_AttachSlotScreenRect.H);
-			if (cursorOverSlot)
-				m_AttachSlotHighlight = true;
 			++i;
 		}
 		for (const std::string& panel : closeRequests)
 			HideFloatPanel(panel, &ctx);
-		if (m_FloatHosts.empty())
+		// 没有跨窗口拖拽在飞 = 挂靠栏不该保持点亮(拖拽结束时 UpdateCrossWindowDrag 也会清,
+		// 这里是防止状态残留的第二道保险)。
+		if (!m_CrossDragActive || m_FloatHosts.empty())
 			m_AttachSlotHighlight = false;
 		// 停靠形态的"临时浮动"面板:在主窗口内绘制(OS 窗口只属于 Independent 面板)。
 		// 独立窗口渲染会把当前 GL 上下文切到各自窗口,先恢复主窗口上下文。

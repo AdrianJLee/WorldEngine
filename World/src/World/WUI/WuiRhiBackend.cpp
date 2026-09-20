@@ -942,16 +942,17 @@ namespace World::Wui
 			default: index = 0; shape = GLFW_ARROW_CURSOR; break;
 		}
 		static GLFWcursor* cursors[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
-		// 只在形状变化时写入,避免每帧重复设置造成光标闪烁。
-		static int currentIndex = -1;
-		if (index != currentIndex)
-		{
-			if (!cursors[index])
-				cursors[index] = glfwCreateStandardCursor(shape);
-			if (cursors[index])
-				glfwSetCursor(window, cursors[index]);
-			currentIndex = index;
-		}
+		if (!cursors[index])
+			cursors[index] = glfwCreateStandardCursor(shape);
+		// **每帧都写**,不做"形状没变就跳过"的缓存(用户 2026-09-20:"鼠标形状还是刚刚的")。
+		// 原因有两层:
+		//   ① 缓存曾经是函数级 static → 主窗口与独立窗口共用一个下标,某个窗口设过一次
+		//      (如缩放宽)后,别的窗口算出的同一形状被判定成"没变化",本窗口的光标不再写回;
+		//   ② 主窗口的缩放带属于**非客户区**,Windows 会按 WM_SETCURSOR 自己画系统缩放光标 ——
+		//      只"变了才写"的缓存无法察觉这次外部改形状,回到普通区域时就会停在旧形状。
+		// 每帧一次 glfwSetCursor(SetCursor)代价可忽略,换来的是形状永远等于本帧算出来的值。
+		if (cursors[index])
+			glfwSetCursor(window, cursors[index]);
 	}
 }
 

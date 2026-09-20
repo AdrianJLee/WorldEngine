@@ -214,7 +214,7 @@ namespace World::Editor
 			{
 				const Wui::WuiRect resetRect { controlRect.X + controlRect.W + 26.0f, y + 1.0f, kResetWidth, 20.0f };
 				if (Wui::Button(ctx, Wui::HashId((key + ".reset").c_str()), resetRect,
-					Wui::Tr("settings.reset", "Reset"), theme))
+					Wui::Tr("settings.reset_row", "Reset"), theme))
 				{
 					std::string resetError;
 					if (!SettingsRegistry::Get().Reset(descriptor.Id, &resetError) && error)
@@ -283,7 +283,7 @@ namespace World::Editor
 			const Wui::WuiRect resetRect { rect.X + rect.W - resetWidth, toolbarY, resetWidth, 24.0f };
 			const bool hasModified = registry.HasModified(scope);
 			if (Wui::Button(ctx, Wui::HashId("settings.reset_scope"), resetRect,
-				Wui::Tr("settings.reset_scope", "Restore Defaults"), theme) && hasModified)
+				Wui::Tr("settings.reset", "Restore Defaults"), theme) && hasModified)
 			{
 				if (!ResetSettingsScope(scope, &error))
 					Wui::Label(ctx, { rect.X, rect.Y + rect.H - 16.0f }, error, theme.Danger, 12.0f);
