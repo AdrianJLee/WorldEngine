@@ -4,6 +4,7 @@
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Mesh.h"
+#include "World/Renderer/Renderer.h"
 #include "World/RHI/Rhi.h"
 
 #include <string>
@@ -98,7 +99,12 @@ namespace World
 		Rhi::Handle<Rhi::Texture> m_PreviewColorMsaa;
 		Rhi::Handle<Rhi::Texture> m_PreviewEntityMsaa;
 		Rhi::Handle<Rhi::Texture> m_PreviewDepthMsaa;
-		Rhi::Handle<Rhi::CommandBuffer> m_PreviewCommandBuffer;
+		// P4-UX16b:预览命令缓冲按**帧槽位**各一份(索引 = Renderer::FrameSlot())。
+		// 单缓冲 + 每帧重新录制会在"上一帧的提交还没完成"时 begin —— 实测开材质窗口后连续触发
+		// VUID-vkBeginCommandBuffer-00049 / VUID-vkQueueSubmit-pCommandBuffers-00071,
+		// 最终把设备打丢(device lost)。帧槽位复用与 Renderer::BeginFrame 的帧栅栏配套:
+		// 同一槽位再次使用前,该帧的栅栏已经被等待过,缓冲必然已完成。
+		Rhi::Handle<Rhi::CommandBuffer> m_PreviewCommands[Renderer::FramesInFlight];
 		Rhi::Handle<Rhi::Buffer> m_PreviewCameraBuffer;
 		Rhi::Handle<Rhi::DescriptorSet> m_PreviewCameraSet;
 		Ref<Mesh> m_PreviewSphere;

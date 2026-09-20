@@ -455,7 +455,9 @@ namespace World
 		framebufferDesc.DebugName = "Model.PreviewFramebuffer";
 		m_PreviewFramebuffer = device->CreateFramebuffer(framebufferDesc);
 
-		m_PreviewCommandBuffer = device->CreateCommandBuffer("Model.Preview");
+		// P4-UX16b:每条帧槽位一条(与材质预览同因同修,见头文件说明)。
+		for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
+			m_PreviewCommands[slot] = device->CreateCommandBuffer("Model.Preview#" + std::to_string(slot));
 
 		Rhi::BufferDesc cameraDesc;
 		cameraDesc.Size = sizeof(glm::mat4);
@@ -490,7 +492,8 @@ namespace World
 		m_PreviewColorMsaa = nullptr;
 		m_PreviewEntityMsaa = nullptr;
 		m_PreviewDepthMsaa = nullptr;
-		m_PreviewCommandBuffer = nullptr;
+		for (Rhi::Handle<Rhi::CommandBuffer>& command : m_PreviewCommands)
+			command = nullptr;
 		m_PreviewCameraBuffer = nullptr;
 		m_PreviewCameraSet = nullptr;
 		m_GpuDevice = nullptr;
@@ -518,6 +521,11 @@ namespace World
 
 	uint64_t ModelPreviewPanel::RenderPreview()
 	{
+		// P4-UX16b:本帧槽位专属的命令缓冲(见头文件:单缓冲会在上一帧还没跑完时重录)。
+		Rhi::Handle<Rhi::CommandBuffer>& command =
+			m_PreviewCommands[Renderer::FrameSlot() % Renderer::FramesInFlight];
+		if (!command)
+			return 0;
 		if (!m_Mesh)
 			return 0;
 		EnsureGpuResources();
@@ -544,12 +552,12 @@ namespace World
 		clears[2].IsDepthStencil = true;
 		clears[2].DepthStencil.Depth = 1.0f;
 
-		m_PreviewCommandBuffer->Begin();
-		m_PreviewCommandBuffer->BeginRenderPass(m_PreviewPass, m_PreviewFramebuffer, clears);
-		m_PreviewCommandBuffer->SetViewport({ 0, 0, static_cast<float>(m_PreviewSize), static_cast<float>(m_PreviewSize) });
-		m_PreviewCommandBuffer->SetScissor({ 0, 0, m_PreviewSize, m_PreviewSize });
-		m_PreviewCommandBuffer->BindDescriptorSet(m_PreviewCameraSet, 0);
-		Renderer3D::BeginScene(viewProjection, m_PreviewCommandBuffer);
+		command->Begin();
+		command->BeginRenderPass(m_PreviewPass, m_PreviewFramebuffer, clears);
+		command->SetViewport({ 0, 0, static_cast<float>(m_PreviewSize), static_cast<float>(m_PreviewSize) });
+		command->SetScissor({ 0, 0, m_PreviewSize, m_PreviewSize });
+		command->BindDescriptorSet(m_PreviewCameraSet, 0);
+		Renderer3D::BeginScene(viewProjection, command);
 		// set0(相机 + 灯光 + 阴影贴图)必须登记给 Renderer3D:它在**管线绑定之后**才真正
 		// 执行 vkCmdBindDescriptorSets(见 Renderer3D::BindPipelineForCurrentPass 的说明);
 		// 只在命令缓冲上直绑(set 索引 0)在 Vulkan 下会被丢,表现为"预览什么都没有"。
@@ -692,9 +700,9 @@ namespace World
 			}
 		}
 		Renderer3D::EndScene();
-		m_PreviewCommandBuffer->EndRenderPass();
-		m_PreviewCommandBuffer->End();
-		Renderer::SubmitScene(m_PreviewCommandBuffer, m_PreviewColor);
+		command->EndRenderPass();
+		command->End();
+		Renderer::SubmitScene(command, m_PreviewColor);
 		if (const char* trace = std::getenv("WLD_TRACE_MODEL_PREVIEW"))
 		{
 			static int traced = 0;

@@ -131,6 +131,14 @@ namespace World::Rhi::Vulkan
 
 	void VulkanCommandBuffer::Begin()
 	{
+		// 取证钩子(2026-09-20):device lost / "command buffer still pending" 这类事故里,
+		// 验证层只会报一个 VkCommandBuffer 地址,看不出归属。打开 WLD_VK_CMDBUF_TRACE=1
+		// 就能把"谁在第几帧重新 begin 了哪条缓冲"打进日志(带调试名,如 WuiBackend / UiFrame)。
+		static const bool traceBegin = std::getenv("WLD_VK_CMDBUF_TRACE") != nullptr;
+		if (traceBegin)
+			WLD_CORE_INFO("[vk-cmdbuf] begin '{0}' handle={1}",
+				m_DebugName.empty() ? "(unnamed)" : m_DebugName,
+				static_cast<const void*>(m_CommandBuffer));
 		m_PendingDescriptorSets.clear();
 		m_TransientBuffers.clear();   // 上一轮同槽位提交的 fence 已通过,临时 staging 可以释放
 		m_ActivePassAttachments.clear();

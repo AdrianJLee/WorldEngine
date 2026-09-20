@@ -399,6 +399,10 @@ namespace World::Rhi::Vulkan
 	{
 		if (!m_Device || !record)
 			return false;
+		// P4-UX16c:整个"挑槽 → 重置栅栏/命令缓冲 → 录制 → 提交(→ 可选等待)"必须原子:
+		// 并发调用会挑到同一个槽位,在 GPU 还在用的栅栏上 vkResetFences,
+		// 并把同一条命令缓冲重新录制+重复提交(实测 → device lost)。
+		std::lock_guard<std::mutex> lock(m_OneShotMutex);
 
 		if (m_OneShotSlots.empty())
 		{

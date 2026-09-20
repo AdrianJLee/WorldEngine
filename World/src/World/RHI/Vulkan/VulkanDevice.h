@@ -106,5 +106,11 @@ namespace World::Rhi::Vulkan
 		VkCommandPool m_TransientPool = VK_NULL_HANDLE;
 		std::vector<OneShotSlot> m_OneShotSlots;
 		size_t m_NextOneShot = 0;
+		// P4-UX16c:一次性提交的槽位环是**共享可变状态**(m_OneShotSlots / m_NextOneShot),
+		// 而 SubmitOneShot 会被多个来源调用(交换链布局转换、纹理 SetData 上传、资源初始化)。
+		// 并发进来会挑到同一个槽位 → 在仍被 GPU 使用的栅栏上 vkResetFences、同一命令缓冲
+		// 被重新录制并再次提交 —— 实测(VUID-vkResetFences-01123 + VUID-vkAcquireNextImageKHR-01779
+		// → "device lost in one-shot submit")。这里串行化,保证"挑槽 → 重置 → 录制 → 提交"原子。
+		std::mutex m_OneShotMutex;
 	};
 }

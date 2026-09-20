@@ -5,6 +5,7 @@
 #include "World/Core/Asset/WModelIO.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/Mesh.h"
+#include "World/Renderer/Renderer.h"
 #include "World/RHI/Rhi.h"
 
 #include <glm/glm.hpp>
@@ -121,7 +122,9 @@ namespace World
 		Rhi::Handle<Rhi::Texture> m_PreviewColorMsaa;
 		Rhi::Handle<Rhi::Texture> m_PreviewEntityMsaa;
 		Rhi::Handle<Rhi::Texture> m_PreviewDepthMsaa;
-		Rhi::Handle<Rhi::CommandBuffer> m_PreviewCommandBuffer;
+		// P4-UX16b:预览命令缓冲按**帧槽位**各一份 —— 与材质预览同因同修(单缓冲会在上一帧
+		// 提交还没完成时 begin,触发 VUID-00049/00071 并最终 device lost)。
+		Rhi::Handle<Rhi::CommandBuffer> m_PreviewCommands[Renderer::FramesInFlight];
 		Rhi::Handle<Rhi::Buffer> m_PreviewCameraBuffer;
 		Rhi::Handle<Rhi::DescriptorSet> m_PreviewCameraSet;
 	};

@@ -192,7 +192,8 @@ namespace World
 		m_PreviewColorMsaa = nullptr;
 		m_PreviewEntityMsaa = nullptr;
 		m_PreviewDepthMsaa = nullptr;
-		m_PreviewCommandBuffer = nullptr;
+		for (Rhi::Handle<Rhi::CommandBuffer>& command : m_PreviewCommands)
+			command = nullptr;
 		m_PreviewCameraBuffer = nullptr;
 		m_PreviewCameraSet = nullptr;
 		m_PreviewTextureId = 0;
@@ -335,7 +336,9 @@ namespace World
 		framebufferDesc.DebugName = "Material.PreviewFramebuffer";
 		m_PreviewFramebuffer = device->CreateFramebuffer(framebufferDesc);
 
-		m_PreviewCommandBuffer = device->CreateCommandBuffer("Material.Preview");
+		// P4-UX16b:每条帧槽位一条(见头文件说明)。调试名带槽位号,取证时能看出是哪一份。
+		for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
+			m_PreviewCommands[slot] = device->CreateCommandBuffer("Material.Preview#" + std::to_string(slot));
 
 		Rhi::BufferDesc cameraDesc;
 		cameraDesc.Size = sizeof(glm::mat4);
@@ -369,7 +372,10 @@ namespace World
 		if (!m_Material)
 			return 0;
 		EnsureGpuResources();
-		if (!m_PreviewFramebuffer || !m_PreviewCameraSet || !m_PreviewSphere)
+		// P4-UX16b:本帧槽位专属的命令缓冲(见头文件:单缓冲会在上一帧还没跑完时重录)。
+		Rhi::Handle<Rhi::CommandBuffer>& command =
+			m_PreviewCommands[Renderer::FrameSlot() % Renderer::FramesInFlight];
+		if (!m_PreviewFramebuffer || !m_PreviewCameraSet || !m_PreviewSphere || !command)
 			return 0;
 
 		const float distance = m_CameraDistance;
@@ -391,12 +397,12 @@ namespace World
 		clears[2].IsDepthStencil = true;
 		clears[2].DepthStencil.Depth = 1.0f;
 
-		m_PreviewCommandBuffer->Begin();
-		m_PreviewCommandBuffer->BeginRenderPass(m_PreviewPass, m_PreviewFramebuffer, clears);
-		m_PreviewCommandBuffer->SetViewport({ 0, 0, static_cast<float>(m_PreviewSize), static_cast<float>(m_PreviewSize) });
-		m_PreviewCommandBuffer->SetScissor({ 0, 0, m_PreviewSize, m_PreviewSize });
-		m_PreviewCommandBuffer->BindDescriptorSet(m_PreviewCameraSet, 0);
-		Renderer3D::BeginScene(viewProjection, m_PreviewCommandBuffer);
+		command->Begin();
+		command->BeginRenderPass(m_PreviewPass, m_PreviewFramebuffer, clears);
+		command->SetViewport({ 0, 0, static_cast<float>(m_PreviewSize), static_cast<float>(m_PreviewSize) });
+		command->SetScissor({ 0, 0, m_PreviewSize, m_PreviewSize });
+		command->BindDescriptorSet(m_PreviewCameraSet, 0);
+		Renderer3D::BeginScene(viewProjection, command);
 		// 预览用**固定对象槽位**(按面板身份映射):否则每个面板/主场景都从序号 0 开始分配,
 		// 会争用同一份对象 UBO 与材质描述符集,两个内容不同的材质面板就会逐帧互相覆盖
 		// (用户实测:预览一直闪烁)。
@@ -432,14 +438,14 @@ namespace World
 			}
 		}
 		Renderer3D::EndScene();
-		m_PreviewCommandBuffer->EndRenderPass();
+		command->EndRenderPass();
 		// 颜色附件已在 EndRenderPass 由渲染通道隐式转换为 FinalLayout(ShaderReadOnly),
 		// 这里不再需要额外的 PipelineBarrier。
-		m_PreviewCommandBuffer->End();
+		command->End();
 		const bool checkGlErrors = std::getenv("WLD_GL_ERRORS") != nullptr;
 		if (checkGlErrors)
 			Renderer::DrainGLErrors("preview-before-submit");
-		Renderer::SubmitScene(m_PreviewCommandBuffer, m_PreviewColor);
+		Renderer::SubmitScene(command, m_PreviewColor);
 		if (checkGlErrors)
 			Renderer::DrainGLErrors("preview-after-submit");
 		// AI 控制通道的一次性抓图请求(与 WLD_PREVIEW_TEX_CAPTURE 同一条读回路径)。
