@@ -17,6 +17,8 @@ AGENTS.md
 Editor/wui-layout.json
 Editor/wui-layout.json.bak
 Editor/wui-browser.json
+# P4-UX:编辑器用户偏好(语言/主题/缩放)是"这台机器上的这个人"的设置,不入库。
+Editor/editor-prefs.json
 # 材质单测的沙箱目录(World.Material 在其中写临时 .wmat;失败时可能留下残件)
 Game/material_tests_tmp/
 # 内容浏览器"New Material"测试产生的临时材质目录(内容根是 Game/assets,这里是测试残留)

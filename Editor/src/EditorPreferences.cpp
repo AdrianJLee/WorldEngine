@@ -40,39 +40,36 @@ namespace World::Editor
 	void EditorPreferences::Load(const std::filesystem::path& path)
 	{
 		m_Path = path;
-		// 开发/自动化覆盖:`WLD_LANG` 优先于偏好文件(与渲染设置的"环境变量 > 清单"同口径)。
-		// 必须在读文件**之前**生效:偏好文件不存在时也要能覆盖(自动化常用全新工作区)。
+		std::ifstream file(path, std::ios::binary);
+		std::optional<Wui::JsonValue> root;
+		if (!file)
+			WLD_CORE_INFO("编辑器偏好:未找到 {0},使用默认值(英文/暗色/1.15)", path.string());
+		else
+		{
+			std::ostringstream buffer;
+			buffer << file.rdbuf();
+			std::string error;
+			root = Wui::JsonValue::Parse(buffer.str(), &error);
+			if (!root || root->type != Wui::JsonValue::Type::Object)
+				WLD_CORE_WARN("编辑器偏好解析失败({0}): {1}(使用默认值)", path.string(), error);
+			else
+				for (const auto& [key, value] : root->Object)
+				{
+					if (key == "language" && value.type == Wui::JsonValue::Type::String)
+						m_Data.Language = value.String;
+					else if (key == "theme" && value.type == Wui::JsonValue::Type::String)
+						m_Data.Theme = ThemeFromString(value.String);
+					else if (key == "ui_scale" && value.type == Wui::JsonValue::Type::Number)
+						m_Data.UiScale = std::clamp(static_cast<float>(value.Number), 0.8f, 1.5f);
+					else if (key == "term_hints" && value.type == Wui::JsonValue::Type::Bool)
+						m_Data.TermHints = value.Bool;
+				}
+		}
+		// 开发/自动化覆盖:`WLD_LANG` 优先于**偏好文件**(与渲染设置的"环境变量 > 清单"同口径);
+		// 必须在解析之后再套用,否则会被文件里的值覆盖(实测踩过)。
 		if (const char* language = std::getenv("WLD_LANG"))
 			if (language[0])
 				m_Data.Language = language;
-		std::ifstream file(path, std::ios::binary);
-		if (!file)
-		{
-			WLD_CORE_INFO("编辑器偏好:未找到 {0},使用默认值(英文/暗色/1.15)", path.string());
-			Apply();
-			return;
-		}
-		std::ostringstream buffer;
-		buffer << file.rdbuf();
-		std::string error;
-		const std::optional<Wui::JsonValue> root = Wui::JsonValue::Parse(buffer.str(), &error);
-		if (!root || root->type != Wui::JsonValue::Type::Object)
-		{
-			WLD_CORE_WARN("编辑器偏好解析失败({0}): {1}(使用默认值)", path.string(), error);
-			Apply();
-			return;
-		}
-		for (const auto& [key, value] : root->Object)
-		{
-			if (key == "language" && value.type == Wui::JsonValue::Type::String)
-				m_Data.Language = value.String;
-			else if (key == "theme" && value.type == Wui::JsonValue::Type::String)
-				m_Data.Theme = ThemeFromString(value.String);
-			else if (key == "ui_scale" && value.type == Wui::JsonValue::Type::Number)
-				m_Data.UiScale = std::clamp(static_cast<float>(value.Number), 0.8f, 1.5f);
-			else if (key == "term_hints" && value.type == Wui::JsonValue::Type::Bool)
-				m_Data.TermHints = value.Bool;
-		}
 		WLD_CORE_INFO("编辑器偏好已加载: {0}(language={1} theme={2} scale={3:.2f} termHints={4})",
 			path.string(), m_Data.Language, ThemeToString(m_Data.Theme), m_Data.UiScale,
 			m_Data.TermHints ? 1 : 0);

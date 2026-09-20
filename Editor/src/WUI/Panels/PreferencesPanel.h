@@ -15,7 +15,19 @@ namespace World
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 
 	private:
+		// P4-UX2(用户反馈"还没有类型分类"):左侧分类 + 右侧内容。
+		enum class Category
+		{
+			General = 0,
+			Appearance = 1,
+			About = 2,
+		};
+		void DrawCategoryList(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
+		void DrawGeneral(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
+		void DrawAppearance(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
+		void DrawAbout(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
+
+		Category m_Category = Category::General;
 		std::string m_Status;
 	};
 }
-

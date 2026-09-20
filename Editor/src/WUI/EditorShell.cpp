@@ -84,7 +84,8 @@ namespace World
 			// 布局存档里的旧停靠记录由 StripIndependentPanelsFromTree 丢弃(不会再停靠回树)。
 			{ "settings",        EditorShell::PanelForm::Independent, { 220.0f, 140.0f, 560.0f, 460.0f } },
 			// P4-UX1:编辑器偏好(用户级,自动保存):语言/主题/缩放/术语对照。
-			{ "prefs",           EditorShell::PanelForm::Independent, { 240.0f, 170.0f, 560.0f, 380.0f } },
+			// P4-UX2:左侧分类 + 右侧内容,默认尺寸更大;位置由 FloatRectFor 居中。
+			{ "prefs",           EditorShell::PanelForm::Independent, { 0.0f, 0.0f, 780.0f, 520.0f } },
 			{ "memory",          EditorShell::PanelForm::Docked, {} },
 			{ "operations",      EditorShell::PanelForm::Docked, {} },
 			{ "save",            EditorShell::PanelForm::Docked, {} },
@@ -280,13 +281,28 @@ namespace World
 	{
 		if (const auto remembered = m_LastFloatRects.find(panel); remembered != m_LastFloatRects.end())
 			return remembered->second;
+		Wui::WuiRect rect {};
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id && spec.Form == PanelForm::Independent)
-				return spec.DefaultFloatRect;
+			{
+				rect = spec.DefaultFloatRect;
+				break;
+			}
 		int windowX = 0, windowY = 0;
+		float clientW = 0.0f, clientH = 0.0f;
 		if (Application::HasInstance())
+		{
 			Application::Get().GetWindow().GetPosition(&windowX, &windowY);
-		return { static_cast<float>(windowX) + 140.0f, static_cast<float>(windowY) + 100.0f, 480.0f, 340.0f };
+			clientW = static_cast<float>(Application::Get().GetWindow().GetWidth());
+			clientH = static_cast<float>(Application::Get().GetWindow().GetHeight());
+		}
+		if (rect.W <= 0.0f || rect.H <= 0.0f)
+			rect = { 0.0f, 0.0f, 480.0f, 340.0f };
+		// P4-UX2(用户反馈"全屏时位置太靠左"):没有位置记忆的面板默认落在**主窗口客户区正中**;
+		// 用户拖过之后走 m_LastFloatRects / FloatMemory,不会再被居中覆盖。
+		rect.X = static_cast<float>(windowX) + (clientW > rect.W ? (clientW - rect.W) * 0.5f : 40.0f);
+		rect.Y = static_cast<float>(windowY) + (clientH > rect.H ? (clientH - rect.H) * 0.5f : 40.0f);
+		return rect;
 	}
 
 	Gameplay::SaveService* EditorShell::GetSaveService()
