@@ -2,6 +2,8 @@
 #include "EditorCooker.h"
 #include "EditorStartup.h"
 #include "EditorLayer.h"
+#include "EditorPreferences.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/Core/Asset/GltfImporter.h"
 
 // 这个文件是整个 Editor 程序的入口，定义了 EditorApp 类并实现了 CreateApplication 函数
@@ -110,6 +112,11 @@ namespace World
 			std::exit(1);
 		}
 
+		// P4-UX1:编辑器偏好(用户级)必须在 EditorShell 构造之前装载 —— 面板标题/主题/字号
+		// 都在创建期取一次快照。语言目录也在编辑器自己的资源里(游戏内容的语言包在 Game 下)。
+		World::Wui::SetLocalizationDirectory(std::filesystem::path(WLD_EDITOR_DIR) / "assets" / "localization");
+		World::Editor::EditorPreferences::Get().Load(
+			std::filesystem::path(WLD_EDITOR_DIR) / "editor-prefs.json");
 		return new EditorApp(context);
 	}
 }

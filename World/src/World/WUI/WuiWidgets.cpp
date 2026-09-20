@@ -662,8 +662,16 @@ namespace World::Wui
 		const bool hovered = ctx.IsHovered(rect);
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, hovered ? theme.ButtonHover : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
-		const std::string text = label.empty() ? options[selected] : label + ": " + options[selected];
-		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, theme.Text, 0, 1.0f, text, 15.0f, false });
+		// P4-UX1:下拉只画**当前值**(label 仅用于无障碍节点)。
+		// 面板的排版约定是"标签在左、控件在右",把 label 也画进框里会出现
+		// "阴影贴图: 2048" / "界面语言: 简体中文" 这种重复且臃肿的文本。
+		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
+			theme.Text, 0, 1.0f, options[selected], 15.0f, false });
+		// 下拉提示:右下角两段细线组成的小折角(不依赖字体里的箭头字形)。
+		const float caretX = rect.X + rect.W - 12.0f;
+		const float caretY = rect.Y + rect.H * 0.5f - 3.0f;
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX, caretY, 7.0f, 1.5f }, theme.TextMuted, 1.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX + 1.5f, caretY + 3.0f, 4.0f, 1.5f }, theme.TextMuted, 1.0f });
 
 		if (ctx.IsClicked(rect))
 		{

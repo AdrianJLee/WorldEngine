@@ -17,6 +17,8 @@ namespace World::Wui
 			bool Loaded = false;
 			uint32_t Generation = 1;
 			bool TermHints = true;
+			std::filesystem::path Directory =
+				std::filesystem::path(WLD_GAME_DIR) / "assets" / "localization";
 			std::unordered_map<std::string, std::string> Catalog;
 			std::unordered_set<std::string> Missing;
 		};
@@ -43,8 +45,7 @@ namespace World::Wui
 			// 默认语言(英文)就是源码内联文案,不需要目录。
 			if (state.Language.empty() || state.Language == "en" || state.Language == "en-US")
 				return;
-			const std::filesystem::path path =
-				std::filesystem::path(WLD_GAME_DIR) / "assets" / "localization" / (state.Language + ".json");
+			const std::filesystem::path path = state.Directory / (state.Language + ".json");
 			if (std::filesystem::exists(path))
 				LoadLocalizationCatalog(path);
 			else
@@ -126,6 +127,22 @@ namespace World::Wui
 		state.Catalog.clear();
 		EnsureCatalogLoaded(state);
 		++state.Generation;
+	}
+
+	void SetLocalizationDirectory(const std::filesystem::path& directory)
+	{
+		LocalizationState& state = State();
+		if (state.Directory == directory)
+			return;
+		state.Directory = directory;
+		state.Loaded = false;      // 下次 Tr 重新按新目录加载
+		state.Catalog.clear();
+		++state.Generation;
+	}
+
+	const std::filesystem::path& GetLocalizationDirectory()
+	{
+		return State().Directory;
 	}
 
 	const std::string& GetLanguage()

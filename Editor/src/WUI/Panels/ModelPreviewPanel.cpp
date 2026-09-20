@@ -897,9 +897,11 @@ namespace World
 				m_Settings.Scale, 0.05f, 0.01f, 100.0f, theme);
 			static const std::vector<std::string> upAxes { "Y", "Z" };
 			int upAxisIndex = m_Settings.UpAxis == 0 ? 0 : 1;
+			// P4-UX1:Combo 只画当前值,标签在左侧单独绘制(与其它面板同一排版语法)。
+			Wui::Label(ctx, { x + halfW + 8.0f, y + 2.0f }, "Up Axis", theme.TextMuted, 11.0f);
 			if (Wui::Combo(ctx, Wui::HashId("model.import.upaxis"),
 				{ x + halfW + 54.0f, y - 2.0f, width - halfW - 54.0f, 18.0f },
-				"Up " + upAxes[upAxisIndex], upAxes, upAxisIndex, theme))
+				"Up Axis", upAxes, upAxisIndex, theme))
 				m_Settings.UpAxis = upAxisIndex == 0 ? 0 : 1;
 			y += 22.0f;
 			bool exportMaterials = m_Settings.ExportMaterials;

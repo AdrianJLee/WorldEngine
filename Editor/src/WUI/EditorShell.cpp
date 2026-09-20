@@ -16,6 +16,8 @@
 #include "Panels/MaterialEditorPanel.h"
 #include "Panels/ModelPreviewPanel.h"
 #include "Panels/SettingsPanel.h"
+#include "Panels/PreferencesPanel.h"
+#include "World/WUI/WuiLocalization.h"
 
 #include <algorithm>
 #include <cstring>
@@ -81,6 +83,8 @@ namespace World
 			// TogglePanel → OpenPanelAttached(附加到主窗口的标签切换),可拖出为独立 OS 窗口。
 			// 布局存档里的旧停靠记录由 StripIndependentPanelsFromTree 丢弃(不会再停靠回树)。
 			{ "settings",        EditorShell::PanelForm::Independent, { 220.0f, 140.0f, 560.0f, 460.0f } },
+			// P4-UX1:编辑器偏好(用户级,自动保存):语言/主题/缩放/术语对照。
+			{ "prefs",           EditorShell::PanelForm::Independent, { 240.0f, 170.0f, 560.0f, 380.0f } },
 			{ "memory",          EditorShell::PanelForm::Docked, {} },
 			{ "operations",      EditorShell::PanelForm::Docked, {} },
 			{ "save",            EditorShell::PanelForm::Docked, {} },
@@ -138,6 +142,7 @@ namespace World
 		// D8a2:项目渲染设置(引擎用户可配置)。用户 2026-09-20 指定为独立窗口形态:
 		// 默认打开 = 附加到主窗口(见 PanelSpec),可拖出为独立 OS 窗口 / ui.detach。
 		m_PanelRegistry.emplace("settings", std::make_unique<SettingsPanel>());
+		m_PanelRegistry.emplace("prefs", std::make_unique<PreferencesPanel>());
 		m_PanelRegistry.emplace("memory", std::make_unique<MemoryPanel>());
 		m_PanelRegistry.emplace("operations", std::make_unique<OperationsPanel>());
 		m_PanelRegistry.emplace("save", std::make_unique<SavePanel>());
@@ -535,10 +540,31 @@ namespace World
 		return m_Editor.GetGizmoOperation();
 	}
 
-	const char* EditorShell::PanelTitle(const std::string& id) const
+	std::string EditorShell::PanelTitle(const std::string& id) const
 	{
+		// 静态面板走本地化表;动态面板(材质/模型/脚本)用注册表里的动态标题。
+		static const std::pair<const char*, const char*>* kTitles = nullptr;
+		static const std::map<std::string, std::pair<const char*, const char*>> titles {
+			{ "hierarchy",       { "panel.hierarchy", "Hierarchy" } },
+			{ "properties",      { "panel.properties", "Properties" } },
+			{ "content_browser", { "panel.content_browser", "Content Browser" } },
+			{ "view",            { "panel.view", "View" } },
+			{ "stats",           { "panel.stats", "Stats" } },
+			{ "settings",        { "panel.settings", "Project Settings" } },
+			{ "prefs",           { "panel.prefs", "Editor Preferences" } },
+			{ "memory",          { "panel.memory", "Memory" } },
+			{ "operations",      { "panel.operations", "Operations" } },
+			{ "save",            { "panel.save", "Save" } },
+			{ "levels",          { "panel.levels", "Levels" } },
+			{ "gallery",         { "panel.gallery", "Widget Gallery" } },
+			{ "input",           { "panel.input", "Input Map" } },
+			{ "scripts",         { "panel.scripts", "Scripts" } },
+		};
+		(void)kTitles;
+		if (const auto found = titles.find(id); found != titles.end())
+			return Wui::Tr(found->second.first, found->second.second);
 		const auto it = m_PanelRegistry.find(id);
-		return it != m_PanelRegistry.end() ? it->second->Title() : id.c_str();
+		return it != m_PanelRegistry.end() ? it->second->Title() : id;
 	}
 
 	void EditorShell::SaveLayout()
@@ -2871,7 +2897,7 @@ namespace World
 			m_MenuBar->Direction = Wui::WuiDirection::Row;
 			m_MenuBar->Gap = 4;
 			m_FileButton = std::make_shared<Wui::WuiButton>();
-			m_FileButton->Label = "File";
+			m_FileButton->Label = Wui::Tr("menu.file", "File");
 			m_FileButton->OnClick = [this, menuFile]
 				{
 					const bool opening = m_OpenMenu != menuFile;
@@ -2887,7 +2913,7 @@ namespace World
 				};
 			m_MenuBar->Add(m_FileButton, { 60, 60, 0, 22, 0 });
 			m_WindowButton = std::make_shared<Wui::WuiButton>();
-			m_WindowButton->Label = "Window";
+			m_WindowButton->Label = Wui::Tr("menu.window", "Window");
 			m_WindowButton->OnClick = [this, menuWindow]
 				{
 					const bool opening = m_OpenMenu != menuWindow;
@@ -2946,11 +2972,11 @@ namespace World
 		};
 
 		drawMenu(menuFile, "menu.file", {
-			{ "New", false, [this] { m_Editor.NewScene(); } },
-			{ "Open", false, [this] { m_Editor.OpenScene(); } },
-			{ "Save", false, [this] { m_Editor.SaveScene(); } },
-			{ "Import glTF...", false, [this] { m_Editor.ImportModelDialog(); } },
-			{ "Project Settings", false, [this]
+			{ Wui::Tr("menu.file.new", "New"), false, [this] { m_Editor.NewScene(); } },
+			{ Wui::Tr("menu.file.open", "Open"), false, [this] { m_Editor.OpenScene(); } },
+			{ Wui::Tr("menu.file.save", "Save"), false, [this] { m_Editor.SaveScene(); } },
+			{ Wui::Tr("menu.file.import", "Import glTF..."), false, [this] { m_Editor.ImportModelDialog(); } },
+			{ Wui::Tr("menu.file.project_settings", "Project Settings"), false, [this]
 				{
 					std::string error;
 					World::Asset::ProjectManifest manifest;
@@ -2962,10 +2988,16 @@ namespace World
 						WLD_CORE_WARN("Failed to load project manifest: {0}", error);
 					m_ShowProjectSettings = true;
 				} },
-			{ "Generate Lua API Stubs", false, [this] { m_Editor.GenerateLuaStubsAction(); } },
-			{ "Cooking", false, [this] { m_Editor.StartCookingAction(); } },
-			{ "Export Operation Log", false, [this] { m_Editor.ExportOperationLog(); } },
-			{ "Exit", false, [this] { m_Editor.CloseAction(); } },
+			{ Wui::Tr("menu.file.editor_settings", "Editor Preferences"), false, [this, &ctx]
+				{
+					if (!FindFloatHost("prefs") && !m_Layout.Contains("prefs"))
+						OpenIndependentPanel("prefs");
+					TogglePanel(ctx, "prefs");
+				} },
+			{ Wui::Tr("menu.file.lua_stubs", "Generate Lua API Stubs"), false, [this] { m_Editor.GenerateLuaStubsAction(); } },
+			{ Wui::Tr("menu.file.cooking", "Cooking"), false, [this] { m_Editor.StartCookingAction(); } },
+			{ Wui::Tr("menu.file.export_ops", "Export Operation Log"), false, [this] { m_Editor.ExportOperationLog(); } },
+			{ Wui::Tr("menu.file.exit", "Exit"), false, [this] { m_Editor.CloseAction(); } },
 		});
 
 		// 菜单分组:独立窗口(自带 OS 窗口)与停靠面板分开列,并给出不可点击的分组标题 ——
@@ -2982,11 +3014,11 @@ namespace World
 				windowEntries.push_back({ PanelTitle(panel), visible, [this, panel, &ctx] { TogglePanel(ctx, panel); } });
 			}
 		};
-		windowEntries.push_back({ "独立窗口", false, {}, true });
+		windowEntries.push_back({ Wui::Tr("menu.window.independent", "Independent Windows"), false, {}, true });
 		appendPanels(/*independent=*/true);
-		windowEntries.push_back({ "停靠面板", false, {}, true });
+		windowEntries.push_back({ Wui::Tr("menu.window.docked", "Docked Panels"), false, {}, true });
 		appendPanels(/*independent=*/false);
-		windowEntries.push_back({ "Reset Layout", false, [this, &ctx] { ResetLayout(ctx); } });
+		windowEntries.push_back({ Wui::Tr("menu.window.reset_layout", "Reset Layout"), false, [this, &ctx] { ResetLayout(ctx); } });
 		drawMenu(menuWindow, "menu.window", windowEntries);
 	}
 

@@ -10,9 +10,9 @@ namespace World
 	// P1b D8a2:项目渲染设置面板 —— 把"过去只藏在代码常量/环境变量里"的开关
 	// 开放给引擎用户(做项目的人),而不是每次都要改引擎代码或设环境变量。
 	//
-	// 交互口径:
-	//  - 控件改动 → **立即生效**(RenderSettings::Set,不写盘),方便边看边调;
-	//  - "保存到 project.we.yaml" → 由宿主写盘(下次启动与打包产物同样生效);
+	// 交互口径(P4-UX1 用户反馈"改完还要点保存太繁琐"):
+	//  - 控件改动 → **立即生效**(RenderSettings::Set)+ **自动落盘**(防抖 400ms);
+	//  - 没有"保存"按钮;面板只显示"已自动保存/保存失败"状态,"恢复默认"仍然保留;
 	//  - 阴影贴图尺寸是**资源创建期**参数 → 面板明确提示"下次启动生效"。
 	class SettingsPanel final : public EditorPanel
 	{
@@ -31,5 +31,8 @@ namespace World
 		bool m_PhysicsChanged = false;
 		std::string m_Status = "渲染设置来自 project.we.yaml 的 `rendering` 区块";
 		bool m_StatusIsError = false;
+		// 自动保存防抖:拖拽控件时每帧都会 changed,不能每帧写盘。
+		bool m_PendingSave = false;
+		double m_LastChangeSeconds = 0.0;
 	};
 }

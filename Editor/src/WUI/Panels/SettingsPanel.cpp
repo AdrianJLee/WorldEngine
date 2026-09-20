@@ -9,6 +9,8 @@
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiWidget.h"
 
+#include <chrono>
+
 namespace World
 {
 	namespace
@@ -100,7 +102,10 @@ namespace World
 				m_Edit.MaxDirectionalLights = static_cast<uint32_t>(value);
 				changed = true;
 			}
-			Wui::Label(ctx, { x, y + 3.0f }, "方向光上限", theme.Text, 13.0f);
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.max_directional", "Max Directional Lights");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
 			y += 26.0f;
 		}
 
@@ -112,7 +117,10 @@ namespace World
 				m_Edit.MaxPointLights = static_cast<uint32_t>(value);
 				changed = true;
 			}
-			Wui::Label(ctx, { x, y + 3.0f }, "点光上限", theme.Text, 13.0f);
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.max_point", "Max Point Lights");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
 			y += 26.0f;
 		}
 
@@ -132,7 +140,10 @@ namespace World
 				m_Edit.Anisotropy = static_cast<uint32_t>(value);
 				changed = true;
 			}
-			Wui::Label(ctx, { x, y + 3.0f }, "纹理各向异性", theme.Text, 13.0f);
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.anisotropy", "Texture Anisotropy");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
 			y += 26.0f;
 		}
 
@@ -145,7 +156,10 @@ namespace World
 				m_Edit.RenderScale = value;
 				changed = true;
 			}
-			Wui::Label(ctx, { x, y + 3.0f }, "渲染分辨率倍率", theme.Text, 13.0f);
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.render_scale", "Render Scale");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
 			y += 26.0f;
 		}
 
@@ -163,7 +177,10 @@ namespace World
 				m_Edit.Msaa = static_cast<uint32_t>(std::stoul(msaaOptions[static_cast<size_t>(selected)]));
 				changed = true;
 			}
-			Wui::Label(ctx, { x, y + 3.0f }, "MSAA(重启生效)", theme.Text, 13.0f);
+			{
+				const Wui::LocalizedLabel label = Wui::TrLabel("settings.msaa", "MSAA (restart)");
+				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme);
+			}
 			y += 26.0f;
 		}
 
@@ -206,35 +223,48 @@ namespace World
 		{
 			RenderSettings::Set(m_Edit);
 			PhysicsSettings::Set(m_Physics);
-			m_Status = Wui::Tr("settings.status.applied", "Applied (not saved to project.we.yaml)");
+			// P4-UX1:改动立即生效 + 自动保存(防抖 400ms;拖拽期间不反复写盘)。
+			m_PendingSave = true;
+			m_LastChangeSeconds = std::chrono::duration<double>(
+				std::chrono::steady_clock::now().time_since_epoch()).count();
+			m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
 			m_StatusIsError = false;
 		}
 
-		y += 4.0f;
-		const float buttonWidth = (width - 12.0f) / 2.0f;
-		if (Wui::Button(ctx, Wui::HashId("settings3d.save"), { x, y, buttonWidth, 24.0f },
-			Wui::Tr("settings.save", "Save to project.we.yaml"), theme))
+		if (m_PendingSave)
 		{
-			std::string message;
-			if (host.SaveProjectRenderSettings(m_Edit, &message) && host.SaveProjectPhysicsSettings(m_Physics, &message))
+			const double now = std::chrono::duration<double>(
+				std::chrono::steady_clock::now().time_since_epoch()).count();
+			if (now - m_LastChangeSeconds >= 0.4)
 			{
-				m_Status = message.empty()
-					? Wui::Tr("settings.status.saved", "Saved to project.we.yaml") : message;
-				m_StatusIsError = false;
-			}
-			else
-			{
-				m_Status = message.empty() ? Wui::Tr("settings.status.save_failed", "Save failed") : message;
-				m_StatusIsError = true;
+				std::string message;
+				if (host.SaveProjectRenderSettings(m_Edit, &message) &&
+					host.SaveProjectPhysicsSettings(m_Physics, &message))
+				{
+					m_Status = Wui::Tr("settings.status.saved", "Saved automatically");
+					m_StatusIsError = false;
+				}
+				else
+				{
+					m_Status = message.empty() ? Wui::Tr("settings.status.save_failed", "Save failed") : message;
+					m_StatusIsError = true;
+				}
+				m_PendingSave = false;
 			}
 		}
-		if (Wui::Button(ctx, Wui::HashId("settings3d.reset"), { x + buttonWidth + 12.0f, y, buttonWidth, 24.0f },
+
+		y += 4.0f;
+		// 只有"恢复默认"按钮:修改本身已自动保存,不需要"保存"确认。
+		if (Wui::Button(ctx, Wui::HashId("settings3d.reset"), { x, y, 180.0f, 24.0f },
 			Wui::Tr("settings.reset", "Restore Defaults"), theme))
 		{
 			m_Edit = Asset::RenderingSettings {};
 			RenderSettings::Set(m_Edit);
 			Renderer::SetVsync(m_Edit.Vsync);
-			m_Status = Wui::Tr("settings.status.defaults", "Restored built-in defaults (not saved)");
+			m_PendingSave = true;
+			m_LastChangeSeconds = std::chrono::duration<double>(
+				std::chrono::steady_clock::now().time_since_epoch()).count();
+			m_Status = Wui::Tr("settings.status.defaults", "Restored built-in defaults");
 			m_StatusIsError = false;
 		}
 		y += 32.0f;

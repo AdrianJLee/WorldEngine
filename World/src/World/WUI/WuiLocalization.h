@@ -35,6 +35,10 @@ namespace World::Wui
 	WLD_API void SetShowTermHints(bool enabled);
 
 	WLD_API bool LoadLocalizationCatalog(const std::filesystem::path& path);
+	// 目录所在文件夹:编辑器用 `<EDITOR_DIR>assets/localization`(编辑器自己的语言包),
+	// 游戏内容用 `<GAME_DIR>assets/localization`(Runtime/打包产物)。默认后者。
+	WLD_API void SetLocalizationDirectory(const std::filesystem::path& directory);
+	WLD_API const std::filesystem::path& GetLocalizationDirectory();
 	WLD_API void SetLanguage(const std::string& code);
 	WLD_API const std::string& GetLanguage();
 	WLD_API uint32_t LocalizationGeneration();

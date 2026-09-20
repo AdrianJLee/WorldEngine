@@ -230,7 +230,8 @@ namespace World
 		void RecordDockChange(Wui::WuiContext& ctx, const std::string& action, const std::string& target, const std::string& before);
 		void TogglePanel(Wui::WuiContext& ctx, const std::string& panel);
 		void ResetLayout(Wui::WuiContext& ctx);
-		const char* PanelTitle(const std::string& id) const;
+		// P4-UX1:面板标题走本地化(标签 / Window 菜单 / 挂靠标签共用同一来源)。
+		std::string PanelTitle(const std::string& id) const;
 
 		EditorLayer& m_Editor;
 		Wui::DockLayout m_Layout;
