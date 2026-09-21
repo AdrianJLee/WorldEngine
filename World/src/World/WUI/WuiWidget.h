@@ -288,6 +288,11 @@ namespace World::Wui
 		WuiRect Uv { 0, 1, 1, -1 };
 		std::function<void()> OnClick;
 		bool Dim = false;
+		// P4-U8:只有图的按钮必须能被"说清楚"—— 无障碍节点用 Label(读屏/脚本按 id 或
+		// 文案找到它),Tooltip 是悬停解释(含快捷键)。此前图标按钮既不在无障碍树里、
+		// 也没有悬停提示,AI 通道只能靠坐标点它。
+		std::string Label;
+		std::string Tooltip;
 
 		WuiMeasure Measure(const WuiConstraints& constraints) override;
 		void Paint(WuiPaintContext& context) override;

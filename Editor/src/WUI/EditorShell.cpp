@@ -3516,7 +3516,15 @@ namespace World
 		}
 
 		// Header = 分组小标题行:只显示、不响应悬停/点击(菜单里区分"独立窗口/停靠面板")。
-		struct MenuEntry { std::string Label; bool Checked; std::function<void()> Action; bool Header = false; };
+		// Tooltip 只给"看名字猜不到全部含义"的项(悬停解释 + 同步进无障碍节点的 Tooltip)。
+		struct MenuEntry
+		{
+			std::string Label;
+			bool Checked;
+			std::function<void()> Action;
+			bool Header = false;
+			std::string Tooltip;
+		};
 
 		const Wui::WuiId menuFile = Wui::HashId("menu.file");
 		// P4-U6b:View 菜单(相机模式/预览 + 范围可视化开关)。
@@ -3584,6 +3592,10 @@ namespace World
 
 		// 菜单栏下移一行:顶部第一行现在是挂靠栏。
 		Wui::PanelBackground(ctx, { 0, 26, viewport.x, 26 }, m_Theme.PanelHeader);
+		// P4-U8:菜单栏/挂靠栏/模态都属于**外壳**(不属于最后渲染的那个面板)。
+		// 不显式切面板时,菜单项的无障碍节点会挂着上一个面板 id(实测:View 菜单项被标成
+		// panel="properties"),脚本按面板过滤就找不到它。
+		Wui::WuiAccessibility::Get().SetPanel("shell");
 		Wui::LayoutWidgetTree(m_MenuBar, { 8, 28, viewport.x - 16, 22 });
 		Wui::WuiPaintContext paint(ctx);
 		m_MenuBar->Paint(paint);
@@ -3605,15 +3617,42 @@ namespace World
 					{
 						// 分组标题:淡色小字,不可点击。
 						Label(ctx, { item.X + 4.0f, item.Y + 4.0f }, entries[i].Label, m_Theme.TextMuted, 12.0f);
+						// 分组标题也要进无障碍树 —— 可见但读不到,读屏/脚本就看不出菜单的分组结构。
+						Wui::WuiAccessNode header;
+						header.Id = Wui::HashId((menuIdName + ".group." + std::to_string(i)).c_str());
+						header.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+						header.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+						header.Kind = "text";
+						header.Label = entries[i].Label;
+						header.Rect = item;
+						header.Interactive = false;
+						Wui::WuiAccessibility::Get().Register(header);
 						continue;
 					}
 					const Wui::WuiId itemId = Wui::HashId((menuIdName + "." + entries[i].Label).c_str());
+					// P4-U8:悬停解释(勾选项的"关掉是什么效果"这类信息读不出来,只能靠提示)。
+					if (!entries[i].Tooltip.empty())
+						Wui::Tooltip(ctx, item, entries[i].Tooltip);
 					if (MenuItem(ctx, itemId, item, entries[i].Label, entries[i].Checked, true, m_Theme))
 					{
 						entries[i].Action();
 						ctx.RecordOp("menu", "item", entries[i].Label, menuIdName);
 						ctx.CloseAllPopups();
 						m_OpenMenu = 0;
+					}
+					// 无障碍:MENU 项说明必须同时进节点 —— 读屏/脚本看不到悬停提示。
+					if (!entries[i].Tooltip.empty())
+					{
+						Wui::WuiAccessNode node;
+						node.Id = itemId;
+						node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+						node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+						node.Kind = "menu-item";
+						node.Label = entries[i].Label;
+						node.Value = entries[i].Checked ? "checked" : "unchecked";
+						node.Tooltip = entries[i].Tooltip;
+						node.Rect = item;
+						Wui::WuiAccessibility::Get().Register(node);
 					}
 				}
 				ctx.ClosePopupsOnOutsideClick({ menuId }, panel);
@@ -3671,26 +3710,40 @@ namespace World
 		windowEntries.push_back({ Wui::Tr("menu.window.reset_layout", "Reset Layout"), false, [this, &ctx] { ResetLayout(ctx); } });
 		drawMenu(menuWindow, "menu.window", windowEntries);
 
-		// P4-U6b:View 菜单(用户 2026-09-21:「视口放编辑器偏好中太远了吧」)。
-		// 视口相关开关的家就在这儿:相机模式/预览 + 两枚范围可视化开关(存储仍在 EditorPreferences,
-		// 与视口工具栏 `Overlays ▾` 共享同一份,改哪边都同步、立即生效)。
+		// P4-U6b / P4-U8:View 菜单 = **全部"看"的开关的唯一入口**
+		// (用户 2026-09-21:「视图这些放视口工具条里还是怪怪的,其他引擎通常是在 view 中」)。
+		// 分组:相机 / 辅助显示;视口那边只留一个只读角标(2D/3D)+ 运行状态徽标。
+		// 存储仍在 EditorPreferences(随偏好落盘),立即生效。
 		drawMenu(menuView, "menu.view", {
+			{ Wui::Tr("menu.view.group.camera", "Camera"), false, {}, true },
 			{ Wui::Tr("menu.view.camera_preview", "Camera Preview"), IsCameraPreviewEnabled(),
-				[this] { ToggleCameraPreview(); } },
+				[this] { ToggleCameraPreview(); }, false,
+				Wui::Tr("menu.view.camera_preview.tooltip",
+					"Show a picture-in-picture preview of the selected camera entity (bottom-left).\n"
+					"Camera frustum outline is always drawn while a camera is selected.") },
 			{ IsViewportCamera3D() ? Wui::Tr("menu.view.camera_3d", "Camera: 3D Orbit")
 				: Wui::Tr("menu.view.camera_2d", "Camera: 2D Ortho"), false,
-				[this] { ToggleViewportCamera3D(); } },
-			{ "", false, {}, true },
+				[this] { ToggleViewportCamera3D(); }, false,
+				Wui::Tr("menu.view.camera_mode.tooltip",
+					"Switch the editor viewport camera: 3D orbit (free look) ↔ 2D orthographic (top-down).\n"
+					"The viewport shows the current mode as a read-only corner label.") },
+			{ Wui::Tr("menu.view.group.overlays", "Overlays"), false, {}, true },
 			{ Wui::Tr("menu.view.light_ranges_all", "Light Ranges: All Lights"),
 				Editor::EditorPreferences::Get().Data().ViewportLightRangesAll, [] {
 					Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
 					prefs.SetViewportLightRangesAll(!prefs.Data().ViewportLightRangesAll);
-				} },
+				}, false,
+				Wui::Tr("viewport.overlays.light_ranges.tooltip",
+					"Draw light extents: point light = Range sphere, directional light = Direction arrow.\n"
+					"Off = only the selected entity.") },
 			{ Wui::Tr("menu.view.collider_outlines_all", "Collider Outlines: All"),
 				Editor::EditorPreferences::Get().Data().ViewportColliderOutlinesAll, [] {
 					Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
 					prefs.SetViewportColliderOutlinesAll(!prefs.Data().ViewportColliderOutlinesAll);
-				} },
+				}, false,
+				Wui::Tr("viewport.overlays.collider_outlines.tooltip",
+					"Draw collider shapes in edit mode (2D box/circle, 3D box/sphere/capsule).\n"
+					"Off = only the selected entity. MeshCollider3D has no analytic shape.") },
 		});
 	}
 

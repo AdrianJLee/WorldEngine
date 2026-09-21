@@ -489,12 +489,35 @@ namespace World::Wui
 	void WuiImageButton::Paint(WuiPaintContext& context)
 	{
 		WuiContext& ctx = context.Context();
-		if (ctx.IsHovered(m_Rect))
+		const bool hovered = ctx.IsHovered(m_Rect);
+		if (hovered)
 			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, WuiColor { 1, 1, 1, 0.08f }, 2.0f });
 		if (TextureId && !Dim)
 			ctx.Commands().push_back({ WuiDrawKind::Image, m_Rect, WuiColor { 1, 1, 1, 1 }, 0, 1.0f, "", 15.0f, false, TextureId, Uv });
 		else if (TextureId)
 			ctx.Commands().push_back({ WuiDrawKind::Image, m_Rect, WuiColor { 1, 1, 1, 0.35f }, 0, 1.0f, "", 15.0f, false, TextureId, Uv });
+		// 无障碍 + 悬停提示(与 WuiButton 同一口径;Dim = 当前状态下不可用/已激活)。
+		if (m_Id != 0)
+		{
+			WuiAccessNode node;
+			node.Id = m_Id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = Label;
+			node.Tooltip = Tooltip;
+			node.Rect = m_Rect;
+			node.Enabled = !Dim;
+			node.Interactive = !Dim;
+			WuiAccessibility::Get().Register(node);
+		}
+		if (hovered)
+		{
+			if (!Dim)
+				ctx.SetCursor(WuiCursor::Hand);
+			if (!Tooltip.empty())
+				ctx.SetTooltip(Tooltip);
+		}
 		if (!Dim && ctx.IsClicked(m_Rect) && OnClick)
 			OnClick();
 	}

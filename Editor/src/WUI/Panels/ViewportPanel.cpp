@@ -135,8 +135,14 @@ namespace World
 			}
 		}
 
+		// P4-U8:视口顶部工具条一行(运行控制 + 运行状态徽标)。
+		constexpr float kToolbarHeight = 40.0f;
+		// 运行控制按钮的稳定无障碍 id:脚本按 id 点,不靠坐标(与菜单/其它按钮同一条口径)。
+		const char* const kViewportToolIds[3] = {
+			"viewport.tool.play", "viewport.tool.simulate", "viewport.tool.pause" };
+
 		void RegisterReadonlyNode(Wui::WuiId id, const char* kind, const std::string& label,
-			const std::string& value, const Wui::WuiRect& rect)
+			const std::string& value, const Wui::WuiRect& rect, const std::string& tooltip = std::string())
 		{
 			Wui::WuiAccessNode node;
 			node.Id = id;
@@ -145,6 +151,7 @@ namespace World
 			node.Kind = kind;
 			node.Label = label;
 			node.Value = value;
+			node.Tooltip = tooltip;
 			node.Rect = rect;
 			node.Interactive = false;
 			Wui::WuiAccessibility::Get().Register(node);
@@ -160,23 +167,28 @@ namespace World
 		{
 			m_Root = std::make_shared<Wui::WuiBox>();
 			m_Root->Direction = Wui::WuiDirection::Column;
-			m_SceneImage = std::make_shared<Wui::WuiImage>();
-			m_SceneImage->Uv = { 0, 1, 1, -1 };
-			m_Root->Add(m_SceneImage, { 0, 1e30f, 0, 1e30f, 1 });
-
+			// P4-U8:运行控制(播放/模拟/暂停)**在视口最上方的工具条里**,场景图在其下 ——
+			// 与 Unity/Godot 的"运行控制在视口工具条上"一致。此前工具条挂在 Column 末尾
+			// (画面底部居中一颗空底板的药丸),用户 2026-09-21:「play 那三个是在 view 的底部」。
 			auto toolbar = std::make_shared<Wui::WuiBox>();
 			toolbar->Direction = Wui::WuiDirection::Row;
-			toolbar->Gap = 8;
-			toolbar->AlignMain = Wui::WuiAlign::Center;
+			toolbar->Gap = 6;
+			toolbar->AlignMain = Wui::WuiAlign::Start;
 			toolbar->AlignCross = Wui::WuiAlign::Center;
+			// 左内边距:与内容浏览器工具条同一视觉起点(10px)。
+			toolbar->Add(std::make_shared<Wui::WuiBox>(), { 10.0f, 10.0f, 0.0f, 0.0f, 0 });
 			for (int i = 0; i < 3; ++i)
 			{
 				auto button = std::make_shared<Wui::WuiImageButton>();
 				button->Uv = { 0, 1, 1, -1 };
+				button->SetId(Wui::HashId(kViewportToolIds[i]));
 				toolbar->Add(button, { 28, 28, 28, 28, 0 });
 				m_Tools.push_back(button);
 			}
-			m_Root->Add(toolbar, { 0, 1e30f, 0, 44, 0 });
+			m_Root->Add(toolbar, { 0, 1e30f, kToolbarHeight, kToolbarHeight, 0 });
+			m_SceneImage = std::make_shared<Wui::WuiImage>();
+			m_SceneImage->Uv = { 0, 1, 1, -1 };
+			m_Root->Add(m_SceneImage, { 0, 1e30f, 0, 1e30f, 1 });
 		}
 
 		const bool play = m_Host.IsPlaying();
@@ -188,6 +200,19 @@ namespace World
 			paused ? (simulate ? 7 : 3) : (simulate ? 6 : 2),
 		};
 		const bool dim[3] = { simulate, play, !play && !simulate };
+		// 文案随状态变化:同一个按钮既是"开始"也是"停止",无障碍/提示必须说清当前能做什么。
+		const std::string labels[3] = {
+			play ? Wui::Tr("viewport.tool.stop_play", "Stop") : Wui::Tr("viewport.tool.play", "Play"),
+			simulate ? Wui::Tr("viewport.tool.stop_simulate", "Stop Simulate")
+				: Wui::Tr("viewport.tool.simulate", "Simulate"),
+			paused ? Wui::Tr("viewport.tool.resume", "Resume") : Wui::Tr("viewport.tool.pause", "Pause"),
+		};
+		const std::string tooltips[3] = {
+			Wui::Tr("viewport.tool.play.tooltip", "Play the scene (F5). Play again to stop."),
+			Wui::Tr("viewport.tool.simulate.tooltip",
+				"Simulate: run physics/animation without game scripts. Simulate again to stop."),
+			Wui::Tr("viewport.tool.pause.tooltip", "Pause / resume the running scene."),
+		};
 		m_Tools[0]->OnClick = [this] { m_Host.TogglePlay(); };
 		m_Tools[1]->OnClick = [this] { m_Host.ToggleSimulate(); };
 		m_Tools[2]->OnClick = [this] { m_Host.TogglePause(); };
@@ -195,75 +220,62 @@ namespace World
 		{
 			m_Tools[i]->TextureId = m_Host.GetIconId(icons[i]);
 			m_Tools[i]->Dim = dim[i];
+			m_Tools[i]->Label = labels[i];
+			m_Tools[i]->Tooltip = tooltips[i];
 		}
 		m_SceneImage->TextureId = m_Host.GetSceneTextureId();
 
-		// 面板底色与工具栏底板:纯绘制,不进布局树。
+		// 面板底色与工具条底板:纯绘制,不进布局树。
 		Wui::PanelBackground(ctx, rect, { 0.06f, 0.06f, 0.07f, 1 });
-		const float panelWidth = 3 * 28.0f + 2 * 8.0f + 16.0f;
-		const Wui::WuiRect bar { rect.X + (rect.W - panelWidth) * 0.5f, rect.Y + 14, panelWidth, 44 };
-		// 工具栏底板走组件(Toolbar):与其它工具栏样式统一。
-		Wui::Toolbar(ctx, bar, theme, 6.0f, 0.85f);
+		// 工具条 = 整宽一行(PanelHeader 底 + 1px 下边线),左侧是运行控制,右侧是运行状态徽标。
+		const Wui::WuiRect toolbarRect { rect.X, rect.Y, rect.W, kToolbarHeight };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, toolbarRect, theme.PanelHeader, 0.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+			{ rect.X, rect.Y + kToolbarHeight - 1.0f, rect.W, 1.0f }, theme.Border, 0.0f });
 
-		// D7-1a:视口相机模式切换(2D 正视 / 3D 轨道)。放在工具栏左侧,不与播放按钮混排。
-		const bool camera3D = m_Host.IsViewportCamera3D();
-		if (Button(ctx, Wui::HashId("viewport.camera.mode"),
-			{ rect.X + 10.0f, rect.Y + 14.0f, 46.0f, 24.0f }, camera3D ? "3D" : "2D", theme))
-			m_Host.ToggleViewportCamera3D();
-		// 相机可视化开关:开关相机预览小窗(视锥线框始终显示)。
-		if (Button(ctx, Wui::HashId("viewport.camera.preview"),
-			{ rect.X + 62.0f, rect.Y + 14.0f, 52.0f, 24.0f },
-			m_Host.IsCameraPreviewEnabled() ? "Cam*" : "Cam", theme))
-			m_Host.ToggleCameraPreview();
-		// P4-U6:Overlays 菜单(范围可视化开关)。用户口径:「在 view 中有个选项可以选是否显示范围;
-		// 如果这个选项没开应该只画选中」→ 两枚勾选,关 = 只画选中实体。
-		// 与「编辑器偏好 ▸ Viewport」是**同一份存储**(改哪边都同步)。
-		const Wui::WuiRect overlaysButton { rect.X + 120.0f, rect.Y + 14.0f, 88.0f, 24.0f };
-		if (Button(ctx, Wui::HashId("viewport.overlays"), overlaysButton,
-			Wui::Tr("viewport.overlays.button", "Overlays"), theme))
-			ctx.OpenPopup(Wui::HashId("viewport.overlays.popup"));
-		const Wui::WuiId overlaysPopup = Wui::HashId("viewport.overlays.popup");
-		if (ctx.IsPopupOpen(overlaysPopup))
-		{
-			ctx.PushOverlay();
-			const float rowHeight = 24.0f;
-			const Wui::WuiRect overlaysPanel { overlaysButton.X, overlaysButton.Y + overlaysButton.H + 2.0f,
-				300.0f, rowHeight * 2.0f + 40.0f };
-			Wui::DrawPanelSurface(ctx, overlaysPanel, theme);
-			// P4-U7:登记为覆盖层矩形 → 下一帧只挡下层控件(视口工具栏/面板不会吃掉菜单上的点击)。
-			ctx.RegisterOverlayRect(overlaysPanel);
-			Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
-			bool rangesAll = prefs.Data().ViewportLightRangesAll;
-			if (Wui::Checkbox(ctx, Wui::HashId("viewport.overlays.light_ranges"),
-				{ overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f, overlaysPanel.W - 16.0f, rowHeight },
-				Wui::Tr("viewport.overlays.light_ranges", "Light ranges (all lights)"), rangesAll, theme))
-				prefs.SetViewportLightRangesAll(rangesAll);
-			bool collidersAll = prefs.Data().ViewportColliderOutlinesAll;
-			if (Wui::Checkbox(ctx, Wui::HashId("viewport.overlays.collider_outlines"),
-				{ overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f + rowHeight, overlaysPanel.W - 16.0f, rowHeight },
-				Wui::Tr("viewport.overlays.collider_outlines", "Collider outlines (all)"), collidersAll, theme))
-				prefs.SetViewportColliderOutlinesAll(collidersAll);
-			Wui::Label(ctx, { overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f + rowHeight * 2.0f + 4.0f },
-				Wui::Tr("viewport.overlays.hint", "Off = only the selected entity"), theme.TextMuted, 12.0f);
-			Wui::Tooltip(ctx, { overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f, overlaysPanel.W - 16.0f, rowHeight },
-				Wui::Tr("viewport.overlays.light_ranges.tooltip",
-					"Draw light extents: point light = Range sphere, directional light = Direction arrow.\n"
-					"Off = only the selected entity."));
-			Wui::Tooltip(ctx, { overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f + rowHeight, overlaysPanel.W - 16.0f, rowHeight },
-				Wui::Tr("viewport.overlays.collider_outlines.tooltip",
-					"Draw collider shapes in edit mode (2D box/circle, 3D box/sphere/capsule).\n"
-					"Off = only the selected entity. MeshCollider3D has no analytic shape."));
-			ctx.ClosePopupsOnOutsideClick({ overlaysPopup }, overlaysPanel);
-			if (ctx.IsKeyPressed(KeyCodes::Escape))
-				ctx.ClosePopup(overlaysPopup);
-			ctx.PopOverlay();
-		}
+		// 运行状态徽标(只读):编辑模式 / 播放中 / 模拟中 / 已暂停。状态是"看图时最需要知道的
+		// 一件事",给颜色 + 文案,不占菜单也不造第二颗按钮。
+		const char* const modeKey = simulate ? (paused ? "paused" : "simulate")
+			: (play ? (paused ? "paused" : "play") : "edit");
+		const std::string modeText = paused ? Wui::Tr("viewport.mode.paused", "Paused")
+			: (simulate ? Wui::Tr("viewport.mode.simulate", "Simulating")
+				: (play ? Wui::Tr("viewport.mode.play", "Playing")
+					: Wui::Tr("viewport.mode.edit", "Edit Mode")));
+		const Wui::WuiColor modeColor = paused ? theme.Warning
+			: (simulate ? theme.Accent : (play ? theme.Success : theme.TextMuted));
+		const float modeWidth = ctx.MeasureTextWidth(modeText, 12.0f) + 18.0f;
+		const Wui::WuiRect modeRect { rect.X + rect.W - 10.0f - modeWidth,
+			rect.Y + (kToolbarHeight - 20.0f) * 0.5f, modeWidth, 20.0f };
+		Wui::WuiColor modeFill = modeColor;
+		modeFill.A = 0.16f;
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, modeRect, modeFill, 10.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+			{ modeRect.X + 9.0f, modeRect.Y + 3.0f, 0, 0 }, modeColor, 0, 1.0f, modeText, 12.0f, true });
+		RegisterReadonlyNode(Wui::HashId("viewport.mode"), "text", modeText, modeKey, modeRect);
 
 		Wui::LayoutWidgetTree(m_Root, rect);
 		Wui::WuiPaintContext paint(ctx);
 		m_Root->Paint(paint);
 
 		const Wui::WuiRect sceneRect = m_SceneImage->Rect();
+
+		// D7-1a:相机模式(2D 正交 / 3D 轨道)—— **只读状态角标**(在画面左上角,和 Unreal/Blender
+		// 的视口模式标签同一位置),切换入口在菜单栏 View 菜单:用户 2026-09-21「视图这些放这里
+		// 还是怪怪的,其他引擎通常是在 view 中」→ 视口不再摆"2D/Cam/Overlays"三颗按钮。
+		const bool camera3D = m_Host.IsViewportCamera3D();
+		const std::string cameraText = camera3D
+			? Wui::Tr("viewport.camera.caption_3d", "3D Perspective")
+			: Wui::Tr("viewport.camera.caption_2d", "2D Orthographic");
+		const std::string cameraHint = Wui::Tr("viewport.camera.hint",
+			"Camera mode — switch in the View menu (Camera: 3D Orbit / 2D Ortho)");
+		const float cameraWidth = ctx.MeasureTextWidth(cameraText, 12.0f) + 16.0f;
+		const Wui::WuiRect cameraRect { sceneRect.X + 8.0f, sceneRect.Y + 8.0f, cameraWidth, 20.0f };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, cameraRect, { 0, 0, 0, 0.35f }, 10.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+			{ cameraRect.X + 8.0f, cameraRect.Y + 3.0f, 0, 0 }, theme.Text, 0, 1.0f, cameraText, 12.0f, false });
+		RegisterReadonlyNode(Wui::HashId("viewport.camera.mode"), "text", cameraText,
+			camera3D ? "3d" : "2d", cameraRect, cameraHint);
+		Wui::Tooltip(ctx, cameraRect, cameraHint);
 		const bool hovered = ctx.IsHovered(rect);
 		if (ctx.IsClicked(rect))
 			ctx.SetFocus(Wui::HashId("viewport"));
