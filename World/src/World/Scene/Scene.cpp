@@ -248,6 +248,66 @@ namespace World
 	entt::registry& Scene::GetRegistry() { AssertStructuralWrite(); return m_Registry; }
 	const entt::registry& Scene::GetRegistry() const { AssertOwnerThread(); return m_Registry; }
 
+	// P4-U13b:Prefab 实例注册表的访问器。它们只碰 std::vector 成员,不写 entt 注册表结构,
+	// 所以只做线程归属检查(与 GetWorldSettings 同类);结构写保护仍由 GetRegistry 承担。
+	std::vector<Gameplay::PrefabInstanceRecord>& Scene::PrefabInstances()
+	{
+		AssertOwnerThread();
+		return m_PrefabInstances;
+	}
+
+	const std::vector<Gameplay::PrefabInstanceRecord>& Scene::PrefabInstances() const
+	{
+		AssertOwnerThread();
+		return m_PrefabInstances;
+	}
+
+	Gameplay::PrefabInstanceRecord* Scene::FindPrefabInstance(entt::entity root)
+	{
+		AssertOwnerThread();
+		for (Gameplay::PrefabInstanceRecord& record : m_PrefabInstances)
+			if (record.Root == root)
+				return &record;
+		return nullptr;
+	}
+
+	const Gameplay::PrefabInstanceRecord* Scene::FindPrefabInstance(entt::entity root) const
+	{
+		AssertOwnerThread();
+		for (const Gameplay::PrefabInstanceRecord& record : m_PrefabInstances)
+			if (record.Root == root)
+				return &record;
+		return nullptr;
+	}
+
+	Gameplay::PrefabInstanceRecord& Scene::AddPrefabInstance(const std::string& prefabPath, entt::entity root)
+	{
+		AssertOwnerThread();
+		if (Gameplay::PrefabInstanceRecord* existing = FindPrefabInstance(root))
+		{
+			existing->PrefabPath = prefabPath;
+			return *existing;
+		}
+		Gameplay::PrefabInstanceRecord record;
+		record.PrefabPath = prefabPath;
+		record.Root = root;
+		m_PrefabInstances.push_back(std::move(record));
+		return m_PrefabInstances.back();
+	}
+
+	bool Scene::RemovePrefabInstance(entt::entity root)
+	{
+		AssertOwnerThread();
+		for (auto it = m_PrefabInstances.begin(); it != m_PrefabInstances.end(); ++it)
+		{
+			if (it->Root != root)
+				continue;
+			m_PrefabInstances.erase(it);
+			return true;
+		}
+		return false;
+	}
+
 	bool Scene::IsPendingDestroy(entt::entity entity) const
 	{
 		AssertOwnerThread();
@@ -851,6 +911,30 @@ namespace World
 		{
 			if (!schema || !schema->Storage || !schema->Storage->CopyAll) continue;
 			schema->Storage->CopyAll(static_cast<void*>(&newScene->m_Registry), static_cast<void*>(&other->m_Registry), static_cast<const void*>(&entityMap));
+		}
+		// P4-U13b:prefab 实例注册表跟着场景一起克隆(编辑器 Play 的活动场景就是这份副本),
+		// 句柄按 UUID 映射重定向——不复制的话 Play 期间层级/属性面板会看不到实例与覆盖。
+		newScene->m_PrefabInstances.clear();
+		for (const Gameplay::PrefabInstanceRecord& source : other->m_PrefabInstances)
+		{
+			const auto* sourceIdentity = other->m_Registry.try_get<UUIDComponent>(source.Root);
+			if (!sourceIdentity)
+				continue;
+			const auto rootIt = entityMap.find(sourceIdentity->ID);
+			if (rootIt == entityMap.end())
+				continue;
+			Gameplay::PrefabInstanceRecord& record =
+				newScene->AddPrefabInstance(source.PrefabPath, rootIt->second);
+			for (const auto& [handle, fields] : source.Overrides)
+			{
+				const auto* identity = other->m_Registry.try_get<UUIDComponent>(static_cast<entt::entity>(handle));
+				if (!identity)
+					continue;
+				const auto entityIt = entityMap.find(identity->ID);
+				if (entityIt == entityMap.end())
+					continue;
+				record.Overrides[static_cast<uint32_t>(entityIt->second)] = fields;
+			}
 		}
 	}
 

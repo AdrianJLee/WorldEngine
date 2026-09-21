@@ -5,7 +5,6 @@
 #include "World/Gameplay/Prefab.h"
 
 #include <memory>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace World
@@ -38,9 +37,17 @@ namespace World
 		uint32_t m_PendingDropZone = 1;
 		// W4-2b:从内容浏览器拖来的 .wprefab(相对内容根路径),松开时实例化。
 		std::string m_PendingPrefabFile;
-		// W4-3b:本场景里由拖拽实例化出来的 prefab 实例(实例根句柄 -> 记录)。
-		// 记录里含来源路径与覆盖集合,供 Revert/Apply/Unpack 使用。
-		std::unordered_map<uint32_t, Gameplay::PrefabInstanceRecord> m_PrefabInstances;
+		// P4-U13b:实例破坏性动作的确认模态(Apply 写回资产 / Unpack 断开链接)。
+		// 实例记录本身由 Scene 持有(存档一起走),面板只保留"待确认的动作"这一帧间状态。
+		enum class PrefabConfirmAction { None = 0, Apply, Unpack };
+		PrefabConfirmAction m_PrefabConfirm = PrefabConfirmAction::None;
+		Entity m_PrefabConfirmRoot;
+		std::string m_PrefabConfirmSource;
+		Wui::WuiId m_PrefabConfirmModal = 0;
+		void OpenPrefabConfirm(Wui::WuiContext& ctx, PanelHost& host, PrefabConfirmAction action,
+			Entity root, const std::string& source);
+		void ClosePrefabConfirm(Wui::WuiContext& ctx, PanelHost& host);
+		void DrawPrefabConfirm(Wui::WuiContext& ctx, PanelHost& host);
 		glm::vec2 m_MenuPos {};
 		glm::vec2 m_BlankMenuPos {};
 	};

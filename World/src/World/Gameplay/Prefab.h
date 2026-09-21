@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Gameplay/PrefabTypes.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 
@@ -40,17 +41,7 @@ namespace World::Gameplay
 	WLD_API PrefabInstanceResult InstantiateFromFile(const std::filesystem::path& path,
 		Scene& destination, entt::entity parent = entt::null);
 
-	// W4-3:实例覆盖记录。
-	// 由"改动发生处"登记(属性面板/脚本),而不是靠全量 diff 反推——这样覆盖信息永远与真实编辑一致。
-	struct PrefabInstanceRecord
-	{
-		std::string PrefabPath;                 // 来源 prefab(空 = 非 prefab 实例)
-		entt::entity Root = entt::null;         // 实例子树根
-		// 实体 -> 被覆盖的字段名(如 "TransformComponent.Location");空集合表示该实体无覆盖。
-		std::unordered_map<uint32_t, std::vector<std::string>> Overrides;
-
-		bool IsValid() const { return Root != entt::null; }
-	};
+	// W4-3:实例覆盖记录(类型定义见 PrefabTypes.h —— Scene 也要持有它,故与 Scene.h 解耦)。
 
 	WLD_API void MarkOverride(PrefabInstanceRecord& record, entt::entity entity, const std::string& field);
 	WLD_API bool HasOverride(const PrefabInstanceRecord& record, entt::entity entity);

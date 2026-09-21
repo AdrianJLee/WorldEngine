@@ -5,6 +5,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Core/UUID.h"
+#include "World/Gameplay/PrefabTypes.h"
 #include "World/Schema/SchemaWriter.h"
 
 #include <filesystem>
@@ -24,6 +25,20 @@ namespace World
 		bool IsLeafKind(Schema::Kind kind)
 		{
 			return kind != Schema::Kind::Object && kind != Schema::Kind::Asset && kind != Schema::Kind::None;
+		}
+
+		// P4-U13b:存档里的实体身份一律是 UUIDComponent 的 UUID,不是 entt 句柄
+		// (句柄带注册表状态,跨会话无意义)。句柄无效/没有 UUIDComponent → false。
+		bool TryGetEntityUuid(const entt::registry& registry, entt::entity entity, uint64_t* outUuid)
+		{
+			if (entity == entt::null || !registry.valid(entity))
+				return false;
+			const auto* identity = registry.try_get<UUIDComponent>(entity);
+			if (!identity)
+				return false;
+			if (outUuid)
+				*outUuid = static_cast<uint64_t>(identity->ID);
+			return true;
 		}
 
 		void SerializeNativeScriptFieldValues(YAML::Emitter& out, NativeScriptComponent& script,
@@ -221,6 +236,55 @@ namespace World
 					return false;
 				}
 			}
+
+			// P4-U13b:Prefab 实例注册表(来源路径 + 覆盖字段)→ `Prefabs:` 块。
+			// 只在该块非空时写,空场景/默认场景的 .wd 形态逐字节不变。
+			// Root/Entity 一律写实体 UUID:entt 句柄跨会话无效,加载时按 UUID 反查句柄重建。
+			const std::vector<Gameplay::PrefabInstanceRecord>& prefabs = m_Scene->PrefabInstances();
+			if (!prefabs.empty())
+			{
+				out << YAML::Key << "Prefabs" << YAML::Value << YAML::BeginSeq;
+				for (const Gameplay::PrefabInstanceRecord& record : prefabs)
+				{
+					uint64_t rootUuid = 0;
+					if (!TryGetEntityUuid(m_Scene->m_Registry, record.Root, &rootUuid))
+					{
+						WLD_CORE_WARN("SceneSerializer: dropping prefab instance '{0}' — its root entity is gone",
+							record.PrefabPath);
+						continue;
+					}
+
+					out << YAML::BeginMap;
+					out << YAML::Key << "Path" << YAML::Value << record.PrefabPath;
+					out << YAML::Key << "Root" << YAML::Value << rootUuid;
+					if (!record.Overrides.empty())
+					{
+						out << YAML::Key << "Overrides" << YAML::Value << YAML::BeginSeq;
+						for (const auto& [handle, fields] : record.Overrides)
+						{
+							if (fields.empty())
+								continue;
+							uint64_t entityUuid = 0;
+							if (!TryGetEntityUuid(m_Scene->m_Registry, static_cast<entt::entity>(handle), &entityUuid))
+							{
+								WLD_CORE_WARN("SceneSerializer: dropping an override entry of '{0}' — its entity is gone",
+									record.PrefabPath);
+								continue;
+							}
+							out << YAML::BeginMap;
+							out << YAML::Key << "Entity" << YAML::Value << entityUuid;
+							out << YAML::Key << "Fields" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+							for (const std::string& field : fields)
+								out << field;
+							out << YAML::EndSeq;
+							out << YAML::EndMap;
+						}
+						out << YAML::EndSeq;
+					}
+					out << YAML::EndMap;
+				}
+				out << YAML::EndSeq;
+			}
 		}
 		out << YAML::EndMap;
 
@@ -297,6 +361,8 @@ namespace World
 	{
 		// 每次反序列化都重建"未知组件保留"集合,避免把上一个场景的未知片段带入本次保存。
 		m_Scene->m_UnknownComponentNodes.clear();
+		// P4-U13b:同理,prefab 实例注册表本次读档重建(旧集合不能残留)。
+		m_Scene->m_PrefabInstances.clear();
 
 		std::string yamlData;
 		if (std::filesystem::exists(filepath))
@@ -466,6 +532,65 @@ namespace World
 			parentHierarchy.Children.push_back(child);
 		}
 		Hierarchy::UpdateWorldTransforms(registry);
+
+		// P4-U13b:Prefab 实例注册表。必须等实体全部建完、层级重建之后再做:盘上只有 UUID,
+		// 这里反查句柄重建 record.Root 与 Overrides 的键。UUID 找不到的记录/条目丢弃并警告
+		// (旧引擎不认识该块、或手工编辑过的场景不因此加载失败)。
+		if (const YAML::Node prefabs = data["Prefabs"])
+		{
+			if (!prefabs.IsSequence())
+			{
+				WLD_CORE_WARN("Scene 'Prefabs' must be a sequence in '{0}'; ignored", filepath);
+			}
+			else
+			{
+				std::unordered_map<UUID, entt::entity> handlesByUuid;
+				for (const auto entity : registry.view<UUIDComponent>())
+					handlesByUuid.emplace(registry.get<UUIDComponent>(entity).ID, entity);
+
+				for (const YAML::Node& node : prefabs)
+				{
+					if (!node.IsMap() || !node["Root"])
+					{
+						WLD_CORE_WARN("Scene prefab instance without 'Root' in '{0}'; dropped", filepath);
+						continue;
+					}
+					const uint64_t rootUuid = node["Root"].as<uint64_t>(0);
+					const auto rootHandle = handlesByUuid.find(UUID(rootUuid));
+					if (rootHandle == handlesByUuid.end() || !registry.valid(rootHandle->second))
+					{
+						WLD_CORE_WARN("Scene prefab instance references unknown root UUID {0} in '{1}'; dropped",
+							rootUuid, filepath);
+						continue;
+					}
+
+					Gameplay::PrefabInstanceRecord& record = m_Scene->AddPrefabInstance(
+						node["Path"] ? node["Path"].as<std::string>("") : std::string(), rootHandle->second);
+
+					const YAML::Node overrides = node["Overrides"];
+					if (!overrides || !overrides.IsSequence())
+						continue;
+					for (const YAML::Node& entry : overrides)
+					{
+						if (!entry.IsMap() || !entry["Entity"] || !entry["Fields"])
+							continue;
+						const uint64_t entityUuid = entry["Entity"].as<uint64_t>(0);
+						const auto entityHandle = handlesByUuid.find(UUID(entityUuid));
+						if (entityHandle == handlesByUuid.end() || !registry.valid(entityHandle->second))
+						{
+							WLD_CORE_WARN("Scene prefab override references unknown entity UUID {0} in '{1}'; dropped",
+								entityUuid, filepath);
+							continue;
+						}
+						std::vector<std::string> fields;
+						for (const YAML::Node& field : entry["Fields"])
+							fields.push_back(field.as<std::string>());
+						if (!fields.empty())
+							record.Overrides[static_cast<uint32_t>(entityHandle->second)] = std::move(fields);
+					}
+				}
+			}
+		}
 
 		return true;
 	}

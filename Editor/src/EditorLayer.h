@@ -46,6 +46,14 @@ namespace World
 		const std::string& PrefabEditLogical() const { return m_PrefabEditLogical; }
 		// 实例化到当前场景(世界原点);成功时选中实例根并标脏。
 		bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr);
+		// ---- P4-U13b:prefab 实例(属性面板实例条 + 层级右键菜单共用同一条实现)----
+		// 实体属于哪个实例(根或子树成员)→ 来源路径 / 覆盖计数 / 实例根;不属于实例时返回 false。
+		bool PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount, Entity* root);
+		// 三个实例动作:Revert 读回资产、Apply 写回资产并清覆盖、Unpack 断开链接。
+		// 成功后标脏;失败把可读原因写进 message(面板/菜单直接显示)。
+		bool PrefabInstanceRevert(Entity root, std::string* message = nullptr);
+		bool PrefabInstanceApply(Entity root, std::string* message = nullptr);
+		bool PrefabInstanceUnpack(Entity root, std::string* message = nullptr);
 		void StartCookingAction();
 		void GenerateLuaStubsAction();
 		void CloseAction();

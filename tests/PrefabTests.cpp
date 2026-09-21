@@ -1,12 +1,16 @@
 // P2a W4:Prefab 子树实例化(深拷贝 + UUID 重发 + 层级重建 + 挂到目标父节点)。
+#include "World/Core/Core.h"
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/Prefab.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/Scene.h"
+#include "World/Scene/SceneSerializer.h"
 
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -20,6 +24,20 @@ namespace
 			throw std::runtime_error(std::string("line ") + std::to_string(line) + ": " + expression);
 	}
 #define CHECK(expression) Check(static_cast<bool>(expression), #expression, __LINE__)
+
+	std::string ReadTextFile(const std::filesystem::path& path)
+	{
+		std::ifstream stream(path, std::ios::binary);
+		std::stringstream buffer;
+		buffer << stream.rdbuf();
+		return buffer.str();
+	}
+
+	void WriteTextFile(const std::filesystem::path& path, const std::string& text)
+	{
+		std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+		stream << text;
+	}
 }
 
 int main()
@@ -217,6 +235,136 @@ int main()
 			PrefabInstanceRecord empty;
 			CHECK(!UnpackInstance(empty));
 			std::filesystem::remove(prefabPath);
+		}
+		// 9. P4-U13b:Prefab 实例注册表随场景存档。盘上只存实体 UUID,读回按 UUID 重建句柄。
+		{
+			const std::filesystem::path prefabPath =
+				std::filesystem::temp_directory_path() / "worldengine-prefab-persist.wprefab";
+			const std::filesystem::path scenePath =
+				std::filesystem::temp_directory_path() / "worldengine-prefab-persist.wd";
+			const std::filesystem::path emptyScenePath =
+				std::filesystem::temp_directory_path() / "worldengine-prefab-empty.wd";
+			const std::filesystem::path orphanScenePath =
+				std::filesystem::temp_directory_path() / "worldengine-prefab-orphan.wd";
+
+			std::string error;
+			CHECK(SaveFromScene(source, Entity(&source, root), prefabPath, &error));
+
+			// 场景 A:实例化 → 登记实例记录(来源路径 + 一条覆盖)。
+			auto sceneA = CreateRef<Scene>(context);
+			const PrefabInstanceResult instance = InstantiateFromFile(prefabPath, *sceneA);
+			CHECK(instance.IsValid());
+			const entt::entity instanceRoot = static_cast<entt::entity>(instance.Root);
+			const UUID instanceUuid = sceneA->GetRegistry().get<UUIDComponent>(instanceRoot).ID;
+
+			PrefabInstanceRecord& record = sceneA->AddPrefabInstance("prefabs/X.wprefab", instanceRoot);
+			CHECK(record.IsValid());
+			CHECK(record.Root == instanceRoot);
+			CHECK(sceneA->PrefabInstances().size() == 1);
+			CHECK(sceneA->FindPrefabInstance(instanceRoot) == &record);
+			CHECK(sceneA->FindPrefabInstance(entt::null) == nullptr);
+			MarkOverride(record, instanceRoot, "TransformComponent.Location");
+			CHECK(GetOverrideCount(record) == 1);
+
+			// 同 root 再登记 = 更新 Path,不重复插入,既有覆盖保留。
+			PrefabInstanceRecord& updated = sceneA->AddPrefabInstance("prefabs/X.wprefab", instanceRoot);
+			CHECK(sceneA->PrefabInstances().size() == 1);
+			CHECK(&updated == &record);
+			CHECK(GetOverrideCount(updated) == 1);
+
+			// A → .wd:Prefabs 块写来源路径与实体 UUID(而不是 entt 句柄)。
+			{
+				SceneSerializer serializer(sceneA);
+				CHECK(serializer.Serialize(scenePath.string()));
+			}
+			{
+				const std::string text = ReadTextFile(scenePath);
+				CHECK(text.find("Prefabs:") != std::string::npos);
+				CHECK(text.find("prefabs/X.wprefab") != std::string::npos);
+				CHECK(text.find("TransformComponent.Location") != std::string::npos);
+				CHECK(text.find("Fields: [TransformComponent.Location]") != std::string::npos);
+				CHECK(text.find(std::to_string(static_cast<uint64_t>(instanceUuid))) != std::string::npos);
+			}
+
+			// 读回场景 B:记录命中,覆盖计数/字段保留,根句柄指向新场景实体(UUID 与 A 一致)。
+			auto sceneB = CreateRef<Scene>(context);
+			{
+				SceneSerializer serializer(sceneB);
+				CHECK(serializer.Deserialize(scenePath.string()));
+				CHECK(serializer.GetLastError().empty());
+			}
+			CHECK(sceneB->PrefabInstances().size() == 1);
+			const PrefabInstanceRecord& restored = sceneB->PrefabInstances()[0];
+			CHECK(restored.IsValid());
+			CHECK(restored.PrefabPath == "prefabs/X.wprefab");
+			CHECK(sceneB->GetRegistry().valid(restored.Root));
+			CHECK(sceneB->FindPrefabInstance(restored.Root) == &restored);
+			CHECK(static_cast<uint64_t>(sceneB->GetRegistry().get<UUIDComponent>(restored.Root).ID) ==
+				static_cast<uint64_t>(instanceUuid));
+			CHECK(GetOverrideCount(restored) == 1);
+			CHECK(HasOverride(restored, restored.Root));
+			CHECK(CanRevert(restored, *sceneB));
+			const auto restoredFields = restored.Overrides.find(static_cast<uint32_t>(restored.Root));
+			CHECK(restoredFields != restored.Overrides.end());
+			CHECK(restoredFields->second.size() == 1);
+			CHECK(restoredFields->second[0] == "TransformComponent.Location");
+
+			// 空注册表:Prefabs 块不写(默认 .wd 形态不变)。
+			sceneB->PrefabInstances().clear();
+			{
+				SceneSerializer serializer(sceneB);
+				CHECK(serializer.Serialize(emptyScenePath.string()));
+			}
+			CHECK(ReadTextFile(emptyScenePath).find("Prefabs:") == std::string::npos);
+
+			// A 侧删除:命中删除返回 true,重复删除返回 false。
+			CHECK(sceneA->RemovePrefabInstance(instanceRoot));
+			CHECK(sceneA->FindPrefabInstance(instanceRoot) == nullptr);
+			CHECK(!sceneA->RemovePrefabInstance(instanceRoot));
+
+			// 负例:Prefabs 里 UUID 不存在 → 加载成功但记录/条目被丢弃(不失败、不崩)。
+			WriteTextFile(orphanScenePath,
+				"FormatVersion: 2\n"
+				"Scene: Untitled\n"
+				"Entities:\n"
+				"  - World::UUIDComponent:\n"
+				"      ID:\n"
+				"        m_UUID: 111\n"
+				"    World::TagComponent:\n"
+				"      Tag: Ghost Host\n"
+				"Prefabs:\n"
+				"  - Path: prefabs/Host.wprefab\n"
+				"    Root: 111\n"
+				"    Overrides:\n"
+				"      - Entity: 222\n"
+				"        Fields: [TransformComponent.Location]\n"
+				"      - Entity: 111\n"
+				"        Fields: [TagComponent.Tag]\n"
+				"  - Path: prefabs/Orphan.wprefab\n"
+				"    Root: 333\n"
+				"    Overrides:\n"
+				"      - Entity: 333\n"
+				"        Fields: [TransformComponent.Location]\n");
+			auto orphanScene = CreateRef<Scene>(context);
+			{
+				SceneSerializer serializer(orphanScene);
+				CHECK(serializer.Deserialize(orphanScenePath.string()));
+				CHECK(serializer.GetLastError().empty());
+			}
+			CHECK(orphanScene->GetRegistry().view<UUIDComponent>().size() == 1);
+			CHECK(orphanScene->PrefabInstances().size() == 1);   // Orphan 记录被丢弃
+			const PrefabInstanceRecord& hostRecord = orphanScene->PrefabInstances()[0];
+			CHECK(hostRecord.PrefabPath == "prefabs/Host.wprefab");
+			CHECK(CanRevert(hostRecord, *orphanScene));
+			CHECK(GetOverrideCount(hostRecord) == 1);            // 只有 UUID 111 的条目命中
+			CHECK(hostRecord.Overrides.size() == 1);
+			CHECK(hostRecord.Overrides.begin()->first == static_cast<uint32_t>(hostRecord.Root));
+			CHECK(hostRecord.Overrides.begin()->second[0] == "TagComponent.Tag");
+
+			std::filesystem::remove(prefabPath);
+			std::filesystem::remove(scenePath);
+			std::filesystem::remove(emptyScenePath);
+			std::filesystem::remove(orphanScenePath);
 		}
 		std::printf("World.Prefab: all checks passed\n");
 		return 0;

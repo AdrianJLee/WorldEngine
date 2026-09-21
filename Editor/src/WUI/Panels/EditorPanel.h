@@ -66,6 +66,39 @@ namespace World
 			if (message) *message = "prefab instantiate is not wired to a host";
 			return false;
 		}
+		// ---- P4-U13b:prefab 实例(层级徽标 + 属性面板实例条共用)----
+		// 选中实体属于哪个实例(实例根,或实例子树内的成员都算)→ 来源路径 / 覆盖计数 / 实例根。
+		// 返回 false = 该实体不属于任何实例(面板据此不画实例条)。
+		virtual bool PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,
+			Entity* root)
+		{
+			(void)entity;
+			(void)sourcePath;
+			(void)overrideCount;
+			(void)root;
+			return false;
+		}
+		// 回滚到资产:重新读来源 .wprefab,把实例子树的组件值写回(覆盖记录随之清空)。
+		virtual bool PrefabInstanceRevert(Entity root, std::string* message = nullptr)
+		{
+			(void)root;
+			if (message) *message = "prefab revert is not wired to a host";
+			return false;
+		}
+		// 应用到资产:把实例子树写回来源 .wprefab(会覆盖资产),并清空覆盖记录。
+		virtual bool PrefabInstanceApply(Entity root, std::string* message = nullptr)
+		{
+			(void)root;
+			if (message) *message = "prefab apply is not wired to a host";
+			return false;
+		}
+		// 断开链接(Unpack):实体保持原样但不再是实例(之后不再跟随资产、也不再登记覆盖)。
+		virtual bool PrefabInstanceUnpack(Entity root, std::string* message = nullptr)
+		{
+			(void)root;
+			if (message) *message = "prefab unpack is not wired to a host";
+			return false;
+		}
 		// 重载一个场景脚本实例。实现必须复用 EditorLayer::ReloadLuaScriptComponent ——
 		// 与属性面板 Reload 按钮、帧边界轮询、AI script.reload 同一条入口,面板不自己编排重载。
 		virtual bool ScriptsReloadInstance(entt::entity handle, std::string* message = nullptr)

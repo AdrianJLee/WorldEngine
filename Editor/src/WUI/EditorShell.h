@@ -146,6 +146,12 @@ namespace World
 		// P4-U13:prefab(内容浏览器双击 = 打开编辑;右键 = 实例化到当前场景)。
 		void OpenPrefabEditor(const std::string& logicalPath) override;
 		bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr) override;
+		// P4-U13b:prefab 实例(属性面板实例条 + 层级右键菜单;实现全在 EditorLayer)。
+		bool PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,
+			Entity* root) override;
+		bool PrefabInstanceRevert(Entity root, std::string* message = nullptr) override;
+		bool PrefabInstanceApply(Entity root, std::string* message = nullptr) override;
+		bool PrefabInstanceUnpack(Entity root, std::string* message = nullptr) override;
 		// P4-U13:prefab 编辑会话(横幅按钮 / AI 通道共用)。
 		bool IsEditingPrefabDocument() const;
 		bool SavePrefabDocument(std::string* message = nullptr);

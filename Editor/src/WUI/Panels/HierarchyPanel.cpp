@@ -7,11 +7,14 @@
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Gameplay/Prefab.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/Widgets/WuiModal.h"
 
 #include <algorithm>
+#include <array>
 #include <functional>
 #include <unordered_set>
 
@@ -19,6 +22,10 @@ namespace World
 {
 	namespace
 	{
+		// P4-U13b:实例行左侧的标记列宽度。根行画 accent 徽标、子树内的其它行画淡色点;
+		// 行文本按 Indent 偏移,所以徽标列不会压到"折叠标记 + 名字"(不需要往文本里塞空格)。
+		constexpr float kPrefabMarkerSlot = 20.0f;
+
 		// 解析内容根(开发布局为 Game/assets,打包布局由清单决定);失败时返回空路径。
 		std::filesystem::path ResolveContentRoot()
 		{
@@ -30,6 +37,60 @@ namespace World
 			if (!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
 				return {};
 			return manifest.ResolveContentRoot(manifestPath);
+		}
+
+		// 面板内无障碍登记(与 WuiWidgets.cpp 的 RegisterAccessNode 同一格式):
+		// 徽标/菜单说明这类"看得见但读不到"的信息统一进树。
+		void RegisterAccessNode(Wui::WuiId id, const char* kind, const Wui::WuiRect& rect,
+			const std::string& label, const std::string& value, bool enabled = true,
+			const std::string& tooltip = std::string(), bool interactive = false)
+		{
+			if (id == 0)
+				return;
+			Wui::WuiAccessNode node;
+			node.Id = id;
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = kind;
+			node.Label = label;
+			node.Value = value;
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = interactive;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
+		// 实例行的悬停说明:来源(逻辑路径)+ 覆盖计数;成员行额外说清它属于哪棵子树。
+		std::string PrefabRowTooltip(const Gameplay::PrefabInstanceRecord& record, bool isRoot)
+		{
+			const std::string count = std::to_string(Gameplay::GetOverrideCount(record));
+			return std::string(isRoot
+					? Wui::Tr("panel.hierarchy.prefab.tooltip", "Prefab instance: ")
+					: Wui::Tr("panel.hierarchy.prefab.member.tooltip", "Prefab instance subtree: "))
+				+ record.PrefabPath
+				+ " (" + count + ") "
+				+ Wui::Tr("panel.hierarchy.prefab.overrides", "override(s)");
+		}
+
+		// 沿父链找实例记录(成员行画点、菜单动作都用它;深度上限防非法层级死循环)。
+		const Gameplay::PrefabInstanceRecord* OwningRecord(const Scene& scene, entt::entity entity)
+		{
+			constexpr int kMaxAncestorDepth = 64;
+			entt::entity current = entity;
+			for (int depth = 0; depth < kMaxAncestorDepth && current != entt::null; ++depth)
+			{
+				if (const auto* record = scene.FindPrefabInstance(current))
+					return record;
+				const entt::registry& registry = scene.GetRegistry();
+				if (!registry.valid(current))
+					break;
+				const auto* hierarchy = registry.try_get<HierarchyComponent>(current);
+				if (!hierarchy || hierarchy->Parent == entt::null || !registry.valid(hierarchy->Parent))
+					break;
+				current = hierarchy->Parent;
+			}
+			return nullptr;
 		}
 	}
 
@@ -45,6 +106,10 @@ namespace World
 
 		std::vector<Entity> entities;
 		std::vector<uint32_t> depths;
+		// P4-U13b:每行的实例角色(0 = 普通实体,1 = 实例根,2 = 子树成员)与悬停说明。
+		// 每帧重算:覆盖计数会变,而它改了不一定要重建行。
+		std::vector<uint8_t> prefabRoles;
+		std::vector<std::string> prefabTips;
 		// 只读遍历必须走 const registry:运行中的场景拒绝非 const 访问(结构写保护)。
 		const entt::registry& registry = static_cast<const Scene*>(scene.get())->GetRegistry();
 
@@ -67,13 +132,20 @@ namespace World
 		std::sort(roots.begin(), roots.end(), byLabel);
 
 		std::unordered_set<uint32_t> visited;
-		std::function<void(entt::entity, uint32_t)> visit = [&](entt::entity handle, uint32_t depth)
+		// enclosingRecord = 最近的祖先实例根记录(根行自己就是实例根时用它自己那条)。
+		std::function<void(entt::entity, uint32_t, const Gameplay::PrefabInstanceRecord*)> visit =
+			[&](entt::entity handle, uint32_t depth, const Gameplay::PrefabInstanceRecord* enclosingRecord)
 		{
 			constexpr uint32_t kMaxDisplayDepth = 64;
 			if (depth > kMaxDisplayDepth || !visited.insert(static_cast<uint32_t>(handle)).second)
 				return;
 			entities.push_back(Entity(scene.get(), handle));
 			depths.push_back(depth);
+			const Gameplay::PrefabInstanceRecord* ownRecord = scene->FindPrefabInstance(handle);
+			const Gameplay::PrefabInstanceRecord* activeRecord = ownRecord ? ownRecord : enclosingRecord;
+			prefabRoles.push_back(activeRecord ? (ownRecord ? 1 : 2) : 0);
+			prefabTips.push_back(activeRecord ? PrefabRowTooltip(*activeRecord, ownRecord != nullptr)
+				: std::string());
 
 			const auto* hierarchy = registry.try_get<HierarchyComponent>(handle);
 			if (!hierarchy)
@@ -84,21 +156,26 @@ namespace World
 			// 子节点顺序即 HierarchyComponent::Children 的顺序(同级重排会改它),不再按名字排序。
 			for (const entt::entity child : hierarchy->Children)
 				if (registry.valid(child))
-					visit(child, depth + 1);
+					visit(child, depth + 1, activeRecord);
 		};
 		for (const entt::entity root : roots)
-			visit(root, 0);
+			visit(root, 0, nullptr);
 		for (auto handle : registry.view<UUIDComponent>())
 			if (visited.find(static_cast<uint32_t>(handle)) == visited.end())
 			{
 				entities.push_back(Entity(scene.get(), handle));
 				depths.push_back(0);
+				const Gameplay::PrefabInstanceRecord* record = scene->FindPrefabInstance(handle);
+				prefabRoles.push_back(record ? 1 : 0);
+				prefabTips.push_back(record ? PrefabRowTooltip(*record, true) : std::string());
 			}
 
 		std::string orderKey;
 		for (size_t i = 0; i < entities.size(); ++i)
 		{
-			orderKey += std::to_string(depths[i]) + ":" + labelOf(entities[i]) + '\n';
+			// 实例角色进排序键:实例被断开/新建(实体集合没变)时也要重建行(缩进列会变)。
+			orderKey += std::to_string(depths[i]) + ":" + std::to_string(prefabRoles[i]) + ":"
+				+ labelOf(entities[i]) + '\n';
 		}
 
 		if (!m_Root)
@@ -135,7 +212,9 @@ namespace World
 				auto row = std::make_shared<Wui::WuiListRow>();
 				const size_t index = m_Rows.size();
 				const uint32_t depth = index < depths.size() ? depths[index] : 0;
-				row->Indent = static_cast<float>(depth) * 14.0f;
+				// P4-U13b:实例行(根 + 子树成员)整体让出一列画徽标/成员点 —— 普通行不变。
+				const bool prefabRow = index < prefabRoles.size() && prefabRoles[index] != 0;
+				row->Indent = static_cast<float>(depth) * 14.0f + (prefabRow ? kPrefabMarkerSlot : 0.0f);
 				// 折叠标记直接放进文本(避免额外的行内热区绘制):有子节点显示 +/-。
 				const auto* hierarchy = registry.try_get<HierarchyComponent>(entity);
 				const bool hasChildren = hierarchy && !hierarchy->Children.empty();
@@ -147,8 +226,12 @@ namespace World
 				row->SetId(Wui::HashId(("hierarchy.row." + std::to_string(
 					static_cast<uint32_t>(static_cast<entt::entity>(entity)))).c_str()));
 				row->AccessValue = std::to_string(static_cast<uint32_t>(static_cast<entt::entity>(entity)));
-				row->AccessTooltip = Wui::Tr("panel.hierarchy.row.tooltip",
+				// 实例行的悬停说明必须写清"来自哪个 prefab、覆盖了几处":徽标只是视觉提示,
+				// 说不清来源的话用户仍然要猜。
+				const std::string selectionHint = Wui::Tr("panel.hierarchy.row.tooltip",
 					"Click to select this entity (shows in the Properties panel)");
+				row->AccessTooltip = prefabRow && index < prefabTips.size() && !prefabTips[index].empty()
+					? prefabTips[index] + " — " + selectionHint : selectionHint;
 				row->OnClick = [&host, entity]
 				{
 					if (std::getenv("WLD_TRACE_UI"))
@@ -174,11 +257,50 @@ namespace World
 			for (size_t i = 0; i < m_Rows.size(); ++i)
 				m_Rows[i]->Selected = host.GetSelectedEntity() == m_RowEntities[i];
 		}
+		// 实例行的无障碍悬停说明每帧刷新(覆盖计数会变,而它不一定触发行重建)。
+		for (size_t i = 0; i < m_Rows.size() && i < prefabTips.size(); ++i)
+			if (!prefabTips[i].empty())
+				m_Rows[i]->AccessTooltip = prefabTips[i] + " — " + Wui::Tr("panel.hierarchy.row.tooltip",
+					"Click to select this entity (shows in the Properties panel)");
 		m_Scroll->ContentHeight = entities.size() * 22.0f + 8.0f;
 
 		Wui::LayoutWidgetTree(m_Root, { rect.X + 4, rect.Y + 4, rect.W - 8, rect.H - 8 });
 		Wui::WuiPaintContext paint(ctx);
 		m_Root->Paint(paint);
+
+		// ---- P4-U13b:实例标记列(根行 = accent 徽标,实例子树内的其它行 = 淡色点)----
+		// 画在行文本之前留出的标记列里(见 kPrefabMarkerSlot),不遮挡折叠标记与实体名。
+		for (size_t i = 0; i < m_Rows.size() && i < prefabRoles.size(); ++i)
+		{
+			if (prefabRoles[i] == 0 || !m_Rows[i])
+				continue;
+			const Wui::WuiRect rowRect = m_Rows[i]->Rect();
+			const float slotX = rowRect.X + 6.0f + (m_Rows[i]->Indent - kPrefabMarkerSlot);
+			const std::string tip = i < prefabTips.size() ? prefabTips[i] : std::string();
+			const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(m_RowEntities[i]));
+			if (prefabRoles[i] == 1)
+			{
+				const Wui::WuiRect badge { slotX, rowRect.Y + 2.0f, 16.0f, 16.0f };
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, badge, theme.Accent, badge.H * 0.5f });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ badge.X + 3.0f, badge.Y + 2.0f, 0.0f, 0.0f },
+					Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, 0.0f, 1.0f,
+					Wui::Tr("panel.hierarchy.prefab.badge", "预"), 11.0f, true });
+				RegisterAccessNode(Wui::HashId(("hierarchy.prefab.badge." + std::to_string(handle)).c_str()),
+					"prefab-badge", badge,
+					Wui::Tr("panel.hierarchy.prefab.badge.label", "Prefab instance"), tip, true, tip, false);
+			}
+			else
+			{
+				// 淡色点:只表达"这一行属于某棵实例子树",不抢行文本的注意力。
+				const Wui::WuiRect dot { slotX + 5.5f, rowRect.Y + rowRect.H * 0.5f - 2.5f, 5.0f, 5.0f };
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, dot,
+					Wui::WuiColor { theme.TextMuted.R, theme.TextMuted.G, theme.TextMuted.B, 0.55f },
+					dot.H * 0.5f });
+			}
+			if (!tip.empty())
+				Wui::Tooltip(ctx, rowRect, tip);
+		}
 
 		// ---- U2d:场景里没有任何实体 → 统一空状态 ----
 		// 只替换"列表内容"的表达;拖拽设父/拖入 .wprefab/空白处右键等既有入口全部保留在下面。
@@ -323,15 +445,14 @@ namespace World
 				Gameplay::InstantiateFromFile(prefabPath, *scene, parent);
 			if (instance.IsValid())
 			{
-				// W4-3b:登记实例记录,供后续 Revert/Apply/Unpack 使用。
-				Gameplay::PrefabInstanceRecord record;
-				record.PrefabPath = prefabPath.string();
-				record.Root = static_cast<entt::entity>(instance.Root);
-				m_PrefabInstances[static_cast<uint32_t>(record.Root)] = record;
+				// P4-U13b:实例记录交给 Scene 持有(随 .wd 存档一起走,重开场景不再丢链接)。
+				// 记录里存**逻辑路径**(内容浏览器载荷原本就是相对内容根的路径):存档可移植,
+				// Revert/Apply 交给引擎的路径解析;只有"这一刻的实例化"才需要解析后的磁盘路径。
+				scene->AddPrefabInstance(m_PendingPrefabFile, static_cast<entt::entity>(instance.Root));
 				host.SetSelectedEntity(instance.Root);
 				host.MarkDocumentDirty();
 				WLD_CORE_INFO("Prefab '{0}' instantiated from hierarchy drop ({1} entities)",
-					prefabPath.generic_string(), instance.EntityCount);
+					m_PendingPrefabFile, instance.EntityCount);
 			}
 			else
 			{
@@ -407,17 +528,31 @@ namespace World
 		if (ctx.IsPopupOpen(popup) && m_Context.IsValid())
 		{
 			// 右键菜单走组件(ContextMenu):位置钉住 + 外部点击/Esc 关闭统一由组件处理。
+			// P4-U13b:实例三个动作常驻在属性面板实例条里,但右键菜单保留老入口 ——
+			// 不再"不满足 CanRevert 就整块消失",而是灰态 + 可读原因(用户看得出为什么不可用)。
+			const entt::entity contextHandle = static_cast<entt::entity>(m_Context);
+			const Gameplay::PrefabInstanceRecord* contextRecord = OwningRecord(*scene, contextHandle);
+			// 菜单高度 = 条目数 × 22 + 8:实例子树多出"来源说明 + 3 个动作"四行,
+			// 旧实现把这几行画在声明高度之外(面板底图盖不住)。
+			const size_t itemCount = 5u + (contextRecord ? 4u : 0u);
 			Wui::WuiRect panel;
-			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 190.0f, 6, &panel, theme))
+			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 190.0f, itemCount, &panel, theme))
 			{
+				float itemY = panel.Y + 4.0f;
+				const auto nextItem = [&itemY, &panel]()
+				{
+					const Wui::WuiRect item { panel.X + 4.0f, itemY, panel.W - 8.0f, 22.0f };
+					itemY += 22.0f;
+					return item;
+				};
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.duplicate"),
-					{ panel.X + 4, panel.Y + 4, panel.W - 8, 22 }, "Duplicate", theme))
+					nextItem(), "Duplicate", theme))
 				{
 					host.DuplicateSelectedEntity();
 					ctx.CloseAllPopups();
 				}
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.delete"),
-					{ panel.X + 4, panel.Y + 26, panel.W - 8, 22 }, "Delete", theme))
+					nextItem(), "Delete", theme))
 				{
 					Entity::DestroyEntity(scene.get(), m_Context);
 					host.MarkDocumentDirty();
@@ -429,7 +564,7 @@ namespace World
 				const bool canParent = selected.IsValid() && selected.GetScene() == scene.get() &&
 					static_cast<entt::entity>(selected) != static_cast<entt::entity>(m_Context);
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.setparent"),
-					{ panel.X + 4, panel.Y + 48, panel.W - 8, 22 },
+					nextItem(),
 					canParent ? "Set Parent (Selected)" : "Set Parent (select another first)", theme))
 				{
 					if (canParent)
@@ -448,7 +583,7 @@ namespace World
 					ctx.CloseAllPopups();
 				}
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.unparent"),
-					{ panel.X + 4, panel.Y + 70, panel.W - 8, 22 }, "Unparent", theme))
+					nextItem(), "Unparent", theme))
 				{
 					const entt::entity child = m_Context;
 					scene->DeferStructuralChange([child](Scene& s) { Hierarchy::ClearParent(s.GetRegistry(), child); });
@@ -458,7 +593,7 @@ namespace World
 				// W4-2c:把选中实体的子树导出为 .wprefab(落在内容根 prefabs/ 下)。
 				// 说明:首版不做文件对话框,固定目录 + 以 Tag 命名,便于立刻验证拖拽实例化链路。
 				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.exportprefab"),
-					{ panel.X + 4, panel.Y + 92, panel.W - 8, 22 }, "Export as Prefab (.wprefab)", theme))
+					nextItem(), "Export as Prefab (.wprefab)", theme))
 				{
 					const std::filesystem::path contentRoot = ResolveContentRoot();
 					if (contentRoot.empty())
@@ -484,47 +619,72 @@ namespace World
 					}
 					ctx.CloseAllPopups();
 				}
-				// W4-3b:prefab 实例的三个入口(仅当该实体确实是由拖拽实例化出来的实例时显示)。
+				// P4-U13b:实例行 —— 来源说明 + 三个动作(记录由 Scene 持有,不再有面板私有表)。
+				if (contextRecord)
 				{
-					const uint32_t contextHandle = static_cast<uint32_t>(static_cast<entt::entity>(m_Context));
-					const auto recordIt = m_PrefabInstances.find(contextHandle);
-					if (recordIt != m_PrefabInstances.end() &&
-						Gameplay::CanRevert(recordIt->second, *scene))
+					const Wui::WuiRect infoItem = nextItem();
+					const std::string source = std::filesystem::path(contextRecord->PrefabPath).filename().string();
+					const std::string infoText = Wui::Tr("panel.hierarchy.prefab.menu.source", "Prefab instance: ")
+						+ (source.empty() ? Wui::Tr("panel.hierarchy.prefab.menu.nosource", "(no source)") : source)
+						+ " · " + std::to_string(Gameplay::GetOverrideCount(*contextRecord)) + " "
+						+ Wui::Tr("panel.hierarchy.prefab.overrides", "override(s)");
+					Wui::Label(ctx, { infoItem.X + 8.0f, infoItem.Y + 3.0f },
+						infoText, theme.TextMuted, 12.0f);
+					RegisterAccessNode(Wui::HashId("hierarchy.prefab.menu.source"), "text", infoItem,
+						infoText, std::string(), false, infoText, false);
+
+					// 实例动作作用在**整棵子树**上:右键子节点也按它所属的实例根处理。
+					const Entity instanceRoot(scene.get(), contextRecord->Root);
+					const bool sourceMissing = contextRecord->PrefabPath.empty();
+					const bool canRevert = !sourceMissing && Gameplay::CanRevert(*contextRecord, *scene);
+					const std::string revertHint = canRevert
+						? Wui::Tr("panel.hierarchy.prefab.revert.tooltip",
+							"Discard overrides and restore this subtree from the prefab asset")
+						: Wui::Tr("panel.hierarchy.prefab.revert.blocked",
+							"Unavailable: the source asset path is missing or the instance root is gone");
+					const Wui::WuiRect revertItem = nextItem();
+					if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.prefabrevert"), revertItem,
+						canRevert ? Wui::Tr("panel.hierarchy.prefab.revert", "Revert to Asset")
+							: Wui::Tr("panel.hierarchy.prefab.revert", "Revert to Asset") + " — "
+								+ Wui::Tr("panel.hierarchy.prefab.blocked_short", "unavailable"),
+						theme, canRevert))
 					{
-						if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.prefabrevert"),
-							{ panel.X + 4, panel.Y + 114, panel.W - 8, 22 }, "Revert Prefab", theme))
-						{
-							if (Gameplay::RevertInstance(recordIt->second, *scene))
-							{
-								host.MarkDocumentDirty();
-								WLD_CORE_INFO("Prefab instance reverted from '{0}'", recordIt->second.PrefabPath);
-							}
-							ctx.CloseAllPopups();
-						}
-						if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.prefabapply"),
-							{ panel.X + 4, panel.Y + 136, panel.W - 8, 22 }, "Apply to Prefab", theme))
-						{
-							std::string applyError;
-							if (Gameplay::SaveFromScene(*scene, m_Context,
-								recordIt->second.PrefabPath, &applyError))
-							{
-								Gameplay::ClearOverrides(recordIt->second);
-								WLD_CORE_INFO("Prefab asset updated: {0}", recordIt->second.PrefabPath);
-							}
-							else
-							{
-								WLD_CORE_WARN("Apply to Prefab failed: {0}", applyError);
-							}
-							ctx.CloseAllPopups();
-						}
-						if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.prefabunpack"),
-							{ panel.X + 4, panel.Y + 158, panel.W - 8, 22 }, "Unpack Prefab", theme))
-						{
-							if (Gameplay::UnpackInstance(recordIt->second))
-								m_PrefabInstances.erase(recordIt);
-							ctx.CloseAllPopups();
-						}
+						std::string message;
+						if (!host.PrefabInstanceRevert(instanceRoot, &message))
+							host.Notify(message);
+						ctx.CloseAllPopups();
 					}
+					else if (!canRevert && ctx.IsHovered(revertItem))
+						ctx.SetTooltip(revertHint);
+
+					const std::string applyHint = sourceMissing
+						? Wui::Tr("panel.hierarchy.prefab.apply.blocked",
+							"Unavailable: the instance has no source asset path")
+						: Wui::Tr("panel.hierarchy.prefab.apply.tooltip",
+							"Write this subtree back to the prefab asset (overwrites the asset)");
+					const Wui::WuiRect applyItem = nextItem();
+					if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.prefabapply"), applyItem,
+						Wui::Tr("panel.hierarchy.prefab.apply", "Apply to Asset"), theme, !sourceMissing))
+					{
+						OpenPrefabConfirm(ctx, host, PrefabConfirmAction::Apply, instanceRoot,
+							contextRecord->PrefabPath);
+						ctx.CloseAllPopups();
+					}
+					else if (sourceMissing && ctx.IsHovered(applyItem))
+						ctx.SetTooltip(applyHint);
+
+					const Wui::WuiRect unpackItem = nextItem();
+					if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.prefabunpack"), unpackItem,
+						Wui::Tr("panel.hierarchy.prefab.unpack", "Unpack (break link)"), theme))
+					{
+						OpenPrefabConfirm(ctx, host, PrefabConfirmAction::Unpack, instanceRoot,
+							contextRecord->PrefabPath);
+						ctx.CloseAllPopups();
+					}
+					else if (ctx.IsHovered(unpackItem))
+						ctx.SetTooltip(Wui::Tr("panel.hierarchy.prefab.unpack.tooltip",
+							"Turn this subtree into plain entities: it no longer follows the asset "
+							"(existing values stay)"));
 				}
 				if (ctx.IsKeyPressed(KeyCodes::Escape))
 					ctx.ClosePopup(popup);
@@ -600,6 +760,106 @@ namespace World
 				ctx.ClosePopup(blankPopup);
 			ctx.PopOverlay();
 		}
+
+		// ---- P4-U13b:实例破坏性动作的确认模态(与属性面板"移除组件"同一套模态通道)----
+		if (m_PrefabConfirm != PrefabConfirmAction::None)
+			DrawPrefabConfirm(ctx, host);
+	}
+
+	void HierarchyPanel::OpenPrefabConfirm(Wui::WuiContext& ctx, PanelHost& host,
+		PrefabConfirmAction action, Entity root, const std::string& source)
+	{
+		m_PrefabConfirm = action;
+		m_PrefabConfirmRoot = root;
+		m_PrefabConfirmSource = source;
+		m_PrefabConfirmModal = Wui::HashId(action == PrefabConfirmAction::Apply
+			? "hierarchy.prefab.apply.modal" : "hierarchy.prefab.unpack.modal");
+		ctx.SetModal(m_PrefabConfirmModal);
+		// 面板级模态:宿主帧初封锁整窗输入,渲染本面板前解开(与属性面板同一条路径)。
+		host.SetPanelModalOwner(Id());
+		ctx.RecordOp("hierarchy", action == PrefabConfirmAction::Apply
+			? "prefab-apply-ask" : "prefab-unpack-ask", source, std::string());
+	}
+
+	void HierarchyPanel::ClosePrefabConfirm(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		m_PrefabConfirm = PrefabConfirmAction::None;
+		m_PrefabConfirmRoot = Entity();
+		m_PrefabConfirmSource.clear();
+		m_PrefabConfirmModal = 0;
+		ctx.ClearModal();
+		host.SetPanelModalOwner(std::string());
+	}
+
+	void HierarchyPanel::DrawPrefabConfirm(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		const bool apply = m_PrefabConfirm == PrefabConfirmAction::Apply;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = m_PrefabConfirmModal;
+		frameDesc.Title = apply
+			? Wui::Tr("panel.hierarchy.prefab.apply.confirm_title", "Apply to Prefab Asset")
+			: Wui::Tr("panel.hierarchy.prefab.unpack.confirm_title", "Unpack (Break Prefab Link)");
+		frameDesc.Size = { 470.0f, 180.0f };
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
+			return;
+
+		// 正文说清后果:会覆盖资产 / 之后不再跟随资产 —— 破坏性操作不能只给一个按钮。
+		// 逐行给(Wui::Label 不换行),不让说明被省略号吃掉。
+		const std::array<std::string, 3> bodyLines = apply
+			? std::array<std::string, 3> {
+				Wui::Tr("panel.hierarchy.prefab.apply.confirm_body",
+					"Write this instance back to the prefab asset?"),
+				Wui::Tr("panel.hierarchy.prefab.apply.confirm_body2",
+					"The asset file will be overwritten, and its other instances"),
+				Wui::Tr("panel.hierarchy.prefab.apply.confirm_body3",
+					"will follow the new values.") }
+			: std::array<std::string, 3> {
+				Wui::Tr("panel.hierarchy.prefab.unpack.confirm_body",
+					"Break the link to the prefab asset?"),
+				Wui::Tr("panel.hierarchy.prefab.unpack.confirm_body2",
+					"These entities stay as they are now, but they"),
+				Wui::Tr("panel.hierarchy.prefab.unpack.confirm_body3",
+					"stop following the asset (revert/apply go away).") };
+		for (int line = 0; line < 3; ++line)
+			Wui::Label(ctx, { frame.X + 16.0f, frame.Y + 50.0f + 18.0f * static_cast<float>(line) },
+				bodyLines[line], theme.Text, 13.0f);
+		Wui::LabelWithTerm(ctx, { frame.X + 16.0f, frame.Y + 108.0f },
+			std::filesystem::path(m_PrefabConfirmSource).filename().string(), std::string(),
+			theme.Warning, 13.0f, theme, frame.W - 32.0f);
+
+		const Wui::ModalButtonDesc buttons[2] = {
+			{ Wui::Tr("panel.hierarchy.prefab.confirm_cancel", "Cancel"),
+				Wui::HashId("hierarchy.prefab.confirm.cancel"), true },
+			{ apply ? Wui::Tr("panel.hierarchy.prefab.apply.confirm", "Apply to Asset")
+				: Wui::Tr("panel.hierarchy.prefab.unpack.confirm", "Unpack"),
+				Wui::HashId("hierarchy.prefab.confirm.ok"), true },
+		};
+		const int clicked = Wui::ModalButtons(ctx, frame, buttons, 2, theme);
+		bool closeRequested = false;
+		if (clicked == 1)
+		{
+			std::string message;
+			const bool ok = apply
+				? host.PrefabInstanceApply(m_PrefabConfirmRoot, &message)
+				: host.PrefabInstanceUnpack(m_PrefabConfirmRoot, &message);
+			if (!message.empty())
+				host.Notify(message);
+			if (ok)
+				ctx.RecordOp("hierarchy", apply ? "prefab-apply" : "prefab-unpack",
+					m_PrefabConfirmSource, message);
+			else
+				WLD_CORE_WARN("Prefab {0} failed: {1}", apply ? "apply" : "unpack", message);
+			closeRequested = true;
+		}
+		else if (clicked == 0 || escapePressed)
+			closeRequested = true;
+		// 先收 overlay 再清模态态(BeginModalFrame/EndModalFrame 必须成对)。
+		Wui::EndModalFrame(ctx);
+		if (closeRequested && ctx.Modal() == frameDesc.Id)
+			ClosePrefabConfirm(ctx, host);
 	}
 
 	bool HierarchyPanel::DebugInvokeRowClick(size_t index)

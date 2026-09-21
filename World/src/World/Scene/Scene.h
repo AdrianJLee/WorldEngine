@@ -2,6 +2,7 @@
 #include "World/Core/Timestep.h"
 #include "World/Core/UUID.h"
 #include "World/Core/WorldContext.h"
+#include "World/Gameplay/PrefabTypes.h"
 #include "World/Renderer/EditorCamera.h"
 #include <box2d/id.h>
 #include <entt.hpp>
@@ -61,6 +62,20 @@ namespace World
 		};
 		WorldSettings& GetWorldSettings() { return m_WorldSettings; }
 		const WorldSettings& GetWorldSettings() const { return m_WorldSettings; }
+
+		// ---- P4-U13b:Prefab 实例注册表(随场景存档) ----
+		// 记录"哪些子树是 prefab 实例、来源文件、哪些字段被覆盖";此前只活在编辑器层级面板
+		// 的内存里,重开场景即丢;现在由 Scene 持有,并由 SceneSerializer 读写 `.wd` 的
+		// `Prefabs:` 块(盘上存实体 UUID,不存 entt 句柄)。
+		// 注意:AddPrefabInstance 返回的引用在下一次插入/删除后失效(容器是 std::vector),
+		// 需要跨调用保存时请按 Root 句柄重新 FindPrefabInstance。
+		std::vector<Gameplay::PrefabInstanceRecord>& PrefabInstances();
+		const std::vector<Gameplay::PrefabInstanceRecord>& PrefabInstances() const;
+		Gameplay::PrefabInstanceRecord* FindPrefabInstance(entt::entity root);
+		const Gameplay::PrefabInstanceRecord* FindPrefabInstance(entt::entity root) const;
+		// 同一 root 已存在 → 更新 Path 并返回既有记录(不重复插入)。
+		Gameplay::PrefabInstanceRecord& AddPrefabInstance(const std::string& prefabPath, entt::entity root);
+		bool RemovePrefabInstance(entt::entity root);
 
 		void OnUpdateEditor(Timestep ts, const EditorCamera& camera);
 		void OnUpdateRuntime(Timestep ts);
@@ -261,6 +276,8 @@ namespace World
 		std::vector<std::function<void(bool added, entt::entity entityA, entt::entity entityB)>> m_Physics3DContactCallbacks;
 		// 上次反序列化时未能识别的组件节点（按实体 UUID 保存原始 YAML 片段），供保存时回写，避免缺插件静默丢数据。
 		std::unordered_map<UUID, std::string> m_UnknownComponentNodes;
+		// P4-U13b:prefab 实例注册表(随 `.wd` 的 Prefabs: 块读写)。
+		std::vector<Gameplay::PrefabInstanceRecord> m_PrefabInstances;
 		// P4-U4:场景级设置(.wd 头部的 World: 块)。
 		WorldSettings m_WorldSettings;
 	};

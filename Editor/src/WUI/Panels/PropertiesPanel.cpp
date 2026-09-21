@@ -7,6 +7,8 @@
 #include "../../EditorLayer.h"
 
 #include "World/Core/KeyCodes.h"
+#include "World/Core/Asset/ProjectManifest.h"
+#include "World/Gameplay/Prefab.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
@@ -14,7 +16,9 @@
 #include "World/WUI/Widgets/WuiModal.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -57,11 +61,66 @@ namespace World
 			Wui::WuiAccessibility::Get().Register(node);
 		}
 
+		// P4-U13b:实例条按钮。与周边控件同一套画法;不可用时弱化绘制,并把"为什么不可用"
+		// 同时写进无障碍节点(tooltip/value)与悬停提示 —— 灰按钮不能没有理由。
+		bool InstanceBarButton(Wui::WuiContext& ctx, const char* idText, const Wui::WuiRect& rect,
+			const std::string& label, const std::string& tooltip, bool enabled, const Wui::WuiTheme& theme)
+		{
+			const bool hovered = ctx.IsHovered(rect);
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect,
+				enabled ? (hovered ? theme.ButtonHover : theme.ButtonBg) : theme.PanelBg, 3.0f });
+			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect,
+				hovered && enabled ? theme.Accent : theme.Border, 3.0f, 1.0f });
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+				{ rect.X + 9.0f, rect.Y + (rect.H - 13.0f) * 0.5f, 0.0f, 0.0f },
+				enabled ? theme.Text : theme.TextDisabled, 0.0f, 1.0f, label, 13.0f, false });
+			RegisterNode(Wui::HashId(idText), "button", rect, label, tooltip, enabled, tooltip);
+			if (hovered)
+			{
+				if (enabled)
+					ctx.SetCursor(Wui::WuiCursor::Hand);
+				if (!tooltip.empty())
+					ctx.SetTooltip(tooltip);
+			}
+			return enabled && ctx.IsClicked(rect);
+		}
+
 		std::string FormatFloatText(float value, int decimals = 3)
 		{
 			char buffer[48] = {};
 			std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
 			return buffer;
+		}
+
+		// 内容根(开发布局 Game/assets,打包由清单决定):**解析一次**缓存起来。
+		// 实例条每帧都要判断"来源资产还在不在",每帧重读 project.we.yaml 是不可接受的。
+		const std::filesystem::path& CachedContentRoot()
+		{
+			static const std::filesystem::path root = []
+			{
+				std::filesystem::path manifestPath;
+				if (!Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+					return std::filesystem::path {};
+				std::string error;
+				Asset::ProjectManifest manifest;
+				if (!Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+					return std::filesystem::path {};
+				return manifest.ResolveContentRoot(manifestPath);
+			}();
+			return root;
+		}
+
+		// P4-U13b:来源资产是否还在盘上。实例记录里存的是**逻辑路径**(相对内容根),
+		// 所以先按原样试,再按内容根解析(与层级面板的 prefab 路径解析同一约定)。
+		bool PrefabSourceExists(const std::string& path)
+		{
+			if (path.empty())
+				return false;
+			std::error_code error;
+			if (std::filesystem::exists(std::filesystem::path(path), error))
+				return true;
+			const std::filesystem::path& contentRoot = CachedContentRoot();
+			return !contentRoot.empty() && std::filesystem::exists(contentRoot / path, error);
 		}
 
 		// 只读展示用:把 schema 值渲染成一行文本(交互路径的控件不参与)。
@@ -638,6 +697,301 @@ namespace World
 			CloseRemoveComponentConfirm(ctx);
 	}
 
+	// ---- P4-U13b:prefab 实例条 + 破坏性动作确认 ----
+	void PropertiesPanel::RegisterPrefabOverrides(Entity entity, const std::vector<std::string>& fields)
+	{
+		if (m_ReadOnly || fields.empty() || !entity.IsValid())
+			return;
+		Scene* scene = entity.GetScene();
+		if (!scene)
+			return;
+
+		// 归属:实体自己是实例根,或沿父链找到实例根(实例子树内的成员被编辑同样算这棵实例的覆盖)。
+		constexpr int kMaxAncestorDepth = 64;
+		entt::entity current = static_cast<entt::entity>(entity);
+		Gameplay::PrefabInstanceRecord* record = nullptr;
+		for (int depth = 0; depth < kMaxAncestorDepth && current != entt::null; ++depth)
+		{
+			record = scene->FindPrefabInstance(current);
+			if (record)
+				break;
+			// 父链只走 const 注册表:Play/Simulate 下活动场景的非 const GetRegistry() 会触发断言。
+			const entt::registry& registry = static_cast<const Scene*>(scene)->GetRegistry();
+			if (!registry.valid(current))
+				break;
+			const auto* hierarchy = registry.try_get<HierarchyComponent>(current);
+			if (!hierarchy || hierarchy->Parent == entt::null || !registry.valid(hierarchy->Parent))
+				break;
+			current = hierarchy->Parent;
+		}
+		if (!record)
+			return;   // 普通实体(不属于任何实例):编辑不产生覆盖记录
+
+		const size_t countBefore = Gameplay::GetOverrideCount(*record);
+		std::string joined;
+		for (const std::string& field : fields)
+		{
+			Gameplay::MarkOverride(*record, static_cast<entt::entity>(entity), field);
+			if (!joined.empty())
+				joined += ", ";
+			joined += field;
+		}
+		// 只在覆盖集合真的长大时记一条日志:拖动数值控件会每帧改值,否则日志会被刷屏。
+		if (Gameplay::GetOverrideCount(*record) != countBefore)
+			WLD_CORE_INFO("[prefab] override registered on '{0}' (handle={1}): {2}",
+				record->PrefabPath, static_cast<uint32_t>(static_cast<entt::entity>(entity)), joined);
+	}
+
+	PropertiesPanel::InstanceBarInfo PropertiesPanel::ResolveInstanceBar(PanelHost& host, Entity entity)
+	{
+		InstanceBarInfo info;
+		if (!host.PrefabInstanceInfo(entity, &info.Source, &info.Overrides, &info.Root))
+			return info;   // 不属于任何实例 → 不画实例条
+		info.InInstance = true;
+		Scene* scene = entity.GetScene();
+		Gameplay::PrefabInstanceRecord* record = scene && info.Root.IsValid()
+			? scene->FindPrefabInstance(static_cast<entt::entity>(info.Root)) : nullptr;
+		if (!record)
+			return info;
+		// 来源资产不在盘上 = 回滚/应用都做不到;实例条要给可读提示而不是点了才失败。
+		info.SourceMissing = !PrefabSourceExists(record->PrefabPath);
+		info.CanRevert = !info.SourceMissing && Gameplay::CanRevert(*record, *scene);
+		info.CanApply = !info.SourceMissing && !record->PrefabPath.empty();
+		return info;
+	}
+
+	PropertiesPanel::InstanceBarLayout PropertiesPanel::LayoutInstanceBar(Wui::WuiContext& ctx,
+		const Wui::WuiRect& rect, const InstanceBarInfo& info) const
+	{
+		constexpr float pad = 8.0f;
+		constexpr float titleHeight = 22.0f;
+		constexpr float buttonHeight = 22.0f;
+		constexpr float rowGap = 6.0f;
+		constexpr float hintHeight = 16.0f;
+
+		InstanceBarLayout layout;
+		layout.HasHint = m_ReadOnly || info.SourceMissing;
+		const float innerWidth = std::max(40.0f, rect.W - pad * 2.0f);
+		const std::string labels[3] = {
+			Wui::Tr("panel.properties.prefab.revert", "Revert to Asset"),
+			Wui::Tr("panel.properties.prefab.apply", "Apply to Asset"),
+			Wui::Tr("panel.properties.prefab.unpack", "Unpack"),
+		};
+		float buttonWidth[3] = { 0.0f, 0.0f, 0.0f };
+		for (int i = 0; i < 3; ++i)
+			buttonWidth[i] = ctx.MeasureTextWidth(labels[i], 13.0f) + 20.0f;
+		// 先排按钮(窄面板放不下就换行),行数决定实例条高度 —— 不用省略号牺牲按钮语义。
+		float buttonY = rect.Y + pad + titleHeight + rowGap;
+		const float buttonTop = buttonY;
+		float buttonX = rect.X + pad;
+		for (int i = 0; i < 3; ++i)
+		{
+			const float width = std::min(buttonWidth[i], innerWidth);
+			if (i > 0 && buttonX + width > rect.X + pad + innerWidth)
+			{
+				buttonY += buttonHeight + rowGap;
+				buttonX = rect.X + pad;
+			}
+			layout.Buttons[i] = { buttonX, buttonY, width, buttonHeight };
+			buttonX += width + rowGap;
+		}
+		const float buttonRowsHeight = (buttonY - buttonTop) + buttonHeight;
+		layout.Height = pad + titleHeight + rowGap + buttonRowsHeight
+			+ (layout.HasHint ? rowGap * 0.5f + hintHeight : 0.0f) + pad;
+		layout.Hint = { rect.X + pad, buttonY + buttonHeight + rowGap * 0.5f, innerWidth, hintHeight };
+		return layout;
+	}
+
+	void PropertiesPanel::DrawInstanceBar(Wui::WuiContext& ctx, PanelHost& host, const Wui::WuiRect& rect,
+		const InstanceBarInfo& info, const InstanceBarLayout& layout)
+	{
+		const Wui::WuiTheme& theme = m_Host.Theme();
+		constexpr float pad = 8.0f;
+		constexpr float titleHeight = 22.0f;
+
+		const std::string sourceName = std::filesystem::path(info.Source).filename().string();
+		const std::string fileName = sourceName.empty()
+			? Wui::Tr("panel.properties.prefab.no_source", "(no source asset)") : sourceName;
+		const std::string revertText = Wui::Tr("panel.properties.prefab.revert", "Revert to Asset");
+		const std::string applyText = Wui::Tr("panel.properties.prefab.apply", "Apply to Asset");
+		const std::string unpackText = Wui::Tr("panel.properties.prefab.unpack", "Unpack");
+
+		// 卡片底 + 左侧 accent 条:与 prefab 编辑横幅同一套"这是资产链接,不是普通组件"的表达。
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, theme.PanelHeader, theme.Radius });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+			{ rect.X, rect.Y, 3.0f, rect.H }, theme.Accent, 0.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect, theme.Border, theme.Radius, 1.0f });
+		RegisterNode(Wui::HashId("properties.prefab.bar"), "group",
+			{ rect.X, rect.Y, rect.W, titleHeight + pad },
+			Wui::Tr("panel.properties.prefab.bar", "Prefab instance"), info.Source,
+			true, Wui::Tr("panel.properties.prefab.bar.tooltip",
+				"This entity belongs to a prefab instance: edits are tracked as overrides"), false);
+
+		// 标题行:[预] 文件名 · N 处覆盖
+		const Wui::WuiRect badge { rect.X + pad, rect.Y + pad + 2.0f, 16.0f, 16.0f };
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, badge, theme.Accent, badge.H * 0.5f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { badge.X + 3.0f, badge.Y + 2.0f, 0.0f, 0.0f },
+			Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, 0.0f, 1.0f,
+			Wui::Tr("panel.properties.prefab.badge", "预"), 11.0f, true });
+		const float nameX = badge.X + badge.W + 6.0f;
+		Wui::Label(ctx, { nameX, rect.Y + pad + 3.0f }, fileName, theme.Text, 13.0f);
+		const std::string countText = std::to_string(info.Overrides) + " "
+			+ Wui::Tr("panel.properties.prefab.overrides", "override(s)");
+		const float countX = nameX + ctx.MeasureTextWidth(fileName, 13.0f) + 8.0f;
+		Wui::Label(ctx, { countX, rect.Y + pad + 4.0f }, countText, theme.TextMuted, 12.0f);
+		// 覆盖计数是脚本/读屏要读的数字:单独一个稳定 id,value 就是纯数字。
+		RegisterNode(Wui::HashId("properties.prefab.overrides"), "text",
+			{ countX, rect.Y + pad + 2.0f,
+				std::max(24.0f, ctx.MeasureTextWidth(countText, 12.0f)), 16.0f },
+			Wui::Tr("panel.properties.prefab.overrides.label", "Overrides"),
+			std::to_string(info.Overrides), true,
+			Wui::Tr("panel.properties.prefab.overrides.tooltip",
+				"Fields edited on this instance that differ from the prefab asset"), false);
+
+		// 动作行:回滚(不需要确认)/ 应用到资产(确认)/ 断开链接(确认)。
+		const bool readOnlyReason = m_ReadOnly;
+		const bool canRevert = info.CanRevert && !readOnlyReason;
+		const bool canApply = info.CanApply && !readOnlyReason;
+		const bool canUnpack = !readOnlyReason;
+		const std::string revertHint = canRevert
+			? Wui::Tr("panel.properties.prefab.revert.tooltip",
+				"Discard overrides and restore this subtree from the prefab asset")
+			: (readOnlyReason
+				? Wui::Tr("panel.properties.prefab.readonly", "Read-only while Play/Simulate is running")
+				: Wui::Tr("panel.properties.prefab.revert.blocked",
+					"Unavailable: the prefab asset could not be found"));
+		const std::string applyHint = canApply
+			? Wui::Tr("panel.properties.prefab.apply.tooltip",
+				"Write this instance back to the prefab asset (asks for confirmation)")
+			: (readOnlyReason
+				? Wui::Tr("panel.properties.prefab.readonly", "Read-only while Play/Simulate is running")
+				: Wui::Tr("panel.properties.prefab.apply.blocked",
+					"Unavailable: the prefab asset could not be found"));
+		const std::string unpackHint = canUnpack
+			? Wui::Tr("panel.properties.prefab.unpack.tooltip",
+				"Turn this subtree into plain entities (asks for confirmation); it stops following the asset")
+			: Wui::Tr("panel.properties.prefab.readonly", "Read-only while Play/Simulate is running");
+
+		if (InstanceBarButton(ctx, "properties.prefab.revert", layout.Buttons[0], revertText, revertHint,
+			canRevert, theme))
+		{
+			std::string message;
+			if (!host.PrefabInstanceRevert(info.Root, &message) || !message.empty())
+				host.Notify(message);
+		}
+		if (InstanceBarButton(ctx, "properties.prefab.apply", layout.Buttons[1], applyText, applyHint,
+			canApply, theme))
+			OpenPrefabActionConfirm(ctx, PrefabAction::Apply, info.Root, info.Source);
+		if (InstanceBarButton(ctx, "properties.prefab.unpack", layout.Buttons[2], unpackText, unpackHint,
+			canUnpack, theme))
+			OpenPrefabActionConfirm(ctx, PrefabAction::Unpack, info.Root, info.Source);
+
+		// 只读/来源缺失的可读提示(不是"按钮点了没反应")。
+		if (layout.HasHint)
+		{
+			const std::string hint = m_ReadOnly
+				? Wui::Tr("panel.properties.prefab.readonly", "Read-only while Play/Simulate is running")
+				: Wui::Tr("panel.properties.prefab.missing", "Source asset not found: ") + info.Source;
+			Wui::Label(ctx, { layout.Hint.X, layout.Hint.Y + 1.0f }, hint,
+				m_ReadOnly ? theme.TextMuted : theme.Warning, 12.0f);
+			RegisterNode(Wui::HashId("properties.prefab.hint"), "text", layout.Hint, hint, std::string(),
+				false, hint, false);
+		}
+	}
+
+	void PropertiesPanel::OpenPrefabActionConfirm(Wui::WuiContext& ctx, PrefabAction action, Entity root,
+		const std::string& source)
+	{
+		m_PrefabActionPending = action;
+		m_PrefabActionRoot = root;
+		m_PrefabActionSource = source;
+		ctx.SetModal(Wui::HashId("prop.prefab.action.modal"));
+		// 面板级模态:宿主帧初封锁整窗输入,渲染本面板前解开(与"移除组件"同一条路径)。
+		m_Host.SetPanelModalOwner(Id());
+		ctx.RecordOp("properties", action == PrefabAction::Apply
+			? "prefab-apply-ask" : "prefab-unpack-ask", source, std::string());
+	}
+
+	void PropertiesPanel::ClosePrefabActionConfirm(Wui::WuiContext& ctx)
+	{
+		m_PrefabActionPending = PrefabAction::None;
+		m_PrefabActionRoot = Entity();
+		m_PrefabActionSource.clear();
+		ctx.ClearModal();
+		m_Host.SetPanelModalOwner(std::string());
+	}
+
+	void PropertiesPanel::DrawPrefabActionConfirm(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiTheme& theme = m_Host.Theme();
+		const bool apply = m_PrefabActionPending == PrefabAction::Apply;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = Wui::HashId("prop.prefab.action.modal");
+		frameDesc.Title = apply
+			? Wui::Tr("panel.properties.prefab.apply.confirm_title", "Apply to Prefab Asset")
+			: Wui::Tr("panel.properties.prefab.unpack.confirm_title", "Unpack (Break Prefab Link)");
+		frameDesc.Size = { 470.0f, 180.0f };
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
+			return;
+
+		// 确认文案说清后果:会写回资产 / 之后不再跟随资产。逐行给(Wui::Label 不换行),
+		// 破坏性操作的说明不能省略成省略号。
+		const std::array<std::string, 3> bodyLines = apply
+			? std::array<std::string, 3> {
+				Wui::Tr("panel.properties.prefab.apply.confirm_body",
+					"Write this instance back to the prefab asset?"),
+				Wui::Tr("panel.properties.prefab.apply.confirm_body2",
+					"The asset file will be overwritten, and its other instances"),
+				Wui::Tr("panel.properties.prefab.apply.confirm_body3",
+					"will follow the new values.") }
+			: std::array<std::string, 3> {
+				Wui::Tr("panel.properties.prefab.unpack.confirm_body",
+					"Break the link to the prefab asset?"),
+				Wui::Tr("panel.properties.prefab.unpack.confirm_body2",
+					"These entities stay as they are now, but they"),
+				Wui::Tr("panel.properties.prefab.unpack.confirm_body3",
+					"stop following the asset (revert/apply go away).") };
+		for (int line = 0; line < 3; ++line)
+			Wui::Label(ctx, { frame.X + 16.0f, frame.Y + 50.0f + 18.0f * static_cast<float>(line) },
+				bodyLines[line], theme.Text, 13.0f);
+		Wui::LabelWithTerm(ctx, { frame.X + 16.0f, frame.Y + 108.0f },
+			std::filesystem::path(m_PrefabActionSource).filename().string(), std::string(),
+			theme.Warning, 13.0f, theme, frame.W - 32.0f);
+
+		const Wui::ModalButtonDesc buttons[2] = {
+			{ Wui::Tr("panel.properties.prefab.confirm_cancel", "Cancel"),
+				Wui::HashId("prop.prefab.action.cancel"), true },
+			{ apply ? Wui::Tr("panel.properties.prefab.apply.confirm", "Apply to Asset")
+				: Wui::Tr("panel.properties.prefab.unpack.confirm", "Unpack"),
+				Wui::HashId("prop.prefab.action.ok"), true },
+		};
+		const int clicked = Wui::ModalButtons(ctx, frame, buttons, 2, theme);
+		bool closeRequested = false;
+		if (clicked == 1)
+		{
+			std::string message;
+			const bool ok = apply
+				? m_Host.PrefabInstanceApply(m_PrefabActionRoot, &message)
+				: m_Host.PrefabInstanceUnpack(m_PrefabActionRoot, &message);
+			if (!message.empty())
+				m_Host.Notify(message);
+			if (ok)
+				ctx.RecordOp("properties", apply ? "prefab-apply" : "prefab-unpack",
+					m_PrefabActionSource, message);
+			else
+				WLD_CORE_WARN("Prefab {0} failed (properties bar): {1}", apply ? "apply" : "unpack", message);
+			closeRequested = true;
+		}
+		else if (clicked == 0 || escapePressed)
+			closeRequested = true;
+		// 先收 overlay 再清模态态(BeginModalFrame/EndModalFrame 必须成对)。
+		Wui::EndModalFrame(ctx);
+		if (closeRequested && ctx.Modal() == frameDesc.Id)
+			ClosePrefabActionConfirm(ctx);
+	}
+
 	void PropertiesPanel::DrawAddComponentPicker(Wui::WuiContext& ctx,
 		Entity entity, Scene* scene, Schema::SchemaRegistry& schemas)
 	{
@@ -1161,7 +1515,24 @@ namespace World
 				theme.TextMuted, 13.0f);
 		}
 
-		const Wui::WuiRect addButton { rect.X + 8, rect.Y + (m_ReadOnly ? 30.0f : 8.0f), 140, 24 };
+		// P4-U13b:实例条常驻在组件列表**最上方**(用户口径:实例的三件事不能再藏在右键菜单里)。
+		// 高度先由布局算出来,下面的 Add Component 行与组件列表整体让出这一段。
+		const InstanceBarInfo instanceInfo = ResolveInstanceBar(host, entity);
+		float instanceBarOffset = 0.0f;
+		if (instanceInfo.InInstance)
+		{
+			// 只读提示占一行,实例条顺延(与 Add Component 行同一套行位计算)。
+			const Wui::WuiRect barRect { rect.X + 6.0f,
+				rect.Y + (m_ReadOnly ? 30.0f : 8.0f),
+				std::max(0.0f, rect.W - 12.0f), 0.0f };
+			const InstanceBarLayout layout = LayoutInstanceBar(ctx, barRect, instanceInfo);
+			DrawInstanceBar(ctx, host, { barRect.X, barRect.Y, barRect.W, layout.Height }, instanceInfo, layout);
+			instanceBarOffset = layout.Height + 8.0f;
+		}
+		const float contentTop = kContentTop + instanceBarOffset;
+
+		const Wui::WuiRect addButton { rect.X + 8,
+			rect.Y + (m_ReadOnly ? 30.0f : 8.0f) + instanceBarOffset, 140, 24 };
 		if (!m_ReadOnly && Button(ctx, Wui::HashId("prop.add"), addButton,
 			Wui::Tr("panel.properties.add_component", "Add Component"), theme))
 			OpenAddComponentPicker(ctx);
@@ -1171,6 +1542,9 @@ namespace World
 		// P4-U9:移除组件的确认模态(与添加组件同一套面板级模态通道)。
 		if (m_RemovePendingId != 0)
 			DrawRemoveComponentConfirm(ctx, entity);
+		// P4-U13b:实例破坏性动作(应用到资产 / 断开链接)的确认模态。
+		if (m_PrefabActionPending != PrefabAction::None)
+			DrawPrefabActionConfirm(ctx);
 
 		// 组件分区进入保留模式布局树;字段内容复用已测的 schema 绘制逻辑。
 		std::vector<const Schema::TypeSchema*> componentSchemas;
@@ -1199,7 +1573,7 @@ namespace World
 
 		// ---- 滚动布局(与迁移前一致的分区顺序;标题/展开态由面板持久化)----
 		// 内容高度取上一帧实测值(首帧按 0 计),分区每帧重绘,下一帧即精确。
-		const float viewportHeight = std::max(0.0f, rect.H - kContentTop - 4.0f);
+		const float viewportHeight = std::max(0.0f, rect.H - contentTop - 4.0f);
 		float contentHeight = 0.0f;
 		// U6:添加组件后要滚到可见的分区顶部(标题行位置)。
 		float revealTargetY = -1.0f;
@@ -1218,7 +1592,7 @@ namespace World
 			sectionTop += kSectionHeader + (open ? m_Sections[i].ContentHeight : 0.0f) + kSectionGap;
 		}
 
-		const Wui::WuiRect scrollViewport { rect.X + 6, rect.Y + kContentTop, rect.W - 12 - kScrollbarWidth, viewportHeight };
+		const Wui::WuiRect scrollViewport { rect.X + 6, rect.Y + contentTop, rect.W - 12 - kScrollbarWidth, viewportHeight };
 		const Wui::WuiRect visibleContent { scrollViewport.X, scrollViewport.Y, scrollViewport.W, viewportHeight };
 		const float maxScroll = std::max(0.0f, contentHeight - viewportHeight);
 		ScrollState& scroll = ctx.Persist<ScrollState>(Wui::HashId("prop.scroll.state"), {});
@@ -1248,7 +1622,7 @@ namespace World
 
 		// 分区区在可视裁剪内绘制:滚出可视区的控件保留在无障碍树里(可见性由中心点判定,
 		// 滚回可视区即可被 ui.invoke 命中 —— 不会出现"AI 点到用户看不到的控件")。
-		const Wui::WuiRect contentRect { rect.X + 6, rect.Y + kContentTop - scroll.Offset,
+		const Wui::WuiRect contentRect { rect.X + 6, rect.Y + contentTop - scroll.Offset,
 			rect.W - 12 - kScrollbarWidth, contentHeight };
 		float sectionY = 0.0f;
 		ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, scrollViewport });
@@ -1410,7 +1784,7 @@ namespace World
 
 	float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect,
 		void* instance, const std::string& typeName, const Schema::TypeSchema& schema,
-		const Wui::WuiRect& visibleRect)
+		const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields)
 	{
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		float y = 0;
@@ -1482,7 +1856,7 @@ namespace World
 				y += 20;
 				if (open && nested && nestedInstance)
 					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u, { row.X + 10, row.Y + 20, row.W - 10, 0 },
-						nestedInstance, nested->DisplayName, *nested, visibleRect);
+						nestedInstance, nested->DisplayName, *nested, visibleRect, changedFields);
 				continue;
 			}
 
@@ -1777,6 +2151,10 @@ namespace World
 			{
 				field.Set(instance, value);
 				changed = true;
+				// P4-U13b:编辑实例字段 → 由"改动发生处"登记覆盖(不靠全量 diff 反推)。
+				// 具体落账在 DrawComponentInspector(那里才知道编辑的是哪个实体)。
+				if (changedFields)
+					changedFields->push_back(typeName + "." + field.Name);
 			}
 			y += 22;
 		}
@@ -1794,16 +2172,19 @@ namespace World
 		if (!instance)
 			return 0;
 		const Wui::WuiId base = Wui::HashId(schema.DisplayName.c_str());
+		// P4-U13b:本分区内被编辑的字段名收在这里,分区画完统一登记成实例覆盖。
+		// 归属判定(这个实体属于哪条实例记录)放在 RegisterPrefabOverrides —— 普通实体编辑不产生记录。
+		std::vector<std::string> changedFields;
+		float height = 0.0f;
 
 		// 自定义检查器:与迁移前一致的三行 Location/Rotation(度)/Scale。
 		if (schema.Id.Name == "World::TransformComponent")
-			return DrawTransformInspector(ctx, rect, *static_cast<TransformComponent*>(instance), schema, visibleRect);
-
+			height = DrawTransformInspector(ctx, rect, *static_cast<TransformComponent*>(instance), schema,
+				visibleRect, &changedFields);
 		// 自定义检查器:Primary / Fixed Aspect Ratio + 投影类型下拉 + 对应参数组。
-		if (schema.Id.Name == "World::CameraComponent")
-			return DrawCameraInspector(ctx, rect, instance, schema, visibleRect);
-
-		if (schema.Id.Name == "World::NativeScriptComponent")
+		else if (schema.Id.Name == "World::CameraComponent")
+			height = DrawCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::NativeScriptComponent")
 		{
 			auto* script = static_cast<NativeScriptComponent*>(instance);
 			Scene* scene = entity.GetScene();
@@ -1830,6 +2211,7 @@ namespace World
 				script->ScriptName = names[selected];
 				script->ResetEditorFieldState();
 				m_Host.MarkDocumentDirty();
+				changedFields.push_back(schema.DisplayName + ".Script");
 			}
 			float y = 26;
 			Label(ctx, { rect.X, rect.Y + y },
@@ -1849,23 +2231,26 @@ namespace World
 				if (preview)
 				{
 					y += DrawSchemaFields(ctx, base ^ 2u, { rect.X, rect.Y + y, rect.W, 0 }, preview,
-						scriptSchema->DisplayName, *scriptSchema, visibleRect);
+						scriptSchema->DisplayName, *scriptSchema, visibleRect, &changedFields);
 					for (const Schema::FieldSchema& field : scriptSchema->Fields)
 						if (field.Get)
 							script->FieldValues[field.Name] = field.Get(preview);
 					script->ReleaseEditorInstance(preview);
 				}
 			}
-			return y;
+			height = y;
 		}
 
-		if (schema.Id.Name == "World::LuaScriptComponent")
+		else if (schema.Id.Name == "World::LuaScriptComponent")
 		{
 			auto* script = static_cast<LuaScriptComponent*>(instance);
 			const std::string before = script->ScriptFilePath;
 			TextField(ctx, base ^ 1u, { rect.X, rect.Y, rect.W, 22 }, script->ScriptFilePath, theme);
 			if (script->ScriptFilePath != before)
+			{
 				m_Host.MarkDocumentDirty();
+				changedFields.push_back(schema.DisplayName + ".ScriptFilePath");
+			}
 
 			// P2 W5b:状态 + 重载诊断 + 脚本错误 + Reload 按钮(稳定 id → 进无障碍树,
 			// 可被 AI 通道 ui.invoke 无鼠标驱动)。
@@ -1910,14 +2295,20 @@ namespace World
 					m_LuaReloadOk ? theme.TextMuted : Wui::WuiColor { 1, 0.4f, 0.4f, 1 }, 12.0f);
 				y += 16;
 			}
-			return y + 4;
+			height = y + 4;
 		}
 
-		return DrawSchemaFields(ctx, base, rect, instance, schema.DisplayName, schema, visibleRect);
+		else
+			height = DrawSchemaFields(ctx, base, rect, instance, schema.DisplayName, schema, visibleRect,
+				&changedFields);
+
+		RegisterPrefabOverrides(entity, changedFields);
+		return height;
 	}
 
 	float PropertiesPanel::DrawTransformInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
-		TransformComponent& transform, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect)
+		TransformComponent& transform, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+		std::vector<std::string>* changedFields)
 	{
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		const std::string& typeName = schema.DisplayName;
@@ -1956,19 +2347,32 @@ namespace World
 		const Wui::WuiRect locationRow = ComponentRect(rect, 0, 20);
 		const Wui::WuiRect rotationRow = ComponentRect(rect, 1, 20);
 		const Wui::WuiRect scaleRow = ComponentRect(rect, 2, 20);
-		changed |= DrawVec3Row(ctx, PropPath(typeName, "Location"), locationRow, locationLabel, transform.Location, theme, reachable(locationRow));
-		changed |= DrawVec3Row(ctx, PropPath(typeName, "Rotation"), rotationRow, rotationLabel, rotationDegrees, theme, reachable(rotationRow));
-		changed |= DrawVec3Row(ctx, PropPath(typeName, "Scale"), scaleRow, scaleLabel, transform.Scale, theme, reachable(scaleRow));
+		// 逐行取"这一行是否被编辑":覆盖登记要精确到 Location/Rotation/Scale,
+		// 不能只记"Transform 动过"(否则覆盖计数与实际改动对不上)。
+		const bool locationChanged = DrawVec3Row(ctx, PropPath(typeName, "Location"), locationRow,
+			locationLabel, transform.Location, theme, reachable(locationRow));
+		const bool rotationChanged = DrawVec3Row(ctx, PropPath(typeName, "Rotation"), rotationRow,
+			rotationLabel, rotationDegrees, theme, reachable(rotationRow));
+		const bool scaleChanged = DrawVec3Row(ctx, PropPath(typeName, "Scale"), scaleRow,
+			scaleLabel, transform.Scale, theme, reachable(scaleRow));
+		changed |= locationChanged || rotationChanged || scaleChanged;
 		if (changed)
 		{
 			transform.SetTransform(transform.Location, glm::radians(rotationDegrees), transform.Scale);
 			m_Host.MarkDocumentDirty();
+			if (changedFields)
+			{
+				if (locationChanged) changedFields->push_back(typeName + ".Location");
+				if (rotationChanged) changedFields->push_back(typeName + ".Rotation");
+				if (scaleChanged) changedFields->push_back(typeName + ".Scale");
+			}
 		}
 		return 66.0f;
 	}
 
 	float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
-		const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect)
+		const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+		std::vector<std::string>* changedFields)
 	{
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		// CameraComponent 的 schema 字段:Primary / FixedAspectRatio / Camera(Object Of SceneCamera)。
@@ -1999,6 +2403,12 @@ namespace World
 		};
 		float y = 0.0f;
 		bool changed = false;
+		// 覆盖字段名与属性行 id 同一口径(PropPath 去掉 "properties." 前缀)。
+		const auto markField = [changedFields](const std::string& field)
+		{
+			if (changedFields)
+				changedFields->push_back(field);
+		};
 
 		const Wui::WuiRect primaryRow { rect.X, rect.Y + y, rect.W, kRowHeight };
 		const Wui::LocalizedLabel primaryLabel = SchemaFieldLabel(*primaryField);
@@ -2018,6 +2428,7 @@ namespace World
 			{
 				primaryField->Set(instance, Schema::Value(primary));
 				changed = true;
+				markField(typeName + ".Primary");
 			}
 		}
 		else
@@ -2044,6 +2455,7 @@ namespace World
 			{
 				fixedField->Set(instance, Schema::Value(fixed));
 				changed = true;
+				markField(typeName + ".FixedAspectRatio");
 			}
 		}
 		else
@@ -2088,6 +2500,7 @@ namespace World
 				projectionField->Set(cameraInstance, Schema::Value(enumSchema->Values[selected].second));
 				projection = camera->GetProjectionType();
 				changed = true;
+				markField(cameraType + ".ProjectionType");
 			}
 			RegisterNode(Wui::HashId(projectionId.c_str()), "combo", comboRect, TermText(projectionLabel),
 				(selected >= 0 && selected < static_cast<int>(names.size())) ? names[selected] : std::string(),
@@ -2125,16 +2538,19 @@ namespace World
 			{
 				camera->SetPerspectiveFOV(fov);
 				changed = true;
+				markField(cameraType + ".Perspective.FOV");
 			}
 			if (nearChanged)
 			{
 				camera->SetPerspectiveNearClip(nearClip);
 				changed = true;
+				markField(cameraType + ".Perspective.NearClip");
 			}
 			if (farChanged)
 			{
 				camera->SetPerspectiveFarClip(farClip);
 				changed = true;
+				markField(cameraType + ".Perspective.FarClip");
 			}
 		}
 		else
@@ -2160,16 +2576,19 @@ namespace World
 			{
 				camera->SetOrthographicZoom(zoom);
 				changed = true;
+				markField(cameraType + ".Orthographic.Zoom");
 			}
 			if (nearChanged)
 			{
 				camera->SetOrthographicNearClip(nearClip);
 				changed = true;
+				markField(cameraType + ".Orthographic.NearClip");
 			}
 			if (farChanged)
 			{
 				camera->SetOrthographicFarClip(farClip);
 				changed = true;
+				markField(cameraType + ".Orthographic.FarClip");
 			}
 		}
 

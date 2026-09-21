@@ -1109,10 +1109,147 @@ namespace World
 			if (message) *message = "prefab instantiate failed: " + logicalPath;
 			return false;
 		}
+		// P4-U13b:新入口产生的实例同样登记进场景注册表(层级徽标 / 属性面板实例条 /
+		// 右键菜单 / 场景存档都读这一份记录)。路径存**逻辑路径**(与内容浏览器同一约定)。
+		m_ActiveScene->AddPrefabInstance(logicalPath, static_cast<entt::entity>(result.Root));
 		m_SelectedEntity = result.Root;
 		MarkDocumentDirty();
 		if (message)
 			*message = "已实例化 " + std::to_string(result.EntityCount) + " 个实体: " + logicalPath;
+		return true;
+	}
+
+	// ---- P4-U13b:prefab 实例(实例条 / 层级徽标共用同一条实现)----
+	namespace
+	{
+		// 实体属于哪个实例:自身是实例根,或沿父链找到实例根(深度上限防非法层级死循环)。
+		// 只走 const 注册表:Play/Simulate 下活动场景的非 const GetRegistry() 会触发结构写断言,
+		// 而实例条在 Play 期间仍然要显示(那时三个动作是禁用的)。
+		entt::entity OwningPrefabInstanceRoot(const Scene& scene, entt::entity entity)
+		{
+			constexpr int kMaxAncestorDepth = 64;
+			entt::entity current = entity;
+			for (int depth = 0; depth < kMaxAncestorDepth && current != entt::null; ++depth)
+			{
+				if (scene.FindPrefabInstance(current))
+					return current;
+				const entt::registry& registry = scene.GetRegistry();
+				if (!registry.valid(current))
+					break;
+				const auto* hierarchy = registry.try_get<HierarchyComponent>(current);
+				if (!hierarchy || hierarchy->Parent == entt::null || !registry.valid(hierarchy->Parent))
+					break;
+				current = hierarchy->Parent;
+			}
+			return entt::null;
+		}
+	}
+
+	bool EditorLayer::PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,
+		Entity* root)
+	{
+		if (!m_ActiveScene || !entity.IsValid() || entity.GetScene() != m_ActiveScene.get())
+			return false;
+		const entt::entity rootHandle = OwningPrefabInstanceRoot(
+			*m_ActiveScene, static_cast<entt::entity>(entity));
+		if (rootHandle == entt::null)
+			return false;
+		const Gameplay::PrefabInstanceRecord* record = m_ActiveScene->FindPrefabInstance(rootHandle);
+		if (!record)
+			return false;
+		if (sourcePath)
+			*sourcePath = record->PrefabPath;
+		if (overrideCount)
+			*overrideCount = Gameplay::GetOverrideCount(*record);
+		if (root)
+			*root = Entity(m_ActiveScene.get(), rootHandle);
+		return true;
+	}
+
+	bool EditorLayer::PrefabInstanceRevert(Entity root, std::string* message)
+	{
+		// Play/Simulate 下活动场景是播放副本,改它没有意义(与属性面板的只读规则一致)。
+		if (m_SceneState != SceneState::Edit)
+		{
+			if (message) *message = "Play/Simulate 运行中:实例动作只读";
+			return false;
+		}
+		Gameplay::PrefabInstanceRecord* record = m_ActiveScene && root.IsValid()
+			? m_ActiveScene->FindPrefabInstance(static_cast<entt::entity>(root)) : nullptr;
+		if (!record)
+		{
+			if (message) *message = "该实体不是 prefab 实例";
+			return false;
+		}
+		if (!Gameplay::RevertInstance(*record, *m_ActiveScene))
+		{
+			if (message) *message = "回滚失败:来源资产读不到或结构已不匹配";
+			return false;
+		}
+		MarkDocumentDirty();
+		if (message) *message = "已回滚到资产";
+		return true;
+	}
+
+	bool EditorLayer::PrefabInstanceApply(Entity root, std::string* message)
+	{
+		if (m_SceneState != SceneState::Edit)
+		{
+			if (message) *message = "Play/Simulate 运行中:实例动作只读";
+			return false;
+		}
+		Gameplay::PrefabInstanceRecord* record = m_ActiveScene && root.IsValid()
+			? m_ActiveScene->FindPrefabInstance(static_cast<entt::entity>(root)) : nullptr;
+		if (!record)
+		{
+			if (message) *message = "该实体不是 prefab 实例";
+			return false;
+		}
+		if (record->PrefabPath.empty())
+		{
+			if (message) *message = "来源资产路径为空,无法写回";
+			return false;
+		}
+		const std::string sourcePath = record->PrefabPath;
+		std::string error;
+		if (!Gameplay::SaveFromScene(*m_ActiveScene, root, sourcePath, &error))
+		{
+			if (message) *message = "写回资产失败: " + error;
+			return false;
+		}
+		// 资产已跟上实例 → 覆盖不再是"偏离资产"的记录(与右键菜单同一条口径)。
+		Gameplay::ClearOverrides(*record);
+		MarkDocumentDirty();
+		if (message) *message = "已写回资产: " + sourcePath;
+		return true;
+	}
+
+	bool EditorLayer::PrefabInstanceUnpack(Entity root, std::string* message)
+	{
+		if (m_SceneState != SceneState::Edit)
+		{
+			if (message) *message = "Play/Simulate 运行中:实例动作只读";
+			return false;
+		}
+		const entt::entity handle = root.IsValid()
+			? static_cast<entt::entity>(root) : entt::null;
+		Gameplay::PrefabInstanceRecord* record = m_ActiveScene && handle != entt::null
+			? m_ActiveScene->FindPrefabInstance(handle) : nullptr;
+		if (!record)
+		{
+			if (message) *message = "该实体不是 prefab 实例";
+			return false;
+		}
+		const std::string source = record->PrefabPath;
+		if (!Gameplay::UnpackInstance(*record))
+		{
+			if (message) *message = "断开链接失败";
+			return false;
+		}
+		// 记录本身也要出注册表:之后它就是普通实体(否则实例条会以"空来源"的形态留着)。
+		m_ActiveScene->RemovePrefabInstance(handle);
+		MarkDocumentDirty();
+		if (message) *message = "已断开链接: " + source;
 		return true;
 	}
 	void EditorLayer::StartCookingAction()

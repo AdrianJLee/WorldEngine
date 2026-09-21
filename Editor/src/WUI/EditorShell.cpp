@@ -525,6 +525,27 @@ namespace World
 		return m_Editor.InstantiatePrefabAsset(logicalPath, message);
 	}
 
+	bool EditorShell::PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,
+		Entity* root)
+	{
+		return m_Editor.PrefabInstanceInfo(entity, sourcePath, overrideCount, root);
+	}
+
+	bool EditorShell::PrefabInstanceRevert(Entity root, std::string* message)
+	{
+		return m_Editor.PrefabInstanceRevert(root, message);
+	}
+
+	bool EditorShell::PrefabInstanceApply(Entity root, std::string* message)
+	{
+		return m_Editor.PrefabInstanceApply(root, message);
+	}
+
+	bool EditorShell::PrefabInstanceUnpack(Entity root, std::string* message)
+	{
+		return m_Editor.PrefabInstanceUnpack(root, message);
+	}
+
 	bool EditorShell::IsEditingPrefabDocument() const
 	{
 		return m_Editor.IsEditingPrefab();

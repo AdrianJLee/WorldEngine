@@ -37,13 +37,54 @@ namespace World
 		};
 
 		float DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect, void* instance,
-			const std::string& typeName, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect);
+			const std::string& typeName, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
 		float DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect);
 		float DrawTransformInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, TransformComponent& transform,
-			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect);
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
 		float DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
-			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect);
+			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
+
+		// ---- P4-U13b:prefab 实例条(选中实体属于某实例时画在组件列表最上方)----
+		// 实例归属/来源/覆盖计数来自宿主(Scene 持有实例记录);来源资产找不到时实例条
+		// 给出可读提示并进入只读:回滚/应用需要来源文件,断开链接仍可用(它是唯一出路)。
+		struct InstanceBarInfo
+		{
+			bool InInstance = false;
+			std::string Source;
+			size_t Overrides = 0;
+			bool SourceMissing = false;
+			bool CanRevert = false;
+			bool CanApply = false;
+			Entity Root;
+		};
+		InstanceBarInfo ResolveInstanceBar(PanelHost& host, Entity entity);
+		// 实例条布局:高度/按钮矩形先算出来,组件列表才知道要让出多少行(窄面板按钮换行)。
+		struct InstanceBarLayout
+		{
+			float Height = 0.0f;
+			Wui::WuiRect Buttons[3] {};
+			Wui::WuiRect Hint {};
+			bool HasHint = false;
+		};
+		InstanceBarLayout LayoutInstanceBar(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+			const InstanceBarInfo& info) const;
+		void DrawInstanceBar(Wui::WuiContext& ctx, PanelHost& host, const Wui::WuiRect& rect,
+			const InstanceBarInfo& info, const InstanceBarLayout& layout);
+		// Apply / Unpack 是破坏性动作:先弹确认模态(与"移除组件"同一套面板级模态)。
+		enum class PrefabAction { None = 0, Apply, Unpack };
+		PrefabAction m_PrefabActionPending = PrefabAction::None;
+		Entity m_PrefabActionRoot;
+		std::string m_PrefabActionSource;
+		void OpenPrefabActionConfirm(Wui::WuiContext& ctx, PrefabAction action, Entity root,
+			const std::string& source);
+		void ClosePrefabActionConfirm(Wui::WuiContext& ctx);
+		void DrawPrefabActionConfirm(Wui::WuiContext& ctx);
+		// 本帧被编辑的字段 → 实例覆盖登记(由"改动发生处"登记,不靠全量 diff 反推)。
+		void RegisterPrefabOverrides(Entity entity, const std::vector<std::string>& fields);
 
 		// ---- U6:Add Component 选择器(方案 §8.2;候选/分类/说明全部来自 schema)----
 		// 打开:清空上一次状态并聚焦搜索框;绘制:搜索框 + 分组列表(最近使用 → 分类 → 未分类)。
