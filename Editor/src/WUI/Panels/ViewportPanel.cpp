@@ -516,7 +516,14 @@ namespace World
 		}
 
 		// ---- 相机预览小窗(PiP):直接显示"场景相机看到的东西" ----
-		if (std::getenv("WLD_PHYSICS_DEBUG"))
+		//
+		// 物理调试线框(P1b D6)也画在这一段之前:P4-U4 起开关有两处来源 ——
+		// 场景头 `World.physics_debug`(设置面板可改、随场景保存)或环境变量
+		// `WLD_PHYSICS_DEBUG`(自动化/一次性诊断,保持向后兼容)。
+		const Ref<Scene> debugToggleScene = m_Host.GetActiveScene();
+		const bool physicsDebugEnabled = std::getenv("WLD_PHYSICS_DEBUG") != nullptr
+			|| (debugToggleScene && debugToggleScene->GetWorldSettings().PhysicsDebug);
+		if (physicsDebugEnabled)
 		{
 			// P1b D6:3D 物理调试线框(碰撞体世界空间线段,复用视锥那套投影/裁剪)。
 			// 只在世界已启动(Play/Simulate)时存在;缓冲按帧复用,避免每帧分配。

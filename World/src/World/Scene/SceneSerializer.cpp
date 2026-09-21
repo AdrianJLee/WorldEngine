@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <unordered_set>
 #include <yaml-cpp/yaml.h>
@@ -183,6 +184,19 @@ namespace World
 		{
 			out << YAML::Key << "FormatVersion" << YAML::Value << 2;
 			out << YAML::Key << "Scene" << YAML::Value << "Untitled";
+			// P4-U4:场景级设置。默认值**不写**(旧文件形态不变);旧引擎读新文件会忽略这个块。
+			{
+				const Scene::WorldSettings& world = m_Scene->GetWorldSettings();
+				if (!world.IsDefault())
+				{
+					out << YAML::Key << "World" << YAML::Value << YAML::BeginMap;
+					if (world.HasGravityOverride())
+						out << YAML::Key << "physics_gravity" << YAML::Value << world.Gravity;
+					if (world.PhysicsDebug)
+						out << YAML::Key << "physics_debug" << YAML::Value << true;
+					out << YAML::EndMap;
+				}
+			}
 			out << YAML::Key << "Entities" << YAML::Value << YAML::BeginSeq;
 
 			auto& entities = m_Scene->m_Registry.storage<entt::entity>();
@@ -331,6 +345,32 @@ namespace World
 		const std::string sceneName = data["Scene"].as<std::string>();
 		WLD_CORE_TRACE("Deserializing scene '{0}'", sceneName);
 		Schema::SchemaRegistry& schemas = m_Scene->GetContext().Schemas();
+
+		// P4-U4:场景级设置(缺块 = 全默认)。非法值不静默吞:记 warning 后按"未设置"处理。
+		m_Scene->GetWorldSettings() = Scene::WorldSettings {};
+		if (const YAML::Node world = data["World"])
+		{
+			if (!world.IsMap())
+			{
+				WLD_CORE_WARN("Scene 'World' must be a map in '{0}'; ignored", filepath);
+			}
+			else
+			{
+				Scene::WorldSettings& settings = m_Scene->GetWorldSettings();
+				if (world["physics_gravity"])
+				{
+					const float gravity = world["physics_gravity"].as<float>(
+						std::numeric_limits<float>::quiet_NaN());
+					if (std::isfinite(gravity))
+						settings.Gravity = gravity;
+					else
+						WLD_CORE_WARN("Scene 'World.physics_gravity' must be finite in '{0}'; using project gravity",
+							filepath);
+				}
+				if (world["physics_debug"])
+					settings.PhysicsDebug = world["physics_debug"].as<bool>(false);
+			}
+		}
 
 		auto entities = data["Entities"];
 		if (entities)

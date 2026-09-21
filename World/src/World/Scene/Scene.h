@@ -8,6 +8,8 @@
 #include <functional>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <thread>
@@ -42,6 +44,23 @@ namespace World
 		~Scene();
 		Scene(const Scene&) = delete;
 		Scene& operator=(const Scene&) = delete;
+
+		// P4-U4:场景级(World)设置 —— 存进 `.wd` 头部的 `World:` 块。
+		// 口径:只放"引擎**已经有实现**、但过去只能靠环境变量/项目清单"的 knob;
+		// 未设置 = 跟随项目/引擎默认(所以重力用 NaN 表达"不覆盖")。
+		struct WorldSettings
+		{
+			// 场景级重力(Y 轴,单位 m/s²)。NaN = 跟随 project.we.yaml 的 physics.gravity。
+			float Gravity = std::numeric_limits<float>::quiet_NaN();
+			// 视口里画物理碰撞体/接触点调试线段(过去只能 `WLD_PHYSICS_DEBUG=1`)。
+			bool PhysicsDebug = false;
+
+			bool HasGravityOverride() const { return std::isfinite(Gravity); }
+			// 是否有任何非默认值(决定要不要在 .wd 里写 `World:` 块)。
+			bool IsDefault() const { return !HasGravityOverride() && !PhysicsDebug; }
+		};
+		WorldSettings& GetWorldSettings() { return m_WorldSettings; }
+		const WorldSettings& GetWorldSettings() const { return m_WorldSettings; }
 
 		void OnUpdateEditor(Timestep ts, const EditorCamera& camera);
 		void OnUpdateRuntime(Timestep ts);
@@ -242,5 +261,7 @@ namespace World
 		std::vector<std::function<void(bool added, entt::entity entityA, entt::entity entityB)>> m_Physics3DContactCallbacks;
 		// 上次反序列化时未能识别的组件节点（按实体 UUID 保存原始 YAML 片段），供保存时回写，避免缺插件静默丢数据。
 		std::unordered_map<UUID, std::string> m_UnknownComponentNodes;
+		// P4-U4:场景级设置(.wd 头部的 World: 块)。
+		WorldSettings m_WorldSettings;
 	};
 }

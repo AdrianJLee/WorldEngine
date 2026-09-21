@@ -115,6 +115,17 @@ namespace World
 		}
 		// 切换渲染后端 = 需要重启编辑器(运行中热切换会串资源):面板改完立刻生效。
 		virtual void ApplyProjectRendererChange(const std::string& renderer) { (void)renderer; }
+		// P4-U4:项目级"资产导入默认值"(`project.we.yaml` 的 `imports:` 区块)。
+		// 实现口径:Locate → Load(保留其它字段与注释) → 只覆盖 ImportDefaults → Save,
+		// 并把值写进 `ModelImportSettings::SetProjectDefaults` —— 之后新建导入立刻按新默认走
+		// (已有 `.wimport` 的源不受影响:旁路文件仍然逐源优先)。
+		virtual bool SaveProjectImportDefaults(const Asset::ModelImportSettings& settings,
+			std::string* message = nullptr)
+		{
+			(void)settings;
+			if (message) *message = "settings panel is not wired to a host";
+			return false;
+		}
 		// ---- W9-2:内置脚本编辑器 ----
 		// 打开脚本编辑器(逻辑路径;每个脚本一个 "script:<逻辑路径>" 面板)。默认空实现。
 		// 实现必须是"创建后默认附加到主窗口"(用户 2026-09-18 决定)。

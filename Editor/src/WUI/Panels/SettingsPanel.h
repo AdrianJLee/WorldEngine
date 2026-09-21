@@ -29,6 +29,16 @@ namespace World
 		bool m_Initialized = false;
 		// P4-UX12:整个面板由设置注册表渲染(描述符在 RegisterProjectSettings 里注册一次)。
 		bool m_Registered = false;
+		// P4-U4(2026-09-21):另外两个作用域也进同一个面板(页签切换)。
+		//   tab 0 = Project(渲染/物理/启动/发行包),1 = Import Defaults,2 = World(场景级)。
+		int m_Tab = 0;
+		bool m_ImportRegistered = false;
+		bool m_WorldRegistered = false;
+		Editor::SettingsPageState m_ImportPage;
+		Editor::SettingsPageState m_WorldPage;
+		// 导入默认值的暂存副本(与渲染/物理同一套"改完防抖落盘"节奏)。
+		Asset::ModelImportSettings m_Import;
+		bool m_ImportDirty = false;
 		PanelHost* m_Host = nullptr;
 		Editor::SettingsPageState m_Page;
 		Asset::RenderingSettings m_Edit;
@@ -54,5 +64,9 @@ namespace World
 		bool m_PendingSave = false;
 		double m_LastChangeSeconds = 0.0;
 		void RegisterProjectSettings();
+		// P4-U4:project.we.yaml 的 `imports:`(资产导入默认值)。
+		void RegisterImportSettings();
+		// P4-U4:.wd 场景头的 `World:` 块(场景级设置;绑当前文档场景)。
+		void RegisterWorldSettings();
 	};
 }

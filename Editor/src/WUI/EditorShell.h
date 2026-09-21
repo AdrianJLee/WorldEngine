@@ -125,6 +125,9 @@ namespace World
 		// P4-1:物理设置写回 project.we.yaml(同一个面板的"保存")。
 		bool SaveProjectPhysicsSettings(const Asset::PhysicsSettingsData& settings,
 			std::string* message = nullptr) override;
+		// P4-U4:资产导入默认值(project.we.yaml 的 imports:)。
+		bool SaveProjectImportDefaults(const Asset::ModelImportSettings& settings,
+			std::string* message = nullptr) override;
 		bool SaveProjectStartupSettings(const std::string& renderer, const std::string& startScene,
 			const std::string& contentRoot, std::string* message = nullptr) override;
 		std::vector<std::string> ListProjectScenes() override;

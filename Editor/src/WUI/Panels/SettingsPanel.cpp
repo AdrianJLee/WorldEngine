@@ -297,6 +297,359 @@ namespace World
 		}
 	}
 
+	// P4-U4(2026-09-21):Asset Import Defaults —— project.we.yaml 的 `imports:`。
+	//
+	// 语义(与 .wimport 的分工):**旁路文件逐源优先**;这里改的是"源没有 .wimport 时"的默认,
+	// 所以它只影响之后的新导入(以及重新导入时仍然没有旁路文件的源),不会悄悄改变已有资产。
+	void SettingsPanel::RegisterImportSettings()
+	{
+		using Settings::SettingApply;
+		using Settings::SettingDescriptor;
+		using Settings::SettingOption;
+		using Settings::SettingsRegistry;
+		using Settings::SettingScope;
+		using Settings::SettingType;
+		using ReadFn = std::function<std::string()>;
+		using WriteFn = std::function<bool(const std::string&, std::string*)>;
+		using FlagFn = std::function<bool()>;
+
+		SettingsRegistry& registry = SettingsRegistry::Get();
+		registry.ClearScope(SettingScope::Import);
+
+		// 描述符长期持有这些 lambda:只捕获 this,不捕获局部量(面板重建后不会悬空)。
+		static const Asset::ModelImportSettings importDefaults;
+		const auto sameAsDefault = [this](const std::function<bool(const Asset::ModelImportSettings&,
+			const Asset::ModelImportSettings&)>& compare)
+		{
+			return FlagFn([this, compare] { return compare(m_Import, importDefaults); });
+		};
+
+		auto describe = [](const char* id, SettingType type, SettingApply apply, const char* label,
+			const char* tooltip, const char* unit, double min, double max, double step)
+		{
+			SettingDescriptor descriptor;
+			descriptor.Id = id;
+			descriptor.Group = "Model";
+			descriptor.Type = type;
+			descriptor.Scope = SettingScope::Import;
+			descriptor.Apply = apply;
+			descriptor.Label = label;
+			descriptor.Tooltip = tooltip;
+			descriptor.Unit = unit;
+			descriptor.Min = min;
+			descriptor.Max = max;
+			descriptor.Step = step;
+			return descriptor;
+		};
+		auto registerRow = [&registry](SettingDescriptor descriptor, ReadFn read, WriteFn write,
+			FlagFn isDefault, FlagFn reset)
+		{
+			descriptor.Read = std::move(read);
+			descriptor.Write = std::move(write);
+			descriptor.IsDefault = std::move(isDefault);
+			descriptor.Reset = std::move(reset);
+			registry.Register(std::move(descriptor));
+		};
+
+		// 缩放(导入期烘进几何/节点:1 = 原尺寸)
+		registerRow(describe("import.model.scale", SettingType::Float, SettingApply::Immediate,
+				"Model Scale", "模型缩放\n导入期把源放大/缩小后烘进几何与节点(不是运行时缩放)。\n默认:1.0。下次导入生效。",
+				"x", 0.001, 1000.0, 0.1),
+			[this] { return std::to_string(m_Import.Scale); },
+			[this](const std::string& value, std::string* error)
+			{
+				const float parsed = std::strtof(value.c_str(), nullptr);
+				if (!std::isfinite(parsed) || parsed <= 0.0f)
+				{
+					if (error) *error = Wui::Tr("settings.import.model.scale.error",
+						"Scale must be a positive number");
+					return false;
+				}
+				m_Import.Scale = parsed;
+				return true;
+			},
+			sameAsDefault([](const Asset::ModelImportSettings& a, const Asset::ModelImportSettings& b)
+				{ return std::fabs(a.Scale - b.Scale) < 1e-4f; }),
+			[this] { m_Import.Scale = importDefaults.Scale; return true; });
+
+		// 上轴(Y = 引擎坐标;Z = 绕 X 轴 -90° 烘焙)
+		{
+			SettingDescriptor descriptor = describe("import.model.up_axis", SettingType::Enum,
+				SettingApply::Immediate, "Source Up Axis",
+				"源上轴\nY = 已经是引擎坐标;Z = 导入期绕 X 轴 -90° 烘焙(Blender/多数 DCC 的默认)。\n默认:Y。",
+				"", 0.0, 0.0, 0.0);
+			descriptor.Options = {
+				{ "y", "Y (engine)" },
+				{ "z", "Z (convert)" },
+			};
+			registerRow(std::move(descriptor),
+				[this] { return m_Import.UpAxis == 1 ? "z" : "y"; },
+				[this](const std::string& value, std::string*)
+				{
+					m_Import.UpAxis = value == "z" ? 1 : 0;
+					return true;
+				},
+				sameAsDefault([](const Asset::ModelImportSettings& a, const Asset::ModelImportSettings& b)
+					{ return a.UpAxis == b.UpAxis; }),
+				[this] { m_Import.UpAxis = importDefaults.UpAxis; return true; });
+		}
+
+		struct BoolRow { const char* Id; const char* Label; const char* Tooltip; bool Asset::ModelImportSettings::* Field; };
+		static const BoolRow boolRows[] = {
+			{ "import.model.export_materials", "Export Materials",
+				"导出材质\n导入时为本模型产出/复用 .wmat。关掉=材质槽留空。\n默认:开。",
+				&Asset::ModelImportSettings::ExportMaterials },
+			{ "import.model.export_textures", "Export Textures",
+				"导出贴图\n把 glTF 内嵌/引用的贴图落到内容目录。关掉=材质贴图路径留空。\n默认:开。",
+				&Asset::ModelImportSettings::ExportTextures },
+			{ "import.model.import_animations", "Import Animations",
+				"导入动画\n读取 glTF animations 并烘成固定采样率的关键帧。\n默认:开。",
+				&Asset::ModelImportSettings::ImportAnimations },
+			{ "import.model.import_skins", "Import Skins",
+				"导入骨架\n关掉时蒙皮网格按静态处理(骨架/蒙皮数据不落盘)。\n默认:开。",
+				&Asset::ModelImportSettings::ImportSkins },
+			{ "import.model.generate_normals", "Generate Normals",
+				"补法线\n源缺法线时按面法线补齐;关掉则缺法线直接报错。\n默认:开。",
+				&Asset::ModelImportSettings::GenerateNormals },
+			{ "import.model.reuse_materials", "Reuse Materials",
+				"复用材质\n导入前算内容哈希,目标目录已有同内容材质就复用它的路径(否则每个模型一份副本)。\n默认:开。",
+				&Asset::ModelImportSettings::ReuseMaterials },
+			{ "import.model.reuse_textures", "Reuse Textures",
+				"复用贴图\n同材质复用的口径:同内容贴图复用同一份文件。\n默认:开。",
+				&Asset::ModelImportSettings::ReuseTextures },
+		};
+		for (const BoolRow& row : boolRows)
+		{
+			// 注意:这里不能写 `const bool ModelImportSettings::*`(那会变成"指向 const 成员的指针",
+			// 赋值被拒 C3892)。成员本身非 const,const 只在 const 行数组上。
+			bool Asset::ModelImportSettings::* field = row.Field;
+			registerRow(describe(row.Id, SettingType::Bool, SettingApply::Immediate, row.Label, row.Tooltip,
+					"", 0.0, 0.0, 0.0),
+				[this, field] { return (m_Import.*field) ? "true" : "false"; },
+				[this, field](const std::string& value, std::string*)
+				{
+					m_Import.*field = value == "true";
+					return true;
+				},
+				FlagFn([this, field] { return (m_Import.*field) == (importDefaults.*field); }),
+				FlagFn([this, field] { m_Import.*field = importDefaults.*field; return true; }));
+		}
+
+		// 动画采样率(Hz)
+		registerRow(describe("import.model.animation_sample_rate", SettingType::Float,
+				SettingApply::Immediate, "Animation Sample Rate",
+				"动画采样率\n导入期把 glTF 关键帧烘成等间隔关键帧(运行时不再解析插值器)。\n范围 1–120 Hz,默认 30。",
+				"Hz", 1.0, 120.0, 1.0),
+			[this] { return std::to_string(m_Import.AnimationSampleRate); },
+			[this](const std::string& value, std::string* error)
+			{
+				const float parsed = std::strtof(value.c_str(), nullptr);
+				if (!std::isfinite(parsed) || parsed < 1.0f || parsed > 120.0f)
+				{
+					if (error) *error = Wui::Tr("settings.import.model.animation_sample_rate.error",
+						"Sample rate must be in [1, 120] Hz");
+					return false;
+				}
+				m_Import.AnimationSampleRate = parsed;
+				return true;
+			},
+			sameAsDefault([](const Asset::ModelImportSettings& a, const Asset::ModelImportSettings& b)
+				{ return std::fabs(a.AnimationSampleRate - b.AnimationSampleRate) < 1e-4f; }),
+			[this] { m_Import.AnimationSampleRate = importDefaults.AnimationSampleRate; return true; });
+
+		// 共享材质查找目录(相对内容根;空 = 只在导入目的地里找)
+		{
+			SettingDescriptor descriptor = describe("import.model.shared_material_folder", SettingType::Text,
+				SettingApply::Immediate, "Shared Material Folder",
+				"共享材质目录\n复用查找的额外范围(相对内容根,如 materials/shared)。\n空 = 只在本次导入的目的地目录里找。",
+				"", 0.0, 0.0, 0.0);
+			registerRow(std::move(descriptor),
+				[this] { return m_Import.SharedMaterialFolder; },
+				[this](const std::string& value, std::string*)
+				{
+					m_Import.SharedMaterialFolder = value;
+					return true;
+				},
+				sameAsDefault([](const Asset::ModelImportSettings& a, const Asset::ModelImportSettings& b)
+					{ return a.SharedMaterialFolder == b.SharedMaterialFolder; }),
+				[this] { m_Import.SharedMaterialFolder = importDefaults.SharedMaterialFolder; return true; });
+		}
+	}
+
+	// P4-U4(2026-09-21):World / Scene Settings —— `.wd` 头部的 `World:` 块。
+	//
+	// 只放"引擎已经有实现、但过去只能靠环境变量或全局设置"的 knob(符合项目口径:
+	// 功能没实现就不进面板)。读写直接绑**当前文档场景**,改完标脏,落盘随"保存场景"。
+	void SettingsPanel::RegisterWorldSettings()
+	{
+		using Settings::SettingApply;
+		using Settings::SettingDescriptor;
+		using Settings::SettingsRegistry;
+		using Settings::SettingScope;
+		using Settings::SettingType;
+		using ReadFn = std::function<std::string()>;
+		using WriteFn = std::function<bool(const std::string&, std::string*)>;
+
+		SettingsRegistry& registry = SettingsRegistry::Get();
+		registry.ClearScope(SettingScope::World);
+
+		// 取当前文档场景;没有场景(未打开 .wd)时全部行禁用并写清原因 —— 而不是假装可改。
+		const auto worldOf = [this]() -> Scene* 
+		{
+			if (!m_Host)
+				return nullptr;
+			const Ref<Scene> scene = m_Host->GetActiveScene();
+			return scene.get();
+		};
+
+		// 物理调试线框:过去只有 WLD_PHYSICS_DEBUG 环境变量
+		{
+			SettingDescriptor descriptor;
+			descriptor.Id = "world.physics.debug";
+			descriptor.Group = "Physics";
+			descriptor.Type = SettingType::Bool;
+			descriptor.Scope = SettingScope::World;
+			descriptor.Apply = SettingApply::Immediate;
+			descriptor.Label = "Physics Debug Draw";
+			descriptor.Tooltip = "物理调试线框\n在视口里画出碰撞体/接触点的世界空间线段\n"
+				"(等价于环境变量 WLD_PHYSICS_DEBUG=1,但按场景保存)。\n默认:关。进入 Play/Simulate 后可见。";
+			descriptor.Read = [worldOf]()
+			{
+				const Scene* scene = worldOf();
+				return (scene && scene->GetWorldSettings().PhysicsDebug) ? "true" : "false";
+			};
+			descriptor.Write = [this, worldOf](const std::string& value, std::string* error)
+			{
+				Scene* scene = worldOf();
+				if (!scene)
+				{
+					if (error) *error = Wui::Tr("settings.world.no_scene",
+						"No scene is open — open a .wd first");
+					return false;
+				}
+				scene->GetWorldSettings().PhysicsDebug = value == "true";
+				return true;
+			};
+			descriptor.IsDefault = [worldOf]
+			{
+				const Scene* scene = worldOf();
+				return !scene || !scene->GetWorldSettings().PhysicsDebug;
+			};
+			descriptor.Reset = [this, worldOf]
+			{
+				Scene* scene = worldOf();
+				if (!scene) return false;
+				scene->GetWorldSettings().PhysicsDebug = false;
+				return true;
+			};
+			descriptor.IsEnabled = [worldOf] { return worldOf() != nullptr; };
+			descriptor.DisabledReason = "No scene is open — open a .wd first";
+			registry.Register(std::move(descriptor));
+		}
+
+		// 重力覆盖:模式(跟随项目/自定义)+ 值。值行只在自定义时可用。
+		SettingsRegistry& registryForMode = registry;
+		auto modeIsCustom = [worldOf]()
+		{
+			const Scene* scene = worldOf();
+			return scene && scene->GetWorldSettings().HasGravityOverride();
+		};
+		{
+			SettingDescriptor descriptor;
+			descriptor.Id = "world.physics.gravity_mode";
+			descriptor.Group = "Physics";
+			descriptor.Type = SettingType::Enum;
+			descriptor.Scope = SettingScope::World;
+			descriptor.Apply = SettingApply::NextPlay;
+			descriptor.Label = "Scene Gravity";
+			descriptor.Tooltip = "场景重力\n跟随项目 = 用 project.we.yaml 的 physics.gravity;\n"
+				"自定义 = 只覆盖当前场景(存在 .wd 场景头里)。\n默认:跟随项目。进入 Play 时生效。";
+			descriptor.Options = {
+				{ "project", "Follow project" },
+				{ "custom", "Custom" },
+			};
+			descriptor.Read = [modeIsCustom] { return modeIsCustom() ? "custom" : "project"; };
+			descriptor.Write = [this, worldOf](const std::string& value, std::string* error)
+			{
+				Scene* scene = worldOf();
+				if (!scene)
+				{
+					if (error) *error = Wui::Tr("settings.world.no_scene",
+						"No scene is open — open a .wd first");
+					return false;
+				}
+				if (value == "custom")
+				{
+					// 起点 = 项目重力,用户改数值时不会突然跳到 0。
+					if (!scene->GetWorldSettings().HasGravityOverride())
+						scene->GetWorldSettings().Gravity = PhysicsSettings::Get().Gravity;
+				}
+				else
+				{
+					scene->GetWorldSettings().Gravity = std::numeric_limits<float>::quiet_NaN();
+				}
+				return true;
+			};
+			descriptor.IsDefault = [modeIsCustom] { return !modeIsCustom(); };
+			descriptor.Reset = [this, worldOf]
+			{
+				Scene* scene = worldOf();
+				if (!scene) return false;
+				scene->GetWorldSettings().Gravity = std::numeric_limits<float>::quiet_NaN();
+				return true;
+			};
+			descriptor.IsEnabled = [worldOf] { return worldOf() != nullptr; };
+			descriptor.DisabledReason = "No scene is open — open a .wd first";
+			registryForMode.Register(std::move(descriptor));
+		}
+		{
+			SettingDescriptor descriptor;
+			descriptor.Id = "world.physics.gravity";
+			descriptor.Group = "Physics";
+			descriptor.Type = SettingType::Float;
+			descriptor.Scope = SettingScope::World;
+			descriptor.Apply = SettingApply::NextPlay;
+			descriptor.Label = "Scene Gravity Value";
+			descriptor.Tooltip = "场景重力值\nY 轴加速度(m/s²);只在上面的模式 = 自定义时生效。\n"
+				"默认:跟随项目。进入 Play 时生效。";
+			descriptor.Unit = "m/s²";
+			descriptor.Min = -100.0;
+			descriptor.Max = 100.0;
+			descriptor.Step = 0.1;
+			descriptor.Read = [worldOf, modeIsCustom]
+			{
+				const Scene* scene = worldOf();
+				if (!scene)
+					return std::string("0");
+				if (!modeIsCustom())
+					return std::to_string(PhysicsSettings::Get().Gravity);
+				return std::to_string(scene->GetWorldSettings().Gravity);
+			};
+			descriptor.Write = [this, worldOf](const std::string& value, std::string* error)
+			{
+				Scene* scene = worldOf();
+				if (!scene)
+				{
+					if (error) *error = Wui::Tr("settings.world.no_scene",
+						"No scene is open — open a .wd first");
+					return false;
+				}
+				const float parsed = std::strtof(value.c_str(), nullptr);
+				if (!std::isfinite(parsed))
+				{
+					if (error) *error = Wui::Tr("settings.world.physics.gravity.error",
+						"Gravity must be a finite number");
+					return false;
+				}
+				scene->GetWorldSettings().Gravity = parsed;
+				return true;
+			};
+			descriptor.IsEnabled = [modeIsCustom] { return modeIsCustom(); };
+			descriptor.DisabledReason = "Gravity mode is 'Follow project' — switch it to Custom first";
+			registry.Register(std::move(descriptor));
+		}
+	}
+
 	void SettingsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
@@ -319,6 +672,10 @@ namespace World
 				m_Startup.StartScene = manifest.StartScene;
 				m_Startup.ContentRoot = manifest.ContentRoot.generic_string();
 				m_Packages = manifest.Packages;
+				// P4-U4:导入默认值同源(清单是事实源);顺手写进进程级默认,让"打开面板"
+				// 这一动作就把本会话的导入默认值对齐到清单(与启动期 LoadProjectDefaults 幂等)。
+				m_Import = manifest.ImportDefaults;
+				Asset::ModelImportSettings::SetProjectDefaults(m_Import);
 			}
 			else
 			{
@@ -335,14 +692,73 @@ namespace World
 		}
 
 		const float pad = 10.0f;
-		const Wui::WuiRect page { rect.X + pad, rect.Y + pad, rect.W - pad * 2.0f,
-			std::max(120.0f, rect.H - pad * 2.0f - 116.0f) };
+		// P4-U4:四个作用域里的三个在**本面板**按页签分家(Editor Preferences 有自己的面板):
+		//   Project(渲染/物理/启动/发行包) | Import Defaults(project.we.yaml 的 imports:) |
+		//   World(.wd 场景头:物理调试 + 场景重力)。
+		// 为什么合成页签而不是三个面板:它们共享同一份"项目上下文",拆成三个面板会让
+		// Window 菜单里出现三个名字相近的入口;页签是 Unity/Blender 的同类做法。
+		const float tabHeight = 28.0f;
+		{
+			const std::vector<std::string> tabs {
+				Wui::Tr("panel.settings.tab.project", "Project"),
+				Wui::Tr("panel.settings.tab.imports", "Import Defaults"),
+				Wui::Tr("panel.settings.tab.world", "World"),
+			};
+			const Wui::WuiRect tabRect { rect.X + pad, rect.Y + 4.0f, rect.W - pad * 2.0f, tabHeight };
+			if (Wui::TabBar(ctx, Wui::HashId("settings.tabs"), tabRect, tabs, m_Tab, theme))
+			{
+				// 换页清搜索与滚动:否则会出现"页签变了、列表还是上一页的过滤结果"。
+				m_Page.Search.clear();
+				m_ImportPage.Search.clear();
+				m_WorldPage.Search.clear();
+			}
+		}
+		const float pageTop = rect.Y + 4.0f + tabHeight + 6.0f;
+		const Wui::WuiRect page { rect.X + pad, pageTop, rect.W - pad * 2.0f,
+			std::max(120.0f, rect.Y + rect.H - pageTop - 116.0f) };
 		const std::vector<std::string> groups { "Rendering", "Physics", "Startup" };
-		bool changed = Editor::DrawSettingsPage(ctx, page, theme, Settings::SettingScope::Project, groups, m_Page);
+		bool changed = false;
+		if (m_Tab == 0)
+		{
+			changed = Editor::DrawSettingsPage(ctx, page, theme, Settings::SettingScope::Project, groups, m_Page);
+		}
+		else if (m_Tab == 1)
+		{
+			if (!m_ImportRegistered)
+			{
+				RegisterImportSettings();
+				m_ImportRegistered = true;
+			}
+			if (Editor::DrawSettingsPage(ctx, page, theme, Settings::SettingScope::Import, { "Model" }, m_ImportPage))
+			{
+				m_ImportDirty = true;
+				m_LastChangeSeconds = SettingsNowSeconds();
+				m_Status = Wui::Tr("settings.status.applied", "Applied — saving…");
+				m_StatusIsError = false;
+			}
+		}
+		else
+		{
+			if (!m_WorldRegistered)
+			{
+				RegisterWorldSettings();
+				m_WorldRegistered = true;
+			}
+			if (Editor::DrawSettingsPage(ctx, page, theme, Settings::SettingScope::World, { "Physics" }, m_WorldPage))
+			{
+				// 场景级设置写进当前文档:标脏 + 立刻生效;落盘跟着"保存场景"走
+				// (与项目清单的自动保存不同 —— 场景保存是用户的显式动作)。
+				host.MarkDocumentDirty();
+				m_Status = Wui::Tr("settings.world.status.applied",
+					"Applied to the current scene — save the scene to keep it");
+				m_StatusIsError = false;
+			}
+		}
 
 		// 手写部分:发行包列表(project.we.yaml 的 `packages:`)。需要真正的"列表编辑"而不是一行文本,
 		// 所以不进注册表(注册表是"一行一个值"的模型)。
 		float y = page.Y + page.H + 6.0f;
+		if (m_Tab == 0)
 		{
 			const Wui::LocalizedLabel header = Wui::TrLabel("settings.group.packages", "Packages (distribution)");
 			Wui::LabelWithTerm(ctx, { rect.X + pad, y }, header.Text, header.Term, theme.TextMuted, 12.0f, theme);
@@ -428,6 +844,23 @@ namespace World
 				m_StatusIsError = true;
 			}
 			m_PendingSave = false;
+		}
+
+		// P4-U4:导入默认值走同一套防抖(拖滑杆/连点勾选时不每帧写盘)。
+		if (m_ImportDirty && SettingsNowSeconds() - m_LastChangeSeconds >= 0.4)
+		{
+			std::string message;
+			if (host.SaveProjectImportDefaults(m_Import, &message))
+			{
+				m_Status = Wui::Tr("settings.status.saved", "Saved automatically");
+				m_StatusIsError = false;
+			}
+			else
+			{
+				m_Status = message.empty() ? Wui::Tr("settings.status.save_failed", "Save failed") : message;
+				m_StatusIsError = true;
+			}
+			m_ImportDirty = false;
 		}
 
 		// 渲染后端"改了但还没重启":给一个显式入口(不替用户重启)。

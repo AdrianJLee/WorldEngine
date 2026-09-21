@@ -380,20 +380,13 @@ namespace World
 			Impl& m_Impl;
 		};
 
-		explicit Impl(Physics3DWorld& owner) : m_Owner(owner)
+		// gravityY 由 Physics3DWorld::Start(Scene&) 解析(P4-U4):场景头 `World.physics_gravity`
+		// 优先,未覆盖才落到项目清单 `physics.gravity`,最后才是引擎常量。
+		explicit Impl(Physics3DWorld& owner, float gravityY) : m_Owner(owner)
 		{
 			m_System.Init(kMaxBodies, /*inNumBodyMutexes=*/0, kMaxBodyPairs, kMaxContactConstraints,
 				m_BroadPhaseLayers, m_ObjectVsBroadPhaseFilter, m_ObjectLayerPairFilter);
-			// P4-1:重力来自项目清单 `physics.gravity`(PhysicsSettings);非法值(非有限)退化到
-			// 引擎默认 kGravity,保证"清单没写/写坏"时行为与旧版一致。
-			float gravity = PhysicsSettings::Get().Gravity;
-			if (!std::isfinite(gravity))
-			{
-				WLD_CORE_WARN("Physics3D: physics.gravity 非有限({0}),退回默认 {1}",
-					gravity, Physics3DWorld::kGravity);
-				gravity = Physics3DWorld::kGravity;
-			}
-			m_System.SetGravity(JPH::Vec3(0.0f, gravity, 0.0f));
+			m_System.SetGravity(JPH::Vec3(0.0f, gravityY, 0.0f));
 			m_System.SetContactListener(&m_ContactListener);
 		}
 
@@ -662,7 +655,19 @@ namespace World
 		AcquireJoltRuntime();
 		try
 		{
-			m_Impl = std::make_unique<Impl>(*this);
+			// P4-U4:重力解析顺序 = 场景覆盖 > 项目清单 > 引擎常量。
+			// 非法值(非有限)一律往下一级退化,保证"清单/场景头写坏"时行为可预测。
+			float gravity = PhysicsSettings::Get().Gravity;
+			if (!std::isfinite(gravity))
+			{
+				WLD_CORE_WARN("Physics3D: physics.gravity 非有限({0}),退回默认 {1}",
+					gravity, Physics3DWorld::kGravity);
+				gravity = Physics3DWorld::kGravity;
+			}
+			const float sceneOverride = scene.GetWorldSettings().Gravity;
+			if (std::isfinite(sceneOverride))
+				gravity = sceneOverride;
+			m_Impl = std::make_unique<Impl>(*this, gravity);
 			m_Impl->Start(scene);
 		}
 		catch (...)

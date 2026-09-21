@@ -3197,6 +3197,36 @@ namespace World
 		return true;
 	}
 
+	bool EditorShell::SaveProjectImportDefaults(const Asset::ModelImportSettings& settings,
+		std::string* message)
+	{
+		// P4-U4:与渲染/物理同一套"回写清单"口径(Load → 只覆盖 imports → Save)。
+		// 额外一步:写进进程级默认,让**本次会话之后的新导入**立刻按新默认走。
+		std::filesystem::path manifestPath;
+		if (!Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
+		{
+			if (message) *message = "找不到 project.we.yaml(工作目录下没有清单)";
+			return false;
+		}
+		Asset::ProjectManifest manifest;
+		std::string error;
+		if (!Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
+		{
+			if (message) *message = "清单读取失败: " + error;
+			return false;
+		}
+		manifest.ImportDefaults = settings;
+		if (!Asset::ProjectManifest::Save(manifestPath, manifest, &error))
+		{
+			if (message) *message = "清单写入失败: " + error;
+			return false;
+		}
+		Asset::ModelImportSettings::SetProjectDefaults(settings);
+		if (message)
+			*message = "已保存导入默认值到 " + manifestPath.filename().string();
+		return true;
+	}
+
 	// P4-UX11:项目启动项(renderer / start_scene / content_root)。
 	// 与渲染/物理同一套"回写清单"口径:Load(保留其它字段与注释风格) → 只覆盖这三项 → Save。
 	bool EditorShell::SaveProjectStartupSettings(const std::string& renderer, const std::string& startScene,

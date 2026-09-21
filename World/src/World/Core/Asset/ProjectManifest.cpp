@@ -132,6 +132,26 @@ namespace World::Asset
 				if (error) *error = "physics.gravity must be a finite number";
 				return false;
 			}
+			// P4-U4:导入默认值的范围校验(与 .wimport 的字段语义一致)。
+			if (!std::isfinite(manifest.ImportDefaults.Scale) || manifest.ImportDefaults.Scale <= 0.0f)
+			{
+				if (error) *error = "imports.scale must be a positive finite number: "
+					+ std::to_string(manifest.ImportDefaults.Scale);
+				return false;
+			}
+			if (manifest.ImportDefaults.UpAxis > 1)
+			{
+				if (error) *error = "imports.up_axis must be 'Y' or 'Z'";
+				return false;
+			}
+			if (!std::isfinite(manifest.ImportDefaults.AnimationSampleRate)
+				|| manifest.ImportDefaults.AnimationSampleRate < 1.0f
+				|| manifest.ImportDefaults.AnimationSampleRate > 120.0f)
+			{
+				if (error) *error = "imports.animation_sample_rate must be in [1, 120]: "
+					+ std::to_string(manifest.ImportDefaults.AnimationSampleRate);
+				return false;
+			}
 			for (std::string& package : manifest.Packages)
 				if (!ValidateRelativePath(package, &package, error))
 					return false;
@@ -398,6 +418,26 @@ namespace World::Asset
 			};
 		}
 
+		// P4-U4:`imports:` 区块(资产导入默认值)。`model.` 前缀是刻意留的:贴图/音频等
+		// 后续导入设置按 `<类型>.<字段>` 继续加,不会和模型字段撞名。
+		std::vector<ManifestKeyValue> ImportsKeyValues(const ProjectManifest& manifest)
+		{
+			const ModelImportSettings& imports = manifest.ImportDefaults;
+			return {
+				{ "model.scale", FormatFloatValue(imports.Scale) },
+				{ "model.up_axis", imports.UpAxis == 1 ? "\"Z\"" : "\"Y\"" },
+				{ "model.export_materials", FormatBoolValue(imports.ExportMaterials) },
+				{ "model.export_textures", FormatBoolValue(imports.ExportTextures) },
+				{ "model.import_animations", FormatBoolValue(imports.ImportAnimations) },
+				{ "model.import_skins", FormatBoolValue(imports.ImportSkins) },
+				{ "model.generate_normals", FormatBoolValue(imports.GenerateNormals) },
+				{ "model.reuse_materials", FormatBoolValue(imports.ReuseMaterials) },
+				{ "model.reuse_textures", FormatBoolValue(imports.ReuseTextures) },
+				{ "model.animation_sample_rate", FormatFloatValue(imports.AnimationSampleRate) },
+				{ "model.shared_material_folder", "\"" + imports.SharedMaterialFolder + "\"" },
+			};
+		}
+
 		struct TextEdit
 		{
 			size_t Start = 0;    // 原始行下标
@@ -471,6 +511,12 @@ namespace World::Asset
 
 			MergeManifestBlock(lines, edits, appended, "rendering", RenderingKeyValues(manifest), eol);
 			MergeManifestBlock(lines, edits, appended, "physics", PhysicsKeyValues(manifest), eol);
+			// `imports:` 只在"确实有非默认值"或"文件里已经有这个块"时才合并 ——
+			// 否则保存一次随便什么设置就会给每个项目的清单塞进 11 行默认值。
+			const bool importsPresent = FindTopLevelKey(lines, "imports") != kNoLine;
+			if (importsPresent || ModelImportSettings::Hash(manifest.ImportDefaults)
+				!= ModelImportSettings::Hash(ModelImportSettings::Default()))
+				MergeManifestBlock(lines, edits, appended, "imports", ImportsKeyValues(manifest), eol);
 
 			// `packages:` 是序列:key 级合并对列表项没有意义,整块按当前值重写
 			// (块前的注释行不在块内,自然保留)。
@@ -629,6 +675,46 @@ namespace World::Asset
 				if (physics["gravity"])
 					manifest.Physics.Gravity = physics["gravity"].as<float>(manifest.Physics.Gravity);
 			}
+			// P4-U4:`imports:` = 资产导入默认值(当前只有模型导入的字段)。
+			// key 用**扁平点号**(`model.scale`),与 `rendering`/`physics` 一样保持"区块内一级 key",
+			// 这样 key 级文本合并不需要支持嵌套;`model.` 前缀给后续贴图/音频导入设置留位。
+			// 缺块 = 保持 ModelImportSettings::Default()(与旧清单逐字节兼容)。
+			if (const YAML::Node imports = root["imports"])
+			{
+				if (!imports.IsMap())
+				{
+					if (error) *error = "manifest 'imports' must be a map: " + path.string();
+					return false;
+				}
+				auto readBool = [&imports](const char* key, bool fallback)
+				{
+					return imports[key] ? imports[key].as<bool>(fallback) : fallback;
+				};
+				ModelImportSettings& target = manifest.ImportDefaults;
+				if (imports["model.scale"])
+					target.Scale = imports["model.scale"].as<float>(target.Scale);
+				if (imports["model.up_axis"])
+				{
+					const std::string axis = imports["model.up_axis"].as<std::string>("Y");
+					// 只认 Y / Z(大小写不敏感);其它值保持默认并在校验期报错(不静默吞)。
+					target.UpAxis = (axis == "Z" || axis == "z") ? 1 : 0;
+					if (!(axis == "Z" || axis == "z" || axis == "Y" || axis == "y"))
+						manifest.ImportDefaults.UpAxis = 2;   // 哨兵:交给 ValidateManifest 拒绝
+				}
+				target.ExportMaterials = readBool("model.export_materials", target.ExportMaterials);
+				target.ExportTextures = readBool("model.export_textures", target.ExportTextures);
+				target.ImportAnimations = readBool("model.import_animations", target.ImportAnimations);
+				target.ImportSkins = readBool("model.import_skins", target.ImportSkins);
+				target.GenerateNormals = readBool("model.generate_normals", target.GenerateNormals);
+				target.ReuseMaterials = readBool("model.reuse_materials", target.ReuseMaterials);
+				target.ReuseTextures = readBool("model.reuse_textures", target.ReuseTextures);
+				if (imports["model.animation_sample_rate"])
+					target.AnimationSampleRate =
+						imports["model.animation_sample_rate"].as<float>(target.AnimationSampleRate);
+				if (imports["model.shared_material_folder"])
+					target.SharedMaterialFolder =
+						imports["model.shared_material_folder"].as<std::string>(target.SharedMaterialFolder);
+			}
 			if (!ValidateManifest(manifest, error))
 				return false;
 			*out = std::move(manifest);
@@ -678,6 +764,25 @@ namespace World::Asset
 			out << YAML::Key << "fixed_step_hz" << YAML::Value << copy.Physics.FixedStepHz;
 			out << YAML::Key << "gravity" << YAML::Value << copy.Physics.Gravity;
 			out << YAML::EndMap;
+			// P4-U4:导入默认值(缺省时不写,保持旧清单形态;只有非默认才落盘)。
+			if (ModelImportSettings::Hash(copy.ImportDefaults)
+				!= ModelImportSettings::Hash(ModelImportSettings::Default()))
+			{
+				out << YAML::Key << "imports" << YAML::Value << YAML::BeginMap;
+				const ModelImportSettings& imports = copy.ImportDefaults;
+				out << YAML::Key << "model.scale" << YAML::Value << imports.Scale;
+				out << YAML::Key << "model.up_axis" << YAML::Value << (imports.UpAxis == 1 ? "Z" : "Y");
+				out << YAML::Key << "model.export_materials" << YAML::Value << imports.ExportMaterials;
+				out << YAML::Key << "model.export_textures" << YAML::Value << imports.ExportTextures;
+				out << YAML::Key << "model.import_animations" << YAML::Value << imports.ImportAnimations;
+				out << YAML::Key << "model.import_skins" << YAML::Value << imports.ImportSkins;
+				out << YAML::Key << "model.generate_normals" << YAML::Value << imports.GenerateNormals;
+				out << YAML::Key << "model.reuse_materials" << YAML::Value << imports.ReuseMaterials;
+				out << YAML::Key << "model.reuse_textures" << YAML::Value << imports.ReuseTextures;
+				out << YAML::Key << "model.animation_sample_rate" << YAML::Value << imports.AnimationSampleRate;
+				out << YAML::Key << "model.shared_material_folder" << YAML::Value << imports.SharedMaterialFolder;
+				out << YAML::EndMap;
+			}
 			out << YAML::Key << "packages" << YAML::Value << YAML::BeginSeq;
 			for (const std::string& package : copy.Packages)
 				out << package;

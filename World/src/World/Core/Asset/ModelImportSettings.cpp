@@ -1,6 +1,7 @@
 #include "wldpch.h"
 #include "World/Core/Asset/ModelImportSettings.h"
 
+#include "World/Core/Asset/ProjectManifest.h"
 #include "World/WUI/WuiJson.h"
 
 #include <algorithm>
@@ -67,7 +68,9 @@ namespace World::Asset
 	{
 		if (reason)
 			reason->clear();
-		ModelImportSettings settings = Default();
+		// P4-U4:没有 `.wimport` 时用**项目级导入默认**(project.we.yaml 的 imports:);
+		// 未设置时它就是 Default(),与旧行为逐字节一致。
+		ModelImportSettings settings = ProjectDefaults();
 		if (sourcePath.empty())
 		{
 			Warn(reason, "source path is empty; using default import settings");
@@ -77,7 +80,7 @@ namespace World::Asset
 		const std::filesystem::path path = SettingsPath(sourcePath);
 		std::error_code existsEc;
 		if (!std::filesystem::is_regular_file(path, existsEc))
-			return settings;   // 缺文件 = 默认值,正常情况,不报错
+			return settings;   // 缺文件 = 项目默认值(未设置时=引擎默认),正常情况,不报错
 
 		std::string text;
 		if (!ReadText(path, text) || text.empty())
@@ -213,6 +216,44 @@ namespace World::Asset
 					+ "': sharedMaterialFolder is not a string; using empty");
 		}
 		return settings;
+	}
+
+	// ---- P4-U4:项目级导入默认值 ----
+	// 进程内缓存(与 PhysicsSettings 同款):清单是事实源,这里只是"当前生效值"。
+	// 用函数内 static 而不是全局对象:避免静态初始化顺序问题(DLL 里尤其明显)。
+	namespace
+	{
+		ModelImportSettings& ProjectDefaultsStorage()
+		{
+			static ModelImportSettings defaults;
+			return defaults;
+		}
+	}
+
+	void ModelImportSettings::SetProjectDefaults(const ModelImportSettings& settings)
+	{
+		ProjectDefaultsStorage() = settings;
+	}
+
+	const ModelImportSettings& ModelImportSettings::ProjectDefaults()
+	{
+		return ProjectDefaultsStorage();
+	}
+
+	bool ModelImportSettings::LoadProjectDefaults(const std::string& manifestPath)
+	{
+		// 循环包含规避:ProjectManifest.h 里放了 ModelImportSettings 字段,这里只在 .cpp 里用它。
+		std::string error;
+		ProjectManifest manifest;
+		if (manifestPath.empty() || !ProjectManifest::Load(manifestPath, &manifest, &error))
+		{
+			WLD_CORE_WARN("[import] 读取项目导入默认值失败({0});回到引擎默认",
+				error.empty() ? std::string("manifest path is empty") : error);
+			SetProjectDefaults(Default());
+			return false;
+		}
+		SetProjectDefaults(manifest.ImportDefaults);
+		return true;
 	}
 
 	bool ModelImportSettings::Save(const std::string& sourcePath, const ModelImportSettings& settings,

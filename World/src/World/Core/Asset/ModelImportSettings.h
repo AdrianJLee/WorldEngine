@@ -34,6 +34,18 @@ namespace World::Asset
 
 		static ModelImportSettings Default() { return ModelImportSettings {}; }
 
+		// ---- P4-U4:项目级导入默认值(project.we.yaml 的 `imports:` 区块) ----
+		//
+		// 语义:`.wimport` 旁路文件仍然**逐源优先**;只有"源没有 .wimport"时才用这份项目默认。
+		// 存法:`ProjectManifest::ImportDefaults` 是清单里的事实源,`LoadProjectDefaults(manifestPath)`
+		// 负责把它读进这里的进程级缓存(与 PhysicsSettings/RenderSettings 同一套"项目设置"模式);
+		// 编辑器设置面板改完立刻 SetProjectDefaults + 写清单,新建导入立刻按新默认走。
+		static void SetProjectDefaults(const ModelImportSettings& settings);
+		static const ModelImportSettings& ProjectDefaults();
+		// 读项目清单的 `imports:` 并写入进程级默认;清单缺该块 = 回到 Default()。
+		// 返回是否成功读到清单(清单本身缺失/坏掉 → false,并把默认值复位成 Default())。
+		static bool LoadProjectDefaults(const std::string& manifestPath);
+
 		// 读取同目录的 .wimport;缺失 → Default() + reason 为空(正常情况)。
 		static ModelImportSettings Load(const std::string& sourcePath, std::string* reason = nullptr);
 		// 将设置写到与源同目录同名的 .wimport;失败写 reason。
