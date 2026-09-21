@@ -533,6 +533,30 @@ namespace World
 		return m_Editor.InstantiatePrefabAsset(logicalPath, message);
 	}
 
+	// P4-U13d:创建预制体 —— 面板与 AI 通道共用 EditorLayer 的那一条内核(写盘/日志/选中/开窗口)。
+	bool EditorShell::CreatePrefabFromSelection(Entity root, const std::string& logicalPath, bool overwrite,
+		std::string* message)
+	{
+		return m_Editor.CreatePrefabFromSelection(root, logicalPath, overwrite, message);
+	}
+
+	// P4-U13d:内容浏览器选中一个刚创建/刚生成的资产(必要时先导航到它所在的目录)。
+	bool EditorShell::SelectContentAsset(const std::string& logicalPath, const char* op)
+	{
+		const std::string panel = "content_browser";
+		// 面板被关掉时先让它回到停靠树:创建完看不到"被选中的新资产"等于没回显
+		// (与打开导入位置模态前同一条处理)。
+		if (!m_Layout.Contains(panel))
+			DockPanelBackToTree(panel);
+		const auto found = m_PanelRegistry.find(panel);
+		if (found == m_PanelRegistry.end())
+			return false;
+		auto* browser = dynamic_cast<ContentBrowserPanel*>(found->second.get());
+		if (!browser)
+			return false;
+		return browser->SelectAsset(logicalPath, op);
+	}
+
 	bool EditorShell::PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,
 		Entity* root)
 	{

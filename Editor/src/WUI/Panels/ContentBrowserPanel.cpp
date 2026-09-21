@@ -782,6 +782,25 @@ namespace World
 			m_Ctx->RecordOp("browser", op, path.filename().string(), "");
 	}
 
+	// P4-U13d:按逻辑路径选中一个已存在的资产(创建预制体成功后由宿主调用)。
+	// 选中的路径存的是**绝对路径**(与 SelectCreated / 内容区切片一致);目标不在当前目录时
+	// 先导航过去(导航会清选中,所以选中必须放在导航之后)。
+	bool ContentBrowserPanel::SelectAsset(const std::string& logicalPath, const char* op)
+	{
+		std::string normalized = logicalPath;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		if (normalized.empty())
+			return false;
+		const std::filesystem::path absolute = m_Model.Root / std::filesystem::path(normalized);
+		std::error_code ec;
+		if (!std::filesystem::exists(absolute, ec))
+			return false;
+		if (absolute.parent_path() != m_Model.Current)
+			Navigate(absolute.parent_path());
+		SelectCreated(absolute, op);
+		return true;
+	}
+
 	bool ContentBrowserPanel::CreateMaterialAsset(const std::filesystem::path& dir, std::string* error,
 		std::filesystem::path* outPath)
 	{
@@ -1299,6 +1318,32 @@ namespace World
 	{
 		m_Ctx = &ctx;
 		const Wui::WuiTheme& theme = host.Theme();
+		// P4-U13d:选中状态进无障碍树 —— 创建资产(预制体等)之后,脚本/读屏要能确认
+		// "内容浏览器真的选中了哪个资产"。此前选中只画在画面上,ui.tree 读不到。
+		{
+			std::string selectedText;
+			if (!m_Model.LastSelected.empty())
+			{
+				std::error_code selectionError;
+				const std::filesystem::path relative =
+					std::filesystem::relative(m_Model.LastSelected, m_Model.Root, selectionError);
+				selectedText = selectionError ? m_Model.LastSelected.generic_string()
+					: relative.generic_string();
+			}
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("browser.selection");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.content_browser.selection", "Selected asset");
+			node.Value = selectedText;   // 逻辑路径;空 = 当前没有选中
+			node.Tooltip = Wui::Tr("panel.content_browser.selection.tooltip",
+				"Logical path of the selected asset (empty = nothing selected)");
+			node.Rect = rect;
+			node.Enabled = true;
+			node.Interactive = false;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
 		// D10:OS 文件拖放(资源管理器 → 窗口)。平台层把拖入路径记在**收到拖放的窗口**上,
 		// 这里消费主窗口的队列:`.gltf/.glb` → 导入到**当前文件夹**(用户 Q1/Q2);
 		// 其它类型明确提示"不支持该类型",不静默丢弃。

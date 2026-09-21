@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "HierarchyPanel.h"
+#include "EditorAssetCatalog.h"
 
 #include "World/Core/KeyCodes.h"
 #include "World/Scene/Components.h"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <functional>
 #include <unordered_set>
 
@@ -25,19 +27,6 @@ namespace World
 		// P4-U13b:实例行左侧的标记列宽度。根行画 accent 徽标、子树内的其它行画淡色点;
 		// 行文本按 Indent 偏移,所以徽标列不会压到"折叠标记 + 名字"(不需要往文本里塞空格)。
 		constexpr float kPrefabMarkerSlot = 20.0f;
-
-		// 解析内容根(开发布局为 Game/assets,打包布局由清单决定);失败时返回空路径。
-		std::filesystem::path ResolveContentRoot()
-		{
-			std::filesystem::path manifestPath;
-			if (!World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
-				return {};
-			std::string error;
-			World::Asset::ProjectManifest manifest;
-			if (!World::Asset::ProjectManifest::Load(manifestPath, &manifest, &error))
-				return {};
-			return manifest.ResolveContentRoot(manifestPath);
-		}
 
 		// 面板内无障碍登记(与 WuiWidgets.cpp 的 RegisterAccessNode 同一格式):
 		// 徽标/菜单说明这类"看得见但读不到"的信息统一进树。
@@ -71,6 +60,38 @@ namespace World
 				+ record.PrefabPath
 				+ " (" + count + ") "
 				+ Wui::Tr("panel.hierarchy.prefab.overrides", "override(s)");
+		}
+
+		// P4-U13d:模态里的动作按钮(与属性面板实例条 / prefab 窗口同一套画法)。
+		// 主按钮走 accent 填充(创建 / 覆盖),次按钮走常规 Button 画法;不可用时弱化绘制,
+		// 并把"为什么不可用"同时写进无障碍节点(Tooltip)与悬停提示 —— 灰按钮不能没有理由。
+		bool ModalActionButton(Wui::WuiContext& ctx, Wui::WuiId id, const Wui::WuiRect& rect,
+			const std::string& label, const std::string& tooltip, bool enabled, bool primary,
+			const Wui::WuiTheme& theme)
+		{
+			const bool hovered = ctx.IsHovered(rect);
+			const Wui::WuiColor fill = !enabled ? theme.PanelBg
+				: (primary ? theme.Accent : (hovered ? theme.ButtonHover : theme.ButtonBg));
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, fill, 3.0f });
+			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect,
+				enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f });
+			// accent 填充上要压深色文字(白字对比度不够);禁用态用 TextDisabled。
+			const Wui::WuiColor textColor = !enabled ? theme.TextDisabled
+				: (primary ? theme.WindowBg : theme.Text);
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+				{ rect.X + 9.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0.0f, 0.0f },
+				textColor, 0.0f, 1.0f, label, 15.0f, false });
+			RegisterAccessNode(id, "button", rect, label, tooltip, enabled, tooltip, true);
+			Wui::DrawFocusRing(ctx, rect, id, theme);
+			ctx.RegisterFocusable(id, rect);
+			if (hovered)
+			{
+				if (enabled)
+					ctx.SetCursor(Wui::WuiCursor::Hand);
+				if (!tooltip.empty())
+					ctx.SetTooltip(tooltip);
+			}
+			return enabled && ctx.IsClicked(rect);
 		}
 
 		// 沿父链找实例记录(成员行画点、菜单动作都用它;深度上限防非法层级死循环)。
@@ -590,35 +611,21 @@ namespace World
 					host.MarkDocumentDirty();
 					ctx.CloseAllPopups();
 				}
-				// W4-2c:把选中实体的子树导出为 .wprefab(落在内容根 prefabs/ 下)。
-				// 说明:首版不做文件对话框,固定目录 + 以 Tag 命名,便于立刻验证拖拽实例化链路。
-				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.exportprefab"),
-					nextItem(), "Export as Prefab (.wprefab)", theme))
+				// P4-U13d:把"做成 prefab"变成一次有回显、可撤销意图的操作 —— 打开居中模态
+				// (名称 / 目录 / 实时落点 / 覆盖与非法名校验),确认后才写盘。
+				// 旧行为(固定 prefabs/<Tag>.wprefab、同名静默覆盖、导出后无回显)已删除。
+				const Wui::WuiRect exportItem = nextItem();
+				const bool canCreatePrefab = !host.IsReadOnlyMode();
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.exportprefab"), exportItem,
+					Wui::Tr("panel.hierarchy.create_prefab.menu", "Create Prefab from Selection…"),
+					theme, canCreatePrefab))
 				{
-					const std::filesystem::path contentRoot = ResolveContentRoot();
-					if (contentRoot.empty())
-					{
-						WLD_CORE_WARN("Export Prefab: content root not found (project.we.yaml?)");
-					}
-					else
-					{
-						std::string tag = m_Context.GetComponent<TagComponent>().Tag;
-						if (tag.empty())
-							tag = "Prefab";
-						for (char& ch : tag)
-							if (ch == ' ' || ch == '/' || ch == '\\' || ch == ':')
-								ch = '_';
-						const std::filesystem::path output =
-							contentRoot / "prefabs" / (tag + ".wprefab");
-						std::filesystem::create_directories(output.parent_path());
-						std::string error;
-						if (Gameplay::SaveFromScene(*scene, m_Context, output, &error))
-							WLD_CORE_INFO("Prefab exported: {0}", output.generic_string());
-						else
-							WLD_CORE_WARN("Export Prefab failed: {0}", error);
-					}
+					OpenCreatePrefabModal(ctx, host, m_Context);
 					ctx.CloseAllPopups();
 				}
+				else if (!canCreatePrefab && ctx.IsHovered(exportItem))
+					ctx.SetTooltip(Wui::Tr("panel.hierarchy.create_prefab.blocked",
+						"Unavailable while Play/Simulate is running"));
 				// P4-U13b:实例行 —— 来源说明 + 三个动作(记录由 Scene 持有,不再有面板私有表)。
 				if (contextRecord)
 				{
@@ -764,6 +771,10 @@ namespace World
 		// ---- P4-U13b:实例破坏性动作的确认模态(与属性面板"移除组件"同一套模态通道)----
 		if (m_PrefabConfirm != PrefabConfirmAction::None)
 			DrawPrefabConfirm(ctx, host);
+
+		// ---- P4-U13d:创建预制体模态(名称 / 目录 / 实时落点 / 覆盖与非法名校验)----
+		if (m_CreateOpen)
+			DrawCreatePrefabModal(ctx, host);
 	}
 
 	void HierarchyPanel::OpenPrefabConfirm(Wui::WuiContext& ctx, PanelHost& host,
@@ -860,6 +871,276 @@ namespace World
 		Wui::EndModalFrame(ctx);
 		if (closeRequested && ctx.Modal() == frameDesc.Id)
 			ClosePrefabConfirm(ctx, host);
+	}
+
+	// ---- P4-U13d:创建预制体模态(名称 / 目录 / 实时落点 / 覆盖与非法名校验)----
+	//
+	// 用户反馈「你这 wprefab 啥呀,太难用了」:旧入口固定 prefabs/<Tag>.wprefab + 静默覆盖 +
+	// 无任何回显。现在打开居中模态,落点、后缀、覆盖结果都在确认前可见;确认后由宿主同一条
+	// 内核写盘(写盘成功还会在内容浏览器里选中它并打开资产窗口)。
+	void HierarchyPanel::OpenCreatePrefabModal(Wui::WuiContext& ctx, PanelHost& host, Entity root)
+	{
+		if (!root.IsValid())
+			return;
+		m_CreateRoot = root;
+		m_CreateOpen = true;
+		m_CreateOpenedFrame = ctx.Frame();
+		m_CreateFailure.clear();
+		m_CreateFailureFor.clear();
+		// 默认名称 = 实体 Tag(空 Tag 用 "Prefab")。Tag 里的非法字符不在这里偷偷改写 ——
+		// 让用户看见原因,而不是拿到一个不明所以的文件名。
+		std::string name = root.HasComponent<TagComponent>()
+			? root.GetComponent<TagComponent>().Tag : std::string();
+		if (name.empty())
+			name = "Prefab";
+		m_CreateName = name;
+		// 目录清单 = 内容根下的目录 + 默认 prefabs/(不存在也列出来,由提示行说明"会新建")。
+		m_CreateFolders = Editor::AssetCatalog::Dirs();
+		const std::string defaultFolder = "prefabs";
+		if (std::find(m_CreateFolders.begin(), m_CreateFolders.end(), defaultFolder) == m_CreateFolders.end())
+		{
+			m_CreateFolders.push_back(defaultFolder);
+			std::sort(m_CreateFolders.begin(), m_CreateFolders.end());
+		}
+		const auto found = std::find(m_CreateFolders.begin(), m_CreateFolders.end(), defaultFolder);
+		m_CreateFolderIndex = found == m_CreateFolders.end()
+			? 0 : static_cast<int>(found - m_CreateFolders.begin());
+		ctx.SetModal(Wui::HashId("prefab.create.modal"));
+		host.SetPanelModalOwner(Id());
+		ctx.SetFocus(Wui::HashId("prefab.create.name"));
+		ctx.RecordOp("hierarchy", "create-prefab-ask", name, defaultFolder);
+	}
+
+	void HierarchyPanel::CloseCreatePrefabModal(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		m_CreateOpen = false;
+		m_CreateRoot = Entity();
+		m_CreateFailure.clear();
+		m_CreateFailureFor.clear();
+		m_CreateFolders.clear();
+		m_CreateFolderIndex = 0;
+		// 只清自己的模态 id:模态被别处抢走时不要顺手清掉别人的。
+		if (ctx.Modal() == Wui::HashId("prefab.create.modal"))
+			ctx.ClearModal();
+		ctx.ClosePopup(Wui::HashId("prefab.create.folder"));
+		host.SetPanelModalOwner(std::string());
+	}
+
+	std::string HierarchyPanel::CreatePrefabBaseName() const
+	{
+		std::string name = m_CreateName;
+		const auto notSpace = [](unsigned char ch) { return std::isspace(ch) == 0; };
+		name.erase(name.begin(), std::find_if(name.begin(), name.end(), notSpace));
+		name.erase(std::find_if(name.rbegin(), name.rend(), notSpace).base(), name.end());
+		// 用户可能连后缀一起打进来;剥掉重复的 .wprefab(大小写不敏感)——后缀在预览行里常显。
+		constexpr size_t kSuffixLength = 8;   // ".wprefab"
+		if (name.size() > kSuffixLength)
+		{
+			std::string suffix = name.substr(name.size() - kSuffixLength);
+			std::transform(suffix.begin(), suffix.end(), suffix.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			if (suffix == ".wprefab")
+				name = name.substr(0, name.size() - kSuffixLength);
+		}
+		return name;
+	}
+
+	std::string HierarchyPanel::CreatePrefabTarget() const
+	{
+		const std::string name = CreatePrefabBaseName();
+		std::string folder;
+		if (m_CreateFolderIndex >= 0 && m_CreateFolderIndex < static_cast<int>(m_CreateFolders.size()))
+			folder = m_CreateFolders[static_cast<size_t>(m_CreateFolderIndex)];
+		std::string target = folder.empty() ? std::string() : (folder + "/");
+		target += name.empty() ? std::string("(name)") : name;
+		target += ".wprefab";
+		return target;
+	}
+
+	std::string HierarchyPanel::CreatePrefabNameError() const
+	{
+		const std::string name = CreatePrefabBaseName();
+		if (name.empty())
+			return Wui::Tr("panel.hierarchy.create_prefab.name.empty", "Name cannot be empty");
+		if (name == "." || name == "..")
+			return Wui::Tr("panel.hierarchy.create_prefab.name.dot", "Name cannot be '.' or '..'");
+		for (const char ch : name)
+			if (ch == '\\' || ch == '/' || ch == ':' || ch == '*' || ch == '?'
+				|| ch == '"' || ch == '<' || ch == '>' || ch == '|')
+				return Wui::Tr("panel.hierarchy.create_prefab.name.illegal",
+					"Name cannot contain \\ / : * ? \" < > |");
+		if (name.back() == '.' || name.back() == ' ')
+			return Wui::Tr("panel.hierarchy.create_prefab.name.trailing",
+				"Name cannot end with a dot or a space");
+		return {};
+	}
+
+	void HierarchyPanel::DrawCreatePrefabModal(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		const Wui::WuiId modalId = Wui::HashId("prefab.create.modal");
+		if (!m_CreateRoot.IsValid())
+		{
+			CloseCreatePrefabModal(ctx, host);
+			return;
+		}
+		const Wui::WuiTheme& theme = host.Theme();
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("panel.hierarchy.create_prefab.title", "Create Prefab from Selection");
+		frameDesc.Size = { 560.0f, 330.0f };
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
+		{
+			// 模态已被别处清掉:收回面板级模态占用,不留悬空状态。
+			CloseCreatePrefabModal(ctx, host);
+			return;
+		}
+		const Wui::WuiId nameId = Wui::HashId("prefab.create.name");
+		const Wui::WuiId folderId = Wui::HashId("prefab.create.folder");
+		const bool folderPopupWasOpen = ctx.IsPopupOpen(folderId);
+		const bool justOpened = ctx.Frame() == m_CreateOpenedFrame;
+		const float labelX = frame.X + 16.0f;
+		const float fieldX = frame.X + 110.0f;
+		const float fieldW = frame.W - 126.0f - 72.0f;   // 右侧留给常显的 ".wprefab" 后缀
+
+		// ---- Name:默认 = 实体 Tag;后缀自动补并即时回显在右侧 ----
+		Wui::Label(ctx, { labelX, frame.Y + 49.0f },
+			Wui::Tr("panel.hierarchy.create_prefab.name", "Name"), theme.TextMuted, 13.0f);
+		const Wui::WuiRect nameRect { fieldX, frame.Y + 44.0f, fieldW, 24.0f };
+		const bool nameFocused = ctx.Focus() == nameId;
+		Wui::TextFieldA11y nameA11y;
+		nameA11y.Label = Wui::Tr("panel.hierarchy.create_prefab.name", "Name");
+		nameA11y.Placeholder = Wui::Tr("panel.hierarchy.create_prefab.name.placeholder", "Prefab name");
+		Wui::TextField(ctx, nameId, nameRect, m_CreateName, theme, nullptr, &nameA11y);
+		const bool nameSubmitted = nameFocused && ctx.IsKeyPressed(KeyCodes::Enter);
+		Wui::Label(ctx, { nameRect.X + nameRect.W + 8.0f, frame.Y + 50.0f }, ".wprefab",
+			theme.TextMuted, 13.0f);
+		RegisterAccessNode(nameId, "text-field", nameRect,
+			Wui::Tr("panel.hierarchy.create_prefab.name", "Name"),
+			m_CreateName.empty() ? nameA11y.Placeholder : m_CreateName, true,
+			Wui::Tr("panel.hierarchy.create_prefab.name.tooltip",
+				"Asset file name; the .wprefab suffix is added automatically (Enter = create)"), true);
+		const std::string nameError = CreatePrefabNameError();
+		if (!nameError.empty())
+			Wui::Label(ctx, { fieldX, frame.Y + 71.0f }, nameError, theme.Danger, 12.0f);
+
+		// ---- Folder:内容根下的目录(可搜索);缺目录时提示"会新建" ----
+		const std::string folderLabel = Wui::Tr("panel.hierarchy.create_prefab.folder", "Folder");
+		Wui::Label(ctx, { labelX, frame.Y + 97.0f }, folderLabel, theme.TextMuted, 13.0f);
+		const Wui::WuiRect folderRect { fieldX, frame.Y + 92.0f, fieldW, 24.0f };
+		Wui::SearchableCombo(ctx, folderId, folderRect, folderLabel, m_CreateFolders,
+			m_CreateFolderIndex, theme);
+		const std::string folderText =
+			(m_CreateFolderIndex >= 0 && m_CreateFolderIndex < static_cast<int>(m_CreateFolders.size()))
+				? m_CreateFolders[static_cast<size_t>(m_CreateFolderIndex)] : std::string();
+		// 后登记覆盖:search-combo 自带的节点没有悬停说明,这里补上(与内容浏览器同一做法)。
+		RegisterAccessNode(folderId, "search-combo", folderRect, folderLabel, folderText, true,
+			Wui::Tr("panel.hierarchy.create_prefab.folder.tooltip",
+				"Folder under the content root (searchable); a missing folder is created on confirm"), true);
+		const std::filesystem::path folderAbsolute =
+			std::filesystem::path(std::string(WLD_ASSETPATH)) / std::filesystem::path(folderText);
+		if (!folderText.empty() && !std::filesystem::is_directory(folderAbsolute))
+		{
+			const std::string note = Wui::Tr("panel.hierarchy.create_prefab.folder.note",
+				"Folder does not exist yet — it will be created");
+			Wui::Label(ctx, { fieldX, frame.Y + 119.0f }, note, theme.Warning, 12.0f);
+			RegisterAccessNode(Wui::HashId("prefab.create.folder.note"), "text",
+				{ fieldX, frame.Y + 115.0f, fieldW, 16.0f }, note, note, true, note, false);
+		}
+
+		// ---- 预览行:落点随名称 / 目录实时变化 ----
+		const std::string target = CreatePrefabTarget();
+		if (!m_CreateFailure.empty() && m_CreateFailureFor != target)
+		{
+			// 用户改了落点 → 上一次的失败原因不再适用(不留过期红字)。
+			m_CreateFailure.clear();
+			m_CreateFailureFor.clear();
+		}
+		const std::string previewLabel = Wui::Tr("panel.hierarchy.create_prefab.preview.label", "Will create");
+		Wui::Label(ctx, { labelX, frame.Y + 150.0f }, previewLabel, theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { fieldX, frame.Y + 148.0f }, target, theme.Text, 13.0f);
+		RegisterAccessNode(Wui::HashId("prefab.create.preview"), "text",
+			{ fieldX, frame.Y + 144.0f, fieldW, 20.0f }, previewLabel, target, true,
+			Wui::Tr("panel.hierarchy.create_prefab.preview.tooltip",
+				"Logical path of the file that will be written (folder + name + .wprefab)"), false);
+
+		// ---- 覆盖提示(红字):目标已存在 = 主按钮变 Overwrite ----
+		std::error_code existsError;
+		const bool targetExists = nameError.empty() && std::filesystem::exists(
+			std::filesystem::path(std::string(WLD_ASSETPATH)) / std::filesystem::path(target), existsError);
+		std::string warningText;
+		if (!m_CreateFailure.empty())
+			warningText = m_CreateFailure;
+		else if (targetExists)
+			warningText = Wui::Tr("panel.hierarchy.create_prefab.exists",
+				"Already exists — continuing will overwrite ") + target;
+		if (!warningText.empty())
+			Wui::Label(ctx, { fieldX, frame.Y + 174.0f }, warningText, theme.Danger, 12.0f);
+		RegisterAccessNode(Wui::HashId("prefab.create.warning"), "text",
+			{ fieldX, frame.Y + 170.0f, fieldW, 18.0f },
+			Wui::Tr("panel.hierarchy.create_prefab.warning.label", "Warning"), warningText, true,
+			Wui::Tr("panel.hierarchy.create_prefab.warning.tooltip",
+				"Red line = the target exists and would be overwritten; empty = no conflict"), false);
+
+		// ---- 底部按钮条:主按钮 accent(Create Prefab / Overwrite)+ 次按钮 Cancel ----
+		const bool canCreate = nameError.empty();
+		const float footerY = frame.Y + frame.H - Wui::ModalFooterPadding - Wui::ModalFooterHeight;
+		const Wui::WuiRect okRect { frame.X + frame.W - 16.0f - 150.0f, footerY, 150.0f,
+			Wui::ModalFooterHeight };
+		const Wui::WuiRect cancelRect { okRect.X - 8.0f - 96.0f, footerY, 96.0f,
+			Wui::ModalFooterHeight };
+		const std::string okLabel = targetExists
+			? Wui::Tr("panel.hierarchy.create_prefab.overwrite", "Overwrite")
+			: Wui::Tr("panel.hierarchy.create_prefab.create", "Create Prefab");
+		const std::string okTooltip = !canCreate
+			? (nameError + " — " + Wui::Tr("panel.hierarchy.create_prefab.ok.disabled",
+				"fix the name to enable this button"))
+			: (targetExists
+				? Wui::Tr("panel.hierarchy.create_prefab.overwrite.tooltip",
+					"The file exists: overwrite it with the current subtree")
+				: Wui::Tr("panel.hierarchy.create_prefab.create.tooltip",
+					"Write the subtree as a .wprefab asset, then select it in the Content Browser"));
+		const bool okClicked = ModalActionButton(ctx, Wui::HashId("prefab.create.ok"), okRect, okLabel,
+			okTooltip, canCreate, true, theme);
+		const bool cancelClicked = ModalActionButton(ctx, Wui::HashId("prefab.create.cancel"), cancelRect,
+			Wui::Tr("panel.hierarchy.create_prefab.cancel", "Cancel"),
+			Wui::Tr("panel.hierarchy.create_prefab.cancel.tooltip",
+				"Close without writing anything (Esc)"), true, false, theme);
+
+		bool closeRequested = false;
+		if ((okClicked || (nameSubmitted && !justOpened)) && canCreate)
+		{
+			std::string message;
+			if (host.CreatePrefabFromSelection(m_CreateRoot, target, targetExists, &message))
+			{
+				ctx.RecordOp("hierarchy", targetExists ? "prefab-overwrite" : "prefab-create",
+					target, message);
+				closeRequested = true;
+			}
+			else
+			{
+				// 失败:模态不关,把可读原因写进提示行(留现场给用户改)。
+				m_CreateFailure = message.empty() ? std::string("create prefab failed") : message;
+				m_CreateFailureFor = target;
+				host.Notify(m_CreateFailure);
+				WLD_CORE_WARN("Create prefab failed: {0}", m_CreateFailure);
+			}
+		}
+		else if (cancelClicked)
+			closeRequested = true;
+		else if (escapePressed)
+		{
+			// Esc 分层:目录下拉展开时先关下拉,第二次才关模态。
+			if (folderPopupWasOpen)
+				ctx.ClosePopup(folderId);
+			else
+				closeRequested = true;
+		}
+		// 先收 overlay 再清模态态(BeginModalFrame/EndModalFrame 必须成对)。
+		Wui::EndModalFrame(ctx);
+		if (closeRequested && ctx.Modal() == modalId)
+			CloseCreatePrefabModal(ctx, host);
 	}
 
 	bool HierarchyPanel::DebugInvokeRowClick(size_t index)

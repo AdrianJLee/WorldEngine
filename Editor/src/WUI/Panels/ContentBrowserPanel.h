@@ -99,6 +99,10 @@ namespace World
 		void RefreshContents();
 		// 当前浏览目录:shell 打开导入模态时用它作默认落点(与双击导入/拖放同一约定)。
 		const std::filesystem::path& CurrentDirectory() const { return m_Model.Current; }
+		// P4-U13d:选中刚创建/刚生成的资产(逻辑路径相对内容根);目标不在内容根下或不存在 → false。
+		// 与"新建材质/场景/脚本"同一条选中通道(SelectCreated),但会先把列表导航到目标所在目录,
+		// 让用户/脚本立刻看到它 —— 创建预制体成功后由宿主调用。
+		bool SelectAsset(const std::string& logicalPath, const char* op);
 
 	private:
 		void UpdateSearch();

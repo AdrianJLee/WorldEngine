@@ -153,6 +153,12 @@ namespace World
 		// 窗口仍然打开并在状态行写原因。AI 通道 `asset.open_prefab` 用它做失败语义。
 		bool OpenPrefabWindowChecked(const std::string& logicalPath, std::string* message = nullptr);
 		bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr) override;
+		// P4-U13d:创建预制体(层级面板的"Create Prefab from Selection…"与 AI 通道
+		// asset.create_prefab 同一内核);实现全在 EditorLayer。
+		bool CreatePrefabFromSelection(Entity root, const std::string& logicalPath, bool overwrite,
+			std::string* message = nullptr) override;
+		// P4-U13d:让内容浏览器选中(必要时先导航到)某个逻辑路径的资产;创建成功后由 EditorLayer 调用。
+		bool SelectContentAsset(const std::string& logicalPath, const char* op);
 		// P4-U13b:prefab 实例(属性面板实例条 + 层级右键菜单;实现全在 EditorLayer)。
 		bool PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,
 			Entity* root) override;

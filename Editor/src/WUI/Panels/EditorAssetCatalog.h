@@ -100,5 +100,44 @@ namespace World
 		{
 			return PathsFor(KindForName(assetType), ttlSeconds);
 		}
+
+		// P4-U13d:"创建预制体"对话框的目录下拉 —— 内容根下的目录清单(逻辑路径,字典序)。
+		// 与 Scan 同一份缓存口径(默认 2s TTL),低频操作不每帧扫盘;权限错误跳过。
+		inline std::vector<std::string> ScanDirs()
+		{
+			std::vector<std::string> dirs;
+			std::error_code ec;
+			const std::filesystem::path root = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+			if (!std::filesystem::exists(root, ec))
+				return dirs;
+			for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root,
+				std::filesystem::directory_options::skip_permission_denied, ec))
+			{
+				std::error_code itemError;
+				if (!entry.is_directory(itemError))
+					continue;
+				const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, itemError);
+				if (itemError || relative.empty())
+					continue;
+				dirs.push_back(relative.generic_string());
+			}
+			std::sort(dirs.begin(), dirs.end());
+			return dirs;
+		}
+
+		inline const std::vector<std::string>& Dirs(double ttlSeconds = 2.0)
+		{
+			using Clock = std::chrono::steady_clock;
+			static std::pair<Clock::time_point, std::vector<std::string>> cache;
+			static const Clock::time_point start = Clock::now();
+			const double now = std::chrono::duration<double>(Clock::now() - start).count();
+			const double stamp = std::chrono::duration<double>(cache.first - start).count();
+			if (stamp <= 0.0 || now - stamp > ttlSeconds)
+			{
+				cache.first = Clock::now();
+				cache.second = ScanDirs();
+			}
+			return cache.second;
+		}
 	}
 }

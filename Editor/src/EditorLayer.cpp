@@ -28,6 +28,8 @@
 #include <stdexcept>
 #include <chrono>
 #include <algorithm>
+#include <cctype>
+#include <unordered_set>
 #include "World/Events/MouseEvent.h"
 namespace World
 {
@@ -1142,6 +1144,31 @@ namespace World
 	// ---- P4-U13b:prefab 实例(实例条 / 层级徽标共用同一条实现)----
 	namespace
 	{
+		// P4-U13d:子树实体数(写出的 prefab 里会有多少实体)。只走 const 注册表 —— Play/Simulate
+		// 下活动场景的非 const GetRegistry() 会触发"结构写"断言;访问集防非法层级死循环。
+		uint32_t CountPrefabSubtreeEntities(const Scene& scene, entt::entity root)
+		{
+			const entt::registry& registry = scene.GetRegistry();
+			if (!registry.valid(root))
+				return 0;
+			std::vector<entt::entity> pending { root };
+			std::unordered_set<uint32_t> seen;
+			uint32_t count = 0;
+			constexpr uint32_t kMaxEntities = 200000;
+			while (!pending.empty() && count < kMaxEntities)
+			{
+				const entt::entity current = pending.back();
+				pending.pop_back();
+				if (!registry.valid(current) || !seen.insert(static_cast<uint32_t>(current)).second)
+					continue;
+				++count;
+				if (const auto* hierarchy = registry.try_get<HierarchyComponent>(current))
+					for (const entt::entity child : hierarchy->Children)
+						pending.push_back(child);
+			}
+			return count;
+		}
+
 		// 实体属于哪个实例:自身是实例根,或沿父链找到实例根(深度上限防非法层级死循环)。
 		// 只走 const 注册表:Play/Simulate 下活动场景的非 const GetRegistry() 会触发结构写断言,
 		// 而实例条在 Play 期间仍然要显示(那时三个动作是禁用的)。
@@ -1163,6 +1190,125 @@ namespace World
 			}
 			return entt::null;
 		}
+	}
+
+	// ---- P4-U13d:创建预制体(实体子树 → .wprefab 资产)----
+	//
+	// 一条内核,两个入口:层级面板的"Create Prefab from Selection…"模态与 AI 通道
+	// `asset.create_prefab`。口径:
+	//  - 只写内容根(WLD_ASSETPATH)内的 .wprefab;缺后缀自动补,越界/非法字符直接拒绝;
+	//  - overwrite=false 且目标已存在 = 失败(绝不静默覆盖,把"覆盖"变成显式决定);
+	//  - 成功 = 写盘 + `[prefab] created <逻辑路径> (N entities)` + 内容浏览器选中该资产
+	//    + 打开它的 prefab 资产窗口(不进编辑会话,编辑仍要显式点 Edit Prefab)。
+	bool EditorLayer::CreatePrefabFromSelection(Entity root, const std::string& logicalPath, bool overwrite,
+		std::string* message, PrefabCreateResult* result)
+	{
+		if (message) message->clear();
+		if (m_SceneState != SceneState::Edit)
+		{
+			if (message) *message = "预制体只能在编辑态创建(Play/Simulate 下请先退出)";
+			return false;
+		}
+		if (!m_ActiveScene || !root.IsValid() || root.GetScene() != m_ActiveScene.get())
+		{
+			if (message) *message = "没有可导出的实体(先在层级面板里选中一个实体)";
+			return false;
+		}
+
+		// 逻辑路径:统一分隔符、剥前导斜杠、补 .wprefab(大小写不敏感)。
+		std::string logical = logicalPath;
+		std::replace(logical.begin(), logical.end(), '\\', '/');
+		while (!logical.empty() && logical.front() == '/')
+			logical.erase(logical.begin());
+		if (logical.empty())
+		{
+			if (message) *message = "缺少目标路径(如 prefabs/MyCube.wprefab)";
+			return false;
+		}
+		auto lowered = [](std::string text)
+		{
+			std::transform(text.begin(), text.end(), text.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			return text;
+		};
+		constexpr size_t kPrefabSuffixLength = 8;   // ".wprefab"
+		const std::string loweredLogical = lowered(logical);
+		if (loweredLogical.size() < kPrefabSuffixLength
+			|| loweredLogical.compare(loweredLogical.size() - kPrefabSuffixLength, kPrefabSuffixLength, ".wprefab") != 0)
+			logical += ".wprefab";
+
+		// 逐段校验:不许空段 / "." / "..",文件名不许含 Windows 非法字符 —— 落点必须留在内容根内。
+		for (size_t start = 0; start <= logical.size();)
+		{
+			const size_t slash = logical.find('/', start);
+			const std::string part = logical.substr(start,
+				slash == std::string::npos ? std::string::npos : slash - start);
+			if (part.empty() || part == "." || part == "..")
+			{
+				if (message) *message = "非法路径: " + logicalPath + "(不许空目录段 / \"..\")";
+				return false;
+			}
+			if (slash == std::string::npos)
+				break;
+			start = slash + 1;
+		}
+		for (const char ch : logical)
+		{
+			if (ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|')
+			{
+				if (message) *message = "非法路径: 不能包含 : * ? \" < > | — " + logicalPath;
+				return false;
+			}
+		}
+
+		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH))
+			/ std::filesystem::path(logical);
+		std::error_code existsError;
+		const bool exists = std::filesystem::exists(absolute, existsError);
+		if (exists && !overwrite)
+		{
+			if (message) *message = "目标已存在: " + logical + "(未覆盖;需要覆盖请显式确认)";
+			return false;
+		}
+		if (!absolute.parent_path().empty())
+		{
+			std::error_code dirError;
+			std::filesystem::create_directories(absolute.parent_path(), dirError);
+			if (!std::filesystem::is_directory(absolute.parent_path()))
+			{
+				if (message) *message = "目录创建失败: " + absolute.parent_path().generic_string()
+					+ (dirError ? (" (" + dirError.message() + ")") : std::string());
+				return false;
+			}
+		}
+
+		std::string saveError;
+		if (!Gameplay::SaveFromScene(*m_ActiveScene, root, absolute, &saveError))
+		{
+			if (message) *message = saveError.empty() ? ("写盘失败: " + logical) : saveError;
+			WLD_CORE_WARN("[prefab] create failed: {0} ({1})", logical, saveError);
+			return false;
+		}
+		const uint32_t entityCount = CountPrefabSubtreeEntities(*m_ActiveScene, static_cast<entt::entity>(root));
+		WLD_CORE_INFO("[prefab] created {0} ({1} entities)", logical, entityCount);
+		m_WuiContext.RecordOp("prefab", exists ? "overwrite" : "create", logical,
+			std::to_string(entityCount));
+
+		// 成功口径:内容浏览器选中该资产 + 打开它的 prefab 资产窗口(编辑仍要显式进会话)。
+		m_Shell.SelectContentAsset(logical, "create-prefab");
+		std::string openMessage;
+		if (!m_Shell.OpenPrefabWindowChecked(logical, &openMessage))
+			WLD_CORE_WARN("[prefab] created '{0}' but its asset window could not read it back: {1}",
+				logical, openMessage);
+		if (result)
+		{
+			result->LogicalPath = logical;
+			result->EntityCount = entityCount;
+			result->Overwrote = exists;
+		}
+		if (message)
+			*message = "已创建 " + logical + " (" + std::to_string(entityCount) + " entities)";
+		return true;
 	}
 
 	bool EditorLayer::PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,

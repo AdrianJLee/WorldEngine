@@ -1168,6 +1168,46 @@ namespace World
 			result = message;
 			return true;
 		}
+		if (cmd == "asset.create_prefab")
+		{
+			// P4-U13d:层级面板"Create Prefab from Selection…"的不弹窗版本(同一条内核)。
+			// 参数:entity(场景实体 handle,缺省 = 当前选中)/ path(逻辑路径,**必须显式给出**;
+			// 缺 .wprefab 自动补)/ overwrite(默认 false;目标已存在且没给 = ok:false + 可读原因)。
+			if (!m_ActiveScene)
+			{
+				error = "no active scene";
+				return false;
+			}
+			Entity root = m_SelectedEntity;
+			if (!arg("entity").empty())
+				root = Entity(m_ActiveScene.get(),
+					static_cast<entt::entity>(std::strtoul(arg("entity").c_str(), nullptr, 10)));
+			if (!root.IsValid() || root.GetScene() != m_ActiveScene.get())
+			{
+				error = "no entity to export (pass entity=<handle> or select one first)";
+				return false;
+			}
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "asset.create_prefab needs path=<logical path> (e.g. prefabs/MyCube.wprefab)";
+				return false;
+			}
+			const bool overwrite = arg("overwrite") == "1" || arg("overwrite") == "true";
+			std::string message;
+			PrefabCreateResult created;
+			if (!CreatePrefabFromSelection(root, path, overwrite, &message, &created))
+			{
+				error = message.empty() ? "create prefab failed" : message;
+				return false;
+			}
+			std::ostringstream out;
+			out << "{\"path\":\"" << JsonEscape(created.LogicalPath) << "\""
+				<< ",\"entities\":" << created.EntityCount
+				<< ",\"overwrote\":" << (created.Overwrote ? "true" : "false") << "}";
+			result = out.str();
+			return true;
+		}
 		if (cmd == "material.get")
 		{
 			const std::string path = arg("path");

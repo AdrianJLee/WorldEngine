@@ -49,6 +49,19 @@ namespace World
 		const std::string& PrefabEditLogical() const { return m_PrefabEditLogical; }
 		// 实例化到当前场景(世界原点);成功时选中实例根并标脏。
 		bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr);
+		// ---- P4-U13d:把选中实体的子树导出成 .wprefab 资产(创建/覆盖二合一)----
+		// 逻辑路径相对内容根;缺 .wprefab 自动补;overwrite=false 且目标已存在 = false + 可读原因
+		// (绝不静默覆盖)。成功:写盘 + `[prefab] created <逻辑路径> (N entities)` 日志 +
+		// 内容浏览器选中该资产 + 打开它的 prefab 资产窗口(**不**进编辑会话)。
+		// 层级面板的"Create Prefab from Selection…"与 AI 通道 asset.create_prefab 共用这一条。
+		struct PrefabCreateResult
+		{
+			std::string LogicalPath;      // 规范化后的逻辑路径(已补 .wprefab)
+			uint32_t EntityCount = 0;     // 写进资产的实体数(含 subtree 全部后代)
+			bool Overwrote = false;       // 目标此前已存在(本次是覆盖)
+		};
+		bool CreatePrefabFromSelection(Entity root, const std::string& logicalPath, bool overwrite,
+			std::string* message = nullptr, PrefabCreateResult* result = nullptr);
 		// ---- P4-U13b:prefab 实例(属性面板实例条 + 层级右键菜单共用同一条实现)----
 		// 实体属于哪个实例(根或子树成员)→ 来源路径 / 覆盖计数 / 实例根;不属于实例时返回 false。
 		bool PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount, Entity* root);

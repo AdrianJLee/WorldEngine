@@ -69,6 +69,19 @@ namespace World
 			if (message) *message = "prefab instantiate is not wired to a host";
 			return false;
 		}
+		// ---- P4-U13d:把根实体的子树导出成 .wprefab 资产(创建/覆盖二合一)----
+		// 逻辑路径相对内容根;缺 .wprefab 自动补;overwrite=false 且目标已存在 = 失败
+		// (不静默覆盖)。成功口径:写盘 + `[prefab] created <逻辑路径> (N entities)` 日志
+		// + 内容浏览器选中该资产 + 打开它的 prefab 资产窗口(**不**进编辑会话)。
+		virtual bool CreatePrefabFromSelection(Entity root, const std::string& logicalPath, bool overwrite,
+			std::string* message = nullptr)
+		{
+			(void)root;
+			(void)logicalPath;
+			(void)overwrite;
+			if (message) *message = "prefab create is not wired to a host";
+			return false;
+		}
 		// ---- P4-U13b:prefab 实例(层级徽标 + 属性面板实例条共用)----
 		// 选中实体属于哪个实例(实例根,或实例子树内的成员都算)→ 来源路径 / 覆盖计数 / 实例根。
 		// 返回 false = 该实体不属于任何实例(面板据此不画实例条)。
