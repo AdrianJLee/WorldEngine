@@ -258,13 +258,13 @@ namespace World
 		const float viewButtonW = ctx.MeasureTextWidth(viewLabel, 13.0f) + 20.0f;
 		const Wui::WuiRect viewButton { sceneRect.X + kChromePad, sceneRect.Y + kChromePad, viewButtonW, kChromeRowH };
 		const std::string viewHint = Wui::Tr("viewport.view.hint",
-			"View options: camera mode, camera preview, light ranges, collider outlines.");
+			"View options: view mode (3D/2D), camera preview, light ranges, collider outlines.");
 		Wui::Tooltip(ctx, viewButton, viewHint);
 		if (Wui::Button(ctx, Wui::HashId("viewport.view"), viewButton, viewLabel, theme))
 			ctx.OpenPopup(Wui::HashId("viewport.view.popup"));
 		RegisterReadonlyNode(Wui::HashId("viewport.camera.mode"), "text", cameraText,
 			camera3D ? "3d" : "2d", viewButton,
-			Wui::Tr("viewport.camera.hint", "Camera mode — switch in this View menu."));
+			Wui::Tr("viewport.camera.hint", "Viewport view mode — switch in the View menu (top-left)."));
 		ctx.RegisterOverlayRect(viewButton);
 
 		// ② 顶部居中:运行控制药丸(播放 / 模拟 / 暂停)。用户 2026-09-21:「悬浮在视口上居中」——
@@ -345,10 +345,19 @@ namespace World
 					Wui::WuiAccessibility::Get().Register(node);
 				}
 			};
-			header(Wui::Tr("viewport.view.group.camera", "Camera"));
-			item("viewport.view.camera3d", Wui::Tr("viewport.view.camera3d", "3D Orbit Camera"), camera3D,
+			// P4-U13h:分组标题从 "Camera" 改为 "View Mode" —— 这一项切的是**编辑器视口**的观察
+			// 方式(3D 透视轨道 / 2D 正交俯视),不是开关场景里的某个相机;"Camera" 分组 +
+			// "3D Orbit Camera" 条目容易被读成相机开关(用户:「名字有误导性」)。
+			header(Wui::Tr("viewport.view.group.view_mode", "View Mode"));
+			// 条目文案随状态变化:勾选(3D)/取消(2D)各自说清当前是什么。
+			const std::string camera3dLabel = camera3D
+				? Wui::Tr("viewport.view.camera3d", "3D Perspective (Orbit)")
+				: Wui::Tr("viewport.view.camera3d.off", "2D Top-Down (Orthographic)");
+			item("viewport.view.camera3d", camera3dLabel, camera3D,
 				Wui::Tr("viewport.view.camera3d.tooltip",
-					"Off = 2D orthographic (top-down) view. Applies to the editor viewport only."),
+					"Editor viewport view mode (not a scene camera). In 3D: right-drag orbits, "
+					"middle-drag pans, wheel dollies. To see what a game camera sees, "
+					"use Camera Preview in this menu."),
 				[this] { m_Host.ToggleViewportCamera3D(); });
 			item("viewport.view.camera_preview", Wui::Tr("viewport.view.camera_preview", "Camera Preview"),
 				m_Host.IsCameraPreviewEnabled(),

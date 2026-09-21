@@ -29,6 +29,7 @@
 #include <chrono>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <unordered_set>
 #include "World/Events/MouseEvent.h"
 namespace World
@@ -90,6 +91,29 @@ namespace World
 				timing.Shell / frames, timing.WuiRender / frames, timing.Frames);
 			timing.Update = timing.UiFrame = timing.Begin = timing.Shell = timing.WuiRender = 0.0;
 			timing.Frames = 0;
+		}
+
+		// D7-1a/P4-U13h:3D 视口中键平移的灵敏度系数(单位:个"视口高度对应的世界距离")。
+		//
+		// 口径:鼠标拖过整个视口高度 ≈ 平移 kPanUnitsPerViewportHeight 个视口高度对应的世界
+		// 距离(目标平面处的视锥高度 = 2 × 距离 × tan(FOV/2))。1.0 = 目标平面上的内容与
+		// 光标 1:1 跟随(Blender/Unreal 一类编辑器的中键抓取手感)。
+		//
+		// 旧口径(2026-09-21 前)把像素位移**直接当世界单位**(1.0 世界单位/物理像素,与视口
+		// 尺寸、相机距离、FOV 全部无关)。实测默认布局(1280×720 窗口、ui_scale 1.3、三栏
+		// 停靠)视口高 281.25 设计单位 = 365.6 物理像素:旧口径拖过整个视口高度平移 366 个
+		// 世界单位(场景里的立方体边长才 1~1.6),即用户反馈的"中键拖太灵敏";新口径同样
+		// 的整屏拖拽只平移 13.86 个世界单位,每物理像素 0.0379(旧值的 3.79%,≈26× 更慢)。
+		//
+		// 只作用于平移;右键环绕(1 像素 = 1 度)与滚轮推拉(1 格 = 0.6 世界单位)保持原口径不变。
+		constexpr float kPanUnitsPerViewportHeight = 1.0f;
+
+		// WLD_PAN_TRACE=1 时把 3D 视口平移的原始鼠标位移与换算后的世界位移打进日志,
+		// 供自动化测量"每像素平移多少世界单位"(默认关,零行为变化)。
+		bool PanTraceEnabled()
+		{
+			static const bool enabled = std::getenv("WLD_PAN_TRACE") != nullptr;
+			return enabled;
 		}
 	}
 
@@ -936,6 +960,9 @@ namespace World
 				{
 					m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键*/ ? Viewport3DDrag::Orbit
 						: (e.GetMouseButton() == 2 /*中键*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
+					if (PanTraceEnabled())
+						WLD_CORE_INFO("[dev] 3D pan trace: press button={0} -> mode={1}",
+							e.GetMouseButton(), static_cast<int>(m_Viewport3DDragging));
 					return false;
 				});
 				cameraDispatcher.Dispatch<MouseButtonReleasedEvent>([this](MouseButtonReleasedEvent& e)
@@ -949,7 +976,29 @@ namespace World
 					if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
 						m_EditorCamera3D.Orbit(e.GetX() - m_Viewport3DLastMouse.x, e.GetY() - m_Viewport3DLastMouse.y);
 					else if (m_Viewport3DDragging == Viewport3DDrag::Pan)
-						m_EditorCamera3D.Pan(e.GetX() - m_Viewport3DLastMouse.x, e.GetY() - m_Viewport3DLastMouse.y);
+					{
+						// P4-U13h:鼠标事件是**物理像素**,布局/视口尺寸是**设计单位**(见
+						// WuiInputCollector::OnMouseMove 的换算)→ 先把像素位移换算成设计单位,
+						// 再按视口高度归一化,平移量与窗口 DPI 缩放无关。
+						const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+						// 视口高度(设计单位);首帧布局之前 m_ViewportSize 还是 0,退回窗口高度。
+						const float viewportHeight = m_ViewportSize.y > 1.0f
+							? m_ViewportSize.y
+							: static_cast<float>(Application::Get().GetWindow().GetHeight()) / uiScale;
+						// 目标平面处的视锥高度(世界单位)= 2 × 距离 × tan(FOV/2)。
+						const float viewportHeightWorld = 2.0f * m_EditorCamera3D.GetDistance()
+							* std::tan(glm::radians(m_EditorCamera3D.GetFOV()) * 0.5f);
+						const float unitsPerDesignUnit = kPanUnitsPerViewportHeight
+							* viewportHeightWorld / std::max(viewportHeight, 1.0f);
+						const float dx = (e.GetX() - m_Viewport3DLastMouse.x) / uiScale * unitsPerDesignUnit;
+						const float dy = (e.GetY() - m_Viewport3DLastMouse.y) / uiScale * unitsPerDesignUnit;
+						if (PanTraceEnabled())
+							WLD_CORE_INFO("[dev] 3D pan trace: mouse=({0:.1f},{1:.1f})px uiScale={2:.2f} "
+								"viewportH={3:.1f}du worldPerViewport={4:.3f} world=({5:.4f},{6:.4f})",
+								e.GetX() - m_Viewport3DLastMouse.x, e.GetY() - m_Viewport3DLastMouse.y,
+								uiScale, viewportHeight, viewportHeightWorld, dx, dy);
+						m_EditorCamera3D.Pan(dx, dy);
+					}
 					m_Viewport3DLastMouse = { e.GetX(), e.GetY() };
 					return false;
 				});
