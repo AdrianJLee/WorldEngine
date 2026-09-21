@@ -61,31 +61,12 @@ namespace World::Asset
 		}
 		else
 		{
-			// 回退:无清单时的旧开发形态(仅保留到旧工程完全迁移)。
-			WLD_CORE_WARN("No project manifest found; falling back to legacy content mounting.");
-			std::error_code dirEc;
-			const std::filesystem::path assetsDir =
-				std::filesystem::path(std::string(WLD_CURRENT_DIR) + "../Game/assets");
-			if (std::filesystem::is_directory(assetsDir, dirEc))
-				vfs.Mount("dir:game-assets",
-					std::make_shared<World::Vfs::DirectoryProvider>(assetsDir), 100);
-
-			const std::filesystem::path contentDir = std::filesystem::current_path() / "content";
-			if (std::filesystem::is_directory(contentDir, dirEc))
-			{
-				for (const auto& entry : std::filesystem::directory_iterator(contentDir, dirEc))
-				{
-					if (dirEc)
-						break;
-					if (!entry.is_regular_file(dirEc) || entry.path().extension() != ".wpak")
-						continue;
-					std::error_code openEc;
-					std::shared_ptr<World::Vfs::PackageProvider> provider =
-						World::Vfs::PackageProvider::Open(entry.path(), openEc);
-					if (provider)
-						vfs.Mount("pak:" + entry.path().filename().string(), std::move(provider), 10);
-				}
-			}
+			// P4-U12:没有清单 = 什么都不挂。旧开发形态(直接跑 build 里的 Runtime.exe,
+			// 从 ../Game/assets 猜内容根 + 扫 cwd/content/*.wpak)已移除:内容根与包
+			// 只由项目清单说了算。报错要能直接指出该去哪儿启动。
+			WLD_CORE_ERROR("No 'project.we.yaml' under '{0}'; nothing mounted. Run the runtime "
+				"from a packaged directory (manifest next to the executable) or from the "
+				"repository root.", std::filesystem::current_path().string());
 		}
 
 		// 着色器烘焙产物解析:发行形态优先读包内 cooked 产物(不依赖源码树/dxc),

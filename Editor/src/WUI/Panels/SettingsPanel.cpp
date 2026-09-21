@@ -43,8 +43,8 @@ namespace World
 	// 于是"说明只存在于鼠标悬停里,脚本读不到""新增设置忘了加复位""徽标口径不一致"反复出现。
 	// 注册表渲染器一次把这些做全;这里只负责:描述符(Id/类型/范围/生效时机/说明/绑定)+ 保存时机。
 	//
-	// 兼容性:迁移过来的行带 `AccessId`(= 迁移前的老节点 id,如 `settings3d.msaa`),
-	// 既有 AI 脚本/自动化按老 id 读写仍然有效;本地化键沿用既有 `settings.<id>`。
+	// 节点 id 规则唯一:`settings.<Id>`(P4-U12 删掉了 `settings3d.*` 这类老 id 覆盖)。
+	// 本地化键同样用 `settings.<id>`。
 	void SettingsPanel::RegisterProjectSettings()
 	{
 		using Settings::SettingApply;
@@ -61,11 +61,10 @@ namespace World
 		registry.ClearScope(SettingScope::Project);   // 幂等:面板重建时重新注册
 
 		auto describe = [](const char* id, const char* group, SettingType type, SettingApply apply,
-			const char* label, const char* tooltip, const char* accessId)
+			const char* label, const char* tooltip)
 		{
 			SettingDescriptor descriptor;
 			descriptor.Id = id;
-			descriptor.AccessId = accessId ? accessId : "";
 			descriptor.Group = group;
 			descriptor.Type = type;
 			descriptor.Scope = SettingScope::Project;
@@ -76,11 +75,11 @@ namespace World
 		};
 
 		auto addBool = [&registry, &describe](const char* id, const char* group, const char* label,
-			const char* tooltip, const char* accessId, ReadFn read, WriteFn write, FlagFn isDefault,
+			const char* tooltip, ReadFn read, WriteFn write, FlagFn isDefault,
 			FlagFn reset = FlagFn {})
 		{
 			SettingDescriptor descriptor = describe(id, group, SettingType::Bool, SettingApply::Immediate,
-				label, tooltip, accessId);
+				label, tooltip);
 			descriptor.Read = std::move(read);
 			descriptor.Write = std::move(write);
 			descriptor.IsDefault = std::move(isDefault);
@@ -89,10 +88,10 @@ namespace World
 		};
 
 		auto addNumber = [&registry, &describe](const char* id, const char* group, SettingType type,
-			SettingApply apply, const char* label, const char* tooltip, const char* accessId, const char* unit,
+			SettingApply apply, const char* label, const char* tooltip, const char* unit,
 			double min, double max, double step, ReadFn read, WriteFn write, FlagFn isDefault, FlagFn reset)
 		{
-			SettingDescriptor descriptor = describe(id, group, type, apply, label, tooltip, accessId);
+			SettingDescriptor descriptor = describe(id, group, type, apply, label, tooltip);
 			descriptor.Unit = unit;
 			descriptor.Min = min;
 			descriptor.Max = max;
@@ -105,10 +104,10 @@ namespace World
 		};
 
 		auto addEnum = [&registry, &describe](const char* id, const char* group, SettingApply apply,
-			const char* label, const char* tooltip, const char* accessId, std::vector<SettingOption> options,
+			const char* label, const char* tooltip, std::vector<SettingOption> options,
 			ReadFn read, WriteFn write, FlagFn isDefault, FlagFn reset)
 		{
-			SettingDescriptor descriptor = describe(id, group, SettingType::Enum, apply, label, tooltip, accessId);
+			SettingDescriptor descriptor = describe(id, group, SettingType::Enum, apply, label, tooltip);
 			descriptor.Options = std::move(options);
 			descriptor.Read = std::move(read);
 			descriptor.Write = std::move(write);
@@ -123,14 +122,14 @@ namespace World
 
 		// ---- 渲染 Rendering ----
 		addBool("culling", "Rendering", "Frustum Culling",
-			"视锥剔除\n不在相机视野内的物体不提交绘制。\n默认:开。立即生效。", "settings3d.culling",
+			"视锥剔除\n不在相机视野内的物体不提交绘制。\n默认:开。立即生效。",
 			[this] { return BoolText(m_Edit.Culling); },
 			[this](const std::string& value, std::string*) { m_Edit.Culling = value == "true"; return true; },
 			[this] { return m_Edit.Culling == renderDefaults.Culling; },
 			[this] { m_Edit.Culling = renderDefaults.Culling; return true; });
 
 		addBool("shadows", "Rendering", "Directional Shadows",
-			"平行光阴影\n主方向光渲染一张阴影贴图。\n默认:开。立即生效。", "settings3d.shadows",
+			"平行光阴影\n主方向光渲染一张阴影贴图。\n默认:开。立即生效。",
 			[this] { return BoolText(m_Edit.Shadows); },
 			[this](const std::string& value, std::string*) { m_Edit.Shadows = value == "true"; return true; },
 			[this] { return m_Edit.Shadows == renderDefaults.Shadows; },
@@ -138,14 +137,13 @@ namespace World
 
 		addBool("vsync", "Rendering", "Vertical Sync",
 			"垂直同步\n等待显示器刷新再呈现(防撕裂;会把帧率压到刷新率)。\n默认:开。立即生效(会重建交换链)。",
-			"settings3d.vsync",
 			[this] { return BoolText(m_Edit.Vsync); },
 			[this](const std::string& value, std::string*) { m_Edit.Vsync = value == "true"; return true; },
 			[this] { return m_Edit.Vsync == renderDefaults.Vsync; },
 			[this] { m_Edit.Vsync = renderDefaults.Vsync; return true; });
 
 		addEnum("shadow_map", "Rendering", SettingApply::Restart, "Shadow Map Size",
-			"阴影贴图尺寸\n平行光阴影贴图的分辨率(512-4096,2 的幂)。\n下次启动生效。", "settings3d.shadow_map",
+			"阴影贴图尺寸\n平行光阴影贴图的分辨率(512-4096,2 的幂)。\n下次启动生效。",
 			{ SettingOption { "512", "512" }, SettingOption { "1024", "1024" },
 				SettingOption { "2048", "2048" }, SettingOption { "4096", "4096" } },
 			[this] { return std::to_string(m_Edit.ShadowMapSize); },
@@ -154,7 +152,7 @@ namespace World
 			[this] { m_Edit.ShadowMapSize = renderDefaults.ShadowMapSize; return true; });
 
 		addNumber("max_directional", "Rendering", SettingType::Int, SettingApply::Immediate, "Max Directional Lights",
-			"平行光上限\n一帧打包多少盏平行光(1-2,与点光共享 8 盏的预算)。\n立即生效。", "settings3d.max_directional",
+			"平行光上限\n一帧打包多少盏平行光(1-2,与点光共享 8 盏的预算)。\n立即生效。",
 			"", 1.0, static_cast<double>(Renderer3D::MaxDirectionalLightCapacity), 1.0,
 			[this] { return std::to_string(m_Edit.MaxDirectionalLights); },
 			[this](const std::string& value, std::string*) { m_Edit.MaxDirectionalLights = static_cast<uint32_t>(std::atoi(value.c_str())); return true; },
@@ -162,7 +160,7 @@ namespace World
 			[this] { m_Edit.MaxDirectionalLights = renderDefaults.MaxDirectionalLights; return true; });
 
 		addNumber("max_point", "Rendering", SettingType::Int, SettingApply::Immediate, "Max Point Lights",
-			"点光上限\n一帧打包多少盏点光(0-7,与平行光共享 8 盏的预算)。\n立即生效。", "settings3d.max_point",
+			"点光上限\n一帧打包多少盏点光(0-7,与平行光共享 8 盏的预算)。\n立即生效。",
 			"", 0.0, static_cast<double>(Renderer3D::MaxPointLightCapacity), 1.0,
 			[this] { return std::to_string(m_Edit.MaxPointLights); },
 			[this](const std::string& value, std::string*) { m_Edit.MaxPointLights = static_cast<uint32_t>(std::atoi(value.c_str())); return true; },
@@ -170,7 +168,7 @@ namespace World
 			[this] { m_Edit.MaxPointLights = renderDefaults.MaxPointLights; return true; });
 
 		addNumber("anisotropy", "Rendering", SettingType::Int, SettingApply::Immediate, "Texture Anisotropy",
-			"纹理各向异性\n场景贴图的最大各向异性(1-16,夹到设备上限,1 = 关闭)。\n立即生效。", "settings3d.anisotropy",
+			"纹理各向异性\n场景贴图的最大各向异性(1-16,夹到设备上限,1 = 关闭)。\n立即生效。",
 			"", 1.0, 16.0, 1.0,
 			[this] { return std::to_string(m_Edit.Anisotropy); },
 			[this](const std::string& value, std::string*) { m_Edit.Anisotropy = static_cast<uint32_t>(std::atoi(value.c_str())); return true; },
@@ -178,7 +176,7 @@ namespace World
 			[this] { m_Edit.Anisotropy = renderDefaults.Anisotropy; return true; });
 
 		addNumber("render_scale", "Rendering", SettingType::Float, SettingApply::Immediate, "Render Scale",
-			"渲染分辨率倍率\n只缩放场景渲染目标(0.25-2.0),窗口与 UI 不变。\n立即生效。", "settings3d.render_scale",
+			"渲染分辨率倍率\n只缩放场景渲染目标(0.25-2.0),窗口与 UI 不变。\n立即生效。",
 			"x", 0.25, 2.0, 0.05,
 			[this] { return FormatFloat(m_Edit.RenderScale); },
 			[this](const std::string& value, std::string*) { m_Edit.RenderScale = static_cast<float>(std::atof(value.c_str())); return true; },
@@ -187,7 +185,6 @@ namespace World
 
 		addEnum("msaa", "Rendering", SettingApply::Restart, "MSAA (restart)",
 			"多重采样\n场景通道的采样数(1/2/4/8)。管线与预览通道在启动时创建,需要重启。",
-			"settings3d.msaa",
 			{ SettingOption { "1", "1" }, SettingOption { "2", "2" },
 				SettingOption { "4", "4" }, SettingOption { "8", "8" } },
 			[this] { return std::to_string(m_Edit.Msaa); },
@@ -197,7 +194,6 @@ namespace World
 
 		addBool("instancing", "Rendering", "GPU Instancing",
 			"GPU 实例合批\n同网格 + 同材质的物体合批绘制(重复道具收益最大)。\n默认:开。立即生效;关掉可做 A/B 对照。",
-			"settings3d.instancing",
 			[this] { return BoolText(m_Edit.Instancing); },
 			[this](const std::string& value, std::string*) { m_Edit.Instancing = value == "true"; return true; },
 			[this] { return m_Edit.Instancing == renderDefaults.Instancing; },
@@ -205,7 +201,6 @@ namespace World
 
 		addBool("gpu_timing", "Rendering", "GPU Timing",
 			"GPU 计时\n用时间戳查询统计场景通道耗时,Stats 面板与 AI 通道可读 gpuMs。\n默认:关(读回有一点代价)。立即生效。",
-			"settings3d.gpu_timing",
 			[this] { return BoolText(m_Edit.GpuTiming); },
 			[this](const std::string& value, std::string*) { m_Edit.GpuTiming = value == "true"; return true; },
 			[this] { return m_Edit.GpuTiming == renderDefaults.GpuTiming; },
@@ -213,16 +208,14 @@ namespace World
 
 		// ---- 物理 Physics ----
 		addNumber("physics.fixed_step", "Physics", SettingType::Int, SettingApply::NextPlay, "Fixed Timestep",
-			"固定步长\n物理更新频率 Hz(1-240)。下次 Play / Runtime 启动生效。\n默认:60。",
-			"settings.physics.fixed_step", "Hz", 1.0, 240.0, 1.0,
+			"固定步长\n物理更新频率 Hz(1-240)。下次 Play / Runtime 启动生效。\n默认:60。", "Hz", 1.0, 240.0, 1.0,
 			[this] { return std::to_string(m_Physics.FixedStepHz); },
 			[this](const std::string& value, std::string*) { m_Physics.FixedStepHz = static_cast<uint32_t>(std::atoi(value.c_str())); return true; },
 			[this] { return m_Physics.FixedStepHz == physicsDefaults.FixedStepHz; },
 			[this] { m_Physics.FixedStepHz = physicsDefaults.FixedStepHz; return true; });
 
 		addNumber("physics.gravity", "Physics", SettingType::Float, SettingApply::NextPlay, "Gravity",
-			"重力\nY 轴加速度(m/s²)。下次 Play / Runtime 启动生效。\n默认:-9.81。",
-			"settings.physics.gravity", "", -50.0, 50.0, 0.1,
+			"重力\nY 轴加速度(m/s²)。下次 Play / Runtime 启动生效。\n默认:-9.81。", "", -50.0, 50.0, 0.1,
 			[this] { return FormatFloat(m_Physics.Gravity); },
 			[this](const std::string& value, std::string*) { m_Physics.Gravity = static_cast<float>(std::atof(value.c_str())); return true; },
 			[this] { return m_Physics.Gravity == physicsDefaults.Gravity; },
@@ -232,7 +225,6 @@ namespace World
 		addEnum("project.renderer", "Startup", SettingApply::Restart, "Renderer",
 			"渲染后端\n编辑器与 Runtime 启动时使用的 RHI 后端(OpenGL / Vulkan)。\n"
 			"运行中热切换会串资源,因此需要重启编辑器;改完面板会给「立即重启」入口。",
-			"settings.project.renderer",
 			{ SettingOption { "opengl", "OpenGL" }, SettingOption { "vulkan", "Vulkan" } },
 			[this] { return m_Startup.Renderer; },
 			[this](const std::string& value, std::string*)
@@ -256,8 +248,7 @@ namespace World
 		{
 			SettingDescriptor startScene = describe("project.start_scene", "Startup", SettingType::Enum,
 				SettingApply::NextPlay, "Start Scene",
-				"启动场景\n打包后的 Runtime 启动时加载的场景(路径相对内容根)。\n下次启动 Runtime / 打包时生效。",
-				"settings.project.start_scene");
+				"启动场景\n打包后的 Runtime 启动时加载的场景(路径相对内容根)。\n下次启动 Runtime / 打包时生效。");
 			startScene.Searchable = true;
 			startScene.Options = std::move(sceneOptions);
 			startScene.Read = [this] { return m_Startup.StartScene; };
@@ -278,8 +269,7 @@ namespace World
 		{
 			SettingDescriptor descriptor = describe("project.content_root", "Startup", SettingType::Path,
 				SettingApply::Restart, "Content Root",
-				"内容根\n存放项目资产的目录(相对 project.we.yaml)。\n挂载点在启动时建立,改完需要重启编辑器。",
-				"settings.project.content_root");
+				"内容根\n存放项目资产的目录(相对 project.we.yaml)。\n挂载点在启动时建立,改完需要重启编辑器。");
 			descriptor.Read = [this] { return m_Startup.ContentRoot; };
 			descriptor.Write = [this](const std::string& value, std::string*)
 			{

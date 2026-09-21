@@ -856,6 +856,17 @@ namespace World::Asset
 				return true;
 			}
 		}
+		// 开发树兜底:编译期就知道仓库在哪,所以从 build/ 目录直接启动 exe(cwd 不是仓库根)
+		// 也能找到项目清单。注意这**只扩大清单的搜索范围** —— 内容根与包仍然只由清单决定,
+		// 旧版"找不到清单就猜 ../Game/assets + 扫 cwd/content/*.wpak"的回退已移除(P4-U12)。
+		const std::filesystem::path developmentManifest =
+			std::filesystem::path(std::string(WLD_GAME_DIR)) / "project.we.yaml";
+		if (std::filesystem::is_regular_file(developmentManifest, ec))
+		{
+			if (manifestPath)
+				*manifestPath = developmentManifest;
+			return true;
+		}
 		return false;
 	}
 }

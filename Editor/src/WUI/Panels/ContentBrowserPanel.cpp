@@ -1,6 +1,7 @@
 #include "wldpch.h"
 #include "ContentBrowserPanel.h"
 #include "EditorAssetTypes.h"
+#include "../../EditorResources.h"
 
 #include "World/Core/KeyCodes.h"
 #include "World/Core/Application.h"
@@ -1329,9 +1330,9 @@ namespace World
 			m_FileIconId = 0;
 		}
 		if (!m_DirIcon)
-			m_DirIcon = Texture2D::Create("Resource/Icons/ContentBrowser/DirectoryIcon.png");
+			m_DirIcon = Texture2D::Create(EditorResourcePath("Resource/Icons/ContentBrowser/DirectoryIcon.png"));
 		if (!m_FileIcon)
-			m_FileIcon = Texture2D::Create("Resource/Icons/ContentBrowser/FileIcon.png");
+			m_FileIcon = Texture2D::Create(EditorResourcePath("Resource/Icons/ContentBrowser/FileIcon.png"));
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (registry.Generation() != m_IconGeneration)
 		{

@@ -59,9 +59,6 @@ namespace World::Settings
 		// 稳定 id,建议 "<作用域>.<分组>.<键>"(如 "editor.editor.script_font_size")。
 		// 它同时是无障碍节点 id 的一部分,改名等于破坏脚本兼容。
 		std::string Id;
-		// 可选:无障碍节点/控件 id 的**完整**覆盖("settings.<Id>" 之外的老 id,例如迁移过来的
-		// "settings3d.msaa")。设置面板迁移时靠它保住既有脚本的 id 兼容;空 = 用 "settings.<Id>"。
-		std::string AccessId;
 		// 分类名(英文,如 "Appearance"/"Workflow"/"Diagnostics")。面板按它分页。
 		std::string Group;
 		SettingType Type = SettingType::Bool;

@@ -46,7 +46,13 @@ namespace World
 			}
 
 			// 2. 磁盘回退(未挂载 VFS 的 headless / 开发环境)。
-			// 贴图逻辑路径相对内容根(Game/assets,与材质路径书写约定一致):
+			// 绝对路径(编辑器自带资源,经 EditorResourcePath 拼出来)= 直接读:
+			// 它本来就不在内容根里,拼上内容根只会拼出个不存在的路径。
+			const std::filesystem::path requested(path);
+			if (requested.is_absolute())
+				return stbi_load(path.c_str(), &width, &height, &channels, desiredChannels);
+
+			// 相对路径 = 内容根(Game/assets)里的资产逻辑路径,与材质路径书写约定一致。
 			// P4-U12:删掉早先"Game/ 与 Editor/ 也算内容根"的旧布局回退 —— 内容根只有一个,
 			// 多候选会让"路径写错却恰好命中旧目录"变成静默成功。
 			std::error_code ec;

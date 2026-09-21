@@ -283,10 +283,9 @@ namespace World
 				}
 			}
 
-			// 2. 磁盘回退(内容根优先,其次 Game/ 与 Editor/ 两种仓库布局)。
-			std::filesystem::path candidate = ResolveOnDisk(path, /*forWrite*/ false);
-			if (candidate.empty())
-				candidate = std::filesystem::path(std::string(WLD_EDITOR_DIR)) / path;
+			// 2. 磁盘回退:**内容根**(Game/assets;绝对路径原样命中,不拼内容根)。
+			// P4-U12:删掉"再试 Editor/ 仓库布局"的第二候选 —— 内容根只有一个。
+			const std::filesystem::path candidate = ResolveOnDisk(path, /*forWrite*/ false);
 			std::ifstream file(candidate, std::ios::binary);
 			if (!file)
 				return false;

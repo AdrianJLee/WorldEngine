@@ -32,12 +32,9 @@ namespace World::Editor
 			return "settings." + descriptor.Id;
 		}
 
-		// 控件/无障碍节点 id:默认 "settings.<Id>";迁移过来的行可以给 AccessId 顶掉整串,
-		// 保住既有脚本按老 id(`settings3d.msaa` 之类)读写的能力。
+		// 控件/无障碍节点 id = "settings.<Id>"(唯一规则;P4-U12 删掉了老 id 覆盖)。
 		Wui::WuiId SettingAccessId(const SettingDescriptor& descriptor)
 		{
-			if (!descriptor.AccessId.empty())
-				return Wui::HashId(descriptor.AccessId.c_str());
 			return Wui::HashId(("settings." + descriptor.Id).c_str());
 		}
 
