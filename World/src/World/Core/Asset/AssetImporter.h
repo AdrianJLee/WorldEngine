@@ -44,6 +44,13 @@ namespace World::Asset
 		virtual std::string Name() const = 0;
 		virtual uint32_t Version() const = 0;
 		virtual bool Matches(const std::filesystem::path& source) const = 0;
+		// P4-U11:导入设置指纹(改了设置 → 产物必须重烘)。默认 0 = 该导入器没有逐源设置;
+		// ModelImporter 覆盖它并走 ModelImportSettings::ResolveForImport(与真正导入同一入口)。
+		virtual uint64_t SettingsFingerprint(const std::filesystem::path& source) const
+		{
+			(void)source;
+			return 0;
+		}
 		virtual ImportResult Import(const ImportRequest& request, std::error_code& ec) const = 0;
 	};
 }

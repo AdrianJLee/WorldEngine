@@ -9,6 +9,7 @@
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Renderer/AssetHotReload.h"
 #include "World/Core/Asset/GltfImporter.h"
+#include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/WuiAccessibility.h"
@@ -33,6 +34,38 @@ namespace World
 			if (path.size() <= 52)
 				return path;
 			return "…" + path.substr(path.size() - 51);
+		}
+
+		// P4-U11:按像素宽度裁剪文本(尾部省略号)。WUI 内部的同名工具是文件局部实现,
+		// 面板侧自己留一份 —— 材质槽/节点树的名字可能很长,不裁会画到邻居列上。
+		std::string EllipsizeToWidthLocal(Wui::WuiContext& ctx, const std::string& text,
+			float maxWidth, float fontSize)
+		{
+			if (text.empty() || maxWidth <= 0.0f)
+				return std::string();
+			if (ctx.MeasureTextWidth(text, fontSize) <= maxWidth)
+				return text;
+			const float ellipsisWidth = ctx.MeasureTextWidth("…", fontSize);
+			std::string result;
+			float width = 0.0f;
+			for (size_t index = 0; index < text.size();)
+			{
+				// UTF-8 逐码点推进(不切开多字节字符)。
+				size_t length = 1;
+				const unsigned char lead = static_cast<unsigned char>(text[index]);
+				if (lead >= 0xF0) length = 4;
+				else if (lead >= 0xE0) length = 3;
+				else if (lead >= 0xC0) length = 2;
+				length = std::min(length, text.size() - index);
+				const std::string glyph = text.substr(index, length);
+				const float glyphWidth = ctx.MeasureTextWidth(glyph, fontSize);
+				if (width + glyphWidth + ellipsisWidth > maxWidth)
+					break;
+				result += glyph;
+				width += glyphWidth;
+				index += length;
+			}
+			return result + "…";
 		}
 
 		std::string ModelStem(const std::string& logicalPath)
@@ -135,10 +168,18 @@ namespace World
 		std::string error;
 		m_Mesh = Mesh::LoadWModel(m_LogicalPath, &error);
 		m_DataValid = Asset::WModelIO::ReadFile(m_LogicalPath, m_Data, &error);
+		// P4-U11:源与设置的解析**必须先于**"加载失败就返回"—— 旧版本(v4 及更早)资产读不出来时
+		// 面板仍然要能显示导入源并提供"重新导入"(否则用户的老资产没有任何恢复入口)。
+		ResolveSource();
+		RefreshSyncState();
 		if (!m_Mesh)
 		{
 			m_Status = Wui::Tr("panel.model.status.load_failed", "Model load failed: ")
-				+ (error.empty() ? m_LogicalPath : error);
+				+ (error.empty() ? m_LogicalPath : error)
+				+ (m_SourceExists
+					? Wui::Tr("panel.model.status.load_failed_hint",
+						" — press Reimport to rebuild this asset from its source")
+					: std::string());
 			m_StatusIsError = true;
 			WLD_CORE_WARN("[model] preview load failed '{0}': {1}", m_LogicalPath, error);
 			return;
@@ -173,8 +214,6 @@ namespace World
 			<< Wui::Tr("panel.model.status.stats_indices", " / indices ") << m_Mesh->GetIndexCount();
 		m_Status = text.str();
 		m_StatusIsError = false;
-		ResolveSource();
-		RefreshSyncState();
 		WLD_CORE_INFO("[model] preview '{0}': nodes={1} meshes={2} submeshes={3} vertices={4}",
 			m_LogicalPath, m_Mesh->GetNodes().size(), m_Mesh->GetMeshes().size(),
 			m_Mesh->GetSubmeshes().size(), m_Mesh->GetVertexCount());
@@ -215,14 +254,17 @@ namespace World
 		}
 		if (m_SourceExists)
 		{
+			// P4-U11:设置来自**资产本身**(.wmodel 的 meta,用户在这里改过的就是它);
+			// 旧项目(资产没有内嵌设置)退回 `.wimport` / 项目默认 / 引擎默认。
 			std::string settingsWarning;
-			m_Settings = Asset::ModelImportSettings::Load(
-				(std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical).string(), &settingsWarning);
+			m_Settings = Asset::ModelImportSettings::ResolveForImport(
+				(std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical).string(),
+				(std::filesystem::path(WLD_ASSETPATH) / m_LogicalPath).string(),
+				&settingsWarning, &m_SettingsFromAsset);
+			if (!settingsWarning.empty())
+				WLD_CORE_WARN("[model] import settings for '{0}': {1}", m_LogicalPath, settingsWarning);
 			m_SettingsLoaded = true;
-			std::filesystem::path sidecar(m_SourceLogical);
-			sidecar.replace_extension(".wimport");
-			const AssetFingerprint fingerprint = FingerprintAsset(sidecar.generic_string(), nullptr);
-			m_SettingsFileFingerprint = fingerprint.Exists ? fingerprint.Value : 0;
+			m_SettingsDirty = false;
 		}
 	}
 
@@ -249,17 +291,6 @@ namespace World
 			m_SyncDetail = Wui::Tr("panel.model.sync.source_changed", "Source file changed");
 			return;
 		}
-		// `.wimport` 被外部改动 → 重新读设置(用户正在编辑但未保存的字段以文件为准)。
-		std::filesystem::path sidecar(m_SourceLogical);
-		sidecar.replace_extension(".wimport");
-		const AssetFingerprint settingsFingerprint = FingerprintAsset(sidecar.generic_string(), nullptr);
-		if (settingsFingerprint.Exists && settingsFingerprint.Value != m_SettingsFileFingerprint)
-		{
-			m_Settings = Asset::ModelImportSettings::Load(
-				(std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical).string(), nullptr);
-			m_SettingsLoaded = true;
-			m_SettingsFileFingerprint = settingsFingerprint.Value;
-		}
 		if (m_SettingsLoaded)
 		{
 			const uint64_t settingsHash = Asset::ModelImportSettings::Hash(m_Settings);
@@ -269,6 +300,13 @@ namespace World
 				m_SyncDetail = Wui::Tr("panel.model.sync.settings_changed", "Import settings changed");
 				return;
 			}
+		}
+		if (m_SettingsDirty)
+		{
+			// 面板里改了设置但还没重新导入:顶部提示 + 重导按钮标星(P4-U11 起设置只随重导落地)。
+			m_NeedsReimport = true;
+			m_SyncDetail = Wui::Tr("panel.model.sync.settings_edited", "Import settings edited — reimport to apply");
+			return;
 		}
 		if (m_Data.Meta.ImporterVersion != 1u)
 		{
@@ -292,7 +330,10 @@ namespace World
 		const std::filesystem::path source = std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical;
 		Asset::GltfImportResult imported;
 		std::string error;
-		if (!Asset::ImportFile(source, std::filesystem::path(WLD_ASSETPATH), &imported, &error))
+		// P4-U11:用**面板当前的设置**导入(用户在设置区改完直接应用);设置随 .wmodel 存盘,
+		// 不再写 .wimport 旁路文件。
+		if (!Asset::GltfImporter::ImportFileWithSettings(source.string(),
+			std::filesystem::path(WLD_ASSETPATH).string(), m_Settings, &imported, &error))
 		{
 			const std::string text = Wui::Tr("panel.model.reimport.failed", "Reimport failed: ")
 				+ (error.empty() ? Wui::Tr("panel.model.reimport.unknown_error", "unknown error") : error);
@@ -303,6 +344,7 @@ namespace World
 		}
 		// .wmodel 缓存会让旧网格继续被场景引用 —— 重导后清缓存,重新读盘。
 		Mesh::ClearWModelCache();
+		m_SettingsDirty = false;
 		Reload();
 		const std::string text = Wui::Tr("panel.model.reimport.done", "Reimported ") + m_LogicalPath
 			+ "(mesh " + std::to_string(imported.MeshCount)
@@ -516,20 +558,46 @@ namespace World
 	// D5c-4b:预览只播第 0 条 clip(控件/状态行/滑杆同一来源)。
 	float ModelPreviewPanel::AnimationClipDuration() const
 	{
-		return (m_DataValid && !m_Data.Animations.empty()) ? m_Data.Animations[0].Duration : 0.0f;
+		const Asset::WModelAnimation* clip = ActiveClip();
+		return clip ? clip->Duration : 0.0f;
+	}
+
+	// P4-U11:当前预览的动画条;下标越界(资产重导后条数变少)回退第 0 条。
+	const Asset::WModelAnimation* ModelPreviewPanel::ActiveClip() const
+	{
+		if (!m_DataValid || m_Data.Animations.empty())
+			return nullptr;
+		const size_t index = static_cast<size_t>(std::clamp(m_AnimClipIndex, 0,
+			static_cast<int>(m_Data.Animations.size()) - 1));
+		return &m_Data.Animations[index];
+	}
+
+	// P4-U11:取景 = 回到包围盒中心 + 按半径给一个合适的距离(与 Reload 的初始取景同一条公式)。
+	void ModelPreviewPanel::FramePreview()
+	{
+		if (!m_Mesh)
+			return;
+		const MeshBounds bounds = ComputeWorldBounds();
+		m_Focus = bounds.GetCenter();
+		const float radius = std::max(0.25f, glm::length(bounds.GetExtents()));
+		m_MinDistance = radius * 0.6f;
+		m_MaxDistance = radius * 40.0f;
+		m_CameraDistance = radius * 3.2f;
+		m_OrbitYaw = 0.6f;
+		m_OrbitPitch = 0.25f;
 	}
 
 	uint64_t ModelPreviewPanel::RenderPreview()
 	{
+		if (!m_Mesh)
+			return 0;
+		// 必须在取命令缓冲**之前**创建资源:命令缓冲是 EnsureGpuResources 建的,
+		// 先判断 !command 会永远早退(实测:模型预览一直显示"预览不可用")。
+		EnsureGpuResources();
 		// P4-UX16b:本帧槽位专属的命令缓冲(见头文件:单缓冲会在上一帧还没跑完时重录)。
 		Rhi::Handle<Rhi::CommandBuffer>& command =
 			m_PreviewCommands[Renderer::FrameSlot() % Renderer::FramesInFlight];
-		if (!command)
-			return 0;
-		if (!m_Mesh)
-			return 0;
-		EnsureGpuResources();
-		if (!m_PreviewFramebuffer || !m_PreviewCameraSet)
+		if (!m_PreviewFramebuffer || !m_PreviewCameraSet || !command)
 			return 0;
 
 		const float distance = m_CameraDistance;
@@ -582,7 +650,8 @@ namespace World
 		{
 			skinPalettes.resize(meshes.size());
 			static const Asset::WModelAnimation kEmptyClip;
-			const Asset::WModelAnimation& clip = m_Data.Animations.empty() ? kEmptyClip : m_Data.Animations[0];
+			const Asset::WModelAnimation* active = ActiveClip();
+			const Asset::WModelAnimation& clip = active ? *active : kEmptyClip;
 			for (size_t meshIndex = 0; meshIndex < meshes.size() && meshIndex < m_Data.Meshes.size(); ++meshIndex)
 			{
 				const int32_t skinIndex = m_Data.Meshes[meshIndex].SkinIndex;
@@ -753,7 +822,7 @@ namespace World
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, { 0.09f, 0.095f, 0.105f, 1.0f });
 
-		// D5b-2:轻量轮询"需要重导"状态(1s 节流):外部改源/改 `.wimport` 后不需要手动刷新。
+		// D5b-2:轻量轮询"需要重导"状态(1s 节流):外部改源之后不需要手动刷新。
 		const double now = std::chrono::duration<double>(
 			std::chrono::steady_clock::now().time_since_epoch()).count();
 		if (m_SettingsLoaded || m_SourceExists)
@@ -779,27 +848,118 @@ namespace World
 		else if (showAnimControls)
 			m_AnimTime = 0.0f;
 
-		const float x = rect.X + 10.0f;
-		const float width = rect.W - 20.0f;
+		const float pad = 10.0f;
+		const float x = rect.X + pad;
+		const float width = rect.W - pad * 2.0f;
+		if (width < 120.0f || rect.H < 80.0f)
+			return;
 		float y = rect.Y + 8.0f;
-		Wui::Label(ctx, { x, y }, ShortenPath(m_LogicalPath), theme.Text, 13.0f);
-		y += 22.0f;
-		// P4-U10:标题显示的是**导入产物**(.wmodel,场景引用的那个),这一行补上导入源 ——
-		// glTF/GLB 只是源文件,重导从这里来(用户 2026-09-21:「gltf 和 wmodel 有歧义」)。
-		if (!m_SourceLogical.empty())
-		{
-			const std::string sourceLine = Wui::Tr("panel.model.source_line", "Import source: ")
-				+ ShortenPath(m_SourceLogical)
-				+ (m_NeedsReimport ? Wui::Tr("panel.model.source_stale", "  (changed — reimport)") : std::string());
-			Wui::Label(ctx, { x, y }, sourceLine, theme.TextMuted, 11.0f);
-			Wui::Tooltip(ctx, { x, y, width, 14.0f }, Wui::Tr("panel.model.source_tooltip",
-				"glTF/GLB sources are import-only; the scene references the .wmodel produced from them."));
-		}
-		y += 16.0f;
 
-		// 预览区:上=图(约占四成高),下=资产视图(状态/设置/依赖/节点树)。
-		const float previewSide = std::min(width, std::max(160.0f, rect.H * 0.40f));
-		const Wui::WuiRect previewRect { x, y, std::max(64.0f, previewSide), std::max(64.0f, previewSide) };
+		// ---- ① 头部:标题 + 动作(放入场景 / 重新导入 / 取景)----
+		const float actionW = 92.0f;
+		const float actionH = 22.0f;
+		const float actionGap = 6.0f;
+		const float actionsW = actionW * 3.0f + actionGap * 2.0f;
+		// 标题在左、动作在右;窄窗口先把标题缩短(动作优先保持可点)。
+		const float titleBudget = std::max(60.0f, width - actionsW - 12.0f);
+		Wui::LabelWithTerm(ctx, { x, y + 3.0f }, ShortenPath(m_LogicalPath), std::string(),
+			theme.Text, 14.0f, theme, titleBudget);
+		float ax = rect.X + rect.W - pad - actionsW;
+		if (Wui::Button(ctx, Wui::HashId("model.instance"), { ax, y, actionW, actionH },
+			Wui::Tr("panel.model.instance", "Place in Scene"), theme))
+		{
+			std::string message;
+			m_StatusIsError = !host.InstantiateModelFile(m_LogicalPath, &message);
+			m_Status = message;
+		}
+		ax += actionW + actionGap;
+		const bool needsReimport = m_NeedsReimport;
+		const std::string reimportLabel = needsReimport
+			? Wui::Tr("panel.model.reimport_dirty", "Reimport *")
+			: Wui::Tr("panel.model.reimport", "Reimport");
+		if (Wui::Button(ctx, Wui::HashId("model.reimport"), { ax, y, actionW, actionH }, reimportLabel, theme))
+		{
+			std::string message;
+			Reimport(&message);
+		}
+		if (needsReimport)
+			Wui::Tooltip(ctx, { ax, y, actionW, actionH }, Wui::Tr("panel.model.reimport_tooltip",
+				"Apply the current import settings and rebuild this asset from its source (.wmodel is rewritten)."));
+		ax += actionW + actionGap;
+		if (Wui::Button(ctx, Wui::HashId("model.frame"), { ax, y, actionW, actionH },
+			Wui::Tr("panel.model.frame", "Frame"), theme))
+			FramePreview();
+		Wui::Tooltip(ctx, { ax, y, actionW, actionH }, Wui::Tr("panel.model.frame_tooltip",
+			"Frame the model in the preview (also: double-click the preview, or press F while hovering it)."));
+		y += 26.0f;
+
+		// ---- ② 来源与同步状态:左边"导入源:xxx.gltf",右边状态(需重导 = 警示色)----
+		std::string statusText;
+		if (m_NeedsReimport)
+			statusText = Wui::Tr("panel.model.sync.needs_reimport", "Reimport needed: ")
+				+ (m_SyncDetail.empty()
+					? Wui::Tr("panel.model.sync.asset_stale", "asset is out of date with its source")
+					: m_SyncDetail);
+		else if (!m_SourceExists)
+			statusText = Wui::Tr("panel.model.sync.in_sync_no_source",
+				"In sync (no source file found, reimport unavailable)");
+		else
+			statusText = Wui::Tr("panel.model.sync.in_sync", "In sync (source and settings unchanged)");
+		const std::string sourceLine = m_SourceLogical.empty()
+			? Wui::Tr("panel.model.source_missing", "No import source found for this asset")
+			: Wui::Tr("panel.model.source_line", "Import source: ") + ShortenPath(m_SourceLogical);
+		const float statusW = ctx.MeasureTextWidth(statusText, 11.0f);
+		const float sourceBudget = std::max(80.0f, width - statusW - 16.0f);
+		Wui::LabelWithTerm(ctx, { x, y + 2.0f }, sourceLine, std::string(), theme.TextMuted, 11.0f,
+			theme, sourceBudget);
+		if (!m_SourceLogical.empty())
+			Wui::Tooltip(ctx, { x, y, sourceBudget, 14.0f }, Wui::Tr("panel.model.source_tooltip",
+				"glTF/GLB sources are import-only; the scene references the .wmodel produced from them."));
+		// 状态右对齐;同时登记成只读无障碍节点(旧契约 id=model.status 保持不变)。
+		const Wui::WuiRect statusRect { rect.X + rect.W - pad - statusW, y, statusW, 14.0f };
+		Wui::WuiAccessNode statusNode;
+		statusNode.Id = Wui::HashId("model.status");
+		statusNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+		statusNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+		statusNode.Kind = "status";
+		statusNode.Label = "model status";
+		statusNode.Value = statusText;
+		statusNode.Rect = statusRect;
+		statusNode.Interactive = false;
+		Wui::WuiAccessibility::Get().Register(statusNode);
+		Wui::Label(ctx, { statusRect.X, statusRect.Y + 1.0f }, statusText,
+			m_NeedsReimport ? Wui::WuiColor { 1.0f, 0.72f, 0.30f, 1.0f } : theme.TextMuted, 11.0f);
+		y += 20.0f;
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { rect.X, y, rect.W, 1.0f }, theme.Border, 0.0f });
+		y += 8.0f;
+
+		// ---- ③ 正文:宽窗口两列(左预览 / 右信息),窄窗口单列(预览在上、信息在下滚动)----
+		const float bodyTop = y;
+		const float bodyBottom = rect.Y + rect.H - 8.0f;
+		const float bodyH = std::max(0.0f, bodyBottom - bodyTop);
+		if (bodyH < 60.0f)
+			return;
+		const bool twoColumn = rect.W >= 520.0f;
+		const float animBlockH = showAnimControls ? 74.0f : 0.0f;
+		float previewSide = 0.0f;
+		float infoX = x;
+		float infoTop = bodyTop;
+		float infoW = width;
+		float infoH = bodyH;
+		if (twoColumn)
+		{
+			previewSide = std::clamp(std::min(bodyH - animBlockH, width * 0.46f), 160.0f,
+				std::max(160.0f, bodyH - animBlockH));
+			infoX = x + previewSide + 12.0f;
+			infoW = std::max(120.0f, rect.X + rect.W - pad - infoX);
+		}
+		else
+		{
+			previewSide = std::min(width, std::max(120.0f, bodyH * 0.42f));
+			infoTop = bodyTop + previewSide + animBlockH + 10.0f;
+			infoH = std::max(40.0f, bodyBottom - infoTop);
+		}
+		const Wui::WuiRect previewRect { x, bodyTop, previewSide, previewSide };
 		const uint64_t textureId = RenderPreview();
 		if (textureId != 0)
 		{
@@ -816,7 +976,7 @@ namespace World
 				m_Orbiting = true;
 				m_LastMouse = ctx.Input().MousePos;
 			}
-			if (m_Orbiting && ctx.Input().MouseDown[0])
+			if (m_Orbiting && ctx.Input().MouseDown[0] && !ctx.IsDoubleClicked(previewRect))
 			{
 				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
 				m_LastMouse = ctx.Input().MousePos;
@@ -825,6 +985,12 @@ namespace World
 			}
 			if (m_Orbiting && !ctx.Input().MouseDown[0])
 				m_Orbiting = false;
+			// 取景:双击 / 悬停按 F(与头部按钮同一条路径)。
+			if (ctx.IsDoubleClicked(previewRect)
+				|| (hovered && ctx.WasKeyPressed(KeyCodes::F)))
+				FramePreview();
+			if (hovered)
+				ctx.SetCursor(m_Orbiting ? Wui::WuiCursor::Hand : Wui::WuiCursor::Arrow);
 		}
 		else
 		{
@@ -832,157 +998,292 @@ namespace World
 				Wui::Tr("panel.model.preview_unavailable", "Preview unavailable (model not loaded or RHI device not ready)"),
 				theme.TextMuted, 12.0f);
 		}
-		y += previewRect.H + 8.0f;
+		// 角标:预览分辨率 + 操作提示(悬停才显示提示,免得常驻噪音)。
+		Wui::Label(ctx, { previewRect.X + 6.0f, previewRect.Y + previewRect.H - 14.0f },
+			std::to_string(m_PreviewSize) + "px", theme.TextDisabled, 10.0f);
+		if (ctx.IsHovered(previewRect))
+			Wui::Tooltip(ctx, previewRect, Wui::Tr("panel.model.preview_tooltip",
+				"Drag = orbit, wheel = zoom, double-click or F = frame."));
+
+		float leftBottom = bodyTop + previewSide;
 		if (showAnimControls)
-			y = DrawAnimationControls(ctx, x, y, width, theme);
-		DrawAssetView(ctx, { x, y, width, std::max(0.0f, rect.Y + rect.H - y - 6.0f) }, host);
+			leftBottom = DrawAnimationControls(ctx, x, leftBottom + 8.0f, previewSide, theme);
+		(void)leftBottom;
+
+		// ---- ④ 信息列(滚动):导入设置 / 统计 / 材质槽 / 节点树 ----
+		if (infoH >= 40.0f && infoW >= 100.0f)
+		{
+			// 内容高度按各区块估算(设置 ~118 + 统计 ~24 + 材质槽 ~n*17 + 节点树 ~min(n,12)*14)。
+			const float settingsH = (m_SourceExists && m_SettingsLoaded) ? 118.0f : 34.0f;
+			const float statsH = m_Mesh ? 44.0f : 0.0f;
+			const float slotsH = m_Mesh ? 20.0f + static_cast<float>(m_Mesh->GetMaterialSlots().size()) * 17.0f : 0.0f;
+			const float nodesH = m_Mesh ? 20.0f + static_cast<float>(std::min<size_t>(m_Mesh->GetNodes().size(), 12)) * 14.0f : 0.0f;
+			const float contentH = settingsH + statsH + slotsH + nodesH + 24.0f;
+			Wui::BeginScrollArea(ctx, { infoX, infoTop, infoW, infoH }, contentH, m_InfoScroll, theme);
+			float columnY = infoTop;
+			columnY += DrawImportSettings(ctx, { infoX, columnY, infoW, 0.0f }, theme);
+			columnY += DrawStatsAndDependencies(ctx, { infoX, columnY, infoW, 0.0f }, host);
+			Wui::EndScrollArea(ctx);
+		}
 	}
 
-	// P1b D5b-2:模型资产视图 —— 同步状态(是否需要重导)/ 导入设置 / 依赖清单 / 节点树,
-	// 以及"放进当前场景 / Reimport / 保存导入设置"三个动作。状态文本登记成只读无障碍节点,
-	// E2E 可以直接断言(不需要鼠标)。
-	void ModelPreviewPanel::DrawAssetView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	// P1b D5b-2 / P4-U11:导入设置区块(右列顶部)。返回占用高度。
+	float ModelPreviewPanel::DrawImportSettings(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		const Wui::WuiTheme& theme)
+	{
+		const float x = rect.X;
+		const float width = rect.W;
+		float y = rect.Y;
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			Wui::Tr("panel.model.import_settings", "Import Settings"), theme.Accent, theme);
+		y += 22.0f;
+		if (!m_SourceExists || !m_SettingsLoaded)
+		{
+			Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.import_settings.unavailable",
+				"No source file: import settings cannot be edited (reimport unavailable)."),
+				theme.TextMuted, 11.0f);
+			return (y - rect.Y) + 18.0f;
+		}
+
+		// 设置来源一行:资产自描述(P4-U11)还是旧 .wimport,以及对"改了要重导"的说明。
+		Wui::Label(ctx, { x, y }, m_SettingsFromAsset
+				? Wui::Tr("panel.model.import_settings.from_asset", "Stored in this .wmodel")
+				: Wui::Tr("panel.model.import_settings.from_legacy", "From legacy .wimport (next import stores it in the .wmodel)"),
+			theme.TextDisabled, 10.0f);
+		y += 14.0f;
+
+		const float halfW = (width - 8.0f) * 0.5f;
+		Wui::Label(ctx, { x, y + 3.0f }, "Scale", theme.TextMuted, 11.0f);
+		const float scaleBefore = m_Settings.Scale;
+		Wui::DragFloat(ctx, Wui::HashId("model.import.scale"), { x + 44.0f, y, halfW - 48.0f, 18.0f },
+			m_Settings.Scale, 0.05f, 0.01f, 100.0f, theme);
+		if (m_Settings.Scale != scaleBefore)
+			m_SettingsDirty = true;
+		Wui::Tooltip(ctx, { x + 44.0f, y, halfW - 48.0f, 18.0f }, Wui::Tr("panel.model.import.scale.tooltip",
+			"Uniform scale baked into the geometry at import time (1 = the source's own units)."));
+		static const std::vector<std::string> upAxes { "Y", "Z" };
+		int upAxisIndex = m_Settings.UpAxis == 0 ? 0 : 1;
+		Wui::Label(ctx, { x + halfW + 8.0f, y + 2.0f }, "Up Axis", theme.TextMuted, 11.0f);
+		if (Wui::Combo(ctx, Wui::HashId("model.import.upaxis"),
+			{ x + halfW + 54.0f, y - 2.0f, std::max(40.0f, width - halfW - 54.0f), 18.0f },
+			"Up Axis", upAxes, upAxisIndex, theme))
+		{
+			m_Settings.UpAxis = upAxisIndex == 0 ? 0 : 1;
+			m_SettingsDirty = true;
+		}
+		Wui::Tooltip(ctx, { x + halfW + 54.0f, y - 2.0f, std::max(40.0f, width - halfW - 54.0f), 18.0f },
+			Wui::Tr("panel.model.import.upaxis.tooltip",
+				"Source up axis: Y = already engine-up; Z = rotate -90° about X while baking."));
+		y += 22.0f;
+		bool exportMaterials = m_Settings.ExportMaterials;
+		if (Wui::Checkbox(ctx, Wui::HashId("model.import.materials"), { x, y, halfW, 16.0f },
+			Wui::Tr("panel.model.import_settings.export_materials", "Export Materials"), exportMaterials, theme))
+		{
+			m_Settings.ExportMaterials = exportMaterials;
+			m_SettingsDirty = true;
+		}
+		bool exportTextures = m_Settings.ExportTextures;
+		if (Wui::Checkbox(ctx, Wui::HashId("model.import.textures"), { x + halfW + 8.0f, y, halfW, 16.0f },
+			Wui::Tr("panel.model.import_settings.export_textures", "Export Textures"), exportTextures, theme))
+		{
+			m_Settings.ExportTextures = exportTextures;
+			m_SettingsDirty = true;
+		}
+		y += 20.0f;
+		bool generateNormals = m_Settings.GenerateNormals;
+		if (Wui::Checkbox(ctx, Wui::HashId("model.import.normals"), { x, y, halfW, 16.0f },
+			Wui::Tr("panel.model.import_settings.generate_normals", "Generate Missing Normals"), generateNormals, theme))
+		{
+			m_Settings.GenerateNormals = generateNormals;
+			m_SettingsDirty = true;
+		}
+		bool importAnimations = m_Settings.ImportAnimations;
+		if (Wui::Checkbox(ctx, Wui::HashId("model.import.animations"), { x + halfW + 8.0f, y, halfW, 16.0f },
+			Wui::Tr("panel.model.import_settings.import_animations", "Import Animations"), importAnimations, theme))
+		{
+			m_Settings.ImportAnimations = importAnimations;
+			m_SettingsDirty = true;
+		}
+		y += 20.0f;
+		bool importSkins = m_Settings.ImportSkins;
+		if (Wui::Checkbox(ctx, Wui::HashId("model.import.skins"), { x, y, halfW, 16.0f },
+			Wui::Tr("panel.model.import_settings.import_skins", "Import Skins"), importSkins, theme))
+		{
+			m_Settings.ImportSkins = importSkins;
+			m_SettingsDirty = true;
+		}
+		Wui::Label(ctx, { x + halfW + 8.0f, y + 2.0f },
+			Wui::Tr("panel.model.import_settings.sample_rate", "Sample Rate"), theme.TextMuted, 11.0f);
+		const float sampleBefore = m_Settings.AnimationSampleRate;
+		Wui::DragFloat(ctx, Wui::HashId("model.import.samplerate"), { x + halfW + 78.0f, y, halfW - 82.0f, 16.0f },
+			m_Settings.AnimationSampleRate, 1.0f, 1.0f, 120.0f, theme);
+		if (m_Settings.AnimationSampleRate != sampleBefore)
+			m_SettingsDirty = true;
+		y += 20.0f;
+		bool reuseMaterials = m_Settings.ReuseMaterials;
+		if (Wui::Checkbox(ctx, Wui::HashId("model.import.reuse_materials"), { x, y, halfW, 16.0f },
+			Wui::Tr("panel.model.import_settings.reuse_materials", "Reuse Materials"), reuseMaterials, theme))
+		{
+			m_Settings.ReuseMaterials = reuseMaterials;
+			m_SettingsDirty = true;
+		}
+		bool reuseTextures = m_Settings.ReuseTextures;
+		if (Wui::Checkbox(ctx, Wui::HashId("model.import.reuse_textures"), { x + halfW + 8.0f, y, halfW, 16.0f },
+			Wui::Tr("panel.model.import_settings.reuse_textures", "Reuse Textures"), reuseTextures, theme))
+		{
+			m_Settings.ReuseTextures = reuseTextures;
+			m_SettingsDirty = true;
+		}
+		y += 18.0f;
+		if (m_SettingsDirty)
+			Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.import_settings.dirty",
+				"Edited — press Reimport to apply (settings are stored inside the .wmodel)."),
+				Wui::WuiColor { 1.0f, 0.72f, 0.30f, 1.0f }, 11.0f);
+		y += 16.0f;
+		return y - rect.Y;
+	}
+
+	// P1b D5b-2 / P4-U11:统计 + 材质槽(可点开材质编辑器)+ 节点树。返回占用高度。
+	float ModelPreviewPanel::DrawStatsAndDependencies(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
 		const float x = rect.X;
 		const float width = rect.W;
-		float y = rect.Y;
-		if (rect.H < 40.0f)
-			return;
+		float y = rect.Y + 4.0f;
+		if (!m_Mesh)
+			return 0.0f;
 
-		std::string statusText;
-		if (m_NeedsReimport)
-			statusText = Wui::Tr("panel.model.sync.needs_reimport", "Reimport needed: ")
-				+ (m_SyncDetail.empty()
-					? Wui::Tr("panel.model.sync.asset_stale", "asset is out of date with its source")
-					: m_SyncDetail);
-		else if (!m_SourceExists)
-			statusText = Wui::Tr("panel.model.sync.in_sync_no_source",
-				"In sync (no source file found, reimport unavailable)");
+		Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+			Wui::Tr("panel.model.stats", "Mesh & Statistics"), theme.Accent, theme);
+		y += 22.0f;
+		const MeshBounds& bounds = m_Mesh->GetBounds();
+		std::ostringstream stats;
+		stats << Wui::Tr("panel.model.stats.nodes_label", "nodes ") << m_Mesh->GetNodes().size()
+			<< Wui::Tr("panel.model.stats.sep", " / ") << "mesh " << m_Mesh->GetMeshes().size()
+			<< Wui::Tr("panel.model.stats.sep", " / ") << "submesh " << m_Mesh->GetSubmeshes().size()
+			<< Wui::Tr("panel.model.stats.sep", " / ")
+			<< Wui::Tr("panel.model.stats.vertices", "vertices ") << m_Mesh->GetVertexCount()
+			<< Wui::Tr("panel.model.stats.sep", " / ")
+			<< Wui::Tr("panel.model.stats.indices", "indices ") << m_Mesh->GetIndexCount()
+			<< Wui::Tr("panel.model.stats.bounds", " | bounds (")
+			<< std::fixed << std::setprecision(2)
+			<< bounds.Min.x << "," << bounds.Min.y << "," << bounds.Min.z << ")~("
+			<< bounds.Max.x << "," << bounds.Max.y << "," << bounds.Max.z << ")";
+		Wui::LabelWithTerm(ctx, { x, y }, stats.str(), std::string(), theme.TextMuted, 11.0f, theme, width);
+		y += 16.0f;
+		if (!m_DataValid || m_Data.Skins.empty())
+		{
+			// 非蒙皮资产:一行说明渲染路径(不再画空区块)。
+			Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.stats.static",
+				"Static asset (no skin/animation blocks)."), theme.TextDisabled, 10.0f);
+			y += 14.0f;
+		}
 		else
-			statusText = Wui::Tr("panel.model.sync.in_sync", "In sync (source and settings unchanged)");
-		Wui::WuiAccessNode statusNode;
-		statusNode.Id = Wui::HashId("model.status");
-		statusNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-		statusNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-		statusNode.Kind = "status";
-		statusNode.Label = "model status";
-		statusNode.Value = statusText;
-		statusNode.Rect = { x, y, width, 16.0f };
-		statusNode.Interactive = false;
-		Wui::WuiAccessibility::Get().Register(statusNode);
-		Wui::Label(ctx, { x, y }, statusText,
-			m_NeedsReimport ? Wui::WuiColor { 1.0f, 0.72f, 0.30f, 1.0f } : theme.TextMuted, 12.0f);
-		y += 18.0f;
+		{
+			std::ostringstream rig;
+			rig << Wui::Tr("panel.model.stats.skins", "skins ") << m_Data.Skins.size()
+				<< Wui::Tr("panel.model.stats.sep", " / ")
+				<< Wui::Tr("panel.model.stats.clips", "clips ") << m_Data.Animations.size();
+			if (!m_Data.Skins.empty())
+				rig << Wui::Tr("panel.model.stats.sep", " / ")
+					<< Wui::Tr("panel.model.stats.joints", "joints ") << m_Data.Skins[0].JointNodes.size();
+			Wui::Label(ctx, { x, y }, rig.str(), theme.TextDisabled, 10.0f);
+			y += 14.0f;
+		}
+		y += 4.0f;
 
-		const float buttonW = (width - 16.0f) / 3.0f;
-		if (Wui::Button(ctx, Wui::HashId("model.instance"), { x, y, buttonW, 22.0f },
-			Wui::Tr("panel.model.instance", "Place in Scene"), theme))
+		// ---- 材质槽:每行可点 → 打开材质编辑器(空槽/缺失分别标注)----
+		const std::vector<std::string>& slots = m_Mesh->GetMaterialSlots();
+		if (!slots.empty())
 		{
-			std::string message;
-			if (!host.InstantiateModelFile(m_LogicalPath, &message))
-			{
-				m_Status = message;
-				m_StatusIsError = true;
-			}
-			else
-			{
-				m_Status = message;
-				m_StatusIsError = false;
-			}
-		}
-		if (Wui::Button(ctx, Wui::HashId("model.reimport"), { x + buttonW + 8.0f, y, buttonW, 22.0f },
-			m_NeedsReimport ? "Reimport *" : "Reimport", theme))
-		{
-			std::string message;
-			Reimport(&message);
-		}
-		if (Wui::Button(ctx, Wui::HashId("model.settings.save"), { x + 2.0f * (buttonW + 8.0f), y, buttonW, 22.0f },
-			Wui::Tr("panel.model.import_settings.save", "Save Import Settings"), theme))
-		{
-			if (!m_SourceExists)
-			{
-				m_Status = Wui::Tr("panel.model.import_settings.no_source",
-					"Failed to save settings: no source file");
-				m_StatusIsError = true;
-			}
-			else
-			{
-				std::string error;
-				if (Asset::ModelImportSettings::Save(
-					(std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical).string(), m_Settings, &error))
-				{
-					m_Status = Wui::Tr("panel.model.import_settings.saved",
-						"Import settings saved (.wimport); click Reimport to apply");
-					m_StatusIsError = false;
-					RefreshSyncState();
-				}
-				else
-				{
-					m_Status = Wui::Tr("panel.model.import_settings.save_failed", "Failed to save settings: ") + error;
-					m_StatusIsError = true;
-				}
-			}
-		}
-		y += 28.0f;
-
-		if (m_SourceExists && m_SettingsLoaded)
-		{
-			const float halfW = (width - 8.0f) * 0.5f;
-			Wui::Label(ctx, { x, y + 4.0f }, "Scale", theme.TextMuted, 11.0f);
-			Wui::DragFloat(ctx, Wui::HashId("model.import.scale"), { x + 46.0f, y, halfW - 50.0f, 18.0f },
-				m_Settings.Scale, 0.05f, 0.01f, 100.0f, theme);
-			static const std::vector<std::string> upAxes { "Y", "Z" };
-			int upAxisIndex = m_Settings.UpAxis == 0 ? 0 : 1;
-			// P4-UX1:Combo 只画当前值,标签在左侧单独绘制(与其它面板同一排版语法)。
-			Wui::Label(ctx, { x + halfW + 8.0f, y + 2.0f }, "Up Axis", theme.TextMuted, 11.0f);
-			if (Wui::Combo(ctx, Wui::HashId("model.import.upaxis"),
-				{ x + halfW + 54.0f, y - 2.0f, width - halfW - 54.0f, 18.0f },
-				"Up Axis", upAxes, upAxisIndex, theme))
-				m_Settings.UpAxis = upAxisIndex == 0 ? 0 : 1;
+			Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+				Wui::Tr("panel.model.material_slots", "Material Slots"), theme.Accent, theme);
 			y += 22.0f;
-			bool exportMaterials = m_Settings.ExportMaterials;
-			if (Wui::Checkbox(ctx, Wui::HashId("model.import.materials"), { x, y, 140.0f, 16.0f },
-				Wui::Tr("panel.model.import_settings.export_materials", "Export Materials"), exportMaterials, theme))
-				m_Settings.ExportMaterials = exportMaterials;
-			bool exportTextures = m_Settings.ExportTextures;
-			if (Wui::Checkbox(ctx, Wui::HashId("model.import.textures"), { x + 150.0f, y, 160.0f, 16.0f },
-				Wui::Tr("panel.model.import_settings.export_textures", "Export Textures"), exportTextures, theme))
-				m_Settings.ExportTextures = exportTextures;
-			bool generateNormals = m_Settings.GenerateNormals;
-			if (Wui::Checkbox(ctx, Wui::HashId("model.import.normals"), { x + 320.0f, y, 170.0f, 16.0f },
-				Wui::Tr("panel.model.import_settings.generate_normals", "Generate Missing Normals"),
-				generateNormals, theme))
-				m_Settings.GenerateNormals = generateNormals;
-			y += 20.0f;
+			for (size_t index = 0; index < slots.size(); ++index)
+			{
+				const std::string& slot = slots[index];
+				const Wui::WuiRect row { x, y, width, 16.0f };
+				if (slot.empty())
+				{
+					Wui::Label(ctx, { x, y + 1.0f }, Wui::Tr("panel.model.empty_slot", "(empty material slot)"),
+						theme.TextDisabled, 10.0f);
+					y += 17.0f;
+					continue;
+				}
+				const Ref<Material> material = MaterialLibrary::Get().Load(slot);
+				const bool missing = material == nullptr;
+				const bool hovered = ctx.IsHovered(row);
+				const std::string label = std::to_string(index) + "  " + slot;
+				const std::string labelText = EllipsizeToWidthLocal(ctx, label, row.W, 11.0f);
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { x, y + 1.0f, 0, 0 },
+					missing ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f }
+						: (hovered ? theme.Accent : theme.Text), 0, 1.0f, labelText, 11.0f, false });
+				Wui::WuiAccessNode slotNode;
+				slotNode.Id = Wui::HashId(("model.slot." + std::to_string(index)).c_str());
+				slotNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				slotNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				slotNode.Kind = "button";
+				slotNode.Label = label;
+				slotNode.Value = missing ? "missing" : "ok";
+				slotNode.Rect = row;
+				slotNode.Interactive = true;
+				Wui::WuiAccessibility::Get().Register(slotNode);
+				if (hovered)
+				{
+					ctx.SetCursor(Wui::WuiCursor::Hand);
+					Wui::Tooltip(ctx, row, Wui::Tr("panel.model.slot_tooltip", "Click to open this material in the material editor."));
+				}
+				if (ctx.IsClicked(row))
+					host.OpenMaterialEditor(slot);
+				y += 17.0f;
+			}
+			// 每个材质槽的贴图依赖(缺失标红):一眼看到"这个模型还缺什么"。
+			for (size_t index = 0; index < slots.size() && index < m_SlotMaterials.size(); ++index)
+			{
+				if (!m_SlotMaterials[index])
+					continue;
+				const MaterialDesc& desc = m_SlotMaterials[index]->GetDesc();
+				const std::string textures[2] = { desc.AlbedoTexture, desc.NormalTexture };
+				for (const std::string& texture : textures)
+				{
+					if (texture.empty())
+						continue;
+					const AssetFingerprint fingerprint = FingerprintAsset(texture, nullptr);
+					Wui::Label(ctx, { x + 12.0f, y }, (fingerprint.Exists ? std::string("tex ")
+						: Wui::Tr("panel.model.missing_texture", "[missing] tex ")) + ShortenPath(texture),
+						fingerprint.Exists ? theme.TextDisabled : Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f }, 10.0f);
+					y += 13.0f;
+				}
+			}
+			y += 4.0f;
 		}
-
-		if (m_Mesh && y < rect.Y + rect.H - 16.0f)
+		else
 		{
-			const MeshBounds& bounds = m_Mesh->GetBounds();
-			// 数值统计行同样走本地化:标签/分隔符都来自目录,数字与格式保持原样。
-			std::ostringstream stats;
-			stats << Wui::Tr("panel.model.stats.nodes_label", "nodes ") << m_Mesh->GetNodes().size()
-				<< Wui::Tr("panel.model.stats.sep", " / ") << "mesh " << m_Mesh->GetMeshes().size()
-				<< Wui::Tr("panel.model.stats.sep", " / ") << "submesh " << m_Mesh->GetSubmeshes().size()
-				<< Wui::Tr("panel.model.stats.sep", " / ")
-				<< Wui::Tr("panel.model.stats.vertices", "vertices ") << m_Mesh->GetVertexCount()
-				<< Wui::Tr("panel.model.stats.sep", " / ")
-				<< Wui::Tr("panel.model.stats.indices", "indices ") << m_Mesh->GetIndexCount()
-				<< Wui::Tr("panel.model.stats.bounds", " | bounds (")
-				<< std::fixed << std::setprecision(2)
-				<< bounds.Min.x << "," << bounds.Min.y << "," << bounds.Min.z << ")~("
-				<< bounds.Max.x << "," << bounds.Max.y << "," << bounds.Max.z << ")";
-			Wui::Label(ctx, { x, y }, stats.str(), theme.TextMuted, 11.0f);
+			// 没有材质槽的资产(纯几何夹具)也要说清"这里为什么是空的",不留空白让用户猜。
+			const std::string emptyHint = Wui::Tr("panel.model.slots_empty",
+				"No material slots (the source has no materials)");
+			Wui::Label(ctx, { x, y }, emptyHint, theme.TextDisabled, 10.0f);
+			Wui::WuiAccessNode emptyNode;
+			emptyNode.Id = Wui::HashId("model.slots.empty");
+			emptyNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			emptyNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			emptyNode.Kind = "text";
+			emptyNode.Label = emptyHint;
+			emptyNode.Rect = { x, y, width, 12.0f };
+			emptyNode.Interactive = false;
+			Wui::WuiAccessibility::Get().Register(emptyNode);
 			y += 16.0f;
 		}
 
-		if (m_Mesh && !m_Mesh->GetNodes().empty() && y < rect.Y + rect.H - 20.0f)
+		// ---- 节点树(缩进 + mesh 下标;超过 12 行截断,免得把面板撑得很长)----
+		const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
+		if (!nodes.empty())
 		{
-			Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.node_tree", "Node tree:"), theme.TextMuted, 11.0f);
-			y += 14.0f;
-			const std::vector<MeshNode>& nodes = m_Mesh->GetNodes();
-			for (size_t index = 0; index < nodes.size() && index < 8; ++index)
+			Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+				Wui::Tr("panel.model.node_tree", "Node Tree"), theme.Accent, theme);
+			y += 22.0f;
+			for (size_t index = 0; index < nodes.size() && index < 12; ++index)
 			{
 				const MeshNode& treeNode = nodes[index];
 				int depth = 0;
@@ -992,59 +1293,26 @@ namespace World
 				std::string text = std::string(static_cast<size_t>(depth) * 2, ' ') + "- " + treeNode.Name;
 				if (treeNode.MeshIndex >= 0)
 					text += "  [mesh " + std::to_string(treeNode.MeshIndex) + "]";
-				Wui::Label(ctx, { x, y }, text, theme.Text, 11.0f);
+				Wui::Label(ctx, { x, y }, EllipsizeToWidthLocal(ctx, text, width, 10.0f), theme.Text, 10.0f);
 				y += 13.0f;
-				if (y > rect.Y + rect.H - 30.0f)
-					break;
 			}
-		}
-
-		if (m_Mesh && !m_Mesh->GetMaterialSlots().empty() && y < rect.Y + rect.H - 20.0f)
-		{
-			Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.dependencies", "Dependencies:"), theme.TextMuted, 11.0f);
-			y += 14.0f;
-			const std::vector<std::string>& slots = m_Mesh->GetMaterialSlots();
-			for (size_t index = 0; index < slots.size() && index < 6; ++index)
+			if (nodes.size() > 12)
 			{
-				const std::string& slot = slots[index];
-				if (slot.empty())
-				{
-					Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.empty_slot", "- (empty material slot)"),
-						theme.TextMuted, 11.0f);
-					y += 13.0f;
-					continue;
-				}
-				const Ref<Material> material = MaterialLibrary::Get().Load(slot);
-				const bool missing = material == nullptr;
-				Wui::Label(ctx, { x, y },
-					(missing ? Wui::Tr("panel.model.missing", "[missing] ") : std::string("- ")) + slot,
-					missing ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.Text, 11.0f);
+				Wui::Label(ctx, { x, y }, Wui::Tr("panel.model.node_tree.more", "… ") +
+					std::to_string(nodes.size() - 12) + Wui::Tr("panel.model.node_tree.more_tail", " more nodes"),
+					theme.TextDisabled, 10.0f);
 				y += 13.0f;
-				if (material)
-				{
-					const MaterialDesc& desc = material->GetDesc();
-					const std::string textures[2] = { desc.AlbedoTexture, desc.NormalTexture };
-					for (const std::string& texture : textures)
-					{
-						if (texture.empty())
-							continue;
-						const AssetFingerprint fingerprint = FingerprintAsset(texture, nullptr);
-						Wui::Label(ctx, { x + 12.0f, y },
-							(fingerprint.Exists ? std::string("  tex ")
-								: Wui::Tr("panel.model.missing_texture", "  [missing] tex ")) + texture,
-							fingerprint.Exists ? theme.TextMuted
-								: Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f }, 11.0f);
-						y += 13.0f;
-					}
-				}
-				if (y > rect.Y + rect.H - 14.0f)
-					break;
 			}
 		}
 
-		if (!m_Status.empty() && y < rect.Y + rect.H - 13.0f)
-			Wui::Label(ctx, { x, y }, m_Status,
-				m_StatusIsError ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.TextMuted, 11.0f);
+		if (!m_Status.empty())
+		{
+			y += 4.0f;
+			Wui::LabelWithTerm(ctx, { x, y }, m_Status, std::string(),
+				m_StatusIsError ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.TextMuted, 10.0f, theme, width);
+			y += 14.0f;
+		}
+		return y - rect.Y;
 	}
 
 	// D5c-4b:动画控制条 —— play/loop/speed/time + 只读状态行。
@@ -1052,8 +1320,31 @@ namespace World
 	float ModelPreviewPanel::DrawAnimationControls(Wui::WuiContext& ctx, float x, float y, float width,
 		const Wui::WuiTheme& theme)
 	{
-		const Asset::WModelAnimation* clip = m_Data.Animations.empty() ? nullptr : &m_Data.Animations[0];
+		const Asset::WModelAnimation* clip = ActiveClip();
 		const float duration = clip ? clip->Duration : 0.0f;
+
+		// P4-U11:多条动画时先给一个 clip 下拉(单条就不占地方)。
+		if (m_Data.Animations.size() > 1)
+		{
+			std::vector<std::string> clipNames;
+			clipNames.reserve(m_Data.Animations.size());
+			for (const Asset::WModelAnimation& animation : m_Data.Animations)
+				clipNames.push_back(animation.Name.empty() ? "(unnamed)" : animation.Name);
+			int selected = std::clamp(m_AnimClipIndex, 0, static_cast<int>(clipNames.size()) - 1);
+			const int before = selected;
+			if (Wui::Combo(ctx, Wui::HashId("model.anim.clip"),
+				{ x, y, std::max(80.0f, width), 18.0f },
+				Wui::Tr("panel.model.anim.clip", "Clip"), clipNames, selected, theme))
+			{
+				m_AnimClipIndex = selected;
+				m_AnimTime = 0.0f;
+			}
+			else if (selected != before)
+			{
+				m_AnimClipIndex = selected;
+			}
+			y += 22.0f;
+		}
 
 		// 第一行:播放/暂停 + 循环 + 速度(0.1..4)。
 		const float playWidth = 56.0f;

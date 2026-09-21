@@ -43,8 +43,9 @@ namespace World::Asset
 			return buffer;
 		}
 
-		// D5b:导入设置的旁路文件(与源同目录同名,如 models/x.wimport)。属主是源 + 设置,
-		// 自身不是可导入资产(缺省 = 默认值),但内容变化必须让源重烘 —— 复合指纹带上它。
+		// D5b 旧格式:导入设置的旁路文件(与源同目录同名,如 models/x.wimport)。P4-U11 之后
+		// 逐源设置存在 .wmodel 的 meta 里,新导入不再写它;这里只为**旧项目**保留 —— 存在才参与,
+		// 内容变化照样让源重烘(复合指纹带上它)。
 		constexpr const char* kImportSettingsExtension = ".wimport";
 
 		std::filesystem::path ImportSettingsPath(const std::filesystem::path& source)
@@ -79,6 +80,10 @@ namespace World::Asset
 
 			// 导入设置的旁路文件(.wimport):存在才参与(CookPipeline 不关心扩展名含义)。
 			MixFileFingerprint(hash, ImportSettingsPath(source), kImportSettingsExtension);
+			// P4-U11:逐源设置现在存在 .wmodel 的 meta 里 —— 用导入器自己的设置指纹参与,
+			// "改了设置 → 重烘"不依赖旁路文件(P4-U11 之后新项目根本没有 .wimport)。
+			hash ^= importer.SettingsFingerprint(source);
+			hash *= 1099511628211ULL;
 			return hash;
 		}
 

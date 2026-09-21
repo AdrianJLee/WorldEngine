@@ -47,10 +47,27 @@ namespace World::Asset
 		static bool LoadProjectDefaults(const std::string& manifestPath);
 
 		// 读取同目录的 .wimport;缺失 → Default() + reason 为空(正常情况)。
+		// P4-U11:这是**旧项目兼容**路径 —— 新导入不再写 .wimport,设置存进 .wmodel 的 meta。
 		static ModelImportSettings Load(const std::string& sourcePath, std::string* reason = nullptr);
 		// 将设置写到与源同目录同名的 .wimport;失败写 reason。
+		// P4-U11:仅保留给"显式导出旧格式"与既有测试;导入器不再调用它。
 		static bool Save(const std::string& sourcePath, const ModelImportSettings& settings,
 			std::string* reason = nullptr);
+		// P4-U11:**这次导入该用哪份设置**(唯一的解析入口,编辑器与 cook 共用):
+		//   ① 已有 `.wmodel` 的 meta 设置(资产自描述,用户改过的那份)
+		//   ② 旧旁路 `.wimport`(只在旧项目里存在)
+		//   ③ `project.we.yaml` 的 `imports:`(新导入的默认模板)
+		//   ④ 引擎默认值
+		// existingModelPath 为空或读不出来时自动落到下一级;fromAsset 返回①是否命中
+		// (面板据此显示"设置来自资产")。
+		static ModelImportSettings ResolveForImport(const std::string& sourcePath,
+			const std::string& existingModelPath = std::string(), std::string* reason = nullptr,
+			bool* fromAsset = nullptr);
+		// P4-U11:在 sourceDirectory(绝对或相对路径)里找"由 sourceLogicalPath 产出的 .wmodel"。
+		// 判定靠 meta.SourcePath(不信文件名),找不到返回空串。编辑器/cook 用它把逐源设置
+		// 从资产里读回来。
+		static std::string FindProducedModel(const std::string& sourceDirectory,
+			const std::string& sourceLogicalPath);
 		// 设置的确定哈希(FNV-1a 64,字段顺序固定);两次相同设置必得同一个值。
 		static uint64_t Hash(const ModelImportSettings& settings);
 	};

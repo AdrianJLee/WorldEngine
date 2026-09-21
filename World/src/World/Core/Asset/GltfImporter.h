@@ -49,6 +49,9 @@ namespace World::Asset
 		// D10:内容根的**绝对路径**,只有做"同内容复用"(材质/贴图去重)时才需要。
 		// 空 = 跳过复用查找(行为退化为每个模型一份副本)。
 		std::string ContentRootAbsolute;
+		// P4-U11:这次导入**实际使用**的完整导入设置 —— 由内核在 ImportAsBytes 里强制写成
+		// 调用方传入的那份(调用方不必自己填),最终落进 .wmodel 的 meta(资产自描述)。
+		ModelImportSettings Settings;
 	};
 
 	// D5b-1:内存产物(LogicalPath 与 ImportFile 写出的磁盘布局一致,相对 outputRoot)。
@@ -89,8 +92,10 @@ namespace World::Asset
 		// D5b-1 内核(cook 复用):只产出内存字节,不写盘;失败返回 false + error。
 		// .wmodel 字节在返回前用 WModelIO::Parse 自校验(坏模型在 cook 期报错)。
 		// ImportFile 是本函数的薄壳(逐项落盘,行为不变)。
+		// P4-U11:metadata 是 in/out —— 内核会把"这次实际用的设置"写进 metadata.Settings,
+		// 调用方不必自己填(它会随 .wmodel 一起存盘)。
 		static bool ImportAsBytes(const std::string& sourcePath,
-			const ModelImportSettings& settings, const GltfImportMetadata& metadata,
+			const ModelImportSettings& settings, GltfImportMetadata& metadata,
 			GltfImportBytesResult* result, std::string* error);
 
 		// destinationLogicalDir(相对 outputRoot 的逻辑目录,如 "models/props";空 = 源所在目录)
@@ -98,6 +103,18 @@ namespace World::Asset
 		static bool ImportFile(const std::string& sourcePath, const std::string& outputRoot,
 			GltfImportResult* result, std::string* error,
 			const std::string& destinationLogicalDir = std::string());
+		// P4-U11:与 ImportFile 同一条落盘路径,但用**调用方给的设置**(模型面板改完设置直接应用、
+		// CLI 显式指定)。设置会随 .wmodel 一起存盘(资产自描述)。
+		static bool ImportFileWithSettings(const std::string& sourcePath, const std::string& outputRoot,
+			const ModelImportSettings& settings, GltfImportResult* result, std::string* error,
+			const std::string& destinationLogicalDir = std::string());
+
+	private:
+		// explicitSettings 为空 = 走 ResolveForImport(资产 meta > 旧 .wimport > 项目默认)。
+		static bool ImportFileImpl(const std::string& sourcePath, const std::string& outputRoot,
+			const ModelImportSettings* explicitSettings, GltfImportResult* result, std::string* error,
+			const std::string& destinationLogicalDir);
+	public:
 	};
 
 	// 便捷入口(编辑器 `--import-gltf` 等调用方持有 filesystem::path):

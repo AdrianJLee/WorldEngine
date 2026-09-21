@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Core/Asset/ModelImportSettings.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -11,7 +12,7 @@
 
 namespace World::Asset
 {
-	// .wmodel v4(D5c)—— glTF 导入产出的 CPU 侧模型资产(不可变)。
+	// .wmodel v5(P4-U11)—— glTF 导入产出的 CPU 侧模型资产(不可变)。
 	// GPU 资源由 Renderer3D 首次提交时创建,本文件与加载器**不依赖 RHI 设备**,可 headless 使用。
 	//
 	// 顶点布局两种:
@@ -20,9 +21,10 @@ namespace World::Asset
 	// 法线缺失时由导入器按面法线补齐。
 	namespace WModelIO
 	{
-		// v4:D5c 起容器带 skin(joints/weights + 骨架)与 animations 区块。
-		// v1–v3 一律拒绝并提示"请重新导入"(旧文件没有这两个区块的读写口径,不做"尽力解析")。
-		constexpr uint32_t kFormatVersion = 4;
+		// v5:P4-U11 起 meta 里带**完整导入设置**(ModelImportSettings)—— 资产自描述,
+		// 不再依赖源旁边的 `.wimport` 旁路文件。
+		// v1–v4 一律拒绝并提示"请重新导入"(旧文件没有这些区块的读写口径,不做"尽力解析")。
+		constexpr uint32_t kFormatVersion = 5;
 		constexpr uint32_t kVertexLayoutStandard = 1;
 		constexpr uint32_t kVertexLayoutSkinned = 2;
 		// 每个 skin 的关节数上限(与 D5c-3 骨骼调色板 ≤128 关节的约定一致)。
@@ -145,6 +147,10 @@ namespace World::Asset
 			// 源资产逻辑路径(相对内容根,如 "models/tests/rock.gltf";空 = 非导入产物/无源)。
 			// 有它才能做"源改了/设置改了 → 需要重导",不必靠"同目录同名"去猜。
 			std::string SourcePath;
+			// v5:产生这个资产时用的**完整导入设置**(P4-U11)。HasSettings=false 只可能是
+			// 手写/外来产物 —— 导入器总是写 true。
+			bool HasSettings = false;
+			ModelImportSettings Settings;
 		};
 		MetaData Meta;
 
@@ -177,7 +183,11 @@ namespace World::Asset
 	//           indexCount / meshCount / submeshCount / nodeCount / materialSlotCount /
 	//           jointCount(= Skins[] 数组长度) / animationCount }
 	//   Meta{sourceFingerprint(u64) / importerVersion(u32) / settingsHash(u64) / upAxis(u8) / scale(f32) /
-	//        reserved(u32) / sourcePath(长度前缀字符串,相对内容根)}
+	//        reserved(u32) / sourcePath(长度前缀字符串,相对内容根) / hasSettings(u8) /
+	//        [settings{scale(f32) / upAxis(u8) / exportMaterials(u8) / exportTextures(u8) /
+	//                  importAnimations(u8) / importSkins(u8) / animationSampleRate(f32) /
+	//                  generateNormals(u8) / reuseMaterials(u8) / reuseTextures(u8) /
+	//                  sharedMaterialFolder(长度前缀字符串)}]  ← v5,hasSettings=1 时才有}
 	//   Bounds{min,max} → Submeshes[] → Meshes[] → Nodes[] → MaterialSlots[] →
 	//   Skins[] → Animations[] →
 	//   VertexData(vertexCount × stride:布局 1 = 32B,布局 2 = 64B) → Indices(u32 × indexCount)
@@ -197,5 +207,8 @@ namespace World::Asset
 		WLD_API bool Parse(const uint8_t* bytes, size_t size, WModelData& out, std::string* error);
 		WLD_API bool WriteFile(const std::string& path, const WModelData& data, std::string* error);
 		WLD_API bool ReadFile(const std::string& path, WModelData& out, std::string* error);
+		// P4-U11:只解析 header + meta(几何不读,GPU/内存都不碰)。编辑器与 cook 判断
+		// "这份 .wmodel 是不是这个源的产物 / 用了什么导入设置"时用它,不必加载整个模型。
+		WLD_API bool ReadMeta(const std::string& path, WModelData::MetaData& out, std::string* error);
 	}
 }

@@ -150,13 +150,31 @@ namespace World::Asset
 				return extension == ".gltf" || extension == ".glb";
 			}
 
+			// P4-U11:设置指纹 = 解析出来的那份设置的哈希(与 Import 同一条解析入口)。
+			// cook 用它判断"设置改了 → 重烘",不依赖任何旁路文件的字节。
+			uint64_t SettingsFingerprint(const std::filesystem::path& source) const override
+			{
+				// Import 时 request.LogicalPath 才是 meta 里的源身份;这里只有绝对路径,
+				// 用文件名兜底(同目录里同名 .wmodel 的 meta.SourcePath 一定以它结尾)。
+				std::string logical = source.filename().generic_string();
+				const std::string existing = ModelImportSettings::FindProducedModel(
+					source.parent_path().string(), logical);
+				return ModelImportSettings::Hash(
+					ModelImportSettings::ResolveForImport(source.string(), existing, nullptr, nullptr));
+			}
+
 			ImportResult Import(const ImportRequest& request, std::error_code& ec) const override
 			{
 				ImportResult result;
 
 				std::string settingsWarning;
-				const ModelImportSettings settings =
-					ModelImportSettings::Load(request.Source.string(), &settingsWarning);
+				// P4-U11:逐源设置存在**已有 .wmodel 的 meta**里(资产自描述);旧项目仍读
+				// `.wimport`,新导入用 project.we.yaml 的 imports: 当默认模板。
+				const std::string existingModel = ModelImportSettings::FindProducedModel(
+					request.Source.parent_path().string(), request.LogicalPath);
+				bool settingsFromAsset = false;
+				const ModelImportSettings settings = ModelImportSettings::ResolveForImport(
+					request.Source.string(), existingModel, &settingsWarning, &settingsFromAsset);
 				if (!settingsWarning.empty())
 					result.Warnings.push_back(settingsWarning);
 

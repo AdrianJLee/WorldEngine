@@ -144,6 +144,15 @@ namespace
 		data.Meta.SettingsHash = 0x99AABBCCDDEEFF00ULL;
 		data.Meta.UpAxis = 0;
 		data.Meta.Scale = 1.0f;
+		// P4-U11(v5):完整导入设置随资产存盘(资产自描述,不再依赖源旁边的 .wimport)。
+		data.Meta.HasSettings = true;
+		data.Meta.Settings.Scale = 1.5f;
+		data.Meta.Settings.UpAxis = 1;
+		data.Meta.Settings.ExportTextures = false;
+		data.Meta.Settings.ImportSkins = false;
+		data.Meta.Settings.AnimationSampleRate = 24.0f;
+		data.Meta.Settings.ReuseTextures = false;
+		data.Meta.Settings.SharedMaterialFolder = "materials/shared";
 		return data;
 	}
 
@@ -184,6 +193,24 @@ namespace
 		CHECK(loaded.Meta.SettingsHash == source.Meta.SettingsHash);
 		CHECK(loaded.Meta.UpAxis == source.Meta.UpAxis);
 		CHECK(Nearly(loaded.Meta.Scale, source.Meta.Scale));
+		// P4-U11(v5):设置区块逐字段往返(资产自描述);ReadMeta 只读 meta 也拿得到同一份。
+		CHECK(loaded.Meta.HasSettings);
+		CHECK(Nearly(loaded.Meta.Settings.Scale, source.Meta.Settings.Scale));
+		CHECK(loaded.Meta.Settings.UpAxis == source.Meta.Settings.UpAxis);
+		CHECK(loaded.Meta.Settings.ExportMaterials == source.Meta.Settings.ExportMaterials);
+		CHECK(loaded.Meta.Settings.ExportTextures == source.Meta.Settings.ExportTextures);
+		CHECK(loaded.Meta.Settings.ImportSkins == source.Meta.Settings.ImportSkins);
+		CHECK(Nearly(loaded.Meta.Settings.AnimationSampleRate, source.Meta.Settings.AnimationSampleRate));
+		CHECK(loaded.Meta.Settings.ReuseTextures == source.Meta.Settings.ReuseTextures);
+		CHECK(loaded.Meta.Settings.SharedMaterialFolder == source.Meta.Settings.SharedMaterialFolder);
+		CHECK(Asset::ModelImportSettings::Hash(loaded.Meta.Settings)
+			== Asset::ModelImportSettings::Hash(source.Meta.Settings));
+		Asset::WModelData::MetaData metaOnly;
+		CHECK(Asset::WModelIO::ReadMeta(file.string(), metaOnly, &error));
+		CHECK(error.empty());
+		CHECK(metaOnly.HasSettings);
+		CHECK(Nearly(metaOnly.Settings.Scale, source.Meta.Settings.Scale));
+		CHECK(metaOnly.Settings.SharedMaterialFolder == source.Meta.Settings.SharedMaterialFolder);
 		CHECK(loaded.Vertices.size() == source.Vertices.size());
 		CHECK(loaded.Indices == source.Indices);
 		for (size_t index = 0; index < loaded.Vertices.size(); ++index)

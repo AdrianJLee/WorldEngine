@@ -380,7 +380,7 @@ namespace World::Asset
 	}
 
 	bool GltfImporter::ImportAsBytes(const std::string& sourcePath,
-		const ModelImportSettings& settings, const GltfImportMetadata& metadata,
+		const ModelImportSettings& settings, GltfImportMetadata& metadata,
 		GltfImportBytesResult* result, std::string* error)
 	{
 		if (result)
@@ -398,6 +398,9 @@ namespace World::Asset
 
 		if (sourcePath.empty())
 			return fail("glTF import failed: source path is empty");
+		// P4-U11:metadata.Settings 由内核统一写成"这次实际用的那份设置"(调用方不必自己填),
+		// 它会落进 .wmodel 的 meta —— 资产自描述,不再依赖源旁边的 .wimport。
+		metadata.Settings = settings;
 		std::error_code ec;
 		if (!std::filesystem::is_regular_file(std::filesystem::path(sourcePath), ec))
 			return fail("glTF import failed: source file not found: " + sourcePath);
@@ -1330,6 +1333,9 @@ namespace World::Asset
 		model.Meta.UpAxis = metadata.UpAxis;
 		model.Meta.Scale = metadata.Scale;
 		model.Meta.SourcePath = metadata.SourceLogicalPath;
+		// P4-U11:完整导入设置写进资产(资产自描述,不再依赖源旁边的 .wimport)。
+		model.Meta.HasSettings = true;
+		model.Meta.Settings = metadata.Settings;
 		if (model.Meta.UpAxis > 1u)
 			return fail("glTF import failed: invalid upAxis metadata value "
 				+ std::to_string(model.Meta.UpAxis));
@@ -1376,6 +1382,21 @@ namespace World::Asset
 	bool GltfImporter::ImportFile(const std::string& sourcePath, const std::string& outputRoot,
 		GltfImportResult* result, std::string* error, const std::string& destinationLogicalDir)
 	{
+		return ImportFileImpl(sourcePath, outputRoot, nullptr, result, error, destinationLogicalDir);
+	}
+
+	bool GltfImporter::ImportFileWithSettings(const std::string& sourcePath, const std::string& outputRoot,
+		const ModelImportSettings& settings, GltfImportResult* result, std::string* error,
+		const std::string& destinationLogicalDir)
+	{
+		// P4-U11:面板/CLI 已经知道要用哪份设置(用户在面板里改的)时走这条 —— 不再去猜。
+		return ImportFileImpl(sourcePath, outputRoot, &settings, result, error, destinationLogicalDir);
+	}
+
+	bool GltfImporter::ImportFileImpl(const std::string& sourcePath, const std::string& outputRoot,
+		const ModelImportSettings* explicitSettings, GltfImportResult* result, std::string* error,
+		const std::string& destinationLogicalDir)
+	{
 		if (result)
 			*result = GltfImportResult {};
 		if (outputRoot.empty())
@@ -1384,11 +1405,29 @@ namespace World::Asset
 			return false;
 		}
 
-		// 设置来源与 cook 的 ModelImporter **同源**:与源同目录同名的 `.wimport`
-		// (缺失/坏 JSON → 默认值 + warning)。否则"改设置 → Reimport 生效"在编辑器路径不成立,
-		// 而且 dev 树里的产物会和打包产物不一致(实测:夹具 sidecar 只有 cook 生效)。
+		// 源相对内容根的逻辑路径:既是 .wmodel meta 的身份字段,也是"找回既有产物"的钥匙。
+		std::string sourceLogicalPath;
+		{
+			std::error_code ec;
+			const std::filesystem::path sourceAbsolute = std::filesystem::absolute(std::filesystem::path(sourcePath), ec);
+			std::error_code rootError;
+			const std::filesystem::path rootAbsolute = std::filesystem::absolute(std::filesystem::path(outputRoot), rootError);
+			std::filesystem::path relative = (!ec && !rootError)
+				? std::filesystem::relative(sourceAbsolute, rootAbsolute, ec)
+				: std::filesystem::path();
+			if (ec || relative.empty() || relative.is_absolute())
+				relative = std::filesystem::path(sourcePath).filename();
+			sourceLogicalPath = relative.generic_string();
+		}
+		// 设置来源(P4-U11):**已有产物的 meta**(资产自描述,用户改过的那份)> 旧旁路
+		// `.wimport`(只服务旧项目)> `project.we.yaml` 的 `imports:` > 引擎默认。与 cook 同一条
+		// 解析入口,dev 树与打包产物不会两套规则。
 		std::string settingsWarning;
-		const ModelImportSettings settings = ModelImportSettings::Load(sourcePath, &settingsWarning);
+		const std::string existingModel = ModelImportSettings::FindProducedModel(
+			std::filesystem::path(sourcePath).parent_path().string(), sourceLogicalPath);
+		bool settingsFromAsset = false;
+		const ModelImportSettings settings = explicitSettings ? *explicitSettings
+			: ModelImportSettings::ResolveForImport(sourcePath, existingModel, &settingsWarning, &settingsFromAsset);
 		if (result && !settingsWarning.empty())
 			result->Warnings.push_back(settingsWarning);
 		GltfImportMetadata metadata;
@@ -1402,20 +1441,7 @@ namespace World::Asset
 		metadata.LogicalModelPath.clear();
 		metadata.DestinationLogicalDir = destinationLogicalDir;
 		metadata.ContentRootAbsolute = std::filesystem::absolute(std::filesystem::path(outputRoot)).string();
-		{
-			std::error_code ec;
-			const std::filesystem::path sourceAbsolute = std::filesystem::absolute(std::filesystem::path(sourcePath), ec);
-			std::error_code rootError;
-			const std::filesystem::path rootAbsolute = std::filesystem::absolute(std::filesystem::path(outputRoot), rootError);
-			std::filesystem::path relative = (!ec && !rootError)
-				? std::filesystem::relative(sourceAbsolute, rootAbsolute, ec)
-				: std::filesystem::path();
-			if (ec || relative.empty() || relative.is_absolute())
-			{
-				relative = std::filesystem::path(sourcePath).filename();
-			}
-			metadata.SourceLogicalPath = relative.generic_string();
-		}
+		metadata.SourceLogicalPath = sourceLogicalPath;
 
 		GltfImportBytesResult bytes;
 		std::string importError;

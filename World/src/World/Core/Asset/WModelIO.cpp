@@ -244,12 +244,104 @@ namespace World::Asset::WModelIO
 			}
 		};
 
+		// v5 meta 区块(header 之后):源身份 + 完整导入设置。ParseImpl 与 ParseMetaOnly 共用。
+		// 返回 false 时 error 已填好可读原因。
+		bool ReadMetaBlock(Reader& reader, WModelData::MetaData& meta, std::string& error)
+		{
+			meta.Valid = true;
+			uint32_t metaReserved = 0;
+			uint32_t sourcePathLength = 0;
+			if (!reader.ReadU64(meta.SourceFingerprint, "meta.sourceFingerprint")
+				|| !reader.ReadU32(meta.ImporterVersion, "meta.importerVersion")
+				|| !reader.ReadU64(meta.SettingsHash, "meta.settingsHash")
+				|| !reader.ReadU8(meta.UpAxis, "meta.upAxis")
+				|| !reader.ReadF32(meta.Scale, "meta.scale")
+				|| !reader.ReadU32(metaReserved, "meta.reserved")
+				|| !reader.ReadU32(sourcePathLength, "meta.sourcePathLength")
+				|| !reader.ReadString(meta.SourcePath, sourcePathLength, "meta.sourcePath"))
+			{
+				error = reader.Error;
+				return false;
+			}
+			(void)metaReserved;
+			if (meta.UpAxis > 1u)
+			{
+				error = "invalid meta.upAxis " + std::to_string(meta.UpAxis) + " (expected 0 or 1)";
+				return false;
+			}
+			if (!std::isfinite(meta.Scale) || meta.Scale <= 0.0f)
+			{
+				error = "invalid meta.scale " + std::to_string(meta.Scale)
+					+ " (expected a positive finite number)";
+				return false;
+			}
+			// v5:完整导入设置(P4-U11)。缺省 = 外来产物;导入器自己写的资产一定有。
+			uint8_t hasSettings = 0;
+			if (!reader.ReadU8(hasSettings, "meta.hasSettings"))
+			{
+				error = reader.Error;
+				return false;
+			}
+			if (hasSettings > 1u)
+			{
+				error = "invalid meta.hasSettings " + std::to_string(hasSettings) + " (expected 0 or 1)";
+				return false;
+			}
+			if (hasSettings == 0u)
+				return true;
+			meta.HasSettings = true;
+			ModelImportSettings& settings = meta.Settings;
+			uint8_t flags[6] = {};
+			uint8_t reuseTextures = 0;
+			uint32_t sharedFolderLength = 0;
+			if (!reader.ReadF32(settings.Scale, "meta.settings.scale")
+				|| !reader.ReadU8(settings.UpAxis, "meta.settings.upAxis")
+				|| !reader.ReadU8(flags[0], "meta.settings.exportMaterials")
+				|| !reader.ReadU8(flags[1], "meta.settings.exportTextures")
+				|| !reader.ReadU8(flags[2], "meta.settings.importAnimations")
+				|| !reader.ReadU8(flags[3], "meta.settings.importSkins")
+				|| !reader.ReadF32(settings.AnimationSampleRate, "meta.settings.animationSampleRate")
+				|| !reader.ReadU8(flags[4], "meta.settings.generateNormals")
+				|| !reader.ReadU8(flags[5], "meta.settings.reuseMaterials")
+				|| !reader.ReadU8(reuseTextures, "meta.settings.reuseTextures")
+				|| !reader.ReadU32(sharedFolderLength, "meta.settings.sharedFolderLength")
+				|| !reader.ReadString(settings.SharedMaterialFolder, sharedFolderLength,
+					"meta.settings.sharedMaterialFolder"))
+			{
+				error = reader.Error;
+				return false;
+			}
+			settings.ExportMaterials = flags[0] != 0;
+			settings.ExportTextures = flags[1] != 0;
+			settings.ImportAnimations = flags[2] != 0;
+			settings.ImportSkins = flags[3] != 0;
+			settings.GenerateNormals = flags[4] != 0;
+			settings.ReuseMaterials = flags[5] != 0;
+			settings.ReuseTextures = reuseTextures != 0;
+			if (settings.UpAxis > 1u)
+			{
+				error = "invalid meta.settings.upAxis " + std::to_string(settings.UpAxis) + " (expected 0 or 1)";
+				return false;
+			}
+			if (!std::isfinite(settings.Scale) || settings.Scale <= 0.0f)
+			{
+				error = "invalid meta.settings.scale (expected a positive finite number)";
+				return false;
+			}
+			if (!std::isfinite(settings.AnimationSampleRate) || settings.AnimationSampleRate <= 0.0f)
+			{
+				error = "invalid meta.settings.animationSampleRate (expected a positive finite number)";
+				return false;
+			}
+			return true;
+		}
+
 		bool ParseImpl(const uint8_t* bytes, size_t size, WModelData& out, std::string& error)
 		{
 			out = WModelData {};
 			if (bytes == nullptr || size < kHeaderSize)
 			{
-				error = "truncated: file is smaller than the .wmodel v4 header";
+				error = "truncated: file is smaller than the .wmodel v5 header";
 				return false;
 			}
 
@@ -320,7 +412,7 @@ namespace World::Asset::WModelIO
 			}
 			if (size < kHeaderSize + kMetaSize)
 			{
-				error = "truncated: file is smaller than the .wmodel v4 meta block";
+				error = "truncated: file is smaller than the .wmodel v5 meta block";
 				return false;
 			}
 
@@ -344,34 +436,9 @@ namespace World::Asset::WModelIO
 			out.Flags = flags;
 			out.VertexLayoutId = vertexLayoutId;
 
-			// Meta
-			out.Meta.Valid = true;
-			uint32_t metaReserved = 0;
-			uint32_t sourcePathLength = 0;
-			if (!reader.ReadU64(out.Meta.SourceFingerprint, "meta.sourceFingerprint")
-				|| !reader.ReadU32(out.Meta.ImporterVersion, "meta.importerVersion")
-				|| !reader.ReadU64(out.Meta.SettingsHash, "meta.settingsHash")
-				|| !reader.ReadU8(out.Meta.UpAxis, "meta.upAxis")
-				|| !reader.ReadF32(out.Meta.Scale, "meta.scale")
-				|| !reader.ReadU32(metaReserved, "meta.reserved")
-				|| !reader.ReadU32(sourcePathLength, "meta.sourcePathLength")
-				|| !reader.ReadString(out.Meta.SourcePath, sourcePathLength, "meta.sourcePath"))
-			{
-				error = reader.Error;
+			// Meta(v5:含完整导入设置)
+			if (!ReadMetaBlock(reader, out.Meta, error))
 				return false;
-			}
-			(void)metaReserved;
-			if (out.Meta.UpAxis > 1u)
-			{
-				error = "invalid meta.upAxis " + std::to_string(out.Meta.UpAxis) + " (expected 0 or 1)";
-				return false;
-			}
-			if (!std::isfinite(out.Meta.Scale) || out.Meta.Scale <= 0.0f)
-			{
-				error = "invalid meta.scale " + std::to_string(out.Meta.Scale)
-					+ " (expected a positive finite number)";
-				return false;
-			}
 
 			// Bounds
 			if (!reader.ReadVec3(out.Bounds.Min, "bounds.min") || !reader.ReadVec3(out.Bounds.Max, "bounds.max"))
@@ -810,6 +877,87 @@ namespace World::Asset::WModelIO
 			}
 			return true;
 		}
+
+		// P4-U11:header + meta 的轻量解析(读完 meta 就停,几何一个字节都不碰)。
+		// 与 ParseImpl 共用 ReadMetaBlock/Reader,错误文案也一致。
+		bool ParseMetaImpl(const uint8_t* bytes, size_t size, WModelData::MetaData& out, std::string& error)
+		{
+			out = WModelData::MetaData {};
+			if (bytes == nullptr || size < kHeaderSize)
+			{
+				error = "truncated: file is smaller than the .wmodel header";
+				return false;
+			}
+			Reader reader { bytes, static_cast<uint64_t>(size), 0, {} };
+			char magic[4] = { 0, 0, 0, 0 };
+			reader.ReadRaw(magic, sizeof(magic), "magic");
+			if (std::memcmp(magic, kMagic, sizeof(kMagic)) != 0)
+			{
+				error = "bad magic: expected 'WMDL'";
+				return false;
+			}
+			uint32_t version = 0;
+			reader.ReadU32(version, "version");
+			if (version != kFormatVersion)
+			{
+				error = "unsupported .wmodel version " + std::to_string(version)
+					+ " (this build reads version " + std::to_string(kFormatVersion)
+					+ "); please re-import the source asset (请重新导入)";
+				return false;
+			}
+			// flags / vertexLayoutId / reserved + 8 个计数(mesh/skin/animation 数量等)全部跳过:
+			// meta 的位置固定,不依赖这些计数。
+			for (int index = 0; index < 3 + 8; ++index)
+			{
+				uint32_t skipped = 0;
+				reader.ReadU32(skipped, "header");
+			}
+			if (reader.Failed())
+			{
+				error = reader.Error;
+				return false;
+			}
+			return ReadMetaBlock(reader, out, error);
+		}
+
+		// 路径解析必须与材质/脚本同一条口径:**VFS 优先、磁盘回退**(ReadFile / ReadMeta 共用)。
+		// 网格引用是"相对内容根"的逻辑路径(如 models/x.wmodel),而编辑器/Runtime 的 CWD 都不是
+		// 内容根;直接 ifstream(逻辑路径) 只会在 CWD 恰好是内容根时成功。
+		bool ReadBytes(const std::string& path, std::vector<uint8_t>& bytes, std::string* error)
+		{
+			if (path.empty())
+			{
+				if (error) *error = "path is empty";
+				return false;
+			}
+			if (Application::HasInstance())
+			{
+				std::error_code vfsError;
+				if (Application::Get().GetContext().Vfs().Read(path, bytes, vfsError) && !bytes.empty())
+				{
+					if (error) error->clear();
+					return true;
+				}
+			}
+			const std::filesystem::path candidates[] = {
+				std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path,
+				std::filesystem::path(std::string(WLD_GAME_DIR)) / path,
+				std::filesystem::path(std::string(WLD_EDITOR_DIR)) / path,
+			};
+			for (const std::filesystem::path& candidate : candidates)
+			{
+				std::ifstream file(candidate, std::ios::binary);
+				if (!file)
+					continue;
+				bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+				if (bytes.empty())
+					continue;
+				if (error) error->clear();
+				return true;
+			}
+			if (error) *error = "cannot open '" + path + "'";
+			return false;
+		}
 	}
 
 	uint32_t GetVertexStride(uint32_t vertexLayoutId)
@@ -861,6 +1009,23 @@ namespace World::Asset::WModelIO
 		AppendF32(out, data.Meta.Scale);
 		AppendU32(out, 0u);   // meta reserved
 		AppendString(out, data.Meta.SourcePath);   // v3:源逻辑路径
+		// v5:完整导入设置(P4-U11)。
+		AppendU8(out, data.Meta.HasSettings ? 1u : 0u);
+		if (data.Meta.HasSettings)
+		{
+			const ModelImportSettings& settings = data.Meta.Settings;
+			AppendF32(out, settings.Scale);
+			AppendU8(out, settings.UpAxis);
+			AppendU8(out, settings.ExportMaterials ? 1u : 0u);
+			AppendU8(out, settings.ExportTextures ? 1u : 0u);
+			AppendU8(out, settings.ImportAnimations ? 1u : 0u);
+			AppendU8(out, settings.ImportSkins ? 1u : 0u);
+			AppendF32(out, settings.AnimationSampleRate);
+			AppendU8(out, settings.GenerateNormals ? 1u : 0u);
+			AppendU8(out, settings.ReuseMaterials ? 1u : 0u);
+			AppendU8(out, settings.ReuseTextures ? 1u : 0u);
+			AppendString(out, settings.SharedMaterialFolder);
+		}
 		AppendVec3(out, data.Bounds.Min);
 		AppendVec3(out, data.Bounds.Max);
 
@@ -971,6 +1136,20 @@ namespace World::Asset::WModelIO
 		return false;
 	}
 
+	// P4-U11:只读 header + meta(几何不解析)。编辑器/cook 判断"这份 .wmodel 是不是这个源的
+	// 产物、用的什么导入设置"时用它 —— 不必把整个模型读进内存。
+	bool ParseMetaOnly(const uint8_t* bytes, size_t size, WModelData::MetaData& out, std::string* error)
+	{
+		std::string localError;
+		if (ParseMetaImpl(bytes, size, out, localError))
+		{
+			if (error) error->clear();
+			return true;
+		}
+		if (error) *error = localError;
+		return false;
+	}
+
 	bool WriteFile(const std::string& path, const WModelData& data, std::string* error)
 	{
 		if (path.empty())
@@ -982,7 +1161,7 @@ namespace World::Asset::WModelIO
 		{
 			// 契约:meta 必须由导入器写入(源指纹/导入器版本/设置哈希);手写数据不得绕过。
 			if (error)
-				*error = "refusing to write .wmodel v4 without a valid meta block "
+				*error = "refusing to write .wmodel v5 without a valid meta block "
 					"(importer must set sourceFingerprint/importerVersion/settingsHash)";
 			return false;
 		}
@@ -991,14 +1170,14 @@ namespace World::Asset::WModelIO
 		if (GetVertexStride(data.VertexLayoutId) == 0u)
 		{
 			if (error)
-				*error = "refusing to write .wmodel v4: unsupported vertex layout id "
+				*error = "refusing to write .wmodel v5: unsupported vertex layout id "
 					+ std::to_string(data.VertexLayoutId);
 			return false;
 		}
 		if (data.VertexLayoutId == kVertexLayoutSkinned && data.SkinVertices.size() != data.Vertices.size())
 		{
 			if (error)
-				*error = "refusing to write .wmodel v4: vertex layout "
+				*error = "refusing to write .wmodel v5: vertex layout "
 					+ std::to_string(kVertexLayoutSkinned) + " needs one joints/weights record per vertex (vertices = "
 					+ std::to_string(data.Vertices.size()) + ", skin records = "
 					+ std::to_string(data.SkinVertices.size()) + ")";
@@ -1007,7 +1186,7 @@ namespace World::Asset::WModelIO
 		if (data.VertexLayoutId == kVertexLayoutStandard && !data.SkinVertices.empty())
 		{
 			if (error)
-				*error = "refusing to write .wmodel v4: vertex layout " + std::to_string(kVertexLayoutStandard)
+				*error = "refusing to write .wmodel v5: vertex layout " + std::to_string(kVertexLayoutStandard)
 					+ " does not carry joints/weights (skin records = "
 					+ std::to_string(data.SkinVertices.size()) + ")";
 			return false;
@@ -1023,7 +1202,7 @@ namespace World::Asset::WModelIO
 				|| skin.BindScales.size() != jointCount)
 			{
 				if (error)
-					*error = "refusing to write .wmodel v4: skin " + std::to_string(index)
+					*error = "refusing to write .wmodel v5: skin " + std::to_string(index)
 						+ " joint arrays have different lengths (jointCount = " + std::to_string(jointCount)
 						+ ", JointNodes = " + std::to_string(skin.JointNodes.size()) + ")";
 				return false;
@@ -1036,7 +1215,7 @@ namespace World::Asset::WModelIO
 			if (skinIndex < -1 || skinIndex >= static_cast<int64_t>(data.Skins.size()))
 			{
 				if (error)
-					*error = "refusing to write .wmodel v4: mesh " + std::to_string(index)
+					*error = "refusing to write .wmodel v5: mesh " + std::to_string(index)
 						+ " references unknown skin " + std::to_string(skinIndex)
 						+ " (Skins[] length = " + std::to_string(data.Skins.size()) + ")";
 				return false;
@@ -1090,43 +1269,18 @@ namespace World::Asset::WModelIO
 
 	bool ReadFile(const std::string& path, WModelData& out, std::string* error)
 	{
-		// 路径解析必须与材质/脚本同一条口径:**VFS 优先、磁盘回退**。
-		// 网格引用是"相对内容根"的逻辑路径(如 models/x.wmodel),而编辑器/Runtime 的 CWD 都不是内容根;
-		// 直接 ifstream(逻辑路径) 只会在 CWD 恰好是内容根时成功(实测:编辑器里"网格加载失败,
-		// 回退到 Primitive";打包后 Runtime 更是必须走 VFS)。
 		std::vector<uint8_t> bytes;
-		if (path.empty())
-		{
-			if (error) *error = "path is empty";
+		if (!ReadBytes(path, bytes, error))
 			return false;
-		}
-		if (Application::HasInstance())
-		{
-			std::error_code vfsError;
-			if (Application::Get().GetContext().Vfs().Read(path, bytes, vfsError) && !bytes.empty())
-			{
-				if (error) error->clear();
-				return Parse(bytes.data(), bytes.size(), out, error);
-			}
-		}
-		// 磁盘回退:内容根 Game/assets → Game/ → Editor/(与 MaterialIO::ReadFileText 同序)。
-		const std::filesystem::path candidates[] = {
-			std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path,
-			std::filesystem::path(std::string(WLD_GAME_DIR)) / path,
-			std::filesystem::path(std::string(WLD_EDITOR_DIR)) / path,
-		};
-		for (const std::filesystem::path& candidate : candidates)
-		{
-			std::ifstream file(candidate, std::ios::binary);
-			if (!file)
-				continue;
-			bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-			if (bytes.empty())
-				continue;
-			if (error) error->clear();
-			return Parse(bytes.data(), bytes.size(), out, error);
-		}
-		if (error) *error = "cannot open '" + path + "'";
-		return false;
+		return Parse(bytes.data(), bytes.size(), out, error);
+	}
+
+	// P4-U11:只读 meta(同 ReadFile 的 VFS → 磁盘解析顺序,但不解析几何)。
+	bool ReadMeta(const std::string& path, WModelData::MetaData& out, std::string* error)
+	{
+		std::vector<uint8_t> bytes;
+		if (!ReadBytes(path, bytes, error))
+			return false;
+		return ParseMetaOnly(bytes.data(), bytes.size(), out, error);
 	}
 }

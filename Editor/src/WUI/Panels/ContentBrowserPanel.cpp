@@ -293,6 +293,11 @@ namespace World
 		{
 			if (listError)
 				break;
+			// P4-U11:`.wimport` 是**旧格式**的导入设置旁路文件(设置已搬进 .wmodel 的 meta),
+			// 不是资产 —— 内容浏览器不显示它(Unity 的 .meta / Unreal 的 uasset 同理:
+			// 元数据文件不进资产视图)。文件仍留在盘上供旧项目迁移读取。
+			if (!entry.is_directory(listError) && LowerExtension(entry.path()) == ".wimport")
+				continue;
 			m_Model.Listing.push_back(entry.path());
 		}
 		std::sort(m_Model.Listing.begin(), m_Model.Listing.end());

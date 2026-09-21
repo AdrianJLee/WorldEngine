@@ -11,6 +11,7 @@
 #include "wldpch.h"
 #include "World/Core/Asset/ModelImportSettings.h"
 #include "World/Core/Asset/ProjectManifest.h"
+#include "World/Core/Asset/WModelIO.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/SceneSerializer.h"
@@ -151,6 +152,40 @@ int main()
 				World::Asset::ModelImportSettings::Load(sidecarSource.string());
 			CHECK(overridden.UpAxis == 0);
 			CHECK(std::fabs(overridden.Scale - 0.5f) < 1e-4f);
+		}
+		{
+			// P4-U11:逐源设置的**唯一解析入口** —— 已有 .wmodel 的 meta 设置优先于旧 .wimport,
+			// 并且靠 meta.SourcePath 认产物(不信文件名)。
+			const std::filesystem::path models = root / "models";
+			std::filesystem::create_directories(models);
+			const std::filesystem::path source = models / "WithAsset.gltf";
+			WriteText(source, "{}");
+			WriteText(models / "WithAsset.wimport", "{\"scale\": 3.0, \"upAxis\": \"Y\"}");
+			World::Asset::WModelData data;
+			data.Meta.Valid = true;
+			data.Meta.SourcePath = "models/WithAsset.gltf";
+			data.Meta.HasSettings = true;
+			data.Meta.Settings.Scale = 7.0f;
+			data.Meta.Settings.UpAxis = 1;
+			const std::filesystem::path model = models / "WithAsset.wmodel";
+			std::string writeError;
+			CHECK(World::Asset::WModelIO::WriteFile(model.string(), data, &writeError));
+			CHECK(writeError.empty());
+			const std::string found = World::Asset::ModelImportSettings::FindProducedModel(
+				models.string(), "models/WithAsset.gltf");
+			CHECK(!found.empty());
+			bool fromAsset = false;
+			const World::Asset::ModelImportSettings resolved = World::Asset::ModelImportSettings::ResolveForImport(
+				source.string(), found, nullptr, &fromAsset);
+			CHECK(fromAsset);
+			CHECK(std::fabs(resolved.Scale - 7.0f) < 1e-4f);   // 资产 > 旧 .wimport(3.0)
+			CHECK(resolved.UpAxis == 1);
+			// 没有资产时退回旧 .wimport(旧项目的路径逐字不变)。
+			bool legacyFromAsset = true;
+			const World::Asset::ModelImportSettings legacy = World::Asset::ModelImportSettings::ResolveForImport(
+				source.string(), std::string(), nullptr, &legacyFromAsset);
+			CHECK(!legacyFromAsset);
+			CHECK(std::fabs(legacy.Scale - 3.0f) < 1e-4f);
 		}
 		{
 			// 清单缺失 → 回到引擎默认(不能让上一个项目的默认值泄漏)。

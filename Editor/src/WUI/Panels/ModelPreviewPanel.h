@@ -34,7 +34,8 @@ namespace World
 		const std::string& LogicalPath() const { return m_LogicalPath; }
 		// 重新从磁盘读模型(导入覆盖后手动刷新用)。
 		void Reload();
-		// P1b D5b-2:用当前 `.wimport` 重新导入并刷新(与内容浏览器双击/CLI 同一条 `Asset::ImportFile` 路径)。
+		// P1b D5b-2 / P4-U11:用**面板当前的设置**重新导入并刷新 —— 设置随 .wmodel 存盘
+		// (资产自描述),不再写 `.wimport` 旁路文件。
 		bool Reimport(std::string* message = nullptr);
 		const std::string& StatusText() const { return m_Status; }
 
@@ -52,6 +53,13 @@ namespace World
 		// 刷新"需要重导"判断(源内容指纹 + 设置哈希 + 导入器版本)。
 		void RefreshSyncState();
 		void DrawAssetView(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// P4-U11:资产视图的两个纵向区块(右列 / 窄窗口下单列),各自返回占用高度。
+		float DrawImportSettings(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
+		float DrawStatsAndDependencies(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// 相机取景到世界包围盒(双击预览 / `F` / 角落按钮都走它)。
+		void FramePreview();
+		// 当前预览播放的动画条(m_AnimClipIndex 越界时回退第 0 条);空 = 没有动画。
+		const Asset::WModelAnimation* ActiveClip() const;
 		// D5c-4b:动画控制条(有 skin + ≥1 条动画时显示)。返回控制条之后的 y。
 		float DrawAnimationControls(Wui::WuiContext& ctx, float x, float y, float width,
 			const Wui::WuiTheme& theme);
@@ -78,8 +86,10 @@ namespace World
 		std::string m_SyncDetail;                    // 需要重导的原因(给 UI/自动化看)
 		Asset::ModelImportSettings m_Settings;       // 当前 .wimport(可编辑 → 保存 → 重导)
 		bool m_SettingsLoaded = false;
-		// 上次读入 `.wimport` 时的内容指纹:外部改动自动重载(用户正在编辑但未保存的字段不被覆盖)。
-		uint64_t m_SettingsFileFingerprint = 0;
+		// P4-U11:设置来源与"改过但还没重导"。设置存进 .wmodel 的 meta,所以面板里的编辑
+		// 只在"重新导入"时落地(Unreal 同款:改设置 → 应用/重导)。
+		bool m_SettingsFromAsset = false;
+		bool m_SettingsDirty = false;
 		// "需要重导"状态的轮询节流(秒;源文件很小,1s 读一次足够)。
 		double m_NextSyncCheck = 0.0;
 
@@ -107,6 +117,10 @@ namespace World
 		// 面板自己的帧间 dt:首帧 0,clamp [0,0.25](不动 EditorLayer/PanelHost 接口)。
 		double m_LastAnimClock = 0.0;
 		bool m_AnimClockValid = false;
+		// P4-U11:预览播放第几条动画(多条 clip 时可在动画条里切换)。
+		int m_AnimClipIndex = 0;
+		// P4-U11:右侧信息列的滚动偏移(设置/统计/材质/节点树)。
+		float m_InfoScroll = 0.0f;
 		// 蒙皮提交被拒的一次性 warn 去重(透明材质 / 调色板不可用)。
 		bool m_TransparentSkipWarned = false;
 		bool m_SkinnedSubmitWarned = false;
