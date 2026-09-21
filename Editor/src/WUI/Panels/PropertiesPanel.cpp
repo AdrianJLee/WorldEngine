@@ -7,10 +7,15 @@
 
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
 
+#include <algorithm>
 #include <cctype>
+#include <fstream>
+#include <iterator>
+#include <map>
 
 namespace World
 {
@@ -28,7 +33,8 @@ namespace World
 		// ---- 无障碍登记(与 WuiWidgets.cpp 的 RegisterAccessNode 同一格式) ----
 		// 面板内的字段/只读值/自定义检查器统一登记,id 由脚本用 Wui::HashId 直接计算。
 		void RegisterNode(Wui::WuiId id, const char* kind, const Wui::WuiRect& rect, const std::string& label,
-			const std::string& value, bool enabled = true)
+			const std::string& value, bool enabled = true, const std::string& tooltip = std::string(),
+			bool focused = false)
 		{
 			if (id == 0)
 				return;
@@ -39,10 +45,13 @@ namespace World
 			node.Kind = kind;
 			node.Label = label;
 			node.Value = value;
+			// P4-UX7:只能靠悬停看到的信息(用途/说明)必须同时进节点,脚本与读屏才拿得到。
+			node.Tooltip = tooltip;
 			node.Rect = rect;
 			node.Enabled = enabled;
 			// 不可用的控件不可被 ui.invoke 点击(与真实鼠标路径一致)。
 			node.Interactive = enabled;
+			node.Focused = focused;
 			Wui::WuiAccessibility::Get().Register(node);
 		}
 
@@ -334,6 +343,529 @@ namespace World
 			std::string Buffer;
 			bool Editing = false;
 		};
+
+		// ---- U6:Add Component 选择器的布局常量与行模型(方案 §8.2;交互冻结)----
+		// 组件 22+ 之后,220px 的无搜索平铺菜单只能瞪眼扫。选择器:宽 320、最大高 420、
+		// 内容富余时自适应高度、超出时内部滚动。
+		constexpr float kPickerWidth = 320.0f;
+		constexpr float kPickerMaxHeight = 420.0f;
+		constexpr float kPickerSearchRow = 30.0f;   // 搜索框行(含内边距)
+		constexpr float kPickerGroupHeader = 20.0f; // 分组标题行
+		constexpr float kPickerRow = 40.0f;         // 候选项:名称行 + 名下 Doc 行
+		constexpr float kPickerPad = 4.0f;
+		constexpr float kPickerEmptyHeight = 56.0f;
+		constexpr size_t kPickerRecentMax = 5;
+		constexpr int kPickerRevealFrames = 5;
+
+		// 选择器里的一行:分组标题(kind="text")或候选项(kind="menu-item")。
+		struct PickerRow
+		{
+			bool Header = false;
+			std::string Text;      // 标题 / 行主文案(本地化)
+			std::string Term;      // 行的英文术语(中文界面下的对照)
+			std::string Doc;       // 一句话说明(默认英文 = schema->Doc,中文走目录)
+			std::string Category;  // 分类(本地化;空分类 = "未分类"文案)—— 也是节点的 value
+			std::string NodeId;    // 稳定无障碍 id(标题 = prop.add.group.*,行 = prop.add.<DisplayName>)
+			const Schema::TypeSchema* Schema = nullptr;
+		};
+
+		// ASCII 不分大小写的子串匹配(非 ASCII 字节原样比较:中文没有大小写)。
+		std::string LowerAscii(std::string text)
+		{
+			std::transform(text.begin(), text.end(), text.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			return text;
+		}
+
+		bool ContainsInsensitive(const std::string& haystack, const std::string& needleLower)
+		{
+			if (needleLower.empty())
+				return true;
+			return LowerAscii(haystack).find(needleLower) != std::string::npos;
+		}
+
+		// 分类目录键 = schema.category.<路径,把 '/' 换成 '.'>(与 schema.component.* 同一口径);
+		// 英文默认 = Category 原文(默认语言不查表)。
+		std::string CategoryKeyName(const std::string& category)
+		{
+			std::string key = category;
+			for (char& character : key)
+				if (character == '/')
+					character = '.';
+			return key;
+		}
+
+		std::string CategoryLabel(const std::string& category)
+		{
+			if (category.empty())
+				return Wui::Tr("panel.properties.add.uncategorized", "Uncategorized");
+			return Wui::Tr("schema.category." + CategoryKeyName(category), category);
+		}
+
+		// 一句话说明:英文默认 = schema->Doc 原文;中文目录用 schema.component.<短名>.doc 覆盖。
+		std::string ComponentDocLabel(const Schema::TypeSchema& schema)
+		{
+			if (schema.Doc.empty())
+				return std::string();
+			return Wui::Tr("schema.component." + SchemaTypeKeyName(schema) + ".doc", schema.Doc);
+		}
+
+		// 搜索命中口径(方案 §8.2):本地化名 / DisplayName / 短类型名 / 字段名,子串匹配。
+		bool MatchesComponentFilter(const Schema::TypeSchema& schema, const std::string& needleLower)
+		{
+			if (needleLower.empty())
+				return true;
+			if (ContainsInsensitive(SchemaComponentLabel(schema).Text, needleLower))
+				return true;
+			if (ContainsInsensitive(schema.DisplayName, needleLower))
+				return true;
+			if (ContainsInsensitive(SchemaTypeKeyName(schema), needleLower))
+				return true;
+			for (const Schema::FieldSchema& field : schema.Fields)
+			{
+				if (ContainsInsensitive(field.Name, needleLower))
+					return true;
+				if (!field.Meta.DisplayName.empty() && ContainsInsensitive(field.Meta.DisplayName, needleLower))
+					return true;
+			}
+			return false;
+		}
+	}
+
+	PropertiesPanel::PropertiesPanel(PanelHost& host)
+		: m_Host(host), m_StatePath(std::string(WLD_EDITOR_DIR) + "wui-properties.json")
+	{
+		// 选择器 MRU 与其它面板状态同口径(wui-layout.json / wui-browser.json):读失败/文件不
+		// 存在都只是"没有最近使用",不影响面板可用性。
+		LoadState();
+	}
+
+	void PropertiesPanel::LoadState()
+	{
+		try
+		{
+			std::error_code existsError;
+			if (!std::filesystem::exists(m_StatePath, existsError))
+				return;
+			std::ifstream stream(m_StatePath, std::ios::binary);
+			if (!stream)
+				return;
+			const std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+			std::string error;
+			const auto parsed = Wui::JsonValue::Parse(text, &error);
+			if (!parsed)
+				return;
+			if (const Wui::JsonValue* value = parsed->Find("recentComponents"))
+			{
+				m_RecentComponents.clear();
+				for (const Wui::JsonValue& item : value->Array)
+				{
+					const std::string name = item.AsString("");
+					if (name.empty())
+						continue;
+					m_RecentComponents.push_back(name);
+					if (m_RecentComponents.size() >= kPickerRecentMax)
+						break;
+				}
+			}
+		}
+		catch (const std::exception& error)
+		{
+			WLD_CORE_WARN("Failed to load properties panel state: {0}", error.what());
+		}
+	}
+
+	void PropertiesPanel::SaveState() const
+	{
+		try
+		{
+			// 目录可能不存在(全新 checkout / 打包产物):先补目录;任何写入失败都只告警 ——
+			// "最近使用"丢了可以接受,不能让编辑动作崩。
+			const std::filesystem::path path(m_StatePath);
+			std::error_code dirError;
+			if (!path.parent_path().empty())
+				std::filesystem::create_directories(path.parent_path(), dirError);
+			Wui::JsonValue root;
+			root.type = Wui::JsonValue::Type::Object;
+			Wui::JsonValue recent;
+			recent.type = Wui::JsonValue::Type::Array;
+			for (const std::string& name : m_RecentComponents)
+				recent.Array.push_back(Wui::JsonValue::MakeString(name));
+			root.Object.push_back({ "recentComponents", std::move(recent) });
+			std::ofstream stream(m_StatePath, std::ios::binary | std::ios::trunc);
+			if (stream)
+				stream << root.Dump();
+		}
+		catch (const std::exception& error)
+		{
+			WLD_CORE_WARN("Failed to save properties panel state: {0}", error.what());
+		}
+	}
+
+	void PropertiesPanel::TouchRecent(const std::string& shortName)
+	{
+		if (shortName.empty())
+			return;
+		m_RecentComponents.erase(std::remove(m_RecentComponents.begin(), m_RecentComponents.end(), shortName),
+			m_RecentComponents.end());
+		m_RecentComponents.insert(m_RecentComponents.begin(), shortName);
+		if (m_RecentComponents.size() > kPickerRecentMax)
+			m_RecentComponents.resize(kPickerRecentMax);
+		SaveState();
+	}
+
+	void PropertiesPanel::OpenAddComponentPicker(Wui::WuiContext& ctx)
+	{
+		// 每次都从干净状态开始:搜索清空、无高亮、键盘在搜索框一侧(下次打开搜索词清空)。
+		m_AddSearch.clear();
+		m_AddSearchLast.clear();
+		m_AddHighlight = -1;
+		m_AddListFocus = false;
+		m_AddScroll = 0.0f;
+		m_AddOpenedFrame = ctx.Frame();
+		ctx.OpenPopup(Wui::HashId("prop.add.popup"));
+		ctx.SetFocus(Wui::HashId("prop.add.search"));
+		ctx.RecordOp("properties", "open-add-picker", "prop.add", "focus=search");
+	}
+
+	void PropertiesPanel::DrawAddComponentPicker(Wui::WuiContext& ctx, const Wui::WuiRect& addButton,
+		Entity entity, Scene* scene, Schema::SchemaRegistry& schemas)
+	{
+		const Wui::WuiTheme& theme = m_Host.Theme();
+		const Wui::WuiId addPopup = Wui::HashId("prop.add.popup");
+		const Wui::WuiId searchId = Wui::HashId("prop.add.search");
+		const Wui::WuiId listId = Wui::HashId("prop.add.list");
+		// 打开弹层的那一帧不吃按键:按钮的键盘激活(Enter/Space)与选择器的回车是同一个事件。
+		const bool justOpened = ctx.Frame() == m_AddOpenedFrame;
+
+		// 候选 = 当前实体还没有的组件(与旧菜单同一口径:有 Storage 且未拥有);不写死任何清单。
+		std::vector<const Schema::TypeSchema*> candidates;
+		for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
+			if (schema && schema->Storage && !entity.HasComponent(schema->Storage->ComponentId))
+				candidates.push_back(schema);
+
+		// 行构造:过滤 + 分组(最近使用 → 按 Category 分层 → 未分类最后),同层按名称排序。
+		const auto buildRows = [&](const std::string& filter)
+		{
+			const std::string needle = LowerAscii(filter);
+			std::vector<const Schema::TypeSchema*> matched;
+			for (const Schema::TypeSchema* schema : candidates)
+				if (MatchesComponentFilter(*schema, needle))
+					matched.push_back(schema);
+
+			const auto makeItem = [](const Schema::TypeSchema& schema)
+			{
+				const Wui::LocalizedLabel label = SchemaComponentLabel(schema);
+				PickerRow row;
+				row.Text = label.Text;
+				row.Term = label.Term;
+				row.Doc = ComponentDocLabel(schema);
+				// 分层分类路径 = TypeSchema::CategoryPath(方案 §8.2 里的 Category 字符串;
+				// 本结构已有 TypeCategory Category 枚举,所以生成物里叫 CategoryPath)。
+				row.Category = CategoryLabel(schema.CategoryPath);
+				// 行 id 沿用既有脚本契约:prop.add.<DisplayName>(schema 生成物里 = 短类型名)。
+				row.NodeId = "prop.add." + schema.DisplayName;
+				row.Schema = &schema;
+				return row;
+			};
+			const auto makeHeader = [](std::string text, std::string nodeId)
+			{
+				PickerRow row;
+				row.Header = true;
+				row.Text = std::move(text);
+				row.NodeId = std::move(nodeId);
+				return row;
+			};
+			const auto byName = [](const Schema::TypeSchema* left, const Schema::TypeSchema* right)
+			{
+				const std::string leftName = LowerAscii(SchemaComponentLabel(*left).Text);
+				const std::string rightName = LowerAscii(SchemaComponentLabel(*right).Text);
+				if (leftName != rightName)
+					return leftName < rightName;
+				return left->DisplayName < right->DisplayName;
+			};
+
+			std::vector<PickerRow> rows;
+			std::vector<bool> used(matched.size(), false);
+
+			// ① 最近使用(最多 5,按 MRU 顺序置顶;已被拥有/不匹配过滤的自动消失)。
+			std::vector<PickerRow> recentRows;
+			for (const std::string& recentName : m_RecentComponents)
+			{
+				if (recentRows.size() >= kPickerRecentMax)
+					break;
+				for (size_t i = 0; i < matched.size(); ++i)
+				{
+					if (used[i] || SchemaTypeKeyName(*matched[i]) != recentName)
+						continue;
+					used[i] = true;
+					recentRows.push_back(makeItem(*matched[i]));
+					break;
+				}
+			}
+			if (!recentRows.empty())
+			{
+				rows.push_back(makeHeader(Wui::Tr("panel.properties.add.recent", "Recently Used"),
+					"prop.add.group.recent"));
+				rows.insert(rows.end(), recentRows.begin(), recentRows.end());
+			}
+
+			// ② 按 Category 分层(路径排序 → 同层按名称排序);③ 未分类排最后。
+			std::map<std::string, std::vector<const Schema::TypeSchema*>> groups;
+			std::vector<const Schema::TypeSchema*> uncategorized;
+			for (size_t i = 0; i < matched.size(); ++i)
+			{
+				if (used[i])
+					continue;
+				if (matched[i]->CategoryPath.empty())
+					uncategorized.push_back(matched[i]);
+				else
+					groups[matched[i]->CategoryPath].push_back(matched[i]);
+			}
+			for (auto& [category, items] : groups)
+			{
+				std::stable_sort(items.begin(), items.end(), byName);
+				rows.push_back(makeHeader(CategoryLabel(category),
+					"prop.add.group." + CategoryKeyName(category)));
+				for (const Schema::TypeSchema* schema : items)
+					rows.push_back(makeItem(*schema));
+			}
+			if (!uncategorized.empty())
+			{
+				std::stable_sort(uncategorized.begin(), uncategorized.end(), byName);
+				rows.push_back(makeHeader(Wui::Tr("panel.properties.add.uncategorized", "Uncategorized"),
+					"prop.add.group.uncategorized"));
+				for (const Schema::TypeSchema* schema : uncategorized)
+					rows.push_back(makeItem(*schema));
+			}
+			return rows;
+		};
+		const auto heightOf = [](const std::vector<PickerRow>& rows)
+		{
+			float height = 0.0f;
+			for (const PickerRow& row : rows)
+				height += row.Header ? kPickerGroupHeader : kPickerRow;
+			return height;
+		};
+
+		// ---- 几何:宽 320、最大高 420;内容富余时自适应高度,超出则内部滚动 ----
+		// 面板高度用"进入本帧时的搜索词"先定框(下一帧即精确),行本身按本帧最终的词绘制。
+		const float layoutHeight = heightOf(buildRows(m_AddSearch));
+		const float contentHeight = layoutHeight > 0.0f ? layoutHeight : kPickerEmptyHeight;
+		const float listHeight = std::min(contentHeight, kPickerMaxHeight - kPickerSearchRow - kPickerPad * 2.0f);
+		const float panelHeight = kPickerSearchRow + listHeight + kPickerPad;
+		const glm::vec2 viewport = ctx.Input().ViewportSize;
+		const float panelX = std::clamp(addButton.X, 2.0f, std::max(2.0f, viewport.x - kPickerWidth - 2.0f));
+		float panelY = addButton.Y + addButton.H + 2.0f;
+		if (panelY + panelHeight > viewport.y - 2.0f)
+			panelY = std::max(2.0f, viewport.y - 2.0f - panelHeight);
+		const Wui::WuiRect panel { panelX, panelY, kPickerWidth, panelHeight };
+		const Wui::WuiRect searchRect { panel.X + kPickerPad, panel.Y + kPickerPad,
+			panel.W - kPickerPad * 2.0f, kPickerSearchRow - 8.0f };
+		const Wui::WuiRect listRect { panel.X + kPickerPad, panel.Y + kPickerSearchRow,
+			panel.W - kPickerPad * 2.0f, listHeight };
+
+		ctx.PushOverlay();
+		DrawPanelSurface(ctx, panel, theme);
+
+		// ---- 搜索框:自动聚焦,输入即过滤(占位文案与 a11y Placeholder 是同一句)----
+		Wui::TextFieldA11y a11y;
+		a11y.Label = Wui::Tr("panel.properties.add_component", "Add Component");
+		a11y.Placeholder = Wui::Tr("panel.properties.add.search_hint", "Search components…");
+		// TextField 在回车/Esc 时会把焦点清 0(它的返回值是"输入结束"语义)→ 先记录本帧是否聚焦。
+		const bool searchFocused = ctx.Focus() == searchId;
+		bool searchCancelled = false;
+		Wui::TextField(ctx, searchId, searchRect, m_AddSearch, theme, &searchCancelled, &a11y);
+		if (m_AddSearch.empty())
+			Wui::Label(ctx, { searchRect.X + 8.0f, searchRect.Y + 5.0f }, a11y.Placeholder,
+				theme.TextDisabled, 12.0f);
+		// 搜索词一变就把键盘高亮归零 → "输入后回车 = 添加第一个匹配项"。
+		if (m_AddSearchLast != m_AddSearch)
+		{
+			m_AddSearchLast = m_AddSearch;
+			m_AddHighlight = -1;
+		}
+
+		// ---- 列表:本帧最终搜索词决定行(与用户看到的同帧一致)----
+		const std::vector<PickerRow> rows = buildRows(m_AddSearch);
+		const float rowsHeight = heightOf(rows);
+		const float maxScroll = std::max(0.0f, rowsHeight - listRect.H);
+		if (ctx.IsHovered(listRect) && ctx.Input().Wheel != 0.0f)
+			m_AddScroll -= ctx.Input().Wheel * 32.0f;
+		m_AddScroll = std::clamp(m_AddScroll, 0.0f, maxScroll);
+
+		int itemCount = 0;
+		for (const PickerRow& row : rows)
+			if (!row.Header)
+				++itemCount;
+		if (m_AddHighlight >= itemCount)
+			m_AddHighlight = itemCount - 1;
+		// ↑/↓ 移动高亮(长按连发);无高亮时 ↓ 取第一项、↑ 取最后一项。
+		if (itemCount > 0 && ctx.WasKeyTriggered(KeyCodes::Down))
+			m_AddHighlight = m_AddHighlight < 0 ? 0 : std::min(itemCount - 1, m_AddHighlight + 1);
+		if (itemCount > 0 && ctx.WasKeyTriggered(KeyCodes::Up))
+			m_AddHighlight = m_AddHighlight < 0 ? itemCount - 1 : std::max(0, m_AddHighlight - 1);
+
+		// ---- 添加:鼠标点击 / Enter(高亮项;无高亮 = 第一个匹配)----
+		const auto activate = [&](const Schema::TypeSchema& schema)
+		{
+			const uint32_t componentId = schema.Storage->ComponentId;
+			const entt::entity handle = entity;
+			if (scene->DeferStructuralChange([handle, componentId](Scene& target)
+			{
+				Entity added(&target, handle);
+				if (added.IsValid() && added.CanAddComponent(componentId))
+					added.AddComponent(componentId);
+			}))
+				m_Host.MarkDocumentDirty();
+			// MRU 置顶并落盘(<Editor>/wui-properties.json)。
+			TouchRecent(SchemaTypeKeyName(schema));
+			// 新分区自动展开(与分区绘制读同一个持久化键),再由 OnRender 连续几帧滚到可见。
+			const bool defaultOpen = schema.Id.Name == "World::LuaScriptComponent";
+			ctx.Persist<bool>(Wui::HashId(("prop.open." + schema.DisplayName).c_str()), defaultOpen) = true;
+			m_RevealSection = schema.DisplayName;
+			m_RevealFrames = kPickerRevealFrames;
+			ctx.CloseAllPopups();
+			ctx.RecordOp("properties", "add-component", schema.DisplayName, SchemaTypeKeyName(schema));
+		};
+
+		ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, listRect });
+		float rowY = listRect.Y - m_AddScroll;
+		int itemIndex = -1;
+		float highlightTop = 0.0f;
+		float highlightHeight = 0.0f;
+		for (const PickerRow& row : rows)
+		{
+			const float rowHeight = row.Header ? kPickerGroupHeader : kPickerRow;
+			const Wui::WuiRect item { listRect.X, rowY, listRect.W, rowHeight };
+			rowY += rowHeight;
+			if (row.Header)
+			{
+				Wui::Label(ctx, { item.X + 6.0f, item.Y + 4.0f }, row.Text, theme.TextMuted, 12.0f);
+				// 分组标题:只读文本节点(kind="text"),不参与点击(与只读属性行同一登记口径)。
+				RegisterNode(Wui::HashId(row.NodeId.c_str()), "text", item, row.Text, std::string(), false);
+				continue;
+			}
+			++itemIndex;
+			const bool highlighted = itemIndex == m_AddHighlight;
+			const bool hovered = ctx.IsHovered(item);
+			if (highlighted || hovered)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, item,
+					highlighted ? theme.ActiveBg : theme.ButtonHover, 2.0f });
+			if (highlighted)
+			{
+				highlightTop = item.Y;
+				highlightHeight = item.H;
+			}
+			// 名称(术语对照)+ 右侧灰字分类 + 名下 Doc 小字;都按真实可用宽度裁剪。
+			const float categoryWidth = ctx.MeasureTextWidth(row.Category, 12.0f);
+			// 分类文本过长(长路径的本地化)时不画它,把整行宽度留给名称;分类仍在节点 value 里。
+			const bool showCategory = categoryWidth <= item.W * 0.45f;
+			const float nameBudget = std::max(40.0f, item.W - 16.0f - (showCategory ? categoryWidth : 0.0f) - 8.0f);
+			Wui::LabelWithTerm(ctx, { item.X + 8.0f, item.Y + 4.0f }, row.Text, row.Term, theme.Text,
+				14.0f, theme, nameBudget);
+			if (showCategory)
+				Wui::Label(ctx, { item.X + item.W - 6.0f - categoryWidth, item.Y + 5.0f }, row.Category,
+					theme.TextMuted, 12.0f);
+			if (!row.Doc.empty())
+			{
+				Wui::LabelWithTerm(ctx, { item.X + 8.0f, item.Y + 23.0f }, row.Doc, std::string(),
+					theme.TextDisabled, theme.FontSizeCaption, theme, item.W - 16.0f);
+				Wui::Tooltip(ctx, item, row.Doc);
+			}
+			// 无障碍:一行一个稳定节点(id = prop.add.<DisplayName>),value = 分类、tooltip = Doc。
+			const Wui::LocalizedLabel label = SchemaComponentLabel(*row.Schema);
+			RegisterNode(Wui::HashId(row.NodeId.c_str()), "menu-item", item, TermText(label),
+				row.Category, true, row.Doc);
+			if (hovered)
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+			// 打开弹层的那一帧**不吃鼠标点击**:面板高度不足时会向上夹取(贴底上移),
+			// 夹取后面板可能正好盖住"Add Component"按钮,于是打开它的那一下点击会落在第一行上
+			// → 直接给实体加了一个用户没选的组件(实测 ops: f294 popup/open 与 add-component 同帧)。
+			// 与键盘 Enter 的 justOpened 守卫同一口径:弹层不消费"打开它的那次输入"。
+			if (!justOpened && ctx.IsClicked(item))
+			{
+				activate(*row.Schema);
+				break;
+			}
+		}
+		ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
+
+		// 键盘把高亮项移出可视区时,下一帧把它带回视野(内容 ≤ 视口时 maxScroll = 0,自动不做)。
+		if (m_AddHighlight >= 0 && highlightHeight > 0.0f)
+		{
+			const float top = highlightTop - listRect.Y;
+			if (top < 0.0f)
+				m_AddScroll = std::max(0.0f, m_AddScroll + top);
+			else if (top + highlightHeight > listRect.H)
+				m_AddScroll = std::min(maxScroll, m_AddScroll + top + highlightHeight - listRect.H);
+		}
+		if (rows.empty())
+		{
+			const std::string empty = Wui::Tr("panel.properties.add.empty", "No matching components");
+			Wui::Label(ctx, { listRect.X + 8.0f, listRect.Y + 8.0f }, empty, theme.TextMuted, 13.0f);
+			RegisterNode(Wui::HashId("prop.add.empty"), "text", listRect, empty, std::string(), false);
+		}
+
+		// ---- Enter:添加高亮项;没有高亮 = 第一个匹配项 ----
+		// 只有键盘在搜索框(searchFocused)或列表侧(m_AddListFocus)时才吃回车 ——
+		// 焦点在别的控件上时,回车属于那个控件。
+		if (itemCount > 0 && !justOpened && (searchFocused || m_AddListFocus)
+			&& ctx.WasKeyPressed(KeyCodes::Enter))
+		{
+			const int wanted = m_AddHighlight >= 0 ? m_AddHighlight : 0;
+			int current = 0;
+			for (const PickerRow& row : rows)
+			{
+				if (row.Header)
+					continue;
+				if (current++ == wanted)
+				{
+					activate(*row.Schema);
+					break;
+				}
+			}
+		}
+
+		// ---- Tab:搜索框 ⇄ 列表(文本控件持焦点时 WuiContext 不处理 Tab,这里显式接管)----
+		if (ctx.WasKeyPressed(KeyCodes::Tab))
+		{
+			m_AddListFocus = !m_AddListFocus;
+			ctx.SetFocus(m_AddListFocus ? listId : searchId);
+			if (m_AddListFocus && m_AddHighlight < 0 && itemCount > 0)
+				m_AddHighlight = 0;
+		}
+		ctx.RegisterFocusable(listId, listRect);
+
+		// ---- Esc:第一下清空搜索(焦点留在搜索框),搜索为空时第二下关闭弹层 ----
+		if (searchCancelled)
+		{
+			if (!m_AddSearch.empty())
+			{
+				m_AddSearch.clear();
+				ctx.SetFocus(searchId);
+			}
+			else
+				ctx.ClosePopup(addPopup);
+		}
+		else if (ctx.WasKeyTriggered(KeyCodes::Escape))
+			ctx.ClosePopup(addPopup);
+
+		ctx.ClosePopupsOnOutsideClick({ addPopup }, panel);
+		// 弹层矩形登记为悬停遮挡区(必须在弹层自身命中测试与"点外关闭"之后):本帧之后绘制的
+		// 分区/滚动条不再响应鼠标(与 Combo / SearchableCombo 同一条顺序规则)。
+		if (ctx.IsPopupOpen(addPopup))
+			ctx.PushHoverBlocker(panel);
+		else
+		{
+			// 关闭后不复用上一次的状态(下次打开由 OpenAddComponentPicker 重新初始化)。
+			m_AddSearch.clear();
+			m_AddSearchLast.clear();
+			m_AddHighlight = -1;
+			m_AddListFocus = false;
+			m_AddScroll = 0.0f;
+		}
+		ctx.PopOverlay();
 	}
 
 	void PropertiesPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
@@ -377,42 +909,10 @@ namespace World
 		const Wui::WuiRect addButton { rect.X + 8, rect.Y + (m_ReadOnly ? 30.0f : 8.0f), 140, 24 };
 		if (!m_ReadOnly && Button(ctx, Wui::HashId("prop.add"), addButton,
 			Wui::Tr("panel.properties.add_component", "Add Component"), theme))
-			ctx.OpenPopup(Wui::HashId("prop.add.popup"));
-
-		const Wui::WuiId addPopup = Wui::HashId("prop.add.popup");
-		if (ctx.IsPopupOpen(addPopup))
-		{
-			ctx.PushOverlay();
-			std::vector<const Schema::TypeSchema*> candidates;
-			for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
-				if (schema && schema->Storage && !entity.HasComponent(schema->Storage->ComponentId))
-					candidates.push_back(schema);
-			const Wui::WuiRect panel { addButton.X, addButton.Y + addButton.H, 220, candidates.size() * 22.0f + 8 };
-			DrawPanelSurface(ctx, panel, theme);
-			for (size_t i = 0; i < candidates.size(); ++i)
-			{
-				const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };
-				// 菜单项 id 仍是 prop.add.<DisplayName>(稳定标识);只有菜单文案走本地化。
-				if (MenuItem(ctx, Wui::HashId(("prop.add." + candidates[i]->DisplayName).c_str()), item,
-					SchemaComponentLabel(*candidates[i]).Text, true, theme))
-				{
-					const uint32_t componentId = candidates[i]->Storage->ComponentId;
-					const entt::entity handle = entity;
-					if (scene->DeferStructuralChange([handle, componentId](Scene& s)
-					{
-						Entity target(&s, handle);
-						if (target.IsValid() && target.CanAddComponent(componentId))
-							target.AddComponent(componentId);
-					}))
-						host.MarkDocumentDirty();
-					ctx.CloseAllPopups();
-				}
-			}
-			ctx.ClosePopupsOnOutsideClick({ addPopup }, panel);
-			if (ctx.IsKeyPressed(KeyCodes::Escape))
-				ctx.ClosePopup(addPopup);
-			ctx.PopOverlay();
-		}
+			OpenAddComponentPicker(ctx);
+		// U6:平铺菜单 → 搜索优先的组件选择器(方案 §8.2;候选/分类/说明全部来自 schema)。
+		if (!m_ReadOnly && ctx.IsPopupOpen(Wui::HashId("prop.add.popup")))
+			DrawAddComponentPicker(ctx, addButton, entity, scene, schemas);
 
 		// 组件分区进入保留模式布局树;字段内容复用已测的 schema 绘制逻辑。
 		std::vector<const Schema::TypeSchema*> componentSchemas;
@@ -443,6 +943,9 @@ namespace World
 		// 内容高度取上一帧实测值(首帧按 0 计),分区每帧重绘,下一帧即精确。
 		const float viewportHeight = std::max(0.0f, rect.H - kContentTop - 4.0f);
 		float contentHeight = 0.0f;
+		// U6:添加组件后要滚到可见的分区顶部(标题行位置)。
+		float revealTargetY = -1.0f;
+		float sectionTop = 0.0f;
 		for (size_t i = 0; i < m_Sections.size(); ++i)
 		{
 			if (i >= componentSchemas.size())
@@ -451,7 +954,10 @@ namespace World
 			const bool defaultOpen = schema->Id.Name == "World::LuaScriptComponent";
 			bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), defaultOpen);
 			m_Sections[i].Open = open;
+			if (!m_RevealSection.empty() && m_Sections[i].Title == m_RevealSection)
+				revealTargetY = sectionTop;
 			contentHeight += kSectionHeader + (open ? m_Sections[i].ContentHeight : 0.0f) + kSectionGap;
+			sectionTop += kSectionHeader + (open ? m_Sections[i].ContentHeight : 0.0f) + kSectionGap;
 		}
 
 		const Wui::WuiRect scrollViewport { rect.X + 6, rect.Y + kContentTop, rect.W - 12 - kScrollbarWidth, viewportHeight };
@@ -467,6 +973,20 @@ namespace World
 		if (ctx.IsHovered(scrollViewport) && ctx.Input().Wheel != 0.0f)
 			scroll.Offset -= ctx.Input().Wheel * 40.0f;
 		scroll.Offset = std::clamp(scroll.Offset, 0.0f, maxScroll);
+
+		// ---- U6:添加组件后把新分区滚到可见 ----
+		// 分区高度是"上一帧实测值"(添加那一帧才第一次测量,且新增分区会把布局重置为 0),
+		// 所以连续几帧重算偏移:布局稳定后自然停在正确位置,不需要动画/定时器。
+		if (!m_RevealSection.empty())
+		{
+			if (revealTargetY >= 0.0f)
+				scroll.Offset = std::clamp(revealTargetY, 0.0f, maxScroll);
+			if (revealTargetY < 0.0f || --m_RevealFrames <= 0)
+			{
+				m_RevealSection.clear();
+				m_RevealFrames = 0;
+			}
+		}
 
 		// 分区区在可视裁剪内绘制:滚出可视区的控件保留在无障碍树里(可见性由中心点判定,
 		// 滚回可视区即可被 ui.invoke 命中 —— 不会出现"AI 点到用户看不到的控件")。
@@ -577,6 +1097,13 @@ namespace World
 					m_ScrollThumbDragging = false;
 			}
 		}
+
+		// ---- U6:Ctrl+Shift+A 打开组件选择器(面板级快捷键)----
+		// 判定必须放在 OnRender **末尾**:文本焦点是在本帧绘制文本控件时才登记的,提前读拿到的是
+		// 上一帧的旧状态(内容浏览器在这个坑上踩过两次:Ctrl+A 把输入框里的全选变成了全选文件)。
+		if (!m_ReadOnly && !Wui::WuiTextFocus::Get().Active() && ctx.Input().Ctrl && ctx.Input().Shift
+			&& ctx.IsHovered(rect) && ctx.WasKeyTriggered(KeyCodes::A))
+			OpenAddComponentPicker(ctx);
 	}
 
 	float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect,

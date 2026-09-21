@@ -93,6 +93,8 @@ struct GeneratedAccess<World::UUIDComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Scene",
+            "Persistence identity written into the .wd file so entities can be matched across save and load; every entity is expected to carry one.",
         };
         return schema;
     }
@@ -147,6 +149,8 @@ struct GeneratedAccess<World::TagComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Scene",
+            "Human-readable entity label used by the hierarchy, the AI command channel and log messages; not an identifier.",
         };
         return schema;
     }
@@ -317,6 +321,8 @@ struct GeneratedAccess<World::TransformComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Scene",
+            "Local translation/rotation/scale of the entity; RotationQuat and the cached Transform matrix are derived runtime state (Transient, never serialized).",
         };
         return schema;
     }
@@ -429,6 +435,8 @@ struct GeneratedAccess<World::SpriteComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Rendering/Mesh",
+            "2D textured quad: an empty Texture falls back to a flat Color fill and TilingFactor repeats the texture UVs.",
         };
         return schema;
     }
@@ -541,6 +549,8 @@ struct GeneratedAccess<World::CircleRendererComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Rendering/Mesh",
+            "Flat 2D disc: Thickness is the ring width as a fraction of the radius (1 = filled) and Fade is the normalized edge softness.",
         };
         return schema;
     }
@@ -711,6 +721,8 @@ struct GeneratedAccess<World::MeshRendererComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Rendering/Mesh",
+            "Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty MaterialPath shades with Color.",
         };
         return schema;
     }
@@ -968,6 +980,8 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Rendering/Mesh",
+            "Skeleton-driven mesh: an empty AnimationClip plays the first clip and Time is written by the animation system (read-only under Play).",
         };
         return schema;
     }
@@ -1053,6 +1067,8 @@ struct GeneratedAccess<World::HierarchyComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Scene",
+            "Parent link plus whether the parent transform is inherited; Children is a runtime cache rebuilt from Parent after loading.",
         };
         return schema;
     }
@@ -1167,6 +1183,8 @@ struct GeneratedAccess<World::CameraComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Scene",
+            "Scene camera settings plus Primary (the camera Play and the runtime render through); FixedAspectRatio keeps the projection from following the viewport size.",
         };
         return schema;
     }
@@ -1308,6 +1326,8 @@ struct GeneratedAccess<World::DirectionalLightComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Rendering/Light",
+            "Sun-style light: Direction is the propagation direction in world space (normalized when packed) and only the first one casts shadows.",
         };
         return schema;
     }
@@ -1420,6 +1440,8 @@ struct GeneratedAccess<World::PointLightComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Rendering/Light",
+            "Local light with distance falloff: Range is the falloff radius in world units, attenuation saturates as (1 - d/Range)^2, and at most 7 point lights reach the shader.",
         };
         return schema;
     }
@@ -1503,6 +1525,8 @@ struct GeneratedAccess<World::AmbientLightComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Rendering/Light",
+            "Global ambient term without a spatial range: only the first ambient light is used and 0.25 grey applies when the scene has none.",
         };
         return schema;
     }
@@ -1557,6 +1581,8 @@ struct GeneratedAccess<World::NativeScriptComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Scripting",
+            "C++ behavior instance created per entity when Play starts; ScriptName selects the registered script and the remaining fields are runtime state.",
         };
         return schema;
     }
@@ -1611,6 +1637,8 @@ struct GeneratedAccess<World::LuaScriptComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Scripting",
+            "Luau script attached to the entity: only ScriptFilePath is serialized, the environment, callbacks and cached fields are rebuilt at load.",
         };
         return schema;
     }
@@ -1698,6 +1726,8 @@ struct GeneratedAccess<World::RigidBody2DComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Physics/2D",
+            "Box2D body: BodyType selects Static/Dynamic/Kinematic and FixedRotation locks the angular degree of freedom.",
         };
         return schema;
     }
@@ -1897,6 +1927,8 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Physics/2D",
+            "2D box collider simulated by Box2D: Size defines the box in local units (multiplied by the entity transform) and Offset is the local centre offset.",
         };
         return schema;
     }
@@ -2096,6 +2128,8 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Physics/2D",
+            "2D circle collider simulated by Box2D: Radius scaled by the entity transform with a local Offset; ShowCollider toggles the physics debug outline.",
         };
         return schema;
     }
@@ -2328,6 +2362,8 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Physics/3D",
+            "Jolt body: Mass and the damping terms drive Dynamic bodies, UseGravity opts into scene gravity, and Static bodies never move.",
         };
         return schema;
     }
@@ -2411,6 +2447,8 @@ struct GeneratedAccess<World::BoxCollider3DComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Physics/3D",
+            "Box shape: HalfExtents are local half sizes scaled by the entity transform and Offset is a local offset applied unscaled.",
         };
         return schema;
     }
@@ -2494,6 +2532,8 @@ struct GeneratedAccess<World::SphereCollider3DComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Physics/3D",
+            "Sphere shape: Radius in local units with a local Offset applied unscaled.",
         };
         return schema;
     }
@@ -2606,6 +2646,8 @@ struct GeneratedAccess<World::CapsuleCollider3DComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Physics/3D",
+            "Capsule along the entity's local Y axis: HalfHeight is the cylinder half height excluding the two hemisphere caps.",
         };
         return schema;
     }
@@ -2693,6 +2735,8 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Physics/3D",
+            "Mesh-derived collision: an empty MeshPath uses the entity's MeshRenderer mesh, StaticTriangles only works on Static bodies, and the editor draws no outline for it.",
         };
         return schema;
     }
@@ -2742,6 +2786,8 @@ struct GeneratedAccess<World::UUID>
             },
             nullptr,
             nullptr,
+            "",
+            "",
         };
         return schema;
     }
@@ -2998,6 +3044,8 @@ struct GeneratedAccess<World::SceneCamera>
             },
             nullptr,
             nullptr,
+            "",
+            "",
         };
         return schema;
     }

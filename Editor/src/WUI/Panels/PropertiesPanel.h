@@ -15,7 +15,7 @@ namespace World
 	class PropertiesPanel final : public EditorPanel
 	{
 	public:
-		explicit PropertiesPanel(PanelHost& host) : m_Host(host) {}
+		explicit PropertiesPanel(PanelHost& host);
 		const char* Id() const override { return "properties"; }
 		const char* Title() const override { return "Properties"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
@@ -45,6 +45,16 @@ namespace World
 		float DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect);
 
+		// ---- U6:Add Component 选择器(方案 §8.2;候选/分类/说明全部来自 schema)----
+		// 打开:清空上一次状态并聚焦搜索框;绘制:搜索框 + 分组列表(最近使用 → 分类 → 未分类)。
+		void OpenAddComponentPicker(Wui::WuiContext& ctx);
+		void DrawAddComponentPicker(Wui::WuiContext& ctx, const Wui::WuiRect& addButton, Entity entity,
+			Scene* scene, Schema::SchemaRegistry& schemas);
+		// MRU 更新(置顶,最多 5 条)并落盘;<Editor>/wui-properties.json 写失败只告警,不影响编辑。
+		void TouchRecent(const std::string& shortName);
+		void LoadState();
+		void SaveState() const;
+
 		PanelHost& m_Host;
 		// Play/Simulate 期间为 true:字段只显示不落值(只读查看)。
 		bool m_ReadOnly = false;
@@ -58,5 +68,16 @@ namespace World
 		std::string m_LuaReloadMessage;
 		uint32_t m_LuaReloadHandle = ~0u;
 		bool m_LuaReloadOk = true;
+		// ---- U6:选择器状态(只属于本面板对象,不进任何全局表)----
+		std::string m_StatePath;                     // <Editor>/wui-properties.json
+		std::vector<std::string> m_RecentComponents; // 最近使用(短类型名,MRU 顺序)
+		std::string m_AddSearch;                     // 搜索框缓冲(TextField 直接写入)
+		std::string m_AddSearchLast;                 // 上一次的搜索词:变化时把高亮归零
+		int m_AddHighlight = -1;                     // 键盘高亮(候选项序号;-1 = 无 → Enter 取第一个)
+		bool m_AddListFocus = false;                 // Tab 是否停在列表侧
+		float m_AddScroll = 0.0f;                    // 列表内部滚动偏移
+		std::string m_RevealSection;                 // 添加后要展开并滚到可见的分区(DisplayName)
+		int m_RevealFrames = 0;                      // 剩余强制滚动帧数(分区高度是上一帧实测值)
+		uint64_t m_AddOpenedFrame = 0;               // 打开的那一帧(同帧的按键不当作选择器输入)
 	};
 }

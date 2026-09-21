@@ -270,6 +270,8 @@ struct GeneratedAccess<World::SampleDataComponent>
             },
             &StorageBindingOf(),
             nullptr,
+            "Project",
+            "Game-module sample component used to exercise schema-driven editing; its eight fields cover bool, integer, float, vector and string kinds.",
         };
         return schema;
     }
@@ -353,6 +355,8 @@ struct GeneratedAccess<World::ExampleScript>
             },
             nullptr,
             &ScriptBindingOf(),
+            "",
+            "",
         };
         return schema;
     }
@@ -469,6 +473,8 @@ struct GeneratedAccess<World::StressTest>
             },
             nullptr,
             &ScriptBindingOf(),
+            "",
+            "",
         };
         return schema;
     }

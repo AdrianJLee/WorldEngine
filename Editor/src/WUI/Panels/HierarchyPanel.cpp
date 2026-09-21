@@ -214,7 +214,9 @@ namespace World
 		{
 			const Wui::WuiRect rowRect = m_Rows[i]->Rect();
 			const bool hovered = ctx.IsHovered(rowRect);
-			if (ctx.Input().MouseDown[0] && hovered)
+			// P4-U6:有弹层打开时不起拖拽(与 WuiListRow 的"弹层打开不吃点击"同一规则):
+			// 组件选择器等弹层可能盖住层级行,按下会被当成"拖层级实体"。
+			if (!ctx.AnyPopupOpen() && ctx.Input().MouseDown[0] && hovered)
 			{
 				const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(m_RowEntities[i]));
 				ctx.BeginDrag(Wui::HashId(("hierarchy.drag." + std::to_string(handle)).c_str()),

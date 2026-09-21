@@ -181,6 +181,15 @@ namespace World::Schema
 		std::vector<FieldSchema> Fields;
 		const StorageBinding* Storage = nullptr; // Category==Component
 		const ScriptBinding* Script = nullptr;   // Category==Script
+
+		// ---- 类型级描述元数据(编辑期/UI 用:组件选择器分组、说明文案、搜索) ----
+		// 来源 = 声明处的 WE_SCHEMA_META(Category(...), Doc(...)) 注解,由 schema-compiler 带进生成物。
+		// 不进序列化、不参与 ABI/存储比较,运行时逻辑不读。
+		// 命名说明:本结构已有一个 Category(TypeCategory 分类枚举),C++ 不允许同名成员,
+		// 所以"分层分类路径"用 CategoryPath(方案里要求的 Category 字符串即此字段);空 = 未分类/无说明。
+		// 位置刻意放在末尾:既有按位置初始化的 TypeSchema 聚合初始化(测试与旧生成物)不受影响。
+		std::string CategoryPath;
+		std::string Doc;
 	};
 
 	// 资产字段操作:以路径字符串作为边界值。每个资产类型提供一个特化。
@@ -200,6 +209,11 @@ namespace World::Schema
 
 #define WE_SCHEMA_END
 #define WE_FIELD(...)
+// 类型级描述元数据注解,写在 WE_SCHEMA_BODY 之后、第一个 WE_FIELD 之前;展开为空,仅供生成器扫描:
+//   WE_SCHEMA_META(Category("Rendering/Light"), Doc("Point light with distance falloff."))
+// Category = 分层分类路径(英文 canonical,空 = 未分类);Doc = 一句话说明(英文 canonical,空 = 无说明)。
+// 两个属性都可以省略;属性名固定为 Category / Doc。
+#define WE_SCHEMA_META(...)
 #define WE_ENUM_SCHEMA(Module, TypeName, Underlying)
 #define WE_ENUM_VALUE(...)
 #define WE_ENUM_END

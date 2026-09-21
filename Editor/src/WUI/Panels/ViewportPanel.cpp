@@ -556,14 +556,21 @@ namespace World
 					const bool isSelected = handle == selectedHandle;
 					if (!isSelected && !showAllColliders)
 						continue;
-					const glm::mat4 world = WorldMatrixOf(registry, handle);
+					// 口径:与物理**同源** —— 2D(Box2D)与 3D(Jolt)都是用实体的**本地** Transform
+					// 建刚体/形状(见 Scene.cpp 的 b2MakeOffsetBox 与 Physics3D.cpp:415),所以轮廓也走本地矩阵;
+					// 用世界矩阵在"有父级"的实体上会和真实碰撞体错位。
+					const glm::mat4 world = registry.try_get<TransformComponent>(handle)
+						? registry.get<TransformComponent>(handle).Transform : glm::mat4(1.0f);
 					const Wui::WuiColor color = isSelected ? colliderSelected : colliderColor;
 					const float thickness = isSelected ? 1.8f : 1.1f;
 					bool drew = false;
 					if (const auto* box2d = registry.try_get<BoxCollider2DComponent>(handle))
 					{
-						const float hx = std::max(0.0f, box2d->Size.x) * 0.5f;
-						const float hy = std::max(0.0f, box2d->Size.y) * 0.5f;
+						// 注意:`BoxCollider2DComponent::Size` 是**半尺寸**(运行时直接喂
+						// b2MakeOffsetBox(halfWidth, halfHeight, …)),不要再乘 0.5 ——
+						// 乘了会把轮廓画成真实碰撞体的一半(we_engine 在 U6 复核时抓到的口径矛盾)。
+						const float hx = std::max(0.0f, box2d->Size.x);
+						const float hy = std::max(0.0f, box2d->Size.y);
 						const glm::vec3 c { box2d->Offset.x, box2d->Offset.y, 0.0f };
 						const glm::vec3 corners[4] = {
 							c + glm::vec3 { -hx, -hy, 0.0f }, c + glm::vec3 { hx, -hy, 0.0f },

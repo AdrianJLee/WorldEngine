@@ -255,6 +255,10 @@ namespace World::Wui
 		void ClosePopup(WuiId id);
 		void CloseAllPopups() { m_OpenPopups.clear(); m_PopupOpenFrame.clear(); }
 		bool IsPopupOpen(WuiId id) const;
+		// P4-U6:是否有任何弹层打开。用于"弹层打开时,其它面板的列表行/拖拽不响应"这条通用规则 ——
+		// 立即模式里先画的面板无法被后画的弹层挡住,于是"点弹层 = 同时点到下面的行"
+		// (实测:属性面板的组件选择器盖住层级面板,点搜索框会误选实体并起一次拖拽)。
+		bool AnyPopupOpen() const { return !m_OpenPopups.empty(); }
 		bool ClosePopupsOnOutsideClick(const std::vector<WuiId>& popups, const WuiRect& ignoreRect);
 		void SetModal(WuiId id) { m_Modal = id; }
 		void ClearModal() { m_Modal = 0; }

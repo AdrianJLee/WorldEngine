@@ -37,6 +37,26 @@ namespace
 		throw std::runtime_error(file + "(" + std::to_string(pos.Line) + "): " + message);
 	}
 
+	std::string Unquote(const std::string& text)
+	{
+		if (text.size() >= 2 && text.front() == '"' && text.back() == '"')
+			return text.substr(1, text.size() - 2);
+		return text;
+	}
+
+	// WE_SCHEMA_META 的文本会被原样写进生成物的 C++ 字符串字面量:拒绝转义/引号/控制字符,
+	// 保证生成物总是合法 C++(不做转义处理,保持生成器行为可预测)。
+	void ValidateMetaText(const std::string& file, const SourcePos& pos, const std::string& attr, const std::string& value)
+	{
+		for (const char c : value)
+		{
+			if (c == '\\' || c == '"')
+				Fail(file, pos, "WE_SCHEMA_META " + attr + " must not contain quotes or backslashes (it is emitted verbatim into a C++ string literal)");
+			if (c == '\n' || c == '\r' || c == '\t')
+				Fail(file, pos, "WE_SCHEMA_META " + attr + " must be a single line without control characters");
+		}
+	}
+
 	class Tokenizer
 	{
 	public:
@@ -208,6 +228,11 @@ namespace
 		std::string Module;
 		std::string Type;
 		std::string Category;
+		// WE_SCHEMA_META(Category(...), Doc(...)):类型级描述元数据(可只写其一;空 = 未填)。
+		std::string MetaCategory;
+		std::string MetaDoc;
+		bool HasMeta = false;
+		SourcePos MetaPos;
 		std::vector<FieldDecl> Fields;
 		SourcePos Pos;
 		std::string File;
@@ -288,14 +313,104 @@ namespace
 					Next();
 					continue;
 				}
+				if (PeekIs(Token::Type::Identifier, "WE_SCHEMA_META"))
+				{
+					ParseStructMeta(decl);
+					continue;
+				}
 				if (!PeekIs(Token::Type::Identifier, "WE_FIELD"))
-					Fail(m_File, Peek().Pos, "only WE_FIELD declarations are allowed inside a WE_SCHEMA_BODY block");
+					Fail(m_File, Peek().Pos, "only WE_SCHEMA_META and WE_FIELD declarations are allowed inside a WE_SCHEMA_BODY block");
 				decl.Fields.push_back(ParseField());
 			}
 			ExpectIdentifier("WE_SCHEMA_END");
 			if (!AtEnd() && PeekIs(Token::Type::Punct, ";"))
 				Next();
 			return decl;
+		}
+
+		// 类型级描述元数据:WE_SCHEMA_META(Category("Rendering/Light"), Doc("一句话说明"))
+		// 只接受 Category / Doc 两个属性,每个最多一次、单个字符串字面量,顺序任意。
+		void ParseStructMeta(StructDecl& decl)
+		{
+			const SourcePos pos = Next().Pos; // WE_SCHEMA_META
+			if (decl.HasMeta)
+				Fail(m_File, pos, "duplicate WE_SCHEMA_META for '" + decl.Type + "' (only one per type)");
+			decl.HasMeta = true;
+			decl.MetaPos = pos;
+			Expect(Token::Type::Punct, "'('");
+			if (!PeekIs(Token::Type::Punct, ")"))
+			{
+				while (true)
+				{
+					const Attr attr = ParseAttr();
+					if (attr.Name != "Category" && attr.Name != "Doc")
+						Fail(m_File, attr.Pos, "unknown WE_SCHEMA_META attribute '" + attr.Name + "' (expected Category/Doc)");
+					if (attr.Args.size() != 1 || attr.Args[0].size() != 1 || attr.Args[0][0].type != Token::Type::String)
+						Fail(m_File, attr.Pos, "WE_SCHEMA_META attribute '" + attr.Name + "' expects a single string literal");
+					const std::string value = Unquote(attr.Args[0][0].Text);
+					ValidateMetaText(m_File, attr.Pos, attr.Name, value);
+					std::string& target = attr.Name == "Category" ? decl.MetaCategory : decl.MetaDoc;
+					if (!target.empty())
+						Fail(m_File, attr.Pos, "duplicate WE_SCHEMA_META attribute '" + attr.Name + "'");
+					target = value;
+					if (!AtEnd() && PeekIs(Token::Type::Punct, ","))
+					{
+						Next();
+						continue;
+					}
+					break;
+				}
+			}
+			Expect(Token::Type::Punct, "')'");
+			if (!AtEnd() && PeekIs(Token::Type::Punct, ";"))
+				Next();
+
+			// 分类是分层路径:派生本地化键 schema.category.<路径,把 / 换成 .>,所以禁止空段。
+			if (!decl.MetaCategory.empty()
+				&& (decl.MetaCategory.front() == '/' || decl.MetaCategory.back() == '/'
+					|| decl.MetaCategory.find("//") != std::string::npos))
+				Fail(m_File, decl.MetaPos, "WE_SCHEMA_META Category must be a slash-separated path without empty segments (e.g. \"Rendering/Light\")");
+		}
+
+		// 属性词法:WE_FIELD 的 Attr(...) 与 WE_SCHEMA_META 的 Category(...)/Doc(...) 共用。
+		// 调用前逗号已消费,当前 token 是属性名。
+		Attr ParseAttr()
+		{
+			Attr attr;
+			attr.Pos = ExpectIdentifier("attribute name").Pos;
+			attr.Name = m_Tokens[m_Index - 1].Text;
+			if (!AtEnd() && PeekIs(Token::Type::Punct, "("))
+			{
+				Next();
+				std::vector<Token> raw;
+				int depth = 1;
+				while (!AtEnd() && depth > 0)
+				{
+					const Token token = Next();
+					if (token.type == Token::Type::Punct)
+					{
+						if (token.Text == "(") ++depth;
+						else if (token.Text == ")") --depth;
+					}
+					if (depth > 0)
+						raw.push_back(token);
+				}
+				if (depth != 0)
+					Fail(m_File, attr.Pos, "unbalanced parentheses in attribute '" + attr.Name + "'");
+				std::vector<Token> group;
+				for (const Token& token : raw)
+				{
+					if (token.type == Token::Type::Punct && token.Text == ",")
+					{
+						attr.Args.push_back(std::move(group));
+						group.clear();
+						continue;
+					}
+					group.push_back(token);
+				}
+				attr.Args.push_back(std::move(group));
+			}
+			return attr;
 		}
 
 		FieldDecl ParseField()
@@ -309,41 +424,7 @@ namespace
 			while (!AtEnd() && PeekIs(Token::Type::Punct, ","))
 			{
 				Next();
-				Attr attr;
-				attr.Pos = ExpectIdentifier("attribute name").Pos;
-				attr.Name = m_Tokens[m_Index - 1].Text;
-				if (!AtEnd() && PeekIs(Token::Type::Punct, "("))
-				{
-					Next();
-					std::vector<Token> raw;
-					int depth = 1;
-					while (!AtEnd() && depth > 0)
-					{
-						const Token token = Next();
-						if (token.type == Token::Type::Punct)
-						{
-							if (token.Text == "(") ++depth;
-							else if (token.Text == ")") --depth;
-						}
-						if (depth > 0)
-							raw.push_back(token);
-					}
-					if (depth != 0)
-						Fail(m_File, attr.Pos, "unbalanced parentheses in attribute '" + attr.Name + "'");
-					std::vector<Token> group;
-					for (const Token& token : raw)
-					{
-						if (token.type == Token::Type::Punct && token.Text == ",")
-						{
-							attr.Args.push_back(std::move(group));
-							group.clear();
-							continue;
-						}
-						group.push_back(token);
-					}
-					attr.Args.push_back(std::move(group));
-				}
-				field.Attrs.push_back(std::move(attr));
+				field.Attrs.push_back(ParseAttr());
 			}
 			Expect(Token::Type::Punct, "')'");
 			Expect(Token::Type::Punct, "';'");
@@ -400,13 +481,6 @@ namespace
 			hash *= 1099511628211ull;
 		}
 		return hash;
-	}
-
-	std::string Unquote(const std::string& text)
-	{
-		if (text.size() >= 2 && text.front() == '"' && text.back() == '"')
-			return text.substr(1, text.size() - 2);
-		return text;
 	}
 
 	const std::set<std::string>& StructKinds()
@@ -798,6 +872,10 @@ namespace
 			out << "            nullptr,\n            &ScriptBindingOf(),\n";
 		else
 			out << "            nullptr,\n            nullptr,\n";
+		// 类型级描述元数据(TypeSchema::CategoryPath / TypeSchema::Doc;空字符串 = 未填)。
+		// 见 Schema.h 里 TypeSchema 末尾的字段说明:位置固定在最后两个成员。
+		out << "            \"" << decl.MetaCategory << "\",\n";
+		out << "            \"" << decl.MetaDoc << "\",\n";
 		out << "        };\n        return schema;\n    }\n";
 		out << "};\n\n";
 	}

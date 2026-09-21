@@ -25,6 +25,8 @@ namespace World
 		std::string Tags;
 
 		WE_SCHEMA_BODY(Game, SampleDataComponent, Component)
+			WE_SCHEMA_META(Category("Project"),
+				Doc("Game-module sample component used to exercise schema-driven editing; its eight fields cover bool, integer, float, vector and string kinds."))
 			WE_FIELD(Health, Float);
 			WE_FIELD(Speed, Float, Range(0.0f, 10.0f));
 			WE_FIELD(Enabled, Bool);

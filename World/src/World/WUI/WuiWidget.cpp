@@ -456,7 +456,9 @@ namespace World::Wui
 			node.Rect = m_Rect;
 			WuiAccessibility::Get().Register(node);
 		}
-		if (ctx.IsClicked(m_Rect) && OnClick)
+		// P4-U6:有弹层打开时行不响应点击 —— 否则"点弹层"会穿透成"点下面的行"
+		// (弹层由后画的面板绘制,先画的面板无法在绘制期挡住它)。
+		if (!ctx.AnyPopupOpen() && ctx.IsClicked(m_Rect) && OnClick)
 			OnClick();
 	}
 
