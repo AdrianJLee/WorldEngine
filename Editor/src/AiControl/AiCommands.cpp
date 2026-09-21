@@ -1093,6 +1093,60 @@ namespace World
 			result = message;
 			return true;
 		}
+		if (cmd == "asset.open_prefab")
+		{
+			// P4-U13:与"内容浏览器双击 .wprefab"同一条路径(打开编辑,不改场景结构)。
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			m_Shell.OpenPrefabEditor(path);
+			result = "opened prefab editor for " + path;
+			return true;
+		}
+		if (cmd == "asset.save_prefab")
+		{
+			// P4-U13:横幅上的"保存 Prefab"同一条路径(写回 .wprefab)。
+			std::string message;
+			if (!m_Shell.SavePrefabDocument(&message))
+			{
+				error = message.empty() ? "save prefab failed" : message;
+				return false;
+			}
+			result = message;
+			return true;
+		}
+		if (cmd == "asset.close_prefab")
+		{
+			// P4-U13:横幅上的"返回场景"同一条路径。
+			if (!m_Shell.ClosePrefabDocument())
+			{
+				error = "not editing a prefab";
+				return false;
+			}
+			result = "left prefab edit session";
+			return true;
+		}
+		if (cmd == "asset.instance_prefab")
+		{
+			// P4-U13:与内容浏览器右键"实例化到当前场景"同一条路径。
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			std::string message;
+			if (!m_Shell.InstantiatePrefabAsset(path, &message))
+			{
+				error = message.empty() ? "prefab instantiate failed" : message;
+				return false;
+			}
+			result = message;
+			return true;
+		}
 		if (cmd == "material.get")
 		{
 			const std::string path = arg("path");

@@ -263,7 +263,9 @@ namespace World
 			BrowserDirNode rootNode;
 			rootNode.Path = m_Model.Root;
 			rootNode.Depth = 0;
-			rootNode.HasChildren = !m_Model.DirTree.empty();
+			// 内容根是**固定根**:不给折叠标识 —— 折叠它等于把整棵树藏起来,没有意义;
+			// 之前给了箭头但 Depth 1 的行恒可见,于是箭头点了没反应(用户 2026-09-21 报的问题)。
+			rootNode.HasChildren = false;
 			m_Model.DirTree.insert(m_Model.DirTree.begin(), std::move(rootNode));
 			// 根行**首次**默认展开(之后尊重用户手动折叠)。
 			if (!m_RootRowSeeded)
@@ -489,6 +491,17 @@ namespace World
 			const std::string logical = ec ? path.generic_string() : relative.generic_string();
 			m_Host.OpenModelPreview(logical);
 			WLD_CORE_INFO("[model] preview opened: {0}", logical);
+		}
+		else if (path.extension() == ".wprefab")
+		{
+			// P4-U13:prefab 双击 = **打开编辑**(以前落到"交给 Windows 打开"的兜底分支,
+			// 实际弹记事本)。编辑期间保存 = 写回这一个资产,返回 = 回上一个场景。
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			m_Host.OpenPrefabEditor(logical);
+			WLD_CORE_INFO("[prefab] open for editing: {0}", logical);
 		}
 		else if (path.extension() == ".gltf" || path.extension() == ".glb")
 		{
@@ -1125,6 +1138,21 @@ namespace World
 					  cell.Y + gap - (iconSize - kSliceIconSize) * 0.5f, iconSize, iconSize },
 					Wui::WuiColor { 1, 1, 1, 1 }, 0.0f, 1.0f, "", nameSize, false, icon, { 0, 1, 1, -1 } });
 
+			// P4-U13:prefab 是"可复用实体子树",不是普通文件 —— 给一枚常驻小标签,
+			// 让它在网格里一眼可辨(文件图标/名称都看不出它是资产还是随便一个文件)。
+			if (slice.Extension == ".wprefab")
+			{
+				const Wui::LocalizedLabel badge = Wui::TrLabel("asset.type.prefab", "Prefab");
+				const float badgeSize = infoSize;
+				const float badgeW = ctx.MeasureTextWidth(badge.Text, badgeSize) + theme.PadSmall * 2.0f;
+				const float badgeH = badgeSize + 4.0f;
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+					{ cell.X + gap, cell.Y + gap, badgeW, badgeH }, theme.Accent, badgeH * 0.5f });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ cell.X + gap + theme.PadSmall, cell.Y + gap + 2.0f, 0.0f, 0.0f },
+					Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, 0.0f, 1.0f, badge.Text, badgeSize, true });
+			}
+
 			// 名称(居中;选中时先铺一层 Selection 底再画文字)。
 			const float infoY = cell.Y + cell.H - gap - infoSize;
 			const float nameY = infoY - theme.PadSmall - nameSize;
@@ -1145,7 +1173,9 @@ namespace World
 			const std::string info = slice.IsDir
 				? Wui::Tr("panel.content_browser.slice.folder", "Folder")
 				// glTF/GLB 用"导入源"而不是裸扩展名:它们在网格视图里必须一眼看出不是可引用资产。
-				: ((slice.Extension == ".gltf" || slice.Extension == ".glb") ? slice.TypeLabel
+				// prefab 同理:显示类型名而不是 ".wprefab"。
+				: ((slice.Extension == ".gltf" || slice.Extension == ".glb" || slice.Extension == ".wprefab")
+					? slice.TypeLabel
 					: (slice.Extension.empty() ? slice.TypeLabel : slice.Extension)) + " · "
 					+ FormatBytes(static_cast<size_t>(bytes));
 			const std::string infoText = EllipsizeToWidth(ctx, info, textBudget, infoSize);
@@ -1629,11 +1659,15 @@ namespace World
 			else if (tree.KeyToggleExpand >= 0 && tree.KeyToggleExpand < static_cast<int>(visibleNodes.size()))
 			{
 				const std::filesystem::path& path = visibleNodes[tree.KeyToggleExpand]->Path;
-				if (treeItems[tree.KeyToggleExpand].Expanded)
-					m_Model.TreeOpen.erase(path);
-				else
-					m_Model.TreeOpen.insert(path);
-				SaveState();
+				// 固定根不参与展开/折叠(控件本来也只为 HasChildren 行发这个键)。
+				if (path != m_Model.Root)
+				{
+					if (treeItems[tree.KeyToggleExpand].Expanded)
+						m_Model.TreeOpen.erase(path);
+					else
+						m_Model.TreeOpen.insert(path);
+					SaveState();
+				}
 			}
 			else if (tree.KeyActivate >= 0 && tree.KeyActivate < static_cast<int>(visibleNodes.size()))
 			{
@@ -1657,9 +1691,12 @@ namespace World
 				const bool hovered = ctx.IsHovered(row);
 				if (tree.ClickedArrow == static_cast<int>(i))
 				{
-					if (treeItems[i].Expanded) m_Model.TreeOpen.erase(node.Path);
-					else m_Model.TreeOpen.insert(node.Path);
-					SaveState();
+					if (node.Depth > 0)   // 固定根没有箭头,这里只是防御性判断
+					{
+						if (treeItems[i].Expanded) m_Model.TreeOpen.erase(node.Path);
+						else m_Model.TreeOpen.insert(node.Path);
+						SaveState();
+					}
 				}
 				else if (tree.Clicked == static_cast<int>(i))
 				{
@@ -2151,19 +2188,54 @@ namespace World
 		const Wui::WuiId popup = Wui::HashId("browser.context");
 		if (ctx.IsPopupOpen(popup) && !m_Model.ContextMenuPath.empty())
 		{
-			struct BrowserItem { const char* Label; std::function<void()> Action; };
+			struct BrowserItem { std::string Label; std::function<void()> Action; };
 			const bool single = m_Model.Selected.size() == 1;
 			// P4-UX16:"新建 X"不再挂在**条目**右键菜单上 —— 它建在"当前文件夹",和条目无关
 			// (资源管理器同款:新建属于空白处,条目菜单只做对该条目本身的操作)。
-			const std::vector<BrowserItem> items = {
-				{ "Open", [this] { OpenItem(m_Model.ContextMenuPath); } },
-				{ "Cut", [this] { Cut(); } },
-				{ "Copy", [this] { Copy(); } },
-				{ "Paste", [this] { PasteInto(std::filesystem::is_directory(m_Model.ContextMenuPath) ? m_Model.ContextMenuPath : m_Model.Current); } },
-				{ "Rename", [this, single] { if (single && m_Ctx) StartRename(*m_Ctx, m_Model.ContextMenuPath); } },
-				{ "Open in Explorer", [this] { OpenInExplorer(m_Model.ContextMenuPath); } },
-				{ "Delete", [this] { m_Model.ShowDeleteModal = true; } },
-			};
+			// P4-U13:prefab 的菜单按"它是资产不是文件"来排 —— 打开编辑 / 实例化到当前场景
+			// 排在最前(这两个才是日常动作),文件操作(剪切/复制…)跟在后面。
+			const bool prefabFile =
+				!std::filesystem::is_directory(m_Model.ContextMenuPath)
+				&& LowerExtension(m_Model.ContextMenuPath) == ".wprefab";
+			std::vector<BrowserItem> items;
+			if (prefabFile)
+			{
+				items.push_back({ Wui::Tr("panel.content_browser.item.open_prefab", "Open Prefab"),
+					[this] { OpenItem(m_Model.ContextMenuPath); } });
+				items.push_back({ Wui::Tr("panel.content_browser.item.instantiate", "Instantiate in Scene"),
+					[this]
+					{
+						const std::filesystem::path contentRoot = m_Model.Root;
+						std::error_code ec;
+						const std::filesystem::path relative =
+							std::filesystem::relative(m_Model.ContextMenuPath, contentRoot, ec);
+						const std::string logical =
+							ec ? m_Model.ContextMenuPath.generic_string() : relative.generic_string();
+						std::string message;
+						if (!m_Host.InstantiatePrefabAsset(logical, &message))
+							WLD_CORE_WARN("[prefab] instantiate failed: {0}", message);
+						else
+							WLD_CORE_INFO("[prefab] {0}", message);
+					} });
+				items.push_back({ Wui::Tr("panel.content_browser.item.rename", "Rename"),
+					[this, single] { if (single && m_Ctx) StartRename(*m_Ctx, m_Model.ContextMenuPath); } });
+				items.push_back({ Wui::Tr("panel.content_browser.item.reveal", "Show in Explorer"),
+					[this] { OpenInExplorer(m_Model.ContextMenuPath); } });
+				items.push_back({ Wui::Tr("panel.content_browser.item.delete", "Delete"),
+					[this] { m_Model.ShowDeleteModal = true; } });
+			}
+			else
+			{
+				items = {
+					{ "Open", [this] { OpenItem(m_Model.ContextMenuPath); } },
+					{ "Cut", [this] { Cut(); } },
+					{ "Copy", [this] { Copy(); } },
+					{ "Paste", [this] { PasteInto(std::filesystem::is_directory(m_Model.ContextMenuPath) ? m_Model.ContextMenuPath : m_Model.Current); } },
+					{ "Rename", [this, single] { if (single && m_Ctx) StartRename(*m_Ctx, m_Model.ContextMenuPath); } },
+					{ "Open in Explorer", [this] { OpenInExplorer(m_Model.ContextMenuPath); } },
+					{ "Delete", [this] { m_Model.ShowDeleteModal = true; } },
+				};
+			}
 			// 右键菜单走组件(ContextMenu):位置钉住 + 外部点击/Esc 关闭统一处理。
 			Wui::WuiRect menuPanel;
 			if (Wui::BeginContextMenu(ctx, popup, m_Model.ContextMenuPos, 180.0f, items.size(), &menuPanel, theme))

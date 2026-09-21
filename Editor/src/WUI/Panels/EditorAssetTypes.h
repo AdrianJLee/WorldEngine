@@ -16,6 +16,7 @@ namespace World
 		Material,
 		Model,          // .wmodel(引擎原生模型资产)
 		ModelSource,    // .gltf/.glb(源资产;双击 = 导入 + 打开预览)
+		Prefab,         // .wprefab(可复用实体子树;双击 = 打开编辑)
 		Texture,
 		Script,
 		Folder,
@@ -48,6 +49,8 @@ namespace World
 			return { EditorAssetKind::Model, "Model" };
 		if (extension == ".gltf" || extension == ".glb")
 			return { EditorAssetKind::ModelSource, "glTF Source" };
+		if (extension == ".wprefab")
+			return { EditorAssetKind::Prefab, "Prefab" };
 		if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".tga")
 			return { EditorAssetKind::Texture, "Texture" };
 		if (extension == ".lua" || extension == ".luau")

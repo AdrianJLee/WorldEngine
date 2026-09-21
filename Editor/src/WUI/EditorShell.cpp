@@ -32,6 +32,9 @@ namespace World
 {
 	namespace
 	{
+		// P4-U13:prefab 编辑横幅的行高(激活时它占一行,停靠区整体下移同样高度)。
+		constexpr float kPrefabBarHeight = 26.0f;
+
 		// P4-UX10:状态栏提示的计时(悬停暂停/移出宽限/淡出都要秒级精度)。
 		double ShellNowSeconds()
 		{
@@ -512,6 +515,78 @@ namespace World
 		m_Editor.OpenScene(path);
 	}
 
+	void EditorShell::OpenPrefabEditor(const std::string& logicalPath)
+	{
+		m_Editor.OpenPrefab(logicalPath);
+	}
+
+	bool EditorShell::InstantiatePrefabAsset(const std::string& logicalPath, std::string* message)
+	{
+		return m_Editor.InstantiatePrefabAsset(logicalPath, message);
+	}
+
+	bool EditorShell::IsEditingPrefabDocument() const
+	{
+		return m_Editor.IsEditingPrefab();
+	}
+
+	bool EditorShell::SavePrefabDocument(std::string* message)
+	{
+		if (!m_Editor.IsEditingPrefab())
+		{
+			if (message) *message = "not editing a prefab";
+			return false;
+		}
+		const std::string logical = m_Editor.PrefabEditLogical();
+		if (!m_Editor.SavePrefab())
+		{
+			if (message) *message = "failed to save " + logical;
+			return false;
+		}
+		if (message) *message = "saved " + logical;
+		return true;
+	}
+
+	bool EditorShell::ClosePrefabDocument()
+	{
+		if (!m_Editor.IsEditingPrefab())
+			return false;
+		m_Editor.ClosePrefab();
+		return true;
+	}
+
+	// P4-U13:prefab 编辑横幅 —— 常驻一条,把"你正在改的是资产"写在最显眼处,
+	// 保存与返回各一个按钮(破坏性/离开语义一眼可见)。
+	void EditorShell::DrawPrefabBar(Wui::WuiContext& ctx, float y)
+	{
+		const glm::vec2 viewport = ctx.ViewportSize();
+		const Wui::WuiRect bar { 0.0f, y, viewport.x, kPrefabBarHeight };
+		// 底色比面板头略暖一档 + 左侧 3px 强调条:和普通工具栏区分开(状态,不是工具)。
+		Wui::BarSurface(ctx, bar, m_Theme.PanelHeader, m_Theme.Border);
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { bar.X, bar.Y, 3.0f, bar.H },
+			m_Theme.Accent, 0.0f });
+		const std::string name = std::filesystem::path(m_Editor.PrefabEditLogical()).filename().string();
+		Wui::Label(ctx, { 12.0f, bar.Y + 5.0f },
+			Wui::Tr("shell.prefab.editing", "Editing Prefab: ") + name, m_Theme.Text, 13.0f);
+		Wui::Label(ctx, { 12.0f + ctx.MeasureTextWidth(
+			Wui::Tr("shell.prefab.editing", "Editing Prefab: ") + name, 13.0f) + 10.0f, bar.Y + 6.0f },
+			Wui::Tr("shell.prefab.hint", "Saving writes the asset; Back returns to the scene."),
+			m_Theme.TextMuted, 11.0f);
+
+		const Wui::WuiRect back { viewport.x - 190.0f, bar.Y + 3.0f, 86.0f, bar.H - 6.0f };
+		const Wui::WuiRect save { viewport.x - 98.0f, bar.Y + 3.0f, 90.0f, bar.H - 6.0f };
+		if (Wui::Button(ctx, Wui::HashId("shell.prefab.back"), back,
+			Wui::Tr("shell.prefab.back", "Back to Scene"), m_Theme))
+			m_Editor.ClosePrefab();
+		Wui::Tooltip(ctx, back, Wui::Tr("shell.prefab.back.tooltip",
+			"Return to the scene you were editing before (unsaved prefab changes stay in the document)."));
+		if (Wui::Button(ctx, Wui::HashId("shell.prefab.save"), save,
+			Wui::Tr("shell.prefab.save", "Save Prefab"), m_Theme))
+			m_Editor.SavePrefab();
+		Wui::Tooltip(ctx, save, Wui::Tr("shell.prefab.save.tooltip",
+			"Write the document back to this .wprefab (Ctrl+S does the same)."));
+	}
+
 	// ---- ViewportHost ----
 
 	bool EditorShell::HasRenderedScene() const
@@ -928,7 +1003,10 @@ namespace World
 		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
 		// 停靠区(而不是只切分鼠标所在的面板组)。需在渲染面板前判定,以便
 		// RenderTabs 跳过面板内的落区逻辑。
-		const float editorTop = 26.0f + m_AttachBarHeight;
+		// P4-U13:prefab 编辑会话期间多一行横幅(在菜单栏下面),停靠区整体让出这一行。
+		const bool prefabEditActive = m_Editor.IsEditingPrefab();
+		const float prefabBarHeight = prefabEditActive ? kPrefabBarHeight : 0.0f;
+		const float editorTop = 26.0f + m_AttachBarHeight + prefabBarHeight;
 		// P4-UX6:底部留出状态栏(场景/选择/后端/帧率)——面板不再压到它上面。
 		constexpr float statusBarHeight = 22.0f;
 		const Wui::WuiRect statusBar { 0, viewport.y - statusBarHeight, viewport.x, statusBarHeight };
@@ -1181,6 +1259,9 @@ namespace World
 		DrawMenuBar(ctx);
 		// 挂靠栏:横条形式(排在菜单栏下方),独立窗口可挂靠至此。
 		DrawAttachBar(ctx);
+		// P4-U13:prefab 编辑横幅(菜单栏之下、停靠区之上;激活时才存在这一行)。
+		if (prefabEditActive)
+			DrawPrefabBar(ctx, 26.0f + m_AttachBarHeight);
 
 		// D10-11/D10-15:模态绘制前解除遮挡(对话框自身要能命中);画完再清一次,
 		// 确保本帧结束时不留 blocker(下一帧开帧也会清,这里是双保险)。

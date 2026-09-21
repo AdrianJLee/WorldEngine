@@ -56,6 +56,16 @@ namespace World
 		// 未注册材质面板时为空实现(不影响其它面板)。
 		virtual void OpenMaterialEditor(const std::string& path) {}
 		// ---- W8:脚本面板(Panels/ScriptsPanel)协作;默认空实现 = 宿主未接线 ----
+		// P4-U13:prefab 资产(内容浏览器双击/右键共用)。
+		// 打开编辑:把 .wprefab 当**文档**打开(顶部横幅标明"正在编辑 Prefab",保存 = 写回资产)。
+		virtual void OpenPrefabEditor(const std::string& logicalPath) { (void)logicalPath; }
+		// 实例化到当前场景(世界原点;成功时选中实例根并标脏)。失败给出可读原因。
+		virtual bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr)
+		{
+			(void)logicalPath;
+			if (message) *message = "prefab instantiate is not wired to a host";
+			return false;
+		}
 		// 重载一个场景脚本实例。实现必须复用 EditorLayer::ReloadLuaScriptComponent ——
 		// 与属性面板 Reload 按钮、帧边界轮询、AI script.reload 同一条入口,面板不自己编排重载。
 		virtual bool ScriptsReloadInstance(entt::entity handle, std::string* message = nullptr)

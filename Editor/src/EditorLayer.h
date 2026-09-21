@@ -36,6 +36,16 @@ namespace World
 		void OpenScene();
 		void OpenScene(const std::filesystem::path& path);
 		bool SaveScene();
+		// ---- P4-U13:prefab 文档编辑会话 ----
+		// 打开编辑:把 .wprefab 当文档打开(记住进来之前的场景);保存 = 写回该 prefab;
+		// 返回 = 重新打开原来的场景。逻辑路径相对内容根(与内容浏览器同一约定)。
+		void OpenPrefab(const std::string& logicalPath);
+		bool SavePrefab();
+		void ClosePrefab();
+		bool IsEditingPrefab() const { return !m_PrefabEditLogical.empty(); }
+		const std::string& PrefabEditLogical() const { return m_PrefabEditLogical; }
+		// 实例化到当前场景(世界原点);成功时选中实例根并标脏。
+		bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr);
 		void StartCookingAction();
 		void GenerateLuaStubsAction();
 		void CloseAction();
@@ -174,6 +184,7 @@ namespace World
 		std::string CurrentDocumentLogicalPath() const;
 		void DoNewScene();
 		void DoOpenScene(const std::filesystem::path& path);
+		void DoOpenPrefab(const std::string& logicalPath);
 		bool TrySave();
 		void RequestAction(std::function<void()> action);
 		void ProcessPendingRendererChange();
@@ -284,6 +295,11 @@ namespace World
 		AssetFileWatch m_SceneWatch;
 		// 当前监听的文档场景逻辑路径(空 = 未监听);镜像它以便换文档时重设基线。
 		std::string m_WatchedSceneLogicalPath;
+		// P4-U13:prefab 编辑会话 —— 正在编辑的 prefab 逻辑路径(空 = 普通场景文档)
+		// 与"进来之前那个场景"的绝对路径(返回时重新打开它)。
+		std::string m_PrefabEditLogical;
+		std::filesystem::path m_SceneBeforePrefab;
+		bool m_HadSceneBeforePrefab = false;
 		bool m_ExternalSceneChanged = false;
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;

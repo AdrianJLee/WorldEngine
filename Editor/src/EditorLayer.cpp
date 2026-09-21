@@ -11,6 +11,7 @@
 #include "World/Core/Vfs/DirectoryProvider.h"
 #include "World/Core/Vfs/PackageProvider.h"
 #include "World/Gameplay/ModelInstance.h"
+#include "World/Gameplay/Prefab.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/AnimationSystem.h"
@@ -1018,11 +1019,101 @@ namespace World
 	}
 	bool EditorLayer::SaveScene()
 	{
+		// P4-U13:prefab 会话里 Ctrl+S = 写回那个 .wprefab(而不是场景)。
+		if (IsEditingPrefab())
+			return SavePrefab();
 		if (TrySave())
 			return true;
 		if (!m_Document.GetLastError().empty())
 			ShowError(m_Document.GetLastError());
 		return false;
+	}
+
+	// ---- P4-U13:prefab 文档编辑会话 ----
+	//
+	// 交互设计(工业引擎同款):双击 .wprefab = 打开编辑(把它当文档),编辑期间顶部有一条
+	// 常驻横幅说明"你在改的是资产、不是场景",保存写回资产、返回恢复原来的场景。
+	// 文件格式与场景同构(同一个序列化器),因此这里直接复用文档的加载/保存通道。
+	void EditorLayer::OpenPrefab(const std::string& logicalPath)
+	{
+		if (logicalPath.empty())
+			return;
+		RequestAction([this, logicalPath]() { DoOpenPrefab(logicalPath); });
+	}
+
+	void EditorLayer::DoOpenPrefab(const std::string& logicalPath)
+	{
+		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH)) / logicalPath;
+		// 记住"进来之前的场景":返回时原样重开(没有就在返回时给一个空场景)。
+		if (!IsEditingPrefab())
+		{
+			m_SceneBeforePrefab = m_Document.GetPath();
+			m_HadSceneBeforePrefab = m_Document.HasPath();
+		}
+		if (!m_Document.LoadFromFile(absolute))
+		{
+			ShowError(m_Document.GetLastError());
+			return;
+		}
+		m_PrefabEditLogical = logicalPath;
+		SetSceneState(SceneState::Edit);
+		UpdateSceneContext(m_Document.GetScene());
+		RebaselineExternalSceneWatch();
+		WLD_CORE_INFO("[prefab] editing '{0}' (save writes back to the asset)", logicalPath);
+	}
+
+	bool EditorLayer::SavePrefab()
+	{
+		if (!IsEditingPrefab())
+			return false;
+		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH)) / m_PrefabEditLogical;
+		if (!m_Document.SaveTo(absolute))
+		{
+			ShowError(m_Document.GetLastError());
+			WLD_CORE_WARN("[prefab] save failed: {0}", m_Document.GetLastError());
+			return false;
+		}
+		WLD_CORE_INFO("[prefab] saved '{0}'", m_PrefabEditLogical);
+		return true;
+	}
+
+	void EditorLayer::ClosePrefab()
+	{
+		if (!IsEditingPrefab())
+			return;
+		const std::string logical = m_PrefabEditLogical;
+		const std::filesystem::path previous = m_SceneBeforePrefab;
+		const bool hadPrevious = m_HadSceneBeforePrefab;
+		m_PrefabEditLogical.clear();
+		m_SceneBeforePrefab.clear();
+		m_HadSceneBeforePrefab = false;
+		WLD_CORE_INFO("[prefab] leaving prefab edit session '{0}'", logical);
+		if (hadPrevious && !previous.empty())
+			DoOpenScene(previous);
+		else
+			DoNewScene();
+	}
+
+	bool EditorLayer::InstantiatePrefabAsset(const std::string& logicalPath, std::string* message)
+	{
+		if (!m_ActiveScene || logicalPath.empty())
+		{
+			if (message) *message = "no active scene";
+			return false;
+		}
+		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH)) / logicalPath;
+		const Gameplay::PrefabInstanceResult result =
+			Gameplay::InstantiateFromFile(absolute, *m_ActiveScene, entt::null);
+		if (!result.IsValid())
+		{
+			if (message) *message = "prefab instantiate failed: " + logicalPath;
+			return false;
+		}
+		m_SelectedEntity = result.Root;
+		MarkDocumentDirty();
+		if (message)
+			*message = "已实例化 " + std::to_string(result.EntityCount) + " 个实体: " + logicalPath;
+		return true;
 	}
 	void EditorLayer::StartCookingAction()
 	{

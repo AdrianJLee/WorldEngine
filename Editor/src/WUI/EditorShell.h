@@ -143,6 +143,13 @@ namespace World
 			std::string* message = nullptr, std::string* outLogicalModel = nullptr) override;
 		// P1b D5:打开模型预览(每个 .wmodel 一个独立窗口;**只读预览,不改场景**)。
 		void OpenModelPreview(const std::string& logicalPath) override;
+		// P4-U13:prefab(内容浏览器双击 = 打开编辑;右键 = 实例化到当前场景)。
+		void OpenPrefabEditor(const std::string& logicalPath) override;
+		bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr) override;
+		// P4-U13:prefab 编辑会话(横幅按钮 / AI 通道共用)。
+		bool IsEditingPrefabDocument() const;
+		bool SavePrefabDocument(std::string* message = nullptr);
+		bool ClosePrefabDocument();
 		// D10:把"选导入位置"交给内容浏览器(引擎内树状选择器,范围限定内容根内)。
 		void RequestImportDestination(const std::string& sourcePath) override;
 		// P4-UX16:面板级短提示统一进状态栏(见 PushNotice 的 4s/悬停冻结/移开宽限节奏)。
@@ -232,6 +239,8 @@ namespace World
 
 		// 菜单 / 模态 / 布局
 		void DrawMenuBar(Wui::WuiContext& ctx);
+		// P4-U13:prefab 编辑横幅(顶部一条,标明"在改资产";右侧 保存 / 返回场景)。
+		void DrawPrefabBar(Wui::WuiContext& ctx, float y);
 		void DrawModals(Wui::WuiContext& ctx);
 		// D10-10/D10-11(用户 2026-09-19):导入位置选择器是**窗口级模态** —— shell 自己持有
 		// 源路径/选中目录/状态/展开集合/滚动;外框(居中/遮罩/标题栏/Esc)与按钮条走
