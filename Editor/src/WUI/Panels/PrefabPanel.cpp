@@ -7,6 +7,7 @@
 #include "World/Core/KeyCodes.h"
 #include "World/Gameplay/Prefab.h"
 #include "World/Gameplay/PrefabTypes.h"
+#include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/SceneSerializer.h"
@@ -25,6 +26,7 @@
 #include <ctime>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 
@@ -44,6 +46,33 @@ namespace World
 		// 就地编辑的行距/控件尺寸(与属性面板同一密度)。
 		constexpr float kFieldRowHeight = 22.0f;
 		constexpr float kReadOnlyLineHeight = 16.0f;
+		// P4-U13f:预览离屏目标的长边范围(等比缩放;4K 窗口不把预览拖成大目标)。
+		constexpr float kPreviewTargetMaxSide = 2048.0f;
+		constexpr float kPreviewTargetMinSide = 128.0f;
+		// 轨道旋转的俯仰限位:±89°(用户口径;留 1° 余量避免视线与上方向共线时 lookAt 退化)。
+		constexpr float kPreviewPitchLimit = 1.55334f;
+
+		// P4-U13f:SceneRenderer 的离屏目标尺寸 = OnResize 请求尺寸 × rendering.render_scale,
+		// 所以"要 target 像素"必须反算请求值。lround 取整会让个别 (target, scale) 组合差 1 像素,
+		// 在 ±3 里挑误差最小的请求值 —— 预览不跟着场景分辨率倍率降采样。
+		uint32_t RequestedExtentForTarget(uint32_t target, float renderScale)
+		{
+			const float scale = renderScale > 0.0f ? renderScale : 1.0f;
+			const long base = std::max(1L, std::lround(static_cast<double>(target) / scale));
+			long best = base;
+			long bestError = std::numeric_limits<long>::max();
+			for (long candidate = std::max(1L, base - 3); candidate <= base + 3; ++candidate)
+			{
+				const long error = std::labs(std::lround(static_cast<double>(candidate) * scale)
+					- static_cast<long>(target));
+				if (error < bestError || (error == bestError && candidate < best))
+				{
+					bestError = error;
+					best = candidate;
+				}
+			}
+			return static_cast<uint32_t>(best);
+		}
 
 		double NowSeconds()
 		{
@@ -1048,7 +1077,9 @@ namespace World
 		m_PreviewGpuDevice = device.get();
 		m_PreviewRenderer = CreateRef<SceneRenderer>();
 		m_PreviewRenderer->Init();
-		m_PreviewRenderer->OnResize(m_PreviewSize, m_PreviewSize);
+		// 新设备的目标尺寸由 UpdatePreviewTargetSize 按当前预览区重算(Init 的默认
+		// 1280×720 只是占位;这一帧就会换成预览区的物理像素尺寸)。
+		m_PreviewSizeDirty = true;
 	}
 
 	void PrefabPanel::ReleasePreviewResources()
@@ -1059,9 +1090,54 @@ namespace World
 			m_PreviewRenderer.reset();
 		}
 		m_PreviewGpuDevice = nullptr;
+		m_PreviewSizeDirty = true;
 		// 注册表里那条纹理还指向已释放的设备资源:下一帧按新句柄 Update(或重登记)。
 		m_PreviewTextureHandle = nullptr;
 		m_UiTextureGeneration = 0;
+	}
+
+	// P4-U13f:目标尺寸 = 预览区物理像素(设计单位 × UiScale),长边 [128, 2048] 等比 clamp;
+	// 只在矩形/倍率真的换了之后才 OnResize(逐帧路径不产生任何资源操作)。
+	void PrefabPanel::UpdatePreviewTargetSize(const Wui::WuiRect& view)
+	{
+		if (!m_PreviewRenderer)
+			return;
+		const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+		const float pixelW = std::max(1.0f, view.W * uiScale);
+		const float pixelH = std::max(1.0f, view.H * uiScale);
+		const float longSide = std::max(pixelW, pixelH);
+		float clampScale = 1.0f;
+		if (longSide > kPreviewTargetMaxSide)
+			clampScale = kPreviewTargetMaxSide / longSide;
+		else if (longSide < kPreviewTargetMinSide)
+			clampScale = kPreviewTargetMinSide / longSide;
+		const uint32_t desiredW = static_cast<uint32_t>(
+			std::max(1.0f, std::round(pixelW * clampScale)));
+		const uint32_t desiredH = static_cast<uint32_t>(
+			std::max(1.0f, std::round(pixelH * clampScale)));
+
+		// rendering.render_scale 只该缩放场景目标(视口/运行时窗口),预览按物理像素 1:1;
+		// 这里把倍率从请求尺寸里除回去 —— 设置里改倍率不会把预览也降分辨率。
+		const float renderScale = std::clamp(RenderSettings::RenderScale(),
+			Asset::RenderingSettings::MinRenderScale, Asset::RenderingSettings::MaxRenderScale);
+		const uint32_t requestedW = RequestedExtentForTarget(desiredW, renderScale);
+		const uint32_t requestedH = RequestedExtentForTarget(desiredH, renderScale);
+		m_PreviewUiScale = uiScale;
+		m_PreviewRenderScale = renderScale;
+		if (!m_PreviewSizeDirty && requestedW == m_PreviewRequestedW
+			&& requestedH == m_PreviewRequestedH)
+			return;
+
+		m_PreviewSizeDirty = false;
+		m_PreviewRequestedW = requestedW;
+		m_PreviewRequestedH = requestedH;
+		m_PreviewRenderer->OnResize(requestedW, requestedH);
+		m_PreviewTargetW = std::max(1u, m_PreviewRenderer->GetWidth());
+		m_PreviewTargetH = std::max(1u, m_PreviewRenderer->GetHeight());
+		WLD_CORE_INFO("[prefab] preview target {0}x{1} (view {2:.0f}x{3:.0f} design, uiScale={4:.2f}, "
+			"renderScale={5:.2f}, requested={6}x{7})",
+			m_PreviewTargetW, m_PreviewTargetH, view.W, view.H, uiScale, renderScale,
+			requestedW, requestedH);
 	}
 
 	void PrefabPanel::PreviewFocusBounds(glm::vec3* center, float* radius) const
@@ -1159,7 +1235,8 @@ namespace World
 		const glm::mat4 view = glm::lookAt(eye, m_Focus, glm::vec3(0.0f, 1.0f, 0.0f));
 		SceneCamera camera;
 		camera.SetProjectionType(SceneCamera::ProjectionType::Perspective);
-		camera.SetViewportSize(m_PreviewSize, m_PreviewSize);
+		// 相机宽高比 = 离屏目标宽高比 = 预览区宽高比 → 物体在预览区里不会被拉扁。
+		camera.SetViewportSize(m_PreviewTargetW, m_PreviewTargetH);
 		camera.SetPerspectiveFOV(40.0f);
 		camera.SetPerspectiveNearClip(std::max(0.01f, distance * 0.01f));
 		camera.SetPerspectiveFarClip(distance * 4.0f + 100.0f);
@@ -1200,13 +1277,23 @@ namespace World
 		if (view.W <= 8.0f || view.H <= 8.0f)
 			return;
 
+		// P4-U13f:目标尺寸跟着矩形走(窗口缩放/分离/挂靠/分栏都换矩形,这里每帧核对重建)。
+		EnsurePreviewResources();
+		UpdatePreviewTargetSize(view);
 		const uint64_t textureId = RenderPreview();
 		const std::string reason = textureId != 0 ? std::string() : PreviewUnavailableReason();
 		if (textureId != 0)
 		{
-			Wui::Image(ctx, view, textureId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+			// 贴图按**物理像素网格**对齐:目标尺寸 = 这段物理尺寸时,每个屏幕像素正好采样
+			// 一个纹素(1:1),线性过滤也不会糊(旧实现是 320×320 放大到整块预览区)。
+			const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+			const Wui::WuiRect pixelView {
+				std::round(view.X * uiScale) / uiScale,
+				std::round(view.Y * uiScale) / uiScale,
+				static_cast<float>(std::lround(view.W * uiScale)) / uiScale,
+				static_cast<float>(std::lround(view.H * uiScale)) / uiScale };
+			Wui::Image(ctx, pixelView, textureId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
 			// 轨道旋转(拖拽)/ 滚轮缩放 / 双击或 F 取景(与模型预览同一套手感)。
-			ctx.SetCursor(Wui::WuiCursor::Arrow);
 			if (ctx.Input().Wheel != 0.0f && ctx.IsHovered(view))
 			{
 				const float step = std::max(0.05f, m_CameraDistance * 0.1f);
@@ -1223,37 +1310,59 @@ namespace World
 				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
 				m_LastMouse = ctx.Input().MousePos;
 				m_OrbitYaw -= delta.x * 0.01f;
-				m_OrbitPitch = std::clamp(m_OrbitPitch + delta.y * 0.01f, -1.45f, 1.45f);
+				m_OrbitPitch = std::clamp(m_OrbitPitch + delta.y * 0.01f,
+					-kPreviewPitchLimit, kPreviewPitchLimit);
 			}
 			if (m_Orbiting && !ctx.Input().MouseDown[0])
 				m_Orbiting = false;
 			if (ctx.IsDoubleClicked(view) || (ctx.IsHovered(view) && ctx.WasKeyPressed(KeyCodes::F)))
 				FramePreview();
+			if (ctx.IsHovered(view))
+				ctx.SetCursor(m_Orbiting ? Wui::WuiCursor::Hand : Wui::WuiCursor::Arrow);
 		}
 		else
 		{
 			// 不留黑块:区里写可读原因(与模型预览同一条约定)。
 			Wui::Label(ctx, { view.X + 8.0f, view.Y + 8.0f }, TruncateUtf8(reason, 160), theme.TextMuted, 12.0f);
 		}
-		const std::string hint = Wui::Tr("panel.prefab.preview.hint", "Drag = orbit, wheel = zoom, F = frame");
+		// 角标:实际离屏目标分辨率(与模型预览面板底角的 "384px" 同一口径,便于核对清晰度)。
+		const std::string targetLabel = std::to_string(m_PreviewTargetW) + "×"
+			+ std::to_string(m_PreviewTargetH) + "px";
+		const float targetLabelW = ctx.MeasureTextWidth(targetLabel, 10.0f);
+		Wui::Label(ctx, { view.X + std::max(4.0f, view.W - targetLabelW - 6.0f),
+			view.Y + view.H - 15.0f }, targetLabel, theme.TextDisabled, 10.0f);
+		const std::string hint = Wui::Tr("panel.prefab.preview.hint",
+			"Drag = orbit, wheel = zoom, double-click or F = frame");
 		Wui::Label(ctx, { view.X + 6.0f, view.Y + view.H - 15.0f }, TruncateUtf8(hint, 60),
 			theme.TextDisabled, 11.0f);
 		Wui::Tooltip(ctx, view, hint);
 
-		// 无障碍:预览区(prefab.preview)+ 操作提示(prefab.preview.hint)+ 相机状态。
+		// 无障碍:预览区(prefab.preview)+ 操作提示 + 相机状态 + 目标尺寸读数。
 		RegisterNode(Wui::HashId("prefab.preview"), "image", view,
 			Wui::Tr("panel.prefab.preview", "Preview"),
 			textureId != 0 ? ("3D preview of " + m_LogicalPath) : reason, textureId != 0, hint, false);
 		RegisterNode(Wui::HashId("prefab.preview.hint"), "text",
 			{ view.X + 4.0f, view.Y + view.H - 16.0f, std::max(0.0f, view.W - 8.0f), 14.0f },
-			Wui::Tr("panel.prefab.preview.hint", "Drag = orbit, wheel = zoom, F = frame"), hint, true,
-			hint, false);
-		char cameraText[96] = {};
-		std::snprintf(cameraText, sizeof(cameraText), "yaw=%.2f pitch=%.2f dist=%.2f focus=%.2f,%.2f,%.2f",
-			m_OrbitYaw, m_OrbitPitch, m_CameraDistance, m_Focus.x, m_Focus.y, m_Focus.z);
+			Wui::Tr("panel.prefab.preview.hint", "Drag = orbit, wheel = zoom, double-click or F = frame"),
+			hint, true, hint, false);
+		char cameraText[192] = {};
+		std::snprintf(cameraText, sizeof(cameraText),
+			"yaw=%.2f pitch=%.2f pitchLimitDeg=89 dist=%.3f minDist=%.3f maxDist=%.3f focus=%.2f,%.2f,%.2f",
+			m_OrbitYaw, m_OrbitPitch, m_CameraDistance, m_MinDistance, m_MaxDistance,
+			m_Focus.x, m_Focus.y, m_Focus.z);
 		RegisterNode(Wui::HashId("prefab.preview.camera"), "text",
 			{ view.X + 4.0f, view.Y + 4.0f, std::max(0.0f, view.W - 8.0f), 14.0f },
 			Wui::Tr("panel.prefab.preview.camera", "Preview camera"), cameraText, true, cameraText, false);
+		// P4-U13f:目标尺寸读数(脚本断言 + 排查"预览糊不糊"的第一手数字)。
+		char targetText[192] = {};
+		std::snprintf(targetText, sizeof(targetText),
+			"target=%ux%u view=%.0fx%.0f renderScale=%.2f uiScale=%.2f requested=%ux%u",
+			m_PreviewTargetW, m_PreviewTargetH, view.W, view.H, m_PreviewRenderScale,
+			m_PreviewUiScale, m_PreviewRequestedW, m_PreviewRequestedH);
+		RegisterNode(Wui::HashId("prefab.preview.target"), "text",
+			{ view.X + 4.0f, view.Y + 18.0f, std::max(0.0f, view.W - 8.0f), 14.0f },
+			Wui::Tr("panel.prefab.preview.target", "Preview render target"), targetText, true,
+			targetText, false);
 	}
 
 	void PrefabPanel::DrawEntityTree(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)

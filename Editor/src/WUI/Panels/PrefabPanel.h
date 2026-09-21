@@ -110,6 +110,10 @@ namespace World
 		// 把句柄放掉(见 ModelPreviewPanel 的同款说明)。
 		void EnsurePreviewResources();
 		void ReleasePreviewResources();
+		// P4-U13f:预览离屏目标 = 预览区**物理像素**尺寸(设计单位 × UiScale),长边按
+		// [128, 2048] 等比 clamp;每帧调用,矩形变化(窗口缩放/分离/挂靠/分栏)就重建目标。
+		// 旧实现固定 320×320 再放大到整块预览区 —— 这就是用户看到的"非常模糊"。
+		void UpdatePreviewTargetSize(const Wui::WuiRect& view);
 		// 渲染预览到离屏目标并登记成 WUI 纹理;返回 0 = 不可用(调用方画可读原因)。
 		uint64_t RenderPreview();
 		// 取景:把轨道相机对到 staging 场景的包围盒上(首次自动 / 双击 / `F` / 头部按钮)。
@@ -176,7 +180,15 @@ namespace World
 		uint64_t m_PreviewTextureId = 0;
 		const void* m_PreviewTextureHandle = nullptr;
 		uint32_t m_UiTextureGeneration = 0;
-		uint32_t m_PreviewSize = 320;
+		// P4-U13f:离屏目标的真实尺寸(物理像素)/ 交给 SceneRenderer::OnResize 的请求尺寸
+		// (两者在 rendering.render_scale ≠ 1 时不同:请求值 = 目标值 ÷ 倍率)。
+		uint32_t m_PreviewTargetW = 320;
+		uint32_t m_PreviewTargetH = 320;
+		uint32_t m_PreviewRequestedW = 320;
+		uint32_t m_PreviewRequestedH = 320;
+		float m_PreviewUiScale = 1.0f;
+		float m_PreviewRenderScale = 1.0f;
+		bool m_PreviewSizeDirty = true;
 		bool m_PreviewFramed = false;
 		bool m_Orbiting = false;
 		float m_OrbitYaw = 0.6f;
