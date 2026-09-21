@@ -467,6 +467,8 @@
   "viewport.overlays.light_ranges.tooltip": "画光源范围:点光 = Range 球(三个大圆),平行光 = Direction 箭头。\n关 = 只画选中实体。",
   "viewport.overlays.collider_outlines.tooltip": "编辑期画碰撞体形状(2D 矩形/圆、3D 盒/球/胶囊)。\n关 = 只画选中实体。MeshCollider3D 没有解析形状,不画。",
   "panel.properties.add.search_hint": "搜索组件…",
+  "panel.properties.add.all": "全部",
+  "panel.properties.add.scroll": "滚动",
   "panel.properties.add.recent": "最近使用",
   "panel.properties.add.uncategorized": "未分类",
   "panel.properties.add.empty": "没有匹配的组件(换个关键词试试)",

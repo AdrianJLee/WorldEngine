@@ -36,6 +36,9 @@ namespace World::Wui
 		// 而 keybd_event 合成的 Ctrl **到不了 WUI 的输入状态**(两次实测),所以组合键只能
 		// 从这里注入 —— 否则"框内 Ctrl+A"这类作用域问题永远只能靠人眼观察。
 		void QueueKey(const std::string& windowKey, uint32_t keyCode, bool ctrl = false, bool shift = false);
+		// 注入一次滚轮(第 1 帧写 MousePos + Wheel,下一帧自动清掉)。滚动区/列表的
+		// "滚不动"类问题只能靠滚轮复现 —— 键盘 ↑/↓ 与拖动滚动条是另外两条路径,不能互相证明。
+		void QueueWheel(const std::string& windowKey, glm::vec2 position, float wheel);
 		// 是否还有待注入事件(供自动化等待"注入被消费")。
 		bool HasPending() const;
 		// 每个窗口每帧调用一次:把待注入事件写进该窗口的输入状态。
@@ -56,6 +59,9 @@ namespace World::Wui
 			int KeyPhase = 0;
 			bool KeyCtrl = false;
 			bool KeyShift = false;
+			// 滚轮注入(0 = 无;>0 = 还剩几帧要写 Wheel)。
+			int WheelFrames = 0;
+			float Wheel = 0.0f;
 		};
 		std::unordered_map<std::string, Pending> m_Pending;
 	};

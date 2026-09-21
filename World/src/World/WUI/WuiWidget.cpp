@@ -237,6 +237,22 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Text, { textX, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 },
 			text, 0, 1.0f, Label, 15.0f, false });
 		PaintFocusRing(context);
+		// P4-U7:对象式按钮也要进无障碍树 —— 菜单栏 File/View/Window、工具条按钮此前
+		// 只登记焦点、不登记节点,"AI 通道点不开菜单"(也就无从验证菜单穿透)。
+		if (Id() != 0)
+		{
+			WuiAccessNode node;
+			node.Id = Id();
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = Label;
+			node.Rect = m_Rect;
+			node.Enabled = Enabled;
+			node.Interactive = Enabled;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
 		if (Enabled && hovered)
 			ctx.SetCursor(WuiCursor::Hand);
 		if (Enabled && (ctx.IsClicked(m_Rect) || keyActivated) && OnClick)
@@ -456,9 +472,9 @@ namespace World::Wui
 			node.Rect = m_Rect;
 			WuiAccessibility::Get().Register(node);
 		}
-		// P4-U6:有弹层打开时行不响应点击 —— 否则"点弹层"会穿透成"点下面的行"
-		// (弹层由后画的面板绘制,先画的面板无法在绘制期挡住它)。
-		if (!ctx.AnyPopupOpen() && ctx.IsClicked(m_Rect) && OnClick)
+		// P4-U7:穿透由 WuiContext 的输入捕获统一处理(捕获层 + 覆盖层矩形 + 打开即消费点击),
+		// 这里不再加"有弹层就全禁"的局部补丁(那会连弹层外的行一起挡掉)。
+		if (ctx.IsClicked(m_Rect) && OnClick)
 			OnClick();
 	}
 

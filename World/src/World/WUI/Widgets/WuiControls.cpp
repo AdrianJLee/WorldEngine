@@ -385,6 +385,8 @@ namespace World::Wui
 
 		ctx.PushOverlay();
 		DrawPanelSurface(ctx, panel, theme);
+		// P4-U7:登记覆盖层矩形 → 下一帧面板内容不会吃掉落在菜单上的点击。
+		ctx.RegisterOverlayRect(panel);
 		int chosen = -1;
 		for (size_t i = 0; i < Items.size(); ++i)
 		{

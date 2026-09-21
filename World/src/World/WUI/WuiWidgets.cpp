@@ -1203,7 +1203,12 @@ namespace World::Wui
 			// 或把弹层内点击误判成"外部点击"而关掉弹层。BeginFrame 每帧清空遮挡区,弹层开着
 			// 时这里每帧重新登记;弹层外不登记,既有"点击弹层外关闭"语义不变。
 			if (ctx.IsPopupOpen(id))
+			{
 				ctx.PushHoverBlocker(panel);
+				// P4-U7:同时登记为覆盖层矩形 → 下一帧它只挡**非覆盖层**控件,
+				// 先画的面板(或本面板更早绘制的行)也不会吃掉落在弹层上的点击。
+				ctx.RegisterOverlayRect(panel);
+			}
 			ctx.PopOverlay();
 		}
 		return changed;
@@ -1366,7 +1371,11 @@ namespace World::Wui
 		// 绘制的下层控件/面板在 HitTest 里判为未命中,光标与点击不再穿透弹层。顺序与 Combo
 		// 一致:必须在弹层自身命中测试与"点外关闭"之后登记。BeginFrame 每帧清空遮挡区。
 		if (ctx.IsPopupOpen(id))
+		{
 			ctx.PushHoverBlocker(panel);
+			// P4-U7:同时登记为覆盖层矩形 → 下一帧只挡非覆盖层控件。
+			ctx.RegisterOverlayRect(panel);
+		}
 		ctx.PopOverlay();
 		return changed;
 	}
@@ -1464,6 +1473,9 @@ namespace World::Wui
 			return false;
 		ctx.PushOverlay();
 		const glm::vec2 viewport = ctx.ViewportSize();
+		// P4-U7:模态遮罩盖住整个客户区 —— 登记为覆盖层矩形,下一帧下层控件不会
+		// 吃掉落在遮罩/模态上的点击(模态自己由外层 BeginModalInputBlock 再封一道)。
+		ctx.RegisterOverlayRect({ 0.0f, 0.0f, viewport.x, viewport.y });
 		const WuiRect centered { (viewport.x - size.x) * 0.5f, (viewport.y - size.y) * 0.5f, size.x, size.y };
 		if (panel)
 			*panel = centered;
@@ -1780,7 +1792,11 @@ namespace World::Wui
 		// 弹层打开期间登记悬停遮挡区(顺序与 Combo 一致:必须在弹层自身命中测试与"点外关闭"之后),
 		// 否则本帧之后绘制的下层控件会穿过弹层收到点击。
 		if (ctx.IsPopupOpen(id))
+		{
 			ctx.PushHoverBlocker(panel);
+			// P4-U7:同时登记为覆盖层矩形 → 下一帧只挡非覆盖层控件。
+			ctx.RegisterOverlayRect(panel);
+		}
 		ctx.PopOverlay();
 		return changed;
 	}

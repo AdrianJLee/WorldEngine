@@ -875,6 +875,9 @@ namespace World
 		panel.Y = std::max(clampArea.Y + 4.0f,
 			std::min(panel.Y, clampArea.Y + clampArea.H - panel.H - 4.0f));
 		Wui::DrawPanelSurface(ctx, panel, theme);
+		// P4-U7:子菜单往父菜单右侧伸出,父菜单矩形的遮挡区盖不住它 —— 子菜单矩形必须
+		// 自己登记(下一帧树/切片不会吃掉落在子菜单上的点击)。
+		ctx.RegisterOverlayRect(panel);
 
 		const std::string tooltip = Wui::Tr("panel.content_browser.new.tooltip", "Create in the current folder");
 		for (size_t index = 0; index < types.size(); ++index)
@@ -1713,6 +1716,8 @@ namespace World
 			};
 			ctx.PushOverlay();
 			Wui::DrawPanelSurface(ctx, menuRect, theme);
+			// P4-U7:登记为覆盖层矩形 → 下一帧只挡下层控件(树/切片不再吃掉菜单上的点击)。
+			ctx.RegisterOverlayRect(menuRect);
 			int hoveredIndex = -1;
 			auto item = [&](int index, const std::string& label, bool enabled, std::function<void()> action)
 			{
@@ -2164,6 +2169,8 @@ namespace World
 			// P4-UX16:新建收成一行 "New ▶"(清单来自注册表)+ Paste + Refresh。
 			const Wui::WuiRect menuPanel { m_Model.BlankMenuPos.x, m_Model.BlankMenuPos.y, 180, 3 * 24 + 8 };
 			DrawPanelSurface(ctx, menuPanel, theme);
+			// P4-U7:同上(空白右键菜单)。
+			ctx.RegisterOverlayRect(menuPanel);
 			const Wui::WuiRect newRow { menuPanel.X + 4, menuPanel.Y + 4, menuPanel.W - 8, 22 };
 			if (RenderNewAssetRow(ctx, Wui::HashId("browser.blank.new"), newRow, theme))
 				m_NewMenuOwner = (m_NewMenuOwner == 2) ? 0 : 2;

@@ -63,6 +63,11 @@ namespace World
 		// U6b:"添加组件"是**居中模态**(用户 2026-09-21:「为什么不弹出个居中窗口呢」)——
 		// 打开期间由宿主封锁整窗输入,面板自身在选中行后回车/点 Add 落地。
 		bool m_AddOpen = false;
+		// 左侧分类栏的当前过滤(空 = 全部);候选集里出现过的 CategoryPath。
+		// 语义:m_AddCategoryAll = 侧栏选中"全部";否则 m_AddCategoryFilter 为空表示"未分类",
+		// 非空表示该分类路径。
+		bool m_AddCategoryAll = true;
+		std::string m_AddCategoryFilter;
 		// 分区滚动布局(手工绘制/裁剪;滚动偏移按实体句柄持久化在 WuiContext::Persist)。
 		std::vector<SectionEntry> m_Sections;
 		std::vector<std::string> m_LastSchemaNames;
@@ -81,6 +86,9 @@ namespace World
 		int m_AddHighlight = -1;                     // 键盘高亮(候选项序号;-1 = 无 → Enter 取第一个)
 		bool m_AddListFocus = false;                 // Tab 是否停在列表侧
 		float m_AddScroll = 0.0f;                    // 列表内部滚动偏移
+		// 右侧滚动条的滑块拖动状态(与主滚动区同一套直接定位换算)。
+		bool m_AddThumbDragging = false;
+		float m_AddThumbGrabOffset = 0.0f;
 		std::string m_RevealSection;                 // 添加后要展开并滚到可见的分区(DisplayName)
 		int m_RevealFrames = 0;                      // 剩余强制滚动帧数(分区高度是上一帧实测值)
 		uint64_t m_AddOpenedFrame = 0;               // 打开的那一帧(同帧的按键不当作选择器输入)

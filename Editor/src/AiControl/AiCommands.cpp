@@ -340,6 +340,38 @@ namespace World
 				+ ") window=" + node->Window;
 			return true;
 		}
+		// P4-U7:滚轮注入。滚动区/列表"滚不动"这类问题只能靠滚轮复现(键盘与拖动滚动条
+		// 是另外两条路径,不能互相证明),所以通道必须能发滚轮。用法二选一:
+		//   {"cmd":"ui.wheel","id":<节点id>,"delta":1}      —— 坐标取该无障碍节点中心
+		//   {"cmd":"ui.wheel","window":"main","x":640,"y":400,"delta":2}
+		if (cmd == "ui.wheel")
+		{
+			std::string windowKey = args.count("window") ? arg("window") : "main";
+			glm::vec2 position { 0.0f, 0.0f };
+			if (args.count("x") || args.count("y"))
+			{
+				position.x = args.count("x") ? std::strtof(arg("x").c_str(), nullptr) : 0.0f;
+				position.y = args.count("y") ? std::strtof(arg("y").c_str(), nullptr) : 0.0f;
+			}
+			else
+			{
+				std::string message;
+				const Wui::WuiAccessNode* node = resolveNode(message);
+				if (!node)
+				{
+					error = message.empty() ? "ui.wheel needs id/label or x/y" : message;
+					return false;
+				}
+				position = { node->Rect.X + node->Rect.W * 0.5f, node->Rect.Y + node->Rect.H * 0.5f };
+				windowKey = node->Window;
+			}
+			const float delta = args.count("delta") ? std::strtof(arg("delta").c_str(), nullptr) : 1.0f;
+			Wui::WuiScriptedInput::Get().QueueWheel(windowKey, position, delta);
+			result = "queued wheel " + std::to_string(delta) + " at ("
+				+ std::to_string(static_cast<int>(position.x)) + "," + std::to_string(static_cast<int>(position.y))
+				+ ") window=" + windowKey;
+			return true;
+		}
 		// ---- W9-3:向文本控件注入真实键入(点击聚焦 → 下一帧起逐帧写入字符)----
 		if (cmd == "ui.type")
 		{

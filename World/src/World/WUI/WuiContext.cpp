@@ -145,6 +145,10 @@ namespace World::Wui
 		m_Commands.clear();
 		m_OverlayCommands.clear();
 		m_OverlayDepth = 0;
+		// P4-U7:点击消费标记每帧归零;上一帧登记的覆盖层矩形转为"只挡下层"的遮挡区。
+		m_PointerConsumedClick[0] = m_PointerConsumedClick[1] = m_PointerConsumedClick[2] = false;
+		m_UnderlayBlockers = std::move(m_OverlayRects);
+		m_OverlayRects.clear();
 		m_HoverBlockers.clear();
 		m_Tooltip.clear();
 		// 焦点顺序表每帧重建:上一帧的表挪到 Prev(Tab 顺序与"消失即失焦"都基于它)。
@@ -250,6 +254,13 @@ namespace World::Wui
 	{
 		if (!World::Wui::HitTest(rect, point))
 			return false;
+		// P4-U7:上一帧的覆盖层矩形(弹出菜单/下拉/模态外框)= 本帧的"下层遮挡区",
+		// 只挡**非覆盖层**控件(覆盖层自己照常命中)。立即模式里"后画的盖住先画的"
+		// 只对绘制成立,命中必须靠这一条补齐,否则"点菜单项 = 同时点到下面的按钮"。
+		if (m_OverlayDepth == 0)
+			for (const WuiRect& overlay : m_UnderlayBlockers)
+				if (overlay.Contains(point))
+					return false;
 		for (const WuiRect& blocker : m_HoverBlockers)
 			if (blocker.Contains(point))
 				return false;
@@ -344,10 +355,16 @@ namespace World::Wui
 
 	void WuiContext::OpenPopup(WuiId id)
 	{
-		if (std::find(m_OpenPopups.begin(), m_OpenPopups.end(), id) == m_OpenPopups.end())
+		const bool wasOpen = std::find(m_OpenPopups.begin(), m_OpenPopups.end(), id) != m_OpenPopups.end();
+		if (!wasOpen)
 		{
 			m_OpenPopups.push_back(id);
 			RecordOp("popup", "open", std::to_string(id), "");
+			// P4-U7:打开弹层的这一下点击**只归它** —— 同帧后面绘制的控件不再看到这次点击。
+			// 只在"从未打开 → 打开"的跃迁上消费,弹层开着时重复调用不会吞掉后续点击。
+			// 左键(点击式菜单/下拉)与右键(右键菜单)都要消费:右键菜单正是右键打开的。
+			ConsumePointerClick(0);
+			ConsumePointerClick(1);
 		}
 		m_PopupOpenFrame[id] = m_Frame;
 	}
@@ -372,7 +389,9 @@ namespace World::Wui
 	{
 		if (!m_Input.MouseClicked[0] && !m_Input.MouseClicked[1])
 			return false;
-		if (HitTest(ignoreRect, m_Input.MousePos))
+		// P4-U7:这里必须用**原始**矩形判定 —— 弹层自己算"内/外",不能被本帧的捕获层/
+		// 下层遮挡区挡住(否则"点在弹层内部"会被判成外部点击而误关)。
+		if (HitTestRaw(ignoreRect, m_Input.MousePos))
 			return false;
 		for (WuiId popup : popups)
 		{

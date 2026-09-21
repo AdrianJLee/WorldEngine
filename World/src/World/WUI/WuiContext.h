@@ -154,9 +154,36 @@ namespace World::Wui
 		const WuiInputState& Input() const { return m_Input; }
 		std::vector<WuiDrawCommand>& Commands() { return m_OverlayDepth > 0 ? m_OverlayCommands : m_Commands; }
 		const std::vector<WuiDrawCommand>& OverlayCommands() const { return m_OverlayCommands; }
-		// 进入/退出顶层绘制:弹出菜单、模态等画在普通 UI 之上。
+		// 进入/退出顶层绘制:弹出菜单、模态、tooltip、焦点环等画在普通 UI 之上。
+		// 只影响**绘制顺序**;命中由 RegisterOverlayRect(下一帧的矩形遮挡)+
+		// ConsumePointerClick(打开那一下的点击归属)负责 —— 不能让"画在上层"顺带
+		// 关掉后面所有控件的命中,否则面板中途画的 tooltip 也会把后面的控件打死。
 		void PushOverlay() { ++m_OverlayDepth; }
-		void PopOverlay() { if (m_OverlayDepth > 0) --m_OverlayDepth; }
+		void PopOverlay()
+		{
+			if (m_OverlayDepth > 0)
+				--m_OverlayDepth;
+		}
+		// P4-U7:登记一个**覆盖层矩形**(弹出菜单/下拉/模态外框)。它在下一帧变成"下层遮挡区":
+		// 只挡非覆盖层控件(m_OverlayDepth == 0),覆盖层自己不受影响 —— 这样"先画的面板"
+		// 也不会吃掉落在弹出层上的点击(菜单栏菜单、面板弹出菜单、下拉弹层都走这一条)。
+		// 立即模式里"后画的盖住先画的"只对绘制成立,命中必须靠这一条补齐。
+		// 覆盖层每帧打开时都要调(矩形可以逐帧变化);关闭当帧多挡一帧是无害的。
+		void RegisterOverlayRect(const WuiRect& rect) { m_OverlayRects.push_back(rect); }
+		// P4-U7:消费本帧的这次点击。凡是"打开弹出层/模态"的动作都该调用它 ——
+		// 否则打开用的那一下点击会继续被后面绘制的控件看到(实测:打开菜单那一下
+		// 同时按到了菜单项/底部按钮)。
+		void ConsumePointerClick(int button = 0)
+		{
+			if (button >= 0 && button < 3)
+				m_PointerConsumedClick[button] = true;
+		}
+		bool IsPointerClickConsumed(int button = 0) const
+		{
+			return button >= 0 && button < 3 && m_PointerConsumedClick[button];
+		}
+		// 不带任何"上层遮挡/捕获"判定的原始命中(弹出层的"点外关闭"用它:弹层自己算内外)。
+		bool HitTestRaw(const WuiRect& rect, glm::vec2 point) const { return World::Wui::HitTest(rect, point); }
 		WuiStyleSheet& Sheet() { return m_Sheet; }
 
 		// P4-UX4:悬停提示(tooltip)。控件在悬停时登记文本(后登记覆盖先登记),
@@ -243,10 +270,16 @@ namespace World::Wui
 		bool IsHovered(const WuiRect& rect) const { return HitTest(rect, m_Input.MousePos); }
 		bool IsClicked(const WuiRect& rect, int button = 0) const
 		{
+			// P4-U7:本帧这一次点击已被上层消费(打开弹出层/模态)→ 后面的控件不再看到它。
+			if (IsPointerClickConsumed(button))
+				return false;
 			return HitTest(rect, m_Input.MousePos) && m_Input.MouseClicked[button];
 		}
 		bool IsDoubleClicked(const WuiRect& rect, int button = 0) const
 		{
+			// 与 IsClicked 同一口径:被打开覆盖层那一下消费掉的点击不算双击。
+			if (IsPointerClickConsumed(button))
+				return false;
 			return HitTest(rect, m_Input.MousePos) && m_Input.MouseDoubleClicked[button];
 		}
 
@@ -255,12 +288,15 @@ namespace World::Wui
 		void ClosePopup(WuiId id);
 		void CloseAllPopups() { m_OpenPopups.clear(); m_PopupOpenFrame.clear(); }
 		bool IsPopupOpen(WuiId id) const;
-		// P4-U6:是否有任何弹层打开。用于"弹层打开时,其它面板的列表行/拖拽不响应"这条通用规则 ——
-		// 立即模式里先画的面板无法被后画的弹层挡住,于是"点弹层 = 同时点到下面的行"
-		// (实测:属性面板的组件选择器盖住层级面板,点搜索框会误选实体并起一次拖拽)。
-		bool AnyPopupOpen() const { return !m_OpenPopups.empty(); }
 		bool ClosePopupsOnOutsideClick(const std::vector<WuiId>& popups, const WuiRect& ignoreRect);
-		void SetModal(WuiId id) { m_Modal = id; }
+		// P4-U7:模态**打开**的那一帧同样消费点击 —— 模态是在本帧稍后画的,
+		// 不消费的话"打开它的那一下"会落到模态里恰好同位置的控件上。
+		void SetModal(WuiId id)
+		{
+			if (id != 0 && id != m_Modal)
+				ConsumePointerClick(0);
+			m_Modal = id;
+		}
 		void ClearModal() { m_Modal = 0; }
 		WuiId Modal() const { return m_Modal; }
 		void SetViewportSize(glm::vec2 size) { m_ViewportSize = size; }
@@ -305,6 +341,11 @@ namespace World::Wui
 		std::vector<WuiDrawCommand> m_Commands;
 		std::vector<WuiDrawCommand> m_OverlayCommands;
 		int m_OverlayDepth = 0;
+		// P4-U7:本帧登记的覆盖层矩形 → 下一帧作为"下层遮挡区"(只挡非覆盖层控件)。
+		std::vector<WuiRect> m_OverlayRects;
+		std::vector<WuiRect> m_UnderlayBlockers;
+		// P4-U7:本帧已消费的鼠标键(打开弹出层那一下不再穿透)。
+		bool m_PointerConsumedClick[3] = { false, false, false };
 		std::unordered_map<WuiId, std::shared_ptr<WuiStateBase>> m_State;
 		std::vector<WuiStyle> m_StyleStack;
 		WuiStyleSheet m_Sheet;

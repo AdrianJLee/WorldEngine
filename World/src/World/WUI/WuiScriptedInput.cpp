@@ -108,6 +108,7 @@ namespace World::Wui
 	{
 		for (const auto& entry : m_Pending)
 			if (entry.second.FramesLeft > 0 || entry.second.KeyPhase > 0
+				|| entry.second.WheelFrames > 0
 				|| entry.second.NextTextFrame < entry.second.TextFrames.size())
 				return true;
 		return false;
@@ -122,12 +123,35 @@ namespace World::Wui
 		pending.KeyShift = shift;
 	}
 
+	void WuiScriptedInput::QueueWheel(const std::string& windowKey, glm::vec2 position, float wheel)
+	{
+		Pending& pending = m_Pending[windowKey];
+		pending.Position = position;
+		pending.Wheel = wheel;
+		pending.WheelFrames = 1;
+	}
+
 	void WuiScriptedInput::Apply(const std::string& windowKey, WuiInputState& input)
 	{
 		auto entry = m_Pending.find(windowKey);
 		if (entry == m_Pending.end())
 			return;
 		Pending& pending = entry->second;
+		if (pending.WheelFrames > 0)
+		{
+			// 滚轮单独占一帧(位置 + Wheel),不与点击/文本同帧:控件读到的就是普通滚轮输入。
+			input.MousePos = pending.Position;
+			input.Wheel = pending.Wheel;
+			input.WantKeyboard = true;
+			if (std::getenv("WLD_TRACE_UI"))
+				WLD_CORE_INFO("[dev] scripted wheel {0} at ({1},{2}) window={3}", pending.Wheel,
+					static_cast<int>(pending.Position.x), static_cast<int>(pending.Position.y), windowKey);
+			--pending.WheelFrames;
+			if (pending.WheelFrames <= 0 && pending.FramesLeft <= 0 && pending.KeyPhase == 0
+				&& pending.NextTextFrame >= pending.TextFrames.size())
+				m_Pending.erase(entry);
+			return;
+		}
 		if (pending.KeyPhase > 0)
 		{
 			input.WantKeyboard = true;

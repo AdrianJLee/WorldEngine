@@ -3528,6 +3528,9 @@ namespace World
 			m_MenuBar->Direction = Wui::WuiDirection::Row;
 			m_MenuBar->Gap = 4;
 			m_FileButton = std::make_shared<Wui::WuiButton>();
+			// P4-U7:菜单栏按钮给稳定 id —— 对象式按钮按 id 进无障碍树,AI 通道
+			// (`ui.invoke`)才能打开菜单;没有 id 的按钮只登记焦点、脚本点不到。
+			m_FileButton->SetId(menuFile);
 			m_FileButton->Label = Wui::Tr("menu.file", "File");
 			m_FileButton->OnClick = [this, menuFile]
 				{
@@ -3544,6 +3547,7 @@ namespace World
 				};
 			m_MenuBar->Add(m_FileButton, { 60, 60, 0, 22, 0 });
 			m_ViewButton = std::make_shared<Wui::WuiButton>();
+			m_ViewButton->SetId(menuView);
 			m_ViewButton->Label = Wui::Tr("menu.view", "View");
 			m_ViewButton->OnClick = [this, menuView]
 				{
@@ -3560,6 +3564,7 @@ namespace World
 				};
 			m_MenuBar->Add(m_ViewButton, { 60, 60, 0, 22, 0 });
 			m_WindowButton = std::make_shared<Wui::WuiButton>();
+			m_WindowButton->SetId(menuWindow);
 			m_WindowButton->Label = Wui::Tr("menu.window", "Window");
 			m_WindowButton->OnClick = [this, menuWindow]
 				{
@@ -3590,6 +3595,9 @@ namespace World
 				ctx.PushOverlay();
 				const Wui::WuiRect panel { m_MenuHeaderRect.X, m_MenuHeaderRect.Y + m_MenuHeaderRect.H + 2, 240, static_cast<float>(entries.size() * 22 + 8) };
 				DrawPanelSurface(ctx, panel, m_Theme);
+				// P4-U7:菜单矩形登记为覆盖层 —— 下一帧面板内容不会吃掉落在菜单上的点击
+				// (实测:菜单项那一下会同时穿透到下面的面板控件)。
+				ctx.RegisterOverlayRect(panel);
 				for (size_t i = 0; i < entries.size(); ++i)
 				{
 					const Wui::WuiRect item { panel.X + 4, panel.Y + 4 + i * 22, panel.W - 8, 22 };

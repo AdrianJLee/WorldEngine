@@ -56,6 +56,8 @@ namespace World::Wui
 			desc.Size.x, desc.Size.y };
 		if (frameRect)
 			*frameRect = frame;
+		// P4-U7:模态外框登记为覆盖层矩形(下一帧只挡非覆盖层控件;模态期间本该如此)。
+		ctx.RegisterOverlayRect(frame);
 
 		// 遮罩 + 面板:与 Wui::BeginModal 相同的配色/圆角/图层(overlay 通道)。
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { 0, 0, viewport.x, viewport.y }, { 0, 0, 0, 0.5f }, 0.0f });

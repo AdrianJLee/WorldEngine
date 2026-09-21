@@ -217,6 +217,8 @@ namespace World::Wui
 			*panel = rect;
 		ctx.PushOverlay();
 		DrawPanelSurface(ctx, rect, theme);
+		// P4-U7:右键菜单矩形登记为覆盖层 → 下一帧只挡下层控件(先画的行不再吃掉菜单上的点击)。
+		ctx.RegisterOverlayRect(rect);
 		return true;
 	}
 

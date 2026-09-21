@@ -426,6 +426,8 @@ namespace World
 		const Wui::WuiRect panelRect { bar.X, bar.Y + bar.H + 2.0f, 160.0f, 2 * 22.0f + 8.0f };
 		ctx.PushOverlay();
 		Wui::DrawPanelSurface(ctx, panelRect, theme);
+		// P4-U7:本窗口菜单的覆盖层矩形 → 下一帧窗口内容(标签栏/面板正文)不会吃掉它上面的点击。
+		ctx.RegisterOverlayRect(panelRect);
 		// 挂靠只对"独立窗口"面板开放:停靠形态的临时浮动不提供该入口。
 		const bool canAttach = !m_Callbacks.CanAttach || m_Callbacks.CanAttach(panel);
 		if (Wui::MenuItem(ctx, Wui::HashId("float.window.menu.dock"),

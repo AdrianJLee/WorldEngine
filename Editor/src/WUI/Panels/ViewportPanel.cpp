@@ -230,6 +230,8 @@ namespace World
 			const Wui::WuiRect overlaysPanel { overlaysButton.X, overlaysButton.Y + overlaysButton.H + 2.0f,
 				300.0f, rowHeight * 2.0f + 40.0f };
 			Wui::DrawPanelSurface(ctx, overlaysPanel, theme);
+			// P4-U7:登记为覆盖层矩形 → 下一帧只挡下层控件(视口工具栏/面板不会吃掉菜单上的点击)。
+			ctx.RegisterOverlayRect(overlaysPanel);
 			Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
 			bool rangesAll = prefs.Data().ViewportLightRangesAll;
 			if (Wui::Checkbox(ctx, Wui::HashId("viewport.overlays.light_ranges"),

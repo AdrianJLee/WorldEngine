@@ -402,7 +402,9 @@ namespace World::Wui
 		if (state.PopupVisible && input.MouseClicked[0]
 			&& !state.PopupBounds.Contains(input.MousePos))
 			state.PopupVisible = false;
-		if (focused && input.MouseClicked[0] && !ctx.IsHovered(rect))
+		// "点到编辑器之外就失焦"必须用**原始**矩形判定:浮层(登记过遮挡)盖在编辑器上时,
+		// IsHovered(rect) 会因为遮挡区返回 false,把"点浮层候选行"误判成"点了外面"而失焦关浮层。
+		if (focused && input.MouseClicked[0] && !ctx.HitTestRaw(rect, input.MousePos))
 		{
 			ctx.SetFocus(0);
 			ctx.SetTextInputActive(false);
@@ -959,7 +961,9 @@ namespace World::Wui
 				state.PopupBounds = { x, y, width, height };
 
 				// 滚轮在浮层内滚动列表(不滚编辑器)。
-				if (ctx.IsHovered(state.PopupBounds) && input.Wheel != 0.0f)
+				// 浮层自己的命中一律走 HitTestRaw:浮层矩形是登记过的覆盖层,
+				// 普通 IsHovered 在下一帧会被自己的遮挡区挡掉(见下面的绘制块)。
+				if (ctx.HitTestRaw(state.PopupBounds, input.MousePos) && input.Wheel != 0.0f)
 				{
 					const int maxFirst = std::max(0, itemCount - kSuggestMaxRows);
 					state.PopupSelected = std::max(0, std::min(itemCount - 1,
@@ -982,7 +986,7 @@ namespace World::Wui
 					const WuiRect rowRect { state.PopupBounds.X,
 						firstRowY + static_cast<float>(row) * kSuggestRowHeight,
 						state.PopupBounds.W, kSuggestRowHeight };
-					if (ctx.IsHovered(rowRect))
+					if (ctx.HitTestRaw(rowRect, input.MousePos))
 						hoveredItem = itemIndex;
 				}
 				if (hoveredItem >= 0)
@@ -1237,6 +1241,9 @@ namespace World::Wui
 			const float firstRowY = state.PopupBounds.Y + 3.0f;
 			ctx.Commands().push_back({ WuiDrawKind::Rect, state.PopupBounds, kSuggestBackground, 4.0f });
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline, state.PopupBounds, kSuggestBorder, 4.0f, 1.0f });
+			// P4-U7:补全浮层是画在正文之上的覆盖层 —— 登记矩形,下一帧落在浮层上的
+			// 点击不再同时落到底下的把文本区(实测:点候选行会同时移动 caret)。
+			ctx.RegisterOverlayRect(state.PopupBounds);
 			for (int row = 0; row < rows; ++row)
 			{
 				const int itemIndex = state.PopupScroll + row;
