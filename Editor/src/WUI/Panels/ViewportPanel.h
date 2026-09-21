@@ -21,6 +21,8 @@ namespace World
 		ViewportHost& m_Host;
 		std::shared_ptr<Wui::WuiBox> m_Root;
 		std::shared_ptr<Wui::WuiImage> m_SceneImage;
+		// P4-U8a:悬浮的运行控制药丸(独立小布局树,按绝对矩形摆在画面之上,不占布局)。
+		std::shared_ptr<Wui::WuiBox> m_ToolPill;
 		std::vector<std::shared_ptr<Wui::WuiImageButton>> m_Tools;
 		bool m_GizmoActive = false;
 		TransformComponent m_GizmoBefore;

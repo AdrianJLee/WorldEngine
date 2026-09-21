@@ -3527,8 +3527,6 @@ namespace World
 		};
 
 		const Wui::WuiId menuFile = Wui::HashId("menu.file");
-		// P4-U6b:View 菜单(相机模式/预览 + 范围可视化开关)。
-		const Wui::WuiId menuView = Wui::HashId("menu.view");
 		const Wui::WuiId menuWindow = Wui::HashId("menu.window");
 		if (!m_MenuBar)
 		{
@@ -3554,23 +3552,6 @@ namespace World
 						m_Ctx->ClosePopup(menuFile);
 				};
 			m_MenuBar->Add(m_FileButton, { 60, 60, 0, 22, 0 });
-			m_ViewButton = std::make_shared<Wui::WuiButton>();
-			m_ViewButton->SetId(menuView);
-			m_ViewButton->Label = Wui::Tr("menu.view", "View");
-			m_ViewButton->OnClick = [this, menuView]
-				{
-					const bool opening = m_OpenMenu != menuView;
-					m_OpenMenu = opening ? menuView : 0;
-					if (opening)
-					{
-						m_Ctx->CloseAllPopups();
-						m_MenuHeaderRect = m_ViewButton->Rect();
-						m_Ctx->OpenPopup(menuView);
-					}
-					else
-						m_Ctx->ClosePopup(menuView);
-				};
-			m_MenuBar->Add(m_ViewButton, { 60, 60, 0, 22, 0 });
 			m_WindowButton = std::make_shared<Wui::WuiButton>();
 			m_WindowButton->SetId(menuWindow);
 			m_WindowButton->Label = Wui::Tr("menu.window", "Window");
@@ -3710,41 +3691,9 @@ namespace World
 		windowEntries.push_back({ Wui::Tr("menu.window.reset_layout", "Reset Layout"), false, [this, &ctx] { ResetLayout(ctx); } });
 		drawMenu(menuWindow, "menu.window", windowEntries);
 
-		// P4-U6b / P4-U8:View 菜单 = **全部"看"的开关的唯一入口**
-		// (用户 2026-09-21:「视图这些放视口工具条里还是怪怪的,其他引擎通常是在 view 中」)。
-		// 分组:相机 / 辅助显示;视口那边只留一个只读角标(2D/3D)+ 运行状态徽标。
-		// 存储仍在 EditorPreferences(随偏好落盘),立即生效。
-		drawMenu(menuView, "menu.view", {
-			{ Wui::Tr("menu.view.group.camera", "Camera"), false, {}, true },
-			{ Wui::Tr("menu.view.camera_preview", "Camera Preview"), IsCameraPreviewEnabled(),
-				[this] { ToggleCameraPreview(); }, false,
-				Wui::Tr("menu.view.camera_preview.tooltip",
-					"Show a picture-in-picture preview of the selected camera entity (bottom-left).\n"
-					"Camera frustum outline is always drawn while a camera is selected.") },
-			{ IsViewportCamera3D() ? Wui::Tr("menu.view.camera_3d", "Camera: 3D Orbit")
-				: Wui::Tr("menu.view.camera_2d", "Camera: 2D Ortho"), false,
-				[this] { ToggleViewportCamera3D(); }, false,
-				Wui::Tr("menu.view.camera_mode.tooltip",
-					"Switch the editor viewport camera: 3D orbit (free look) ↔ 2D orthographic (top-down).\n"
-					"The viewport shows the current mode as a read-only corner label.") },
-			{ Wui::Tr("menu.view.group.overlays", "Overlays"), false, {}, true },
-			{ Wui::Tr("menu.view.light_ranges_all", "Light Ranges: All Lights"),
-				Editor::EditorPreferences::Get().Data().ViewportLightRangesAll, [] {
-					Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
-					prefs.SetViewportLightRangesAll(!prefs.Data().ViewportLightRangesAll);
-				}, false,
-				Wui::Tr("viewport.overlays.light_ranges.tooltip",
-					"Draw light extents: point light = Range sphere, directional light = Direction arrow.\n"
-					"Off = only the selected entity.") },
-			{ Wui::Tr("menu.view.collider_outlines_all", "Collider Outlines: All"),
-				Editor::EditorPreferences::Get().Data().ViewportColliderOutlinesAll, [] {
-					Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
-					prefs.SetViewportColliderOutlinesAll(!prefs.Data().ViewportColliderOutlinesAll);
-				}, false,
-				Wui::Tr("viewport.overlays.collider_outlines.tooltip",
-					"Draw collider shapes in edit mode (2D box/circle, 3D box/sphere/capsule).\n"
-					"Off = only the selected entity. MeshCollider3D has no analytic shape.") },
-		});
+		// P4-U8a:菜单栏不再有 View 菜单 —— "看"的开关**全部搬进视口自己的悬浮 `视图 ▼`**
+		// (用户 2026-09-21:「视图菜单栏的功能能否放到 view 里」;Unity 的 Scene 视图工具条/
+		// Unreal 的 Show 菜单就是这个位置)。实现见 ViewportPanel::OnRender。
 	}
 
 	void EditorShell::DrawModals(Wui::WuiContext& ctx)

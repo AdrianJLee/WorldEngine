@@ -374,7 +374,6 @@ namespace World
 		std::shared_ptr<Wui::WuiBox> m_MenuBar;
 		std::shared_ptr<Wui::WuiButton> m_FileButton;
 		// P4-U6b:View 菜单(相机模式/预览 + 范围可视化开关)。
-		std::shared_ptr<Wui::WuiButton> m_ViewButton;
 		std::shared_ptr<Wui::WuiButton> m_WindowButton;
 		// P4-U6b:当前显示帧级模态的面板(空 = 无)。帧初封锁输入,渲染该面板前解开。
 		std::string m_PanelModalOwner;

@@ -97,7 +97,24 @@ namespace World::Wui
 			crossSize = std::max(row ? container.MinH : container.MinW, boundedCross);
 		}
 
-		float cursor = 0;
+		// 主轴对齐(P4-U8a):此前 SolveFlex 只按 cursor 从左往右摆,AlignMain 完全不生效
+		// (只有交叉轴对齐实现过)—— 结果是"设了 Center 的容器内容仍然贴左"。这里补上:
+		// 容器有界时先算自由空间,再整体平移;无界(测量阶段)时自由空间为 0,测量结果不变。
+		float mainOffset = 0.0f;
+		if (boundedMain <= 1e29f)
+		{
+			float contentMain = 0.0f;
+			for (size_t i = 0; i < count; ++i)
+				contentMain += main[i];
+			const float freeSpace = std::max(0.0f, boundedMain - totalGap - contentMain);
+			switch (layout.AlignMain)
+			{
+				case WuiAlign::Center: mainOffset = freeSpace * 0.5f; break;
+				case WuiAlign::End: mainOffset = freeSpace; break;
+				default: break;
+			}
+		}
+		float cursor = mainOffset;
 		for (size_t i = 0; i < count; ++i)
 		{
 			WuiRect& rect = result.Rects[i];
@@ -118,7 +135,7 @@ namespace World::Wui
 			cursor += main[i] + layout.Gap;
 		}
 
-		result.MainSize = cursor - layout.Gap;
+		result.MainSize = cursor - mainOffset - layout.Gap;
 		result.CrossSize = crossSize;
 		return result;
 	}
