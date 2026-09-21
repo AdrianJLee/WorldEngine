@@ -920,7 +920,10 @@ namespace World
 		}
 		const bool shellModalOpen = m_ImportModalOpen || m_Editor.ShowUnsavedModal()
 			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress();
-		if (shellModalOpen)
+		// P4-U6b:面板级模态(属性面板的"添加组件"居中窗口)与 shell 模态同一条封锁路径;
+		// 渲染该面板之前会解开(RenderTabs),画完再封回去。
+		const bool panelModalOpen = !m_PanelModalOwner.empty();
+		if (shellModalOpen || panelModalOpen)
 			Wui::BeginModalInputBlock(ctx);
 		// 编辑器级四边停靠区:拖拽面板进入窗口边缘条带时,生成横跨整个编辑器的
 		// 停靠区(而不是只切分鼠标所在的面板组)。需在渲染面板前判定,以便
@@ -1583,7 +1586,17 @@ namespace World
 
 		const Wui::WuiRect content { area.X, area.Y + tabH, area.W, area.H - tabH };
 		if (!node.Panels.empty())
-			RenderPanelContent(ctx, node.Panels[node.Active], content);
+		{
+			// P4-U6b:面板级模态的拥有者自己需要能命中 —— 先解封锁,画完再封回去,
+			// 这样它之后渲染的面板(以及本帧的其它交互)仍然被挡住。
+			const std::string& active = node.Panels[node.Active];
+			const bool ownsPanelModal = !m_PanelModalOwner.empty() && m_PanelModalOwner == active;
+			if (ownsPanelModal)
+				Wui::EndModalInputBlock(ctx);
+			RenderPanelContent(ctx, active, content);
+			if (ownsPanelModal)
+				Wui::BeginModalInputBlock(ctx);
+		}
 
 		std::string dragPayload;
 		// 独立窗口不能在停靠面板上落区(只能挂靠到顶部挂靠栏)。
@@ -3506,6 +3519,8 @@ namespace World
 		struct MenuEntry { std::string Label; bool Checked; std::function<void()> Action; bool Header = false; };
 
 		const Wui::WuiId menuFile = Wui::HashId("menu.file");
+		// P4-U6b:View 菜单(相机模式/预览 + 范围可视化开关)。
+		const Wui::WuiId menuView = Wui::HashId("menu.view");
 		const Wui::WuiId menuWindow = Wui::HashId("menu.window");
 		if (!m_MenuBar)
 		{
@@ -3528,6 +3543,22 @@ namespace World
 						m_Ctx->ClosePopup(menuFile);
 				};
 			m_MenuBar->Add(m_FileButton, { 60, 60, 0, 22, 0 });
+			m_ViewButton = std::make_shared<Wui::WuiButton>();
+			m_ViewButton->Label = Wui::Tr("menu.view", "View");
+			m_ViewButton->OnClick = [this, menuView]
+				{
+					const bool opening = m_OpenMenu != menuView;
+					m_OpenMenu = opening ? menuView : 0;
+					if (opening)
+					{
+						m_Ctx->CloseAllPopups();
+						m_MenuHeaderRect = m_ViewButton->Rect();
+						m_Ctx->OpenPopup(menuView);
+					}
+					else
+						m_Ctx->ClosePopup(menuView);
+				};
+			m_MenuBar->Add(m_ViewButton, { 60, 60, 0, 22, 0 });
 			m_WindowButton = std::make_shared<Wui::WuiButton>();
 			m_WindowButton->Label = Wui::Tr("menu.window", "Window");
 			m_WindowButton->OnClick = [this, menuWindow]
@@ -3631,6 +3662,28 @@ namespace World
 		appendPanels(/*independent=*/false);
 		windowEntries.push_back({ Wui::Tr("menu.window.reset_layout", "Reset Layout"), false, [this, &ctx] { ResetLayout(ctx); } });
 		drawMenu(menuWindow, "menu.window", windowEntries);
+
+		// P4-U6b:View 菜单(用户 2026-09-21:「视口放编辑器偏好中太远了吧」)。
+		// 视口相关开关的家就在这儿:相机模式/预览 + 两枚范围可视化开关(存储仍在 EditorPreferences,
+		// 与视口工具栏 `Overlays ▾` 共享同一份,改哪边都同步、立即生效)。
+		drawMenu(menuView, "menu.view", {
+			{ Wui::Tr("menu.view.camera_preview", "Camera Preview"), IsCameraPreviewEnabled(),
+				[this] { ToggleCameraPreview(); } },
+			{ IsViewportCamera3D() ? Wui::Tr("menu.view.camera_3d", "Camera: 3D Orbit")
+				: Wui::Tr("menu.view.camera_2d", "Camera: 2D Ortho"), false,
+				[this] { ToggleViewportCamera3D(); } },
+			{ "", false, {}, true },
+			{ Wui::Tr("menu.view.light_ranges_all", "Light Ranges: All Lights"),
+				Editor::EditorPreferences::Get().Data().ViewportLightRangesAll, [] {
+					Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
+					prefs.SetViewportLightRangesAll(!prefs.Data().ViewportLightRangesAll);
+				} },
+			{ Wui::Tr("menu.view.collider_outlines_all", "Collider Outlines: All"),
+				Editor::EditorPreferences::Get().Data().ViewportColliderOutlinesAll, [] {
+					Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
+					prefs.SetViewportColliderOutlinesAll(!prefs.Data().ViewportColliderOutlinesAll);
+				} },
+		});
 	}
 
 	void EditorShell::DrawModals(Wui::WuiContext& ctx)

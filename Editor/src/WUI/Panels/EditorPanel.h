@@ -172,6 +172,10 @@ namespace World
 		// P4-UX16:面板向状态栏推一条短提示(新建资产失败等)。默认空实现 = 宿主未接线。
 		// 不要用它做模态:失败信息是"说出来"而不是"挡住用户"。
 		virtual void Notify(const std::string& message) { (void)message; }
+		// P4-U6b:面板自绘的**帧级模态**(如属性面板的"添加组件"居中窗口)占用声明。
+		// 传 panelId = 该面板正显示模态;传空 = 关闭。宿主据此在帧初封锁整窗输入,
+		// 并在渲染该面板之前解开封锁(模态自己的控件才点得动),画完再封回去。
+		virtual void SetPanelModalOwner(const std::string& panelId) { (void)panelId; }
 	};
 
 	// 编辑器面板组件:model 与 view 内聚,由 EditorShell 按停靠布局驱动渲染。

@@ -147,6 +147,8 @@ namespace World
 		void RequestImportDestination(const std::string& sourcePath) override;
 		// P4-UX16:面板级短提示统一进状态栏(见 PushNotice 的 4s/悬停冻结/移开宽限节奏)。
 		void Notify(const std::string& message) override;
+		// P4-U6b:面板级模态占用(属性面板的"添加组件"居中窗口)。
+		void SetPanelModalOwner(const std::string& panelId) override { m_PanelModalOwner = panelId; }
 		// W9-2 三层快捷键路由第 2 层:当前焦点面板。
 		//   ① 主窗口处于"已附加面板"模式(顶栏标签)→ 该面板;
 		//   ② 否则某个独立窗口在前台 → 该窗口的当前标签;
@@ -371,7 +373,11 @@ namespace World
 		// 菜单栏(保留模式树)。
 		std::shared_ptr<Wui::WuiBox> m_MenuBar;
 		std::shared_ptr<Wui::WuiButton> m_FileButton;
+		// P4-U6b:View 菜单(相机模式/预览 + 范围可视化开关)。
+		std::shared_ptr<Wui::WuiButton> m_ViewButton;
 		std::shared_ptr<Wui::WuiButton> m_WindowButton;
+		// P4-U6b:当前显示帧级模态的面板(空 = 无)。帧初封锁输入,渲染该面板前解开。
+		std::string m_PanelModalOwner;
 		Wui::WuiId m_OpenMenu = 0;
 		Wui::WuiRect m_MenuHeaderRect;
 		Wui::WuiContext* m_Ctx = nullptr;

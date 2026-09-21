@@ -48,8 +48,10 @@ namespace World
 		// ---- U6:Add Component 选择器(方案 §8.2;候选/分类/说明全部来自 schema)----
 		// 打开:清空上一次状态并聚焦搜索框;绘制:搜索框 + 分组列表(最近使用 → 分类 → 未分类)。
 		void OpenAddComponentPicker(Wui::WuiContext& ctx);
-		void DrawAddComponentPicker(Wui::WuiContext& ctx, const Wui::WuiRect& addButton, Entity entity,
+		void DrawAddComponentPicker(Wui::WuiContext& ctx, Entity entity,
 			Scene* scene, Schema::SchemaRegistry& schemas);
+		// 关闭居中模态(清模态态 + 解除面板级输入封锁)。
+		void CloseAddComponentPicker(Wui::WuiContext& ctx);
 		// MRU 更新(置顶,最多 5 条)并落盘;<Editor>/wui-properties.json 写失败只告警,不影响编辑。
 		void TouchRecent(const std::string& shortName);
 		void LoadState();
@@ -58,6 +60,9 @@ namespace World
 		PanelHost& m_Host;
 		// Play/Simulate 期间为 true:字段只显示不落值(只读查看)。
 		bool m_ReadOnly = false;
+		// U6b:"添加组件"是**居中模态**(用户 2026-09-21:「为什么不弹出个居中窗口呢」)——
+		// 打开期间由宿主封锁整窗输入,面板自身在选中行后回车/点 Add 落地。
+		bool m_AddOpen = false;
 		// 分区滚动布局(手工绘制/裁剪;滚动偏移按实体句柄持久化在 WuiContext::Persist)。
 		std::vector<SectionEntry> m_Sections;
 		std::vector<std::string> m_LastSchemaNames;

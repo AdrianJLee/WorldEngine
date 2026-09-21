@@ -450,7 +450,6 @@ namespace World
 			{
 				const entt::registry& registry = static_cast<const Scene*>(overlayScene.get())->GetRegistry();
 				const Wui::GizmoCamera overlayCamera = m_Host.GetGizmoCamera();
-				const bool cameraIs3D = m_Host.IsViewportCamera3D();
 				const entt::entity selectedHandle = selected.IsValid()
 					&& selected.GetScene() == overlayScene.get()
 					? static_cast<entt::entity>(selected) : entt::null;
@@ -496,15 +495,14 @@ namespace World
 							glm::clamp(point->Color.b + point->Intensity * 0.05f, 0.0f, 1.0f), alpha };
 						if (point->Range > 0.0f)
 						{
+							// 用户 2026-09-21:「绘制的光源范围怎么是 2d 的,要 3d 的」→
+							// 三个大圆**始终**画(2D 正交视口下它同样投影成一个球(圆环),不再降级成单圈)。
 							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
 								point->Range, 0, color, isSelected ? 1.6f : 1.1f, &overlayMin, &overlayMax);
-							if (cameraIs3D)
-							{
-								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
-									point->Range, 1, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
-								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
-									point->Range, 2, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
-							}
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+								point->Range, 1, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+								point->Range, 2, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
 							drew = true;
 						}
 						// 位置十字(即使 Range=0 也能看到光源在哪)。
@@ -610,7 +608,7 @@ namespace World
 					if (const auto* sphere = registry.try_get<SphereCollider3DComponent>(handle))
 					{
 						if (sphere->Radius > 0.0f)
-							for (int axis = 0; axis < (cameraIs3D ? 3 : 1); ++axis)
+							for (int axis = 0; axis < 3; ++axis)
 								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, sphere->Offset,
 									sphere->Radius, axis, color, thickness, &overlayMin, &overlayMax);
 						drew = true;
@@ -623,7 +621,7 @@ namespace World
 						if (radius > 0.0f)
 						{
 							const glm::vec3 base = capsule->Offset;
-							for (int axis = 0; axis < (cameraIs3D ? 3 : 1); ++axis)
+							for (int axis = 0; axis < 3; ++axis)
 							{
 								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
 									base + glm::vec3 { 0.0f, half, 0.0f }, radius, axis, color, thickness,

@@ -30,11 +30,8 @@ namespace World
 			Workflow = 3,
 			Automation = 4,
 			Diagnostics = 5,
-			// P4-U6:视口辅助显示(光源范围 / 碰撞体轮廓)的开关住在这里,
-			// 视口工具栏的 `Overlays ▾` 是同一份存储的就地入口。
-			Viewport = 6,
-			About = 7,
-			Count = 8,
+			About = 6,
+			Count = 7,
 		};
 		void DrawCategoryList(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
 		void DrawAbout(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);

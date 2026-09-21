@@ -612,28 +612,9 @@ namespace World::Editor
 			[&prefs] { return prefs.Data().DiagVulkanValidation; },
 			[&prefs] { prefs.SetDiagVulkanValidation(true); return true; }, true);
 
-		// ---- P4-U6 视口(User 2026-09-21:「应该在 view 中有个选项可以选是否显示范围;
-		// 如果这个选项没开应该只画选中」)。视口工具栏的 `Overlays ▾` 与这里共享同一存储。
-		addBool("editor.viewport.light_ranges_all", "Viewport", SettingApply::Immediate,
-			"Light Ranges (all)",
-			"光源范围\n在视口里画光源的空间范围:点光 = 半径 Range 的三维圆环,平行光 = 沿 Direction 的箭头。\n"
-			"关(默认)= 只画**选中实体**的;开 = 画场景里全部光源(会拥挤,适合核对整体布光)。\n"
-			"开关只影响绘制,立即生效。",
-			[&prefs] { return FormatBool(prefs.Data().ViewportLightRangesAll); },
-			[&prefs](const std::string& value, std::string*) { prefs.SetViewportLightRangesAll(value == "true"); return true; },
-			[&prefs] { return !prefs.Data().ViewportLightRangesAll; },
-			[&prefs] { prefs.SetViewportLightRangesAll(false); return true; });
-
-		addBool("editor.viewport.collider_outlines_all", "Viewport", SettingApply::Immediate,
-			"Collider Outlines (all)",
-			"碰撞体轮廓\n编辑期在视口里画碰撞体形状(2D 矩形/圆、3D 盒/球/胶囊),摆碰撞盒不用再猜数值。\n"
-			"关(默认)= 只画**选中实体**的;开 = 画场景里全部碰撞体。\n"
-			"MeshCollider3D 按网格求交,不画轮廓。只影响绘制,立即生效。",
-			[&prefs] { return FormatBool(prefs.Data().ViewportColliderOutlinesAll); },
-			[&prefs](const std::string& value, std::string*) { prefs.SetViewportColliderOutlinesAll(value == "true"); return true; },
-			[&prefs] { return !prefs.Data().ViewportColliderOutlinesAll; },
-			[&prefs] { prefs.SetViewportColliderOutlinesAll(false); return true; });
-
+		// P4-U6 的两枚视口辅助开关**刻意不在这里**:用户 2026-09-21「视口放编辑器偏好中太远了吧」→
+		// 入口就近放到「菜单栏 ▸ View」与「视口工具栏 ▸ Overlays ▾」,存储仍在 EditorPreferences
+		// (随偏好落盘),但它们属于"看着画面就能改"的东西,不该让人跑一趟设置面板。
 		WLD_CORE_INFO("设置注册表:已注册编辑器偏好 {0} 项", registry.OfScope(SettingScope::Editor).size());
 	}
 }

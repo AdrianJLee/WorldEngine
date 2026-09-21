@@ -10,6 +10,7 @@
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/Widgets/WuiModal.h"
 
 #include <algorithm>
 #include <cctype>
@@ -523,16 +524,27 @@ namespace World
 		m_AddListFocus = false;
 		m_AddScroll = 0.0f;
 		m_AddOpenedFrame = ctx.Frame();
-		ctx.OpenPopup(Wui::HashId("prop.add.popup"));
+		m_AddOpen = true;
+		const Wui::WuiId modalId = Wui::HashId("prop.add.modal");
+		ctx.SetModal(modalId);
+		// 面板级模态:宿主帧初封锁整窗输入,渲染本面板前解开(见 EditorShell::RenderTabs)。
+		m_Host.SetPanelModalOwner(Id());
 		ctx.SetFocus(Wui::HashId("prop.add.search"));
 		ctx.RecordOp("properties", "open-add-picker", "prop.add", "focus=search");
 	}
 
-	void PropertiesPanel::DrawAddComponentPicker(Wui::WuiContext& ctx, const Wui::WuiRect& addButton,
+	void PropertiesPanel::CloseAddComponentPicker(Wui::WuiContext& ctx)
+	{
+		m_AddOpen = false;
+		ctx.ClearModal();
+		m_Host.SetPanelModalOwner(std::string());
+	}
+
+	void PropertiesPanel::DrawAddComponentPicker(Wui::WuiContext& ctx,
 		Entity entity, Scene* scene, Schema::SchemaRegistry& schemas)
 	{
 		const Wui::WuiTheme& theme = m_Host.Theme();
-		const Wui::WuiId addPopup = Wui::HashId("prop.add.popup");
+		const Wui::WuiId addModal = Wui::HashId("prop.add.modal");
 		const Wui::WuiId searchId = Wui::HashId("prop.add.search");
 		const Wui::WuiId listId = Wui::HashId("prop.add.list");
 		// 打开弹层的那一帧不吃按键:按钮的键盘激活(Enter/Space)与选择器的回车是同一个事件。
@@ -648,25 +660,24 @@ namespace World
 			return height;
 		};
 
-		// ---- 几何:宽 320、最大高 420;内容富余时自适应高度,超出则内部滚动 ----
-		// 面板高度用"进入本帧时的搜索词"先定框(下一帧即精确),行本身按本帧最终的词绘制。
+		// ---- 几何:居中模态窗口(用户 2026-09-21:「添加组件在右下角太难用了,为什么不弹出个居中窗口呢」)----
+		// 用引擎既有的 WuiModal 组件:遮罩 + 居中 + 输入封锁 + Esc + 底部按钮条,与其它模态同一套交互。
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = addModal;
+		frameDesc.Title = Wui::Tr("panel.properties.add_component", "Add Component");
+		frameDesc.Size = { 560.0f, 520.0f };
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
+			return;
+		// 列表高度按内容自适应(上限 = 框内可用高度),超出内部滚动。
 		const float layoutHeight = heightOf(buildRows(m_AddSearch));
 		const float contentHeight = layoutHeight > 0.0f ? layoutHeight : kPickerEmptyHeight;
-		const float listHeight = std::min(contentHeight, kPickerMaxHeight - kPickerSearchRow - kPickerPad * 2.0f);
-		const float panelHeight = kPickerSearchRow + listHeight + kPickerPad;
-		const glm::vec2 viewport = ctx.Input().ViewportSize;
-		const float panelX = std::clamp(addButton.X, 2.0f, std::max(2.0f, viewport.x - kPickerWidth - 2.0f));
-		float panelY = addButton.Y + addButton.H + 2.0f;
-		if (panelY + panelHeight > viewport.y - 2.0f)
-			panelY = std::max(2.0f, viewport.y - 2.0f - panelHeight);
-		const Wui::WuiRect panel { panelX, panelY, kPickerWidth, panelHeight };
-		const Wui::WuiRect searchRect { panel.X + kPickerPad, panel.Y + kPickerPad,
-			panel.W - kPickerPad * 2.0f, kPickerSearchRow - 8.0f };
-		const Wui::WuiRect listRect { panel.X + kPickerPad, panel.Y + kPickerSearchRow,
-			panel.W - kPickerPad * 2.0f, listHeight };
-
-		ctx.PushOverlay();
-		DrawPanelSurface(ctx, panel, theme);
+		const float listTop = frame.Y + 82.0f;
+		const float listBottom = frame.Y + frame.H - Wui::ModalFooterHeight - 18.0f;
+		const float listHeight = std::min(contentHeight, std::max(60.0f, listBottom - listTop));
+		const Wui::WuiRect searchRect { frame.X + 16.0f, frame.Y + 48.0f, frame.W - 32.0f, 24.0f };
+		const Wui::WuiRect listRect { frame.X + 16.0f, listTop, frame.W - 32.0f, listHeight };
 
 		// ---- 搜索框:自动聚焦,输入即过滤(占位文案与 a11y Placeholder 是同一句)----
 		Wui::TextFieldA11y a11y;
@@ -725,7 +736,7 @@ namespace World
 			ctx.Persist<bool>(Wui::HashId(("prop.open." + schema.DisplayName).c_str()), defaultOpen) = true;
 			m_RevealSection = schema.DisplayName;
 			m_RevealFrames = kPickerRevealFrames;
-			ctx.CloseAllPopups();
+			CloseAddComponentPicker(ctx);
 			ctx.RecordOp("properties", "add-component", schema.DisplayName, SchemaTypeKeyName(schema));
 		};
 
@@ -779,11 +790,11 @@ namespace World
 				row.Category, true, row.Doc);
 			if (hovered)
 				ctx.SetCursor(Wui::WuiCursor::Hand);
-			// 打开弹层的那一帧**不吃鼠标点击**:面板高度不足时会向上夹取(贴底上移),
-			// 夹取后面板可能正好盖住"Add Component"按钮,于是打开它的那一下点击会落在第一行上
-			// → 直接给实体加了一个用户没选的组件(实测 ops: f294 popup/open 与 add-component 同帧)。
-			// 与键盘 Enter 的 justOpened 守卫同一口径:弹层不消费"打开它的那次输入"。
+			// 交互:单击 = 选中(高亮),回车/双击/底部 Add = 真正添加 —— 居中窗口的常规手感。
+			// (旧版"单击即加"在弹层贴着按钮时会把"打开弹层的点击"也算进去,实测误加过组件。)
 			if (!justOpened && ctx.IsClicked(item))
+				m_AddHighlight = itemIndex;
+			if (!justOpened && ctx.IsDoubleClicked(item))
 			{
 				activate(*row.Schema);
 				break;
@@ -837,8 +848,33 @@ namespace World
 		}
 		ctx.RegisterFocusable(listId, listRect);
 
-		// ---- Esc:第一下清空搜索(焦点留在搜索框),搜索为空时第二下关闭弹层 ----
-		if (searchCancelled)
+		// ---- 底部按钮条:Add(选中项) / Cancel;Esc = 取消 ----
+		// Add 只在"有高亮行"时可用(先选再加,避免误加);双击行 = 直接加(见上面的行循环)。
+		bool canAdd = m_AddHighlight >= 0 && m_AddHighlight < itemCount;
+		const Wui::ModalButtonDesc footerButtons[2] = {
+			{ Wui::Tr("panel.properties.add.cancel", "Cancel"), Wui::HashId("prop.add.cancel"), true },
+			{ Wui::Tr("panel.properties.add.confirm", "Add"), Wui::HashId("prop.add.confirm"), canAdd },
+		};
+		const int footerClicked = Wui::ModalButtons(ctx, frame, footerButtons, 2, theme);
+		if (footerClicked == 1 && canAdd)
+		{
+			int current = 0;
+			for (const PickerRow& row : rows)
+			{
+				if (row.Header)
+					continue;
+				if (current++ == m_AddHighlight)
+				{
+					activate(*row.Schema);
+					break;
+				}
+			}
+		}
+		else if (footerClicked == 0)
+			CloseAddComponentPicker(ctx);
+
+		// Esc:第一下清空搜索(焦点留在搜索框),搜索为空时第二下关闭模态(与旧口径一致)。
+		if (m_AddOpen && searchCancelled)
 		{
 			if (!m_AddSearch.empty())
 			{
@@ -846,17 +882,12 @@ namespace World
 				ctx.SetFocus(searchId);
 			}
 			else
-				ctx.ClosePopup(addPopup);
+				CloseAddComponentPicker(ctx);
 		}
-		else if (ctx.WasKeyTriggered(KeyCodes::Escape))
-			ctx.ClosePopup(addPopup);
-
-		ctx.ClosePopupsOnOutsideClick({ addPopup }, panel);
-		// 弹层矩形登记为悬停遮挡区(必须在弹层自身命中测试与"点外关闭"之后):本帧之后绘制的
-		// 分区/滚动条不再响应鼠标(与 Combo / SearchableCombo 同一条顺序规则)。
-		if (ctx.IsPopupOpen(addPopup))
-			ctx.PushHoverBlocker(panel);
-		else
+		else if (m_AddOpen && escapePressed)
+			CloseAddComponentPicker(ctx);
+		Wui::EndModalFrame(ctx);
+		if (!m_AddOpen)
 		{
 			// 关闭后不复用上一次的状态(下次打开由 OpenAddComponentPicker 重新初始化)。
 			m_AddSearch.clear();
@@ -865,7 +896,6 @@ namespace World
 			m_AddListFocus = false;
 			m_AddScroll = 0.0f;
 		}
-		ctx.PopOverlay();
 	}
 
 	void PropertiesPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
@@ -910,9 +940,9 @@ namespace World
 		if (!m_ReadOnly && Button(ctx, Wui::HashId("prop.add"), addButton,
 			Wui::Tr("panel.properties.add_component", "Add Component"), theme))
 			OpenAddComponentPicker(ctx);
-		// U6:平铺菜单 → 搜索优先的组件选择器(方案 §8.2;候选/分类/说明全部来自 schema)。
-		if (!m_ReadOnly && ctx.IsPopupOpen(Wui::HashId("prop.add.popup")))
-			DrawAddComponentPicker(ctx, addButton, entity, scene, schemas);
+		// U6b:平铺菜单 → **居中模态**的搜索选择器(候选/分类/说明全部来自 schema)。
+		if (!m_ReadOnly && m_AddOpen)
+			DrawAddComponentPicker(ctx, entity, scene, schemas);
 
 		// 组件分区进入保留模式布局树;字段内容复用已测的 schema 绘制逻辑。
 		std::vector<const Schema::TypeSchema*> componentSchemas;
