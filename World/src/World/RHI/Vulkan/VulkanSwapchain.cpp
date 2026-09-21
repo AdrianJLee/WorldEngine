@@ -78,6 +78,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanSwapchain::~VulkanSwapchain()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;   // 设备已丢失:交换链还在队列跟踪里,交给 vkDestroyDevice/进程回收
 		if (m_Swapchain) vkDestroySwapchainKHR(m_Device.GetNativeDevice(), m_Swapchain, nullptr);
 		if (m_Surface) vkDestroySurfaceKHR(m_Device.GetInstance(), m_Surface, nullptr);
 	}
@@ -107,6 +109,10 @@ namespace World::Rhi::Vulkan
 			result.Failed = true;
 			return result;
 		}
+		// P4-CLEANUP:acquire 也会丢设备(TDR 后第一枪往往在这里)——置位丢失标志,
+		// 否则退出路径的守卫看不到"设备已死"。
+		if (status == VK_ERROR_DEVICE_LOST)
+			m_Device.NotifyDeviceLost("swapchain acquire");
 		if (status != VK_SUCCESS && status != VK_SUBOPTIMAL_KHR)
 		{
 			// 例如 VK_ERROR_SURFACE_LOST_KHR:不存在可渲染图像,且信号量不会被 signal。
@@ -141,7 +147,10 @@ namespace World::Rhi::Vulkan
 		info.swapchainCount = 1;
 		info.pSwapchains = &m_Swapchain;
 		info.pImageIndices = &m_CurrentImageIndex;
-		vkQueuePresentKHR(m_Device.GetGraphicsQueue(), &info);
+		const VkResult result = vkQueuePresentKHR(m_Device.GetGraphicsQueue(), &info);
+		// P4-CLEANUP:present 同样要置位(2026-09-20 前现场就是 present 后丢设备)。
+		if (result == VK_ERROR_DEVICE_LOST)
+			m_Device.NotifyDeviceLost("swapchain present");
 	}
 
 	Extent2D VulkanSwapchain::GetExtent() const { return m_Extent; }

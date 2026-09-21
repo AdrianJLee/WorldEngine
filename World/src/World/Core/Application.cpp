@@ -143,12 +143,26 @@ namespace World
 
 			if (!m_Minimized)
 			{
+				// P4-CLEANUP:帧相位追踪(诊断用,默认关)。用途:主线程"卡住但不是崩溃"时,
+				// 日志最后一条相位就是凶手(2026-09-21 device-lost 挂起事故就是靠它定位的)。
+				// `WLD_FRAME_TRACE=1` 打开。
+				static const bool frameTrace = [] {
+					const char* env = std::getenv("WLD_FRAME_TRACE");
+					return env && env[0] != '\0' && env[0] != '0';
+				}();
+				const auto tracePhase = [](const char* phase) {
+					if (frameTrace)
+						WLD_CORE_INFO("[frame-trace] {0}", phase);
+				};
+				tracePhase("Renderer::BeginFrame");
 				Renderer::BeginFrame();
+				tracePhase("Renderer::BeginFramePresent");
 				Renderer::BeginFramePresent();
 				{
 					WLD_PROFILE_SCOPE("LayerStack OnUpdate");
 					for (Layer* layer : m_LayerStack)
 					{
+						tracePhase(("OnUpdate " + std::string(layer->GetName())).c_str());
 						layer->OnUpdate(timestep);
 					}
 				}
@@ -157,10 +171,13 @@ namespace World
 					WLD_PROFILE_SCOPE("LayerStack UiFrame");
 					for (Layer* layer : m_LayerStack)
 					{
+						tracePhase(("OnUiFrame " + std::string(layer->GetName())).c_str());
 						layer->OnUiFrame();
 					}
 				}
+				tracePhase("Renderer::EndFramePresent");
 				Renderer::EndFramePresent();
+				tracePhase("Renderer::EndFrame");
 				Renderer::EndFrame();
 			}
 

@@ -275,6 +275,31 @@ namespace World
 			// 之后再清一次 Dirty,否则会每帧都重建交换链(实测 18ms/帧、FPS 40)。
 			state.Dirty = true;
 		}
+
+		// ---- P4-CLEANUP:设备已丢失(TDR/reset)时的退出硬化 ----
+		// "设备已丢失"只在 Vulkan 设备上有语义(OpenGL 后端没有这个概念,恒为 false)。
+		// 返回 true 时:该设备上的"等 GPU 空闲 / 提交"都不会成功(规范:返回
+		// VK_ERROR_DEVICE_LOST),退出路径按"跳过 GPU 交互、只释放 CPU 侧句柄"处理。
+		bool DeviceLost(const Rhi::Handle<Rhi::Device>& device)
+		{
+			if (!device)
+				return false;
+			const auto vulkanDevice = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanDevice>(device);
+			return vulkanDevice && vulkanDevice->IsDeviceLost();
+		}
+
+		// 跳过 GPU 交互的提示**只报一次**:退出会依次经过 WaitForGpu → 各独立窗口的
+		// DestroyPresentTarget → Renderer::Shutdown,三处跳过的是同一件事,逐处报会刷屏。
+		void WarnDeviceLostSkipOnce(const char* action)
+		{
+			static bool warned = false;
+			if (warned)
+				return;
+			warned = true;
+			WLD_CORE_WARN("[shutdown] 设备已丢失:跳过 GPU 等待/交互({0});"
+				"按原顺序继续释放 CPU 侧句柄(释放钩子与资源销毁不受影响)",
+				action ? action : "?");
+		}
 	}
 
 	void Renderer::Init()
@@ -352,8 +377,13 @@ namespace World
 		// 释放交换链画面/信号量/描述符池前必须让 GPU 工作结束,
 		// 否则触发 VUID-vkDestroyFramebuffer-00892 / vkDestroySemaphore-05149 /
 		// vkDestroyDescriptorPool-00303(销毁仍在被提交命令引用的对象)。
-		if (m_Device)
+		// P4-CLEANUP:设备已丢失时这一步等不到任何东西(vkDeviceWaitIdle 立刻返回
+		// VK_ERROR_DEVICE_LOST,驱动的在途工作已被终止),按"设备丢失 = 跳过 GPU 交互、
+		// 只释放 CPU 侧句柄"的口径跳过;**下面的释放钩子/子系统/呈现状态清理顺序不变**。
+		if (m_Device && !DeviceLost(m_Device))
 			m_Device->WaitIdle();
+		else if (m_Device)
+			WarnDeviceLostSkipOnce("Renderer::Shutdown 的整设备等待(WaitIdle)");
 		for (uint32_t i = 0; i < kFramesInFlight; ++i)
 		{
 			s_FrameFences[i] = nullptr;
@@ -432,17 +462,46 @@ namespace World
 	{
 		if (!m_Device)
 			return;
+		// P4-CLEANUP(2026-09-21):诊断/回归钩子 —— 人为把设备标记为"已丢失",用来验证
+		// "丢失之后安全退出"这条路径(真实 TDR 不可控,之前的回归只能靠碰运气复现)。
+		// 用法:`WLD_VK_SIMULATE_DEVICE_LOST=<帧号>` → 该帧起所有提交/等待按"设备已死"处理,
+		// 退出应仍然干净(0xC0000005 不再出现)。只影响被显式打开该变量的进程。
+		if (s_BackendName == "vulkan")
+		{
+			if (const char* simulate = std::getenv("WLD_VK_SIMULATE_DEVICE_LOST"))
+			{
+				const uint64_t targetFrame = std::strtoull(simulate, nullptr, 10);
+				if (targetFrame != 0 && s_FrameNumber == targetFrame)
+				{
+					if (const auto vulkanDevice = std::dynamic_pointer_cast<Rhi::Vulkan::VulkanDevice>(m_Device))
+						vulkanDevice->NotifyDeviceLost("simulated (WLD_VK_SIMULATE_DEVICE_LOST)");
+				}
+			}
+		}
 		TimingBeginFrame();
 		const uint32_t slot = FrameSlot();
 		if (s_BackendName == "vulkan" && s_FrameFenceSubmitted[slot])
 		{
 			// 该槽位上一轮提交的 GPU 工作完成后才开始复用其资源(替代整队列 WaitIdle)。
-			TimingScope fenceScope(Timing().Fence);
-			if (!s_FrameFences[slot])
-				s_FrameFences[slot] = m_Device->CreateFence(false);
-			s_FrameFences[slot]->Wait();
-			s_FrameFences[slot]->Reset();
-			s_FrameFenceSubmitted[slot] = false;
+			// P4-CLEANUP(2026-09-21,实测挂起事故):设备已丢失时**必须跳过这次等待** ——
+			// 丢失之后 VulkanCommandQueue::Submit 会早退,帧末那次"挂栅栏的空提交"根本没发出去,
+			// 栅栏永远不会 signal,而 EndFrame 已经把它标成已提交 → 本函数等到 3 帧后回到同一槽位时
+			// 就永久阻塞(实测:主线程卡死、窗口无响应、AI 通道 10s 超时)。
+			// 丢失时"等 GPU"没有语义(驱动已终止在途工作),清标志继续走,让宿主决定退出/恢复。
+			if (DeviceLost(m_Device))
+			{
+				WarnDeviceLostSkipOnce("Renderer::BeginFrame 的帧栅栏等待");
+				s_FrameFenceSubmitted[slot] = false;
+			}
+			else
+			{
+				TimingScope fenceScope(Timing().Fence);
+				if (!s_FrameFences[slot])
+					s_FrameFences[slot] = m_Device->CreateFence(false);
+				s_FrameFences[slot]->Wait();
+				s_FrameFences[slot]->Reset();
+				s_FrameFenceSubmitted[slot] = false;
+			}
 		}
 		RunDeferredReleases(s_FrameNumber);
 	}
@@ -493,6 +552,13 @@ namespace World
 		// GL 语义下没有跨帧 GPU 队列:调用点自身已同步。
 		if (!m_Device || s_BackendName != "vulkan")
 			return;
+		// P4-CLEANUP:设备已丢失时"等 GPU 空闲"没有语义 —— 驱动的在途工作已被终止。
+		// 宿主退出序列第一步就调到这里(Application::Shutdown),跳过并说明。
+		if (DeviceLost(m_Device))
+		{
+			WarnDeviceLostSkipOnce("Renderer::WaitForGpu 的整设备等待(WaitIdle)");
+			return;
+		}
 		m_Device->WaitIdle();
 	}
 
@@ -598,7 +664,9 @@ namespace World
 			s_ActivePresent = &s_MainPresent;
 		// 销毁独立窗口的交换链前先等 GPU 空闲:该窗口可能刚提交过帧,
 		// 直接释放会让 Vulkan 在仍有在途工作时销毁资源(访问违例)。
-		if (m_Device)
+		// P4-CLEANUP:设备已丢失时在途工作已被驱动终止,这里的等待同样跳过;
+		// 交换链/画面/信号量仍按原顺序释放(都是 CPU 侧句柄)。
+		if (m_Device && !DeviceLost(m_Device))
 			m_Device->WaitIdle();
 		ReleasePresentState(*state);
 		s_AuxPresent.erase(std::remove_if(s_AuxPresent.begin(), s_AuxPresent.end(),

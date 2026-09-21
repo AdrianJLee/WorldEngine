@@ -173,6 +173,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanBuffer::~VulkanBuffer()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;   // 设备已丢失:交给 vkDestroyDevice/进程回收(见 VulkanDevice::SkipNativeDestroy)
 		const VkDevice device = m_Device.GetNativeDevice();
 		if (m_Mapped) vkUnmapMemory(device, m_Memory);
 		if (m_Buffer) vkDestroyBuffer(device, m_Buffer, nullptr);
@@ -273,6 +275,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanTexture::~VulkanTexture()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		const VkDevice device = m_Device.GetNativeDevice();
 		if (m_View) vkDestroyImageView(device, m_View, nullptr);
 		if (m_OwnsImage)
@@ -453,6 +457,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanSampler::~VulkanSampler()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		if (m_Sampler) vkDestroySampler(m_Device.GetNativeDevice(), m_Sampler, nullptr);
 	}
 
@@ -477,6 +483,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanShader::~VulkanShader()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		for (VkShaderModule module : m_Modules)
 			vkDestroyShaderModule(m_Device.GetNativeDevice(), module, nullptr);
 	}
@@ -573,6 +581,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanRenderPass::~VulkanRenderPass()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		if (m_RenderPass) vkDestroyRenderPass(m_Device.GetNativeDevice(), m_RenderPass, nullptr);
 	}
 
@@ -598,6 +608,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanFramebuffer::~VulkanFramebuffer()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		if (m_Framebuffer) vkDestroyFramebuffer(m_Device.GetNativeDevice(), m_Framebuffer, nullptr);
 	}
 
@@ -640,6 +652,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanDescriptorSetLayout::~VulkanDescriptorSetLayout()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		if (m_Layout) vkDestroyDescriptorSetLayout(m_Device.GetNativeDevice(), m_Layout, nullptr);
 	}
 
@@ -682,6 +696,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanDescriptorSet::~VulkanDescriptorSet()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		if (m_Pool)
 			vkDestroyDescriptorPool(m_Device.GetNativeDevice(), m_Pool, nullptr);
 	}
@@ -762,6 +778,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanFence::~VulkanFence()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		if (m_Fence) vkDestroyFence(m_Device.GetNativeDevice(), m_Fence, nullptr);
 	}
 
@@ -795,6 +813,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanSemaphore::~VulkanSemaphore()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		if (m_Semaphore) vkDestroySemaphore(m_Device.GetNativeDevice(), m_Semaphore, nullptr);
 	}
 
@@ -834,6 +854,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanQueryPool::~VulkanQueryPool()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;
 		if (m_Pool) vkDestroyQueryPool(m_Device.GetNativeDevice(), m_Pool, nullptr);
 	}
 }

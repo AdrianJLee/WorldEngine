@@ -210,6 +210,8 @@ namespace World::Rhi::Vulkan
 
 	VulkanPipeline::~VulkanPipeline()
 	{
+		if (m_Device.SkipNativeDestroy())
+			return;   // 设备已丢失:交给 vkDestroyDevice/进程回收
 		if (m_Pipeline) vkDestroyPipeline(m_Device.GetNativeDevice(), m_Pipeline, nullptr);
 		if (m_Layout) vkDestroyPipelineLayout(m_Device.GetNativeDevice(), m_Layout, nullptr);
 	}

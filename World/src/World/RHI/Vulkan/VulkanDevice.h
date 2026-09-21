@@ -71,6 +71,16 @@ namespace World::Rhi::Vulkan
 		// 设备已丢失(vkQueueSubmit 返回 VK_ERROR_DEVICE_LOST):
 		// GPU 已被 TDR/reset 重置,后续任何提交都只会连锁报错。宿主应按"设备失效"处理。
 		bool IsDeviceLost() const { return m_DeviceLost; }
+		// P4-CLEANUP(2026-09-21):把"设备已丢失"集中置位 + **只报一次**,并顺带打印
+		// VK_EXT_device_fault 现场。此前只有 SubmitOneShot 会置位,而真实事故更常发生在
+		// queue submit / present / acquire —— 丢失标志不置位,退出路径的硬化守卫就都不会触发
+		// (2026-09-20 现场正是如此:queue submit 丢设备,IsDeviceLost() 仍是 false)。
+		void NotifyDeviceLost(const char* source);
+		// P4-CLEANUP(2026-09-21):设备已丢失后**不再逐个 vkDestroy***。
+		// 丢失时队列里还留着驱动层已废弃、但驱动/验证层仍在跟踪的批(信号量、栅栏、交换链);
+		// 逐个销毁会触发 VUID-vkDestroySemaphore-05149,真实 TDR 下更会踩到驱动 →
+		// 退出 0xC0000005(用户 2026-09-20 现场)。这些子对象随 vkDestroyDevice / 进程退出回收即可。
+		bool SkipNativeDestroy() const { return m_DeviceLost; }
 		// P4-UX5:设备丢失取证(VK_EXT_device_fault)。故障发生时把地址/引擎/厂商数据写进日志,
 		// 并把厂商二进制落到文件里 —— 没有验证层 VUID 的 GPU 引擎错误(如 nvlddmkm Event 153)
 		// 只有这里能给出线索。

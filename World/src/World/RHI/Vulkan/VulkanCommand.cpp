@@ -126,6 +126,9 @@ namespace World::Rhi::Vulkan
 
 	VulkanCommandBuffer::~VulkanCommandBuffer()
 	{
+		// 设备已丢失时命令池整体交给 vkDestroyDevice 回收(丢失后释放命令缓冲会踩驱动)。
+		if (m_Device.SkipNativeDestroy())
+			return;
 		vkFreeCommandBuffers(m_Device.GetNativeDevice(), m_Pool, 1, &m_CommandBuffer);
 	}
 
@@ -626,9 +629,12 @@ namespace World::Rhi::Vulkan
 				}
 			if (result == VK_ERROR_DEVICE_LOST)
 			{
-				WLD_CORE_ERROR("[RHI-VK] device lost in queue submit (commandBuffers=[{0}]); GPU work stopped",
-					names);
-				m_Device.LogDeviceFault(names.empty() ? "queue-submit" : names.c_str());
+				// P4-CLEANUP:置位"设备已丢失"(此前这里只打日志 → 丢失标志仍是 false,
+				// 退出路径的硬化守卫不会触发)。详细出处只在**首次**丢失时打一行。
+				const bool firstLoss = !m_Device.IsDeviceLost();
+				m_Device.NotifyDeviceLost(names.empty() ? "queue-submit" : names.c_str());
+				if (firstLoss)
+					WLD_CORE_ERROR("[RHI-VK] vkQueueSubmit 丢设备,出处 commandBuffers=[{0}]", names);
 			}
 			else
 			{
@@ -658,7 +664,10 @@ namespace World::Rhi::Vulkan
 		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submit.commandBufferCount = 1;
 		submit.pCommandBuffers = &native;
-		vkQueueSubmit(m_Device.GetGraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+		const VkResult submitResult = vkQueueSubmit(m_Device.GetGraphicsQueue(), 1, &submit, VK_NULL_HANDLE);
+		// P4-CLEANUP:一次性立即提交同样要置位"设备已丢失"(此前返回值被忽略)。
+		if (submitResult == VK_ERROR_DEVICE_LOST)
+			m_Device.NotifyDeviceLost("immediate submit");
 		vkQueueWaitIdle(m_Device.GetGraphicsQueue());
 	}
 }

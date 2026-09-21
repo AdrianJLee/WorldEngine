@@ -336,8 +336,26 @@ namespace World::Rhi::Vulkan
 
 	void VulkanDevice::WaitIdle()
 	{
+		// P4-CLEANUP:设备已丢失时 vkDeviceWaitIdle 只会立刻返回 VK_ERROR_DEVICE_LOST,
+		// 在途工作已被驱动终止 —— 不再发这次无意义的等待(退出路径由 Renderer 守卫跳过)。
+		if (m_DeviceLost)
+		{
+			if (std::getenv("WLD_VK_PRESENT_TRACE"))
+				WLD_CORE_WARN("[RHI-VK] WaitIdle skipped: device is lost");
+			return;
+		}
 		if (m_Device)
 			vkDeviceWaitIdle(m_Device);
+	}
+
+	void VulkanDevice::NotifyDeviceLost(const char* source)
+	{
+		// 只报一次:设备已死,后续每一处失败都是同一件事的噪声。
+		if (m_DeviceLost)
+			return;
+		m_DeviceLost = true;
+		WLD_CORE_ERROR("[RHI-VK] device lost in {0}; GPU work stopped", source ? source : "unknown");
+		LogDeviceFault(source ? source : "device-lost");
 	}
 
 	// P4-UX5:device lost 取证。用户实测的两次事故都只有驱动级 nvlddmkm Event 153
@@ -494,10 +512,11 @@ namespace World::Rhi::Vulkan
 			// DEVICE_LOST 只报一次:设备已死,后续每帧的失败都是噪声。
 			if (submitResult == VK_ERROR_DEVICE_LOST && !m_DeviceLost)
 			{
-				m_DeviceLost = true;
-				WLD_CORE_ERROR("[RHI-VK] device lost in one-shot submit '{0}'; GPU work stopped",
-					label ? label : "unlabelled");
-				LogDeviceFault(label ? label : "SubmitOneShot");
+				// 统一走 NotifyDeviceLost(置位 + 只报一次 + 打印 device fault 现场)。
+				std::string source = "one-shot submit '";
+				source += label ? label : "unlabelled";
+				source += "'";
+				NotifyDeviceLost(source.c_str());
 			}
 			else if (!m_DeviceLost && std::getenv("WLD_VK_PRESENT_TRACE"))
 				WLD_CORE_ERROR("[RHI-VK] SubmitOneShot vkQueueSubmit failed result={0}", static_cast<int>(submitResult));
