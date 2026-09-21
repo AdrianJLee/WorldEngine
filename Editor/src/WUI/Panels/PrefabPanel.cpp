@@ -1,21 +1,31 @@
 #include "wldpch.h"
 #include "PrefabPanel.h"
 
+#include "EditorAssetCatalog.h"
+
 #include "World/Core/Application.h"
+#include "World/Core/KeyCodes.h"
+#include "World/Gameplay/Prefab.h"
 #include "World/Gameplay/PrefabTypes.h"
+#include "World/Renderer/Renderer.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/SceneSerializer.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
+#include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <functional>
+#include <sstream>
 #include <unordered_map>
 
 namespace World
@@ -29,6 +39,11 @@ namespace World
 		constexpr float kTwoColumnMinWidth = 560.0f;
 		// 读盘节流:同一份资产 2s 内不重复反序列化(不做逐帧读盘)。
 		constexpr double kDiskScanInterval = 2.0;
+		// 保存/回滚后的静默期:状态行写的是 "Saved …"/"Reverted …",不要被 TTL 重扫刷掉。
+		constexpr double kStatusHoldInterval = 30.0;
+		// 就地编辑的行距/控件尺寸(与属性面板同一密度)。
+		constexpr float kFieldRowHeight = 22.0f;
+		constexpr float kReadOnlyLineHeight = 16.0f;
 
 		double NowSeconds()
 		{
@@ -64,6 +79,55 @@ namespace World
 			char buffer[48] = {};
 			std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
 			return buffer;
+		}
+
+		// 组件短名(小节标题 / 字段 id / AI 通道的 component 参数共用一份拼写)。
+		constexpr const char* kTransformComponent = "Transform";
+		constexpr const char* kMeshRendererComponent = "MeshRenderer";
+		constexpr const char* kCameraComponent = "Camera";
+		constexpr const char* kDirectionalLightComponent = "DirectionalLight";
+		constexpr const char* kPointLightComponent = "PointLight";
+		constexpr const char* kAmbientLightComponent = "AmbientLight";
+
+		std::string LocalTimeStamp()
+		{
+			const std::time_t now = std::time(nullptr);
+			std::tm local {};
+			localtime_s(&local, &now);
+			char buffer[32] = {};
+			std::strftime(buffer, sizeof(buffer), "%H:%M:%S", &local);
+			return buffer;
+		}
+
+		// 逻辑路径 → 内容根下的绝对路径。
+		std::filesystem::path AbsoluteAssetPath(const std::string& logical)
+		{
+			return std::filesystem::path(std::string(WLD_ASSETPATH)) / logical;
+		}
+
+		// 内容根里这个逻辑路径是不是真的存在(编辑时的只读校验,不阻断保存)。
+		bool AssetPathExists(const std::string& logical)
+		{
+			if (logical.empty())
+				return true;
+			std::error_code ec;
+			return std::filesystem::is_regular_file(AbsoluteAssetPath(logical), ec);
+		}
+
+		bool ParseFloat3Text(const std::string& text, glm::vec3* out)
+		{
+			std::stringstream stream(text);
+			std::string part;
+			float values[3] = { 0.0f, 0.0f, 0.0f };
+			int index = 0;
+			while (std::getline(stream, part, ',') && index < 3)
+				values[index++] = std::strtof(part.c_str(), nullptr);
+			if (index == 0)
+				return false;
+			for (; index < 3; ++index)
+				values[index] = 0.0f;
+			*out = { values[0], values[1], values[2] };
+			return true;
 		}
 
 		// ---- 无障碍登记(与 WuiWidgets.cpp / PropertiesPanel 同一格式) ----
@@ -166,6 +230,9 @@ namespace World
 
 	PrefabPanel::PrefabPanel(std::string logicalPath)
 	{
+		// 预览资源属于当前设备:设备释放(后端切换/关闭)前必须把句柄放掉,否则会在设备
+		// 之后析构(与 ModelPreviewPanel 同因同修;实测漏掉会 0xC0000005)。
+		Renderer::RegisterDeviceReleaseHook(this, [this] { ReleasePreviewResources(); });
 		m_LogicalPath = NormalizePath(std::move(logicalPath));
 		m_PanelId = "prefab:" + m_LogicalPath;
 		const std::string name = std::filesystem::path(m_LogicalPath).filename().string();
@@ -173,11 +240,26 @@ namespace World
 		m_Status = Wui::Tr("panel.prefab.status.loading", "Loading prefab...");
 	}
 
-	PrefabPanel::~PrefabPanel() = default;
+	PrefabPanel::~PrefabPanel()
+	{
+		Renderer::UnregisterDeviceReleaseHook(this);
+		ReleasePreviewResources();
+	}
 
 	bool PrefabPanel::ReloadNow(Scene* activeScene, std::string* message)
 	{
+		// 有未保存改动时**不重读**:重复双击资产/`asset.open_prefab` 是"刷新"入口,
+		// 但刷新不能把窗口里刚编辑的值静默盖掉(要丢改动得显式点 Revert)。
+		if (m_Dirty)
+		{
+			if (message)
+				*message = Wui::Tr("panel.prefab.reload.dirty",
+					"Not reloaded: this window has unsaved changes (Save or Revert first).");
+			return true;
+		}
 		RefreshFromDisk(activeScene, true);
+		// 显式重开 = 重新取景(用户双击资产/`asset.open_prefab` 都走这条)。
+		m_PreviewFramed = false;
 		if (message)
 			*message = m_Status;
 		return m_DocumentValid;
@@ -185,6 +267,9 @@ namespace World
 
 	void PrefabPanel::RefreshFromDisk(Scene* activeScene, bool force)
 	{
+		// 有未保存改动时不重扫:磁盘内容不能静默盖掉用户刚编辑的值(Revert/Save 才动它)。
+		if (m_Dirty && !force)
+			return;
 		const double now = NowSeconds();
 		if (!force && now < m_NextDiskScan)
 			return;
@@ -198,6 +283,8 @@ namespace World
 		m_Rows.clear();
 		m_Assets.clear();
 		m_DocumentValid = false;
+		m_AssetWarning.clear();
+		m_LastSavedText.clear();
 
 		// staging 场景的上下文:优先当前文档场景(与它同一份 schemas/VFS),没有就用应用上下文。
 		WorldContext* context = activeScene ? &activeScene->GetContext()
@@ -234,9 +321,160 @@ namespace World
 		m_DocumentValid = true;
 		RebuildRows();
 		m_Assets = CollectReferencedAssets();
+		RefreshStatusText();
+	}
+
+	// ---- P4-U13e:状态行 / 脏标记 / 资产路径警告 ----
+
+	void PrefabPanel::RefreshStatusText()
+	{
+		if (!m_DocumentValid)
+			return;   // 失败原因由 LoadStaging 直接写(可读原因不能被覆盖)
+		if (!m_AssetWarning.empty())
+		{
+			m_Status = m_AssetWarning;
+			m_StatusIsError = true;
+			return;
+		}
+		if (m_Dirty)
+		{
+			m_Status = Wui::Tr("panel.prefab.status.edited",
+				"Unsaved changes — Save writes them back into this .wprefab.");
+			m_StatusIsError = false;
+			return;
+		}
+		if (!m_LastSavedText.empty())
+		{
+			m_Status = m_LastSavedText;
+			m_StatusIsError = false;
+			return;
+		}
 		m_Status = std::to_string(m_Rows.size()) + " entities · "
 			+ std::to_string(m_Assets.size()) + " referenced assets";
 		m_StatusIsError = false;
+	}
+
+	void PrefabPanel::MarkDirty()
+	{
+		m_Dirty = true;
+		m_LastSavedText.clear();
+		// 引用资产清单可能因路径编辑而变化(去重排序)。
+		m_Assets = CollectReferencedAssets();
+		RefreshStatusText();
+	}
+
+	void PrefabPanel::RefreshAssetWarning()
+	{
+		m_AssetWarning.clear();
+		if (!m_Staging)
+			return;
+		const entt::registry& registry = m_Staging->GetRegistry();
+		const auto* entities = registry.storage<entt::entity>();
+		if (!entities)
+			return;
+		const auto check = [this](const std::string& path) -> bool
+		{
+			if (path.empty() || AssetPathExists(path))
+				return false;
+			m_AssetWarning = std::string(Wui::Tr("panel.prefab.status.asset_missing",
+				"Warning: asset path not found in the content root: ")) + path;
+			return true;
+		};
+		for (const entt::entity handle : *entities)
+		{
+			if (const auto* mesh = registry.try_get<MeshRendererComponent>(handle))
+			{
+				if (check(mesh->MeshPath) || check(mesh->MaterialPath))
+					return;
+			}
+			if (const auto* skinned = registry.try_get<SkinnedMeshRendererComponent>(handle))
+			{
+				if (check(skinned->MeshPath) || check(skinned->MaterialPath))
+					return;
+			}
+		}
+	}
+
+	entt::entity PrefabPanel::StagingRoot() const
+	{
+		if (!m_Staging)
+			return entt::null;
+		const entt::registry& registry = m_Staging->GetRegistry();
+		// 与 Gameplay::InstantiateFromFile 同一口径:没有有效父节点的实体就是实例根
+		// (prefab 文件按约定只有一个根)。
+		for (const entt::entity handle : registry.view<UUIDComponent>())
+		{
+			const auto* hierarchy = registry.try_get<HierarchyComponent>(handle);
+			if (!hierarchy || hierarchy->Parent == entt::null || !registry.valid(hierarchy->Parent))
+				return handle;
+		}
+		return entt::null;
+	}
+
+	void PrefabPanel::DiscardUnsavedChanges()
+	{
+		m_Dirty = false;
+		m_AssetWarning.clear();
+		m_LastSavedText.clear();
+		// 下一帧强制重读:内存里的编辑丢弃,面板回到磁盘版本。
+		m_NextDiskScan = 0.0;
+	}
+
+	bool PrefabPanel::SaveToDisk(std::string* message)
+	{
+		if (!m_Staging)
+		{
+			if (message) *message = Wui::Tr("panel.prefab.save.no_document", "Nothing to save: the prefab could not be read");
+			return false;
+		}
+		const entt::entity root = StagingRoot();
+		if (root == entt::null)
+		{
+			if (message) *message = Wui::Tr("panel.prefab.save.no_root",
+				"Cannot save: this prefab has no root entity to export");
+			m_Status = *message;
+			m_StatusIsError = true;
+			return false;
+		}
+		const std::filesystem::path absolute = AbsoluteAssetPath(m_LogicalPath);
+		std::string error;
+		if (!Gameplay::SaveFromScene(*m_Staging, Entity(m_Staging.get(), root), absolute, &error))
+		{
+			m_Status = error.empty()
+				? (std::string(Wui::Tr("panel.prefab.save.failed", "Save failed: ")) + m_LogicalPath)
+				: error;
+			m_StatusIsError = true;
+			if (message) *message = m_Status;
+			return false;
+		}
+		m_Dirty = false;
+		m_LastSavedText = std::string(Wui::Tr("panel.prefab.status.saved", "Saved ")) + LocalTimeStamp();
+		RefreshStatusText();
+		// 保存后的状态行(以及"Saved"语义)要留得住:TTL 重扫不能马上把它刷回实体计数。
+		m_NextDiskScan = NowSeconds() + kStatusHoldInterval;
+		WLD_CORE_INFO("[prefab] window saved '{0}' (entities={1})", m_LogicalPath, m_Rows.size());
+		if (message) *message = m_Status;
+		return true;
+	}
+
+	bool PrefabPanel::RevertFromDisk(Scene* activeScene, std::string* message)
+	{
+		m_Dirty = false;
+		m_AssetWarning.clear();
+		m_LastSavedText.clear();
+		LoadStaging(activeScene);
+		if (!m_DocumentValid)
+		{
+			if (message) *message = m_Status;
+			return false;
+		}
+		m_LastSavedText = Wui::Tr("panel.prefab.status.reverted",
+			"Reverted: reloaded this asset from disk (unsaved edits discarded).");
+		RefreshStatusText();
+		m_NextDiskScan = NowSeconds() + kStatusHoldInterval;
+		WLD_CORE_INFO("[prefab] window reverted '{0}'", m_LogicalPath);
+		if (message) *message = m_Status;
+		return true;
 	}
 
 	void PrefabPanel::RebuildRows()
@@ -341,6 +579,202 @@ namespace World
 		return lines;
 	}
 
+	// P4-U13e:只读小节 —— 可编辑组件之外的部分仍要给摘要(用户 2026-09-21:
+	// 「除上述字段外的组件仍显示只读摘要」)。短名走 schema 的 DisplayName(去命名空间)。
+	std::vector<std::string> PrefabPanel::BuildReadOnlySummary(entt::entity handle) const
+	{
+		std::vector<std::string> lines;
+		if (!m_Staging)
+			return lines;
+		const entt::registry& registry = m_Staging->GetRegistry();
+		if (!registry.valid(handle))
+			return lines;
+
+		if (const auto* tag = registry.try_get<TagComponent>(handle))
+			lines.push_back("Tag: " + tag->Tag);
+		if (const auto* sprite = registry.try_get<SpriteComponent>(handle))
+			lines.push_back("Sprite: TilingFactor=" + FormatFloat(sprite->TilingFactor, 2));
+		if (const auto* skinned = registry.try_get<SkinnedMeshRendererComponent>(handle))
+			lines.push_back("SkinnedMeshRenderer: MeshPath="
+				+ (skinned->MeshPath.empty() ? std::string("(none)") : skinned->MeshPath)
+				+ "  MaterialPath=" + (skinned->MaterialPath.empty() ? std::string("(none)") : skinned->MaterialPath));
+
+		// 其余带 schema 的组件(物理/脚本/碰撞体…)按短名列一行,至少让用户知道它在这个实体上
+		// (这一层不暴露可写控件,所以不做字段级摘要)。
+		const Schema::SchemaRegistry& schemas = m_Staging->GetContext().Schemas();
+		for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
+		{
+			if (!schema || !schema->Storage)
+				continue;
+			const std::string& display = schema->DisplayName;
+			const std::string shortName = display.rfind("::", 0) == 0 ? display
+				: (display.find("::") != std::string::npos ? display.substr(display.rfind("::") + 2) : display);
+			if (shortName == "TagComponent" || shortName == "SpriteComponent"
+				|| shortName == "SkinnedMeshRendererComponent")
+				continue;   // 上面已经给过更具体的摘要
+			if (shortName == "TransformComponent" || shortName == "MeshRendererComponent"
+				|| shortName == "CameraComponent" || shortName == "DirectionalLightComponent"
+				|| shortName == "PointLightComponent" || shortName == "AmbientLightComponent")
+				continue;   // 可编辑小节已经覆盖
+			const auto* storage = registry.storage(schema->Storage->ComponentId);
+			if (storage && storage->contains(handle))
+				lines.push_back(shortName + ": (read-only)");
+		}
+		return lines;
+	}
+
+	// P4-U13e:AI 通道的脚本化写字段 —— 与面板控件同一条写入口(同一个脏标记/状态行通道)。
+	// 只接受 v1 的可编辑字段;不认识的 component/field 直接拒绝并给出可读原因。
+	bool PrefabPanel::SetEditableField(const std::string& component, const std::string& field,
+		const std::string& value, const std::string& axis, std::string* message)
+	{
+		if (!m_Staging || m_SelectedRow < 0 || m_SelectedRow >= static_cast<int>(m_Rows.size()))
+		{
+			if (message) *message = "no entity selected in the prefab window";
+			return false;
+		}
+		const entt::entity handle = m_Rows[static_cast<std::size_t>(m_SelectedRow)].Handle;
+		entt::registry& registry = m_Staging->GetRegistry();
+		if (!registry.valid(handle))
+		{
+			if (message) *message = "selected entity is no longer valid";
+			return false;
+		}
+		const auto reject = [&](const char* reason)
+		{
+			if (message)
+				*message = std::string(reason) + ": " + component + "." + field;
+			return false;
+		};
+		const auto parseScalar = [&](float* out)
+		{
+			char* end = nullptr;
+			const float parsed = std::strtof(value.c_str(), &end);
+			if (!end || end == value.c_str() || *end != 0)
+				return false;
+			*out = parsed;
+			return true;
+		};
+
+		if (component == kTransformComponent)
+		{
+			auto* transform = registry.try_get<TransformComponent>(handle);
+			if (!transform)
+				return reject("entity has no such component");
+			glm::vec3 target;
+			if (field == "Location") target = transform->Location;
+			else if (field == "Rotation") target = transform->Rotation;
+			else if (field == "Scale") target = transform->Scale;
+			else return reject("field is not editable");
+			if (axis == "x" || axis == "y" || axis == "z")
+			{
+				float scalar = 0.0f;
+				if (!parseScalar(&scalar))
+					return reject("value is not a number");
+				target[axis == "x" ? 0 : (axis == "y" ? 1 : 2)] = scalar;
+			}
+			else if (!ParseFloat3Text(value, &target))
+			{
+				return reject("value is not a number");
+			}
+			if (field == "Location") transform->SetLocation(target);
+			else if (field == "Rotation") transform->SetRotation(target);
+			else transform->SetScale(target);
+		}
+		else if (component == kMeshRendererComponent)
+		{
+			auto* mesh = registry.try_get<MeshRendererComponent>(handle);
+			if (!mesh)
+				return reject("entity has no such component");
+			if (field == "Primitive") mesh->Primitive = value;
+			else if (field == "MeshPath") mesh->MeshPath = value;
+			else if (field == "MaterialPath") mesh->MaterialPath = value;
+			else if (field == "MeshIndex")
+			{
+				float scalar = 0.0f;
+				if (!parseScalar(&scalar))
+					return reject("value is not a number");
+				mesh->MeshIndex = static_cast<int32_t>(scalar);
+			}
+			else return reject("field is not editable");
+			RefreshAssetWarning();
+		}
+		else if (component == kCameraComponent)
+		{
+			auto* camera = registry.try_get<CameraComponent>(handle);
+			if (!camera)
+				return reject("entity has no such component");
+			float scalar = 0.0f;
+			if (!parseScalar(&scalar))
+				return reject("value is not a number");
+			if (field == "Fov") camera->Camera.SetPerspectiveFOV(scalar);
+			else if (field == "NearClip") camera->Camera.SetPerspectiveNearClip(scalar);
+			else if (field == "FarClip") camera->Camera.SetPerspectiveFarClip(scalar);
+			else return reject("field is not editable");
+		}
+		else if (component == kDirectionalLightComponent || component == kPointLightComponent
+			|| component == kAmbientLightComponent)
+		{
+			glm::vec3* color = nullptr;
+			float* intensity = nullptr;
+			float* range = nullptr;
+			if (auto* light = registry.try_get<DirectionalLightComponent>(handle);
+				component == kDirectionalLightComponent && light)
+			{
+				color = &light->Color;
+				intensity = &light->Intensity;
+			}
+			else if (auto* light = registry.try_get<PointLightComponent>(handle);
+				component == kPointLightComponent && light)
+			{
+				color = &light->Color;
+				intensity = &light->Intensity;
+				range = &light->Range;
+			}
+			else if (auto* light = registry.try_get<AmbientLightComponent>(handle);
+				component == kAmbientLightComponent && light)
+			{
+				color = &light->Color;
+				intensity = &light->Intensity;
+			}
+			if (!color)
+				return reject("entity has no such component");
+			if (field == "Color")
+			{
+				glm::vec3 rgb;
+				if (!ParseFloat3Text(value, &rgb))
+					return reject("value is not a number");
+				*color = rgb;
+			}
+			else if (field == "Intensity")
+			{
+				float scalar = 0.0f;
+				if (!parseScalar(&scalar))
+					return reject("value is not a number");
+				*intensity = scalar;
+			}
+			else if (field == "Range" && range)
+			{
+				float scalar = 0.0f;
+				if (!parseScalar(&scalar))
+					return reject("value is not a number");
+				*range = scalar;
+			}
+			else return reject("field is not editable");
+		}
+		else
+		{
+			return reject("component is not editable in the prefab window");
+		}
+
+		MarkDirty();
+		RefreshStatusText();
+		if (message)
+			*message = "set " + component + "." + field + (axis.empty() ? "" : ("." + axis))
+				+ " = " + value;
+		return true;
+	}
+
 	std::vector<std::string> PrefabPanel::CollectReferencedAssets() const
 	{
 		std::vector<std::string> assets;
@@ -428,12 +862,26 @@ namespace World
 		const float pad = 8.0f;
 		float y = rect.Y + 6.0f;
 
-		// ---- 头部:标题 + 三个动作(全部带悬停说明 + 无障碍 id)----
+		// ---- 头部:标题(脏时带 `*`)+ 动作(全部带悬停说明 + 无障碍 id)----
 		const std::string fileName = std::filesystem::path(m_LogicalPath).filename().string();
 		const std::string title = std::string(Wui::Tr("panel.prefab.title", "Prefab")) + ": "
-			+ (fileName.empty() ? m_LogicalPath : fileName);
+			+ (fileName.empty() ? m_LogicalPath : fileName) + (m_Dirty ? " *" : "");
 		if (rect.W >= 380.0f)
 			Wui::Label(ctx, { rect.X + pad, y + 4.0f }, TruncateUtf8(title, 72), theme.Text, 14.0f);
+		// 标题与脏标记都登记成节点:标题是判定"未保存"的稳定来源(脚本/读屏都能读)。
+		RegisterNode(Wui::HashId("prefab.title"), "title",
+			{ rect.X + pad, y, std::max(0.0f, rect.W * 0.5f), 22.0f },
+			Wui::Tr("panel.prefab.title", "Prefab"), title, true,
+			Wui::Tr("panel.prefab.title.tooltip",
+				"Editing this window writes back into the asset file (Save). A trailing * marks unsaved edits."),
+			false);
+		if (m_Dirty)
+			RegisterNode(Wui::HashId("prefab.dirty"), "status",
+				{ rect.X + pad, y + 22.0f, 120.0f, 14.0f },
+				Wui::Tr("panel.prefab.dirty", "Unsaved changes"), "true", true,
+				Wui::Tr("panel.prefab.dirty.tooltip",
+					"This window has edits that are not written into the .wprefab yet; Save writes them, Revert reloads from disk."),
+				false);
 
 		const bool hasDocument = m_DocumentValid;
 		const bool hasInstance = !m_Instances.empty();
@@ -445,6 +893,8 @@ namespace World
 		const std::string placeText = Wui::Tr("panel.prefab.place", "Place in Scene");
 		const std::string editText = Wui::Tr("panel.prefab.edit", "Edit Prefab");
 		const std::string locateText = Wui::Tr("panel.prefab.locate", "Locate Instance");
+		const std::string saveText = Wui::Tr("panel.prefab.save", "Save");
+		const std::string revertText = Wui::Tr("panel.prefab.revert", "Revert");
 		const std::string placeHint = !hasDocument ? unreadableHint
 			: (readOnly
 				? Wui::Tr("panel.prefab.place.readonly",
@@ -453,13 +903,17 @@ namespace World
 					"Instantiate this prefab into the current scene (world origin)."));
 		const std::string editHint = hasDocument
 			? Wui::Tr("panel.prefab.edit.tooltip",
-				"Open the prefab document edit session (3D viewport + gizmo); saving writes the asset back.")
+				"Open this prefab in the full editor (better for large hierarchy reworks); saving there writes the asset back.")
 			: unreadableHint;
 		const std::string locateHint = hasInstance
 			? Wui::Tr("panel.prefab.locate.tooltip",
 				"Select this prefab's first instance root in the Hierarchy panel.")
 			: Wui::Tr("panel.prefab.locate.disabled",
 				"Disabled: the current scene has no instance of this prefab (use Place in Scene first).");
+		const std::string saveHint = Wui::Tr("panel.prefab.save.tooltip",
+			"Write the current values back into this .wprefab; the window goes clean afterwards.");
+		const std::string revertHint = Wui::Tr("panel.prefab.revert.tooltip",
+			"Discard the edits in this window and reload the asset from disk.");
 
 		const float buttonH = 24.0f;
 		float buttonRight = rect.X + rect.W - pad;
@@ -471,11 +925,27 @@ namespace World
 			right = button.X - 6.0f;
 			return PanelActionButton(ctx, id, button, text, hint, enabled, theme);
 		};
+		// 未保存改动时头部才出现 Save / Revert(脏标记 + 这两个按钮一起出现,语义成对)。
+		const bool saveClicked = m_Dirty
+			? placeButton("prefab.save", saveText, buttonRight, hasDocument, saveHint) : false;
+		const bool revertClicked = m_Dirty
+			? placeButton("prefab.revert", revertText, buttonRight, true, revertHint) : false;
 		const bool locateClicked = placeButton("prefab.locate", locateText, buttonRight, hasInstance, locateHint);
 		const bool editClicked = placeButton("prefab.edit", editText, buttonRight, hasDocument, editHint);
 		const bool placeClicked = placeButton("prefab.place", placeText, buttonRight, canPlace, placeHint);
 		y += buttonH + 6.0f;
 
+		if (saveClicked)
+		{
+			std::string message;
+			if (!SaveToDisk(&message))
+				host.Notify(message);
+		}
+		if (revertClicked)
+		{
+			std::string message;
+			RevertFromDisk(scene, &message);
+		}
 		if (placeClicked)
 		{
 			std::string message;
@@ -493,11 +963,15 @@ namespace World
 		}
 		if (editClicked)
 		{
-			// 编辑仍然走文档会话(窗口只负责"看/管理");横幅出现后保存 = 写回这个资产。
+			// 完整编辑器仍然走文档会话;有未保存改动时由宿主先问一次(丢弃 / 取消)。
 			host.OpenPrefabEditor(m_LogicalPath);
-			m_Status = std::string(Wui::Tr("panel.prefab.status.editing", "Opened the edit session: "))
-				+ m_LogicalPath;
-			m_StatusIsError = false;
+			// 宿主拦下(弹确认)时这次并没有真的切过去 —— 状态行不能先写"已进入会话"。
+			if (!m_Dirty)
+			{
+				m_Status = std::string(Wui::Tr("panel.prefab.status.editing", "Opened the edit session: "))
+					+ m_LogicalPath;
+				m_StatusIsError = false;
+			}
 		}
 		if (locateClicked && hasInstance)
 			SelectInstance(host, scene, m_Instances.front().Handle);
@@ -511,34 +985,275 @@ namespace World
 			m_StatusIsError ? theme.Danger : theme.TextMuted, 12.0f);
 		y += statusRect.H + 6.0f;
 
-		// ---- 内容:左树右详情;窄窗口退化成单列 ----
+		// ---- 内容:左列 = 3D 预览 + 实体树;右列 = 就地编辑 + 引用资产 + 场景实例 ----
 		const Wui::WuiRect content { rect.X + pad, y, std::max(0.0f, rect.W - pad * 2.0f),
 			std::max(0.0f, rect.Y + rect.H - pad - y) };
+		Wui::WuiRect previewRect = content;
 		Wui::WuiRect treeRect = content;
-		Wui::WuiRect detailRect = content;
+		Wui::WuiRect editorRect = content;
+		Wui::WuiRect assetsRect = content;
+		Wui::WuiRect instancesRect = content;
 		if (content.W >= kTwoColumnMinWidth)
 		{
-			const float leftWidth = std::clamp(content.W * 0.42f, 200.0f, content.W - 220.0f);
-			treeRect = { content.X, content.Y, leftWidth, content.H };
-			detailRect = { content.X + leftWidth + 10.0f, content.Y,
+			const float leftWidth = std::clamp(content.W * 0.44f, 200.0f,
+				std::max(200.0f, content.W - 240.0f));
+			const float previewSide = std::clamp(leftWidth * 0.86f, 120.0f,
+				std::max(120.0f, content.H * 0.58f));
+			previewRect = { content.X, content.Y, leftWidth, previewSide };
+			treeRect = { content.X, content.Y + previewSide + 6.0f, leftWidth,
+				std::max(0.0f, content.H - previewSide - 6.0f) };
+			const Wui::WuiRect right { content.X + leftWidth + 10.0f, content.Y,
 				std::max(0.0f, content.W - leftWidth - 10.0f), content.H };
+			const float editorHeight = std::floor(right.H * 0.56f);
+			const float assetsHeight = std::floor(right.H * 0.18f);
+			editorRect = { right.X, right.Y, right.W, editorHeight };
+			assetsRect = { right.X, right.Y + editorHeight, right.W, assetsHeight };
+			instancesRect = { right.X, right.Y + editorHeight + assetsHeight, right.W,
+				std::max(0.0f, right.H - editorHeight - assetsHeight) };
 		}
 		else
 		{
-			const float treeHeight = std::max(60.0f, content.H * 0.42f);
-			treeRect = { content.X, content.Y, content.W, treeHeight };
-			detailRect = { content.X, content.Y + treeHeight + 8.0f, content.W,
-				std::max(0.0f, content.H - treeHeight - 8.0f) };
+			const float previewSide = std::min(content.W, std::max(120.0f, content.H * 0.34f));
+			previewRect = { content.X, content.Y, content.W, previewSide };
+			const float restY = content.Y + previewSide + 6.0f;
+			const float restH = std::max(0.0f, content.Y + content.H - restY);
+			const float treeHeight = std::floor(restH * 0.22f);
+			const float editorHeight = std::floor(restH * 0.44f);
+			const float assetsHeight = std::floor(restH * 0.14f);
+			treeRect = { content.X, restY, content.W, treeHeight };
+			editorRect = { content.X, restY + treeHeight, content.W, editorHeight };
+			assetsRect = { content.X, restY + treeHeight + editorHeight, content.W, assetsHeight };
+			instancesRect = { content.X, restY + treeHeight + editorHeight + assetsHeight, content.W,
+				std::max(0.0f, restH - treeHeight - editorHeight - assetsHeight) };
 		}
 
+		DrawPreview(ctx, previewRect, theme);
 		DrawEntityTree(ctx, treeRect, theme);
-		const float detailsHeight = std::floor(detailRect.H * 0.42f);
-		const float assetsHeight = std::floor(detailRect.H * 0.27f);
-		const float instancesHeight = std::max(0.0f, detailRect.H - detailsHeight - assetsHeight);
-		DrawDetails(ctx, { detailRect.X, detailRect.Y, detailRect.W, detailsHeight }, theme);
-		DrawAssets(ctx, { detailRect.X, detailRect.Y + detailsHeight, detailRect.W, assetsHeight }, theme);
-		DrawInstances(ctx, { detailRect.X, detailRect.Y + detailsHeight + assetsHeight, detailRect.W,
-			instancesHeight }, host, scene, theme);
+		DrawEditableComponents(ctx, editorRect, theme);
+		DrawAssets(ctx, assetsRect, theme);
+		DrawInstances(ctx, instancesRect, host, scene, theme);
+	}
+
+	// ---- P4-U13e:3D 预览(与 ModelPreviewPanel 同一套离屏写法) ----
+
+	void PrefabPanel::EnsurePreviewResources()
+	{
+		const Rhi::Handle<Rhi::Device>& device = Renderer::GetDevice();
+		if (!device)
+			return;
+		if (m_PreviewGpuDevice == device.get() && m_PreviewRenderer)
+			return;
+		// 设备变了(后端切换/重建):旧句柄属于旧设备,必须先放掉再重建。
+		ReleasePreviewResources();
+		m_PreviewGpuDevice = device.get();
+		m_PreviewRenderer = CreateRef<SceneRenderer>();
+		m_PreviewRenderer->Init();
+		m_PreviewRenderer->OnResize(m_PreviewSize, m_PreviewSize);
+	}
+
+	void PrefabPanel::ReleasePreviewResources()
+	{
+		if (m_PreviewRenderer)
+		{
+			m_PreviewRenderer->Shutdown();
+			m_PreviewRenderer.reset();
+		}
+		m_PreviewGpuDevice = nullptr;
+		// 注册表里那条纹理还指向已释放的设备资源:下一帧按新句柄 Update(或重登记)。
+		m_PreviewTextureHandle = nullptr;
+		m_UiTextureGeneration = 0;
+	}
+
+	void PrefabPanel::PreviewFocusBounds(glm::vec3* center, float* radius) const
+	{
+		glm::vec3 minimum { 0.0f };
+		glm::vec3 maximum { 0.0f };
+		bool any = false;
+		if (m_Staging)
+		{
+			const entt::registry& registry = m_Staging->GetRegistry();
+			const auto* entities = registry.storage<entt::entity>();
+			if (entities)
+			{
+				for (const entt::entity handle : *entities)
+				{
+					const auto* transform = registry.try_get<TransformComponent>(handle);
+					if (!transform)
+						continue;
+					// 世界矩阵优先(层级下的子物体);没有缓存时退回局部矩阵(近似取景足够)。
+					glm::mat4 matrix = transform->Transform;
+					if (const auto* world = registry.try_get<WorldTransformComponent>(handle))
+						matrix = world->Matrix;
+					const glm::vec3 position { matrix[3] };
+					// 单位网格近似半尺寸(不加载 .wmodel 资源,取景只要求"框得住")。
+					const glm::vec3 half {
+						std::max(0.5f, 0.5f * glm::length(glm::vec3(matrix[0]))),
+						std::max(0.5f, 0.5f * glm::length(glm::vec3(matrix[1]))),
+						std::max(0.5f, 0.5f * glm::length(glm::vec3(matrix[2]))) };
+					if (!any)
+					{
+						minimum = position - half;
+						maximum = position + half;
+						any = true;
+					}
+					else
+					{
+						minimum = glm::min(minimum, position - half);
+						maximum = glm::max(maximum, position + half);
+					}
+				}
+			}
+		}
+		const glm::vec3 extent = any ? (maximum - minimum) * 0.5f : glm::vec3 { 1.0f };
+		if (center)
+			*center = any ? (minimum + maximum) * 0.5f : glm::vec3 { 0.0f };
+		if (radius)
+			*radius = std::max(0.5f, glm::length(extent));
+	}
+
+	void PrefabPanel::FramePreview()
+	{
+		glm::vec3 center { 0.0f };
+		float radius = 2.0f;
+		PreviewFocusBounds(&center, &radius);
+		m_Focus = center;
+		m_MinDistance = std::max(0.1f, radius * 0.5f);
+		m_MaxDistance = std::max(4.0f, radius * 40.0f);
+		m_CameraDistance = std::clamp(radius * 3.0f, m_MinDistance, m_MaxDistance);
+		m_OrbitYaw = 0.6f;
+		m_OrbitPitch = 0.25f;
+		m_PreviewFramed = true;
+	}
+
+	std::string PrefabPanel::PreviewUnavailableReason() const
+	{
+		if (!m_DocumentValid || !m_Staging)
+			return Wui::Tr("panel.prefab.preview.no_document",
+				"Preview unavailable: this prefab could not be read (see the status line).");
+		if (m_Rows.empty())
+			return Wui::Tr("panel.prefab.preview.empty", "Preview unavailable: this prefab has no entities.");
+		if (!Renderer::GetDevice())
+			return Wui::Tr("panel.prefab.preview.no_device",
+				"Preview unavailable: the graphics device is not ready yet.");
+		if (!m_PreviewRenderer)
+			return Wui::Tr("panel.prefab.preview.no_target",
+				"Preview unavailable: the offscreen render target could not be created.");
+		return {};
+	}
+
+	uint64_t PrefabPanel::RenderPreview()
+	{
+		if (!m_Staging || m_Rows.empty())
+			return 0;
+		EnsurePreviewResources();
+		if (!m_PreviewRenderer)
+			return 0;
+		if (!m_PreviewFramed)
+			FramePreview();
+		// 轨道相机:拖拽(yaw/pitch)+ 滚轮(distance)都只改这里的三个量,不动 staging 数据。
+		const float distance = m_CameraDistance;
+		const glm::vec3 eye {
+			m_Focus.x + distance * std::cos(m_OrbitPitch) * std::sin(m_OrbitYaw),
+			m_Focus.y + distance * std::sin(m_OrbitPitch),
+			m_Focus.z + distance * std::cos(m_OrbitPitch) * std::cos(m_OrbitYaw) };
+		const glm::mat4 view = glm::lookAt(eye, m_Focus, glm::vec3(0.0f, 1.0f, 0.0f));
+		SceneCamera camera;
+		camera.SetProjectionType(SceneCamera::ProjectionType::Perspective);
+		camera.SetViewportSize(m_PreviewSize, m_PreviewSize);
+		camera.SetPerspectiveFOV(40.0f);
+		camera.SetPerspectiveNearClip(std::max(0.01f, distance * 0.01f));
+		camera.SetPerspectiveFarClip(distance * 4.0f + 100.0f);
+		// 与视口/相机预览同一条提交路径(SceneRenderer):prefab 里的网格/材质走引擎自己的加载。
+		SceneRendererOptions options;
+		options.ShowGrid = false;
+		m_PreviewRenderer->BeginScene(m_Staging.get(), options);
+		m_PreviewRenderer->SubmitScene(camera, glm::inverse(view));
+		m_PreviewRenderer->EndScene();
+
+		const Rhi::Handle<Rhi::Texture>& color = m_PreviewRenderer->GetColorTexture();
+		if (!color)
+			return 0;
+		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
+		const bool generationChanged = registry.Generation() != m_UiTextureGeneration;
+		if (m_PreviewTextureId == 0)
+		{
+			m_PreviewTextureId = registry.Register(color);
+			m_UiTextureGeneration = registry.Generation();
+			m_PreviewTextureHandle = color.get();
+		}
+		else if (generationChanged || m_PreviewTextureHandle != color.get())
+		{
+			// 目标被 resize/重建后句柄会变(见"按对象地址做键的缓存必须让内容代参与"那条教训)。
+			registry.Update(m_PreviewTextureId, color);
+			m_UiTextureGeneration = registry.Generation();
+			m_PreviewTextureHandle = color.get();
+		}
+		return m_PreviewTextureId;
+	}
+
+	void PrefabPanel::DrawPreview(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
+	{
+		const std::string header = Wui::Tr("panel.prefab.preview", "Preview");
+		Wui::SectionHeader(ctx, { rect.X, rect.Y, rect.W, kSectionHeaderHeight }, header, theme.Accent, theme);
+		const Wui::WuiRect view { rect.X, rect.Y + kSectionHeaderHeight + 1.0f, rect.W,
+			std::max(0.0f, rect.H - kSectionHeaderHeight - 1.0f) };
+		if (view.W <= 8.0f || view.H <= 8.0f)
+			return;
+
+		const uint64_t textureId = RenderPreview();
+		const std::string reason = textureId != 0 ? std::string() : PreviewUnavailableReason();
+		if (textureId != 0)
+		{
+			Wui::Image(ctx, view, textureId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+			// 轨道旋转(拖拽)/ 滚轮缩放 / 双击或 F 取景(与模型预览同一套手感)。
+			ctx.SetCursor(Wui::WuiCursor::Arrow);
+			if (ctx.Input().Wheel != 0.0f && ctx.IsHovered(view))
+			{
+				const float step = std::max(0.05f, m_CameraDistance * 0.1f);
+				m_CameraDistance = std::clamp(m_CameraDistance - ctx.Input().Wheel * step,
+					m_MinDistance, m_MaxDistance);
+			}
+			if (ctx.IsHovered(view) && ctx.Input().MouseClicked[0])
+			{
+				m_Orbiting = true;
+				m_LastMouse = ctx.Input().MousePos;
+			}
+			if (m_Orbiting && ctx.Input().MouseDown[0] && !ctx.IsDoubleClicked(view))
+			{
+				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
+				m_LastMouse = ctx.Input().MousePos;
+				m_OrbitYaw -= delta.x * 0.01f;
+				m_OrbitPitch = std::clamp(m_OrbitPitch + delta.y * 0.01f, -1.45f, 1.45f);
+			}
+			if (m_Orbiting && !ctx.Input().MouseDown[0])
+				m_Orbiting = false;
+			if (ctx.IsDoubleClicked(view) || (ctx.IsHovered(view) && ctx.WasKeyPressed(KeyCodes::F)))
+				FramePreview();
+		}
+		else
+		{
+			// 不留黑块:区里写可读原因(与模型预览同一条约定)。
+			Wui::Label(ctx, { view.X + 8.0f, view.Y + 8.0f }, TruncateUtf8(reason, 160), theme.TextMuted, 12.0f);
+		}
+		const std::string hint = Wui::Tr("panel.prefab.preview.hint", "Drag = orbit, wheel = zoom, F = frame");
+		Wui::Label(ctx, { view.X + 6.0f, view.Y + view.H - 15.0f }, TruncateUtf8(hint, 60),
+			theme.TextDisabled, 11.0f);
+		Wui::Tooltip(ctx, view, hint);
+
+		// 无障碍:预览区(prefab.preview)+ 操作提示(prefab.preview.hint)+ 相机状态。
+		RegisterNode(Wui::HashId("prefab.preview"), "image", view,
+			Wui::Tr("panel.prefab.preview", "Preview"),
+			textureId != 0 ? ("3D preview of " + m_LogicalPath) : reason, textureId != 0, hint, false);
+		RegisterNode(Wui::HashId("prefab.preview.hint"), "text",
+			{ view.X + 4.0f, view.Y + view.H - 16.0f, std::max(0.0f, view.W - 8.0f), 14.0f },
+			Wui::Tr("panel.prefab.preview.hint", "Drag = orbit, wheel = zoom, F = frame"), hint, true,
+			hint, false);
+		char cameraText[96] = {};
+		std::snprintf(cameraText, sizeof(cameraText), "yaw=%.2f pitch=%.2f dist=%.2f focus=%.2f,%.2f,%.2f",
+			m_OrbitYaw, m_OrbitPitch, m_CameraDistance, m_Focus.x, m_Focus.y, m_Focus.z);
+		RegisterNode(Wui::HashId("prefab.preview.camera"), "text",
+			{ view.X + 4.0f, view.Y + 4.0f, std::max(0.0f, view.W - 8.0f), 14.0f },
+			Wui::Tr("panel.prefab.preview.camera", "Preview camera"), cameraText, true, cameraText, false);
 	}
 
 	void PrefabPanel::DrawEntityTree(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
@@ -564,7 +1279,7 @@ namespace World
 				+ row.Label;
 			row.Value = "#" + std::to_string(static_cast<uint32_t>(m_Rows[i].Handle));
 			row.Tooltip = Wui::Tr("panel.prefab.entity_row.tooltip",
-				"Click to inspect this entity's components (read-only).");
+				"Click to select this entity and edit its components on the right.");
 			row.Interactive = true;
 			rows.push_back(std::move(row));
 		}
@@ -576,46 +1291,479 @@ namespace World
 			m_SelectedRow = clicked;
 	}
 
-	void PrefabPanel::DrawDetails(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
+	// ---- P4-U13e:就地编辑(右侧第一段) ----
+
+	// 一行 vec3:标签 + X/Y/Z 三个 drag-float(与属性面板同一控件/同一"1,-1 = 无界"哨兵)。
+	float PrefabPanel::DrawVec3Row(Wui::WuiContext& ctx, float x, float y, float width, const char* idPrefix,
+		const std::string& label, const std::string& tooltip, glm::vec3& value, float speed,
+		const Wui::WuiTheme& theme, bool& changed)
 	{
-		std::vector<std::string> lines;
+		const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
+		Wui::Label(ctx, { x, y + 3.0f }, TruncateUtf8(label, 48), theme.TextMuted, 12.0f);
+		const float fieldsWidth = std::max(60.0f, width - labelWidth);
+		const float slotWidth = fieldsWidth / 3.0f;
+		static const char* const kAxisNames[3] = { "x", "y", "z" };
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			const Wui::WuiRect slot { x + labelWidth + slotWidth * static_cast<float>(axis), y,
+				std::max(18.0f, slotWidth - 2.0f), 18.0f };
+			const std::string idText = std::string(idPrefix) + "." + kAxisNames[axis];
+			float component = value[axis];
+			if (Wui::DragFloat(ctx, Wui::HashId(idText.c_str()), slot, component, speed, 1.0f, -1.0f, theme)
+				&& component != value[axis])
+			{
+				value[axis] = component;
+				changed = true;
+			}
+			// 覆盖控件自己的登记(空 label):脚本/读屏要读到"哪个字段的哪个轴"。
+			RegisterNode(Wui::HashId(idText.c_str()), "drag-float", slot,
+				label + " " + kAxisNames[axis], FormatFloat(value[axis]), true, tooltip, true);
+			Wui::Tooltip(ctx, slot, tooltip);
+		}
+		return kFieldRowHeight;
+	}
+
+	float PrefabPanel::DrawScalarRow(Wui::WuiContext& ctx, float x, float y, float width, const char* idText,
+		const std::string& label, const std::string& tooltip, float& value, float speed,
+		float min, float max, const Wui::WuiTheme& theme, bool& changed)
+	{
+		const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
+		Wui::Label(ctx, { x, y + 3.0f }, TruncateUtf8(label, 48), theme.TextMuted, 12.0f);
+		const Wui::WuiRect ctrl { x + labelWidth, y, std::max(60.0f, width - labelWidth), 18.0f };
+		if (Wui::DragFloat(ctx, Wui::HashId(idText), ctrl, value, speed, min, max, theme))
+			changed = true;
+		RegisterNode(Wui::HashId(idText), "drag-float", ctrl, label, FormatFloat(value), true, tooltip, true);
+		Wui::Tooltip(ctx, ctrl, tooltip);
+		return kFieldRowHeight;
+	}
+
+	float PrefabPanel::DrawColorRow(Wui::WuiContext& ctx, float x, float y, float width, const char* idText,
+		const std::string& label, const std::string& tooltip, glm::vec4& value,
+		const Wui::WuiTheme& theme, bool& changed)
+	{
+		const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
+		Wui::Label(ctx, { x, y + 3.0f }, TruncateUtf8(label, 48), theme.TextMuted, 12.0f);
+		const Wui::WuiRect ctrl { x + labelWidth, y, std::max(80.0f, width - labelWidth), 18.0f };
+		if (Wui::ColorField(ctx, Wui::HashId(idText), ctrl, value, theme))
+			changed = true;
+		char buffer[16] = {};
+		std::snprintf(buffer, sizeof(buffer), "#%02X%02X%02X%02X",
+			static_cast<int>(std::lround(std::clamp(value.x, 0.0f, 1.0f) * 255.0f)),
+			static_cast<int>(std::lround(std::clamp(value.y, 0.0f, 1.0f) * 255.0f)),
+			static_cast<int>(std::lround(std::clamp(value.z, 0.0f, 1.0f) * 255.0f)),
+			static_cast<int>(std::lround(std::clamp(value.w, 0.0f, 1.0f) * 255.0f)));
+		RegisterNode(Wui::HashId(idText), "color", ctrl, label, buffer, true, tooltip, true);
+		Wui::Tooltip(ctx, ctrl, tooltip);
+		return kFieldRowHeight;
+	}
+
+	float PrefabPanel::DrawAssetRow(Wui::WuiContext& ctx, float x, float y, float width, const char* idText,
+		const std::string& label, const std::string& tooltip, const std::string& assetType,
+		std::string& value, const Wui::WuiTheme& theme, bool& changed)
+	{
+		const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
+		Wui::Label(ctx, { x, y + 3.0f }, TruncateUtf8(label, 48), theme.TextMuted, 12.0f);
+		const Wui::WuiRect ctrl { x + labelWidth, y, std::max(80.0f, width - labelWidth), 18.0f };
+		const std::vector<std::string>& paths = Editor::AssetCatalog::PathsForName(assetType);
+		std::vector<std::string> options;
+		options.reserve(paths.size() + 2);
+		options.push_back(Wui::Tr("panel.prefab.asset_none", "(none)"));
+		options.insert(options.end(), paths.begin(), paths.end());
+		int selected = 0;
+		const auto found = std::find(paths.begin(), paths.end(), value);
+		if (found != paths.end())
+			selected = static_cast<int>(found - paths.begin()) + 1;
+		else if (!value.empty())
+		{
+			// 当前值不在扫描结果里(路径写错 / 资产还没建):照样显示,不假装它是"(none)"。
+			options.push_back(value);
+			selected = static_cast<int>(options.size()) - 1;
+		}
+		const int beforePick = selected;
+		if (Wui::SearchableCombo(ctx, Wui::HashId(idText), ctrl, "", options, selected, theme)
+			&& selected != beforePick)
+		{
+			value = selected <= 0 ? std::string() : options[static_cast<std::size_t>(selected)];
+			changed = true;
+		}
+		RegisterNode(Wui::HashId(idText), "searchable-combo", ctrl, label, value, true, tooltip, true);
+		Wui::Tooltip(ctx, ctrl, tooltip);
+		return kFieldRowHeight;
+	}
+
+	float PrefabPanel::EstimateEditorHeight() const
+	{
+		if (!m_DocumentValid || !m_Staging || m_SelectedRow < 0
+			|| m_SelectedRow >= static_cast<int>(m_Rows.size()))
+			return 40.0f;
+		const entt::registry& registry = m_Staging->GetRegistry();
+		const entt::entity handle = m_Rows[static_cast<std::size_t>(m_SelectedRow)].Handle;
+		if (!registry.valid(handle))
+			return 40.0f;
+		constexpr float kSection = 20.0f;
+		float height = 8.0f;
+		if (registry.try_get<TransformComponent>(handle))
+			height += kSection + kFieldRowHeight * 3.0f + 6.0f;
+		if (registry.try_get<MeshRendererComponent>(handle))
+			height += kSection + kFieldRowHeight * 4.0f + 6.0f;
+		if (registry.try_get<CameraComponent>(handle))
+			height += kSection + kFieldRowHeight * 3.0f + 6.0f;
+		if (registry.try_get<DirectionalLightComponent>(handle))
+			height += kSection + kFieldRowHeight * 2.0f + 6.0f;
+		if (registry.try_get<PointLightComponent>(handle))
+			height += kSection + kFieldRowHeight * 3.0f + 6.0f;
+		if (registry.try_get<AmbientLightComponent>(handle))
+			height += kSection + kFieldRowHeight * 2.0f + 6.0f;
+		const std::vector<std::string> readOnly = BuildReadOnlySummary(handle);
+		if (!readOnly.empty())
+			height += kSection + kReadOnlyLineHeight * static_cast<float>(readOnly.size()) + 8.0f;
+		return std::max(60.0f, height);
+	}
+
+	void PrefabPanel::DrawEditableComponents(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		const Wui::WuiTheme& theme)
+	{
 		const bool rowSelected = m_DocumentValid && m_SelectedRow >= 0
 			&& m_SelectedRow < static_cast<int>(m_Rows.size());
+		std::vector<std::string> summary;
 		if (rowSelected)
-			lines = BuildComponentSummary(static_cast<std::size_t>(m_SelectedRow));
-
-		const std::string header = std::string(Wui::Tr("panel.prefab.components", "Components")) + " ("
-			+ std::to_string(lines.size()) + ")";
-		Wui::SectionHeader(ctx, { rect.X, rect.Y, rect.W, kSectionHeaderHeight }, header, theme.Accent, theme);
-
+			summary = BuildComponentSummary(static_cast<std::size_t>(m_SelectedRow));
 		std::string joined;
-		for (std::size_t i = 0; i < lines.size(); ++i)
+		for (std::size_t i = 0; i < summary.size(); ++i)
 		{
 			if (i)
 				joined += " | ";
-			joined += lines[i];
+			joined += summary[i];
 		}
-		if (lines.empty())
+		if (joined.empty())
 			joined = Wui::Tr("panel.prefab.no_components", "No components");
 		RegisterNode(Wui::HashId("prefab.details"), "text",
 			{ rect.X, rect.Y + kSectionHeaderHeight, rect.W,
 				std::max(0.0f, rect.H - kSectionHeaderHeight) },
 			Wui::Tr("panel.prefab.details", "Component summary"), joined, true, joined, false);
 
-		float y = rect.Y + kSectionHeaderHeight + 2.0f;
-		if (lines.empty())
+		const std::string header = std::string(Wui::Tr("panel.prefab.components", "Components")) + " ("
+			+ std::to_string(summary.size()) + ")";
+		Wui::SectionHeader(ctx, { rect.X, rect.Y, rect.W, kSectionHeaderHeight }, header, theme.Accent, theme);
+
+		const Wui::WuiRect viewport { rect.X, rect.Y + kSectionHeaderHeight + 1.0f, rect.W,
+			std::max(0.0f, rect.H - kSectionHeaderHeight - 1.0f) };
+		if (viewport.H <= 8.0f || viewport.W <= 40.0f)
+			return;
+		Wui::BeginScrollArea(ctx, viewport, std::max(viewport.H, EstimateEditorHeight()), m_DetailsScroll,
+			theme);
+		const float x = viewport.X + 2.0f;
+		const float width = std::max(40.0f, viewport.W - 4.0f);
+		float y = viewport.Y + 2.0f;
+		if (!rowSelected || !m_Staging)
 		{
-			Wui::Label(ctx, { rect.X + 4.0f, y }, Wui::Tr("panel.prefab.no_components", "No components"),
-				theme.TextMuted, 12.0f);
+			Wui::Label(ctx, { x, y }, Wui::Tr("panel.prefab.select_entity",
+				"Select an entity to view and edit its components."), theme.TextMuted, 12.0f);
+			Wui::EndScrollArea(ctx);
 			return;
 		}
-		const std::size_t visibleLines = static_cast<std::size_t>(
-			std::max(0.0f, (rect.H - kSectionHeaderHeight - 4.0f) / 16.0f));
-		for (std::size_t i = 0; i < lines.size() && i < visibleLines; ++i)
+
+		entt::registry& registry = m_Staging->GetRegistry();
+		const entt::entity handle = m_Rows[static_cast<std::size_t>(m_SelectedRow)].Handle;
+		if (!registry.valid(handle))
 		{
-			Wui::Label(ctx, { rect.X + 4.0f, y }, TruncateUtf8(lines[i], 120), theme.Text, 12.0f);
-			y += 16.0f;
+			Wui::Label(ctx, { x, y }, Wui::Tr("panel.prefab.select_entity",
+				"Select an entity to view and edit its components."), theme.TextMuted, 12.0f);
+			Wui::EndScrollArea(ctx);
+			return;
 		}
+
+		// ---- Transform:T/R/S 三行 drag-float(与属性面板同控件)----
+		if (auto* transform = registry.try_get<TransformComponent>(handle))
+		{
+			Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+				Wui::Tr("panel.prefab.section.transform", "Transform"), theme.Accent, theme, 13.0f);
+			y += 20.0f;
+			bool changed = false;
+			glm::vec3 location = transform->Location;
+			y += DrawVec3Row(ctx, x, y, width, "prefab.field.TransformComponent.Location",
+				Wui::Tr("panel.prefab.field.location", "Location"),
+				Wui::Tr("panel.prefab.field.location.tooltip",
+					"Local position in the parent's space (world units); drag a number or click it to type."),
+				location, 0.1f, theme, changed);
+			if (changed)
+			{
+				transform->SetLocation(location);
+				MarkDirty();
+				changed = false;
+			}
+			glm::vec3 rotation = transform->Rotation;
+			y += DrawVec3Row(ctx, x, y, width, "prefab.field.TransformComponent.Rotation",
+				Wui::Tr("panel.prefab.field.rotation", "Rotation"),
+				Wui::Tr("panel.prefab.field.rotation.tooltip",
+					"Local Euler rotation in degrees (X/Y/Z); the engine stores the equivalent quaternion."),
+				rotation, 0.5f, theme, changed);
+			if (changed)
+			{
+				transform->SetRotation(rotation);
+				MarkDirty();
+				changed = false;
+			}
+			glm::vec3 scale = transform->Scale;
+			y += DrawVec3Row(ctx, x, y, width, "prefab.field.TransformComponent.Scale",
+				Wui::Tr("panel.prefab.field.scale", "Scale"),
+				Wui::Tr("panel.prefab.field.scale.tooltip",
+					"Local scale per axis; 1,1,1 = unscaled, negative values mirror."),
+				scale, 0.1f, theme, changed);
+			if (changed)
+			{
+				transform->SetScale(scale);
+				MarkDirty();
+				changed = false;
+			}
+			y += 6.0f;
+		}
+
+		// ---- MeshRenderer:Primitive / MeshPath / MaterialPath / MeshIndex ----
+		if (auto* mesh = registry.try_get<MeshRendererComponent>(handle))
+		{
+			Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+				Wui::Tr("panel.prefab.section.mesh", "Mesh Renderer"), theme.Accent, theme, 13.0f);
+			y += 20.0f;
+			bool changed = false;
+			// Primitive:固定集合用下拉(schema 的 Choices 同一份取值);当前值不在集合里也照样显示。
+			{
+				std::vector<std::string> options { "cube", "sphere", "plane" };
+				if (std::find(options.begin(), options.end(), mesh->Primitive) == options.end())
+					options.push_back(mesh->Primitive);
+				int selected = static_cast<int>(std::find(options.begin(), options.end(), mesh->Primitive)
+					- options.begin());
+				const int beforePick = selected;
+				const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
+				Wui::Label(ctx, { x, y + 3.0f },
+					Wui::Tr("panel.prefab.field.primitive", "Primitive"), theme.TextMuted, 12.0f);
+				const Wui::WuiRect ctrl { x + labelWidth, y, std::max(80.0f, width - labelWidth), 18.0f };
+				if (Wui::Combo(ctx, Wui::HashId("prefab.field.MeshRendererComponent.Primitive"), ctrl, "",
+					options, selected, theme) && selected != beforePick)
+				{
+					mesh->Primitive = options[static_cast<std::size_t>(selected)];
+					changed = true;
+				}
+				RegisterNode(Wui::HashId("prefab.field.MeshRendererComponent.Primitive"), "combo", ctrl,
+					Wui::Tr("panel.prefab.field.primitive", "Primitive"), mesh->Primitive, true,
+					Wui::Tr("panel.prefab.field.primitive.tooltip",
+						"Built-in primitive used when Mesh Path is empty (cube / sphere / plane)."),
+					true);
+				Wui::Tooltip(ctx, ctrl, Wui::Tr("panel.prefab.field.primitive.tooltip",
+					"Built-in primitive used when Mesh Path is empty (cube / sphere / plane)."));
+			}
+			y += kFieldRowHeight;
+			y += DrawAssetRow(ctx, x, y, width, "prefab.field.MeshRendererComponent.MeshPath",
+				Wui::Tr("panel.prefab.field.mesh_path", "Mesh Path"),
+				Wui::Tr("panel.prefab.field.mesh_path.tooltip",
+					"Imported model asset (.wmodel) relative to Game/assets; empty = use Primitive. glTF/GLB must be imported first."),
+				"Model", mesh->MeshPath, theme, changed);
+			y += DrawAssetRow(ctx, x, y, width, "prefab.field.MeshRendererComponent.MaterialPath",
+				Wui::Tr("panel.prefab.field.material_path", "Material Path"),
+				Wui::Tr("panel.prefab.field.material_path.tooltip",
+					"Material asset (.wmat); overrides the entity Color and the model's own material slots."),
+				"Material", mesh->MaterialPath, theme, changed);
+			{
+				const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
+				Wui::Label(ctx, { x, y + 3.0f },
+					Wui::Tr("panel.prefab.field.mesh_index", "Mesh Index"), theme.TextMuted, 12.0f);
+				const Wui::WuiRect ctrl { x + labelWidth, y, std::max(60.0f, width - labelWidth), 18.0f };
+				int64_t meshIndex = mesh->MeshIndex;
+				if (Wui::DragInt(ctx, Wui::HashId("prefab.field.MeshRendererComponent.MeshIndex"), ctrl,
+					meshIndex, 0, 1024, theme) && meshIndex != mesh->MeshIndex)
+				{
+					mesh->MeshIndex = static_cast<int32_t>(meshIndex);
+					changed = true;
+				}
+				RegisterNode(Wui::HashId("prefab.field.MeshRendererComponent.MeshIndex"), "drag-int", ctrl,
+					Wui::Tr("panel.prefab.field.mesh_index", "Mesh Index"),
+					std::to_string(mesh->MeshIndex), true,
+					Wui::Tr("panel.prefab.field.mesh_index.tooltip",
+						"Selects which mesh inside a .wmodel this entity draws (ignored by built-in primitives)."),
+					true);
+				Wui::Tooltip(ctx, ctrl, Wui::Tr("panel.prefab.field.mesh_index.tooltip",
+					"Selects which mesh inside a .wmodel this entity draws (ignored by built-in primitives)."));
+				y += kFieldRowHeight;
+			}
+			if (changed)
+			{
+				RefreshAssetWarning();
+				MarkDirty();
+				changed = false;
+			}
+			y += 6.0f;
+		}
+
+		// ---- Camera:Fov / NearClip / FarClip ----
+		if (auto* camera = registry.try_get<CameraComponent>(handle))
+		{
+			Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+				Wui::Tr("panel.prefab.section.camera", "Camera"), theme.Accent, theme, 13.0f);
+			y += 20.0f;
+			bool changed = false;
+			float fov = camera->Camera.GetPerspectiveFOV();
+			y += DrawScalarRow(ctx, x, y, width, "prefab.field.CameraComponent.Fov",
+				Wui::Tr("panel.prefab.field.fov", "Fov"),
+				Wui::Tr("panel.prefab.field.fov.tooltip",
+					"Vertical field of view in degrees for the perspective projection (1..179)."),
+				fov, 0.5f, 1.0f, 179.0f, theme, changed);
+			if (changed)
+			{
+				camera->Camera.SetPerspectiveFOV(fov);
+				MarkDirty();
+				changed = false;
+			}
+			float nearClip = camera->Camera.GetPerspectiveNearClip();
+			y += DrawScalarRow(ctx, x, y, width, "prefab.field.CameraComponent.NearClip",
+				Wui::Tr("panel.prefab.field.near_clip", "Near Clip"),
+				Wui::Tr("panel.prefab.field.near_clip.tooltip",
+					"Near plane distance of the perspective projection; keep it as large as the scene allows."),
+				nearClip, 0.01f, 0.001f, 1000.0f, theme, changed);
+			if (changed)
+			{
+				camera->Camera.SetPerspectiveNearClip(nearClip);
+				MarkDirty();
+				changed = false;
+			}
+			float farClip = camera->Camera.GetPerspectiveFarClip();
+			y += DrawScalarRow(ctx, x, y, width, "prefab.field.CameraComponent.FarClip",
+				Wui::Tr("panel.prefab.field.far_clip", "Far Clip"),
+				Wui::Tr("panel.prefab.field.far_clip.tooltip",
+					"Far plane distance of the perspective projection (visible range end)."),
+				farClip, 1.0f, 0.01f, 100000.0f, theme, changed);
+			if (changed)
+			{
+				camera->Camera.SetPerspectiveFarClip(farClip);
+				MarkDirty();
+			}
+			y += 6.0f;
+		}
+
+		// ---- 灯光:Color(取色器)/ Intensity / Range ----
+		const auto drawLightHeader = [&](const char* id, const char* fallback)
+		{
+			Wui::SectionHeader(ctx, { x, y, width, 18.0f }, Wui::Tr(id, fallback), theme.Accent, theme, 13.0f);
+			y += 20.0f;
+		};
+		if (auto* light = registry.try_get<DirectionalLightComponent>(handle))
+		{
+			drawLightHeader("panel.prefab.section.directional_light", "Directional Light");
+			bool changed = false;
+			glm::vec4 color { light->Color, 1.0f };
+			y += DrawColorRow(ctx, x, y, width, "prefab.field.DirectionalLightComponent.Color",
+				Wui::Tr("panel.prefab.field.light_color", "Color"),
+				Wui::Tr("panel.prefab.field.light_color.tooltip",
+					"Linear color of the light (the shader decodes it with pow 2.2)."),
+				color, theme, changed);
+			if (changed)
+			{
+				light->Color = { color.x, color.y, color.z };
+				MarkDirty();
+				changed = false;
+			}
+			float intensity = light->Intensity;
+			y += DrawScalarRow(ctx, x, y, width, "prefab.field.DirectionalLightComponent.Intensity",
+				Wui::Tr("panel.prefab.field.intensity", "Intensity"),
+				Wui::Tr("panel.prefab.field.intensity.tooltip", "Brightness multiplier applied to the light color."),
+				intensity, 0.05f, 0.0f, 100.0f, theme, changed);
+			if (changed)
+			{
+				light->Intensity = intensity;
+				MarkDirty();
+			}
+			y += 6.0f;
+		}
+		if (auto* light = registry.try_get<PointLightComponent>(handle))
+		{
+			drawLightHeader("panel.prefab.section.point_light", "Point Light");
+			bool changed = false;
+			glm::vec4 color { light->Color, 1.0f };
+			y += DrawColorRow(ctx, x, y, width, "prefab.field.PointLightComponent.Color",
+				Wui::Tr("panel.prefab.field.light_color", "Color"),
+				Wui::Tr("panel.prefab.field.light_color.tooltip",
+					"Linear color of the light (the shader decodes it with pow 2.2)."),
+				color, theme, changed);
+			if (changed)
+			{
+				light->Color = { color.x, color.y, color.z };
+				MarkDirty();
+				changed = false;
+			}
+			float intensity = light->Intensity;
+			y += DrawScalarRow(ctx, x, y, width, "prefab.field.PointLightComponent.Intensity",
+				Wui::Tr("panel.prefab.field.intensity", "Intensity"),
+				Wui::Tr("panel.prefab.field.intensity.tooltip", "Brightness multiplier applied to the light color."),
+				intensity, 0.05f, 0.0f, 100.0f, theme, changed);
+			if (changed)
+			{
+				light->Intensity = intensity;
+				MarkDirty();
+				changed = false;
+			}
+			float range = light->Range;
+			y += DrawScalarRow(ctx, x, y, width, "prefab.field.PointLightComponent.Range",
+				Wui::Tr("panel.prefab.field.range", "Range"),
+				Wui::Tr("panel.prefab.field.range.tooltip",
+					"Falloff radius in world units; attenuation is (1 - d/Range)^2."),
+				range, 0.1f, 0.0f, 1000.0f, theme, changed);
+			if (changed)
+			{
+				light->Range = range;
+				MarkDirty();
+			}
+			y += 6.0f;
+		}
+		if (auto* light = registry.try_get<AmbientLightComponent>(handle))
+		{
+			drawLightHeader("panel.prefab.section.ambient_light", "Ambient Light");
+			bool changed = false;
+			glm::vec4 color { light->Color, 1.0f };
+			y += DrawColorRow(ctx, x, y, width, "prefab.field.AmbientLightComponent.Color",
+				Wui::Tr("panel.prefab.field.light_color", "Color"),
+				Wui::Tr("panel.prefab.field.light_color.tooltip",
+					"Linear ambient color added to every surface (the shader decodes it with pow 2.2)."),
+				color, theme, changed);
+			if (changed)
+			{
+				light->Color = { color.x, color.y, color.z };
+				MarkDirty();
+				changed = false;
+			}
+			float intensity = light->Intensity;
+			y += DrawScalarRow(ctx, x, y, width, "prefab.field.AmbientLightComponent.Intensity",
+				Wui::Tr("panel.prefab.field.intensity", "Intensity"),
+				Wui::Tr("panel.prefab.field.intensity.tooltip", "Brightness multiplier applied to the light color."),
+				intensity, 0.05f, 0.0f, 100.0f, theme, changed);
+			if (changed)
+			{
+				light->Intensity = intensity;
+				MarkDirty();
+			}
+			y += 6.0f;
+		}
+
+		// ---- 其余组件:只读摘要(小节标题写明"只读")----
+		const std::vector<std::string> readOnly = BuildReadOnlySummary(handle);
+		if (!readOnly.empty())
+		{
+			const std::string readOnlyTitle = Wui::Tr("panel.prefab.readonly_section",
+				"Other Components (read-only)");
+			Wui::SectionHeader(ctx, { x, y, width, 18.0f },
+				readOnlyTitle, theme.TextMuted, theme, 13.0f);
+			// 单独登记:脚本/读屏要能读到"这一节不能改"(与可编辑小节区分开)。
+			RegisterNode(Wui::HashId("prefab.readonly_section"), "text", { x, y, width, 18.0f },
+				readOnlyTitle, readOnlyTitle, true,
+				Wui::Tr("panel.prefab.readonly_section.tooltip",
+					"These components are shown as a read-only summary; edit them in the full editor."),
+				false);
+			y += 20.0f;
+			for (const std::string& line : readOnly)
+			{
+				Wui::Label(ctx, { x + 2.0f, y + 1.0f }, TruncateUtf8(line, 140), theme.TextMuted, 12.0f);
+				y += kReadOnlyLineHeight;
+			}
+		}
+		Wui::EndScrollArea(ctx);
 	}
 
 	void PrefabPanel::DrawAssets(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)

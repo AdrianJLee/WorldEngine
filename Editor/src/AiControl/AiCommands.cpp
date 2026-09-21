@@ -10,6 +10,7 @@
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiScriptedInput.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -1148,6 +1149,41 @@ namespace World
 				return false;
 			}
 			result = "left prefab edit session";
+			return true;
+		}
+		if (cmd == "asset.prefab_set_field")
+		{
+			// P4-U13e:给自动化脚本一条"写 prefab 资产窗口字段"的入口 —— 与窗口控件同一
+			// 写入口(同样的脏标记 / 状态行 / 资产路径警告),不是旁路写数据。
+			// 参数:path(逻辑路径)或 panel("prefab:<逻辑路径>")二选一;
+			//       component / field / value,可选 axis(x/y/z,vec3 字段按分量写)。
+			std::string panel = arg("panel");
+			const std::string path = arg("path");
+			if (panel.empty() && !path.empty())
+			{
+				std::string normalized = path;
+				std::replace(normalized.begin(), normalized.end(), '\\', '/');
+				panel = "prefab:" + normalized;
+			}
+			if (panel.empty())
+			{
+				error = "asset.prefab_set_field needs panel=<prefab:…> or path=<logical path>";
+				return false;
+			}
+			const std::string component = arg("component");
+			const std::string field = arg("field");
+			if (component.empty() || field.empty())
+			{
+				error = "asset.prefab_set_field needs component and field";
+				return false;
+			}
+			std::string message;
+			if (!m_Shell.SetPrefabPanelField(panel, component, field, arg("value"), arg("axis"), &message))
+			{
+				error = message.empty() ? "prefab field write failed" : message;
+				return false;
+			}
+			result = message;
 			return true;
 		}
 		if (cmd == "asset.instance_prefab")

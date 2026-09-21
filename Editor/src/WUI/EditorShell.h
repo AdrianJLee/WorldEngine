@@ -30,6 +30,7 @@
 namespace World
 {
 	class EditorLayer;
+	class PrefabPanel;
 
 	// 编辑器外壳:停靠布局、菜单栏、模态与面板注册表。业务面板已组件化到
 	// Panels/ 目录,外壳只负责驱动它们渲染并通过 PanelHost / ViewportHost 供给能力。
@@ -152,6 +153,11 @@ namespace World
 		// 同一个入口的"带结果"版本(打开前后读一次盘):失败 = false + 可读原因,
 		// 窗口仍然打开并在状态行写原因。AI 通道 `asset.open_prefab` 用它做失败语义。
 		bool OpenPrefabWindowChecked(const std::string& logicalPath, std::string* message = nullptr);
+		// P4-U13e:脚本化写 prefab **资产窗口**里的可编辑字段(与窗口控件同一条写入口):
+		// panelId = "prefab:<逻辑路径>",component/field/axis 用面板小节里的短名。
+		bool SetPrefabPanelField(const std::string& panelId, const std::string& component,
+			const std::string& field, const std::string& value, const std::string& axis,
+			std::string* message = nullptr);
 		bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr) override;
 		// P4-U13d:创建预制体(层级面板的"Create Prefab from Selection…"与 AI 通道
 		// asset.create_prefab 同一内核);实现全在 EditorLayer。
@@ -261,6 +267,20 @@ namespace World
 		// P4-U13:prefab 编辑横幅(顶部一条,标明"在改资产";右侧 保存 / 返回场景)。
 		void DrawPrefabBar(Wui::WuiContext& ctx, float y);
 		void DrawModals(Wui::WuiContext& ctx);
+		// ---- P4-U13e:prefab 资产窗口的"未保存改动"守卫 ----
+		// 关窗 / 进文档会话都会丢掉窗口里未落盘的编辑:先弹项目现成的确认模态(丢弃 / 取消),
+		// 用户确认后才执行被延迟的动作。Intercept 返回 true = 本次动作已被拦下(等用户回答)。
+		enum class PrefabPendingAction { None, Close, OpenDocument };
+		PrefabPanel* PrefabPanelById(const std::string& panelId) const;
+		bool InterceptPrefabUnsaved(const std::string& panelId, PrefabPendingAction action,
+			const std::string& logicalPath = std::string());
+		void RunPendingPrefabAction(Wui::WuiContext& ctx);
+		void DrawPrefabUnsavedModal(Wui::WuiContext& ctx);
+		std::string m_PrefabPendingPanel;
+		std::string m_PrefabPendingLogical;
+		PrefabPendingAction m_PrefabPendingAction = PrefabPendingAction::None;
+		// 半路执行延迟动作时显式放行一次(否则刚点"丢弃"又会被守卫拦回来)。
+		bool m_PrefabGuardBypass = false;
 		// D10-10/D10-11(用户 2026-09-19):导入位置选择器是**窗口级模态** —— shell 自己持有
 		// 源路径/选中目录/状态/展开集合/滚动;外框(居中/遮罩/标题栏/Esc)与按钮条走
 		// World/WUI/Widgets/WuiModal.* 组件,整窗输入封锁由 OnRender 的 Begin/EndModalInputBlock 成对完成。

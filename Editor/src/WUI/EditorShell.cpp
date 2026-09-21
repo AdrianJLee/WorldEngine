@@ -525,6 +525,13 @@ namespace World
 
 	void EditorShell::OpenPrefabEditor(const std::string& logicalPath)
 	{
+		// P4-U13e:同一个 prefab 的**资产窗口**里有未保存改动时,先进文档会话会把这些改动丢掉
+		// (文档会话从磁盘读)。所以先问一次(丢弃 / 取消),用户确认丢弃后才真的切过去。
+		std::string normalized = logicalPath;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		if (InterceptPrefabUnsaved(std::string(kPrefabPanelPrefix) + normalized,
+			PrefabPendingAction::OpenDocument, normalized))
+			return;
 		m_Editor.OpenPrefab(logicalPath);
 	}
 
@@ -748,7 +755,15 @@ namespace World
 		if (const auto found = titles.find(id); found != titles.end())
 			return Wui::Tr(found->second.first, found->second.second);
 		const auto it = m_PanelRegistry.find(id);
-		return it != m_PanelRegistry.end() ? it->second->Title() : id;
+		if (it == m_PanelRegistry.end())
+			return id;
+		std::string title = it->second->Title();
+		// P4-U13e:prefab 资产窗口有未保存改动时标题带 `*`(窗口标签 / 挂靠标签 / Window 菜单
+		// 共用这一份标题,所以"改了但没保存"到哪儿都看得见)。
+		if (const auto* prefab = dynamic_cast<const PrefabPanel*>(it->second.get());
+			prefab && prefab->HasUnsavedChanges())
+			title += " *";
+		return title;
 	}
 
 	void EditorShell::SaveLayout()
@@ -861,6 +876,10 @@ namespace World
 		const auto attached = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
 		if (attached != m_AttachedPanels.end())
 		{
+			// P4-U13e:prefab 面板有未保存改动 → 先弹确认;**不要**先把标签摘掉
+			// (窗口还在,只是内容不画了 —— 那就是"静默丢"的另一种形态)。
+			if (InterceptPrefabUnsaved(panel, PrefabPendingAction::Close))
+				return;
 			CloseFloatWindow(panel, true, &ctx);
 			m_AttachedPanels.erase(attached);
 			if (m_ActiveWindowTag == panel)
@@ -1047,7 +1066,9 @@ namespace World
 			ctx.PushHoverBlocker(RestorePromptRect(statusBarRect));
 		}
 		const bool shellModalOpen = m_ImportModalOpen || m_Editor.ShowUnsavedModal()
-			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress();
+			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress()
+			// P4-U13e:prefab 未保存改动的确认(关窗 / 进文档会话)也是窗口级模态。
+			|| m_PrefabPendingAction != PrefabPendingAction::None;
 		// P4-U6b:面板级模态(属性面板的"添加组件"居中窗口)与 shell 模态同一条封锁路径;
 		// 渲染该面板之前会解开(RenderTabs),画完再封回去。
 		const bool panelModalOpen = !m_PanelModalOwner.empty();
@@ -1905,6 +1926,12 @@ namespace World
 			}
 		}
 
+		if (!closeRequest.empty())
+		{
+			// P4-U13e:prefab 面板有未保存改动 → 先弹确认;窗口先留着,标签也不能摘。
+			if (InterceptPrefabUnsaved(closeRequest, PrefabPendingAction::Close))
+				closeRequest.clear();
+		}
 		if (!closeRequest.empty())
 		{
 			// × = 关闭:隐藏该窗口的面板(可从 Window 菜单重新打开),并把标签移出栏。
@@ -2971,6 +2998,20 @@ namespace World
 		return readable;
 	}
 
+	// P4-U13e:脚本化写字段 —— 复用面板自己的写入口(不是旁路:同样走脏标记/状态行/资产警告)。
+	bool EditorShell::SetPrefabPanelField(const std::string& panelId, const std::string& component,
+		const std::string& field, const std::string& value, const std::string& axis, std::string* message)
+	{
+		PrefabPanel* prefab = PrefabPanelById(panelId);
+		if (!prefab)
+		{
+			if (message)
+				*message = "no prefab window for panel '" + panelId + "'";
+			return false;
+		}
+		return prefab->SetEditableField(component, field, value, axis, message);
+	}
+
 	void EditorShell::RequestImportDestination(const std::string& sourcePath)
 	{
 		// D10-10(用户 2026-09-19):导入位置选择器改成**窗口级模态**(此前是内容浏览器面板
@@ -3353,6 +3394,137 @@ namespace World
 		TogglePanel(*m_Ctx, panel);
 	}
 
+	// ---- P4-U13e:prefab 资产窗口的"未保存改动"守卫 ----
+	//
+	// 关窗 / 进文档会话都会丢掉窗口里未落盘的编辑,所以先弹项目现成的确认模态问一次
+	// (丢弃 / 取消),用户点"丢弃"后才执行被延迟的那个动作。守卫只认 prefab 面板,
+	// 其它面板原样透传(不影响既有路径)。
+
+	PrefabPanel* EditorShell::PrefabPanelById(const std::string& panelId) const
+	{
+		const auto found = m_PanelRegistry.find(panelId);
+		if (found == m_PanelRegistry.end())
+			return nullptr;
+		return dynamic_cast<PrefabPanel*>(found->second.get());
+	}
+
+	bool EditorShell::InterceptPrefabUnsaved(const std::string& panelId, PrefabPendingAction action,
+		const std::string& logicalPath)
+	{
+		if (m_PrefabGuardBypass || panelId.empty())
+			return false;
+		PrefabPanel* panel = PrefabPanelById(panelId);
+		if (!panel || !panel->HasUnsavedChanges())
+			return false;
+		if (m_PrefabPendingAction == action && m_PrefabPendingPanel == panelId)
+			return true;   // 已经在等用户回答:不要重复排队
+		m_PrefabPendingPanel = panelId;
+		m_PrefabPendingLogical = logicalPath;
+		m_PrefabPendingAction = action;
+		// 独立窗口的 × 会先把 OS 窗口标成 should-close(此后不再渲染,内容会冻在上一帧)。
+		// 这里把那个待关闭状态撤销:用户点"取消"后窗口还能继续用(容器唯一会清 should-close
+		// 的公开入口是"显示但不激活")。挂靠态的面板 OS 窗口本来就在隐藏复用,跳过。
+		if (FloatWindowHost* host = FindFloatHost(panelId); host && !host->IsHidden())
+			host->ShowWithoutActivation();
+		WLD_CORE_INFO("[prefab] '{0}' has unsaved edits: waiting for the discard confirmation", panelId);
+		return true;
+	}
+
+	void EditorShell::RunPendingPrefabAction(Wui::WuiContext& ctx)
+	{
+		const std::string panel = m_PrefabPendingPanel;
+		const std::string logical = m_PrefabPendingLogical;
+		const PrefabPendingAction action = m_PrefabPendingAction;
+		m_PrefabPendingPanel.clear();
+		m_PrefabPendingLogical.clear();
+		m_PrefabPendingAction = PrefabPendingAction::None;
+		// 丢弃面板内的编辑(下一次绘制会从磁盘重读),然后执行被拦下的动作。
+		if (PrefabPanel* prefab = PrefabPanelById(panel))
+			prefab->DiscardUnsavedChanges();
+		m_PrefabGuardBypass = true;
+		if (action == PrefabPendingAction::Close && !panel.empty())
+			TogglePanel(ctx, panel);
+		else if (action == PrefabPendingAction::OpenDocument && !logical.empty())
+			m_Editor.OpenPrefab(logical);
+		m_PrefabGuardBypass = false;
+	}
+
+	void EditorShell::DrawPrefabUnsavedModal(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiId modalId = Wui::HashId("modal.prefab.unsaved");
+		if (m_PrefabPendingAction != PrefabPendingAction::None)
+			ctx.SetModal(modalId);
+		else if (ctx.Modal() == modalId)
+			ctx.ClearModal();
+
+		Wui::WuiRect panel;
+		bool escapePressed = false;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("modal.prefab.unsaved.title", "Unsaved Prefab Changes");
+		frameDesc.Size = { 500.0f, 160.0f };
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &panel, &escapePressed, m_Theme))
+			return;
+		const bool opening = m_PrefabPendingAction == PrefabPendingAction::OpenDocument;
+		Label(ctx, { panel.X + 16.0f, panel.Y + 44.0f }, opening
+				? Wui::Tr("modal.prefab.unsaved.line1_open", "The full editor loads this asset from disk.")
+				: Wui::Tr("modal.prefab.unsaved.line1_close", "This window has unsaved prefab edits."),
+			m_Theme.Text, 14.0f);
+		Label(ctx, { panel.X + 16.0f, panel.Y + 64.0f }, opening
+				? Wui::Tr("modal.prefab.unsaved.line2_open", "Continuing discards the edits made in this window.")
+				: Wui::Tr("modal.prefab.unsaved.line2_close", "Closing discards them; Save writes them into the asset."),
+			m_Theme.Text, 14.0f);
+		Label(ctx, { panel.X + 16.0f, panel.Y + 86.0f }, m_PrefabPendingPanel, m_Theme.TextMuted, 12.0f);
+		const std::string discardLabel = Wui::Tr("modal.prefab.unsaved.discard", "Discard");
+		const std::string cancelLabel = Wui::Tr("modal.prefab.unsaved.cancel", "Cancel");
+		const Wui::WuiId discardId = Wui::HashId("modal.prefab.unsaved.discard");
+		const Wui::WuiId cancelId = Wui::HashId("modal.prefab.unsaved.cancel");
+		// 按钮几何与 Wui::ModalButtons 的两按钮口径一致(等分、整行居中、gap 8;内边距/按钮高
+		// 取 ModalFooter 的公开常量)。按钮自己画而不是走 ModalButtons,原因只有一个:
+		// 本帧如果先渲染过可见的独立窗口,WuiAccessibility 的"当前窗口"会停在那个浮窗上
+		// (每个窗口在自己的 BeginFrame 里设置它),而模态是画在主窗口里的 —— 跟着"当前窗口"
+		// 登记的话,脚本 ui.invoke 会按浮窗去投递点击(实测:点不到)。这里显式写死 main。
+		const float buttonGap = 8.0f;
+		const float available = std::max(80.0f, panel.W - Wui::ModalFooterPadding * 2.0f);
+		const float buttonWidth = std::clamp((available - buttonGap) * 0.5f, 48.0f, 240.0f);
+		const float rowWidth = buttonWidth * 2.0f + buttonGap;
+		const float buttonX = panel.X + (panel.W - rowWidth) * 0.5f;
+		const float buttonY = panel.Y + panel.H - Wui::ModalFooterPadding - Wui::ModalFooterHeight;
+		const Wui::WuiRect discardRect { buttonX, buttonY, buttonWidth, Wui::ModalFooterHeight };
+		const Wui::WuiRect cancelRect { buttonX + buttonWidth + buttonGap, buttonY, buttonWidth,
+			Wui::ModalFooterHeight };
+		const auto registerMainButton = [](Wui::WuiId id, const Wui::WuiRect& rect, const std::string& label)
+		{
+			Wui::WuiAccessNode node;
+			node.Id = id;
+			node.Window = "main";
+			node.Panel = "shell";
+			node.Kind = "button";
+			node.Label = label;
+			node.Rect = rect;
+			node.Enabled = true;
+			node.Visible = true;
+			node.Interactive = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		};
+		registerMainButton(discardId, discardRect, discardLabel);
+		registerMainButton(cancelId, cancelRect, cancelLabel);
+		const bool discardClicked = Wui::Button(ctx, discardId, discardRect, discardLabel, m_Theme);
+		const bool cancelClicked = Wui::Button(ctx, cancelId, cancelRect, cancelLabel, m_Theme);
+		if (discardClicked)
+		{
+			RunPendingPrefabAction(ctx);
+		}
+		else if (cancelClicked || escapePressed)
+		{
+			// 取消:窗口/资产原样不动,未保存改动保留。
+			m_PrefabPendingPanel.clear();
+			m_PrefabPendingLogical.clear();
+			m_PrefabPendingAction = PrefabPendingAction::None;
+		}
+		Wui::EndModalFrame(ctx);
+	}
+
 	// W5-L1:文档场景外部改动提示(视口面板读;按钮触发重开,未保存时走确认模态)。
 	bool EditorShell::ExternalSceneChanged() const
 	{
@@ -3654,6 +3826,9 @@ namespace World
 	// 隐藏单个面板(标签栏 x / Window 菜单):从所属窗口摘除,窗口为空则销毁。
 	void EditorShell::HideFloatPanel(const std::string& panel, Wui::WuiContext* ctx)
 	{
+		// P4-U13e:prefab 面板有未保存改动时先问一次(丢弃 / 取消),不静默丢。
+		if (InterceptPrefabUnsaved(panel, PrefabPendingAction::Close))
+			return;
 		const std::string before = m_Layout.Serialize();
 		if (FloatWindowHost* host = FindFloatHost(panel))
 		{
@@ -3679,6 +3854,9 @@ namespace World
 	// 整窗关闭(用户关闭/渲染失败):窗口内全部面板隐藏,布局写回并记录操作。
 	void EditorShell::CloseFloatWindow(const std::string& panel, bool recordChange, Wui::WuiContext* ctx)
 	{
+		// P4-U13e:同上(OS 窗口关闭 / 挂靠标签 × 都从这里过)。
+		if (InterceptPrefabUnsaved(panel, PrefabPendingAction::Close))
+			return;
 		const std::string before = m_Layout.Serialize();
 		FloatWindowHost* host = FindFloatHost(panel);
 		if (!host)
@@ -3912,6 +4090,9 @@ namespace World
 
 	void EditorShell::DrawModals(Wui::WuiContext& ctx)
 	{
+		// ---- P4-U13e:prefab 窗口的未保存改动(关窗 / 进文档会话)----
+		DrawPrefabUnsavedModal(ctx);
+
 		// ---- D10-10:导入位置(窗口级模态) ----
 		// 放在这里(其余模态之前)是故意的:导入失败时 EditorLayer 会弹它自己的 Error 模态,
 		// 那份错误框必须画在选择器**之上**才看得见(与 D10-9 面板内选择器时期的行为一致);
