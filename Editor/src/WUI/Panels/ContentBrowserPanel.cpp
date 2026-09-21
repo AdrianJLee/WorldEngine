@@ -494,14 +494,15 @@ namespace World
 		}
 		else if (path.extension() == ".wprefab")
 		{
-			// P4-U13:prefab 双击 = **打开编辑**(以前落到"交给 Windows 打开"的兜底分支,
-			// 实际弹记事本)。编辑期间保存 = 写回这一个资产,返回 = 回上一个场景。
+			// P4-U13c:双击 = 打开 prefab **资产窗口**(看/管理:实体树 + 组件摘要 + 引用资产 +
+			// 场景实例),与 .wmodel 预览窗口同款、默认附加到主窗口。
+			// 真正要改资产走窗口里的 `Edit Prefab`(文档会话,那里才有 3D 视口与 gizmo)。
 			const std::filesystem::path contentRoot = m_Model.Root;
 			std::error_code ec;
 			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
 			const std::string logical = ec ? path.generic_string() : relative.generic_string();
-			m_Host.OpenPrefabEditor(logical);
-			WLD_CORE_INFO("[prefab] open for editing: {0}", logical);
+			m_Host.OpenPrefabWindow(logical);
+			WLD_CORE_INFO("[prefab] asset window opened: {0}", logical);
 		}
 		else if (path.extension() == ".gltf" || path.extension() == ".glb")
 		{
@@ -2200,8 +2201,20 @@ namespace World
 			std::vector<BrowserItem> items;
 			if (prefabFile)
 			{
-				items.push_back({ Wui::Tr("panel.content_browser.item.open_prefab", "Open Prefab"),
+				// P4-U13c:Open = 打开资产窗口(与双击同一条);编辑是单独一条(文档会话)。
+				items.push_back({ Wui::Tr("panel.content_browser.item.open_prefab", "Open Prefab Window"),
 					[this] { OpenItem(m_Model.ContextMenuPath); } });
+				items.push_back({ Wui::Tr("panel.content_browser.item.edit_prefab", "Edit Prefab"),
+					[this]
+					{
+						const std::filesystem::path contentRoot = m_Model.Root;
+						std::error_code ec;
+						const std::filesystem::path relative =
+							std::filesystem::relative(m_Model.ContextMenuPath, contentRoot, ec);
+						const std::string logical =
+							ec ? m_Model.ContextMenuPath.generic_string() : relative.generic_string();
+						m_Host.OpenPrefabEditor(logical);
+					} });
 				items.push_back({ Wui::Tr("panel.content_browser.item.instantiate", "Instantiate in Scene"),
 					[this]
 					{

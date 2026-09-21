@@ -16,6 +16,7 @@
 #include "World/WUI/Widgets/WuiModal.h"
 #include "Panels/MaterialEditorPanel.h"
 #include "Panels/ModelPreviewPanel.h"
+#include "Panels/PrefabPanel.h"
 #include "Panels/SettingsPanel.h"
 #include "Panels/PreferencesPanel.h"
 #include "World/WUI/WuiLocalization.h"
@@ -119,6 +120,8 @@ namespace World
 		constexpr const char* kModelPanelPrefix = "model:";
 		// W9-2:动态脚本编辑器面板 id 前缀:每个脚本一个 "script:<逻辑路径>" 面板。
 		constexpr const char* kScriptPanelPrefix = "script:";
+		// P4-U13c:prefab 资产窗口(每个 .wprefab 一个 "prefab:<逻辑路径>" 面板)。
+		constexpr const char* kPrefabPanelPrefix = "prefab:";
 	}
 
 	EditorShell::EditorShell(EditorLayer& editor)
@@ -238,6 +241,9 @@ namespace World
 		// 可拖出为 OS 窗口 / 再挂靠回主窗口)。
 		if (panel.compare(0, std::strlen(kScriptPanelPrefix), kScriptPanelPrefix) == 0)
 			return PanelForm::Independent;
+		// P4-U13c:prefab 资产窗口同上(默认附加到主窗口,可拖出)。
+		if (panel.compare(0, std::strlen(kPrefabPanelPrefix), kPrefabPanelPrefix) == 0)
+			return PanelForm::Independent;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
 				return spec.Form;
@@ -251,6 +257,8 @@ namespace World
 		if (panel.compare(0, std::strlen(kModelPanelPrefix), kModelPanelPrefix) == 0)
 			return true;
 		if (panel.compare(0, std::strlen(kScriptPanelPrefix), kScriptPanelPrefix) == 0)
+			return true;
+		if (panel.compare(0, std::strlen(kPrefabPanelPrefix), kPrefabPanelPrefix) == 0)
 			return true;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
@@ -2340,6 +2348,7 @@ namespace World
 				EnsureMaterialPanelFromId(panel);
 				EnsureScriptPanelFromId(panel);
 				EnsureModelPanelFromId(panel);
+				EnsurePrefabPanelFromId(panel);
 			}
 			const bool attach = forceTabs || item.Attached;
 			// 先隐藏着建出来:恢复成 chip 时不会"闪一下窗口",恢复成浮窗时下一步再显示。
@@ -2433,6 +2442,22 @@ namespace World
 			EnsureModelPanelFromId(panel);
 			if (!m_Layout.FindFloatMemory(panel, nullptr))
 				m_Layout.FloatMemory.push_back({ panel, Wui::WuiRect { 220.0f, 160.0f, 620.0f, 660.0f } });
+		}
+		// P4-U13c:动态 prefab 资产窗口 —— 未打开 → 走 OpenPrefabWindow(默认附加到主窗口);
+		// 已打开(附加标签或可见独立窗口)→ 走菜单同一条开关路径关闭。
+		if (panel.rfind(kPrefabPanelPrefix, 0) == 0)
+		{
+			EnsurePrefabPanelFromId(panel);
+			if (!m_Ctx)
+				return false;
+			const auto attached = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
+			FloatWindowHost* host = FindFloatHost(panel);
+			const bool visibleWindow = host && !host->IsHidden();
+			if (attached != m_AttachedPanels.end() || visibleWindow)
+				TogglePanel(*m_Ctx, panel);
+			else
+				OpenPrefabWindow(panel.substr(std::strlen(kPrefabPanelPrefix)));
+			return true;
 		}
 		// W9-2:动态脚本面板 —— 未打开 → 走 OpenScriptEditor(默认附加到主窗口);
 		// 已打开(附加标签或可见独立窗口)→ 走菜单同一条开关路径关闭。
@@ -2876,6 +2901,52 @@ namespace World
 		OpenPanelAttached(panelId);
 	}
 
+	// ---- P4-U13c:prefab 资产窗口(动态实例,id = "prefab:<逻辑路径>")----
+
+	void EditorShell::OpenPrefabWindow(const std::string& logicalPath)
+	{
+		OpenPrefabWindowChecked(logicalPath, nullptr);
+	}
+
+	bool EditorShell::OpenPrefabWindowChecked(const std::string& logicalPath, std::string* message)
+	{
+		// 与 `.wmodel` 预览同款:每个 prefab 一个面板 + 默认附加到主窗口;
+		// 重复打开 = 立刻重读一次 + 前置焦点(资产的"刷新"入口)。
+		std::string path = logicalPath;
+		std::replace(path.begin(), path.end(), '\\', '/');
+		if (path.empty())
+		{
+			if (message)
+				*message = "empty prefab path";
+			return false;
+		}
+		const std::string panelId = std::string(kPrefabPanelPrefix) + path;
+		PrefabPanel* panel = nullptr;
+		if (const auto found = m_PanelRegistry.find(panelId); found != m_PanelRegistry.end())
+		{
+			panel = dynamic_cast<PrefabPanel*>(found->second.get());
+		}
+		else
+		{
+			auto created = std::make_unique<PrefabPanel>(path);
+			panel = created.get();
+			m_PanelRegistry.emplace(panelId, std::move(created));
+			m_Panels.push_back(panelId);
+			m_Layout.FloatMemory.push_back({ panelId, Wui::WuiRect { 220.0f, 160.0f, 620.0f, 560.0f } });
+		}
+		if (!panel)
+		{
+			if (message)
+				*message = "panel id '" + panelId + "' is not a prefab window";
+			return false;
+		}
+		// 打开/前置之前先把这份资产读一遍:失败也要开窗口 —— 状态行写可读原因,
+		// 调用方(AI 通道)拿到 false + 同一条原因,不存在"静默成功"。
+		const bool readable = panel->ReloadNow(m_Editor.GetActiveScene().get(), message);
+		OpenPanelAttached(panelId);
+		return readable;
+	}
+
 	void EditorShell::RequestImportDestination(const std::string& sourcePath)
 	{
 		// D10-10(用户 2026-09-19):导入位置选择器改成**窗口级模态**(此前是内容浏览器面板
@@ -3163,6 +3234,23 @@ namespace World
 		if (path.empty())
 			return;
 		auto panel = std::make_unique<ModelPreviewPanel>(path);
+		m_PanelRegistry.emplace(panelId, std::move(panel));
+		if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
+			m_Panels.push_back(panelId);
+	}
+
+	// ---- P4-U13c:prefab 资产窗口(动态实例,id = "prefab:<逻辑路径>")----
+
+	void EditorShell::EnsurePrefabPanelFromId(const std::string& panelId)
+	{
+		if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
+			return;
+		if (panelId.compare(0, std::strlen(kPrefabPanelPrefix), kPrefabPanelPrefix) != 0)
+			return;
+		const std::string path = panelId.substr(std::strlen(kPrefabPanelPrefix));
+		if (path.empty())
+			return;
+		auto panel = std::make_unique<PrefabPanel>(path);
 		m_PanelRegistry.emplace(panelId, std::move(panel));
 		if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
 			m_Panels.push_back(panelId);

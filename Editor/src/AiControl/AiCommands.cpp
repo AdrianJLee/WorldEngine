@@ -1095,7 +1095,28 @@ namespace World
 		}
 		if (cmd == "asset.open_prefab")
 		{
-			// P4-U13:与"内容浏览器双击 .wprefab"同一条路径(打开编辑,不改场景结构)。
+			// P4-U13c:与"内容浏览器双击 .wprefab"同一条路径 —— 打开**资产窗口**
+			// (看/管理:实体树 + 组件摘要 + 引用资产 + 场景实例),不改当前文档。
+			// 读不了的资产:窗口照常打开(状态行写原因),命令本身返回可读失败。
+			const std::string path = arg("path");
+			if (path.empty())
+			{
+				error = "missing path";
+				return false;
+			}
+			std::string message;
+			if (!m_Shell.OpenPrefabWindowChecked(path, &message))
+			{
+				error = message.empty() ? ("cannot open prefab window: " + path) : message;
+				return false;
+			}
+			result = "opened prefab window for " + path;
+			return true;
+		}
+		if (cmd == "asset.edit_prefab")
+		{
+			// P4-U13c:进入**文档编辑会话**(原来的 asset.open_prefab 行为)——
+			// 顶部横幅标明"正在编辑 Prefab",保存 = 写回资产,返回 = 回原来的场景。
 			const std::string path = arg("path");
 			if (path.empty())
 			{

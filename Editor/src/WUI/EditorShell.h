@@ -106,6 +106,8 @@ namespace World
 		void EnsureMaterialPanelFromId(const std::string& panelId);
 		// P1b D5:动态模型预览面板("model:<逻辑路径>")从布局存档恢复时按 id 建实例。
 		void EnsureModelPanelFromId(const std::string& panelId);
+		// P4-U13c:动态 prefab 资产窗口("prefab:<逻辑路径>")从布局存档/AI ui.open 恢复时按 id 建实例。
+		void EnsurePrefabPanelFromId(const std::string& panelId);
 		// W9-2:打开脚本编辑器(每个脚本一个 "script:<逻辑路径>" 面板,创建后默认附加到主窗口)。
 		void OpenScriptEditor(const std::string& logicalPath) override;
 		// 帧边界执行版:内部使用(AI 通道在帧首、OnRender 开头处理待办时)。
@@ -145,6 +147,11 @@ namespace World
 		void OpenModelPreview(const std::string& logicalPath) override;
 		// P4-U13:prefab(内容浏览器双击 = 打开编辑;右键 = 实例化到当前场景)。
 		void OpenPrefabEditor(const std::string& logicalPath) override;
+		// P4-U13c:内容浏览器双击 .wprefab = 打开这个资产窗口(看/管理),编辑在窗口里的 Edit Prefab。
+		void OpenPrefabWindow(const std::string& logicalPath) override;
+		// 同一个入口的"带结果"版本(打开前后读一次盘):失败 = false + 可读原因,
+		// 窗口仍然打开并在状态行写原因。AI 通道 `asset.open_prefab` 用它做失败语义。
+		bool OpenPrefabWindowChecked(const std::string& logicalPath, std::string* message = nullptr);
 		bool InstantiatePrefabAsset(const std::string& logicalPath, std::string* message = nullptr) override;
 		// P4-U13b:prefab 实例(属性面板实例条 + 层级右键菜单;实现全在 EditorLayer)。
 		bool PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,

@@ -40,6 +40,9 @@ namespace World
 		// 打开编辑:把 .wprefab 当文档打开(记住进来之前的场景);保存 = 写回该 prefab;
 		// 返回 = 重新打开原来的场景。逻辑路径相对内容根(与内容浏览器同一约定)。
 		void OpenPrefab(const std::string& logicalPath);
+		// P4-U13c:打开 prefab **资产窗口**(看/管理:树 + 组件摘要 + 引用资产 + 场景实例)。
+		// 本函数只负责打开面板,窗口内容与读盘全在 PrefabPanel;编辑仍是 OpenPrefab(文档会话)。
+		void OpenPrefabWindow(const std::string& logicalPath);
 		bool SavePrefab();
 		void ClosePrefab();
 		bool IsEditingPrefab() const { return !m_PrefabEditLogical.empty(); }

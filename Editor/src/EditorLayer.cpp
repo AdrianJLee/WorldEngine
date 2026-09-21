@@ -1041,6 +1041,18 @@ namespace World
 		RequestAction([this, logicalPath]() { DoOpenPrefab(logicalPath); });
 	}
 
+	// P4-U13c:prefab 资产窗口(看/管理)与编辑会话(OpenPrefab)分开:
+	// 窗口只读展示资产;真正的编辑仍然进文档会话(窗口里的 Edit Prefab 调 OpenPrefab)。
+	void EditorLayer::OpenPrefabWindow(const std::string& logicalPath)
+	{
+		if (logicalPath.empty())
+			return;
+		std::string message;
+		// 读不了的资产也要开窗口(状态行写原因),但失败必须留一条可读日志,不能静默。
+		if (!m_Shell.OpenPrefabWindowChecked(logicalPath, &message))
+			WLD_CORE_WARN("[prefab] window opened for unreadable asset '{0}': {1}", logicalPath, message);
+	}
+
 	void EditorLayer::DoOpenPrefab(const std::string& logicalPath)
 	{
 		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH)) / logicalPath;
@@ -1099,6 +1111,14 @@ namespace World
 		if (!m_ActiveScene || logicalPath.empty())
 		{
 			if (message) *message = "no active scene";
+			return false;
+		}
+		// 与 InstantiateModelFile 同一条只读口径:实例化会写活动场景结构,
+		// Play/Simulate 下拒绝(否则 GetRegistry() 的"活动场景禁止结构写"断言会抛出来)。
+		if (m_SceneState != SceneState::Edit)
+		{
+			if (message)
+				*message = "预制体只能在编辑态实例化(Play/Simulate 下请先退出)";
 			return false;
 		}
 		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH)) / logicalPath;
