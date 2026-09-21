@@ -56,6 +56,10 @@ namespace World::Wui
 		// 任意四边形(顶点按左上/右上/右下/左下顺序):画斜线、箭头、圆环等
 		// 轴对齐矩形覆盖不到的形状。4 个顶点放在 WuiDrawCommand::Vertices。
 		Quad,
+		// P4-U10:四角渐变矩形(顶点顺序同 Quad,颜色取 WuiDrawCommand::Corners)。
+		// 取色器的 饱和度×明度方块 / 色相条 / alpha 条 都靠它:2D 管线本来就是逐顶点颜色,
+		// 所以"渐变"只是 4 个顶点给不同颜色,后端与着色器都不用改。
+		Gradient,
 		ClipPush,
 		ClipPop,
 	};
@@ -82,6 +86,9 @@ namespace World::Wui
 		// W9:代码编辑器的闪烁 caret(逐行局部字节偏移,-1 = 不画)。与 TextCursorByte
 		// 的区别:该字段由后端做 0.5s 闪烁,且按真实度量画 1.5px。
 		int TextCaretByte = -1;
+		// Gradient 命令的四个角颜色(左上/右上/右下/左下)。
+		std::array<WuiColor, 4> Corners { WuiColor { 1, 1, 1, 1 }, WuiColor { 1, 1, 1, 1 },
+			WuiColor { 1, 1, 1, 1 }, WuiColor { 1, 1, 1, 1 } };
 	};
 
 	// ---- 文本度量钩子 ----

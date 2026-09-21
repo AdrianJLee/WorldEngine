@@ -218,7 +218,7 @@ namespace World
 			WE_FIELD(Color, Vec4, Id(0x4D455348434F4C52), Color(),
 				Doc("Base color used when MaterialPath is empty."));
 			WE_FIELD(MeshPath, String, Id(0x4D45534850415448), Asset("Model"),
-				Doc("Imported model asset (.wmodel, path relative to Game/assets); empty = use Primitive."));
+				Doc("Imported model asset (.wmodel, path relative to Game/assets); empty = use Primitive. glTF/GLB are import sources only: import them first and reference the produced .wmodel."));
 			WE_FIELD(MaterialPath, String, Id(0x4D4154455249414C), Asset("Material"),
 				Doc("Material asset (.wmat); overrides Color and the model's own material slots when set."));
 			// D5:字段 id 显式钉住("MESHINDX"),默认 0;.wmodel 节点树选择 mesh 用。
@@ -657,7 +657,7 @@ namespace World
 			WE_FIELD(Mode, Enum, Id(0x4D33444D4F444530), Of(ColliderMode),
 				Doc("ConvexHull works on every body type; StaticTriangles is only allowed on Static bodies."));
 			WE_FIELD(MeshPath, String, Id(0x4D33445041544830), Asset("Model"),
-				Doc("Model asset used for collision; empty = reuse the MeshRenderer mesh on the same entity."));
+				Doc("Collision model asset (.wmodel); empty = reuse the MeshRenderer mesh on the same entity. glTF/GLB sources must be imported to .wmodel first."));
 		WE_SCHEMA_END
 	};
 

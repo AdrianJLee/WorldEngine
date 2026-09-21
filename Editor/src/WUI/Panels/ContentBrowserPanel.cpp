@@ -510,7 +510,12 @@ namespace World
 				if (m_Model.Search[0])
 					UpdateSearch();
 				if (!logicalModel.empty())
+				{
+					// P4-U10:导入完成后**选中产物**(.wmodel)—— 让用户一眼看到"真正可引用的是它",
+					// 而不是继续盯着 .gltf 源文件。
+					SelectCreated(m_Model.Root / logicalModel, "import-model");
 					m_Host.OpenModelPreview(logicalModel);
+				}
 			}
 		}
 		else
@@ -1138,7 +1143,9 @@ namespace World
 			const uintmax_t bytes = slice.IsDir ? 0 : (slice.SizeKnown ? slice.Size : FileSize(slice.Path));
 			const std::string info = slice.IsDir
 				? Wui::Tr("panel.content_browser.slice.folder", "Folder")
-				: (slice.Extension.empty() ? slice.Type : slice.Extension) + " · "
+				// glTF/GLB 用"导入源"而不是裸扩展名:它们在网格视图里必须一眼看出不是可引用资产。
+				: ((slice.Extension == ".gltf" || slice.Extension == ".glb") ? slice.TypeLabel
+					: (slice.Extension.empty() ? slice.TypeLabel : slice.Extension)) + " · "
 					+ FormatBytes(static_cast<size_t>(bytes));
 			const std::string infoText = EllipsizeToWidth(ctx, info, textBudget, infoSize);
 			if (!infoText.empty())
@@ -1231,7 +1238,7 @@ namespace World
 					{ nameX, row.Y + (row.H - theme.FontSizeBody) * 0.5f, 0.0f, 0.0f },
 					theme.Text, 0.0f, 1.0f, nameText, theme.FontSizeBody, false });
 
-			const std::string typeText = EllipsizeToWidth(ctx, slice.Type,
+			const std::string typeText = EllipsizeToWidth(ctx, slice.TypeLabel,
 				std::max(0.0f, typeW - theme.PadSmall * 2.0f), smallSize);
 			if (!typeText.empty())
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
@@ -1293,7 +1300,10 @@ namespace World
 						if (m_Model.Search[0])
 							UpdateSearch();
 						if (!logicalModel.empty())
+						{
+							SelectCreated(m_Model.Root / logicalModel, "import-model");
 							m_Host.OpenModelPreview(logicalModel);
+						}
 					}
 				}
 				else
@@ -1899,6 +1909,20 @@ namespace World
 			slice.Name = path.extension().empty() ? path.filename().string() : path.stem().string();
 			const EditorAssetType type = DescribeAssetType(path, slice.IsDir);
 			slice.Type = type.Name;
+			// P4-U10:切片上显示的类型文案走本地化;glTF/GLB 明确写成"导入源(导入用)",
+			// 不再和原生 .wmodel 混在一起(用户 2026-09-21 报的歧义)。
+			switch (type.Kind)
+			{
+				case EditorAssetKind::Folder: slice.TypeLabel = Wui::Tr("asset.file.folder", "Folder"); break;
+				case EditorAssetKind::Scene: slice.TypeLabel = Wui::Tr("asset.file.scene", "Scene"); break;
+				case EditorAssetKind::Material: slice.TypeLabel = Wui::Tr("asset.file.material", "Material"); break;
+				case EditorAssetKind::Model: slice.TypeLabel = Wui::Tr("asset.file.model", "Model"); break;
+				case EditorAssetKind::ModelSource:
+					slice.TypeLabel = Wui::Tr("asset.file.model_source", "glTF source (import only)"); break;
+				case EditorAssetKind::Texture: slice.TypeLabel = Wui::Tr("asset.file.texture", "Texture"); break;
+				case EditorAssetKind::Script: slice.TypeLabel = Wui::Tr("asset.file.script", "Script"); break;
+				default: slice.TypeLabel = type.Name; break;
+			}
 			slice.Extension = LowerExtension(path);
 			// 列表模式本来就要显示"大小"列:整表统计沿用旧行为;
 			// 网格模式只对**可见**切片按需 stat(见 RenderGridSlices),大目录不做全量 stat。
@@ -1951,6 +1975,16 @@ namespace World
 		{
 			const bool selected = m_Model.Selected.find(path) != m_Model.Selected.end();
 			const bool hovered = ctx.IsHovered(itemRect);
+			// P4-U10:`.gltf/.glb` 是**导入源**而不是可引用资产 —— 悬停直接说清"导入后场景引用
+			// 产出的 .wmodel"(用户 2026-09-21:「gltf 和 wmodel 现在有歧义,尤其是网格选取时」)。
+			if (hovered && !isDir)
+			{
+				const std::string extension = LowerExtension(path);
+				if (extension == ".gltf" || extension == ".glb")
+					Wui::Tooltip(ctx, itemRect, Wui::Tr("panel.content_browser.source_hint",
+						"Import source (not referenceable): import it, then reference the produced .wmodel")
+						+ "  →  " + path.stem().string() + ".wmodel");
+			}
 			if (isDir && fileDrag && hovered)
 			{
 				ctx.DropTarget(itemRect, "file:");

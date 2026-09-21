@@ -784,6 +784,18 @@ namespace World
 		float y = rect.Y + 8.0f;
 		Wui::Label(ctx, { x, y }, ShortenPath(m_LogicalPath), theme.Text, 13.0f);
 		y += 22.0f;
+		// P4-U10:标题显示的是**导入产物**(.wmodel,场景引用的那个),这一行补上导入源 ——
+		// glTF/GLB 只是源文件,重导从这里来(用户 2026-09-21:「gltf 和 wmodel 有歧义」)。
+		if (!m_SourceLogical.empty())
+		{
+			const std::string sourceLine = Wui::Tr("panel.model.source_line", "Import source: ")
+				+ ShortenPath(m_SourceLogical)
+				+ (m_NeedsReimport ? Wui::Tr("panel.model.source_stale", "  (changed — reimport)") : std::string());
+			Wui::Label(ctx, { x, y }, sourceLine, theme.TextMuted, 11.0f);
+			Wui::Tooltip(ctx, { x, y, width, 14.0f }, Wui::Tr("panel.model.source_tooltip",
+				"glTF/GLB sources are import-only; the scene references the .wmodel produced from them."));
+		}
+		y += 16.0f;
 
 		// 预览区:上=图(约占四成高),下=资产视图(状态/设置/依赖/节点树)。
 		const float previewSide = std::min(width, std::max(160.0f, rect.H * 0.40f));

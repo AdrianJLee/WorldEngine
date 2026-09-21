@@ -77,6 +77,8 @@ namespace World
 		bool SizeKnown = false;
 		std::string Name;      // 文件名(不含目录)
 		std::string Type;      // EditorAssetTypes 的类型名(Folder / Scene / Material / …)
+		// P4-U10:本地化后的类型文案(切片展示用);glTF/GLB 明确标成"导入源"。
+		std::string TypeLabel;
 		std::string Extension; // 小写扩展名(含点);文件夹为空
 	};
 

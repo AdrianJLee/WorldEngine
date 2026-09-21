@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/Core/KeyCodes.h"
 
@@ -1536,6 +1537,12 @@ namespace World::Wui
 		{
 			std::string Hex;
 			bool Initialized = false;
+			// P4-U10:HSV 是取色器(色板/色相条)的编辑状态。拖动时以 HSV 为准,
+			// 外部改动(hex/滑杆/预设)导致 RGB(HSV) 与当前 rgba 不一致时重新同步。
+			float H = 0.0f;
+			float S = 0.0f;
+			float V = 1.0f;
+			bool HsvValid = false;
 		};
 
 		// 分隔条:拖动锚点(按下那一帧的值与轴向坐标)。拖动期间按"锚点 + 轴向位移"累加,
@@ -1551,12 +1558,72 @@ namespace World::Wui
 		constexpr float kColorSwatchWidth = 6.0f;      // 折叠态左侧色块宽
 		constexpr float kColorCheckerSize = 4.0f;      // 棋盘格方块边长
 		constexpr float kColorSwatchInset = 3.0f;      // 色块相对字段上下内缩
-		constexpr float kColorPopupWidth = 220.0f;     // 弹层宽
-		constexpr float kColorPopupHeight = 132.0f;    // 弹层高:8 + hex 22 + 14 + 4×22 = 132
+		constexpr float kColorPopupWidth = 236.0f;     // 弹层宽
+		// 弹层高(P4-U10):8 + 色板 110 + 10 + 色相条 12 + 6 + alpha 条 12 + 10 + hex 22
+		// + 4×22 通道滑杆 + 12 + 预设 2×18 + 8 ≈ 330。
+		constexpr float kColorPopupHeight = 348.0f;
+		constexpr float kColorSvHeight = 110.0f;       // 饱和度×明度 色板高
+		constexpr float kColorBarHeight = 12.0f;       // 色相条 / alpha 条高
+		constexpr float kColorPresetCell = 18.0f;      // 预设色块边长
+		constexpr int kColorPresetColumns = 10;
+		constexpr int kColorPresetRows = 2;
 		constexpr float kColorHexRowHeight = 22.0f;    // 弹层顶部 hex 输入行高
 		constexpr float kColorChannelRowHeight = 22.0f;// R/G/B/A 每行高
 		constexpr float kColorChannelLabelWidth = 14.0f;
 		constexpr float kColorChannelValueWidth = 40.0f;
+
+		// 预设调色板:第一行 = 灰阶/基础色,第二行 = 常用鲜艳色(与 Unity/Blender 的
+		// 快速取色同一档位);值就是 sRGB 的 0..1。
+		const glm::vec3 kColorPresets[kColorPresetColumns * kColorPresetRows] = {
+			{ 0.00f, 0.00f, 0.00f }, { 1.00f, 1.00f, 1.00f }, { 0.50f, 0.50f, 0.50f }, { 0.25f, 0.25f, 0.25f },
+			{ 0.75f, 0.75f, 0.75f }, { 1.00f, 0.27f, 0.23f }, { 1.00f, 0.62f, 0.04f }, { 1.00f, 0.84f, 0.25f },
+			{ 0.25f, 0.86f, 0.35f }, { 0.29f, 0.62f, 1.00f },
+			{ 0.00f, 0.42f, 0.72f }, { 0.20f, 0.80f, 0.85f }, { 0.55f, 0.35f, 0.95f }, { 0.95f, 0.35f, 0.65f },
+			{ 0.55f, 0.27f, 0.07f }, { 0.55f, 0.55f, 0.30f }, { 0.30f, 0.45f, 0.35f }, { 0.95f, 0.95f, 0.90f },
+			{ 0.10f, 0.05f, 0.15f }, { 0.65f, 0.15f, 0.15f },
+		};
+
+		// RGB(0..1) ↔ HSV(色相 0..360,饱和/明度 0..1)。
+		glm::vec3 ColorToHsv(const glm::vec3& rgb)
+		{
+			const float maxChannel = std::max(rgb.x, std::max(rgb.y, rgb.z));
+			const float minChannel = std::min(rgb.x, std::min(rgb.y, rgb.z));
+			const float delta = maxChannel - minChannel;
+			float hue = 0.0f;
+			if (delta > 1e-6f)
+			{
+				if (maxChannel == rgb.x) hue = 60.0f * std::fmod((rgb.y - rgb.z) / delta, 6.0f);
+				else if (maxChannel == rgb.y) hue = 60.0f * ((rgb.z - rgb.x) / delta + 2.0f);
+				else hue = 60.0f * ((rgb.x - rgb.y) / delta + 4.0f);
+			}
+			if (hue < 0.0f) hue += 360.0f;
+			const float saturation = maxChannel <= 1e-6f ? 0.0f : delta / maxChannel;
+			return { hue, saturation, maxChannel };
+		}
+
+		glm::vec3 HsvToColor(const glm::vec3& hsv)
+		{
+			const float hue = std::fmod(std::fmod(hsv.x, 360.0f) + 360.0f, 360.0f);
+			const float saturation = std::clamp(hsv.y, 0.0f, 1.0f);
+			const float value = std::clamp(hsv.z, 0.0f, 1.0f);
+			const float c = value * saturation;
+			const float x = c * (1.0f - std::fabs(std::fmod(hue / 60.0f, 2.0f) - 1.0f));
+			const float m = value - c;
+			glm::vec3 rgb { 0.0f };
+			if (hue < 60.0f) rgb = { c, x, 0.0f };
+			else if (hue < 120.0f) rgb = { x, c, 0.0f };
+			else if (hue < 180.0f) rgb = { 0.0f, c, x };
+			else if (hue < 240.0f) rgb = { 0.0f, x, c };
+			else if (hue < 300.0f) rgb = { x, 0.0f, c };
+			else rgb = { c, 0.0f, x };
+			return rgb + glm::vec3 { m };
+		}
+
+		WuiColor ToWuiColor(const glm::vec3& rgb, float alpha = 1.0f)
+		{
+			return { std::clamp(rgb.x, 0.0f, 1.0f), std::clamp(rgb.y, 0.0f, 1.0f),
+				std::clamp(rgb.z, 0.0f, 1.0f), std::clamp(alpha, 0.0f, 1.0f) };
+		}
 
 		// 分隔条:命中带宽与线宽(派工确认:6px 命中带、视觉 1px、悬停加粗)。
 		constexpr float kSplitterHitWidth = 6.0f;
@@ -1746,12 +1813,159 @@ namespace World::Wui
 		// ---- 弹层(与 Combo 同一套 ctx.OpenPopup/ClosePopup/IsPopupOpen,不自造)----
 		ctx.PushOverlay();
 		WuiRect panel { rect.X, rect.Y + rect.H + 2.0f, kColorPopupWidth, kColorPopupHeight };
-		// 下方空间不够时向上展开(与 SearchableCombo 同一判据:用 UI 视口高度判断)。
-		if (panel.Y + panel.H > ctx.Input().ViewportSize.y)
-			panel.Y = std::max(4.0f, rect.Y - panel.H - 2.0f);
+		// P4-U10 弹层比原来的 hex+滑杆版高得多:下方放不下就向上翻,再整体夹进视口
+		// (夹不住时顶部对齐 —— 取色器被窗口边缘裁掉比"位置略偏"更糟)。
+		const float viewportHeight = ctx.Input().ViewportSize.y;
+		if (panel.Y + panel.H > viewportHeight)
+			panel.Y = rect.Y - panel.H - 2.0f;
+		panel.Y = std::max(4.0f, std::min(panel.Y, std::max(4.0f, viewportHeight - panel.H - 4.0f)));
+		panel.X = std::max(4.0f, std::min(panel.X, std::max(4.0f, ctx.Input().ViewportSize.x - panel.W - 4.0f)));
 		DrawPanelSurface(ctx, panel, theme);
 
-		const WuiRect hexRect { panel.X + theme.Pad, panel.Y + theme.Pad,
+		// ---- ① 饱和度 × 明度色板(四角渐变:左上白 → 右上古纯色 → 下黑)----
+		// 外部改动(hex/滑杆/预设)先同步 HSV;拖动中则以 HSV 为准。
+		if (!state.HsvValid)
+		{
+			const glm::vec3 hsv = ColorToHsv(glm::vec3 { rgba });
+			state.H = hsv.x;
+			state.S = hsv.y;
+			state.V = hsv.z;
+			state.HsvValid = true;
+		}
+		else
+		{
+			const glm::vec3 derived = HsvToColor({ state.H, state.S, state.V });
+			if (std::fabs(derived.x - rgba.r) > 1.0f / 255.0f || std::fabs(derived.y - rgba.g) > 1.0f / 255.0f
+				|| std::fabs(derived.z - rgba.b) > 1.0f / 255.0f)
+			{
+				const glm::vec3 hsv = ColorToHsv(glm::vec3 { rgba });
+				state.H = hsv.x;
+				state.S = hsv.y;
+				state.V = hsv.z;
+			}
+		}
+		const glm::vec3 hueColor = HsvToColor({ state.H, 1.0f, 1.0f });
+		const WuiRect svRect { panel.X + theme.Pad, panel.Y + theme.Pad,
+			panel.W - theme.Pad * 2.0f, kColorSvHeight };
+		{
+			WuiDrawCommand gradient;
+			gradient.Kind = WuiDrawKind::Gradient;
+			gradient.Rect = svRect;
+			gradient.Corners = { ToWuiColor({ 1.0f, 1.0f, 1.0f }), ToWuiColor(hueColor),
+				ToWuiColor({ 0.0f, 0.0f, 0.0f }), ToWuiColor({ 0.0f, 0.0f, 0.0f }) };
+			ctx.Commands().push_back(gradient);
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, svRect, theme.Border, 3.0f, 1.0f });
+			// 标记点(实心点 + 白描边):黑白背景上都看得见。
+			const glm::vec2 marker { svRect.X + state.S * svRect.W, svRect.Y + (1.0f - state.V) * svRect.H };
+			const WuiRect markerRect { marker.x - 5.0f, marker.y - 5.0f, 10.0f, 10.0f };
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, markerRect, { 0, 0, 0, 1 }, 5.0f, 1.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline,
+				{ markerRect.X + 1.0f, markerRect.Y + 1.0f, 8.0f, 8.0f }, { 1, 1, 1, 1 }, 4.0f, 1.0f });
+			RegisterAccessNode(DerivedChildId(id, ".sv.", 0), "color-area", svRect,
+				Wui::Tr("wui.color.saturation_value", "Saturation / Value"),
+				FloatToText(state.S) + "," + FloatToText(state.V), true, true, false);
+			// 交互:按下即定位,按住拖动持续更新(取色器的标准手感)。
+			const bool active = ctx.IsHovered(svRect)
+				&& (ctx.Input().MouseClicked[0] || ctx.Input().MouseDown[0]);
+			if (active)
+			{
+				state.S = std::clamp((ctx.Input().MousePos.x - svRect.X) / std::max(1.0f, svRect.W), 0.0f, 1.0f);
+				state.V = 1.0f - std::clamp((ctx.Input().MousePos.y - svRect.Y) / std::max(1.0f, svRect.H), 0.0f, 1.0f);
+				if (ctx.Input().MouseClicked[0])
+					ctx.SetCursor(WuiCursor::Hand);
+			}
+			if (ctx.IsHovered(svRect))
+				ctx.SetCursor(WuiCursor::Hand);
+		}
+
+		// ---- ② 色相条(6 段四角渐变拼出 360° 连续色相)----
+		const WuiRect hueRect { panel.X + theme.Pad, svRect.Y + svRect.H + 8.0f,
+			panel.W - theme.Pad * 2.0f, kColorBarHeight };
+		for (int segment = 0; segment < 6; ++segment)
+		{
+			const float left = static_cast<float>(segment) / 6.0f;
+			const float right = static_cast<float>(segment + 1) / 6.0f;
+			const WuiRect band { hueRect.X + hueRect.W * left, hueRect.Y, hueRect.W * (right - left) + 0.5f, hueRect.H };
+			WuiDrawCommand gradient;
+			gradient.Kind = WuiDrawKind::Gradient;
+			gradient.Rect = band;
+			const WuiColor from = ToWuiColor(HsvToColor({ left * 360.0f, 1.0f, 1.0f }));
+			const WuiColor to = ToWuiColor(HsvToColor({ right * 360.0f, 1.0f, 1.0f }));
+			gradient.Corners = { from, to, to, from };
+			ctx.Commands().push_back(gradient);
+		}
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, hueRect, theme.Border, 3.0f, 1.0f });
+		{
+			const float hueX = hueRect.X + (state.H / 360.0f) * hueRect.W;
+			const WuiRect thumb { hueX - 2.0f, hueRect.Y - 2.0f, 4.0f, hueRect.H + 4.0f };
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, thumb, { 1, 1, 1, 1 }, 2.0f, 2.0f });
+			RegisterAccessNode(DerivedChildId(id, ".hue.", 0), "slider", hueRect,
+				Wui::Tr("wui.color.hue", "Hue"), FloatToText(state.H) + "°", true, true, false);
+			if (ctx.IsHovered(hueRect) && (ctx.Input().MouseClicked[0] || ctx.Input().MouseDown[0]))
+			{
+				state.H = std::clamp((ctx.Input().MousePos.x - hueRect.X) / std::max(1.0f, hueRect.W), 0.0f, 1.0f) * 360.0f;
+				if (ctx.Input().MouseClicked[0])
+					ctx.SetCursor(WuiCursor::Hand);
+			}
+			if (ctx.IsHovered(hueRect))
+				ctx.SetCursor(WuiCursor::Hand);
+		}
+
+		// ---- ③ alpha 条(棋盘格 + 透明→不透明渐变)----
+		const WuiRect alphaRect { panel.X + theme.Pad, hueRect.Y + hueRect.H + 6.0f,
+			panel.W - theme.Pad * 2.0f, kColorBarHeight };
+		ctx.Commands().push_back({ WuiDrawKind::Rect, alphaRect, theme.ButtonBg, 2.0f });
+		for (int cx = 0; kColorCheckerSize * static_cast<float>(cx) < alphaRect.W; ++cx)
+		{
+			for (int cy = 0; kColorCheckerSize * static_cast<float>(cy) < alphaRect.H; ++cy)
+			{
+				if (((cx + cy) & 1) == 0)
+					continue;
+				ctx.Commands().push_back({ WuiDrawKind::Rect,
+					{ alphaRect.X + kColorCheckerSize * static_cast<float>(cx),
+					  alphaRect.Y + kColorCheckerSize * static_cast<float>(cy),
+					  kColorCheckerSize, kColorCheckerSize }, theme.ButtonHover, 0.0f });
+			}
+		}
+		{
+			const glm::vec3 rgb { rgba };
+			WuiDrawCommand gradient;
+			gradient.Kind = WuiDrawKind::Gradient;
+			gradient.Rect = alphaRect;
+			gradient.Corners = { ToWuiColor(rgb, 1.0f), ToWuiColor(rgb, 0.0f),
+				ToWuiColor(rgb, 0.0f), ToWuiColor(rgb, 1.0f) };
+			ctx.Commands().push_back(gradient);
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, alphaRect, theme.Border, 3.0f, 1.0f });
+			const WuiRect thumb { alphaRect.X + rgba.a * alphaRect.W - 2.0f, alphaRect.Y - 2.0f, 4.0f, alphaRect.H + 4.0f };
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, thumb, { 1, 1, 1, 1 }, 2.0f, 2.0f });
+			RegisterAccessNode(DerivedChildId(id, ".alpha.", 0), "slider", alphaRect,
+				Wui::Tr("wui.color.alpha", "Alpha"), FloatToText(rgba.a), true, true, false);
+			if (ctx.IsHovered(alphaRect) && (ctx.Input().MouseClicked[0] || ctx.Input().MouseDown[0]))
+			{
+				rgba.a = std::clamp((ctx.Input().MousePos.x - alphaRect.X) / std::max(1.0f, alphaRect.W), 0.0f, 1.0f);
+				changed = true;
+				if (ctx.Input().MouseClicked[0])
+					ctx.SetCursor(WuiCursor::Hand);
+			}
+			if (ctx.IsHovered(alphaRect))
+				ctx.SetCursor(WuiCursor::Hand);
+		}
+
+		// ---- ④ 色板/色相条产生的 RGB 写回(alpha 保持)----
+		{
+			const glm::vec3 rgb = HsvToColor({ state.H, state.S, state.V });
+			if (std::fabs(rgb.x - rgba.r) > 1.0f / 255.0f || std::fabs(rgb.y - rgba.g) > 1.0f / 255.0f
+				|| std::fabs(rgb.z - rgba.b) > 1.0f / 255.0f)
+			{
+				rgba.r = rgb.x;
+				rgba.g = rgb.y;
+				rgba.b = rgb.z;
+				changed = true;
+			}
+		}
+
+		// ④ 之上的 hex 行(色板/色相/alpha 之下),再接 R/G/B/A 滑杆与预设调色板。
+		const WuiRect hexRect { panel.X + theme.Pad, alphaRect.Y + alphaRect.H + 8.0f,
 			panel.W - theme.Pad * 2.0f, kColorHexRowHeight };
 		const bool hexFocused = ctx.Focus() == hexId;
 		// 失焦即把缓冲同步回规范值:非法输入不残留(值本身从来不被非法文本改写)。
@@ -1793,6 +2007,37 @@ namespace World::Wui
 				  row.Y + (row.H - theme.FontSizeCaption) * 0.5f, 0, 0 },
 				theme.Text, 0, 1.0f, valueText, theme.FontSizeCaption, false });
 			rowY += row.H;
+		}
+
+		// ---- ⑤ 预设调色板(2×10 常用色,点击直接套用;每格登记为无障碍节点)----
+		rowY += 6.0f;
+		const float presetCell = kColorPresetCell;
+		const float presetGap = std::max(1.0f, (panel.W - theme.Pad * 2.0f
+			- presetCell * static_cast<float>(kColorPresetColumns)) / static_cast<float>(kColorPresetColumns - 1));
+		for (int preset = 0; preset < kColorPresetColumns * kColorPresetRows; ++preset)
+		{
+			const int column = preset % kColorPresetColumns;
+			const int rowIndex = preset / kColorPresetColumns;
+			const WuiRect cell { panel.X + theme.Pad + (presetCell + presetGap) * static_cast<float>(column),
+				rowY + (presetCell + 4.0f) * static_cast<float>(rowIndex), presetCell, presetCell };
+			const glm::vec3 presetRgb = kColorPresets[preset];
+			const bool hovered = ctx.IsHovered(cell);
+			ctx.Commands().push_back({ WuiDrawKind::Rect, cell, ToWuiColor(presetRgb), 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, cell,
+				hovered ? theme.Accent : theme.Border, 3.0f, hovered ? 2.0f : 1.0f });
+			RegisterAccessNode(DerivedChildId(id, ".preset.", static_cast<size_t>(preset)), "color-swatch",
+				cell, FormatColorHex(glm::vec4 { presetRgb, 1.0f }), std::string(), true, true, false);
+			if (hovered)
+				ctx.SetCursor(WuiCursor::Hand);
+			if (ctx.IsClicked(cell))
+			{
+				rgba = glm::vec4 { presetRgb, rgba.a };
+				const glm::vec3 hsv = ColorToHsv(presetRgb);
+				state.H = hsv.x;
+				state.S = hsv.y;
+				state.V = hsv.z;
+				changed = true;
+			}
 		}
 
 		ctx.ClosePopupsOnOutsideClick({ id }, panel);

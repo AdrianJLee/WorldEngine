@@ -84,6 +84,8 @@ namespace World::Wui
 		void PushQuad(const WuiRect& rect, const WuiColor& color, const WuiRect& uv);
 		// 任意四边形(D7-D4):用于斜线/箭头/圆环等轴对齐矩形画不出的形状。
 		void PushQuadVertices(const std::array<glm::vec2, 4>& positions, const WuiColor& color);
+		// P4-U10:四角渐变矩形(左上/右上/右下/左下),给取色器这类需要渐变的控件。
+		void PushGradientQuad(const WuiRect& rect, const std::array<WuiColor, 4>& corners);
 		void PushSolidQuad(const WuiRect& rect, const WuiColor& color);
 		void SetActiveTexture(const Rhi::Handle<Rhi::Texture>& texture);
 		void Flush();

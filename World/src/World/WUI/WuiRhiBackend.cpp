@@ -482,6 +482,27 @@ namespace World::Wui
 		m_Indices.insert(m_Indices.end(), { quad * 4, quad * 4 + 1, quad * 4 + 2, quad * 4, quad * 4 + 2, quad * 4 + 3 });
 	}
 
+	// P4-U10:四角渐变(P4-U10 取色器用)。顶点顺序与 Quad 一致:左上/右上/右下/左下。
+	void WuiRhiBackend::PushGradientQuad(const WuiRect& rect, const std::array<WuiColor, 4>& corners)
+	{
+		if (m_Vertices.size() + 4 > MaxQuads * 4)
+			Flush();
+		const uint32_t base = static_cast<uint32_t>(m_Vertices.size());
+		const glm::vec2 positions[4] = {
+			{ rect.X, rect.Y },
+			{ rect.X + rect.W, rect.Y },
+			{ rect.X + rect.W, rect.Y + rect.H },
+			{ rect.X, rect.Y + rect.H },
+		};
+		for (int i = 0; i < 4; ++i)
+		{
+			const WuiColor& color = corners[static_cast<size_t>(i)];
+			m_Vertices.push_back({ positions[i].x, positions[i].y, color.R, color.G, color.B, color.A, -1.0f, 0.0f });
+		}
+		const uint32_t quad = base / 4;
+		m_Indices.insert(m_Indices.end(), { quad * 4, quad * 4 + 1, quad * 4 + 2, quad * 4, quad * 4 + 2, quad * 4 + 3 });
+	}
+
 	void WuiRhiBackend::SetActiveTexture(const Rhi::Handle<Rhi::Texture>& texture)
 	{
 		if (texture.get() == m_ActiveTexture.get())
@@ -753,6 +774,7 @@ namespace World::Wui
 				case WuiDrawKind::Text: DrawText(command); break;
 				case WuiDrawKind::Image: DrawImageCommand(command); break;
 				case WuiDrawKind::Quad: PushQuadVertices(command.Vertices, command.Color); break;
+				case WuiDrawKind::Gradient: PushGradientQuad(command.Rect, command.Corners); break;
 			}
 		}
 	}

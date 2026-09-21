@@ -663,7 +663,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Imported model asset (.wmodel, path relative to Game/assets); empty = use Primitive.", false, "Model", {  } },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Imported model asset (.wmodel, path relative to Game/assets); empty = use Primitive. glTF/GLB are import sources only: import them first and reference the produced .wmodel.", false, "Model", {  } },
             Value(std::string()),
         };
         return schema;
@@ -2732,7 +2732,7 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Model asset used for collision; empty = reuse the MeshRenderer mesh on the same entity.", false, "Model", {  } },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Collision model asset (.wmodel); empty = reuse the MeshRenderer mesh on the same entity. glTF/GLB sources must be imported to .wmodel first.", false, "Model", {  } },
             Value(std::string()),
         };
         return schema;

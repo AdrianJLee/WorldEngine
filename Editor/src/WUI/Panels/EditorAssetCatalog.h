@@ -19,7 +19,11 @@ namespace World
 		inline EditorAssetKind KindForName(const std::string& assetType)
 		{
 			if (assetType == "Material") return EditorAssetKind::Material;
-			if (assetType == "Model" || assetType == "ModelSource") return EditorAssetKind::Model;
+			// P4-U10:Model = **引擎原生** .wmodel(场景/字段只引用它);glTF/GLB 是导入源,
+			// 单独一个 kind —— 网格选取里绝不该出现 .gltf(用户 2026-09-21 报的歧义)。
+			if (assetType == "Model") return EditorAssetKind::Model;
+			if (assetType == "ModelSource" || assetType == "glTF" || assetType == "GLTF")
+				return EditorAssetKind::ModelSource;
 			if (assetType == "Texture" || assetType == "Texture2D") return EditorAssetKind::Texture;
 			if (assetType == "Script") return EditorAssetKind::Script;
 			if (assetType == "Scene") return EditorAssetKind::Scene;
@@ -31,8 +35,13 @@ namespace World
 			switch (kind)
 			{
 				case EditorAssetKind::Material: return LowerExtension(path) == ".wmat";
-				case EditorAssetKind::Model: return LowerExtension(path) == ".wmodel" || LowerExtension(path) == ".gltf"
-					|| LowerExtension(path) == ".glb";
+				// 原生模型资产 = .wmodel(导入产物)。.gltf/.glb 属于 ModelSource,不在"可引用资产"里。
+				case EditorAssetKind::Model: return LowerExtension(path) == ".wmodel";
+				case EditorAssetKind::ModelSource:
+				{
+					const std::string extension = LowerExtension(path);
+					return extension == ".gltf" || extension == ".glb";
+				}
 				case EditorAssetKind::Texture:
 				{
 					const std::string extension = LowerExtension(path);
