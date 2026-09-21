@@ -118,7 +118,7 @@ namespace World
 		// P4-U4:项目级"资产导入默认值"(`project.we.yaml` 的 `imports:` 区块)。
 		// 实现口径:Locate → Load(保留其它字段与注释) → 只覆盖 ImportDefaults → Save,
 		// 并把值写进 `ModelImportSettings::SetProjectDefaults` —— 之后新建导入立刻按新默认走
-		// (已有 `.wimport` 的源不受影响:旁路文件仍然逐源优先)。
+		// (已有产物的源不受影响:资产 meta 里的逐源设置优先)。
 		virtual bool SaveProjectImportDefaults(const Asset::ModelImportSettings& settings,
 			std::string* message = nullptr)
 		{

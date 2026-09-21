@@ -136,7 +136,7 @@ namespace World::Asset
 
 		// D5b:模型导入器(.gltf/.glb → .wmodel + .wmat + 贴图,单一源产出多产物)。
 		//  - 复用 GltfImporter::ImportAsBytes(与编辑器导入/单测同一条内核);
-		//  - .wimport 缺失/坏 JSON → 默认值 + Warnings 记录,不失败;
+		//  - 设置按 ResolveForImport 解析(资产 meta > 项目默认),读不出来只记录 Warnings,不失败;
 		//  - .wmodel 字节在返回前已由内核用 WModelIO::Parse 自校验,坏模型在 cook 期报错;
 		//  - Outputs 顺序 = 贴图 → 材质 → 模型(.wmodel 最后写,cook 失败时不留半成品模型)。
 		class ModelImporter final : public IAssetImporter
@@ -151,7 +151,7 @@ namespace World::Asset
 			}
 
 			// P4-U11:设置指纹 = 解析出来的那份设置的哈希(与 Import 同一条解析入口)。
-			// cook 用它判断"设置改了 → 重烘",不依赖任何旁路文件的字节。
+			// cook 用它判断"设置改了 → 重烘",设置的事实源只有资产自己的 meta。
 			uint64_t SettingsFingerprint(const std::filesystem::path& source) const override
 			{
 				// Import 时 request.LogicalPath 才是 meta 里的源身份;这里只有绝对路径,
@@ -159,8 +159,7 @@ namespace World::Asset
 				std::string logical = source.filename().generic_string();
 				const std::string existing = ModelImportSettings::FindProducedModel(
 					source.parent_path().string(), logical);
-				return ModelImportSettings::Hash(
-					ModelImportSettings::ResolveForImport(source.string(), existing, nullptr, nullptr));
+				return ModelImportSettings::Hash(ModelImportSettings::ResolveForImport(existing));
 			}
 
 			ImportResult Import(const ImportRequest& request, std::error_code& ec) const override
@@ -168,13 +167,13 @@ namespace World::Asset
 				ImportResult result;
 
 				std::string settingsWarning;
-				// P4-U11:逐源设置存在**已有 .wmodel 的 meta**里(资产自描述);旧项目仍读
-				// `.wimport`,新导入用 project.we.yaml 的 imports: 当默认模板。
+				// P4-U11:逐源设置存在**已有 .wmodel 的 meta**里(资产自描述);
+				// 新导入(还没有产物)用 project.we.yaml 的 imports: 当默认模板。
 				const std::string existingModel = ModelImportSettings::FindProducedModel(
 					request.Source.parent_path().string(), request.LogicalPath);
 				bool settingsFromAsset = false;
 				const ModelImportSettings settings = ModelImportSettings::ResolveForImport(
-					request.Source.string(), existingModel, &settingsWarning, &settingsFromAsset);
+					existingModel, &settingsWarning, &settingsFromAsset);
 				if (!settingsWarning.empty())
 					result.Warnings.push_back(settingsWarning);
 

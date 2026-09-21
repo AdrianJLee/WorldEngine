@@ -1132,7 +1132,7 @@ set_tests_properties(World.AssetTypeRegistry PROPERTIES
 )
 
 # P4-U4:两个"设置作用域"的回归 —— project.we.yaml 的 imports:(导入默认值)与
-# .wd 头部的 World: 块(场景级设置)。含"合并保存不抹注释"与优先级(.wimport 优先)。
+# .wd 头部的 World: 块(场景级设置)。含"合并保存不抹注释"与优先级(资产 meta 优先)。
 add_executable(WorldImportWorldSettingsTests ImportWorldSettingsTests.cpp)
 target_link_libraries(WorldImportWorldSettingsTests PRIVATE World)
 target_compile_features(WorldImportWorldSettingsTests PRIVATE cxx_std_17)

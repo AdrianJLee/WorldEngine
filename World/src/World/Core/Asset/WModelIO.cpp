@@ -939,10 +939,9 @@ namespace World::Asset::WModelIO
 					return true;
 				}
 			}
+			// P4-U12:模型逻辑路径只相对**内容根**(Game/assets);不再回退 Game/ 或 Editor/。
 			const std::filesystem::path candidates[] = {
 				std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path,
-				std::filesystem::path(std::string(WLD_GAME_DIR)) / path,
-				std::filesystem::path(std::string(WLD_EDITOR_DIR)) / path,
 			};
 			for (const std::filesystem::path& candidate : candidates)
 			{

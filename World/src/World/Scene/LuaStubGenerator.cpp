@@ -525,8 +525,6 @@ namespace World
 			rendered << "---Annotation-only shape of a script table; there is no WorldScript runtime global or constructor.\n"
 				<< "---@class WorldScript\n"
 				<< "---@field entity Entity Entity owning this script instance.\n"
-				<< "---@field __Entity Entity Deprecated compatibility alias; use entity.\n"
-				<< "---@field __EntityID Entity Deprecated compatibility alias for the Entity object, not a UUID; use entity.\n"
 				<< "---@field OnCreate? fun(self: WorldScript) Called once when the instance starts.\n"
 				<< "---@field OnUpdate? fun(self: WorldScript, dt: number) Updated on the scene thread; dt is elapsed seconds.\n"
 				<< "---@field OnUI? fun(self: WorldScript) Called once per UI frame while the instance is running.\n"

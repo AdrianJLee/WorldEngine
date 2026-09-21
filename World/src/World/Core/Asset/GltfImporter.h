@@ -110,7 +110,7 @@ namespace World::Asset
 			const std::string& destinationLogicalDir = std::string());
 
 	private:
-		// explicitSettings 为空 = 走 ResolveForImport(资产 meta > 旧 .wimport > 项目默认)。
+		// explicitSettings 为空 = 走 ResolveForImport(资产 meta > 项目默认)。
 		static bool ImportFileImpl(const std::string& sourcePath, const std::string& outputRoot,
 			const ModelImportSettings* explicitSettings, GltfImportResult* result, std::string* error,
 			const std::string& destinationLogicalDir);

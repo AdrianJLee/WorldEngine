@@ -43,32 +43,7 @@ namespace World::Asset
 			return buffer;
 		}
 
-		// D5b 旧格式:导入设置的旁路文件(与源同目录同名,如 models/x.wimport)。P4-U11 之后
-		// 逐源设置存在 .wmodel 的 meta 里,新导入不再写它;这里只为**旧项目**保留 —— 存在才参与,
-		// 内容变化照样让源重烘(复合指纹带上它)。
-		constexpr const char* kImportSettingsExtension = ".wimport";
-
-		std::filesystem::path ImportSettingsPath(const std::filesystem::path& source)
-		{
-			std::filesystem::path path = source;
-			path.replace_extension(kImportSettingsExtension);
-			return path;
-		}
-
-		void MixFileFingerprint(uint64_t& hash, const std::filesystem::path& path, const char* salt)
-		{
-			hash ^= Fnv1a64String(salt);
-			hash *= 1099511628211ULL;
-			std::ifstream stream(path, std::ios::binary);
-			if (!stream)
-				return;
-			const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(stream)),
-				std::istreambuf_iterator<char>());
-			hash ^= Fnv1a64(bytes.data(), bytes.size());
-			hash *= 1099511628211ULL;
-		}
-
-		// 源内容指纹复合导入器身份:导入器升级时所有产物失效重烘焙。
+		// 源内容指纹复合导入器身份 + 逐源导入设置:导入器升级或设置变化时产物失效重烘焙。
 		uint64_t CompositeFingerprint(const IAssetImporter& importer, const std::vector<uint8_t>& bytes,
 			const std::filesystem::path& source)
 		{
@@ -78,10 +53,8 @@ namespace World::Asset
 			hash ^= importer.Version();
 			hash *= 1099511628211ULL;
 
-			// 导入设置的旁路文件(.wimport):存在才参与(CookPipeline 不关心扩展名含义)。
-			MixFileFingerprint(hash, ImportSettingsPath(source), kImportSettingsExtension);
-			// P4-U11:逐源设置现在存在 .wmodel 的 meta 里 —— 用导入器自己的设置指纹参与,
-			// "改了设置 → 重烘"不依赖旁路文件(P4-U11 之后新项目根本没有 .wimport)。
+			// P4-U11:逐源设置存在 .wmodel 的 meta 里 —— 用导入器自己的设置指纹参与,
+			// "改了设置 → 重烘"由它负责(不存在第二份需要盯着的设置文件)。
 			hash ^= importer.SettingsFingerprint(source);
 			hash *= 1099511628211ULL;
 			return hash;
@@ -206,10 +179,6 @@ namespace World::Asset
 			std::error_code fileEc;
 			if (!entry.is_regular_file(fileEc))
 				continue;
-			// D5b:.wimport 是源的导入设置(复合指纹里已带上),不是独立资产 —— 不产出 cooked 项。
-			if (entry.path().extension() == kImportSettingsExtension)
-				continue;
-
 			std::filesystem::path relative;
 			{
 				std::error_code relEc;

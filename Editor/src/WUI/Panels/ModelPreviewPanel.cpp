@@ -255,10 +255,9 @@ namespace World
 		if (m_SourceExists)
 		{
 			// P4-U11:设置来自**资产本身**(.wmodel 的 meta,用户在这里改过的就是它);
-			// 旧项目(资产没有内嵌设置)退回 `.wimport` / 项目默认 / 引擎默认。
+			// 资产还没写进设置时退回项目默认(project.we.yaml 的 imports:)/ 引擎默认。
 			std::string settingsWarning;
 			m_Settings = Asset::ModelImportSettings::ResolveForImport(
-				(std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical).string(),
 				(std::filesystem::path(WLD_ASSETPATH) / m_LogicalPath).string(),
 				&settingsWarning, &m_SettingsFromAsset);
 			if (!settingsWarning.empty())
@@ -1045,10 +1044,11 @@ namespace World
 			return (y - rect.Y) + 18.0f;
 		}
 
-		// 设置来源一行:资产自描述(P4-U11)还是旧 .wimport,以及对"改了要重导"的说明。
+		// 设置来源一行:资产自描述(P4-U11)还是项目默认,以及对"改了要重导"的说明。
 		Wui::Label(ctx, { x, y }, m_SettingsFromAsset
 				? Wui::Tr("panel.model.import_settings.from_asset", "Stored in this .wmodel")
-				: Wui::Tr("panel.model.import_settings.from_legacy", "From legacy .wimport (next import stores it in the .wmodel)"),
+				: Wui::Tr("panel.model.import_settings.from_project_defaults",
+					"From project defaults (next import stores it in the .wmodel)"),
 			theme.TextDisabled, 10.0f);
 		y += 14.0f;
 

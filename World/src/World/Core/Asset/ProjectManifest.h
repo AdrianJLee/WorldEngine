@@ -79,8 +79,8 @@ namespace World::Asset
 		RenderingSettings Rendering;
 		// P4-1:物理设置(缺省 = 引擎默认;`physics:` 区块缺失时保持默认)。
 		PhysicsSettingsData Physics;
-		// P4-U4(2026-09-21):资产导入默认值(`imports:` 区块)。作为"源没有 .wimport 时"的
-		// 模型导入默认 —— 逐源 `.wimport` 仍然优先(ModelImportSettings::Load 的语义)。
+		// P4-U4(2026-09-21):资产导入默认值(`imports:` 区块)。作为"源还没有产物时"的
+		// 模型导入默认 —— 已有资产 meta 里的逐源设置优先(ModelImportSettings::ResolveForImport)。
 		ModelImportSettings ImportDefaults;
 
 		// 加载并校验;error 为空表示成功。

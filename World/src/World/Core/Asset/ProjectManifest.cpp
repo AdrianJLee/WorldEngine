@@ -132,7 +132,7 @@ namespace World::Asset
 				if (error) *error = "physics.gravity must be a finite number";
 				return false;
 			}
-			// P4-U4:导入默认值的范围校验(与 .wimport 的字段语义一致)。
+			// P4-U4:导入默认值的范围校验(与 ModelImportSettings 的字段语义一致)。
 			if (!std::isfinite(manifest.ImportDefaults.Scale) || manifest.ImportDefaults.Scale <= 0.0f)
 			{
 				if (error) *error = "imports.scale must be a positive finite number: "
@@ -466,7 +466,7 @@ namespace World::Asset
 			if (blockKey == "imports")
 				return {
 					"资产导入默认值(当前是模型导入):<类型>.<字段> 扁平 key。",
-					"只在源文件**没有同目录 .wimport 旁路文件**时生效 —— 逐源设置永远优先,不会改动已有资产。",
+					"只在源文件**还没有产物**时生效 —— 已有资产 meta 里的逐源设置永远优先,不会改动已有资产。",
 					"由「项目设置 ▸ 导入默认值」页读写。",
 				};
 			return {};

@@ -299,8 +299,8 @@ namespace World
 
 	// P4-U4(2026-09-21):Asset Import Defaults —— project.we.yaml 的 `imports:`。
 	//
-	// 语义(与 .wimport 的分工):**旁路文件逐源优先**;这里改的是"源没有 .wimport 时"的默认,
-	// 所以它只影响之后的新导入(以及重新导入时仍然没有旁路文件的源),不会悄悄改变已有资产。
+	// 语义(与资产自描述的分工):**已有资产的 meta 逐源优先**;这里改的是"还没有产物"时的默认,
+	// 所以它只影响之后的新导入,不会悄悄改变已有资产。
 	void SettingsPanel::RegisterImportSettings()
 	{
 		using Settings::SettingApply;

@@ -2,7 +2,7 @@
 //
 //   1. Asset Import Defaults:`project.we.yaml` 的 `imports:`(= ModelImportSettings)
 //      - 解析 / 文本合并保存(注释与未受管 key 不动、默认值不往清单里塞块);
-//      - `ModelImportSettings::Load` 的优先级:同目录 `.wimport` > 项目默认 > 引擎默认;
+//      - `ModelImportSettings::ResolveForImport` 的优先级:资产 meta > 项目默认 > 引擎默认;
 //      - `LoadProjectDefaults(manifestPath)`:读到清单就生效,清单缺失/坏掉回到引擎默认。
 //   2. World / Scene Settings:`.wd` 头部的 `World:` 块(= Scene::WorldSettings)
 //      - 默认值不写块(旧文件形态不变);
@@ -127,40 +127,31 @@ int main()
 			CHECK(error.find("animation_sample_rate") != std::string::npos);
 		}
 
-		// ---- 2. 导入默认值的优先级 ----
+		// ---- 2. 导入设置的优先级(资产 meta > 项目默认 > 引擎默认)----
 		{
 			// 清单存在 → 进程级默认生效。
 			CHECK(World::Asset::ModelImportSettings::LoadProjectDefaults(manifestPath.string()));
 			CHECK(World::Asset::ModelImportSettings::ProjectDefaults().UpAxis == 1);
 			CHECK(std::fabs(World::Asset::ModelImportSettings::ProjectDefaults().Scale - 2.5f) < 1e-4f);
 
-			// 源没有 .wimport → 用项目默认。
-			const std::filesystem::path source = root / "models" / "NoSidecar.gltf";
+			// 还没有产物 → 用项目默认。
+			const std::filesystem::path source = root / "models" / "NoArtifact.gltf";
 			std::filesystem::create_directories(source.parent_path(), ignored);
 			WriteText(source, "{}");
+			bool fromAsset = true;
 			const World::Asset::ModelImportSettings loaded =
-				World::Asset::ModelImportSettings::Load(source.string());
+				World::Asset::ModelImportSettings::ResolveForImport(std::string(), nullptr, &fromAsset);
+			CHECK(!fromAsset);
 			CHECK(loaded.UpAxis == 1);
 			CHECK(std::fabs(loaded.Scale - 2.5f) < 1e-4f);
-
-			// 源有 .wimport → **旁路文件优先**于项目默认。
-			const std::filesystem::path sidecar = root / "models" / "WithSidecar.wimport";
-			WriteText(sidecar, "{\"scale\": 0.5, \"upAxis\": \"Y\"}");
-			const std::filesystem::path sidecarSource = root / "models" / "WithSidecar.gltf";
-			WriteText(sidecarSource, "{}");
-			const World::Asset::ModelImportSettings overridden =
-				World::Asset::ModelImportSettings::Load(sidecarSource.string());
-			CHECK(overridden.UpAxis == 0);
-			CHECK(std::fabs(overridden.Scale - 0.5f) < 1e-4f);
 		}
 		{
-			// P4-U11:逐源设置的**唯一解析入口** —— 已有 .wmodel 的 meta 设置优先于旧 .wimport,
+			// P4-U11:逐源设置的**唯一解析入口** —— 已有 .wmodel 的 meta 设置优先于项目默认,
 			// 并且靠 meta.SourcePath 认产物(不信文件名)。
 			const std::filesystem::path models = root / "models";
 			std::filesystem::create_directories(models);
 			const std::filesystem::path source = models / "WithAsset.gltf";
 			WriteText(source, "{}");
-			WriteText(models / "WithAsset.wimport", "{\"scale\": 3.0, \"upAxis\": \"Y\"}");
 			World::Asset::WModelData data;
 			data.Meta.Valid = true;
 			data.Meta.SourcePath = "models/WithAsset.gltf";
@@ -176,16 +167,17 @@ int main()
 			CHECK(!found.empty());
 			bool fromAsset = false;
 			const World::Asset::ModelImportSettings resolved = World::Asset::ModelImportSettings::ResolveForImport(
-				source.string(), found, nullptr, &fromAsset);
+				found, nullptr, &fromAsset);
 			CHECK(fromAsset);
-			CHECK(std::fabs(resolved.Scale - 7.0f) < 1e-4f);   // 资产 > 旧 .wimport(3.0)
+			CHECK(std::fabs(resolved.Scale - 7.0f) < 1e-4f);   // 资产 > 项目默认(2.5)
 			CHECK(resolved.UpAxis == 1);
-			// 没有资产时退回旧 .wimport(旧项目的路径逐字不变)。
-			bool legacyFromAsset = true;
-			const World::Asset::ModelImportSettings legacy = World::Asset::ModelImportSettings::ResolveForImport(
-				source.string(), std::string(), nullptr, &legacyFromAsset);
-			CHECK(!legacyFromAsset);
-			CHECK(std::fabs(legacy.Scale - 3.0f) < 1e-4f);
+			// 没有产物 → 项目默认(清单里 scale=2.5 / upAxis=Z)。
+			bool fallbackFromAsset = true;
+			const World::Asset::ModelImportSettings fallback = World::Asset::ModelImportSettings::ResolveForImport(
+				std::string(), nullptr, &fallbackFromAsset);
+			CHECK(!fallbackFromAsset);
+			CHECK(std::fabs(fallback.Scale - 2.5f) < 1e-4f);
+			CHECK(fallback.UpAxis == 1);
 		}
 		{
 			// 清单缺失 → 回到引擎默认(不能让上一个项目的默认值泄漏)。

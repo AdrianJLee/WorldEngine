@@ -1419,15 +1419,15 @@ namespace World::Asset
 				relative = std::filesystem::path(sourcePath).filename();
 			sourceLogicalPath = relative.generic_string();
 		}
-		// 设置来源(P4-U11):**已有产物的 meta**(资产自描述,用户改过的那份)> 旧旁路
-		// `.wimport`(只服务旧项目)> `project.we.yaml` 的 `imports:` > 引擎默认。与 cook 同一条
+		// 设置来源(P4-U11):**已有产物的 meta**(资产自描述,用户改过的那份)>
+		// `project.we.yaml` 的 `imports:`(新导入的默认模板)> 引擎默认。与 cook 同一条
 		// 解析入口,dev 树与打包产物不会两套规则。
 		std::string settingsWarning;
 		const std::string existingModel = ModelImportSettings::FindProducedModel(
 			std::filesystem::path(sourcePath).parent_path().string(), sourceLogicalPath);
 		bool settingsFromAsset = false;
 		const ModelImportSettings settings = explicitSettings ? *explicitSettings
-			: ModelImportSettings::ResolveForImport(sourcePath, existingModel, &settingsWarning, &settingsFromAsset);
+			: ModelImportSettings::ResolveForImport(existingModel, &settingsWarning, &settingsFromAsset);
 		if (result && !settingsWarning.empty())
 			result->Warnings.push_back(settingsWarning);
 		GltfImportMetadata metadata;

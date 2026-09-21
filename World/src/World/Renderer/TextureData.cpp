@@ -47,17 +47,11 @@ namespace World
 
 			// 2. 磁盘回退(未挂载 VFS 的 headless / 开发环境)。
 			// 贴图逻辑路径相对内容根(Game/assets,与材质路径书写约定一致):
-			// 修复前直接拼 WLD_GAME_DIR,普通 "textures/xxx.png" 恒找不到 →
-			// headless 路径退化成 1x1 白纹理。
+			// P4-U12:删掉早先"Game/ 与 Editor/ 也算内容根"的旧布局回退 —— 内容根只有一个,
+			// 多候选会让"路径写错却恰好命中旧目录"变成静默成功。
 			std::error_code ec;
-			std::filesystem::path diskPath = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
-			if (!std::filesystem::exists(diskPath, ec))
-			{
-				// 兼容 Game/ 与 Editor/ 两种仓库布局(与 MaterialIO::ResolveOnDisk 同顺序)。
-				diskPath = std::filesystem::path(std::string(WLD_GAME_DIR)) / path;
-				if (!std::filesystem::exists(diskPath, ec))
-					diskPath = std::filesystem::path(std::string(WLD_EDITOR_DIR)) / path;
-			}
+			const std::filesystem::path diskPath =
+				std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
 			return stbi_load(diskPath.string().c_str(), &width, &height, &channels, desiredChannels);
 		}
 	}

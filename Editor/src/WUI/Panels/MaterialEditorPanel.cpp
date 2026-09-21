@@ -53,9 +53,6 @@ namespace World
 			const std::filesystem::path contentRoot = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
 			if (std::filesystem::exists(contentRoot / key, existsError))
 				return Wui::Tr("panel.material.newpath.error.exists", "A file already exists at this path");
-			std::error_code legacyError;
-			if (std::filesystem::exists(std::filesystem::path(std::string(WLD_GAME_DIR)) / key, legacyError))
-				return Wui::Tr("panel.material.newpath.error.exists", "A file already exists at this path");
 			return {};
 		}
 

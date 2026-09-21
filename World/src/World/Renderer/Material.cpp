@@ -251,16 +251,14 @@ namespace World
 		}
 
 		// 内容根解析:项目清单的 content_root = Game/assets,而 WLD_GAME_DIR = Game/。
-		// 两种约定都合法(MaterialPath 按"相对内容根"书写),按顺序探测。
+		// MaterialPath 一律按"**相对内容根**"书写;P4-U12 删掉了"再试 Game/ 旧布局"的候选。
 		namespace
 		{
 			std::filesystem::path ResolveOnDisk(const std::string& path, bool forWrite)
 			{
 				std::error_code ec;
-				std::filesystem::path candidate = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
-				if (std::filesystem::exists(candidate, ec))
-					return candidate;
-				candidate = std::filesystem::path(std::string(WLD_GAME_DIR)) / path;
+				const std::filesystem::path candidate =
+					std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
 				if (forWrite || std::filesystem::exists(candidate, ec))
 					return candidate;
 				return {};

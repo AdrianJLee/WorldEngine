@@ -675,8 +675,6 @@ function ui:columns(x, y, w, h, count, gap) end
 ---Annotation-only shape of a script table; there is no WorldScript runtime global or constructor.
 ---@class WorldScript
 ---@field entity Entity Entity owning this script instance.
----@field __Entity Entity Deprecated compatibility alias; use entity.
----@field __EntityID Entity Deprecated compatibility alias for the Entity object, not a UUID; use entity.
 ---@field OnCreate? fun(self: WorldScript) Called once when the instance starts.
 ---@field OnUpdate? fun(self: WorldScript, dt: number) Updated on the scene thread; dt is elapsed seconds.
 ---@field OnUI? fun(self: WorldScript) Called once per UI frame while the instance is running.

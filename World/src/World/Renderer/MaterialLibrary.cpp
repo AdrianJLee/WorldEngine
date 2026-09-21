@@ -15,16 +15,13 @@ namespace World
 {
 	namespace
 	{
-		// 磁盘位置:先内容根(Game/assets,与 MaterialIO::ReadFileText 一致),再 Game/ 布局。
-		// 修复前这里只拼 WLD_GAME_DIR / path,普通材质("xxx.wmat" 相对内容根)恒取不到时间戳,
-		// IsFileNewer() 因此永远返回 false。
+		// 磁盘位置:**内容根**(Game/assets),与 MaterialIO::ReadFileText 同一约定。
+		// P4-U12:删掉"再试 Game/ 旧布局"的第二候选 —— 内容根只有一个。
 		std::filesystem::path ResolveMaterialDiskPath(const std::string& path)
 		{
 			std::error_code ec;
-			std::filesystem::path candidate = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
-			if (std::filesystem::exists(candidate, ec))
-				return candidate;
-			candidate = std::filesystem::path(std::string(WLD_GAME_DIR)) / path;
+			const std::filesystem::path candidate =
+				std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
 			if (std::filesystem::exists(candidate, ec))
 				return candidate;
 			return {};

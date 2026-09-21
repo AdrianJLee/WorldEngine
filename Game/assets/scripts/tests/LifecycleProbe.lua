@@ -6,8 +6,6 @@ local LifecycleProbe = { LocalUpdates = 0, Mode = "normal" }
 
 function LifecycleProbe:OnCreate()
     assert(self.entity:IsValid())
-    assert(self.__Entity:GetID() == self.entity:GetID())
-    assert(self.__EntityID:GetID() == self.entity:GetID())
     assert(self.entity:HasComponent("TagComponent"))
     T02Record(self.entity:GetID(), "create", 0)
     T02Action(self.entity, "create")

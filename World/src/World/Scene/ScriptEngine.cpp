@@ -807,11 +807,9 @@ namespace World
 			script.ScriptTable = table;
 
 			ApplyCachedFields(script);
-			// All names carry the same non-owning, generation-checked entity handle.
+			// entity 是这个句柄**唯一**的名字(旧别名 __Entity/__EntityID 已移除)。
 			const ScriptValue entityValue = MakeEntityValue(*s_Bindings, entity);
-			if (!script.ScriptTable.SetField("entity", entityValue) ||
-				!script.ScriptTable.SetField("__Entity", entityValue) ||
-				!script.ScriptTable.SetField("__EntityID", entityValue))
+			if (!script.ScriptTable.SetField("entity", entityValue))
 				throw std::logic_error("Cannot assign the entity handle");
 
 			std::string error;
@@ -1096,11 +1094,9 @@ namespace World
 		std::vector<std::string> warnings;
 		try
 		{
-			// entity 句柄:与 OnCreateScript 同一条路径(三个名字都是同一个非 owning 句柄)。
+			// entity 句柄:与 OnCreateScript 同一条路径(同一个非 owning 句柄)。
 			const ScriptValue entityValue = MakeEntityValue(*s_Bindings, script.RuntimeEntity);
-			if (!newTable.SetField("entity", entityValue) ||
-				!newTable.SetField("__Entity", entityValue) ||
-				!newTable.SetField("__EntityID", entityValue))
+			if (!newTable.SetField("entity", entityValue))
 				return reject("bind", "cannot assign the entity handle");
 
 			// 字段迁移:当前活表优先(运行期 self.X=... 只存在于这里),缺失/类型不符再回退 CachedFields,

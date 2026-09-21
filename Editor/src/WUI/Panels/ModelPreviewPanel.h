@@ -84,7 +84,7 @@ namespace World
 		bool m_SourceExists = false;
 		bool m_NeedsReimport = false;
 		std::string m_SyncDetail;                    // 需要重导的原因(给 UI/自动化看)
-		Asset::ModelImportSettings m_Settings;       // 当前 .wimport(可编辑 → 保存 → 重导)
+		Asset::ModelImportSettings m_Settings;       // 当前生效的导入设置(可编辑 → 保存 → 重导)
 		bool m_SettingsLoaded = false;
 		// P4-U11:设置来源与"改过但还没重导"。设置存进 .wmodel 的 meta,所以面板里的编辑
 		// 只在"重新导入"时落地(Unreal 同款:改设置 → 应用/重导)。
