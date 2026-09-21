@@ -1310,7 +1310,9 @@ namespace World
 				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
 				m_LastMouse = ctx.Input().MousePos;
 				m_OrbitYaw -= delta.x * 0.01f;
-				m_OrbitPitch = std::clamp(m_OrbitPitch + delta.y * 0.01f,
+				// 鼠标向下拖 = 相机往下走(看物体底部):屏幕 Y 向下为正,所以这里取负号。
+				// 2026-09-21 用户实测"上下操作反了"→ 与 ModelPreviewPanel 一起翻正。
+				m_OrbitPitch = std::clamp(m_OrbitPitch - delta.y * 0.01f,
 					-kPreviewPitchLimit, kPreviewPitchLimit);
 			}
 			if (m_Orbiting && !ctx.Input().MouseDown[0])

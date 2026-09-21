@@ -980,7 +980,8 @@ namespace World
 				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
 				m_LastMouse = ctx.Input().MousePos;
 				m_OrbitYaw -= delta.x * 0.01f;
-				m_OrbitPitch = std::clamp(m_OrbitPitch + delta.y * 0.01f, -1.45f, 1.45f);
+				// 与 PrefabPanel 同一条口径(2026-09-21 用户实测上下反了):鼠标向下拖 = 相机往下走。
+				m_OrbitPitch = std::clamp(m_OrbitPitch - delta.y * 0.01f, -1.45f, 1.45f);
 			}
 			if (m_Orbiting && !ctx.Input().MouseDown[0])
 				m_Orbiting = false;
