@@ -52,6 +52,13 @@ namespace World
 			Scene* scene, Schema::SchemaRegistry& schemas);
 		// 关闭居中模态(清模态态 + 解除面板级输入封锁)。
 		void CloseAddComponentPicker(Wui::WuiContext& ctx);
+		// ---- P4-U9:移除组件(核心组件禁止移除;破坏性操作先确认)----
+		// 点击分区标题右侧的 ✕ → 打开确认模态;确认后走与场景结构改动同一条路径。
+		void DrawRemoveComponentConfirm(Wui::WuiContext& ctx, Entity entity);
+		void OpenRemoveComponentConfirm(Wui::WuiContext& ctx, uint32_t componentId, const std::string& displayName);
+		void CloseRemoveComponentConfirm(Wui::WuiContext& ctx);
+		uint32_t m_RemovePendingId = 0;      // 待确认移除的组件 id(0 = 没有)
+		std::string m_RemovePendingName;     // 组件显示名(模态标题/操作记录用)
 		// MRU 更新(置顶,最多 5 条)并落盘;<Editor>/wui-properties.json 写失败只告警,不影响编辑。
 		void TouchRecent(const std::string& shortName);
 		void LoadState();

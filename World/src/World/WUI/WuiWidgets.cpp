@@ -1302,6 +1302,13 @@ namespace World::Wui
 
 		float& scroll = ctx.Persist<float>(id ^ 0x5A1Bu, 0.0f);
 		const WuiRect listRect { panel.X + 4.0f, panel.Y + 30.0f, panel.W - 8.0f, rowH * static_cast<float>(visible) };
+		// 诊断(WLD_TRACE_UI=1):下拉的几何/过滤/滚动与鼠标位置 —— "点了候选项却没反应"这类
+		// 问题(几何对不上 / 被别的控件吃掉)只能靠这几个数直接判定。
+		if (std::getenv("WLD_TRACE_UI") && ctx.IsHovered(panel))
+			WLD_CORE_INFO("[ui] search-combo id={0} panel=({1},{2},{3},{4}) flip={5} scroll={6} visible={7} matches={8} mouse=({9},{10})",
+				id, static_cast<int>(panel.X), static_cast<int>(panel.Y),
+				static_cast<int>(panel.W), static_cast<int>(panel.H), flipUp ? 1 : 0, scroll, visible, matches.size(),
+				static_cast<int>(ctx.Input().MousePos.x), static_cast<int>(ctx.Input().MousePos.y));
 		if (ctx.IsHovered(listRect) && ctx.Input().Wheel != 0.0f)
 			scroll = std::clamp(scroll - ctx.Input().Wheel * 24.0f, 0.0f,
 				std::max(0.0f, rowH * static_cast<float>(matches.size()) - listRect.H));
@@ -1338,6 +1345,9 @@ namespace World::Wui
 			ctx.Commands().push_back({ WuiDrawKind::ClipPop });
 			if (ctx.IsClicked(item))
 			{
+				if (std::getenv("WLD_TRACE_UI"))
+					WLD_CORE_INFO("[ui] search-combo row clicked: id={0} option={1} label='{2}'",
+						id, optionIndex, options[optionIndex]);
 				selected = optionIndex;
 				changed = true;
 				ctx.ClosePopup(id);

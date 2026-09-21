@@ -35,6 +35,7 @@ namespace World
 
 		WE_SCHEMA_BODY(World, UUIDComponent, Component)
 			WE_SCHEMA_META(Category("Scene"),
+				Core(),
 				Doc("Persistence identity written into the .wd file so entities can be matched across save and load; every entity is expected to carry one."))
 			WE_FIELD(ID, Object, Of(UUID));
 		WE_SCHEMA_END
@@ -49,6 +50,7 @@ namespace World
 
 		WE_SCHEMA_BODY(World, TagComponent, Component)
 			WE_SCHEMA_META(Category("Scene"),
+				Core(),
 				Doc("Human-readable entity label used by the hierarchy, the AI command channel and log messages; not an identifier."))
 			WE_FIELD(Tag, String);
 		WE_SCHEMA_END
@@ -114,11 +116,15 @@ namespace World
 
 		WE_SCHEMA_BODY(World, TransformComponent, Component)
 			WE_SCHEMA_META(Category("Scene"),
+				Core(),
 				Doc("Local translation/rotation/scale of the entity; RotationQuat and the cached Transform matrix are derived runtime state (Transient, never serialized)."))
-			WE_FIELD(Location, Vec3, Group("Transform"));
-			WE_FIELD(Rotation, Vec3, Group("Transform"));
+			WE_FIELD(Location, Vec3, Group("Transform"),
+				Doc("Local position in the parent's space (world units)."));
+			WE_FIELD(Rotation, Vec3, Group("Transform"),
+				Doc("Local rotation in degrees (Euler XYZ); the engine stores the equivalent quaternion."));
 			WE_FIELD(RotationQuat, Quat, Transient, Group("Transform"));
-			WE_FIELD(Scale, Vec3, Group("Transform"));
+			WE_FIELD(Scale, Vec3, Group("Transform"),
+				Doc("Local scale per axis; 1,1,1 = unscaled, negative values mirror."));
 			WE_FIELD(Transform, Mat4, Transient, Group("Transform"));
 		WE_SCHEMA_END
 	};
@@ -135,9 +141,11 @@ namespace World
 		WE_SCHEMA_BODY(World, SpriteComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Mesh"),
 				Doc("2D textured quad: an empty Texture falls back to a flat Color fill and TilingFactor repeats the texture UVs."))
-			WE_FIELD(Color, Vec4);
+			WE_FIELD(Color, Vec4, Color(),
+				Doc("Tint multiplied into the sprite (alpha < 1 blends with what is behind)."));
 			WE_FIELD(Texture, Asset, Of("Texture2D"));
-			WE_FIELD(TilingFactor, Float);
+			WE_FIELD(TilingFactor, Float,
+				Doc("Repeats the texture UVs; 1 = once across the quad."));
 		WE_SCHEMA_END
 	};
 
@@ -150,9 +158,12 @@ namespace World
 		WE_SCHEMA_BODY(World, CircleRendererComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Mesh"),
 				Doc("Flat 2D disc: Thickness is the ring width as a fraction of the radius (1 = filled) and Fade is the normalized edge softness."))
-			WE_FIELD(Color, Vec4);
-			WE_FIELD(Thickness, Float);
-			WE_FIELD(Fade, Float);
+			WE_FIELD(Color, Vec4, Color(),
+				Doc("Tint multiplied into the disc."));
+			WE_FIELD(Thickness, Float,
+				Doc("Ring width as a fraction of the radius: 1 = filled disc, 0.1 = thin ring."));
+			WE_FIELD(Fade, Float,
+				Doc("Normalized softness of the edge (0 = hard edge)."));
 		WE_SCHEMA_END
 	};
 
@@ -172,8 +183,10 @@ namespace World
 			// P2 W3a:字段 id 显式钉住(schema-compiler 的公式值会改写这两个 id,
 			// 而它们已经写进存档;显式 Id 让生成物与既有存档迁移语义一致,--check 门禁才可能为绿)。
 			// Entity32:Parent 在 C++ 侧是 entt::entity(32 位句柄),schema 存 64 位整数。
-			WE_FIELD(Parent, UInt64, Id(0x4849455241524331), Entity32);
-			WE_FIELD(InheritTransform, Bool, Id(0x4849455241524332), Default(true));
+			WE_FIELD(Parent, UInt64, Id(0x4849455241524331), Entity32,
+				Doc("Parent entity; cleared = the entity is a root."));
+			WE_FIELD(InheritTransform, Bool, Id(0x4849455241524332), Default(true),
+				Doc("When on, this entity's world transform is parent world x local; off = ignore the parent transform."));
 		WE_SCHEMA_END
 	};
 
@@ -200,10 +213,14 @@ namespace World
 			WE_SCHEMA_META(Category("Rendering/Mesh"),
 				Doc("Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty MaterialPath shades with Color."))
 			// 同上:四个字段 id 已随存档/材质资产落盘(D2c/D3 期间手写),显式钉住。
-			WE_FIELD(Primitive, String, Id(0x4D4553485052494D));
-			WE_FIELD(Color, Vec4, Id(0x4D455348434F4C52));
-			WE_FIELD(MeshPath, String, Id(0x4D45534850415448));
-			WE_FIELD(MaterialPath, String, Id(0x4D4154455249414C));
+			WE_FIELD(Primitive, String, Id(0x4D4553485052494D), Choices("cube", "sphere", "plane"),
+				Doc("Built-in primitive used when MeshPath is empty."));
+			WE_FIELD(Color, Vec4, Id(0x4D455348434F4C52), Color(),
+				Doc("Base color used when MaterialPath is empty."));
+			WE_FIELD(MeshPath, String, Id(0x4D45534850415448), Asset("Model"),
+				Doc("Imported model asset (.wmodel, path relative to Game/assets); empty = use Primitive."));
+			WE_FIELD(MaterialPath, String, Id(0x4D4154455249414C), Asset("Material"),
+				Doc("Material asset (.wmat); overrides Color and the model's own material slots when set."));
 			// D5:字段 id 显式钉住("MESHINDX"),默认 0;.wmodel 节点树选择 mesh 用。
 			WE_FIELD(MeshIndex, Int32, Id(0x4D455348494E4458), Default(0));
 		WE_SCHEMA_END
@@ -230,13 +247,19 @@ namespace World
 		WE_SCHEMA_BODY(World, SkinnedMeshRendererComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Mesh"),
 				Doc("Skeleton-driven mesh: an empty AnimationClip plays the first clip and Time is written by the animation system (read-only under Play)."))
-			WE_FIELD(MeshPath, String, Id(0x534B4D4553485041));
+			WE_FIELD(MeshPath, String, Id(0x534B4D4553485041), Asset("Model"),
+				Doc("Skinned model asset (.wmodel); required — this component draws nothing without it."));
 			WE_FIELD(MeshIndex, Int32, Id(0x534B4D4553484958), Default(0));
-			WE_FIELD(MaterialPath, String, Id(0x534B4D4154505448));
-			WE_FIELD(AnimationClip, String, Id(0x534B414E494D434C));
-			WE_FIELD(Playing, Bool, Id(0x534B504C4159494E), Default(true));
-			WE_FIELD(Speed, Float, Id(0x534B535045454430), Default(1.0f));
-			WE_FIELD(Loop, Bool, Id(0x534B4C4F4F503030), Default(true));
+			WE_FIELD(MaterialPath, String, Id(0x534B4D4154505448), Asset("Material"),
+				Doc("Material asset (.wmat); empty = the model's own material slots."));
+			WE_FIELD(AnimationClip, String, Id(0x534B414E494D434C),
+				Doc("Clip name inside the model; empty = play the first clip."));
+			WE_FIELD(Playing, Bool, Id(0x534B504C4159494E), Default(true),
+				Doc("Play the clip automatically."));
+			WE_FIELD(Speed, Float, Id(0x534B535045454430), Default(1.0f),
+				Doc("Playback speed multiplier (1 = the clip's authored speed)."));
+			WE_FIELD(Loop, Bool, Id(0x534B4C4F4F503030), Default(true),
+				Doc("Loop the clip when it reaches the end."));
 			WE_FIELD(Time, Float, Id(0x534B54494D453030), Default(0.0f));
 		WE_SCHEMA_END
 	};
@@ -257,8 +280,10 @@ namespace World
 			WE_SCHEMA_META(Category("Scene"),
 				Doc("Scene camera settings plus Primary (the camera Play and the runtime render through); FixedAspectRatio keeps the projection from following the viewport size."))
 			WE_FIELD(Camera, Object, Of(SceneCamera));
-			WE_FIELD(Primary, Bool);
-			WE_FIELD(FixedAspectRatio, Bool);
+			WE_FIELD(Primary, Bool,
+				Doc("The scene renders through the first primary camera in Play and in the runtime."));
+			WE_FIELD(FixedAspectRatio, Bool,
+				Doc("Keep the projection aspect from the editor instead of following the viewport/window size."));
 		WE_SCHEMA_END
 	};
 
@@ -278,10 +303,14 @@ namespace World
 		WE_SCHEMA_BODY(World, DirectionalLightComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Light"),
 				Doc("Sun-style light: Direction is the propagation direction in world space (normalized when packed) and only the first one casts shadows."))
-			WE_FIELD(Color, Vec3, Group("Light"));
-			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f));
-			WE_FIELD(Direction, Vec3, Group("Light"));
-			WE_FIELD(CastShadow, Bool, Group("Light"));
+			WE_FIELD(Color, Vec3, Group("Light"), Color(),
+				Doc("Linear color of the light (values are decoded with pow 2.2 by the shader)."));
+			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f),
+				Doc("Brightness multiplier applied to Color."));
+			WE_FIELD(Direction, Vec3, Group("Light"), 
+				Doc("Propagation direction in world space (normalized when packed); zero falls back to -Y."));
+			WE_FIELD(CastShadow, Bool, Group("Light"),
+				Doc("Render a 2048² shadow map with 3x3 PCF; only the first directional light casts shadows."));
 		WE_SCHEMA_END
 	};
 
@@ -295,9 +324,12 @@ namespace World
 		WE_SCHEMA_BODY(World, PointLightComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Light"),
 				Doc("Local light with distance falloff: Range is the falloff radius in world units, attenuation saturates as (1 - d/Range)^2, and at most 7 point lights reach the shader."))
-			WE_FIELD(Color, Vec3, Group("Light"));
-			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f));
-			WE_FIELD(Range, Float, Group("Light"), Range(0.0f, 1000.0f));
+			WE_FIELD(Color, Vec3, Group("Light"), Color(),
+				Doc("Linear color of the light (decoded with pow 2.2 by the shader)."));
+			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f),
+				Doc("Brightness multiplier applied to Color."));
+			WE_FIELD(Range, Float, Group("Light"), Range(0.0f, 1000.0f),
+				Doc("Falloff radius in world units: attenuation is (1 - d/Range)² and reaches zero at Range."));
 		WE_SCHEMA_END
 	};
 
@@ -311,8 +343,10 @@ namespace World
 		WE_SCHEMA_BODY(World, AmbientLightComponent, Component)
 			WE_SCHEMA_META(Category("Rendering/Light"),
 				Doc("Global ambient term without a spatial range: only the first ambient light is used and 0.25 grey applies when the scene has none."))
-			WE_FIELD(Color, Vec3, Group("Light"));
-			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f));
+			WE_FIELD(Color, Vec3, Group("Light"), Color(),
+				Doc("Linear ambient color added to every surface (decoded with pow 2.2)."));
+			WE_FIELD(Intensity, Float, Group("Light"), Range(0.0f, 100.0f),
+				Doc("Ambient strength: 0 = no ambient, 0.25 is the engine default when the scene has none."));
 		WE_SCHEMA_END
 	};
 
@@ -417,7 +451,8 @@ namespace World
 		WE_SCHEMA_BODY(World, LuaScriptComponent, Component)
 			WE_SCHEMA_META(Category("Scripting"),
 				Doc("Luau script attached to the entity: only ScriptFilePath is serialized, the environment, callbacks and cached fields are rebuilt at load."))
-			WE_FIELD(ScriptFilePath, String);
+			WE_FIELD(ScriptFilePath, String, Asset("Script"),
+				Doc("Luau script asset (.luau/.lua) relative to Game/assets, e.g. scripts/Player.luau."));
 		WE_SCHEMA_END
 	};
 
@@ -440,8 +475,10 @@ namespace World
 		WE_SCHEMA_BODY(World, RigidBody2DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/2D"),
 				Doc("Box2D body: BodyType selects Static/Dynamic/Kinematic and FixedRotation locks the angular degree of freedom."))
-			WE_FIELD(Type, Enum, Of(BodyType));
-			WE_FIELD(FixedRotation, Bool);
+			WE_FIELD(Type, Enum, Of(BodyType),
+				Doc("Static never moves, Dynamic is driven by forces/gravity, Kinematic moves only through code."));
+			WE_FIELD(FixedRotation, Bool,
+				Doc("Lock the angular degree of freedom so collisions cannot rotate the body."));
 		WE_SCHEMA_END
 	};
 
@@ -457,12 +494,18 @@ namespace World
 		WE_SCHEMA_BODY(World, BoxCollider2DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/2D"),
 				Doc("2D box collider simulated by Box2D: Size defines the box in local units (multiplied by the entity transform) and Offset is the local centre offset."))
-			WE_FIELD(Offset, Vec2);
-			WE_FIELD(Size, Vec2);
-			WE_FIELD(Density, Float);
-			WE_FIELD(Friction, Float);
-			WE_FIELD(Restitution, Float);
-			WE_FIELD(ShowCollider, Bool);
+			WE_FIELD(Offset, Vec2,
+				Doc("Centre of the box in local units (scaled by the entity transform)."));
+			WE_FIELD(Size, Vec2,
+				Doc("Half-extents of the box in local units (scaled by the entity transform)."));
+			WE_FIELD(Density, Float,
+				Doc("Mass per area: the body mass is density x collider area."));
+			WE_FIELD(Friction, Float,
+				Doc("Surface friction against other colliders (0 = ice, 1 = rough)."));
+			WE_FIELD(Restitution, Float,
+				Doc("Bounciness: 0 = no bounce, 1 = perfectly elastic."));
+			WE_FIELD(ShowCollider, Bool,
+				Doc("Draw the Box2D debug outline for this collider while simulating."));
 		WE_SCHEMA_END
 	};
 
@@ -478,12 +521,18 @@ namespace World
 		WE_SCHEMA_BODY(World, CircleCollider2DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/2D"),
 				Doc("2D circle collider simulated by Box2D: Radius scaled by the entity transform with a local Offset; ShowCollider toggles the physics debug outline."))
-			WE_FIELD(Offset, Vec2);
-			WE_FIELD(Radius, Float);
-			WE_FIELD(Density, Float);
-			WE_FIELD(Friction, Float);
-			WE_FIELD(Restitution, Float);
-			WE_FIELD(ShowCollider, Bool);
+			WE_FIELD(Offset, Vec2,
+				Doc("Centre of the circle in local units (scaled by the entity transform)."));
+			WE_FIELD(Radius, Float,
+				Doc("Radius in local units (scaled by the entity transform)."));
+			WE_FIELD(Density, Float,
+				Doc("Mass per area: the body mass is density x circle area."));
+			WE_FIELD(Friction, Float,
+				Doc("Surface friction against other colliders (0 = ice, 1 = rough)."));
+			WE_FIELD(Restitution, Float,
+				Doc("Bounciness: 0 = no bounce, 1 = perfectly elastic."));
+			WE_FIELD(ShowCollider, Bool,
+				Doc("Draw the Box2D debug outline for this collider while simulating."));
 		WE_SCHEMA_END
 	};
 
@@ -517,13 +566,20 @@ namespace World
 		WE_SCHEMA_BODY(World, RigidBody3DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/3D"),
 				Doc("Jolt body: Mass and the damping terms drive Dynamic bodies, UseGravity opts into scene gravity, and Static bodies never move."))
-			WE_FIELD(Type, Enum, Id(0x5242334454595045), Of(MotionType));
-			WE_FIELD(Mass, Float, Id(0x524233444D415353), Range(0.0f, 100000.0f));
-			WE_FIELD(LinearDamping, Float, Id(0x524233444C4E4450), Range(0.0f, 100.0f));
-			WE_FIELD(AngularDamping, Float, Id(0x52423344414E4744), Range(0.0f, 100.0f));
-			WE_FIELD(Friction, Float, Id(0x5242334446524943), Range(0.0f, 1.0f));
-			WE_FIELD(Restitution, Float, Id(0x5242334452455354), Range(0.0f, 1.0f));
-			WE_FIELD(UseGravity, Bool, Id(0x5242334447525654));
+			WE_FIELD(Type, Enum, Id(0x5242334454595045), Of(MotionType),
+				Doc("Static never moves, Kinematic moves only through code, Dynamic follows forces and gravity."));
+			WE_FIELD(Mass, Float, Id(0x524233444D415353), Range(0.0f, 100000.0f),
+				Doc("Mass in kilograms used for Dynamic bodies (the shape only contributes inertia)."));
+			WE_FIELD(LinearDamping, Float, Id(0x524233444C4E4450), Range(0.0f, 100.0f),
+				Doc("Velocity damping per second: higher values stop a sliding body faster."));
+			WE_FIELD(AngularDamping, Float, Id(0x52423344414E4744), Range(0.0f, 100.0f),
+				Doc("Spin damping per second: higher values stop a rotating body faster."));
+			WE_FIELD(Friction, Float, Id(0x5242334446524943), Range(0.0f, 1.0f),
+				Doc("Surface friction against other bodies (0 = ice, 1 = rough)."));
+			WE_FIELD(Restitution, Float, Id(0x5242334452455354), Range(0.0f, 1.0f),
+				Doc("Bounciness: 0 = no bounce, 1 = perfectly elastic."));
+			WE_FIELD(UseGravity, Bool, Id(0x5242334447525654),
+				Doc("Apply the scene gravity to this body (see Project Settings ▸ Physics)."));
 		WE_SCHEMA_END
 	};
 
@@ -536,8 +592,10 @@ namespace World
 		WE_SCHEMA_BODY(World, BoxCollider3DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/3D"),
 				Doc("Box shape: HalfExtents are local half sizes scaled by the entity transform and Offset is a local offset applied unscaled."))
-			WE_FIELD(HalfExtents, Vec3, Id(0x42334448414C4658));
-			WE_FIELD(Offset, Vec3, Id(0x4233444F46465354));
+			WE_FIELD(HalfExtents, Vec3, Id(0x42334448414C4658),
+				Doc("Half size of the box in local units (scaled by the entity transform)."));
+			WE_FIELD(Offset, Vec3, Id(0x4233444F46465354),
+				Doc("Shape centre offset in local units (not scaled by the entity transform)."));
 		WE_SCHEMA_END
 	};
 
@@ -549,8 +607,10 @@ namespace World
 		WE_SCHEMA_BODY(World, SphereCollider3DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/3D"),
 				Doc("Sphere shape: Radius in local units with a local Offset applied unscaled."))
-			WE_FIELD(Radius, Float, Id(0x5333445241444955), Range(0.0f, 100000.0f));
-			WE_FIELD(Offset, Vec3, Id(0x5333444F46465354));
+			WE_FIELD(Radius, Float, Id(0x5333445241444955), Range(0.0f, 100000.0f),
+				Doc("Sphere radius in local units (scaled by the entity transform)."));
+			WE_FIELD(Offset, Vec3, Id(0x5333444F46465354),
+				Doc("Shape centre offset in local units (not scaled by the entity transform)."));
 		WE_SCHEMA_END
 	};
 
@@ -564,9 +624,12 @@ namespace World
 		WE_SCHEMA_BODY(World, CapsuleCollider3DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/3D"),
 				Doc("Capsule along the entity's local Y axis: HalfHeight is the cylinder half height excluding the two hemisphere caps."))
-			WE_FIELD(Radius, Float, Id(0x4333445241444955), Range(0.0f, 100000.0f));
-			WE_FIELD(HalfHeight, Float, Id(0x43334448414C4648), Range(0.0f, 100000.0f));
-			WE_FIELD(Offset, Vec3, Id(0x4333444F46465354));
+			WE_FIELD(Radius, Float, Id(0x4333445241444955), Range(0.0f, 100000.0f),
+				Doc("Radius of the capsule and its two hemisphere caps."));
+			WE_FIELD(HalfHeight, Float, Id(0x43334448414C4648), Range(0.0f, 100000.0f),
+				Doc("Half height of the cylinder segment (excludes the hemisphere caps)."));
+			WE_FIELD(Offset, Vec3, Id(0x4333444F46465354),
+				Doc("Shape centre offset in local units (not scaled by the entity transform)."));
 		WE_SCHEMA_END
 	};
 
@@ -591,8 +654,10 @@ namespace World
 		WE_SCHEMA_BODY(World, MeshCollider3DComponent, Component)
 			WE_SCHEMA_META(Category("Physics/3D"),
 				Doc("Mesh-derived collision: an empty MeshPath uses the entity's MeshRenderer mesh, StaticTriangles only works on Static bodies, and the editor draws no outline for it."))
-			WE_FIELD(Mode, Enum, Id(0x4D33444D4F444530), Of(ColliderMode));
-			WE_FIELD(MeshPath, String, Id(0x4D33445041544830));
+			WE_FIELD(Mode, Enum, Id(0x4D33444D4F444530), Of(ColliderMode),
+				Doc("ConvexHull works on every body type; StaticTriangles is only allowed on Static bodies."));
+			WE_FIELD(MeshPath, String, Id(0x4D33445041544830), Asset("Model"),
+				Doc("Model asset used for collision; empty = reuse the MeshRenderer mesh on the same entity."));
 		WE_SCHEMA_END
 	};
 

@@ -128,6 +128,16 @@ namespace World::Schema
 		std::optional<float> Max;
 		bool ReadOnly = false;
 		bool Transient = false;
+		// ---- P4-U9:编辑期字段语义(全部是"怎么编"的提示,不参与存储/ABI) ----
+		// 一句话说明(英文 canonical,空 = 无说明):属性面板的行悬停提示 + 无障碍 Tooltip。
+		std::string Doc;
+		// true = 这个 Vec3/Vec4 是颜色 → 用取色器(色块 + hex + 预设)而不是四个数字框。
+		bool Color = false;
+		// 非空 = 这个字符串字段是"某类资产的路径"(值 = 资产类型名,如 Material/Model/Texture/
+		// Script)→ 用可搜索的资产下拉(带"(无)")而不是裸文本框。
+		std::string AssetType;
+		// 非空 = 这个字符串字段是从固定集合里选(如 Primitive = cube/plane/sphere)→ 用下拉。
+		std::vector<std::string> Choices;
 	};
 
 	struct TypeSchema;
@@ -190,6 +200,9 @@ namespace World::Schema
 		// 位置刻意放在末尾:既有按位置初始化的 TypeSchema 聚合初始化(测试与旧生成物)不受影响。
 		std::string CategoryPath;
 		std::string Doc;
+		// true = 核心组件:编辑器不提供"移除组件"(缺了它层级/存档/渲染就不成立)。
+		// 同样只服务编辑期 UI,不进序列化、不参与 ABI/存储比较。位置固定在最后(生成物按位置初始化)。
+		bool Core = false;
 	};
 
 	// 资产字段操作:以路径字符串作为边界值。每个资产类型提供一个特化。

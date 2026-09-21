@@ -231,6 +231,8 @@ namespace
 		// WE_SCHEMA_META(Category(...), Doc(...)):类型级描述元数据(可只写其一;空 = 未填)。
 		std::string MetaCategory;
 		std::string MetaDoc;
+		// WE_SCHEMA_META(..., Core()):核心组件(编辑器不允许移除)。
+		bool MetaCore = false;
 		bool HasMeta = false;
 		SourcePos MetaPos;
 		std::vector<FieldDecl> Fields;
@@ -328,8 +330,8 @@ namespace
 			return decl;
 		}
 
-		// 类型级描述元数据:WE_SCHEMA_META(Category("Rendering/Light"), Doc("一句话说明"))
-		// 只接受 Category / Doc 两个属性,每个最多一次、单个字符串字面量,顺序任意。
+		// 类型级描述元数据:WE_SCHEMA_META(Category("Rendering/Light"), Doc("一句话说明"), Core())
+		// 接受 Category / Doc(单个字符串字面量)与 Core(无参),每个最多一次,顺序任意。
 		void ParseStructMeta(StructDecl& decl)
 		{
 			const SourcePos pos = Next().Pos; // WE_SCHEMA_META
@@ -343,16 +345,27 @@ namespace
 				while (true)
 				{
 					const Attr attr = ParseAttr();
-					if (attr.Name != "Category" && attr.Name != "Doc")
-						Fail(m_File, attr.Pos, "unknown WE_SCHEMA_META attribute '" + attr.Name + "' (expected Category/Doc)");
-					if (attr.Args.size() != 1 || attr.Args[0].size() != 1 || attr.Args[0][0].type != Token::Type::String)
-						Fail(m_File, attr.Pos, "WE_SCHEMA_META attribute '" + attr.Name + "' expects a single string literal");
-					const std::string value = Unquote(attr.Args[0][0].Text);
-					ValidateMetaText(m_File, attr.Pos, attr.Name, value);
-					std::string& target = attr.Name == "Category" ? decl.MetaCategory : decl.MetaDoc;
-					if (!target.empty())
-						Fail(m_File, attr.Pos, "duplicate WE_SCHEMA_META attribute '" + attr.Name + "'");
-					target = value;
+					if (attr.Name != "Category" && attr.Name != "Doc" && attr.Name != "Core")
+						Fail(m_File, attr.Pos, "unknown WE_SCHEMA_META attribute '" + attr.Name + "' (expected Category/Doc/Core)");
+					if (attr.Name == "Core")
+					{
+						if (!(attr.Args.empty() || (attr.Args.size() == 1 && attr.Args[0].empty())))
+							Fail(m_File, attr.Pos, "WE_SCHEMA_META attribute 'Core' takes no arguments");
+						if (decl.MetaCore)
+							Fail(m_File, attr.Pos, "duplicate WE_SCHEMA_META attribute 'Core'");
+						decl.MetaCore = true;
+					}
+					else
+					{
+						if (attr.Args.size() != 1 || attr.Args[0].size() != 1 || attr.Args[0][0].type != Token::Type::String)
+							Fail(m_File, attr.Pos, "WE_SCHEMA_META attribute '" + attr.Name + "' expects a single string literal");
+						const std::string value = Unquote(attr.Args[0][0].Text);
+						ValidateMetaText(m_File, attr.Pos, attr.Name, value);
+						std::string& target = attr.Name == "Category" ? decl.MetaCategory : decl.MetaDoc;
+						if (!target.empty())
+							Fail(m_File, attr.Pos, "duplicate WE_SCHEMA_META attribute '" + attr.Name + "'");
+						target = value;
+					}
 					if (!AtEnd() && PeekIs(Token::Type::Punct, ","))
 					{
 						Next();
@@ -598,11 +611,21 @@ namespace
 		std::optional<uint64_t> Id;
 		std::optional<std::string> DefaultExpr;
 		std::optional<std::string> Of;
+		// ---- P4-U9:编辑期字段语义(见 Schema.h 的 FieldMetadata) ----
+		std::string Doc;                        // 一句话说明(空 = 未填)
+		bool IsColor = false;                   // Color() → Vec3/Vec4 用取色器
+		std::string AssetType;                  // Asset("Material") → 字符串字段是资产路径
+		std::vector<std::string> Choices;       // Choices("cube","plane") → 字符串字段固定集合
 	};
 
 	FieldOptions ParseOptions(const FieldDecl& field, const std::string& file)
 	{
 		FieldOptions options;
+		// 无参属性既接受 `ReadOnly` 也接受 `ReadOnly()`(后者语法上是一个空分组)。
+		const auto noArgs = [](const Attr& attr)
+		{
+			return attr.Args.empty() || (attr.Args.size() == 1 && attr.Args[0].empty());
+		};
 		for (const Attr& attr : field.Attrs)
 		{
 			if (attr.Name == "Group" || attr.Name == "DisplayName")
@@ -622,17 +645,17 @@ namespace
 			}
 			else if (attr.Name == "ReadOnly")
 			{
-				if (!attr.Args.empty()) Fail(file, attr.Pos, "attribute 'ReadOnly' takes no arguments");
+				if (!noArgs(attr)) Fail(file, attr.Pos, "attribute 'ReadOnly' takes no arguments");
 				options.ReadOnly = true;
 			}
 			else if (attr.Name == "Transient")
 			{
-				if (!attr.Args.empty()) Fail(file, attr.Pos, "attribute 'Transient' takes no arguments");
+				if (!noArgs(attr)) Fail(file, attr.Pos, "attribute 'Transient' takes no arguments");
 				options.Transient = true;
 			}
 			else if (attr.Name == "Entity32")
 			{
-				if (!attr.Args.empty()) Fail(file, attr.Pos, "attribute 'Entity32' takes no arguments");
+				if (!noArgs(attr)) Fail(file, attr.Pos, "attribute 'Entity32' takes no arguments");
 				options.Entity32 = true;
 			}
 			else if (attr.Name == "Id")
@@ -654,6 +677,39 @@ namespace
 					Fail(file, attr.Pos, "attribute 'Of' expects a type name");
 				const bool isString = attr.Args[0].size() == 1 && attr.Args[0][0].type == Token::Type::String;
 				options.Of = isString ? Unquote(attr.Args[0][0].Text) : JoinCompact(attr.Args[0]);
+			}
+			else if (attr.Name == "Doc")
+			{
+				if (attr.Args.size() != 1 || attr.Args[0].size() != 1 || attr.Args[0][0].type != Token::Type::String)
+					Fail(file, attr.Pos, "attribute 'Doc' expects a single string literal");
+				const std::string value = Unquote(attr.Args[0][0].Text);
+				ValidateMetaText(file, attr.Pos, attr.Name, value);
+				if (!options.Doc.empty())
+					Fail(file, attr.Pos, "duplicate attribute 'Doc'");
+				options.Doc = value;
+			}
+			else if (attr.Name == "Color")
+			{
+				if (!noArgs(attr))
+					Fail(file, attr.Pos, "attribute 'Color' takes no arguments");
+				options.IsColor = true;
+			}
+			else if (attr.Name == "Asset")
+			{
+				if (attr.Args.size() != 1 || attr.Args[0].size() != 1 || attr.Args[0][0].type != Token::Type::String)
+					Fail(file, attr.Pos, "attribute 'Asset' expects a single string literal (asset type name)");
+				options.AssetType = Unquote(attr.Args[0][0].Text);
+			}
+			else if (attr.Name == "Choices")
+			{
+				if (attr.Args.empty())
+					Fail(file, attr.Pos, "attribute 'Choices' expects at least one string literal");
+				for (const std::vector<Token>& group : attr.Args)
+				{
+					if (group.size() != 1 || group[0].type != Token::Type::String)
+						Fail(file, attr.Pos, "attribute 'Choices' expects string literals only");
+					options.Choices.push_back(Unquote(group[0].Text));
+				}
 			}
 			else
 			{
@@ -814,7 +870,12 @@ namespace
 			}
 			out << "            FieldMetadata{ \"" << options.DisplayName << "\", \"" << options.Group << "\", "
 				<< OptionalText(options.Min) << ", " << OptionalText(options.Max) << ", "
-				<< (options.ReadOnly ? "true" : "false") << ", " << (options.Transient ? "true" : "false") << " },\n";
+				<< (options.ReadOnly ? "true" : "false") << ", " << (options.Transient ? "true" : "false") << ", "
+				<< "\"" << options.Doc << "\", " << (options.IsColor ? "true" : "false") << ", "
+				<< "\"" << options.AssetType << "\", { ";
+			for (size_t i = 0; i < options.Choices.size(); ++i)
+				out << (i ? ", " : "") << "\"" << options.Choices[i] << "\"";
+			out << " } },\n";
 			std::string def;
 			if (field.Kind == "Enum")
 			{
@@ -873,9 +934,10 @@ namespace
 		else
 			out << "            nullptr,\n            nullptr,\n";
 		// 类型级描述元数据(TypeSchema::CategoryPath / TypeSchema::Doc;空字符串 = 未填)。
-		// 见 Schema.h 里 TypeSchema 末尾的字段说明:位置固定在最后两个成员。
+		// 见 Schema.h 里 TypeSchema 末尾的字段说明:位置固定在最后(CategoryPath/Doc/Core)。
 		out << "            \"" << decl.MetaCategory << "\",\n";
 		out << "            \"" << decl.MetaDoc << "\",\n";
+		out << "            " << (decl.MetaCore ? "true" : "false") << ",\n";
 		out << "        };\n        return schema;\n    }\n";
 		out << "};\n\n";
 	}

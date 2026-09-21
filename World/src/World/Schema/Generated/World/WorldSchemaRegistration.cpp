@@ -70,7 +70,7 @@ struct GeneratedAccess<World::UUIDComponent>
             &GetNested_ID,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(),
         };
         return schema;
@@ -95,6 +95,7 @@ struct GeneratedAccess<World::UUIDComponent>
             nullptr,
             "Scene",
             "Persistence identity written into the .wd file so entities can be matched across save and load; every entity is expected to carry one.",
+            true,
         };
         return schema;
     }
@@ -126,7 +127,7 @@ struct GeneratedAccess<World::TagComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(std::string()),
         };
         return schema;
@@ -151,6 +152,7 @@ struct GeneratedAccess<World::TagComponent>
             nullptr,
             "Scene",
             "Human-readable entity label used by the hierarchy, the AI command channel and log messages; not an identifier.",
+            true,
         };
         return schema;
     }
@@ -222,7 +224,7 @@ struct GeneratedAccess<World::TransformComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, false, "Local position in the parent's space (world units).", false, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -240,7 +242,7 @@ struct GeneratedAccess<World::TransformComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, false, "Local rotation in degrees (Euler XYZ); the engine stores the equivalent quaternion.", false, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -258,7 +260,7 @@ struct GeneratedAccess<World::TransformComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, true },
+            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, true, "", false, "", {  } },
             Value(glm::quat(1.0f, 0.0f, 0.0f, 0.0f)),
         };
         return schema;
@@ -276,7 +278,7 @@ struct GeneratedAccess<World::TransformComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, false, "Local scale per axis; 1,1,1 = unscaled, negative values mirror.", false, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -294,7 +296,7 @@ struct GeneratedAccess<World::TransformComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, true },
+            FieldMetadata{ "", "Transform", std::nullopt, std::nullopt, false, true, "", false, "", {  } },
             Value(glm::mat4(1.0f)),
         };
         return schema;
@@ -323,6 +325,7 @@ struct GeneratedAccess<World::TransformComponent>
             nullptr,
             "Scene",
             "Local translation/rotation/scale of the entity; RotationQuat and the cached Transform matrix are derived runtime state (Transient, never serialized).",
+            true,
         };
         return schema;
     }
@@ -374,7 +377,7 @@ struct GeneratedAccess<World::SpriteComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Tint multiplied into the sprite (alpha < 1 blends with what is behind).", true, "", {  } },
             Value(glm::vec4(0.0f)),
         };
         return schema;
@@ -392,7 +395,7 @@ struct GeneratedAccess<World::SpriteComponent>
             nullptr,
             nullptr,
             "Texture2D",
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(),
         };
         return schema;
@@ -410,7 +413,7 @@ struct GeneratedAccess<World::SpriteComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Repeats the texture UVs; 1 = once across the quad.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -437,6 +440,7 @@ struct GeneratedAccess<World::SpriteComponent>
             nullptr,
             "Rendering/Mesh",
             "2D textured quad: an empty Texture falls back to a flat Color fill and TilingFactor repeats the texture UVs.",
+            false,
         };
         return schema;
     }
@@ -488,7 +492,7 @@ struct GeneratedAccess<World::CircleRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Tint multiplied into the disc.", true, "", {  } },
             Value(glm::vec4(0.0f)),
         };
         return schema;
@@ -506,7 +510,7 @@ struct GeneratedAccess<World::CircleRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Ring width as a fraction of the radius: 1 = filled disc, 0.1 = thin ring.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -524,7 +528,7 @@ struct GeneratedAccess<World::CircleRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Normalized softness of the edge (0 = hard edge).", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -551,6 +555,7 @@ struct GeneratedAccess<World::CircleRendererComponent>
             nullptr,
             "Rendering/Mesh",
             "Flat 2D disc: Thickness is the ring width as a fraction of the radius (1 = filled) and Fade is the normalized edge softness.",
+            false,
         };
         return schema;
     }
@@ -622,7 +627,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Built-in primitive used when MeshPath is empty.", false, "", { "cube", "sphere", "plane" } },
             Value(std::string()),
         };
         return schema;
@@ -640,7 +645,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Base color used when MaterialPath is empty.", true, "", {  } },
             Value(glm::vec4(0.0f)),
         };
         return schema;
@@ -658,7 +663,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Imported model asset (.wmodel, path relative to Game/assets); empty = use Primitive.", false, "Model", {  } },
             Value(std::string()),
         };
         return schema;
@@ -676,7 +681,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Material asset (.wmat); overrides Color and the model's own material slots when set.", false, "Material", {  } },
             Value(std::string()),
         };
         return schema;
@@ -694,7 +699,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0),
         };
         return schema;
@@ -723,6 +728,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
             nullptr,
             "Rendering/Mesh",
             "Draws a built-in primitive or an imported mesh; MeshIndex selects the mesh inside the model and an empty MaterialPath shades with Color.",
+            false,
         };
         return schema;
     }
@@ -824,7 +830,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Skinned model asset (.wmodel); required — this component draws nothing without it.", false, "Model", {  } },
             Value(std::string()),
         };
         return schema;
@@ -842,7 +848,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0),
         };
         return schema;
@@ -860,7 +866,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Material asset (.wmat); empty = the model's own material slots.", false, "Material", {  } },
             Value(std::string()),
         };
         return schema;
@@ -878,7 +884,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Clip name inside the model; empty = play the first clip.", false, "", {  } },
             Value(std::string()),
         };
         return schema;
@@ -896,7 +902,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Play the clip automatically.", false, "", {  } },
             Value(true),
         };
         return schema;
@@ -914,7 +920,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Playback speed multiplier (1 = the clip's authored speed).", false, "", {  } },
             Value(1.0f),
         };
         return schema;
@@ -932,7 +938,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Loop the clip when it reaches the end.", false, "", {  } },
             Value(true),
         };
         return schema;
@@ -950,7 +956,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0.0f),
         };
         return schema;
@@ -982,6 +988,7 @@ struct GeneratedAccess<World::SkinnedMeshRendererComponent>
             nullptr,
             "Rendering/Mesh",
             "Skeleton-driven mesh: an empty AnimationClip plays the first clip and Time is written by the animation system (read-only under Play).",
+            false,
         };
         return schema;
     }
@@ -1025,7 +1032,7 @@ struct GeneratedAccess<World::HierarchyComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Parent entity; cleared = the entity is a root.", false, "", {  } },
             Value(static_cast<uint64_t>(static_cast<uint32_t>(entt::null))),
         };
         return schema;
@@ -1043,7 +1050,7 @@ struct GeneratedAccess<World::HierarchyComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "When on, this entity's world transform is parent world x local; off = ignore the parent transform.", false, "", {  } },
             Value(true),
         };
         return schema;
@@ -1069,6 +1076,7 @@ struct GeneratedAccess<World::HierarchyComponent>
             nullptr,
             "Scene",
             "Parent link plus whether the parent transform is inherited; Children is a runtime cache rebuilt from Parent after loading.",
+            false,
         };
         return schema;
     }
@@ -1122,7 +1130,7 @@ struct GeneratedAccess<World::CameraComponent>
             &GetNested_Camera,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(),
         };
         return schema;
@@ -1140,7 +1148,7 @@ struct GeneratedAccess<World::CameraComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "The scene renders through the first primary camera in Play and in the runtime.", false, "", {  } },
             Value(false),
         };
         return schema;
@@ -1158,7 +1166,7 @@ struct GeneratedAccess<World::CameraComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Keep the projection aspect from the editor instead of following the viewport/window size.", false, "", {  } },
             Value(false),
         };
         return schema;
@@ -1185,6 +1193,7 @@ struct GeneratedAccess<World::CameraComponent>
             nullptr,
             "Scene",
             "Scene camera settings plus Primary (the camera Play and the runtime render through); FixedAspectRatio keeps the projection from following the viewport size.",
+            false,
         };
         return schema;
     }
@@ -1246,7 +1255,7 @@ struct GeneratedAccess<World::DirectionalLightComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false, "Linear color of the light (values are decoded with pow 2.2 by the shader).", true, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -1264,7 +1273,7 @@ struct GeneratedAccess<World::DirectionalLightComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Brightness multiplier applied to Color.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -1282,7 +1291,7 @@ struct GeneratedAccess<World::DirectionalLightComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false, "Propagation direction in world space (normalized when packed); zero falls back to -Y.", false, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -1300,7 +1309,7 @@ struct GeneratedAccess<World::DirectionalLightComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false, "Render a 2048² shadow map with 3x3 PCF; only the first directional light casts shadows.", false, "", {  } },
             Value(false),
         };
         return schema;
@@ -1328,6 +1337,7 @@ struct GeneratedAccess<World::DirectionalLightComponent>
             nullptr,
             "Rendering/Light",
             "Sun-style light: Direction is the propagation direction in world space (normalized when packed) and only the first one casts shadows.",
+            false,
         };
         return schema;
     }
@@ -1379,7 +1389,7 @@ struct GeneratedAccess<World::PointLightComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false, "Linear color of the light (decoded with pow 2.2 by the shader).", true, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -1397,7 +1407,7 @@ struct GeneratedAccess<World::PointLightComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Brightness multiplier applied to Color.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -1415,7 +1425,7 @@ struct GeneratedAccess<World::PointLightComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(1000.000000f), false, false },
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(1000.000000f), false, false, "Falloff radius in world units: attenuation is (1 - d/Range)² and reaches zero at Range.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -1442,6 +1452,7 @@ struct GeneratedAccess<World::PointLightComponent>
             nullptr,
             "Rendering/Light",
             "Local light with distance falloff: Range is the falloff radius in world units, attenuation saturates as (1 - d/Range)^2, and at most 7 point lights reach the shader.",
+            false,
         };
         return schema;
     }
@@ -1483,7 +1494,7 @@ struct GeneratedAccess<World::AmbientLightComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Light", std::nullopt, std::nullopt, false, false, "Linear ambient color added to every surface (decoded with pow 2.2).", true, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -1501,7 +1512,7 @@ struct GeneratedAccess<World::AmbientLightComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Ambient strength: 0 = no ambient, 0.25 is the engine default when the scene has none.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -1527,6 +1538,7 @@ struct GeneratedAccess<World::AmbientLightComponent>
             nullptr,
             "Rendering/Light",
             "Global ambient term without a spatial range: only the first ambient light is used and 0.25 grey applies when the scene has none.",
+            false,
         };
         return schema;
     }
@@ -1558,7 +1570,7 @@ struct GeneratedAccess<World::NativeScriptComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(std::string()),
         };
         return schema;
@@ -1583,6 +1595,7 @@ struct GeneratedAccess<World::NativeScriptComponent>
             nullptr,
             "Scripting",
             "C++ behavior instance created per entity when Play starts; ScriptName selects the registered script and the remaining fields are runtime state.",
+            false,
         };
         return schema;
     }
@@ -1614,7 +1627,7 @@ struct GeneratedAccess<World::LuaScriptComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Luau script asset (.luau/.lua) relative to Game/assets, e.g. scripts/Player.luau.", false, "Script", {  } },
             Value(std::string()),
         };
         return schema;
@@ -1639,6 +1652,7 @@ struct GeneratedAccess<World::LuaScriptComponent>
             nullptr,
             "Scripting",
             "Luau script attached to the entity: only ScriptFilePath is serialized, the environment, callbacks and cached fields are rebuilt at load.",
+            false,
         };
         return schema;
     }
@@ -1684,7 +1698,7 @@ struct GeneratedAccess<World::RigidBody2DComponent>
             nullptr,
             &GetEnum_Type,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Static never moves, Dynamic is driven by forces/gravity, Kinematic moves only through code.", false, "", {  } },
             Value(static_cast<int64_t>(0)),
         };
         return schema;
@@ -1702,7 +1716,7 @@ struct GeneratedAccess<World::RigidBody2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Lock the angular degree of freedom so collisions cannot rotate the body.", false, "", {  } },
             Value(false),
         };
         return schema;
@@ -1728,6 +1742,7 @@ struct GeneratedAccess<World::RigidBody2DComponent>
             nullptr,
             "Physics/2D",
             "Box2D body: BodyType selects Static/Dynamic/Kinematic and FixedRotation locks the angular degree of freedom.",
+            false,
         };
         return schema;
     }
@@ -1809,7 +1824,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Centre of the box in local units (scaled by the entity transform).", false, "", {  } },
             Value(glm::vec2(0.0f)),
         };
         return schema;
@@ -1827,7 +1842,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Half-extents of the box in local units (scaled by the entity transform).", false, "", {  } },
             Value(glm::vec2(0.0f)),
         };
         return schema;
@@ -1845,7 +1860,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Mass per area: the body mass is density x collider area.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -1863,7 +1878,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Surface friction against other colliders (0 = ice, 1 = rough).", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -1881,7 +1896,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bounciness: 0 = no bounce, 1 = perfectly elastic.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -1899,7 +1914,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Draw the Box2D debug outline for this collider while simulating.", false, "", {  } },
             Value(false),
         };
         return schema;
@@ -1929,6 +1944,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             "Physics/2D",
             "2D box collider simulated by Box2D: Size defines the box in local units (multiplied by the entity transform) and Offset is the local centre offset.",
+            false,
         };
         return schema;
     }
@@ -2010,7 +2026,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Centre of the circle in local units (scaled by the entity transform).", false, "", {  } },
             Value(glm::vec2(0.0f)),
         };
         return schema;
@@ -2028,7 +2044,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Radius in local units (scaled by the entity transform).", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2046,7 +2062,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Mass per area: the body mass is density x circle area.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2064,7 +2080,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Surface friction against other colliders (0 = ice, 1 = rough).", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2082,7 +2098,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bounciness: 0 = no bounce, 1 = perfectly elastic.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2100,7 +2116,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Draw the Box2D debug outline for this collider while simulating.", false, "", {  } },
             Value(false),
         };
         return schema;
@@ -2130,6 +2146,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             "Physics/2D",
             "2D circle collider simulated by Box2D: Radius scaled by the entity transform with a local Offset; ShowCollider toggles the physics debug outline.",
+            false,
         };
         return schema;
     }
@@ -2225,7 +2242,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             &GetEnum_Type,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Static never moves, Kinematic moves only through code, Dynamic follows forces and gravity.", false, "", {  } },
             Value(static_cast<int64_t>(0)),
         };
         return schema;
@@ -2243,7 +2260,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false, "Mass in kilograms used for Dynamic bodies (the shape only contributes inertia).", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2261,7 +2278,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Velocity damping per second: higher values stop a sliding body faster.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2279,7 +2296,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Spin damping per second: higher values stop a rotating body faster.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2297,7 +2314,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Surface friction against other bodies (0 = ice, 1 = rough).", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2315,7 +2332,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Bounciness: 0 = no bounce, 1 = perfectly elastic.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2333,7 +2350,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Apply the scene gravity to this body (see Project Settings ▸ Physics).", false, "", {  } },
             Value(false),
         };
         return schema;
@@ -2364,6 +2381,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             "Physics/3D",
             "Jolt body: Mass and the damping terms drive Dynamic bodies, UseGravity opts into scene gravity, and Static bodies never move.",
+            false,
         };
         return schema;
     }
@@ -2405,7 +2423,7 @@ struct GeneratedAccess<World::BoxCollider3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Half size of the box in local units (scaled by the entity transform).", false, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -2423,7 +2441,7 @@ struct GeneratedAccess<World::BoxCollider3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Shape centre offset in local units (not scaled by the entity transform).", false, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -2449,6 +2467,7 @@ struct GeneratedAccess<World::BoxCollider3DComponent>
             nullptr,
             "Physics/3D",
             "Box shape: HalfExtents are local half sizes scaled by the entity transform and Offset is a local offset applied unscaled.",
+            false,
         };
         return schema;
     }
@@ -2490,7 +2509,7 @@ struct GeneratedAccess<World::SphereCollider3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false, "Sphere radius in local units (scaled by the entity transform).", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2508,7 +2527,7 @@ struct GeneratedAccess<World::SphereCollider3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Shape centre offset in local units (not scaled by the entity transform).", false, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -2534,6 +2553,7 @@ struct GeneratedAccess<World::SphereCollider3DComponent>
             nullptr,
             "Physics/3D",
             "Sphere shape: Radius in local units with a local Offset applied unscaled.",
+            false,
         };
         return schema;
     }
@@ -2585,7 +2605,7 @@ struct GeneratedAccess<World::CapsuleCollider3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false, "Radius of the capsule and its two hemisphere caps.", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2603,7 +2623,7 @@ struct GeneratedAccess<World::CapsuleCollider3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false, "Half height of the cylinder segment (excludes the hemisphere caps).", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2621,7 +2641,7 @@ struct GeneratedAccess<World::CapsuleCollider3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Shape centre offset in local units (not scaled by the entity transform).", false, "", {  } },
             Value(glm::vec3(0.0f)),
         };
         return schema;
@@ -2648,6 +2668,7 @@ struct GeneratedAccess<World::CapsuleCollider3DComponent>
             nullptr,
             "Physics/3D",
             "Capsule along the entity's local Y axis: HalfHeight is the cylinder half height excluding the two hemisphere caps.",
+            false,
         };
         return schema;
     }
@@ -2693,7 +2714,7 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
             nullptr,
             &GetEnum_Mode,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "ConvexHull works on every body type; StaticTriangles is only allowed on Static bodies.", false, "", {  } },
             Value(static_cast<int64_t>(0)),
         };
         return schema;
@@ -2711,7 +2732,7 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Model asset used for collision; empty = reuse the MeshRenderer mesh on the same entity.", false, "Model", {  } },
             Value(std::string()),
         };
         return schema;
@@ -2737,6 +2758,7 @@ struct GeneratedAccess<World::MeshCollider3DComponent>
             nullptr,
             "Physics/3D",
             "Mesh-derived collision: an empty MeshPath uses the entity's MeshRenderer mesh, StaticTriangles only works on Static bodies, and the editor draws no outline for it.",
+            false,
         };
         return schema;
     }
@@ -2768,7 +2790,7 @@ struct GeneratedAccess<World::UUID>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0),
         };
         return schema;
@@ -2788,6 +2810,7 @@ struct GeneratedAccess<World::UUID>
             nullptr,
             "",
             "",
+            false,
         };
         return schema;
     }
@@ -2893,7 +2916,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             &GetEnum_m_ProjectionType,
             nullptr,
-            FieldMetadata{ "", "Projection", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Projection", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(static_cast<int64_t>(0)),
         };
         return schema;
@@ -2911,7 +2934,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, true },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, true, "", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2929,7 +2952,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Orthographic", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Orthographic", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2947,7 +2970,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Orthographic", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Orthographic", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2965,7 +2988,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Orthographic", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Orthographic", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -2983,7 +3006,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Perspective", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Perspective", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -3001,7 +3024,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Perspective", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Perspective", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -3019,7 +3042,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "Perspective", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "Perspective", std::nullopt, std::nullopt, false, false, "", false, "", {  } },
             Value(0.0),
         };
         return schema;
@@ -3046,6 +3069,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             "",
             "",
+            false,
         };
         return schema;
     }

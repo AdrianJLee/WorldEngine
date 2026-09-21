@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "PropertiesPanel.h"
+#include "EditorAssetCatalog.h"
 
 // P2 W5b:Reload 按钮要复用 EditorLayer 的热重载入口(与帧边界轮询、AI 通道 script.reload
 // 同一条语义)。PanelHost 是跨任务冻结的窄接口,本包文件边界内不能扩展它,因此只 include。
@@ -410,6 +411,29 @@ namespace World
 			return Wui::Tr("schema.component." + SchemaTypeKeyName(schema) + ".doc", schema.Doc);
 		}
 
+		// P4-U9:字段说明(悬浮提示 + 无障碍 Tooltip)。英文默认 = schema 里的 Doc 原文,
+		// 中文目录用 schema.field.<短类型名>.<字段名>.doc 覆盖;空 = 该字段没写说明。
+		std::string FieldDocLabel(const Schema::TypeSchema& schema, const Schema::FieldSchema& field)
+		{
+			if (field.Meta.Doc.empty())
+				return std::string();
+			return Wui::Tr(("schema.field." + SchemaTypeKeyName(schema) + "." + field.Name + ".doc").c_str(),
+				field.Meta.Doc);
+		}
+
+		// 颜色字段的无障碍值文本(#RRGGBBAA,与取色器弹层里的 hex 行同一写法)。
+		std::string FormatColorHexText(const glm::vec4& color)
+		{
+			const auto channel = [](float value)
+			{
+				return static_cast<int>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+			};
+			char buffer[16] = {};
+			std::snprintf(buffer, sizeof(buffer), "#%02X%02X%02X%02X",
+				channel(color.r), channel(color.g), channel(color.b), channel(color.a));
+			return buffer;
+		}
+
 		// 搜索命中口径(方案 §8.2):本地化名 / DisplayName / 短类型名 / 字段名,子串匹配。
 		bool MatchesComponentFilter(const Schema::TypeSchema& schema, const std::string& needleLower)
 		{
@@ -539,6 +563,79 @@ namespace World
 		m_AddOpen = false;
 		ctx.ClearModal();
 		m_Host.SetPanelModalOwner(std::string());
+	}
+
+	// ---- P4-U9:移除组件的确认模态(与"添加组件"同一套面板级模态通道)----
+	void PropertiesPanel::OpenRemoveComponentConfirm(Wui::WuiContext& ctx, uint32_t componentId,
+		const std::string& displayName)
+	{
+		m_RemovePendingId = componentId;
+		m_RemovePendingName = displayName;
+		ctx.SetModal(Wui::HashId("prop.remove.modal"));
+		m_Host.SetPanelModalOwner(Id());
+		ctx.RecordOp("properties", "remove-component-ask", displayName, std::to_string(componentId));
+	}
+
+	void PropertiesPanel::CloseRemoveComponentConfirm(Wui::WuiContext& ctx)
+	{
+		m_RemovePendingId = 0;
+		m_RemovePendingName.clear();
+		ctx.ClearModal();
+		m_Host.SetPanelModalOwner(std::string());
+	}
+
+	void PropertiesPanel::DrawRemoveComponentConfirm(Wui::WuiContext& ctx, Entity entity)
+	{
+		const Wui::WuiTheme& theme = m_Host.Theme();
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = Wui::HashId("prop.remove.modal");
+		frameDesc.Title = Wui::Tr("panel.properties.remove_component", "Remove Component");
+		frameDesc.Size = { 460.0f, 170.0f };
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
+			return;
+
+		// 正文说清"移除哪个 + 会丢什么":破坏性操作不能只给一个按钮。
+		Wui::Label(ctx, { frame.X + 16.0f, frame.Y + 50.0f },
+			Wui::Tr("panel.properties.remove_confirm_body",
+				"Remove this component from the selected entity? Its settings will be lost."),
+			theme.Text, 13.0f);
+		Wui::LabelWithTerm(ctx, { frame.X + 16.0f, frame.Y + 72.0f }, m_RemovePendingName, std::string(),
+			theme.Warning, 13.0f, theme, frame.W - 32.0f);
+
+		const Wui::ModalButtonDesc buttons[2] = {
+			{ Wui::Tr("panel.properties.remove_cancel", "Cancel"), Wui::HashId("prop.remove.cancel"), true },
+			{ Wui::Tr("panel.properties.remove_confirm", "Remove"), Wui::HashId("prop.remove.confirm"), true },
+		};
+		const int clicked = Wui::ModalButtons(ctx, frame, buttons, 2, theme);
+		bool closeRequested = false;
+		if (clicked == 1)
+		{
+			const uint32_t componentId = m_RemovePendingId;
+			const std::string displayName = m_RemovePendingName;
+			const entt::entity handle = entity;
+			if (entity.IsValid() && entity.HasComponent(componentId))
+			{
+				// 结构性改动走场景自己的延迟队列(与添加组件同一路径);移除后当前选择保留,
+				// 分区列表下一帧自然少一项(m_LastSchemaNames 变化 → 重建).
+				if (entity.GetScene()->DeferStructuralChange([handle, componentId](Scene& target)
+					{
+						Entity removed(&target, handle);
+						if (removed.IsValid() && removed.HasComponent(componentId))
+							removed.RemoveComponent(componentId);
+					}))
+					m_Host.MarkDocumentDirty();
+				ctx.RecordOp("properties", "remove-component", displayName, std::to_string(componentId));
+			}
+			closeRequested = true;
+		}
+		else if (clicked == 0 || escapePressed)
+			closeRequested = true;
+		// 先收 overlay 再清模态态(BeginModalFrame/EndModalFrame 必须成对;模态被别处清掉时不再重复收)。
+		Wui::EndModalFrame(ctx);
+		if (closeRequested && ctx.Modal() == frameDesc.Id)
+			CloseRemoveComponentConfirm(ctx);
 	}
 
 	void PropertiesPanel::DrawAddComponentPicker(Wui::WuiContext& ctx,
@@ -1071,6 +1168,9 @@ namespace World
 		// U6b:平铺菜单 → **居中模态**的搜索选择器(候选/分类/说明全部来自 schema)。
 		if (!m_ReadOnly && m_AddOpen)
 			DrawAddComponentPicker(ctx, entity, scene, schemas);
+		// P4-U9:移除组件的确认模态(与添加组件同一套面板级模态通道)。
+		if (m_RemovePendingId != 0)
+			DrawRemoveComponentConfirm(ctx, entity);
 
 		// 组件分区进入保留模式布局树;字段内容复用已测的 schema 绘制逻辑。
 		std::vector<const Schema::TypeSchema*> componentSchemas;
@@ -1171,16 +1271,60 @@ namespace World
 			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, header, open ? Wui::WuiColor { 0.27f, 0.28f, 0.31f, 1 } : Wui::WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 2.0f });
 			// 标题 = 主文案(中文界面为译文)+ 英文术语(Caption/次要色,窄处自动省略);前缀仍是展开标记。
 			const Wui::LocalizedLabel sectionLabel = SchemaComponentLabel(*schema);
+			// P4-U9:分区标题悬停 = 组件说明(schema Doc),右侧留出"移除组件"按钮的位置。
+			const std::string componentDoc = ComponentDocLabel(*schema);
+			if (!componentDoc.empty())
+				Wui::Tooltip(ctx, { header.X, header.Y, header.W - 24.0f, header.H }, componentDoc);
+			const float titleBudget = std::max(60.0f, header.W - 12.0f - 24.0f);
 			Wui::LabelWithTerm(ctx, { header.X + 6, header.Y + 3 }, (open ? "- " : "+ ") + sectionLabel.Text,
-				sectionLabel.Term, theme.Text, 14.0f, theme, header.W - 12.0f);
+				sectionLabel.Term, theme.Text, 14.0f, theme, titleBudget);
 			// 无障碍 id / 操作记录仍用 section.Title(=<DisplayName>),节点 id 逐字节不变。
 			const std::string headerId = "properties.section." + section.Title;
-			RegisterNode(Wui::HashId(headerId.c_str()), "button", header, TermText(sectionLabel), open ? "open" : "closed");
-			if (ctx.IsClicked(header))
+			RegisterNode(Wui::HashId(headerId.c_str()), "button", header, TermText(sectionLabel),
+				open ? "open" : "closed", true, componentDoc);
+			if (ctx.IsClicked({ header.X, header.Y, header.W - 24.0f, header.H }))
 			{
 				open = !open;
 				section.Open = open;
 				ctx.RecordOp("properties", "toggle-section", section.Title, open ? "open" : "closed");
+			}
+
+			// ---- P4-U9:移除组件(核心组件禁止移除;破坏性操作走确认模态)----
+			{
+				const Wui::WuiRect removeRect { header.X + header.W - 22.0f, header.Y + 2.0f, 18.0f, 18.0f };
+				std::string blockedReason;
+				const bool core = schema->Core;
+				const bool canRemove = !m_ReadOnly && !core
+					&& entity.CanRemoveComponent(schema->Storage->ComponentId, &blockedReason);
+				if (core)
+					blockedReason = Wui::Tr("panel.properties.remove.core",
+						"Core components cannot be removed");
+				else if (m_ReadOnly)
+					blockedReason = Wui::Tr("panel.properties.remove.readonly",
+						"Read-only while Play/Simulate is running");
+				const std::string removeHint = canRemove
+					? Wui::Tr("panel.properties.remove.tooltip", "Remove this component")
+					: blockedReason;
+				const bool hoverRemove = ctx.IsHovered(removeRect);
+				if (hoverRemove && canRemove)
+					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, removeRect, Wui::WuiColor { 0.97f, 0.32f, 0.29f, 0.22f }, 3.0f });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ removeRect.X + 5.0f, removeRect.Y + 1.0f, 0, 0 },
+					canRemove ? (hoverRemove ? theme.Danger : theme.TextMuted) : theme.TextDisabled,
+					0, 1.0f, "x", 13.0f, false });
+				if (hoverRemove)
+				{
+					if (canRemove)
+						ctx.SetCursor(Wui::WuiCursor::Hand);
+					if (!removeHint.empty())
+						ctx.SetTooltip(removeHint);
+				}
+				const std::string removeId = "properties.section.remove." + section.Title;
+				RegisterNode(Wui::HashId(removeId.c_str()), "button", removeRect,
+					Wui::Tr("panel.properties.remove_component", "Remove Component"), removeHint,
+					canRemove, removeHint);
+				if (canRemove && ctx.IsClicked(removeRect))
+					OpenRemoveComponentConfirm(ctx, schema->Storage->ComponentId, schema->DisplayName);
 			}
 
 			const Wui::WuiRect inner { contentRect.X + 10, rowY + kSectionHeader, contentRect.W - 10, 0 };
@@ -1328,9 +1472,13 @@ namespace World
 				bool& open = ctx.Persist<bool>(fid, false);
 				if (ctx.IsClicked(row))
 					open = !open;
+				const std::string nestedDoc = FieldDocLabel(schema, field);
+				if (!nestedDoc.empty())
+					Wui::Tooltip(ctx, row, nestedDoc);
 				Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, (open ? "- " : "+ ") + label.Text, label.Term,
 					theme.Text, 13.0f, theme, labelBudget);
-				RegisterNode(Wui::HashId(idText.c_str()), "button", row, labelText, open ? "open" : "closed", reachable(row));
+				RegisterNode(Wui::HashId(idText.c_str()), "button", row, labelText, open ? "open" : "closed",
+					reachable(row), nestedDoc);
 				y += 20;
 				if (open && nested && nestedInstance)
 					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u, { row.X + 10, row.Y + 20, row.W - 10, 0 },
@@ -1341,17 +1489,20 @@ namespace World
 			if (m_ReadOnly || field.Meta.ReadOnly || !field.Get || !field.Set)
 			{
 				const std::string idText = propId(typeName, field.Name);
+				const std::string docText = FieldDocLabel(schema, field);
 				// 只读也要显示"值":否则 Play/Simulate 下属性面板只剩字段名,看起来像"什么都不显示"。
 				std::string text = label.Text;
 				if (field.Get)
 					text += ": " + FormatReadOnlyValue(field, field.Get(instance));
+				if (!docText.empty())
+					Wui::Tooltip(ctx, row, docText);
 				// 值行整行可用;术语作为行尾 Caption 对照(句子/值本身不加英文)。
 				Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, text, label.Term, theme.TextMuted, 13.0f, theme,
 					row.W - 8.0f);
 				// 只读字段登记为不可交互文本节点:ui.tree 能断言"可见但禁用"。
 				RegisterNode(Wui::HashId(idText.c_str()), "text", row,
 					labelText, field.Get ? FormatReadOnlyValue(field, field.Get(instance)) : std::string(),
-					false);
+					false, docText);
 				y += 20;
 				continue;
 			}
@@ -1359,7 +1510,11 @@ namespace World
 			// 交互字段:标签登记为静态节点(不可点),控件本体按真实 kind 登记
 			// (脚本用 properties.<Type>.<Field> 直接 ui.invoke)。
 			const std::string idText = propId(typeName, field.Name);
-			RegisterNode(Wui::HashId(idText.c_str()), "label", row, labelText, std::string(), false);
+			// P4-U9:字段说明(如果有)—— 悬停提示 + 无障碍节点 Tooltip。
+			const std::string fieldDoc = FieldDocLabel(schema, field);
+			if (!fieldDoc.empty())
+				Wui::Tooltip(ctx, row, fieldDoc);
+			RegisterNode(Wui::HashId(idText.c_str()), "label", row, labelText, std::string(), false, fieldDoc);
 			Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f,
 				theme, labelBudget);
 			Schema::Value value = field.Get(instance);
@@ -1373,7 +1528,8 @@ namespace World
 					Checkbox(ctx, fid, ctrl, "", b, theme);
 					fieldChanged = b != before;
 					if (fieldChanged) value = b;
-					RegisterNode(Wui::HashId(idText.c_str()), "checkbox", ctrl, labelText, b ? "true" : "false", reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "checkbox", ctrl, labelText, b ? "true" : "false",
+						reachable(ctrl), fieldDoc);
 					break;
 				}
 				case Schema::Kind::Int8:
@@ -1396,7 +1552,8 @@ namespace World
 						else if (field.K == Schema::Kind::Int32) value = static_cast<int32_t>(raw);
 						else value = raw;
 					}
-					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, labelText, std::to_string(raw), reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, labelText, std::to_string(raw),
+						reachable(ctrl), fieldDoc);
 					break;
 				}
 				case Schema::Kind::UInt8:
@@ -1420,7 +1577,8 @@ namespace World
 						else if (field.K == Schema::Kind::UInt32) value = static_cast<uint32_t>(signedRaw);
 						else value = static_cast<uint64_t>(signedRaw);
 					}
-					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, labelText, std::to_string(signedRaw), reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, labelText, std::to_string(signedRaw),
+						reachable(ctrl), fieldDoc);
 					break;
 				}
 				case Schema::Kind::Float:
@@ -1433,13 +1591,34 @@ namespace World
 					DragFloat(ctx, fid, ctrl, f, 0.01f, lo, hi, theme);
 					fieldChanged = f != before;
 					if (fieldChanged) value = field.K == Schema::Kind::Float ? Schema::Value(f) : Schema::Value(static_cast<double>(f));
-					RegisterNode(Wui::HashId(idText.c_str()), "drag-float", ctrl, labelText, FormatFloatText(f), reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "drag-float", ctrl, labelText, FormatFloatText(f),
+						reachable(ctrl), fieldDoc);
 					break;
 				}
 				case Schema::Kind::Vec2:
 				case Schema::Kind::Vec3:
 				case Schema::Kind::Vec4:
 				{
+					// P4-U9:Color() 标记的向量 = 颜色 → 取色器(色块 + hex + R/G/B/A 滑杆 + 预设),
+					// 不再让用户对着四个数字框猜颜色。
+					if (field.Meta.Color && field.K != Schema::Kind::Vec2)
+					{
+						const glm::vec4 before = field.K == Schema::Kind::Vec3
+							? glm::vec4 { std::get<glm::vec3>(value), 1.0f }
+							: std::get<glm::vec4>(value);
+						glm::vec4 edited = before;
+						Wui::ColorField(ctx, fid, ctrl, edited, theme);
+						if (edited != before)
+						{
+							fieldChanged = true;
+							value = field.K == Schema::Kind::Vec3
+								? Schema::Value(glm::vec3 { edited.x, edited.y, edited.z })
+								: Schema::Value(edited);
+						}
+						RegisterNode(Wui::HashId(idText.c_str()), "color", ctrl, labelText,
+							FormatColorHexText(edited), reachable(ctrl), fieldDoc);
+						break;
+					}
 					const int components = field.K == Schema::Kind::Vec2 ? 2 : (field.K == Schema::Kind::Vec3 ? 3 : 4);
 					const float slot = ctrl.W / components;
 					for (int c = 0; c < components; ++c)
@@ -1460,17 +1639,70 @@ namespace World
 						const std::string componentId = idText + kSuffix[c];
 						const Wui::WuiRect slotRect { ctrl.X + slot * static_cast<float>(c), ctrl.Y, slot - 2, ctrl.H };
 						RegisterNode(Wui::HashId(componentId.c_str()), "drag-float", slotRect,
-							labelText + "." + kShort[c], FormatFloatText(f), reachable(slotRect));
+							labelText + "." + kShort[c], FormatFloatText(f), reachable(slotRect), fieldDoc);
 					}
 					break;
 				}
 				case Schema::Kind::String:
 				case Schema::Kind::Asset:
 				{
+					const std::string current = std::get<std::string>(value);
+					// P4-U9:资产路径(Asset("Material") / Of("Texture2D"))→ 可搜索资产下拉,
+					// 明确给"(无)"选项 —— 手打路径既容易写错也发现不了拼写问题。
+					const std::string assetType = !field.Meta.AssetType.empty() ? field.Meta.AssetType
+						: (field.K == Schema::Kind::Asset && field.AssetTypeName ? std::string(field.AssetTypeName)
+							: std::string());
+					if (!assetType.empty())
+					{
+						const std::vector<std::string>& paths = Editor::AssetCatalog::PathsForName(assetType);
+						std::vector<std::string> options;
+						options.reserve(paths.size() + 2);
+						options.push_back(Wui::Tr("panel.properties.asset_none", "(none)"));
+						options.insert(options.end(), paths.begin(), paths.end());
+						// 当前值不在扫描结果里(文件名写错/资产还没建):照样显示出来,不假装它是"(无)"。
+						int selected = 0;
+						const auto found = std::find(paths.begin(), paths.end(), current);
+						if (found != paths.end())
+							selected = static_cast<int>(found - paths.begin()) + 1;
+						else if (!current.empty())
+						{
+							options.push_back(current);
+							selected = static_cast<int>(options.size()) - 1;
+						}
+						// 注意类型:beforePick 必须是 int —— 写成 bool 时 selected(1) != true 恒为 false,
+						// "选到第 1 个资产"就永远不会写回(实测踩过)。
+						const int beforePick = selected;
+						if (Wui::SearchableCombo(ctx, fid, ctrl, "", options, selected, theme)
+							&& selected != beforePick)
+						{
+							value = selected <= 0 ? std::string() : options[static_cast<size_t>(selected)];
+							fieldChanged = true;
+						}
+						RegisterNode(Wui::HashId(idText.c_str()), "searchable-combo", ctrl, labelText,
+							current, reachable(ctrl), fieldDoc);
+						break;
+					}
+					// P4-U9:固定集合的字符串(Choices("cube","sphere"...))→ 下拉,别无谓地手打。
+					if (!field.Meta.Choices.empty())
+					{
+						std::vector<std::string> options = field.Meta.Choices;
+						int selected = 0;
+						const auto found = std::find(options.begin(), options.end(), current);
+						if (found != options.end())
+							selected = static_cast<int>(found - options.begin());
+						const int beforePick = selected;
+						if (Wui::Combo(ctx, fid, ctrl, "", options, selected, theme) && selected != beforePick)
+						{
+							value = options[static_cast<size_t>(selected)];
+							fieldChanged = true;
+						}
+						RegisterNode(Wui::HashId(idText.c_str()), "combo", ctrl, labelText, current,
+							reachable(ctrl), fieldDoc);
+						break;
+					}
 					// 与 TextField 的 WuiEditState 共用 fid 会导致类型混淆,
 					// 编辑缓冲必须使用独立 id。
 					auto& state = ctx.Persist<SchemaTextState>(Wui::HashId("schema.text.state") ^ fid, {});
-					const std::string current = std::get<std::string>(value);
 					if (!state.Editing)
 						state.Buffer = current;
 					bool cancelled = false;
@@ -1505,7 +1737,8 @@ namespace World
 					// 本次点击进入编辑
 					if (!state.Editing && ctx.Focus() == fid)
 						state.Editing = true;
-					RegisterNode(Wui::HashId(idText.c_str()), "text-field", ctrl, labelText, current, reachable(ctrl));
+					RegisterNode(Wui::HashId(idText.c_str()), "text-field", ctrl, labelText, current,
+						reachable(ctrl), fieldDoc);
 					break;
 				}
 				case Schema::Kind::Enum:
@@ -1529,7 +1762,7 @@ namespace World
 							value = es->IsSigned ? Schema::Value(es->Values[selected].second) : Schema::Value(static_cast<uint64_t>(es->Values[selected].second));
 						RegisterNode(Wui::HashId(idText.c_str()), "combo", ctrl, labelText,
 							(selected >= 0 && selected < static_cast<int>(names.size())) ? names[selected] : std::string(),
-							reachable(ctrl));
+							reachable(ctrl), fieldDoc);
 					}
 					break;
 				}
