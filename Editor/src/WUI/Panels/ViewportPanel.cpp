@@ -4,8 +4,11 @@
 #include "World/WUI/WuiGizmo.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiLocalization.h"
+#include "World/Core/KeyCodes.h"
 #include "World/Physics/Physics3D.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "../../EditorPreferences.h"
 
 namespace World
 {
@@ -82,6 +85,56 @@ namespace World
 		}
 
 		// 只读节点(status):AI 能读到,ui.invoke 不会去点它(与脚本面板同一约定)。
+		// ---- P4-U6:范围可视化辅助(光源范围 / 碰撞体轮廓共用) ----
+
+		// 世界变换:优先 WorldTransformComponent(带父级链),否则退回本地矩阵。
+		glm::mat4 WorldMatrixOf(const entt::registry& registry, entt::entity handle)
+		{
+			if (const auto* world = registry.try_get<WorldTransformComponent>(handle))
+				return world->Matrix;
+			if (const auto* transform = registry.try_get<TransformComponent>(handle))
+				return transform->Transform;
+			return glm::mat4(1.0f);
+		}
+
+		// 世界空间线段(两端点)→ 投影成屏幕线段。
+		void PushWorldSegment(Wui::WuiContext& ctx, const glm::mat4& viewProjection, const Wui::WuiRect& viewport,
+			const glm::mat4& world, const glm::vec3& from, const glm::vec3& to,
+			const Wui::WuiColor& color, float thickness, glm::vec2* boundsMin, glm::vec2* boundsMax)
+		{
+			PushProjectedSegment(ctx, viewProjection, viewport,
+				viewProjection * (world * glm::vec4 { from, 1.0f }),
+				viewProjection * (world * glm::vec4 { to, 1.0f }),
+				color, thickness, boundsMin, boundsMax);
+		}
+
+		// 世界空间圆(axis:0=XY 平面 1=XZ 2=YZ),按 40 段折线画成"圆环"。
+		// 点光范围 / 球形碰撞体 / 胶囊端面都用它 —— 一套几何代码,不各写一遍。
+		void PushWorldCircle(Wui::WuiContext& ctx, const glm::mat4& viewProjection, const Wui::WuiRect& viewport,
+			const glm::mat4& world, const glm::vec3& center, float radius, int axis,
+			const Wui::WuiColor& color, float thickness, glm::vec2* boundsMin, glm::vec2* boundsMax)
+		{
+			constexpr int kSegments = 40;
+			constexpr float kTwoPi = 6.28318530718f;
+			glm::vec4 previous {};
+			for (int i = 0; i <= kSegments; ++i)
+			{
+				const float angle = kTwoPi * static_cast<float>(i) / static_cast<float>(kSegments);
+				glm::vec3 offset(0.0f);
+				if (axis == 0)
+					offset = { std::cos(angle) * radius, std::sin(angle) * radius, 0.0f };
+				else if (axis == 1)
+					offset = { std::cos(angle) * radius, 0.0f, std::sin(angle) * radius };
+				else
+					offset = { 0.0f, std::cos(angle) * radius, std::sin(angle) * radius };
+				const glm::vec4 clip = viewProjection * (world * glm::vec4 { center + offset, 1.0f });
+				if (i > 0)
+					PushProjectedSegment(ctx, viewProjection, viewport, previous, clip, color, thickness,
+						boundsMin, boundsMax);
+				previous = clip;
+			}
+		}
+
 		void RegisterReadonlyNode(Wui::WuiId id, const char* kind, const std::string& label,
 			const std::string& value, const Wui::WuiRect& rect)
 		{
@@ -162,6 +215,47 @@ namespace World
 			{ rect.X + 62.0f, rect.Y + 14.0f, 52.0f, 24.0f },
 			m_Host.IsCameraPreviewEnabled() ? "Cam*" : "Cam", theme))
 			m_Host.ToggleCameraPreview();
+		// P4-U6:Overlays 菜单(范围可视化开关)。用户口径:「在 view 中有个选项可以选是否显示范围;
+		// 如果这个选项没开应该只画选中」→ 两枚勾选,关 = 只画选中实体。
+		// 与「编辑器偏好 ▸ Viewport」是**同一份存储**(改哪边都同步)。
+		const Wui::WuiRect overlaysButton { rect.X + 120.0f, rect.Y + 14.0f, 88.0f, 24.0f };
+		if (Button(ctx, Wui::HashId("viewport.overlays"), overlaysButton,
+			Wui::Tr("viewport.overlays.button", "Overlays"), theme))
+			ctx.OpenPopup(Wui::HashId("viewport.overlays.popup"));
+		const Wui::WuiId overlaysPopup = Wui::HashId("viewport.overlays.popup");
+		if (ctx.IsPopupOpen(overlaysPopup))
+		{
+			ctx.PushOverlay();
+			const float rowHeight = 24.0f;
+			const Wui::WuiRect overlaysPanel { overlaysButton.X, overlaysButton.Y + overlaysButton.H + 2.0f,
+				300.0f, rowHeight * 2.0f + 40.0f };
+			Wui::DrawPanelSurface(ctx, overlaysPanel, theme);
+			Editor::EditorPreferences& prefs = Editor::EditorPreferences::Get();
+			bool rangesAll = prefs.Data().ViewportLightRangesAll;
+			if (Wui::Checkbox(ctx, Wui::HashId("viewport.overlays.light_ranges"),
+				{ overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f, overlaysPanel.W - 16.0f, rowHeight },
+				Wui::Tr("viewport.overlays.light_ranges", "Light ranges (all lights)"), rangesAll, theme))
+				prefs.SetViewportLightRangesAll(rangesAll);
+			bool collidersAll = prefs.Data().ViewportColliderOutlinesAll;
+			if (Wui::Checkbox(ctx, Wui::HashId("viewport.overlays.collider_outlines"),
+				{ overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f + rowHeight, overlaysPanel.W - 16.0f, rowHeight },
+				Wui::Tr("viewport.overlays.collider_outlines", "Collider outlines (all)"), collidersAll, theme))
+				prefs.SetViewportColliderOutlinesAll(collidersAll);
+			Wui::Label(ctx, { overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f + rowHeight * 2.0f + 4.0f },
+				Wui::Tr("viewport.overlays.hint", "Off = only the selected entity"), theme.TextMuted, 12.0f);
+			Wui::Tooltip(ctx, { overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f, overlaysPanel.W - 16.0f, rowHeight },
+				Wui::Tr("viewport.overlays.light_ranges.tooltip",
+					"Draw light extents: point light = Range sphere, directional light = Direction arrow.\n"
+					"Off = only the selected entity."));
+			Wui::Tooltip(ctx, { overlaysPanel.X + 8.0f, overlaysPanel.Y + 8.0f + rowHeight, overlaysPanel.W - 16.0f, rowHeight },
+				Wui::Tr("viewport.overlays.collider_outlines.tooltip",
+					"Draw collider shapes in edit mode (2D box/circle, 3D box/sphere/capsule).\n"
+					"Off = only the selected entity. MeshCollider3D has no analytic shape."));
+			ctx.ClosePopupsOnOutsideClick({ overlaysPopup }, overlaysPanel);
+			if (ctx.IsKeyPressed(KeyCodes::Escape))
+				ctx.ClosePopup(overlaysPopup);
+			ctx.PopOverlay();
+		}
 
 		Wui::LayoutWidgetTree(m_Root, rect);
 		Wui::WuiPaintContext paint(ctx);
@@ -337,6 +431,227 @@ namespace World
 					WLD_CORE_INFO("[ui] camera frustum count={0} bbox=({1},{2},{3},{4}) viewport=({5},{6},{7},{8})",
 						frustumCount, frustumMin.x, frustumMin.y, frustumMax.x - frustumMin.x, frustumMax.y - frustumMin.y,
 						sceneRect.X, sceneRect.Y, sceneRect.W, sceneRect.H);
+				}
+			}
+		}
+
+		// ---- P4-U6:范围可视化(光源范围 + 碰撞体轮廓) ----
+		//
+		// 用户 2026-09-21:「像光照这种需要标明范围的目前没有范围显示」+
+		// 「应该在 view 中有个选项可以选是否显示范围;如果这个选项没开应该只画选中」。
+		// 口径:开关(编辑器偏好 ▸ Viewport / 视口工具栏 Overlays)= 画全部还是只画选中;
+		// 选中实体的范围**永远**画(与相机视锥一致:选中就看得见自己的影响范围)。
+		{
+			const Editor::EditorPreferencesData& prefs = Editor::EditorPreferences::Get().Data();
+			const bool showAllLights = prefs.ViewportLightRangesAll;
+			const bool showAllColliders = prefs.ViewportColliderOutlinesAll;
+			const Ref<Scene> overlayScene = m_Host.GetActiveScene();
+			if (overlayScene && m_Host.HasRenderedScene())
+			{
+				const entt::registry& registry = static_cast<const Scene*>(overlayScene.get())->GetRegistry();
+				const Wui::GizmoCamera overlayCamera = m_Host.GetGizmoCamera();
+				const bool cameraIs3D = m_Host.IsViewportCamera3D();
+				const entt::entity selectedHandle = selected.IsValid()
+					&& selected.GetScene() == overlayScene.get()
+					? static_cast<entt::entity>(selected) : entt::null;
+
+				// 平行光箭头长度:按场景实体位置的包围盒对角线取 25%(下限 1.0,上限 50),
+				// 这样小场景大场景都看得清;没有实体时退回 2.0。
+				float sceneDiagonal = 0.0f;
+				{
+					glm::vec3 minPos(1e30f), maxPos(-1e30f);
+					int transformCount = 0;
+					for (const entt::entity handle : registry.view<TransformComponent>())
+					{
+						const glm::vec3 position = glm::vec3(WorldMatrixOf(registry, handle)[3]);
+						minPos = glm::min(minPos, position);
+						maxPos = glm::max(maxPos, position);
+						++transformCount;
+					}
+					if (transformCount > 0)
+						sceneDiagonal = glm::length(maxPos - minPos);
+				}
+				const float arrowLength = glm::clamp(sceneDiagonal * 0.25f, 1.0f, 50.0f);
+
+				int lightCount = 0;
+				int colliderCount = 0;
+				glm::vec2 overlayMin { 1e30f, 1e30f };
+				glm::vec2 overlayMax { -1e30f, -1e30f };
+				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sceneRect, {} });
+
+				// ---- 光源 ----
+				for (const entt::entity handle : registry.view<TransformComponent>())
+				{
+					const bool isSelected = handle == selectedHandle;
+					if (!isSelected && !showAllLights)
+						continue;
+					const glm::mat4 world = WorldMatrixOf(registry, handle);
+					const float alpha = isSelected ? 0.95f : 0.45f;
+					bool drew = false;
+					if (const auto* point = registry.try_get<PointLightComponent>(handle))
+					{
+						// 点光:半径 = Range 的三个大圆(2D 视口只画 XY 那一个,避免看起来像乱线)。
+						const Wui::WuiColor color { glm::clamp(point->Color.r + point->Intensity * 0.05f, 0.0f, 1.0f),
+							glm::clamp(point->Color.g + point->Intensity * 0.05f, 0.0f, 1.0f),
+							glm::clamp(point->Color.b + point->Intensity * 0.05f, 0.0f, 1.0f), alpha };
+						if (point->Range > 0.0f)
+						{
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+								point->Range, 0, color, isSelected ? 1.6f : 1.1f, &overlayMin, &overlayMax);
+							if (cameraIs3D)
+							{
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+									point->Range, 1, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+									point->Range, 2, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
+							}
+							drew = true;
+						}
+						// 位置十字(即使 Range=0 也能看到光源在哪)。
+						const float cross = glm::clamp(point->Range * 0.1f, 0.05f, 0.5f);
+						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+							{ -cross, 0.0f, 0.0f }, { cross, 0.0f, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
+						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+							{ 0.0f, -cross, 0.0f }, { 0.0f, cross, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
+						drew = true;
+					}
+					if (const auto* directional = registry.try_get<DirectionalLightComponent>(handle))
+					{
+						// 平行光:沿 Direction 的箭头 + 末端四根短射线(太阳标记)。方向是世界空间,不受实体缩放影响。
+						const Wui::WuiColor color { glm::clamp(directional->Color.r + directional->Intensity * 0.05f, 0.0f, 1.0f),
+							glm::clamp(directional->Color.g + directional->Intensity * 0.05f, 0.0f, 1.0f),
+							glm::clamp(directional->Color.b + directional->Intensity * 0.05f, 0.0f, 1.0f), alpha };
+						glm::vec3 direction = directional->Direction;
+						if (glm::length(direction) < 1e-4f)
+							direction = { 0.0f, -1.0f, 0.0f };
+						direction = glm::normalize(direction);
+						const float length = arrowLength;
+						const glm::vec3 tip = direction * length;
+						const glm::vec3 side = glm::normalize(glm::cross(direction, glm::vec3(0.0f, 1.0f, 0.0f))
+							+ glm::vec3(1e-4f, 0.0f, 0.0f));
+						const glm::vec3 side2 = glm::normalize(glm::cross(direction, side));
+						const float wing = length * 0.12f;
+						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f), tip,
+							color, isSelected ? 2.2f : 1.4f, &overlayMin, &overlayMax);
+						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+							tip, tip - direction * wing + side * wing, color, 2.0f, &overlayMin, &overlayMax);
+						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+							tip, tip - direction * wing - side * wing, color, 2.0f, &overlayMin, &overlayMax);
+						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+							tip, tip - direction * wing + side2 * wing, color, 2.0f, &overlayMin, &overlayMax);
+						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+							tip, tip - direction * wing - side2 * wing, color, 2.0f, &overlayMin, &overlayMax);
+						drew = true;
+					}
+					// AmbientLightComponent 是全局语义(没有空间范围)→ 不画,属性行 tooltip 已写明。
+					if (drew)
+						++lightCount;
+				}
+
+				// ---- 碰撞体轮廓(编辑期;MeshCollider3D 无解析形状,按设计不画) ----
+				const Wui::WuiColor colliderColor { 0.20f, 0.90f, 0.40f, 0.55f };
+				const Wui::WuiColor colliderSelected { 0.35f, 1.0f, 0.55f, 0.95f };
+				for (const entt::entity handle : registry.view<TransformComponent>())
+				{
+					const bool isSelected = handle == selectedHandle;
+					if (!isSelected && !showAllColliders)
+						continue;
+					const glm::mat4 world = WorldMatrixOf(registry, handle);
+					const Wui::WuiColor color = isSelected ? colliderSelected : colliderColor;
+					const float thickness = isSelected ? 1.8f : 1.1f;
+					bool drew = false;
+					if (const auto* box2d = registry.try_get<BoxCollider2DComponent>(handle))
+					{
+						const float hx = std::max(0.0f, box2d->Size.x) * 0.5f;
+						const float hy = std::max(0.0f, box2d->Size.y) * 0.5f;
+						const glm::vec3 c { box2d->Offset.x, box2d->Offset.y, 0.0f };
+						const glm::vec3 corners[4] = {
+							c + glm::vec3 { -hx, -hy, 0.0f }, c + glm::vec3 { hx, -hy, 0.0f },
+							c + glm::vec3 { hx, hy, 0.0f }, c + glm::vec3 { -hx, hy, 0.0f } };
+						for (int i = 0; i < 4; ++i)
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								corners[i], corners[(i + 1) % 4], color, thickness, &overlayMin, &overlayMax);
+						drew = true;
+					}
+					if (const auto* circle2d = registry.try_get<CircleCollider2DComponent>(handle))
+					{
+						if (circle2d->Radius > 0.0f)
+							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								{ circle2d->Offset.x, circle2d->Offset.y, 0.0f }, circle2d->Radius, 0,
+								color, thickness, &overlayMin, &overlayMax);
+						drew = true;
+					}
+					if (const auto* box3d = registry.try_get<BoxCollider3DComponent>(handle))
+					{
+						// 12 条棱:两个角点索引按位异或一个轴位就得到一条棱。
+						glm::vec3 corners[8];
+						for (int i = 0; i < 8; ++i)
+							corners[i] = box3d->Offset + glm::vec3 {
+								(i & 1) ? box3d->HalfExtents.x : -box3d->HalfExtents.x,
+								(i & 2) ? box3d->HalfExtents.y : -box3d->HalfExtents.y,
+								(i & 4) ? box3d->HalfExtents.z : -box3d->HalfExtents.z };
+						for (int i = 0; i < 8; ++i)
+							for (int axis = 0; axis < 3; ++axis)
+							{
+								const int other = i ^ (1 << axis);
+								if (other > i)
+									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+							}
+						drew = true;
+					}
+					if (const auto* sphere = registry.try_get<SphereCollider3DComponent>(handle))
+					{
+						if (sphere->Radius > 0.0f)
+							for (int axis = 0; axis < (cameraIs3D ? 3 : 1); ++axis)
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, sphere->Offset,
+									sphere->Radius, axis, color, thickness, &overlayMin, &overlayMax);
+						drew = true;
+					}
+					if (const auto* capsule = registry.try_get<CapsuleCollider3DComponent>(handle))
+					{
+						// 近似:上下两个端面圆 + 两条母线(沿本地 Y 轴)。
+						const float radius = std::max(0.0f, capsule->Radius);
+						const float half = std::max(0.0f, capsule->HalfHeight);
+						if (radius > 0.0f)
+						{
+							const glm::vec3 base = capsule->Offset;
+							for (int axis = 0; axis < (cameraIs3D ? 3 : 1); ++axis)
+							{
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									base + glm::vec3 { 0.0f, half, 0.0f }, radius, axis, color, thickness,
+									&overlayMin, &overlayMax);
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									base - glm::vec3 { 0.0f, half, 0.0f }, radius, axis, color, thickness,
+									&overlayMin, &overlayMax);
+							}
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								base + glm::vec3 { radius, -half, 0.0f }, base + glm::vec3 { radius, half, 0.0f },
+								color, thickness, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								base + glm::vec3 { -radius, -half, 0.0f }, base + glm::vec3 { -radius, half, 0.0f },
+								color, thickness, &overlayMin, &overlayMax);
+						}
+						drew = true;
+					}
+					if (drew)
+						++colliderCount;
+				}
+
+				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
+				// 取证(与相机视锥同口径):脚本可断言"画了几个、覆盖到哪",不靠像素。
+				if ((lightCount > 0 || colliderCount > 0) && std::getenv("WLD_TRACE_UI"))
+				{
+					static uint64_t lastOverlayLog = ~0ull;
+					const uint64_t stamp = ctx.Frame() / 120;
+					if (stamp != lastOverlayLog)
+					{
+						lastOverlayLog = stamp;
+						WLD_CORE_INFO("[ui] overlays lights={0} colliders={1} allLights={2} allColliders={3} "
+							"bbox=({4},{5},{6},{7})",
+							lightCount, colliderCount, showAllLights ? 1 : 0, showAllColliders ? 1 : 0,
+							overlayMin.x, overlayMin.y, overlayMax.x - overlayMin.x, overlayMax.y - overlayMin.y);
+					}
 				}
 			}
 		}

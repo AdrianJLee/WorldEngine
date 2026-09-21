@@ -33,7 +33,8 @@ namespace World
 			{ 3, "Workflow",    "prefs.category.workflow",    "Workflow" },
 			{ 4, "Automation",  "prefs.category.automation",  "Automation" },
 			{ 5, "Diagnostics", "prefs.category.diagnostics", "Diagnostics" },
-			{ 6, "",            "prefs.category.about",       "About" },   // About = 只读信息页
+			{ 6, "Viewport",    "prefs.category.viewport",    "Viewport" },
+			{ 7, "",            "prefs.category.about",       "About" },   // About = 只读信息页
 		};
 
 		// 该分组里是否存在偏离默认值的项(分类列表上画小圆点,用户不用逐页找)。

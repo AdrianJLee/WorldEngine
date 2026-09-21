@@ -161,6 +161,11 @@ namespace World::Editor
 						m_Data.DiagAssetTrace = value.Bool;
 					else if (key == "diag_vulkan_validation" && isBool)
 						m_Data.DiagVulkanValidation = value.Bool;
+					// P4-U6:视口范围可视化(User 2026-09-21)。
+					else if (key == "viewport_light_ranges_all" && isBool)
+						m_Data.ViewportLightRangesAll = value.Bool;
+					else if (key == "viewport_collider_outlines_all" && isBool)
+						m_Data.ViewportColliderOutlinesAll = value.Bool;
 				}
 		}
 		// 开发/自动化覆盖:环境变量优先于**偏好文件**(与渲染设置的"环境变量 > 清单"同口径);
@@ -250,7 +255,9 @@ namespace World::Editor
 			<< "  \"diag_present_trace\": " << FormatBool(m_Data.DiagPresentTrace) << ",\n"
 			<< "  \"diag_gl_trace\": " << FormatBool(m_Data.DiagGlTrace) << ",\n"
 			<< "  \"diag_asset_trace\": " << FormatBool(m_Data.DiagAssetTrace) << ",\n"
-			<< "  \"diag_vulkan_validation\": " << FormatBool(m_Data.DiagVulkanValidation) << "\n"
+			<< "  \"diag_vulkan_validation\": " << FormatBool(m_Data.DiagVulkanValidation) << ",\n"
+			<< "  \"viewport_light_ranges_all\": " << FormatBool(m_Data.ViewportLightRangesAll) << ",\n"
+			<< "  \"viewport_collider_outlines_all\": " << FormatBool(m_Data.ViewportColliderOutlinesAll) << "\n"
 			<< "}\n";
 		return static_cast<bool>(file);
 	}
@@ -376,6 +383,21 @@ namespace World::Editor
 	{
 		if (m_Data.DiagVulkanValidation == enabled) return;
 		m_Data.DiagVulkanValidation = enabled;
+		Commit();
+	}
+
+	// P4-U6:视口范围可视化开关(立即生效:只影响视口绘制,不重建任何 GPU 资源)。
+	void EditorPreferences::SetViewportLightRangesAll(bool enabled)
+	{
+		if (m_Data.ViewportLightRangesAll == enabled) return;
+		m_Data.ViewportLightRangesAll = enabled;
+		Commit();
+	}
+
+	void EditorPreferences::SetViewportColliderOutlinesAll(bool enabled)
+	{
+		if (m_Data.ViewportColliderOutlinesAll == enabled) return;
+		m_Data.ViewportColliderOutlinesAll = enabled;
 		Commit();
 	}
 
@@ -589,6 +611,28 @@ namespace World::Editor
 			[&prefs](const std::string& value, std::string*) { prefs.SetDiagVulkanValidation(value == "true"); return true; },
 			[&prefs] { return prefs.Data().DiagVulkanValidation; },
 			[&prefs] { prefs.SetDiagVulkanValidation(true); return true; }, true);
+
+		// ---- P4-U6 视口(User 2026-09-21:「应该在 view 中有个选项可以选是否显示范围;
+		// 如果这个选项没开应该只画选中」)。视口工具栏的 `Overlays ▾` 与这里共享同一存储。
+		addBool("editor.viewport.light_ranges_all", "Viewport", SettingApply::Immediate,
+			"Light Ranges (all)",
+			"光源范围\n在视口里画光源的空间范围:点光 = 半径 Range 的三维圆环,平行光 = 沿 Direction 的箭头。\n"
+			"关(默认)= 只画**选中实体**的;开 = 画场景里全部光源(会拥挤,适合核对整体布光)。\n"
+			"开关只影响绘制,立即生效。",
+			[&prefs] { return FormatBool(prefs.Data().ViewportLightRangesAll); },
+			[&prefs](const std::string& value, std::string*) { prefs.SetViewportLightRangesAll(value == "true"); return true; },
+			[&prefs] { return !prefs.Data().ViewportLightRangesAll; },
+			[&prefs] { prefs.SetViewportLightRangesAll(false); return true; });
+
+		addBool("editor.viewport.collider_outlines_all", "Viewport", SettingApply::Immediate,
+			"Collider Outlines (all)",
+			"碰撞体轮廓\n编辑期在视口里画碰撞体形状(2D 矩形/圆、3D 盒/球/胶囊),摆碰撞盒不用再猜数值。\n"
+			"关(默认)= 只画**选中实体**的;开 = 画场景里全部碰撞体。\n"
+			"MeshCollider3D 按网格求交,不画轮廓。只影响绘制,立即生效。",
+			[&prefs] { return FormatBool(prefs.Data().ViewportColliderOutlinesAll); },
+			[&prefs](const std::string& value, std::string*) { prefs.SetViewportColliderOutlinesAll(value == "true"); return true; },
+			[&prefs] { return !prefs.Data().ViewportColliderOutlinesAll; },
+			[&prefs] { prefs.SetViewportColliderOutlinesAll(false); return true; });
 
 		WLD_CORE_INFO("设置注册表:已注册编辑器偏好 {0} 项", registry.OfScope(SettingScope::Editor).size());
 	}

@@ -50,6 +50,10 @@ namespace World::Editor
 		bool DiagGlTrace = false;                       // WLD_GL_TRACE_DRAW
 		bool DiagAssetTrace = false;                    // WLD_ASSET_HOTRELOAD_TRACE
 		bool DiagVulkanValidation = true;               // WLD_VULKAN_VALIDATION(默认开)
+		// P4-U6:视口范围可视化开关(用户 2026-09-21:「应该在 view 中有个选项可以选是否显示范围;
+		// 如果这个选项没开应该只画选中」)。false = 只画选中实体,true = 画全场景。
+		bool ViewportLightRangesAll = false;
+		bool ViewportColliderOutlinesAll = false;
 	};
 
 	class EditorPreferences
@@ -78,6 +82,9 @@ namespace World::Editor
 		void SetDiagGlTrace(bool enabled);
 		void SetDiagAssetTrace(bool enabled);
 		void SetDiagVulkanValidation(bool enabled);
+		// P4-U6:视口"范围可视化"开关(立即生效,只影响绘制)。
+		void SetViewportLightRangesAll(bool enabled);
+		void SetViewportColliderOutlinesAll(bool enabled);
 
 		// 把当前值应用到 WUI(主题/字号/语言/术语对照)与日志级别。
 		void Apply() const;
