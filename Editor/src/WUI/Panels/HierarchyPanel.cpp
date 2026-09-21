@@ -142,6 +142,13 @@ namespace World
 				const bool collapsed = m_Collapsed.find(static_cast<uint32_t>(static_cast<entt::entity>(entity)))
 					!= m_Collapsed.end();
 				row->Text = std::string(hasChildren ? (collapsed ? "+ " : "- ") : "  ") + labelOf(entity);
+				// P4-U5a:行进无障碍树 —— id 用实体 handle(稳定,重排后仍是同一行),
+				// value 给脚本一个可以直接喂给 scene.select / 属性面板的句柄。
+				row->SetId(Wui::HashId(("hierarchy.row." + std::to_string(
+					static_cast<uint32_t>(static_cast<entt::entity>(entity)))).c_str()));
+				row->AccessValue = std::to_string(static_cast<uint32_t>(static_cast<entt::entity>(entity)));
+				row->AccessTooltip = Wui::Tr("panel.hierarchy.row.tooltip",
+					"Click to select this entity (shows in the Properties panel)");
 				row->OnClick = [&host, entity]
 				{
 					if (std::getenv("WLD_TRACE_UI"))

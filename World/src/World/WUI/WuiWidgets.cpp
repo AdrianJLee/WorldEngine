@@ -1019,10 +1019,16 @@ namespace World::Wui
 		// TextField / TextFieldEx 的共同实现(旧签名语义逐条不变,只是多了 error 参数):
 		// error 非空时描边用 theme.Danger,并把 "error=<文本>" 追加进无障碍节点 value(TextFieldEx 的契约)。
 		bool TextFieldCore(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
-			const WuiTheme& theme, bool* cancelledOut, const std::string& error)
+			const WuiTheme& theme, bool* cancelledOut, const std::string& error,
+			const TextFieldA11y* a11y = nullptr)
 		{
-			RegisterAccessNode(id, "text-field", rect, std::string(),
-				error.empty() ? buffer : (buffer + " error=" + error), true, true, ctx.Focus() == id);
+			// P4-U5a:label/value 都不能空 —— 空输入时 value 用占位文案(与用户看到的一致),
+			// label 用控件名;两者都由调用方给出(文本控件不知道自己的业务语义)。
+			std::string accessValue = error.empty() ? buffer : (buffer + " error=" + error);
+			if (accessValue.empty() && a11y)
+				accessValue = a11y->Placeholder;
+			RegisterAccessNode(id, "text-field", rect, a11y ? a11y->Label : std::string(),
+				accessValue, true, true, ctx.Focus() == id);
 			ctx.RegisterFocusable(id, rect);
 			WuiEditState& state = ctx.Persist<WuiEditState>(id, {});
 			// 仅在按下的那一帧初始化拖选锚点;按住期间持续更新选区。
@@ -1093,18 +1099,19 @@ namespace World::Wui
 		}
 	}
 
-	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme, bool* cancelledOut)
+	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme,
+		bool* cancelledOut, const TextFieldA11y* a11y)
 	{
 		// 旧签名语义不变:与 TextFieldEx 共用同一条实现,error 恒为空。
-		return TextFieldCore(ctx, id, rect, buffer, theme, cancelledOut, std::string());
+		return TextFieldCore(ctx, id, rect, buffer, theme, cancelledOut, std::string(), a11y);
 	}
 
 	bool TextFieldEx(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
-		const WuiTheme& theme, const std::string& error)
+		const WuiTheme& theme, const std::string& error, const TextFieldA11y* a11y)
 	{
 		// 返回值与 TextField 相同(回车提交)。错误说明画在控件下方一行(Caption 字号、Danger 色),
 		// 超宽按省略号裁剪;调用方负责给这一行留出高度。
-		const bool submitted = TextFieldCore(ctx, id, rect, buffer, theme, nullptr, error);
+		const bool submitted = TextFieldCore(ctx, id, rect, buffer, theme, nullptr, error, a11y);
 		if (!error.empty())
 		{
 			const std::string shown = EllipsizeToWidth(ctx, error, rect.W, theme.FontSizeCaption);

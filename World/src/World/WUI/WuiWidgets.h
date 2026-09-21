@@ -120,12 +120,21 @@ namespace World::Wui
 	bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme);
 	bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int64_t min, int64_t max, const WuiTheme& theme);
 	// 文本输入:UTF-8 追加/退格;回车提交返回 true,Escape 失焦。
-	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme, bool* cancelledOut = nullptr);
+	// P4-U5a(2026-09-21):无障碍补充信息。**为什么要显式传**:占位提示是各面板自己画的 Label,
+	// 读屏/脚本读不到 —— 实测 search 框的节点 label/value 双空(用户口径:两者不能同时为空)。
+	// Label = 控件名(如 "Search assets");Placeholder = 空输入时当作 value 的占位文案(与画进框里的同一句)。
+	struct TextFieldA11y
+	{
+		std::string Label;
+		std::string Placeholder;
+	};
+	bool TextField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer, const WuiTheme& theme,
+		bool* cancelledOut = nullptr, const TextFieldA11y* a11y = nullptr);
 	// P4-UX6 带行内错误的文本字段:error 非空时描边用 theme.Danger,并在控件下方画一行 Caption
 	// 字号的 Danger 说明(调用方负责给这一行留高度;文案超宽按省略号裁剪)。
 	// 返回值与 TextField 相同(回车提交)。无障碍节点 value 追加 " error=<文本>"。
 	bool TextFieldEx(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
-		const WuiTheme& theme, const std::string& error);
+		const WuiTheme& theme, const std::string& error, const TextFieldA11y* a11y = nullptr);
 	void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme);
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);

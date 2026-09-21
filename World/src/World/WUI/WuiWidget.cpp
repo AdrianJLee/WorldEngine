@@ -2,6 +2,7 @@
 #include "WuiWidget.h"
 
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/Core/KeyCodes.h"
 
 #include <algorithm>
@@ -295,7 +296,12 @@ namespace World::Wui
 		// Enter 提交 / Escape 取消沿用立即模式 TextField 的既有实现,这里不重复一套。
 		RegisterFocusable(context);
 		bool cancelled = false;
-		if (TextField(context.Context(), Id(), m_Rect, *Buffer, Theme ? *Theme : WuiDefaultTheme(), &cancelled))
+		TextFieldA11y a11y;
+		a11y.Label = A11yLabel;
+		a11y.Placeholder = A11yPlaceholder;
+		const TextFieldA11y* a11yPtr = (A11yLabel.empty() && A11yPlaceholder.empty()) ? nullptr : &a11y;
+		if (TextField(context.Context(), Id(), m_Rect, *Buffer, Theme ? *Theme : WuiDefaultTheme(),
+			&cancelled, a11yPtr))
 		{
 			if (OnCommit) OnCommit();
 		}
@@ -436,6 +442,20 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Text,
 			{ m_Rect.X + 6 + Indent, m_Rect.Y + (m_Rect.H - FontSize) * 0.5f, 0, 0 },
 			WuiColor { 0.82f, 0.84f, 0.87f, 1 }, 0, 1.0f, Text, FontSize, false });
+		// P4-U5a:行文本必须进无障碍树 —— 否则"看得见、读不到也点不到"(层级面板实测)。
+		if (m_Id != 0)
+		{
+			WuiAccessNode node;
+			node.Id = m_Id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "list-row";
+			node.Label = Text;
+			node.Value = AccessValue;
+			node.Tooltip = AccessTooltip;
+			node.Rect = m_Rect;
+			WuiAccessibility::Get().Register(node);
+		}
 		if (ctx.IsClicked(m_Rect) && OnClick)
 			OnClick();
 	}

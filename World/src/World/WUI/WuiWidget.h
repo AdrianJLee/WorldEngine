@@ -186,6 +186,9 @@ namespace World::Wui
 		std::function<void()> OnCommit;
 		std::function<void()> OnCancel;
 		const WuiTheme* Theme = nullptr;
+		// P4-U5a:进无障碍树的控件名与"空输入时的占位文案"(与画在框里的提示同一句)。
+		std::string A11yLabel;
+		std::string A11yPlaceholder;
 
 		WuiMeasure Measure(const WuiConstraints& constraints) override;
 		void Paint(WuiPaintContext& context) override;
@@ -267,6 +270,12 @@ namespace World::Wui
 		WuiColor IdleFill { 0, 0, 0, 0 };
 		WuiColor HoverFill { 1, 1, 1, 0.06f };
 		WuiColor SelectedFill { 0.28f, 0.45f, 0.85f, 0.35f };
+		// P4-U5a(2026-09-21):SetId 之后本行进无障碍树(kind="list-row")。
+		// 为什么在控件里做而不是各面板各写一遍:层级面板这类"行列表"是读屏/脚本最需要枚举的东西,
+		// 每处手写一次必然漏(实测:层级面板 9 行实体在 ui.tree 里 0 个节点)。
+		// AccessValue 放"这一行代表什么"(如实体 handle);AccessTooltip 放悬停说明。
+		std::string AccessValue;
+		std::string AccessTooltip;
 
 		WuiMeasure Measure(const WuiConstraints& constraints) override;
 		void Paint(WuiPaintContext& context) override;

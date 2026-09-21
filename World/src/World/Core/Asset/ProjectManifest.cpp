@@ -447,6 +447,31 @@ namespace World::Asset
 
 		// `rendering:` / `physics:` 区块:逐 key 换值,缺的 key 追加到区块内容末尾;
 		// 整个区块缺失时补一整块(追加到文件末尾)。
+		//
+		// P4-U4b(2026-09-21,用户:「注释说明你可以想个办法存起来」):**区块的说明注释存在代码里**
+		// (`BlockComments`),新建清单或补一个新区块时自动写出来 —— 这样"注释"不再依赖"上一次是谁
+		// 手写的文件",任何由引擎生成的清单都自带说明,而用户自己改过的注释仍由文本合并原样保留。
+		std::vector<std::string> BlockComments(std::string_view blockKey)
+		{
+			if (blockKey == "rendering")
+				return {
+					"渲染:剔除/阴影/灯光上限/分辨率倍率/MSAA/合批等;括号里是生效时机。",
+					"由「项目设置 ▸ 项目」页读写;手改本文件同样生效。",
+				};
+			if (blockKey == "physics")
+				return {
+					"物理:固定步长(Hz)与重力(m/s²)。",
+					"单个场景可以在自己的 .wd 头部 World: 块里覆盖重力。",
+				};
+			if (blockKey == "imports")
+				return {
+					"资产导入默认值(当前是模型导入):<类型>.<字段> 扁平 key。",
+					"只在源文件**没有同目录 .wimport 旁路文件**时生效 —— 逐源设置永远优先,不会改动已有资产。",
+					"由「项目设置 ▸ 导入默认值」页读写。",
+				};
+			return {};
+		}
+
 		void MergeManifestBlock(std::vector<TextLine>& lines, std::vector<TextEdit>& edits,
 			std::vector<TextLine>& appended, std::string_view blockKey,
 			const std::vector<ManifestKeyValue>& entries, const std::string& eol)
@@ -454,6 +479,8 @@ namespace World::Asset
 			const size_t blockStart = FindTopLevelKey(lines, blockKey);
 			if (blockStart == kNoLine)
 			{
+				for (const std::string& comment : BlockComments(blockKey))
+					appended.push_back({ "# " + comment, eol });
 				appended.push_back({ std::string(blockKey) + ":", eol });
 				for (const ManifestKeyValue& entry : entries)
 					appended.push_back({ "  " + std::string(entry.Key) + ": " + entry.Value, eol });
@@ -741,6 +768,11 @@ namespace World::Asset
 				return WriteTextFile(path, MergeManifestText(existing, copy), error);
 
 			YAML::Emitter out;
+			// P4-U4b:全量序列化(文件不存在/为空)也带上说明注释 —— 引擎生成的清单必须是
+			// 自解释的:字段含义 + 生效时机 + 谁在读写,直接写在文件里给人看。
+			out << YAML::Comment("WorldEngine 项目清单(project.we.yaml)。");
+			out << YAML::Comment("content_root = 内容根(相对本文件);start_scene = 启动场景(相对内容根);");
+			out << YAML::Comment("renderer = opengl | vulkan。以下各区块也可由编辑器设置面板读写。");
 			out << YAML::BeginMap;
 			out << YAML::Key << "id" << YAML::Value << copy.Id;
 			out << YAML::Key << "version" << YAML::Value << copy.Version;
@@ -748,6 +780,8 @@ namespace World::Asset
 			out << YAML::Key << "start_scene" << YAML::Value << copy.StartScene;
 			out << YAML::Key << "renderer" << YAML::Value << copy.Renderer;
 			out << YAML::Key << "rendering" << YAML::Value << YAML::BeginMap;
+			for (const std::string& comment : BlockComments("rendering"))
+				out << YAML::Comment(comment);
 			out << YAML::Key << "culling" << YAML::Value << copy.Rendering.Culling;
 			out << YAML::Key << "shadows" << YAML::Value << copy.Rendering.Shadows;
 			out << YAML::Key << "shadow_map_size" << YAML::Value << copy.Rendering.ShadowMapSize;
@@ -761,6 +795,8 @@ namespace World::Asset
 			out << YAML::Key << "render_scale" << YAML::Value << copy.Rendering.RenderScale;
 			out << YAML::EndMap;
 			out << YAML::Key << "physics" << YAML::Value << YAML::BeginMap;
+			for (const std::string& comment : BlockComments("physics"))
+				out << YAML::Comment(comment);
 			out << YAML::Key << "fixed_step_hz" << YAML::Value << copy.Physics.FixedStepHz;
 			out << YAML::Key << "gravity" << YAML::Value << copy.Physics.Gravity;
 			out << YAML::EndMap;
@@ -769,6 +805,8 @@ namespace World::Asset
 				!= ModelImportSettings::Hash(ModelImportSettings::Default()))
 			{
 				out << YAML::Key << "imports" << YAML::Value << YAML::BeginMap;
+				for (const std::string& comment : BlockComments("imports"))
+					out << YAML::Comment(comment);
 				const ModelImportSettings& imports = copy.ImportDefaults;
 				out << YAML::Key << "model.scale" << YAML::Value << imports.Scale;
 				out << YAML::Key << "model.up_axis" << YAML::Value << (imports.UpAxis == 1 ? "Z" : "Y");

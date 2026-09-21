@@ -159,6 +159,39 @@ int main()
 				== World::Asset::ModelImportSettings::Hash(World::Asset::ModelImportSettings::Default()));
 		}
 
+		// ---- 2b. 注释模板:引擎生成的清单必须自带说明(用户:「注释说明你可以想个办法存起来」)----
+		{
+			// 全量序列化(文件不存在):头部说明 + 每个区块的说明都要写出来。
+			const std::filesystem::path freshPath = root / "fresh" / "project.we.yaml";
+			std::filesystem::create_directories(freshPath.parent_path(), ignored);
+			World::Asset::ProjectManifest manifest;
+			manifest.Id = "fresh";
+			manifest.StartScene = "scenes/3DTest.wd";
+			std::string error;
+			CHECK(World::Asset::ProjectManifest::Save(freshPath, manifest, &error));
+			const std::string fresh = ReadText(freshPath);
+			CHECK(fresh.find("# WorldEngine 项目清单") != std::string::npos);
+			CHECK(fresh.find("# 渲染:") != std::string::npos);
+			CHECK(fresh.find("# 物理:") != std::string::npos);
+		}
+		{
+			// 文本合并路径:原文件**没有** imports: 且导入默认值非默认 → 补块时必须带上该块的说明。
+			const std::filesystem::path mergedPath = root / "merged" / "project.we.yaml";
+			std::filesystem::create_directories(mergedPath.parent_path(), ignored);
+			WriteText(mergedPath, kManifestText);
+			World::Asset::ProjectManifest manifest;
+			std::string error;
+			CHECK(World::Asset::ProjectManifest::Load(mergedPath, &manifest, &error));
+			manifest.ImportDefaults.GenerateNormals = false;   // 非默认 → 触发补块
+			CHECK(World::Asset::ProjectManifest::Save(mergedPath, manifest, &error));
+			const std::string merged = ReadText(mergedPath);
+			CHECK(merged.find("# 资产导入默认值") != std::string::npos);
+			CHECK(merged.find("model.generate_normals: false") != std::string::npos);
+			// 用户原有的注释与未受管 key 仍然原样。
+			CHECK(merged.find("# 项目清单(注释必须活下来)") != std::string::npos);
+			CHECK(merged.find("custom_key: keep-me") != std::string::npos);
+		}
+
 		// ---- 3. .wd 头部的 World 块 ----
 		World::WorldContext context;
 		const std::filesystem::path scenePath = root / "WorldSettings.wd";

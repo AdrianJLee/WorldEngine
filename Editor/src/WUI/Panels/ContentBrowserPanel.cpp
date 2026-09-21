@@ -1375,6 +1375,10 @@ namespace World
 			m_SearchField = std::make_shared<Wui::WuiTextField>();
 			// D10:给搜索框一个稳定 id —— AI/脚本可以 ui.type 驱动它(以前只能手点)。
 			m_SearchField->SetId(Wui::HashId("browser.search"));
+			// P4-U5a:占位提示是面板自己画的 Label,读屏/脚本读不到 → 显式喂给控件
+			// (节点 label=控件名,value=空输入时的占位文案)。
+			m_SearchField->A11yLabel = Wui::Tr("panel.content_browser.search.a11y", "Search assets");
+			m_SearchField->A11yPlaceholder = Wui::Tr("panel.content_browser.search.hint", "Search assets…");
 			m_SearchField->Buffer = &m_Model.SearchEdit;
 			m_SearchField->OnCommit = [this]
 				{

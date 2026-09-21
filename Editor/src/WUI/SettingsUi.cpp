@@ -86,7 +86,7 @@ namespace World::Editor
 		// 一行设置:标签 + 控件 + 单位 + 复位 + 生效徽标 + tooltip + 无障碍节点。
 		// 返回 true = 本帧改动了值(changed 输出参数里带出错信息)。
 		bool DrawSettingRow(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const SettingDescriptor& descriptor,
-			float x, float y, float width, std::string* error)
+			float x, float y, float width, std::string* error, bool narrow = false)
 		{
 			const std::string key = SettingKey(descriptor);
 			const Wui::WuiId id = SettingAccessId(descriptor);
@@ -94,7 +94,14 @@ namespace World::Editor
 			std::string tooltip = Wui::Tr(key + ".tooltip", descriptor.Tooltip);
 			const std::string current = descriptor.Read ? descriptor.Read() : std::string();
 			const bool isDefault = !descriptor.IsDefault || descriptor.IsDefault();
-			const Wui::WuiRect controlRect { x + kLabelColumn, y, kControlWidth, 22.0f };
+			// P4-U5a(窄态重排):宽不够时标签与控件分两行 —— 旧实现固定"标签列 290 + 控件列 180",
+			// 520px 面板下控件被挤出客户区、复位按钮与相邻控件相交(实测 U5 矩阵 3 处越界 + 2 处重叠)。
+			// 窄态:标题一行(可省略号),控件 + 单位 + 复位在第二行。
+			const float labelWidth = narrow ? width - 8.0f : kLabelColumn - 16.0f;
+			const float controlWidth = narrow ? std::min(kControlWidth, std::max(80.0f, width - 60.0f)) : kControlWidth;
+			const Wui::WuiRect controlRect { narrow ? x : x + kLabelColumn, narrow ? y + 22.0f : y,
+				controlWidth, 22.0f };
+			const float labelY = narrow ? y + 1.0f : y + 3.0f;
 			const bool enabled = !descriptor.IsEnabled || descriptor.IsEnabled();
 			if (!enabled && !descriptor.DisabledReason.empty())
 				tooltip += "\n" + Wui::Tr(key + ".disabled", descriptor.DisabledReason);
@@ -105,8 +112,8 @@ namespace World::Editor
 			if (!enabled)
 			{
 				// 禁用行:标签与值都用禁用色,不给可点控件 —— 用户看到的是"为什么不能用"。
-				Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.TextDisabled, 13.0f, theme,
-					kLabelColumn - 16.0f);
+				Wui::LabelWithTerm(ctx, { x, labelY }, label.Text, label.Term, theme.TextDisabled, 13.0f, theme,
+					labelWidth);
 				Wui::Label(ctx, { controlRect.X, y + 4.0f }, current, theme.TextDisabled, 13.0f);
 				Wui::WuiAccessNode disabledNode;
 				disabledNode.Id = id;
@@ -132,7 +139,7 @@ namespace World::Editor
 				{
 					// 勾选框自己画标签(标签列左侧),与 Blender/Fluent 的勾选行排版一致。
 					bool value = current == "true";
-					const Wui::WuiRect boxRect { x, y + 3.0f, kLabelColumn - 8.0f, 20.0f };
+					const Wui::WuiRect boxRect { x, labelY, narrow ? width - 8.0f : kLabelColumn - 8.0f, 20.0f };
 					if (Wui::Checkbox(ctx, id, boxRect, label.Text, label.Term, value, theme))
 					{
 						newValue = value ? "true" : "false";
@@ -142,8 +149,8 @@ namespace World::Editor
 				}
 				case SettingType::Enum:
 				{
-					Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme,
-						kLabelColumn - 16.0f);
+					Wui::LabelWithTerm(ctx, { x, labelY }, label.Text, label.Term, theme.Text, 13.0f, theme,
+						labelWidth);
 					std::vector<std::string> options;
 					options.reserve(descriptor.Options.size());
 					for (const Settings::SettingOption& option : descriptor.Options)
@@ -161,8 +168,8 @@ namespace World::Editor
 				}
 				case SettingType::Int:
 				{
-					Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme,
-						kLabelColumn - 16.0f);
+					Wui::LabelWithTerm(ctx, { x, labelY }, label.Text, label.Term, theme.Text, 13.0f, theme,
+						labelWidth);
 					int64_t value = std::atoll(current.c_str());
 					const int64_t minValue = static_cast<int64_t>(descriptor.Min);
 					const int64_t maxValue = static_cast<int64_t>(descriptor.Max > descriptor.Min ? descriptor.Max : 2147483647.0);
@@ -175,8 +182,8 @@ namespace World::Editor
 				}
 				case SettingType::Float:
 				{
-					Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme,
-						kLabelColumn - 16.0f);
+					Wui::LabelWithTerm(ctx, { x, labelY }, label.Text, label.Term, theme.Text, 13.0f, theme,
+						labelWidth);
 					float value = static_cast<float>(std::atof(current.c_str()));
 					const float speed = static_cast<float>(descriptor.Step > 0.0 ? descriptor.Step : 0.01);
 					const float minValue = static_cast<float>(descriptor.Min);
@@ -194,8 +201,8 @@ namespace World::Editor
 				case SettingType::Text:
 				default:
 				{
-					Wui::LabelWithTerm(ctx, { x, y + 3.0f }, label.Text, label.Term, theme.Text, 13.0f, theme,
-						kLabelColumn - 16.0f);
+					Wui::LabelWithTerm(ctx, { x, labelY }, label.Text, label.Term, theme.Text, 13.0f, theme,
+						labelWidth);
 					// 缓冲用**派生 id**:TextField 内部会拿控件 id 存自己的编辑态(WuiEditState),
 					// 同一个 id 再存 std::string 会类型冲突(实测:日志刷 "persisted state id reused
 					// with different types",退出时 0xC0000005)。
@@ -222,12 +229,14 @@ namespace World::Editor
 
 			// 单位(控件右侧)。
 			if (!descriptor.Unit.empty())
-				Wui::Label(ctx, { controlRect.X + controlRect.W + 6.0f, y + 4.0f }, descriptor.Unit, theme.TextMuted, 12.0f);
+				Wui::Label(ctx, { controlRect.X + controlRect.W + 6.0f,
+					(narrow ? controlRect.Y : y) + 4.0f }, descriptor.Unit, theme.TextMuted, 12.0f);
 
 			// 复位:只在偏离默认值时出现(与"只看已修改"同一判据)。
 			if (!isDefault && descriptor.Reset)
 			{
-				const Wui::WuiRect resetRect { controlRect.X + controlRect.W + 26.0f, y + 1.0f, kResetWidth, 20.0f };
+				const Wui::WuiRect resetRect { controlRect.X + controlRect.W + 26.0f,
+					(narrow ? controlRect.Y + 1.0f : y + 1.0f), kResetWidth, 20.0f };
 				if (Wui::Button(ctx, Wui::HashId((key + ".reset").c_str()), resetRect,
 					Wui::Tr("settings.reset_row", "Reset"), theme))
 				{
@@ -282,9 +291,21 @@ namespace World::Editor
 		std::string error;
 
 		// ---- 工具栏:搜索 + 只看已修改 + 恢复默认 ----
+		// P4-U5a(窄态重排):宽 < 560 时折两行 —— 第一行搜索(占满),第二行"只看已修改 + 恢复默认"。
+		// 旧实现三件固定 x 坐标,520px 下互压并把控件挤出客户区(U5 矩阵实测)。
+		const bool narrowToolbar = rect.W < 560.0f;
+		const bool narrowRows = rect.W < (kLabelColumn + kControlWidth + 80.0f);
+		const float rowHeight = narrowRows ? 52.0f : kRowHeight;
+		const float toolbarHeight = narrowToolbar ? kToolbarHeight * 2.0f : kToolbarHeight;
 		const float toolbarY = rect.Y;
-		if (Wui::TextField(ctx, Wui::HashId("settings.search"), { rect.X, toolbarY, 220.0f, 24.0f },
-			state.Search, theme))
+		const float secondRowY = toolbarY + kToolbarHeight;
+		const float searchWidth = narrowToolbar ? rect.W : 220.0f;
+		// P4-U5a:占位提示是下面手画的 Label,读屏/脚本读不到 → 显式喂给文本框(节点 label/value 不再双空)。
+		Wui::TextFieldA11y searchA11y;
+		searchA11y.Label = Wui::Tr("settings.search.a11y", "Search settings");
+		searchA11y.Placeholder = Wui::Tr("settings.search.hint", "Search settings…");
+		if (Wui::TextField(ctx, Wui::HashId("settings.search"), { rect.X, toolbarY, searchWidth, 24.0f },
+			state.Search, theme, nullptr, &searchA11y))
 			state.ScrollY = 0.0f;
 		if (state.Search.empty())
 		{
@@ -295,13 +316,17 @@ namespace World::Editor
 		{
 			bool onlyModified = state.OnlyModified;
 			const Wui::LocalizedLabel onlyModifiedLabel = Wui::TrLabel("settings.only_modified", "Only Modified");
-			if (Wui::Checkbox(ctx, Wui::HashId("settings.only_modified"), { rect.X + 232.0f, toolbarY + 2.0f, 190.0f, 20.0f },
+			const Wui::WuiRect checkboxRect = narrowToolbar
+				? Wui::WuiRect { rect.X, secondRowY + 2.0f, 190.0f, 20.0f }
+				: Wui::WuiRect { rect.X + 232.0f, toolbarY + 2.0f, 190.0f, 20.0f };
+			if (Wui::Checkbox(ctx, Wui::HashId("settings.only_modified"), checkboxRect,
 				onlyModifiedLabel.Text, onlyModifiedLabel.Term, onlyModified, theme))
 				state.OnlyModified = onlyModified;
 		}
 		{
 			const float resetWidth = 160.0f;
-			const Wui::WuiRect resetRect { rect.X + rect.W - resetWidth, toolbarY, resetWidth, 24.0f };
+			const Wui::WuiRect resetRect { rect.X + rect.W - resetWidth,
+				narrowToolbar ? secondRowY : toolbarY, resetWidth, 24.0f };
 			const bool hasModified = registry.HasModified(scope);
 			if (Wui::Button(ctx, Wui::HashId("settings.reset_scope"), resetRect,
 				Wui::Tr("settings.reset", "Restore Defaults"), theme) && hasModified)
@@ -319,7 +344,7 @@ namespace World::Editor
 				if (descriptor->Group == group)
 					rows.push_back(descriptor);
 
-		const Wui::WuiRect content { rect.X, rect.Y + kToolbarHeight, rect.W, rect.H - kToolbarHeight };
+		const Wui::WuiRect content { rect.X, rect.Y + toolbarHeight, rect.W, rect.H - toolbarHeight };
 		float contentHeight = 8.0f;
 		for (const std::string& group : groups)
 		{
@@ -331,7 +356,7 @@ namespace World::Editor
 				continue;
 			const size_t count = static_cast<size_t>(std::count_if(rows.begin(), rows.end(),
 				[&group](const SettingDescriptor* descriptor) { return descriptor->Group == group; }));
-			contentHeight += kGroupHeaderHeight + kRowHeight * static_cast<float>(count) + 6.0f;
+			contentHeight += kGroupHeaderHeight + rowHeight * static_cast<float>(count) + 6.0f;
 		}
 
 		Wui::BeginScrollArea(ctx, content, contentHeight, state.ScrollY, theme);
@@ -350,9 +375,13 @@ namespace World::Editor
 			y += kGroupHeaderHeight;
 			for (const SettingDescriptor* descriptor : groupRows)
 			{
-				if (DrawSettingRow(ctx, theme, *descriptor, rect.X, y, rect.W, &error))
+				// P4-U5a:整行落在滚动视口外就**不画也不登记** —— 否则滚出视口的行仍会以
+				// "可见可点"的节点进无障碍树(U5 矩阵实测:窄态下与下方 Packages 区的控件重叠、
+				// 或 rect 落在客户区外)。这也顺带省掉不可见行的绘制开销。
+				const bool rowVisible = (y + rowHeight > content.Y) && (y < content.Y + content.H);
+				if (rowVisible && DrawSettingRow(ctx, theme, *descriptor, rect.X, y, rect.W, &error, narrowRows))
 					changed = true;
-				y += kRowHeight;
+				y += rowHeight;
 			}
 			y += 6.0f;
 		}
