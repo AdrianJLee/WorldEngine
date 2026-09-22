@@ -33,3 +33,8 @@ Game/assets/models/**/textures/
 !Game/.vscode/**
 !Game/.luau-lsp/
 !Game/.luau-lsp/**
+# 2026-09-22:docs/ 随仓库走,但只放**公开**文档(做游戏的人 docs/user/** + 改引擎的公开部分 docs/dev/**);
+# 内部知识(不变量/契约/决策/陷阱/验证口径/术语/工作流数据)不在本仓库里。
+# 父目录先解忽略,子项才能被重新包含。
+!docs/
+!docs/**
