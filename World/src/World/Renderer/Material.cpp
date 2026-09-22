@@ -158,14 +158,175 @@ namespace World
 			out.push_back('"');
 			return out;
 		}
+
+		// Parent 这类逻辑路径:正常路径写裸标量(与方案的格式示例一致,可读),
+		// 只有会破坏 YAML 的字符(首尾空白、'#'、': '、引号、反斜杠、换行、制表)才加引号。
+		bool NeedsQuoting(const std::string& text)
+		{
+			if (text.empty())
+				return true;
+			if (text.front() == ' ' || text.front() == '\t' || text.back() == ' ' || text.back() == '\t')
+				return true;
+			for (std::size_t index = 0; index < text.size(); ++index)
+			{
+				const char c = text[index];
+				if (c == '#' || c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t')
+					return true;
+				if (c == ':' && index + 1 < text.size() && text[index + 1] == ' ')
+					return true;
+			}
+			return false;
+		}
+
+		std::string FormatLogicalPath(const std::string& text)
+		{
+			return NeedsQuoting(text) ? Quote(text) : text;
+		}
+
+		// 字段 ↔ MaterialDesc 成员的唯一映射(读/写/比较都走它,避免 9 个字段在 3 处各抄一遍)。
+		void AssignField(MaterialDesc& target, const MaterialDesc& source, MaterialField field)
+		{
+			switch (field)
+			{
+			case MaterialField::Name: target.Name = source.Name; break;
+			case MaterialField::BaseColor: target.BaseColor = source.BaseColor; break;
+			case MaterialField::Metallic: target.Metallic = source.Metallic; break;
+			case MaterialField::Roughness: target.Roughness = source.Roughness; break;
+			case MaterialField::Emissive: target.Emissive = source.Emissive; break;
+			case MaterialField::AlbedoTexture: target.AlbedoTexture = source.AlbedoTexture; break;
+			case MaterialField::NormalTexture: target.NormalTexture = source.NormalTexture; break;
+			case MaterialField::BlendMode: target.BlendMode = source.BlendMode; break;
+			case MaterialField::DoubleSided: target.DoubleSided = source.DoubleSided; break;
+			case MaterialField::Count: break;
+			}
+		}
+
+		bool FieldsEqual(const MaterialDesc& a, const MaterialDesc& b, MaterialField field)
+		{
+			switch (field)
+			{
+			case MaterialField::Name: return a.Name == b.Name;
+			case MaterialField::BaseColor: return a.BaseColor == b.BaseColor;
+			case MaterialField::Metallic: return a.Metallic == b.Metallic;
+			case MaterialField::Roughness: return a.Roughness == b.Roughness;
+			case MaterialField::Emissive: return a.Emissive == b.Emissive;
+			case MaterialField::AlbedoTexture: return a.AlbedoTexture == b.AlbedoTexture;
+			case MaterialField::NormalTexture: return a.NormalTexture == b.NormalTexture;
+			case MaterialField::BlendMode: return a.BlendMode == b.BlendMode;
+			case MaterialField::DoubleSided: return a.DoubleSided == b.DoubleSided;
+			case MaterialField::Count: break;
+			}
+			return false;
+		}
+	}
+
+	int MaterialFieldSet::Count() const
+	{
+		int count = 0;
+		for (uint8_t index = 0; index < static_cast<uint8_t>(MaterialField::Count); ++index)
+			if (Has(static_cast<MaterialField>(index)))
+				++count;
+		return count;
+	}
+
+	void Material::SetDesc(const MaterialDesc& desc)
+	{
+		if (m_Desc == desc)
+			return;
+		// 逐字段比较:变了的值 = 这次是显式写入 → 记进覆盖集(M3)。
+		// 老调用点(整份拷贝)因此仍然写全字段;只改一个字段的调用点只把那个字段记成覆盖。
+		for (uint8_t index = 0; index < static_cast<uint8_t>(MaterialField::Count); ++index)
+		{
+			const MaterialField field = static_cast<MaterialField>(index);
+			if (!FieldsEqual(m_Desc, desc, field))
+				m_Overrides.Set(field);
+		}
+		m_Desc = desc;
+		BumpRevision();
+	}
+
+	void Material::RevertField(MaterialField field)
+	{
+		if (!m_Overrides.Has(field))
+			return;   // 已经是继承态:no-op(不动 Revision、不动脏标记)
+		const MaterialDesc& inherited = m_Parent ? m_Parent->GetDesc() : MaterialIO::DefaultMaterialDesc();
+		AssignField(m_Desc, inherited, field);
+		m_Overrides.Clear(field);
+		BumpRevision();
+		// 值可能没变,但文件里那一行必须消失 —— 只有保存才落地,所以标记未保存。
+		MarkDirty(true);
+	}
+
+	uint32_t Material::GetFormatVersion() const
+	{
+		// 只有"没有父级 + 全字段都写了"才回到老写法(与 M3 前的文件逐字节一致);
+		// 其它情况都是材质实例格式。
+		return (m_ParentPath.empty() && m_Overrides.All()) ? kMaterialFormatVersionLegacy
+			: kMaterialFormatVersionMax;
 	}
 
 	namespace MaterialIO
 	{
-		MaterialLoadResult Parse(const std::string& text, MaterialDesc& out, std::string* error)
+		const MaterialDesc& DefaultMaterialDesc()
+		{
+			static const MaterialDesc kDefault;
+			return kDefault;
+		}
+
+		std::string NormalizePath(const std::string& path)
+		{
+			std::string normalized;
+			normalized.reserve(path.size());
+			for (const char c : path)
+				normalized.push_back(c == '\\' ? '/' : c);
+			while (normalized.rfind("./", 0) == 0)
+				normalized.erase(0, 2);
+			// 去掉重复的斜杠(保留协议风格前缀不在本用例范围)。
+			normalized.erase(std::unique(normalized.begin(), normalized.end(),
+				[](char a, char b) { return a == '/' && b == '/'; }), normalized.end());
+			return normalized;
+		}
+
+		const char* FieldKey(MaterialField field)
+		{
+			switch (field)
+			{
+			case MaterialField::Name: return "Name";
+			case MaterialField::BaseColor: return "BaseColor";
+			case MaterialField::Metallic: return "Metallic";
+			case MaterialField::Roughness: return "Roughness";
+			case MaterialField::Emissive: return "Emissive";
+			case MaterialField::AlbedoTexture: return "AlbedoTexture";
+			case MaterialField::NormalTexture: return "NormalTexture";
+			case MaterialField::BlendMode: return "BlendMode";
+			case MaterialField::DoubleSided: return "DoubleSided";
+			case MaterialField::Count: break;
+			}
+			return "";
+		}
+
+		std::string FormatFieldValue(const MaterialDesc& desc, MaterialField field)
+		{
+			switch (field)
+			{
+			case MaterialField::Name: return desc.Name;
+			case MaterialField::BaseColor: return FormatVec(desc.BaseColor);
+			case MaterialField::Metallic: return FormatFloat(desc.Metallic);
+			case MaterialField::Roughness: return FormatFloat(desc.Roughness);
+			case MaterialField::Emissive: return FormatVec(desc.Emissive);
+			case MaterialField::AlbedoTexture: return desc.AlbedoTexture.empty() ? "(none)" : desc.AlbedoTexture;
+			case MaterialField::NormalTexture: return desc.NormalTexture.empty() ? "(none)" : desc.NormalTexture;
+			case MaterialField::BlendMode: return BlendModeName(desc.BlendMode);
+			case MaterialField::DoubleSided: return desc.DoubleSided ? "true" : "false";
+			case MaterialField::Count: break;
+			}
+			return std::string();
+		}
+
+		MaterialLoadResult ParseDocument(const std::string& text, MaterialDocument& out, std::string* error)
 		{
 			MaterialLoadResult result;
-			out = MaterialDesc {};
+			out = MaterialDocument {};
 
 			YAML::Node root;
 			try
@@ -204,30 +365,70 @@ namespace World
 				if (error) *error = result.Error;
 				return result;
 			}
+			out.FormatVersion = version;
 
 			std::string warning;
 			try
 			{
-				if (root["Name"]) out.Name = root["Name"].as<std::string>();
-				out.BaseColor = ReadVec4(root["BaseColor"], out.BaseColor, "BaseColor", &warning);
-				if (root["Metallic"]) out.Metallic = root["Metallic"].as<float>();
-				if (root["Roughness"]) out.Roughness = root["Roughness"].as<float>();
-				out.Emissive = ReadVec3(root["Emissive"], out.Emissive, "Emissive", &warning);
-				if (root["AlbedoTexture"]) out.AlbedoTexture = root["AlbedoTexture"].as<std::string>();
-				if (root["NormalTexture"]) out.NormalTexture = root["NormalTexture"].as<std::string>();
+				// M3:写了哪个字段 = 覆盖哪个字段;没写的字段继承(没有父级 = 引擎内置默认)。
+				// 老文件(v1 全字段)因此得到"全部覆盖",合并结果与 M3 前逐字段一致。
+				if (root["Parent"])
+				{
+					out.ParentPath = NormalizePath(root["Parent"].as<std::string>());
+				}
+				if (root["Name"])
+				{
+					out.Values.Name = root["Name"].as<std::string>();
+					out.Overridden.Set(MaterialField::Name);
+				}
+				if (root["BaseColor"])
+				{
+					out.Values.BaseColor = ReadVec4(root["BaseColor"], out.Values.BaseColor, "BaseColor", &warning);
+					out.Overridden.Set(MaterialField::BaseColor);
+				}
+				if (root["Metallic"])
+				{
+					out.Values.Metallic = root["Metallic"].as<float>();
+					out.Overridden.Set(MaterialField::Metallic);
+				}
+				if (root["Roughness"])
+				{
+					out.Values.Roughness = root["Roughness"].as<float>();
+					out.Overridden.Set(MaterialField::Roughness);
+				}
+				if (root["Emissive"])
+				{
+					out.Values.Emissive = ReadVec3(root["Emissive"], out.Values.Emissive, "Emissive", &warning);
+					out.Overridden.Set(MaterialField::Emissive);
+				}
+				if (root["AlbedoTexture"])
+				{
+					out.Values.AlbedoTexture = root["AlbedoTexture"].as<std::string>();
+					out.Overridden.Set(MaterialField::AlbedoTexture);
+				}
+				if (root["NormalTexture"])
+				{
+					out.Values.NormalTexture = root["NormalTexture"].as<std::string>();
+					out.Overridden.Set(MaterialField::NormalTexture);
+				}
 				if (root["BlendMode"])
 				{
 					const std::string mode = root["BlendMode"].as<std::string>();
-					if (mode == "Opaque") out.BlendMode = MaterialBlendMode::Opaque;
-					else if (mode == "Transparent") out.BlendMode = MaterialBlendMode::Transparent;
+					if (mode == "Opaque") out.Values.BlendMode = MaterialBlendMode::Opaque;
+					else if (mode == "Transparent") out.Values.BlendMode = MaterialBlendMode::Transparent;
 					else
 					{
 						if (!warning.empty()) warning.append("; ");
 						warning.append("BlendMode '").append(mode).append("' 未知,已用 Opaque");
-						out.BlendMode = MaterialBlendMode::Opaque;
+						out.Values.BlendMode = MaterialBlendMode::Opaque;
 					}
+					out.Overridden.Set(MaterialField::BlendMode);
 				}
-				if (root["DoubleSided"]) out.DoubleSided = root["DoubleSided"].as<bool>();
+				if (root["DoubleSided"])
+				{
+					out.Values.DoubleSided = root["DoubleSided"].as<bool>();
+					out.Overridden.Set(MaterialField::DoubleSided);
+				}
 			}
 			catch (const YAML::Exception& exception)
 			{
@@ -236,16 +437,17 @@ namespace World
 				return result;
 			}
 
-			ClampWarn(out.Metallic, 0.0f, 1.0f, "Metallic", &warning);
-			ClampWarn(out.Roughness, 0.02f, 1.0f, "Roughness", &warning);
+			// 夹紧/越界警告与 M3 前逐字一致(未覆盖字段用的是引擎默认值,天然在范围内,不会产生噪声)。
+			ClampWarn(out.Values.Metallic, 0.0f, 1.0f, "Metallic", &warning);
+			ClampWarn(out.Values.Roughness, 0.02f, 1.0f, "Roughness", &warning);
 			for (int i = 0; i < 3; ++i)
 			{
-				if (out.BaseColor[i] < 0.0f || out.BaseColor[i] > 1.0f)
-					out.BaseColor[i] = std::clamp(out.BaseColor[i], 0.0f, 1.0f);
-				if (out.Emissive[i] < 0.0f)
-					out.Emissive[i] = 0.0f;
+				if (out.Values.BaseColor[i] < 0.0f || out.Values.BaseColor[i] > 1.0f)
+					out.Values.BaseColor[i] = std::clamp(out.Values.BaseColor[i], 0.0f, 1.0f);
+				if (out.Values.Emissive[i] < 0.0f)
+					out.Values.Emissive[i] = 0.0f;
 			}
-			out.BaseColor.w = std::clamp(out.BaseColor.w, 0.0f, 1.0f);
+			out.Values.BaseColor.w = std::clamp(out.Values.BaseColor.w, 0.0f, 1.0f);
 
 			result.Success = true;
 			result.Error = warning;
@@ -253,21 +455,93 @@ namespace World
 			return result;
 		}
 
+		MaterialDesc MergeDocument(const MaterialDocument& document, const MaterialDesc* parentDesc)
+		{
+			MaterialDesc merged = parentDesc ? *parentDesc : DefaultMaterialDesc();
+			for (uint8_t index = 0; index < static_cast<uint8_t>(MaterialField::Count); ++index)
+			{
+				const MaterialField field = static_cast<MaterialField>(index);
+				if (document.Overridden.Has(field))
+					AssignField(merged, document.Values, field);
+			}
+			return merged;
+		}
+
+		uint32_t DocumentFormatVersion(const MaterialDocument& document)
+		{
+			// 老写法的唯一判据:没有父级 + 全部字段都写出 → 与 M3 前的文件逐字节一致。
+			// 只写部分字段的文件必须是 v2(否则"缺字段 = 引擎默认"会与"覆盖字段"混淆)。
+			return (document.ParentPath.empty() && document.Overridden.All())
+				? kMaterialFormatVersionLegacy : kMaterialFormatVersionMax;
+		}
+
+		MaterialLoadResult Parse(const std::string& text, MaterialDesc& out, std::string* error)
+		{
+			MaterialDocument document;
+			std::string parseError;
+			const MaterialLoadResult parsed = ParseDocument(text, document, &parseError);
+			if (!parsed.Success)
+			{
+				out = MaterialDesc {};
+				if (error) *error = parsed.Error;
+				return parsed;
+			}
+
+			out = MergeDocument(document, nullptr);
+
+			MaterialLoadResult result = parsed;
+			if (!document.ParentPath.empty())
+			{
+				// 纯文本解析不读盘:告诉调用方这条路径拿不到继承值(素材本身仍是可用的)。
+				if (!result.Error.empty()) result.Error.append("; ");
+				result.Error.append("Parent '").append(document.ParentPath)
+					.append("' 未解析(纯文本解析只按引擎默认合并;要继承请用 MaterialLibrary::Load)");
+			}
+			if (error) *error = result.Error;
+			return result;
+		}
+
+		std::string SerializeDocument(const MaterialDocument& document)
+		{
+			const uint32_t version = DocumentFormatVersion(document);
+			std::ostringstream out;
+			if (version == kMaterialFormatVersionLegacy)
+			{
+				// 老写法保持 M3 前的头注释 + 全字段,写出字节与今天完全一致。
+				out << "# WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。\n";
+			}
+			out << "FormatVersion: " << version << "\n";
+			if (!document.ParentPath.empty())
+				out << "Parent: " << FormatLogicalPath(document.ParentPath) << "\n";
+			if (document.Overridden.Has(MaterialField::Name))
+				out << "Name: " << Quote(document.Values.Name) << "\n";
+			if (document.Overridden.Has(MaterialField::BaseColor))
+				out << "BaseColor: " << FormatVec(document.Values.BaseColor) << "\n";
+			if (document.Overridden.Has(MaterialField::Metallic))
+				out << "Metallic: " << FormatFloat(document.Values.Metallic) << "\n";
+			if (document.Overridden.Has(MaterialField::Roughness))
+				out << "Roughness: " << FormatFloat(document.Values.Roughness) << "\n";
+			if (document.Overridden.Has(MaterialField::Emissive))
+				out << "Emissive: " << FormatVec(document.Values.Emissive) << "\n";
+			if (document.Overridden.Has(MaterialField::AlbedoTexture))
+				out << "AlbedoTexture: " << Quote(document.Values.AlbedoTexture) << "\n";
+			if (document.Overridden.Has(MaterialField::NormalTexture))
+				out << "NormalTexture: " << Quote(document.Values.NormalTexture) << "\n";
+			if (document.Overridden.Has(MaterialField::BlendMode))
+				out << "BlendMode: " << BlendModeName(document.Values.BlendMode) << "\n";
+			if (document.Overridden.Has(MaterialField::DoubleSided))
+				out << "DoubleSided: " << (document.Values.DoubleSided ? "true" : "false") << "\n";
+			return out.str();
+		}
+
 		std::string Serialize(const MaterialDesc& desc)
 		{
-			std::ostringstream out;
-			out << "# WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。\n";
-			out << "FormatVersion: " << kFormatVersion << "\n";
-			out << "Name: " << Quote(desc.Name) << "\n";
-			out << "BaseColor: " << FormatVec(desc.BaseColor) << "\n";
-			out << "Metallic: " << FormatFloat(desc.Metallic) << "\n";
-			out << "Roughness: " << FormatFloat(desc.Roughness) << "\n";
-			out << "Emissive: " << FormatVec(desc.Emissive) << "\n";
-			out << "AlbedoTexture: " << Quote(desc.AlbedoTexture) << "\n";
-			out << "NormalTexture: " << Quote(desc.NormalTexture) << "\n";
-			out << "BlendMode: " << BlendModeName(desc.BlendMode) << "\n";
-			out << "DoubleSided: " << (desc.DoubleSided ? "true" : "false") << "\n";
-			return out.str();
+			// 老口径:全字段 + (没有父级)→ v1,与 M3 前的 Serialize 逐字节一致。
+			// 导入器 / 新建模板 / 既有测试都走这里,行为不变。
+			MaterialDocument document;
+			document.Values = desc;
+			document.Overridden = MaterialFieldSet::Everything();
+			return SerializeDocument(document);
 		}
 
 		bool EquivalentForSave(const MaterialDesc& actual, const MaterialDesc& expected, float tolerance)

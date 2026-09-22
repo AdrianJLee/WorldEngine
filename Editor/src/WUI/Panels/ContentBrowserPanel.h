@@ -205,6 +205,10 @@ namespace World
 		std::vector<std::string> m_NewMaterialFolders;
 		int m_NewMaterialFolderIndex = 0;
 		int m_NewMaterialTemplate = 0;        // 0=Standard 1=Unlit-ish 2=Transparent 3=Additive
+		// M3:Parent 下拉 —— 下标 0 = 引擎内置默认(自包含材质),> 0 = 已有 .wmat(继承它,
+		// 文件里只写覆盖字段)。路径表与下拉一一对应。
+		std::vector<std::string> m_NewMaterialParentPaths;
+		int m_NewMaterialParentIndex = 0;
 		std::string m_NewMaterialFailure;
 		std::string m_NewMaterialFailureFor;
 		bool m_NewMaterialFromSelection = false;

@@ -632,6 +632,370 @@ int main()
 			library.Shutdown();
 		}
 
+		// ---- M3:材质实例(.wmat = 覆盖字段 + Parent)----
+		//
+		// 夹具统一落在 Game/assets/material_m3_tmp/(与引擎同一条"相对内容根"的解析路径),
+		// 每个用例自己清理;父级链一律用**相对内容根**的路径书写。
+		{
+			CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
+			std::error_code ec;
+			const std::filesystem::path directory = std::filesystem::current_path() / "Game" / "assets"
+				/ "material_m3_tmp";
+			std::filesystem::remove_all(directory, ec);
+			std::filesystem::create_directories(directory, ec);
+			const auto fullPath = [&directory](const std::string& fileName)
+			{
+				return directory / fileName;
+			};
+			const auto writeText = [&fullPath](const std::string& fileName, const std::string& text)
+			{
+				std::ofstream file(fullPath(fileName), std::ios::binary | std::ios::trunc);
+				file << text;
+				file.flush();
+			};
+			const auto readText = [&fullPath](const std::string& fileName)
+			{
+				std::ifstream file(fullPath(fileName), std::ios::binary);
+				return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+			};
+			const auto relative = [](const std::string& fileName)
+			{
+				return "material_m3_tmp/" + fileName;
+			};
+			MaterialLibrary& library = MaterialLibrary::Get();
+			std::string error;
+
+			// 17. 解析优先级:本文件覆盖 → 父级(递归)→ 引擎内置默认(缺省 Parent 即默认)。
+			{
+				writeText("m3_grandparent.wmat",
+					"FormatVersion: 2\nName: \"Grand\"\nBaseColor: [0.25, 0.5, 0.75, 1]\nRoughness: 0.75\n");
+				writeText("m3_parent.wmat",
+					"FormatVersion: 2\nParent: material_m3_tmp/m3_grandparent.wmat\n"
+					"Name: \"Parent\"\nMetallic: 0.2\n");
+				writeText("m3_child.wmat",
+					"FormatVersion: 2\nParent: material_m3_tmp/m3_parent.wmat\n"
+					"Name: \"Child\"\nMetallic: 0.9\nAlbedoTexture: \"textures/Icon.png\"\n");
+
+				Ref<Material> child = library.Load(relative("m3_child.wmat"), &error);
+				CHECK(child != nullptr);
+				CHECK(error.empty());
+				CHECK(child->GetDesc().Name == "Child");                       // 自己
+				CHECK(child->GetDesc().Metallic == 0.9f);                      // 自己(盖住父级 0.2)
+				CHECK(child->GetDesc().AlbedoTexture == "textures/Icon.png");  // 自己
+				CHECK(child->GetDesc().Roughness == 0.75f);                    // 自己没写 → 祖父
+				CHECK(child->GetDesc().BaseColor == glm::vec4(0.25f, 0.5f, 0.75f, 1.0f));   // 祖父
+				CHECK(child->GetDesc().NormalTexture.empty());                 // 全链没写 → 引擎默认
+				CHECK(child->GetDesc().BlendMode == MaterialBlendMode::Opaque);
+				CHECK(!child->GetDesc().DoubleSided);
+				CHECK(child->ParentPath() == relative("m3_parent.wmat"));
+				CHECK(child->ResolvedParent() != nullptr);
+				CHECK(child->ResolvedParent()->GetPath() == relative("m3_parent.wmat"));
+				CHECK(library.Load(relative("m3_parent.wmat"), nullptr) == child->ResolvedParent());
+				CHECK(child->ResolvedParent()->ParentPath() == relative("m3_grandparent.wmat"));
+				CHECK(child->ResolvedParent()->ResolvedParent() != nullptr);
+				CHECK(child->ResolvedParent()->GetDesc().Metallic == 0.2f);
+				CHECK(child->ResolvedParent()->GetDesc().BaseColor == glm::vec4(0.25f, 0.5f, 0.75f, 1.0f));
+				CHECK(!child->IsParentMissing());
+				CHECK(child->ParentWarning().empty());
+				// 覆盖集 = 本文件写出来的字段(不是"合并后的全部字段")。
+				CHECK(child->HasOverride(MaterialField::Name));
+				CHECK(child->HasOverride(MaterialField::Metallic));
+				CHECK(child->HasOverride(MaterialField::AlbedoTexture));
+				CHECK(!child->HasOverride(MaterialField::Roughness));
+				CHECK(!child->HasOverride(MaterialField::BaseColor));
+				CHECK(child->OverrideCount() == 3);
+				CHECK(child->GetFormatVersion() == 2);
+
+				// 缺省 Parent = 引擎内置默认(用户确认的语义)。
+				writeText("m3_rootless.wmat", "FormatVersion: 2\nMetallic: 0.4\n");
+				Ref<Material> rootless = library.Load(relative("m3_rootless.wmat"), nullptr);
+				CHECK(rootless != nullptr);
+				CHECK(rootless->ParentPath().empty());
+				CHECK(rootless->ResolvedParent() == nullptr);
+				CHECK(!rootless->IsParentMissing());
+				CHECK(rootless->GetDesc().Metallic == 0.4f);
+				CHECK(rootless->GetDesc().Roughness == MaterialIO::DefaultMaterialDesc().Roughness);
+				CHECK(rootless->GetDesc().BaseColor == MaterialIO::DefaultMaterialDesc().BaseColor);
+				CHECK(rootless->GetDesc().Name == MaterialIO::DefaultMaterialDesc().Name);
+				CHECK(rootless->OverrideCount() == 1);
+				library.Shutdown();
+			}
+
+			// 18. 写盘只写覆盖字段 + Parent(逐字节);Save As 变体 = Parent 指向当前材质。
+			{
+				writeText("m3_writeparent.wmat", "FormatVersion: 2\nName: \"WriteParent\"\nRoughness: 0.6\n");
+
+				Ref<Material> instance = library.CreateInstance(relative("m3_writeparent.wmat"),
+					"WriteChild", &error);
+				CHECK(instance != nullptr);
+				CHECK(error.empty());
+				CHECK(instance->IsDirty());
+				CHECK(instance->GetDesc().Roughness == 0.6f);      // 初始 = 父级值
+				CHECK(instance->GetDesc().Name == "WriteChild");
+				instance->SetMetallic(0.9f);
+				CHECK(instance->HasOverride(MaterialField::Metallic));
+				CHECK(!instance->HasOverride(MaterialField::Roughness));
+				CHECK(library.Save(instance, relative("m3_writechild.wmat"), &error));
+				CHECK(error.empty());
+				CHECK(!instance->IsDirty());
+
+				const std::string text = readText("m3_writechild.wmat");
+				CHECK(text == "FormatVersion: 2\n"
+					"Parent: material_m3_tmp/m3_writeparent.wmat\n"
+					"Name: \"WriteChild\"\n"
+					"Metallic: 0.9\n");
+				CHECK(text.find("Roughness") == std::string::npos);
+				CHECK(text.find("BaseColor") == std::string::npos);
+				CHECK(text.find("BlendMode") == std::string::npos);
+
+				// 重开(缓存清空后从磁盘读):未覆盖字段 == 父级值,覆盖字段 == 自己的值。
+				library.Shutdown();
+				Ref<Material> reopened = library.Load(relative("m3_writechild.wmat"), &error);
+				CHECK(reopened != nullptr);
+				CHECK(reopened->GetDesc().Roughness == 0.6f);
+				CHECK(reopened->GetDesc().Metallic == 0.9f);
+				CHECK(reopened->GetDesc().Name == "WriteChild");
+
+				// Save As 变体:Parent = 当前材质,产物只写自己的覆盖(不是整份拷贝)。
+				Ref<Material> variant = library.CreateInstance(relative("m3_writechild.wmat"),
+					"WriteVariant", &error);
+				CHECK(variant != nullptr);
+				CHECK(variant->GetDesc().Metallic == 0.9f);        // 从父级(子材质)解析出来的值
+				CHECK(variant->GetDesc().Roughness == 0.6f);
+				CHECK(library.Save(variant, relative("m3_writevariant.wmat"), &error));
+				CHECK(readText("m3_writevariant.wmat") == "FormatVersion: 2\n"
+					"Parent: material_m3_tmp/m3_writechild.wmat\n"
+					"Name: \"WriteVariant\"\n");
+				library.Shutdown();
+			}
+
+			// 19. 老 .wmat(v1 全字段)逐字节不变:Load → Save 的磁盘字节 == M3 前的写出。
+			{
+				MaterialDesc legacy;
+				legacy.Name = "Legacy";
+				legacy.BaseColor = glm::vec4(0.2f, 0.4f, 0.6f, 1.0f);
+				legacy.Metallic = 0.35f;
+				legacy.Roughness = 0.42f;
+				legacy.Emissive = glm::vec3(0.1f, 0.0f, 0.05f);
+				legacy.AlbedoTexture = "textures/Icon.png";
+				legacy.NormalTexture = "textures/quadrants.png";
+				legacy.BlendMode = MaterialBlendMode::Transparent;
+				legacy.DoubleSided = true;
+				const std::string legacyText = MaterialIO::Serialize(legacy);
+				CHECK(legacyText.rfind("# WorldEngine 材质资产", 0) == 0);
+				CHECK(legacyText.find("FormatVersion: 1\n") != std::string::npos);
+				CHECK(legacyText.find("Parent:") == std::string::npos);
+				CHECK(legacyText.find("BaseColor: [0.2, 0.4, 0.6, 1]\n") != std::string::npos);
+
+				// 老文件解析出来 = 全部字段都是覆盖(所以合并结果与 M3 前逐字段一致)。
+				MaterialDocument document;
+				CHECK(MaterialIO::ParseDocument(legacyText, document, nullptr).Success);
+				CHECK(document.Overridden.All());
+				CHECK(document.Overridden.Count() == static_cast<int>(kMaterialFieldCount));
+				CHECK(document.ParentPath.empty());
+				CHECK(MaterialIO::DocumentFormatVersion(document) == 1);
+				CHECK(MaterialIO::SerializeDocument(document) == legacyText);   // 逐字节往返
+				CHECK(MaterialIO::MergeDocument(document, nullptr) == legacy);
+
+				writeText("m3_legacy.wmat", legacyText);
+				Ref<Material> loaded = library.Load(relative("m3_legacy.wmat"), &error);
+				CHECK(loaded != nullptr);
+				CHECK(error.empty());
+				CHECK(loaded->GetDesc() == legacy);
+				CHECK(loaded->GetFormatVersion() == 1);
+				CHECK(loaded->OverrideCount() == static_cast<int>(kMaterialFieldCount));
+				CHECK(loaded->ParentPath().empty());
+				CHECK(loaded->ResolvedParent() == nullptr);
+				CHECK(library.Save(loaded, relative("m3_legacy.wmat"), &error));
+				CHECK(error.empty());
+				CHECK(readText("m3_legacy.wmat") == legacyText);   // 未改动 → 逐字节不变
+				library.Shutdown();
+			}
+
+			// 20. 父级缺失/坏 → 退化成引擎默认 + 可读警告,子材质仍可用。
+			{
+				writeText("m3_orphan.wmat",
+					"FormatVersion: 2\nParent: material_m3_tmp/__missing_parent__.wmat\n"
+					"Name: \"Orphan\"\nMetallic: 0.4\n");
+				Ref<Material> orphan = library.Load(relative("m3_orphan.wmat"), &error);
+				CHECK(orphan != nullptr);
+				CHECK(!error.empty());                       // 成功但带警告
+				CHECK(orphan->IsParentMissing());
+				CHECK(!orphan->ParentWarning().empty());
+				CHECK(orphan->ResolvedParent() == nullptr);
+				CHECK(orphan->GetDesc().Name == "Orphan");   // 自己的覆盖照常生效
+				CHECK(orphan->GetDesc().Metallic == 0.4f);
+				CHECK(orphan->GetDesc().Roughness == MaterialIO::DefaultMaterialDesc().Roughness);
+				CHECK(orphan->GetDesc().BaseColor == MaterialIO::DefaultMaterialDesc().BaseColor);
+				CHECK(library.GetLoadWarning(relative("m3_orphan.wmat")).find("父级") != std::string::npos);
+
+				// 父级存在但解析不了:同口径(退化 + 警告,不失败)。
+				writeText("m3_broken_parent.wmat", "this is not a material\n");
+				writeText("m3_broken_child.wmat",
+					"FormatVersion: 2\nParent: material_m3_tmp/m3_broken_parent.wmat\nMetallic: 0.3\n");
+				Ref<Material> brokenChild = library.Load(relative("m3_broken_child.wmat"), &error);
+				CHECK(brokenChild != nullptr);
+				CHECK(!error.empty());
+				CHECK(brokenChild->IsParentMissing());
+				CHECK(brokenChild->GetDesc().Metallic == 0.3f);
+				CHECK(brokenChild->GetDesc().Roughness == MaterialIO::DefaultMaterialDesc().Roughness);
+				library.Shutdown();
+			}
+
+			// 21. 父级循环引用 → 拒绝 + 可读链路(含环上每个路径);深度上限 8 级。
+			{
+				writeText("m3_cycle_a.wmat", "FormatVersion: 2\nParent: material_m3_tmp/m3_cycle_b.wmat\n");
+				writeText("m3_cycle_b.wmat", "FormatVersion: 2\nParent: material_m3_tmp/m3_cycle_a.wmat\n");
+				CHECK(library.Load(relative("m3_cycle_a.wmat"), &error) == nullptr);
+				CHECK(error.find("循环") != std::string::npos);
+				CHECK(error.find("m3_cycle_a.wmat") != std::string::npos);
+				CHECK(error.find("m3_cycle_b.wmat") != std::string::npos);
+				// 自引用同样是循环(不会栈溢出 / 死循环)。
+				writeText("m3_selfcycle.wmat", "FormatVersion: 2\nParent: material_m3_tmp/m3_selfcycle.wmat\n");
+				CHECK(library.Load(relative("m3_selfcycle.wmat"), &error) == nullptr);
+				CHECK(error.find("循环") != std::string::npos);
+				CHECK(error.find("m3_selfcycle.wmat") != std::string::npos);
+
+				// 深度:8 级父级允许,9 级拒绝(可读错误,不崩)。
+				const auto writeChain = [&writeText](int level)
+				{
+					std::string text = "FormatVersion: 2\n";
+					if (level > 0)
+						text += "Parent: material_m3_tmp/m3_depth_" + std::to_string(level - 1) + ".wmat\n";
+					text += "Metallic: 0.5\n";
+					writeText("m3_depth_" + std::to_string(level) + ".wmat", text);
+				};
+				for (int level = 0; level <= 9; ++level)
+					writeChain(level);
+				library.Shutdown();
+				Ref<Material> deepOk = library.Load(relative("m3_depth_8.wmat"), &error);
+				CHECK(deepOk != nullptr);
+				CHECK(deepOk->GetDesc().Metallic == 0.5f);
+				library.Shutdown();
+				CHECK(library.Load(relative("m3_depth_9.wmat"), &error) == nullptr);
+				CHECK(error.find("超过") != std::string::npos);
+				CHECK(error.find("m3_depth_9.wmat") != std::string::npos);
+				library.Shutdown();
+			}
+
+			// 22. RevertField:回父级值 + 覆盖位消失(文件里那一行也消失,逐字节比对)。
+			{
+				writeText("m3_revert_parent.wmat",
+					"FormatVersion: 2\nName: \"RevertParent\"\nMetallic: 0.2\nRoughness: 0.8\n");
+				Ref<Material> child = library.CreateInstance(relative("m3_revert_parent.wmat"),
+					"RevertChild", &error);
+				CHECK(child != nullptr);
+				child->SetMetallic(0.7f);
+				CHECK(library.Save(child, relative("m3_revert_child.wmat"), &error));
+				CHECK(readText("m3_revert_child.wmat").find("Metallic: 0.7\n") != std::string::npos);
+
+				const uint32_t revisionBefore = child->GetRevision();
+				CHECK(child->HasOverride(MaterialField::Metallic));
+				CHECK(!child->HasOverride(MaterialField::Roughness));
+				child->RevertField(MaterialField::Roughness);     // 本来就是继承态 → no-op
+				CHECK(child->GetRevision() == revisionBefore);
+				CHECK(!child->IsDirty());
+				child->RevertField(MaterialField::Metallic);      // 覆盖 → 回父级值
+				CHECK(!child->HasOverride(MaterialField::Metallic));
+				CHECK(child->GetDesc().Metallic == 0.2f);          // 父级值
+				CHECK(child->GetRevision() > revisionBefore);
+				CHECK(child->IsDirty());
+				CHECK(library.Save(child, relative("m3_revert_child.wmat"), &error));
+				CHECK(!child->IsDirty());
+				CHECK(readText("m3_revert_child.wmat") == "FormatVersion: 2\n"
+					"Parent: material_m3_tmp/m3_revert_parent.wmat\n"
+					"Name: \"RevertChild\"\n");
+				// 重开确认:读回就是父级值(不是"把父级值写进文件")。
+				library.Shutdown();
+				Ref<Material> reopened = library.Load(relative("m3_revert_child.wmat"), &error);
+				CHECK(reopened != nullptr);
+				CHECK(reopened->GetDesc().Metallic == 0.2f);
+				CHECK(!reopened->HasOverride(MaterialField::Metallic));
+				library.Shutdown();
+			}
+
+			// 23. 指纹:子材质 = 本文件内容 ⊕ 解析后父级链(父改 → 子失效;子文件一字不动)。
+			{
+				const std::string parentOriginal =
+					"FormatVersion: 2\nName: \"FpParent\"\nMetallic: 0.1\nRoughness: 0.5\n";
+				writeText("m3_fp_parent.wmat", parentOriginal);
+				writeText("m3_fp_child.wmat",
+					"FormatVersion: 2\nParent: material_m3_tmp/m3_fp_parent.wmat\nName: \"FpChild\"\n");
+
+				const AssetFingerprint childBefore = FingerprintAsset(relative("m3_fp_child.wmat"), &error);
+				CHECK(childBefore.Exists);
+				CHECK(childBefore.FromContent);
+				CHECK(childBefore.Value != 0);
+				CHECK(FingerprintAsset(relative("m3_fp_child.wmat"), nullptr).Value == childBefore.Value);
+				const AssetFingerprint parentBefore = FingerprintAsset(relative("m3_fp_parent.wmat"), nullptr);
+
+				writeText("m3_fp_parent.wmat",
+					"FormatVersion: 2\nName: \"FpParent\"\nMetallic: 0.65\nRoughness: 0.5\n");
+				const AssetFingerprint childAfter = FingerprintAsset(relative("m3_fp_child.wmat"), &error);
+				CHECK(childAfter.Exists);
+				CHECK(childAfter.Value != childBefore.Value);
+				CHECK(FingerprintAsset(relative("m3_fp_parent.wmat"), nullptr).Value != parentBefore.Value);
+
+				// 父级消失(链断裂)同样改变子指纹。
+				std::filesystem::remove(fullPath("m3_fp_parent.wmat"), ec);
+				const AssetFingerprint childOrphan = FingerprintAsset(relative("m3_fp_child.wmat"), nullptr);
+				CHECK(childOrphan.Exists);
+				CHECK(childOrphan.Value != childAfter.Value);
+				// 父级还原 → 指纹回到第一次的值(纯函数、可复现)。
+				writeText("m3_fp_parent.wmat", parentOriginal);
+				CHECK(FingerprintAsset(relative("m3_fp_child.wmat"), nullptr).Value == childBefore.Value);
+			}
+
+			// 24. 父级改动经热重载链传播:子材质原地更新(同一性保持、Revision 前进);
+			//     dirty 子材质只报告、绝不覆盖未保存修改。
+			{
+				writeText("m3_hot_parent.wmat", "FormatVersion: 2\nName: \"HotParent\"\nRoughness: 0.5\n");
+				writeText("m3_hot_child.wmat",
+					"FormatVersion: 2\nParent: material_m3_tmp/m3_hot_parent.wmat\nName: \"HotChild\"\n");
+				library.Shutdown();
+				library.PollAssetChanges(0.0, AssetHotReloadReport {});   // 清掉上一批的监听集合
+				Ref<Material> child = library.Load(relative("m3_hot_child.wmat"), nullptr);
+				Ref<Material> parent = library.Load(relative("m3_hot_parent.wmat"), nullptr);
+				CHECK(child != nullptr && parent != nullptr);
+				CHECK(child->GetDesc().Roughness == 0.5f);
+				const Ref<Material> sameChild = child;
+				const uint32_t childRevision = child->GetRevision();
+				library.PollAssetChanges(0.0, AssetHotReloadReport {});   // 建立基线(首次登记不报告)
+
+				writeText("m3_hot_parent.wmat", "FormatVersion: 2\nName: \"HotParent\"\nRoughness: 0.9\n");
+				AssetHotReloadReport report;
+				library.PollAssetChanges(0.05, report);
+				CHECK(report.ReloadedMaterials.empty());                  // 0.05s < debounce
+				report = AssetHotReloadReport {};
+				library.PollAssetChanges(0.5, report);
+				CHECK(report.ReloadedMaterials.size() >= 1);
+				CHECK(report.FailedMaterials.empty());
+				CHECK(child == sameChild);                                // 实例同一性保持
+				CHECK(child->GetDesc().Roughness > 0.89f && child->GetDesc().Roughness < 0.91f);
+				CHECK(child->GetRevision() > childRevision);
+				CHECK(parent->GetDesc().Roughness > 0.89f && parent->GetDesc().Roughness < 0.91f);
+
+				// dirty 子材质:父级再改 → 只报告,不覆盖未保存修改。
+				child->SetMetallic(0.33f);
+				child->MarkDirty(true);
+				const std::string inMemoryName = child->GetDesc().Name;
+				library.PollAssetChanges(0.0, AssetHotReloadReport {});
+				writeText("m3_hot_parent.wmat", "FormatVersion: 2\nName: \"HotParent\"\nRoughness: 0.15\n");
+				library.PollAssetChanges(0.05, AssetHotReloadReport {});
+				report = AssetHotReloadReport {};
+				library.PollAssetChanges(0.5, report);
+				CHECK(std::find(report.SkippedDirtyMaterials.begin(), report.SkippedDirtyMaterials.end(),
+					relative("m3_hot_child.wmat")) != report.SkippedDirtyMaterials.end());
+				CHECK(child->GetDesc().Roughness > 0.89f && child->GetDesc().Roughness < 0.91f);  // 仍是旧值
+				CHECK(child->GetDesc().Name == inMemoryName);
+				CHECK(child->IsDirty());
+				library.Shutdown();
+			}
+
+			std::filesystem::remove_all(directory, ec);
+			library.Shutdown();
+		}
+
 		std::printf("MaterialTests: all checks passed\n");
 		return 0;
 	}

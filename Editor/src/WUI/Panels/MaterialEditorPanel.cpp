@@ -488,10 +488,10 @@ namespace World
 			{ "advanced", "disk", "material.prop.disk", "Disk State", "material.prop.disk.doc",
 				"clean = the file on disk matches memory; modified = unsaved edits are kept in memory.",
 				1, 0 },
-			{ "advanced", "reset_all", "material.prop.reset_all", "Restore Material Defaults",
+			{ "advanced", "reset_all", "material.prop.reset_all", "Revert All to Parent",
 				"material.prop.reset_all.doc",
-				"Reset every material property (not the preview options) to its engine default. "
-				"The .wmat is not written until you press Save.",
+				"Drop every field this file overrides so each one inherits again from its parent "
+				"(no parent = the engine default). The .wmat is not written until you press Save.",
 				0, 0 },
 		};
 		constexpr int kRowSpecCount = static_cast<int>(sizeof(kRowSpecs) / sizeof(kRowSpecs[0]));
@@ -879,13 +879,14 @@ namespace World
 		}
 
 		void RegisterReadOnlyNode(Wui::WuiId id, const std::string& label, const std::string& value,
-			const Wui::WuiRect& rect, const std::string& tooltip)
+			const Wui::WuiRect& rect, const std::string& tooltip,
+			const char* kind = "text")
 		{
 			Wui::WuiAccessNode node;
 			node.Id = id;
 			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-			node.Kind = "text";
+			node.Kind = kind;
 			node.Label = label;
 			node.Value = value;
 			node.Tooltip = tooltip;
@@ -947,10 +948,18 @@ namespace World
 		Ref<Material> material = MaterialLibrary::Get().Load(path, &error);
 		if (!material)
 		{
-			m_Status = Wui::Tr("panel.material.status.load_failed", "Load failed: ") + error;
+			// M3:加载失败要留下**可读原因**(循环引用 / 父级链坏 / 文件读不到)。
+			// 面板已经有一份材质时保留它(只把原因写进状态行);面板还没有材质时记进
+			// m_LoadError —— 那种情况下内容区没有别的东西可显示,原因必须自己顶上去。
+			const std::string reason = error.empty()
+				? Wui::Tr("panel.material.status.load_failed.unknown", "unknown error") : error;
+			m_Status = Wui::Tr("panel.material.status.load_failed", "Load failed: ") + reason;
 			m_StatusIsError = true;
+			if (!m_Material)
+				m_LoadError = reason;
 			return;
 		}
+		m_LoadError.clear();
 		// 已有未保存改动时换目标:提示并保留原材质(不自动丢弃用户改动)。
 		if (m_Material && m_Material->IsDirty() && m_Material->GetPath() != path)
 		{
@@ -1011,11 +1020,89 @@ namespace World
 	{
 		if (!m_Material)
 			return false;
+		// M3:可继承字段的"已改"= 本文件显式写了它(覆盖位)。未覆盖的字段跟随父级链,
+		// 值可能与引擎默认不同,但那不是"这一行改过"。
+		MaterialField field;
+		if (FieldForKey(key, &field))
+			return m_Material->HasOverride(field);
 		const MaterialDesc defaults;
 		return FieldDiffersFromDefault(key, m_Material->GetDesc(), defaults);
 	}
 
-	int MaterialEditorPanel::GroupModifiedCount(const std::string& groupKey) const
+	// ---- M3:继承 / 覆盖(状态唯一落点)----
+	//  覆盖        = 本文件显式写了这个字段(.wmat 里有这一行);
+	//  继承        = 本文件没写,但声明了父级文件 → 值来自父级链;
+	//  引擎默认    = 本文件没写,父级链也到不了(没有父级 / 父级缺失退化)。
+	// 三种状态都要在 a11y 里可读:`material.prop.<key>.state` 的 value 分别是
+	// override / inherited / engine-default;`inherited` 还与"没写"一致 —— 探测脚本
+	// 因此能直接断言"未覆盖字段 == 父级值"。
+	bool MaterialEditorPanel::FieldForKey(const std::string& key, MaterialField* field)
+	{
+		struct Entry { const char* Key; MaterialField Field; };
+		static const Entry kEntries[] = {
+			{ "base", MaterialField::BaseColor },
+			{ "metallic", MaterialField::Metallic },
+			{ "roughness", MaterialField::Roughness },
+			{ "emissive", MaterialField::Emissive },
+			{ "albedo", MaterialField::AlbedoTexture },
+			{ "normal", MaterialField::NormalTexture },
+			{ "blend", MaterialField::BlendMode },
+			{ "doublesided", MaterialField::DoubleSided },
+		};
+		for (const Entry& entry : kEntries)
+		{
+			if (key == entry.Key)
+			{
+				if (field)
+					*field = entry.Field;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	MaterialEditorPanel::FieldState MaterialEditorPanel::StateOfField(MaterialField field) const
+	{
+		if (!m_Material)
+			return FieldState::EngineDefault;
+		if (m_Material->HasOverride(field))
+			return FieldState::Override;
+		// 父级文件真的解析到了才算"继承";父级缺失/坏(ResolvedParent() 为空)时值来自
+		// 引擎默认 —— 头部会同时给出缺失告警(不把"退化的默认值"说成"父级的值")。
+		return m_Material->ResolvedParent() ? FieldState::Inherited : FieldState::EngineDefault;
+	}
+
+	const char* MaterialEditorPanel::FieldStateName(FieldState state)
+	{
+		switch (state)
+		{
+			case FieldState::Override: return "override";
+			case FieldState::Inherited: return "inherited";
+			default: return "engine-default";
+		}
+	}
+
+	std::string MaterialEditorPanel::FieldStateDoc(const RowPlan& row, FieldState state) const
+	{
+		if (!m_Material)
+			return {};
+		const std::string value = MaterialIO::FormatFieldValue(m_Material->GetDesc(), row.Field);
+		if (state == FieldState::Override)
+		{
+			const std::string parent = m_Material->ResolvedParent()
+				? m_Material->ParentPath()
+				: Wui::Tr("panel.material.parent.engine", "Engine Default");
+			return Wui::Tr("panel.material.field.override.doc", "Overridden here:") + " " + value
+				+ "\n" + Wui::Tr("panel.material.field.override.revert",
+					"Press the revert button to inherit from:") + " " + parent;
+		}
+		if (state == FieldState::Inherited)
+			return Wui::Tr("panel.material.field.inherited.doc", "Inherited from:") + " "
+				+ m_Material->ParentPath() + " = " + value;
+		return Wui::Tr("panel.material.field.engine.doc", "Engine default:") + " " + value;
+	}
+
+	int MaterialEditorPanel::GroupOverrideCount(const std::string& groupKey) const
 	{
 		int count = 0;
 		for (int index = 0; index < kRowSpecCount; ++index)
@@ -1083,30 +1170,13 @@ namespace World
 			m_ShowUvChecker = false;
 		else
 		{
-			// 材质字段:走 Material 的 setter(Revision 自增 → 渲染侧缓存失效),与手动编辑同一条路径。
-			const MaterialDesc defaults;
-			const uint32_t revision = m_Material->GetRevision();
-			if (key == "base")
-				m_Material->SetBaseColor(defaults.BaseColor);
-			else if (key == "metallic")
-				m_Material->SetMetallic(defaults.Metallic);
-			else if (key == "roughness")
-				m_Material->SetRoughness(defaults.Roughness);
-			else if (key == "emissive")
-				m_Material->SetEmissive(defaults.Emissive);
-			else if (key == "blend")
-				m_Material->SetBlendMode(defaults.BlendMode);
-			else if (key == "doublesided")
-				m_Material->SetDoubleSided(defaults.DoubleSided);
-			else if (key == "albedo")
-				m_Material->SetAlbedoTexture(defaults.AlbedoTexture);
-			else if (key == "normal")
-				m_Material->SetNormalTexture(defaults.NormalTexture);
-			else
+			// M3:材质字段的复位 = **回退到父级**(没有父级 = 回退引擎内置默认):
+			// 清掉覆盖位,值重新从父级链解析。Revision 与脏标记由 RevertField 负责
+			// (本来就是继承态时是 no-op,不产生"假脏")。
+			MaterialField field;
+			if (!FieldForKey(key, &field))
 				return;
-			// 与手动编辑同一条 dirty 口径:真的改了值才标脏(已等于默认值时不产生"假脏")。
-			if (m_Material->GetRevision() != revision)
-				m_Material->MarkDirty(true);
+			m_Material->RevertField(field);
 		}
 	}
 
@@ -1114,14 +1184,14 @@ namespace World
 	{
 		if (!m_Material)
 			return;
-		for (const RowSpec& spec : kRowSpecs)
-		{
-			if (!spec.HasReset || spec.ReadOnly || std::string(spec.Group) == "preview")
-				continue;
-			SetFieldToDefault(spec.Key);
-		}
-		m_Status = Wui::Tr("panel.material.status.reset_defaults",
-			"Restored every material parameter to its default (not saved yet; press Save to write the .wmat)");
+		// M3:整份材质"回退到父级" —— 8 个可继承字段逐个清覆盖位(没有父级 = 引擎默认)。
+		for (uint8_t index = 0; index < static_cast<uint8_t>(MaterialField::Count); ++index)
+			m_Material->RevertField(static_cast<MaterialField>(index));
+		m_Status = m_Material->ParentPath().empty()
+			? Wui::Tr("panel.material.status.revert_engine",
+				"Reverted every parameter to the engine default (not saved yet; press Save to write the .wmat)")
+			: Wui::Tr("panel.material.status.revert_parent",
+				"Reverted every parameter to its parent (not saved yet; press Save to write the .wmat)");
 		m_StatusIsError = false;
 	}
 
@@ -1902,8 +1972,71 @@ namespace World
 			Wui::Tr("panel.material.dirty.label", "Unsaved changes"), dirty ? "true" : "false",
 			dirtyRect, dirtyDoc);
 
-		// 第二行:材质名 + 来源逻辑路径(紧贴动作行下方一个 PadSmall)。
-		const float lineY = y + actionsHeight + gap;
+		// ---- M3:父级行(Inherits: <父> [打开父材质])----
+		// 位置 = 动作行与名称行之间:头部的"最后一行"仍然是名称/路径(或状态行),
+		// 因此 U23 的"标题底 → 首个内容控件 = PadSmall"口径不受影响。
+		const std::string parentPath = m_Material->ParentPath();
+		const bool parentIsEngineDefault = parentPath.empty();
+		const bool parentMissing = m_Material->IsParentMissing();
+		const std::string parentText = parentIsEngineDefault
+			? Wui::Tr("panel.material.parent.engine", "Engine Default") : parentPath;
+		const float parentRowY = y + actionsHeight + gap;
+		const float parentRowH = theme.ControlHeight;
+		const std::string parentDoc = parentIsEngineDefault
+			? Wui::Tr("panel.material.parent.engine.tooltip",
+				"Inherits: Engine Default. Every field this file does not write comes from the "
+				"engine's built-in material.")
+			: (parentMissing
+				? Wui::Tr("panel.material.parent.missing.tooltip",
+					"Inherits: the declared parent could not be read — this material falls back to "
+					"the engine default and stays usable.")
+				: Wui::Tr("panel.material.parent.file.tooltip",
+					"Inherits: every field this file does not write comes from this parent material. "
+					"Open Parent Material switches this window to it (unsaved edits ask first)."));
+		const std::string openParentLabel = Wui::Tr("panel.material.parent.open",
+			"Open Parent Material");
+		const float openParentWidth = std::min(std::max(60.0f, rect.W - 60.0f),
+			ctx.MeasureTextWidth(openParentLabel, 12.0f) + 18.0f);
+		const Wui::WuiRect openParentRect { x + rect.W - openParentWidth - 4.0f, parentRowY,
+			openParentWidth, parentRowH };
+		const bool canOpenParent = !parentIsEngineDefault && !parentMissing
+			&& m_Material->ResolvedParent() != nullptr;
+		if (!parentIsEngineDefault)
+		{
+			if (ActionButton(ctx, Wui::HashId("material.parent.open"), openParentRect,
+				openParentLabel, parentDoc, canOpenParent, false, theme))
+				OpenParentMaterial(ctx, host);
+		}
+		const float parentBudget = parentIsEngineDefault
+			? std::max(40.0f, rect.W - 8.0f)
+			: std::max(40.0f, openParentRect.X - x - 8.0f);
+		const std::string parentLine = Wui::Tr("material.parent.prefix", "Inherits:") + " "
+			+ parentText;
+		Wui::Label(ctx, { x, parentRowY + 5.0f },
+			EllipsizeToWidth(ctx, parentLine, parentBudget, 12.0f),
+			parentMissing ? theme.Danger : theme.TextMuted, 12.0f);
+		RegisterReadOnlyNode(Wui::HashId("material.parent"),
+			Wui::Tr("panel.material.parent", "Inherits"), parentText,
+			{ x, parentRowY, parentBudget, parentRowH }, parentDoc);
+		float parentWarningHeight = 0.0f;
+		if (parentMissing)
+		{
+			// 父级缺失:退化成引擎默认,但要**明说**(值里带声明路径,AI 通道可直接断言)。
+			const std::string warning = Wui::Tr("panel.material.parent.missing",
+				"Parent missing — using Engine Default:") + " " + parentPath + " — "
+				+ m_Material->ParentWarning();
+			const Wui::WuiRect warningRect { x, parentRowY + parentRowH + 2.0f,
+				std::max(40.0f, rect.W - 8.0f), kHeaderStatusHeight + 4.0f };
+			Wui::Label(ctx, { x, warningRect.Y }, EllipsizeToWidth(ctx, warning, warningRect.W, 11.0f),
+				theme.Danger, 11.0f);
+			RegisterReadOnlyNode(Wui::HashId("material.parent.warning"),
+				Wui::Tr("panel.material.parent.warning", "Parent missing"), warning, warningRect, warning);
+			Wui::Tooltip(ctx, warningRect, warning);
+			parentWarningHeight = warningRect.H + gap;
+		}
+
+		// 第二行:材质名 + 来源逻辑路径(紧贴父级行下方一个 PadSmall)。
+		const float lineY = parentRowY + parentRowH + gap + parentWarningHeight;
 		const MaterialDesc& desc = m_Material->GetDesc();
 		std::filesystem::path file(m_Path.empty() ? std::string() : m_Path);
 		std::string fallbackName = file.stem().string();
@@ -1999,12 +2132,29 @@ namespace World
 		const Wui::WuiRect controlRect { controlX, controlY, controlWidth, controlHeight };
 		const Wui::WuiRect rowRect { x, y, width, row.Height };
 		// 数值行的悬停说明补一句"条体拖动 / 值区输入 / ↑↓ 步进"(分类规则落在 DragBar 上的行)。
-		const std::string rowDoc = control == RowControl::DragBar
+		// M3:继承态的字段把"继承自 <父>: <值>"拼进同一句悬停说明(读屏与脚本同源)。
+		const FieldState fieldState = row.HasField ? StateOfField(row.Field) : FieldState::Override;
+		const bool inheritedField = row.HasField && fieldState != FieldState::Override;
+		const std::string stateDoc = row.HasField ? FieldStateDoc(row, fieldState) : std::string();
+		std::string rowDoc = control == RowControl::DragBar
 			? row.Doc + "\n" + Wui::Tr("panel.material.numeric.tooltip",
 				"Drag the bar to change the value, or click the value box to type it "
 				"(Enter commits, Esc cancels); Up/Down step by 1% of the range.")
 			: row.Doc;
+		if (!stateDoc.empty())
+			rowDoc += "\n" + stateDoc;
 		Wui::Tooltip(ctx, rowRect, rowDoc);
+
+		// M3:继承/覆盖的左侧强调条(与组容器的归属竖条同一条竖线上):
+		//  覆盖 = Accent(这一行是本文件的显式值)、继承 = BorderStrong、引擎默认 = Border(更弱)。
+		// 只画在行内,不占布局 —— U24 的"固定占位 / 零位移"口径不变。
+		if (row.HasField)
+		{
+			const Wui::WuiColor barColor = fieldState == FieldState::Override ? theme.Accent
+				: (fieldState == FieldState::Inherited ? theme.BorderStrong : theme.Border);
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+				{ x - 6.0f, y + 3.0f, 2.0f, std::max(4.0f, row.Height - 6.0f) }, barColor, 1.0f });
+		}
 
 		const auto applyEdit = [this](auto&& setter)
 		{
@@ -2026,7 +2176,7 @@ namespace World
 			return;
 		}
 		Wui::Label(ctx, { x, labelY }, EllipsizeToWidth(ctx, row.Label, labelWidth, 12.0f),
-			theme.Text, 12.0f);
+			inheritedField ? theme.TextMuted : theme.Text, 12.0f);
 
 		// ---- 动作行:恢复整个材质的默认值 ----
 		if (row.Key == std::string("reset_all"))
@@ -2200,27 +2350,53 @@ namespace World
 			Wui::Checkbox(ctx, controlId, controlRect, row.Label, m_ShowUvChecker, theme);
 		}
 
-		// ---- 恢复默认(固定占位:两个状态同一个 rect,行布局零位移)----
+		// M3:继承态的**值区弱化** —— 只在非悬停/非焦点时压一层半透明面板底,
+		// 悬停/焦点反馈与无障碍节点(仍可交互、仍登记)不受影响。
+		if (inheritedField && !ctx.IsHovered(controlRect) && ctx.Focus() != controlId)
+		{
+			Wui::WuiColor dim = theme.PanelBg;
+			dim.A = 0.22f;
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, controlRect, dim, 2.0f });
+		}
+
+		// ---- 回退到父级(固定占位:两个状态同一个 rect,行布局零位移)----
 		if (hasResetSlot)
 		{
 			const Wui::WuiRect resetRect { x + width - kResetWidth, controlY, kResetWidth, controlHeight };
 			const std::string resetId = ResetIdFor(row.Key);
-			const std::string resetDoc = Wui::Tr("panel.material.reset.tooltip",
-				"Restore this parameter to its default value.") + " "
-				+ Wui::Tr("panel.material.reset.placeholder",
-					"Always occupies this slot: it stays dimmed while the value already equals the default.");
+			// M3:按钮语义 = 回退到父级(没有父级 = 回退引擎默认);按钮的 a11y value 仍是
+			// modified/default(= 覆盖位),U24 的固定占位与 U21 的值口径都不变。
+			// 只有父级真的解析到了才算"回退到父级";父级缺失 = 回退引擎默认(与字段态一致)。
+			const bool hasParentFile = m_Material->ResolvedParent() != nullptr;
+			const std::string resetLabel = hasParentFile
+				? Wui::Tr("panel.material.revert_row", "Revert to parent")
+				: Wui::Tr("panel.material.revert_row.engine", "Revert to engine default");
+			const std::string resetDoc = (hasParentFile
+				? Wui::Tr("panel.material.revert.tooltip",
+					"Revert to parent: drop this file's value so the field inherits again from") + " "
+					+ m_Material->ParentPath() + "."
+				: Wui::Tr("panel.material.revert.tooltip_engine",
+					"Revert to engine default: drop this file's value (this material has no parent)."))
+				+ " " + Wui::Tr("panel.material.reset.placeholder",
+					"Always occupies this slot: it stays dimmed while the field is already inherited.");
 			// 控件自己登记 a11y(kind="reset-default"、value="modified"/"default"、enabled 跟随),
 			// 两个状态只改高亮不改几何 —— 探测口径:前后行矩形逐像素相同。
 			const Wui::WuiId resetWuiId = Wui::HashId(resetId.c_str());
 			if (Wui::ResetDefaultButton(ctx, resetWuiId, resetRect, row.Modified,
-				theme, Wui::Tr("panel.material.reset_row", "Reset"), resetDoc))
+				theme, resetLabel, resetDoc))
 				SetFieldToDefault(row.Key);
 			// 控件的 a11y 节点自带 kind/value/enabled,但**不带**悬停说明:两态都补齐
 			// (AnnotateNode 保留 live 的 value/kind,只补 label/tooltip)。
-			AnnotateNode(ctx, resetWuiId, Wui::Tr("panel.material.reset_row", "Reset"), resetDoc);
+			AnnotateNode(ctx, resetWuiId, resetLabel, resetDoc);
 		}
 		// 控件自己登记过节点:补上参数名与悬停说明(值/矩形仍以控件为准)。
 		AnnotateNode(ctx, controlId, row.Label, rowDoc);
+		// M3:继承态在无障碍里可读(id + value + tooltip):override / inherited / engine-default。
+		if (row.HasField)
+		{
+			RegisterReadOnlyNode(Wui::HashId(("material.prop." + row.Key + ".state").c_str()),
+				row.Label, FieldStateName(fieldState), rowRect, stateDoc, "material-field-state");
+		}
 	}
 
 	// ---- U27:参数列的响应式网格 ----
@@ -2356,9 +2532,22 @@ namespace World
 				plan.ControlId = "material.prop.reset_all";
 			plan.Label = Wui::Tr(spec.LabelKey, spec.LabelEn);
 			plan.Doc = Wui::Tr(spec.DocKey, spec.DocEn);
+			// M3:整份回退的按钮文案跟随父级是否存在(有父级 = 回退到父级,否则回退引擎默认)。
+			if (plan.Key == std::string("reset_all"))
+				plan.Label = m_Material->ParentPath().empty()
+					? Wui::Tr("material.prop.reset_all.engine", "Revert All to Engine Default")
+					: Wui::Tr("material.prop.reset_all.parent", "Revert All to Parent");
 			plan.ReadOnly = spec.ReadOnly != 0;
 			plan.HasReset = spec.HasReset != 0;
 			plan.Modified = plan.HasReset && !plan.ReadOnly && FieldModified(plan.Key);
+			// M3:可继承字段的继承/覆盖状态(参数列的强调条、弱化、状态节点都用它)。
+			MaterialField field;
+			if (FieldForKey(plan.Key, &field))
+			{
+				plan.HasField = true;
+				plan.Field = field;
+				plan.Override = m_Material->HasOverride(field);
+			}
 			// 只读行的显示值(采样/高级诊断)。
 			if (plan.Key == std::string("normal.space"))
 				plan.Value = Wui::Tr("material.value.linear", "Linear (UNORM, no sRGB decode)");
@@ -2373,7 +2562,7 @@ namespace World
 				plan.Value = samplerText;
 			}
 			else if (plan.Key == std::string("format"))
-				plan.Value = "FormatVersion " + std::to_string(MaterialIO::kFormatVersion);
+				plan.Value = "FormatVersion " + std::to_string(m_Material->GetFormatVersion());
 			else if (plan.Key == std::string("revision"))
 				plan.Value = "Revision " + std::to_string(m_Material->GetRevision());
 			else if (plan.Key == std::string("disk"))
@@ -2445,7 +2634,8 @@ namespace World
 				continue;
 			const std::vector<std::vector<const RowPlan*>> lines = BuildGridLines(rows, gridColumns);
 			const bool open = m_SectionOpen[group.Index] || !needle.empty();
-			const int modified = GroupModifiedCount(group.Key);
+			// M3:组头的数字 = 本组里被**覆盖**的字段数(不是"与引擎默认不同")。
+			const int modified = GroupOverrideCount(group.Key);
 			const int rowCount = static_cast<int>(rows.size());
 			// U22(用户 §5.2「折叠设计的怪怪的,分别区分不出来折叠内容属于哪里」):
 			// 组 = **容器**:底 + 圆角描边 + 左侧归属竖条 + 子项缩进 + 组间留白。
@@ -2503,13 +2693,14 @@ namespace World
 					theme.TextMuted, 12.0f);
 				Wui::Label(ctx, { headerRect.X + 22.0f, headerRect.Y + 4.0f }, GroupLabel(group),
 					theme.Text, 13.0f);
-				// 折叠后也要能看出这一组里有多少项、多少项已改(用户 §5.2)。
+				// 折叠后也要能看出这一组里有多少项、多少项覆盖(用户 §5.2 + M3 的继承语义)。
 				const std::string countText = std::to_string(rowCount) + " "
 					+ Wui::Tr("panel.material.group.items", "items")
 					+ (modified > 0
 						? std::string(" · ") + std::to_string(modified) + " "
-							+ Wui::Tr("panel.material.group.modified", "modified")
-						: std::string(" · ") + Wui::Tr("panel.material.group.defaults", "defaults"));
+							+ Wui::Tr("panel.material.group.overridden", "overridden")
+						: std::string(" · ") + Wui::Tr("panel.material.group.inherited",
+							"all inherited"));
 				const float countWidth = ctx.MeasureTextWidth(countText, 11.0f);
 				Wui::Label(ctx, { headerRect.X + std::max(24.0f, headerRect.W - countWidth - 8.0f),
 					headerRect.Y + 6.0f }, countText,
@@ -3465,6 +3656,34 @@ namespace World
 			node.Visible = true;
 			Wui::WuiAccessibility::Get().Register(node);
 		}
+		// ---- M3:变体语义说明(Parent = 当前材质 + 只写覆盖字段)----
+		// 这里必须**写清**产物是什么:`Parent:` 指向当前材质,文件里只出现"当前材质自己
+		// 覆盖过的字段",不是整份拷贝(源文件与源材质的继承链都不动)。
+		const std::string variantNote = m_Path.empty()
+			? Wui::Tr("panel.material.saveas.variant.unsaved",
+				"This material has never been saved, so the variant starts as a full standalone copy "
+				"(no Parent line).")
+			: Wui::Tr("panel.material.saveas.variant.note",
+				"Variant of") + " " + m_Path
+				+ Wui::Tr("panel.material.saveas.variant.note2",
+					": the file stores Parent: <this material> plus only the fields it overrides.");
+		Wui::Label(ctx, { fieldX, frame.Y + 200.0f },
+			EllipsizeToWidth(ctx, variantNote, fieldW, 12.0f), theme.TextMuted, 12.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.saveas.parent");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.saveas.variant.label", "Parent of the variant");
+			node.Value = m_Path;
+			node.Tooltip = variantNote;
+			node.Rect = { fieldX, frame.Y + 196.0f, fieldW, 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
 
 		// ---- 底部按钮条:主按钮(Create Variant / Overwrite)+ Cancel ----
 		const bool canCreate = nameError.empty();
@@ -3494,13 +3713,43 @@ namespace World
 		if ((okClicked || (nameSubmitted && !justOpened)) && canCreate)
 		{
 			const std::string base = MaterialBaseName(m_SaveAsName);
-			// 变体 = 源材质的**副本**:新实例 + 写盘,源实例与源文件都不动(方案 §D)。
-			Ref<Material> variant = MaterialLibrary::Get().CreateDefault(base);
-			MaterialDesc desc = m_Material->GetDesc();
-			desc.Name = base;
-			variant->SetDesc(desc);
+			// M3:变体 = `Parent: <当前材质>` + 只写覆盖字段(不是整份拷贝;源文件与源材质的
+			// 覆盖集都不动)。覆盖集照抄源材质 —— 源怎么写,变体就怎么写;源没写的字段
+			// 继续沿着 Parent 链继承。v1 全字段老文件因此写出"全字段 + Parent"。
 			std::string error;
-			if (!MaterialLibrary::Get().Save(variant, target, &error))
+			std::string savedPath;
+			if (m_Path.empty())
+			{
+				// 未落盘材质没有文件可当父级:退回整份拷贝(旧口径),状态里会写清没有 Parent。
+				Ref<Material> variant = MaterialLibrary::Get().CreateDefault(base);
+				MaterialDesc desc = m_Material->GetDesc();
+				desc.Name = base;
+				variant->SetDesc(desc);
+				if (MaterialLibrary::Get().Save(variant, target, &error))
+					savedPath = variant->GetPath();
+			}
+			else
+			{
+				MaterialDocument document;
+				document.ParentPath = MaterialLibrary::NormalizePath(m_Path);
+				document.Values = m_Material->GetDesc();
+				document.Values.Name = base;
+				document.Overridden = m_Material->Overrides();
+				document.Overridden.Set(MaterialField::Name);
+				const std::string text = MaterialIO::SerializeDocument(document);
+				const std::filesystem::path absolute = ContentRootPath() / std::filesystem::path(target);
+				if (MaterialIO::WriteFileText(absolute.generic_string(), text, &error))
+				{
+					// 写盘后重新解析(含父级链):面板切开的是**磁盘上的**变体,不是临时实例。
+					std::string reloadError;
+					if (MaterialLibrary::Get().Reload(target, &reloadError)
+						|| MaterialLibrary::Get().Load(target, &reloadError))
+						savedPath = MaterialLibrary::NormalizePath(target);
+					else
+						error = reloadError;
+				}
+			}
+			if (savedPath.empty())
 			{
 				m_SaveAsFailure = error.empty() ? std::string("Save As failed") : error;
 				m_SaveAsFailureFor = target;
@@ -3509,14 +3758,14 @@ namespace World
 			}
 			else
 			{
-				const std::string savedPath = variant->GetPath();
 				ctx.RecordOp("material", "saveas", savedPath, m_Path);
 				// 当前面板切到新材质(标题/路径/校验都跟着新文档走)。
 				OpenMaterial(savedPath);
 				host.SelectContentAsset(savedPath, "material-saveas");
 				m_Status = Wui::Tr("panel.material.status.saved_as", "Saved as ") + savedPath
 					+ Wui::Tr("panel.material.status.saved_as.note",
-						" (source .wmat unchanged; this window now edits the variant)");
+						" (source .wmat unchanged; the variant stores Parent: <this material> and only "
+						"the fields this material overrides)");
 				m_StatusIsError = false;
 				closeRequested = true;
 			}
@@ -3685,6 +3934,22 @@ namespace World
 		OpenMaterial(normalized);
 	}
 
+	// M3:头部的"打开父材质" —— 同窗口切文档,复用 RequestOpenMaterial 的未保存确认路径。
+	void MaterialEditorPanel::OpenParentMaterial(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		if (!m_Material)
+			return;
+		const std::string parent = m_Material->ParentPath();
+		if (parent.empty())
+		{
+			m_Status = Wui::Tr("panel.material.parent.none",
+				"Open Parent Material: this material has no parent file (it inherits the engine default)");
+			m_StatusIsError = true;
+			return;
+		}
+		RequestOpenMaterial(ctx, parent, host);
+	}
+
 	void MaterialEditorPanel::DrawOpenConfirmModal(Wui::WuiContext& ctx, PanelHost& host)
 	{
 		if (!m_OpenConfirmOpen)
@@ -3757,10 +4022,23 @@ namespace World
 			Wui::BeginModalInputBlock(ctx);
 		if (!m_Material)
 		{
+			// M3:加载失败的面板要给出**可读原因**(循环引用 / 父级链坏 / 文件读不到),
+			// 不能只剩一句"没有材质"。整句同时进无障碍节点(material.load_error)与悬停。
+			const std::string message = m_LoadError.empty()
+				? Wui::Tr("panel.material.none_open",
+					"No material open: double-click a .wmat file in the Content Browser")
+				: Wui::Tr("panel.material.status.load_failed", "Load failed: ") + m_LoadError;
 			Wui::Label(ctx, { rect.X + 10.0f, rect.Y + 10.0f },
-				Wui::Tr("panel.material.none_open",
-					"No material open: double-click a .wmat file in the Content Browser"),
-				theme.TextMuted, 13.0f);
+				EllipsizeToWidth(ctx, message, std::max(40.0f, rect.W - 20.0f), 13.0f),
+				m_LoadError.empty() ? theme.TextMuted : theme.Danger, 13.0f);
+			if (!m_LoadError.empty())
+			{
+				const Wui::WuiRect errorRect { rect.X + 8.0f, rect.Y + 6.0f,
+					std::max(40.0f, rect.W - 16.0f), 24.0f };
+				RegisterReadOnlyNode(Wui::HashId("material.load_error"),
+					Wui::Tr("panel.material.load_error", "Load error"), m_LoadError, errorRect, message);
+				Wui::Tooltip(ctx, errorRect, message);
+			}
 			if (panelModal)
 				Wui::EndModalInputBlock(ctx);
 			return;

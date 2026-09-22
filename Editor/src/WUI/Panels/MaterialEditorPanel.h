@@ -31,6 +31,11 @@ namespace World
 	//    所有简短的选项都占了一行」):预览列与参数列之间一条可拖拽 `material.splitter`
 	//    (两侧最小宽 220/260,双击回到默认比例,比例会话内跨面板记住);参数列与预览设置
 	//    都走响应式网格 —— 可用宽度够时 2 格(极宽 3 格)一行,长内容仍独占整行。
+	//  - M3(用户 2026-09-22 批准 `.wmat` 支持 `Parent:` + 只存覆盖字段):面板按"继承 vs
+	//    覆盖"显示 —— 覆盖的字段带强调条 + 值,未覆盖的字段弱化并给出"继承自 <父>: <值>"
+	//    悬停说明;每行的复位按钮语义改为"回退到父级"(无父级 = 回退引擎默认,仍用 U24 的
+	//    固定占位原语,零位移);头部显示父级(引擎默认时写 `Inherits: Engine Default`)并给
+	//    `打开父材质`(同窗口切文档,有未保存改动先确认);父级缺失时显示可读告警。
 	//
 	// 相机手感与模型/预制体面板一致:左键轨道旋转、滚轮推拉、双击或 F 取景、上下方向已翻正。
 	// 每个材质一个面板/窗口(id = "material:<path>"),可同时打开多个。
@@ -82,6 +87,12 @@ namespace World
 			bool Modified = false;
 			bool HasReset = false;
 			float Height = 26.0f;
+			// ---- M3:继承/覆盖 ----
+			// HasField = 这一行是不是可继承的材质字段(只有它们有"继承 vs 覆盖"语义);
+			// Override = 本文件显式写了这个字段(覆盖位);未覆盖时按父级链取值。
+			bool HasField = false;
+			MaterialField Field = MaterialField::Name;
+			bool Override = false;
 		};
 
 		// ---- 文档状态 ----
@@ -93,6 +104,9 @@ namespace World
 		bool m_NewPathAttempted = false;    // U2d:点过 Save 之后才把"路径不能为空"标成行内错误
 		std::string m_Status;               // 最近一次操作结果
 		bool m_StatusIsError = false;
+		// M3:打开失败的可读原因(m_Material == nullptr 时也要显示 —— 循环引用 / 父级链坏 /
+		// 文件读不到都不能只剩一句"没有材质")。
+		std::string m_LoadError;
 		std::vector<std::string> m_MaterialPaths;
 		std::vector<std::string> m_TexturePaths;
 		int m_MaterialPickIndex = -1;
@@ -301,9 +315,22 @@ namespace World
 		bool FieldModified(const std::string& key) const;
 		// 预览选项是否偏离内置默认(球 / 纯色 / 三点光 / 强度 1 / 方位 35 / 仰角 45 / 关闭)。
 		bool PreviewOptionModified(const std::string& key) const;
+		// ---- M3:继承 / 覆盖 ----
+		// 字段的继承状态:覆盖 / 从父级文件继承 / 引擎内置默认。
+		enum class FieldState : uint8_t { Override = 0, Inherited = 1, EngineDefault = 2 };
+		FieldState StateOfField(MaterialField field) const;
+		// a11y 读数用的状态名(override / inherited / engine-default)。
+		static const char* FieldStateName(FieldState state);
+		// "继承自 <父>: <值>" / "引擎默认: <值>"(悬停与 a11y tooltip 共用一句)。
+		std::string FieldStateDoc(const RowPlan& row, FieldState state) const;
+		// 参数键(material.<key>)→ MaterialField;不是可继承字段返回 false。
+		static bool FieldForKey(const std::string& key, MaterialField* field);
+		// 该组里有多少个覆盖字段(组头 "n 项覆盖" 的唯一口径)。
+		int GroupOverrideCount(const std::string& groupKey) const;
+		// 头部父级行:`打开父材质`(父级是文件时可用;同窗口切文档,有未保存先确认)。
+		void OpenParentMaterial(Wui::WuiContext& ctx, PanelHost& host);
 		void SetFieldToDefault(const std::string& key);
 		void ResetAllMaterialFields();
-		int GroupModifiedCount(const std::string& groupKey) const;
 		void RefreshValidation(double now);
 		void SaveCurrent();
 		void RefreshCatalog();

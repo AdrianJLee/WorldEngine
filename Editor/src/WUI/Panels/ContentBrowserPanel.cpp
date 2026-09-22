@@ -1547,6 +1547,12 @@ namespace World
 		m_NewMaterialSeed = MaterialDesc {};
 		m_NewMaterialAssignEntity = Entity {};
 		m_NewMaterialFromSelection = fromSelection;
+		// M3:Parent 下拉 = 引擎内置默认(下标 0)+ 内容根下所有已有 .wmat。
+		m_NewMaterialParentPaths.clear();
+		m_NewMaterialParentPaths.push_back(std::string());
+		for (const std::string& path : MaterialLibrary::Get().ScanMaterials())
+			m_NewMaterialParentPaths.push_back(path);
+		m_NewMaterialParentIndex = 0;
 
 		std::string defaultName;
 		std::string defaultFolder;
@@ -1646,7 +1652,8 @@ namespace World
 		frameDesc.Title = m_NewMaterialFromSelection
 			? Wui::Tr("panel.content_browser.new_material.title.extract", "Extract Material from Selection")
 			: Wui::Tr("panel.content_browser.new_material.title", "New Material");
-		frameDesc.Size = { 600.0f, 400.0f };
+		// M3:向导多了一行 Parent(选父级 + 起始覆盖),模态相应加高。
+		frameDesc.Size = { 620.0f, 470.0f };
 		Wui::WuiRect frame;
 		bool escapePressed = false;
 		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
@@ -1658,15 +1665,20 @@ namespace World
 		const float fieldX = frame.X + 130.0f;
 		const float fieldW = frame.W - 146.0f - 68.0f;
 		const Wui::WuiId templateId = Wui::HashId("material.new.template");
+		const Wui::WuiId parentId = Wui::HashId("material.new.parent");
 		const Wui::WuiId nameId = Wui::HashId("material.new.name");
 		const Wui::WuiId folderId = Wui::HashId("material.new.folder");
 		const bool templatePopupWasOpen = ctx.IsPopupOpen(templateId);
+		const bool parentPopupWasOpen = ctx.IsPopupOpen(parentId);
 		const bool folderPopupWasOpen = ctx.IsPopupOpen(folderId);
 		const bool justOpened = ctx.Frame() == m_NewMaterialOpenedFrame;
 
-		// ---- 模板下拉(Standard / Unlit-ish / Transparent / Additive)----
+		// ---- 起始覆盖下拉(Standard / Unlit-ish / Transparent / Additive)----
+		// M3:这一栏不再假装是"着色模型":它描述的是**这次新建会写下哪些覆盖字段**
+		// (父级是引擎默认时 = 自包含材质;父级是 .wmat 时 = 相对父级的起始覆盖)。
 		float cursorY = frame.Y + 46.0f;
-		const std::string templateLabel = Wui::Tr("panel.content_browser.new_material.template", "Template");
+		const std::string templateLabel = Wui::Tr("panel.content_browser.new_material.template",
+			"Starting overrides");
 		Wui::Label(ctx, { labelX, cursorY + 5.0f }, templateLabel, theme.TextMuted, 13.0f);
 		std::vector<std::string> templateOptions;
 		for (const NewMaterialTemplate& entry : kNewMaterialTemplates)
@@ -1698,6 +1710,12 @@ namespace World
 			Wui::WuiAccessibility::Get().Register(node);
 		}
 		cursorY += docLines.second.empty() ? 24.0f : 39.0f;
+
+		// M3:起始覆盖 + 名称 + 目录三行之后,与底部 Parent 行之间始终留出两行说明的高度 ——
+		// 这样"起始覆盖"下拉的选项条目(弹层从它下方展开)不会压到"目录"触发条上:
+		// WUI 的 popup 只在**下一帧**遮挡下层控件,点选项那一下的 release 会落到条目正下方的
+		// 控件上(实测)。留白是这条规则下的必要布局约束,不是随手加的空行。
+		cursorY += 39.0f;
 
 		// ---- 名称(后缀自动补)----
 		const std::string nameLabel = Wui::Tr("panel.content_browser.new_material.name", "Name");
@@ -1802,9 +1820,59 @@ namespace World
 			Wui::WuiAccessibility::Get().Register(node);
 		}
 
+		// ---- M3:Parent(父级)—— 默认引擎内置默认;可选内容根下任意 .wmat ----
+		// 位置 = 内容最下方、按钮条正上方,而且**收窄宽度**:
+		//  - 它的弹层从下方展开(条目多、可以很长),下面只剩空白与按钮条左侧的空区;
+		//    收窄后弹层 x 范围与 OK/Cancel 不重叠 —— 点条目那一下的 release 不会顺手按到按钮
+		//    (WUI 的 popup 只在下一帧遮挡下层控件,选项 release 会落到条目正下方的控件上);
+		//  - 上面的"起始覆盖/目录"弹层不会向下延伸到这里(见前面的留白注释)。
+		const float footerY = frame.Y + frame.H - Wui::ModalFooterPadding - Wui::ModalFooterHeight;
+		const std::string parentLabel = Wui::Tr("panel.content_browser.new_material.parent", "Parent");
+		std::vector<std::string> parentOptions;
+		parentOptions.push_back(Wui::Tr("panel.content_browser.new_material.parent.engine",
+			"Engine Default"));
+		for (size_t index = 1; index < m_NewMaterialParentPaths.size(); ++index)
+			parentOptions.push_back(m_NewMaterialParentPaths[index]);
+		m_NewMaterialParentIndex = std::clamp(m_NewMaterialParentIndex, 0,
+			static_cast<int>(parentOptions.size()) - 1);
+		const std::string parentPath = m_NewMaterialParentIndex > 0
+			? parentOptions[static_cast<size_t>(m_NewMaterialParentIndex)] : std::string();
+		const std::string parentDoc = parentPath.empty()
+			? Wui::Tr("panel.content_browser.new_material.parent.engine.doc",
+				"Engine Default: the new material is self-contained — every field is written, "
+				"exactly like a material created before M3.")
+			: Wui::Tr("panel.content_browser.new_material.parent.file.doc",
+				"Inherit from:") + " " + parentPath
+				+ Wui::Tr("panel.content_browser.new_material.parent.file.doc2",
+					" — the file stores Parent plus the starting overrides below; everything else "
+					"keeps following the parent (edit it later in the material editor).");
+		const Wui::WuiRect parentRect { fieldX, footerY - 30.0f, std::min(fieldW, 300.0f), 24.0f };
+		Wui::Label(ctx, { labelX, parentRect.Y + 5.0f }, parentLabel, theme.TextMuted, 13.0f);
+		Wui::Combo(ctx, parentId, parentRect, parentLabel, parentOptions,
+			m_NewMaterialParentIndex, theme);
+		const Wui::WuiRect parentHint { labelX, parentRect.Y - 18.0f,
+			std::max(60.0f, frame.W - 32.0f), 16.0f };
+		Wui::Label(ctx, { parentHint.X, parentHint.Y },
+			EllipsizeToWidth(ctx, parentDoc, parentHint.W, 12.0f), theme.TextMuted, 12.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.new.parent.doc");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = parentLabel;
+			node.Value = parentDoc;
+			node.Tooltip = parentDoc;
+			node.Rect = parentHint;
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		Wui::Tooltip(ctx, parentRect, parentDoc);
+
 		// ---- 底部按钮条 ----
 		const bool canCreate = nameError.empty();
-		const float footerY = frame.Y + frame.H - Wui::ModalFooterPadding - Wui::ModalFooterHeight;
 		const Wui::WuiRect okRect { frame.X + frame.W - 16.0f - 150.0f, footerY, 150.0f,
 			Wui::ModalFooterHeight };
 		const Wui::WuiRect cancelRect { okRect.X - 8.0f - 96.0f, footerY, 96.0f, Wui::ModalFooterHeight };
@@ -1834,10 +1902,46 @@ namespace World
 		{
 			const std::string absolute = (m_Model.Root / std::filesystem::path(target)).generic_string();
 			const std::string base = NewMaterialBaseName();
-			const MaterialDesc desc = MaterialDescForTemplate(templateIndex, base, m_NewMaterialSeed);
 			std::string error;
-			// 绝对路径:MaterialIO 对"还不存在的相对路径"会解析到 Game/<path>(CreateMaterialAsset 记的坑)。
-			if (!MaterialIO::WriteFileText(absolute, MaterialIO::Serialize(desc), &error))
+			bool wrote = false;
+			if (parentPath.empty())
+			{
+				// 父级 = 引擎内置默认:自包含材质(全字段、没有 Parent 行 → 仍是 v1 写法,
+				// 与 M3 前新建的 .wmat 逐字节一致)。
+				const MaterialDesc desc = MaterialDescForTemplate(templateIndex, base, m_NewMaterialSeed);
+				// 绝对路径:MaterialIO 对"还不存在的相对路径"会解析到 Game/<path>(CreateMaterialAsset 记的坑)。
+				wrote = MaterialIO::WriteFileText(absolute, MaterialIO::Serialize(desc), &error);
+			}
+			else
+			{
+				// 父级 = 已有 .wmat:真材质实例 —— 只写 Parent + 本次的起始覆盖。
+				Ref<Material> instance = MaterialLibrary::Get().CreateInstance(parentPath, base, &error);
+				if (instance)
+				{
+					// 起始覆盖按预设落到具体字段(相对父级的当前解析值):
+					// Standard = 不改任何字段(纯继承),其余三个只改它们真正涉及的那几项。
+					const MaterialDesc resolved = instance->GetDesc();
+					switch (templateIndex)
+					{
+						case 1:   // Unlit-ish:自发光 = 基色,金属度/粗糙度归零
+							instance->SetEmissive(glm::vec3(resolved.BaseColor));
+							instance->SetMetallic(0.0f);
+							instance->SetRoughness(0.0f);
+							break;
+						case 2:   // Transparent:混合模式
+							instance->SetBlendMode(MaterialBlendMode::Transparent);
+							break;
+						case 3:   // Additive(近似):透明 + 自发光 = 基色 x 2
+							instance->SetBlendMode(MaterialBlendMode::Transparent);
+							instance->SetEmissive(glm::vec3(resolved.BaseColor) * 2.0f);
+							break;
+						default:
+							break;
+					}
+					wrote = MaterialLibrary::Get().Save(instance, target, &error);
+				}
+			}
+			if (!wrote)
 			{
 				m_NewMaterialFailure = error.empty() ? std::string("could not write the .wmat") : error;
 				m_NewMaterialFailureFor = target;
@@ -1873,6 +1977,8 @@ namespace World
 			// Esc 分层:先关展开的下拉,第二次才关模态。
 			if (templatePopupWasOpen)
 				ctx.ClosePopup(templateId);
+			else if (parentPopupWasOpen)
+				ctx.ClosePopup(parentId);
 			else if (folderPopupWasOpen)
 				ctx.ClosePopup(folderId);
 			else

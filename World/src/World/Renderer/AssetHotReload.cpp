@@ -2,6 +2,8 @@
 
 #include "World/Renderer/AssetHotReload.h"
 
+#include "World/Renderer/Material.h"
+
 #include "World/Core/Application.h"
 
 #include <algorithm>
@@ -37,6 +39,25 @@ namespace World
 		std::filesystem::path DiskPathFor(const std::string& logicalPath)
 		{
 			return std::filesystem::path(WLD_ASSETPATH) / logicalPath;
+		}
+
+		// M3:.wmat 是材质实例(覆盖字段 + Parent),指纹必须含**解析后的父级链**,
+		// 否则"父级改了、子材质没变"会漏检。深度上限与父级链一致(8 级);
+		// 环由 MaterialLibrary::Load 拒绝,这里只防指纹递归本身失控。
+		constexpr int kMaxMaterialParentDepth = 8;
+
+		AssetFingerprint FingerprintAssetInternal(const std::string& logicalPath, std::string* error, int depth);
+
+		bool IsMaterialPath(const std::string& logicalPath)
+		{
+			return logicalPath.size() >= 5 && logicalPath.compare(logicalPath.size() - 5, 5, ".wmat") == 0;
+		}
+
+		// FNV-1a 风格混合:把父级指纹并入子级(顺序敏感、稳定、与字节哈希同族)。
+		void MixFingerprint(uint64_t& value, uint64_t other)
+		{
+			value ^= other;
+			value *= kFnvPrime;
 		}
 	}
 
@@ -76,49 +97,71 @@ namespace World
 		return true;
 	}
 
-	AssetFingerprint FingerprintAsset(const std::string& logicalPath, std::string* error)
+	namespace
 	{
-		AssetFingerprint result;
-		if (logicalPath.empty())
+		AssetFingerprint FingerprintAssetInternal(const std::string& logicalPath, std::string* error, int depth)
 		{
-			if (error) *error = "asset path is empty";
-			return result;
-		}
+			AssetFingerprint result;
+			if (logicalPath.empty())
+			{
+				if (error) *error = "asset path is empty";
+				return result;
+			}
 
-		// 内容哈希优先:同内容重写(只动 mtime)不算变化。
-		std::vector<uint8_t> bytes;
-		std::string readError;
-		if (ReadAssetBytes(logicalPath, bytes, &readError))
-		{
-			result.Value = (bytes.empty() ? kFnvOffsetBasis : HashBytes(bytes.data(), bytes.size()));
-			result.FromContent = true;
+			// 内容哈希优先:同内容重写(只动 mtime)不算变化。
+			std::vector<uint8_t> bytes;
+			std::string readError;
+			if (ReadAssetBytes(logicalPath, bytes, &readError))
+			{
+				result.Value = (bytes.empty() ? kFnvOffsetBasis : HashBytes(bytes.data(), bytes.size()));
+				result.FromContent = true;
+				result.Exists = true;
+
+				// M3:材质实例指纹 = 本文件内容 ⊕ 解析后父级链的指纹(父改 → 子失效)。
+				if (IsMaterialPath(logicalPath) && depth < kMaxMaterialParentDepth)
+				{
+					const std::string text(bytes.begin(), bytes.end());
+					MaterialDocument document;
+					if (MaterialIO::ParseDocument(text, document, nullptr).Success && !document.ParentPath.empty())
+					{
+						const AssetFingerprint parent =
+							FingerprintAssetInternal(document.ParentPath, nullptr, depth + 1);
+						MixFingerprint(result.Value, parent.Value);
+						MixFingerprint(result.Value, parent.Exists ? 0x9e3779b97f4a7c15ull : 0ull);
+					}
+				}
+				if (error) error->clear();
+				return result;
+			}
+
+			// 内容读不到 → size|mtime 兜底(只有磁盘能提供;包内读取失败时自然退化成不存在)。
+			std::error_code ec;
+			const std::filesystem::path diskPath = DiskPathFor(logicalPath);
+			const uintmax_t size = std::filesystem::file_size(diskPath, ec);
+			if (ec)
+			{
+				if (error) *error = readError;
+				return result;
+			}
+			const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(diskPath, ec);
+			if (ec)
+			{
+				if (error) *error = readError;
+				return result;
+			}
+			const std::string key = std::to_string(static_cast<unsigned long long>(size)) + "|" +
+				std::to_string(static_cast<long long>(writeTime.time_since_epoch().count()));
+			result.Value = HashBytes(key.data(), key.size());
+			result.FromContent = false;
 			result.Exists = true;
 			if (error) error->clear();
 			return result;
 		}
+	}
 
-		// 内容读不到 → size|mtime 兜底(只有磁盘能提供;包内读取失败时自然退化成不存在)。
-		std::error_code ec;
-		const std::filesystem::path diskPath = DiskPathFor(logicalPath);
-		const uintmax_t size = std::filesystem::file_size(diskPath, ec);
-		if (ec)
-		{
-			if (error) *error = readError;
-			return result;
-		}
-		const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(diskPath, ec);
-		if (ec)
-		{
-			if (error) *error = readError;
-			return result;
-		}
-		const std::string key = std::to_string(static_cast<unsigned long long>(size)) + "|" +
-			std::to_string(static_cast<long long>(writeTime.time_since_epoch().count()));
-		result.Value = HashBytes(key.data(), key.size());
-		result.FromContent = false;
-		result.Exists = true;
-		if (error) error->clear();
-		return result;
+	AssetFingerprint FingerprintAsset(const std::string& logicalPath, std::string* error)
+	{
+		return FingerprintAssetInternal(logicalPath, error, 0);
 	}
 
 	AssetFileWatch::AssetFileWatch(double debounceSeconds)
