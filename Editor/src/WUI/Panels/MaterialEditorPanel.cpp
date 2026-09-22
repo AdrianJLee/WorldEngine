@@ -1,10 +1,12 @@
 #include "wldpch.h"
 #include "MaterialEditorPanel.h"
 
+#include "World/Core/KeyCodes.h"
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/RenderSettings.h"
+#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -14,14 +16,37 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
-#include <sstream>
+#include <vector>
+
+#ifdef _WIN32
+#include <shellapi.h>
+#endif
 
 namespace World
 {
 	namespace
 	{
+		// ---- 排版(设计单位,4px 基准栅格;与设置面板同一密度)----
+		constexpr float kHeaderBaseHeight = 50.0f;   // 动作行 + 名称/路径行
+		constexpr float kGroupHeaderHeight = 26.0f;
+		constexpr float kRowHeight = 26.0f;
+		constexpr float kRowHeightStacked = 46.0f;
+		constexpr float kResetWidth = 56.0f;
+		constexpr float kTwoColumnMinWidth = 560.0f; // 与模型/预制体面板同口径
+		constexpr float kLabelColumnMax = 150.0f;
+		constexpr float kStackedThreshold = 380.0f;  // 参数列窄于它 → 标签/控件分两行
+		// 预览离屏目标的长边范围(等比缩放;4K 窗口不把预览拖成大目标)。
+		constexpr float kPreviewTargetMaxSide = 2048.0f;
+		constexpr float kPreviewTargetMinSide = 128.0f;
+		// 轨道旋转俯仰限位 ±89°(与模型/预制体面板同口径)。
+		constexpr float kPitchLimit = 1.55334f;
+		// UV 棋盘格:每个方向 8 格(方案 §1.C「看平铺是否拉伸」)。
+		constexpr float kUvCheckerCells = 8.0f;
 		constexpr float kPi = 3.14159265358979323846f;
 
 		std::string ShortenPath(const std::string& path)
@@ -31,9 +56,39 @@ namespace World
 			return "…" + path.substr(path.size() - 45);
 		}
 
+		std::string ToLowerAscii(const std::string& text)
+		{
+			std::string result = text;
+			std::transform(result.begin(), result.end(), result.begin(),
+				[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+			return result;
+		}
+
+		// 按 UTF-8 码点边界裁剪到宽度(直接按字节切会切碎中文)。
+		std::string EllipsizeToWidth(const Wui::WuiContext& ctx, const std::string& text, float width,
+			float fontSize)
+		{
+			if (text.empty() || width <= 0.0f)
+				return {};
+			if (ctx.MeasureTextWidth(text, fontSize) <= width)
+				return text;
+			const std::string dots = "…";
+			std::vector<size_t> boundaries;
+			for (size_t index = 0; index < text.size(); ++index)
+				if ((static_cast<unsigned char>(text[index]) & 0xC0) != 0x80)
+					boundaries.push_back(index);
+			for (size_t count = boundaries.size(); count > 0; --count)
+			{
+				const std::string candidate = text.substr(0, boundaries[count - 1]) + dots;
+				if (ctx.MeasureTextWidth(candidate, fontSize) <= width)
+					return candidate;
+			}
+			return dots;
+		}
+
 		// U2d:未落盘材质的"另存为"目标路径校验,返回给用户看的具体原因(空字符串 = 可提交)。
 		// 与 MaterialLibrary::Save + MaterialIO::WriteFileText 的落盘规则一致:
-		//  - 缺 .wmat 后缀会自动补;  - 写入目标为内容根 Game/assets,其次 Game/ 旧布局(都不存在时写 Game/<key>)。
+		//  - 缺 .wmat 后缀会自动补;  - 写入目标为内容根 Game/assets。
 		// 名字里真正非法的只有 < > : " | ? *(反斜杠/斜杠是路径分隔符,不是非法字符)。
 		std::string NewMaterialPathError(const std::string& raw)
 		{
@@ -41,8 +96,8 @@ namespace World
 				return Wui::Tr("panel.material.newpath.error.empty", "Path cannot be empty");
 			for (const char character : raw)
 			{
-				if (character == '<' || character == '>' || character == ':' || character == '"'
-					|| character == '|' || character == '?' || character == '*')
+				if (character == '<' || character == '>' || character == ':'
+					|| character == '"' || character == '|' || character == '?' || character == '*')
 					return Wui::Tr("panel.material.newpath.error.illegal",
 						"Path contains illegal characters (< > : \" | ? *)");
 			}
@@ -50,7 +105,8 @@ namespace World
 			if (key.size() < 5 || key.substr(key.size() - 5) != ".wmat")
 				key.append(".wmat");
 			std::error_code existsError;
-			const std::filesystem::path contentRoot = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+			const std::filesystem::path contentRoot =
+				std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
 			if (std::filesystem::exists(contentRoot / key, existsError))
 				return Wui::Tr("panel.material.newpath.error.exists", "A file already exists at this path");
 			return {};
@@ -82,6 +138,540 @@ namespace World
 			std::sort(paths.begin(), paths.end());
 			return paths;
 		}
+
+		std::filesystem::path ContentRootPath()
+		{
+			return std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+		}
+
+		// 逻辑贴图路径是否能在磁盘上找到(绝对路径也支持:编辑器自带资源用绝对路径)。
+		bool TextureAssetExists(const std::string& logical)
+		{
+			if (logical.empty())
+				return true;
+			std::error_code ec;
+			const std::filesystem::path path(MaterialLibrary::NormalizePath(logical));
+			if (path.is_absolute())
+				return std::filesystem::exists(path, ec);
+			return std::filesystem::exists(ContentRootPath() / path, ec);
+		}
+
+		// "引用在内容根内":打包/复制项目不会丢的引用。绝对路径与 ".." 逃逸都算问题
+		// (U21 校验区第三类:未引用资产 —— 引用了不随项目分发的文件)。
+		bool TextureInsideContentRoot(const std::string& logical)
+		{
+			if (logical.empty())
+				return true;
+			const std::filesystem::path path(MaterialLibrary::NormalizePath(logical));
+			if (path.is_absolute())
+				return false;
+			for (const std::filesystem::path& part : path)
+				if (part == "..")
+					return false;
+			return true;
+		}
+
+		// ---- 参数分组(方案 §1.A:按物理意义分组;组序 = 参数区从上到下)----
+		struct GroupDesc
+		{
+			const char* Key;
+			const char* Label;   // 默认英文(zh-CN 由 catalog 覆盖)
+			int Index;
+		};
+
+		const GroupDesc kGroups[] = {
+			{ "preview", "Preview", 0 },
+			{ "base", "Base Appearance", 1 },
+			{ "detail", "Surface Detail", 2 },
+			{ "emissive", "Emissive", 3 },
+			{ "blend", "Transparency & Blend", 4 },
+			{ "sampling", "Texture Sampling", 5 },
+			{ "advanced", "Advanced", 6 },
+		};
+		constexpr int kGroupCount = static_cast<int>(sizeof(kGroups) / sizeof(kGroups[0]));
+
+		const GroupDesc* FindGroup(const std::string& key)
+		{
+			for (const GroupDesc& group : kGroups)
+				if (key == group.Key)
+					return &group;
+			return nullptr;
+		}
+
+		std::string GroupLabel(const GroupDesc& group)
+		{
+			return Wui::Tr(std::string("material.group.") + group.Key, group.Label);
+		}
+
+		// ---- 参数行表(唯一事实源:分组 / 参数名 / 文案 / 只读 / 是否有默认值)----
+		struct RowSpec
+		{
+			const char* Group;
+			const char* Key;        // 参数名:决定控件 id、复位 id、校验定位
+			const char* LabelKey;
+			const char* LabelEn;
+			const char* DocKey;
+			const char* DocEn;
+			bool ReadOnly;
+			bool HasReset;
+		};
+
+		const RowSpec kRowSpecs[] = {
+			// ---- 预览控制(方案 §1.C;只影响预览,不写进 .wmat)----
+			{ "preview", "preview.mesh", "material.prop.preview.mesh", "Mesh",
+				"material.prop.preview.mesh.doc",
+				"Preview mesh: sphere / cube / plane. Preview only, never saved into the .wmat. Default: Sphere.",
+				0, 1 },
+			{ "preview", "preview.bg", "material.prop.preview.bg", "Background",
+				"material.prop.preview.bg.doc",
+				"Preview background: solid colour or gradient. Preview only. Default: Solid.",
+				0, 1 },
+			{ "preview", "preview.light", "material.prop.preview.light", "Lighting",
+				"material.prop.preview.light.doc",
+				"Lighting preset: three-point / single directional / none (unlit shows emissive only). "
+				"Preview only. Default: Three-Point.",
+				0, 1 },
+			{ "preview", "preview.light.intensity", "material.prop.preview.light.intensity",
+				"Light Intensity", "material.prop.preview.light.intensity.doc",
+				"Key light intensity multiplier, 0-4. Preview only. Default: 1.",
+				0, 1 },
+			{ "preview", "preview.light.azimuth", "material.prop.preview.light.azimuth",
+				"Light Azimuth", "material.prop.preview.light.azimuth.doc",
+				"Key light azimuth in degrees, -180 to 180. Preview only. Default: 35.",
+				0, 1 },
+			{ "preview", "preview.light.elevation", "material.prop.preview.light.elevation",
+				"Light Elevation", "material.prop.preview.light.elevation.doc",
+				"Key light elevation in degrees, -85 to 85. Preview only. Default: 45.",
+				0, 1 },
+			{ "preview", "preview.wireframe", "material.prop.preview.wireframe", "Wireframe",
+				"material.prop.preview.wireframe.doc",
+				"Draw a wireframe overlay (every triangle edge) on the preview mesh. Default: off.",
+				0, 1 },
+			{ "preview", "preview.normals", "material.prop.preview.normals", "Normals",
+				"material.prop.preview.normals.doc",
+				"Draw per-vertex normal ticks on the preview mesh to spot flipped normals. Default: off.",
+				0, 1 },
+			{ "preview", "preview.uvchecker", "material.prop.preview.uvchecker", "UV Checker",
+				"material.prop.preview.uvchecker.doc",
+				"Show an 8x8 checker in UV space instead of the material, to spot stretched or flipped UVs. "
+				"Default: off.",
+				0, 1 },
+			// ---- 基础外观 ----
+			{ "base", "base", "material.prop.base", "Base Color", "material.prop.base.doc",
+				"Base colour in sRGB; albedo when no albedo texture is set. Default: white.", 0, 1 },
+			// 贴图槽放在它所属的物理组里(基础外观 = 基础色 + 它的贴图),而不是单独塞进"采样":
+			// 一来这是 Unreal 一类编辑器的分组口径,二来**首屏**就能看到贴图槽
+			// (verify-ai-control.py 与用户习惯都不希望"先滚一屏才能换贴图")。
+			{ "base", "albedo", "material.prop.albedo", "Albedo Texture", "material.prop.albedo.doc",
+				"Base colour texture; decoded from sRGB to linear by the hardware. Empty = base colour only. "
+				"Default: none.",
+				0, 1 },
+			{ "base", "metallic", "material.prop.metallic", "Metallic", "material.prop.metallic.doc",
+				"0 = dielectric, 1 = metal; shifts the diffuse/specular balance. Default: 0.", 0, 1 },
+			{ "base", "roughness", "material.prop.roughness", "Roughness", "material.prop.roughness.doc",
+				"0 = mirror-like highlight, 1 = fully diffuse. Default: 0.5.", 0, 1 },
+			// ---- 表面细节 ----
+			{ "detail", "normal", "material.prop.normal", "Normal Texture", "material.prop.normal.doc",
+				"Tangent-space normal map (linear colour space). Empty = flat surface. Default: none.",
+				0, 1 },
+			{ "detail", "normal.space", "material.prop.normal.space", "Normal Colour Space",
+				"material.prop.normal.space.doc",
+				"Normal maps are read as linear data (UNORM, no sRGB decode). Fixed by the engine.",
+				1, 0 },
+			// ---- 自发光 ----
+			{ "emissive", "emissive", "material.prop.emissive", "Emissive", "material.prop.emissive.doc",
+				"Self-illumination added after lighting, sRGB, range 0-8. Visible with lights off. "
+				"Default: 0,0,0.",
+				0, 1 },
+			// ---- 透明度与混合 ----
+			{ "blend", "blend", "material.prop.blend", "Blend Mode", "material.prop.blend.doc",
+				"Opaque writes depth and culls back faces; Transparent blends and does not write depth. "
+				"Default: Opaque.",
+				0, 1 },
+			{ "blend", "doublesided", "material.prop.doublesided", "Double Sided",
+				"material.prop.doublesided.doc",
+				"Draw back faces as well (no back-face culling); useful for planes. Default: off.",
+				0, 1 },
+			// ---- 贴图采样 ----
+			{ "sampling", "albedo.space", "material.prop.albedo.space", "Albedo Colour Space",
+				"material.prop.albedo.space.doc",
+				"Albedo textures are created as sRGB; sampling decodes them to linear. Fixed by the engine.",
+				1, 0 },
+			{ "sampling", "sampler", "material.prop.sampler", "Sampler", "material.prop.sampler.doc",
+				"Material textures use linear filtering with repeat wrap; anisotropy comes from "
+				"Project Settings. Fixed by the engine.",
+				1, 0 },
+			// ---- 高级 ----
+			{ "advanced", "name", "material.prop.name", "Display Name", "material.prop.name.doc",
+				"Display name written into the .wmat. Free text (no default); asset identity is the file path.",
+				0, 0 },
+			{ "advanced", "format", "material.prop.format", "Format Version", "material.prop.format.doc",
+				"Material format version written by the engine on save.", 1, 0 },
+			{ "advanced", "revision", "material.prop.revision", "Revision", "material.prop.revision.doc",
+				"In-memory revision counter; every edit bumps it so the renderer rebuilds GPU state.",
+				1, 0 },
+			{ "advanced", "disk", "material.prop.disk", "Disk State", "material.prop.disk.doc",
+				"clean = the file on disk matches memory; modified = unsaved edits are kept in memory.",
+				1, 0 },
+			{ "advanced", "reset_all", "material.prop.reset_all", "Restore Material Defaults",
+				"material.prop.reset_all.doc",
+				"Reset every material property (not the preview options) to its engine default. "
+				"The .wmat is not written until you press Save.",
+				0, 0 },
+		};
+		constexpr int kRowSpecCount = static_cast<int>(sizeof(kRowSpecs) / sizeof(kRowSpecs[0]));
+
+		std::string ResetIdFor(const std::string& key)
+		{
+			return "material.prop." + key + ".reset";
+		}
+
+		// ---- .wmat 的字段默认值(MaterialDesc 的默认构造;恢复默认 = 写回这里)----
+		bool FieldDiffersFromDefault(const std::string& key, const MaterialDesc& desc,
+			const MaterialDesc& defaults)
+		{
+			if (key == "base")
+				return desc.BaseColor != defaults.BaseColor;
+			if (key == "metallic")
+				return desc.Metallic != defaults.Metallic;
+			if (key == "roughness")
+				return desc.Roughness != defaults.Roughness;
+			if (key == "emissive")
+				return desc.Emissive != defaults.Emissive;
+			if (key == "blend")
+				return desc.BlendMode != defaults.BlendMode;
+			if (key == "doublesided")
+				return desc.DoubleSided != defaults.DoubleSided;
+			if (key == "albedo")
+				return desc.AlbedoTexture != defaults.AlbedoTexture;
+			if (key == "normal")
+				return desc.NormalTexture != defaults.NormalTexture;
+			return false;   // 只读行与自由文本(显示名)没有"默认值"概念
+		}
+
+		// ---- 预览派生网格的几何工具 ----
+		// 顶点布局与 Mesh::MakeStandardLayout() 一致:position(12) + normal(12) + uv(8)。
+		struct MeshBuilder
+		{
+			std::vector<uint8_t> Vertices;
+			std::vector<uint32_t> Indices;
+
+			uint32_t Add(const glm::vec3& position, const glm::vec3& normal, const glm::vec2& uv)
+			{
+				const float data[8] = { position.x, position.y, position.z,
+					normal.x, normal.y, normal.z, uv.x, uv.y };
+				const uint32_t index = static_cast<uint32_t>(Vertices.size() / sizeof(data));
+				const uint8_t* bytes = reinterpret_cast<const uint8_t*>(data);
+				Vertices.insert(Vertices.end(), bytes, bytes + sizeof(data));
+				return index;
+			}
+			void Triangle(uint32_t a, uint32_t b, uint32_t c)
+			{
+				Indices.push_back(a);
+				Indices.push_back(b);
+				Indices.push_back(c);
+			}
+			void Quad(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+			{
+				Triangle(a, b, c);
+				Triangle(a, c, d);
+			}
+			Ref<Mesh> Build(const std::string& name)
+			{
+				MeshDesc desc;
+				desc.DebugName = name;
+				desc.VertexData = Vertices;
+				desc.Indices = Indices;
+				desc.Layout = Mesh::MakeStandardLayout();
+				desc.VertexLayoutId = Mesh::kVertexLayoutStandard;
+				return Mesh::Create(desc);
+			}
+		};
+
+		struct SourceVertex
+		{
+			glm::vec3 Position { 0.0f };
+			glm::vec3 Normal { 0.0f, 1.0f, 0.0f };
+			glm::vec2 Uv { 0.0f };
+		};
+
+		// 读取标准布局(32B stride)的顶点;不是标准布局时返回空表(调用方跳过派生网格)。
+		std::vector<SourceVertex> ReadStandardVertices(const Mesh& mesh)
+		{
+			std::vector<SourceVertex> vertices;
+			if (mesh.GetVertexLayoutId() != Mesh::kVertexLayoutStandard)
+				return vertices;
+			const std::vector<uint8_t>& data = mesh.GetDesc().VertexData;
+			constexpr size_t stride = 32;
+			const size_t count = data.size() / stride;
+			vertices.reserve(count);
+			for (size_t index = 0; index < count; ++index)
+			{
+				const float* values = reinterpret_cast<const float*>(data.data() + index * stride);
+				SourceVertex vertex;
+				vertex.Position = { values[0], values[1], values[2] };
+				vertex.Normal = { values[3], values[4], values[5] };
+				vertex.Uv = { values[6], values[7] };
+				vertices.push_back(vertex);
+			}
+			return vertices;
+		}
+
+		glm::vec3 SafeNormalize(const glm::vec3& value, const glm::vec3& fallback = { 0.0f, 1.0f, 0.0f })
+		{
+			const float length = glm::length(value);
+			return length > 1e-6f ? value / length : fallback;
+		}
+
+		void OrthonormalBasis(const glm::vec3& direction, glm::vec3* u, glm::vec3* v)
+		{
+			const glm::vec3 axis = std::abs(direction.y) < 0.9f ? glm::vec3 { 0.0f, 1.0f, 0.0f }
+				: glm::vec3 { 1.0f, 0.0f, 0.0f };
+			*u = SafeNormalize(glm::cross(axis, direction), { 1.0f, 0.0f, 0.0f });
+			*v = SafeNormalize(glm::cross(direction, *u), { 0.0f, 0.0f, 1.0f });
+		}
+
+		// 线框:把每个三角形的三条边做成"贴着表面的细带",沿法线抬起一点点避免 z-fighting。
+		// 为什么不用多边形线模式:3D 管线是冻结的(World/** 不在本批边界内),RHI 也没有
+		// FillMode=Line;用几何表示线框不需要改任何共享接口。
+		Ref<Mesh> BuildWireMesh(const Mesh& source, float thickness, float offset)
+		{
+			const std::vector<SourceVertex> vertices = ReadStandardVertices(source);
+			if (vertices.empty())
+				return nullptr;
+			const std::vector<uint32_t>& indices = source.GetDesc().Indices;
+			MeshBuilder builder;
+			for (size_t index = 0; index + 2 < indices.size(); index += 3)
+			{
+				const SourceVertex& a = vertices[indices[index + 0]];
+				const SourceVertex& b = vertices[indices[index + 1]];
+				const SourceVertex& c = vertices[indices[index + 2]];
+				const SourceVertex* triangle[3] = { &a, &b, &c };
+				const glm::vec3 faceNormal = SafeNormalize(glm::cross(b.Position - a.Position,
+					c.Position - a.Position));
+				for (int edge = 0; edge < 3; ++edge)
+				{
+					const SourceVertex& start = *triangle[edge];
+					const SourceVertex& end = *triangle[(edge + 1) % 3];
+					const glm::vec3 edgeDirection = end.Position - start.Position;
+					if (glm::length(edgeDirection) < 1e-6f)
+						continue;
+					const glm::vec3 side = SafeNormalize(glm::cross(SafeNormalize(edgeDirection), faceNormal),
+						{ 1.0f, 0.0f, 0.0f }) * (thickness * 0.5f);
+					const glm::vec3 normal = SafeNormalize(start.Normal + end.Normal + faceNormal);
+					const glm::vec3 startPoint = start.Position + normal * offset;
+					const glm::vec3 endPoint = end.Position + normal * offset;
+					const uint32_t i0 = builder.Add(startPoint - side, normal, start.Uv);
+					const uint32_t i1 = builder.Add(startPoint + side, normal, start.Uv);
+					const uint32_t i2 = builder.Add(endPoint + side, normal, end.Uv);
+					const uint32_t i3 = builder.Add(endPoint - side, normal, end.Uv);
+					builder.Quad(i0, i1, i2, i3);
+				}
+			}
+			return builder.Build("Material.Preview.Wire");
+		}
+
+		// 法线可视化:每个顶点一根"三棱柱"细柱(比单面片更抗侧视,不用改着色器)。
+		Ref<Mesh> BuildNormalMesh(const Mesh& source, float length, float radius, float offset)
+		{
+			const std::vector<SourceVertex> vertices = ReadStandardVertices(source);
+			if (vertices.empty())
+				return nullptr;
+			MeshBuilder builder;
+			for (const SourceVertex& vertex : vertices)
+			{
+				const glm::vec3 normal = SafeNormalize(vertex.Normal);
+				glm::vec3 u;
+				glm::vec3 v;
+				OrthonormalBasis(normal, &u, &v);
+				const glm::vec3 base = vertex.Position + normal * offset;
+				const glm::vec3 tip = base + normal * length;
+				glm::vec3 ring[3];
+				glm::vec3 tipRing[3];
+				for (int corner = 0; corner < 3; ++corner)
+				{
+					const float angle = static_cast<float>(corner) * (2.0f * kPi / 3.0f);
+					const glm::vec3 offsetDir = u * std::cos(angle) + v * std::sin(angle);
+					ring[corner] = base + offsetDir * radius;
+					tipRing[corner] = tip + offsetDir * radius * 0.15f;
+				}
+				for (int corner = 0; corner < 3; ++corner)
+				{
+					const int next = (corner + 1) % 3;
+					const uint32_t i0 = builder.Add(ring[corner], normal, vertex.Uv);
+					const uint32_t i1 = builder.Add(ring[next], normal, vertex.Uv);
+					const uint32_t i2 = builder.Add(tipRing[next], normal, vertex.Uv);
+					const uint32_t i3 = builder.Add(tipRing[corner], normal, vertex.Uv);
+					builder.Quad(i0, i1, i2, i3);
+				}
+			}
+			return builder.Build("Material.Preview.Normals");
+		}
+
+		// UV 棋盘格:按 UV 把每个三角形细分,按格子奇偶分成两张网格(亮格 / 暗格)。
+		// 细分步长取"半个格子",所以低模(立方体/平面)也能得到 8×8 的棋盘。
+		void BuildCheckerMeshes(const Mesh& source, Ref<Mesh>* light, Ref<Mesh>* dark)
+		{
+			const std::vector<SourceVertex> vertices = ReadStandardVertices(source);
+			if (vertices.empty())
+				return;
+			const std::vector<uint32_t>& indices = source.GetDesc().Indices;
+			MeshBuilder lightBuilder;
+			MeshBuilder darkBuilder;
+			const float stepSize = 1.0f / (kUvCheckerCells * 2.0f);
+			for (size_t index = 0; index + 2 < indices.size(); index += 3)
+			{
+				const SourceVertex& a = vertices[indices[index + 0]];
+				const SourceVertex& b = vertices[indices[index + 1]];
+				const SourceVertex& c = vertices[indices[index + 2]];
+				const glm::vec2 minUv = glm::min(glm::min(a.Uv, b.Uv), c.Uv);
+				const glm::vec2 maxUv = glm::max(glm::max(a.Uv, b.Uv), c.Uv);
+				const int stepsU = std::clamp(
+					static_cast<int>(std::ceil((maxUv.x - minUv.x) / stepSize)), 1, 24);
+				const int stepsV = std::clamp(
+					static_cast<int>(std::ceil((maxUv.y - minUv.y) / stepSize)), 1, 24);
+				// UV 域重心坐标(带符号,不做 abs —— 镜像 UV 也要能正确求值);
+				// 返回 false = 该点在 UV 三角形之外(不发射,避免"折到边上"的斜向条纹)。
+				const float denominator = (b.Uv.y - c.Uv.y) * (a.Uv.x - c.Uv.x)
+					+ (c.Uv.x - b.Uv.x) * (a.Uv.y - c.Uv.y);
+				if (std::abs(denominator) < 1e-9f)
+					continue;   // UV 退化(整条三角形挤成一点):没有棋盘格可看
+				const auto barycentric = [&](const glm::vec2& uv, bool* inside, SourceVertex* out)
+				{
+					const float wA = ((b.Uv.y - c.Uv.y) * (uv.x - c.Uv.x)
+						+ (c.Uv.x - b.Uv.x) * (uv.y - c.Uv.y)) / denominator;
+					const float wB = ((c.Uv.y - a.Uv.y) * (uv.x - c.Uv.x)
+						+ (a.Uv.x - c.Uv.x) * (uv.y - c.Uv.y)) / denominator;
+					const float wC = 1.0f - wA - wB;
+					if (inside)
+						*inside = wA >= -1e-4f && wB >= -1e-4f && wC >= -1e-4f;
+					if (!out)
+						return;
+					out->Position = a.Position * wA + b.Position * wB + c.Position * wC;
+					out->Normal = SafeNormalize(a.Normal * wA + b.Normal * wB + c.Normal * wC);
+					out->Uv = a.Uv * wA + b.Uv * wB + c.Uv * wC;
+				};
+				for (int cellV = 0; cellV < stepsV; ++cellV)
+				{
+					for (int cellU = 0; cellU < stepsU; ++cellU)
+					{
+						const float u0 = static_cast<float>(cellU) / static_cast<float>(stepsU);
+						const float u1 = static_cast<float>(cellU + 1) / static_cast<float>(stepsU);
+						const float v0 = static_cast<float>(cellV) / static_cast<float>(stepsV);
+						const float v1 = static_cast<float>(cellV + 1) / static_cast<float>(stepsV);
+						// 四个角都要落在 UV 三角形内才发射(边界损失 ≤ 一个细分格,肉眼不可见)。
+						const glm::vec2 uv[4] = { { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 } };
+						SourceVertex corner[4];
+						bool allInside = true;
+						for (int index = 0; index < 4; ++index)
+						{
+							bool inside = false;
+							barycentric(uv[index], &inside, &corner[index]);
+							allInside = allInside && inside;
+						}
+						if (!allInside)
+							continue;
+						// 两个子三角形各自按**自己的重心 UV** 取格子奇偶(镜像 UV 也正确)。
+						const int triangles[2][3] = { { 0, 1, 2 }, { 0, 2, 3 } };
+						for (const int* triangle : triangles)
+						{
+							const glm::vec2 centroid = (uv[triangle[0]] + uv[triangle[1]] + uv[triangle[2]])
+								/ 3.0f;
+							const int cellX = static_cast<int>(std::floor(centroid.x * kUvCheckerCells));
+							const int cellY = static_cast<int>(std::floor(centroid.y * kUvCheckerCells));
+							MeshBuilder& builder = (((cellX + cellY) & 1) == 0) ? lightBuilder : darkBuilder;
+							uint32_t ids[3];
+							for (int index = 0; index < 3; ++index)
+							{
+								const SourceVertex& source = corner[triangle[index]];
+								ids[index] = builder.Add(source.Position, source.Normal, source.Uv);
+							}
+							builder.Triangle(ids[0], ids[1], ids[2]);
+						}
+					}
+				}
+			}
+			if (light)
+				*light = lightBuilder.Build("Material.Preview.CheckerLight");
+			if (dark)
+				*dark = darkBuilder.Build("Material.Preview.CheckerDark");
+		}
+
+		// 预览灯光预设 → LightUniforms(走 Renderer3D::BuildLightRig,与场景同一条打包口径)。
+		// 为什么补光/轮廓光用点光:方向光容量 = 2 且 BuildLightRig 只取前 1 个方向光,
+		// 三点光只能"1 个主方向光 + 2 个点光"。
+		LightUniforms BuildPreviewLightUniforms(int preset, float intensity, float azimuthDeg, float elevationDeg)
+		{
+			const float azimuth = glm::radians(azimuthDeg);
+			const float elevation = glm::radians(elevationDeg);
+			const glm::vec3 toLight { std::cos(elevation) * std::sin(azimuth), std::sin(elevation),
+				std::cos(elevation) * std::cos(azimuth) };
+			std::vector<DirectionalLightData> directional;
+			std::vector<PointLightData> point;
+			AmbientLightData ambient;
+			if (preset == 0)
+			{
+				directional.push_back({ glm::vec3 { 1.0f }, intensity, -toLight, false });
+				point.push_back({ glm::vec3 { 1.0f }, intensity * 0.35f, { -1.9f, 0.7f, 1.5f }, 9.0f });
+				point.push_back({ glm::vec3 { 1.0f }, intensity * 0.45f, { 0.5f, 1.3f, -2.1f }, 9.0f });
+				ambient.Intensity = 0.22f;
+			}
+			else if (preset == 1)
+			{
+				directional.push_back({ glm::vec3 { 1.0f }, intensity, -toLight, false });
+				ambient.Intensity = 0.12f;
+			}
+			else
+			{
+				// 无光:只看自发光(环境光也置 0)。
+				ambient.Intensity = 0.0f;
+			}
+			const bool glDepthConvention = Renderer::GetBackendName() != "vulkan";
+			return Renderer3D::BuildLightRig(directional, point, &ambient, glDepthConvention).Uniforms;
+		}
+
+		// ---- 无障碍辅助:补标签/悬停说明(值/矩形仍以控件自己登记的为准)----
+		void AnnotateNode(Wui::WuiContext& ctx, Wui::WuiId id, const std::string& label,
+			const std::string& tooltip)
+		{
+			const Wui::WuiAccessNode* live = Wui::WuiAccessibility::Get().Find(id);
+			Wui::WuiAccessNode node;
+			if (live)
+				node = *live;
+			node.Id = id;
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			if (live && !live->Label.empty())
+				node.Label = live->Label;
+			else
+				node.Label = label;
+			node.Tooltip = tooltip;
+			if (!live)
+			{
+				node.Kind = "text";
+				node.Value = label;
+			}
+			node.Focused = ctx.Focus() == id;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
+		void RegisterReadOnlyNode(Wui::WuiId id, const std::string& label, const std::string& value,
+			const Wui::WuiRect& rect, const std::string& tooltip)
+		{
+			Wui::WuiAccessNode node;
+			node.Id = id;
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = label;
+			node.Value = value;
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
 	}
 
 	MaterialEditorPanel::MaterialEditorPanel()
@@ -93,7 +683,13 @@ namespace World
 	{
 		// 预览资源属于当前设备:设备释放(后端切换/关闭)前必须把句柄放掉,
 		// 否则会在设备之后析构(独立窗口崩溃那次的同类问题)。
-		Renderer::RegisterDeviceReleaseHook(this, [this] { ReleaseGpuResources(); });
+		Renderer::RegisterDeviceReleaseHook(this, [this]
+		{
+			ReleaseGpuResources();
+			// 设备重建后注册表整表清空:句柄与注册槽位一起作废。
+			m_PreviewTextureId = 0;
+			m_UiTextureGeneration = 0;
+		});
 		SetMaterialPathForPanel(materialPath);
 	}
 
@@ -108,12 +704,18 @@ namespace World
 		if (name.empty())
 			name = "Material";
 		m_PanelTitle = "Material - " + name;
+		m_Search.clear();
+		m_ScrollY = 0.0f;
+		m_RevealField.clear();
+		m_RevealFrames = 0;
+		m_SyncNameBuffer = true;
 	}
 
 	MaterialEditorPanel::~MaterialEditorPanel()
 	{
 		Renderer::UnregisterDeviceReleaseHook(this);
-		ReleaseGpuResources();
+		// 面板关闭时设备与帧循环通常还活着:延迟释放,避免销毁在飞命令引用着的资源。
+		ReleaseGpuResources(/*defer*/ true);
 	}
 
 	void MaterialEditorPanel::OpenMaterial(const std::string& path)
@@ -141,6 +743,9 @@ namespace World
 		m_Material = material;
 		m_Path = material->GetPath();
 		SetMaterialPathForPanel(m_Path);
+		// 校验缓存按路径/Revision 失效,换文档要立刻重算。
+		m_ValidationRevision = 0;
+		m_ValidationPath.clear();
 		RefreshCatalog();
 		RefreshPickerIndices();
 		WLD_CORE_INFO("[material-ui] opened material '{0}'", m_Path);
@@ -179,8 +784,187 @@ namespace World
 				m_NormalPickIndex = static_cast<int>(i) + 1;
 	}
 
-	void MaterialEditorPanel::ReleaseGpuResources()
+	bool MaterialEditorPanel::FieldModified(const std::string& key) const
 	{
+		if (!m_Material)
+			return false;
+		const MaterialDesc defaults;
+		return FieldDiffersFromDefault(key, m_Material->GetDesc(), defaults);
+	}
+
+	int MaterialEditorPanel::GroupModifiedCount(const std::string& groupKey) const
+	{
+		int count = 0;
+		for (int index = 0; index < kRowSpecCount; ++index)
+		{
+			const RowSpec& spec = kRowSpecs[index];
+			if (groupKey != spec.Group || !spec.HasReset || spec.ReadOnly)
+				continue;
+			if (groupKey == std::string("preview"))
+			{
+				if (PreviewOptionModified(spec.Key))
+					++count;
+				continue;
+			}
+			if (FieldModified(spec.Key))
+				++count;
+		}
+		return count;
+	}
+
+	bool MaterialEditorPanel::PreviewOptionModified(const std::string& key) const
+	{
+		if (key == "preview.mesh")
+			return m_PreviewMesh != PreviewMesh::Sphere;
+		if (key == "preview.bg")
+			return m_PreviewBackground != PreviewBackground::Solid;
+		if (key == "preview.light")
+			return m_PreviewLighting != PreviewLighting::ThreePoint;
+		if (key == "preview.light.intensity")
+			return m_LightIntensity != 1.0f;
+		if (key == "preview.light.azimuth")
+			return m_LightAzimuth != 35.0f;
+		if (key == "preview.light.elevation")
+			return m_LightElevation != 45.0f;
+		if (key == "preview.wireframe")
+			return m_ShowWireframe;
+		if (key == "preview.normals")
+			return m_ShowNormals;
+		if (key == "preview.uvchecker")
+			return m_ShowUvChecker;
+		return false;
+	}
+
+	void MaterialEditorPanel::SetFieldToDefault(const std::string& key)
+	{
+		if (!m_Material)
+			return;
+		// 预览选项不写进 .wmat:复位只动面板状态。
+		if (key == "preview.mesh")
+			m_PreviewMesh = PreviewMesh::Sphere;
+		else if (key == "preview.bg")
+			m_PreviewBackground = PreviewBackground::Solid;
+		else if (key == "preview.light")
+			m_PreviewLighting = PreviewLighting::ThreePoint;
+		else if (key == "preview.light.intensity")
+			m_LightIntensity = 1.0f;
+		else if (key == "preview.light.azimuth")
+			m_LightAzimuth = 35.0f;
+		else if (key == "preview.light.elevation")
+			m_LightElevation = 45.0f;
+		else if (key == "preview.wireframe")
+			m_ShowWireframe = false;
+		else if (key == "preview.normals")
+			m_ShowNormals = false;
+		else if (key == "preview.uvchecker")
+			m_ShowUvChecker = false;
+		else
+		{
+			// 材质字段:走 Material 的 setter(Revision 自增 → 渲染侧缓存失效),与手动编辑同一条路径。
+			const MaterialDesc defaults;
+			const uint32_t revision = m_Material->GetRevision();
+			if (key == "base")
+				m_Material->SetBaseColor(defaults.BaseColor);
+			else if (key == "metallic")
+				m_Material->SetMetallic(defaults.Metallic);
+			else if (key == "roughness")
+				m_Material->SetRoughness(defaults.Roughness);
+			else if (key == "emissive")
+				m_Material->SetEmissive(defaults.Emissive);
+			else if (key == "blend")
+				m_Material->SetBlendMode(defaults.BlendMode);
+			else if (key == "doublesided")
+				m_Material->SetDoubleSided(defaults.DoubleSided);
+			else if (key == "albedo")
+				m_Material->SetAlbedoTexture(defaults.AlbedoTexture);
+			else if (key == "normal")
+				m_Material->SetNormalTexture(defaults.NormalTexture);
+			else
+				return;
+			// 与手动编辑同一条 dirty 口径:真的改了值才标脏(已等于默认值时不产生"假脏")。
+			if (m_Material->GetRevision() != revision)
+				m_Material->MarkDirty(true);
+		}
+	}
+
+	void MaterialEditorPanel::ResetAllMaterialFields()
+	{
+		if (!m_Material)
+			return;
+		for (const RowSpec& spec : kRowSpecs)
+		{
+			if (!spec.HasReset || spec.ReadOnly || std::string(spec.Group) == "preview")
+				continue;
+			SetFieldToDefault(spec.Key);
+		}
+		m_Status = Wui::Tr("panel.material.status.reset_defaults",
+			"Restored every material parameter to its default (not saved yet; press Save to write the .wmat)");
+		m_StatusIsError = false;
+	}
+
+	void MaterialEditorPanel::RefreshValidation(double now)
+	{
+		m_Validation.clear();
+		if (!m_Material)
+			return;
+		const MaterialDesc& desc = m_Material->GetDesc();
+		const auto checkTexture = [&](const std::string& logical, const char* field,
+			const std::string& label)
+		{
+			if (logical.empty())
+				return;
+			if (!TextureAssetExists(logical))
+			{
+				m_Validation.push_back({ field, label + ": " + logical, "missing" });
+				return;
+			}
+			if (!TextureInsideContentRoot(logical))
+				m_Validation.push_back({ field, label + ": " + logical, "unreferenced" });
+		};
+		checkTexture(desc.AlbedoTexture, "albedo", Wui::Tr("panel.material.validation.missing_albedo",
+			"Albedo texture not found"));
+		checkTexture(desc.NormalTexture, "normal", Wui::Tr("panel.material.validation.missing_normal",
+			"Normal texture not found"));
+
+		const auto checkRange = [&](const char* field, const char* label, float value, float minimum,
+			float maximum)
+		{
+			if (value >= minimum && value <= maximum)
+				return;
+			char buffer[128] = {};
+			std::snprintf(buffer, sizeof(buffer), "%s out of range [%g, %g]: %g", label,
+				static_cast<double>(minimum), static_cast<double>(maximum), static_cast<double>(value));
+			m_Validation.push_back({ field, buffer, "range" });
+		};
+		checkRange("base", "BaseColor R", desc.BaseColor.r, 0.0f, 1.0f);
+		checkRange("base", "BaseColor G", desc.BaseColor.g, 0.0f, 1.0f);
+		checkRange("base", "BaseColor B", desc.BaseColor.b, 0.0f, 1.0f);
+		checkRange("base", "BaseColor A", desc.BaseColor.a, 0.0f, 1.0f);
+		checkRange("metallic", "Metallic", desc.Metallic, 0.0f, 1.0f);
+		checkRange("roughness", "Roughness", desc.Roughness, 0.0f, 1.0f);
+		checkRange("emissive", "Emissive R", desc.Emissive.r, 0.0f, 8.0f);
+		checkRange("emissive", "Emissive G", desc.Emissive.g, 0.0f, 8.0f);
+		checkRange("emissive", "Emissive B", desc.Emissive.b, 0.0f, 8.0f);
+		m_ValidationRevision = m_Material->GetRevision();
+		m_ValidationPath = m_Path;
+		m_ValidationTime = now;
+	}
+
+	void MaterialEditorPanel::ReleaseGpuResources(bool defer)
+	{
+		if (defer)
+		{
+			// 帧在飞:把旧句柄搬到延迟释放队列(与 MaterialTextureCache::Invalidate /
+			// SceneRenderer::OnResize 同一条路径)。GL 立即执行,Vulkan 等帧栅栏。
+			std::array<Rhi::Handle<Rhi::CommandBuffer>, Renderer::FramesInFlight> commands {};
+			for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
+				commands[slot] = m_PreviewCommands[slot];
+			Renderer::QueueRelease([pass = m_PreviewPass, framebuffer = m_PreviewFramebuffer,
+				color = m_PreviewColor, entityId = m_PreviewEntityId, depth = m_PreviewDepth,
+				colorMsaa = m_PreviewColorMsaa, entityMsaa = m_PreviewEntityMsaa,
+				depthMsaa = m_PreviewDepthMsaa, commands, cameraBuffer = m_PreviewCameraBuffer,
+				lightBuffer = m_PreviewLightBuffer, cameraSet = m_PreviewCameraSet]() {});
+		}
 		m_PreviewPass = nullptr;
 		m_PreviewFramebuffer = nullptr;
 		m_PreviewColor = nullptr;
@@ -192,9 +976,11 @@ namespace World
 		for (Rhi::Handle<Rhi::CommandBuffer>& command : m_PreviewCommands)
 			command = nullptr;
 		m_PreviewCameraBuffer = nullptr;
+		m_PreviewLightBuffer = nullptr;
 		m_PreviewCameraSet = nullptr;
-		m_PreviewTextureId = 0;
 		m_GpuDevice = nullptr;
+		m_GpuTargetW = 0;
+		m_GpuTargetH = 0;
 	}
 
 	void MaterialEditorPanel::EnsureGpuResources()
@@ -202,10 +988,18 @@ namespace World
 		Rhi::Handle<Rhi::Device> device = Renderer::GetDevice();
 		if (!device)
 			return;
-		if (m_GpuDevice == device.get() && m_PreviewFramebuffer)
+		if (m_GpuDevice == device.get() && m_PreviewFramebuffer
+			&& m_GpuTargetW == m_PreviewTargetW && m_GpuTargetH == m_PreviewTargetH)
 			return;
-		ReleaseGpuResources();
+		// 尺寸变了:只重建 GPU 资源,**保留注册表槽位**(id 不变;Update 会推进内容代,
+		// WUI 后端的描述符集缓存随之失效 —— 不会采样到已销毁贴图)。
+		// 旧资源走延迟释放:本帧之前提交的命令可能还在引用它们(见 ReleaseGpuResources 注释)。
+		const uint64_t registryId = m_PreviewTextureId;
+		ReleaseGpuResources(/*defer*/ true);
+		m_PreviewTextureId = registryId;
 		m_GpuDevice = device.get();
+		m_GpuTargetW = m_PreviewTargetW;
+		m_GpuTargetH = m_PreviewTargetH;
 
 		// 预览目标:与 SceneRenderer 同样的结构(颜色 + entity id + 深度),
 		// 这样 Renderer3D 的管线(它就是按这个结构建的)可以直接用。
@@ -218,7 +1012,7 @@ namespace World
 		Rhi::TextureDesc colorDesc;
 		colorDesc.Type = Rhi::TextureType::Texture2D;
 		colorDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
-		colorDesc.Extent = { m_PreviewSize, m_PreviewSize, 1 };
+		colorDesc.Extent = { m_PreviewTargetW, m_PreviewTargetH, 1 };
 		colorDesc.Usage = Rhi::TextureUsageColorAttachment | Rhi::TextureUsageSampled;
 		colorDesc.DebugName = "Material.Preview.Color";
 		m_PreviewColor = device->CreateTexture(colorDesc);
@@ -293,7 +1087,8 @@ namespace World
 		depth.Clear.DepthStencil.Depth = 1.0f;
 		passDesc.Attachments = { color, entityId, depth };
 		Rhi::SubpassDesc subpass;
-		subpass.ColorAttachments = { { 0, Rhi::AttachmentLayout::ColorAttachment }, { 1, Rhi::AttachmentLayout::ColorAttachment } };
+		subpass.ColorAttachments = { { 0, Rhi::AttachmentLayout::ColorAttachment },
+			{ 1, Rhi::AttachmentLayout::ColorAttachment } };
 		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
 		if (multisampled)
 		{
@@ -323,7 +1118,7 @@ namespace World
 
 		Rhi::FramebufferDesc framebufferDesc;
 		framebufferDesc.RenderPass = m_PreviewPass;
-		framebufferDesc.Extent = { m_PreviewSize, m_PreviewSize };
+		framebufferDesc.Extent = { m_PreviewTargetW, m_PreviewTargetH };
 		// 顺序必须与渲染通道附件表 1:1(Vulkan 要求 framebuffer 附件数/顺序与通道一致)。
 		if (multisampled)
 			framebufferDesc.Attachments = { m_PreviewColorMsaa, m_PreviewEntityMsaa, m_PreviewDepthMsaa,
@@ -343,25 +1138,135 @@ namespace World
 		cameraDesc.Memory = Rhi::MemoryHint::HostVisible;
 		cameraDesc.DebugName = "Material.Preview.Camera";
 		m_PreviewCameraBuffer = device->CreateBuffer(cameraDesc);
+
+		// U21:预览灯光 UBO(set0 binding 2)。自建 set0 的调用方必须把相机(0)/灯光(2)/
+		// 阴影贴图(3)写在**同一次 Update** 里(GL 后端是整体替换语义)。
+		Rhi::BufferDesc lightDesc;
+		lightDesc.Size = sizeof(LightUniforms);
+		lightDesc.Usage = Rhi::BufferUsageUniform;
+		lightDesc.Memory = Rhi::MemoryHint::HostVisible;
+		lightDesc.DebugName = "Material.Preview.Light";
+		m_PreviewLightBuffer = device->CreateBuffer(lightDesc);
+
 		m_PreviewCameraSet = device->CreateDescriptorSet(Renderer::GetGlobalDescriptorSetLayout());
 		if (m_PreviewCameraSet)
 		{
-			// P1b D4:set0 现在还有 binding 2(灯光 UBO)与 binding 3(阴影贴图),3D 管线静态使用它们;
-			// 必须与相机(binding 0)**同一次 Update** 写完 —— GL 后端的 Update 是整体替换语义,
-			// 分两次写会把相机绑定冲掉(实测 Vulkan 预览球体几乎全黑)。
 			std::vector<Rhi::DescriptorWrite> writes;
 			Rhi::DescriptorWrite camera;
 			camera.Binding = 0;
 			camera.Type = Rhi::DescriptorType::UniformBuffer;
 			camera.Buffer = m_PreviewCameraBuffer;
 			writes.push_back(camera);
-			for (Rhi::DescriptorWrite& lighting : Renderer3D::MakeGlobalLightingWrites(nullptr))
+			for (Rhi::DescriptorWrite& lighting : Renderer3D::MakeGlobalLightingWrites(m_PreviewLightBuffer))
 				writes.push_back(std::move(lighting));
 			m_PreviewCameraSet->Update(writes);
 		}
+	}
 
-		if (!m_PreviewSphere)
-			m_PreviewSphere = Mesh::CreateUnitSphere(2.0f, 48, 24);
+	const Ref<Mesh>& MaterialEditorPanel::PreviewMeshFor(PreviewMesh kind)
+	{
+		const int index = std::clamp(static_cast<int>(kind), 0, 2);
+		if (!m_PreviewMeshes[index])
+		{
+			switch (static_cast<PreviewMesh>(index))
+			{
+				case PreviewMesh::Cube:
+					m_PreviewMeshes[index] = Mesh::CreateUnitCube(1.7f);
+					break;
+				case PreviewMesh::Plane:
+					m_PreviewMeshes[index] = Mesh::CreateUnitPlane(1.8f);
+					break;
+				case PreviewMesh::Sphere:
+				default:
+					m_PreviewMeshes[index] = Mesh::CreateUnitSphere(2.0f, 48, 24);
+					break;
+			}
+		}
+		return m_PreviewMeshes[index];
+	}
+
+	void MaterialEditorPanel::BuildDerivedMeshes()
+	{
+		const int index = std::clamp(static_cast<int>(m_PreviewMesh), 0, 2);
+		if (m_DerivedMeshFor == index && m_WireMesh && m_NormalMesh && m_CheckLightMesh && m_CheckDarkMesh)
+			return;
+		const Ref<Mesh>& source = PreviewMeshFor(m_PreviewMesh);
+		if (!source)
+			return;
+		m_CheckLightMesh = nullptr;
+		m_CheckDarkMesh = nullptr;
+		m_WireMesh = nullptr;
+		m_NormalMesh = nullptr;
+		// 尺寸系数按包围半径算,球/立方/平面三种网格的观感一致。
+		const float radius = std::max(0.2f, source->GetBounds().GetRadius());
+		BuildCheckerMeshes(*source, &m_CheckLightMesh, &m_CheckDarkMesh);
+		m_WireMesh = BuildWireMesh(*source, radius * 0.016f, radius * 0.0025f);
+		// 法线柱:长度 25% 半径、截面半径 1.2% 半径(在 400px 预览上约 2-3px 宽,看得见)。
+		m_NormalMesh = BuildNormalMesh(*source, radius * 0.25f, radius * 0.012f, radius * 0.004f);
+		m_DerivedMeshFor = index;
+	}
+
+	void MaterialEditorPanel::EnsureOverrideMaterials()
+	{
+		// 预览专用纯色材质:不进资产库缓存(不落盘、不出现在内容浏览器),
+		// 只被本面板的覆盖绘制(线框/法线/UV 棋盘格)引用。
+		if (!m_OverrideLight)
+		{
+			m_OverrideLight = MaterialLibrary::Get().CreateDefault("Material Preview Cell");
+			m_OverrideLight->SetBaseColor({ 0.87f, 0.87f, 0.87f, 1.0f });
+			m_OverrideLight->SetRoughness(0.95f);
+			// 双面:覆盖层的四边形是按 UV 参数域拼的,UV 镜像的三角形上绕序会反转,
+			// 单面材质会把它们当背面剔掉(实测 UV 棋盘格出现大片黑洞)。
+			m_OverrideLight->SetDoubleSided(true);
+		}
+		if (!m_OverrideDark)
+		{
+			m_OverrideDark = MaterialLibrary::Get().CreateDefault("Material Preview Cell Dark");
+			m_OverrideDark->SetBaseColor({ 0.18f, 0.20f, 0.24f, 1.0f });
+			m_OverrideDark->SetRoughness(0.95f);
+			m_OverrideDark->SetDoubleSided(true);
+		}
+		if (!m_OverrideWire)
+		{
+			m_OverrideWire = MaterialLibrary::Get().CreateDefault("Material Preview Wire");
+			m_OverrideWire->SetBaseColor({ 1.0f, 0.62f, 0.18f, 1.0f });
+			m_OverrideWire->SetRoughness(1.0f);
+			m_OverrideWire->SetDoubleSided(true);
+		}
+		if (!m_OverrideNormal)
+		{
+			m_OverrideNormal = MaterialLibrary::Get().CreateDefault("Material Preview Normals");
+			m_OverrideNormal->SetBaseColor({ 0.25f, 0.82f, 1.0f, 1.0f });
+			m_OverrideNormal->SetRoughness(1.0f);
+			m_OverrideNormal->SetDoubleSided(true);
+		}
+	}
+
+	// U21+P4-U13f 口径:目标尺寸 = 预览区物理像素(设计单位 × UiScale),长边 [128, 2048] 等比 clamp。
+	// render_scale **不参与**:材质预览自建 framebuffer(不走 SceneRenderer::OnResize),
+	// 读数里把它回显出来,供探针断言"改 render_scale 不影响预览目标"。
+	void MaterialEditorPanel::UpdatePreviewTargetSize(const Wui::WuiRect& view)
+	{
+		const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+		const float pixelW = std::max(1.0f, view.W * uiScale);
+		const float pixelH = std::max(1.0f, view.H * uiScale);
+		const float longSide = std::max(pixelW, pixelH);
+		float clampScale = 1.0f;
+		if (longSide > kPreviewTargetMaxSide)
+			clampScale = kPreviewTargetMaxSide / longSide;
+		else if (longSide < kPreviewTargetMinSide)
+			clampScale = kPreviewTargetMinSide / longSide;
+		const uint32_t targetW = static_cast<uint32_t>(std::max(1.0f, std::round(pixelW * clampScale)));
+		const uint32_t targetH = static_cast<uint32_t>(std::max(1.0f, std::round(pixelH * clampScale)));
+		m_PreviewUiScale = uiScale;
+		m_PreviewViewW = view.W;
+		m_PreviewViewH = view.H;
+		if (targetW == m_PreviewTargetW && targetH == m_PreviewTargetH)
+			return;
+		m_PreviewTargetW = targetW;
+		m_PreviewTargetH = targetH;
+		WLD_CORE_INFO("[material-ui] preview target {0}x{1} (view {2:.0f}x{3:.0f} design, uiScale={4:.2f})",
+			m_PreviewTargetW, m_PreviewTargetH, view.W, view.H, uiScale);
 	}
 
 	uint64_t MaterialEditorPanel::RenderPreview()
@@ -372,8 +1277,12 @@ namespace World
 		// P4-UX16b:本帧槽位专属的命令缓冲(见头文件:单缓冲会在上一帧还没跑完时重录)。
 		Rhi::Handle<Rhi::CommandBuffer>& command =
 			m_PreviewCommands[Renderer::FrameSlot() % Renderer::FramesInFlight];
-		if (!m_PreviewFramebuffer || !m_PreviewCameraSet || !m_PreviewSphere || !command)
+		const Ref<Mesh>& mesh = PreviewMeshFor(m_PreviewMesh);
+		if (!m_PreviewFramebuffer || !m_PreviewCameraSet || !mesh || !command)
 			return 0;
+
+		EnsureOverrideMaterials();
+		BuildDerivedMeshes();
 
 		const float distance = m_CameraDistance;
 		const glm::vec3 eye {
@@ -381,14 +1290,28 @@ namespace World
 			distance * std::sin(m_OrbitPitch),
 			distance * std::cos(m_OrbitPitch) * std::cos(m_OrbitYaw) };
 		const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-		const glm::mat4 projection = glm::perspective(glm::radians(35.0f), 1.0f, 0.05f, 20.0f);
+		// 宽高比 = 目标宽高比(非方形预览区不会被拉伸)。
+		const float aspect = m_PreviewTargetH > 0
+			? static_cast<float>(m_PreviewTargetW) / static_cast<float>(m_PreviewTargetH)
+			: 1.0f;
+		const glm::mat4 projection = glm::perspective(glm::radians(35.0f), aspect,
+			std::max(0.01f, distance * 0.01f), distance * 8.0f + 10.0f);
 		// 与场景同一条投影适配(离屏不做 Y 翻转,只补 Vulkan 的深度范围)。
 		const glm::mat4 viewProjection = AdaptViewProjectionForOffscreen(projection * view,
 			Renderer::GetBackendName() == "vulkan");
 		m_PreviewCameraBuffer->SetData(&viewProjection, sizeof(glm::mat4));
+		const LightUniforms lights = BuildPreviewLightUniforms(static_cast<int>(m_PreviewLighting),
+			m_LightIntensity, m_LightAzimuth, m_LightElevation);
+		if (m_PreviewLightBuffer)
+			m_PreviewLightBuffer->SetData(&lights, sizeof(lights));
 
 		std::vector<Rhi::ClearValue> clears(3);
-		clears[0].Color = { 0.12f, 0.13f, 0.15f, 1.0f };
+		// 纯色背景 = 清屏色;渐变背景清成**透明**,由 WUI 在贴图下面画渐变(见 DrawPreview)。
+		const bool gradientBackground = m_PreviewBackground == PreviewBackground::Gradient;
+		if (gradientBackground)
+			clears[0].Color = { 0.0f, 0.0f, 0.0f, 0.0f };
+		else
+			clears[0].Color = { 0.12f, 0.13f, 0.15f, 1.0f };
 		const int minusOne = -1;
 		std::memcpy(&clears[1].Color, &minusOne, sizeof(int));
 		clears[2].IsDepthStencil = true;
@@ -396,17 +1319,29 @@ namespace World
 
 		command->Begin();
 		command->BeginRenderPass(m_PreviewPass, m_PreviewFramebuffer, clears);
-		command->SetViewport({ 0, 0, static_cast<float>(m_PreviewSize), static_cast<float>(m_PreviewSize) });
-		command->SetScissor({ 0, 0, m_PreviewSize, m_PreviewSize });
+		command->SetViewport({ 0, 0, static_cast<float>(m_PreviewTargetW),
+			static_cast<float>(m_PreviewTargetH) });
+		command->SetScissor({ 0, 0, m_PreviewTargetW, m_PreviewTargetH });
 		command->BindDescriptorSet(m_PreviewCameraSet, 0);
 		Renderer3D::BeginScene(viewProjection, command);
-		// 预览用**固定对象槽位**(按面板身份映射):否则每个面板/主场景都从序号 0 开始分配,
+		// 预览用**固定槽位区**(按面板身份映射):否则每个面板/主场景都从序号 0 开始分配,
 		// 会争用同一份对象 UBO 与材质描述符集,两个内容不同的材质面板就会逐帧互相覆盖
-		// (用户实测:预览一直闪烁)。
+		// (用户实测:预览一直闪烁)。span=5:底材质 + 棋盘格两格 + 线框 + 法线。
 		const uint32_t slotBase = Renderer3D::ReserveSlotBase(
-			static_cast<uint32_t>(Wui::HashId(m_PanelId.c_str()) ^ 0x9E37u));
-		const uint32_t previewIndex = Renderer3D::SubmitAtSlot(slotBase, m_PreviewSphere, m_Material, glm::mat4(1.0f), -1);
-		(void)previewIndex;
+			static_cast<uint32_t>(Wui::HashId(m_PanelId.c_str()) ^ 0x9E37u), 5);
+		const glm::mat4 identity { 1.0f };
+		// 覆盖层先画(它们贴在表面外侧,深度写让底材质不会盖掉细线)。
+		if (m_ShowUvChecker && m_CheckLightMesh)
+			Renderer3D::SubmitAtSlot(slotBase + 1, m_CheckLightMesh, m_OverrideLight, identity, -1);
+		if (m_ShowUvChecker && m_CheckDarkMesh)
+			Renderer3D::SubmitAtSlot(slotBase + 2, m_CheckDarkMesh, m_OverrideDark, identity, -1);
+		if (m_ShowWireframe && m_WireMesh)
+			Renderer3D::SubmitAtSlot(slotBase + 3, m_WireMesh, m_OverrideWire, identity, -1);
+		if (m_ShowNormals && m_NormalMesh)
+			Renderer3D::SubmitAtSlot(slotBase + 4, m_NormalMesh, m_OverrideNormal, identity, -1);
+		// 底材质:UV 棋盘格打开时不画(棋盘格的意义是看 UV,不是看材质)。
+		if (!m_ShowUvChecker)
+			Renderer3D::SubmitAtSlot(slotBase, mesh, m_Material, identity, -1);
 		// 诊断钩子(用户复现):WLD_MATERIAL_SWITCH_TEXTURE=<贴图路径> 在第 30 帧把指定面板的
 		// Albedo 切到该贴图;WLD_MATERIAL_SWITCH_PANEL 指定面板(空 = 第一个面板)。
 		if (const char* switchTo = std::getenv("WLD_MATERIAL_SWITCH_TEXTURE"))
@@ -424,16 +1359,6 @@ namespace World
 				}
 			}
 		}
-		if (std::getenv("WLD_TRACE_3D"))
-		{
-			static int tracedPreviewSlots = 0;
-			if (tracedPreviewSlots < 24)
-			{
-				tracedPreviewSlots++;
-				WLD_CORE_INFO("[material-ui] preview slot panel='{0}' base={1} objectIndex={2}",
-					m_PanelId, slotBase, previewIndex);
-			}
-		}
 		Renderer3D::EndScene();
 		command->EndRenderPass();
 		// 颜色附件已在 EndRenderPass 由渲染通道隐式转换为 FinalLayout(ShaderReadOnly),
@@ -448,19 +1373,28 @@ namespace World
 		// AI 控制通道的一次性抓图请求(与 WLD_PREVIEW_TEX_CAPTURE 同一条读回路径)。
 		if (!m_PendingPreviewCapture.empty())
 		{
-			if (Renderer::CaptureTexture(m_PendingPreviewCapture, m_PreviewColor, m_PreviewSize, m_PreviewSize))
+			if (Renderer::CaptureTexture(m_PendingPreviewCapture, m_PreviewColor,
+				m_PreviewTargetW, m_PreviewTargetH))
 				WLD_CORE_INFO("[ai] preview capture written: {0}", m_PendingPreviewCapture);
 			m_PendingPreviewCapture.clear();
 		}
 		CapturePreviewTextureSequence();
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
-		if (m_PreviewTextureId == 0 || registry.Generation() != m_UiTextureGeneration)
+		if (m_PreviewTextureId == 0)
 		{
 			m_UiTextureGeneration = registry.Generation();
-			if (m_PreviewTextureId == 0)
-				m_PreviewTextureId = registry.Register(m_PreviewColor);
-			else
-				registry.Update(m_PreviewTextureId, m_PreviewColor);
+			m_PreviewTextureId = registry.Register(m_PreviewColor);
+		}
+		else if (registry.Generation() != m_UiTextureGeneration)
+		{
+			// 注册表整表清空(设备重建)→ 同一槽位换成新句柄。
+			m_UiTextureGeneration = registry.Generation();
+			registry.Update(m_PreviewTextureId, m_PreviewColor);
+		}
+		else
+		{
+			// 尺寸变化只是换了纹理对象:槽位 id 不变,Update 推进内容代让 WUI 后端丢掉旧 set。
+			registry.Update(m_PreviewTextureId, m_PreviewColor);
 		}
 		return m_PreviewTextureId;
 	}
@@ -474,9 +1408,12 @@ namespace World
 		const char* dir = std::getenv("WLD_PREVIEW_TEX_CAPTURE");
 		if (!dir || !*dir)
 			return;
-		static const int every = std::getenv("WLD_SCREEN_CAPTURE_EVERY") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_EVERY")) : 1;
-		static const int start = std::getenv("WLD_SCREEN_CAPTURE_START") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_START")) : 0;
-		static const int count = std::getenv("WLD_SCREEN_CAPTURE_COUNT") ? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_COUNT")) : 60;
+		static const int every = std::getenv("WLD_SCREEN_CAPTURE_EVERY")
+			? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_EVERY")) : 1;
+		static const int start = std::getenv("WLD_SCREEN_CAPTURE_START")
+			? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_START")) : 0;
+		static const int count = std::getenv("WLD_SCREEN_CAPTURE_COUNT")
+			? std::atoi(std::getenv("WLD_SCREEN_CAPTURE_COUNT")) : 60;
 		const int step = every > 0 ? every : 1;
 		++m_PreviewCaptureFrame;
 		if (m_PreviewCaptureFrame < start || m_PreviewCaptureWritten >= count
@@ -487,7 +1424,7 @@ namespace World
 			stem += (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_') ? c : '_';
 		const std::string path = std::string(dir) + "/preview-" + stem + "-"
 			+ std::to_string(m_PreviewCaptureWritten) + ".ppm";
-		Renderer::CaptureTexture(path, m_PreviewColor, m_PreviewSize, m_PreviewSize);
+		Renderer::CaptureTexture(path, m_PreviewColor, m_PreviewTargetW, m_PreviewTargetH);
 		++m_PreviewCaptureWritten;
 	}
 
@@ -526,25 +1463,96 @@ namespace World
 		m_Path = m_Material->GetPath();
 		SetMaterialPathForPanel(m_Path);
 		RefreshPickerIndices();
+		// 保存 = 磁盘与内存一致:校验缓存要重算(缺贴图可能刚补上)。
+		m_ValidationRevision = 0;
 		m_Status = Wui::Tr("panel.material.status.saved", "Saved ") + m_Path;
 		m_StatusIsError = false;
 	}
 
-	void MaterialEditorPanel::DrawToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	void MaterialEditorPanel::FramePreview()
+	{
+		const Ref<Mesh>& mesh = PreviewMeshFor(m_PreviewMesh);
+		const float radius = mesh ? std::max(0.2f, mesh->GetBounds().GetRadius()) : 1.0f;
+		m_FocusDistance = radius * 3.0f;
+		m_CameraMinDistance = radius * 0.6f;
+		m_CameraMaxDistance = radius * 30.0f;
+		m_CameraDistance = std::clamp(m_FocusDistance, m_CameraMinDistance, m_CameraMaxDistance);
+	}
+
+	void MaterialEditorPanel::RevealMaterialOnDisk()
+	{
+		if (m_Path.empty())
+		{
+			m_Status = Wui::Tr("panel.material.status.reveal_failed",
+				"Reveal failed: this material has never been saved to disk");
+			m_StatusIsError = true;
+			return;
+		}
+		const std::filesystem::path diskPath = ContentRootPath() / m_Path;
+		std::error_code ec;
+		const bool exists = std::filesystem::exists(diskPath, ec);
+		if (!exists)
+		{
+			m_Status = Wui::Tr("panel.material.status.reveal_missing",
+				"Reveal failed: the .wmat is not on disk yet (save it first)");
+			m_StatusIsError = true;
+			return;
+		}
+#ifdef _WIN32
+		// 与内容浏览器"Show in Explorer"同一条系统调用(/select 打开所在文件夹并选中该项)。
+		const std::wstring parameters = L"/select,\"" + std::filesystem::absolute(diskPath).wstring() + L"\"";
+		const HINSTANCE result = ShellExecuteW(nullptr, L"open", L"explorer.exe", parameters.c_str(),
+			nullptr, SW_SHOWNORMAL);
+		if (reinterpret_cast<intptr_t>(result) <= 32)
+		{
+			m_Status = Wui::Tr("panel.material.status.reveal_failed", "Reveal failed");
+			m_StatusIsError = true;
+			return;
+		}
+		m_Status = Wui::Tr("panel.material.status.revealed", "Revealed in Explorer: ") + m_Path;
+		m_StatusIsError = false;
+#else
+		m_Status = Wui::Tr("panel.material.status.reveal_unsupported",
+			"Reveal is only implemented on Windows");
+		m_StatusIsError = true;
+#endif
+	}
+
+	// ---- 头部:材质名 + 来源逻辑路径 + 脏标记 + Save / Reveal / Revert ----
+	float MaterialEditorPanel::DrawHeader(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
-		// 材质/贴图下拉列表:节流刷新(新资产 ~1.5s 内出现在列表里)。
-		if (m_Material)
-			RefreshCatalog();
-		const float x = rect.X + 10.0f;
-		float y = rect.Y + 6.0f;
-		const float buttonW = 86.0f;
-		const float gap = 8.0f;
+		const float x = rect.X;
+		const float y = rect.Y + 4.0f;
+		const float buttonW = 76.0f;
+		const float buttonH = 24.0f;
+		const float gap = 6.0f;
+		const bool dirty = m_Material && m_Material->IsDirty();
 
-		// 新建材质在内容浏览器(右键 → New Material)完成;面板只负责编辑与保存。
-		if (Wui::Button(ctx, Wui::HashId("material.save"), { x, y, buttonW, 22.0f }, "Save", theme))
+		const Wui::WuiRect saveRect { x, y, buttonW, buttonH };
+		const std::string saveDoc = Wui::Tr("panel.material.save.tooltip",
+			"Save: write the current values back to the .wmat on disk.");
+		if (Wui::Button(ctx, Wui::HashId("material.save"), saveRect,
+			Wui::Tr("panel.material.save", "Save"), theme))
 			SaveCurrent();
-		if (Wui::Button(ctx, Wui::HashId("material.revert"), { x + (buttonW + gap), y, buttonW, 22.0f }, "Revert", theme))
+		Wui::Tooltip(ctx, saveRect, saveDoc);
+		AnnotateNode(ctx, Wui::HashId("material.save"), Wui::Tr("panel.material.save", "Save"), saveDoc);
+
+		const Wui::WuiRect revealRect { x + (buttonW + gap), y, buttonW, buttonH };
+		const std::string revealDoc = Wui::Tr("panel.material.reveal.tooltip",
+			"Reveal: select the .wmat file in Windows Explorer (needs a saved file).");
+		if (Wui::Button(ctx, Wui::HashId("material.reveal"), revealRect,
+			Wui::Tr("panel.material.reveal", "Reveal"), theme))
+			RevealMaterialOnDisk();
+		Wui::Tooltip(ctx, revealRect, revealDoc);
+		AnnotateNode(ctx, Wui::HashId("material.reveal"), Wui::Tr("panel.material.reveal", "Reveal"),
+			revealDoc);
+
+		const Wui::WuiRect revertRect { x + 2.0f * (buttonW + gap), y, buttonW, buttonH };
+		const std::string revertDoc = Wui::Tr("panel.material.revert.tooltip",
+			"Revert: drop unsaved edits and read the .wmat from disk again.");
+		if (Wui::Button(ctx, Wui::HashId("material.revert"), revertRect,
+			Wui::Tr("panel.material.revert", "Revert"), theme))
 		{
 			if (m_Path.empty())
 			{
@@ -558,6 +1566,8 @@ namespace World
 				if (MaterialLibrary::Get().Reload(m_Path, &error))
 				{
 					RefreshPickerIndices();
+					m_ValidationRevision = 0;
+					m_SyncNameBuffer = true;
 					m_Status = Wui::Tr("panel.material.status.reloaded", "Reloaded from disk ") + m_Path;
 					m_StatusIsError = false;
 				}
@@ -568,45 +1578,97 @@ namespace World
 				}
 			}
 		}
+		Wui::Tooltip(ctx, revertRect, revertDoc);
+		AnnotateNode(ctx, Wui::HashId("material.revert"), Wui::Tr("panel.material.revert", "Revert"),
+			revertDoc);
 
-		y += 30.0f;
+		// 脏标记(状态节点,不是按钮):* = 内存与磁盘不一致。
+		const std::string dirtyText = dirty ? Wui::Tr("panel.material.dirty", "* Unsaved changes")
+			: Wui::Tr("panel.material.clean", "Saved");
+		const float dirtyWidth = ctx.MeasureTextWidth(dirtyText, 11.0f);
+		const Wui::WuiRect dirtyRect { x + rect.W - dirtyWidth - 6.0f, y + 5.0f, dirtyWidth, 16.0f };
+		Wui::Label(ctx, { dirtyRect.X, dirtyRect.Y }, dirtyText,
+			dirty ? theme.Warning : theme.TextDisabled, 11.0f);
+		const std::string dirtyDoc = Wui::Tr("panel.material.dirty.tooltip",
+			"Unsaved changes are kept in memory until you press Save; the file on disk is unchanged.");
+		Wui::Tooltip(ctx, dirtyRect, dirtyDoc);
+		RegisterReadOnlyNode(Wui::HashId("material.dirty"),
+			Wui::Tr("panel.material.dirty.label", "Unsaved changes"), dirty ? "true" : "false",
+			dirtyRect, dirtyDoc);
+
+		// 第二行:材质名 + 来源逻辑路径。
+		const float lineY = rect.Y + 32.0f;
+		const MaterialDesc& desc = m_Material->GetDesc();
+		std::filesystem::path file(m_Path.empty() ? std::string() : m_Path);
+		std::string fallbackName = file.stem().string();
+		if (fallbackName.empty())
+			fallbackName = "Material";
+		const std::string name = desc.Name.empty() ? fallbackName : desc.Name;
+		const float nameWidth = std::max(40.0f,
+			std::min(rect.W * 0.5f, ctx.MeasureTextWidth(name, 13.0f)));
+		Wui::Label(ctx, { x, lineY }, EllipsizeToWidth(ctx, name, nameWidth, 13.0f), theme.Text, 13.0f);
+		const std::string nameDoc = Wui::Tr("panel.material.name.tooltip",
+			"Material display name (the .wmat Name field). Asset identity is the file path; rename the file "
+			"in the Content Browser to change where it lives.");
+		Wui::Tooltip(ctx, { x, lineY, nameWidth, 16.0f }, nameDoc);
+		RegisterReadOnlyNode(Wui::HashId("material.name"),
+			Wui::Tr("panel.material.name", "Material name"), name, { x, lineY, nameWidth, 16.0f }, nameDoc);
+		const float pathX = x + nameWidth + 10.0f;
+		if (pathX < x + rect.W - 60.0f)
+		{
+			const float pathWidth = rect.W - (pathX - x) - 6.0f;
+			const std::string pathText = m_Path.empty()
+				? Wui::Tr("panel.material.unsaved_new", "(unsaved new material)")
+				: ShortenPath(m_Path);
+			Wui::Label(ctx, { pathX, lineY + 2.0f },
+				EllipsizeToWidth(ctx, pathText, pathWidth, 11.0f), theme.TextMuted, 11.0f);
+			const std::string pathDoc = Wui::Tr("panel.material.path.tooltip",
+				"Source asset path, relative to the content root (Game/assets).");
+			Wui::Tooltip(ctx, { pathX, lineY, pathWidth, 16.0f }, pathDoc);
+			RegisterReadOnlyNode(Wui::HashId("material.path"),
+				Wui::Tr("panel.material.path", "Source path"), pathText,
+				{ pathX, lineY, pathWidth, 16.0f }, pathDoc);
+		}
+
+		float used = kHeaderBaseHeight;
 		if (m_Path.empty())
 		{
-			Wui::Label(ctx, { x, y },
-				Wui::Tr("panel.material.not_saved",
-					"Not saved to disk yet: create a material in the Content Browser"), theme.TextMuted, 12.0f);
-			y += 16.0f;
-			const Wui::WuiRect field { x, y, rect.W - 20.0f, 22.0f };
-			// U2d:目标路径行内校验(空 / 非法字符 / 目标已存在)。空路径只在用户点过一次 Save
-			// 之后才标红(字段初始就是空的,不算用户输错);错误行由 TextFieldEx 画在字段下方。
+			// 未落盘材质:给出"另存为"路径输入 + 行内校验。
+			const Wui::WuiRect field { x, rect.Y + kHeaderBaseHeight, rect.W - 8.0f, 22.0f };
 			const std::string pathError = NewMaterialPathError(m_NewPathBuffer);
 			const std::string shownError = m_NewPathBuffer.empty()
 				? (m_NewPathAttempted ? pathError : std::string()) : pathError;
 			Wui::TextFieldEx(ctx, Wui::HashId("material.newpath"), field, m_NewPathBuffer, theme, shownError);
-			y += 28.0f;
+			used += 26.0f;
 		}
+		if (!m_Status.empty())
+		{
+			Wui::Label(ctx, { x, rect.Y + used }, EllipsizeToWidth(ctx, m_Status, rect.W - 8.0f, 11.0f),
+				m_StatusIsError ? theme.Danger : theme.TextMuted, 11.0f);
+			used += 16.0f;
+		}
+		return used;
 	}
 
-	void MaterialEditorPanel::DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	// ---- 一行参数:标签 + 控件 + 恢复默认 + 悬停说明 + 无障碍 ----
+	void MaterialEditorPanel::DrawParameterRow(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+		const RowPlan& row, float x, float y, float width, bool stacked)
 	{
-		const Wui::WuiTheme& theme = host.Theme();
-		if (!m_Material)
-		{
-			Wui::Label(ctx, { rect.X + 10.0f, rect.Y + 8.0f },
-				Wui::Tr("panel.material.none_open",
-					"No material open: double-click a .wmat file in the Content Browser"), theme.TextMuted, 13.0f);
-			return;
-		}
-
-		// 只读快照:编辑控件写各自局部变量,再经 Material 的 setter 落回实例
-		// (setter 会自增 Revision,渲染侧缓存才会失效 → 预览即时更新)。
 		const MaterialDesc& desc = m_Material->GetDesc();
-		const float x = rect.X + 10.0f;
-		const float width = rect.W - 20.0f;
-		float y = rect.Y + 6.0f;
+		const Wui::WuiId controlId = Wui::HashId(row.ControlId.c_str());
+		const float labelWidth = stacked ? width - 8.0f
+			: std::min(kLabelColumnMax, std::max(84.0f, width * 0.36f));
+		const float labelY = stacked ? y + 1.0f : y + 4.0f;
+		const float controlY = stacked ? y + 20.0f : y;
+		const float controlHeight = stacked ? 20.0f : 22.0f;
+		const bool showReset = row.HasReset && row.Modified;
+		const float controlX = stacked ? x : x + labelWidth + 8.0f;
+		const float reserved = showReset ? kResetWidth + 6.0f : 0.0f;
+		const float controlWidth = std::max(60.0f, width - (controlX - x) - reserved);
+		const Wui::WuiRect controlRect { controlX, controlY, controlWidth, controlHeight };
+		const Wui::WuiRect rowRect { x, y, width, row.Height };
+		Wui::Tooltip(ctx, rowRect, row.Doc);
 
-		// W5-L1:本帧任何参数写入 = "未保存修改"(以 Revision 是否前进为准,避免每帧误标)。
-		// 资产热重载对 dirty 材质只报告不覆盖(SkippedDirty),不能静默丢掉面板里的改动。
 		const auto applyEdit = [this](auto&& setter)
 		{
 			const uint32_t revision = m_Material->GetRevision();
@@ -615,98 +1677,613 @@ namespace World
 				m_Material->MarkDirty(true);
 		};
 
-		Wui::Label(ctx, { x, y }, ShortenPath(m_Path.empty()
-				? Wui::Tr("panel.material.unsaved_new", "(unsaved new material)") : m_Path)
-			+ (m_Material->IsDirty() ? "  *" : ""), theme.Text, 13.0f);
-		y += 20.0f;
-
-		// ---- 颜色/标量 ----
-		Wui::Label(ctx, { x, y }, "BaseColor (sRGB)", theme.TextMuted, 12.0f);
-		y += 16.0f;
-		const float colorW = (width - 3 * 4.0f) / 4.0f;
-		glm::vec4 baseColor = desc.BaseColor;
-		bool colorChanged = false;
-		colorChanged |= Wui::DragFloat(ctx, Wui::HashId("material.base.r"), { x + 0 * (colorW + 4.0f), y, colorW, 20.0f }, baseColor.r, 0.01f, 0.0f, 1.0f, theme);
-		colorChanged |= Wui::DragFloat(ctx, Wui::HashId("material.base.g"), { x + 1 * (colorW + 4.0f), y, colorW, 20.0f }, baseColor.g, 0.01f, 0.0f, 1.0f, theme);
-		colorChanged |= Wui::DragFloat(ctx, Wui::HashId("material.base.b"), { x + 2 * (colorW + 4.0f), y, colorW, 20.0f }, baseColor.b, 0.01f, 0.0f, 1.0f, theme);
-		colorChanged |= Wui::DragFloat(ctx, Wui::HashId("material.base.a"), { x + 3 * (colorW + 4.0f), y, colorW, 20.0f }, baseColor.a, 0.01f, 0.0f, 1.0f, theme);
-		y += 26.0f;
-		if (colorChanged)
-			applyEdit([&] { m_Material->SetBaseColor(baseColor); });
-
-		float metallic = desc.Metallic;
-		Wui::Label(ctx, { x, y }, "Metallic", theme.TextMuted, 12.0f);
-		Wui::SliderFloat(ctx, Wui::HashId("material.metallic"), { x + 70.0f, y - 2.0f, width - 70.0f, 18.0f }, metallic, 0.0f, 1.0f, theme);
-		y += 24.0f;
-		applyEdit([&] { m_Material->SetMetallic(metallic); });
-
-		float roughness = desc.Roughness;
-		Wui::Label(ctx, { x, y }, "Roughness", theme.TextMuted, 12.0f);
-		Wui::SliderFloat(ctx, Wui::HashId("material.roughness"), { x + 70.0f, y - 2.0f, width - 70.0f, 18.0f }, roughness, 0.02f, 1.0f, theme);
-		y += 24.0f;
-		applyEdit([&] { m_Material->SetRoughness(roughness); });
-
-		Wui::Label(ctx, { x, y }, "Emissive", theme.TextMuted, 12.0f);
-		y += 16.0f;
-		glm::vec3 emissive = desc.Emissive;
-		bool emissiveChanged = false;
-		const float emissiveW = (width - 2 * 4.0f) / 3.0f;
-		emissiveChanged |= Wui::DragFloat(ctx, Wui::HashId("material.emissive.r"), { x + 0 * (emissiveW + 4.0f), y, emissiveW, 20.0f }, emissive.x, 0.01f, 0.0f, 8.0f, theme);
-		emissiveChanged |= Wui::DragFloat(ctx, Wui::HashId("material.emissive.g"), { x + 1 * (emissiveW + 4.0f), y, emissiveW, 20.0f }, emissive.y, 0.01f, 0.0f, 8.0f, theme);
-		emissiveChanged |= Wui::DragFloat(ctx, Wui::HashId("material.emissive.b"), { x + 2 * (emissiveW + 4.0f), y, emissiveW, 20.0f }, emissive.z, 0.01f, 0.0f, 8.0f, theme);
-		y += 26.0f;
-		if (emissiveChanged)
-			applyEdit([&] { m_Material->SetEmissive(emissive); });
-
-		// ---- 混合 / 双面 ----
-		static const std::vector<std::string> blendModes { "Opaque", "Transparent" };
-		int blendIndex = desc.BlendMode == MaterialBlendMode::Transparent ? 1 : 0;
-		Wui::Label(ctx, { x, y }, "BlendMode", theme.TextMuted, 12.0f);
-		if (Wui::Combo(ctx, Wui::HashId("material.blend"), { x + 70.0f, y - 4.0f, 140.0f, 20.0f }, blendModes[blendIndex], blendModes, blendIndex, theme))
-			applyEdit([&] { m_Material->SetBlendMode(blendIndex == 1 ? MaterialBlendMode::Transparent : MaterialBlendMode::Opaque); });
-		y += 26.0f;
-
-		bool doubleSided = desc.DoubleSided;
-		if (Wui::Checkbox(ctx, Wui::HashId("material.doublesided"), { x, y, 120.0f, 18.0f }, "Double Sided", doubleSided, theme))
-			applyEdit([&] { m_Material->SetDoubleSided(doubleSided); });
-		y += 26.0f;
-
-		// 注:面板不提供"切换材质"入口 —— 从内容浏览器/菜单打开哪个材质,这个窗口就是
-		// 哪个材质的编辑器(用户 2026-09-16 明确要求)。
-
-		// ---- 贴图槽(可搜索下拉) ----
-		std::vector<std::string> albedoOptions = m_TexturePaths;
-		albedoOptions.insert(albedoOptions.begin(), Wui::Tr("panel.material.texture_none", "(none)"));
-		Wui::Label(ctx, { x, y }, Wui::Tr("panel.material.albedo", "Albedo Texture (sRGB)"),
-			theme.TextMuted, 12.0f);
-		y += 16.0f;
-		if (Wui::SearchableCombo(ctx, Wui::HashId("material.albedo"), { x, y, width, 22.0f }, "",
-			albedoOptions, m_AlbedoPickIndex, theme))
+		if (row.ReadOnly)
 		{
-			// 只在**真的换了一张**时才写回材质:否则每帧调用会让 Revision 每帧 +1,
-			// 渲染侧每帧重建材质描述符集 → 预览逐帧闪(用户反馈"切换贴图后预览闪烁")。
-			const std::string chosen = m_AlbedoPickIndex <= 0 ? std::string() : albedoOptions[m_AlbedoPickIndex];
-			if (chosen != m_Material->GetDesc().AlbedoTexture)
-				applyEdit([&] { m_Material->SetAlbedoTexture(chosen); });
+			// 只读信息行:标签 + 值(不画控件、不给复位)。
+			Wui::Label(ctx, { x, labelY }, EllipsizeToWidth(ctx, row.Label, labelWidth, 12.0f),
+				theme.TextMuted, 12.0f);
+			Wui::Label(ctx, { controlX, controlY + 3.0f },
+				EllipsizeToWidth(ctx, row.Value, controlWidth, 12.0f), theme.Text, 12.0f);
+			RegisterReadOnlyNode(controlId, row.Label, row.Value,
+				{ controlX, controlY, controlWidth, controlHeight }, row.Doc);
+			return;
 		}
-		y += 28.0f;
-		std::vector<std::string> normalOptions = m_TexturePaths;
-		normalOptions.insert(normalOptions.begin(), Wui::Tr("panel.material.texture_none", "(none)"));
-		Wui::Label(ctx, { x, y }, Wui::Tr("panel.material.normal", "Normal Texture (Linear)"),
-			theme.TextMuted, 12.0f);
-		y += 16.0f;
-		if (Wui::SearchableCombo(ctx, Wui::HashId("material.normal"), { x, y, width, 22.0f }, "",
-			normalOptions, m_NormalPickIndex, theme))
-		{
-			const std::string chosen = m_NormalPickIndex <= 0 ? std::string() : normalOptions[m_NormalPickIndex];
-			if (chosen != m_Material->GetDesc().NormalTexture)
-				applyEdit([&] { m_Material->SetNormalTexture(chosen); });
-		}
-		y += 28.0f;
+		Wui::Label(ctx, { x, labelY }, EllipsizeToWidth(ctx, row.Label, labelWidth, 12.0f),
+			theme.Text, 12.0f);
 
-		// ---- 状态行 ----
-		if (!m_Status.empty())
-			Wui::Label(ctx, { x, y }, m_Status, m_StatusIsError ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f } : theme.TextMuted, 12.0f);
+		// ---- 动作行:恢复整个材质的默认值 ----
+		if (row.Key == std::string("reset_all"))
+		{
+			const Wui::WuiRect buttonRect { controlX, controlY, std::min(controlWidth, 220.0f), controlHeight };
+			if (Wui::Button(ctx, controlId, buttonRect, row.Label, theme))
+				ResetAllMaterialFields();
+			Wui::Tooltip(ctx, buttonRect, row.Doc);
+			AnnotateNode(ctx, controlId, row.Label, row.Doc);
+			return;
+		}
+
+		if (row.Key == std::string("base"))
+		{
+			glm::vec4 color = desc.BaseColor;
+			if (Wui::ColorField(ctx, controlId, controlRect, color, theme))
+				applyEdit([&] { m_Material->SetBaseColor(color); });
+		}
+		else if (row.Key == std::string("metallic"))
+		{
+			float value = desc.Metallic;
+			Wui::SliderFloat(ctx, controlId, controlRect, value, 0.0f, 1.0f, theme);
+			if (value != desc.Metallic)
+				applyEdit([&] { m_Material->SetMetallic(value); });
+		}
+		else if (row.Key == std::string("roughness"))
+		{
+			float value = desc.Roughness;
+			Wui::SliderFloat(ctx, controlId, controlRect, value, 0.02f, 1.0f, theme);
+			if (value != desc.Roughness)
+				applyEdit([&] { m_Material->SetRoughness(value); });
+		}
+		else if (row.Key == std::string("emissive"))
+		{
+			glm::vec3 value = desc.Emissive;
+			if (Wui::Vec3Field(ctx, controlId, controlRect, value, 0.02f, 0.0f, 8.0f, theme, 0))
+				applyEdit([&] { m_Material->SetEmissive(value); });
+		}
+		else if (row.Key == std::string("blend"))
+		{
+			std::vector<std::string> options { Wui::Tr("material.blend.opaque", "Opaque"),
+				Wui::Tr("material.blend.transparent", "Transparent") };
+			int selected = desc.BlendMode == MaterialBlendMode::Transparent ? 1 : 0;
+			if (Wui::Combo(ctx, controlId, controlRect, row.Label, options, selected, theme))
+				applyEdit([&]
+				{
+					m_Material->SetBlendMode(selected == 1 ? MaterialBlendMode::Transparent
+						: MaterialBlendMode::Opaque);
+				});
+		}
+		else if (row.Key == std::string("doublesided"))
+		{
+			bool value = desc.DoubleSided;
+			if (Wui::Checkbox(ctx, controlId, controlRect, row.Label, value, theme))
+				applyEdit([&] { m_Material->SetDoubleSided(value); });
+		}
+		else if (row.Key == std::string("albedo"))
+		{
+			std::vector<std::string> options = m_TexturePaths;
+			options.insert(options.begin(), Wui::Tr("panel.material.texture_none", "(none)"));
+			if (Wui::SearchableCombo(ctx, controlId, controlRect, row.Label, options,
+				m_AlbedoPickIndex, theme))
+			{
+				// 只在**真的换了一张**时才写回材质:否则每帧调用会让 Revision 每帧 +1,
+				// 渲染侧每帧重建材质描述符集 → 预览逐帧闪。
+				const std::string chosen = m_AlbedoPickIndex <= 0 ? std::string()
+					: options[static_cast<size_t>(m_AlbedoPickIndex)];
+				if (chosen != desc.AlbedoTexture)
+					applyEdit([&] { m_Material->SetAlbedoTexture(chosen); });
+			}
+		}
+		else if (row.Key == std::string("normal"))
+		{
+			std::vector<std::string> options = m_TexturePaths;
+			options.insert(options.begin(), Wui::Tr("panel.material.texture_none", "(none)"));
+			if (Wui::SearchableCombo(ctx, controlId, controlRect, row.Label, options,
+				m_NormalPickIndex, theme))
+			{
+				const std::string chosen = m_NormalPickIndex <= 0 ? std::string()
+					: options[static_cast<size_t>(m_NormalPickIndex)];
+				if (chosen != desc.NormalTexture)
+					applyEdit([&] { m_Material->SetNormalTexture(chosen); });
+			}
+		}
+		else if (row.Key == std::string("name"))
+		{
+			if (m_SyncNameBuffer)
+			{
+				m_NameBuffer = desc.Name;
+				m_SyncNameBuffer = false;
+			}
+			Wui::TextFieldA11y a11y;
+			a11y.Label = row.Label;
+			a11y.Placeholder = row.Label;
+			if (Wui::TextField(ctx, controlId, controlRect, m_NameBuffer, theme, nullptr, &a11y))
+			{
+				MaterialDesc updated = desc;
+				updated.Name = m_NameBuffer;
+				m_Material->SetDesc(updated);
+				m_Material->MarkDirty(true);
+			}
+		}
+		else if (row.Key == std::string("preview.mesh"))
+		{
+			std::vector<std::string> options { Wui::Tr("material.mesh.sphere", "Sphere"),
+				Wui::Tr("material.mesh.cube", "Cube"), Wui::Tr("material.mesh.plane", "Plane") };
+			int selected = static_cast<int>(m_PreviewMesh);
+			if (Wui::Segmented(ctx, controlId, controlRect, options, selected, theme))
+			{
+				m_PreviewMesh = static_cast<PreviewMesh>(selected);
+				FramePreview();
+			}
+		}
+		else if (row.Key == std::string("preview.bg"))
+		{
+			std::vector<std::string> options { Wui::Tr("material.bg.solid", "Solid"),
+				Wui::Tr("material.bg.gradient", "Gradient") };
+			int selected = static_cast<int>(m_PreviewBackground);
+			if (Wui::Segmented(ctx, controlId, controlRect, options, selected, theme))
+				m_PreviewBackground = static_cast<PreviewBackground>(selected);
+		}
+		else if (row.Key == std::string("preview.light"))
+		{
+			std::vector<std::string> options { Wui::Tr("material.light.three_point", "Three-Point"),
+				Wui::Tr("material.light.single", "Single"), Wui::Tr("material.light.none", "None") };
+			int selected = static_cast<int>(m_PreviewLighting);
+			if (Wui::Segmented(ctx, controlId, controlRect, options, selected, theme))
+				m_PreviewLighting = static_cast<PreviewLighting>(selected);
+		}
+		else if (row.Key == std::string("preview.light.intensity"))
+		{
+			Wui::SliderFloat(ctx, controlId, controlRect, m_LightIntensity, 0.0f, 4.0f, theme);
+		}
+		else if (row.Key == std::string("preview.light.azimuth"))
+		{
+			Wui::SliderFloat(ctx, controlId, controlRect, m_LightAzimuth, -180.0f, 180.0f, theme);
+		}
+		else if (row.Key == std::string("preview.light.elevation"))
+		{
+			Wui::SliderFloat(ctx, controlId, controlRect, m_LightElevation, -85.0f, 85.0f, theme);
+		}
+		else if (row.Key == std::string("preview.wireframe"))
+		{
+			Wui::Checkbox(ctx, controlId, controlRect, row.Label, m_ShowWireframe, theme);
+		}
+		else if (row.Key == std::string("preview.normals"))
+		{
+			Wui::Checkbox(ctx, controlId, controlRect, row.Label, m_ShowNormals, theme);
+		}
+		else if (row.Key == std::string("preview.uvchecker"))
+		{
+			Wui::Checkbox(ctx, controlId, controlRect, row.Label, m_ShowUvChecker, theme);
+		}
+
+		// ---- 恢复默认(只在偏离默认值时出现)----
+		if (showReset)
+		{
+			const Wui::WuiRect resetRect { x + width - kResetWidth, controlY, kResetWidth, controlHeight };
+			const std::string resetId = ResetIdFor(row.Key);
+			const std::string resetDoc = Wui::Tr("panel.material.reset.tooltip",
+				"Restore this parameter to its default value.");
+			if (Wui::Button(ctx, Wui::HashId(resetId.c_str()), resetRect,
+				Wui::Tr("panel.material.reset_row", "Reset"), theme))
+				SetFieldToDefault(row.Key);
+			Wui::Tooltip(ctx, resetRect, resetDoc);
+			AnnotateNode(ctx, Wui::HashId(resetId.c_str()),
+				Wui::Tr("panel.material.reset_row", "Reset"), resetDoc);
+		}
+		// 控件自己登记过节点:补上参数名与悬停说明(值/矩形仍以控件为准)。
+		AnnotateNode(ctx, controlId, row.Label, row.Doc);
+	}
+
+	// ---- 参数区:搜索 + 分组折叠 + 每字段控件 + 校验区 ----
+	float MaterialEditorPanel::DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		if (!m_Material)
+		{
+			Wui::Label(ctx, { rect.X + 8.0f, rect.Y + 8.0f },
+				Wui::Tr("panel.material.none_open",
+					"No material open: double-click a .wmat file in the Content Browser"),
+				theme.TextMuted, 13.0f);
+			return rect.H;
+		}
+		const double now = std::chrono::duration<double>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+		if (m_ValidationPath != m_Path || m_ValidationRevision != m_Material->GetRevision()
+			|| now - m_ValidationTime > 1.0)
+			RefreshValidation(now);
+
+		// ---- 搜索框(与设置面板同一控件与密度)----
+		Wui::TextFieldA11y searchA11y;
+		searchA11y.Label = Wui::Tr("panel.material.search", "Search parameters");
+		searchA11y.Placeholder = Wui::Tr("panel.material.search.hint", "Search parameters…");
+		const Wui::WuiRect searchRect { rect.X, rect.Y, rect.W, 24.0f };
+		if (Wui::TextField(ctx, Wui::HashId("material.search"), searchRect, m_Search, theme,
+			nullptr, &searchA11y))
+			m_ScrollY = 0.0f;
+		if (m_Search.empty())
+			Wui::Label(ctx, { searchRect.X + 8.0f, searchRect.Y + 5.0f }, searchA11y.Placeholder,
+				theme.TextDisabled, 12.0f);
+		const std::string searchDoc = Wui::Tr("panel.material.search.tooltip",
+			"Filter parameters by name, group or description. Clear the field to show everything again.");
+		Wui::Tooltip(ctx, searchRect, searchDoc);
+		AnnotateNode(ctx, Wui::HashId("material.search"), searchA11y.Label, searchDoc);
+
+		// ---- 校验区高度(只在有问题时占位)----
+		float validationHeight = 0.0f;
+		const size_t shownIssues = std::min<size_t>(m_Validation.size(), 3);
+		if (!m_Validation.empty())
+			validationHeight = 20.0f + static_cast<float>(shownIssues) * 18.0f;
+		const Wui::WuiRect contentRect { rect.X, rect.Y + 30.0f, rect.W,
+			std::max(40.0f, rect.H - 30.0f - validationHeight) };
+
+		// ---- 行集合(搜索过滤;行高按窄列与否)----
+		const bool stacked = rect.W < kStackedThreshold;
+		const std::string needle = ToLowerAscii(m_Search);
+		std::vector<RowPlan> plans;
+		for (int index = 0; index < kRowSpecCount; ++index)
+		{
+			const RowSpec& spec = kRowSpecs[index];
+			RowPlan plan;
+			plan.Group = spec.Group;
+			plan.Key = spec.Key;
+			plan.ControlId = std::string("material.") + spec.Key;
+			// 两个"不与字段同名"的 id:头部已占用 material.name(材质名回显),
+			// 动作行 material.prop.reset_all 与 material.prop.<key>.reset 同一命名族。
+			if (plan.Key == std::string("name"))
+				plan.ControlId = "material.prop.name";
+			else if (plan.Key == std::string("reset_all"))
+				plan.ControlId = "material.prop.reset_all";
+			plan.Label = Wui::Tr(spec.LabelKey, spec.LabelEn);
+			plan.Doc = Wui::Tr(spec.DocKey, spec.DocEn);
+			plan.ReadOnly = spec.ReadOnly != 0;
+			plan.HasReset = spec.HasReset != 0;
+			if (plan.Group == std::string("preview"))
+				plan.Modified = plan.HasReset && PreviewOptionModified(plan.Key);
+			else
+				plan.Modified = plan.HasReset && !plan.ReadOnly && FieldModified(plan.Key);
+			// 只读行的显示值(采样/高级诊断)。
+			if (plan.Key == std::string("normal.space"))
+				plan.Value = Wui::Tr("material.value.linear", "Linear (UNORM, no sRGB decode)");
+			else if (plan.Key == std::string("albedo.space"))
+				plan.Value = Wui::Tr("material.value.srgb", "sRGB (hardware decode)");
+			else if (plan.Key == std::string("sampler"))
+			{
+				char samplerText[128] = {};
+				std::snprintf(samplerText, sizeof(samplerText), "%s, anisotropy %.0f",
+					Wui::Tr("material.value.sampler", "Linear filter, repeat wrap").c_str(),
+					static_cast<double>(RenderSettings::Get().Anisotropy));
+				plan.Value = samplerText;
+			}
+			else if (plan.Key == std::string("format"))
+				plan.Value = "FormatVersion " + std::to_string(MaterialIO::kFormatVersion);
+			else if (plan.Key == std::string("revision"))
+				plan.Value = "Revision " + std::to_string(m_Material->GetRevision());
+			else if (plan.Key == std::string("disk"))
+				plan.Value = m_Material->IsDirty()
+					? Wui::Tr("material.value.dirty", "modified (unsaved edits in memory)")
+					: Wui::Tr("material.value.clean", "clean (matches the file on disk)");
+			if (!needle.empty())
+			{
+				const GroupDesc* group = FindGroup(spec.Group);
+				const std::string haystack = ToLowerAscii(std::string(spec.Key) + " " + spec.LabelEn + " "
+					+ spec.DocEn + " " + plan.Label + " " + plan.Doc + " " + plan.Value + " "
+					+ (group ? group->Key : "") + " " + (group ? GroupLabel(*group) : std::string()));
+				if (haystack.find(needle) == std::string::npos)
+					continue;
+			}
+			plan.Height = stacked ? (plan.ReadOnly ? 34.0f : kRowHeightStacked) : (plan.ReadOnly ? 20.0f : kRowHeight);
+			plans.push_back(std::move(plan));
+		}
+
+		// ---- 内容高度(折叠的组只占组头)----
+		float contentHeight = 6.0f;
+		for (const GroupDesc& group : kGroups)
+		{
+			bool any = false;
+			for (const RowPlan& plan : plans)
+				if (plan.Group == group.Key)
+					any = true;
+			if (!any)
+				continue;
+			contentHeight += kGroupHeaderHeight;
+			if (!m_SectionOpen[group.Index] && needle.empty())
+				continue;
+			for (const RowPlan& plan : plans)
+				if (plan.Group == group.Key)
+					contentHeight += plan.Height;
+		}
+		const float maxScroll = std::max(0.0f, contentHeight - contentRect.H);
+		m_ScrollY = std::clamp(m_ScrollY, 0.0f, maxScroll);
+
+		Wui::BeginScrollArea(ctx, contentRect, contentHeight, m_ScrollY, theme);
+		float y = contentRect.Y + 4.0f - m_ScrollY;
+		int drawnRows = 0;
+		for (const GroupDesc& group : kGroups)
+		{
+			std::vector<const RowPlan*> rows;
+			for (const RowPlan& plan : plans)
+				if (plan.Group == group.Key)
+					rows.push_back(&plan);
+			if (rows.empty())
+				continue;
+			const bool open = m_SectionOpen[group.Index] || !needle.empty();
+			const int modified = GroupModifiedCount(group.Key);
+			const std::string headerId = std::string("material.section.") + group.Key;
+			const Wui::WuiRect headerRect { contentRect.X, y, contentRect.W, kGroupHeaderHeight - 4.0f };
+			// 与行同口径:滚出视口的组头既不画也不登记(否则树里会出现"用户看不见的节点")。
+			const bool headerVisible = (headerRect.Y + headerRect.H > contentRect.Y)
+				&& (headerRect.Y < contentRect.Y + contentRect.H);
+			if (headerVisible)
+			{
+				const bool hovered = ctx.IsHovered(headerRect);
+				Wui::HoverRow(ctx, headerRect, hovered, false, theme, 3.0f);
+				Wui::Label(ctx, { headerRect.X + 6.0f, headerRect.Y + 4.0f }, open ? "v" : ">",
+					theme.TextMuted, 12.0f);
+				Wui::Label(ctx, { headerRect.X + 20.0f, headerRect.Y + 4.0f }, GroupLabel(group),
+					theme.Text, 13.0f);
+				const std::string countText = modified > 0
+					? std::to_string(modified) + " " + Wui::Tr("panel.material.group.modified", "modified")
+					: Wui::Tr("panel.material.group.defaults", "defaults");
+				const float countWidth = ctx.MeasureTextWidth(countText, 11.0f);
+				Wui::Label(ctx, { headerRect.X + std::max(24.0f, headerRect.W - countWidth - 8.0f),
+					headerRect.Y + 6.0f }, countText,
+					modified > 0 ? theme.Warning : theme.TextDisabled, 11.0f);
+				if (hovered)
+					ctx.SetCursor(Wui::WuiCursor::Hand);
+				if (ctx.IsClicked(headerRect))
+					m_SectionOpen[group.Index] = !m_SectionOpen[group.Index];
+				const std::string sectionDoc = Wui::Tr("panel.material.section.tooltip",
+					"Click to expand or collapse this group.");
+				{
+					Wui::WuiAccessNode node;
+					node.Id = Wui::HashId(headerId.c_str());
+					node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+					node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+					node.Kind = "section";
+					node.Label = GroupLabel(group);
+					node.Value = (open ? std::string("expanded") : std::string("collapsed")) + ", "
+						+ std::to_string(modified) + " modified";
+					node.Tooltip = sectionDoc;
+					node.Rect = headerRect;
+					node.Enabled = true;
+					node.Interactive = true;
+					node.Visible = true;
+					Wui::WuiAccessibility::Get().Register(node);
+				}
+				Wui::Tooltip(ctx, headerRect, sectionDoc);
+			}
+			y += kGroupHeaderHeight;
+			if (!open)
+				continue;
+			for (const RowPlan* plan : rows)
+			{
+				// 校验条目点击后的定位:在**可见性判断之前**处理 —— 目标行通常正在视口外,
+				// 那正是要滚过去的情况(下一帧生效,行高是本帧算出来的)。
+				if (!m_RevealField.empty() && plan->Key == m_RevealField)
+				{
+					if (y < contentRect.Y + 2.0f)
+						m_ScrollY = std::max(0.0f, m_ScrollY - (contentRect.Y + 2.0f - y));
+					else if (y + plan->Height > contentRect.Y + contentRect.H - 2.0f)
+						m_ScrollY = std::min(maxScroll,
+							m_ScrollY + (y + plan->Height - (contentRect.Y + contentRect.H - 2.0f)));
+					if (--m_RevealFrames <= 0)
+						m_RevealField.clear();
+				}
+				const bool visible = (y + plan->Height > contentRect.Y)
+					&& (y < contentRect.Y + contentRect.H);
+				if (!visible)
+				{
+					y += plan->Height;
+					continue;
+				}
+				++drawnRows;
+				DrawParameterRow(ctx, theme, *plan, rect.X, y, rect.W, stacked);
+				y += plan->Height;
+			}
+		}
+		Wui::EndScrollArea(ctx);
+		// 滚动指示条(纯视觉,不参与命中):参数比视口长时给一个位置/比例读数 ——
+		// 共享的 BeginScrollArea 没有滚动条,"下面还有高级组"必须能被看见。
+		if (contentHeight > contentRect.H + 1.0f)
+		{
+			const float trackHeight = contentRect.H - 8.0f;
+			const float thumbHeight = std::max(24.0f, trackHeight * (contentRect.H / contentHeight));
+			const float offset = maxScroll > 0.0f ? (m_ScrollY / maxScroll) * (trackHeight - thumbHeight) : 0.0f;
+			const Wui::WuiRect track { contentRect.X + contentRect.W - 3.0f, contentRect.Y + 4.0f,
+				2.0f, trackHeight };
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, track,
+				Wui::WuiColor { 0.169f, 0.192f, 0.220f, 1.0f }, 1.0f });
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+				{ track.X, track.Y + offset, 2.0f, thumbHeight },
+				Wui::WuiColor { 0.298f, 0.553f, 1.0f, 0.55f }, 1.0f });
+		}
+		if (drawnRows == 0)
+		{
+			const std::string message = m_Search.empty()
+				? Wui::Tr("panel.material.empty", "No parameters in this material.")
+				: Wui::Tr("panel.material.empty.filtered", "No parameter matches the search");
+			Wui::Label(ctx, { contentRect.X + 8.0f, contentRect.Y + 12.0f },
+				EllipsizeToWidth(ctx, message, contentRect.W - 16.0f, 13.0f), theme.TextMuted, 13.0f);
+		}
+		// ---- 校验区(参数区底部,只在有问题时占位)----
+		if (!m_Validation.empty())
+		{
+			const float blockY = rect.Y + rect.H - validationHeight;
+			const Wui::WuiRect blockRect { rect.X, blockY, rect.W, validationHeight };
+			Wui::PanelBackground(ctx, blockRect, { 0.20f, 0.14f, 0.06f, 1.0f }, 4.0f);
+			const std::string summary = std::to_string(m_Validation.size()) + " "
+				+ Wui::Tr("panel.material.validation.issues", "issue(s)");
+			Wui::Label(ctx, { blockRect.X + 6.0f, blockRect.Y + 3.0f }, summary, theme.Warning, 12.0f);
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.validation");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "status";
+			node.Label = Wui::Tr("panel.material.validation", "Validation");
+			for (const ValidationEntry& entry : m_Validation)
+				node.Value += (node.Value.empty() ? "" : "; ") + entry.Text;
+			node.Tooltip = Wui::Tr("panel.material.validation.tooltip",
+				"Click an entry to jump to the parameter that causes it.");
+			node.Rect = blockRect;
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+			for (size_t index = 0; index < shownIssues; ++index)
+			{
+				const ValidationEntry& entry = m_Validation[index];
+				const Wui::WuiRect rowRect { blockRect.X + 4.0f,
+					blockRect.Y + 18.0f + static_cast<float>(index) * 18.0f, blockRect.W - 8.0f, 17.0f };
+				const bool hovered = ctx.IsHovered(rowRect);
+				Wui::HoverRow(ctx, rowRect, hovered, false, theme, 2.0f);
+				Wui::Label(ctx, { rowRect.X + 4.0f, rowRect.Y + 2.0f },
+					EllipsizeToWidth(ctx, entry.Text, rowRect.W - 8.0f, 11.0f), theme.Warning, 11.0f);
+				const std::string itemId = "material.validation." + std::to_string(index);
+				const std::string itemDoc = Wui::Tr("panel.material.validation.item.tooltip",
+					"Click to jump to this parameter.");
+				Wui::WuiAccessNode entryNode;
+				entryNode.Id = Wui::HashId(itemId.c_str());
+				entryNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				entryNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				entryNode.Kind = "validation-item";
+				entryNode.Label = entry.Text;
+				entryNode.Value = entry.Severity;
+				entryNode.Tooltip = itemDoc;
+				entryNode.Rect = rowRect;
+				entryNode.Enabled = true;
+				entryNode.Interactive = true;
+				entryNode.Visible = true;
+				Wui::WuiAccessibility::Get().Register(entryNode);
+				if (hovered)
+				{
+					ctx.SetCursor(Wui::WuiCursor::Hand);
+					Wui::Tooltip(ctx, rowRect, itemDoc);
+				}
+				if (ctx.IsClicked(rowRect))
+				{
+					// 定位:清搜索、展开目标组、把该行滚进视野。
+					m_Search.clear();
+					for (int specIndex = 0; specIndex < kRowSpecCount; ++specIndex)
+					{
+						if (entry.Field != kRowSpecs[specIndex].Key)
+							continue;
+						const GroupDesc* target = FindGroup(kRowSpecs[specIndex].Group);
+						if (target)
+							m_SectionOpen[target->Index] = true;
+					}
+					m_RevealField = entry.Field;
+					m_RevealFrames = 6;
+				}
+			}
+		}
+		return rect.H;
+	}
+
+	// ---- 预览:图像 + 相机操作 + 读数 ----
+	float MaterialEditorPanel::DrawPreview(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		UpdatePreviewTargetSize(rect);
+		const uint64_t textureId = RenderPreview();
+		const std::string hint = Wui::Tr("panel.material.preview.hint",
+			"Drag = orbit, wheel = zoom, double-click or F = frame");
+		if (textureId != 0)
+		{
+			// 贴图按**物理像素网格**对齐:目标尺寸 = 这段物理尺寸时,每个屏幕像素正好采样
+			// 一个纹素(1:1),线性过滤也不会糊。
+			const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+			const Wui::WuiRect pixelView {
+				std::round(rect.X * uiScale) / uiScale,
+				std::round(rect.Y * uiScale) / uiScale,
+				static_cast<float>(std::lround(rect.W * uiScale)) / uiScale,
+				static_cast<float>(std::lround(rect.H * uiScale)) / uiScale };
+			// 渐变背景:预览目标清成透明,先在下面画一层 WUI 渐变(2D 通道,不需要改 3D)。
+			if (m_PreviewBackground == PreviewBackground::Gradient)
+			{
+				Wui::WuiDrawCommand gradient;
+				gradient.Kind = Wui::WuiDrawKind::Gradient;
+				gradient.Rect = pixelView;
+				gradient.Corners = { Wui::WuiColor { 0.24f, 0.27f, 0.33f, 1.0f },
+					Wui::WuiColor { 0.24f, 0.27f, 0.33f, 1.0f },
+					Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f },
+					Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f } };
+				ctx.Commands().push_back(std::move(gradient));
+			}
+			Wui::Image(ctx, pixelView, textureId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+			// 相机:左键轨道旋转 / 滚轮推拉 / 双击或 F 取景(与模型/预制体面板同一手感)。
+			const bool hovered = ctx.IsHovered(pixelView);
+			if (ctx.Input().Wheel != 0.0f && hovered)
+			{
+				const float step = std::max(0.05f, m_CameraDistance * 0.1f);
+				m_CameraDistance = std::clamp(m_CameraDistance - ctx.Input().Wheel * step,
+					m_CameraMinDistance, m_CameraMaxDistance);
+			}
+			if (hovered && ctx.Input().MouseClicked[0])
+			{
+				m_Orbiting = true;
+				m_LastMouse = ctx.Input().MousePos;
+			}
+			if (m_Orbiting && ctx.Input().MouseDown[0] && !ctx.IsDoubleClicked(pixelView))
+			{
+				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
+				m_LastMouse = ctx.Input().MousePos;
+				m_OrbitYaw -= delta.x * 0.01f;
+				// 鼠标向下拖 = 相机往下走(看物体底部):屏幕 Y 向下为正,所以这里取负号。
+				// 与模型/预制体面板一起在 2026-09-21 翻正(用户实测"上下操作反了")。
+				m_OrbitPitch = std::clamp(m_OrbitPitch - delta.y * 0.01f, -kPitchLimit, kPitchLimit);
+			}
+			if (m_Orbiting && !ctx.Input().MouseDown[0])
+				m_Orbiting = false;
+			if (ctx.IsDoubleClicked(pixelView) || (hovered && ctx.WasKeyPressed(KeyCodes::F)))
+				FramePreview();
+			if (hovered)
+				ctx.SetCursor(m_Orbiting ? Wui::WuiCursor::Hand : Wui::WuiCursor::Arrow);
+			// 角标:实际离屏目标分辨率(与预制体面板同一口径)。
+			const std::string targetLabel = std::to_string(m_PreviewTargetW) + "×"
+				+ std::to_string(m_PreviewTargetH) + "px";
+			const float labelWidth = ctx.MeasureTextWidth(targetLabel, 10.0f);
+			Wui::Label(ctx, { pixelView.X + std::max(4.0f, pixelView.W - labelWidth - 6.0f),
+				pixelView.Y + pixelView.H - 14.0f }, targetLabel, theme.TextDisabled, 10.0f);
+			Wui::Label(ctx, { pixelView.X + 6.0f, pixelView.Y + pixelView.H - 14.0f },
+				EllipsizeToWidth(ctx, hint, std::max(40.0f, pixelView.W - 90.0f), 11.0f),
+				theme.TextDisabled, 11.0f);
+			Wui::Tooltip(ctx, pixelView, hint);
+		}
+		else
+		{
+			Wui::Label(ctx, { rect.X + 8.0f, rect.Y + 8.0f },
+				Wui::Tr("panel.material.preview_unavailable", "Preview unavailable (RHI device not ready)"),
+				theme.TextMuted, 12.0f);
+		}
+		// 无障碍:预览区节点 + 两条可断言的读数(target / camera)。
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.preview");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "image";
+			node.Label = Wui::Tr("panel.material.preview", "Preview");
+			node.Value = textureId != 0
+				? ("preview of " + m_Path + " (" + std::to_string(m_PreviewTargetW) + "x"
+					+ std::to_string(m_PreviewTargetH) + ")")
+				: Wui::Tr("panel.material.preview_unavailable", "Preview unavailable (RHI device not ready)");
+			node.Tooltip = hint;
+			node.Rect = rect;
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		char targetText[256] = {};
+		std::snprintf(targetText, sizeof(targetText),
+			"target=%ux%u view=%.0fx%.0f uiScale=%.2f renderScale=%.2f (echo only)",
+			m_PreviewTargetW, m_PreviewTargetH, static_cast<double>(m_PreviewViewW),
+			static_cast<double>(m_PreviewViewH), static_cast<double>(m_PreviewUiScale),
+			static_cast<double>(RenderSettings::RenderScale()));
+		RegisterReadOnlyNode(Wui::HashId("material.preview.target"),
+			Wui::Tr("panel.material.preview.target", "Preview render target"), targetText,
+			{ rect.X, rect.Y, std::max(20.0f, rect.W), 14.0f },
+			Wui::Tr("material.prop.preview.target.doc",
+				"Preview render target = preview rect in physical pixels, long side clamped to [128, 2048]. "
+				"Independent of rendering.render_scale."));
+		char cameraText[256] = {};
+		std::snprintf(cameraText, sizeof(cameraText),
+			"yaw=%.2f pitch=%.2f pitchLimitDeg=89 dist=%.3f minDist=%.3f maxDist=%.3f mesh=%d",
+			static_cast<double>(m_OrbitYaw), static_cast<double>(m_OrbitPitch),
+			static_cast<double>(m_CameraDistance), static_cast<double>(m_CameraMinDistance),
+			static_cast<double>(m_CameraMaxDistance), static_cast<int>(m_PreviewMesh));
+		RegisterReadOnlyNode(Wui::HashId("material.preview.camera"),
+			Wui::Tr("panel.material.preview.camera", "Preview camera"), cameraText,
+			{ rect.X, rect.Y + 14.0f, std::max(20.0f, rect.W), 14.0f }, hint);
+		return rect.H;
 	}
 
 	void MaterialEditorPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
@@ -722,66 +2299,42 @@ namespace World
 			}
 		}
 		const Wui::WuiTheme& theme = host.Theme();
-
-		// 左列 = 参数/文件;右列 = 预览球。窄面板时退化为上下布局。
-		const bool wide = rect.W >= 560.0f;
-		Wui::WuiRect parameterRect = rect;
-		Wui::WuiRect previewRect = rect;
+		if (!m_Material)
+		{
+			Wui::Label(ctx, { rect.X + 10.0f, rect.Y + 10.0f },
+				Wui::Tr("panel.material.none_open",
+					"No material open: double-click a .wmat file in the Content Browser"),
+				theme.TextMuted, 13.0f);
+			return;
+		}
+		const float headerHeight = DrawHeader(ctx, { rect.X, rect.Y, rect.W, kHeaderBaseHeight }, host);
+		const Wui::WuiRect body { rect.X, rect.Y + headerHeight, rect.W,
+			std::max(60.0f, rect.H - headerHeight) };
+		const bool wide = rect.W >= kTwoColumnMinWidth;
+		const float pad = 8.0f;
+		Wui::WuiRect previewRect;
+		Wui::WuiRect parameterRect;
 		if (wide)
 		{
-			const float previewW = std::min(300.0f, rect.W * 0.45f);
-			previewRect = { rect.X + rect.W - previewW - 10.0f, rect.Y + 8.0f, previewW, previewW };
-			parameterRect.W = rect.W - previewW - 30.0f;
+			// 宽窗:左 = 预览(方案 §1.A),右 = 可搜索的参数区。
+			const float previewColumn = std::clamp(body.W * 0.40f, 220.0f, 340.0f);
+			const float side = std::clamp(previewColumn, 120.0f, std::max(120.0f, body.H - 2.0f * pad));
+			previewRect = { body.X + pad, body.Y + pad, side, side };
+			parameterRect = { body.X + previewColumn + 2.0f * pad, body.Y,
+				std::max(160.0f, body.W - previewColumn - 3.0f * pad), body.H };
 		}
 		else
 		{
-			previewRect = { rect.X + 10.0f, rect.Y + 8.0f, rect.W - 20.0f, rect.W - 20.0f };
-			parameterRect = { rect.X, rect.Y + previewRect.H + 16.0f, rect.W, rect.H - previewRect.H - 24.0f };
+			// 窄窗:单列,预览在上、参数在下(两者不重叠)。
+			const float width = std::max(80.0f, body.W - 2.0f * pad);
+			const float maxHeight = std::max(90.0f, body.H * 0.45f);
+			const float height = std::clamp(width * 0.62f, 90.0f, maxHeight);
+			previewRect = { body.X + pad, body.Y + pad, width, height };
+			parameterRect = { body.X + pad, previewRect.Y + height + pad, width,
+				std::max(60.0f, body.H - height - 2.0f * pad) };
 		}
-
-		// 预览:每帧重渲染(参数改动即时可见)。面板不可见时 EditorShell 不会调用本函数,
-		// 因此没有隐藏面板的额外开销。
-		const uint64_t textureId = RenderPreview();
-		if (textureId != 0)
-		{
-			Wui::Image(ctx, previewRect, textureId, { 0, 0, 1, 1 }, theme);
-
-			// 左键拖拽旋转预览相机(与 3D 视口一致的直觉:拖拽转物体)。
-			const bool hovered = ctx.IsHovered(previewRect);
-			// 滚轮缩放(镜头远近):距离越小越近;越近步长越小,便于微调。
-			if (hovered && ctx.Input().Wheel != 0.0f)
-			{
-				const float step = std::max(0.1f, m_CameraDistance * 0.1f);
-				m_CameraDistance = std::clamp(m_CameraDistance - ctx.Input().Wheel * step, 1.6f, 20.0f);
-				WLD_CORE_INFO("[material-ui] preview zoom distance={0}", m_CameraDistance);
-			}
-			if (hovered && ctx.Input().MouseClicked[0])
-			{
-				m_Orbiting = true;
-				m_LastMouse = ctx.Input().MousePos;
-			}
-			if (m_Orbiting && ctx.Input().MouseDown[0])
-			{
-				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
-				m_LastMouse = ctx.Input().MousePos;
-				m_OrbitYaw -= delta.x * 0.01f;
-				m_OrbitPitch = std::clamp(m_OrbitPitch + delta.y * 0.01f, -1.45f, 1.45f);
-			}
-			if (m_Orbiting && !ctx.Input().MouseDown[0])
-				m_Orbiting = false;
-		}
-		else
-		{
-			Wui::Label(ctx, { previewRect.X + 10.0f, previewRect.Y + 10.0f },
-				Wui::Tr("panel.material.preview_unavailable", "Preview unavailable (RHI device not ready)"),
-				theme.TextMuted, 12.0f);
-		}
-
-		DrawToolbar(ctx, parameterRect, host);
-		// U2d:未落盘材质的"另存为"字段(22px)与它的行内错误行(Caption+3px)都占工具栏区,
-		// 参数区按这段高度整体下移,错误行才不会被参数内容盖住(该字段只在 m_Path 为空时出现)。
-		const float unsavedPathReserve = m_Path.empty() ? 22.0f + theme.FontSizeCaption + 5.0f : 0.0f;
-		DrawParameters(ctx, { parameterRect.X, parameterRect.Y + 56.0f + unsavedPathReserve,
-			parameterRect.W, parameterRect.H - 56.0f - unsavedPathReserve }, host);
+		m_PreviewRect = previewRect;
+		DrawPreview(ctx, previewRect, host);
+		DrawParameters(ctx, parameterRect, host);
 	}
 }
