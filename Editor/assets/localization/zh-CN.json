@@ -1116,6 +1116,8 @@
   "panel.material.preview.zone": "预览",
   "panel.material.preview.note": "仅影响预览显示(不写入材质)",
   "panel.material.preview.note.tooltip": "预览设置只改变你怎么看这个材质(网格 / 背景 / 光照 / 显示开关),不会写进 .wmat,也不影响对象实际渲染用的材质。",
+  "panel.material.splitter": "预览 / 参数分隔条",
+  "panel.material.splitter.tooltip": "拖动改变预览占的宽度,双击恢复默认比例(预览 40%)。\n预览列最少 220、参数列最少 260 设计单位;宽度是会话内记住的,换材质不会重置。",
   "material.preview.tab.mesh": "网格",
   "material.preview.tab.bg": "背景",
   "material.preview.tab.light": "光照",

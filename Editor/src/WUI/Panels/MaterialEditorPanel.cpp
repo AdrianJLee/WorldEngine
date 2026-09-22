@@ -63,6 +63,26 @@ namespace World
 		constexpr float kPreviewImageMinSide = 96.0f;  // 空间再紧也留一块能看的预览
 		constexpr float kPreviewInlineMinWidth = 240.0f; // 预览设置行:窄于它才改成标签/控件两行
 		constexpr float kParamsMinHeight = 120.0f;     // 窄窗单列时给参数区留的最小高度
+		// ---- U27:可拖拽分隔条 + 响应式网格 ----
+		// 用户 2026-09-22:「材质编辑器预览窗口能不能弄成可伸缩的. 材质编辑器右侧编辑区域
+		// 占了一整块.你不觉得很不合理吗?所有简短的选项都占了一行.」
+		//  - 分隔条两侧各有最小宽度(方案 §A):预览 >= 220、参数列 >= 260 设计单位;
+		//  - 网格每格 >= 300 设计单位才开第二/第三格(300 是本面板实测能同时放下
+		//    "标签 + 数值控件 + 固定占位"的最小宽度,与 U24 的 90px 控件下限口径一致)。
+		constexpr float kSplitterMinPreviewWidth = 220.0f;
+		constexpr float kSplitterMinParamsWidth = 260.0f;
+		constexpr float kSplitterDefaultRatio = 0.40f;      // 双击复位 = 默认比例
+		constexpr float kSplitterDefaultMaxWidth = 340.0f;  // 默认比例上限(U23 起的既有默认)
+		constexpr float kGridCellMinWidth = 300.0f;
+		constexpr int kGridMaxColumns = 3;
+
+		// U27:预览列宽**会话内跨面板记住**(切材质、关掉再打开都不重置;<= 0 = 还没设过)。
+		// 只记用户拖出来的值 —— 窗口变窄时只在本帧夹取,不覆写记忆,窗口再变宽能回到原位置。
+		float& SessionPreviewColumnWidth()
+		{
+			static float width = 0.0f;
+			return width;
+		}
 		// 头部行高(U23:头部只按内容占位,不再留空白带 —— 间距全部走主题令牌)。
 		// 高度 = 该行文字的**实际墨迹高度**(名称 13px / 路径 11px 下移 2px / 状态 11px),
 		// 这样头部底边就是最后一行文字的底边,头部与内容之间不会多出一条看不见的空白带。
@@ -1954,12 +1974,15 @@ namespace World
 
 	// ---- 一行参数:标签 + 控件 + 恢复默认 + 悬停说明 + 无障碍 ----
 	void MaterialEditorPanel::DrawParameterRow(Wui::WuiContext& ctx, PanelHost& host,
-		const Wui::WuiTheme& theme, const RowPlan& row, float x, float y, float width, bool stacked)
+		const Wui::WuiTheme& theme, const RowPlan& row, float x, float y, float width, bool stacked,
+		float labelWidthOverride, bool gridCell)
 	{
 		const MaterialDesc& desc = m_Material->GetDesc();
 		const Wui::WuiId controlId = Wui::HashId(row.ControlId.c_str());
-		const float labelWidth = stacked ? width - 8.0f
-			: std::min(kLabelColumnMax, std::max(84.0f, width * 0.36f));
+		// U27:网格里标签列宽由整块网格统一给出(不是每行各算各的),这是"两列对齐"的前提。
+		const float labelWidth = labelWidthOverride > 0.0f ? labelWidthOverride
+			: (stacked ? width - 8.0f
+				: std::min(kLabelColumnMax, std::max(84.0f, width * 0.36f)));
 		const float labelY = stacked ? y + 1.0f : y + 4.0f;
 		const float controlY = stacked ? y + 20.0f : y;
 		const float controlHeight = stacked ? 20.0f : 22.0f;
@@ -1967,8 +1990,11 @@ namespace World
 		// 在两种状态下逐像素相同 —— 旧实现"只在偏离时出现"会把控件挤窄(用户反馈②)。
 		const RowControl control = RowControlFor(row.Key);
 		const bool hasResetSlot = row.HasReset && !row.ReadOnly && control != RowControl::Button;
+		// U27:多列网格里**每一格**都留出同宽的占位(连只读格也一样),各列的值区才会严格对齐;
+		// 单列沿用旧口径(只读行占满,不给不存在的按钮留白)。
+		const bool reserveResetSlot = hasResetSlot || (gridCell && row.ReadOnly);
 		const float controlX = stacked ? x : x + labelWidth + 8.0f;
-		const float reserved = hasResetSlot ? kResetWidth + 6.0f : 0.0f;
+		const float reserved = reserveResetSlot ? kResetWidth + 6.0f : 0.0f;
 		const float controlWidth = std::max(60.0f, width - (controlX - x) - reserved);
 		const Wui::WuiRect controlRect { controlX, controlY, controlWidth, controlHeight };
 		const Wui::WuiRect rowRect { x, y, width, row.Height };
@@ -2197,6 +2223,64 @@ namespace World
 		AnnotateNode(ctx, controlId, row.Label, rowDoc);
 	}
 
+	// ---- U27:参数列的响应式网格 ----
+	//
+	// 规则(方案 §A):可用宽度足够时每行放 2 个短字段(极宽 3 个),不够就回落成 1 个/行;
+	// "长内容"独占整行 —— 贴图路径(资产下拉)、材质名(自由文本)、三分量向量、动作行。
+	// 配对只用**组内顺序**:连续短字段按原顺序成行(例如基础外观的金属度/粗糙度、
+	// 透明度与混合的混合模式/双面、贴图采样的两条色彩空间诊断、高级的格式/修订),
+	// 长字段会打断当前行 —— 不跨组、不跳序、不硬凑。
+	bool MaterialEditorPanel::RowSpansFullWidth(const RowPlan& row)
+	{
+		return row.Key == "albedo"        // 资产下拉:路径可能很长
+			|| row.Key == "normal"        // 资产下拉
+			|| row.Key == "emissive"      // 三分量向量:每分量一个输入框
+			|| row.Key == "name"          // 自由文本
+			|| row.Key == "reset_all";    // 动作行(按钮)
+	}
+
+	int MaterialEditorPanel::GridColumnCount(float width, const Wui::WuiTheme& theme)
+	{
+		int columns = 1;
+		for (int candidate = 2; candidate <= kGridMaxColumns; ++candidate)
+		{
+			const float needed = kGridCellMinWidth * static_cast<float>(candidate)
+				+ theme.PadSmall * static_cast<float>(candidate - 1);
+			if (width + 0.5f >= needed)
+				columns = candidate;
+		}
+		return columns;
+	}
+
+	std::vector<std::vector<const MaterialEditorPanel::RowPlan*>> MaterialEditorPanel::BuildGridLines(
+		const std::vector<const RowPlan*>& rows, int columns)
+	{
+		std::vector<std::vector<const RowPlan*>> lines;
+		std::vector<const RowPlan*> pending;
+		const auto flush = [&lines, &pending]()
+		{
+			if (!pending.empty())
+			{
+				lines.push_back(pending);
+				pending.clear();
+			}
+		};
+		for (const RowPlan* plan : rows)
+		{
+			if (columns <= 1 || RowSpansFullWidth(*plan))
+			{
+				flush();
+				lines.push_back({ plan });
+				continue;
+			}
+			pending.push_back(plan);
+			if (static_cast<int>(pending.size()) >= columns)
+				flush();
+		}
+		flush();
+		return lines;
+	}
+
 	// ---- 参数区:搜索 + 分组折叠 + 每字段控件 + 校验区 ----
 	float MaterialEditorPanel::DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
@@ -2309,22 +2393,44 @@ namespace World
 			plans.push_back(std::move(plan));
 		}
 
+		// ---- U27:响应式网格(列数 / 格宽 / 统一标签列宽)----
+		// 列数只看**可用宽度**(不够就 1 列,既有窄窗口径不变);格宽与标签列宽在整块网格里
+		// 是同一个值 —— 两列的标签、值区才会逐列对齐,而不是每行各算各的。
+		const float gridAreaWidth = std::max(80.0f, contentRect.W - kGroupIndent - 10.0f);
+		const int gridColumns = GridColumnCount(gridAreaWidth, theme);
+		const float gridGap = theme.PadSmall;
+		const float gridCellWidth = std::max(80.0f, (gridAreaWidth
+			- gridGap * static_cast<float>(gridColumns - 1)) / static_cast<float>(gridColumns));
+		const float gridLabelWidth = gridColumns >= 2
+			? std::clamp(gridCellWidth * 0.42f, 64.0f, 110.0f) : -1.0f;
+		const auto rowsOfGroup = [&plans](const std::string& key)
+		{
+			std::vector<const RowPlan*> rows;
+			for (const RowPlan& plan : plans)
+				if (plan.Group == key)
+					rows.push_back(&plan);
+			return rows;
+		};
+		const auto lineHeightOf = [](const std::vector<const RowPlan*>& line)
+		{
+			float height = 0.0f;
+			for (const RowPlan* plan : line)
+				height = std::max(height, plan->Height);
+			return height;
+		};
+
 		// ---- 内容高度(折叠的组只占组头;展开的组 = 容器块,含子项)----
 		float contentHeight = 6.0f;
 		for (const GroupDesc& group : kGroups)
 		{
-			bool any = false;
-			for (const RowPlan& plan : plans)
-				if (plan.Group == group.Key)
-					any = true;
-			if (!any)
+			const std::vector<const RowPlan*> rows = rowsOfGroup(group.Key);
+			if (rows.empty())
 				continue;
 			contentHeight += kGroupHeaderHeight + kGroupGap;
 			if (!m_SectionOpen[group.Index] && needle.empty())
 				continue;
-			for (const RowPlan& plan : plans)
-				if (plan.Group == group.Key)
-					contentHeight += plan.Height;
+			for (const std::vector<const RowPlan*>& line : BuildGridLines(rows, gridColumns))
+				contentHeight += lineHeightOf(line);
 		}
 		const float maxScroll = std::max(0.0f, contentHeight - contentRect.H);
 		m_ScrollY = std::clamp(m_ScrollY, 0.0f, maxScroll);
@@ -2334,12 +2440,10 @@ namespace World
 		int drawnRows = 0;
 		for (const GroupDesc& group : kGroups)
 		{
-			std::vector<const RowPlan*> rows;
-			for (const RowPlan& plan : plans)
-				if (plan.Group == group.Key)
-					rows.push_back(&plan);
+			const std::vector<const RowPlan*> rows = rowsOfGroup(group.Key);
 			if (rows.empty())
 				continue;
+			const std::vector<std::vector<const RowPlan*>> lines = BuildGridLines(rows, gridColumns);
 			const bool open = m_SectionOpen[group.Index] || !needle.empty();
 			const int modified = GroupModifiedCount(group.Key);
 			const int rowCount = static_cast<int>(rows.size());
@@ -2349,8 +2453,8 @@ namespace World
 			float blockHeight = kGroupHeaderHeight;
 			if (open)
 			{
-				for (const RowPlan* plan : rows)
-					blockHeight += plan->Height;
+				for (const std::vector<const RowPlan*>& line : lines)
+					blockHeight += lineHeightOf(line);
 			}
 			const Wui::WuiRect blockRect { contentRect.X + 2.0f, y - 3.0f,
 				std::max(40.0f, contentRect.W - 12.0f), blockHeight + 4.0f };
@@ -2440,32 +2544,41 @@ namespace World
 				y += kGroupGap;
 				continue;
 			}
-			for (const RowPlan* plan : rows)
+			for (const std::vector<const RowPlan*>& line : lines)
 			{
+				const float lineHeight = lineHeightOf(line);
 				// 校验条目点击后的定位:在**可见性判断之前**处理 —— 目标行通常正在视口外,
 				// 那正是要滚过去的情况(下一帧生效,行高是本帧算出来的)。
-				if (!m_RevealField.empty() && plan->Key == m_RevealField)
+				for (const RowPlan* plan : line)
 				{
+					if (m_RevealField.empty() || plan->Key != m_RevealField)
+						continue;
 					if (y < contentRect.Y + 2.0f)
 						m_ScrollY = std::max(0.0f, m_ScrollY - (contentRect.Y + 2.0f - y));
-					else if (y + plan->Height > contentRect.Y + contentRect.H - 2.0f)
+					else if (y + lineHeight > contentRect.Y + contentRect.H - 2.0f)
 						m_ScrollY = std::min(maxScroll,
-							m_ScrollY + (y + plan->Height - (contentRect.Y + contentRect.H - 2.0f)));
+							m_ScrollY + (y + lineHeight - (contentRect.Y + contentRect.H - 2.0f)));
 					if (--m_RevealFrames <= 0)
 						m_RevealField.clear();
 				}
-				const bool visible = (y + plan->Height > contentRect.Y)
+				const bool visible = (y + lineHeight > contentRect.Y)
 					&& (y < contentRect.Y + contentRect.H);
 				if (!visible)
 				{
-					y += plan->Height;
+					y += lineHeight;
 					continue;
 				}
-				++drawnRows;
-				// 子项缩进:与组头左侧竖条对齐,让"这些行属于上面那一组"一眼可见。
-				DrawParameterRow(ctx, host, theme, *plan, contentRect.X + kGroupIndent, y,
-					std::max(80.0f, contentRect.W - kGroupIndent - 10.0f), stacked);
-				y += plan->Height;
+				for (size_t cell = 0; cell < line.size(); ++cell)
+				{
+					++drawnRows;
+					// 子项缩进:与组头左侧竖条对齐,让"这些行属于上面那一组"一眼可见。
+					// U27:同一行的第 2/3 格按格宽 + PadSmall 依次排开,标签列宽全网格一致。
+					const float cellX = contentRect.X + kGroupIndent
+						+ static_cast<float>(cell) * (gridCellWidth + gridGap);
+					DrawParameterRow(ctx, host, theme, *line[cell], cellX, y, gridCellWidth,
+						gridColumns == 1 ? stacked : false, gridLabelWidth, gridColumns >= 2);
+				}
+				y += lineHeight;
 			}
 			y += kGroupGap;
 		}
@@ -2588,17 +2701,62 @@ namespace World
 		// 预览行:与参数区同一条"窄列换行"口径(宽窗左列只有 220..340 宽)。
 		// U23:预览列比参数列窄得多,单行的"标签 + 控件"在 240 设计单位以上都能放下
 		// (再窄才改成上下两行),这样图像能拿到更多高度。
-		const bool stacked = innerW < kPreviewInlineMinWidth;
+		// U27:卡片够宽(分隔条拖开 / 极宽窗口)时同一套响应式网格生效 —— 光照的"强度 +
+		// 方位"、显示开关这类短字段成对同行;不够宽仍然一行一项(既有口径)。
+		const int previewColumns = GridColumnCount(innerW, theme);
+		const float previewCellWidth = std::max(80.0f, (innerW
+			- theme.PadSmall * static_cast<float>(previewColumns - 1))
+			/ static_cast<float>(previewColumns));
+		const float previewLabelWidth = previewColumns >= 2
+			? std::clamp(previewCellWidth * 0.42f, 64.0f, 110.0f) : -1.0f;
+		const bool stacked = previewColumns == 1 && innerW < kPreviewInlineMinWidth;
 		const float rowH = stacked ? kRowHeightStacked : kRowHeight;
+		// 当前标签的行计划(网格切分与绘制共用同一份构造,避免"预留高度"和"实际画的东西"不一致)。
+		const auto previewPlans = [this, rowH](int tab)
+		{
+			std::vector<RowPlan> plans;
+			for (int index = 0; index < kRowSpecCount; ++index)
+			{
+				const RowSpec& spec = kRowSpecs[index];
+				if (std::string(spec.Group) != std::string("preview") || PreviewTabFor(spec.Key) != tab)
+					continue;
+				RowPlan plan;
+				plan.Group = spec.Group;
+				plan.Key = spec.Key;
+				plan.ControlId = std::string("material.") + spec.Key;
+				plan.Label = Wui::Tr(spec.LabelKey, spec.LabelEn);
+				plan.Doc = Wui::Tr(spec.DocKey, spec.DocEn);
+				plan.ReadOnly = spec.ReadOnly != 0;
+				plan.HasReset = spec.HasReset != 0;
+				plan.Modified = plan.HasReset && !plan.ReadOnly && PreviewOptionModified(plan.Key);
+				plan.Height = rowH;
+				plans.push_back(std::move(plan));
+			}
+			return plans;
+		};
+		const auto packedHeight = [](const std::vector<std::vector<const RowPlan*>>& lines)
+		{
+			float height = 0.0f;
+			for (const std::vector<const RowPlan*>& line : lines)
+			{
+				float lineHeight = 0.0f;
+				for (const RowPlan* plan : line)
+					lineHeight = std::max(lineHeight, plan->Height);
+				height += lineHeight;
+			}
+			return height;
+		};
 		// 标签条高度按**当前最高的标签**预留(光照 4 项 / 显示 3 项 / 网格·背景 1 项):
 		// 切标签时预览画面与卡片尺寸都不变 → 离屏目标不重建、切标签不闪。
 		float tabRowsH[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-		for (int index = 0; index < kRowSpecCount; ++index)
+		for (int tab = 0; tab < 4; ++tab)
 		{
-			const RowSpec& spec = kRowSpecs[index];
-			if (std::string(spec.Group) != std::string("preview"))
-				continue;
-			tabRowsH[std::clamp(PreviewTabFor(spec.Key), 0, 3)] += rowH;
+			const std::vector<RowPlan> plans = previewPlans(tab);
+			std::vector<const RowPlan*> refs;
+			refs.reserve(plans.size());
+			for (const RowPlan& plan : plans)
+				refs.push_back(&plan);
+			tabRowsH[tab] = packedHeight(BuildGridLines(refs, previewColumns));
 		}
 		const float rowsReserveH = std::max(std::max(tabRowsH[0], tabRowsH[1]),
 			std::max(tabRowsH[2], tabRowsH[3]));
@@ -2750,28 +2908,29 @@ namespace World
 			noteRect, previewNoteDoc);
 		// 当前标签的控件:与参数行同一个绘制函数(同一套密度与"恢复默认"口径)。
 		float rowY = noteRect.Y + noteRect.H + gap;
-		for (int index = 0; index < kRowSpecCount; ++index)
 		{
-			const RowSpec& spec = kRowSpecs[index];
-			if (std::string(spec.Group) != std::string("preview"))
-				continue;
-			if (PreviewTabFor(spec.Key) != activeTab)
-				continue;
-			// 窗口高度极小时宁可少画一行,也不让控件越出卡片(卡片外面是参数列)。
-			if (rowY + rowH > card.Y + cardH + 0.5f)
-				break;
-			RowPlan plan;
-			plan.Group = spec.Group;
-			plan.Key = spec.Key;
-			plan.ControlId = std::string("material.") + spec.Key;
-			plan.Label = Wui::Tr(spec.LabelKey, spec.LabelEn);
-			plan.Doc = Wui::Tr(spec.DocKey, spec.DocEn);
-			plan.ReadOnly = spec.ReadOnly != 0;
-			plan.HasReset = spec.HasReset != 0;
-			plan.Modified = plan.HasReset && !plan.ReadOnly && PreviewOptionModified(plan.Key);
-			plan.Height = rowH;
-			DrawParameterRow(ctx, host, theme, plan, card.X + pad, rowY, innerW, stacked);
-			rowY += rowH;
+			const std::vector<RowPlan> plans = previewPlans(activeTab);
+			std::vector<const RowPlan*> refs;
+			refs.reserve(plans.size());
+			for (const RowPlan& plan : plans)
+				refs.push_back(&plan);
+			for (const std::vector<const RowPlan*>& line : BuildGridLines(refs, previewColumns))
+			{
+				float lineHeight = 0.0f;
+				for (const RowPlan* plan : line)
+					lineHeight = std::max(lineHeight, plan->Height);
+				// 窗口高度极小时宁可少画一行,也不让控件越出卡片(卡片外面是参数列)。
+				if (rowY + lineHeight > card.Y + cardH + 0.5f)
+					break;
+				for (size_t cell = 0; cell < line.size(); ++cell)
+				{
+					const float cellX = card.X + pad
+						+ static_cast<float>(cell) * (previewCellWidth + gap);
+					DrawParameterRow(ctx, host, theme, *line[cell], cellX, rowY, previewCellWidth,
+						stacked, previewLabelWidth, previewColumns >= 2);
+				}
+				rowY += lineHeight;
+			}
 		}
 		// 无障碍:预览区节点 + 两条可断言的读数(target / camera)。
 		{
@@ -3618,11 +3777,44 @@ namespace World
 		Wui::WuiRect parameterRect;
 		if (wide)
 		{
-			// 宽窗:左 = 预览卡片(图像 + 预览设置标签),右 = 可搜索的材质参数区。
-			const float previewColumn = std::clamp(body.W * 0.40f, 220.0f, 340.0f);
+			// 宽窗:左 = 预览卡片(图像 + 预览设置标签),右 = 可搜索的材质参数区,
+			// 中间一条**可拖拽分隔条**(U27,用户「预览窗口能不能弄成可伸缩的」)。
+			// 宽度顺序:预览列宽 = 会话记住的值(默认 40%,夹在 [220, 340]),本帧再夹到
+			// [220, body.W - 参数列最小宽 - 3*Pad] —— 拖到极限也不越界、两列不重叠。
+			const float defaultPreviewColumn = std::clamp(body.W * kSplitterDefaultRatio,
+				kSplitterMinPreviewWidth, kSplitterDefaultMaxWidth);
+			const float maxPreviewColumn = std::max(kSplitterMinPreviewWidth,
+				body.W - kSplitterMinParamsWidth - 3.0f * pad);
+			float& rememberedPreviewColumn = SessionPreviewColumnWidth();
+			float previewColumn = rememberedPreviewColumn > 0.0f
+				? rememberedPreviewColumn : defaultPreviewColumn;
+			previewColumn = std::clamp(previewColumn, kSplitterMinPreviewWidth, maxPreviewColumn);
+			// 分隔条轴线落在两列之间那段 Pad 的正中;命中带(6px)/悬停高亮/左右箭头光标
+			// 都由共享控件负责(不新造原语)。
+			const float splitAxis = body.X + pad + previewColumn + pad * 0.5f;
+			const Wui::WuiRect splitterRect { splitAxis, body.Y + gap, 1.0f,
+				std::max(40.0f, body.H - gap - pad) };
+			const Wui::WuiRect splitterBand { splitAxis - 3.0f, splitterRect.Y, 6.0f, splitterRect.H };
+			// 双击复位必须在控件调用**之前**:控件在按下那一帧把"当前值"记成拖拽锚点,
+			// 先复位再按下 = 锚点就是默认值,不会出现"拖一下又跳回旧位置"。
+			const Wui::WuiId splitterId = Wui::HashId("material.splitter");
+			const bool splitterReset = ctx.IsDoubleClicked(splitterBand);
+			if (splitterReset)
+				previewColumn = defaultPreviewColumn;
+			const bool splitterMoved = Wui::Splitter(ctx, splitterId, splitterRect, true, previewColumn,
+				kSplitterMinPreviewWidth, maxPreviewColumn, theme);
+			// 只有用户真的拖了/双击复位才写回会话记忆:窗口变窄时只在本帧夹取,不覆写。
+			if (splitterMoved || splitterReset)
+				rememberedPreviewColumn = previewColumn;
+			const std::string splitterDoc = Wui::Tr("panel.material.splitter.tooltip",
+				"Drag to change how much room the preview takes; double-click to restore the "
+				"default 40% split. The preview keeps at least 220 and the parameters at least 260.");
+			Wui::Tooltip(ctx, splitterBand, splitterDoc);
+			AnnotateNode(ctx, splitterId, Wui::Tr("panel.material.splitter", "Preview / Parameters"),
+				splitterDoc);
 			previewZone = { body.X + pad, body.Y + gap, previewColumn,
 				std::max(80.0f, body.H - gap - pad) };
-			parameterRect = { body.X + previewColumn + 2.0f * pad, body.Y + gap,
+			parameterRect = { body.X + pad + previewColumn + pad, body.Y + gap,
 				std::max(160.0f, body.W - previewColumn - 3.0f * pad),
 				std::max(80.0f, body.H - gap - pad) };
 			DrawPreview(ctx, previewZone, host);

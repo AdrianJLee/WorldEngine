@@ -27,6 +27,10 @@ namespace World
 	//    (网格/背景/光照/显示)住在**预览区自己的卡片与标签条**里,参数列只留会影响材质
 	//    本身的字段 —— 预览只影响"看",不写进 .wmat。离屏目标 = **预览区物理像素**
 	//    (与 render_scale 脱钩)。
+	//  - U27(用户 2026-09-22「预览窗口能不能弄成可伸缩的 / 右侧编辑区域占了一整块,
+	//    所有简短的选项都占了一行」):预览列与参数列之间一条可拖拽 `material.splitter`
+	//    (两侧最小宽 220/260,双击回到默认比例,比例会话内跨面板记住);参数列与预览设置
+	//    都走响应式网格 —— 可用宽度够时 2 格(极宽 3 格)一行,长内容仍独占整行。
 	//
 	// 相机手感与模型/预制体面板一致:左键轨道旋转、滚轮推拉、双击或 F 取景、上下方向已翻正。
 	// 每个材质一个面板/窗口(id = "material:<path>"),可同时打开多个。
@@ -244,8 +248,24 @@ namespace World
 		// 参数区(搜索 + 分组 + 每字段控件 + 校验区);返回占用高度。
 		float DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		// 一行参数:标签 + 控件 + 恢复默认 + 悬停说明 + 无障碍节点。
+		//
+		// U27(用户 2026-09-22「右侧编辑区域占了一整块,所有简短的选项都占了一行」):
+		//  - `labelWidthOverride > 0` = 网格统一的标签列宽(同一行/整个网格里每一格一致);
+		//    `< 0` = 按 width 现算(单列口径,与 U21/U22/U24 的几何完全一致);
+		//  - `gridCell = true` = 这一格属于多列网格:值区右侧统一留出"恢复默认"槽位,
+		//    让各格的标签列与值区严格对齐(只读格也让出同宽,不对齐会看着像两套网格)。
 		void DrawParameterRow(Wui::WuiContext& ctx, PanelHost& host, const Wui::WuiTheme& theme, const RowPlan& row,
-			float x, float y, float width, bool stacked);
+			float x, float y, float width, bool stacked, float labelWidthOverride = -1.0f,
+			bool gridCell = false);
+		// ---- U27:参数列的响应式网格(网格口径的唯一落点)----
+		// 长内容(贴图路径 / 材质名 / 三分量 / 动作行)独占整行;其余短字段按组内**顺序**成对/成行。
+		static bool RowSpansFullWidth(const RowPlan& row);
+		// 可用宽度 → 列数(1/2/3):每格不小于 kGridCellMinWidth(300 设计单位),不够就回落。
+		static int GridColumnCount(float width, const Wui::WuiTheme& theme);
+		// 把一组的行切成"网格行":连续短字段按顺序填进同一行(最多 columns 格),
+		// 遇到长内容先收尾再独占一行 —— 顺序不变,不把不相关的字段硬凑一行。
+		static std::vector<std::vector<const RowPlan*>> BuildGridLines(
+			const std::vector<const RowPlan*>& rows, int columns);
 		// 预览区(卡片:图像 + 相机操作 + 预览设置标签/控件 + "仅影响预览显示"标注 + 读数);
 		// 传入矩形 = 分配到的区域,返回实际占用的高度。
 		float DrawPreview(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
