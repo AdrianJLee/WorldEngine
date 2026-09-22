@@ -190,4 +190,16 @@ namespace World::Wui
 	// 结果写进 KeyMoveTo / KeyToggleExpand / KeyActivate(旧调用点不传 id,行为不变)。
 	TreeViewResult TreeView(WuiContext& ctx, const WuiRect& area, const std::vector<TreeViewItem>& items,
 		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id = 0);
+
+	// ---- P4-U24:坐标系指示器(主视口 + 材质/模型/预制体预览共用) ----
+	// viewRight/viewUp = 当前画面的屏幕基(与面板相机同一套 lookAt 数学,正立画面)。
+	// 形态口径(用户 2026-09-22 反馈「字母和轴挤在一起、轴又粗又短、分不清朝内朝外」):
+	//   · 轴从中心画到臂端,三轴总跨度 ≈ gizmo 盒的 72%(落在 70–80% 口径内),线宽 1.6px;
+	//   · 标号画在臂端**外侧**、沿投影方向留 ≥4px 间隙(不再压在轴/交叠);
+	//   · 透视 + 深度着色:朝观察者的轴更长更亮,背离的更短更暗;
+	//   · 轴接近正对/背对相机(屏幕投影长度 < 0.22)时不再"只留一个点":
+	//     朝观察者画**实心圆点**,背离画**空心圆环**,标号仍留 ≥4px 间隙。
+	// 返回 gizmo 盒矩形(调用方据此登记 <panel>.axis 无障碍节点,value 仍是 yaw/pitch)。
+	WuiRect AxisGizmo(WuiContext& ctx, const WuiRect& viewport, const glm::vec3& viewRight,
+		const glm::vec3& viewUp, float size = 48.0f);
 }

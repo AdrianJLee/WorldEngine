@@ -5,6 +5,7 @@
 #include "World/Core/KeyCodes.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace World::Wui
 {
@@ -14,6 +15,31 @@ namespace World::Wui
 			const WuiColor& color, float size, bool bold = false)
 		{
 			ctx.Commands().push_back({ WuiDrawKind::Text, { pos.x, pos.y, 0, 0 }, color, 0.0f, 1.0f, text, size, bold });
+		}
+
+		// 细线段 = 一个旋转后的四边形(2D 管线逐顶点颜色,不需要新的绘制类型)。
+		void PushAxisLine(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to,
+			const WuiColor& color, float thickness)
+		{
+			const glm::vec2 d = to - from;
+			const float length = glm::length(d);
+			if (length < 1e-3f)
+				return;
+			const glm::vec2 n { -d.y / length * thickness * 0.5f, d.x / length * thickness * 0.5f };
+			WuiDrawCommand command;
+			command.Kind = WuiDrawKind::Quad;
+			command.Color = color;
+			command.Vertices = { from + n, to + n, to - n, from - n };
+			ctx.Commands().push_back(std::move(command));
+		}
+
+		// 深度着色:depth=+1 = 轴指向观察者(更亮更实),-1 = 背离(更暗更透)。
+		WuiColor ShadeAxisColor(const WuiColor& base, float depth)
+		{
+			const float toward = std::max(0.0f, std::min(1.0f, depth));
+			const float bright = 0.72f + 0.28f * toward;
+			const float alpha = 0.55f + 0.41f * toward;
+			return WuiColor { base.R * bright, base.G * bright, base.B * bright, alpha };
 		}
 	}
 
@@ -624,5 +650,108 @@ namespace World::Wui
 		}
 		EndScrollArea(ctx);
 		return result;
+	}
+
+	// P4-U24:轴指示器(主视口 + 所有预览面板共用;口径见头文件)。
+	WuiRect AxisGizmo(WuiContext& ctx, const WuiRect& viewport, const glm::vec3& viewRight,
+		const glm::vec3& viewUp, float size)
+	{
+		constexpr float kMargin = 6.0f;
+		const WuiRect box { viewport.X + viewport.W - size - kMargin,
+			viewport.Y + viewport.H - size - kMargin, size, size };
+		if (box.W < 24.0f || box.H < 24.0f)
+			return box;
+		// 半透明底 + 描边:压在预览内容上也读得出来。
+		ctx.Commands().push_back({ WuiDrawKind::Rect, box,
+			WuiColor { 0.04f, 0.05f, 0.07f, 0.42f }, 6.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box,
+			WuiColor { 0.62f, 0.68f, 0.78f, 0.22f }, 6.0f, 1.0f });
+		const glm::vec2 center { box.X + box.W * 0.5f, box.Y + box.H * 0.5f };
+		// 臂长基准 = 盒边长的 38%(三轴总跨度 ≈ 76% 盒宽/高,落在用户口径 70–80%);
+		// 每根轴再按深度在 0.84–1.0 之间做透视缩放。
+		const float axisLength = size * 0.38f;
+		constexpr float kLineWidth = 1.6f;   // 用户口径 1.5–2px(原来 2.5 显粗)
+		constexpr float kLabelSize = 10.0f;
+		constexpr float kLabelGap = 5.0f;    // 标号近边到臂端 ≥4px(留 1px 栅格化余量)
+		constexpr float kDegenerate = 0.22f; // 屏幕投影长度阈值(接近正对/背对)
+		const glm::vec3 axes[3] = { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
+		const char* axisNames[3] = { "X", "Y", "Z" };
+		const WuiColor baseColors[3] = {
+			{ 0.93f, 0.31f, 0.28f, 0.96f },   // X 红
+			{ 0.36f, 0.77f, 0.32f, 0.96f },   // Y 绿
+			{ 0.33f, 0.58f, 0.98f, 0.96f } }; // Z 蓝
+		// 相机基的右手法向 = 指向观察者(OrbitBasis/lookAt 口径下 = eye 方向)。
+		const glm::vec3 viewNormal = glm::cross(viewRight, viewUp);
+		bool degenerate[3] = { false, false, false };
+		glm::vec2 screenDirs[3] = {};
+		float depths[3] = {};
+		for (int i = 0; i < 3; ++i)
+		{
+			// 屏幕 +x 向右、+y 向下;画面正立 → 屏幕向上 = -dot(axis, viewUp)。
+			const glm::vec2 dir { glm::dot(axes[i], viewRight), -glm::dot(axes[i], viewUp) };
+			const float projected = glm::length(dir);
+			screenDirs[i] = dir;
+			depths[i] = glm::dot(axes[i], viewNormal);
+			degenerate[i] = projected < kDegenerate;
+			if (degenerate[i])
+				continue;
+			// 透视:朝观察者的臂更长(基准 0.92→1.0),背离的更短(0.84)。
+			const WuiColor color = ShadeAxisColor(baseColors[i], depths[i]);
+			const float reach = axisLength * (0.92f + 0.08f * std::max(-1.0f, std::min(1.0f, depths[i])));
+			const glm::vec2 unit = dir / projected;
+			const glm::vec2 tip = center + unit * reach;
+			PushAxisLine(ctx, center, tip, color, kLineWidth);
+			// 标号在臂端外侧:近边沿投影方向与臂端留 kLabelGap。
+			const float textW = ctx.MeasureTextWidth(axisNames[i], kLabelSize);
+			const float halfExtent = 0.5f * (std::fabs(unit.x) * textW + std::fabs(unit.y) * kLabelSize);
+			const glm::vec2 labelCenter = tip + unit * (kLabelGap + halfExtent);
+			PushText(ctx, { labelCenter.x - textW * 0.5f, labelCenter.y - kLabelSize * 0.5f },
+				axisNames[i], color, kLabelSize);
+		}
+		// 第二遍:正对/背对相机的轴画在其它轴线**之上**,避免中心点被别的轴压掉。
+		for (int i = 0; i < 3; ++i)
+		{
+			if (!degenerate[i])
+				continue;
+			const float projected = glm::length(screenDirs[i]);
+			const float depth = depths[i];
+			const WuiColor color = ShadeAxisColor(baseColors[i], depth);
+			// 朝观察者 = 实心圆点;背离 = 空心圆环(两者在像素上可区分)。
+			constexpr float kMarkerRadius = 4.0f;
+			const WuiRect marker { center.x - kMarkerRadius, center.y - kMarkerRadius,
+				kMarkerRadius * 2.0f, kMarkerRadius * 2.0f };
+			if (depth >= 0.0f)
+			{
+				ctx.Commands().push_back({ WuiDrawKind::Rect, marker, color, kMarkerRadius });
+				ctx.Commands().push_back({ WuiDrawKind::RectOutline, marker,
+					ShadeAxisColor(baseColors[i], 1.0f), kMarkerRadius, kLineWidth });
+			}
+			else
+			{
+				// 空心圆环:先铺一块与盒底同色的圆盘,盖掉从中心穿过的其它轴线 ——
+				// 否则"环里露出别的轴色"会让人误读成实心点(用户口径:不得与其它轴混淆)。
+				ctx.Commands().push_back({ WuiDrawKind::Rect, marker,
+					WuiColor { 0.04f, 0.05f, 0.07f, 0.42f }, kMarkerRadius });
+				ctx.Commands().push_back({ WuiDrawKind::RectOutline, marker, color,
+					kMarkerRadius, kLineWidth });
+			}
+			// 标号:投影方向退化时用确定性备用方位(X 右 / Y 上 / Z 左),避免叠在中心。
+			glm::vec2 labelDir = projected > 1e-3f ? screenDirs[i] / projected : glm::vec2 { 0.0f, 0.0f };
+			if (projected <= 1e-3f)
+			{
+				if (i == 0)
+					labelDir = { 1.0f, 0.0f };
+				else if (i == 1)
+					labelDir = { 0.0f, -1.0f };
+				else
+					labelDir = { -1.0f, 0.0f };
+			}
+			const float textW = ctx.MeasureTextWidth(axisNames[i], kLabelSize);
+			const float halfExtent = 0.5f * (std::fabs(labelDir.x) * textW + std::fabs(labelDir.y) * kLabelSize);
+			const glm::vec2 labelCenter = center + labelDir * (kMarkerRadius + kLabelGap + halfExtent);
+			PushText(ctx, { labelCenter.x - textW * 0.5f, labelCenter.y - kLabelSize * 0.5f },
+				axisNames[i], color, kLabelSize);
+		}
+		return box;
 	}
 }

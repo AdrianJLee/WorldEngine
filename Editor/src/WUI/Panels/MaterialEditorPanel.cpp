@@ -37,7 +37,10 @@ namespace World
 		constexpr float kGroupHeaderHeight = 26.0f;
 		constexpr float kRowHeight = 26.0f;
 		constexpr float kRowHeightStacked = 46.0f;
-		constexpr float kResetWidth = 56.0f;
+		// U24:B1 的"恢复默认"改成**固定占位图标**(we_engine 的 ResetDefaultButton 画回旋箭头,
+		// rect 建议 24×24)。旧实现用 56px 文本按钮、且只在偏离默认时出现 —— 点一下整行控件
+		// 宽度就跳一次(用户反馈②:恢复默认会突然改变布局)。
+		constexpr float kResetWidth = 24.0f;
 		constexpr float kTwoColumnMinWidth = 560.0f; // 与模型/预制体面板同口径
 		constexpr float kLabelColumnMax = 150.0f;
 		constexpr float kStackedThreshold = 380.0f;  // 参数列窄于它 → 标签/控件分两行
@@ -383,6 +386,54 @@ namespace World
 		std::string ResetIdFor(const std::string& key)
 		{
 			return "material.prop." + key + ".reset";
+		}
+
+		// ---- U24:字段的**控件分类**(唯一落点;规则原文见 World/src/World/WUI/WuiWidgets.h)----
+		//   DragBarFloat     = 感知型归一化区间(0..1 比例、角度、强度、透明度、平铺系数);
+		//   NumberFieldInt   = 计数/索引/ID/大范围整数;StepperInt = 小整数(1..16)。
+		// 材质面板的**全部**可编辑数值字段都是感知型 —— 金属度/粗糙度(0..1)、预览光照强度(0..4)
+		// 与两个角度(±180°/±85°,顺时针手感)→ DragBarFloat;计数类字段(格式版本 / 修订号)是
+		// **只读信息行**(Label+文本值),不是控件。因此本面板既没有 NumberFieldInt/StepperInt 的
+		// 调用点,也没有"用进度条显示计数"的行(用户反馈④的落点:进度条不再出现在非感知字段上)。
+		// 自发光是**三分量颜色**(0..8),按颜色语义用 Vec3Field(每分量值常显 + 可输入),
+		// 与"颜色不是进度条"的既有口径一致。
+		enum class RowControl : uint8_t
+		{
+			Button = 0,     // 动作行(material.prop.reset_all)
+			Color = 1,      // 基色(material.base,ColorField)
+			Vec3 = 2,       // 三分量颜色(自发光)
+			DragBar = 3,    // 感知型归一化标量(DragBarFloat,值常显 + 值区输入 + ↑/↓ 步进)
+			Combo = 4,      // 单选下拉
+			Segmented = 5,  // 分段按钮
+			Checkbox = 6,   // 开关
+			Asset = 7,      // 资产下拉(.png / .wmat 槽)
+			Text = 8,       // 自由文本
+			ReadOnly = 9,   // 只读信息行(含计数类诊断)
+		};
+
+		RowControl RowControlFor(const std::string& key)
+		{
+			if (key == "reset_all")
+				return RowControl::Button;
+			if (key == "base")
+				return RowControl::Color;
+			if (key == "emissive")
+				return RowControl::Vec3;
+			if (key == "metallic" || key == "roughness" || key == "preview.light.intensity"
+				|| key == "preview.light.azimuth" || key == "preview.light.elevation")
+				return RowControl::DragBar;
+			if (key == "blend")
+				return RowControl::Combo;
+			if (key == "preview.mesh" || key == "preview.bg" || key == "preview.light")
+				return RowControl::Segmented;
+			if (key == "doublesided" || key == "preview.wireframe" || key == "preview.normals"
+				|| key == "preview.uvchecker")
+				return RowControl::Checkbox;
+			if (key == "albedo" || key == "normal")
+				return RowControl::Asset;
+			if (key == "name")
+				return RowControl::Text;
+			return RowControl::ReadOnly;
 		}
 
 		// ---- .wmat 的字段默认值(MaterialDesc 的默认构造;恢复默认 = 写回这里)----
@@ -1733,13 +1784,22 @@ namespace World
 		const float labelY = stacked ? y + 1.0f : y + 4.0f;
 		const float controlY = stacked ? y + 20.0f : y;
 		const float controlHeight = stacked ? 20.0f : 22.0f;
-		const bool showReset = row.HasReset && row.Modified;
+		// U24:恢复默认 = **固定占位**(偏离默认与等于默认都占同一个槽位);控件区宽度与行高
+		// 在两种状态下逐像素相同 —— 旧实现"只在偏离时出现"会把控件挤窄(用户反馈②)。
+		const RowControl control = RowControlFor(row.Key);
+		const bool hasResetSlot = row.HasReset && !row.ReadOnly && control != RowControl::Button;
 		const float controlX = stacked ? x : x + labelWidth + 8.0f;
-		const float reserved = showReset ? kResetWidth + 6.0f : 0.0f;
+		const float reserved = hasResetSlot ? kResetWidth + 6.0f : 0.0f;
 		const float controlWidth = std::max(60.0f, width - (controlX - x) - reserved);
 		const Wui::WuiRect controlRect { controlX, controlY, controlWidth, controlHeight };
 		const Wui::WuiRect rowRect { x, y, width, row.Height };
-		Wui::Tooltip(ctx, rowRect, row.Doc);
+		// 数值行的悬停说明补一句"条体拖动 / 值区输入 / ↑↓ 步进"(分类规则落在 DragBar 上的行)。
+		const std::string rowDoc = control == RowControl::DragBar
+			? row.Doc + "\n" + Wui::Tr("panel.material.numeric.tooltip",
+				"Drag the bar to change the value, or click the value box to type it "
+				"(Enter commits, Esc cancels); Up/Down step by 1% of the range.")
+			: row.Doc;
+		Wui::Tooltip(ctx, rowRect, rowDoc);
 
 		const auto applyEdit = [this](auto&& setter)
 		{
@@ -1782,15 +1842,17 @@ namespace World
 		}
 		else if (row.Key == std::string("metallic"))
 		{
+			// 感知型 0..1 比例(分类规则 → DragBarFloat):值区常显当前值、点值区可输入。
 			float value = desc.Metallic;
-			Wui::SliderFloat(ctx, controlId, controlRect, value, 0.0f, 1.0f, theme);
+			Wui::DragBarFloat(ctx, controlId, controlRect, value, 0.0f, 1.0f, theme);
 			if (value != desc.Metallic)
 				applyEdit([&] { m_Material->SetMetallic(QuantizeMaterialValue(value)); });
 		}
 		else if (row.Key == std::string("roughness"))
 		{
+			// 感知型 0..1 比例(下限 0.02 = 镜面高光仍可见)。
 			float value = desc.Roughness;
-			Wui::SliderFloat(ctx, controlId, controlRect, value, 0.02f, 1.0f, theme);
+			Wui::DragBarFloat(ctx, controlId, controlRect, value, 0.02f, 1.0f, theme);
 			if (value != desc.Roughness)
 				applyEdit([&] { m_Material->SetRoughness(QuantizeMaterialValue(value)); });
 		}
@@ -1893,15 +1955,27 @@ namespace World
 		}
 		else if (row.Key == std::string("preview.light.intensity"))
 		{
-			Wui::SliderFloat(ctx, controlId, controlRect, m_LightIntensity, 0.0f, 4.0f, theme);
+			// 感知型强度(分类规则 → DragBarFloat);两位小数足够读出主光倍率。
+			Wui::WuiNumberStyle style;
+			style.Decimals = 2;
+			Wui::DragBarFloat(ctx, controlId, controlRect, m_LightIntensity, 0.0f, 4.0f, theme, style);
 		}
 		else if (row.Key == std::string("preview.light.azimuth"))
 		{
-			Wui::SliderFloat(ctx, controlId, controlRect, m_LightAzimuth, -180.0f, 180.0f, theme);
+			// 角度(分类规则 → DragBarFloat):带 ° 单位、一位小数 —— 单位与值区右对齐由控件负责。
+			Wui::WuiNumberStyle style;
+			style.Decimals = 1;
+			style.Unit = "°";
+			style.ValueWidth = 68.0f;   // "-180.0°" 也能完整显示(值区宽度是**每个字段的常量**)
+			Wui::DragBarFloat(ctx, controlId, controlRect, m_LightAzimuth, -180.0f, 180.0f, theme, style);
 		}
 		else if (row.Key == std::string("preview.light.elevation"))
 		{
-			Wui::SliderFloat(ctx, controlId, controlRect, m_LightElevation, -85.0f, 85.0f, theme);
+			Wui::WuiNumberStyle style;
+			style.Decimals = 1;
+			style.Unit = "°";
+			style.ValueWidth = 68.0f;
+			Wui::DragBarFloat(ctx, controlId, controlRect, m_LightElevation, -85.0f, 85.0f, theme, style);
 		}
 		else if (row.Key == std::string("preview.wireframe"))
 		{
@@ -1916,22 +1990,27 @@ namespace World
 			Wui::Checkbox(ctx, controlId, controlRect, row.Label, m_ShowUvChecker, theme);
 		}
 
-		// ---- 恢复默认(只在偏离默认值时出现)----
-		if (showReset)
+		// ---- 恢复默认(固定占位:两个状态同一个 rect,行布局零位移)----
+		if (hasResetSlot)
 		{
 			const Wui::WuiRect resetRect { x + width - kResetWidth, controlY, kResetWidth, controlHeight };
 			const std::string resetId = ResetIdFor(row.Key);
 			const std::string resetDoc = Wui::Tr("panel.material.reset.tooltip",
-				"Restore this parameter to its default value.");
-			if (Wui::Button(ctx, Wui::HashId(resetId.c_str()), resetRect,
-				Wui::Tr("panel.material.reset_row", "Reset"), theme))
+				"Restore this parameter to its default value.") + " "
+				+ Wui::Tr("panel.material.reset.placeholder",
+					"Always occupies this slot: it stays dimmed while the value already equals the default.");
+			// 控件自己登记 a11y(kind="reset-default"、value="modified"/"default"、enabled 跟随),
+			// 两个状态只改高亮不改几何 —— 探测口径:前后行矩形逐像素相同。
+			const Wui::WuiId resetWuiId = Wui::HashId(resetId.c_str());
+			if (Wui::ResetDefaultButton(ctx, resetWuiId, resetRect, row.Modified,
+				theme, Wui::Tr("panel.material.reset_row", "Reset"), resetDoc))
 				SetFieldToDefault(row.Key);
-			Wui::Tooltip(ctx, resetRect, resetDoc);
-			AnnotateNode(ctx, Wui::HashId(resetId.c_str()),
-				Wui::Tr("panel.material.reset_row", "Reset"), resetDoc);
+			// 控件的 a11y 节点自带 kind/value/enabled,但**不带**悬停说明:两态都补齐
+			// (AnnotateNode 保留 live 的 value/kind,只补 label/tooltip)。
+			AnnotateNode(ctx, resetWuiId, Wui::Tr("panel.material.reset_row", "Reset"), resetDoc);
 		}
 		// 控件自己登记过节点:补上参数名与悬停说明(值/矩形仍以控件为准)。
-		AnnotateNode(ctx, controlId, row.Label, row.Doc);
+		AnnotateNode(ctx, controlId, row.Label, rowDoc);
 	}
 
 	// ---- 参数区:搜索 + 分组折叠 + 每字段控件 + 校验区 ----

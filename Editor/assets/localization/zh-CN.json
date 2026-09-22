@@ -981,6 +981,8 @@
   "panel.material.group.defaults": "默认值",
   "panel.material.reset_row": "恢复默认",
   "panel.material.reset.tooltip": "把这一项恢复成默认值(不会自动写盘)。",
+  "panel.material.reset.placeholder": "这个位置常驻:值已经等于默认时只是变暗,不会挪动其它控件。",
+  "panel.material.numeric.tooltip": "拖动条体改值,点数值区输入(回车提交 / Esc 取消);上下方向键按值域的 1% 步进。",
   "panel.material.empty": "这个材质没有可显示的参数。",
   "panel.material.empty.filtered": "没有匹配的参数",
   "panel.material.preview": "预览",

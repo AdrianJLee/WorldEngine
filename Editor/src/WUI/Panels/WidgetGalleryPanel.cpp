@@ -6,6 +6,7 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace World
 {
@@ -196,6 +197,7 @@ namespace World
 			(28.0f + 26.0f + gap + rowH + gap + rowH + gap + rowH + 18.0f + gap) + // Controls 2
 			(28.0f + 24.0f + 22.0f * 4.0f + gap + 22.0f + gap + 84.0f + gap) + // Table / Color / Splitter
 			(28.0f + rowH * 3.0f + gap + 120.0f + gap) + // Vector / Empty
+			(28.0f + (rowH + gap) * 4.0f) +               // U24 Numeric / Reset
 			40.0f;
 
 		Wui::BeginScrollArea(ctx, rect, contentHeight, m_ScrollY, theme);
@@ -597,6 +599,61 @@ namespace World
 			Wui::Label(ctx, { x0 + 260.0f, y + 8.0f },
 				Wui::Tr("panel.gallery.empty.caption", "EmptyState 240x120"), theme.TextMuted, 13.0f);
 			y += emptyRect.H + gap;
+		}
+
+		// ---- U24 数值控件 / 固定占位恢复默认(控件层验收;分类规则见 WuiWidgets.h) ----
+		// 这一段是 we_engine 的控件级验收演示(DragBarFloat / StepperInt / NumberFieldInt /
+		// ResetDefaultButton 各一个),不替代材质面板本身的落地(那是 we_editor 的边界)。
+		section(Wui::Tr("panel.gallery.section.numeric_reset", "Numeric / Reset"));
+		{
+			// DragBarFloat = 感知型归一化区间:条体拖动 + 右侧固定宽度值区(可点输入)。
+			float& barValue = ctx.Persist<float>(Wui::HashId("gallery.u24.bar.value"), 0.6f);
+			const Wui::WuiNumberStyle barStyle;
+			if (Wui::DragBarFloat(ctx, Wui::HashId("gallery.u24.bar"), { x0, y, 300.0f, rowH },
+				barValue, 0.0f, 1.0f, theme, barStyle))
+				m_LastAction = "DragBarFloat: " + std::to_string(barValue);
+			Wui::Label(ctx, { x0 + 312.0f, y + 5.0f },
+				Wui::Tr("panel.gallery.numeric.bar", "normalized 0..1 (value + input)"),
+				theme.TextMuted, 13.0f);
+			y += rowH + gap;
+
+			// StepperInt = 小整数(1..16):[−] 值 [+];值区同样可键入。
+			int& stepValue = ctx.Persist<int>(Wui::HashId("gallery.u24.step.value"), 4);
+			const Wui::WuiNumberStyle stepStyle;
+			if (Wui::StepperInt(ctx, Wui::HashId("gallery.u24.step"), { x0, y, 160.0f, rowH },
+				stepValue, 1, 16, theme, stepStyle))
+				m_LastAction = "StepperInt: " + std::to_string(stepValue);
+			Wui::Label(ctx, { x0 + 172.0f, y + 5.0f },
+				Wui::Tr("panel.gallery.numeric.stepper", "small integer 1..16"),
+				theme.TextMuted, 13.0f);
+			y += rowH + gap;
+
+			// NumberFieldInt = 计数/索引/大范围整数:数字输入框 + 单位后缀。
+			int64_t& numberValue = ctx.Persist<int64_t>(Wui::HashId("gallery.u24.number.value"), 0);
+			Wui::WuiNumberStyle numberStyle;
+			numberStyle.Unit = "ch";
+			if (Wui::NumberFieldInt(ctx, Wui::HashId("gallery.u24.number"), { x0, y, 160.0f, rowH },
+				numberValue, 0, 7, theme, numberStyle))
+				m_LastAction = "NumberFieldInt: " + std::to_string(numberValue);
+			Wui::Label(ctx, { x0 + 172.0f, y + 5.0f },
+				Wui::Tr("panel.gallery.numeric.number", "index / unit suffix"),
+				theme.TextMuted, 13.0f);
+			y += rowH + gap;
+
+			// 固定占位恢复默认:行内恒定预留 24px 图标位,偏离默认才高亮可点。
+			float& resetValue = ctx.Persist<float>(Wui::HashId("gallery.u24.reset.value"), 0.35f);
+			constexpr float kResetDefault = 0.35f;
+			const bool resetModified = std::fabs(resetValue - kResetDefault) > 1e-4f;
+			const Wui::WuiNumberStyle resetStyle;
+			Wui::DragBarFloat(ctx, Wui::HashId("gallery.u24.resetbar"), { x0, y, 300.0f, rowH },
+				resetValue, 0.0f, 1.0f, theme, resetStyle);
+			if (Wui::ResetDefaultButton(ctx, Wui::HashId("gallery.u24.reset"),
+				{ x0 + 308.0f, y, 24.0f, rowH }, resetModified, theme, "Reset"))
+				resetValue = kResetDefault;
+			Wui::Label(ctx, { x0 + 344.0f, y + 5.0f },
+				Wui::Tr("panel.gallery.numeric.reset", "fixed-slot restore default"),
+				theme.TextMuted, 13.0f);
+			y += rowH + gap;
 		}
 
 		Wui::EndScrollArea(ctx);

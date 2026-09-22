@@ -119,6 +119,38 @@ namespace World::Wui
 	// 数值编辑:点击进入文本输入,按住左右拖动微调;Enter 提交,Escape 取消。
 	bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme);
 	bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int64_t min, int64_t max, const WuiTheme& theme);
+
+	// ---- P4-U24:数值控件族(值常显 + 可输入 + 固定占位恢复默认) ----
+	// **分类规则(硬口径;面板按字段语义选控件,不要逐字段特判)**:
+	//   · DragBarFloat  = 感知型归一化区间(0..1 比例、角度、强度、透明度、平铺系数等
+	//                      "用拖动找手感"的值):进度条 + 右侧**固定宽度**数值区(右对齐);
+	//                      拖条体 = 按像素比例改值,单击值区 = 文本输入,↑/↓(←/→)= 1% 值域步进。
+	//   · NumberFieldInt = 计数/索引/ID/大范围整数(UV 通道、MeshIndex、材质索引、上限值…):
+	//                      数字输入框(可带单位后缀与步进箭头),不做"拖出大整数"的拖动。
+	//   · StepperInt    = 小范围整数(1..16 的枚举式数量,如平铺次数、细分级别):[−] 值 [+];
+	//                      值区同样可键入。
+	//   · DragFloat/DragInt = 既有通用数值字段(自由拖动微调):保留原语义;U24 起同样支持
+	//                      ↑/↓ 步进与非法输入的可读反馈。新代码按上面三类选型。
+	struct WuiNumberStyle
+	{
+		const char* Unit = "";     // 单位后缀(° / px / ch / × …);空 = 无单位
+		float ValueWidth = 56.0f;  // DragBar 右侧值区固定宽度(设计单位,最小 40)
+		int Decimals = 3;          // 显示/编辑小数位;-1 = 自动(去尾零)
+		bool Steppers = false;     // NumberField 是否画 [−]/[+] 步进箭头(StepperInt 恒为真)
+	};
+	bool DragBarFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value,
+		float min, float max, const WuiTheme& theme, const WuiNumberStyle& style = {});
+	bool NumberFieldInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value,
+		int64_t min, int64_t max, const WuiTheme& theme, const WuiNumberStyle& style = {});
+	bool StepperInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int& value, int min, int max,
+		const WuiTheme& theme, const WuiNumberStyle& style = {});
+	// **固定占位"恢复默认"**:调用方按行高**恒定预留** rect(例如 24×24 图标位);偏离默认
+	//   (modified=true)时高亮可点,等于默认时同尺寸弱化/禁用 —— 控件自身不读写任何布局,
+	//   因此"点恢复默认前/后行矩形逐像素相同"。返回值 = 本帧被点击(调用方写回默认值)。
+	//   无障碍:kind="reset-default"、value="modified"/"default"、enabled/interactive 跟随 modified。
+	bool ResetDefaultButton(WuiContext& ctx, WuiId id, const WuiRect& rect, bool modified,
+		const WuiTheme& theme, const std::string& label = std::string(),
+		const std::string& tooltip = std::string());
 	// 文本输入:UTF-8 追加/退格;回车提交返回 true,Escape 失焦。
 	// P4-U5a(2026-09-21):无障碍补充信息。**为什么要显式传**:占位提示是各面板自己画的 Label,
 	// 读屏/脚本读不到 —— 实测 search 框的节点 label/value 双空(用户口径:两者不能同时为空)。

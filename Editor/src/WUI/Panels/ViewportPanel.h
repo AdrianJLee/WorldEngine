@@ -5,6 +5,7 @@
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
 #include <cmath>
@@ -95,47 +96,13 @@ namespace World
 
 		// 坐标系指示器:右下角 ~48 设计单位的半透明块,X 红 / Y 绿 / Z 蓝,
 		// 轴顶点按**该窗口画面**的朝向投影(viewRight/viewUp = 正立画面的屏幕基)。
-		// 投影长度退化的轴不画 —— 2D 正交视图里 Z 正对画面,自然只剩 X/Y(方案 §5.5)。
+		// U24 起实现迁到 World/WUI/Widgets/WuiChrome.cpp(AxisGizmo):主视口与三个预览面板
+		// 共用同一份"臂长/线宽/标号间隙/正对相机实心点+背离空心环"口径;这里只保留
+		// 调用点与命名空间(draw 的几何契约不变:`<panel>.axis` 的 rect/value 仍由调用方登记)。
 		inline Wui::WuiRect DrawAxisIndicator(Wui::WuiContext& ctx, const Wui::WuiRect& viewport,
 			const glm::vec3& viewRight, const glm::vec3& viewUp, float size = 48.0f)
 		{
-			constexpr float kMargin = 6.0f;
-			const Wui::WuiRect box { viewport.X + viewport.W - size - kMargin,
-				viewport.Y + viewport.H - size - kMargin, size, size };
-			if (box.W < 24.0f || box.H < 24.0f)
-				return box;
-			// 半透明底 + 描边:压在预览内容上也读得出来。
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, box,
-				Wui::WuiColor { 0.04f, 0.05f, 0.07f, 0.42f }, 6.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, box,
-				Wui::WuiColor { 0.62f, 0.68f, 0.78f, 0.22f }, 6.0f, 1.0f });
-			const glm::vec2 center { box.X + box.W * 0.5f, box.Y + box.H * 0.5f };
-			const float axisLength = size * 0.30f;
-			const glm::vec3 axes[3] = { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f },
-				{ 0.0f, 0.0f, 1.0f } };
-			const char* axisNames[3] = { "X", "Y", "Z" };
-			const Wui::WuiColor axisColors[3] = {
-				{ 0.93f, 0.31f, 0.28f, 0.96f },   // X 红
-				{ 0.36f, 0.77f, 0.32f, 0.96f },   // Y 绿
-				{ 0.33f, 0.58f, 0.98f, 0.96f } }; // Z 蓝
-			for (int i = 0; i < 3; ++i)
-			{
-				// 屏幕 +x 向右、+y 向下;画面正立 → 屏幕向上 = -dot(axis, viewUp)。
-				const glm::vec2 dir { glm::dot(axes[i], viewRight), -glm::dot(axes[i], viewUp) };
-				const float projected = glm::length(dir);
-				if (projected < 0.22f)
-					continue;   // 正对/背对画面:只会在中心留一个点
-				// 朝向观察者的轴略短:一眼看出哪根轴指向自己(与 Unity 的轴标同一条读法)。
-				const float depth = glm::dot(axes[i], glm::cross(viewRight, viewUp));
-				const float reach = axisLength * (depth < 0.0f ? 0.72f : 1.0f);
-				const glm::vec2 tip = center + dir / projected * reach;
-				PushLine(ctx, center, tip, axisColors[i], 2.5f);
-				const float fontSize = 10.0f;
-				const float textWidth = ctx.MeasureTextWidth(axisNames[i], fontSize);
-				Wui::Label(ctx, { tip.x - textWidth * 0.5f, tip.y - fontSize * 0.5f },
-					axisNames[i], axisColors[i], fontSize);
-			}
-			return box;
+			return Wui::AxisGizmo(ctx, viewport, viewRight, viewUp, size);
 		}
 
 		// 坐标系读数(探针按它断言符号与模式)。
