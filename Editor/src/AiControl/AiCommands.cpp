@@ -561,6 +561,15 @@ namespace World
 			result = Wui::WuiAccessibility::Get().Serialize();
 			return true;
 		}
+		// U26:窗口几何(客户区屏幕原点 + 尺寸,物理像素),键 = ui.tree 节点的 window 字段。
+		// 跨窗口自动化(把 a11y 矩形换算成屏幕点再注入)必须先有这份权威数据:
+		// 脚本自己 EnumWindows 时,进程里还混着 GLFW 消息窗、驱动的 pbuffer 窗口等,
+		// 按"客户区最大的 GLFW 窗口"猜角色实测会算错注入点。
+		if (cmd == "ui.windows")
+		{
+			result = m_Shell.AiWindowRectsJson();
+			return true;
+		}
 		if (cmd == "ui.invoke")
 		{
 			std::string message;

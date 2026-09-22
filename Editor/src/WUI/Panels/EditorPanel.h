@@ -22,12 +22,18 @@ namespace World
 	// 而内容浏览器(主窗口里的停靠面板)与材质编辑器(独立 OS 窗口,或附加到主窗口的标签)不可能
 	// 同时渲染 —— 拖拽的按下/移动/释放全部发生在**源窗口**,源窗口看不到目标面板的控件矩形。
 	// 这里用一个编辑器级通道把两边接起来:
-	//   · 目标面板每帧把自己的"可落点"矩形登记进来(屏幕物理像素);
+	//   · 目标面板每次渲染时把自己的"可落点"矩形登记进来(屏幕物理像素),登记带帧号;
 	//   · 源面板在**释放那一帧**用全局光标(本窗口客户区坐标 + 窗口屏幕原点)命中它们,
 	//     命中就投递一次 drop;
 	//   · 目标面板渲染时取走(恰好一次);没登记/没命中 = 什么都不做(不静默改值)。
 	// 坐标统一 = 屏幕物理像素(窗口客户区原点 + 客户区坐标 × UiScale);两个窗口的原点都由宿主给出
-	// (EditorShell::PanelWindowScreenOrigin)。宿主每帧开头调 BeginFrame 清空登记。
+	// (EditorShell::PanelWindowScreenOrigin)。宿主每帧开头调 BeginFrame 做老化清理。
+	//
+	// **登记必须跨帧存活**:主窗口(源:内容浏览器)与独立窗口(目标:材质编辑器)是分开渲染的,
+	// 而目标窗口在本帧的渲染发生在源面板**之后**。若 BeginFrame 清空登记,释放那一帧源面板
+	// 能看到的就只剩"本帧更早渲染的面板"——独立窗口永远命中不了(实测:U25 拖放 0 命中)。
+	// 因此登记只在超过 kTargetLifetimeFrames 帧未刷新时丢弃:位置稳定的目标(面板不随拖拽移动)
+	// 仍然精确,面板被关掉/隐藏后最多 2 帧就失效,不会留下幽灵落点。
 	namespace Editor
 	{
 		class AssetDropBridge
@@ -40,6 +46,7 @@ namespace World
 				std::string Key;            // 落点参数(如槽位 key:albedo / normal)
 				std::string PayloadPrefix;  // 只接受此前缀(内容浏览器 = "file:")
 				float X = 0.0f, Y = 0.0f, W = 0.0f, H = 0.0f;   // 屏幕物理像素
+				uint64_t Frame = 0;         // 最后一次登记的帧号(见 kTargetLifetimeFrames)
 			};
 			struct Drop
 			{
@@ -60,6 +67,9 @@ namespace World
 			bool TakeDrop(const std::string& owner, const std::string& sink, const std::string& key, Drop* out);
 			size_t TargetCount() const { return m_Targets.size(); }
 			size_t PendingCount() const { return m_Pending.size(); }
+
+			// 落点登记的存活帧数:目标窗口在源面板之后渲染,释放帧至少要能看到上一帧的登记。
+			static constexpr uint64_t kTargetLifetimeFrames = 2;
 
 		private:
 			std::vector<Target> m_Targets;

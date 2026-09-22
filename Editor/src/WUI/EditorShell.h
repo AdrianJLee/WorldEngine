@@ -61,6 +61,11 @@ namespace World
 		std::string AiDescribeState() const;
 		// 当前停靠布局(JSON 文本,供 ui.layout.get)。
 		std::string AiLayoutJson() const { return m_Layout.Serialize(); }
+		// U26:窗口几何(物理像素客户区原点 + 尺寸),按**无障碍 window 键**寻址 ——
+		// 跨窗口脚本要把 a11y 矩形(设计单位)换算成屏幕物理像素,必须先知道目标窗口
+		// 客户区的屏幕原点;让脚本自己 EnumWindows 猜窗口角色(主窗口/浮窗/GLFW 消息窗/
+		// 驱动的 pbuffer 窗口)在实测里错过一次,这里由引擎直接给出权威答案(供 ui.windows)。
+		std::string AiWindowRectsJson() const;
 		// 渲染后端切换后重建全部可见独立窗口(位置/尺寸/面板归属保留)。
 		void RecreateIndependentWindows();
 		Wui::WuiRect ViewportRect() const { return m_ViewportRect; }
@@ -236,6 +241,9 @@ namespace World
 		void RenderPanelContent(Wui::WuiContext& ctx, const std::string& id, const Wui::WuiRect& rect);
 		// 浮动面板:在停靠区之上绘制,支持拖动/缩放/关闭与拖回停靠。
 		void RenderFloating(Wui::WuiContext& ctx);
+		// 独立 OS 窗口(每个 FloatWindowHost 一扇):**帧末**渲染,理由见实现处注释
+		// (无障碍树的"当前窗口"与跨窗口落点登记都要求主窗口 UI 先画完)。
+		void RenderIndependentWindows(Wui::WuiContext& ctx);
 		// 单个"窗口内浮动面板"(停靠形态面板拖出后的形态):标题栏拖动、右下角缩放、
 		// 关闭回停靠位。独立窗口(Independent)不走这里,它们有自己的 OS 窗口。
 		void RenderFloatWindow(Wui::WuiContext& ctx, Wui::DockFloat& window, bool* closed);

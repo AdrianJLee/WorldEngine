@@ -1463,6 +1463,9 @@ namespace World
 		// P4-UX10:启动询问贴状态栏上方(非模态;不压暗、不挡操作)。
 		DrawRestorePrompt(ctx, statusBar);
 		Wui::DrawTooltip(ctx, m_Theme);
+		// U26:独立 OS 窗口放在**最后**渲染 —— 它们会把无障碍树的"当前窗口"切到自己,
+		// 放在前面会让菜单栏/状态栏等主窗口节点挂错窗口键(见 RenderIndependentWindows)。
+		RenderIndependentWindows(ctx);
 		m_TextFocusLatched = Wui::WuiTextFocus::Get().Active();
 	}
 
@@ -2101,7 +2104,6 @@ namespace World
 
 		// 槽位屏幕矩形(客户区 -> 屏幕):用于判断独立窗口是否停到了槽位上。
 		const glm::vec2 viewport = ctx.ViewportSize();
-		std::vector<std::pair<Wui::PanelId, Wui::WuiRect>> dockRects;
 		// 挂靠栏的屏幕矩形(横条):客户区坐标 -> 屏幕坐标。
 		// 注意:viewport 是**设计单位**(= 物理像素 / UiScale),而这里要和 GetCursorPos /
 		// 窗口屏幕矩形(都是物理像素)比较 —— 必须乘回 UiScale,否则 UI 缩放 1.3 时
@@ -2114,6 +2116,45 @@ namespace World
 		m_AttachSlotScreenRect.X += static_cast<float>(windowX);
 		m_AttachSlotScreenRect.Y += static_cast<float>(windowY);
 
+		// 独立 OS 窗口不在这里渲染 —— 见 RenderIndependentWindows(帧末调用,理由见该函数)。
+		// 停靠形态的"临时浮动"面板:在主窗口内绘制(OS 窗口只属于 Independent 面板)。
+		for (size_t i = 0; i < m_Layout.Floating.size(); ++i)
+		{
+			const std::string panel = m_Layout.Floating[i].Panel;
+			if (IsIndependentPanel(panel))
+				continue; // 独立面板有自己的 OS 窗口
+			bool closed = false;
+			RenderFloatWindow(ctx, m_Layout.Floating[i], &closed);
+			if (closed)
+			{
+				// 停靠形态的浮动窗口关闭 = 回停靠位(D3),不是隐藏面板。
+				HideFloatPanel(panel, &ctx);
+				break; // 容器已改变,下一帧继续绘制其余窗口
+			}
+		}
+		// 置顶在绘制结束后应用,避免遍历中修改容器。
+		if (!m_BringFloatFront.empty())
+		{
+			m_Layout.BringFloatToFront(m_BringFloatFront);
+			m_BringFloatFront.clear();
+		}
+		// 落点预览画在所有浮动面板之上:拖动中的面板正好盖在目标上。
+		if (m_DropPreviewActive)
+			Wui::DropZoneOverlay(ctx, m_DropPreviewRect, 0.30f, 3.0f);
+	}
+
+	// 独立窗口:每个宿主 = 一个 OS 窗口(可含多个标签面板)。
+	//
+	// **为什么放在主窗口 UI 的最后一步**(U26 修):每个窗口渲染前都会调
+	// `WuiAccessibility::BeginFrame(windowKey)` 把无障碍树的"当前窗口"切到自己,而
+	// 主窗口的菜单栏 / 状态栏 / 外壳模态都在停靠面板之后才绘制。若独立窗口在本帧中段
+	// 渲染,之后登记的主窗口节点(菜单栏 File/Window、菜单项、状态栏…)就会挂着**浮窗的
+	// window 键** —— `ui.invoke` 会把点击投进浮窗,菜单从此点不开(实测:U25 探针在
+	// `window=main` 下找不到 menu.window,唯一那份指向材质浮窗,点它只打中浮窗的标签栏),
+	// 跨窗口拖放的落点登记同样晚于源面板渲染(见 AssetDropBridge 的帧老化)。
+	// 移到帧末后,主窗口 UI 全程处于 BeginFrame("main") 之后,独立窗口只影响自己的节点。
+	void EditorShell::RenderIndependentWindows(Wui::WuiContext& ctx)
+	{
 		// 每个独立窗口渲染自己的 OS 窗口(含标签栏);窗口被关闭 = 隐藏其全部面板。
 		// 标签栏 x 只登记关闭请求,统一在遍历结束后处理,避免边遍历边改 m_FloatHosts。
 		std::vector<std::string> closeRequests;
@@ -2175,38 +2216,10 @@ namespace World
 		}
 		for (const std::string& panel : closeRequests)
 			HideFloatPanel(panel, &ctx);
-		// 挂靠栏高亮只可能由"正在拖窗口"点亮(P4-UX9 起拖动走系统移动循环,循环期间不渲染,
-		// 松手后由 PerformIndependentWindowDrag 收口)—— 空闲时一律熄灭,避免残留。
-		m_AttachSlotHighlight = false;
-		// 停靠形态的"临时浮动"面板:在主窗口内绘制(OS 窗口只属于 Independent 面板)。
-		// 独立窗口渲染会把当前 GL 上下文切到各自窗口,先恢复主窗口上下文。
-		if (Application::HasInstance())
-			Application::Get().GetWindow().MakeCurrent();
-		for (size_t i = 0; i < m_Layout.Floating.size(); ++i)
-		{
-			const std::string panel = m_Layout.Floating[i].Panel;
-			if (IsIndependentPanel(panel))
-				continue; // 独立面板有自己的 OS 窗口
-			bool closed = false;
-			RenderFloatWindow(ctx, m_Layout.Floating[i], &closed);
-			if (closed)
-			{
-				// 停靠形态的浮动窗口关闭 = 回停靠位(D3),不是隐藏面板。
-				HideFloatPanel(panel, &ctx);
-				break; // 容器已改变,下一帧继续绘制其余窗口
-			}
-		}
-		// 置顶在绘制结束后应用,避免遍历中修改容器。
-		if (!m_BringFloatFront.empty())
-		{
-			m_Layout.BringFloatToFront(m_BringFloatFront);
-			m_BringFloatFront.clear();
-		}
-		// 落点预览画在所有浮动面板之上:拖动中的面板正好盖在目标上。
-		if (m_DropPreviewActive)
-			Wui::DropZoneOverlay(ctx, m_DropPreviewRect, 0.30f, 3.0f);
-		// 跨窗口拖拽的目标命中与落点(在窗口渲染之后执行,便于统一改容器)。
-		// 独立窗口渲染会把 GL 上下文切到各自窗口,这里恢复主窗口上下文,
+		// 挂靠栏高亮不再在这里复位:本函数已经排到 DrawAttachBar 之后,复位会擦掉
+		// 当帧刚算出的高亮;残留由下一帧 RenderFloating 开头的复位统一清掉。
+		//
+		// 独立窗口渲染会把当前 GL 上下文切到各自窗口,这里恢复主窗口上下文 ——
 		// 否则主窗口后续的呈现/交换会作用在错误的上下文上(表现为主窗口不再刷新)。
 		if (Application::HasInstance())
 			Application::Get().GetWindow().MakeCurrent();
@@ -2916,6 +2929,60 @@ namespace World
 			out << "{\"panel\":\"" << escape(id) << "\",\"state\":\"" << PanelStateLabel(id) << "\"}";
 		}
 		out << "]}";
+		return out.str();
+	}
+
+	// U26:窗口几何(客户区屏幕原点 + 尺寸,均为物理像素),键 = 无障碍节点的 window。
+	// 主窗口 = GLFW 内容区原点(与注入窗口一致);独立窗口 = FloatWindowHost::ScreenRect
+	// (同一份数据也是跨窗口拖放命中用的原点)。隐藏态(附加到主窗口)照常列出,
+	// 但 visible=false —— 脚本由此能判断"面板在主窗口里"(那时节点 window 键是 main)。
+	std::string EditorShell::AiWindowRectsJson() const
+	{
+		auto escape = [](const std::string& text)
+		{
+			std::string out;
+			out.reserve(text.size() + 8);
+			for (char c : text)
+			{
+				switch (c)
+				{
+					case '"': out += "\\\""; break;
+					case '\\': out += "\\\\"; break;
+					case '\n': out += "\\n"; break;
+					case '\r': out += "\\r"; break;
+					case '\t': out += "\\t"; break;
+					default: out += c; break;
+				}
+			}
+			return out;
+		};
+		std::ostringstream out;
+		out << "[";
+		bool first = true;
+		if (Application::HasInstance())
+		{
+			int x = 0, y = 0;
+			Application::Get().GetWindow().GetPosition(&x, &y);
+			out << "{\"window\":\"main\",\"x\":" << x << ",\"y\":" << y
+				<< ",\"w\":" << Application::Get().GetWindow().GetWidth()
+				<< ",\"h\":" << Application::Get().GetWindow().GetHeight()
+				<< ",\"visible\":true,\"state\":\"main\",\"tabs\":1}";
+			first = false;
+		}
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+		{
+			if (!first)
+				out << ",";
+			first = false;
+			const Wui::WuiRect rect = host->ScreenRect();
+			out << "{\"window\":\"float:" << escape(host->Panel())
+				<< "\",\"x\":" << rect.X << ",\"y\":" << rect.Y
+				<< ",\"w\":" << rect.W << ",\"h\":" << rect.H
+				<< ",\"visible\":" << (host->IsHidden() ? "false" : "true")
+				<< ",\"state\":\"" << PanelStateLabel(host->Panel())
+				<< "\",\"tabs\":" << host->Panels().size() << "}";
+		}
+		out << "]";
 		return out.str();
 	}
 
@@ -4312,7 +4379,13 @@ namespace World
 		void AssetDropBridge::BeginFrame(uint64_t frame)
 		{
 			m_Frame = frame;
-			m_Targets.clear();
+			// 只老化、不清空:目标窗口(独立 OS 窗口)在本帧的渲染发生在源面板之后,
+			// 释放那一帧必须还能看到上一帧登记的落点矩形(见 EditorPanel.h 的契约注释)。
+			m_Targets.erase(std::remove_if(m_Targets.begin(), m_Targets.end(),
+				[frame](const Target& target)
+				{
+					return target.Frame + kTargetLifetimeFrames < frame;
+				}), m_Targets.end());
 			// 投递过的 drop 只给目标几帧时间取走:面板被关掉/不可见时不无限堆积。
 			const uint64_t oldest = frame > 4 ? frame - 4 : 0;
 			m_Pending.erase(std::remove_if(m_Pending.begin(), m_Pending.end(),
@@ -4323,16 +4396,18 @@ namespace World
 		{
 			if (target.Owner.empty() || target.W <= 0.0f || target.H <= 0.0f)
 				return;
+			Target entry = target;
+			entry.Frame = m_Frame;
 			for (Target& existing : m_Targets)
 			{
 				if (existing.Owner == target.Owner && existing.Sink == target.Sink
 					&& existing.Key == target.Key)
 				{
-					existing = target;   // 每帧刷新:矩形会随布局/窗口移动变化
+					existing = entry;   // 每帧刷新:矩形会随布局/窗口移动变化
 					return;
 				}
 			}
-			m_Targets.push_back(target);
+			m_Targets.push_back(std::move(entry));
 		}
 
 		bool AssetDropBridge::DeliverFromScreen(float screenX, float screenY, const std::string& payload)
@@ -4340,6 +4415,9 @@ namespace World
 			for (const Target& target : m_Targets)
 			{
 				if (!target.PayloadPrefix.empty() && payload.rfind(target.PayloadPrefix, 0) != 0)
+					continue;
+				// 过期登记不参与命中(面板已隐藏/关闭后不能还吃 drop)。
+				if (target.Frame + kTargetLifetimeFrames < m_Frame)
 					continue;
 				if (screenX < target.X || screenY < target.Y
 					|| screenX > target.X + target.W || screenY > target.Y + target.H)
