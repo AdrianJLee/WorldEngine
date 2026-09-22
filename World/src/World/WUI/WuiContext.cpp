@@ -51,6 +51,40 @@ namespace World::Wui
 				i += length;
 			}
 		}
+
+		bool SameOverlayRect(const WuiOverlayRect& a, const WuiOverlayRect& b)
+		{
+			return a.Depth == b.Depth && a.Rect.X == b.Rect.X && a.Rect.Y == b.Rect.Y
+				&& a.Rect.W == b.Rect.W && a.Rect.H == b.Rect.H;
+		}
+
+		// P4-U28:验收期调试计数(只在 WLD_TRACE_UI=1 时输出,每帧最多一条)。探针用它证明
+		// 两件事:①弹层关闭帧的 release 被遮挡区挡住(没有落到下层);②关闭后"多挡一帧"
+		// 确实发生、而且只发生一帧(两帧后彻底清除)。
+		void TraceU28Block(const WuiInputState& input, uint64_t frame, const WuiOverlayRect& blocker)
+		{
+			if (!std::getenv("WLD_TRACE_UI"))
+				return;
+			static uint64_t lastLiveFrame = 0;
+			static uint64_t lastDelayedFrame = 0;
+			const char* kind = blocker.Delayed ? "delayed" : "live";
+			if (blocker.Delayed)
+			{
+				if (lastDelayedFrame == frame)
+					return;
+				lastDelayedFrame = frame;
+			}
+			else
+			{
+				const bool released = input.MouseReleased[0] || input.MouseReleased[1] || input.MouseReleased[2];
+				if (!released || lastLiveFrame == frame)
+					return;
+				lastLiveFrame = frame;
+			}
+			WLD_CORE_INFO("[wui-u28] {0} overlay blocked hit on frame {1}: rect=({2},{3},{4},{5}) depth={6}",
+				kind, frame, static_cast<int>(blocker.Rect.X), static_cast<int>(blocker.Rect.Y),
+				static_cast<int>(blocker.Rect.W), static_cast<int>(blocker.Rect.H), blocker.Depth);
+		}
 	}
 
 	void SetTextMeasureHook(void* owner, WuiTextMeasureFn fn)
@@ -145,12 +179,33 @@ namespace World::Wui
 		m_Commands.clear();
 		m_OverlayCommands.clear();
 		m_OverlayDepth = 0;
-		// P4-U7:点击消费标记每帧归零;上一帧登记的覆盖层矩形转为"只挡下层"的遮挡区。
+		// P4-U7:点击消费标记每帧归零;上一帧登记的覆盖层矩形转为"只挡更浅层"的遮挡区。
 		m_PointerConsumedClick[0] = m_PointerConsumedClick[1] = m_PointerConsumedClick[2] = false;
-		m_UnderlayBlockers = std::move(m_OverlayRects);
+		// P4-U28:弹层关闭那一帧(上一帧还登记着)继续遮挡,并且**多挡一帧**(上一帧刚消失的
+		// 矩形再挡一帧)后才彻底清除 —— 避免 close 帧的 release 直接落到下层,又不留幽灵遮挡。
+		m_UnderlayBlockers.clear();
+		for (const WuiOverlayRect& rect : m_OverlayRects)
+			m_UnderlayBlockers.push_back(rect);
+		for (const WuiOverlayRect& rect : m_OverlayRectsLast)
+		{
+			const bool stillRegistered = std::any_of(m_OverlayRects.begin(), m_OverlayRects.end(),
+				[&](const WuiOverlayRect& other) { return SameOverlayRect(other, rect); });
+			if (stillRegistered)
+				continue;
+			WuiOverlayRect delayed = rect;
+			delayed.Delayed = true;
+			m_UnderlayBlockers.push_back(delayed);
+		}
+		m_OverlayRectsLast = std::move(m_OverlayRects);
 		m_OverlayRects.clear();
 		m_HoverBlockers.clear();
 		m_Tooltip.clear();
+		// P4-U28:按下归属。新的一次按下重新归属;没有按下/抬起标记(事件丢失)时不留幽灵。
+		for (int button = 0; button < 3; ++button)
+		{
+			if (m_Input.MouseClicked[button] || (!m_Input.MouseDown[button] && !m_Input.MouseReleased[button]))
+				m_ClickOwners[button] = WuiClickOwner {};
+		}
 		// 焦点顺序表每帧重建:上一帧的表挪到 Prev(Tab 顺序与"消失即失焦"都基于它)。
 		m_FocusablesPrev = std::move(m_Focusables);
 		m_Focusables.clear();
@@ -254,21 +309,46 @@ namespace World::Wui
 	{
 		if (!World::Wui::HitTest(rect, point))
 			return false;
-		// P4-U7:上一帧的覆盖层矩形(弹出菜单/下拉/模态外框)= 本帧的"下层遮挡区",
-		// 只挡**非覆盖层**控件(覆盖层自己照常命中)。立即模式里"后画的盖住先画的"
-		// 只对绘制成立,命中必须靠这一条补齐,否则"点菜单项 = 同时点到下面的按钮"。
-		if (m_OverlayDepth == 0)
-			for (const WuiRect& overlay : m_UnderlayBlockers)
-				if (overlay.Contains(point))
-					return false;
+		// P4-U7:上一帧的覆盖层矩形(弹出菜单/下拉/模态外框)= 本帧的"下层遮挡区"。
+		// P4-U28:改成按深度遮挡 —— 只挡**比它浅**的绘制层(depth 0 的常驻面板最浅,
+		// 模态内容 depth 1,叠在模态里的弹层 depth 2…),弹层自己与更深的子菜单照常命中。
+		// 旧口径"只挡 depth 0"在模态内部会漏挡(模态内容也是覆盖层深度),M3 报告的
+		// "点选项那一下穿透到 Parent 下拉"就是这条漏挡。
+		for (const WuiOverlayRect& overlay : m_UnderlayBlockers)
+		{
+			if (!overlay.Rect.Contains(point))
+				continue;
+			const int blockingDepth = std::max(overlay.Depth, 1);
+			if (m_OverlayDepth < blockingDepth)
+			{
+				TraceU28Block(m_Input, m_Frame, overlay);
+				return false;
+			}
+		}
 		for (const WuiRect& blocker : m_HoverBlockers)
 			if (blocker.Contains(point))
 				return false;
 		return true;
 	}
 
+	void WuiContext::RecordClickOwner(int button, WuiId id, const WuiRect& rect) const
+	{
+		if (button < 0 || button > 2)
+			return;
+		WuiClickOwner& owner = m_ClickOwners[button];
+		if (owner.Valid)
+			return;   // 一次按下只归第一个命中它的控件
+		owner.Id = id;
+		owner.Rect = rect;
+		owner.Valid = true;
+	}
+
 	void WuiContext::EndFrame()
 	{
+		// P4-U28:release 帧核对完按下归属就让它失效;按住没松开的按钮继续保留归属。
+		for (int button = 0; button < 3; ++button)
+			if (!m_Input.MouseDown[button])
+				m_ClickOwners[button] = WuiClickOwner {};
 		// 待拖 → 真拖:不依赖源控件仍处于悬停状态(鼠标可离开源标签/图标)。
 		if (m_DragPending && !m_Dragging)
 		{

@@ -47,6 +47,29 @@ namespace World::Wui
 		WuiRect Rect { 0, 0, 0, 0 };
 	};
 
+	// P4-U28:一次"点击"的按下归属。press 帧由第一个命中的控件登记(IsClicked /
+	// IsClickCompleted),release 帧只有落在同一个控件上的那次释放才算"完成了一次点击"。
+	// 这样弹层关闭那一帧的 release 不会落到正下方的控件上,也不会把拖拽松开算成点击。
+	struct WuiClickOwner
+	{
+		WuiId Id = 0;
+		WuiRect Rect { 0, 0, 0, 0 };
+		bool Valid = false;
+	};
+
+	// P4-U28:覆盖层矩形(弹出菜单/下拉/模态外框)。
+	//  - Depth = 登记时的 overlay 绘制深度:只挡**比它浅**的控件(常驻面板 depth 0,
+	//    模态内容 depth 1,弹层叠在模态里 depth 2 …),所以"弹层盖住模态里的其它行"
+	//    也成立,而弹层自己/更深的子菜单不受影响(P4-U7 的口径是"只挡 depth 0",
+	//    在模态内部会漏挡 —— M3 报告的 release 穿透真因)。
+	//  - Delayed = "弹层已关闭、只多挡一帧"的残留矩形(关闭帧 + 一帧,两帧后彻底清除)。
+	struct WuiOverlayRect
+	{
+		WuiRect Rect { 0, 0, 0, 0 };
+		int Depth = 0;
+		bool Delayed = false;
+	};
+
 	enum class WuiDrawKind : uint8_t
 	{
 		Rect,
@@ -175,8 +198,12 @@ namespace World::Wui
 		// 只挡非覆盖层控件(m_OverlayDepth == 0),覆盖层自己不受影响 —— 这样"先画的面板"
 		// 也不会吃掉落在弹出层上的点击(菜单栏菜单、面板弹出菜单、下拉弹层都走这一条)。
 		// 立即模式里"后画的盖住先画的"只对绘制成立,命中必须靠这一条补齐。
-		// 覆盖层每帧打开时都要调(矩形可以逐帧变化);关闭当帧多挡一帧是无害的。
-		void RegisterOverlayRect(const WuiRect& rect) { m_OverlayRects.push_back(rect); }
+		// 覆盖层每帧打开时都要调(矩形可以逐帧变化)。登记时记录当时的 overlay 深度:
+		// 它决定这条遮挡区挡到哪一层(见 WuiOverlayRect);关闭后它会按深度多挡一帧。
+		void RegisterOverlayRect(const WuiRect& rect)
+		{
+			m_OverlayRects.push_back(WuiOverlayRect { rect, m_OverlayDepth, false });
+		}
 		// P4-U7:消费本帧的这次点击。凡是"打开弹出层/模态"的动作都该调用它 ——
 		// 否则打开用的那一下点击会继续被后面绘制的控件看到(实测:打开菜单那一下
 		// 同时按到了菜单项/底部按钮)。
@@ -280,7 +307,44 @@ namespace World::Wui
 			// P4-U7:本帧这一次点击已被上层消费(打开弹出层/模态)→ 后面的控件不再看到它。
 			if (IsPointerClickConsumed(button))
 				return false;
-			return HitTest(rect, m_Input.MousePos) && m_Input.MouseClicked[button];
+			if (!HitTest(rect, m_Input.MousePos) || !m_Input.MouseClicked[button])
+				return false;
+			// P4-U28:按下这一帧记录这次按下的归属(release 帧由 IsClickCompleted 核对)。
+			RecordClickOwner(button, 0, rect);
+			return true;
+		}
+		// P4-U28:release 帧的点击确认 —— press 与 release 必须落在**同一个控件**上。
+		// 弹层条目(下拉选项、可搜索下拉候选、取色器预设色块)走这条,于是:
+		//  - 在条目上按下 → 拖到条目外松开:不选中(动作只在 release 且同控件时发生);
+		//  - 弹层关闭那一帧落到下层的 release:下层控件的归属对不上,不会被当成自己的点击。
+		// 同帧内按下+抬起(帧间隔吞掉了一次快速点击)仍按"第一个命中者"确认,保留快速点击手感。
+		bool IsClickCompleted(const WuiRect& rect, int button = 0) const
+		{
+			return IsClickCompleted(0, rect, button);
+		}
+		bool IsClickCompleted(WuiId id, const WuiRect& rect, int button = 0) const
+		{
+			if (IsPointerClickConsumed(button))
+				return false;
+			if (m_Input.MouseClicked[button])
+			{
+				if (!HitTest(rect, m_Input.MousePos))
+					return false;
+				const bool owned = m_ClickOwners[button].Valid;
+				RecordClickOwner(button, id, rect);
+				// 同一帧里 press+release(快速点击):按下归属即本次点击,仍只认第一个命中者。
+				return m_Input.MouseReleased[button] && !owned;
+			}
+			if (!m_Input.MouseReleased[button])
+				return false;
+			const WuiClickOwner& owner = m_ClickOwners[button];
+			if (!owner.Valid)
+				return false;
+			// 有稳定 id 的控件按 id 核对(矩形可能因悬停/布局微调而变);没 id 的老控件按矩形。
+			const bool sameRect = owner.Rect.X == rect.X && owner.Rect.Y == rect.Y
+				&& owner.Rect.W == rect.W && owner.Rect.H == rect.H;
+			const bool same = (id != 0 && owner.Id != 0) ? (owner.Id == id) : sameRect;
+			return same && HitTest(rect, m_Input.MousePos);
 		}
 		bool IsDoubleClicked(const WuiRect& rect, int button = 0) const
 		{
@@ -335,6 +399,8 @@ namespace World::Wui
 	private:
 		// 带遮挡区判定的命中测试:IsHovered/IsClicked/DropTarget 都走它。
 		bool HitTest(const WuiRect& rect, glm::vec2 point) const;
+		// press 帧登记"这次按下归哪个控件"。只认第一个命中者(一次按下只有一个归属)。
+		void RecordClickOwner(int button, WuiId id, const WuiRect& rect) const;
 		// Tab / Shift+Tab / Escape 的焦点导航(在 BeginFrame 里、清空本帧登记之后调用)。
 		// textFocusActive = 上一帧结束时文本控件仍持有焦点 → 这些键全归文本控件,焦点表不抢。
 		void NavigateFocus(const WuiInputState& input, bool textFocusActive);
@@ -348,11 +414,15 @@ namespace World::Wui
 		std::vector<WuiDrawCommand> m_Commands;
 		std::vector<WuiDrawCommand> m_OverlayCommands;
 		int m_OverlayDepth = 0;
-		// P4-U7:本帧登记的覆盖层矩形 → 下一帧作为"下层遮挡区"(只挡非覆盖层控件)。
-		std::vector<WuiRect> m_OverlayRects;
-		std::vector<WuiRect> m_UnderlayBlockers;
+		// P4-U7:本帧登记的覆盖层矩形 → 下一帧作为"下层遮挡区"(只挡更浅的控件)。
+		// P4-U28:再保留上一帧的集合,用来把"上一帧刚关闭"的弹层矩形多挡一帧(两帧后彻底清)。
+		std::vector<WuiOverlayRect> m_OverlayRects;
+		std::vector<WuiOverlayRect> m_OverlayRectsLast;
+		std::vector<WuiOverlayRect> m_UnderlayBlockers;
 		// P4-U7:本帧已消费的鼠标键(打开弹出层那一下不再穿透)。
 		bool m_PointerConsumedClick[3] = { false, false, false };
+		// P4-U28:一次按下的归属(press 帧写,release 帧核对;IsClicked/IsClickCompleted 是 const)。
+		mutable WuiClickOwner m_ClickOwners[3];
 		std::unordered_map<WuiId, std::shared_ptr<WuiStateBase>> m_State;
 		std::vector<WuiStyle> m_StyleStack;
 		WuiStyleSheet m_Sheet;

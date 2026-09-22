@@ -1703,10 +1703,13 @@ namespace World::Wui
 					// 不再让"更早绘制的控件"留下的光标形状代表弹层。
 					ctx.SetCursor(WuiCursor::Hand);
 				}
-				if (ctx.IsClicked(item))
+				// P4-U28:条目在 release 帧确认(press+release 必须落在同一项)—— 在条目上
+				// 按下后拖到弹层外松手不会选中;关闭那一帧的 release 也不会被下层控件认领。
+				if (ctx.IsClickCompleted(ComboOptionId(id, i), item))
 				{
 					selected = static_cast<int>(i);
 					changed = true;
+					ctx.ConsumePointerClick();
 					ctx.ClosePopup(id);
 				}
 				ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + 6.0f, item.Y + 3.0f, 0, 0 }, theme.Text, 0, 1.0f, options[i], 15.0f, false });
@@ -1861,13 +1864,15 @@ namespace World::Wui
 			ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + 6.0f, item.Y + 3.0f, 0, 0 },
 				theme.Text, 0, 1.0f, options[optionIndex], 15.0f, false });
 			ctx.Commands().push_back({ WuiDrawKind::ClipPop });
-			if (ctx.IsClicked(item))
+			// P4-U28:与 Combo 同一条 release 确认口径(拖出弹层后松手不选中)。
+			if (ctx.IsClickCompleted(ComboOptionId(id, static_cast<size_t>(optionIndex)), item))
 			{
 				if (std::getenv("WLD_TRACE_UI"))
 					WLD_CORE_INFO("[ui] search-combo row clicked: id={0} option={1} label='{2}'",
 						id, optionIndex, options[optionIndex]);
 				selected = optionIndex;
 				changed = true;
+				ctx.ConsumePointerClick();
 				ctx.ClosePopup(id);
 				break;
 			}
@@ -1975,6 +1980,9 @@ namespace World::Wui
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 0.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, enabled ? theme.Text : theme.TextMuted, 0, 1.0f, label, 15.0f, false });
 		DrawFocusRing(ctx, rect, id, theme);
+		// 菜单项保持"按下即触发"(派工单硬约束:菜单项点击照旧;World.Wui 的 WuiMenuButton
+		// 单测也按单帧 press 编码)。关闭帧/释放帧的穿透由 WuiContext 的遮挡机制(按深度 +
+		// 多挡一帧)负责,不靠改这里的触发时机。
 		return enabled && (ctx.IsClicked(rect)
 			|| (focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))));
 	}
@@ -1991,6 +1999,7 @@ namespace World::Wui
 		const std::string text = std::string(checked ? "[x] " : "[ ] ") + label;
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, enabled ? theme.Text : theme.TextMuted, 0, 1.0f, text, 15.0f, false });
 		DrawFocusRing(ctx, rect, id, theme);
+		// 与普通菜单项同一口径:按下即触发(硬约束"菜单项点击照旧")。
 		return enabled && (ctx.IsClicked(rect)
 			|| (focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))));
 	}
@@ -2546,7 +2555,8 @@ namespace World::Wui
 				cell, FormatColorHex(glm::vec4 { presetRgb, 1.0f }), std::string(), true, true, false);
 			if (hovered)
 				ctx.SetCursor(WuiCursor::Hand);
-			if (ctx.IsClicked(cell))
+			// P4-U28:预设色块也是弹层条目 —— 按下后拖出去松手不取色。
+			if (ctx.IsClickCompleted(DerivedChildId(id, ".preset.", static_cast<size_t>(preset)), cell))
 			{
 				rgba = glm::vec4 { presetRgb, rgba.a };
 				const glm::vec3 hsv = ColorToHsv(presetRgb);
@@ -2554,6 +2564,7 @@ namespace World::Wui
 				state.S = hsv.y;
 				state.V = hsv.z;
 				changed = true;
+				ctx.ConsumePointerClick();
 			}
 		}
 
