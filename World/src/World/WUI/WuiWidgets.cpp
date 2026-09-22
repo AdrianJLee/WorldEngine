@@ -266,6 +266,84 @@ namespace World::Wui
 				lines.push_back(std::string());
 			return lines;
 		}
+
+		// ---- P4-U29:弹层延后绘制 ----
+		//
+		// overlay 命令是**单一列表、后画遮先画**:模态/面板里后绘制的内容会把下拉弹层盖住
+		// (用户实测:新建材质向导的"目录"下拉被下方的 Parent 行与按钮压住)。命中测试、
+		// a11y 登记与遮挡登记必须留在原地 —— U28 的 press+release 归属与"关闭帧多挡一帧"
+		// 依赖那里的调用顺序;只有**绘制命令**可以搬到帧末。
+		//
+		// 做法:弹层绘制段用 WuiDeferredPopupScope 收集命令,存进上下文持久状态里的延后批次;
+		// 帧末唯一的 overlay 收口 Wui::DrawTooltip(两个宿主 EditorShell / FloatWindowHost
+		// 都在所有面板与模态之后调用它)把批次追加到 overlay 列表末尾,tooltip 仍在其上。
+		struct WuiDeferredPopupLayer
+		{
+			uint64_t Frame = 0;
+			std::vector<WuiDrawCommand> Commands;
+		};
+
+		// 本帧的延后批次(按上下文持有;首帧/换帧时清空上一帧的残留)。
+		WuiDeferredPopupLayer& DeferredPopupLayer(WuiContext& ctx)
+		{
+			WuiDeferredPopupLayer& layer = ctx.Persist<WuiDeferredPopupLayer>(
+				HashId("world.wui.deferred-popup"), {});
+			if (layer.Frame != ctx.Frame())
+			{
+				layer.Commands.clear();
+				layer.Frame = ctx.Frame();
+			}
+			return layer;
+		}
+
+		// 把一段 overlay 绘制命令收进延后批次:进入时 PushOverlay,离开时搬走这段命令
+		// (保持相对顺序),因此作用域内的 SetCursor / RegisterOverlayRect / 命中判定
+		// 仍然当场生效,只有像素被推后。
+		class WuiDeferredPopupScope
+		{
+		public:
+			explicit WuiDeferredPopupScope(WuiContext& ctx) : m_Ctx(ctx)
+			{
+				m_Ctx.PushOverlay();
+				m_Commands = &m_Ctx.Commands();
+				m_Mark = m_Commands->size();
+			}
+
+			~WuiDeferredPopupScope()
+			{
+				Collect();
+			}
+
+			void Collect()
+			{
+				if (m_Commands == nullptr)
+					return;
+				std::vector<WuiDrawCommand>& deferred = DeferredPopupLayer(m_Ctx).Commands;
+				deferred.insert(deferred.end(), m_Commands->begin() + m_Mark, m_Commands->end());
+				m_Commands->resize(m_Mark);
+				m_Commands = nullptr;
+				m_Ctx.PopOverlay();
+			}
+
+		private:
+			WuiContext& m_Ctx;
+			std::vector<WuiDrawCommand>* m_Commands = nullptr;
+			size_t m_Mark = 0;
+		};
+
+		// 帧末收口:把本帧攒下的弹层命令追加到 overlay 末尾。
+		void FlushDeferredPopupDraws(WuiContext& ctx)
+		{
+			WuiDeferredPopupLayer& layer = DeferredPopupLayer(ctx);
+			if (layer.Frame != ctx.Frame() || layer.Commands.empty())
+				return;
+			ctx.PushOverlay();
+			std::vector<WuiDrawCommand>& target = ctx.Commands();
+			for (WuiDrawCommand& command : layer.Commands)
+				target.push_back(command);
+			ctx.PopOverlay();
+			layer.Commands.clear();
+		}
 	}
 
 	void Tooltip(WuiContext& ctx, const WuiRect& hoverRect, const std::string& text)
@@ -277,6 +355,9 @@ namespace World::Wui
 
 	void DrawTooltip(WuiContext& ctx, const WuiTheme& theme)
 	{
+		// P4-U29:先把本帧延后的下拉弹层补画到 overlay 末尾(在所有面板/模态内容之上),
+		// 再画 tooltip —— tooltip 仍在最上层;没有 tooltip 时也必须走这一步。
+		FlushDeferredPopupDraws(ctx);
 		const std::string& text = ctx.Tooltip();
 		if (text.empty())
 			return;
@@ -1681,7 +1762,8 @@ namespace World::Wui
 		bool changed = false;
 		if (ctx.IsPopupOpen(id))
 		{
-			ctx.PushOverlay();
+			// P4-U29:绘制延后到帧末(命中/遮挡登记仍在此处当场生效)。
+			WuiDeferredPopupScope deferred(ctx);
 			const float itemH = 22.0f;
 			const WuiRect panel { rect.X, rect.Y + rect.H + 2.0f, rect.W, itemH * options.size() + 8.0f };
 			DrawPanelSurface(ctx, panel, theme);
@@ -1730,7 +1812,6 @@ namespace World::Wui
 				// 先画的面板(或本面板更早绘制的行)也不会吃掉落在弹层上的点击。
 				ctx.RegisterOverlayRect(panel);
 			}
-			ctx.PopOverlay();
 		}
 		return changed;
 	}
@@ -1784,7 +1865,8 @@ namespace World::Wui
 		if (!open)
 			return false;
 
-		ctx.PushOverlay();
+		// P4-U29:同 Combo —— 弹层绘制延后,命中/遮挡登记留在原地。
+		WuiDeferredPopupScope deferred(ctx);
 		const float rowH = 22.0f;
 		constexpr size_t kMaxVisible = 8;
 		// 过滤(大小写不敏感的子串匹配):空串 = 全部。
@@ -1909,7 +1991,6 @@ namespace World::Wui
 			// P4-U7:同时登记为覆盖层矩形 → 下一帧只挡非覆盖层控件。
 			ctx.RegisterOverlayRect(panel);
 		}
-		ctx.PopOverlay();
 		return changed;
 	}
 
@@ -2151,10 +2232,9 @@ namespace World::Wui
 				std::clamp(rgb.z, 0.0f, 1.0f), std::clamp(alpha, 0.0f, 1.0f) };
 		}
 
-		// 分隔条:命中带宽与线宽(派工确认:6px 命中带、视觉 1px、悬停加粗)。
+		// 分隔条:命中带宽与线宽(6px 命中带、视觉恒 1px;P4-U29 去掉了 hover/drag 加粗)。
 		constexpr float kSplitterHitWidth = 6.0f;
 		constexpr float kSplitterLineWidth = 1.0f;
-		constexpr float kSplitterActiveWidth = 3.0f;
 
 		// 表头:列名右侧给排序箭头保留的宽度(派工确认 14px)。
 		constexpr float kTableSortArrowReserve = 14.0f;
@@ -2641,16 +2721,36 @@ namespace World::Wui
 			}
 		}
 
-		// 视觉:默认 1px 线(theme.Border);悬停 3px(theme.BorderStrong);拖动中 3px(theme.Accent)。
-		const float thickness = (hovered || state.Dragging) ? kSplitterActiveWidth : kSplitterLineWidth;
-		const WuiColor color = state.Dragging ? theme.Accent : (hovered ? theme.BorderStrong : theme.Border);
+		// 视觉(P4-U29,用户截图:分隔条被画成一整条蓝色圆角选中框 —— 那是 hover/拖动时
+		// 3px 强调色加粗 + DrawFocusRing 的 1.5px 强调色描边):全程**中性色**、恒定 1px、
+		// 线心在 6px 命中带轴线上,只换线色 Border → hover BorderStrong → drag TextMuted;
+		// 可交互(hover/拖动)时在中点画 3 个 grip 圆点,离开即消失。
+		const WuiColor color = state.Dragging ? theme.TextMuted
+			: (hovered ? theme.BorderStrong : theme.Border);
 		const WuiRect line = vertical
-			? WuiRect { centerX - thickness * 0.5f, rect.Y, thickness, rect.H }
-			: WuiRect { rect.X, centerY - thickness * 0.5f, rect.W, thickness };
+			? WuiRect { centerX - kSplitterLineWidth * 0.5f, rect.Y, kSplitterLineWidth, rect.H }
+			: WuiRect { rect.X, centerY - kSplitterLineWidth * 0.5f, rect.W, kSplitterLineWidth };
 		ctx.Commands().push_back({ WuiDrawKind::Rect, line, color, 0.0f });
 		if (hovered || state.Dragging)
+		{
 			ctx.SetCursor(vertical ? WuiCursor::ResizeEW : WuiCursor::ResizeNS);
-		DrawFocusRing(ctx, band, id, theme);
+			// grip 三点:沿轴向 ±4px,2×2 圆点;颜色同为中性色,拖动时更亮一档。
+			const WuiColor grip = state.Dragging ? theme.TextMuted : theme.BorderStrong;
+			constexpr float kGripDot = 2.0f;
+			constexpr float kGripStep = 4.0f;
+			for (int index = -1; index <= 1; ++index)
+			{
+				const float offset = kGripStep * static_cast<float>(index);
+				const WuiRect dot = vertical
+					? WuiRect { centerX - kGripDot * 0.5f, centerY + offset - kGripDot * 0.5f,
+						kGripDot, kGripDot }
+					: WuiRect { centerX + offset - kGripDot * 0.5f, centerY - kGripDot * 0.5f,
+						kGripDot, kGripDot };
+				ctx.Commands().push_back({ WuiDrawKind::Rect, dot, grip, 1.0f });
+			}
+		}
+		// P4-U29:不再画 DrawFocusRing —— 键盘焦点时那条强调色圆角框就是用户报的"蓝色选中框"。
+		// 焦点语义保持不变(RegisterFocusable / 箭头改值 / 双击复位都在调用方与上方实现)。
 		return changed;
 	}
 
