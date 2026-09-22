@@ -9,11 +9,64 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace World
 {
 	class EditorLayer;
 	namespace Gameplay { class SaveService; }
+
+	// ---- U25-M2:跨窗口资产拖放桥(编辑器侧;不碰核心 WUI)----
+	//
+	// 为什么需要:核心 WUI 的拖拽状态是**每个窗口一份**(WuiContext 的 m_DragPayload / m_Dragging),
+	// 而内容浏览器(主窗口里的停靠面板)与材质编辑器(独立 OS 窗口,或附加到主窗口的标签)不可能
+	// 同时渲染 —— 拖拽的按下/移动/释放全部发生在**源窗口**,源窗口看不到目标面板的控件矩形。
+	// 这里用一个编辑器级通道把两边接起来:
+	//   · 目标面板每帧把自己的"可落点"矩形登记进来(屏幕物理像素);
+	//   · 源面板在**释放那一帧**用全局光标(本窗口客户区坐标 + 窗口屏幕原点)命中它们,
+	//     命中就投递一次 drop;
+	//   · 目标面板渲染时取走(恰好一次);没登记/没命中 = 什么都不做(不静默改值)。
+	// 坐标统一 = 屏幕物理像素(窗口客户区原点 + 客户区坐标 × UiScale);两个窗口的原点都由宿主给出
+	// (EditorShell::PanelWindowScreenOrigin)。宿主每帧开头调 BeginFrame 清空登记。
+	namespace Editor
+	{
+		class AssetDropBridge
+		{
+		public:
+			struct Target
+			{
+				std::string Owner;          // 登记者(面板 id)
+				std::string Sink;           // 落点种类(面板自定义,如 "texture-slot"/"header")
+				std::string Key;            // 落点参数(如槽位 key:albedo / normal)
+				std::string PayloadPrefix;  // 只接受此前缀(内容浏览器 = "file:")
+				float X = 0.0f, Y = 0.0f, W = 0.0f, H = 0.0f;   // 屏幕物理像素
+			};
+			struct Drop
+			{
+				std::string Owner;
+				std::string Sink;
+				std::string Key;
+				std::string Payload;
+				uint64_t Frame = 0;         // 投递帧(几帧内没被取走就丢弃)
+			};
+
+			static AssetDropBridge& Get();
+
+			void BeginFrame(uint64_t frame);
+			void Register(const Target& target);
+			// 源面板(内容浏览器)在拖拽释放那一帧调用;命中登记项则投递一次 drop。
+			bool DeliverFromScreen(float screenX, float screenY, const std::string& payload);
+			// 目标面板取走投递给自己的 drop(owner + sink 匹配;key 为空 = 该落点接受任意 key)。
+			bool TakeDrop(const std::string& owner, const std::string& sink, const std::string& key, Drop* out);
+			size_t TargetCount() const { return m_Targets.size(); }
+			size_t PendingCount() const { return m_Pending.size(); }
+
+		private:
+			std::vector<Target> m_Targets;
+			std::vector<Drop> m_Pending;
+			uint64_t m_Frame = 0;
+		};
+	}
 
 	// 面板间协作窄接口:面板只依赖这些能力,不依赖 EditorLayer 全部。
 	class PanelHost
@@ -165,6 +218,47 @@ namespace World
 		}
 		// 内容根下的场景(逻辑路径,如 "scenes/3DTest.wd"),给"启动场景"下拉用。
 		virtual std::vector<std::string> ListProjectScenes() { return {}; }
+		// ---- U25-M2:材质工作流(把调好的材质接回场景;实现在 EditorShell → EditorLayer)----
+		// 把材质逻辑路径写进**当前选中实体**的 MeshRendererComponent.MaterialPath
+		// (与 AI 通道 scene.set Material / 属性面板同一条字段写入口)。
+		// 成功:outEntity = 被写入的实体、outPreviousPath = 写入前的路径(供调用方提供"撤销本次赋值");
+		// 失败:false + message(没有选中 / 选中实体没有 MeshRenderer / Play-Simulate 只读)。
+		virtual bool AssignMaterialToSelection(const std::string& logicalPath, Entity* outEntity,
+			std::string* outPreviousPath, std::string* message = nullptr)
+		{
+			(void)logicalPath; (void)outEntity; (void)outPreviousPath;
+			if (message) *message = "material assign is not wired to a host";
+			return false;
+		}
+		// 把指定实体的 MaterialPath 写成 materialPath(撤销"本次赋值"与 Extract 赋回共用)。
+		virtual bool SetEntityMaterialPath(Entity entity, const std::string& materialPath,
+			std::string* message = nullptr)
+		{
+			(void)entity; (void)materialPath;
+			if (message) *message = "material write-back is not wired to a host";
+			return false;
+		}
+		// 在内容浏览器里选中(必要时先导航到)某个逻辑路径的资产(U25-M2 引用者列表"定位")。
+		virtual bool SelectContentAsset(const std::string& logicalPath, const char* op = nullptr)
+		{
+			(void)logicalPath; (void)op;
+			return false;
+		}
+		// 打开"新建材质"向导(fromSelection = 以选中实体当前材质为初值,即 Extract from Selection)。
+		// 成功 = 向导已打开(创建与打开编辑器由内容浏览器面板在同一条向导路径里完成)。
+		virtual bool OpenNewMaterialWizard(bool fromSelection, std::string* message = nullptr)
+		{
+			(void)fromSelection;
+			if (message) *message = "new-material wizard is not wired to a host";
+			return false;
+		}
+		// 面板所在窗口的**客户区原点**(屏幕物理像素)。跨窗口拖放按屏幕坐标命中落点,
+		// 面板必须能把自己的客户区坐标换算到屏幕;独立窗口与主窗口各一条路径。
+		virtual bool PanelWindowScreenOrigin(const Wui::WuiContext& ctx, float* outX, float* outY)
+		{
+			(void)ctx; (void)outX; (void)outY;
+			return false;
+		}
 		// P4-UX11:发行包列表(project.we.yaml 的 `packages:`,打包产物里的相对路径)。
 		virtual bool SaveProjectPackages(const std::vector<std::string>& packages, std::string* message = nullptr)
 		{

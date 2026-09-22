@@ -70,6 +70,16 @@ namespace World
 		bool PrefabInstanceRevert(Entity root, std::string* message = nullptr);
 		bool PrefabInstanceApply(Entity root, std::string* message = nullptr);
 		bool PrefabInstanceUnpack(Entity root, std::string* message = nullptr);
+		// ---- U25-M2:材质工作流(编辑器侧唯一写入口;与 AI 通道 scene.set Material / 属性面板
+		// 同一条字段写入)----
+		// 把材质逻辑路径写进指定实体的 MeshRendererComponent.MaterialPath。
+		// 成功时 MarkDocumentDirty 并把写入前的路径写进 outPreviousPath(供"撤销本次赋值");
+		// 失败(false)把可读原因写进 message:实体无效 / 没有 MeshRenderer / Play-Simulate 只读。
+		bool AssignMaterialToEntity(Entity entity, const std::string& logicalPath,
+			std::string* message = nullptr, std::string* outPreviousPath = nullptr);
+		// 同上,但目标是**当前选中实体**(面板的 "Assign to Selection" 走这条)。
+		bool AssignMaterialToSelection(const std::string& logicalPath, Entity* outEntity,
+			std::string* outPreviousPath, std::string* message = nullptr);
 		void StartCookingAction();
 		void GenerateLuaStubsAction();
 		void CloseAction();

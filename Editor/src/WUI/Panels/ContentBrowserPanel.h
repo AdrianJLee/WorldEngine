@@ -2,6 +2,7 @@
 
 #include "EditorPanel.h"
 #include "World/Core/Asset/AssetTypeRegistry.h"
+#include "World/Renderer/Material.h"
 #include "World/Renderer/Texture.h"
 #include "World/WUI/WuiWidget.h"
 
@@ -104,6 +105,15 @@ namespace World
 		// 让用户/脚本立刻看到它 —— 创建预制体成功后由宿主调用。
 		bool SelectAsset(const std::string& logicalPath, const char* op);
 
+		// ---- U25-M2:E 写材质的工作流 ----
+		// "新建材质"向导(Window ▸ New Material… 与内容浏览器 New ▸ Material… 共用这一条):
+		// 模板下拉(Standard / Unlit-ish / Transparent / Additive)+ 名称 + 目录 + 实时落点回显,
+		// 确认后写出 .wmat 并在材质编辑器里打开它。
+		bool OpenNewMaterialWizard(std::string* message = nullptr);
+		// Extract from Selection:以选中实体 MeshRenderer 的当前材质为初值走同一个向导
+		// (默认名 <实体名>_material),创建后把新材质**赋回该实体**并打开编辑器。
+		bool OpenNewMaterialFromSelection(std::string* message = nullptr);
+
 	private:
 		void UpdateSearch();
 		void OpenItem(const std::filesystem::path& path);
@@ -140,6 +150,24 @@ namespace World
 			const Wui::WuiRect& parentMenu, const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme);
 		// 失败提示统一入口(面板不自己弹模态)。
 		void NotifyAssetFailure(const std::string& error);
+		// ---- U25-M2 ---- 
+		// 打开/关闭/绘制"新建材质"向导(居中模态,复用 U13d 的 Create Prefab 那套)。
+		void CloseNewMaterialModal(Wui::WuiContext& ctx);
+		void DrawNewMaterialModal(Wui::WuiContext& ctx);
+		std::string NewMaterialBaseName() const;
+		std::string NewMaterialTarget() const;
+		std::string NewMaterialNameError() const;
+		// 模板 → MaterialDesc(只映射现有字段;真正的着色模型是 M3 的事)。
+		static MaterialDesc MaterialDescForTemplate(int templateIndex, const std::string& name,
+			const MaterialDesc& seed);
+		// 跨窗口拖放:释放那一帧把 "file:<逻辑路径>" 交给编辑器侧的落点登记
+		// (内容浏览器在主窗口、材质编辑器在另一个窗口 —— 见 Editor::AssetDropBridge)。
+		void DeliverCrossWindowDrop(Wui::WuiContext& ctx);
+		// 本面板窗口的客户区原点(屏幕物理像素)+ 全局光标 → 屏幕坐标。
+		bool GlobalCursorScreen(const Wui::WuiContext& ctx, float* outX, float* outY) const;
+		// 内容区切片进无障碍树:脚本/AI 通道按稳定 id 拿到某个文件切片的矩形
+		// (跨窗口拖放测试要按住一个 .png 切片,没有节点就只能猜坐标)。
+		void RegisterSliceNode(const BrowserSlice& slice, const Wui::WuiRect& rect);
 		// 选中刚创建的资产(各类型共用;顺带让"新建后立刻改名/打开"有统一落点)。
 		void SelectCreated(const std::filesystem::path& path, const char* op);
 		void ApplyRename(const std::filesystem::path& target, const std::string& newName);
@@ -170,6 +198,24 @@ namespace World
 
 		PanelHost& m_Host;
 		ContentBrowserModel m_Model;
+		// ---- U25-M2:"新建材质"向导(面板级模态)----
+		bool m_NewMaterialOpen = false;
+		uint32_t m_NewMaterialOpenedFrame = 0;
+		std::string m_NewMaterialName;
+		std::vector<std::string> m_NewMaterialFolders;
+		int m_NewMaterialFolderIndex = 0;
+		int m_NewMaterialTemplate = 0;        // 0=Standard 1=Unlit-ish 2=Transparent 3=Additive
+		std::string m_NewMaterialFailure;
+		std::string m_NewMaterialFailureFor;
+		bool m_NewMaterialFromSelection = false;
+		MaterialDesc m_NewMaterialSeed;       // Extract 的初值(选中实体当前材质 / 它的 Color)
+		Entity m_NewMaterialAssignEntity;     // Extract:创建后要赋回哪个实体
+		// 向导可能在"非渲染期"被请求(注册表回调 / Window 菜单 / 材质面板的 Extract):
+		// 统一排队,下一帧的 OnRender 里打开(那时才有 WuiContext 与布局)。
+		bool m_NewMaterialPendingOpen = false;
+		bool m_NewMaterialPendingFromSelection = false;
+		std::filesystem::path m_NewMaterialPendingDir;
+		void OpenNewMaterialModal(Wui::WuiContext& ctx, bool fromSelection);
 		// D10-6:树行右键菜单的目标路径与钉住位置(跨帧保留,菜单关闭后清空)。
 		std::filesystem::path m_TreeMenuPath;
 		glm::vec2 m_TreeMenuPos {};

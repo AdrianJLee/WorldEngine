@@ -564,6 +564,82 @@ namespace World
 		return browser->SelectAsset(logicalPath, op);
 	}
 
+	// ---- U25-M2:材质工作流(PanelHost 能力)----
+	// 赋值/撤销都转发到 EditorLayer 的**唯一写入口**(与 AI 通道 scene.set Material 同一条字段);
+	// 编辑器侧不做"面板自己改组件"的旁路,否则脏标记与只读规则会两套。
+	bool EditorShell::AssignMaterialToSelection(const std::string& logicalPath, Entity* outEntity,
+		std::string* outPreviousPath, std::string* message)
+	{
+		return m_Editor.AssignMaterialToSelection(logicalPath, outEntity, outPreviousPath, message);
+	}
+
+	bool EditorShell::SetEntityMaterialPath(Entity entity, const std::string& materialPath,
+		std::string* message)
+	{
+		return m_Editor.AssignMaterialToEntity(entity, materialPath, message, nullptr);
+	}
+
+	// "新建材质"向导住在内容浏览器面板(它本来就有模态与目录/落点控件):
+	// Window 菜单与材质面板的 Extract from Selection 都走这一条 —— 单点实现,不复制向导。
+	bool EditorShell::OpenNewMaterialWizard(bool fromSelection, std::string* message)
+	{
+		const std::string panel = "content_browser";
+		// 面板被关掉时先让它回到停靠树:向导开在一个看不见的面板里等于没做事
+		// (与 SelectContentAsset / 打开导入位置模态同一条处理)。
+		if (!m_Layout.Contains(panel))
+			DockPanelBackToTree(panel);
+		AiActivatePanel(panel, nullptr);
+		const auto found = m_PanelRegistry.find(panel);
+		if (found == m_PanelRegistry.end())
+		{
+			if (message)
+				*message = "content browser panel is not registered";
+			return false;
+		}
+		auto* browser = dynamic_cast<ContentBrowserPanel*>(found->second.get());
+		if (!browser)
+		{
+			if (message)
+				*message = "content browser panel has an unexpected type";
+			return false;
+		}
+		return fromSelection ? browser->OpenNewMaterialFromSelection(message)
+			: browser->OpenNewMaterialWizard(message);
+	}
+
+	// 面板所在窗口的客户区原点(屏幕物理像素):跨窗口拖放按屏幕坐标命中落点。
+	// 主窗口 = GLFW 内容区原点;独立窗口 = FloatWindowHost::ScreenRect() 的原点。
+	bool EditorShell::PanelWindowScreenOrigin(const Wui::WuiContext& ctx, float* outX, float* outY)
+	{
+		const std::string& windowKey = ctx.WindowKey();
+		if (windowKey.empty() || windowKey == "main")
+		{
+			if (!Application::HasInstance())
+				return false;
+			int windowX = 0, windowY = 0;
+			Application::Get().GetWindow().GetPosition(&windowX, &windowY);
+			if (outX)
+				*outX = static_cast<float>(windowX);
+			if (outY)
+				*outY = static_cast<float>(windowY);
+			return true;
+		}
+		if (windowKey.rfind("float:", 0) == 0)
+		{
+			const std::string panel = windowKey.substr(6);
+			if (const FloatWindowHost* host = FindFloatHost(panel))
+			{
+				const Wui::WuiRect screen = host->ScreenRect();
+				if (outX)
+					*outX = screen.X;
+				if (outY)
+					*outY = screen.Y;
+				return true;
+			}
+		}
+		return false;
+	}
+
 	bool EditorShell::PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,
 		Entity* root)
 	{
@@ -1027,6 +1103,8 @@ namespace World
 		}
 		// AI 无障碍树:主窗口这一帧的节点从这里开始重新登记(见 WuiAccessibility)。
 		Wui::WuiAccessibility::Get().BeginFrame("main", ctx.ViewportSize());
+		// U25-M2:跨窗口拖放桥的落点登记每帧重建(独立窗口在本帧稍后登记自己).
+		Editor::AssetDropBridge::Get().BeginFrame(ctx.Frame());
 		// W9 review:文本焦点登记用宿主显式身份,不依赖无障碍开关。
 		ctx.SetWindowKey("main");
 		m_ViewportRect = {};
@@ -4065,6 +4143,17 @@ namespace World
 		// 菜单分组:独立窗口(自带 OS 窗口)与停靠面板分开列,并给出不可点击的分组标题 ——
 		// 之前两类平铺在一起,用户看不出"Gallery/Input Map 是独立窗口,其余是停靠标签"。
 		std::vector<MenuEntry> windowEntries;
+		// U25-M2:写材质的入口 —— "从零新建一份材质"(模板 + 名称 + 目录 + 实时落点),
+		// 与内容浏览器空白右键的 New ▸ Material… 共用同一个向导(实现全在内容浏览器面板)。
+		windowEntries.push_back({ Wui::Tr("menu.window.new_material", "New Material…"), false,
+			[this] {
+				std::string message;
+				if (!OpenNewMaterialWizard(false, &message))
+					Notify(message.empty() ? std::string("could not open the new-material wizard") : message);
+			}, false,
+			Wui::Tr("menu.window.new_material.tooltip",
+				"New Material…: pick a template, name it, choose a folder — then it opens in the "
+				"material editor.") });
 		const auto appendPanels = [this, &windowEntries, &ctx](bool independent)
 		{
 			for (const std::string& panel : m_Panels)
@@ -4202,6 +4291,90 @@ namespace World
 
 		// P4-UX11:旧的"项目设置"模态框已删除 —— 项目设置统一进独立窗口的 Settings 面板
 		// (File ▸ Project Settings 改为打开该面板),避免两套界面互相打架。
+	}
+
+	// ---- U25-M2:跨窗口资产拖放桥(实现;契约见 Panels/EditorPanel.h)----
+	//
+	// 核心 WUI 的拖拽态(按下/负载/释放)是**每个窗口一份**,而内容浏览器(主窗口的停靠面板)
+	// 与材质编辑器(独立 OS 窗口,或附加到主窗口的标签页)不可能同时渲染 —— 拖拽全程发生在
+	// 源窗口,它看不到目标面板的控件矩形。桥的做法:
+	//   · 目标面板每帧把自己的"可落点"登记进来(屏幕物理像素);
+	//   · 源面板在**释放那一帧**用全局光标命中登记项,投递一次 drop;
+	//   · 目标面板渲染时取走(恰好一次);过期未取走则丢弃。
+	namespace Editor
+	{
+		AssetDropBridge& AssetDropBridge::Get()
+		{
+			static AssetDropBridge bridge;
+			return bridge;
+		}
+
+		void AssetDropBridge::BeginFrame(uint64_t frame)
+		{
+			m_Frame = frame;
+			m_Targets.clear();
+			// 投递过的 drop 只给目标几帧时间取走:面板被关掉/不可见时不无限堆积。
+			const uint64_t oldest = frame > 4 ? frame - 4 : 0;
+			m_Pending.erase(std::remove_if(m_Pending.begin(), m_Pending.end(),
+				[oldest](const Drop& drop) { return drop.Frame < oldest; }), m_Pending.end());
+		}
+
+		void AssetDropBridge::Register(const Target& target)
+		{
+			if (target.Owner.empty() || target.W <= 0.0f || target.H <= 0.0f)
+				return;
+			for (Target& existing : m_Targets)
+			{
+				if (existing.Owner == target.Owner && existing.Sink == target.Sink
+					&& existing.Key == target.Key)
+				{
+					existing = target;   // 每帧刷新:矩形会随布局/窗口移动变化
+					return;
+				}
+			}
+			m_Targets.push_back(target);
+		}
+
+		bool AssetDropBridge::DeliverFromScreen(float screenX, float screenY, const std::string& payload)
+		{
+			for (const Target& target : m_Targets)
+			{
+				if (!target.PayloadPrefix.empty() && payload.rfind(target.PayloadPrefix, 0) != 0)
+					continue;
+				if (screenX < target.X || screenY < target.Y
+					|| screenX > target.X + target.W || screenY > target.Y + target.H)
+					continue;
+				Drop drop;
+				drop.Owner = target.Owner;
+				drop.Sink = target.Sink;
+				drop.Key = target.Key;
+				drop.Payload = payload;
+				drop.Frame = m_Frame;
+				WLD_CORE_INFO("[wui-drop] bridge '{0}' -> panel '{1}' ({2}:{3})", payload, target.Owner,
+					target.Sink, target.Key);
+				m_Pending.push_back(std::move(drop));
+				return true;
+			}
+			return false;
+		}
+
+		bool AssetDropBridge::TakeDrop(const std::string& owner, const std::string& sink,
+			const std::string& key, Drop* out)
+		{
+			for (size_t index = 0; index < m_Pending.size(); ++index)
+			{
+				const Drop& drop = m_Pending[index];
+				if (drop.Owner != owner || drop.Sink != sink)
+					continue;
+				if (!key.empty() && drop.Key != key)
+					continue;
+				if (out)
+					*out = drop;
+				m_Pending.erase(m_Pending.begin() + static_cast<std::ptrdiff_t>(index));
+				return true;
+			}
+			return false;
+		}
 	}
 }
 

@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "MaterialEditorPanel.h"
+#include "EditorAssetCatalog.h"
 #include "ViewportPanel.h"
 
 #include "World/Core/KeyCodes.h"
@@ -11,6 +12,7 @@
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/Widgets/WuiModal.h"
 #include "World/WUI/WuiWidgets.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -66,6 +68,97 @@ namespace World
 		// 这样头部底边就是最后一行文字的底边,头部与内容之间不会多出一条看不见的空白带。
 		constexpr float kHeaderTextHeight = 13.0f;     // 材质名 / 路径行
 		constexpr float kHeaderStatusHeight = 11.0f;   // 状态行
+
+		// ---- U25-M2(工作流)----
+		// 头部动作按钮的最小宽度;实际宽度按文案量出来(中英文都放得下,不硬编码 76)。
+		constexpr float kActionMinWidth = 52.0f;
+		// 引用者条(常驻一行)+ 展开时的每行高度;列表最多显示 8 条(更多用 "…" 提示)。
+		constexpr float kRefsRowHeight = 22.0f;
+		constexpr float kRefsItemHeight = 20.0f;
+		constexpr size_t kRefsMaxShown = 8;
+		// 引用者扫描 TTL(方案:2s;不每帧读盘)。
+		constexpr double kRefsTtlSeconds = 2.0;
+
+		// U25-M2:动作按钮(与 U13d 的 ModalActionButton 同一套画法)。
+		// 主按钮 = accent 填充;禁用 = 同尺寸弱化绘制,并把"为什么不可用"同时写进
+		// 无障碍节点的 Tooltip 与悬停提示 —— 灰按钮不能没有理由。
+		bool ActionButton(Wui::WuiContext& ctx, Wui::WuiId id, const Wui::WuiRect& rect,
+			const std::string& label, const std::string& tooltip, bool enabled, bool primary,
+			const Wui::WuiTheme& theme)
+		{
+			const bool hovered = ctx.IsHovered(rect);
+			const Wui::WuiColor fill = !enabled ? theme.PanelBg
+				: (primary ? theme.Accent : (hovered ? theme.ButtonHover : theme.ButtonBg));
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, fill, 3.0f });
+			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect,
+				enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f });
+			// accent 填充上压深色文字(白字对比度不够);禁用态用 TextDisabled。
+			const Wui::WuiColor textColor = !enabled ? theme.TextDisabled
+				: (primary ? theme.WindowBg : theme.Text);
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+				{ rect.X + 8.0f, rect.Y + (rect.H - 14.0f) * 0.5f, 0.0f, 0.0f },
+				textColor, 0.0f, 1.0f, label, 13.0f, false });
+			Wui::WuiAccessNode node;
+			node.Id = id;
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = label;
+			node.Value = tooltip;
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = true;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+			Wui::DrawFocusRing(ctx, rect, id, theme);
+			ctx.RegisterFocusable(id, rect);
+			if (hovered)
+			{
+				if (enabled)
+					ctx.SetCursor(Wui::WuiCursor::Hand);
+				if (!tooltip.empty())
+					ctx.SetTooltip(tooltip);
+			}
+			return enabled && ctx.IsClicked(rect);
+		}
+
+		// 逻辑路径的小写扩展名(含点)。
+		std::string LowerExtension(const std::string& path)
+		{
+			const size_t dot = path.find_last_of('.');
+			if (dot == std::string::npos)
+				return {};
+			std::string extension = path.substr(dot);
+			std::transform(extension.begin(), extension.end(), extension.begin(),
+				[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+			return extension;
+		}
+
+		bool IsTextureExtension(const std::string& extension)
+		{
+			return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".tga";
+		}
+
+		// Save As / 新建向导共用的"基础名":去首尾空白 + 剥掉用户多打的 .wmat 后缀
+		// (后缀在落点回显行里常显),不做其它"善意改写" —— 非法字符由校验行说出来。
+		std::string MaterialBaseName(const std::string& raw)
+		{
+			std::string name = raw;
+			const auto notSpace = [](unsigned char character) { return std::isspace(character) == 0; };
+			name.erase(name.begin(), std::find_if(name.begin(), name.end(), notSpace));
+			name.erase(std::find_if(name.rbegin(), name.rend(), notSpace).base(), name.end());
+			constexpr size_t kSuffixLength = 5;   // ".wmat"
+			if (name.size() > kSuffixLength)
+			{
+				std::string suffix = name.substr(name.size() - kSuffixLength);
+				std::transform(suffix.begin(), suffix.end(), suffix.begin(),
+					[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+				if (suffix == ".wmat")
+					name = name.substr(0, name.size() - kSuffixLength);
+			}
+			return name;
+		}
 
 		// 预览组的分段标签:行 key → 标签下标(0=网格 1=背景 2=光照 3=显示)。
 		int PreviewTabFor(const std::string& key)
@@ -1637,63 +1730,143 @@ namespace World
 		const float gap = theme.PadSmall;
 		const float x = rect.X;
 		const float y = rect.Y + gap;
-		const float buttonW = 76.0f;
 		const float buttonH = theme.ControlHeight;
 		const float actionGap = 6.0f;   // 动作按钮之间的间距(控件间距,与容器留白无关)
 		const bool dirty = m_Material && m_Material->IsDirty();
+		const bool readOnly = host.IsReadOnlyMode();
 
-		const Wui::WuiRect saveRect { x, y, buttonW, buttonH };
-		const std::string saveDoc = Wui::Tr("panel.material.save.tooltip",
-			"Save: write the current values back to the .wmat on disk.");
-		if (Wui::Button(ctx, Wui::HashId("material.save"), saveRect,
-			Wui::Tr("panel.material.save", "Save"), theme))
-			SaveCurrent();
-		Wui::Tooltip(ctx, saveRect, saveDoc);
-		AnnotateNode(ctx, Wui::HashId("material.save"), Wui::Tr("panel.material.save", "Save"), saveDoc);
-
-		const Wui::WuiRect revealRect { x + (buttonW + actionGap), y, buttonW, buttonH };
-		const std::string revealDoc = Wui::Tr("panel.material.reveal.tooltip",
-			"Reveal: select the .wmat file in Windows Explorer (needs a saved file).");
-		if (Wui::Button(ctx, Wui::HashId("material.reveal"), revealRect,
-			Wui::Tr("panel.material.reveal", "Reveal"), theme))
-			RevealMaterialOnDisk();
-		Wui::Tooltip(ctx, revealRect, revealDoc);
-		AnnotateNode(ctx, Wui::HashId("material.reveal"), Wui::Tr("panel.material.reveal", "Reveal"),
-			revealDoc);
-
-		const Wui::WuiRect revertRect { x + 2.0f * (buttonW + actionGap), y, buttonW, buttonH };
-		const std::string revertDoc = Wui::Tr("panel.material.revert.tooltip",
-			"Revert: drop unsaved edits and read the .wmat from disk again.");
-		if (Wui::Button(ctx, Wui::HashId("material.revert"), revertRect,
-			Wui::Tr("panel.material.revert", "Revert"), theme))
+		// ---- U25-M2:头部动作表(唯一落点)----
+		// Save / Save As… / Assign to Selection / Undo Assign / Reveal / Revert。
+		// 按钮宽度按文案量出来(**不硬编码 76**):中文与英文都放得下;一行放不下就换行,
+		// 窄窗因此不会把动作挤到面板之外(它们仍有稳定 a11y id,ui.invoke 永远点得到)。
+		struct HeaderAction
 		{
-			if (m_Path.empty())
+			const char* Id = "";
+			std::string Label;
+			std::string Doc;
+			bool Enabled = true;
+			bool Primary = false;
+		};
+		const std::string assignBlockedDoc = Wui::Tr("panel.material.assign.blocked",
+			"Assign to Selection: unavailable while Play/Simulate runs (the scene is read-only).");
+		const std::string assignDoc = readOnly ? assignBlockedDoc
+			: Wui::Tr("panel.material.assign.tooltip",
+				"Assign to Selection: write this material into the MeshRenderer of the entity selected in "
+				"the Scene Hierarchy (the same field the Properties panel edits).");
+		const std::string undoDoc = !m_AssignUndoValid
+			? Wui::Tr("panel.material.assign.undo.none",
+				"Undo Assign: nothing to undo — this panel has not assigned a material yet.")
+			: (readOnly ? assignBlockedDoc
+				: Wui::Tr("panel.material.assign.undo.tooltip",
+					"Undo Assign: write the previous material path back into the entity this panel "
+					"assigned just now (one level: only that write)."));
+		const std::vector<HeaderAction> headerActions {
+			{ "material.save", Wui::Tr("panel.material.save", "Save"),
+				Wui::Tr("panel.material.save.tooltip",
+					"Save: write the current values back to the .wmat on disk."), true, true },
+			{ "material.saveas", Wui::Tr("panel.material.saveas", "Save As…"),
+				Wui::Tr("panel.material.saveas.tooltip",
+					"Save As…: write a variant (default name <name>_variant) in a folder under the content "
+					"root, then keep editing the variant. The source file is never overwritten."), true, false },
+			{ "material.assign", Wui::Tr("panel.material.assign", "Assign to Selection"), assignDoc,
+				!readOnly, false },
+			{ "material.assign.undo", Wui::Tr("panel.material.assign.undo", "Undo Assign"), undoDoc,
+				m_AssignUndoValid && !readOnly, false },
+			{ "material.extract", Wui::Tr("panel.material.extract", "Extract from Selection"),
+				(!readOnly && host.GetSelectedEntity().IsValid())
+					? Wui::Tr("panel.material.extract.tooltip",
+						"Extract from Selection: start a new material from the selected entity's current "
+						"render setup (its material, or its colour), then assign the result back to it.")
+					: (readOnly
+						? Wui::Tr("panel.material.extract.blocked_play",
+							"Extract from Selection: unavailable while Play/Simulate runs (the scene is read-only).")
+						: Wui::Tr("panel.material.extract.blocked_none",
+							"Extract from Selection: select an entity in the Scene Hierarchy first.")),
+				!readOnly && host.GetSelectedEntity().IsValid(), false },
+			{ "material.reveal", Wui::Tr("panel.material.reveal", "Reveal"),
+				Wui::Tr("panel.material.reveal.tooltip",
+					"Reveal: select the .wmat file in Windows Explorer (needs a saved file)."), true, false },
+			{ "material.revert", Wui::Tr("panel.material.revert", "Revert"),
+				Wui::Tr("panel.material.revert.tooltip",
+					"Revert: drop unsaved edits and read the .wmat from disk again."), true, false },
+		};
+		float actionX = x;
+		float actionY = y;
+		float actionsHeight = buttonH;
+		for (const HeaderAction& action : headerActions)
+		{
+			const float measured = ctx.MeasureTextWidth(action.Label, 13.0f) + 18.0f;
+			const float width = std::min(std::max(kActionMinWidth, measured), std::max(24.0f, rect.W - 2.0f));
+			if (actionX > x && actionX + width > x + rect.W - 2.0f)
 			{
-				m_Status = Wui::Tr("panel.material.status.revert_failed",
-					"Revert failed: this material has never been saved to disk");
-				m_StatusIsError = true;
+				actionX = x;
+				actionY += buttonH + actionGap;
 			}
-			else
+			const Wui::WuiRect actionRect { actionX, actionY, width, buttonH };
+			const std::string actionId = action.Id;
+			if (ActionButton(ctx, Wui::HashId(action.Id), actionRect, action.Label, action.Doc,
+				action.Enabled, action.Primary, theme))
 			{
-				std::string error;
-				if (MaterialLibrary::Get().Reload(m_Path, &error))
+				if (actionId == "material.save")
+					SaveCurrent();
+				else if (actionId == "material.saveas")
+					OpenSaveAsModal(ctx, host);
+				else if (actionId == "material.assign")
+					AssignToSelection(host);
+				else if (actionId == "material.assign.undo")
+					UndoAssign(host);
+				else if (actionId == "material.extract")
 				{
-					RefreshPickerIndices();
-					m_ValidationRevision = 0;
-					m_SyncNameBuffer = true;
-					m_Status = Wui::Tr("panel.material.status.reloaded", "Reloaded from disk ") + m_Path;
-					m_StatusIsError = false;
+					// 向导住在内容浏览器面板(模板/名称/目录/落点控件都在那边):
+					// 面板只负责把"从选中对象提取"的意图传过去,并回显结果。
+					std::string message;
+					if (host.OpenNewMaterialWizard(true, &message))
+					{
+						m_Status = Wui::Tr("panel.material.status.extract_opened",
+							"Extract from Selection: the new-material wizard is open in the Content Browser "
+							"(it will assign the result back to the selected entity)");
+						m_StatusIsError = false;
+					}
+					else
+					{
+						m_Status = Wui::Tr("panel.material.status.extract_failed",
+							"Extract from Selection failed: ")
+							+ (message.empty() ? std::string("no selection") : message);
+						m_StatusIsError = true;
+					}
 				}
-				else
+				else if (actionId == "material.reveal")
+					RevealMaterialOnDisk();
+				else if (actionId == "material.revert")
 				{
-					m_Status = Wui::Tr("panel.material.status.reload_failed", "Reload failed: ") + error;
-					m_StatusIsError = true;
+					if (m_Path.empty())
+					{
+						m_Status = Wui::Tr("panel.material.status.revert_failed",
+							"Revert failed: this material has never been saved to disk");
+						m_StatusIsError = true;
+					}
+					else
+					{
+						std::string error;
+						if (MaterialLibrary::Get().Reload(m_Path, &error))
+						{
+							RefreshPickerIndices();
+							m_ValidationRevision = 0;
+							m_SyncNameBuffer = true;
+							m_Status = Wui::Tr("panel.material.status.reloaded", "Reloaded from disk ") + m_Path;
+							m_StatusIsError = false;
+						}
+						else
+						{
+							m_Status = Wui::Tr("panel.material.status.reload_failed", "Reload failed: ") + error;
+							m_StatusIsError = true;
+						}
+					}
 				}
 			}
+			actionsHeight = (actionY - y) + buttonH;
+			actionX += actionRect.W + actionGap;
 		}
-		Wui::Tooltip(ctx, revertRect, revertDoc);
-		AnnotateNode(ctx, Wui::HashId("material.revert"), Wui::Tr("panel.material.revert", "Revert"),
-			revertDoc);
 
 		// 脏标记(状态节点,不是按钮):* = 内存与磁盘不一致。
 		const std::string dirtyText = dirty ? Wui::Tr("panel.material.dirty", "* Unsaved changes")
@@ -1710,7 +1883,7 @@ namespace World
 			dirtyRect, dirtyDoc);
 
 		// 第二行:材质名 + 来源逻辑路径(紧贴动作行下方一个 PadSmall)。
-		const float lineY = y + buttonH + gap;
+		const float lineY = y + actionsHeight + gap;
 		const MaterialDesc& desc = m_Material->GetDesc();
 		std::filesystem::path file(m_Path.empty() ? std::string() : m_Path);
 		std::string fallbackName = file.stem().string();
@@ -1744,6 +1917,12 @@ namespace World
 				{ pathX, lineY, pathWidth, kHeaderTextHeight }, pathDoc);
 		}
 
+		// U25-M2 B:拖 .wmat 到**标题/头部件** = 在本窗口打开该材质(有未保存改动先确认)。
+		// 落点 = 名称/路径这一行(用户眼里的"标题");贴图等其它类型到这里给可读反馈,不静默改。
+		const Wui::WuiRect titleRect { x, lineY, std::max(60.0f, rect.W - 2.0f), kHeaderTextHeight };
+		RegisterHeaderDrop(ctx, host, titleRect);
+		TakeHeaderDrop(ctx, host);
+
 		// 头部真实高度 = 最后一行文字的底边(名字/路径行),不留空白带。
 		float used = (lineY - rect.Y) + kHeaderTextHeight;
 		if (m_Path.empty())
@@ -1774,8 +1953,8 @@ namespace World
 	}
 
 	// ---- 一行参数:标签 + 控件 + 恢复默认 + 悬停说明 + 无障碍 ----
-	void MaterialEditorPanel::DrawParameterRow(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		const RowPlan& row, float x, float y, float width, bool stacked)
+	void MaterialEditorPanel::DrawParameterRow(Wui::WuiContext& ctx, PanelHost& host,
+		const Wui::WuiTheme& theme, const RowPlan& row, float x, float y, float width, bool stacked)
 	{
 		const MaterialDesc& desc = m_Material->GetDesc();
 		const Wui::WuiId controlId = Wui::HashId(row.ControlId.c_str());
@@ -1882,6 +2061,8 @@ namespace World
 		}
 		else if (row.Key == std::string("albedo"))
 		{
+			// U25-M2 B:贴图槽 = 跨窗口资产拖放的落点(内容浏览器 → 本面板)。
+			RegisterSlotDrop(ctx, host, row.Key, controlRect);
 			std::vector<std::string> options = m_TexturePaths;
 			options.insert(options.begin(), Wui::Tr("panel.material.texture_none", "(none)"));
 			if (Wui::SearchableCombo(ctx, controlId, controlRect, row.Label, options,
@@ -1894,9 +2075,11 @@ namespace World
 				if (chosen != desc.AlbedoTexture)
 					applyEdit([&] { m_Material->SetAlbedoTexture(chosen); });
 			}
+			TakeSlotDrop(host, row.Key);
 		}
 		else if (row.Key == std::string("normal"))
 		{
+			RegisterSlotDrop(ctx, host, row.Key, controlRect);
 			std::vector<std::string> options = m_TexturePaths;
 			options.insert(options.begin(), Wui::Tr("panel.material.texture_none", "(none)"));
 			if (Wui::SearchableCombo(ctx, controlId, controlRect, row.Label, options,
@@ -1907,6 +2090,7 @@ namespace World
 				if (chosen != desc.NormalTexture)
 					applyEdit([&] { m_Material->SetNormalTexture(chosen); });
 			}
+			TakeSlotDrop(host, row.Key);
 		}
 		else if (row.Key == std::string("name"))
 		{
@@ -2050,14 +2234,21 @@ namespace World
 		Wui::Tooltip(ctx, searchRect, searchDoc);
 		AnnotateNode(ctx, Wui::HashId("material.search"), searchA11y.Label, searchDoc);
 
-		// ---- 校验区高度(只在有问题时占位)----
+		// ---- 底部两块(常驻顺序:参数内容 → 校验区 → 引用者条)----
+		// 引用者条常驻一行("被 N 处引用"/"无引用"):它放在参数列的**底部**而不是头部 ——
+		// 头部与首个内容控件之间的间距口径(U23:标题底 → 首个内容控件 = PadSmall)因此不变。
+		if (m_RefsPath != m_Path || now - m_RefsTime > kRefsTtlSeconds)
+			RefreshReferences(now, false);
+		const float refsHeight = kRefsRowHeight
+			+ (m_RefsOpen ? static_cast<float>(std::min(m_Refs.size(), kRefsMaxShown)) * kRefsItemHeight + 2.0f : 0.0f);
+		// 校验区高度(只在有问题时占位)
 		float validationHeight = 0.0f;
 		const size_t shownIssues = std::min<size_t>(m_Validation.size(), 3);
 		if (!m_Validation.empty())
 			validationHeight = 20.0f + static_cast<float>(shownIssues) * 18.0f;
 		const float contentTop = searchHeight + theme.PadSmall;
 		const Wui::WuiRect contentRect { rect.X, rect.Y + contentTop, rect.W,
-			std::max(40.0f, rect.H - contentTop - validationHeight) };
+			std::max(40.0f, rect.H - contentTop - validationHeight - refsHeight) };
 
 		// ---- 行集合(搜索过滤;行高按窄列与否)----
 		const bool stacked = rect.W < kStackedThreshold;
@@ -2272,7 +2463,7 @@ namespace World
 				}
 				++drawnRows;
 				// 子项缩进:与组头左侧竖条对齐,让"这些行属于上面那一组"一眼可见。
-				DrawParameterRow(ctx, theme, *plan, contentRect.X + kGroupIndent, y,
+				DrawParameterRow(ctx, host, theme, *plan, contentRect.X + kGroupIndent, y,
 					std::max(80.0f, contentRect.W - kGroupIndent - 10.0f), stacked);
 				y += plan->Height;
 			}
@@ -2305,7 +2496,7 @@ namespace World
 		// ---- 校验区(参数区底部,只在有问题时占位)----
 		if (!m_Validation.empty())
 		{
-			const float blockY = rect.Y + rect.H - validationHeight;
+			const float blockY = rect.Y + rect.H - validationHeight - refsHeight;
 			const Wui::WuiRect blockRect { rect.X, blockY, rect.W, validationHeight };
 			Wui::PanelBackground(ctx, blockRect, { 0.20f, 0.14f, 0.06f, 1.0f }, 4.0f);
 			const std::string summary = std::to_string(m_Validation.size()) + " "
@@ -2377,6 +2568,9 @@ namespace World
 				}
 			}
 		}
+		// ---- 引用者条(常驻一行):"被 N 处引用" / "无引用";点开列出引用者,条目可在内容
+		// 浏览器里定位(复用 SelectCreated/Reveal 那条选中通道)。----
+		DrawReferences(ctx, { rect.X, rect.Y + rect.H - refsHeight, rect.W, refsHeight }, host);
 		return rect.H;
 	}
 
@@ -2576,7 +2770,7 @@ namespace World
 			plan.HasReset = spec.HasReset != 0;
 			plan.Modified = plan.HasReset && !plan.ReadOnly && PreviewOptionModified(plan.Key);
 			plan.Height = rowH;
-			DrawParameterRow(ctx, theme, plan, card.X + pad, rowY, innerW, stacked);
+			DrawParameterRow(ctx, host, theme, plan, card.X + pad, rowY, innerW, stacked);
 			rowY += rowH;
 		}
 		// 无障碍:预览区节点 + 两条可断言的读数(target / camera)。
@@ -2643,6 +2837,746 @@ namespace World
 		return cardH;
 	}
 
+	// ---- U25-M2:C 引用者(谁在用这个材质)----
+	//
+	// 口径(方案 §C):扫内容根里的 .wd / .wprefab / .wmodel,**直接文本匹配**本材质的逻辑路径
+	// (归一化分隔符 + 大小写不敏感),不解析字段语义;带 2s TTL,不每帧读盘。
+	// 零引用 = 明确写"无引用"(不是空白);扫描失败 = 把可读原因显示出来。
+	void MaterialEditorPanel::RefreshReferences(double now, bool force)
+	{
+		(void)force;
+		m_RefsTime = now;
+		m_RefsPath = m_Path;
+		m_Refs.clear();
+		m_RefsError.clear();
+		if (m_Path.empty())
+			return;   // 未落盘的材质没有资产路径,别人引用不到它
+		const std::filesystem::path root = ContentRootPath();
+		std::error_code rootError;
+		if (!std::filesystem::is_directory(root, rootError))
+		{
+			m_RefsError = Wui::Tr("panel.material.refs.error.root", "content root not found: ")
+				+ root.generic_string();
+			return;
+		}
+		const std::string needle = ToLowerAscii(m_Path);
+		std::error_code walkError;
+		for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root,
+			std::filesystem::directory_options::skip_permission_denied, walkError))
+		{
+			std::error_code typeError;
+			if (!entry.is_regular_file(typeError))
+				continue;
+			const std::string extension = LowerExtension(entry.path().string());
+			const char* type = nullptr;
+			if (extension == ".wd")
+				type = "scene";
+			else if (extension == ".wprefab")
+				type = "prefab";
+			else if (extension == ".wmodel")
+				type = "model";
+			if (!type)
+				continue;
+			std::error_code sizeError;
+			const uintmax_t size = std::filesystem::file_size(entry.path(), sizeError);
+			if (sizeError || size > 16u * 1024u * 1024u)
+				continue;   // 超大文件不当文本读(引用一定写在文本头/场景行里)
+			std::ifstream file(entry.path(), std::ios::binary);
+			if (!file)
+				continue;
+			std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+			if (text.empty())
+				continue;
+			std::replace(text.begin(), text.end(), '\\', '/');
+			if (ToLowerAscii(text).find(needle) == std::string::npos)
+				continue;
+			std::error_code relativeError;
+			const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, relativeError);
+			if (relativeError)
+				continue;
+			m_Refs.push_back({ relative.generic_string(), type });
+		}
+		if (walkError)
+			m_RefsError = Wui::Tr("panel.material.refs.error.scan", "reference scan failed: ")
+				+ walkError.message();
+		std::sort(m_Refs.begin(), m_Refs.end(),
+			[](const RefEntry& left, const RefEntry& right) { return left.Path < right.Path; });
+	}
+
+	float MaterialEditorPanel::DrawReferences(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		if (rect.H <= 0.0f || rect.W <= 0.0f)
+			return 0.0f;
+		const Wui::WuiTheme& theme = host.Theme();
+		const size_t shown = std::min(m_Refs.size(), kRefsMaxShown);
+		char counted[192] = {};
+		std::snprintf(counted, sizeof(counted),
+			Wui::Tr("panel.material.refs.count", "Referenced by %zu asset(s)").c_str(), m_Refs.size());
+		std::string label;
+		std::string tooltip;
+		if (!m_RefsError.empty())
+		{
+			label = Wui::Tr("panel.material.refs.error.label", "Reference scan failed");
+			tooltip = m_RefsError;
+		}
+		else if (m_Refs.empty())
+		{
+			// 零引用必须写出来(方案 §C:不是空白)。
+			label = Wui::Tr("panel.material.refs.none", "No references");
+			tooltip = Wui::Tr("panel.material.refs.none.tooltip",
+				"No scene / prefab / model under the content root mentions this material path yet.");
+		}
+		else
+		{
+			label = counted;
+			tooltip = Wui::Tr("panel.material.refs.tooltip",
+				"Click to list the scenes / prefabs / models that mention this material, then click an entry "
+				"to select it in the Content Browser. The scan is direct text matching, refreshed every 2s.");
+		}
+		const std::string display = std::string(m_RefsOpen ? "v  " : "▶  ") + label;
+		const Wui::WuiRect rowRect { rect.X, rect.Y, rect.W, kRefsRowHeight };
+		const bool hovered = ctx.IsHovered(rowRect);
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+			{ rect.X, rect.Y, rect.W, 1.0f }, theme.BorderStrong, 0.0f });
+		if (hovered)
+			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+				{ rect.X + 2.0f, rect.Y + 2.0f, std::max(20.0f, rect.W - 4.0f), kRefsRowHeight - 2.0f },
+				theme.HoverBg, theme.Radius });
+		Wui::Label(ctx, { rect.X + 6.0f, rect.Y + (kRefsRowHeight - 12.0f) * 0.5f },
+			EllipsizeToWidth(ctx, display, std::max(20.0f, rect.W - 12.0f), 12.0f),
+			m_RefsError.empty() ? theme.Text : theme.Danger, 12.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.refs");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = label;
+			// value = 纯计数(脚本按它断言"引用者 +1");类型分解放在 tooltip 里。
+			node.Value = std::to_string(m_Refs.size());
+			node.Tooltip = tooltip;
+			node.Rect = rowRect;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		Wui::DrawFocusRing(ctx, rowRect, Wui::HashId("material.refs"), theme);
+		ctx.RegisterFocusable(Wui::HashId("material.refs"), rowRect);
+		if (hovered)
+		{
+			ctx.SetCursor(Wui::WuiCursor::Hand);
+			ctx.SetTooltip(tooltip);
+		}
+		if (ctx.IsClicked(rowRect))
+		{
+			m_RefsOpen = !m_RefsOpen;
+			ctx.RecordOp("material", m_RefsOpen ? "refs-open" : "refs-close", m_Path,
+				std::to_string(m_Refs.size()));
+		}
+		if (!m_RefsOpen)
+			return rect.H;
+		// 展开:逐条列出引用者(逻辑路径 + 类型);点一条 = 在内容浏览器里选中并定位它。
+		for (size_t index = 0; index < shown; ++index)
+		{
+			const RefEntry& entry = m_Refs[index];
+			const Wui::WuiRect itemRect { rect.X + 6.0f,
+				rect.Y + kRefsRowHeight + static_cast<float>(index) * kRefsItemHeight,
+				std::max(40.0f, rect.W - 12.0f), kRefsItemHeight - 1.0f };
+			const bool itemHovered = ctx.IsHovered(itemRect);
+			if (itemHovered)
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, itemRect, theme.HoverBg, 2.0f });
+			const std::string typeLabel = Wui::Tr(("panel.material.refs.type." + entry.Type).c_str(),
+				entry.Type == "prefab" ? "Prefab" : (entry.Type == "model" ? "Model" : "Scene"));
+			const float typeWidth = std::min(64.0f, ctx.MeasureTextWidth(typeLabel, 11.0f) + 8.0f);
+			Wui::Label(ctx, { itemRect.X + 4.0f, itemRect.Y + 3.0f },
+				EllipsizeToWidth(ctx, entry.Path, itemRect.W - typeWidth - 12.0f, 12.0f), theme.Text, 12.0f);
+			Wui::Label(ctx, { itemRect.X + itemRect.W - typeWidth, itemRect.Y + 4.0f }, typeLabel,
+				theme.TextMuted, 11.0f);
+			const std::string itemId = "material.refs.item." + entry.Path;
+			const std::string itemTooltip = Wui::Tr("panel.material.refs.item.tooltip",
+				"Select this asset in the Content Browser (and navigate to its folder).");
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId(itemId.c_str());
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = entry.Path;
+			node.Value = typeLabel;
+			node.Tooltip = itemTooltip;
+			node.Rect = itemRect;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+			ctx.RegisterFocusable(node.Id, itemRect);
+			if (itemHovered)
+			{
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+				ctx.SetTooltip(itemTooltip);
+			}
+			if (ctx.IsClicked(itemRect))
+			{
+				if (host.SelectContentAsset(entry.Path, "material-ref"))
+				{
+					m_Status = Wui::Tr("panel.material.status.ref_located", "Selected in the Content Browser: ")
+						+ entry.Path;
+					m_StatusIsError = false;
+				}
+				else
+				{
+					m_Status = Wui::Tr("panel.material.status.ref_locate_failed",
+						"Could not select that asset in the Content Browser: ") + entry.Path;
+					m_StatusIsError = true;
+				}
+			}
+		}
+		if (m_Refs.size() > shown)
+		{
+			const std::string more = "+" + std::to_string(m_Refs.size() - shown) + " …";
+			Wui::Label(ctx, { rect.X + 10.0f,
+				rect.Y + kRefsRowHeight + static_cast<float>(shown) * kRefsItemHeight }, more,
+				theme.TextMuted, 11.0f);
+		}
+		return rect.H;
+	}
+
+	// ---- U25-M2:A 把材质接回场景(Assign to Selection / 撤销本次赋值)----
+	void MaterialEditorPanel::AssignToSelection(PanelHost& host)
+	{
+		if (!m_Material)
+			return;
+		if (m_Path.empty())
+		{
+			m_Status = Wui::Tr("panel.material.status.assign_nosave",
+				"Assign failed: this material has never been saved, so it has no asset path to reference");
+			m_StatusIsError = true;
+			return;
+		}
+		Entity target;
+		std::string previous;
+		std::string message;
+		if (!host.AssignMaterialToSelection(m_Path, &target, &previous, &message))
+		{
+			m_Status = Wui::Tr("panel.material.status.assign_failed", "Assign failed: ")
+				+ (message.empty() ? std::string("no selection") : message);
+			m_StatusIsError = true;
+			return;
+		}
+		m_AssignUndoValid = target.IsValid();
+		m_AssignUndoEntity = target;
+		m_AssignUndoPath = previous;
+		m_AssignUndoTarget = message;
+		m_Status = Wui::Tr("panel.material.status.assigned", "Assign to Selection: ") + message;
+		m_StatusIsError = false;
+	}
+
+	void MaterialEditorPanel::UndoAssign(PanelHost& host)
+	{
+		if (!m_AssignUndoValid)
+		{
+			m_Status = Wui::Tr("panel.material.status.undo_none",
+				"Undo Assign: nothing to undo in this window");
+			m_StatusIsError = true;
+			return;
+		}
+		std::string message;
+		if (!host.SetEntityMaterialPath(m_AssignUndoEntity, m_AssignUndoPath, &message))
+		{
+			m_Status = Wui::Tr("panel.material.status.undo_failed", "Undo Assign failed: ")
+				+ (message.empty() ? std::string("the entity is gone") : message);
+			m_StatusIsError = true;
+			// 实体已失效(被删除/换场景):不再提供撤销,避免反复失败。
+			m_AssignUndoValid = false;
+			m_AssignUndoEntity = Entity {};
+			return;
+		}
+		m_Status = Wui::Tr("panel.material.status.undone", "Undo Assign: ") + message;
+		m_StatusIsError = false;
+		m_AssignUndoValid = false;
+		m_AssignUndoEntity = Entity {};
+		m_AssignUndoPath.clear();
+		m_AssignUndoTarget.clear();
+	}
+
+	// ---- U25-M2:D Save As…(变体的入口)----
+	std::string MaterialEditorPanel::SaveAsTarget() const
+	{
+		const std::string name = MaterialBaseName(m_SaveAsName);
+		std::string folder;
+		if (m_SaveAsFolderIndex >= 0 && m_SaveAsFolderIndex < static_cast<int>(m_SaveAsFolders.size()))
+			folder = m_SaveAsFolders[static_cast<size_t>(m_SaveAsFolderIndex)];
+		std::string target = folder.empty() ? std::string() : (folder + "/");
+		target += name.empty() ? std::string("(name)") : name;
+		target += ".wmat";
+		return target;
+	}
+
+	std::string MaterialEditorPanel::SaveAsNameError() const
+	{
+		const std::string name = MaterialBaseName(m_SaveAsName);
+		if (name.empty())
+			return Wui::Tr("panel.material.saveas.name.empty", "Name cannot be empty");
+		if (name == "." || name == "..")
+			return Wui::Tr("panel.material.saveas.name.dot", "Name cannot be '.' or '..'");
+		for (const char character : name)
+			if (character == '\\' || character == '/' || character == ':' || character == '*'
+				|| character == '?' || character == '"' || character == '<' || character == '>'
+				|| character == '|')
+				return Wui::Tr("panel.material.saveas.name.illegal",
+					"Name cannot contain \\ / : * ? \" < > |");
+		if (name.back() == '.' || name.back() == ' ')
+			return Wui::Tr("panel.material.saveas.name.trailing", "Name cannot end with a dot or a space");
+		// 方案 §D:不覆盖源文件 —— 目标就是源文件时禁用并说明。
+		if (!m_Path.empty()
+			&& MaterialLibrary::NormalizePath(SaveAsTarget()) == MaterialLibrary::NormalizePath(m_Path))
+			return Wui::Tr("panel.material.saveas.name.source",
+				"That is the source file — write the variant under another name (the source is never overwritten)");
+		return {};
+	}
+
+	void MaterialEditorPanel::OpenSaveAsModal(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		if (!m_Material)
+			return;
+		m_SaveAsOpen = true;
+		m_OpenConfirmOpen = false;
+		m_SaveAsOpenedFrame = static_cast<uint32_t>(ctx.Frame());
+		m_SaveAsFailure.clear();
+		m_SaveAsFailureFor.clear();
+		// 默认名 = <原名>_variant;默认目录 = 当前材质所在目录(未落盘时 materials/)。
+		const std::filesystem::path source(m_Path);
+		std::string stem = source.stem().string();
+		if (stem.empty())
+			stem = "material";
+		m_SaveAsName = stem + "_variant";
+		std::string folder = source.parent_path().generic_string();
+		if (folder.empty())
+			folder = "materials";
+		m_SaveAsFolders = Editor::AssetCatalog::Dirs();
+		auto found = std::find(m_SaveAsFolders.begin(), m_SaveAsFolders.end(), folder);
+		if (found == m_SaveAsFolders.end())
+		{
+			m_SaveAsFolders.push_back(folder);
+			std::sort(m_SaveAsFolders.begin(), m_SaveAsFolders.end());
+			found = std::find(m_SaveAsFolders.begin(), m_SaveAsFolders.end(), folder);
+		}
+		m_SaveAsFolderIndex = found == m_SaveAsFolders.end()
+			? 0 : static_cast<int>(found - m_SaveAsFolders.begin());
+		ctx.SetModal(Wui::HashId("material.saveas.modal"));
+		ctx.SetFocus(Wui::HashId("material.saveas.name"));
+		ctx.RecordOp("material", "saveas-ask", m_Path, m_SaveAsName);
+	}
+
+	void MaterialEditorPanel::CloseSaveAsModal(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		(void)host;
+		m_SaveAsOpen = false;
+		m_SaveAsFailure.clear();
+		m_SaveAsFailureFor.clear();
+		m_SaveAsFolders.clear();
+		if (ctx.Modal() == Wui::HashId("material.saveas.modal"))
+			ctx.ClearModal();
+		ctx.ClosePopup(Wui::HashId("material.saveas.folder"));
+	}
+
+	void MaterialEditorPanel::DrawSaveAsModal(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		if (!m_SaveAsOpen || !m_Material)
+			return;
+		const Wui::WuiId modalId = Wui::HashId("material.saveas.modal");
+		const Wui::WuiTheme& theme = host.Theme();
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("panel.material.saveas.title", "Save Material As…");
+		frameDesc.Size = { 560.0f, 350.0f };
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
+		{
+			// 模态被别处清掉:收回状态,不留悬空(与 Create Prefab 同一条规则)。
+			CloseSaveAsModal(ctx, host);
+			return;
+		}
+		const Wui::WuiId nameId = Wui::HashId("material.saveas.name");
+		const Wui::WuiId folderId = Wui::HashId("material.saveas.folder");
+		const bool folderPopupWasOpen = ctx.IsPopupOpen(folderId);
+		const bool justOpened = ctx.Frame() == m_SaveAsOpenedFrame;
+		const float labelX = frame.X + 16.0f;
+		const float fieldX = frame.X + 110.0f;
+		const float fieldW = frame.W - 126.0f - 72.0f;
+
+		// ---- 名称(后缀 .wmat 自动补,常显在右侧)----
+		Wui::Label(ctx, { labelX, frame.Y + 49.0f },
+			Wui::Tr("panel.material.saveas.name", "Name"), theme.TextMuted, 13.0f);
+		const Wui::WuiRect nameRect { fieldX, frame.Y + 44.0f, fieldW, 24.0f };
+		const bool nameFocused = ctx.Focus() == nameId;
+		Wui::TextFieldA11y nameA11y;
+		nameA11y.Label = Wui::Tr("panel.material.saveas.name", "Name");
+		nameA11y.Placeholder = Wui::Tr("panel.material.saveas.name.placeholder", "Variant name");
+		Wui::TextField(ctx, nameId, nameRect, m_SaveAsName, theme, nullptr, &nameA11y);
+		const bool nameSubmitted = nameFocused && ctx.IsKeyPressed(KeyCodes::Enter);
+		Wui::Label(ctx, { nameRect.X + nameRect.W + 8.0f, frame.Y + 50.0f }, ".wmat", theme.TextMuted, 13.0f);
+		const std::string nameError = SaveAsNameError();
+		if (!nameError.empty())
+			Wui::Label(ctx, { fieldX, frame.Y + 71.0f }, nameError, theme.Danger, 12.0f);
+
+		// ---- 目录(内容根下的目录,可搜索;缺目录会自动新建)----
+		const std::string folderLabel = Wui::Tr("panel.material.saveas.folder", "Folder");
+		Wui::Label(ctx, { labelX, frame.Y + 99.0f }, folderLabel, theme.TextMuted, 13.0f);
+		const Wui::WuiRect folderRect { fieldX, frame.Y + 94.0f, fieldW, 24.0f };
+		Wui::SearchableCombo(ctx, folderId, folderRect, folderLabel, m_SaveAsFolders,
+			m_SaveAsFolderIndex, theme);
+		const std::string folderText = (m_SaveAsFolderIndex >= 0
+			&& m_SaveAsFolderIndex < static_cast<int>(m_SaveAsFolders.size()))
+			? m_SaveAsFolders[static_cast<size_t>(m_SaveAsFolderIndex)] : std::string();
+		{
+			Wui::WuiAccessNode node;
+			node.Id = folderId;
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "search-combo";
+			node.Label = folderLabel;
+			node.Value = folderText;
+			node.Tooltip = Wui::Tr("panel.material.saveas.folder.tooltip",
+				"Folder under the content root (searchable); a missing folder is created on confirm.");
+			node.Rect = folderRect;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		const std::filesystem::path folderAbsolute = ContentRootPath() / std::filesystem::path(folderText);
+		if (!folderText.empty() && !std::filesystem::is_directory(folderAbsolute))
+			Wui::Label(ctx, { fieldX, frame.Y + 121.0f },
+				Wui::Tr("panel.material.saveas.folder.note",
+					"Folder does not exist yet — it will be created"), theme.Warning, 12.0f);
+
+		// ---- 实时落点回显 ----
+		const std::string target = SaveAsTarget();
+		if (!m_SaveAsFailure.empty() && m_SaveAsFailureFor != target)
+		{
+			m_SaveAsFailure.clear();
+			m_SaveAsFailureFor.clear();
+		}
+		const std::string previewLabel = Wui::Tr("panel.material.saveas.preview.label", "Will create");
+		Wui::Label(ctx, { labelX, frame.Y + 152.0f }, previewLabel, theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { fieldX, frame.Y + 150.0f }, target, theme.Text, 13.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.saveas.preview");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = previewLabel;
+			node.Value = target;
+			node.Tooltip = Wui::Tr("panel.material.saveas.preview.tooltip",
+				"Logical path of the file that will be written (folder + name + .wmat).");
+			node.Rect = { fieldX, frame.Y + 146.0f, fieldW, 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
+		// ---- 目标已存在 = 红字 + 主按钮变 Overwrite(源文件永远不覆盖)----
+		std::error_code existsError;
+		const bool targetExists = nameError.empty() && std::filesystem::exists(
+			ContentRootPath() / std::filesystem::path(target), existsError);
+		std::string warningText;
+		if (!m_SaveAsFailure.empty())
+			warningText = m_SaveAsFailure;
+		else if (targetExists)
+			warningText = Wui::Tr("panel.material.saveas.exists", "Already exists — overwriting: ") + target;
+		if (!warningText.empty())
+			Wui::Label(ctx, { fieldX, frame.Y + 176.0f }, warningText, theme.Danger, 12.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.saveas.warning");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.saveas.warning.label", "Warning");
+			node.Value = warningText;
+			node.Tooltip = Wui::Tr("panel.material.saveas.warning.tooltip",
+				"Red line = the target exists and would be overwritten; empty = no conflict.");
+			node.Rect = { fieldX, frame.Y + 172.0f, fieldW, 18.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
+		// ---- 底部按钮条:主按钮(Create Variant / Overwrite)+ Cancel ----
+		const bool canCreate = nameError.empty();
+		const float footerY = frame.Y + frame.H - Wui::ModalFooterPadding - Wui::ModalFooterHeight;
+		const Wui::WuiRect okRect { frame.X + frame.W - 16.0f - 150.0f, footerY, 150.0f,
+			Wui::ModalFooterHeight };
+		const Wui::WuiRect cancelRect { okRect.X - 8.0f - 96.0f, footerY, 96.0f, Wui::ModalFooterHeight };
+		const std::string okLabel = targetExists
+			? Wui::Tr("panel.material.saveas.overwrite", "Overwrite")
+			: Wui::Tr("panel.material.saveas.create", "Create Variant");
+		const std::string okTooltip = !canCreate
+			? (nameError + " — " + Wui::Tr("panel.material.saveas.ok.disabled",
+				"fix the name to enable this button"))
+			: (targetExists
+				? Wui::Tr("panel.material.saveas.overwrite.tooltip",
+					"The file exists: overwrite it with the current material as a variant")
+				: Wui::Tr("panel.material.saveas.create.tooltip",
+					"Write the variant and keep editing it in this window (the source .wmat stays untouched)"));
+		const bool okClicked = ActionButton(ctx, Wui::HashId("material.saveas.ok"), okRect, okLabel,
+			okTooltip, canCreate, true, theme);
+		const bool cancelClicked = ActionButton(ctx, Wui::HashId("material.saveas.cancel"), cancelRect,
+			Wui::Tr("panel.material.saveas.cancel", "Cancel"),
+			Wui::Tr("panel.material.saveas.cancel.tooltip", "Close without writing anything (Esc)"),
+			true, false, theme);
+
+		bool closeRequested = false;
+		if ((okClicked || (nameSubmitted && !justOpened)) && canCreate)
+		{
+			const std::string base = MaterialBaseName(m_SaveAsName);
+			// 变体 = 源材质的**副本**:新实例 + 写盘,源实例与源文件都不动(方案 §D)。
+			Ref<Material> variant = MaterialLibrary::Get().CreateDefault(base);
+			MaterialDesc desc = m_Material->GetDesc();
+			desc.Name = base;
+			variant->SetDesc(desc);
+			std::string error;
+			if (!MaterialLibrary::Get().Save(variant, target, &error))
+			{
+				m_SaveAsFailure = error.empty() ? std::string("Save As failed") : error;
+				m_SaveAsFailureFor = target;
+				host.Notify(m_SaveAsFailure);
+				WLD_CORE_WARN("Save As failed: {0}", m_SaveAsFailure);
+			}
+			else
+			{
+				const std::string savedPath = variant->GetPath();
+				ctx.RecordOp("material", "saveas", savedPath, m_Path);
+				// 当前面板切到新材质(标题/路径/校验都跟着新文档走)。
+				OpenMaterial(savedPath);
+				host.SelectContentAsset(savedPath, "material-saveas");
+				m_Status = Wui::Tr("panel.material.status.saved_as", "Saved as ") + savedPath
+					+ Wui::Tr("panel.material.status.saved_as.note",
+						" (source .wmat unchanged; this window now edits the variant)");
+				m_StatusIsError = false;
+				closeRequested = true;
+			}
+		}
+		else if (cancelClicked)
+			closeRequested = true;
+		else if (escapePressed)
+		{
+			// Esc 分层:目录下拉展开时先关下拉,第二次才关模态。
+			if (folderPopupWasOpen)
+				ctx.ClosePopup(folderId);
+			else
+				closeRequested = true;
+		}
+		Wui::EndModalFrame(ctx);
+		if (closeRequested && ctx.Modal() == modalId)
+			CloseSaveAsModal(ctx, host);
+	}
+
+	// ---- U25-M2:B 拖放(内容浏览器 ↔ 材质编辑器)----
+	//
+	// 核心 WUI 的拖拽态是**每个窗口一份**,而内容浏览器(主窗口停靠面板)与材质编辑器
+	// (独立窗口/附加标签)不可能同时渲染 —— 所以释放由**源窗口**用全局光标命中这里登记的
+	// 落点矩形(屏幕物理像素),投递一次 drop;本面板在渲染时取走。见 Editor::AssetDropBridge。
+	bool MaterialEditorPanel::PayloadToLogical(const std::string& payload, std::string* logical)
+	{
+		if (payload.rfind("file:", 0) != 0)
+			return false;
+		std::string path = payload.substr(5);
+		std::replace(path.begin(), path.end(), '\\', '/');
+		if (path.empty())
+			return false;
+		if (logical)
+			*logical = path;
+		return true;
+	}
+
+	void MaterialEditorPanel::RegisterSlotDrop(const Wui::WuiContext& ctx, PanelHost& host,
+		const std::string& key, const Wui::WuiRect& rect)
+	{
+		float originX = 0.0f, originY = 0.0f;
+		if (!host.PanelWindowScreenOrigin(ctx, &originX, &originY))
+			return;
+		const float scale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+		Editor::AssetDropBridge::Target target;
+		target.Owner = m_PanelId;
+		target.Sink = "texture-slot";
+		target.Key = key;
+		target.PayloadPrefix = "file:";
+		target.X = originX + rect.X * scale;
+		target.Y = originY + rect.Y * scale;
+		target.W = rect.W * scale;
+		target.H = rect.H * scale;
+		Editor::AssetDropBridge::Get().Register(target);
+	}
+
+	bool MaterialEditorPanel::TakeSlotDrop(PanelHost& host, const std::string& key)
+	{
+		(void)host;
+		Editor::AssetDropBridge::Drop drop;
+		if (!Editor::AssetDropBridge::Get().TakeDrop(m_PanelId, "texture-slot", key, &drop))
+			return false;
+		std::string logical;
+		if (!PayloadToLogical(drop.Payload, &logical) || !m_Material)
+			return false;
+		const std::string extension = LowerExtension(logical);
+		if (extension == ".wmat")
+		{
+			// 方案 §B:.wmat 拖到槽位不做特殊处理,只给可读反馈。
+			m_Status = Wui::Tr("panel.material.status.drop_wmat_on_slot",
+				"This row is a texture slot: drop .png/.jpg/.tga here, or drop the .wmat on the title to open it");
+			m_StatusIsError = true;
+			return true;
+		}
+		if (!IsTextureExtension(extension))
+		{
+			m_Status = Wui::Tr("panel.material.status.drop_type", "Unsupported drop type: ") + logical;
+			m_StatusIsError = true;
+			return true;
+		}
+		const MaterialDesc& desc = m_Material->GetDesc();
+		const std::string& current = key == "normal" ? desc.NormalTexture : desc.AlbedoTexture;
+		if (current == logical)
+		{
+			m_Status = Wui::Tr("panel.material.status.drop_same", "Already uses this texture: ") + logical;
+			m_StatusIsError = false;
+			return true;
+		}
+		// 与下拉选择**同一条写入口**(Material 的 setter → Revision 自增 → 渲染侧重建)。
+		const uint32_t revision = m_Material->GetRevision();
+		if (key == "normal")
+			m_Material->SetNormalTexture(logical);
+		else
+			m_Material->SetAlbedoTexture(logical);
+		if (m_Material->GetRevision() != revision)
+			m_Material->MarkDirty(true);
+		// 下拉索引与目录缓存跟上(否则回显会落在"(none)")。
+		m_CatalogRefreshTime = 0.0;
+		RefreshCatalog();
+		m_ValidationRevision = 0;
+		WLD_CORE_INFO("[material-ui] texture drop '{0}' -> slot '{1}'", logical, key);
+		m_Status = Wui::Tr("panel.material.status.texture_dropped", "Texture assigned by drop: ") + logical;
+		m_StatusIsError = false;
+		return true;
+	}
+
+	void MaterialEditorPanel::RegisterHeaderDrop(const Wui::WuiContext& ctx, PanelHost& host,
+		const Wui::WuiRect& rect)
+	{
+		float originX = 0.0f, originY = 0.0f;
+		if (!host.PanelWindowScreenOrigin(ctx, &originX, &originY))
+			return;
+		const float scale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+		Editor::AssetDropBridge::Target target;
+		target.Owner = m_PanelId;
+		target.Sink = "header";
+		target.PayloadPrefix = "file:";
+		target.X = originX + rect.X * scale;
+		target.Y = originY + rect.Y * scale;
+		target.W = rect.W * scale;
+		target.H = rect.H * scale;
+		Editor::AssetDropBridge::Get().Register(target);
+	}
+
+	bool MaterialEditorPanel::TakeHeaderDrop(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		Editor::AssetDropBridge::Drop drop;
+		if (!Editor::AssetDropBridge::Get().TakeDrop(m_PanelId, "header", std::string(), &drop))
+			return false;
+		std::string logical;
+		if (!PayloadToLogical(drop.Payload, &logical))
+			return false;
+		if (LowerExtension(logical) != ".wmat")
+		{
+			m_Status = Wui::Tr("panel.material.status.drop_header_type",
+				"The title opens .wmat files: drop the texture on a texture slot row instead");
+			m_StatusIsError = true;
+			return true;
+		}
+		RequestOpenMaterial(ctx, logical, host);
+		return true;
+	}
+
+	void MaterialEditorPanel::RequestOpenMaterial(Wui::WuiContext& ctx, const std::string& path,
+		PanelHost& host)
+	{
+		(void)host;
+		const std::string normalized = MaterialLibrary::NormalizePath(path);
+		if (!m_Path.empty() && normalized == MaterialLibrary::NormalizePath(m_Path))
+		{
+			m_Status = Wui::Tr("panel.material.status.already_open",
+				"Already open in this window: ") + normalized;
+			m_StatusIsError = false;
+			return;
+		}
+		if (m_Material && m_Material->IsDirty())
+		{
+			// 有未保存改动:先确认(不静默丢弃),确认后走同一条 OpenMaterial。
+			m_PendingOpenPath = normalized;
+			m_OpenConfirmOpen = true;
+			ctx.SetModal(Wui::HashId("material.openconfirm.modal"));
+			ctx.RecordOp("material", "open-ask", normalized, m_Path);
+			return;
+		}
+		ctx.RecordOp("material", "open-drop", normalized, m_Path);
+		OpenMaterial(normalized);
+	}
+
+	void MaterialEditorPanel::DrawOpenConfirmModal(Wui::WuiContext& ctx, PanelHost& host)
+	{
+		if (!m_OpenConfirmOpen)
+			return;
+		const Wui::WuiId modalId = Wui::HashId("material.openconfirm.modal");
+		const Wui::WuiTheme& theme = host.Theme();
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("panel.material.openconfirm.title", "Open another material?");
+		frameDesc.Size = { 480.0f, 190.0f };
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
+		{
+			m_OpenConfirmOpen = false;
+			m_PendingOpenPath.clear();
+			return;
+		}
+		Wui::Label(ctx, { frame.X + 16.0f, frame.Y + 52.0f },
+			Wui::Tr("panel.material.openconfirm.body", "This window has unsaved changes."), theme.Text, 13.0f);
+		Wui::Label(ctx, { frame.X + 16.0f, frame.Y + 74.0f },
+			EllipsizeToWidth(ctx, m_PendingOpenPath, frame.W - 32.0f, 12.0f), theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { frame.X + 16.0f, frame.Y + 94.0f },
+			Wui::Tr("panel.material.openconfirm.body2",
+				"Opening it drops those edits (the file on disk is unchanged)."),
+			theme.TextMuted, 12.0f);
+		const Wui::ModalResult result = Wui::ModalFooter(ctx, frame,
+			Wui::Tr("panel.material.openconfirm.discard", "Discard & Open"),
+			Wui::Tr("panel.material.openconfirm.cancel", "Cancel"),
+			Wui::HashId("material.openconfirm.ok"), Wui::HashId("material.openconfirm.cancel"),
+			true, theme);
+		const std::string pending = m_PendingOpenPath;
+		const bool openPending = result == Wui::ModalResult::Confirm;
+		if (openPending || result == Wui::ModalResult::Cancel || escapePressed)
+		{
+			m_OpenConfirmOpen = false;
+			m_PendingOpenPath.clear();
+		}
+		// 先收 overlay 再清模态态(BeginModalFrame/EndModalFrame 必须成对)。
+		Wui::EndModalFrame(ctx);
+		if (openPending)
+		{
+			if (ctx.Modal() == modalId)
+				ctx.ClearModal();
+			ctx.RecordOp("material", "open-confirmed", pending, m_Path);
+			OpenMaterial(pending);
+		}
+		else if (ctx.Modal() == modalId && !m_OpenConfirmOpen)
+			ctx.ClearModal();
+	}
+
 	void MaterialEditorPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		if (std::getenv("WLD_TRACE_3D"))
@@ -2656,12 +3590,20 @@ namespace World
 			}
 		}
 		const Wui::WuiTheme& theme = host.Theme();
+		// U25-M2:面板级模态(Save As… / 丢弃未保存改动再打开)按"自己的输入封锁"处理 ——
+		// 材质面板可能是**独立窗口**(外壳的 m_PanelModalOwner 只作用于主窗口的停靠树),
+		// 所以在本面板内容之前登记整窗遮挡,画模态本体之前解开(与 WuiModal 的三段式一致)。
+		const bool panelModal = HasPanelModal();
+		if (panelModal)
+			Wui::BeginModalInputBlock(ctx);
 		if (!m_Material)
 		{
 			Wui::Label(ctx, { rect.X + 10.0f, rect.Y + 10.0f },
 				Wui::Tr("panel.material.none_open",
 					"No material open: double-click a .wmat file in the Content Browser"),
 				theme.TextMuted, 13.0f);
+			if (panelModal)
+				Wui::EndModalInputBlock(ctx);
 			return;
 		}
 		const float headerHeight = DrawHeader(ctx, { rect.X, rect.Y, rect.W, kHeaderBaseHeight }, host);
@@ -2698,5 +3640,11 @@ namespace World
 				std::max(60.0f, body.H - gap - previewUsed - 2.0f * pad) };
 		}
 		DrawParameters(ctx, parameterRect, host);
+		if (panelModal)
+		{
+			Wui::EndModalInputBlock(ctx);
+			DrawSaveAsModal(ctx, host);
+			DrawOpenConfirmModal(ctx, host);
+		}
 	}
 }

@@ -108,6 +108,35 @@ namespace World
 		std::string m_NameBuffer;           // 高级组的"显示名"文本缓冲(回车/失焦提交)
 		bool m_SyncNameBuffer = false;      // 打开/重载后把磁盘值重新灌进缓冲
 
+		// ---- U25-M2:B 工作流(赋值 / 拖放 / 引用者 / Save As)----
+		// Assign to Selection:一次"撤销本次赋值"(只回退它刚写的那一次)。
+		bool m_AssignUndoValid = false;
+		Entity m_AssignUndoEntity;
+		std::string m_AssignUndoPath;       // 写入前的 MaterialPath
+		std::string m_AssignUndoTarget;     // 当时被写入的实体名(状态行文案)
+		// 引用者:扫内容根里 .wd/.wprefab/.wmodel 是否直接提到本材质的逻辑路径(2s TTL)。
+		struct RefEntry
+		{
+			std::string Path;   // 逻辑路径
+			std::string Type;   // scene / prefab / model
+		};
+		std::vector<RefEntry> m_Refs;
+		std::string m_RefsPath;             // 这份结果属于哪个材质(换文档立刻重扫)
+		std::string m_RefsError;            // 扫描失败的可读原因(空 = 成功)
+		double m_RefsTime = 0.0;
+		bool m_RefsOpen = false;            // "被 N 处引用"的展开态
+		// Save As… 模态(与 U13d 的"创建预制体"同一套:名称 + 目录 + 实时落点 + 覆盖警告 + Enter/Esc)。
+		bool m_SaveAsOpen = false;
+		uint32_t m_SaveAsOpenedFrame = 0;
+		std::string m_SaveAsName;
+		std::vector<std::string> m_SaveAsFolders;
+		int m_SaveAsFolderIndex = 0;
+		std::string m_SaveAsFailure;
+		std::string m_SaveAsFailureFor;
+		// 拖 .wmat 到头部 = 在本窗口打开它;当前有未保存改动时先确认(不静默丢弃)。
+		bool m_OpenConfirmOpen = false;
+		std::string m_PendingOpenPath;
+
 		// ---- U21:校验区 ----
 		std::vector<ValidationEntry> m_Validation;
 		uint32_t m_ValidationRevision = 0;
@@ -215,7 +244,7 @@ namespace World
 		// 参数区(搜索 + 分组 + 每字段控件 + 校验区);返回占用高度。
 		float DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		// 一行参数:标签 + 控件 + 恢复默认 + 悬停说明 + 无障碍节点。
-		void DrawParameterRow(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const RowPlan& row,
+		void DrawParameterRow(Wui::WuiContext& ctx, PanelHost& host, const Wui::WuiTheme& theme, const RowPlan& row,
 			float x, float y, float width, bool stacked);
 		// 预览区(卡片:图像 + 相机操作 + 预览设置标签/控件 + "仅影响预览显示"标注 + 读数);
 		// 传入矩形 = 分配到的区域,返回实际占用的高度。
@@ -224,6 +253,31 @@ namespace World
 		void FramePreview();
 		// Reveal:在资源管理器里选中当前 .wmat(未落盘时给出可读状态)。
 		void RevealMaterialOnDisk();
+		// ---- U25-M2 ----
+		// 引用者:重扫(force=true 忽略 TTL)/ 画"被 N 处引用"条(返回占用高度)。
+		void RefreshReferences(double now, bool force);
+		float DrawReferences(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// 头部动作:赋值给选中实体 / 撤销本次赋值(都走 PanelHost 的字段写入口)。
+		void AssignToSelection(PanelHost& host);
+		void UndoAssign(PanelHost& host);
+		// Save As…(变体):模态的打开/关闭/提交 + 实时落点与校验。
+		void OpenSaveAsModal(Wui::WuiContext& ctx, PanelHost& host);
+		void CloseSaveAsModal(Wui::WuiContext& ctx, PanelHost& host);
+		void DrawSaveAsModal(Wui::WuiContext& ctx, PanelHost& host);
+		std::string SaveAsTarget() const;
+		std::string SaveAsNameError() const;
+		// 拖放:贴图槽(登记屏幕矩形 + 取走投递)与头部(.wmat 切文档)。
+		void RegisterSlotDrop(const Wui::WuiContext& ctx, PanelHost& host, const std::string& key,
+			const Wui::WuiRect& rect);
+		bool TakeSlotDrop(PanelHost& host, const std::string& key);
+		void RegisterHeaderDrop(const Wui::WuiContext& ctx, PanelHost& host, const Wui::WuiRect& rect);
+		bool TakeHeaderDrop(Wui::WuiContext& ctx, PanelHost& host);
+		// 切换本文档的材质:有未保存改动时先弹确认(由调用方在同一帧画)。
+		void RequestOpenMaterial(Wui::WuiContext& ctx, const std::string& path, PanelHost& host);
+		void DrawOpenConfirmModal(Wui::WuiContext& ctx, PanelHost& host);
+		bool HasPanelModal() const { return m_SaveAsOpen || m_OpenConfirmOpen; }
+		// payload("file:<逻辑路径>")→ 逻辑路径;前缀不符返回 false。
+		static bool PayloadToLogical(const std::string& payload, std::string* logical);
 		bool FieldModified(const std::string& key) const;
 		// 预览选项是否偏离内置默认(球 / 纯色 / 三点光 / 强度 1 / 方位 35 / 仰角 45 / 关闭)。
 		bool PreviewOptionModified(const std::string& key) const;

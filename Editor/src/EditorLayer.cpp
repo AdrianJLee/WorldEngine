@@ -14,6 +14,7 @@
 #include "World/Gameplay/Prefab.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/RenderSettings.h"
+#include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/AnimationSystem.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
@@ -1357,6 +1358,71 @@ namespace World
 		}
 		if (message)
 			*message = "已创建 " + logical + " (" + std::to_string(entityCount) + " entities)";
+		return true;
+	}
+
+	// ---- U25-M2:材质工作流:把材质接回场景(编辑器侧唯一写入口)----
+	//
+	// 与 AI 通道 `scene.set ... Material` / 属性面板用的是**同一个字段**
+	// (MeshRendererComponent.MaterialPath,相对内容根):场景存档、渲染器与"撤销本次赋值"
+	// 因此天然一致。面板不自己改组件,只通过 PanelHost 调这一条。
+	bool EditorLayer::AssignMaterialToEntity(Entity entity, const std::string& logicalPath,
+		std::string* message, std::string* outPreviousPath)
+	{
+		if (message)
+			message->clear();
+		if (m_SceneState != SceneState::Edit)
+		{
+			if (message) *message = "材质只能在编辑态赋值(Play/Simulate 下场景只读)";
+			return false;
+		}
+		if (!m_ActiveScene || !entity.IsValid() || entity.GetScene() != m_ActiveScene.get())
+		{
+			if (message) *message = "没有选中实体(先在层级面板里选中一个实体)";
+			return false;
+		}
+		const entt::entity handle = static_cast<entt::entity>(entity);
+		auto& registry = m_ActiveScene->GetRegistry();
+		auto* mesh = registry.try_get<MeshRendererComponent>(handle);
+		if (!mesh)
+		{
+			if (message) *message = "选中实体没有 MeshRenderer(材质只能赋给会渲染的实体)";
+			return false;
+		}
+		const std::string normalized = MaterialLibrary::NormalizePath(logicalPath);
+		const std::string previous = mesh->MaterialPath;
+		const bool changed = previous != normalized;
+		mesh->MaterialPath = normalized;
+		if (changed)
+			MarkDocumentDirty();
+		const auto* tag = registry.try_get<TagComponent>(handle);
+		const std::string name = tag ? tag->Tag : std::string("(unnamed)");
+		WLD_CORE_INFO("[material-ui] assign '{0}' -> entity {1} ('{2}'){3}", normalized,
+			static_cast<uint32_t>(handle), name, changed ? "" : " (unchanged)");
+		m_WuiContext.RecordOp("material", "assign", normalized, "entity=" + std::to_string(static_cast<uint32_t>(handle)));
+		if (outPreviousPath)
+			*outPreviousPath = previous;
+		if (message)
+			*message = (changed ? "已把 " : "已是 ")
+				+ (normalized.empty() ? std::string("(none)") : normalized) + " → " + name;
+		return true;
+	}
+
+	bool EditorLayer::AssignMaterialToSelection(const std::string& logicalPath, Entity* outEntity,
+		std::string* outPreviousPath, std::string* message)
+	{
+		if (outEntity)
+			*outEntity = Entity {};
+		// 选择模型是**单选**(EditorLayer::m_SelectedEntity):面板的 "Assign to Selection"
+		// 交给这里的永远是"第一个(也是唯一一个)选中实体";多选落地后按同一入口逐个调用即可。
+		const Entity target = m_SelectedEntity;
+		std::string previous;
+		if (!AssignMaterialToEntity(target, logicalPath, message, &previous))
+			return false;
+		if (outEntity)
+			*outEntity = target;
+		if (outPreviousPath)
+			*outPreviousPath = previous;
 		return true;
 	}
 

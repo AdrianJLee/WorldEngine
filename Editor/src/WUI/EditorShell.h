@@ -164,7 +164,18 @@ namespace World
 		bool CreatePrefabFromSelection(Entity root, const std::string& logicalPath, bool overwrite,
 			std::string* message = nullptr) override;
 		// P4-U13d:让内容浏览器选中(必要时先导航到)某个逻辑路径的资产;创建成功后由 EditorLayer 调用。
-		bool SelectContentAsset(const std::string& logicalPath, const char* op);
+		bool SelectContentAsset(const std::string& logicalPath, const char* op) override;
+		// ---- U25-M2:材质工作流(PanelHost 能力;转发 EditorLayer / 内容浏览器面板)----
+		// 材质赋值:写进选中实体的 MeshRendererComponent.MaterialPath(失败给可读原因)。
+		bool AssignMaterialToSelection(const std::string& logicalPath, Entity* outEntity,
+			std::string* outPreviousPath, std::string* message = nullptr) override;
+		// 撤销赋值 / Extract 赋回:把指定实体的 MaterialPath 写成给定值。
+		bool SetEntityMaterialPath(Entity entity, const std::string& materialPath,
+			std::string* message = nullptr) override;
+		// 打开内容浏览器面板的"新建材质"向导(Window 菜单与材质面板的 Extract 共用这一条)。
+		bool OpenNewMaterialWizard(bool fromSelection, std::string* message = nullptr) override;
+		// 面板所在窗口的客户区原点(屏幕物理像素):跨窗口拖放命中用(见 Editor::AssetDropBridge)。
+		bool PanelWindowScreenOrigin(const Wui::WuiContext& ctx, float* outX, float* outY) override;
 		// P4-U13b:prefab 实例(属性面板实例条 + 层级右键菜单;实现全在 EditorLayer)。
 		bool PrefabInstanceInfo(Entity entity, std::string* sourcePath, size_t* overrideCount,
 			Entity* root) override;
