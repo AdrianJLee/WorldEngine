@@ -7,14 +7,49 @@
 
 namespace World::Wui
 {
+	namespace
+	{
+		bool IsSystemButtonDown(int button)
+		{
+			switch (button)
+			{
+				case 0: return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+				case 1: return (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+				default: return (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
+			}
+		}
+	}
+
 	void WuiInputCollector::SyncButtonsWithSystem()
 	{
-		const bool left = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
-		const bool right = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
-		const bool middle = (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
-		if (!left && m_MouseDown[0]) { m_MouseDown[0] = false; m_MouseReleased[0] = true; }
-		if (!right && m_MouseDown[1]) { m_MouseDown[1] = false; m_MouseReleased[1] = true; }
-		if (!middle && m_MouseDown[2]) { m_MouseDown[2] = false; m_MouseReleased[2] = true; }
+		const double now = glfwGetTime();
+		for (int button = 0; button < 3; ++button)
+		{
+			if (!m_MouseDown[button])
+				continue;
+			// 系统确认按下:标记为真实输入(此后由系统状态或抬起事件收口)。
+			if (IsSystemButtonDown(button))
+			{
+				m_PressFromSystem[button] = true;
+				continue;
+			}
+			// 系统说抬起 + 这个按下是系统建立的 → 补一次抬起(跨窗口丢释放的幽灵拖拽修复)。
+			if (m_PressFromSystem[button])
+			{
+				m_MouseDown[button] = false;
+				m_MouseReleased[button] = true;
+				m_PressFromSystem[button] = false;
+				m_PressTime[button] = -1.0;
+				continue;
+			}
+			// 脚本注入的虚拟按键:显式抬起(OnMouseButton(false))或超时前保持按住。
+			// 没有注入时永远走不到这里 —— 真实按下在按下那一刻就被系统状态确认。
+			if (m_PressTime[button] >= 0.0 && now - m_PressTime[button] < kInjectedHoldTimeoutSeconds)
+				continue;
+			m_MouseDown[button] = false;
+			m_MouseReleased[button] = true;
+			m_PressTime[button] = -1.0;
+		}
 	}
 
 	namespace
@@ -56,12 +91,22 @@ namespace World::Wui
 		m_MouseDown[button] = down;
 		if (down)
 		{
+			// U23:按下瞬间的系统按键状态决定这个按下的"来源":
+			//  - 系统确认(真实鼠标 / SendInput)→ 真实输入,可由 SyncButtonsWithSystem 收口;
+			//  - 未确认(PostMessage 注入的 WM_*BUTTONDOWN)→ 虚拟按键,跨帧保持到显式抬起。
+			m_PressFromSystem[button] = IsSystemButtonDown(button);
+			m_PressTime[button] = glfwGetTime();
 			const double now = glfwGetTime();
 			const glm::vec2 delta = m_MousePos - m_LastClickPos[button];
 			if (now - m_LastClickTime[button] < 0.35 && glm::dot(delta, delta) < 36.0f)
 				m_MouseDoubleClicked[button] = true;
 			m_LastClickTime[button] = now;
 			m_LastClickPos[button] = m_MousePos;
+		}
+		else
+		{
+			m_PressFromSystem[button] = false;
+			m_PressTime[button] = -1.0;
 		}
 	}
 

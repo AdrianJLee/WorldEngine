@@ -126,6 +126,14 @@ namespace World
 		WLD_API MaterialLoadResult Parse(const std::string& text, MaterialDesc& out, std::string* error);
 		// 序列化为 .wmat 文本(与 Parse 往返一致)。
 		WLD_API std::string Serialize(const MaterialDesc& desc);
+		// U23:保存回读校验的比较口径(旧行为是 `verify != desc` 逐位相等)。
+		//  - 浮点字段(BaseColor / Metallic / Roughness / Emissive)按 |a-b| <= tolerance 比较:
+		//    写出文本的十进制表示不再把"拖一下滑杆"的正常值判成写入校验失败;
+		//  - 非浮点字段(Name / 两个贴图路径 / BlendMode / DoubleSided)仍然**严格相等**,
+		//    类型/字符串/枚举写坏必须被拒;
+		//  - NaN 不参与"近似相等"(返回 false),与逐位比较的语义一致。
+		WLD_API bool EquivalentForSave(const MaterialDesc& actual, const MaterialDesc& expected,
+			float tolerance = 1e-6f);
 
 		// 从 VFS 优先、磁盘回退读取文件内容;找不到返回 false。
 		WLD_API bool ReadFileText(const std::string& path, std::string& out);

@@ -7,6 +7,8 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <charconv>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -104,6 +106,24 @@ namespace World
 
 		std::string FormatFloat(float value)
 		{
+			// U23:必须保证 float → 文本 → float **逐位可逆**。
+			//
+			// 旧写法是 std::fixed + precision(6):0.1f + 0.2f(= 0.30000001192092896)写成
+			// "0.300000",而 MaterialLibrary::Save 的回读校验当时按逐位相等比较 —— 于是
+			// "拖一下滑杆再保存"会报 "Save failed: 写入校验失败",磁盘其实已经写了、
+			// 脏标记却永远清不掉(U22 实测复现)。
+			//
+			// std::to_chars 给的是"最短往返表示":能用 1 位小数表示的写 1 位,精度不够的
+			// 自动加位数,读回**始终是同一个 float**;同时比 fixed + 9 位小数可读
+			// (0.3 写 "0.3"、0.25 写 "0.25")。非有限值(np/inf)没有往返语义,回落到
+			// 旧格式,让 Parse/校验按原路径拒绝,而不是写出无法解析的字面量。
+			if (std::isfinite(value))
+			{
+				char buffer[64] = {};
+				const std::to_chars_result result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+				if (result.ec == std::errc())
+					return std::string(buffer, result.ptr);
+			}
 			std::ostringstream stream;
 			stream.precision(6);
 			stream << std::fixed << value;
@@ -248,6 +268,32 @@ namespace World
 			out << "BlendMode: " << BlendModeName(desc.BlendMode) << "\n";
 			out << "DoubleSided: " << (desc.DoubleSided ? "true" : "false") << "\n";
 			return out.str();
+		}
+
+		bool EquivalentForSave(const MaterialDesc& actual, const MaterialDesc& expected, float tolerance)
+		{
+			const float limit = tolerance > 0.0f ? tolerance : 0.0f;
+			// NaN 的 |a-b| <= limit 恒为 false:与逐位比较一样拒绝 NaN。
+			// (名字不用 near:Windows.h 的历史宏 near/far 会把它替换掉。)
+			const auto closeEnough = [limit](float a, float b) { return std::fabs(a - b) <= limit; };
+			const auto nearVec4 = [&closeEnough](const glm::vec4& a, const glm::vec4& b)
+			{
+				return closeEnough(a.x, b.x) && closeEnough(a.y, b.y)
+					&& closeEnough(a.z, b.z) && closeEnough(a.w, b.w);
+			};
+			const auto nearVec3 = [&closeEnough](const glm::vec3& a, const glm::vec3& b)
+			{
+				return closeEnough(a.x, b.x) && closeEnough(a.y, b.y) && closeEnough(a.z, b.z);
+			};
+			return actual.Name == expected.Name
+				&& nearVec4(actual.BaseColor, expected.BaseColor)
+				&& closeEnough(actual.Metallic, expected.Metallic)
+				&& closeEnough(actual.Roughness, expected.Roughness)
+				&& nearVec3(actual.Emissive, expected.Emissive)
+				&& actual.AlbedoTexture == expected.AlbedoTexture
+				&& actual.NormalTexture == expected.NormalTexture
+				&& actual.BlendMode == expected.BlendMode
+				&& actual.DoubleSided == expected.DoubleSided;
 		}
 
 		// 内容根解析:项目清单的 content_root = Game/assets,而 WLD_GAME_DIR = Game/。

@@ -154,9 +154,13 @@ namespace World
 			return false;
 
 		// 回读校验:确保写出的文件能被自己解析(往返一致的第一道关)。
+		// U23:比较口径 = MaterialIO::EquivalentForSave(浮点按 1e-6 容差、其余字段严格相等)。
+		// 逐位相等会把"拖一下滑杆"的正常浮点尾差判成写入失败(见 Material.cpp FormatFloat 的说明);
+		// 容差仍然拒绝类型/字符串/枚举写坏与超过 1e-6 的数值错误。
 		MaterialDesc verify;
 		std::string verifyError;
-		if (!MaterialIO::Parse(text, verify, &verifyError).Success || verify != material->GetDesc())
+		if (!MaterialIO::Parse(text, verify, &verifyError).Success
+			|| !MaterialIO::EquivalentForSave(verify, material->GetDesc()))
 		{
 			if (error) *error = "写入校验失败: " + verifyError;
 			return false;

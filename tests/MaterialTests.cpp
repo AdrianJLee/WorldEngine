@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -468,6 +470,166 @@ int main()
 			cache.Invalidate("material_hotreload_tmp/none.png");
 			cache.Clear();                                    // 无设备的 Clear 同样安全
 			CHECK(true);                                      // 运行到这里 = 没有崩溃/未定义行为
+		}
+
+		// 14. U23:带长尾差的浮点("拖一下滑杆"的值)保存往返必须成功。
+		// 修复前:FormatFloat 是 fixed + precision(6),0.1f + 0.2f(= 0.30000001192092896)
+		// 写成 "0.300000",而 MaterialLibrary::Save 的回读校验按逐位相等比较 →
+		// Save 返回 false(报"写入校验失败"),磁盘其实已写、脏标记永远清不掉。
+		{
+			CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
+			std::error_code ec;
+			const std::filesystem::path directory = std::filesystem::current_path() / "Game" / "assets"
+				/ "material_save_precision_tmp";
+			std::filesystem::create_directories(directory, ec);
+			const std::string relative = "material_save_precision_tmp/long_tail.wmat";
+			const std::filesystem::path full = std::filesystem::current_path() / "Game" / "assets" / relative;
+
+			MaterialLibrary& library = MaterialLibrary::Get();
+			Ref<Material> material = library.CreateDefault("LongTail");
+			CHECK(material != nullptr);
+			MaterialDesc desc = material->GetDesc();
+			// 0.4997164 = U22 实测"拖一下滑杆"的值;先证明旧的 6 位定点写出确实不可逆,
+			// 再验证新写法读回来逐位相等(否则这条用例证明不了任何事)。
+			desc.Roughness = 0.4997164f;
+			desc.Metallic = 0.1234567f;
+			desc.BaseColor = glm::vec4(1.0f / 3.0f, 0.4997164f, 0.7f, 1.0f);
+			desc.Emissive = glm::vec3(0.0617284f, 0.05f, 0.0f);
+			CHECK(std::strtof("0.499716", nullptr) != desc.Roughness);
+			CHECK(std::strtof("0.123457", nullptr) != desc.Metallic);
+			CHECK(std::strtof("0.333333", nullptr) != desc.BaseColor.x);
+			material->SetDesc(desc);
+			material->MarkDirty(true);
+
+			std::string error;
+			CHECK(library.Save(material, relative, &error));     // 修复前:false + "写入校验失败"
+			CHECK(error.empty());                                 // 长尾值不是警告,更不是错误
+			CHECK(!material->IsDirty());                          // 保存成功 = 脏标记清掉
+			CHECK(material->GetPath() == relative);
+
+			// 直接读磁盘断言"写出的文本读回来逐位相等"(不是只靠内存态)。
+			std::string diskText;
+			{
+				std::ifstream file(full, std::ios::binary);
+				diskText.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+			}
+			CHECK(!diskText.empty());
+			MaterialDesc reloaded;
+			CHECK(MaterialIO::Parse(diskText, reloaded, nullptr).Success);
+			CHECK(reloaded.Roughness == desc.Roughness);
+			CHECK(reloaded.Metallic == desc.Metallic);
+			CHECK(reloaded.BaseColor == desc.BaseColor);
+			CHECK(reloaded.Emissive == desc.Emissive);
+			// 序列化文本必须带够位数(旧的 6 位定点只会写 "0.499716")。
+			CHECK(diskText.find("0.4997164") != std::string::npos);
+			CHECK(diskText.find("Roughness: 0.499716\n") == std::string::npos);
+
+			std::filesystem::remove_all(directory, ec);
+			library.Shutdown();
+		}
+
+		// 15. U23:回读校验的比较口径 —— 浮点按 1e-6 容差,非浮点字段严格相等。
+		{
+			MaterialDesc base;
+			base.Name = "Tolerance";
+			base.Roughness = 0.4997164f;    // 6 位小数写出会丢尾差
+			base.Metallic = 0.5f;
+			base.BaseColor = glm::vec4(1.0f / 3.0f, 0.25f, 0.5f, 1.0f);
+			base.Emissive = glm::vec3(0.1f, 0.2f, 0.3f);
+			base.AlbedoTexture = "textures/Icon.png";
+			base.BlendMode = MaterialBlendMode::Transparent;
+			base.DoubleSided = true;
+
+			// 旧格式写出的 6 位小数文本回读后差 ~4e-7:容差内 → 等价(保存不再被判失败)。
+			MaterialDesc truncated;
+			CHECK(MaterialIO::Parse(
+				"FormatVersion: 1\nName: \"Tolerance\"\nBaseColor: [0.333333, 0.25, 0.5, 1.0]\n"
+				"Metallic: 0.5\nRoughness: 0.499716\nEmissive: [0.1, 0.2, 0.3]\n"
+				"AlbedoTexture: \"textures/Icon.png\"\nNormalTexture: \"\"\n"
+				"BlendMode: Transparent\nDoubleSided: true\n",
+				truncated, nullptr).Success);
+			CHECK(truncated != base);                                  // 逐位比较确实不相等
+			CHECK(MaterialIO::EquivalentForSave(truncated, base));     // 容差比较通过
+
+			// 超差数值必须被拒(容差不是"什么都放过")。
+			MaterialDesc beyond = base;
+			beyond.Roughness = base.Roughness + 1e-3f;
+			CHECK(!MaterialIO::EquivalentForSave(beyond, base));
+			MaterialDesc beyondColor = base;
+			beyondColor.BaseColor.x = base.BaseColor.x + 1e-3f;
+			CHECK(!MaterialIO::EquivalentForSave(beyondColor, base));
+			// NaN 不被容差吞掉(旧逐位比较同样拒绝)。
+			MaterialDesc nanValue = base;
+			nanValue.Roughness = std::numeric_limits<float>::quiet_NaN();
+			CHECK(!MaterialIO::EquivalentForSave(nanValue, base));
+
+			// 非浮点字段严格相等:字符串 / 枚举 / 布尔 任一不同都不等价。
+			MaterialDesc textureDiff = base;
+			textureDiff.AlbedoTexture = "textures/quadrants.png";
+			CHECK(!MaterialIO::EquivalentForSave(textureDiff, base));
+			MaterialDesc normalDiff = base;
+			normalDiff.NormalTexture = "textures/n.png";
+			CHECK(!MaterialIO::EquivalentForSave(normalDiff, base));
+			MaterialDesc blendDiff = base;
+			blendDiff.BlendMode = MaterialBlendMode::Opaque;
+			CHECK(!MaterialIO::EquivalentForSave(blendDiff, base));
+			MaterialDesc sideDiff = base;
+			sideDiff.DoubleSided = false;
+			CHECK(!MaterialIO::EquivalentForSave(sideDiff, base));
+			MaterialDesc nameDiff = base;
+			nameDiff.Name = "Other";
+			CHECK(!MaterialIO::EquivalentForSave(nameDiff, base));
+		}
+
+		// 16. U23:故意写坏的文件仍然必须失败(容差比较没有放宽"文件必须能解析"这一关)。
+		{
+			CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
+			std::error_code ec;
+			const std::filesystem::path directory = std::filesystem::current_path() / "Game" / "assets"
+				/ "material_save_precision_tmp";
+			std::filesystem::create_directories(directory, ec);
+			const std::string relative = "material_save_precision_tmp/broken.wmat";
+			const std::filesystem::path full = std::filesystem::current_path() / "Game" / "assets" / relative;
+
+			MaterialDesc good;
+			good.Name = "GoodBase";
+			{
+				std::ofstream file(full, std::ios::binary | std::ios::trunc);
+				file << MaterialIO::Serialize(good);
+			}
+			MaterialLibrary& library = MaterialLibrary::Get();
+			Ref<Material> material = library.Load(relative, nullptr);
+			CHECK(material != nullptr);
+			CHECK(material->GetDesc().Name == "GoodBase");
+
+			// ① 直接解析坏文本:必须失败(不是"回退默认值算成功")。
+			MaterialDesc parsed;
+			CHECK(!MaterialIO::Parse("this is not a valid material\n", parsed, nullptr).Success);
+			// ② 字段类型写坏也要失败。
+			CHECK(!MaterialIO::Parse("FormatVersion: 1\nMetallic: \"high\"\n", parsed, nullptr).Success);
+			// ③ 不支持的版本要失败(不猜、不降级)。
+			CHECK(!MaterialIO::Parse("FormatVersion: 99\nName: \"x\"\n", parsed, nullptr).Success);
+
+			// ④ 库侧:坏文件 Reload 失败且不覆盖内存态(旧 desc 保留、仍可继续编辑)。
+			{
+				std::ofstream file(full, std::ios::binary | std::ios::trunc);
+				file << "FormatVersion: 1\nMetallic: \"high\"\n";
+			}
+			std::string error;
+			CHECK(!library.Reload(relative, &error));
+			CHECK(!error.empty());
+			CHECK(material->GetDesc().Name == "GoodBase");
+
+			// ⑤ 坏文件永远解析不出材质(新路径 Load 也必须失败)。
+			const std::string brokenNew = "material_save_precision_tmp/broken_new.wmat";
+			{
+				std::ofstream file(directory / "broken_new.wmat", std::ios::binary | std::ios::trunc);
+				file << "not a material at all\n";
+			}
+			CHECK(library.Load(brokenNew, nullptr) == nullptr);
+
+			std::filesystem::remove_all(directory, ec);
+			library.Shutdown();
 		}
 
 		std::printf("MaterialTests: all checks passed\n");

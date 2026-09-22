@@ -16,11 +16,13 @@ namespace World
 	//
 	// U21-M1(用户 2026-09-22 确认的方案 §1.A + §1.C):把"参数表"做成编辑器——
 	//  - 头部:材质名 + 来源逻辑路径 + 脏标记 + Save / Reveal / Revert(全部有悬停说明);
-	//  - 参数区:按物理意义分六组(基础外观/表面细节/自发光/透明度与混合/贴图采样/高级)
-	//    + 预览组,可折叠、可搜索、每字段"恢复默认"(只在偏离默认时出现);
+	//  - 参数区:按物理意义分六组(基础外观/表面细节/自发光/透明度与混合/贴图采样/高级),
+	//    可折叠、可搜索、每字段"恢复默认"(只在偏离默认时出现);
 	//  - 校验区:缺贴图 / 越界 / 引用不在内容根,每条可点击定位到字段(无问题时整块不占位);
-	//  - 预览:网格(球/立方/平面)、背景(纯色/渐变)、光照预设(三点/单方向/无光)+ 强度与角度、
-	//    显示开关(线框/法线/UV 棋盘格);离屏目标 = **预览区物理像素**(与 render_scale 脱钩)。
+	//  - 预览区(U23,用户 2026-09-22「预览这个大分类应该和其他的分开」):预览设置
+	//    (网格/背景/光照/显示)住在**预览区自己的卡片与标签条**里,参数列只留会影响材质
+	//    本身的字段 —— 预览只影响"看",不写进 .wmat。离屏目标 = **预览区物理像素**
+	//    (与 render_scale 脱钩)。
 	//
 	// 相机手感与模型/预制体面板一致:左键轨道旋转、滚轮推拉、双击或 F 取景、上下方向已翻正。
 	// 每个材质一个面板/窗口(id = "material:<path>"),可同时打开多个。
@@ -71,9 +73,6 @@ namespace World
 			bool ReadOnly = false;
 			bool Modified = false;
 			bool HasReset = false;
-			// U22:预览组按标签过滤 —— false = 该行属于别的标签(不画、不登记、不占高)。
-			// 搜索态下强制 true(搜索要能找到四个标签里的任何一行)。
-			bool InTab = true;
 			float Height = 26.0f;
 		};
 
@@ -96,8 +95,9 @@ namespace World
 		// ---- U21:参数区(搜索 / 分组折叠 / 定位)----
 		std::string m_Search;               // 搜索框内容(参数名 / 分组 / 说明,不区分大小写)
 		float m_ScrollY = 0.0f;             // 参数区滚动位置
-		// 分组展开态(下标 = 组序):默认全展开,用户折叠后跨帧保持。
-		bool m_SectionOpen[7] = { true, true, true, true, true, true, true };
+		// 分组展开态(下标 = 组序 = kGroups 里材质参数分组的顺序):默认全展开,用户折叠后跨帧保持。
+		// U23:预览组搬进预览区后,参数列只剩 6 个材质分组(kGroups 与这里必须同步)。
+		bool m_SectionOpen[6] = { true, true, true, true, true, true };
 		// 校验条目点击后要把目标字段滚进视野(行高是上一帧实测值,所以保持几帧)。
 		std::string m_RevealField;
 		int m_RevealFrames = 0;
@@ -129,6 +129,8 @@ namespace World
 		float m_PreviewViewH = 0.0f;
 		// 预览:上一帧矩形(探针按它核对"目标 = 矩形物理像素")。
 		Wui::WuiRect m_PreviewRect;
+		// U23:预览区卡片矩形(预览设置与参数列的**分区**依据;探针按它断言归属)。
+		Wui::WuiRect m_PreviewZoneRect;
 		uint64_t m_PreviewTextureId = 0;
 		uint32_t m_UiTextureGeneration = 0;
 		// 预览纹理连续抓图(WLD_PREVIEW_TEX_CAPTURE):计数与写出张数,按面板各记一份。
@@ -211,7 +213,8 @@ namespace World
 		// 一行参数:标签 + 控件 + 恢复默认 + 悬停说明 + 无障碍节点。
 		void DrawParameterRow(Wui::WuiContext& ctx, const Wui::WuiTheme& theme, const RowPlan& row,
 			float x, float y, float width, bool stacked);
-		// 预览区(图像 + 相机操作 + 读数);返回占用高度。
+		// 预览区(卡片:图像 + 相机操作 + 预览设置标签/控件 + "仅影响预览显示"标注 + 读数);
+		// 传入矩形 = 分配到的区域,返回实际占用的高度。
 		float DrawPreview(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		// 双击 / F 取景:回到按网格包围半径算出的默认距离。
 		void FramePreview();

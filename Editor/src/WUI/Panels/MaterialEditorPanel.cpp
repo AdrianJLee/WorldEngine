@@ -52,7 +52,17 @@ namespace World
 		// U22:参数区"组 = 容器"的排版(组头 + 子项缩进 + 组间留白/描边)。
 		constexpr float kGroupIndent = 10.0f;        // 子项缩进:一眼看出这几行属于上面那个组头
 		constexpr float kGroupGap = 6.0f;            // 组之间的留白(配合容器描边就是分隔线)
-		constexpr float kPreviewTabHeight = 26.0f;   // 预览组顶部的分段标签条(网格|背景|光照|显示)
+		// U23:预览区的分段标签条(网格|背景|光照|显示)与"仅影响预览显示"标注(U23 §B)。
+		constexpr float kPreviewTabHeight = 26.0f;
+		constexpr float kPreviewNoteHeight = 16.0f;
+		constexpr float kPreviewImageMinSide = 96.0f;  // 空间再紧也留一块能看的预览
+		constexpr float kPreviewInlineMinWidth = 240.0f; // 预览设置行:窄于它才改成标签/控件两行
+		constexpr float kParamsMinHeight = 120.0f;     // 窄窗单列时给参数区留的最小高度
+		// 头部行高(U23:头部只按内容占位,不再留空白带 —— 间距全部走主题令牌)。
+		// 高度 = 该行文字的**实际墨迹高度**(名称 13px / 路径 11px 下移 2px / 状态 11px),
+		// 这样头部底边就是最后一行文字的底边,头部与内容之间不会多出一条看不见的空白带。
+		constexpr float kHeaderTextHeight = 13.0f;     // 材质名 / 路径行
+		constexpr float kHeaderStatusHeight = 11.0f;   // 状态行
 
 		// 预览组的分段标签:行 key → 标签下标(0=网格 1=背景 2=光照 3=显示)。
 		int PreviewTabFor(const std::string& key)
@@ -218,6 +228,9 @@ namespace World
 		}
 
 		// ---- 参数分组(方案 §1.A:按物理意义分组;组序 = 参数区从上到下)----
+		// U23(用户 2026-09-22「预览这个大分类应该和其他的分开;预览只是为了看,并不影响实际效果」):
+		// 预览分组**不在**这里 —— 它搬进预览区自己的卡片(DrawPreview)。这张表只剩会影响材质
+		// 本身的字段,组标题里因此不会再出现"预览"(与 MaterialEditorPanel::m_SectionOpen 同长)。
 		struct GroupDesc
 		{
 			const char* Key;
@@ -226,15 +239,15 @@ namespace World
 		};
 
 		const GroupDesc kGroups[] = {
-			{ "preview", "Preview", 0 },
-			{ "base", "Base Appearance", 1 },
-			{ "detail", "Surface Detail", 2 },
-			{ "emissive", "Emissive", 3 },
-			{ "blend", "Transparency & Blend", 4 },
-			{ "sampling", "Texture Sampling", 5 },
-			{ "advanced", "Advanced", 6 },
+			{ "base", "Base Appearance", 0 },
+			{ "detail", "Surface Detail", 1 },
+			{ "emissive", "Emissive", 2 },
+			{ "blend", "Transparency & Blend", 3 },
+			{ "sampling", "Texture Sampling", 4 },
+			{ "advanced", "Advanced", 5 },
 		};
 		constexpr int kGroupCount = static_cast<int>(sizeof(kGroups) / sizeof(kGroups[0]));
+		static_assert(kGroupCount == 6, "m_SectionOpen 的容量与材质参数分组数必须一致");
 
 		const GroupDesc* FindGroup(const std::string& key)
 		{
@@ -1568,11 +1581,14 @@ namespace World
 	float MaterialEditorPanel::DrawHeader(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
+		// U23(用户 2026-09-22「材质编辑器上面有空行,太丑了」):头部高度**按内容算**,
+		// 行间距全部取主题令牌(不再出现 kHeaderBaseHeight 这种固定占位造成的空白带)。
+		const float gap = theme.PadSmall;
 		const float x = rect.X;
-		const float y = rect.Y + 4.0f;
+		const float y = rect.Y + gap;
 		const float buttonW = 76.0f;
-		const float buttonH = 24.0f;
-		const float gap = 6.0f;
+		const float buttonH = theme.ControlHeight;
+		const float actionGap = 6.0f;   // 动作按钮之间的间距(控件间距,与容器留白无关)
 		const bool dirty = m_Material && m_Material->IsDirty();
 
 		const Wui::WuiRect saveRect { x, y, buttonW, buttonH };
@@ -1584,7 +1600,7 @@ namespace World
 		Wui::Tooltip(ctx, saveRect, saveDoc);
 		AnnotateNode(ctx, Wui::HashId("material.save"), Wui::Tr("panel.material.save", "Save"), saveDoc);
 
-		const Wui::WuiRect revealRect { x + (buttonW + gap), y, buttonW, buttonH };
+		const Wui::WuiRect revealRect { x + (buttonW + actionGap), y, buttonW, buttonH };
 		const std::string revealDoc = Wui::Tr("panel.material.reveal.tooltip",
 			"Reveal: select the .wmat file in Windows Explorer (needs a saved file).");
 		if (Wui::Button(ctx, Wui::HashId("material.reveal"), revealRect,
@@ -1594,7 +1610,7 @@ namespace World
 		AnnotateNode(ctx, Wui::HashId("material.reveal"), Wui::Tr("panel.material.reveal", "Reveal"),
 			revealDoc);
 
-		const Wui::WuiRect revertRect { x + 2.0f * (buttonW + gap), y, buttonW, buttonH };
+		const Wui::WuiRect revertRect { x + 2.0f * (buttonW + actionGap), y, buttonW, buttonH };
 		const std::string revertDoc = Wui::Tr("panel.material.revert.tooltip",
 			"Revert: drop unsaved edits and read the .wmat from disk again.");
 		if (Wui::Button(ctx, Wui::HashId("material.revert"), revertRect,
@@ -1642,8 +1658,8 @@ namespace World
 			Wui::Tr("panel.material.dirty.label", "Unsaved changes"), dirty ? "true" : "false",
 			dirtyRect, dirtyDoc);
 
-		// 第二行:材质名 + 来源逻辑路径。
-		const float lineY = rect.Y + 32.0f;
+		// 第二行:材质名 + 来源逻辑路径(紧贴动作行下方一个 PadSmall)。
+		const float lineY = y + buttonH + gap;
 		const MaterialDesc& desc = m_Material->GetDesc();
 		std::filesystem::path file(m_Path.empty() ? std::string() : m_Path);
 		std::string fallbackName = file.stem().string();
@@ -1656,9 +1672,10 @@ namespace World
 		const std::string nameDoc = Wui::Tr("panel.material.name.tooltip",
 			"Material display name (the .wmat Name field). Asset identity is the file path; rename the file "
 			"in the Content Browser to change where it lives.");
-		Wui::Tooltip(ctx, { x, lineY, nameWidth, 16.0f }, nameDoc);
+		Wui::Tooltip(ctx, { x, lineY, nameWidth, kHeaderTextHeight }, nameDoc);
 		RegisterReadOnlyNode(Wui::HashId("material.name"),
-			Wui::Tr("panel.material.name", "Material name"), name, { x, lineY, nameWidth, 16.0f }, nameDoc);
+			Wui::Tr("panel.material.name", "Material name"), name,
+			{ x, lineY, nameWidth, kHeaderTextHeight }, nameDoc);
 		const float pathX = x + nameWidth + 10.0f;
 		if (pathX < x + rect.W - 60.0f)
 		{
@@ -1670,28 +1687,37 @@ namespace World
 				EllipsizeToWidth(ctx, pathText, pathWidth, 11.0f), theme.TextMuted, 11.0f);
 			const std::string pathDoc = Wui::Tr("panel.material.path.tooltip",
 				"Source asset path, relative to the content root (Game/assets).");
-			Wui::Tooltip(ctx, { pathX, lineY, pathWidth, 16.0f }, pathDoc);
+			Wui::Tooltip(ctx, { pathX, lineY, pathWidth, kHeaderTextHeight }, pathDoc);
 			RegisterReadOnlyNode(Wui::HashId("material.path"),
 				Wui::Tr("panel.material.path", "Source path"), pathText,
-				{ pathX, lineY, pathWidth, 16.0f }, pathDoc);
+				{ pathX, lineY, pathWidth, kHeaderTextHeight }, pathDoc);
 		}
 
-		float used = kHeaderBaseHeight;
+		// 头部真实高度 = 最后一行文字的底边(名字/路径行),不留空白带。
+		float used = (lineY - rect.Y) + kHeaderTextHeight;
 		if (m_Path.empty())
 		{
 			// 未落盘材质:给出"另存为"路径输入 + 行内校验。
-			const Wui::WuiRect field { x, rect.Y + kHeaderBaseHeight, rect.W - 8.0f, 22.0f };
+			const Wui::WuiRect field { x, rect.Y + used + gap, rect.W - 8.0f, 22.0f };
 			const std::string pathError = NewMaterialPathError(m_NewPathBuffer);
 			const std::string shownError = m_NewPathBuffer.empty()
 				? (m_NewPathAttempted ? pathError : std::string()) : pathError;
 			Wui::TextFieldEx(ctx, Wui::HashId("material.newpath"), field, m_NewPathBuffer, theme, shownError);
-			used += 26.0f;
+			used += gap + 22.0f;
 		}
 		if (!m_Status.empty())
 		{
-			Wui::Label(ctx, { x, rect.Y + used }, EllipsizeToWidth(ctx, m_Status, rect.W - 8.0f, 11.0f),
+			const Wui::WuiRect statusRect { x, rect.Y + used + gap,
+				std::max(20.0f, rect.W - 8.0f), kHeaderStatusHeight };
+			Wui::Label(ctx, { x, statusRect.Y }, EllipsizeToWidth(ctx, m_Status, rect.W - 8.0f, 11.0f),
 				m_StatusIsError ? theme.Danger : theme.TextMuted, 11.0f);
-			used += 16.0f;
+			// U23:状态行也登记无障碍节点 —— 它是头部的一部分,"标题底"要按它算
+			// (顶部间距的验收口径:标题/路径/动作条整块 → 首个内容控件)。
+			RegisterReadOnlyNode(Wui::HashId("material.status"),
+				Wui::Tr("panel.material.status", "Status"), m_Status, statusRect,
+				Wui::Tr("panel.material.status.tooltip",
+					"Result of the most recent material action (open / save / reload / reveal)."));
+			used += gap + kHeaderStatusHeight;
 		}
 		return used;
 	}
@@ -1930,7 +1956,10 @@ namespace World
 		Wui::TextFieldA11y searchA11y;
 		searchA11y.Label = Wui::Tr("panel.material.search", "Search parameters");
 		searchA11y.Placeholder = Wui::Tr("panel.material.search.hint", "Search parameters…");
-		const Wui::WuiRect searchRect { rect.X, rect.Y, rect.W, 24.0f };
+		// U23:参数区第一行就是搜索框(顶到分配区域的上沿),它下面只留一个 PadSmall —— 参数区
+		// 顶部的空白带一并去掉(用户 2026-09-22「上面有空行」)。
+		const float searchHeight = theme.ControlHeight;
+		const Wui::WuiRect searchRect { rect.X, rect.Y, rect.W, searchHeight };
 		if (Wui::TextField(ctx, Wui::HashId("material.search"), searchRect, m_Search, theme,
 			nullptr, &searchA11y))
 			m_ScrollY = 0.0f;
@@ -1947,8 +1976,9 @@ namespace World
 		const size_t shownIssues = std::min<size_t>(m_Validation.size(), 3);
 		if (!m_Validation.empty())
 			validationHeight = 20.0f + static_cast<float>(shownIssues) * 18.0f;
-		const Wui::WuiRect contentRect { rect.X, rect.Y + 30.0f, rect.W,
-			std::max(40.0f, rect.H - 30.0f - validationHeight) };
+		const float contentTop = searchHeight + theme.PadSmall;
+		const Wui::WuiRect contentRect { rect.X, rect.Y + contentTop, rect.W,
+			std::max(40.0f, rect.H - contentTop - validationHeight) };
 
 		// ---- 行集合(搜索过滤;行高按窄列与否)----
 		const bool stacked = rect.W < kStackedThreshold;
@@ -1957,6 +1987,9 @@ namespace World
 		for (int index = 0; index < kRowSpecCount; ++index)
 		{
 			const RowSpec& spec = kRowSpecs[index];
+			// U23:预览设置不在这张列表里 —— 它们在预览区自己的标签条里(DrawPreview)。
+			if (std::string(spec.Group) == std::string("preview"))
+				continue;
 			RowPlan plan;
 			plan.Group = spec.Group;
 			plan.Key = spec.Key;
@@ -1971,10 +2004,7 @@ namespace World
 			plan.Doc = Wui::Tr(spec.DocKey, spec.DocEn);
 			plan.ReadOnly = spec.ReadOnly != 0;
 			plan.HasReset = spec.HasReset != 0;
-			if (plan.Group == std::string("preview"))
-				plan.Modified = plan.HasReset && PreviewOptionModified(plan.Key);
-			else
-				plan.Modified = plan.HasReset && !plan.ReadOnly && FieldModified(plan.Key);
+			plan.Modified = plan.HasReset && !plan.ReadOnly && FieldModified(plan.Key);
 			// 只读行的显示值(采样/高级诊断)。
 			if (plan.Key == std::string("normal.space"))
 				plan.Value = Wui::Tr("material.value.linear", "Linear (UNORM, no sRGB decode)");
@@ -2005,15 +2035,11 @@ namespace World
 				if (haystack.find(needle) == std::string::npos)
 					continue;
 			}
-			// U22:预览组按当前标签过滤(搜索态不过滤:搜索结果要跨标签可见,
-			// 与"搜索时自动展开分组"同一条口径)。
-			plan.InTab = needle.empty() ? (plan.Group != std::string("preview")
-				|| PreviewTabFor(plan.Key) == m_PreviewTab) : true;
 			plan.Height = stacked ? (plan.ReadOnly ? 34.0f : kRowHeightStacked) : (plan.ReadOnly ? 20.0f : kRowHeight);
 			plans.push_back(std::move(plan));
 		}
 
-		// ---- 内容高度(折叠的组只占组头;展开的组 = 容器块,含标签条与子项)----
+		// ---- 内容高度(折叠的组只占组头;展开的组 = 容器块,含子项)----
 		float contentHeight = 6.0f;
 		for (const GroupDesc& group : kGroups)
 		{
@@ -2026,10 +2052,8 @@ namespace World
 			contentHeight += kGroupHeaderHeight + kGroupGap;
 			if (!m_SectionOpen[group.Index] && needle.empty())
 				continue;
-			if (group.Key == std::string("preview"))
-				contentHeight += kPreviewTabHeight;
 			for (const RowPlan& plan : plans)
-				if (plan.Group == group.Key && plan.InTab)
+				if (plan.Group == group.Key)
 					contentHeight += plan.Height;
 		}
 		const float maxScroll = std::max(0.0f, contentHeight - contentRect.H);
@@ -2047,7 +2071,6 @@ namespace World
 			if (rows.empty())
 				continue;
 			const bool open = m_SectionOpen[group.Index] || !needle.empty();
-			const bool previewGroup = group.Key == std::string("preview");
 			const int modified = GroupModifiedCount(group.Key);
 			const int rowCount = static_cast<int>(rows.size());
 			// U22(用户 §5.2「折叠设计的怪怪的,分别区分不出来折叠内容属于哪里」):
@@ -2056,11 +2079,8 @@ namespace World
 			float blockHeight = kGroupHeaderHeight;
 			if (open)
 			{
-				if (previewGroup)
-					blockHeight += kPreviewTabHeight;
 				for (const RowPlan* plan : rows)
-					if (plan->InTab)
-						blockHeight += plan->Height;
+					blockHeight += plan->Height;
 			}
 			const Wui::WuiRect blockRect { contentRect.X + 2.0f, y - 3.0f,
 				std::max(40.0f, contentRect.W - 12.0f), blockHeight + 4.0f };
@@ -2150,58 +2170,8 @@ namespace World
 				y += kGroupGap;
 				continue;
 			}
-			// U22(用户 §5.3「关于预览的设置选项用不同的 tag 分开」):预览组顶部一条
-			// 分段标签条,一次只放对应标签的控件;选中项在会话内记住(成员变量)。
-			if (previewGroup)
-			{
-				const float tabY = y;
-				y += kPreviewTabHeight;
-				const Wui::WuiRect tabRect { blockRect.X + 6.0f, tabY + 1.0f,
-					std::max(60.0f, blockRect.W - 16.0f), kPreviewTabHeight - 7.0f };
-				const bool tabVisible = (tabRect.Y + tabRect.H > contentRect.Y)
-					&& (tabRect.Y < contentRect.Y + contentRect.H);
-				if (tabVisible)
-				{
-					const char* tabKeys[4] = { "mesh", "bg", "light", "display" };
-					const std::vector<std::string> tabLabels {
-						Wui::Tr("material.preview.tab.mesh", "Mesh"),
-						Wui::Tr("material.preview.tab.bg", "Background"),
-						Wui::Tr("material.preview.tab.light", "Lighting"),
-						Wui::Tr("material.preview.tab.display", "Display") };
-					int active = std::clamp(m_PreviewTab, 0, 3);
-					if (Wui::TabBar(ctx, Wui::HashId("material.preview.tabs"), tabRect, tabLabels,
-						active, theme))
-						m_PreviewTab = active;
-					// 额外登记**稳定 id**(material.preview.tab.<key>):脚本按 id 点击/断言,
-					// 不依赖本地化文案,也不用去猜 TabBar 的派生 id。
-					const float tabWidth = tabRect.W / 4.0f;
-					for (int index = 0; index < 4; ++index)
-					{
-						Wui::WuiAccessNode node;
-						node.Id = Wui::HashId((std::string("material.preview.tab.")
-							+ tabKeys[index]).c_str());
-						node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-						node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-						node.Kind = "tab";
-						node.Label = tabLabels[static_cast<size_t>(index)];
-						node.Value = index == active ? "true" : "false";
-						node.Tooltip = Wui::Tr("panel.material.preview.tab.tooltip",
-							"Preview settings are split into tabs: the preview scene never changes, "
-							"only which options you are looking at.");
-						node.Rect = { tabRect.X + tabWidth * static_cast<float>(index), tabRect.Y,
-							tabWidth, tabRect.H };
-						node.Enabled = true;
-						node.Interactive = true;
-						node.Visible = true;
-						Wui::WuiAccessibility::Get().Register(node);
-					}
-				}
-			}
 			for (const RowPlan* plan : rows)
 			{
-				// 不属于当前预览标签的行:不画、不登记、不占高(搜索态下 InTab 恒为 true)。
-				if (!plan->InTab)
-					continue;
 				// 校验条目点击后的定位:在**可见性判断之前**处理 —— 目标行通常正在视口外,
 				// 那正是要滚过去的情况(下一帧生效,行高是本帧算出来的)。
 				if (!m_RevealField.empty() && plan->Key == m_RevealField)
@@ -2331,11 +2301,50 @@ namespace World
 		return rect.H;
 	}
 
-	// ---- 预览:图像 + 相机操作 + 读数 ----
+	// ---- 预览区:卡片(图像 + 预览设置标签/控件 + "仅影响预览显示"标注 + 读数) ----
+	//
+	// U23(用户 2026-09-22):「预览这个大分类应该和其他的分开。因为预览只是为了看,它并不影响
+	// 实际效果呀。」→ 预览设置(网格/背景/光照/显示)搬进**预览区自己的卡片与标签条**,
+	// 参数列只剩会影响材质本身的字段;卡片有底色 + 描边,与参数列明确分隔。
 	float MaterialEditorPanel::DrawPreview(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
-		UpdatePreviewTargetSize(rect);
+		const float pad = theme.Pad;
+		const float gap = theme.PadSmall;
+		const float innerW = std::max(80.0f, rect.W - 2.0f * pad);
+		// 预览行:与参数区同一条"窄列换行"口径(宽窗左列只有 220..340 宽)。
+		// U23:预览列比参数列窄得多,单行的"标签 + 控件"在 240 设计单位以上都能放下
+		// (再窄才改成上下两行),这样图像能拿到更多高度。
+		const bool stacked = innerW < kPreviewInlineMinWidth;
+		const float rowH = stacked ? kRowHeightStacked : kRowHeight;
+		// 标签条高度按**当前最高的标签**预留(光照 4 项 / 显示 3 项 / 网格·背景 1 项):
+		// 切标签时预览画面与卡片尺寸都不变 → 离屏目标不重建、切标签不闪。
+		float tabRowsH[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		for (int index = 0; index < kRowSpecCount; ++index)
+		{
+			const RowSpec& spec = kRowSpecs[index];
+			if (std::string(spec.Group) != std::string("preview"))
+				continue;
+			tabRowsH[std::clamp(PreviewTabFor(spec.Key), 0, 3)] += rowH;
+		}
+		const float rowsReserveH = std::max(std::max(tabRowsH[0], tabRowsH[1]),
+			std::max(tabRowsH[2], tabRowsH[3]));
+		const float tabRowH = kPreviewTabHeight - 6.0f;
+		const float stripH = (tabRowH + gap) + (kPreviewNoteHeight + gap) + rowsReserveH;
+		// 图像(正方形)占满可用宽,但给下面的"标签 + 标注 + 控件"留出空间:空间不足时图像先变小。
+		const float side = std::clamp(innerW, kPreviewImageMinSide,
+			std::max(kPreviewImageMinSide, rect.H - 2.0f * pad - stripH));
+		const float cardH = std::min(rect.H, 2.0f * pad + side + stripH);
+		const Wui::WuiRect card { rect.X, rect.Y, rect.W, cardH };
+		m_PreviewZoneRect = card;
+		// 预览区 = 一张卡片(ContentBg 底 + BorderStrong 描边):与右侧参数列"明确分隔"。
+		Wui::PanelBackground(ctx, card, theme.ContentBg, theme.Radius + 2.0f);
+		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, card, theme.BorderStrong,
+			theme.Radius + 2.0f, 1.0f });
+
+		const Wui::WuiRect view { card.X + pad, card.Y + pad, side, side };
+		m_PreviewRect = view;
+		UpdatePreviewTargetSize(view);
 		const uint64_t textureId = RenderPreview();
 		const std::string hint = Wui::Tr("panel.material.preview.hint",
 			"Drag = orbit, wheel = zoom, double-click or F = frame");
@@ -2345,10 +2354,10 @@ namespace World
 			// 一个纹素(1:1),线性过滤也不会糊。
 			const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
 			const Wui::WuiRect pixelView {
-				std::round(rect.X * uiScale) / uiScale,
-				std::round(rect.Y * uiScale) / uiScale,
-				static_cast<float>(std::lround(rect.W * uiScale)) / uiScale,
-				static_cast<float>(std::lround(rect.H * uiScale)) / uiScale };
+				std::round(view.X * uiScale) / uiScale,
+				std::round(view.Y * uiScale) / uiScale,
+				static_cast<float>(std::lround(view.W * uiScale)) / uiScale,
+				static_cast<float>(std::lround(view.H * uiScale)) / uiScale };
 			// 渐变背景:预览目标清成透明,先在下面画一层 WUI 渐变(2D 通道,不需要改 3D)。
 			if (m_PreviewBackground == PreviewBackground::Gradient)
 			{
@@ -2413,12 +2422,100 @@ namespace World
 		}
 		else
 		{
-			Wui::Label(ctx, { rect.X + 8.0f, rect.Y + 8.0f },
+			Wui::Label(ctx, { view.X + pad, view.Y + pad },
 				Wui::Tr("panel.material.preview_unavailable", "Preview unavailable (RHI device not ready)"),
 				theme.TextMuted, 12.0f);
 		}
+		// ---- 预览设置:分段标签(网格|背景|光照|显示)+ "仅影响预览显示"标注 + 当前标签的控件 ----
+		const char* tabKeys[4] = { "mesh", "bg", "light", "display" };
+		const std::vector<std::string> tabLabels {
+			Wui::Tr("material.preview.tab.mesh", "Mesh"),
+			Wui::Tr("material.preview.tab.bg", "Background"),
+			Wui::Tr("material.preview.tab.light", "Lighting"),
+			Wui::Tr("material.preview.tab.display", "Display") };
+		const int activeTab = std::clamp(m_PreviewTab, 0, 3);
+		const Wui::WuiRect tabRect { card.X + pad, view.Y + view.H + gap, innerW, tabRowH };
+		int tabSelection = activeTab;
+		if (Wui::TabBar(ctx, Wui::HashId("material.preview.tabs"), tabRect, tabLabels,
+			tabSelection, theme))
+			m_PreviewTab = tabSelection;
+		// 额外登记**稳定 id**(material.preview.tab.<key>):脚本按 id 点击/断言,
+		// 不依赖本地化文案,也不用去猜 TabBar 的派生 id。
+		const float tabWidth = tabRect.W / 4.0f;
+		for (int index = 0; index < 4; ++index)
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId((std::string("material.preview.tab.") + tabKeys[index]).c_str());
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "tab";
+			node.Label = tabLabels[static_cast<size_t>(index)];
+			node.Value = index == activeTab ? "true" : "false";
+			node.Tooltip = Wui::Tr("panel.material.preview.tab.tooltip",
+				"Preview settings are split into tabs: the preview scene never changes, "
+				"only which options you are looking at.");
+			node.Rect = { tabRect.X + tabWidth * static_cast<float>(index), tabRect.Y, tabWidth,
+				tabRect.H };
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		// 归属标注:预览区是"看"的设置,不写进 .wmat —— 用户 2026-09-22 的原话就是这个分界线。
+		const std::string previewNote = Wui::Tr("panel.material.preview.note",
+			"Preview display only — never written into the material");
+		const std::string previewNoteDoc = Wui::Tr("panel.material.preview.note.tooltip",
+			"Preview settings change how you look at the material (mesh, background, lighting, "
+			"display overlays). They are never saved into the .wmat and never change the material "
+			"that objects render with.");
+		const Wui::WuiRect noteRect { card.X + pad, tabRect.Y + tabRect.H + gap, innerW,
+			kPreviewNoteHeight };
+		Wui::Label(ctx, { noteRect.X, noteRect.Y },
+			EllipsizeToWidth(ctx, previewNote, noteRect.W, 11.0f), theme.TextDisabled, 11.0f);
+		Wui::Tooltip(ctx, noteRect, previewNoteDoc);
+		RegisterReadOnlyNode(Wui::HashId("material.preview.note"), previewNote, "preview-only",
+			noteRect, previewNoteDoc);
+		// 当前标签的控件:与参数行同一个绘制函数(同一套密度与"恢复默认"口径)。
+		float rowY = noteRect.Y + noteRect.H + gap;
+		for (int index = 0; index < kRowSpecCount; ++index)
+		{
+			const RowSpec& spec = kRowSpecs[index];
+			if (std::string(spec.Group) != std::string("preview"))
+				continue;
+			if (PreviewTabFor(spec.Key) != activeTab)
+				continue;
+			// 窗口高度极小时宁可少画一行,也不让控件越出卡片(卡片外面是参数列)。
+			if (rowY + rowH > card.Y + cardH + 0.5f)
+				break;
+			RowPlan plan;
+			plan.Group = spec.Group;
+			plan.Key = spec.Key;
+			plan.ControlId = std::string("material.") + spec.Key;
+			plan.Label = Wui::Tr(spec.LabelKey, spec.LabelEn);
+			plan.Doc = Wui::Tr(spec.DocKey, spec.DocEn);
+			plan.ReadOnly = spec.ReadOnly != 0;
+			plan.HasReset = spec.HasReset != 0;
+			plan.Modified = plan.HasReset && !plan.ReadOnly && PreviewOptionModified(plan.Key);
+			plan.Height = rowH;
+			DrawParameterRow(ctx, theme, plan, card.X + pad, rowY, innerW, stacked);
+			rowY += rowH;
+		}
 		// 无障碍:预览区节点 + 两条可断言的读数(target / camera)。
 		{
+			Wui::WuiAccessNode zone;
+			zone.Id = Wui::HashId("material.preview.zone");
+			zone.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			zone.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			zone.Kind = "group";
+			zone.Label = Wui::Tr("panel.material.preview.zone", "Preview");
+			zone.Value = "preview-only";
+			zone.Tooltip = previewNoteDoc;
+			zone.Rect = card;
+			zone.Enabled = true;
+			zone.Interactive = false;
+			zone.Visible = true;
+			Wui::WuiAccessibility::Get().Register(zone);
+
 			Wui::WuiAccessNode node;
 			node.Id = Wui::HashId("material.preview");
 			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
@@ -2430,7 +2527,7 @@ namespace World
 					+ std::to_string(m_PreviewTargetH) + ")")
 				: Wui::Tr("panel.material.preview_unavailable", "Preview unavailable (RHI device not ready)");
 			node.Tooltip = hint;
-			node.Rect = rect;
+			node.Rect = view;
 			node.Enabled = true;
 			node.Interactive = false;
 			node.Visible = true;
@@ -2444,7 +2541,7 @@ namespace World
 			static_cast<double>(RenderSettings::RenderScale()));
 		RegisterReadOnlyNode(Wui::HashId("material.preview.target"),
 			Wui::Tr("panel.material.preview.target", "Preview render target"), targetText,
-			{ rect.X, rect.Y, std::max(20.0f, rect.W), 14.0f },
+			{ view.X, view.Y, std::max(20.0f, view.W), 14.0f },
 			Wui::Tr("material.prop.preview.target.doc",
 				"Preview render target = preview rect in physical pixels, long side clamped to [128, 2048]. "
 				"Independent of rendering.render_scale."));
@@ -2456,7 +2553,7 @@ namespace World
 			static_cast<double>(m_CameraMaxDistance), static_cast<int>(m_PreviewMesh));
 		RegisterReadOnlyNode(Wui::HashId("material.preview.camera"),
 			Wui::Tr("panel.material.preview.camera", "Preview camera"), cameraText,
-			{ rect.X, rect.Y + 14.0f, std::max(20.0f, rect.W), 14.0f }, hint);
+			{ view.X, view.Y + 14.0f, std::max(20.0f, view.W), 14.0f }, hint);
 		// U22:坐标系指示器读数(探针按它断言"拖拽后 yaw/pitch 的符号"与方向一致性)。
 		ViewChrome::RegisterAxisNode(m_AxisRect, "material.axis",
 			Wui::Tr("panel.material.axis", "Preview axes"),
@@ -2464,7 +2561,7 @@ namespace World
 			Wui::Tr("panel.material.axis.tooltip",
 				"World axes drawn in the preview's corner: X red, Y green, Z blue. "
 				"They follow the preview camera; yaw/pitch of that camera are in the value."));
-		return rect.H;
+		return cardH;
 	}
 
 	void MaterialEditorPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
@@ -2489,33 +2586,38 @@ namespace World
 			return;
 		}
 		const float headerHeight = DrawHeader(ctx, { rect.X, rect.Y, rect.W, kHeaderBaseHeight }, host);
+		// U23(用户 2026-09-22「材质编辑器上面有空行,太丑了」):标题/路径/动作条与第一块内容
+		// 之间只留一个 **PadSmall**(主题令牌,不是魔法数字),不再有空白带;宽窗/窄窗同一条。
+		const float pad = theme.Pad;
+		const float gap = theme.PadSmall;
 		const Wui::WuiRect body { rect.X, rect.Y + headerHeight, rect.W,
 			std::max(60.0f, rect.H - headerHeight) };
 		const bool wide = rect.W >= kTwoColumnMinWidth;
-		const float pad = 8.0f;
-		Wui::WuiRect previewRect;
+		Wui::WuiRect previewZone;
 		Wui::WuiRect parameterRect;
 		if (wide)
 		{
-			// 宽窗:左 = 预览(方案 §1.A),右 = 可搜索的参数区。
+			// 宽窗:左 = 预览卡片(图像 + 预览设置标签),右 = 可搜索的材质参数区。
 			const float previewColumn = std::clamp(body.W * 0.40f, 220.0f, 340.0f);
-			const float side = std::clamp(previewColumn, 120.0f, std::max(120.0f, body.H - 2.0f * pad));
-			previewRect = { body.X + pad, body.Y + pad, side, side };
-			parameterRect = { body.X + previewColumn + 2.0f * pad, body.Y,
-				std::max(160.0f, body.W - previewColumn - 3.0f * pad), body.H };
+			previewZone = { body.X + pad, body.Y + gap, previewColumn,
+				std::max(80.0f, body.H - gap - pad) };
+			parameterRect = { body.X + previewColumn + 2.0f * pad, body.Y + gap,
+				std::max(160.0f, body.W - previewColumn - 3.0f * pad),
+				std::max(80.0f, body.H - gap - pad) };
+			DrawPreview(ctx, previewZone, host);
 		}
 		else
 		{
-			// 窄窗:单列,预览在上、参数在下(两者不重叠)。
+			// 窄窗单列:头部 → 预览(含预览设置标签) → 参数,三段不重叠(方案 §B)。
 			const float width = std::max(80.0f, body.W - 2.0f * pad);
-			const float maxHeight = std::max(90.0f, body.H * 0.45f);
-			const float height = std::clamp(width * 0.62f, 90.0f, maxHeight);
-			previewRect = { body.X + pad, body.Y + pad, width, height };
-			parameterRect = { body.X + pad, previewRect.Y + height + pad, width,
-				std::max(60.0f, body.H - height - 2.0f * pad) };
+			// 预览卡片先按内容要高度,但给参数区留出至少 kParamsMinHeight(否则材质参数一行都看不到)。
+			const float cardMax = std::max(kPreviewImageMinSide + 2.0f * gap,
+				body.H - gap - kParamsMinHeight - pad);
+			previewZone = { body.X + pad, body.Y + gap, width, cardMax };
+			const float previewUsed = DrawPreview(ctx, previewZone, host);
+			parameterRect = { body.X + pad, previewZone.Y + previewUsed + pad, width,
+				std::max(60.0f, body.H - gap - previewUsed - 2.0f * pad) };
 		}
-		m_PreviewRect = previewRect;
-		DrawPreview(ctx, previewRect, host);
 		DrawParameters(ctx, parameterRect, host);
 	}
 }

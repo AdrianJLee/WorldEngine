@@ -12,9 +12,11 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string>
 
 namespace World
 {
@@ -128,6 +130,247 @@ namespace World
 				return false;
 			*out = value;
 			return true;
+		}
+
+		// ---- U23:鼠标注入(跨帧按住 + 位移 = 真拖拽)----
+		//
+		// 为什么走 PostMessage 的 WM_* 鼠标消息,而不是直接改 WUI 输入态:
+		//   * GLFW 会把 WM_* 变成正常的鼠标事件,交给**该窗口自己的**输入收集器:
+		//     主窗口 = WuiRhiBackend::s_Input(停靠面板与主视口共用),
+		//     独立窗口 = FloatWindowHost 里那份局部 collector;
+		//   * 于是宿主自己跟踪的路径(EditorLayer 的主视口右键轨道 = GLFW 事件)与
+		//     WUI 面板(材质/模型/预制体预览的左键轨道)走的是**用户真实操作的同一条路**;
+		//   * "按住"跨帧保持由 WuiInputCollector::SyncButtonsWithSystem 的虚拟按键
+		//     规则负责(按下那一刻系统按键是抬起的 → 不在下一帧被自动清掉)。
+		//
+		// 坐标 = **设计单位**(与无障碍节点 rect 同一坐标系,窗口客户区原点);
+		// 注入时按 Wui::UiScale() 换算成物理像素,与 WuiInputCollector::OnMouseMove 的
+		// 除法互为逆运算。
+		struct ScriptedMouseState
+		{
+			bool Held[3] = { false, false, false };
+			int LastButton = 0;
+			glm::vec2 Last { 0.0f, 0.0f };
+			std::string Window;
+			void* Handle = nullptr;
+		};
+
+		ScriptedMouseState& ScriptedMouse()
+		{
+			static ScriptedMouseState state;
+			return state;
+		}
+
+		std::wstring Utf8ToWide(const std::string& text)
+		{
+			if (text.empty())
+				return {};
+			const int length = MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
+				static_cast<int>(text.size()), nullptr, 0);
+			if (length <= 0)
+				return {};
+			std::wstring wide(static_cast<size_t>(length), L'\0');
+			MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()),
+				wide.data(), length);
+			return wide;
+		}
+
+		std::wstring ToLowerWide(std::wstring text)
+		{
+			std::transform(text.begin(), text.end(), text.begin(),
+				[](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
+			return text;
+		}
+
+		std::string WideToUtf8(const std::wstring& text)
+		{
+			if (text.empty())
+				return {};
+			const int length = WideCharToMultiByte(CP_UTF8, 0, text.c_str(),
+				static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+			if (length <= 0)
+				return {};
+			std::string utf8(static_cast<size_t>(length), '\0');
+			WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()),
+				utf8.data(), length, nullptr, nullptr);
+			return utf8;
+		}
+
+		// 面板 id → 标题提示:浮窗标题由面板自己的 Title() 决定(材质 = "Material - <stem>"),
+		// 取面板 id 里最先出现的路径段文件名(去扩展名)做包含匹配,避免在这里复刻各面板标题。
+		std::string TitleHintForPanel(const std::string& panel)
+		{
+			std::string hint = panel;
+			const size_t colon = hint.find(':');
+			if (colon != std::string::npos)
+				hint = hint.substr(colon + 1);
+			const size_t slash = hint.find_last_of("/\\");
+			if (slash != std::string::npos)
+				hint = hint.substr(slash + 1);
+			const size_t dot = hint.find_last_of('.');
+			if (dot != std::string::npos && dot > 0)
+				hint = hint.substr(0, dot);
+			return hint;
+		}
+
+		// 本进程的 GLFW 顶层窗口(主窗口 + 各独立窗口)。不依赖 GLFW 头:
+		// 编辑器目标没有 GLFW 的 include 路径,而 Win32 枚举本来就能拿到 HWND、
+		// 标题与客户区尺寸,足够把注入送到正确的窗口。
+		struct ProcessWindow
+		{
+			HWND Handle = nullptr;
+			std::wstring Title;
+			int Width = 0;
+			int Height = 0;
+			bool Decorated = false;   // 有系统标题栏/边框 = 主窗口(独立窗口是无边框的)
+		};
+
+		BOOL CALLBACK CollectProcessWindow(HWND hwnd, LPARAM context)
+		{
+			auto* windows = reinterpret_cast<std::vector<ProcessWindow>*>(context);
+			DWORD pid = 0;
+			GetWindowThreadProcessId(hwnd, &pid);
+			if (pid != GetCurrentProcessId())
+				return TRUE;
+			wchar_t className[64] = {};
+			if (GetClassNameW(hwnd, className, 64) <= 0 || wcsncmp(className, L"GLFW", 4) != 0)
+				return TRUE;
+			RECT client {};
+			if (!GetClientRect(hwnd, &client))
+				return TRUE;
+			const int width = client.right - client.left;
+			const int height = client.bottom - client.top;
+			if (width < 8 || height < 8)
+				return TRUE;   // GLFW 的 0×0 message window(不是用户窗口)
+			wchar_t title[512] = {};
+			GetWindowTextW(hwnd, title, 512);
+			const LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+			windows->push_back(ProcessWindow { hwnd, title, width, height, (style & WS_CAPTION) != 0 });
+			return TRUE;
+		}
+
+		std::vector<ProcessWindow> CollectProcessWindows()
+		{
+			std::vector<ProcessWindow> windows;
+			EnumWindows(&CollectProcessWindow, reinterpret_cast<LPARAM>(&windows));
+			return windows;
+		}
+
+		// 主窗口 = 本进程**有系统标题栏**的 GLFW 窗口里客户区最大的那个(独立窗口一律无边框);
+		// 万一都无边框,退回"客户区最大的 GLFW 窗口"。
+		HWND MainWindowHandle()
+		{
+			if (!Application::HasInstance())
+				return nullptr;
+			const std::vector<ProcessWindow> windows = CollectProcessWindows();
+			const ProcessWindow* best = nullptr;
+			for (const ProcessWindow& window : windows)
+			{
+				if (!window.Decorated)
+					continue;
+				if (!best || 1ll * window.Width * window.Height > 1ll * best->Width * best->Height)
+					best = &window;
+			}
+			if (!best)
+				for (const ProcessWindow& window : windows)
+					if (!best || 1ll * window.Width * window.Height > 1ll * best->Width * best->Height)
+						best = &window;
+			return best ? best->Handle : nullptr;
+		}
+
+		// 目标窗口解析:"main" 或 "float:<面板>"。独立窗口按标题提示(可被 title= 覆盖)
+		// 匹配本进程的 GLFW 顶层窗口;只剩一扇浮窗时直接认它(隐藏启动的自动化常态)。
+		HWND ResolveInjectionWindow(const std::string& windowKey, const std::string& titleOverride,
+			std::string* error)
+		{
+			if (windowKey.empty() || windowKey == "main")
+			{
+				if (HWND main = MainWindowHandle())
+					return main;
+				if (error) *error = "main window is not available";
+				return nullptr;
+			}
+			if (windowKey.rfind("float:", 0) != 0)
+			{
+				if (error) *error = "unknown window '" + windowKey + "' (expected main or float:<panel>)";
+				return nullptr;
+			}
+			const HWND main = MainWindowHandle();
+			std::vector<ProcessWindow> candidates;
+			for (const ProcessWindow& window : CollectProcessWindows())
+				if (window.Handle != main)
+					candidates.push_back(window);
+			if (candidates.empty())
+			{
+				if (error)
+					*error = "no independent window is open for '" + windowKey
+						+ "' (打开为独立窗口后才能注入;附加到主窗口时用 window=main)";
+				return nullptr;
+			}
+			const std::wstring hint = ToLowerWide(Utf8ToWide(
+				titleOverride.empty() ? TitleHintForPanel(windowKey.substr(6)) : titleOverride));
+			std::vector<const ProcessWindow*> matched;
+			if (!hint.empty())
+				for (const ProcessWindow& candidate : candidates)
+					if (ToLowerWide(candidate.Title).find(hint) != std::wstring::npos)
+						matched.push_back(&candidate);
+			if (matched.size() == 1)
+				return matched.front()->Handle;
+			// 面板 id 推不出提示、且当前只有一扇浮窗:认它(隐藏启动的自动化常态)。
+			// 有提示但一扇都匹配不上时**不猜** —— 否则面板 id 写错会把事件注进别的窗口。
+			if (hint.empty() && candidates.size() == 1)
+				return candidates.front().Handle;
+			if (error)
+			{
+				*error = matched.empty()
+					? ("no independent window matches '" + windowKey + "'; open windows:")
+					: ("cannot tell which independent window '" + windowKey
+						+ "' is: pass title=<窗标题片段>; open windows:");
+				for (const ProcessWindow& candidate : candidates)
+					*error += " [" + WideToUtf8(candidate.Title) + "]";
+			}
+			return nullptr;
+		}
+
+		bool ParseMouseButton(const std::string& text, int fallback, int* out, std::string* error)
+		{
+			if (text.empty())
+			{
+				*out = fallback;
+				return true;
+			}
+			if (text == "left" || text == "0") { *out = 0; return true; }
+			if (text == "right" || text == "1") { *out = 1; return true; }
+			if (text == "middle" || text == "2") { *out = 2; return true; }
+			if (error) *error = "unknown button '" + text + "' (expected left/right/middle)";
+			return false;
+		}
+
+		glm::vec2 ToPhysicalPixels(const glm::vec2& designUnits)
+		{
+			const float scale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+			return designUnits * scale;
+		}
+
+		bool PostMouseMessage(HWND hwnd, UINT message, WPARAM wparam, const glm::vec2& physical)
+		{
+			const LPARAM lparam = MAKELPARAM(static_cast<int>(physical.x) & 0xFFFF,
+				static_cast<int>(physical.y) & 0xFFFF);
+			return PostMessageW(hwnd, message, wparam, lparam) != FALSE;
+		}
+
+		WPARAM ButtonMaskFor(const ScriptedMouseState& state)
+		{
+			WPARAM mask = 0;
+			if (state.Held[0]) mask |= MK_LBUTTON;
+			if (state.Held[1]) mask |= MK_RBUTTON;
+			if (state.Held[2]) mask |= MK_MBUTTON;
+			return mask;
+		}
+
+		const char* ButtonName(int button)
+		{
+			return button == 1 ? "right" : (button == 2 ? "middle" : "left");
 		}
 	}
 
@@ -371,6 +614,101 @@ namespace World
 			result = "queued wheel " + std::to_string(delta) + " at ("
 				+ std::to_string(static_cast<int>(position.x)) + "," + std::to_string(static_cast<int>(position.y))
 				+ ") window=" + windowKey;
+			return true;
+		}
+		// ---- U23:真拖拽注入(跨帧按住 + 位移)----
+		//   {"cmd":"ui.mouse.press","window":"main"|"float:<面板>","x":..,"y":..,"button":"left|right|middle"}
+		//   {"cmd":"ui.mouse.move","x":..,"y":..}
+		//   {"cmd":"ui.mouse.release","x":..,"y":..,"button":"left"}
+		//
+		// x/y = **设计单位**(与 ui.invoke / 无障碍节点 rect 同一坐标系,窗口客户区原点)。
+		// window 默认 main;附加到主窗口的面板也是 main(它们渲染在主窗口里),只有拖成
+		// 独立 OS 窗口才写 float:<面板 id>。注入的按下是"虚拟按键"——按下那一刻系统按键
+		// 是抬起的,所以 WuiInputCollector 不会在下一帧用 GetAsyncKeyState 把它判成抬起,
+		// 跨帧按住因此成立(真拖拽);release 或 5 秒超时收口。
+		// 注意:一帧内 Pump 会处理完队列里的全部命令 —— 脚本侧每步之间至少隔一帧发送,
+		// 否则几步位移会落在同一帧里(只会产生一次位移量)。
+		if (cmd == "ui.mouse.press" || cmd == "ui.mouse.move" || cmd == "ui.mouse.release")
+		{
+			ScriptedMouseState& mouse = ScriptedMouse();
+			const std::string action = cmd.substr(std::string("ui.mouse.").size());
+			const std::string windowKey = args.count("window") ? arg("window")
+				: (mouse.Window.empty() ? std::string("main") : mouse.Window);
+			std::string resolveError;
+			HWND hwnd = ResolveInjectionWindow(windowKey, arg("title"), &resolveError);
+			if (!hwnd)
+			{
+				error = resolveError;
+				return false;
+			}
+			const bool anyHeld = mouse.Held[0] || mouse.Held[1] || mouse.Held[2];
+			if (anyHeld && (mouse.Window != windowKey || mouse.Handle != hwnd))
+			{
+				error = "another button is still held on window '" + mouse.Window
+					+ "'; release it before injecting into '" + windowKey + "'";
+				return false;
+			}
+			int button = 0;
+			if (!ParseMouseButton(arg("button"), mouse.LastButton, &button, &error))
+				return false;
+			glm::vec2 position = mouse.Last;
+			const bool hasCoords = args.count("x") || args.count("y");
+			if (hasCoords)
+			{
+				if (args.count("x")) position.x = std::strtof(arg("x").c_str(), nullptr);
+				if (args.count("y")) position.y = std::strtof(arg("y").c_str(), nullptr);
+			}
+			if (action != "release" && !hasCoords)
+			{
+				error = "ui.mouse." + action + " needs x/y (design units, window client coords)";
+				return false;
+			}
+			const glm::vec2 physical = ToPhysicalPixels(position);
+			const std::string where = "(" + std::to_string(static_cast<int>(position.x)) + ","
+				+ std::to_string(static_cast<int>(position.y)) + ") design ≈ ("
+				+ std::to_string(static_cast<int>(physical.x)) + ","
+				+ std::to_string(static_cast<int>(physical.y)) + ") px window=" + windowKey;
+			if (action == "press")
+			{
+				// 同一帧里先移动再按下(与 ui.invoke 的"先悬停再点击"同节拍):悬停在按下那一帧
+				// 就位,面板的 MouseClicked 分支才会把这次按下当成拖拽起点。
+				PostMouseMessage(hwnd, WM_MOUSEMOVE, ButtonMaskFor(mouse), physical);
+				const WPARAM ownMask = button == 1 ? MK_RBUTTON : (button == 2 ? MK_MBUTTON : MK_LBUTTON);
+				const UINT message = button == 1 ? WM_RBUTTONDOWN : (button == 2 ? WM_MBUTTONDOWN : WM_LBUTTONDOWN);
+				PostMouseMessage(hwnd, message, ButtonMaskFor(mouse) | ownMask, physical);
+				mouse.Held[button] = true;
+				mouse.LastButton = button;
+				mouse.Last = position;
+				mouse.Window = windowKey;
+				mouse.Handle = hwnd;
+				result = "pressed " + std::string(ButtonName(button)) + " at " + where;
+				return true;
+			}
+			if (action == "move")
+			{
+				// 没有按住任何键时 = 纯悬停移动(与真实鼠标移动一致)。拖拽脚本先来一次
+				// 悬停移动、下一帧再 press,能让"上一帧鼠标位置"这类宿主状态先就位。
+				PostMouseMessage(hwnd, WM_MOUSEMOVE, ButtonMaskFor(mouse), physical);
+				mouse.Last = position;
+				result = "moved to " + where + (anyHeld ? " (button held)" : " (hover)");
+				return true;
+			}
+			if (!mouse.Held[button])
+			{
+				// 幂等:重复 release(脚本收尾路径)不报错,但明确告诉调用方什么都没按。
+				result = std::string(ButtonName(button)) + " is not held (no-op) at " + where;
+				return true;
+			}
+			mouse.Held[button] = false;
+			const UINT message = button == 1 ? WM_RBUTTONUP : (button == 2 ? WM_MBUTTONUP : WM_LBUTTONUP);
+			PostMouseMessage(hwnd, message, ButtonMaskFor(mouse), physical);
+			mouse.Last = position;
+			result = "released " + std::string(ButtonName(button)) + " at " + where;
+			if (!(mouse.Held[0] || mouse.Held[1] || mouse.Held[2]))
+			{
+				mouse.Window.clear();
+				mouse.Handle = nullptr;
+			}
 			return true;
 		}
 		// ---- W9-3:向文本控件注入真实键入(点击聚焦 → 下一帧起逐帧写入字符)----
