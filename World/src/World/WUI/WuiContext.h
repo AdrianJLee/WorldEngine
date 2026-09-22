@@ -354,6 +354,15 @@ namespace World::Wui
 			return HitTest(rect, m_Input.MousePos) && m_Input.MouseDoubleClicked[button];
 		}
 
+		// P4-U30:菜单项的"release 确认"。统一口径 = press 落在(该菜单的按钮 ∪ 该菜单的面板)
+		// 范围内,release 落在某一菜单项上 → 触发;其余一律不触发:
+		//  - 菜单栏经典路径:press 在菜单按钮上(那一下打开了弹层)→ 滑到项 → 松开 = 触发;
+		//  - 面板路径:press 落在弹层面板内(项上或面板空白),release 落在同一块面板的项上 = 触发;
+		//  - 在项上按下 → 拖走 → 松开 = 不触发;在面板外(如视口)按下 → 拖到项上松开 = 不触发。
+		// RecordMenuPress 在 press 帧登记归属(不再按下即动作),IsMenuRelease 在 release 帧核对。
+		void RecordMenuPress(WuiId id, const WuiRect& rect, int button = 0) const;
+		bool IsMenuRelease(WuiId id, const WuiRect& rect, int button = 0) const;
+
 		// ---- 弹窗/模态 ----
 		void OpenPopup(WuiId id);
 		void ClosePopup(WuiId id);
@@ -401,6 +410,8 @@ namespace World::Wui
 		bool HitTest(const WuiRect& rect, glm::vec2 point) const;
 		// press 帧登记"这次按下归哪个控件"。只认第一个命中者(一次按下只有一个归属)。
 		void RecordClickOwner(int button, WuiId id, const WuiRect& rect) const;
+		// P4-U30:press 与 item 是否落在**同一块**已登记的弹层面板里(本帧登记 + 上一帧登记)。
+		bool PressInPanelWith(const WuiRect& item, int button) const;
 		// Tab / Shift+Tab / Escape 的焦点导航(在 BeginFrame 里、清空本帧登记之后调用)。
 		// textFocusActive = 上一帧结束时文本控件仍持有焦点 → 这些键全归文本控件,焦点表不抢。
 		void NavigateFocus(const WuiInputState& input, bool textFocusActive);
@@ -423,6 +434,11 @@ namespace World::Wui
 		bool m_PointerConsumedClick[3] = { false, false, false };
 		// P4-U28:一次按下的归属(press 帧写,release 帧核对;IsClicked/IsClickCompleted 是 const)。
 		mutable WuiClickOwner m_ClickOwners[3];
+		// P4-U30:菜单项的按下区间(press 帧写位置,按住期间一直有效,release 帧核对后失效)。
+		glm::vec2 m_PressPos[3] { glm::vec2 { 0, 0 }, glm::vec2 { 0, 0 }, glm::vec2 { 0, 0 } };
+		bool m_PressValid[3] = { false, false, false };
+		// 这一次按住是否打开了某个弹层(菜单栏按钮路径:press 在按钮上,release 落在菜单项上)。
+		bool m_PressOpenedPopup[3] = { false, false, false };
 		std::unordered_map<WuiId, std::shared_ptr<WuiStateBase>> m_State;
 		std::vector<WuiStyle> m_StyleStack;
 		WuiStyleSheet m_Sheet;

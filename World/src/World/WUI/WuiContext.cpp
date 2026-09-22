@@ -206,6 +206,22 @@ namespace World::Wui
 			if (m_Input.MouseClicked[button] || (!m_Input.MouseDown[button] && !m_Input.MouseReleased[button]))
 				m_ClickOwners[button] = WuiClickOwner {};
 		}
+		// P4-U30:菜单项的按下区间。press 帧记下按下的位置(按住期间一直有效,跨帧滑动也认),
+		// release/事件丢失时失效 —— 与上面的按下归属同一生命周期。
+		for (int button = 0; button < 3; ++button)
+		{
+			if (m_Input.MouseClicked[button])
+			{
+				m_PressPos[button] = m_Input.MousePos;
+				m_PressValid[button] = true;
+				m_PressOpenedPopup[button] = false;
+			}
+			else if (!m_Input.MouseDown[button] && !m_Input.MouseReleased[button])
+			{
+				m_PressValid[button] = false;
+				m_PressOpenedPopup[button] = false;
+			}
+		}
 		// 焦点顺序表每帧重建:上一帧的表挪到 Prev(Tab 顺序与"消失即失焦"都基于它)。
 		m_FocusablesPrev = std::move(m_Focusables);
 		m_Focusables.clear();
@@ -343,12 +359,104 @@ namespace World::Wui
 		owner.Valid = true;
 	}
 
+	void WuiContext::RecordMenuPress(WuiId id, const WuiRect& rect, int button) const
+	{
+		// 菜单项的 press 帧:只登记归属,不做动作(动作留给 release 帧的 IsMenuRelease)。
+		if (button < 0 || button > 2)
+			return;
+		if (IsPointerClickConsumed(button))
+			return;
+		if (!m_Input.MouseClicked[button])
+			return;
+		if (!HitTest(rect, m_Input.MousePos))
+			return;
+		if (std::getenv("WLD_U30_TRACE"))
+			WLD_CORE_INFO("[wui-u30] record-press id={0} rect=({1},{2},{3},{4}) ownerValid={5}",
+				id, rect.X, rect.Y, rect.W, rect.H, m_ClickOwners[button].Valid ? 1 : 0);
+		RecordClickOwner(button, id, rect);
+	}
+
+	bool WuiContext::PressInPanelWith(const WuiRect& item, int button) const
+	{
+		if (button < 0 || button > 2 || !m_PressValid[button])
+			return false;
+		const glm::vec2 press = m_PressPos[button];
+		const glm::vec2 itemCenter { item.X + item.W * 0.5f, item.Y + item.H * 0.5f };
+		// "这块菜单的面板" = 包含本项的最小 overlay 矩形(depth ≥ 1):本帧已登记的(含打开那一帧)
+		// + 上一帧登记的(跨帧按住)。取最小是为了区分嵌套弹层(子菜单面板比父菜单小)与模态
+		// (模态框比整屏遮罩小)。Delayed(关闭后多挡一帧的残留)不算 —— 它已经不接受点击了。
+		const WuiOverlayRect* panel = nullptr;
+		float panelArea = 0.0f;
+		const auto consider = [&](const WuiOverlayRect& overlay)
+		{
+			if (overlay.Depth < 1 || overlay.Delayed || !overlay.Rect.Contains(itemCenter))
+				return;
+			const float area = overlay.Rect.W * overlay.Rect.H;
+			if (panel == nullptr || area < panelArea)
+			{
+				panel = &overlay;
+				panelArea = area;
+			}
+		};
+		for (const WuiOverlayRect& overlay : m_OverlayRects)
+			consider(overlay);
+		for (const WuiOverlayRect& overlay : m_UnderlayBlockers)
+			consider(overlay);
+		return panel != nullptr && panel->Rect.Contains(press);
+	}
+
+	bool WuiContext::IsMenuRelease(WuiId id, const WuiRect& rect, int button) const
+	{
+		// 只打印"光标原始落在这条项上"的那一条(每释放帧最多一行,避免诊断本身改变帧节奏)。
+		if (std::getenv("WLD_U30_TRACE") && m_Input.MouseReleased[button]
+			&& HitTestRaw(rect, m_Input.MousePos))
+			WLD_CORE_INFO("[wui-u30] release id={0} hit={1} ownerValid={2} ownerId={3} pressValid={4}"
+				" press=({5},{6}) opened={7} consumed={8}",
+				id, HitTest(rect, m_Input.MousePos) ? 1 : 0, m_ClickOwners[button].Valid ? 1 : 0,
+				m_ClickOwners[button].Id, m_PressValid[button] ? 1 : 0,
+				m_PressPos[button].x, m_PressPos[button].y, m_PressOpenedPopup[button] ? 1 : 0,
+				IsPointerClickConsumed(button) ? 1 : 0);
+		if (button < 0 || button > 2)
+			return false;
+		if (IsPointerClickConsumed(button))
+			return false;
+		if (!m_Input.MouseReleased[button])
+			return false;   // 菜单项只在 release 帧确认
+		if (!HitTest(rect, m_Input.MousePos))
+			return false;
+		// ① press 与 release 落在同一项上(自绘弹层没登记面板矩形时的兜底)。
+		const WuiClickOwner& owner = m_ClickOwners[button];
+		if (owner.Valid)
+		{
+			const bool sameId = id != 0 && owner.Id == id;
+			const bool sameRect = owner.Rect.X == rect.X && owner.Rect.Y == rect.Y
+				&& owner.Rect.W == rect.W && owner.Rect.H == rect.H;
+			if (sameId || sameRect)
+				return true;
+		}
+		// ② press 与 release 在同一块弹层面板里(项上按下、面板内任意位置按下都算)。
+		if (PressInPanelWith(rect, button))
+			return true;
+		// ③ press 那一下打开了弹层:菜单栏/工具条按钮的经典路径(按住按钮 → 滑到项 → 松开)。
+		const bool openedByPress = m_PressValid[button] && m_PressOpenedPopup[button];
+		if (std::getenv("WLD_TRACE_UI"))
+			WLD_CORE_INFO("[wui-u30] release id={0} ownerMatch={1} pressInPanel={2} openedByPress={3} (valid={4} opened={5})",
+				id, owner.Valid ? 1 : 0, PressInPanelWith(rect, button) ? 1 : 0, openedByPress ? 1 : 0,
+				m_PressValid[button] ? 1 : 0, m_PressOpenedPopup[button] ? 1 : 0);
+		return openedByPress;
+	}
+
 	void WuiContext::EndFrame()
 	{
 		// P4-U28:release 帧核对完按下归属就让它失效;按住没松开的按钮继续保留归属。
 		for (int button = 0; button < 3; ++button)
 			if (!m_Input.MouseDown[button])
+			{
 				m_ClickOwners[button] = WuiClickOwner {};
+				// P4-U30:同一条生命周期 —— 松开后按下区间失效,下次按下重新登记。
+				m_PressValid[button] = false;
+				m_PressOpenedPopup[button] = false;
+			}
 		// 待拖 → 真拖:不依赖源控件仍处于悬停状态(鼠标可离开源标签/图标)。
 		if (m_DragPending && !m_Dragging)
 		{
@@ -445,6 +553,19 @@ namespace World::Wui
 			// 左键(点击式菜单/下拉)与右键(右键菜单)都要消费:右键菜单正是右键打开的。
 			ConsumePointerClick(0);
 			ConsumePointerClick(1);
+			// P4-U30:记下"这一次按住打开了弹层" —— 菜单栏/工具条按钮的经典路径要在
+			// release 落在菜单项上时仍然成立(press 在按钮上、不在面板矩形里)。取"这一次按下
+			// 还没收口"(m_PressValid),不要求本帧 MouseDown——两种实测情形都靠它:
+			// ① 内容浏览器 `…` 这类"按下先排队、下一帧才开弹层"的入口;
+			// ② 一次帧内同时收到 press+release(掉帧时快速点击,鼠标状态已是抬起)。
+			for (int button = 0; button < 3; ++button)
+				if (m_PressValid[button])
+					m_PressOpenedPopup[button] = true;
+			// P4-U30 验收调试计数(只在 WLD_TRACE_UI=1 时输出)。
+			if (std::getenv("WLD_TRACE_UI"))
+				WLD_CORE_INFO("[wui-u30] popup open id={0} press0(valid={1} down={2} clicked={3}) opened0={4}",
+					id, m_PressValid[0] ? 1 : 0, m_Input.MouseDown[0] ? 1 : 0,
+					m_Input.MouseClicked[0] ? 1 : 0, m_PressOpenedPopup[0] ? 1 : 0);
 		}
 		m_PopupOpenFrame[id] = m_Frame;
 	}

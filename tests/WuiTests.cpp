@@ -601,11 +601,14 @@ int main()
 			LayoutWidgetTree(menuButton, { 0, 0, 120, 24 });
 			{
 				WuiPaintContext paint(ctx);
+				// 按下菜单按钮:只展开菜单,项不触发(P4-U30:菜单项改成 release 确认)。
 				input.MousePos = { 60, 12 };
+				input.MouseDown[0] = true;
 				input.MouseClicked[0] = true;
 				ctx.BeginFrame(input);
 				menuButton->Paint(paint);
 				CHECK(ctx.IsPopupOpen(menuButton->Id()));
+				CHECK(menuChoice == -1);
 				input.MouseClicked[0] = false;
 
 				// 展开帧:菜单条目绘制到 Overlay 层。
@@ -613,14 +616,171 @@ int main()
 				menuButton->Paint(paint);
 				CHECK(!ctx.OverlayCommands().empty());
 
-				// 选择第二项:回调触发且菜单关闭。
-				input.MousePos = { 60, 24 + 2 + 4 + 22 + 11 }; // 第二个条目中心
-				input.MouseClicked[0] = true;
+				// 经典路径:按住菜单按钮 → 滑到第二项 → 松开 = 触发一次且菜单关闭。
+				const glm::vec2 beta { 60, 24 + 2 + 4 + 22 + 11 }; // 第二个条目中心
+				input.MousePos = beta;
+				input.MouseDown[0] = false;
+				input.MouseReleased[0] = true;
 				ctx.BeginFrame(input);
 				menuButton->Paint(paint);
 				CHECK(menuChoice == 1);
 				CHECK(!ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseReleased[0] = false;
+			}
+
+			// P4-U30①:菜单项在 release 帧触发 —— press 落在项上只登记归属。
+			{
+				WuiPaintContext paint(ctx);
+				input.MousePos = { 60, 12 };
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
 				input.MouseClicked[0] = false;
+				input.MouseDown[0] = false;
+				input.MouseReleased[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(ctx.IsPopupOpen(menuButton->Id())); // 松开在按钮上 = 菜单仍开着
+				input.MouseReleased[0] = false;
+
+				const glm::vec2 beta { 60, 24 + 2 + 4 + 22 + 11 };
+				menuChoice = -1;
+				input.MousePos = beta;
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(menuChoice == -1); // press 不触发
+				CHECK(ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseClicked[0] = false;
+
+				input.MouseDown[0] = false;
+				input.MouseReleased[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(menuChoice == 1); // release 落在同一项上才触发
+				CHECK(!ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseReleased[0] = false;
+			}
+
+			// P4-U30②:在项上按下 → 拖走 → 松开:不触发(菜单保持打开,松开不算点击)。
+			{
+				WuiPaintContext paint(ctx);
+				menuChoice = -1;
+				input.MousePos = { 60, 12 };
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				input.MouseClicked[0] = false;
+				input.MouseDown[0] = false;
+				input.MouseReleased[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				input.MouseReleased[0] = false;
+
+				const glm::vec2 beta { 60, 24 + 2 + 4 + 22 + 11 };
+				input.MousePos = beta;
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				input.MouseClicked[0] = false;
+
+				input.MousePos = { 320, 300 }; // 拖到菜单外
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				input.MouseDown[0] = false;
+				input.MouseReleased[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(menuChoice == -1);
+				CHECK(ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseReleased[0] = false;
+
+				// 收尾:外部按下关掉菜单(下一段从"菜单关闭"起步)。
+				input.MousePos = { 320, 300 };
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(!ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseClicked[0] = false;
+				input.MouseDown[0] = false;
+			}
+
+			// P4-U30③:在菜单面板里按下(项以外)→ 滑到项上松开 = 触发(press 在面板范围内)。
+			{
+				WuiPaintContext paint(ctx);
+				menuChoice = -1;
+				// 先把菜单打开(点按钮后松开在按钮上)。
+				input.MousePos = { 60, 12 };
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				input.MouseClicked[0] = false;
+				input.MouseDown[0] = false;
+				input.MouseReleased[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseReleased[0] = false;
+
+				const glm::vec2 panelPadding { 70, 26 + 2 }; // 面板上边缘的空白,不在任何项里
+				input.MousePos = panelPadding;
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(menuChoice == -1);
+				CHECK(ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseClicked[0] = false;
+
+				input.MousePos = { 60, 24 + 2 + 4 + 11 }; // 第一个条目中心
+				input.MouseDown[0] = false;
+				input.MouseReleased[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(menuChoice == 0);
+				CHECK(!ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseReleased[0] = false;
+			}
+
+			// P4-U30④:在菜单外按下 → 拖到菜单项上松开:不触发(菜单已被外部按下关掉)。
+			{
+				WuiPaintContext paint(ctx);
+				menuChoice = -1;
+				input.MousePos = { 60, 12 };
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				input.MouseClicked[0] = false;
+				input.MouseDown[0] = false;
+				input.MouseReleased[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				input.MouseReleased[0] = false;
+				CHECK(ctx.IsPopupOpen(menuButton->Id()));
+
+				input.MousePos = { 320, 300 }; // 菜单之外(视口位置)
+				input.MouseDown[0] = true;
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(!ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseClicked[0] = false;
+
+				input.MousePos = { 60, 24 + 2 + 4 + 11 }; // 滑到(已关闭的)菜单项位置
+				input.MouseDown[0] = false;
+				input.MouseReleased[0] = true;
+				ctx.BeginFrame(input);
+				menuButton->Paint(paint);
+				CHECK(menuChoice == -1);
+				CHECK(!ctx.IsPopupOpen(menuButton->Id()));
+				input.MouseReleased[0] = false;
 			}
 
 			auto tooltip = std::make_shared<WuiTooltip>();

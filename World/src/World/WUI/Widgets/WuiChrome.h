@@ -88,6 +88,9 @@ namespace World::Wui
 	void ToolbarSeparator(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
 
 	// ---- 右键菜单 ----
+	// P4-U30:ContextMenuItem/ContextMenuToggleItem 直接转发到 Wui::MenuItem —— 右键菜单与菜单栏
+	// 共用同一套"release 确认"规则:press 落在(打开菜单的按钮 ∪ 菜单面板)内、release 落在
+	// 本项上才触发;在项上按下后拖走松开、或在菜单外按下再拖到项上松开都不触发(破坏性项可反悔)。
 	// Begin:在固定位置画出菜单面板并返回是否为有效菜单区域(内部已 PushOverlay)。
 	bool BeginContextMenu(WuiContext& ctx, WuiId id, const glm::vec2& pinnedPos, float width,
 		size_t itemCount, WuiRect* panel, const WuiTheme& theme);

@@ -2061,10 +2061,12 @@ namespace World::Wui
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 0.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, enabled ? theme.Text : theme.TextMuted, 0, 1.0f, label, 15.0f, false });
 		DrawFocusRing(ctx, rect, id, theme);
-		// 菜单项保持"按下即触发"(派工单硬约束:菜单项点击照旧;World.Wui 的 WuiMenuButton
-		// 单测也按单帧 press 编码)。关闭帧/释放帧的穿透由 WuiContext 的遮挡机制(按深度 +
-		// 多挡一帧)负责,不靠改这里的触发时机。
-		return enabled && (ctx.IsClicked(rect)
+		// P4-U30:菜单项与下拉选项统一为"release 确认" —— press 落在(菜单按钮 ∪ 菜单面板)里,
+		// release 落在本项上才触发;在项上按下后拖走松开、或在面板外按下再拖到项上松开都不触发。
+		// 键盘(焦点 + Enter/Space)不变。
+		if (enabled)
+			ctx.RecordMenuPress(id, rect);
+		return enabled && (ctx.IsMenuRelease(id, rect)
 			|| (focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))));
 	}
 
@@ -2080,8 +2082,10 @@ namespace World::Wui
 		const std::string text = std::string(checked ? "[x] " : "[ ] ") + label;
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, enabled ? theme.Text : theme.TextMuted, 0, 1.0f, text, 15.0f, false });
 		DrawFocusRing(ctx, rect, id, theme);
-		// 与普通菜单项同一口径:按下即触发(硬约束"菜单项点击照旧")。
-		return enabled && (ctx.IsClicked(rect)
+		// 与普通菜单项同一口径:P4-U30 起"release 落在本项上"才触发(拖走/面板外按下都不触发)。
+		if (enabled)
+			ctx.RecordMenuPress(id, rect);
+		return enabled && (ctx.IsMenuRelease(id, rect)
 			|| (focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))));
 	}
 
