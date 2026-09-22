@@ -6,7 +6,9 @@
 #include "World/Renderer/ShaderUtils.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -368,6 +370,149 @@ int main()
 		CHECK(World::ShaderCompiler::CookedHitCount() == 1);
 		CHECK(World::ShaderCompiler::ToolInvocationCount() == 0);
 		World::ShaderCompiler::ClearArtifactResolver();
+
+		// 3b. M4-S2:注解参数表 → 参数块编译 → dxc 反射校验(三态)+ 字段偏移表 + 打包
+		{
+			using World::MaterialParamDecl;
+			using World::MaterialParamLayout;
+			using World::MaterialParamOverride;
+			using World::MaterialSurfaceCompiler;
+			using World::ParamType;
+
+			const std::string annotated =
+				"//! param Float Roughness = 0.4 [0,1] group(\"Surface\") label(\"Roughness\")\n"
+				"//! param Color Tint = 1, 0.5, 0.25, 1 group(\"Surface\")\n"
+				"//! param Bool Glow = true\n"
+				"//! param Texture2D Albedo = \"textures/Icon.png\"\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    Surface surface = MakeDefaultSurface();\n"
+				"    surface.Roughness = Roughness;\n"
+				"    surface.BaseColor = Tint.rgb * Albedo.Sample(AlbedoSampler, input.UV).rgb;\n"
+				"    if (Glow) surface.Emissive = float3(0.05f, 0.05f, 0.05f);\n"
+				"    return surface;\n"
+				"}\n";
+
+			std::vector<MaterialParamDecl> table;
+			std::string error;
+			CHECK(World::ParseMaterialParams(annotated, &table, &error));
+			CHECK(table.size() == 4);
+
+			// ⑥ 与 M4-S1 编译管线串起来:注解生成的参数块真的能编译通过。
+			const World::SurfaceCompileResult compiled =
+				MaterialSurfaceCompiler::CompileSurface(annotated, "m4s2-annotated");
+			CHECK(compiled.Success);
+			CHECK(!compiled.Artifact.Bytecode.empty());
+			CHECK(compiled.Artifact.EntryPoint == "PSMain");
+			const std::string wrapper = MaterialSurfaceCompiler::WrapSurfaceSource(annotated,
+				World::SurfaceShaderBackend::VulkanSpirV);
+			CHECK(wrapper.find("cbuffer MaterialParams : register(b2, space1)") != std::string::npos);
+			CHECK(wrapper.find("float Roughness;") != std::string::npos);
+			CHECK(wrapper.find("float4 Tint;") != std::string::npos);
+			CHECK(wrapper.find("bool Glow;") != std::string::npos);
+			CHECK(wrapper.find("Texture2D Albedo : register(t4, space2);") != std::string::npos);
+			CHECK(wrapper.find("SamplerState AlbedoSampler : register(s4, space2);") != std::string::npos);
+
+			// 反射布局:名称/类型/偏移/大小来自 dxc 的 SPIR-V 汇编(引擎不手写参数结构体)。
+			MaterialParamLayout layout;
+			CHECK(World::BuildParamLayout(annotated, table, &layout, &error));
+			std::printf("World.ShaderPipeline: M4-S2 layout\n%s", World::FormatParamLayout(layout).c_str());
+			CHECK(layout.Fields.size() == 3);
+			CHECK(layout.Fields[0].Name == "Roughness" && layout.Fields[0].Type == ParamType::Float);
+			CHECK(layout.Fields[1].Name == "Tint" && layout.Fields[1].Type == ParamType::Color);
+			CHECK(layout.Fields[2].Name == "Glow" && layout.Fields[2].Type == ParamType::Bool);
+			CHECK(layout.Fields[0].Offset == 0);
+			CHECK(layout.Fields[0].Size == 4);
+			CHECK(layout.Fields[1].Offset >= layout.Fields[0].Offset + layout.Fields[0].Size);
+			CHECK(layout.Fields[2].Offset >= layout.Fields[1].Offset + layout.Fields[1].Size);
+			CHECK(layout.CbufferSize >= layout.Fields[2].Offset + layout.Fields[2].Size);
+			CHECK(layout.CbufferSize % 16 == 0);
+			CHECK(layout.Textures.size() == 1);
+			CHECK(layout.Textures[0].Name == "Albedo");
+			CHECK(layout.Textures[0].Set == 2 && layout.Textures[0].Binding == 4);
+			CHECK(layout.UsedMembers.size() == 3);
+
+			// 打包:覆盖优先,缺项用注解默认;偏移直接用反射结果。
+			std::vector<MaterialParamOverride> overrides;
+			overrides.push_back(MaterialParamOverride { "Roughness", "0.75" });
+			std::vector<uint8_t> bytes;
+			CHECK(World::PackParamValues(layout, table, overrides, &bytes, &error));
+			CHECK(bytes.size() == layout.CbufferSize);
+			float packedRoughness = 0.0f;
+			std::memcpy(&packedRoughness, bytes.data() + layout.Fields[0].Offset, sizeof(float));
+			CHECK(packedRoughness == 0.75f);
+			float packedTint[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			std::memcpy(packedTint, bytes.data() + layout.Fields[1].Offset, sizeof(packedTint));
+			CHECK(packedTint[0] == 1.0f && packedTint[1] == 0.5f
+				&& packedTint[2] == 0.25f && packedTint[3] == 1.0f);
+			uint32_t packedGlow = 0u;
+			std::memcpy(&packedGlow, bytes.data() + layout.Fields[2].Offset, sizeof(packedGlow));
+			CHECK(packedGlow == 1u);
+
+			// ③-1 合规:声明 / 类型 / 绑定一致,而且成员真的被读 → true 且无警告。
+			std::vector<std::string> warnings;
+			CHECK(World::ValidateParamsWithReflection(annotated, table, &warnings, &error));
+			CHECK(warnings.empty());
+
+			// ③-2 声明未用 → 仍是 true,但给可读警告(编辑器照样显示该参数)。
+			const std::string unusedSource = "//! param Float Unused = 0.25\n" + annotated;
+			std::vector<MaterialParamDecl> unusedTable;
+			CHECK(World::ParseMaterialParams(unusedSource, &unusedTable, &error));
+			warnings.clear();
+			CHECK(World::ValidateParamsWithReflection(unusedSource, unusedTable, &warnings, &error));
+			CHECK(warnings.size() == 1);
+			CHECK(warnings[0].find("Unused") != std::string::npos);
+			CHECK(warnings[0].find("声明未用") != std::string::npos);
+			std::printf("World.ShaderPipeline: M4-S2 unused warning: %s\n", warnings[0].c_str());
+
+			// ③-3 用了未声明:没有注解,用户**手写**参数块 → 反射到没声明的成员 → error。
+			const std::string handWritten =
+				"cbuffer MaterialParams : register(b2, space1)\n"
+				"{\n"
+				"    float3 Speed;\n"
+				"};\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    Surface surface = MakeDefaultSurface();\n"
+				"    surface.BaseColor *= Speed;\n"
+				"    return surface;\n"
+				"}\n";
+			std::vector<MaterialParamDecl> noTable;
+			warnings.clear();
+			CHECK(!World::ValidateParamsWithReflection(handWritten, noTable, &warnings, &error));
+			CHECK(error.find("Speed") != std::string::npos);
+			CHECK(error.find("没有声明") != std::string::npos);
+
+			// 注解 + 手写块撞同一个寄存器 → 结构化编译错误(不崩、不静默)。
+			const std::string conflict = "//! param Float Speed = 1\n" + handWritten;
+			std::vector<MaterialParamDecl> conflictTable;
+			CHECK(World::ParseMaterialParams(conflict, &conflictTable, &error));
+			warnings.clear();
+			CHECK(!World::ValidateParamsWithReflection(conflict, conflictTable, &warnings, &error));
+			CHECK(!error.empty());
+
+			// 注解坏 → 结构化诊断(用户源行列号),并且不调用 dxc。
+			const size_t toolsBefore = MaterialSurfaceCompiler::ToolInvocationCount();
+			const World::SurfaceCompileResult badAnnotation = MaterialSurfaceCompiler::CompileSurface(
+				"//! param Float3 Tint = 1\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    return MakeDefaultSurface();\n"
+				"}\n",
+				"m4s2-bad-annotation");
+			CHECK(!badAnnotation.Success);
+			CHECK(MaterialSurfaceCompiler::ToolInvocationCount() == toolsBefore);
+			bool foundAnnotationDiagnostic = false;
+			for (const World::SurfaceDiagnostic& diagnostic : badAnnotation.Diagnostics)
+			{
+				if (diagnostic.InUserSource && diagnostic.UserLine == 1 && diagnostic.UserColumn == 11
+					&& diagnostic.Message.find("未知参数类型") != std::string::npos)
+				{
+					foundAnnotationDiagnostic = true;
+				}
+			}
+			CHECK(foundAnnotationDiagnostic);
+		}
 
 		std::printf("World.ShaderPipeline: all checks passed\n");
 		return 0;

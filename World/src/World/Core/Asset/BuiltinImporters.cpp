@@ -226,10 +226,14 @@ namespace World::Asset
 	std::vector<std::shared_ptr<IAssetImporter>> DefaultImporters()
 	{
 		// 注册顺序:特定类型在前,PassThrough 兜底;模型在 Scene/Script 之后、PassThrough 之前。
+		// M4-S2:`.hlsl`(材质表面函数)是一等资产 —— 显式登记导入器,不再靠 PassThrough 兜底。
+		// 内容原样复制;cook 复合指纹含源内容哈希 + 导入器身份,所以改代码/注解会自动重烘。
 		return {
 			std::make_shared<ExtensionImporter>("Scene", 1, std::vector<std::string>{ ".wd" }),
 			std::make_shared<ScriptImporter>(),
 			std::make_shared<ModelImporter>(),
+			std::make_shared<ExtensionImporter>("MaterialShader", 1,
+				std::vector<std::string>{ ".hlsl" }),
 			std::make_shared<PassThroughImporter>(),
 		};
 	}

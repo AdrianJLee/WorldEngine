@@ -2,6 +2,7 @@
 
 #include "World/Core/Export.h"
 #include "World/Core/Core.h"
+#include "World/Renderer/MaterialParams.h"
 
 #include <glm/glm.hpp>
 
@@ -38,6 +39,9 @@ namespace World
 		std::string NormalTexture;
 		MaterialBlendMode BlendMode = MaterialBlendMode::Opaque;
 		bool DoubleSided = false;
+		// M4-S2:材质着色器资产(`.hlsl`,相对内容根;如 "shaders/glass.hlsl")。
+		// 空 = 不做表面函数着色(M3 及以前的参数化路径)。
+		std::string ShaderPath;
 
 		bool operator==(const MaterialDesc& other) const
 		{
@@ -49,7 +53,8 @@ namespace World
 				&& AlbedoTexture == other.AlbedoTexture
 				&& NormalTexture == other.NormalTexture
 				&& BlendMode == other.BlendMode
-				&& DoubleSided == other.DoubleSided;
+				&& DoubleSided == other.DoubleSided
+				&& ShaderPath == other.ShaderPath;
 		}
 		bool operator!=(const MaterialDesc& other) const { return !(*this == other); }
 	};
@@ -59,6 +64,8 @@ namespace World
 	// 格式版本:
 	//  - 1 = M3 之前的老写法:逐字段全写;缺字段 = 引擎内置默认(逐字段行为与老代码一致);
 	//  - 2 = 材质实例:Parent + 只写覆盖字段(缺字段 = 从父级继承;没有父级 = 引擎内置默认)。
+	//        M4-S2 起 v2 还承载 `Shader:`(表面函数引用)与 `Params:`(参数覆盖);
+	//        v1 没有这两个键,所以带它们的文件一律按 v2 写出。
 	// 读接受 1..2,读到更高版本直接失败(不猜、不降级);写出用哪个版本见
 	// MaterialIO::DocumentFormatVersion(全字段 + 无父级仍然写 1,保证老文件逐字节不变)。
 	constexpr uint32_t kMaterialFormatVersionLegacy = 1;
@@ -120,6 +127,10 @@ namespace World
 		std::string ParentPath;
 		MaterialDesc Values;
 		MaterialFieldSet Overridden;
+		// M4-S2:本文件写了 `Shader:` 行(空字符串 = 显式置空,不继承父级)。
+		bool HasShader = false;
+		// M4-S2:本文件写的参数覆盖(文件顺序);值文本见 MaterialParams.h。
+		std::vector<MaterialParamOverride> Params;
 	};
 
 	struct WLD_API MaterialLoadResult;
@@ -175,6 +186,48 @@ namespace World
 		// 本实例当前写出会用哪个 .wmat 版本(1 = 老的全字段写法;2 = 覆盖字段 + Parent)。
 		uint32_t GetFormatVersion() const;
 
+		// ---- M4-S2:shader 引用 + 注解参数 ----
+		//
+		// 语义(与 M3 一致的最少惊讶口径):
+		//  - Shader 是可继承字段:本文件没写 `Shader:` 时跟随父级(没有父级 = 不做表面函数);
+		//  - 参数默认值来自 shader 的 `//! param` 注解;`Params:` 只写覆盖项;
+		//    生效值 = 本文件覆盖 > 父级覆盖 > shader 默认;
+		//  - shader 里没有声明的参数:文件里保留、运行期忽略,并在 ParamWarnings() 里给可读警告。
+
+		// 生效的 shader 路径(可能继承父级;空 = 不做表面函数)。
+		const std::string& ShaderPath() const { return m_Desc.ShaderPath; }
+		// 本文件是否显式写了 `Shader:`。
+		bool HasShaderOverride() const { return m_HasShaderOverride; }
+		// shader 读不到 / 注解解析失败的可读原因(空 = 没问题)。
+		const std::string& ShaderWarning() const { return m_ShaderWarning; }
+		// shader 注解声明的参数表(空 = 没有 shader / 读不到 / 注解为空)。
+		const std::vector<MaterialParamDecl>& Params() const { return m_ParamDecls; }
+		// 本文件写的覆盖(文件顺序)。
+		const std::vector<MaterialParamOverride>& ParamOverrides() const { return m_ParamOverrides; }
+		// 未声明参数 / 值类型不符等可读警告(加载时算好,编辑器直接显示)。
+		const std::vector<std::string>& ParamWarnings() const { return m_ParamWarnings; }
+
+		bool HasParamOverride(const std::string& name) const;
+		const std::string* FindParamOverride(const std::string& name) const;
+		// 生效值来自哪里:本文件覆盖 / 父级覆盖 / shader 默认(编辑器三态用)。
+		MaterialParamSource ParamSource(const std::string& name) const;
+		// shader 注解里的默认值(空 = 该参数没被声明)。
+		std::string ParamDefaultValue(const std::string& name) const;
+		// 生效值:本文件覆盖 > 父级覆盖 > shader 默认(都没有 = 空串)。
+		std::string ResolvedParamValue(const std::string& name) const;
+		// 本文件覆盖的值是否等于 shader 默认值(编辑器"与默认相同"态;没有覆盖 = false)。
+		bool ParamMatchesDefault(const std::string& name) const;
+
+		// 写 shader 覆盖(记覆盖 + Revision + 脏标记);参数表由 MaterialLibrary 立刻刷新。
+		void SetShaderPath(const std::string& path);
+		// 清掉 shader 覆盖(回退父级;没有父级 = 不做表面函数)。
+		void RevertShader();
+		// 写参数覆盖(值文本;NormalizeParamValue 的方言)。参数名不在 shader 声明里也照写
+		// (文件里保留 + 警告),这样"编辑器里改错了还能改回来"。
+		void SetParamOverride(const std::string& name, const std::string& value);
+		// 清掉本文件的参数覆盖(生效值回到父级 / shader 默认)。本来就没有 → no-op。
+		void RevertParam(const std::string& name);
+
 		// 贴图文件在磁盘/VFS 上被替换后调用:同样失效 GPU 侧贴图缓存。
 		void InvalidateTextures() { BumpRevision(); }
 
@@ -196,10 +249,16 @@ namespace World
 		std::string m_Path;          // 规范化(可阅读)路径;内存态可能为空 = 未落盘的新材质
 		std::string m_ParentPath;    // M3:声明的父级(规范化);空 = 引擎内置默认
 		MaterialFieldSet m_Overrides; // M3:本文件显式写出的字段(覆盖集)
+		bool m_HasShaderOverride = false;              // M4-S2:本文件写了 Shader:
+		std::vector<MaterialParamOverride> m_ParamOverrides;  // M4-S2:本文件的参数覆盖
+		std::vector<MaterialParamDecl> m_ParamDecls;   // M4-S2:shader 注解参数表(可能继承父级)
+		std::vector<std::string> m_ParamWarnings;      // M4-S2:未声明参数 / 值类型不符
+		std::string m_ShaderWarning;                   // M4-S2:shader 读不到 / 注解解析失败
 		Ref<Material> m_Parent;      // M3:解析到的父级实例(共享所有权;nullptr = 引擎默认/退化)
 		std::string m_ParentWarning; // M3:父级不可用的可读原因
 		uint32_t m_Revision = 1;     // 0 保留给"从未上传"
 		bool m_Dirty = false;
+		void RecomputeParamWarnings();  // 覆盖集 → ParamWarnings()
 		// 热重载用的磁盘时间戳(仅 MaterialLibrary 维护)。
 		std::filesystem::file_time_type m_FileTime = std::filesystem::file_time_type::min();
 	};
@@ -244,9 +303,12 @@ namespace World
 		WLD_API MaterialLoadResult Parse(const std::string& text, MaterialDesc& out, std::string* error);
 
 		// 序列化为 .wmat 文本:
-		//  - SerializeDocument:只写覆盖字段 + Parent(逐字节确定);
+		//  - SerializeDocument:只写覆盖字段 + Parent + Shader + Params(逐字节确定;
+		//    paramDecls 给参数值的 YAML 形态:已知类型 → 数字/序列/字符串,
+		//    未知类型(shader 读不到)→ 按标量文本写,值文本原样保留);
 		//  - Serialize(desc):老写法的全字段文本,与 M3 前逐字节一致(导入器/新建模板继续用它)。
-		WLD_API std::string SerializeDocument(const MaterialDocument& document);
+		WLD_API std::string SerializeDocument(const MaterialDocument& document,
+			const std::vector<MaterialParamDecl>* paramDecls = nullptr);
 		WLD_API std::string Serialize(const MaterialDesc& desc);
 		// U23:保存回读校验的比较口径(旧行为是 `verify != desc` 逐位相等)。
 		//  - 浮点字段(BaseColor / Metallic / Roughness / Emissive)按 |a-b| <= tolerance 比较:

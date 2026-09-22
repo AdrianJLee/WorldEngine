@@ -3,6 +3,7 @@
 #include "World/Renderer/Material.h"
 
 #include "World/Core/Application.h"
+#include "World/Renderer/MaterialLibrary.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -17,6 +18,15 @@ namespace World
 {
 	namespace
 	{
+		std::string Trim(const std::string& text)
+		{
+			const size_t begin = text.find_first_not_of(" \t\r\n");
+			if (begin == std::string::npos)
+				return {};
+			const size_t end = text.find_last_not_of(" \t\r\n");
+			return text.substr(begin, end - begin + 1);
+		}
+
 		bool InRange(float value, float min, float max)
 		{
 			return value >= min && value <= max;
@@ -183,6 +193,65 @@ namespace World
 			return NeedsQuoting(text) ? Quote(text) : text;
 		}
 
+		// M4-S2:`.wmat` 的 Params 值(值文本,见 MaterialParams.h)。
+		//  - 标量:原样文本("0.25" / "true" / "textures/icon.png");
+		//  - 序列:[a, b, c](空白归一,值文本是逗号分隔);
+		//  - 其它(嵌套映射等)不支持 —— 调用方按错误处理。
+		bool ReadParamValueText(const YAML::Node& node, std::string* out)
+		{
+			if (node.IsScalar())
+			{
+				if (out) *out = Trim(node.Scalar());
+				return true;
+			}
+			if (node.IsSequence())
+			{
+				std::string text;
+				for (const YAML::Node& element : node)
+				{
+					if (!element.IsScalar())
+						return false;
+					if (!text.empty())
+						text.append(", ");
+					text.append(Trim(element.Scalar()));
+				}
+				if (out) *out = text;
+				return true;
+			}
+			return false;
+		}
+
+		// 写 .wmat 时的值形态:知道声明类型 → 数字/布尔/序列/字符串;不知道 → 按标量文本写。
+		std::string FormatParamValueText(const std::string& name, const std::string& value,
+			const std::vector<MaterialParamDecl>* paramDecls)
+		{
+			const MaterialParamDecl* decl = paramDecls ? FindParamDecl(*paramDecls, name) : nullptr;
+			if (decl)
+			{
+				switch (decl->Type)
+				{
+					case ParamType::Texture2D:
+						return Quote(value);
+					case ParamType::Bool:
+					case ParamType::Float:
+					case ParamType::Int:
+						return IsParamValueCompatible(decl->Type, value) ? value : Quote(value);
+					case ParamType::Vec2:
+					case ParamType::Vec3:
+					case ParamType::Vec4:
+					case ParamType::Color:
+					{
+						std::string normalized;
+						std::string reason;
+						if (NormalizeParamValue(decl->Type, value, &normalized, &reason))
+							return "[" + normalized + "]";
+						return Quote(value);
+					}
+				}
+			}
+			return FormatLogicalPath(value);
+		}
+
 		// 字段 ↔ MaterialDesc 成员的唯一映射(读/写/比较都走它,避免 9 个字段在 3 处各抄一遍)。
 		void AssignField(MaterialDesc& target, const MaterialDesc& source, MaterialField field)
 		{
@@ -241,7 +310,14 @@ namespace World
 			if (!FieldsEqual(m_Desc, desc, field))
 				m_Overrides.Set(field);
 		}
+		const bool shaderChanged = m_Desc.ShaderPath != desc.ShaderPath;
 		m_Desc = desc;
+		if (shaderChanged)
+		{
+			m_HasShaderOverride = true;
+			// shader 换了 → 注解参数表随之刷新(读盘由库负责)。
+			MaterialLibrary::Get().RefreshParams(*this);
+		}
 		BumpRevision();
 	}
 
@@ -260,9 +336,144 @@ namespace World
 	uint32_t Material::GetFormatVersion() const
 	{
 		// 只有"没有父级 + 全字段都写了"才回到老写法(与 M3 前的文件逐字节一致);
-		// 其它情况都是材质实例格式。
-		return (m_ParentPath.empty() && m_Overrides.All()) ? kMaterialFormatVersionLegacy
+		// 其它情况都是材质实例格式。M4-S2:带 Shader/Params 的文件也必须是 v2。
+		return (m_ParentPath.empty() && m_Overrides.All() && !m_HasShaderOverride
+				&& m_ParamOverrides.empty())
+			? kMaterialFormatVersionLegacy
 			: kMaterialFormatVersionMax;
+	}
+
+	void Material::RecomputeParamWarnings()
+	{
+		m_ParamWarnings = BuildParamWarnings(m_ParamDecls, m_ParamOverrides, m_Desc.ShaderPath);
+	}
+
+	const std::string* Material::FindParamOverride(const std::string& name) const
+	{
+		for (const MaterialParamOverride& entry : m_ParamOverrides)
+			if (entry.Name == name)
+				return &entry.Value;
+		return nullptr;
+	}
+
+	bool Material::HasParamOverride(const std::string& name) const
+	{
+		return FindParamOverride(name) != nullptr;
+	}
+
+	MaterialParamSource Material::ParamSource(const std::string& name) const
+	{
+		if (FindParamOverride(name))
+			return MaterialParamSource::Local;
+		if (m_Parent && m_Parent->FindParamOverride(name))
+			return MaterialParamSource::Parent;
+		return MaterialParamSource::ShaderDefault;
+	}
+
+	std::string Material::ParamDefaultValue(const std::string& name) const
+	{
+		const MaterialParamDecl* decl = FindParamDecl(m_ParamDecls, name);
+		return decl ? decl->Default : std::string();
+	}
+
+	std::string Material::ResolvedParamValue(const std::string& name) const
+	{
+		if (const std::string* local = FindParamOverride(name))
+			return *local;
+		for (const Material* current = m_Parent.get(); current != nullptr;
+			current = current->ResolvedParent().get())
+		{
+			if (const std::string* inherited = current->FindParamOverride(name))
+				return *inherited;
+		}
+		return ParamDefaultValue(name);
+	}
+
+	bool Material::ParamMatchesDefault(const std::string& name) const
+	{
+		const std::string* local = FindParamOverride(name);
+		if (!local)
+			return false;
+		const MaterialParamDecl* decl = FindParamDecl(m_ParamDecls, name);
+		if (!decl)
+			return false;
+		std::string normalized;
+		std::string reason;
+		if (!NormalizeParamValue(decl->Type, *local, &normalized, &reason))
+			return false;
+		std::string defaultNormalized;
+		if (!NormalizeParamValue(decl->Type, decl->Default, &defaultNormalized, &reason))
+			return false;
+		return normalized == defaultNormalized;
+	}
+
+	void Material::SetShaderPath(const std::string& path)
+	{
+		const std::string normalized = MaterialIO::NormalizePath(path);
+		if (m_HasShaderOverride && m_Desc.ShaderPath == normalized)
+			return;
+		m_Desc.ShaderPath = normalized;
+		m_HasShaderOverride = true;
+		MaterialLibrary::Get().RefreshParams(*this);
+		BumpRevision();
+		MarkDirty(true);
+	}
+
+	void Material::RevertShader()
+	{
+		if (!m_HasShaderOverride)
+			return;
+		m_Desc.ShaderPath = m_Parent ? m_Parent->GetDesc().ShaderPath : std::string();
+		m_HasShaderOverride = false;
+		MaterialLibrary::Get().RefreshParams(*this);
+		BumpRevision();
+		MarkDirty(true);
+	}
+
+	void Material::SetParamOverride(const std::string& name, const std::string& value)
+	{
+		if (name.empty())
+			return;
+		// 类型已知时把值归一(序列空白、Color 补 alpha、0.5f → 0.5),保存回读才稳定;
+		// 类型不符的值原样保留(靠 ParamWarnings 提示,不静默改写用户输入)。
+		std::string stored = value;
+		if (const MaterialParamDecl* decl = FindParamDecl(m_ParamDecls, name))
+		{
+			std::string normalized;
+			std::string reason;
+			if (NormalizeParamValue(decl->Type, value, &normalized, &reason))
+				stored = normalized;
+		}
+		for (MaterialParamOverride& entry : m_ParamOverrides)
+		{
+			if (entry.Name != name)
+				continue;
+			if (entry.Value == stored)
+				return;   // 值没变:不动 Revision / 脏标记
+			entry.Value = stored;
+			RecomputeParamWarnings();
+			BumpRevision();
+			MarkDirty(true);
+			return;
+		}
+		m_ParamOverrides.push_back(MaterialParamOverride { name, stored });
+		RecomputeParamWarnings();
+		BumpRevision();
+		MarkDirty(true);
+	}
+
+	void Material::RevertParam(const std::string& name)
+	{
+		for (auto entry = m_ParamOverrides.begin(); entry != m_ParamOverrides.end(); ++entry)
+		{
+			if (entry->Name != name)
+				continue;
+			m_ParamOverrides.erase(entry);
+			RecomputeParamWarnings();
+			BumpRevision();
+			MarkDirty(true);
+			return;
+		}
 	}
 
 	namespace MaterialIO
@@ -376,6 +587,48 @@ namespace World
 				{
 					out.ParentPath = NormalizePath(root["Parent"].as<std::string>());
 				}
+				if (root["Shader"])
+				{
+					out.Values.ShaderPath = NormalizePath(root["Shader"].as<std::string>());
+					out.HasShader = true;
+				}
+				if (root["Params"])
+				{
+					const YAML::Node params = root["Params"];
+					if (!params.IsMap())
+					{
+						result.Error = "Params 需要映射结构(参数名: 值)";
+						if (error) *error = result.Error;
+						return result;
+					}
+					for (const auto& entry : params)
+					{
+						MaterialParamOverride override;
+						override.Name = entry.first.as<std::string>();
+						if (override.Name.empty())
+						{
+							result.Error = "Params 里有空参数名";
+							if (error) *error = result.Error;
+							return result;
+						}
+						for (const MaterialParamOverride& existing : out.Params)
+						{
+							if (existing.Name == override.Name)
+							{
+								result.Error = "Params 里参数 '" + override.Name + "' 重复";
+								if (error) *error = result.Error;
+								return result;
+							}
+						}
+						if (!ReadParamValueText(entry.second, &override.Value))
+						{
+							result.Error = "参数 '" + override.Name + "' 的值需要标量或序列(不支持嵌套结构)";
+							if (error) *error = result.Error;
+							return result;
+						}
+						out.Params.push_back(std::move(override));
+					}
+				}
 				if (root["Name"])
 				{
 					out.Values.Name = root["Name"].as<std::string>();
@@ -464,6 +717,10 @@ namespace World
 				if (document.Overridden.Has(field))
 					AssignField(merged, document.Values, field);
 			}
+			// M4-S2:Shader 是独立可继承字段(不参与 M3 的 MaterialField 位集,免得改变
+			// "全字段 = v1 老写法"的判据)。
+			if (document.HasShader)
+				merged.ShaderPath = document.Values.ShaderPath;
 			return merged;
 		}
 
@@ -471,7 +728,9 @@ namespace World
 		{
 			// 老写法的唯一判据:没有父级 + 全部字段都写出 → 与 M3 前的文件逐字节一致。
 			// 只写部分字段的文件必须是 v2(否则"缺字段 = 引擎默认"会与"覆盖字段"混淆)。
-			return (document.ParentPath.empty() && document.Overridden.All())
+			// M4-S2:带 Shader / Params 的文件也只能是 v2(v1 没有这两个键)。
+			return (document.ParentPath.empty() && document.Overridden.All()
+					&& !document.HasShader && document.Params.empty())
 				? kMaterialFormatVersionLegacy : kMaterialFormatVersionMax;
 		}
 
@@ -501,7 +760,8 @@ namespace World
 			return result;
 		}
 
-		std::string SerializeDocument(const MaterialDocument& document)
+		std::string SerializeDocument(const MaterialDocument& document,
+			const std::vector<MaterialParamDecl>* paramDecls)
 		{
 			const uint32_t version = DocumentFormatVersion(document);
 			std::ostringstream out;
@@ -513,6 +773,8 @@ namespace World
 			out << "FormatVersion: " << version << "\n";
 			if (!document.ParentPath.empty())
 				out << "Parent: " << FormatLogicalPath(document.ParentPath) << "\n";
+			if (document.HasShader)
+				out << "Shader: " << FormatLogicalPath(document.Values.ShaderPath) << "\n";
 			if (document.Overridden.Has(MaterialField::Name))
 				out << "Name: " << Quote(document.Values.Name) << "\n";
 			if (document.Overridden.Has(MaterialField::BaseColor))
@@ -531,6 +793,13 @@ namespace World
 				out << "BlendMode: " << BlendModeName(document.Values.BlendMode) << "\n";
 			if (document.Overridden.Has(MaterialField::DoubleSided))
 				out << "DoubleSided: " << (document.Values.DoubleSided ? "true" : "false") << "\n";
+			if (!document.Params.empty())
+			{
+				out << "Params:\n";
+				for (const MaterialParamOverride& entry : document.Params)
+					out << "  " << entry.Name << ": "
+						<< FormatParamValueText(entry.Name, entry.Value, paramDecls) << "\n";
+			}
 			return out.str();
 		}
 
@@ -541,6 +810,8 @@ namespace World
 			MaterialDocument document;
 			document.Values = desc;
 			document.Overridden = MaterialFieldSet::Everything();
+			// M4-S2:带了 shader 的材质不能用 v1 写出(v1 没有 Shader 键,会静默丢引用)。
+			document.HasShader = !desc.ShaderPath.empty();
 			return SerializeDocument(document);
 		}
 

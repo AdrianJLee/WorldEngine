@@ -201,10 +201,12 @@ int main()
 		{
 			const std::vector<std::shared_ptr<IAssetImporter>> importers = DefaultImporters();
 			// D5b-1:Model 导入器(.gltf/.glb)注册在 Script 之后、PassThrough 之前。
-			CHECK(importers.size() == 4);
+			// M4-S2:MaterialShader 导入器(.hlsl)注册在 Model 之后、PassThrough 之前。
+			CHECK(importers.size() == 5);
 			CHECK(importers[0]->Name() == "Scene" && importers[0]->Version() == 1);
 			CHECK(importers[2]->Name() == "Model" && importers[2]->Version() == 1);
-			CHECK(importers[3]->Name() == "PassThrough");
+			CHECK(importers[3]->Name() == "MaterialShader" && importers[3]->Version() == 1);
+			CHECK(importers[4]->Name() == "PassThrough");
 			const std::shared_ptr<IAssetImporter> script = FindImporter(importers, "Script");
 			CHECK(script != nullptr);
 			CHECK(script->Version() == 2);
@@ -323,6 +325,64 @@ int main()
 			CHECK(Contains(results[0].Error, "compile error"));
 			CHECK(!std::filesystem::exists(outputDir / "cooked" / "scripts" / "Broken.lua"));
 			std::printf("[W7-2] (5) cook gate: 1/1 failed, no artifact written\n");
+		}
+
+		// 5b. M4-S2:`.hlsl`(MaterialShader)是一等资产 —— 原样复制;cook 指纹 = 源内容哈希,
+		//     改代码/注解自动重烘,没改则跳过。
+		{
+			const std::shared_ptr<IAssetImporter> shader = FindImporter(DefaultImporters(), "MaterialShader");
+			CHECK(shader != nullptr);
+			CHECK(shader->Version() == 1);
+			CHECK(shader->Matches("shaders/Glow.hlsl"));
+			CHECK(!shader->Matches("materials/glass.wmat"));
+			CHECK(!shader->Matches("scenes/a.wd"));
+			CHECK(!shader->Matches("textures/x.png"));
+
+			const std::filesystem::path content = temp.path / "shader-content";
+			const std::filesystem::path source = content / "shaders" / "Glow.hlsl";
+			const std::string firstSource =
+				"//! param Float Roughness = 0.25 [0,1]\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    Surface surface = MakeDefaultSurface();\n"
+				"    surface.Roughness = Roughness;\n"
+				"    return surface;\n"
+				"}\n";
+			WriteBytes(source, firstSource);
+
+			std::string error;
+			ProjectManifest manifest;
+			manifest.Id = "com.test.shaders";
+			manifest.ContentRoot = "shader-content";
+			manifest.StartScene = "shaders/Glow.hlsl";
+			manifest.Packages = { "packages/Base.wpak" };
+			const std::filesystem::path manifestPath = temp.path / "shaders.we.yaml";
+			CHECK(ProjectManifest::Save(manifestPath, manifest, &error));
+			const std::filesystem::path outputDir = temp.path / "shader-cooked";
+
+			CookPipeline pipeline(DefaultImporters());
+			CookSummary summary;
+			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Total == 1 && summary.Changed == 1 && summary.Failed == 0);
+			const std::filesystem::path artifact = outputDir / "cooked" / "shaders" / "Glow.hlsl";
+			CHECK(ReadText(artifact) == firstSource);   // 原样复制(注解也在产物里)
+
+			// 未改 → skip;改注解/代码 → 重烘(指纹 = 源内容哈希)。
+			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Changed == 0 && summary.Skipped == 1 && summary.Failed == 0);
+			const std::string secondSource =
+				"//! param Float Roughness = 0.5 [0,1]\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    Surface surface = MakeDefaultSurface();\n"
+				"    surface.Roughness = Roughness;\n"
+				"    return surface;\n"
+				"}\n";
+			WriteBytes(source, secondSource);
+			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Changed == 1 && summary.Skipped == 0 && summary.Failed == 0);
+			CHECK(ReadText(artifact) == secondSource);
+			std::printf("[M4-S2] (5b) .hlsl cook: 1 changed -> 1 skipped -> 1 changed (content hash)\n");
 		}
 
 		std::printf("World.Asset: all checks passed\n");

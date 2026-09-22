@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -994,6 +996,458 @@ int main()
 
 			std::filesystem::remove_all(directory, ec);
 			library.Shutdown();
+		}
+
+		// ---- M4-S2:注解参数表 + .wmat 的 Shader/Params ----
+		//
+		// 夹具落在 Game/assets/material_m4s2_tmp/(与引擎同一条"相对内容根"解析路径):
+		//  - 注解解析 / 值归一 / 反射(纯文本)不需要 dxc,在本目标里跑;
+		//  - 需要真实 dxc 的反射校验与编译在 World.ShaderPipeline 里(见 ShaderPipelineTests.cpp)。
+		{
+			using World::MaterialParamDecl;
+			using World::MaterialParamSource;
+			using World::ParamType;
+
+			// 22. 注解解析:全类型 + 范围 / 单位 / 分组 / 标签 / 默认值归一。
+			{
+				const std::string source =
+					"//! param Float Roughness = 0.4 [0,1] group(\"Surface\") label(\"Roughness\")\n"
+					"//! param Vec2 Tiling = 1, 2 unit(\"tiles\") group(\"UV\")\n"
+					"//! param Vec3 Tint = 1, 0.5, 0.25\n"
+					"//! param Vec4 Weights = 1, 1, 1, 0.5f\n"
+					"//! param Color Base = 0.8,0.2,0.1\n"
+					"//! param Int Steps = 3 [0,8] unit(\"steps\")\n"
+					"//! param Bool Glow = true group(\"Emissive\")\n"
+					"//! param Texture2D Albedo = \"textures/icon.png\" label(\"Albedo\")\n"
+					"//! param Texture2D NoMap = \"\"\n"
+					"Surface Evaluate(MaterialInputs input)\n"
+					"{\n"
+					"    return MakeDefaultSurface();\n"
+					"}\n";
+				std::vector<MaterialParamDecl> table;
+				std::string error = "sentinel";
+				if (!ParseMaterialParams(source, &table, &error))
+					std::printf("MaterialTests: M4-S2 annotation parse failed: %s\n", error.c_str());
+				CHECK(ParseMaterialParams(source, &table, &error));
+				CHECK(error.empty());
+				CHECK(table.size() == 9);
+				CHECK(table[0].Name == "Roughness" && table[0].Type == ParamType::Float);
+				CHECK(table[0].Default == "0.4");
+				CHECK(table[0].Min == 0.0f && table[0].Max == 1.0f);
+				CHECK(table[0].Group == "Surface" && table[0].Label == "Roughness");
+				CHECK(table[0].Unit.empty());
+				CHECK(table[1].Type == ParamType::Vec2 && table[1].Default == "1, 2");
+				CHECK(table[1].Unit == "tiles" && table[1].Group == "UV");
+				CHECK(table[2].Type == ParamType::Vec3 && table[2].Default == "1, 0.5, 0.25");
+				CHECK(table[3].Type == ParamType::Vec4 && table[3].Default == "1, 1, 1, 0.5");
+				CHECK(table[4].Type == ParamType::Color && table[4].Default == "0.8, 0.2, 0.1, 1");
+				CHECK(table[5].Type == ParamType::Int && table[5].Default == "3");
+				CHECK(table[5].Min == 0.0f && table[5].Max == 8.0f && table[5].Unit == "steps");
+				CHECK(table[6].Type == ParamType::Bool && table[6].Default == "true");
+				CHECK(table[7].Type == ParamType::Texture2D && table[7].Default == "textures/icon.png");
+				CHECK(table[8].Type == ParamType::Texture2D && table[8].Default.empty());
+
+				// 注解写出 → 读回:编辑器改默认值/文案时走这条路径,口径必须闭环。
+				for (const MaterialParamDecl& decl : table)
+				{
+					const std::string line = "//! " + FormatMaterialParamAnnotation(decl) + "\n";
+					std::vector<MaterialParamDecl> reparsed;
+					CHECK(ParseMaterialParams(line, &reparsed, &error));
+					CHECK(reparsed.size() == 1);
+					CHECK(reparsed[0].Name == decl.Name && reparsed[0].Type == decl.Type);
+					CHECK(reparsed[0].Default == decl.Default);
+					CHECK(reparsed[0].Min == decl.Min && reparsed[0].Max == decl.Max);
+					CHECK(reparsed[0].Unit == decl.Unit && reparsed[0].Group == decl.Group
+						&& reparsed[0].Label == decl.Label);
+				}
+
+				// 空源 / 没有注解 → 空表(不是错误)。
+				std::vector<MaterialParamDecl> empty;
+				CHECK(ParseMaterialParams("Surface Evaluate(MaterialInputs input) { return MakeDefaultSurface(); }\n",
+					&empty, &error));
+				CHECK(empty.empty());
+			}
+
+			// 23. 坏注解:每条都给 `<行>:<列>: <原因>`,列号指向出错的 token。
+			{
+				const auto expectError = [](const std::string& source, const std::string& reasonHint,
+					const std::string& linePrefix)
+				{
+					std::vector<MaterialParamDecl> table;
+					std::string error;
+					const bool parsed = ParseMaterialParams(source, &table, &error);
+					if (parsed || !table.empty() || error.rfind(linePrefix, 0) != 0
+						|| error.find(reasonHint) == std::string::npos)
+					{
+						std::printf("MaterialTests: M4-S2 want '%s' @ '%s', got: %s\n",
+							reasonHint.c_str(), linePrefix.c_str(), error.c_str());
+					}
+					CHECK(!parsed);
+					CHECK(table.empty());
+					CHECK(error.rfind(linePrefix, 0) == 0);
+					CHECK(error.find(reasonHint) != std::string::npos);
+					return error;
+				};
+
+				// 未知类型:列号 = 类型 token 的第一列。
+				const std::string unknownType = expectError("//! param Float3 Tint = 1\n",
+					"未知参数类型", "1:11:");
+				CHECK(unknownType.find("Float3") != std::string::npos);
+				expectError("//! param floats Tint = 1\n", "未知参数类型", "1:11:");
+				// 未知指令 / 缺指令。
+				expectError("//! colour Float Tint = 1\n", "未知注解指令", "1:5:");
+				expectError("//! = 1\n", "缺少注解指令", "1:5:");
+				// 缺默认值(= 号缺失 / 等号后为空)。
+				expectError("//! param Float Tint\n", "缺少默认值", "1:");
+				expectError("//! param Float Tint = [0,1]\n", "缺少默认值", "1:22:");
+				// 重复参数名:第二条给第二次出现的行列。
+				expectError("//! param Float Tint = 1\n//! param Vec3 Tint = 1, 1, 1\n",
+					"重复的参数名", "2:16:");
+				// 未知字段 / 字段重复 / 引号缺失。
+				expectError("//! param Float Tint = 1 colour(\"x\")\n", "无法识别的注解内容", "1:");
+				expectError("//! param Float Tint = 1 [0,1] [0,2]\n", "重复", "1:");
+				expectError("//! param Float Tint = 1 unit(px)\n", "需要双引号字符串", "1:");
+				// 范围:只给 Float/Int;下界不能大于上界;默认值必须在区间内。
+				expectError("//! param Vec3 Tint = 1, 1, 1 [0,1]\n", "只适用于 Float/Int", "1:");
+				expectError("//! param Float Tint = 1 [1,0]\n", "大于上界", "1:");
+				expectError("//! param Float Tint = 2 [0,1]\n", "超出范围", "1:");
+				// 名字:非法标识符 / 与引擎模板保留名冲突(u_ 前缀与模板标识符)。
+				expectError("//! param Float 2Tint = 1\n", "缺少参数名", "1:17:");
+				expectError("//! param Float u_Speed = 1\n", "保留名", "1:17:");
+				expectError("//! param Float input = 1\n", "保留名", "1:17:");
+				// 值文本与类型不符(默认值本身非法)。
+				expectError("//! param Vec3 Tint = 1, 1\n", "不合法", "1:");
+				expectError("//! param Bool Glow = yes\n", "不合法", "1:");
+			}
+
+			// 24. 值文本归一 + 浮点最短往返(与 .wmat 写出共用一套口径)。
+			{
+				std::string normalized;
+				std::string error;
+				CHECK(NormalizeParamValue(ParamType::Float, "0.500f", &normalized, &error)
+					&& normalized == "0.5");
+				CHECK(NormalizeParamValue(ParamType::Int, "3.0", &normalized, &error)
+					&& normalized == "3");
+				CHECK(NormalizeParamValue(ParamType::Bool, "TRUE", &normalized, &error)
+					&& normalized == "true");
+				CHECK(NormalizeParamValue(ParamType::Vec2, "1,2", &normalized, &error)
+					&& normalized == "1, 2");
+				CHECK(NormalizeParamValue(ParamType::Color, "1,0.5,0.25", &normalized, &error)
+					&& normalized == "1, 0.5, 0.25, 1");
+				CHECK(NormalizeParamValue(ParamType::Texture2D, "\"textures/x.png\"", &normalized, &error)
+					&& normalized == "textures/x.png");
+				CHECK(NormalizeParamValue(ParamType::Texture2D, "", &normalized, &error) && normalized.empty());
+				CHECK(!NormalizeParamValue(ParamType::Float, "abc", &normalized, &error));
+				CHECK(!NormalizeParamValue(ParamType::Vec3, "1, 2", &normalized, &error));
+				CHECK(!NormalizeParamValue(ParamType::Int, "1.5", &normalized, &error));
+				CHECK(!NormalizeParamValue(ParamType::Bool, "yes", &normalized, &error));
+				CHECK(FormatParamFloatText(0.4997164f) == "0.4997164");
+				CHECK(FormatParamFloatText(0.5f) == "0.5");
+				// 反射类型 ↔ 注解类型的判据(HLSL bool 在 SPIR-V 里是 uint;
+				// Color 与 Vec4 都是 v4float)。
+				CHECK(IsReflectedTypeCompatible(ParamType::Float, "float"));
+				CHECK(!IsReflectedTypeCompatible(ParamType::Float, "v2float"));
+				CHECK(IsReflectedTypeCompatible(ParamType::Vec2, "v2float"));
+				CHECK(IsReflectedTypeCompatible(ParamType::Vec3, "v3float"));
+				CHECK(IsReflectedTypeCompatible(ParamType::Vec4, "v4float"));
+				CHECK(IsReflectedTypeCompatible(ParamType::Color, "v4float"));
+				CHECK(IsReflectedTypeCompatible(ParamType::Int, "int"));
+				CHECK(!IsReflectedTypeCompatible(ParamType::Int, "uint"));
+				CHECK(IsReflectedTypeCompatible(ParamType::Bool, "uint"));
+				CHECK(!IsReflectedTypeCompatible(ParamType::Bool, "int"));
+			}
+
+			// 25. 反射(纯文本):从 dxc -Fc 的 SPIR-V 汇编读成员偏移/类型/绑定与"真的被读"，
+			//     并据此打包参数块字节。这里用与 dxc 实测输出同形的汇编片段,不需要工具。
+			{
+				const std::string assembly =
+					"; SPIR-V\n"
+					"               OpName %type_2d_image \"type.2d.image\"\n"
+					"               OpName %Albedo \"Albedo\"\n"
+					"               OpName %type_MaterialParams \"type.MaterialParams\"\n"
+					"               OpMemberName %type_MaterialParams 0 \"Roughness\"\n"
+					"               OpMemberName %type_MaterialParams 1 \"Tint\"\n"
+					"               OpMemberName %type_MaterialParams 2 \"Glow\"\n"
+					"               OpName %MaterialParams \"MaterialParams\"\n"
+					"               OpName %u_ShadowMap \"u_ShadowMap\"\n"
+					"               OpDecorate %Albedo DescriptorSet 2\n"
+					"               OpDecorate %Albedo Binding 4\n"
+					"               OpDecorate %u_ShadowMap DescriptorSet 0\n"
+					"               OpDecorate %u_ShadowMap Binding 3\n"
+					"               OpDecorate %MaterialParams DescriptorSet 1\n"
+					"               OpDecorate %MaterialParams Binding 2\n"
+					"               OpMemberDecorate %type_MaterialParams 0 Offset 0\n"
+					"               OpMemberDecorate %type_MaterialParams 1 Offset 16\n"
+					"               OpMemberDecorate %type_MaterialParams 2 Offset 32\n"
+					"      %float = OpTypeFloat 32\n"
+					"       %uint = OpTypeInt 32 0\n"
+					"    %v4float = OpTypeVector %float 4\n"
+					"%type_MaterialParams = OpTypeStruct %float %v4float %uint\n"
+					"%_ptr_Uniform_type_MaterialParams = OpTypePointer Uniform %type_MaterialParams\n"
+					"      %int_0 = OpConstant %int 0\n"
+					"      %int_2 = OpConstant %int 2\n"
+					"%type_2d_image = OpTypeImage %float 2D 2 0 0 1 Unknown\n"
+					"%type_sampled_image = OpTypeSampledImage %type_2d_image\n"
+					"%_ptr_UniformConstant_type_sampled_image = OpTypePointer UniformConstant %type_sampled_image\n"
+					"%_ptr_UniformConstant_type_2d_image = OpTypePointer UniformConstant %type_2d_image\n"
+					"%MaterialParams = OpVariable %_ptr_Uniform_type_MaterialParams Uniform\n"
+					"      %Albedo = OpVariable %_ptr_UniformConstant_type_sampled_image UniformConstant\n"
+					"  %u_ShadowMap = OpVariable %_ptr_UniformConstant_type_2d_image UniformConstant\n"
+					"         %20 = OpAccessChain %_ptr_Uniform_float %MaterialParams %int_0\n"
+					"         %21 = OpAccessChain %_ptr_Uniform_uint %MaterialParams %int_2\n";
+				MaterialParamLayout layout;
+				std::string error;
+				CHECK(ReflectParamLayoutFromAssembly(assembly, &layout, &error));
+				std::printf("MaterialTests: M4-S2 assembly-reflected layout\n%s",
+					FormatParamLayout(layout).c_str());
+				CHECK(layout.CbufferSet == 1 && layout.CbufferBinding == 2);
+				CHECK(layout.Fields.size() == 3);
+				CHECK(layout.Fields[0].Name == "Roughness" && layout.Fields[0].ReflectedType == "float");
+				CHECK(layout.Fields[0].Offset == 0 && layout.Fields[0].Size == 4);
+				CHECK(layout.Fields[1].Name == "Tint" && layout.Fields[1].ReflectedType == "v4float");
+				CHECK(layout.Fields[1].Offset == 16 && layout.Fields[1].Size == 16);
+				CHECK(layout.Fields[2].Name == "Glow" && layout.Fields[2].ReflectedType == "uint");
+				CHECK(layout.Fields[2].Type == ParamType::Bool);
+				CHECK(layout.CbufferSize == 48);   // 末端 36 → 16 字节对齐
+				CHECK(layout.UsedMembers.size() == 2);
+				CHECK(layout.UsedMembers[0] == "Glow" && layout.UsedMembers[1] == "Roughness");
+				CHECK(layout.Textures.size() == 1);   // 引擎自己的 u_ShadowMap(set 0)不算参数槽
+				CHECK(layout.Textures[0].Name == "Albedo" && layout.Textures[0].Set == 2
+					&& layout.Textures[0].Binding == 4);
+				CHECK(layout.Textures[0].ReflectedType == "type.2d.image");
+
+				// 布局 + 注解表 → 参数块字节(覆盖生效、缺项用注解默认)。
+				std::vector<MaterialParamDecl> table;
+				table.push_back(MaterialParamDecl { "Roughness", ParamType::Float, "0.25" });
+				table.push_back(MaterialParamDecl { "Tint", ParamType::Color, "1, 1, 1, 1" });
+				table.push_back(MaterialParamDecl { "Glow", ParamType::Bool, "true" });
+				std::vector<MaterialParamOverride> overrides;
+				overrides.push_back(MaterialParamOverride { "Roughness", "0.75" });
+				overrides.push_back(MaterialParamOverride { "Glow", "false" });
+				std::vector<uint8_t> bytes;
+				CHECK(PackParamValues(layout, table, overrides, &bytes, &error));
+				CHECK(bytes.size() == 48);
+				float roughness = 0.0f;
+				std::memcpy(&roughness, bytes.data(), sizeof(roughness));
+				CHECK(roughness == 0.75f);
+				float tint[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				std::memcpy(tint, bytes.data() + 16, sizeof(tint));
+				CHECK(tint[0] == 1.0f && tint[1] == 1.0f && tint[2] == 1.0f && tint[3] == 1.0f);
+				uint32_t glow = 1u;
+				std::memcpy(&glow, bytes.data() + 32, sizeof(glow));
+				CHECK(glow == 0u);
+			}
+
+			// 26. `.wmat` 带 Shader + Params:默认值来自 shader、覆盖生效、未声明 → 可读警告。
+			{
+				CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
+				std::error_code ec;
+				const std::filesystem::path directory = std::filesystem::current_path() / "Game" / "assets"
+					/ "material_m4s2_tmp";
+				std::filesystem::remove_all(directory, ec);
+				std::filesystem::create_directories(directory, ec);
+				const auto fullPath = [&directory](const std::string& fileName)
+				{
+					return directory / fileName;
+				};
+				const auto writeText = [&fullPath](const std::string& fileName, const std::string& text)
+				{
+					std::ofstream file(fullPath(fileName), std::ios::binary | std::ios::trunc);
+					file << text;
+					file.flush();
+				};
+				const auto readText = [&fullPath](const std::string& fileName)
+				{
+					std::ifstream file(fullPath(fileName), std::ios::binary);
+					return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+				};
+				const auto relative = [](const std::string& fileName)
+				{
+					return "material_m4s2_tmp/" + fileName;
+				};
+				MaterialLibrary& library = MaterialLibrary::Get();
+				std::string error;
+
+				writeText("glass.hlsl",
+					"//! param Float Roughness = 0.4 [0,1] group(\"Surface\") label(\"Roughness\")\n"
+					"//! param Color Tint = 1, 1, 1, 1 group(\"Surface\")\n"
+					"//! param Int Steps = 2 [0,8]\n"
+					"//! param Bool Glow = true\n"
+					"//! param Texture2D Albedo = \"\"\n"
+					"Surface Evaluate(MaterialInputs input)\n"
+					"{\n"
+					"    Surface surface = MakeDefaultSurface();\n"
+					"    surface.Roughness = Roughness;\n"
+					"    surface.BaseColor = Tint.rgb;\n"
+					"    if (Glow) surface.Emissive = float3(Steps, 0.0f, 0.0f);\n"
+					"    surface.BaseColor *= Albedo.Sample(AlbedoSampler, input.UV).rgb;\n"
+					"    return surface;\n"
+					"}\n");
+				writeText("mat_base.wmat",
+					"FormatVersion: 2\n"
+					"Shader: material_m4s2_tmp/glass.hlsl\n"
+					"Name: \"Glass\"\n"
+					"Params:\n"
+					"  Roughness: 0.75\n"
+					"  Albedo: \"textures/Icon.png\"\n");
+
+				Ref<Material> material = library.Load(relative("mat_base.wmat"), &error);
+				CHECK(material != nullptr);
+				CHECK(error.empty());
+				CHECK(material->HasShaderOverride());
+				CHECK(material->ShaderPath() == relative("glass.hlsl"));
+				CHECK(material->ShaderWarning().empty());
+				CHECK(material->Params().size() == 5);
+				CHECK(material->ParamOverrides().size() == 2);
+				CHECK(material->HasParamOverride("Roughness"));
+				CHECK(!material->HasParamOverride("Tint"));
+				CHECK(material->ParamSource("Roughness") == MaterialParamSource::Local);
+				CHECK(material->ParamSource("Tint") == MaterialParamSource::ShaderDefault);
+				CHECK(material->ParamDefaultValue("Tint") == "1, 1, 1, 1");
+				CHECK(material->ResolvedParamValue("Tint") == "1, 1, 1, 1");     // 缺参数 → shader 默认
+				CHECK(material->ResolvedParamValue("Roughness") == "0.75");      // 覆盖生效
+				CHECK(material->ResolvedParamValue("Albedo") == "textures/Icon.png");
+				CHECK(material->ResolvedParamValue("Steps") == "2");
+				CHECK(!material->ParamMatchesDefault("Roughness"));
+				CHECK(material->ParamWarnings().empty());
+				CHECK(library.GetLoadWarning(relative("mat_base.wmat")).empty());
+
+				// "与默认相同"的三态判定 + 值归一(SetParamOverride 会按声明类型规范化)。
+				material->SetParamOverride("Steps", "2");
+				CHECK(material->ParamMatchesDefault("Steps"));
+				material->SetParamOverride("Tint", "0.5,0.5,0.5");
+				CHECK(material->HasParamOverride("Tint"));
+				CHECK(material->ResolvedParamValue("Tint") == "0.5, 0.5, 0.5, 1");
+				CHECK(!material->ParamMatchesDefault("Tint"));
+
+				// 未声明参数:载入不算失败,给可读警告,值保留在文件里。
+				writeText("mat_undeclared.wmat",
+					"FormatVersion: 2\n"
+					"Shader: material_m4s2_tmp/glass.hlsl\n"
+					"Params:\n"
+					"  Nope: 1\n");
+				std::string undeclaredWarning;
+				Ref<Material> undeclared = library.Load(relative("mat_undeclared.wmat"), &undeclaredWarning);
+				CHECK(undeclared != nullptr);
+				CHECK(undeclaredWarning.find("没有声明") != std::string::npos);
+				CHECK(undeclaredWarning.find("Nope") != std::string::npos);
+				CHECK(undeclared->ParamWarnings().size() == 1);
+				CHECK(library.GetLoadWarning(relative("mat_undeclared.wmat")).find("Nope")
+					!= std::string::npos);
+				CHECK(library.Save(undeclared, relative("mat_undeclared.wmat"), &error));
+				CHECK(readText("mat_undeclared.wmat").find("Nope: 1") != std::string::npos);
+
+				// 值类型不符:也不失败,警告里带原因,写回时原样保留。
+				writeText("mat_badvalue.wmat",
+					"FormatVersion: 2\n"
+					"Shader: material_m4s2_tmp/glass.hlsl\n"
+					"Params:\n"
+					"  Roughness: 0.5, 0.5\n");
+				std::string badValueWarning;
+				Ref<Material> badValue = library.Load(relative("mat_badvalue.wmat"), &badValueWarning);
+				CHECK(badValue != nullptr);
+				CHECK(badValueWarning.find("不符") != std::string::npos);
+				CHECK(badValue->ResolvedParamValue("Roughness") == "0.5, 0.5");
+				CHECK(library.Save(badValue, relative("mat_badvalue.wmat"), &error));
+				CHECK(readText("mat_badvalue.wmat").find("Roughness: \"0.5, 0.5\"") != std::string::npos);
+
+				// shader 读不到:材质仍可用,警告指出 shader,参数默认值不可用。
+				writeText("mat_missing_shader.wmat",
+					"FormatVersion: 2\n"
+					"Shader: material_m4s2_tmp/__missing__.hlsl\n"
+					"Params:\n"
+					"  Roughness: 0.3\n");
+				std::string missingWarning;
+				Ref<Material> missing = library.Load(relative("mat_missing_shader.wmat"), &missingWarning);
+				CHECK(missing != nullptr);
+				CHECK(missingWarning.find("读不到") != std::string::npos);
+				CHECK(missing->Params().empty());
+				CHECK(missing->ResolvedParamValue("Roughness") == "0.3");
+
+				// 注解坏的 shader:同样只给警告,不拖垮材质。
+				writeText("broken.hlsl", "//! param Float3 X = 1\n");
+				writeText("mat_broken_shader.wmat",
+					"FormatVersion: 2\n"
+					"Shader: material_m4s2_tmp/broken.hlsl\n");
+				std::string brokenWarning;
+				Ref<Material> broken = library.Load(relative("mat_broken_shader.wmat"), &brokenWarning);
+				CHECK(broken != nullptr);
+				CHECK(brokenWarning.find("注解参数表解析失败") != std::string::npos);
+				CHECK(brokenWarning.find("1:11:") != std::string::npos);
+
+				// 父级继承:Shader 与注解表跟随父级,参数生效值 = 本文件 > 父级 > shader 默认。
+				writeText("mat_parent.wmat",
+					"FormatVersion: 2\n"
+					"Shader: material_m4s2_tmp/glass.hlsl\n"
+					"Name: \"Parent\"\n"
+					"Params:\n"
+					"  Roughness: 0.5\n");
+				writeText("mat_child.wmat",
+					"FormatVersion: 2\n"
+					"Parent: material_m4s2_tmp/mat_parent.wmat\n"
+					"Name: \"Child\"\n"
+					"Params:\n"
+					"  Tint: 0.25, 0.25, 0.25, 1\n");
+				Ref<Material> child = library.Load(relative("mat_child.wmat"), &error);
+				CHECK(child != nullptr);
+				CHECK(error.empty());
+				CHECK(!child->HasShaderOverride());
+				CHECK(child->ShaderPath() == relative("glass.hlsl"));   // 继承父级
+				CHECK(child->Params().size() == 5);                     // 注解表也继承
+				CHECK(!child->HasParamOverride("Roughness"));           // 本文件没写
+				CHECK(child->ParamSource("Roughness") == MaterialParamSource::Parent);
+				CHECK(child->ResolvedParamValue("Roughness") == "0.5");
+				CHECK(child->ParamSource("Tint") == MaterialParamSource::Local);
+				CHECK(child->ResolvedParamValue("Tint") == "0.25, 0.25, 0.25, 1");
+				CHECK(child->ParamSource("Steps") == MaterialParamSource::ShaderDefault);
+
+				// 27. 保存只写覆盖项(逐行断言):未覆盖的字段/参数一行都不出现。
+				CHECK(library.Save(child, relative("mat_child_saved.wmat"), &error));
+				const std::string saved = readText("mat_child_saved.wmat");
+				CHECK(saved == "FormatVersion: 2\n"
+					"Parent: material_m4s2_tmp/mat_parent.wmat\n"
+					"Name: \"Child\"\n"
+					"Params:\n"
+					"  Tint: [0.25, 0.25, 0.25, 1]\n");
+				CHECK(saved.find("Shader:") == std::string::npos);        // 没覆盖 → 不写(继承父级)
+				CHECK(saved.find("Roughness") == std::string::npos);
+				CHECK(saved.find("Metallic") == std::string::npos);
+
+				// 写了 Shader 的本文件:写出带 Shader + 只带自己的覆盖项。
+				material->SetParamOverride("Steps", "5");
+				CHECK(library.Save(material, relative("mat_base_saved.wmat"), &error));
+				const std::string savedBase = readText("mat_base_saved.wmat");
+				CHECK(savedBase.find("FormatVersion: 2\n") == 0);
+				CHECK(savedBase.find("Shader: material_m4s2_tmp/glass.hlsl\n") != std::string::npos);
+				CHECK(savedBase.find("  Roughness: 0.75\n") != std::string::npos);
+				CHECK(savedBase.find("  Albedo: \"textures/Icon.png\"\n") != std::string::npos);
+				CHECK(savedBase.find("  Tint: [0.5, 0.5, 0.5, 1]\n") != std::string::npos);
+				CHECK(savedBase.find("  Steps: 5\n") != std::string::npos);
+				CHECK(savedBase.find("Glow") == std::string::npos);       // 没写覆盖
+				Ref<Material> reopened = library.Load(relative("mat_base_saved.wmat"), &error);
+				CHECK(reopened != nullptr);
+				CHECK(reopened->ParamOverrides().size() == 4);
+				CHECK(reopened->ResolvedParamValue("Steps") == "5");
+				CHECK(reopened->ResolvedParamValue("Glow") == "true");
+
+				// 回退覆盖:文件里那一行消失(值回到 shader 默认)。
+				reopened->RevertParam("Steps");
+				reopened->RevertParam("Roughness");
+				CHECK(library.Save(reopened, relative("mat_base_saved.wmat"), &error));
+				const std::string reverted = readText("mat_base_saved.wmat");
+				CHECK(reverted.find("  Steps:") == std::string::npos);
+				CHECK(reverted.find("  Roughness:") == std::string::npos);
+				CHECK(reopened->ResolvedParamValue("Roughness") == "0.4");   // shader 默认
+
+				// Shader 覆盖可以回退(回到父级/引擎默认);没有父级时 = 不做表面函数。
+				material->RevertShader();
+				CHECK(!material->HasShaderOverride());
+				CHECK(material->ShaderPath().empty());
+				CHECK(material->Params().empty());
+
+				library.Shutdown();
+				std::filesystem::remove_all(directory, ec);
+			}
 		}
 
 		std::printf("MaterialTests: all checks passed\n");

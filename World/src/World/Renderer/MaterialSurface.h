@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Renderer/MaterialParams.h"
 #include "World/Renderer/MaterialSurfaceContract.hlsli"
 
 #include <cstddef>
@@ -73,6 +74,14 @@ namespace World
 		static SurfaceCompileResult CompileSurface(const std::string& source, const std::string& permutationKey,
 			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);
 
+		// M4-S2:带注解参数表的编译。参数块(`cbuffer MaterialParams` + 贴图槽)由 table 生成,
+		// 插在引擎模板之后、用户源之前 —— 注解是参数的事实源,用户源里不再手写参数块。
+		// CompileSurface(source, key) 等价于先 ParseMaterialParams(source) 再走这里
+		// (注解解析失败 → 结构化诊断,不调用 dxc)。
+		static SurfaceCompileResult CompileSurfaceWithParams(const std::string& source,
+			const std::vector<MaterialParamDecl>& params, const std::string& permutationKey,
+			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);
+
 		// S3 的"新建 .hlsl 起始代码":只含用户可编辑的 Evaluate();默认值来自
 		// MakeDefaultSurface(),不会漏字段。
 		static std::string DefaultSurfaceFunctionSource();
@@ -80,7 +89,17 @@ namespace World
 		// CompileSurface 会把这种情况变成结构化错误而不是断言。
 		static std::string WrapSurfaceSource(const std::string& userSource,
 			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);
+		static std::string WrapSurfaceSourceWithParams(const std::string& userSource,
+			const std::vector<MaterialParamDecl>& params,
+			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);
+		// 参数块源码(注解 → `cbuffer MaterialParams` + Texture2D/SamplerState 声明)。
+		// 反射与编译共用同一份生成器,保证"声明 == 编译 == 反射"是同一件事。
+		static std::string BuildParamBlockSource(const std::vector<MaterialParamDecl>& params);
 		static std::string ContractHeaderPath();
+
+		// M4-S2:与 artifact 同键的 SPIR-V 汇编(-Fc)路径。反射(MaterialParams.cpp)读它;
+		// 文件不存在(旧缓存 / 工具没写)时返回空串。
+		static std::string AssemblyPath(const SurfaceArtifact& artifact);
 
 		// 上一次成功编译的产物查询(按"后端 + 排列键"分别保存)。失败后由调用方决定
 		// 是否继续用这份;编译器本身不会静默返回旧产物。

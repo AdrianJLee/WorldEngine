@@ -26,9 +26,11 @@ namespace World
 	{
 		namespace fs = std::filesystem;
 
-		constexpr uint32_t kSurfaceCacheVersion = 1;
+		// 2 = M4-S2:包装源码加入注解参数块,并且每次编译都落一份 SPIR-V 汇编(-Fc)供反射。
+		constexpr uint32_t kSurfaceCacheVersion = 2;
 		constexpr const char* kSurfaceEntryPoint = "PSMain";
 		constexpr const char* kUserSourceFileName = "surface_user.hlsl";
+		constexpr const char* kAssemblyFileName = "surface.asm";
 
 		std::atomic<size_t> s_CacheHits { 0 };
 		std::atomic<size_t> s_CacheMisses { 0 };
@@ -313,6 +315,74 @@ namespace World
 				text += ";\n";
 			}
 			text += "    return surface;\n}\n";
+			return text;
+		}
+
+		// 参数类型 → 参数块里的 HLSL 类型。注意 HLSL 的 bool 在 SPIR-V 里是 uint32
+		// (反射校验按 uint 认它,见 MaterialParams.cpp 的 ReflectedTypeMatches)。
+		const char* ParamHlslType(ParamType type)
+		{
+			switch (type)
+			{
+				case ParamType::Float: return "float";
+				case ParamType::Vec2: return "float2";
+				case ParamType::Vec3: return "float3";
+				case ParamType::Vec4: return "float4";
+				case ParamType::Color: return "float4";
+				case ParamType::Int: return "int";
+				case ParamType::Bool: return "bool";
+				case ParamType::Texture2D: return "Texture2D";
+			}
+			return "float";
+		}
+
+		// 注解 → 参数块源码。标量/向量进 `cbuffer MaterialParams`(register b2, space1),
+		// 贴图按注解顺序占 space2 的 t4、t5…(每张同时声明配套 SamplerState)。
+		// 布局(偏移/大小)不在这里手写:编译后用 dxc 的 SPIR-V 汇编反射出来。
+		std::string BuildParamBlockText(const std::vector<MaterialParamDecl>& params)
+		{
+			std::string members;
+			std::string textures;
+			uint32_t textureIndex = 0;
+			for (const MaterialParamDecl& param : params)
+			{
+				if (IsTextureParamType(param.Type))
+				{
+					const uint32_t binding = ParamTextureBaseBinding() + textureIndex;
+					++textureIndex;
+					textures += "[[vk::combinedImageSampler]] Texture2D ";
+					textures += param.Name;
+					textures += " : register(t" + std::to_string(binding) + ", space2);\n";
+					textures += "[[vk::combinedImageSampler]] SamplerState ";
+					textures += param.Name + "Sampler";
+					textures += " : register(s" + std::to_string(binding) + ", space2);\n";
+					continue;
+				}
+				members += "    ";
+				members += ParamHlslType(param.Type);
+				members += " ";
+				members += param.Name;
+				members += ";\n";
+			}
+
+			std::string text;
+			text += "\n// ---- M4-S2 material parameters (generated from //! param annotations) ----\n";
+			if (!members.empty())
+			{
+				text += "// 参数值由编辑器/运行时按反射出的偏移写入;这里只声明参数块。\n";
+				text += "cbuffer ";
+				text += ParamCbufferName();
+				text += " : register(b";
+				text += std::to_string(ParamCbufferBinding());
+				text += ", space1)\n{\n";
+				text += members;
+				text += "};\n";
+			}
+			if (!textures.empty())
+			{
+				text += "// 贴图参数(采样器与贴图同名 + Sampler 后缀):\n";
+				text += textures;
+			}
 			return text;
 		}
 
@@ -616,7 +686,8 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 )WESURFACE";
 
 		std::string BuildWrapperSource(const std::string& contractText, const std::string& userSource,
-			const std::string& permutationKey, SurfaceShaderBackend backend)
+			const std::string& permutationKey, SurfaceShaderBackend backend,
+			const std::vector<MaterialParamDecl>& params)
 		{
 			std::string wrapper;
 			wrapper.reserve(contractText.size() + userSource.size() + 16384);
@@ -632,6 +703,7 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			wrapper += kSurfaceTemplatePrefix;
 			wrapper += "\n// ---- generated default surface (from the shared field table) ----\n";
 			wrapper += BuildDefaultSurfaceFunction();
+			wrapper += BuildParamBlockText(params);
 			wrapper += "\n// ---- user surface function ----\n#include \"";
 			wrapper += kUserSourceFileName;
 			wrapper += "\"\n";
@@ -675,12 +747,43 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 	std::string MaterialSurfaceCompiler::WrapSurfaceSource(const std::string& userSource,
 		SurfaceShaderBackend backend)
 	{
+		// 注解坏了时只丢参数块(这里是诊断用的"看包装源码"入口),编译入口会返回结构化错误。
+		std::vector<MaterialParamDecl> params;
+		std::string parseError;
+		if (!ParseMaterialParams(userSource, &params, &parseError))
+			params.clear();
+		return WrapSurfaceSourceWithParams(userSource, params, backend);
+	}
+
+	std::string MaterialSurfaceCompiler::WrapSurfaceSourceWithParams(const std::string& userSource,
+		const std::vector<MaterialParamDecl>& params, SurfaceShaderBackend backend)
+	{
 		std::string contractText;
 		if (!ReadAllText(fs::path(ContractHeaderPath()), contractText))
 			return {};
 		const std::string effectiveSource = Trim(userSource).empty()
 			? DefaultSurfaceFunctionSource() : userSource;
-		return BuildWrapperSource(contractText, effectiveSource, "", backend);
+		return BuildWrapperSource(contractText, effectiveSource, "", backend, params);
+	}
+
+	std::string MaterialSurfaceCompiler::BuildParamBlockSource(const std::vector<MaterialParamDecl>& params)
+	{
+		return BuildParamBlockText(params);
+	}
+
+	std::string MaterialSurfaceCompiler::AssemblyPath(const SurfaceArtifact& artifact)
+	{
+		if (artifact.CacheKey.empty())
+			return {};
+		const fs::path path = fs::path(WLD_INTERMEDIATE_DIR) / "SurfaceShaderCache"
+			/ artifact.CacheKey / kAssemblyFileName;
+		std::error_code ec;
+		if (!fs::is_regular_file(path, ec))
+			return {};
+		const uintmax_t size = fs::file_size(path, ec);
+		if (ec || size == 0)
+			return {};
+		return path.string();
 	}
 
 	size_t MaterialSurfaceCompiler::CacheHitCount()
@@ -725,6 +828,49 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 	SurfaceCompileResult MaterialSurfaceCompiler::CompileSurface(const std::string& source,
 		const std::string& permutationKey, SurfaceShaderBackend backend)
 	{
+		// M4-S2:注解是参数的事实源。解析失败 = 结构化诊断(带用户源行列号),不调用 dxc。
+		std::vector<MaterialParamDecl> params;
+		std::string parseError;
+		if (!ParseMaterialParams(source, &params, &parseError))
+		{
+			SurfaceCompileResult result;
+			SurfaceDiagnostic diagnostic;
+			diagnostic.Severity = "error";
+			diagnostic.Message = "material param annotation: " + parseError;
+			diagnostic.File = kUserSourceFileName;
+			diagnostic.InUserSource = true;
+			// 解析错误串是 `<行>:<列>: <原因>`;行列拿给编辑器定位。
+			const size_t firstColon = parseError.find(':');
+			const size_t secondColon = firstColon == std::string::npos ? std::string::npos
+				: parseError.find(':', firstColon + 1);
+			if (firstColon != std::string::npos && secondColon != std::string::npos)
+			{
+				try
+				{
+					diagnostic.UserLine = static_cast<uint32_t>(std::stoul(parseError.substr(0, firstColon)));
+					diagnostic.UserColumn = static_cast<uint32_t>(
+						std::stoul(parseError.substr(firstColon + 1, secondColon - firstColon - 1)));
+					diagnostic.Line = diagnostic.UserLine;
+					diagnostic.Column = diagnostic.UserColumn;
+				}
+				catch (const std::exception&)
+				{
+					diagnostic.UserLine = 0;
+					diagnostic.UserColumn = 0;
+				}
+			}
+			result.Diagnostics.push_back(std::move(diagnostic));
+			SurfaceArtifact ignoredLastGood;
+			result.LastGoodAvailable = LastGood(permutationKey, backend, ignoredLastGood);
+			return result;
+		}
+		return CompileSurfaceWithParams(source, params, permutationKey, backend);
+	}
+
+	SurfaceCompileResult MaterialSurfaceCompiler::CompileSurfaceWithParams(const std::string& source,
+		const std::vector<MaterialParamDecl>& params, const std::string& permutationKey,
+		SurfaceShaderBackend backend)
+	{
 		SurfaceCompileResult result;
 		const auto started = std::chrono::steady_clock::now();
 		const auto finish = [&result, started]()
@@ -749,6 +895,27 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 				return finish();
 			}
 
+			// 参数表的轻量自检(调用方可能直接给手工表):名字合法/唯一/不与引擎保留名冲突。
+			{
+				std::unordered_map<std::string, bool> seen;
+				for (const MaterialParamDecl& param : params)
+				{
+					const bool valid = IsUsableParamName(param.Name);
+					if (!valid || seen.count(param.Name) != 0)
+					{
+						SurfaceDiagnostic diagnostic;
+						diagnostic.Severity = "error";
+						diagnostic.Message = valid
+							? "material param '" + param.Name + "' is declared twice"
+							: "material param name '" + param.Name + "' is not a usable HLSL identifier "
+								"(reserved engine name or invalid characters)";
+						result.Diagnostics.push_back(std::move(diagnostic));
+						return finish();
+					}
+					seen.emplace(param.Name, true);
+				}
+			}
+
 			const std::string effectiveSource = Trim(source).empty()
 				? DefaultSurfaceFunctionSource() : source;
 
@@ -763,7 +930,7 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			}
 
 			const std::string wrapperSource = BuildWrapperSource(contractText, effectiveSource,
-				permutationKey, backend);
+				permutationKey, backend, params);
 			const uint64_t sourceHash = Fnv1a64String(effectiveSource);
 			uint64_t keyHash = Fnv1a64String(wrapperSource);
 			// 包装源码把用户源作为 #include 引用,所以用户源内容必须显式进键;
@@ -781,9 +948,12 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			const fs::path cacheRoot = fs::path(WLD_INTERMEDIATE_DIR) / "SurfaceShaderCache";
 			const fs::path keyDir = cacheRoot / keyHex;
 			const fs::path spvPath = keyDir / "surface.spv";
+			const fs::path asmPath = keyDir / kAssemblyFileName;
 
 			std::error_code ec;
-			if (fs::is_regular_file(spvPath, ec) && fs::file_size(spvPath, ec) > 0)
+			// 汇编(-Fc)是反射的输入:产物在但汇编丢了 → 当成未命中,重新编译补上。
+			if (fs::is_regular_file(spvPath, ec) && fs::file_size(spvPath, ec) > 0
+				&& fs::is_regular_file(asmPath, ec) && fs::file_size(asmPath, ec) > 0)
 			{
 				std::vector<uint8_t> cached;
 				if (ReadAllBytes(spvPath, cached) && !cached.empty())
@@ -825,9 +995,15 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			}
 
 			fs::remove(spvPath, ec);
+			fs::remove(asmPath, ec);
 			const std::string dxcPath = std::string(WLD_DXC_DIR) + "dxc.exe";
-			const std::string arguments = "-spirv -T ps_6_0 -E " + std::string(kSurfaceEntryPoint) +
-				" \"" + wrapperPath.string() + "\" -Fo \"" + spvPath.string() + "\"";
+			// -fvk-use-gl-layout:参数块用 std140 对齐。实测引擎现有 4 个 cbuffer 的成员偏移
+			// 在 DX 布局与 GL 布局下逐条相同(全 vec4/mat4 对齐),所以对既有管线零影响;
+			// 换来的是"标量/短向量参数块"在 Vulkan 与将来 GL(spirv-cross std140)下同一套偏移。
+			// -Fc:同时落一份 SPIR-V 汇编,参数反射(MaterialParams.cpp)直接读它。
+			const std::string arguments = "-spirv -fvk-use-gl-layout -T ps_6_0 -E "
+				+ std::string(kSurfaceEntryPoint) + " \"" + wrapperPath.string() + "\" -Fo \""
+				+ spvPath.string() + "\" -Fc \"" + asmPath.string() + "\"";
 			int exitCode = -1;
 			std::string toolOutput;
 			s_ToolInvocations.fetch_add(1, std::memory_order_relaxed);

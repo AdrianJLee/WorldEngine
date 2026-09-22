@@ -54,6 +54,35 @@ namespace World
 			if (AssetHotReloadTraceEnabled())
 				WLD_CORE_INFO("[asset-hot-reload] {0} {1}", format, path);
 		}
+
+		// M4-S2:shader(.hlsl)的注解参数表。读不到 / 注解坏了都不算材质失败 ——
+		// 材质照样可用(参数覆盖保留),原因进可读 warning。
+		struct ShaderParamTable
+		{
+			std::vector<MaterialParamDecl> Decls;
+			std::string Warning;
+		};
+
+		ShaderParamTable LoadShaderParamTable(const std::string& shaderPath)
+		{
+			ShaderParamTable result;
+			if (shaderPath.empty())
+				return result;
+			std::string source;
+			if (!MaterialIO::ReadFileText(shaderPath, source))
+			{
+				result.Warning = "shader '" + shaderPath
+					+ "' 读不到:参数默认值不可用(.wmat 里写的覆盖值保留)";
+				return result;
+			}
+			std::string parseError;
+			if (!ParseMaterialParams(source, &result.Decls, &parseError))
+			{
+				result.Decls.clear();
+				result.Warning = "shader '" + shaderPath + "' 的注解参数表解析失败: " + parseError;
+			}
+			return result;
+		}
 	}
 
 	MaterialLibrary& MaterialLibrary::Get()
@@ -170,9 +199,12 @@ namespace World
 		Ref<Material> material(new Material(desc, key));
 		material->m_ParentPath = document.ParentPath;
 		material->m_Overrides = document.Overridden;
+		material->m_HasShaderOverride = document.HasShader;
+		material->m_ParamOverrides = document.Params;
 		material->m_Parent = parent;
 		material->m_ParentWarning = parentError;
 		material->m_FileTime = FileWriteTime(key);
+		RefreshParams(*material);
 		m_Cache.emplace(key, material);
 
 		std::string warning = parsed.Error;
@@ -184,6 +216,20 @@ namespace World
 				.append(parentError).append("; 已退化为引擎内置默认");
 			WLD_CORE_WARN("[material] '{0}':父级 '{1}' 不可用({2}),已退化为引擎内置默认",
 				key, document.ParentPath, parentError);
+		}
+		if (!material->m_ShaderWarning.empty())
+		{
+			if (!warning.empty())
+				warning.append("; ");
+			warning.append(material->m_ShaderWarning);
+			WLD_CORE_WARN("[material] '{0}':{1}", key, material->m_ShaderWarning);
+		}
+		for (const std::string& paramWarning : material->m_ParamWarnings)
+		{
+			if (!warning.empty())
+				warning.append("; ");
+			warning.append(paramWarning);
+			WLD_CORE_WARN("[material] '{0}':{1}", key, paramWarning);
 		}
 		if (warning.empty())
 			m_Warnings.erase(key);
@@ -197,16 +243,44 @@ namespace World
 
 	void MaterialLibrary::AdoptResolved(Material& target, const Material& source)
 	{
-		const bool valuesChanged = !(target.m_Desc == source.m_Desc);
+		const bool valuesChanged = !(target.m_Desc == source.m_Desc)
+			|| target.m_ParamOverrides != source.m_ParamOverrides;
 		target.m_Desc = source.m_Desc;
 		target.m_ParentPath = source.m_ParentPath;
 		target.m_Overrides = source.m_Overrides;
+		target.m_HasShaderOverride = source.m_HasShaderOverride;
+		target.m_ParamOverrides = source.m_ParamOverrides;
+		target.m_ParamDecls = source.m_ParamDecls;
+		target.m_ParamWarnings = source.m_ParamWarnings;
+		target.m_ShaderWarning = source.m_ShaderWarning;
 		target.m_Parent = source.m_Parent;
 		target.m_ParentWarning = source.m_ParentWarning;
 		target.m_FileTime = source.m_FileTime;
 		target.m_Dirty = false;
 		if (valuesChanged)
 			target.BumpRevision();   // 值真的变了才前进(与 M3 前 SetDesc 的口径一致)
+	}
+
+	void MaterialLibrary::RefreshParams(Material& material)
+	{
+		// 本文件写过 Shader: → 按它读注解;否则继承父级已解析的参数表;都没有 → 空表。
+		if (material.m_HasShaderOverride)
+		{
+			const ShaderParamTable table = LoadShaderParamTable(material.GetDesc().ShaderPath);
+			material.m_ParamDecls = table.Decls;
+			material.m_ShaderWarning = table.Warning;
+		}
+		else if (const Ref<Material>& parent = material.ResolvedParent())
+		{
+			material.m_ParamDecls = parent->Params();
+			material.m_ShaderWarning = parent->ShaderWarning();
+		}
+		else
+		{
+			material.m_ParamDecls.clear();
+			material.m_ShaderWarning.clear();
+		}
+		material.RecomputeParamWarnings();
 	}
 
 	Ref<Material> MaterialLibrary::Load(const std::string& path, std::string* error)
@@ -297,11 +371,14 @@ namespace World
 
 		// M3:写出 = 覆盖字段 + Parent(没有父级时不写 Parent);
 		// 全字段 + 无父级的老形态仍然按 v1 写,与 M3 前逐字节一致。
+		// M4-S2:再加 `Shader:`(本文件写过才写)与 `Params:`(只写本文件覆盖项)。
 		MaterialDocument document;
 		document.ParentPath = material->m_ParentPath;
 		document.Values = material->GetDesc();
 		document.Overridden = material->m_Overrides;
-		const std::string text = MaterialIO::SerializeDocument(document);
+		document.HasShader = material->m_HasShaderOverride;
+		document.Params = material->m_ParamOverrides;
+		const std::string text = MaterialIO::SerializeDocument(document, &material->m_ParamDecls);
 		if (!MaterialIO::WriteFileText(key, text, error))
 			return false;
 
@@ -316,6 +393,10 @@ namespace World
 		if (!MaterialIO::ParseDocument(text, verifyDocument, &verifyError).Success
 			|| verifyDocument.ParentPath != document.ParentPath
 			|| verifyDocument.Overridden != document.Overridden
+			|| verifyDocument.HasShader != document.HasShader
+			// 没写 `Shader:` 时文档里的路径是**继承来的**(不落盘),不参与回读比较。
+			|| (document.HasShader && verifyDocument.Values.ShaderPath != document.Values.ShaderPath)
+			|| !ParamOverridesEquivalent(verifyDocument.Params, document.Params, material->m_ParamDecls)
 			|| !MaterialIO::EquivalentForSave(
 				MaterialIO::MergeDocument(verifyDocument, parentDesc), material->GetDesc()))
 		{

@@ -22,6 +22,9 @@ namespace World
 	//    合并结果写进 GetDesc();循环引用 → 拒绝 + 可读链路;父级缺失/坏 → 退化成引擎内置默认
 	//    + WLD_CORE_WARN(子材质仍可用,ParentWarning() 里能看到原因)。
 	//    保存时只写覆盖字段 + Parent(全字段 + 无父级仍然写 v1,老文件逐字节不变)。
+	//  - M4-S2:.wmat 还可以引用 `.hlsl`(Shader:)并写参数覆盖(Params:)。Load 会读那份
+	//    `.hlsl` 的注解参数表(读不到 → 可读警告 + 参数默认值不可用,材质仍可用),
+	//    Params()/ResolvedParamValue()/ParamWarnings() 供编辑器直接渲染;保存只写覆盖项。
 	class WLD_API MaterialLibrary
 	{
 	public:
@@ -53,6 +56,12 @@ namespace World
 
 		// 重新从磁盘读取该路径(含父级链)并**原地更新**已有实例(保留编辑器里的引用)。
 		bool Reload(const std::string& path, std::string* error = nullptr);
+
+		// M4-S2:按当前 shader 重新读注解参数表并重算参数警告(不读/写 .wmat)。
+		//  - 本文件写过 `Shader:` → 读那份 .hlsl;
+		//  - 否则继承父级已解析的参数表(没有父级 = 空表);
+		// SetShaderPath / RevertShader 会立刻调用它;编辑器在 .hlsl 改动后也可以手动调。
+		void RefreshParams(Material& material);
 
 		// 磁盘文件比内存态新(外部编辑器改动)时返回 true;供面板提示/自动重载。
 		bool IsFileNewer(const Material& material) const;

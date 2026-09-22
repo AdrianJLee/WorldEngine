@@ -9,7 +9,9 @@ namespace World::Asset
 {
 	// 内置导入器:PassThrough(纹理/字体/图标原样)、Scene(.wd 原样,P2 规范化)、
 	// Script(.lua/.luau → W7-2 起产出 WSL1 字节码容器,v2)、
-	// Model(D5b:.gltf/.glb → .wmodel v2 + .wmat + 贴图的多产物导入,v1)。
-	// 默认注册顺序:Scene/Script/Model 在前,PassThrough 兜底。
+	// Model(D5b:.gltf/.glb → .wmodel v2 + .wmat + 贴图的多产物导入,v1)、
+	// MaterialShader(M4-S2:.hlsl 材质表面函数原样复制;cook 指纹 = 源内容哈希,
+	// 改了注解/代码就重烘,v1)。
+	// 默认注册顺序:Scene/Script/Model/MaterialShader 在前,PassThrough 兜底。
 	WLD_API std::vector<std::shared_ptr<IAssetImporter>> DefaultImporters();
 }
