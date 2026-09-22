@@ -389,6 +389,25 @@ namespace World
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(viewPopup);
 		}
+		// U22(用户 §5.5「所有视口类窗口都要有坐标系来表明方向」):主视口右下角
+		// 半透明三轴指示(X 红 / Y 绿 / Z 蓝),朝向取**当前画面用的相机基** ——
+		// Play 下是场景主相机、2D 下是正交相机(此时 Z 投影为点,自然只剩 X/Y)。
+		{
+			const Wui::GizmoCamera axisCamera = m_Host.GetGizmoCamera();
+			const Wui::WuiRect axisRect = ViewChrome::DrawAxisIndicator(ctx, sceneRect,
+				axisCamera.Right, axisCamera.Up);
+			float axisYaw = 0.0f;
+			float axisPitch = 0.0f;
+			ViewChrome::BasisYawPitch(axisCamera.Forward, &axisYaw, &axisPitch);
+			ViewChrome::RegisterAxisNode(axisRect, "viewport.axis",
+				Wui::Tr("viewport.axis", "Viewport axes"),
+				ViewChrome::AxisReadout(axisYaw, axisPitch, !m_Host.IsViewportCamera3D()),
+				Wui::Tr("viewport.axis.tooltip",
+					"World axes drawn in the corner of the viewport: X red, Y green, Z blue. "
+					"They follow the viewport camera; in 2D orthographic views only X and Y are visible."));
+			// 与其它悬浮层同一条口径:指示器下面的拾取/gizmo 不吃这一下的点击。
+			ctx.RegisterOverlayRect(axisRect);
+		}
 		ctx.PopOverlay();
 
 		const bool hovered = ctx.IsHovered(rect);

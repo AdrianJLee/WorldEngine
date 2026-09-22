@@ -71,6 +71,9 @@ namespace World
 			bool ReadOnly = false;
 			bool Modified = false;
 			bool HasReset = false;
+			// U22:预览组按标签过滤 —— false = 该行属于别的标签(不画、不登记、不占高)。
+			// 搜索态下强制 true(搜索要能找到四个标签里的任何一行)。
+			bool InTab = true;
 			float Height = 26.0f;
 		};
 
@@ -145,6 +148,10 @@ namespace World
 		float m_CameraMaxDistance = 30.0f;
 		float m_FocusDistance = 3.0f;       // 双击/F 取景距离(按网格尺寸算)
 		glm::vec2 m_LastMouse { 0.0f };
+		// U22:右下角坐标系指示器的矩形(用于登记 a11y 节点;方案 §5.5)。
+		Wui::WuiRect m_AxisRect;
+		// U22:预览设置分段标签(0=网格 / 1=背景 / 2=光照 / 3=显示)。会话内记住选中项。
+		int m_PreviewTab = 0;
 
 		// ---- GPU 资源(预览专用,惰性创建) ----
 		Rhi::Handle<Rhi::RenderPass> m_PreviewPass;

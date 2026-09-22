@@ -996,5 +996,20 @@
   "panel.material.status.revealed": "已在资源管理器中定位: ",
   "panel.material.status.reveal_failed": "定位失败",
   "panel.material.status.reveal_missing": "定位失败: .wmat 还没落盘(先保存)",
-  "panel.material.status.reveal_unsupported": "定位文件只在 Windows 上实现"
+  "panel.material.status.reveal_unsupported": "定位文件只在 Windows 上实现",
+  "panel.material.group.items": "项",
+  "panel.material.group.tooltip": "分组容器:组头与本组的每一行都画在同一个框里(行做了缩进,表示归属),左侧竖条标出这一组的范围。",
+  "panel.material.preview.tab.tooltip": "预览设置按标签分开:预览场景不变,变的只是你在看哪一组选项。",
+  "material.preview.tab.mesh": "网格",
+  "material.preview.tab.bg": "背景",
+  "material.preview.tab.light": "光照",
+  "material.preview.tab.display": "显示",
+  "panel.material.axis": "预览坐标系",
+  "panel.material.axis.tooltip": "预览右下角的世界坐标系:X 红 / Y 绿 / Z 蓝,随预览相机转动;value 里是该相机的 yaw/pitch(度)。",
+  "panel.model.axis": "预览坐标系",
+  "panel.model.axis.tooltip": "预览右下角的世界坐标系:X 红 / Y 绿 / Z 蓝,随预览相机转动;value 里是该相机的 yaw/pitch(度)。",
+  "panel.prefab.axis": "预览坐标系",
+  "panel.prefab.axis.tooltip": "预览右下角的世界坐标系:X 红 / Y 绿 / Z 蓝,随预览相机转动;value 里是该相机的 yaw/pitch(度)。",
+  "viewport.axis": "视口坐标系",
+  "viewport.axis.tooltip": "视口右下角的世界坐标系:X 红 / Y 绿 / Z 蓝,随当前视口相机转动;2D 正交视图只画 X/Y。"
 }

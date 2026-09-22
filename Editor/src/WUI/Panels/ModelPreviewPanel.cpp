@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "ModelPreviewPanel.h"
+#include "ViewportPanel.h"
 
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/ProjectionConventions.h"
@@ -962,7 +963,9 @@ namespace World
 		const uint64_t textureId = RenderPreview();
 		if (textureId != 0)
 		{
-			Wui::Image(ctx, previewRect, textureId, { 0, 0, 1, 1 }, theme);
+			// U22:离屏预览按引擎统一口径贴({0,1,1,-1});三个预览面板共用同一份常量,
+			// 漏翻会让画面上下镜像(拖拽手感与主视口相反)。
+			Wui::Image(ctx, previewRect, textureId, ViewChrome::kPreviewImageUv, theme);
 			const bool hovered = ctx.IsHovered(previewRect);
 			if (hovered && ctx.Input().Wheel != 0.0f)
 			{
@@ -979,9 +982,8 @@ namespace World
 			{
 				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
 				m_LastMouse = ctx.Input().MousePos;
-				m_OrbitYaw -= delta.x * 0.01f;
-				// 与 PrefabPanel 同一条口径(2026-09-21 用户实测上下反了):鼠标向下拖 = 相机往下走。
-				m_OrbitPitch = std::clamp(m_OrbitPitch - delta.y * 0.01f, -1.45f, 1.45f);
+				// U22:符号走 ViewChrome::ApplyOrbitDrag(与材质/预制体预览 + 主视口唯一事实源)。
+				ViewChrome::ApplyOrbitDrag(m_OrbitYaw, m_OrbitPitch, delta);
 			}
 			if (m_Orbiting && !ctx.Input().MouseDown[0])
 				m_Orbiting = false;
@@ -991,6 +993,18 @@ namespace World
 				FramePreview();
 			if (hovered)
 				ctx.SetCursor(m_Orbiting ? Wui::WuiCursor::Hand : Wui::WuiCursor::Arrow);
+			// U22:右下角坐标系指示器(方案 §5.5),朝向与上面渲染用的基一致。
+			glm::vec3 axisRight { 1.0f, 0.0f, 0.0f };
+			glm::vec3 axisUp { 0.0f, 1.0f, 0.0f };
+			ViewChrome::OrbitBasis(m_OrbitYaw, m_OrbitPitch, &axisRight, &axisUp, nullptr);
+			const Wui::WuiRect axisRect = ViewChrome::DrawAxisIndicator(ctx, previewRect,
+				axisRight, axisUp);
+			ViewChrome::RegisterAxisNode(axisRect, "model.axis",
+				Wui::Tr("panel.model.axis", "Preview axes"),
+				ViewChrome::AxisReadout(glm::degrees(m_OrbitYaw), glm::degrees(m_OrbitPitch), false),
+				Wui::Tr("panel.model.axis.tooltip",
+					"World axes in the preview corner: X red, Y green, Z blue. They follow the "
+					"preview camera; yaw/pitch of that camera are in the value."));
 		}
 		else
 		{

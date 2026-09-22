@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "MaterialEditorPanel.h"
+#include "ViewportPanel.h"
 
 #include "World/Core/KeyCodes.h"
 #include "World/Renderer/ProjectionConventions.h"
@@ -48,6 +49,51 @@ namespace World
 		// UV 棋盘格:每个方向 8 格(方案 §1.C「看平铺是否拉伸」)。
 		constexpr float kUvCheckerCells = 8.0f;
 		constexpr float kPi = 3.14159265358979323846f;
+		// U22:参数区"组 = 容器"的排版(组头 + 子项缩进 + 组间留白/描边)。
+		constexpr float kGroupIndent = 10.0f;        // 子项缩进:一眼看出这几行属于上面那个组头
+		constexpr float kGroupGap = 6.0f;            // 组之间的留白(配合容器描边就是分隔线)
+		constexpr float kPreviewTabHeight = 26.0f;   // 预览组顶部的分段标签条(网格|背景|光照|显示)
+
+		// 预览组的分段标签:行 key → 标签下标(0=网格 1=背景 2=光照 3=显示)。
+		int PreviewTabFor(const std::string& key)
+		{
+			if (key == std::string("preview.mesh"))
+				return 0;
+			if (key == std::string("preview.bg"))
+				return 1;
+			if (key.rfind("preview.light", 0) == 0)
+				return 2;
+			return 3;   // preview.wireframe / preview.normals / preview.uvchecker
+		}
+
+		// U22:写进 .wmat 的标量/颜色先量化到 1e-3。
+		//
+		// 为什么:滑杆/色板产生的是全精度 float(拖一下就是 0.4997164…),而 `.wmat` 写出
+		// 用的是 6 位小数(Material.cpp FormatFloat,std::fixed + precision(6)),
+		// 保存时的**回读校验**按逐位相等比对(`verify != material->GetDesc()`)——
+		// 于是"拖滑杆 → 保存"会被判成写入校验失败:状态栏报 "Save failed: 写入校验失败",
+		// 而磁盘其实已经写出去了,**脏标记永远清不掉**(2026-09-22 实测复现,
+		// 证据:build/x64-Debug/u22-material/dirty-status.png)。
+		// 量化到 3 位小数后,内存值与文件值逐位一致,回读校验通过,手感无差别。
+		// 真正的根治在 World 侧(回读校验按容差比较,或写出更高精度)—— 已记进 U22 报告。
+		constexpr float kMaterialValueStep = 1000.0f;
+
+		float QuantizeMaterialValue(float value)
+		{
+			return std::round(value * kMaterialValueStep) / kMaterialValueStep;
+		}
+
+		glm::vec4 QuantizeMaterialValue(const glm::vec4& value)
+		{
+			return { QuantizeMaterialValue(value.x), QuantizeMaterialValue(value.y),
+				QuantizeMaterialValue(value.z), QuantizeMaterialValue(value.w) };
+		}
+
+		glm::vec3 QuantizeMaterialValue(const glm::vec3& value)
+		{
+			return { QuantizeMaterialValue(value.x), QuantizeMaterialValue(value.y),
+				QuantizeMaterialValue(value.z) };
+		}
 
 		std::string ShortenPath(const std::string& path)
 		{
@@ -1704,29 +1750,29 @@ namespace World
 
 		if (row.Key == std::string("base"))
 		{
-			glm::vec4 color = desc.BaseColor;
+			glm::vec4 color = desc.BaseColor;   // 量化在下面写回时做(见 QuantizeMaterialValue)
 			if (Wui::ColorField(ctx, controlId, controlRect, color, theme))
-				applyEdit([&] { m_Material->SetBaseColor(color); });
+				applyEdit([&] { m_Material->SetBaseColor(QuantizeMaterialValue(color)); });
 		}
 		else if (row.Key == std::string("metallic"))
 		{
 			float value = desc.Metallic;
 			Wui::SliderFloat(ctx, controlId, controlRect, value, 0.0f, 1.0f, theme);
 			if (value != desc.Metallic)
-				applyEdit([&] { m_Material->SetMetallic(value); });
+				applyEdit([&] { m_Material->SetMetallic(QuantizeMaterialValue(value)); });
 		}
 		else if (row.Key == std::string("roughness"))
 		{
 			float value = desc.Roughness;
 			Wui::SliderFloat(ctx, controlId, controlRect, value, 0.02f, 1.0f, theme);
 			if (value != desc.Roughness)
-				applyEdit([&] { m_Material->SetRoughness(value); });
+				applyEdit([&] { m_Material->SetRoughness(QuantizeMaterialValue(value)); });
 		}
 		else if (row.Key == std::string("emissive"))
 		{
 			glm::vec3 value = desc.Emissive;
 			if (Wui::Vec3Field(ctx, controlId, controlRect, value, 0.02f, 0.0f, 8.0f, theme, 0))
-				applyEdit([&] { m_Material->SetEmissive(value); });
+				applyEdit([&] { m_Material->SetEmissive(QuantizeMaterialValue(value)); });
 		}
 		else if (row.Key == std::string("blend"))
 		{
@@ -1959,11 +2005,15 @@ namespace World
 				if (haystack.find(needle) == std::string::npos)
 					continue;
 			}
+			// U22:预览组按当前标签过滤(搜索态不过滤:搜索结果要跨标签可见,
+			// 与"搜索时自动展开分组"同一条口径)。
+			plan.InTab = needle.empty() ? (plan.Group != std::string("preview")
+				|| PreviewTabFor(plan.Key) == m_PreviewTab) : true;
 			plan.Height = stacked ? (plan.ReadOnly ? 34.0f : kRowHeightStacked) : (plan.ReadOnly ? 20.0f : kRowHeight);
 			plans.push_back(std::move(plan));
 		}
 
-		// ---- 内容高度(折叠的组只占组头)----
+		// ---- 内容高度(折叠的组只占组头;展开的组 = 容器块,含标签条与子项)----
 		float contentHeight = 6.0f;
 		for (const GroupDesc& group : kGroups)
 		{
@@ -1973,11 +2023,13 @@ namespace World
 					any = true;
 			if (!any)
 				continue;
-			contentHeight += kGroupHeaderHeight;
+			contentHeight += kGroupHeaderHeight + kGroupGap;
 			if (!m_SectionOpen[group.Index] && needle.empty())
 				continue;
+			if (group.Key == std::string("preview"))
+				contentHeight += kPreviewTabHeight;
 			for (const RowPlan& plan : plans)
-				if (plan.Group == group.Key)
+				if (plan.Group == group.Key && plan.InTab)
 					contentHeight += plan.Height;
 		}
 		const float maxScroll = std::max(0.0f, contentHeight - contentRect.H);
@@ -1995,23 +2047,75 @@ namespace World
 			if (rows.empty())
 				continue;
 			const bool open = m_SectionOpen[group.Index] || !needle.empty();
+			const bool previewGroup = group.Key == std::string("preview");
 			const int modified = GroupModifiedCount(group.Key);
+			const int rowCount = static_cast<int>(rows.size());
+			// U22(用户 §5.2「折叠设计的怪怪的,分别区分不出来折叠内容属于哪里」):
+			// 组 = **容器**:底 + 圆角描边 + 左侧归属竖条 + 子项缩进 + 组间留白。
+			// 先把整块尺寸算出来(组头 + 标签条 + 属于本标签的行),再一次性画底。
+			float blockHeight = kGroupHeaderHeight;
+			if (open)
+			{
+				if (previewGroup)
+					blockHeight += kPreviewTabHeight;
+				for (const RowPlan* plan : rows)
+					if (plan->InTab)
+						blockHeight += plan->Height;
+			}
+			const Wui::WuiRect blockRect { contentRect.X + 2.0f, y - 3.0f,
+				std::max(40.0f, contentRect.W - 12.0f), blockHeight + 4.0f };
+			// 滚动裁剪由 BeginScrollArea(ClipPush)负责,这里只跳过"整块在视口之外"的情况。
+			const bool blockVisible = (blockRect.Y + blockRect.H > contentRect.Y)
+				&& (blockRect.Y < contentRect.Y + contentRect.H);
+			if (blockVisible)
+			{
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, blockRect, theme.ContentBg, 6.0f });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, blockRect, theme.Border,
+					6.0f, 1.0f });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+					{ blockRect.X + 1.0f, blockRect.Y + 5.0f, 2.0f,
+						std::max(6.0f, blockRect.H - 10.0f) },
+					modified > 0 ? theme.Warning : theme.BorderStrong, 1.0f });
+				// 容器节点(只读):脚本按它断言"组头与本组子项都落在这块容器里"(归属关系),
+				// 也方便无障碍读屏讲清"这些行属于哪一组"。
+				Wui::WuiAccessNode groupNode;
+				groupNode.Id = Wui::HashId((std::string("material.group.") + group.Key).c_str());
+				groupNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				groupNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				groupNode.Kind = "group";
+				groupNode.Label = GroupLabel(group);
+				groupNode.Value = std::to_string(rowCount) + " items, "
+					+ std::to_string(modified) + " modified";
+				groupNode.Tooltip = Wui::Tr("panel.material.group.tooltip",
+					"Group container: its header and every parameter row of this group are drawn "
+					"inside this rectangle (rows are indented to show ownership).");
+				groupNode.Rect = blockRect;
+				groupNode.Enabled = true;
+				groupNode.Interactive = false;
+				groupNode.Visible = true;
+				Wui::WuiAccessibility::Get().Register(groupNode);
+			}
 			const std::string headerId = std::string("material.section.") + group.Key;
-			const Wui::WuiRect headerRect { contentRect.X, y, contentRect.W, kGroupHeaderHeight - 4.0f };
+			const Wui::WuiRect headerRect { blockRect.X + 4.0f, y, std::max(40.0f, blockRect.W - 8.0f),
+				kGroupHeaderHeight - 4.0f };
 			// 与行同口径:滚出视口的组头既不画也不登记(否则树里会出现"用户看不见的节点")。
 			const bool headerVisible = (headerRect.Y + headerRect.H > contentRect.Y)
 				&& (headerRect.Y < contentRect.Y + contentRect.H);
 			if (headerVisible)
 			{
 				const bool hovered = ctx.IsHovered(headerRect);
-				Wui::HoverRow(ctx, headerRect, hovered, false, theme, 3.0f);
-				Wui::Label(ctx, { headerRect.X + 6.0f, headerRect.Y + 4.0f }, open ? "v" : ">",
+				Wui::HoverRow(ctx, headerRect, hovered, false, theme, 4.0f);
+				Wui::Label(ctx, { headerRect.X + 8.0f, headerRect.Y + 4.0f }, open ? "v" : ">",
 					theme.TextMuted, 12.0f);
-				Wui::Label(ctx, { headerRect.X + 20.0f, headerRect.Y + 4.0f }, GroupLabel(group),
+				Wui::Label(ctx, { headerRect.X + 22.0f, headerRect.Y + 4.0f }, GroupLabel(group),
 					theme.Text, 13.0f);
-				const std::string countText = modified > 0
-					? std::to_string(modified) + " " + Wui::Tr("panel.material.group.modified", "modified")
-					: Wui::Tr("panel.material.group.defaults", "defaults");
+				// 折叠后也要能看出这一组里有多少项、多少项已改(用户 §5.2)。
+				const std::string countText = std::to_string(rowCount) + " "
+					+ Wui::Tr("panel.material.group.items", "items")
+					+ (modified > 0
+						? std::string(" · ") + std::to_string(modified) + " "
+							+ Wui::Tr("panel.material.group.modified", "modified")
+						: std::string(" · ") + Wui::Tr("panel.material.group.defaults", "defaults"));
 				const float countWidth = ctx.MeasureTextWidth(countText, 11.0f);
 				Wui::Label(ctx, { headerRect.X + std::max(24.0f, headerRect.W - countWidth - 8.0f),
 					headerRect.Y + 6.0f }, countText,
@@ -2030,7 +2134,7 @@ namespace World
 					node.Kind = "section";
 					node.Label = GroupLabel(group);
 					node.Value = (open ? std::string("expanded") : std::string("collapsed")) + ", "
-						+ std::to_string(modified) + " modified";
+						+ std::to_string(rowCount) + " items, " + std::to_string(modified) + " modified";
 					node.Tooltip = sectionDoc;
 					node.Rect = headerRect;
 					node.Enabled = true;
@@ -2042,9 +2146,62 @@ namespace World
 			}
 			y += kGroupHeaderHeight;
 			if (!open)
+			{
+				y += kGroupGap;
 				continue;
+			}
+			// U22(用户 §5.3「关于预览的设置选项用不同的 tag 分开」):预览组顶部一条
+			// 分段标签条,一次只放对应标签的控件;选中项在会话内记住(成员变量)。
+			if (previewGroup)
+			{
+				const float tabY = y;
+				y += kPreviewTabHeight;
+				const Wui::WuiRect tabRect { blockRect.X + 6.0f, tabY + 1.0f,
+					std::max(60.0f, blockRect.W - 16.0f), kPreviewTabHeight - 7.0f };
+				const bool tabVisible = (tabRect.Y + tabRect.H > contentRect.Y)
+					&& (tabRect.Y < contentRect.Y + contentRect.H);
+				if (tabVisible)
+				{
+					const char* tabKeys[4] = { "mesh", "bg", "light", "display" };
+					const std::vector<std::string> tabLabels {
+						Wui::Tr("material.preview.tab.mesh", "Mesh"),
+						Wui::Tr("material.preview.tab.bg", "Background"),
+						Wui::Tr("material.preview.tab.light", "Lighting"),
+						Wui::Tr("material.preview.tab.display", "Display") };
+					int active = std::clamp(m_PreviewTab, 0, 3);
+					if (Wui::TabBar(ctx, Wui::HashId("material.preview.tabs"), tabRect, tabLabels,
+						active, theme))
+						m_PreviewTab = active;
+					// 额外登记**稳定 id**(material.preview.tab.<key>):脚本按 id 点击/断言,
+					// 不依赖本地化文案,也不用去猜 TabBar 的派生 id。
+					const float tabWidth = tabRect.W / 4.0f;
+					for (int index = 0; index < 4; ++index)
+					{
+						Wui::WuiAccessNode node;
+						node.Id = Wui::HashId((std::string("material.preview.tab.")
+							+ tabKeys[index]).c_str());
+						node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+						node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+						node.Kind = "tab";
+						node.Label = tabLabels[static_cast<size_t>(index)];
+						node.Value = index == active ? "true" : "false";
+						node.Tooltip = Wui::Tr("panel.material.preview.tab.tooltip",
+							"Preview settings are split into tabs: the preview scene never changes, "
+							"only which options you are looking at.");
+						node.Rect = { tabRect.X + tabWidth * static_cast<float>(index), tabRect.Y,
+							tabWidth, tabRect.H };
+						node.Enabled = true;
+						node.Interactive = true;
+						node.Visible = true;
+						Wui::WuiAccessibility::Get().Register(node);
+					}
+				}
+			}
 			for (const RowPlan* plan : rows)
 			{
+				// 不属于当前预览标签的行:不画、不登记、不占高(搜索态下 InTab 恒为 true)。
+				if (!plan->InTab)
+					continue;
 				// 校验条目点击后的定位:在**可见性判断之前**处理 —— 目标行通常正在视口外,
 				// 那正是要滚过去的情况(下一帧生效,行高是本帧算出来的)。
 				if (!m_RevealField.empty() && plan->Key == m_RevealField)
@@ -2065,9 +2222,12 @@ namespace World
 					continue;
 				}
 				++drawnRows;
-				DrawParameterRow(ctx, theme, *plan, rect.X, y, rect.W, stacked);
+				// 子项缩进:与组头左侧竖条对齐,让"这些行属于上面那一组"一眼可见。
+				DrawParameterRow(ctx, theme, *plan, contentRect.X + kGroupIndent, y,
+					std::max(80.0f, contentRect.W - kGroupIndent - 10.0f), stacked);
 				y += plan->Height;
 			}
+			y += kGroupGap;
 		}
 		Wui::EndScrollArea(ctx);
 		// 滚动指示条(纯视觉,不参与命中):参数比视口长时给一个位置/比例读数 ——
@@ -2158,6 +2318,10 @@ namespace World
 						const GroupDesc* target = FindGroup(kRowSpecs[specIndex].Group);
 						if (target)
 							m_SectionOpen[target->Index] = true;
+						// U22:目标行在预览组的非当前标签里时,连标签一起切过去 ——
+						// 否则"点击定位"会落到一个当前不显示的行上。
+						if (std::string(kRowSpecs[specIndex].Group) == std::string("preview"))
+							m_PreviewTab = PreviewTabFor(kRowSpecs[specIndex].Key);
 					}
 					m_RevealField = entry.Field;
 					m_RevealFrames = 6;
@@ -2197,7 +2361,10 @@ namespace World
 					Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f } };
 				ctx.Commands().push_back(std::move(gradient));
 			}
-			Wui::Image(ctx, pixelView, textureId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+			// U22:离屏预览按引擎统一口径贴({0,1,1,-1},与主视口同一行序约定)。
+			// 之前用 {0,0,1,1} 会上下镜像:主光(仰角 +45°)会画到球的下方,
+			// 用户看到的就是"上下反、左右反"(实测:与 capture.texture 的 flipV 相关度 0.98)。
+			Wui::Image(ctx, pixelView, textureId, ViewChrome::kPreviewImageUv, theme);
 			// 相机:左键轨道旋转 / 滚轮推拉 / 双击或 F 取景(与模型/预制体面板同一手感)。
 			const bool hovered = ctx.IsHovered(pixelView);
 			if (ctx.Input().Wheel != 0.0f && hovered)
@@ -2215,10 +2382,10 @@ namespace World
 			{
 				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
 				m_LastMouse = ctx.Input().MousePos;
-				m_OrbitYaw -= delta.x * 0.01f;
-				// 鼠标向下拖 = 相机往下走(看物体底部):屏幕 Y 向下为正,所以这里取负号。
-				// 与模型/预制体面板一起在 2026-09-21 翻正(用户实测"上下操作反了")。
-				m_OrbitPitch = std::clamp(m_OrbitPitch - delta.y * 0.01f, -kPitchLimit, kPitchLimit);
+				// U22:符号只有一处定义(三个预览面板 + 主视口共用 ViewChrome::ApplyOrbitDrag)。
+				// 2026-09-22 用户实测材质预览"上下反、左右反"的真因是**画面上下镜像**
+				// (离屏纹理按 {0,1,1,-1} 才正立,见上面 Image 的 UV),不是拖拽符号本身。
+				ViewChrome::ApplyOrbitDrag(m_OrbitYaw, m_OrbitPitch, delta, kPitchLimit);
 			}
 			if (m_Orbiting && !ctx.Input().MouseDown[0])
 				m_Orbiting = false;
@@ -2226,12 +2393,19 @@ namespace World
 				FramePreview();
 			if (hovered)
 				ctx.SetCursor(m_Orbiting ? Wui::WuiCursor::Hand : Wui::WuiCursor::Arrow);
-			// 角标:实际离屏目标分辨率(与预制体面板同一口径)。
+			// U22:坐标系指示器(方案 §5.5)—— 右下角 48px,跟随预览相机朝向。
+			// 画在这里 = 画在预览图像之后,天然压在图像之上;轴顶点用与渲染**同一份**
+			// 基向量算(OrbitBasis),不另写一套投影,避免"图正了、轴标还是反的"。
+			glm::vec3 axisRight { 1.0f, 0.0f, 0.0f };
+			glm::vec3 axisUp { 0.0f, 1.0f, 0.0f };
+			ViewChrome::OrbitBasis(m_OrbitYaw, m_OrbitPitch, &axisRight, &axisUp, nullptr);
+			m_AxisRect = ViewChrome::DrawAxisIndicator(ctx, pixelView, axisRight, axisUp);
+			// 角标:实际离屏目标分辨率(与预制体面板同一口径);移到右上,给轴标让位。
 			const std::string targetLabel = std::to_string(m_PreviewTargetW) + "×"
 				+ std::to_string(m_PreviewTargetH) + "px";
 			const float labelWidth = ctx.MeasureTextWidth(targetLabel, 10.0f);
 			Wui::Label(ctx, { pixelView.X + std::max(4.0f, pixelView.W - labelWidth - 6.0f),
-				pixelView.Y + pixelView.H - 14.0f }, targetLabel, theme.TextDisabled, 10.0f);
+				pixelView.Y + 4.0f }, targetLabel, theme.TextDisabled, 10.0f);
 			Wui::Label(ctx, { pixelView.X + 6.0f, pixelView.Y + pixelView.H - 14.0f },
 				EllipsizeToWidth(ctx, hint, std::max(40.0f, pixelView.W - 90.0f), 11.0f),
 				theme.TextDisabled, 11.0f);
@@ -2283,6 +2457,13 @@ namespace World
 		RegisterReadOnlyNode(Wui::HashId("material.preview.camera"),
 			Wui::Tr("panel.material.preview.camera", "Preview camera"), cameraText,
 			{ rect.X, rect.Y + 14.0f, std::max(20.0f, rect.W), 14.0f }, hint);
+		// U22:坐标系指示器读数(探针按它断言"拖拽后 yaw/pitch 的符号"与方向一致性)。
+		ViewChrome::RegisterAxisNode(m_AxisRect, "material.axis",
+			Wui::Tr("panel.material.axis", "Preview axes"),
+			ViewChrome::AxisReadout(glm::degrees(m_OrbitYaw), glm::degrees(m_OrbitPitch), false),
+			Wui::Tr("panel.material.axis.tooltip",
+				"World axes drawn in the preview's corner: X red, Y green, Z blue. "
+				"They follow the preview camera; yaw/pitch of that camera are in the value."));
 		return rect.H;
 	}
 

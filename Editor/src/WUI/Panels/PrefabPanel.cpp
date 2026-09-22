@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "PrefabPanel.h"
+#include "ViewportPanel.h"
 
 #include "EditorAssetCatalog.h"
 
@@ -1292,7 +1293,8 @@ namespace World
 				std::round(view.Y * uiScale) / uiScale,
 				static_cast<float>(std::lround(view.W * uiScale)) / uiScale,
 				static_cast<float>(std::lround(view.H * uiScale)) / uiScale };
-			Wui::Image(ctx, pixelView, textureId, { 0.0f, 0.0f, 1.0f, 1.0f }, theme);
+			// U22:离屏预览按引擎统一口径贴({0,1,1,-1});三个预览面板共用同一份常量。
+			Wui::Image(ctx, pixelView, textureId, ViewChrome::kPreviewImageUv, theme);
 			// 轨道旋转(拖拽)/ 滚轮缩放 / 双击或 F 取景(与模型预览同一套手感)。
 			if (ctx.Input().Wheel != 0.0f && ctx.IsHovered(view))
 			{
@@ -1309,11 +1311,8 @@ namespace World
 			{
 				const glm::vec2 delta = ctx.Input().MousePos - m_LastMouse;
 				m_LastMouse = ctx.Input().MousePos;
-				m_OrbitYaw -= delta.x * 0.01f;
-				// 鼠标向下拖 = 相机往下走(看物体底部):屏幕 Y 向下为正,所以这里取负号。
-				// 2026-09-21 用户实测"上下操作反了"→ 与 ModelPreviewPanel 一起翻正。
-				m_OrbitPitch = std::clamp(m_OrbitPitch - delta.y * 0.01f,
-					-kPreviewPitchLimit, kPreviewPitchLimit);
+				// U22:符号走 ViewChrome::ApplyOrbitDrag(与材质/模型预览 + 主视口唯一事实源)。
+				ViewChrome::ApplyOrbitDrag(m_OrbitYaw, m_OrbitPitch, delta, kPreviewPitchLimit);
 			}
 			if (m_Orbiting && !ctx.Input().MouseDown[0])
 				m_Orbiting = false;
@@ -1321,18 +1320,30 @@ namespace World
 				FramePreview();
 			if (ctx.IsHovered(view))
 				ctx.SetCursor(m_Orbiting ? Wui::WuiCursor::Hand : Wui::WuiCursor::Arrow);
+			// U22:右下角坐标系指示器(方案 §5.5),朝向与上面 SceneRenderer 用的相机基一致。
+			glm::vec3 axisRight { 1.0f, 0.0f, 0.0f };
+			glm::vec3 axisUp { 0.0f, 1.0f, 0.0f };
+			ViewChrome::OrbitBasis(m_OrbitYaw, m_OrbitPitch, &axisRight, &axisUp, nullptr);
+			const Wui::WuiRect axisRect = ViewChrome::DrawAxisIndicator(ctx, view, axisRight, axisUp);
+			ViewChrome::RegisterAxisNode(axisRect, "prefab.axis",
+				Wui::Tr("panel.prefab.axis", "Preview axes"),
+				ViewChrome::AxisReadout(glm::degrees(m_OrbitYaw), glm::degrees(m_OrbitPitch), false),
+				Wui::Tr("panel.prefab.axis.tooltip",
+					"World axes in the preview corner: X red, Y green, Z blue. They follow the "
+					"preview camera; yaw/pitch of that camera are in the value."));
 		}
 		else
 		{
 			// 不留黑块:区里写可读原因(与模型预览同一条约定)。
 			Wui::Label(ctx, { view.X + 8.0f, view.Y + 8.0f }, TruncateUtf8(reason, 160), theme.TextMuted, 12.0f);
 		}
-		// 角标:实际离屏目标分辨率(与模型预览面板底角的 "384px" 同一口径,便于核对清晰度)。
+		// 角标:实际离屏目标分辨率(与模型预览面板的 "384px" 同一口径,便于核对清晰度)。
+		// U22:移到右上角,给右下角的坐标系指示器让位。
 		const std::string targetLabel = std::to_string(m_PreviewTargetW) + "×"
 			+ std::to_string(m_PreviewTargetH) + "px";
 		const float targetLabelW = ctx.MeasureTextWidth(targetLabel, 10.0f);
 		Wui::Label(ctx, { view.X + std::max(4.0f, view.W - targetLabelW - 6.0f),
-			view.Y + view.H - 15.0f }, targetLabel, theme.TextDisabled, 10.0f);
+			view.Y + 4.0f }, targetLabel, theme.TextDisabled, 10.0f);
 		const std::string hint = Wui::Tr("panel.prefab.preview.hint",
 			"Drag = orbit, wheel = zoom, double-click or F = frame");
 		Wui::Label(ctx, { view.X + 6.0f, view.Y + view.H - 15.0f }, TruncateUtf8(hint, 60),
