@@ -30,7 +30,7 @@ if(WLD_DXC_DIR STREQUAL "${CMAKE_SOURCE_DIR}/vendor/dxc/")
 endif()
 
 # --- 添加子项目---
-add_subdirectory(World)
+add_subdirectory(Engine)
 
 add_subdirectory(Editor)
 add_subdirectory(Game)
@@ -46,7 +46,7 @@ target_compile_definitions(World PUBLIC
     WLD_GAME_DIR="${CMAKE_SOURCE_DIR}/Game/"
     WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/Game/assets"
     WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
-    WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/World/"
+    WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/Engine/"
     WLD_DXC_DIR="${WLD_DXC_DIR}"
 )
 

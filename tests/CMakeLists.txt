@@ -587,7 +587,7 @@ set_tests_properties(World.RhiContract PROPERTIES
 add_executable(WorldVulkanDeviceTests VulkanDeviceTests.cpp)
 target_link_libraries(WorldVulkanDeviceTests PRIVATE World Vulkan::Vulkan)
 # 内部 Vulkan 头(上传环形缓冲回归)需要 volk。
-target_include_directories(WorldVulkanDeviceTests PRIVATE "${CMAKE_SOURCE_DIR}/World/vendor/volk")
+target_include_directories(WorldVulkanDeviceTests PRIVATE "${CMAKE_SOURCE_DIR}/Engine/vendor/volk")
 target_compile_features(WorldVulkanDeviceTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldVulkanDeviceTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
@@ -1095,12 +1095,12 @@ set_tests_properties(World.Behavior PROPERTIES
 # 注解(含显式 Id(...))改了却没重跑生成器 → 此测试红灯。生成器只构建、不参与产品二进制。
 add_test(NAME World.SchemaDrift
     COMMAND schema-compiler
-        --input "${CMAKE_SOURCE_DIR}/World/src/World/Scene/Components.h"
-        --input "${CMAKE_SOURCE_DIR}/World/src/World/Core/UUID.h"
-        --input "${CMAKE_SOURCE_DIR}/World/src/World/Scene/SceneCamera.h"
+        --input "${CMAKE_SOURCE_DIR}/Engine/src/World/Scene/Components.h"
+        --input "${CMAKE_SOURCE_DIR}/Engine/src/World/Core/UUID.h"
+        --input "${CMAKE_SOURCE_DIR}/Engine/src/World/Scene/SceneCamera.h"
         --module World
-        --output "${CMAKE_SOURCE_DIR}/World/src/World/Schema/Generated"
-        --manifest "${CMAKE_SOURCE_DIR}/World/src/World/Schema/Generated/World.manifest"
+        --output "${CMAKE_SOURCE_DIR}/Engine/src/World/Schema/Generated"
+        --manifest "${CMAKE_SOURCE_DIR}/Engine/src/World/Schema/Generated/World.manifest"
         --reg-include "World/Scene/Components.h"
         --reg-include "World/Core/UUID.h"
         --reg-include "World/Scene/SceneCamera.h"

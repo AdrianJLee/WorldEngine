@@ -523,7 +523,7 @@ namespace World
 			return "material.prop." + key + ".reset";
 		}
 
-		// ---- U24:字段的**控件分类**(唯一落点;规则原文见 World/src/World/WUI/WuiWidgets.h)----
+		// ---- U24:字段的**控件分类**(唯一落点;规则原文见 Engine/src/World/WUI/WuiWidgets.h)----
 		//   DragBarFloat     = 感知型归一化区间(0..1 比例、角度、强度、透明度、平铺系数);
 		//   NumberFieldInt   = 计数/索引/ID/大范围整数;StepperInt = 小整数(1..16)。
 		// 材质面板的**全部**可编辑数值字段都是感知型 —— 金属度/粗糙度(0..1)、预览光照强度(0..4)

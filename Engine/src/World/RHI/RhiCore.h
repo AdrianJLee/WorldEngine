@@ -9,7 +9,7 @@
 #include <vector>
 
 // RHI 合同核心类型。POD 描述符默认值即"未设置"状态;接口只面向合同,后端在
-// World/src/World/RHI/<Backend> 实现。跨 DLL 的版本号见 RHI_ABI_VERSION。
+// Engine/src/World/RHI/<Backend> 实现。跨 DLL 的版本号见 RHI_ABI_VERSION。
 
 #define WORLD_RHI_ABI_VERSION 2u
 

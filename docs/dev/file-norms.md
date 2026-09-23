@@ -28,9 +28,9 @@ tools/    vendor/     World/
 
 | 目录 | 放什么 | 不放什么 | 入库 |
 | --- | --- | --- | --- |
-| `World/src/World/**` | 引擎库(+namespace `World`);`RHI/`、`Renderer/`、`WUI/`、`Scene/`、`Schema/` 等 | 任何宿主/编辑器专用代码 | 是 |
-| `World/src/Platform/**` | 平台层(窗口/输入/系统工具)。**注意**:`Platform/OpenGL/**` 是旧渲染抽象,与新 `RHI/OpenGL/**` 并存,属于历史包袱(见 §10.2) | 新功能 | 是 |
-| `World/vendor/<name>/` | 编进 `WorldRuntime.dll` 的第三方**源码**(见 `vendor/README.md`) | CLI 工具、预编译库 | submodule 优先 |
+| `Engine/src/World/**` | 引擎库(+namespace `World`);`RHI/`、`Renderer/`、`WUI/`、`Scene/`、`Schema/` 等 | 任何宿主/编辑器专用代码 | 是 |
+| `Engine/src/Platform/**` | 平台层(窗口/输入/系统工具)。**注意**:`Platform/OpenGL/**` 是旧渲染抽象,与新 `RHI/OpenGL/**` 并存,属于历史包袱(见 §10.2) | 新功能 | 是 |
+| `Engine/vendor/<name>/` | 编进 `WorldRuntime.dll` 的第三方**源码**(见 `vendor/README.md`) | CLI 工具、预编译库 | submodule 优先 |
 | `Editor/src/**` | 编辑器宿主与面板;`WUI/Panels/**` 一文件一面板 | 引擎能力(应下沉到 `World/**`) | 是 |
 | `Editor/assets/**` | 编辑器自带资源(本地化、图标、字体) | 项目内容、生成物 | 是 |
 | `Game/` | 默认示例项目与 gameplay DLL(`project.we.yaml` + `assets/**` + `src/**`) | 引擎代码 | 是(生成物除外) |
@@ -38,7 +38,7 @@ tools/    vendor/     World/
 | `tests/**` | 每个领域一个可执行测试(ctest 名 `World.<Domain>`) | 夹具资产(应放 `Game/assets/**` 或临时目录) | 是 |
 | `docs/user/**` `docs/dev/**` | 公开文档:用户手册 / 开发者文档 | 内部过程记录(走 `tools/agents/**`)、私有知识(走 `WorldEngine-docs`) | 是 |
 | `tools/agents/**` | 过程层 + 工具面:`tasks/ dispatch/ reports/ scratch/ tmp/ archive/ skills/ multi-agent/ fonts/` | 任何"项目运行需要"的文件 | 见 §9 |
-| `vendor/` | 外部工具与记录(见 `vendor/README.md`) | 参与编译的源码(那属于 `World/vendor/**`) | 见 `vendor/README.md` |
+| `vendor/` | 外部工具与记录(见 `vendor/README.md`) | 参与编译的源码(那属于 `Engine/vendor/**`) | 见 `vendor/README.md` |
 | `build/**` | 全部构建产物、日志、中间缓存 | 源码、文档 | 否 |
 
 ## 4. 第三方内容
@@ -135,7 +135,7 @@ tools/    vendor/     World/
 
 - 全量替换**活引用**:`AGENTS.md`、skill 的 SKILL.md 与脚本自引用、multi-agent 协议正文、
   `.codex/agents/*.toml` 指针、三处代码注释(`Editor/src/AiControl/AiControlServer.h`、
-  `World/src/World/WUI/WuiWidgets.cpp`、`World/src/World/Script/Sandbox.h`)、私有库
+  `Engine/src/World/WUI/WuiWidgets.cpp`、`Engine/src/World/Script/Sandbox.h`)、私有库
   (`scripts/export-state.ps1`、`knowledge/00-KNOWLEDGE.md`、`generated/STATE.md`、`workflow/**`)。
 - **历史记录不改**:`tools/agents/dispatch/{archive,reports}/**`、`tasks/**` 里的旧路径保持原样,
   在新 `README.md` 注明"2026-09-23 前的记录可能引用 `tools/codex/`"。
@@ -145,8 +145,8 @@ tools/    vendor/     World/
 
 ## 11. 已知结构性问题(记录,不在 v0.1 修)
 
-1. 引擎代码有两个 include 根:`World/src/World/**` 与 `World/src/Platform/**`(后者含 `Windows/` 与旧
-   `OpenGL/`)。约定:新代码只进 `World/src/World/**`。
+1. 引擎代码有两个 include 根:`Engine/src/World/**` 与 `Engine/src/Platform/**`(后者含 `Windows/` 与旧
+   `OpenGL/`)。约定:新代码只进 `Engine/src/World/**`。
 2. `Platform/OpenGL/**`(旧渲染抽象,仍被 `Renderer/Buffer.cpp` 等 include)与 `RHI/OpenGL/**`(新后端)
    并存:动 GL 前先确认改的是哪一层;目标是旧层冻结并逐步迁入 RHI。
 3. `Editor/` 里存在被忽略的 in-source 构建残留(`Editor.vcxproj*`);构建永远在 `build/**` 里做。
@@ -171,7 +171,7 @@ tools/    vendor/     World/
 
 | 检查 | 判据 |
 | --- | --- |
-| 未引用源文件 | `World/src/**` 下无任何 include 命中且无 CMake 引用 → 报错(如 `Platform/OpenGL` 类) |
+| 未引用源文件 | `Engine/src/**` 下无任何 include 命中且无 CMake 引用 → 报错(如 `Platform/OpenGL` 类) |
 | 文件规模 | 单文件 >60KB 警告,>100KB 报错(白名单可豁免) |
 | 命名正则 | 按 §5 表逐类校验新增文件名 |
 | ignore 漂移 | `git check-ignore` 命中"必须入库清单"任一项 → 报错 |
