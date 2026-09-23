@@ -5010,6 +5010,15 @@ namespace World
 		m_ShaderParams = std::move(parsed);
 		// 文本编辑缓冲跟随新表重建(参数名集合可能变了)。
 		m_ShaderParamTextBuffers.clear();
+		// Slang-S7 修复(关键):预览替身材质也要像 `.wmat` 一样**引用这份 shader**,
+		// 否则它没有注解表 → 参数(尤其贴图)解析不出默认值 → 引擎绑白色 1×1 →
+		// 法线贴图退化成 (1,1,1) → 光照≈0 → 代码形态预览**全黑**。
+		// 渲染侧的管线选择仍只认 `SetSurfaceKeyOverride` 的键(未保存编辑只进预览)。
+		if (m_Material && !m_ShaderPath.empty())
+		{
+			m_Material->SetShaderPath(m_ShaderPath);
+			MaterialLibrary::Get().RefreshParams(*m_Material);
+		}
 		ApplyShaderDefaultsToPreview();
 	}
 
@@ -5060,6 +5069,13 @@ namespace World
 			}
 		}
 		m_Material->SetDesc(desc);
+		// Slang-S7 修复:上面的"名字白名单"只覆盖历史约定名(basecolor/albedo/normal/…),
+		// 一旦用户用别的名字(如 albedoMap/normalMap/tint)就全不命中 → 替身材质贴图槽为空 →
+		// 引擎绑白色 1×1 → 法线贴图退化 → 预览全黑。
+		// 正确语义与 `.wmat` 无覆盖时一致:**注解默认值就是这份材质的生效值**。
+		// 因此这里把全部注解默认值显式写进预览材质的参数表(surface 管线的参数块/贴图槽按它绑定)。
+		for (const MaterialParamDecl& decl : m_ShaderParams)
+			m_Material->SetParamOverride(decl.Name, decl.Default);
 	}
 
 	bool MaterialEditorPanel::WriteShaderParamDefault(MaterialParamDecl decl, const std::string& valueText)

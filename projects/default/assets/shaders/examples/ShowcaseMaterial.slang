@@ -21,7 +21,9 @@
 //! param Vec3      sheen           = 0.10, 0.20, 0.30 group("Surface") label("Sheen Tint")
 //! param Int       shadingMode     = 0 [0, 2] group("Surface") label("Shading Mode (0/1/2)")
 //! param Texture2D albedoMap       = "textures/Icon.png" group("Maps") label("Albedo")
-//! param Texture2D normalMap       = "" group("Maps") label("Normal")
+//! param Texture2D normalMap       = "textures/flat_normal.png" group("Maps") label("Normal")
+//   ↑ 法线贴图的默认值必须指向**真实**的平面法线贴图:空路径/缺失会绑到引擎的白色 1×1,
+//     于是 `texel*2-1` = (1,1,1) 退化法线 → 光照几乎为 0(表现为全黑)。
 //! param Bool      useNormalMap    = true group("Maps") label("Use Normal Map")
 //! param Vec2      uvScale         = 1, 1 group("Maps") label("UV Scale")
 //! param Float     emissivePower   = 0.0 [0, 8] unit("x") group("Emissive") label("Emissive Power")
@@ -81,7 +83,7 @@ Surface Evaluate(MaterialInputs input)
     if (useNormalMap)
     {
         float3 tangentNormal = normalMap.Sample(uv).xyz * 2.0 - 1.0;
-        surface.Normal = tangentNormal;
+        surface.Normal = normalize(tangentNormal);   // 归一化,避免贴图内容退化时产生异常法线
     }
 
     // 三种着色模式 = 参数驱动分支
