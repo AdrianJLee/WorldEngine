@@ -128,6 +128,15 @@ namespace World
 			GLFWwindow* shareWindow = (m_Auxiliary && m_HasGLContext) ? m_ShareWindow : nullptr;
 			if (m_Auxiliary && !m_HasGLContext)
 				glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+			else
+			{
+				// 引擎的 OpenGL 标准 = 4.6 core(显式请求,不再依赖驱动默认)。
+				// 依据:GL_ARB_gl_spirv 需要 4.6;Slang 重构把 GL 的着色器摄入从 GLSL 文本
+				// 换成 SPIR-V(glShaderBinary + glSpecializeShader),见 docs/dev/build.md。
+				glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+				glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+				glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+			}
 			m_Window = glfwCreateWindow((int)props.Widdth, (int)props.Height, m_Data.Title.c_str(), nullptr, shareWindow);
 			if (props.Frameless)
 				glfwWindowHint(GLFW_DECORATED, GLFW_TRUE); // hint 会残留,恢复默认

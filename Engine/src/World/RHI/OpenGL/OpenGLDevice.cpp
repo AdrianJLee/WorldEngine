@@ -35,6 +35,11 @@ namespace World::Rhi::OpenGL
 		WLD_CORE_ASSERT(glGetString(GL_VERSION) != nullptr, "OpenGL context is not current");
 
 		const auto version = ParseVersion(reinterpret_cast<const char*>(glGetString(GL_VERSION)));
+		// 引擎的 OpenGL 标准 = 4.6 core(显式请求见 WindowsWindow;这里做硬校验,
+		// 免得在低版本上下文里跑到一半才炸)。GL 的 SPIR-V 摄入(GL_ARB_gl_spirv)也要求 4.6。
+		WLD_CORE_ASSERT(version.first > 4 || (version.first == 4 && version.second >= 6),
+			"WorldEngine requires an OpenGL 4.6 core context (got "
+			+ std::to_string(version.first) + "." + std::to_string(version.second) + ")");
 		m_Capabilities.BackendName = "OpenGL";
 		m_Capabilities.RendererName = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
 		m_Capabilities.ApiMajor = version.first;
@@ -72,6 +77,20 @@ namespace World::Rhi::OpenGL
 					m_Capabilities.AnisotropicFiltering = true;
 					m_Capabilities.MaxSamplerAnisotropy = maxAnisotropy;
 				}
+			}
+			// 4.6 core 的 SPIR-V 摄入能力(GL_ARB_gl_spirv):Slang 重构后 GL 的着色器入口。
+			// 缺失时先只告警(过渡期仍可能走 GLSL 文本);T1 落地后改为硬性要求。
+			bool spirvModules = false;
+			for (GLint index = 0; index < extensionCount && !spirvModules; ++index)
+			{
+				const char* extension = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, index));
+				spirvModules = extension != nullptr && std::strcmp(extension, "GL_ARB_gl_spirv") == 0;
+			}
+			m_Capabilities.SpirVShaderModules = spirvModules;
+			if (!spirvModules)
+			{
+				WLD_CORE_WARN("GL_ARB_gl_spirv missing (GL {0}.{1}); SPIR-V shader modules unavailable on this GL driver",
+					version.first, version.second);
 			}
 		}
 

@@ -43,6 +43,14 @@ Engine/
 - 旧层 `src/World/Platform/OpenGL/**`(Renderer-era)与新 `src/World/RHI/OpenGL/**`(RHI)并存:
   动 GL 前先确认改哪一层;目标是旧层冻结并逐步并入 RHI。
 
+### 运行要求:OpenGL = 4.6 core
+
+- 引擎**显式请求 4.6 core**(`WindowsWindow` 的 GLFW hints),并在 `OpenGLDevice` 构造时硬校验版本;
+- **`GL_ARB_gl_spirv` 是目标能力**(`RhiCapabilities::SpirVShaderModules`):Slang 重构后 GL 的着色器
+  摄入走 `glShaderBinary` + `glSpecializeShader`(不再吃 GLSL 文本);缺失时当前先告警。
+- 依据:GL 4.6 才有 GL_SPIRV;Slang 的 GLSL 目标是 **Vulkan-GLSL**(含 `set =`、`texture2D`/`sampler`
+  分离类型),桌面 GL 不能直接编译 —— 因此 GL 侧的正确路径是直接吃 SPIR-V。
+
 ## 3. 资产与状态(三档口径)
 
 | 类别 | 位置 | 入库 | 备注 |

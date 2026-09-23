@@ -34,6 +34,10 @@ namespace World::Rhi
 		uint32_t MaxFramesInFlight = 1;
 		bool SamplerMirrorClampToEdge = false;
 		bool TextureCompressionBC = false;
+		// GL 4.6 的 SPIR-V 摄入路径(GL_ARB_gl_spirv):glShaderBinary + glSpecializeShader。
+		// Slang 重构的目标形态是"Slang → SPIR-V → {Vulkan, GL}";缺这个能力时 GL 只能退回
+		// GLSL 文本(过渡期),重构完成后即为硬性要求。Vulkan 后端不适用(恒 false)。
+		bool SpirVShaderModules = false;
 		uint32_t MaxColorAttachments = 4;
 		uint32_t MaxSampleCount = 1;
 		// P4-4a:整数颜色附件(R32_SINT 等,实体 id 通道用)的采样数上限 —— 与 MaxSampleCount
