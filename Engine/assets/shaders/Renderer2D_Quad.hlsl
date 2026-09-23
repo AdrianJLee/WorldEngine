@@ -38,17 +38,16 @@ struct PS_OUTPUT
 // 2. 资源绑定 (Uniforms & Textures)
 // ==========================================
 
-// 矩阵缓冲区：绑定到 set=0, binding=0 (由编译器自动分配或显式指定)
-cbuffer Uniforms : register(b0)
+// 矩阵缓冲区:显式 set=0, binding=0(Slang 单源,双目标:Vulkan / GL SPIR-V)。
+[[vk::binding(0, 0)]] cbuffer Uniforms
 {
     float4x4 u_ViewProjection;
 };
 
-// 纹理数组与采样器
-//Texture2D u_Textures[32] : register(t0);
-//SamplerState u_Sampler : register(s0);
-Texture2D u_Textures[32] : register(t1, space1);
-SamplerState u_Sampler : register(s1, space1);
+// 纹理数组:组合采样器(Sampler2D)数组,set=1 / binding=1,32 个槽位。
+// GL_SPIRV 只接受组合形态(OpTypeSampledImage);Vulkan 侧是
+// COMBINED_IMAGE_SAMPLER 描述符数组 —— 两端共用这一份声明(Slang-T2)。
+[[vk::binding(1, 1)]] Sampler2D u_Textures[32];
 
 // ==========================================
 // 3. 顶点着色器 (Vertex Shader)
@@ -81,7 +80,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
 
     // 采样纹理：使用纹理对象的 Sample 方法
     // 增加 + 0.5f 解决插值过程中的浮点数精度丢失引发的向下截断问题
-    float4 texColor = u_Textures[input.v_TexIndex].Sample(u_Sampler, input.v_TexCoord * input.v_TilingFactor);
+    float4 texColor = u_Textures[uint(input.v_TexIndex)].Sample(input.v_TexCoord * input.v_TilingFactor);
     
     // 最终颜色计算
     output.Color = texColor * input.v_Color;

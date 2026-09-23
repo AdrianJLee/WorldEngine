@@ -25,10 +25,18 @@ struct VS_OUTPUT
 };
 
 // D8b-2:实例属性(binding 1 = PerInstance;stride 96B,与 C++ Renderer3D::InstanceData 一致)。
-// 模型矩阵按**行**上传(glm 的 row0..row3),HLSL 的 float4x4(...) 构造按行取值,
+// 模型矩阵按**行**上传(glm 的 row0..row3),float4x4(...) 构造按行取值,
 // 这样与 cbuffer 路径的 mul(matrix, vector) 语义完全一致。
-struct VS_INSTANCE_INPUT
+//
+// Slang-T2:实例入口用**一个**合并输入 struct(顶点属性 0..2 + per-instance 3..8)。
+// Slang 不会把两个参数各自的 struct 按显式 `[[vk::location]]` 合并成一个接口:
+// 第二个参数(实例属性)会被排到 location 6..11 —— 与 C++ 顶点布局 3..8 不符,
+// 实例矩阵会读到错位的属性。合并成单参数后 location 逐项等于改造前的 dxc 产出。
+struct VS_INSTANCED_INPUT
 {
+    [[vk::location(0)]] float3 a_Position : POSITION;
+    [[vk::location(1)]] float3 a_Normal : NORMAL;
+    [[vk::location(2)]] float2 a_TexCoord : TEXCOORD0;
     [[vk::location(3)]] float4 i_Row0 : INSTANCE0;
     [[vk::location(4)]] float4 i_Row1 : INSTANCE1;
     [[vk::location(5)]] float4 i_Row2 : INSTANCE2;
@@ -56,7 +64,7 @@ struct PS_OUTPUT
 };
 
 // set 0, binding 0:由 SceneRenderer 每帧绑定的全局相机矩阵。
-cbuffer CameraUniforms : register(b0)
+[[vk::binding(0, 0)]] cbuffer CameraUniforms
 {
     float4x4 u_ViewProjection;
 };
@@ -70,7 +78,7 @@ struct GpuLight
     float4 DirectionRange;    // 方向光:xyz = 传播方向(已归一化);点光:x = 范围
 };
 
-cbuffer LightUniforms : register(b2)
+[[vk::binding(2, 0)]] cbuffer LightUniforms
 {
     float4x4 u_ShadowViewProjection;
     // x = 启用阴影, y = 深度 bias, z = 贴图边长, w = PCF 半径(纹素)。
@@ -84,13 +92,14 @@ cbuffer LightUniforms : register(b2)
 };
 
 // set 0, binding 3:方向光阴影贴图(D24,点采样 + ClampToEdge;值域 [0,1] 的深度)。
-[[vk::combinedImageSampler]] Texture2D u_ShadowMap : register(t3, space0);
-[[vk::combinedImageSampler]] SamplerState u_ShadowSampler : register(s3, space0);
+// Slang 组合采样器:一份声明同时喂 Vulkan(COMBINED_IMAGE_SAMPLER)与 GL_SPIRV
+// (OpTypeSampledImage —— ARB_gl_spirv 不接受分离的 OpTypeSampler)。
+[[vk::binding(3, 0)]] Sampler2D u_ShadowMap;
 
 // set 1, binding 1:每对象数据(Renderer3D 在提交时写入对应帧槽位的 UBO)。
 // binding 必须非 0:OpenGL 后端的描述符绑定单元 = binding(忽略 set 索引),
 // 用 b0 会与 set0/binding0 的相机 UBO 撞同一个 GL uniform buffer unit → GL 下 3D 全黑。
-cbuffer ObjectUniforms : register(b1, space1)
+[[vk::binding(1, 1)]] cbuffer ObjectUniforms
 {
     float4x4 u_Model;
     float4 u_BaseColor;
@@ -112,17 +121,15 @@ cbuffer ObjectUniforms : register(b1, space1)
 // 为什么是 UBO 而不是 SSBO(主 agent 2026-09-19 冻结):GL 后端的 SSBO 描述符绑定支持
 // 未经验证,而"每绘制写 UBO"是本项目对象 UBO 已有的路径;128 × 64B 在 UBO 上限内。
 // 下标必须**动态**合法:调用方保证 paletteCount ≤ 128,顶点里的关节下标在这里 clamp。
-cbuffer BoneUniforms : register(b3, space1)
+[[vk::binding(3, 1)]] cbuffer BoneUniforms
 {
     float4x4 u_Bones[128];
 };
 
 // set 2:材质贴图。albedo 以 sRGB 格式创建(硬件解码到线性),
 // 法线贴图是线性数据(不解码)。
-[[vk::combinedImageSampler]] Texture2D u_AlbedoTexture : register(t1, space2);
-[[vk::combinedImageSampler]] SamplerState u_AlbedoSampler : register(s1, space2);
-[[vk::combinedImageSampler]] Texture2D u_NormalTexture : register(t2, space2);
-[[vk::combinedImageSampler]] SamplerState u_NormalSampler : register(s2, space2);
+[[vk::binding(1, 2)]] Sampler2D u_AlbedoTexture;
+[[vk::binding(2, 2)]] Sampler2D u_NormalTexture;
 
 VS_OUTPUT VSMain(VS_INPUT input)
 {
@@ -140,19 +147,19 @@ VS_OUTPUT VSMain(VS_INPUT input)
 }
 
 // D8b-2:实例化合批入口(一次绘制画 N 个实例;per-draw 常量仍来自 set1 的对象 UBO)。
-VS_OUTPUT VSMainInstanced(VS_INPUT input, VS_INSTANCE_INPUT instance)
+VS_OUTPUT VSMainInstanced(VS_INSTANCED_INPUT input)
 {
     VS_OUTPUT output;
-    const float4x4 model = float4x4(instance.i_Row0, instance.i_Row1,
-        instance.i_Row2, instance.i_Row3);
+    const float4x4 model = float4x4(input.i_Row0, input.i_Row1,
+        input.i_Row2, input.i_Row3);
     const float4 worldPosition = mul(model, float4(input.a_Position, 1.0f));
     output.Position = mul(u_ViewProjection, worldPosition);
     const float3x3 normalMatrix = (float3x3)transpose((float3x3)model);
     output.v_Normal = normalize(mul(normalMatrix, input.a_Normal));
     output.v_WorldPosition = worldPosition.xyz;
     output.v_TexCoord = input.a_TexCoord;
-    output.v_BaseColor = instance.i_Color;
-    output.v_EntityId = instance.i_EntityId.x;
+    output.v_BaseColor = input.i_Color;
+    output.v_EntityId = input.i_EntityId.x;
     return output;
 }
 
@@ -224,7 +231,7 @@ float SampleDirectionalShadow(float3 worldPosition, float3 normal, float3 toLigh
     {
         [unroll] for (int offsetX = -1; offsetX <= 1; ++offsetX)
         {
-            const float sampledDepth = u_ShadowMap.Sample(u_ShadowSampler,
+            const float sampledDepth = u_ShadowMap.Sample(
                 uv + float2(offsetX, offsetY) * texel).r;
             visible += (depth - bias <= sampledDepth) ? 1.0f : 0.0f;
         }
@@ -242,7 +249,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     const float3 baseColorLinear = pow(saturate(input.v_BaseColor.rgb), 2.2f);
     float3 albedo = baseColorLinear;
     if (u_Flags.x > 0.5f)
-        albedo *= u_AlbedoTexture.Sample(u_AlbedoSampler, input.v_TexCoord).rgb;
+        albedo *= u_AlbedoTexture.Sample(input.v_TexCoord).rgb;
 
     float3 normal = normalize(input.v_Normal);
     if (u_Flags.y > 0.5f)
@@ -255,7 +262,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
         const float2 duvdy = ddy(input.v_TexCoord);
         const float3 tangent = normalize(dpdx * duvdy.y - dpdy * duvdx.y + 1e-6f);
         const float3 bitangent = normalize(cross(normal, tangent));
-        const float3 sampled = u_NormalTexture.Sample(u_NormalSampler, input.v_TexCoord).xyz * 2.0f - 1.0f;
+        const float3 sampled = u_NormalTexture.Sample(input.v_TexCoord).xyz * 2.0f - 1.0f;
         normal = normalize(tangent * sampled.x + bitangent * sampled.y + normal * sampled.z);
     }
 

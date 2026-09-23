@@ -1,5 +1,7 @@
-// WUI RHI 后端:纯 2D UI 批绘制。
-// set=0 binding=0: 视口投影 UBO; set=1 binding=1: 纹理 + 采样器。
+// WUI RHI 后端:纯 2D UI 批绘制(Slang 单源,双目标:Vulkan / GL SPIR-V)。
+// set=0 binding=0: 视口投影 UBO; set=1 binding=1: 组合采样器 Sampler2D。
+// 组合类型是 GL_SPIRV 的硬要求(ARB_gl_spirv 不接受 OpTypeSampler);
+// Vulkan 侧同一份声明映射成 COMBINED_IMAGE_SAMPLER 描述符(Slang-T2)。
 struct VS_INPUT
 {
     [[vk::location(0)]] float2 a_Position : POSITION;
@@ -19,13 +21,12 @@ struct PS_OUTPUT
     float4 Color : SV_Target0;
 };
 
-cbuffer Uniforms : register(b0)
+[[vk::binding(0, 0)]] cbuffer Uniforms
 {
     float4x4 u_ViewProjection;
 };
 
-[[vk::combinedImageSampler]] Texture2D u_Texture : register(t1, space1);
-[[vk::combinedImageSampler]] SamplerState u_Sampler : register(s1, space1);
+[[vk::binding(1, 1)]] Sampler2D u_Texture;
 
 VS_OUTPUT VSMain(VS_INPUT input)
 {
@@ -43,6 +44,6 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
     if (input.v_TexCoord.x < -0.5f)
         output.Color = input.v_Color;
     else
-        output.Color = u_Texture.Sample(u_Sampler, input.v_TexCoord) * input.v_Color;
+        output.Color = u_Texture.Sample(input.v_TexCoord) * input.v_Color;
     return output;
 }

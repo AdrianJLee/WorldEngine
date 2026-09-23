@@ -1,5 +1,5 @@
 ﻿// 矩阵缓冲区：绑定到 set=0, binding=0 (由编译器自动分配或显式指定)
-cbuffer Uniforms : register(b0)
+[[vk::binding(0, 0)]] cbuffer Uniforms
 {
     float4x4 u_ViewProjection;
 };

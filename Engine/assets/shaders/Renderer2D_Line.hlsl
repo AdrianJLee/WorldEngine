@@ -1,4 +1,5 @@
-﻿cbuffer Camera : register(b0)
+// 2D 线段批绘制(Slang 单源,双目标:Vulkan / GL SPIR-V)。
+[[vk::binding(0, 0)]] cbuffer Camera
 {
     float4x4 u_ViewProjection;
 };
@@ -20,14 +21,14 @@ struct VertexOutput
 VertexOutput VSMain(VertexInput input)
 {
     VertexOutput output;
-    
+
     // 1. 计算顶点位置
     output.Position = mul(u_ViewProjection, float4(input.a_Position, 1.0));
-    
+
     // 2. 透传颜色和 EntityID
     output.v_Color = input.a_Color;
     output.v_EntityID = input.a_EntityID;
-    
+
     return output;
 }
 
@@ -40,12 +41,12 @@ struct PixelOutput
 PixelOutput PSMain(VertexOutput input)
 {
     PixelOutput output;
-    
+
     // 1. 直接输出颜色
     output.Color = input.v_Color;
-    
-    // 3. 输出 EntityID
+
+    // 2. 输出 EntityID
     output.EntityID = input.v_EntityID;
-    
+
     return output;
 }

@@ -28,7 +28,7 @@ struct GpuLight
     float4 DirectionRange;
 };
 
-cbuffer LightUniforms : register(b2)
+[[vk::binding(2, 0)]] cbuffer LightUniforms
 {
     float4x4 u_ShadowViewProjection;
     float4 u_ShadowParams;
@@ -38,7 +38,7 @@ cbuffer LightUniforms : register(b2)
 };
 
 // set 1, binding 1:每对象数据(Renderer3D 提交时写入;这里只用到 u_Model)。
-cbuffer ObjectUniforms : register(b1, space1)
+[[vk::binding(1, 1)]] cbuffer ObjectUniforms
 {
     float4x4 u_Model;
 };
@@ -46,7 +46,7 @@ cbuffer ObjectUniforms : register(b1, space1)
 // D5c-3b:set 1, binding 3 = 骨骼调色板(与 Renderer3D_Solid.hlsl 同布局)。
 // 用 3 而不是 2:GL 后端绑定单元 = binding(忽略 set),binding 2 是 set0 的灯光 UBO。
 // 蒙皮投影者必须在这里同样做混合,否则影子留在**绑定姿态**(与网格错位)。
-cbuffer BoneUniforms : register(b3, space1)
+[[vk::binding(3, 1)]] cbuffer BoneUniforms
 {
     float4x4 u_Bones[128];
 };
@@ -59,21 +59,24 @@ VS_OUTPUT VSMain(VS_INPUT input)
     return output;
 }
 
-// D8b-2:实例化合批入口。属性布局与 Renderer3D_Solid.hlsl 的 VS_INSTANCE_INPUT 一致
-// (同一个实例缓冲,只是这里只用到模型矩阵 4 行;颜色/实体 id 由主通道的着色器使用)。
-struct VS_INSTANCE_INPUT
+// D8b-2:实例化合批入口。属性布局与 Renderer3D_Solid.hlsl 一致(同一个实例缓冲,
+// 只是这里只用到模型矩阵 4 行;颜色/实体 id 由主通道的着色器使用)。
+// Slang-T2:与主通道同理——Slang 不合并两个输入 struct,必须声明成一个合并 struct,
+// 否则实例矩阵会落到 location 6..9 而不是顶点布局里的 3..6。
+struct VS_INSTANCED_INPUT
 {
+    [[vk::location(0)]] float3 a_Position : POSITION;
     [[vk::location(3)]] float4 i_Row0 : INSTANCE0;
     [[vk::location(4)]] float4 i_Row1 : INSTANCE1;
     [[vk::location(5)]] float4 i_Row2 : INSTANCE2;
     [[vk::location(6)]] float4 i_Row3 : INSTANCE3;
 };
 
-VS_OUTPUT VSMainInstanced(VS_INPUT input, VS_INSTANCE_INPUT instance)
+VS_OUTPUT VSMainInstanced(VS_INSTANCED_INPUT input)
 {
     VS_OUTPUT output;
-    const float4x4 model = float4x4(instance.i_Row0, instance.i_Row1,
-        instance.i_Row2, instance.i_Row3);
+    const float4x4 model = float4x4(input.i_Row0, input.i_Row1,
+        input.i_Row2, input.i_Row3);
     const float4 worldPosition = mul(model, float4(input.a_Position, 1.0f));
     output.Position = mul(u_ShadowViewProjection, worldPosition);
     return output;
