@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -104,6 +106,41 @@ namespace
 	{
 		return bytes.size() > 28 && std::memcmp(bytes.data(), "WSL1", 4) == 0;
 	}
+
+	// Slang-B1w:v1→v2 重烘 A/B 用的最小导入器(原样复制;版本号可控)。
+	// 机制与 MaterialShader 导入器同类:复合指纹 = 内容 ⊕ 名字 ⊕ 版本 ⊕ 设置,
+	// 所以"只有版本变了"也必须重烘。
+	class VersionedCopyImporter final : public IAssetImporter
+	{
+	public:
+		explicit VersionedCopyImporter(uint32_t version) : m_Version(version) {}
+
+		std::string Name() const override { return "TestVersionedCopy"; }
+		uint32_t Version() const override { return m_Version; }
+		bool Matches(const std::filesystem::path& source) const override
+		{
+			return source.extension() == ".vsrc";
+		}
+		ImportResult Import(const ImportRequest& request, std::error_code& ec) const override
+		{
+			ImportResult result;
+			std::ifstream stream(request.Source, std::ios::binary);
+			if (!stream)
+			{
+				ec = std::make_error_code(std::errc::no_such_file_or_directory);
+				result.Error = "cannot open " + request.Source.string();
+				return result;
+			}
+			const std::string text((std::istreambuf_iterator<char>(stream)),
+				std::istreambuf_iterator<char>());
+			result.Data.assign(text.begin(), text.end());
+			result.Ok = true;
+			return result;
+		}
+
+	private:
+		uint32_t m_Version = 1;
+	};
 }
 
 int main()
@@ -432,13 +469,113 @@ int main()
 
 			CookPipeline legacyPipeline(DefaultImporters());
 			CookSummary legacySummary;
-			legacyPipeline.Cook(legacyManifest, legacyManifestPath, legacyOutputDir, false, &legacySummary);
+			const std::vector<CookEntryResult> legacyResults =
+				legacyPipeline.Cook(legacyManifest, legacyManifestPath, legacyOutputDir, false, &legacySummary);
 			CHECK(legacySummary.Total == 1 && legacySummary.Changed == 1 && legacySummary.Failed == 0);
+			// Slang-B1w:导入警告不再被丢弃 —— 落到条目 + 摘要(cook 摘要能读出 legacy 条目数)。
+			CHECK(legacySummary.Warnings == 1 && legacySummary.WarningMessages == 1);
+			CHECK(legacyResults.size() == 1 && legacyResults[0].Path == "shaders/Legacy.hlsl");
+			CHECK(legacyResults[0].Warnings == imported.Warnings);
 			const std::filesystem::path legacyArtifact =
 				legacyOutputDir / "cooked" / "shaders" / "Legacy.hlsl";
 			CHECK(ReadText(legacyArtifact) == legacyText);   // 逻辑路径与字节都不变
 			std::printf("[Slang-B1] (5c) legacy .hlsl: imported + cooked unchanged, "
 				"with a migration hint -> %s\n", imported.Warnings[0].c_str());
+			std::printf("[Slang-B1w] (5c) cook summary: %zu/%zu asset(s) with import warnings\n",
+				legacySummary.Warnings, legacySummary.Total);
+
+			// Slang-B1w:提示随 cook.db 持久化 —— 第二次全跳过时摘要照样能报出 legacy 条目数。
+			CookSummary legacySkipSummary;
+			const std::vector<CookEntryResult> legacySkipResults = legacyPipeline.Cook(
+				legacyManifest, legacyManifestPath, legacyOutputDir, false, &legacySkipSummary);
+			CHECK(legacySkipSummary.Changed == 0 && legacySkipSummary.Skipped == 1);
+			CHECK(legacySkipSummary.Warnings == 1 && legacySkipSummary.WarningMessages == 1);
+			CHECK(legacySkipResults.size() == 1 && legacySkipResults[0].Warnings == imported.Warnings);
+			CHECK(Contains(ReadText(legacyOutputDir / "cook.db.json"), "legacy"));
+			std::printf("[Slang-B1w] (5c) skipped cook keeps the hint: %zu warning(s) "
+				"(persisted in cook.db)\n", legacySkipSummary.WarningMessages);
+		}
+
+		// 5d. Slang-B1w:同一份资产 `.hlsl` → `.slang` 改名 —— 新逻辑路径必须**重烘**
+		//     (不是命中旧产物),旧路径条目从 cook.db 里消失。
+		{
+			const std::filesystem::path content = temp.path / "rename-content";
+			const std::filesystem::path oldSource = content / "shaders" / "Renamed.hlsl";
+			const std::filesystem::path newSource = content / "shaders" / "Renamed.slang";
+			const std::string shaderText =
+				"// Slang-B1w rename fixture\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    return MakeDefaultSurface();\n"
+				"}\n";
+			WriteBytes(oldSource, shaderText);
+
+			std::string error;
+			ProjectManifest manifest;
+			manifest.Id = "com.test.rename";
+			manifest.ContentRoot = "rename-content";
+			manifest.StartScene = "shaders/Renamed.hlsl";
+			manifest.Packages = { "packages/Base.wpak" };
+			const std::filesystem::path manifestPath = temp.path / "rename.we.yaml";
+			CHECK(ProjectManifest::Save(manifestPath, manifest, &error));
+			const std::filesystem::path outputDir = temp.path / "rename-cooked";
+
+			CookPipeline pipeline(DefaultImporters());
+			CookSummary summary;
+			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Total == 1 && summary.Changed == 1 && summary.Failed == 0);
+			CHECK(ReadText(outputDir / "cooked" / "shaders" / "Renamed.hlsl") == shaderText);
+			CHECK(Contains(ReadText(outputDir / "cook.db.json"), "shaders/Renamed.hlsl"));
+
+			// 未改名:skip(对照 —— 数据库确实生效)。
+			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Changed == 0 && summary.Skipped == 1 && summary.Failed == 0);
+
+			std::error_code renameEc;
+			std::filesystem::rename(oldSource, newSource, renameEc);
+			CHECK(!renameEc);
+			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Total == 1 && summary.Changed == 1 && summary.Skipped == 0 && summary.Failed == 0);
+			CHECK(ReadText(outputDir / "cooked" / "shaders" / "Renamed.slang") == shaderText);
+			const std::string database = ReadText(outputDir / "cook.db.json");
+			CHECK(Contains(database, "shaders/Renamed.slang"));
+			CHECK(!Contains(database, "shaders/Renamed.hlsl"));
+			std::printf("[Slang-B1w] (5d) .hlsl -> .slang rename: 1 skipped before, 1 changed after (not skipped)\n");
+		}
+
+		// 5e. Slang-B1w:v1→v2 重烘 A/B —— 同一份资产、同一逻辑路径,只有导入器版本不同:
+		//     旧指纹(v1)在 cook.db 里必须失效(重烘),而不是命中旧产物。
+		{
+			const std::filesystem::path content = temp.path / "version-content";
+			WriteBytes(content / "assets" / "thing.vsrc", "version-payload");
+
+			std::string error;
+			ProjectManifest manifest;
+			manifest.Id = "com.test.versioned";
+			manifest.ContentRoot = "version-content";
+			manifest.StartScene = "assets/thing.vsrc";
+			manifest.Packages = { "packages/Base.wpak" };
+			const std::filesystem::path manifestPath = temp.path / "versioned.we.yaml";
+			CHECK(ProjectManifest::Save(manifestPath, manifest, &error));
+			const std::filesystem::path outputDir = temp.path / "version-cooked";
+
+			CookPipeline v1Pipeline({ std::make_shared<VersionedCopyImporter>(1) });
+			CookSummary summary;
+			v1Pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Total == 1 && summary.Changed == 1 && summary.Failed == 0);
+			const std::string v1Database = ReadText(outputDir / "cook.db.json");
+
+			// 同版本再跑:skip(对照,证明数据库条目本身有效)。
+			v1Pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Changed == 0 && summary.Skipped == 1 && summary.Failed == 0);
+
+			// 只升版本(1 → 2):同一路径必须重烘,指纹前进。
+			CookPipeline v2Pipeline({ std::make_shared<VersionedCopyImporter>(2) });
+			v2Pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Changed == 1 && summary.Skipped == 0 && summary.Failed == 0);
+			const std::string v2Database = ReadText(outputDir / "cook.db.json");
+			CHECK(v2Database != v1Database);
+			std::printf("[Slang-B1w] (5e) importer v1 -> v2: 1 skipped at v1, 1 changed at v2 (rebaked)\n");
 		}
 
 		std::printf("World.Asset: all checks passed\n");

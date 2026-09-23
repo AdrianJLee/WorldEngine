@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Core/Asset/CookPipeline.h"
+#include "World/Core/Log.h"
 #include "World/WUI/WuiJson.h"
 
 #include <cstdio>
@@ -16,6 +17,8 @@ namespace World::Asset
 		{
 			uint64_t Fingerprint = 0;
 			uint64_t Size = 0;
+			// Slang-B1w:导入提示随条目持久化 —— 条目被跳过时摘要/报告也能报出 legacy 条目数。
+			std::vector<std::string> Warnings;
 		};
 
 		uint64_t Fnv1a64(const void* data, size_t size)
@@ -85,6 +88,9 @@ namespace World::Asset
 				DatabaseEntry entry;
 				entry.Fingerprint = std::strtoull(fingerprint.c_str(), nullptr, 16);
 				entry.Size = size;
+				if (const Wui::JsonValue* warnings = node.Find("warnings"))
+					for (const Wui::JsonValue& item : warnings->Array)
+						entry.Warnings.push_back(item.AsString(""));
 				out[path] = entry;
 			}
 			return true;
@@ -104,6 +110,14 @@ namespace World::Asset
 				node.Object.push_back({ "path", Wui::JsonValue::MakeString(logical) });
 				node.Object.push_back({ "fingerprint", Wui::JsonValue::MakeString(Hex(entry.Fingerprint)) });
 				node.Object.push_back({ "size", Wui::JsonValue::MakeString(std::to_string(entry.Size)) });
+				if (!entry.Warnings.empty())
+				{
+					Wui::JsonValue warnings;
+					warnings.type = Wui::JsonValue::Type::Array;
+					for (const std::string& warning : entry.Warnings)
+						warnings.Array.push_back(Wui::JsonValue::MakeString(warning));
+					node.Object.push_back({ "warnings", std::move(warnings) });
+				}
 				array.Array.push_back(std::move(node));
 			}
 			root.Object.push_back({ "entries", std::move(array) });
@@ -228,6 +242,13 @@ namespace World::Asset
 				nextDatabase[logical] = existing->second;
 				result.Changed = false;
 				++stats.Skipped;
+				// Slang-B1w:条目里存的导入提示(如 legacy `.hlsl`)在跳过时照样进摘要/报告。
+				if (!existing->second.Warnings.empty())
+				{
+					result.Warnings = existing->second.Warnings;
+					++stats.Warnings;
+					stats.WarningMessages += existing->second.Warnings.size();
+				}
 				results.push_back(std::move(result));
 				continue;
 			}
@@ -244,6 +265,17 @@ namespace World::Asset
 				++stats.Failed;
 				results.push_back(std::move(result));
 				continue;
+			}
+
+			// Slang-B1w:导入成功但带提示(legacy `.hlsl` 扩展名等)不再被丢弃 ——
+			// 逐条落到条目/摘要,并进 cook 日志(打包时就能看到有多少资产要迁移)。
+			if (!imported.Warnings.empty())
+			{
+				result.Warnings = imported.Warnings;
+				++stats.Warnings;
+				stats.WarningMessages += imported.Warnings.size();
+				for (const std::string& warning : imported.Warnings)
+					WLD_CORE_WARN("[cook] '{0}': {1}", logical, warning);
 			}
 
 			// D5b 多产物契约:Outputs 非空时 Data 必须为空(单产物路径行为不变)。
@@ -298,6 +330,7 @@ namespace World::Asset
 			stored.Fingerprint = fingerprint;
 			stored.Size = imported.Outputs.empty() ? imported.Data.size()
 				: static_cast<uint64_t>(imported.Outputs.size());
+			stored.Warnings = result.Warnings;
 			nextDatabase[logical] = stored;
 			result.Changed = true;
 			++stats.Changed;
@@ -305,6 +338,15 @@ namespace World::Asset
 		}
 
 		SaveDatabase(outputDir / "cook.db.json", nextDatabase);
+		if (stats.Warnings)
+		{
+			// 摘要行:数值与逐条 `[cook] '<path>': …` 提示一一对应;legacy `.hlsl` 的条目
+			// 在提示文本里带 "legacy material shader extension"(迁移脚本见该提示)。
+			WLD_CORE_WARN("[cook] import warnings: {0} of {1} asset(s), {2} message(s) "
+				"(e.g. legacy material shader sources; migration: "
+				"tools/agents/scratch/migrate-hlsl-to-slang.py)",
+				stats.Warnings, stats.Total, stats.WarningMessages);
+		}
 		if (summary)
 			*summary = stats;
 		return results;

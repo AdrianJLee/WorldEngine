@@ -18,6 +18,8 @@ namespace World::Asset
 		bool Changed = false;
 		bool Failed = false;
 		std::string Error;
+		// Slang-B1w:导入成功但带提示(legacy 扩展名等)时不再丢弃 —— 与 ImportResult::Warnings 同口径。
+		std::vector<std::string> Warnings;
 	};
 
 	struct CookSummary
@@ -26,6 +28,9 @@ namespace World::Asset
 		size_t Changed = 0;
 		size_t Skipped = 0;
 		size_t Failed = 0;
+		// 带导入警告的条目数(assets)与警告条数;legacy `.hlsl` 资产的条数从这里/日志里读。
+		size_t Warnings = 0;
+		size_t WarningMessages = 0;
 	};
 
 	// 增量资产烘焙:遍历内容根 → 指纹比对 → 只重处理变化项。

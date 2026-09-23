@@ -1409,11 +1409,20 @@ int main()
 				std::string legacyWarning;
 				Ref<Material> legacy = library.Load(relative("mat_legacy_shader.wmat"), &legacyWarning);
 				CHECK(legacy != nullptr);
-				CHECK(legacyWarning.empty());
 				CHECK(legacy->HasShaderOverride());
 				CHECK(legacy->ShaderPath() == relative("legacy_glass.hlsl"));
 				CHECK(legacy->Params().size() == 1);
 				CHECK(legacy->ResolvedParamValue("Roughness") == "0.1");
+				// Slang-B1w:legacy 扩展名给可读提示(与 ShaderWarning()/GetLoadWarning() 同口径),
+				// 但**加载不失败**、参数表照旧可用;提示指向新扩展名与迁移脚本。
+				CHECK(legacy->ShaderWarning().find("legacy") != std::string::npos);
+				CHECK(legacy->ShaderWarning().find(".hlsl") != std::string::npos);
+				CHECK(legacy->ShaderWarning().find(".slang") != std::string::npos);
+				CHECK(legacy->ShaderWarning().find("migrate-hlsl-to-slang.py") != std::string::npos);
+				CHECK(legacyWarning == legacy->ShaderWarning());
+				CHECK(library.GetLoadWarning(relative("mat_legacy_shader.wmat")) == legacy->ShaderWarning());
+				std::printf("[Slang-B1w] legacy .hlsl material hint: %s\n",
+					legacy->ShaderWarning().c_str());
 
 				// 父级继承:Shader 与注解表跟随父级,参数生效值 = 本文件 > 父级 > shader 默认。
 				writeText("mat_parent.wmat",

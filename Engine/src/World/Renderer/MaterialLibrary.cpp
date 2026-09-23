@@ -9,6 +9,7 @@
 #include "World/Renderer/Renderer.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -66,23 +67,57 @@ namespace World
 			std::string Warning;
 		};
 
+		// Slang-B1w:读取侧的 legacy 提示 —— `.hlsl` 是只读兼容扩展名(规范扩展名 `.slang`)。
+		// 只影响提示,不影响加载结果:.wmat 引用 legacy shader 照样解析成功。
+		bool IsLegacyShaderExtension(const std::string& shaderPath)
+		{
+			const std::string normalized = MaterialIO::NormalizePath(shaderPath);
+			const size_t slash = normalized.find_last_of('/');
+			const size_t dot = normalized.find_last_of('.');
+			if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
+				return false;
+			std::string extension = normalized.substr(dot);
+			for (char& c : extension)
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			return extension == ".hlsl";
+		}
+
+		std::string LegacyShaderHint(const std::string& shaderPath)
+		{
+			return "shader '" + MaterialIO::NormalizePath(shaderPath)
+				+ "' 用的是 legacy 扩展名 '.hlsl'(仍按只读兼容读取);新材质着色器请写 '.slang'"
+				"(Slang 源,HLSL 语法是其子集)。迁移:tools/agents/scratch/migrate-hlsl-to-slang.py"
+				"(默认 dry-run,`--apply` 落地)";
+		}
+
 		ShaderParamTable LoadShaderParamTable(const std::string& shaderPath)
 		{
 			ShaderParamTable result;
 			if (shaderPath.empty())
 				return result;
+			std::vector<std::string> warnings;
+			if (IsLegacyShaderExtension(shaderPath))
+				warnings.push_back(LegacyShaderHint(shaderPath));
 			std::string source;
 			if (!MaterialIO::ReadFileText(shaderPath, source))
 			{
-				result.Warning = "shader '" + shaderPath
-					+ "' 读不到:参数默认值不可用(.wmat 里写的覆盖值保留)";
-				return result;
+				warnings.push_back("shader '" + shaderPath
+					+ "' 读不到:参数默认值不可用(.wmat 里写的覆盖值保留)");
 			}
-			std::string parseError;
-			if (!ParseMaterialParams(source, &result.Decls, &parseError))
+			else
 			{
-				result.Decls.clear();
-				result.Warning = "shader '" + shaderPath + "' 的注解参数表解析失败: " + parseError;
+				std::string parseError;
+				if (!ParseMaterialParams(source, &result.Decls, &parseError))
+				{
+					result.Decls.clear();
+					warnings.push_back("shader '" + shaderPath + "' 的注解参数表解析失败: " + parseError);
+				}
+			}
+			for (size_t index = 0; index < warnings.size(); ++index)
+			{
+				if (index)
+					result.Warning += "; ";
+				result.Warning += warnings[index];
 			}
 			return result;
 		}
