@@ -4526,6 +4526,10 @@ namespace World
 		ShaderCompileRequest request;
 		request.Serial = ++m_ShaderCompileSerial;
 		request.Source = source;
+		// Slang-T4a:目标按**当前设备后端**选(GL 会话编译 GL 目标 SPIR-V,SPIR-V 1.0 +
+		// 组合 Sampler2D),Install 侧再校验 artifact.Backend 与设备一致。
+		request.Target = ShaderBackendIsVulkan()
+			? SurfaceShaderBackend::VulkanSpirV : SurfaceShaderBackend::OpenGLSpirV;
 		// 排列键仍是逻辑路径(M4-S2 口径):预览键/路径键只决定 Install 的落点,
 		// 不参与编译缓存 —— 同一份内容两边共用产物,不会重复跑 dxc。
 		request.PermutationKey = m_ShaderPath;
@@ -4558,9 +4562,10 @@ namespace World
 				request = std::move(m_ShaderCompileRequest);
 				m_ShaderCompileRequestPending = false;
 			}
-			// 工作线程只跑 dxc(内核自带缓存与互斥);不碰 UI / 渲染 / 面板状态。
+			// 工作线程只跑 slangc(内核自带缓存与互斥);不碰 UI / 渲染 / 面板状态。
 			const SurfaceCompileResult result =
-				MaterialSurfaceCompiler::CompileSurface(request.Source, request.PermutationKey);
+				MaterialSurfaceCompiler::CompileSurface(request.Source, request.PermutationKey,
+					request.Target);
 			ShaderCompileOutcome outcome;
 			outcome.Serial = request.Serial;
 			outcome.Success = result.Success;
@@ -4756,15 +4761,6 @@ namespace World
 			status += Wui::Tr("panel.material.shader.disk.changed",
 				"The .hlsl changed on disk while this buffer had unsaved edits — nothing was "
 				"overwritten (Revert to load the file).");
-		}
-		if (!ShaderBackendIsVulkan())
-		{
-			// 后端提示(不是行为分支):GL 的实时预览归 M4-S4;这里照实说明 + 内核的结构化错误照报。
-			if (!status.empty())
-				status += "   |   ";
-			status += Wui::Tr("panel.material.shader.backend.hint",
-				"Live shader preview needs the Vulkan backend; OpenGL surface shaders land in "
-				"M4-S4, so the preview keeps the last working pipeline.");
 		}
 		return status;
 	}

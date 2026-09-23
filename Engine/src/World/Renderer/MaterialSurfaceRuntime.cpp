@@ -5,6 +5,7 @@
 #include "World/Core/Log.h"
 #include "World/Renderer/Renderer.h"
 
+#include <cstring>
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -68,6 +69,71 @@ namespace World
 		{
 			const SurfaceVertexStage* stage = artifact.FindVertexStage(entryPoint.c_str());
 			return stage != nullptr && !stage->Bytecode.empty();
+		}
+
+		// ---- Slang-T4a:表面产物必须与**当前设备后端**一致 ----
+		// 同一份 .hlsl 有两个目标(Vulkan profile → SPIR-V 1.3;GL profile → SPIR-V 1.0),
+		// 裁剪空间/深度约定不同,混用会在驱动层失败或画出错误结果。这里给出"本设备需要的
+		// 目标名"(与 MaterialSurfaceCompiler::BackendName 同一套字符串),由 Install 校验;
+		// 不匹配 = 可读错误,不在运行时偷偷换成另一份产物。
+		const char* ArtifactBackendForCurrentDevice()
+		{
+			return Renderer::GetAPI() == RendererAPI::API::Vulkan ? "vulkan-spirv" : "opengl-spirv";
+		}
+
+		bool SpirvLooksValid(const std::vector<uint8_t>& bytes)
+		{
+			if (bytes.size() < 20 || (bytes.size() % 4) != 0)
+				return false;
+			uint32_t magic = 0;
+			std::memcpy(&magic, bytes.data(), sizeof(magic));
+			return magic == 0x07230203u;
+		}
+
+		// GL(ARB_gl_spirv)只接受 SPIR-V 1.0,且不接受分离采样器形态(OpTypeSampler):
+		// T1 实测这种模块交给 glShaderBinary 后 NVIDIA 驱动会在第一次采样时崩
+		// (nvoglv64+0x75abcb,14/14 同一签名)。命中任一条 = 这份产物不能用于 GL,
+		// 给可读原因而不是把坏模块丢给驱动。
+		bool SpirvModuleFitsGlSpirv(const std::vector<uint8_t>& bytes, std::string* reason)
+		{
+			if (!SpirvLooksValid(bytes))
+			{
+				if (reason)
+					*reason = "not a SPIR-V module (bad magic or not 32-bit aligned)";
+				return false;
+			}
+			uint32_t version = 0;
+			std::memcpy(&version, bytes.data() + 4, sizeof(version));
+			if (version != 0x00010000u)
+			{
+				if (reason)
+				{
+					std::ostringstream text;
+					text << "SPIR-V version word 0x" << std::hex << version
+						<< " is not 1.0 (ARB_gl_spirv needs SPIR-V 1.0)";
+					*reason = text.str();
+				}
+				return false;
+			}
+			// 头部 5 个字;之后每条指令 = (wordCount << 16) | opcode,OpTypeSampler = 26。
+			const size_t words = bytes.size() / 4;
+			for (size_t offset = 5; offset < words;)
+			{
+				uint32_t word = 0;
+				std::memcpy(&word, bytes.data() + offset * 4, sizeof(word));
+				const uint32_t wordCount = word >> 16;
+				if (wordCount == 0)
+					break;
+				if ((word & 0xFFFFu) == 26u)
+				{
+					if (reason)
+						*reason = "module declares OpTypeSampler (separate sampler); GL needs the combined "
+							"`Sampler2D` form";
+					return false;
+				}
+				offset += wordCount;
+			}
+			return true;
 		}
 
 		// Slang-T3:从编译产物的反射 JSON(`-reflection-json`,与 artifact 同键)+ artifact 自带的
@@ -224,17 +290,53 @@ namespace World
 			result.Error = "surface artifact has no pixel bytecode";
 			return result;
 		}
-		// D4:接口后端无关,但本批只落 Vulkan(OpenGL 走同一份 SPIR-V 的 spirv-cross 归 M4-S4)。
-		if (Renderer::GetBackendName() != "vulkan")
-		{
-			result.Error = "surface material pipelines need the Vulkan backend in this build "
-				"(backend='" + Renderer::GetBackendName() + "'; OpenGL is M4-S4)";
-			return result;
-		}
-		if (!Renderer::GetDevice())
+		const Rhi::Handle<Rhi::Device> device = Renderer::GetDevice();
+		if (!device)
 		{
 			result.Error = "no RHI device";
 			return result;
+		}
+		// Slang-T4a:装配哪个后端的管线由**当前设备后端**决定 —— artifact 必须就是该目标的
+		// 产物(两个目标的裁剪空间/深度约定不同,SPIR-V 版本与采样器形态也不同)。
+		// 不匹配时给可读原因,不静默换用另一份产物。
+		const std::string deviceBackend = Renderer::GetBackendName();
+		const std::string expectedBackend = ArtifactBackendForCurrentDevice();
+		if (artifact.Backend != expectedBackend)
+		{
+			result.Error = "surface artifact targets '" + artifact.Backend
+				+ "' but the current device backend '" + deviceBackend + "' needs '" + expectedBackend
+				+ "'; recompile the .hlsl for this backend (GL uses <stage>_5_0+spirv_1_0, "
+				"Vulkan uses <stage>_6_0)";
+			return result;
+		}
+		if (expectedBackend == "opengl-spirv")
+		{
+			// GL 的 SPIR-V 摄入前提(GL 4.6 core + GL_ARB_gl_spirv)与模块形态都要先验证:
+			// 否则 OpenGLPipeline 只会在 glShaderBinary/glSpecializeShader 处失败。
+			if (!device->GetCapabilities().SpirVShaderModules)
+			{
+				result.Error = "GL_SPIRV capability missing (need GL 4.6 core + GL_ARB_gl_spirv and a "
+					"live device): surface SPIR-V modules cannot be ingested; switch to the Vulkan "
+					"backend or update the GL driver";
+				return result;
+			}
+			std::string reason;
+			if (!SpirvModuleFitsGlSpirv(artifact.Bytecode, &reason))
+			{
+				result.Error = "surface pixel stage cannot be ingested by GL: " + reason;
+				return result;
+			}
+			for (const SurfaceVertexStage& stage : artifact.VertexStages)
+			{
+				if (stage.Bytecode.empty())
+					continue;
+				if (!SpirvModuleFitsGlSpirv(stage.Bytecode, &reason))
+				{
+					result.Error = "surface vertex stage '" + stage.EntryPoint
+						+ "' cannot be ingested by GL: " + reason;
+					return result;
+				}
+			}
 		}
 
 		SurfacePipelineEnvironment environment;

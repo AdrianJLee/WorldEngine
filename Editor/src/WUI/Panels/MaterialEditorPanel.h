@@ -154,6 +154,10 @@ namespace World
 			uint64_t Serial = 0;
 			std::string Source;
 			std::string PermutationKey;   // 编译缓存键 = 逻辑路径(与 M4-S2 同口径)
+			// Slang-T4a:本次编译的目标 = 起请求时的设备后端(Vulkan / GL 各一份 SPIR-V;
+			// 装配侧的 MaterialSurfaceRuntime::Install 会校验 artifact.Backend 与设备一致)。
+			// 在主线程取,避免工作线程读渲染器状态。
+			SurfaceShaderBackend Target = SurfaceShaderBackend::VulkanSpirV;
 		};
 		struct ShaderCompileOutcome
 		{
