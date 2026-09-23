@@ -145,7 +145,8 @@ namespace World
 
 	// WLD_DXC_DIR 由构建系统决定(优先 Vulkan SDK 完整安装,含匹配的 dxcompiler.dll)。
 	const std::string ShaderCompiler::dxcAbsPath = std::string(WLD_DXC_DIR) + "dxc.exe";
-	const std::string ShaderCompiler::spirvCrossAbsPath = WLD_ROOT_DIR + std::string("vendor/SPIRV-Cross/spirv-cross.exe");
+// 工具目录由构建系统给(WLD_SPIRV_CROSS_DIR):spirv-cross 属**可替换**工具,换实现只改 CMake 变量。
+const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROSS_DIR) + "spirv-cross.exe";
 	const std::string ShaderCompiler::cacheDirAbsPath = WLD_INTERMEDIATE_DIR + std::string("ShaderCache/");
 
 	std::string ShaderCompiler::ArtifactLogicalPath(const std::string& hlslPath, const std::string& entryPoint, bool vulkan)

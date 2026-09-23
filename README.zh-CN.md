@@ -4,7 +4,7 @@
 
 原生 Windows 游戏引擎:引擎核心编译为共享库 **`WorldRuntime.dll`**,游戏逻辑编译为独立的
 **`Game.dll`**,编辑器与运行时是宿主程序。C++17 + CMake,第三方依赖随仓库锁定
-(`vendor/`、`Engine/vendor/` 与子模块)。
+(`vendor/`、`third_party/` 与子模块)。
 
 ## 模块
 

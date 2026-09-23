@@ -7,5 +7,5 @@
 // luaopen_bit32/luaL_sandbox/luau_load 全部"未声明")。PUC Lua 已在 W1b 删除,同名冲突不再存在,
 // 但保留显式相对路径仍然更稳:脚本前端的头文件来源只有这一个事实源,不依赖 include 顺序。
 
-#include "../../../vendor/luau/VM/include/lua.h"
-#include "../../../vendor/luau/VM/include/lualib.h"
+#include "../../../../third_party/luau/VM/include/lua.h"
+#include "../../../../third_party/luau/VM/include/lualib.h"

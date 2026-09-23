@@ -62,7 +62,7 @@ namespace
 		return std::filesystem::is_regular_file(dxcDir / "dxc.exe", ec) &&
 			std::filesystem::is_regular_file(dxcDir / "dxcompiler.dll", ec) &&
 			std::filesystem::is_regular_file(
-				std::filesystem::path(WLD_ROOT_DIR) / "vendor/SPIRV-Cross/spirv-cross.exe", ec);
+				std::filesystem::path(WLD_ROOT_DIR) / "vendor/tools/spirv-cross/spirv-cross.exe", ec);
 	}
 
 	const char* kProbeShader = R"(

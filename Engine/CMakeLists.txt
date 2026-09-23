@@ -1,58 +1,60 @@
-﻿add_subdirectory(vendor/GLFW)
-add_subdirectory(vendor/Glad)
+﻿set(WE_THIRD_PARTY "${CMAKE_SOURCE_DIR}/third_party")
+
+add_subdirectory(${WE_THIRD_PARTY}/GLFW ${CMAKE_BINARY_DIR}/third_party/GLFW)
+add_subdirectory(${WE_THIRD_PARTY}/Glad ${CMAKE_BINARY_DIR}/third_party/Glad)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(vendor/yaml)
-add_subdirectory(vendor/spdlog)
+add_subdirectory(${WE_THIRD_PARTY}/yaml ${CMAKE_BINARY_DIR}/third_party/yaml)
+add_subdirectory(${WE_THIRD_PARTY}/spdlog ${CMAKE_BINARY_DIR}/third_party/spdlog)
 set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
-add_subdirectory(vendor/SPIRV-Cross)
+add_subdirectory(${WE_THIRD_PARTY}/SPIRV-Cross ${CMAKE_BINARY_DIR}/third_party/SPIRV-Cross)
 # Box2D 以 OBJECT 库并入 World（W4）：box2d 是带全局 id 池（b2_worldIdPool）
 # 的 C 库，若以静态库形式被 World 和消费者各链接一份，跨 DLL 的
 # b2Body_IsValid 等接口会查各自模块的 id 池而失效。以 OBJECT 形式并入
 # World 后，符号经 WINDOWS_EXPORT_ALL_SYMBOLS 从 WorldRuntime.dll 导出，
 # 保证进程内只有一份 box2d 状态。
 set(WE_BOX2D_SOURCES
-    vendor/box2d/src/aabb.c
-    vendor/box2d/src/arena_allocator.c
-    vendor/box2d/src/array.c
-    vendor/box2d/src/bitset.c
-    vendor/box2d/src/body.c
-    vendor/box2d/src/broad_phase.c
-    vendor/box2d/src/constraint_graph.c
-    vendor/box2d/src/contact.c
-    vendor/box2d/src/contact_solver.c
-    vendor/box2d/src/core.c
-    vendor/box2d/src/distance.c
-    vendor/box2d/src/distance_joint.c
-    vendor/box2d/src/dynamic_tree.c
-    vendor/box2d/src/geometry.c
-    vendor/box2d/src/hull.c
-    vendor/box2d/src/id_pool.c
-    vendor/box2d/src/island.c
-    vendor/box2d/src/joint.c
-    vendor/box2d/src/manifold.c
-    vendor/box2d/src/math_functions.c
-    vendor/box2d/src/motor_joint.c
-    vendor/box2d/src/mover.c
-    vendor/box2d/src/parallel_for.c
-    vendor/box2d/src/physics_world.c
-    vendor/box2d/src/prismatic_joint.c
-    vendor/box2d/src/revolute_joint.c
-    vendor/box2d/src/scheduler.c
-    vendor/box2d/src/sensor.c
-    vendor/box2d/src/shape.c
-    vendor/box2d/src/solver.c
-    vendor/box2d/src/solver_set.c
-    vendor/box2d/src/table.c
-    vendor/box2d/src/timer.c
-    vendor/box2d/src/types.c
-    vendor/box2d/src/weld_joint.c
-    vendor/box2d/src/wheel_joint.c
+    ${WE_THIRD_PARTY}/box2d/src/aabb.c
+    ${WE_THIRD_PARTY}/box2d/src/arena_allocator.c
+    ${WE_THIRD_PARTY}/box2d/src/array.c
+    ${WE_THIRD_PARTY}/box2d/src/bitset.c
+    ${WE_THIRD_PARTY}/box2d/src/body.c
+    ${WE_THIRD_PARTY}/box2d/src/broad_phase.c
+    ${WE_THIRD_PARTY}/box2d/src/constraint_graph.c
+    ${WE_THIRD_PARTY}/box2d/src/contact.c
+    ${WE_THIRD_PARTY}/box2d/src/contact_solver.c
+    ${WE_THIRD_PARTY}/box2d/src/core.c
+    ${WE_THIRD_PARTY}/box2d/src/distance.c
+    ${WE_THIRD_PARTY}/box2d/src/distance_joint.c
+    ${WE_THIRD_PARTY}/box2d/src/dynamic_tree.c
+    ${WE_THIRD_PARTY}/box2d/src/geometry.c
+    ${WE_THIRD_PARTY}/box2d/src/hull.c
+    ${WE_THIRD_PARTY}/box2d/src/id_pool.c
+    ${WE_THIRD_PARTY}/box2d/src/island.c
+    ${WE_THIRD_PARTY}/box2d/src/joint.c
+    ${WE_THIRD_PARTY}/box2d/src/manifold.c
+    ${WE_THIRD_PARTY}/box2d/src/math_functions.c
+    ${WE_THIRD_PARTY}/box2d/src/motor_joint.c
+    ${WE_THIRD_PARTY}/box2d/src/mover.c
+    ${WE_THIRD_PARTY}/box2d/src/parallel_for.c
+    ${WE_THIRD_PARTY}/box2d/src/physics_world.c
+    ${WE_THIRD_PARTY}/box2d/src/prismatic_joint.c
+    ${WE_THIRD_PARTY}/box2d/src/revolute_joint.c
+    ${WE_THIRD_PARTY}/box2d/src/scheduler.c
+    ${WE_THIRD_PARTY}/box2d/src/sensor.c
+    ${WE_THIRD_PARTY}/box2d/src/shape.c
+    ${WE_THIRD_PARTY}/box2d/src/solver.c
+    ${WE_THIRD_PARTY}/box2d/src/solver_set.c
+    ${WE_THIRD_PARTY}/box2d/src/table.c
+    ${WE_THIRD_PARTY}/box2d/src/timer.c
+    ${WE_THIRD_PARTY}/box2d/src/types.c
+    ${WE_THIRD_PARTY}/box2d/src/weld_joint.c
+    ${WE_THIRD_PARTY}/box2d/src/wheel_joint.c
 )
 add_library(WorldBox2d OBJECT ${WE_BOX2D_SOURCES})
 target_include_directories(WorldBox2d
-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/include"
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/src"
+    PUBLIC "${CMAKE_SOURCE_DIR}/third_party/box2d/include"
+    PRIVATE "${CMAKE_SOURCE_DIR}/third_party/box2d/src"
 )
 set_target_properties(WorldBox2d PROPERTIES
     C_STANDARD 17
@@ -65,8 +67,8 @@ endif()
 
 # P1b D5:glTF 2.0 导入(cgltf,锁定 v1.15)。单头库 + 本地包装源,与 stb_image 同款
 # "普通 vendor 目录"做法(不进 submodule);include 只暴露给 World。
-add_library(cgltf STATIC vendor/cgltf/cgltf.c)
-target_include_directories(cgltf PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/vendor/cgltf")
+add_library(cgltf STATIC ${WE_THIRD_PARTY}/cgltf/cgltf.c)
+target_include_directories(cgltf PUBLIC "${CMAKE_SOURCE_DIR}/third_party/cgltf")
 set_target_properties(cgltf PROPERTIES
     C_STANDARD 17
     C_STANDARD_REQUIRED YES
@@ -92,13 +94,13 @@ set(JPH_USE_DX12 OFF CACHE BOOL "" FORCE)
 set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
 set(JPH_USE_MTL OFF CACHE BOOL "" FORCE)
 set(JPH_USE_CPU_COMPUTE OFF CACHE BOOL "" FORCE)
-add_subdirectory(vendor/Jolt/Build)
+add_subdirectory(${WE_THIRD_PARTY}/Jolt/Build ${CMAKE_BINARY_DIR}/third_party/Jolt)
 
 # P2 脚本前端:Luau(只编库,不编 CLI/tests/Web)。sol2 + PUC Lua 已在 W1b 移除。
 set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LUAU_BUILD_WEB OFF CACHE BOOL "" FORCE)
-add_subdirectory(vendor/luau)
+add_subdirectory(${WE_THIRD_PARTY}/luau ${CMAKE_BINARY_DIR}/third_party/luau)
 add_library(World SHARED)
 set_target_properties(World PROPERTIES
     OUTPUT_NAME "WorldRuntime"
@@ -158,36 +160,36 @@ target_compile_definitions(World PUBLIC
 
 # 头文件路径
 target_include_directories(World PRIVATE 
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/GLFW/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/Glad/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb_image"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vulkan-headers/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/volk"
+    "${CMAKE_SOURCE_DIR}/third_party/GLFW/include"
+    "${CMAKE_SOURCE_DIR}/third_party/Glad/include"
+    "${CMAKE_SOURCE_DIR}/third_party/stb_image"
+    "${CMAKE_SOURCE_DIR}/third_party/stb"
+    "${CMAKE_SOURCE_DIR}/third_party/vulkan-headers/include"
+    "${CMAKE_SOURCE_DIR}/third_party/volk"
     ${Vulkan_INCLUDE_DIRS} # 自动解析的 Vulkan 路径
 )
 target_include_directories(World PUBLIC 
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/entt/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/yaml/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SPIRV-Cross"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SPIRV-Cross/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/spdlog/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/src"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/box2d/include"
+    "${CMAKE_SOURCE_DIR}/third_party/glm"
+    "${CMAKE_SOURCE_DIR}/third_party/entt/include"
+    "${CMAKE_SOURCE_DIR}/third_party/yaml/include"
+    "${CMAKE_SOURCE_DIR}/third_party/SPIRV-Cross"
+    "${CMAKE_SOURCE_DIR}/third_party/SPIRV-Cross/include"
+    "${CMAKE_SOURCE_DIR}/third_party/spdlog/include"
+    "${CMAKE_SOURCE_DIR}/third_party/box2d/src"
+    "${CMAKE_SOURCE_DIR}/third_party/box2d/include"
 )
 
 # 递归获取源文件
 file(GLOB_RECURSE WORLD_SOURCES 
     "src/*.h"
     "src/*.cpp"
-    "vendor/stb_image/*.h"
-    "vendor/stb_image/*.cpp"
-    "vendor/glm/glm/**.hpp"
-	"vendor/glm/glm/**.inl"
-    "vendor/volk/*.c"
-    "vendor/volk/*.h"
+    "${WE_THIRD_PARTY}/stb_image/*.h"
+    "${WE_THIRD_PARTY}/stb_image/*.cpp"
+    "${WE_THIRD_PARTY}/glm/glm/**.hpp"
+	"${WE_THIRD_PARTY}/glm/glm/**.inl"
+    "${WE_THIRD_PARTY}/volk/*.c"
+    "${WE_THIRD_PARTY}/volk/*.h"
 
 )
 
@@ -196,7 +198,7 @@ target_sources(World PRIVATE ${WORLD_SOURCES} $<TARGET_OBJECTS:WorldBox2d>)
 
 # volk 需要在启用 Win32 平台宏时编译,才会导出 VkWin32SurfaceCreateInfoKHR /
 # vkCreateWin32SurfaceKHR 等平台符号(VulkanSwapchain 用它们创建表面)。
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/vendor/volk/volk.c"
+set_source_files_properties("${CMAKE_SOURCE_DIR}/third_party/volk/volk.c"
     PROPERTIES COMPILE_DEFINITIONS "VK_USE_PLATFORM_WIN32_KHR")
 
 # 链接库 (Vulkan::Vulkan 解决了 vulkan-1.lib 路径问题)

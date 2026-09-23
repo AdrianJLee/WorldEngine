@@ -30,7 +30,7 @@ tools/    vendor/     World/
 | --- | --- | --- | --- |
 | `Engine/src/World/**` | 引擎库(+namespace `World`);`RHI/`、`Renderer/`、`WUI/`、`Scene/`、`Schema/` 等 | 任何宿主/编辑器专用代码 | 是 |
 | `Engine/src/Platform/**` | 平台层(窗口/输入/系统工具)。**注意**:`Platform/OpenGL/**` 是旧渲染抽象,与新 `RHI/OpenGL/**` 并存,属于历史包袱(见 §10.2) | 新功能 | 是 |
-| `Engine/vendor/<name>/` | 编进 `WorldRuntime.dll` 的第三方**源码**(见 `vendor/README.md`) | CLI 工具、预编译库 | submodule 优先 |
+| `third_party/<name>/` | 编进 `WorldRuntime.dll` 的第三方**源码**(见 `vendor/README.md`) | CLI 工具、预编译库 | submodule 优先 |
 | `Editor/src/**` | 编辑器宿主与面板;`WUI/Panels/**` 一文件一面板 | 引擎能力(应下沉到 `World/**`) | 是 |
 | `Editor/assets/**` | 编辑器自带资源(本地化、图标、字体) | 项目内容、生成物 | 是 |
 | `Game/` | 默认示例项目与 gameplay DLL(`project.we.yaml` + `assets/**` + `src/**`) | 引擎代码 | 是(生成物除外) |
@@ -38,7 +38,7 @@ tools/    vendor/     World/
 | `tests/**` | 每个领域一个可执行测试(ctest 名 `World.<Domain>`) | 夹具资产(应放 `Game/assets/**` 或临时目录) | 是 |
 | `docs/user/**` `docs/dev/**` | 公开文档:用户手册 / 开发者文档 | 内部过程记录(走 `tools/agents/**`)、私有知识(走 `WorldEngine-docs`) | 是 |
 | `tools/agents/**` | 过程层 + 工具面:`tasks/ dispatch/ reports/ scratch/ tmp/ archive/ skills/ multi-agent/ fonts/` | 任何"项目运行需要"的文件 | 见 §9 |
-| `vendor/` | 外部工具与记录(见 `vendor/README.md`) | 参与编译的源码(那属于 `Engine/vendor/**`) | 见 `vendor/README.md` |
+| `vendor/` | 外部工具与记录(见 `vendor/README.md`) | 参与编译的源码(那属于 `third_party/**`) | 见 `vendor/README.md` |
 | `build/**` | 全部构建产物、日志、中间缓存 | 源码、文档 | 否 |
 
 ## 4. 第三方内容
@@ -160,6 +160,16 @@ tools/    vendor/     World/
 | `AGENTS.md` 是否入库 | (a) 继续本地-only(与 `tools/**` 同策略,靠私有库快照)(b) 入库,让 clone 即有跨工具指引 | (b) 会把"项目指引"公开;(a) 丢机器时只靠快照恢复 |
 | `.github/**` 是否入库 | (a) 继续忽略(当前无 CI)(b) 入库并接管 CI | 直接入库即公开工作流定义 |
 | 耐久工具面迁私有库(R2) | 迁 `skills/`+`multi-agent/`+`check-environment.ps1`+探针到 `WorldEngine-docs/tooling/**` | 迁完 `tools/` 纯过程层,可随时清 |
+
+### R3(建议尽快做):补 `.gitattributes`(行尾陷阱,已实测)
+
+仓库没有 `.gitattributes`,而本机 `core.autocrlf` 生效:签出会写 CRLF,`git add` 又转回 LF。
+后果:`tests/ScriptWorkflowTests.cpp` 的"存根漂移门禁"做**逐字节比较**
+(`Game/assets/scripts/intermediate/WorldEngineAPI.luau`),工作树一旦是 CRLF 就**误报失败**
+(2026-09-23 实测:内容逐行相同、仅 CRLF 差异 → 门禁失败)。
+
+建议:新增 `.gitattributes`,至少 `* text=auto eol=lf` + `*.luau text eol=lf`,并给该门禁加
+"忽略行尾"或"先规范化再比较"的兜底(否则新人 clone 第一次跑测试就会红)。
 
 ## 12. 本规范的变更方式
 

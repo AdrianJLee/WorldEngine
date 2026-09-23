@@ -587,7 +587,7 @@ set_tests_properties(World.RhiContract PROPERTIES
 add_executable(WorldVulkanDeviceTests VulkanDeviceTests.cpp)
 target_link_libraries(WorldVulkanDeviceTests PRIVATE World Vulkan::Vulkan)
 # 内部 Vulkan 头(上传环形缓冲回归)需要 volk。
-target_include_directories(WorldVulkanDeviceTests PRIVATE "${CMAKE_SOURCE_DIR}/Engine/vendor/volk")
+target_include_directories(WorldVulkanDeviceTests PRIVATE "${CMAKE_SOURCE_DIR}/third_party/volk")
 target_compile_features(WorldVulkanDeviceTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldVulkanDeviceTests PRIVATE
     _CRT_SECURE_NO_WARNINGS

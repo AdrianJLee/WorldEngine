@@ -5,7 +5,7 @@ English | [Simplified Chinese](README.zh-CN.md)
 A native Windows game engine: the engine core builds as the shared library **`WorldRuntime.dll`**,
 game logic builds as a separate **`Game.dll`**, and the editor and runtime are host programs.
 C++17 + CMake, with third-party dependencies locked into the repository (`vendor/`,
-`Engine/vendor/` and submodules).
+`third_party/` and submodules).
 
 ## Modules
 
