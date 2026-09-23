@@ -80,4 +80,4 @@ GetEntity().GetScene()->DeferStructuralChange([position](World::Scene& scene) {
 | API 变更没出现在补全里 | 重新构建并启动编辑器,看生成是否报错;不要手改生成文件 |
 | 生命周期报错 | 看 Inspector 状态与引擎日志里的文件、实体、阶段和 traceback,修好后重新 Play |
 
-`tests/lua/CompletionProbe.lua` 有意包含错误,用于语言服务器的验收;日常工作区已把它排除在索引之外。
+`tests/World/lua/CompletionProbe.lua` 有意包含错误,用于语言服务器的验收;日常工作区已把它排除在索引之外。
