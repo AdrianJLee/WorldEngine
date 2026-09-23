@@ -70,28 +70,30 @@ namespace World
 			return stage != nullptr && !stage->Bytecode.empty();
 		}
 
-		// 从编译产物的 SPIR-V 汇编(-Fc,与 artifact 同键)反射参数布局。
-		// 反射是纯文本函数,不需要 dxc;汇编缺失 = 该 artifact 不能用于运行时上传。
+		// Slang-T3:从编译产物的反射 JSON(`-reflection-json`,与 artifact 同键)+ artifact 自带的
+		// SPIR-V 反射参数布局("成员真的被读"看 SPIR-V 里的 OpAccessChain)。
+		// 反射是纯函数,不再调用编译器;JSON 缺失 = 该 artifact 不能用于运行时上传。
 		bool ReflectArtifactLayout(const SurfaceArtifact& artifact, MaterialParamLayout* out,
 			std::string* error)
 		{
-			const std::string assemblyPath = MaterialSurfaceCompiler::AssemblyPath(artifact);
-			if (assemblyPath.empty())
+			const std::string reflectionPath = MaterialSurfaceCompiler::ReflectionPath(artifact);
+			if (reflectionPath.empty())
 			{
 				if (error)
-					*error = "surface artifact has no SPIR-V assembly (-Fc); cannot reflect parameter layout";
+					*error = "surface artifact has no Slang reflection JSON (-reflection-json); "
+						"cannot reflect parameter layout";
 				return false;
 			}
-			std::ifstream stream(assemblyPath, std::ios::binary);
+			std::ifstream stream(reflectionPath, std::ios::binary);
 			if (!stream)
 			{
 				if (error)
-					*error = "cannot read surface SPIR-V assembly: " + assemblyPath;
+					*error = "cannot read surface reflection JSON: " + reflectionPath;
 				return false;
 			}
 			std::ostringstream buffer;
 			buffer << stream.rdbuf();
-			return ReflectParamLayoutFromAssembly(buffer.str(), out, error);
+			return ReflectParamLayoutFromReflectionJson(buffer.str(), artifact.Bytecode, out, error);
 		}
 
 		// 一个变体的完整管线(顶点入口 + 像素入口都来自 artifact)。

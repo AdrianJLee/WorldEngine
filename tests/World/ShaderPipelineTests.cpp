@@ -6,6 +6,7 @@
 #include "World/Renderer/ShaderUtils.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -55,6 +56,45 @@ namespace
 		stream << text;
 	}
 
+	// Slang-T3:表面材质内核改用 slangc;按引擎同一套顺序找一次(找不到就跳过需要工具的检查)。
+	std::string FindSlangc()
+	{
+		const auto accept = [](const std::filesystem::path& candidate) -> std::string
+		{
+			std::error_code ec;
+			return std::filesystem::is_regular_file(candidate, ec)
+				? candidate.string() : std::string();
+		};
+		if (const char* full = std::getenv("WLD_SLANGC"); full && *full)
+			if (std::string resolved = accept(full); !resolved.empty())
+				return resolved;
+		if (const char* dir = std::getenv("WLD_SLANG_DIR"); dir && *dir)
+			if (std::string resolved = accept(std::filesystem::path(dir) / "slangc.exe");
+				!resolved.empty())
+				return resolved;
+		const std::filesystem::path repoRoot = WLD_REPO_ROOT;
+		if (std::string resolved = accept(repoRoot / "vendor" / "tools" / "slang" / "slangc.exe");
+			!resolved.empty())
+			return resolved;
+		std::error_code ec;
+		const std::filesystem::path depsRoot = repoRoot.parent_path() / "WorldEngine-deps";
+		std::vector<std::filesystem::path> versions;
+		for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(
+			depsRoot, std::filesystem::directory_options::skip_permission_denied, ec))
+		{
+			std::error_code entryEc;
+			if (!entry.is_directory(entryEc))
+				continue;
+			if (entry.path().filename().string().rfind("slang-", 0) == 0)
+				versions.push_back(entry.path());
+		}
+		std::sort(versions.begin(), versions.end());
+		for (auto it = versions.rbegin(); it != versions.rend(); ++it)
+			if (std::string resolved = accept(*it / "bin" / "slangc.exe"); !resolved.empty())
+				return resolved;
+		return {};
+	}
+
 	bool HasVendorTools()
 	{
 		std::error_code ec;
@@ -62,7 +102,8 @@ namespace
 		return std::filesystem::is_regular_file(dxcDir / "dxc.exe", ec) &&
 			std::filesystem::is_regular_file(dxcDir / "dxcompiler.dll", ec) &&
 			std::filesystem::is_regular_file(
-				std::filesystem::path(WLD_ROOT_DIR) / "vendor/tools/spirv-cross/spirv-cross.exe", ec);
+				std::filesystem::path(WLD_ROOT_DIR) / "vendor/tools/spirv-cross/spirv-cross.exe", ec) &&
+			!FindSlangc().empty();
 	}
 
 	const char* kProbeShader = R"(
@@ -125,7 +166,7 @@ int main()
 
 		if (!HasVendorTools())
 		{
-			std::printf("World.ShaderPipeline: vendor dxc/spirv-cross missing, bake checks skipped\n");
+			std::printf("World.ShaderPipeline: vendor dxc/spirv-cross/slangc missing, bake checks skipped\n");
 			std::printf("World.ShaderPipeline: all checks passed\n");
 			return 0;
 		}
@@ -176,6 +217,13 @@ int main()
 			CHECK(minimalFirst.Artifact.Bytecode[3] == 0x07);
 			CHECK(minimalFirst.Artifact.EntryPoint == "PSMain");
 			CHECK(minimalFirst.Artifact.Backend == "vulkan-spirv");
+			// Slang-T3:Vulkan 目标由 slangc 出 SPIR-V(1.3);GL 目标必须是 1.0(asserted 下面)。
+			{
+				uint32_t spirvVersion = 0;
+				CHECK(minimalFirst.Artifact.Bytecode.size() >= 8);
+				std::memcpy(&spirvVersion, minimalFirst.Artifact.Bytecode.data() + 4, sizeof(spirvVersion));
+				CHECK(spirvVersion >= 0x00010000u);
+			}
 
 			// ② 同一源第二次编译 → 缓存命中、不重编。
 			const size_t toolRunsAfterMinimal = MaterialSurfaceCompiler::ToolInvocationCount();
@@ -188,7 +236,7 @@ int main()
 			CHECK(MaterialSurfaceCompiler::CacheHitCount() == hitsAfterMinimal + 1);
 			CHECK(minimalSecond.Artifact.Bytecode == minimalFirst.Artifact.Bytecode);
 
-			// ①b 删掉缓存文件强制走一次真实 dxc,再验证工具输出逐字节确定。
+			// ①b 删掉缓存文件强制走一次真实编译(slangc),再验证工具输出逐字节确定。
 			const std::filesystem::path cachedSpv =
 				std::filesystem::path(WLD_INTERMEDIATE_DIR) / "SurfaceShaderCache" /
 				minimalFirst.Artifact.CacheKey / "surface.spv";
@@ -201,7 +249,7 @@ int main()
 			CHECK(minimalRecompiled.Artifact.Bytecode == minimalFirst.Artifact.Bytecode);
 
 			// ①c M4-S3(D5):顶点阶段齐全(模板自带的三个入口)+ **按模板键缓存** ——
-			// 改用户代码时只有 PSMain 真的跑 dxc(稳态下每次编辑一次),VS 全部命中缓存。
+			// 改用户代码时只有 PSMain 真的跑编译器(稳态下每次编辑一次),VS 全部命中缓存。
 			CHECK(minimalFirst.Artifact.VertexStages.size() == 3);
 			// SurfaceVertexStage 没有 operator==(公开头冻结):按入口名 + 字节逐条比较。
 			const auto sameVertexStages = [](const std::vector<World::SurfaceVertexStage>& left,
@@ -249,7 +297,7 @@ int main()
 				CHECK(MaterialSurfaceCompiler::ToolInvocationCount() == toolsAfterFirstVsCache + 1);
 				CHECK(sameVertexStages(vsCacheSecond.Artifact.VertexStages, vsCacheFirst.Artifact.VertexStages));
 				CHECK(vsCacheSecond.Artifact.Bytecode != vsCacheFirst.Artifact.Bytecode);
-				std::printf("World.ShaderPipeline: M4-S3 vertex stages=%zu (dxc runs: first=%zu, edited=%zu)\n",
+				std::printf("World.ShaderPipeline: M4-S3 vertex stages=%zu (compiler runs: first=%zu, edited=%zu)\n",
 					vsCacheSecond.Artifact.VertexStages.size(),
 					toolsAfterFirstVsCache - toolsBeforeVsCache,
 					MaterialSurfaceCompiler::ToolInvocationCount() - toolsAfterFirstVsCache);
@@ -328,15 +376,39 @@ int main()
 				SurfaceShaderBackend::VulkanSpirV, lastGood));
 			CHECK(lastGood.Bytecode == goodForFallback.Artifact.Bytecode);
 
-			// 第一版只支持 Vulkan:OpenGL 目标返回结构化提示,不调用工具。
-			const size_t toolRunsBeforeOpenGL = MaterialSurfaceCompiler::ToolInvocationCount();
-			const World::SurfaceCompileResult openGlUnsupported =
-				MaterialSurfaceCompiler::CompileSurface(minimalSource, "m4s1-opengl",
-					SurfaceShaderBackend::OpenGLGlsl);
-			CHECK(!openGlUnsupported.Success);
-			CHECK(!openGlUnsupported.Diagnostics.empty());
-			CHECK(openGlUnsupported.Diagnostics[0].Message.find("not supported") != std::string::npos);
-			CHECK(MaterialSurfaceCompiler::ToolInvocationCount() == toolRunsBeforeOpenGL);
+			// Slang-T3:GL 目标也由 slangc 编成 SPIR-V(`<stage>_5_0+spirv_1_0`),产物**必须**是
+			// SPIR-V 1.0(ARB_gl_spirv 的硬要求);GL 侧的运行时接入归 M4-S4,本层只保证产物对。
+			{
+				const size_t toolRunsBeforeOpenGL = MaterialSurfaceCompiler::ToolInvocationCount();
+				// 排列键带本次运行的唯一 tag:否则第二次跑同一个测试时 GL 顶点阶段会命中上一轮的
+				// 模板键缓存,工具调用次数就不再是 4(计数断言必须与缓存状态无关)。
+				const std::string openGlPermutation = "m4s1-opengl-" + runTag;
+				const World::SurfaceCompileResult openGlTarget =
+					MaterialSurfaceCompiler::CompileSurface(minimalSource, openGlPermutation,
+						SurfaceShaderBackend::OpenGLSpirV);
+				CHECK(openGlTarget.Success);
+				CHECK(!openGlTarget.CacheHit);
+				CHECK(openGlTarget.Artifact.Backend == "opengl-spirv");
+				CHECK(openGlTarget.Artifact.EntryPoint == "PSMain");
+				CHECK(openGlTarget.Artifact.Bytecode.size() >= 8);
+				CHECK(openGlTarget.Artifact.Bytecode[0] == 0x03 && openGlTarget.Artifact.Bytecode[1] == 0x02
+					&& openGlTarget.Artifact.Bytecode[2] == 0x23 && openGlTarget.Artifact.Bytecode[3] == 0x07);
+				uint32_t glVersion = 0;
+				std::memcpy(&glVersion, openGlTarget.Artifact.Bytecode.data() + 4, sizeof(glVersion));
+				CHECK(glVersion == 0x00010000u);   // ARB_gl_spirv:只接受 SPIR-V 1.0
+				CHECK(openGlTarget.Artifact.VertexStages.size() == 3);
+				// 目标不同 → 产物与缓存键都不同(Vulkan 那份是 SPIR-V 1.3)。
+				CHECK(openGlTarget.Artifact.CacheKey != minimalFirst.Artifact.CacheKey);
+				CHECK(openGlTarget.Artifact.Bytecode != minimalFirst.Artifact.Bytecode);
+				CHECK(MaterialSurfaceCompiler::ToolInvocationCount() == toolRunsBeforeOpenGL + 4);
+				// 同源同目标第二次 → 命中缓存,不再调用工具。
+				const World::SurfaceCompileResult openGlCached =
+					MaterialSurfaceCompiler::CompileSurface(minimalSource, openGlPermutation,
+						SurfaceShaderBackend::OpenGLSpirV);
+				CHECK(openGlCached.Success && openGlCached.CacheHit);
+				CHECK(openGlCached.Artifact.Bytecode == openGlTarget.Artifact.Bytecode);
+				CHECK(MaterialSurfaceCompiler::ToolInvocationCount() == toolRunsBeforeOpenGL + 4);
+			}
 
 			std::printf("World.ShaderPipeline: M4-S1 cache hits=%zu misses=%zu tool=%zu\n",
 				MaterialSurfaceCompiler::CacheHitCount(),
@@ -368,7 +440,7 @@ int main()
 		}
 
 		// 4. 烘焙 → 内容寻址缓存 → 打包 → 包内读回 → 运行时解析器命中
-		// 每次运行内容不同 → 指纹不同,保证真的走一次 dxc + spirv-cross;
+		// 每次运行内容不同 → 指纹不同,保证真的走一次 slangc + spirv-cross;
 		// 第二次调用同一内容则必须命中缓存。
 		WriteText(sourceDir / "Probe.hlsl",
 			std::string(kProbeShader) + "\n// build " + temp.path.filename().string() + "\n");
@@ -426,7 +498,7 @@ int main()
 		CHECK(World::ShaderCompiler::ToolInvocationCount() == 0);
 		World::ShaderCompiler::ClearArtifactResolver();
 
-		// 3b. M4-S2:注解参数表 → 参数块编译 → dxc 反射校验(三态)+ 字段偏移表 + 打包
+		// 3b. M4-S2:注解参数表 → 参数块编译 → Slang 反射校验(三态)+ 字段偏移表 + 打包
 		{
 			using World::MaterialParamDecl;
 			using World::MaterialParamLayout;
@@ -443,7 +515,7 @@ int main()
 				"{\n"
 				"    Surface surface = MakeDefaultSurface();\n"
 				"    surface.Roughness = Roughness;\n"
-				"    surface.BaseColor = Tint.rgb * Albedo.Sample(AlbedoSampler, input.UV).rgb;\n"
+				"    surface.BaseColor = Tint.rgb * Albedo.Sample(input.UV).rgb;\n"
 				"    if (Glow) surface.Emissive = float3(0.05f, 0.05f, 0.05f);\n"
 				"    return surface;\n"
 				"}\n";
@@ -461,15 +533,18 @@ int main()
 			CHECK(compiled.Artifact.EntryPoint == "PSMain");
 			const std::string wrapper = MaterialSurfaceCompiler::WrapSurfaceSource(annotated,
 				World::SurfaceShaderBackend::VulkanSpirV);
-			// M4-S3(D1):参数块从 space1 b2 挪到 b4(GL 的 UBO 单元 = binding,单元 2 是灯光)。
-			CHECK(wrapper.find("cbuffer MaterialParams : register(b4, space1)") != std::string::npos);
+			// M4-S3(D1):参数块从 space1 b2 挪到 b4(GL 的 UBO 单元 = binding,单元 2 是灯光);
+			// Slang-T3:cbuffer / 贴图都改用显式 `[[vk::binding]]`,贴图是**组合采样器** Sampler2D
+			// (ARB_gl_spirv 不接受分离的 OpTypeSampler;同时喂 Vulkan 的 COMBINED_IMAGE_SAMPLER)。
+			CHECK(wrapper.find("[[vk::binding(4, 1)]] cbuffer MaterialParams") != std::string::npos);
 			CHECK(wrapper.find("float Roughness;") != std::string::npos);
 			CHECK(wrapper.find("float4 Tint;") != std::string::npos);
 			CHECK(wrapper.find("bool Glow;") != std::string::npos);
-			CHECK(wrapper.find("Texture2D Albedo : register(t4, space2);") != std::string::npos);
-			CHECK(wrapper.find("SamplerState AlbedoSampler : register(s4, space2);") != std::string::npos);
+			CHECK(wrapper.find("[[vk::binding(4, 2)]] Sampler2D Albedo;") != std::string::npos);
+			CHECK(wrapper.find("Texture2D Albedo") == std::string::npos);
+			CHECK(wrapper.find("SamplerState AlbedoSampler") == std::string::npos);
 
-			// 反射布局:名称/类型/偏移/大小来自 dxc 的 SPIR-V 汇编(引擎不手写参数结构体)。
+			// 反射布局:名称/类型/偏移/大小来自 Slang 的反射 JSON(引擎不手写参数结构体)。
 			MaterialParamLayout layout;
 			CHECK(World::BuildParamLayout(annotated, table, &layout, &error));
 			std::printf("World.ShaderPipeline: M4-S2 layout\n%s", World::FormatParamLayout(layout).c_str());
@@ -550,7 +625,7 @@ int main()
 			CHECK(!error.empty());
 
 			// M4-S3:贴图参数上限 = 8(t4..t11 的固定槽位)。第 9 张必须结构化失败,
-			// 而且**不调用 dxc**(表自检在编译之前),不能静默丢参数。
+			// 而且**不调用编译器**(表自检在编译之前),不能静默丢参数。
 			{
 				std::string tooManyTextures;
 				for (int index = 0; index < 9; ++index)
@@ -579,7 +654,7 @@ int main()
 					capped.Diagnostics.empty() ? "<none>" : capped.Diagnostics.front().Message.c_str());
 			}
 
-			// 注解坏 → 结构化诊断(用户源行列号),并且不调用 dxc。
+			// 注解坏 → 结构化诊断(用户源行列号),并且不调用编译器。
 			const size_t toolsBefore = MaterialSurfaceCompiler::ToolInvocationCount();
 			const World::SurfaceCompileResult badAnnotation = MaterialSurfaceCompiler::CompileSurface(
 				"//! param Float3 Tint = 1\n"

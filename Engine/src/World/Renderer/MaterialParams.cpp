@@ -58,7 +58,7 @@ namespace World
 		}
 
 		// 与引擎模板/uniform 冲突的参数名:这些名字进参数块后必然编译不过,提前给可读错误
-		// (其余冲突仍由 dxc 的原始诊断兜底)。
+		// (其余冲突仍由 Slang 的原始诊断兜底)。
 		const char* const kReservedParamNames[] = {
 			"Surface", "MaterialInputs", "SurfaceVSInput", "SurfaceVSOutput",
 			"SurfaceInstanceInput", "SurfaceSkinnedInput", "SurfacePSOutput", "GpuLight",
@@ -509,233 +509,409 @@ namespace World
 			std::unordered_set<std::string> m_SeenFields;
 		};
 
-		// ---- SPIR-V 汇编解析(dxc -Fc) ----
-
-		struct AsmModule
+		// ---- Slang 反射 JSON(Slang-T3) ----
+		//
+		// 只用到 JSON 的一个子集(对象/数组/字符串/数字/布尔/null),键名与结构由 Slang 自己生成、
+		// 跨版本稳定;因此这里自带一个小解析器:不引入第三方依赖,反射 JSON 只有几十 KB。
+		struct JsonValue
 		{
-			std::unordered_map<std::string, std::string> Names;
-			std::unordered_map<std::string, std::unordered_map<uint32_t, std::string>> MemberNames;
-			std::unordered_map<std::string, std::unordered_map<std::string, int64_t>> Decorations;
-			std::unordered_map<std::string, std::unordered_map<uint32_t, uint32_t>> MemberOffsets;
-			std::unordered_map<std::string, std::string> ScalarKind;
-			std::unordered_map<std::string, std::pair<std::string, int>> Vectors;
-			std::unordered_map<std::string, std::vector<std::string>> StructMembers;
-			std::unordered_map<std::string, std::pair<std::string, std::string>> Pointers;
-			std::unordered_map<std::string, std::string> Images;
-			std::unordered_map<std::string, std::string> SampledImages;
-			std::unordered_map<std::string, std::pair<std::string, std::string>> Variables;
-			std::unordered_map<std::string, int64_t> Constants;
-			std::vector<std::pair<std::string, std::vector<std::string>>> AccessChains;
-			size_t InstructionCount = 0;
+			enum class Kind { Null, Bool, Number, String, Array, Object };
+
+			Kind ValueKind = Kind::Null;
+			bool Boolean = false;
+			double Number = 0.0;
+			std::string Text;                                          // Kind::String
+			std::vector<JsonValue> Items;                              // Kind::Array
+			std::vector<std::pair<std::string, JsonValue>> Members;    // Kind::Object
+
+			const JsonValue* Find(const char* key) const
+			{
+				if (ValueKind != Kind::Object)
+					return nullptr;
+				for (const auto& member : Members)
+					if (member.first == key)
+						return &member.second;
+				return nullptr;
+			}
+
+			bool IsNumber() const { return ValueKind == Kind::Number; }
+			bool IsString() const { return ValueKind == Kind::String; }
 		};
 
-		std::vector<std::string> SplitTokens(const std::string& line)
+		class JsonReader
 		{
-			std::vector<std::string> tokens;
-			std::istringstream stream(line);
-			std::string token;
-			while (stream >> token)
-				tokens.push_back(token);
-			return tokens;
-		}
+		public:
+			explicit JsonReader(const std::string& text) : m_Text(text) {}
 
-		std::string QuotedName(const std::string& line)
-		{
-			const size_t begin = line.find('"');
-			if (begin == std::string::npos)
-				return {};
-			const size_t end = line.rfind('"');
-			if (end <= begin)
-				return {};
-			return line.substr(begin + 1, end - begin - 1);
-		}
-
-		bool ParseInt64(const std::string& text, int64_t* out)
-		{
-			if (text.empty())
-				return false;
-			char* end = nullptr;
-			const long long value = std::strtoll(text.c_str(), &end, 10);
-			if (end == nullptr || *end != '\0')
-				return false;
-			*out = static_cast<int64_t>(value);
-			return true;
-		}
-
-		bool ParseAsmModule(const std::string& assembly, AsmModule* out, std::string* error)
-		{
-			std::istringstream stream(assembly);
-			std::string line;
-			while (std::getline(stream, line))
+			bool Parse(JsonValue* out, std::string* error)
 			{
-				if (!line.empty() && line.back() == '\r')
-					line.pop_back();
-				const std::string trimmed = Trim(line);
-				if (trimmed.empty() || trimmed.front() == ';')
-					continue;
-				const std::vector<std::string> tokens = SplitTokens(trimmed);
-				if (tokens.size() < 2)
-					continue;
-				++out->InstructionCount;
-				const bool assigned = tokens[1] == "=";
-				const std::string& opcode = assigned ? tokens[2] : tokens[0];
-				const size_t operandBase = assigned ? 3 : 1;
-				if (assigned)
+				if (!ParseValue(out, 0))
 				{
-					const std::string& id = tokens[0];
-					if (opcode == "OpTypeFloat")
+					if (error) *error = m_Error.empty() ? "反射 JSON 解析失败" : m_Error;
+					return false;
+				}
+				SkipWhitespace();
+				return true;
+			}
+
+		private:
+			void SkipWhitespace()
+			{
+				while (m_Pos < m_Text.size())
+				{
+					const char ch = m_Text[m_Pos];
+					if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n')
+						++m_Pos;
+					else
+						break;
+				}
+			}
+
+			bool Fail(const char* reason)
+			{
+				m_Error = std::string("反射 JSON 解析失败(") + reason + ",偏移 "
+					+ std::to_string(m_Pos) + ")";
+				return false;
+			}
+
+			bool ParseValue(JsonValue* out, int depth)
+			{
+				if (depth > 64)
+					return Fail("嵌套过深");
+				SkipWhitespace();
+				if (m_Pos >= m_Text.size())
+					return Fail("意外结束");
+				const char ch = m_Text[m_Pos];
+				if (ch == '{')
+					return ParseObject(out, depth);
+				if (ch == '[')
+					return ParseArray(out, depth);
+				if (ch == '"')
+				{
+					out->ValueKind = JsonValue::Kind::String;
+					return ParseString(&out->Text);
+				}
+				if (ch == 't' || ch == 'f')
+				{
+					const bool value = ch == 't';
+					const char* literal = value ? "true" : "false";
+					const size_t length = value ? 4u : 5u;
+					if (m_Text.compare(m_Pos, length, literal) != 0)
+						return Fail("布尔字面量");
+					m_Pos += length;
+					out->ValueKind = JsonValue::Kind::Bool;
+					out->Boolean = value;
+					return true;
+				}
+				if (ch == 'n')
+				{
+					if (m_Text.compare(m_Pos, 4, "null") != 0)
+						return Fail("null 字面量");
+					m_Pos += 4;
+					out->ValueKind = JsonValue::Kind::Null;
+					return true;
+				}
+				return ParseNumber(out);
+			}
+
+			bool ParseObject(JsonValue* out, int depth)
+			{
+				out->ValueKind = JsonValue::Kind::Object;
+				++m_Pos;   // '{'
+				SkipWhitespace();
+				if (m_Pos < m_Text.size() && m_Text[m_Pos] == '}')
+				{
+					++m_Pos;
+					return true;
+				}
+				while (true)
+				{
+					SkipWhitespace();
+					if (m_Pos >= m_Text.size() || m_Text[m_Pos] != '"')
+						return Fail("对象的键");
+					std::string key;
+					if (!ParseString(&key))
+						return false;
+					SkipWhitespace();
+					if (m_Pos >= m_Text.size() || m_Text[m_Pos] != ':')
+						return Fail("对象的冒号");
+					++m_Pos;
+					JsonValue value;
+					if (!ParseValue(&value, depth + 1))
+						return false;
+					out->Members.emplace_back(std::move(key), std::move(value));
+					SkipWhitespace();
+					if (m_Pos < m_Text.size() && m_Text[m_Pos] == ',')
 					{
-						out->ScalarKind[id] = "float";
+						++m_Pos;
+						continue;
 					}
-					else if (opcode == "OpTypeInt")
+					if (m_Pos < m_Text.size() && m_Text[m_Pos] == '}')
 					{
-						const std::string signedness = tokens.size() > operandBase + 1
-							? tokens[operandBase + 1] : std::string("1");
-						out->ScalarKind[id] = signedness == "0" ? "uint" : "int";
+						++m_Pos;
+						return true;
 					}
-					else if (opcode == "OpTypeVector")
+					return Fail("对象的分隔符");
+				}
+			}
+
+			bool ParseArray(JsonValue* out, int depth)
+			{
+				out->ValueKind = JsonValue::Kind::Array;
+				++m_Pos;   // '['
+				SkipWhitespace();
+				if (m_Pos < m_Text.size() && m_Text[m_Pos] == ']')
+				{
+					++m_Pos;
+					return true;
+				}
+				while (true)
+				{
+					JsonValue item;
+					if (!ParseValue(&item, depth + 1))
+						return false;
+					out->Items.push_back(std::move(item));
+					SkipWhitespace();
+					if (m_Pos < m_Text.size() && m_Text[m_Pos] == ',')
 					{
-						const int count = tokens.size() > operandBase + 1
-							? std::atoi(tokens[operandBase + 1].c_str()) : 0;
-						out->Vectors[id] = { tokens[operandBase], count };
+						++m_Pos;
+						continue;
 					}
-					else if (opcode == "OpTypeStruct")
+					if (m_Pos < m_Text.size() && m_Text[m_Pos] == ']')
 					{
-						std::vector<std::string> members;
-						for (size_t index = operandBase; index < tokens.size(); ++index)
-							members.push_back(tokens[index]);
-						out->StructMembers[id] = std::move(members);
+						++m_Pos;
+						return true;
 					}
-					else if (opcode == "OpTypePointer")
+					return Fail("数组的分隔符");
+				}
+			}
+
+			bool ParseString(std::string* out)
+			{
+				++m_Pos;   // '"'
+				out->clear();
+				while (m_Pos < m_Text.size())
+				{
+					const char ch = m_Text[m_Pos++];
+					if (ch == '"')
+						return true;
+					if (ch != '\\')
 					{
-						if (tokens.size() > operandBase + 1)
-							out->Pointers[id] = { tokens[operandBase], tokens[operandBase + 1] };
+						*out += ch;
+						continue;
 					}
-					else if (opcode == "OpTypeImage")
+					if (m_Pos >= m_Text.size())
+						return Fail("转义序列");
+					const char escape = m_Text[m_Pos++];
+					switch (escape)
 					{
-						if (tokens.size() > operandBase + 1)
-							out->Images[id] = tokens[operandBase + 1];
-					}
-					else if (opcode == "OpTypeSampledImage")
-					{
-						if (tokens.size() > operandBase)
-							out->SampledImages[id] = tokens[operandBase];
-					}
-					else if (opcode == "OpVariable")
-					{
-						if (tokens.size() > operandBase + 1)
-							out->Variables[id] = { tokens[operandBase], tokens[operandBase + 1] };
-					}
-					else if (opcode == "OpConstant")
-					{
-						// `%int_0 = OpConstant %int 0`:operandBase 指向**类型 id**,值在下一个。
-						int64_t value = 0;
-						if (tokens.size() > operandBase + 1
-							&& ParseInt64(tokens[operandBase + 1], &value))
-							out->Constants[id] = value;
-					}
-					else if (opcode == "OpAccessChain" || opcode == "OpInBoundsAccessChain")
-					{
-						if (tokens.size() > operandBase + 1)
+						case '"': *out += '"'; break;
+						case '\\': *out += '\\'; break;
+						case '/': *out += '/'; break;
+						case 'b': *out += '\b'; break;
+						case 'f': *out += '\f'; break;
+						case 'n': *out += '\n'; break;
+						case 'r': *out += '\r'; break;
+						case 't': *out += '\t'; break;
+						case 'u':
 						{
-							std::vector<std::string> indices;
-							for (size_t index = operandBase + 2; index < tokens.size(); ++index)
-								indices.push_back(tokens[index]);
-							out->AccessChains.emplace_back(tokens[operandBase + 1], std::move(indices));
+							if (m_Pos + 4 > m_Text.size())
+								return Fail("\\u 转义");
+							uint32_t code = 0;
+							for (int index = 0; index < 4; ++index)
+							{
+								const char digit = m_Text[m_Pos + static_cast<size_t>(index)];
+								code <<= 4;
+								if (digit >= '0' && digit <= '9') code |= static_cast<uint32_t>(digit - '0');
+								else if (digit >= 'a' && digit <= 'f') code |= static_cast<uint32_t>(digit - 'a' + 10);
+								else if (digit >= 'A' && digit <= 'F') code |= static_cast<uint32_t>(digit - 'A' + 10);
+								else return Fail("\\u 十六进制");
+							}
+							m_Pos += 4;
+							// 参数名是 ASCII 标识符;非 ASCII 只做最小 UTF-8 编码(够编辑器显示)。
+							if (code < 0x80)
+								*out += static_cast<char>(code);
+							else if (code < 0x800)
+							{
+								*out += static_cast<char>(0xC0 | (code >> 6));
+								*out += static_cast<char>(0x80 | (code & 0x3F));
+							}
+							else
+							{
+								*out += static_cast<char>(0xE0 | (code >> 12));
+								*out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+								*out += static_cast<char>(0x80 | (code & 0x3F));
+							}
+							break;
 						}
-					}
-					continue;
-				}
-
-				if (opcode == "OpName" && tokens.size() >= 3)
-				{
-					out->Names[tokens[1]] = QuotedName(trimmed);
-				}
-				else if (opcode == "OpMemberName" && tokens.size() >= 4)
-				{
-					int64_t index = 0;
-					if (ParseInt64(tokens[2], &index))
-						out->MemberNames[tokens[1]][static_cast<uint32_t>(index)] = QuotedName(trimmed);
-				}
-				else if (opcode == "OpDecorate" && tokens.size() >= 4)
-				{
-					int64_t value = 0;
-					if (ParseInt64(tokens[3], &value))
-						out->Decorations[tokens[1]][tokens[2]] = value;
-				}
-				else if (opcode == "OpMemberDecorate" && tokens.size() >= 5 && tokens[3] == "Offset")
-				{
-					int64_t index = 0;
-					int64_t value = 0;
-					if (ParseInt64(tokens[2], &index) && ParseInt64(tokens[4], &value))
-					{
-						out->MemberOffsets[tokens[1]][static_cast<uint32_t>(index)]
-							= static_cast<uint32_t>(value);
+						default:
+							return Fail("未知转义");
 					}
 				}
+				return Fail("字符串没有结束引号");
 			}
-			if (out->InstructionCount == 0)
+
+			bool ParseNumber(JsonValue* out)
 			{
-				if (error) *error = "SPIR-V 汇编为空或格式不认识";
+				const size_t begin = m_Pos;
+				while (m_Pos < m_Text.size())
+				{
+					const char ch = m_Text[m_Pos];
+					const bool part = (ch >= '0' && ch <= '9') || ch == '-' || ch == '+'
+						|| ch == '.' || ch == 'e' || ch == 'E';
+					if (!part)
+						break;
+					++m_Pos;
+				}
+				if (begin == m_Pos)
+					return Fail("数字");
+				const std::string text = m_Text.substr(begin, m_Pos - begin);
+				char* end = nullptr;
+				const double value = std::strtod(text.c_str(), &end);
+				if (end == nullptr || *end != '\0')
+					return Fail("数字格式");
+				out->ValueKind = JsonValue::Kind::Number;
+				out->Number = value;
+				return true;
+			}
+
+			const std::string& m_Text;
+			size_t m_Pos = 0;
+			std::string m_Error;
+		};
+
+		uint32_t JsonBindingNumber(const JsonValue* binding, const char* key)
+		{
+			if (!binding || binding->ValueKind != JsonValue::Kind::Object)
+				return 0;
+			const JsonValue* value = binding->Find(key);
+			if (!value || !value->IsNumber() || value->Number < 0.0)
+				return 0;
+			return static_cast<uint32_t>(value->Number);
+		}
+
+		// 反射类型的显示名。口径与 dxc 时代一致(测试与编辑器文案都按这套串):
+		//   float32→float、int32→int、bool/uint32→uint(HLSL bool 在 SPIR-V 参数块里是 uint32)、
+		//   vector→v4float、贴图→type.2d.image。
+		std::string ReflectedTypeFromJson(const JsonValue& type)
+		{
+			const JsonValue* kind = type.Find("kind");
+			if (!kind || !kind->IsString())
+				return "unknown";
+			const std::string& kindText = kind->Text;
+			if (kindText == "scalar")
+			{
+				const JsonValue* scalar = type.Find("scalarType");
+				const std::string scalarText = scalar && scalar->IsString() ? scalar->Text : std::string();
+				if (scalarText == "float32") return "float";
+				if (scalarText == "int32") return "int";
+				if (scalarText == "uint32") return "uint";
+				if (scalarText == "bool") return "uint";
+				if (scalarText == "float16") return "half";
+				return scalarText.empty() ? std::string("scalar") : scalarText;
+			}
+			if (kindText == "vector")
+			{
+				const JsonValue* count = type.Find("elementCount");
+				const uint32_t elements = count && count->IsNumber()
+					? static_cast<uint32_t>(count->Number) : 0u;
+				const JsonValue* element = type.Find("elementType");
+				const std::string inner = element ? ReflectedTypeFromJson(*element) : std::string("float");
+				return elements == 0 ? std::string("vector") : ("v" + std::to_string(elements) + inner);
+			}
+			if (kindText == "matrix")
+				return "matrix";
+			if (kindText == "resource")
+			{
+				const JsonValue* shape = type.Find("baseShape");
+				const std::string shapeText = shape && shape->IsString() ? shape->Text : std::string();
+				if (shapeText == "texture2D") return "type.2d.image";
+				if (shapeText == "textureCube") return "type.cube.image";
+				if (shapeText == "texture2DArray") return "type.2d.image.array";
+				return shapeText.empty() ? std::string("resource") : shapeText;
+			}
+			if (kindText == "samplerState")
+				return "sampler";
+			return kindText;
+		}
+
+		// ---- SPIR-V 二进制里的"成员真的被读"(Slang-T3) ----
+		//
+		// 判据与 dxc 时代一致:OpAccessChain 以参数块变量为 base、**第一个**下标是常量 → 该成员被读。
+		// 输入从汇编文本换成二进制:引擎运行时不依赖 spirv-dis。
+		struct SpirvUsage
+		{
+			std::unordered_map<uint32_t, uint32_t> DescriptorSet;
+			std::unordered_map<uint32_t, uint32_t> Binding;
+			std::unordered_set<uint32_t> UniformVariables;
+			std::unordered_map<uint32_t, uint64_t> Constants;
+			std::vector<std::pair<uint32_t, std::vector<uint32_t>>> AccessChains;
+		};
+
+		bool ScanSpirvUsage(const std::vector<uint8_t>& spirv, SpirvUsage* out, std::string* error)
+		{
+			if (!out)
+			{
+				if (error) *error = "SPIR-V 使用情况输出为空";
 				return false;
+			}
+			if (spirv.size() < 20 || (spirv.size() % 4) != 0)
+			{
+				if (error) *error = "SPIR-V 二进制长度不合法";
+				return false;
+			}
+			const uint32_t* words = reinterpret_cast<const uint32_t*>(spirv.data());
+			if (words[0] != 0x07230203u)
+			{
+				if (error) *error = "SPIR-V 魔数不匹配";
+				return false;
+			}
+			const size_t wordCount = spirv.size() / 4;
+			size_t index = 5;   // 跳过 5 个字的头部
+			while (index < wordCount)
+			{
+				const uint32_t instruction = words[index];
+				const uint32_t opcode = instruction & 0xFFFFu;
+				const uint32_t length = instruction >> 16;
+				if (length == 0 || index + length > wordCount)
+				{
+					if (error) *error = "SPIR-V 指令长度越界";
+					return false;
+				}
+				const uint32_t* operands = words + index + 1;
+				switch (opcode)
+				{
+					case 71:   // OpDecorate: target, decoration, ...
+						if (length >= 3 && operands[1] == 33)        // Binding
+							out->Binding[operands[0]] = operands[2];
+						else if (length >= 3 && operands[1] == 34)   // DescriptorSet
+							out->DescriptorSet[operands[0]] = operands[2];
+						break;
+					case 59:   // OpVariable: resultType, resultId, storageClass
+						if (length >= 4 && operands[2] == 2)         // StorageClass Uniform
+							out->UniformVariables.insert(operands[1]);
+						break;
+					case 43:   // OpConstant: resultType, resultId, value...
+						if (length >= 4)
+							out->Constants[operands[1]] = static_cast<uint64_t>(operands[2]);
+						break;
+					case 65:   // OpAccessChain: resultType, resultId, base, indexes...
+						if (length >= 5)
+						{
+							std::vector<uint32_t> indexes;
+							indexes.reserve(length - 4);
+							for (uint32_t operand = 3; operand < length; ++operand)
+								indexes.push_back(operands[operand]);
+							out->AccessChains.emplace_back(operands[2], std::move(indexes));
+						}
+						break;
+					default:
+						break;
+				}
+				index += length;
 			}
 			return true;
 		}
-
-		std::string TypeDisplayName(const AsmModule& module, const std::string& typeId, int depth = 0)
-		{
-			const auto named = module.Names.find(typeId);
-			if (named != module.Names.end() && !named->second.empty())
-				return named->second;
-			const auto scalar = module.ScalarKind.find(typeId);
-			if (scalar != module.ScalarKind.end())
-				return scalar->second;
-			const auto vector = module.Vectors.find(typeId);
-			if (vector != module.Vectors.end())
-			{
-				if (depth < 4)
-					return "v" + std::to_string(vector->second.second)
-						+ TypeDisplayName(module, vector->second.first, depth + 1);
-				return "vector";
-			}
-			if (module.StructMembers.count(typeId) != 0)
-				return "struct";
-			if (module.Images.count(typeId) != 0)
-				return "image";
-			if (module.SampledImages.count(typeId) != 0)
-				return "sampledimage";
-			if (module.Pointers.count(typeId) != 0)
-				return "pointer";
-			return "unknown";
-		}
-
-		uint32_t TypeSize(const AsmModule& module, const std::string& typeId, int depth = 0)
-		{
-			if (depth > 8)
-				return 0;
-			if (module.ScalarKind.count(typeId) != 0)
-				return kScalarSize;
-			const auto vector = module.Vectors.find(typeId);
-			if (vector != module.Vectors.end())
-				return static_cast<uint32_t>(vector->second.second) * kScalarSize;
-			const auto structure = module.StructMembers.find(typeId);
-			if (structure != module.StructMembers.end())
-			{
-				uint32_t end = 0;
-				const auto offsets = module.MemberOffsets.find(typeId);
-				for (size_t index = 0; index < structure->second.size(); ++index)
-				{
-					const uint32_t offset = offsets != module.MemberOffsets.end()
-						&& offsets->second.count(static_cast<uint32_t>(index)) != 0
-						? offsets->second.at(static_cast<uint32_t>(index)) : end;
-					const uint32_t size = TypeSize(module, structure->second[index], depth + 1);
-					end = std::max(end, offset + size);
-				}
-				return end;
-			}
-			return 0;
-		}
-
 		uint32_t RoundUp16(uint32_t value)
 		{
 			return ((value + kParamBlobAlignment - 1) / kParamBlobAlignment) * kParamBlobAlignment;
@@ -1066,7 +1242,8 @@ namespace World
 		return true;
 	}
 
-	bool ReflectParamLayoutFromAssembly(const std::string& assembly, MaterialParamLayout* out, std::string* error)
+	bool ReflectParamLayoutFromReflectionJson(const std::string& reflectionJson,
+		const std::vector<uint8_t>& spirv, MaterialParamLayout* out, std::string* error)
 	{
 		if (!out)
 		{
@@ -1077,128 +1254,154 @@ namespace World
 		out->CbufferSet = ParamCbufferSet();
 		out->CbufferBinding = ParamCbufferBinding();
 
-		AsmModule module;
-		if (!ParseAsmModule(assembly, &module, error))
+		JsonValue root;
+		if (!JsonReader(reflectionJson).Parse(&root, error))
 			return false;
-
-		// 参数块变量:优先按 (set,binding);找不到再按名字 MaterialParams(用户手写参数块的情况)。
-		std::string blockId;
-		for (const auto& entry : module.Variables)
+		const JsonValue* parameters = root.Find("parameters");
+		if (!parameters || parameters->ValueKind != JsonValue::Kind::Array)
 		{
-			const std::string& id = entry.first;
-			if (entry.second.second != "Uniform")
+			if (error) *error = "反射 JSON 里没有 parameters[](不是 Slang 的 -reflection-json?)";
+			return false;
+		}
+
+		// 参数块:优先按 (set,binding);找不到再按名字 MaterialParams(用户手写参数块的情况)。
+		const JsonValue* block = nullptr;
+		for (const JsonValue& parameter : parameters->Items)
+		{
+			const JsonValue* type = parameter.Find("type");
+			const JsonValue* kind = type ? type->Find("kind") : nullptr;
+			if (!kind || !kind->IsString() || kind->Text != "constantBuffer")
 				continue;
-			const auto decorations = module.Decorations.find(id);
-			if (decorations == module.Decorations.end())
-				continue;
-			const auto set = decorations->second.find("DescriptorSet");
-			const auto binding = decorations->second.find("Binding");
-			if (set != decorations->second.end() && binding != decorations->second.end()
-				&& set->second == static_cast<int64_t>(ParamCbufferSet())
-				&& binding->second == static_cast<int64_t>(ParamCbufferBinding()))
+			const JsonValue* binding = parameter.Find("binding");
+			if (JsonBindingNumber(binding, "space") == ParamCbufferSet()
+				&& JsonBindingNumber(binding, "index") == ParamCbufferBinding())
 			{
-				blockId = id;
+				block = &parameter;
 				break;
 			}
 		}
-		if (blockId.empty())
+		if (!block)
 		{
-			for (const auto& entry : module.Names)
+			for (const JsonValue& parameter : parameters->Items)
 			{
-				if (entry.second == ParamCbufferName() && module.Variables.count(entry.first) != 0)
+				const JsonValue* name = parameter.Find("name");
+				if (name && name->IsString() && name->Text == ParamCbufferName())
 				{
-					blockId = entry.first;
+					block = &parameter;
 					break;
 				}
 			}
 		}
-		if (!blockId.empty())
+		if (block)
 		{
-			const auto variable = module.Variables.find(blockId);
-			const auto pointer = module.Pointers.find(variable->second.first);
-			const std::string structId = pointer != module.Pointers.end()
-				? pointer->second.second : std::string();
-			const auto structure = module.StructMembers.find(structId);
-			if (structure == module.StructMembers.end())
+			const JsonValue* type = block->Find("type");
+			const JsonValue* elementType = type ? type->Find("elementType") : nullptr;
+			const JsonValue* fields = elementType ? elementType->Find("fields") : nullptr;
+			if (!fields || fields->ValueKind != JsonValue::Kind::Array)
 			{
 				if (error)
-					*error = std::string("参数块 ") + ParamCbufferName() + " 不是结构体,无法反射";
+					*error = "参数块 " + std::string(ParamCbufferName()) + " 在反射 JSON 里没有成员表";
 				return false;
 			}
 
-			const auto memberNames = module.MemberNames.find(structId);
-			const auto offsets = module.MemberOffsets.find(structId);
 			uint32_t end = 0;
-			for (size_t index = 0; index < structure->second.size(); ++index)
+			for (const JsonValue& field : fields->Items)
 			{
-				MaterialParamLayoutField field;
-				field.Name = memberNames != module.MemberNames.end()
-					&& memberNames->second.count(static_cast<uint32_t>(index)) != 0
-					? memberNames->second.at(static_cast<uint32_t>(index))
-					: ("member" + std::to_string(index));
-				field.ReflectedType = TypeDisplayName(module, structure->second[index]);
-				field.Type = DeriveTypeFromReflected(field.ReflectedType);
-				field.Offset = offsets != module.MemberOffsets.end()
-					&& offsets->second.count(static_cast<uint32_t>(index)) != 0
-					? offsets->second.at(static_cast<uint32_t>(index)) : 0;
-				field.Size = TypeSize(module, structure->second[index]);
-				end = std::max(end, field.Offset + field.Size);
-				out->Fields.push_back(std::move(field));
+				MaterialParamLayoutField layoutField;
+				const JsonValue* name = field.Find("name");
+				layoutField.Name = name && name->IsString() ? name->Text : std::string("member");
+				const JsonValue* fieldType = field.Find("type");
+				layoutField.ReflectedType = fieldType
+					? ReflectedTypeFromJson(*fieldType) : std::string("unknown");
+				layoutField.Type = DeriveTypeFromReflected(layoutField.ReflectedType);
+				const JsonValue* binding = field.Find("binding");
+				layoutField.Offset = JsonBindingNumber(binding, "offset");
+				layoutField.Size = JsonBindingNumber(binding, "size");
+				end = std::max(end, layoutField.Offset + layoutField.Size);
+				out->Fields.push_back(std::move(layoutField));
 			}
-			out->CbufferSize = RoundUp16(end);
 
-			// 使用情况:OpAccessChain 的**第一个**下标直接索引参数块成员。
-			bool dynamicIndex = false;
-			std::unordered_set<uint32_t> usedIndices;
-			for (const auto& [base, indices] : module.AccessChains)
+			// 块大小:优先用 Slang 报的 uniform size(已含尾部对齐);缺失时按成员末端 16 字节对齐。
+			uint32_t blockSize = 0;
+			const JsonValue* sizes = elementType->Find("sizes");
+			if (sizes && sizes->ValueKind == JsonValue::Kind::Array)
 			{
-				if (base != blockId || indices.empty())
-					continue;
-				const auto constant = module.Constants.find(indices.front());
-				if (constant == module.Constants.end())
+				for (const JsonValue& size : sizes->Items)
 				{
-					dynamicIndex = true;
-					continue;
+					const JsonValue* kind = size.Find("kind");
+					const JsonValue* value = size.Find("value");
+					if (kind && kind->IsString() && kind->Text == "uniform"
+						&& value && value->IsNumber())
+					{
+						blockSize = static_cast<uint32_t>(value->Number);
+					}
 				}
-				usedIndices.insert(static_cast<uint32_t>(constant->second));
 			}
-			for (size_t index = 0; index < structure->second.size(); ++index)
+			out->CbufferSize = blockSize != 0 ? blockSize : RoundUp16(end);
+
+			// "真的被读":SPIR-V 里的 OpAccessChain 首下标。SPIR-V 缺失(纯 JSON 单测)时
+			// 退化为"没有使用信息"(空 UsedMembers),不猜。
+			SpirvUsage usage;
+			std::string usageError;
+			if (!spirv.empty() && ScanSpirvUsage(spirv, &usage, &usageError))
 			{
-				if (dynamicIndex || usedIndices.count(static_cast<uint32_t>(index)) != 0)
-					out->UsedMembers.push_back(out->Fields[index].Name);
+				uint32_t blockVariable = 0;
+				for (const uint32_t variable : usage.UniformVariables)
+				{
+					const auto set = usage.DescriptorSet.find(variable);
+					const auto binding = usage.Binding.find(variable);
+					if (set == usage.DescriptorSet.end() || binding == usage.Binding.end())
+						continue;
+					if (set->second == ParamCbufferSet() && binding->second == ParamCbufferBinding())
+					{
+						blockVariable = variable;
+						break;
+					}
+				}
+				if (blockVariable != 0)
+				{
+					bool dynamicIndex = false;
+					std::unordered_set<uint32_t> usedIndices;
+					for (const auto& chain : usage.AccessChains)
+					{
+						if (chain.first != blockVariable || chain.second.empty())
+							continue;
+						const auto constant = usage.Constants.find(chain.second.front());
+						if (constant == usage.Constants.end())
+						{
+							dynamicIndex = true;
+							continue;
+						}
+						usedIndices.insert(static_cast<uint32_t>(constant->second));
+					}
+					for (size_t index = 0; index < out->Fields.size(); ++index)
+					{
+						if (dynamicIndex || usedIndices.count(static_cast<uint32_t>(index)) != 0)
+							out->UsedMembers.push_back(out->Fields[index].Name);
+					}
+					std::sort(out->UsedMembers.begin(), out->UsedMembers.end());
+				}
 			}
-			std::sort(out->UsedMembers.begin(), out->UsedMembers.end());
 		}
 
-		// 参数贴图槽:set = 2、binding >= 4 的 UniformConstant 变量
-		// (引擎 albedo = t1 / normal = t2,不受影响)。
-		for (const auto& entry : module.Variables)
+		// 参数贴图槽:space = 2、binding >= 4 的 resource(引擎 albedo = t1 / normal = t2 不算)。
+		for (const JsonValue& parameter : parameters->Items)
 		{
-			const std::string& id = entry.first;
-			if (entry.second.second != "UniformConstant")
+			const JsonValue* type = parameter.Find("type");
+			const JsonValue* kind = type ? type->Find("kind") : nullptr;
+			if (!kind || !kind->IsString() || kind->Text != "resource")
 				continue;
-			const auto decorations = module.Decorations.find(id);
-			if (decorations == module.Decorations.end())
-				continue;
-			const auto set = decorations->second.find("DescriptorSet");
-			const auto binding = decorations->second.find("Binding");
-			if (set == decorations->second.end() || binding == decorations->second.end())
-				continue;
-			const uint32_t setValue = static_cast<uint32_t>(set->second);
-			const uint32_t bindingValue = static_cast<uint32_t>(binding->second);
-			if (setValue != 2 || bindingValue < ParamTextureBaseBinding())
+			const JsonValue* binding = parameter.Find("binding");
+			const uint32_t space = JsonBindingNumber(binding, "space");
+			const uint32_t index = JsonBindingNumber(binding, "index");
+			if (space != 2 || index < ParamTextureBaseBinding())
 				continue;
 			MaterialParamTextureSlot slot;
-			slot.Name = module.Names.count(id) != 0 ? module.Names.at(id) : id;
-			const auto pointer = module.Pointers.find(entry.second.first);
-			std::string pointee = pointer != module.Pointers.end()
-				? pointer->second.second : std::string();
-			const auto sampled = module.SampledImages.find(pointee);
-			if (sampled != module.SampledImages.end())
-				pointee = sampled->second;
-			slot.ReflectedType = TypeDisplayName(module, pointee);
-			slot.Set = setValue;
-			slot.Binding = bindingValue;
+			const JsonValue* name = parameter.Find("name");
+			slot.Name = name && name->IsString() ? name->Text : std::string();
+			slot.ReflectedType = type ? ReflectedTypeFromJson(*type) : std::string("type.2d.image");
+			slot.Set = space;
+			slot.Binding = index;
 			out->Textures.push_back(std::move(slot));
 		}
 		std::sort(out->Textures.begin(), out->Textures.end(),
@@ -1210,6 +1413,7 @@ namespace World
 		return true;
 	}
 
+	// 端到端:按 table 编译包装源码(slangc)并反射出布局。工具缺失/源码错误 → false + error。
 	bool BuildParamLayout(const std::string& hlslSource, const std::vector<MaterialParamDecl>& table,
 		MaterialParamLayout* out, std::string* error)
 	{
@@ -1229,25 +1433,27 @@ namespace World
 					messages.push_back(diagnostic.Message);
 			}
 			if (messages.empty())
-				messages.push_back("dxc 编译失败但没有诊断输出");
+				messages.push_back("Slang 编译失败但没有诊断输出");
 			if (error) *error = "参数表编译失败: " + Join(messages);
 			return false;
 		}
-		const std::string assemblyPath = MaterialSurfaceCompiler::AssemblyPath(compiled.Artifact);
-		if (assemblyPath.empty())
+		const std::string reflectionPath = MaterialSurfaceCompiler::ReflectionPath(compiled.Artifact);
+		if (reflectionPath.empty())
 		{
 			if (error)
-				*error = "参数表编译产物缺少 SPIR-V 汇编(-Fc 输出),无法反射;请重新编译该着色器";
+				*error = "参数表编译产物缺少 Slang 反射 JSON(-reflection-json 输出),无法反射;"
+					"请重新编译该着色器";
 			return false;
 		}
-		std::string assembly;
-		if (!ReadTextFile(fs::path(assemblyPath), assembly))
+		std::string reflectionJson;
+		if (!ReadTextFile(fs::path(reflectionPath), reflectionJson))
 		{
-			if (error) *error = "读不到反射用的 SPIR-V 汇编: " + assemblyPath;
+			if (error) *error = "读不到反射用的 Slang JSON: " + reflectionPath;
 			return false;
 		}
 		MaterialParamLayout layout;
-		if (!ReflectParamLayoutFromAssembly(assembly, &layout, error))
+		if (!ReflectParamLayoutFromReflectionJson(reflectionJson, compiled.Artifact.Bytecode,
+			&layout, error))
 			return false;
 
 		// 注解类型是事实源:反射只能给出 v4float(Vec4 与 Color 同形)、uint(HLSL bool 的形态),

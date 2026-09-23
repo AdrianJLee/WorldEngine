@@ -26,12 +26,13 @@ namespace World
 	{
 		namespace fs = std::filesystem;
 
-		// 2 = M4-S2:包装源码加入注解参数块,并且每次编译都落一份 SPIR-V 汇编(-Fc)供反射。
-		// 3 = M4-S3:参数块挪到 register(b4, space1) + 顶点阶段(模板键缓存,不进 PS 键)。
-		constexpr uint32_t kSurfaceCacheVersion = 3;
+		// 2 = M4-S2:包装源码加入注解参数块,并且每次编译都落一份反射输入供参数校验。
+		// 3 = M4-S3:参数块挪到 b4/space1 + 顶点阶段(模板键缓存,不进 PS 键)。
+		// 4 = Slang-T3:内核换成 slangc(双目标 SPIR-V + `-reflection-json` + 组合采样器模板)。
+		constexpr uint32_t kSurfaceCacheVersion = 4;
 		constexpr const char* kSurfaceEntryPoint = "PSMain";
 		constexpr const char* kUserSourceFileName = "surface_user.hlsl";
-		constexpr const char* kAssemblyFileName = "surface.asm";
+		constexpr const char* kReflectionFileName = "surface.reflection.json";
 
 		// M4-S3(D5):表面模板自带的三个顶点入口。它们的输出(4 个插值量)与引擎
 		// Renderer3D_Solid.hlsl 的不兼容,所以表面管线必须用模板自己的 VS。
@@ -166,13 +167,129 @@ namespace World
 			return static_cast<bool>(stream);
 		}
 
-		// 工具身份:可执行文件大小做代理(与 ShaderCompiler 同一口径);dxc 与 dxcompiler.dll
-		// 一起参与,避免只换 DLL 时命中旧缓存。
-		uint64_t ToolIdentity(const std::string& toolPath)
+		uint64_t FileSize(const std::string& toolPath)
 		{
 			std::error_code ec;
 			const uint64_t size = static_cast<uint64_t>(fs::file_size(toolPath, ec));
 			return ec ? 0 : size;
+		}
+
+		// ---- Slang 工具解析(Slang-T3) ----
+		//
+		// 口径与 ShaderUtils.cpp 的 ShaderCompiler 一致(两份解析在 T5/T6 的根 CMake FETCH 后应合一):
+		//   1) WLD_SLANGC(完整 exe 路径)
+		//   2) WLD_SLANG_DIR(目录)
+		//   3) 编译期 WLD_SLANG_DIR(根 CMake 目前未定义;FETCH 接管后自动生效)
+		//   4) <repo>/vendor/tools/slang/slangc.exe
+		//   5) <repo 同级>/WorldEngine-deps/slang-*/bin/slangc.exe(本机开发依赖根)
+		//   6) PATH 上的 slangc.exe
+		// 解析结果只算一次(编译路径是热的,不能每次 stat 一整串目录)。
+		std::string ResolveSlangcPath()
+		{
+			const auto accept = [](const fs::path& candidate) -> std::string
+			{
+				std::error_code ec;
+				if (fs::is_regular_file(candidate, ec))
+					return candidate.string();
+				return {};
+			};
+
+			if (const char* full = std::getenv("WLD_SLANGC"); full && *full)
+				if (std::string resolved = accept(fs::path(full)); !resolved.empty())
+					return resolved;
+			if (const char* dir = std::getenv("WLD_SLANG_DIR"); dir && *dir)
+				if (std::string resolved = accept(fs::path(dir) / "slangc.exe"); !resolved.empty())
+					return resolved;
+#ifdef WLD_SLANG_DIR
+			if (std::string resolved = accept(fs::path(WLD_SLANG_DIR) / "slangc.exe"); !resolved.empty())
+				return resolved;
+#endif
+
+			const fs::path repoRoot = WLD_REPO_ROOT;
+			if (std::string resolved = accept(repoRoot / "vendor" / "tools" / "slang" / "slangc.exe");
+				!resolved.empty())
+				return resolved;
+
+			std::error_code ec;
+			const fs::path depsRoot = repoRoot.parent_path() / "WorldEngine-deps";
+			std::vector<fs::path> versions;
+			for (const fs::directory_entry& entry :
+				fs::directory_iterator(depsRoot, fs::directory_options::skip_permission_denied, ec))
+			{
+				std::error_code entryEc;
+				if (!entry.is_directory(entryEc))
+					continue;
+				const std::string name = entry.path().filename().string();
+				if (name.rfind("slang-", 0) == 0)
+					versions.push_back(entry.path());
+			}
+			std::sort(versions.begin(), versions.end());
+			for (auto it = versions.rbegin(); it != versions.rend(); ++it)
+				if (std::string resolved = accept(*it / "bin" / "slangc.exe"); !resolved.empty())
+					return resolved;
+
+#ifdef _WIN32
+			{
+				char buffer[MAX_PATH] = {};
+				if (SearchPathA(nullptr, "slangc.exe", nullptr, MAX_PATH, buffer, nullptr) > 0)
+					return std::string(buffer);
+			}
+#endif
+			return {};
+		}
+
+		const std::string& SlangcPath()
+		{
+			static const std::string resolved = ResolveSlangcPath();
+			return resolved;
+		}
+
+		// 文件内容哈希(64 位 FNV-1a,分块读)—— 工具身份用它:换 Slang 构建即失效。
+		uint64_t HashFileBytes(const std::string& path)
+		{
+			std::ifstream stream(path, std::ios::binary);
+			if (!stream)
+				return 0;
+			uint64_t hash = 14695981039346656037ULL;
+			std::vector<char> buffer(1u << 16);
+			while (stream)
+			{
+				stream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+				const std::streamsize read = stream.gcount();
+				for (std::streamsize index = 0; index < read; ++index)
+				{
+					hash ^= static_cast<uint8_t>(buffer[static_cast<size_t>(index)]);
+					hash *= 1099511628211ULL;
+				}
+			}
+			return hash;
+		}
+
+		// 工具身份:slangc.exe 与自己的编译器 DLL 的**大小 + 内容哈希**一起参与
+		// (dxc 时代是 dxc.exe + dxcompiler.dll 的大小代理;Slang 同理:slang-compiler.dll 换代
+		// 也必须让缓存失效)。只算一次 —— 哈希 60MB 级文件只发生在首次编译。
+		uint64_t SlangToolIdentity()
+		{
+			static const uint64_t identity = []
+			{
+				const std::string tool = SlangcPath();
+				if (tool.empty())
+					return uint64_t(0);
+				const fs::path toolPath(tool);
+				uint64_t hash = FileSize(tool);
+				hash = Mix(hash, std::to_string(FileSize(tool)));
+				hash = Mix(hash, Hex(HashFileBytes(tool)));
+				const fs::path compilerDll = toolPath.parent_path() / "slang-compiler.dll";
+				std::error_code ec;
+				if (fs::is_regular_file(compilerDll, ec))
+				{
+					const std::string dll = compilerDll.string();
+					hash = Mix(hash, std::to_string(FileSize(dll)));
+					hash = Mix(hash, Hex(HashFileBytes(dll)));
+				}
+				return hash;
+			}();
+			return identity;
 		}
 
 		std::string BackendKey(SurfaceShaderBackend backend)
@@ -180,9 +297,42 @@ namespace World
 			switch (backend)
 			{
 				case SurfaceShaderBackend::VulkanSpirV: return "vulkan-spirv";
-				case SurfaceShaderBackend::OpenGLGlsl: return "opengl-glsl";
+				case SurfaceShaderBackend::OpenGLSpirV: return "opengl-spirv";
 			}
 			return "unknown";
+		}
+
+		// 目标后端的 slangc profile(与 ShaderUtils.cpp 的 ShaderCompiler 同一口径):
+		//  - Vulkan:直接用请求的 D3D profile(vs_6_0 / ps_6_0;产物 SPIR-V 1.3);
+		//  - GL:`<stage>_5_0+spirv_1_0` —— ARB_gl_spirv 只接受 SPIR-V 1.0(T1 实测:
+		//    默认 1.5 与 ps_6_0+spirv_1_0 的 1.3 都被 spirv-val --target-env opengl4.5 拒绝)。
+		std::string ProfileForTarget(SurfaceShaderBackend backend, const std::string& d3dProfile)
+		{
+			if (backend != SurfaceShaderBackend::OpenGLSpirV)
+				return d3dProfile;
+			const size_t underscore = d3dProfile.find('_');
+			const std::string stage = underscore == std::string::npos
+				? d3dProfile : d3dProfile.substr(0, underscore);
+			return stage + "_5_0+spirv_1_0";
+		}
+
+		// 一个 stage 的 slangc 命令行。两家目标的差异只有两处(与 T2 的引擎 shader 路径一致):
+		//  - Vulkan:`-fvk-use-entrypoint-name` —— 模块入口名 = 源里的入口名(pipeline 的 pName 直接用);
+		//  - GL:入口名保持 Slang 默认的 "main"(ARB_gl_spirv 的 glSpecializeShader 固定用它),
+		//    并保留 T1 验证过的 `-fvk-use-gl-layout`。
+		// `-reflection-json` 只有像素阶段要(参数反射的事实源;顶点阶段不带参数块)。
+		std::string BuildSlangArguments(SurfaceShaderBackend backend, const std::string& d3dProfile,
+			const std::string& entryPoint, const std::string& sourcePath, const std::string& outputPath,
+			const std::string& reflectionPath)
+		{
+			std::string arguments = "-target spirv -profile \""
+				+ ProfileForTarget(backend, d3dProfile) + "\" ";
+			arguments += backend == SurfaceShaderBackend::OpenGLSpirV
+				? "-fvk-use-gl-layout " : "-fvk-use-entrypoint-name ";
+			arguments += "-entry \"" + entryPoint + "\" \"" + sourcePath + "\" -o \"" + outputPath + "\"";
+			if (!reflectionPath.empty())
+				arguments += " -reflection-json \"" + reflectionPath + "\"";
+			return arguments;
 		}
 
 		std::string LastGoodKey(const std::string& permutationKey, SurfaceShaderBackend backend)
@@ -258,50 +408,134 @@ namespace World
 		std::vector<SurfaceDiagnostic> ParseDiagnostics(const std::string& toolOutput)
 		{
 			std::vector<SurfaceDiagnostic> diagnostics;
+			// Slang 的默认(rich)形态是**两行**:
+			//   error[E20002]: syntax error
+			//    --> <file>:<line>:<col>
+			// 其后是源码片段与插入符行(跳过,不当成独立诊断)。
+			// 单行 `<file>:<line>:<col>: <severity>: <msg>` 与 `<file>(<line>,<col>): ...` 作为兜底
+			// 保留(Slang 的 -enable-machine-readable-diagnostics 形态与其它工具形态)。
+			const std::regex header(R"(^\s*(error|warning)\s*(?:\[[A-Za-z0-9]+\])?\s*:\s*(.*)$)",
+				std::regex::ECMAScript);
+			const std::regex arrow(R"(^\s*-->\s*(.+?):(\d+):(\d+)\s*$)", std::regex::ECMAScript);
 			const std::regex parenthesized(
 				R"(^\s*(.+?)\((\d+),(\d+)\)\s*:\s*(error|warning)\s*:?\s*(.*)$)",
 				std::regex::ECMAScript);
 			const std::regex colonized(
 				R"(^\s*(.+?):(\d+):(\d+)\s*:\s*(error|warning)\s*:?\s*(.*)$)",
 				std::regex::ECMAScript);
+			const std::regex snippet(R"(^(\s*[|^-].*|\s*\d+\s*\|.*)$)", std::regex::ECMAScript);
 
 			const std::string userFile = LowerAscii(NormalizeSlashes(kUserSourceFileName));
+			const auto markUserSource = [&userFile](SurfaceDiagnostic& diagnostic)
+			{
+				const std::string reported = LowerAscii(NormalizeSlashes(diagnostic.File));
+				if (reported == userFile || EndsWith(reported, "/" + userFile))
+				{
+					diagnostic.InUserSource = true;
+					diagnostic.UserLine = diagnostic.Line;
+					diagnostic.UserColumn = diagnostic.Column;
+				}
+			};
+
+			std::string pendingSeverity;
+			std::string pendingMessage;
 			std::istringstream stream(toolOutput);
 			std::string line;
 			while (std::getline(stream, line))
 			{
 				if (!line.empty() && line.back() == '\r')
 					line.pop_back();
-				if (Trim(line).empty())
+				const std::string trimmed = Trim(line);
+				if (trimmed.empty())
 					continue;
 
-				SurfaceDiagnostic diagnostic;
 				std::smatch match;
+				if (std::regex_match(line, match, header))
+				{
+					// 上一条 header 没等到 `-->`(工具只打了错误行)→ 先落一条无位置诊断。
+					if (!pendingMessage.empty())
+					{
+						SurfaceDiagnostic diagnostic;
+						diagnostic.Severity = pendingSeverity;
+						diagnostic.Message = pendingMessage;
+						diagnostics.push_back(std::move(diagnostic));
+					}
+					pendingSeverity = match[1].str();
+					pendingMessage = trimmed;   // 保留 E 码:用户/编辑器能直接搜
+					continue;
+				}
+				if (std::regex_match(line, match, arrow))
+				{
+					SurfaceDiagnostic diagnostic;
+					diagnostic.Severity = pendingSeverity.empty() ? "error" : pendingSeverity;
+					diagnostic.Message = trimmed;
+					diagnostic.File = match[1].str();
+					diagnostic.Line = static_cast<uint32_t>(std::stoul(match[2].str()));
+					diagnostic.Column = static_cast<uint32_t>(std::stoul(match[3].str()));
+					markUserSource(diagnostic);
+					diagnostics.push_back(std::move(diagnostic));
+					pendingSeverity.clear();
+					pendingMessage.clear();
+					continue;
+				}
 				if (std::regex_match(line, match, parenthesized) ||
 					std::regex_match(line, match, colonized))
 				{
+					SurfaceDiagnostic diagnostic;
 					diagnostic.Severity = match[4].str();
 					diagnostic.Message = line;
 					diagnostic.File = match[1].str();
 					diagnostic.Line = static_cast<uint32_t>(std::stoul(match[2].str()));
 					diagnostic.Column = static_cast<uint32_t>(std::stoul(match[3].str()));
-
-					const std::string reported = LowerAscii(NormalizeSlashes(diagnostic.File));
-					if (reported == userFile || EndsWith(reported, "/" + userFile))
-					{
-						diagnostic.InUserSource = true;
-						diagnostic.UserLine = diagnostic.Line;
-						diagnostic.UserColumn = diagnostic.Column;
-					}
+					markUserSource(diagnostic);
+					diagnostics.push_back(std::move(diagnostic));
+					pendingSeverity.clear();
+					pendingMessage.clear();
+					continue;
 				}
-				else
+				if (std::regex_match(line, snippet))
+					continue;
+				if (pendingMessage.empty())
 				{
-					diagnostic.Message = line;
-					diagnostic.Severity = (line.find("error") != std::string::npos) ? "error" : "";
+					SurfaceDiagnostic diagnostic;
+					diagnostic.Message = trimmed;
+					diagnostic.Severity = (trimmed.find("error") != std::string::npos) ? "error" : "";
+					diagnostics.push_back(std::move(diagnostic));
 				}
+			}
+			if (!pendingMessage.empty())
+			{
+				SurfaceDiagnostic diagnostic;
+				diagnostic.Severity = pendingSeverity;
+				diagnostic.Message = pendingMessage;
 				diagnostics.push_back(std::move(diagnostic));
 			}
 			return diagnostics;
+		}
+
+		// Slang 版本串(`slangc -v`,只算一次;失败给空串)。与文件哈希一起构成缓存键里的
+		// "Slang 工具身份" —— 版本能直接读出来,调试日志/报告里也用它。
+		// 注意:这不是一次"编译调用",不计入 ToolInvocationCount。
+		const std::string& SlangVersionText()
+		{
+			static const std::string version = []() -> std::string
+			{
+				const std::string tool = SlangcPath();
+				if (tool.empty())
+					return {};
+				std::error_code ec;
+				const fs::path logPath = fs::temp_directory_path(ec) / "we-slangc-version.log";
+				if (ec)
+					return {};
+				int exitCode = -1;
+				std::string output;
+				if (!RunToolCapture(tool, "-v", logPath.string(), exitCode, output))
+					return {};
+				std::error_code removeEc;
+				fs::remove(logPath, removeEc);
+				return Trim(output);
+			}();
+			return version;
 		}
 
 		bool HasErrorDiagnostic(const std::vector<SurfaceDiagnostic>& diagnostics)
@@ -351,11 +585,13 @@ namespace World
 			return "float";
 		}
 
-		// 注解 → 参数块源码。标量/向量进 `cbuffer MaterialParams`(M4-S3 起 register b4, space1;
+		// 注解 → 参数块源码。标量/向量进 `cbuffer MaterialParams`(b4/space1;
 		// 2 被 set0 的灯光 UBO 占用 —— GL 的 UBO 单元 = binding,忽略 set),
-		// 贴图按注解顺序占 space2 的 t4、t5…(每张同时声明配套 SamplerState),
-		// 数量上限 kMaxMaterialTextureSlots(超出由编译入口给结构化错误)。
-		// 布局(偏移/大小)不在这里手写:编译后用 dxc 的 SPIR-V 汇编反射出来。
+		// 贴图按注解顺序占 space2 的 t4、t5…,**每张一个组合采样器 `Sampler2D`**
+		// (Slang-T3:ARB_gl_spirv 不接受分离的 OpTypeSampler,组合形态同时喂 Vulkan 的
+		// COMBINED_IMAGE_SAMPLER 与 GL_SPIRV),数量上限 kMaxMaterialTextureSlots
+		// (超出由编译入口给结构化错误)。
+		// 布局(偏移/大小)不在这里手写:编译后用 Slang 的反射 JSON 读出来。
 		std::string BuildParamBlockText(const std::vector<MaterialParamDecl>& params)
 		{
 			std::string members;
@@ -367,12 +603,11 @@ namespace World
 				{
 					const uint32_t binding = ParamTextureBaseBinding() + textureIndex;
 					++textureIndex;
-					textures += "[[vk::combinedImageSampler]] Texture2D ";
+					textures += "[[vk::binding(";
+					textures += std::to_string(binding);
+					textures += ", 2)]] Sampler2D ";
 					textures += param.Name;
-					textures += " : register(t" + std::to_string(binding) + ", space2);\n";
-					textures += "[[vk::combinedImageSampler]] SamplerState ";
-					textures += param.Name + "Sampler";
-					textures += " : register(s" + std::to_string(binding) + ", space2);\n";
+					textures += ";\n";
 					continue;
 				}
 				members += "    ";
@@ -387,11 +622,13 @@ namespace World
 			if (!members.empty())
 			{
 				text += "// 参数值由编辑器/运行时按反射出的偏移写入;这里只声明参数块。\n";
-				text += "cbuffer ";
-				text += ParamCbufferName();
-				text += " : register(b";
+				text += "[[vk::binding(";
 				text += std::to_string(ParamCbufferBinding());
-				text += ", space1)\n{\n";
+				text += ", ";
+				text += std::to_string(ParamCbufferSet());
+				text += ")]] cbuffer ";
+				text += ParamCbufferName();
+				text += "\n{\n";
 				text += members;
 				text += "};\n";
 			}
@@ -453,7 +690,7 @@ struct SurfacePSOutput
     [[vk::location(1)]] int EntityID : SV_Target1;
 };
 
-cbuffer CameraUniforms : register(b0)
+[[vk::binding(0, 0)]] cbuffer CameraUniforms
 {
     float4x4 u_ViewProjection;
 };
@@ -465,7 +702,7 @@ struct GpuLight
     float4 DirectionRange;
 };
 
-cbuffer LightUniforms : register(b2)
+[[vk::binding(2, 0)]] cbuffer LightUniforms
 {
     float4x4 u_ShadowViewProjection;
     float4 u_ShadowParams;
@@ -474,10 +711,9 @@ cbuffer LightUniforms : register(b2)
     GpuLight u_Lights[8];
 };
 
-[[vk::combinedImageSampler]] Texture2D u_ShadowMap : register(t3, space0);
-[[vk::combinedImageSampler]] SamplerState u_ShadowSampler : register(s3, space0);
+[[vk::binding(3, 0)]] Sampler2D u_ShadowMap;
 
-cbuffer ObjectUniforms : register(b1, space1)
+[[vk::binding(1, 1)]] cbuffer ObjectUniforms
 {
     float4x4 u_Model;
     float4 u_BaseColor;
@@ -487,15 +723,13 @@ cbuffer ObjectUniforms : register(b1, space1)
     int4 u_EntityId;
 };
 
-cbuffer BoneUniforms : register(b3, space1)
+[[vk::binding(3, 1)]] cbuffer BoneUniforms
 {
     float4x4 u_Bones[128];
 };
 
-[[vk::combinedImageSampler]] Texture2D u_AlbedoTexture : register(t1, space2);
-[[vk::combinedImageSampler]] SamplerState u_AlbedoSampler : register(s1, space2);
-[[vk::combinedImageSampler]] Texture2D u_NormalTexture : register(t2, space2);
-[[vk::combinedImageSampler]] SamplerState u_NormalSampler : register(s2, space2);
+[[vk::binding(1, 2)]] Sampler2D u_AlbedoTexture;
+[[vk::binding(2, 2)]] Sampler2D u_NormalTexture;
 
 float3 WeLinearizeColor(float3 srgb)
 {
@@ -537,7 +771,7 @@ float SampleDirectionalShadow(float3 worldPosition, float3 normal, float3 toLigh
     {
         [unroll] for (int offsetX = -1; offsetX <= 1; ++offsetX)
         {
-            const float sampledDepth = u_ShadowMap.Sample(u_ShadowSampler,
+            const float sampledDepth = u_ShadowMap.Sample(
                 uv + float2(offsetX, offsetY) * texel).r;
             visible += (depth - bias <= sampledDepth) ? 1.0f : 0.0f;
         }
@@ -615,7 +849,7 @@ float3 ResolveShadingNormal(SurfaceVSOutput input, MaterialInputs materialInputs
 {
     float3 tangentNormal = float3(0.0f, 0.0f, 1.0f);
     if (u_Flags.y > 0.5f)
-        tangentNormal = u_NormalTexture.Sample(u_NormalSampler, input.UV).xyz * 2.0f - 1.0f;
+        tangentNormal = u_NormalTexture.Sample(input.UV).xyz * 2.0f - 1.0f;
     // Surface.Normal 是"在引擎采样结果之上的切空间扰动";默认 (0,0,1) 保持采样值。
     float3 combined = float3(tangentNormal.xy + surface.Normal.xy, surface.Normal.z);
     if (dot(combined, combined) < 1e-12f)
@@ -633,7 +867,7 @@ float3 EvaluateEngineLighting(MaterialInputs materialInputs, Surface surface, fl
 {
     float3 albedo = max(surface.BaseColor, 0.0f);
     if (u_Flags.x > 0.5f)
-        albedo *= u_AlbedoTexture.Sample(u_AlbedoSampler, materialInputs.UV).rgb;
+        albedo *= u_AlbedoTexture.Sample(materialInputs.UV).rgb;
 
     const float metallic = saturate(surface.Metallic);
     const float roughness = saturate(surface.Roughness);
@@ -733,7 +967,7 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 		// 关键决定:VS 包装里塞的是**引擎默认表面函数**,不是用户源 —— 模板自带的
 		// VSMain/VSMainInstanced/VSMainSkinned 都不引用 Evaluate(),所以 VS 的编译输入
 		// 只由"包装模板 + 参数块 + 排列键 + 工具/契约身份"决定。缓存键因此**不含用户源**:
-		// 改用户代码时只有 PSMain 需要真的跑 dxc(稳态下每次编辑一次),首帧之后几乎全命中。
+		// 改用户代码时只有 PSMain 需要真的跑编译器(稳态下每次编辑一次),首帧之后几乎全命中。
 		//
 		// 失败语义:任一个顶点入口编译失败 = 本次编译整体失败(结构化诊断),由调用方决定
 		// 是否继续用上一份已发布管线。缺文件(缓存被清)时**重新编译该入口**,不静默少阶段。
@@ -759,13 +993,13 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			keyHash = Mix(keyHash, BackendKey(backend));
 			keyHash = Mix(keyHash, permutationKey);
 			keyHash = Mix(keyHash, std::to_string(kSurfaceCacheVersion));
-			keyHash = Mix(keyHash, std::to_string(ToolIdentity(std::string(WLD_DXC_DIR) + "dxc.exe")));
-			keyHash = Mix(keyHash, std::to_string(ToolIdentity(std::string(WLD_DXC_DIR) + "dxcompiler.dll")));
+			keyHash = Mix(keyHash, Hex(SlangToolIdentity()));
+			keyHash = Mix(keyHash, SlangVersionText());
 			const std::string keyHex = Hex(keyHash);
 
 			const fs::path cacheRoot = fs::path(WLD_INTERMEDIATE_DIR) / "SurfaceShaderCache";
 			const fs::path keyDir = cacheRoot / ("vs-" + keyHex);
-			const std::string dxcPath = std::string(WLD_DXC_DIR) + "dxc.exe";
+			const std::string slangc = SlangcPath();
 
 			std::error_code ec;
 			fs::create_directories(keyDir, ec);
@@ -815,13 +1049,13 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 				}
 
 				fs::remove(spvPath, ec);
-				const std::string arguments = "-spirv -fvk-use-gl-layout -T vs_6_0 -E "
-					+ std::string(entry.EntryPoint) + " \"" + wrapperPath.string() + "\" -Fo \""
-					+ spvPath.string() + "\"";
+				const std::string arguments = BuildSlangArguments(backend, "vs_6_0",
+					entry.EntryPoint, wrapperPath.string(), spvPath.string(), std::string());
 				int exitCode = -1;
 				std::string toolOutput;
 				s_ToolInvocations.fetch_add(1, std::memory_order_relaxed);
-				const bool launched = RunToolCapture(dxcPath, arguments, logPath.string(), exitCode,
+				const bool launched = !slangc.empty()
+					&& RunToolCapture(slangc, arguments, logPath.string(), exitCode,
 					toolOutput);
 				rawToolOutput += toolOutput;
 				if (!toolOutput.empty() && toolOutput.back() != '\n')
@@ -843,8 +1077,10 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 						SurfaceDiagnostic diagnostic;
 						diagnostic.Severity = "error";
 						diagnostic.Message = !launched
-							? ("cannot launch dxc for vertex entry " + std::string(entry.EntryPoint)
-								+ ": " + dxcPath)
+							? ("cannot launch slangc for vertex entry " + std::string(entry.EntryPoint)
+								+ ": " + (slangc.empty()
+									? std::string("slangc.exe not found (set WLD_SLANG_DIR)")
+									: slangc))
 							: ("surface vertex entry " + std::string(entry.EntryPoint)
 								+ " failed to compile (exit code " + std::to_string(exitCode) + ")");
 						diagnostics->push_back(std::move(diagnostic));
@@ -867,7 +1103,7 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 		switch (backend)
 		{
 			case SurfaceShaderBackend::VulkanSpirV: return "vulkan-spirv";
-			case SurfaceShaderBackend::OpenGLGlsl: return "opengl-glsl";
+			case SurfaceShaderBackend::OpenGLSpirV: return "opengl-spirv";
 		}
 		return "unknown";
 	}
@@ -921,12 +1157,12 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 		return BuildParamBlockText(params);
 	}
 
-	std::string MaterialSurfaceCompiler::AssemblyPath(const SurfaceArtifact& artifact)
+	std::string MaterialSurfaceCompiler::ReflectionPath(const SurfaceArtifact& artifact)
 	{
 		if (artifact.CacheKey.empty())
 			return {};
 		const fs::path path = fs::path(WLD_INTERMEDIATE_DIR) / "SurfaceShaderCache"
-			/ artifact.CacheKey / kAssemblyFileName;
+			/ artifact.CacheKey / kReflectionFileName;
 		std::error_code ec;
 		if (!fs::is_regular_file(path, ec))
 			return {};
@@ -978,7 +1214,7 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 	SurfaceCompileResult MaterialSurfaceCompiler::CompileSurface(const std::string& source,
 		const std::string& permutationKey, SurfaceShaderBackend backend)
 	{
-		// M4-S2:注解是参数的事实源。解析失败 = 结构化诊断(带用户源行列号),不调用 dxc。
+		// M4-S2:注解是参数的事实源。解析失败 = 结构化诊断(带用户源行列号),不调用编译器。
 		std::vector<MaterialParamDecl> params;
 		std::string parseError;
 		if (!ParseMaterialParams(source, &params, &parseError))
@@ -1035,12 +1271,15 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			SurfaceArtifact ignoredLastGood;
 			result.LastGoodAvailable = LastGood(permutationKey, backend, ignoredLastGood);
 
-			if (backend != SurfaceShaderBackend::VulkanSpirV)
+			// Slang-T3:两家目标都由 slangc 编成 SPIR-V —— Vulkan 用 Vulkan profile,
+			// GL 用 `<stage>_5_0+spirv_1_0`(SPIR-V 1.0;GL 侧运行时接入归 M4-S4)。
+			if (backend != SurfaceShaderBackend::VulkanSpirV
+				&& backend != SurfaceShaderBackend::OpenGLSpirV)
 			{
 				SurfaceDiagnostic diagnostic;
 				diagnostic.Severity = "error";
 				diagnostic.Message = "surface shader backend '" + std::string(BackendName(backend)) +
-					"' is not supported yet (M4-S4); this build only compiles Vulkan/SPIR-V";
+					"' is not a known Slang target (expected vulkan-spirv or opengl-spirv)";
 				result.Diagnostics.push_back(std::move(diagnostic));
 				return finish();
 			}
@@ -1097,16 +1336,22 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 
 			const std::string wrapperSource = BuildWrapperSource(contractText, effectiveSource,
 				permutationKey, backend, params);
+			const std::string paramBlockSource = BuildParamBlockText(params);
 			const uint64_t sourceHash = Fnv1a64String(effectiveSource);
 			uint64_t keyHash = Fnv1a64String(wrapperSource);
 			// 包装源码把用户源作为 #include 引用,所以用户源内容必须显式进键;
 			// 否则"只改用户代码"会错误命中同一份 artifact(实测 2026-09-22)。
 			keyHash = Mix(keyHash, Hex(sourceHash));
+			// Slang-T3:注解表(参数块文本)与契约版本也显式进键 —— 只改注解(不动用户源)
+			// 或只改契约头文件,都必须换一份 artifact。
+			keyHash = Mix(keyHash, Hex(Fnv1a64String(paramBlockSource)));
+			keyHash = Mix(keyHash, Hex(Fnv1a64String(contractText)));
 			keyHash = Mix(keyHash, BackendKey(backend));
 			keyHash = Mix(keyHash, permutationKey);
 			keyHash = Mix(keyHash, std::to_string(kSurfaceCacheVersion));
-			keyHash = Mix(keyHash, std::to_string(ToolIdentity(std::string(WLD_DXC_DIR) + "dxc.exe")));
-			keyHash = Mix(keyHash, std::to_string(ToolIdentity(std::string(WLD_DXC_DIR) + "dxcompiler.dll")));
+			// Slang 工具身份 = 版本/二进制大小 + 内容哈希(slangc.exe + slang-compiler.dll)。
+			keyHash = Mix(keyHash, Hex(SlangToolIdentity()));
+			keyHash = Mix(keyHash, SlangVersionText());
 			const std::string keyHex = Hex(keyHash);
 
 			std::lock_guard<std::mutex> lock(s_CompileMutex);
@@ -1114,12 +1359,13 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			const fs::path cacheRoot = fs::path(WLD_INTERMEDIATE_DIR) / "SurfaceShaderCache";
 			const fs::path keyDir = cacheRoot / keyHex;
 			const fs::path spvPath = keyDir / "surface.spv";
-			const fs::path asmPath = keyDir / kAssemblyFileName;
+			const fs::path reflectionPath = keyDir / kReflectionFileName;
 
 			std::error_code ec;
-			// 汇编(-Fc)是反射的输入:产物在但汇编丢了 → 当成未命中,重新编译补上。
+			// 反射 JSON(-reflection-json)是参数校验/上传的输入:产物在但反射丢了 →
+			// 当成未命中,重新编译补上(旧 dxc 缓存没有这份文件,自然全部作废)。
 			if (fs::is_regular_file(spvPath, ec) && fs::file_size(spvPath, ec) > 0
-				&& fs::is_regular_file(asmPath, ec) && fs::file_size(asmPath, ec) > 0)
+				&& fs::is_regular_file(reflectionPath, ec) && fs::file_size(reflectionPath, ec) > 0)
 			{
 				std::vector<uint8_t> cached;
 				if (ReadAllBytes(spvPath, cached) && !cached.empty())
@@ -1169,19 +1415,17 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			}
 
 			fs::remove(spvPath, ec);
-			fs::remove(asmPath, ec);
-			const std::string dxcPath = std::string(WLD_DXC_DIR) + "dxc.exe";
-			// -fvk-use-gl-layout:参数块用 std140 对齐。实测引擎现有 4 个 cbuffer 的成员偏移
-			// 在 DX 布局与 GL 布局下逐条相同(全 vec4/mat4 对齐),所以对既有管线零影响;
-			// 换来的是"标量/短向量参数块"在 Vulkan 与将来 GL(spirv-cross std140)下同一套偏移。
-			// -Fc:同时落一份 SPIR-V 汇编,参数反射(MaterialParams.cpp)直接读它。
-			const std::string arguments = "-spirv -fvk-use-gl-layout -T ps_6_0 -E "
-				+ std::string(kSurfaceEntryPoint) + " \"" + wrapperPath.string() + "\" -Fo \""
-				+ spvPath.string() + "\" -Fc \"" + asmPath.string() + "\"";
+			fs::remove(reflectionPath, ec);
+			const std::string slangc = SlangcPath();
+			// 参数反射(MaterialParams.cpp)直接读这份 `-reflection-json`(不再解析 -Fc 汇编文本);
+			// profile/入口名/布局开关按目标后端分(Slang-T3,T1/T2 已实测)。
+			const std::string arguments = BuildSlangArguments(backend, "ps_6_0",
+				kSurfaceEntryPoint, wrapperPath.string(), spvPath.string(), reflectionPath.string());
 			int exitCode = -1;
 			std::string toolOutput;
 			s_ToolInvocations.fetch_add(1, std::memory_order_relaxed);
-			const bool launched = RunToolCapture(dxcPath, arguments, logPath.string(), exitCode, toolOutput);
+			const bool launched = !slangc.empty()
+				&& RunToolCapture(slangc, arguments, logPath.string(), exitCode, toolOutput);
 			result.RawToolOutput = toolOutput;
 			result.Diagnostics = ParseDiagnostics(toolOutput);
 
@@ -1196,16 +1440,19 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 				{
 					SurfaceDiagnostic diagnostic;
 					diagnostic.Severity = "error";
-					diagnostic.Message = "cannot launch dxc: " + dxcPath;
+					diagnostic.Message = slangc.empty()
+						? "cannot launch slangc: slangc.exe not found (set WLD_SLANG_DIR, or run the "
+							"vendor/tools/slang FETCH)"
+						: "cannot launch slangc: " + slangc;
 					result.Diagnostics.push_back(std::move(diagnostic));
-					result.RawToolOutput += "\ncannot launch dxc: " + dxcPath + "\n";
+					result.RawToolOutput += "\n" + result.Diagnostics.back().Message + "\n";
 				}
 				else if (!HasErrorDiagnostic(result.Diagnostics))
 				{
 					SurfaceDiagnostic diagnostic;
 					diagnostic.Severity = "error";
 					diagnostic.Message = toolOutput.empty()
-						? "dxc failed with exit code " + std::to_string(exitCode)
+						? "slangc failed with exit code " + std::to_string(exitCode)
 						: toolOutput;
 					result.Diagnostics.push_back(std::move(diagnostic));
 				}

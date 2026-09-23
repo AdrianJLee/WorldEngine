@@ -12,21 +12,23 @@
 namespace World
 {
 	// M4-S1:用户表面函数的编译目标。
-	//  - VulkanSpirV:第一版支持的目标,走现有 dxc → SPIR-V 通路;
-	//  - OpenGLGlsl:占位,明确返回结构化"暂不支持"错误(M4-S4 单独立项)。
+	// Slang-T3:两家目标都由 slangc 出 SPIR-V(同一源码、同一编译器、每家一份 permutation);
+	//  - VulkanSpirV:Vulkan profile(产物 SPIR-V 1.3);
+	//  - OpenGLSpirV:`<stage>_5_0+spirv_1_0` —— ARB_gl_spirv 只接受 SPIR-V 1.0 与组合采样器,
+	//    GL 侧的运行时接入(M4-S4)另立项,本层只负责编译出目标产物。
 	enum class SurfaceShaderBackend : uint8_t
 	{
 		VulkanSpirV = 0,
-		OpenGLGlsl = 1,
+		OpenGLSpirV = 1,
 	};
 
-	// dxc 的一条诊断。用户源里的错误会被映射回**用户源文件的行列号**
+	// 编译器(Slang)的一条诊断。用户源里的错误会被映射回**用户源文件的行列号**
 	// (InUserSource = true, UserLine/UserColumn 有效);包装模板自身的错误只有 File/Line/Column。
 	struct WLD_API SurfaceDiagnostic
 	{
 		std::string Severity;   // "error" | "warning"
-		std::string Message;    // dxc 原始整行(含文件与位置)
-		std::string File;       // dxc 报告的文件;用户源错误时是 surface_user.hlsl
+		std::string Message;    // 编译器原始整行(含 E 码,如 error[E20002]: …)
+		std::string File;       // 编译器报告的文件;用户源错误时是 surface_user.hlsl
 		uint32_t Line = 0;      // 报告文件内的行
 		uint32_t Column = 0;    // 报告文件内的列
 		bool InUserSource = false;
@@ -57,7 +59,7 @@ namespace World
 		uint64_t SourceHash = 0;     // 用户源内容哈希(不含包装模板)
 		// M4-S3:顶点阶段(见 SurfaceVertexStage)。它们不引用用户的 Evaluate(),因此按
 		// **模板键**缓存(包装模板 + 参数块 + 排列键 + 工具/契约身份,不含用户源):
-		// 改代码时只有 PSMain 需要真的跑 dxc。
+		// 改代码时只有 PSMain 需要真的跑编译器。
 		std::vector<SurfaceVertexStage> VertexStages;
 
 		const SurfaceVertexStage* FindVertexStage(const char* entryPoint) const
@@ -92,11 +94,11 @@ namespace World
 	// M4-S1:表面函数编译入口。
 	//
 	// 输入是**用户源文本**(函数 `Surface Evaluate(MaterialInputs input)`)与排列键;
-	// 引擎把用户源包进固定模板(顶点/光照/阴影/实例化/蒙皮/雾钩子),用现有 dxc 约定
+	// 引擎把用户源包进固定模板(顶点/光照/阴影/实例化/蒙皮/雾钩子),由 slangc 编成
 	// (`-spirv -T ps_6_0 -E PSMain`)编译成 SPIR-V。空源 = 使用引擎默认表面函数(起始代码)。
 	//
 	// 缓存:键 = 包装后源内容(含契约与用户源)+ 后端 + 排列键 + 工具/契约身份;
-	// 命中直接读缓存,不调用 dxc。命中/未命中/工具调用都有计数器。
+	// 命中直接读缓存,不调用工具。命中/未命中/工具调用都有计数器。
 	class WLD_API MaterialSurfaceCompiler
 	{
 	public:
@@ -106,7 +108,7 @@ namespace World
 		// M4-S2:带注解参数表的编译。参数块(`cbuffer MaterialParams` + 贴图槽)由 table 生成,
 		// 插在引擎模板之后、用户源之前 —— 注解是参数的事实源,用户源里不再手写参数块。
 		// CompileSurface(source, key) 等价于先 ParseMaterialParams(source) 再走这里
-		// (注解解析失败 → 结构化诊断,不调用 dxc)。
+		// (注解解析失败 → 结构化诊断,不调用工具)。
 		static SurfaceCompileResult CompileSurfaceWithParams(const std::string& source,
 			const std::vector<MaterialParamDecl>& params, const std::string& permutationKey,
 			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);
@@ -126,9 +128,9 @@ namespace World
 		static std::string BuildParamBlockSource(const std::vector<MaterialParamDecl>& params);
 		static std::string ContractHeaderPath();
 
-		// M4-S2:与 artifact 同键的 SPIR-V 汇编(-Fc)路径。反射(MaterialParams.cpp)读它;
-		// 文件不存在(旧缓存 / 工具没写)时返回空串。
-		static std::string AssemblyPath(const SurfaceArtifact& artifact);
+		// Slang-T3:与 artifact 同键的 Slang 反射 JSON(`-reflection-json`)路径。
+		// 反射(MaterialParams.cpp)读它;文件不存在(旧缓存 / 工具没写)时返回空串。
+		static std::string ReflectionPath(const SurfaceArtifact& artifact);
 
 		// 上一次成功编译的产物查询(按"后端 + 排列键"分别保存)。失败后由调用方决定
 		// 是否继续用这份;编译器本身不会静默返回旧产物。

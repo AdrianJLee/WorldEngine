@@ -72,15 +72,15 @@ namespace World
 	WLD_API bool ParseMaterialParams(const std::string& hlslSource,
 		std::vector<MaterialParamDecl>* out, std::string* error);
 
-	// 冻结 API(M4-S2 派工):用 DXC 编译产物做反射校验。
-	//  1) 按 table 生成参数块(注解是事实源)编译包装源码 → 拿 SPIR-V + SPIR-V 汇编(-Fc);
-	//  2) 从汇编反射参数块成员(名称/类型/偏移)与贴图槽(set/binding);
+	// 冻结 API(M4-S2 派工;Slang-T3 起编译/反射走 slangc + `-reflection-json`)。
+	//  1) 按 table 生成参数块(注解是事实源)编译包装源码 → 拿 SPIR-V + 反射 JSON;
+	//  2) 从反射 JSON 读参数块成员(名称/类型/偏移)与贴图槽(set/binding);
 	//  3) 三态判定:
 	//     - 合规:声明、类型、绑定一致,且成员真的被读 → true,无警告;
 	//     - 声明未用 → true + warnings("参数 'X' 声明了但着色器没读它");
 	//     - 用了未声明(参数块里有注解没有的成员)/ 类型不符 / 贴图绑定不符 → false + error;
-	//  编译失败(用户源码错误)时 false + error(带 dxc 原始诊断)。
-	// 反射数据来自 dxc 自己的 SPIR-V 汇编(`-Fc`),不依赖 dxcompiler 头文件/链接 —— 详见 .cpp。
+	//  编译失败(用户源码错误)时 false + error(带 Slang 原始诊断)。
+	// 反射数据来自 Slang 自己的 `-reflection-json`,不依赖编译器头文件/链接 —— 详见 .cpp。
 	WLD_API bool ValidateParamsWithReflection(const std::string& hlslSource,
 		const std::vector<MaterialParamDecl>& table,
 		std::vector<std::string>* warnings, std::string* error);
@@ -108,7 +108,7 @@ namespace World
 	// 范围只在 (Min,Max) != (0,1) 时写出 —— 保持"没写范围"与"[0,1]"在解析结果上等价。
 	WLD_API std::string FormatMaterialParamAnnotation(const MaterialParamDecl& decl);
 
-	// ---- 反射布局(由 DXC 的 SPIR-V 汇编读出,不手写结构体) ----
+	// ---- 反射布局(由 Slang 的反射 JSON 读出,不手写结构体) ----
 
 	struct WLD_API MaterialParamLayoutField
 	{
@@ -153,11 +153,15 @@ namespace World
 	// (编译与反射校验都不允许静默丢参数)。
 	inline constexpr uint32_t kMaxMaterialTextureSlots = 8;
 
-	// 从 dxc -Fc 的 SPIR-V 汇编文本反射参数布局(纯文本函数,可无工具单测)。
-	WLD_API bool ReflectParamLayoutFromAssembly(const std::string& assembly,
-		MaterialParamLayout* out, std::string* error);
+	// Slang-T3:从 Slang 的 `-reflection-json` + 同一次编译的 SPIR-V 二进制反射参数布局。
+	//  - JSON 是布局的事实源:参数块 (set,binding)、成员名/类型/偏移/大小、块大小、贴图槽 set/binding;
+	//  - SPIR-V 只用来回答"成员真的被读"(OpAccessChain 的首下标)—— 与 dxc 时代同一判据,
+	//    只是输入从汇编文本换成二进制(不依赖任何外部反汇编工具)。
+	// 纯函数:不调用编译器,可无工具单测。
+	WLD_API bool ReflectParamLayoutFromReflectionJson(const std::string& reflectionJson,
+		const std::vector<uint8_t>& spirv, MaterialParamLayout* out, std::string* error);
 
-	// 端到端:按 table 编译包装源码(dxc -Fc)并反射出布局。工具缺失/源码错误 → false + error。
+	// 端到端:按 table 编译包装源码(slangc)并反射出布局。工具缺失/源码错误 → false + error。
 	WLD_API bool BuildParamLayout(const std::string& hlslSource,
 		const std::vector<MaterialParamDecl>& table,
 		MaterialParamLayout* out, std::string* error);

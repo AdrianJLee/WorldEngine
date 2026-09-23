@@ -1001,8 +1001,8 @@ int main()
 		// ---- M4-S2:注解参数表 + .wmat 的 Shader/Params ----
 		//
 		// 夹具落在内容根下的 material_m4s2_tmp/(与引擎同一条"相对内容根"解析路径):
-		//  - 注解解析 / 值归一 / 反射(纯文本)不需要 dxc,在本目标里跑;
-		//  - 需要真实 dxc 的反射校验与编译在 World.ShaderPipeline 里(见 ShaderPipelineTests.cpp)。
+			//  - 注解解析 / 值归一 / 反射(纯函数)不需要编译器,在本目标里跑;
+			//  - 需要真实 slangc 的反射校验与编译在 World.ShaderPipeline 里(见 ShaderPipelineTests.cpp)。
 		{
 			using World::MaterialParamDecl;
 			using World::MaterialParamSource;
@@ -1157,52 +1157,62 @@ int main()
 				CHECK(!IsReflectedTypeCompatible(ParamType::Bool, "int"));
 			}
 
-			// 25. 反射(纯文本):从 dxc -Fc 的 SPIR-V 汇编读成员偏移/类型/绑定与"真的被读"，
-			//     并据此打包参数块字节。这里用与 dxc 实测输出同形的汇编片段,不需要工具。
+			// 25. 反射(Slang-T3):从 `-reflection-json` + 同一份 SPIR-V 二进制读成员偏移/类型/绑定
+			//     与"真的被读",并据此打包参数块字节。两个夹具都不需要编译器:
+			//     JSON 与 Slang 实测输出同形;SPIR-V 手写(只含本解析器关心的指令)。
 			{
-				const std::string assembly =
-					"; SPIR-V\n"
-					"               OpName %type_2d_image \"type.2d.image\"\n"
-					"               OpName %Albedo \"Albedo\"\n"
-					"               OpName %type_MaterialParams \"type.MaterialParams\"\n"
-					"               OpMemberName %type_MaterialParams 0 \"Roughness\"\n"
-					"               OpMemberName %type_MaterialParams 1 \"Tint\"\n"
-					"               OpMemberName %type_MaterialParams 2 \"Glow\"\n"
-					"               OpName %MaterialParams \"MaterialParams\"\n"
-					"               OpName %u_ShadowMap \"u_ShadowMap\"\n"
-					"               OpDecorate %Albedo DescriptorSet 2\n"
-					"               OpDecorate %Albedo Binding 4\n"
-					"               OpDecorate %u_ShadowMap DescriptorSet 0\n"
-					"               OpDecorate %u_ShadowMap Binding 3\n"
-          "               OpDecorate %MaterialParams DescriptorSet 1\n"
-          "               OpDecorate %MaterialParams Binding 4\n"
-					"               OpMemberDecorate %type_MaterialParams 0 Offset 0\n"
-					"               OpMemberDecorate %type_MaterialParams 1 Offset 16\n"
-					"               OpMemberDecorate %type_MaterialParams 2 Offset 32\n"
-					"      %float = OpTypeFloat 32\n"
-					"       %uint = OpTypeInt 32 0\n"
-					"    %v4float = OpTypeVector %float 4\n"
-					"%type_MaterialParams = OpTypeStruct %float %v4float %uint\n"
-					"%_ptr_Uniform_type_MaterialParams = OpTypePointer Uniform %type_MaterialParams\n"
-					"      %int_0 = OpConstant %int 0\n"
-					"      %int_2 = OpConstant %int 2\n"
-					"%type_2d_image = OpTypeImage %float 2D 2 0 0 1 Unknown\n"
-					"%type_sampled_image = OpTypeSampledImage %type_2d_image\n"
-					"%_ptr_UniformConstant_type_sampled_image = OpTypePointer UniformConstant %type_sampled_image\n"
-					"%_ptr_UniformConstant_type_2d_image = OpTypePointer UniformConstant %type_2d_image\n"
-					"%MaterialParams = OpVariable %_ptr_Uniform_type_MaterialParams Uniform\n"
-					"      %Albedo = OpVariable %_ptr_UniformConstant_type_sampled_image UniformConstant\n"
-					"  %u_ShadowMap = OpVariable %_ptr_UniformConstant_type_2d_image UniformConstant\n"
-					"         %20 = OpAccessChain %_ptr_Uniform_float %MaterialParams %int_0\n"
-					"         %21 = OpAccessChain %_ptr_Uniform_uint %MaterialParams %int_2\n";
+				const std::string reflectionJson = R"JSON({
+  "version": 1,
+  "parameters": [
+    { "name": "u_ShadowMap", "binding": { "kind": "descriptorTableSlot", "index": 3 },
+      "type": { "kind": "resource", "baseShape": "texture2D" } },
+    { "name": "MaterialParams", "binding": { "kind": "descriptorTableSlot", "space": 1, "index": 4 },
+      "type": { "kind": "constantBuffer", "elementType": { "kind": "struct", "fields": [
+        { "name": "Roughness", "type": { "kind": "scalar", "scalarType": "float32" },
+          "binding": { "kind": "uniform", "offset": 0, "size": 4 } },
+        { "name": "Tint", "type": { "kind": "vector", "elementCount": 4,
+          "elementType": { "kind": "scalar", "scalarType": "float32" } },
+          "binding": { "kind": "uniform", "offset": 16, "size": 16 } },
+        { "name": "Glow", "type": { "kind": "scalar", "scalarType": "bool" },
+          "binding": { "kind": "uniform", "offset": 32, "size": 4 } }
+      ], "sizes": [ { "kind": "uniform", "value": 48, "alignment": 16 } ] } } },
+    { "name": "Albedo", "binding": { "kind": "descriptorTableSlot", "space": 2, "index": 4 },
+      "type": { "kind": "resource", "baseShape": "texture2D" } }
+  ],
+  "entryPoints": [ { "name": "PSMain", "stage": "fragment" } ]
+})JSON";
+
+				// 手写 SPIR-V:只放 OpDecorate / OpVariable / OpConstant / OpAccessChain。
+				// 访问链指向成员 0(Roughness)与成员 2(Glow)→ Tint 未读。
+				const auto emit = [](std::vector<uint32_t>& words, uint32_t opcode,
+					std::vector<uint32_t> operands)
+				{
+					words.push_back(((static_cast<uint32_t>(operands.size()) + 1u) << 16) | opcode);
+					for (const uint32_t operand : operands)
+						words.push_back(operand);
+				};
+				std::vector<uint32_t> spirvWords = { 0x07230203u, 0x00010000u, 0u, 100u, 0u };
+				emit(spirvWords, 71, { 1u, 33u, 4u });        // OpDecorate %1 Binding 4
+				emit(spirvWords, 71, { 1u, 34u, 1u });        // OpDecorate %1 DescriptorSet 1
+				emit(spirvWords, 71, { 5u, 33u, 4u });        // OpDecorate %5 Binding 4
+				emit(spirvWords, 71, { 5u, 34u, 2u });        // OpDecorate %5 DescriptorSet 2
+				emit(spirvWords, 59, { 2u, 1u, 2u });         // %1 = OpVariable %2 Uniform
+				emit(spirvWords, 59, { 3u, 5u, 0u });         // %5 = OpVariable %3 UniformConstant
+				emit(spirvWords, 43, { 4u, 20u, 0u });        // %20 = OpConstant %4 0
+				emit(spirvWords, 43, { 4u, 21u, 2u });        // %21 = OpConstant %4 2
+				emit(spirvWords, 65, { 6u, 30u, 1u, 20u });   // %30 = OpAccessChain %6 %1 %20
+				emit(spirvWords, 65, { 7u, 31u, 1u, 21u });   // %31 = OpAccessChain %7 %1 %21
+				std::vector<uint8_t> spirvFixture(spirvWords.size() * sizeof(uint32_t));
+				std::memcpy(spirvFixture.data(), spirvWords.data(), spirvFixture.size());
+
 				MaterialParamLayout layout;
 				std::string error;
-				CHECK(ReflectParamLayoutFromAssembly(assembly, &layout, &error));
-				std::printf("MaterialTests: M4-S2 assembly-reflected layout\n%s",
+				CHECK(ReflectParamLayoutFromReflectionJson(reflectionJson, spirvFixture, &layout, &error));
+				std::printf("MaterialTests: Slang reflection-json layout\n%s",
 					FormatParamLayout(layout).c_str());
-        // M4-S3(D1):参数块 = set 1 / binding 4(b2 让给 set0 的灯光 UBO —— GL 的 UBO
-        // 单元 = binding,忽略 set)。
-        CHECK(layout.CbufferSet == 1 && layout.CbufferBinding == 4);
+				// M4-S3(D1):参数块 = set 1 / binding 4(b2 让给 set0 的灯光 UBO —— GL 的 UBO
+				// 单元 = binding,忽略 set)。
+				CHECK(layout.CbufferSet == 1 && layout.CbufferBinding == 4);
 				CHECK(layout.Fields.size() == 3);
 				CHECK(layout.Fields[0].Name == "Roughness" && layout.Fields[0].ReflectedType == "float");
 				CHECK(layout.Fields[0].Offset == 0 && layout.Fields[0].Size == 4);
@@ -1210,7 +1220,7 @@ int main()
 				CHECK(layout.Fields[1].Offset == 16 && layout.Fields[1].Size == 16);
 				CHECK(layout.Fields[2].Name == "Glow" && layout.Fields[2].ReflectedType == "uint");
 				CHECK(layout.Fields[2].Type == ParamType::Bool);
-				CHECK(layout.CbufferSize == 48);   // 末端 36 → 16 字节对齐
+				CHECK(layout.CbufferSize == 48);   // Slang 报的 uniform size(== 末端 36 → 16 字节对齐)
 				CHECK(layout.UsedMembers.size() == 2);
 				CHECK(layout.UsedMembers[0] == "Glow" && layout.UsedMembers[1] == "Roughness");
 				CHECK(layout.Textures.size() == 1);   // 引擎自己的 u_ShadowMap(set 0)不算参数槽
@@ -1286,7 +1296,7 @@ int main()
 					"    surface.Roughness = Roughness;\n"
 					"    surface.BaseColor = Tint.rgb;\n"
 					"    if (Glow) surface.Emissive = float3(Steps, 0.0f, 0.0f);\n"
-					"    surface.BaseColor *= Albedo.Sample(AlbedoSampler, input.UV).rgb;\n"
+					"    surface.BaseColor *= Albedo.Sample(input.UV).rgb;\n"
 					"    return surface;\n"
 					"}\n");
 				writeText("mat_base.wmat",
