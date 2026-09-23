@@ -20,6 +20,8 @@ namespace World::Rhi::OpenGL
 {
 	namespace
 	{
+		bool s_SpirVShaderModules = false;
+
 		std::pair<uint32_t, uint32_t> ParseVersion(const char* version)
 		{
 			uint32_t major = 4, minor = 6;
@@ -27,6 +29,11 @@ namespace World::Rhi::OpenGL
 				std::sscanf(version, "%u.%u", &major, &minor);
 			return { major, minor };
 		}
+	}
+
+	bool SupportsSpirVShaderModules()
+	{
+		return s_SpirVShaderModules;
 	}
 
 	OpenGLDevice::OpenGLDevice(const DeviceDesc& desc)
@@ -87,6 +94,7 @@ namespace World::Rhi::OpenGL
 				spirvModules = extension != nullptr && std::strcmp(extension, "GL_ARB_gl_spirv") == 0;
 			}
 			m_Capabilities.SpirVShaderModules = spirvModules;
+			s_SpirVShaderModules = spirvModules;
 			if (!spirvModules)
 			{
 				WLD_CORE_WARN("GL_ARB_gl_spirv missing (GL {0}.{1}); SPIR-V shader modules unavailable on this GL driver",

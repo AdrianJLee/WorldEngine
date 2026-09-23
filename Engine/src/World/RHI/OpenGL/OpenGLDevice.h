@@ -6,6 +6,12 @@
 
 namespace World::Rhi::OpenGL
 {
+	// 上下文是否具备 GL 的 SPIR-V 摄入能力(GL 4.6 core / GL_ARB_gl_spirv)。
+	// 由 OpenGLDevice 构造时按 `RhiCapabilities::SpirVShaderModules` 同一份探测结果写入 ——
+	// OpenGLPipeline 建管线时没有设备句柄,只能从这里读;同一进程的所有 GL 上下文
+	// 由同一驱动创建,该能力一致(T1 试点;多后端/多驱动场景由 T2 的正式描述符模型接管)。
+	bool SupportsSpirVShaderModules();
+
 	class OpenGLDevice : public Device
 	{
 	public:

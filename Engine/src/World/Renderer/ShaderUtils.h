@@ -23,6 +23,8 @@ namespace World
 		// 编译或加载指定的 HLSL 文件，返回对应平台的字节码（SPV 或 GLSL）
 		static std::vector<char> CompileOrLoad(const std::string& hlslPath, const std::string& entryPoint, const std::string& profile);
 		// 按当前后端填充规范的 RHI 着色器阶段(Vulkan 填 SPIR-V,OpenGL 填 GLSL)。
+		// T1 试点:OpenGL 在具备 GL_ARB_gl_spirv 且 WLD_GL_SPIRV_DIR 命中时改填 GL 目标
+		// SPIR-V(见 .cpp 的 TryLoadGlSpirVStage),此时 GLSL 字段留空。
 		static Rhi::ShaderStageSource CompileStage(Rhi::ShaderStage stage, const std::string& hlslPath,
 			const std::string& entryPoint, const std::string& profile);
 

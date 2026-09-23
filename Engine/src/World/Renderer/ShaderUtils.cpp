@@ -141,6 +141,52 @@ namespace World
 			if (Log::GetCoreLogger())
 				WLD_CORE_INFO("[Shader] cooked artifact hit: {0} ({1} bytes)", logical, size);
 		}
+
+		// ---- T1 试点:GL 直接摄入 SPIR-V(GL 4.6 core + GL_ARB_gl_spirv) ----
+		//
+		// 试点期由离线脚本(见 tools/agents/scratch/slang-t1/build-gl-spirv.ps1)用 slangc 产出
+		// `<stem>.<EntryPoint>.spv` 到 WLD_GL_SPIRV_DIR;每个后端一份 SPIR-V permutation
+		// (GL 侧:DescriptorSet=0、binding=GL 单元号、无 -fvk-invert-y)。T3 起这段由
+		// slangc 现场编译 + 缓存键(目标后端/工具身份/契约版本)替代,本函数即那时的解析器。
+		bool GlSpirVModulesAvailable()
+		{
+			if (Renderer::GetAPI() != RendererAPI::API::OpenGL)
+				return false;
+			const Rhi::Handle<Rhi::Device> device = Renderer::GetDevice();
+			return device && device->GetCapabilities().SpirVShaderModules;
+		}
+
+		bool TryLoadGlSpirVStage(const std::string& hlslPath, const std::string& entryPoint,
+			std::vector<uint8_t>& out)
+		{
+			if (!GlSpirVModulesAvailable())
+				return false;
+			const char* dir = std::getenv("WLD_GL_SPIRV_DIR");
+			if (!dir || !*dir)
+				return false;
+
+			const fs::path modulePath = fs::path(dir) / (StemOf(hlslPath) + "." + entryPoint + ".spv");
+			const std::vector<char> bytes = ReadAllBytes(modulePath.string());
+			if (bytes.empty() || (bytes.size() % 4) != 0)
+			{
+				static std::mutex mutex;
+				static std::set<std::string> reported;
+				std::lock_guard<std::mutex> lock(mutex);
+				if (reported.insert(modulePath.string()).second && Log::GetCoreLogger())
+					WLD_CORE_WARN("[gl-spirv] pilot module unavailable: {0} (falling back to GLSL text)",
+						modulePath.string());
+				return false;
+			}
+
+			out.assign(bytes.begin(), bytes.end());
+			static std::mutex mutex;
+			static std::set<std::string> reported;
+			std::lock_guard<std::mutex> lock(mutex);
+			if (reported.insert(modulePath.string()).second && Log::GetCoreLogger())
+				WLD_CORE_INFO("[gl-spirv] stage source: {0} ({1} bytes) -> SPIR-V module path",
+					modulePath.string(), out.size());
+			return true;
+		}
 	}
 
 	// WLD_DXC_DIR 由构建系统决定(优先 Vulkan SDK 完整安装,含匹配的 dxcompiler.dll)。
@@ -221,6 +267,11 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 		Rhi::ShaderStageSource out;
 		out.Stage = stage;
 		out.EntryPoint = entryPoint;
+
+		// T1 试点:命中 GL 的 SPIR-V 模块时不再调用 dxc/spirv-cross(GLSL 字段留空)。
+		if (TryLoadGlSpirVStage(hlslPath, entryPoint, out.SpirV))
+			return out;
+
 		const std::vector<char> bytes = CompileOrLoad(hlslPath, entryPoint, profile);
 		if (Renderer::GetAPI() == RendererAPI::API::Vulkan)
 			out.SpirV.assign(bytes.begin(), bytes.end());
