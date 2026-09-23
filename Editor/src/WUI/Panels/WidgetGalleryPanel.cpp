@@ -1,682 +1,1179 @@
 #include "wldpch.h"
 #include "WidgetGalleryPanel.h"
 
-#include "World/WUI/WuiWidgets.h"
+#include "../../EditorPreferences.h"
+
+#include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
+#include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <fstream>
+#include <sstream>
+#include <system_error>
+
+// 构建期常量由 CMake 注入(见根 CMakeLists 的 WLD_OUTPUT_DIR);单独做语法检查时给个兜底,
+// 不影响正常构建(与其它面板依赖 WLD_PROJECT_DIR/WLD_LOCAL_DIR 的用法一致)。
+#ifndef WLD_OUTPUT_DIR
+#define WLD_OUTPUT_DIR "build/x64-Debug/"
+#endif
 
 namespace World
 {
-	// 组件画廊:每帧按停靠布局给出的 rect 重新 Arrange 保留模式控件并绘制。
-	// 交互结果写入 m_LastAction 并 RecordOp,便于在 Operations 面板核对。
+	namespace
+	{
+		// ---- 稳定 a11y id 约定 ----
+		// 工作台里每个可交互件都是 `wui.workbench.<area>.<name>`;控件自己登记的节点
+		// (Button/Checkbox/Combo/TextField/DragFloat)自动带上这套 id,工作台另行手工登记
+		// 左树行、画布、状态行等"不是控件"的节点。探针按 id 驱动,不依赖文案(语言无关)。
+		constexpr const char* kCaptureButtonId = "wui.workbench.btn.capture";
+		constexpr const char* kApproveButtonId = "wui.workbench.btn.approve";
+		constexpr const char* kTreeSearchId = "wui.workbench.tree.search";
+		constexpr const char* kTreeRowPrefix = "wui.workbench.tree.row.";
+		constexpr const char* kCanvasId = "wui.workbench.canvas";
+		constexpr const char* kCanvasLabelId = "wui.workbench.canvas.label";
+		constexpr const char* kStateComboId = "wui.workbench.prop.__state";
+		constexpr const char* kStatusId = "wui.workbench.status";
+		constexpr const char* kInfoId = "wui.workbench.info";
+		constexpr const char* kPropLabelPrefix = "wui.workbench.prop.";
+		constexpr const char* kSelectPrefix = "wui.workbench.select.";
+
+		constexpr float kMinCanvasSize = 120.0f;
+		constexpr float kMaxCanvasSize = 640.0f;
+
+		void RegisterWorkbenchNode(Wui::WuiId id, const char* kind, const Wui::WuiRect& rect,
+			const std::string& label, const std::string& value = std::string(),
+			bool enabled = true, bool interactive = true)
+		{
+			if (id == 0)
+				return;
+			Wui::WuiAccessNode node;
+			node.Id = id;
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = kind;
+			node.Label = label;
+			node.Value = value;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = interactive;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
+		// 按可用宽度裁剪(省略号在末尾);命中测试与 a11y 文案都用裁剪后的字符串。
+		std::string ClipText(const Wui::WuiContext& ctx, const std::string& text, float width,
+			float fontSize)
+		{
+			if (text.empty() || width <= 8.0f)
+				return std::string();
+			if (ctx.MeasureTextWidth(text, fontSize) <= width)
+				return text;
+			std::string out = text;
+			while (!out.empty())
+			{
+				out.pop_back();
+				while (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xC0) == 0x80)
+					out.pop_back();
+				if (ctx.MeasureTextWidth(out + "...", fontSize) <= width)
+					break;
+			}
+			return out.empty() ? std::string() : out + "...";
+		}
+
+		float SafeFloat(const std::string& text, float fallback)
+		{
+			try
+			{
+				return std::stof(text);
+			}
+			catch (...)
+			{
+				return fallback;
+			}
+		}
+
+		std::string FormatFloat(float value)
+		{
+			char buffer[32] = {};
+			std::snprintf(buffer, sizeof(buffer), "%.3f", value);
+			return buffer;
+		}
+
+		// ---- 落盘目录:`<build>/wui-workbench`(与 plan P0-4 的 `build/wui-workbench/**` 同义)----
+		// 注意:引擎的 Exe 运行时会自己把工作目录切到 WLD_OUTPUT_DIR(实测:相对路径会落在
+		// build/x64-Debug 下),因此这里用**构建期常量** WLD_OUTPUT_DIR 解析,不依赖 cwd。
+		const std::filesystem::path& WorkbenchDir()
+		{
+			static const std::filesystem::path directory =
+				std::filesystem::path(std::string(WLD_OUTPUT_DIR)) / "wui-workbench";
+			return directory;
+		}
+
+		void EnsureWorkbenchDir()
+		{
+			std::error_code error;
+			std::filesystem::create_directories(WorkbenchDir(), error);
+		}
+
+		std::string JsonEscape(const std::string& text)
+		{
+			std::string out;
+			out.reserve(text.size() + 8);
+			for (const char ch : text)
+			{
+				switch (ch)
+				{
+				case '"': out += "\\\""; break;
+				case '\\': out += "\\\\"; break;
+				case '\n': out += "\\n"; break;
+				case '\r': out += "\\r"; break;
+				case '\t': out += "\\t"; break;
+				default:
+					if (static_cast<unsigned char>(ch) < 0x20)
+					{
+						char buffer[8] = {};
+						std::snprintf(buffer, sizeof(buffer), "\\u%04x", static_cast<unsigned char>(ch));
+						out += buffer;
+					}
+					else
+					{
+						out.push_back(ch);
+					}
+					break;
+				}
+			}
+			return out;
+		}
+
+		std::string ReadFirstLine(const std::filesystem::path& path)
+		{
+			std::ifstream file(path, std::ios::binary);
+			if (!file)
+				return std::string();
+			std::string line;
+			std::getline(file, line);
+			while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+				line.pop_back();
+			return line;
+		}
+
+		// Approve 的 `<commit>`:优先读 .git(git 目录/文件两种形态都认),读不到记 "unknown"
+		// (报告里说明口径,不假装知道提交号)。
+		std::string ResolveGitCommit()
+		{
+			std::error_code error;
+			std::filesystem::path candidate(".git");
+			if (std::filesystem::is_directory(candidate, error))
+			{
+				// 普通 checkout
+			}
+			else if (std::filesystem::exists(candidate, error))
+			{
+				const std::string pointer = ReadFirstLine(candidate);
+				const std::string prefix = "gitdir:";
+				if (pointer.rfind(prefix, 0) != 0)
+					return "unknown";
+				std::string target = pointer.substr(prefix.size());
+				while (!target.empty() && target.front() == ' ')
+					target.erase(target.begin());
+				candidate = std::filesystem::path(target);
+				if (candidate.is_relative())
+					candidate = std::filesystem::path(".git").parent_path() / candidate;
+			}
+			else
+			{
+				return "unknown";
+			}
+			const std::string head = ReadFirstLine(candidate / "HEAD");
+			const std::string refPrefix = "ref:";
+			if (head.rfind(refPrefix, 0) != 0)
+				return head.empty() ? std::string("unknown") : head.substr(0, 12);
+			std::string ref = head.substr(refPrefix.size());
+			while (!ref.empty() && ref.front() == ' ')
+				ref.erase(ref.begin());
+			const std::string hash = ReadFirstLine(candidate / ref);
+			if (!hash.empty())
+				return hash.substr(0, 12);
+			std::ifstream packed(candidate / "packed-refs", std::ios::binary);
+			std::string line;
+			while (std::getline(packed, line))
+			{
+				const size_t space = line.find(' ');
+				if (space == std::string::npos)
+					continue;
+				if (line.substr(space + 1) == ref)
+					return line.substr(0, std::min<size_t>(12, space));
+			}
+			return "unknown";
+		}
+
+		// SizeNotes 里的 preferred WxH → 单件画布尺寸(解析不出来就用 240x120)。
+		std::pair<float, float> SizeNotesToSize(const std::string& notes)
+		{
+			const size_t marker = notes.find("preferred");
+			const size_t from = marker == std::string::npos ? 0 : marker;
+			float width = 240.0f;
+			float height = 120.0f;
+			const size_t x = notes.find('x', from);
+			if (x != std::string::npos)
+			{
+				size_t start = x;
+				while (start > 0 && (std::isdigit(static_cast<unsigned char>(notes[start - 1]))
+					|| notes[start - 1] == '.'))
+					--start;
+				const std::string widthText = notes.substr(start, x - start);
+				size_t end = x + 1;
+				while (end < notes.size() && (std::isdigit(static_cast<unsigned char>(notes[end]))
+					|| notes[end] == '.'))
+					++end;
+				const std::string heightText = notes.substr(x + 1, end - x - 1);
+				if (!widthText.empty())
+					width = SafeFloat(widthText, width);
+				if (!heightText.empty())
+					height = SafeFloat(heightText, height);
+			}
+			width = std::clamp(width, kMinCanvasSize, kMaxCanvasSize);
+			height = std::clamp(height, 28.0f, kMaxCanvasSize);
+			return { width, height };
+		}
+
+		const char* StatusText(Wui::WuiComponentStatus status)
+		{
+			switch (status)
+			{
+			case Wui::WuiComponentStatus::Approved: return "Approved";
+			case Wui::WuiComponentStatus::Deprecated: return "Deprecated";
+			default: return "Draft";
+			}
+		}
+
+		Wui::WuiColor StatusColor(Wui::WuiComponentStatus status, const Wui::WuiTheme& theme)
+		{
+			switch (status)
+			{
+			case Wui::WuiComponentStatus::Approved: return theme.Success;
+			case Wui::WuiComponentStatus::Deprecated: return theme.Danger;
+			default: return theme.Warning;
+			}
+		}
+
+	}
+
+	WidgetGalleryPanel::WbLayout WidgetGalleryPanel::ComputeLayout(const Wui::WuiRect& rect,
+		const Wui::WuiTheme& theme)
+	{
+		WbLayout layout;
+		const float pad = theme.Pad > 0.0f ? theme.Pad : 8.0f;
+		const float innerX = rect.X + pad;
+		const float innerW = std::max(120.0f, rect.W - 2.0f * pad);
+		float y = rect.Y + pad;
+
+		layout.TopBar = { innerX, y, innerW, 26.0f };
+		// 顶栏在窄窗换行成两行(语言/长文本/重置下移一行),避免控件互相压住。
+		layout.TopBar.H = innerW < 900.0f ? 56.0f : 26.0f;
+		y += layout.TopBar.H + 6.0f;
+		layout.InfoBar = { innerX, y, innerW, 18.0f };
+		y += 18.0f + 8.0f;
+
+		const float actionH = 30.0f;
+		layout.Actions = { innerX, rect.Y + rect.H - pad - actionH, innerW, actionH };
+		layout.Body = { innerX, y, innerW, std::max(80.0f, layout.Actions.Y - 8.0f - y) };
+
+		layout.Stacked = innerW < 900.0f;
+		if (!layout.Stacked)
+		{
+			const float treeW = std::max(180.0f, innerW * 0.26f);
+			const float propsW = std::max(240.0f, innerW * 0.30f);
+			layout.Tree = { innerX, layout.Body.Y, treeW, layout.Body.H };
+			const float canvasX = innerX + treeW + 10.0f;
+			layout.Canvas = { canvasX, layout.Body.Y,
+				std::max(180.0f, innerW - treeW - propsW - 20.0f), layout.Body.H };
+			layout.Props = { layout.Canvas.X + layout.Canvas.W + 10.0f, layout.Body.Y, propsW,
+				layout.Body.H };
+		}
+		else
+		{
+			// 窄窗退化单列:三段共用同一宽度,外层滚动(见 OnRender)。
+			const float treeH = std::clamp(layout.Body.H * 0.34f, 120.0f, 240.0f);
+			const float canvasH = std::max(240.0f, layout.Body.H * 0.5f);
+			const float propsH = std::max(220.0f, layout.Body.H * 0.6f);
+			layout.Tree = { innerX, y, innerW, treeH };
+			layout.Canvas = { innerX, y + treeH + 10.0f, innerW, canvasH };
+			layout.Props = { innerX, y + treeH + 10.0f + canvasH + 10.0f, innerW, propsH };
+		}
+		return layout;
+	}
+
+	void WidgetGalleryPanel::DrawTopBar(Wui::WuiContext& ctx, const WbLayout& layout,
+		const Wui::WuiTheme& theme)
+	{
+		const Wui::WuiRect bar = layout.TopBar;
+		Wui::PanelBackground(ctx, bar, theme.PanelHeader, theme.Radius);
+		const bool twoRows = bar.H > 40.0f;
+
+		float x = bar.X + 8.0f;
+		float rowY = bar.Y + 2.0f;
+		const float buttonH = twoRows ? 24.0f : bar.H - 4.0f;
+
+		Wui::Label(ctx, { x, rowY + 5.0f }, Wui::Tr("workbench.global.density", "Density"),
+			theme.TextMuted, 12.0f);
+		x += 56.0f;
+		if (Wui::Button(ctx, Wui::HashId("wui.workbench.btn.density.comfortable"),
+			{ x, rowY, 92.0f, buttonH },
+			Wui::Tr("workbench.density.comfortable", "Comfortable"), theme))
+		{
+			m_DensityIndex = 0;
+			ctx.RecordOp("gallery", "global", "Density", "comfortable");
+		}
+		x += 96.0f;
+		if (Wui::Button(ctx, Wui::HashId("wui.workbench.btn.density.compact"),
+			{ x, rowY, 74.0f, buttonH },
+			Wui::Tr("workbench.density.compact", "Compact"), theme))
+		{
+			m_DensityIndex = 1;
+			ctx.RecordOp("gallery", "global", "Density", "compact");
+		}
+		x += 82.0f;
+
+		Wui::Label(ctx, { x, rowY + 5.0f }, Wui::Tr("workbench.global.scale", "UI scale"),
+			theme.TextMuted, 12.0f);
+		x += 52.0f;
+		static const float kScales[3] = { 1.0f, 1.25f, 1.5f };
+		static const char* kScaleLabels[3] = { "100%", "125%", "150%" };
+		for (int index = 0; index < 3; ++index)
+		{
+			const std::string id = std::string("wui.workbench.btn.scale.") + std::to_string(index);
+			if (Wui::Button(ctx, Wui::HashId(id.c_str()), { x, rowY, 56.0f, buttonH },
+				kScaleLabels[index], theme))
+			{
+				m_UiScaleIndex = index;
+				Editor::EditorPreferences::Get().SetUiScale(kScales[index]);
+				Wui::SetUiScale(kScales[index]);
+				ctx.RecordOp("gallery", "global", "UiScale", kScaleLabels[index]);
+			}
+			x += 60.0f;
+		}
+		x += 6.0f;
+		if (twoRows)
+		{
+			// 第二行:语言 / 长文本压力 / 重置。
+			x = bar.X + 8.0f;
+			rowY = bar.Y + 30.0f;
+		}
+
+		m_LanguageOptions = { "en", "zh-CN" };
+		Wui::Label(ctx, { x, rowY + 5.0f }, Wui::Tr("workbench.global.language", "Language"),
+			theme.TextMuted, 12.0f);
+		x += 54.0f;
+		if (Wui::Combo(ctx, Wui::HashId("wui.workbench.btn.language"), { x, rowY, 96.0f, buttonH },
+			std::string(), m_LanguageOptions, m_LanguageIndex, theme))
+		{
+			m_LanguageIndex = std::clamp(m_LanguageIndex, 0,
+				static_cast<int>(m_LanguageOptions.size()) - 1);
+			const std::string language = m_LanguageOptions[static_cast<size_t>(m_LanguageIndex)];
+			Editor::EditorPreferences::Get().SetLanguage(language);
+			Wui::SetLanguage(language);
+			ctx.RecordOp("gallery", "global", "Language", language);
+		}
+		x += 104.0f;
+
+		if (Wui::Button(ctx, Wui::HashId("wui.workbench.btn.longtext"),
+			{ x, rowY, 132.0f, buttonH },
+			(m_LongText ? "[x] " : "[ ] ") + Wui::Tr("workbench.global.long_text", "Long text stress"),
+			theme))
+		{
+			m_LongText = !m_LongText;
+			ctx.RecordOp("gallery", "global", "LongText", m_LongText ? "on" : "off");
+		}
+
+		if (Wui::Button(ctx, Wui::HashId("wui.workbench.btn.reset"),
+			{ bar.X + bar.W - 74.0f, rowY, 66.0f, buttonH },
+			Wui::Tr("workbench.global.reset", "Reset"), theme))
+		{
+			const std::string id = m_SelectedId.empty() ? std::string("<first>") : m_SelectedId;
+			m_PropertyValues.clear();
+			m_ForceState = "default";
+			m_LongText = false;
+			m_Status = Wui::Tr("workbench.status.reset", "Reset: property overrides and forced state cleared");
+			ctx.RecordOp("gallery", "global", "Reset", id);
+		}
+	}
+
+	void WidgetGalleryPanel::DrawInfoBar(Wui::WuiContext& ctx, const WbLayout& layout,
+		const Wui::WuiTheme& theme, const Wui::WuiComponentDesc* desc)
+	{
+		const float size = 12.0f;
+		std::string left = Wui::Tr("workbench.info.registry", "Registry: ")
+			+ std::to_string(Wui::WuiComponentRegistry::Count()) + " components";
+		if (desc != nullptr)
+			left += "  |  " + desc->Id;
+		Wui::Label(ctx, { layout.InfoBar.X, layout.InfoBar.Y + 2.0f },
+			ClipText(ctx, left, layout.InfoBar.W * 0.55f, size), theme.TextMuted, size);
+
+		const std::string right = Wui::Tr("workbench.info.last_action", "last action: ") + m_LastAction;
+		Wui::Label(ctx, { layout.InfoBar.X + layout.InfoBar.W * 0.56f, layout.InfoBar.Y + 2.0f },
+			ClipText(ctx, right, layout.InfoBar.W * 0.44f, size), theme.TextMuted, size);
+		RegisterWorkbenchNode(Wui::HashId(kInfoId), "text", layout.InfoBar, left, m_LastAction, true, false);
+	}
+
+	const Wui::WuiComponentDesc* WidgetGalleryPanel::DrawTree(Wui::WuiContext& ctx,
+		const WbLayout& layout, const Wui::WuiTheme& theme)
+	{
+		const Wui::WuiRect area = layout.Tree;
+		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
+		Wui::SectionHeader(ctx, { area.X, area.Y, area.W, 22.0f },
+			Wui::Tr("workbench.tree.title", "Components"), theme.Accent, theme, 14.0f);
+
+		const float rowH = m_DensityIndex == 1 ? 20.0f : 24.0f;
+		const Wui::WuiRect search { area.X + 6.0f, area.Y + 26.0f,
+			std::max(60.0f, area.W - 12.0f), 24.0f };
+		if (Wui::SearchField(ctx, Wui::HashId(kTreeSearchId), search, m_Search,
+			Wui::Tr("workbench.tree.search", "Search components"), theme))
+			ctx.RecordOp("gallery", "filter", "Components", m_Search);
+
+		// 过滤后按 Category → DisplayName 分组(登记表已按此排序,这里保持原序)。
+		const auto& all = Wui::WuiComponentRegistry::All();
+		std::vector<const Wui::WuiComponentDesc*> visible;
+		for (const Wui::WuiComponentDesc& item : all)
+		{
+			if (!m_Search.empty())
+			{
+				std::string haystack = item.Id + " " + item.DisplayName + " " + item.Category;
+				std::string needle = m_Search;
+				std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+					[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+				std::transform(needle.begin(), needle.end(), needle.begin(),
+					[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+				if (haystack.find(needle) == std::string::npos)
+					continue;
+			}
+			visible.push_back(&item);
+		}
+
+		const float listTop = search.Y + search.H + 6.0f;
+		const float listHeight = std::max(40.0f, area.Y + area.H - listTop - 6.0f);
+		const Wui::WuiRect list { area.X + 4.0f, listTop, std::max(40.0f, area.W - 8.0f), listHeight };
+		const float listBottom = list.Y + list.H;
+
+		float contentHeight = 4.0f;
+		{
+			std::string lastCategory;
+			for (const Wui::WuiComponentDesc* item : visible)
+			{
+				if (item->Category != lastCategory)
+				{
+					contentHeight += 20.0f;
+					lastCategory = item->Category;
+				}
+				contentHeight += rowH;
+			}
+		}
+		Wui::BeginScrollArea(ctx, list, contentHeight, m_TreeScroll, theme);
+		// 滚轮归属:滚动区自己登记过覆盖层矩形(打给"上层盖住下层"用),所以 IsHovered
+		// 会对滚动区自身返回 false —— 判"指针是否在我的滚动区里"要用不带遮挡的原始命中
+		// (与弹出层自己的"点外关闭"同一口径)。
+		if (ctx.Input().Wheel != 0.0f && ctx.HitTestRaw(list, ctx.Input().MousePos))
+			m_TreeScroll = std::clamp(m_TreeScroll - ctx.Input().Wheel * (rowH + 4.0f), 0.0f,
+				std::max(0.0f, contentHeight - list.H));
+
+		const Wui::WuiComponentDesc* selected = nullptr;
+		int rowIndex = 0;
+		float y = list.Y + 4.0f - m_TreeScroll;
+		std::string lastCategory;
+		for (const Wui::WuiComponentDesc* item : visible)
+		{
+			if (item->Category != lastCategory)
+			{
+				lastCategory = item->Category;
+				if (y + 20.0f > list.Y && y < listBottom)
+					Wui::Label(ctx, { list.X + 4.0f, y + 3.0f }, lastCategory, theme.TextMuted, 12.0f);
+				y += 20.0f;
+			}
+			const Wui::WuiRect row { list.X, y, list.W, rowH };
+			y += rowH;
+			const bool active = item->Id == m_SelectedId
+				|| (m_SelectedId.empty() && !visible.empty() && item == visible.front());
+			if (active)
+				selected = item;
+			if (row.Y + row.H <= list.Y || row.Y >= listBottom)
+			{
+				++rowIndex;
+				continue;
+			}
+
+			const bool hovered = ctx.IsHovered(row);
+			Wui::HoverRow(ctx, row, hovered, active, theme, 2.0f);
+
+			const float badgeW = 66.0f;
+			Wui::Label(ctx, { row.X + 6.0f, row.Y + 3.0f },
+				ClipText(ctx, item->DisplayName, std::max(20.0f, row.W - badgeW - 12.0f), 13.0f),
+				active ? theme.Text : theme.TextMuted, 13.0f);
+			Wui::Label(ctx, { row.X + row.W - badgeW - 2.0f, row.Y + 4.0f }, StatusText(item->Status),
+				StatusColor(item->Status, theme), 11.0f);
+
+			// 行 id 按**过滤后序**稳定编号;精确选中项另有 wui.workbench.canvas.selected 节点,
+			// 探针不必从行号反推组件 id。
+			const std::string rowId = std::string(kTreeRowPrefix) + std::to_string(rowIndex);
+			RegisterWorkbenchNode(Wui::HashId(rowId.c_str()), "list-item", row,
+				item->DisplayName, item->Id + "|" + StatusText(item->Status), true, true);
+
+			if (hovered && ctx.Input().MouseClicked[0] && !ctx.IsPointerClickConsumed(0))
+			{
+				m_SelectedId = item->Id;
+				m_ForceState = "default";
+				ResetPropertyValues(item->Id);
+				m_PropScroll = 0.0f;
+				m_LastAction = "selected " + item->Id;
+				ctx.RecordOp("gallery", "select", "Component", item->Id);
+			}
+			++rowIndex;
+		}
+		Wui::EndScrollArea(ctx);
+
+		if (selected == nullptr && !visible.empty())
+		{
+			selected = visible.front();
+			m_SelectedId = selected->Id;
+		}
+
+		if (!visible.empty() && m_LastScrolledSelection != m_SelectedId)
+		{
+			// 选中**变化时**把选中行滚进视口(鼠标点行 / 首次默认选中 / 自动化逐件选)——
+			// 只在选择变化那一次滚:每帧都滚会跟用户的滚轮/拖动抢滚动位置(实测会卡住列表)。
+			m_LastScrolledSelection = m_SelectedId;
+			const auto rowTopFor = [&](size_t upto) {
+				// 行在"未滚动"坐标系里的顶边(含它前面的分类头)。
+				float top = list.Y + 4.0f;
+				std::string category;
+				for (size_t index = 0; index < upto; ++index)
+				{
+					if (visible[index]->Category != category)
+					{
+						category = visible[index]->Category;
+						top += 20.0f;
+					}
+					top += rowH;
+				}
+				if (!visible.empty() && visible[upto]->Category != category)
+					top += 20.0f;
+				return top;
+			};
+			size_t currentIndex = 0;
+			for (size_t index = 0; index < visible.size(); ++index)
+				if (visible[index]->Id == m_SelectedId)
+					currentIndex = index;
+			const float selectedTop = rowTopFor(currentIndex);
+			const float selectedBottom = selectedTop + rowH;
+			if (selectedTop < list.Y + 4.0f + m_TreeScroll)
+				m_TreeScroll = std::max(0.0f, selectedTop - list.Y - 4.0f);
+			else if (selectedBottom > list.Y + 4.0f + m_TreeScroll + list.H)
+				m_TreeScroll = std::min(std::max(0.0f, contentHeight - list.H),
+					selectedBottom - list.Y - 4.0f - list.H);
+		}
+		RegisterWorkbenchNode(Wui::HashId("wui.workbench.canvas.selected"), "text", list,
+			selected != nullptr ? selected->DisplayName : std::string(),
+			selected != nullptr ? selected->Id : std::string(), true, false);
+		return selected;
+	}
+
+	void WidgetGalleryPanel::DrawCanvas(Wui::WuiContext& ctx, const WbLayout& layout,
+		const Wui::WuiTheme& theme, const Wui::WuiComponentDesc* desc, float density, float uiScale)
+	{
+		const Wui::WuiRect area = layout.Canvas;
+		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
+		Wui::SectionHeader(ctx, { area.X, area.Y, area.W, 22.0f },
+			Wui::Tr("workbench.canvas.title", "Canvas"), theme.Accent, theme, 14.0f);
+
+		const Wui::WuiRect inner { area.X + 8.0f, area.Y + 28.0f,
+			std::max(40.0f, area.W - 16.0f), std::max(40.0f, area.H - 36.0f) };
+		m_CanvasRect = area;
+		m_CanvasInner = inner;
+		m_CanvasValid = true;
+		m_AppliedState = m_ForceState;
+		if (desc != nullptr)
+			m_AppliedProperties = AppliedProperties(*desc, density, uiScale);
+		else
+			m_AppliedProperties.clear();
+
+		// 参考网格(40px 主格,200px 加重)。
+		const Wui::WuiColor gridColor { theme.Border.R, theme.Border.G, theme.Border.B, 0.55f };
+		const Wui::WuiColor majorColor { theme.BorderStrong.R, theme.BorderStrong.G,
+			theme.BorderStrong.B, 0.9f };
+		if (m_ShowGrid)
+		{
+			for (float x = inner.X; x <= inner.X + inner.W + 0.5f; x += 40.0f)
+			{
+				const bool major = std::fmod(x - inner.X, 200.0f) < 0.5f;
+				Wui::PanelBackground(ctx, { x, inner.Y, 1.0f, inner.H },
+					major ? majorColor : gridColor, 0.0f);
+			}
+			for (float y = inner.Y; y <= inner.Y + inner.H + 0.5f; y += 40.0f)
+			{
+				const bool major = std::fmod(y - inner.Y, 200.0f) < 0.5f;
+				Wui::PanelBackground(ctx, { inner.X, y, inner.W, 1.0f },
+					major ? majorColor : gridColor, 0.0f);
+			}
+		}
+
+		if (desc == nullptr)
+		{
+			Wui::Label(ctx, { inner.X + 10.0f, inner.Y + 12.0f },
+				Wui::Tr("workbench.canvas.empty", "No component selected"), theme.TextMuted, 14.0f);
+			RegisterWorkbenchNode(Wui::HashId(kCanvasId), "canvas", area, std::string(),
+				std::string(), true, false);
+			return;
+		}
+
+		// 尺寸:登记表 SizeNotes 的 preferred WxH,再按缩放与画布可用空间收敛。
+		const std::pair<float, float> preferred = SizeNotesToSize(desc->SizeNotes);
+		const float scale = std::max(0.5f, uiScale);
+		float width = std::max(kMinCanvasSize, preferred.first * scale);
+		float height = std::max(28.0f, preferred.second * scale);
+		if (width > inner.W - 16.0f)
+		{
+			const float shrink = (inner.W - 16.0f) / width;
+			width *= shrink;
+			height *= shrink;
+		}
+		if (height > inner.H - 16.0f)
+		{
+			const float shrink = (inner.H - 16.0f) / height;
+			width *= shrink;
+			height *= shrink;
+		}
+		width = std::max(40.0f, width);
+		height = std::max(16.0f, height);
+
+		const Wui::WuiRect slot { inner.X + 8.0f, inner.Y + 8.0f, width, height };
+		Wui::PanelBackground(ctx, { slot.X - 2.0f, slot.Y - 2.0f, slot.W + 4.0f, slot.H + 4.0f },
+			theme.WindowBg, 2.0f);
+
+		if (desc->Showcase != nullptr)
+		{
+			Wui::WuiComponentDraw draw;
+			draw.Context = &ctx;
+			draw.Theme = &theme;
+			draw.Rect = slot;
+			draw.State = m_ForceState;
+			draw.Properties = m_AppliedProperties;
+			draw.UiScale = scale;
+			draw.Density = density;
+			draw.Locale = Wui::GetLanguage();
+			desc->Showcase(draw);
+		}
+		else
+		{
+			Wui::Label(ctx, { slot.X + 8.0f, slot.Y + 8.0f }, desc->DisplayName, theme.Text, 14.0f);
+			Wui::Label(ctx, { slot.X + 8.0f, slot.Y + 28.0f },
+				Wui::Tr("workbench.canvas.no_showcase",
+					"Showcase pending (registered by the component owner)"),
+				theme.TextMuted, 12.0f);
+		}
+
+		RegisterWorkbenchNode(Wui::HashId(kCanvasId), "canvas", slot, desc->DisplayName,
+			desc->Id + "|" + m_ForceState, true, false);
+		const std::string label = desc->DisplayName + "  " + FormatFloat(width) + " x "
+			+ FormatFloat(height);
+		Wui::Label(ctx, { slot.X, slot.Y + slot.H + 4.0f },
+			ClipText(ctx, label, inner.W, 12.0f), theme.TextMuted, 12.0f);
+		RegisterWorkbenchNode(Wui::HashId(kCanvasLabelId), "text",
+			{ slot.X, slot.Y + slot.H + 4.0f, inner.W, 16.0f }, label, std::string(), true, false);
+	}
+
+	void WidgetGalleryPanel::DrawProperties(Wui::WuiContext& ctx, const WbLayout& layout,
+		const Wui::WuiTheme& theme, const Wui::WuiComponentDesc* desc, float density, float uiScale)
+	{
+		const Wui::WuiRect area = layout.Props;
+		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
+		Wui::SectionHeader(ctx, { area.X, area.Y, area.W, 22.0f },
+			Wui::Tr("workbench.props.title", "Properties"), theme.Accent, theme, 14.0f);
+
+		if (desc == nullptr)
+		{
+			Wui::Label(ctx, { area.X + 8.0f, area.Y + 32.0f },
+				Wui::Tr("workbench.props.empty", "Select a component"), theme.TextMuted, 13.0f);
+			return;
+		}
+
+		const Wui::WuiRect content { area.X + 6.0f, area.Y + 26.0f,
+			std::max(60.0f, area.W - 12.0f), std::max(60.0f, area.H - 32.0f) };
+		const float rowH = 24.0f;
+		const float rowGap = 4.0f;
+		float contentHeight = 6.0f + rowH + rowGap;
+		for (size_t index = 0; index < desc->Properties.size(); ++index)
+			contentHeight += rowH + rowGap;
+		contentHeight += 120.0f;   // 元信息(A11yNotes / SizeNotes / SourceFile / 开关摘要)
+
+		Wui::BeginScrollArea(ctx, content, contentHeight, m_PropScroll, theme);
+		float y = content.Y + 6.0f - m_PropScroll;
+
+		// ---- 伪状态:由 desc.States 生成(登记表没列状态就不显示下拉,不造假控件)----
+		if (!desc->States.empty())
+		{
+			m_StateOptions.clear();
+			int selectedIndex = 0;
+			for (size_t index = 0; index < desc->States.size(); ++index)
+			{
+				m_StateOptions.push_back(desc->States[index].Label.empty() ? desc->States[index].Id
+					: desc->States[index].Label);
+				if (desc->States[index].Id == m_ForceState)
+					selectedIndex = static_cast<int>(index);
+			}
+			Wui::Label(ctx, { content.X + 2.0f, y + 4.0f },
+				Wui::Tr("workbench.props.state", "State"), theme.TextMuted, 12.0f);
+			int& stateIndex = ctx.Persist<int>(Wui::HashId("wui.workbench.prop.__state_index"),
+				selectedIndex);
+			if (stateIndex < 0 || stateIndex >= static_cast<int>(desc->States.size()))
+				stateIndex = selectedIndex;
+			if (Wui::Combo(ctx, Wui::HashId(kStateComboId),
+				{ content.X + 76.0f, y, std::max(80.0f, content.W - 80.0f), rowH }, std::string(),
+				m_StateOptions, stateIndex, theme))
+			{
+				m_ForceState = desc->States[static_cast<size_t>(stateIndex)].Id;
+				m_LastAction = "state " + m_ForceState;
+				ctx.RecordOp("gallery", "state", desc->Id, m_ForceState);
+			}
+			else
+			{
+				m_ForceState = desc->States[static_cast<size_t>(stateIndex)].Id;
+			}
+			y += rowH + rowGap;
+		}
+
+		// ---- 属性:类型由 Kind 决定,完全由登记表生成 ----
+		for (size_t index = 0; index < desc->Properties.size(); ++index)
+		{
+			const Wui::WuiComponentProperty& prop = desc->Properties[index];
+			const Wui::WuiRect row { content.X, y, content.W, rowH };
+			if (row.Y + row.H > content.Y && row.Y < content.Y + content.H)
+			{
+				// id 里带上组件:属性控件与控件自身内部持久态共用 id 空间,而"行 0"在不同组件
+				// 可能是完全不同的控件类型(TextField 的 WuiEditState vs DragFloat 的
+				// WuiNumericState)——不区分组件就会报 "persisted state id reused with
+				// different types",随后浮窗渲染直接失败(实测)。带上组件 id 后每件一套。
+				const std::string propId = std::string(kPropLabelPrefix) + desc->Id + "."
+					+ std::to_string(index);
+				Wui::Label(ctx, { row.X + 2.0f, row.Y + 4.0f },
+					ClipText(ctx, prop.Name, 72.0f, 12.0f), theme.TextMuted, 12.0f);
+				const Wui::WuiRect control { row.X + 76.0f, row.Y,
+					std::max(60.0f, row.W - 80.0f), rowH };
+				const std::string value = PropertyValue(*desc, prop);
+				switch (prop.Type)
+				{
+				case Wui::WuiComponentProperty::Kind::Bool:
+				{
+					bool flag = value == "1" || value == "true";
+					if (Wui::Checkbox(ctx, Wui::HashId(propId.c_str()), control, std::string(), flag, theme))
+					{
+						SetPropertyValue(desc->Id, prop.Name, flag ? "1" : "0");
+						m_LastAction = prop.Name + " = " + (flag ? "1" : "0");
+					}
+					break;
+				}
+				case Wui::WuiComponentProperty::Kind::Float:
+				case Wui::WuiComponentProperty::Kind::Int:
+				{
+					if (prop.Type == Wui::WuiComponentProperty::Kind::Int)
+					{
+						int64_t number = static_cast<int64_t>(std::llround(SafeFloat(value, prop.Min)));
+						number = std::clamp(number, static_cast<int64_t>(prop.Min),
+							static_cast<int64_t>(prop.Max));
+						if (Wui::DragInt(ctx, Wui::HashId(propId.c_str()), control, number,
+							static_cast<int64_t>(prop.Min), static_cast<int64_t>(prop.Max), theme))
+						{
+							SetPropertyValue(desc->Id, prop.Name, std::to_string(number));
+							m_LastAction = prop.Name + " = " + std::to_string(number);
+						}
+					}
+					else
+					{
+						float number = std::clamp(SafeFloat(value, prop.Min), prop.Min, prop.Max);
+						if (Wui::DragFloat(ctx, Wui::HashId(propId.c_str()), control, number,
+							std::max(0.001f, prop.Step), prop.Min, prop.Max, theme))
+						{
+							SetPropertyValue(desc->Id, prop.Name, FormatFloat(number));
+							m_LastAction = prop.Name + " = " + FormatFloat(number);
+						}
+					}
+					break;
+				}
+				case Wui::WuiComponentProperty::Kind::Enum:
+				{
+					m_PropertyEnumOptions = prop.Options.empty()
+						? std::vector<std::string> { value } : prop.Options;
+					int selected = 0;
+					for (size_t option = 0; option < m_PropertyEnumOptions.size(); ++option)
+						if (m_PropertyEnumOptions[option] == value)
+							selected = static_cast<int>(option);
+					int& cached = m_PropertyEnumIndex[desc->Id + "|" + prop.Name];
+					if (cached < 0 || cached >= static_cast<int>(m_PropertyEnumOptions.size()))
+						cached = selected;
+					if (Wui::Combo(ctx, Wui::HashId(propId.c_str()), control, std::string(),
+						m_PropertyEnumOptions, cached, theme))
+					{
+						const std::string chosen = m_PropertyEnumOptions[static_cast<size_t>(cached)];
+						SetPropertyValue(desc->Id, prop.Name, chosen);
+						m_LastAction = prop.Name + " = " + chosen;
+					}
+					break;
+				}
+				case Wui::WuiComponentProperty::Kind::Text:
+				default:
+				{
+					std::string buffer = value;
+					Wui::TextFieldA11y a11y;
+					a11y.Label = prop.Name;
+					if (Wui::TextField(ctx, Wui::HashId(propId.c_str()), control, buffer, theme, nullptr,
+						&a11y))
+					{
+						SetPropertyValue(desc->Id, prop.Name, buffer);
+						m_LastAction = prop.Name + " = " + buffer;
+					}
+					break;
+				}
+				}
+
+				// 属性控件与控件内部持久态共用 id 是安全的(Widget 自己的 ctx.Persist 归它),
+				// 但工作台自己**不再**往同一个 id 里塞第二种类型的状态。
+			}
+			y += rowH + rowGap;
+		}
+
+		// ---- 元信息:登记表里的说明与实现文件(追责/文档)----
+		const float metaSize = 12.0f;
+		const auto metaLine = [&](const std::string& text, const Wui::WuiColor& color)
+		{
+			if (y + 16.0f > content.Y && y < content.Y + content.H)
+				Wui::Label(ctx, { content.X + 2.0f, y + 2.0f },
+					ClipText(ctx, text, content.W - 4.0f, metaSize), color, metaSize);
+			y += 16.0f;
+		};
+		metaLine(Wui::Tr("workbench.props.a11y_notes", "a11y: ") + desc->A11yNotes, theme.TextMuted);
+		metaLine(Wui::Tr("workbench.props.size_notes", "size: ") + desc->SizeNotes, theme.TextMuted);
+		metaLine(Wui::Tr("workbench.props.source", "source: ") + desc->SourceFile, theme.TextMuted);
+		if (!desc->ExtraA11yIds.empty())
+		{
+			std::string ids;
+			for (const std::string& id : desc->ExtraA11yIds)
+				ids += (ids.empty() ? "" : ", ") + id;
+			metaLine(Wui::Tr("workbench.props.extra_ids", "ids: ") + ids, theme.TextMuted);
+		}
+		metaLine(Wui::Tr("workbench.props.globals", "density: ")
+			+ (m_DensityIndex == 1 ? "compact" : "comfortable")
+			+ "  scale: " + FormatFloat(uiScale)
+			+ "  locale: " + (Wui::GetLanguage().empty() ? "en" : Wui::GetLanguage()),
+			theme.TextMuted);
+		Wui::EndScrollArea(ctx);
+	}
+
+	void WidgetGalleryPanel::DrawActions(Wui::WuiContext& ctx, const WbLayout& layout,
+		const Wui::WuiTheme& theme, const Wui::WuiComponentDesc* desc, float uiScale)
+	{
+		const Wui::WuiRect bar = layout.Actions;
+		Wui::PanelBackground(ctx, bar, theme.PanelHeader, theme.Radius);
+		const float density = m_DensityIndex == 1 ? 0.85f : 1.0f;
+
+		if (Wui::Button(ctx, Wui::HashId(kCaptureButtonId), { bar.X + 8.0f, bar.Y + 3.0f, 110.0f, 24.0f },
+			Wui::Tr("workbench.action.capture", "Capture"), theme))
+		{
+			if (desc != nullptr && m_CanvasValid)
+			{
+				WriteCaptureMetadata(*desc, density, uiScale);
+				m_Status = Wui::Tr("workbench.status.captured", "Capture metadata written: ")
+					+ (WorkbenchDir() / "current.json").string();
+				m_LastAction = "capture " + desc->Id;
+				ctx.RecordOp("gallery", "capture", desc->Id, "build/wui-workbench/current.json");
+			}
+			else
+			{
+				m_Status = Wui::Tr("workbench.status.no_component",
+					"Action skipped: no component selected");
+			}
+		}
+
+		if (Wui::Button(ctx, Wui::HashId(kApproveButtonId), { bar.X + 124.0f, bar.Y + 3.0f, 130.0f, 24.0f },
+			Wui::Tr("workbench.action.approve", "Approve"), theme))
+		{
+			if (desc != nullptr)
+			{
+				WriteApproval(*desc, density, uiScale);
+				const std::string commit = ResolveGitCommit();
+				m_Status = Wui::Tr("workbench.status.approved", "Recorded approval: ") + desc->Id
+					+ " @ " + commit;
+				m_LastAction = "approve " + desc->Id;
+				ctx.RecordOp("gallery", "approve", desc->Id, commit);
+			}
+			else
+			{
+				m_Status = Wui::Tr("workbench.status.no_component",
+					"Action skipped: no component selected");
+			}
+		}
+
+		RegisterWorkbenchNode(Wui::HashId("wui.workbench.canvas.state"), "text", bar,
+			desc != nullptr ? desc->Id : std::string("(none)"), m_ForceState, true, false);
+		const std::string status = m_Status.empty()
+			? Wui::Tr("workbench.status.idle",
+				"Idle. Capture writes metadata; the probe crops the screenshot.")
+			: m_Status;
+		Wui::Label(ctx, { bar.X + 266.0f, bar.Y + 7.0f },
+			ClipText(ctx, status, std::max(40.0f, bar.W - 274.0f), 12.0f), theme.TextMuted, 12.0f);
+		RegisterWorkbenchNode(Wui::HashId(kStatusId), "text", bar, status, m_ForceState, true, false);
+	}
+
+	std::string WidgetGalleryPanel::CaptureMetadataJson(const Wui::WuiComponentDesc& desc, float density,
+		float uiScale) const
+	{
+		std::ostringstream out;
+		out << "{\n";
+		out << "  \"component\": \"" << JsonEscape(desc.Id) << "\",\n";
+		out << "  \"displayName\": \"" << JsonEscape(desc.DisplayName) << "\",\n";
+		out << "  \"state\": \"" << JsonEscape(m_AppliedState) << "\",\n";
+		out << "  \"commit\": \"" << ResolveGitCommit() << "\",\n";
+		out << "  \"window\": \"" << JsonEscape(Wui::WuiAccessibility::Get().CurrentWindow()) << "\",\n";
+		out << "  \"canvas\": {\"x\": " << m_CanvasRect.X << ", \"y\": " << m_CanvasRect.Y
+			<< ", \"w\": " << m_CanvasRect.W << ", \"h\": " << m_CanvasRect.H << "},\n";
+		out << "  \"slot\": {\"x\": " << m_CanvasInner.X << ", \"y\": " << m_CanvasInner.Y
+			<< ", \"w\": " << m_CanvasInner.W << ", \"h\": " << m_CanvasInner.H << "},\n";
+		out << "  \"uiScale\": " << uiScale << ",\n";
+		out << "  \"density\": " << density << ",\n";
+		out << "  \"locale\": \"" << JsonEscape(Wui::GetLanguage()) << "\",\n";
+		out << "  \"longText\": " << (m_LongText ? "true" : "false") << ",\n";
+		out << "  \"a11yIds\": [";
+		for (size_t index = 0; index < desc.ExtraA11yIds.size(); ++index)
+			out << (index == 0 ? "" : ", ") << "\"" << JsonEscape(desc.ExtraA11yIds[index]) << "\"";
+		out << "],\n";
+		out << "  \"properties\": {";
+		bool first = true;
+		for (const auto& [name, value] : m_AppliedProperties)
+		{
+			out << (first ? "\n" : ",\n") << "    \"" << JsonEscape(name) << "\": \"" << JsonEscape(value)
+				<< "\"";
+			first = false;
+		}
+		out << (first ? "}\n" : "\n  }\n");
+		out << "}\n";
+		return out.str();
+	}
+
+	void WidgetGalleryPanel::WriteCaptureMetadata(const Wui::WuiComponentDesc& desc, float density,
+		float uiScale) const
+	{
+		EnsureWorkbenchDir();
+		std::ofstream file(WorkbenchDir() / "current.json", std::ios::binary | std::ios::trunc);
+		if (!file)
+			return;
+		file << CaptureMetadataJson(desc, density, uiScale);
+	}
+
+	void WidgetGalleryPanel::WriteApproval(const Wui::WuiComponentDesc& desc, float density, float uiScale)
+	{
+		EnsureWorkbenchDir();
+		// 只按 component 做"合并写":把已有条目解析出来(平铺解析器,不引 JSON 依赖),
+		// 保留其它组件的记录,只改当前这一条。口径见 approved.json 的 note 字段。
+		struct Entry
+		{
+			std::string Component;
+			std::string Commit;
+			std::string ApprovedAt;
+			std::string Status;
+			std::string A11y;
+			std::string Size;
+			std::string Source;
+			std::string Locale;
+			float Density = 1.0f;
+			float UiScale = 1.0f;
+		};
+		std::vector<Entry> entries;
+		{
+			std::ifstream existing(WorkbenchDir() / "approved.json", std::ios::binary);
+			std::ostringstream buffer;
+			buffer << existing.rdbuf();
+			const std::string text = buffer.str();
+			const auto readField = [&text](const std::string& key, size_t from) {
+				const std::string needle = "\"" + key + "\": \"";
+				const size_t at = text.find(needle, from);
+				if (at == std::string::npos)
+					return std::string();
+				const size_t start = at + needle.size();
+				const size_t end = text.find('"', start);
+				return end == std::string::npos ? std::string() : text.substr(start, end - start);
+			};
+			size_t cursor = 0;
+			while (true)
+			{
+				const std::string needle = "\"component\": \"";
+				const size_t at = text.find(needle, cursor);
+				if (at == std::string::npos)
+					break;
+				const size_t start = at + needle.size();
+				const size_t end = text.find('"', start);
+				if (end == std::string::npos)
+					break;
+				Entry entry;
+				entry.Component = text.substr(start, end - start);
+				entry.Commit = readField("commit", at);
+				entry.ApprovedAt = readField("approvedAt", at);
+				entry.Status = readField("status", at);
+				entry.A11y = readField("a11yNotes", at);
+				entry.Size = readField("sizeNotes", at);
+				entry.Source = readField("sourceFile", at);
+				entry.Locale = readField("locale", at);
+				entries.push_back(entry);
+				cursor = end;
+			}
+		}
+
+		Entry entry;
+		entry.Component = desc.Id;
+		entry.Commit = ResolveGitCommit();
+		entry.Status = StatusText(desc.Status);
+		entry.A11y = desc.A11yNotes;
+		entry.Size = desc.SizeNotes;
+		entry.Source = desc.SourceFile;
+		entry.Density = density;
+		entry.UiScale = uiScale;
+		entry.Locale = Wui::GetLanguage().empty() ? "en" : Wui::GetLanguage();
+		{
+			const std::time_t now = std::time(nullptr);
+			char stamp[32] = {};
+			std::tm local {};
+			localtime_s(&local, &now);
+			std::strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &local);
+			entry.ApprovedAt = stamp;
+		}
+
+		bool replaced = false;
+		for (Entry& item : entries)
+		{
+			if (item.Component == entry.Component)
+			{
+				item = entry;
+				replaced = true;
+			}
+		}
+		if (!replaced)
+			entries.push_back(entry);
+		std::sort(entries.begin(), entries.end(),
+			[](const Entry& left, const Entry& right) { return left.Component < right.Component; });
+
+		std::ofstream file(WorkbenchDir() / "approved.json", std::ios::binary | std::ios::trunc);
+		if (!file)
+			return;
+		std::ostringstream out;
+		out << "{\n";
+		out << "  \"note\": \"WUI component approvals: the component was reviewed at the recorded "
+			"commit. Changing a component's look requires re-approval (plan P1).\",\n";
+		out << "  \"approved\": [\n";
+		for (size_t index = 0; index < entries.size(); ++index)
+		{
+			const Entry& item = entries[index];
+			out << "    { \"component\": \"" << JsonEscape(item.Component) << "\", \"commit\": \""
+				<< JsonEscape(item.Commit) << "\", \"approvedAt\": \"" << JsonEscape(item.ApprovedAt)
+				<< "\", \"status\": \"" << JsonEscape(item.Status) << "\", \"a11yNotes\": \""
+				<< JsonEscape(item.A11y) << "\", \"sizeNotes\": \"" << JsonEscape(item.Size)
+				<< "\", \"sourceFile\": \"" << JsonEscape(item.Source) << "\", \"locale\": \""
+				<< JsonEscape(item.Locale) << "\", \"density\": " << item.Density
+				<< ", \"uiScale\": " << item.UiScale << " }"
+				<< (index + 1 < entries.size() ? "," : "") << "\n";
+		}
+		out << "  ]\n}\n";
+		file << out.str();
+	}
+
+	std::string WidgetGalleryPanel::PropertyValue(const Wui::WuiComponentDesc& desc,
+		const Wui::WuiComponentProperty& prop) const
+	{
+		const auto component = m_PropertyValues.find(desc.Id);
+		if (component != m_PropertyValues.end())
+		{
+			const auto found = component->second.find(prop.Name);
+			if (found != component->second.end())
+				return found->second;
+		}
+		switch (prop.Type)
+		{
+		case Wui::WuiComponentProperty::Kind::Bool:
+			return "0";
+		case Wui::WuiComponentProperty::Kind::Float:
+			return FormatFloat(prop.Min);
+		case Wui::WuiComponentProperty::Kind::Int:
+			return std::to_string(static_cast<int64_t>(prop.Min));
+		case Wui::WuiComponentProperty::Kind::Enum:
+			return prop.Options.empty() ? std::string() : prop.Options.front();
+		case Wui::WuiComponentProperty::Kind::Text:
+		default:
+			return prop.DefaultText;
+		}
+	}
+
+	void WidgetGalleryPanel::SetPropertyValue(const std::string& componentId, const std::string& name,
+		const std::string& value)
+	{
+		m_PropertyValues[componentId][name] = value;
+	}
+
+	void WidgetGalleryPanel::ResetPropertyValues(const std::string& componentId)
+	{
+		m_PropertyValues[componentId].clear();
+	}
+
+	std::vector<std::pair<std::string, std::string>> WidgetGalleryPanel::AppliedProperties(
+		const Wui::WuiComponentDesc& desc, float density, float uiScale) const
+	{
+		std::vector<std::pair<std::string, std::string>> out;
+		out.reserve(desc.Properties.size() + 3);
+		// 全局开关作为"已知属性名"注入:showcase 认识就这样用,不认识会忽略(登记表契约)。
+		out.emplace_back("density", FormatFloat(density));
+		out.emplace_back("uiScale", FormatFloat(uiScale));
+		out.emplace_back("locale", Wui::GetLanguage().empty() ? "en" : Wui::GetLanguage());
+		for (const Wui::WuiComponentProperty& prop : desc.Properties)
+		{
+			std::string value = PropertyValue(desc, prop);
+			// 长文本压力:Text 类属性换成超长串(一帧就能看出溢出/裁剪/换行问题)。
+			if (m_LongText && prop.Type == Wui::WuiComponentProperty::Kind::Text)
+				value = "Long text stress: " + std::string(160, 'W')
+					+ " / 长文本压力测试(检查溢出、裁剪与换行)";
+			out.emplace_back(prop.Name, value);
+		}
+		return out;
+	}
+
 	void WidgetGalleryPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		Wui::WuiTheme& theme = host.Theme();
+		const WbLayout layout = ComputeLayout(rect, theme);
+		const float density = m_DensityIndex == 1 ? 0.85f : 1.0f;
+		const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
 
-		// ---- 控件实例(首次进入时创建,之后跨帧复用) ----
-		if (!m_Button)
+		DrawTopBar(ctx, layout, theme);
+		const Wui::WuiComponentDesc* selected = nullptr;
+
+		if (!layout.Stacked)
 		{
-			m_ComboOptions = { "Option A", "Option B", "Option C" };
-
-			m_Button = std::make_shared<Wui::WuiButton>();
-			m_Button->Label = "Click me";
-			m_Button->SetId(Wui::HashId("gallery.button"));
-			m_Button->OnClick = [this, &ctx] { m_LastAction = "Button clicked"; ctx.RecordOp("gallery", "click", "Button", "Click me"); };
-
-			m_ButtonDisabled = std::make_shared<Wui::WuiButton>();
-			m_ButtonDisabled->Label = "Disabled";
-			m_ButtonDisabled->Disabled = true;
-			m_ButtonDisabled->SetId(Wui::HashId("gallery.button.disabled"));
-
-			m_IconPlay = std::make_shared<Wui::WuiIconButton>();
-			m_IconPlay->SetId(Wui::HashId("gallery.icon.play"));
-			m_IconPlay->Tooltip = "Icon button (play)";
-			m_IconPlay->OnClick = [this, &ctx] { m_LastAction = "Icon button (play)"; ctx.RecordOp("gallery", "click", "IconButton", "play"); };
-
-			m_IconStop = std::make_shared<Wui::WuiIconButton>();
-			m_IconStop->SetId(Wui::HashId("gallery.icon.stop"));
-			m_IconStop->Tooltip = "Icon button (stop)";
-			m_IconStop->OnClick = [this, &ctx] { m_LastAction = "Icon button (stop)"; ctx.RecordOp("gallery", "click", "IconButton", "stop"); };
-
-			m_Field = std::make_shared<Wui::WuiTextField>();
-			m_Field->Buffer = &m_Text;
-			m_Field->SetId(Wui::HashId("gallery.field"));
-			m_Field->OnCommit = [this, &ctx] { m_LastAction = "TextField committed: " + m_Text; ctx.RecordOp("gallery", "commit", "TextField", m_Text); };
-			m_Field->OnCancel = [this] { m_LastAction = "TextField edit cancelled"; };
-
-			m_DragFloatWidget = std::make_shared<Wui::WuiDragFloat>();
-			m_DragFloatWidget->Value = &m_DragFloat;
-			m_DragFloatWidget->Speed = 0.05f;
-			m_DragFloatWidget->SetId(Wui::HashId("gallery.dragfloat"));
-
-			m_DragIntWidget = std::make_shared<Wui::WuiDragInt>();
-			m_DragIntWidget->Value = &m_DragInt;
-			m_DragIntWidget->SetId(Wui::HashId("gallery.dragint"));
-
-			m_Checkbox = std::make_shared<Wui::WuiCheckbox>();
-			m_Checkbox->Label = "Checkbox";
-			m_Checkbox->Value = &m_CheckA;
-			m_Checkbox->SetId(Wui::HashId("gallery.checkbox"));
-
-			m_ToggleX = std::make_shared<Wui::WuiToggle>();
-			m_ToggleX->Label = "Toggle A";
-			m_ToggleX->Value = &m_ToggleA;
-			m_ToggleX->SetId(Wui::HashId("gallery.toggle.a"));
-			m_ToggleX->OnChanged = [this, &ctx]
-			{
-				m_LastAction = std::string("Toggle A ") + (m_ToggleA ? "on" : "off");
-				ctx.RecordOp("gallery", "toggle", "Toggle A", m_ToggleA ? "on" : "off");
-			};
-
-			m_ToggleY = std::make_shared<Wui::WuiToggle>();
-			m_ToggleY->Label = "Toggle B";
-			m_ToggleY->Value = &m_ToggleB;
-			m_ToggleY->SetId(Wui::HashId("gallery.toggle.b"));
-			m_ToggleY->OnChanged = [this, &ctx]
-			{
-				m_LastAction = std::string("Toggle B ") + (m_ToggleB ? "on" : "off");
-				ctx.RecordOp("gallery", "toggle", "Toggle B", m_ToggleB ? "on" : "off");
-			};
-
-			m_SliderX = std::make_shared<Wui::WuiSlider>();
-			m_SliderX->Value = &m_SliderA;
-			m_SliderX->SetId(Wui::HashId("gallery.slider.a"));
-
-			m_SliderY = std::make_shared<Wui::WuiSlider>();
-			m_SliderY->Value = &m_SliderB;
-			m_SliderY->SetId(Wui::HashId("gallery.slider.b"));
-
-			m_Combo = std::make_shared<Wui::WuiCombo>();
-			m_Combo->Options = &m_ComboOptions;
-			m_Combo->Selected = &m_ComboIndex;
-			m_Combo->SetId(Wui::HashId("gallery.combo"));
-
-			m_Tabs = std::make_shared<Wui::WuiTabs>();
-			m_Tabs->Labels = { "General", "Rendering", "Physics" };
-			m_Tabs->Selected = &m_TabIndex;
-			m_Tabs->SetId(Wui::HashId("gallery.tabs"));
-			m_Tabs->OnChanged = [this, &ctx](int index)
-			{
-				m_LastAction = "Tab changed: " + std::to_string(index);
-				ctx.RecordOp("gallery", "select", "Tabs", std::to_string(index));
-			};
-
-			m_Menu = std::make_shared<Wui::WuiMenuButton>();
-			m_Menu->Label = "Popup Menu";
-			m_Menu->Items = { "Duplicate", "Rename...", "Delete" };
-			m_Menu->SetId(Wui::HashId("gallery.menu"));
-			m_Menu->OnSelect = [this, &ctx](int index)
-			{
-				m_LastAction = "Menu item " + std::to_string(index) + " selected";
-				ctx.RecordOp("gallery", "select", "Menu", m_Menu->Items[static_cast<size_t>(index)]);
-			};
-
-			m_Tooltip = std::make_shared<Wui::WuiTooltip>();
-			m_Tooltip->Text = "Tooltip overlay: hover 提示";
-			m_Tooltip->SetId(Wui::HashId("gallery.tooltip"));
-
-			for (int i = 0; i < 3; ++i)
-			{
-				auto item = std::make_shared<Wui::WuiListItem>();
-				item->Label = "List item " + std::to_string(i + 1);
-				item->SetId(Wui::HashId("gallery.list") + static_cast<Wui::WuiId>(i));
-				item->OnSelect = [this, &ctx, i]
-				{
-					m_ListIndex = i;
-					m_LastAction = "List item " + std::to_string(i + 1) + " selected";
-					ctx.RecordOp("gallery", "select", "ListItem", std::to_string(i));
-				};
-				m_ListItems.push_back(item);
-			}
-
-			for (int i = 0; i < 2; ++i)
-			{
-				auto node = std::make_shared<Wui::WuiTreeItem>();
-				node->Label = i == 0 ? "Scene (parent)" : "Child entity";
-				node->Depth = i;
-				node->SetId(Wui::HashId("gallery.tree") + static_cast<Wui::WuiId>(i));
-				node->Expanded = i == 0 ? &m_TreeExpanded : &m_TreeChildExpanded;
-				node->OnSelect = [this, &ctx, i]
-				{
-					m_TreeIndex = i;
-					m_LastAction = "Tree node " + std::to_string(i) + " selected";
-					ctx.RecordOp("gallery", "select", "TreeItem", std::to_string(i));
-				};
-				m_TreeItems.push_back(node);
-			}
-
-			m_Separator = std::make_shared<Wui::WuiSeparator>();
-			m_Separator->SetId(Wui::HashId("gallery.separator"));
+			selected = DrawTree(ctx, layout, theme);
+			DrawInfoBar(ctx, layout, theme, selected);
+			DrawCanvas(ctx, layout, theme, selected, density, uiScale);
+			DrawProperties(ctx, layout, theme, selected, density, uiScale);
+		}
+		else
+		{
+			// 窄窗:三段纵向排布,整个 body 一起滚动(窗口够小时仍能看到全部区域)。
+			const float contentHeight = layout.Props.Y + layout.Props.H + 8.0f - layout.Body.Y;
+			Wui::BeginScrollArea(ctx, layout.Body, contentHeight, m_BodyScroll, theme);
+			selected = DrawTree(ctx, layout, theme);
+			DrawCanvas(ctx, layout, theme, selected, density, uiScale);
+			DrawProperties(ctx, layout, theme, selected, density, uiScale);
+			Wui::EndScrollArea(ctx);
+			DrawInfoBar(ctx, layout, theme, selected);
 		}
 
-		// 主题/纹理每帧同步(设备重建后 icon 纹理 id 会变化)。
-		m_IconPlay->TextureId = host.GetIconId(0);
-		m_IconStop->TextureId = host.GetIconId(1);
-		m_IconPlay->Theme = &theme;
-		m_IconStop->Theme = &theme;
-		m_Field->Theme = &theme;
-		m_DragFloatWidget->Theme = &theme;
-		m_DragIntWidget->Theme = &theme;
-		m_Combo->Theme = &theme;
-		m_Tabs->Theme = &theme;
-		m_ToggleX->Theme = &theme;
-		m_ToggleY->Theme = &theme;
-		m_SliderX->Theme = &theme;
-		m_SliderY->Theme = &theme;
-		m_Menu->Theme = &theme;
-		m_Tooltip->Theme = &theme;
-		m_Separator->Theme = &theme;
-		for (auto& item : m_ListItems)
-			item->Theme = &theme;
-		for (auto& node : m_TreeItems)
-			node->Theme = &theme;
-
-		// ---- 布局常量 ----
-		const float rowH = 24.0f;
-		const float gap = 6.0f;
-		const float sectionGap = 14.0f;
-		const float x0 = rect.X + 12.0f;
-		const float width = std::max(160.0f, rect.W - 24.0f);
-
-		// 内容高度按各段行数估算,用于滚动范围。
-		const float contentHeight =
-			8.0f + 26.0f + sectionGap +
-			(28.0f + rowH + gap + rowH + gap) +          // 按钮/图标/菜单 + 提示/模态
-			(28.0f + rowH + gap + rowH) +                // 文本与数值
-			(28.0f + rowH + gap) +                       // 复选与开关
-			(28.0f + rowH) +                             // 滑条
-			(28.0f + rowH) +                             // 下拉
-			(28.0f + 26.0f + rowH) +                     // 标签页
-			(28.0f + 22.0f * 3.0f + gap + 22.0f * 2.0f + gap) + // 列表与树
-			(28.0f + 120.0f + gap + 10.0f) +             // 滚动区
-			(28.0f + 66.0f) +                            // Chrome:工具栏/面包屑/搜索
-			(28.0f + 116.0f + 34.0f) +                   // Chrome:列表/网格/树/标签条/右键菜单
-			(28.0f + 26.0f + gap + rowH + gap + rowH + gap + rowH + 18.0f + gap) + // Controls 2
-			(28.0f + 24.0f + 22.0f * 4.0f + gap + 22.0f + gap + 84.0f + gap) + // Table / Color / Splitter
-			(28.0f + rowH * 3.0f + gap + 120.0f + gap) + // Vector / Empty
-			(28.0f + (rowH + gap) * 4.0f) +               // U24 Numeric / Reset
-			40.0f;
-
-		Wui::BeginScrollArea(ctx, rect, contentHeight, m_ScrollY, theme);
-		Wui::WuiPaintContext paint(ctx);
-
-		float y = rect.Y + 8.0f - m_ScrollY;
-		const auto place = [&paint](const std::shared_ptr<Wui::WuiWidget>& widget, const Wui::WuiRect& widgetRect)
-		{
-			widget->Arrange(widgetRect);
-			widget->Paint(paint);
-		};
-		// title 收 std::string(而不是 const char*):U2C 起段落标题走 Wui::Tr 的返回值。
-		const auto section = [&](const std::string& title)
-		{
-			Wui::SectionHeader(ctx, { x0, y, width, 24.0f }, title, theme.Accent, theme, 15.0f);
-			y += 28.0f;
-		};
-
-		// 标题 + 最近一次交互
-		Wui::Label(ctx, { x0, y }, "WUI Component Gallery", theme.Text, 16.0f);
-		Wui::Label(ctx, { x0 + 220.0f, y + 3 }, "last action: " + m_LastAction, theme.TextMuted, 13.0f);
-		y += 26.0f + sectionGap;
-
-		// ---- 按钮 / 图标按钮 / 弹出菜单 ----
-		section("Buttons / Icon buttons / Menu");
-		place(m_Button, { x0, y, 120, rowH });
-		place(m_ButtonDisabled, { x0 + 128, y, 120, rowH });
-		place(m_IconPlay, { x0 + 256, y, 28, rowH });
-		place(m_IconStop, { x0 + 290, y, 28, rowH });
-		place(m_Menu, { x0 + 326, y, 130, rowH });
-		y += rowH + gap;
-
-		// ---- 悬浮提示 + 模态触发 ----
-		const Wui::WuiRect hoverAnchor { x0, y, 150, rowH };
-		Wui::PanelBackground(ctx, hoverAnchor, ctx.IsHovered(hoverAnchor) ? theme.ButtonHover : theme.ButtonBg, 3.0f);
-		Wui::Label(ctx, { hoverAnchor.X + 8, hoverAnchor.Y + 4 }, "Hover for tooltip", theme.Text, 15.0f);
-		m_Tooltip->Anchor = hoverAnchor;
-
-		const Wui::WuiRect modalButton { x0 + 160, y, 130, rowH };
-		if (Wui::Button(ctx, Wui::HashId("gallery.modal.open"), modalButton, "Open Modal", theme))
-		{
-			ctx.SetModal(Wui::HashId("gallery.modal"));
-			ctx.RecordOp("gallery", "open", "Modal", "gallery");
-		}
-		y += rowH + gap;
-
-		// ---- 文本与数值 ----
-		section("Text / Numbers");
-		place(m_Field, { x0, y, 240, rowH });
-		Wui::Label(ctx, { x0 + 250, y + 5 }, "DragFloat", theme.TextMuted, 13.0f);
-		place(m_DragFloatWidget, { x0 + 320, y, 90, rowH });
-		Wui::Label(ctx, { x0 + 418, y + 5 }, "DragInt", theme.TextMuted, 13.0f);
-		place(m_DragIntWidget, { x0 + 478, y, 80, rowH });
-		y += rowH + gap;
-
-		// ---- 复选与开关 ----
-		section("Checkbox / Toggle");
-		place(m_Checkbox, { x0, y, 140, rowH });
-		place(m_ToggleX, { x0 + 150, y, 160, rowH });
-		place(m_ToggleY, { x0 + 320, y, 160, rowH });
-		y += rowH + gap;
-
-		// ---- 滑条 ----
-		section("Slider");
-		Wui::Label(ctx, { x0, y + 5 }, "A", theme.TextMuted, 13.0f);
-		place(m_SliderX, { x0 + 20, y, 200, rowH });
-		Wui::Label(ctx, { x0 + 232, y + 5 }, std::to_string(m_SliderA).substr(0, 4), theme.Text, 13.0f);
-		Wui::Label(ctx, { x0 + 292, y + 5 }, "B", theme.TextMuted, 13.0f);
-		place(m_SliderY, { x0 + 312, y, 200, rowH });
-		Wui::Label(ctx, { x0 + 524, y + 5 }, std::to_string(m_SliderB).substr(0, 4), theme.Text, 13.0f);
-		y += rowH + gap;
-
-		// ---- 下拉 ----
-		section("Combo");
-		place(m_Combo, { x0, y, 180, rowH });
-		Wui::Label(ctx, { x0 + 190, y + 5 }, "selected index: " + std::to_string(m_ComboIndex), theme.TextMuted, 13.0f);
-		y += rowH + gap;
-
-		// ---- 标签页 ----
-		section("Tabs");
-		place(m_Tabs, { x0, y, 320, 26.0f });
-		y += 26.0f + gap;
-		Wui::Label(ctx, { x0, y }, "content of tab " + std::to_string(m_TabIndex), theme.TextMuted, 14.0f);
-		y += rowH;
-
-		// ---- 列表与树 ----
-		section("List items / Tree items");
-		for (size_t i = 0; i < m_ListItems.size(); ++i)
-		{
-			m_ListItems[i]->Selected = static_cast<int>(i) == m_ListIndex;
-			m_ListItems[i]->IconTexture = host.GetIconId(static_cast<int>(i));
-			place(m_ListItems[i], { x0, y, width * 0.5f, 22.0f });
-			y += 22.0f;
-		}
-		y += gap;
-		for (size_t i = 0; i < m_TreeItems.size(); ++i)
-		{
-			if (i == 1 && !m_TreeExpanded)
-				continue; // 子节点仅随父节点展开
-			m_TreeItems[i]->Selected = static_cast<int>(i) == m_TreeIndex;
-			place(m_TreeItems[i], { x0, y, width * 0.5f, 22.0f });
-			y += 22.0f;
-		}
-		y += gap;
-
-		// ---- 分隔线 ----
-		place(m_Separator, { x0, y, width, 1.0f });
-		y += 10.0f;
-
-		// ---- 滚动区演示 ----
-		section("Scroll area");
-		const Wui::WuiRect inner { x0, y, width * 0.6f, 120.0f };
-		float innerScroll = 0.0f;
-		Wui::BeginScrollArea(ctx, inner, 12 * 22.0f + 8.0f, innerScroll, theme);
-		for (int i = 0; i < 12; ++i)
-		{
-			const Wui::WuiRect row { inner.X + 4, inner.Y + 4 + i * 22.0f - innerScroll, inner.W - 8, 22.0f };
-			Wui::HoverRow(ctx, row, ctx.IsHovered(row), false, theme, 2.0f);
-			Wui::Label(ctx, { row.X + 8, row.Y + 3 }, "scroll row " + std::to_string(i + 1), theme.Text, 14.0f);
-		}
-		Wui::EndScrollArea(ctx);
-
-		// ---- 界面骨架组件(WuiChrome):工具栏 / 面包屑 / 搜索 / 列表 / 网格 / 树 / 标签栏 / 分隔条 ----
-		section("Chrome: Toolbar / Breadcrumb / Search");
-		{
-			const Wui::WuiRect toolbarRect { x0, y, width * 0.5f, 32.0f };
-			const Wui::WuiRect toolbarContent = Wui::Toolbar(ctx, toolbarRect, theme);
-			for (int i = 0; i < 3; ++i)
-			{
-				const Wui::WuiRect button { toolbarContent.X + i * 32.0f, toolbarContent.Y, 26.0f, 24.0f };
-				if (Wui::ToolbarIconButton(ctx, Wui::HashId("gallery.chrome.tool") + static_cast<Wui::WuiId>(i), button,
-					host.GetIconId(i), { 0, 1, 1, -1 }, i == 0 ? "A" : (i == 1 ? "B" : "C"), theme))
-					m_LastAction = "Chrome toolbar button " + std::to_string(i);
-			}
-			if (Wui::Breadcrumb(ctx, { x0 + width * 0.52f, y, width * 0.44f, 24.0f }, "Game/Assets/Scenes", theme) >= 0)
-				m_LastAction = "Breadcrumb clicked";
-			if (Wui::SearchField(ctx, Wui::HashId("gallery.chrome.search"), { x0, y + 34.0f, 220.0f, 24.0f },
-				m_ChromeSearch, "Search assets...", theme))
-				m_LastAction = "Search submitted: " + m_ChromeSearch;
-			const Wui::SplitterResult split = Wui::Splitter(ctx,
-				{ x0 + 240.0f, y + 34.0f, 4.0f, 24.0f }, true, theme, false);
-			if (split.Hovered)
-				m_LastAction = "Splitter hovered";
-			y += 66.0f;
-		}
-
-		section("Chrome: ListView / GridView / TreeView / TabBar / ContextMenu");
-		{
-			std::vector<Wui::ListViewItem> listItems;
-			for (int i = 0; i < 4; ++i)
-			{
-				Wui::ListViewItem item;
-				item.Id = Wui::HashId("gallery.chrome.list") + static_cast<Wui::WuiId>(i);
-				item.Label = "List row " + std::to_string(i + 1);
-				item.SubLabel = i % 2 ? "File" : "Folder";
-				item.Icon = host.GetIconId(i);
-				item.Uv = { 0, 1, 1, -1 };
-				item.Selected = m_ChromeListIndex == i;
-				listItems.push_back(item);
-			}
-			float listScroll = 0.0f;
-			const Wui::ListViewResult lv = Wui::ListView(ctx, { x0, y, width * 0.3f, 110.0f }, listItems, 24.0f,
-				listScroll, theme);
-			if (lv.Clicked >= 0)
-			{
-				m_ChromeListIndex = lv.Clicked;
-				m_LastAction = "ListView clicked " + std::to_string(lv.Clicked);
-			}
-
-			std::vector<Wui::GridViewItem> gridItems;
-			for (int i = 0; i < 3; ++i)
-			{
-				Wui::GridViewItem item;
-				item.Id = Wui::HashId("gallery.chrome.grid") + static_cast<Wui::WuiId>(i);
-				item.Label = "Cell " + std::to_string(i + 1);
-				item.Icon = host.GetIconId(i);
-				item.Uv = { 0, 1, 1, -1 };
-				item.Selected = m_ChromeGridIndex == i;
-				gridItems.push_back(item);
-			}
-			float gridScroll = 0.0f;
-			const Wui::GridViewResult gv = Wui::GridView(ctx, { x0 + width * 0.32f, y, width * 0.3f, 110.0f },
-				gridItems, 74.0f, 96.0f, gridScroll, theme);
-			if (gv.Clicked >= 0)
-			{
-				m_ChromeGridIndex = gv.Clicked;
-				m_LastAction = "GridView clicked " + std::to_string(gv.Clicked);
-			}
-
-			std::vector<Wui::TreeViewItem> treeItems;
-			for (int i = 0; i < 3; ++i)
-			{
-				Wui::TreeViewItem item;
-				item.Id = Wui::HashId("gallery.chrome.tree") + static_cast<Wui::WuiId>(i);
-				item.Label = i == 0 ? "Root" : ("Child " + std::to_string(i));
-				item.Depth = i == 0 ? 0 : 1;
-				item.HasChildren = i == 0;
-				item.Expanded = m_ChromeTreeExpanded;
-				item.Selected = m_ChromeTreeIndex == i;
-				treeItems.push_back(item);
-			}
-			float treeScroll = 0.0f;
-			const Wui::TreeViewResult tv = Wui::TreeView(ctx, { x0 + width * 0.64f, y, width * 0.34f, 110.0f },
-				treeItems, 22.0f, treeScroll, theme);
-			if (tv.ClickedArrow == 0)
-			{
-				m_ChromeTreeExpanded = !m_ChromeTreeExpanded;
-				m_LastAction = "TreeView toggled";
-			}
-			else if (tv.Clicked >= 0)
-			{
-				m_ChromeTreeIndex = tv.Clicked;
-				m_LastAction = "TreeView clicked " + std::to_string(tv.Clicked);
-			}
-			y += 116.0f;
-
-			std::vector<Wui::DockTab> dockTabs = { { 1, "Tab A", m_ChromeTabIndex == 0 },
-				{ 2, "Tab B", m_ChromeTabIndex == 1 }, { 3, "Tab C", m_ChromeTabIndex == 2 } };
-			const Wui::DockTabBarResult tabBar = Wui::DockTabBar(ctx, { x0, y, width * 0.5f, 24.0f }, dockTabs, theme);
-			if (tabBar.Clicked >= 0)
-			{
-				m_ChromeTabIndex = tabBar.Clicked;
-				m_LastAction = "DockTabBar tab " + std::to_string(tabBar.Clicked);
-			}
-			if (Wui::Button(ctx, Wui::HashId("gallery.chrome.context.open"), { x0 + width * 0.52f, y, 130.0f, 24.0f },
-				"Open context menu", theme))
-			{
-				m_ChromeMenuPos = ctx.Input().MousePos;
-				ctx.OpenPopup(Wui::HashId("gallery.chrome.menu"));
-			}
-			y += 34.0f;
-		}
-
-		// ContextMenu 演示:菜单项点击写入操作日志。
-		{
-			Wui::WuiRect menuPanel;
-			const Wui::WuiId menuId = Wui::HashId("gallery.chrome.menu");
-			if (Wui::BeginContextMenu(ctx, menuId, m_ChromeMenuPos, 170.0f, 3, &menuPanel, theme))
-			{
-				if (Wui::ContextMenuItem(ctx, Wui::HashId("gallery.chrome.menu.a"),
-					{ menuPanel.X + 4, menuPanel.Y + 4, menuPanel.W - 8, 22 }, "Action A", theme))
-				{
-					m_LastAction = "ContextMenu: Action A";
-					ctx.CloseAllPopups();
-				}
-				if (Wui::ContextMenuToggleItem(ctx, Wui::HashId("gallery.chrome.menu.toggle"),
-					{ menuPanel.X + 4, menuPanel.Y + 26, menuPanel.W - 8, 22 }, "Toggle item", m_ChromeMenuChecked, theme))
-				{
-					m_ChromeMenuChecked = !m_ChromeMenuChecked;
-					m_LastAction = "ContextMenu: toggle";
-				}
-				Wui::ContextMenuSeparator(ctx, { menuPanel.X + 4, menuPanel.Y + 48, menuPanel.W - 8, 4 }, theme);
-				if (Wui::ContextMenuItem(ctx, Wui::HashId("gallery.chrome.menu.b"),
-					{ menuPanel.X + 4, menuPanel.Y + 54, menuPanel.W - 8, 22 }, "Action B", theme))
-				{
-					m_LastAction = "ContextMenu: Action B";
-					ctx.CloseAllPopups();
-				}
-				Wui::EndContextMenu(ctx, menuId, menuPanel, theme);
-			}
-		}
-
-		// ---- U2A 新控件:标签条 / 分段按钮 / 混合勾选 / 行内错误 ----
-		section("Controls 2");
-		{
-			int& tabIndex = ctx.Persist<int>(Wui::HashId("gallery.controls2.tab.state"), 0);
-			int closeRequest = -1;
-			if (Wui::TabBar(ctx, Wui::HashId("gallery.controls2.tabbar"), { x0, y, width * 0.5f, 26.0f },
-				{ "General", "Controls 2", "Stats" }, tabIndex, theme, &closeRequest))
-				m_LastAction = "TabBar: tab " + std::to_string(tabIndex);
-			if (closeRequest >= 0)
-				m_LastAction = "TabBar close requested: " + std::to_string(closeRequest);
-			y += 26.0f + gap;
-
-			int& segmented = ctx.Persist<int>(Wui::HashId("gallery.controls2.segment.state"), 0);
-			if (Wui::Segmented(ctx, Wui::HashId("gallery.controls2.segmented"), { x0, y, width * 0.5f, rowH },
-				{ "Left", "Center", "Right" }, segmented, theme))
-				m_LastAction = "Segmented: " + std::to_string(segmented);
-			y += rowH + gap;
-
-			// 混合 = 管辖的多个对象取值不同;点击后由调用方把 value 统一写给自己管辖的对象。
-			bool& mixedValue = ctx.Persist<bool>(Wui::HashId("gallery.controls2.mixed.value"), false);
-			bool& mixedFlag = ctx.Persist<bool>(Wui::HashId("gallery.controls2.mixed.flag"), true);
-			if (Wui::CheckboxMixed(ctx, Wui::HashId("gallery.controls2.mixed"), { x0, y, 240.0f, rowH },
-				"Mixed rows", mixedValue, mixedFlag, theme))
-			{
-				mixedFlag = false;
-				m_LastAction = "CheckboxMixed: all rows selected";
-			}
-			y += rowH + gap;
-
-			std::string& errorText = ctx.Persist<std::string>(Wui::HashId("gallery.controls2.field"), std::string());
-			const std::string error = errorText.empty() ? "Name is required" : std::string();
-			Wui::TextFieldEx(ctx, Wui::HashId("gallery.controls2.fieldex"), { x0, y, 260.0f, rowH }, errorText, theme, error);
-			Wui::Label(ctx, { x0 + 272.0f, y + 5.0f }, "inline error (clear the text to fix)",
-				theme.TextMuted, 13.0f);
-			y += rowH + 18.0f + gap;
-		}
-
-		// ---- U2B 新控件:表头排序 / 颜色字段 / 分隔条 ----
-		section("Table / Color / Splitter");
-		{
-			// 表头 + 排序:三列小表格(4 行假数据),按当前排序状态重排显示顺序(不做真实比较,
-			// 只演示点击表头 → 排序状态变化 → 表格可见变化)。
-			int& sortColumn = ctx.Persist<int>(Wui::HashId("gallery.ux2b.table.sortColumn"), 0);
-			bool& ascending = ctx.Persist<bool>(Wui::HashId("gallery.ux2b.table.ascending"), true);
-			const std::vector<std::string> columns { "Name", "Type", "Size" };
-			const std::vector<float> widths { 150.0f, 110.0f, 70.0f };
-			const float tableW = 330.0f;
-			const float tableRowH = 22.0f;
-			const Wui::WuiRect header { x0, y, tableW, 24.0f };
-			if (Wui::TableHeader(ctx, Wui::HashId("gallery.ux2b.table"), header, columns, widths,
-				sortColumn, ascending, theme))
-			{
-				m_LastAction = "TableHeader: sort column " + std::to_string(sortColumn)
-					+ (ascending ? " asc" : " desc");
-			}
-			const Wui::WuiRect body { x0, y + header.H, tableW, tableRowH * 4.0f };
-			static const char* rows[4][3] = {
-				{ "Player", "Mesh", "12 KB" },
-				{ "Ground", "Mesh", "48 KB" },
-				{ "Sky", "Texture", "256 KB" },
-				{ "Camera", "Entity", "-" },
-			};
-			for (int row = 0; row < 4; ++row)
-			{
-				int source = (ascending ? row : 3 - row) + sortColumn;
-				source %= 4;
-				for (size_t col = 0; col < columns.size(); ++col)
-				{
-					const Wui::WuiRect cell = Wui::TableCell(body, widths, static_cast<size_t>(row), col, tableRowH);
-					Wui::Label(ctx, { cell.X + 8.0f, cell.Y + 4.0f }, rows[source][col],
-						col == 0 ? theme.Text : theme.TextMuted, 13.0f);
-				}
-			}
-			y += header.H + body.H + gap;
-
-			// 颜色字段:折叠态一块色块 + 色值;点击展开 R/G/B/A 滑杆 + hex 输入。
-			glm::vec4& demoColor = ctx.Persist<glm::vec4>(Wui::HashId("gallery.ux2b.color"),
-				glm::vec4 { 0.298f, 0.553f, 1.0f, 1.0f });
-			if (Wui::ColorField(ctx, Wui::HashId("gallery.ux2b.colorfield"),
-				{ x0, y, 200.0f, 22.0f }, demoColor, theme))
-				m_LastAction = "ColorField: value changed";
-			y += 22.0f + gap;
-
-			// 分隔条:一条横向演示带,左右两块按 value 分宽(竖向条 = 左右拖动,光标 ResizeEW)。
-			float& split = ctx.Persist<float>(Wui::HashId("gallery.ux2b.split"), 150.0f);
-			const float stripW = std::min(width, 330.0f);
-			const float minSplit = 60.0f;
-			const float maxSplit = std::max(minSplit + 20.0f, stripW - 90.0f);
-			split = std::clamp(split, minSplit, maxSplit);
-			const Wui::WuiRect strip { x0, y, stripW, 84.0f };
-			const Wui::WuiRect leftBlock { strip.X, strip.Y, split, strip.H };
-			const Wui::WuiRect rightBlock { strip.X + split + 6.0f, strip.Y,
-				std::max(0.0f, strip.W - split - 6.0f), strip.H };
-			Wui::PanelBackground(ctx, leftBlock, theme.ContentBg, theme.Radius);
-			Wui::PanelBackground(ctx, rightBlock, theme.ContentBg, theme.Radius);
-			Wui::Label(ctx, { leftBlock.X + 8.0f, leftBlock.Y + 8.0f },
-				"Left " + std::to_string(static_cast<int>(split)), theme.TextMuted, 12.0f);
-			Wui::Label(ctx, { rightBlock.X + 8.0f, rightBlock.Y + 8.0f }, "Right", theme.TextMuted, 12.0f);
-			// 分隔条带 6px 宽、摆在边界上;控件内部自己把命中带撑到 6px(视觉线居中)。
-			const Wui::WuiRect splitterBand { strip.X + split, strip.Y, 6.0f, strip.H };
-			if (Wui::Splitter(ctx, Wui::HashId("gallery.ux2b.splitter"), splitterBand, true,
-				split, minSplit, maxSplit, theme))
-				m_LastAction = "Splitter: " + std::to_string(static_cast<int>(split));
-			y += strip.H + gap;
-		}
-
-		// ---- U2C 新控件:向量字段 / 空状态(本段新增文案走 Tr,内联英文默认;
-		// 中文键由主 agent 统一并入 Editor/assets/localization/zh-CN.json) ----
-		section(Wui::Tr("panel.gallery.section.vector_empty", "Vector / Empty"));
-		{
-			// 向量字段:横排(宽)与竖排(窄面板,宽 140)。
-			glm::vec3& vectorWide = ctx.Persist<glm::vec3>(Wui::HashId("gallery.ux2c.vec.wide"),
-				glm::vec3 { 1.0f, 2.5f, 0.0f });
-			if (Wui::Vec3Field(ctx, Wui::HashId("gallery.ux2c.vecfield.wide"), { x0, y, 300.0f, rowH },
-				vectorWide, 0.05f, -100.0f, 100.0f, theme))
-				m_LastAction = "Vec3Field (horizontal) changed";
-			Wui::Label(ctx, { x0 + 312.0f, y + 5.0f },
-				Wui::Tr("panel.gallery.vec3.horizontal", "horizontal 300px"), theme.TextMuted, 13.0f);
-
-			glm::vec3& vectorNarrow = ctx.Persist<glm::vec3>(Wui::HashId("gallery.ux2c.vec.narrow"),
-				glm::vec3 { 0.25f, 1.0f, -3.5f });
-			if (Wui::Vec3Field(ctx, Wui::HashId("gallery.ux2c.vecfield.narrow"), { x0 + 430.0f, y, 140.0f, rowH * 3.0f },
-				vectorNarrow, 0.05f, -100.0f, 100.0f, theme, 1))
-				m_LastAction = "Vec3Field (vertical) changed";
-			Wui::Label(ctx, { x0 + 580.0f, y + 5.0f },
-				Wui::Tr("panel.gallery.vec3.vertical", "vertical 140px"), theme.TextMuted, 13.0f);
-			y += rowH * 3.0f + gap;
-
-			// 空状态:240×120,带 action 按钮(点击写 m_LastAction)。
-			const Wui::WuiRect emptyRect { x0, y, 240.0f, 120.0f };
-			if (Wui::EmptyState(ctx, emptyRect, "◇",
-				Wui::Tr("panel.gallery.empty.title", "No items yet"),
-				Wui::Tr("panel.gallery.empty.hint", "Create an item and it will show up in this list."),
-				Wui::Tr("panel.gallery.empty.action", "New Item"),
-				Wui::HashId("gallery.ux2c.empty.action"), theme))
-				m_LastAction = "EmptyState action";
-			Wui::Label(ctx, { x0 + 260.0f, y + 8.0f },
-				Wui::Tr("panel.gallery.empty.caption", "EmptyState 240x120"), theme.TextMuted, 13.0f);
-			y += emptyRect.H + gap;
-		}
-
-		// ---- U24 数值控件 / 固定占位恢复默认(控件层验收;分类规则见 WuiWidgets.h) ----
-		// 这一段是 we_engine 的控件级验收演示(DragBarFloat / StepperInt / NumberFieldInt /
-		// ResetDefaultButton 各一个),不替代材质面板本身的落地(那是 we_editor 的边界)。
-		section(Wui::Tr("panel.gallery.section.numeric_reset", "Numeric / Reset"));
-		{
-			// DragBarFloat = 感知型归一化区间:条体拖动 + 右侧固定宽度值区(可点输入)。
-			float& barValue = ctx.Persist<float>(Wui::HashId("gallery.u24.bar.value"), 0.6f);
-			const Wui::WuiNumberStyle barStyle;
-			if (Wui::DragBarFloat(ctx, Wui::HashId("gallery.u24.bar"), { x0, y, 300.0f, rowH },
-				barValue, 0.0f, 1.0f, theme, barStyle))
-				m_LastAction = "DragBarFloat: " + std::to_string(barValue);
-			Wui::Label(ctx, { x0 + 312.0f, y + 5.0f },
-				Wui::Tr("panel.gallery.numeric.bar", "normalized 0..1 (value + input)"),
-				theme.TextMuted, 13.0f);
-			y += rowH + gap;
-
-			// StepperInt = 小整数(1..16):[−] 值 [+];值区同样可键入。
-			int& stepValue = ctx.Persist<int>(Wui::HashId("gallery.u24.step.value"), 4);
-			const Wui::WuiNumberStyle stepStyle;
-			if (Wui::StepperInt(ctx, Wui::HashId("gallery.u24.step"), { x0, y, 160.0f, rowH },
-				stepValue, 1, 16, theme, stepStyle))
-				m_LastAction = "StepperInt: " + std::to_string(stepValue);
-			Wui::Label(ctx, { x0 + 172.0f, y + 5.0f },
-				Wui::Tr("panel.gallery.numeric.stepper", "small integer 1..16"),
-				theme.TextMuted, 13.0f);
-			y += rowH + gap;
-
-			// NumberFieldInt = 计数/索引/大范围整数:数字输入框 + 单位后缀。
-			int64_t& numberValue = ctx.Persist<int64_t>(Wui::HashId("gallery.u24.number.value"), 0);
-			Wui::WuiNumberStyle numberStyle;
-			numberStyle.Unit = "ch";
-			if (Wui::NumberFieldInt(ctx, Wui::HashId("gallery.u24.number"), { x0, y, 160.0f, rowH },
-				numberValue, 0, 7, theme, numberStyle))
-				m_LastAction = "NumberFieldInt: " + std::to_string(numberValue);
-			Wui::Label(ctx, { x0 + 172.0f, y + 5.0f },
-				Wui::Tr("panel.gallery.numeric.number", "index / unit suffix"),
-				theme.TextMuted, 13.0f);
-			y += rowH + gap;
-
-			// 固定占位恢复默认:行内恒定预留 24px 图标位,偏离默认才高亮可点。
-			float& resetValue = ctx.Persist<float>(Wui::HashId("gallery.u24.reset.value"), 0.35f);
-			constexpr float kResetDefault = 0.35f;
-			const bool resetModified = std::fabs(resetValue - kResetDefault) > 1e-4f;
-			const Wui::WuiNumberStyle resetStyle;
-			Wui::DragBarFloat(ctx, Wui::HashId("gallery.u24.resetbar"), { x0, y, 300.0f, rowH },
-				resetValue, 0.0f, 1.0f, theme, resetStyle);
-			if (Wui::ResetDefaultButton(ctx, Wui::HashId("gallery.u24.reset"),
-				{ x0 + 308.0f, y, 24.0f, rowH }, resetModified, theme, "Reset"))
-				resetValue = kResetDefault;
-			Wui::Label(ctx, { x0 + 344.0f, y + 5.0f },
-				Wui::Tr("panel.gallery.numeric.reset", "fixed-slot restore default"),
-				theme.TextMuted, 13.0f);
-			y += rowH + gap;
-		}
-
-		Wui::EndScrollArea(ctx);
-
-		// ---- 模态 ----
-		Wui::WuiRect modalPanel;
-		const Wui::WuiId modalId = Wui::HashId("gallery.modal");
-		if (Wui::BeginModal(ctx, modalId, "Gallery Modal", { 340, 150 }, &modalPanel, theme))
-		{
-			Wui::Label(ctx, { modalPanel.X + 16, modalPanel.Y + 44 }, "Modal 组件:遮罩 + 面板 + 按钮。", theme.Text, 14.0f);
-			if (Wui::Button(ctx, Wui::HashId("gallery.modal.ok"), { modalPanel.X + 16, modalPanel.Y + 100, 110, 26 }, "OK", theme))
-			{
-				m_LastAction = "Modal OK";
-				ctx.RecordOp("gallery", "close", "Modal", "ok");
-				ctx.ClearModal();
-			}
-			if (Wui::Button(ctx, Wui::HashId("gallery.modal.cancel"), { modalPanel.X + 138, modalPanel.Y + 100, 110, 26 }, "Cancel", theme))
-			{
-				m_LastAction = "Modal cancelled";
-				ctx.RecordOp("gallery", "close", "Modal", "cancel");
-				ctx.ClearModal();
-			}
-			Wui::EndModal(ctx, modalId);
-		}
+		DrawActions(ctx, layout, theme, selected, uiScale);
 	}
 }
