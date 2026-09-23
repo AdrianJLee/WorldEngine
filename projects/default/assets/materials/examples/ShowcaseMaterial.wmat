@@ -1,0 +1,16 @@
+# MaterialShader 实例(.wmat)= 材质实例:只写"覆盖值",其余继承 .slang 里的注解默认值。
+# 语义(M3):本文件覆盖 > 父级覆盖 > shader 默认;改参数不重编译,改 .slang 代码才重编。
+FormatVersion: 2
+Shader: shaders/examples/ShowcaseMaterial.slang
+Params:
+  tint: 0.85, 0.72, 0.55, 1
+  roughness: 0.35
+  metallic: 0.1
+  shadingMode: 0
+  useNormalMap: false
+  uvScale: 1, 1
+  emissivePower: 1.5
+  emissiveTint: 0.2, 0.6, 1.0, 1
+  opacity: 1
+  ambientOcclusion: 1
+  albedoMap: textures/Icon.png

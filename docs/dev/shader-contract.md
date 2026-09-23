@@ -12,6 +12,9 @@
 > **完整示例(可直接在编辑器里打开)**:[`projects/default/assets/shaders/examples/ShowcaseMaterial.slang`](../../projects/default/assets/shaders/examples/ShowcaseMaterial.slang)
 > —— 覆盖全部注解类型与修饰符、组合采样器、切线空间法线、参数驱动分支、以及 Slang 的
 > `interface` + 泛型约束写法;该文件已在双目标上实编译验证(Vulkan/GL 各 `spirv-val` = 0,GL 模块 SPIR-V 1.0)。
+>
+> **两条硬性写法**(踩过才写在这里):① **注解行必须独占一行** —— `//! param …` 行尾不能再跟 `// 注释`;
+> ② `[min,max]` **只适用于 Float/Int**(写在 Vec2/Vec3/Color 上会解析失败)。
 
 ## 1. 一个材质着色器长什么样
 

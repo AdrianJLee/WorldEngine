@@ -66,6 +66,7 @@ namespace World::Editor
 			const std::string& shaderPath)
 		{
 			std::string message;
+			std::string fallbackMessage;   // 第一个非空 error 文本(注解解析失败没有 E 码,走这条)
 			std::string location;
 			// 两条判据结论一致,合起来用(实测有只带位置、不带 InUserSource 标记的形态)。
 			const auto pointsAtUserSource = [](const World::SurfaceDiagnostic& diagnostic)
@@ -80,6 +81,8 @@ namespace World::Editor
 					continue;
 				if (message.empty() && diagnostic.Message.find("error[") != std::string::npos)
 					message = diagnostic.Message;   // 带 E 码的整行,便于搜索
+				if (fallbackMessage.empty() && !diagnostic.Message.empty())
+					fallbackMessage = diagnostic.Message;   // 如 `material param annotation: <行>:<列>: <原因>`
 				if (location.empty() && pointsAtUserSource(diagnostic))
 				{
 					const uint32_t line = diagnostic.InUserSource && diagnostic.UserLine != 0
@@ -105,6 +108,10 @@ namespace World::Editor
 					break;
 				}
 			}
+			// 注解解析失败时没有 E 码、也没有工具输出(工具根本没被调用)——先把解析器给的真实原因
+			// 抬上来,否则用户只会看到下面那句无用的 "Slang reported no diagnostics"。
+			if (message.empty() && !fallbackMessage.empty())
+				message = fallbackMessage;
 			if (message.empty())
 			{
 				// 诊断里只有位置行时(引擎把 `error[E…]` 那行并进了位置诊断)→ 取工具输出的
@@ -118,6 +125,8 @@ namespace World::Editor
 					firstLine.pop_back();
 				message = firstLine.empty() ? std::string("Slang reported no diagnostics") : firstLine;
 			}
+			if (message.empty())
+				message = fallbackMessage;   // 注解解析失败:把解析器给的真实原因抬上来
 			return message + location;
 		}
 

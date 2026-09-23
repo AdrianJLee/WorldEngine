@@ -23,7 +23,7 @@
 //! param Texture2D albedoMap       = "textures/Icon.png" group("Maps") label("Albedo")
 //! param Texture2D normalMap       = "" group("Maps") label("Normal")
 //! param Bool      useNormalMap    = true group("Maps") label("Use Normal Map")
-//! param Vec2      uvScale         = 1, 1 [0, 16] group("Maps") label("UV Scale")
+//! param Vec2      uvScale         = 1, 1 group("Maps") label("UV Scale")
 //! param Float     emissivePower   = 0.0 [0, 8] unit("x") group("Emissive") label("Emissive Power")
 //! param Color     emissiveTint    = 0.2, 0.6, 1.0, 1 group("Emissive") label("Emissive Tint")
 //! param Float     opacity         = 1.0 [0, 1] group("Blend") label("Opacity")
