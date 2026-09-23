@@ -255,7 +255,21 @@ namespace
 
 		const fs::path committed = fs::path(WLD_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.luau";
 		CHECK(fs::is_regular_file(committed));
-		CHECK(ReadText(committed) == rendered);   // 漂移门禁:逐字节一致
+		// 漂移门禁:逐字节一致(比较前统一 CRLF→LF —— 仓库走 core.autocrlf 时工作树可能是 CRLF,
+		// 那是行尾差异不是内容漂移;2026-09-23 实测过该误报,见 docs/dev/file-norms.md §R3)。
+		const auto normalizeEol = [](std::string text)
+		{
+			std::string out;
+			out.reserve(text.size());
+			for (std::size_t index = 0; index < text.size(); ++index)
+			{
+				if (text[index] == '\r' && index + 1 < text.size() && text[index + 1] == '\n')
+					continue;
+				out.push_back(text[index]);
+			}
+			return out;
+		};
+		CHECK(normalizeEol(ReadText(committed)) == normalizeEol(rendered));
 		// W8 新增:WorldScript 注解包含运行时就存在的 OnUI(self) 回调。
 		CHECK(rendered.find("---@field OnUI? fun(self: WorldScript)") != std::string::npos);
 		CHECK(rendered.find("---@field OnCreate? fun(self: WorldScript)") != std::string::npos);
