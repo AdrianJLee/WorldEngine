@@ -20,7 +20,7 @@ namespace World::Settings
 	//
 	// 口径:一个 knob 一条描述符(Id 稳定、进无障碍节点;Read/Write 绑定真实存储),
 	// 面板只负责"按 Group 分组渲染 + 搜索 + 只看已修改";存盘仍由各自的存储负责
-	// (项目级 `Game/project.we.yaml`、用户级 `Editor/editor-prefs.json`)。
+	// (项目级 `projects/default/project.we.yaml`、用户级 `Editor/editor-prefs.json`)。
 	enum class SettingType : uint8_t
 	{
 		Bool = 0,
@@ -34,7 +34,7 @@ namespace World::Settings
 	// 作用域决定"是否存在项目仓库里"与显示在哪个面板(方案 §U4)。
 	enum class SettingScope : uint8_t
 	{
-		Project = 0,   // 随项目提交:Game/project.we.yaml
+		Project = 0,   // 随项目提交:projects/default/project.we.yaml
 		Editor = 1,    // 用户级:Editor/editor-prefs.json
 		Import = 2,    // 项目级:project.we.yaml 的 imports:
 		World = 3,     // 场景级:.wd 场景头

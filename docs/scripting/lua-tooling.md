@@ -8,7 +8,7 @@
 
 | 打开方式 | 生效的配置 | 补全来源 |
 | --- | --- | --- |
-| 用 VS Code 打开仓库根 | 根 `.luarc.json` | `Game/assets/scripts/intermediate/WorldEngineAPI.luau` |
+| 用 VS Code 打开仓库根 | 根 `.luarc.json` | `projects/default/assets/scripts/intermediate/WorldEngineAPI.luau` |
 | 用 VS Code 打开 `Game/` | `Game/.vscode/settings.json` + `Game/.luau-lsp/config.json` | 同上(路径按 `Game/` 相对) |
 
 `.luarc.json` 里的 `runtime.version` 是 LuaLS 自身的设置项(LuaLS 没有 Luau 运行时档位);
@@ -16,7 +16,7 @@
 
 ## 写一个脚本
 
-从 `Game/assets/scripts/templates/WorldScript.lua` 复制新脚本,修改类名和字段。用
+从 `projects/default/assets/scripts/templates/WorldScript.lua` 复制新脚本,修改类名和字段。用
 `---@class YourScript : WorldScript`、`---@field`、`---@param` 描述自己新增的类型。脚本必须返回一个 table。
 
 ```lua
@@ -36,7 +36,7 @@ return PlayerScript
 在 `self.entity:` 后使用补全;输入 `vec3.new(` 后看参数提示;悬停 `direction`、`dt`、`self.Speed` 查看类型。
 `WorldScript` 只描述脚本形状,不能调用 `WorldScript.new()`;构造数学对象用实际绑定的 `.new(...)`。
 
-`Game/assets/scripts/intermediate/WorldEngineAPI.luau` 由编辑器按**实际注册的绑定**生成,仅供语言服务器读取,
+`projects/default/assets/scripts/intermediate/WorldEngineAPI.luau` 由编辑器按**实际注册的绑定**生成,仅供语言服务器读取,
 **不要 require 或运行它**。仓库保留生成基线;编辑器注册完 API 会自动刷新(内容不变就不改写,失败保留原文件),
 也可以从菜单手动刷新。新增 C++ 侧脚本 API 后要重新构建并启动编辑器才会出现在声明里;Runtime 不生成提示文件。
 

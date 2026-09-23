@@ -57,8 +57,8 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `Engine/src/World/WUI/` | WUI 控件与布局框架(编辑器与 Runtime HUD 共用) |
 | `Engine/src/World/Script/` | Luau 运行时、绑定与热重载 |
 | `Engine/assets/shaders/` | HLSL 着色器源(`*.hlsl`,入口 `VSMain` / `PSMain`) |
-| `Game/assets/scenes/` | 示例场景(`.wd`) |
-| `Game/assets/scripts/` | 游戏脚本与补全声明 |
+| `Game/src/` | gameplay DLL(`Game.dll`)源码;项目内容在 `projects/` 下 |
+| `projects/default/` | 默认项目内容根:项目清单 + `assets/scenes/`、`assets/scripts/` |
 | `Editor/src/WUI/` | 编辑器面板与外壳 |
 | `tests/` | 各主题的测试可执行文件与 ctest 注册 |
 | `docs/` | 公开文档(见下) |
@@ -81,7 +81,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `.wprefab` | 预制体 |
 | `.wpak` | 内容包(打包产物) |
 | `.lua` / `.luau` | 脚本;引擎内嵌的脚本运行时是 Luau |
-| `WorldEngineAPI.luau` | 编辑器生成的补全声明(`Game/assets/scripts/intermediate/`),不要手改 |
+| `WorldEngineAPI.luau` | 编辑器生成的补全声明(`projects/default/assets/scripts/intermediate/`),不要手改 |
 
 ## 仓库
 

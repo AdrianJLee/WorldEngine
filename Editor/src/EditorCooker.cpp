@@ -71,7 +71,7 @@ namespace World::Editor
 				fs::create_directories(options.PublishDir);
 
 			// 1. 项目清单(单一事实源)。
-			const fs::path projectManifestPath = std::string(WLD_GAME_DIR) + "project.we.yaml";
+			const fs::path projectManifestPath = std::string(WLD_PROJECT_DIR) + "project.we.yaml";
 			World::Asset::ProjectManifest manifest;
 			std::string manifestError;
 			if (!World::Asset::ProjectManifest::Load(projectManifestPath, &manifest, &manifestError))

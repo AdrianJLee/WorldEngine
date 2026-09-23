@@ -49,10 +49,15 @@ add_dependencies(Editor Runtime)
 
 target_compile_definitions(World PUBLIC
     WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"
+    # 开发期绝对锚点(不带尾分隔符):供"与进程 CWD 无关"的路径拼接(如定位 Game.dll)。
+    WLD_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     WLD_EDITOR_DIR="${CMAKE_SOURCE_DIR}/Editor/"
     WLD_LOCAL_DIR="${CMAKE_SOURCE_DIR}/local/"
+    # WLD_GAME_DIR = Game **模块**目录(只放 gameplay DLL 源码);项目内容根见 WLD_PROJECT_DIR。
     WLD_GAME_DIR="${CMAKE_SOURCE_DIR}/Game/"
-    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/Game/assets"
+    # Layout-S7:项目内容(清单/关卡表/assets)在 projects/<名>/;默认项目 = projects/default/。
+    WLD_PROJECT_DIR="${CMAKE_SOURCE_DIR}/projects/default/"
+    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/projects/default/assets"
     WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
     WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/Engine/"
     WLD_DXC_DIR="${WLD_DXC_DIR}"

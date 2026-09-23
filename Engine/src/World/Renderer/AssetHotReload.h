@@ -13,7 +13,7 @@ namespace World
 	//
 	// 与 Script/HotReload 的口径一致:**内容哈希优先**(同内容重写只动 mtime 不算变化);
 	// 内容读不到时退化为 "size|mtime" 兜底(Exists=true, FromContent=false)。
-	// 读取走 VFS 优先、磁盘回退(内容根 = Game/assets,与材质路径书写约定一致)。
+	// 读取走 VFS 优先、磁盘回退(内容根 = WLD_ASSETPATH,与材质路径书写约定一致)。
 	// M3:`.wmat` 是材质实例,指纹 = 本文件内容 ⊕ **解析后父级链**的指纹
 	// (父级改 → 子材质指纹变化 → 缓存/热重载一起失效;父级链断裂同样改变指纹)。
 	struct WLD_API AssetFingerprint

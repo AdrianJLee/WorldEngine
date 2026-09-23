@@ -35,7 +35,7 @@ namespace World
 			return hash;
 		}
 
-		// 逻辑路径的磁盘位置:内容根 = WLD_ASSETPATH(Game/assets),与材质路径书写约定一致。
+		// 逻辑路径的磁盘位置:内容根 = WLD_ASSETPATH(projects/default/assets),与材质路径书写约定一致。
 		std::filesystem::path DiskPathFor(const std::string& logicalPath)
 		{
 			return std::filesystem::path(WLD_ASSETPATH) / logicalPath;

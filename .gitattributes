@@ -2,7 +2,7 @@
 #
 # 背景:本机 core.autocrlf 生效时,签出写 CRLF、提交转回 LF;而
 # tests/ScriptWorkflowTests.cpp 的"存根漂移门禁"对
-# Game/assets/scripts/intermediate/WorldEngineAPI.luau 做逐字节比较,
+# projects/default/assets/scripts/intermediate/WorldEngineAPI.luau 做逐字节比较,
 # 工作树是 CRLF 时会误报失败(内容逐行相同)。
 #
 # 策略:只对"逐字节门禁涉及的文本"强制 LF,避免全仓 renormalize 造成无关 diff。

@@ -52,12 +52,12 @@ namespace World
 			if (requested.is_absolute())
 				return stbi_load(path.c_str(), &width, &height, &channels, desiredChannels);
 
-			// 相对路径 = 内容根(Game/assets)里的资产逻辑路径,与材质路径书写约定一致。
+			// 相对路径 = 项目内容根(WLD_ASSETPATH)里的资产逻辑路径,与材质路径书写约定一致。
 			// P4-U12:删掉早先"Game/ 与 Editor/ 也算内容根"的旧布局回退 —— 内容根只有一个,
 			// 多候选会让"路径写错却恰好命中旧目录"变成静默成功。
 			std::error_code ec;
 			const std::filesystem::path diskPath =
-				std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
+				std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
 			return stbi_load(diskPath.string().c_str(), &width, &height, &channels, desiredChannels);
 		}
 	}

@@ -15,13 +15,13 @@ namespace World
 {
 	namespace
 	{
-		// 磁盘位置:**内容根**(Game/assets),与 MaterialIO::ReadFileText 同一约定。
+		// 磁盘位置:**内容根**,与 MaterialIO::ReadFileText 同一约定。
 		// P4-U12:删掉"再试 Game/ 旧布局"的第二候选 —— 内容根只有一个。
 		std::filesystem::path ResolveMaterialDiskPath(const std::string& path)
 		{
 			std::error_code ec;
 			const std::filesystem::path candidate =
-				std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
+				std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
 			if (std::filesystem::exists(candidate, ec))
 				return candidate;
 			return {};
@@ -655,8 +655,8 @@ namespace World
 	{
 		std::vector<std::string> paths;
 		std::error_code ec;
-		// 内容根 = Game/assets(与材质路径的书写约定一致);遍历失败时返回空列表。
-		const std::filesystem::path root = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+		// 内容根 = WLD_PROJECT_DIR/assets(与材质路径的书写约定一致);遍历失败时返回空列表。
+		const std::filesystem::path root = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
 		if (!std::filesystem::exists(root, ec))
 			return paths;
 		for (const std::filesystem::directory_entry& entry :

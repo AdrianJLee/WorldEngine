@@ -30,7 +30,7 @@ namespace World::Asset
 				// 发行形态:按 manifest 逐条挂载包,失败只记错误继续。
 				for (const std::string& package : manifest.Packages)
 				{
-					// 包路径相对清单所在目录解析(发行目录 = 清单目录;开发目录 = 仓库 Game/)。
+					// 包路径相对清单所在目录解析(发行目录 = 清单目录;开发目录 = projects/default/)。
 					std::filesystem::path pakPath = manifestPath.parent_path() / package;
 					std::error_code existsEc;
 					if (!std::filesystem::is_regular_file(pakPath, existsEc))
@@ -62,7 +62,7 @@ namespace World::Asset
 		else
 		{
 			// P4-U12:没有清单 = 什么都不挂。旧开发形态(直接跑 build 里的 Runtime.exe,
-			// 从 ../Game/assets 猜内容根 + 扫 cwd/content/*.wpak)已移除:内容根与包
+			// 从内容根猜 + 扫 cwd/content/*.wpak)已移除:内容根与包
 			// 只由项目清单说了算。报错要能直接指出该去哪儿启动。
 			WLD_CORE_ERROR("No 'project.we.yaml' under '{0}'; nothing mounted. Run the runtime "
 				"from a packaged directory (manifest next to the executable) or from the "

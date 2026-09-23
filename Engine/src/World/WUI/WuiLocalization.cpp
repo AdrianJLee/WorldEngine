@@ -18,7 +18,7 @@ namespace World::Wui
 			uint32_t Generation = 1;
 			bool TermHints = true;
 			std::filesystem::path Directory =
-				std::filesystem::path(WLD_GAME_DIR) / "assets" / "localization";
+				std::filesystem::path(WLD_PROJECT_DIR) / "assets" / "localization";
 			std::unordered_map<std::string, std::string> Catalog;
 			std::unordered_set<std::string> Missing;
 		};

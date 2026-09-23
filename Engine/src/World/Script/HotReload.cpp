@@ -57,9 +57,9 @@ namespace World
 			return true;
 		}
 
-		// W8 脚手架固定内容:与入库的 Game/.vscode/settings.json、Game/.luau-lsp/config.json
+		// W8 脚手架固定内容:与入库的 projects/default/.vscode/settings.json、projects/default/.luau-lsp/config.json
 		// 逐字节一致(World.LuauStubSchema 的漂移门禁只盯存根,这两份由 World.ScriptWorkflow 对照)。
-		// luau-lsp 的路径相对工作区根(Game/):存根在 assets/scripts/intermediate/ 下。
+		// luau-lsp 的路径相对工作区根(项目目录,清单与 .vscode/ 同级):存根在 assets/scripts/intermediate/ 下。
 		constexpr const char* kEditorVsCodeSettings =
 			"{\n"
 			"  \"luau-lsp.types.definitionFiles\": [\n"

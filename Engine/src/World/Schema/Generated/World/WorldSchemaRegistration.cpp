@@ -663,7 +663,7 @@ struct GeneratedAccess<World::MeshRendererComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Imported model asset (.wmodel, path relative to Game/assets); empty = use Primitive. glTF/GLB are import sources only: import them first and reference the produced .wmodel.", false, "Model", {  } },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Imported model asset (.wmodel, path relative to the project content root); empty = use Primitive. glTF/GLB are import sources only: import them first and reference the produced .wmodel.", false, "Model", {  } },
             Value(std::string()),
         };
         return schema;
@@ -1627,7 +1627,7 @@ struct GeneratedAccess<World::LuaScriptComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Luau script asset (.luau/.lua) relative to Game/assets, e.g. scripts/Player.luau.", false, "Script", {  } },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Luau script asset (.luau/.lua) relative to the project content root, e.g. scripts/Player.luau.", false, "Script", {  } },
             Value(std::string()),
         };
         return schema;

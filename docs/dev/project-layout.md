@@ -74,6 +74,6 @@ Engine/
 | 4 | 编辑器状态 → `local/`;`Editor/Resource/Icons` → `Editor/assets/icons` | ✅ |
 | 5 | `schema-compiler` → `Engine/generators/` | ✅ |
 | 6 | `Engine/vendor` → `third_party/`;工具 → `vendor/tools/` + 变量可替换 | ✅ |
-| 7 | `tests/` 按模块分域 | 🔄 进行中(Layout-S5) |
-| 8 | `Game/` 内容 → `projects/default/`(DLL 只留 `src/`) | ⬜ 计划中(Layout-S7) |
+| 7 | `tests/` 按模块分域 | ✅ 已交付(54/54,ctest 名单 0 差异) |
+| 8 | `Game/` 内容 → `projects/default/`(DLL 只留 `src/`) | ✅ 已交付(54/54、冒烟 OK、机检 exit 0 无 WARN) |
 | 9 | 机检脚本 `tools/agents/check-layout.ps1` | ✅ 随本页提交 |

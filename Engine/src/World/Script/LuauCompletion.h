@@ -3,7 +3,7 @@
 // P2 W9.5-1:编辑器补全的符号表 + 光标上下文(纯逻辑,不依赖 WUI/VM)。
 //
 // 口径:
-//   - 符号源一:入库存根 Game/assets/scripts/intermediate/WorldEngineAPI.luau
+//   - 符号源一:入库存根 projects/default/assets/scripts/intermediate/WorldEngineAPI.luau
 //     (LuaStubGenerator 渲染,World.ScriptWorkflow 的逐字节漂移门禁守着它)。行级扫描:
 //     `---@class Name[: Base]`、`---@field name type desc`、`Name = {}`、
 //     `function Name:Method(...)` / `function Name.Method(...)`;方法/表前连续 `---`

@@ -18,7 +18,7 @@ namespace World
 	public:
 		// 清单 → 全局生效值(叠加环境变量覆盖)。
 		static void Apply(const Asset::ProjectManifest& manifest);
-		// 从工作目录定位并加载项目清单(project.we.yaml / Game/project.we.yaml)→ Apply;
+		// 从工作目录定位并加载项目清单(project.we.yaml / projects/default/project.we.yaml)→ Apply;
 		// 找不到/读不动时退回内置默认。渲染器初始化(Init)时自动调一次,保证
 		// "清单改了就生效"对 Editor/Runtime/测试三条路径一致。
 		static bool LoadFromProject(const std::filesystem::path& workingDirectory);

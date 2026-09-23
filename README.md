@@ -65,8 +65,8 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `Engine/src/World/WUI/` | WUI widgets and layout framework (shared by the editor and the Runtime HUD) |
 | `Engine/src/World/Script/` | Luau runtime, bindings and hot reload |
 | `Engine/assets/shaders/` | HLSL shader sources (`*.hlsl`, entry points `VSMain` / `PSMain`) |
-| `Game/assets/scenes/` | Sample scenes (`.wd`) |
-| `Game/assets/scripts/` | Gameplay scripts and completion stubs |
+| `Game/src/` | Gameplay DLL source (`Game.dll`); the project content root lives under `projects/` |
+| `projects/default/` | Default project content root: `project.we.yaml` plus `assets/scenes/` and `assets/scripts/` |
 | `Editor/src/WUI/` | Editor panels and shell |
 | `tests/` | Per-topic test executables and ctest registration |
 | `docs/` | Public documentation (see below) |
@@ -89,7 +89,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `.wprefab` | Prefab |
 | `.wpak` | Content package (packaging output) |
 | `.lua` / `.luau` | Scripts; the embedded scripting runtime is Luau |
-| `WorldEngineAPI.luau` | Editor-generated completion stubs (`Game/assets/scripts/intermediate/`); do not edit by hand |
+| `WorldEngineAPI.luau` | Editor-generated completion stubs (`projects/default/assets/scripts/intermediate/`); do not edit by hand |
 
 ## Repository
 

@@ -90,8 +90,8 @@ namespace World::Asset
 
 		// 相对 manifest 文件目录解析内容根绝对路径。
 		std::filesystem::path ResolveContentRoot(const std::filesystem::path& manifestPath) const;
-		// 按工作目录依次尝试 project.we.yaml、Game/project.we.yaml;都没有再退回**开发树**
-		// (编译期 WLD_GAME_DIR 下的清单,让从 build/ 启动的 exe 也找得到项目)。
+		// 按工作目录依次尝试 project.we.yaml、projects/default/project.we.yaml;都没有再退回**开发树**
+		// (编译期 WLD_PROJECT_DIR 下的清单,让从 build/ 启动的 exe 也找得到项目)。
 		// 命中则 out 填实际路径。
 		static bool Locate(const std::filesystem::path& workingDirectory, std::filesystem::path* manifestPath);
 	};

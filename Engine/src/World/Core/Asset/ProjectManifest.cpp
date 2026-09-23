@@ -846,7 +846,7 @@ namespace World::Asset
 	bool ProjectManifest::Locate(const std::filesystem::path& workingDirectory, std::filesystem::path* manifestPath)
 	{
 		std::error_code ec;
-		for (const char* candidate : { "project.we.yaml", "Game/project.we.yaml" })
+		for (const char* candidate : { "project.we.yaml", "projects/default/project.we.yaml" })
 		{
 			const std::filesystem::path full = workingDirectory / candidate;
 			if (std::filesystem::is_regular_file(full, ec))
@@ -860,7 +860,7 @@ namespace World::Asset
 		// 也能找到项目清单。注意这**只扩大清单的搜索范围** —— 内容根与包仍然只由清单决定,
 		// 旧版"找不到清单就猜 ../Game/assets + 扫 cwd/content/*.wpak"的回退已移除(P4-U12)。
 		const std::filesystem::path developmentManifest =
-			std::filesystem::path(std::string(WLD_GAME_DIR)) / "project.we.yaml";
+			std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "project.we.yaml";
 		if (std::filesystem::is_regular_file(developmentManifest, ec))
 		{
 			if (manifestPath)

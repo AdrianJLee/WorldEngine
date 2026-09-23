@@ -34,7 +34,7 @@ namespace World
 		float Metallic = 0.0f;
 		float Roughness = 0.5f;
 		glm::vec3 Emissive { 0.0f };
-		// 相对 Game/assets 的路径(与场景/网格引用一致);空字符串 = 不使用该贴图。
+		// 相对项目内容根(WLD_ASSETPATH)的路径(与场景/网格引用一致);空字符串 = 不使用该贴图。
 		std::string AlbedoTexture;
 		std::string NormalTexture;
 		MaterialBlendMode BlendMode = MaterialBlendMode::Opaque;

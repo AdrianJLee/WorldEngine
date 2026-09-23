@@ -1,5 +1,5 @@
 # 关卡清单(P2a W2):关卡 id → 场景资产,由 Gameplay::LevelService 消费。
-# 场景内容仍在 Game/assets/scenes/*.wd;这里是"可被加载/卸载/切换的关卡"列表。
+# 场景内容在内容根(projects/default/assets/scenes/*.wd);这里是"可被加载/卸载/切换的关卡"列表。
 levels:
   - id: 3dtest
     name: 3D Test

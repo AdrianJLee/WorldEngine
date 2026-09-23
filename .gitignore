@@ -25,16 +25,17 @@ AGENTS.md
 /local/
 # glTF 导入产物(.wmodel / .wmat / 贴图)由导入器生成:夹具只提交 .gltf,
 # 导入结果由测试/编辑器首次导入时重建(2026-09-20 误提交过一次,已改回忽略)。
-Game/assets/models/**/*.wmodel
-Game/assets/models/**/materials/
-Game/assets/models/**/textures/
+# Layout-S7:项目内容根在 projects/<名>/assets/**。
+projects/*/assets/models/**/*.wmodel
+projects/*/assets/models/**/materials/
+projects/*/assets/models/**/textures/
 
 # W8:编辑器脚本工作区脚手架(create-if-missing 生成;用户改过的配置不入库即保留)。
 # 上面的 `.vscode` 忽略规则会连带排除父目录,必须先把目录本身取消忽略,再放行其内容。
-!Game/.vscode/
-!Game/.vscode/**
-!Game/.luau-lsp/
-!Game/.luau-lsp/**
+!projects/default/.vscode/
+!projects/default/.vscode/**
+!projects/default/.luau-lsp/
+!projects/default/.luau-lsp/**
 # 2026-09-22:docs/ 随仓库走,但只放**公开**文档(做游戏的人 docs/user/** + 改引擎的公开部分 docs/dev/**);
 # 内部知识(不变量/契约/决策/陷阱/验证口径/术语/工作流数据)不在本仓库里。
 # 父目录先解忽略,子项才能被重新包含。

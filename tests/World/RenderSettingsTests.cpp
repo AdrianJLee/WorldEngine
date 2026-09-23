@@ -176,7 +176,7 @@ namespace
 	{
 		const fs::path root = TestRoot();
 		const fs::path manifestPath = root / "project.we.yaml";
-		// 与 Game/project.we.yaml 同构:区块前的中文注释 + 规范数值 + packages 序列。
+		// 与 projects/default/project.we.yaml 同构:区块前的中文注释 + 规范数值 + packages 序列。
 		const std::string original =
 			"id: com.example.test\n"
 			"version: 2.0.0\n"

@@ -853,7 +853,7 @@ namespace World
 				&& actual.DoubleSided == expected.DoubleSided;
 		}
 
-		// 内容根解析:项目清单的 content_root = Game/assets,而 WLD_GAME_DIR = Game/。
+		// 内容根解析:项目清单的 content_root = assets(相对清单目录 = WLD_PROJECT_DIR)。
 		// MaterialPath 一律按"**相对内容根**"书写;P4-U12 删掉了"再试 Game/ 旧布局"的候选。
 		namespace
 		{
@@ -861,7 +861,7 @@ namespace World
 			{
 				std::error_code ec;
 				const std::filesystem::path candidate =
-					std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets" / path;
+					std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
 				if (forWrite || std::filesystem::exists(candidate, ec))
 					return candidate;
 				return {};
@@ -886,7 +886,7 @@ namespace World
 				}
 			}
 
-			// 2. 磁盘回退:**内容根**(Game/assets;绝对路径原样命中,不拼内容根)。
+			// 2. 磁盘回退:**内容根**(WLD_PROJECT_DIR/assets;绝对路径原样命中,不拼内容根)。
 			// P4-U12:删掉"再试 Editor/ 仓库布局"的第二候选 —— 内容根只有一个。
 			const std::filesystem::path candidate = ResolveOnDisk(path, /*forWrite*/ false);
 			std::ifstream file(candidate, std::ios::binary);
@@ -906,7 +906,7 @@ namespace World
 				return false;
 			}
 			std::error_code ec;
-			// 写入统一落在内容根(Game/assets)下,与 VFS 的开发目录挂载一致。
+			// 写入统一落在内容根下,与 VFS 的开发目录挂载一致。
 			const std::filesystem::path target = ResolveOnDisk(path, /*forWrite*/ true);
 			std::filesystem::create_directories(target.parent_path(), ec);
 			const std::filesystem::path temporary = target.string() + ".tmp";

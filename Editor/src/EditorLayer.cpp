@@ -110,8 +110,8 @@ namespace World
 		// 这里补一条**与 CWD 无关**的兜底:把同一个开发期布局锚定到绝对编译期路径(仓库根),
 		// 不新增目录约定。WLD_OUTPUT_DIR 将来若改成绝对路径,path 的 / 运算仍取绝对那一侧,
 		// 这条兜底继续成立。
-		// 仓库根取自 WLD_ASSETPATH("<root>/Game/assets",**无**尾分隔符):WLD_GAME_DIR /
-		// WLD_EDITOR_DIR 都写成 "<root>/X/" 带尾分隔符,对它们调 parent_path() 只会去掉那个
+		// 仓库根用 WLD_REPO_ROOT(**无**尾分隔符;Layout-S7 新增):WLD_GAME_DIR / WLD_EDITOR_DIR /
+		// WLD_PROJECT_DIR 都写成 "<root>/X/" 带尾分隔符,对它们调 parent_path() 只会去掉那个
 		// 空文件名(实测 2026-09-23:得到 "<root>/X" 而不是 "<root>",拼出来是
 		// "<root>/Game\build/x64-Debug/..." 这种错路径)。
 		bool LoadGameModuleForEditor(WorldContext& context, std::string* error)
@@ -120,8 +120,7 @@ namespace World
 			if (Modules::GameModuleHost::LoadDefault(context, &primaryError))
 				return true;
 
-			const std::filesystem::path repoRoot =
-				std::filesystem::path(WLD_ASSETPATH).parent_path().parent_path();
+			const std::filesystem::path repoRoot = std::filesystem::path(WLD_REPO_ROOT);
 			const std::filesystem::path anchored =
 				repoRoot / WLD_OUTPUT_DIR / "bin" / WLD_BUILD_TYPE / "Game" / WLD_BUILD_TYPE / "Game.dll";
 			std::string anchoredError;
@@ -226,8 +225,8 @@ namespace World
 		// W8:Luau LSP 脚手架(.vscode/settings.json + .luau-lsp/config.json):create-if-missing,
 		// 磁盘已有(用户改过的)配置绝不覆盖。
 		{
-			// 工作区根 = 项目清单所在目录(Game/;清单里的 content_root = assets),与
-			// 入库的 Game/.vscode、Game/.luau-lsp 一致;没有清单时退回内容根。
+			// 工作区根 = 项目清单所在目录(projects/default/;清单里的 content_root = assets),与
+			// 入库的 projects/default/.vscode、projects/default/.luau-lsp 一致;没有清单时退回内容根。
 			std::filesystem::path scaffoldRoot = std::filesystem::path(WLD_ASSETPATH);
 			std::filesystem::path manifestPath;
 			if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
@@ -2615,7 +2614,7 @@ namespace World
 				{
 					std::string manifestError;
 					World::Asset::ProjectManifest manifest;
-					const fs::path projectManifestPath = std::string(WLD_GAME_DIR) + "project.we.yaml";
+					const fs::path projectManifestPath = std::string(WLD_PROJECT_DIR) + "project.we.yaml";
 					if (World::Asset::ProjectManifest::Load(projectManifestPath, &manifest, &manifestError))
 					{
 						const fs::path contentRoot = manifest.ResolveContentRoot(projectManifestPath);

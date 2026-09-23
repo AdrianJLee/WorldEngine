@@ -54,7 +54,7 @@
 ## 5. 加脚本绑定
 
 脚本侧(Luau)通过绑定暴露引擎能力:绑定代码在 `Engine/src/World/Script/`(`Bind*.cpp`),
-补全声明由编辑器按实际注册结果生成到 `Game/assets/scripts/intermediate/WorldEngineAPI.luau`。
+补全声明由编辑器按实际注册结果生成到 `projects/default/assets/scripts/intermediate/WorldEngineAPI.luau`。
 新增绑定后重新构建并启动编辑器刷新声明;不要手改生成文件。
 
 ## 验证

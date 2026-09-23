@@ -134,7 +134,7 @@ namespace
 		CHECK(TestContext().Schemas().Register({ "BehaviorTest", 1 }, probeSchema) == Schema::SchemaRegistry::Status::Ok);
 	}
 
-	// ---- 夹具脚本(Game/assets/scripts/tests/LifecycleProbe.lua)要求的注入函数 ----
+	// ---- 夹具脚本(内容根 scripts/tests/LifecycleProbe.lua)要求的注入函数 ----
 
 	ScriptValue RecordLuaPhase(const ScriptValue* args, std::size_t count)
 	{

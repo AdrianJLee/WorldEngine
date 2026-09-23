@@ -35,7 +35,7 @@ tools/    vendor/     World/
 | `Editor/assets/**` | 编辑器自带资源(本地化、图标、字体) | 项目内容、生成物 | 是 |
 | `Game/` | 默认示例项目与 gameplay DLL(`project.we.yaml` + `assets/**` + `src/**`) | 引擎代码 | 是(生成物除外) |
 | `Runtime/` | 运行宿主(无编辑器启动游戏) | 业务逻辑 | 是 |
-| `tests/**` | 每个领域一个可执行测试(ctest 名 `World.<Domain>`) | 夹具资产(应放 `Game/assets/**` 或临时目录) | 是 |
+| `tests/**` | 每个领域一个可执行测试(ctest 名 `World.<Domain>`) | 夹具资产(应放 `projects/<名>/assets/**` 或临时目录) | 是 |
 | `docs/user/**` `docs/dev/**` | 公开文档:用户手册 / 开发者文档 | 内部过程记录(走 `tools/agents/**`)、私有知识(走 `WorldEngine-docs`) | 是 |
 | `tools/agents/**` | 过程层 + 工具面:`tasks/ dispatch/ reports/ scratch/ tmp/ archive/ skills/ multi-agent/ fonts/` | 任何"项目运行需要"的文件 | 见 §9 |
 | `vendor/` | 外部工具与记录(见 `vendor/README.md`) | 参与编译的源码(那属于 `third_party/**`) | 见 `vendor/README.md` |
@@ -165,7 +165,7 @@ tools/    vendor/     World/
 
 仓库没有 `.gitattributes`,而本机 `core.autocrlf` 生效:签出会写 CRLF,`git add` 又转回 LF。
 后果:`tests/World/ScriptWorkflowTests.cpp` 的"存根漂移门禁"做**逐字节比较**
-(`Game/assets/scripts/intermediate/WorldEngineAPI.luau`),工作树一旦是 CRLF 就**误报失败**
+(`projects/default/assets/scripts/intermediate/WorldEngineAPI.luau`),工作树一旦是 CRLF 就**误报失败**
 (2026-09-23 实测:内容逐行相同、仅 CRLF 差异 → 门禁失败)。
 
 建议:新增 `.gitattributes`,至少 `* text=auto eol=lf` + `*.luau text eol=lf`,并给该门禁加

@@ -325,7 +325,7 @@ namespace
 		fs::remove_all(root);
 	}
 
-	// 4.真实 glTF 夹具导入 + Mesh::LoadWModel 读回(fixture 见 Game/assets/models/tests/D5Fixture.gltf)。
+	// 4.真实 glTF 夹具导入 + Mesh::LoadWModel 读回(fixture 见 projects/default/assets/models/tests/D5Fixture.gltf)。
 	void GltfFixtureImportsAndLoadsBack()
 	{
 		const fs::path root = TestRoot() / "import";

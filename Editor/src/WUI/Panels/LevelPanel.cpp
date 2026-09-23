@@ -14,7 +14,7 @@ namespace World
 			return;
 		m_Loaded = true;
 
-		// 与 GameHost 相同的定位顺序:内容根上一级 → 内容根 → 当前目录(Game/levels.welevel 是常见位置)。
+		// 与 GameHost 相同的定位顺序:内容根上一级(项目目录,项目清单同级)→ 内容根 → 当前目录。
 		std::filesystem::path manifestPath;
 		if (!World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
 			return;

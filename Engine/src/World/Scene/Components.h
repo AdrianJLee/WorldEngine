@@ -202,7 +202,7 @@ namespace World
 		std::string Primitive = "cube";
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };
 		std::string MeshPath;
-		// D3:材质资产路径(相对 Game/assets,形如 materials/steel.wmat)。
+		// D3:材质资产路径(相对项目内容根,形如 materials/steel.wmat)。
 		// 空 = 旧行为:用上面的 Color 直接作为基色。
 		std::string MaterialPath;
 		// D5:.wmodel 有节点树时,选择"第几个 mesh"(节点引用 mesh 下标);
@@ -218,7 +218,7 @@ namespace World
 			WE_FIELD(Color, Vec4, Id(0x4D455348434F4C52), Color(),
 				Doc("Base color used when MaterialPath is empty."));
 			WE_FIELD(MeshPath, String, Id(0x4D45534850415448), Asset("Model"),
-				Doc("Imported model asset (.wmodel, path relative to Game/assets); empty = use Primitive. glTF/GLB are import sources only: import them first and reference the produced .wmodel."));
+				Doc("Imported model asset (.wmodel, path relative to the project content root); empty = use Primitive. glTF/GLB are import sources only: import them first and reference the produced .wmodel."));
 			WE_FIELD(MaterialPath, String, Id(0x4D4154455249414C), Asset("Material"),
 				Doc("Material asset (.wmat); overrides Color and the model's own material slots when set."));
 			// D5:字段 id 显式钉住("MESHINDX"),默认 0;.wmodel 节点树选择 mesh 用。
@@ -452,7 +452,7 @@ namespace World
 			WE_SCHEMA_META(Category("Scripting"),
 				Doc("Luau script attached to the entity: only ScriptFilePath is serialized, the environment, callbacks and cached fields are rebuilt at load."))
 			WE_FIELD(ScriptFilePath, String, Asset("Script"),
-				Doc("Luau script asset (.luau/.lua) relative to Game/assets, e.g. scripts/Player.luau."));
+				Doc("Luau script asset (.luau/.lua) relative to the project content root, e.g. scripts/Player.luau."));
 		WE_SCHEMA_END
 	};
 

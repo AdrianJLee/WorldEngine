@@ -197,10 +197,10 @@ namespace
 		CHECK(fs::is_regular_file(settings));
 		CHECK(fs::is_regular_file(lspConfig));
 
-		// 内容正确:与入库的 Game/ 两份脚手架文件逐字节一致(同一份常量,不会各自漂移)。
-		const fs::path gameRoot = fs::path(WLD_ASSETPATH).parent_path();
-		CHECK(ReadText(settings) == ReadText(gameRoot / ".vscode" / "settings.json"));
-		CHECK(ReadText(lspConfig) == ReadText(gameRoot / ".luau-lsp" / "config.json"));
+		// 内容正确:与入库的 projects/default/ 两份脚手架文件逐字节一致(同一份常量,不会各自漂移)。
+		const fs::path projectRoot = fs::path(WLD_ASSETPATH).parent_path();
+		CHECK(ReadText(settings) == ReadText(projectRoot / ".vscode" / "settings.json"));
+		CHECK(ReadText(lspConfig) == ReadText(projectRoot / ".luau-lsp" / "config.json"));
 		CHECK(ReadText(settings).find("assets/scripts/intermediate/WorldEngineAPI.luau") != std::string::npos);
 		CHECK(ReadText(lspConfig).find("assets/scripts/intermediate/WorldEngineAPI.luau") != std::string::npos);
 
