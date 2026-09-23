@@ -14,7 +14,7 @@
 namespace World::Editor
 {
 	// AI 控制通道:127.0.0.1 上的 JSON 行协议,把"用户能做的操作 / 能看到的状态"
-	// 变成脚本可调用的命令(见 tools/codex/tasks/20260916-2200-ai-accessible-editor/plan.md)。
+	// 变成脚本可调用的命令(见 tools/agents/tasks/20260916-2200-ai-accessible-editor/plan.md)。
 	//
 	// 线程模型:
 	//   * 监听/会话线程只做 socket 与解析,把命令塞进队列后**阻塞等结果**;

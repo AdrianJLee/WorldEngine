@@ -10,7 +10,7 @@ namespace World
 {
 	// P2 W6:脚本沙箱的预算与中断(指令数 / 墙钟)。
 	//
-	// 契约(与 tools/codex/tasks/20260914-2300-p2-scripting-hotreload/plan.md §11 的
+	// 契约(与 tools/agents/tasks/20260914-2300-p2-scripting-hotreload/plan.md §11 的
 	// "W6 勘察结论" 一致):
 	//   - 每个 VM 一份状态,挂在 lua_callbacks()->userdata 上;hook 是 lua_callbacks()->interrupt;
 	//   - 只在安全点计数(gc < 0 的 interrupt 命中);GC 路径(gc >= 0)直接返回,绝不 longjmp;

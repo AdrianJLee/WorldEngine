@@ -1929,7 +1929,7 @@ namespace World::Wui
 			// value = 该选项是否为当前值。上一条遗留项(可搜索下拉的条目对脚本不可见)由此补齐。
 			RegisterAccessNode(ComboOptionId(id, static_cast<size_t>(optionIndex)), "combo-option", item,
 				options[optionIndex], (selected == optionIndex) ? "true" : "false");
-			// 兼容既有端到端脚本:tools/codex/skills/worldengine-dev/scripts/verify-ai-control.py 按
+			// 兼容既有端到端脚本:tools/agents/skills/worldengine-dev/scripts/verify-ai-control.py 按
 			// kind="combo-item" 检索候选项,而该脚本不在本任务的文件边界内,所以同一条目保留旧节点。
 			// 两个节点的矩形/标签一致,点击注入的坐标相同 → 走的是同一条命中路径。
 			const std::string itemKey = "combo-item:" + std::to_string(id) + ":" + std::to_string(optionIndex);

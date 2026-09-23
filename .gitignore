@@ -1,7 +1,12 @@
 # Directories
 .vs/
+# 构建产物目录:任何层级都挡(历史出现过 in-source 构建,如 World/vendor/Glad/bin)。
 bin/
 bin-int/
+# 例外:第三方 CLI 工具目录允许自带 bin/(见 vendor/README.md 的"工具 vs 源码"判据)。
+!vendor/tools/**/bin/
+# 实验性第三方包整包不入库(体积大):采纳时按 vendor/README.md 落"pin + FETCH"或小 CLI 子集。
+vendor/slang/
 
 # Files
 *.user
@@ -12,7 +17,9 @@ build
 .codex
 .vscode
 docs
-tools
+# 只忽略**根级** tools/(过程层与本机工具面);不要用裸目录名——裸名会在任意深度命中
+# (历史:`World/tools/` 这类同名声明的目录会被静默吞掉;2026-09-23 修)。
+/tools
 AGENTS.md
 Editor/wui-layout.json
 Editor/wui-layout.json.bak

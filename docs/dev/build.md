@@ -85,5 +85,5 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 ## 内部开发 checkout 的额外工具
 
 内部 checkout 里有一个只读预检脚本(按 `.gitignore` 不进公开仓库):
-`tools/codex/check-environment.ps1` —— 一次列出 CMake / MSVC / MSBuild / Windows SDK / Vulkan SDK /
+`tools/agents/check-environment.ps1` —— 一次列出 CMake / MSVC / MSBuild / Windows SDK / Vulkan SDK /
 `dxc` / 已有构建缓存的状态,`-AsJson` 供脚本消费。
