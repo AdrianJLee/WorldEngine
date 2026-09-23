@@ -2,7 +2,7 @@
 #include "Framebuffer.h"
 
 #include "World/Renderer/Renderer.h"
-#include "Platform/OpenGL/OpenGLFramebuffer.h"
+#include "World/Platform/OpenGL/OpenGLFramebuffer.h"
 
 namespace World
 {

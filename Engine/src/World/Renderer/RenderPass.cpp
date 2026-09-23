@@ -1,7 +1,7 @@
 ﻿#include "wldpch.h"
 #include "RenderPass.h"
 #include "Renderer.h"
-#include "Platform/OpenGL/OpenGLRenderPass.h"
+#include "World/Platform/OpenGL/OpenGLRenderPass.h"
 
 namespace World
 {

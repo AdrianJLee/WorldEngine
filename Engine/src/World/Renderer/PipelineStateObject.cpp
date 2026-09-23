@@ -1,7 +1,7 @@
 ﻿#include "wldpch.h"
 #include "PipelineStateObject.h"
 #include "World/Renderer/RendererAPI.h"
-#include "Platform/OpenGL/OpenGLPipeline.h"
+#include "World/Platform/OpenGL/OpenGLPipeline.h"
 namespace World
 {
 	Ref<PipelineStateObject> PipelineStateObject::Create(const PipelineSpecification& spec)

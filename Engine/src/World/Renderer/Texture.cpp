@@ -2,7 +2,7 @@
 #include "Texture.h"
 
 #include "World/Renderer/Renderer.h"
-#include "Platform/OpenGL/OpenGLTexture.h"
+#include "World/Platform/OpenGL/OpenGLTexture.h"
 
 namespace World
 {

@@ -2,7 +2,7 @@
 #include "VertexArray.h"
 
 #include "World/Renderer/Renderer.h"
-#include "Platform/OpenGL/OpenGLVertexArray.h"
+#include "World/Platform/OpenGL/OpenGLVertexArray.h"
 
 namespace World
 {

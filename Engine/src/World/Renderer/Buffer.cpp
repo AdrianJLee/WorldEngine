@@ -1,7 +1,7 @@
 ﻿#include "wldpch.h"
 #include "Buffer.h"
 #include "World/Renderer/Renderer.h"
-#include "Platform/OpenGL/OpenGLBuffer.h"
+#include "World/Platform/OpenGL/OpenGLBuffer.h"
 namespace World
 {
 	Ref<VertexBuffer> VertexBuffer::Create(uint32_t size)

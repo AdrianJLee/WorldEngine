@@ -2,7 +2,7 @@
 #include "UniformBuffer.h"
 
 #include "World/Renderer/Renderer.h"
-#include "Platform/OpenGL/OpenGLUniformBuffer.h"
+#include "World/Platform/OpenGL/OpenGLUniformBuffer.h"
 
 namespace World
 {

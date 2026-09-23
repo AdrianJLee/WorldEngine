@@ -2,7 +2,7 @@
 #include "Shader.h"
 
 #include "World/Renderer/Renderer.h"
-#include "Platform/OpenGL/OpenGLShader.h"
+#include "World/Platform/OpenGL/OpenGLShader.h"
 namespace World
 {
 	Ref<Shader> Shader::Create()
