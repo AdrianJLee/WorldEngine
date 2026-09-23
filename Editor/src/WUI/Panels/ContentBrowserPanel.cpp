@@ -361,7 +361,7 @@ namespace World
 	}
 
 	ContentBrowserPanel::ContentBrowserPanel(PanelHost& host)
-		: m_Host(host), m_StatePath(std::string(WLD_EDITOR_DIR) + "wui-browser.json")
+		: m_Host(host), m_StatePath(std::string(WLD_LOCAL_DIR) + "wui-browser.json")
 	{
 		m_Model.Current = m_Model.Root;
 		LoadState();
@@ -2638,9 +2638,9 @@ namespace World
 			m_FileIconId = 0;
 		}
 		if (!m_DirIcon)
-			m_DirIcon = Texture2D::Create(EditorResourcePath("Resource/Icons/ContentBrowser/DirectoryIcon.png"));
+			m_DirIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/DirectoryIcon.png"));
 		if (!m_FileIcon)
-			m_FileIcon = Texture2D::Create(EditorResourcePath("Resource/Icons/ContentBrowser/FileIcon.png"));
+			m_FileIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/FileIcon.png"));
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (registry.Generation() != m_IconGeneration)
 		{

@@ -319,19 +319,19 @@ namespace World
 	// 图标是旧式(GL)纹理:窗口/上下文重建后必须重新加载,否则渲染出的图标会错乱。
 	void EditorLayer::LoadIconTextures()
 	{
-		// 图标是**编辑器资源**(Editor/Resource/Icons),不是内容根里的游戏资产 ——
+		// 图标是**编辑器资源**(Editor/assets/icons),不是内容根里的游戏资产 ——
 		// 一律走 EditorResourcePath 拼绝对路径(见 EditorResources.h)。
-		m_IconPlay = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_Play.png"));
+		m_IconPlay = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Play.png"));
 
-		m_IconStop = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_Stop.png"));
+		m_IconStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Stop.png"));
 
-		m_IconPause = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_Pause.png"));
-		m_IconContinue = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_Continue.png"));
+		m_IconPause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Pause.png"));
+		m_IconContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Continue.png"));
 
-		m_IconSimulate = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_SimulateStart.png"));
-		m_IconSimulateStop = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_SimulateStop.png"));
-		m_IconSimulatePause = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_SimulatePause.png"));
-		m_IconSimulateContinue = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_SimulateContinue.png"));
+		m_IconSimulate = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStart.png"));
+		m_IconSimulateStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStop.png"));
+		m_IconSimulatePause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulatePause.png"));
+		m_IconSimulateContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateContinue.png"));
 	}
 
 	void EditorLayer::OnDetach()

@@ -21,13 +21,8 @@ docs
 # (历史:`World/tools/` 这类同名声明的目录会被静默吞掉;2026-09-23 修;模块目录已改名 Engine/)。
 /tools
 AGENTS.md
-Editor/wui-layout.json
-Editor/wui-layout.json.bak
-Editor/wui-browser.json
-# P4-UX:编辑器用户偏好(语言/主题/缩放)是"这台机器上的这个人"的设置,不入库。
-Editor/editor-prefs.json
-# P4-U6:属性面板的"最近使用组件"(MRU)同属用户状态,不入库。
-Editor/wui-properties.json
+# 本机状态(编辑器偏好/布局/窗口/最近使用组件):不入库;整个目录可删,删后自动重建。
+/local/
 # glTF 导入产物(.wmodel / .wmat / 贴图)由导入器生成:夹具只提交 .gltf,
 # 导入结果由测试/编辑器首次导入时重建(2026-09-20 误提交过一次,已改回忽略)。
 Game/assets/models/**/*.wmodel

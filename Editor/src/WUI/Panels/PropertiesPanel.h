@@ -100,7 +100,7 @@ namespace World
 		void CloseRemoveComponentConfirm(Wui::WuiContext& ctx);
 		uint32_t m_RemovePendingId = 0;      // 待确认移除的组件 id(0 = 没有)
 		std::string m_RemovePendingName;     // 组件显示名(模态标题/操作记录用)
-		// MRU 更新(置顶,最多 5 条)并落盘;<Editor>/wui-properties.json 写失败只告警,不影响编辑。
+		// MRU 更新(置顶,最多 5 条)并落盘;<local>/wui-properties.json 写失败只告警,不影响编辑。
 		void TouchRecent(const std::string& shortName);
 		void LoadState();
 		void SaveState() const;
@@ -127,7 +127,7 @@ namespace World
 		uint32_t m_LuaReloadHandle = ~0u;
 		bool m_LuaReloadOk = true;
 		// ---- U6:选择器状态(只属于本面板对象,不进任何全局表)----
-		std::string m_StatePath;                     // <Editor>/wui-properties.json
+		std::string m_StatePath;                     // <local>/wui-properties.json
 		std::vector<std::string> m_RecentComponents; // 最近使用(短类型名,MRU 顺序)
 		std::string m_AddSearch;                     // 搜索框缓冲(TextField 直接写入)
 		std::string m_AddSearchLast;                 // 上一次的搜索词:变化时把高亮归零

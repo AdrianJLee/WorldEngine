@@ -125,7 +125,7 @@ namespace World
 	}
 
 	EditorShell::EditorShell(EditorLayer& editor)
-		: m_Editor(editor), m_LayoutPath(std::string(WLD_EDITOR_DIR) + "wui-layout.json")
+		: m_Editor(editor), m_LayoutPath(std::string(WLD_LOCAL_DIR) + "wui-layout.json")
 	{
 		// 面板列表与默认停靠布局都由形态声明生成:独立形态面板不进停靠树。
 		// 注意:"windows"(Independent Windows 面板)与 "attach_slot" 仍未注册(等后续任务),
