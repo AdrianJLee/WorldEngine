@@ -12,6 +12,8 @@
 #include "World/Renderer/RenderSettings.h"
 // M4-S2:代码形态的"按需编译"走 M4-S1 的编译入口(结构化诊断 + 用户源行列号)。
 #include "World/Renderer/MaterialSurface.h"
+// M4-S3:编译产物装配成管线(Install 必须在渲染线程 = 本面板的 UI 帧内调用)。
+#include "World/Renderer/MaterialSurfaceRuntime.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
@@ -23,14 +25,18 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -931,6 +937,8 @@ namespace World
 			m_UiTextureGeneration = 0;
 		});
 		SetMaterialPathForPanel(materialPath);
+		// M4-S3:代码形态的编译线程随面板起停(空闲时只等条件变量,不占 CPU)。
+		m_ShaderCompileThread = std::thread([this] { ShaderCompileWorkerLoop(); });
 	}
 
 	void MaterialEditorPanel::SetMaterialPathForPanel(const std::string& path)
@@ -953,6 +961,15 @@ namespace World
 
 	MaterialEditorPanel::~MaterialEditorPanel()
 	{
+		// 先收编译线程:工作线程只读自己的副本、结果写回成员,析构前必须确定它已经退出
+		// (dxc 单次调用有界,等它跑完即可;detach 会让它写已析构的成员)。
+		{
+			std::lock_guard<std::mutex> lock(m_ShaderCompileMutex);
+			m_ShaderCompileThreadStop = true;
+		}
+		m_ShaderCompileCv.notify_all();
+		if (m_ShaderCompileThread.joinable())
+			m_ShaderCompileThread.join();
 		Renderer::UnregisterDeviceReleaseHook(this);
 		// 面板关闭时设备与帧循环通常还活着:延迟释放,避免销毁在飞命令引用着的资源。
 		ReleaseGpuResources(/*defer*/ true);
@@ -2686,7 +2703,9 @@ namespace World
 				? Wui::Tr("panel.material.revert_row", "Revert to parent")
 				: Wui::Tr("panel.material.revert_row.engine", "Revert to engine default");
 			const std::string resetDoc = (hasParentFile
-				? Wui::Tr("panel.material.revert.tooltip",
+				// 批准 5(2026-09-23):这一条与头部 Revert 按钮共用过 "panel.material.revert.tooltip",
+				// 中文目录里后写的"回退到父级…"把头部按钮的"丢弃未保存改动"覆盖掉了 —— 拆成独立 key。
+				? Wui::Tr("panel.material.revert.tooltip_row",
 					"Revert to parent: drop this file's value so the field inherits again from") + " "
 					+ m_Material->ParentPath() + "."
 				: Wui::Tr("panel.material.revert.tooltip_engine",
@@ -4352,6 +4371,17 @@ namespace World
 		m_ShaderParamTextBuffers.clear();
 		m_ShaderPendingParamName.clear();
 		m_ShaderPendingParamValue.clear();
+		// M4-S3:换文档时编译状态/键/磁盘指纹一起复位(上一份文档的键与结果都不再相关)。
+		m_ShaderDiagnostics.clear();
+		m_ShaderCompileStatus.clear();
+		m_ShaderCompileFailed = false;
+		m_ShaderInstalledKey.clear();
+		m_ShaderInstalledVersion = 0;
+		m_ShaderDiskChangedNotice = false;
+		m_ShaderDiskStampValid = false;
+		m_ShaderDiskText.clear();
+		m_ShaderRequestedRevision = ~0ull;
+		m_ShaderEditTime = 0.0;
 		// 预览替身 = 引擎默认表面材质(SetDesc 在解析成功后按注解默认值映射)。
 		m_Material = MaterialLibrary::Get().CreateDefault("Shader Preview");
 		RefreshCatalog();   // 贴图下拉的选项(与 .wmat 共用同一份 2s 缓存)
@@ -4360,13 +4390,17 @@ namespace World
 
 	void MaterialEditorPanel::LoadShaderFromDisk()
 	{
+		// 打开 / Revert / 热重载共用:磁盘内容 = 已保存内容(D2 键分离的事实源)。
 		m_ShaderCompileStatus.clear();
 		m_ShaderCompileFailed = false;
 		m_ShaderDiagnostics.clear();
+		m_ShaderForceCompile = false;
 		if (m_ShaderPath.empty())
 		{
 			m_ShaderStatus = Wui::Tr("panel.material.shader.no_path", "No shader path");
 			m_ShaderStatusIsError = true;
+			m_ShaderDiskText.clear();
+			m_ShaderDiskStampValid = false;
 			return;
 		}
 		const std::filesystem::path diskPath = ContentRootPath() / m_ShaderPath;
@@ -4377,6 +4411,8 @@ namespace World
 				+ m_ShaderPath;
 			m_ShaderStatusIsError = true;
 			m_ShaderBuffer.SetText(std::string());
+			m_ShaderDiskText.clear();
+			m_ShaderDiskStampValid = false;
 			RefreshShaderParams();
 			return;
 		}
@@ -4386,6 +4422,8 @@ namespace World
 			m_ShaderStatus = Wui::Tr("panel.material.shader.status.unreadable", "Cannot read: ") + m_ShaderPath;
 			m_ShaderStatusIsError = true;
 			m_ShaderBuffer.SetText(std::string());
+			m_ShaderDiskText.clear();
+			m_ShaderDiskStampValid = false;
 			RefreshShaderParams();
 			return;
 		}
@@ -4393,9 +4431,475 @@ namespace World
 		m_ShaderBuffer.SetText(std::move(source));   // 视为已保存状态
 		m_ShaderHighlight.Clear();
 		RefreshShaderParams();
+		// M4-S3:记录磁盘指纹 + 立刻编译一次已保存内容并 Install(路径键)—— 场景与预览的基线。
+		m_ShaderDiskText = m_ShaderBuffer.Text();
+		RecordShaderDiskStamp(m_ShaderDiskText);
+		m_ShaderDiskChangedNotice = false;
+		m_ShaderRequestedRevision = ~0ull;
+		m_ShaderSeenRevision = m_ShaderBuffer.Revision();
+		m_ShaderForceCompile = true;
 		m_ShaderStatus = Wui::Tr("panel.material.shader.status.loaded", "Loaded ") + m_ShaderPath;
 		m_ShaderStatusIsError = false;
 		WLD_CORE_INFO("[material-ui] opened shader '{0}'", m_ShaderPath);
+	}
+
+	// ---- M4-S3:代码态实时预览(防抖 + 后台编译 + 键分离)----
+	//
+	// 用户口径(2026-09-23 确认):「只有在保存后才会应用到主场景,如果没保存只是预览中的实时改动」。
+	// 实现手段是**键分离**(D2):
+	//   - 未保存的实时改动 → Install("<路径>#preview", artifact),预览材质按
+	//     `Material::SetSurfaceKeyOverride` 指到这个键(渲染侧的管线选择只看这个键);
+	//   - 保存成功       → 写盘 + Install("<路径>", artifact),预览材质指回普通键(这时场景才变);
+	//   - 打开既有 `.hlsl` 先编译已保存内容并 Install("<路径>", …),保证场景/预览有可用基线。
+	// 线程纪律:dxc 只在**工作线程**跑(单飞,后来者覆盖前者);Install 与渲染状态只在主线程帧内改。
+	namespace
+	{
+		double ShaderWallClockSeconds()
+		{
+			return std::chrono::duration<double>(
+				std::chrono::steady_clock::now().time_since_epoch()).count();
+		}
+
+		std::string FormatShaderMilliseconds(double value)
+		{
+			char buffer[32] = {};
+			std::snprintf(buffer, sizeof(buffer), "%.1f", value > 0.0 ? value : 0.0);
+			return std::string(buffer);
+		}
+
+		bool ShaderBackendIsVulkan()
+		{
+			const std::string name = Renderer::GetBackendName();
+			std::string lower = name;
+			std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c)
+			{
+				return static_cast<char>(std::tolower(c));
+			});
+			return lower.find("vulkan") != std::string::npos;
+		}
+	}
+
+	std::string MaterialEditorPanel::ShaderPathKey() const
+	{
+		return MaterialLibrary::NormalizePath(m_ShaderPath);
+	}
+
+	std::string MaterialEditorPanel::ShaderPreviewKey() const
+	{
+		const std::string base = ShaderPathKey();
+		return base.empty() ? std::string() : base + "#preview";
+	}
+
+	std::string MaterialEditorPanel::FormatShaderDiagnostic(const ShaderDiagnostic& diagnostic)
+	{
+		std::string text = diagnostic.Severity.empty() ? std::string("error") : diagnostic.Severity;
+		text += ": ";
+		if (diagnostic.InUserSource && diagnostic.Line > 0)
+			text += "line " + std::to_string(diagnostic.Line) + ":" + std::to_string(diagnostic.Column) + "  ";
+		text += diagnostic.Message;
+		return text;
+	}
+
+	void MaterialEditorPanel::RecordShaderDiskStamp(const std::string& text)
+	{
+		(void)text;
+		m_ShaderDiskStampValid = false;
+		m_ShaderDiskSize = 0;
+		if (m_ShaderPath.empty())
+			return;
+		const std::filesystem::path diskPath = ContentRootPath() / m_ShaderPath;
+		std::error_code stampError;
+		const std::filesystem::file_time_type writeTime =
+			std::filesystem::last_write_time(diskPath, stampError);
+		if (stampError)
+			return;
+		const uintmax_t size = std::filesystem::file_size(diskPath, stampError);
+		if (stampError)
+			return;
+		m_ShaderDiskWriteTime = writeTime;
+		m_ShaderDiskSize = size;
+		m_ShaderDiskStampValid = true;
+	}
+
+	void MaterialEditorPanel::DispatchShaderCompile(const std::string& source)
+	{
+		ShaderCompileRequest request;
+		request.Serial = ++m_ShaderCompileSerial;
+		request.Source = source;
+		// 排列键仍是逻辑路径(M4-S2 口径):预览键/路径键只决定 Install 的落点,
+		// 不参与编译缓存 —— 同一份内容两边共用产物,不会重复跑 dxc。
+		request.PermutationKey = m_ShaderPath;
+		{
+			std::lock_guard<std::mutex> lock(m_ShaderCompileMutex);
+			m_ShaderCompileRequest = std::move(request);
+			m_ShaderCompileRequestPending = true;
+			m_ShaderCompileResultReady = false;   // 旧结果被新请求覆盖(后来者胜)
+		}
+		m_ShaderCompileInFlight = true;
+		m_ShaderCompileDispatchedTime = ShaderWallClockSeconds();
+		m_ShaderCompileCv.notify_one();
+		WLD_CORE_INFO("[material-ui] shader compile dispatch #{0} ({1} bytes) key='{2}'",
+			m_ShaderCompileSerial, source.size(), m_ShaderPath);
+	}
+
+	void MaterialEditorPanel::ShaderCompileWorkerLoop()
+	{
+		for (;;)
+		{
+			ShaderCompileRequest request;
+			{
+				std::unique_lock<std::mutex> lock(m_ShaderCompileMutex);
+				m_ShaderCompileCv.wait(lock, [this]
+				{
+					return m_ShaderCompileThreadStop || m_ShaderCompileRequestPending;
+				});
+				if (m_ShaderCompileThreadStop)
+					return;
+				request = std::move(m_ShaderCompileRequest);
+				m_ShaderCompileRequestPending = false;
+			}
+			// 工作线程只跑 dxc(内核自带缓存与互斥);不碰 UI / 渲染 / 面板状态。
+			const SurfaceCompileResult result =
+				MaterialSurfaceCompiler::CompileSurface(request.Source, request.PermutationKey);
+			ShaderCompileOutcome outcome;
+			outcome.Serial = request.Serial;
+			outcome.Success = result.Success;
+			outcome.CacheHit = result.CacheHit;
+			outcome.Source = request.Source;
+			outcome.Artifact = result.Artifact;
+			outcome.RawToolOutput = result.RawToolOutput;
+			outcome.ElapsedMs = result.ElapsedMilliseconds;
+			outcome.Diagnostics.reserve(result.Diagnostics.size());
+			for (const SurfaceDiagnostic& diagnostic : result.Diagnostics)
+			{
+				ShaderDiagnostic entry;
+				entry.Severity = diagnostic.Severity;
+				entry.Message = diagnostic.Message;
+				entry.InUserSource = diagnostic.InUserSource;
+				entry.Line = static_cast<int>(diagnostic.InUserSource ? diagnostic.UserLine : diagnostic.Line);
+				entry.Column = static_cast<int>(diagnostic.InUserSource
+					? diagnostic.UserColumn : diagnostic.Column);
+				outcome.Diagnostics.push_back(std::move(entry));
+			}
+			{
+				std::lock_guard<std::mutex> lock(m_ShaderCompileMutex);
+				if (m_ShaderCompileThreadStop)
+					return;
+				m_ShaderCompileOutcome = std::move(outcome);
+				m_ShaderCompileResultReady = true;
+			}
+		}
+	}
+
+	void MaterialEditorPanel::PumpShaderCompile(double now)
+	{
+		if (!m_ShaderMode)
+			return;
+		// 1) 编辑 → 起/续消抖计时(Revision 是单调的内容变更计数)。
+		const uint64_t revision = m_ShaderBuffer.Revision();
+		if (revision != m_ShaderSeenRevision)
+		{
+			m_ShaderSeenRevision = revision;
+			m_ShaderEditTime = now;
+		}
+		// 2) 消费后台结果 —— 只有主线程会 Install / 改预览材质。
+		ShaderCompileOutcome outcome;
+		bool haveOutcome = false;
+		{
+			std::lock_guard<std::mutex> lock(m_ShaderCompileMutex);
+			if (m_ShaderCompileResultReady)
+			{
+				outcome = std::move(m_ShaderCompileOutcome);
+				m_ShaderCompileResultReady = false;
+				haveOutcome = true;
+			}
+		}
+		if (haveOutcome)
+		{
+			m_ShaderCompileInFlight = false;
+			if (outcome.Source != m_ShaderBuffer.Text())
+			{
+				// 这份结果对应的是**当时**的源:源已经变了就当过期丢掉(下一步会编译最新源)。
+				WLD_CORE_INFO("[material-ui] shader compile #{0} dropped (source changed)", outcome.Serial);
+			}
+			else
+			{
+				ApplyShaderCompileOutcome(outcome);
+			}
+		}
+		// 3) 单飞投递:有请求在飞就不投;消抖到点(或强制:打开 / 重载 / Compile 按钮)才投。
+		if (m_ShaderCompileInFlight)
+			return;
+		const bool sourceStale = revision != m_ShaderRequestedRevision;
+		const bool debounceElapsed = m_ShaderEditTime > 0.0
+			&& (now - m_ShaderEditTime) >= kShaderCompileDebounceSeconds;
+		if (m_ShaderForceCompile || (sourceStale && debounceElapsed))
+		{
+			m_ShaderForceCompile = false;
+			m_ShaderEditTime = 0.0;
+			m_ShaderRequestedRevision = revision;
+			DispatchShaderCompile(m_ShaderBuffer.Text());
+		}
+	}
+
+	void MaterialEditorPanel::ApplyShaderCompileOutcome(const ShaderCompileOutcome& outcome)
+	{
+		m_ShaderDiagnostics = outcome.Diagnostics;
+		m_ShaderCompileFailed = !outcome.Success;
+		if (!outcome.Success)
+		{
+			// 编译失败:**不 Install** —— 上一份可用管线继续用,预览不得变黑。
+			std::string firstError;
+			for (const ShaderDiagnostic& diagnostic : outcome.Diagnostics)
+			{
+				if (diagnostic.Severity != "error")
+					continue;
+				firstError = FormatShaderDiagnostic(diagnostic);
+				if (m_ShaderParseError.empty() && diagnostic.InUserSource && diagnostic.Line > 0)
+					m_ShaderErrorLine = diagnostic.Line;
+				break;
+			}
+			if (firstError.empty())
+			{
+				firstError = outcome.Diagnostics.empty()
+					? (outcome.RawToolOutput.empty()
+						? Wui::Tr("panel.material.shader.compile.no_diagnostics",
+							"the compiler returned no diagnostics")
+						: outcome.RawToolOutput)
+					: FormatShaderDiagnostic(outcome.Diagnostics.front());
+			}
+			m_ShaderCompileStatus = Wui::Tr("panel.material.shader.compile.failed", "Compile failed")
+				+ Wui::Tr("panel.material.shader.compile.failed_hint", " — first error: ") + firstError
+				+ Wui::Tr("panel.material.shader.compile.keeps_last",
+					"  (the preview and the scene keep the last working pipeline)");
+			WLD_CORE_WARN("[material-ui] shader compile failed key='{0}': {1}", m_ShaderPath, firstError);
+			return;
+		}
+		if (m_ShaderParseError.empty())
+			m_ShaderErrorLine = 0;
+		// 记住这份成功产物:保存成功时用它把路径键提升到同一份内容(不再多跑一次 dxc)。
+		m_ShaderLastArtifact = outcome.Artifact;
+		m_ShaderLastArtifactSource = outcome.Source;
+		// 键按"这份源是否等于磁盘内容"选(而不是按请求时刻的脏标记):
+		//   相等 = 已保存内容 → 路径键(场景也换);不等 = 未保存的实时改动 → 预览键(只有预览变)。
+		const bool savedContents = !m_ShaderDiskText.empty() && outcome.Source == m_ShaderDiskText;
+		const std::string key = savedContents ? ShaderPathKey() : ShaderPreviewKey();
+		std::string summary = Wui::Tr("panel.material.shader.compile.ok", "Compiled: ")
+			+ std::to_string(outcome.Artifact.ByteSize())
+			+ Wui::Tr("panel.material.shader.compile.bytes", " bytes of SPIR-V")
+			+ Wui::Tr("panel.material.shader.compile.ok_elapsed", " in ")
+			+ FormatShaderMilliseconds(outcome.ElapsedMs)
+			+ Wui::Tr("panel.material.shader.compile.ok_key", " ms -> key ") + key;
+		if (outcome.CacheHit)
+			summary += Wui::Tr("panel.material.shader.compile.cached", " (cache hit)");
+		if (key.empty())
+		{
+			m_ShaderCompileStatus = summary + Wui::Tr("panel.material.shader.compile.no_key",
+				" — no Install: the shader has no logical path yet");
+			return;
+		}
+		const MaterialSurfaceRuntime::InstallResult install =
+			MaterialSurfaceRuntime::Install(key, outcome.Artifact);
+		if (install.Success)
+		{
+			// 预览材质指向本次的键:未保存时用 `<路径>#preview`(只有预览变),
+			// 保存后才指回路径键(与场景共用同一份已发布管线)。
+			// 键走 Material::SetSurfaceKeyOverride(不是 ShaderPath):预览替身材质没有
+			// 自己的 `.hlsl` 引用,覆盖键只影响渲染侧的管线选择,不写盘、不读注解。
+			if (m_Material)
+				m_Material->SetSurfaceKeyOverride(key);
+			m_ShaderInstalledKey = key;
+			m_ShaderInstalledVersion = MaterialSurfaceRuntime::PublishedVersion(key);
+			m_ShaderCompileStatus = summary
+				+ Wui::Tr("panel.material.shader.compile.ok_version", " (published v")
+				+ std::to_string(m_ShaderInstalledVersion) + ")";
+			WLD_CORE_INFO("[material-ui] shader pipeline installed key='{0}' variants={1} v{2} ({3} ms)",
+				key, install.Pipelines, m_ShaderInstalledVersion, outcome.ElapsedMs);
+		}
+		else
+		{
+			// 内核给了结构化原因(后端不支持 / 变体建不出来 / 设备缺失):照实报,预览保持上一份。
+			m_ShaderCompileStatus = summary + Wui::Tr("panel.material.shader.compile.not_published",
+				" — the pipeline was not published: ")
+				+ (install.Error.empty()
+					? Wui::Tr("panel.material.shader.compile.unknown_reason", "unknown reason") : install.Error)
+				+ Wui::Tr("panel.material.shader.compile.keeps_last",
+					"  (the preview and the scene keep the last working pipeline)");
+			WLD_CORE_WARN("[material-ui] shader pipeline not published key='{0}': {1}", key, install.Error);
+		}
+	}
+
+	std::string MaterialEditorPanel::ShaderCompileStatusLine() const
+	{
+		std::string status;
+		const bool debouncePending = m_ShaderEditTime > 0.0
+			&& m_ShaderBuffer.Revision() != m_ShaderRequestedRevision;
+		if (m_ShaderCompileInFlight)
+		{
+			const double elapsed = (ShaderWallClockSeconds() - m_ShaderCompileDispatchedTime) * 1000.0;
+			status = Wui::Tr("panel.material.shader.compile.running", "Compiling… (background thread, ")
+				+ FormatShaderMilliseconds(elapsed) + " ms)";
+		}
+		else if (debouncePending)
+		{
+			status = Wui::Tr("panel.material.shader.compile.debounce",
+				"Compiling… (waiting for the 350 ms debounce)");
+		}
+		else if (!m_ShaderCompileStatus.empty())
+		{
+			status = m_ShaderCompileStatus;
+		}
+		if (m_ShaderDiskChangedNotice)
+		{
+			if (!status.empty())
+				status += "   |   ";
+			status += Wui::Tr("panel.material.shader.disk.changed",
+				"The .hlsl changed on disk while this buffer had unsaved edits — nothing was "
+				"overwritten (Revert to load the file).");
+		}
+		if (!ShaderBackendIsVulkan())
+		{
+			// 后端提示(不是行为分支):GL 的实时预览归 M4-S4;这里照实说明 + 内核的结构化错误照报。
+			if (!status.empty())
+				status += "   |   ";
+			status += Wui::Tr("panel.material.shader.backend.hint",
+				"Live shader preview needs the Vulkan backend; OpenGL surface shaders land in "
+				"M4-S4, so the preview keeps the last working pipeline.");
+		}
+		return status;
+	}
+
+	void MaterialEditorPanel::PollShaderDiskChange(double now)
+	{
+		if (!m_ShaderMode || m_ShaderPath.empty())
+			return;
+		if (now - m_ShaderDiskPollTime < kShaderDiskPollSeconds)
+			return;
+		m_ShaderDiskPollTime = now;
+		const std::filesystem::path diskPath = ContentRootPath() / m_ShaderPath;
+		std::error_code statError;
+		const std::filesystem::file_time_type writeTime =
+			std::filesystem::last_write_time(diskPath, statError);
+		if (statError)
+			return;
+		const uintmax_t size = std::filesystem::file_size(diskPath, statError);
+		if (statError)
+			return;
+		if (m_ShaderDiskStampValid && writeTime == m_ShaderDiskWriteTime && size == m_ShaderDiskSize)
+			return;
+		// 指纹变了(可能是别的窗口保存 / 外部编辑器改写):读内容再比对,只有真的变了才算。
+		std::ifstream input(diskPath, std::ios::binary);
+		if (!input.is_open())
+			return;
+		std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+		if (text == m_ShaderDiskText)
+		{
+			// 只是时间戳/大小变了(内容相同):更新指纹,不当成外部改动。
+			m_ShaderDiskWriteTime = writeTime;
+			m_ShaderDiskSize = size;
+			m_ShaderDiskStampValid = true;
+			return;
+		}
+		if (m_ShaderBuffer.Dirty())
+		{
+			// 缓冲有未保存改动 → 只提示,**绝不**覆盖用户的输入。
+			if (!m_ShaderDiskChangedNotice)
+				WLD_CORE_INFO("[material-ui] shader '{0}' changed on disk; unsaved edits kept", m_ShaderPath);
+			m_ShaderDiskChangedNotice = true;
+			m_ShaderDiskWriteTime = writeTime;
+			m_ShaderDiskSize = size;
+			m_ShaderDiskStampValid = true;
+			return;
+		}
+		// 缓冲未修改 → 重新载入 + 重编译 + Install(路径键)(用户口径:D2 的"已保存版本"路径)。
+		m_ShaderBuffer.SetText(text);
+		m_ShaderHighlight.Clear();
+		RefreshShaderParams();
+		m_ShaderDiskText = text;
+		RecordShaderDiskStamp(text);
+		m_ShaderDiskChangedNotice = false;
+		m_ShaderSeenRevision = m_ShaderBuffer.Revision();
+		m_ShaderRequestedRevision = ~0ull;
+		m_ShaderForceCompile = true;
+		m_ShaderStatus = Wui::Tr("panel.material.shader.status.reloaded",
+			"Reloaded the changed .hlsl from disk: ") + m_ShaderPath;
+		m_ShaderStatusIsError = false;
+		WLD_CORE_INFO("[material-ui] shader '{0}' reloaded from disk (hot reload)", m_ShaderPath);
+	}
+
+	float MaterialEditorPanel::DrawShaderDiagnostics(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		if (m_ShaderDiagnostics.empty() || rect.H <= 0.0f)
+			return 0.0f;
+		const Wui::WuiTheme& theme = host.Theme();
+		const float rowHeight = 16.0f;
+		const int rows = std::min<int>(static_cast<int>(m_ShaderDiagnostics.size()),
+			std::min(4, static_cast<int>(rect.H / rowHeight)));
+		if (rows <= 0)
+			return 0.0f;
+		float used = 0.0f;
+		for (int index = 0; index < rows; ++index)
+		{
+			const ShaderDiagnostic& diagnostic = m_ShaderDiagnostics[static_cast<size_t>(index)];
+			const Wui::WuiRect rowRect { rect.X, rect.Y + used, std::max(40.0f, rect.W), rowHeight };
+			const bool hovered = ctx.IsHovered(rowRect);
+			// T2c:只有**用户源**行列号的条目真的会跳行(T2b),所以也只有它们才带"可点击"
+			// 的视觉/无障碍 affordance —— 非用户源行(包装模板上下文)不再给手型光标,
+			// 也不登记 interactive,避免"看起来能点、点了不动"。
+			const bool canJump = diagnostic.InUserSource && diagnostic.Line > 0;
+			Wui::HoverRow(ctx, rowRect, hovered, false, theme, 2.0f);
+			const bool isError = diagnostic.Severity != "warning";
+			const std::string text = FormatShaderDiagnostic(diagnostic);
+			Wui::Label(ctx, { rowRect.X + 4.0f, rowRect.Y + 1.0f },
+				EllipsizeToWidth(ctx, text, std::max(40.0f, rowRect.W - 8.0f), 11.0f),
+				isError ? theme.Danger : theme.TextMuted, 11.0f);
+			if (hovered && canJump)
+				ctx.SetCursor(Wui::WuiCursor::Hand);
+			{
+				Wui::WuiAccessNode node;
+				node.Id = Wui::HashId(("material.shader.diagnostic." + std::to_string(index)).c_str());
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "button";
+				node.Label = Wui::Tr("panel.material.shader.diagnostic.label", "Diagnostic ")
+					+ std::to_string(index + 1);
+				node.Value = text;
+				// 不可跳行的行不要在 tooltip 里承诺"点击跳行"(affordance 与真实行为一致)。
+				node.Tooltip = canJump
+					? text + "\n" + Wui::Tr("panel.material.shader.diagnostic.hint",
+						"Click to move the caret to this line in the code column.")
+					: text;
+				node.Rect = rowRect;
+				node.Enabled = true;
+				node.Interactive = canJump;
+				node.Visible = true;
+				Wui::WuiAccessibility::Get().Register(node);
+			}
+			// T2b:只有**用户源**行列号的条目可点击跳行 —— 包装模板上下文行(dxc 的
+			// `In file included from …surface_wrapper.hlsl:386`)的 Line 是模板行号,
+			// 点它会跳到用户缓冲区的无关位置。
+			if (hovered && ctx.IsClicked(rowRect) && canJump)
+			{
+				// 跳行:光标落到该行行首(错误行由 options.ErrorLine 标红;控件自己跟随光标滚动)。
+				const std::pair<size_t, size_t> range = m_ShaderBuffer.LineRange(diagnostic.Line - 1);
+				m_ShaderBuffer.SetCaret(range.first);
+				ctx.SetFocus(Wui::HashId("material.shader.code"));
+				m_ShaderStatus = Wui::Tr("panel.material.shader.diagnostic.jumped", "Caret moved to line ")
+					+ std::to_string(diagnostic.Line)
+					+ Wui::Tr("panel.material.shader.diagnostic.jumped.unit", "");
+				m_ShaderStatusIsError = false;
+			}
+			used += rowHeight;
+		}
+		if (static_cast<int>(m_ShaderDiagnostics.size()) > rows && rect.H - used >= 14.0f)
+		{
+			const std::string more = Wui::Tr("panel.material.shader.diagnostic.more", "+")
+				+ std::to_string(m_ShaderDiagnostics.size() - static_cast<size_t>(rows))
+				+ Wui::Tr("panel.material.shader.diagnostic.more_suffix", " more diagnostics");
+			Wui::Label(ctx, { rect.X + 4.0f, rect.Y + used + 1.0f }, more, theme.TextMuted, 11.0f);
+			used += 14.0f;
+		}
+		return used;
 	}
 
 	void MaterialEditorPanel::RefreshShaderParams()
@@ -4681,8 +5185,61 @@ namespace World
 		}
 		m_ShaderBuffer.MarkSaved();
 		RefreshShaderParams();
-		m_ShaderStatus = Wui::Tr("panel.material.shader.status.saved", "Saved ") + m_ShaderPath;
-		m_ShaderStatusIsError = false;
+		// M4-S3(D2):保存成功 = 写盘 + Install("<路径>", artifact)—— 这时场景才换管线。
+		m_ShaderDiskText = m_ShaderBuffer.Text();
+		RecordShaderDiskStamp(m_ShaderDiskText);
+		m_ShaderDiskChangedNotice = false;
+		bool promoted = false;
+		bool publishFailed = false;
+		std::string publishNote;
+		if (!m_ShaderLastArtifactSource.empty() && m_ShaderLastArtifactSource == m_ShaderBuffer.Text())
+		{
+			const std::string key = ShaderPathKey();
+			const MaterialSurfaceRuntime::InstallResult install =
+				MaterialSurfaceRuntime::Install(key, m_ShaderLastArtifact);
+			if (install.Success)
+			{
+				// 预览材质从 `<路径>#preview` 指回普通键:场景与预览从此共用同一份已发布管线。
+				if (m_Material)
+					m_Material->SetSurfaceKeyOverride(key);
+				m_ShaderInstalledKey = key;
+				m_ShaderInstalledVersion = MaterialSurfaceRuntime::PublishedVersion(key);
+				promoted = true;
+				WLD_CORE_INFO("[material-ui] shader saved + promoted to key '{0}' v{1}",
+					key, m_ShaderInstalledVersion);
+			}
+			else
+			{
+				publishFailed = true;
+				publishNote = Wui::Tr("panel.material.shader.status.saved_not_published",
+					"Saved, but the pipeline was not published: ")
+					+ (install.Error.empty()
+						? Wui::Tr("panel.material.shader.compile.unknown_reason", "unknown reason")
+						: install.Error);
+			}
+		}
+		if (promoted)
+		{
+			m_ShaderStatus = Wui::Tr("panel.material.shader.status.saved_live", "Saved and live: ")
+				+ m_ShaderPath;
+			m_ShaderStatusIsError = false;
+		}
+		else
+		{
+			// 带错保存 / 编译还没回来:照常写盘(用户意图),但不 Install ——
+			// 场景继续用上一份可用管线(D6:不做静默降级,状态行说明)。
+			const std::string reason = publishFailed
+				? publishNote
+				: (m_ShaderCompileFailed
+					? Wui::Tr("panel.material.shader.status.saved_errors",
+						"the shader has errors — the scene keeps the last good pipeline")
+					: Wui::Tr("panel.material.shader.status.saved_compiling",
+						"compiling — the scene keeps the last good pipeline until it succeeds"));
+			m_ShaderStatus = Wui::Tr("panel.material.shader.status.saved", "Saved ") + m_ShaderPath
+				+ " (" + reason + ")";
+			// 带错保存本身不算操作失败(文件确实写下去了);只有发布失败才是错误色。
+			m_ShaderStatusIsError = publishFailed;
+		}
 		WLD_CORE_INFO("[material-ui] saved shader '{0}' ({1} bytes)", m_ShaderPath, m_ShaderBuffer.Text().size());
 	}
 
@@ -4724,45 +5281,13 @@ namespace World
 		if (m_ShaderCompileScheduled)
 		{
 			m_ShaderCompileScheduled = false;
-			// 按需编译:只跑内核的编译入口拿结构化诊断(带用户源行列号),不建 PSO、不换管线
-			// (防抖编译 + 原子换管线是 M4-S3 的范围)。
-			const SurfaceCompileResult result =
-				MaterialSurfaceCompiler::CompileSurface(m_ShaderBuffer.Text(), m_ShaderPath);
-			m_ShaderDiagnostics.clear();
-			m_ShaderCompileFailed = !result.Success;
-			int firstUserLine = 0;
-			for (const SurfaceDiagnostic& diagnostic : result.Diagnostics)
-			{
-				std::string text = diagnostic.Severity + ": ";
-				if (diagnostic.InUserSource)
-				{
-					text += "line " + std::to_string(diagnostic.UserLine) + ":"
-						+ std::to_string(diagnostic.UserColumn) + "  ";
-					if (firstUserLine == 0)
-						firstUserLine = static_cast<int>(diagnostic.UserLine);
-				}
-				text += diagnostic.Message;
-				m_ShaderDiagnostics.push_back(std::move(text));
-			}
-			if (m_ShaderDiagnostics.empty() && !result.Success)
-				m_ShaderDiagnostics.push_back(result.RawToolOutput.empty()
-					? std::string("the compiler returned no diagnostics") : result.RawToolOutput);
-			if (result.Success)
-			{
-				if (m_ShaderParseError.empty())
-					m_ShaderErrorLine = 0;
-				m_ShaderCompileStatus = Wui::Tr("panel.material.shader.compile.ok", "Compiled: ")
-					+ std::to_string(result.Artifact.ByteSize())
-					+ Wui::Tr("panel.material.shader.compile.bytes", " bytes of SPIR-V")
-					+ (result.CacheHit ? Wui::Tr("panel.material.shader.compile.cached", " (cache hit)") : std::string());
-			}
-			else
-			{
-				if (m_ShaderParseError.empty() && firstUserLine > 0)
-					m_ShaderErrorLine = firstUserLine;
-				m_ShaderCompileStatus = Wui::Tr("panel.material.shader.compile.failed", "Compile failed");
-			}
+			// 手动 Compile = 跳过消抖的立即编译(M4-S3:实际编译仍在工作线程,不阻塞 UI 帧)。
+			m_ShaderForceCompile = true;
 		}
+		// M4-S3:防抖 → 后台编译 → 结果回主线程 Install;顺带轮询磁盘(.hlsl 热重载)。
+		const double now = ShaderWallClockSeconds();
+		PumpShaderCompile(now);
+		PollShaderDiskChange(now);
 		const float headerHeight = DrawShaderHeader(ctx, { rect.X, rect.Y, rect.W, kHeaderBaseHeight }, host);
 		const float pad = theme.Pad;
 		const float gap = theme.PadSmall;
@@ -4873,7 +5398,9 @@ namespace World
 			{ "material.shader.save", Wui::Tr("panel.material.shader.save", "Save"),
 				Wui::Tr("panel.material.shader.save.tooltip",
 					"Save (Ctrl+S): write the source back to the .hlsl on disk (temporary file + atomic "
-					"replace). The parameter annotations in the file are the single source of truth."),
+					"replace). The parameter annotations in the file are the single source of truth. "
+					"Saving also publishes the compiled pipeline for the scene: unsaved edits only "
+					"change this panel's preview."),
 				!readOnly, true },
 			{ "material.shader.revert", Wui::Tr("panel.material.shader.revert", "Revert"),
 				Wui::Tr("panel.material.shader.revert.tooltip",
@@ -4881,8 +5408,9 @@ namespace World
 				true, false },
 			{ "material.shader.compile", Wui::Tr("panel.material.shader.compile", "Compile"),
 				Wui::Tr("panel.material.shader.compile.tooltip",
-					"Compile: run the engine surface-function compiler once and show its diagnostics "
-					"(line numbers refer to this file). Live/recompiled preview lands with M4-S3."),
+					"Compile now (skips the 350 ms debounce): the surface-function compiler runs on a "
+					"worker thread and its diagnostics refer to line:column in this file. Live edits "
+					"are compiled automatically; the scene switches only after Save."),
 				true, false },
 			{ "material.shader.reveal", Wui::Tr("panel.material.shader.reveal", "Reveal"),
 				Wui::Tr("panel.material.shader.reveal.tooltip",
@@ -4968,7 +5496,8 @@ namespace World
 			node.Label = Wui::Tr("panel.material.shader.dirty.label", "Unsaved changes");
 			node.Value = dirty ? "dirty" : "clean";
 			node.Tooltip = Wui::Tr("panel.material.shader.dirty.tooltip",
-				"* = the editor buffer differs from the .hlsl on disk.");
+				"* = the editor buffer differs from the .hlsl on disk. Unsaved edits are compiled and "
+				"shown in this panel's preview only; the scene switches after Save.");
 			node.Rect = { x, y + actionsHeight + 4.0f, 24.0f, 14.0f };
 			node.Enabled = true;
 			node.Interactive = false;
@@ -5009,8 +5538,13 @@ namespace World
 	{
 		const Wui::WuiTheme& theme = host.Theme();
 		Wui::PanelBackground(ctx, rect, theme.ContentBg, theme.Radius);
+		// M4-S3:诊断列表住在代码列底部(每条可点击跳行);没有诊断时一点位置都不占。
+		const float wantedStrip = m_ShaderDiagnostics.empty() ? 0.0f
+			: (static_cast<float>(std::min<int>(static_cast<int>(m_ShaderDiagnostics.size()), 4)) * 16.0f
+				+ (m_ShaderDiagnostics.size() > 4 ? 14.0f : 0.0f));
+		const float stripHeight = std::min(wantedStrip, std::max(0.0f, rect.H - 12.0f - 40.0f));
 		const Wui::WuiRect editorRect { rect.X + 6.0f, rect.Y + 6.0f,
-			std::max(40.0f, rect.W - 12.0f), std::max(40.0f, rect.H - 12.0f) };
+			std::max(40.0f, rect.W - 12.0f), std::max(40.0f, rect.H - 12.0f - stripHeight) };
 		const bool readOnly = host.IsReadOnlyMode();
 		const float fontSize = std::max(10.0f, std::min(32.0f,
 			Editor::EditorPreferences::Get().Data().ScriptFontSize));
@@ -5075,6 +5609,9 @@ namespace World
 			if (m_ShaderBuffer.Text().find(kMarker) != std::string::npos)
 				RefreshShaderParams();
 		}
+		if (stripHeight > 0.0f)
+			DrawShaderDiagnostics(ctx, { editorRect.X, editorRect.Y + editorRect.H + 2.0f,
+				editorRect.W, stripHeight }, host);
 	}
 
 	// ---- M4-S2:参数列(注解 = 事实源;改默认值 = 改写注解) ----
@@ -5284,7 +5821,8 @@ namespace World
 		}
 		y += 18.0f;
 
-		const Wui::WuiRect content { rect.X, y, rect.W, std::max(20.0f, rect.Y + rect.H - y - 22.0f) };
+		// M4-S3:底部现在是两行 —— 编译状态(字节数 + 耗时 + 键 / 第一条错误的行列号)在上一行。
+		const Wui::WuiRect content { rect.X, y, rect.W, std::max(20.0f, rect.Y + rect.H - y - 38.0f) };
 		// 内容高度 ≈ 组头 20 + 每行 26(与下面绘制一致;折叠组只多留一点余量,不影响可读性)。
 		const std::string defaultGroupLabel =
 			Wui::Tr("panel.material.shader.params.group.default", "Parameters");
@@ -5398,14 +5936,36 @@ namespace World
 				Wui::Tr("panel.material.shader.params.none",
 					"This shader declares no parameters yet — add //! param lines in the code column."),
 				theme.TextMuted, 12.0f);
-		// 底部状态行(保存 / 编译 / 参数编辑结果)。
+		// 底部状态行:M4-S3 的编译状态(成功 = 字节数 + 耗时 + 键;失败 = 第一条错误含行列号)
+		// 单独占一行并给稳定 a11y id(material.shader.compile.status),探针按它读结果。
 		const float statusY = rect.Y + rect.H - 18.0f;
-		const std::string status = !m_ShaderCompileStatus.empty()
-			? (m_ShaderStatus.empty() ? m_ShaderCompileStatus : m_ShaderStatus + "   |   " + m_ShaderCompileStatus)
-			: m_ShaderStatus;
+		const float compileStatusY = statusY - 14.0f;
+		const std::string compileStatus = ShaderCompileStatusLine();
+		if (!compileStatus.empty())
+		{
+			Wui::Label(ctx, { rect.X + 2.0f, compileStatusY },
+				EllipsizeToWidth(ctx, compileStatus, std::max(40.0f, rect.W - 4.0f), 11.0f),
+				m_ShaderCompileFailed ? theme.Danger : theme.TextMuted, 11.0f);
+		}
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.compile.status");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.shader.compile.status.label", "Shader compile status");
+			node.Value = compileStatus;
+			node.Tooltip = compileStatus;
+			node.Rect = { rect.X, compileStatusY - 2.0f, std::max(40.0f, rect.W - 4.0f), 16.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		const std::string status = m_ShaderStatus;
 		Wui::Label(ctx, { rect.X + 2.0f, statusY },
 			EllipsizeToWidth(ctx, status, std::max(40.0f, rect.W - 4.0f), 11.0f),
-			(m_ShaderStatusIsError || m_ShaderCompileFailed) ? theme.Danger : theme.TextMuted, 11.0f);
+			m_ShaderStatusIsError ? theme.Danger : theme.TextMuted, 11.0f);
 		{
 			Wui::WuiAccessNode node;
 			node.Id = Wui::HashId("material.shader.status");
@@ -5429,9 +5989,9 @@ namespace World
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 			node.Kind = "text";
 			node.Label = Wui::Tr("panel.material.shader.diagnostics", "Compiler diagnostics");
-			node.Value = m_ShaderDiagnostics.front();
-			node.Tooltip = m_ShaderDiagnostics.front();
-			node.Rect = { rect.X, statusY - 20.0f, std::max(40.0f, rect.W - 4.0f), 16.0f };
+			node.Value = FormatShaderDiagnostic(m_ShaderDiagnostics.front());
+			node.Tooltip = FormatShaderDiagnostic(m_ShaderDiagnostics.front());
+			node.Rect = { rect.X, compileStatusY - 16.0f, std::max(40.0f, rect.W - 4.0f), 14.0f };
 			node.Enabled = true;
 			node.Interactive = false;
 			node.Visible = true;

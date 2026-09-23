@@ -5,13 +5,20 @@
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialParams.h"
+// M4-S3:编译产物(SurfaceArtifact)按值存在面板状态里,头文件必须能看到它的完整定义。
+#include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/Renderer.h"
 #include "World/RHI/Rhi.h"
 #include "World/WUI/WuiTextBuffer.h"
 
+#include <condition_variable>
+#include <cstdint>
+#include <filesystem>
 #include <map>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace World
@@ -131,10 +138,71 @@ namespace World
 		bool m_ShaderCompileScheduled = false; // 面板自绘的"编译"按钮 → 下一帧执行(避免在绘制中调工具)
 		// 会话内记住代码列宽(与预览列宽的记住口径一致;<= 0 = 还没设过)。
 		float m_ShaderCodeColumnWidth = 0.0f;
-		// 编译(按需):状态行 + 结构化诊断(S3 才做防抖 + 换管线)。
-		std::string m_ShaderCompileStatus;
+		// ---- M4-S3:代码态实时预览(防抖 + 后台编译 + 键分离)----
+		// 一条结构化诊断:Line/Column 是**用户源**的 1 基行列号(0 = 不在用户源里,dxc 报的是包装模板)。
+		struct ShaderDiagnostic
+		{
+			std::string Severity;   // "error" / "warning"
+			int Line = 0;
+			int Column = 0;
+			std::string Message;
+			bool InUserSource = false;
+		};
+		// 后台编译的输入 / 输出:工作线程只碰传给它的副本,结果经互斥量交回主线程。
+		struct ShaderCompileRequest
+		{
+			uint64_t Serial = 0;
+			std::string Source;
+			std::string PermutationKey;   // 编译缓存键 = 逻辑路径(与 M4-S2 同口径)
+		};
+		struct ShaderCompileOutcome
+		{
+			uint64_t Serial = 0;
+			bool Success = false;
+			bool CacheHit = false;
+			std::string Source;           // 这份结果对应的源(主线程据此判"键"与"是否已过期")
+			SurfaceArtifact Artifact;
+			std::vector<ShaderDiagnostic> Diagnostics;
+			std::string RawToolOutput;
+			double ElapsedMs = 0.0;
+		};
+		// 派工口径:最后一次编辑后 350ms 触发一次编译(300–500 可调)。
+		static constexpr double kShaderCompileDebounceSeconds = 0.35;
+		// `.hlsl` 热重载的轮询节流(单个文件 stat,不递归目录)。
+		static constexpr double kShaderDiskPollSeconds = 0.75;
+		std::string m_ShaderCompileStatus;      // 状态行:成功 = 字节数 + 耗时 + 键;失败 = 第一条错误(含行列号)
 		bool m_ShaderCompileFailed = false;
-		std::vector<std::string> m_ShaderDiagnostics;
+		std::vector<ShaderDiagnostic> m_ShaderDiagnostics;
+		// 后台编译线程:单飞 + 后来者覆盖前者;主线程**绝不**调 dxc。
+		std::thread m_ShaderCompileThread;
+		std::mutex m_ShaderCompileMutex;
+		std::condition_variable m_ShaderCompileCv;
+		ShaderCompileRequest m_ShaderCompileRequest;   // 待编译请求(新请求覆盖旧的未启动请求)
+		bool m_ShaderCompileRequestPending = false;
+		ShaderCompileOutcome m_ShaderCompileOutcome;   // 未消费的结果(新结果覆盖未消费的旧结果)
+		bool m_ShaderCompileResultReady = false;
+		bool m_ShaderCompileThreadStop = false;
+		uint64_t m_ShaderCompileSerial = 0;
+		bool m_ShaderCompileInFlight = false;          // 主线程视角:已有请求在飞(单飞)
+		uint64_t m_ShaderRequestedRevision = ~0ull;    // 已投递请求对应的缓冲区版本
+		uint64_t m_ShaderSeenRevision = 0;             // 上次看到的缓冲区版本(消抖计时的起点)
+		double m_ShaderEditTime = 0.0;                 // 最后一次编辑的墙钟(0 = 没有待编译的编辑)
+		double m_ShaderCompileDispatchedTime = 0.0;    // 投递时刻(状态行显示耗时)
+		bool m_ShaderForceCompile = false;             // 打开 / 重载 / 保存 / Compile 按钮:跳过消抖立即编译
+		// 键分离(D2)的事实:磁盘内容。缓冲与它相等 = 已保存 → 路径键;不等 = 未保存 → 预览键。
+		std::string m_ShaderDiskText;
+		std::string m_ShaderInstalledKey;              // 预览材质当前指向的键(诊断/探针可读)
+		uint64_t m_ShaderInstalledVersion = 0;         // 该键的发布版本(0 = 从未安装)
+		// 最近一次**成功**编译的产物与它对应的源:保存成功时用它把路径键提升到同一份内容
+		// (省掉一次重复编译;带错保存时它保留上一份可用产物,正好是"场景仍用上一份"的实现)。
+		SurfaceArtifact m_ShaderLastArtifact;
+		std::string m_ShaderLastArtifactSource;
+		// `.hlsl` 热重载:磁盘指纹(未修改的缓冲 → 重载 + 重编译 + Install(路径键))。
+		std::filesystem::file_time_type m_ShaderDiskWriteTime {};
+		uintmax_t m_ShaderDiskSize = 0;
+		bool m_ShaderDiskStampValid = false;
+		double m_ShaderDiskPollTime = 0.0;
+		bool m_ShaderDiskChangedNotice = false;        // 磁盘变了但缓冲有未保存改动 → 只提示,不覆盖
 		// 分组折叠态(注解里的 group("…") 直接当分组名;空组名 = "Parameters")。
 		std::map<std::string, bool> m_ShaderGroupOpen;
 		// 参数的文本编辑缓冲(Vec2/Vec4 这类没有专用控件的类型用逗号文本输入;
@@ -315,6 +383,27 @@ namespace World
 		void LoadShaderFromDisk();
 		// 保存:临时文件 + 同目录原子替换(与脚本编辑器/材质保存同一口径)。
 		void SaveShaderDocument();
+		// ---- M4-S3:代码态实时预览 ----
+		// 帧内开头泵一次:消抖计时 → 消费后台结果(回主线程 Install)→ 投递下一次编译(单飞)。
+		void PumpShaderCompile(double now);
+		// 投递一份编译请求给工作线程(请求/结果都按"后来者覆盖前者"换代)。
+		void DispatchShaderCompile(const std::string& source);
+		// 工作线程主体:只在这里跑 dxc(不碰任何 UI / 渲染状态)。
+		void ShaderCompileWorkerLoop();
+		// 主线程:消费一份编译结果 —— 成功才 Install(键按"缓冲是否已保存"选),失败不 Install。
+		void ApplyShaderCompileOutcome(const ShaderCompileOutcome& outcome);
+		// 键(D2):缓冲有未保存改动 → `<路径>#preview`;否则 → `<路径>`(场景与预览共用)。
+		std::string ShaderPathKey() const;
+		std::string ShaderPreviewKey() const;
+		// 磁盘热重载轮询(节流):缓冲未修改 → 重载 + 重编译 + Install(路径键);有改动 → 只提示。
+		void PollShaderDiskChange(double now);
+		void RecordShaderDiskStamp(const std::string& text);
+		// 代码列底部的诊断列表(每条可点击跳行);返回占用高度。
+		float DrawShaderDiagnostics(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// 诊断 → 单行文本("line L:C  message")。
+		static std::string FormatShaderDiagnostic(const ShaderDiagnostic& diagnostic);
+		// 状态行文案:编译结果(成功 = 字节数 + 耗时 + 键;失败 = 第一条错误含行列号)。
+		std::string ShaderCompileStatusLine() const;
 		// 重新解析注解参数表 + 定位错误行;顺带把认识的参数映射进预览替身材质。
 		void RefreshShaderParams();
 		// 把某个参数的默认值写回**注解文本**(参数默认值的唯一事实源是文件本身)。

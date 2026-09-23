@@ -196,6 +196,19 @@ namespace World
 
 		// 生效的 shader 路径(可能继承父级;空 = 不做表面函数)。
 		const std::string& ShaderPath() const { return m_Desc.ShaderPath; }
+		// ---- M4-S3:表面管线键 ----
+		// 键 = 表面管线在 MaterialSurfaceRuntime 里的身份(不透明字符串):
+		//  - 默认 = 规范化后的 ShaderPath(),例如 "shaders/glass.hlsl" —— 已保存的材质
+		//    在场景与预览里共用同一份已发布管线;
+		//  - 编辑器里**未保存**的实时改动把键覆盖成 `<路径>#preview`(SetSurfaceKeyOverride),
+		//    只有该面板的预览材质用它 —— 主场景因此永远看不到未保存的编辑(D2 的键分离);
+		//  - 空串 = 该材质不参与表面管线(没有 shader 引用)。
+		std::string SurfaceKey() const;
+		void SetSurfaceKeyOverride(std::string key) { m_SurfaceKeyOverride = std::move(key); }
+		const std::string& SurfaceKeyOverride() const { return m_SurfaceKeyOverride; }
+		// M4-S3:引用的 `.hlsl` 内容变化(热重载)后调用:Revision 自增 → 渲染侧按 Revision
+		// 重建该材质的参数 UBO / 表面描述符集(与 InvalidateTextures 同款语义)。
+		void InvalidateShader() { BumpRevision(); }
 		// 本文件是否显式写了 `Shader:`。
 		bool HasShaderOverride() const { return m_HasShaderOverride; }
 		// shader 读不到 / 注解解析失败的可读原因(空 = 没问题)。
@@ -256,6 +269,7 @@ namespace World
 		std::string m_ShaderWarning;                   // M4-S2:shader 读不到 / 注解解析失败
 		Ref<Material> m_Parent;      // M3:解析到的父级实例(共享所有权;nullptr = 引擎默认/退化)
 		std::string m_ParentWarning; // M3:父级不可用的可读原因
+		std::string m_SurfaceKeyOverride;  // M4-S3:表面管线键覆盖(不序列化;预览材质用)
 		uint32_t m_Revision = 1;     // 0 保留给"从未上传"
 		bool m_Dirty = false;
 		void RecomputeParamWarnings();  // 覆盖集 → ParamWarnings()

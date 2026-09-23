@@ -67,7 +67,8 @@ namespace World
 		bool IsFileNewer(const Material& material) const;
 
 		// W5-L1:帧边界轮询外部改动(内容哈希 + debounce;材质 150ms、贴图 500ms,互相独立)。
-		//  - 监听集合 = 当前缓存的材质 + 它们引用的贴图(Albedo/Normal);首次见到即建立基线,不报告;
+		//  - 监听集合 = 当前缓存的材质 + 它们引用的贴图(Albedo/Normal)+ 引用的 `.hlsl`
+		//    (M4-S3:表面函数);首次见到即建立基线,不报告;
 		//  - clean 材质:原地 Reload(实例同一性保持,Revision 前进)→ ReloadedMaterials;
 		//    dirty 材质:SkippedDirtyMaterials(只报告,绝不覆盖未保存修改);
 		//    读取/解析失败:FailedMaterials(保留旧内存态,详见 GetLoadWarning);
@@ -120,5 +121,7 @@ namespace World
 		static constexpr double kTextureDebounceSeconds = 0.5;
 		AssetFileWatch m_MaterialWatch { kMaterialDebounceSeconds };
 		AssetFileWatch m_TextureWatch { kTextureDebounceSeconds };
+		// M4-S3:材质引用的 `.hlsl`(表面函数)内容变化监听(与材质同一节拍)。
+		AssetFileWatch m_ShaderWatch { kMaterialDebounceSeconds };
 	};
 }

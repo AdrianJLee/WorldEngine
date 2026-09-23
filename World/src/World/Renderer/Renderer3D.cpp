@@ -4,12 +4,16 @@
 
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/MaterialTextureCache.h"
+#include "World/Renderer/MaterialSurfaceRuntime.h"
+#include "World/Renderer/MaterialSurfaceRuntimeInternal.h"
 #include "World/RHI/Vulkan/VulkanResources.h"
 #include "World/Renderer/ShaderUtils.h"
 
 #include <cstring>
 #include <filesystem>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <glm/gtc/matrix_access.hpp>
 
@@ -29,6 +33,11 @@ namespace World
 		// 64 会让第 65 个之后的物体静默消失。代价只是首帧按需创建的 UBO/描述符集
 		// (144B × 3 帧槽位 × 1024 ≈ 440KB),没有预分配成本;真正的合并进 D8b 实例化。
 		constexpr uint32_t kObjectsPerFrame = 1024;
+
+		// M4-S3:共享零值参数缓冲的字节数。非表面绘制也要把 set 1 binding 4 写掉
+		// (描述符集跨帧复用,不能留上一批已释放的参数缓冲),引擎着色器不读它,
+		// 所以只需要"够大、永远合法"。表面材质自己用反射出的真实大小创建缓冲。
+		constexpr uint32_t kDefaultParamBlockBytes = 1024;
 
 		// D5c-4c:蒙皮调色板池分成互不重叠的两段(每份 8KB 的 BoneUniforms UBO)。
 		//  - 顺序分配区 [0, MaxSkinnedDrawsPerFrame):SubmitSkinned / SubmitShadowSkinned 用
@@ -169,6 +178,39 @@ namespace World
 				uint32_t Revision[Renderer::FramesInFlight] = {};
 			};
 			std::unordered_map<const Material*, MaterialGpu> MaterialCache;
+			// ---- M4-S3:表面函数材质(HLSL 代码态)----
+			// set 2 的布局与引擎材质不同(1/2 + 4..11 贴图参数),所以单独一份缓存。
+			Rhi::Handle<Rhi::DescriptorSetLayout> SurfaceMaterialLayout;
+			// 每个帧槽位的"默认表面材质集":绑定时永远合法(白色 albedo/normal + 全部贴图槽
+			// 白色),用于"表面材质描述符集刚建好、还没轮到通道外补写"的那一帧 ——
+			// 绝不把没写过的描述符集绑给管线(裸描述符 = 验证层报错 + 驱动未定义行为)。
+			Rhi::Handle<Rhi::DescriptorSet> SurfaceDefaultSets[Renderer::FramesInFlight];
+			// set 1 binding 4(参数块)的共享兜底缓冲:描述符集跨帧复用,非表面绘制也要写掉
+			// 这个 binding,否则会留着上一批已释放的参数缓冲(野描述符)。
+			Rhi::Handle<Rhi::Buffer> SurfaceDefaultParamBuffer;
+			struct SurfaceMaterialGpu
+			{
+				// 缓存键是裸指针(与 MaterialGpu 同款);这里持有强引用防止 Mesh/Material 被
+				// 释放后新对象复用同一地址 → 命中别人的表面状态。
+				Ref<Material> Owner;
+				std::string Key;                 // 表面键(材质 Revision 变化时重算)
+				uint32_t KeyRevision = 0;
+				size_t Version = 0;              // 已发布版本快照(0 = 从未安装)
+				MaterialParamLayout Layout;      // 与该版本对应(反射自编译产物)
+				bool HasLayout = false;
+				uint32_t ParamSize = 0;          // 参数块字节数(0 = 没有参数)
+				// 逐槽位状态:参数 UBO / 描述符集 / 已写入的 binding 掩码 / 打包与写入时的
+				// 材质 Revision(见 MaterialGpu.Revision 的说明:必须按槽位记)。
+				Rhi::Handle<Rhi::Buffer> ParamBuffers[Renderer::FramesInFlight];
+				Rhi::Handle<Rhi::DescriptorSet> Sets[Renderer::FramesInFlight];
+				uint32_t WrittenMask[Renderer::FramesInFlight] = {};
+				uint32_t ParamRevision[Renderer::FramesInFlight] = {};
+				uint32_t DescRevision[Renderer::FramesInFlight] = {};
+			};
+			std::unordered_map<const Material*, SurfaceMaterialGpu> SurfaceCache;
+			// 表面材质描述符的挂起写入(与 PendingMaterialUpdates 同款:通道录制期间不写描述符)。
+			std::vector<std::pair<const Material*, Ref<Material>>> PendingSurfaceUpdates;
+			std::vector<uint32_t> PendingSurfaceSlots;
 			// set 0(全局相机)描述符集:预览这类"非 SceneRenderer 调用方"通过
 			// SetGlobalDescriptorSet 传入,在管线绑定后(布局可用时)统一绑定。
 			Rhi::Handle<Rhi::DescriptorSet> GlobalSet;
@@ -215,6 +257,9 @@ namespace World
 		// 否则"后定义先调用"过不了编译(实测 C2660)。
 		void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const ObjectUniforms& uniforms,
 			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set,
+			Rhi::Handle<Rhi::Buffer>& boneBuffer, const Rhi::Handle<Rhi::Buffer>& paramBuffer);
+		void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const ObjectUniforms& uniforms,
+			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set,
 			Rhi::Handle<Rhi::Buffer>& boneBuffer);
 
 		// D5c-3b:蒙皮提交会用到材质描述符集,而它的定义在下方(实测 C3861)→ 先声明。
@@ -233,7 +278,7 @@ namespace World
 		// (GL 像素基线打红、实体 id 附件却一致)。占用表:0=相机、1=物体、2=灯光、3=骨骼。
 		void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const ObjectUniforms& uniforms,
 			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set,
-			Rhi::Handle<Rhi::Buffer>& boneBuffer)
+			Rhi::Handle<Rhi::Buffer>& boneBuffer, const Rhi::Handle<Rhi::Buffer>& paramBuffer)
 		{
 			// 每对象 UBO 独立分配:提交期写入不会与同帧其它对象互相覆盖。
 			if (!buffer)
@@ -256,8 +301,25 @@ namespace World
 			bones.Binding = 3;
 			bones.Type = Rhi::DescriptorType::UniformBuffer;
 			bones.Buffer = boneBuffer ? boneBuffer : state.DefaultPaletteBuffer;
-			set->Update({ write, bones });
+			// M4-S3:binding 4 = 表面材质参数块(register b4, space1)。**每次**都要写:
+			// 描述符集按"帧槽位 × 对象序号"复用,同一序号在不同帧可能分别是表面绘制与
+			// 引擎绘制 —— 只写 1/3 会让 binding 4 留着上一批已释放的参数缓冲(野描述符)。
+			// 非表面绘制用共享的零值参数缓冲兜底(引擎着色器不读它,只为"永不留野句柄")。
+			Rhi::DescriptorWrite params;
+			params.Binding = 4;
+			params.Type = Rhi::DescriptorType::UniformBuffer;
+			params.Buffer = paramBuffer ? paramBuffer : state.SurfaceDefaultParamBuffer;
+			set->Update({ write, bones, params });
 			(void)slot; (void)index;
+		}
+
+		// 不关心参数块的调用方(阴影/常量色/引擎路径):binding 4 交给共享零值缓冲。
+		void WriteObjectUniforms(State& state, uint32_t slot, uint32_t index, const ObjectUniforms& uniforms,
+			Rhi::Handle<Rhi::Buffer>& buffer, Rhi::Handle<Rhi::DescriptorSet>& set,
+			Rhi::Handle<Rhi::Buffer>& boneBuffer)
+		{
+			WriteObjectUniforms(state, slot, index, uniforms, buffer, set, boneBuffer,
+				state.SurfaceDefaultParamBuffer);
 		}
 
 		// 非蒙皮路径的便捷重载:binding 3 交给默认调色板(7 参数版里 boneBuffer == nullptr 的分支)。
@@ -319,6 +381,249 @@ namespace World
 			(void)slot; (void)index;
 		}
 
+		// ---- M4-S3:表面函数材质(HLSL 代码态)----
+		//
+		// 一个材质要不要走表面管线,取决于"材质键 + 已发布版本":
+		//  - 键来自 Material::SurfaceKey()(保存态 = 着色器内容根路径;编辑器里未保存的
+		//    实时改动 = `<路径>#preview`,只有该面板的预览材质用它 —— D2 的键分离);
+		//  - 版本由 MaterialSurfaceRuntime::Install 递增,0 = 从未安装 → 完全走引擎管线。
+		// 表面模板的顶点输出与引擎着色器不兼容,所以选了表面管线就必须同时用它的 VS/PS。
+
+		// set 2 里"着色器静态使用、必须写描述符"的 binding 掩码:
+		// 1 = albedo、2 = normal(表面模板总是静态采样),4.. = 反射到的贴图参数槽。
+		uint32_t SurfaceNeededBindings(const MaterialParamLayout& layout, bool hasLayout)
+		{
+			uint32_t mask = (1u << 1) | (1u << 2);
+			if (!hasLayout)
+				return mask;
+			for (const MaterialParamTextureSlot& slot : layout.Textures)
+			{
+				if (slot.Set == 2 && slot.Binding < 32)
+					mask |= (1u << slot.Binding);
+			}
+			return mask;
+		}
+
+		const char* SurfaceVariantLabel(SurfacePipelineVariant variant)
+		{
+			switch (variant)
+			{
+				case SurfacePipelineVariant::Solid: return "solid";
+				case SurfacePipelineVariant::Transparent: return "transparent";
+				case SurfacePipelineVariant::Instanced: return "instanced";
+				case SurfacePipelineVariant::Skinned: return "skinned";
+				default: return "unknown";
+			}
+		}
+
+		// 变体回退的警告只打一次(键 × 变体),避免逐帧刷屏;上限 16 条防止无界增长。
+		void WarnSurfaceFallbackOnce(const std::string& key, SurfacePipelineVariant variant,
+			const std::string& reason)
+		{
+			static std::vector<std::string> warned;
+			const std::string tag = key + "|" + SurfaceVariantLabel(variant);
+			for (const std::string& existing : warned)
+				if (existing == tag)
+					return;
+			if (warned.size() >= 16)
+				return;
+			warned.push_back(tag);
+			WLD_CORE_WARN("Renderer3D: 表面管线变体 '{0}' 不可用(key '{1}'),本次绘制回退引擎管线:{2}",
+				SurfaceVariantLabel(variant), key, reason);
+		}
+
+		// 参数块的字节:生效值 = 本文件覆盖 > 父级覆盖 > 注解默认。
+		// 打包失败(注解表与编译产物对不上 / 值文本坏)时退一步只写注解默认;再失败留零值 ——
+		// 一个坏参数值不该让整个绘制中断,但必须留下可读警告。
+		void PackSurfaceParamBytes(const Ref<Material>& material, const MaterialParamLayout& layout,
+			std::vector<uint8_t>* out)
+		{
+			const std::vector<MaterialParamDecl>& table = material->Params();
+			std::vector<MaterialParamOverride> resolved;
+			resolved.reserve(table.size());
+			for (const MaterialParamDecl& decl : table)
+			{
+				if (IsTextureParamType(decl.Type))
+					continue;
+				resolved.push_back(MaterialParamOverride { decl.Name, material->ResolvedParamValue(decl.Name) });
+			}
+			std::string error;
+			if (PackParamValues(layout, table, resolved, out, &error))
+				return;
+			WLD_CORE_WARN("Renderer3D: 材质参数打包失败,退到注解默认值:{0}", error);
+			resolved.clear();
+			if (PackParamValues(layout, table, resolved, out, &error))
+				return;
+			WLD_CORE_WARN("Renderer3D: 材质参数默认值也不能打包,本次写零值:{0}", error);
+			out->assign(layout.CbufferSize, 0);
+		}
+
+		struct SurfaceDrawState
+		{
+			bool Active = false;                             // true = 这一次绘制走表面管线
+			Rhi::Handle<Rhi::Pipeline> Pipeline;
+			Rhi::Handle<Rhi::DescriptorSet> SurfaceSet;      // set 2
+			Rhi::Handle<Rhi::Buffer> ParamBuffer;            // set 1 binding 4(register b4, space1)
+		};
+
+		void QueueSurfaceUpdate(State& state, const Ref<Material>& material, uint32_t slot)
+		{
+			state.PendingSurfaceUpdates.emplace_back(material.get(), material);
+			state.PendingSurfaceSlots.push_back(slot);
+		}
+
+		// 材质 → 表面绘制状态。Active == false 时调用方**完全**走引擎管线(既有行为不变)。
+		SurfaceDrawState PrepareSurfaceDraw(State& state, const Ref<Material>& material,
+			SurfacePipelineVariant variant, uint32_t slot)
+		{
+			SurfaceDrawState draw;
+			if (!material)
+				return draw;
+			const std::string key = material->SurfaceKey();
+			if (key.empty())
+				return draw;
+			const size_t version = SurfacePublishedVersion(key);
+			if (version == 0)
+				return draw;
+			Rhi::Handle<Rhi::Pipeline> pipeline;
+			if (!FetchSurfacePipeline(key, variant, &pipeline))
+			{
+				WarnSurfaceFallbackOnce(key, variant,
+					"该变体的顶点阶段没有建出管线(改 .hlsl 时请保留 VSMain/VSMainInstanced/VSMainSkinned)");
+				return draw;
+			}
+
+			State::SurfaceMaterialGpu& gpu = state.SurfaceCache[material.get()];
+			const uint32_t revision = material->GetRevision();
+			if (gpu.Owner != material)
+			{
+				// 地址复用保护:旧的 Material 已经释放、新对象拿到同一地址 → 整份复位。
+				gpu = State::SurfaceMaterialGpu {};
+				gpu.Owner = material;
+			}
+			if (gpu.Key != key || gpu.Version != version)
+			{
+				MaterialParamLayout layout;
+				const bool hasLayout = FetchSurfaceParamLayout(key, &layout);
+				const uint32_t previousMask = SurfaceNeededBindings(gpu.Layout, gpu.HasLayout);
+				const uint32_t nextMask = SurfaceNeededBindings(layout, hasLayout);
+				const uint32_t nextSize = hasLayout ? layout.CbufferSize : 0;
+				// 布局 / 参数块大小真的变了才需要整份重写;只换版本(改代码、布局不动)
+				// 沿用已写好的绑定,预览不会因为"换管线"白白闪一帧白贴图。
+				const bool invalidate = previousMask != nextMask || gpu.ParamSize != nextSize;
+				gpu.Key = key;
+				gpu.KeyRevision = revision;
+				gpu.Version = version;
+				gpu.Layout = layout;
+				gpu.HasLayout = hasLayout;
+				gpu.ParamSize = nextSize;
+				if (invalidate)
+				{
+					for (uint32_t index = 0; index < Renderer::FramesInFlight; ++index)
+					{
+						gpu.WrittenMask[index] = 0;
+						gpu.ParamRevision[index] = 0;
+						gpu.DescRevision[index] = 0;
+					}
+				}
+			}
+
+			// 参数 UBO:每材质 × 帧槽位;材质 Revision 变化时重打包(与引擎对象 UBO 同款
+			// "提交期写 host-visible 缓冲")。
+			if (gpu.HasLayout && gpu.ParamSize > 0)
+			{
+				Rhi::Handle<Rhi::Buffer>& buffer = gpu.ParamBuffers[slot];
+				if (!buffer)
+				{
+					Rhi::BufferDesc desc;
+					desc.Size = gpu.ParamSize;
+					desc.Usage = Rhi::BufferUsageUniform;
+					desc.Memory = Rhi::MemoryHint::HostVisible;
+					desc.DebugName = "Renderer3D.SurfaceParamUBO";
+					buffer = Renderer::GetDevice()->CreateBuffer(desc);
+				}
+				if (buffer && gpu.ParamRevision[slot] != revision)
+				{
+					std::vector<uint8_t> bytes;
+					PackSurfaceParamBytes(material, gpu.Layout, &bytes);
+					if (bytes.size() == gpu.ParamSize)
+						buffer->SetData(bytes.data(), bytes.size());
+					gpu.ParamRevision[slot] = revision;
+				}
+				draw.ParamBuffer = buffer;
+			}
+
+			Rhi::Handle<Rhi::DescriptorSet>& set = gpu.Sets[slot];
+			if (!set)
+				set = Renderer::GetDevice()->CreateDescriptorSet(state.SurfaceMaterialLayout);
+			const uint32_t needed = SurfaceNeededBindings(gpu.Layout, gpu.HasLayout);
+			const bool written = (gpu.WrittenMask[slot] & needed) == needed;
+			if (!written || gpu.DescRevision[slot] != revision)
+			{
+				// 描述符写入必须留到通道外(与 MaterialSetFor 同款);同帧重复绘制不再排队。
+				QueueSurfaceUpdate(state, material, slot);
+				gpu.DescRevision[slot] = revision;
+			}
+			// 需要但还没写过的 binding → 这一帧先绑"默认表面材质集"(全白、全部槽位都写过);
+			// 都写过(只是内容变了)就沿用旧集,下一帧补写 —— 与引擎材质同款一帧滞后。
+			draw.SurfaceSet = written ? set : state.SurfaceDefaultSets[slot % Renderer::FramesInFlight];
+			draw.Active = true;
+			draw.Pipeline = pipeline;
+			return draw;
+		}
+
+		// 在渲染通道**之外**(BeginScene)补写挂起的表面材质描述符。
+		void FlushSurfaceUpdates(State& state)
+		{
+			for (size_t index = 0; index < state.PendingSurfaceUpdates.size(); ++index)
+			{
+				const Ref<Material>& material = state.PendingSurfaceUpdates[index].second;
+				const uint32_t slot = state.PendingSurfaceSlots[index] % Renderer::FramesInFlight;
+				const auto cached = state.SurfaceCache.find(material.get());
+				if (cached == state.SurfaceCache.end())
+					continue;
+				State::SurfaceMaterialGpu& gpu = cached->second;
+				Rhi::Handle<Rhi::DescriptorSet>& set = gpu.Sets[slot];
+				if (!set)
+					continue;
+
+				const MaterialDesc& desc = material->GetDesc();
+				std::vector<Rhi::DescriptorWrite> writes;
+				writes.reserve(2 + gpu.Layout.Textures.size());
+				Rhi::DescriptorWrite albedo;
+				albedo.Binding = 1;
+				albedo.Type = Rhi::DescriptorType::CombinedImageSampler;
+				albedo.Texture = MaterialTextureCache::Get().Get(desc.AlbedoTexture, /*srgb*/ true);
+				albedo.Sampler = state.MaterialSampler;
+				writes.push_back(albedo);
+				Rhi::DescriptorWrite normal;
+				normal.Binding = 2;
+				normal.Type = Rhi::DescriptorType::CombinedImageSampler;
+				normal.Texture = MaterialTextureCache::Get().Get(desc.NormalTexture, /*srgb*/ false);
+				normal.Sampler = state.MaterialSampler;
+				writes.push_back(normal);
+				// 注解声明的贴图参数:绑定 = 反射到的 slot(t4..t11);没赋值 → 默认白贴图。
+				// 着色器**静态**使用这些槽,不写描述符在 Vulkan 下是 VUID-vkCmdDrawIndexed-None-08600。
+				for (const MaterialParamTextureSlot& texture : gpu.Layout.Textures)
+				{
+					Rhi::DescriptorWrite write;
+					write.Binding = texture.Binding;
+					write.Type = Rhi::DescriptorType::CombinedImageSampler;
+					// 参数贴图按 sRGB 采样(编辑器里参数贴图的主用途是颜色;线性数据贴图
+					// 目前没有区分入口 —— 需要时由主 agent 决定加注解字段)。
+					write.Texture = MaterialTextureCache::Get().Get(material->ResolvedParamValue(texture.Name),
+						/*srgb*/ true);
+					write.Sampler = state.MaterialSampler;
+					writes.push_back(write);
+				}
+				set->Update(writes);
+				gpu.WrittenMask[slot] |= SurfaceNeededBindings(gpu.Layout, gpu.HasLayout);
+				gpu.DescRevision[slot] = material->GetRevision();
+			}
+			state.PendingSurfaceUpdates.clear();
+			state.PendingSurfaceSlots.clear();
+		}
+
 		// D5c-3b:蒙皮绘制核心。主通道与阴影通道只有"管线/对象槽位区/是否绑材质"三处差异,
 		// 统一走这里,保证调色板绑定与统计口径一致。
 		// 阴影管线的布局只有 set0/set1:多绑一个 set2 在 Vulkan 下是非法绑定(实测直接崩)。
@@ -366,13 +671,21 @@ namespace World
 				uniforms.Flags = { 0.0f, 0.0f, 0.0f, 0.0f };
 			}
 			// 对象 UBO(binding 1)与调色板(binding 3)必须在同一次 Update 里写(见上面的说明)。
-			WriteObjectUniforms(state, slot, objectIndex, uniforms, objectBuffer, objectSet, boneBuffer);
+			// M4-S3:表面材质走 Skinned 变体管线;没有已发布版本 / 该变体没建出来 → 引擎蒙皮管线。
+			// 阴影通道(Depth-only)不属于降级,继续用引擎阴影管线(D6)。
+			SurfaceDrawState surface;
+			if (!shadow && material)
+				surface = PrepareSurfaceDraw(state, material, SurfacePipelineVariant::Skinned, slot);
+			WriteObjectUniforms(state, slot, objectIndex, uniforms, objectBuffer, objectSet, boneBuffer,
+				surface.ParamBuffer);
 
 			Rhi::Handle<Rhi::DescriptorSet> materialSet;
 			if (!shadow && material)
-				materialSet = MaterialSetFor(state, material, slot);
+				materialSet = surface.Active ? surface.SurfaceSet : MaterialSetFor(state, material, slot);
+			const Rhi::Handle<Rhi::Pipeline>& effectivePipeline =
+				surface.Active ? surface.Pipeline : pipeline;
 
-			state.CommandBuffer->BindPipeline(pipeline);
+			state.CommandBuffer->BindPipeline(effectivePipeline);
 			state.CommandBuffer->BindDescriptorSet(objectSet, 1);
 			if (!shadow)
 			{
@@ -505,6 +818,15 @@ namespace World
 			const uint32_t slot = Renderer::FrameSlot() % Renderer::FramesInFlight;
 			const uint32_t index = state.ObjectIndex++;
 
+			// M4-S3:有已发布表面管线的材质走表面变体(Solid / Transparent),否则引擎管线。
+			SurfaceDrawState surface;
+			if (desc)
+			{
+				surface = PrepareSurfaceDraw(state, material,
+					desc->BlendMode == MaterialBlendMode::Transparent
+						? SurfacePipelineVariant::Transparent : SurfacePipelineVariant::Solid, slot);
+			}
+
 			ObjectUniforms uniforms;
 			uniforms.Model = transform;
 			uniforms.EntityId = { entityId, 0, 0, 0 };
@@ -527,15 +849,25 @@ namespace World
 				uniforms.Flags = { 0.0f, 0.0f, 0.0f, 0.0f };
 			}
 			WriteObjectUniforms(state, slot, index, uniforms,
-				state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index]);
+				state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index],
+				state.DefaultPaletteBuffer, surface.ParamBuffer);
 
 			Rhi::Handle<Rhi::DescriptorSet> materialSet;
 			const Rhi::Handle<Rhi::Pipeline>* pipeline = &state.Pipeline;
 			if (desc)
 			{
-				materialSet = MaterialSetFor(state, material, slot);
-				if (desc->BlendMode == MaterialBlendMode::Transparent)
-					pipeline = &state.TransparentPipeline;
+				if (surface.Active)
+				{
+					// M4-S3:该材质有已发布的表面管线 → 走它(透明 = Transparent 变体)。
+					pipeline = &surface.Pipeline;
+					materialSet = surface.SurfaceSet;
+				}
+				else
+				{
+					materialSet = MaterialSetFor(state, material, slot);
+					if (desc->BlendMode == MaterialBlendMode::Transparent)
+						pipeline = &state.TransparentPipeline;
+				}
 			}
 			BindObject(state, slot, index, cached->second, *pipeline, state.ObjectSets[slot][index],
 				materialSet, indexCount, firstIndex);
@@ -576,6 +908,12 @@ namespace World
 		// 不引入新的后端能力要求;128 × 64B = 8KB 在 UBO 上限(16KB)内。
 		objectLayoutDesc.Bindings.push_back({ 3, Rhi::DescriptorType::UniformBuffer,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex), 1 });
+		// M4-S3:binding 4 = 材质参数块 `cbuffer MaterialParams : register(b4, space1)`
+		// (表面函数材质的注解参数,像素阶段)。既有引擎着色器不声明/不读它 → 行为不变;
+		// 但布局里必须有它,否则表面管线(用同一份 set 1)在 Vulkan 下会因为
+		// "着色器静态使用 binding 4 而布局里没有"直接建不出管线。
+		objectLayoutDesc.Bindings.push_back({ 4, Rhi::DescriptorType::UniformBuffer,
+			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
 		objectLayoutDesc.DebugName = "Renderer3D.Object";
 		state.ObjectLayout = Renderer::GetDevice()->CreateDescriptorSetLayout(objectLayoutDesc);
 
@@ -588,6 +926,25 @@ namespace World
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
 		materialLayoutDesc.DebugName = "Renderer3D.Material";
 		state.MaterialLayout = Renderer::GetDevice()->CreateDescriptorSetLayout(materialLayoutDesc);
+
+		// M4-S3:表面材质的 set 2 = 1(albedo)/2(normal)+ 4..11(注解声明的贴图参数,
+		// 对应 space2 的 t4..t11)。引擎材质继续用 state.MaterialLayout({1,2}),
+		// 两套布局互不影响;槽位表是**固定**的一段,所以表面管线只依赖这一份布局。
+		{
+			Rhi::DescriptorSetLayoutDesc surfaceLayoutDesc;
+			surfaceLayoutDesc.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
+				Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+			surfaceLayoutDesc.Bindings.push_back({ 2, Rhi::DescriptorType::CombinedImageSampler,
+				Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+			for (uint32_t index = 0; index < kMaxMaterialTextureSlots; ++index)
+			{
+				surfaceLayoutDesc.Bindings.push_back({ ParamTextureBaseBinding() + index,
+					Rhi::DescriptorType::CombinedImageSampler,
+					Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+			}
+			surfaceLayoutDesc.DebugName = "Renderer3D.SurfaceMaterial";
+			state.SurfaceMaterialLayout = Renderer::GetDevice()->CreateDescriptorSetLayout(surfaceLayoutDesc);
+		}
 
 		// 材质采样器:重复寻址(平铺贴图常见需求)+ 线性过滤;mip 由贴图自带(当前单级)。
 		// P4-1:最大各向异性来自项目清单(rendering.anisotropy,1..16,启动时生效);
@@ -649,6 +1006,54 @@ namespace World
 			normal.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ false);
 			normal.Sampler = state.MaterialSampler;
 			state.DefaultMaterialSets[slot]->Update({ albedo, normal });
+		}
+
+		// M4-S3:表面材质的"默认描述符集"(每帧槽位一份)+ 共享零值参数缓冲。
+		//  - 默认表面集:1/2 + 4..11 全部写白色贴图 → 任何时候都合法。表面材质的描述符集
+		//    刚建好、还没轮到通道外补写时,这一帧先绑它 —— 绝不把"没写过"的描述符集绑给管线;
+		//  - 参数缓冲:binding 4 每次都要写(描述符集跨帧复用),非表面绘制用它兜底。
+		{
+			Rhi::BufferDesc paramDesc;
+			paramDesc.Size = kDefaultParamBlockBytes;
+			paramDesc.Usage = Rhi::BufferUsageUniform;
+			paramDesc.Memory = Rhi::MemoryHint::HostVisible;
+			paramDesc.DebugName = "Renderer3D.SurfaceDefaultParamUBO";
+			state.SurfaceDefaultParamBuffer = Renderer::GetDevice()->CreateBuffer(paramDesc);
+			if (state.SurfaceDefaultParamBuffer)
+			{
+				const std::vector<uint8_t> zeros(kDefaultParamBlockBytes, 0);
+				state.SurfaceDefaultParamBuffer->SetData(zeros.data(), zeros.size());
+			}
+			for (uint32_t slot = 0; slot < Renderer::FramesInFlight; ++slot)
+			{
+				if (!state.SurfaceMaterialLayout)
+					break;
+				state.SurfaceDefaultSets[slot] =
+					Renderer::GetDevice()->CreateDescriptorSet(state.SurfaceMaterialLayout);
+				if (!state.SurfaceDefaultSets[slot])
+					continue;
+				Rhi::DescriptorWrite albedo;
+				albedo.Binding = 1;
+				albedo.Type = Rhi::DescriptorType::CombinedImageSampler;
+				albedo.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ true);
+				albedo.Sampler = state.MaterialSampler;
+				Rhi::DescriptorWrite normal;
+				normal.Binding = 2;
+				normal.Type = Rhi::DescriptorType::CombinedImageSampler;
+				normal.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ false);
+				normal.Sampler = state.MaterialSampler;
+				std::vector<Rhi::DescriptorWrite> writes { albedo, normal };
+				for (uint32_t index = 0; index < kMaxMaterialTextureSlots; ++index)
+				{
+					Rhi::DescriptorWrite texture;
+					texture.Binding = ParamTextureBaseBinding() + index;
+					texture.Type = Rhi::DescriptorType::CombinedImageSampler;
+					texture.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ true);
+					texture.Sampler = state.MaterialSampler;
+					writes.push_back(texture);
+				}
+				state.SurfaceDefaultSets[slot]->Update(writes);
+			}
 		}
 
 		// D5c-3b:默认骨骼调色板(set 1 binding 3)。内容无所谓(非蒙皮顶点入口根本不读 u_Bones),
@@ -916,6 +1321,24 @@ namespace World
 			if (state.DefaultLightBuffer)
 				state.DefaultLightBuffer->SetData(&previewRig.Uniforms, sizeof(previewRig.Uniforms));
 		}
+
+		// M4-S3:把"建表面管线需要的引擎资源"登记给 MaterialSurfaceRuntime(内部头,
+		// 公开头不变)。Runtime 拿到的是句柄快照,不访问 Renderer3D 的私有 state;
+		// Install 只会用它建管线,设备销毁前由 Shutdown 清掉。
+		{
+			SurfacePipelineEnvironment surfaceEnvironment;
+			surfaceEnvironment.Valid = true;
+			surfaceEnvironment.RenderPass = state.RenderPass;
+			surfaceEnvironment.GlobalLayout = Renderer::GetGlobalDescriptorSetLayout();
+			surfaceEnvironment.ObjectLayout = state.ObjectLayout;
+			surfaceEnvironment.SurfaceMaterialLayout = state.SurfaceMaterialLayout;
+			surfaceEnvironment.SolidLayout = meshLayout;
+			surfaceEnvironment.InstancedLayout = WithInstanceBinding(meshLayout);
+			surfaceEnvironment.SkinnedLayout = Mesh::MakeSkinnedLayout();
+			surfaceEnvironment.Samples = sceneSamples;
+			surfaceEnvironment.Front = pipelineDesc.Front;
+			RegisterSurfacePipelineEnvironment(surfaceEnvironment);
+		}
 	}
 
 	void Renderer3D::Shutdown()
@@ -968,6 +1391,18 @@ namespace World
 		state.RenderPass = nullptr;
 		state.ObjectLayout = nullptr;
 		state.MaterialLayout = nullptr;
+		// M4-S3:表面管线(Runtime 持有的)与表面材质的 GPU 状态也要在设备销毁前放掉。
+		// Renderer 已经 WaitIdle,所以直接放句柄;这里**不能**走 QueueRelease ——
+		// 延迟释放排的是"将来某一帧",句柄会活过设备销毁(静态析构里撞已销毁设备)。
+		MaterialSurfaceRuntime::Shutdown();
+		ClearSurfacePipelineEnvironment();
+		state.SurfaceCache.clear();
+		for (Rhi::Handle<Rhi::DescriptorSet>& set : state.SurfaceDefaultSets)
+			set = nullptr;
+		state.SurfaceDefaultParamBuffer = nullptr;
+		state.SurfaceMaterialLayout = nullptr;
+		state.PendingSurfaceUpdates.clear();
+		state.PendingSurfaceSlots.clear();
 		state.MaterialSampler = nullptr;
 		state.CommandBuffer = nullptr;
 		// 预览类调用方会把自己的 set0 登记进来(SetGlobalDescriptorSet):
@@ -994,6 +1429,8 @@ namespace World
 		// 上一帧挂起的材质描述符在这里补写:此时既不在渲染通道内,也没有在录制的命令缓冲,
 		// 是唯一对驱动安全的写入时机(见 MaterialSetFor 的说明)。
 		FlushMaterialUpdates(state);
+		// M4-S3:表面材质的描述符(set 2:贴图槽)同样在这里补写。
+		FlushSurfaceUpdates(state);
 		state.CommandBuffer = commandBuffer;
 		state.ObjectIndex = 0;
 		// D8b-2:每批场景从这里开始重新分配实例缓冲区(帧槽位由帧栅栏保护)。
@@ -1263,10 +1700,15 @@ namespace World
 		// 整批共享的对象槽位:材质标量来自 material,模型矩阵用单位阵(真实模型矩阵在实例属性里),
 		// 实体 id 用 -1(per-instance 给出)。
 		const uint32_t index = state.ObjectIndex++;
+		// M4-S3:表面材质照常参与实例合批 —— 表面模板自带 VSMainInstanced(per-instance
+		// 模型矩阵/颜色/实体 id),所以这里换的是"管线 + 材质集",不是"退出合批"。
+		SurfaceDrawState surface;
+		const MaterialDesc* desc = material ? &material->GetDesc() : nullptr;
+		if (desc)
+			surface = PrepareSurfaceDraw(state, material, SurfacePipelineVariant::Instanced, slot);
 		ObjectUniforms uniforms;
 		uniforms.Model = glm::mat4(1.0f);
 		uniforms.EntityId = { -1, 0, 0, 0 };
-		const MaterialDesc* desc = material ? &material->GetDesc() : nullptr;
 		if (desc)
 		{
 			uniforms.BaseColor = desc->BaseColor;
@@ -1287,13 +1729,16 @@ namespace World
 			uniforms.Flags = { 0.0f, 0.0f, 0.0f, 0.0f };
 		}
 		WriteObjectUniforms(state, slot, index, uniforms,
-			state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index]);
+			state.ObjectUniformBuffers[slot][index], state.ObjectSets[slot][index],
+			state.DefaultPaletteBuffer, surface.ParamBuffer);
 
 		Rhi::Handle<Rhi::DescriptorSet> materialSet;
+		const Rhi::Handle<Rhi::Pipeline>& batchPipeline =
+			surface.Active ? surface.Pipeline : state.InstancedPipeline;
 		if (desc)
-			materialSet = MaterialSetFor(state, material, slot);
+			materialSet = surface.Active ? surface.SurfaceSet : MaterialSetFor(state, material, slot);
 		DrawInstancedBatch(state, cached->second, indexCount, firstIndex,
-			state.InstanceBuffers[slot], instanceOffset, count, state.InstancedPipeline,
+			state.InstanceBuffers[slot], instanceOffset, count, batchPipeline,
 			state.ObjectSets[slot][index], materialSet, slot, true);
 		return count;
 	}
@@ -1406,6 +1851,8 @@ namespace World
 	void Renderer3D::InvalidateMaterialCache()
 	{
 		GetState().MaterialCache.clear();
+		// M4-S3:表面材质的描述符集引用材质贴图缓存里的贴图,一起失效(下一帧重建)。
+		GetState().SurfaceCache.clear();
 		MaterialTextureCache::Get().Clear();
 	}
 

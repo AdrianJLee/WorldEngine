@@ -130,8 +130,12 @@ namespace World
 	struct WLD_API MaterialParamLayout
 	{
 		uint32_t CbufferSize = 0;      // 16 字节对齐(>= 反射到的成员末端)
-		uint32_t CbufferSet = 1;       // 参数块固定 set 1 / binding 2(与引擎 ObjectUniforms 同 set)
-		uint32_t CbufferBinding = 2;
+		// M4-S3(D1):参数块固定 set 1 / binding 4(与引擎 ObjectUniforms 同 set)。
+		// 必须是 4 而不是 2:OpenGL 后端的 UBO 绑定单元 = binding(忽略 set),
+		// set0 的灯光 UBO 已经占了单元 2(与 2026-09-19 骨骼单元 2→3 同类坑)。
+		// 占用表:0=相机、1=物体、2=灯光、3=骨骼、4=材质参数。
+		uint32_t CbufferSet = 1;
+		uint32_t CbufferBinding = 4;
 		std::vector<MaterialParamLayoutField> Fields;
 		std::vector<MaterialParamTextureSlot> Textures;
 		// 反射到的"真的被读"的成员名(升序)。声明了但不在这里面 = 声明未用 → 警告。
@@ -143,6 +147,11 @@ namespace World
 	WLD_API uint32_t ParamCbufferSet();
 	WLD_API uint32_t ParamCbufferBinding();
 	WLD_API uint32_t ParamTextureBaseBinding();
+
+	// M4-S3:参数块里贴图参数的数量上限。贴图槽 = ParamTextureBaseBinding() 起**连续**占用
+	// (t4..t11),与运行时/表面材质的固定描述符槽位一一对应;超过上限 = 结构化错误
+	// (编译与反射校验都不允许静默丢参数)。
+	inline constexpr uint32_t kMaxMaterialTextureSlots = 8;
 
 	// 从 dxc -Fc 的 SPIR-V 汇编文本反射参数布局(纯文本函数,可无工具单测)。
 	WLD_API bool ReflectParamLayoutFromAssembly(const std::string& assembly,

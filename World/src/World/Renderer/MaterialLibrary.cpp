@@ -501,6 +501,20 @@ namespace World
 		std::sort(wantedMaterials.begin(), wantedMaterials.end());
 		std::sort(wantedTextures.begin(), wantedTextures.end());
 
+		// M4-S3:监听集合还包括材质引用的 `.hlsl`(表面函数代码态实时预览的输入)。
+		std::vector<std::string> wantedShaders;
+		for (const auto& [key, material] : m_Cache)
+		{
+			if (!material)
+				continue;
+			const std::string shaderPath = MaterialLibrary::NormalizePath(material->ShaderPath());
+			if (shaderPath.empty())
+				continue;
+			if (std::find(wantedShaders.begin(), wantedShaders.end(), shaderPath) == wantedShaders.end())
+				wantedShaders.push_back(shaderPath);
+		}
+		std::sort(wantedShaders.begin(), wantedShaders.end());
+
 		const std::vector<std::string> watchedMaterials = m_MaterialWatch.WatchedPaths();
 		for (const std::string& path : wantedMaterials)
 			if (std::find(watchedMaterials.begin(), watchedMaterials.end(), path) == watchedMaterials.end())
@@ -516,9 +530,16 @@ namespace World
 		for (const std::string& path : watchedTextures)
 			if (std::find(wantedTextures.begin(), wantedTextures.end(), path) == wantedTextures.end())
 				m_TextureWatch.Unwatch(path);
+		const std::vector<std::string> watchedShaders = m_ShaderWatch.WatchedPaths();
+		for (const std::string& path : wantedShaders)
+			if (std::find(watchedShaders.begin(), watchedShaders.end(), path) == watchedShaders.end())
+				m_ShaderWatch.Watch(path);
+		for (const std::string& path : watchedShaders)
+			if (std::find(wantedShaders.begin(), wantedShaders.end(), path) == wantedShaders.end())
+				m_ShaderWatch.Unwatch(path);
 		if (AssetHotReloadTraceEnabled())
-			WLD_CORE_INFO("[asset-hot-reload] watching {0} material(s), {1} texture(s)",
-				wantedMaterials.size(), wantedTextures.size());
+			WLD_CORE_INFO("[asset-hot-reload] watching {0} material(s), {1} texture(s), {2} shader(s)",
+				wantedMaterials.size(), wantedTextures.size(), wantedShaders.size());
 
 		// ---- 材质:.wmat 内容变化(已过 debounce)→ clean 原地重载 / dirty 只报告 ----
 		// M3:子材质的指纹含解析后的父级链(见 FingerprintAsset),所以父级改动会让子材质
@@ -596,6 +617,30 @@ namespace World
 			{
 				report.InvalidatedTextures.push_back(normalized);
 				PrintHotReloadTrace("invalidated texture", normalized);
+			}
+		}
+
+		// ---- M4-S3:`.hlsl` 表面函数:内容变化 → 引用它的材质失效(参数表刷新 + Revision 前进)。
+		// 重新编译 + MaterialSurfaceRuntime::Install 由编辑器侧执行(内核不在渲染线程里跑 dxc);
+		// 这里只负责"让引用它的材质失效并把路径报出去"。
+		const std::vector<std::string> changedShaders = m_ShaderWatch.Poll(deltaSeconds);
+		if (!changedShaders.empty())
+		{
+			std::unordered_set<std::string> changed(changedShaders.begin(), changedShaders.end());
+			for (const auto& [key, material] : m_Cache)
+			{
+				if (!material)
+					continue;
+				const std::string shaderPath = MaterialLibrary::NormalizePath(material->ShaderPath());
+				if (shaderPath.empty() || changed.count(shaderPath) == 0)
+					continue;
+				RefreshParams(*material);
+				material->InvalidateShader();
+			}
+			for (const std::string& normalized : changedShaders)
+			{
+				report.ChangedShaders.push_back(normalized);
+				PrintHotReloadTrace("changed shader", normalized);
 			}
 		}
 	}

@@ -35,6 +35,19 @@ namespace World
 	};
 
 	// 可缓存的编译产物。第一版只有 SPIR-V(Vulkan);OpenGL 由 M4-S4 补。
+	// M4-S3:表面模板自带的顶点阶段(按入口名区分)。
+	//
+	// 为什么不能复用引擎 Renderer3D_Solid.hlsl 的 VS:表面模板的 VS 输出是 4 个插值量
+	// (loc0 法线 / loc1 世界位置 / loc2 UV / loc3 实体 id),引擎的是 5 个(loc3 是基础色、
+	// loc4 才是实体 id)—— 混用在 Vulkan 上属于**接口不匹配**,不是风格问题。
+	// 变体与入口的对应:solid/transparent = "VSMain"、instanced = "VSMainInstanced"、
+	// skinned = "VSMainSkinned"。
+	struct WLD_API SurfaceVertexStage
+	{
+		std::string EntryPoint;   // "VSMain" | "VSMainInstanced" | "VSMainSkinned"
+		std::vector<uint8_t> Bytecode;
+	};
+
 	struct WLD_API SurfaceArtifact
 	{
 		std::vector<uint8_t> Bytecode;
@@ -42,6 +55,22 @@ namespace World
 		std::string Backend;         // BackendName(backend)
 		std::string EntryPoint;      // 当前固定 "PSMain"
 		uint64_t SourceHash = 0;     // 用户源内容哈希(不含包装模板)
+		// M4-S3:顶点阶段(见 SurfaceVertexStage)。它们不引用用户的 Evaluate(),因此按
+		// **模板键**缓存(包装模板 + 参数块 + 排列键 + 工具/契约身份,不含用户源):
+		// 改代码时只有 PSMain 需要真的跑 dxc。
+		std::vector<SurfaceVertexStage> VertexStages;
+
+		const SurfaceVertexStage* FindVertexStage(const char* entryPoint) const
+		{
+			if (!entryPoint)
+				return nullptr;
+			for (const SurfaceVertexStage& stage : VertexStages)
+			{
+				if (stage.EntryPoint == entryPoint)
+					return &stage;
+			}
+			return nullptr;
+		}
 
 		size_t ByteSize() const { return Bytecode.size(); }
 	};

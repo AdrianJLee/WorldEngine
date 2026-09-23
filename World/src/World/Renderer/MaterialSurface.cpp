@@ -27,10 +27,25 @@ namespace World
 		namespace fs = std::filesystem;
 
 		// 2 = M4-S2:包装源码加入注解参数块,并且每次编译都落一份 SPIR-V 汇编(-Fc)供反射。
-		constexpr uint32_t kSurfaceCacheVersion = 2;
+		// 3 = M4-S3:参数块挪到 register(b4, space1) + 顶点阶段(模板键缓存,不进 PS 键)。
+		constexpr uint32_t kSurfaceCacheVersion = 3;
 		constexpr const char* kSurfaceEntryPoint = "PSMain";
 		constexpr const char* kUserSourceFileName = "surface_user.hlsl";
 		constexpr const char* kAssemblyFileName = "surface.asm";
+
+		// M4-S3(D5):表面模板自带的三个顶点入口。它们的输出(4 个插值量)与引擎
+		// Renderer3D_Solid.hlsl 的不兼容,所以表面管线必须用模板自己的 VS。
+		struct SurfaceVertexEntry
+		{
+			const char* EntryPoint;
+			const char* FileStem;
+		};
+
+		constexpr SurfaceVertexEntry kSurfaceVertexEntries[] = {
+			{ "VSMain", "vs_VSMain" },
+			{ "VSMainInstanced", "vs_VSMainInstanced" },
+			{ "VSMainSkinned", "vs_VSMainSkinned" },
+		};
 
 		std::atomic<size_t> s_CacheHits { 0 };
 		std::atomic<size_t> s_CacheMisses { 0 };
@@ -336,8 +351,10 @@ namespace World
 			return "float";
 		}
 
-		// 注解 → 参数块源码。标量/向量进 `cbuffer MaterialParams`(register b2, space1),
-		// 贴图按注解顺序占 space2 的 t4、t5…(每张同时声明配套 SamplerState)。
+		// 注解 → 参数块源码。标量/向量进 `cbuffer MaterialParams`(M4-S3 起 register b4, space1;
+		// 2 被 set0 的灯光 UBO 占用 —— GL 的 UBO 单元 = binding,忽略 set),
+		// 贴图按注解顺序占 space2 的 t4、t5…(每张同时声明配套 SamplerState),
+		// 数量上限 kMaxMaterialTextureSlots(超出由编译入口给结构化错误)。
 		// 布局(偏移/大小)不在这里手写:编译后用 dxc 的 SPIR-V 汇编反射出来。
 		std::string BuildParamBlockText(const std::vector<MaterialParamDecl>& params)
 		{
@@ -710,6 +727,139 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			wrapper += kSurfaceTemplateSuffix;
 			return wrapper;
 		}
+
+		// M4-S3(D5):顶点阶段的编译与缓存。
+		//
+		// 关键决定:VS 包装里塞的是**引擎默认表面函数**,不是用户源 —— 模板自带的
+		// VSMain/VSMainInstanced/VSMainSkinned 都不引用 Evaluate(),所以 VS 的编译输入
+		// 只由"包装模板 + 参数块 + 排列键 + 工具/契约身份"决定。缓存键因此**不含用户源**:
+		// 改用户代码时只有 PSMain 需要真的跑 dxc(稳态下每次编辑一次),首帧之后几乎全命中。
+		//
+		// 失败语义:任一个顶点入口编译失败 = 本次编译整体失败(结构化诊断),由调用方决定
+		// 是否继续用上一份已发布管线。缺文件(缓存被清)时**重新编译该入口**,不静默少阶段。
+		std::string BuildVertexWrapperSource(const std::string& contractText, const std::string& permutationKey,
+			SurfaceShaderBackend backend, const std::vector<MaterialParamDecl>& params)
+		{
+			return BuildWrapperSource(contractText, MaterialSurfaceCompiler::DefaultSurfaceFunctionSource(),
+				permutationKey, backend, params);
+		}
+
+		bool ResolveVertexStages(const std::string& contractText,
+			const std::vector<MaterialParamDecl>& params, const std::string& permutationKey,
+			SurfaceShaderBackend backend, std::vector<SurfaceVertexStage>* out,
+			std::vector<SurfaceDiagnostic>* diagnostics, std::string& rawToolOutput)
+		{
+			if (!out)
+				return false;
+			out->clear();
+
+			const std::string wrapperSource = BuildVertexWrapperSource(contractText, permutationKey,
+				backend, params);
+			uint64_t keyHash = Fnv1a64String(wrapperSource);
+			keyHash = Mix(keyHash, BackendKey(backend));
+			keyHash = Mix(keyHash, permutationKey);
+			keyHash = Mix(keyHash, std::to_string(kSurfaceCacheVersion));
+			keyHash = Mix(keyHash, std::to_string(ToolIdentity(std::string(WLD_DXC_DIR) + "dxc.exe")));
+			keyHash = Mix(keyHash, std::to_string(ToolIdentity(std::string(WLD_DXC_DIR) + "dxcompiler.dll")));
+			const std::string keyHex = Hex(keyHash);
+
+			const fs::path cacheRoot = fs::path(WLD_INTERMEDIATE_DIR) / "SurfaceShaderCache";
+			const fs::path keyDir = cacheRoot / ("vs-" + keyHex);
+			const std::string dxcPath = std::string(WLD_DXC_DIR) + "dxc.exe";
+
+			std::error_code ec;
+			fs::create_directories(keyDir, ec);
+			if (ec)
+			{
+				if (diagnostics)
+				{
+					SurfaceDiagnostic diagnostic;
+					diagnostic.Severity = "error";
+					diagnostic.Message = "cannot create surface vertex cache dir: " + ec.message();
+					diagnostics->push_back(std::move(diagnostic));
+				}
+				return false;
+			}
+
+			const fs::path wrapperPath = keyDir / "vs_wrapper.hlsl";
+			const fs::path logPath = keyDir / "vs_compile.log";
+			// 包装源码用 `#include "surface_user.hlsl"` 引用用户源;VS 这一份固定写
+			// 引擎默认表面函数(VS 不调用 Evaluate())—— 键里因此不含用户源。
+			const fs::path userPath = keyDir / kUserSourceFileName;
+			if (!WriteAllText(userPath, MaterialSurfaceCompiler::DefaultSurfaceFunctionSource())
+				|| !WriteAllText(wrapperPath, wrapperSource))
+			{
+				if (diagnostics)
+				{
+					SurfaceDiagnostic diagnostic;
+					diagnostic.Severity = "error";
+					diagnostic.Message = "cannot write generated surface vertex source under "
+						+ keyDir.string();
+					diagnostics->push_back(std::move(diagnostic));
+				}
+				return false;
+			}
+
+			for (const SurfaceVertexEntry& entry : kSurfaceVertexEntries)
+			{
+				const fs::path spvPath = keyDir / (std::string(entry.FileStem) + ".spv");
+				std::vector<uint8_t> bytecode;
+				if (fs::is_regular_file(spvPath, ec) && fs::file_size(spvPath, ec) > 0
+					&& ReadAllBytes(spvPath, bytecode) && !bytecode.empty())
+				{
+					SurfaceVertexStage stage;
+					stage.EntryPoint = entry.EntryPoint;
+					stage.Bytecode = std::move(bytecode);
+					out->push_back(std::move(stage));
+					continue;
+				}
+
+				fs::remove(spvPath, ec);
+				const std::string arguments = "-spirv -fvk-use-gl-layout -T vs_6_0 -E "
+					+ std::string(entry.EntryPoint) + " \"" + wrapperPath.string() + "\" -Fo \""
+					+ spvPath.string() + "\"";
+				int exitCode = -1;
+				std::string toolOutput;
+				s_ToolInvocations.fetch_add(1, std::memory_order_relaxed);
+				const bool launched = RunToolCapture(dxcPath, arguments, logPath.string(), exitCode,
+					toolOutput);
+				rawToolOutput += toolOutput;
+				if (!toolOutput.empty() && toolOutput.back() != '\n')
+					rawToolOutput += '\n';
+				if (diagnostics)
+				{
+					const std::vector<SurfaceDiagnostic> parsed = ParseDiagnostics(toolOutput);
+					diagnostics->insert(diagnostics->end(), parsed.begin(), parsed.end());
+				}
+
+				const bool ready = launched && exitCode == 0 && fs::is_regular_file(spvPath, ec)
+					&& fs::file_size(spvPath, ec) > 0 && ReadAllBytes(spvPath, bytecode)
+					&& !bytecode.empty();
+				if (!ready)
+				{
+					fs::remove(spvPath, ec);
+					if (diagnostics)
+					{
+						SurfaceDiagnostic diagnostic;
+						diagnostic.Severity = "error";
+						diagnostic.Message = !launched
+							? ("cannot launch dxc for vertex entry " + std::string(entry.EntryPoint)
+								+ ": " + dxcPath)
+							: ("surface vertex entry " + std::string(entry.EntryPoint)
+								+ " failed to compile (exit code " + std::to_string(exitCode) + ")");
+						diagnostics->push_back(std::move(diagnostic));
+					}
+					out->clear();
+					return false;
+				}
+
+				SurfaceVertexStage stage;
+				stage.EntryPoint = entry.EntryPoint;
+				stage.Bytecode = std::move(bytecode);
+				out->push_back(std::move(stage));
+			}
+			return true;
+		}
 	}
 
 	const char* MaterialSurfaceCompiler::BackendName(SurfaceShaderBackend backend)
@@ -898,6 +1048,7 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			// 参数表的轻量自检(调用方可能直接给手工表):名字合法/唯一/不与引擎保留名冲突。
 			{
 				std::unordered_map<std::string, bool> seen;
+				uint32_t textureCount = 0;
 				for (const MaterialParamDecl& param : params)
 				{
 					const bool valid = IsUsableParamName(param.Name);
@@ -913,6 +1064,21 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 						return finish();
 					}
 					seen.emplace(param.Name, true);
+					// M4-S3:贴图槽位是固定的一段(space2 的 t4..t11),超出上限给结构化错误 ——
+					// 让运行时的描述符槽位与声明永远对得上,不静默丢参数。
+					if (IsTextureParamType(param.Type) && ++textureCount > kMaxMaterialTextureSlots)
+					{
+						SurfaceDiagnostic diagnostic;
+						diagnostic.Severity = "error";
+						diagnostic.Message = "material param '" + param.Name + "': too many Texture2D params ("
+							+ std::to_string(textureCount) + "), the parameter block allows at most "
+							+ std::to_string(kMaxMaterialTextureSlots) + " (t"
+							+ std::to_string(ParamTextureBaseBinding()) + "..t"
+							+ std::to_string(ParamTextureBaseBinding() + kMaxMaterialTextureSlots - 1)
+							+ ", space2)";
+						result.Diagnostics.push_back(std::move(diagnostic));
+						return finish();
+					}
 				}
 			}
 
@@ -958,14 +1124,22 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 				std::vector<uint8_t> cached;
 				if (ReadAllBytes(spvPath, cached) && !cached.empty())
 				{
-					s_CacheHits.fetch_add(1, std::memory_order_relaxed);
-					result.Success = true;
-					result.CacheHit = true;
 					result.Artifact.Bytecode = std::move(cached);
 					result.Artifact.CacheKey = keyHex;
 					result.Artifact.Backend = BackendName(backend);
 					result.Artifact.EntryPoint = kSurfaceEntryPoint;
 					result.Artifact.SourceHash = sourceHash;
+					// M4-S3:缓存命中同样要把顶点阶段(模板键)读回 artifact;VS 缓存缺失时
+					// 这里会补一次编译。
+					if (!ResolveVertexStages(contractText, params, permutationKey, backend,
+						&result.Artifact.VertexStages, &result.Diagnostics, result.RawToolOutput))
+					{
+						result.Success = false;
+						return finish();
+					}
+					s_CacheHits.fetch_add(1, std::memory_order_relaxed);
+					result.Success = true;
+					result.CacheHit = true;
 					StoreLastGood(permutationKey, backend, result.Artifact);
 					return finish();
 				}
@@ -1045,6 +1219,14 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			result.Artifact.Backend = BackendName(backend);
 			result.Artifact.EntryPoint = kSurfaceEntryPoint;
 			result.Artifact.SourceHash = sourceHash;
+			// M4-S3(D5):PS 成功后编译/读取模板自带的三个顶点阶段(按模板键缓存)。
+			// 任一个失败 → 本次编译整体失败(VS 与 PS 必须成对)。
+			if (!ResolveVertexStages(contractText, params, permutationKey, backend,
+				&result.Artifact.VertexStages, &result.Diagnostics, result.RawToolOutput))
+			{
+				result.Success = false;
+				return finish();
+			}
 			StoreLastGood(permutationKey, backend, result.Artifact);
 			return finish();
 		}

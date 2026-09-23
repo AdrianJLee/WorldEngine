@@ -200,6 +200,61 @@ int main()
 			CHECK(!minimalRecompiled.CacheHit);
 			CHECK(minimalRecompiled.Artifact.Bytecode == minimalFirst.Artifact.Bytecode);
 
+			// ①c M4-S3(D5):顶点阶段齐全(模板自带的三个入口)+ **按模板键缓存** ——
+			// 改用户代码时只有 PSMain 真的跑 dxc(稳态下每次编辑一次),VS 全部命中缓存。
+			CHECK(minimalFirst.Artifact.VertexStages.size() == 3);
+			// SurfaceVertexStage 没有 operator==(公开头冻结):按入口名 + 字节逐条比较。
+			const auto sameVertexStages = [](const std::vector<World::SurfaceVertexStage>& left,
+				const std::vector<World::SurfaceVertexStage>& right)
+			{
+				if (left.size() != right.size())
+					return false;
+				for (size_t index = 0; index < left.size(); ++index)
+				{
+					if (left[index].EntryPoint != right[index].EntryPoint)
+						return false;
+					if (left[index].Bytecode != right[index].Bytecode)
+						return false;
+				}
+				return true;
+			};
+			const World::SurfaceVertexStage* vsMain = minimalFirst.Artifact.FindVertexStage("VSMain");
+			const World::SurfaceVertexStage* vsInstanced =
+				minimalFirst.Artifact.FindVertexStage("VSMainInstanced");
+			const World::SurfaceVertexStage* vsSkinned =
+				minimalFirst.Artifact.FindVertexStage("VSMainSkinned");
+			CHECK(vsMain != nullptr && vsInstanced != nullptr && vsSkinned != nullptr);
+			CHECK(minimalFirst.Artifact.FindVertexStage("PSMain") == nullptr);   // 顶点阶段里没有 PS 入口
+			CHECK(vsMain->Bytecode.size() >= 4 && vsMain->Bytecode[0] == 0x03 && vsMain->Bytecode[3] == 0x07);
+			// 删掉 PS 缓存后重编:VS 仍从模板键缓存读回,逐字节一致。
+			CHECK(sameVertexStages(minimalRecompiled.Artifact.VertexStages, minimalFirst.Artifact.VertexStages));
+			{
+				const std::string vsCachePermutation = "m4s3-vs-cache-" + runTag;
+				// 语义改动(不是注释):PS 字节必须真的不同,否则"VS 命中缓存"就没有说服力。
+				std::string editedSource = minimalSource;
+				const size_t roughnessAt = editedSource.find("0.5f");
+				CHECK(roughnessAt != std::string::npos);
+				editedSource.replace(roughnessAt, 4, "0.25f");
+				const size_t toolsBeforeVsCache = MaterialSurfaceCompiler::ToolInvocationCount();
+				const World::SurfaceCompileResult vsCacheFirst =
+					MaterialSurfaceCompiler::CompileSurface(minimalSource, vsCachePermutation);
+				CHECK(vsCacheFirst.Success);
+				const size_t toolsAfterFirstVsCache = MaterialSurfaceCompiler::ToolInvocationCount();
+				// 新排列键:1 次 PS + 3 次 VS(首次建立模板键缓存)。
+				CHECK(toolsAfterFirstVsCache == toolsBeforeVsCache + 4);
+				const World::SurfaceCompileResult vsCacheSecond =
+					MaterialSurfaceCompiler::CompileSurface(editedSource, vsCachePermutation);
+				CHECK(vsCacheSecond.Success);
+				// 同一排列键、换了用户源:只有 PS 重编一次(VS 不含用户源 → 命中)。
+				CHECK(MaterialSurfaceCompiler::ToolInvocationCount() == toolsAfterFirstVsCache + 1);
+				CHECK(sameVertexStages(vsCacheSecond.Artifact.VertexStages, vsCacheFirst.Artifact.VertexStages));
+				CHECK(vsCacheSecond.Artifact.Bytecode != vsCacheFirst.Artifact.Bytecode);
+				std::printf("World.ShaderPipeline: M4-S3 vertex stages=%zu (dxc runs: first=%zu, edited=%zu)\n",
+					vsCacheSecond.Artifact.VertexStages.size(),
+					toolsAfterFirstVsCache - toolsBeforeVsCache,
+					MaterialSurfaceCompiler::ToolInvocationCount() - toolsAfterFirstVsCache);
+			}
+
 			// ③ 语法错误 → 失败、错误消息含用户源行号(实测字符串打印在下面)。
 			const World::SurfaceCompileResult syntaxFailure =
 				MaterialSurfaceCompiler::CompileSurface(syntaxErrorSource, "m4s1-syntax");
@@ -406,7 +461,8 @@ int main()
 			CHECK(compiled.Artifact.EntryPoint == "PSMain");
 			const std::string wrapper = MaterialSurfaceCompiler::WrapSurfaceSource(annotated,
 				World::SurfaceShaderBackend::VulkanSpirV);
-			CHECK(wrapper.find("cbuffer MaterialParams : register(b2, space1)") != std::string::npos);
+			// M4-S3(D1):参数块从 space1 b2 挪到 b4(GL 的 UBO 单元 = binding,单元 2 是灯光)。
+			CHECK(wrapper.find("cbuffer MaterialParams : register(b4, space1)") != std::string::npos);
 			CHECK(wrapper.find("float Roughness;") != std::string::npos);
 			CHECK(wrapper.find("float4 Tint;") != std::string::npos);
 			CHECK(wrapper.find("bool Glow;") != std::string::npos);
@@ -417,6 +473,8 @@ int main()
 			MaterialParamLayout layout;
 			CHECK(World::BuildParamLayout(annotated, table, &layout, &error));
 			std::printf("World.ShaderPipeline: M4-S2 layout\n%s", World::FormatParamLayout(layout).c_str());
+			// M4-S3(D1):参数块 = set 1 / binding 4(反射结果与生成器同一份约定)。
+			CHECK(layout.CbufferSet == 1 && layout.CbufferBinding == 4);
 			CHECK(layout.Fields.size() == 3);
 			CHECK(layout.Fields[0].Name == "Roughness" && layout.Fields[0].Type == ParamType::Float);
 			CHECK(layout.Fields[1].Name == "Tint" && layout.Fields[1].Type == ParamType::Color);
@@ -467,7 +525,7 @@ int main()
 
 			// ③-3 用了未声明:没有注解,用户**手写**参数块 → 反射到没声明的成员 → error。
 			const std::string handWritten =
-				"cbuffer MaterialParams : register(b2, space1)\n"
+				"cbuffer MaterialParams : register(b4, space1)\n"
 				"{\n"
 				"    float3 Speed;\n"
 				"};\n"
@@ -490,6 +548,36 @@ int main()
 			warnings.clear();
 			CHECK(!World::ValidateParamsWithReflection(conflict, conflictTable, &warnings, &error));
 			CHECK(!error.empty());
+
+			// M4-S3:贴图参数上限 = 8(t4..t11 的固定槽位)。第 9 张必须结构化失败,
+			// 而且**不调用 dxc**(表自检在编译之前),不能静默丢参数。
+			{
+				std::string tooManyTextures;
+				for (int index = 0; index < 9; ++index)
+					tooManyTextures += "//! param Texture2D Map" + std::to_string(index) + " = \"\"\n";
+				tooManyTextures +=
+					"Surface Evaluate(MaterialInputs input)\n"
+					"{\n"
+					"    return MakeDefaultSurface();\n"
+					"}\n";
+				const size_t toolsBeforeCap = MaterialSurfaceCompiler::ToolInvocationCount();
+				const World::SurfaceCompileResult capped =
+					MaterialSurfaceCompiler::CompileSurface(tooManyTextures, "m4s3-texture-cap");
+				CHECK(!capped.Success);
+				CHECK(MaterialSurfaceCompiler::ToolInvocationCount() == toolsBeforeCap);
+				bool foundCapDiagnostic = false;
+				for (const World::SurfaceDiagnostic& diagnostic : capped.Diagnostics)
+				{
+					if (diagnostic.Severity == "error"
+						&& diagnostic.Message.find("too many Texture2D params") != std::string::npos)
+					{
+						foundCapDiagnostic = true;
+					}
+				}
+				CHECK(foundCapDiagnostic);
+				std::printf("World.ShaderPipeline: M4-S3 texture cap diagnostic: %s\n",
+					capped.Diagnostics.empty() ? "<none>" : capped.Diagnostics.front().Message.c_str());
+			}
 
 			// 注解坏 → 结构化诊断(用户源行列号),并且不调用 dxc。
 			const size_t toolsBefore = MaterialSurfaceCompiler::ToolInvocationCount();

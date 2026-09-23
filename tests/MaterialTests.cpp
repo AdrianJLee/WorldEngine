@@ -1174,8 +1174,8 @@ int main()
 					"               OpDecorate %Albedo Binding 4\n"
 					"               OpDecorate %u_ShadowMap DescriptorSet 0\n"
 					"               OpDecorate %u_ShadowMap Binding 3\n"
-					"               OpDecorate %MaterialParams DescriptorSet 1\n"
-					"               OpDecorate %MaterialParams Binding 2\n"
+          "               OpDecorate %MaterialParams DescriptorSet 1\n"
+          "               OpDecorate %MaterialParams Binding 4\n"
 					"               OpMemberDecorate %type_MaterialParams 0 Offset 0\n"
 					"               OpMemberDecorate %type_MaterialParams 1 Offset 16\n"
 					"               OpMemberDecorate %type_MaterialParams 2 Offset 32\n"
@@ -1200,7 +1200,9 @@ int main()
 				CHECK(ReflectParamLayoutFromAssembly(assembly, &layout, &error));
 				std::printf("MaterialTests: M4-S2 assembly-reflected layout\n%s",
 					FormatParamLayout(layout).c_str());
-				CHECK(layout.CbufferSet == 1 && layout.CbufferBinding == 2);
+        // M4-S3(D1):参数块 = set 1 / binding 4(b2 让给 set0 的灯光 UBO —— GL 的 UBO
+        // 单元 = binding,忽略 set)。
+        CHECK(layout.CbufferSet == 1 && layout.CbufferBinding == 4);
 				CHECK(layout.Fields.size() == 3);
 				CHECK(layout.Fields[0].Name == "Roughness" && layout.Fields[0].ReflectedType == "float");
 				CHECK(layout.Fields[0].Offset == 0 && layout.Fields[0].Size == 4);
@@ -1233,10 +1235,14 @@ int main()
 				float tint[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 				std::memcpy(tint, bytes.data() + 16, sizeof(tint));
 				CHECK(tint[0] == 1.0f && tint[1] == 1.0f && tint[2] == 1.0f && tint[3] == 1.0f);
-				uint32_t glow = 1u;
-				std::memcpy(&glow, bytes.data() + 32, sizeof(glow));
-				CHECK(glow == 0u);
-			}
+        uint32_t glow = 1u;
+        std::memcpy(&glow, bytes.data() + 32, sizeof(glow));
+        CHECK(glow == 0u);
+        std::printf("MaterialTests: M4-S2 packed %zu bytes -> Roughness=%.3f Tint=(%.2f,%.2f,%.2f,%.2f) Glow=%u\n",
+          bytes.size(), static_cast<double>(roughness), static_cast<double>(tint[0]),
+          static_cast<double>(tint[1]), static_cast<double>(tint[2]), static_cast<double>(tint[3]),
+          glow);
+      }
 
 			// 26. `.wmat` 带 Shader + Params:默认值来自 shader、覆盖生效、未声明 → 可读警告。
 			{
@@ -1445,8 +1451,90 @@ int main()
 				CHECK(material->ShaderPath().empty());
 				CHECK(material->Params().empty());
 
-				library.Shutdown();
-				std::filesystem::remove_all(directory, ec);
+				// 28. M4-S3:`.hlsl` 内容进 `.wmat` 指纹;`.hlsl` 变化被资产热重载看见
+				//     (报告条目 + 引用它的材质失效 → 参数表刷新、Revision 前进)。
+				{
+					writeText("m4s3_probe.hlsl",
+						"//! param Float Roughness = 0.4 [0,1]\n"
+						"//! param Int Steps = 2 [0,8]\n"
+						"Surface Evaluate(MaterialInputs input)\n"
+						"{\n"
+						"    Surface surface = MakeDefaultSurface();\n"
+						"    surface.Roughness = Roughness;\n"
+						"    surface.Emissive = float3(Steps, 0.0f, 0.0f);\n"
+						"    return surface;\n"
+						"}\n");
+					writeText("m4s3_probe.wmat",
+						"FormatVersion: 2\n"
+						"Shader: material_m4s2_tmp/m4s3_probe.hlsl\n"
+						"Name: \"Probe\"\n"
+						"Params:\n"
+						"  Roughness: 0.6\n");
+
+					Ref<Material> probe = library.Load(relative("m4s3_probe.wmat"), &error);
+					CHECK(probe != nullptr);
+					CHECK(probe->Params().size() == 2);
+					// 表面管线键 = 规范化的 shader 路径;预览用的覆盖键是 `<路径>#preview`。
+					CHECK(probe->SurfaceKey() == relative("m4s3_probe.hlsl"));
+					probe->SetSurfaceKeyOverride(relative("m4s3_probe.hlsl") + "#preview");
+					CHECK(probe->SurfaceKey() == relative("m4s3_probe.hlsl") + "#preview");
+					probe->SetSurfaceKeyOverride(std::string());
+					CHECK(probe->SurfaceKey() == relative("m4s3_probe.hlsl"));
+					CHECK(probe->SurfaceKeyOverride().empty());
+
+					const AssetFingerprint shaderBefore = FingerprintAsset(relative("m4s3_probe.hlsl"));
+					const AssetFingerprint materialBefore = FingerprintAsset(relative("m4s3_probe.wmat"));
+					CHECK(shaderBefore.Exists && shaderBefore.FromContent);
+					CHECK(materialBefore.Exists && materialBefore.FromContent);
+
+					// 监听基线必须在改文件之前建立(Watch() 首次登记不报告)。
+					AssetHotReloadReport baseline;
+					library.PollAssetChanges(0.0, baseline);
+					CHECK(!baseline.Any());
+
+				const uint32_t revisionBefore = probe->GetRevision();
+				const size_t paramsBefore = probe->Params().size();
+				writeText("m4s3_probe.hlsl",
+						"//! param Float Roughness = 0.4 [0,1]\n"
+						"Surface Evaluate(MaterialInputs input)\n"
+						"{\n"
+						"    Surface surface = MakeDefaultSurface();\n"
+						"    surface.Roughness = Roughness * 0.5f;\n"
+						"    return surface;\n"
+						"}\n");
+
+					// 指纹:.hlsl 自己变 + 引用它的 .wmat 一起变(父级链同款口径)。
+					const AssetFingerprint shaderAfter = FingerprintAsset(relative("m4s3_probe.hlsl"));
+					const AssetFingerprint materialAfter = FingerprintAsset(relative("m4s3_probe.wmat"));
+					CHECK(shaderAfter.Value != shaderBefore.Value);
+					CHECK(materialAfter.Value != materialBefore.Value);
+
+					const char* hotReloadSwitch = std::getenv("WLD_ASSET_HOTRELOAD");
+					const bool hotReloadEnabled = !(hotReloadSwitch && *hotReloadSwitch
+						&& std::string(hotReloadSwitch) == "0");
+					if (hotReloadEnabled)
+					{
+						AssetHotReloadReport observed;
+						library.PollAssetChanges(0.0, observed);       // 看到新内容,debounce 未到
+						CHECK(observed.ChangedShaders.empty());
+						library.PollAssetChanges(0.2, observed);       // 稳定 0.2s ≥ 0.15s → 报告
+						CHECK(observed.ChangedShaders.size() == 1);
+						CHECK(observed.ChangedShaders[0] == relative("m4s3_probe.hlsl"));
+					// 引用它的材质失效:参数表刷新(Steps 注解已删)+ Revision 前进。
+					CHECK(probe->Params().size() == 1);
+					CHECK(probe->GetRevision() > revisionBefore);
+					std::printf("MaterialTests: M4-S3 shader fingerprint %016llx -> %016llx, "
+						"material fingerprint %016llx -> %016llx, revision %u -> %u (params %zu -> %zu)\n",
+						static_cast<unsigned long long>(shaderBefore.Value),
+						static_cast<unsigned long long>(shaderAfter.Value),
+						static_cast<unsigned long long>(materialBefore.Value),
+						static_cast<unsigned long long>(materialAfter.Value),
+						revisionBefore, probe->GetRevision(), paramsBefore, probe->Params().size());
+				}
+			}
+
+			library.Shutdown();
+			std::filesystem::remove_all(directory, ec);
 			}
 		}
 

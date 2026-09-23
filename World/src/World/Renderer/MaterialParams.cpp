@@ -1004,7 +1004,8 @@ namespace World
 
 	uint32_t ParamCbufferBinding()
 	{
-		return 2;
+		// M4-S3(D1):2 被 set0 的灯光 UBO 占用(GL 的 UBO 单元 = binding,忽略 set)。
+		return 4;
 	}
 
 	uint32_t ParamTextureBaseBinding()
@@ -1344,6 +1345,19 @@ namespace World
 		{
 			if (!IsTextureParamType(decl.Type))
 				continue;
+			// M4-S3:贴图槽位是**固定**的一段(t4..t11),超出上限必须结构化失败 ——
+			// 静默继续会让运行时的描述符槽位与声明对不上。
+			if (textureIndex >= kMaxMaterialTextureSlots)
+			{
+				if (error)
+				{
+					*error = "贴图参数 '" + decl.Name + "' 超出上限:参数块最多 "
+						+ std::to_string(kMaxMaterialTextureSlots) + " 张贴图(t"
+						+ std::to_string(ParamTextureBaseBinding()) + "..t"
+						+ std::to_string(ParamTextureBaseBinding() + kMaxMaterialTextureSlots - 1) + ")";
+				}
+				return false;
+			}
 			const uint32_t expectedBinding = ParamTextureBaseBinding() + textureIndex;
 			++textureIndex;
 			const MaterialParamTextureSlot* slot = nullptr;

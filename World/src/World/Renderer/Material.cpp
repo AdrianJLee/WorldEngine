@@ -407,6 +407,18 @@ namespace World
 		return normalized == defaultNormalized;
 	}
 
+	// M4-S3:表面管线键。覆盖(编辑器预览)优先,否则用规范化的 shader 路径;
+	// 没有 shader 引用 → 空串(不参与表面管线)。规范化与 .wmat/资产路径同一口径,
+	// 保证"保存前后"和"场景/预览"拿到的是同一个键。
+	std::string Material::SurfaceKey() const
+	{
+		if (!m_SurfaceKeyOverride.empty())
+			return m_SurfaceKeyOverride;
+		if (m_Desc.ShaderPath.empty())
+			return {};
+		return MaterialIO::NormalizePath(m_Desc.ShaderPath);
+	}
+
 	void Material::SetShaderPath(const std::string& path)
 	{
 		const std::string normalized = MaterialIO::NormalizePath(path);
