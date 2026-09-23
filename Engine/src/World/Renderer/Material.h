@@ -39,7 +39,7 @@ namespace World
 		std::string NormalTexture;
 		MaterialBlendMode BlendMode = MaterialBlendMode::Opaque;
 		bool DoubleSided = false;
-		// M4-S2/Slang-B1:材质着色器资产(Slang 源 `.slang`;legacy `.hlsl` 同列。
+		// M4-S2/Slang-B1:材质着色器资产(Slang 源 `.slang`;
 		// 相对内容根;如 "shaders/glass.slang")。
 		// 空 = 不做表面函数着色(M3 及以前的参数化路径)。
 		std::string ShaderPath;

@@ -8,7 +8,7 @@
 
 namespace World
 {
-	// M4-S2:材质着色器(Slang 源 `.slang`;legacy `.hlsl` 同列)里的**注解参数表**。
+	// M4-S2:材质着色器(Slang 源 `.slang`)里的**注解参数表**。
 	//
 	// 注解是参数的事实源(编辑器据此生成 DragBar / 取色器 / 资产下拉 / 复选框 / 步进,
 	// 运行时据此生成 cbuffer 布局):

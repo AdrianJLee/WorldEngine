@@ -113,7 +113,7 @@ namespace World
 			const std::vector<MaterialParamDecl>& params, const std::string& permutationKey,
 			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);
 
-		// S3 的"新建 `.slang` 起始代码"(legacy `.hlsl` 同源):只含用户可编辑的 Evaluate();默认值来自
+		// S3 的"新建 `.slang` 起始代码":只含用户可编辑的 Evaluate();默认值来自
 		// MakeDefaultSurface(),不会漏字段。
 		static std::string DefaultSurfaceFunctionSource();
 		// 引擎包装后的完整 Slang 源(契约 + 模板 + 用户源;HLSL 语法是 Slang 的子集)。

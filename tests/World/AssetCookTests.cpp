@@ -141,6 +141,37 @@ namespace
 	private:
 		uint32_t m_Version = 1;
 	};
+
+	// Slang-B1sk:通用的"导入成功但带提示"路径必须继续被验证 ——
+	// 材质着色器不再发提示(`.hlsl` 支持已废除),这个最小导入器替它守住
+	// ImportResult::Warnings → 条目/摘要/cook.db 的转发。
+	class WarningCopyImporter final : public IAssetImporter
+	{
+	public:
+		std::string Name() const override { return "TestWarningCopy"; }
+		uint32_t Version() const override { return 1; }
+		bool Matches(const std::filesystem::path& source) const override
+		{
+			return source.extension() == ".vwarn";
+		}
+		ImportResult Import(const ImportRequest& request, std::error_code& ec) const override
+		{
+			ImportResult result;
+			std::ifstream stream(request.Source, std::ios::binary);
+			if (!stream)
+			{
+				ec = std::make_error_code(std::errc::no_such_file_or_directory);
+				result.Error = "cannot open " + request.Source.string();
+				return result;
+			}
+			const std::string text((std::istreambuf_iterator<char>(stream)),
+				std::istreambuf_iterator<char>());
+			result.Data.assign(text.begin(), text.end());
+			result.Warnings.push_back("test import warning: " + request.LogicalPath);
+			result.Ok = true;
+			return result;
+		}
+	};
 }
 
 int main()
@@ -238,13 +269,14 @@ int main()
 		{
 			const std::vector<std::shared_ptr<IAssetImporter>> importers = DefaultImporters();
 			// D5b-1:Model 导入器(.gltf/.glb)注册在 Script 之后、PassThrough 之前。
-			// M4-S2/Slang-B1:MaterialShader 导入器(规范扩展名 `.slang`;legacy `.hlsl` 同列)
+			// M4-S2/Slang-B1:MaterialShader 导入器(唯一扩展名 `.slang`)
 			// 注册在 Model 之后、PassThrough 之前。
 			CHECK(importers.size() == 5);
 			CHECK(importers[0]->Name() == "Scene" && importers[0]->Version() == 1);
 			CHECK(importers[2]->Name() == "Model" && importers[2]->Version() == 1);
-			// Slang-B1:升 v2 —— 扩展名口径变化,cook 复合指纹含导入器版本 → 旧 cook.db 整体重烘。
-			CHECK(importers[3]->Name() == "MaterialShader" && importers[3]->Version() == 2);
+			// Slang-B1sk:升 v3 —— `.hlsl` 不再是材质着色器资产类型,
+			// cook 复合指纹含导入器版本 → 旧 cook.db 整体重烘。
+			CHECK(importers[3]->Name() == "MaterialShader" && importers[3]->Version() == 3);
 			CHECK(importers[4]->Name() == "PassThrough");
 			const std::shared_ptr<IAssetImporter> script = FindImporter(importers, "Script");
 			CHECK(script != nullptr);
@@ -368,13 +400,13 @@ int main()
 
 		// 5b. M4-S2/Slang-B1:材质着色器(MaterialShader)是一等资产 —— 原样复制;
 		//     cook 指纹 = 源内容哈希 ⊕ 导入器名/版本,改代码/注解或升版就重烘,没改则跳过。
-		//     规范扩展名 = `.slang`(新写路径);legacy `.hlsl` 仍可导入/烘焙(见 5c)。
+		//     唯一扩展名 = `.slang`;`.hlsl` 不再是材质着色器资产类型(见 5c)。
 		{
 			const std::shared_ptr<IAssetImporter> shader = FindImporter(DefaultImporters(), "MaterialShader");
 			CHECK(shader != nullptr);
-			CHECK(shader->Version() == 2);
+			CHECK(shader->Version() == 3);
 			CHECK(shader->Matches("shaders/Glow.slang"));   // 规范扩展名(向导/迁移写出的那一种)
-			CHECK(shader->Matches("shaders/Glow.hlsl"));    // legacy:仍被接受(只读兼容)
+			CHECK(!shader->Matches("shaders/Glow.hlsl"));   // Slang-B1sk:`.hlsl` 不是材质着色器资产类型
 			CHECK(!shader->Matches("materials/glass.wmat"));
 			CHECK(!shader->Matches("scenes/a.wd"));
 			CHECK(!shader->Matches("textures/x.png"));
@@ -426,11 +458,17 @@ int main()
 			std::printf("[Slang-B1] (5b) .slang cook: 1 changed -> 1 skipped -> 1 changed (content hash)\n");
 		}
 
-		// 5c. Slang-B1:legacy `.hlsl` 仍然能被**导入 + 烘焙**(既有项目不破),
-		//     并带可读迁移提示;新写路径产出 `.slang`(证据 = 5b 的 Glow.slang 全链路)。
+		// 5c. Slang-B1sk:`.hlsl` **不再是**材质着色器资产类型 —— 既不命中 MaterialShader
+		//     导入器,也没有任何提示/迁移入口;它按未知扩展名走 PassThrough(内容原样
+		//     复制),cook 摘要里不再出现导入警告。新写路径只有 `.slang`(见 5b)。
 		{
-			const std::shared_ptr<IAssetImporter> shader = FindImporter(DefaultImporters(), "MaterialShader");
+			const std::vector<std::shared_ptr<IAssetImporter>> importers = DefaultImporters();
+			const std::shared_ptr<IAssetImporter> shader = FindImporter(importers, "MaterialShader");
+			const std::shared_ptr<IAssetImporter> passThrough = importers.back();
 			CHECK(shader != nullptr);
+			CHECK(passThrough->Name() == "PassThrough");
+			CHECK(!shader->Matches("shaders/Legacy.hlsl"));
+			CHECK(passThrough->Matches("shaders/Legacy.hlsl"));
 
 			const std::filesystem::path legacyContent = temp.path / "legacy-shader-content";
 			const std::filesystem::path legacySource = legacyContent / "shaders" / "Legacy.hlsl";
@@ -448,14 +486,11 @@ int main()
 			request.LogicalPath = "shaders/Legacy.hlsl";
 			request.Source = legacySource;
 			std::error_code legacyEc;
-			const ImportResult imported = shader->Import(request, legacyEc);
+			const ImportResult imported = passThrough->Import(request, legacyEc);
 			CHECK(imported.Ok);
 			CHECK(!legacyEc);
-			CHECK(imported.Data.size() == legacyText.size());   // 原样复制,legacy 不改写内容
-			CHECK(imported.Warnings.size() == 1);               // 可读迁移提示(结构化字段)
-			CHECK(Contains(imported.Warnings[0], "legacy"));
-			CHECK(Contains(imported.Warnings[0], ".slang"));    // 提示指向新扩展名
-			CHECK(Contains(imported.Warnings[0], "migrate-hlsl-to-slang.py"));
+			CHECK(imported.Data.size() == legacyText.size());   // 原样复制,不改写内容
+			CHECK(imported.Warnings.empty());                   // 不再有提示
 
 			std::string error;
 			ProjectManifest legacyManifest;
@@ -467,37 +502,35 @@ int main()
 			CHECK(ProjectManifest::Save(legacyManifestPath, legacyManifest, &error));
 			const std::filesystem::path legacyOutputDir = temp.path / "legacy-shader-cooked";
 
-			CookPipeline legacyPipeline(DefaultImporters());
+			CookPipeline legacyPipeline(importers);
 			CookSummary legacySummary;
 			const std::vector<CookEntryResult> legacyResults =
 				legacyPipeline.Cook(legacyManifest, legacyManifestPath, legacyOutputDir, false, &legacySummary);
 			CHECK(legacySummary.Total == 1 && legacySummary.Changed == 1 && legacySummary.Failed == 0);
-			// Slang-B1w:导入警告不再被丢弃 —— 落到条目 + 摘要(cook 摘要能读出 legacy 条目数)。
-			CHECK(legacySummary.Warnings == 1 && legacySummary.WarningMessages == 1);
+			// Slang-B1sk:没有提示 → 条目/摘要的警告计数都是 0
+			// (通用的 ImportResult::Warnings 转发机制本身保留,见 5f)。
+			CHECK(legacySummary.Warnings == 0 && legacySummary.WarningMessages == 0);
 			CHECK(legacyResults.size() == 1 && legacyResults[0].Path == "shaders/Legacy.hlsl");
-			CHECK(legacyResults[0].Warnings == imported.Warnings);
+			CHECK(legacyResults[0].Warnings.empty());
 			const std::filesystem::path legacyArtifact =
 				legacyOutputDir / "cooked" / "shaders" / "Legacy.hlsl";
 			CHECK(ReadText(legacyArtifact) == legacyText);   // 逻辑路径与字节都不变
-			std::printf("[Slang-B1] (5c) legacy .hlsl: imported + cooked unchanged, "
-				"with a migration hint -> %s\n", imported.Warnings[0].c_str());
-			std::printf("[Slang-B1w] (5c) cook summary: %zu/%zu asset(s) with import warnings\n",
-				legacySummary.Warnings, legacySummary.Total);
 
-			// Slang-B1w:提示随 cook.db 持久化 —— 第二次全跳过时摘要照样能报出 legacy 条目数。
+			// 未变化 → skip,警告计数仍为 0。
 			CookSummary legacySkipSummary;
 			const std::vector<CookEntryResult> legacySkipResults = legacyPipeline.Cook(
 				legacyManifest, legacyManifestPath, legacyOutputDir, false, &legacySkipSummary);
 			CHECK(legacySkipSummary.Changed == 0 && legacySkipSummary.Skipped == 1);
-			CHECK(legacySkipSummary.Warnings == 1 && legacySkipSummary.WarningMessages == 1);
-			CHECK(legacySkipResults.size() == 1 && legacySkipResults[0].Warnings == imported.Warnings);
-			CHECK(Contains(ReadText(legacyOutputDir / "cook.db.json"), "legacy"));
-			std::printf("[Slang-B1w] (5c) skipped cook keeps the hint: %zu warning(s) "
-				"(persisted in cook.db)\n", legacySkipSummary.WarningMessages);
+			CHECK(legacySkipSummary.Warnings == 0 && legacySkipSummary.WarningMessages == 0);
+			CHECK(legacySkipResults.size() == 1 && legacySkipResults[0].Warnings.empty());
+			std::printf("[Slang-B1sk] (5c) .hlsl is not a MaterialShader type: PassThrough copy, "
+				"0 import warnings\n");
 		}
 
 		// 5d. Slang-B1w:同一份资产 `.hlsl` → `.slang` 改名 —— 新逻辑路径必须**重烘**
 		//     (不是命中旧产物),旧路径条目从 cook.db 里消失。
+		//     Slang-B1sk 后 `.hlsl` 走 PassThrough(未知扩展名),改名后换成 MaterialShader:
+		//     这条同时也证明"未知扩展名 → 资产类型"的改名照样按新路径重烘。
 		{
 			const std::filesystem::path content = temp.path / "rename-content";
 			const std::filesystem::path oldSource = content / "shaders" / "Renamed.hlsl";
@@ -540,7 +573,8 @@ int main()
 			const std::string database = ReadText(outputDir / "cook.db.json");
 			CHECK(Contains(database, "shaders/Renamed.slang"));
 			CHECK(!Contains(database, "shaders/Renamed.hlsl"));
-			std::printf("[Slang-B1w] (5d) .hlsl -> .slang rename: 1 skipped before, 1 changed after (not skipped)\n");
+			std::printf("[Slang-B1w] (5d) .hlsl -> .slang rename: 1 skipped before, "
+				"1 changed after (unknown type -> MaterialShader)\n");
 		}
 
 		// 5e. Slang-B1w:v1→v2 重烘 A/B —— 同一份资产、同一逻辑路径,只有导入器版本不同:
@@ -576,6 +610,44 @@ int main()
 			const std::string v2Database = ReadText(outputDir / "cook.db.json");
 			CHECK(v2Database != v1Database);
 			std::printf("[Slang-B1w] (5e) importer v1 -> v2: 1 skipped at v1, 1 changed at v2 (rebaked)\n");
+		}
+
+		// 5f. Slang-B1sk:通用的 ImportResult::Warnings 转发链路(条目 → 摘要 → cook.db)
+		//     保留 —— 提示由导入器自己决定要不要发,不再和 `.hlsl` 绑定。
+		{
+			const std::filesystem::path content = temp.path / "warning-content";
+			WriteBytes(content / "assets" / "thing.vwarn", "warning-payload");
+
+			std::string error;
+			ProjectManifest manifest;
+			manifest.Id = "com.test.warning";
+			manifest.ContentRoot = "warning-content";
+			manifest.StartScene = "assets/thing.vwarn";
+			manifest.Packages = { "packages/Base.wpak" };
+			const std::filesystem::path manifestPath = temp.path / "warning.we.yaml";
+			CHECK(ProjectManifest::Save(manifestPath, manifest, &error));
+			const std::filesystem::path outputDir = temp.path / "warning-cooked";
+
+			CookPipeline pipeline({ std::make_shared<WarningCopyImporter>() });
+			CookSummary summary;
+			const std::vector<CookEntryResult> results =
+				pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
+			CHECK(summary.Total == 1 && summary.Changed == 1 && summary.Failed == 0);
+			CHECK(summary.Warnings == 1 && summary.WarningMessages == 1);
+			CHECK(results.size() == 1 && results[0].Warnings.size() == 1);
+			CHECK(Contains(results[0].Warnings[0], "test import warning"));
+
+			// 跳过轮:提示随 cook.db 持久化,摘要照样报得出来。
+			CookSummary skipSummary;
+			const std::vector<CookEntryResult> skipResults =
+				pipeline.Cook(manifest, manifestPath, outputDir, false, &skipSummary);
+			CHECK(skipSummary.Changed == 0 && skipSummary.Skipped == 1);
+			CHECK(skipSummary.Warnings == 1 && skipSummary.WarningMessages == 1);
+			CHECK(skipResults.size() == 1 && skipResults[0].Warnings == results[0].Warnings);
+			CHECK(Contains(ReadText(outputDir / "cook.db.json"), "test import warning"));
+			std::printf("[Slang-B1sk] (5f) import warnings forwarded + persisted: "
+				"%zu/%zu changed, %zu/%zu skipped\n",
+				summary.Warnings, summary.Total, skipSummary.WarningMessages, skipSummary.Total);
 		}
 
 		std::printf("World.Asset: all checks passed\n");

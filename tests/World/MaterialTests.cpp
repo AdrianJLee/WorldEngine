@@ -1391,38 +1391,31 @@ int main()
 				CHECK(brokenWarning.find("注解参数表解析失败") != std::string::npos);
 				CHECK(brokenWarning.find("1:11:") != std::string::npos);
 
-				// Slang-B1:legacy `.hlsl` 引用**仍然可读**(既有 .wmat 不迁移也能加载),
-				// 参数注解表与 `.slang` 走同一条入口;新写路径不再产出它(向导/迁移写 `.slang`)。
-				writeText("legacy_glass.hlsl",
-					"//! param Float Roughness = 0.25 [0,1]\n"
-					"Surface Evaluate(MaterialInputs input)\n"
-					"{\n"
-					"    Surface surface = MakeDefaultSurface();\n"
-					"    surface.Roughness = Roughness;\n"
-					"    return surface;\n"
-					"}\n");
-				writeText("mat_legacy_shader.wmat",
+				// Slang-B1sk:`.hlsl` 不再是材质着色器资产类型 —— 旧 `.wmat` 里的
+				// `Shader: *.hlsl` 引用**没有**任何兼容/迁移提示,只剩通用的
+				// "读不到那份源"警告(参数表空,覆盖值保留)。新写路径只有 `.slang`。
+				writeText("mat_hlslext_shader.wmat",
 					"FormatVersion: 2\n"
-					"Shader: material_m4s2_tmp/legacy_glass.hlsl\n"
+					"Shader: material_m4s2_tmp/hlslext_glass.hlsl\n"
 					"Params:\n"
 					"  Roughness: 0.1\n");
-				std::string legacyWarning;
-				Ref<Material> legacy = library.Load(relative("mat_legacy_shader.wmat"), &legacyWarning);
-				CHECK(legacy != nullptr);
-				CHECK(legacy->HasShaderOverride());
-				CHECK(legacy->ShaderPath() == relative("legacy_glass.hlsl"));
-				CHECK(legacy->Params().size() == 1);
-				CHECK(legacy->ResolvedParamValue("Roughness") == "0.1");
-				// Slang-B1w:legacy 扩展名给可读提示(与 ShaderWarning()/GetLoadWarning() 同口径),
-				// 但**加载不失败**、参数表照旧可用;提示指向新扩展名与迁移脚本。
-				CHECK(legacy->ShaderWarning().find("legacy") != std::string::npos);
-				CHECK(legacy->ShaderWarning().find(".hlsl") != std::string::npos);
-				CHECK(legacy->ShaderWarning().find(".slang") != std::string::npos);
-				CHECK(legacy->ShaderWarning().find("migrate-hlsl-to-slang.py") != std::string::npos);
-				CHECK(legacyWarning == legacy->ShaderWarning());
-				CHECK(library.GetLoadWarning(relative("mat_legacy_shader.wmat")) == legacy->ShaderWarning());
-				std::printf("[Slang-B1w] legacy .hlsl material hint: %s\n",
-					legacy->ShaderWarning().c_str());
+				std::string hslExtWarning;
+				Ref<Material> hslExt = library.Load(relative("mat_hlslext_shader.wmat"), &hslExtWarning);
+				CHECK(hslExt != nullptr);                                  // .wmat 本身照样加载
+				CHECK(hslExt->HasShaderOverride());
+				CHECK(hslExt->ShaderPath() == relative("hlslext_glass.hlsl"));
+				CHECK(hslExt->Params().empty());                           // 源读不到 → 参数表空
+				CHECK(hslExt->ShaderWarning().find("读不到") != std::string::npos);
+				CHECK(hslExt->ShaderWarning().find(".hlsl") != std::string::npos);
+				CHECK(hslExt->ShaderWarning().find("legacy") == std::string::npos);
+				CHECK(hslExt->ShaderWarning().find("migrate") == std::string::npos);
+				// Load 警告 = shader 警告 + 参数警告拼接(未声明 override 也会进这里),
+				// 所以这里是"包含"(旧用例只比 shader 警告,是因为当时没有参数警告)。
+				CHECK(hslExtWarning.find(hslExt->ShaderWarning()) != std::string::npos);
+				CHECK(library.GetLoadWarning(relative("mat_hlslext_shader.wmat"))
+					.find(hslExt->ShaderWarning()) != std::string::npos);
+				std::printf("[Slang-B1sk] .hlsl material reference (no migration hint): %s\n",
+					hslExt->ShaderWarning().c_str());
 
 				// 父级继承:Shader 与注解表跟随父级,参数生效值 = 本文件 > 父级 > shader 默认。
 				writeText("mat_parent.wmat",

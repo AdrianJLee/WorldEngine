@@ -129,7 +129,7 @@ namespace World
 						MixFingerprint(result.Value, parent.Value);
 						MixFingerprint(result.Value, parent.Exists ? 0x9e3779b97f4a7c15ull : 0ull);
 					}
-					// M4-S3:本文件写的 `Shader:` 引用的材质着色器(`.slang`;legacy `.hlsl` 同列)
+					// M4-S3:本文件写的 `Shader:` 引用的材质着色器(`.slang`)
 					// 内容也进指纹 —— 改代码 → 引用它的材质指纹变化(缓存/热重载口径与父级链同款)。
 					// 继承来的 shader 由父级那一层的指纹负责(递归里已经混进去)。
 					if (document.HasShader && !document.Values.ShaderPath.empty())

@@ -17,7 +17,7 @@ namespace World::Asset
 		{
 			uint64_t Fingerprint = 0;
 			uint64_t Size = 0;
-			// Slang-B1w:导入提示随条目持久化 —— 条目被跳过时摘要/报告也能报出 legacy 条目数。
+			// Slang-B1w:导入提示随条目持久化 —— 条目被跳过时摘要/报告也能报出带提示的条目数。
 			std::vector<std::string> Warnings;
 		};
 
@@ -242,7 +242,7 @@ namespace World::Asset
 				nextDatabase[logical] = existing->second;
 				result.Changed = false;
 				++stats.Skipped;
-				// Slang-B1w:条目里存的导入提示(如 legacy `.hlsl`)在跳过时照样进摘要/报告。
+				// Slang-B1w:条目里存的导入提示在跳过时照样进摘要/报告。
 				if (!existing->second.Warnings.empty())
 				{
 					result.Warnings = existing->second.Warnings;
@@ -267,8 +267,8 @@ namespace World::Asset
 				continue;
 			}
 
-			// Slang-B1w:导入成功但带提示(legacy `.hlsl` 扩展名等)不再被丢弃 ——
-			// 逐条落到条目/摘要,并进 cook 日志(打包时就能看到有多少资产要迁移)。
+			// Slang-B1w:导入成功但带提示不再被丢弃 ——
+			// 逐条落到条目/摘要,并进 cook 日志。
 			if (!imported.Warnings.empty())
 			{
 				result.Warnings = imported.Warnings;
@@ -340,11 +340,9 @@ namespace World::Asset
 		SaveDatabase(outputDir / "cook.db.json", nextDatabase);
 		if (stats.Warnings)
 		{
-			// 摘要行:数值与逐条 `[cook] '<path>': …` 提示一一对应;legacy `.hlsl` 的条目
-			// 在提示文本里带 "legacy material shader extension"(迁移脚本见该提示)。
+			// 摘要行:数值与逐条 `[cook] '<path>': …` 提示一一对应。
 			WLD_CORE_WARN("[cook] import warnings: {0} of {1} asset(s), {2} message(s) "
-				"(e.g. legacy material shader sources; migration: "
-				"tools/agents/scratch/migrate-hlsl-to-slang.py)",
+				"(see the per-asset [cook] lines above)",
 				stats.Warnings, stats.Total, stats.WarningMessages);
 		}
 		if (summary)

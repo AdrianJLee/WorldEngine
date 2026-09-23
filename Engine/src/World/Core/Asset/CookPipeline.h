@@ -18,7 +18,7 @@ namespace World::Asset
 		bool Changed = false;
 		bool Failed = false;
 		std::string Error;
-		// Slang-B1w:导入成功但带提示(legacy 扩展名等)时不再丢弃 —— 与 ImportResult::Warnings 同口径。
+		// Slang-B1w:导入成功但带提示时不再丢弃 —— 与 ImportResult::Warnings 同口径。
 		std::vector<std::string> Warnings;
 	};
 
@@ -28,7 +28,7 @@ namespace World::Asset
 		size_t Changed = 0;
 		size_t Skipped = 0;
 		size_t Failed = 0;
-		// 带导入警告的条目数(assets)与警告条数;legacy `.hlsl` 资产的条数从这里/日志里读。
+		// 带导入警告的条目数(assets)与警告条数;哪个资产带哪条提示看条目/日志。
 		size_t Warnings = 0;
 		size_t WarningMessages = 0;
 	};

@@ -20,7 +20,7 @@
 | 生成代码 | `<Module>/Schema/Generated/**` 或 `<Module>/Generated/**`,头部标 "Generated … Do not edit" | `Engine/src/World/Schema/Generated/World/WorldSchemaRegistration.cpp` |
 | 测试 | `tests/<模块>/<概念>Tests.cpp`,target 名 `World.<概念>`(文件名 ⇒ target 名)** | `tests/World/MaterialTests.cpp` → `World.Material` |
 | 着色器(引擎) | `<模块>_<用途>.slang`;公共 include 片段用 `.hlsli` | `Renderer3D_Solid.slang`、`MaterialSurfaceContract.hlsli` |
-| 着色器(用户材质) | `.slang` = 材质本身;`.wmat` = 实例;`.hlsl` 只作 legacy 只读兼容 | `shaders/glass.slang` |
+| 着色器(用户材质) | `.slang` = 材质本身;`.wmat` = 实例 | `shaders/glass.slang` |
 
 **例外:文件名用 `<Domain>Tests.cpp`(目标名 `World.<Domain>`)的映射由 `tests/CMakeLists.txt` 维护;
 分域后目录=模块、文件名=概念。
@@ -38,7 +38,7 @@
 | 类别 | 规则 | 例 |
 | --- | --- | --- |
 | PowerShell / Python 脚本 | kebab-case | `check-environment.ps1`、`verify-pixel-baseline.ps1` |
-| 一次性探针 | `<批次id>-<主题>-probe.py`,放 `tools/agents/scratch/` | `m4s3-hlsl-live-probe.py` |
+| 一次性探针 | `<批次id>-<主题>-probe.py`,放 `tools/agents/scratch/` | `m4s3-slang-live-probe.py` |
 | 任务 / 派工 / 报告 | 任务 ID `YYYYMMDD-HHMM-短名`;报告 `reports/<任务ID>-<角色>.md` | `reports/M4-S3-kernel.md` |
 
 ## 5. 数据与内容

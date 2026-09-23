@@ -10,7 +10,6 @@
 | `.wmodel` | 模型资产 | `Engine`(ModelIO/导入器) | 有 | 由 glTF 导入器生成(入库策略见 `.gitignore`) |
 | `.welevel` | 关卡 | `Engine`(Level) | 有 | 例:`projects/default/levels.welevel` |
 | `.slang` | **材质着色器(材质本身)/ 引擎着色器源**(Slang 源) | 用户 + `Engine`(MaterialSurfaceCompiler / ShaderCompiler) | 契约版本在缓存键里 | `//! param` 注解 = 参数事实源;HLSL 语法是 Slang 的子集 |
-| `.hlsl`(legacy) | 旧口径的着色器源,只读兼容 | `Engine`(导入 / 编译 / 烘焙都认) | 同上 | 带可读迁移提示;新写路径(向导 / 迁移脚本)产出 `.slang` |
 | `.hlsli` | 引擎着色器**共享头片段**(Slang / C++ 共用,非独立翻译单元) | `Engine` | 同契约版本 | 如 `MaterialSurfaceContract.hlsli` |
 | `.luau` | 脚本 / 生成存根 | `Engine`(Luau VM) + 编辑器 | — | 存根:工程 `assets/scripts/intermediate/**`,有漂移门禁 |
 | `.wui.json`(历史) | 编辑器窗口布局/浏览器/偏好 | 编辑器 | — | **已迁移**为 `local/*.json`(不入库) |

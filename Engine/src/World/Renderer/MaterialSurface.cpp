@@ -30,8 +30,8 @@ namespace World
 		// 2 = M4-S2:包装源码加入注解参数块,并且每次编译都落一份反射输入供参数校验。
 		// 3 = M4-S3:参数块挪到 b4/space1 + 顶点阶段(模板键缓存,不进 PS 键)。
 		// 4 = Slang-T3:内核换成 slangc(双目标 SPIR-V + `-reflection-json` + 组合采样器模板)。
-		// 5 = Slang-B1:生成的中间源码改名(`surface_user.hlsl` → `surface_user.slang`、
-		//     `surface_wrapper.hlsl` / `vs_wrapper.hlsl` → `.slang`)—— 包装源码里的
+		// 5 = Slang-B1:生成的中间源码改名(`surface_user` / `surface_wrapper` / `vs_wrapper`
+		//     一律 `.slang`,旧名是 `.hlsl`)—— 包装源码里的
 		//     `#include` 名随之变化,键本来就含包装源码,升版让旧缓存目录自然作废。
 		// 6 = Slang-B2-1:顶点实现收敛为泛型 `TransformVertex<T : IVertexSource>`(一个接口 +
 		//     两个实现 + 三个同名特化入口);IO location / UBO / binding 与入口名逐项不变,
@@ -39,7 +39,7 @@ namespace World
 		constexpr uint32_t kSurfaceCacheVersion = 6;
 		constexpr const char* kSurfaceEntryPoint = "PSMain";
 		// 生成的中间用户源文件名:诊断里的 `File` 就是它,所以跟资产层同一口径用 `.slang`
-		// (用户在编辑器里看到的是自己的 `.slang`/legacy `.hlsl`;这里只是编译脚手架)。
+		// (用户在编辑器里看到的是自己的 `.slang`;这里只是编译脚手架)。
 		constexpr const char* kUserSourceFileName = "surface_user.slang";
 		constexpr const char* kReflectionFileName = "surface.reflection.json";
 

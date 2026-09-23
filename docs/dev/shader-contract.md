@@ -1,10 +1,10 @@
 # 材质着色器契约(Slang 严格子集)
 
-> 谁在读:写 `.slang` 材质着色器的人 / AI 生成代码 / 迁移旧资产的人。
+> 谁在读:写 `.slang` 材质着色器的人 / AI 生成代码。
 > 工具链:Slang 是**唯一**着色器编译器(ADR `0003-slang-first-gl-spirv`);
 > `.slang`(Slang 源;**HLSL 语法是它的子集**)→ SPIR-V → { Vulkan, OpenGL 4.6 + `GL_ARB_gl_spirv` },
-> 每个后端一份 permutation。`*.hlsl` 是**legacy**:导入/编译/烘焙都照旧认它,但新写路径
-> (内容浏览器向导、迁移脚本)一律产出 `.slang`。
+> 每个后端一份 permutation。材质着色器资产的扩展名**只有 `.slang`** —— 导入、编译、烘焙、
+> 内容浏览器向导都按它走,`.hlsl` 不是资产类型(旧文件按未知扩展名处理)。
 > **用户面是破坏性的**:HLSL 隐式转换从 warning 变 error;`Texture2D + SamplerState` 要改成组合采样器。
 > 相关决策与证据:`tools/agents/tasks/20260923-1700-slang-refactor/plan.md`(v3.1 §12/§13)、
 > `tools/agents/reports/Slang-T1-gl-spirv.md`、`Slang-T3-kernel.md`。
@@ -154,20 +154,11 @@ GL 口径:描述符绑定单元 = `binding`(**忽略 set**),所以 UBO 单元占
 | `cbuffer X : register(b2)` | `[[vk::binding(2, 0)]] cbuffer X` |
 | `float3 r = color4;` | `float3 r = color4.xyz;` |
 
-机械迁移脚本(默认 dry-run;幂等,第二次跑 0 处自动改动)。它处理的是 **legacy `.hlsl` 源**:
-先按方言规则把内容修到 Slang 严格子集,再由扩展名步骤改名为 `.slang`:
-
-```powershell
-python tools/agents/scratch/migrate-hlsl-to-slang.py            # 扫全仓 .hlsl,只报告
-python tools/agents/scratch/migrate-hlsl-to-slang.py --apply    # 写盘
-```
-
-自动改:组合采样器属性删除、`Sample(sampler, …)` 去首参、`float3 v = float4变量` 补 `.xyz`。
-只报告(必须人工):`Texture2D`/`SamplerState` 声明对合并、`register(...)` 换显式 binding、
-`return`/`+=` 截断、`double` 窄化 —— 这些要么需要槽位判断,要么需要人确认语义。
-脚本只处理 `.hlsl`(legacy;`.wmat` 里的旧 `Shader:` 引用两种扩展名都能读,迁移脚本负责改写);
-`.hlsli` 共享片段与 C++ 里的内嵌源码不在范围内。改完记得重编:缓存键含源码与注解哈希,
-不会串用旧产物。
+**无需迁移(2026-09-23)**:`.hlsl` 作为材质着色器扩展名已整体废除,仓库与示例项目都没有应用在用
+(决策见 `tools/agents/tasks/20260923-2200-slang-native/plan.md`),也没有可跑的迁移脚本 ——
+上表的方言差异只用于**手工**把旧写法改到 `.slang`。`.hlsli` 共享头片段
+(`MaterialSurfaceContract.hlsli`)与 C++ 里的内嵌源码不受扩展名规则影响。
+改完记得重编:缓存键含源码与注解哈希,不会串用旧产物。
 
 ## 9. 边界与未验证
 

@@ -23,9 +23,8 @@ namespace World
 	//    合并结果写进 GetDesc();循环引用 → 拒绝 + 可读链路;父级缺失/坏 → 退化成引擎内置默认
 	//    + WLD_CORE_WARN(子材质仍可用,ParentWarning() 里能看到原因)。
 	//    保存时只写覆盖字段 + Parent(全字段 + 无父级仍然写 v1,老文件逐字节不变)。
-	//  - M4-S2/Slang-B1:.wmat 还可以引用材质着色器(Slang 源 `.slang`;legacy `.hlsl` 同列,
-	//    Shader: 写出**任一种**都能读)并写参数覆盖(Params:)。Load 会读那份源的
-	//    注解参数表(读不到 → 可读警告 + 参数默认值不可用,材质仍可用),
+	//  - M4-S2/Slang-B1:.wmat 还可以引用材质着色器(Slang 源 `.slang`)并写参数覆盖(Params:)。
+	//    Load 会读那份源的注解参数表(读不到 → 可读警告 + 参数默认值不可用,材质仍可用),
 	//    Params()/ResolvedParamValue()/ParamWarnings() 供编辑器直接渲染;保存只写覆盖项。
 	class WLD_API MaterialLibrary
 	{
@@ -60,14 +59,14 @@ namespace World
 		bool Reload(const std::string& path, std::string* error = nullptr);
 
 		// M4-S2:按当前 shader 重新读注解参数表并重算参数警告(不读/写 .wmat)。
-		//  - 本文件写过 `Shader:` → 读那份 Slang 源(`.slang` / legacy `.hlsl`);
+		//  - 本文件写过 `Shader:` → 读那份 Slang 源(`.slang`);
 		//  - 否则继承父级已解析的参数表(没有父级 = 空表);
 		// SetShaderPath / RevertShader 会立刻调用它;编辑器在源文件改动后也可以手动调。
 		void RefreshParams(Material& material);
 
 		// ---- Slang-T6a:打包形态消费烘好的表面材质产物 ----
 		//
-		// 材质引用材质着色器(`.slang` / legacy `.hlsl`,Shader:)时,开发形态由编辑器面板现场编译 + Install;
+		// 材质引用材质着色器(`.slang`,Shader:)时,开发形态由编辑器面板现场编译 + Install;
 		// **打包形态既没有编译器也没有编辑器**,只能消费 `--cook` 烘好的成对产物:
 		//   shaders/surface/<内容根相对路径去扩展名>.<入口>[.gl].spv        (SPIR-V)
 		//   shaders/surface/<…>.PSMain[.gl].reflection.json                  (参数布局)
@@ -99,7 +98,7 @@ namespace World
 		// 表面材质烘资产物的**逻辑路径**(打包与运行时共用这一处命名实现 ——
 		// EditorCooker 写、运行时读,两边都调这里):
 		//  - shaderPath = 内容根相对的材质着色器路径(带扩展名,= Material::SurfaceKey()),如
-		//    `shaders/glass.slang`(legacy `.hlsl` 同列);
+		//    `shaders/glass.slang`;
 		//  - glTarget = GL 目标(SPIR-V 1.0 + 组合采样器)用 `.gl.` 中缀,Vulkan 目标没有中缀;
 		//  - 路径的最后一段扩展名被去掉(`shaders/glass.slang` → `shaders/surface/shaders/glass`)。
 		static std::string SurfaceArtifactBasePath(const std::string& shaderPath);

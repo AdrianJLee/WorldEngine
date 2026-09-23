@@ -540,28 +540,22 @@ int main()
 		CHECK(World::ShaderCompiler::CacheHitCount() >= 2);
 		CHECK(ReadFileBytes(shaderOut / "Probe.VSMain.gl.spv") == glVertexFirst);
 
-		// 4b. Slang-B1:legacy `.hlsl` 源**仍然能被烘焙**(既有资产不破),产物命名与 `.slang`
-		//     同规则(产物名只取 stem,与扩展名无关)。单独的内容根/输出目录,不污染上面的计数。
+		// 4b. Slang-B1sk:烘焙扫描只认 `.slang` —— 同一份内容换成 `.hlsl` 扩展名必须
+		//     **被忽略**(0 源 / 0 产物 / 0 失败),`.hlsl` 不再是可烘焙的源。
 		{
-			const std::filesystem::path legacySourceDir = temp.path / "legacy-src" / "shaders";
-			const std::filesystem::path legacyCookedDir = temp.path / "legacy-cooked";
+			const std::filesystem::path legacySourceDir = temp.path / "hlsl-ext-src" / "shaders";
+			const std::filesystem::path legacyCookedDir = temp.path / "hlsl-ext-cooked";
 			WriteText(legacySourceDir / "Legacy.hlsl",
-				std::string(kProbeShader) + "\n// legacy build " + temp.path.filename().string() + "\n");
+				std::string(kProbeShader) + "\n// .hlsl extension fixture " + temp.path.filename().string() + "\n");
 			World::ShaderCompiler::ResetCounters();
 			const World::ShaderCompiler::BakeResult legacyBaked =
 				World::ShaderCompiler::BakeDistributionTargets(legacySourceDir, legacyCookedDir);
-			CHECK(legacyBaked.Shaders == 1);
-			CHECK(legacyBaked.Artifacts == 4);
+			CHECK(legacyBaked.Shaders == 0);
+			CHECK(legacyBaked.Artifacts == 0);
 			CHECK(legacyBaked.Failed == 0);
-			CHECK(World::ShaderCompiler::ToolInvocationCount() >= 2);
-			for (const char* name : { "Legacy.VSMain.spv", "Legacy.VSMain.gl.spv",
-				"Legacy.PSMain.spv", "Legacy.PSMain.gl.spv" })
-			{
-				std::error_code sizeEc;
-				CHECK(std::filesystem::is_regular_file(legacyCookedDir / "shaders" / name, sizeEc));
-			}
-			std::printf("World.ShaderPipeline: Slang-B1 legacy .hlsl baked: %zu shader(s), %zu artifacts\n",
-				legacyBaked.Shaders, legacyBaked.Artifacts);
+			CHECK(World::ShaderCompiler::ToolInvocationCount() == 0);
+			CHECK(!std::filesystem::exists(legacyCookedDir / "shaders" / "Legacy.VSMain.spv"));
+			std::printf("World.ShaderPipeline: Slang-B1sk .hlsl ignored by the .slang-only bake scan\n");
 		}
 
 		// 打包为 wpak(与 Editor cook 的产物目录一致)并从包内读回。
