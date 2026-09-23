@@ -1,4 +1,6 @@
 #include "World/WUI/WuiCore.h"
+#include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiComponentRegistry.h"
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiOperationLog.h"
 #include "World/WUI/WuiUndoStack.h"
@@ -1097,6 +1099,103 @@ int main()
 			input = WuiInputState {};
 			scripted.Apply("win", input);
 			CHECK(!input.MouseClicked[0] && !input.MouseReleased[0] && input.TextInput.empty());
+		}
+
+		// 19. WUI 组件登记表(P0-1/P0-2):结构不变量 + 排序稳定 + "重复登记=覆盖"
+		{
+			const std::vector<WuiComponentDesc>& all = WuiComponentRegistry::All();
+			CHECK(all.size() >= 20);
+			CHECK(WuiComponentRegistry::Count() == all.size());
+			std::set<std::string> ids;
+			for (const WuiComponentDesc& desc : all)
+			{
+				CHECK(!desc.Id.empty());
+				CHECK(ids.insert(desc.Id).second);      // id 唯一
+				CHECK(!desc.DisplayName.empty());
+				CHECK(!desc.Category.empty());
+				CHECK(!desc.SourceFile.empty());
+				CHECK(!desc.A11yNotes.empty());
+				CHECK(!desc.SizeNotes.empty());
+				CHECK(!desc.Properties.empty());        // 工作台属性编辑器至少有一项可调
+				CHECK(desc.Showcase != nullptr);        // 必须是真实控件路径
+				bool hasDefault = false;
+				for (const WuiComponentState& state : desc.States)
+					if (state.Id == "default")
+						hasDefault = true;
+				CHECK(hasDefault);
+			}
+			// All() 稳定排序:连调两次逐条一致,且按 Category → DisplayName → Id 有序。
+			const std::vector<WuiComponentDesc>& again = WuiComponentRegistry::All();
+			CHECK(again.size() == all.size());
+			for (size_t i = 0; i < all.size(); ++i)
+			{
+				CHECK(again[i].Id == all[i].Id);
+				if (i == 0)
+					continue;
+				const WuiComponentDesc& previous = all[i - 1];
+				const WuiComponentDesc& current = all[i];
+				const bool ordered = previous.Category < current.Category
+					|| (previous.Category == current.Category && previous.DisplayName < current.DisplayName)
+					|| (previous.Category == current.Category && previous.DisplayName == current.DisplayName
+						&& previous.Id < current.Id);
+				CHECK(ordered);
+			}
+			// Find 与重复登记语义:同 id = 覆盖(不新增条目),空 id 被拒绝。
+			CHECK(WuiComponentRegistry::Find("button") != nullptr);
+			CHECK(WuiComponentRegistry::Find("no.such.component") == nullptr);
+			const WuiComponentDesc original = *WuiComponentRegistry::Find("button");
+			WuiComponentDesc probe = original;
+			probe.DisplayName = "Button (override probe)";
+			WuiComponentRegistry::Register(probe);
+			CHECK(WuiComponentRegistry::Count() == all.size());
+			CHECK(WuiComponentRegistry::Find("button")->DisplayName == "Button (override probe)");
+			WuiComponentRegistry::Register(original);   // 还原:后续用例仍看到原生条目
+			CHECK(WuiComponentRegistry::Find("button")->DisplayName == original.DisplayName);
+			const size_t beforeEmpty = WuiComponentRegistry::Count();
+			WuiComponentRegistry::Register(WuiComponentDesc {});
+			CHECK(WuiComponentRegistry::Count() == beforeEmpty);
+		}
+
+		// 20. 每件 showcase:headless 走一遍真实控件路径 —— 至少一条绘制命令 + 稳定 a11y 锚点;
+		//     属性塞非法值/未知名字、状态塞不存在的值时都必须按 default 处理,不崩。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			WuiContext ctx;
+			size_t drawn = 0;
+			for (const WuiComponentDesc& desc : WuiComponentRegistry::All())
+			{
+				std::vector<std::string> states;
+				for (const WuiComponentState& state : desc.States)
+					states.push_back(state.Id);
+				states.push_back("__unknown_state__");
+				for (const std::string& state : states)
+				{
+					accessibility.BeginFrame("main", { 640.0f, 480.0f });
+					accessibility.SetPanel("showcase");
+					WuiInputState input;
+					input.ViewportSize = { 640.0f, 480.0f };
+					ctx.BeginFrame(input);
+					WuiComponentDraw draw;
+					draw.Context = &ctx;
+					draw.Theme = &CurrentTheme();
+					draw.Rect = { 12.0f, 12.0f, 420.0f, 160.0f };
+					draw.State = state;
+					draw.Properties = { { "value", "not-a-number" }, { "min", "NaN" }, { "bogus", "x" } };
+					draw.UiScale = 1.0f;
+					draw.Density = 1.0f;
+					draw.Locale = "en";
+					desc.Showcase(draw);
+					CHECK(ctx.Commands().size() + ctx.OverlayCommands().size() > 0);
+					ctx.EndFrame();
+					for (const std::string& id : desc.ExtraA11yIds)
+						CHECK(accessibility.Find(HashId(id.c_str())) != nullptr);
+					++drawn;
+				}
+			}
+			CHECK(drawn >= 20);
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
 		}
 
 		std::printf("World.Wui: all checks passed\n");
