@@ -247,6 +247,9 @@ namespace World
 		bool m_CameraPreviewEnabled = true;
 		std::unique_ptr<Gameplay::SaveService> m_SaveService;
 		SceneRendererOptions m_RendererOptions;
+		// Layout-S6:Game 模块(模块加载成功 = Game 组件 schema 已注册)。自动存根生成要求它为真,
+		// 否则渲染结果缺少 Game 组件块,写回入库文件即造成漂移门禁失败。
+		bool m_GameModuleLoaded = false;
 
 		Ref<Scene> m_ActiveScene;
 		Ref<Scene> m_RuntimeScene;
