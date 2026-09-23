@@ -56,7 +56,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `Engine/src/World/RHI/` | 渲染前端与 OpenGL / Vulkan 后端 |
 | `Engine/src/World/WUI/` | WUI 控件与布局框架(编辑器与 Runtime HUD 共用) |
 | `Engine/src/World/Script/` | Luau 运行时、绑定与热重载 |
-| `Engine/assets/shaders/` | HLSL 着色器源(`*.slang(legacy `.slang`(legacy `.hlsl` 兼容) 仍可读)`,入口 `VSMain` / `PSMain`) |
+| `Engine/assets/shaders/` | HLSL 着色器源(`*.slang（legacy *.hlsl 仍可读）`,入口 `VSMain` / `PSMain`) |
 | `Game/src/` | gameplay DLL(`Game.dll`)源码;项目内容在 `projects/` 下 |
 | `projects/default/` | 默认项目内容根:项目清单 + `assets/scenes/`、`assets/scripts/` |
 | `Editor/src/WUI/` | 编辑器面板与外壳 |

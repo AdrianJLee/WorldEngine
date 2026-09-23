@@ -64,7 +64,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `Engine/src/World/RHI/` | Rendering frontend with OpenGL / Vulkan backends |
 | `Engine/src/World/WUI/` | WUI widgets and layout framework (shared by the editor and the Runtime HUD) |
 | `Engine/src/World/Script/` | Luau runtime, bindings and hot reload |
-| `Engine/assets/shaders/` | HLSL shader sources (`*.slang(legacy `.slang`(legacy `.hlsl` 兼容) 仍可读)`, entry points `VSMain` / `PSMain`) |
+| `Engine/assets/shaders/` | HLSL shader sources (`*.slang（legacy *.hlsl 仍可读）`, entry points `VSMain` / `PSMain`) |
 | `Game/src/` | Gameplay DLL source (`Game.dll`); the project content root lives under `projects/` |
 | `projects/default/` | Default project content root: `project.we.yaml` plus `assets/scenes/` and `assets/scripts/` |
 | `Editor/src/WUI/` | Editor panels and shell |
