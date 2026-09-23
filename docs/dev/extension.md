@@ -12,7 +12,7 @@
 | 步骤 | 位置 |
 | --- | --- |
 | 声明组件与字段 | `Engine/src/World/Scene/Components.h`(`WE_SCHEMA_META(...)`、`WE_FIELD(...)`) |
-| 生成反射代码 | `Engine/schema-compiler`(`--input <头文件> --module World --output Engine/src/World/Schema/Generated --manifest ... --reg-include ...`) |
+| 生成反射代码 | `Engine/generators/schema-compiler`(`--input <头文件> --module World --output Engine/src/World/Schema/Generated --manifest ... --reg-include ...`) |
 | 门禁 | 测试 `World.SchemaDrift`:生成结果与注解不一致就红灯(字节级比较) |
 
 字段上可用的编辑元数据包括:显示名与分组、文档字符串(`Doc("…")`,落到属性面板的悬停提示与无障碍节点)、
