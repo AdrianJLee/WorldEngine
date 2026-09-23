@@ -47,6 +47,13 @@ namespace World
 		// 烘焙产物逻辑路径(打包与运行时共用同一命名规则)。
 		static std::string ArtifactLogicalPath(const std::string& hlslPath, const std::string& entryPoint, bool vulkan);
 
+		// Slang-T5:**唯一的工具目录解析入口**。
+		// 工具目录由构建系统给(WLD_SLANG_DIR,根 CMake 变量,可 -D 覆盖;默认
+		// <repo>/../WorldEngine-deps/slang-<版本>/bin,由 tools/agents/fetch-slang.ps1 落盘)。
+		// 解析只做一次存在性检查并缓存;解析失败返回空串并在日志里给出可执行提示。
+		// 渲染内核(MaterialSurface*)与烘焙/打包都走这里 —— 不允许第二份实现。
+		static const std::string& SlangcPath();
+
 		// 诊断计数:验收口径为发行形态 CookedHits>0 且 ToolInvocations==0。
 		static size_t CookedHitCount();
 		static size_t CacheHitCount();
@@ -63,9 +70,20 @@ namespace World
 		// 把一个目录下的全部 .hlsl 烘焙为 shaders/<stem>.<entry>.spv|glsl 写入 outputDir,
 		// 供打包流程调用(两个入口 x 两个后端)。使用同一内容寻址缓存,重复调用不重编译。
 		// Slang-T2:编译器换成 slangc(Vulkan 目标 SPIR-V + spirv-cross GLSL 兜底);
-		// GL 目标 SPIR-V 仍由运行时从内容寻址缓存取(T5 的 FETCH/bake 再把它写进发行包),
 		// 产物计数保持 4 个/着色器(契约由 tests/World/ShaderPipelineTests.cpp 冻结)。
+		// GL 目标 SPIR-V 由 BakeDistributionTargets 写进发行包(Slang-T5);
+		// 这里的 .glsl 是过渡期兜底,T6 删除。
 		static BakeResult BakeDirectory(const std::filesystem::path& sourceDir,
+			const std::filesystem::path& outputDir);
+
+		// Slang-T5:发行形态的**双目标**烘焙。对每个 .hlsl 把运行时真的会请求的入口
+		// (VSMain / PSMain + 源码里存在的 VSMainInstanced / VSMainSkinned)烘成两份 SPIR-V:
+		//   shaders/<stem>.<Entry>.spv     —— Vulkan 目标(SPIR-V 1.3,模块入口名 = 源入口名);
+		//   shaders/<stem>.<Entry>.gl.spv  —— GL 目标(SPIR-V 1.0 + 组合 Sampler2D,入口名 "main");
+		// 与 BakeDirectory 共用同一内容寻址缓存(重复调用不重编译)。发行包因此**不需要任何编译器**:
+		// 运行时先查包内产物,查不到才会退回源码树现场编译(T6 删除)。
+		// 产物形态在写出前逐字节校验(GL 目标:SPIR-V 1.0 + 无 OpTypeSampler),不合法即失败。
+		static BakeResult BakeDistributionTargets(const std::filesystem::path& sourceDir,
 			const std::filesystem::path& outputDir);
 
 	private:

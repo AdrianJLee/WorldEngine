@@ -21,7 +21,10 @@ namespace World::Editor
 		size_t AssetsTotal = 0;
 		size_t AssetsChanged = 0;
 		size_t AssetsSkipped = 0;
-		size_t ShaderArtifacts = 0;
+		size_t ShaderArtifacts = 0;         // 全部着色器产物的总数(老口径 + 双目标 + 表面材质)
+		size_t DistributionArtifacts = 0;   // Slang-T5:引擎着色器的双目标 SPIR-V(.spv + .gl.spv)
+		size_t SurfaceShaders = 0;          // Slang-T5:烘焙过的表面材质着色器(.hlsl)数
+		size_t SurfaceArtifacts = 0;        // Slang-T5:表面材质的 SPIR-V + 反射 JSON 产物数
 	};
 
 	// 执行一次完整打包:项目清单 → 增量烘焙 → 着色器烘焙 → 内容包 →

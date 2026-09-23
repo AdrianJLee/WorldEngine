@@ -206,84 +206,36 @@ namespace World
 				WLD_CORE_INFO("{0}", message);
 		}
 
-		// ---- Slang 工具解析(Slang-T2 过渡期;T5 的 FETCH + 根 CMake 变量接管) ----
+		// ---- Slang 工具解析(Slang-T5:唯一入口) ----
 		//
-		// 顺序:
-		//   1) WLD_SLANGC(完整 exe 路径)
-		//   2) WLD_SLANG_DIR(目录)
-		//   3) 编译期 WLD_SLANG_DIR(根 CMake 目前未定义;T3/T5 接入 FETCH 后自动生效)
-		//   4) <repo>/vendor/tools/slang/slangc.exe(计划的 FETCH 落点)
-		//   5) <repo 同级>/WorldEngine-deps/slang-*/bin/slangc.exe(本机开发依赖根)
-		//   6) PATH 上的 slangc.exe
-		// 解析结果只算一次并缓存;解析失败时把所有尝试过的路径打进 ERROR 日志。
+		// 只有一处事实源:构建系统给的 WLD_SLANG_DIR(根 CMake 变量,可 -D 覆盖;
+		// 默认 <repo>/../WorldEngine-deps/slang-<版本>/bin,由 tools/agents/fetch-slang.ps1
+		// 按版本 + sha256 取到仓库外)。T2/T3 过渡期的 env(WLD_SLANGC/WLD_SLANG_DIR)、
+		// vendor/tools/slang、同级 WorldEngine-deps 版本扫描与 PATH 兜底全部删除 ——
+		// "去哪儿找工具"由配置决定一次,不在运行时猜。
+		// 解析结果只算一次并缓存;失败时给出可执行的修复提示。
 		std::string ResolveSlangc()
 		{
-			std::vector<std::string> tried;
-			const auto accept = [&tried](const fs::path& candidate) -> std::string
-			{
-				std::error_code ec;
-				if (fs::is_regular_file(candidate, ec))
-					return candidate.string();
-				tried.push_back(candidate.string());
-				return {};
-			};
-
-			if (const char* full = std::getenv("WLD_SLANGC"); full && *full)
-				if (std::string resolved = accept(fs::path(full)); !resolved.empty())
-					return resolved;
-			if (const char* dir = std::getenv("WLD_SLANG_DIR"); dir && *dir)
-				if (std::string resolved = accept(fs::path(dir) / "slangc.exe"); !resolved.empty())
-					return resolved;
 #ifdef WLD_SLANG_DIR
-			if (std::string resolved = accept(fs::path(WLD_SLANG_DIR) / "slangc.exe"); !resolved.empty())
-				return resolved;
-#endif
-
-			const fs::path repoRoot = WLD_REPO_ROOT;
-			if (std::string resolved = accept(repoRoot / "vendor" / "tools" / "slang" / "slangc.exe");
-				!resolved.empty())
-				return resolved;
-
+			const fs::path toolDir(WLD_SLANG_DIR);
+			const fs::path candidate = toolDir / "slangc.exe";
 			std::error_code ec;
-			const fs::path depsRoot = repoRoot.parent_path() / "WorldEngine-deps";
-			std::vector<fs::path> versions;
-			for (const fs::directory_entry& entry :
-				fs::directory_iterator(depsRoot, fs::directory_options::skip_permission_denied, ec))
-			{
-				std::error_code entryEc;
-				if (!entry.is_directory(entryEc))
-					continue;
-				const std::string name = entry.path().filename().string();
-				if (name.rfind("slang-", 0) == 0)
-					versions.push_back(entry.path());
-			}
-			std::sort(versions.begin(), versions.end());
-			for (auto it = versions.rbegin(); it != versions.rend(); ++it)
-				if (std::string resolved = accept(*it / "bin" / "slangc.exe"); !resolved.empty())
-					return resolved;
-
-#ifdef _WIN32
-			{
-				char buffer[MAX_PATH] = {};
-				if (SearchPathA(nullptr, "slangc.exe", nullptr, MAX_PATH, buffer, nullptr) > 0)
-					return std::string(buffer);
-			}
-#endif
-
+			if (fs::is_regular_file(candidate, ec))
+				return candidate.string();
 			if (Log::GetCoreLogger())
 			{
-				std::string list;
-				for (const std::string& path : tried)
-					list += "\n  - " + path;
-				WLD_CORE_ERROR("[shader] slangc.exe not found (Slang-T2 toolchain). Tried:{0}", list);
+				WLD_CORE_ERROR("[shader] slangc.exe not found at '{0}' (WLD_SLANG_DIR). "
+					"Run tools/agents/fetch-slang.ps1, or configure with -DWLD_SLANG_DIR=<dir>.",
+					candidate.string());
 			}
+#else
+			if (Log::GetCoreLogger())
+			{
+				WLD_CORE_ERROR("[shader] built without WLD_SLANG_DIR: no shader compiler directory is "
+					"configured. Reconfigure with -DWLD_SLANG_DIR=<dir containing slangc.exe>.");
+			}
+#endif
 			return {};
-		}
-
-		const std::string& SlangcPath()
-		{
-			static const std::string resolved = ResolveSlangc();
-			return resolved;
 		}
 
 		// ---- SPIR-V 检查 ----
@@ -323,12 +275,66 @@ namespace World
 
 		// GL 目标 SPIR-V 的常规产物名(Slang-T2 定的规范名;与
 		// shaders/<stem>.<Entry>.spv | .glsl 同一套命名)。
-		// 当前 bake 仍只写 4 个产物/着色器(产物计数契约由
-		// tests/World/ShaderPipelineTests.cpp 冻结);T5 的 FETCH/bake 会把它一并写进发行包,
-		// 运行时这份解析已经就位(命中即用,不命中回落到内容寻址缓存)。
+		// BakeDirectory 的老口径仍是 4 个产物/着色器(.spv + .glsl;计数契约由
+		// tests/World/ShaderPipelineTests.cpp 冻结),Slang-T5 的双目标(BakeDistributionTargets)
+		// 把 .gl.spv 一并写进发行包 —— 运行时命中即用,不再回落到内容寻址缓存/编译器。
 		std::string GlSpirVLogicalPath(const std::string& hlslPath, const std::string& entryPoint)
 		{
 			return std::string("shaders/") + StemOf(hlslPath) + "." + entryPoint + ".gl.spv";
+		}
+
+		// Slang-T5:写出 GL 目标产物**之前**的形态判据(与运行时 TryLoadGlSpirVStage 同一套):
+		// ARB_gl_spirv 只吃 SPIR-V 1.0,且不接受 OpTypeSampler。不合法就不写进发行包 ——
+		// 让打包阶段失败,而不是让用户机器上的驱动去崩。
+		bool SpirvIsGlIngestable(const std::vector<char>& bytes, std::string& reason)
+		{
+			if (bytes.size() < 20 || (bytes.size() % 4) != 0)
+			{
+				reason = "not a SPIR-V module (bad size)";
+				return false;
+			}
+			uint32_t magic = 0;
+			std::memcpy(&magic, bytes.data(), sizeof(magic));
+			if (magic != 0x07230203u)
+			{
+				reason = "not a SPIR-V module (bad magic)";
+				return false;
+			}
+			uint32_t version = 0;
+			std::memcpy(&version, bytes.data() + 4, sizeof(version));
+			if (version != 0x00010000u)
+			{
+				char text[96] = {};
+				std::snprintf(text, sizeof(text), "SPIR-V version word 0x%08x is not 1.0 "
+					"(ARB_gl_spirv needs 1.0)", version);
+				reason = text;
+				return false;
+			}
+			const std::vector<uint8_t> asBytes(bytes.begin(), bytes.end());
+			if (SpirvHasSeparateSamplerType(asBytes))
+			{
+				reason = "module declares OpTypeSampler (GL needs the combined `Sampler2D` form)";
+				return false;
+			}
+			return true;
+		}
+
+		// 运行时会请求的入口点:VSMain / PSMain 固定;实例化/蒙皮入口只在源码里真的声明了
+		// 才烘(只有 Renderer3D_Solid / Renderer3D_Shadow 有 —— 无脑烘会让 slangc 报
+		// "entry point not found",把健康的着色器判成失败)。
+		std::vector<std::string> DiscoverEntryPoints(const std::string& sourceText)
+		{
+			std::vector<std::string> entries { "VSMain", "PSMain" };
+			if (sourceText.find("VSMainInstanced") != std::string::npos)
+				entries.push_back("VSMainInstanced");
+			if (sourceText.find("VSMainSkinned") != std::string::npos)
+				entries.push_back("VSMainSkinned");
+			return entries;
+		}
+
+		const char* ProfileForEntry(const std::string& entryPoint)
+		{
+			return entryPoint.rfind("VS", 0) == 0 ? "vs_6_0" : "ps_6_0";
 		}
 
 		// GL 侧的 SPIR-V 能力:由 RHI 设备能力位决定(带 GL_ARB_gl_spirv 的 GL 4.6 core)。
@@ -350,6 +356,13 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 	std::string ShaderCompiler::ArtifactLogicalPath(const std::string& hlslPath, const std::string& entryPoint, bool vulkan)
 	{
 		return std::string("shaders/") + StemOf(hlslPath) + "." + entryPoint + (vulkan ? ".spv" : ".glsl");
+	}
+
+	const std::string& ShaderCompiler::SlangcPath()
+	{
+		// 唯一入口:解析一次并缓存(路径来自构建期的 WLD_SLANG_DIR,见 ResolveSlangc 的说明)。
+		static const std::string resolved = ResolveSlangc();
+		return resolved;
 	}
 
 	void ShaderCompiler::SetArtifactResolver(ArtifactResolver resolver)
@@ -607,7 +620,7 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 		fingerprint = Mix(fingerprint, targetProfile);
 		fingerprint = Mix(fingerprint, TargetName(target));
 		fingerprint = Mix(fingerprint, std::to_string(kCacheVersion));
-		fingerprint = Mix(fingerprint, std::to_string(ToolIdentity(SlangcPath())));
+		fingerprint = Mix(fingerprint, std::to_string(ToolIdentity(ShaderCompiler::SlangcPath())));
 
 		const fs::path cacheDir(cacheDirAbsPath);
 		std::error_code ec;
@@ -626,9 +639,9 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 			return true;
 		}
 
-		if (SlangcPath().empty())
+		if (ShaderCompiler::SlangcPath().empty())
 		{
-			error = "slangc.exe was not found (Slang-T2 toolchain; set WLD_SLANG_DIR)";
+			error = "slangc.exe was not found in WLD_SLANG_DIR (run tools/agents/fetch-slang.ps1)";
 			return false;
 		}
 
@@ -650,9 +663,9 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 
 		s_ToolInvocations.fetch_add(1, std::memory_order_relaxed);
 		int result = 0;
-		if (!RunTool(SlangcPath(), arguments, result))
+		if (!RunTool(ShaderCompiler::SlangcPath(), arguments, result))
 		{
-			error = "cannot launch slangc: " + SlangcPath();
+			error = "cannot launch slangc: " + ShaderCompiler::SlangcPath();
 			return false;
 		}
 		if (result != 0)
@@ -770,6 +783,102 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 					continue;
 				}
 				result.Artifacts += 2;
+			}
+		}
+		return result;
+	}
+
+	ShaderCompiler::BakeResult ShaderCompiler::BakeDistributionTargets(const std::filesystem::path& sourceDir,
+		const std::filesystem::path& outputDir)
+	{
+		// Slang-T5:发行形态的"每个入口两份 SPIR-V"。Vulkan 目标给 Vulkan RHI;
+		// GL 目标(SPIR-V 1.0 + 组合 Sampler2D + 入口名 "main")给 GL 4.6 的
+		// glShaderBinary/glSpecializeShader。两者与开发形态用**同一个**内容寻址缓存,
+		// 所以重复 cook 不重编译,产物与现场编译逐字节相同。
+		BakeResult result;
+		std::error_code ec;
+		if (!fs::is_directory(sourceDir, ec))
+		{
+			result.Error = "shader source directory missing: " + sourceDir.string();
+			result.Failed = 1;
+			return result;
+		}
+
+		const fs::path outShaders = outputDir / "shaders";
+		fs::create_directories(outShaders, ec);
+		if (ec)
+		{
+			result.Error = "cannot create shader output dir: " + ec.message();
+			result.Failed = 1;
+			return result;
+		}
+
+		for (const fs::directory_entry& entry : fs::recursive_directory_iterator(
+			sourceDir, fs::directory_options::skip_permission_denied, ec))
+		{
+			if (!entry.is_regular_file(ec) || entry.path().extension() != ".hlsl")
+				continue;
+
+			const std::vector<char> sourceBytes = ReadAllBytes(entry.path().string());
+			if (sourceBytes.empty())
+			{
+				++result.Failed;
+				if (result.Error.empty())
+					result.Error = "cannot read shader source: " + entry.path().string();
+				continue;
+			}
+			const std::string sourceText(sourceBytes.begin(), sourceBytes.end());
+			const std::string stem = StemOf(entry.path().string());
+			++result.Shaders;
+
+			for (const std::string& entryPoint : DiscoverEntryPoints(sourceText))
+			{
+				for (const bool glTarget : { false, true })
+				{
+					std::string cachedPath;
+					std::string error;
+					if (!EnsureModule(entry.path(), entryPoint, ProfileForEntry(entryPoint), glTarget,
+							cachedPath, error))
+					{
+						++result.Failed;
+						if (result.Error.empty())
+							result.Error = error;
+						continue;
+					}
+
+					const std::vector<char> module = ReadAllBytes(cachedPath);
+					if (module.empty())
+					{
+						++result.Failed;
+						if (result.Error.empty())
+							result.Error = "empty module: " + cachedPath;
+						continue;
+					}
+					if (glTarget)
+					{
+						std::string reason;
+						if (!SpirvIsGlIngestable(module, reason))
+						{
+							++result.Failed;
+							if (result.Error.empty())
+								result.Error = stem + "." + entryPoint + " GL module rejected: " + reason;
+							continue;
+						}
+					}
+
+					const fs::path artifact = outShaders
+						/ (stem + "." + entryPoint + (glTarget ? ".gl.spv" : ".spv"));
+					std::error_code copyEc;
+					fs::copy_file(cachedPath, artifact, fs::copy_options::overwrite_existing, copyEc);
+					if (copyEc)
+					{
+						++result.Failed;
+						if (result.Error.empty())
+							result.Error = "cannot write " + artifact.string() + ": " + copyEc.message();
+						continue;
+					}
+					++result.Artifacts;
+				}
 			}
 		}
 		return result;

@@ -36,6 +36,26 @@ if(WLD_DXC_DIR STREQUAL "${CMAKE_SOURCE_DIR}/vendor/tools/dxc/")
         "dev-time shader compilation may fail (packaged builds use baked artifacts).")
 endif()
 
+# --- Slang(Slang-T5:当前唯一的着色器编译器)---
+# 工具不入库("重物不入库"):由 tools/agents/fetch-slang.ps1 按固定版本 + sha256 下载到
+# 仓库外的依赖根(默认 <repo 同级>/WorldEngine-deps/slang-<版本>)。
+# WLD_SLANG_DIR = **含 slangc.exe 的目录**,是"去哪儿找编译器"的唯一事实源:
+# 运行时代码只读这个编译期常量,不再有 env / vendor / PATH 兜底猜测。
+if(NOT DEFINED WLD_SLANG_DIR)
+    if(DEFINED ENV{WLD_SLANG_DIR} AND NOT "$ENV{WLD_SLANG_DIR}" STREQUAL "")
+        set(WLD_SLANG_DIR "$ENV{WLD_SLANG_DIR}")
+    else()
+        set(WLD_SLANG_DIR "${CMAKE_SOURCE_DIR}/../WorldEngine-deps/slang-2026.18.2/bin")
+    endif()
+endif()
+file(TO_CMAKE_PATH "${WLD_SLANG_DIR}" WLD_SLANG_DIR)
+message(STATUS "WorldEngine Slang tool dir: ${WLD_SLANG_DIR}")
+if(NOT EXISTS "${WLD_SLANG_DIR}/slangc.exe")
+    message(WARNING "slangc.exe not found in ${WLD_SLANG_DIR}; dev-time shader compilation will "
+        "fail (packaged builds use baked artifacts). Run tools/agents/fetch-slang.ps1, or "
+        "configure with -DWLD_SLANG_DIR=<dir containing slangc.exe>.")
+endif()
+
 # --- 添加子项目---
 add_subdirectory(Engine)
 
@@ -62,6 +82,8 @@ target_compile_definitions(World PUBLIC
     WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/Engine/"
     WLD_DXC_DIR="${WLD_DXC_DIR}"
     WLD_SPIRV_CROSS_DIR="${WLD_SPIRV_CROSS_DIR}"
+    # Slang-T5:唯一工具目录入口(见上面的 WLD_SLANG_DIR 说明)。
+    WLD_SLANG_DIR="${WLD_SLANG_DIR}"
 )
 
 # Debug 配置启用引擎断言与调试期诊断(内存哨兵/污染填充等):

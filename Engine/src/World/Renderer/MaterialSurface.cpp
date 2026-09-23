@@ -1,6 +1,7 @@
 #include "MaterialSurface.h"
 
 #include "World/Core/Log.h"
+#include "World/Renderer/ShaderUtils.h"
 
 #include <atomic>
 #include <chrono>
@@ -174,74 +175,15 @@ namespace World
 			return ec ? 0 : size;
 		}
 
-		// ---- Slang 工具解析(Slang-T3) ----
+		// ---- Slang 工具解析(Slang-T5:只剩一份实现) ----
 		//
-		// 口径与 ShaderUtils.cpp 的 ShaderCompiler 一致(两份解析在 T5/T6 的根 CMake FETCH 后应合一):
-		//   1) WLD_SLANGC(完整 exe 路径)
-		//   2) WLD_SLANG_DIR(目录)
-		//   3) 编译期 WLD_SLANG_DIR(根 CMake 目前未定义;FETCH 接管后自动生效)
-		//   4) <repo>/vendor/tools/slang/slangc.exe
-		//   5) <repo 同级>/WorldEngine-deps/slang-*/bin/slangc.exe(本机开发依赖根)
-		//   6) PATH 上的 slangc.exe
-		// 解析结果只算一次(编译路径是热的,不能每次 stat 一整串目录)。
-		std::string ResolveSlangcPath()
-		{
-			const auto accept = [](const fs::path& candidate) -> std::string
-			{
-				std::error_code ec;
-				if (fs::is_regular_file(candidate, ec))
-					return candidate.string();
-				return {};
-			};
-
-			if (const char* full = std::getenv("WLD_SLANGC"); full && *full)
-				if (std::string resolved = accept(fs::path(full)); !resolved.empty())
-					return resolved;
-			if (const char* dir = std::getenv("WLD_SLANG_DIR"); dir && *dir)
-				if (std::string resolved = accept(fs::path(dir) / "slangc.exe"); !resolved.empty())
-					return resolved;
-#ifdef WLD_SLANG_DIR
-			if (std::string resolved = accept(fs::path(WLD_SLANG_DIR) / "slangc.exe"); !resolved.empty())
-				return resolved;
-#endif
-
-			const fs::path repoRoot = WLD_REPO_ROOT;
-			if (std::string resolved = accept(repoRoot / "vendor" / "tools" / "slang" / "slangc.exe");
-				!resolved.empty())
-				return resolved;
-
-			std::error_code ec;
-			const fs::path depsRoot = repoRoot.parent_path() / "WorldEngine-deps";
-			std::vector<fs::path> versions;
-			for (const fs::directory_entry& entry :
-				fs::directory_iterator(depsRoot, fs::directory_options::skip_permission_denied, ec))
-			{
-				std::error_code entryEc;
-				if (!entry.is_directory(entryEc))
-					continue;
-				const std::string name = entry.path().filename().string();
-				if (name.rfind("slang-", 0) == 0)
-					versions.push_back(entry.path());
-			}
-			std::sort(versions.begin(), versions.end());
-			for (auto it = versions.rbegin(); it != versions.rend(); ++it)
-				if (std::string resolved = accept(*it / "bin" / "slangc.exe"); !resolved.empty())
-					return resolved;
-
-#ifdef _WIN32
-			{
-				char buffer[MAX_PATH] = {};
-				if (SearchPathA(nullptr, "slangc.exe", nullptr, MAX_PATH, buffer, nullptr) > 0)
-					return std::string(buffer);
-			}
-#endif
-			return {};
-		}
-
+		// 工具目录是构建期决定的单一事实源(根 CMake 的 WLD_SLANG_DIR,可 -D 覆盖;
+		// 落盘由 tools/agents/fetch-slang.ps1 负责)。这里直接用 ShaderUtils 里的
+		// ShaderCompiler::SlangcPath() —— 渲染内核与烘焙/发行路径不再各有一份解析,
+		// 也不再有 env/vendor/PATH 兜底猜测。
 		const std::string& SlangcPath()
 		{
-			static const std::string resolved = ResolveSlangcPath();
-			return resolved;
+			return ShaderCompiler::SlangcPath();
 		}
 
 		// 文件内容哈希(64 位 FNV-1a,分块读)—— 工具身份用它:换 Slang 构建即失效。
