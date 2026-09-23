@@ -347,7 +347,7 @@ namespace World
 		}
 		WLD_CORE_ASSERT(m_Device, "Failed to create RHI device: {0}", error);
 
-		// ShaderCompiler 依据 API 决定返回 SPIR-V 或 GLSL。
+		// ShaderCompiler 依据 API 选 SPIR-V 目标(Vulkan profile / GL profile)。
 		RendererAPI::SetAPI(requestedBackend == Rhi::Backend::Vulkan && m_Device->GetCapabilities().BackendName == "Vulkan"
 			? RendererAPI::API::Vulkan : RendererAPI::API::OpenGL);
 		s_BackendName = RendererAPI::GetAPI() == RendererAPI::API::Vulkan ? "vulkan" : "opengl";

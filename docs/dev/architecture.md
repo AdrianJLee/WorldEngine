@@ -35,7 +35,8 @@
 - 后端由项目清单(`projects/default/project.we.yaml`)的 `renderer: opengl | vulkan` 选择;**字段缺省时按 `opengl` 处理**。
   本仓库示例项目当前写的是 `vulkan`。
 - 着色器源是 `Engine/assets/shaders/*.hlsl`(入口 `VSMain` / `PSMain`,`vs_6_0` / `ps_6_0`),
-  开发期编译到构建目录的着色器缓存;打包产物里带编译好的着色器,运行时不依赖 `dxc`。
+  唯一编译器是 **Slang**(`slangc`),每个 stage 编出 Vulkan 与 GL 两份 SPIR-V;
+  开发期编译到构建目录的着色器缓存,打包产物里带编译好的着色器,运行时不依赖编译器。
 
 ## 场景与反射
 

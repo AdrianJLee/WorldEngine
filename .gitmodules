@@ -4,9 +4,6 @@
 [submodule "World/vendor/GLFW"]
 	path = third_party/GLFW
 	url = https://github.com/AdrianJLee/glfw.git
-[submodule "World/vendor/SPIRV-Cross"]
-	path = third_party/SPIRV-Cross
-	url = https://github.com/KhronosGroup/SPIRV-Cross.git
 [submodule "World/vendor/glm"]
 	path = third_party/glm
 	url = https://github.com/g-truc/glm.git

@@ -13,30 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # --- 查找 Vulkan SDK(可选):headers+volk 已 vendor,SDK 仅用于可选验证层
 find_package(Vulkan QUIET)
 
-# --- DXC 着色器编译器:SPIR-V 代码生成要求 dxc.exe 与 dxcompiler.dll 版本匹配,
-# 仓库内的 vendor/tools/dxc/dxc.exe 只带壳。优先用 Vulkan SDK 的完整工具链(与 glslc 同目录),
-# 找不到时回退 vendor/dxc(仅 DXIL 场景可用)。
-# 外部工具根:dxc / spirv-cross 都是**可替换**的,替换只改这一个变量(或命令行 -D 覆盖)。
-set(WLD_SHADER_TOOL_DIR "${CMAKE_SOURCE_DIR}/vendor/tools/")
-if(NOT DEFINED WLD_DXC_DIR)
-    set(WLD_DXC_DIR "${WLD_SHADER_TOOL_DIR}dxc/")
-endif()
-if(NOT DEFINED WLD_SPIRV_CROSS_DIR)
-    set(WLD_SPIRV_CROSS_DIR "${WLD_SHADER_TOOL_DIR}spirv-cross/")
-endif()
-if(Vulkan_GLSLC_EXECUTABLE)
-    get_filename_component(_we_vulkan_bin "${Vulkan_GLSLC_EXECUTABLE}" DIRECTORY)
-    if(EXISTS "${_we_vulkan_bin}/dxc.exe" AND EXISTS "${_we_vulkan_bin}/dxcompiler.dll")
-        set(WLD_DXC_DIR "${_we_vulkan_bin}/")
-    endif()
-endif()
-message(STATUS "WorldEngine DXC tool dir: ${WLD_DXC_DIR}")
-if(WLD_DXC_DIR STREQUAL "${CMAKE_SOURCE_DIR}/vendor/tools/dxc/")
-    message(WARNING "Complete dxc toolchain not found in the Vulkan SDK; "
-        "dev-time shader compilation may fail (packaged builds use baked artifacts).")
-endif()
-
-# --- Slang(Slang-T5:当前唯一的着色器编译器)---
+# --- Slang(Slang-T5 起是**唯一**的着色器编译器;Slang-T6b 删掉了旧的两套外部工具)---
 # 工具不入库("重物不入库"):由 tools/agents/fetch-slang.ps1 按固定版本 + sha256 下载到
 # 仓库外的依赖根(默认 <repo 同级>/WorldEngine-deps/slang-<版本>)。
 # WLD_SLANG_DIR = **含 slangc.exe 的目录**,是"去哪儿找编译器"的唯一事实源:
@@ -80,8 +57,6 @@ target_compile_definitions(World PUBLIC
     WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/projects/default/assets"
     WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
     WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/Engine/"
-    WLD_DXC_DIR="${WLD_DXC_DIR}"
-    WLD_SPIRV_CROSS_DIR="${WLD_SPIRV_CROSS_DIR}"
     # Slang-T5:唯一工具目录入口(见上面的 WLD_SLANG_DIR 说明)。
     WLD_SLANG_DIR="${WLD_SLANG_DIR}"
 )

@@ -63,7 +63,7 @@ Surface Evaluate(MaterialInputs input)
 
 ## 3. 严格类型(最常见的一类报错)
 
-Slang 不做隐式宽度转换 —— 旧 dxc 下是 warning,现在是 **error**:
+Slang 不做隐式宽度转换 —— 隐式窄化/加宽都是 **error**:
 
 | 旧写法 | Slang 诊断 | 修法 |
 | --- | --- | --- |
@@ -143,7 +143,7 @@ GL 口径:描述符绑定单元 = `binding`(**忽略 set**),所以 UBO 单元占
 
 ## 8. 从旧写法迁移
 
-| 旧(dxc 时代) | 新(Slang) |
+| 旧写法(旧编译器) | 新(Slang) |
 | --- | --- |
 | `Texture2D Albedo; SamplerState AlbedoSampler;`(或 `[[vk::combinedImageSampler]]`) | `Sampler2D Albedo;`(材质参数走注解,不要手写声明) |
 | `Albedo.Sample(AlbedoSampler, uv)` | `Albedo.Sample(uv)` |

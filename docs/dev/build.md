@@ -80,10 +80,10 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | 改了目录结构但构建没反应 | 源文件列表在配置阶段收集;重新跑 `cmake -S . -B ...` |
 | 产物路径和预期不符 | `CMAKE_BUILD_TYPE` 与 `--config` 不同名 |
 | DLL 找不到 / `LoadLibraryA` 失败 | 工作目录不对,或宿主与 DLL 的架构(x64)、构建类型不匹配 |
-| 着色器编译失败 / 只有 DXIL | `dxc.exe` 需要和 `dxcompiler.dll` 同目录;优先用 Vulkan SDK `Bin/` 里的完整工具链 |
+| 着色器编译失败 | 找不到编译器时跑 `tools/agents/fetch-slang.ps1`(按固定版本 + sha256 取到仓库外),或用 `-DWLD_SLANG_DIR=<含 slangc.exe 的目录>` 配置 |
 
 ## 内部开发 checkout 的额外工具
 
 内部 checkout 里有一个只读预检脚本(按 `.gitignore` 不进公开仓库):
 `tools/agents/check-environment.ps1` —— 一次列出 CMake / MSVC / MSBuild / Windows SDK / Vulkan SDK /
-`dxc` / 已有构建缓存的状态,`-AsJson` 供脚本消费。
+`slangc`(版本 + sha256)/ 已有构建缓存的状态,`-AsJson` 供脚本消费。

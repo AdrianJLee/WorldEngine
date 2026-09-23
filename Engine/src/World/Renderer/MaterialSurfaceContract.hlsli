@@ -1,7 +1,7 @@
 // WorldEngine M4-S1:材质表面函数契约(HLSL / C++ 共用同一份字段表)。
 //
 // 这个文件故意写成双语:
-//   - dxc 编译生成的包装源码时,走 HLSL 分支,声明 MaterialInputs / Surface;
+//   - Slang(slangc)编译生成的包装源码时,走 HLSL 分支,声明 MaterialInputs / Surface;
 //   - C++ 编译单元包含它时,走 C++ 分支,拿到同一份字段元数据(名字/HLSL 类型/语义/默认值)。
 // X-macro 列表是**唯一事实源**:结构体成员、默认表面函数、C++ 元数据都由它展开,
 // 新增字段只改列表,不在别处手写成员。

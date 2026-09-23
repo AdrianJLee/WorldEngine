@@ -667,7 +667,7 @@ namespace World::Rhi::Vulkan
 		};
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		// 池标志必须与布局匹配:spirv-cross 为 combinedImageSampler 生成的布局带
+		// 池标志必须与布局匹配:组合采样器(Slang `Sampler2D`)的布局带
 		// VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,池少了这个标志
 		// 会让 vkAllocateDescriptorSets 失败(返回空 set),随后 Update 直接崩
 		// (实测 VUID-VkDescriptorSetAllocateInfo-pSetLayouts-03044)。

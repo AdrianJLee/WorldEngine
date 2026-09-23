@@ -176,8 +176,8 @@ namespace World::Wui
 		m_Shader = device->CreateShader(shaderDesc);
 
 		Rhi::DescriptorSetLayoutDesc textureLayoutDesc;
-		// 着色器用 [[vk::combinedImageSampler]] 声明合并采样器,SPIR-V 与 GLSL 交叉
-		// 编译产物统一为 binding 1 的 combined image sampler。
+		// 着色器用组合采样器(Slang `Sampler2D`)声明,SPIR-V 产物里 binding 1 就是
+		// combined image sampler(GL 与 Vulkan 同形)。
 		textureLayoutDesc.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
 		m_TextureLayout = device->CreateDescriptorSetLayout(textureLayoutDesc);

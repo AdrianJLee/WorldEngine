@@ -86,7 +86,8 @@ namespace World::Rhi::OpenGL
 				}
 			}
 			// 4.6 core 的 SPIR-V 摄入能力(GL_ARB_gl_spirv):Slang 重构后 GL 的着色器入口。
-			// 缺失时先只告警(过渡期仍可能走 GLSL 文本);T1 落地后改为硬性要求。
+			// Slang-T6b 起这是 GL 的**唯一**着色器摄入方式(没有 GLSL 文本兜底):扩展串
+			// 缺失时这里告警,随后每个管线的阶段装配都会留 ERROR(提示切 Vulkan 后端)。
 			bool spirvModules = false;
 			for (GLint index = 0; index < extensionCount && !spirvModules; ++index)
 			{

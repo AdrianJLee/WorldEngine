@@ -15,7 +15,7 @@
 | `projects/<名>/` | **项目内容根**:`project.we.yaml`、`assets/**`、`levels/**`、项目级 dot 配置 | 运行时/编辑器按清单读取 |
 | `tests/<模块>/<概念>Tests.cpp` | 引擎与宿主测试;target 名 `World.<概念>` | `Engine`(部分目标额外编译 Game/TestKit 生成源) |
 | `third_party/<名>/` | 参与编译的第三方**源码**(submodule 优先) | 各 target |
-| `vendor/tools/<名>/` | 以**进程**调用的外部工具(dxc、spirv-cross …) | 构建期/运行时 |
+| `vendor/tools/<名>/` | 以**进程**调用的外部工具(重物默认不入库,如 slangc 走 FETCH + sha256) | 构建期/运行时 |
 | `tools/agents/**` | 本机工作流与过程层(方案/派工/报告/scratch);**不入库、可丢** | 人 + AI |
 | `local/**` | 本机状态(编辑器偏好/布局/窗口/最近使用);**不入库、可整体删除** | 编辑器 |
 | `docs/{user,dev}/**` | 公开文档(用户手册 / 开发者文档) | 人 |
@@ -46,8 +46,9 @@ Engine/
 ### 运行要求:OpenGL = 4.6 core
 
 - 引擎**显式请求 4.6 core**(`WindowsWindow` 的 GLFW hints),并在 `OpenGLDevice` 构造时硬校验版本;
-- **`GL_ARB_gl_spirv` 是目标能力**(`RhiCapabilities::SpirVShaderModules`):Slang 重构后 GL 的着色器
-  摄入走 `glShaderBinary` + `glSpecializeShader`(不再吃 GLSL 文本);缺失时当前先告警。
+- **`GL_ARB_gl_spirv` 是硬性能力**(`RhiCapabilities::SpirVShaderModules`):GL 的着色器摄入只有
+  `glShaderBinary` + `glSpecializeShader` 一条路,没有 GLSL 文本兜底;扩展串缺失时设备构建期告警、
+  管线装配期明确报错(提示切 Vulkan 后端)。
 - 依据:GL 4.6 才有 GL_SPIRV;Slang 的 GLSL 目标是 **Vulkan-GLSL**(含 `set =`、`texture2D`/`sampler`
   分离类型),桌面 GL 不能直接编译 —— 因此 GL 侧的正确路径是直接吃 SPIR-V。
 
@@ -69,8 +70,8 @@ Engine/
 
 ## 5. 第三方与工具
 
-判据、入证据(来源+pin+许可)、重物阈值、patch 规则、**可替换工具**(`WLD_SHADER_TOOL_DIR` /
-`WLD_DXC_DIR` / `WLD_SPIRV_CROSS_DIR`)见 [`vendor/README.md`](../../vendor/README.md)。
+判据、入证据(来源+pin+许可)、重物阈值、patch 规则、**外部工具**(`WLD_SLANG_DIR` 等)见
+[`vendor/README.md`](../../vendor/README.md)。
 
 ## 6. 迁移进度(2026-09-23,分支 `codex/layout-engine`)
 

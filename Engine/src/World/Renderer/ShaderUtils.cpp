@@ -39,7 +39,7 @@ namespace World
 		};
 
 		// 缓存版本:编译命令/工具链语义变化时递增,旧缓存自动失效。
-		// Slang-T2(2):引擎着色器从 dxc 单目标迁到 Slang 双目标 SPIR-V,旧缓存全部作废。
+		// Slang-T2(2):引擎着色器从单目标迁到 Slang 双目标 SPIR-V,旧缓存全部作废。
 		constexpr uint32_t kCacheVersion = 2;
 
 		// 着色器目标(Slang-T2 起每个 stage 两份 SPIR-V permutation):
@@ -112,7 +112,7 @@ namespace World
 			return hash;
 		}
 
-		// 工具身份:用可执行文件大小做代理,工具升级(换 slangc/spirv-cross)时缓存自动失效。
+		// 工具身份:用可执行文件大小做代理,工具升级(换 slangc 构建)时缓存自动失效。
 		uint64_t ToolIdentity(const std::string& toolPath)
 		{
 			std::error_code ec;
@@ -251,8 +251,8 @@ namespace World
 		// ARB_gl_spirv 的"Non-acceptance of SPIR-V features"清单里有 OpTypeSampler:
 		// Slang 的分离采样器形态(Texture2D + SamplerState)会产出它。T1 实测这种模块
 		// 交给 glShaderBinary 之后,NVIDIA 驱动会在第一次采样时崩(nvoglv64+0x75abcb,
-		// 14/14 同一签名)。所以这里做一次静态检查:命中就退回 GLSL 文本,而不是把
-		// 一个已知会崩驱动的模块丢给驱动。
+		// 14/14 同一签名)。所以这里做一次静态检查:命中就**拒绝**这个模块,而不是把一个
+		// 已知会崩驱动的模块丢给驱动(T6b 起没有 GLSL 文本兜底:拒绝 = 该阶段装配失败)。
 		bool SpirvHasSeparateSamplerType(const std::vector<uint8_t>& bytes)
 		{
 			if (!SpirvLooksValid(bytes))
@@ -271,16 +271,6 @@ namespace World
 				offset += wordCount;
 			}
 			return false;
-		}
-
-		// GL 目标 SPIR-V 的常规产物名(Slang-T2 定的规范名;与
-		// shaders/<stem>.<Entry>.spv | .glsl 同一套命名)。
-		// BakeDirectory 的老口径仍是 4 个产物/着色器(.spv + .glsl;计数契约由
-		// tests/World/ShaderPipelineTests.cpp 冻结),Slang-T5 的双目标(BakeDistributionTargets)
-		// 把 .gl.spv 一并写进发行包 —— 运行时命中即用,不再回落到内容寻址缓存/编译器。
-		std::string GlSpirVLogicalPath(const std::string& hlslPath, const std::string& entryPoint)
-		{
-			return std::string("shaders/") + StemOf(hlslPath) + "." + entryPoint + ".gl.spv";
 		}
 
 		// Slang-T5:写出 GL 目标产物**之前**的形态判据(与运行时 TryLoadGlSpirVStage 同一套):
@@ -347,15 +337,12 @@ namespace World
 		}
 	}
 
-	// WLD_DXC_DIR 由构建系统决定(dxc 只服务 MaterialSurface 路径;引擎着色器 T2 起走 Slang)。
-	const std::string ShaderCompiler::dxcAbsPath = std::string(WLD_DXC_DIR) + "dxc.exe";
-// 工具目录由构建系统给(WLD_SPIRV_CROSS_DIR):spirv-cross 属**可替换**工具,换实现只改 CMake 变量。
-const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROSS_DIR) + "spirv-cross.exe";
 	const std::string ShaderCompiler::cacheDirAbsPath = WLD_INTERMEDIATE_DIR + std::string("ShaderCache/");
 
 	std::string ShaderCompiler::ArtifactLogicalPath(const std::string& hlslPath, const std::string& entryPoint, bool vulkan)
 	{
-		return std::string("shaders/") + StemOf(hlslPath) + "." + entryPoint + (vulkan ? ".spv" : ".glsl");
+		// Slang-T6b:两个目标都是 SPIR-V 产物 —— 命名只有这一处实现(cook 写、运行时读)。
+		return std::string("shaders/") + StemOf(hlslPath) + "." + entryPoint + (vulkan ? ".spv" : ".gl.spv");
 	}
 
 	const std::string& ShaderCompiler::SlangcPath()
@@ -428,47 +415,17 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 			return ReadBinaryFile(modulePath);
 		}
 
-		// ---- OpenGL ----
-		// Slang-T2 起 GL 的默认摄入路径是 GL 目标 SPIR-V;只有拿不到它(能力缺失 /
-		// 工具缺失 / 模块形态不合法)时才回退 GLSL 文本,并在 CompileStage 里留下 ERROR。
+		// ---- OpenGL:GL 目标 SPIR-V(GL 4.6 core + GL_ARB_gl_spirv)----
+		// 烘焙产物 → 内容寻址缓存 → slangc 现场编译;两条都拿不到就是失败。
+		// Slang-T6b 起没有 GLSL 文本兜底(旧的编译器与转译器已删除)。
 		std::vector<uint8_t> spirv;
 		std::string reason;
 		if (TryLoadGlSpirVStage(hlslPath, entryPoint, profile, spirv, reason))
 			return std::vector<char>(spirv.begin(), spirv.end());
 
-		if (s_Resolver)
-		{
-			const std::string logical = ArtifactLogicalPath(hlslPath, entryPoint, false);
-			std::vector<uint8_t> bytes;
-			if (s_Resolver(logical, bytes) && !bytes.empty())
-			{
-				s_CookedHits.fetch_add(1, std::memory_order_relaxed);
-				LogCookedHit(logical, bytes.size());
-				return std::vector<char>(bytes.begin(), bytes.end());
-			}
-		}
-
-		std::error_code ec;
-		const fs::path sourceAbs = fs::absolute(fs::path(WLD_WORLD_DIR) / hlslPath, ec);
-		if (ec || !fs::is_regular_file(sourceAbs, ec))
-		{
-			WLD_CORE_ERROR("Shader '{0}' has no cooked artifact and no source in the content tree.", hlslPath);
-			WLD_CORE_ASSERT(false, "Shader source missing and no cooked artifact available");
-			return {};
-		}
-
-		std::string glslPath;
-		std::string error;
-		if (!EnsureGlslFallback(sourceAbs, entryPoint, profile, glslPath, error))
-		{
-			WLD_CORE_ERROR("Shader '{0}' ({1}) GLSL fallback failed: {2} (GL SPIR-V reason: {3})",
-				hlslPath, entryPoint, error, reason);
-			WLD_CORE_ASSERT(false, "Shader compilation failed");
-			return {};
-		}
-		LogOnce("glsl-fallback:" + hlslPath + "." + entryPoint, "error",
-			"[gl-spirv] " + hlslPath + " (" + entryPoint + "): using GLSL text fallback because " + reason);
-		return ReadBinaryFile(glslPath);
+		WLD_CORE_ERROR("Shader '{0}' ({1}): no GL SPIR-V module available: {2}", hlslPath, entryPoint, reason);
+		WLD_CORE_ASSERT(false, "GL shader stage has no SPIR-V module");
+		return {};
 	}
 
 	Rhi::ShaderStageSource ShaderCompiler::CompileStage(Rhi::ShaderStage stage, const std::string& hlslPath,
@@ -487,7 +444,7 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 			return out;
 		}
 
-		// OpenGL:GL 目标 SPIR-V(默认路径)。
+		// OpenGL:GL 目标 SPIR-V(唯一路径)。
 		std::vector<uint8_t> spirv;
 		std::string reason;
 		if (TryLoadGlSpirVStage(hlslPath, entryPoint, profile, spirv, reason))
@@ -496,41 +453,8 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 			return out;
 		}
 
-		// 过渡期兜底(GLSL 文本;T6 删除):明确报出"走了哪条、为什么"。
-		LogOnce("gl-spirv-fallback:" + hlslPath + "." + entryPoint, "error",
-			"[gl-spirv] " + hlslPath + " (" + entryPoint + "): GL SPIR-V unavailable — " + reason +
-			"; falling back to GLSL text (transitional, removed in T6)");
-
-		if (s_Resolver)
-		{
-			const std::string logical = ArtifactLogicalPath(hlslPath, entryPoint, false);
-			std::vector<uint8_t> bytes;
-			if (s_Resolver(logical, bytes) && !bytes.empty())
-			{
-				s_CookedHits.fetch_add(1, std::memory_order_relaxed);
-				LogCookedHit(logical, bytes.size());
-				out.Glsl.assign(bytes.begin(), bytes.end());
-				return out;
-			}
-		}
-
-		std::error_code ec;
-		const fs::path sourceAbs = fs::absolute(fs::path(WLD_WORLD_DIR) / hlslPath, ec);
-		if (ec || !fs::is_regular_file(sourceAbs, ec))
-		{
-			WLD_CORE_ERROR("Shader '{0}' ({1}): no GL SPIR-V, no cooked GLSL and no source.", hlslPath, entryPoint);
-			return out;
-		}
-
-		std::string glslPath;
-		std::string error;
-		if (!EnsureGlslFallback(sourceAbs, entryPoint, profile, glslPath, error))
-		{
-			WLD_CORE_ERROR("Shader '{0}' ({1}): GLSL fallback failed: {2}", hlslPath, entryPoint, error);
-			return out;
-		}
-		const std::vector<char> glsl = ReadBinaryFile(glslPath);
-		out.Glsl.assign(glsl.begin(), glsl.end());
+		// Slang-T6b:没有 GLSL 文本兜底 —— 留 ERROR,返回空阶段(调用方按"该阶段不可用"处理)。
+		WLD_CORE_ERROR("Shader '{0}' ({1}): GL SPIR-V unavailable — {2}", hlslPath, entryPoint, reason);
 		return out;
 	}
 
@@ -543,10 +467,10 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 			return false;
 		}
 
-		// 1) 烘焙产物:shaders/<stem>.<Entry>.gl.spv(与 .spv/.glsl 同一套命名规则)。
+		// 1) 烘焙产物:shaders/<stem>.<Entry>.gl.spv(命名见 ArtifactLogicalPath)。
 		if (s_Resolver)
 		{
-			const std::string logical = GlSpirVLogicalPath(hlslPath, entryPoint);
+			const std::string logical = ArtifactLogicalPath(hlslPath, entryPoint, /*vulkan*/ false);
 			std::vector<uint8_t> bytes;
 			if (s_Resolver(logical, bytes) && !bytes.empty())
 			{
@@ -594,7 +518,7 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 		if (SpirvHasSeparateSamplerType(module))
 		{
 			// 源码还不是 Slang 形态(例如手工放进来的老 HLSL)。GL 上这种模块会让驱动崩,
-			// 必须退回 GLSL 文本 —— 日志里给出可操作的提示。
+			// 必须拒绝 —— 日志里给出可操作的提示(T6b 起没有 GLSL 文本兜底)。
 			reason = "source produced OpTypeSampler (use Slang combined samplers `Sampler2D`): " + hlslPath;
 			return false;
 		}
@@ -687,37 +611,11 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 		return true;
 	}
 
-	bool ShaderCompiler::EnsureGlslFallback(const std::filesystem::path& sourceAbs, const std::string& entryPoint,
-		const std::string& profile, std::string& outPath, std::string& error)
-	{
-		std::string spvPath;
-		if (!EnsureModule(sourceAbs, entryPoint, profile, /*glTarget*/ false, spvPath, error))
-			return false;
-
-		uint64_t fingerprint = Fnv1a64String(spvPath);
-		fingerprint = Mix(fingerprint, std::to_string(ToolIdentity(spirvCrossAbsPath)));
-
-		const fs::path cacheDir(cacheDirAbsPath);
-		std::error_code ec;
-		outPath = (cacheDir / (Hex(fingerprint) + ".glsl")).string();
-		if (fs::is_regular_file(outPath, ec))
-		{
-			s_CacheHits.fetch_add(1, std::memory_order_relaxed);
-			return true;
-		}
-
-		s_ToolInvocations.fetch_add(1, std::memory_order_relaxed);
-		if (!CrossCompileToGlsl(spvPath, outPath))
-		{
-			error = "spirv-cross failed for " + spvPath;
-			return false;
-		}
-		return true;
-	}
-
 	ShaderCompiler::BakeResult ShaderCompiler::BakeDirectory(const std::filesystem::path& sourceDir,
 		const std::filesystem::path& outputDir)
 	{
+		// Slang-T6b:兼容入口(EditorCooker 的 4a 步)。只烘 Vulkan 目标 shaders/<stem>.<entry>.spv;
+		// GLSL 文本产物已删除,GL 目标 .gl.spv 由 BakeDistributionTargets 写。
 		BakeResult result;
 		std::error_code ec;
 		if (!fs::is_directory(sourceDir, ec))
@@ -754,18 +652,9 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 						result.Error = error;
 					continue;
 				}
-				std::string cachedGlsl;
-				if (!EnsureGlslFallback(entry.path(), stage.Entry, stage.Profile, cachedGlsl, error))
-				{
-					++result.Failed;
-					if (result.Error.empty())
-						result.Error = error;
-					continue;
-				}
 
 				const std::string stem = StemOf(entry.path().string());
 				const fs::path spvOut = outShaders / (stem + "." + stage.Suffix + ".spv");
-				const fs::path glslOut = outShaders / (stem + "." + stage.Suffix + ".glsl");
 				fs::copy_file(cachedSpv, spvOut, fs::copy_options::overwrite_existing, ec);
 				if (ec)
 				{
@@ -774,15 +663,7 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 						result.Error = "cannot write " + spvOut.string() + ": " + ec.message();
 					continue;
 				}
-				fs::copy_file(cachedGlsl, glslOut, fs::copy_options::overwrite_existing, ec);
-				if (ec)
-				{
-					++result.Failed;
-					if (result.Error.empty())
-						result.Error = "cannot write " + glslOut.string() + ": " + ec.message();
-					continue;
-				}
-				result.Artifacts += 2;
+				++result.Artifacts;
 			}
 		}
 		return result;
@@ -882,56 +763,6 @@ const std::string ShaderCompiler::spirvCrossAbsPath = std::string(WLD_SPIRV_CROS
 			}
 		}
 		return result;
-	}
-
-	bool ShaderCompiler::CompileToSpvWithDxc(const std::string& hlslAbsPath, const std::string& entryPoint,
-		const std::string& profile, const std::string& spvAbsPath)
-	{
-		// Slang-T2 起引擎着色器不再经过 dxc(源码已是 Slang 形态:Sampler2D + [[vk::binding]])。
-		// 这个函数与 dxcAbsPath 保留到 T6,与工具链一并删除。
-		const std::string arguments = "-spirv -T " + profile + " -E " + entryPoint +
-			" \"" + hlslAbsPath + "\" -Fo \"" + spvAbsPath + "\"";
-		int result = 0;
-		if (!RunTool(dxcAbsPath, arguments, result))
-		{
-			std::fprintf(stderr, "[ShaderCompiler] cannot launch dxc: %s\n", dxcAbsPath.c_str());
-			return false;
-		}
-		if (result != 0)
-		{
-			std::fprintf(stderr, "[ShaderCompiler] dxc failed (%d): %s %s\n", result,
-				dxcAbsPath.c_str(), arguments.c_str());
-			return false;
-		}
-		return true;
-	}
-
-	bool ShaderCompiler::CrossCompileToGlsl(const std::string& spvAbsPath, const std::string& glslAbsPath)
-	{
-		const std::string arguments = "--version 450 --combined-samplers-inherit-bindings --output \"" +
-			glslAbsPath + "\" \"" + spvAbsPath + "\"";
-		int result = 0;
-		if (!RunTool(spirvCrossAbsPath, arguments, result))
-		{
-			std::fprintf(stderr, "[ShaderCompiler] cannot launch spirv-cross: %s\n", spirvCrossAbsPath.c_str());
-			return false;
-		}
-		if (result != 0)
-		{
-			std::fprintf(stderr, "[ShaderCompiler] spirv-cross failed (%d): %s %s\n", result,
-				spirvCrossAbsPath.c_str(), arguments.c_str());
-			return false;
-		}
-		return true;
-	}
-
-	bool ShaderCompiler::WriteBinaryFile(const std::string& filename, const std::vector<char>& data)
-	{
-		std::ofstream stream(filename, std::ios::binary | std::ios::trunc);
-		if (!stream)
-			return false;
-		stream.write(data.data(), static_cast<std::streamsize>(data.size()));
-		return static_cast<bool>(stream);
 	}
 
 	std::vector<char> ShaderCompiler::ReadBinaryFile(const std::string& filename)

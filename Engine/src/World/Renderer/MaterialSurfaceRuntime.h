@@ -21,7 +21,7 @@ namespace World
 	//
 	// 线程与生命周期纪律:
 	//  - Install/Uninstall/Shutdown 会调用 RHI(driver 建管线),**必须在渲染线程**调用;
-	//    dxc 编译可以放工作线程,结果拿回渲染线程再 Install;
+	//    编译可以放工作线程,结果拿回渲染线程再 Install;
 	//  - 换管线是原子的:先把本次要用的管线全部建好,再一次性发布;旧管线按
 	//    `Renderer::QueueRelease` 延迟释放,不在飞行帧里销毁;
 	//  - 失败(后端不支持 / 设备缺失 / 变体建不出来)不改变已发布的版本,返回 false + 可读原因。

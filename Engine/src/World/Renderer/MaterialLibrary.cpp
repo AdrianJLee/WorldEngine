@@ -764,7 +764,7 @@ namespace World
 		}
 
 		// ---- M4-S3:`.hlsl` 表面函数:内容变化 → 引用它的材质失效(参数表刷新 + Revision 前进)。
-		// 重新编译 + MaterialSurfaceRuntime::Install 由编辑器侧执行(内核不在渲染线程里跑 dxc);
+		// 重新编译 + MaterialSurfaceRuntime::Install 由编辑器侧执行(内核不在渲染线程里跑编译器);
 		// 这里只负责"让引用它的材质失效并把路径报出去"。
 		const std::vector<std::string> changedShaders = m_ShaderWatch.Poll(deltaSeconds);
 		if (!changedShaders.empty())

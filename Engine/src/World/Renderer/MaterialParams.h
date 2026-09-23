@@ -155,8 +155,8 @@ namespace World
 
 	// Slang-T3:从 Slang 的 `-reflection-json` + 同一次编译的 SPIR-V 二进制反射参数布局。
 	//  - JSON 是布局的事实源:参数块 (set,binding)、成员名/类型/偏移/大小、块大小、贴图槽 set/binding;
-	//  - SPIR-V 只用来回答"成员真的被读"(OpAccessChain 的首下标)—— 与 dxc 时代同一判据,
-	//    只是输入从汇编文本换成二进制(不依赖任何外部反汇编工具)。
+	//  - SPIR-V 只用来回答"成员真的被读"(OpAccessChain 的首下标)—— 输入是二进制模块,
+	//    不依赖任何外部反汇编工具。
 	// 纯函数:不调用编译器,可无工具单测。
 	WLD_API bool ReflectParamLayoutFromReflectionJson(const std::string& reflectionJson,
 		const std::vector<uint8_t>& spirv, MaterialParamLayout* out, std::string* error);

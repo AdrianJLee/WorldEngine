@@ -151,10 +151,12 @@ int main()
 		{
 			CHECK(World::ShaderCompiler::ArtifactLogicalPath("assets/shaders/Foo.hlsl", "VSMain", true) ==
 				"shaders/Foo.VSMain.spv");
+			// Slang-T6b:GL 目标的产物也是 SPIR-V(`.gl.` 中缀),没有 GLSL 文本产物了。
+			CHECK(World::ShaderCompiler::ArtifactLogicalPath("assets/shaders/Foo.hlsl", "VSMain", false) ==
+				"shaders/Foo.VSMain.gl.spv");
 			// Slang-T6a:表面材质产物的命名**只有一处实现**(EditorCooker 写、运行时读):
 			//   shaders/surface/<内容根相对路径去扩展名>.<入口>[.gl].spv | .PSMain[.gl].reflection.json
-			// (`.gl.` 中缀 = GL 4.6 + ARB_gl_spirv 的 SPIR-V 1.0 目标;旧口径的 `.glsl` 文本
-			//  只是过渡兜底,T6 删除,因此这里不再冻结它的命名。)
+			// (`.gl.` 中缀 = GL 4.6 + ARB_gl_spirv 的 SPIR-V 1.0 目标;两者都是 SPIR-V。)
 			CHECK(World::MaterialLibrary::SurfaceArtifactBasePath("shaders/Glass.hlsl") ==
 				"shaders/surface/shaders/Glass");
 			CHECK(World::MaterialLibrary::SurfaceArtifactLogicalPath("shaders/Glass.hlsl", "PSMain", false) ==
@@ -172,6 +174,10 @@ int main()
 
 		// 2. 解析器优先:有烘焙产物时不触发工具调用(发行形态路径)
 		{
+			// Slang-T6b:GL 目标也必须是在**活设备**上才解析(capability 门),所以这段决议
+			// 路径按 Vulkan 目标跑(`.spv` 与设备无关);GL 目标由打包探针在真后端上覆盖。
+			const World::RendererAPI::API previousApi = World::Renderer::GetAPI();
+			World::RendererAPI::SetAPI(World::RendererAPI::API::Vulkan);
 			World::ShaderCompiler::ClearArtifactResolver();
 			World::ShaderCompiler::ResetCounters();
 			World::ShaderCompiler::SetArtifactResolver([](const std::string& logical, std::vector<uint8_t>& out)
@@ -188,6 +194,7 @@ int main()
 			CHECK(World::ShaderCompiler::CookedHitCount() == 1);
 			CHECK(World::ShaderCompiler::ToolInvocationCount() == 0);
 			World::ShaderCompiler::ClearArtifactResolver();
+			World::RendererAPI::SetAPI(previousApi);
 		}
 
 		if (!HasSlangc())
@@ -470,7 +477,7 @@ int main()
 		// Slang-T5/T6a 的产物契约:运行时真的会请求的每个入口烘**两份 SPIR-V** ——
 		//   shaders/<stem>.<Entry>.spv      Vulkan 目标;
 		//   shaders/<stem>.<Entry>.gl.spv   GL 4.6 + ARB_gl_spirv 目标(SPIR-V 1.0 + 组合采样器)。
-		// 旧口径的 "4 产物/着色器"(.spv + `.glsl` 文本)不再冻结:GLSL 文本只是过渡兜底,T6 删除。
+		// Slang-T6b:全程只有 SPIR-V 产物(GLSL 文本路径已删除)。
 		// 每次运行内容不同 → 指纹不同,保证真的走一次 slangc;第二次同一内容必须命中缓存。
 		WriteText(sourceDir / "Probe.hlsl",
 			std::string(kProbeShader) + "\n// build " + temp.path.filename().string() + "\n");
@@ -491,6 +498,19 @@ int main()
 			std::error_code sizeEc;
 			CHECK(std::filesystem::is_regular_file(shaderOut / name, sizeEc));
 			CHECK(std::filesystem::file_size(shaderOut / name, sizeEc) > 0);
+		}
+		// Slang-T6b:烘焙产物里**没有** GLSL 文本(旧的 SPIR-V→GLSL 转译兜底已删除)——
+		// 两个后端的产物都是 SPIR-V;这一条是"GLSL 路径归零"的可复跑判据。
+		{
+			std::error_code globEc;
+			size_t glslCount = 0;
+			for (const std::filesystem::directory_entry& entry :
+				std::filesystem::directory_iterator(shaderOut, globEc))
+			{
+				if (entry.is_regular_file(globEc) && entry.path().extension() == ".glsl")
+					++glslCount;
+			}
+			CHECK(glslCount == 0);
 		}
 
 		// GL 目标必须是 GL 4.6 能摄入的形态(逐字节判据,不是"文件存在就算过"):

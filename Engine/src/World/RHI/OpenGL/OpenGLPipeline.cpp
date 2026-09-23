@@ -9,33 +9,11 @@ namespace World::Rhi::OpenGL
 {
 	namespace
 	{
-		GLuint CompileStage(GLenum type, const std::string& source)
-		{
-			GLuint shader = glCreateShader(type);
-			const char* src = source.c_str();
-			glShaderSource(shader, 1, &src, nullptr);
-			glCompileShader(shader);
-
-			GLint compiled = GL_FALSE;
-			glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-			if (compiled == GL_FALSE)
-			{
-				GLint length = 0;
-				glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
-				std::string log(std::max(length, 1) - 1, '\0');
-				glGetShaderInfoLog(shader, length, nullptr, log.data());
-				glDeleteShader(shader);
-				WLD_CORE_ERROR("GL shader compile failed: {0}", log);
-				return 0;
-			}
-			return shader;
-		}
-
 		// GL_SPIRV 摄入(GL_ARB_gl_spirv / GL 4.6 core):把 Slang 产出的 SPIR-V 模块
 		// 交给 glShaderBinary,再用 glSpecializeShader 选定入口。
 		//  - 入口名固定 "main":Slang 不带 -fvk-use-entrypoint-name 时写入的就是 "main",
 		//    GL 的链接入口也是 "main"(ARB_gl_spirv 的 SpecializeShader 语义);
-		//  - 失败(格式/校验不通过)返回 0,调用方按过渡期规则退回 GLSL 文本并留 ERROR 日志。
+		//  - 失败(格式/校验不通过)返回 0 —— Slang-T6b 起没有 GLSL 文本兜底,调用方留 ERROR。
 		GLuint CompileSpirVModule(GLenum type, const std::vector<uint8_t>& spirv,
 			const std::string& debugName, GLuint program)
 		{
@@ -132,14 +110,25 @@ namespace World::Rhi::OpenGL
 			if (!type)
 				continue;
 
-			// SPIR-V 优先(能力具备且阶段确实带字节码时);否则走过渡期的 GLSL 文本分支。
-			// GL 4.6 + GL_ARB_gl_spirv 是 T1 起 GL 的着色器摄入标准(T6 删除 GLSL 分支)。
+			// GL 的唯一摄入路径 = SPIR-V(GL 4.6 core + GL_ARB_gl_spirv)。
+			// 没有 GLSL 文本兜底:能力缺失或模块不合法都在这里明确报错,不静默降级。
 			GLuint stage = 0;
-			if (SupportsSpirVShaderModules() && !stageSource.SpirV.empty())
+			if (!SupportsSpirVShaderModules())
+			{
+				WLD_CORE_ERROR("[gl-spirv] {0} ({1}): GL 4.6 + GL_ARB_gl_spirv is required for shader "
+					"modules; this driver cannot ingest SPIR-V (switch to the Vulkan backend)", debugName,
+					stageSource.EntryPoint);
+			}
+			else if (stageSource.SpirV.empty())
+			{
+				WLD_CORE_ERROR("[gl-spirv] {0} ({1}): stage has no SPIR-V module", debugName,
+					stageSource.EntryPoint);
+			}
+			else
+			{
 				stage = CompileSpirVModule(type, stageSource.SpirV,
 					debugName + " (" + stageSource.EntryPoint + ")", m_Program);
-			if (!stage && !stageSource.Glsl.empty())
-				stage = CompileStage(type, stageSource.Glsl);
+			}
 			if (stage)
 			{
 				glAttachShader(m_Program, stage);

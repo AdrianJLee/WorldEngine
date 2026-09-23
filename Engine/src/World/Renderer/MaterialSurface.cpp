@@ -208,8 +208,8 @@ namespace World
 		}
 
 		// 工具身份:slangc.exe 与自己的编译器 DLL 的**大小 + 内容哈希**一起参与
-		// (dxc 时代是 dxc.exe + dxcompiler.dll 的大小代理;Slang 同理:slang-compiler.dll 换代
-		// 也必须让缓存失效)。只算一次 —— 哈希 60MB 级文件只发生在首次编译。
+		// (slang-compiler.dll 换代也必须让缓存失效)。只算一次 —— 哈希 60MB 级文件
+		// 只发生在首次编译。
 		uint64_t SlangToolIdentity()
 		{
 			static const uint64_t identity = []
@@ -607,8 +607,17 @@ struct SurfaceVSOutput
     [[vk::location(3)]] nointerpolation float EntityId : ENTITYID;
 };
 
-struct SurfaceInstanceInput
+// Slang-T6b:实例化入口必须用**一个**合并输入 struct(顶点属性 0..2 + per-instance 3..8)。
+// Slang 不会把两个参数各自的 struct 按显式 `[[vk::location]]` 合并成一个接口 —— 第二个
+// 参数会被顺移到 6..11:管线按 C++ 顶点布局声明 0..8,于是 Vulkan 报
+// VUID-VkGraphicsPipelineCreateInfo-Input-07904(缺 Location 9/11),per-instance 矩阵
+// 还会读到错位槽位(6/7/8 = Row3/Color/EntityId 被当成 Row0/Row1/Row2)。
+// 引擎着色器 Renderer3D_Solid.hlsl 的 VS_INSTANCED_INPUT 是同一写法(实测有效)。
+struct SurfaceInstancedInput
 {
+    [[vk::location(0)]] float3 Position : POSITION;
+    [[vk::location(1)]] float3 Normal : NORMAL;
+    [[vk::location(2)]] float2 UV : TEXCOORD0;
     [[vk::location(3)]] float4 Row0 : INSTANCE0;
     [[vk::location(4)]] float4 Row1 : INSTANCE1;
     [[vk::location(5)]] float4 Row2 : INSTANCE2;
@@ -740,13 +749,13 @@ SurfaceVSOutput VSMain(SurfaceVSInput input)
         (float)u_EntityId.x);
 }
 
-SurfaceVSOutput VSMainInstanced(SurfaceVSInput input, SurfaceInstanceInput instance)
+SurfaceVSOutput VSMainInstanced(SurfaceInstancedInput input)
 {
-    const float4x4 model = float4x4(instance.Row0, instance.Row1, instance.Row2, instance.Row3);
+    const float4x4 model = float4x4(input.Row0, input.Row1, input.Row2, input.Row3);
     const float4 worldPosition = mul(model, float4(input.Position, 1.0f));
     const float3x3 normalMatrix = (float3x3)transpose((float3x3)model);
     return BuildVSOutput(worldPosition, mul(normalMatrix, input.Normal), input.UV,
-        instance.EntityId.x);
+        input.EntityId.x);
 }
 
 SurfaceVSOutput VSMainSkinned(SurfaceSkinnedInput input)
@@ -1305,7 +1314,7 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 
 			std::error_code ec;
 			// 反射 JSON(-reflection-json)是参数校验/上传的输入:产物在但反射丢了 →
-			// 当成未命中,重新编译补上(旧 dxc 缓存没有这份文件,自然全部作废)。
+			// 当成未命中,重新编译补上(旧缓存的产物没有这份文件,自然全部作废)。
 			if (fs::is_regular_file(spvPath, ec) && fs::file_size(spvPath, ec) > 0
 				&& fs::is_regular_file(reflectionPath, ec) && fs::file_size(reflectionPath, ec) > 0)
 			{

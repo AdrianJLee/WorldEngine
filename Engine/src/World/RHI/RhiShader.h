@@ -8,8 +8,9 @@ namespace World::Rhi
 	{
 		ShaderStage Stage = ShaderStage::Vertex;
 		std::string EntryPoint;
-		std::vector<uint8_t> SpirV;   // 规范字节码(Vulkan 直接使用)
-		std::string Glsl;             // GL 后端降级源(cook 阶段 spirv-cross 产出)
+		// 规范字节码:Vulkan 与 GL(GL 4.6 + GL_ARB_gl_spirv)都吃 SPIR-V。
+		// Slang-T6b:GLSL 文本降级路径已删除 —— 后端拿不到 SPIR-V 阶段就是错误,不静默换源。
+		std::vector<uint8_t> SpirV;
 	};
 
 	struct ShaderDesc

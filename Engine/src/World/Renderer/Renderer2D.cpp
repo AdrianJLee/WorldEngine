@@ -198,7 +198,7 @@ namespace World
 		// 生效采样数(否则 msaa>1 时 2D 管线在场景通道里绘制会被判为不兼容)。
 		RenderSettings::LoadFromProject(std::filesystem::current_path());
 
-		// 纹理描述符(绑定 0 = t0~t31;GLSL 未显式声明 layout,默认单元 0..31)。
+		// 纹理描述符(binding 1 = 贴图槽;GL 侧单元号 = binding)。
 		Rhi::DescriptorSetLayoutDesc textureLayout;
 		textureLayout.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
 			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), MaxTextureSlots });

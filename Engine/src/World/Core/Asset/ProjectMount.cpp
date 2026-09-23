@@ -69,7 +69,7 @@ namespace World::Asset
 				"repository root.", std::filesystem::current_path().string());
 		}
 
-		// 着色器烘焙产物解析:发行形态优先读包内 cooked 产物(不依赖源码树/dxc),
+		// 着色器烘焙产物解析:发行形态优先读包内 cooked 产物(不依赖源码树/编译器),
 		// 开发形态未命中时回落到源码树按需编译。
 		World::ShaderCompiler::SetArtifactResolver(
 			[&vfs](const std::string& logical, std::vector<uint8_t>& out)

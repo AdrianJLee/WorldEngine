@@ -59,7 +59,7 @@ namespace World
 			glm::vec4 Emissive { 0.0f };
 			glm::vec4 Flags { 0.0f };   // x = 有 albedo, y = 有法线, z = 双面
 			// D7-1c:视口点选用的实体 id(SV_Target1),用 int4 承载(见 hlsl 里的说明:
-			// 标量+短向量在 HLSL 与 std140 下偏移不一致,spirv-cross 会拒绝该块)。
+			// 标量+短向量在 HLSL 与 std140 下偏移不一致)。
 			glm::ivec4 EntityId { -1, 0, 0, 0 };
 		};
 		static_assert(sizeof(ObjectUniforms) == 144, "ObjectUniforms must match Renderer3D_Solid.hlsl");

@@ -39,6 +39,11 @@ namespace World
 	void OpenGLShader::AddShader(const std::string& path, ShaderType type)
 	{
 		m_Name = path;
+		// 遗留说明(Slang-T6b):本类属旧 GL 渲染脚手架,没有调用点(Shader::Create() 无调用者),
+		// 且它把 CompileOrLoad 的结果当 **GLSL 文本**喂给 glShaderSource —— 与"GL 只吃 SPIR-V"
+		// 的现状不符。活路径是 RHI(World/RHI/OpenGL + RhiShader)。删除本层需连同
+		// World/Renderer/{Shader,Buffer,Framebuffer,PipelineStateObject,RenderCommand} 一起改,
+		// 不在 T6b 边界内。
 		switch (type)
 		{
 			case ShaderType::Vertex:

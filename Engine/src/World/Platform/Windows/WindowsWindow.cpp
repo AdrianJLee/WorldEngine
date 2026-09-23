@@ -131,8 +131,8 @@ namespace World
 			else
 			{
 				// 引擎的 OpenGL 标准 = 4.6 core(显式请求,不再依赖驱动默认)。
-				// 依据:GL_ARB_gl_spirv 需要 4.6;Slang 重构把 GL 的着色器摄入从 GLSL 文本
-				// 换成 SPIR-V(glShaderBinary + glSpecializeShader),见 docs/dev/build.md。
+				// 依据:GL_ARB_gl_spirv 需要 4.6;Slang 重构把 GL 的着色器摄入统一成
+				// SPIR-V(glShaderBinary + glSpecializeShader),见 docs/dev/build.md。
 				glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 				glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
 				glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);

@@ -61,7 +61,7 @@ namespace World
 		// (其余冲突仍由 Slang 的原始诊断兜底)。
 		const char* const kReservedParamNames[] = {
 			"Surface", "MaterialInputs", "SurfaceVSInput", "SurfaceVSOutput",
-			"SurfaceInstanceInput", "SurfaceSkinnedInput", "SurfacePSOutput", "GpuLight",
+			"SurfaceInstancedInput", "SurfaceSkinnedInput", "SurfacePSOutput", "GpuLight",
 			"VSMain", "VSMainInstanced", "VSMainSkinned", "PSMain", "Evaluate",
 			"MakeDefaultSurface", "BuildVSOutput", "BuildMaterialInputs",
 			"ResolveShadingNormal", "EvaluateEngineLighting", "ApplyEngineFog",
@@ -790,7 +790,7 @@ namespace World
 			return static_cast<uint32_t>(value->Number);
 		}
 
-		// 反射类型的显示名。口径与 dxc 时代一致(测试与编辑器文案都按这套串):
+		// 反射类型的显示名(测试与编辑器文案都按这套串):
 		//   float32→float、int32→int、bool/uint32→uint(HLSL bool 在 SPIR-V 参数块里是 uint32)、
 		//   vector→v4float、贴图→type.2d.image。
 		std::string ReflectedTypeFromJson(const JsonValue& type)
@@ -837,8 +837,8 @@ namespace World
 
 		// ---- SPIR-V 二进制里的"成员真的被读"(Slang-T3) ----
 		//
-		// 判据与 dxc 时代一致:OpAccessChain 以参数块变量为 base、**第一个**下标是常量 → 该成员被读。
-		// 输入从汇编文本换成二进制:引擎运行时不依赖 spirv-dis。
+		// 判据:OpAccessChain 以参数块变量为 base、**第一个**下标是常量 → 该成员被读。
+		// 输入是 SPIR-V 二进制:引擎运行时不依赖 spirv-dis。
 		struct SpirvUsage
 		{
 			std::unordered_map<uint32_t, uint32_t> DescriptorSet;

@@ -6,8 +6,6 @@ set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${WE_THIRD_PARTY}/yaml ${CMAKE_BINARY_DIR}/third_party/yaml)
 add_subdirectory(${WE_THIRD_PARTY}/spdlog ${CMAKE_BINARY_DIR}/third_party/spdlog)
-set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
-add_subdirectory(${WE_THIRD_PARTY}/SPIRV-Cross ${CMAKE_BINARY_DIR}/third_party/SPIRV-Cross)
 # Box2D 以 OBJECT 库并入 World（W4）：box2d 是带全局 id 池（b2_worldIdPool）
 # 的 C 库，若以静态库形式被 World 和消费者各链接一份，跨 DLL 的
 # b2Body_IsValid 等接口会查各自模块的 id 池而失效。以 OBJECT 形式并入
@@ -81,7 +79,7 @@ set_target_properties(cgltf PROPERTIES
 #  - USE_STATIC_MSVC_RUNTIME_LIBRARY OFF:Jolt 必须与本工程一致用 /MD(dll CRT),否则
 #    Ref<>/Array/异常跨 CRT 堆分配释放会踩内存;
 #  - JPH_USE_DX12/VK/MTL/CPU_COMPUTE OFF:D6 只做刚体物理,不需要 Jolt 的 compute 后端;
-#    关掉后构建期不依赖 dxc/SPIR-V/Metal 工具链,也不会往 vendor 源码树写 .dxil/.spv。
+#    关掉后构建期不依赖 D3D12/Metal 的着色器工具链,也不会往 vendor 源码树写 .dxil/.spv。
 set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
 set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
 set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
@@ -173,8 +171,6 @@ target_include_directories(World PUBLIC
     "${CMAKE_SOURCE_DIR}/third_party/glm"
     "${CMAKE_SOURCE_DIR}/third_party/entt/include"
     "${CMAKE_SOURCE_DIR}/third_party/yaml/include"
-    "${CMAKE_SOURCE_DIR}/third_party/SPIRV-Cross"
-    "${CMAKE_SOURCE_DIR}/third_party/SPIRV-Cross/include"
     "${CMAKE_SOURCE_DIR}/third_party/spdlog/include"
     "${CMAKE_SOURCE_DIR}/third_party/box2d/src"
     "${CMAKE_SOURCE_DIR}/third_party/box2d/include"
