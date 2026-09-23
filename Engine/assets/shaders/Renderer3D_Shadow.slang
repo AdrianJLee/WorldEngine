@@ -19,7 +19,7 @@ struct VS_OUTPUT
     float4 Position : SV_Position;
 };
 
-// set 0, binding 2:与 Renderer3D_Solid.hlsl 的 cbuffer LightUniforms 同布局
+// set 0, binding 2:与 Renderer3D_Solid.slang 的 cbuffer LightUniforms 同布局
 // (C++ 侧 LightUniforms,std140,496 字节)。阴影阶段只读第一个字段。
 struct GpuLight
 {
@@ -43,7 +43,7 @@ struct GpuLight
     float4x4 u_Model;
 };
 
-// D5c-3b:set 1, binding 3 = 骨骼调色板(与 Renderer3D_Solid.hlsl 同布局)。
+// D5c-3b:set 1, binding 3 = 骨骼调色板(与 Renderer3D_Solid.slang 同布局)。
 // 用 3 而不是 2:GL 后端绑定单元 = binding(忽略 set),binding 2 是 set0 的灯光 UBO。
 // 蒙皮投影者必须在这里同样做混合,否则影子留在**绑定姿态**(与网格错位)。
 [[vk::binding(3, 1)]] cbuffer BoneUniforms
@@ -59,7 +59,7 @@ VS_OUTPUT VSMain(VS_INPUT input)
     return output;
 }
 
-// D8b-2:实例化合批入口。属性布局与 Renderer3D_Solid.hlsl 一致(同一个实例缓冲,
+// D8b-2:实例化合批入口。属性布局与 Renderer3D_Solid.slang 一致(同一个实例缓冲,
 // 只是这里只用到模型矩阵 4 行;颜色/实体 id 由主通道的着色器使用)。
 // Slang-T2:与主通道同理——Slang 不合并两个输入 struct,必须声明成一个合并 struct,
 // 否则实例矩阵会落到 location 6..9 而不是顶点布局里的 3..6。

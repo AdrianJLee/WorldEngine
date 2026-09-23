@@ -288,7 +288,7 @@ namespace World
 		s_Data.Textures[0]->SetData(white, 4);
 		s_Data.SourceTextures[0] = nullptr;
 
-		const auto quadShader = CreateRendererShader("assets/shaders/Renderer2D_Quad.hlsl", "Renderer2D-Quad");
+		const auto quadShader = CreateRendererShader("assets/shaders/Renderer2D_Quad.slang", "Renderer2D-Quad");
 		CreateBatch<QuadVertex, MaxQuads * 6>(s_Data.Quads, quadShader, {
 			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
 			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 12 },
@@ -298,7 +298,7 @@ namespace World
 			{ 5, 0, Rhi::Format::R32_SINT, 44 },
 		}, Rhi::PrimitiveTopology::TriangleList, s_Data.TextureLayout, MaxQuads * 4, 1.0f);
 
-		const auto circleShader = CreateRendererShader("assets/shaders/Renderer2D_Circle.hlsl", "Renderer2D-Circle");
+		const auto circleShader = CreateRendererShader("assets/shaders/Renderer2D_Circle.slang", "Renderer2D-Circle");
 		CreateBatch<CircleVertex, MaxCircles * 6>(s_Data.Circles, circleShader, {
 			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
 			{ 1, 0, Rhi::Format::R32G32B32_SFLOAT, 12 },
@@ -308,7 +308,7 @@ namespace World
 			{ 5, 0, Rhi::Format::R32_SINT, 48 },
 		}, Rhi::PrimitiveTopology::TriangleList, s_Data.TextureLayout, MaxCircles * 4, 1.0f);
 
-		const auto lineShader = CreateRendererShader("assets/shaders/Renderer2D_Line.hlsl", "Renderer2D-Line");
+		const auto lineShader = CreateRendererShader("assets/shaders/Renderer2D_Line.slang", "Renderer2D-Line");
 		CreateBatch<LineVertex, MaxLines * 2>(s_Data.Lines, lineShader, {
 			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
 			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 12 },

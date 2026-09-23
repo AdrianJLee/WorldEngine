@@ -39,7 +39,8 @@ namespace World
 		std::string NormalTexture;
 		MaterialBlendMode BlendMode = MaterialBlendMode::Opaque;
 		bool DoubleSided = false;
-		// M4-S2:材质着色器资产(`.hlsl`,相对内容根;如 "shaders/glass.hlsl")。
+		// M4-S2/Slang-B1:材质着色器资产(Slang 源 `.slang`;legacy `.hlsl` 同列。
+		// 相对内容根;如 "shaders/glass.slang")。
 		// 空 = 不做表面函数着色(M3 及以前的参数化路径)。
 		std::string ShaderPath;
 
@@ -198,7 +199,7 @@ namespace World
 		const std::string& ShaderPath() const { return m_Desc.ShaderPath; }
 		// ---- M4-S3:表面管线键 ----
 		// 键 = 表面管线在 MaterialSurfaceRuntime 里的身份(不透明字符串):
-		//  - 默认 = 规范化后的 ShaderPath(),例如 "shaders/glass.hlsl" —— 已保存的材质
+		//  - 默认 = 规范化后的 ShaderPath(),例如 "shaders/glass.slang" —— 已保存的材质
 		//    在场景与预览里共用同一份已发布管线;
 		//  - 编辑器里**未保存**的实时改动把键覆盖成 `<路径>#preview`(SetSurfaceKeyOverride),
 		//    只有该面板的预览材质用它 —— 主场景因此永远看不到未保存的编辑(D2 的键分离);
@@ -206,7 +207,7 @@ namespace World
 		std::string SurfaceKey() const;
 		void SetSurfaceKeyOverride(std::string key) { m_SurfaceKeyOverride = std::move(key); }
 		const std::string& SurfaceKeyOverride() const { return m_SurfaceKeyOverride; }
-		// M4-S3:引用的 `.hlsl` 内容变化(热重载)后调用:Revision 自增 → 渲染侧按 Revision
+		// M4-S3:引用的材质着色器内容变化(热重载)后调用:Revision 自增 → 渲染侧按 Revision
 		// 重建该材质的参数 UBO / 表面描述符集(与 InvalidateTextures 同款语义)。
 		void InvalidateShader() { BumpRevision(); }
 		// 本文件是否显式写了 `Shader:`。

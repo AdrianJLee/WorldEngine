@@ -74,7 +74,7 @@ namespace World
 		}
 
 		// ---- Slang-T4a:表面产物必须与**当前设备后端**一致 ----
-		// 同一份 .hlsl 有两个目标(Vulkan profile → SPIR-V 1.3;GL profile → SPIR-V 1.0),
+		// 同一份材质着色器源有两个目标(Vulkan profile → SPIR-V 1.3;GL profile → SPIR-V 1.0),
 		// 裁剪空间/深度约定不同,混用会在驱动层失败或画出错误结果。这里给出"本设备需要的
 		// 目标名"(与 MaterialSurfaceCompiler::BackendName 同一套字符串),由 Install 校验;
 		// 不匹配 = 可读错误,不在运行时偷偷换成另一份产物。
@@ -146,7 +146,7 @@ namespace World
 		//  1) 开发形态:编译器写的仓内文件(`MaterialSurfaceCompiler::ReflectionPath`,
 		//     与 artifact 的内容键同目录);
 		//  2) 打包形态:包内烘好的 `<键>.PSMain[.gl].reflection.json`(命名见
-		//     MaterialLibrary::SurfaceReflectionLogicalPath;读取走 VFS,与 .wmat/.hlsl 同一口径)。
+		//     MaterialLibrary::SurfaceReflectionLogicalPath;读取走 VFS,与 .wmat/材质着色器同一口径)。
 		// 打包运行时没有编译器,所以第 2 条是它的唯一来源。
 		bool ReflectArtifactLayout(const std::string& key, const SurfaceArtifact& artifact,
 			MaterialParamLayout* out, std::string* error)
@@ -331,7 +331,7 @@ namespace World
 		{
 			result.Error = "surface artifact targets '" + artifact.Backend
 				+ "' but the current device backend '" + deviceBackend + "' needs '" + expectedBackend
-				+ "'; recompile the .hlsl for this backend (GL uses <stage>_5_0+spirv_1_0, "
+				+ "'; recompile the material shader for this backend (GL uses <stage>_5_0+spirv_1_0, "
 				"Vulkan uses <stage>_6_0)";
 			return result;
 		}

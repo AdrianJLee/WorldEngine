@@ -1,6 +1,6 @@
 #pragma once
 
-// M4-S2:`.hlsl` 材质着色器的逐行语法高亮。
+// M4-S2 / Slang-B1:材质着色器(`.slang`,legacy `.hlsl`)的逐行语法高亮。
 //
 // 与 LuauHighlighter(Engine/src/World/Script/LuauHighlighter.h)同一套口径,便于复用
 // Wui::CodeEditor 的内核(行号、选区、滚动、诊断行、Ctrl+S 全在核心里,这里只提供 token):
@@ -24,7 +24,7 @@
 
 namespace World
 {
-	// 行间延续状态:HLSL 里只有块注释会跨行(字符串不跨行)。
+// 行间延续状态:着色器源码里只有块注释会跨行(字符串不跨行)。
 	struct HlslHighlightState
 	{
 		bool BlockComment = false;
@@ -220,7 +220,9 @@ namespace World
 					return false;
 			}
 		}
-		// 关键字 + 内建类型/结构名(HLSL 的类型与关键字同一组着色)。
+		// 关键字 + 内建类型/结构名(HLSL/Slang 的类型与关键字同一组着色)。
+		// Slang-B1:补上 Slang 源里会真的出现的名字 —— 组合采样器(Sampler2D 等,
+		// 严格子集里贴图参数就是组合采样器)与 Slang 的模块/泛型关键字。
 		static bool IsKeyword(std::string_view word)
 		{
 			static constexpr std::string_view kWords[] = {
@@ -230,11 +232,16 @@ namespace World
 				"min16float", "matrix", "void", "struct", "cbuffer", "tbuffer", "register",
 				"Texture1D", "Texture2D", "Texture3D", "TextureCube", "SamplerState",
 				"SamplerComparisonState", "RWTexture2D", "ByteAddressBuffer",
+				"Texture2DArray", "TextureCubeArray", "Sampler1D", "Sampler2D", "Sampler3D",
+				"SamplerCube", "Sampler2DArray", "SamplerCubeArray",
 				"static", "const", "inline", "uniform", "in", "out", "inout", "volatile",
 				"true", "false", "if", "else", "for", "while", "do", "switch", "case",
 				"default", "break", "continue", "return", "discard", "namespace", "typedef",
 				"nointerpolation", "noperspective", "linear", "centroid", "sample",
 				"packoffset", "row_major", "column_major", "groupshared", "snorm", "unorm",
+				// Slang 语言层(模块/泛型/接口)—— 高亮它们让"这是 Slang 源"读得出来。
+				"import", "module", "interface", "associatedtype", "enum",
+				"where", "each", "expand", "func",
 			};
 			for (const std::string_view candidate : kWords)
 				if (candidate == word)

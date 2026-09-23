@@ -22,8 +22,9 @@ namespace World::Editor
 
 	namespace
 	{
-		// Slang-T5:表面材质(.hlsl)的烘焙 —— 发行包里的表面产物同样是"只读产物"。
-		// 每份 .hlsl 烘两个后端(装配时只取与当前设备后端一致的那一份):
+		// Slang-T5/Slang-B1:表面材质(`.slang`;legacy `.hlsl` 仍会被烘)的烘焙 ——
+		// 发行包里的表面产物同样是"只读产物"。
+		// 每份着色器源烘两个后端(装配时只取与当前设备后端一致的那一份):
 		//   <内容根相对路径去扩展名>.PSMain.spv | .gl.spv
 		//   <…>.VSMain|VSMainInstanced|VSMainSkinned.spv | .gl.spv
 		//   <…>.PSMain.reflection.json | .gl.reflection.json
@@ -60,7 +61,7 @@ namespace World::Editor
 		//
 		// Slang 的 rich 诊断是两行(`error[E20002]: syntax error` + `--> 文件:行:列`),
 		// 位置那行指向**中间目录里的包装源码**(surface_user.hlsl)。打包失败要让用户看到的
-		// 是"哪份 `.hlsl`、第几行第几列、什么错",不是那个中间路径 —— 所以这里把
+		// 是"哪份 `.slang`、第几行第几列、什么错",不是那个中间路径 —— 所以这里把
 		// "指向用户源的诊断"重新映射回内容根相对路径。
 		std::string FormatSurfaceFailure(const World::SurfaceCompileResult& compiled,
 			const std::string& shaderPath)
@@ -70,8 +71,11 @@ namespace World::Editor
 			// 两条判据结论一致,合起来用(实测有只带位置、不带 InUserSource 标记的形态)。
 			const auto pointsAtUserSource = [](const World::SurfaceDiagnostic& diagnostic)
 			{
+				// Slang-B1:包装源码的文件名在 B1 里可能从 `surface_user.hlsl` 改成
+				// `surface_user.slang`(内核侧改名)—— 两种名字都认,免得映射悄悄失效。
 				return diagnostic.InUserSource
-					|| diagnostic.File.find("surface_user.hlsl") != std::string::npos;
+					|| diagnostic.File.find("surface_user.hlsl") != std::string::npos
+					|| diagnostic.File.find("surface_user.slang") != std::string::npos;
 			};
 			for (const World::SurfaceDiagnostic& diagnostic : compiled.Diagnostics)
 			{
@@ -130,7 +134,9 @@ namespace World::Editor
 			for (const fs::directory_entry& entry : fs::recursive_directory_iterator(
 				contentRoot, fs::directory_options::skip_permission_denied, ec))
 			{
-				if (!entry.is_regular_file(ec) || entry.path().extension() != ".hlsl")
+				// Slang-B1:主扩展名 `.slang`;legacy `.hlsl` 继续烘(旧内容包/旧项目不改也能打包)。
+				const std::string extension = entry.path().extension().string();
+				if (!entry.is_regular_file(ec) || (extension != ".slang" && extension != ".hlsl"))
 					continue;
 
 				std::ifstream stream(entry.path(), std::ios::binary);
@@ -152,7 +158,7 @@ namespace World::Editor
 				if (relEc || relative.empty())
 					relative = entry.path().filename();
 				// 内容根相对路径(**带**扩展名)—— 与 Material::SurfaceKey()/运行时的消费键同一口径;
-				// 同时当作排列键:编辑器与 cooker 对同一份 .hlsl 因此落在**同一个缓存条目**上
+				// 同时当作排列键:编辑器与 cooker 对同一份着色器源因此落在**同一个缓存条目**上
 				// (cook 不重编编辑器刚编过的东西,产物也一致)。
 				const std::string shaderPath = relative.generic_string();
 				++result.Shaders;
@@ -333,12 +339,12 @@ namespace World::Editor
 				return result;
 			}
 
-			// 4. 着色器烘焙:引擎 HLSL → 产物写入 cooked 目录,随内容包发布 ——
+			// 4. 着色器烘焙:引擎 Slang 源 → 产物写入 cooked 目录,随内容包发布 ——
 			// 发行版 Runtime 不再依赖源码树与任何编译器。
 			//   4a. 老口径(BakeDirectory):每个入口 .spv(Vulkan)+ .gl.spv(GL 目标 SPIR-V;旧 .glsl 兜底已随 T6 删除);
 			//   4b. Slang-T5 双目标(BakeDistributionTargets):每个入口 .spv + .gl.spv
 			//       —— GL 4.6 直吃 GL 目标 SPIR-V,发行形态不再回落到 GLSL 文本;
-			//   4c. Slang-T5 表面材质:内容根下的每份 .hlsl → 双目标 SPIR-V + 反射 JSON。
+			//   4c. Slang-T5 表面材质:内容根下的每份 .slang(legacy .hlsl)→ 双目标 SPIR-V + 反射 JSON。
 			const fs::path engineShaderDir = fs::absolute(std::string(WLD_WORLD_DIR) + "assets/shaders");
 			const fs::path cookedContentDir = cookedDir / "cooked";
 			const World::ShaderCompiler::BakeResult baked =

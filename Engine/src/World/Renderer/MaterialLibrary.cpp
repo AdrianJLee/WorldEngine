@@ -58,7 +58,7 @@ namespace World
 				WLD_CORE_INFO("[asset-hot-reload] {0} {1}", format, path);
 		}
 
-		// M4-S2:shader(.hlsl)的注解参数表。读不到 / 注解坏了都不算材质失败 ——
+		// M4-S2:材质着色器(`.slang`;legacy `.hlsl` 同列)的注解参数表。读不到 / 注解坏了都不算材质失败 ——
 		// 材质照样可用(参数覆盖保留),原因进可读 warning。
 		struct ShaderParamTable
 		{
@@ -90,7 +90,7 @@ namespace World
 		// ---- Slang-T6a:打包形态的表面产物 ----
 		//
 		// 产物读取一律走 MaterialIO::ReadFileText(VFS 优先:开发目录 provider / 发行包 provider),
-		// 与 .wmat/.hlsl 的读取同一口径 —— 打包 Runtime 因此不依赖源码树。
+		// 与 .wmat/材质着色器源的读取同一口径 —— 打包 Runtime 因此不依赖源码树。
 		bool ReadLogicalBytes(const std::string& logical, std::vector<uint8_t>* out)
 		{
 			if (!out)
@@ -306,7 +306,7 @@ namespace World
 			material.m_ShaderWarning.clear();
 		}
 		material.RecomputeParamWarnings();
-		// Slang-T6a:材质引用 `.hlsl` 时,打包形态的产物装配跟着参数表刷新一起做
+		// Slang-T6a:材质引用材质着色器时,打包形态的产物装配跟着参数表刷新一起做
 		// (开发形态没有这些产物 → 空操作;编辑器照旧现场编译 + Install)。
 		EnsureCookedSurfacePipeline(material);
 	}
@@ -320,7 +320,7 @@ namespace World
 
 	std::string MaterialLibrary::SurfaceArtifactBasePath(const std::string& shaderPath)
 	{
-		// `shaders/glass.hlsl` → `shaders/surface/shaders/glass`
+		// `shaders/glass.slang` → `shaders/surface/shaders/glass`
 		// (只去掉最后一段扩展名;与 EditorCooker 的 replace_extension 同一口径)。
 		std::string normalized = NormalizePath(shaderPath);
 		const size_t slash = normalized.find_last_of('/');
@@ -644,7 +644,7 @@ namespace World
 		std::sort(wantedMaterials.begin(), wantedMaterials.end());
 		std::sort(wantedTextures.begin(), wantedTextures.end());
 
-		// M4-S3:监听集合还包括材质引用的 `.hlsl`(表面函数代码态实时预览的输入)。
+		// M4-S3:监听集合还包括材质引用的材质着色器(表面函数代码态实时预览的输入)。
 		std::vector<std::string> wantedShaders;
 		for (const auto& [key, material] : m_Cache)
 		{
@@ -763,7 +763,7 @@ namespace World
 			}
 		}
 
-		// ---- M4-S3:`.hlsl` 表面函数:内容变化 → 引用它的材质失效(参数表刷新 + Revision 前进)。
+		// ---- M4-S3:材质着色器(表面函数)内容变化 → 引用它的材质失效(参数表刷新 + Revision 前进)。
 		// 重新编译 + MaterialSurfaceRuntime::Install 由编辑器侧执行(内核不在渲染线程里跑编译器);
 		// 这里只负责"让引用它的材质失效并把路径报出去"。
 		const std::vector<std::string> changedShaders = m_ShaderWatch.Poll(deltaSeconds);

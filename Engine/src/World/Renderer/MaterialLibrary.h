@@ -23,8 +23,9 @@ namespace World
 	//    合并结果写进 GetDesc();循环引用 → 拒绝 + 可读链路;父级缺失/坏 → 退化成引擎内置默认
 	//    + WLD_CORE_WARN(子材质仍可用,ParentWarning() 里能看到原因)。
 	//    保存时只写覆盖字段 + Parent(全字段 + 无父级仍然写 v1,老文件逐字节不变)。
-	//  - M4-S2:.wmat 还可以引用 `.hlsl`(Shader:)并写参数覆盖(Params:)。Load 会读那份
-	//    `.hlsl` 的注解参数表(读不到 → 可读警告 + 参数默认值不可用,材质仍可用),
+	//  - M4-S2/Slang-B1:.wmat 还可以引用材质着色器(Slang 源 `.slang`;legacy `.hlsl` 同列,
+	//    Shader: 写出**任一种**都能读)并写参数覆盖(Params:)。Load 会读那份源的
+	//    注解参数表(读不到 → 可读警告 + 参数默认值不可用,材质仍可用),
 	//    Params()/ResolvedParamValue()/ParamWarnings() 供编辑器直接渲染;保存只写覆盖项。
 	class WLD_API MaterialLibrary
 	{
@@ -59,14 +60,14 @@ namespace World
 		bool Reload(const std::string& path, std::string* error = nullptr);
 
 		// M4-S2:按当前 shader 重新读注解参数表并重算参数警告(不读/写 .wmat)。
-		//  - 本文件写过 `Shader:` → 读那份 .hlsl;
+		//  - 本文件写过 `Shader:` → 读那份 Slang 源(`.slang` / legacy `.hlsl`);
 		//  - 否则继承父级已解析的参数表(没有父级 = 空表);
-		// SetShaderPath / RevertShader 会立刻调用它;编辑器在 .hlsl 改动后也可以手动调。
+		// SetShaderPath / RevertShader 会立刻调用它;编辑器在源文件改动后也可以手动调。
 		void RefreshParams(Material& material);
 
 		// ---- Slang-T6a:打包形态消费烘好的表面材质产物 ----
 		//
-		// 材质引用 `.hlsl`(Shader:)时,开发形态由编辑器面板现场编译 + Install;
+		// 材质引用材质着色器(`.slang` / legacy `.hlsl`,Shader:)时,开发形态由编辑器面板现场编译 + Install;
 		// **打包形态既没有编译器也没有编辑器**,只能消费 `--cook` 烘好的成对产物:
 		//   shaders/surface/<内容根相对路径去扩展名>.<入口>[.gl].spv        (SPIR-V)
 		//   shaders/surface/<…>.PSMain[.gl].reflection.json                  (参数布局)
@@ -97,10 +98,10 @@ namespace World
 
 		// 表面材质烘资产物的**逻辑路径**(打包与运行时共用这一处命名实现 ——
 		// EditorCooker 写、运行时读,两边都调这里):
-		//  - shaderPath = 内容根相对的 `.hlsl` 路径(带扩展名,= Material::SurfaceKey()),如
-		//    `shaders/glass.hlsl`;
+		//  - shaderPath = 内容根相对的材质着色器路径(带扩展名,= Material::SurfaceKey()),如
+		//    `shaders/glass.slang`(legacy `.hlsl` 同列);
 		//  - glTarget = GL 目标(SPIR-V 1.0 + 组合采样器)用 `.gl.` 中缀,Vulkan 目标没有中缀;
-		//  - `.hlsl` 的最后一段扩展名被去掉(`shaders/glass.hlsl` → `shaders/surface/shaders/glass`)。
+		//  - 路径的最后一段扩展名被去掉(`shaders/glass.slang` → `shaders/surface/shaders/glass`)。
 		static std::string SurfaceArtifactBasePath(const std::string& shaderPath);
 		static std::string SurfaceArtifactLogicalPath(const std::string& shaderPath,
 			const std::string& entryPoint, bool glTarget);
@@ -110,8 +111,8 @@ namespace World
 		bool IsFileNewer(const Material& material) const;
 
 		// W5-L1:帧边界轮询外部改动(内容哈希 + debounce;材质 150ms、贴图 500ms,互相独立)。
-		//  - 监听集合 = 当前缓存的材质 + 它们引用的贴图(Albedo/Normal)+ 引用的 `.hlsl`
-		//    (M4-S3:表面函数);首次见到即建立基线,不报告;
+		//  - 监听集合 = 当前缓存的材质 + 它们引用的贴图(Albedo/Normal)+ 引用的材质着色器
+		//    (`.slang`;M4-S3:表面函数);首次见到即建立基线,不报告;
 		//  - clean 材质:原地 Reload(实例同一性保持,Revision 前进)→ ReloadedMaterials;
 		//    dirty 材质:SkippedDirtyMaterials(只报告,绝不覆盖未保存修改);
 		//    读取/解析失败:FailedMaterials(保留旧内存态,详见 GetLoadWarning);
@@ -164,7 +165,7 @@ namespace World
 		static constexpr double kTextureDebounceSeconds = 0.5;
 		AssetFileWatch m_MaterialWatch { kMaterialDebounceSeconds };
 		AssetFileWatch m_TextureWatch { kTextureDebounceSeconds };
-		// M4-S3:材质引用的 `.hlsl`(表面函数)内容变化监听(与材质同一节拍)。
+		// M4-S3:材质引用的材质着色器(表面函数)内容变化监听(与材质同一节拍)。
 		AssetFileWatch m_ShaderWatch { kMaterialDebounceSeconds };
 		// Slang-T6a:已经有过**确定结论**的表面键(装上了 / 包内没有产物 / 已有发布版本)。
 		// 临时失败(设备或建管线环境还没就绪)不入缓存,下次调用会重试。

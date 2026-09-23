@@ -149,26 +149,26 @@ int main()
 	{
 		// 1. 产物命名规则(打包与运行时共用)
 		{
-			CHECK(World::ShaderCompiler::ArtifactLogicalPath("assets/shaders/Foo.hlsl", "VSMain", true) ==
+			CHECK(World::ShaderCompiler::ArtifactLogicalPath("assets/shaders/Foo.slang", "VSMain", true) ==
 				"shaders/Foo.VSMain.spv");
 			// Slang-T6b:GL 目标的产物也是 SPIR-V(`.gl.` 中缀),没有 GLSL 文本产物了。
-			CHECK(World::ShaderCompiler::ArtifactLogicalPath("assets/shaders/Foo.hlsl", "VSMain", false) ==
+			CHECK(World::ShaderCompiler::ArtifactLogicalPath("assets/shaders/Foo.slang", "VSMain", false) ==
 				"shaders/Foo.VSMain.gl.spv");
 			// Slang-T6a:表面材质产物的命名**只有一处实现**(EditorCooker 写、运行时读):
 			//   shaders/surface/<内容根相对路径去扩展名>.<入口>[.gl].spv | .PSMain[.gl].reflection.json
 			// (`.gl.` 中缀 = GL 4.6 + ARB_gl_spirv 的 SPIR-V 1.0 目标;两者都是 SPIR-V。)
-			CHECK(World::MaterialLibrary::SurfaceArtifactBasePath("shaders/Glass.hlsl") ==
+			CHECK(World::MaterialLibrary::SurfaceArtifactBasePath("shaders/Glass.slang") ==
 				"shaders/surface/shaders/Glass");
-			CHECK(World::MaterialLibrary::SurfaceArtifactLogicalPath("shaders/Glass.hlsl", "PSMain", false) ==
+			CHECK(World::MaterialLibrary::SurfaceArtifactLogicalPath("shaders/Glass.slang", "PSMain", false) ==
 				"shaders/surface/shaders/Glass.PSMain.spv");
-			CHECK(World::MaterialLibrary::SurfaceArtifactLogicalPath("shaders/Glass.hlsl", "VSMainSkinned", true) ==
+			CHECK(World::MaterialLibrary::SurfaceArtifactLogicalPath("shaders/Glass.slang", "VSMainSkinned", true) ==
 				"shaders/surface/shaders/Glass.VSMainSkinned.gl.spv");
-			CHECK(World::MaterialLibrary::SurfaceReflectionLogicalPath("shaders/Glass.hlsl", false) ==
+			CHECK(World::MaterialLibrary::SurfaceReflectionLogicalPath("shaders/Glass.slang", false) ==
 				"shaders/surface/shaders/Glass.PSMain.reflection.json");
-			CHECK(World::MaterialLibrary::SurfaceReflectionLogicalPath("fx/sub/Glass.hlsl", true) ==
+			CHECK(World::MaterialLibrary::SurfaceReflectionLogicalPath("fx/sub/Glass.slang", true) ==
 				"shaders/surface/fx/sub/Glass.PSMain.gl.reflection.json");
 			// 只去掉**最后一段**扩展名(目录里的点、文件名里的多点都不动)。
-			CHECK(World::MaterialLibrary::SurfaceArtifactBasePath("fx/v1.2/Glass.surface.hlsl") ==
+			CHECK(World::MaterialLibrary::SurfaceArtifactBasePath("fx/v1.2/Glass.surface.slang") ==
 				"shaders/surface/fx/v1.2/Glass.surface");
 		}
 
@@ -188,7 +188,7 @@ int main()
 				return true;
 			});
 			const std::vector<char> bytes =
-				World::ShaderCompiler::CompileOrLoad("assets/shaders/Missing.hlsl", "VSMain", "vs_6_0");
+				World::ShaderCompiler::CompileOrLoad("assets/shaders/Missing.slang", "VSMain", "vs_6_0");
 			CHECK(bytes.size() == 4);
 			CHECK(static_cast<unsigned char>(bytes[0]) == 0xDE);
 			CHECK(World::ShaderCompiler::CookedHitCount() == 1);
@@ -479,7 +479,7 @@ int main()
 		//   shaders/<stem>.<Entry>.gl.spv   GL 4.6 + ARB_gl_spirv 目标(SPIR-V 1.0 + 组合采样器)。
 		// Slang-T6b:全程只有 SPIR-V 产物(GLSL 文本路径已删除)。
 		// 每次运行内容不同 → 指纹不同,保证真的走一次 slangc;第二次同一内容必须命中缓存。
-		WriteText(sourceDir / "Probe.hlsl",
+		WriteText(sourceDir / "Probe.slang",
 			std::string(kProbeShader) + "\n// build " + temp.path.filename().string() + "\n");
 
 		World::ShaderCompiler::ResetCounters();
@@ -540,6 +540,30 @@ int main()
 		CHECK(World::ShaderCompiler::CacheHitCount() >= 2);
 		CHECK(ReadFileBytes(shaderOut / "Probe.VSMain.gl.spv") == glVertexFirst);
 
+		// 4b. Slang-B1:legacy `.hlsl` 源**仍然能被烘焙**(既有资产不破),产物命名与 `.slang`
+		//     同规则(产物名只取 stem,与扩展名无关)。单独的内容根/输出目录,不污染上面的计数。
+		{
+			const std::filesystem::path legacySourceDir = temp.path / "legacy-src" / "shaders";
+			const std::filesystem::path legacyCookedDir = temp.path / "legacy-cooked";
+			WriteText(legacySourceDir / "Legacy.hlsl",
+				std::string(kProbeShader) + "\n// legacy build " + temp.path.filename().string() + "\n");
+			World::ShaderCompiler::ResetCounters();
+			const World::ShaderCompiler::BakeResult legacyBaked =
+				World::ShaderCompiler::BakeDistributionTargets(legacySourceDir, legacyCookedDir);
+			CHECK(legacyBaked.Shaders == 1);
+			CHECK(legacyBaked.Artifacts == 4);
+			CHECK(legacyBaked.Failed == 0);
+			CHECK(World::ShaderCompiler::ToolInvocationCount() >= 2);
+			for (const char* name : { "Legacy.VSMain.spv", "Legacy.VSMain.gl.spv",
+				"Legacy.PSMain.spv", "Legacy.PSMain.gl.spv" })
+			{
+				std::error_code sizeEc;
+				CHECK(std::filesystem::is_regular_file(legacyCookedDir / "shaders" / name, sizeEc));
+			}
+			std::printf("World.ShaderPipeline: Slang-B1 legacy .hlsl baked: %zu shader(s), %zu artifacts\n",
+				legacyBaked.Shaders, legacyBaked.Artifacts);
+		}
+
 		// 打包为 wpak(与 Editor cook 的产物目录一致)并从包内读回。
 		const std::filesystem::path pakPath = temp.path / "content.wpak";
 		std::error_code pakEc;
@@ -568,7 +592,7 @@ int main()
 				return provider->Open(logical, out, readEc) && !out.empty();
 			});
 		const std::vector<char> packaged =
-			World::ShaderCompiler::CompileOrLoad("assets/shaders/Probe.hlsl", "VSMain", "vs_6_0");
+			World::ShaderCompiler::CompileOrLoad("assets/shaders/Probe.slang", "VSMain", "vs_6_0");
 		CHECK(packaged.size() == expected.size());
 		CHECK(World::ShaderCompiler::CookedHitCount() == 1);
 		CHECK(World::ShaderCompiler::ToolInvocationCount() == 0);

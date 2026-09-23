@@ -53,7 +53,7 @@ tools/    vendor/     World/
 | C++ 源文件/头文件 | PascalCase,与主类型同名;一文件一主题 | `MaterialSurface.cpp` / `MaterialSurfaceRuntime.h` |
 | C++ 类型/函数 | PascalCase;成员 `m_`;宏 `WLD_` 前缀;引擎宏 `WLD_API` | `class MaterialSurfaceRuntime` |
 | 生成代码 | 落 `Generated/` 子目录,文件头写"由脚本生成,不要手改" | `World/Schema/Generated/…` |
-| 引擎 shader | `<模块>_<用途>.hlsl`;用户材质扩展名 `.hlsl`,实例 `.wmat` | `Renderer3D_Solid.hlsl` |
+| 引擎 shader | `<模块>_<用途>.slang`;用户材质扩展名 `.slang`(legacy `.hlsl` 只读兼容),实例 `.wmat` | `Renderer3D_Solid.slang` |
 | 资产 | 小写 + 点分层扩展名(`.we.yaml`/`.wmat`/`.wmodel`);内容根相对路径 | `materials/glass.wmat` |
 | 构建脚本/PS | kebab-case | `check-environment.ps1`、`verify-pixel-baseline.ps1` |
 | Python 探针 | `<批次-id>-<主题>-probe.py`,放 `tools/agents/scratch/` | `m4s3-hlsl-live-probe.py` |

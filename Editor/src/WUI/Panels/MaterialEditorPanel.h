@@ -66,8 +66,9 @@ namespace World
 
 		// 由内容浏览器/Window 菜单调用:打开指定 .wmat(失败时面板显示错误而不是弹窗)。
 		void OpenMaterial(const std::string& path);
-		// M4-S2:同一个编辑器的**代码形态** —— 打开 `.hlsl`(表面函数 + 注解参数)。
-		// 双击入口与 `.wmat` 完全相同(ContentBrowserPanel::OpenItem 按扩展名分派形态)。
+		// M4-S2/Slang-B1:同一个编辑器的**代码形态** —— 打开 `.slang`(legacy `.hlsl` 同样识别;
+		// 表面函数 + 注解参数)。双击入口与 `.wmat` 完全相同
+		// (ContentBrowserPanel::OpenItem 按扩展名分派形态)。
 		void OpenShaderDocument(const std::string& path);
 		bool IsShaderDocument() const { return m_ShaderMode; }
 		const std::string& GetShaderPath() const { return m_ShaderPath; }
@@ -119,7 +120,7 @@ namespace World
 		std::string m_PanelTitle = "Material";
 		Ref<Material> m_Material;
 
-		// ---- M4-S2:`.hlsl` 代码形态(同一个面板的第二种形态)----
+		// ---- M4-S2/Slang-B1:着色器(`.slang`;legacy `.hlsl`)代码形态(同一个面板的第二种形态)----
 		// 形态由**打开的文件扩展名**决定;代码形态下 m_Material 是引擎默认表面材质(预览替身),
 		// 参数列与代码列都走下面这套状态,不触碰 `.wmat` 的字段/继承逻辑。
 		bool m_ShaderMode = false;
@@ -148,6 +149,16 @@ namespace World
 			std::string Message;
 			bool InUserSource = false;
 		};
+		// Slang-B1:诊断分类(前 5 类给"这是什么 + 怎么修";其余归 Other,不给解释)。
+		enum class ShaderDiagnosticClass : uint8_t
+		{
+			Other = 0,
+			Truncation,     // E30019 / E39999:隐式截断(严格类型)
+			Syntax,         // E20002:语法错
+			MissingReturn,  // E41009 / E41010:非 void 函数必须返回值
+			Sampler,        // 组合采样器写法(含 E31000 / E39029 的旧写法)
+			Entry,          // E38000:找不到入口函数
+		};
 		// 后台编译的输入 / 输出:工作线程只碰传给它的副本,结果经互斥量交回主线程。
 		struct ShaderCompileRequest
 		{
@@ -172,7 +183,7 @@ namespace World
 		};
 		// 派工口径:最后一次编辑后 350ms 触发一次编译(300–500 可调)。
 		static constexpr double kShaderCompileDebounceSeconds = 0.35;
-		// `.hlsl` 热重载的轮询节流(单个文件 stat,不递归目录)。
+		// 着色器热重载的轮询节流(单个文件 stat,不递归目录)。
 		static constexpr double kShaderDiskPollSeconds = 0.75;
 		std::string m_ShaderCompileStatus;      // 状态行:成功 = 字节数 + 耗时 + 键;失败 = 第一条错误(含行列号)
 		bool m_ShaderCompileFailed = false;
@@ -201,7 +212,7 @@ namespace World
 		// (省掉一次重复编译;带错保存时它保留上一份可用产物,正好是"场景仍用上一份"的实现)。
 		SurfaceArtifact m_ShaderLastArtifact;
 		std::string m_ShaderLastArtifactSource;
-		// `.hlsl` 热重载:磁盘指纹(未修改的缓冲 → 重载 + 重编译 + Install(路径键))。
+		// 着色器热重载:磁盘指纹(未修改的缓冲 → 重载 + 重编译 + Install(路径键))。
 		std::filesystem::file_time_type m_ShaderDiskWriteTime {};
 		uintmax_t m_ShaderDiskSize = 0;
 		bool m_ShaderDiskStampValid = false;
@@ -376,7 +387,7 @@ namespace World
 		void EnsureOverrideMaterials();
 		// 头部(材质名 + 路径 + 脏标记 + 动作);返回占用高度。
 		float DrawHeader(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
-		// ---- M4-S2:`.hlsl` 代码形态 ----
+		// ---- M4-S2/Slang-B1:着色器代码形态 ----
 		// 布局(用户口径):左 预览 | 中 代码(复用 Wui::CodeEditor 内核) | 右 参数(注解默认值)。
 		// 代码形态**没有**材质字段区:参数只来自注解,右边改的是 shader 的默认值(改写注解文本)。
 		float DrawShaderDocument(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
@@ -406,6 +417,22 @@ namespace World
 		float DrawShaderDiagnostics(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		// 诊断 → 单行文本("line L:C  message")。
 		static std::string FormatShaderDiagnostic(const ShaderDiagnostic& diagnostic);
+		// ---- Slang-B1:诊断码 → 人话(前 5 类)+ 迁移入口 ----
+		// 从 `error[E30019]: …` 形态里取稳定码;取不到返回空。
+		static std::string ShaderDiagnosticCode(const std::string& message);
+		// 分类 = 码 + 消息判据(采样器误用与截断同为 E30019,按消息里的 SamplerState 区分)。
+		static ShaderDiagnosticClass ClassifyShaderDiagnostic(const ShaderDiagnostic& diagnostic);
+		// "这是什么 + 怎么修"的单行解释(未分类/未知码返回空串,不硬凑文案)。
+		static std::string ShaderDiagnosticHelp(const ShaderDiagnostic& diagnostic);
+		// 迁移入口的触发条件:严格类型(截断)或组合采样器/旧绑定写法。
+		static bool ShaderDiagnosticWantsMigration(const ShaderDiagnostic& diagnostic);
+		bool ShaderDiagnosticsWantMigration() const;
+		// 迁移命令的真实文本(绝对路径,dry-run;用户复核 diff 后自行加 --apply)。
+		std::string ShaderMigrationCommand() const;
+		// 契约文档(仓库根 docs/dev/shader-contract.md)与仓库根(由 WLD_WORLD_DIR 推导)。
+		static std::filesystem::path RepoRootPath();
+		static std::filesystem::path ShaderContractDocPath();
+		std::string ShaderMigrationTarget() const;
 		// 状态行文案:编译结果(成功 = 字节数 + 耗时 + 键;失败 = 第一条错误含行列号)。
 		std::string ShaderCompileStatusLine() const;
 		// 重新解析注解参数表 + 定位错误行;顺带把认识的参数映射进预览替身材质。

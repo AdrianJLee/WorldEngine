@@ -11,7 +11,7 @@
 
 namespace World
 {
-	// P1b D4:灯光 UBO 的 CPU 镜像(std140,与 Renderer3D_Solid.hlsl 的 cbuffer LightUniforms
+	// P1b D4:灯光 UBO 的 CPU 镜像(std140,与 Renderer3D_Solid.slang 的 cbuffer LightUniforms
 	// 逐字段对应;数组元素 48 字节)。总大小 64+16+16+16+8*48 = 496。
 	struct LightUniforms
 	{
@@ -36,7 +36,7 @@ namespace World
 		glm::uvec4 LightCounts { 0u, 0u, 0u, 0u };
 		Light Lights[8];
 	};
-	static_assert(sizeof(LightUniforms) == 496, "LightUniforms must match Renderer3D_Solid.hlsl (std140)");
+	static_assert(sizeof(LightUniforms) == 496, "LightUniforms must match Renderer3D_Solid.slang (std140)");
 
 	// 收集阶段得到的灯光数据(SceneRenderer 从组件填充;打包由 BuildLightRig 完成,
 	// 因此上限/归一化/默认值都是纯函数,可在 headless 测试里直接断言)。
@@ -191,7 +191,7 @@ namespace World
 		static uint32_t SubmitSkinned(const Ref<Mesh>& mesh, uint32_t submeshIndex, const glm::vec4& baseColor,
 			const glm::mat4& transform, const glm::mat4* palette, uint32_t paletteCount, int32_t entityId = -1);
 		// 阴影通道的蒙皮提交:同一套调色板/布局约束(材质/透明无关),顶点入口换成
-		// Renderer3D_Shadow.hlsl 的 VSMainSkinned,不写蒙皮姿态的话影子会留在绑定姿态。
+		// Renderer3D_Shadow.slang 的 VSMainSkinned,不写蒙皮姿态的话影子会留在绑定姿态。
 		// 与 SubmitShadow* 共用投影者槽位区与蒙皮配额。
 		static uint32_t SubmitShadowSkinned(const Ref<Mesh>& mesh, uint32_t submeshIndex,
 			const glm::mat4& transform, const glm::mat4* palette, uint32_t paletteCount);

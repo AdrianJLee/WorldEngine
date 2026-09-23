@@ -1,13 +1,16 @@
-// WorldEngine M4-S1:材质表面函数契约(HLSL / C++ 共用同一份字段表)。
+// WorldEngine M4-S1:材质表面函数契约(Slang 语法 / C++ 共用同一份字段表)。
+//
+// 命名(Slang-B1):扩展名保持 `.hlsli` —— 它是**共享头片段**,不是可独立编译的 Slang
+// 翻译单元(引擎把它作为文本内嵌进生成的包装源码,slangc 不按路径 include 它)。
 //
 // 这个文件故意写成双语:
-//   - Slang(slangc)编译生成的包装源码时,走 HLSL 分支,声明 MaterialInputs / Surface;
-//   - C++ 编译单元包含它时,走 C++ 分支,拿到同一份字段元数据(名字/HLSL 类型/语义/默认值)。
+//   - Slang(slangc)编译生成的包装源码时,走 HLSL 语法分支,声明 MaterialInputs / Surface;
+//   - C++ 编译单元包含它时,走 C++ 分支,拿到同一份字段元数据(名字/类型/语义/默认值)。
 // X-macro 列表是**唯一事实源**:结构体成员、默认表面函数、C++ 元数据都由它展开,
 // 新增字段只改列表,不在别处手写成员。
 //
 // 口径:
-//   - MaterialInputs 只放引擎当前**真的能给**的量(Renderer3D_Solid.hlsl 的顶点/像素阶段);
+//   - MaterialInputs 只放引擎当前**真的能给**的量(Renderer3D_Solid.slang 的顶点/像素阶段);
 //     引擎没有相机位置 uniform、没有顶点色、没有 per-vertex 切线,所以这些字段不在这里;
 //   - Surface.BaseColor / Surface.Emissive 是**线性 RGB**;显示空间编码由引擎包装层负责;
 //   - Surface.Normal 是切线空间扰动,默认 (0,0,1) = 保留引擎采样到的法线(无法线贴图时 = 几何法线);

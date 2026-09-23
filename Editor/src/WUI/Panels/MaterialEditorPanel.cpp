@@ -88,7 +88,7 @@ namespace World
 		constexpr float kSplitterDefaultMaxWidth = 340.0f;  // 默认比例上限(U23 起的既有默认)
 		constexpr float kGridCellMinWidth = 300.0f;
 		constexpr int kGridMaxColumns = 3;
-		// ---- M4-S2:`.hlsl` 代码形态的三列(预览 | 代码 | 参数)----
+		// ---- M4-S2/Slang-B1:着色器代码形态的三列(预览 | 代码 | 参数)----
 		// 宽度门槛与最小列宽按"参数列最优先"排:参数面板是本批的主交付,挤不下时先收代码列。
 		constexpr float kShaderThreeColumnMinWidth = 900.0f;
 		constexpr float kShaderPreviewMinWidth = 200.0f;
@@ -977,9 +977,11 @@ namespace World
 
 	void MaterialEditorPanel::OpenMaterial(const std::string& path)
 	{
-		// M4-S2:同一个编辑器的两种形态 —— `.hlsl` = 代码形态(预览 | 代码 | 注解参数),
-		// `.wmat` = 材质实例形态(左预览 / 右字段,无代码区)。入口与面板 id 都不变。
-		if (LowerExtension(std::filesystem::path(path)) == ".hlsl")
+		// M4-S2/Slang-B1:同一个编辑器的两种形态 —— 着色器(`.slang`;legacy `.hlsl` 同样识别)
+		// = 代码形态(预览 | 代码 | 注解参数),`.wmat` = 材质实例形态(左预览 / 右字段,无代码区)。
+		// 入口与面板 id 都不变。
+		const std::string extension = LowerExtension(std::filesystem::path(path));
+		if (extension == ".slang" || extension == ".hlsl")
 		{
 			OpenShaderDocument(path);
 			return;
@@ -2255,7 +2257,7 @@ namespace World
 				Wui::Tr("material.group.shader.open", "Edit Shader"), theme))
 				host.OpenMaterialEditor(shaderPath);   // 同一个编辑器的代码形态
 			Wui::Tooltip(ctx, buttonRect, Wui::Tr("material.group.shader.open.tooltip",
-				"Open this material's shader (.hlsl) in the material editor's code form: "
+				"Open this material's shader (.slang) in the material editor's code form: "
 				"preview | code | annotated parameters."));
 		}
 		if (headerHovered)
@@ -4342,9 +4344,9 @@ namespace World
 			ctx.ClearModal();
 	}
 
-	// ==== M4-S2:`.hlsl`(Material Shader)代码形态 ====
+	// ==== M4-S2/Slang-B1:Material Shader(`.slang`;legacy `.hlsl`)代码形态 ====
 	//
-	// 用户口径:「打开 .hlsl:左预览 / 中代码 / 右参数 —— 右栏显示 shader 声明的参数与其默认值」。
+	// 用户口径:「打开着色器:左预览 / 中代码 / 右参数 —— 右栏显示 shader 声明的参数与其默认值」。
 	// 形态由**打开的文件扩展名**决定(同一个面板、同一套窗口/停靠机制):
 	//   - 代码列复用 Wui::CodeEditor 内核(行号 / 高亮 / 选区 / 撤销 / 滚动 / 诊断行),
 	//     这里只提供 HLSL token 化(HlslHighlight.h);
@@ -4450,7 +4452,8 @@ namespace World
 	//   - 未保存的实时改动 → Install("<路径>#preview", artifact),预览材质按
 	//     `Material::SetSurfaceKeyOverride` 指到这个键(渲染侧的管线选择只看这个键);
 	//   - 保存成功       → 写盘 + Install("<路径>", artifact),预览材质指回普通键(这时场景才变);
-	//   - 打开既有 `.hlsl` 先编译已保存内容并 Install("<路径>", …),保证场景/预览有可用基线。
+	//   - 打开既有 `.slang`(legacy `.hlsl`)先编译已保存内容并 Install("<路径>", …),
+	//     保证场景/预览有可用基线。
 	// 线程纪律:编译器只在**工作线程**跑(单飞,后来者覆盖前者);Install 与渲染状态只在主线程帧内改。
 	namespace
 	{
@@ -4498,6 +4501,132 @@ namespace World
 			text += "line " + std::to_string(diagnostic.Line) + ":" + std::to_string(diagnostic.Column) + "  ";
 		text += diagnostic.Message;
 		return text;
+	}
+
+	// ---- Slang-B1:诊断码 → 人话(前 5 类)----
+	// 口径来自 docs/dev/shader-contract.md §7(码表)+ 2026-09-23 实测的 slangc 2026.18.2 输出:
+	//   E30019/E39999 = 严格类型(隐式截断/无重载),E20002 = 语法错,
+	//   E41009/E41010 = 非 void 函数必须返回值,E38000 = 找不到入口函数,
+	//   E31000/E39029 = 旧写法残留(combinedImageSampler / register 无 binding)。
+	// 采样器误用与截断同为 E30019,只能按消息里是否点到 SamplerState 区分(实测确认)。
+	std::string MaterialEditorPanel::ShaderDiagnosticCode(const std::string& message)
+	{
+		// 只认 `[E…]` 形态(Slang 的 `error[E30019]: …`);先找 "[E" 避免把消息里
+		// 无关的方括号(数组下标之类)当成诊断码。
+		const size_t open = message.find("[E");
+		if (open == std::string::npos)
+			return {};
+		const size_t close = message.find(']', open + 1);
+		if (close == std::string::npos || close < open + 3)
+			return {};
+		const std::string code = message.substr(open + 1, close - open - 1);
+		for (const char character : code)
+			if (!std::isalnum(static_cast<unsigned char>(character)))
+				return {};
+		return code;
+	}
+
+	MaterialEditorPanel::ShaderDiagnosticClass MaterialEditorPanel::ClassifyShaderDiagnostic(
+		const ShaderDiagnostic& diagnostic)
+	{
+		const std::string code = ShaderDiagnosticCode(diagnostic.Message);
+		const bool mentionsSampler = diagnostic.Message.find("SamplerState") != std::string::npos
+			|| diagnostic.Message.find("SamplerComparisonState") != std::string::npos;
+		if (code == "E30019" || code == "E39999")
+			return mentionsSampler ? ShaderDiagnosticClass::Sampler : ShaderDiagnosticClass::Truncation;
+		if (code == "E20002")
+			return ShaderDiagnosticClass::Syntax;
+		if (code == "E41009" || code == "E41010")
+			return ShaderDiagnosticClass::MissingReturn;
+		if (code == "E38000")
+			return ShaderDiagnosticClass::Entry;
+		if (code == "E31000" || code == "E39029")
+			return ShaderDiagnosticClass::Sampler;
+		return ShaderDiagnosticClass::Other;
+	}
+
+	std::string MaterialEditorPanel::ShaderDiagnosticHelp(const ShaderDiagnostic& diagnostic)
+	{
+		switch (ClassifyShaderDiagnostic(diagnostic))
+		{
+			case ShaderDiagnosticClass::Truncation:
+				return Wui::Tr("panel.material.shader.diag.help.truncation",
+					"Strict types: Slang has no implicit width conversion, so a float4 assigned/returned "
+					"as float3 is an error. Fix: truncate explicitly -- `v.xyz` / `v.rgb` -- or "
+					"construct the target type.");
+			case ShaderDiagnosticClass::Syntax:
+				return Wui::Tr("panel.material.shader.diag.help.syntax",
+					"Syntax error: the compiler could not parse this line (missing/extra `;` `{` `}` "
+					"`(` `)`, or a stray token at the caret). Fix: check the caret position and the "
+					"brace/paren balance around it.");
+			case ShaderDiagnosticClass::MissingReturn:
+				return Wui::Tr("panel.material.shader.diag.help.missing_return",
+					"Non-void function must return a value on every path. Fix: end it with "
+					"`return <value>;` (every field of `Surface` is optional, the function itself is not).");
+			case ShaderDiagnosticClass::Sampler:
+				return Wui::Tr("panel.material.shader.diag.help.sampler",
+					"Combined-sampler misuse: a texture parameter becomes `Sampler2D` and is sampled as "
+					"`Tex.Sample(uv)` -- there is no separate sampler argument, and legacy "
+					"`register(...)` / `[[vk::combinedImageSampler]]` are not supported. Fix: drop the "
+					"sampler argument and use explicit `[[vk::binding(N, S)]]`.");
+			case ShaderDiagnosticClass::Entry:
+				return Wui::Tr("panel.material.shader.diag.help.entry",
+					"Missing entry point: the wrapper could not find the expected entry function (e.g. "
+					"`PSMain`). Fix: keep the file's `Evaluate()` signature fixed and do not rename or "
+					"remove engine-provided entry points / functions.");
+			case ShaderDiagnosticClass::Other:
+			default:
+				return {};
+		}
+	}
+
+	bool MaterialEditorPanel::ShaderDiagnosticWantsMigration(const ShaderDiagnostic& diagnostic)
+	{
+		// 迁移入口的触发条件 = 严格类型(隐式截断)或组合采样器/旧绑定写法 ——
+		// 正是 migrate-hlsl-to-slang.py 能自动改或列成"待人工"的那两类。
+		const ShaderDiagnosticClass classification = ClassifyShaderDiagnostic(diagnostic);
+		return classification == ShaderDiagnosticClass::Truncation
+			|| classification == ShaderDiagnosticClass::Sampler;
+	}
+
+	bool MaterialEditorPanel::ShaderDiagnosticsWantMigration() const
+	{
+		for (const ShaderDiagnostic& diagnostic : m_ShaderDiagnostics)
+			if (ShaderDiagnosticWantsMigration(diagnostic))
+				return true;
+		return false;
+	}
+
+	std::filesystem::path MaterialEditorPanel::RepoRootPath()
+	{
+		// WLD_WORLD_DIR = "<repo>/Engine/"(构建期定义,带尾斜杠):lexically_normal 去掉尾斜杠,
+		// 再上一级就是仓库根 —— 只用来指 docs/ 与 tools/ 里的文件(它们不在内容根下)。
+		const std::filesystem::path engineDir =
+			std::filesystem::path(std::string(WLD_WORLD_DIR)).lexically_normal();
+		return engineDir.parent_path();
+	}
+
+	std::filesystem::path MaterialEditorPanel::ShaderContractDocPath()
+	{
+		return RepoRootPath() / "docs" / "dev" / "shader-contract.md";
+	}
+
+	std::string MaterialEditorPanel::ShaderMigrationTarget() const
+	{
+		if (m_ShaderPath.empty())
+			return {};
+		return (ContentRootPath() / m_ShaderPath).generic_string();
+	}
+
+	std::string MaterialEditorPanel::ShaderMigrationCommand() const
+	{
+		// 复制出去的是 **dry-run** 命令(只出 diff,不写盘):复核后再自己加 --apply。
+		const std::string target = ShaderMigrationTarget();
+		if (target.empty())
+			return {};
+		const std::filesystem::path script =
+			RepoRootPath() / "tools" / "agents" / "scratch" / "migrate-hlsl-to-slang.py";
+		return "python \"" + script.generic_string() + "\" \"" + target + "\"";
 	}
 
 	void MaterialEditorPanel::RecordShaderDiskStamp(const std::string& text)
@@ -4710,7 +4839,7 @@ namespace World
 			// 预览材质指向本次的键:未保存时用 `<路径>#preview`(只有预览变),
 			// 保存后才指回路径键(与场景共用同一份已发布管线)。
 			// 键走 Material::SetSurfaceKeyOverride(不是 ShaderPath):预览替身材质没有
-			// 自己的 `.hlsl` 引用,覆盖键只影响渲染侧的管线选择,不写盘、不读注解。
+			// 自己的着色器引用,覆盖键只影响渲染侧的管线选择,不写盘、不读注解。
 			if (m_Material)
 				m_Material->SetSurfaceKeyOverride(key);
 			m_ShaderInstalledKey = key;
@@ -4759,7 +4888,7 @@ namespace World
 			if (!status.empty())
 				status += "   |   ";
 			status += Wui::Tr("panel.material.shader.disk.changed",
-				"The .hlsl changed on disk while this buffer had unsaved edits — nothing was "
+				"The .slang changed on disk while this buffer had unsaved edits — nothing was "
 				"overwritten (Revert to load the file).");
 		}
 		return status;
@@ -4818,7 +4947,7 @@ namespace World
 		m_ShaderRequestedRevision = ~0ull;
 		m_ShaderForceCompile = true;
 		m_ShaderStatus = Wui::Tr("panel.material.shader.status.reloaded",
-			"Reloaded the changed .hlsl from disk: ") + m_ShaderPath;
+			"Reloaded the changed .slang from disk: ") + m_ShaderPath;
 		m_ShaderStatusIsError = false;
 		WLD_CORE_INFO("[material-ui] shader '{0}' reloaded from disk (hot reload)", m_ShaderPath);
 	}
@@ -4846,11 +4975,15 @@ namespace World
 			Wui::HoverRow(ctx, rowRect, hovered, false, theme, 2.0f);
 			const bool isError = diagnostic.Severity != "warning";
 			const std::string text = FormatShaderDiagnostic(diagnostic);
+			// Slang-B1:前 5 类诊断给"这是什么 + 怎么修"(悬停可见 + 同一条进无障碍 tooltip)。
+			const std::string help = ShaderDiagnosticHelp(diagnostic);
 			Wui::Label(ctx, { rowRect.X + 4.0f, rowRect.Y + 1.0f },
 				EllipsizeToWidth(ctx, text, std::max(40.0f, rowRect.W - 8.0f), 11.0f),
 				isError ? theme.Danger : theme.TextMuted, 11.0f);
 			if (hovered && canJump)
 				ctx.SetCursor(Wui::WuiCursor::Hand);
+			if (hovered && !help.empty())
+				Wui::Tooltip(ctx, rowRect, text + "\n" + help);
 			{
 				Wui::WuiAccessNode node;
 				node.Id = Wui::HashId(("material.shader.diagnostic." + std::to_string(index)).c_str());
@@ -4861,10 +4994,13 @@ namespace World
 					+ std::to_string(index + 1);
 				node.Value = text;
 				// 不可跳行的行不要在 tooltip 里承诺"点击跳行"(affordance 与真实行为一致)。
-				node.Tooltip = canJump
+				std::string tooltip = canJump
 					? text + "\n" + Wui::Tr("panel.material.shader.diagnostic.hint",
 						"Click to move the caret to this line in the code column.")
 					: text;
+				if (!help.empty())
+					tooltip += "\n" + help;
+				node.Tooltip = tooltip;
 				node.Rect = rowRect;
 				node.Enabled = true;
 				node.Interactive = canJump;
@@ -5280,7 +5416,7 @@ namespace World
 			// 手动 Compile = 跳过消抖的立即编译(M4-S3:实际编译仍在工作线程,不阻塞 UI 帧)。
 			m_ShaderForceCompile = true;
 		}
-		// M4-S3:防抖 → 后台编译 → 结果回主线程 Install;顺带轮询磁盘(.hlsl 热重载)。
+		// M4-S3:防抖 → 后台编译 → 结果回主线程 Install;顺带轮询磁盘(着色器热重载)。
 		const double now = ShaderWallClockSeconds();
 		PumpShaderCompile(now);
 		PollShaderDiskChange(now);
@@ -5390,17 +5526,17 @@ namespace World
 			bool Enabled = true;
 			bool Primary = false;
 		};
-		const std::vector<ShaderAction> actions {
+		std::vector<ShaderAction> actions {
 			{ "material.shader.save", Wui::Tr("panel.material.shader.save", "Save"),
 				Wui::Tr("panel.material.shader.save.tooltip",
-					"Save (Ctrl+S): write the source back to the .hlsl on disk (temporary file + atomic "
+					"Save (Ctrl+S): write the source back to the .slang on disk (temporary file + atomic "
 					"replace). The parameter annotations in the file are the single source of truth. "
 					"Saving also publishes the compiled pipeline for the scene: unsaved edits only "
 					"change this panel's preview."),
 				!readOnly, true },
 			{ "material.shader.revert", Wui::Tr("panel.material.shader.revert", "Revert"),
 				Wui::Tr("panel.material.shader.revert.tooltip",
-					"Revert (Ctrl+R): drop unsaved edits and read the .hlsl from disk again."),
+					"Revert (Ctrl+R): drop unsaved edits and read the .slang from disk again."),
 				true, false },
 			{ "material.shader.compile", Wui::Tr("panel.material.shader.compile", "Compile"),
 				Wui::Tr("panel.material.shader.compile.tooltip",
@@ -5410,9 +5546,29 @@ namespace World
 				true, false },
 			{ "material.shader.reveal", Wui::Tr("panel.material.shader.reveal", "Reveal"),
 				Wui::Tr("panel.material.shader.reveal.tooltip",
-					"Reveal: select the .hlsl in Windows Explorer."),
+					"Reveal: select the .slang in Windows Explorer."),
 				true, false },
 		};
+		// Slang-B1:诊断命中"严格类型 / 组合采样器"类错误时,头部多出迁移入口 ——
+		// 复制现成的 **dry-run** 命令(复核 diff 后自己加 --apply)+ 打开契约文档。
+		// (选了"复制命令 + 打开文档"的退化形态:编辑器不在 UI 里直接跑 Python 脚本。)
+		if (ShaderDiagnosticsWantMigration())
+		{
+			actions.push_back({ "material.shader.migrate.copy",
+				Wui::Tr("panel.material.shader.migrate.copy", "Copy Migrate Command"),
+				Wui::Tr("panel.material.shader.migrate.copy.tooltip",
+					"These diagnostics hit the strict-type / combined-sampler rules. Copies a ready-to-run "
+					"dry-run migration command for this file (nothing is written): run it in a terminal, "
+					"review the diff, then re-run it with --apply. Script: "
+					"tools/agents/scratch/migrate-hlsl-to-slang.py"),
+				true, false });
+			actions.push_back({ "material.shader.contract.open",
+				Wui::Tr("panel.material.shader.contract.open", "Contract Doc"),
+				Wui::Tr("panel.material.shader.contract.open.tooltip",
+					"Open docs/dev/shader-contract.md: strict types, combined samplers, explicit "
+					"[[vk::binding]] and the old-.hlsl migration table."),
+				true, false });
+		}
 		float actionX = x;
 		float actionY = y;
 		float actionsHeight = buttonH;
@@ -5443,7 +5599,7 @@ namespace World
 					if (!std::filesystem::exists(disk, existsError))
 					{
 						m_ShaderStatus = Wui::Tr("panel.material.shader.status.reveal_missing",
-							"Reveal failed: the .hlsl is not on disk yet (save it first)");
+							"Reveal failed: the .slang is not on disk yet (save it first)");
 						m_ShaderStatusIsError = true;
 					}
 #ifdef _WIN32
@@ -5476,6 +5632,65 @@ namespace World
 					}
 #endif
 				}
+				else if (actionId == "material.shader.migrate.copy")
+				{
+					// 只复制 dry-run 命令(不写盘);--apply 由用户在终端复核 diff 后自己加。
+					const std::string command = ShaderMigrationCommand();
+					if (!command.empty() && Application::HasInstance())
+					{
+						Application::Get().GetWindow().SetClipboardText(command);
+						m_ShaderStatus = Wui::Tr("panel.material.shader.migrate.copied",
+							"Migration command copied (dry-run; review the diff first): ") + command
+							+ Wui::Tr("panel.material.shader.migrate.copied.hint",
+								"  -- re-run it with --apply to write the changes.");
+						m_ShaderStatusIsError = false;
+					}
+					else
+					{
+						m_ShaderStatus = Wui::Tr("panel.material.shader.migrate.unavailable",
+							"Migration command unavailable: the shader has no logical path yet");
+						m_ShaderStatusIsError = true;
+					}
+				}
+				else if (actionId == "material.shader.contract.open")
+				{
+					const std::filesystem::path doc = ShaderContractDocPath();
+					std::error_code docError;
+					if (!std::filesystem::is_regular_file(doc, docError))
+					{
+						m_ShaderStatus = Wui::Tr("panel.material.shader.contract.missing",
+							"Contract document not found: ") + doc.generic_string();
+						m_ShaderStatusIsError = true;
+					}
+#ifdef _WIN32
+					else
+					{
+						// 与 Reveal / 打开外部文档同一条系统调用。
+						const HINSTANCE docResult = ShellExecuteW(nullptr, L"open",
+							doc.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+						if (reinterpret_cast<intptr_t>(docResult) <= 32)
+						{
+							m_ShaderStatus = Wui::Tr("panel.material.shader.contract.failed",
+								"Could not open the contract document: ") + doc.generic_string();
+							m_ShaderStatusIsError = true;
+						}
+						else
+						{
+							m_ShaderStatus = Wui::Tr("panel.material.shader.contract.opened",
+								"Opened the shader contract: ") + doc.generic_string();
+							m_ShaderStatusIsError = false;
+						}
+					}
+#else
+					else
+					{
+						m_ShaderStatus = Wui::Tr("panel.material.shader.contract.unsupported",
+							"Opening external documents is only implemented on Windows: ")
+							+ doc.generic_string();
+						m_ShaderStatusIsError = true;
+					}
+#endif
+				}
 			}
 			actionsHeight = (actionY - y) + buttonH;
 			actionX += actionRect.W + 6.0f;
@@ -5492,7 +5707,7 @@ namespace World
 			node.Label = Wui::Tr("panel.material.shader.dirty.label", "Unsaved changes");
 			node.Value = dirty ? "dirty" : "clean";
 			node.Tooltip = Wui::Tr("panel.material.shader.dirty.tooltip",
-				"* = the editor buffer differs from the .hlsl on disk. Unsaved edits are compiled and "
+				"* = the editor buffer differs from the .slang on disk. Unsaved edits are compiled and "
 				"shown in this panel's preview only; the scene switches after Save.");
 			node.Rect = { x, y + actionsHeight + 4.0f, 24.0f, 14.0f };
 			node.Enabled = true;
@@ -5516,7 +5731,7 @@ namespace World
 			node.Label = Wui::Tr("panel.material.shader.title", "Material Shader");
 			node.Value = m_ShaderPath + (dirty ? " (unsaved)" : " (saved)");
 			node.Tooltip = Wui::Tr("panel.material.shader.title.tooltip",
-				"Logical path of this .hlsl (relative to the content root). The material editor opens "
+				"Logical path of this .slang (relative to the content root). The material editor opens "
 				"shaders in code form: preview | code | declared parameters.");
 			node.Rect = { x, titleY - 2.0f, std::max(40.0f, rect.W - 8.0f),
 				kHeaderTextHeight + kHeaderStatusHeight + 6.0f };
@@ -5944,6 +6159,10 @@ namespace World
 				m_ShaderCompileFailed ? theme.Danger : theme.TextMuted, 11.0f);
 		}
 		{
+			// Slang-B1:编译失败时把第一条诊断的"这是什么 + 怎么修"接在 tooltip 后面
+			// (状态行本身只放得下一条错误;解释走悬停/读屏,与诊断行同一份文案)。
+			const std::string firstHelp = m_ShaderDiagnostics.empty()
+				? std::string() : ShaderDiagnosticHelp(m_ShaderDiagnostics.front());
 			Wui::WuiAccessNode node;
 			node.Id = Wui::HashId("material.shader.compile.status");
 			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
@@ -5951,7 +6170,7 @@ namespace World
 			node.Kind = "text";
 			node.Label = Wui::Tr("panel.material.shader.compile.status.label", "Shader compile status");
 			node.Value = compileStatus;
-			node.Tooltip = compileStatus;
+			node.Tooltip = firstHelp.empty() ? compileStatus : (compileStatus + "\n" + firstHelp);
 			node.Rect = { rect.X, compileStatusY - 2.0f, std::max(40.0f, rect.W - 4.0f), 16.0f };
 			node.Enabled = true;
 			node.Interactive = false;
@@ -5979,14 +6198,19 @@ namespace World
 		}
 		if (!m_ShaderDiagnostics.empty())
 		{
+			// Slang-B1:第一条诊断的"这是什么 + 怎么修"一并进 tooltip —— 状态行是一条 11px 的
+			// 单行文本,放不下整段解释;悬停/读屏能拿到完整口径(与诊断行 tooltip 同一份文案)。
+			const std::string firstDiagnostic = FormatShaderDiagnostic(m_ShaderDiagnostics.front());
+			const std::string firstDiagnosticHelp = ShaderDiagnosticHelp(m_ShaderDiagnostics.front());
 			Wui::WuiAccessNode node;
 			node.Id = Wui::HashId("material.shader.diagnostics");
 			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 			node.Kind = "text";
 			node.Label = Wui::Tr("panel.material.shader.diagnostics", "Compiler diagnostics");
-			node.Value = FormatShaderDiagnostic(m_ShaderDiagnostics.front());
-			node.Tooltip = FormatShaderDiagnostic(m_ShaderDiagnostics.front());
+			node.Value = firstDiagnostic;
+			node.Tooltip = firstDiagnosticHelp.empty()
+				? firstDiagnostic : (firstDiagnostic + "\n" + firstDiagnosticHelp);
 			node.Rect = { rect.X, compileStatusY - 16.0f, std::max(40.0f, rect.W - 4.0f), 14.0f };
 			node.Enabled = true;
 			node.Interactive = false;
@@ -6009,7 +6233,7 @@ namespace World
 			}
 		}
 		const Wui::WuiTheme& theme = host.Theme();
-		// M4-S2:代码形态(`.hlsl`)与材质形态(`.wmat`)是本面板的两种形态,布局/动作各走一条;
+		// M4-S2:代码形态(`.slang`)与材质形态(`.wmat`)是本面板的两种形态,布局/动作各走一条;
 		// `.wmat` 路径的既有行为一行不动。
 		if (m_ShaderMode)
 		{

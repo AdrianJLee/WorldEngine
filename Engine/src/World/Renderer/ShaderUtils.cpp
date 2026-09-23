@@ -327,6 +327,17 @@ namespace World
 			return entryPoint.rfind("VS", 0) == 0 ? "vs_6_0" : "ps_6_0";
 		}
 
+		// Slang-B1:烘焙扫描认的源文件扩展名。
+		//  - `.slang` = 规范扩展名(Slang 源;HLSL 语法是它的子集);
+		//  - `.hlsl` = legacy:既有内容仍被烘焙,不因扩展名升级而漏出发布包。
+		// 产物命名与扩展名无关(`shaders/<stem>.<Entry>[.gl].spv`),所以两种扩展名
+		// 烘出的产物在同一位置,运行时按 stem 解析。
+		bool IsShaderSourceExtension(const std::filesystem::path& path)
+		{
+			const std::filesystem::path extension = path.extension();
+			return extension == ".slang" || extension == ".hlsl";
+		}
+
 		// GL 侧的 SPIR-V 能力:由 RHI 设备能力位决定(带 GL_ARB_gl_spirv 的 GL 4.6 core)。
 		bool GlSpirVModulesAvailable()
 		{
@@ -616,6 +627,7 @@ namespace World
 	{
 		// Slang-T6b:兼容入口(EditorCooker 的 4a 步)。只烘 Vulkan 目标 shaders/<stem>.<entry>.spv;
 		// GLSL 文本产物已删除,GL 目标 .gl.spv 由 BakeDistributionTargets 写。
+		// Slang-B1:扫描 `.slang`(规范)+ `.hlsl`(legacy)两种源扩展名。
 		BakeResult result;
 		std::error_code ec;
 		if (!fs::is_directory(sourceDir, ec))
@@ -637,7 +649,7 @@ namespace World
 		for (const fs::directory_entry& entry : fs::recursive_directory_iterator(
 			sourceDir, fs::directory_options::skip_permission_denied, ec))
 		{
-			if (!entry.is_regular_file(ec) || entry.path().extension() != ".hlsl")
+			if (!entry.is_regular_file(ec) || !IsShaderSourceExtension(entry.path()))
 				continue;
 
 			++result.Shaders;
@@ -676,6 +688,7 @@ namespace World
 		// GL 目标(SPIR-V 1.0 + 组合 Sampler2D + 入口名 "main")给 GL 4.6 的
 		// glShaderBinary/glSpecializeShader。两者与开发形态用**同一个**内容寻址缓存,
 		// 所以重复 cook 不重编译,产物与现场编译逐字节相同。
+		// Slang-B1:扫描 `.slang`(规范)+ `.hlsl`(legacy)两种源扩展名。
 		BakeResult result;
 		std::error_code ec;
 		if (!fs::is_directory(sourceDir, ec))
@@ -697,7 +710,7 @@ namespace World
 		for (const fs::directory_entry& entry : fs::recursive_directory_iterator(
 			sourceDir, fs::directory_options::skip_permission_denied, ec))
 		{
-			if (!entry.is_regular_file(ec) || entry.path().extension() != ".hlsl")
+			if (!entry.is_regular_file(ec) || !IsShaderSourceExtension(entry.path()))
 				continue;
 
 			const std::vector<char> sourceBytes = ReadAllBytes(entry.path().string());

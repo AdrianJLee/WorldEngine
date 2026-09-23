@@ -82,7 +82,7 @@ namespace World
 		std::vector<std::string> SkippedDirtyMaterials;   // 磁盘变了但有未保存修改 → 只报告
 		std::vector<AssetReloadFailure> FailedMaterials;  // 读取/解析失败:保留旧内存态
 		std::vector<std::string> InvalidatedTextures;     // 内容变化的贴图(GPU 缓存已失效)
-		// M4-S3:内容变化的 `.hlsl` 表面函数资产。引用它们的材质会被刷新参数表 +
+		// M4-S3:内容变化的材质着色器(`.slang`;legacy `.hlsl` 同列)资产。引用它们的材质会被刷新参数表 +
 		// Revision 自增(渲染侧重建参数 UBO/表面描述符集);**重新编译与
 		// MaterialSurfaceRuntime::Install 由编辑器侧执行**(内核不在渲染线程里跑编译器)。
 		std::vector<std::string> ChangedShaders;

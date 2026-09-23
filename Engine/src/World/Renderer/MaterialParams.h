@@ -8,7 +8,7 @@
 
 namespace World
 {
-	// M4-S2:`.hlsl` 表面函数里的**注解参数表**。
+	// M4-S2:材质着色器(Slang 源 `.slang`;legacy `.hlsl` 同列)里的**注解参数表**。
 	//
 	// 注解是参数的事实源(编辑器据此生成 DragBar / 取色器 / 资产下拉 / 复选框 / 步进,
 	// 运行时据此生成 cbuffer 布局):
@@ -103,7 +103,7 @@ namespace World
 	// 反射类型能否满足注解类型(Float←float、Vec2←v2float、Bool←uint(HLSL bool 在 SPIR-V 里
 	// 是 uint32)、Color/Vec4←v4float …)。ValidateParamsWithReflection 的"类型不符"判据。
 	WLD_API bool IsReflectedTypeCompatible(ParamType type, const std::string& reflectedType);
-	// 注解 → 文本(不带 `//! ` 前缀)。编辑器改写 `.hlsl` 里的注解行时用它,保证
+	// 注解 → 文本(不带 `//! ` 前缀)。编辑器改写材质着色器里的注解行时用它,保证
 	// "写出的行"能被 ParseMaterialParams 原样读回来(同一套值文本 / 引号 / 范围口径)。
 	// 范围只在 (Min,Max) != (0,1) 时写出 —— 保持"没写范围"与"[0,1]"在解析结果上等价。
 	WLD_API std::string FormatMaterialParamAnnotation(const MaterialParamDecl& decl);

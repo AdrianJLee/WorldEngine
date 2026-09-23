@@ -12,8 +12,9 @@ namespace World
 {
 	// Slang → SPIR-V 编译与烘焙产物解析(Slang-T6b:Slang 是唯一编译器,GL 也吃 SPIR-V)。
 	//
-	// 引擎着色器(`Engine/assets/shaders/**`)是**Slang 单源**形态(组合采样器
-	// `Sampler2D` + 显式 `[[vk::binding(N,S)]]`),每个 stage 编出两份 SPIR-V permutation:
+	// 引擎着色器(`Engine/assets/shaders/**`)是**Slang 单源**形态(`.slang`;扩展名升级前
+	// 写下的 `.hlsl` 仍被当作同一种源读取 —— HLSL 语法是 Slang 的子集),用组合采样器
+	// `Sampler2D` + 显式 `[[vk::binding(N,S)]]`,每个 stage 编出两份 SPIR-V permutation:
 	//   - Vulkan:`-profile <stage>_6_0`(Slang 直出 Vulkan SPIR-V);
 	//   - OpenGL:`-profile <stage>_5_0+spirv_1_0`(ARB_gl_spirv 只接受 SPIR-V 1.0,
 	//     且不接受 OpTypeSampler,必须组合采样器 —— 依据 T1 实测)。
@@ -28,7 +29,7 @@ namespace World
 	class WLD_API ShaderCompiler
 	{
 	public:
-		// 编译或加载指定的 HLSL 文件，返回**当前后端**的 SPIR-V 字节码
+		// 编译或加载指定的 Slang 源(`.slang`;legacy `.hlsl` 同一入口),返回**当前后端**的 SPIR-V 字节码
 		static std::vector<char> CompileOrLoad(const std::string& hlslPath, const std::string& entryPoint, const std::string& profile);
 		// 按当前后端填充规范的 RHI 着色器阶段:
 		//   - Vulkan → 填 Vulkan 目标 SPIR-V(Vulkan profile);
@@ -60,19 +61,21 @@ namespace World
 
 		struct BakeResult
 		{
-			size_t Shaders = 0;    // 处理的 HLSL 文件数
+			size_t Shaders = 0;    // 处理的 Slang 源文件数(`.slang` + legacy `.hlsl`)
 			size_t Artifacts = 0;  // 写出的产物数(SPIR-V)
 			size_t Failed = 0;
 			std::string Error;     // 首个错误(便于打包失败时报出)
 		};
-		// 兼容入口(EditorCooker 的 4a 步):把目录下全部 .hlsl 的 VSMain/PSMain 烘成
+		// 兼容入口(EditorCooker 的 4a 步):把目录下全部 Slang 源(`.slang`;legacy `.hlsl` 同列)
+		// 的 VSMain/PSMain 烘成
 		// Vulkan 目标 shaders/<stem>.<entry>.spv 写进 outputDir。使用同一内容寻址缓存,
 		// 重复调用不重编译。Slang-T6b:不再产出 GLSL 文本产物;GL 目标(.gl.spv)与
 		// 实例化/蒙皮入口一律由 BakeDistributionTargets 写(与这里的 Vulkan 产物同源同字节)。
 		static BakeResult BakeDirectory(const std::filesystem::path& sourceDir,
 			const std::filesystem::path& outputDir);
 
-		// Slang-T5:发行形态的**双目标**烘焙。对每个 .hlsl 把运行时真的会请求的入口
+		// Slang-T5:发行形态的**双目标**烘焙。对每个 Slang 源(`.slang`;legacy `.hlsl` 同列)
+		// 把运行时真的会请求的入口
 		// (VSMain / PSMain + 源码里存在的 VSMainInstanced / VSMainSkinned)烘成两份 SPIR-V:
 		//   shaders/<stem>.<Entry>.spv     —— Vulkan 目标(SPIR-V 1.3,模块入口名 = 源入口名);
 		//   shaders/<stem>.<Entry>.gl.spv  —— GL 目标(SPIR-V 1.0 + 组合 Sampler2D,入口名 "main");

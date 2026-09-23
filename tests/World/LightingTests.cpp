@@ -4,7 +4,7 @@
 //   1. 无灯光组件时环境光默认 0.25(既有场景不会突然全黑);
 //   2. 上限截断:方向光 ≤1、点光 ≤7、合计 ≤8,超出的进 DroppedLights 且按顺序保留前几盏;
 //   3. 方向归一化(含零向量回退 -Y);
-//   4. 灯光 UBO 的 std140 布局字节数/偏移(与 Renderer3D_Solid.hlsl 的 cbuffer 对应);
+//   4. 灯光 UBO 的 std140 布局字节数/偏移(与 Renderer3D_Solid.slang 的 cbuffer 对应);
 //   5. 阴影开关:没有 CastShadow 时不启用;ApplyShadowCaster 写入矩阵并启用标志;
 //   6. 组件 schema 往返(registry 的 Get/Set + 场景存档 SceneSerializer 写/读,
 //      与编辑器/运行时同一条 .wd 路径)。
@@ -173,7 +173,7 @@ namespace
 		CHECK(NearlyEqual(normalized.y, -0.8f));
 	}
 
-	// 5.std140 布局:与 Renderer3D_Solid.hlsl 的 cbuffer LightUniforms 逐字段对应,
+	// 5.std140 布局:与 Renderer3D_Solid.slang 的 cbuffer LightUniforms 逐字段对应,
 	//   总大小 496(64 + 16 + 16 + 16 + 8*48)。
 	void LightUniformsLayoutMatchesShader()
 	{

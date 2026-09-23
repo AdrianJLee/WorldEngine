@@ -4,8 +4,11 @@
 #include "World/Core/Asset/GltfImporter.h"
 #include "World/Core/Asset/ModelImportSettings.h"
 #include "World/Core/Asset/ScriptArtifact.h"
+#include "World/Core/Log.h"
 
 #include <fstream>
+#include <mutex>
+#include <set>
 #include <string_view>
 #include <utility>
 
@@ -221,19 +224,73 @@ namespace World::Asset
 				return result;
 			}
 		};
+
+		// Slang-B1:材质着色器导入器(M4-S2 起是 `.hlsl` 的 ExtensionImporter)。
+		//
+		// 口径(2026-09-23,plan `20260923-2200-slang-native` B1-1/B1-2):
+		//  - 规范扩展名 = `.slang`(Slang 源;HLSL 语法是它的子集);
+		//  - `.hlsl` **仍被接受**,按 legacy 处理:导入照样成功(既有项目/资产不破),
+		//    但给出可读迁移提示 —— `ImportResult::Warnings`(结构化,调用方如编辑器可直接展示)
+		//    + 一条 `WLD_CORE_WARN`(每个逻辑路径只记一次,避免 cook 刷屏);
+		//  - 内容仍是**原样复制**(与旧实现一致),产物逻辑路径不变(扩展名保留原样);
+		//  - Version 1 → 2:内容没变,但 cook 的复合指纹含导入器名与版本
+		//    (见 CookPipeline::CompositeFingerprint),升版 = 旧 cook.db 整体重烘,
+		//    保证包里的产物都出自新口径。
+		class MaterialShaderImporter final : public IAssetImporter
+		{
+		public:
+			static constexpr const char* kCanonicalExtension = ".slang";   // 新写/新建用
+			static constexpr const char* kLegacyExtension = ".hlsl";       // 只读兼容
+
+			std::string Name() const override { return "MaterialShader"; }
+			uint32_t Version() const override { return 2; }
+			bool Matches(const std::filesystem::path& source) const override
+			{
+				const std::filesystem::path extension = source.extension();
+				return extension == kCanonicalExtension || extension == kLegacyExtension;
+			}
+
+			ImportResult Import(const ImportRequest& request, std::error_code& ec) const override
+			{
+				ImportResult result = CopySource(request, ec);
+				if (!result.Ok || request.Source.extension() != kLegacyExtension)
+					return result;
+
+				const std::string hint = "legacy material shader extension '.hlsl': '" + request.LogicalPath
+					+ "' is still imported unchanged, but new material shaders use '.slang' "
+					"(Slang source; HLSL syntax is a subset). Migration: "
+					"tools/agents/scratch/migrate-hlsl-to-slang.py (dry-run by default).";
+				result.Warnings.push_back(hint);
+				LogLegacyHintOnce(request.LogicalPath, hint);
+				return result;
+			}
+
+		private:
+			static void LogLegacyHintOnce(const std::string& logicalPath, const std::string& hint)
+			{
+				static std::mutex mutex;
+				static std::set<std::string> reported;
+				{
+					std::lock_guard<std::mutex> lock(mutex);
+					if (!reported.insert(logicalPath).second)
+						return;
+				}
+				WLD_CORE_WARN("[import] {0}", hint);
+			}
+		};
 	}
 
 	std::vector<std::shared_ptr<IAssetImporter>> DefaultImporters()
 	{
 		// 注册顺序:特定类型在前,PassThrough 兜底;模型在 Scene/Script 之后、PassThrough 之前。
-		// M4-S2:`.hlsl`(材质表面函数)是一等资产 —— 显式登记导入器,不再靠 PassThrough 兜底。
+		// M4-S2/Slang-B1:材质表面函数是一等资产 —— 显式登记导入器,不再靠 PassThrough 兜底。
+		// 规范扩展名 `.slang`(v2);legacy `.hlsl` 兼容读取 + 迁移提示。
 		// 内容原样复制;cook 复合指纹含源内容哈希 + 导入器身份,所以改代码/注解会自动重烘。
 		return {
 			std::make_shared<ExtensionImporter>("Scene", 1, std::vector<std::string>{ ".wd" }),
 			std::make_shared<ScriptImporter>(),
 			std::make_shared<ModelImporter>(),
-			std::make_shared<ExtensionImporter>("MaterialShader", 1,
-				std::vector<std::string>{ ".hlsl" }),
+			std::make_shared<MaterialShaderImporter>(),
 			std::make_shared<PassThroughImporter>(),
 		};
 	}

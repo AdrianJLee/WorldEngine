@@ -28,7 +28,7 @@ namespace World
 	{
 		std::string Severity;   // "error" | "warning"
 		std::string Message;    // 编译器原始整行(含 E 码,如 error[E20002]: …)
-		std::string File;       // 编译器报告的文件;用户源错误时是 surface_user.hlsl
+		std::string File;       // 编译器报告的文件;用户源错误时是 surface_user.slang(生成的中间源)
 		uint32_t Line = 0;      // 报告文件内的行
 		uint32_t Column = 0;    // 报告文件内的列
 		bool InUserSource = false;
@@ -39,7 +39,7 @@ namespace World
 	// 可缓存的编译产物。第一版只有 SPIR-V(Vulkan);OpenGL 由 M4-S4 补。
 	// M4-S3:表面模板自带的顶点阶段(按入口名区分)。
 	//
-	// 为什么不能复用引擎 Renderer3D_Solid.hlsl 的 VS:表面模板的 VS 输出是 4 个插值量
+	// 为什么不能复用引擎 Renderer3D_Solid.slang 的 VS:表面模板的 VS 输出是 4 个插值量
 	// (loc0 法线 / loc1 世界位置 / loc2 UV / loc3 实体 id),引擎的是 5 个(loc3 是基础色、
 	// loc4 才是实体 id)—— 混用在 Vulkan 上属于**接口不匹配**,不是风格问题。
 	// 变体与入口的对应:solid/transparent = "VSMain"、instanced = "VSMainInstanced"、
@@ -113,10 +113,11 @@ namespace World
 			const std::vector<MaterialParamDecl>& params, const std::string& permutationKey,
 			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);
 
-		// S3 的"新建 .hlsl 起始代码":只含用户可编辑的 Evaluate();默认值来自
+		// S3 的"新建 `.slang` 起始代码"(legacy `.hlsl` 同源):只含用户可编辑的 Evaluate();默认值来自
 		// MakeDefaultSurface(),不会漏字段。
 		static std::string DefaultSurfaceFunctionSource();
-		// 引擎包装后的完整 HLSL(契约 + 模板 + 用户源)。契约文件读不到时返回空串;
+		// 引擎包装后的完整 Slang 源(契约 + 模板 + 用户源;HLSL 语法是 Slang 的子集)。
+		// 契约文件读不到时返回空串;
 		// CompileSurface 会把这种情况变成结构化错误而不是断言。
 		static std::string WrapSurfaceSource(const std::string& userSource,
 			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);

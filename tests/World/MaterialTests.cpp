@@ -1284,7 +1284,7 @@ int main()
 				MaterialLibrary& library = MaterialLibrary::Get();
 				std::string error;
 
-				writeText("glass.hlsl",
+				writeText("glass.slang",
 					"//! param Float Roughness = 0.4 [0,1] group(\"Surface\") label(\"Roughness\")\n"
 					"//! param Color Tint = 1, 1, 1, 1 group(\"Surface\")\n"
 					"//! param Int Steps = 2 [0,8]\n"
@@ -1301,7 +1301,7 @@ int main()
 					"}\n");
 				writeText("mat_base.wmat",
 					"FormatVersion: 2\n"
-					"Shader: material_m4s2_tmp/glass.hlsl\n"
+					"Shader: material_m4s2_tmp/glass.slang\n"
 					"Name: \"Glass\"\n"
 					"Params:\n"
 					"  Roughness: 0.75\n"
@@ -1311,7 +1311,7 @@ int main()
 				CHECK(material != nullptr);
 				CHECK(error.empty());
 				CHECK(material->HasShaderOverride());
-				CHECK(material->ShaderPath() == relative("glass.hlsl"));
+				CHECK(material->ShaderPath() == relative("glass.slang"));
 				CHECK(material->ShaderWarning().empty());
 				CHECK(material->Params().size() == 5);
 				CHECK(material->ParamOverrides().size() == 2);
@@ -1339,7 +1339,7 @@ int main()
 				// 未声明参数:载入不算失败,给可读警告,值保留在文件里。
 				writeText("mat_undeclared.wmat",
 					"FormatVersion: 2\n"
-					"Shader: material_m4s2_tmp/glass.hlsl\n"
+					"Shader: material_m4s2_tmp/glass.slang\n"
 					"Params:\n"
 					"  Nope: 1\n");
 				std::string undeclaredWarning;
@@ -1356,7 +1356,7 @@ int main()
 				// 值类型不符:也不失败,警告里带原因,写回时原样保留。
 				writeText("mat_badvalue.wmat",
 					"FormatVersion: 2\n"
-					"Shader: material_m4s2_tmp/glass.hlsl\n"
+					"Shader: material_m4s2_tmp/glass.slang\n"
 					"Params:\n"
 					"  Roughness: 0.5, 0.5\n");
 				std::string badValueWarning;
@@ -1370,7 +1370,7 @@ int main()
 				// shader 读不到:材质仍可用,警告指出 shader,参数默认值不可用。
 				writeText("mat_missing_shader.wmat",
 					"FormatVersion: 2\n"
-					"Shader: material_m4s2_tmp/__missing__.hlsl\n"
+					"Shader: material_m4s2_tmp/__missing__.slang\n"
 					"Params:\n"
 					"  Roughness: 0.3\n");
 				std::string missingWarning;
@@ -1381,20 +1381,44 @@ int main()
 				CHECK(missing->ResolvedParamValue("Roughness") == "0.3");
 
 				// 注解坏的 shader:同样只给警告,不拖垮材质。
-				writeText("broken.hlsl", "//! param Float3 X = 1\n");
+				writeText("broken.slang", "//! param Float3 X = 1\n");
 				writeText("mat_broken_shader.wmat",
 					"FormatVersion: 2\n"
-					"Shader: material_m4s2_tmp/broken.hlsl\n");
+					"Shader: material_m4s2_tmp/broken.slang\n");
 				std::string brokenWarning;
 				Ref<Material> broken = library.Load(relative("mat_broken_shader.wmat"), &brokenWarning);
 				CHECK(broken != nullptr);
 				CHECK(brokenWarning.find("注解参数表解析失败") != std::string::npos);
 				CHECK(brokenWarning.find("1:11:") != std::string::npos);
 
+				// Slang-B1:legacy `.hlsl` 引用**仍然可读**(既有 .wmat 不迁移也能加载),
+				// 参数注解表与 `.slang` 走同一条入口;新写路径不再产出它(向导/迁移写 `.slang`)。
+				writeText("legacy_glass.hlsl",
+					"//! param Float Roughness = 0.25 [0,1]\n"
+					"Surface Evaluate(MaterialInputs input)\n"
+					"{\n"
+					"    Surface surface = MakeDefaultSurface();\n"
+					"    surface.Roughness = Roughness;\n"
+					"    return surface;\n"
+					"}\n");
+				writeText("mat_legacy_shader.wmat",
+					"FormatVersion: 2\n"
+					"Shader: material_m4s2_tmp/legacy_glass.hlsl\n"
+					"Params:\n"
+					"  Roughness: 0.1\n");
+				std::string legacyWarning;
+				Ref<Material> legacy = library.Load(relative("mat_legacy_shader.wmat"), &legacyWarning);
+				CHECK(legacy != nullptr);
+				CHECK(legacyWarning.empty());
+				CHECK(legacy->HasShaderOverride());
+				CHECK(legacy->ShaderPath() == relative("legacy_glass.hlsl"));
+				CHECK(legacy->Params().size() == 1);
+				CHECK(legacy->ResolvedParamValue("Roughness") == "0.1");
+
 				// 父级继承:Shader 与注解表跟随父级,参数生效值 = 本文件 > 父级 > shader 默认。
 				writeText("mat_parent.wmat",
 					"FormatVersion: 2\n"
-					"Shader: material_m4s2_tmp/glass.hlsl\n"
+					"Shader: material_m4s2_tmp/glass.slang\n"
 					"Name: \"Parent\"\n"
 					"Params:\n"
 					"  Roughness: 0.5\n");
@@ -1408,7 +1432,7 @@ int main()
 				CHECK(child != nullptr);
 				CHECK(error.empty());
 				CHECK(!child->HasShaderOverride());
-				CHECK(child->ShaderPath() == relative("glass.hlsl"));   // 继承父级
+				CHECK(child->ShaderPath() == relative("glass.slang"));   // 继承父级
 				CHECK(child->Params().size() == 5);                     // 注解表也继承
 				CHECK(!child->HasParamOverride("Roughness"));           // 本文件没写
 				CHECK(child->ParamSource("Roughness") == MaterialParamSource::Parent);
@@ -1434,7 +1458,7 @@ int main()
 				CHECK(library.Save(material, relative("mat_base_saved.wmat"), &error));
 				const std::string savedBase = readText("mat_base_saved.wmat");
 				CHECK(savedBase.find("FormatVersion: 2\n") == 0);
-				CHECK(savedBase.find("Shader: material_m4s2_tmp/glass.hlsl\n") != std::string::npos);
+				CHECK(savedBase.find("Shader: material_m4s2_tmp/glass.slang\n") != std::string::npos);
 				CHECK(savedBase.find("  Roughness: 0.75\n") != std::string::npos);
 				CHECK(savedBase.find("  Albedo: \"textures/Icon.png\"\n") != std::string::npos);
 				CHECK(savedBase.find("  Tint: [0.5, 0.5, 0.5, 1]\n") != std::string::npos);
@@ -1461,10 +1485,10 @@ int main()
 				CHECK(material->ShaderPath().empty());
 				CHECK(material->Params().empty());
 
-				// 28. M4-S3:`.hlsl` 内容进 `.wmat` 指纹;`.hlsl` 变化被资产热重载看见
+				// 28. M4-S3:材质着色器(`.slang`)内容进 `.wmat` 指纹;源变化被资产热重载看见
 				//     (报告条目 + 引用它的材质失效 → 参数表刷新、Revision 前进)。
 				{
-					writeText("m4s3_probe.hlsl",
+					writeText("m4s3_probe.slang",
 						"//! param Float Roughness = 0.4 [0,1]\n"
 						"//! param Int Steps = 2 [0,8]\n"
 						"Surface Evaluate(MaterialInputs input)\n"
@@ -1476,7 +1500,7 @@ int main()
 						"}\n");
 					writeText("m4s3_probe.wmat",
 						"FormatVersion: 2\n"
-						"Shader: material_m4s2_tmp/m4s3_probe.hlsl\n"
+						"Shader: material_m4s2_tmp/m4s3_probe.slang\n"
 						"Name: \"Probe\"\n"
 						"Params:\n"
 						"  Roughness: 0.6\n");
@@ -1485,14 +1509,14 @@ int main()
 					CHECK(probe != nullptr);
 					CHECK(probe->Params().size() == 2);
 					// 表面管线键 = 规范化的 shader 路径;预览用的覆盖键是 `<路径>#preview`。
-					CHECK(probe->SurfaceKey() == relative("m4s3_probe.hlsl"));
-					probe->SetSurfaceKeyOverride(relative("m4s3_probe.hlsl") + "#preview");
-					CHECK(probe->SurfaceKey() == relative("m4s3_probe.hlsl") + "#preview");
+					CHECK(probe->SurfaceKey() == relative("m4s3_probe.slang"));
+					probe->SetSurfaceKeyOverride(relative("m4s3_probe.slang") + "#preview");
+					CHECK(probe->SurfaceKey() == relative("m4s3_probe.slang") + "#preview");
 					probe->SetSurfaceKeyOverride(std::string());
-					CHECK(probe->SurfaceKey() == relative("m4s3_probe.hlsl"));
+					CHECK(probe->SurfaceKey() == relative("m4s3_probe.slang"));
 					CHECK(probe->SurfaceKeyOverride().empty());
 
-					const AssetFingerprint shaderBefore = FingerprintAsset(relative("m4s3_probe.hlsl"));
+					const AssetFingerprint shaderBefore = FingerprintAsset(relative("m4s3_probe.slang"));
 					const AssetFingerprint materialBefore = FingerprintAsset(relative("m4s3_probe.wmat"));
 					CHECK(shaderBefore.Exists && shaderBefore.FromContent);
 					CHECK(materialBefore.Exists && materialBefore.FromContent);
@@ -1504,7 +1528,7 @@ int main()
 
 				const uint32_t revisionBefore = probe->GetRevision();
 				const size_t paramsBefore = probe->Params().size();
-				writeText("m4s3_probe.hlsl",
+				writeText("m4s3_probe.slang",
 						"//! param Float Roughness = 0.4 [0,1]\n"
 						"Surface Evaluate(MaterialInputs input)\n"
 						"{\n"
@@ -1513,8 +1537,8 @@ int main()
 						"    return surface;\n"
 						"}\n");
 
-					// 指纹:.hlsl 自己变 + 引用它的 .wmat 一起变(父级链同款口径)。
-					const AssetFingerprint shaderAfter = FingerprintAsset(relative("m4s3_probe.hlsl"));
+					// 指纹:源自己变 + 引用它的 .wmat 一起变(父级链同款口径)。
+					const AssetFingerprint shaderAfter = FingerprintAsset(relative("m4s3_probe.slang"));
 					const AssetFingerprint materialAfter = FingerprintAsset(relative("m4s3_probe.wmat"));
 					CHECK(shaderAfter.Value != shaderBefore.Value);
 					CHECK(materialAfter.Value != materialBefore.Value);
@@ -1529,7 +1553,7 @@ int main()
 						CHECK(observed.ChangedShaders.empty());
 						library.PollAssetChanges(0.2, observed);       // 稳定 0.2s ≥ 0.15s → 报告
 						CHECK(observed.ChangedShaders.size() == 1);
-						CHECK(observed.ChangedShaders[0] == relative("m4s3_probe.hlsl"));
+						CHECK(observed.ChangedShaders[0] == relative("m4s3_probe.slang"));
 					// 引用它的材质失效:参数表刷新(Steps 注解已删)+ Revision 前进。
 					CHECK(probe->Params().size() == 1);
 					CHECK(probe->GetRevision() > revisionBefore);

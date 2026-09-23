@@ -30,13 +30,18 @@ namespace World
 		// 2 = M4-S2:包装源码加入注解参数块,并且每次编译都落一份反射输入供参数校验。
 		// 3 = M4-S3:参数块挪到 b4/space1 + 顶点阶段(模板键缓存,不进 PS 键)。
 		// 4 = Slang-T3:内核换成 slangc(双目标 SPIR-V + `-reflection-json` + 组合采样器模板)。
-		constexpr uint32_t kSurfaceCacheVersion = 4;
+		// 5 = Slang-B1:生成的中间源码改名(`surface_user.hlsl` → `surface_user.slang`、
+		//     `surface_wrapper.hlsl` / `vs_wrapper.hlsl` → `.slang`)—— 包装源码里的
+		//     `#include` 名随之变化,键本来就含包装源码,升版让旧缓存目录自然作废。
+		constexpr uint32_t kSurfaceCacheVersion = 5;
 		constexpr const char* kSurfaceEntryPoint = "PSMain";
-		constexpr const char* kUserSourceFileName = "surface_user.hlsl";
+		// 生成的中间用户源文件名:诊断里的 `File` 就是它,所以跟资产层同一口径用 `.slang`
+		// (用户在编辑器里看到的是自己的 `.slang`/legacy `.hlsl`;这里只是编译脚手架)。
+		constexpr const char* kUserSourceFileName = "surface_user.slang";
 		constexpr const char* kReflectionFileName = "surface.reflection.json";
 
 		// M4-S3(D5):表面模板自带的三个顶点入口。它们的输出(4 个插值量)与引擎
-		// Renderer3D_Solid.hlsl 的不兼容,所以表面管线必须用模板自己的 VS。
+		// Renderer3D_Solid.slang 的不兼容,所以表面管线必须用模板自己的 VS。
 		struct SurfaceVertexEntry
 		{
 			const char* EntryPoint;
@@ -612,7 +617,7 @@ struct SurfaceVSOutput
 // 参数会被顺移到 6..11:管线按 C++ 顶点布局声明 0..8,于是 Vulkan 报
 // VUID-VkGraphicsPipelineCreateInfo-Input-07904(缺 Location 9/11),per-instance 矩阵
 // 还会读到错位槽位(6/7/8 = Row3/Color/EntityId 被当成 Row0/Row1/Row2)。
-// 引擎着色器 Renderer3D_Solid.hlsl 的 VS_INSTANCED_INPUT 是同一写法(实测有效)。
+// 引擎着色器 Renderer3D_Solid.slang 的 VS_INSTANCED_INPUT 是同一写法(实测有效)。
 struct SurfaceInstancedInput
 {
     [[vk::location(0)]] float3 Position : POSITION;
@@ -966,9 +971,9 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 				return false;
 			}
 
-			const fs::path wrapperPath = keyDir / "vs_wrapper.hlsl";
+			const fs::path wrapperPath = keyDir / "vs_wrapper.slang";
 			const fs::path logPath = keyDir / "vs_compile.log";
-			// 包装源码用 `#include "surface_user.hlsl"` 引用用户源;VS 这一份固定写
+			// 包装源码用 `#include "surface_user.slang"` 引用用户源;VS 这一份固定写
 			// 引擎默认表面函数(VS 不调用 Evaluate())—— 键里因此不含用户源。
 			const fs::path userPath = keyDir / kUserSourceFileName;
 			if (!WriteAllText(userPath, MaterialSurfaceCompiler::DefaultSurfaceFunctionSource())
@@ -1354,7 +1359,7 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			}
 
 			const fs::path userPath = keyDir / kUserSourceFileName;
-			const fs::path wrapperPath = keyDir / "surface_wrapper.hlsl";
+			const fs::path wrapperPath = keyDir / "surface_wrapper.slang";
 			const fs::path logPath = keyDir / "surface_compile.log";
 			if (!WriteAllText(userPath, effectiveSource) || !WriteAllText(wrapperPath, wrapperSource))
 			{

@@ -170,9 +170,9 @@ namespace World::Wui
 		Rhi::ShaderDesc shaderDesc;
 		shaderDesc.DebugName = "WUI";
 		shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(
-			Rhi::ShaderStage::Vertex, "assets/shaders/Wui_Ui.hlsl", "VSMain", "vs_6_0"));
+			Rhi::ShaderStage::Vertex, "assets/shaders/Wui_Ui.slang", "VSMain", "vs_6_0"));
 		shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(
-			Rhi::ShaderStage::Fragment, "assets/shaders/Wui_Ui.hlsl", "PSMain", "ps_6_0"));
+			Rhi::ShaderStage::Fragment, "assets/shaders/Wui_Ui.slang", "PSMain", "ps_6_0"));
 		m_Shader = device->CreateShader(shaderDesc);
 
 		Rhi::DescriptorSetLayoutDesc textureLayoutDesc;

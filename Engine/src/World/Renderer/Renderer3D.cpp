@@ -62,10 +62,10 @@ namespace World
 			// 标量+短向量在 HLSL 与 std140 下偏移不一致)。
 			glm::ivec4 EntityId { -1, 0, 0, 0 };
 		};
-		static_assert(sizeof(ObjectUniforms) == 144, "ObjectUniforms must match Renderer3D_Solid.hlsl");
+		static_assert(sizeof(ObjectUniforms) == 144, "ObjectUniforms must match Renderer3D_Solid.slang");
 
 		// D5c-3b:骨骼调色板(set 1 binding 3,b0 = u_Model 之外的第二个 UBO)。
-		// 与 Renderer3D_Solid.hlsl / Renderer3D_Shadow.hlsl 的 `cbuffer BoneUniforms : register(b3, space1)`
+		// 与 Renderer3D_Solid.slang / Renderer3D_Shadow.slang 的 `cbuffer BoneUniforms : register(b3, space1)`
 		// 逐字段对应:float4x4 u_Bones[128],行主序上传(mat4 的 16 个 float 按列主序存放,
 		// 与 u_Model 同一条路径 —— 见 WriteObjectUniforms 的 SetData 与实例化 Row0..Row3 的对照)。
 		// 尺寸 = 128 × 64B = 8KB < UBO 上限(16KB)。
@@ -77,7 +77,7 @@ namespace World
 			"BoneUniforms must be MaxBonePalette × mat4 (8KB)");
 		static_assert(sizeof(BoneUniforms) == 8192, "u_Bones[128] must be 8192 bytes");
 
-		// D8b-2:实例数据(96B;与 Renderer3D_Solid.hlsl 的 VS_INSTANCE_INPUT 逐字段对应)。
+		// D8b-2:实例数据(96B;与 Renderer3D_Solid.slang 的 VS_INSTANCE_INPUT 逐字段对应)。
 		// 模型矩阵按**行**上传(HLSL 的 float4x4(a,b,c,d) 按行构造),避免列/行主序歧义。
 		// 实体 id 用 float 承载而不是整数属性:GL 后端建属性走 glVertexArrayAttribFormat
 		// (不是 I 版),整数属性会被当浮点读,拾取 id 直接烂掉。
@@ -498,7 +498,7 @@ namespace World
 			if (!FetchSurfacePipeline(key, variant, &pipeline))
 			{
 				WarnSurfaceFallbackOnce(key, variant,
-					"该变体的顶点阶段没有建出管线(改 .hlsl 时请保留 VSMain/VSMainInstanced/VSMainSkinned)");
+					"该变体的顶点阶段没有建出管线(改材质着色器源时请保留 VSMain/VSMainInstanced/VSMainSkinned)");
 				return draw;
 			}
 
@@ -1138,7 +1138,7 @@ namespace World
 
 		const MeshVertexLayout meshLayout = Mesh::MakeStandardLayout();
 		Rhi::PipelineDesc pipelineDesc;
-		pipelineDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Solid.hlsl", "Renderer3D-Solid");
+		pipelineDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Solid.slang", "Renderer3D-Solid");
 		pipelineDesc.RenderPass = state.RenderPass;
 		// set 0 = 全局相机(SceneRenderer 绑定),set 1 = 每对象数据,set 2 = 材质贴图。
 		pipelineDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), state.ObjectLayout, state.MaterialLayout };
@@ -1167,7 +1167,7 @@ namespace World
 		// 现有逐物体管线**不动**:预览/gizmo/透明物体继续走它。
 		{
 			Rhi::PipelineDesc instancedDesc = pipelineDesc;
-			instancedDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Solid.hlsl",
+			instancedDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Solid.slang",
 				"Renderer3D-Solid-Instanced", "VSMainInstanced");
 			const MeshVertexLayout instancedLayout = WithInstanceBinding(meshLayout);
 			instancedDesc.VertexBindings = instancedLayout.Bindings;
@@ -1268,7 +1268,7 @@ namespace World
 		state.ShadowFramebuffer = Renderer::GetDevice()->CreateFramebuffer(shadowFramebufferDesc);
 
 		Rhi::PipelineDesc shadowPipelineDesc = pipelineDesc;
-		shadowPipelineDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.hlsl", "Renderer3D-Shadow");
+		shadowPipelineDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.slang", "Renderer3D-Shadow");
 		shadowPipelineDesc.RenderPass = state.ShadowPass;
 		// P4-4b:阴影通道是单采样(`ShadowPass` 的两个附件都是 Count1),必须显式覆盖
 		// pipelineDesc.Samples(它现在跟随主通道的 MSAA);否则 Vulkan 的
@@ -1286,7 +1286,7 @@ namespace World
 		// D8b-2:实例化阴影管线(投影者按 (mesh,submesh) 合批,一次画 N 个)。
 		{
 			Rhi::PipelineDesc instancedShadowDesc = shadowPipelineDesc;
-			instancedShadowDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.hlsl",
+			instancedShadowDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.slang",
 				"Renderer3D-Shadow-Instanced", "VSMainInstanced");
 			const MeshVertexLayout instancedLayout = WithInstanceBinding(meshLayout);
 			instancedShadowDesc.VertexBindings = instancedLayout.Bindings;
@@ -1300,7 +1300,7 @@ namespace World
 		{
 			const MeshVertexLayout skinnedLayout = Mesh::MakeSkinnedLayout();
 			Rhi::PipelineDesc skinnedDesc = pipelineDesc;
-			skinnedDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Solid.hlsl",
+			skinnedDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Solid.slang",
 				"Renderer3D-Solid-Skinned", "VSMainSkinned");
 			skinnedDesc.VertexBindings = skinnedLayout.Bindings;
 			skinnedDesc.VertexAttributes = skinnedLayout.Attributes;
@@ -1308,7 +1308,7 @@ namespace World
 			state.SkinnedPipeline = Renderer::GetDevice()->CreatePipeline(skinnedDesc);
 
 			Rhi::PipelineDesc skinnedShadowDesc = shadowPipelineDesc;
-			skinnedShadowDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.hlsl",
+			skinnedShadowDesc.Shader = CreateSolidShader("assets/shaders/Renderer3D_Shadow.slang",
 				"Renderer3D-Shadow-Skinned", "VSMainSkinned");
 			skinnedShadowDesc.VertexBindings = skinnedLayout.Bindings;
 			skinnedShadowDesc.VertexAttributes = skinnedLayout.Attributes;

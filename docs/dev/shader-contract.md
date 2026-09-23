@@ -1,15 +1,18 @@
 # 材质着色器契约(Slang 严格子集)
 
-> 谁在读:写 `.hlsl` 材质着色器的人 / AI 生成代码 / 迁移旧资产的人。
+> 谁在读:写 `.slang` 材质着色器的人 / AI 生成代码 / 迁移旧资产的人。
 > 工具链:Slang 是**唯一**着色器编译器(ADR `0003-slang-first-gl-spirv`);
-> `.hlsl` → SPIR-V → { Vulkan, OpenGL 4.6 + `GL_ARB_gl_spirv` },每个后端一份 permutation。
+> `.slang`(Slang 源;**HLSL 语法是它的子集**)→ SPIR-V → { Vulkan, OpenGL 4.6 + `GL_ARB_gl_spirv` },
+> 每个后端一份 permutation。`*.hlsl` 是**legacy**:导入/编译/烘焙都照旧认它,但新写路径
+> (内容浏览器向导、迁移脚本)一律产出 `.slang`。
 > **用户面是破坏性的**:HLSL 隐式转换从 warning 变 error;`Texture2D + SamplerState` 要改成组合采样器。
 > 相关决策与证据:`tools/agents/tasks/20260923-1700-slang-refactor/plan.md`(v3.1 §12/§13)、
 > `tools/agents/reports/Slang-T1-gl-spirv.md`、`Slang-T3-kernel.md`。
 
 ## 1. 一个材质着色器长什么样
 
-新建 `.hlsl` 时照这个骨架写(改注解与 `Evaluate()` 里的赋值即可):
+新建 `.slang` 时照这个骨架写(改注解与 `Evaluate()` 里的赋值即可;下面代码块的语法分类是 HLSL 家族,
+Slang 不需要任何语法改写):
 
 ```hlsl
 //! param Color Tint = 1, 1, 1, 1 group("Appearance") label("Tint")
@@ -37,7 +40,8 @@ Surface Evaluate(MaterialInputs input)
 ## 2. 表面函数契约
 
 函数签名固定:`Surface Evaluate(MaterialInputs input)`。字段表是唯一事实源,定义在
-`Engine/src/World/Renderer/MaterialSurfaceContract.hlsli`(X-macro;HLSL 与 C++ 共用)。
+`Engine/src/World/Renderer/MaterialSurfaceContract.hlsli`(X-macro;**共享头片段**,Slang 与 C++ 共用;
+扩展名保持 `.hlsli` —— 它不是一个可独立编译的源文件,引擎把它作为文本内嵌进生成的包装源码)。
 
 | `MaterialInputs` | 类型 | 语义 |
 | --- | --- | --- |
@@ -150,7 +154,8 @@ GL 口径:描述符绑定单元 = `binding`(**忽略 set**),所以 UBO 单元占
 | `cbuffer X : register(b2)` | `[[vk::binding(2, 0)]] cbuffer X` |
 | `float3 r = color4;` | `float3 r = color4.xyz;` |
 
-机械迁移脚本(默认 dry-run;幂等,第二次跑 0 处自动改动):
+机械迁移脚本(默认 dry-run;幂等,第二次跑 0 处自动改动)。它处理的是 **legacy `.hlsl` 源**:
+先按方言规则把内容修到 Slang 严格子集,再由扩展名步骤改名为 `.slang`:
 
 ```powershell
 python tools/agents/scratch/migrate-hlsl-to-slang.py            # 扫全仓 .hlsl,只报告
@@ -160,7 +165,8 @@ python tools/agents/scratch/migrate-hlsl-to-slang.py --apply    # 写盘
 自动改:组合采样器属性删除、`Sample(sampler, …)` 去首参、`float3 v = float4变量` 补 `.xyz`。
 只报告(必须人工):`Texture2D`/`SamplerState` 声明对合并、`register(...)` 换显式 binding、
 `return`/`+=` 截断、`double` 窄化 —— 这些要么需要槽位判断,要么需要人确认语义。
-脚本只处理 `.hlsl`;`.hlsli` 与 C++ 里的内嵌源码不在范围内。改完记得重编:缓存键含源码与注解哈希,
+脚本只处理 `.hlsl`(legacy;`.wmat` 里的旧 `Shader:` 引用两种扩展名都能读,迁移脚本负责改写);
+`.hlsli` 共享片段与 C++ 里的内嵌源码不在范围内。改完记得重编:缓存键含源码与注解哈希,
 不会串用旧产物。
 
 ## 9. 边界与未验证

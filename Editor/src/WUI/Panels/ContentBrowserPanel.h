@@ -79,11 +79,12 @@ namespace World
 		bool SizeKnown = false;
 		std::string Name;      // 文件名(不含目录)
 		std::string Type;      // EditorAssetTypes 的类型名(Folder / Scene / Material / …)
-		// M4-S2:类型枚举(切片绘制按它区分渲染:`.hlsl` 的图标染色与类型徽标)。
+		// M4-S2/Slang-B1:类型枚举(切片绘制按它区分渲染:着色器的图标染色与类型徽标;
+		// `.hlsl` 是 legacy,徽标/类型名带 (legacy) 提示)。
 		EditorAssetKind Kind = EditorAssetKind::Unknown;
 		// P4-U10:本地化后的类型文案(切片展示用);glTF/GLB 明确标成"导入源"。
 		std::string TypeLabel;
-		std::string Extension; // 小写扩展名(含点);文件夹为空
+		std::string Extension; // 小写扩展名(含点);文件夹为空。着色器:.slang(主)/ .hlsl(legacy)
 	};
 
 	class ContentBrowserPanel final : public EditorPanel
@@ -116,10 +117,12 @@ namespace World
 		// Extract from Selection:以选中实体 MeshRenderer 的当前材质为初值走同一个向导
 		// (默认名 <实体名>_material),创建后把新材质**赋回该实体**并打开编辑器。
 		bool OpenNewMaterialFromSelection(std::string* message = nullptr);
-		// ---- M4-S2:`.hlsl`(Material Shader)新建向导 ----
+		// ---- M4-S2/Slang-B1:Material Shader(`.slang`)新建向导 ----
 		// 与"新建材质"同一套 U13d 交互(名称 + 目录 + 实时落点 + 覆盖警告),内容更简单:
-		// 模板 = 起始代码(引擎默认表面函数 / 默认表面函数 + 注解参数示例)。
+		// 模板 = 起始代码(引擎默认表面函数 / 默认表面函数 + 注解参数示例),两条模板都带
+		// 契约注释头(严格类型 / 组合采样器 / 显式 binding + 文档与迁移脚本指针)。
 		// 入口 = `New ▶ Material Shader…`(资产类型注册表)+ 本函数(宿主/菜单可直接调)。
+		// 产物固定 `.slang`;`.hlsl` 只作为 legacy 被读取。
 		bool OpenNewShaderWizard(std::string* message = nullptr);
 
 	private:
@@ -165,12 +168,14 @@ namespace World
 		std::string NewMaterialBaseName() const;
 		std::string NewMaterialTarget() const;
 		std::string NewMaterialNameError() const;
-		// ---- M4-S2:`.hlsl` 新建向导(与材质向导同一套模态骨架)----
+		// ---- M4-S2/Slang-B1:`.slang` 新建向导(与材质向导同一套模态骨架)----
 		void OpenNewShaderModal(Wui::WuiContext& ctx);
 		void CloseNewShaderModal(Wui::WuiContext& ctx);
 		void DrawNewShaderModal(Wui::WuiContext& ctx);
 		std::string NewShaderTarget() const;
 		std::string NewShaderNameError() const;
+		// Slang-B1:新建文件的契约注释头(三条硬规则 + docs/dev/shader-contract.md 与迁移脚本指针)。
+		static std::string ShaderContractHeader();
 		// 起始代码:0 = 引擎默认表面函数(经 M4-S1 的 MaterialSurfaceCompiler 取,不抄一份);
 		// 1 = 同一份 + 一段注解参数示例(教用户怎么写 `//! param …`)。
 		static std::string ShaderTemplateSource(int templateIndex);
@@ -237,7 +242,7 @@ namespace World
 		bool m_NewMaterialPendingFromSelection = false;
 		std::filesystem::path m_NewMaterialPendingDir;
 		void OpenNewMaterialModal(Wui::WuiContext& ctx, bool fromSelection);
-		// ---- M4-S2:`.hlsl` 新建向导状态 ----
+		// ---- M4-S2/Slang-B1:`.slang` 新建向导状态 ----
 		bool m_NewShaderOpen = false;
 		uint32_t m_NewShaderOpenedFrame = 0;
 		std::string m_NewShaderName;

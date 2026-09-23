@@ -201,11 +201,13 @@ int main()
 		{
 			const std::vector<std::shared_ptr<IAssetImporter>> importers = DefaultImporters();
 			// D5b-1:Model 导入器(.gltf/.glb)注册在 Script 之后、PassThrough 之前。
-			// M4-S2:MaterialShader 导入器(.hlsl)注册在 Model 之后、PassThrough 之前。
+			// M4-S2/Slang-B1:MaterialShader 导入器(规范扩展名 `.slang`;legacy `.hlsl` 同列)
+			// 注册在 Model 之后、PassThrough 之前。
 			CHECK(importers.size() == 5);
 			CHECK(importers[0]->Name() == "Scene" && importers[0]->Version() == 1);
 			CHECK(importers[2]->Name() == "Model" && importers[2]->Version() == 1);
-			CHECK(importers[3]->Name() == "MaterialShader" && importers[3]->Version() == 1);
+			// Slang-B1:升 v2 —— 扩展名口径变化,cook 复合指纹含导入器版本 → 旧 cook.db 整体重烘。
+			CHECK(importers[3]->Name() == "MaterialShader" && importers[3]->Version() == 2);
 			CHECK(importers[4]->Name() == "PassThrough");
 			const std::shared_ptr<IAssetImporter> script = FindImporter(importers, "Script");
 			CHECK(script != nullptr);
@@ -327,19 +329,21 @@ int main()
 			std::printf("[W7-2] (5) cook gate: 1/1 failed, no artifact written\n");
 		}
 
-		// 5b. M4-S2:`.hlsl`(MaterialShader)是一等资产 —— 原样复制;cook 指纹 = 源内容哈希,
-		//     改代码/注解自动重烘,没改则跳过。
+		// 5b. M4-S2/Slang-B1:材质着色器(MaterialShader)是一等资产 —— 原样复制;
+		//     cook 指纹 = 源内容哈希 ⊕ 导入器名/版本,改代码/注解或升版就重烘,没改则跳过。
+		//     规范扩展名 = `.slang`(新写路径);legacy `.hlsl` 仍可导入/烘焙(见 5c)。
 		{
 			const std::shared_ptr<IAssetImporter> shader = FindImporter(DefaultImporters(), "MaterialShader");
 			CHECK(shader != nullptr);
-			CHECK(shader->Version() == 1);
-			CHECK(shader->Matches("shaders/Glow.hlsl"));
+			CHECK(shader->Version() == 2);
+			CHECK(shader->Matches("shaders/Glow.slang"));   // 规范扩展名(向导/迁移写出的那一种)
+			CHECK(shader->Matches("shaders/Glow.hlsl"));    // legacy:仍被接受(只读兼容)
 			CHECK(!shader->Matches("materials/glass.wmat"));
 			CHECK(!shader->Matches("scenes/a.wd"));
 			CHECK(!shader->Matches("textures/x.png"));
 
 			const std::filesystem::path content = temp.path / "shader-content";
-			const std::filesystem::path source = content / "shaders" / "Glow.hlsl";
+			const std::filesystem::path source = content / "shaders" / "Glow.slang";
 			const std::string firstSource =
 				"//! param Float Roughness = 0.25 [0,1]\n"
 				"Surface Evaluate(MaterialInputs input)\n"
@@ -354,7 +358,7 @@ int main()
 			ProjectManifest manifest;
 			manifest.Id = "com.test.shaders";
 			manifest.ContentRoot = "shader-content";
-			manifest.StartScene = "shaders/Glow.hlsl";
+			manifest.StartScene = "shaders/Glow.slang";
 			manifest.Packages = { "packages/Base.wpak" };
 			const std::filesystem::path manifestPath = temp.path / "shaders.we.yaml";
 			CHECK(ProjectManifest::Save(manifestPath, manifest, &error));
@@ -364,7 +368,7 @@ int main()
 			CookSummary summary;
 			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
 			CHECK(summary.Total == 1 && summary.Changed == 1 && summary.Failed == 0);
-			const std::filesystem::path artifact = outputDir / "cooked" / "shaders" / "Glow.hlsl";
+			const std::filesystem::path artifact = outputDir / "cooked" / "shaders" / "Glow.slang";
 			CHECK(ReadText(artifact) == firstSource);   // 原样复制(注解也在产物里)
 
 			// 未改 → skip;改注解/代码 → 重烘(指纹 = 源内容哈希)。
@@ -382,7 +386,59 @@ int main()
 			pipeline.Cook(manifest, manifestPath, outputDir, false, &summary);
 			CHECK(summary.Changed == 1 && summary.Skipped == 0 && summary.Failed == 0);
 			CHECK(ReadText(artifact) == secondSource);
-			std::printf("[M4-S2] (5b) .hlsl cook: 1 changed -> 1 skipped -> 1 changed (content hash)\n");
+			std::printf("[Slang-B1] (5b) .slang cook: 1 changed -> 1 skipped -> 1 changed (content hash)\n");
+		}
+
+		// 5c. Slang-B1:legacy `.hlsl` 仍然能被**导入 + 烘焙**(既有项目不破),
+		//     并带可读迁移提示;新写路径产出 `.slang`(证据 = 5b 的 Glow.slang 全链路)。
+		{
+			const std::shared_ptr<IAssetImporter> shader = FindImporter(DefaultImporters(), "MaterialShader");
+			CHECK(shader != nullptr);
+
+			const std::filesystem::path legacyContent = temp.path / "legacy-shader-content";
+			const std::filesystem::path legacySource = legacyContent / "shaders" / "Legacy.hlsl";
+			const std::string legacyText =
+				"//! param Float Roughness = 0.25 [0,1]\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    Surface surface = MakeDefaultSurface();\n"
+				"    surface.Roughness = Roughness;\n"
+				"    return surface;\n"
+				"}\n";
+			WriteBytes(legacySource, legacyText);
+
+			ImportRequest request;
+			request.LogicalPath = "shaders/Legacy.hlsl";
+			request.Source = legacySource;
+			std::error_code legacyEc;
+			const ImportResult imported = shader->Import(request, legacyEc);
+			CHECK(imported.Ok);
+			CHECK(!legacyEc);
+			CHECK(imported.Data.size() == legacyText.size());   // 原样复制,legacy 不改写内容
+			CHECK(imported.Warnings.size() == 1);               // 可读迁移提示(结构化字段)
+			CHECK(Contains(imported.Warnings[0], "legacy"));
+			CHECK(Contains(imported.Warnings[0], ".slang"));    // 提示指向新扩展名
+			CHECK(Contains(imported.Warnings[0], "migrate-hlsl-to-slang.py"));
+
+			std::string error;
+			ProjectManifest legacyManifest;
+			legacyManifest.Id = "com.test.legacy.shaders";
+			legacyManifest.ContentRoot = "legacy-shader-content";
+			legacyManifest.StartScene = "shaders/Legacy.hlsl";
+			legacyManifest.Packages = { "packages/Base.wpak" };
+			const std::filesystem::path legacyManifestPath = temp.path / "legacy-shaders.we.yaml";
+			CHECK(ProjectManifest::Save(legacyManifestPath, legacyManifest, &error));
+			const std::filesystem::path legacyOutputDir = temp.path / "legacy-shader-cooked";
+
+			CookPipeline legacyPipeline(DefaultImporters());
+			CookSummary legacySummary;
+			legacyPipeline.Cook(legacyManifest, legacyManifestPath, legacyOutputDir, false, &legacySummary);
+			CHECK(legacySummary.Total == 1 && legacySummary.Changed == 1 && legacySummary.Failed == 0);
+			const std::filesystem::path legacyArtifact =
+				legacyOutputDir / "cooked" / "shaders" / "Legacy.hlsl";
+			CHECK(ReadText(legacyArtifact) == legacyText);   // 逻辑路径与字节都不变
+			std::printf("[Slang-B1] (5c) legacy .hlsl: imported + cooked unchanged, "
+				"with a migration hint -> %s\n", imported.Warnings[0].c_str());
 		}
 
 		std::printf("World.Asset: all checks passed\n");
