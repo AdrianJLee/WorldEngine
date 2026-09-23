@@ -19,6 +19,10 @@ namespace World
 		inline EditorAssetKind KindForName(const std::string& assetType)
 		{
 			if (assetType == "Material") return EditorAssetKind::Material;
+			// M4-S2:`.hlsl` 表面函数(Material Shader)—— 与 `.wmat` 实例分开的资产类型,
+			// 供"Shader"字段/参数表按名字取路径列表时使用。
+			if (assetType == "Shader" || assetType == "MaterialShader" || assetType == "Material Shader")
+				return EditorAssetKind::Shader;
 			// P4-U10:Model = **引擎原生** .wmodel(场景/字段只引用它);glTF/GLB 是导入源,
 			// 单独一个 kind —— 网格选取里绝不该出现 .gltf(用户 2026-09-21 报的歧义)。
 			if (assetType == "Model") return EditorAssetKind::Model;
@@ -35,6 +39,7 @@ namespace World
 			switch (kind)
 			{
 				case EditorAssetKind::Material: return LowerExtension(path) == ".wmat";
+				case EditorAssetKind::Shader: return LowerExtension(path) == ".hlsl";
 				// 原生模型资产 = .wmodel(导入产物)。.gltf/.glb 属于 ModelSource,不在"可引用资产"里。
 				case EditorAssetKind::Model: return LowerExtension(path) == ".wmodel";
 				case EditorAssetKind::ModelSource:

@@ -16,6 +16,8 @@
 #include "World/Renderer/Texture.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
+// M4-S2:`.hlsl` 起始代码取自内核的 MaterialSurfaceCompiler(不在这里再抄一份表面函数骨架)。
+#include "World/Renderer/MaterialSurface.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/SceneSerializer.h"
 
@@ -126,6 +128,15 @@ namespace World
 		constexpr float kListSizeColumnWidth = 96.0f;  // 大小列基准宽
 		constexpr float kListColumnShare = 0.24f;      // 窄面板时列宽占面板宽的上限
 
+		// ---- M4-S2:`.hlsl`(Material Shader)在切片里的**独立标识** ----
+		// 引擎的通用文件图标只有"文件/目录"两枚,而 `.hlsl` 是"写表面函数的材质资产"、
+		// 与 `.wmat` 实例同级 —— 它必须在网格里一眼可辨(用户口径:独立图标/标签)。
+		// 做法:图标整体染成"代码蓝",右上角挂一枚类型徽标(与 prefab 徽标同一套画法,
+		// 但用这一组颜色区分开)。不新增二进制图标资源(编辑器 scope 内只有 src/** 与文案)。
+		constexpr Wui::WuiColor kShaderIconTint { 0.62f, 0.80f, 1.00f, 1.00f };
+		constexpr Wui::WuiColor kShaderBadgeFill { 0.20f, 0.42f, 0.78f, 1.00f };
+		constexpr Wui::WuiColor kShaderBadgeText { 0.93f, 0.96f, 1.00f, 1.00f };
+
 		Wui::WuiColor MixColor(const Wui::WuiColor& from, const Wui::WuiColor& to, float amount)
 		{
 			return { from.R + (to.R - from.R) * amount, from.G + (to.G - from.G) * amount,
@@ -219,6 +230,21 @@ namespace World
 			}
 			return name;
 		}
+		// M4-S2:`.hlsl` 版本的同一件小事 —— 用户把后缀也敲进名称框时不产生 "x.hlsl.hlsl"。
+		std::string ShaderBaseName(const std::string& raw)
+		{
+			std::string name = SanitizeAssetName(raw);
+			constexpr size_t kSuffixLength = 5;   // ".hlsl"
+			if (name.size() > kSuffixLength)
+			{
+				std::string tail = name.substr(name.size() - kSuffixLength);
+				std::transform(tail.begin(), tail.end(), tail.begin(),
+					[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+				if (tail == ".hlsl")
+					name = name.substr(0, name.size() - kSuffixLength);
+			}
+			return name;
+		}
 
 		// U25-M2:新建材质向导的模板表(唯一落点)。
 		// 模板只映射**现有字段** —— 真正的着色模型(Unlit / Additive 混合)是 M3 的内核工作,
@@ -248,6 +274,27 @@ namespace World
 		};
 		constexpr int kNewMaterialTemplateCount =
 			static_cast<int>(sizeof(kNewMaterialTemplates) / sizeof(kNewMaterialTemplates[0]));
+
+		// M4-S2:`.hlsl` 的起始代码模板(两种)——模板内容是**代码**,不是参数预设。
+		struct NewShaderTemplate
+		{
+			const char* LabelKey;
+			const char* LabelEn;
+			const char* DocKey;
+			const char* DocEn;
+		};
+		const NewShaderTemplate kNewShaderTemplates[] = {
+			{ "panel.content_browser.new_shader.tpl.surface", "Standard surface",
+				"panel.content_browser.new_shader.tpl.surface.doc",
+				"Compilable starting code: Surface Evaluate(MaterialInputs input) with every field "
+				"already defaulted by the engine." },
+			{ "panel.content_browser.new_shader.tpl.params", "Surface + annotated parameters",
+				"panel.content_browser.new_shader.tpl.params.doc",
+				"Same starting code plus a block of `//! param` declarations that show every type "
+				"(float / colour / texture / bool / int) and how ranges, groups and labels are written." },
+		};
+		constexpr int kNewShaderTemplateCount =
+			static_cast<int>(sizeof(kNewShaderTemplates) / sizeof(kNewShaderTemplates[0]));
 
 		// 两行折行(说明文案长于一行时按空白切一刀,第二行超出部分省略)。
 		std::pair<std::string, std::string> WrapTwoLines(const Wui::WuiContext& ctx,
@@ -599,6 +646,15 @@ namespace World
 			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
 			m_Host.OpenMaterialEditor(ec ? path.generic_string() : relative.generic_string());
 		}
+		else if (path.extension() == ".hlsl")
+		{
+			// M4-S2:`.hlsl`(Material Shader)双击 → **同一个材质编辑器的代码形态**
+			// (左预览 / 中代码 / 右参数);面板按扩展名决定形态,宿主入口与 .wmat 相同。
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			m_Host.OpenMaterialEditor(ec ? path.generic_string() : relative.generic_string());
+		}
 		else if (path.extension() == ".lua" || path.extension() == ".luau")
 		{
 			// W9-2:脚本双击 → 内置脚本编辑器(与双击材质同一条路:逻辑路径相对 Game/assets,
@@ -842,6 +898,16 @@ namespace World
 				m_NewMaterialPendingFromSelection = false;
 				return true;
 			});
+		// M4-S2:Material Shader(`.hlsl`)—— 与材质同一套"先向导后创建":名称/目录/实时落点
+		// 全部在确认前可见,确认后写出起始代码并在材质编辑器的**代码形态**里打开。
+		add("shader", "Material Shader", ".hlsl", 15, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				(void)error;
+				m_NewShaderPendingDir = dir;
+				m_NewShaderPendingOpen = true;
+				return true;
+			});
 		// Scene:只创建 + 选中,**不自动打开** —— 打开会直接替换当前文档
 		// (EditorLayer::DoOpenScene 不拦未保存改动),"新建资产"不该顺带丢掉用户正在编辑的场景。
 		add("scene", "Scene", ".wd", 20, false,
@@ -873,7 +939,7 @@ namespace World
 		m_AssetTypesRegistered = false;
 		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
 		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
-		for (const char* id : { "folder", "material", "scene", "script" })
+		for (const char* id : { "folder", "material", "shader", "scene", "script" })
 			registry.Unregister(id);
 	}
 
@@ -1288,7 +1354,23 @@ namespace World
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Image,
 					{ cell.X + cell.W * 0.5f - iconSize * 0.5f,
 					  cell.Y + gap - (iconSize - kSliceIconSize) * 0.5f, iconSize, iconSize },
-					Wui::WuiColor { 1, 1, 1, 1 }, 0.0f, 1.0f, "", nameSize, false, icon, { 0, 1, 1, -1 } });
+					slice.Kind == EditorAssetKind::Shader
+						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 },
+					0.0f, 1.0f, "", nameSize, false, icon, { 0, 1, 1, -1 } });
+
+			// M4-S2:`.hlsl` 的常驻类型徽标(与 prefab 徽标同一套画法)。
+			if (slice.Kind == EditorAssetKind::Shader)
+			{
+				const Wui::LocalizedLabel badge = Wui::TrLabel("asset.file.shader", "Material Shader");
+				const float badgeSize = infoSize;
+				const float badgeW = ctx.MeasureTextWidth(badge.Text, badgeSize) + theme.PadSmall * 2.0f;
+				const float badgeH = badgeSize + 4.0f;
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+					{ cell.X + gap, cell.Y + gap, badgeW, badgeH }, kShaderBadgeFill, badgeH * 0.5f });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ cell.X + gap + theme.PadSmall, cell.Y + gap + 2.0f, 0.0f, 0.0f },
+					kShaderBadgeText, 0.0f, 1.0f, badge.Text, badgeSize, true });
+			}
 
 			// P4-U13:prefab 是"可复用实体子树",不是普通文件 —— 给一枚常驻小标签,
 			// 让它在网格里一眼可辨(文件图标/名称都看不出它是资产还是随便一个文件)。
@@ -1325,8 +1407,9 @@ namespace World
 			const std::string info = slice.IsDir
 				? Wui::Tr("panel.content_browser.slice.folder", "Folder")
 				// glTF/GLB 用"导入源"而不是裸扩展名:它们在网格视图里必须一眼看出不是可引用资产。
-				// prefab 同理:显示类型名而不是 ".wprefab"。
-				: ((slice.Extension == ".gltf" || slice.Extension == ".glb" || slice.Extension == ".wprefab")
+				// prefab / `.hlsl` 同理:显示类型名而不是 ".wprefab" / ".hlsl"。
+				: ((slice.Extension == ".gltf" || slice.Extension == ".glb" || slice.Extension == ".wprefab"
+						|| slice.Extension == ".hlsl")
 					? slice.TypeLabel
 					: (slice.Extension.empty() ? slice.TypeLabel : slice.Extension)) + " · "
 					+ FormatBytes(static_cast<size_t>(bytes));
@@ -1412,7 +1495,10 @@ namespace World
 			if (icon != 0)
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Image,
 					{ row.X + theme.PadSmall, row.Y + (row.H - kListIconSize) * 0.5f, kListIconSize, kListIconSize },
-					Wui::WuiColor { 1, 1, 1, 1 }, 0.0f, 1.0f, "", smallSize, false, icon, { 0, 1, 1, -1 } });
+					// M4-S2:与网格同一枚"代码蓝"染色,列表里也能一眼分辨 `.hlsl`。
+					slice.Kind == EditorAssetKind::Shader
+						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 },
+					0.0f, 1.0f, "", smallSize, false, icon, { 0, 1, 1, -1 } });
 
 			const float nameX = row.X + theme.PadSmall * 2.0f + kListIconSize;
 			const float nameBudget = std::max(0.0f, nameW - (nameX - row.X) - theme.PadSmall);
@@ -1990,6 +2076,390 @@ namespace World
 			CloseNewMaterialModal(ctx);
 	}
 
+	// ==== M4-S2:`.hlsl`(Material Shader)新建向导 ====
+	// 与"新建材质"同一套 U13d 交互与同一套模态骨架(名称 + 目录 + 实时落点 + 覆盖警告 + Enter/Esc);
+	// 差别只有两点:扩展名是 `.hlsl`、内容是一份**可编译的起始代码**(不是字段预设)。
+	bool ContentBrowserPanel::OpenNewShaderWizard(std::string* message)
+	{
+		m_NewShaderPendingOpen = true;
+		if (message)
+			*message = "new material shader wizard queued";
+		return true;
+	}
+
+	std::string ContentBrowserPanel::ShaderTemplateSource(int templateIndex)
+	{
+		// 起始代码来自内核(M4-S1 的 MaterialSurfaceCompiler):契约字段有默认值,空改动也能编译。
+		// 引擎不在这里留副本 —— 内核改骨架,新建的文件跟着变。
+		std::string source = MaterialSurfaceCompiler::DefaultSurfaceFunctionSource();
+		if (templateIndex <= 0)
+			return source;
+		std::string header;
+		header += "// Material parameters are declared in the file itself; the editor reads these\n";
+		header += "// annotations to build the parameter panel (values default from the shader).\n";
+		header += "// Syntax: //! param <type> <name> = <default> [min,max] unit(\"x\") group(\"G\") label(\"L\")\n";
+		header += "// Types (case sensitive): Float Vec2 Vec3 Vec4 Color Int Bool Texture2D.\n";
+		header += "// [min,max] only applies to Float / Int; values use the material value dialect\n";
+		header += "// (0.25 / 1, 0.5 / true / textures/icon.png).\n";
+		header += "\n";
+		header += "//! param Float     roughness   = 0.35 [0.02,1] group(\"Surface\") label(\"Roughness\")\n";
+		header += "//! param Color     baseColor   = 0.85, 0.72, 0.55, 1 group(\"Surface\") label(\"Base Colour\")\n";
+		header += "//! param Texture2D albedo      = \"\" group(\"Maps\") label(\"Albedo\")\n";
+		header += "//! param Bool      doubleSided = false group(\"Geometry\") label(\"Double Sided\")\n";
+		header += "//! param Int       uvChannel   = 0 [0,3] group(\"Maps\") label(\"UV Channel\")\n";
+		header += "\n";
+		return header + source;
+	}
+
+	std::string ContentBrowserPanel::NewShaderTarget() const
+	{
+		const std::string name = ShaderBaseName(m_NewShaderName);
+		std::string folder;
+		if (m_NewShaderFolderIndex >= 0
+			&& m_NewShaderFolderIndex < static_cast<int>(m_NewShaderFolders.size()))
+			folder = m_NewShaderFolders[static_cast<size_t>(m_NewShaderFolderIndex)];
+		std::string target = folder.empty() ? std::string() : (folder + "/");
+		target += name.empty() ? std::string("(name)") : name;
+		target += ".hlsl";
+		return target;
+	}
+
+	std::string ContentBrowserPanel::NewShaderNameError() const
+	{
+		// 与材质向导同一套命名规则(非法字符 / 空名 / 结尾点或空格)。
+		const std::string name = ShaderBaseName(m_NewShaderName);
+		if (name.empty())
+			return Wui::Tr("panel.content_browser.new_shader.name.empty", "Name cannot be empty");
+		if (name == "." || name == "..")
+			return Wui::Tr("panel.content_browser.new_shader.name.dot", "Name cannot be '.' or '..'");
+		for (const char character : name)
+			if (character == '\\' || character == '/' || character == ':' || character == '*'
+				|| character == '?' || character == '"' || character == '<' || character == '>'
+				|| character == '|')
+				return Wui::Tr("panel.content_browser.new_shader.name.illegal",
+					"Name cannot contain \\ / : * ? \" < > |");
+		if (name.back() == '.' || name.back() == ' ')
+			return Wui::Tr("panel.content_browser.new_shader.name.trailing",
+				"Name cannot end with a dot or a space");
+		return {};
+	}
+
+	void ContentBrowserPanel::OpenNewShaderModal(Wui::WuiContext& ctx)
+	{
+		m_NewShaderOpen = true;
+		m_NewShaderOpenedFrame = static_cast<uint32_t>(ctx.Frame());
+		m_NewShaderFailure.clear();
+		m_NewShaderFailureFor.clear();
+		m_NewShaderTemplate = 0;
+		m_NewShaderName = "material_shader";
+		// 默认落点 = 内容浏览器当前目录(相对内容根);根目录时退回 shaders/。
+		std::error_code relativeError;
+		const std::filesystem::path relative =
+			std::filesystem::relative(m_NewShaderPendingDir.empty() ? m_Model.Current
+				: m_NewShaderPendingDir, m_Model.Root, relativeError);
+		std::string defaultFolder = relativeError || relative.empty() || relative.generic_string() == "."
+			? std::string("shaders") : relative.generic_string();
+		m_NewShaderFolders = Editor::AssetCatalog::Dirs();
+		auto found = std::find(m_NewShaderFolders.begin(), m_NewShaderFolders.end(), defaultFolder);
+		if (found == m_NewShaderFolders.end())
+		{
+			m_NewShaderFolders.push_back(defaultFolder);
+			std::sort(m_NewShaderFolders.begin(), m_NewShaderFolders.end());
+			found = std::find(m_NewShaderFolders.begin(), m_NewShaderFolders.end(), defaultFolder);
+		}
+		m_NewShaderFolderIndex = found == m_NewShaderFolders.end()
+			? 0 : static_cast<int>(found - m_NewShaderFolders.begin());
+		ctx.SetModal(Wui::HashId("shader.new.modal"));
+		m_Host.SetPanelModalOwner(Id());
+		ctx.SetFocus(Wui::HashId("shader.new.name"));
+		ctx.RecordOp("browser", "new-shader-ask", m_NewShaderName, defaultFolder);
+	}
+
+	void ContentBrowserPanel::CloseNewShaderModal(Wui::WuiContext& ctx)
+	{
+		m_NewShaderOpen = false;
+		m_NewShaderFolders.clear();
+		m_NewShaderFailure.clear();
+		m_NewShaderFailureFor.clear();
+		if (ctx.Modal() == Wui::HashId("shader.new.modal"))
+			ctx.ClearModal();
+		ctx.ClosePopup(Wui::HashId("shader.new.folder"));
+		ctx.ClosePopup(Wui::HashId("shader.new.template"));
+		m_Host.SetPanelModalOwner(std::string());
+	}
+
+	void ContentBrowserPanel::DrawNewShaderModal(Wui::WuiContext& ctx)
+	{
+		if (!m_NewShaderOpen)
+			return;
+		const Wui::WuiId modalId = Wui::HashId("shader.new.modal");
+		const Wui::WuiTheme& theme = m_Host.Theme();
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("panel.content_browser.new_shader.title", "New Material Shader");
+		frameDesc.Size = { 620.0f, 390.0f };
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
+		{
+			CloseNewShaderModal(ctx);
+			return;
+		}
+		const float labelX = frame.X + 16.0f;
+		const float fieldX = frame.X + 130.0f;
+		const float fieldW = frame.W - 146.0f - 68.0f;
+		const Wui::WuiId templateId = Wui::HashId("shader.new.template");
+		const Wui::WuiId nameId = Wui::HashId("shader.new.name");
+		const Wui::WuiId folderId = Wui::HashId("shader.new.folder");
+		const bool templatePopupWasOpen = ctx.IsPopupOpen(templateId);
+		const bool folderPopupWasOpen = ctx.IsPopupOpen(folderId);
+		const bool justOpened = ctx.Frame() == m_NewShaderOpenedFrame;
+
+		// ---- 起始代码(模板)----
+		float cursorY = frame.Y + 46.0f;
+		const std::string templateLabel = Wui::Tr("panel.content_browser.new_shader.template", "Starting code");
+		Wui::Label(ctx, { labelX, cursorY + 5.0f }, templateLabel, theme.TextMuted, 13.0f);
+		std::vector<std::string> templateOptions;
+		for (const NewShaderTemplate& entry : kNewShaderTemplates)
+			templateOptions.push_back(Wui::Tr(entry.LabelKey, entry.LabelEn));
+		const Wui::WuiRect templateRect { fieldX, cursorY, fieldW, 24.0f };
+		Wui::Combo(ctx, templateId, templateRect, templateLabel, templateOptions, m_NewShaderTemplate, theme);
+		const int templateIndex = std::clamp(m_NewShaderTemplate, 0, kNewShaderTemplateCount - 1);
+		const std::string templateDoc = Wui::Tr(kNewShaderTemplates[templateIndex].DocKey,
+			kNewShaderTemplates[templateIndex].DocEn);
+		cursorY += 30.0f;
+		const std::pair<std::string, std::string> docLines =
+			WrapTwoLines(ctx, templateDoc, frame.W - 32.0f, 12.0f);
+		Wui::Label(ctx, { labelX, cursorY }, docLines.first, theme.TextMuted, 12.0f);
+		if (!docLines.second.empty())
+			Wui::Label(ctx, { labelX, cursorY + 15.0f }, docLines.second, theme.TextMuted, 12.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("shader.new.template.doc");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = templateLabel;
+			node.Value = templateDoc;
+			node.Tooltip = templateDoc;
+			node.Rect = { labelX, cursorY, frame.W - 32.0f, docLines.second.empty() ? 16.0f : 31.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		cursorY += docLines.second.empty() ? 24.0f : 39.0f;
+		// 与材质向导同一条留白约束:模板下拉的选项弹层从下方展开,点条目的 release 不能落到
+		// 正下方的控件上(下一帧的遮挡才生效),所以这里固定留出两行高度。
+		cursorY += 39.0f;
+
+		// ---- 名称(后缀固定 .hlsl)----
+		const std::string nameLabel = Wui::Tr("panel.content_browser.new_shader.name", "Name");
+		Wui::Label(ctx, { labelX, cursorY + 5.0f }, nameLabel, theme.TextMuted, 13.0f);
+		const Wui::WuiRect nameRect { fieldX, cursorY, fieldW, 24.0f };
+		const bool nameFocused = ctx.Focus() == nameId;
+		Wui::TextFieldA11y nameA11y;
+		nameA11y.Label = nameLabel;
+		nameA11y.Placeholder = Wui::Tr("panel.content_browser.new_shader.name.placeholder", "Shader name");
+		Wui::TextField(ctx, nameId, nameRect, m_NewShaderName, theme, nullptr, &nameA11y);
+		const bool nameSubmitted = nameFocused && ctx.IsKeyPressed(KeyCodes::Enter);
+		Wui::Label(ctx, { nameRect.X + nameRect.W + 8.0f, cursorY + 6.0f }, ".hlsl", theme.TextMuted, 13.0f);
+		const std::string nameError = NewShaderNameError();
+		if (!nameError.empty())
+			Wui::Label(ctx, { fieldX, cursorY + 27.0f }, nameError, theme.Danger, 12.0f);
+		cursorY += 46.0f;
+
+		// ---- 目录(内容根下的目录,可搜索)----
+		const std::string folderLabel = Wui::Tr("panel.content_browser.new_shader.folder", "Folder");
+		Wui::Label(ctx, { labelX, cursorY + 5.0f }, folderLabel, theme.TextMuted, 13.0f);
+		const Wui::WuiRect folderRect { fieldX, cursorY, fieldW, 24.0f };
+		Wui::SearchableCombo(ctx, folderId, folderRect, folderLabel, m_NewShaderFolders,
+			m_NewShaderFolderIndex, theme);
+		const std::string folderText = (m_NewShaderFolderIndex >= 0
+			&& m_NewShaderFolderIndex < static_cast<int>(m_NewShaderFolders.size()))
+			? m_NewShaderFolders[static_cast<size_t>(m_NewShaderFolderIndex)] : std::string();
+		{
+			Wui::WuiAccessNode node;
+			node.Id = folderId;
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "search-combo";
+			node.Label = folderLabel;
+			node.Value = folderText;
+			node.Tooltip = Wui::Tr("panel.content_browser.new_shader.folder.tooltip",
+				"Folder under the content root (searchable); a missing folder is created on confirm.");
+			node.Rect = folderRect;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		const std::filesystem::path folderAbsolute = m_Model.Root / std::filesystem::path(folderText);
+		if (!folderText.empty() && !std::filesystem::is_directory(folderAbsolute))
+			Wui::Label(ctx, { fieldX, cursorY + 27.0f },
+				Wui::Tr("panel.content_browser.new_shader.folder.note",
+					"Folder does not exist yet — it will be created"), theme.Warning, 12.0f);
+		cursorY += 46.0f;
+
+		// ---- 实时落点回显 + 覆盖警告 ----
+		const std::string target = NewShaderTarget();
+		if (!m_NewShaderFailure.empty() && m_NewShaderFailureFor != target)
+		{
+			m_NewShaderFailure.clear();
+			m_NewShaderFailureFor.clear();
+		}
+		const std::string previewLabel = Wui::Tr("panel.content_browser.new_shader.preview.label", "Will create");
+		Wui::Label(ctx, { labelX, cursorY + 3.0f }, previewLabel, theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { fieldX, cursorY + 1.0f }, target, theme.Text, 13.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("shader.new.preview");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = previewLabel;
+			node.Value = target;
+			node.Tooltip = Wui::Tr("panel.content_browser.new_shader.preview.tooltip",
+				"Logical path of the file that will be written (folder + name + .hlsl).");
+			node.Rect = { fieldX, cursorY - 3.0f, fieldW, 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		cursorY += 24.0f;
+		std::error_code existsError;
+		const bool targetExists = nameError.empty()
+			&& std::filesystem::exists(m_Model.Root / std::filesystem::path(target), existsError);
+		std::string warningText;
+		if (!m_NewShaderFailure.empty())
+			warningText = m_NewShaderFailure;
+		else if (targetExists)
+			warningText = Wui::Tr("panel.content_browser.new_shader.exists",
+				"Already exists — overwriting: ") + target;
+		if (!warningText.empty())
+			Wui::Label(ctx, { fieldX, cursorY }, warningText, theme.Danger, 12.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("shader.new.warning");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.content_browser.new_shader.warning.label", "Warning");
+			node.Value = warningText;
+			node.Tooltip = Wui::Tr("panel.content_browser.new_shader.warning.tooltip",
+				"Red line = the target exists and would be overwritten; empty = no conflict.");
+			node.Rect = { fieldX, cursorY - 4.0f, fieldW, 18.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
+		// ---- 底部按钮 ----
+		const float footerY = frame.Y + frame.H - Wui::ModalFooterPadding - Wui::ModalFooterHeight;
+		const float okW = 96.0f;
+		const float cancelW = 96.0f;
+		const float buttonsRight = frame.X + frame.W - 16.0f;
+		const Wui::WuiRect okRect { buttonsRight - okW, footerY, okW, Wui::ModalFooterHeight };
+		const Wui::WuiRect cancelRect { okRect.X - 8.0f - cancelW, footerY, cancelW, Wui::ModalFooterHeight };
+		const bool canCreate = nameError.empty();
+		const std::string okTooltip = canCreate
+			? Wui::Tr("panel.content_browser.new_shader.ok.tooltip",
+				"Write the starting code to the path shown above and open it in the material editor.")
+			: nameError;
+		const bool okClicked = ModalActionButton(ctx, Wui::HashId("shader.new.ok"), okRect,
+			Wui::Tr("panel.content_browser.new_shader.ok", "Create"),
+			okTooltip, canCreate, true, theme);
+		const bool cancelClicked = ModalActionButton(ctx, Wui::HashId("shader.new.cancel"), cancelRect,
+			Wui::Tr("panel.content_browser.new_shader.cancel", "Cancel"),
+			Wui::Tr("panel.content_browser.new_shader.cancel.tooltip",
+				"Close without writing anything (Esc)"),
+			true, false, theme);
+		bool closeRequested = false;
+		if ((okClicked || (nameSubmitted && !justOpened)) && canCreate)
+		{
+			// 目录不存在就建(与材质向导同口径:确认前只提示,确认时才落盘)。
+			std::error_code dirError;
+			const std::filesystem::path absolute = m_Model.Root / std::filesystem::path(target);
+			const std::filesystem::path parent = absolute.parent_path();
+			if (!parent.empty() && !std::filesystem::is_directory(parent, dirError))
+				std::filesystem::create_directories(parent, dirError);
+			const std::string source = ShaderTemplateSource(templateIndex);
+			std::string error;
+			bool wrote = false;
+			if (dirError)
+			{
+				error = "could not create folder: " + parent.generic_string();
+			}
+			else
+			{
+				// 临时文件 + 原子替换(与脚本编辑器/材质保存同一套写法);失败不留半成品。
+				const std::filesystem::path temporary =
+					absolute.parent_path() / (absolute.filename().string() + ".tmp-write");
+				std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+				if (!out.is_open())
+					error = "could not write " + temporary.generic_string();
+				else
+				{
+					out << source;
+					out.close();
+					std::error_code renameError;
+					std::filesystem::rename(temporary, absolute, renameError);
+					if (renameError)
+					{
+						// 目标已存在时 rename 在 Windows 上会失败:先删目标再改名(覆盖 = 用户已看到警告)。
+						std::error_code removeError;
+						std::filesystem::remove(absolute, removeError);
+						renameError.clear();
+						std::filesystem::rename(temporary, absolute, renameError);
+					}
+					if (renameError)
+					{
+						error = renameError.message();
+						std::error_code cleanupError;
+						std::filesystem::remove(temporary, cleanupError);
+					}
+					else
+					{
+						wrote = true;
+					}
+				}
+			}
+			if (!wrote)
+			{
+				m_NewShaderFailure = error.empty() ? std::string("could not write the .hlsl") : error;
+				m_NewShaderFailureFor = target;
+				NotifyAssetFailure(m_NewShaderFailure);
+				WLD_CORE_WARN("New material shader failed: {0}", m_NewShaderFailure);
+			}
+			else
+			{
+				WLD_CORE_INFO("[material-ui] created shader {0} (template {1})", target, templateIndex);
+				SelectCreated(m_Model.Root / std::filesystem::path(target), "new-shader");
+				// 打开 = 同一个材质编辑器的**代码形态**(面板按扩展名决定布局)。
+				m_Host.OpenMaterialEditor(target);
+				m_Host.Notify(Wui::Tr("panel.content_browser.new_shader.created", "Created ") + target);
+				closeRequested = true;
+			}
+		}
+		else if (cancelClicked)
+			closeRequested = true;
+		else if (escapePressed)
+		{
+			// Esc 分层:先关展开的下拉,第二次才关模态。
+			if (templatePopupWasOpen)
+				ctx.ClosePopup(templateId);
+			else if (folderPopupWasOpen)
+				ctx.ClosePopup(folderId);
+			else
+				closeRequested = true;
+		}
+		Wui::EndModalFrame(ctx);
+		if (closeRequested && ctx.Modal() == modalId)
+			CloseNewShaderModal(ctx);
+	}
+
 	void ContentBrowserPanel::RegisterSliceNode(const BrowserSlice& slice, const Wui::WuiRect& rect)
 	{
 		std::error_code relativeError;
@@ -2006,7 +2476,10 @@ namespace World
 		node.Value = logical;
 		node.Tooltip = slice.IsDir
 			? Wui::Tr("panel.content_browser.slice.folder.tooltip", "Folder under the content root: ") + logical
-			: Wui::Tr("panel.content_browser.slice.asset.tooltip", "Asset: ") + logical
+			// M4-S2:类型名进悬停说明(读屏/脚本看不到徽标与配色,必须能读出"这是哪一类资产"——
+			// `.hlsl` 与 `.wmat` 的区别正是这里)。类型文案本身已本地化,这里只负责拼装。
+			: Wui::Tr("panel.content_browser.slice.asset.tooltip", "Asset: ") + logical + " · "
+				+ slice.TypeLabel
 				+ Wui::Tr("panel.content_browser.slice.asset.hint",
 					" — drag it onto a texture slot / material title");
 		node.Rect = rect;
@@ -2066,6 +2539,13 @@ namespace World
 			m_NewMaterialPendingOpen = false;
 			OpenNewMaterialModal(ctx, m_NewMaterialPendingFromSelection);
 			m_NewMaterialPendingFromSelection = false;
+		}
+		// M4-S2:`.hlsl` 新建向导同一套"下一帧落地"规则(注册表回调可能来自快捷键路径)。
+		if (m_NewShaderPendingOpen)
+		{
+			m_NewShaderPendingOpen = false;
+			OpenNewShaderModal(ctx);
+			m_NewShaderPendingDir.clear();
 		}
 		// U25-M2:跨窗口拖放(内容浏览器 → 材质编辑器的贴图槽/标题):在**释放那一帧**把
 		// "file:<逻辑路径>" 交给登记过落点的面板(核心 WUI 的拖拽态是每窗口一份,见 AssetDropBridge)。
@@ -2745,6 +3225,7 @@ namespace World
 			slice.Name = path.extension().empty() ? path.filename().string() : path.stem().string();
 			const EditorAssetType type = DescribeAssetType(path, slice.IsDir);
 			slice.Type = type.Name;
+			slice.Kind = type.Kind;
 			// P4-U10:切片上显示的类型文案走本地化;glTF/GLB 明确写成"导入源(导入用)",
 			// 不再和原生 .wmodel 混在一起(用户 2026-09-21 报的歧义)。
 			switch (type.Kind)
@@ -2752,6 +3233,8 @@ namespace World
 				case EditorAssetKind::Folder: slice.TypeLabel = Wui::Tr("asset.file.folder", "Folder"); break;
 				case EditorAssetKind::Scene: slice.TypeLabel = Wui::Tr("asset.file.scene", "Scene"); break;
 				case EditorAssetKind::Material: slice.TypeLabel = Wui::Tr("asset.file.material", "Material"); break;
+				case EditorAssetKind::Shader:
+					slice.TypeLabel = Wui::Tr("asset.file.shader", "Material Shader"); break;
 				case EditorAssetKind::Model: slice.TypeLabel = Wui::Tr("asset.file.model", "Model"); break;
 				case EditorAssetKind::ModelSource:
 					slice.TypeLabel = Wui::Tr("asset.file.model_source", "glTF source (import only)"); break;
@@ -3170,6 +3653,8 @@ namespace World
 
 		// ---- U25-M2:E 新建材质向导(面板级模态;外壳按 m_PanelModalOwner 封锁其余面板输入)----
 		DrawNewMaterialModal(ctx);
+		// M4-S2:`.hlsl` 新建向导(同一套面板级模态语义;两个模态不会同时打开)。
+		DrawNewShaderModal(ctx);
 
 		// ---- 面板级快捷键(放在**最后**判定)----
 		// 关键:重命名输入框是在本函数后半段才绘制的,`SetTextInputActive` 也是那时才登记

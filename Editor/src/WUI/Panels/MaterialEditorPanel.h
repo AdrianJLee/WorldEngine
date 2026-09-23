@@ -1,12 +1,16 @@
 #pragma once
 
 #include "EditorPanel.h"
+#include "HlslHighlight.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
+#include "World/Renderer/MaterialParams.h"
 #include "World/Renderer/Mesh.h"
 #include "World/Renderer/Renderer.h"
 #include "World/RHI/Rhi.h"
+#include "World/WUI/WuiTextBuffer.h"
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -49,9 +53,17 @@ namespace World
 		const char* Id() const override { return m_PanelId.c_str(); }
 		const char* Title() const override { return m_PanelTitle.c_str(); }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
+		// M4-S2:代码形态的快捷键(第 2 层路由) —— Ctrl+S 保存源码、Ctrl+R 从磁盘重载。
+		// 与脚本编辑器同口径:事件派发在 UI 帧之外,这里只置位,帧内统一消费。
+		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
 
 		// 由内容浏览器/Window 菜单调用:打开指定 .wmat(失败时面板显示错误而不是弹窗)。
 		void OpenMaterial(const std::string& path);
+		// M4-S2:同一个编辑器的**代码形态** —— 打开 `.hlsl`(表面函数 + 注解参数)。
+		// 双击入口与 `.wmat` 完全相同(ContentBrowserPanel::OpenItem 按扩展名分派形态)。
+		void OpenShaderDocument(const std::string& path);
+		bool IsShaderDocument() const { return m_ShaderMode; }
+		const std::string& GetShaderPath() const { return m_ShaderPath; }
 		bool HasMaterial() const { return m_Material != nullptr; }
 		const std::string& GetMaterialPath() const { return m_Path; }
 		void SetMaterialPathForPanel(const std::string& path);
@@ -99,6 +111,39 @@ namespace World
 		std::string m_PanelId = "material:";
 		std::string m_PanelTitle = "Material";
 		Ref<Material> m_Material;
+
+		// ---- M4-S2:`.hlsl` 代码形态(同一个面板的第二种形态)----
+		// 形态由**打开的文件扩展名**决定;代码形态下 m_Material 是引擎默认表面材质(预览替身),
+		// 参数列与代码列都走下面这套状态,不触碰 `.wmat` 的字段/继承逻辑。
+		bool m_ShaderMode = false;
+		std::string m_ShaderPath;              // 逻辑路径(相对内容根)
+		// `.wmat` 形态:`Shader:` 引用的参数组是否展开(与其它分组同一条"折叠也看得见计数"的规则)。
+		bool m_ShaderParamsOpen = true;
+		Wui::WuiTextBuffer m_ShaderBuffer;     // 源码(编辑 / 撤销 / 脏标记)
+		HlslHighlightCache m_ShaderHighlight;
+		std::vector<MaterialParamDecl> m_ShaderParams;
+		std::string m_ShaderParseError;        // `ParseMaterialParams` 的 `<行>:<列>: <原因>`
+		int m_ShaderErrorLine = 0;             // 解析错误行(1 基;0 = 无错误;进 CodeEditor 红标)
+		std::string m_ShaderStatus;
+		bool m_ShaderStatusIsError = false;
+		bool m_PendingShaderSave = false;      // OnShortcut 只置位,帧内消费(与脚本编辑器同口径)
+		bool m_PendingShaderRevert = false;
+		bool m_ShaderCompileScheduled = false; // 面板自绘的"编译"按钮 → 下一帧执行(避免在绘制中调工具)
+		// 会话内记住代码列宽(与预览列宽的记住口径一致;<= 0 = 还没设过)。
+		float m_ShaderCodeColumnWidth = 0.0f;
+		// 编译(按需):状态行 + 结构化诊断(S3 才做防抖 + 换管线)。
+		std::string m_ShaderCompileStatus;
+		bool m_ShaderCompileFailed = false;
+		std::vector<std::string> m_ShaderDiagnostics;
+		// 分组折叠态(注解里的 group("…") 直接当分组名;空组名 = "Parameters")。
+		std::map<std::string, bool> m_ShaderGroupOpen;
+		// 参数的文本编辑缓冲(Vec2/Vec4 这类没有专用控件的类型用逗号文本输入;
+		// 按参数名持有 —— TextField 需要一个跨帧稳定的 std::string)。
+		std::map<std::string, std::string> m_ShaderParamTextBuffers;
+		// 拖拽中的参数值:拖动期间每帧都在变,只在**松手那一帧**改写注解文本
+		// (否则一次拖动会往撤销历史里塞几十步)。
+		std::string m_ShaderPendingParamName;
+		std::string m_ShaderPendingParamValue;
 		std::string m_Path;                 // 当前材质路径(空 = 未落盘新材质)
 		std::string m_NewPathBuffer;        // 未落盘时的目标路径输入
 		bool m_NewPathAttempted = false;    // U2d:点过 Save 之后才把"路径不能为空"标成行内错误
@@ -259,8 +304,37 @@ namespace World
 		void EnsureOverrideMaterials();
 		// 头部(材质名 + 路径 + 脏标记 + 动作);返回占用高度。
 		float DrawHeader(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// ---- M4-S2:`.hlsl` 代码形态 ----
+		// 布局(用户口径):左 预览 | 中 代码(复用 Wui::CodeEditor 内核) | 右 参数(注解默认值)。
+		// 代码形态**没有**材质字段区:参数只来自注解,右边改的是 shader 的默认值(改写注解文本)。
+		float DrawShaderDocument(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		float DrawShaderHeader(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		void DrawShaderCode(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		float DrawShaderParams(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// 从磁盘读源码(打开 / Revert);解析失败也**不丢文件**(面板显示错误行,仍可编辑保存)。
+		void LoadShaderFromDisk();
+		// 保存:临时文件 + 同目录原子替换(与脚本编辑器/材质保存同一口径)。
+		void SaveShaderDocument();
+		// 重新解析注解参数表 + 定位错误行;顺带把认识的参数映射进预览替身材质。
+		void RefreshShaderParams();
+		// 把某个参数的默认值写回**注解文本**(参数默认值的唯一事实源是文件本身)。
+		// 失败(找不到注解行 / 改完解析不回来)时回滚 buffer 并写状态行。
+		// 参数按**值**传入:函数内部会重建参数表(RefreshShaderParams),引用会失效。
+		bool WriteShaderParamDefault(MaterialParamDecl decl, const std::string& valueText);
+		// 注解参数 → 预览替身材质(baseColor / metallic / roughness / emissive / albedo / normal)。
+		void ApplyShaderDefaultsToPreview();
+		// 右栏一行的控件(按参数类型;返回是否有编辑,编辑值写进 outText)。
+		bool DrawShaderParamControl(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+			const MaterialParamDecl& decl, const Wui::WuiRect& controlRect, const std::string& current,
+			std::string* outText);
 		// 参数区(搜索 + 分组 + 每字段控件 + 校验区);返回占用高度。
 		float DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// ---- M4-S2:`Shader:` 引用的参数(材质实例形态)----
+		// 参数表 = shader 的 `//! param` 注解;本文件只存覆盖(三态:覆盖 / 父级 / shader 默认)。
+		// 没有 `Shader:` 的 `.wmat` 这两条都不占位(既有材质面板的布局逐像素不变)。
+		float ShaderParamSectionHeight() const;
+		float DrawShaderParamSection(Wui::WuiContext& ctx, PanelHost& host, const Wui::WuiTheme& theme,
+			const Wui::WuiRect& contentRect, float y);
 		// 一行参数:标签 + 控件 + 恢复默认 + 悬停说明 + 无障碍节点。
 		//
 		// U27(用户 2026-09-22「右侧编辑区域占了一整块,所有简短的选项都占了一行」):

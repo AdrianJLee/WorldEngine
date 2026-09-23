@@ -14,6 +14,7 @@ namespace World
 		Unknown,
 		Scene,
 		Material,
+		Shader,         // .hlsl(M4-S2:表面函数材质;参数与默认值写在文件注解里)
 		Model,          // .wmodel(引擎原生模型资产)
 		ModelSource,    // .gltf/.glb(源资产;双击 = 导入 + 打开预览)
 		Prefab,         // .wprefab(可复用实体子树;双击 = 打开编辑)
@@ -45,6 +46,10 @@ namespace World
 			return { EditorAssetKind::Scene, "Scene" };
 		if (extension == ".wmat")
 			return { EditorAssetKind::Material, "Material" };
+		// M4-S2:`.hlsl` 是一等资产(Material Shader)——它写表面函数与参数默认值,
+		// `.wmat` 是引用它的材质实例;两者在浏览器里必须有各自的类型名。
+		if (extension == ".hlsl")
+			return { EditorAssetKind::Shader, "Material Shader" };
 		if (extension == ".wmodel")
 			return { EditorAssetKind::Model, "Model" };
 		if (extension == ".gltf" || extension == ".glb")

@@ -1462,6 +1462,9 @@ namespace World
 		DrawStatusBar(ctx, statusBar);
 		// P4-UX10:启动询问贴状态栏上方(非模态;不压暗、不挡操作)。
 		DrawRestorePrompt(ctx, statusBar);
+		// M4-S2:菜单栏下拉的延后批次在**模态之后**补画(它们与 U29 的下拉弹层同属"永远在最上层"
+		// 的那一类);tooltip 仍在最后画,所以提示不会被菜单压住。
+		FlushDeferredMenuDraws(ctx);
 		Wui::DrawTooltip(ctx, m_Theme);
 		// U26:独立 OS 窗口放在**最后**渲染 —— 它们会把无障碍树的"当前窗口"切到自己,
 		// 放在前面会让菜单栏/状态栏等主窗口节点挂错窗口键(见 RenderIndependentWindows)。
@@ -1471,6 +1474,20 @@ namespace World
 
 	// P4-UX6:状态栏 —— 一眼看到"当前场景有没有改、选中了什么、跑在哪个后端、多少帧"。
 	// 全部取自既有状态(文档/选择/Input().FPS),不做任何额外计算或分配。
+	// M4-S2 遗留②:菜单栏下拉的延后收口。调用点在**所有面板与模态之后、tooltip 之前**
+	// (OnUiFrame 的帧末)。没有菜单打开时批次为空,零成本。
+	void EditorShell::FlushDeferredMenuDraws(Wui::WuiContext& ctx)
+	{
+		if (m_DeferredMenuCommands.empty())
+			return;
+		ctx.PushOverlay();
+		std::vector<Wui::WuiDrawCommand>& target = ctx.Commands();
+		for (const Wui::WuiDrawCommand& command : m_DeferredMenuCommands)
+			target.push_back(command);
+		ctx.PopOverlay();
+		m_DeferredMenuCommands.clear();
+	}
+
 	void EditorShell::DrawStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& rect)
 	{
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, m_Theme.PanelHeader, 0.0f });
@@ -4118,11 +4135,25 @@ namespace World
 		Wui::WuiPaintContext paint(ctx);
 		m_MenuBar->Paint(paint);
 
+		// M4-S2 遗留①(另一半):任何**不是**"点外面关闭"的收口路径(别的弹层打开时的
+		// CloseAllPopups、面板里的 Esc、脚本 ui.close…)都会把弹层关掉而 m_OpenMenu 仍留着;
+		// 那会让同一个按钮下一次点击被判成"已经在开" → 又是按两次。每帧按弹层真实状态对齐:
+		// 开着的那个是唯一事实源,弹层没了就把归属清零。放在按钮绘制之后(刚打开那一帧
+		// 弹层已 Open,不会被误清)。
+		if (m_OpenMenu != 0 && !ctx.IsPopupOpen(m_OpenMenu))
+			m_OpenMenu = 0;
+
 		auto drawMenu = [&](const Wui::WuiId menuId, const std::string& menuIdName, const std::vector<MenuEntry>& entries)
 		{
 			if (ctx.IsPopupOpen(menuId))
 			{
 				ctx.PushOverlay();
+				// M4-S2 遗留②:菜单栏下拉的**绘制命令**延后到帧末(模态画完之后),与 U29 给
+				// Combo/SearchableCombo 的 `WuiDeferredPopupScope` 同一口径 —— 菜单栏在模态之前
+				// 绘制,否则模态一开就把下拉盖住(同类 z-order 风险)。命中测试、Tooltip、
+				// RegisterOverlayRect 与关闭判定全部留在原地当场生效(命令只是搬走像素)。
+				std::vector<Wui::WuiDrawCommand>& menuOverlay = ctx.Commands();
+				const size_t menuCommandMark = menuOverlay.size();
 				const Wui::WuiRect panel { m_MenuHeaderRect.X, m_MenuHeaderRect.Y + m_MenuHeaderRect.H + 2, 240, static_cast<float>(entries.size() * 22 + 8) };
 				DrawPanelSurface(ctx, panel, m_Theme);
 				// P4-U7:菜单矩形登记为覆盖层 —— 下一帧面板内容不会吃掉落在菜单上的点击
@@ -4174,11 +4205,25 @@ namespace World
 					}
 				}
 				ctx.ClosePopupsOnOutsideClick({ menuId }, panel);
+				// M4-S2 遗留①:点外面关闭后必须**同步清零 m_OpenMenu** —— 否则下一次按同一个
+				// 菜单按钮时 `opening = (m_OpenMenu != menuFile)` 判成"已经开着" → 只发关闭、
+				// 菜单不出现,用户得按两次(实测)。这里按**弹层真实状态**收口(不看返回值:
+				// ClosePopupsOnOutsideClick 在"弹层是本帧刚打开"时会跳过关闭但同样返回 true)。
+				if (m_OpenMenu == menuId && !ctx.IsPopupOpen(menuId))
+					m_OpenMenu = 0;
 				if (ctx.IsKeyPressed(KeyCodes::Escape))
 				{
 					ctx.ClosePopup(menuId);
 					m_OpenMenu = 0;
 				}
+				// 只搬"这一帧仍然开着"的菜单:菜单项动作(打开模态等)会在本帧调 CloseAllPopups,
+				// 那一帧的命令必须丢弃 —— 否则刚弹出的模态会被上一帧的下拉盖一帧。
+				if (ctx.IsPopupOpen(menuId))
+				{
+					m_DeferredMenuCommands.insert(m_DeferredMenuCommands.end(),
+						menuOverlay.begin() + static_cast<std::ptrdiff_t>(menuCommandMark), menuOverlay.end());
+				}
+				menuOverlay.resize(menuCommandMark);
 				ctx.PopOverlay();
 			}
 		};

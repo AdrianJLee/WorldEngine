@@ -2,12 +2,16 @@
 #include "MaterialEditorPanel.h"
 #include "EditorAssetCatalog.h"
 #include "ViewportPanel.h"
+#include "../../EditorPreferences.h"
 
 #include "World/Core/KeyCodes.h"
+#include "World/Core/Application.h"
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/RenderSettings.h"
+// M4-S2:代码形态的"按需编译"走 M4-S1 的编译入口(结构化诊断 + 用户源行列号)。
+#include "World/Renderer/MaterialSurface.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
@@ -24,6 +28,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string_view>
 #include <vector>
 
 #ifdef _WIN32
@@ -75,6 +82,15 @@ namespace World
 		constexpr float kSplitterDefaultMaxWidth = 340.0f;  // 默认比例上限(U23 起的既有默认)
 		constexpr float kGridCellMinWidth = 300.0f;
 		constexpr int kGridMaxColumns = 3;
+		// ---- M4-S2:`.hlsl` 代码形态的三列(预览 | 代码 | 参数)----
+		// 宽度门槛与最小列宽按"参数列最优先"排:参数面板是本批的主交付,挤不下时先收代码列。
+		constexpr float kShaderThreeColumnMinWidth = 900.0f;
+		constexpr float kShaderPreviewMinWidth = 200.0f;
+		constexpr float kShaderCodeMinWidth = 240.0f;
+		constexpr float kShaderParamsMinWidth = 260.0f;
+		constexpr float kShaderDefaultCodeRatio = 0.45f;
+		constexpr float kShaderRowHeight = 26.0f;
+		constexpr float kShaderGroupHeaderHeight = 20.0f;
 
 		// U27:预览列宽**会话内跨面板记住**(切材质、关掉再打开都不重置;<= 0 = 还没设过)。
 		// 只记用户拖出来的值 —— 窗口变窄时只在本帧夹取,不覆写记忆,窗口再变宽能回到原位置。
@@ -944,6 +960,14 @@ namespace World
 
 	void MaterialEditorPanel::OpenMaterial(const std::string& path)
 	{
+		// M4-S2:同一个编辑器的两种形态 —— `.hlsl` = 代码形态(预览 | 代码 | 注解参数),
+		// `.wmat` = 材质实例形态(左预览 / 右字段,无代码区)。入口与面板 id 都不变。
+		if (LowerExtension(std::filesystem::path(path)) == ".hlsl")
+		{
+			OpenShaderDocument(path);
+			return;
+		}
+		m_ShaderMode = false;
 		std::string error;
 		Ref<Material> material = MaterialLibrary::Get().Load(path, &error);
 		if (!material)
@@ -2106,6 +2130,296 @@ namespace World
 	}
 
 	// ---- 一行参数:标签 + 控件 + 恢复默认 + 悬停说明 + 无障碍 ----
+	// ==== M4-S2:`.wmat` 引用 shader(`Shader:`)时的参数组 ====
+	//
+	// 语义(方案 §2.1 + M3 的继承口径):参数表来自 shader 的 `//! param` 注解;`.wmat`
+	// **只存覆盖**,所以每行有三态 —— 覆盖(本文件)/ 父级覆盖 / shader 默认。行右侧的复位图标
+	// 语义 = "丢掉本文件的覆盖,回退到 shader 默认(或父级)"。
+	float MaterialEditorPanel::ShaderParamSectionHeight() const
+	{
+		if (!m_Material)
+			return 0.0f;
+		const size_t rows = m_Material->Params().size();
+		const size_t warnings = m_Material->ParamWarnings().size()
+			+ (m_Material->ShaderWarning().empty() ? 0u : 1u);
+		if (rows == 0 && warnings == 0)
+			return 0.0f;   // 没有 Shader / 没有警告:整块不占位(既有 .wmat 布局逐像素不变)
+		float height = kShaderGroupHeaderHeight;
+		if (m_ShaderParamsOpen)
+			height += static_cast<float>(rows) * kShaderRowHeight;
+		if (warnings > 0)
+			height += 6.0f + static_cast<float>(warnings) * 16.0f;
+		return height + kGroupGap;
+	}
+
+	float MaterialEditorPanel::DrawShaderParamSection(Wui::WuiContext& ctx, PanelHost& host,
+		const Wui::WuiTheme& theme, const Wui::WuiRect& contentRect, float y)
+	{
+		if (!m_Material)
+			return y;
+		const std::vector<MaterialParamDecl>& decls = m_Material->Params();
+		const std::vector<std::string>& paramWarnings = m_Material->ParamWarnings();
+		const std::string shaderWarning = m_Material->ShaderWarning();
+		const std::string shaderPath = m_Material->ShaderPath();
+		if (decls.empty() && paramWarnings.empty() && shaderWarning.empty())
+			return y;
+
+		int overridden = 0;
+		for (const MaterialParamDecl& decl : decls)
+			if (m_Material->HasParamOverride(decl.Name))
+				++overridden;
+		const size_t warningCount = paramWarnings.size() + (shaderWarning.empty() ? 0u : 1u);
+
+		// 容器(与其它分组同一条视觉语言:底 + 圆角描边 + 左侧归属竖条 + 子项缩进)。
+		float blockHeight = kShaderGroupHeaderHeight;
+		if (m_ShaderParamsOpen)
+			blockHeight += static_cast<float>(decls.size()) * kShaderRowHeight;
+		if (warningCount > 0)
+			blockHeight += 6.0f + static_cast<float>(warningCount) * 16.0f;
+		const Wui::WuiRect blockRect { contentRect.X + 2.0f, y - 3.0f,
+			std::max(40.0f, contentRect.W - 12.0f), blockHeight + 4.0f };
+		// 滚出可视区:既不该画,也不该登记无障碍节点(与其它分组同一条规则),但高度照走。
+		const bool blockVisible = (blockRect.Y + blockRect.H > contentRect.Y)
+			&& (blockRect.Y < contentRect.Y + contentRect.H);
+		if (!blockVisible)
+			return y + blockHeight + kGroupGap;
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, blockRect, theme.ContentBg, 6.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, blockRect, theme.Border, 6.0f, 1.0f });
+		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+			{ blockRect.X + 1.0f, blockRect.Y + 5.0f, 2.0f, std::max(6.0f, blockRect.H - 10.0f) },
+			overridden > 0 ? theme.Warning : theme.BorderStrong, 1.0f });
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.group.shader");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "group";
+			node.Label = Wui::Tr("material.group.shader", "Shader Parameters");
+			node.Value = std::to_string(decls.size()) + " items, " + std::to_string(overridden) + " modified";
+			node.Tooltip = Wui::Tr("material.group.shader.tooltip",
+				"Parameters declared by the shader this material references (Shader: <path>). "
+				"Each row shows whether the value is overridden here, inherited from the parent "
+				"material, or the shader default.");
+			node.Rect = blockRect;
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
+		// 组头:标题 + 计数 + `Edit Shader`(打开代码形态)。
+		const Wui::WuiRect headerRect { blockRect.X + 4.0f, y, std::max(40.0f, blockRect.W - 8.0f),
+			kShaderGroupHeaderHeight - 4.0f };
+		const bool headerHovered = ctx.IsHovered(headerRect);
+		Wui::HoverRow(ctx, headerRect, headerHovered, false, theme, 4.0f);
+		Wui::Label(ctx, { headerRect.X + 8.0f, y + 3.0f }, m_ShaderParamsOpen ? "v" : ">",
+			theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { headerRect.X + 22.0f, y + 3.0f },
+			Wui::Tr("material.group.shader", "Shader Parameters"), theme.Text, 13.0f);
+		const std::string countText = std::to_string(decls.size()) + " "
+			+ Wui::Tr("panel.material.group.items", "items")
+			+ (overridden > 0
+				? std::string(" · ") + std::to_string(overridden) + " "
+					+ Wui::Tr("panel.material.group.overridden", "overridden")
+				: std::string(" · ") + Wui::Tr("material.group.shader.inherited", "none overridden"));
+		const float countWidth = ctx.MeasureTextWidth(countText, 11.0f);
+		Wui::Label(ctx, { headerRect.X + std::max(24.0f, headerRect.W - countWidth - 8.0f), y + 5.0f },
+			countText, overridden > 0 ? theme.Warning : theme.TextDisabled, 11.0f);
+		// 标题行的空白处点击 = 折叠/展开(与其它分组同一手感;右侧的按钮自己吃点击)。
+		Wui::WuiRect toggleRect { headerRect.X, headerRect.Y, std::max(40.0f, headerRect.W), headerRect.H };
+		if (!shaderPath.empty())
+		{
+			const float buttonWidth = ctx.MeasureTextWidth(
+				Wui::Tr("material.group.shader.open", "Edit Shader"), 12.0f) + 16.0f;
+			const Wui::WuiRect buttonRect { headerRect.X + headerRect.W - buttonWidth, y + 1.0f,
+				buttonWidth, kShaderGroupHeaderHeight - 6.0f };
+			toggleRect.W = std::max(40.0f, buttonRect.X - headerRect.X - 4.0f);
+			if (Wui::Button(ctx, Wui::HashId("material.shader.open"), buttonRect,
+				Wui::Tr("material.group.shader.open", "Edit Shader"), theme))
+				host.OpenMaterialEditor(shaderPath);   // 同一个编辑器的代码形态
+			Wui::Tooltip(ctx, buttonRect, Wui::Tr("material.group.shader.open.tooltip",
+				"Open this material's shader (.hlsl) in the material editor's code form: "
+				"preview | code | annotated parameters."));
+		}
+		if (headerHovered)
+			ctx.SetCursor(Wui::WuiCursor::Hand);
+		if (ctx.IsClicked(toggleRect))
+			m_ShaderParamsOpen = !m_ShaderParamsOpen;
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.section.shader");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "section";
+			node.Label = Wui::Tr("material.group.shader", "Shader Parameters");
+			node.Value = (m_ShaderParamsOpen ? std::string("expanded") : std::string("collapsed"))
+				+ ", " + std::to_string(decls.size()) + " items, " + std::to_string(overridden) + " modified";
+			node.Tooltip = Wui::Tr("panel.material.section.tooltip",
+				"Click to expand or collapse this group.");
+			node.Rect = toggleRect;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		// 引用的 shader 路径本身也是一条可读信息(标题行右侧)。
+		if (!shaderPath.empty())
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.path");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("material.shader.path.label", "Shader");
+			node.Value = shaderPath;
+			node.Tooltip = Wui::Tr("material.shader.path.tooltip", "Shader referenced by this material: ")
+				+ shaderPath;
+			node.Rect = { headerRect.X, headerRect.Y, std::max(40.0f, headerRect.W), headerRect.H };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		y += kShaderGroupHeaderHeight;
+		if (m_ShaderParamsOpen)
+		{
+			for (const MaterialParamDecl& decl : decls)
+			{
+				const MaterialParamSource source = m_Material->ParamSource(decl.Name);
+				const bool isOverride = m_Material->HasParamOverride(decl.Name);
+				const std::string resolved = m_Material->ResolvedParamValue(decl.Name);
+				const float labelWidth = std::min(kLabelColumnMax, std::max(84.0f, contentRect.W * 0.30f));
+				const float rowX = contentRect.X + kGroupIndent;
+				const float rowWidth = std::max(80.0f, contentRect.W - kGroupIndent - 6.0f);
+				const float controlX = rowX + labelWidth + 8.0f;
+				const float reserved = kResetWidth + 6.0f;
+				const Wui::WuiRect rowRect { rowX, y, rowWidth, kShaderRowHeight };
+				const Wui::WuiRect controlRect { controlX, y, std::max(60.0f, rowWidth - (controlX - rowX) - reserved), 22.0f };
+				const Wui::WuiRect resetRect { rowX + rowWidth - kResetWidth - 2.0f, y + 1.0f,
+					kResetWidth, kResetWidth };
+				const std::string label = decl.Label.empty() ? decl.Name : decl.Label;
+				// 三态强调条(与 M3 的字段行同一条语言:覆盖 = Accent / 父级 = BorderStrong / shader 默认 = Border)。
+				const Wui::WuiColor stateColor = isOverride ? theme.Accent
+					: (source == MaterialParamSource::Parent ? theme.BorderStrong : theme.Border);
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+					{ rowX - 6.0f, y + 3.0f, 2.0f, kShaderRowHeight - 6.0f }, stateColor, 1.0f });
+				Wui::Label(ctx, { rowX, y + 4.0f }, EllipsizeToWidth(ctx, label, labelWidth, 12.0f),
+					isOverride ? theme.Text : theme.TextMuted, 12.0f);
+				std::string edited = resolved;
+				if (DrawShaderParamControl(ctx, theme, decl, controlRect, resolved, &edited) && edited != resolved)
+				{
+					std::string normalized = edited;
+					std::string valueError;
+					if (NormalizeParamValue(decl.Type, normalized, &normalized, &valueError))
+					{
+						const uint32_t revision = m_Material->GetRevision();
+						m_Material->SetParamOverride(decl.Name, normalized);
+						if (m_Material->GetRevision() != revision)
+							m_Material->MarkDirty(true);
+						m_Status = Wui::Tr("panel.material.status.param_override",
+							"Parameter override written (press Save to keep it): ") + decl.Name;
+						m_StatusIsError = false;
+					}
+					else
+					{
+						m_Status = Wui::Tr("panel.material.status.param_override_invalid",
+							"Parameter value rejected: ") + (valueError.empty() ? edited : valueError);
+						m_StatusIsError = true;
+					}
+				}
+				// 复位 = 丢掉本文件的覆盖(有父级时回到父级值,否则回到 shader 默认)。
+				const std::string resetDoc = isOverride
+					? (Wui::Tr("panel.material.shader.param.reset.tooltip",
+						"Revert to the shader default (drops this file's override): ") + decl.Default)
+					: Wui::Tr("panel.material.shader.param.reset.default.tooltip",
+						"Already the shader default — nothing to revert.");
+				if (Wui::ResetDefaultButton(ctx, Wui::HashId(
+					("material.shader.params." + decl.Name + ".reset").c_str()), resetRect, isOverride,
+					theme, label, resetDoc))
+				{
+					const uint32_t revision = m_Material->GetRevision();
+					m_Material->RevertParam(decl.Name);
+					if (m_Material->GetRevision() != revision)
+						m_Material->MarkDirty(true);
+				}
+				// 悬停:类型 / 范围 / 单位 + 三态来源(读屏看不到强调条,必须能读出来)。
+				std::string doc = Wui::Tr("panel.material.shader.param.type", "Type: ")
+					+ ParamTypeName(decl.Type);
+				if (decl.Type == ParamType::Float || decl.Type == ParamType::Int)
+					doc += "\n" + Wui::Tr("panel.material.shader.param.range", "Range: ")
+						+ FormatParamFloatText(decl.Min) + " .. " + FormatParamFloatText(decl.Max);
+				if (!decl.Unit.empty())
+					doc += "\n" + Wui::Tr("panel.material.shader.param.unit", "Unit: ") + decl.Unit;
+				doc += "\n" + (source == MaterialParamSource::Local
+					? Wui::Tr("panel.material.shader.param.source.local", "Overridden in this file: ")
+					: (source == MaterialParamSource::Parent
+						? Wui::Tr("panel.material.shader.param.source.parent", "From parent override: ")
+						: Wui::Tr("panel.material.shader.param.source.shader_default", "From shader default: ")))
+					+ resolved;
+				Wui::Tooltip(ctx, rowRect, doc);
+				{
+					Wui::WuiAccessNode node;
+					node.Id = Wui::HashId(("material.param." + decl.Name + ".source").c_str());
+					node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+					node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+					node.Kind = "text";
+					node.Label = label + Wui::Tr("panel.material.shader.param.source.label", " — source");
+					node.Value = isOverride ? "override"
+						: (source == MaterialParamSource::Parent ? "parent" : "shader-default");
+					node.Tooltip = doc;
+					node.Rect = { rowX, y, 2.0f, kShaderRowHeight };
+					node.Enabled = true;
+					node.Interactive = false;
+					node.Visible = true;
+					Wui::WuiAccessibility::Get().Register(node);
+				}
+				y += kShaderRowHeight;
+			}
+		}
+		// 警告区(未声明参数 / 值类型不符 / shader 读不到):**可读**且不阻断面板。
+		if (warningCount > 0)
+		{
+			std::string joined;
+			float warningY = y + 2.0f;
+			if (!shaderWarning.empty())
+			{
+				Wui::Label(ctx, { contentRect.X + kGroupIndent, warningY },
+					EllipsizeToWidth(ctx, Wui::Tr("panel.material.shader.warning", "Shader warning: ")
+						+ shaderWarning, std::max(40.0f, contentRect.W - kGroupIndent - 8.0f), 11.0f),
+					theme.Danger, 11.0f);
+				joined = shaderWarning;
+				warningY += 16.0f;
+			}
+			for (const std::string& warning : paramWarnings)
+			{
+				Wui::Label(ctx, { contentRect.X + kGroupIndent, warningY },
+					EllipsizeToWidth(ctx, warning, std::max(40.0f, contentRect.W - kGroupIndent - 8.0f), 11.0f),
+					theme.Warning, 11.0f);
+				if (!joined.empty())
+					joined += " | ";
+				joined += warning;
+				warningY += 16.0f;
+			}
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.warning");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.shader.warning.label", "Shader parameter warnings");
+			node.Value = joined;
+			node.Tooltip = joined;
+			node.Rect = { contentRect.X + kGroupIndent, y, std::max(40.0f, contentRect.W - kGroupIndent - 8.0f),
+				warningCount * 16.0f + 4.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+			y = warningY;
+		}
+		y += kGroupGap;
+		return y;
+	}
+
 	void MaterialEditorPanel::DrawParameterRow(Wui::WuiContext& ctx, PanelHost& host,
 		const Wui::WuiTheme& theme, const RowPlan& row, float x, float y, float width, bool stacked,
 		float labelWidthOverride, bool gridCell)
@@ -2621,12 +2935,20 @@ namespace World
 			for (const std::vector<const RowPlan*>& line : BuildGridLines(rows, gridColumns))
 				contentHeight += lineHeightOf(line);
 		}
+		// M4-S2:`Shader:` 引用的参数组(没有 shader/没有警告 = 0,既有布局逐像素不变)。
+		contentHeight += ShaderParamSectionHeight();
 		const float maxScroll = std::max(0.0f, contentHeight - contentRect.H);
 		m_ScrollY = std::clamp(m_ScrollY, 0.0f, maxScroll);
 
 		Wui::BeginScrollArea(ctx, contentRect, contentHeight, m_ScrollY, theme);
 		float y = contentRect.Y + 4.0f - m_ScrollY;
 		int drawnRows = 0;
+		// M4-S2:引用了 shader 的材质,参数列**以 shader 声明的参数开头** —— 那些参数才是这份实例
+		// 真正的可覆盖项(用户口径:`.wmat` = 实例覆盖值);旧的内建字段组跟在后面。
+		// 没有 shader / 没有警告时这一句是 no-op(既有材质面板布局逐像素不变)。
+		if (!m_Material->Params().empty() || !m_Material->ShaderWarning().empty()
+			|| !m_Material->ParamWarnings().empty())
+			y = DrawShaderParamSection(ctx, host, theme, contentRect, y);
 		for (const GroupDesc& group : kGroups)
 		{
 			const std::vector<const RowPlan*> rows = rowsOfGroup(group.Key);
@@ -4001,6 +4323,1123 @@ namespace World
 			ctx.ClearModal();
 	}
 
+	// ==== M4-S2:`.hlsl`(Material Shader)代码形态 ====
+	//
+	// 用户口径:「打开 .hlsl:左预览 / 中代码 / 右参数 —— 右栏显示 shader 声明的参数与其默认值」。
+	// 形态由**打开的文件扩展名**决定(同一个面板、同一套窗口/停靠机制):
+	//   - 代码列复用 Wui::CodeEditor 内核(行号 / 高亮 / 选区 / 撤销 / 滚动 / 诊断行),
+	//     这里只提供 HLSL token 化(HlslHighlight.h);
+	//   - 参数列的事实源是**文件里的注解**(M4-S2 内核的 ParseMaterialParams);
+	//     改默认值 = 改写注解文本,不是改内存里的影子值;
+	//   - 真正的"防抖编译 + 原子换管线"属 M4-S3;本批按需编译只验证源码能过 dxc,
+	//     预览仍用引擎默认表面材质(注解里认识的名字会映射进去),面板上写明这一点。
+	void MaterialEditorPanel::OpenShaderDocument(const std::string& path)
+	{
+		std::string normalized = path;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		if (normalized.empty())
+			return;
+		// 面板 id/标题/搜索态复位与 .wmat 同一条路径(面板 id 仍是 material:<逻辑路径>,
+		// 所以宿主、布局存档、AI 通道的面板寻址都不用新增一套)。
+		SetMaterialPathForPanel(normalized);
+		m_ShaderMode = true;
+		m_ShaderPath = MaterialLibrary::NormalizePath(normalized);
+		m_PanelTitle = "Material Shader - " + std::filesystem::path(m_ShaderPath).stem().string();
+		// 代码形态不是材质资产:材质字段/引用者/另存这些路径不参与。
+		m_Path.clear();
+		m_LoadError.clear();
+		m_ShaderGroupOpen.clear();
+		m_ShaderParamTextBuffers.clear();
+		m_ShaderPendingParamName.clear();
+		m_ShaderPendingParamValue.clear();
+		// 预览替身 = 引擎默认表面材质(SetDesc 在解析成功后按注解默认值映射)。
+		m_Material = MaterialLibrary::Get().CreateDefault("Shader Preview");
+		RefreshCatalog();   // 贴图下拉的选项(与 .wmat 共用同一份 2s 缓存)
+		LoadShaderFromDisk();
+	}
+
+	void MaterialEditorPanel::LoadShaderFromDisk()
+	{
+		m_ShaderCompileStatus.clear();
+		m_ShaderCompileFailed = false;
+		m_ShaderDiagnostics.clear();
+		if (m_ShaderPath.empty())
+		{
+			m_ShaderStatus = Wui::Tr("panel.material.shader.no_path", "No shader path");
+			m_ShaderStatusIsError = true;
+			return;
+		}
+		const std::filesystem::path diskPath = ContentRootPath() / m_ShaderPath;
+		std::error_code fileError;
+		if (!std::filesystem::is_regular_file(diskPath, fileError))
+		{
+			m_ShaderStatus = Wui::Tr("panel.material.shader.status.missing", "Shader file not found: ")
+				+ m_ShaderPath;
+			m_ShaderStatusIsError = true;
+			m_ShaderBuffer.SetText(std::string());
+			RefreshShaderParams();
+			return;
+		}
+		std::ifstream input(diskPath, std::ios::binary);
+		if (!input.is_open())
+		{
+			m_ShaderStatus = Wui::Tr("panel.material.shader.status.unreadable", "Cannot read: ") + m_ShaderPath;
+			m_ShaderStatusIsError = true;
+			m_ShaderBuffer.SetText(std::string());
+			RefreshShaderParams();
+			return;
+		}
+		std::string source((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+		m_ShaderBuffer.SetText(std::move(source));   // 视为已保存状态
+		m_ShaderHighlight.Clear();
+		RefreshShaderParams();
+		m_ShaderStatus = Wui::Tr("panel.material.shader.status.loaded", "Loaded ") + m_ShaderPath;
+		m_ShaderStatusIsError = false;
+		WLD_CORE_INFO("[material-ui] opened shader '{0}'", m_ShaderPath);
+	}
+
+	void MaterialEditorPanel::RefreshShaderParams()
+	{
+		m_ShaderParams.clear();
+		m_ShaderParseError.clear();
+		m_ShaderErrorLine = 0;
+		std::vector<MaterialParamDecl> parsed;
+		std::string error;
+		if (!ParseMaterialParams(m_ShaderBuffer.Text(), &parsed, &error))
+		{
+			m_ShaderParseError = error.empty()
+				? std::string("the parameter annotations could not be parsed") : error;
+			// 内核的错误格式固定为 `<行>:<列>: <原因>`(1 基)—— 行号直接进代码编辑器的红标。
+			const size_t colon = m_ShaderParseError.find(':');
+			if (colon != std::string::npos && colon > 0)
+			{
+				const std::string lineText = m_ShaderParseError.substr(0, colon);
+				char* end = nullptr;
+				const long value = std::strtol(lineText.c_str(), &end, 10);
+				if (end != nullptr && *end == '\0' && value > 0)
+					m_ShaderErrorLine = static_cast<int>(value);
+			}
+			return;
+		}
+		m_ShaderParams = std::move(parsed);
+		// 文本编辑缓冲跟随新表重建(参数名集合可能变了)。
+		m_ShaderParamTextBuffers.clear();
+		ApplyShaderDefaultsToPreview();
+	}
+
+	void MaterialEditorPanel::ApplyShaderDefaultsToPreview()
+	{
+		if (!m_Material || m_ShaderParams.empty())
+			return;
+		// 名字映射(约定,写在报告与工具提示里):S3 才会用**编译后的管线**渲染预览,
+		// 本批让最常见的几个名字反映进替身材质,拖参数时能立刻看到预览变化。
+		MaterialDesc desc = m_Material->GetDesc();
+		for (const MaterialParamDecl& decl : m_ShaderParams)
+		{
+			const std::string key = ToLowerAscii(decl.Name);
+			if (decl.Type == ParamType::Color
+				&& (key == "basecolor" || key == "base_color" || key == "albedocolor"))
+			{
+				float rgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				if (ParseParamFloatComponents(decl.Default, ParamType::Color, rgba, 4))
+					desc.BaseColor = glm::vec4 { rgba[0], rgba[1], rgba[2], rgba[3] };
+			}
+			else if (decl.Type == ParamType::Float && key == "metallic")
+			{
+				float value = 0.0f;
+				if (ParseParamFloat(decl.Default, &value))
+					desc.Metallic = value;
+			}
+			else if (decl.Type == ParamType::Float && key == "roughness")
+			{
+				float value = 0.0f;
+				if (ParseParamFloat(decl.Default, &value))
+					desc.Roughness = value;
+			}
+			else if (decl.Type == ParamType::Vec3 && (key == "emissive" || key == "emission"))
+			{
+				float rgb[3] = { 0.0f, 0.0f, 0.0f };
+				if (ParseParamFloatComponents(decl.Default, ParamType::Vec3, rgb, 3))
+					desc.Emissive = glm::vec3 { rgb[0], rgb[1], rgb[2] };
+			}
+			else if (decl.Type == ParamType::Texture2D && key == "albedo")
+				desc.AlbedoTexture = decl.Default;
+			else if (decl.Type == ParamType::Texture2D && key == "normal")
+				desc.NormalTexture = decl.Default;
+			else if (decl.Type == ParamType::Bool && key == "doublesided")
+			{
+				bool value = false;
+				if (ParseParamBool(decl.Default, &value))
+					desc.DoubleSided = value;
+			}
+		}
+		m_Material->SetDesc(desc);
+	}
+
+	bool MaterialEditorPanel::WriteShaderParamDefault(MaterialParamDecl decl, const std::string& valueText)
+	{
+		// 1) 先按内核方言规范化(颜色补齐 4 个分量、浮点最短往返、贴图空串写成 ""),失败就不改文件。
+		std::string normalized = valueText;
+		std::string error;
+		if (decl.Type == ParamType::Texture2D && normalized.empty())
+			normalized = "\"\"";
+		if (!NormalizeParamValue(decl.Type, normalized, &normalized, &error))
+		{
+			m_ShaderStatus = Wui::Tr("panel.material.shader.status.value_invalid",
+				"Value rejected: ") + (error.empty() ? valueText : error);
+			m_ShaderStatusIsError = true;
+			return false;
+		}
+		// 2) 在源码里定位这条注解(`//! param <type> <name> = …`),只替换默认值那一段 ——
+		//    范围、单位、分组、显示名原样保留(它们是用户在文件里写的排版)。
+		const std::string text = m_ShaderBuffer.Text();
+		std::vector<std::pair<size_t, size_t>> lines;   // [start,end) 不含换行
+		{
+			size_t start = 0;
+			while (start <= text.size())
+			{
+				size_t end = text.find('\n', start);
+				if (end == std::string::npos)
+					end = text.size();
+				lines.push_back({ start, end });
+				if (end == text.size())
+					break;
+				start = end + 1;
+			}
+		}
+		for (const std::pair<size_t, size_t>& line : lines)
+		{
+			const std::string lineText = text.substr(line.first, line.second - line.first);
+			const size_t marker = lineText.find("//!");
+			if (marker == std::string::npos)
+				continue;
+			std::string_view view(lineText);
+			view.remove_prefix(marker + 3);
+			// 逐 token:param <type> <name> =
+			auto skipSpaces = [](std::string_view& v)
+			{
+				while (!v.empty() && (v.front() == ' ' || v.front() == '\t' || v.front() == '\r'))
+					v.remove_prefix(1);
+			};
+			auto takeToken = [](std::string_view& v)
+			{
+				size_t length = 0;
+				while (length < v.size() && v[length] != ' ' && v[length] != '\t' && v[length] != '\r')
+					++length;
+				std::string token(v.substr(0, length));
+				v.remove_prefix(length);
+				return token;
+			};
+			skipSpaces(view);
+			if (takeToken(view) != "param")
+				continue;
+			skipSpaces(view);
+			(void)takeToken(view);   // <type>
+			skipSpaces(view);
+			if (takeToken(view) != decl.Name)
+				continue;
+			skipSpaces(view);
+			if (view.empty() || view.front() != '=')
+				continue;
+			view.remove_prefix(1);
+			skipSpaces(view);
+			// 默认值一直取到 `[` / `unit(` / `group(` / `label(` 或行尾(行尾可能带 '\r')。
+			const size_t valueOffsetInView = lineText.size() - (marker + 3) - view.size();
+			size_t valueLength = 0;
+			while (valueLength < view.size())
+			{
+				const char c = view[valueLength];
+				if (c == '[' || c == '\r' || c == '\n')
+					break;
+				// 只看行内切片:紧跟 value 的 ` unit(` / ` group(` / ` label(` 是下一段。
+				if (c == ' ')
+				{
+					const std::string_view rest = view.substr(valueLength + 1);
+					if (rest.rfind("unit(", 0) == 0 || rest.rfind("group(", 0) == 0
+						|| rest.rfind("label(", 0) == 0)
+						break;
+				}
+				++valueLength;
+			}
+			// 去掉尾部空白(不是默认值的一部分)。
+			while (valueLength > 0 && (view[valueLength - 1] == ' ' || view[valueLength - 1] == '\t'))
+				--valueLength;
+			// valueOffsetInView 是"从 `//!` 之后到默认值起点"的消费长度,所以绝对位置要加上
+			// 行内 `//!` 的位置与它自己的 3 个字符。
+			const size_t replaceStart = line.first + marker + 3 + valueOffsetInView;
+			const size_t replaceLength = valueLength;
+			const std::string updated = text.substr(0, replaceStart) + normalized
+				+ text.substr(replaceStart + replaceLength);
+			const std::string before = text;
+			m_ShaderBuffer.ReplaceAll(updated);   // 整篇替换 = 一次撤销步
+			// 3) 解析回读:新默认值必须被注解解析器读成我们写的那份(否则回滚,不留下坏文件)。
+			std::vector<MaterialParamDecl> check;
+			std::string checkError;
+			const MaterialParamDecl* found = nullptr;
+			if (ParseMaterialParams(m_ShaderBuffer.Text(), &check, &checkError))
+				found = FindParamDecl(check, decl.Name);
+			bool valueMatches = false;
+			if (found != nullptr)
+			{
+				valueMatches = found->Default == normalized;
+				if (!valueMatches)
+				{
+					// 解析器可能对值做了等价规范化(贴图去引号、颜色补 alpha):按规范化结果比一次。
+					std::string written;
+					std::string readBack;
+					if (NormalizeParamValue(decl.Type, normalized, &written, nullptr)
+						&& NormalizeParamValue(decl.Type, found->Default, &readBack, nullptr))
+						valueMatches = written == readBack;
+				}
+			}
+			if (!valueMatches)
+			{
+				m_ShaderBuffer.ReplaceAll(before);
+				m_ShaderStatus = Wui::Tr("panel.material.shader.status.write_back_failed",
+					"Could not write the default back into the annotation")
+					+ (checkError.empty() ? std::string() : (": " + checkError));
+				m_ShaderStatusIsError = true;
+				return false;
+			}
+			RefreshShaderParams();
+			m_ShaderStatus = Wui::Tr("panel.material.shader.status.default_changed",
+				"Default updated in the annotation: ") + decl.Name + " = " + normalized
+				+ Wui::Tr("panel.material.shader.status.default_changed.hint",
+					" (press Save / Ctrl+S to write the file)");
+			m_ShaderStatusIsError = false;
+			return true;
+		}
+		m_ShaderStatus = Wui::Tr("panel.material.shader.status.annotation_not_found",
+			"Cannot find the annotation line for parameter '") + decl.Name
+			+ Wui::Tr("panel.material.shader.status.annotation_not_found.hint",
+				"' — edit the file text directly, then save.");
+		m_ShaderStatusIsError = true;
+		return false;
+	}
+
+	void MaterialEditorPanel::SaveShaderDocument()
+	{
+		if (m_ShaderPath.empty())
+		{
+			m_ShaderStatus = Wui::Tr("panel.material.shader.status.no_path", "No shader path");
+			m_ShaderStatusIsError = true;
+			return;
+		}
+		const std::filesystem::path target = ContentRootPath() / m_ShaderPath;
+		std::error_code dirError;
+		if (!target.parent_path().empty())
+			std::filesystem::create_directories(target.parent_path(), dirError);
+		// 临时文件 + 同目录原子替换(与脚本编辑器/材质保存同一口径:失败保留内存内容)。
+		const std::filesystem::path temporary = target.parent_path()
+			/ (target.filename().string() + ".tmp-" + std::to_string(static_cast<unsigned long>(GetCurrentProcessId())));
+		{
+			std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+			if (!output.is_open())
+			{
+				m_ShaderStatus = Wui::Tr("panel.material.shader.error.temp_create",
+					"Cannot create temporary file: ") + temporary.string();
+				m_ShaderStatusIsError = true;
+				return;
+			}
+			const std::string& source = m_ShaderBuffer.Text();
+			output.write(source.data(), static_cast<std::streamsize>(source.size()));
+			output.flush();
+			if (!output.good())
+			{
+				output.close();
+				std::error_code cleanupError;
+				std::filesystem::remove(temporary, cleanupError);
+				m_ShaderStatus = Wui::Tr("panel.material.shader.error.temp_write",
+					"Failed to write the temporary file (editor content preserved)");
+				m_ShaderStatusIsError = true;
+				return;
+			}
+		}
+		std::string replaceError;
+		bool replaced = false;
+#ifdef _WIN32
+		replaced = MoveFileExW(temporary.wstring().c_str(), target.wstring().c_str(),
+			MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+		if (!replaced)
+			replaceError = Wui::Tr("panel.material.shader.error.replace_failed",
+				"Save failed (the file may be in use): ") + m_ShaderPath
+				+ " (Win32 " + std::to_string(static_cast<unsigned long>(GetLastError())) + ")";
+#else
+		std::error_code renameError;
+		std::filesystem::rename(temporary, target, renameError);
+		replaced = !renameError;
+		if (!replaced)
+			replaceError = renameError.message();
+#endif
+		if (!replaced)
+		{
+			std::error_code cleanupError;
+			std::filesystem::remove(temporary, cleanupError);
+			m_ShaderStatus = replaceError;
+			m_ShaderStatusIsError = true;
+			return;
+		}
+		m_ShaderBuffer.MarkSaved();
+		RefreshShaderParams();
+		m_ShaderStatus = Wui::Tr("panel.material.shader.status.saved", "Saved ") + m_ShaderPath;
+		m_ShaderStatusIsError = false;
+		WLD_CORE_INFO("[material-ui] saved shader '{0}' ({1} bytes)", m_ShaderPath, m_ShaderBuffer.Text().size());
+	}
+
+	bool MaterialEditorPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
+	{
+		(void)alt;
+		if (!m_ShaderMode)
+			return false;   // `.wmat` 形态不抢键(既有接线不变)
+		if (!ctrl)
+			return false;
+		if (keyCode == KeyCodes::S)
+		{
+			m_PendingShaderSave = true;
+			return true;
+		}
+		if (keyCode == KeyCodes::R && !shift)
+		{
+			m_PendingShaderRevert = true;
+			return true;
+		}
+		return false;
+	}
+
+	// ---- M4-S2:代码形态的三列布局(预览 | 代码 | 参数)----
+	float MaterialEditorPanel::DrawShaderDocument(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		// 绘制之外只置位的请求在**帧内开头**消费(与脚本编辑器同一条纪律:不在事件派发期改文档)。
+		if (m_PendingShaderRevert)
+		{
+			m_PendingShaderRevert = false;
+			LoadShaderFromDisk();
+		}
+		if (m_PendingShaderSave)
+		{
+			m_PendingShaderSave = false;
+			SaveShaderDocument();
+		}
+		if (m_ShaderCompileScheduled)
+		{
+			m_ShaderCompileScheduled = false;
+			// 按需编译:只跑内核的编译入口拿结构化诊断(带用户源行列号),不建 PSO、不换管线
+			// (防抖编译 + 原子换管线是 M4-S3 的范围)。
+			const SurfaceCompileResult result =
+				MaterialSurfaceCompiler::CompileSurface(m_ShaderBuffer.Text(), m_ShaderPath);
+			m_ShaderDiagnostics.clear();
+			m_ShaderCompileFailed = !result.Success;
+			int firstUserLine = 0;
+			for (const SurfaceDiagnostic& diagnostic : result.Diagnostics)
+			{
+				std::string text = diagnostic.Severity + ": ";
+				if (diagnostic.InUserSource)
+				{
+					text += "line " + std::to_string(diagnostic.UserLine) + ":"
+						+ std::to_string(diagnostic.UserColumn) + "  ";
+					if (firstUserLine == 0)
+						firstUserLine = static_cast<int>(diagnostic.UserLine);
+				}
+				text += diagnostic.Message;
+				m_ShaderDiagnostics.push_back(std::move(text));
+			}
+			if (m_ShaderDiagnostics.empty() && !result.Success)
+				m_ShaderDiagnostics.push_back(result.RawToolOutput.empty()
+					? std::string("the compiler returned no diagnostics") : result.RawToolOutput);
+			if (result.Success)
+			{
+				if (m_ShaderParseError.empty())
+					m_ShaderErrorLine = 0;
+				m_ShaderCompileStatus = Wui::Tr("panel.material.shader.compile.ok", "Compiled: ")
+					+ std::to_string(result.Artifact.ByteSize())
+					+ Wui::Tr("panel.material.shader.compile.bytes", " bytes of SPIR-V")
+					+ (result.CacheHit ? Wui::Tr("panel.material.shader.compile.cached", " (cache hit)") : std::string());
+			}
+			else
+			{
+				if (m_ShaderParseError.empty() && firstUserLine > 0)
+					m_ShaderErrorLine = firstUserLine;
+				m_ShaderCompileStatus = Wui::Tr("panel.material.shader.compile.failed", "Compile failed");
+			}
+		}
+		const float headerHeight = DrawShaderHeader(ctx, { rect.X, rect.Y, rect.W, kHeaderBaseHeight }, host);
+		const float pad = theme.Pad;
+		const float gap = theme.PadSmall;
+		const Wui::WuiRect body { rect.X, rect.Y + headerHeight, rect.W,
+			std::max(80.0f, rect.H - headerHeight) };
+		if (body.W >= kShaderThreeColumnMinWidth)
+		{
+			// 三列 + 两条可拖拽分隔条(与 U27 的预览/参数分隔条同一控件、同一口径)。
+			const float usable = body.W - 2.0f * pad - 2.0f * gap;
+			float previewW = SessionPreviewColumnWidth() > 0.0f
+				? SessionPreviewColumnWidth() : body.W * 0.28f;
+			previewW = std::clamp(previewW, kShaderPreviewMinWidth,
+				std::max(kShaderPreviewMinWidth, usable - kShaderCodeMinWidth - kShaderParamsMinWidth));
+			float codeW = m_ShaderCodeColumnWidth > 0.0f
+				? m_ShaderCodeColumnWidth : usable * kShaderDefaultCodeRatio;
+			codeW = std::clamp(codeW, kShaderCodeMinWidth,
+				std::max(kShaderCodeMinWidth, usable - previewW - kShaderParamsMinWidth));
+			const float paramsW = std::max(kShaderParamsMinWidth, usable - previewW - codeW);
+
+			const float rowY = body.Y + gap;
+			const float rowH = std::max(80.0f, body.H - gap - pad);
+			const float previewX = body.X + pad;
+			const float previewAxis = previewX + previewW + gap * 0.5f;
+			const float codeX = previewX + previewW + gap;
+			const float codeAxis = codeX + codeW + gap * 0.5f;
+			const float paramsX = codeX + codeW + gap;
+			// 双击复位:与 .wmat 形态同口径(复位必须在控件调用之前,拖拽锚点才是默认值)。
+			const Wui::WuiId previewSplitId = Wui::HashId("material.shader.splitter.preview");
+			const Wui::WuiId codeSplitId = Wui::HashId("material.shader.splitter.code");
+			const Wui::WuiRect previewBand { previewAxis - 3.0f, rowY, 6.0f, rowH };
+			const Wui::WuiRect codeBand { codeAxis - 3.0f, rowY, 6.0f, rowH };
+			const float defaultPreviewW = std::clamp(body.W * 0.28f, kShaderPreviewMinWidth,
+				std::max(kShaderPreviewMinWidth, usable - kShaderCodeMinWidth - kShaderParamsMinWidth));
+			const float defaultCodeW = std::clamp(usable * kShaderDefaultCodeRatio, kShaderCodeMinWidth,
+				std::max(kShaderCodeMinWidth, usable - defaultPreviewW - kShaderParamsMinWidth));
+			if (ctx.IsDoubleClicked(previewBand))
+			{
+				previewW = defaultPreviewW;
+				SessionPreviewColumnWidth() = previewW;
+			}
+			if (ctx.IsDoubleClicked(codeBand))
+			{
+				codeW = defaultCodeW;
+				m_ShaderCodeColumnWidth = codeW;
+			}
+			float movedValue = previewW;
+			if (Wui::Splitter(ctx, previewSplitId, { previewAxis, rowY, 1.0f, rowH }, true, movedValue,
+				kShaderPreviewMinWidth, std::max(kShaderPreviewMinWidth,
+					usable - kShaderCodeMinWidth - kShaderParamsMinWidth), theme))
+			{
+				previewW = movedValue;
+				SessionPreviewColumnWidth() = previewW;
+			}
+			movedValue = codeW;
+			if (Wui::Splitter(ctx, codeSplitId, { codeAxis, rowY, 1.0f, rowH }, true, movedValue,
+				kShaderCodeMinWidth, std::max(kShaderCodeMinWidth,
+					usable - previewW - kShaderParamsMinWidth), theme))
+			{
+				codeW = movedValue;
+				m_ShaderCodeColumnWidth = codeW;
+			}
+			Wui::Tooltip(ctx, previewBand, Wui::Tr("panel.material.shader.splitter.preview.tooltip",
+				"Drag to resize the preview; double-click to restore the default split."));
+			Wui::Tooltip(ctx, codeBand, Wui::Tr("panel.material.shader.splitter.code.tooltip",
+				"Drag to resize the code column; double-click to restore the default split."));
+
+			DrawPreview(ctx, { previewX, rowY, previewW, rowH }, host);
+			DrawShaderCode(ctx, { codeX, rowY, codeW, rowH }, host);
+			DrawShaderParams(ctx, { paramsX, rowY, std::max(kShaderParamsMinWidth, paramsW), rowH }, host);
+		}
+		else
+		{
+			// 窄窗单列:预览(上) → 代码(中) → 参数(下),三段不重叠(与其他面板的窄窗规则一致)。
+			const float width = std::max(80.0f, body.W - 2.0f * pad);
+			const float cardMax = std::max(kPreviewImageMinSide + 2.0f * gap, body.H * 0.34f);
+			const Wui::WuiRect previewZone { body.X + pad, body.Y + gap, width, cardMax };
+			const float previewUsed = DrawPreview(ctx, previewZone, host);
+			// 代码与参数各占剩余空间的一半;参数列保底 kParamsMinHeight(它比代码更能被压缩)。
+			const float remaining = std::max(200.0f, body.H - gap - previewUsed - 2.0f * pad);
+			const float codeHeight = std::max(100.0f, remaining - kParamsMinHeight - pad);
+			DrawShaderCode(ctx, { body.X + pad, previewZone.Y + previewUsed + pad, width, codeHeight }, host);
+			DrawShaderParams(ctx, { body.X + pad, previewZone.Y + previewUsed + pad + codeHeight + pad,
+				width, std::max(kParamsMinHeight, remaining - codeHeight - pad) }, host);
+		}
+		return body.H;
+	}
+
+	// ---- M4-S2:代码形态的头部(名称 + 路径 + 脏标记 + 动作)----
+	float MaterialEditorPanel::DrawShaderHeader(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		const float gap = theme.PadSmall;
+		const float x = rect.X;
+		const float y = rect.Y + gap;
+		const float buttonH = theme.ControlHeight;
+		const bool dirty = m_ShaderBuffer.Dirty();
+		const bool readOnly = host.IsReadOnlyMode();
+
+		struct ShaderAction
+		{
+			const char* Id = "";
+			std::string Label;
+			std::string Doc;
+			bool Enabled = true;
+			bool Primary = false;
+		};
+		const std::vector<ShaderAction> actions {
+			{ "material.shader.save", Wui::Tr("panel.material.shader.save", "Save"),
+				Wui::Tr("panel.material.shader.save.tooltip",
+					"Save (Ctrl+S): write the source back to the .hlsl on disk (temporary file + atomic "
+					"replace). The parameter annotations in the file are the single source of truth."),
+				!readOnly, true },
+			{ "material.shader.revert", Wui::Tr("panel.material.shader.revert", "Revert"),
+				Wui::Tr("panel.material.shader.revert.tooltip",
+					"Revert (Ctrl+R): drop unsaved edits and read the .hlsl from disk again."),
+				true, false },
+			{ "material.shader.compile", Wui::Tr("panel.material.shader.compile", "Compile"),
+				Wui::Tr("panel.material.shader.compile.tooltip",
+					"Compile: run the engine surface-function compiler once and show its diagnostics "
+					"(line numbers refer to this file). Live/recompiled preview lands with M4-S3."),
+				true, false },
+			{ "material.shader.reveal", Wui::Tr("panel.material.shader.reveal", "Reveal"),
+				Wui::Tr("panel.material.shader.reveal.tooltip",
+					"Reveal: select the .hlsl in Windows Explorer."),
+				true, false },
+		};
+		float actionX = x;
+		float actionY = y;
+		float actionsHeight = buttonH;
+		for (const ShaderAction& action : actions)
+		{
+			const float measured = ctx.MeasureTextWidth(action.Label, 13.0f) + 18.0f;
+			const float width = std::min(std::max(kActionMinWidth, measured), std::max(24.0f, rect.W - 2.0f));
+			if (actionX > x && actionX + width > x + rect.W - 2.0f)
+			{
+				actionX = x;
+				actionY += buttonH + 6.0f;
+			}
+			const Wui::WuiRect actionRect { actionX, actionY, width, buttonH };
+			const std::string actionId = action.Id;
+			if (ActionButton(ctx, Wui::HashId(action.Id), actionRect, action.Label, action.Doc,
+				action.Enabled, action.Primary, theme))
+			{
+				if (actionId == "material.shader.save")
+					SaveShaderDocument();
+				else if (actionId == "material.shader.revert")
+					LoadShaderFromDisk();
+				else if (actionId == "material.shader.compile")
+					m_ShaderCompileScheduled = true;   // 在绘制之外执行(帧内首段消费)
+				else if (actionId == "material.shader.reveal")
+				{
+					const std::filesystem::path disk = ContentRootPath() / m_ShaderPath;
+					std::error_code existsError;
+					if (!std::filesystem::exists(disk, existsError))
+					{
+						m_ShaderStatus = Wui::Tr("panel.material.shader.status.reveal_missing",
+							"Reveal failed: the .hlsl is not on disk yet (save it first)");
+						m_ShaderStatusIsError = true;
+					}
+#ifdef _WIN32
+					else
+					{
+						// 与 .wmat 的 Reveal / 内容浏览器"Show in Explorer"同一条系统调用。
+						const std::wstring parameters = L"/select,\""
+							+ std::filesystem::absolute(disk).wstring() + L"\"";
+						const HINSTANCE revealResult = ShellExecuteW(nullptr, L"open", L"explorer.exe",
+							parameters.c_str(), nullptr, SW_SHOWNORMAL);
+						if (reinterpret_cast<intptr_t>(revealResult) <= 32)
+						{
+							m_ShaderStatus = Wui::Tr("panel.material.shader.status.reveal_failed",
+								"Reveal failed");
+							m_ShaderStatusIsError = true;
+						}
+						else
+						{
+							m_ShaderStatus = Wui::Tr("panel.material.shader.status.revealed",
+								"Revealed in Explorer: ") + m_ShaderPath;
+							m_ShaderStatusIsError = false;
+						}
+					}
+#else
+					else
+					{
+						m_ShaderStatus = Wui::Tr("panel.material.shader.status.reveal_unsupported",
+							"Reveal is only implemented on Windows");
+						m_ShaderStatusIsError = true;
+					}
+#endif
+				}
+			}
+			actionsHeight = (actionY - y) + buttonH;
+			actionX += actionRect.W + 6.0f;
+		}
+
+		// 脏标记(与 .wmat 同一语言:* = 内存与磁盘不一致)。
+		const std::string marker = dirty ? "*" : "";
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.dirty");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.shader.dirty.label", "Unsaved changes");
+			node.Value = dirty ? "dirty" : "clean";
+			node.Tooltip = Wui::Tr("panel.material.shader.dirty.tooltip",
+				"* = the editor buffer differs from the .hlsl on disk.");
+			node.Rect = { x, y + actionsHeight + 4.0f, 24.0f, 14.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		// 标题行:名称(带脏标记)+ 逻辑路径。
+		const float titleY = y + actionsHeight + 6.0f;
+		const std::string title = std::filesystem::path(m_ShaderPath).filename().string() + marker;
+		Wui::Label(ctx, { x + 14.0f, titleY }, title, theme.Text, kHeaderTextHeight);
+		Wui::Label(ctx, { x, titleY + kHeaderTextHeight + 2.0f },
+			EllipsizeToWidth(ctx, m_ShaderPath, std::max(40.0f, rect.W - 8.0f), kHeaderStatusHeight),
+			theme.TextMuted, kHeaderStatusHeight);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.title");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.shader.title", "Material Shader");
+			node.Value = m_ShaderPath + (dirty ? " (unsaved)" : " (saved)");
+			node.Tooltip = Wui::Tr("panel.material.shader.title.tooltip",
+				"Logical path of this .hlsl (relative to the content root). The material editor opens "
+				"shaders in code form: preview | code | declared parameters.");
+			node.Rect = { x, titleY - 2.0f, std::max(40.0f, rect.W - 8.0f),
+				kHeaderTextHeight + kHeaderStatusHeight + 6.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		const float headerHeight = (titleY - rect.Y) + kHeaderTextHeight + kHeaderStatusHeight + 2.0f;
+		return headerHeight;
+	}
+
+	// ---- M4-S2:代码列(复用 Wui::CodeEditor 内核)----
+	void MaterialEditorPanel::DrawShaderCode(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		Wui::PanelBackground(ctx, rect, theme.ContentBg, theme.Radius);
+		const Wui::WuiRect editorRect { rect.X + 6.0f, rect.Y + 6.0f,
+			std::max(40.0f, rect.W - 12.0f), std::max(40.0f, rect.H - 12.0f) };
+		const bool readOnly = host.IsReadOnlyMode();
+		const float fontSize = std::max(10.0f, std::min(32.0f,
+			Editor::EditorPreferences::Get().Data().ScriptFontSize));
+		Wui::WuiAccessNode editorNode;
+		editorNode.Id = Wui::HashId("material.shader.code");
+		editorNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+		editorNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+		editorNode.Kind = "editor";
+		editorNode.Label = Wui::Tr("panel.material.shader.code", "shader code");
+		editorNode.Value = m_ShaderPath;
+		editorNode.Rect = editorRect;
+		editorNode.Enabled = !readOnly;
+		editorNode.Interactive = true;
+		Wui::WuiAccessibility::Get().Register(editorNode);
+
+		m_ShaderHighlight.Update(m_ShaderBuffer);
+		Wui::WuiCodeEditorOptions options;
+		options.FontSize = fontSize;
+		options.LineHeight = std::round(fontSize * (20.0f / 14.0f));
+		options.ErrorLine = m_ShaderErrorLine > 0 ? m_ShaderErrorLine - 1 : -1;
+		options.ReadOnly = readOnly;
+		options.Highlight = [this](std::string_view text, std::vector<Wui::WuiCodeToken>& out)
+		{
+			if (const std::vector<Wui::WuiCodeToken>* cached = m_ShaderHighlight.Find(text))
+			{
+				out = *cached;
+				return;
+			}
+			// 本帧改过文本(缓冲区重分配)→ 重建缓存后重试;仍未命中就现场兜底。
+			m_ShaderHighlight.Update(m_ShaderBuffer);
+			if (const std::vector<Wui::WuiCodeToken>* refreshed = m_ShaderHighlight.Find(text))
+			{
+				out = *refreshed;
+				return;
+			}
+			HlslHighlightState state;
+			HlslHighlighter::HighlightLine(text, state, out);
+		};
+		options.GetClipboard = [](std::string& out)
+		{
+			if (!Application::HasInstance())
+				return false;
+			out = Application::Get().GetWindow().GetClipboardText();
+			return !out.empty();
+		};
+		options.SetClipboard = [](std::string_view text)
+		{
+			if (!Application::HasInstance())
+				return false;
+			Application::Get().GetWindow().SetClipboardText(std::string(text));
+			return true;
+		};
+		const Wui::WuiCodeEditorResult result =
+			Wui::CodeEditor(ctx, Wui::HashId("material.shader.code"), editorRect, m_ShaderBuffer, options);
+		if (result.SaveRequested)
+			m_PendingShaderSave = true;
+		if (result.Changed && m_ShaderParseError.empty())
+		{
+			// 编辑中的注解文本可能已经不合法:每帧重解析只在"源码里出现过 //! 或错误尚未清除"时做,
+			// 避免大文件每帧全量解析。
+			static const std::string kMarker = "//!";
+			if (m_ShaderBuffer.Text().find(kMarker) != std::string::npos)
+				RefreshShaderParams();
+		}
+	}
+
+	// ---- M4-S2:参数列(注解 = 事实源;改默认值 = 改写注解) ----
+	bool MaterialEditorPanel::DrawShaderParamControl(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+		const MaterialParamDecl& decl, const Wui::WuiRect& controlRect, const std::string& current,
+		std::string* outText)
+	{
+		// 控件 id 是**稳定契约**(派工单点名):material.shader.params.<name>。
+		const Wui::WuiId id = Wui::HashId(("material.shader.params." + decl.Name).c_str());
+		switch (decl.Type)
+		{
+			case ParamType::Float:
+			{
+				float value = decl.Min;
+				if (!ParseParamFloat(current, &value))
+					value = decl.Min;
+				// 值域 = 注解里的 [min,max](缺省 0..1,与内核同口径);值区常显 + 可键入 + ↑↓ 步进。
+				Wui::DragBarFloat(ctx, id, controlRect, value, decl.Min, decl.Max, theme);
+				const float rounded = std::round(value * 1000.0f) / 1000.0f;
+				const std::string text = FormatParamFloatText(rounded);
+				if (text != current)
+				{
+					*outText = text;
+					return true;
+				}
+				return false;
+			}
+			case ParamType::Int:
+			{
+				int value = static_cast<int>(decl.Min);
+				if (!ParseParamInt(current, &value))
+					value = static_cast<int>(decl.Min);
+				const int minValue = static_cast<int>(decl.Min);
+				const int maxValue = std::max(minValue, static_cast<int>(decl.Max));
+				if (maxValue - minValue <= 16)
+					Wui::StepperInt(ctx, id, controlRect, value, minValue, maxValue, theme);
+				else
+				{
+					int64_t wide = value;
+					Wui::NumberFieldInt(ctx, id, controlRect, wide, minValue, maxValue, theme);
+					value = static_cast<int>(wide);
+				}
+				const std::string text = std::to_string(value);
+				if (text != current)
+				{
+					*outText = text;
+					return true;
+				}
+				return false;
+			}
+			case ParamType::Bool:
+			{
+				bool value = false;
+				ParseParamBool(current, &value);
+				if (Wui::Checkbox(ctx, id, controlRect, decl.Label.empty() ? decl.Name : decl.Label, value, theme))
+				{
+					*outText = value ? "true" : "false";
+					return true;
+				}
+				return false;
+			}
+			case ParamType::Color:
+			{
+				glm::vec4 color { 1.0f, 1.0f, 1.0f, 1.0f };
+				float rgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				if (ParseParamFloatComponents(current, ParamType::Color, rgba, 4))
+					color = glm::vec4 { rgba[0], rgba[1], rgba[2], rgba[3] };
+				if (Wui::ColorField(ctx, id, controlRect, color, theme))
+				{
+					const glm::vec4 quantized = QuantizeMaterialValue(color);
+					*outText = FormatParamFloatText(quantized.x) + ", " + FormatParamFloatText(quantized.y)
+						+ ", " + FormatParamFloatText(quantized.z) + ", " + FormatParamFloatText(quantized.w);
+					return true;
+				}
+				return false;
+			}
+			case ParamType::Vec2:
+			case ParamType::Vec3:
+			case ParamType::Vec4:
+			{
+				if (decl.Type == ParamType::Vec3)
+				{
+					glm::vec3 value { 0.0f };
+					float rgb[3] = { 0.0f, 0.0f, 0.0f };
+					if (ParseParamFloatComponents(current, ParamType::Vec3, rgb, 3))
+						value = glm::vec3 { rgb[0], rgb[1], rgb[2] };
+					// [min,max] 只对 Float/Int 有效(内核口径):向量用固定宽容区间。
+					if (Wui::Vec3Field(ctx, id, controlRect, value, 0.01f, -8.0f, 8.0f, theme, 0))
+					{
+						*outText = FormatParamFloatText(value.x) + ", " + FormatParamFloatText(value.y)
+							+ ", " + FormatParamFloatText(value.z);
+						return true;
+					}
+					return false;
+				}
+				// Vec2 / Vec4:没有专用控件 —— 用逗号文本输入(值的方言就是逗号分隔),
+				// 提交(回车 / 失焦)时按内核的 NormalizeParamValue 校验。
+				std::string& buffer = m_ShaderParamTextBuffers[decl.Name];
+				if (buffer.empty())
+					buffer = current;
+				Wui::TextFieldA11y a11y;
+				a11y.Label = decl.Label.empty() ? decl.Name : decl.Label;
+				a11y.Placeholder = decl.Type == ParamType::Vec2 ? "x, y" : "x, y, z, w";
+				if (Wui::TextField(ctx, id, controlRect, buffer, theme, nullptr, &a11y))
+				{
+					std::string normalized;
+					std::string error;
+					if (NormalizeParamValue(decl.Type, buffer, &normalized, &error))
+					{
+						buffer = normalized;
+						*outText = normalized;
+						return true;
+					}
+					m_ShaderStatus = Wui::Tr("panel.material.shader.status.value_invalid",
+						"Value rejected: ") + (error.empty() ? buffer : error);
+					m_ShaderStatusIsError = true;
+					buffer = current;   // 回显合法值,不改文件
+				}
+				return false;
+			}
+			case ParamType::Texture2D:
+			default:
+			{
+				std::vector<std::string> options = m_TexturePaths;
+				options.insert(options.begin(), Wui::Tr("panel.material.texture_none", "(none)"));
+				int selected = 0;
+				for (size_t index = 0; index < m_TexturePaths.size(); ++index)
+					if (m_TexturePaths[index] == current)
+						selected = static_cast<int>(index) + 1;
+				if (Wui::SearchableCombo(ctx, id, controlRect, decl.Label.empty() ? decl.Name : decl.Label,
+					options, selected, theme))
+				{
+					const std::string chosen = selected <= 0 ? std::string()
+						: options[static_cast<size_t>(selected)];
+					if (chosen != current)
+					{
+						*outText = chosen;
+						return true;
+					}
+				}
+				return false;
+			}
+		}
+	}
+
+	float MaterialEditorPanel::DrawShaderParams(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Wui::WuiTheme& theme = host.Theme();
+		float y = rect.Y;
+		// 顶部:标题 + 参数条数(读屏/脚本由此确认"右栏就是注解参数表")。
+		const std::string title = Wui::Tr("panel.material.shader.params", "Shader Parameters");
+		Wui::Label(ctx, { rect.X, y + 2.0f }, title, theme.Text, 13.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.params.header");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "group";
+			node.Label = title;
+			node.Value = std::to_string(m_ShaderParams.size()) + " declared parameters";
+			node.Tooltip = Wui::Tr("panel.material.shader.params.tooltip",
+				"Parameters declared by the //! param annotations in this file. Editing a value here "
+				"rewrites the annotation default (the file stays the single source of truth).");
+			node.Rect = { rect.X, y, std::max(40.0f, rect.W), 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		y += 22.0f;
+		if (!m_ShaderParseError.empty())
+		{
+			Wui::Label(ctx, { rect.X, y }, Wui::Tr("panel.material.shader.parse_error", "Annotation error: ")
+				+ EllipsizeToWidth(ctx, m_ShaderParseError, std::max(40.0f, rect.W), 12.0f), theme.Danger, 12.0f);
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.parse_error");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.shader.parse_error.label", "Parameter annotation error");
+			node.Value = m_ShaderParseError;
+			node.Tooltip = Wui::Tr("panel.material.shader.parse_error.tooltip",
+				"The //! param annotations could not be parsed; the readable reason carries line:column. "
+				"Fix the text in the code column — nothing is written to disk until you save.");
+			node.Rect = { rect.X, y - 2.0f, std::max(40.0f, rect.W), 18.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+			y += 20.0f;
+		}
+		// 提示:行数 = 声明数(探针按它断言"右栏条数与 ParseMaterialParams 一致")。
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.params.count");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.shader.params.count.label", "Declared parameters");
+			node.Value = std::to_string(m_ShaderParams.size());
+			node.Tooltip = title;
+			node.Rect = { rect.X, y, std::max(40.0f, rect.W), 14.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		y += 18.0f;
+
+		const Wui::WuiRect content { rect.X, y, rect.W, std::max(20.0f, rect.Y + rect.H - y - 22.0f) };
+		// 内容高度 ≈ 组头 20 + 每行 26(与下面绘制一致;折叠组只多留一点余量,不影响可读性)。
+		const std::string defaultGroupLabel =
+			Wui::Tr("panel.material.shader.params.group.default", "Parameters");
+		std::vector<std::string> groups;
+		for (const MaterialParamDecl& decl : m_ShaderParams)
+		{
+			const std::string group = decl.Group.empty() ? defaultGroupLabel : decl.Group;
+			if (std::find(groups.begin(), groups.end(), group) == groups.end())
+				groups.push_back(group);
+		}
+		const float contentHeight = static_cast<float>(groups.size()) * 20.0f
+			+ static_cast<float>(m_ShaderParams.size()) * 26.0f + 4.0f;
+		// 滚动位置复用 m_ScrollY(材质字段列与代码形态不会同屏出现)。
+		Wui::BeginScrollArea(ctx, content, contentHeight, m_ScrollY, theme);
+		// 简化:参数不多(注解表通常几条到十几条),不做虚拟化;直接按分组顺序画。
+		float cursor = content.Y + 2.0f - m_ScrollY;
+		std::string currentGroup;
+		bool groupOpen = true;
+		for (const MaterialParamDecl& decl : m_ShaderParams)
+		{
+			const std::string group = decl.Group.empty()
+				? defaultGroupLabel : decl.Group;
+			if (group != currentGroup)
+			{
+				currentGroup = group;
+				auto found = m_ShaderGroupOpen.find(group);
+				if (found == m_ShaderGroupOpen.end())
+					found = m_ShaderGroupOpen.emplace(group, true).first;
+				groupOpen = found->second;
+				const Wui::WuiRect headerRect { content.X, cursor, std::max(40.0f, content.W), 20.0f };
+				const bool hovered = ctx.IsHovered(headerRect);
+				Wui::HoverRow(ctx, headerRect, hovered, false, theme, 4.0f);
+				Wui::Label(ctx, { headerRect.X + 6.0f, cursor + 3.0f }, (groupOpen ? "v " : "> ") + group,
+					theme.TextMuted, 12.0f);
+				if (hovered)
+					ctx.SetCursor(Wui::WuiCursor::Hand);
+				if (ctx.IsClicked(headerRect))
+					found->second = !found->second;
+				Wui::Tooltip(ctx, headerRect, Wui::Tr("panel.material.shader.params.group.tooltip",
+					"Group name written in the annotation: group(\"…\"). Click to expand or collapse."));
+				cursor += 20.0f;
+				if (!groupOpen)
+					continue;
+			}
+			if (!groupOpen)
+				continue;
+			// 一行 = 标签 + 控件(+ 单位/范围/类型说明)。
+			const float rowHeight = 26.0f;
+			const Wui::WuiRect rowRect { content.X, cursor, std::max(40.0f, content.W), rowHeight };
+			const float labelWidth = std::min(140.0f, std::max(70.0f, content.W * 0.34f));
+			const Wui::WuiRect controlRect { content.X + labelWidth + 8.0f, cursor,
+				std::max(60.0f, content.W - labelWidth - 16.0f), 22.0f };
+			const std::string label = decl.Label.empty() ? decl.Name : decl.Label;
+			Wui::Label(ctx, { content.X, cursor + 4.0f },
+				EllipsizeToWidth(ctx, label, labelWidth, 12.0f), theme.Text, 12.0f);
+			std::string valueText = decl.Default;
+			if (DrawShaderParamControl(ctx, theme, decl, controlRect, decl.Default, &valueText))
+			{
+				if (m_ShaderPendingParamName != decl.Name || m_ShaderPendingParamValue != valueText)
+				{
+					m_ShaderPendingParamName = decl.Name;
+					m_ShaderPendingParamValue = valueText;
+				}
+			}
+			// 悬停说明:类型 / 范围 / 单位 / 分组 / 当前默认值。
+			std::string doc = Wui::Tr("panel.material.shader.param.type", "Type: ")
+				+ ParamTypeName(decl.Type);
+			if (decl.Type == ParamType::Float || decl.Type == ParamType::Int)
+				doc += "\n" + Wui::Tr("panel.material.shader.param.range", "Range: ")
+					+ FormatParamFloatText(decl.Min) + " .. " + FormatParamFloatText(decl.Max);
+			if (!decl.Unit.empty())
+				doc += "\n" + Wui::Tr("panel.material.shader.param.unit", "Unit: ") + decl.Unit;
+			doc += "\n" + Wui::Tr("panel.material.shader.param.default", "Default (from the annotation): ")
+				+ decl.Default;
+			doc += "\n" + Wui::Tr("panel.material.shader.param.edit_hint",
+				"Editing here rewrites the //! param annotation; press Save (Ctrl+S) to write the file.");
+			Wui::Tooltip(ctx, rowRect, doc);
+			{
+				Wui::WuiAccessNode node;
+				node.Id = Wui::HashId(("material.param." + decl.Name + ".source").c_str());
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "text";
+				node.Label = label + Wui::Tr("panel.material.shader.param.source.label", " — source");
+				node.Value = "shader-default";
+				// 行说明与 `.wmat` 形态同一份(类型 / 范围 / 单位 / 来源),读屏两态一致。
+				node.Tooltip = doc;
+				node.Rect = { content.X, cursor, 2.0f, rowHeight };
+				node.Enabled = true;
+				node.Interactive = false;
+				node.Visible = true;
+				Wui::WuiAccessibility::Get().Register(node);
+			}
+			cursor += rowHeight;
+		}
+		Wui::EndScrollArea(ctx);
+		// 拖拽/输入结束那一帧才改写注解:一次拖动 = 一个撤销步(拖动期间每帧都改会把
+		// 撤销历史塞满,也会让解析器每帧重跑)。
+		if (!m_ShaderPendingParamName.empty()
+			&& (!ctx.Input().MouseDown[0] || ctx.Input().MouseReleased[0]))
+		{
+			const std::string pendingName = m_ShaderPendingParamName;
+			const std::string pendingValue = m_ShaderPendingParamValue;
+			m_ShaderPendingParamName.clear();
+			m_ShaderPendingParamValue.clear();
+			if (const MaterialParamDecl* pendingDecl = FindParamDecl(m_ShaderParams, pendingName))
+				WriteShaderParamDefault(*pendingDecl, pendingValue);
+		}
+		if (m_ShaderParams.empty() && m_ShaderParseError.empty())
+			Wui::Label(ctx, { content.X, content.Y + 2.0f },
+				Wui::Tr("panel.material.shader.params.none",
+					"This shader declares no parameters yet — add //! param lines in the code column."),
+				theme.TextMuted, 12.0f);
+		// 底部状态行(保存 / 编译 / 参数编辑结果)。
+		const float statusY = rect.Y + rect.H - 18.0f;
+		const std::string status = !m_ShaderCompileStatus.empty()
+			? (m_ShaderStatus.empty() ? m_ShaderCompileStatus : m_ShaderStatus + "   |   " + m_ShaderCompileStatus)
+			: m_ShaderStatus;
+		Wui::Label(ctx, { rect.X + 2.0f, statusY },
+			EllipsizeToWidth(ctx, status, std::max(40.0f, rect.W - 4.0f), 11.0f),
+			(m_ShaderStatusIsError || m_ShaderCompileFailed) ? theme.Danger : theme.TextMuted, 11.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.status");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.shader.status.label", "Status");
+			node.Value = status;
+			node.Tooltip = status;
+			node.Rect = { rect.X, statusY - 2.0f, std::max(40.0f, rect.W - 4.0f), 16.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		if (!m_ShaderDiagnostics.empty())
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.diagnostics");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.material.shader.diagnostics", "Compiler diagnostics");
+			node.Value = m_ShaderDiagnostics.front();
+			node.Tooltip = m_ShaderDiagnostics.front();
+			node.Rect = { rect.X, statusY - 20.0f, std::max(40.0f, rect.W - 4.0f), 16.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		return y - rect.Y;
+	}
+
 	void MaterialEditorPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		if (std::getenv("WLD_TRACE_3D"))
@@ -4014,6 +5453,13 @@ namespace World
 			}
 		}
 		const Wui::WuiTheme& theme = host.Theme();
+		// M4-S2:代码形态(`.hlsl`)与材质形态(`.wmat`)是本面板的两种形态,布局/动作各走一条;
+		// `.wmat` 路径的既有行为一行不动。
+		if (m_ShaderMode)
+		{
+			DrawShaderDocument(ctx, rect, host);
+			return;
+		}
 		// U25-M2:面板级模态(Save As… / 丢弃未保存改动再打开)按"自己的输入封锁"处理 ——
 		// 材质面板可能是**独立窗口**(外壳的 m_PanelModalOwner 只作用于主窗口的停靠树),
 		// 所以在本面板内容之前登记整窗遮挡,画模态本体之前解开(与 WuiModal 的三段式一致)。

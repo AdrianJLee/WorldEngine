@@ -283,6 +283,9 @@ namespace World
 
 		// 菜单 / 模态 / 布局
 		void DrawMenuBar(Wui::WuiContext& ctx);
+		// M4-S2:把本帧攒下的菜单栏下拉命令补画到 overlay 末尾(在所有面板与模态之后、
+		// tooltip 之前调用一次)。没有菜单打开时是零成本。
+		void FlushDeferredMenuDraws(Wui::WuiContext& ctx);
 		// P4-U13:prefab 编辑横幅(顶部一条,标明"在改资产";右侧 保存 / 返回场景)。
 		void DrawPrefabBar(Wui::WuiContext& ctx, float y);
 		void DrawModals(Wui::WuiContext& ctx);
@@ -446,6 +449,9 @@ namespace World
 		std::string m_PanelModalOwner;
 		Wui::WuiId m_OpenMenu = 0;
 		Wui::WuiRect m_MenuHeaderRect;
+		// M4-S2:`菜单栏下拉`的延后绘制批次(与 U29 的 WuiDeferredPopupScope 同一口径:
+		// 绘制搬到帧末,命中/遮挡登记留在原地)。帧末由 FlushDeferredMenuDraws 追加到 overlay。
+		std::vector<Wui::WuiDrawCommand> m_DeferredMenuCommands;
 		Wui::WuiContext* m_Ctx = nullptr;
 
 		// D10-10:导入位置模态的状态与目录树行(打开时重建;根行 Depth 0,其余按路径排序)。
