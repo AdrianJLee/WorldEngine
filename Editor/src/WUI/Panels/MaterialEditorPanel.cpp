@@ -977,11 +977,11 @@ namespace World
 
 	void MaterialEditorPanel::OpenMaterial(const std::string& path)
 	{
-		// M4-S2/Slang-B1:同一个编辑器的两种形态 —— 着色器(`.slang`;legacy `.hlsl` 同样识别)
-		// = 代码形态(预览 | 代码 | 注解参数),`.wmat` = 材质实例形态(左预览 / 右字段,无代码区)。
+		// M4-S2/Slang-B1:同一个编辑器的两种形态 —— 着色器(`.slang`)= 代码形态
+		// (预览 | 代码 | 注解参数),`.wmat` = 材质实例形态(左预览 / 右字段,无代码区)。
 		// 入口与面板 id 都不变。
 		const std::string extension = LowerExtension(std::filesystem::path(path));
-		if (extension == ".slang" || extension == ".hlsl")
+		if (extension == ".slang")
 		{
 			OpenShaderDocument(path);
 			return;
@@ -4344,12 +4344,12 @@ namespace World
 			ctx.ClearModal();
 	}
 
-	// ==== M4-S2/Slang-B1:Material Shader(`.slang`;legacy `.hlsl`)代码形态 ====
+	// ==== M4-S2/Slang-B1:Material Shader(`.slang`)代码形态 ====
 	//
 	// 用户口径:「打开着色器:左预览 / 中代码 / 右参数 —— 右栏显示 shader 声明的参数与其默认值」。
 	// 形态由**打开的文件扩展名**决定(同一个面板、同一套窗口/停靠机制):
 	//   - 代码列复用 Wui::CodeEditor 内核(行号 / 高亮 / 选区 / 撤销 / 滚动 / 诊断行),
-	//     这里只提供 HLSL token 化(HlslHighlight.h);
+	//     这里只提供 Slang/HLSL 语法族的 token 化(SlangHighlight.h);
 	//   - 参数列的事实源是**文件里的注解**(M4-S2 内核的 ParseMaterialParams);
 	//     改默认值 = 改写注解文本,不是改内存里的影子值;
 	//   - 真正的"防抖编译 + 原子换管线"属 M4-S3;本批按需编译只验证源码能过编译器,
@@ -4452,8 +4452,7 @@ namespace World
 	//   - 未保存的实时改动 → Install("<路径>#preview", artifact),预览材质按
 	//     `Material::SetSurfaceKeyOverride` 指到这个键(渲染侧的管线选择只看这个键);
 	//   - 保存成功       → 写盘 + Install("<路径>", artifact),预览材质指回普通键(这时场景才变);
-	//   - 打开既有 `.slang`(legacy `.hlsl`)先编译已保存内容并 Install("<路径>", …),
-	//     保证场景/预览有可用基线。
+	//   - 打开既有 `.slang` 先编译已保存内容并 Install("<路径>", …),保证场景/预览有可用基线。
 	// 线程纪律:编译器只在**工作线程**跑(单飞,后来者覆盖前者);Install 与渲染状态只在主线程帧内改。
 	namespace
 	{
@@ -4566,7 +4565,7 @@ namespace World
 			case ShaderDiagnosticClass::Sampler:
 				return Wui::Tr("panel.material.shader.diag.help.sampler",
 					"Combined-sampler misuse: a texture parameter becomes `Sampler2D` and is sampled as "
-					"`Tex.Sample(uv)` -- there is no separate sampler argument, and legacy "
+					"`Tex.Sample(uv)` -- there is no separate sampler argument, and the old "
 					"`register(...)` / `[[vk::combinedImageSampler]]` are not supported. Fix: drop the "
 					"sampler argument and use explicit `[[vk::binding(N, S)]]`.");
 			case ShaderDiagnosticClass::Entry:
@@ -4578,55 +4577,6 @@ namespace World
 			default:
 				return {};
 		}
-	}
-
-	bool MaterialEditorPanel::ShaderDiagnosticWantsMigration(const ShaderDiagnostic& diagnostic)
-	{
-		// 迁移入口的触发条件 = 严格类型(隐式截断)或组合采样器/旧绑定写法 ——
-		// 正是 migrate-hlsl-to-slang.py 能自动改或列成"待人工"的那两类。
-		const ShaderDiagnosticClass classification = ClassifyShaderDiagnostic(diagnostic);
-		return classification == ShaderDiagnosticClass::Truncation
-			|| classification == ShaderDiagnosticClass::Sampler;
-	}
-
-	bool MaterialEditorPanel::ShaderDiagnosticsWantMigration() const
-	{
-		for (const ShaderDiagnostic& diagnostic : m_ShaderDiagnostics)
-			if (ShaderDiagnosticWantsMigration(diagnostic))
-				return true;
-		return false;
-	}
-
-	std::filesystem::path MaterialEditorPanel::RepoRootPath()
-	{
-		// WLD_WORLD_DIR = "<repo>/Engine/"(构建期定义,带尾斜杠):lexically_normal 去掉尾斜杠,
-		// 再上一级就是仓库根 —— 只用来指 docs/ 与 tools/ 里的文件(它们不在内容根下)。
-		const std::filesystem::path engineDir =
-			std::filesystem::path(std::string(WLD_WORLD_DIR)).lexically_normal();
-		return engineDir.parent_path();
-	}
-
-	std::filesystem::path MaterialEditorPanel::ShaderContractDocPath()
-	{
-		return RepoRootPath() / "docs" / "dev" / "shader-contract.md";
-	}
-
-	std::string MaterialEditorPanel::ShaderMigrationTarget() const
-	{
-		if (m_ShaderPath.empty())
-			return {};
-		return (ContentRootPath() / m_ShaderPath).generic_string();
-	}
-
-	std::string MaterialEditorPanel::ShaderMigrationCommand() const
-	{
-		// 复制出去的是 **dry-run** 命令(只出 diff,不写盘):复核后再自己加 --apply。
-		const std::string target = ShaderMigrationTarget();
-		if (target.empty())
-			return {};
-		const std::filesystem::path script =
-			RepoRootPath() / "tools" / "agents" / "scratch" / "migrate-hlsl-to-slang.py";
-		return "python \"" + script.generic_string() + "\" \"" + target + "\"";
 	}
 
 	void MaterialEditorPanel::RecordShaderDiskStamp(const std::string& text)
@@ -5008,7 +4958,7 @@ namespace World
 				Wui::WuiAccessibility::Get().Register(node);
 			}
 			// T2b:只有**用户源**行列号的条目可点击跳行 —— 包装模板上下文行(非用户源的
-			// `In file included from …surface_wrapper.hlsl:386`)的 Line 是模板行号,
+			// `In file included from …surface_wrapper.slang:386`)的 Line 是模板行号,
 			// 点它会跳到用户缓冲区的无关位置。
 			if (hovered && ctx.IsClicked(rowRect) && canJump)
 			{
@@ -5549,26 +5499,6 @@ namespace World
 					"Reveal: select the .slang in Windows Explorer."),
 				true, false },
 		};
-		// Slang-B1:诊断命中"严格类型 / 组合采样器"类错误时,头部多出迁移入口 ——
-		// 复制现成的 **dry-run** 命令(复核 diff 后自己加 --apply)+ 打开契约文档。
-		// (选了"复制命令 + 打开文档"的退化形态:编辑器不在 UI 里直接跑 Python 脚本。)
-		if (ShaderDiagnosticsWantMigration())
-		{
-			actions.push_back({ "material.shader.migrate.copy",
-				Wui::Tr("panel.material.shader.migrate.copy", "Copy Migrate Command"),
-				Wui::Tr("panel.material.shader.migrate.copy.tooltip",
-					"These diagnostics hit the strict-type / combined-sampler rules. Copies a ready-to-run "
-					"dry-run migration command for this file (nothing is written): run it in a terminal, "
-					"review the diff, then re-run it with --apply. Script: "
-					"tools/agents/scratch/migrate-hlsl-to-slang.py"),
-				true, false });
-			actions.push_back({ "material.shader.contract.open",
-				Wui::Tr("panel.material.shader.contract.open", "Contract Doc"),
-				Wui::Tr("panel.material.shader.contract.open.tooltip",
-					"Open docs/dev/shader-contract.md: strict types, combined samplers, explicit "
-					"[[vk::binding]] and the old-.hlsl migration table."),
-				true, false });
-		}
 		float actionX = x;
 		float actionY = y;
 		float actionsHeight = buttonH;
@@ -5628,65 +5558,6 @@ namespace World
 					{
 						m_ShaderStatus = Wui::Tr("panel.material.shader.status.reveal_unsupported",
 							"Reveal is only implemented on Windows");
-						m_ShaderStatusIsError = true;
-					}
-#endif
-				}
-				else if (actionId == "material.shader.migrate.copy")
-				{
-					// 只复制 dry-run 命令(不写盘);--apply 由用户在终端复核 diff 后自己加。
-					const std::string command = ShaderMigrationCommand();
-					if (!command.empty() && Application::HasInstance())
-					{
-						Application::Get().GetWindow().SetClipboardText(command);
-						m_ShaderStatus = Wui::Tr("panel.material.shader.migrate.copied",
-							"Migration command copied (dry-run; review the diff first): ") + command
-							+ Wui::Tr("panel.material.shader.migrate.copied.hint",
-								"  -- re-run it with --apply to write the changes.");
-						m_ShaderStatusIsError = false;
-					}
-					else
-					{
-						m_ShaderStatus = Wui::Tr("panel.material.shader.migrate.unavailable",
-							"Migration command unavailable: the shader has no logical path yet");
-						m_ShaderStatusIsError = true;
-					}
-				}
-				else if (actionId == "material.shader.contract.open")
-				{
-					const std::filesystem::path doc = ShaderContractDocPath();
-					std::error_code docError;
-					if (!std::filesystem::is_regular_file(doc, docError))
-					{
-						m_ShaderStatus = Wui::Tr("panel.material.shader.contract.missing",
-							"Contract document not found: ") + doc.generic_string();
-						m_ShaderStatusIsError = true;
-					}
-#ifdef _WIN32
-					else
-					{
-						// 与 Reveal / 打开外部文档同一条系统调用。
-						const HINSTANCE docResult = ShellExecuteW(nullptr, L"open",
-							doc.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-						if (reinterpret_cast<intptr_t>(docResult) <= 32)
-						{
-							m_ShaderStatus = Wui::Tr("panel.material.shader.contract.failed",
-								"Could not open the contract document: ") + doc.generic_string();
-							m_ShaderStatusIsError = true;
-						}
-						else
-						{
-							m_ShaderStatus = Wui::Tr("panel.material.shader.contract.opened",
-								"Opened the shader contract: ") + doc.generic_string();
-							m_ShaderStatusIsError = false;
-						}
-					}
-#else
-					else
-					{
-						m_ShaderStatus = Wui::Tr("panel.material.shader.contract.unsupported",
-							"Opening external documents is only implemented on Windows: ")
-							+ doc.generic_string();
 						m_ShaderStatusIsError = true;
 					}
 #endif
@@ -5791,8 +5662,8 @@ namespace World
 				out = *refreshed;
 				return;
 			}
-			HlslHighlightState state;
-			HlslHighlighter::HighlightLine(text, state, out);
+			SlangHighlightState state;
+			SlangHighlighter::HighlightLine(text, state, out);
 		};
 		options.GetClipboard = [](std::string& out)
 		{

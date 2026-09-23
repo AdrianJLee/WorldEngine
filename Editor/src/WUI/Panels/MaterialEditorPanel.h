@@ -1,7 +1,7 @@
 #pragma once
 
 #include "EditorPanel.h"
-#include "HlslHighlight.h"
+#include "SlangHighlight.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialParams.h"
@@ -66,9 +66,8 @@ namespace World
 
 		// 由内容浏览器/Window 菜单调用:打开指定 .wmat(失败时面板显示错误而不是弹窗)。
 		void OpenMaterial(const std::string& path);
-		// M4-S2/Slang-B1:同一个编辑器的**代码形态** —— 打开 `.slang`(legacy `.hlsl` 同样识别;
-		// 表面函数 + 注解参数)。双击入口与 `.wmat` 完全相同
-		// (ContentBrowserPanel::OpenItem 按扩展名分派形态)。
+		// M4-S2/Slang-B1:同一个编辑器的**代码形态** —— 打开 `.slang`(表面函数 + 注解参数)。
+		// 双击入口与 `.wmat` 完全相同(ContentBrowserPanel::OpenItem 按扩展名分派形态)。
 		void OpenShaderDocument(const std::string& path);
 		bool IsShaderDocument() const { return m_ShaderMode; }
 		const std::string& GetShaderPath() const { return m_ShaderPath; }
@@ -120,7 +119,7 @@ namespace World
 		std::string m_PanelTitle = "Material";
 		Ref<Material> m_Material;
 
-		// ---- M4-S2/Slang-B1:着色器(`.slang`;legacy `.hlsl`)代码形态(同一个面板的第二种形态)----
+		// ---- M4-S2/Slang-B1:着色器(`.slang`)代码形态(同一个面板的第二种形态)----
 		// 形态由**打开的文件扩展名**决定;代码形态下 m_Material 是引擎默认表面材质(预览替身),
 		// 参数列与代码列都走下面这套状态,不触碰 `.wmat` 的字段/继承逻辑。
 		bool m_ShaderMode = false;
@@ -128,7 +127,7 @@ namespace World
 		// `.wmat` 形态:`Shader:` 引用的参数组是否展开(与其它分组同一条"折叠也看得见计数"的规则)。
 		bool m_ShaderParamsOpen = true;
 		Wui::WuiTextBuffer m_ShaderBuffer;     // 源码(编辑 / 撤销 / 脏标记)
-		HlslHighlightCache m_ShaderHighlight;
+		SlangHighlightCache m_ShaderHighlight;
 		std::vector<MaterialParamDecl> m_ShaderParams;
 		std::string m_ShaderParseError;        // `ParseMaterialParams` 的 `<行>:<列>: <原因>`
 		int m_ShaderErrorLine = 0;             // 解析错误行(1 基;0 = 无错误;进 CodeEditor 红标)
@@ -417,22 +416,13 @@ namespace World
 		float DrawShaderDiagnostics(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		// 诊断 → 单行文本("line L:C  message")。
 		static std::string FormatShaderDiagnostic(const ShaderDiagnostic& diagnostic);
-		// ---- Slang-B1:诊断码 → 人话(前 5 类)+ 迁移入口 ----
+		// ---- Slang-B1:诊断码 → 人话(前 5 类;纯 Slang 语义,不挂迁移入口)----
 		// 从 `error[E30019]: …` 形态里取稳定码;取不到返回空。
 		static std::string ShaderDiagnosticCode(const std::string& message);
 		// 分类 = 码 + 消息判据(采样器误用与截断同为 E30019,按消息里的 SamplerState 区分)。
 		static ShaderDiagnosticClass ClassifyShaderDiagnostic(const ShaderDiagnostic& diagnostic);
 		// "这是什么 + 怎么修"的单行解释(未分类/未知码返回空串,不硬凑文案)。
 		static std::string ShaderDiagnosticHelp(const ShaderDiagnostic& diagnostic);
-		// 迁移入口的触发条件:严格类型(截断)或组合采样器/旧绑定写法。
-		static bool ShaderDiagnosticWantsMigration(const ShaderDiagnostic& diagnostic);
-		bool ShaderDiagnosticsWantMigration() const;
-		// 迁移命令的真实文本(绝对路径,dry-run;用户复核 diff 后自行加 --apply)。
-		std::string ShaderMigrationCommand() const;
-		// 契约文档(仓库根 docs/dev/shader-contract.md)与仓库根(由 WLD_WORLD_DIR 推导)。
-		static std::filesystem::path RepoRootPath();
-		static std::filesystem::path ShaderContractDocPath();
-		std::string ShaderMigrationTarget() const;
 		// 状态行文案:编译结果(成功 = 字节数 + 耗时 + 键;失败 = 第一条错误含行列号)。
 		std::string ShaderCompileStatusLine() const;
 		// 重新解析注解参数表 + 定位错误行;顺带把认识的参数映射进预览替身材质。

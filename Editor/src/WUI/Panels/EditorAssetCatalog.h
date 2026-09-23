@@ -19,9 +19,9 @@ namespace World
 		inline EditorAssetKind KindForName(const std::string& assetType)
 		{
 			if (assetType == "Material") return EditorAssetKind::Material;
-			// Slang-B1:表面函数(Material Shader)—— 主扩展名 `.slang`;`.hlsl` 是 legacy
-			// (旧数据仍可读,资产下拉里保留它,新建只产出 `.slang`)。与 `.wmat` 实例
-			// 分开的资产类型,供"Shader"字段/参数表按名字取路径列表时使用。
+			// Slang-B1:表面函数(Material Shader)—— 唯一扩展名 `.slang`(Slang-B1se 起
+			// 旧扩展名不再进资产列表)。与 `.wmat` 实例分开的资产类型,供"Shader"字段/
+			// 参数表按名字取路径列表时使用。
 			if (assetType == "Shader" || assetType == "MaterialShader" || assetType == "Material Shader")
 				return EditorAssetKind::Shader;
 			// P4-U10:Model = **引擎原生** .wmodel(场景/字段只引用它);glTF/GLB 是导入源,
@@ -40,12 +40,8 @@ namespace World
 			switch (kind)
 			{
 				case EditorAssetKind::Material: return LowerExtension(path) == ".wmat";
-				// Slang-B1:资产过滤器认两种扩展名 —— `.slang`(主)+ `.hlsl`(legacy 兼容)。
-				case EditorAssetKind::Shader:
-				{
-					const std::string extension = LowerExtension(path);
-					return extension == ".slang" || extension == ".hlsl";
-				}
+				// Slang-B1se:资产过滤器只认 `.slang`(旧扩展名已从编辑器移除)。
+				case EditorAssetKind::Shader: return LowerExtension(path) == ".slang";
 				// 原生模型资产 = .wmodel(导入产物)。.gltf/.glb 属于 ModelSource,不在"可引用资产"里。
 				case EditorAssetKind::Model: return LowerExtension(path) == ".wmodel";
 				case EditorAssetKind::ModelSource:

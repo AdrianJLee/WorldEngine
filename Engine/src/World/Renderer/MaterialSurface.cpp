@@ -33,7 +33,10 @@ namespace World
 		// 5 = Slang-B1:生成的中间源码改名(`surface_user.hlsl` → `surface_user.slang`、
 		//     `surface_wrapper.hlsl` / `vs_wrapper.hlsl` → `.slang`)—— 包装源码里的
 		//     `#include` 名随之变化,键本来就含包装源码,升版让旧缓存目录自然作废。
-		constexpr uint32_t kSurfaceCacheVersion = 5;
+		// 6 = Slang-B2-1:顶点实现收敛为泛型 `TransformVertex<T : IVertexSource>`(一个接口 +
+		//     两个实现 + 三个同名特化入口);IO location / UBO / binding 与入口名逐项不变,
+		//     模板文本变化 → 升版让旧产物失效重烘。
+		constexpr uint32_t kSurfaceCacheVersion = 6;
 		constexpr const char* kSurfaceEntryPoint = "PSMain";
 		// 生成的中间用户源文件名:诊断里的 `File` 就是它,所以跟资产层同一口径用 `.slang`
 		// (用户在编辑器里看到的是自己的 `.slang`/legacy `.hlsl`;这里只是编译脚手架)。
@@ -746,35 +749,85 @@ SurfaceVSOutput BuildVSOutput(float4 worldPosition, float3 worldNormal, float2 u
     return output;
 }
 
+// ---- Slang-B2-1(候选形态 D):无分支泛型 —— 变体差异全部落在两个实现里 ----
+interface IVertexSource
+{
+    float3 Position();
+    float3 Normal();
+    float2 UV();
+    float4x4 LocalPalette();
+};
+
+float4x4 WeIdentityMatrix()
+{
+    return float4x4(1.0f, 0.0f, 0.0f, 0.0f,
+                    0.0f, 1.0f, 0.0f, 0.0f,
+                    0.0f, 0.0f, 1.0f, 0.0f,
+                    0.0f, 0.0f, 0.0f, 1.0f);
+}
+
+struct PlainVertexSource : IVertexSource
+{
+    SurfaceVSInput Attributes;
+    float3 Position() { return Attributes.Position; }
+    float3 Normal() { return Attributes.Normal; }
+    float2 UV() { return Attributes.UV; }
+    float4x4 LocalPalette() { return WeIdentityMatrix(); }
+};
+
+struct SkinnedVertexSource : IVertexSource
+{
+    SurfaceSkinnedInput Attributes;
+    float3 Position() { return Attributes.Position; }
+    float3 Normal() { return Attributes.Normal; }
+    float2 UV() { return Attributes.UV; }
+    float4x4 LocalPalette()
+    {
+        // 原实现:权重全零、或蒙皮位置非有限 → 用未蒙皮的位置/法线。
+        // 单位阵把这条回退编码进"调色板"本身 → 泛型实现里不再需要分支。
+        if (!any(Attributes.Weights != 0.0f))
+            return WeIdentityMatrix();
+        const float4x4 blended = ComputeSkinPalette(Attributes);
+        const float4 skinnedPosition = mul(blended, float4(Attributes.Position, 1.0f));
+        return all(isfinite(skinnedPosition)) ? blended : WeIdentityMatrix();
+    }
+};
+
+SurfaceVSOutput TransformVertex<T : IVertexSource>(T source, float4x4 model, float entityId)
+{
+    const float4x4 palette = source.LocalPalette();
+    const float4 localPosition = mul(palette, float4(source.Position(), 1.0f));
+    const float3 localNormal = mul((float3x3)palette, source.Normal());
+    const float4 worldPosition = mul(model, localPosition);
+    const float3x3 normalMatrix = (float3x3)transpose((float3x3)model);
+    return BuildVSOutput(worldPosition, mul(normalMatrix, localNormal), source.UV(), entityId);
+}
+
+[shader("vertex")]
 SurfaceVSOutput VSMain(SurfaceVSInput input)
 {
-    const float4 worldPosition = mul(u_Model, float4(input.Position, 1.0f));
-    const float3x3 normalMatrix = (float3x3)transpose((float3x3)u_Model);
-    return BuildVSOutput(worldPosition, mul(normalMatrix, input.Normal), input.UV,
-        (float)u_EntityId.x);
+    PlainVertexSource source;
+    source.Attributes = input;
+    return TransformVertex(source, u_Model, (float)u_EntityId.x);
 }
 
+[shader("vertex")]
 SurfaceVSOutput VSMainInstanced(SurfaceInstancedInput input)
 {
+    PlainVertexSource source;
+    source.Attributes.Position = input.Position;
+    source.Attributes.Normal = input.Normal;
+    source.Attributes.UV = input.UV;
     const float4x4 model = float4x4(input.Row0, input.Row1, input.Row2, input.Row3);
-    const float4 worldPosition = mul(model, float4(input.Position, 1.0f));
-    const float3x3 normalMatrix = (float3x3)transpose((float3x3)model);
-    return BuildVSOutput(worldPosition, mul(normalMatrix, input.Normal), input.UV,
-        input.EntityId.x);
+    return TransformVertex(source, model, input.EntityId.x);
 }
 
+[shader("vertex")]
 SurfaceVSOutput VSMainSkinned(SurfaceSkinnedInput input)
 {
-    const float4x4 palette = ComputeSkinPalette(input);
-    const float4 skinnedPosition = mul(palette, float4(input.Position, 1.0f));
-    const float3 skinnedNormal = mul((float3x3)palette, input.Normal);
-    const bool hasWeights = any(input.Weights != 0.0f) && all(isfinite(skinnedPosition));
-    const float4 localPosition = hasWeights ? skinnedPosition : float4(input.Position, 1.0f);
-    const float3 localNormal = hasWeights ? skinnedNormal : input.Normal;
-    const float4 worldPosition = mul(u_Model, localPosition);
-    const float3x3 normalMatrix = (float3x3)transpose((float3x3)u_Model);
-    return BuildVSOutput(worldPosition, mul(normalMatrix, localNormal), input.UV,
-        (float)u_EntityId.x);
+    SkinnedVertexSource source;
+    source.Attributes = input;
+    return TransformVertex(source, u_Model, (float)u_EntityId.x);
 }
 
 MaterialInputs BuildMaterialInputs(SurfaceVSOutput input)

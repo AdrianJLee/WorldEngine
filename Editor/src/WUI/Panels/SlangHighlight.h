@@ -1,6 +1,7 @@
 #pragma once
 
-// M4-S2 / Slang-B1:材质着色器(`.slang`,legacy `.hlsl`)的逐行语法高亮。
+// M4-S2 / Slang-B1:材质着色器(`.slang`)的逐行语法高亮 —— 高亮的是 Slang 源,
+// HLSL 语法是它的子集,所以关键字表按这一族语言给。
 //
 // 与 LuauHighlighter(Engine/src/World/Script/LuauHighlighter.h)同一套口径,便于复用
 // Wui::CodeEditor 的内核(行号、选区、滚动、诊断行、Ctrl+S 全在核心里,这里只提供 token):
@@ -25,23 +26,23 @@
 namespace World
 {
 // 行间延续状态:着色器源码里只有块注释会跨行(字符串不跨行)。
-	struct HlslHighlightState
+	struct SlangHighlightState
 	{
 		bool BlockComment = false;
 
-		bool operator==(const HlslHighlightState& other) const
+		bool operator==(const SlangHighlightState& other) const
 		{
 			return BlockComment == other.BlockComment;
 		}
-		bool operator!=(const HlslHighlightState& other) const { return !(*this == other); }
+		bool operator!=(const SlangHighlightState& other) const { return !(*this == other); }
 	};
 
-	class HlslHighlighter
+	class SlangHighlighter
 	{
 	public:
 		// 高亮一行:state 为行首状态,返回后为该行行尾状态(交给下一行)。
 		// line 不含换行符(允许带行尾 '\r',视为空白)。
-		static void HighlightLine(std::string_view line, HlslHighlightState& state,
+		static void HighlightLine(std::string_view line, SlangHighlightState& state,
 			std::vector<Wui::WuiCodeToken>& out)
 		{
 			out.clear();
@@ -113,7 +114,7 @@ namespace World
 					index = close;
 					continue;
 				}
-				// ---- 预处理指令(#include "x.hlsli" / #define)----
+				// ---- 预处理指令(#include "surface_utils.slang" / #define)----
 				if (c == '#' && index == 0)
 				{
 					size_t directive = index + 1;
@@ -220,7 +221,7 @@ namespace World
 					return false;
 			}
 		}
-		// 关键字 + 内建类型/结构名(HLSL/Slang 的类型与关键字同一组着色)。
+		// 关键字 + 内建类型/结构名(Slang 与 HLSL 共享的类型/关键字同一组着色)。
 		// Slang-B1:补上 Slang 源里会真的出现的名字 —— 组合采样器(Sampler2D 等,
 		// 严格子集里贴图参数就是组合采样器)与 Slang 的模块/泛型关键字。
 		static bool IsKeyword(std::string_view word)
@@ -270,7 +271,7 @@ namespace World
 
 	// 按行 token 缓存(与 LuauHighlightCache 同一口径):只有"内容或行首延续状态变了"的行
 	// 才重新 token 化;Find 用行文本指针 + 长度定位,编辑导致缓冲区重分配时自然失配。
-	class HlslHighlightCache
+	class SlangHighlightCache
 	{
 	public:
 		void Update(const Wui::WuiTextBuffer& buffer)
@@ -282,7 +283,7 @@ namespace World
 			m_Lines.clear();
 			m_ByPointer.clear();
 			m_Lines.reserve(static_cast<size_t>(std::max(0, m_LineCount)));
-			HlslHighlightState state;
+			SlangHighlightState state;
 			for (int line = 0; line < m_LineCount; ++line)
 			{
 				const std::pair<size_t, size_t> range = buffer.LineRange(line);
@@ -290,7 +291,7 @@ namespace World
 				const size_t size = range.second - range.first;
 				Entry entry;
 				entry.Start = state;
-				HlslHighlighter::HighlightLine(std::string_view(text, size), state, entry.Tokens);
+				SlangHighlighter::HighlightLine(std::string_view(text, size), state, entry.Tokens);
 				entry.End = state;
 				entry.Text = text;
 				entry.TextSize = size;
@@ -331,8 +332,8 @@ namespace World
 	private:
 		struct Entry
 		{
-			HlslHighlightState Start;
-			HlslHighlightState End;
+			SlangHighlightState Start;
+			SlangHighlightState End;
 			const char* Text = nullptr;
 			size_t TextSize = 0;
 			std::vector<Wui::WuiCodeToken> Tokens;

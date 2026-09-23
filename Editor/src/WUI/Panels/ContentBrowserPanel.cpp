@@ -129,7 +129,7 @@ namespace World
 		constexpr float kListSizeColumnWidth = 96.0f;  // 大小列基准宽
 		constexpr float kListColumnShare = 0.24f;      // 窄面板时列宽占面板宽的上限
 
-		// ---- M4-S2 / Slang-B1:材质着色器(`.slang`,legacy `.hlsl`)在切片里的**独立标识** ----
+		// ---- M4-S2 / Slang-B1:材质着色器(`.slang`)在切片里的**独立标识** ----
 		// 引擎的通用文件图标只有"文件/目录"两枚,而着色器是"写表面函数的材质资产"、
 		// 与 `.wmat` 实例同级 —— 它必须在网格里一眼可辨(用户口径:独立图标/标签)。
 		// 做法:图标整体染成"代码蓝",右上角挂一枚类型徽标(与 prefab 徽标同一套画法,
@@ -137,9 +137,6 @@ namespace World
 		constexpr Wui::WuiColor kShaderIconTint { 0.62f, 0.80f, 1.00f, 1.00f };
 		constexpr Wui::WuiColor kShaderBadgeFill { 0.20f, 0.42f, 0.78f, 1.00f };
 		constexpr Wui::WuiColor kShaderBadgeText { 0.93f, 0.96f, 1.00f, 1.00f };
-		// Slang-B1:legacy `.hlsl` 徽标底色用主题的警告色令牌(theme.Warning),文字用深色
-		// 保证在琥珀底上的对比度 —— 与主 `.slang` 的代码蓝一眼可分。
-		constexpr Wui::WuiColor kLegacyBadgeText { 0.12f, 0.11f, 0.08f, 1.00f };
 
 		Wui::WuiColor MixColor(const Wui::WuiColor& from, const Wui::WuiColor& to, float amount)
 		{
@@ -234,12 +231,11 @@ namespace World
 			}
 			return name;
 		}
-		// Slang-B1:`.slang`(主)/ `.hlsl`(legacy)版本的同一件小事 —— 用户把后缀也敲进
-		// 名称框时不产生 "x.slang.slang" / "x.hlsl.slang"(两种后缀都剥掉)。
+		// Slang-B1:用户把后缀也敲进名称框时不产生 "x.slang.slang"(后缀剥掉)。
 		std::string ShaderBaseName(const std::string& raw)
 		{
 			std::string name = SanitizeAssetName(raw);
-			for (const std::string suffix : { std::string(".slang"), std::string(".hlsl") })
+			for (const std::string suffix : { std::string(".slang") })
 			{
 				if (name.size() <= suffix.size())
 					continue;
@@ -657,10 +653,10 @@ namespace World
 			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
 			m_Host.OpenMaterialEditor(ec ? path.generic_string() : relative.generic_string());
 		}
-		else if (LowerExtension(path) == ".slang" || LowerExtension(path) == ".hlsl")
+		else if (LowerExtension(path) == ".slang")
 		{
-			// Slang-B1:`.slang`(Material Shader;`.hlsl` 是 legacy)双击 → **同一个材质编辑器的
-			// 代码形态**(左预览 / 中代码 / 右参数);面板按扩展名决定形态,宿主入口与 .wmat 相同。
+			// Slang-B1:`.slang`(Material Shader)双击 → **同一个材质编辑器的代码形态**
+			// (左预览 / 中代码 / 右参数);面板按扩展名决定形态,宿主入口与 .wmat 相同。
 			const std::filesystem::path contentRoot = m_Model.Root;
 			std::error_code ec;
 			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
@@ -911,7 +907,7 @@ namespace World
 			});
 		// Slang-B1:Material Shader(`.slang`,主扩展名)—— 与材质同一套"先向导后创建":
 		// 名称/目录/实时落点全部在确认前可见,确认后写出起始代码(含三条硬规则的注释头)
-		// 并在材质编辑器的**代码形态**里打开。`.hlsl` 只是 legacy 兼容读取,不从这里产出。
+		// 并在材质编辑器的**代码形态**里打开。产物固定 `.slang`。
 		add("shader", "Material Shader", ".slang", 15, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{
@@ -1370,23 +1366,20 @@ namespace World
 						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 },
 					0.0f, 1.0f, "", nameSize, false, icon, { 0, 1, 1, -1 } });
 
-			// Slang-B1:着色器的常驻类型徽标(与 prefab 徽标同一套画法);
-			// legacy `.hlsl` 用警告色 + (legacy) 后缀,新的 `.slang` 用代码蓝。
+			// Slang-B1:着色器的常驻类型徽标(与 prefab 徽标同一套画法;代码蓝底)。
 			if (slice.Kind == EditorAssetKind::Shader)
 			{
-				const bool legacy = slice.Extension == ".hlsl";
-				const Wui::LocalizedLabel badge = legacy
-					? Wui::TrLabel("asset.file.shader_legacy", "Material Shader (legacy)")
-					: Wui::TrLabel("asset.file.shader", "Material Shader");
+				const Wui::LocalizedLabel badge =
+					Wui::TrLabel("asset.file.shader", "Material Shader");
 				const float badgeSize = infoSize;
 				const float badgeW = ctx.MeasureTextWidth(badge.Text, badgeSize) + theme.PadSmall * 2.0f;
 				const float badgeH = badgeSize + 4.0f;
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
 					{ cell.X + gap, cell.Y + gap, badgeW, badgeH },
-					legacy ? theme.Warning : kShaderBadgeFill, badgeH * 0.5f });
+					kShaderBadgeFill, badgeH * 0.5f });
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
 					{ cell.X + gap + theme.PadSmall, cell.Y + gap + 2.0f, 0.0f, 0.0f },
-					legacy ? kLegacyBadgeText : kShaderBadgeText, 0.0f, 1.0f, badge.Text, badgeSize, true });
+					kShaderBadgeText, 0.0f, 1.0f, badge.Text, badgeSize, true });
 			}
 
 			// P4-U13:prefab 是"可复用实体子树",不是普通文件 —— 给一枚常驻小标签,
@@ -1424,10 +1417,9 @@ namespace World
 			const std::string info = slice.IsDir
 				? Wui::Tr("panel.content_browser.slice.folder", "Folder")
 				// glTF/GLB 用"导入源"而不是裸扩展名:它们在网格视图里必须一眼看出不是可引用资产。
-				// prefab / 着色器同理:显示类型名而不是 ".wprefab" / ".slang"(legacy ".hlsl"
-				// 显示带 (legacy) 的类型名)。
+				// prefab / 着色器同理:显示类型名而不是 ".wprefab" / ".slang"。
 				: ((slice.Extension == ".gltf" || slice.Extension == ".glb" || slice.Extension == ".wprefab"
-						|| slice.Extension == ".slang" || slice.Extension == ".hlsl")
+						|| slice.Extension == ".slang")
 					? slice.TypeLabel
 					: (slice.Extension.empty() ? slice.TypeLabel : slice.Extension)) + " · "
 					+ FormatBytes(static_cast<size_t>(bytes));
@@ -1513,8 +1505,7 @@ namespace World
 			if (icon != 0)
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Image,
 					{ row.X + theme.PadSmall, row.Y + (row.H - kListIconSize) * 0.5f, kListIconSize, kListIconSize },
-					// Slang-B1:与网格同一枚"代码蓝"染色(legacy `.hlsl` 同色,类型名带 (legacy));
-					// 列表里也能一眼分辨着色器。
+					// Slang-B1:与网格同一枚"代码蓝"染色 —— 列表里也能一眼分辨着色器。
 					slice.Kind == EditorAssetKind::Shader
 						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 },
 					0.0f, 1.0f, "", smallSize, false, icon, { 0, 1, 1, -1 } });
@@ -2097,8 +2088,7 @@ namespace World
 
 	// ==== M4-S2/Slang-B1:Material Shader(`.slang`)新建向导 ====
 	// 与"新建材质"同一套 U13d 交互与同一套模态骨架(名称 + 目录 + 实时落点 + 覆盖警告 + Enter/Esc);
-	// 差别只有两点:扩展名是 `.slang`(legacy `.hlsl` 仍可读)、内容是一份**可编译的起始代码**
-	// (不是字段预设)且带契约注释头。
+	// 差别只有两点:扩展名是 `.slang`、内容是一份**可编译的起始代码**(不是字段预设)且带契约注释头。
 	bool ContentBrowserPanel::OpenNewShaderWizard(std::string* message)
 	{
 		m_NewShaderPendingOpen = true;
@@ -2107,8 +2097,8 @@ namespace World
 		return true;
 	}
 
-	// Slang-B1:新建 `.slang` 的**注释头**(两条模板共用)—— 把三条硬规则与指路写进文件本身,
-	// 而不是只留在文档里:① 严格类型;② 贴图参数 = 组合采样器;③ 资源显式 binding。
+	// Slang-B1:新建 `.slang` 的**注释头**(两条模板共用)—— 把三条硬规则与契约文档指针写进
+	// 文件本身,而不是只留在文档里:① 严格类型;② 贴图参数 = 组合采样器;③ 资源显式 binding。
 	// 验收(plan B1-5):这段文本必须含 `Sampler2D`、`.Sample(uv)` 与严格类型提示。
 	std::string ContentBrowserPanel::ShaderContractHeader()
 	{
@@ -2124,7 +2114,6 @@ namespace World
 		header += "//   3. Resources use explicit `[[vk::binding(N, S)]]`; `register(...)` is not supported.\n";
 		header += "//\n";
 		header += "// Contract: docs/dev/shader-contract.md\n";
-		header += "// Migrating an old .hlsl: python tools/agents/scratch/migrate-hlsl-to-slang.py (dry-run; add --apply)\n";
 		header += "\n";
 		return header;
 	}
@@ -2134,7 +2123,7 @@ namespace World
 		// 起始代码来自内核(M4-S1 的 MaterialSurfaceCompiler):契约字段有默认值,空改动也能编译。
 		// 引擎不在这里留副本 —— 内核改骨架,新建的文件跟着变。
 		std::string source = MaterialSurfaceCompiler::DefaultSurfaceFunctionSource();
-		// Slang-B1:两条模板都带契约注释头(新建文件的第一眼 = 三条硬规则 + 文档/迁移指针)。
+		// Slang-B1:两条模板都带契约注释头(新建文件的第一眼 = 三条硬规则 + 契约文档指针)。
 		std::string header = ShaderContractHeader();
 		if (templateIndex <= 0)
 			return header + source;
@@ -2296,7 +2285,7 @@ namespace World
 		// 正下方的控件上(下一帧的遮挡才生效),所以这里固定留出两行高度。
 		cursorY += 39.0f;
 
-		// ---- 名称(后缀固定 .slang;`.hlsl` 只是 legacy 兼容)----
+		// ---- 名称(后缀固定 .slang)----
 		const std::string nameLabel = Wui::Tr("panel.content_browser.new_shader.name", "Name");
 		Wui::Label(ctx, { labelX, cursorY + 5.0f }, nameLabel, theme.TextMuted, 13.0f);
 		const Wui::WuiRect nameRect { fieldX, cursorY, fieldW, 24.0f };
@@ -2519,20 +2508,12 @@ namespace World
 		node.Value = logical;
 		// M4-S2:类型名进悬停说明(读屏/脚本看不到徽标与配色,必须能读出"这是哪一类资产"——
 		// 着色器与 `.wmat` 的区别正是这里)。类型文案本身已本地化,这里只负责拼装。
-		// Slang-B1:legacy `.hlsl` 额外给"它是什么 + 怎么迁移"的指针(与诊断里的迁移入口同一口径)。
 		std::string tooltip = slice.IsDir
 			? Wui::Tr("panel.content_browser.slice.folder.tooltip", "Folder under the content root: ") + logical
 			: Wui::Tr("panel.content_browser.slice.asset.tooltip", "Asset: ") + logical + " · "
 				+ slice.TypeLabel
 				+ Wui::Tr("panel.content_browser.slice.asset.hint",
 					" — drag it onto a texture slot / material title");
-		if (!slice.IsDir && slice.Extension == ".hlsl")
-		{
-			tooltip += Wui::Tr("panel.content_browser.slice.shader.legacy",
-				" — legacy .hlsl: still loads, but new shaders are written as .slang. "
-				"Migrate with tools/agents/scratch/migrate-hlsl-to-slang.py "
-				"(see docs/dev/shader-contract.md §8).");
-		}
 		node.Tooltip = tooltip;
 		node.Rect = rect;
 		node.Enabled = true;
@@ -3287,11 +3268,8 @@ namespace World
 				case EditorAssetKind::Scene: slice.TypeLabel = Wui::Tr("asset.file.scene", "Scene"); break;
 				case EditorAssetKind::Material: slice.TypeLabel = Wui::Tr("asset.file.material", "Material"); break;
 				case EditorAssetKind::Shader:
-					// Slang-B1:`.hlsl` 是 legacy —— 类型名带上 (legacy),与主扩展名 `.slang` 区分;
-					// 切片 tooltip 里另给迁移脚本指针(RegisterSliceNode)。
-					slice.TypeLabel = slice.Extension == ".hlsl"
-						? Wui::Tr("asset.file.shader_legacy", "Material Shader (legacy)")
-						: Wui::Tr("asset.file.shader", "Material Shader");
+					// Slang-B1:唯一扩展名 `.slang` → 一个类型名。
+					slice.TypeLabel = Wui::Tr("asset.file.shader", "Material Shader");
 					break;
 				case EditorAssetKind::Model: slice.TypeLabel = Wui::Tr("asset.file.model", "Model"); break;
 				case EditorAssetKind::ModelSource:
