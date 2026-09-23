@@ -335,7 +335,7 @@ namespace World::Editor
 
 			// 4. 着色器烘焙:引擎 HLSL → 产物写入 cooked 目录,随内容包发布 ——
 			// 发行版 Runtime 不再依赖源码树与任何编译器。
-			//   4a. 老口径(BakeDirectory):每个入口 .spv(Vulkan)+ .glsl(GLSL 兜底,T6 删除);
+			//   4a. 老口径(BakeDirectory):每个入口 .spv(Vulkan)+ .gl.spv(GL 目标 SPIR-V;旧 .glsl 兜底已随 T6 删除);
 			//   4b. Slang-T5 双目标(BakeDistributionTargets):每个入口 .spv + .gl.spv
 			//       —— GL 4.6 直吃 GL 目标 SPIR-V,发行形态不再回落到 GLSL 文本;
 			//   4c. Slang-T5 表面材质:内容根下的每份 .hlsl → 双目标 SPIR-V + 反射 JSON。

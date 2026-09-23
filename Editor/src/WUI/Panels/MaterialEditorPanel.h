@@ -139,7 +139,7 @@ namespace World
 		// 会话内记住代码列宽(与预览列宽的记住口径一致;<= 0 = 还没设过)。
 		float m_ShaderCodeColumnWidth = 0.0f;
 		// ---- M4-S3:代码态实时预览(防抖 + 后台编译 + 键分离)----
-		// 一条结构化诊断:Line/Column 是**用户源**的 1 基行列号(0 = 不在用户源里,dxc 报的是包装模板)。
+		// 一条结构化诊断:Line/Column 是**用户源**的 1 基行列号(0 = 不在用户源里,非用户源诊断报的是包装模板)。
 		struct ShaderDiagnostic
 		{
 			std::string Severity;   // "error" / "warning"
@@ -177,7 +177,7 @@ namespace World
 		std::string m_ShaderCompileStatus;      // 状态行:成功 = 字节数 + 耗时 + 键;失败 = 第一条错误(含行列号)
 		bool m_ShaderCompileFailed = false;
 		std::vector<ShaderDiagnostic> m_ShaderDiagnostics;
-		// 后台编译线程:单飞 + 后来者覆盖前者;主线程**绝不**调 dxc。
+		// 后台编译线程:单飞 + 后来者覆盖前者;主线程**绝不**跑编译器。
 		std::thread m_ShaderCompileThread;
 		std::mutex m_ShaderCompileMutex;
 		std::condition_variable m_ShaderCompileCv;
@@ -392,7 +392,7 @@ namespace World
 		void PumpShaderCompile(double now);
 		// 投递一份编译请求给工作线程(请求/结果都按"后来者覆盖前者"换代)。
 		void DispatchShaderCompile(const std::string& source);
-		// 工作线程主体:只在这里跑 dxc(不碰任何 UI / 渲染状态)。
+		// 工作线程主体:只在这里跑编译器 slangc(不碰任何 UI / 渲染状态)。
 		void ShaderCompileWorkerLoop();
 		// 主线程:消费一份编译结果 —— 成功才 Install(键按"缓冲是否已保存"选),失败不 Install。
 		void ApplyShaderCompileOutcome(const ShaderCompileOutcome& outcome);

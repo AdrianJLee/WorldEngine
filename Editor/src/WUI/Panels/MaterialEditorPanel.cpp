@@ -962,7 +962,7 @@ namespace World
 	MaterialEditorPanel::~MaterialEditorPanel()
 	{
 		// 先收编译线程:工作线程只读自己的副本、结果写回成员,析构前必须确定它已经退出
-		// (dxc 单次调用有界,等它跑完即可;detach 会让它写已析构的成员)。
+		// (单次编译器调用有界,等它跑完即可;detach 会让它写已析构的成员)。
 		{
 			std::lock_guard<std::mutex> lock(m_ShaderCompileMutex);
 			m_ShaderCompileThreadStop = true;
@@ -4350,7 +4350,7 @@ namespace World
 	//     这里只提供 HLSL token 化(HlslHighlight.h);
 	//   - 参数列的事实源是**文件里的注解**(M4-S2 内核的 ParseMaterialParams);
 	//     改默认值 = 改写注解文本,不是改内存里的影子值;
-	//   - 真正的"防抖编译 + 原子换管线"属 M4-S3;本批按需编译只验证源码能过 dxc,
+	//   - 真正的"防抖编译 + 原子换管线"属 M4-S3;本批按需编译只验证源码能过编译器,
 	//     预览仍用引擎默认表面材质(注解里认识的名字会映射进去),面板上写明这一点。
 	void MaterialEditorPanel::OpenShaderDocument(const std::string& path)
 	{
@@ -4451,7 +4451,7 @@ namespace World
 	//     `Material::SetSurfaceKeyOverride` 指到这个键(渲染侧的管线选择只看这个键);
 	//   - 保存成功       → 写盘 + Install("<路径>", artifact),预览材质指回普通键(这时场景才变);
 	//   - 打开既有 `.hlsl` 先编译已保存内容并 Install("<路径>", …),保证场景/预览有可用基线。
-	// 线程纪律:dxc 只在**工作线程**跑(单飞,后来者覆盖前者);Install 与渲染状态只在主线程帧内改。
+	// 线程纪律:编译器只在**工作线程**跑(单飞,后来者覆盖前者);Install 与渲染状态只在主线程帧内改。
 	namespace
 	{
 		double ShaderWallClockSeconds()
@@ -4531,7 +4531,7 @@ namespace World
 		request.Target = ShaderBackendIsVulkan()
 			? SurfaceShaderBackend::VulkanSpirV : SurfaceShaderBackend::OpenGLSpirV;
 		// 排列键仍是逻辑路径(M4-S2 口径):预览键/路径键只决定 Install 的落点,
-		// 不参与编译缓存 —— 同一份内容两边共用产物,不会重复跑 dxc。
+		// 不参与编译缓存 —— 同一份内容两边共用产物,不会重复跑编译器。
 		request.PermutationKey = m_ShaderPath;
 		{
 			std::lock_guard<std::mutex> lock(m_ShaderCompileMutex);
@@ -4682,7 +4682,7 @@ namespace World
 		}
 		if (m_ShaderParseError.empty())
 			m_ShaderErrorLine = 0;
-		// 记住这份成功产物:保存成功时用它把路径键提升到同一份内容(不再多跑一次 dxc)。
+		// 记住这份成功产物:保存成功时用它把路径键提升到同一份内容(不再多跑一次编译器)。
 		m_ShaderLastArtifact = outcome.Artifact;
 		m_ShaderLastArtifactSource = outcome.Source;
 		// 键按"这份源是否等于磁盘内容"选(而不是按请求时刻的脏标记):
@@ -4871,7 +4871,7 @@ namespace World
 				node.Visible = true;
 				Wui::WuiAccessibility::Get().Register(node);
 			}
-			// T2b:只有**用户源**行列号的条目可点击跳行 —— 包装模板上下文行(dxc 的
+			// T2b:只有**用户源**行列号的条目可点击跳行 —— 包装模板上下文行(非用户源的
 			// `In file included from …surface_wrapper.hlsl:386`)的 Line 是模板行号,
 			// 点它会跳到用户缓冲区的无关位置。
 			if (hovered && ctx.IsClicked(rowRect) && canJump)

@@ -31,7 +31,7 @@ struct VS_OUTPUT
 // Slang-T2:实例入口用**一个**合并输入 struct(顶点属性 0..2 + per-instance 3..8)。
 // Slang 不会把两个参数各自的 struct 按显式 `[[vk::location]]` 合并成一个接口:
 // 第二个参数(实例属性)会被排到 location 6..11 —— 与 C++ 顶点布局 3..8 不符,
-// 实例矩阵会读到错位的属性。合并成单参数后 location 逐项等于改造前的 dxc 产出。
+// 实例矩阵会读到错位的属性。合并成单参数后 location 逐项等于改造前(dxc 时代)的产出。
 struct VS_INSTANCED_INPUT
 {
     [[vk::location(0)]] float3 a_Position : POSITION;
@@ -109,7 +109,7 @@ struct GpuLight
     float4 u_Flags;               // x = 有 albedo 贴图, y = 有法线贴图, z = 双面
     // P1b D7-1c:视口点选用的实体 id(写进 SV_Target1);-1 = 不可拾取。
     // 用 int4 而不是 int/int3:标量+短向量在 HLSL 与 std140 下的偏移不一致,
-    // spirv-cross 会直接拒绝这个块("Buffer block cannot be expressed as std140/std430")。
+    // GL 的 SPIR-V 环境(std140)不接受这种块布局(旧 GLSL 路径同样拒绝过)。
     int4 u_EntityId;
 };
 
@@ -169,7 +169,7 @@ VS_OUTPUT VSMainInstanced(VS_INSTANCED_INPUT input)
 //   会被 (0,0,0) 矩阵打成退化点,整块网格消失 —— 反而更难排查;
 // - 法线用调色板矩阵的 3×3 部分混合后**重新归一化**(参考实现口径;非均匀缩放下不精确,
 //   与"顶点布局里没有切线/逆转置"的既有约定一致)。
-// 注意:spirv-cross 生成的 GLSL 里 "linear" 是插值修饰符关键字,不能用作变量名(实测)。
+// 注意:变量名不用 linear —— 旧 GLSL 路径里它是插值修饰符关键字(实测);现已走 SPIR-V,保留旧名避免缓存/引用漂移。
 float4x4 ComputeSkinPalette(VS_SKINNED_INPUT input)
 {
     const int4 joints = (int4)round(input.a_Joints);
@@ -315,7 +315,7 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
 
     const float3 emissive = pow(saturate(u_Emissive.rgb), 2.2f);
     litColor += emissive;
-    // 变量名不能叫 linear:spirv-cross 生成的 GLSL 里 "linear" 是插值修饰符关键字,
+    // 变量名不能叫 linear:旧 GLSL 路径里它是插值修饰符关键字(现已走 SPIR-V),
     // GL 侧着色器编译会直接报 "modifiers must appear before type"(实测)。
 
     // 线性 → 显示空间(与 2D/WUI 的显示空间书写保持同一最终空间)。
