@@ -9,6 +9,7 @@
 | [build.md](build.md) | 从零配置 → 构建 → 运行 → 跑测试:真实命令、产物路径、常见失败 |
 | [architecture.md](architecture.md) | 模块与产物、依赖方向、渲染 / 场景 / 资产 / 脚本的分层 |
 | [extension.md](extension.md) | 扩展点:加组件、加资产类型、加面板、从 Game 接入、加脚本绑定 |
+| [shader-contract.md](shader-contract.md) | 材质着色器怎么写:表面函数契约、`//! param` 注解、严格类型、组合采样器、槽位表、诊断码、迁移 |
 
 ## 仓库结构(速查)
 
