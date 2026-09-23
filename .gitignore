@@ -1,7 +1,12 @@
 # Directories
 .vs/
+# 构建产物目录:任何层级都挡(历史出现过 in-source 构建,如 Engine/vendor/Glad/bin)。
 bin/
 bin-int/
+# 例外:第三方 CLI 工具目录允许自带 bin/(见 vendor/README.md 的"工具 vs 源码"判据)。
+!vendor/tools/**/bin/
+# 实验性第三方包整包不入库(体积大):采纳时按 vendor/README.md 落"pin + FETCH"或小 CLI 子集。
+vendor/slang/
 
 # Files
 *.user
@@ -12,27 +17,25 @@ build
 .codex
 .vscode
 docs
-tools
+# 只忽略**根级** tools/(过程层与本机工具面);不要用裸目录名——裸名会在任意深度命中
+# (历史:`World/tools/` 这类同名声明的目录会被静默吞掉;2026-09-23 修;模块目录已改名 Engine/)。
+/tools
 AGENTS.md
-Editor/wui-layout.json
-Editor/wui-layout.json.bak
-Editor/wui-browser.json
-# P4-UX:编辑器用户偏好(语言/主题/缩放)是"这台机器上的这个人"的设置,不入库。
-Editor/editor-prefs.json
-# P4-U6:属性面板的"最近使用组件"(MRU)同属用户状态,不入库。
-Editor/wui-properties.json
+# 本机状态(编辑器偏好/布局/窗口/最近使用组件):不入库;整个目录可删,删后自动重建。
+/local/
 # glTF 导入产物(.wmodel / .wmat / 贴图)由导入器生成:夹具只提交 .gltf,
 # 导入结果由测试/编辑器首次导入时重建(2026-09-20 误提交过一次,已改回忽略)。
-Game/assets/models/**/*.wmodel
-Game/assets/models/**/materials/
-Game/assets/models/**/textures/
+# Layout-S7:项目内容根在 projects/<名>/assets/**。
+projects/*/assets/models/**/*.wmodel
+projects/*/assets/models/**/materials/
+projects/*/assets/models/**/textures/
 
 # W8:编辑器脚本工作区脚手架(create-if-missing 生成;用户改过的配置不入库即保留)。
 # 上面的 `.vscode` 忽略规则会连带排除父目录,必须先把目录本身取消忽略,再放行其内容。
-!Game/.vscode/
-!Game/.vscode/**
-!Game/.luau-lsp/
-!Game/.luau-lsp/**
+!projects/default/.vscode/
+!projects/default/.vscode/**
+!projects/default/.luau-lsp/
+!projects/default/.luau-lsp/**
 # 2026-09-22:docs/ 随仓库走,但只放**公开**文档(做游戏的人 docs/user/** + 改引擎的公开部分 docs/dev/**);
 # 内部知识(不变量/契约/决策/陷阱/验证口径/术语/工作流数据)不在本仓库里。
 # 父目录先解忽略,子项才能被重新包含。

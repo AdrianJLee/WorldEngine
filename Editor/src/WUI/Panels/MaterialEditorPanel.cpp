@@ -282,7 +282,7 @@ namespace World
 
 		// U2d:未落盘材质的"另存为"目标路径校验,返回给用户看的具体原因(空字符串 = 可提交)。
 		// 与 MaterialLibrary::Save + MaterialIO::WriteFileText 的落盘规则一致:
-		//  - 缺 .wmat 后缀会自动补;  - 写入目标为内容根 Game/assets。
+		//  - 缺 .wmat 后缀会自动补;  - 写入目标为项目内容根。
 		// 名字里真正非法的只有 < > : " | ? *(反斜杠/斜杠是路径分隔符,不是非法字符)。
 		std::string NewMaterialPathError(const std::string& raw)
 		{
@@ -300,7 +300,7 @@ namespace World
 				key.append(".wmat");
 			std::error_code existsError;
 			const std::filesystem::path contentRoot =
-				std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+				std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
 			if (std::filesystem::exists(contentRoot / key, existsError))
 				return Wui::Tr("panel.material.newpath.error.exists", "A file already exists at this path");
 			return {};
@@ -311,7 +311,7 @@ namespace World
 		{
 			std::vector<std::string> paths;
 			std::error_code ec;
-			const std::filesystem::path root = std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+			const std::filesystem::path root = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
 			if (!std::filesystem::exists(root, ec))
 				return paths;
 			for (const std::filesystem::directory_entry& entry :
@@ -335,7 +335,7 @@ namespace World
 
 		std::filesystem::path ContentRootPath()
 		{
-			return std::filesystem::path(std::string(WLD_GAME_DIR)) / "assets";
+			return std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
 		}
 
 		// 逻辑贴图路径是否能在磁盘上找到(绝对路径也支持:编辑器自带资源用绝对路径)。
@@ -523,7 +523,7 @@ namespace World
 			return "material.prop." + key + ".reset";
 		}
 
-		// ---- U24:字段的**控件分类**(唯一落点;规则原文见 World/src/World/WUI/WuiWidgets.h)----
+		// ---- U24:字段的**控件分类**(唯一落点;规则原文见 Engine/src/World/WUI/WuiWidgets.h)----
 		//   DragBarFloat     = 感知型归一化区间(0..1 比例、角度、强度、透明度、平铺系数);
 		//   NumberFieldInt   = 计数/索引/ID/大范围整数;StepperInt = 小整数(1..16)。
 		// 材质面板的**全部**可编辑数值字段都是感知型 —— 金属度/粗糙度(0..1)、预览光照强度(0..4)
@@ -2104,7 +2104,7 @@ namespace World
 			Wui::Label(ctx, { pathX, lineY + 2.0f },
 				EllipsizeToWidth(ctx, pathText, pathWidth, 11.0f), theme.TextMuted, 11.0f);
 			const std::string pathDoc = Wui::Tr("panel.material.path.tooltip",
-				"Source asset path, relative to the content root (Game/assets).");
+				"Source asset path, relative to the project content root.");
 			Wui::Tooltip(ctx, { pathX, lineY, pathWidth, kHeaderTextHeight }, pathDoc);
 			RegisterReadOnlyNode(Wui::HashId("material.path"),
 				Wui::Tr("panel.material.path", "Source path"), pathText,

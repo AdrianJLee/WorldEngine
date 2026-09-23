@@ -22,24 +22,24 @@
 
 | 层 | 位置 | 说明 |
 | --- | --- | --- |
-| 应用与基础设施 | `World/src/World/Core/` | 应用生命周期、内存、作业、日志、VFS、项目清单 |
-| 平台 | `World/src/World/Platform/` | 窗口、输入、动态库加载、OpenGL 上下文等平台相关实现 |
-| 渲染 | `World/src/World/RHI/` | RHI 前端 + OpenGL / Vulkan 后端、资源与描述符抽象 |
-| 场景与反射 | `World/src/World/Scene/`、`World/src/World/Schema/` | ECS、场景序列化、组件定义与生成的访问器 |
-| UI | `World/src/World/WUI/` | WUI 控件、布局、无障碍节点;编辑器与 Runtime HUD 共用 |
-| 脚本 | `World/src/World/Script/` | Luau 运行时、绑定、沙箱、热重载、补全声明生成 |
+| 应用与基础设施 | `Engine/src/World/Core/` | 应用生命周期、内存、作业、日志、VFS、项目清单 |
+| 平台 | `Engine/src/World/Platform/` | 窗口、输入、动态库加载、OpenGL 上下文等平台相关实现 |
+| 渲染 | `Engine/src/World/RHI/` | RHI 前端 + OpenGL / Vulkan 后端、资源与描述符抽象 |
+| 场景与反射 | `Engine/src/World/Scene/`、`Engine/src/World/Schema/` | ECS、场景序列化、组件定义与生成的访问器 |
+| UI | `Engine/src/World/WUI/` | WUI 控件、布局、无障碍节点;编辑器与 Runtime HUD 共用 |
+| 脚本 | `Engine/src/World/Script/` | Luau 运行时、绑定、沙箱、热重载、补全声明生成 |
 
 ## 渲染
 
 - 引擎默认后端是 **OpenGL**;Vulkan 后端与 OpenGL 后端共用同一套 RHI 前端。
-- 后端由项目清单(`Game/project.we.yaml`)的 `renderer: opengl | vulkan` 选择;**字段缺省时按 `opengl` 处理**。
+- 后端由项目清单(`projects/default/project.we.yaml`)的 `renderer: opengl | vulkan` 选择;**字段缺省时按 `opengl` 处理**。
   本仓库示例项目当前写的是 `vulkan`。
-- 着色器源是 `World/assets/shaders/*.hlsl`(入口 `VSMain` / `PSMain`,`vs_6_0` / `ps_6_0`),
+- 着色器源是 `Engine/assets/shaders/*.hlsl`(入口 `VSMain` / `PSMain`,`vs_6_0` / `ps_6_0`),
   开发期编译到构建目录的着色器缓存;打包产物里带编译好的着色器,运行时不依赖 `dxc`。
 
 ## 场景与反射
 
-- 组件是普通 C++ 结构,字段通过注解参与 schema 生成;生成结果在 `World/src/World/Schema/Generated/`。
+- 组件是普通 C++ 结构,字段通过注解参与 schema 生成;生成结果在 `Engine/src/World/Schema/Generated/`。
 - 编辑器属性面板是 **schema 驱动**的:字段怎么编辑(名字、分类、取值范围、资产类型、只读核心字段)声明在字段旁,
   不在面板里逐字段硬编码。
 - 场景文件(`.wd`)保存实体与组件;`World.SchemaDrift` 测试对生成结果做字节级门禁,改注解必须重跑生成器。
@@ -53,7 +53,7 @@
 ## 脚本
 
 - 引擎内嵌 **Luau**;脚本组件挂到实体上,由引擎驱动 `OnCreate` / `OnUpdate` / `OnDestroy` 等回调。
-- 编辑器根据实际注册的绑定生成 `Game/assets/scripts/intermediate/WorldEngineAPI.luau`,供语言服务器做补全;
+- 编辑器根据实际注册的绑定生成 `projects/default/assets/scripts/intermediate/WorldEngineAPI.luau`,供语言服务器做补全;
   生成文件不参与运行,不要 `require`。
 
 ## 验证

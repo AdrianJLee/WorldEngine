@@ -92,7 +92,7 @@ namespace World
 			return buffer;
 		}
 
-		// 内容根(开发布局 Game/assets,打包由清单决定):**解析一次**缓存起来。
+		// 内容根(开发布局 projects/default/assets,打包由清单决定):**解析一次**缓存起来。
 		// 实例条每帧都要判断"来源资产还在不在",每帧重读 project.we.yaml 是不可接受的。
 		const std::filesystem::path& CachedContentRoot()
 		{
@@ -516,7 +516,7 @@ namespace World
 	}
 
 	PropertiesPanel::PropertiesPanel(PanelHost& host)
-		: m_Host(host), m_StatePath(std::string(WLD_EDITOR_DIR) + "wui-properties.json")
+		: m_Host(host), m_StatePath(std::string(WLD_LOCAL_DIR) + "wui-properties.json")
 	{
 		// 选择器 MRU 与其它面板状态同口径(wui-layout.json / wui-browser.json):读失败/文件不
 		// 存在都只是"没有最近使用",不影响面板可用性。
@@ -1264,7 +1264,7 @@ namespace World
 					added.AddComponent(componentId);
 			}))
 				m_Host.MarkDocumentDirty();
-			// MRU 置顶并落盘(<Editor>/wui-properties.json)。
+			// MRU 置顶并落盘(<local>/wui-properties.json)。
 			TouchRecent(SchemaTypeKeyName(schema));
 			// 新分区自动展开(与分区绘制读同一个持久化键),再由 OnRender 连续几帧滚到可见。
 			const bool defaultOpen = schema.Id.Name == "World::LuaScriptComponent";

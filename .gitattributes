@@ -1,0 +1,31 @@
+# 行尾与二进制处理(2026-09-23,R3:修"逐字节门禁被 CRLF 误伤"的陷阱)
+#
+# 背景:本机 core.autocrlf 生效时,签出写 CRLF、提交转回 LF;而
+# tests/ScriptWorkflowTests.cpp 的"存根漂移门禁"对
+# projects/default/assets/scripts/intermediate/WorldEngineAPI.luau 做逐字节比较,
+# 工作树是 CRLF 时会误报失败(内容逐行相同)。
+#
+# 策略:只对"逐字节门禁涉及的文本"强制 LF,避免全仓 renormalize 造成无关 diff。
+
+*.luau text eol=lf
+*.lua  text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+
+# 二进制:永远不做文本转换
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.ico   binary
+*.ttf   binary
+*.otf   binary
+*.exe   binary
+*.dll   binary
+*.lib   binary
+*.pdb   binary
+*.spv   binary
+*.zip   binary
+*.gz    binary
+*.wav   binary
+*.mp3   binary

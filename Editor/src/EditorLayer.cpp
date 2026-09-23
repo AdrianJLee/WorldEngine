@@ -10,6 +10,7 @@
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Core/Vfs/DirectoryProvider.h"
 #include "World/Core/Vfs/PackageProvider.h"
+#include "World/Core/WorldContext.h"
 #include "World/Gameplay/ModelInstance.h"
 #include "World/Gameplay/Prefab.h"
 #include "World/Modules/GameModuleHost.h"
@@ -94,6 +95,46 @@ namespace World
 			timing.Frames = 0;
 		}
 
+		// ---- Layout-S6:Game 模块加载 = 自动存根生成的前置条件 ----
+		//
+		// 编辑器的 Lua 存根输入是当前 WorldContext 的 schema 注册表:Game 组件(SampleDataComponent
+		// 等)只有在 Game 模块注册后才在表里。而 GameModuleHost::LoadDefault 的兜底路径用
+		// WLD_OUTPUT_DIR —— 它由 CMake 定义成**相对**路径("build/x64-<cfg>/"),按进程 CWD 解析:
+		//   * CWD = 仓库根(文档口径)→ 命中 build/x64-<cfg>/bin/<cfg>/Game/<cfg>/Game.dll;
+		//   * CWD = 别处(双击 Editor.exe / 从构建目录或快捷方式启动)→ 找不到 Game.dll,模块不注册,
+		//     于是 ScriptEngine::GenerateLuaStubs() 会把**缺少 Game 组件块**的存根写回入库文件
+		//     (WLD_ASSETPATH 是绝对路径,写的就是仓库里那一份)。
+		//     2026-09-23 实测(cwd=build/x64-Debug):27266 → 26893 字节,少 11 行 SampleDataComponent
+		//     块,工作区变脏、World.ScriptWorkflow 的存根漂移门禁失败。
+		//
+		// 这里补一条**与 CWD 无关**的兜底:把同一个开发期布局锚定到绝对编译期路径(仓库根),
+		// 不新增目录约定。WLD_OUTPUT_DIR 将来若改成绝对路径,path 的 / 运算仍取绝对那一侧,
+		// 这条兜底继续成立。
+		// 仓库根用 WLD_REPO_ROOT(**无**尾分隔符;Layout-S7 新增):WLD_GAME_DIR / WLD_EDITOR_DIR /
+		// WLD_PROJECT_DIR 都写成 "<root>/X/" 带尾分隔符,对它们调 parent_path() 只会去掉那个
+		// 空文件名(实测 2026-09-23:得到 "<root>/X" 而不是 "<root>",拼出来是
+		// "<root>/Game\build/x64-Debug/..." 这种错路径)。
+		bool LoadGameModuleForEditor(WorldContext& context, std::string* error)
+		{
+			std::string primaryError;
+			if (Modules::GameModuleHost::LoadDefault(context, &primaryError))
+				return true;
+
+			const std::filesystem::path repoRoot = std::filesystem::path(WLD_REPO_ROOT);
+			const std::filesystem::path anchored =
+				repoRoot / WLD_OUTPUT_DIR / "bin" / WLD_BUILD_TYPE / "Game" / WLD_BUILD_TYPE / "Game.dll";
+			std::string anchoredError;
+			if (context.Modules().Load(anchored, context, &anchoredError) == Modules::ModuleManager::Status::Ok)
+			{
+				WLD_CORE_INFO("[game-module] loaded through the workspace-anchored path: {0}", anchored.string());
+				return true;
+			}
+
+			if (error)
+				*error = primaryError + "; fallback " + anchored.string() + ": " + anchoredError;
+			return false;
+		}
+
 		// D7-1a/P4-U13h:3D 视口中键平移的灵敏度系数(单位:个"视口高度对应的世界距离")。
 		//
 		// 口径:鼠标拖过整个视口高度 ≈ 平移 kPanUnitsPerViewportHeight 个视口高度对应的世界
@@ -159,22 +200,33 @@ namespace World
 		}
 		// 主窗口无边框:顶部第一行(挂靠栏)即窗口栏位,可拖动/关闭;边缘缩放保留。
 		Application::Get().GetWindow().SetFrameless(true);
+		// Layout-S6:Game 模块是 Game 组件 schema 的注册者,也是自动存根生成的输入来源。
+		// 加载失败时下面会**停用**自动存根生成(见那儿的原因)。
 		std::string moduleError;
-		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
+		m_GameModuleLoaded = LoadGameModuleForEditor(Application::Get().GetContext(), &moduleError);
+		if (!m_GameModuleLoaded)
 			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
 
 		// 开发期资产:编辑器与 Runtime 一致,经 VFS 目录 provider 读内容。
 		// 目录 provider 已由 Application::MountProjectContent 统一挂载,此处不再重复。
 
 		// Application initialized Lua before attach; Game registration is now merged.
-		if (!ScriptEngine::GenerateLuaStubs())
+		// Layout-S6:Game 模块没注册时渲染出来的存根会缺少 Game 组件块,而写出目标是**入库文件**
+		// (WLD_ASSETPATH 与 CWD 无关,写的就是仓库里那一份)——宁可保留上一份有效声明,也不要
+		// 用不完整的 schema 覆盖它。File ▸ Generate Lua API Stubs 仍可手动强制生成(带告警)。
+		if (!m_GameModuleLoaded)
+		{
+			WLD_CORE_WARN("[Lua] Game module is not registered; skipping the automatic Lua API stub "
+				"generation so the committed stub keeps its Game component blocks.");
+		}
+		else if (!ScriptEngine::GenerateLuaStubs())
 			WLD_CORE_ERROR("Automatic Lua API stub generation failed; keeping the last valid declarations.");
 
 		// W8:Luau LSP 脚手架(.vscode/settings.json + .luau-lsp/config.json):create-if-missing,
 		// 磁盘已有(用户改过的)配置绝不覆盖。
 		{
-			// 工作区根 = 项目清单所在目录(Game/;清单里的 content_root = assets),与
-			// 入库的 Game/.vscode、Game/.luau-lsp 一致;没有清单时退回内容根。
+			// 工作区根 = 项目清单所在目录(projects/default/;清单里的 content_root = assets),与
+			// 入库的 projects/default/.vscode、projects/default/.luau-lsp 一致;没有清单时退回内容根。
 			std::filesystem::path scaffoldRoot = std::filesystem::path(WLD_ASSETPATH);
 			std::filesystem::path manifestPath;
 			if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
@@ -319,19 +371,19 @@ namespace World
 	// 图标是旧式(GL)纹理:窗口/上下文重建后必须重新加载,否则渲染出的图标会错乱。
 	void EditorLayer::LoadIconTextures()
 	{
-		// 图标是**编辑器资源**(Editor/Resource/Icons),不是内容根里的游戏资产 ——
+		// 图标是**编辑器资源**(Editor/assets/icons),不是内容根里的游戏资产 ——
 		// 一律走 EditorResourcePath 拼绝对路径(见 EditorResources.h)。
-		m_IconPlay = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_Play.png"));
+		m_IconPlay = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Play.png"));
 
-		m_IconStop = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_Stop.png"));
+		m_IconStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Stop.png"));
 
-		m_IconPause = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_Pause.png"));
-		m_IconContinue = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_Continue.png"));
+		m_IconPause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Pause.png"));
+		m_IconContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Continue.png"));
 
-		m_IconSimulate = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_SimulateStart.png"));
-		m_IconSimulateStop = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_SimulateStop.png"));
-		m_IconSimulatePause = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_SimulatePause.png"));
-		m_IconSimulateContinue = Texture2D::Create(EditorResourcePath("Resource/Icons/Icon_SimulateContinue.png"));
+		m_IconSimulate = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStart.png"));
+		m_IconSimulateStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStop.png"));
+		m_IconSimulatePause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulatePause.png"));
+		m_IconSimulateContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateContinue.png"));
 	}
 
 	void EditorLayer::OnDetach()
@@ -1543,6 +1595,11 @@ namespace World
 
 	void EditorLayer::GenerateLuaStubsAction()
 	{
+		// Layout-S6:这是用户的显式请求,照旧执行;但 Game 模块缺失时结果会少 Game 组件块,
+		// 而文件是入库的那一份,所以把代价先讲清楚。
+		if (!m_GameModuleLoaded)
+			WLD_CORE_WARN("[Lua] Game module is not registered; the generated stub will lack the Game "
+				"component blocks and will overwrite the committed file.");
 		if (!ScriptEngine::GenerateLuaStubs())
 			WLD_CORE_ERROR("Lua API stub generation failed; keeping the last valid declarations.");
 	}
@@ -2557,7 +2614,7 @@ namespace World
 				{
 					std::string manifestError;
 					World::Asset::ProjectManifest manifest;
-					const fs::path projectManifestPath = std::string(WLD_GAME_DIR) + "project.we.yaml";
+					const fs::path projectManifestPath = std::string(WLD_PROJECT_DIR) + "project.we.yaml";
 					if (World::Asset::ProjectManifest::Load(projectManifestPath, &manifest, &manifestError))
 					{
 						const fs::path contentRoot = manifest.ResolveContentRoot(projectManifestPath);

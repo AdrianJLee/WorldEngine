@@ -8,7 +8,7 @@
 - CMake ≥ 3.16(本仓库在 `4.3.1-msvc1` 上验证)。
 - **Vulkan SDK 必须能配置到**:配置阶段就会查找 Vulkan 头文件与导入库,即使实际用默认的 OpenGL 后端。
   缺失时 `find_package(Vulkan)` 失败,后面的着色器工具链也会退化(见下)。
-- 第三方依赖在仓库内(`vendor/`、`World/vendor/`)与子模块里,**不要**换成系统版本。
+- 第三方依赖在仓库内(`vendor/`、`third_party/`)与子模块里,**不要**换成系统版本。
 
 ## 配置
 
@@ -85,5 +85,5 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 ## 内部开发 checkout 的额外工具
 
 内部 checkout 里有一个只读预检脚本(按 `.gitignore` 不进公开仓库):
-`tools/codex/check-environment.ps1` —— 一次列出 CMake / MSVC / MSBuild / Windows SDK / Vulkan SDK /
+`tools/agents/check-environment.ps1` —— 一次列出 CMake / MSVC / MSBuild / Windows SDK / Vulkan SDK /
 `dxc` / 已有构建缓存的状态,`-AsJson` 供脚本消费。

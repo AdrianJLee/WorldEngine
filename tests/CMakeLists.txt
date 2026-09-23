@@ -1,5 +1,5 @@
 # P2 W1:Luau 运行时封装(沙箱/错误定位),headless 可跑。
-add_executable(WorldLuauVmTests LuauVmTests.cpp)
+add_executable(WorldLuauVmTests World/LuauVmTests.cpp)
 target_link_libraries(WorldLuauVmTests PRIVATE World)
 target_compile_features(WorldLuauVmTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauVmTests PRIVATE
@@ -20,7 +20,7 @@ set_tests_properties(World.LuauVm PROPERTIES
 )
 
 # P2 W1b:绑定层地基(environment/全局注入/受保护调用+traceback/引用失效/usertype)。
-add_executable(WorldLuauBindingTests LuauBindingTests.cpp)
+add_executable(WorldLuauBindingTests World/LuauBindingTests.cpp)
 target_link_libraries(WorldLuauBindingTests PRIVATE World)
 target_compile_features(WorldLuauBindingTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauBindingTests PRIVATE
@@ -41,7 +41,7 @@ set_tests_properties(World.LuauBinding PROPERTIES
 )
 
 # P2 W2a:语言无关的行为注册层(两类行为的描述/重复注册拒绝/按实体枚举的确定性/共存调度)。
-add_executable(WorldBehaviorRegistryTests BehaviorRegistryTests.cpp)
+add_executable(WorldBehaviorRegistryTests World/BehaviorRegistryTests.cpp)
 target_link_libraries(WorldBehaviorRegistryTests PRIVATE World)
 target_compile_features(WorldBehaviorRegistryTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldBehaviorRegistryTests PRIVATE
@@ -62,7 +62,7 @@ set_tests_properties(World.BehaviorRegistry PROPERTIES
 )
 
 # P2 W3a-A1:Entity:GetComponent 返回的 schema 字段代理(映射表/读写/失败路径/下一帧可见)。
-add_executable(WorldLuauSchemaBindingTests LuauSchemaBindingTests.cpp)
+add_executable(WorldLuauSchemaBindingTests World/LuauSchemaBindingTests.cpp)
 target_link_libraries(WorldLuauSchemaBindingTests PRIVATE World)
 target_compile_features(WorldLuauSchemaBindingTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauSchemaBindingTests PRIVATE
@@ -83,7 +83,7 @@ set_tests_properties(World.LuauSchemaBinding PROPERTIES
 )
 
 # P2 W3d:Entity 生成/查询/prefab 绑定(回调内同步白名单、层级、快照可见性、失败路径)。
-add_executable(WorldLuauEntityBindingTests LuauEntityBindingTests.cpp)
+add_executable(WorldLuauEntityBindingTests World/LuauEntityBindingTests.cpp)
 target_link_libraries(WorldLuauEntityBindingTests PRIVATE World)
 target_compile_features(WorldLuauEntityBindingTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauEntityBindingTests PRIVATE
@@ -105,7 +105,7 @@ set_tests_properties(World.LuauEntityBinding PROPERTIES
 )
 
 # P2 W3a-A2:存根随 schema 自动更新(组件块/字段注解/顺序规则/确定性)。
-add_executable(WorldLuauStubSchemaTests LuauStubSchemaTests.cpp)
+add_executable(WorldLuauStubSchemaTests World/LuauStubSchemaTests.cpp)
 target_link_libraries(WorldLuauStubSchemaTests PRIVATE World)
 target_compile_features(WorldLuauStubSchemaTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauStubSchemaTests PRIVATE
@@ -126,7 +126,7 @@ set_tests_properties(World.LuauStubSchema PROPERTIES
 )
 
 # P2 W3b:游戏服务面的脚本绑定(Input/Level/Save;headless 夹具走真实 GameHost.Tick)。
-add_executable(WorldLuauServiceBindingTests LuauServiceBindingTests.cpp)
+add_executable(WorldLuauServiceBindingTests World/LuauServiceBindingTests.cpp)
 target_link_libraries(WorldLuauServiceBindingTests PRIVATE World)
 target_compile_features(WorldLuauServiceBindingTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauServiceBindingTests PRIVATE
@@ -147,7 +147,7 @@ set_tests_properties(World.LuauServiceBinding PROPERTIES
 )
 
 # P2 W3c:UI 面的脚本绑定(ui.* 立即模式控件;headless 手工输入 + WuiContext 命令断言)。
-add_executable(WorldLuauUiBindingTests LuauUiBindingTests.cpp)
+add_executable(WorldLuauUiBindingTests World/LuauUiBindingTests.cpp)
 target_link_libraries(WorldLuauUiBindingTests PRIVATE World)
 target_compile_features(WorldLuauUiBindingTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauUiBindingTests PRIVATE
@@ -168,7 +168,7 @@ set_tests_properties(World.LuauUiBinding PROPERTIES
 )
 
 # P2 W5:L2 脚本热重载(源指纹/字段迁移/失败回滚/轮询监听;headless,脚本写构建产物临时目录)。
-add_executable(WorldScriptHotReloadTests ScriptHotReloadTests.cpp)
+add_executable(WorldScriptHotReloadTests World/ScriptHotReloadTests.cpp)
 target_link_libraries(WorldScriptHotReloadTests PRIVATE World)
 target_compile_features(WorldScriptHotReloadTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldScriptHotReloadTests PRIVATE
@@ -190,7 +190,7 @@ set_tests_properties(World.ScriptHotReload PROPERTIES
 )
 
 # P2 W3e:相机字段的嵌套对象代理(CameraComponent.Camera → SceneCamera;headless)。
-add_executable(WorldLuauCameraBindingTests LuauCameraBindingTests.cpp)
+add_executable(WorldLuauCameraBindingTests World/LuauCameraBindingTests.cpp)
 target_link_libraries(WorldLuauCameraBindingTests PRIVATE World)
 target_compile_features(WorldLuauCameraBindingTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauCameraBindingTests PRIVATE
@@ -211,7 +211,7 @@ set_tests_properties(World.LuauCameraBinding PROPERTIES
 )
 
 # P2 W3f:2D 物理运行时 API(速度/冲量/力/运动学同步/运行时建刚体;headless)。
-add_executable(WorldLuauPhysicsBindingTests LuauPhysicsBindingTests.cpp)
+add_executable(WorldLuauPhysicsBindingTests World/LuauPhysicsBindingTests.cpp)
 target_link_libraries(WorldLuauPhysicsBindingTests PRIVATE World)
 target_compile_features(WorldLuauPhysicsBindingTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauPhysicsBindingTests PRIVATE
@@ -232,7 +232,7 @@ set_tests_properties(World.LuauPhysicsBinding PROPERTIES
 )
 
 # P2 W4:事件 / 计时器脚本绑定(顺序/off/盒装往返/失败隔离/退订/热重载重建;headless)。
-add_executable(WorldLuauEventBindingTests LuauEventBindingTests.cpp)
+add_executable(WorldLuauEventBindingTests World/LuauEventBindingTests.cpp)
 target_link_libraries(WorldLuauEventBindingTests PRIVATE World)
 target_compile_features(WorldLuauEventBindingTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauEventBindingTests PRIVATE
@@ -254,7 +254,7 @@ set_tests_properties(World.LuauEventBinding PROPERTIES
 )
 
 # P2 W6:沙箱预算(指令/时间预算 + 中断 + 粘住语义;headless)。
-add_executable(WorldLuauSandboxTests LuauSandboxTests.cpp)
+add_executable(WorldLuauSandboxTests World/LuauSandboxTests.cpp)
 target_link_libraries(WorldLuauSandboxTests PRIVATE World)
 target_compile_features(WorldLuauSandboxTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauSandboxTests PRIVATE
@@ -275,7 +275,7 @@ set_tests_properties(World.LuauSandbox PROPERTIES
 )
 
 # P2 W7-1:脚本字节码容器(WSL1)+ LuauVm::LoadChunk 统一装载入口(源码/容器分流;headless)。
-add_executable(WorldScriptArtifactTests ScriptArtifactTests.cpp)
+add_executable(WorldScriptArtifactTests World/ScriptArtifactTests.cpp)
 target_link_libraries(WorldScriptArtifactTests PRIVATE World)
 target_compile_features(WorldScriptArtifactTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldScriptArtifactTests PRIVATE
@@ -296,7 +296,7 @@ set_tests_properties(World.ScriptArtifact PROPERTIES
 )
 
 # P2 W7-3:运行时分流(容器/源码字节;U3 无源码树 headless:只挂包 provider)。
-add_executable(WorldScriptBinaryLoadTests ScriptBinaryLoadTests.cpp)
+add_executable(WorldScriptBinaryLoadTests World/ScriptBinaryLoadTests.cpp)
 target_link_libraries(WorldScriptBinaryLoadTests PRIVATE World)
 target_compile_features(WorldScriptBinaryLoadTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldScriptBinaryLoadTests PRIVATE
@@ -318,7 +318,7 @@ set_tests_properties(World.ScriptBinaryLoad PROPERTIES
 )
 
 # P2 W8:脚本工作流(逻辑路径 → 可编辑磁盘路径 + LSP 脚手架 create-if-missing;headless)。
-add_executable(WorldScriptWorkflowTests ScriptWorkflowTests.cpp)
+add_executable(WorldScriptWorkflowTests World/ScriptWorkflowTests.cpp)
 target_link_libraries(WorldScriptWorkflowTests PRIVATE World)
 target_compile_features(WorldScriptWorkflowTests PRIVATE cxx_std_17)
 # 存根漂移门禁要复现"编辑器同一输入":额外编译 Game 的生成式 schema 注册源
@@ -346,7 +346,7 @@ set_tests_properties(World.ScriptWorkflow PROPERTIES
     TIMEOUT 90
 )
 
-add_executable(WorldScriptTests ScriptLifecycleTests.cpp)
+add_executable(WorldScriptTests World/ScriptLifecycleTests.cpp)
 target_link_libraries(WorldScriptTests PRIVATE World)
 target_compile_features(WorldScriptTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldScriptTests PRIVATE
@@ -371,10 +371,10 @@ set_tests_properties(World.ScriptLifecycle PROPERTIES
 
 # Schema 2.0 核心回归:注册表、稳定身份、生成访问器、事务化模块注册。
 add_executable(WorldSchemaTests
-    SchemaTests.cpp
-    schema/Generated/TestKit/TestKitSchemaRegistration.cpp
+    World/SchemaTests.cpp
+    World/schema/Generated/TestKit/TestKitSchemaRegistration.cpp
 )
-target_include_directories(WorldSchemaTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(WorldSchemaTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/World")
 target_compile_definitions(WorldSchemaTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
     NOMINMAX
@@ -395,7 +395,7 @@ set_tests_properties(World.Schema PROPERTIES
 )
 
 # WUI Core 纯逻辑回归:布局/样式/命中/焦点(无 GL)。
-add_executable(WorldWuiTests WuiTests.cpp)
+add_executable(WorldWuiTests World/WuiTests.cpp)
 target_link_libraries(WorldWuiTests PRIVATE World)
 target_compile_features(WorldWuiTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldWuiTests PRIVATE
@@ -416,7 +416,7 @@ set_tests_properties(World.Wui PROPERTIES
 )
 
 # D10-13:WUI 模态组件(整窗输入封锁 / 居中外框+遮罩+标题+Esc / 底部按钮条)headless 回归。
-add_executable(WorldWuiModalTests WuiModalTests.cpp)
+add_executable(WorldWuiModalTests World/WuiModalTests.cpp)
 target_link_libraries(WorldWuiModalTests PRIVATE World)
 target_compile_features(WorldWuiModalTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldWuiModalTests PRIVATE
@@ -437,7 +437,7 @@ set_tests_properties(World.WuiModal PROPERTIES
 )
 
 # W9-1:WUI 文本编辑内核(UTF-8 行索引/选区/撤销/快捷键)与代码编辑器控件的 headless 回归。
-add_executable(WorldWuiTextBufferTests WuiTextBufferTests.cpp)
+add_executable(WorldWuiTextBufferTests World/WuiTextBufferTests.cpp)
 target_link_libraries(WorldWuiTextBufferTests PRIVATE World)
 target_compile_features(WorldWuiTextBufferTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldWuiTextBufferTests PRIVATE
@@ -458,7 +458,7 @@ set_tests_properties(World.WuiTextBuffer PROPERTIES
 )
 
 # W9-2:Luau 逐行语法高亮(关键字/字符串/长括号/跨行块注释/中文串边界)+ 按行缓存。
-add_executable(WorldLuauHighlighterTests LuauHighlighterTests.cpp)
+add_executable(WorldLuauHighlighterTests World/LuauHighlighterTests.cpp)
 target_link_libraries(WorldLuauHighlighterTests PRIVATE World)
 target_compile_features(WorldLuauHighlighterTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauHighlighterTests PRIVATE
@@ -479,7 +479,7 @@ set_tests_properties(World.LuauHighlighter PROPERTIES
 )
 
 # W9.5-1:Luau 补全符号表(入库存根解析/上下文/过滤排序)+ 文件内符号(headless)。
-add_executable(WorldLuauCompletionTests LuauCompletionTests.cpp)
+add_executable(WorldLuauCompletionTests World/LuauCompletionTests.cpp)
 target_link_libraries(WorldLuauCompletionTests PRIVATE World)
 target_compile_features(WorldLuauCompletionTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLuauCompletionTests PRIVATE
@@ -500,7 +500,7 @@ set_tests_properties(World.LuauCompletion PROPERTIES
 )
 
 # W9.5-2:代码编辑器补全浮层(触发/选择/接受/抑制/无障碍节点)+ headless。
-add_executable(WorldWuiCompletionTests WuiCompletionTests.cpp)
+add_executable(WorldWuiCompletionTests World/WuiCompletionTests.cpp)
 target_link_libraries(WorldWuiCompletionTests PRIVATE World)
 target_compile_features(WorldWuiCompletionTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldWuiCompletionTests PRIVATE
@@ -521,7 +521,7 @@ set_tests_properties(World.WuiCompletion PROPERTIES
 )
 
 # VFS 2.0 核心回归:归一化、目录/包 provider、挂载优先级与包格式校验。
-add_executable(WorldVfsTests VfsTests.cpp)
+add_executable(WorldVfsTests World/VfsTests.cpp)
 target_link_libraries(WorldVfsTests PRIVATE World)
 target_compile_features(WorldVfsTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldVfsTests PRIVATE
@@ -542,7 +542,7 @@ set_tests_properties(World.Vfs PROPERTIES
 )
 
 # 资产管线回归:项目清单、指纹缓存、增量烘焙与打包读回一致性。
-add_executable(WorldAssetTests AssetCookTests.cpp)
+add_executable(WorldAssetTests World/AssetCookTests.cpp)
 target_link_libraries(WorldAssetTests PRIVATE World)
 target_compile_features(WorldAssetTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldAssetTests PRIVATE
@@ -563,7 +563,7 @@ set_tests_properties(World.Asset PROPERTIES
 )
 
 # RHI 合同头自洽性:全部 POD 描述符默认构造与关键语义(无渲染)。
-add_executable(WorldRhiContractTests RhiContractTests.cpp)
+add_executable(WorldRhiContractTests World/RhiContractTests.cpp)
 target_link_libraries(WorldRhiContractTests PRIVATE World)
 target_compile_features(WorldRhiContractTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldRhiContractTests PRIVATE
@@ -584,10 +584,10 @@ set_tests_properties(World.RhiContract PROPERTIES
 )
 
 # Vulkan 设备创建(volk 动态加载驱动;无驱动环境优雅跳过)。
-add_executable(WorldVulkanDeviceTests VulkanDeviceTests.cpp)
+add_executable(WorldVulkanDeviceTests World/VulkanDeviceTests.cpp)
 target_link_libraries(WorldVulkanDeviceTests PRIVATE World Vulkan::Vulkan)
 # 内部 Vulkan 头(上传环形缓冲回归)需要 volk。
-target_include_directories(WorldVulkanDeviceTests PRIVATE "${CMAKE_SOURCE_DIR}/World/vendor/volk")
+target_include_directories(WorldVulkanDeviceTests PRIVATE "${CMAKE_SOURCE_DIR}/third_party/volk")
 target_compile_features(WorldVulkanDeviceTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldVulkanDeviceTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
@@ -607,7 +607,7 @@ set_tests_properties(World.VulkanDevice PROPERTIES
 )
 
 # P2a 游戏框架:会话(GameApp)与流程(GameFlow)——固定步长、暂停、安全点切换,无设备依赖。
-add_executable(WorldGameplayTests GameplayTests.cpp)
+add_executable(WorldGameplayTests Game/GameplayTests.cpp)
 target_link_libraries(WorldGameplayTests PRIVATE World)
 target_compile_features(WorldGameplayTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldGameplayTests PRIVATE
@@ -628,7 +628,7 @@ set_tests_properties(World.Gameplay PROPERTIES
 )
 
 # P2a W2:关卡清单与关卡服务(加载状态机/进度/场景栈,含 YAML 往返)。
-add_executable(WorldLevelTests LevelTests.cpp)
+add_executable(WorldLevelTests World/LevelTests.cpp)
 target_link_libraries(WorldLevelTests PRIVATE World)
 target_compile_features(WorldLevelTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLevelTests PRIVATE
@@ -651,8 +651,8 @@ set_tests_properties(World.Level PROPERTIES
 # P1b D1:3D 相机与射线数学(纯 glm,无窗口/无设备)。
 # 注意:源文件由 P1b D1 子 agent 产出中,文件落地后再打开本目标(临时禁用以免 configure 失败)。
 set(_we_optional_test_targets "")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Camera3DTests.cpp")
-add_executable(WorldCamera3DTests Camera3DTests.cpp)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/World/Camera3DTests.cpp")
+add_executable(WorldCamera3DTests World/Camera3DTests.cpp)
 target_link_libraries(WorldCamera3DTests PRIVATE World)
 target_compile_features(WorldCamera3DTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldCamera3DTests PRIVATE
@@ -673,7 +673,7 @@ set_tests_properties(World.Camera3D PROPERTIES
 )
 
 # P1b D8a:视锥剔除数学(平面抽取/AABB 变换/相交判定)。
-add_executable(WorldFrustumCullTests FrustumCullTests.cpp)
+add_executable(WorldFrustumCullTests World/FrustumCullTests.cpp)
 target_link_libraries(WorldFrustumCullTests PRIVATE World)
 target_compile_features(WorldFrustumCullTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldFrustumCullTests PRIVATE
@@ -694,7 +694,7 @@ set_tests_properties(World.Frustum PROPERTIES
 )
 
 # P1b D8a2:项目渲染设置(清单 rendering 区块 / 运行期生效值 / 环境变量覆盖)。
-add_executable(WorldRenderSettingsTests RenderSettingsTests.cpp)
+add_executable(WorldRenderSettingsTests World/RenderSettingsTests.cpp)
 target_link_libraries(WorldRenderSettingsTests PRIVATE World)
 target_compile_features(WorldRenderSettingsTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldRenderSettingsTests PRIVATE
@@ -715,7 +715,7 @@ set_tests_properties(World.RenderSettings PROPERTIES
 )
 
 # P1b D2:网格资产模型(布局/包围盒/索引校验/默认物体)。
-add_executable(WorldMeshTests MeshTests.cpp)
+add_executable(WorldMeshTests World/MeshTests.cpp)
 target_link_libraries(WorldMeshTests PRIVATE World)
 target_compile_features(WorldMeshTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldMeshTests PRIVATE
@@ -736,7 +736,7 @@ set_tests_properties(World.Mesh PROPERTIES
 )
 
 # D3:材质资产(解析/版本/默认/夹紧/往返)+ 材质库(缓存/保存/热重载)。
-add_executable(WorldMaterialTests MaterialTests.cpp)
+add_executable(WorldMaterialTests World/MaterialTests.cpp)
 target_link_libraries(WorldMaterialTests PRIVATE World)
 target_compile_features(WorldMaterialTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldMaterialTests PRIVATE
@@ -757,7 +757,7 @@ set_tests_properties(World.Material PROPERTIES
 )
 
 # P1b D4:光照系统(灯光收集/打包上限、组件 schema 往返)。
-add_executable(WorldLightingTests LightingTests.cpp)
+add_executable(WorldLightingTests World/LightingTests.cpp)
 target_link_libraries(WorldLightingTests PRIVATE World)
 target_compile_features(WorldLightingTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldLightingTests PRIVATE
@@ -778,7 +778,7 @@ set_tests_properties(World.Lighting PROPERTIES
 )
 
 # P1b D5:模型导入(.wmodel 往返 / glTF 导入 / MeshIndex schema)。
-add_executable(WorldModelTests ModelIOTests.cpp)
+add_executable(WorldModelTests World/ModelIOTests.cpp)
 target_link_libraries(WorldModelTests PRIVATE World)
 target_compile_features(WorldModelTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldModelTests PRIVATE
@@ -799,7 +799,7 @@ set_tests_properties(World.Model PROPERTIES
 )
 
 # D5c-3a:CPU 蒙皮/动画数学(SampleAnimation / BuildJointMatrices 纯函数,headless)。
-add_executable(WorldSkinningTests SkinningTests.cpp)
+add_executable(WorldSkinningTests World/SkinningTests.cpp)
 target_link_libraries(WorldSkinningTests PRIVATE World)
 target_compile_features(WorldSkinningTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldSkinningTests PRIVATE
@@ -820,7 +820,7 @@ set_tests_properties(World.Skinning PROPERTIES
 )
 
 # D5c-4a:骨骼动画系统(节点树采样/时间推进/调色板缓存;headless 纯 CPU)。
-add_executable(WorldAnimationTests AnimationTests.cpp)
+add_executable(WorldAnimationTests World/AnimationTests.cpp)
 target_link_libraries(WorldAnimationTests PRIVATE World)
 target_compile_features(WorldAnimationTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldAnimationTests PRIVATE
@@ -841,7 +841,7 @@ set_tests_properties(World.Animation PROPERTIES
 )
 
 # P1b D6:3D 物理(Jolt)落体/堆叠/共存/接触/调试线段。
-add_executable(WorldPhysics3DTests Physics3DTests.cpp)
+add_executable(WorldPhysics3DTests World/Physics3DTests.cpp)
 target_link_libraries(WorldPhysics3DTests PRIVATE World)
 target_compile_features(WorldPhysics3DTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldPhysics3DTests PRIVATE
@@ -862,7 +862,7 @@ set_tests_properties(World.Physics3D PROPERTIES
 )
 
 # P2a W7:输入映射资产 + InputService(动作/轴/多玩家/边沿判定)。
-add_executable(WorldInputTests InputTests.cpp)
+add_executable(WorldInputTests World/InputTests.cpp)
 target_link_libraries(WorldInputTests PRIVATE World)
 target_compile_features(WorldInputTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldInputTests PRIVATE
@@ -882,7 +882,7 @@ set_tests_properties(World.Input PROPERTIES
     TIMEOUT 60
 )
 # P2a W4:Prefab 子树实例化(深拷贝/UUID 重发/层级重建)。
-add_executable(WorldPrefabTests PrefabTests.cpp)
+add_executable(WorldPrefabTests World/PrefabTests.cpp)
 target_link_libraries(WorldPrefabTests PRIVATE World)
 target_compile_features(WorldPrefabTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldPrefabTests PRIVATE
@@ -902,7 +902,7 @@ set_tests_properties(World.Prefab PROPERTIES
     TIMEOUT 60
 )
 # P2a W5:SystemRegistry(阶段/顺序依赖/耗时,无设备依赖)。
-add_executable(WorldSystemTests SystemRegistryTests.cpp)
+add_executable(WorldSystemTests World/SystemRegistryTests.cpp)
 target_link_libraries(WorldSystemTests PRIVATE World)
 target_compile_features(WorldSystemTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldSystemTests PRIVATE
@@ -922,7 +922,7 @@ set_tests_properties(World.Systems PROPERTIES
     TIMEOUT 60
 )
 # P2a W3a:实体层级与世界变换求解(挂载/环路检测/继承开关/深层链)。
-add_executable(WorldHierarchyTests HierarchyTests.cpp)
+add_executable(WorldHierarchyTests World/HierarchyTests.cpp)
 target_link_libraries(WorldHierarchyTests PRIVATE World)
 target_compile_features(WorldHierarchyTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldHierarchyTests PRIVATE
@@ -943,7 +943,7 @@ set_tests_properties(World.Hierarchy PROPERTIES
 )
 
 # P2a W6:类型化事件总线 + 计时器(无设备依赖)。
-add_executable(WorldEventTests EventTests.cpp)
+add_executable(WorldEventTests World/EventTests.cpp)
 target_link_libraries(WorldEventTests PRIVATE World)
 target_compile_features(WorldEventTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldEventTests PRIVATE
@@ -966,7 +966,7 @@ list(APPEND _we_optional_test_targets WorldCamera3DTests)
 endif()
 
 # 着色器管线回归:烘焙产物、内容寻址缓存、打包读回与运行时解析器优先级。
-add_executable(WorldShaderPipelineTests ShaderPipelineTests.cpp)
+add_executable(WorldShaderPipelineTests World/ShaderPipelineTests.cpp)
 target_link_libraries(WorldShaderPipelineTests PRIVATE World)
 target_compile_features(WorldShaderPipelineTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldShaderPipelineTests PRIVATE
@@ -987,7 +987,7 @@ set_tests_properties(World.ShaderPipeline PROPERTIES
 )
 
 # 内存基座回归:每线程帧 arena、析构、追加页、双轨与池分配器。
-add_executable(WorldMemoryTests MemoryTests.cpp)
+add_executable(WorldMemoryTests World/MemoryTests.cpp)
 target_link_libraries(WorldMemoryTests PRIVATE World)
 target_compile_features(WorldMemoryTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldMemoryTests PRIVATE
@@ -1002,7 +1002,7 @@ if(MSVC)
 endif()
 
 # 任务系统回归:提交/等待、ParallelFor、嵌套依赖、取消、压力与统计。
-add_executable(WorldTaskTests TaskTests.cpp)
+add_executable(WorldTaskTests World/TaskTests.cpp)
 target_link_libraries(WorldTaskTests PRIVATE World)
 target_compile_features(WorldTaskTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldTaskTests PRIVATE
@@ -1029,7 +1029,7 @@ set_tests_properties(World.Memory PROPERTIES
 )
 
 # 渲染后端运行时热切换回归:GL↔VK 往返 ≥3 次,含 SceneRenderer 重建。
-add_executable(WorldRendererHotswapTests RendererHotswapTests.cpp)
+add_executable(WorldRendererHotswapTests World/RendererHotswapTests.cpp)
 target_link_libraries(WorldRendererHotswapTests PRIVATE World)
 target_compile_features(WorldRendererHotswapTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldRendererHotswapTests PRIVATE
@@ -1050,7 +1050,7 @@ set_tests_properties(World.RendererHotswap PROPERTIES
 )
 
 # P2a W8:存档服务(槽位/全局块/场景块/版本迁移/坏档保护)。
-add_executable(WorldSaveTests SaveTests.cpp)
+add_executable(WorldSaveTests World/SaveTests.cpp)
 target_link_libraries(WorldSaveTests PRIVATE World)
 target_compile_features(WorldSaveTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldSaveTests PRIVATE
@@ -1071,7 +1071,7 @@ set_tests_properties(World.Save PROPERTIES
 )
 
 # P2a W10-1(D3):最小 C++ IBehavior 示例(固定步长确定性 + 生命周期)。
-add_executable(WorldBehaviorTests BehaviorTests.cpp)
+add_executable(WorldBehaviorTests World/BehaviorTests.cpp)
 target_link_libraries(WorldBehaviorTests PRIVATE World)
 target_compile_features(WorldBehaviorTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldBehaviorTests PRIVATE
@@ -1095,12 +1095,12 @@ set_tests_properties(World.Behavior PROPERTIES
 # 注解(含显式 Id(...))改了却没重跑生成器 → 此测试红灯。生成器只构建、不参与产品二进制。
 add_test(NAME World.SchemaDrift
     COMMAND schema-compiler
-        --input "${CMAKE_SOURCE_DIR}/World/src/World/Scene/Components.h"
-        --input "${CMAKE_SOURCE_DIR}/World/src/World/Core/UUID.h"
-        --input "${CMAKE_SOURCE_DIR}/World/src/World/Scene/SceneCamera.h"
+        --input "${CMAKE_SOURCE_DIR}/Engine/src/World/Scene/Components.h"
+        --input "${CMAKE_SOURCE_DIR}/Engine/src/World/Core/UUID.h"
+        --input "${CMAKE_SOURCE_DIR}/Engine/src/World/Scene/SceneCamera.h"
         --module World
-        --output "${CMAKE_SOURCE_DIR}/World/src/World/Schema/Generated"
-        --manifest "${CMAKE_SOURCE_DIR}/World/src/World/Schema/Generated/World.manifest"
+        --output "${CMAKE_SOURCE_DIR}/Engine/src/World/Schema/Generated"
+        --manifest "${CMAKE_SOURCE_DIR}/Engine/src/World/Schema/Generated/World.manifest"
         --reg-include "World/Scene/Components.h"
         --reg-include "World/Core/UUID.h"
         --reg-include "World/Scene/SceneCamera.h"
@@ -1111,7 +1111,7 @@ set_tests_properties(World.SchemaDrift PROPERTIES
 )
 
 # P4-UX16:"新建资产"类型注册表(注册/覆盖/反注册/排序/Create 落盘;菜单数据源)。
-add_executable(WorldAssetTypeRegistryTests AssetTypeRegistryTests.cpp)
+add_executable(WorldAssetTypeRegistryTests World/AssetTypeRegistryTests.cpp)
 target_link_libraries(WorldAssetTypeRegistryTests PRIVATE World)
 target_compile_features(WorldAssetTypeRegistryTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldAssetTypeRegistryTests PRIVATE
@@ -1133,7 +1133,7 @@ set_tests_properties(World.AssetTypeRegistry PROPERTIES
 
 # P4-U4:两个"设置作用域"的回归 —— project.we.yaml 的 imports:(导入默认值)与
 # .wd 头部的 World: 块(场景级设置)。含"合并保存不抹注释"与优先级(资产 meta 优先)。
-add_executable(WorldImportWorldSettingsTests ImportWorldSettingsTests.cpp)
+add_executable(WorldImportWorldSettingsTests World/ImportWorldSettingsTests.cpp)
 target_link_libraries(WorldImportWorldSettingsTests PRIVATE World)
 target_compile_features(WorldImportWorldSettingsTests PRIVATE cxx_std_17)
 target_compile_definitions(WorldImportWorldSettingsTests PRIVATE

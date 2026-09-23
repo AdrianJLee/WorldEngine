@@ -19,7 +19,7 @@
 | `Editor/` | `Editor.exe` | 编辑器宿主 |
 | `Runtime/` | `Runtime.exe` | 游戏运行宿主 |
 | `tests/` | 测试套件 | 引擎回归测试(需配置时开 `WORLD_BUILD_SCRIPT_TESTS`) |
-| `vendor/`、`World/vendor/` | 第三方依赖 | 仓库内锁定版本,不要替换成系统版本 |
+| `vendor/`、`third_party/` | 第三方依赖 | 仓库内锁定版本,不要替换成系统版本 |
 
 ## 约定
 

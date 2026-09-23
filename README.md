@@ -5,7 +5,7 @@ English | [Simplified Chinese](README.zh-CN.md)
 A native Windows game engine: the engine core builds as the shared library **`WorldRuntime.dll`**,
 game logic builds as a separate **`Game.dll`**, and the editor and runtime are host programs.
 C++17 + CMake, with third-party dependencies locked into the repository (`vendor/`,
-`World/vendor/` and submodules).
+`third_party/` and submodules).
 
 ## Modules
 
@@ -58,15 +58,15 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 
 | Path | What it is |
 | --- | --- |
-| `World/src/World/Core/` | Application, memory, jobs, VFS, project manifest |
-| `World/src/World/Scene/` | ECS, scene serialization, component definitions |
-| `World/src/World/Schema/` | Reflection schema and generated accessors |
-| `World/src/World/RHI/` | Rendering frontend with OpenGL / Vulkan backends |
-| `World/src/World/WUI/` | WUI widgets and layout framework (shared by the editor and the Runtime HUD) |
-| `World/src/World/Script/` | Luau runtime, bindings and hot reload |
-| `World/assets/shaders/` | HLSL shader sources (`*.hlsl`, entry points `VSMain` / `PSMain`) |
-| `Game/assets/scenes/` | Sample scenes (`.wd`) |
-| `Game/assets/scripts/` | Gameplay scripts and completion stubs |
+| `Engine/src/World/Core/` | Application, memory, jobs, VFS, project manifest |
+| `Engine/src/World/Scene/` | ECS, scene serialization, component definitions |
+| `Engine/src/World/Schema/` | Reflection schema and generated accessors |
+| `Engine/src/World/RHI/` | Rendering frontend with OpenGL / Vulkan backends |
+| `Engine/src/World/WUI/` | WUI widgets and layout framework (shared by the editor and the Runtime HUD) |
+| `Engine/src/World/Script/` | Luau runtime, bindings and hot reload |
+| `Engine/assets/shaders/` | HLSL shader sources (`*.hlsl`, entry points `VSMain` / `PSMain`) |
+| `Game/src/` | Gameplay DLL source (`Game.dll`); the project content root lives under `projects/` |
+| `projects/default/` | Default project content root: `project.we.yaml` plus `assets/scenes/` and `assets/scripts/` |
 | `Editor/src/WUI/` | Editor panels and shell |
 | `tests/` | Per-topic test executables and ctest registration |
 | `docs/` | Public documentation (see below) |
@@ -89,7 +89,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `.wprefab` | Prefab |
 | `.wpak` | Content package (packaging output) |
 | `.lua` / `.luau` | Scripts; the embedded scripting runtime is Luau |
-| `WorldEngineAPI.luau` | Editor-generated completion stubs (`Game/assets/scripts/intermediate/`); do not edit by hand |
+| `WorldEngineAPI.luau` | Editor-generated completion stubs (`projects/default/assets/scripts/intermediate/`); do not edit by hand |
 
 ## Repository
 

@@ -14,11 +14,11 @@
 .\build\x64-Debug\Editor\Debug\Editor.exe
 
 # 想直接打开某个场景(路径按项目内容根解析)
-.\build\x64-Debug\Editor\Debug\Editor.exe -scene Game/assets/scenes/3DTest.wd
+.\build\x64-Debug\Editor\Debug\Editor.exe -scene projects/default/assets/scenes/3DTest.wd
 ```
 
 - 不带参数时编辑器从**空场景**起步,不会自动打开示例场景。
-- 仓库自带的示例场景在 `Game/assets/scenes/`:`2DTest.wd`、`3DTest.wd`、`LightingTest.wd`、`Physics3DTest.wd`;
+- 仓库自带的示例场景在 `projects/default/assets/scenes/`:`2DTest.wd`、`3DTest.wd`、`LightingTest.wd`、`Physics3DTest.wd`;
   也可以在内容浏览器里双击 `.wd` 打开。
 - 编辑器启动时恢复上次的面板布局;要回到默认布局,用 Window 菜单里的 `Reset Layout`。
 
@@ -36,7 +36,7 @@
 
 | 词 | 含义 |
 | --- | --- |
-| 项目 | 一棵内容树 + 一份项目清单(`Game/project.we.yaml`:起始场景、渲染后端、物理参数、内容包) |
+| 项目 | 一棵内容树 + 一份项目清单(`projects/default/project.we.yaml`:起始场景、渲染后端、物理参数、内容包) |
 | 场景 | `.wd` 文件:实体树 + 每个实体挂的组件 |
 | 实体 | 场景里的一条对象,自带 Transform,可挂组件 |
 | 组件 | 挂在实体上的数据或行为:Transform、摄像机、灯光、网格、碰撞体、脚本…… |

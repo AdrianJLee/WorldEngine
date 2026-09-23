@@ -11,8 +11,8 @@
 
 | 步骤 | 位置 |
 | --- | --- |
-| 声明组件与字段 | `World/src/World/Scene/Components.h`(`WE_SCHEMA_META(...)`、`WE_FIELD(...)`) |
-| 生成反射代码 | `World/schema-compiler`(`--input <头文件> --module World --output World/src/World/Schema/Generated --manifest ... --reg-include ...`) |
+| 声明组件与字段 | `Engine/src/World/Scene/Components.h`(`WE_SCHEMA_META(...)`、`WE_FIELD(...)`) |
+| 生成反射代码 | `Engine/generators/schema-compiler`(`--input <头文件> --module World --output Engine/src/World/Schema/Generated --manifest ... --reg-include ...`) |
 | 门禁 | 测试 `World.SchemaDrift`:生成结果与注解不一致就红灯(字节级比较) |
 
 字段上可用的编辑元数据包括:显示名与分组、文档字符串(`Doc("…")`,落到属性面板的悬停提示与无障碍节点)、
@@ -23,9 +23,9 @@
 
 | 步骤 | 位置 |
 | --- | --- |
-| 注册类型名、扩展名、创建方式 | `World/src/World/Core/Asset/AssetTypeRegistry.h/.cpp` |
+| 注册类型名、扩展名、创建方式 | `Engine/src/World/Core/Asset/AssetTypeRegistry.h/.cpp` |
 | 内容浏览器显示与筛选 | `Editor/src/WUI/Panels/ContentBrowserPanel.*` |
-| 参考测试 | `tests/AssetTypeRegistryTests.cpp`(注册 / 覆盖 / 反注册 / 排序 / 落盘) |
+| 参考测试 | `tests/World/AssetTypeRegistryTests.cpp`(注册 / 覆盖 / 反注册 / 排序 / 落盘) |
 
 导入型资产(如模型)另走导入器:源文件 → 引擎资产,导入设置存放在资产自身;`.gltf` / `.glb` 只是导入源,
 可引用的产物是 `.wmodel`。
@@ -53,8 +53,8 @@
 
 ## 5. 加脚本绑定
 
-脚本侧(Luau)通过绑定暴露引擎能力:绑定代码在 `World/src/World/Script/`(`Bind*.cpp`),
-补全声明由编辑器按实际注册结果生成到 `Game/assets/scripts/intermediate/WorldEngineAPI.luau`。
+脚本侧(Luau)通过绑定暴露引擎能力:绑定代码在 `Engine/src/World/Script/`(`Bind*.cpp`),
+补全声明由编辑器按实际注册结果生成到 `projects/default/assets/scripts/intermediate/WorldEngineAPI.luau`。
 新增绑定后重新构建并启动编辑器刷新声明;不要手改生成文件。
 
 ## 验证

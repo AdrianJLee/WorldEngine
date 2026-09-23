@@ -4,7 +4,7 @@
 
 原生 Windows 游戏引擎:引擎核心编译为共享库 **`WorldRuntime.dll`**,游戏逻辑编译为独立的
 **`Game.dll`**,编辑器与运行时是宿主程序。C++17 + CMake,第三方依赖随仓库锁定
-(`vendor/`、`World/vendor/` 与子模块)。
+(`vendor/`、`third_party/` 与子模块)。
 
 ## 模块
 
@@ -50,15 +50,15 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 
 | 路径 | 是什么 |
 | --- | --- |
-| `World/src/World/Core/` | 应用、内存、作业、VFS、项目清单 |
-| `World/src/World/Scene/` | ECS、场景序列化、组件定义 |
-| `World/src/World/Schema/` | 反射 schema 与生成的访问器 |
-| `World/src/World/RHI/` | 渲染前端与 OpenGL / Vulkan 后端 |
-| `World/src/World/WUI/` | WUI 控件与布局框架(编辑器与 Runtime HUD 共用) |
-| `World/src/World/Script/` | Luau 运行时、绑定与热重载 |
-| `World/assets/shaders/` | HLSL 着色器源(`*.hlsl`,入口 `VSMain` / `PSMain`) |
-| `Game/assets/scenes/` | 示例场景(`.wd`) |
-| `Game/assets/scripts/` | 游戏脚本与补全声明 |
+| `Engine/src/World/Core/` | 应用、内存、作业、VFS、项目清单 |
+| `Engine/src/World/Scene/` | ECS、场景序列化、组件定义 |
+| `Engine/src/World/Schema/` | 反射 schema 与生成的访问器 |
+| `Engine/src/World/RHI/` | 渲染前端与 OpenGL / Vulkan 后端 |
+| `Engine/src/World/WUI/` | WUI 控件与布局框架(编辑器与 Runtime HUD 共用) |
+| `Engine/src/World/Script/` | Luau 运行时、绑定与热重载 |
+| `Engine/assets/shaders/` | HLSL 着色器源(`*.hlsl`,入口 `VSMain` / `PSMain`) |
+| `Game/src/` | gameplay DLL(`Game.dll`)源码;项目内容在 `projects/` 下 |
+| `projects/default/` | 默认项目内容根:项目清单 + `assets/scenes/`、`assets/scripts/` |
 | `Editor/src/WUI/` | 编辑器面板与外壳 |
 | `tests/` | 各主题的测试可执行文件与 ctest 注册 |
 | `docs/` | 公开文档(见下) |
@@ -81,7 +81,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `.wprefab` | 预制体 |
 | `.wpak` | 内容包(打包产物) |
 | `.lua` / `.luau` | 脚本;引擎内嵌的脚本运行时是 Luau |
-| `WorldEngineAPI.luau` | 编辑器生成的补全声明(`Game/assets/scripts/intermediate/`),不要手改 |
+| `WorldEngineAPI.luau` | 编辑器生成的补全声明(`projects/default/assets/scripts/intermediate/`),不要手改 |
 
 ## 仓库
 

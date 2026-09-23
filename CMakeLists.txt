@@ -14,9 +14,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Vulkan QUIET)
 
 # --- DXC 着色器编译器:SPIR-V 代码生成要求 dxc.exe 与 dxcompiler.dll 版本匹配,
-# 仓库内的 vendor/dxc/dxc.exe 只带壳。优先用 Vulkan SDK 的完整工具链(与 glslc 同目录),
+# 仓库内的 vendor/tools/dxc/dxc.exe 只带壳。优先用 Vulkan SDK 的完整工具链(与 glslc 同目录),
 # 找不到时回退 vendor/dxc(仅 DXIL 场景可用)。
-set(WLD_DXC_DIR "${CMAKE_SOURCE_DIR}/vendor/dxc/")
+# 外部工具根:dxc / spirv-cross 都是**可替换**的,替换只改这一个变量(或命令行 -D 覆盖)。
+set(WLD_SHADER_TOOL_DIR "${CMAKE_SOURCE_DIR}/vendor/tools/")
+if(NOT DEFINED WLD_DXC_DIR)
+    set(WLD_DXC_DIR "${WLD_SHADER_TOOL_DIR}dxc/")
+endif()
+if(NOT DEFINED WLD_SPIRV_CROSS_DIR)
+    set(WLD_SPIRV_CROSS_DIR "${WLD_SHADER_TOOL_DIR}spirv-cross/")
+endif()
 if(Vulkan_GLSLC_EXECUTABLE)
     get_filename_component(_we_vulkan_bin "${Vulkan_GLSLC_EXECUTABLE}" DIRECTORY)
     if(EXISTS "${_we_vulkan_bin}/dxc.exe" AND EXISTS "${_we_vulkan_bin}/dxcompiler.dll")
@@ -24,13 +31,13 @@ if(Vulkan_GLSLC_EXECUTABLE)
     endif()
 endif()
 message(STATUS "WorldEngine DXC tool dir: ${WLD_DXC_DIR}")
-if(WLD_DXC_DIR STREQUAL "${CMAKE_SOURCE_DIR}/vendor/dxc/")
+if(WLD_DXC_DIR STREQUAL "${CMAKE_SOURCE_DIR}/vendor/tools/dxc/")
     message(WARNING "Complete dxc toolchain not found in the Vulkan SDK; "
         "dev-time shader compilation may fail (packaged builds use baked artifacts).")
 endif()
 
 # --- 添加子项目---
-add_subdirectory(World)
+add_subdirectory(Engine)
 
 add_subdirectory(Editor)
 add_subdirectory(Game)
@@ -42,12 +49,19 @@ add_dependencies(Editor Runtime)
 
 target_compile_definitions(World PUBLIC
     WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"
+    # 开发期绝对锚点(不带尾分隔符):供"与进程 CWD 无关"的路径拼接(如定位 Game.dll)。
+    WLD_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     WLD_EDITOR_DIR="${CMAKE_SOURCE_DIR}/Editor/"
+    WLD_LOCAL_DIR="${CMAKE_SOURCE_DIR}/local/"
+    # WLD_GAME_DIR = Game **模块**目录(只放 gameplay DLL 源码);项目内容根见 WLD_PROJECT_DIR。
     WLD_GAME_DIR="${CMAKE_SOURCE_DIR}/Game/"
-    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/Game/assets"
+    # Layout-S7:项目内容(清单/关卡表/assets)在 projects/<名>/;默认项目 = projects/default/。
+    WLD_PROJECT_DIR="${CMAKE_SOURCE_DIR}/projects/default/"
+    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/projects/default/assets"
     WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
-    WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/World/"
+    WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/Engine/"
     WLD_DXC_DIR="${WLD_DXC_DIR}"
+    WLD_SPIRV_CROSS_DIR="${WLD_SPIRV_CROSS_DIR}"
 )
 
 # Debug 配置启用引擎断言与调试期诊断(内存哨兵/污染填充等):

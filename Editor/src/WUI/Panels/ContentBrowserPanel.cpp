@@ -361,7 +361,7 @@ namespace World
 	}
 
 	ContentBrowserPanel::ContentBrowserPanel(PanelHost& host)
-		: m_Host(host), m_StatePath(std::string(WLD_EDITOR_DIR) + "wui-browser.json")
+		: m_Host(host), m_StatePath(std::string(WLD_LOCAL_DIR) + "wui-browser.json")
 	{
 		m_Model.Current = m_Model.Root;
 		LoadState();
@@ -640,7 +640,7 @@ namespace World
 		else if (path.extension() == ".wmat")
 		{
 			// D3:材质资产双击 → 材质编辑器(独立窗口)载入。
-			// 面板/渲染侧都按"相对 Game/assets"的路径引用,这里转成同一约定。
+			// 面板/渲染侧都按"相对内容根"的路径引用,这里转成同一约定。
 			const std::filesystem::path contentRoot = m_Model.Root;
 			std::error_code ec;
 			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
@@ -657,7 +657,7 @@ namespace World
 		}
 		else if (path.extension() == ".lua" || path.extension() == ".luau")
 		{
-			// W9-2:脚本双击 → 内置脚本编辑器(与双击材质同一条路:逻辑路径相对 Game/assets,
+			// W9-2:脚本双击 → 内置脚本编辑器(与双击材质同一条路:逻辑路径相对内容根,
 			// 默认附加到主窗口;解析失败时面板自身显示只读 + 错误文本)。
 			const std::filesystem::path contentRoot = m_Model.Root;
 			std::error_code ec;
@@ -1000,9 +1000,9 @@ namespace World
 		std::filesystem::path* outPath)
 	{
 		// 写一份默认 .wmat 模板(重名自动编号)。
-		// 关键:MateriaIO 的路径解析是 `<Game>/assets/<path>` 存在就用它,否则回退 `<Game>/<path>` ——
-		// 相对逻辑路径**新建**时会落到 `Game/<path>`(实测:内容浏览器新建材质写进了 Game/_ux_probe)。
-		// 绝对路径两种情况都原样命中,所以这里传绝对路径(旧 CreateMaterial 的同一个坑)。
+		// 关键:MaterialIO 的路径解析只认"内容根/<path>"(WLD_PROJECT_DIR/assets),绝对路径原样命中。
+		// 历史:早先还会回退 `<Game>/<path>`,相对逻辑路径**新建**时会落到项目目录之外
+		// (实测:内容浏览器新建材质写进了 Game/_ux_probe)。所以这里始终传绝对路径(旧 CreateMaterial 的同一个坑)。
 		const std::filesystem::path target = MakeUniqueAssetPath(dir, "material", ".wmat");
 		MaterialDesc desc;
 		desc.Name = target.stem().string();
@@ -1995,7 +1995,7 @@ namespace World
 				// 父级 = 引擎内置默认:自包含材质(全字段、没有 Parent 行 → 仍是 v1 写法,
 				// 与 M3 前新建的 .wmat 逐字节一致)。
 				const MaterialDesc desc = MaterialDescForTemplate(templateIndex, base, m_NewMaterialSeed);
-				// 绝对路径:MaterialIO 对"还不存在的相对路径"会解析到 Game/<path>(CreateMaterialAsset 记的坑)。
+				// 绝对路径:MaterialIO 只认"内容根/<path>",相对路径不保证落在内容根里(CreateMaterialAsset 记的坑)。
 				wrote = MaterialIO::WriteFileText(absolute, MaterialIO::Serialize(desc), &error);
 			}
 			else
@@ -2638,9 +2638,9 @@ namespace World
 			m_FileIconId = 0;
 		}
 		if (!m_DirIcon)
-			m_DirIcon = Texture2D::Create(EditorResourcePath("Resource/Icons/ContentBrowser/DirectoryIcon.png"));
+			m_DirIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/DirectoryIcon.png"));
 		if (!m_FileIcon)
-			m_FileIcon = Texture2D::Create(EditorResourcePath("Resource/Icons/ContentBrowser/FileIcon.png"));
+			m_FileIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/FileIcon.png"));
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (registry.Generation() != m_IconGeneration)
 		{

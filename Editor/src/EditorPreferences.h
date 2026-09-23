@@ -19,8 +19,8 @@ namespace World::Editor
 		None = 3,    // 不恢复(并把记录清掉,下次不再问)
 	};
 
-	// 编辑器用户偏好(P4-UX1):用户级、不随项目提交 —— 存 `Editor/editor-prefs.json`。
-	// 与 `Game/project.we.yaml`(项目级)严格分家:语言/主题/密度/字号属于"这台机器上的这个人"。
+	// 编辑器用户偏好(P4-UX1):用户级、不随项目提交 —— 存 `local/editor-prefs.json`。
+	// 与 `projects/default/project.we.yaml`(项目级)严格分家:语言/主题/密度/字号属于"这台机器上的这个人"。
 	//
 	// 交互口径:任何一次修改立即应用 + 立即落盘(自动保存),不需要"保存"按钮。
 	// P4-UX7:全部偏好项都在 `SettingsRegistry` 里注册(Id/类型/生效时机/tooltip),

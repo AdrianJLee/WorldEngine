@@ -1678,7 +1678,7 @@ namespace World
 			y += DrawAssetRow(ctx, x, y, width, "prefab.field.MeshRendererComponent.MeshPath",
 				Wui::Tr("panel.prefab.field.mesh_path", "Mesh Path"),
 				Wui::Tr("panel.prefab.field.mesh_path.tooltip",
-					"Imported model asset (.wmodel) relative to Game/assets; empty = use Primitive. glTF/GLB must be imported first."),
+					"Imported model asset (.wmodel) relative to the project content root; empty = use Primitive. glTF/GLB must be imported first."),
 				"Model", mesh->MeshPath, theme, changed);
 			y += DrawAssetRow(ctx, x, y, width, "prefab.field.MeshRendererComponent.MaterialPath",
 				Wui::Tr("panel.prefab.field.material_path", "Material Path"),

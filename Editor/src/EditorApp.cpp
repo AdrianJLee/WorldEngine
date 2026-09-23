@@ -115,8 +115,10 @@ namespace World
 		// P4-UX1:编辑器偏好(用户级)必须在 EditorShell 构造之前装载 —— 面板标题/主题/字号
 		// 都在创建期取一次快照。语言目录也在编辑器自己的资源里(游戏内容的语言包在 Game 下)。
 		World::Wui::SetLocalizationDirectory(std::filesystem::path(WLD_EDITOR_DIR) / "assets" / "localization");
+		// 本机状态目录(编辑器偏好/布局/窗口/最近使用):不入库;首次运行自动创建。
+		std::filesystem::create_directories(std::filesystem::path(WLD_LOCAL_DIR));
 		World::Editor::EditorPreferences::Get().Load(
-			std::filesystem::path(WLD_EDITOR_DIR) / "editor-prefs.json");
+			std::filesystem::path(WLD_LOCAL_DIR) / "editor-prefs.json");
 		// P4-UX7:AI 控制通道端口 —— 命令行 `--ai-control=<port>` 优先(自动化脚本),
 		// 没给命令行时用编辑器偏好里的端口(面板可见、重启生效)。
 		if (World::Editor::AiControlPort() <= 0)

@@ -2,7 +2,7 @@
 
 // M4-S2:`.hlsl` 材质着色器的逐行语法高亮。
 //
-// 与 LuauHighlighter(World/src/World/Script/LuauHighlighter.h)同一套口径,便于复用
+// 与 LuauHighlighter(Engine/src/World/Script/LuauHighlighter.h)同一套口径,便于复用
 // Wui::CodeEditor 的内核(行号、选区、滚动、诊断行、Ctrl+S 全在核心里,这里只提供 token):
 //   - 逐行接口 HighlightLine:行首状态进、行尾状态出 —— 跨行的 /* */ 块注释靠它在行间延续
 //     (编辑器只画可见行,不能靠在回调里从头 token 化);
