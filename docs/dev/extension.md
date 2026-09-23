@@ -25,7 +25,7 @@
 | --- | --- |
 | 注册类型名、扩展名、创建方式 | `Engine/src/World/Core/Asset/AssetTypeRegistry.h/.cpp` |
 | 内容浏览器显示与筛选 | `Editor/src/WUI/Panels/ContentBrowserPanel.*` |
-| 参考测试 | `tests/AssetTypeRegistryTests.cpp`(注册 / 覆盖 / 反注册 / 排序 / 落盘) |
+| 参考测试 | `tests/World/AssetTypeRegistryTests.cpp`(注册 / 覆盖 / 反注册 / 排序 / 落盘) |
 
 导入型资产(如模型)另走导入器:源文件 → 引擎资产,导入设置存放在资产自身;`.gltf` / `.glb` 只是导入源,
 可引用的产物是 `.wmodel`。

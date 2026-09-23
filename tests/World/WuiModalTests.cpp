@@ -8,7 +8,7 @@
 //      注入路径得到 ModalResult::Confirm/Cancel;无障碍节点 id/kind/enabled 正确;
 //   5. BeginModalInputBlock/EndModalInputBlock 成对:遮挡期间 hover 与点击落空,End 后恢复。
 //
-// 纯 WuiContext 逻辑:无窗口、无渲染后端、无纹理(写法与 tests/WuiTests.cpp 一致)。
+// 纯 WuiContext 逻辑:无窗口、无渲染后端、无纹理(写法与 tests/World/WuiTests.cpp 一致)。
 #include <cstdint>   // KeyCodes.h 里用 uint16_t;先包含,避免该头独立包含时缺类型
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiAccessibility.h"

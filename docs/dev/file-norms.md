@@ -164,7 +164,7 @@ tools/    vendor/     World/
 ### R3(建议尽快做):补 `.gitattributes`(行尾陷阱,已实测)
 
 仓库没有 `.gitattributes`,而本机 `core.autocrlf` 生效:签出会写 CRLF,`git add` 又转回 LF。
-后果:`tests/ScriptWorkflowTests.cpp` 的"存根漂移门禁"做**逐字节比较**
+后果:`tests/World/ScriptWorkflowTests.cpp` 的"存根漂移门禁"做**逐字节比较**
 (`Game/assets/scripts/intermediate/WorldEngineAPI.luau`),工作树一旦是 CRLF 就**误报失败**
 (2026-09-23 实测:内容逐行相同、仅 CRLF 差异 → 门禁失败)。
 
