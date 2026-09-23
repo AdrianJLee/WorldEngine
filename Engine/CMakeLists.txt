@@ -162,7 +162,6 @@ target_include_directories(World PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/Glad/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb_image"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/VMA/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vulkan-headers/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/volk"
     ${Vulkan_INCLUDE_DIRS} # 自动解析的 Vulkan 路径
