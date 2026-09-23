@@ -8,6 +8,10 @@
 > **用户面是破坏性的**:HLSL 隐式转换从 warning 变 error;`Texture2D + SamplerState` 要改成组合采样器。
 > 相关决策与证据:`tools/agents/tasks/20260923-1700-slang-refactor/plan.md`(v3.1 §12/§13)、
 > `tools/agents/reports/Slang-T1-gl-spirv.md`、`Slang-T3-kernel.md`。
+>
+> **完整示例(可直接在编辑器里打开)**:[`projects/default/assets/shaders/examples/ShowcaseMaterial.slang`](../../projects/default/assets/shaders/examples/ShowcaseMaterial.slang)
+> —— 覆盖全部注解类型与修饰符、组合采样器、切线空间法线、参数驱动分支、以及 Slang 的
+> `interface` + 泛型约束写法;该文件已在双目标上实编译验证(Vulkan/GL 各 `spirv-val` = 0,GL 模块 SPIR-V 1.0)。
 
 ## 1. 一个材质着色器长什么样
 
