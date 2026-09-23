@@ -13,6 +13,12 @@
 *.yaml text eol=lf
 *.yml  text eol=lf
 
+# 生成物:漂移门禁(schema-compiler --check)逐字节比较 → 必须固定 LF,
+# 否则分支切换/签出把工作树写回 CRLF 就会误报 drift。
+Engine/src/World/Schema/Generated/** text eol=lf
+Game/src/Generated/**               text eol=lf
+tests/**/Generated/**               text eol=lf
+
 # 二进制:永远不做文本转换
 *.png   binary
 *.jpg   binary
