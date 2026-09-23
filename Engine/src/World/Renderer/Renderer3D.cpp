@@ -3,6 +3,7 @@
 #include "World/Renderer/RenderSettings.h"
 
 #include "World/Renderer/Renderer.h"
+#include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialTextureCache.h"
 #include "World/Renderer/MaterialSurfaceRuntime.h"
 #include "World/Renderer/MaterialSurfaceRuntimeInternal.h"
@@ -482,7 +483,15 @@ namespace World
 			const std::string key = material->SurfaceKey();
 			if (key.empty())
 				return draw;
-			const size_t version = SurfacePublishedVersion(key);
+			size_t version = SurfacePublishedVersion(key);
+			if (version == 0)
+			{
+				// Slang-T6a:打包形态没有编辑器/编译器 —— 第一次真的要画这个键时,
+				// 用包内烘好的成对产物装配一次(库侧幂等 + 负缓存,不会逐帧读盘)。
+				// 开发形态包内没有这些产物 → 空操作,编辑器照旧现场编译 + Install。
+				MaterialLibrary::Get().EnsureCookedSurfacePipeline(*material);
+				version = SurfacePublishedVersion(key);
+			}
 			if (version == 0)
 				return draw;
 			Rhi::Handle<Rhi::Pipeline> pipeline;

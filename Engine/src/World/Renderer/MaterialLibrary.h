@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace World
@@ -62,6 +63,48 @@ namespace World
 		//  - 否则继承父级已解析的参数表(没有父级 = 空表);
 		// SetShaderPath / RevertShader 会立刻调用它;编辑器在 .hlsl 改动后也可以手动调。
 		void RefreshParams(Material& material);
+
+		// ---- Slang-T6a:打包形态消费烘好的表面材质产物 ----
+		//
+		// 材质引用 `.hlsl`(Shader:)时,开发形态由编辑器面板现场编译 + Install;
+		// **打包形态既没有编译器也没有编辑器**,只能消费 `--cook` 烘好的成对产物:
+		//   shaders/surface/<内容根相对路径去扩展名>.<入口>[.gl].spv        (SPIR-V)
+		//   shaders/surface/<…>.PSMain[.gl].reflection.json                  (参数布局)
+		// 本函数按**当前设备后端**取那份产物(Vulkan → `.spv`;OpenGL → `.gl.spv`),
+		// 装配成表面管线(键 = Material::SurfaceKey())。
+		//
+		// 纪律:
+		//  - 只在包内真的有成对产物(PS + 反射 JSON)时装配 —— 开发形态没有这些产物,
+		//    编辑器照旧现场编译,行为不变;
+		//  - 该键已有发布版本(编辑器/上一次装配)时不重复装配;
+		//  - 结果按键缓存(不含"设备/环境还不存在"这类临时失败),渲染侧可以逐帧调用;
+		//  - 失败留可读原因,不静默换成另一份后端产物(见 Slang-T4a)。
+		struct SurfaceInstallReport
+		{
+			std::string Key;               // 表面键(Material::SurfaceKey())
+			std::string Backend;           // "vulkan-spirv" | "opengl-spirv"(当前设备需要的目标)
+			bool CookedArtifacts = false;  // 包内找到了成对产物(PS + 反射 JSON)
+			bool AlreadyPublished = false; // 该键已有发布版本(编辑器/更早的装配)
+			bool Installed = false;        // 本次装配成功(或已有版本)
+			size_t Pipelines = 0;          // 本次建出的变体管线数
+			size_t VertexStages = 0;       // 产物里带上的顶点入口数
+			std::string Error;             // 失败原因(可读,英文,便于探针断言)
+		};
+		// 幂等:同一键重复调用不会重复装配(见上)。
+		SurfaceInstallReport EnsureCookedSurfacePipeline(const Material& material);
+		// 环境开关(诊断/取证用):WLD_SURFACE_COOKED=0 关掉打包形态的表面产物消费 → 引擎管线兜底。
+		static bool CookedSurfaceConsumptionEnabled();
+
+		// 表面材质烘资产物的**逻辑路径**(打包与运行时共用这一处命名实现 ——
+		// EditorCooker 写、运行时读,两边都调这里):
+		//  - shaderPath = 内容根相对的 `.hlsl` 路径(带扩展名,= Material::SurfaceKey()),如
+		//    `shaders/glass.hlsl`;
+		//  - glTarget = GL 目标(SPIR-V 1.0 + 组合采样器)用 `.gl.` 中缀,Vulkan 目标没有中缀;
+		//  - `.hlsl` 的最后一段扩展名被去掉(`shaders/glass.hlsl` → `shaders/surface/shaders/glass`)。
+		static std::string SurfaceArtifactBasePath(const std::string& shaderPath);
+		static std::string SurfaceArtifactLogicalPath(const std::string& shaderPath,
+			const std::string& entryPoint, bool glTarget);
+		static std::string SurfaceReflectionLogicalPath(const std::string& shaderPath, bool glTarget);
 
 		// 磁盘文件比内存态新(外部编辑器改动)时返回 true;供面板提示/自动重载。
 		bool IsFileNewer(const Material& material) const;
@@ -123,5 +166,8 @@ namespace World
 		AssetFileWatch m_TextureWatch { kTextureDebounceSeconds };
 		// M4-S3:材质引用的 `.hlsl`(表面函数)内容变化监听(与材质同一节拍)。
 		AssetFileWatch m_ShaderWatch { kMaterialDebounceSeconds };
+		// Slang-T6a:已经有过**确定结论**的表面键(装上了 / 包内没有产物 / 已有发布版本)。
+		// 临时失败(设备或建管线环境还没就绪)不入缓存,下次调用会重试。
+		std::unordered_set<std::string> m_CookedSurfaceAttempted;
 	};
 }

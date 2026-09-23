@@ -1,7 +1,9 @@
 #include "World/Core/Vfs/PackageProvider.h"
 #include "World/Core/Core.h"
 #include "World/Core/Log.h"
+#include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Renderer.h"
+#include "World/Renderer/RendererAPI.h"
 #include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/ShaderUtils.h"
 
@@ -12,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -56,54 +59,62 @@ namespace
 		stream << text;
 	}
 
-	// Slang-T3:表面材质内核改用 slangc;按引擎同一套顺序找一次(找不到就跳过需要工具的检查)。
-	std::string FindSlangc()
+	// Slang-T5:工具目录只有一个入口 —— 构建期 `WLD_SLANG_DIR` 决定的
+	// `ShaderCompiler::SlangcPath()`。测试里**不再**自带一份 env/vendor/同级目录扫描:
+	// "去哪儿找工具"由配置决定一次,测试只问引擎要结论(与内核/烘焙同一条路径)。
+	bool HasSlangc()
 	{
-		const auto accept = [](const std::filesystem::path& candidate) -> std::string
-		{
-			std::error_code ec;
-			return std::filesystem::is_regular_file(candidate, ec)
-				? candidate.string() : std::string();
-		};
-		if (const char* full = std::getenv("WLD_SLANGC"); full && *full)
-			if (std::string resolved = accept(full); !resolved.empty())
-				return resolved;
-		if (const char* dir = std::getenv("WLD_SLANG_DIR"); dir && *dir)
-			if (std::string resolved = accept(std::filesystem::path(dir) / "slangc.exe");
-				!resolved.empty())
-				return resolved;
-		const std::filesystem::path repoRoot = WLD_REPO_ROOT;
-		if (std::string resolved = accept(repoRoot / "vendor" / "tools" / "slang" / "slangc.exe");
-			!resolved.empty())
-			return resolved;
-		std::error_code ec;
-		const std::filesystem::path depsRoot = repoRoot.parent_path() / "WorldEngine-deps";
-		std::vector<std::filesystem::path> versions;
-		for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(
-			depsRoot, std::filesystem::directory_options::skip_permission_denied, ec))
-		{
-			std::error_code entryEc;
-			if (!entry.is_directory(entryEc))
-				continue;
-			if (entry.path().filename().string().rfind("slang-", 0) == 0)
-				versions.push_back(entry.path());
-		}
-		std::sort(versions.begin(), versions.end());
-		for (auto it = versions.rbegin(); it != versions.rend(); ++it)
-			if (std::string resolved = accept(*it / "bin" / "slangc.exe"); !resolved.empty())
-				return resolved;
-		return {};
+		return !World::ShaderCompiler::SlangcPath().empty();
 	}
 
-	bool HasVendorTools()
+	// ---- 产物形态判据(与引擎的 SpirvIsGlIngestable 同一套逐字节口径)----
+	//
+	// ARB_gl_spirv 只接受 SPIR-V 1.0,且不接受分离采样器 OpTypeSampler
+	// (T1 实测:这种模块交给 glShaderBinary 后 NVIDIA 驱动在第一次采样时崩,14/14)。
+	std::vector<uint8_t> ReadFileBytes(const std::filesystem::path& path)
 	{
-		std::error_code ec;
-		const std::filesystem::path dxcDir(WLD_DXC_DIR);
-		return std::filesystem::is_regular_file(dxcDir / "dxc.exe", ec) &&
-			std::filesystem::is_regular_file(dxcDir / "dxcompiler.dll", ec) &&
-			std::filesystem::is_regular_file(
-				std::filesystem::path(WLD_ROOT_DIR) / "vendor/tools/spirv-cross/spirv-cross.exe", ec) &&
-			!FindSlangc().empty();
+		std::ifstream stream(path, std::ios::binary | std::ios::ate);
+		if (!stream)
+			return {};
+		const std::streamsize size = stream.tellg();
+		if (size <= 0)
+			return {};
+		stream.seekg(0);
+		std::vector<uint8_t> bytes(static_cast<size_t>(size));
+		stream.read(reinterpret_cast<char*>(bytes.data()), size);
+		return bytes;
+	}
+
+	bool SpirvLooksValid(const std::vector<uint8_t>& bytes, uint32_t* version)
+	{
+		if (bytes.size() < 20 || (bytes.size() % 4) != 0)
+			return false;
+		uint32_t magic = 0;
+		std::memcpy(&magic, bytes.data(), sizeof(magic));
+		if (magic != 0x07230203u)
+			return false;
+		if (version)
+			std::memcpy(version, bytes.data() + 4, sizeof(*version));
+		return true;
+	}
+
+	bool SpirvHasSeparateSamplerType(const std::vector<uint8_t>& bytes)
+	{
+		if (!SpirvLooksValid(bytes, nullptr))
+			return false;
+		const size_t words = bytes.size() / 4;
+		for (size_t offset = 5; offset < words;)
+		{
+			uint32_t word = 0;
+			std::memcpy(&word, bytes.data() + offset * 4, sizeof(word));
+			const uint32_t wordCount = word >> 16;
+			if (wordCount == 0)
+				break;
+			if ((word & 0xFFFFu) == 26u)   // OpTypeSampler
+				return true;
+			offset += wordCount;
+		}
+		return false;
 	}
 
 	const char* kProbeShader = R"(
@@ -140,8 +151,23 @@ int main()
 		{
 			CHECK(World::ShaderCompiler::ArtifactLogicalPath("assets/shaders/Foo.hlsl", "VSMain", true) ==
 				"shaders/Foo.VSMain.spv");
-			CHECK(World::ShaderCompiler::ArtifactLogicalPath("assets/shaders/Foo.hlsl", "PSMain", false) ==
-				"shaders/Foo.PSMain.glsl");
+			// Slang-T6a:表面材质产物的命名**只有一处实现**(EditorCooker 写、运行时读):
+			//   shaders/surface/<内容根相对路径去扩展名>.<入口>[.gl].spv | .PSMain[.gl].reflection.json
+			// (`.gl.` 中缀 = GL 4.6 + ARB_gl_spirv 的 SPIR-V 1.0 目标;旧口径的 `.glsl` 文本
+			//  只是过渡兜底,T6 删除,因此这里不再冻结它的命名。)
+			CHECK(World::MaterialLibrary::SurfaceArtifactBasePath("shaders/Glass.hlsl") ==
+				"shaders/surface/shaders/Glass");
+			CHECK(World::MaterialLibrary::SurfaceArtifactLogicalPath("shaders/Glass.hlsl", "PSMain", false) ==
+				"shaders/surface/shaders/Glass.PSMain.spv");
+			CHECK(World::MaterialLibrary::SurfaceArtifactLogicalPath("shaders/Glass.hlsl", "VSMainSkinned", true) ==
+				"shaders/surface/shaders/Glass.VSMainSkinned.gl.spv");
+			CHECK(World::MaterialLibrary::SurfaceReflectionLogicalPath("shaders/Glass.hlsl", false) ==
+				"shaders/surface/shaders/Glass.PSMain.reflection.json");
+			CHECK(World::MaterialLibrary::SurfaceReflectionLogicalPath("fx/sub/Glass.hlsl", true) ==
+				"shaders/surface/fx/sub/Glass.PSMain.gl.reflection.json");
+			// 只去掉**最后一段**扩展名(目录里的点、文件名里的多点都不动)。
+			CHECK(World::MaterialLibrary::SurfaceArtifactBasePath("fx/v1.2/Glass.surface.hlsl") ==
+				"shaders/surface/fx/v1.2/Glass.surface");
 		}
 
 		// 2. 解析器优先:有烘焙产物时不触发工具调用(发行形态路径)
@@ -164,9 +190,9 @@ int main()
 			World::ShaderCompiler::ClearArtifactResolver();
 		}
 
-		if (!HasVendorTools())
+		if (!HasSlangc())
 		{
-			std::printf("World.ShaderPipeline: vendor dxc/spirv-cross/slangc missing, bake checks skipped\n");
+			std::printf("World.ShaderPipeline: slangc missing (WLD_SLANG_DIR), bake checks skipped\n");
 			std::printf("World.ShaderPipeline: all checks passed\n");
 			return 0;
 		}
@@ -439,15 +465,19 @@ int main()
 				undeclaredUserLine, undeclaredUserColumn);
 		}
 
-		// 4. 烘焙 → 内容寻址缓存 → 打包 → 包内读回 → 运行时解析器命中
-		// 每次运行内容不同 → 指纹不同,保证真的走一次 slangc + spirv-cross;
-		// 第二次调用同一内容则必须命中缓存。
+		// 4. 烘焙(双目标 SPIR-V)→ 内容寻址缓存 → 打包 → 包内读回 → 运行时解析器命中
+		//
+		// Slang-T5/T6a 的产物契约:运行时真的会请求的每个入口烘**两份 SPIR-V** ——
+		//   shaders/<stem>.<Entry>.spv      Vulkan 目标;
+		//   shaders/<stem>.<Entry>.gl.spv   GL 4.6 + ARB_gl_spirv 目标(SPIR-V 1.0 + 组合采样器)。
+		// 旧口径的 "4 产物/着色器"(.spv + `.glsl` 文本)不再冻结:GLSL 文本只是过渡兜底,T6 删除。
+		// 每次运行内容不同 → 指纹不同,保证真的走一次 slangc;第二次同一内容必须命中缓存。
 		WriteText(sourceDir / "Probe.hlsl",
 			std::string(kProbeShader) + "\n// build " + temp.path.filename().string() + "\n");
 
 		World::ShaderCompiler::ResetCounters();
 		const World::ShaderCompiler::BakeResult baked =
-			World::ShaderCompiler::BakeDirectory(sourceDir, cookedDir);
+			World::ShaderCompiler::BakeDistributionTargets(sourceDir, cookedDir);
 		CHECK(baked.Shaders == 1);
 		CHECK(baked.Artifacts == 4);
 		CHECK(baked.Failed == 0);
@@ -455,19 +485,40 @@ int main()
 		CHECK(toolRuns >= 2);
 
 		const std::filesystem::path shaderOut = cookedDir / "shaders";
-		for (const char* name : { "Probe.VSMain.spv", "Probe.VSMain.glsl", "Probe.PSMain.spv", "Probe.PSMain.glsl" })
+		for (const char* name : { "Probe.VSMain.spv", "Probe.VSMain.gl.spv",
+			"Probe.PSMain.spv", "Probe.PSMain.gl.spv" })
 		{
 			std::error_code sizeEc;
 			CHECK(std::filesystem::is_regular_file(shaderOut / name, sizeEc));
 			CHECK(std::filesystem::file_size(shaderOut / name, sizeEc) > 0);
 		}
 
-		// 同一内容再次烘焙:命中缓存,工具调用次数不增长。
+		// GL 目标必须是 GL 4.6 能摄入的形态(逐字节判据,不是"文件存在就算过"):
+		// SPIR-V 1.0(ARB_gl_spirv 的硬要求)+ 不含 OpTypeSampler(驱动会崩的分离采样器形态)。
+		// Vulkan 目标则必须是**另一份**产物(不是同一份复制)。
+		const std::vector<uint8_t> glVertexFirst = ReadFileBytes(shaderOut / "Probe.VSMain.gl.spv");
+		{
+			const std::vector<uint8_t> glPixel = ReadFileBytes(shaderOut / "Probe.PSMain.gl.spv");
+			const std::vector<uint8_t> vulkanVertex = ReadFileBytes(shaderOut / "Probe.VSMain.spv");
+			uint32_t glVersion = 0;
+			uint32_t vulkanVersion = 0;
+			CHECK(SpirvLooksValid(glVertexFirst, &glVersion));
+			CHECK(SpirvLooksValid(glPixel, &glVersion));
+			CHECK(glVersion == 0x00010000u);
+			CHECK(!SpirvHasSeparateSamplerType(glVertexFirst));
+			CHECK(!SpirvHasSeparateSamplerType(glPixel));
+			CHECK(SpirvLooksValid(vulkanVertex, &vulkanVersion));
+			CHECK(vulkanVersion != 0x00010000u);
+			CHECK(vulkanVertex != glVertexFirst);
+		}
+
+		// 同一内容再次烘焙:命中缓存,工具调用次数不增长,产物逐字节不变。
 		const World::ShaderCompiler::BakeResult again =
-			World::ShaderCompiler::BakeDirectory(sourceDir, cookedDir);
+			World::ShaderCompiler::BakeDistributionTargets(sourceDir, cookedDir);
 		CHECK(again.Artifacts == 4 && again.Failed == 0);
 		CHECK(World::ShaderCompiler::ToolInvocationCount() == toolRuns);
 		CHECK(World::ShaderCompiler::CacheHitCount() >= 2);
+		CHECK(ReadFileBytes(shaderOut / "Probe.VSMain.gl.spv") == glVertexFirst);
 
 		// 打包为 wpak(与 Editor cook 的产物目录一致)并从包内读回。
 		const std::filesystem::path pakPath = temp.path / "content.wpak";
@@ -477,13 +528,18 @@ int main()
 			World::Vfs::PackageProvider::Open(pakPath, pakEc);
 		CHECK(provider != nullptr);
 
-		const bool vulkan = World::Renderer::GetAPI() == World::RendererAPI::API::Vulkan;
-		const std::string expectedName = std::string("shaders/Probe.VSMain.") + (vulkan ? "spv" : "glsl");
 		std::vector<uint8_t> expected;
-		CHECK(provider->Open(expectedName, expected, pakEc));
+		CHECK(provider->Open("shaders/Probe.VSMain.spv", expected, pakEc));
 		CHECK(!expected.empty());
+		std::vector<uint8_t> expectedGl;
+		CHECK(provider->Open("shaders/Probe.VSMain.gl.spv", expectedGl, pakEc));
+		CHECK(!expectedGl.empty());
 
-		// Runtime 侧:注册 VFS 解析器后,着色器不再走源码树编译。
+		// Runtime 侧:注册 VFS 解析器后,着色器不再走源码树编译(发行形态 = 只读产物)。
+		// 这一段显式按 Vulkan 目标跑:`.spv` 与设备无关,不需要真设备;
+		// GL 目标的摄入要走活设备的 GL_ARB_gl_spirv,由打包探针在真后端上覆盖。
+		const World::RendererAPI::API previousApi = World::Renderer::GetAPI();
+		World::RendererAPI::SetAPI(World::RendererAPI::API::Vulkan);
 		World::ShaderCompiler::ResetCounters();
 		World::ShaderCompiler::SetArtifactResolver(
 			[&provider](const std::string& logical, std::vector<uint8_t>& out)
@@ -497,6 +553,7 @@ int main()
 		CHECK(World::ShaderCompiler::CookedHitCount() == 1);
 		CHECK(World::ShaderCompiler::ToolInvocationCount() == 0);
 		World::ShaderCompiler::ClearArtifactResolver();
+		World::RendererAPI::SetAPI(previousApi);
 
 		// 3b. M4-S2:注解参数表 → 参数块编译 → Slang 反射校验(三态)+ 字段偏移表 + 打包
 		{
@@ -564,6 +621,51 @@ int main()
 			CHECK(layout.Textures[0].Name == "Albedo");
 			CHECK(layout.Textures[0].Set == 2 && layout.Textures[0].Binding == 4);
 			CHECK(layout.UsedMembers.size() == 3);
+
+			// Slang-T6a:反射 JSON 是**运行时上传**的事实源(打包形态没有编译器,靠的就是这份
+			// 与产物同键的 JSON)。直接按 artifact 的 JSON + SPIR-V 反射出的布局必须与上面
+			// BuildParamLayout 的结果**逐字段相等** —— 名称/类型/偏移/大小/绑定一个都不许放宽。
+			{
+				const std::string reflectionPath =
+					World::MaterialSurfaceCompiler::ReflectionPath(compiled.Artifact);
+				CHECK(!reflectionPath.empty());
+				CHECK(std::filesystem::is_regular_file(reflectionPath));
+				std::ifstream reflectionStream(reflectionPath, std::ios::binary);
+				CHECK(reflectionStream.good());
+				std::ostringstream reflectionBuffer;
+				reflectionBuffer << reflectionStream.rdbuf();
+				const std::string reflectionText = reflectionBuffer.str();
+				CHECK(!reflectionText.empty());
+
+				World::MaterialParamLayout reflected;
+				std::string reflectionError;
+				CHECK(World::ReflectParamLayoutFromReflectionJson(reflectionText,
+					compiled.Artifact.Bytecode, &reflected, &reflectionError));
+				CHECK(reflected.CbufferSet == layout.CbufferSet);
+				CHECK(reflected.CbufferBinding == layout.CbufferBinding);
+				CHECK(reflected.CbufferSize == layout.CbufferSize);
+				CHECK(reflected.Fields.size() == layout.Fields.size());
+				for (size_t index = 0; index < reflected.Fields.size(); ++index)
+				{
+					CHECK(reflected.Fields[index].Name == layout.Fields[index].Name);
+					// 反射(SPIR-V 侧)类型逐字节相等;注解类型 (Color/Vec4、Bool/uint) 是
+					// **语义覆盖**,用引擎自己的等价判据断言,不看名字猜。
+					CHECK(reflected.Fields[index].ReflectedType == layout.Fields[index].ReflectedType);
+					CHECK(World::IsReflectedTypeCompatible(layout.Fields[index].Type,
+						reflected.Fields[index].ReflectedType));
+					CHECK(reflected.Fields[index].Offset == layout.Fields[index].Offset);
+					CHECK(reflected.Fields[index].Size == layout.Fields[index].Size);
+				}
+				CHECK(reflected.Textures.size() == layout.Textures.size());
+				for (size_t index = 0; index < reflected.Textures.size(); ++index)
+				{
+					CHECK(reflected.Textures[index].Name == layout.Textures[index].Name);
+					CHECK(reflected.Textures[index].ReflectedType == layout.Textures[index].ReflectedType);
+					CHECK(reflected.Textures[index].Set == layout.Textures[index].Set);
+					CHECK(reflected.Textures[index].Binding == layout.Textures[index].Binding);
+				}
+				CHECK(reflected.UsedMembers == layout.UsedMembers);
+			}
 
 			// 打包:覆盖优先,缺项用注解默认;偏移直接用反射结果。
 			std::vector<MaterialParamOverride> overrides;

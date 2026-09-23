@@ -5,6 +5,7 @@
 #include "World/Core/Asset/CookPipeline.h"
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Vfs/PackageProvider.h"
+#include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/ShaderUtils.h"
 
@@ -23,9 +24,12 @@ namespace World::Editor
 	{
 		// Slang-T5:表面材质(.hlsl)的烘焙 —— 发行包里的表面产物同样是"只读产物"。
 		// 每份 .hlsl 烘两个后端(装配时只取与当前设备后端一致的那一份):
-		//   shaders/surface/<内容根相对路径去扩展名>.PSMain.spv | .gl.spv
-		//   shaders/surface/<…>.VSMain|VSMainInstanced|VSMainSkinned.spv | .gl.spv
-		//   shaders/surface/<…>.PSMain.reflection.json | .gl.reflection.json
+		//   <内容根相对路径去扩展名>.PSMain.spv | .gl.spv
+		//   <…>.VSMain|VSMainInstanced|VSMainSkinned.spv | .gl.spv
+		//   <…>.PSMain.reflection.json | .gl.reflection.json
+		// (都写在 `shaders/surface/` 下;命名只有一处实现 ——
+		//  `MaterialLibrary::SurfaceArtifactLogicalPath` / `SurfaceReflectionLogicalPath`,
+		//  运行时按同一份规则从包里读,见 MaterialLibrary::EnsureCookedSurfacePipeline。)
 		// 反射 JSON 是参数布局(偏移/类型/绑定)的事实源:与 SPIR-V 成对发布,
 		// 打包形态因此不需要任何编译器。
 		struct SurfaceBakeResult
@@ -52,6 +56,70 @@ namespace World::Editor
 			return static_cast<bool>(stream);
 		}
 
+		// 表面材质烘焙失败时的**用户可读**消息。
+		//
+		// Slang 的 rich 诊断是两行(`error[E20002]: syntax error` + `--> 文件:行:列`),
+		// 位置那行指向**中间目录里的包装源码**(surface_user.hlsl)。打包失败要让用户看到的
+		// 是"哪份 `.hlsl`、第几行第几列、什么错",不是那个中间路径 —— 所以这里把
+		// "指向用户源的诊断"重新映射回内容根相对路径。
+		std::string FormatSurfaceFailure(const World::SurfaceCompileResult& compiled,
+			const std::string& shaderPath)
+		{
+			std::string message;
+			std::string location;
+			// 两条判据结论一致,合起来用(实测有只带位置、不带 InUserSource 标记的形态)。
+			const auto pointsAtUserSource = [](const World::SurfaceDiagnostic& diagnostic)
+			{
+				return diagnostic.InUserSource
+					|| diagnostic.File.find("surface_user.hlsl") != std::string::npos;
+			};
+			for (const World::SurfaceDiagnostic& diagnostic : compiled.Diagnostics)
+			{
+				if (diagnostic.Severity != "error")
+					continue;
+				if (message.empty() && diagnostic.Message.find("error[") != std::string::npos)
+					message = diagnostic.Message;   // 带 E 码的整行,便于搜索
+				if (location.empty() && pointsAtUserSource(diagnostic))
+				{
+					const uint32_t line = diagnostic.InUserSource && diagnostic.UserLine != 0
+						? diagnostic.UserLine : diagnostic.Line;
+					const uint32_t column = diagnostic.InUserSource && diagnostic.UserColumn != 0
+						? diagnostic.UserColumn : diagnostic.Column;
+					if (line != 0)
+					{
+						location = " at " + shaderPath + ":" + std::to_string(line)
+							+ ":" + std::to_string(column);
+					}
+				}
+			}
+			if (location.empty())
+			{
+				// 用户源没在诊断里出现过 = 错误在引擎包装模板/契约里 —— 这时才报包装位置。
+				for (const World::SurfaceDiagnostic& diagnostic : compiled.Diagnostics)
+				{
+					if (diagnostic.Severity != "error" || diagnostic.File.empty() || diagnostic.Line == 0)
+						continue;
+					location = " (engine wrapper " + diagnostic.File + ":"
+						+ std::to_string(diagnostic.Line) + ":" + std::to_string(diagnostic.Column) + ")";
+					break;
+				}
+			}
+			if (message.empty())
+			{
+				// 诊断里只有位置行时(引擎把 `error[E…]` 那行并进了位置诊断)→ 取工具输出的
+				// **第一行**:它正是 `error[E20002]: syntax error`,单行、带稳定码、可直接搜。
+				// (整段原始输出会把源码片段/插入符塞进一行日志里,反而不好读。)
+				std::string firstLine = compiled.RawToolOutput;
+				const size_t newline = firstLine.find('\n');
+				if (newline != std::string::npos)
+					firstLine.erase(newline);
+				if (!firstLine.empty() && firstLine.back() == '\r')
+					firstLine.pop_back();
+				message = firstLine.empty() ? std::string("Slang reported no diagnostics") : firstLine;
+			}
+			return message + location;
+		}
+
 		SurfaceBakeResult BakeSurfaceMaterials(const fs::path& contentRoot, const fs::path& outputDir)
 		{
 			SurfaceBakeResult result;
@@ -59,7 +127,6 @@ namespace World::Editor
 			if (!fs::is_directory(contentRoot, ec))
 				return result;   // 没有内容根 = 没有表面材质,不是失败
 
-			const fs::path outBase = outputDir / "shaders" / "surface";
 			for (const fs::directory_entry& entry : fs::recursive_directory_iterator(
 				contentRoot, fs::directory_options::skip_permission_denied, ec))
 			{
@@ -84,37 +151,31 @@ namespace World::Editor
 				fs::path relative = fs::relative(entry.path(), contentRoot, relEc);
 				if (relEc || relative.empty())
 					relative = entry.path().filename();
-				relative.replace_extension();
-				const std::string logical = relative.generic_string();
+				// 内容根相对路径(**带**扩展名)—— 与 Material::SurfaceKey()/运行时的消费键同一口径;
+				// 同时当作排列键:编辑器与 cooker 对同一份 .hlsl 因此落在**同一个缓存条目**上
+				// (cook 不重编编辑器刚编过的东西,产物也一致)。
+				const std::string shaderPath = relative.generic_string();
 				++result.Shaders;
 
 				for (const World::SurfaceShaderBackend backend :
 					{ World::SurfaceShaderBackend::VulkanSpirV, World::SurfaceShaderBackend::OpenGLSpirV })
 				{
 					const bool gl = backend == World::SurfaceShaderBackend::OpenGLSpirV;
-					const std::string suffix = gl ? ".gl.spv" : ".spv";
 					const World::SurfaceCompileResult compiled =
-						World::MaterialSurfaceCompiler::CompileSurface(source, logical, backend);
+						World::MaterialSurfaceCompiler::CompileSurface(source, shaderPath, backend);
 					if (!compiled.Success)
 					{
 						++result.Failed;
 						if (result.Error.empty())
-						{
-							std::string detail = compiled.RawToolOutput;
-							if (!compiled.Diagnostics.empty())
-							{
-								const World::SurfaceDiagnostic& first = compiled.Diagnostics.front();
-								detail = first.Message + " (" + first.File + ":"
-									+ std::to_string(first.Line) + ":" + std::to_string(first.Column) + ")";
-							}
-							result.Error = "surface shader '" + logical + "' ("
-								+ World::MaterialSurfaceCompiler::BackendName(backend) + ") failed: " + detail;
-						}
+							result.Error = "surface shader '" + shaderPath + "' ("
+								+ World::MaterialSurfaceCompiler::BackendName(backend) + ") failed: "
+								+ FormatSurfaceFailure(compiled, shaderPath);
 						continue;
 					}
 
 					std::string writeError;
-					const fs::path pixelOut = outBase / (logical + ".PSMain" + suffix);
+					const fs::path pixelOut = outputDir / World::MaterialLibrary::SurfaceArtifactLogicalPath(
+						shaderPath, "PSMain", gl);
 					if (!WriteFileBytes(pixelOut, compiled.Artifact.Bytecode, writeError))
 					{
 						++result.Failed;
@@ -126,7 +187,8 @@ namespace World::Editor
 
 					for (const World::SurfaceVertexStage& stage : compiled.Artifact.VertexStages)
 					{
-						const fs::path vertexOut = outBase / (logical + "." + stage.EntryPoint + suffix);
+						const fs::path vertexOut = outputDir / World::MaterialLibrary::SurfaceArtifactLogicalPath(
+							shaderPath, stage.EntryPoint, gl);
 						if (!WriteFileBytes(vertexOut, stage.Bytecode, writeError))
 						{
 							++result.Failed;
@@ -144,7 +206,7 @@ namespace World::Editor
 					{
 						++result.Failed;
 						if (result.Error.empty())
-							result.Error = "surface shader '" + logical
+							result.Error = "surface shader '" + shaderPath
 								+ "' has no Slang reflection JSON (-reflection-json)";
 						continue;
 					}
@@ -152,8 +214,8 @@ namespace World::Editor
 					reflectionBuffer << reflectionStream.rdbuf();
 					const std::string reflectionText = reflectionBuffer.str();
 					const std::vector<uint8_t> reflectionBytes(reflectionText.begin(), reflectionText.end());
-					const fs::path reflectionOut = outBase
-						/ (logical + ".PSMain" + (gl ? ".gl" : "") + ".reflection.json");
+					const fs::path reflectionOut = outputDir /
+						World::MaterialLibrary::SurfaceReflectionLogicalPath(shaderPath, gl);
 					if (!WriteFileBytes(reflectionOut, reflectionBytes, writeError))
 					{
 						++result.Failed;

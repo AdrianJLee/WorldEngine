@@ -3,6 +3,8 @@
 #include "World/Renderer/MaterialSurfaceRuntimeInternal.h"
 
 #include "World/Core/Log.h"
+#include "World/Renderer/Material.h"
+#include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/Renderer.h"
 
 #include <cstring>
@@ -139,27 +141,51 @@ namespace World
 		// Slang-T3:从编译产物的反射 JSON(`-reflection-json`,与 artifact 同键)+ artifact 自带的
 		// SPIR-V 反射参数布局("成员真的被读"看 SPIR-V 里的 OpAccessChain)。
 		// 反射是纯函数,不再调用编译器;JSON 缺失 = 该 artifact 不能用于运行时上传。
-		bool ReflectArtifactLayout(const SurfaceArtifact& artifact, MaterialParamLayout* out,
-			std::string* error)
+		//
+		// Slang-T6a:反射 JSON 有两处来源,顺序固定 ——
+		//  1) 开发形态:编译器写的仓内文件(`MaterialSurfaceCompiler::ReflectionPath`,
+		//     与 artifact 的内容键同目录);
+		//  2) 打包形态:包内烘好的 `<键>.PSMain[.gl].reflection.json`(命名见
+		//     MaterialLibrary::SurfaceReflectionLogicalPath;读取走 VFS,与 .wmat/.hlsl 同一口径)。
+		// 打包运行时没有编译器,所以第 2 条是它的唯一来源。
+		bool ReflectArtifactLayout(const std::string& key, const SurfaceArtifact& artifact,
+			MaterialParamLayout* out, std::string* error)
 		{
+			std::string reflectionJson;
 			const std::string reflectionPath = MaterialSurfaceCompiler::ReflectionPath(artifact);
-			if (reflectionPath.empty())
+			if (!reflectionPath.empty())
+			{
+				std::ifstream stream(reflectionPath, std::ios::binary);
+				if (stream)
+				{
+					std::ostringstream buffer;
+					buffer << stream.rdbuf();
+					reflectionJson = buffer.str();
+				}
+			}
+
+			std::string cookedLogical;
+			if (reflectionJson.empty() && !key.empty() && key.find('#') == std::string::npos)
+			{
+				// 与产物同一套命名:GL 目标(SPIR-V 1.0)是 `.gl.` 中缀。
+				cookedLogical = MaterialLibrary::SurfaceReflectionLogicalPath(key,
+					artifact.Backend == "opengl-spirv");
+				if (!MaterialIO::ReadFileText(cookedLogical, reflectionJson))
+					reflectionJson.clear();
+			}
+			if (reflectionJson.empty())
 			{
 				if (error)
+				{
 					*error = "surface artifact has no Slang reflection JSON (-reflection-json); "
-						"cannot reflect parameter layout";
+						"cannot reflect parameter layout (compiler cache: '"
+						+ (reflectionPath.empty() ? std::string("<none>") : reflectionPath)
+						+ "', cooked: '"
+						+ (cookedLogical.empty() ? std::string("<none>") : cookedLogical) + "')";
+				}
 				return false;
 			}
-			std::ifstream stream(reflectionPath, std::ios::binary);
-			if (!stream)
-			{
-				if (error)
-					*error = "cannot read surface reflection JSON: " + reflectionPath;
-				return false;
-			}
-			std::ostringstream buffer;
-			buffer << stream.rdbuf();
-			return ReflectParamLayoutFromReflectionJson(buffer.str(), artifact.Bytecode, out, error);
+			return ReflectParamLayoutFromReflectionJson(reflectionJson, artifact.Bytecode, out, error);
 		}
 
 		// 一个变体的完整管线(顶点入口 + 像素入口都来自 artifact)。
@@ -359,7 +385,7 @@ namespace World
 
 		MaterialParamLayout params;
 		std::string reflectError;
-		if (!ReflectArtifactLayout(artifact, &params, &reflectError))
+		if (!ReflectArtifactLayout(key, artifact, &params, &reflectError))
 		{
 			result.Error = "cannot reflect material parameter layout: " + reflectError;
 			return result;

@@ -3,7 +3,10 @@
 #include "World/Renderer/MaterialLibrary.h"
 
 #include "World/Core/Log.h"
+#include "World/Renderer/MaterialSurface.h"
+#include "World/Renderer/MaterialSurfaceRuntime.h"
 #include "World/Renderer/MaterialTextureCache.h"
+#include "World/Renderer/Renderer.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -82,6 +85,28 @@ namespace World
 				result.Warning = "shader '" + shaderPath + "' 的注解参数表解析失败: " + parseError;
 			}
 			return result;
+		}
+
+		// ---- Slang-T6a:打包形态的表面产物 ----
+		//
+		// 产物读取一律走 MaterialIO::ReadFileText(VFS 优先:开发目录 provider / 发行包 provider),
+		// 与 .wmat/.hlsl 的读取同一口径 —— 打包 Runtime 因此不依赖源码树。
+		bool ReadLogicalBytes(const std::string& logical, std::vector<uint8_t>* out)
+		{
+			if (!out)
+				return false;
+			std::string bytes;
+			if (!MaterialIO::ReadFileText(logical, bytes) || bytes.empty())
+				return false;
+			out->assign(bytes.begin(), bytes.end());
+			return true;
+		}
+
+		// 当前设备要的那份后端产物(Vulkan → `.spv`;OpenGL → `.gl.spv`)。
+		// 与 MaterialSurfaceRuntime 的 ArtifactBackendForCurrentDevice 同一套字符串。
+		const char* CookedSurfaceBackendName()
+		{
+			return Renderer::GetAPI() == RendererAPI::API::Vulkan ? "vulkan-spirv" : "opengl-spirv";
 		}
 	}
 
@@ -281,6 +306,124 @@ namespace World
 			material.m_ShaderWarning.clear();
 		}
 		material.RecomputeParamWarnings();
+		// Slang-T6a:材质引用 `.hlsl` 时,打包形态的产物装配跟着参数表刷新一起做
+		// (开发形态没有这些产物 → 空操作;编辑器照旧现场编译 + Install)。
+		EnsureCookedSurfacePipeline(material);
+	}
+
+	bool MaterialLibrary::CookedSurfaceConsumptionEnabled()
+	{
+		// 默认开;`WLD_SURFACE_COOKED=0` 关掉(取证/对照用:关掉后打包运行时回退引擎管线)。
+		const char* value = std::getenv("WLD_SURFACE_COOKED");
+		return !(value && *value && std::string(value) == "0");
+	}
+
+	std::string MaterialLibrary::SurfaceArtifactBasePath(const std::string& shaderPath)
+	{
+		// `shaders/glass.hlsl` → `shaders/surface/shaders/glass`
+		// (只去掉最后一段扩展名;与 EditorCooker 的 replace_extension 同一口径)。
+		std::string normalized = NormalizePath(shaderPath);
+		const size_t slash = normalized.find_last_of('/');
+		const size_t dot = normalized.find_last_of('.');
+		if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+			normalized.erase(dot);
+		return "shaders/surface/" + normalized;
+	}
+
+	std::string MaterialLibrary::SurfaceArtifactLogicalPath(const std::string& shaderPath,
+		const std::string& entryPoint, bool glTarget)
+	{
+		return SurfaceArtifactBasePath(shaderPath) + "." + entryPoint
+			+ (glTarget ? ".gl.spv" : ".spv");
+	}
+
+	std::string MaterialLibrary::SurfaceReflectionLogicalPath(const std::string& shaderPath, bool glTarget)
+	{
+		return SurfaceArtifactBasePath(shaderPath) + ".PSMain"
+			+ (glTarget ? ".gl" : "") + ".reflection.json";
+	}
+
+	MaterialLibrary::SurfaceInstallReport MaterialLibrary::EnsureCookedSurfacePipeline(const Material& material)
+	{
+		SurfaceInstallReport report;
+		const std::string key = material.SurfaceKey();
+		report.Key = key;
+		if (key.empty() || key.find('#') != std::string::npos)
+			return report;   // 没有 shader 引用 / 编辑器未保存的预览键(只有编辑器会装)
+		if (!CookedSurfaceConsumptionEnabled())
+		{
+			report.Error = "cooked surface consumption disabled (WLD_SURFACE_COOKED=0)";
+			return report;
+		}
+
+		const bool glTarget = Renderer::GetAPI() != RendererAPI::API::Vulkan;
+		report.Backend = CookedSurfaceBackendName();
+
+		// 该键已经有发布版本(编辑器装过 / 上一次装配)→ 不覆盖:编译路径优先。
+		if (MaterialSurfaceRuntime::PublishedVersion(key) != 0)
+		{
+			report.AlreadyPublished = true;
+			report.Installed = true;
+			m_CookedSurfaceAttempted.insert(key);
+			return report;
+		}
+		// 已经有过确定结论的键(包内没有产物)→ 不再重复读盘(渲染侧会逐帧调到这里)。
+		if (m_CookedSurfaceAttempted.count(key) != 0)
+			return report;
+
+		// 成对产物:PS 必选;VS 三个入口按存在性取(产物清单由 cooker 决定)。
+		SurfaceArtifact artifact;
+		artifact.Backend = report.Backend;
+		artifact.EntryPoint = "PSMain";
+		if (!ReadLogicalBytes(SurfaceArtifactLogicalPath(key, "PSMain", glTarget), &artifact.Bytecode))
+			return report;   // 开发形态:包内没有表面产物 → 交给编辑器/编译器路径
+
+		std::string reflectionJson;
+		if (!MaterialIO::ReadFileText(SurfaceReflectionLogicalPath(key, glTarget), reflectionJson)
+			|| reflectionJson.empty())
+		{
+			report.Error = "cooked surface artifacts for '" + key
+				+ "' have no reflection JSON ('" + SurfaceReflectionLogicalPath(key, glTarget)
+				+ "'); the package is incomplete (re-run --cook)";
+			WLD_CORE_ERROR("[surface] {0}", report.Error);
+			m_CookedSurfaceAttempted.insert(key);
+			return report;
+		}
+
+		for (const char* entryPoint : { "VSMain", "VSMainInstanced", "VSMainSkinned" })
+		{
+			std::vector<uint8_t> bytecode;
+			if (!ReadLogicalBytes(SurfaceArtifactLogicalPath(key, entryPoint, glTarget), &bytecode))
+				continue;
+			artifact.VertexStages.push_back(SurfaceVertexStage { entryPoint, std::move(bytecode) });
+		}
+
+		report.CookedArtifacts = true;
+		report.VertexStages = artifact.VertexStages.size();
+		// 装配:反射 JSON 由 MaterialSurfaceRuntime 从**同一份包内产物**读(见那里的说明),
+		// 运行时不调用任何编译器。
+		const MaterialSurfaceRuntime::InstallResult install =
+			MaterialSurfaceRuntime::Install(key, artifact);
+		if (!install.Success)
+		{
+			// 设备/建管线环境还没就绪这类临时失败**不**缓存:下一次调用会重试
+			// (场景在 Renderer3D::Init 之后加载,正常路径一次就成)。
+			report.Error = install.Error;
+			WLD_CORE_WARN("[surface] cooked pipeline install failed: key='{0}' backend={1}: {2}",
+				key, report.Backend, install.Error);
+			return report;
+		}
+
+		report.Installed = true;
+		report.Pipelines = install.Pipelines;
+		m_CookedSurfaceAttempted.insert(key);
+		// 证据行(打包探针按这行 + 计数器断言,不看感觉):
+		// 键、后端、变体数、顶点入口数,以及"本次装配全程 0 次编译器调用"的计数器。
+		WLD_CORE_INFO("[surface] cooked install ok: key='{0}' backend={1} pipelines={2} vertexStages={3} "
+			"materialSurfaceToolInvocations={4}",
+			key, report.Backend, install.Pipelines, artifact.VertexStages.size(),
+			MaterialSurfaceCompiler::ToolInvocationCount());
+		return report;
 	}
 
 	Ref<Material> MaterialLibrary::Load(const std::string& path, std::string* error)
