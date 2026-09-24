@@ -187,13 +187,13 @@ namespace World
 			const std::string& label, const std::string& tooltip, bool enabled, const Wui::WuiTheme& theme)
 		{
 			const bool hovered = ctx.IsHovered(rect);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect,
-				enabled ? (hovered ? theme.ButtonHover : theme.ButtonBg) : theme.PanelBg, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect,
-				hovered && enabled ? theme.Accent : theme.Border, 3.0f, 1.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-				{ rect.X + 9.0f, rect.Y + (rect.H - 13.0f) * 0.5f, 0.0f, 0.0f },
-				enabled ? theme.Text : theme.TextDisabled, 0.0f, 1.0f, label, 13.0f, false });
+			// WUI-P1c-W3.7:底色/描边/文字三条裸绘制改走库件(命令逐字段等价;禁用态配色、悬停口径、
+			// 命中与 a11y 节点全部原样保留在面板侧)。
+			Wui::PanelBackground(ctx, rect,
+				enabled ? (hovered ? theme.ButtonHover : theme.ButtonBg) : theme.PanelBg, 3.0f);
+			Wui::HighlightOutline(ctx, rect, hovered && enabled ? theme.Accent : theme.Border, 3.0f, 1.0f);
+			Wui::Label(ctx, { rect.X + 9.0f, rect.Y + (rect.H - 13.0f) * 0.5f }, label,
+				enabled ? theme.Text : theme.TextDisabled, 13.0f);
 			RegisterNode(Wui::HashId(idText), "button", rect, label, tooltip, enabled, tooltip, true);
 			if (hovered)
 			{
@@ -236,9 +236,9 @@ namespace World
 				const bool hovered = ctx.IsHovered(row);
 				const bool isSelected = static_cast<int>(i) == selected;
 				if (hovered && rows[i].Interactive)
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.ButtonHover, 2.0f });
+					Wui::PanelBackground(ctx, row, theme.ButtonHover, 2.0f);
 				else if (isSelected)
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.Selection, 2.0f });
+					Wui::PanelBackground(ctx, row, theme.Selection, 2.0f);
 				const std::string& shown = rows[i].DisplayText.empty() ? rows[i].Label : rows[i].DisplayText;
 				Wui::Label(ctx, { row.X + 6.0f, row.Y + 3.0f }, TruncateUtf8(shown, 110),
 					isSelected ? theme.Text : theme.TextMuted, 12.0f);

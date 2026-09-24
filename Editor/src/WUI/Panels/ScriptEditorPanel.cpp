@@ -148,11 +148,13 @@ namespace World
 			node.Enabled = false;
 			node.Interactive = false;
 			Wui::WuiAccessibility::Get().Register(node);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, theme.PanelHeader, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-				{ rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
-				theme.TextMuted, 0, 1.0f, label, 15.0f, false });
+			// WUI-P1c-W3.7:只读工具条的禁用画法(底色/描边/文字)改走库件,命令逐字段等价;
+			// a11y 节点(Enabled=false / Interactive=false)与外观口径(PanelHeader + TextMuted)
+			// 保持在面板侧 —— 与 `Wui::ButtonEx` 的禁用配色是两套口径,不在此片换件。
+			Wui::PanelBackground(ctx, rect, theme.PanelHeader, 3.0f);
+			Wui::HighlightOutline(ctx, rect, theme.Border, 3.0f, 1.0f);
+			Wui::Label(ctx, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f }, label,
+				theme.TextMuted, 15.0f);
 		}
 	}
 

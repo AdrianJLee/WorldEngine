@@ -72,15 +72,15 @@ namespace World
 			const bool hovered = ctx.IsHovered(rect);
 			const Wui::WuiColor fill = !enabled ? theme.PanelBg
 				: (primary ? theme.Accent : (hovered ? theme.ButtonHover : theme.ButtonBg));
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, fill, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect,
-				enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f });
+			// WUI-P1c-W3.7:底色/描边/文字三条裸绘制改走库件(命令逐字段等价)。
+			Wui::PanelBackground(ctx, rect, fill, 3.0f);
+			Wui::HighlightOutline(ctx, rect,
+				enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f);
 			// accent 填充上要压深色文字(白字对比度不够);禁用态用 TextDisabled。
 			const Wui::WuiColor textColor = !enabled ? theme.TextDisabled
 				: (primary ? theme.WindowBg : theme.Text);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-				{ rect.X + 9.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0.0f, 0.0f },
-				textColor, 0.0f, 1.0f, label, 15.0f, false });
+			Wui::Label(ctx, { rect.X + 9.0f, rect.Y + (rect.H - 15.0f) * 0.5f }, label, textColor,
+				15.0f);
 			RegisterAccessNode(id, "button", rect, label, tooltip, enabled, tooltip, true);
 			Wui::DrawFocusRing(ctx, rect, id, theme);
 			ctx.RegisterFocusable(id, rect);
@@ -302,11 +302,11 @@ namespace World
 			if (prefabRoles[i] == 1)
 			{
 				const Wui::WuiRect badge { slotX, rowRect.Y + 2.0f, 16.0f, 16.0f };
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, badge, theme.Accent, badge.H * 0.5f });
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-					{ badge.X + 3.0f, badge.Y + 2.0f, 0.0f, 0.0f },
-					Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, 0.0f, 1.0f,
-					Wui::Tr("panel.hierarchy.prefab.badge", "预"), 11.0f, true });
+				// WUI-P1c-W3.7:accent 圆底 + 粗体字形走 `Wui::Badge`。填充/圆角/字号/粗体逐字段相同;
+				// 字形原点改按库件居中口径 ((16−tw)/2, (16−11)/2 = 2.5),与手写 (X+3, Y+2) 差 0.5px
+				// ⇒ 字形亚像素重采样(与 W3.4/W3.5 徽标同源,报告给像素级解释)。
+				Wui::Badge(ctx, badge, Wui::Tr("panel.hierarchy.prefab.badge", "预"), theme.Accent,
+					Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, 11.0f, true, badge.H * 0.5f);
 				RegisterAccessNode(Wui::HashId(("hierarchy.prefab.badge." + std::to_string(handle)).c_str()),
 					"prefab-badge", badge,
 					Wui::Tr("panel.hierarchy.prefab.badge.label", "Prefab instance"), tip, true, tip, false);
@@ -315,9 +315,9 @@ namespace World
 			{
 				// 淡色点:只表达"这一行属于某棵实例子树",不抢行文本的注意力。
 				const Wui::WuiRect dot { slotX + 5.5f, rowRect.Y + rowRect.H * 0.5f - 2.5f, 5.0f, 5.0f };
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, dot,
+				Wui::PanelBackground(ctx, dot,
 					Wui::WuiColor { theme.TextMuted.R, theme.TextMuted.G, theme.TextMuted.B, 0.55f },
-					dot.H * 0.5f });
+					dot.H * 0.5f);
 			}
 			if (!tip.empty())
 				Wui::Tooltip(ctx, rowRect, tip);
@@ -384,8 +384,9 @@ namespace World
 					else
 					{
 						const float lineY = m_PendingDropZone == 0 ? rowRect.Y : rowRect.Y + rowRect.H - 2.0f;
-						ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-							{ rowRect.X, lineY, rowRect.W, 2.0f }, theme.Accent, 0.0f });
+						// 纯填充的落点强调线:库内暂无 `WuiSeparatorLine`,按"纯填充"走 PanelBackground
+						// (命令逐字段相同);缺件登记在报告里。
+						Wui::PanelBackground(ctx, { rowRect.X, lineY, rowRect.W, 2.0f }, theme.Accent, 0.0f);
 					}
 				}
 			}

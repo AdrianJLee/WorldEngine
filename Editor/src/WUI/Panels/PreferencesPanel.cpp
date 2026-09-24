@@ -6,6 +6,7 @@
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <chrono>
 
@@ -52,7 +53,8 @@ namespace World
 	// ---- 左侧分类列表(用户 2026-09-20:"还没有类型分类") ----
 	void PreferencesPanel::DrawCategoryList(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const Wui::WuiTheme& theme)
 	{
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, theme.ContentBg, 0.0f });
+		// WUI-P1c-W3.7:本函数的 7 条裸绘制全部改走库件(命令逐字段等价)。
+		Wui::PanelBackground(ctx, rect, theme.ContentBg, 0.0f);
 		float y = rect.Y + 6.0f;
 		for (const CategoryEntry& entry : kCategories)
 		{
@@ -60,25 +62,24 @@ namespace World
 			const bool selected = static_cast<int>(m_Category) == entry.Index;
 			if (selected)
 			{
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.Selection, 3.0f });
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { row.X, row.Y, 2.0f, row.H }, theme.Accent, 0.0f });
+				Wui::PanelBackground(ctx, row, theme.Selection, 3.0f);
+				Wui::PanelBackground(ctx, { row.X, row.Y, 2.0f, row.H }, theme.Accent, 0.0f);
 			}
 			else if (ctx.IsHovered(row))
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.HoverBg, 3.0f });
+				Wui::PanelBackground(ctx, row, theme.HoverBg, 3.0f);
 			const Wui::LocalizedLabel localized = Wui::TrLabel(entry.Key, entry.English);
 			const std::string& label = localized.Text;
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { row.X + 12.0f, row.Y + 5.0f, 0, 0 },
-				selected ? theme.Text : theme.TextMuted, 0, 1.0f, label, 13.0f, false });
+			Wui::Label(ctx, { row.X + 12.0f, row.Y + 5.0f }, label,
+				selected ? theme.Text : theme.TextMuted, 13.0f);
 			float termX = row.X + 12.0f + ctx.MeasureTextWidth(label, 13.0f) + 6.0f;
 			if (!localized.Term.empty())
 			{
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { termX, row.Y + 6.0f, 0, 0 },
-					theme.TextMuted, 0, 1.0f, localized.Term, 11.0f, false });
+				Wui::Label(ctx, { termX, row.Y + 6.0f }, localized.Term, theme.TextMuted, 11.0f);
 				termX += ctx.MeasureTextWidth(localized.Term, 11.0f) + 6.0f;
 			}
 			// 改过的分组画一个小圆点(未保存/已修改的可见性)。
 			if (GroupHasModified(entry.Group))
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { termX, row.Y + 11.0f, 5.0f, 5.0f }, theme.Accent, 2.5f });
+				Wui::PanelBackground(ctx, { termX, row.Y + 11.0f, 5.0f, 5.0f }, theme.Accent, 2.5f);
 			// 分类也是可点控件:登记无障碍节点(AI 通道/自动化能按 id 切页)。
 			Wui::WuiAccessNode node;
 			node.Id = Wui::HashId(("prefs.category." + std::string(entry.English)).c_str());
