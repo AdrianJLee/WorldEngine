@@ -92,6 +92,37 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y + rect.H - 1.0f, rect.W, 1.0f }, theme.Border, 0.0f });
 	}
 
+	// ---- P1c-LIB1:徽标 / 染色图标(ClipScope 是纯 RAII,定义在头文件里) ----
+
+	void Badge(WuiContext& ctx, const WuiRect& rect, const std::string& text, const WuiColor& fill,
+		const WuiColor& textColor, const WuiTheme& theme, float fontSize, bool bold, float radius)
+	{
+		const float size = fontSize > 0.0f ? fontSize : theme.FontSizeCaption;
+		const float corner = radius >= 0.0f ? radius : std::min(rect.W, rect.H) * 0.5f;
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, corner });
+		const float textWidth = ctx.MeasureTextWidth(text, size);
+		PushText(ctx, { rect.X + (rect.W - textWidth) * 0.5f, rect.Y + (rect.H - size) * 0.5f },
+			text, textColor, size, bold);
+	}
+
+	void Icon(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv,
+		const WuiColor& tint, const WuiTheme& theme, float radius)
+	{
+		if (textureId != 0)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Image, rect, tint, 0.0f, 1.0f, "", 15.0f, false, textureId, uv });
+			return;
+		}
+		// 空图兜底:底 + 2×2 棋盘 + 描边(不依赖纹理与字体,任何后端都画得出来)。
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ContentBg, radius });
+		const WuiRect cells[2] = {
+			{ rect.X + rect.W * 0.5f, rect.Y, rect.W * 0.5f, rect.H * 0.5f },
+			{ rect.X, rect.Y + rect.H * 0.5f, rect.W * 0.5f, rect.H * 0.5f } };
+		for (const WuiRect& cell : cells)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, cell, theme.ButtonHover, 0.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, radius, 1.0f });
+	}
+
 	// ---- 挂靠标签 ----
 
 	AttachTagResult AttachTag(WuiContext& ctx, const WuiRect& rect, const std::string& title, bool active,

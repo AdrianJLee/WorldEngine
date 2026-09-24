@@ -1235,6 +1235,57 @@ namespace World::Wui
 			PaintRetained(draw, image, slot.Rect);
 		}
 
+		// P1c-LIB1:徽标(W3.1 的"粗体圆形/胶囊字标"缺件)。同一帧画两枚:
+		// ① 默认(中性底,填充/字色/字号/粗体都可被属性覆盖);② 变色态(强调色底 + 反白字),
+		// 对应面板里的"类型徽标"(Prefab/着色器)——工作台一次就能看到两种着色。
+		void ShowBadge(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 168.0f, 18.0f);
+			const WuiId id = BeginShowcase(draw, "badge", "Badge", slot.Rect);
+			(void)id;
+			const float fontSize = DrivenFloat(ctx, "showcase.badge.fontSize", draw, "fontSize",
+				theme.FontSizeCaption, 8.0f, 20.0f) * slot.Scale;
+			const bool bold = BoolProperty(draw, "bold", true);
+			const std::string text = MaybeLongText(draw, LocalizedText(draw, "text", "Material Shader", "着色器"));
+			const glm::vec4 fill = DrivenColor(ctx, "showcase.badge.fill", draw, "fill",
+				glm::vec4 { theme.ActiveBg.R, theme.ActiveBg.G, theme.ActiveBg.B, theme.ActiveBg.A });
+			const glm::vec4 textColor = DrivenColor(ctx, "showcase.badge.textColor", draw, "textColor",
+				glm::vec4 { theme.Text.R, theme.Text.G, theme.Text.B, theme.Text.A });
+			const float corner = slot.Rect.H * 0.5f;
+			const float width = std::min(slot.Rect.W, 96.0f * slot.Scale);
+			Badge(ctx, { slot.Rect.X, slot.Rect.Y, width, slot.Rect.H }, text,
+				WuiColor { fill.r, fill.g, fill.b, fill.a },
+				WuiColor { textColor.r, textColor.g, textColor.b, textColor.a }, theme, fontSize, bold, corner);
+			// ② 变色态:强调色底 + 反白字(面板里的 Prefab/着色器徽标就是这一档)。
+			const float accentX = slot.Rect.X + width + 8.0f * slot.Scale;
+			const float accentWidth = std::min(56.0f * slot.Scale,
+				std::max(0.0f, slot.Rect.X + slot.Rect.W - accentX));
+			if (accentWidth > 8.0f)
+				Badge(ctx, { accentX, slot.Rect.Y, accentWidth, slot.Rect.H },
+					LocalizedText(draw, "accentText", "Prefab", "预制体"),
+					theme.Accent, WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, fontSize, bold, corner);
+		}
+
+		// P1c-LIB1:染色图标(W3.2 的"按资产类型染色图标"缺件)。纹理 id 口径与 WuiImage 一致;
+		// 默认 textureId=0 = 空图 → Icon 自己的兜底占位(底 + 棋盘 + 描边),所以工作台里
+		// 这件**不需要** image/spacer 那种像素断言豁免。
+		void ShowIcon(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 32.0f, 32.0f);
+			const WuiId id = BeginShowcase(draw, "icon", "Icon", slot.Rect);
+			(void)id;
+			const uint64_t textureId = static_cast<uint64_t>(
+				DrivenInt(ctx, "showcase.icon.textureId", draw, "textureId", 0, 0, 100000));
+			const glm::vec4 tint = DrivenColor(ctx, "showcase.icon.tint", draw, "tint",
+				glm::vec4 { 1.0f, 1.0f, 1.0f, 1.0f });
+			Icon(ctx, slot.Rect, textureId, { 0.0f, 0.0f, 1.0f, 1.0f },
+				WuiColor { tint.r, tint.g, tint.b, tint.a }, theme);
+		}
+
 		void ShowBox(const WuiComponentDraw& draw)
 		{
 			WuiContext& ctx = *draw.Context;
@@ -1917,6 +1968,27 @@ namespace World::Wui
 				StateList({ "default" }),
 				{ PropInt("textureId", 0.0f, 100000.0f, 1.0f), PropText("tint", "#FFFFFF") },
 				&ShowImage));
+
+			WuiComponentRegistry::Register(Desc(
+				"badge", "Badge", "Badge", "Chrome", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
+				"role=无(纯展示徽标,不登记节点);外壳锚点 kind=component-root、interactive=false;填充/字色/字号/粗体都由调用方给(粗体默认开);文字不裁剪(超宽会溢出调用方的矩形)",
+				"showcase 首选 168x18,同一帧画两枚(中性底 + 强调色底);正方形(如 16x16 实例徽标)+ radius<0 = 圆,胶囊给 W≥H 的矩形",
+				ShellIds("badge"),
+				StateList({ "default", "long-text" }),
+				{ PropText("text", "Material Shader"), PropText("fill", "#2A3038"), PropText("textColor", "#D7DCE3"),
+					PropFloat("fontSize", 8.0f, 20.0f, 0.5f), PropBool("bold") },
+				&ShowBadge));
+
+			WuiComponentRegistry::Register(Desc(
+				"icon", "Icon", "Icon (Tinted)", "Chrome", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
+				"role=无(纯展示图标,不登记节点);外壳锚点 kind=component-root、interactive=false;纹理 id 来自宿主 WuiTextureRegistry(与 WuiImage 同一口径),tint 由调用方给;textureId=0 = 空图 → 兜底占位(底 + 2×2 棋盘 + 描边),不是空白、也不是纯色",
+				"showcase 首选 32x32;方形图标位(内容网格 20x20 / 列表 16x16 / 工具条 18x18 都按调用方给的矩形画,控件不改布局)",
+				ShellIds("icon"),
+				StateList({ "default" }),
+				{ PropInt("textureId", 0.0f, 100000.0f, 1.0f), PropText("tint", "#FFFFFF") },
+				&ShowIcon));
 
 			// ---- Menus ----
 			WuiComponentRegistry::Register(Desc(

@@ -29,6 +29,55 @@ namespace World::Wui
 	void SectionHeader(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiColor& color,
 		const WuiTheme& theme, float fontSize = 15.0f);
 
+	// ---- P1c-LIB1:徽标 / 染色图标 / 即时裁剪作用域(面板缺件 → 库件) ----
+
+	// 文本徽标:纯填充底 + 居中文字。着色器/Prefab 这类"类型徽标"、实例条上的强调字标
+	// (正方形圆标 / 胶囊)都走它。
+	//  · fontSize <= 0 = theme.FontSizeCaption;bold 默认 true(徽标字形一律粗体);
+	//  · radius < 0 = 胶囊(min(rect.W, rect.H) * 0.5;正方形小标 = 圆);
+	//  · 不裁剪文字(调用方约束宽度);不登记 a11y 节点(展示件,节点由调用方或外壳锚点负责)。
+	void Badge(WuiContext& ctx, const WuiRect& rect, const std::string& text, const WuiColor& fill,
+		const WuiColor& textColor, const WuiTheme& theme, float fontSize = 0.0f, bool bold = true,
+		float radius = -1.0f);
+
+	// 染色图标:纹理 id + tint(与 WuiImage 同一套纹理注册口径 —— 宿主用 WuiTextureRegistry
+	// 注册后把 id 交给面板)。textureId == 0(空图)时画**兜底占位**(底 + 2×2 棋盘 + 描边),
+	// 保证图标位不空、也不是纯色块(所以 icon 不适用 image/spacer 的像素断言豁免)。
+	void Icon(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv,
+		const WuiColor& tint, const WuiTheme& theme, float radius = 0.0f);
+
+	// 即时裁剪作用域(RAII):等价于面板里手写的一对
+	//   ctx.Commands().push_back({ WuiDrawKind::ClipPush, rect }); … { WuiDrawKind::ClipPop }
+	// **加上** BeginScrollArea 同款的 ctx.PushClipRect / PopClipRect —— 渲染裁剪与裁剪栈
+	// 同进同出,ClipAllows(焦点环/条目剔除)在作用域内、外的判据都正确。
+	// 不滚动、不填充、不推其它状态;非拷贝、非移动(裁剪必须成对进出)。
+	// 不登记为工作台组件:它不是可展示部件(理由见 reports/WUI-P1c-lib1.md)。
+	class ClipScope
+	{
+	public:
+		ClipScope(WuiContext& ctx, const WuiRect& rect) : m_Context(&ctx)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::ClipPush, rect });
+			ctx.PushClipRect(rect);
+		}
+
+		~ClipScope()
+		{
+			if (m_Context == nullptr)
+				return;
+			m_Context->Commands().push_back({ WuiDrawKind::ClipPop });
+			m_Context->PopClipRect();
+		}
+
+		ClipScope(const ClipScope&) = delete;
+		ClipScope& operator=(const ClipScope&) = delete;
+		ClipScope(ClipScope&&) = delete;
+		ClipScope& operator=(ClipScope&&) = delete;
+
+	private:
+		WuiContext* m_Context = nullptr;
+	};
+
 	// ---- 挂靠标签(主窗口顶栏 chip) ----
 	struct AttachTagResult
 	{

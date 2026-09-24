@@ -2105,6 +2105,194 @@ int main()
 			accessibility.Clear();
 		}
 
+		// 24. P1c-LIB1:徽标 / 染色图标 / 即时裁剪作用域 —— 三条硬口径:
+		//     ① 登记条目可解析(id/TypeName/Category;通用字段由 §19 覆盖);
+		//     ② showcase 走真实库入口:badge 同一帧画"默认 + 变色"两枚、字形默认粗体;
+		//        icon 的空图(textureId=0)走兜底占位,有纹理时只发一条带 tint 的 Image 命令;
+		//     ③ ClipScope 与手写的 ClipPush/ClipPop 命令逐字段等价,且裁剪栈同进同出
+		//        (ClipAllows 在作用域内/外、嵌套时的判据都正确)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme = CurrentTheme();
+
+			// ---- ① badge:登记 + "默认 + 变色"两枚 + 粗体字标 + 外壳锚点 ----
+			{
+				const WuiComponentDesc* badge = WuiComponentRegistry::Find("badge");
+				CHECK(badge != nullptr);
+				if (badge != nullptr)
+				{
+					CHECK(badge->TypeName == "Badge");
+					CHECK(badge->Category == "Chrome");
+					WuiContext ctx;
+					WuiInputState input;
+					input.ViewportSize = { 640.0f, 480.0f };
+					accessibility.BeginFrame("main", input.ViewportSize);
+					accessibility.SetPanel("showcase");
+					ctx.BeginFrame(input);
+					WuiComponentDraw draw;
+					draw.Context = &ctx;
+					draw.Theme = &theme;
+					draw.Rect = { 12.0f, 12.0f, 420.0f, 160.0f };
+					draw.State = "default";
+					draw.UiScale = 1.0f;
+					draw.Density = 1.0f;
+					draw.Locale = "en";
+					badge->Showcase(draw);
+					ctx.EndFrame();
+					const std::vector<WuiDrawCommand> commands = ctx.Commands();
+					int rects = 0;
+					int boldTexts = 0;
+					std::set<std::string> fills;
+					for (const WuiDrawCommand& command : commands)
+					{
+						if (command.Kind == WuiDrawKind::Rect)
+						{
+							++rects;
+							fills.insert(std::to_string(command.Color.R) + "," + std::to_string(command.Color.G)
+								+ "," + std::to_string(command.Color.B));
+						}
+						else if (command.Kind == WuiDrawKind::Text && command.Bold)
+							++boldTexts;
+					}
+					CHECK(rects >= 2);        // 默认底 + 变色底
+					CHECK(fills.size() >= 2); // "默认 + 变色"确实是两种底色
+					CHECK(boldTexts >= 2);    // 两枚字形都走粗体
+					const WuiAccessNode* anchor = accessibility.Find(HashId("showcase.badge"));
+					CHECK(anchor != nullptr && anchor->Kind == "component-root" && !anchor->Interactive);
+				}
+			}
+
+			// ---- ② icon:空图兜底占位 / 有纹理时 tint 逐字段透传 ----
+			{
+				const WuiComponentDesc* icon = WuiComponentRegistry::Find("icon");
+				CHECK(icon != nullptr);
+				if (icon != nullptr)
+				{
+					CHECK(icon->TypeName == "Icon");
+					// 默认属性(textureId=0):底 + 2×2 棋盘 + 描边,且不发 Image 命令。
+					{
+						WuiContext ctx;
+						WuiInputState input;
+						input.ViewportSize = { 640.0f, 480.0f };
+						accessibility.BeginFrame("main", input.ViewportSize);
+						accessibility.SetPanel("showcase");
+						ctx.BeginFrame(input);
+						WuiComponentDraw draw;
+						draw.Context = &ctx;
+						draw.Theme = &theme;
+						draw.Rect = { 12.0f, 12.0f, 420.0f, 160.0f };
+						draw.State = "default";
+						draw.UiScale = 1.0f;
+						draw.Density = 1.0f;
+						draw.Locale = "en";
+						icon->Showcase(draw);
+						ctx.EndFrame();
+						const std::vector<WuiDrawCommand> commands = ctx.Commands();
+						int rects = 0;
+						int outlines = 0;
+						int images = 0;
+						for (const WuiDrawCommand& command : commands)
+						{
+							if (command.Kind == WuiDrawKind::Rect) ++rects;
+							if (command.Kind == WuiDrawKind::RectOutline) ++outlines;
+							if (command.Kind == WuiDrawKind::Image) ++images;
+						}
+						CHECK(rects >= 3);    // 底 + 两块棋盘
+						CHECK(outlines >= 1); // 描边
+						CHECK(images == 0);   // 空图不画 Image
+						const WuiAccessNode* anchor = accessibility.Find(HashId("showcase.icon"));
+						CHECK(anchor != nullptr && anchor->Kind == "component-root" && !anchor->Interactive);
+					}
+					// 有纹理 + tint:只发一条 Image 命令,tint / textureId / UV 逐字段透传。
+					{
+						WuiContext ctx;
+						WuiInputState input;
+						input.ViewportSize = { 640.0f, 480.0f };
+						accessibility.BeginFrame("main", input.ViewportSize);
+						accessibility.SetPanel("showcase");
+						ctx.BeginFrame(input);
+						WuiComponentDraw draw;
+						draw.Context = &ctx;
+						draw.Theme = &theme;
+						draw.Rect = { 12.0f, 12.0f, 420.0f, 160.0f };
+						draw.State = "default";
+						draw.UiScale = 1.0f;
+						draw.Density = 1.0f;
+						draw.Locale = "en";
+						draw.Properties = { { "textureId", "1234" }, { "tint", "#FF0000" } };
+						icon->Showcase(draw);
+						ctx.EndFrame();
+						const std::vector<WuiDrawCommand> commands = ctx.Commands();
+						CHECK(commands.size() == 1);
+						if (!commands.empty())
+						{
+							const WuiDrawCommand& image = commands[0];
+							CHECK(image.Kind == WuiDrawKind::Image);
+							CHECK(image.Image == 1234u);
+							CHECK(Near(image.Color.R, 1.0f) && Near(image.Color.G, 0.0f) && Near(image.Color.B, 0.0f));
+							CHECK(Near(image.Uv.W, 1.0f) && Near(image.Uv.H, 1.0f));
+						}
+					}
+				}
+			}
+
+			// ---- ③ ClipScope:与手写 ClipPush/ClipPop 逐字段等价 + 裁剪栈同进同出 ----
+			{
+				WuiContext ctx;
+				WuiInputState input;
+				input.ViewportSize = { 640.0f, 480.0f };
+				ctx.BeginFrame(input);
+				const WuiRect clipRect { 10.0f, 20.0f, 100.0f, 50.0f };
+				// 手写版(与面板里现存的裸写法逐字段相同):ClipPush + PushClipRect … PopClipRect + ClipPop。
+				ctx.Commands().push_back({ WuiDrawKind::ClipPush, clipRect });
+				ctx.PushClipRect(clipRect);
+				ctx.Commands().push_back({ WuiDrawKind::ClipPop });
+				ctx.PopClipRect();
+				{
+					ClipScope clip(ctx, clipRect);
+					(void)clip;
+					CHECK(ctx.ClipAllows({ 30.0f, 30.0f, 10.0f, 10.0f }));
+					CHECK(!ctx.ClipAllows({ 200.0f, 30.0f, 10.0f, 10.0f }));
+					const WuiDrawCommand& push = ctx.Commands().back();
+					CHECK(push.Kind == WuiDrawKind::ClipPush);
+					CHECK(Near(push.Rect.X, clipRect.X) && Near(push.Rect.Y, clipRect.Y)
+						&& Near(push.Rect.W, clipRect.W) && Near(push.Rect.H, clipRect.H));
+				}
+				CHECK(ctx.ClipAllows({ 200.0f, 30.0f, 10.0f, 10.0f })); // 出作用域 = 不裁剪
+				CHECK(ctx.Commands().size() == 4);
+				CHECK(ctx.Commands()[0].Kind == WuiDrawKind::ClipPush && ctx.Commands()[1].Kind == WuiDrawKind::ClipPop);
+				CHECK(ctx.Commands()[2].Kind == WuiDrawKind::ClipPush && ctx.Commands()[3].Kind == WuiDrawKind::ClipPop);
+				CHECK(Near(ctx.Commands()[2].Rect.X, clipRect.X) && Near(ctx.Commands()[2].Rect.W, clipRect.W));
+				ctx.EndFrame();
+			}
+			// 嵌套 = LIFO:内层裁剪生效、出内层恢复外层(与 PushClipRect/PopClipRect 同语义)。
+			{
+				WuiContext ctx;
+				WuiInputState input;
+				input.ViewportSize = { 640.0f, 480.0f };
+				ctx.BeginFrame(input);
+				{
+					ClipScope outer(ctx, { 0.0f, 0.0f, 100.0f, 100.0f });
+					(void)outer;
+					CHECK(ctx.ClipAllows({ 10.0f, 10.0f, 10.0f, 10.0f }));
+					{
+						ClipScope inner(ctx, { 0.0f, 0.0f, 20.0f, 20.0f });
+						(void)inner;
+						CHECK(ctx.ClipAllows({ 10.0f, 10.0f, 10.0f, 10.0f }));
+						CHECK(!ctx.ClipAllows({ 50.0f, 50.0f, 10.0f, 10.0f }));
+					}
+					CHECK(ctx.ClipAllows({ 50.0f, 50.0f, 10.0f, 10.0f }));
+				}
+				CHECK(ctx.ClipAllows({ 500.0f, 500.0f, 10.0f, 10.0f }));
+				CHECK(ctx.Commands().size() == 4); // 两次 push + 两次 pop,无残留
+				ctx.EndFrame();
+			}
+
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}
