@@ -220,7 +220,21 @@ namespace World::Wui
 		else
 			PushText(ctx, { rect.X + 4.0f, rect.Y + rect.H * 0.5f - 8.0f }, fallbackLabel,
 				enabled ? theme.Text : theme.TextMuted, 13.0f);
-		(void)id;
+		// P1c-a:图标按钮与保留模式 WuiImageButton 同一条 a11y 契约(那条路径一直在登记节点)——
+		// 整块矩形就是按钮,kind=button、label=语义文案、enabled 跟随交互态,AI/脚本按 id 点得到。
+		if (id != 0)
+		{
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = fallbackLabel;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = enabled;
+			WuiAccessibility::Get().Register(node);
+		}
 		return enabled && ctx.IsClicked(rect);
 	}
 
@@ -375,6 +389,24 @@ namespace World::Wui
 			result.ItemRects.push_back(row); // 索引对齐:即使不可见也占位
 			if (row.Y + row.H < area.Y || row.Y > area.Y + area.H)
 				continue; // 视野外:不绘制也不命中
+			// P1c-a:行登记 a11y 节点(与 TreeView 同一条契约)—— id 由调用方给(items[i].Id),
+			// label/subLabel 直接进节点,disabled 行 enabled/interactive=false。只登记行中心
+			// 确实落在可视区内的行:半滚出视口的行中心可能压在下面的控件上,注入点击会打错目标。
+			const float rowCenterY = row.Y + row.H * 0.5f;
+			if (item.Id != 0 && rowCenterY >= area.Y && rowCenterY <= area.Y + area.H)
+			{
+				WuiAccessNode node;
+				node.Id = item.Id;
+				node.Window = WuiAccessibility::Get().CurrentWindow();
+				node.Panel = WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "list-row";
+				node.Label = item.Label;
+				node.Value = item.SubLabel;
+				node.Rect = row;
+				node.Enabled = !item.Disabled;
+				node.Interactive = !item.Disabled;
+				WuiAccessibility::Get().Register(node);
+			}
 			const bool hovered = !item.Disabled && ctx.IsHovered(row);
 			if (hovered)
 				result.Hovered = static_cast<int>(i);

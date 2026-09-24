@@ -454,6 +454,10 @@ namespace World::Wui
 			active = 0;
 		bool changed = false;
 		const float tabW = rect.W / static_cast<float>(tabs.size());
+		// 标签条本体的节点(P1c-a):标签等分整条矩形 → 节点矩形里任何一点都落在某个标签上,
+		// 按它注入的点击(= 组中心那一格)一定激活一个真实标签;要精确点某一个仍用子节点
+		// kind="tab"(派生 id)。
+		RegisterAccessNode(id, "tab-bar", rect, std::string(), tabs[static_cast<size_t>(active)], true, true);
 		// 整条底边线:让标签条与下方内容有分界(取面板边框色,不新增样式常量)。
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y + rect.H - 1.0f, rect.W, 1.0f }, theme.Border, 0.0f });
 		for (size_t i = 0; i < tabs.size(); ++i)
@@ -506,8 +510,10 @@ namespace World::Wui
 		if (selected < 0 || selected >= static_cast<int>(options.size()))
 			selected = 0;
 		bool changed = false;
-		// 组节点:组本身不是可点控件(interactive=false),脚本按 kind="segmented-option" 点具体分段。
-		RegisterAccessNode(id, "segmented", rect, std::string(), options[static_cast<size_t>(selected)], true, false);
+		// 组节点 + 逐个分段节点都登记(P1c-a):分段把整条矩形铺满,所以**组节点也是真的可点**——
+		// 按组节点注入的点击落在组中心,命中的是那里那一格分段,与用户点击走同一条路径
+		// (于是 interactive=true 不撒谎);要精确选某一格仍用 kind="segmented-option" 的子节点。
+		RegisterAccessNode(id, "segmented", rect, std::string(), options[static_cast<size_t>(selected)], true, true);
 		// 同一圆角外壳:铺底 + 1px 描边,内部等分(选中项 ActiveBg + Accent 文本)。
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonBg, theme.Radius });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, theme.Radius, 1.0f });
@@ -2302,6 +2308,14 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Rect, table, theme.PanelHeader, 0.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect,
 			{ table.X, table.Y + std::max(0.0f, table.H - 1.0f), table.W, 1.0f }, theme.BorderStrong, 0.0f });
+		// 表头整行的节点(P1c-a):列等分整行 → 节点矩形里任何一点都落在某一列上,按它注入的
+		// 点击(= 组中心那一列)一定触发一次真实排序;要精确点某一列仍用子节点 kind="table-header"。
+		{
+			std::string sortInfo;
+			if (sortColumn >= 0 && sortColumn < static_cast<int>(columns.size()))
+				sortInfo = "sort=" + columns[static_cast<size_t>(sortColumn)] + (ascending ? " asc" : " desc");
+			RegisterAccessNode(id, "table-header-row", table, std::string(), sortInfo, true, true);
+		}
 
 		const float fontSize = theme.FontSizeBody;
 		const float arrowSize = theme.FontSizeCaption;

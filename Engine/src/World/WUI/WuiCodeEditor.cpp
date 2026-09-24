@@ -361,6 +361,24 @@ namespace World::Wui
 		const WuiInputState& input = ctx.Input();
 		// 本帧开始时的浮层可见性(帧内会被"打字关闭/点外关闭"改写,刷新判断要用这个)。
 		const bool popupVisibleAtFrameStart = state.PopupVisible;
+		// P1c-a:编辑器本体的 a11y 节点(以前只有补全浮层/悬停时才登记节点)。点它 = 聚焦并把
+		// caret 放到该点(真实鼠标路径),之后的 ui.type/ui.key 都落在这个焦点上;只读模式仍然
+		// 可聚焦/选择,但 enabled=false 让人一眼看出"不能改内容"。
+		if (WuiAccessibility::Get().Enabled() && id != 0)
+		{
+			WuiAccessNode node;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Id = id;
+			node.Kind = "code-editor";
+			node.Label = options.CompletionIdPrefix;
+			node.Value = std::to_string(lineCount) + (readOnly ? " lines, read-only" : " lines");
+			node.Rect = rect;
+			node.Enabled = !readOnly;
+			node.Interactive = true;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
 
 		// 命中:行 = 鼠标 y 对应的行,列 = 该行内真实度量得到的字节偏移。
 		const auto HitOffset = [&](float mouseY, float mouseX)

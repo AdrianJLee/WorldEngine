@@ -405,6 +405,8 @@ namespace World::Wui
 
 		// 伪状态:state=hover/pressed 时本帧临时挪鼠标(必要时按下),state=focus 时临时设焦点;
 		// 离开作用域恢复原输入与焦点 —— 不污染同一帧里其它组件的绘制。
+		// **只模拟外观,不模拟输入**:伪状态期间清掉按下/抬起沿与"按住的键"(pressed 外观例外,
+		// 只有它自己需要 MouseDown 画按下态),否则真实的点击/拖拽会落在假鼠标位置上(P1c-a)。
 		class PseudoState
 		{
 		public:
@@ -414,10 +416,28 @@ namespace World::Wui
 				const bool hover = draw.State == "hover" || (allowPress && draw.State == "pressed");
 				if (hover)
 					m_Context.Input().MousePos = { rect.X + rect.W * 0.5f, rect.Y + rect.H * 0.5f };
-				if (allowPress && draw.State == "pressed")
+				const bool pressedVisual = allowPress && draw.State == "pressed";
+				if (pressedVisual)
 					m_Context.Input().MouseDown[0] = true;
+				else
+				{
+					// 伪状态不是**拖拽**来源:滑杆这类"按住 + 悬停就改值"的控件,如果看见一只
+					// 按住的键,就会把值改到假鼠标位置上(实测:slider.float 两轮 default 漂移)。
+					m_Context.Input().MouseDown[0] = false;
+					m_Context.Input().MouseDown[1] = false;
+					m_Context.Input().MouseDown[2] = false;
+				}
 				if (focusId != 0 && draw.State == "focus")
 					m_Context.SetFocus(focusId);
+				// ①清按下/抬起沿:组件自己的点击动作会在假鼠标位置上真的发生(实测:组件处于 hover 态
+				// 时,点工作台其它按钮会改动它的持久值/选中项 → 两轮之间像素漂移),而且这次按下的
+				// 归属会被它抢走,真目标(下拉弹层条目)release 帧确认不到(状态下拉第 3 条起点不动)。
+				for (int button = 0; button < 3; ++button)
+				{
+					m_Context.Input().MouseClicked[button] = false;
+					m_Context.Input().MouseReleased[button] = false;
+					m_Context.Input().MouseDoubleClicked[button] = false;
+				}
 			}
 
 			~PseudoState()
@@ -1039,8 +1059,25 @@ namespace World::Wui
 			const WuiTheme themed = ThemedFor(draw, *draw.Theme);
 			const Slot slot = Canvas(draw, *draw.Theme, 230.0f);
 			const WuiId id = BeginShowcase(draw, "breadcrumb", "Breadcrumb", slot.Rect);
-			(void)id;
-			Breadcrumb(ctx, slot.Rect, TextProperty(draw, "path", "assets/textures/icon.png"), themed);
+			const std::string path = TextProperty(draw, "path", "assets/textures/icon.png");
+			// P1c-a:面包屑目前没有 id 参数(公开头文件里加参数归主 agent),由外壳登记"整条
+			// 面包屑"的交互节点覆盖 component-root 锚点:点它 = 命中组中心所在的那一段(与用户
+			// 点击同一条命中路径,控件照常返回被点段下标)。面板真的采用面包屑时,应把 id 参数
+			// 下沉进控件,让每个面板实例都能登记(见任务报告未决项)。
+			if (WuiAccessibility::Get().Enabled())
+			{
+				WuiAccessNode node;
+				node.Id = id;
+				node.Window = WuiAccessibility::Get().CurrentWindow();
+				node.Panel = WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "breadcrumb";
+				node.Label = "Breadcrumb";
+				node.Value = path;
+				node.Rect = slot.Rect;
+				node.Interactive = true;
+				WuiAccessibility::Get().Register(node);
+			}
+			Breadcrumb(ctx, slot.Rect, path, themed);
 		}
 
 		void ShowContextMenu(const WuiComponentDraw& draw)
@@ -1474,8 +1511,8 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"button.icon", "WuiImageButton", "Icon Button", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
-				"role=无(控件不登记节点);showcase 外壳节点 kind=component-root、interactive=false;label=label 属性;textureId=0 时退化成语义文字",
-				"showcase 首选 32x24(方形图标位);enabled=false 时节点仍由外壳提供",
+				"role=button;id=HashId('showcase.button.icon')(控件自己登记,与保留模式 WuiImageButton 同一口径);label=label 属性;enabled/interactive 跟随 enabled(disabled 态为 false);textureId=0 时退化成语义文字",
+				"showcase 首选 32x24(方形图标位);enabled=false 时节点仍在,enabled/interactive 都是 false",
 				ShellIds("button.icon"),
 				StateList({ "default", "hover", "disabled", "long-text" }),
 				{ PropText("label", "Save"), PropBool("disabled") },
@@ -1504,7 +1541,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"segmented", "Segmented", "Segmented", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=segmented(组,interactive=false)+ 子节点 kind=segmented-option(派生 id=HashId(str(父id)+'.segment.'+i));组节点覆盖外壳锚点;value=当前下标",
+				"role=segmented;id=HashId('showcase.segmented')(控件自己登记,覆盖外壳锚点);组节点 interactive=true —— 分段铺满整条矩形,按它注入的点击落在组中心那一格分段;逐格精确点击用子节点 kind=segmented-option(派生 id=HashId(str(父id)+'.segment.'+i));value=当前选中项文案",
 				"showcase 首选 210x24;项等分宽度;建议 2–4 项(空表直接返回)",
 				ShellIds("segmented"),
 				StateList({ "default", "hover", "focus" }),
@@ -1660,7 +1697,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"codeeditor", "CodeEditor", "Code Editor", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiCodeEditor.cpp",
-				"role=无根节点(编辑器只在补全浮层可见时登记 '<CompletionIdPrefix>.<i>' 与 '.status',悬停登记 '.hover');showcase 外壳锚点 kind=component-root;本条目 = Draft,探针先按像素/命令断言",
+				"role=code-editor;id=HashId('showcase.codeeditor')(控件自己登记);interactive=true(点它 = 聚焦 + caret 定位,之后 ui.type/ui.key 落在该焦点上);enabled=!readonly;value='<n> lines[/, read-only]';补全浮层可见时另登记 '<CompletionIdPrefix>.<i>' 与 '.status',悬停登记 '.hover'",
 				"showcase 首选 280x104;行高 19×UiScale;ErrorLine 用 state=error 展示",
 				ShellIds("codeeditor"),
 				StateList({ "default", "focus", "error" }),
@@ -1671,7 +1708,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"tabs", "TabBar", "Tabs", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=tab(每个标签一个子节点,id=HashId(str(父id)+'.tab.'+i),value=true/false);父节点不登记 —— showcase 外壳锚点 kind=component-root",
+				"role=tab-bar;id=HashId('showcase.tabs')(控件自己登记,覆盖外壳锚点);父节点 interactive=true —— 标签等分整条矩形,按它注入的点击落在组中心那一个标签上;逐标签精确点击用子节点 kind=tab(id=HashId(str(父id)+'.tab.'+i),value=true/false)",
 				"showcase 首选 240x24;标签等分整条矩形;中键点击上报 closeRequested(本 showcase 不接)",
 				ShellIds("tabs"),
 				StateList({ "default", "hover", "focus" }),
@@ -1702,9 +1739,10 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"listview", "ListView", "List View", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiChrome.cpp",
-				"role=无(列表行不登记 a11y 节点);showcase 外壳锚点 kind=component-root、interactive=false;行 Id 仍是稳定 id 但只用于调用方交互",
+				"role=list-row(控件用调用方给的 items[i].Id 登记,showcase 用 HashId('showcase.listview.item.N'));label=行文案、value=SubLabel、disabled 行 enabled/interactive=false;行中心必须落在可视区内才登记(半滚出的行不登记)",
 				"showcase 首选 230x96(自带滚动裁剪);行高 24×Density;选中行底色 theme.PanelBg、悬停 ButtonHover",
-				ShellIds("listview"),
+				A11yIds({ "showcase.listview", "showcase.listview.item.0", "showcase.listview.item.1",
+					"showcase.listview.item.2" }),
 				StateList({ "default", "hover", "selected", "disabled", "scrolled" }),
 				{ PropText("label", "Textures"), PropText("disabled", "Locked"), PropFloat("scroll", 0.0f, 200.0f, 1.0f) },
 				&ShowListView));
@@ -1712,7 +1750,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"table.header", "TableHeader", "Table Header", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=table-header(每列一个子节点 id=HashId(str(父id)+'.col.'+i),value=asc/desc/空);父节点不登记 —— 外壳锚点 kind=component-root",
+				"role=table-header-row;id=HashId('showcase.table.header')(控件自己登记,覆盖外壳锚点);整行 interactive=true —— 列等分整行,按它注入的点击落在组中心那一列并触发排序,value='sort=<列> asc|desc';逐列精确点击用子节点 kind=table-header(id=HashId(str(父id)+'.col.'+i),value=asc/desc/空)",
 				"showcase 首选 260x24 表头 + 22px 数据行;列宽等分(真实表格由调用方给列宽表)",
 				ShellIds("table.header"),
 				StateList({ "default", "hover", "focus" }),
@@ -1805,7 +1843,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"breadcrumb", "Breadcrumb", "Breadcrumb", "Chrome", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
-				"role=无(路径段不登记节点);外壳锚点 kind=component-root;命中按 '/' 分段,返回被点段下标",
+				"role=breadcrumb;id=HashId('showcase.breadcrumb')(外壳代登记:控件没有 id 参数,面板零调用点);interactive=true —— 点它 = 命中组中心所在的那一段,控件按 '/' 分段命中并返回被点段下标;路径段本身不单独登记节点",
 				"showcase 首选 230x20;段宽按粗略字宽(7px/字符)算,仅影响命中不影响绘制",
 				ShellIds("breadcrumb"),
 				StateList({ "default", "hover" }),

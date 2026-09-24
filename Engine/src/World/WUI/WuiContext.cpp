@@ -353,7 +353,15 @@ namespace World::Wui
 			return;
 		WuiClickOwner& owner = m_ClickOwners[button];
 		if (owner.Valid)
-			return;   // 一次按下只归第一个命中它的控件
+		{
+			// P1c-a(2026-09-24):"一次按下只归第一个命中者"只在**同一鼠标位置**下成立。
+			// 归属矩形已经不包含当前鼠标位置 = 那次归属是在帧内被临时改写的输入下登记的
+			// (实测来源:工作台伪状态把 MousePos 挪到组件中心,组件自己先把这一次按下认领了),
+			// 它必须让位,否则真实位置上的控件(下拉弹层条目)release 帧永远确认不到自己的点击
+			// —— 症状就是"弹层第 3 条起点不动/整下点击消失"。位置一致时行为完全不变。
+			if (HitTestRaw(owner.Rect, m_Input.MousePos))
+				return;
+		}
 		owner.Id = id;
 		owner.Rect = rect;
 		owner.Valid = true;

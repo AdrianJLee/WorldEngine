@@ -1668,6 +1668,111 @@ int main()
 			CHECK(!fs::exists(root));
 		}
 
+		// 22. P1c-a:①声明了交互状态的件必须给出 interactive=true 的 a11y 节点(E1 契约);
+		//     ②帧内被临时改写过鼠标位置时,按下归属要重新落到**真实位置**上的控件 —— 回归:
+		//       工作台伪状态把 MousePos 挪到组件中心并让组件先认领按下,把下拉弹层的逐条
+		//       点击整下吃掉(第 3 条起点不动)。
+		{
+			// ---- ① 七件的交互节点契约 ----
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			for (const char* componentId : { "button.icon", "segmented", "breadcrumb", "listview",
+				"table.header", "tabs", "codeeditor" })
+			{
+				const WuiComponentDesc* desc = WuiComponentRegistry::Find(componentId);
+				CHECK(desc != nullptr);
+				if (desc == nullptr)
+					continue;
+				accessibility.BeginFrame("main", { 640.0f, 480.0f });
+				accessibility.SetPanel("showcase");
+				WuiContext ctx;
+				WuiInputState input;
+				input.ViewportSize = { 640.0f, 480.0f };
+				ctx.BeginFrame(input);
+				WuiComponentDraw draw;
+				draw.Context = &ctx;
+				draw.Theme = &CurrentTheme();
+				draw.Rect = { 12.0f, 12.0f, 420.0f, 160.0f };
+				draw.State = "default";
+				draw.UiScale = 1.0f;
+				draw.Density = 1.0f;
+				draw.Locale = "en";
+				desc->Showcase(draw);
+				ctx.EndFrame();
+				bool interactive = false;
+				for (const std::string& id : desc->ExtraA11yIds)
+				{
+					const WuiAccessNode* node = accessibility.Find(HashId(id.c_str()));
+					interactive = interactive || (node != nullptr && node->Interactive && node->Visible);
+				}
+				CHECK(interactive);
+			}
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+
+			// ---- ② 6 条弹层逐条命中(逐条 press/release 两帧;press 帧里先有一次"假位置认领") ----
+			WuiTheme theme;
+			const WuiRect rect { 100, 100, 200, 22 };
+			const std::vector<std::string> options { "Low", "Medium", "High", "Ultra", "Extreme", "Max" };
+			const WuiId id = HashId("test.combo.p1ca");
+			const float itemH = 22.0f;
+			int selected = 0;
+			WuiContext ctx;
+			const auto ClickTrigger = [&]()
+			{
+				WuiInputState input;
+				input.MousePos = { rect.X + 10.0f, rect.Y + rect.H * 0.5f };
+				input.MouseClicked[0] = true;
+				ctx.BeginFrame(input);
+				Combo(ctx, id, rect, "Quality", options, selected, theme);
+				ctx.EndFrame();
+			};
+			const auto ItemCenter = [&](size_t index)
+			{
+				// 弹层条目矩形 = {panel.X+4, panel.Y+4+22*i, panel.W-8, 22},panel 在触发器正下方 2px。
+				return glm::vec2 { rect.X + rect.W * 0.5f,
+					rect.Y + rect.H + 2.0f + 4.0f + itemH * static_cast<float>(index) + itemH * 0.5f };
+			};
+			ClickTrigger();
+			CHECK(ctx.IsPopupOpen(id));
+			for (size_t index = 0; index < options.size(); ++index)
+			{
+				const glm::vec2 point = ItemCenter(index);
+				{
+					// press 帧:一个"帧内临时改写输入"的控件先在假鼠标位置上按下了(id=0 的归属),
+					// 之后恢复真实输入再画 Combo —— 与工作台 PseudoState 同一条路径。
+					WuiInputState input;
+					input.MousePos = point;
+					input.MouseClicked[0] = true;
+					input.MouseDown[0] = true;
+					ctx.BeginFrame(input);
+					const WuiRect fake { 400, 400, 60, 24 };
+					const WuiInputState real = ctx.Input();
+					ctx.Input().MousePos = { fake.X + fake.W * 0.5f, fake.Y + fake.H * 0.5f };
+					(void)ctx.IsClicked(fake, 0);
+					ctx.Input() = real;
+					Combo(ctx, id, rect, "Quality", options, selected, theme);
+					ctx.EndFrame();
+				}
+				CHECK(ctx.IsPopupOpen(id));
+				{
+					WuiInputState input;
+					input.MousePos = point;
+					input.MouseReleased[0] = true;
+					ctx.BeginFrame(input);
+					Combo(ctx, id, rect, "Quality", options, selected, theme);
+					ctx.EndFrame();
+				}
+				CHECK(selected == static_cast<int>(index));
+				CHECK(!ctx.IsPopupOpen(id));
+				if (index + 1 < options.size())
+				{
+					ClickTrigger();
+					CHECK(ctx.IsPopupOpen(id));
+				}
+			}
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}
