@@ -131,15 +131,13 @@ namespace World
 			const bool hovered = ctx.IsHovered(rect);
 			const Wui::WuiColor fill = !enabled ? theme.PanelBg
 				: (primary ? theme.Accent : (hovered ? theme.ButtonHover : theme.ButtonBg));
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, fill, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect,
-				enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f });
+			Wui::PanelBackground(ctx, rect, fill, 3.0f);
+			Wui::HighlightOutline(ctx, rect,
+				enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f);
 			// accent 填充上压深色文字(白字对比度不够);禁用态用 TextDisabled。
 			const Wui::WuiColor textColor = !enabled ? theme.TextDisabled
 				: (primary ? theme.WindowBg : theme.Text);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-				{ rect.X + 8.0f, rect.Y + (rect.H - 14.0f) * 0.5f, 0.0f, 0.0f },
-				textColor, 0.0f, 1.0f, label, 13.0f, false });
+			Wui::Label(ctx, { rect.X + 8.0f, rect.Y + (rect.H - 14.0f) * 0.5f }, label, textColor, 13.0f);
 			Wui::WuiAccessNode node;
 			node.Id = id;
 			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
@@ -2202,11 +2200,11 @@ namespace World
 			&& (blockRect.Y < contentRect.Y + contentRect.H);
 		if (!blockVisible)
 			return y + blockHeight + kGroupGap;
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, blockRect, theme.ContentBg, 6.0f });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, blockRect, theme.Border, 6.0f, 1.0f });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+		Wui::PanelBackground(ctx, blockRect, theme.ContentBg, 6.0f);
+		Wui::HighlightOutline(ctx, blockRect, theme.Border, 6.0f, 1.0f);
+		Wui::PanelBackground(ctx,
 			{ blockRect.X + 1.0f, blockRect.Y + 5.0f, 2.0f, std::max(6.0f, blockRect.H - 10.0f) },
-			overridden > 0 ? theme.Warning : theme.BorderStrong, 1.0f });
+			overridden > 0 ? theme.Warning : theme.BorderStrong, 1.0f);
 		{
 			Wui::WuiAccessNode node;
 			node.Id = Wui::HashId("material.group.shader");
@@ -2320,8 +2318,8 @@ namespace World
 				// 三态强调条(与 M3 的字段行同一条语言:覆盖 = Accent / 父级 = BorderStrong / shader 默认 = Border)。
 				const Wui::WuiColor stateColor = isOverride ? theme.Accent
 					: (source == MaterialParamSource::Parent ? theme.BorderStrong : theme.Border);
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-					{ rowX - 6.0f, y + 3.0f, 2.0f, kShaderRowHeight - 6.0f }, stateColor, 1.0f });
+				Wui::PanelBackground(ctx, { rowX - 6.0f, y + 3.0f, 2.0f, kShaderRowHeight - 6.0f },
+					stateColor, 1.0f);
 				Wui::Label(ctx, { rowX, y + 4.0f }, EllipsizeToWidth(ctx, label, labelWidth, 12.0f),
 					isOverride ? theme.Text : theme.TextMuted, 12.0f);
 				std::string edited = resolved;
@@ -2485,8 +2483,8 @@ namespace World
 		{
 			const Wui::WuiColor barColor = fieldState == FieldState::Override ? theme.Accent
 				: (fieldState == FieldState::Inherited ? theme.BorderStrong : theme.Border);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-				{ x - 6.0f, y + 3.0f, 2.0f, std::max(4.0f, row.Height - 6.0f) }, barColor, 1.0f });
+			Wui::PanelBackground(ctx,
+				{ x - 6.0f, y + 3.0f, 2.0f, std::max(4.0f, row.Height - 6.0f) }, barColor, 1.0f);
 		}
 
 		const auto applyEdit = [this](auto&& setter)
@@ -2689,7 +2687,7 @@ namespace World
 		{
 			Wui::WuiColor dim = theme.PanelBg;
 			dim.A = 0.22f;
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, controlRect, dim, 2.0f });
+			Wui::PanelBackground(ctx, controlRect, dim, 2.0f);
 		}
 
 		// ---- 回退到父级(固定占位:两个状态同一个 rect,行布局零位移)----
@@ -2996,13 +2994,11 @@ namespace World
 				&& (blockRect.Y < contentRect.Y + contentRect.H);
 			if (blockVisible)
 			{
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, blockRect, theme.ContentBg, 6.0f });
-				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, blockRect, theme.Border,
-					6.0f, 1.0f });
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-					{ blockRect.X + 1.0f, blockRect.Y + 5.0f, 2.0f,
-						std::max(6.0f, blockRect.H - 10.0f) },
-					modified > 0 ? theme.Warning : theme.BorderStrong, 1.0f });
+				Wui::PanelBackground(ctx, blockRect, theme.ContentBg, 6.0f);
+				Wui::HighlightOutline(ctx, blockRect, theme.Border, 6.0f, 1.0f);
+				Wui::PanelBackground(ctx,
+					{ blockRect.X + 1.0f, blockRect.Y + 5.0f, 2.0f, std::max(6.0f, blockRect.H - 10.0f) },
+					modified > 0 ? theme.Warning : theme.BorderStrong, 1.0f);
 				// 容器节点(只读):脚本按它断言"组头与本组子项都落在这块容器里"(归属关系),
 				// 也方便无障碍读屏讲清"这些行属于哪一组"。
 				Wui::WuiAccessNode groupNode;
@@ -3126,11 +3122,9 @@ namespace World
 			const float offset = maxScroll > 0.0f ? (m_ScrollY / maxScroll) * (trackHeight - thumbHeight) : 0.0f;
 			const Wui::WuiRect track { contentRect.X + contentRect.W - 3.0f, contentRect.Y + 4.0f,
 				2.0f, trackHeight };
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, track,
-				Wui::WuiColor { 0.169f, 0.192f, 0.220f, 1.0f }, 1.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-				{ track.X, track.Y + offset, 2.0f, thumbHeight },
-				Wui::WuiColor { 0.298f, 0.553f, 1.0f, 0.55f }, 1.0f });
+			Wui::PanelBackground(ctx, track, Wui::WuiColor { 0.169f, 0.192f, 0.220f, 1.0f }, 1.0f);
+			Wui::PanelBackground(ctx, { track.X, track.Y + offset, 2.0f, thumbHeight },
+				Wui::WuiColor { 0.298f, 0.553f, 1.0f, 0.55f }, 1.0f);
 		}
 		if (drawnRows == 0)
 		{
@@ -3304,8 +3298,7 @@ namespace World
 		m_PreviewZoneRect = card;
 		// 预览区 = 一张卡片(ContentBg 底 + BorderStrong 描边):与右侧参数列"明确分隔"。
 		Wui::PanelBackground(ctx, card, theme.ContentBg, theme.Radius + 2.0f);
-		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, card, theme.BorderStrong,
-			theme.Radius + 2.0f, 1.0f });
+		Wui::HighlightOutline(ctx, card, theme.BorderStrong, theme.Radius + 2.0f, 1.0f);
 
 		const Wui::WuiRect view { card.X + pad, card.Y + pad, side, side };
 		m_PreviewRect = view;
@@ -3326,6 +3319,9 @@ namespace World
 			// 渐变背景:预览目标清成透明,先在下面画一层 WUI 渐变(2D 通道,不需要改 3D)。
 			if (m_PreviewBackground == PreviewBackground::Gradient)
 			{
+				// ②缺件(库内没有可用库件,本轮不硬造):本面板唯一一条即时绘制 ——
+				// 库里只有 ColorField 内部的渐变,没有"调用方给几何 + 四角色"的渐变原语。
+				// 语义缺口与建议接口见 reports/WUI-P1c-w3.3-material-editor.md §4。
 				Wui::WuiDrawCommand gradient;
 				gradient.Kind = Wui::WuiDrawKind::Gradient;
 				gradient.Rect = pixelView;
@@ -3629,12 +3625,11 @@ namespace World
 		const std::string display = std::string(m_RefsOpen ? "v  " : "▶  ") + label;
 		const Wui::WuiRect rowRect { rect.X, rect.Y, rect.W, kRefsRowHeight };
 		const bool hovered = ctx.IsHovered(rowRect);
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-			{ rect.X, rect.Y, rect.W, 1.0f }, theme.BorderStrong, 0.0f });
+		Wui::PanelBackground(ctx, { rect.X, rect.Y, rect.W, 1.0f }, theme.BorderStrong, 0.0f);
 		if (hovered)
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+			Wui::PanelBackground(ctx,
 				{ rect.X + 2.0f, rect.Y + 2.0f, std::max(20.0f, rect.W - 4.0f), kRefsRowHeight - 2.0f },
-				theme.HoverBg, theme.Radius });
+				theme.HoverBg, theme.Radius);
 		Wui::Label(ctx, { rect.X + 6.0f, rect.Y + (kRefsRowHeight - 12.0f) * 0.5f },
 			EllipsizeToWidth(ctx, display, std::max(20.0f, rect.W - 12.0f), 12.0f),
 			m_RefsError.empty() ? theme.Text : theme.Danger, 12.0f);
@@ -3678,7 +3673,7 @@ namespace World
 				std::max(40.0f, rect.W - 12.0f), kRefsItemHeight - 1.0f };
 			const bool itemHovered = ctx.IsHovered(itemRect);
 			if (itemHovered)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, itemRect, theme.HoverBg, 2.0f });
+				Wui::PanelBackground(ctx, itemRect, theme.HoverBg, 2.0f);
 			const std::string typeLabel = Wui::Tr(("panel.material.refs.type." + entry.Type).c_str(),
 				entry.Type == "prefab" ? "Prefab" : (entry.Type == "model" ? "Model" : "Scene"));
 			const float typeWidth = std::min(64.0f, ctx.MeasureTextWidth(typeLabel, 11.0f) + 8.0f);
