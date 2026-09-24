@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -156,6 +157,123 @@ namespace World
 		// 控件自己的持久态归控件。
 		std::map<std::string, std::map<std::string, std::string>> m_PropertyValues;
 
+		// ---- WUI-P1.6b:Edit / Play 双模式 + 交互契约 runner ----
+		//
+		// Edit(默认)= 现状:伪状态强制外观 + 属性/状态基线;Play = **真实输入直通**
+		// (`draw.RouteRealInput=true`、`draw.State` 固定 "default"、不套伪状态),
+		// hover/pressed/focus 由真实输入产生,工作台只**观测**:交互状态、焦点节点、
+		// 输入边沿计数、画布区 a11y 片段。
+		//
+		// 一键 "Run interactions" 按 `Desc::Interactions` 逐条执行(注入写的是 WuiInputState——
+		// 与 `ui.invoke`/`WuiScriptedInput` 同一条输入结构,不直接调用控件回调),
+		// 每条契约落一份证据:`<build>/wui-workbench/<id>/interaction/<kind>.json`,
+		// 过程文件 `interaction/_live.json`(探针按它对齐抓像素的时机)、
+		// 收口文件 `interaction/summary.json`。**像素 sha256 由探针回填** —— 面板拿不到
+		// 自己窗口的 framebuffer(`capture.float` 是帧末延迟落盘,PanelHost 没有这条能力),
+		// 证据里的 `pixels` 是留白位,探针用同一节拍的 `capture.float` 按画布矩形裁剪后写回。
+		//
+		// 阶段定时用**墙钟**而不是帧数:隐藏窗口的帧率不保证,按帧定时会让探针抓不到
+		// pressed 帧(按下沿只存在一帧)。
+		bool m_PlayMode = false;              // false = Edit(现状),true = Play(真实输入)
+		std::string m_PlayState = "default";  // 观测到的交互状态:default/hover/pressed/focus
+		std::string m_PlayObservation;        // 本帧观测串(计数器 + 最近事件 + 焦点)
+		std::string m_PlayObservationPrev;    // 上一帧观测串(信息条画在画布之前)
+		std::string m_PlayFocusName;          // 焦点节点("label#id" / 空)
+		std::string m_PlayLastEvent;          // 最近一次真实输入事件
+		uint64_t m_PlayLastEventFrame = 0;
+		int m_PlayPressCount = 0;             // 目标上的按下沿(AiControl/真实鼠标/runner 注入同一条)
+		int m_PlayClickCount = 0;             // 按下沿落在目标上 = 控件激活判据为真
+		int m_PlayReleaseCount = 0;           // 抬起沿
+		int m_PlayKeyCount = 0;               // 焦点在目标上时的 Enter/Space
+		bool m_PlayHoverSeen = false;
+		std::vector<std::pair<std::string, std::string>> m_PlayEvents;   // 滚动事件日志(最近 60 条)
+		std::string m_PlayA11yJson;           // 本帧画布区 a11y 片段(JSON 数组文本)
+		std::string m_PlayA11yPrevJson;       // 上一帧的(契约的 before 快照)
+		// 最近一次从 a11y 解析到的**真实控件矩形**(契约切换发生在画布绘制之前,那时本帧 a11y
+		// 还没登记 —— 用它当上一帧缓存,避免回落到槽位中心点空)。
+		std::string m_LastTargetId;
+		Wui::WuiRect m_LastTargetRect {};
+
+		// 契约 runner 的阶段记录 / 状态时间线(每条契约独立,落盘后清空)。
+		struct PlayPhaseRecord
+		{
+			std::string Name;            // approach / press-hold / release / leave / …
+			std::string Note;            // 这一段注入的是什么(人话)
+			uint64_t FirstFrame = 0;
+			uint64_t LastFrame = 0;
+			uint64_t WallMs = 0;
+			int Frames = 0;
+			bool Hover = false;
+			bool Pressed = false;
+			bool FocusOnTarget = false;
+		};
+
+		struct PlayTimelineEntry
+		{
+			uint64_t Frame = 0;
+			std::string Phase;
+			std::string State;           // default/hover/pressed/focus
+			float MouseX = 0.0f;
+			float MouseY = 0.0f;
+			bool Hover = false;
+			bool Pressed = false;
+			bool Clicked = false;        // 本帧按下沿(MouseClicked[0])
+			bool Released = false;       // 本帧抬起沿(MouseReleased[0])
+			Wui::WuiId Focus = 0;
+			bool FocusOnTarget = false;
+		};
+
+		struct InteractionRun
+		{
+			bool Active = false;
+			std::string Id;               // play-<组件>-<epochms>(证据文件里可定位同一次运行)
+			std::string ComponentId;
+			std::string WindowKey;        // 注入/证据所属窗口(独立窗口 = float:<面板 id>)
+			size_t Index = 0;             // 当前契约下标
+			int Phase = 0;                // RunPhase
+			bool PhaseEdgeSent = false;   // 本阶段的"沿"(按下/抬起/按键)是否已发过
+			// 按住存续位:从"按下沿"发出起为 true,到"抬起沿"发出为止 —— 期间每帧末保持
+			// `MouseDown[0]`(= 引擎点击归属的生命周期判据),否则抬起帧的 IsClickCompleted
+			// 没有归属可核对(实测;阶段切换那一帧不注入,也要保持)。
+			bool PressHeld = false;
+			int TypeCharsInjected = 0;    // Type 契约已注入的码点数
+			uint64_t PhaseStartMs = 0;
+			uint64_t PhaseDeadlineMs = 0;
+			uint64_t NextTabMs = 0;
+			int TabsQueued = 0;
+			bool FocusReached = false;
+			std::string FocusMatch;       // id / canvas / none
+			std::string Kind;             // 当前契约 kind(hover/click/drag/type/scroll/key)
+			std::string Target;           // 契约目标 id 文本
+			Wui::WuiId TargetId = 0;
+			Wui::WuiRect TargetRect {};   // 目标矩形(a11y 优先,回落画布槽位)
+			std::string Expect;           // value-change / pixel-change / event / state-change
+			std::string Steps;
+			std::string Note;
+			std::string Result;           // ok / gap:<原因> / cancelled
+			std::string GapReason;
+			bool PressSeen = false;
+			bool ReleaseSeen = false;
+			bool ClickCompleted = false;  // 抬起帧的 WuiContext::IsClickCompleted(0, target)
+			bool KeyEnterSeen = false;
+			bool KeySpaceSeen = false;
+			uint64_t PressFrame = 0;
+			uint64_t ReleaseFrame = 0;
+			uint64_t StartFrame = 0;
+			uint64_t EndFrame = 0;
+			uint64_t StartedWallMs = 0;
+			uint64_t FinishedWallMs = 0;
+			std::string ValueBefore;      // 目标 a11y 的 value(Expect::ValueChange 的判据)
+			std::string ValueAfter;
+			std::string A11yBefore;
+			std::vector<PlayPhaseRecord> Phases;
+			std::vector<PlayTimelineEntry> Timeline;
+			std::vector<std::pair<std::string, std::string>> Events;   // (event@frame, detail)
+			std::vector<std::string> WrittenKinds;
+		};
+		InteractionRun m_Run;
+		std::string m_RunStatus;          // 面向用户的状态(底栏/观测条)
+
 		// ---- 绘制helper(全部只写 ctx,不碰任何组件内部状态)----
 		struct WbLayout
 		{
@@ -215,6 +333,31 @@ namespace World
 			const Wui::WuiComponentProperty& prop, const std::string& key) const;
 		void DrawActions(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
 			const Wui::WuiComponentDesc* desc, float uiScale);
+
+		// ---- WUI-P1.6b:Play 模式与交互契约 ----
+		// 切模式(清/停 runner;Edit ⇄ Play 两边都不改属性值)。
+		void SetPlayMode(Wui::WuiContext& ctx, bool play);
+		// 观测串(信息条 / `wui.workbench.play.observation` 节点 / 证据文件都读它)。
+		std::string PlayObservationText() const;
+		// Play:每帧推进契约 runner;返回 true = 本帧往 showcase 段注入输入
+		// (调用方负责保存/恢复 ctx.Input(),注入只作用于这一段 —— 与 PseudoState 同一挂点)。
+		bool AdvanceInteractionRun(Wui::WuiContext& ctx, const Wui::WuiRect& slot,
+			const Wui::WuiComponentDesc& desc);
+		// Play:showcase 画完后采样这一帧的观测(边沿计数/状态时间线/事件日志)。
+		void ObservePlayInput(Wui::WuiContext& ctx, const Wui::WuiRect& slot,
+			const Wui::WuiComponentDesc& desc);
+		// 画布区的 a11y 片段(JSON 数组文本;证据的 before/after 用它)。
+		std::string CanvasA11yJson(const Wui::WuiContext& ctx) const;
+		// 契约 runner 的落盘:过程(_live.json)/ 单条证据(<kind>.json)/ 收口(summary.json)。
+		void StartInteractionRun(Wui::WuiContext& ctx, const Wui::WuiComponentDesc& desc);
+		void BeginRunInteraction(Wui::WuiContext& ctx, const Wui::WuiComponentDesc& desc);
+		void EnterRunPhase(int phase, uint64_t durationMs, const std::string& note);
+		void FinishCurrentInteraction(Wui::WuiContext& ctx, const Wui::WuiComponentDesc& desc,
+			const char* result, const std::string& gap);
+		void WriteInteractionLive(const std::string& phaseName) const;
+		void WriteInteractionEvidence() const;
+		void WriteInteractionSummary() const;
+		std::string InteractionEvidenceJson() const;
 
 		// Capture 元数据(Capture 按钮 → 探针按它裁剪整窗抓图)。
 		std::string CaptureMetadataJson(const Wui::WuiComponentDesc& desc, float density,

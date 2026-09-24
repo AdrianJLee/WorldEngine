@@ -6,6 +6,7 @@
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
+#include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <sstream>
@@ -48,6 +50,13 @@ namespace World
 		// WUI-P1.5b:属性面板的搜索框 / 分组折叠头(P1.5b 新增的稳定 id)。
 		constexpr const char* kPropSearchId = "wui.workbench.props.search";
 		constexpr const char* kPropGroupHeaderPrefix = "wui.workbench.props.group.";
+		// WUI-P1.6b:Edit/Play 开关 + 一键跑交互契约 + Play 观测条(探针按这些 id 驱动/断言)。
+		constexpr const char* kModeEditButtonId = "wui.workbench.btn.mode.edit";
+		constexpr const char* kModePlayButtonId = "wui.workbench.btn.mode.play";
+		constexpr const char* kModeNodeId = "wui.workbench.mode";
+		constexpr const char* kRunButtonId = "wui.workbench.btn.interactions";
+		constexpr const char* kRunNodeId = "wui.workbench.interactions";
+		constexpr const char* kPlayObservationId = "wui.workbench.play.observation";
 
 		constexpr float kMinCanvasSize = 120.0f;
 		constexpr float kMaxCanvasSize = 640.0f;
@@ -424,6 +433,236 @@ namespace World
 			return false;
 		}
 
+		// ---- WUI-P1.6b:交互契约 runner 的阶段与工具 ----
+		//
+		// 阶段定时用**墙钟**:隐藏窗口的帧率不保证(实测同一台机器上 60 与 200+ fps 都出现过),
+		// 按帧定时会让探针抓不到 pressed 帧 —— 按下沿只存在一帧,而"按住"这一段才是像素证据窗口。
+		enum RunPhaseId
+		{
+			kRunIdle = 0,
+			kRunApproach,     // 移入(悬停)
+			kRunClickSend,    // 脚本化点击(与 ui.invoke 同一条 WuiScriptedInput 队列)
+			kRunPressHold,    // 按下 + 保持(像素抓取窗口)
+			kRunRelease,      // 抬起沿
+			kRunLeave,        // 移出(保证"未悬停"的默认外观)
+			kRunFocusScan,    // Key 契约:Tab 找焦点
+			kRunKeyEnter,     // Enter
+			kRunKeySpace,     // Space
+			kRunDragMove,     // 按住 + 位移
+			kRunTypeText,     // 逐帧注入码点
+			kRunScroll,       // 逐帧注入滚轮
+			kRunSettle,       // 收尾(不注入)
+			kRunFinished,
+		};
+
+		uint64_t NowMs()
+		{
+			return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now().time_since_epoch()).count());
+		}
+
+		std::string WallStamp()
+		{
+			const std::time_t now = std::time(nullptr);
+			std::tm local {};
+			localtime_s(&local, &now);
+			char stamp[32] = {};
+			std::strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &local);
+			return stamp;
+		}
+
+		const char* RunPhaseName(int phase)
+		{
+			switch (phase)
+			{
+			case kRunApproach: return "approach";
+			case kRunClickSend: return "click-send";
+			case kRunPressHold: return "press-hold";
+			case kRunRelease: return "release";
+			case kRunLeave: return "leave";
+			case kRunFocusScan: return "focus-scan";
+			case kRunKeyEnter: return "key-enter";
+			case kRunKeySpace: return "key-space";
+			case kRunDragMove: return "drag-move";
+			case kRunTypeText: return "type-text";
+			case kRunScroll: return "scroll";
+			case kRunSettle: return "settle";
+			default: return "idle";
+			}
+		}
+
+		uint64_t RunPhaseDurationMs(int phase)
+		{
+			switch (phase)
+			{
+			case kRunApproach: return 600;      // 悬停稳定段(探针的 hover 抓帧窗口)
+			case kRunClickSend: return 700;     // 脚本化点击的节拍(队列本身 2 帧)
+			case kRunPressHold: return 1300;    // 按住稳定段(探针的 pressed 抓帧窗口)
+			case kRunRelease: return 350;
+			case kRunLeave: return 700;         // "移出"稳定段(探针的 default 抓帧窗口)
+			case kRunFocusScan: return 15000;   // 硬上限:Tab 扫描(Tab 自身节拍见 NextTabMs)
+			case kRunKeyEnter: return 900;
+			case kRunKeySpace: return 900;
+			case kRunDragMove: return 700;
+			case kRunTypeText: return 700;
+			case kRunScroll: return 500;
+			case kRunSettle: return 250;
+			default: return 200;
+			}
+		}
+
+		std::string RunPhaseNote(int phase, const std::string& kind)
+		{
+			switch (phase)
+			{
+			case kRunApproach:
+				return "鼠标移到目标中心(悬停,不按键)";
+			case kRunClickSend:
+				return "脚本化点击 QueueClick(与 ui.invoke 同一条队列:press 帧 + release 帧)";
+			case kRunPressHold:
+				return kind == "click"
+					? "按住段:保持 MouseDown(真实「按住」的同一状态),给探针的 pressed 像素证据留窗口"
+					: std::string("按下并保持(首帧为按下沿;") + kind + " 的证据窗口)";
+			case kRunRelease:
+				return "抬起(抬起沿;clickCompleted 在这一帧核对)";
+			case kRunLeave:
+				return "鼠标移出目标(默认外观,探针的 default 抓帧窗口)";
+			case kRunFocusScan:
+				return "Tab 找焦点(WuiScriptedInput::QueueKey,与 ui.key 同一条注入路径)";
+			case kRunKeyEnter: return "Enter(焦点在目标上;首帧为按键沿)";
+			case kRunKeySpace: return "Space(同上;验证与 click 等价)";
+			case kRunDragMove: return "按住 + 位移";
+			case kRunTypeText: return "逐帧注入文本码点(与真实键入同一条 TextInput)";
+			case kRunScroll: return "逐帧注入滚轮";
+			case kRunSettle: return "收尾(不注入,等 a11y/状态稳定)";
+			default: return std::string();
+			}
+		}
+
+		int StartRunPhase(const std::string& kind)
+		{
+			return kind == "key" ? kRunFocusScan : kRunApproach;
+		}
+
+		int NextRunPhase(const std::string& kind, int phase)
+		{
+			switch (phase)
+			{
+			case kRunApproach:
+				if (kind == "hover") return kRunLeave;
+				if (kind == "scroll") return kRunScroll;
+				if (kind == "click") return kRunClickSend;
+				return kRunPressHold;
+			case kRunClickSend: return kRunPressHold;
+			case kRunPressHold:
+				if (kind == "drag") return kRunDragMove;
+				if (kind == "click") return kRunSettle;   // click 的抬起沿由脚本化点击给出
+				return kRunRelease;
+			case kRunDragMove: return kRunRelease;
+			case kRunRelease:
+				return kind == "type" ? kRunTypeText : kRunSettle;
+			case kRunTypeText: return kRunSettle;
+			case kRunLeave: return kRunFinished;
+			case kRunScroll: return kRunSettle;
+			case kRunKeyEnter: return kRunKeySpace;
+			case kRunKeySpace: return kRunSettle;
+			case kRunSettle: return kRunFinished;
+			default: return kRunFinished;
+			}
+		}
+
+		const char* InteractionKindId(Wui::WuiInteractionKind kind)
+		{
+			switch (kind)
+			{
+			case Wui::WuiInteractionKind::Hover: return "hover";
+			case Wui::WuiInteractionKind::Click: return "click";
+			case Wui::WuiInteractionKind::Drag: return "drag";
+			case Wui::WuiInteractionKind::Type: return "type";
+			case Wui::WuiInteractionKind::Scroll: return "scroll";
+			default: return "key";
+			}
+		}
+
+		const char* InteractionExpectId(Wui::WuiInteractionExpect expect)
+		{
+			switch (expect)
+			{
+			case Wui::WuiInteractionExpect::ValueChange: return "value-change";
+			case Wui::WuiInteractionExpect::PixelChange: return "pixel-change";
+			case Wui::WuiInteractionExpect::Event: return "event";
+			default: return "state-change";
+			}
+		}
+
+		// 探针该在哪个阶段抓像素(证据文件里的 pixelHint;探针按 _live.json 的 phase 对齐)。
+		const char* InteractionPixelPhase(const std::string& kind)
+		{
+			if (kind == "hover") return "approach";
+			if (kind == "click" || kind == "drag") return "press-hold";
+			if (kind == "type") return "type-text";
+			if (kind == "scroll") return "scroll";
+			if (kind == "key") return "key-enter";
+			return "press-hold";
+		}
+
+		// 目标矩形:契约声明的是子节点 id → 用 a11y 里的**真实控件矩形**(不是槽位:槽位可以远大于
+		// 控件,拿槽位中心去点会打空 —— 实测按钮只占槽位左侧 128x24,槽位 240x120)。
+		// 契约切换发生在画布绘制**之前**,那一刻本帧 a11y 还没登记 → 用上一帧缓存下来的同一目标矩形;
+		// 都没有才回落 showcase 槽位。
+		Wui::WuiRect ResolveInteractionTarget(const std::string& targetId, const Wui::WuiRect& slot,
+			const std::string& cachedId, const Wui::WuiRect& cachedRect)
+		{
+			if (const Wui::WuiAccessNode* node =
+				Wui::WuiAccessibility::Get().Find(Wui::HashId(targetId.c_str())))
+			{
+				if (node->Rect.W > 0.0f && node->Rect.H > 0.0f)
+					return node->Rect;
+			}
+			if (!cachedId.empty() && cachedId == targetId && cachedRect.W > 0.0f
+				&& cachedRect.H > 0.0f)
+				return cachedRect;
+			return slot;
+		}
+
+		std::string AccessNodeValue(Wui::WuiId id)
+		{
+			if (const Wui::WuiAccessNode* node = Wui::WuiAccessibility::Get().Find(id))
+				return node->Value;
+			return std::string();
+		}
+
+		std::string PlayFocusName(Wui::WuiId id)
+		{
+			if (id == 0)
+				return std::string("none");
+			if (const Wui::WuiAccessNode* node = Wui::WuiAccessibility::Get().Find(id))
+				return (node->Label.empty() ? node->Kind : node->Label) + "#" + std::to_string(id);
+			return "#" + std::to_string(id);
+		}
+
+		bool PointInside(const Wui::WuiRect& rect, const glm::vec2& point)
+		{
+			return point.x >= rect.X && point.x <= rect.X + rect.W
+				&& point.y >= rect.Y && point.y <= rect.Y + rect.H;
+		}
+
+		// "移出"的落点:优先画布内、目标外的角(保证默认外观又不出画布);
+		// 目标铺满画布(如 scrollarea)时只能退到画布框上,报告里注明。
+		glm::vec2 LeavePoint(const Wui::WuiRect& target, const Wui::WuiRect& canvas)
+		{
+			const glm::vec2 candidates[] = {
+				{ canvas.X + 2.0f, canvas.Y + 2.0f },
+				{ canvas.X + canvas.W - 2.0f, canvas.Y + canvas.H - 2.0f },
+				{ canvas.X + 2.0f, canvas.Y + canvas.H - 2.0f },
+				{ canvas.X + canvas.W - 2.0f, canvas.Y + 2.0f },
+			};
+			for (const glm::vec2& point : candidates)
+				if (!PointInside(target, point))
+					return point;
+			return { canvas.X - 4.0f, canvas.Y - 4.0f };
+		}
+
 	}
 
 	WidgetGalleryPanel::WbLayout WidgetGalleryPanel::ComputeLayout(const Wui::WuiRect& rect,
@@ -582,10 +821,17 @@ namespace World
 		Wui::Label(ctx, { layout.InfoBar.X, layout.InfoBar.Y + 2.0f },
 			ClipText(ctx, left, layout.InfoBar.W * 0.55f, size), theme.TextMuted, size);
 
-		const std::string right = Wui::Tr("workbench.info.last_action", "last action: ") + m_LastAction;
+		// Play:信息条显示**观测**(状态 id / 焦点节点 / 计数 / 最近事件);信息条画在画布
+		// 之前,所以这里用上一帧的观测(m_PlayObservationPrev)—— 同一帧的观测在动作条上,
+		// 探针读 `wui.workbench.play.observation` 节点。
+		std::string right = Wui::Tr("workbench.info.last_action", "last action: ") + m_LastAction;
+		if (m_PlayMode)
+			right = std::string("play: ")
+				+ (m_PlayObservationPrev.empty() ? PlayObservationText() : m_PlayObservationPrev);
 		Wui::Label(ctx, { layout.InfoBar.X + layout.InfoBar.W * 0.56f, layout.InfoBar.Y + 2.0f },
 			ClipText(ctx, right, layout.InfoBar.W * 0.44f, size), theme.TextMuted, size);
-		RegisterWorkbenchNode(Wui::HashId(kInfoId), "text", layout.InfoBar, left, m_LastAction, true, false);
+		RegisterWorkbenchNode(Wui::HashId(kInfoId), "text", layout.InfoBar, left,
+			m_PlayMode ? right : m_LastAction, true, false);
 	}
 
 	std::vector<const Wui::WuiComponentDesc*> WidgetGalleryPanel::FilteredComponents() const
@@ -625,6 +871,13 @@ namespace World
 	void WidgetGalleryPanel::SelectComponent(Wui::WuiContext& ctx, const Wui::WuiComponentDesc& desc,
 		const char* how)
 	{
+		// Play 的运行中换件:取消(证据只在一条契约跑完时落盘,不会留半份)。
+		if (m_Run.Active)
+		{
+			m_Run.Active = false;
+			m_Run.Result = "cancelled";
+			ctx.RecordOp("gallery", "interaction-run", "cancelled", m_Run.ComponentId);
+		}
 		m_SelectedId = desc.Id;
 		m_ForceState = "default";
 		ResetPropertyValues(desc.Id);
@@ -842,7 +1095,8 @@ namespace World
 		m_CanvasRect = area;
 		m_CanvasInner = inner;
 		m_CanvasValid = true;
-		m_AppliedState = m_ForceState;
+		// Play:状态固定 "default"(真实输入决定外观);Edit:强制状态(基线口径不变)。
+		m_AppliedState = m_PlayMode ? std::string("default") : m_ForceState;
 		if (desc != nullptr)
 			m_AppliedProperties = AppliedProperties(*desc, density, uiScale);
 		else
@@ -910,7 +1164,7 @@ namespace World
 			DrawCanvasShowcase(ctx, theme, *desc, density, uiScale, false, area);
 
 		RegisterWorkbenchNode(Wui::HashId(kCanvasId), "canvas", slot, desc->DisplayName,
-			desc->Id + "|" + m_ForceState, true, false);
+			desc->Id + "|" + (m_PlayMode ? std::string("default") : m_ForceState), true, false);
 		const std::string label = desc->DisplayName + "  " + FormatFloat(width) + " x "
 			+ FormatFloat(height);
 		Wui::Label(ctx, { slot.X, slot.Y + slot.H + 4.0f },
@@ -931,6 +1185,16 @@ namespace World
 		const size_t overlayBefore = ctx.OverlayCommands().size();
 		// overlayStage 时 ctx.Commands() 就是 overlay 命令流,下面取两条增量里的较大者。
 		const size_t mainBefore = ctx.Commands().size();
+		// WUI-P1.6b:Play —— runner 先决定这一帧注入什么输入(Edit 恒为不注入)。
+		// 注入只作用于 showcase 这一段:保存/恢复 ctx.Input()(与 Edit 的 PseudoState 同一挂点),
+		// 工作台自己的控件在同一帧看到的仍是真实指针。
+		Wui::WuiInputState savedInput;
+		bool injecting = false;
+		if (m_PlayMode && desc.Showcase != nullptr)
+		{
+			savedInput = ctx.Input();
+			injecting = AdvanceInteractionRun(ctx, slot, desc);
+		}
 		if (overlayStage)
 		{
 			ctx.PushOverlay();
@@ -951,11 +1215,14 @@ namespace World
 			draw.Context = &ctx;
 			draw.Theme = &showcaseTheme;
 			draw.Rect = slot;
-			draw.State = m_ForceState;
+			// Play:状态固定 "default"(不套伪状态,hover/pressed/focus 由真实输入产生);
+			// Edit:沿用强制状态,行为与基线逐字节不变。
+			draw.State = m_PlayMode ? std::string("default") : m_ForceState;
 			draw.Properties = m_AppliedProperties;
 			draw.UiScale = scale;
 			draw.Density = density;
 			draw.Locale = Wui::GetLanguage();
+			draw.RouteRealInput = m_PlayMode;
 			desc.Showcase(draw);
 		}
 		else
@@ -966,6 +1233,18 @@ namespace World
 					"Showcase pending (registered by the component owner)"),
 				theme.TextMuted, 12.0f);
 		}
+		// Play:采样这一帧的观测(控件已经消费过输入 —— 悬停/按下沿/焦点都是真的)。
+		if (m_PlayMode)
+			ObservePlayInput(ctx, slot, desc);
+		if (injecting)
+			ctx.Input() = savedInput;
+		// 按住存续位:引擎的点击归属(`WuiClickOwner`)在 EndFrame 按"是否仍按住"决定生命周期
+		// —— 不保留会让抬起帧的 `IsClickCompleted` 永远没有归属可核对(实测口径,不是设计偏好)。
+		// 必须在**每一帧末**保持(阶段切换那一帧不注入,也要保持),直到抬起沿发出。
+		// 面板自己的控件要靠 `hover && MouseClicked[0]` 才会动作,而这两者恢复的都是真实值,
+		// 所以不会因为这一位保持而误触。
+		if (m_PlayMode && m_Run.Active && m_Run.PressHeld)
+			ctx.Input().MouseDown[0] = true;
 		if (overlayStage)
 		{
 			Wui::WuiDrawCommand clipPop;
@@ -1302,15 +1581,83 @@ namespace World
 		}
 
 		RegisterWorkbenchNode(Wui::HashId("wui.workbench.canvas.state"), "text", bar,
-			desc != nullptr ? desc->Id : std::string("(none)"), m_ForceState, true, false);
-		const std::string status = m_Status.empty()
-			? Wui::Tr("workbench.status.idle",
-				"Idle. Capture writes metadata; the probe crops the screenshot.")
-			: m_Status;
-		Wui::Label(ctx, { bar.X + 266.0f, bar.Y + 7.0f },
-			ClipText(ctx, status, std::max(40.0f, bar.W - 274.0f), 12.0f * fontSize),
-			theme.TextMuted, fontSize);
-		RegisterWorkbenchNode(Wui::HashId(kStatusId), "text", bar, status, m_ForceState, true, false);
+			desc != nullptr ? desc->Id : std::string("(none)"),
+			m_PlayMode ? std::string("default") : m_ForceState, true, false);
+
+		// ---- WUI-P1.6b:Edit / Play 开关 + 一键跑交互契约 ----
+		//
+		// 位置刻意放在**动作条**(画布之后绘制):焦点表的顺序 = 绘制顺序,加在画布之前会
+		// 让每件组件的 Tab 下标整体后移 —— P1c-E4 的键盘验收按"≤12 步 Tab"判可达,
+		// 那批基线不该被这次改版弄脏。画布之后新增控件不影响任何既有 Tab 下标。
+		const bool wide = bar.W >= 620.0f;
+		const float modeX = bar.X + 262.0f;
+		const float modeY = bar.Y + 3.0f;
+		if (Wui::ButtonEx(ctx, Wui::HashId(kModeEditButtonId), { modeX, modeY, 62.0f, 24.0f },
+			Wui::Tr("workbench.mode.edit", "Edit"), theme, true, !m_PlayMode,
+			Wui::Tr("workbench.mode.edit_tip",
+				"Edit mode: forced states + property overrides (the frozen baseline口径)")))
+		{
+			SetPlayMode(ctx, false);
+		}
+		if (Wui::ButtonEx(ctx, Wui::HashId(kModePlayButtonId),
+			{ modeX + 66.0f, modeY, 62.0f, 24.0f },
+			Wui::Tr("workbench.mode.play", "Play"), theme, true, m_PlayMode,
+			Wui::Tr("workbench.mode.play_tip",
+				"Play mode: real input routed into the showcase; no forced state")))
+		{
+			SetPlayMode(ctx, true);
+		}
+		RegisterWorkbenchNode(Wui::HashId(kModeNodeId), "text",
+			{ modeX, modeY, 128.0f, 24.0f }, Wui::Tr("workbench.mode.title", "Workbench mode"),
+			m_PlayMode ? "play" : "edit", true, false);
+
+		if (desc != nullptr)
+		{
+			const bool hasContract = !desc->Interactions.empty();
+			const bool runEnabled = m_PlayMode && hasContract;
+			const std::string runTip = !m_PlayMode
+				? Wui::Tr("workbench.play.run_tip_edit",
+					"Switch to Play mode to run the interaction contract")
+				: (hasContract
+					? Wui::Tr("workbench.play.run_tip",
+						"Run every declared interaction; each one writes an evidence file")
+					: Wui::Tr("workbench.play.run_tip_static",
+						"Static component: no interaction contract declared"));
+			const float runX = wide ? modeX + 136.0f : bar.X + bar.W - 146.0f;
+			if (Wui::ButtonEx(ctx, Wui::HashId(kRunButtonId), { runX, modeY, 140.0f, 24.0f },
+				Wui::Tr("workbench.play.run", "Run interactions"), theme, runEnabled, false, runTip))
+				StartInteractionRun(ctx, *desc);
+			RegisterWorkbenchNode(Wui::HashId(kRunNodeId), "button", { runX, modeY, 140.0f, 24.0f },
+				"Run interactions",
+				m_Run.Active ? ("running " + m_Run.Kind) : (hasContract ? "ready" : "static"),
+				runEnabled, true);
+		}
+
+		// 状态行优先级:Play/契约 runner 的实时状态 > Capture/Approve 的结果 > 空闲提示。
+		const std::string status = !m_RunStatus.empty() ? m_RunStatus
+			: (m_Status.empty()
+				? Wui::Tr("workbench.status.idle",
+					"Idle. Capture writes metadata; the probe crops the screenshot.")
+				: m_Status);
+		if (wide)
+		{
+			const float statusX = modeX + 286.0f;
+			Wui::Label(ctx, { statusX, bar.Y + 7.0f },
+				ClipText(ctx, status, std::max(40.0f, bar.X + bar.W - statusX - 6.0f),
+					12.0f * fontSize),
+				theme.TextMuted, fontSize);
+		}
+		RegisterWorkbenchNode(Wui::HashId(kStatusId), "text", bar, status,
+			m_PlayMode ? PlayObservationText() : m_ForceState, true, false);
+		// Play:本帧观测(AiControl 的 ui.invoke/ui.key 也走同一条观测口径 —— 探针据此
+		// 断言"真实输入真的到了 showcase",而不是看一句自述)。
+		if (m_PlayMode)
+		{
+			const std::string observation = m_PlayObservation.empty() ? PlayObservationText()
+				: m_PlayObservation;
+			RegisterWorkbenchNode(Wui::HashId(kPlayObservationId), "text", bar,
+				Wui::Tr("workbench.play.observation", "Play observation"), observation, true, false);
+		}
 	}
 
 	std::string WidgetGalleryPanel::CaptureMetadataJson(const Wui::WuiComponentDesc& desc, float density,
@@ -1972,6 +2319,728 @@ namespace World
 		return out;
 	}
 
+	// ---- WUI-P1.6b:Play 模式(真实输入直通)+ 交互契约 runner ----
+	//
+	// 口径(与派工单/plan §P1.6 一致):
+	//   · Play = `draw.RouteRealInput=true` + `draw.State="default"`(不套伪状态),
+	//     hover/pressed/focus 由真实输入产生;工作台只**观测**、不强制外观;
+	//   · 注入写的是 `WuiInputState`(屏幕坐标系就是窗口客户区;按下/抬起/按键**沿**在正确的
+	//     帧上产生)—— 与 `ui.invoke`/`ui.key` 的 `WuiScriptedInput` 是同一条输入结构,
+	//     控件侧没有任何"测试专用分支";
+	//   · 注入只作用于 showcase 绘制段(保存/恢复 ctx.Input(),与 Edit 的 PseudoState 同一挂点):
+	//     同一帧里工作台自己的控件看到的是真实指针,不被脚本化的"手"污染。
+	//   · 阶段用**墙钟**定时,`_live.json` 在阶段切换时落盘 —— 探针据此在 press-hold 段里
+	//     用 `capture.float` 抓 pressed 帧(按下沿只存在一帧,抓不到就变成猜)。
+	void WidgetGalleryPanel::SetPlayMode(Wui::WuiContext& ctx, bool play)
+	{
+		if (m_PlayMode == play)
+			return;
+		m_PlayMode = play;
+		if (m_Run.Active)
+		{
+			// 运行中切模式:不写半份证据(证据文件只在一条契约跑完时落盘)。
+			m_Run.Active = false;
+			m_Run.Result = "cancelled";
+			ctx.RecordOp("gallery", "mode", "run-cancelled", m_Run.ComponentId);
+		}
+		if (!play)
+		{
+			// 回到 Edit:清观测,免得上一轮的 Play 计数被当成 Edit 的观测。
+			m_PlayState = "default";
+			m_PlayObservation.clear();
+			m_PlayObservationPrev.clear();
+			m_PlayFocusName.clear();
+			m_PlayLastEvent.clear();
+			m_PlayLastEventFrame = 0;
+			m_PlayEvents.clear();
+			m_PlayHoverSeen = false;
+			m_PlayPressCount = m_PlayClickCount = m_PlayReleaseCount = m_PlayKeyCount = 0;
+			m_PlayA11yJson.clear();
+			m_PlayA11yPrevJson.clear();
+		}
+		m_RunStatus = play
+			? Wui::Tr("workbench.play.ready",
+				"Play: real input routed into the showcase (no forced state). "
+				"Run interactions writes evidence per contract.")
+			: Wui::Tr("workbench.play.edit",
+				"Edit: forced states + property overrides (baselines unchanged).");
+		ctx.RecordOp("gallery", "mode", "Workbench", play ? "play" : "edit");
+	}
+
+	std::string WidgetGalleryPanel::PlayObservationText() const
+	{
+		std::string out = std::string("play state=") + m_PlayState
+			+ " focus=" + (m_PlayFocusName.empty() ? std::string("none") : m_PlayFocusName)
+			+ " press=" + std::to_string(m_PlayPressCount)
+			+ " click=" + std::to_string(m_PlayClickCount)
+			+ " release=" + std::to_string(m_PlayReleaseCount)
+			+ " key=" + std::to_string(m_PlayKeyCount)
+			+ " events=" + std::to_string(m_PlayEvents.size());
+		if (!m_PlayLastEvent.empty())
+			out += " last=" + m_PlayLastEvent + "@" + std::to_string(m_PlayLastEventFrame);
+		return out;
+	}
+
+	void WidgetGalleryPanel::StartInteractionRun(Wui::WuiContext& ctx,
+		const Wui::WuiComponentDesc& desc)
+	{
+		if (m_PlayMode == false || desc.Interactions.empty())
+		{
+			m_RunStatus = Wui::Tr("workbench.play.static",
+				"Static component: no interaction contract declared (nothing to run).");
+			return;
+		}
+		m_Run = InteractionRun {};
+		m_Run.Active = true;
+		m_Run.Id = "play-" + desc.Id + "-" + std::to_string(NowMs());
+		m_Run.ComponentId = desc.Id;
+		m_Run.WindowKey = ctx.WindowKey();
+		m_Run.Index = 0;
+		m_Run.StartFrame = ctx.Frame();
+		m_Run.StartedWallMs = NowMs();
+		BeginRunInteraction(ctx, desc);
+		ctx.RecordOp("gallery", "interaction-run", desc.Id,
+			std::to_string(desc.Interactions.size()) + " contracts");
+	}
+
+	void WidgetGalleryPanel::BeginRunInteraction(Wui::WuiContext& ctx,
+		const Wui::WuiComponentDesc& desc)
+	{
+		const Wui::WuiComponentInteraction& item = desc.Interactions[m_Run.Index];
+		m_Run.Kind = InteractionKindId(item.Kind);
+		m_Run.Target = item.TargetId;
+		m_Run.TargetId = Wui::HashId(item.TargetId.c_str());
+		m_Run.Expect = InteractionExpectId(item.Expect);
+		m_Run.Steps = item.Steps;
+		m_Run.Note = item.Note;
+		m_Run.TargetRect = ResolveInteractionTarget(item.TargetId, m_CanvasSlot,
+			m_LastTargetId, m_LastTargetRect);
+		m_Run.Result.clear();
+		m_Run.GapReason.clear();
+		m_Run.PressSeen = false;
+		m_Run.ReleaseSeen = false;
+		m_Run.ClickCompleted = false;
+		m_Run.KeyEnterSeen = false;
+		m_Run.KeySpaceSeen = false;
+		m_Run.PressFrame = 0;
+		m_Run.ReleaseFrame = 0;
+		m_Run.TabsQueued = 0;
+		m_Run.FocusReached = false;
+		m_Run.FocusMatch.clear();
+		m_Run.NextTabMs = 0;
+		m_Run.TypeCharsInjected = 0;
+		m_Run.PhaseEdgeSent = false;
+		m_Run.PressHeld = false;
+		m_Run.Phases.clear();
+		m_Run.Timeline.clear();
+		m_Run.Events.clear();
+		m_Run.StartFrame = ctx.Frame();
+		m_Run.StartedWallMs = NowMs();
+		// before 快照取**上一帧**的画布 a11y(本帧的节点要等 showcase 画完才登记)。
+		m_Run.A11yBefore = m_PlayA11yPrevJson;
+		m_Run.ValueBefore = AccessNodeValue(m_Run.TargetId);
+		const int start = StartRunPhase(m_Run.Kind);
+		EnterRunPhase(start, RunPhaseDurationMs(start), RunPhaseNote(start, m_Run.Kind));
+		m_RunStatus = std::string("interaction ") + std::to_string(m_Run.Index + 1) + "/"
+			+ std::to_string(desc.Interactions.size()) + "  " + m_Run.Kind;
+	}
+
+	void WidgetGalleryPanel::EnterRunPhase(int phase, uint64_t durationMs, const std::string& note)
+	{
+		m_Run.Phase = phase;
+		m_Run.PhaseEdgeSent = false;
+		if (phase == kRunIdle || phase == kRunFinished || phase == kRunSettle)
+			m_Run.PressHeld = false;   // 收起按住存续位(别把按下状态带出这条契约)
+		const uint64_t now = NowMs();
+		m_Run.PhaseStartMs = now;
+		m_Run.PhaseDeadlineMs = now + durationMs;
+		if (phase == kRunIdle || phase == kRunFinished)
+			return;
+		PlayPhaseRecord record;
+		record.Name = RunPhaseName(phase);
+		record.Note = note;
+		record.WallMs = durationMs;
+		m_Run.Phases.push_back(record);
+		if (phase == kRunFocusScan)
+			m_Run.NextTabMs = now;   // 第一帧就发第一次 Tab
+		WriteInteractionLive(record.Name);
+	}
+
+	bool WidgetGalleryPanel::AdvanceInteractionRun(Wui::WuiContext& ctx, const Wui::WuiRect& slot,
+		const Wui::WuiComponentDesc& desc)
+	{
+		if (!m_Run.Active)
+			return false;
+		if (m_Run.ComponentId != desc.Id)
+		{
+			m_Run.Active = false;
+			m_Run.Result = "cancelled";
+			m_RunStatus = Wui::Tr("workbench.play.run_cancelled",
+				"Interaction run cancelled: the selected component changed");
+			return false;
+		}
+		const uint64_t now = NowMs();
+		const Wui::WuiRect target = m_Run.TargetRect.W > 0.0f && m_Run.TargetRect.H > 0.0f
+			? m_Run.TargetRect : slot;
+		const glm::vec2 center { target.X + target.W * 0.5f, target.Y + target.H * 0.5f };
+		Wui::WuiInputState& input = ctx.Input();
+
+		// ---- Key 契约:焦点扫描(阶段内每 NextTabMs 发一次 Tab;注入走 WuiScriptedInput,
+		// 因为焦点导航发生在 BeginFrame —— 面板内直接改 KeyPressed 已经晚了)----
+		if (m_Run.Phase == kRunFocusScan && !m_Run.FocusReached)
+		{
+			const Wui::WuiId focus = ctx.Focus();
+			bool focusOnTarget = focus != 0 && focus == m_Run.TargetId;
+			bool focusOnCanvas = false;
+			if (!focusOnTarget && focus != 0 && m_CanvasRect.W > 0.0f)
+			{
+				if (const Wui::WuiAccessNode* node = Wui::WuiAccessibility::Get().Find(focus))
+				{
+					const Wui::WuiRect& r = node->Rect;
+					focusOnCanvas = r.X + r.W > m_CanvasRect.X && r.X < m_CanvasRect.X + m_CanvasRect.W
+						&& r.Y + r.H > m_CanvasRect.Y && r.Y < m_CanvasRect.Y + m_CanvasRect.H;
+				}
+			}
+			if (focusOnTarget || focusOnCanvas)
+			{
+				m_Run.FocusReached = true;
+				m_Run.FocusMatch = focusOnTarget ? "id" : "canvas";
+				EnterRunPhase(kRunKeyEnter, RunPhaseDurationMs(kRunKeyEnter),
+					RunPhaseNote(kRunKeyEnter, m_Run.Kind));
+				return false;
+			}
+			if (now >= m_Run.PhaseDeadlineMs || m_Run.TabsQueued >= 90)
+			{
+				// 焦点到不了就如实记 gap(不 SetFocus —— 那等于伪造键盘可达性)。
+				FinishCurrentInteraction(ctx, desc, "gap", "focus-unreachable");
+				return false;
+			}
+			if (now >= m_Run.NextTabMs)
+			{
+				Wui::WuiScriptedInput::Get().QueueKey(ctx.WindowKey(), KeyCodes::Tab);
+				++m_Run.TabsQueued;
+				m_Run.NextTabMs = now + 130;
+			}
+			return false;
+		}
+
+		// ---- 阶段到点:下一段(或在最后一段结算)----
+		if (now >= m_Run.PhaseDeadlineMs)
+		{
+			const int next = NextRunPhase(m_Run.Kind, m_Run.Phase);
+			if (next != kRunFinished)
+			{
+				EnterRunPhase(next, RunPhaseDurationMs(next), RunPhaseNote(next, m_Run.Kind));
+				return false;
+			}
+			const bool hoverSeen = std::any_of(m_Run.Phases.begin(), m_Run.Phases.end(),
+				[](const PlayPhaseRecord& phase) { return phase.Hover; });
+			const bool pressedSeen = std::any_of(m_Run.Phases.begin(), m_Run.Phases.end(),
+				[](const PlayPhaseRecord& phase) { return phase.Pressed; });
+			std::string gap;
+			if (m_Run.Kind == "hover" && !hoverSeen)
+				gap = "no-hover";
+			else if (m_Run.Kind == "click" && !(m_Run.PressSeen && m_Run.ReleaseSeen))
+				gap = "no-click";
+			else if (m_Run.Kind == "key"
+				&& !(m_Run.FocusReached && m_Run.KeyEnterSeen && m_Run.KeySpaceSeen))
+				gap = m_Run.FocusReached ? "no-key-activation" : "focus-unreachable";
+			else if (m_Run.Kind == "drag" && !pressedSeen)
+				gap = "no-press";
+			else if ((m_Run.Kind == "type" || m_Run.Kind == "scroll") && !hoverSeen)
+				gap = "target-unreachable";
+			else if (m_Run.Expect == "value-change" && !m_Run.ValueBefore.empty()
+				&& m_Run.ValueBefore == AccessNodeValue(m_Run.TargetId))
+				gap = "no-value-change";
+			FinishCurrentInteraction(ctx, desc, gap.empty() ? "ok" : "gap", gap);
+			return false;
+		}
+
+		// ---- 本阶段注入(只写 ctx.Input();调用方会保存/恢复,作用域 = showcase 段)----
+		switch (m_Run.Phase)
+		{
+		case kRunApproach:
+			input.MousePos = center;
+			return true;
+		case kRunClickSend:
+			// 点击的**按下/抬起沿**走 WuiScriptedInput(与 `ui.invoke` 完全同一条队列,
+			// 在 BeginFrame 之前注入)= 引擎的点击归属生命周期能正常跨帧存续;
+			// 面板这一帧不注入,等 press 帧被观测到再进"按住段"。
+			if (!m_Run.PhaseEdgeSent)
+			{
+				m_Run.PhaseEdgeSent = true;
+				Wui::WuiScriptedInput::Get().QueueClick(ctx.WindowKey(), center);
+			}
+			else if (m_Run.PressSeen)
+			{
+				EnterRunPhase(kRunPressHold, RunPhaseDurationMs(kRunPressHold),
+					RunPhaseNote(kRunPressHold, m_Run.Kind));
+			}
+			return false;
+		case kRunPressHold:
+			input.MousePos = center;
+			input.MouseDown[0] = true;
+			// click 的按下沿已经由脚本化点击给出;按住段只把 MouseDown 保持住(像素证据窗口)。
+			if (m_Run.Kind != "click")
+				input.MouseClicked[0] = !m_Run.PhaseEdgeSent;   // 首帧 = 按下沿
+			m_Run.PressHeld = true;
+			m_Run.PhaseEdgeSent = true;
+			return true;
+		case kRunRelease:
+			input.MousePos = center;
+			input.MouseDown[0] = false;
+			input.MouseReleased[0] = !m_Run.PhaseEdgeSent;  // 首帧 = 抬起沿
+			m_Run.PressHeld = false;                        // 抬起沿之后不再保持
+			m_Run.PhaseEdgeSent = true;
+			return true;
+		case kRunLeave:
+			input.MousePos = LeavePoint(target, m_CanvasInner);
+			return true;
+		case kRunKeyEnter:
+		case kRunKeySpace:
+		{
+			const uint32_t key = m_Run.Phase == kRunKeyEnter ? KeyCodes::Enter : KeyCodes::Space;
+			input.MousePos = center;
+			input.MouseDown[0] = false;
+			input.KeyDown.clear();
+			input.KeyPressed.clear();
+			if (!m_Run.PhaseEdgeSent)
+			{
+				input.KeyDown.push_back(key);
+				input.KeyPressed.push_back(key);   // 边沿:控件按 WasKeyPressed 消费
+				m_Run.PhaseEdgeSent = true;
+			}
+			return true;
+		}
+		case kRunDragMove:
+		{
+			const float progress = std::min(1.0f,
+				static_cast<float>(now - m_Run.PhaseStartMs) / static_cast<float>(
+					RunPhaseDurationMs(kRunDragMove)));
+			input.MousePos = { center.x + 60.0f * progress, center.y + 24.0f * progress };
+			input.MouseDown[0] = true;
+			m_Run.PressHeld = true;
+			return true;
+		}
+		case kRunTypeText:
+		{
+			static const char* const kScript = "play";
+			input.MousePos = center;
+			const int step = static_cast<int>((now - m_Run.PhaseStartMs) / 150ULL);
+			const int length = static_cast<int>(std::strlen(kScript));
+			if (step >= 0 && step < length && m_Run.TypeCharsInjected <= step)
+			{
+				input.TextInput.push_back(static_cast<uint32_t>(kScript[step]));
+				m_Run.TypeCharsInjected = step + 1;
+			}
+			return true;
+		}
+		case kRunScroll:
+			input.MousePos = center;
+			input.Wheel = -1.0f;   // 与真实滚轮同向(GLFW yoffset 向下为负)
+			return true;
+		default:
+			return false;          // settle / idle / finished:不注入
+		}
+	}
+
+	void WidgetGalleryPanel::ObservePlayInput(Wui::WuiContext& ctx, const Wui::WuiRect& slot,
+		const Wui::WuiComponentDesc& desc)
+	{
+		const Wui::WuiRect target = (m_Run.Active && m_Run.TargetRect.W > 0.0f
+			&& m_Run.TargetRect.H > 0.0f) ? m_Run.TargetRect : slot;
+		const Wui::WuiInputState& input = ctx.Input();
+		const bool hover = ctx.IsHovered(target);
+		const bool pressed = hover && input.MouseDown[0];
+		const bool pressedEdge = hover && input.MouseClicked[0];
+		const bool releasedEdge = hover && input.MouseReleased[0];
+		const Wui::WuiId focus = ctx.Focus();
+		const Wui::WuiId fallbackTarget = Wui::HashId(("showcase." + desc.Id).c_str());
+		const Wui::WuiId targetId = m_Run.Active && m_Run.TargetId != 0 ? m_Run.TargetId
+			: fallbackTarget;
+		// 目标矩形以 a11y 实测为准(此刻 showcase 已画完,本帧节点已登记):回填运行中的目标,
+		// 并存成"上一帧缓存"给下一次契约切换用 —— 槽位 ≠ 控件,点空是实测踩过的坑。
+		if (m_Run.Active && m_Run.TargetId != 0)
+		{
+			if (const Wui::WuiAccessNode* node = Wui::WuiAccessibility::Get().Find(m_Run.TargetId))
+			{
+				if (node->Rect.W > 0.0f && node->Rect.H > 0.0f)
+				{
+					m_Run.TargetRect = node->Rect;
+					m_LastTargetId = m_Run.Target;
+					m_LastTargetRect = node->Rect;
+				}
+			}
+		}
+		bool focusOnTarget = focus != 0 && focus == targetId;
+		if (!focusOnTarget && focus != 0 && m_CanvasRect.W > 0.0f)
+		{
+			if (const Wui::WuiAccessNode* node = Wui::WuiAccessibility::Get().Find(focus))
+			{
+				const Wui::WuiRect& r = node->Rect;
+				focusOnTarget = r.X + r.W > m_CanvasRect.X && r.X < m_CanvasRect.X + m_CanvasRect.W
+					&& r.Y + r.H > m_CanvasRect.Y && r.Y < m_CanvasRect.Y + m_CanvasRect.H;
+			}
+		}
+
+		std::string state = "default";
+		if (pressed)
+			state = "pressed";
+		else if (hover)
+			state = "hover";
+		else if (focusOnTarget)
+			state = "focus";
+		m_PlayState = state;
+		if (focusOnTarget || focus != 0)
+			m_PlayFocusName = PlayFocusName(focus);
+		else
+			m_PlayFocusName.clear();
+
+		const auto record = [&](const std::string& name, const std::string& detail) {
+			m_PlayLastEvent = name;
+			m_PlayLastEventFrame = ctx.Frame();
+			const std::string line = detail + " frame=" + std::to_string(ctx.Frame());
+			m_PlayEvents.emplace_back(name, line);
+			if (m_PlayEvents.size() > 60)
+				m_PlayEvents.erase(m_PlayEvents.begin());
+			if (m_Run.Active)
+				m_Run.Events.emplace_back(name, line);
+		};
+		if (hover && !m_PlayHoverSeen)
+		{
+			m_PlayHoverSeen = true;
+			record("hover.enter", "hovered=1");
+		}
+		else if (!hover && m_PlayHoverSeen)
+		{
+			m_PlayHoverSeen = false;
+			record("hover.leave", "hovered=0");
+		}
+		if (pressedEdge)
+		{
+			++m_PlayPressCount;
+			++m_PlayClickCount;
+			record("press.edge",
+				"hovered=1 MouseClicked[0]=1 -> widget predicate (hovered && MouseClicked[0]) true");
+			if (m_Run.Active)
+			{
+				m_Run.PressSeen = true;
+				m_Run.PressFrame = ctx.Frame();
+			}
+		}
+		if (releasedEdge)
+		{
+			++m_PlayReleaseCount;
+			// 引擎口径的"这一次点击落在同一目标上":press 帧登记归属、release 帧核对。
+			const bool completed = ctx.IsClickCompleted(0, target);
+			record("release.edge", std::string("hovered=1 MouseReleased[0]=1 clickCompleted=")
+				+ (completed ? "1" : "0"));
+			if (m_Run.Active)
+			{
+				m_Run.ReleaseSeen = true;
+				m_Run.ReleaseFrame = ctx.Frame();
+				m_Run.ClickCompleted = completed;
+			}
+		}
+		else if (pressed && m_Run.Active)
+		{
+			// 按住期间持续登记归属,保证抬起帧的 IsClickCompleted 有归属可核对。
+			ctx.IsClickCompleted(0, target);
+		}
+		if (focusOnTarget && ctx.WasKeyPressed(KeyCodes::Enter))
+		{
+			++m_PlayKeyCount;
+			record("key.enter", "focused=1 KeyPressed(Enter)=1 -> keyActivated true");
+			if (m_Run.Active)
+				m_Run.KeyEnterSeen = true;
+		}
+		if (focusOnTarget && ctx.WasKeyPressed(KeyCodes::Space))
+		{
+			++m_PlayKeyCount;
+			record("key.space", "focused=1 KeyPressed(Space)=1 -> keyActivated true");
+			if (m_Run.Active)
+				m_Run.KeySpaceSeen = true;
+		}
+
+		if (m_Run.Active && !m_Run.Phases.empty())
+		{
+			PlayPhaseRecord& phase = m_Run.Phases.back();
+			if (phase.FirstFrame == 0)
+				phase.FirstFrame = ctx.Frame();
+			phase.LastFrame = ctx.Frame();
+			++phase.Frames;
+			phase.Hover = phase.Hover || hover;
+			phase.Pressed = phase.Pressed || pressed;
+			phase.FocusOnTarget = phase.FocusOnTarget || focusOnTarget;
+			if (m_Run.Timeline.size() < 700)
+			{
+				PlayTimelineEntry entry;
+				entry.Frame = ctx.Frame();
+				entry.Phase = phase.Name;
+				entry.State = state;
+				entry.MouseX = input.MousePos.x;
+				entry.MouseY = input.MousePos.y;
+				entry.Hover = hover;
+				entry.Pressed = pressed;
+				entry.Clicked = input.MouseClicked[0];
+				entry.Released = input.MouseReleased[0];
+				entry.Focus = focus;
+				entry.FocusOnTarget = focusOnTarget;
+				m_Run.Timeline.push_back(entry);
+			}
+		}
+
+		m_PlayObservation = PlayObservationText();
+		m_PlayA11yPrevJson = m_PlayA11yJson;
+		m_PlayA11yJson = CanvasA11yJson(ctx);
+	}
+
+	std::string WidgetGalleryPanel::CanvasA11yJson(const Wui::WuiContext& ctx) const
+	{
+		std::ostringstream out;
+		out << "[";
+		bool first = true;
+		for (const Wui::WuiAccessNode& node : Wui::WuiAccessibility::Get().Nodes())
+		{
+			if (node.Window != ctx.WindowKey())
+				continue;
+			const Wui::WuiRect& r = node.Rect;
+			if (r.X + r.W <= m_CanvasRect.X || r.X >= m_CanvasRect.X + m_CanvasRect.W
+				|| r.Y + r.H <= m_CanvasRect.Y || r.Y >= m_CanvasRect.Y + m_CanvasRect.H)
+				continue;
+			out << (first ? "\n" : ",\n");
+			first = false;
+			out << "    {\"id\": " << node.Id << ", \"kind\": \"" << JsonEscape(node.Kind)
+				<< "\", \"label\": \"" << JsonEscape(node.Label) << "\", \"value\": \""
+				<< JsonEscape(node.Value) << "\", \"enabled\": " << (node.Enabled ? "true" : "false")
+				<< ", \"focused\": " << (node.Focused ? "true" : "false")
+				<< ", \"interactive\": " << (node.Interactive ? "true" : "false")
+				<< ", \"rect\": [" << r.X << ", " << r.Y << ", " << r.W << ", " << r.H << "]}";
+		}
+		out << (first ? "]" : "\n  ]");
+		return out.str();
+	}
+
+	void WidgetGalleryPanel::FinishCurrentInteraction(Wui::WuiContext& ctx,
+		const Wui::WuiComponentDesc& desc, const char* result, const std::string& gap)
+	{
+		if (!m_Run.Active)
+			return;
+		m_Run.Result = result;
+		m_Run.GapReason = gap;
+		m_Run.PressHeld = false;
+		m_Run.ValueAfter = AccessNodeValue(m_Run.TargetId);
+		m_Run.EndFrame = ctx.Frame();
+		m_Run.FinishedWallMs = NowMs();
+		WriteInteractionEvidence();
+		m_Run.WrittenKinds.push_back(m_Run.Kind);
+		const std::string summary = m_Run.Kind + std::string(": ") + m_Run.Result
+			+ (m_Run.GapReason.empty() ? std::string() : std::string(" (") + m_Run.GapReason + ")");
+		ctx.RecordOp("gallery", "interaction", m_Run.ComponentId, summary);
+		++m_Run.Index;
+		if (m_Run.Index < desc.Interactions.size())
+		{
+			BeginRunInteraction(ctx, desc);
+			return;
+		}
+		WriteInteractionSummary();
+		m_RunStatus = m_Run.Kind.empty()
+			? summary
+			: std::string("interactions done (") + std::to_string(m_Run.WrittenKinds.size())
+				+ "): " + summary;
+		m_Run.Active = false;
+		m_Run.Phase = kRunIdle;
+	}
+
+	void WidgetGalleryPanel::WriteInteractionLive(const std::string& phaseName) const
+	{
+		if (m_Run.ComponentId.empty())
+			return;
+		const std::filesystem::path directory =
+			WorkbenchDir() / m_Run.ComponentId / "interaction";
+		std::error_code error;
+		std::filesystem::create_directories(directory, error);
+		std::ofstream file(directory / "_live.json", std::ios::binary | std::ios::trunc);
+		if (!file)
+			return;
+		std::ostringstream out;
+		out << "{\n";
+		out << "  \"schema\": \"wui-workbench-interaction-live/1\",\n";
+		out << "  \"run\": \"" << JsonEscape(m_Run.Id) << "\",\n";
+		out << "  \"component\": \"" << JsonEscape(m_Run.ComponentId) << "\",\n";
+		out << "  \"kind\": \"" << JsonEscape(m_Run.Kind) << "\",\n";
+		out << "  \"index\": " << m_Run.Index << ",\n";
+		out << "  \"phase\": \"" << JsonEscape(phaseName) << "\",\n";
+		out << "  \"target\": \"" << JsonEscape(m_Run.Target) << "\",\n";
+		out << "  \"active\": " << (m_Run.Active ? "true" : "false") << ",\n";
+		out << "  \"tabs\": " << m_Run.TabsQueued << ",\n";
+		out << "  \"focusReached\": " << (m_Run.FocusReached ? "true" : "false") << ",\n";
+		out << "  \"uiScale\": " << (Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f) << ",\n";
+		out << "  \"canvas\": {\"x\": " << m_CanvasRect.X << ", \"y\": " << m_CanvasRect.Y
+			<< ", \"w\": " << m_CanvasRect.W << ", \"h\": " << m_CanvasRect.H << "},\n";
+		out << "  \"slot\": {\"x\": " << m_CanvasSlot.X << ", \"y\": " << m_CanvasSlot.Y
+			<< ", \"w\": " << m_CanvasSlot.W << ", \"h\": " << m_CanvasSlot.H << "},\n";
+		out << "  \"targetRect\": {\"x\": " << m_Run.TargetRect.X << ", \"y\": " << m_Run.TargetRect.Y
+			<< ", \"w\": " << m_Run.TargetRect.W << ", \"h\": " << m_Run.TargetRect.H << "},\n";
+		out << "  \"updatedAt\": \"" << WallStamp() << "\"\n";
+		out << "}\n";
+		file << out.str();
+	}
+
+	void WidgetGalleryPanel::WriteInteractionEvidence() const
+	{
+		if (m_Run.ComponentId.empty() || m_Run.Kind.empty())
+			return;
+		const std::filesystem::path directory =
+			WorkbenchDir() / m_Run.ComponentId / "interaction";
+		std::error_code error;
+		std::filesystem::create_directories(directory, error);
+		std::ofstream file(directory / (m_Run.Kind + ".json"), std::ios::binary | std::ios::trunc);
+		if (!file)
+			return;
+		file << InteractionEvidenceJson();
+	}
+
+	std::string WidgetGalleryPanel::InteractionEvidenceJson() const
+	{
+		std::ostringstream out;
+		out << "{\n";
+		out << "  \"schema\": \"wui-workbench-interaction/1\",\n";
+		out << "  \"component\": \"" << JsonEscape(m_Run.ComponentId) << "\",\n";
+		out << "  \"kind\": \"" << JsonEscape(m_Run.Kind) << "\",\n";
+		out << "  \"target\": \"" << JsonEscape(m_Run.Target) << "\",\n";
+		out << "  \"targetId\": " << m_Run.TargetId << ",\n";
+		out << "  \"expect\": \"" << JsonEscape(m_Run.Expect) << "\",\n";
+		out << "  \"steps\": \"" << JsonEscape(m_Run.Steps) << "\",\n";
+		out << "  \"note\": \"" << JsonEscape(m_Run.Note) << "\",\n";
+		out << "  \"mode\": \"play\",\n";
+		out << "  \"route\": \"WuiInputState(draw.RouteRealInput=true;与 WuiScriptedInput/ui.invoke "
+			"同一输入结构,不做测试专用分支)\",\n";
+		out << "  \"run\": \"" << JsonEscape(m_Run.Id) << "\",\n";
+		out << "  \"window\": \"" << JsonEscape(m_Run.WindowKey) << "\",\n";
+		out << "  \"frames\": [" << m_Run.StartFrame << ", " << m_Run.EndFrame << "],\n";
+		out << "  \"wallMs\": " << (m_Run.FinishedWallMs >= m_Run.StartedWallMs
+			? m_Run.FinishedWallMs - m_Run.StartedWallMs : 0) << ",\n";
+		out << "  \"uiScale\": " << (Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f) << ",\n";
+		out << "  \"canvas\": {\"x\": " << m_CanvasRect.X << ", \"y\": " << m_CanvasRect.Y
+			<< ", \"w\": " << m_CanvasRect.W << ", \"h\": " << m_CanvasRect.H << "},\n";
+		out << "  \"slot\": {\"x\": " << m_CanvasSlot.X << ", \"y\": " << m_CanvasSlot.Y
+			<< ", \"w\": " << m_CanvasSlot.W << ", \"h\": " << m_CanvasSlot.H << "},\n";
+		out << "  \"targetRect\": {\"x\": " << m_Run.TargetRect.X << ", \"y\": " << m_Run.TargetRect.Y
+			<< ", \"w\": " << m_Run.TargetRect.W << ", \"h\": " << m_Run.TargetRect.H << "},\n";
+		out << "  \"pixelHint\": \"" << InteractionPixelPhase(m_Run.Kind) << "\",\n";
+		out << "  \"phases\": [";
+		for (size_t index = 0; index < m_Run.Phases.size(); ++index)
+		{
+			const PlayPhaseRecord& phase = m_Run.Phases[index];
+			out << (index == 0 ? "\n" : ",\n");
+			out << "    {\"name\": \"" << JsonEscape(phase.Name) << "\", \"note\": \""
+				<< JsonEscape(phase.Note) << "\", \"frames\": [" << phase.FirstFrame << ", "
+				<< phase.LastFrame << "], \"sampledFrames\": " << phase.Frames
+				<< ", \"budgetMs\": " << phase.WallMs << ", \"hover\": "
+				<< (phase.Hover ? "true" : "false") << ", \"pressed\": "
+				<< (phase.Pressed ? "true" : "false") << ", \"focusOnTarget\": "
+				<< (phase.FocusOnTarget ? "true" : "false") << "}";
+		}
+		out << (m_Run.Phases.empty() ? "]," : "\n  ],") << "\n";
+		out << "  \"timeline\": [";
+		for (size_t index = 0; index < m_Run.Timeline.size(); ++index)
+		{
+			const PlayTimelineEntry& entry = m_Run.Timeline[index];
+			out << (index == 0 ? "\n" : ",\n");
+			out << "    {\"frame\": " << entry.Frame << ", \"phase\": \"" << JsonEscape(entry.Phase)
+				<< "\", \"state\": \"" << JsonEscape(entry.State) << "\", \"mouse\": ["
+				<< entry.MouseX << ", " << entry.MouseY << "], \"hover\": "
+				<< (entry.Hover ? "true" : "false") << ", \"pressed\": "
+				<< (entry.Pressed ? "true" : "false") << ", \"clicked\": "
+				<< (entry.Clicked ? "true" : "false") << ", \"released\": "
+				<< (entry.Released ? "true" : "false") << ", \"focus\": " << entry.Focus
+				<< ", \"focusOnTarget\": " << (entry.FocusOnTarget ? "true" : "false") << "}";
+		}
+		out << (m_Run.Timeline.empty() ? "]," : "\n  ],") << "\n";
+		out << "  \"events\": [";
+		for (size_t index = 0; index < m_Run.Events.size(); ++index)
+		{
+			out << (index == 0 ? "\n" : ",\n");
+			out << "    {\"event\": \"" << JsonEscape(m_Run.Events[index].first) << "\", \"detail\": \""
+				<< JsonEscape(m_Run.Events[index].second) << "\"}";
+		}
+		out << (m_Run.Events.empty() ? "]," : "\n  ],") << "\n";
+		out << "  \"activation\": {\n";
+		out << "    \"witness\": \"widget-predicate+engine-click-completed\",\n";
+		out << "    \"predicate\": \"hovered && ctx.Input().MouseClicked[0]\",\n";
+		out << "    \"value\": " << (m_Run.PressFrame != 0 ? "true" : "false") << ",\n";
+		out << "    \"frame\": " << m_Run.PressFrame << ",\n";
+		out << "    \"clickCompleted\": " << (m_Run.ClickCompleted ? "true" : "false") << ",\n";
+		out << "    \"clickCompletedWitness\": \"WuiContext::IsClickCompleted(0, targetRect)\",\n";
+		out << "    \"releaseFrame\": " << m_Run.ReleaseFrame << ",\n";
+		out << "    \"limitation\": \"showcase 丢弃 Button 的返回值(Engine 侧 ShowButton 未接);"
+			"字面返回值需要 Engine 改动,超出本单边界 —— 这里记的是同帧判据求值 + 引擎的点击完成口径\"\n";
+		out << "  },\n";
+		out << "  \"keyboard\": {\"focusReached\": " << (m_Run.FocusReached ? "true" : "false")
+			<< ", \"match\": \"" << JsonEscape(m_Run.FocusMatch) << "\", \"tabs\": " << m_Run.TabsQueued
+			<< ", \"enter\": " << (m_Run.KeyEnterSeen ? "true" : "false") << ", \"space\": "
+			<< (m_Run.KeySpaceSeen ? "true" : "false") << "},\n";
+		out << "  \"observation\": {\"valueBefore\": \"" << JsonEscape(m_Run.ValueBefore)
+			<< "\", \"valueAfter\": \"" << JsonEscape(m_Run.ValueAfter) << "\", \"hoverSeen\": "
+			<< (std::any_of(m_Run.Phases.begin(), m_Run.Phases.end(),
+				[](const PlayPhaseRecord& phase) { return phase.Hover; }) ? "true" : "false")
+			<< ", \"pressSeen\": " << (m_Run.PressSeen ? "true" : "false")
+			<< ", \"releaseSeen\": " << (m_Run.ReleaseSeen ? "true" : "false") << "},\n";
+		out << "  \"a11y\": {\"before\": " << (m_Run.A11yBefore.empty() ? "[]" : m_Run.A11yBefore)
+			<< ",\n          \"after\": " << (m_PlayA11yJson.empty() ? "[]" : m_PlayA11yJson) << "},\n";
+		out << "  \"result\": \"" << JsonEscape(m_Run.Result) << "\",\n";
+		out << "  \"gap\": \"" << JsonEscape(m_Run.GapReason) << "\",\n";
+		out << "  \"pixels\": {\"source\": \"probe:capture.float\", \"filledBy\": \"probe\", "
+			"\"phase\": \"" << InteractionPixelPhase(m_Run.Kind)
+			<< "\", \"sha256\": \"\", \"captures\": {}}\n";
+		out << "}\n";
+		return out.str();
+	}
+
+	void WidgetGalleryPanel::WriteInteractionSummary() const
+	{
+		if (m_Run.ComponentId.empty())
+			return;
+		const std::filesystem::path directory =
+			WorkbenchDir() / m_Run.ComponentId / "interaction";
+		std::error_code error;
+		std::filesystem::create_directories(directory, error);
+		std::ofstream file(directory / "summary.json", std::ios::binary | std::ios::trunc);
+		if (!file)
+			return;
+		std::ostringstream out;
+		out << "{\n";
+		out << "  \"schema\": \"wui-workbench-interaction-summary/1\",\n";
+		out << "  \"run\": \"" << JsonEscape(m_Run.Id) << "\",\n";
+		out << "  \"component\": \"" << JsonEscape(m_Run.ComponentId) << "\",\n";
+		out << "  \"mode\": \"play\",\n";
+		out << "  \"route\": \"WuiInputState(RouteRealInput=true)\",\n";
+		out << "  \"startedAt\": \"" << WallStamp() << "\",\n";
+		out << "  \"frames\": [" << m_Run.StartFrame << ", " << m_Run.EndFrame << "],\n";
+		out << "  \"wallMs\": " << (m_Run.FinishedWallMs >= m_Run.StartedWallMs
+			? m_Run.FinishedWallMs - m_Run.StartedWallMs : 0) << ",\n";
+		out << "  \"interactions\": [";
+		for (size_t index = 0; index < m_Run.WrittenKinds.size(); ++index)
+			out << (index == 0 ? "\n" : ",\n") << "    {\"kind\": \""
+				<< JsonEscape(m_Run.WrittenKinds[index]) << "\", \"file\": \""
+				<< JsonEscape(m_Run.WrittenKinds[index]) << ".json\"}";
+		out << (m_Run.WrittenKinds.empty() ? "]," : "\n  ],") << "\n";
+		out << "  \"observation\": {\"state\": \"" << JsonEscape(m_PlayState) << "\", \"focus\": \""
+			<< JsonEscape(m_PlayFocusName) << "\", \"press\": " << m_PlayPressCount
+			<< ", \"click\": " << m_PlayClickCount << ", \"release\": " << m_PlayReleaseCount
+			<< ", \"key\": " << m_PlayKeyCount << ", \"lastEvent\": \""
+			<< JsonEscape(m_PlayLastEvent) << "\"},\n";
+		out << "  \"events\": [";
+		for (size_t index = 0; index < m_PlayEvents.size(); ++index)
+			out << (index == 0 ? "\n" : ",\n") << "    {\"event\": \""
+				<< JsonEscape(m_PlayEvents[index].first) << "\", \"detail\": \""
+				<< JsonEscape(m_PlayEvents[index].second) << "\"}";
+		out << (m_PlayEvents.empty() ? "]\n" : "\n  ]\n");
+		out << "}\n";
+		file << out.str();
+	}
+
 	void WidgetGalleryPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		Wui::WuiTheme& theme = host.Theme();
@@ -1980,6 +3049,8 @@ namespace World
 		const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
 		m_PanelRect = rect;
 		m_PopupOpenNow = false;
+		// 信息条画在画布之前:它显示上一帧的 Play 观测(同一帧的观测在动作条上)。
+		m_PlayObservationPrev = m_PlayObservation;
 
 		// "专用舞台"顺序(覆盖层组件):画布先画,其余内容画到更深的分层 —— 否则模态遮罩登记的
 		// 全窗遮挡区会把工作台自己整块面板的命中打死(实测:选中 modal 之后连 Capture 都点不动,
