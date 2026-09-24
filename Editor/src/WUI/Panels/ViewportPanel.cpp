@@ -68,6 +68,8 @@ namespace World
 				return;
 			const glm::vec2 normal { -delta.y / length, delta.x / length };
 			const glm::vec2 offset = normal * (thickness * 0.5f);
+			// P1c-W3.4 ③纯几何:线段 = 投影后的旋转四边形(屏幕端点由本函数算);库件里没有
+			// "投影线段"原语(库内轴 gizmo 的 PushAxisLine 同样不对调用方开放),保留即时绘制。
 			Wui::WuiDrawCommand command;
 			command.Kind = Wui::WuiDrawKind::Quad;
 			command.Color = color;
@@ -296,9 +298,11 @@ namespace World
 		{
 			Wui::WuiColor modeFill = modeColor;
 			modeFill.A = modeKey[0] == 'e' ? 0.10f : 0.20f;
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, modeRect, modeFill, 10.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-				{ modeRect.X + 9.0f, modeRect.Y + 3.0f, 0, 0 }, modeColor, 0, 1.0f, modeText, 12.0f, true });
+			// P1c-W3.4:徽标走库件 Wui::Badge(填充 + 居中粗体字;radius 10 与原来手写一致)。
+			// 逐字段:填充 rect/颜色/圆角 10、字色/字号 12/粗体 —— 全部相同;**唯一差异** = 文字
+			// 纵向位置按库件居中口径 (H-12)/2 = +4(原手写 +3)⇒ 整条徽标文字下移 1px。
+			// 这是本片唯一预期像素差,已在报告 §3 把它定位到 modeRect 之内(bbox 与像素数)。
+			Wui::Badge(ctx, modeRect, modeText, modeFill, modeColor, theme, 12.0f, true, 10.0f);
 			RegisterReadonlyNode(Wui::HashId("viewport.mode"), "text", modeText, modeKey, modeRect);
 			ctx.RegisterOverlayRect(modeRect);
 		}
@@ -494,79 +498,83 @@ namespace World
 			int frustumCount = 0;
 			glm::vec2 frustumMin { 1e30f, 1e30f };
 			glm::vec2 frustumMax { -1e30f, -1e30f };
-			ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sceneRect, {} });
-			for (const entt::entity handle : frustumRegistry.view<CameraComponent, TransformComponent>())
 			{
-				if (static_cast<entt::entity>(selectedCamera) != handle)
-					continue;   // 只画选中的那台相机
-				const SceneCamera& camera = frustumRegistry.get<CameraComponent>(handle).Camera;
-				glm::mat4 world = frustumRegistry.get<TransformComponent>(handle).Transform;
-				if (const auto* worldTransform = frustumRegistry.try_get<WorldTransformComponent>(handle))
-					world = worldTransform->Matrix;
-				// 相机看向 -Z(与 glm::perspective / glm::ortho 的约定一致)。
-				float hNear = 0.0f, wNear = 0.0f, hFar = 0.0f, wFar = 0.0f, zNear = 0.0f, zFar = 0.0f;
-				if (camera.GetProjectionType() == SceneCamera::ProjectionType::Perspective)
+				// P1c-W3.4:裁剪作用域走库件 Wui::ClipScope(RAII):进口一条 ClipPush、出口一条 ClipPop
+				// (与手写命令逐字段等价,含 rect),并把 ctx 的裁剪栈同进同出。本作用域里不含控件绘制,
+				// 所以 ClipAllows(焦点环/条目剔除)没有可作用的调用点 —— 像素后果应当为 0。
+				Wui::ClipScope frustumClip(ctx, sceneRect);
+				for (const entt::entity handle : frustumRegistry.view<CameraComponent, TransformComponent>())
 				{
-					const float tanHalf = std::tan(glm::radians(camera.GetPerspectiveFOV()) * 0.5f);
-					zNear = -camera.GetPerspectiveNearClip();
-					zFar = -camera.GetPerspectiveFarClip();
-					hNear = tanHalf * std::abs(zNear);
-					wNear = hNear * camera.GetAspectRatio();
-					hFar = tanHalf * std::abs(zFar);
-					wFar = hFar * camera.GetAspectRatio();
+					if (static_cast<entt::entity>(selectedCamera) != handle)
+						continue;   // 只画选中的那台相机
+					const SceneCamera& camera = frustumRegistry.get<CameraComponent>(handle).Camera;
+					glm::mat4 world = frustumRegistry.get<TransformComponent>(handle).Transform;
+					if (const auto* worldTransform = frustumRegistry.try_get<WorldTransformComponent>(handle))
+						world = worldTransform->Matrix;
+					// 相机看向 -Z(与 glm::perspective / glm::ortho 的约定一致)。
+					float hNear = 0.0f, wNear = 0.0f, hFar = 0.0f, wFar = 0.0f, zNear = 0.0f, zFar = 0.0f;
+					if (camera.GetProjectionType() == SceneCamera::ProjectionType::Perspective)
+					{
+						const float tanHalf = std::tan(glm::radians(camera.GetPerspectiveFOV()) * 0.5f);
+						zNear = -camera.GetPerspectiveNearClip();
+						zFar = -camera.GetPerspectiveFarClip();
+						hNear = tanHalf * std::abs(zNear);
+						wNear = hNear * camera.GetAspectRatio();
+						hFar = tanHalf * std::abs(zFar);
+						wFar = hFar * camera.GetAspectRatio();
+					}
+					else
+					{
+						zNear = -camera.GetOrthographicNearClip();
+						zFar = -camera.GetOrthographicFarClip();
+						hNear = hFar = camera.GetOrthographicZoom();
+						wNear = wFar = camera.GetOrthographicZoom() * camera.GetAspectRatio();
+					}
+					const glm::vec3 corners[8] = {
+						{ -wNear, -hNear, zNear }, { wNear, -hNear, zNear }, { wNear, hNear, zNear }, { -wNear, hNear, zNear },
+						{ -wFar, -hFar, zFar }, { wFar, -hFar, zFar }, { wFar, hFar, zFar }, { -wFar, hFar, zFar },
+					};
+					glm::vec4 clip[8];
+					for (int i = 0; i < 8; ++i)
+						clip[i] = frustumCamera.ViewProjection * (world * glm::vec4 { corners[i], 1.0f });
+					const Wui::WuiColor nearColor { 1.0f, 0.55f, 0.12f, 0.95f };   // 近面(相机所在端)
+					const Wui::WuiColor farColor { 1.0f, 0.55f, 0.12f, 0.38f };    // 远面
+					const Wui::WuiColor axisColor { 1.0f, 0.78f, 0.28f, 0.85f };   // 中轴/方向
+					for (int i = 0; i < 4; ++i)
+					{
+						PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[i], clip[(i + 1) % 4],
+							nearColor, 2.4f, &frustumMin, &frustumMax);
+						PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[4 + i], clip[4 + (i + 1) % 4],
+							farColor, 1.2f, &frustumMin, &frustumMax);
+						PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[i], clip[4 + i],
+							nearColor, 1.6f, &frustumMin, &frustumMax);
+					}
+					// 中轴:相机原点 → 远面中心;远端画一个小十字,远处也看得出"这是朝向哪儿"。
+					const glm::vec4 eye = frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.0f, 0.0f, 1.0f });
+					const glm::vec4 farCenter = frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.0f, zFar, 1.0f });
+					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, eye, farCenter,
+						axisColor, 2.2f, &frustumMin, &frustumMax);
+					const float crossSize = std::max(0.08f * std::max(wFar, hFar), 0.02f);
+					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
+						frustumCamera.ViewProjection * (world * glm::vec4 { crossSize, 0.0f, zFar, 1.0f }), farCenter,
+						axisColor, 1.8f, &frustumMin, &frustumMax);
+					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
+						frustumCamera.ViewProjection * (world * glm::vec4 { -crossSize, 0.0f, zFar, 1.0f }), farCenter,
+						axisColor, 1.8f, &frustumMin, &frustumMax);
+					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
+						frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, crossSize, zFar, 1.0f }), farCenter,
+						axisColor, 1.8f, &frustumMin, &frustumMax);
+					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
+						frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, -crossSize, zFar, 1.0f }), farCenter,
+						axisColor, 1.8f, &frustumMin, &frustumMax);
+					// 相机位置标记:原点 → 上方 0.25(相机本地 +Y)一小段,便于找到相机实体。
+					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
+						eye,
+						frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.25f, 0.0f, 1.0f }),
+						nearColor, 2.8f, &frustumMin, &frustumMax);
+					++frustumCount;
 				}
-				else
-				{
-					zNear = -camera.GetOrthographicNearClip();
-					zFar = -camera.GetOrthographicFarClip();
-					hNear = hFar = camera.GetOrthographicZoom();
-					wNear = wFar = camera.GetOrthographicZoom() * camera.GetAspectRatio();
-				}
-				const glm::vec3 corners[8] = {
-					{ -wNear, -hNear, zNear }, { wNear, -hNear, zNear }, { wNear, hNear, zNear }, { -wNear, hNear, zNear },
-					{ -wFar, -hFar, zFar }, { wFar, -hFar, zFar }, { wFar, hFar, zFar }, { -wFar, hFar, zFar },
-				};
-				glm::vec4 clip[8];
-				for (int i = 0; i < 8; ++i)
-					clip[i] = frustumCamera.ViewProjection * (world * glm::vec4 { corners[i], 1.0f });
-				const Wui::WuiColor nearColor { 1.0f, 0.55f, 0.12f, 0.95f };   // 近面(相机所在端)
-				const Wui::WuiColor farColor { 1.0f, 0.55f, 0.12f, 0.38f };    // 远面
-				const Wui::WuiColor axisColor { 1.0f, 0.78f, 0.28f, 0.85f };   // 中轴/方向
-				for (int i = 0; i < 4; ++i)
-				{
-					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[i], clip[(i + 1) % 4],
-						nearColor, 2.4f, &frustumMin, &frustumMax);
-					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[4 + i], clip[4 + (i + 1) % 4],
-						farColor, 1.2f, &frustumMin, &frustumMax);
-					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[i], clip[4 + i],
-						nearColor, 1.6f, &frustumMin, &frustumMax);
-				}
-				// 中轴:相机原点 → 远面中心;远端画一个小十字,远处也看得出"这是朝向哪儿"。
-				const glm::vec4 eye = frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.0f, 0.0f, 1.0f });
-				const glm::vec4 farCenter = frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.0f, zFar, 1.0f });
-				PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, eye, farCenter,
-					axisColor, 2.2f, &frustumMin, &frustumMax);
-				const float crossSize = std::max(0.08f * std::max(wFar, hFar), 0.02f);
-				PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-					frustumCamera.ViewProjection * (world * glm::vec4 { crossSize, 0.0f, zFar, 1.0f }), farCenter,
-					axisColor, 1.8f, &frustumMin, &frustumMax);
-				PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-					frustumCamera.ViewProjection * (world * glm::vec4 { -crossSize, 0.0f, zFar, 1.0f }), farCenter,
-					axisColor, 1.8f, &frustumMin, &frustumMax);
-				PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-					frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, crossSize, zFar, 1.0f }), farCenter,
-					axisColor, 1.8f, &frustumMin, &frustumMax);
-				PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-					frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, -crossSize, zFar, 1.0f }), farCenter,
-					axisColor, 1.8f, &frustumMin, &frustumMax);
-				// 相机位置标记:原点 → 上方 0.25(相机本地 +Y)一小段,便于找到相机实体。
-				PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-					eye,
-					frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.25f, 0.0f, 1.0f }),
-					nearColor, 2.8f, &frustumMin, &frustumMax);
-				++frustumCount;
 			}
-			ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
 			if (frustumCount > 0 && std::getenv("WLD_TRACE_UI"))
 			{
 				// 每 ~2 秒打一行(帧号节流):自动化/人工都能核对"视锥覆盖范围"。
@@ -623,174 +631,176 @@ namespace World
 				int colliderCount = 0;
 				glm::vec2 overlayMin { 1e30f, 1e30f };
 				glm::vec2 overlayMax { -1e30f, -1e30f };
-				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sceneRect, {} });
-
-				// ---- 光源 ----
-				for (const entt::entity handle : registry.view<TransformComponent>())
 				{
-					const bool isSelected = handle == selectedHandle;
-					if (!isSelected && !showAllLights)
-						continue;
-					const glm::mat4 world = WorldMatrixOf(registry, handle);
-					const float alpha = isSelected ? 0.95f : 0.45f;
-					bool drew = false;
-					if (const auto* point = registry.try_get<PointLightComponent>(handle))
+					// P1c-W3.4:范围覆盖层(光源/碰撞体)的裁剪走库件 Wui::ClipScope(同相机视锥那条)。
+					Wui::ClipScope overlayClip(ctx, sceneRect);
+
+					// ---- 光源 ----
+					for (const entt::entity handle : registry.view<TransformComponent>())
 					{
-						// 点光:半径 = Range 的三个大圆(2D 视口只画 XY 那一个,避免看起来像乱线)。
-						const Wui::WuiColor color { glm::clamp(point->Color.r + point->Intensity * 0.05f, 0.0f, 1.0f),
-							glm::clamp(point->Color.g + point->Intensity * 0.05f, 0.0f, 1.0f),
-							glm::clamp(point->Color.b + point->Intensity * 0.05f, 0.0f, 1.0f), alpha };
-						if (point->Range > 0.0f)
+						const bool isSelected = handle == selectedHandle;
+						if (!isSelected && !showAllLights)
+							continue;
+						const glm::mat4 world = WorldMatrixOf(registry, handle);
+						const float alpha = isSelected ? 0.95f : 0.45f;
+						bool drew = false;
+						if (const auto* point = registry.try_get<PointLightComponent>(handle))
 						{
-							// 用户 2026-09-21:「绘制的光源范围怎么是 2d 的,要 3d 的」→
-							// 三个大圆**始终**画(2D 正交视口下它同样投影成一个球(圆环),不再降级成单圈)。
-							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
-								point->Range, 0, color, isSelected ? 1.6f : 1.1f, &overlayMin, &overlayMax);
-							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
-								point->Range, 1, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
-							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
-								point->Range, 2, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
+							// 点光:半径 = Range 的三个大圆(2D 视口只画 XY 那一个,避免看起来像乱线)。
+							const Wui::WuiColor color { glm::clamp(point->Color.r + point->Intensity * 0.05f, 0.0f, 1.0f),
+								glm::clamp(point->Color.g + point->Intensity * 0.05f, 0.0f, 1.0f),
+								glm::clamp(point->Color.b + point->Intensity * 0.05f, 0.0f, 1.0f), alpha };
+							if (point->Range > 0.0f)
+							{
+								// 用户 2026-09-21:「绘制的光源范围怎么是 2d 的,要 3d 的」→
+								// 三个大圆**始终**画(2D 正交视口下它同样投影成一个球(圆环),不再降级成单圈)。
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+									point->Range, 0, color, isSelected ? 1.6f : 1.1f, &overlayMin, &overlayMax);
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+									point->Range, 1, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
+									point->Range, 2, color, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
+								drew = true;
+							}
+							// 位置十字(即使 Range=0 也能看到光源在哪)。
+							const float cross = glm::clamp(point->Range * 0.1f, 0.05f, 0.5f);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								{ -cross, 0.0f, 0.0f }, { cross, 0.0f, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								{ 0.0f, -cross, 0.0f }, { 0.0f, cross, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
 							drew = true;
 						}
-						// 位置十字(即使 Range=0 也能看到光源在哪)。
-						const float cross = glm::clamp(point->Range * 0.1f, 0.05f, 0.5f);
-						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-							{ -cross, 0.0f, 0.0f }, { cross, 0.0f, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
-						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-							{ 0.0f, -cross, 0.0f }, { 0.0f, cross, 0.0f }, color, 2.0f, &overlayMin, &overlayMax);
-						drew = true;
-					}
-					if (const auto* directional = registry.try_get<DirectionalLightComponent>(handle))
-					{
-						// 平行光:沿 Direction 的箭头 + 末端四根短射线(太阳标记)。方向是世界空间,不受实体缩放影响。
-						const Wui::WuiColor color { glm::clamp(directional->Color.r + directional->Intensity * 0.05f, 0.0f, 1.0f),
-							glm::clamp(directional->Color.g + directional->Intensity * 0.05f, 0.0f, 1.0f),
-							glm::clamp(directional->Color.b + directional->Intensity * 0.05f, 0.0f, 1.0f), alpha };
-						glm::vec3 direction = directional->Direction;
-						if (glm::length(direction) < 1e-4f)
-							direction = { 0.0f, -1.0f, 0.0f };
-						direction = glm::normalize(direction);
-						const float length = arrowLength;
-						const glm::vec3 tip = direction * length;
-						const glm::vec3 side = glm::normalize(glm::cross(direction, glm::vec3(0.0f, 1.0f, 0.0f))
-							+ glm::vec3(1e-4f, 0.0f, 0.0f));
-						const glm::vec3 side2 = glm::normalize(glm::cross(direction, side));
-						const float wing = length * 0.12f;
-						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f), tip,
-							color, isSelected ? 2.2f : 1.4f, &overlayMin, &overlayMax);
-						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-							tip, tip - direction * wing + side * wing, color, 2.0f, &overlayMin, &overlayMax);
-						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-							tip, tip - direction * wing - side * wing, color, 2.0f, &overlayMin, &overlayMax);
-						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-							tip, tip - direction * wing + side2 * wing, color, 2.0f, &overlayMin, &overlayMax);
-						PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-							tip, tip - direction * wing - side2 * wing, color, 2.0f, &overlayMin, &overlayMax);
-						drew = true;
-					}
-					// AmbientLightComponent 是全局语义(没有空间范围)→ 不画,属性行 tooltip 已写明。
-					if (drew)
-						++lightCount;
-				}
-
-				// ---- 碰撞体轮廓(编辑期;MeshCollider3D 无解析形状,按设计不画) ----
-				const Wui::WuiColor colliderColor { 0.20f, 0.90f, 0.40f, 0.55f };
-				const Wui::WuiColor colliderSelected { 0.35f, 1.0f, 0.55f, 0.95f };
-				for (const entt::entity handle : registry.view<TransformComponent>())
-				{
-					const bool isSelected = handle == selectedHandle;
-					if (!isSelected && !showAllColliders)
-						continue;
-					// 口径:与物理**同源** —— 2D(Box2D)与 3D(Jolt)都是用实体的**本地** Transform
-					// 建刚体/形状(见 Scene.cpp 的 b2MakeOffsetBox 与 Physics3D.cpp:415),所以轮廓也走本地矩阵;
-					// 用世界矩阵在"有父级"的实体上会和真实碰撞体错位。
-					const glm::mat4 world = registry.try_get<TransformComponent>(handle)
-						? registry.get<TransformComponent>(handle).Transform : glm::mat4(1.0f);
-					const Wui::WuiColor color = isSelected ? colliderSelected : colliderColor;
-					const float thickness = isSelected ? 1.8f : 1.1f;
-					bool drew = false;
-					if (const auto* box2d = registry.try_get<BoxCollider2DComponent>(handle))
-					{
-						// 注意:`BoxCollider2DComponent::Size` 是**半尺寸**(运行时直接喂
-						// b2MakeOffsetBox(halfWidth, halfHeight, …)),不要再乘 0.5 ——
-						// 乘了会把轮廓画成真实碰撞体的一半(we_engine 在 U6 复核时抓到的口径矛盾)。
-						const float hx = std::max(0.0f, box2d->Size.x);
-						const float hy = std::max(0.0f, box2d->Size.y);
-						const glm::vec3 c { box2d->Offset.x, box2d->Offset.y, 0.0f };
-						const glm::vec3 corners[4] = {
-							c + glm::vec3 { -hx, -hy, 0.0f }, c + glm::vec3 { hx, -hy, 0.0f },
-							c + glm::vec3 { hx, hy, 0.0f }, c + glm::vec3 { -hx, hy, 0.0f } };
-						for (int i = 0; i < 4; ++i)
-							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								corners[i], corners[(i + 1) % 4], color, thickness, &overlayMin, &overlayMax);
-						drew = true;
-					}
-					if (const auto* circle2d = registry.try_get<CircleCollider2DComponent>(handle))
-					{
-						if (circle2d->Radius > 0.0f)
-							PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								{ circle2d->Offset.x, circle2d->Offset.y, 0.0f }, circle2d->Radius, 0,
-								color, thickness, &overlayMin, &overlayMax);
-						drew = true;
-					}
-					if (const auto* box3d = registry.try_get<BoxCollider3DComponent>(handle))
-					{
-						// 12 条棱:两个角点索引按位异或一个轴位就得到一条棱。
-						glm::vec3 corners[8];
-						for (int i = 0; i < 8; ++i)
-							corners[i] = box3d->Offset + glm::vec3 {
-								(i & 1) ? box3d->HalfExtents.x : -box3d->HalfExtents.x,
-								(i & 2) ? box3d->HalfExtents.y : -box3d->HalfExtents.y,
-								(i & 4) ? box3d->HalfExtents.z : -box3d->HalfExtents.z };
-						for (int i = 0; i < 8; ++i)
-							for (int axis = 0; axis < 3; ++axis)
-							{
-								const int other = i ^ (1 << axis);
-								if (other > i)
-									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
-							}
-						drew = true;
-					}
-					if (const auto* sphere = registry.try_get<SphereCollider3DComponent>(handle))
-					{
-						if (sphere->Radius > 0.0f)
-							for (int axis = 0; axis < 3; ++axis)
-								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, sphere->Offset,
-									sphere->Radius, axis, color, thickness, &overlayMin, &overlayMax);
-						drew = true;
-					}
-					if (const auto* capsule = registry.try_get<CapsuleCollider3DComponent>(handle))
-					{
-						// 近似:上下两个端面圆 + 两条母线(沿本地 Y 轴)。
-						const float radius = std::max(0.0f, capsule->Radius);
-						const float half = std::max(0.0f, capsule->HalfHeight);
-						if (radius > 0.0f)
+						if (const auto* directional = registry.try_get<DirectionalLightComponent>(handle))
 						{
-							const glm::vec3 base = capsule->Offset;
-							for (int axis = 0; axis < 3; ++axis)
-							{
-								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
-									base + glm::vec3 { 0.0f, half, 0.0f }, radius, axis, color, thickness,
-									&overlayMin, &overlayMax);
-								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
-									base - glm::vec3 { 0.0f, half, 0.0f }, radius, axis, color, thickness,
-									&overlayMin, &overlayMax);
-							}
+							// 平行光:沿 Direction 的箭头 + 末端四根短射线(太阳标记)。方向是世界空间,不受实体缩放影响。
+							const Wui::WuiColor color { glm::clamp(directional->Color.r + directional->Intensity * 0.05f, 0.0f, 1.0f),
+								glm::clamp(directional->Color.g + directional->Intensity * 0.05f, 0.0f, 1.0f),
+								glm::clamp(directional->Color.b + directional->Intensity * 0.05f, 0.0f, 1.0f), alpha };
+							glm::vec3 direction = directional->Direction;
+							if (glm::length(direction) < 1e-4f)
+								direction = { 0.0f, -1.0f, 0.0f };
+							direction = glm::normalize(direction);
+							const float length = arrowLength;
+							const glm::vec3 tip = direction * length;
+							const glm::vec3 side = glm::normalize(glm::cross(direction, glm::vec3(0.0f, 1.0f, 0.0f))
+								+ glm::vec3(1e-4f, 0.0f, 0.0f));
+							const glm::vec3 side2 = glm::normalize(glm::cross(direction, side));
+							const float wing = length * 0.12f;
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f), tip,
+								color, isSelected ? 2.2f : 1.4f, &overlayMin, &overlayMax);
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								base + glm::vec3 { radius, -half, 0.0f }, base + glm::vec3 { radius, half, 0.0f },
-								color, thickness, &overlayMin, &overlayMax);
+								tip, tip - direction * wing + side * wing, color, 2.0f, &overlayMin, &overlayMax);
 							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-								base + glm::vec3 { -radius, -half, 0.0f }, base + glm::vec3 { -radius, half, 0.0f },
-								color, thickness, &overlayMin, &overlayMax);
+								tip, tip - direction * wing - side * wing, color, 2.0f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								tip, tip - direction * wing + side2 * wing, color, 2.0f, &overlayMin, &overlayMax);
+							PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								tip, tip - direction * wing - side2 * wing, color, 2.0f, &overlayMin, &overlayMax);
+							drew = true;
 						}
-						drew = true;
+						// AmbientLightComponent 是全局语义(没有空间范围)→ 不画,属性行 tooltip 已写明。
+						if (drew)
+							++lightCount;
 					}
-					if (drew)
-						++colliderCount;
-				}
 
-				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
+					// ---- 碰撞体轮廓(编辑期;MeshCollider3D 无解析形状,按设计不画) ----
+					const Wui::WuiColor colliderColor { 0.20f, 0.90f, 0.40f, 0.55f };
+					const Wui::WuiColor colliderSelected { 0.35f, 1.0f, 0.55f, 0.95f };
+					for (const entt::entity handle : registry.view<TransformComponent>())
+					{
+						const bool isSelected = handle == selectedHandle;
+						if (!isSelected && !showAllColliders)
+							continue;
+						// 口径:与物理**同源** —— 2D(Box2D)与 3D(Jolt)都是用实体的**本地** Transform
+						// 建刚体/形状(见 Scene.cpp 的 b2MakeOffsetBox 与 Physics3D.cpp:415),所以轮廓也走本地矩阵;
+						// 用世界矩阵在"有父级"的实体上会和真实碰撞体错位。
+						const glm::mat4 world = registry.try_get<TransformComponent>(handle)
+							? registry.get<TransformComponent>(handle).Transform : glm::mat4(1.0f);
+						const Wui::WuiColor color = isSelected ? colliderSelected : colliderColor;
+						const float thickness = isSelected ? 1.8f : 1.1f;
+						bool drew = false;
+						if (const auto* box2d = registry.try_get<BoxCollider2DComponent>(handle))
+						{
+							// 注意:`BoxCollider2DComponent::Size` 是**半尺寸**(运行时直接喂
+							// b2MakeOffsetBox(halfWidth, halfHeight, …)),不要再乘 0.5 ——
+							// 乘了会把轮廓画成真实碰撞体的一半(we_engine 在 U6 复核时抓到的口径矛盾)。
+							const float hx = std::max(0.0f, box2d->Size.x);
+							const float hy = std::max(0.0f, box2d->Size.y);
+							const glm::vec3 c { box2d->Offset.x, box2d->Offset.y, 0.0f };
+							const glm::vec3 corners[4] = {
+								c + glm::vec3 { -hx, -hy, 0.0f }, c + glm::vec3 { hx, -hy, 0.0f },
+								c + glm::vec3 { hx, hy, 0.0f }, c + glm::vec3 { -hx, hy, 0.0f } };
+							for (int i = 0; i < 4; ++i)
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									corners[i], corners[(i + 1) % 4], color, thickness, &overlayMin, &overlayMax);
+							drew = true;
+						}
+						if (const auto* circle2d = registry.try_get<CircleCollider2DComponent>(handle))
+						{
+							if (circle2d->Radius > 0.0f)
+								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									{ circle2d->Offset.x, circle2d->Offset.y, 0.0f }, circle2d->Radius, 0,
+									color, thickness, &overlayMin, &overlayMax);
+							drew = true;
+						}
+						if (const auto* box3d = registry.try_get<BoxCollider3DComponent>(handle))
+						{
+							// 12 条棱:两个角点索引按位异或一个轴位就得到一条棱。
+							glm::vec3 corners[8];
+							for (int i = 0; i < 8; ++i)
+								corners[i] = box3d->Offset + glm::vec3 {
+									(i & 1) ? box3d->HalfExtents.x : -box3d->HalfExtents.x,
+									(i & 2) ? box3d->HalfExtents.y : -box3d->HalfExtents.y,
+									(i & 4) ? box3d->HalfExtents.z : -box3d->HalfExtents.z };
+							for (int i = 0; i < 8; ++i)
+								for (int axis = 0; axis < 3; ++axis)
+								{
+									const int other = i ^ (1 << axis);
+									if (other > i)
+										PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+											corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+								}
+							drew = true;
+						}
+						if (const auto* sphere = registry.try_get<SphereCollider3DComponent>(handle))
+						{
+							if (sphere->Radius > 0.0f)
+								for (int axis = 0; axis < 3; ++axis)
+									PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, sphere->Offset,
+										sphere->Radius, axis, color, thickness, &overlayMin, &overlayMax);
+							drew = true;
+						}
+						if (const auto* capsule = registry.try_get<CapsuleCollider3DComponent>(handle))
+						{
+							// 近似:上下两个端面圆 + 两条母线(沿本地 Y 轴)。
+							const float radius = std::max(0.0f, capsule->Radius);
+							const float half = std::max(0.0f, capsule->HalfHeight);
+							if (radius > 0.0f)
+							{
+								const glm::vec3 base = capsule->Offset;
+								for (int axis = 0; axis < 3; ++axis)
+								{
+									PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										base + glm::vec3 { 0.0f, half, 0.0f }, radius, axis, color, thickness,
+										&overlayMin, &overlayMax);
+									PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
+										base - glm::vec3 { 0.0f, half, 0.0f }, radius, axis, color, thickness,
+										&overlayMin, &overlayMax);
+								}
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									base + glm::vec3 { radius, -half, 0.0f }, base + glm::vec3 { radius, half, 0.0f },
+									color, thickness, &overlayMin, &overlayMax);
+								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									base + glm::vec3 { -radius, -half, 0.0f }, base + glm::vec3 { -radius, half, 0.0f },
+									color, thickness, &overlayMin, &overlayMax);
+							}
+							drew = true;
+						}
+						if (drew)
+							++colliderCount;
+					}
+
+				}
 				// 取证(与相机视锥同口径):脚本可断言"画了几个、覆盖到哪",不靠像素。
 				if ((lightCount > 0 || colliderCount > 0) && std::getenv("WLD_TRACE_UI"))
 				{
@@ -935,26 +945,28 @@ namespace World
 				// 远的先画(先画的被后画的盖住),并按视深度淡出:近实远淡。
 				std::sort(edges.begin(), edges.end(),
 					[](const Edge& a, const Edge& b) { return a.Depth > b.Depth; });
-				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sceneRect, {} });
-				for (const Edge& edge : edges)
 				{
-					// 可见棱统一实色(不再做远近淡出:背面棱已经被剔除,不需要透视暗示)。
-					const Wui::WuiColor color { 1.0f, 0.55f, 0.12f, 1.0f };
-					const glm::vec2 from = edge.From;
-					const glm::vec2 to = edge.To;
-					const glm::vec2 delta = to - from;
-					const float length = glm::length(delta);
-					if (length < 0.5f)
-						continue;
-					const glm::vec2 normal { -delta.y / length, delta.x / length };
-					const glm::vec2 offset = normal * 0.9f; // 1.8px 宽
-					Wui::WuiDrawCommand command;
-					command.Kind = Wui::WuiDrawKind::Quad;
-					command.Color = color;
-					command.Vertices = { from + offset, to + offset, to - offset, from - offset };
-					ctx.Commands().push_back(std::move(command));
+					// P1c-W3.4:选中框线框的裁剪走库件 Wui::ClipScope。
+					Wui::ClipScope selectionClip(ctx, sceneRect);
+					for (const Edge& edge : edges)
+					{
+						// 可见棱统一实色(不再做远近淡出:背面棱已经被剔除,不需要透视暗示)。
+						const Wui::WuiColor color { 1.0f, 0.55f, 0.12f, 1.0f };
+						const glm::vec2 from = edge.From;
+						const glm::vec2 to = edge.To;
+						const glm::vec2 delta = to - from;
+						const float length = glm::length(delta);
+						if (length < 0.5f)
+							continue;
+						const glm::vec2 normal { -delta.y / length, delta.x / length };
+						const glm::vec2 offset = normal * 0.9f; // 1.8px 宽
+						Wui::WuiDrawCommand command;
+						command.Kind = Wui::WuiDrawKind::Quad;
+						command.Color = color;
+						command.Vertices = { from + offset, to + offset, to - offset, from - offset };
+						ctx.Commands().push_back(std::move(command));
+					}
 				}
-				ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
 				if (std::getenv("WLD_TRACE_UI"))
 				{
 					// 句柄或矩形变化时打一行(上限 40 行):Play↔暂停会换相机,矩形必须跟着变,
@@ -1004,15 +1016,17 @@ namespace World
 				{
 					const Wui::GizmoCamera debugCamera = m_Host.GetGizmoCamera();
 					const Wui::WuiColor physicsColor { 0.20f, 0.90f, 0.40f, 0.90f };
-					ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sceneRect, {} });
-					for (const DebugLine& line : physicsLines)
 					{
-						PushProjectedSegment(ctx, debugCamera.ViewProjection, sceneRect,
-							debugCamera.ViewProjection * glm::vec4 { line.Begin, 1.0f },
-							debugCamera.ViewProjection * glm::vec4 { line.End, 1.0f },
-							physicsColor, 1.4f);
+						// P1c-W3.4:物理调试线框的裁剪走库件 Wui::ClipScope。
+						Wui::ClipScope physicsClip(ctx, sceneRect);
+						for (const DebugLine& line : physicsLines)
+						{
+							PushProjectedSegment(ctx, debugCamera.ViewProjection, sceneRect,
+								debugCamera.ViewProjection * glm::vec4 { line.Begin, 1.0f },
+								debugCamera.ViewProjection * glm::vec4 { line.End, 1.0f },
+								physicsColor, 1.4f);
+						}
 					}
-					ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
 					if (std::getenv("WLD_TRACE_UI"))
 					{
 						static uint64_t lastPhysicsLog = ~0ull;
@@ -1037,7 +1051,8 @@ namespace World
 			// UV 与主视口一致(场景纹理按 {0,1,1,-1} 贴,预览渲染器同一条路径)。
 			Image(ctx, { previewRect.X + 1.0f, previewRect.Y + 18.0f, previewRect.W - 2.0f, previewRect.H - 19.0f },
 				previewTexture, { 0, 1, 1, -1 }, theme);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, previewRect, theme.Border, 3.0f, 1.0f });
+			// P1c-W3.4:描边走库件(与手写 RectOutline 逐字段等价:色/圆角 3/厚度 1)。
+			Wui::HighlightOutline(ctx, previewRect, theme.Border, 3.0f, 1.0f);
 		}
 
 		// ---- W5-L1:文档场景外部改动提示:只提示 + 一键重开,**不自动替换**文档 ----
@@ -1051,7 +1066,9 @@ namespace World
 			if (Button(ctx, Wui::HashId("scene.external.reopen"),
 				{ bannerRect.X + bannerRect.W - 104.0f, bannerRect.Y + 3.0f, 96.0f, 20.0f }, "重新打开", theme))
 				m_Host.ReopenExternalScene();
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, bannerRect, theme.Border, 3.0f, 1.0f });
+			// P1c-W3.4:描边走库件(与手写 RectOutline 逐字段等价)。注:该横幅要"场景文件被外部改"
+			// 才出现,本片未驱动该状态(报告 §5.4 未做项);同一条命令的另一处(预览小窗边框)已实测。
+			Wui::HighlightOutline(ctx, bannerRect, theme.Border, 3.0f, 1.0f);
 		}
 		(void)theme;
 	}
