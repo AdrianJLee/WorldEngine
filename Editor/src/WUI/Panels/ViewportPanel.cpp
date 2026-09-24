@@ -8,6 +8,7 @@
 #include "World/Core/KeyCodes.h"
 #include "World/Physics/Physics3D.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/WuiWidgets.h"
 #include "../../EditorPreferences.h"
 
 namespace World
@@ -66,15 +67,9 @@ namespace World
 			const float length = glm::length(delta);
 			if (length < 0.5f)
 				return;
-			const glm::vec2 normal { -delta.y / length, delta.x / length };
-			const glm::vec2 offset = normal * (thickness * 0.5f);
-			// P1c-W3.4 ③纯几何:线段 = 投影后的旋转四边形(屏幕端点由本函数算);库件里没有
-			// "投影线段"原语(库内轴 gizmo 的 PushAxisLine 同样不对调用方开放),保留即时绘制。
-			Wui::WuiDrawCommand command;
-			command.Kind = Wui::WuiDrawKind::Quad;
-			command.Color = color;
-			command.Vertices = { from + offset, to + offset, to - offset, from - offset };
-			ctx.Commands().push_back(std::move(command));
+			// P1c-W3.6:投影后的屏幕线段 = 一条旋转四边形,末段走库件 `Wui::LineSegment`
+			// (法线/半点偏移/顶点顺序/退化阈值与手写逐字段相同;投影/近平面裁剪/夹取仍在上面本函数里)。
+			Wui::LineSegment(ctx, from, to, color, thickness);
 		}
 
 		// 相机预览小窗位置:场景图左下角,宽取视口的 28%,16:9。
@@ -954,17 +949,8 @@ namespace World
 						const Wui::WuiColor color { 1.0f, 0.55f, 0.12f, 1.0f };
 						const glm::vec2 from = edge.From;
 						const glm::vec2 to = edge.To;
-						const glm::vec2 delta = to - from;
-						const float length = glm::length(delta);
-						if (length < 0.5f)
-							continue;
-						const glm::vec2 normal { -delta.y / length, delta.x / length };
-						const glm::vec2 offset = normal * 0.9f; // 1.8px 宽
-						Wui::WuiDrawCommand command;
-						command.Kind = Wui::WuiDrawKind::Quad;
-						command.Color = color;
-						command.Vertices = { from + offset, to + offset, to - offset, from - offset };
-						ctx.Commands().push_back(std::move(command));
+						// P1c-W3.6:可见棱同理走库件(1.8px 宽 = 半点偏移 0.9)。
+						Wui::LineSegment(ctx, from, to, color, 1.8f);
 					}
 				}
 				if (std::getenv("WLD_TRACE_UI"))

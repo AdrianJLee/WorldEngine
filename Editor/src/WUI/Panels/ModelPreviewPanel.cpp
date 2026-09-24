@@ -932,7 +932,10 @@ namespace World
 		Wui::Label(ctx, { statusRect.X, statusRect.Y + 1.0f }, statusText,
 			m_NeedsReimport ? Wui::WuiColor { 1.0f, 0.72f, 0.30f, 1.0f } : theme.TextMuted, 11.0f);
 		y += 20.0f;
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, { rect.X, y, rect.W, 1.0f }, theme.Border, 0.0f });
+		// P1c-W3.6:1px 分隔线 = 纯填充(命令逐字段等价:`PanelBackground` 就是
+		// `{ Rect, rect, color, radius }`)。库里的 `WuiSeparator` 是保留模式占位件
+		// (吃布局、不接调用方几何),拿不到"调用方给几何的即时分隔线"这个语义 —— 缺口登记在报告里。
+		Wui::PanelBackground(ctx, { rect.X, y, rect.W, 1.0f }, theme.Border, 0.0f);
 		y += 8.0f;
 
 		// ---- ③ 正文:宽窗口两列(左预览 / 右信息),窄窗口单列(预览在上、信息在下滚动)----
@@ -1233,9 +1236,10 @@ namespace World
 				const bool hovered = ctx.IsHovered(row);
 				const std::string label = std::to_string(index) + "  " + slot;
 				const std::string labelText = EllipsizeToWidthLocal(ctx, label, row.W, 11.0f);
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { x, y + 1.0f, 0, 0 },
+				// P1c-W3.6:槽行文字走库件 `Wui::Label`(文字命令逐字段等价;缺材质红/悬停 Accent 三态不变)。
+				Wui::Label(ctx, { x, y + 1.0f }, labelText,
 					missing ? Wui::WuiColor { 1.0f, 0.45f, 0.4f, 1.0f }
-						: (hovered ? theme.Accent : theme.Text), 0, 1.0f, labelText, 11.0f, false });
+						: (hovered ? theme.Accent : theme.Text), 11.0f);
 				Wui::WuiAccessNode slotNode;
 				slotNode.Id = Wui::HashId(("model.slot." + std::to_string(index)).c_str());
 				slotNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();

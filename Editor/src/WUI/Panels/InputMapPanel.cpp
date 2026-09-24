@@ -4,6 +4,7 @@
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/WuiWidgets.h"
 
 #include <array>
 
@@ -113,8 +114,8 @@ namespace World
 			}
 
 			const std::string bindingText = action.Bindings.empty() ? "(unbound)" : BindingLabel(action.Bindings[0]);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-				{ rect.X + rect.W - 180, y + 4, 0, 0 }, theme.Text, 0, 1.0f, bindingText, 13.0f, false });
+			// P1c-W3.6:绑定列文字走库件 `Wui::Label`(文字命令逐字段等价)。
+			Wui::Label(ctx, { rect.X + rect.W - 180, y + 4 }, bindingText, theme.Text, 13.0f);
 			y += 24;
 		}
 
@@ -154,10 +155,10 @@ namespace World
 			Save();
 		y += 26;
 
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-			{ rect.X + 8, y, 0, 0 }, theme.TextMuted, 0, 1.0f, m_Status, 13.0f, false });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-			{ rect.X + 8, y + 20, 0, 0 }, theme.TextMuted, 0, 1.0f,
-			"click an action to rebind; Esc cancels; saved to assets/input.weinput", 12.0f, false });
+		// P1c-W3.6:状态行 + 底部提示同理(两条都只是 `{ Text, {x,y,0,0}, color, 0, 1, text, size, false }`)。
+		Wui::Label(ctx, { rect.X + 8, y }, m_Status, theme.TextMuted, 13.0f);
+		Wui::Label(ctx, { rect.X + 8, y + 20 },
+			"click an action to rebind; Esc cancels; saved to assets/input.weinput",
+			theme.TextMuted, 12.0f);
 	}
 }

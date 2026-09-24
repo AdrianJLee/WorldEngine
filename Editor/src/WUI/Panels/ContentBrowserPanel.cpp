@@ -1356,13 +1356,13 @@ namespace World
 			const float iconSize = kSliceIconSize * (hovered ? kSliceHoverIconScale : 1.0f);
 			const uint64_t icon = slice.IsDir ? m_DirIconId : m_FileIconId;
 			if (icon != 0)
-				// 缺件(W3.2):`Wui::Image` 把着色写死成 theme.Text,表达不了这里的白色/代码蓝染色 —— 见报告 §4-2。
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Image,
-					{ cell.X + cell.W * 0.5f - iconSize * 0.5f,
-					  cell.Y + gap - (iconSize - kSliceIconSize) * 0.5f, iconSize, iconSize },
+				// W3.6:染色图标走库件 `Wui::Icon`(命令逐字段等价:矩形/uv/tint 都不变;
+				// 保留 icon != 0 守卫 ⇒ 不改变"无图不画"的既有行为,空图兜底不在这条路径上)。
+				Wui::Icon(ctx, { cell.X + cell.W * 0.5f - iconSize * 0.5f,
+						cell.Y + gap - (iconSize - kSliceIconSize) * 0.5f, iconSize, iconSize },
+					icon, { 0, 1, 1, -1 },
 					slice.Kind == EditorAssetKind::Shader
-						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 },
-					0.0f, 1.0f, "", nameSize, false, icon, { 0, 1, 1, -1 } });
+						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 }, theme);
 
 			// Slang-B1:着色器的常驻类型徽标(与 prefab 徽标同一套画法;代码蓝底)。
 			if (slice.Kind == EditorAssetKind::Shader)
@@ -1372,12 +1372,10 @@ namespace World
 				const float badgeSize = infoSize;
 				const float badgeW = ctx.MeasureTextWidth(badge.Text, badgeSize) + theme.PadSmall * 2.0f;
 				const float badgeH = badgeSize + 4.0f;
-				Wui::PanelBackground(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH },
-					kShaderBadgeFill, badgeH * 0.5f);
-				// 缺件(W3.2):徽标字形是粗体,`Wui::Label` 没有 bold 形参 —— 保留裸绘制,见报告 §4-1。
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-					{ cell.X + gap + theme.PadSmall, cell.Y + gap + 2.0f, 0.0f, 0.0f },
-					kShaderBadgeText, 0.0f, 1.0f, badge.Text, badgeSize, true });
+				// W3.6:徽标(胶囊底 + 粗体居中字形)收进库件 `Wui::Badge`。文字坐标与手写等价:
+				// 水平 (badgeW-tw)/2 = PadSmall、垂直 (badgeH-badgeSize)/2 = 2 ⇒ 与原来两行逐字段相同。
+				Wui::Badge(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH }, badge.Text,
+					kShaderBadgeFill, kShaderBadgeText, theme, badgeSize);
 			}
 
 			// P4-U13:prefab 是"可复用实体子树",不是普通文件 —— 给一枚常驻小标签,
@@ -1388,12 +1386,9 @@ namespace World
 				const float badgeSize = infoSize;
 				const float badgeW = ctx.MeasureTextWidth(badge.Text, badgeSize) + theme.PadSmall * 2.0f;
 				const float badgeH = badgeSize + 4.0f;
-				Wui::PanelBackground(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH },
-					theme.Accent, badgeH * 0.5f);
-				// 缺件(W3.2):同上,粗体字形没有库入口。
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-					{ cell.X + gap + theme.PadSmall, cell.Y + gap + 2.0f, 0.0f, 0.0f },
-					Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, 0.0f, 1.0f, badge.Text, badgeSize, true });
+				// W3.6:同上,prefab 徽标(Accent 底 + 白字)也走 `Wui::Badge`。
+				Wui::Badge(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH }, badge.Text,
+					theme.Accent, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
 			}
 
 			// 名称(居中;选中时先铺一层 Selection 底再画文字)。
@@ -1500,12 +1495,12 @@ namespace World
 
 			const uint64_t icon = slice.IsDir ? m_DirIconId : m_FileIconId;
 			if (icon != 0)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Image,
+				// W3.6:列表图标同样走库件 `Wui::Icon`(Slang-B1:与网格同一枚"代码蓝"染色)。
+				Wui::Icon(ctx,
 					{ row.X + theme.PadSmall, row.Y + (row.H - kListIconSize) * 0.5f, kListIconSize, kListIconSize },
-					// Slang-B1:与网格同一枚"代码蓝"染色 —— 列表里也能一眼分辨着色器。
+					icon, { 0, 1, 1, -1 },
 					slice.Kind == EditorAssetKind::Shader
-						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 },
-					0.0f, 1.0f, "", smallSize, false, icon, { 0, 1, 1, -1 } });
+						? kShaderIconTint : Wui::WuiColor { 1, 1, 1, 1 }, theme);
 
 			const float nameX = row.X + theme.PadSmall * 2.0f + kListIconSize;
 			const float nameBudget = std::max(0.0f, nameW - (nameX - row.X) - theme.PadSmall);
