@@ -66,6 +66,9 @@ namespace World
 		std::set<std::string> m_OverlayStageComponents;
 		Wui::WuiRect m_PanelRect {};          // 本帧面板矩形(清键盘焦点用)
 		bool m_CanvasOverlayStage = false;    // 本帧画布是否走专用舞台(写进捕获元数据)
+		// 本帧 showcase 实际往命令流里写了多少条绘制命令(WUI-P1b:探针断言"绘制命令数 > 0"
+		// 要求的是真实命令数,不能拿"画布上有非背景像素"当替身)。只统计 showcase 自己那段。
+		size_t m_ShowcaseCommands = 0;
 
 		// 画布实测矩形(客户区坐标)+ 该帧实际送进 showcase 的属性(写 Capture 元数据用)。
 		Wui::WuiRect m_CanvasRect {};

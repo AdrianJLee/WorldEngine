@@ -282,6 +282,34 @@ namespace World
 			return false;
 		}
 
+		// WUI-P1b:状态按钮行的排版。**同一份矩形既用来估算滚动区高度、又用来画**,
+		// 避免"估算一处、绘制另一处"慢慢走偏。原点取传入 rect 的左上角,宽度用 rect.W。
+		std::vector<Wui::WuiRect> StateChipRects(
+			const std::vector<Wui::WuiComponentState>& states, const Wui::WuiRect& origin, float rowH)
+		{
+			std::vector<Wui::WuiRect> rects;
+			if (states.empty())
+				return rects;
+			const float gap = 4.0f;
+			float x = origin.X + 2.0f;
+			float y = origin.Y;
+			for (const Wui::WuiComponentState& state : states)
+			{
+				std::string text = state.Id;
+				if (text.size() > 14)
+					text.resize(14);
+				const float width = std::clamp(14.0f + static_cast<float>(text.size()) * 6.2f, 54.0f, 104.0f);
+				if (x > origin.X + 2.0f && x + width > origin.X + origin.W - 2.0f)
+				{
+					x = origin.X + 2.0f;
+					y += rowH + gap;
+				}
+				rects.push_back({ x, y, width, rowH });
+				x += width + gap;
+			}
+			return rects;
+		}
+
 	}
 
 	WidgetGalleryPanel::WbLayout WidgetGalleryPanel::ComputeLayout(const Wui::WuiRect& rect,
@@ -780,6 +808,8 @@ namespace World
 		const Wui::WuiRect slot = m_CanvasSlot;
 		const float scale = std::max(0.5f, uiScale);
 		const size_t overlayBefore = ctx.OverlayCommands().size();
+		// overlayStage 时 ctx.Commands() 就是 overlay 命令流,下面取两条增量里的较大者。
+		const size_t mainBefore = ctx.Commands().size();
 		if (overlayStage)
 		{
 			ctx.PushOverlay();
@@ -819,7 +849,12 @@ namespace World
 			ctx.PopClipRect();
 			ctx.PopOverlay();
 		}
-		else if (DetectsFullWindowOverlay(ctx, overlayBefore))
+		const size_t overlayAfter = ctx.OverlayCommands().size();
+		const size_t mainAfter = ctx.Commands().size();
+		const size_t overlayDelta = overlayAfter >= overlayBefore ? overlayAfter - overlayBefore : 0;
+		const size_t mainDelta = mainAfter >= mainBefore ? mainAfter - mainBefore : 0;
+		m_ShowcaseCommands = std::max(overlayDelta, mainDelta);
+		if (!overlayStage && DetectsFullWindowOverlay(ctx, overlayBefore))
 		{
 			// 首次遇到这个组件就往 overlay 层画了整窗矩形(模态遮罩)——记下来,下一帧起改走
 			// 专用舞台,免得它登记的全窗遮挡区把工作台自己也点不动(实测踩过)。
@@ -849,6 +884,13 @@ namespace World
 		float contentHeight = 6.0f + rowH + rowGap;
 		for (size_t index = 0; index < desc->Properties.size(); ++index)
 			contentHeight += rowH + rowGap;
+		// WUI-P1b:状态按钮行(见下面绘制)自己占的高度。
+		{
+			const std::vector<Wui::WuiRect> chips = StateChipRects(desc->States,
+				{ content.X, 0.0f, content.W, rowH }, rowH);
+			if (!chips.empty())
+				contentHeight += (chips.back().Y - chips.front().Y) + rowH + rowGap;
+		}
 		contentHeight += 120.0f;   // 元信息(A11yNotes / SizeNotes / SourceFile / 开关摘要)
 
 		Wui::BeginScrollArea(ctx, content, contentHeight, m_PropScroll, theme);
@@ -887,6 +929,46 @@ namespace World
 			if (ctx.IsPopupOpen(Wui::HashId(kStateComboId)))
 				m_PopupOpenNow = true;   // 状态下拉开着:↑/↓ 归它,组件树不抢键
 			y += rowH + rowGap;
+
+			// WUI-P1b:状态按钮行 —— 逐件状态矩阵的**直接驱动路径**。
+			// 每个状态一个按钮,id = `wui.workbench.state.<组件id>.<状态id>`(稳定,探针按它点)。
+			// 为什么要有它:状态下拉是`Wui::Combo`的弹层,实测里注入点击只有上面两条能落下,
+			// 第三条起收不到(节点 visible/interactive 都是 true 也点不动)。逐件出状态矩阵
+			// 不能建在这个命中行为上;顺带也让"这件有哪些状态"一眼可见,不用先拉开下拉。
+			const std::vector<Wui::WuiRect> chips = StateChipRects(desc->States,
+				{ content.X, y, content.W, rowH }, rowH);
+			for (size_t index = 0; index < chips.size() && index < desc->States.size(); ++index)
+			{
+				const Wui::WuiRect chip = chips[index];
+				if (chip.Y + chip.H <= content.Y || chip.Y >= content.Y + content.H)
+					continue;   // 滚动区外:不画也不登记,免得出现"看不到却点得到"的节点
+				const std::string& stateId = desc->States[index].Id;
+				const bool active = stateId == m_ForceState;
+				Wui::WuiTheme chipTheme = theme;
+				if (active)
+				{
+					chipTheme.Border = theme.Accent;
+				}
+				else
+				{
+					// 未选中:平铺底,靠文字与边框区分,不抢选中项的视觉权重。
+					chipTheme.ButtonBg = theme.ContentBg;
+					chipTheme.ButtonHover = theme.HoverBg;
+					chipTheme.Text = theme.TextMuted;
+				}
+				const std::string chipId = std::string("wui.workbench.state.") + desc->Id + "." + stateId;
+				std::string chipText = stateId;
+				if (chipText.size() > 14)
+					chipText.resize(14);
+				if (Wui::Button(ctx, Wui::HashId(chipId.c_str()), chip, chipText, chipTheme))
+				{
+					stateIndex = static_cast<int>(index);
+					m_ForceState = stateId;
+					m_LastAction = "state " + stateId;
+					ctx.RecordOp("gallery", "state", desc->Id, stateId);
+				}
+			}
+			y += (chips.empty() ? 0.0f : (chips.back().Y - chips.front().Y) + rowH + rowGap);
 		}
 
 		// ---- 属性:类型由 Kind 决定,完全由登记表生成 ----
@@ -1079,6 +1161,21 @@ namespace World
 		out << "{\n";
 		out << "  \"component\": \"" << JsonEscape(desc.Id) << "\",\n";
 		out << "  \"displayName\": \"" << JsonEscape(desc.DisplayName) << "\",\n";
+		// WUI-P1b:探针要按登记表逐个状态驱动/断言,这些字段让它不必反查 C++ 源。
+		out << "  \"typeName\": \"" << JsonEscape(desc.TypeName) << "\",\n";
+		out << "  \"category\": \"" << JsonEscape(desc.Category) << "\",\n";
+		out << "  \"status\": \"" << JsonEscape(StatusText(desc.Status)) << "\",\n";
+		out << "  \"sourceFile\": \"" << JsonEscape(desc.SourceFile) << "\",\n";
+		out << "  \"a11yNotes\": \"" << JsonEscape(desc.A11yNotes) << "\",\n";
+		out << "  \"sizeNotes\": \"" << JsonEscape(desc.SizeNotes) << "\",\n";
+		out << "  \"states\": [";
+		for (size_t index = 0; index < desc.States.size(); ++index)
+		{
+			out << (index == 0 ? "" : ", ") << "{\"id\": \"" << JsonEscape(desc.States[index].Id)
+				<< "\", \"label\": \"" << JsonEscape(desc.States[index].Label) << "\"}";
+		}
+		out << "],\n";
+		out << "  \"commands\": " << m_ShowcaseCommands << ",\n";
 		out << "  \"state\": \"" << JsonEscape(m_AppliedState) << "\",\n";
 		out << "  \"commit\": \"" << ResolveGitCommit() << "\",\n";
 		out << "  \"window\": \"" << JsonEscape(Wui::WuiAccessibility::Get().CurrentWindow()) << "\",\n";
@@ -1086,6 +1183,10 @@ namespace World
 			<< ", \"w\": " << m_CanvasRect.W << ", \"h\": " << m_CanvasRect.H << "},\n";
 		out << "  \"slot\": {\"x\": " << m_CanvasInner.X << ", \"y\": " << m_CanvasInner.Y
 			<< ", \"w\": " << m_CanvasInner.W << ", \"h\": " << m_CanvasInner.H << "},\n";
+		// WUI-P1b:"slot" 是画布内框(历史字段,含义不变);showcase 自己那块占位矩形另给一个键 ——
+		// image / spacer 判定"占位尺寸正确"要的是它(用户裁决 2 的豁免断言)。
+		out << "  \"showcaseSlot\": {\"x\": " << m_CanvasSlot.X << ", \"y\": " << m_CanvasSlot.Y
+			<< ", \"w\": " << m_CanvasSlot.W << ", \"h\": " << m_CanvasSlot.H << "},\n";
 		out << "  \"uiScale\": " << uiScale << ",\n";
 		out << "  \"density\": " << density << ",\n";
 		out << "  \"overlayStage\": " << (m_CanvasOverlayStage ? "true" : "false") << ",\n";
