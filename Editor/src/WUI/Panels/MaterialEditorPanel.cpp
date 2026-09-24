@@ -5727,6 +5727,17 @@ namespace World
 	}
 
 	// ---- M4-S2:代码列(复用 Wui::CodeEditor 内核)----
+	// MAT-INTEL3:补全索引 = "按缓冲区版本刷新"。除了代码列帧首,**补全 / 悬停回调进入前也刷一次**:
+	// `WuiCodeEditor` 在同一帧里先插入文本再查候选,只用帧首版本会让"这一帧刚敲出来的那一行"还没进索引
+	// —— 光标行落在函数体区间之外,局部变量/形参被误判成不可见(实测:文末新起一行时必现)。
+	void MaterialEditorPanel::EnsureShaderIndex()
+	{
+		if (m_ShaderCompletionRevision == m_ShaderBuffer.Revision())
+			return;
+		m_ShaderCompletionRevision = m_ShaderBuffer.Revision();
+		m_ShaderCompletion.SetFileSource(m_ShaderBuffer.Text());
+	}
+
 	void MaterialEditorPanel::DrawShaderCode(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
@@ -5753,12 +5764,9 @@ namespace World
 		editorNode.Interactive = true;
 		Wui::WuiAccessibility::Get().Register(editorNode);
 
-		// MAT-INTEL:补全/Hover 的文档表 —— 本文件声明的 `//! param` 名字进候选(Revision 变化才重扫)。
-		if (m_ShaderCompletionRevision != m_ShaderBuffer.Revision())
-		{
-			m_ShaderCompletionRevision = m_ShaderBuffer.Revision();
-			m_ShaderCompletion.SetFileSource(m_ShaderBuffer.Text());
-		}
+		// MAT-INTEL:补全/Hover 的文档表 —— 本文件声明的 `//! param` 名字进候选(Revision 变化才重扫);
+		// MAT-INTEL3 起同一份索引也带语义索引(形参 / 局部变量 / 文件级声明)。
+		EnsureShaderIndex();
 		// MAT-INTEL2:高亮与补全读同一份词表(SlangKeywords.h)+ 同一份参数名扫描 —— 缓存 Update
 		// 放在索引刷新之后,改注解声明的那一帧颜色就是对的。
 		m_ShaderHighlight.Update(m_ShaderBuffer, m_ShaderCompletion.DeclaredNames());
@@ -5795,15 +5803,20 @@ namespace World
 				SlangHighlighter::HighlightLine(text, state, out, &symbols);
 		};
 		// MAT-INTEL:补全(成员 / 文件参数+引擎函数+类型+内建+关键字 / `//!` 注解)+ 悬停同一份文档。
+		// MAT-INTEL3:补全查询带上**光标所在行** —— 局部变量 / 形参按"同一函数体内 + 声明在光标之前"
+		// 过滤(口径见 SlangCompletion.h 的 SlangSemantics);高亮仍只按名字集合着色。
 		options.CompletionIdPrefix = "material.suggest";
 		options.Completion = [this](std::string_view linePrefix,
 			std::vector<World::LuauCompletionItem>& out)
 		{
-			m_ShaderCompletion.Query(linePrefix, 50, out);
+			EnsureShaderIndex();   // 同帧新敲的文本必须在索引里(见本函数上方注释)
+			const int caretLine = m_ShaderBuffer.LineOfOffset(m_ShaderBuffer.Caret());
+			m_ShaderCompletion.QueryAt(linePrefix, caretLine, 50, out);
 		};
 		options.Hover = [this](std::string_view linePrefix, std::string_view word,
 			World::LuauCompletionItem& out)
 		{
+			EnsureShaderIndex();
 			return m_ShaderCompletion.Describe(linePrefix, word, out);
 		};
 		options.GetClipboard = [](std::string& out)

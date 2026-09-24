@@ -130,6 +130,9 @@ namespace World
 		Wui::WuiTextBuffer m_ShaderBuffer;     // 源码(编辑 / 撤销 / 脏标记)
 		SlangHighlightCache m_ShaderHighlight;
 		// MAT-INTEL:补全/Hover 的文档表(字段表来自 MaterialSurfaceContract,文件参数来自缓冲)。
+		// MAT-INTEL3:补全 + Hover 的候选/文档。SetFileSource 同时建"保守语义索引"
+		// (形参 / 局部变量 / 文件级声明 / 类型名);补全用 QueryAt(带光标行)做作用域过滤,
+		// 高亮用 DeclaredNames() 的名字集合着色(不看作用域)。
 		SlangCompletionIndex m_ShaderCompletion;
 		uint64_t m_ShaderCompletionRevision = ~0ull;   // 已喂给索引的缓冲区版本
 		std::vector<MaterialParamDecl> m_ShaderParams;
@@ -397,6 +400,8 @@ namespace World
 		float DrawShaderDocument(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		float DrawShaderHeader(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void DrawShaderCode(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// MAT-INTEL3:代码列帧首 / 补全 / 悬停前都调它 —— 按缓冲区版本刷新补全索引(含语义索引)。
+		void EnsureShaderIndex();
 		// MAT-INTEL2 探针钩子:把代码列**真正用到的**逐行 token 落盘(白色比例/关键字覆盖率的
 		// 量化证据;触发 = WLD_SLANG_TOKEN_DUMP,不设环境变量时不会被调用,不影响正常使用)。
 		void DumpShaderTokens(const char* path);

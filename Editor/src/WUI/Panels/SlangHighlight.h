@@ -47,8 +47,11 @@ namespace World
 		bool operator!=(const SlangHighlightState& other) const { return !(*this == other); }
 	};
 
-	// 文件级符号(本文件 `//! param` 声明的参数名):高亮与补全读同一份扫描结果
-	// (SlangAnnotations::CollectDeclaredNames)。指针为空 = 只用内置表 + 契约字段。
+	// 本文件里参与着色的名字:高亮与补全读同一份结果(SlangCompletionIndex::DeclaredNames)
+	// = `//! param` 声明 + MAT-INTEL3 的语义索引(局部变量 / 形参 / 文件级声明 / 类型名 / 成员)。
+	// **着色按名字集合,不区分作用域**(高亮没有"光标行"这一维):索引里的名字在整个文件里都着
+	// Global 色,所以跨函数的同名标识符会一起着色 —— 口径见 SlangCompletion.h 的 SlangSemantics。
+	// 指针为空 = 只用内置表 + 契约字段。
 	struct SlangHighlightSymbols
 	{
 		const std::vector<std::string>* FileNames = nullptr;
