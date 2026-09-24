@@ -333,14 +333,12 @@ namespace World
 			const bool hovered = ctx.IsHovered(rect);
 			const Wui::WuiColor fill = !enabled ? theme.PanelBg
 				: (primary ? theme.Accent : (hovered ? theme.ButtonHover : theme.ButtonBg));
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, fill, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect,
-				enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f });
+			Wui::PanelBackground(ctx, rect, fill, 3.0f);
+			Wui::HighlightOutline(ctx, rect,
+				enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f);
 			const Wui::WuiColor textColor = !enabled ? theme.TextDisabled
 				: (primary ? theme.WindowBg : theme.Text);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-				{ rect.X + 9.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0.0f, 0.0f },
-				textColor, 0.0f, 1.0f, label, 15.0f, false });
+			Wui::Label(ctx, { rect.X + 9.0f, rect.Y + (rect.H - 15.0f) * 0.5f }, label, textColor, 15.0f);
 			Wui::WuiAccessNode node;
 			node.Id = id;
 			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
@@ -1159,9 +1157,8 @@ namespace World
 			if (!desc.Extension.empty())
 			{
 				const float textWidth = ctx.MeasureTextWidth(desc.Extension, 12.0f);
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-					{ row.X + row.W - textWidth - 8.0f, row.Y + (row.H - 15.0f) * 0.5f, 0, 0 },
-					theme.TextMuted, 0, 1.0f, desc.Extension, 12.0f, false });
+				Wui::Label(ctx, { row.X + row.W - textWidth - 8.0f, row.Y + (row.H - 15.0f) * 0.5f },
+					desc.Extension, theme.TextMuted, 12.0f);
 			}
 			Wui::Tooltip(ctx, row, tooltip);
 		}
@@ -1359,6 +1356,7 @@ namespace World
 			const float iconSize = kSliceIconSize * (hovered ? kSliceHoverIconScale : 1.0f);
 			const uint64_t icon = slice.IsDir ? m_DirIconId : m_FileIconId;
 			if (icon != 0)
+				// 缺件(W3.2):`Wui::Image` 把着色写死成 theme.Text,表达不了这里的白色/代码蓝染色 —— 见报告 §4-2。
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Image,
 					{ cell.X + cell.W * 0.5f - iconSize * 0.5f,
 					  cell.Y + gap - (iconSize - kSliceIconSize) * 0.5f, iconSize, iconSize },
@@ -1374,9 +1372,9 @@ namespace World
 				const float badgeSize = infoSize;
 				const float badgeW = ctx.MeasureTextWidth(badge.Text, badgeSize) + theme.PadSmall * 2.0f;
 				const float badgeH = badgeSize + 4.0f;
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-					{ cell.X + gap, cell.Y + gap, badgeW, badgeH },
-					kShaderBadgeFill, badgeH * 0.5f });
+				Wui::PanelBackground(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH },
+					kShaderBadgeFill, badgeH * 0.5f);
+				// 缺件(W3.2):徽标字形是粗体,`Wui::Label` 没有 bold 形参 —— 保留裸绘制,见报告 §4-1。
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
 					{ cell.X + gap + theme.PadSmall, cell.Y + gap + 2.0f, 0.0f, 0.0f },
 					kShaderBadgeText, 0.0f, 1.0f, badge.Text, badgeSize, true });
@@ -1390,8 +1388,9 @@ namespace World
 				const float badgeSize = infoSize;
 				const float badgeW = ctx.MeasureTextWidth(badge.Text, badgeSize) + theme.PadSmall * 2.0f;
 				const float badgeH = badgeSize + 4.0f;
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-					{ cell.X + gap, cell.Y + gap, badgeW, badgeH }, theme.Accent, badgeH * 0.5f });
+				Wui::PanelBackground(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH },
+					theme.Accent, badgeH * 0.5f);
+				// 缺件(W3.2):同上,粗体字形没有库入口。
 				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
 					{ cell.X + gap + theme.PadSmall, cell.Y + gap + 2.0f, 0.0f, 0.0f },
 					Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, 0.0f, 1.0f, badge.Text, badgeSize, true });
@@ -1404,12 +1403,11 @@ namespace World
 			const float nameW = ctx.MeasureTextWidth(nameText, nameSize);
 			const float nameX = cell.X + (cell.W - nameW) * 0.5f;
 			if (selected)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
+				Wui::PanelBackground(ctx,
 					{ nameX - theme.PadSmall, nameY - 1.0f, nameW + theme.PadSmall * 2.0f, nameSize + 4.0f },
-					theme.Selection, theme.Radius });
+					theme.Selection, theme.Radius);
 			if (!nameText.empty())
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { nameX, nameY, 0.0f, 0.0f },
-					theme.Text, 0.0f, 1.0f, nameText, nameSize, false });
+				Wui::Label(ctx, { nameX, nameY }, nameText, theme.Text, nameSize);
 
 			// 次级信息:文件夹 = "文件夹";文件 = 扩展名 · 大小。
 			// 大小按需 stat,只统计**可见**切片(大目录在网格模式下不再每帧全量 stat)。
@@ -1425,9 +1423,9 @@ namespace World
 					+ FormatBytes(static_cast<size_t>(bytes));
 			const std::string infoText = EllipsizeToWidth(ctx, info, textBudget, infoSize);
 			if (!infoText.empty())
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-					{ cell.X + (cell.W - ctx.MeasureTextWidth(infoText, infoSize)) * 0.5f, infoY, 0.0f, 0.0f },
-					theme.TextMuted, 0.0f, 1.0f, infoText, infoSize, false });
+				Wui::Label(ctx,
+					{ cell.X + (cell.W - ctx.MeasureTextWidth(infoText, infoSize)) * 0.5f, infoY },
+					infoText, theme.TextMuted, infoSize);
 
 			// 描边:常驻 1px Border → 悬停 BorderStrong → 选中 2px Accent(选中 + 悬停再提亮一档)。
 			Wui::WuiColor stroke = theme.Border;
@@ -1441,7 +1439,7 @@ namespace World
 			}
 			else if (hovered)
 				stroke = theme.BorderStrong;
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, cell, stroke, theme.Radius, thickness });
+			Wui::HighlightOutline(ctx, cell, stroke, theme.Radius, thickness);
 
 			interact(slice.Path, cell, slice.IsDir);
 			// D10-6:从树菜单发起的重命名画在树行上;内容区这一份画在名称位置上。
@@ -1493,13 +1491,12 @@ namespace World
 			const bool hovered = ctx.IsHovered(row);
 			if (selected)
 			{
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.Selection, theme.Radius });
+				Wui::PanelBackground(ctx, row, theme.Selection, theme.Radius);
 				// 左侧 2px 强调条:与树的选中语言一致(行内上下各留 1px)。
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-					{ row.X, row.Y + 1.0f, 2.0f, row.H - 2.0f }, theme.Accent, 1.0f });
+				Wui::PanelBackground(ctx, { row.X, row.Y + 1.0f, 2.0f, row.H - 2.0f }, theme.Accent, 1.0f);
 			}
 			else if (hovered)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, row, theme.HoverBg, theme.Radius });
+				Wui::PanelBackground(ctx, row, theme.HoverBg, theme.Radius);
 
 			const uint64_t icon = slice.IsDir ? m_DirIconId : m_FileIconId;
 			if (icon != 0)
@@ -1514,16 +1511,14 @@ namespace World
 			const float nameBudget = std::max(0.0f, nameW - (nameX - row.X) - theme.PadSmall);
 			const std::string nameText = EllipsizeToWidth(ctx, slice.Name, nameBudget, theme.FontSizeBody);
 			if (!nameText.empty())
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-					{ nameX, row.Y + (row.H - theme.FontSizeBody) * 0.5f, 0.0f, 0.0f },
-					theme.Text, 0.0f, 1.0f, nameText, theme.FontSizeBody, false });
+				Wui::Label(ctx, { nameX, row.Y + (row.H - theme.FontSizeBody) * 0.5f },
+					nameText, theme.Text, theme.FontSizeBody);
 
 			const std::string typeText = EllipsizeToWidth(ctx, slice.TypeLabel,
 				std::max(0.0f, typeW - theme.PadSmall * 2.0f), smallSize);
 			if (!typeText.empty())
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-					{ typeX + theme.PadSmall, row.Y + (row.H - smallSize) * 0.5f, 0.0f, 0.0f },
-					theme.TextMuted, 0.0f, 1.0f, typeText, smallSize, false });
+				Wui::Label(ctx, { typeX + theme.PadSmall, row.Y + (row.H - smallSize) * 0.5f },
+					typeText, theme.TextMuted, smallSize);
 
 			const std::string sizeText = slice.IsDir
 				? std::string("-")
@@ -1531,9 +1526,8 @@ namespace World
 			const std::string sizeShown = EllipsizeToWidth(ctx, sizeText,
 				std::max(0.0f, sizeW - theme.PadSmall * 2.0f), smallSize);
 			if (!sizeShown.empty())
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-					{ sizeX + theme.PadSmall, row.Y + (row.H - smallSize) * 0.5f, 0.0f, 0.0f },
-					theme.TextMuted, 0.0f, 1.0f, sizeShown, smallSize, false });
+				Wui::Label(ctx, { sizeX + theme.PadSmall, row.Y + (row.H - smallSize) * 0.5f },
+					sizeShown, theme.TextMuted, smallSize);
 
 			interact(slice.Path, row, slice.IsDir);
 			// D10-6:从树菜单发起的重命名画在树行上,内容区不再重复画同 id 输入框。
@@ -2876,8 +2870,10 @@ namespace World
 		{
 			const auto separator = [&](const Wui::WuiRect& firstOfGroup)
 			{
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-					{ firstOfGroup.X - 8.0f, rect.Y + 9.0f, 1.0f, 18.0f }, theme.Border, 0.0f });
+				// 缺件(W3.2):库里没有"即时分隔线"(WuiSeparator 是占位 widget、ToolbarSeparator 几何不同),
+				// 这一条按纯填充走 PanelBackground —— 命令逐字段不变,语义缺口进报告 §4-3。
+				Wui::PanelBackground(ctx, { firstOfGroup.X - 8.0f, rect.Y + 9.0f, 1.0f, 18.0f },
+					theme.Border, 0.0f);
 			};
 			separator(m_SearchField->Rect());
 			if (m_MoreButton)
