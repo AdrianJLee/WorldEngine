@@ -26,6 +26,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -1469,6 +1471,192 @@ int main()
 				const std::vector<std::string> recursiveConflicts = LocalizationConflicts();
 				CHECK(recursiveConflicts.size() == 1);
 				CHECK(HasEntry(recursiveConflicts, "rec/zz-top.json:dup.key"));   // 记被忽略的那次定义
+			}
+
+			// 21i. S2 回退链候选:`zh-CN` → {`zh-CN`, `zh`}(去重);英文族/空 = 空表;
+			//      逐层按候选顺序找 `<dir>/<candidate>/`,先命中的候选生效(层之间独立解析)。
+			{
+				const fs::path dir = root / "fallback";
+				WriteText(dir / "fb" / "zh" / "main.json", "{ \"fb.key\": \"zh-main\" }");
+				WriteText(dir / "fb" / "zh-TW" / "main.json", "{ \"fb.key\": \"zh-TW-main\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("fb", dir / "fb", 0);
+				SetLanguage("zh");
+				ReloadLocalization();
+				const std::vector<std::string> single = LocalizationLanguageCandidates();
+				CHECK(single.size() == 1 && single[0] == "zh");              // 主标签 = 自身,不重复
+				CHECK(Tr("fb.key", "fallback") == "zh-main");
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				const std::vector<std::string> chain = LocalizationLanguageCandidates();
+				CHECK(chain.size() == 2 && chain[0] == "zh-CN" && chain[1] == "zh");
+				CHECK(Tr("fb.key", "fallback") == "zh-main");                // zh-CN 无包 → 用主标签 zh
+				SetLanguage("zh-TW");
+				ReloadLocalization();
+				CHECK(Tr("fb.key", "fallback") == "zh-TW-main");             // 命中 zh-TW 就不再看 zh
+				CHECK(LocalizationLanguageCandidates().size() == 2);
+				SetLanguage("en");
+				CHECK(LocalizationLanguageCandidates().empty());             // 英文族 = 内联默认,无候选
+				CHECK(!LocalizationFilesChanged());
+				SetLanguage("en-US");
+				CHECK(LocalizationLanguageCandidates().empty());
+				SetLanguage("");
+				CHECK(LocalizationLanguageCandidates().empty());
+				CHECK(Tr("fb.key", "inline") == "inline");                   // 空语言 = 内联默认
+			}
+
+			// 21j. S2 编译产物:层语言目录里的 `catalog.json` 且 `$format` 命中 → 该层该语言**只读它**
+			//      (域文件被跳过;`$layers/$source_hash` 仅元数据);`$format` 不匹配 → 维持 S1 域文件扫描。
+			{
+				const fs::path dir = root / "artifact";
+				const fs::path domain = dir / "prod" / "zh-CN" / "panels" / "a.json";
+				WriteText(domain, "{ \"art.key\": \"domain-value\" }");
+				WriteText(dir / "prod" / "zh-CN" / "catalog.json",
+					"{ \"$format\": \"wld-localization-catalog/1\", \"$language\": \"zh-CN\","
+					" \"$layers\": [\"engine\", \"editor\"], \"$source_hash\": \"deadbeef\","
+					" \"art.key\": \"artifact-value\","
+					" \"art.obj\": { \"text\": \"artifact-obj\", \"status\": \"reviewed\", \"maxLength\": 8 },"
+					" \"art.num\": 5 }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("prod", dir / "prod", 0);
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(Tr("art.key", "fallback") == "artifact-value");        // 产物优先:域文件同键被跳过
+				CHECK(Tr("art.obj", "fallback") == "artifact-obj");         // 结构化条目照读
+				CHECK(Tr("art.num", "fallback") == "fallback");              // 非文本值不进表
+				CHECK(LocalizationSource("art.key") == "prod/catalog.json");
+				CHECK(Tr("$source_hash", "meta-fallback") == "meta-fallback");
+				CHECK(Tr("$layers", "meta-fallback") == "meta-fallback");    // 产物元数据不作文案
+				CHECK(LocalizationSource("$layers").empty());
+				WriteText(domain, "{ \"art.key\": \"domain-value-2\" }");
+				CHECK(!LocalizationFilesChanged());                          // 只跟踪产物本身(域文件不参与)
+				ReloadLocalization();
+				CHECK(Tr("art.key", "fallback") == "artifact-value");        // 域文件改了也不进表
+				WriteText(dir / "prod" / "zh-CN" / "catalog.json",
+					"{ \"$format\": \"wld-localization-catalog/1\", \"$language\": \"zh-CN\","
+					" \"art.key\": \"artifact-value-2-longer\","
+					" \"art.obj\": { \"text\": \"artifact-obj\" } }");
+				CHECK(LocalizationFilesChanged());                           // 产物改动 → 真
+				ReloadLocalization();
+				CHECK(!LocalizationFilesChanged());
+				CHECK(Tr("art.key", "fallback") == "artifact-value-2-longer");
+				// `$format` 不匹配(旧格式/普通 JSON 恰好叫 catalog.json)→ 该文件回到域文件扫描里。
+				const fs::path plain = root / "artifact-plain";
+				WriteText(plain / "plain" / "zh-CN" / "catalog.json",
+					"{ \"$format\": \"wld-localization/1\", \"plain.key\": \"catalog-as-domain\" }");
+				WriteText(plain / "plain" / "zh-CN" / "other.json", "{ \"plain.other\": \"other-value\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("plain", plain / "plain", 0);
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(Tr("plain.key", "fallback") == "catalog-as-domain");
+				CHECK(Tr("plain.other", "fallback") == "other-value");
+				CHECK(!LocalizationFilesChanged());
+			}
+
+			// 21k. S2 热重载戳:未加载过 = false;加载后不变 = false;改 / 增 / 删 = true;
+			//      `true` 只表示"盘面变了",不自动重载(宿主调 `ReloadLocalization`)。
+			{
+				const fs::path dir = root / "stamp";
+				const fs::path a = dir / "st" / "zh-CN" / "a.json";
+				const fs::path b = dir / "st" / "zh-CN" / "b.json";
+				const fs::path c = dir / "st" / "zh-CN" / "panels" / "c.json";
+				WriteText(a, "{ \"st.a\": \"a1\" }");
+				WriteText(b, "{ \"st.b\": \"b1\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("st", dir / "st", 0);
+				CHECK(!LocalizationFilesChanged());                          // 未加载过 → false
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(!LocalizationFilesChanged());                          // 盘面未变
+				WriteText(a, "{ \"st.a\": \"a1-longer\" }");
+				CHECK(LocalizationFilesChanged());                           // 改
+				CHECK(Tr("st.a", "fallback") == "a1");                       // 不自动重载
+				ReloadLocalization();
+				CHECK(!LocalizationFilesChanged());
+				CHECK(Tr("st.a", "fallback") == "a1-longer");
+				WriteText(c, "{ \"st.c\": \"c1\" }");                        // 新增(含子目录)
+				CHECK(LocalizationFilesChanged());
+				ReloadLocalization();
+				CHECK(!LocalizationFilesChanged());
+				CHECK(Tr("st.c", "fallback") == "c1");
+				std::error_code removeError;
+				CHECK(fs::remove(b, removeError));                           // 删除
+				CHECK(LocalizationFilesChanged());
+				ReloadLocalization();
+				CHECK(!LocalizationFilesChanged());
+				CHECK(Tr("st.b", "fallback") == "fallback");
+			}
+
+			// 21l. S3 占位符:`TrFormat` 先查表(含结构化条目)再替换 `{name}`;未知占位符原样保留;
+			//      `{{`/`}}` 转义;未命中 = fallback(同样替换/转义)+ 缺键记账;`Tr` 不做替换。
+			{
+				const fs::path dir = root / "format";
+				WriteText(dir / "fmt" / "zh-CN" / "f.json",
+					"{ \"fmt.obj\": { \"text\": \"deleted {count} of {name}\" },"
+					" \"fmt.esc\": \"{{literal}} {name}\","
+					" \"fmt.unknown\": \"keep {missing} tail\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("fmt", dir / "fmt", 0);
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				const std::vector<std::pair<std::string_view, std::string_view>> args{
+					{ "count", "5" }, { "name", "3" } };
+				CHECK(TrFormat("fmt.obj", "fallback", args) == "deleted 5 of 3");
+				CHECK(TrFormat("fmt.esc", "fallback", args) == "{literal} 3");
+				CHECK(TrFormat("fmt.unknown", "fallback", args) == "keep {missing} tail");
+				CHECK(TrFormat("fmt.miss", "raw {name}/{unknown} {{x}}", args) == "raw 3/{unknown} {x}");
+				CHECK(HasEntry(MissingLocalizationKeys(), "fmt.miss"));
+				CHECK(Tr("fmt.obj", "fallback") == "deleted {count} of {name}");   // Tr 原样透传
+			}
+
+			// 21m. S3 复数:按语言类别选 `plural` 变体(en: one/other;ru: one/few/many;
+			//      zh/ja/ko 与其它语言: other;缺类别回退 other),再替换 `{count}`;
+			//      没有 `plural` 的条目 = 文本 + `{count}`;未命中 = fallback + `{count}`。
+			{
+				const fs::path dir = root / "plural";
+				const std::string all =
+					"{ \"p.all\": { \"plural\": { \"one\": \"one:{count}\", \"few\": \"few:{count}\","
+					" \"many\": \"many:{count}\", \"other\": \"other:{count}\" } },"
+					" \"p.only\": { \"plural\": { \"other\": \"only-other:{count}\" } },"
+					" \"p.plain\": \"plain:{count}\" }";
+				WriteText(dir / "pl" / "ru" / "p.json", all);
+				WriteText(dir / "pl" / "zh-CN" / "p.json", all);
+				WriteText(dir / "pl" / "de" / "p.json", all);
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("pl", dir / "pl", 0);
+				SetLanguage("ru");
+				ReloadLocalization();
+				CHECK(TrPlural("p.all", "fb", 1) == "one:1");
+				CHECK(TrPlural("p.all", "fb", 2) == "few:2");
+				CHECK(TrPlural("p.all", "fb", 5) == "many:5");
+				CHECK(TrPlural("p.all", "fb", 11) == "many:11");
+				CHECK(TrPlural("p.all", "fb", 21) == "one:21");
+				CHECK(TrPlural("p.all", "fb", 22) == "few:22");
+				CHECK(TrPlural("p.all", "fb", 0) == "many:0");
+				CHECK(TrPlural("p.only", "fb", 3) == "only-other:3");        // 缺该类别 → other
+				CHECK(TrPlural("p.plain", "fb", 4) == "plain:4");            // 没有 plural:文本 + {count}
+				CHECK(Tr("p.only", "fb") == "only-other:{count}");           // 只有 plural.other → 当条目文本
+				CHECK(TrPlural("p.miss", "miss {count}", 2) == "miss 2");    // 未命中:fallback + {count}
+				CHECK(HasEntry(MissingLocalizationKeys(), "p.miss"));
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(TrPlural("p.all", "fb", 1) == "other:1");              // zh:任意数量 → other
+				CHECK(TrPlural("p.all", "fb", 5) == "other:5");
+				SetLanguage("de");
+				ReloadLocalization();
+				CHECK(TrPlural("p.all", "fb", 1) == "other:1");              // 未列出的语言 → other
+				CHECK(TrPlural("p.all", "fb", 2) == "other:2");
+				// 英文族按口径(候选 = 空表)不读语言包,所以 en 类别规则只能在"有词典"时观察:
+				// 用单文件入口给一份 en 词典,验证 one/other(真实调用点的英文文案来自内联 fallback)。
+				const fs::path enCatalog = dir / "en-catalog.json";
+				WriteText(enCatalog, all);
+				ClearLocalizationLayers();
+				SetLanguage("en");
+				CHECK(LoadLocalizationCatalog(enCatalog));
+				CHECK(TrPlural("p.all", "fb", 1) == "one:1");
+				CHECK(TrPlural("p.all", "fb", 2) == "other:2");
+				CHECK(TrPlural("p.all", "fb", 0) == "other:0");
 			}
 
 			// 收尾:恢复全局态(清层 + 英文内联),删除夹具目录。

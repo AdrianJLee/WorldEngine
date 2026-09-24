@@ -62,7 +62,8 @@ Engine/
 
 本地化目录树(2026-09-24,S1):`<层>/assets/localization/<lang>/<域>/<件>.json`,文件头 `$owns` 声明
 该文件拥有的键前缀;层序 `engine → editor → project`(高优先层覆盖,缺翻译回退内联英文);加载器递归扫描。
-方案与迁移记录见 `tools/agents/tasks/20260924-1200-localization-layers/plan.md`。
+格式、工具链与打包口径见 `docs/dev/localization.md`;方案与迁移记录见
+`tools/agents/tasks/20260924-1200-localization-layers/plan.md`。
 
 ## 4. 生成物三档
 

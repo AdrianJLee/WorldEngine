@@ -22,7 +22,9 @@
   "panel.model.reimport.failed": "重导失败: ",
   "panel.model.reimport.unknown_error": "未知错误",
   "panel.model.reimport.done": "已重导 ",
-  "panel.model.stats.nodes": " / 节点 ",
+  "panel.model.stats.nodes": {
+    "text": " / 节点 {count}"
+  },
   "panel.model.stats.materials": " / 材质 ",
   "panel.model.stats.nodes_label": "节点 ",
   "panel.model.stats.sep": " / ",

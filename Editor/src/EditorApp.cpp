@@ -17,6 +17,45 @@
 
 namespace World
 {
+	namespace
+	{
+		// WLD-L10N-S2:语言包热重载轮询(0.5s 节流;消费 S3 的 `LocalizationFilesChanged`)。
+		//
+		//  - 只在**非内联默认语言**下查盘:英文(en/空)按 P4-UX1 口径不读语言包,盘上文件变化
+		//    不该触发重扫,更不该为它刷盘;
+		//  - `LocalizationFilesChanged()` 只比较"已加载输入"的(路径, 大小, mtime),不自己重载 ——
+		//    何时重载由宿主决定;true → `ReloadLocalization()` 立即重扫(Generation++),
+		//    面板每帧经 `Tr` 取文案,下一帧就读到新内容,不需要重启。
+		class LocalizationHotReloadLayer : public Layer
+		{
+		public:
+			LocalizationHotReloadLayer()
+				:Layer("LocalizationHotReload")
+			{
+			}
+
+			void OnUpdate(Timestep ts) override
+			{
+				m_Elapsed += ts.GetSeconds();
+				if (m_Elapsed < kInterval)
+					return;
+				m_Elapsed = 0.0f;
+				const std::string& language = Wui::GetLanguage();
+				if (language.empty() || language == "en" || language == "en-US")
+					return;   // 内联默认语言:没有语言包参与,不查盘
+				if (!Wui::LocalizationFilesChanged())
+					return;
+				Wui::ReloadLocalization();
+				WLD_CORE_INFO("[i18n] 语言包已变化,热重载完成(语言 {0};generation {1})",
+					language, Wui::LocalizationGeneration());
+			}
+
+		private:
+			static constexpr float kInterval = 0.5f;
+			float m_Elapsed = kInterval;   // 首帧即做第一次检查(不等 0.5s)
+		};
+	}
+
 	class EditorApp : public Application
 	{
 	public:
@@ -24,6 +63,8 @@ namespace World
 			:Application("Editor", context)
 		{
 			PushLayer(WLD_ENGINE_NEW(EditorLayer));
+			// 热重载轮询层:改语言包文件后不重启即生效(与 EditorLayer 同栈,每帧 OnUpdate)。
+			PushLayer(WLD_ENGINE_NEW(LocalizationHotReloadLayer));
 		}
 		~EditorApp()
 		{
@@ -91,21 +132,64 @@ namespace World
 				continue;
 			World::Editor::CookOptions options;
 			options.PublishDir = arguments[i + 1];
-			size_t next = i + 2;
-			if (next + 1 < arguments.size() && arguments[next] == "--scene")
+			// 可选参数(顺序无关):`--scene <相对路径>`、`--check`、
+			// `--languages=zh-CN,en`(WLD-L10N-S2:发行包只带选中的语言;不写 = 扫描到的全部语言)。
+			for (size_t next = i + 2; next < arguments.size(); )
 			{
-				options.StartSceneOverride = arguments[next + 1];
-				next += 2;
+				if (arguments[next] == "--scene" && next + 1 < arguments.size())
+				{
+					options.StartSceneOverride = arguments[next + 1];
+					next += 2;
+					continue;
+				}
+				if (arguments[next] == "--check")
+				{
+					options.CheckOnly = true;
+					++next;
+					continue;
+				}
+				if (arguments[next].rfind("--languages=", 0) == 0)
+				{
+					const std::string list = arguments[next].substr(std::strlen("--languages="));
+					size_t start = 0;
+					for (;;)
+					{
+						const size_t comma = list.find(',', start);
+						std::string language = list.substr(start,
+							comma == std::string::npos ? std::string::npos : comma - start);
+						// 去首尾空白:`--languages=zh-CN, en` 也接受。
+						const size_t first = language.find_first_not_of(" \t");
+						const size_t last = language.find_last_not_of(" \t");
+						language = first == std::string::npos ? std::string()
+							: language.substr(first, last - first + 1);
+						if (!language.empty())
+							options.Languages.push_back(language);
+						if (comma == std::string::npos)
+							break;
+						start = comma + 1;
+					}
+					++next;
+					continue;
+				}
+				break;   // 未知参数:到此为止(与旧的两段式解析同样的宽容度)
 			}
-			if (next < arguments.size() && arguments[next] == "--check")
-				options.CheckOnly = true;
 
-			std::printf("[cook] publish dir: %s\n", options.PublishDir.string().c_str());
+			std::string languageList;
+			for (const std::string& language : options.Languages)
+			{
+				if (!languageList.empty())
+					languageList += ",";
+				languageList += language;
+			}
+			std::printf("[cook] publish dir: %s (languages: %s)\n", options.PublishDir.string().c_str(),
+				languageList.empty() ? "(all)" : languageList.c_str());
 			const World::Editor::CookResult cooked = World::Editor::CookProject(options);
 			if (cooked.Ok)
 			{
-				std::printf("[cook] OK: %zu assets (%zu changed), %zu shader artifacts\n",
-					cooked.AssetsTotal, cooked.AssetsChanged, cooked.ShaderArtifacts);
+				std::printf("[cook] OK: %zu assets (%zu changed), %zu shader artifacts, "
+					"%zu localization files (%zu languages)\n",
+					cooked.AssetsTotal, cooked.AssetsChanged, cooked.ShaderArtifacts,
+					cooked.LocalizationFiles, cooked.LocalizationLanguages);
 				std::exit(0);
 			}
 			std::fprintf(stderr, "[cook] FAILED: %s\n", cooked.Error.c_str());

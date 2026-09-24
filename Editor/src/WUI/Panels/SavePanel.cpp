@@ -75,7 +75,12 @@ namespace World
 			{
 				// 与槽位行的 Save 按钮同一条路径。
 				if (saves->Save(0, "current"))
-					m_Status = Wui::Tr("panel.save.status.saved", "Saved to slot ") + std::to_string(0);
+				{
+					// WLD-L10N-S3:槽位号走占位符(`{slot}`),语言包可以调整语序/量词。
+					const std::string slotText = std::to_string(0);
+					m_Status = Wui::TrFormat("panel.save.status.saved", "Saved to slot {slot}",
+						{ { "slot", slotText } });
+				}
 				else
 					m_Status = Wui::Tr("panel.save.status.save_failed", "Save failed: ") + saves->GetLastError();
 				m_StatusUntil = static_cast<double>(ctx.Frame()) + 300.0;
@@ -115,7 +120,11 @@ namespace World
 				const std::string before = saves->GetLastError();
 				(void)before;
 				if (saves->Save(slot, "current"))
-					m_Status = Wui::Tr("panel.save.status.saved", "Saved to slot ") + std::to_string(slot);
+				{
+					const std::string slotText = std::to_string(slot);
+					m_Status = Wui::TrFormat("panel.save.status.saved", "Saved to slot {slot}",
+						{ { "slot", slotText } });
+				}
 				else
 					m_Status = Wui::Tr("panel.save.status.save_failed", "Save failed: ") + saves->GetLastError();
 				m_StatusUntil = static_cast<double>(ctx.Frame()) + 300.0;
@@ -133,7 +142,11 @@ namespace World
 					m_Status = Wui::Tr("panel.save.status.loaded", "Loaded slot ") + std::to_string(slot)
 						+ Wui::Tr("panel.save.status.loaded_stats", ": updated ") + std::to_string(report.EntitiesUpdated)
 						+ Wui::Tr("panel.save.status.loaded_created", " / created ") + std::to_string(report.EntitiesCreated)
-						+ Wui::Tr("panel.save.status.loaded_components", " / components ") + std::to_string(report.ComponentsApplied)
+						// 组件计数走复数(en 内联回退没有语言包,单/复数由调用点按同一类别规则给出:
+						// 1 → one;zh-CN 语言包给 `plural.other`(中文只有 other 类别))。
+						+ Wui::TrPlural("panel.save.status.loaded_components",
+							report.ComponentsApplied == 1 ? " / component {count}" : " / components {count}",
+							static_cast<long long>(report.ComponentsApplied))
 						+ (report.ComponentsFailed ? Wui::Tr("panel.save.status.loaded_failed", " / failed ")
 							+ std::to_string(report.ComponentsFailed) : "");
 				}

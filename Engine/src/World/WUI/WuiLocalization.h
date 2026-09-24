@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace World::Wui
@@ -67,4 +68,27 @@ namespace World::Wui
 	WLD_API std::string LocalizationSource(std::string_view key);
 	// 层内重复键记账(先出现者生效)。条目形如 `"editor/shell/menu.json:menu.file"`。
 	WLD_API std::vector<std::string> LocalizationConflicts();
+
+	// ---- S2:回退链 / 编译产物 / 热重载戳 ----
+
+	// 语言回退链候选(S2):`zh-CN` → {`zh-CN`, `zh`}(去重;逐层按候选顺序找 `<directory>/<candidate>/`,
+	// 先命中的候选生效,层之间各自独立解析);英文族(`en`/`en-*`)与空语言 = **空表**
+	// (内联默认文案,不读目录)。
+	WLD_API std::vector<std::string> LocalizationLanguageCandidates();
+	// 热重载戳(S2):本次加载涉及的输入文件(域文件,或编译产物 `<lang>/catalog.json`)
+	// 里任一「大小/mtime 变化、新增、删除」→ true。**只做比较,不重载**;
+	// 宿主发现 true 后自行调 `ReloadLocalization()`。
+	// 从未加载(`Loaded` = false)、或当前语言是英文族(不读盘)时返回 false。
+	WLD_API bool LocalizationFilesChanged();
+
+	// ---- S3:占位符与复数 ----
+
+	// 占位符格式化(S3):先查表(命中条目文本,支持结构条目),再替换 `{name}` ——
+	// 未知占位符原样保留;`{{`/`}}` 转义回 `{`/`}`。未命中 = `fallback`(同样做替换/转义)。
+	WLD_API std::string TrFormat(std::string_view key, std::string_view fallback,
+		const std::vector<std::pair<std::string_view, std::string_view>>& args);
+	// 复数(S3):条目带 `plural` 时按当前语言的复数类别选变体
+	// (en: one/other;ru: one/few/many/other;zh/ja/ko 等其它语言: other;缺类别回退 other),
+	// 再替换 `{count}`;没有 `plural` 时 = 文本(命中条目文本,否则 `fallback`)+ `{count}` 替换。
+	WLD_API std::string TrPlural(std::string_view key, std::string_view fallback, long long count);
 }

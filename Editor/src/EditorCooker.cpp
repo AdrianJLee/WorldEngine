@@ -9,6 +9,7 @@
 #include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/ShaderUtils.h"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <memory>
@@ -280,6 +281,114 @@ namespace World::Editor
 		private:
 			fs::path m_Path;
 		};
+
+		// WLD-L10N-S2:发行包的语言子集(§11.1 打包布局)。
+		//
+		// 层序 = 运行时的注册序:engine(`WLD_WORLD_DIR/assets/localization`,库自带件/引擎键)
+		// → project(`WLD_PROJECT_DIR/assets/localization`,项目覆盖 + 项目文案);**编辑器层不进游戏包**
+		// (`Editor/assets/localization` 是编辑器 UI 的语言包,游戏里没有它的消费者)。
+		// 落点:`<publish>/localization/<engine|project>/<语言>/**`,层内相对路径(含域子目录)原样保留;
+		// 只拷域文件 `*.json`(编译产物 `catalog.json` 同样以 `.json` 落在语言根,一起拷走)。
+		struct LocalizationCopyResult
+		{
+			std::string Error;
+			std::vector<std::string> Languages;   // 实际带上内容的语言(按输入序)
+			std::vector<std::string> Skipped;     // 选中但两层都没有内容的语言
+			size_t Files = 0;
+		};
+
+		// 一层目录下扫描到的语言子目录名(排序去重);目录不存在 = 空(不是错误)。
+		std::vector<std::string> ScanLocalizationLanguages(const fs::path& layerDirectory)
+		{
+			std::vector<std::string> languages;
+			std::error_code ec;
+			if (!fs::is_directory(layerDirectory, ec))
+				return languages;
+			for (const fs::directory_entry& entry : fs::directory_iterator(layerDirectory,
+				fs::directory_options::skip_permission_denied, ec))
+			{
+				std::error_code entryEc;
+				if (entry.is_directory(entryEc))
+					languages.push_back(entry.path().filename().string());
+			}
+			std::sort(languages.begin(), languages.end());
+			languages.erase(std::unique(languages.begin(), languages.end()), languages.end());
+			return languages;
+		}
+
+		// 把一层的一门语言按相对路径拷进发行目录;返回拷贝的文件数。
+		// 层目录/语言目录不存在 = 0(该层这门语言没内容,不是失败);拷贝失败写入 error 并就地停止。
+		size_t CopyLocalizationLanguage(const fs::path& layerDirectory, const std::string& language,
+			const fs::path& destination, std::string& error)
+		{
+			const fs::path source = layerDirectory / language;
+			std::error_code ec;
+			if (!fs::is_directory(source, ec))
+				return 0;
+			size_t copied = 0;
+			for (const fs::directory_entry& entry : fs::recursive_directory_iterator(source,
+				fs::directory_options::skip_permission_denied, ec))
+			{
+				std::error_code entryEc;
+				if (!entry.is_regular_file(entryEc) || entry.path().extension() != ".json")
+					continue;   // 只拷域文件(与产物 catalog.json):不放工具/术语表等其它形态
+				const fs::path target = destination / entry.path().lexically_relative(source);
+				std::error_code directoryEc;
+				fs::create_directories(target.parent_path(), directoryEc);
+				if (directoryEc)
+				{
+					error = "cannot create " + target.parent_path().string() + ": " + directoryEc.message();
+					return copied;
+				}
+				std::error_code copyEc;
+				fs::copy_file(entry.path(), target, fs::copy_options::overwrite_existing, copyEc);
+				if (copyEc)
+				{
+					error = "cannot copy " + entry.path().string() + ": " + copyEc.message();
+					return copied;
+				}
+				++copied;
+			}
+			if (ec && error.empty())
+				error = "cannot scan " + source.string() + ": " + ec.message();
+			return copied;
+		}
+
+		LocalizationCopyResult CopyLocalizationSubset(const CookOptions& options)
+		{
+			LocalizationCopyResult result;
+			const fs::path engineLayer = fs::path(WLD_WORLD_DIR) / "assets" / "localization";
+			const fs::path projectLayer = fs::path(WLD_PROJECT_DIR) / "assets" / "localization";
+
+			// 空列表 = 扫描到的全部语言(engine ∪ project);显式列表原样尊重(不存在的语言记 skipped)。
+			std::vector<std::string> languages = options.Languages;
+			if (languages.empty())
+			{
+				languages = ScanLocalizationLanguages(engineLayer);
+				for (const std::string& language : ScanLocalizationLanguages(projectLayer))
+					languages.push_back(language);
+				std::sort(languages.begin(), languages.end());
+				languages.erase(std::unique(languages.begin(), languages.end()), languages.end());
+			}
+
+			for (const std::string& language : languages)
+			{
+				if (language.empty())
+					continue;
+				const size_t engineFiles = CopyLocalizationLanguage(engineLayer, language,
+					options.PublishDir / "localization" / "engine" / language, result.Error);
+				const size_t projectFiles = CopyLocalizationLanguage(projectLayer, language,
+					options.PublishDir / "localization" / "project" / language, result.Error);
+				if (!result.Error.empty())
+					return result;
+				if (engineFiles == 0 && projectFiles == 0)
+					result.Skipped.push_back(language);
+				else
+					result.Languages.push_back(language);
+				result.Files += engineFiles + projectFiles;
+			}
+			return result;
+		}
 	}
 
 	CookResult CookProject(const CookOptions& options)
@@ -410,7 +519,27 @@ namespace World::Editor
 				fs::copy_options::overwrite_existing);
 			WLD_CORE_INFO("Copied Game.dll into bin/");
 
-			// 7. 写发行清单。
+			// 7. 语言包:发行包只带选中的语言(engine / project 两层;编辑器层不进包,§11.1)。
+			const LocalizationCopyResult localization = CopyLocalizationSubset(options);
+			if (!localization.Error.empty())
+				throw std::runtime_error("Localization copy failed: " + localization.Error);
+			for (const std::string& language : localization.Skipped)
+				WLD_CORE_WARN("Localization subset skipped: 语言 {0} 在 engine/project 两层都没有内容", language);
+			{
+				std::string languagesText;
+				for (const std::string& language : localization.Languages)
+				{
+					if (!languagesText.empty())
+						languagesText += ", ";
+					languagesText += language;
+				}
+				WLD_CORE_INFO("Copied localization: {0} languages ({1}), {2} files",
+					localization.Languages.size(), languagesText, localization.Files);
+			}
+			result.LocalizationLanguages = localization.Languages.size();
+			result.LocalizationFiles = localization.Files;
+
+			// 8. 写发行清单。
 			std::string saveError;
 			if (!World::Asset::ProjectManifest::Save(options.PublishDir / "project.we.yaml", manifest, &saveError))
 				throw std::runtime_error("Project manifest save failed: " + saveError);

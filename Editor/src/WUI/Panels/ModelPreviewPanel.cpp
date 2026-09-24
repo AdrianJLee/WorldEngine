@@ -349,7 +349,9 @@ namespace World
 		const std::string text = Wui::Tr("panel.model.reimport.done", "Reimported ") + m_LogicalPath
 			+ "(mesh " + std::to_string(imported.MeshCount)
 			+ " / submesh " + std::to_string(imported.SubmeshCount)
-			+ Wui::Tr("panel.model.stats.nodes", " / nodes ") + std::to_string(imported.NodeCount)
+			// WLD-L10N-S3:节点数走占位符(`{count}`),语言包可以调整语序。
+			+ Wui::TrFormat("panel.model.stats.nodes", " / nodes {count}",
+				{ { "count", std::to_string(imported.NodeCount) } })
 			+ Wui::Tr("panel.model.stats.materials", " / materials ")
 			+ std::to_string(imported.MaterialPaths.size()) + ")";
 		if (message) *message = text;

@@ -6,14 +6,22 @@
     "panel.save."
   ],
   "panel.save.service_unavailable": "存档服务未就绪(需要项目清单与活动场景)。",
-  "panel.save.status.saved": "已保存到 slot ",
+  "panel.save.status.saved": {
+    "text": "已保存到 slot {slot}"
+  },
   "panel.save.status.save_failed": "保存失败: ",
   "panel.save.status.empty_slot": "slot ",
   "panel.save.status.empty_slot_suffix": " 为空",
   "panel.save.status.loaded": "已读取 slot ",
   "panel.save.status.loaded_stats": ": 更新 ",
   "panel.save.status.loaded_created": " / 新建 ",
-  "panel.save.status.loaded_components": " / 组件 ",
+  "panel.save.status.loaded_components": {
+    "text": " / 组件 {count}",
+    "plural": {
+      "one": " / 组件 {count}",
+      "other": " / 组件 {count}"
+    }
+  },
   "panel.save.status.loaded_failed": " / 失败 ",
   "panel.save.status.load_failed": "读取失败: ",
   "panel.save.status.deleted": "已删除 slot ",
