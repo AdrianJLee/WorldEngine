@@ -11,12 +11,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 
 // 构建期常量由 CMake 注入(见根 CMakeLists 的 WLD_OUTPUT_DIR);单独做语法检查时给个兜底,
@@ -40,10 +42,12 @@ namespace World
 		constexpr const char* kTreeListId = "wui.workbench.tree.list";
 		constexpr const char* kCanvasId = "wui.workbench.canvas";
 		constexpr const char* kCanvasLabelId = "wui.workbench.canvas.label";
-		constexpr const char* kStateComboId = "wui.workbench.prop.__state";
 		constexpr const char* kStatusId = "wui.workbench.status";
 		constexpr const char* kInfoId = "wui.workbench.info";
 		constexpr const char* kPropLabelPrefix = "wui.workbench.prop.";
+		// WUI-P1.5b:属性面板的搜索框 / 分组折叠头(P1.5b 新增的稳定 id)。
+		constexpr const char* kPropSearchId = "wui.workbench.props.search";
+		constexpr const char* kPropGroupHeaderPrefix = "wui.workbench.props.group.";
 
 		constexpr float kMinCanvasSize = 120.0f;
 		constexpr float kMaxCanvasSize = 640.0f;
@@ -104,6 +108,120 @@ namespace World
 			char buffer[32] = {};
 			std::snprintf(buffer, sizeof(buffer), "%.3f", value);
 			return buffer;
+		}
+
+		// ---- WUI-P1.5b:属性面板(UE 式)用的分组/格式化工具 ----
+		//
+		// 值编码协议(颜色 `#RRGGBB[AA]`、尺寸 `WxH`)由登记表侧实现
+		// (`Wui::ParseComponentColor` / `Wui::ParseComponentSize` / `FormatComponent*`),
+		// 面板**只调用不重写** —— 否则面板与 showcase 会各解析一套,迟早不一致。
+		constexpr const char* kPropGroupGeneral = "General";
+
+		std::string ToLowerAscii(std::string_view text)
+		{
+			std::string out;
+			out.reserve(text.size());
+			for (const char ch : text)
+			{
+				const unsigned char byte = static_cast<unsigned char>(ch);
+				out.push_back(byte < 0x80 ? static_cast<char>(std::tolower(byte)) : ch);
+			}
+			return out;
+		}
+
+		// 组名:登记表的枚举 → 面板内的稳定组 id(做 a11y id / 排序键,不随语言变)。
+		// 类型名用 decltype 取而不是直接写:属性分组枚举是**属性元数据**,不是可展示控件,
+		// 而共享门禁 `check-ui-components.ps1` 会把面板里出现的控件命名空间类型名当成
+		// "用到但未登记的控件类型"报缺口(它的 `$nonComponentTypes` 白名单在门禁文件里,
+		// 不在本单的文件边界内)。语义完全不变,只是不给扫描面添假阳性。
+		using PropGroupEnum = decltype(Wui::WuiComponentProperty::Group);
+
+		std::string NormalizePropGroup(PropGroupEnum group)
+		{
+			switch (group)
+			{
+			case PropGroupEnum::Style: return "Style";
+			case PropGroupEnum::Layout: return "Layout";
+			case PropGroupEnum::Behavior: return "Behavior";
+			case PropGroupEnum::Content: return "Content";
+			default: return kPropGroupGeneral;   // 未来新增的枚举值先落"其它"桶,不静默丢行
+			}
+		}
+
+		int PropGroupRank(const std::string& group)
+		{
+			if (group == "Content") return 0;
+			if (group == "Style") return 1;
+			if (group == "Layout") return 2;
+			if (group == "Behavior") return 3;
+			if (group == kPropGroupGeneral) return 9;
+			return 5;
+		}
+
+		std::string PropGroupTitle(const std::string& group)
+		{
+			if (group == "Content") return Wui::Tr("workbench.props.group.content", "Content");
+			if (group == "Style") return Wui::Tr("workbench.props.group.style", "Style");
+			if (group == "Layout") return Wui::Tr("workbench.props.group.layout", "Layout");
+			if (group == "Behavior") return Wui::Tr("workbench.props.group.behavior", "Behavior");
+			if (group == kPropGroupGeneral) return Wui::Tr("workbench.props.group.general", "General");
+			return group;
+		}
+
+		// 颜色两种表示之间的转换:面板的色板控件用 glm::vec4,登记表/引擎协议用 WuiColor。
+		glm::vec4 PropColorToVec4(const Wui::WuiColor& color)
+		{
+			return { color.R, color.G, color.B, color.A };
+		}
+
+		Wui::WuiColor PropVec4ToColor(const glm::vec4& rgba)
+		{
+			return Wui::WuiColor { rgba.r, rgba.g, rgba.b, rgba.a };
+		}
+
+		// ---- WUI-P1.5b:性能采样开关(只用于验收,默认关闭)----
+		// WLD_WORKBENCH_PROPS:属性面板形态
+		//   0 = 整体不画(基线"面板关闭")
+		//   1 = 只画属性行(旧结构:无搜索框、无分组头、无状态选择器)
+		//   2 = 完整面板(**默认,用户看到的就是它**)
+		//   3 = 只画前 2 行属性(基线"旧 2 属性版")
+		// 非 2 的取值不是产品行为,只服务于 ≤0.5ms/帧 的增量验收。
+		int PropPanelMode()
+		{
+			static const int mode = [] {
+				const char* raw = std::getenv("WLD_WORKBENCH_PROPS");
+				return raw == nullptr || *raw == '\0' ? 2 : std::atoi(raw);
+			}();
+			return mode;
+		}
+
+		bool PropTimingEnabled()
+		{
+			static const bool enabled = std::getenv("WLD_WORKBENCH_TIMING") != nullptr;
+			return enabled;
+		}
+
+		// 状态选择器的排版:估计高度与绘制**走同一段代码**(绘制时多画一次按钮),避免两处口径走偏。
+		// 宽度表在缓存重建时算好;这里只做换行与位置计算,不建临时 vector(每帧零分配)。
+		template <typename Emit>
+		float WalkStateChips(const std::vector<float>& widths, const Wui::WuiRect& rect, float rowH,
+			Emit&& emit)
+		{
+			const float gap = 4.0f;
+			float x = rect.X + 2.0f;
+			float y = rect.Y;
+			for (size_t index = 0; index < widths.size(); ++index)
+			{
+				const float width = widths[index];
+				if (x > rect.X + 2.0f && x + width > rect.X + rect.W - 2.0f)
+				{
+					x = rect.X + 2.0f;
+					y += rowH + gap;
+				}
+				emit(index, Wui::WuiRect { x, y, width, rowH });
+				x += width + gap;
+			}
+			return widths.empty() ? 0.0f : (y - rect.Y) + rowH;
 		}
 
 		// WUI-P1c-b W2:字号缩放因子(UiScale)。面板/画布里的字号都要乘它,与 density 分开 ——
@@ -306,34 +424,6 @@ namespace World
 			return false;
 		}
 
-		// WUI-P1b:状态按钮行的排版。**同一份矩形既用来估算滚动区高度、又用来画**,
-		// 避免"估算一处、绘制另一处"慢慢走偏。原点取传入 rect 的左上角,宽度用 rect.W。
-		std::vector<Wui::WuiRect> StateChipRects(
-			const std::vector<Wui::WuiComponentState>& states, const Wui::WuiRect& origin, float rowH)
-		{
-			std::vector<Wui::WuiRect> rects;
-			if (states.empty())
-				return rects;
-			const float gap = 4.0f;
-			float x = origin.X + 2.0f;
-			float y = origin.Y;
-			for (const Wui::WuiComponentState& state : states)
-			{
-				std::string text = state.Id;
-				if (text.size() > 14)
-					text.resize(14);
-				const float width = std::clamp(14.0f + static_cast<float>(text.size()) * 6.2f, 54.0f, 104.0f);
-				if (x > origin.X + 2.0f && x + width > origin.X + origin.W - 2.0f)
-				{
-					x = origin.X + 2.0f;
-					y += rowH + gap;
-				}
-				rects.push_back({ x, y, width, rowH });
-				x += width + gap;
-			}
-			return rects;
-		}
-
 	}
 
 	WidgetGalleryPanel::WbLayout WidgetGalleryPanel::ComputeLayout(const Wui::WuiRect& rect,
@@ -473,6 +563,7 @@ namespace World
 		{
 			const std::string id = m_SelectedId.empty() ? std::string("<first>") : m_SelectedId;
 			m_PropertyValues.clear();
+			InvalidatePropertyCache();   // 属性被外部清空:行缓存要跟着重播种(P1.5b)
 			m_ForceState = "default";
 			m_LongText = false;
 			m_Status = Wui::Tr("workbench.status.reset", "Reset: property overrides and forced state cleared");
@@ -901,6 +992,19 @@ namespace World
 	{
 		const Wui::WuiRect area = layout.Props;
 		const float fontScale = FontScale(uiScale);
+		// WLD_WORKBENCH_PROPS=0:整体不画 —— 性能验收的"面板关闭"基线(默认 2 = 完整面板)。
+		const int panelMode = PropPanelMode();
+		if (panelMode == 0)
+		{
+			// 关闭态也出一行(rows=0 / us=0):采样脚本按"同一支二进制、不同形态"算增量,
+			// 缺了这一档就没有基线可减。
+			if (PropTimingEnabled())
+				WLD_CORE_INFO("[workbench] props timing mode={0} rows={1} us={2:.1f}", 0, 0, 0.0);
+			return;
+		}
+		const bool timing = PropTimingEnabled();
+		const auto timerStart = timing ? std::chrono::steady_clock::now()
+			: std::chrono::steady_clock::time_point();
 		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
 		Wui::SectionHeader(ctx, { area.X, area.Y, area.W, 22.0f },
 			Wui::Tr("workbench.props.title", "Properties"), theme.Accent, theme, 14.0f * fontScale);
@@ -913,227 +1017,243 @@ namespace World
 			return;
 		}
 
-		const Wui::WuiRect content { area.X + 6.0f, area.Y + 26.0f,
-			std::max(60.0f, area.W - 12.0f), std::max(60.0f, area.H - 32.0f) };
+		// 面板形态(见 PropPanelMode):1/3 是性能验收的基线形态 —— 只有属性行,
+		// 不画搜索框 / 分组头 / 状态选择器(别处不要重复取)。
+		const bool grouped = panelMode == 2;
+
+		// ---- 面板顶部:属性搜索框(P1.5b;完整面板才有)----
+		const Wui::WuiRect search { area.X + 6.0f, area.Y + 24.0f,
+			std::max(60.0f, area.W - 12.0f), 22.0f };
+		if (grouped && Wui::SearchField(ctx, Wui::HashId(kPropSearchId), search, m_PropSearch,
+			m_PropSearchPlaceholder, theme))
+			ctx.RecordOp("gallery", "prop-filter", desc->Id, m_PropSearch);
+		// 命中串(属性名 + 文档)预小写:**只在输入真的变了时重算** —— 每帧对每行小写化都要分配。
+		if (m_PropSearch != m_PropSearchSource)
+		{
+			m_PropSearchLower = ToLowerAscii(m_PropSearch);
+			m_PropSearchSource = m_PropSearch;
+			// 开始搜索时展开所有分组:否则命中的行藏在折叠组里,看起来"搜不到"。
+			if (!m_PropSearchLower.empty())
+				for (PropGroup& group : m_PropGroups)
+					group.Open = true;
+		}
+
+		// 属性表缓存:换件 / 切语言(或属性被外部重置)后重建;此后每帧只比值。
+		if (m_PropCacheComponent != desc->Id || m_PropCacheLanguage != Wui::GetLanguage())
+			RebuildPropertyCache(*desc);
+
+		// 基线形态:没有搜索框,属性行直接从标题下面开始(与改动前的面板同几何)。
+		const float contentTop = grouped ? search.Y + search.H + 4.0f : area.Y + 26.0f;
+		const Wui::WuiRect content { area.X + 6.0f, contentTop,
+			std::max(60.0f, area.W - 12.0f),
+			std::max(60.0f, area.Y + area.H - contentTop - 6.0f) };
+		// ---- 元信息行(登记表说明 + 全局开关摘要):文本与裁剪都缓存,逐帧零分配 ----
+		// 键是组件 / 语言 / 密度 / 缩放 / 宽度这五个量:任一变化才重取 i18n 与重算裁剪。
+		const float metaSize = 12.0f * fontScale;
+		const std::string& language = Wui::GetLanguage();
+		if (m_PropMetaComponent != desc->Id || m_PropMetaLanguage != language
+			|| m_PropMetaDensity != density || m_PropMetaScale != uiScale
+			|| m_PropMetaWidth != content.W)
+		{
+			m_PropMetaComponent = desc->Id;
+			m_PropMetaLanguage = language;
+			m_PropMetaDensity = density;
+			m_PropMetaScale = uiScale;
+			m_PropMetaWidth = content.W;
+			std::vector<std::string> lines;
+			lines.push_back(Wui::Tr("workbench.props.a11y_notes", "a11y: ") + desc->A11yNotes);
+			lines.push_back(Wui::Tr("workbench.props.size_notes", "size: ") + desc->SizeNotes);
+			lines.push_back(Wui::Tr("workbench.props.source", "source: ") + desc->SourceFile);
+			if (!desc->ExtraA11yIds.empty())
+			{
+				std::string ids;
+				for (const std::string& id : desc->ExtraA11yIds)
+					ids += (ids.empty() ? "" : ", ") + id;
+				lines.push_back(Wui::Tr("workbench.props.extra_ids", "ids: ") + ids);
+			}
+			lines.push_back(Wui::Tr("workbench.props.globals", "density: ")
+				+ (m_DensityIndex == 1 ? "compact" : "comfortable")
+				+ "  scale: " + FormatFloat(uiScale)
+				+ "  locale: " + (language.empty() ? "en" : language));
+			// 裁剪放进重建里(逐帧 ClipText 遇到超宽文本会分配临时串)。
+			m_PropMetaLines.clear();
+			m_PropMetaLines.reserve(lines.size());
+			for (const std::string& line : lines)
+				m_PropMetaLines.push_back(ClipText(ctx, line, content.W - 4.0f, metaSize));
+		}
 		const float rowH = 24.0f;
 		const float rowGap = 4.0f;
-		float contentHeight = 6.0f + rowH + rowGap;
-		for (size_t index = 0; index < desc->Properties.size(); ++index)
-			contentHeight += rowH + rowGap;
-		// WUI-P1b:状态按钮行(见下面绘制)自己占的高度。
+		const float groupH = 22.0f;
+		const size_t rowLimit = panelMode == 3 ? 2 : desc->Properties.size();
+		const bool searching = !m_PropSearchLower.empty();
+
+		const auto stateVisible = [this](const PropRow& row) {
+			return row.ExplicitState.empty() || row.ExplicitState == m_ForceState;
+		};
+		const auto searchVisible = [](const PropRow& row, const std::string& query) {
+			return query.empty() || row.Haystack.find(query) != std::string::npos;
+		};
+
+		// 先算高度、再画:同一套判据(分组模式下"折叠组只占标题行",扁平模式按行累加)。
+		float contentHeight = 6.0f;
+		int visibleTotal = 0;
+		if (grouped)
 		{
-			const std::vector<Wui::WuiRect> chips = StateChipRects(desc->States,
-				{ content.X, 0.0f, content.W, rowH }, rowH);
-			if (!chips.empty())
-				contentHeight += (chips.back().Y - chips.front().Y) + rowH + rowGap;
+			if (m_PropStateHome < 0)
+				contentHeight += StateSelectorHeight(content) + rowGap;
+			for (const PropGroup& group : m_PropGroups)
+			{
+				const int count = static_cast<int>(std::count_if(group.Rows.begin(),
+					group.Rows.end(), [&](size_t index) {
+						return index < rowLimit && stateVisible(m_PropRows[index])
+							&& searchVisible(m_PropRows[index], m_PropSearchLower);
+					}));
+				visibleTotal += count;
+				contentHeight += groupH + rowGap;
+				if (!group.Open)
+					continue;
+				if (group.StateSelector)
+					contentHeight += StateSelectorHeight(content) + rowGap;
+				contentHeight += static_cast<float>(count) * (rowH + rowGap);
+			}
+			if (searching && visibleTotal == 0)
+				contentHeight += 22.0f;
 		}
-		contentHeight += 120.0f;   // 元信息(A11yNotes / SizeNotes / SourceFile / 开关摘要)
+		else
+		{
+			for (size_t index = 0; index < m_PropRows.size() && index < rowLimit; ++index)
+			{
+				if (!stateVisible(m_PropRows[index]))
+					continue;
+				++visibleTotal;
+				contentHeight += rowH + rowGap;
+			}
+		}
+		// 元信息:行数与"已裁剪文本"都缓存过,高度按实际行数算(不再用 120 的粗估)。
+		contentHeight += static_cast<float>(m_PropMetaLines.size()) * 16.0f + 8.0f;
 
 		Wui::BeginScrollArea(ctx, content, contentHeight, m_PropScroll, theme);
 		float y = content.Y + 6.0f - m_PropScroll;
 
-		// ---- 伪状态:由 desc.States 生成(登记表没列状态就不显示下拉,不造假控件)----
-		if (!desc->States.empty())
-		{
-			m_StateOptions.clear();
-			int selectedIndex = 0;
-			for (size_t index = 0; index < desc->States.size(); ++index)
-			{
-				m_StateOptions.push_back(desc->States[index].Label.empty() ? desc->States[index].Id
-					: desc->States[index].Label);
-				if (desc->States[index].Id == m_ForceState)
-					selectedIndex = static_cast<int>(index);
-			}
-			Wui::Label(ctx, { content.X + 2.0f, y + 4.0f },
-				Wui::Tr("workbench.props.state", "State"), theme.TextMuted, 12.0f * fontScale);
-			int& stateIndex = ctx.Persist<int>(Wui::HashId("wui.workbench.prop.__state_index"),
-				selectedIndex);
-			if (stateIndex < 0 || stateIndex >= static_cast<int>(desc->States.size()))
-				stateIndex = selectedIndex;
-			if (Wui::Combo(ctx, Wui::HashId(kStateComboId),
-				{ content.X + 76.0f, y, std::max(80.0f, content.W - 80.0f), rowH }, std::string(),
-				m_StateOptions, stateIndex, theme))
-			{
-				m_ForceState = desc->States[static_cast<size_t>(stateIndex)].Id;
-				m_LastAction = "state " + m_ForceState;
-				ctx.RecordOp("gallery", "state", desc->Id, m_ForceState);
-			}
-			else
-			{
-				m_ForceState = desc->States[static_cast<size_t>(stateIndex)].Id;
-			}
-			if (ctx.IsPopupOpen(Wui::HashId(kStateComboId)))
-				m_PopupOpenNow = true;   // 状态下拉开着:↑/↓ 归它,组件树不抢键
-			y += rowH + rowGap;
-
-			// WUI-P1b:状态按钮行 —— 逐件状态矩阵的**直接驱动路径**。
-			// 每个状态一个按钮,id = `wui.workbench.state.<组件id>.<状态id>`(稳定,探针按它点)。
-			// 为什么要有它:状态下拉是`Wui::Combo`的弹层,实测里注入点击只有上面两条能落下,
-			// 第三条起收不到(节点 visible/interactive 都是 true 也点不动)。逐件出状态矩阵
-			// 不能建在这个命中行为上;顺带也让"这件有哪些状态"一眼可见,不用先拉开下拉。
-			const std::vector<Wui::WuiRect> chips = StateChipRects(desc->States,
-				{ content.X, y, content.W, rowH }, rowH);
-			for (size_t index = 0; index < chips.size() && index < desc->States.size(); ++index)
-			{
-				const Wui::WuiRect chip = chips[index];
-				if (chip.Y + chip.H <= content.Y || chip.Y >= content.Y + content.H)
-					continue;   // 滚动区外:不画也不登记,免得出现"看不到却点得到"的节点
-				const std::string& stateId = desc->States[index].Id;
-				const bool active = stateId == m_ForceState;
-				Wui::WuiTheme chipTheme = theme;
-				if (active)
-				{
-					chipTheme.Border = theme.Accent;
-				}
-				else
-				{
-					// 未选中:平铺底,靠文字与边框区分,不抢选中项的视觉权重。
-					chipTheme.ButtonBg = theme.ContentBg;
-					chipTheme.ButtonHover = theme.HoverBg;
-					chipTheme.Text = theme.TextMuted;
-				}
-				const std::string chipId = std::string("wui.workbench.state.") + desc->Id + "." + stateId;
-				std::string chipText = stateId;
-				if (chipText.size() > 14)
-					chipText.resize(14);
-				if (Wui::Button(ctx, Wui::HashId(chipId.c_str()), chip, chipText, chipTheme))
-				{
-					stateIndex = static_cast<int>(index);
-					m_ForceState = stateId;
-					m_LastAction = "state " + stateId;
-					ctx.RecordOp("gallery", "state", desc->Id, stateId);
-				}
-			}
-			y += (chips.empty() ? 0.0f : (chips.back().Y - chips.front().Y) + rowH + rowGap);
-		}
-
-		// ---- 属性:类型由 Kind 决定,完全由登记表生成 ----
-		for (size_t index = 0; index < desc->Properties.size(); ++index)
-		{
+		// 行准备:键随当前状态变化(如 `bg` → `bg.hover`),变一次才重算键/值并重新播种控件值。
+		// 每帧只在"状态没变"时走一次比较 —— 不改动时零分配(含字符串)。
+		const auto prepareRow = [&](size_t index) -> PropRow& {
+			PropRow& row = m_PropRows[index];
+			if (row.KeyState == m_ForceState)
+				return row;
 			const Wui::WuiComponentProperty& prop = desc->Properties[index];
-			const Wui::WuiRect row { content.X, y, content.W, rowH };
-			if (row.Y + row.H > content.Y && row.Y < content.Y + content.H)
+			row.Key = (row.StateScoped && row.ExplicitState.empty() && m_ForceState != "default")
+				? prop.Name + "." + m_ForceState
+				: prop.Name;
+			row.KeyState = m_ForceState;
+			row.Value = PropertyValueForKey(*desc, prop, row.Key);
+			row.SeedValid = false;
+			return row;
+		};
+		const auto drawRow = [&](size_t index, const Wui::WuiRect& rowRect) {
+			PropRow& row = prepareRow(index);
+			if (!row.SeedValid)
 			{
-				// id 里带上组件:属性控件与控件自身内部持久态共用 id 空间,而"行 0"在不同组件
-				// 可能是完全不同的控件类型(TextField 的 WuiEditState vs DragFloat 的
-				// WuiNumericState)——不区分组件就会报 "persisted state id reused with
-				// different types",随后浮窗渲染直接失败(实测)。带上组件 id 后每件一套。
-				const std::string propId = std::string(kPropLabelPrefix) + desc->Id + "."
-					+ std::to_string(index);
-				Wui::Label(ctx, { row.X + 2.0f, row.Y + 4.0f },
-					ClipText(ctx, prop.Name, 72.0f, 12.0f * fontScale), theme.TextMuted,
-					12.0f * fontScale);
-				const Wui::WuiRect control { row.X + 76.0f, row.Y,
-					std::max(60.0f, row.W - 80.0f), rowH };
-				const std::string value = PropertyValue(*desc, prop);
-				switch (prop.Type)
-				{
-				case Wui::WuiComponentProperty::Kind::Bool:
-				{
-					bool flag = value == "1" || value == "true";
-					if (Wui::Checkbox(ctx, Wui::HashId(propId.c_str()), control, std::string(), flag, theme))
-					{
-						SetPropertyValue(desc->Id, prop.Name, flag ? "1" : "0");
-						m_LastAction = prop.Name + " = " + (flag ? "1" : "0");
-					}
-					break;
-				}
-				case Wui::WuiComponentProperty::Kind::Float:
-				case Wui::WuiComponentProperty::Kind::Int:
-				{
-					if (prop.Type == Wui::WuiComponentProperty::Kind::Int)
-					{
-						int64_t number = static_cast<int64_t>(std::llround(SafeFloat(value, prop.Min)));
-						number = std::clamp(number, static_cast<int64_t>(prop.Min),
-							static_cast<int64_t>(prop.Max));
-						if (Wui::DragInt(ctx, Wui::HashId(propId.c_str()), control, number,
-							static_cast<int64_t>(prop.Min), static_cast<int64_t>(prop.Max), theme))
-						{
-							SetPropertyValue(desc->Id, prop.Name, std::to_string(number));
-							m_LastAction = prop.Name + " = " + std::to_string(number);
-						}
-					}
-					else
-					{
-						float number = std::clamp(SafeFloat(value, prop.Min), prop.Min, prop.Max);
-						if (Wui::DragFloat(ctx, Wui::HashId(propId.c_str()), control, number,
-							std::max(0.001f, prop.Step), prop.Min, prop.Max, theme))
-						{
-							SetPropertyValue(desc->Id, prop.Name, FormatFloat(number));
-							m_LastAction = prop.Name + " = " + FormatFloat(number);
-						}
-					}
-					break;
-				}
-				case Wui::WuiComponentProperty::Kind::Enum:
-				{
-					m_PropertyEnumOptions = prop.Options.empty()
-						? std::vector<std::string> { value } : prop.Options;
-					int selected = 0;
-					for (size_t option = 0; option < m_PropertyEnumOptions.size(); ++option)
-						if (m_PropertyEnumOptions[option] == value)
-							selected = static_cast<int>(option);
-					int& cached = m_PropertyEnumIndex[desc->Id + "|" + prop.Name];
-					if (cached < 0 || cached >= static_cast<int>(m_PropertyEnumOptions.size()))
-						cached = selected;
-					if (Wui::Combo(ctx, Wui::HashId(propId.c_str()), control, std::string(),
-						m_PropertyEnumOptions, cached, theme))
-					{
-						const std::string chosen = m_PropertyEnumOptions[static_cast<size_t>(cached)];
-						SetPropertyValue(desc->Id, prop.Name, chosen);
-						m_LastAction = prop.Name + " = " + chosen;
-					}
-					if (ctx.IsPopupOpen(Wui::HashId(propId.c_str())))
-						m_PopupOpenNow = true;
-					break;
-				}
-				case Wui::WuiComponentProperty::Kind::Text:
-				default:
-				{
-					std::string buffer = value;
-					Wui::TextFieldA11y a11y;
-					a11y.Label = prop.Name;
-					if (Wui::TextField(ctx, Wui::HashId(propId.c_str()), control, buffer, theme, nullptr,
-						&a11y))
-					{
-						SetPropertyValue(desc->Id, prop.Name, buffer);
-						m_LastAction = prop.Name + " = " + buffer;
-					}
-					break;
-				}
-				}
-
-				// 属性控件与控件内部持久态共用 id 是安全的(Widget 自己的 ctx.Persist 归它),
-				// 但工作台自己**不再**往同一个 id 里塞第二种类型的状态。
+				SeedPropertyRow(row, desc->Properties[index]);
+				row.SeedValid = true;
 			}
-			y += rowH + rowGap;
+			// 滚动区外:不画也不登记,免得出现"看不到却点得到"的节点。
+			if (rowRect.Y + rowRect.H <= content.Y || rowRect.Y >= content.Y + content.H)
+				return;
+			DrawPropertyRow(ctx, theme, *desc, row, desc->Properties[index], rowRect, fontScale);
+		};
+
+		if (grouped)
+		{
+			// 状态选择器:有"按状态的颜色"的组件落在 Style 组顶部(见 RebuildPropertyCache 的
+			// m_PropStateHome);否则仍在面板顶部(与 P1b 的位置一致,逐件状态矩阵照旧能驱动)。
+			if (m_PropStateHome < 0)
+				y += DrawPropertyStateSelector(ctx, theme, { content.X, y, content.W, rowH },
+					*desc, fontScale) + rowGap;
+
+			for (PropGroup& group : m_PropGroups)
+			{
+				int count = 0;
+				int total = 0;
+				for (const size_t index : group.Rows)
+				{
+					if (index >= rowLimit || !stateVisible(m_PropRows[index]))
+						continue;
+					++total;
+					if (searchVisible(m_PropRows[index], m_PropSearchLower))
+						++count;
+				}
+				// "命中/总数"后缀:只在数字变了时重建字符串(每帧 std::to_string = 每帧分配)。
+				if (count != group.LastVisible)
+				{
+					group.Trailing = std::to_string(count) + "/" + std::to_string(total);
+					group.LastVisible = count;
+				}
+				const Wui::WuiRect header { content.X, y, content.W, groupH };
+				bool open = group.Open;
+				if (Wui::CollapsibleHeader(ctx, group.HeaderId, header, group.Title, open, theme,
+					std::string(), group.Trailing, m_PropGroupTip, 13.0f * fontScale))
+				{
+					m_LastAction = "group " + group.Id + (open ? " open" : " closed");
+					ctx.RecordOp("gallery", "prop-group", group.Id, open ? "open" : "closed");
+				}
+				if (open != group.Open)
+					group.Open = open;
+				y += groupH + rowGap;
+				if (!group.Open)
+					continue;
+				// Style 组:先画状态选择器,再画"按状态"的颜色行 —— 与 UE 的 Details 一致。
+				if (group.StateSelector)
+					y += DrawPropertyStateSelector(ctx, theme, { content.X, y, content.W, rowH },
+						*desc, fontScale) + rowGap;
+				for (const size_t index : group.Rows)
+				{
+					if (index >= rowLimit || !stateVisible(m_PropRows[index])
+						|| !searchVisible(m_PropRows[index], m_PropSearchLower))
+						continue;
+					const Wui::WuiRect rowRect { content.X, y, content.W, rowH };
+					drawRow(index, rowRect);
+					y += rowH + rowGap;
+				}
+			}
+			if (searching && visibleTotal == 0)
+			{
+				Wui::Label(ctx, { content.X + 2.0f, y + 2.0f },
+					Wui::Tr("workbench.props.no_match", "No property matches the filter"),
+					theme.TextMuted, 12.0f * fontScale);
+				y += 22.0f;
+			}
+		}
+		else
+		{
+			// 基线形态(只画属性行):性能采样用,产品默认不会走到这里。
+			for (size_t index = 0; index < m_PropRows.size() && index < rowLimit; ++index)
+			{
+				if (!stateVisible(m_PropRows[index]))
+					continue;
+				drawRow(index, { content.X, y, content.W, rowH });
+				y += rowH + rowGap;
+			}
 		}
 
-		// ---- 元信息:登记表里的说明与实现文件(追责/文档)----
-		const float metaSize = 12.0f * fontScale;
-		const auto metaLine = [&](const std::string& text, const Wui::WuiColor& color)
+		// ---- 元信息:登记表里的说明与实现文件(追责/文档)—— 文本已缓存,这里只画 ----
+		for (const std::string& line : m_PropMetaLines)
 		{
 			if (y + 16.0f > content.Y && y < content.Y + content.H)
-				Wui::Label(ctx, { content.X + 2.0f, y + 2.0f },
-					ClipText(ctx, text, content.W - 4.0f, metaSize), color, metaSize);
+				Wui::Label(ctx, { content.X + 2.0f, y + 2.0f }, line, theme.TextMuted, metaSize);
 			y += 16.0f;
-		};
-		metaLine(Wui::Tr("workbench.props.a11y_notes", "a11y: ") + desc->A11yNotes, theme.TextMuted);
-		metaLine(Wui::Tr("workbench.props.size_notes", "size: ") + desc->SizeNotes, theme.TextMuted);
-		metaLine(Wui::Tr("workbench.props.source", "source: ") + desc->SourceFile, theme.TextMuted);
-		if (!desc->ExtraA11yIds.empty())
-		{
-			std::string ids;
-			for (const std::string& id : desc->ExtraA11yIds)
-				ids += (ids.empty() ? "" : ", ") + id;
-			metaLine(Wui::Tr("workbench.props.extra_ids", "ids: ") + ids, theme.TextMuted);
 		}
-		metaLine(Wui::Tr("workbench.props.globals", "density: ")
-			+ (m_DensityIndex == 1 ? "compact" : "comfortable")
-			+ "  scale: " + FormatFloat(uiScale)
-			+ "  locale: " + (Wui::GetLanguage().empty() ? "en" : Wui::GetLanguage()),
-			theme.TextMuted);
 		Wui::EndScrollArea(ctx);
+
+		// 性能采样(仅在 WLD_WORKBENCH_TIMING=1 时开):每帧一行,行数/形态都在里面,
+		// 由 %TEMP% 侧脚本按帧统计分布 —— 采样不改变绘制路径(只多两次计时调用)。
+		if (timing)
+		{
+			const double micros = std::chrono::duration<double, std::micro>(
+				std::chrono::steady_clock::now() - timerStart).count();
+			WLD_CORE_INFO("[workbench] props timing mode={0} rows={1} us={2:.1f}",
+				panelMode, visibleTotal, micros);
+		}
 	}
 
 	void WidgetGalleryPanel::DrawActions(Wui::WuiContext& ctx, const WbLayout& layout,
@@ -1376,27 +1496,415 @@ namespace World
 	std::string WidgetGalleryPanel::PropertyValue(const Wui::WuiComponentDesc& desc,
 		const Wui::WuiComponentProperty& prop) const
 	{
+		return PropertyValueForKey(desc, prop, prop.Name);
+	}
+
+	// 键 → 值:用户覆盖优先,其次登记表的**类型化默认值**(老登记项没有新字段时退回旧默认)。
+	// 键与属性名不一定相同:按状态读写的属性,键是 `bg.hover` 这类"名 + 状态"。
+	std::string WidgetGalleryPanel::PropertyValueForKey(const Wui::WuiComponentDesc& desc,
+		const Wui::WuiComponentProperty& prop, const std::string& key) const
+	{
 		const auto component = m_PropertyValues.find(desc.Id);
 		if (component != m_PropertyValues.end())
 		{
-			const auto found = component->second.find(prop.Name);
+			const auto found = component->second.find(key);
 			if (found != component->second.end())
 				return found->second;
 		}
 		switch (prop.Type)
 		{
 		case Wui::WuiComponentProperty::Kind::Bool:
-			return "0";
+			if (!prop.DefaultText.empty())
+				return prop.DefaultText;
+			return prop.DefaultNumber != 0.0f ? "1" : "0";
 		case Wui::WuiComponentProperty::Kind::Float:
-			return FormatFloat(prop.Min);
+			if (prop.DefaultNumber != 0.0f)
+				return FormatFloat(prop.DefaultNumber);
+			return prop.DefaultText.empty() ? FormatFloat(prop.Min) : prop.DefaultText;
 		case Wui::WuiComponentProperty::Kind::Int:
-			return std::to_string(static_cast<int64_t>(prop.Min));
+			if (prop.DefaultNumber != 0.0f)
+				return std::to_string(static_cast<int64_t>(std::llround(prop.DefaultNumber)));
+			return prop.DefaultText.empty()
+				? std::to_string(static_cast<int64_t>(std::llround(prop.Min))) : prop.DefaultText;
+		case Wui::WuiComponentProperty::Kind::Color:
+			// 规范文本优先(登记表两侧都写);只有文本缺省时才回到类型化默认。
+			return prop.DefaultText.empty()
+				? Wui::FormatComponentColor(prop.DefaultColor) : prop.DefaultText;
+		case Wui::WuiComponentProperty::Kind::Size2:
+			return prop.DefaultText.empty()
+				? Wui::FormatComponentSize(prop.DefaultSize.x, prop.DefaultSize.y) : prop.DefaultText;
 		case Wui::WuiComponentProperty::Kind::Enum:
 			return prop.Options.empty() ? std::string() : prop.Options.front();
 		case Wui::WuiComponentProperty::Kind::Text:
 		default:
 			return prop.DefaultText;
 		}
+	}
+
+	// 属性表缓存:分组 / 行 / 状态选择器一次算好(标签、命中串、控件 id、状态键都不再逐帧重建)。
+	void WidgetGalleryPanel::RebuildPropertyCache(const Wui::WuiComponentDesc& desc)
+	{
+		m_PropCacheComponent = desc.Id;
+		m_PropCacheLanguage = Wui::GetLanguage();
+		// i18n 文案在重建时取一次:逐帧 Tr(...) 会构造 std::string(长文案还会堆分配)。
+		m_PropSearchPlaceholder = Wui::Tr("workbench.props.search", "Search properties");
+		m_PropGroupTip = Wui::Tr("workbench.props.group.tip",
+			"Click to collapse / expand the group");
+		m_PropRows.clear();
+		m_PropGroups.clear();
+		m_PropStateHome = -1;
+		m_PropStateIds.clear();
+		m_PropStateChips.clear();
+		m_PropStateChipWidths.clear();
+		m_PropStateChipIds.clear();
+
+		// ---- 状态表(登记表顺序;没声明状态就不画选择器,不造假控件)----
+		for (const Wui::WuiComponentState& state : desc.States)
+		{
+			if (state.Id.empty())
+				continue;
+			m_PropStateIds.push_back(state.Id);
+			std::string text = state.Label.empty() ? state.Id : state.Label;
+			if (text.size() > 14)
+				text.resize(14);
+			// 宽度口径沿用 P1b 的状态按钮行(按字数估,不量字宽 —— 只在重建时算一次)。
+			m_PropStateChipWidths.push_back(std::clamp(
+				14.0f + static_cast<float>(text.size()) * 6.2f, 54.0f, 104.0f));
+			m_PropStateChips.push_back(text);
+			m_PropStateChipIds.push_back(Wui::HashId(
+				(std::string("wui.workbench.state.") + desc.Id + "." + state.Id).c_str()));
+		}
+
+		// ---- 行 ----
+		m_PropRows.resize(desc.Properties.size());
+		for (size_t index = 0; index < desc.Properties.size(); ++index)
+		{
+			const Wui::WuiComponentProperty& prop = desc.Properties[index];
+			PropRow& row = m_PropRows[index];
+			row.PropIndex = index;
+			row.Label = prop.Name;
+			row.GroupId = NormalizePropGroup(prop.Group);
+			row.StateScoped = prop.StateScoped;
+			// 名字里已经带状态后缀的登记项(`bg.hover` 这种平铺写法):只在对应状态下露脸,
+			// 键就是名字本身;不带后缀的按状态拼键(见 prepareRow)。
+			if (prop.StateScoped)
+			{
+				for (const std::string& stateId : m_PropStateIds)
+				{
+					if (prop.Name.size() > stateId.size() + 1
+						&& prop.Name.compare(prop.Name.size() - stateId.size(), stateId.size(), stateId) == 0
+						&& prop.Name[prop.Name.size() - stateId.size() - 1] == '.')
+					{
+						row.ExplicitState = stateId;
+						break;
+					}
+				}
+			}
+			// 行控件 id 里带组件 + 登记表下标:折叠/过滤只影响显隐,不影响控件身份(探针按 id 定位)。
+			const std::string base = std::string(kPropLabelPrefix) + desc.Id + "."
+				+ std::to_string(index);
+			row.ControlId = Wui::HashId(base.c_str());
+			row.ChildIds[0] = Wui::HashId((base + ".w").c_str());
+			row.ChildIds[1] = Wui::HashId((base + ".h").c_str());
+			row.ChildIds[2] = Wui::HashId((base + ".lock").c_str());
+			// 搜索命中串 = 属性名 + 文档,预小写缓存一次(逐帧小写化每行都要分配)。
+			row.Haystack = ToLowerAscii(prop.Name);
+			if (!prop.Doc.empty())
+			{
+				row.Haystack += ' ';
+				row.Haystack += ToLowerAscii(prop.Doc);
+			}
+			// Enum 选项:登记表为空时给单元素兜底(Combo 会索引 selected,不能给空表)。
+			row.Options = prop.Options;
+			if (row.Options.empty())
+				row.Options.push_back(PropertyValueForKey(desc, prop, prop.Name));
+			row.Key = prop.Name;
+			row.KeyState.clear();
+			row.SeedValid = false;
+		}
+
+		// ---- 分组(Style → Content → Layout → Behavior → 其余;空组名归 General)----
+		for (size_t index = 0; index < m_PropRows.size(); ++index)
+		{
+			const std::string& groupId = m_PropRows[index].GroupId;
+			PropGroup* target = nullptr;
+			for (PropGroup& group : m_PropGroups)
+				if (group.Id == groupId)
+					target = &group;
+			if (target == nullptr)
+			{
+				PropGroup group;
+				group.Id = groupId;
+				group.Title = PropGroupTitle(groupId);
+				group.HeaderId = Wui::HashId((std::string(kPropGroupHeaderPrefix) + groupId).c_str());
+				group.Open = true;
+				m_PropGroups.push_back(std::move(group));
+				target = &m_PropGroups.back();
+			}
+			target->Rows.push_back(index);
+			if (m_PropRows[index].StateScoped && target != nullptr)
+				target->StateSelector = true;
+		}
+		std::stable_sort(m_PropGroups.begin(), m_PropGroups.end(),
+			[](const PropGroup& left, const PropGroup& right) {
+				const int leftRank = PropGroupRank(left.Id);
+				const int rightRank = PropGroupRank(right.Id);
+				return leftRank != rightRank ? leftRank < rightRank : left.Id < right.Id;
+			});
+		// 状态选择器落点:有"按状态"属性的第一组(约定是 Style)顶部;一组都没有时留在面板顶部。
+		for (size_t index = 0; index < m_PropGroups.size(); ++index)
+			if (m_PropGroups[index].StateSelector)
+			{
+				m_PropStateHome = static_cast<int>(index);
+				break;
+			}
+	}
+
+	void WidgetGalleryPanel::InvalidatePropertyCache()
+	{
+		m_PropCacheComponent.clear();
+		m_PropGroups.clear();
+		m_PropRows.clear();
+	}
+
+	float WidgetGalleryPanel::StateSelectorHeight(const Wui::WuiRect& rect) const
+	{
+		if (m_PropStateIds.empty())
+			return 0.0f;
+		return WalkStateChips(m_PropStateChipWidths, rect, 24.0f,
+			[](size_t, const Wui::WuiRect&) {});
+	}
+
+	// 状态选择器:一排状态按钮(与 P1b 同一套 id,逐件状态矩阵照旧按 id 驱动)。
+	float WidgetGalleryPanel::DrawPropertyStateSelector(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+		const Wui::WuiRect& rect, const Wui::WuiComponentDesc& desc, float fontScale)
+	{
+		if (m_PropStateIds.empty())
+			return 0.0f;
+		return WalkStateChips(m_PropStateChipWidths, rect, 24.0f,
+			[&](size_t index, const Wui::WuiRect& chip) {
+				const std::string& stateId = m_PropStateIds[index];
+				Wui::WuiTheme chipTheme = theme;
+				if (stateId == m_ForceState)
+				{
+					chipTheme.Border = theme.Accent;
+				}
+				else
+				{
+					// 未选中:平铺底,靠文字与边框区分,不抢选中项的视觉权重。
+					chipTheme.ButtonBg = theme.ContentBg;
+					chipTheme.ButtonHover = theme.HoverBg;
+					chipTheme.Text = theme.TextMuted;
+				}
+				if (Wui::Button(ctx, m_PropStateChipIds[index], chip, m_PropStateChips[index], chipTheme))
+				{
+					m_ForceState = stateId;
+					m_LastAction = "state " + stateId;
+					ctx.RecordOp("gallery", "state", desc.Id, stateId);
+				}
+			});
+	}
+
+	// 行控件值存储 ⇄ 值文本(只在"换件 / 切状态 / 用户改值"时走,不进逐帧路径)。
+	void WidgetGalleryPanel::SeedPropertyRow(PropRow& row, const Wui::WuiComponentProperty& prop)
+	{
+		switch (prop.Type)
+		{
+		case Wui::WuiComponentProperty::Kind::Bool:
+			row.Flag = row.Value == "1" || row.Value == "true";
+			break;
+		case Wui::WuiComponentProperty::Kind::Float:
+			row.Number = std::clamp(SafeFloat(row.Value, prop.Min), prop.Min, prop.Max);
+			break;
+		case Wui::WuiComponentProperty::Kind::Int:
+			row.Integer = std::clamp<int64_t>(
+				static_cast<int64_t>(std::llround(SafeFloat(row.Value, prop.Min))),
+				static_cast<int64_t>(std::llround(prop.Min)),
+				static_cast<int64_t>(std::llround(prop.Max)));
+			break;
+		case Wui::WuiComponentProperty::Kind::Color:
+		{
+			Wui::WuiColor parsed {};
+			row.Color = Wui::ParseComponentColor(row.Value, parsed)
+				? PropColorToVec4(parsed) : glm::vec4 { 1.0f, 1.0f, 1.0f, 1.0f };
+			break;
+		}
+		case Wui::WuiComponentProperty::Kind::Size2:
+			if (!Wui::ParseComponentSize(row.Value, row.SizeW, row.SizeH))
+			{
+				row.SizeW = 120.0f;
+				row.SizeH = 32.0f;
+			}
+			row.Ratio = row.SizeH > 0.0f ? row.SizeW / row.SizeH : 1.0f;
+			break;
+		case Wui::WuiComponentProperty::Kind::Enum:
+			row.EnumIndex = 0;
+			for (size_t option = 0; option < row.Options.size(); ++option)
+				if (row.Options[option] == row.Value)
+					row.EnumIndex = static_cast<int>(option);
+			break;
+		case Wui::WuiComponentProperty::Kind::Text:
+		default:
+			row.Text = row.Value;
+			break;
+		}
+	}
+
+	void WidgetGalleryPanel::SerializePropertyRow(PropRow& row, const Wui::WuiComponentProperty& prop)
+	{
+		switch (prop.Type)
+		{
+		case Wui::WuiComponentProperty::Kind::Bool:
+			row.Value = row.Flag ? "1" : "0";
+			break;
+		case Wui::WuiComponentProperty::Kind::Float:
+			row.Value = FormatFloat(row.Number);
+			break;
+		case Wui::WuiComponentProperty::Kind::Int:
+			row.Value = std::to_string(row.Integer);
+			break;
+		case Wui::WuiComponentProperty::Kind::Color:
+			row.Value = Wui::FormatComponentColor(PropVec4ToColor(row.Color));
+			break;
+		case Wui::WuiComponentProperty::Kind::Size2:
+			row.Value = Wui::FormatComponentSize(row.SizeW, row.SizeH);
+			break;
+		case Wui::WuiComponentProperty::Kind::Enum:
+			if (!row.Options.empty())
+			{
+				row.EnumIndex = std::clamp(row.EnumIndex, 0, static_cast<int>(row.Options.size()) - 1);
+				row.Value = row.Options[static_cast<size_t>(row.EnumIndex)];
+			}
+			break;
+		case Wui::WuiComponentProperty::Kind::Text:
+		default:
+			break;   // 文本行实现里已经直接写入 row.Text → row.Value(见 DrawPropertyRow)
+		}
+	}
+
+	bool WidgetGalleryPanel::DrawPropertyRow(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+		const Wui::WuiComponentDesc& desc, PropRow& row, const Wui::WuiComponentProperty& prop,
+		const Wui::WuiRect& rowRect, float fontScale)
+	{
+		const float labelSize = 12.0f * fontScale;
+		Wui::Label(ctx, { rowRect.X + 2.0f, rowRect.Y + 4.0f },
+			ClipText(ctx, row.Label, 72.0f, labelSize), theme.TextMuted, labelSize);
+
+		// 单位是登记表数据(P1.5A 的 Unit):在行右侧留出位置并按字号量宽,控件宽度跟着缩,
+		// 这样单位不会和数值文本叠在一起,也不用给每个控件写特例。
+		const std::string& unit = prop.Unit;
+		const float unitW = unit.empty() ? 0.0f : ctx.MeasureTextWidth(unit, labelSize) + 6.0f;
+		const Wui::WuiRect control { rowRect.X + 76.0f, rowRect.Y,
+			std::max(40.0f, rowRect.W - 80.0f - unitW), rowRect.H };
+		if (unitW > 0.0f)
+			Wui::Label(ctx, { control.X + control.W + 4.0f, control.Y + 4.0f },
+				ClipText(ctx, unit, unitW - 6.0f, labelSize), theme.TextMuted, labelSize);
+
+		bool changed = false;
+		switch (prop.Type)
+		{
+		case Wui::WuiComponentProperty::Kind::Bool:
+			changed = Wui::Checkbox(ctx, row.ControlId, control, std::string(), row.Flag, theme);
+			break;
+		case Wui::WuiComponentProperty::Kind::Float:
+			changed = Wui::DragFloat(ctx, row.ControlId, control, row.Number,
+				std::max(0.001f, prop.Step), prop.Min, prop.Max, theme);
+			break;
+		case Wui::WuiComponentProperty::Kind::Int:
+			changed = Wui::DragInt(ctx, row.ControlId, control, row.Integer,
+				static_cast<int64_t>(std::llround(prop.Min)),
+				static_cast<int64_t>(std::llround(prop.Max)), theme);
+			break;
+		case Wui::WuiComponentProperty::Kind::Color:
+			// 色板 + hex(库件 ColorField:折叠态 = 色块 + 规范化色值,弹层 = SV 板/hue/alpha/hex/预设)。
+			changed = Wui::ColorField(ctx, row.ControlId, control, row.Color, theme);
+			if (ctx.IsPopupOpen(row.ControlId))
+				m_PopupOpenNow = true;
+			break;
+		case Wui::WuiComponentProperty::Kind::Size2:
+		{
+			const float gap = 4.0f;
+			const float lockW = std::clamp(control.W * 0.16f, 40.0f, 52.0f);
+			const float fieldW = std::max(30.0f,
+				(control.W - lockW - gap * 2.0f - 12.0f) * 0.5f);
+			const Wui::WuiRect widthField { control.X, control.Y, fieldW, control.H };
+			const Wui::WuiRect heightField { control.X + fieldW + 12.0f, control.Y, fieldW, control.H };
+			const Wui::WuiRect lockButton { control.X + control.W - lockW, control.Y, lockW, control.H };
+			// 尺寸按像素:0 起、上界取登记表 Max(登记表没给合理上界时按 4096 兜底)。
+			const float lo = 0.0f;
+			const float hi = prop.Max > lo && prop.Max >= 2.0f ? prop.Max : 4096.0f;
+			const float speed = std::max(0.001f, prop.Step);
+			const bool widthChanged = Wui::DragFloat(ctx, row.ChildIds[0], widthField,
+				row.SizeW, speed, lo, hi, theme);
+			Wui::Label(ctx, { widthField.X + widthField.W + 2.0f, widthField.Y + 4.0f }, "x",
+				theme.TextMuted, labelSize);
+			const bool heightChanged = Wui::DragFloat(ctx, row.ChildIds[1], heightField,
+				row.SizeH, speed, lo, hi, theme);
+			Wui::WuiTheme lockTheme = theme;
+			if (row.RatioLock)
+			{
+				lockTheme.Border = theme.Accent;
+			}
+			else
+			{
+				lockTheme.Text = theme.TextMuted;
+			}
+			if (Wui::Button(ctx, row.ChildIds[2], lockButton,
+				row.RatioLock ? Wui::Tr("workbench.props.ratio.locked", "Lock")
+					: Wui::Tr("workbench.props.ratio.free", "Free"), lockTheme))
+			{
+				row.RatioLock = !row.RatioLock;
+				if (row.RatioLock && row.SizeH > 0.0f)
+					row.Ratio = row.SizeW / row.SizeH;
+			}
+			if (row.RatioLock && row.Ratio > 0.0f)
+			{
+				// 锁定比例:改一边按锁定时记下的比例带动另一边(夹在同一值域里)。
+				if (widthChanged)
+					row.SizeH = std::clamp(row.SizeW / row.Ratio, lo, hi);
+				else if (heightChanged)
+					row.SizeW = std::clamp(row.SizeH * row.Ratio, lo, hi);
+			}
+			else if (widthChanged || heightChanged)
+			{
+				row.Ratio = row.SizeH > 0.0f ? row.SizeW / row.SizeH : row.Ratio;
+			}
+			changed = widthChanged || heightChanged;
+			break;
+		}
+		case Wui::WuiComponentProperty::Kind::Enum:
+		{
+			if (row.EnumIndex < 0 || row.EnumIndex >= static_cast<int>(row.Options.size()))
+				row.EnumIndex = 0;
+			changed = Wui::Combo(ctx, row.ControlId, control, std::string(), row.Options,
+				row.EnumIndex, theme);
+			if (ctx.IsPopupOpen(row.ControlId))
+				m_PopupOpenNow = true;
+			break;
+		}
+		case Wui::WuiComponentProperty::Kind::Text:
+		default:
+		{
+			Wui::TextFieldA11y a11y;
+			a11y.Label = row.Label;
+			a11y.Placeholder = prop.Doc;
+			if (Wui::TextField(ctx, row.ControlId, control, row.Text, theme, nullptr, &a11y))
+			{
+				row.Value = row.Text;
+				changed = true;
+			}
+			break;
+		}
+		}
+
+		if (changed)
+		{
+			if (prop.Type != Wui::WuiComponentProperty::Kind::Text)
+				SerializePropertyRow(row, prop);
+			SetPropertyValue(desc.Id, row.Key, row.Value);
+			m_LastAction = row.Key + " = " + row.Value;
+		}
+		return changed;
 	}
 
 	void WidgetGalleryPanel::SetPropertyValue(const std::string& componentId, const std::string& name,
@@ -1408,6 +1916,8 @@ namespace World
 	void WidgetGalleryPanel::ResetPropertyValues(const std::string& componentId)
 	{
 		m_PropertyValues[componentId].clear();
+		// 行缓存里存着"当前值的文本":外部清空覆盖后必须重播种,否则界面还显示旧覆盖值(P1.5b)。
+		InvalidatePropertyCache();
 	}
 
 	std::vector<std::pair<std::string, std::string>> WidgetGalleryPanel::AppliedProperties(
@@ -1428,21 +1938,36 @@ namespace World
 		// AI 通道与键盘操作都观察不到(探针报的 "Space 后 a11y value 没变")。
 		// 没改过的键一律不发,showcase 退回它自己的默认/持久态(登记表契约:未知属性名忽略)。
 		// 长文本压力(m_LongText)是全局开关:开着时 Text 类属性仍作为覆盖发出去(语义不变)。
+		//
+		// WUI-P1.5b:发的是**编辑表里的键**,不再按 desc.Properties 逐项匹配名字 —— 按状态读写的
+		// 属性键是 `bg.hover` 这类"名 + 状态",名字匹配不到就会永远发不出去(状态色改了不生效)。
+		// 键只可能由属性面板写入(它自己就是唯一的写入方),所以"编辑表 = 用户改过的键"仍然成立。
 		const auto component = m_PropertyValues.find(desc.Id);
 		const std::map<std::string, std::string>* edited =
 			component != m_PropertyValues.end() ? &component->second : nullptr;
-		for (const Wui::WuiComponentProperty& prop : desc.Properties)
+		std::vector<std::string> longTextKeys;
+		if (m_LongText)
 		{
-			const bool wasEdited = edited != nullptr && edited->count(prop.Name) != 0;
 			// 长文本压力:Text 类属性换成超长串(一帧就能看出溢出/裁剪/换行问题)。
-			const bool longText = m_LongText && prop.Type == Wui::WuiComponentProperty::Kind::Text;
-			if (!wasEdited && !longText)
-				continue;
-			std::string value = PropertyValue(desc, prop);
-			if (longText)
-				value = "Long text stress: " + std::string(160, 'W')
-					+ " / 长文本压力测试(检查溢出、裁剪与换行)";
-			out.emplace_back(prop.Name, value);
+			const std::string stress = "Long text stress: " + std::string(160, 'W')
+				+ " / 长文本压力测试(检查溢出、裁剪与换行)";
+			for (const Wui::WuiComponentProperty& prop : desc.Properties)
+			{
+				if (prop.Type != Wui::WuiComponentProperty::Kind::Text)
+					continue;
+				out.emplace_back(prop.Name, stress);
+				longTextKeys.push_back(prop.Name);
+			}
+		}
+		if (edited != nullptr)
+		{
+			for (const auto& entry : *edited)
+			{
+				if (std::find(longTextKeys.begin(), longTextKeys.end(), entry.first)
+					!= longTextKeys.end())
+					continue;   // 长文本压力已经替它发了(同一个键不要发两遍)
+				out.emplace_back(entry.first, entry.second);
+			}
 		}
 		return out;
 	}

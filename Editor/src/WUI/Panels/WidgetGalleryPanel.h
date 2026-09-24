@@ -80,16 +80,81 @@ namespace World
 
 		// Combo 要求 vector 引用:**只在更新事件那一帧**重建(随后 Clear）。
 		std::vector<std::string> m_LanguageOptions;
-		std::vector<std::string> m_StateOptions;
-		std::vector<std::string> m_PropertyEnumOptions;
+
+		// ---- WUI-P1.5b:属性面板(UE 式:分组 + 搜索 + 类型化行 + 状态选择器)----
+		//
+		// 属性表来自**静态**登记表:行标签/搜索命中串/控件 id/状态键都在换件或属性被外部重置时
+		// 一次性重建,此后每帧只做"值是否变了"的比较 —— 不改动时零分配(见任务报告的性能数字)。
+		struct PropRow
+		{
+			size_t PropIndex = 0;          // 登记表下标(行 id 与它绑定:分组/过滤下仍然稳定)
+			Wui::WuiId ControlId = 0;      // 行控件的 a11y id(重建时算一次)
+			std::string GroupId;           // Content / Style / Layout / Behavior / General
+			std::string Label;             // 行标签(属性名)
+			std::string Haystack;          // 预小写的"名 + 文档"(搜索用)
+			bool StateScoped = false;      // 按状态读写(键 = name,或 name.<state>)
+			std::string ExplicitState;     // 属性名里已带状态后缀时:该状态 id(如 hover)
+			std::string Key;               // 当前状态对应的键(状态变化时才重算)
+			std::string KeyState;          // Key 对应的状态 id(判"要不要重算")
+			std::string Value;             // 当前值的文本(用户改值后立即同步)
+			// 行控件的值存储:控件直接读写它们,避免每帧解析文本。
+			float Number = 0.0f;           // Float
+			int64_t Integer = 0;           // Int
+			bool Flag = false;             // Bool
+			glm::vec4 Color { 1, 1, 1, 1 };  // Color
+			float SizeW = 120.0f;          // Size2 宽
+			float SizeH = 32.0f;           // Size2 高
+			float Ratio = 0.0f;            // Size2 锁定比例时记下的宽/高
+			bool RatioLock = false;        // Size2 比例锁
+			std::string Text;              // Text
+			int EnumIndex = 0;             // Enum
+			std::vector<std::string> Options;    // Enum 选项(登记表为空时用单元素兜底)
+			Wui::WuiId ChildIds[3] = { 0, 0, 0 };  // Size2:宽/高/比例锁三个子控件 id
+			bool SeedValid = false;        // 值存储是否已与 Key 同步过
+		};
+
+		struct PropGroup
+		{
+			std::string Id;                // 规范组名(见 NormalizePropGroup)
+			std::string Title;             // 显示名(Tr 只在重建时调一次)
+			Wui::WuiId HeaderId = 0;       // 折叠头 a11y id(重建时算一次)
+			std::vector<size_t> Rows;      // 行下标(指向 m_PropRows)
+			bool Open = true;
+			bool StateSelector = false;    // 本组顶部画状态选择器(Style 组)
+			int LastVisible = -1;          // 最近一次算出的可见行数(缓存 trailing 文本用)
+			std::string Trailing;          // "可见/总数"(只在可见数变化时重算)
+		};
+
+		std::vector<PropRow> m_PropRows;
+		std::vector<PropGroup> m_PropGroups;
+		std::string m_PropCacheComponent;     // 缓存属于哪个组件(空 = 需要重建)
+		std::string m_PropCacheLanguage;      // 缓存对应的语言(切语言要重取 i18n 文案)
+		std::string m_PropSearchPlaceholder;  // 搜索框占位文案(缓存:逐帧不再构造 std::string)
+		std::string m_PropGroupTip;           // 分组折叠头的提示文案(同上)
+		// 元信息行(登记表说明 + 全局开关摘要):文本与"已裁剪"的结果都缓存,
+		// 只在组件/语言/密度/缩放/宽度变化时重建 —— 逐帧零分配。
+		std::vector<std::string> m_PropMetaLines;
+		std::string m_PropMetaComponent;
+		std::string m_PropMetaLanguage;
+		float m_PropMetaDensity = -1.0f;
+		float m_PropMetaScale = -1.0f;
+		float m_PropMetaWidth = -1.0f;
+		int m_PropStateHome = -1;             // 状态选择器的落点:<0 = 面板顶部,否则组下标
+		std::string m_PropSearch;             // 属性搜索输入(用户/脚本编辑)
+		std::string m_PropSearchLower;        // 预小写缓存(只在输入变化时重算)
+		std::string m_PropSearchSource;       // 上次小写化时的原始输入
+		std::vector<std::string> m_PropStateIds;     // 状态选择器:状态 id(登记表顺序)
+		std::vector<std::string> m_PropStateChips;   // 状态选择器:按钮文案
+		std::vector<float> m_PropStateChipWidths;    // 状态选择器:按钮宽(重建时算一次)
+		std::vector<Wui::WuiId> m_PropStateChipIds;  // 状态选择器:按钮 id
 
 		// 属性值缓存:组件 id → (属性名 → 文本值)。数值/枚举/文本控件都读写这里。
-		std::map<std::string, std::map<std::string, std::string>> m_PropertyValues;
-		// 枚举属性的下拉选中项(属性名 → 选项下标)。
-		// **不要**把下标塞进 ctx.Persist:同一个 id 还被 TextField 等控件的内部
+		// 键不一定是属性名:按状态读写的属性用 `bg.hover` 这类"名 + 状态"(P1.5b)。
+		// **不要**把枚举下标塞进 ctx.Persist:同一个 id 还被 TextField 等控件的内部
 		// 焦点/编辑态使用,类型不一致会触发 "persisted state id reused with different types"
-		// (实测该告警随后就是浮窗渲染失败:string too long)。控件自己的持久态归控件。
-		std::map<std::string, int> m_PropertyEnumIndex;
+		// (实测该告警随后就是浮窗渲染失败:string too long)。枚举下标现存在 PropRow::EnumIndex,
+		// 控件自己的持久态归控件。
+		std::map<std::string, std::map<std::string, std::string>> m_PropertyValues;
 
 		// ---- 绘制helper(全部只写 ctx,不碰任何组件内部状态)----
 		struct WbLayout
@@ -129,6 +194,25 @@ namespace World
 			const Wui::WuiRect& clipRect);
 		void DrawProperties(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
 			const Wui::WuiComponentDesc* desc, float density, float uiScale);
+		// ---- WUI-P1.5b 属性面板内部件 ----
+		// 属性表缓存(分组 / 行 / 状态选择器):换件或属性被外部重置后重建,每帧不再动字符串。
+		void RebuildPropertyCache(const Wui::WuiComponentDesc& desc);
+		void InvalidatePropertyCache();
+		// 状态选择器(一排状态按钮;id 沿用 `wui.workbench.state.<组件>.<状态>`,探针按它驱动态)。
+		// 返回本帧选择器占的高度(0 = 没有状态可选)。
+		float DrawPropertyStateSelector(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+			const Wui::WuiRect& rect, const Wui::WuiComponentDesc& desc, float fontScale);
+		float StateSelectorHeight(const Wui::WuiRect& rect) const;
+		// 一行属性(类型化库件);返回值 = 本帧改了值(调用方据此记操作记录)。
+		bool DrawPropertyRow(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+			const Wui::WuiComponentDesc& desc, PropRow& row, const Wui::WuiComponentProperty& prop,
+			const Wui::WuiRect& rowRect, float fontScale);
+		// 行控件值存储 ⇄ 文本(值编码协议:颜色 #RRGGBB[AA]、尺寸 WxH、其余沿用文本)。
+		void SeedPropertyRow(PropRow& row, const Wui::WuiComponentProperty& prop);
+		void SerializePropertyRow(PropRow& row, const Wui::WuiComponentProperty& prop);
+		// 键 → 值(用户覆盖优先,其次登记表默认值)。
+		std::string PropertyValueForKey(const Wui::WuiComponentDesc& desc,
+			const Wui::WuiComponentProperty& prop, const std::string& key) const;
 		void DrawActions(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
 			const Wui::WuiComponentDesc* desc, float uiScale);
 
