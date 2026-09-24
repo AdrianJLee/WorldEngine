@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "MaterialEditorPanel.h"
+#include "SlangFormat.h"
 #include "EditorAssetCatalog.h"
 #include "ViewportPanel.h"
 #include "../../EditorPreferences.h"
@@ -5332,6 +5333,28 @@ namespace World
 		WLD_CORE_INFO("[material-ui] saved shader '{0}' ({1} bytes)", m_ShaderPath, m_ShaderBuffer.Text().size());
 	}
 
+	// MAT-INTEL:轻量格式化 —— 只动空白/缩进(规则表见 SlangFormat.h),语义不变。
+	// 一次 ReplaceAll = 一步撤销历史,所以 Ctrl+Z 回到格式化前的原文。
+	// 状态行复用脚本编辑器已有的两条键(语言包不在本单边界内;新键会被 audit-localization 判缺失)。
+	void MaterialEditorPanel::ApplyShaderFormat()
+	{
+		const std::size_t beforeBytes = m_ShaderBuffer.Text().size();
+		const std::string formatted = FormatSlangSource(m_ShaderBuffer.Text());
+		if (m_ShaderBuffer.ReplaceAll(formatted))
+		{
+			m_ShaderStatus = Wui::Tr("panel.script.status.formatted",
+				"Formatted (4-space indent + trailing whitespace removed)");
+			m_ShaderStatusIsError = false;
+			WLD_CORE_INFO("[material-ui] formatted shader '{0}' ({1} -> {2} bytes)",
+				m_ShaderPath, beforeBytes, m_ShaderBuffer.Text().size());
+		}
+		else
+		{
+			m_ShaderStatus = Wui::Tr("panel.script.status.format_unchanged", "No formatting changes");
+			m_ShaderStatusIsError = false;
+		}
+	}
+
 	bool MaterialEditorPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt)
 	{
 		(void)alt;
@@ -5347,6 +5370,13 @@ namespace World
 		if (keyCode == KeyCodes::R && !shift)
 		{
 			m_PendingShaderRevert = true;
+			return true;
+		}
+		if (keyCode == KeyCodes::F && shift)
+		{
+			// MAT-INTEL:Ctrl+Shift+F = 轻量格式化(与脚本编辑器同一键位;Ctrl+S/Ctrl+R 已占用,
+			// CodeEditor 自身只消费 Ctrl+S/A/C/X/V/Z/Y,不冲突)。
+			m_PendingShaderFormat = true;
 			return true;
 		}
 		return false;
@@ -5366,6 +5396,17 @@ namespace World
 		{
 			m_PendingShaderSave = false;
 			SaveShaderDocument();
+		}
+		// MAT-INTEL:注入路径(ui.key)不进 EditorLayer 的快捷键路由(那条路由只吃 GLFW 事件),
+		// 所以代码列持焦时在这里补看一次 Ctrl+Shift+F —— 与 WuiCodeEditor 自己消费 Ctrl+S 是同一条
+		// "帧内看输入"的口径;真实按键两条路径都置位同一个 flag,幂等。
+		if (!m_PendingShaderFormat && ctx.Focus() == Wui::HashId("material.shader.code")
+			&& ctx.Input().Ctrl && ctx.Input().Shift && ctx.WasKeyTriggered(KeyCodes::F))
+			m_PendingShaderFormat = true;
+		if (m_PendingShaderFormat)
+		{
+			m_PendingShaderFormat = false;
+			ApplyShaderFormat();
 		}
 		if (m_ShaderCompileScheduled)
 		{
@@ -5501,6 +5542,14 @@ namespace World
 					"worker thread and its diagnostics refer to line:column in this file. Live edits "
 					"are compiled automatically; the scene switches only after Save."),
 				true, false },
+			// MAT-INTEL:格式化(标签/说明用字面量 —— 语言包不在本单边界内,新增 Tr 键会被
+			// audit-localization 判成"代码用了但目录没有";脚本编辑器的 Format 按钮同样是字面量)。
+			{ "material.shader.format", "Format",
+				"Format (Ctrl+Shift+F): whitespace only — trailing whitespace removed, tabs → 4 spaces, "
+				"braces drive a 4-space indent, runs of 3+ blank lines collapse to one, one trailing "
+				"newline, `//!` gets a space. Identifiers and expressions are untouched. The formatted "
+				"text goes into the edit buffer (Ctrl+Z undoes it); Save writes it back to disk.",
+				!readOnly, false },
 			{ "material.shader.reveal", Wui::Tr("panel.material.shader.reveal", "Reveal"),
 				Wui::Tr("panel.material.shader.reveal.tooltip",
 					"Reveal: select the .slang in Windows Explorer."),
@@ -5529,6 +5578,8 @@ namespace World
 					LoadShaderFromDisk();
 				else if (actionId == "material.shader.compile")
 					m_ShaderCompileScheduled = true;   // 在绘制之外执行(帧内首段消费)
+				else if (actionId == "material.shader.format")
+					ApplyShaderFormat();
 				else if (actionId == "material.shader.reveal")
 				{
 					const std::filesystem::path disk = ContentRootPath() / m_ShaderPath;
@@ -5650,6 +5701,12 @@ namespace World
 		Wui::WuiAccessibility::Get().Register(editorNode);
 
 		m_ShaderHighlight.Update(m_ShaderBuffer);
+		// MAT-INTEL:补全/Hover 的文档表 —— 本文件声明的 `//! param` 名字进候选(Revision 变化才重扫)。
+		if (m_ShaderCompletionRevision != m_ShaderBuffer.Revision())
+		{
+			m_ShaderCompletionRevision = m_ShaderBuffer.Revision();
+			m_ShaderCompletion.SetFileSource(m_ShaderBuffer.Text());
+		}
 		Wui::WuiCodeEditorOptions options;
 		options.FontSize = fontSize;
 		options.LineHeight = std::round(fontSize * (20.0f / 14.0f));
@@ -5657,6 +5714,14 @@ namespace World
 		options.ReadOnly = readOnly;
 		options.Highlight = [this](std::string_view text, std::vector<Wui::WuiCodeToken>& out)
 		{
+			// `//!` 注解行:整行注释色会让 WuiCodeEditor 的"注释里不弹补全"闸门挡住注解体,
+			// 所以注解体按 Slang 语法着色(见 SlangAnnotations::HighlightLineWithAnnotations)。
+			if (SlangAnnotations::IsAnnotationLine(text))
+			{
+				SlangHighlightState state;
+				SlangAnnotations::HighlightLineWithAnnotations(text, state, out);
+				return;
+			}
 			if (const std::vector<Wui::WuiCodeToken>* cached = m_ShaderHighlight.Find(text))
 			{
 				out = *cached;
@@ -5671,6 +5736,18 @@ namespace World
 			}
 			SlangHighlightState state;
 			SlangHighlighter::HighlightLine(text, state, out);
+		};
+		// MAT-INTEL:补全(成员 / 文件参数+引擎函数+类型+内建+关键字 / `//!` 注解)+ 悬停同一份文档。
+		options.CompletionIdPrefix = "material.suggest";
+		options.Completion = [this](std::string_view linePrefix,
+			std::vector<World::LuauCompletionItem>& out)
+		{
+			m_ShaderCompletion.Query(linePrefix, 50, out);
+		};
+		options.Hover = [this](std::string_view linePrefix, std::string_view word,
+			World::LuauCompletionItem& out)
+		{
+			return m_ShaderCompletion.Describe(linePrefix, word, out);
 		};
 		options.GetClipboard = [](std::string& out)
 		{
@@ -5688,6 +5765,13 @@ namespace World
 		};
 		const Wui::WuiCodeEditorResult result =
 			Wui::CodeEditor(ctx, Wui::HashId("material.shader.code"), editorRect, m_ShaderBuffer, options);
+		// P1c-a(72c9ca2)起 WuiCodeEditor 自己也登记一个同 id、kind=code-editor 的本体节点,把上面
+		// 那个面板节点顶掉(Register 同 id 以最后一次为准);而 AI 通道 ui.type 的 kind 闸门只认
+		// editor / text-field —— 结果:脚本编辑器与材质代码列都再也没法按 id 注入文本(m4s3 探针
+		// 的 ui.type 现在会被拒)。在引擎侧改闸门/节点合并策略超出本单边界,这里按面板侧重新登记
+		// 自己的节点:kind=editor(可注入)、label/value 与 P1c-a 之前一致,focused 反映真实焦点。
+		editorNode.Focused = ctx.Focus() == Wui::HashId("material.shader.code");
+		Wui::WuiAccessibility::Get().Register(editorNode);
 		if (result.SaveRequested)
 			m_PendingShaderSave = true;
 		if (result.Changed && m_ShaderParseError.empty())

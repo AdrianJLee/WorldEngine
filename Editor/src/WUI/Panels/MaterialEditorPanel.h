@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorPanel.h"
+#include "SlangCompletion.h"
 #include "SlangHighlight.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
@@ -128,6 +129,9 @@ namespace World
 		bool m_ShaderParamsOpen = true;
 		Wui::WuiTextBuffer m_ShaderBuffer;     // 源码(编辑 / 撤销 / 脏标记)
 		SlangHighlightCache m_ShaderHighlight;
+		// MAT-INTEL:补全/Hover 的文档表(字段表来自 MaterialSurfaceContract,文件参数来自缓冲)。
+		SlangCompletionIndex m_ShaderCompletion;
+		uint64_t m_ShaderCompletionRevision = ~0ull;   // 已喂给索引的缓冲区版本
 		std::vector<MaterialParamDecl> m_ShaderParams;
 		std::string m_ShaderParseError;        // `ParseMaterialParams` 的 `<行>:<列>: <原因>`
 		int m_ShaderErrorLine = 0;             // 解析错误行(1 基;0 = 无错误;进 CodeEditor 红标)
@@ -135,6 +139,7 @@ namespace World
 		bool m_ShaderStatusIsError = false;
 		bool m_PendingShaderSave = false;      // OnShortcut 只置位,帧内消费(与脚本编辑器同口径)
 		bool m_PendingShaderRevert = false;
+		bool m_PendingShaderFormat = false;    // MAT-INTEL:格式化(Ctrl+Shift+F / 工具条按钮)
 		bool m_ShaderCompileScheduled = false; // 面板自绘的"编译"按钮 → 下一帧执行(避免在绘制中调工具)
 		// 会话内记住代码列宽(与预览列宽的记住口径一致;<= 0 = 还没设过)。
 		float m_ShaderCodeColumnWidth = 0.0f;
@@ -397,6 +402,8 @@ namespace World
 		void LoadShaderFromDisk();
 		// 保存:临时文件 + 同目录原子替换(与脚本编辑器/材质保存同一口径)。
 		void SaveShaderDocument();
+		// MAT-INTEL:轻量格式化(只动空白/缩进,语义不变;写回 WuiTextBuffer → Ctrl+Z 可撤销)。
+		void ApplyShaderFormat();
 		// ---- M4-S3:代码态实时预览 ----
 		// 帧内开头泵一次:消抖计时 → 消费后台结果(回主线程 Install)→ 投递下一次编译(单飞)。
 		void PumpShaderCompile(double now);
