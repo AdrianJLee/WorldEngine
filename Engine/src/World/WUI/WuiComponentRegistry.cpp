@@ -9,6 +9,7 @@
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
+#include "World/WUI/Widgets/WuiControls.h"
 
 #include "World/Core/Log.h"
 
@@ -1185,6 +1186,22 @@ namespace World::Wui
 			return label;
 		}
 
+		void ShowSeparator(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const Slot slot = Canvas(draw, *draw.Theme, 220.0f, 12.0f);
+			const WuiId id = BeginShowcase(draw, "separator", "Separator", slot.Rect);
+			(void)id;
+			// WuiSeparator 是面板侧的保留模式件(与 WuiLabel/WuiProgress 同一条路径:
+			// 建对象 → LayoutWidgetTree → Paint)。线色取控件自己的 Theme(Border 令牌)、
+			// 厚度 = thickness 属性 —— showcase 不另画一条假线。
+			auto separator = std::make_shared<WuiSeparator>();
+			separator->Thickness = DrivenFloat(ctx, "showcase.separator.thickness", draw, "thickness",
+				1.0f, 0.5f, 6.0f) * slot.Scale;
+			separator->Theme = draw.Theme;
+			PaintRetained(draw, separator, slot.Rect);
+		}
+
 		void ShowLabel(const WuiComponentDraw& draw)
 		{
 			WuiContext& ctx = *draw.Context;
@@ -1850,6 +1867,16 @@ namespace World::Wui
 				StateList({ "default", "long-text" }),
 				{ PropText("title", "Transform") },
 				&ShowSectionHeader));
+
+			WuiComponentRegistry::Register(Desc(
+				"separator", "WuiSeparator", "Separator", "Chrome", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/Widgets/WuiControls.cpp",
+				"role=无(纯展示分隔线,不登记节点);外壳锚点 kind=component-root、interactive=false;不进焦点表 —— 分隔线不是输入目标;线色取主题 Border 令牌、厚度=thickness 属性",
+				"showcase 首选 220x12(画布高度用 12 而不是 1:线仍画在矩形垂直中心、厚度=thickness×UiScale,占位高一点便于看与点);宽度由调用方给,不改布局",
+				ShellIds("separator"),
+				StateList({ "default" }),
+				{ PropFloat("thickness", 0.5f, 6.0f, 0.5f) },
+				&ShowSeparator));
 
 			WuiComponentRegistry::Register(Desc(
 				"breadcrumb", "Breadcrumb", "Breadcrumb", "Chrome", WuiComponentStatus::Draft,

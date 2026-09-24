@@ -1998,6 +1998,113 @@ int main()
 			accessibility.Clear();
 		}
 
+		// 24. P1c-E4-fix:①单行文本框按 Tab 交还焦点(ReleaseOnTab 标记)—— 工作台搜索框这类
+		//     单行框不再把正向 Tab 吞掉;②多行 CodeEditor 不带标记 ⇒ Tab 仍归编辑器(缩进语义不变);
+		//     ③WuiSeparator 登记进组件表,showcase 走保留模式控件的真实绘制路径。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme& theme = CurrentTheme();
+			const WuiRect fieldRect { 20.0f, 20.0f, 200.0f, 24.0f };
+			const WuiRect buttonRect { 20.0f, 60.0f, 96.0f, 24.0f };
+			const WuiId fieldId = HashId("test.e4f.single-line");
+			const WuiId buttonId = HashId("test.e4f.button");
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+
+			// ① 单行 TextField:第 1 帧聚焦 → 登记 ReleaseOnTab;第 2 帧 Tab → 焦点交给表里的下一个。
+			{
+				WuiContext ctx;
+				std::string buffer = "abc";
+				const auto paint = [&](WuiContext& target)
+				{
+					TextField(target, fieldId, fieldRect, buffer, theme);
+					Button(target, buttonId, buttonRect, "Next", theme);
+				};
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(idle);
+				ctx.SetFocus(fieldId);
+				paint(ctx);
+				ctx.EndFrame();
+				CHECK(ctx.Focus() == fieldId);
+				CHECK(WuiTextFocus::Get().Active());
+				CHECK(WuiTextFocus::Get().ReleaseOnTab());   // 单行框带 Tab 交还标记
+
+				WuiInputState tab = idle;
+				tab.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Tab) };
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(tab);
+				paint(ctx);
+				ctx.EndFrame();
+				CHECK(ctx.Focus() == buttonId);            // Tab 交还 → 焦点落到表里的下一个控件
+				CHECK(!WuiTextFocus::Get().Active());       // 单行框不再持焦 ⇒ 文本焦点登记也清掉
+			}
+
+			// ② 多行 CodeEditor:同一条 Tab 注入,焦点仍留在编辑器(未带标记 ⇒ Tab=缩进,焦点表不抢)。
+			{
+				const WuiId editorId = HashId("test.e4f.code-editor");
+				const WuiRect editorRect { 20.0f, 20.0f, 240.0f, 80.0f };
+				WuiContext ctx;
+				WuiTextBuffer buffer;
+				buffer.SetText("local x = 1\n");
+				WuiCodeEditorOptions options;
+				const auto paint = [&](WuiContext& target)
+				{
+					CodeEditor(target, editorId, editorRect, buffer, options);
+					Button(target, buttonId, buttonRect, "Next", theme);
+				};
+				ctx.BeginFrame(idle);
+				ctx.SetFocus(editorId);
+				paint(ctx);
+				ctx.EndFrame();
+				CHECK(WuiTextFocus::Get().Active());
+				CHECK(!WuiTextFocus::Get().ReleaseOnTab());    // 多行编辑器不带标记
+
+				WuiInputState tab = idle;
+				tab.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Tab) };
+				ctx.BeginFrame(tab);
+				paint(ctx);
+				ctx.EndFrame();
+				CHECK(ctx.Focus() == editorId);                // Tab 没被焦点表抢走
+				CHECK(WuiTextFocus::Get().Active());
+			}
+
+			// ③ WuiSeparator:登记表条目存在,showcase 画出的就是控件自己的那一条线(1px/220 宽),
+			//    外壳锚点 kind=component-root、interactive=false(分隔线不是输入目标)。
+			{
+				const WuiComponentDesc* separator = WuiComponentRegistry::Find("separator");
+				CHECK(separator != nullptr);
+				CHECK(separator != nullptr && separator->TypeName == "WuiSeparator");
+				WuiContext ctx;
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("showcase");
+				ctx.BeginFrame(idle);
+				WuiComponentDraw draw;
+				draw.Context = &ctx;
+				draw.Theme = &theme;
+				draw.Rect = { 12.0f, 12.0f, 420.0f, 160.0f };
+				draw.State = "default";
+				draw.UiScale = 1.0f;
+				draw.Density = 1.0f;
+				draw.Locale = "en";
+				separator->Showcase(draw);
+				ctx.EndFrame();
+				const std::vector<WuiDrawCommand>& commands = ctx.Commands();
+				CHECK(commands.size() == 1);
+				CHECK(commands[0].Kind == WuiDrawKind::Rect);
+				CHECK(Near(commands[0].Rect.W, 220.0f));
+				CHECK(Near(commands[0].Rect.H, 1.0f));         // 默认 thickness=1
+				const WuiAccessNode* anchor = accessibility.Find(HashId("showcase.separator"));
+				CHECK(anchor != nullptr && anchor->Kind == "component-root" && !anchor->Interactive);
+			}
+
+			WuiTextFocus::Get().Clear();
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}

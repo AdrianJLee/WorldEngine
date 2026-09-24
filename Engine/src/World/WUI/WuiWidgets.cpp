@@ -1681,7 +1681,10 @@ namespace World::Wui
 			if (state.MouseSelecting && ctx.Input().MouseReleased[0])
 				state.MouseSelecting = false;
 			const bool focused = ctx.Focus() == id;
-			if (focused) ctx.SetTextInputActive(true);
+			// P1c-E4-fix:单行文本框(TextField/TextFieldEx 与其所有调用者:搜索框、重命名、
+			// 属性文本、Combo 过滤、十六进制输入……)登记时带 ReleaseOnTab 标记 ⇒ 按 Tab/Shift+Tab
+			// 交出焦点、走正常焦点链,不再把 Tab 吃掉。CodeEditor 不走这条路径 ⇒ Tab=缩进不变。
+			if (focused) ctx.SetTextInputActive(true, /*releaseOnTab=*/true);
 			bool submitted = false;
 			if (focused)
 			{

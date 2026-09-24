@@ -142,6 +142,9 @@ namespace World::Wui
 			WuiId Id = 0;
 			std::string Window; // "main" / "float:<面板>"(WuiContext::SetWindowKey 显式登记,不依赖控制通道)
 			std::string Panel;  // 面板 id
+			// P1c-E4-fix:单行文本框的 Tab 交还标记。true = 下一次 Tab/Shift+Tab 不被文本控件吞掉,
+			// 走正常焦点链(单行框里 Tab 没有文本语义);多行编辑器(CodeEditor)保持 false ⇒ Tab=缩进不变。
+			bool ReleaseOnTab = false;
 		};
 
 		static WuiTextFocus& Get();
@@ -149,7 +152,7 @@ namespace World::Wui
 		// 每个窗口(上下文)在 BeginFrame 时调用:清掉本上下文上一帧的登记。
 		void BeginContextFrame(const void* context);
 		// 取得焦点的文本控件在绘制时调用(每帧重建)。
-		void Set(const void* context, WuiId id, std::string window, std::string panel);
+		void Set(const void* context, WuiId id, std::string window, std::string panel, bool releaseOnTab = false);
 		void Clear();
 
 		// 当前是否存在持有焦点的文本控件。
@@ -159,6 +162,8 @@ namespace World::Wui
 		WuiId Id() const { return m_Entries.empty() ? 0 : m_Entries.back().Info.Id; }
 		const std::string& Window() const;
 		const std::string& Panel() const;
+		// 最近登记的文本焦点是否带"Tab 交还"标记(无登记 = false)。
+		bool ReleaseOnTab() const { return !m_Entries.empty() && m_Entries.back().Info.ReleaseOnTab; }
 
 	private:
 		struct Item
@@ -274,7 +279,9 @@ namespace World::Wui
 		const std::string& WindowKey() const { return m_WindowKey; }
 		const std::string& PanelId() const { return m_PanelId; }
 		// 文本输入态 + 全局文本焦点登记(聚焦的文本控件每帧调用一次 SetTextInputActive(true))。
-		void SetTextInputActive(bool active);
+		// releaseOnTab(P1c-E4-fix):单行文本框传 true —— Tab/Shift+Tab 交还给焦点顺序表;
+		// 默认 false = 沿用"文本持焦时 Tab 归文本控件"(多行 CodeEditor 的缩进语义)。
+		void SetTextInputActive(bool active, bool releaseOnTab = false);
 		bool IsTextInputActive() const { return m_TextInputActive; }
 		// 文本度量(命中测试/行宽/横向滚动)。family 决定字体族,后端注册真实度量。
 		float MeasureTextWidth(std::string_view utf8, float fontSize, WuiFontFamily family = WuiFontFamily::Ui) const;
@@ -414,7 +421,8 @@ namespace World::Wui
 		bool PressInPanelWith(const WuiRect& item, int button) const;
 		// Tab / Shift+Tab / Escape 的焦点导航(在 BeginFrame 里、清空本帧登记之后调用)。
 		// textFocusActive = 上一帧结束时文本控件仍持有焦点 → 这些键全归文本控件,焦点表不抢。
-		void NavigateFocus(const WuiInputState& input, bool textFocusActive);
+		// textReleaseOnTab = 上一帧的文本焦点带"Tab 交还"标记(单行文本框)⇒ Tab/Shift+Tab 除外。
+		void NavigateFocus(const WuiInputState& input, bool textFocusActive, bool textReleaseOnTab);
 		struct WuiStateBase
 		{
 			const char* TypeName = nullptr;
@@ -447,6 +455,8 @@ namespace World::Wui
 		std::vector<WuiFocusable> m_FocusablesPrev; // 上一帧(Tab 顺序 + "消失即失焦"判定)
 		std::vector<WuiRect> m_ClipStack;           // 滚动区裁剪栈(空 = 不裁剪)
 		bool m_TextInputActive = false;
+		// P1c-E4-fix:上一帧文本焦点是否要求"Tab 交还"(与 m_TextInputActive 同一生命周期)。
+		bool m_TextInputReleaseOnTab = false;
 		std::string m_WindowKey;
 		std::string m_PanelId;
 		std::string m_Tooltip;

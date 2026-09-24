@@ -124,7 +124,8 @@ namespace World::Wui
 			[&](const Item& item) { return item.Context == context; }), m_Entries.end());
 	}
 
-	void WuiTextFocus::Set(const void* context, WuiId id, std::string window, std::string panel)
+	void WuiTextFocus::Set(const void* context, WuiId id, std::string window, std::string panel,
+		bool releaseOnTab)
 	{
 		BeginContextFrame(context);
 		if (id == 0)
@@ -134,6 +135,7 @@ namespace World::Wui
 		item.Info.Id = id;
 		item.Info.Window = std::move(window);
 		item.Info.Panel = std::move(panel);
+		item.Info.ReleaseOnTab = releaseOnTab;
 		m_Entries.push_back(std::move(item));
 	}
 
@@ -172,7 +174,14 @@ namespace World::Wui
 		// 文本控件是否仍持焦点:登记每帧重建,所以判定必须赶在 BeginContextFrame 清掉本上下文的
 		// 登记**之前**取值 —— 否则本窗口自己的文本焦点已经被抹掉,一按 Tab 就会被焦点表抢走。
 		const bool textFocusActive = m_TextInputActive || WuiTextFocus::Get().Active();
+		// P1c-E4-fix:同一时刻取"Tab 交还"标记(单行文本框)。与 textFocusActive 同一口径:
+		// 先取上一帧的值,再清本上下文登记,最后交给 NavigateFocus 决定 Tab 归谁。
+		// 本上下文自己有文本焦点时只认自己的标记 —— 否则多窗口下(本窗口是 CodeEditor、
+		// 另一窗口是单行搜索框)全局登记会把 Tab 从多行编辑器的缩进语义里抢走。
+		const bool textReleaseOnTab = m_TextInputActive ? m_TextInputReleaseOnTab
+			: WuiTextFocus::Get().ReleaseOnTab();
 		m_TextInputActive = false;
+		m_TextInputReleaseOnTab = false;
 		// 文本焦点每帧重建:上一帧的登记先失效,本帧聚焦的文本控件再登记。
 		WuiTextFocus::Get().BeginContextFrame(this);
 		m_Cursor = WuiCursor::Arrow;
@@ -225,7 +234,7 @@ namespace World::Wui
 		// 焦点顺序表每帧重建:上一帧的表挪到 Prev(Tab 顺序与"消失即失焦"都基于它)。
 		m_FocusablesPrev = std::move(m_Focusables);
 		m_Focusables.clear();
-		NavigateFocus(m_Input, textFocusActive);
+		NavigateFocus(m_Input, textFocusActive, textReleaseOnTab);
 		++m_Frame;
 	}
 
@@ -265,11 +274,8 @@ namespace World::Wui
 			&& rect.Y + rect.H > clip.Y && rect.Y < clip.Y + clip.H;
 	}
 
-	void WuiContext::NavigateFocus(const WuiInputState& input, bool textFocusActive)
+	void WuiContext::NavigateFocus(const WuiInputState& input, bool textFocusActive, bool textReleaseOnTab)
 	{
-		// 文本控件正在编辑:Tab(代码编辑器里是缩进 / 接受补全候选)与 Escape 都归它,焦点表不抢。
-		if (textFocusActive)
-			return;
 		bool forward = false;
 		bool backward = false;
 		for (uint32_t key : input.KeyPressed)
@@ -282,6 +288,12 @@ namespace World::Wui
 			else
 				forward = true;
 		}
+		// 文本控件正在编辑:Tab(代码编辑器里是缩进 / 接受补全候选)与 Escape 都归它,焦点表不抢。
+		// P1c-E4-fix 例外:单行文本框(ReleaseOnTab 标记)里的 Tab 没有文本语义 ⇒ Tab/Shift+Tab
+		// 交还给焦点顺序表(浏览器/桌面的通用惯例,也是 AI 正向遍历不再被搜索框堵死的正解);
+		// Escape 不在例外里 —— 单行框的 Escape(取消编辑/交回焦点)仍由文本控件自己处理。
+		if (textFocusActive && !(textReleaseOnTab && (forward || backward)))
+			return;
 		// Escape 清焦点,但只清"由焦点顺序表拥有"的焦点(上一帧登记过的控件)。焦点在代码编辑器/
 		// 视口这类自管 id 上时不动它:它们的 Escape 语义(关补全浮层但保留焦点等)由自己处理。
 		const bool escapePressed = std::find(input.KeyPressed.begin(), input.KeyPressed.end(), KeyCodes::Escape)
@@ -305,11 +317,13 @@ namespace World::Wui
 			SetFocus(*next);
 	}
 
-	void WuiContext::SetTextInputActive(bool active)
+	void WuiContext::SetTextInputActive(bool active, bool releaseOnTab)
 	{
 		m_TextInputActive = active;
+		// 标记只跟着"当前真的在文本输入态"走:非激活时一律清掉(不留上一帧的幽灵)。
+		m_TextInputReleaseOnTab = active && releaseOnTab;
 		if (active && m_Focus != 0)
-			WuiTextFocus::Get().Set(this, m_Focus, m_WindowKey, m_PanelId);
+			WuiTextFocus::Get().Set(this, m_Focus, m_WindowKey, m_PanelId, m_TextInputReleaseOnTab);
 		else if (!active)
 			WuiTextFocus::Get().BeginContextFrame(this);
 	}
