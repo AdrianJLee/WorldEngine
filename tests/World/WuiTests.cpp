@@ -2566,6 +2566,202 @@ int main()
 			accessibility.Clear();
 		}
 
+		// 26. P1c-LIB3:① 线段原语 LineSegment 与 ViewportPanel 手写的"投影线段四边形"逐字段等价
+		//     (Kind/Color/Vertices 三项 + 退化阈值 0.5 + 其它字段保持默认);
+		//     ② ButtonEx 禁用态不进 Tab 焦点链(焦点步骤里一次都不出现),a11y 仍可读
+		//     (Enabled=false + Value/Tooltip=理由);启用态与普通 Button 同一条登记路径。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme = CurrentTheme();
+			WuiInputState base;
+			base.ViewportSize = { 640.0f, 480.0f };
+			const WuiColor color { 0.9f, 0.75f, 0.5f, 1.0f };
+
+			// ---- ① LineSegment:一条 Quad 命令 + 顶点公式(斜线用字面量钉死)----
+			{
+				WuiContext ctx;
+				ctx.BeginFrame(base);
+				CHECK(ctx.Commands().empty());
+				// 斜线:from(0,0)→to(30,40),|d|=50,厚度 6 ⇒ 法线=(-40,30)/50,偏移=法线*3=(-2.4,1.8)。
+				LineSegment(ctx, { 0.0f, 0.0f }, { 30.0f, 40.0f }, color, 6.0f);
+				CHECK(ctx.Commands().size() == 1);
+				const WuiDrawCommand& oblique = ctx.Commands()[0];
+				CHECK(oblique.Kind == WuiDrawKind::Quad);
+				CHECK(Near(oblique.Color.R, color.R) && Near(oblique.Color.G, color.G)
+					&& Near(oblique.Color.B, color.B) && Near(oblique.Color.A, color.A));
+				// 顶点顺序 = {from+n, to+n, to-n, from-n}(与面板手写一致)。
+				CHECK(Near(oblique.Vertices[0].x, -2.4f) && Near(oblique.Vertices[0].y, 1.8f));
+				CHECK(Near(oblique.Vertices[1].x, 27.6f) && Near(oblique.Vertices[1].y, 41.8f));
+				CHECK(Near(oblique.Vertices[2].x, 32.4f) && Near(oblique.Vertices[2].y, 38.2f));
+				CHECK(Near(oblique.Vertices[3].x, 2.4f) && Near(oblique.Vertices[3].y, -1.8f));
+				// 其余字段 = WuiDrawCommand 默认(与面板"默认构造 + 只设三项"逐字段等价)。
+				CHECK(oblique.Text.empty() && oblique.Image == 0);
+				CHECK(Near(oblique.Rounding, 0.0f) && Near(oblique.Thickness, 1.0f) && !oblique.Bold);
+				CHECK(Near(oblique.Rect.X, 0.0f) && Near(oblique.Rect.W, 0.0f)
+					&& Near(oblique.Uv.W, 1.0f));
+				// 水平线:法线 = (0,1) ⇒ 只在 y 上 ±thickness/2(不产生 x 位移)。
+				LineSegment(ctx, { 10.0f, 50.0f }, { 110.0f, 50.0f }, color, 4.0f);
+				const WuiDrawCommand& flat = ctx.Commands()[1];
+				CHECK(Near(flat.Vertices[0].x, 10.0f) && Near(flat.Vertices[0].y, 52.0f));
+				CHECK(Near(flat.Vertices[1].x, 110.0f) && Near(flat.Vertices[1].y, 52.0f));
+				CHECK(Near(flat.Vertices[2].x, 110.0f) && Near(flat.Vertices[2].y, 48.0f));
+				CHECK(Near(flat.Vertices[3].x, 10.0f) && Near(flat.Vertices[3].y, 48.0f));
+				// 退化阈值 = 0.5px:|d| < 0.5 不产出命令,|d| == 0.5 照常产出(与面板同一判据)。
+				const size_t before = ctx.Commands().size();
+				LineSegment(ctx, { 20.0f, 20.0f }, { 20.3f, 20.2f }, color, 4.0f);   // |d|≈0.361
+				LineSegment(ctx, { 20.0f, 20.0f }, { 20.0f, 20.0f }, color, 4.0f);
+				CHECK(ctx.Commands().size() == before);
+				LineSegment(ctx, { 20.0f, 20.0f }, { 20.5f, 20.0f }, color, 4.0f);
+				CHECK(ctx.Commands().size() == before + 1);
+				ctx.EndFrame();
+			}
+
+			// ---- ② ButtonEx 禁用态:Tab 焦点步骤 0 → A → B → 回卷(Space 也不能激活它)----
+			{
+				const WuiId idA = HashId("test.lib3.a");
+				const WuiId idDisabled = HashId("test.lib3.disabled");
+				const WuiId idB = HashId("test.lib3.b");
+				const WuiRect rectA { 20.0f, 20.0f, 120.0f, 24.0f };
+				const WuiRect rectDisabled { 20.0f, 48.0f, 120.0f, 24.0f };
+				const WuiRect rectB { 20.0f, 76.0f, 120.0f, 24.0f };
+				const std::string reason = "Select a material instance first";
+				WuiContext ctx;
+				bool disabledActivated = false;
+				const auto frame = [&](WuiContext& target, const WuiInputState& input)
+				{
+					accessibility.BeginFrame("main", input.ViewportSize);
+					accessibility.SetPanel("showcase");
+					target.BeginFrame(input);
+					Button(target, idA, rectA, "A", theme);
+					disabledActivated = ButtonEx(target, idDisabled, rectDisabled, "Assign", theme,
+						false, false, reason)
+						|| disabledActivated;
+					Button(target, idB, rectB, "B", theme);
+					target.EndFrame();
+				};
+				WuiInputState idle = base;
+				frame(ctx, idle);
+				// a11y 仍可读:禁用 + 理由都在节点上(Interactive 保持 true = "可读",但点了不动作)。
+				const WuiAccessNode* node = accessibility.Find(idDisabled);
+				CHECK(node != nullptr);
+				if (node != nullptr)
+				{
+					CHECK(node->Kind == "button" && node->Label == "Assign");
+					CHECK(!node->Enabled && node->Interactive);
+					CHECK(node->Value == reason && node->Tooltip == reason);
+					CHECK(!node->Focused);
+				}
+				// Tab 焦点步骤:0 → A → B(跳过禁用件)→ 回卷 A → B。禁用件 1 次都不出现。
+				std::vector<WuiId> focusSteps;
+				for (int step = 0; step < 4; ++step)
+				{
+					WuiInputState tab = base;
+					tab.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Tab) };
+					frame(ctx, tab);
+					focusSteps.push_back(ctx.Focus());
+				}
+				CHECK(focusSteps[0] == idA);
+				CHECK(focusSteps[1] == idB);
+				CHECK(focusSteps[2] == idA);
+				CHECK(focusSteps[3] == idB);
+				for (WuiId focused : focusSteps)
+					CHECK(focused != idDisabled);
+				// "改前"对照(同一二进制内可复现):手工把禁用件登记进焦点表 —— 那正是改动前
+				// ButtonEx 无条件 RegisterFocusable 的那一行;同一 Tab 序列立刻变成 A → 禁用件 ⇒
+				// "禁用不进 Tab"确实来自这一次登记,而不是别处(比如 a11y 或绘制)顺带造成的。
+				{
+					WuiContext beforeCtx;
+					const auto beforeFrame = [&](WuiContext& target, const WuiInputState& input)
+					{
+						accessibility.BeginFrame("main", input.ViewportSize);
+						accessibility.SetPanel("showcase");
+						target.BeginFrame(input);
+						Button(target, idA, rectA, "A", theme);
+						ButtonEx(target, idDisabled, rectDisabled, "Assign", theme, false, false, reason);
+						target.RegisterFocusable(idDisabled, rectDisabled);   // 改前口径(现由 if (enabled) 拦掉)
+						Button(target, idB, rectB, "B", theme);
+						target.EndFrame();
+					};
+					beforeFrame(beforeCtx, idle);
+					WuiInputState tab = base;
+					tab.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Tab) };
+					beforeFrame(beforeCtx, tab);
+					CHECK(beforeCtx.Focus() == idA);
+					beforeFrame(beforeCtx, tab);
+					CHECK(beforeCtx.Focus() == idDisabled);   // 改前:Tab 第 2 步就停在禁用件上
+				}
+				// 焦点正好落在禁用件上时按 Space:不激活(焦点链变化之外的"不可点"仍成立)。
+				{
+					WuiContext forced;
+					WuiInputState space = base;
+					space.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Space) };
+					accessibility.BeginFrame("main", space.ViewportSize);
+					accessibility.SetPanel("showcase");
+					forced.BeginFrame(space);
+					forced.SetFocus(idDisabled);
+					CHECK(!ButtonEx(forced, idDisabled, rectDisabled, "Assign", theme, false, false, reason));
+					forced.EndFrame();
+					CHECK(!disabledActivated);
+				}
+				// 下一帧仍禁用 ⇒ "消失即失焦"把它从焦点位清掉(不留幽灵焦点)。
+				{
+					WuiContext cleared;
+					WuiInputState first = base;
+					accessibility.BeginFrame("main", first.ViewportSize);
+					accessibility.SetPanel("showcase");
+					cleared.BeginFrame(first);
+					ButtonEx(cleared, idDisabled, rectDisabled, "Assign", theme, true, false, reason);
+					cleared.SetFocus(idDisabled);
+					cleared.EndFrame();
+					CHECK(cleared.Focus() == idDisabled);
+					accessibility.BeginFrame("main", first.ViewportSize);
+					accessibility.SetPanel("showcase");
+					cleared.BeginFrame(first);
+					ButtonEx(cleared, idDisabled, rectDisabled, "Assign", theme, false, false, reason);
+					cleared.EndFrame();
+					CHECK(cleared.Focus() == 0);
+				}
+				// 启用态仍进焦点链(本改动只作用于 enabled=false):第一帧登记,第二帧 Tab 到达。
+				{
+					WuiContext enabledCtx;
+					accessibility.BeginFrame("main", idle.ViewportSize);
+					accessibility.SetPanel("showcase");
+					enabledCtx.BeginFrame(idle);
+					ButtonEx(enabledCtx, idDisabled, rectDisabled, "Assign", theme, true, false, reason);
+					enabledCtx.EndFrame();
+					WuiInputState tab = base;
+					tab.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Tab) };
+					accessibility.BeginFrame("main", tab.ViewportSize);
+					accessibility.SetPanel("showcase");
+					enabledCtx.BeginFrame(tab);
+					ButtonEx(enabledCtx, idDisabled, rectDisabled, "Assign", theme, true, false, reason);
+					enabledCtx.EndFrame();
+					CHECK(enabledCtx.Focus() == idDisabled);
+				}
+			}
+
+			// ---- ③ 登记表:line-segment 已登记(showcase 真实路径由 §20 的通用循环跑)----
+			{
+				const WuiComponentDesc* line = WuiComponentRegistry::Find("line-segment");
+				CHECK(line != nullptr);
+				if (line != nullptr)
+				{
+					CHECK(line->TypeName == "LineSegment");
+					CHECK(line->Category == "Chrome");
+					CHECK(!line->Properties.empty());
+					bool hasDefault = false;
+					for (const WuiComponentState& state : line->States)
+						if (state.Id == "default")
+							hasDefault = true;
+					CHECK(hasDefault);
+				}
+			}
+
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}

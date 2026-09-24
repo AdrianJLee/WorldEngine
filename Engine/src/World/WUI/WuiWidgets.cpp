@@ -434,6 +434,8 @@ namespace World::Wui
 
 	// P1c-LIB2:带禁用态 + 理由的按钮 —— 画法与面板侧 ActionButton/ModalActionButton 同源,
 	// 语义收进库:"不可用"必须同时体现在 Enabled 与 Value/Tooltip(禁用的理由)上。
+	// P1c-LIB3(用户裁决 2026-09-24):enabled=false 时不登记焦点表 ⇒ 不进 Tab 焦点链;
+	// a11y 节点照登记(Enabled=false + Value/Tooltip=理由),即"可读不可点"。
 	bool ButtonEx(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const WuiTheme& theme, bool enabled, bool primary, const std::string& tooltip)
 	{
@@ -466,8 +468,14 @@ namespace World::Wui
 			node.Focused = focused;
 			WuiAccessibility::Get().Register(node);
 		}
-		ctx.RegisterFocusable(id, rect);
-		DrawFocusRing(ctx, rect, id, theme);
+		// P1c-LIB3:禁用件不进 Tab 焦点链(焦点表登记 = Tab/Shift+Tab 的唯一入口);
+		// 启用件与普通 Button 完全同一条登记路径 —— 普通按钮/其它控件不受影响。
+		if (enabled)
+		{
+			ctx.RegisterFocusable(id, rect);
+			// 禁用件不画焦点环(即使调用方在同一帧强设焦点):"不可聚焦"必须在外观上一致。
+			DrawFocusRing(ctx, rect, id, theme);
+		}
 		if (hovered && !tooltip.empty())
 			Tooltip(ctx, rect, tooltip);
 		if (enabled)
@@ -1828,6 +1836,25 @@ namespace World::Wui
 			GradientFill(ctx, rect, from, from, to, to);
 		else
 			GradientFill(ctx, rect, from, to, to, from);
+	}
+
+	// P1c-LIB3:线段原语 —— 与 ViewportPanel::PushProjectedSegment 末段逐字段等价的那一步:
+	// 方向 d = to - from、退化阈值 0.5、法线 (-d.y, d.x)/|d|、偏移 = 法线*thickness/2、
+	// 顶点 {from+n, to+n, to-n, from-n}。投影/近平面裁剪/夹取留在调用方(库件不猜几何语义)。
+	void LineSegment(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, const WuiColor& color,
+		float thickness)
+	{
+		const glm::vec2 delta = to - from;
+		const float length = glm::length(delta);
+		if (length < 0.5f)
+			return;   // 退化线段:与面板同一阈值(0.5px),不产出命令
+		const glm::vec2 normal { -delta.y / length, delta.x / length };
+		const glm::vec2 offset = normal * (thickness * 0.5f);
+		WuiDrawCommand command;
+		command.Kind = WuiDrawKind::Quad;
+		command.Color = color;
+		command.Vertices = { from + offset, to + offset, to - offset, from - offset };
+		ctx.Commands().push_back(std::move(command));
 	}
 
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,

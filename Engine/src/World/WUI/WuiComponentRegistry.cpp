@@ -1359,7 +1359,7 @@ namespace World::Wui
 			PaintRetained(draw, column, slot.Rect);
 		}
 
-		// ---- P1c-LIB2:渐变填充 / 可折叠分区标题 / 禁用+理由按钮 / 有状态滚动条 ----
+		// ---- P1c-LIB2 渐变填充 / 可折叠分区标题 / 禁用+理由按钮 / 有状态滚动条 + P1c-LIB3 线段原语 ----
 
 		void ShowGradient(const WuiComponentDraw& draw)
 		{
@@ -1374,6 +1374,30 @@ namespace World::Wui
 			const WuiColor to { bottom.r, bottom.g, bottom.b, bottom.a };
 			// 方向是本件唯一的可变视觉口径:default = 上→下,horizontal = 左→右。
 			GradientFill(ctx, slot.Rect, from, to, draw.State != "horizontal");
+		}
+
+		// P1c-LIB3:线段原语的 showcase —— 两个方向态,证明"斜线也是同一条旋转四边形"。
+		void ShowLineSegment(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 220.0f, 64.0f);
+			const WuiId id = BeginShowcase(draw, "line-segment", "Line Segment", slot.Rect);
+			(void)id;   // 纯绘制原语:外框锚点已是唯一节点,不再自己登记
+			const float thickness = DrivenFloat(ctx, "showcase.line-segment.thickness", draw, "thickness",
+				2.0f, 0.5f, 16.0f);
+			glm::vec4& tint = DrivenColor(ctx, "showcase.line-segment.color", draw, "color",
+				{ 0.894f, 0.753f, 0.541f, 1.0f });   // #E4C08A
+			const WuiColor stroke { tint.r, tint.g, tint.b, tint.a };
+			const float inset = 8.0f;
+			// default = 水平线段(法线 = ±y 方向);diagonal = 左下→右上斜线且厚度 x2(法线/顶点顺序在
+			// 斜线上才有可见差别)。两个态都是同一公式,端点由本 showcase 给(与面板调用方式一致)。
+			if (draw.State == "diagonal")
+				LineSegment(ctx, { slot.Rect.X + inset, slot.Rect.Y + slot.Rect.H - inset },
+					{ slot.Rect.X + slot.Rect.W - inset, slot.Rect.Y + inset }, stroke, thickness * 2.0f);
+			else
+				LineSegment(ctx, { slot.Rect.X + inset, slot.Rect.Y + slot.Rect.H * 0.5f },
+					{ slot.Rect.X + slot.Rect.W - inset, slot.Rect.Y + slot.Rect.H * 0.5f }, stroke, thickness);
 		}
 
 		void ShowCollapsibleHeader(const WuiComponentDraw& draw)
@@ -2096,7 +2120,7 @@ namespace World::Wui
 				{ PropFloat("value", 0.0f, 1.0f, 0.01f), PropBool("disabled") },
 				&ShowProgress));
 
-			// ---- P1c-LIB2:渐变填充 / 可折叠分区标题 / 禁用+理由按钮 / 有状态滚动条 ----
+			// ---- P1c-LIB2 渐变填充 / 可折叠分区标题 / 禁用+理由按钮 / 有状态滚动条 + P1c-LIB3 线段原语 ----
 			WuiComponentRegistry::Register(Desc(
 				"gradient", "GradientFill", "Gradient Fill", "Chrome", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
@@ -2106,6 +2130,16 @@ namespace World::Wui
 				StateList({ "default", "horizontal" }),
 				{ PropText("top", "#3D4554"), PropText("bottom", "#0D0F14") },
 				&ShowGradient));
+
+			WuiComponentRegistry::Register(Desc(
+				"line-segment", "LineSegment", "Line Segment", "Chrome", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=无(纯绘制原语,不登记节点);外壳锚点 kind=component-root、interactive=false;端点原样使用(投影/近平面裁剪/夹取留在调用方),法线=(-dy,dx)/|d|、偏移=法线*thickness/2、顶点顺序 {from+n,to+n,to-n,from-n},|to-from|<0.5 不产出命令",
+				"showcase 首选 220x64;一条线段 = 一条 Quad 命令(端点由调用方给);thickness 不钳制,斜线态用 x2 厚度;需要裁剪时由调用方套 ClipScope",
+				ShellIds("line-segment"),
+				StateList({ "default", "diagonal" }),
+				{ PropFloat("thickness", 0.5f, 16.0f, 0.5f), PropText("color", "#E4C08A") },
+				&ShowLineSegment));
 
 			WuiComponentRegistry::Register(Desc(
 				"collapsible", "CollapsibleHeader", "Section Header (Collapsible)", "Containers",

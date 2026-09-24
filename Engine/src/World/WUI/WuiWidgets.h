@@ -181,11 +181,29 @@ namespace World::Wui
 	void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& from, const WuiColor& to,
 		bool vertical = true);
 
+	// ---- P1c-LIB3:即时线段原语(屏幕空间"投影线段"四边形 → 库件) ----
+
+	// 即时线段:两个屏幕端点之间的线段 = **一条** WuiDrawKind::Quad 命令(2D 管线逐顶点颜色,
+	// 不需要新的绘制类型)。口径与 ViewportPanel::PushProjectedSegment 的末段逐字段相同
+	// (所以面板可以原地迁走,像素零差):
+	//  · 端点 = 传入的 from/to **原样使用**(不投影、不裁剪、不夹取、不排序)——"这一段在图里
+	//    怎么裁、怎么投影"是调用方的事,库件只负责"把两个屏幕点画成一条带";
+	//  · 方向 d = to - from;|d| < 0.5 视为退化 —— **不产出任何命令**(与面板同一阈值);
+	//  · 法线 n = (-d.y, d.x)/|d|(屏幕坐标 y 向下时的左侧垂线),偏移 = n * (thickness * 0.5);
+	//  · 顶点顺序 = { from+偏移, to+偏移, to-偏移, from-偏移 },与 WuiDrawCommand::Vertices 顺序一致;
+	//  · thickness 不钳制、不做最小线宽兜底:<=0 时得到零面积四边形(与面板手写同样的退化结果);
+	//  · 命令只设 Kind/Color/Vertices,其余字段保持 WuiDrawCommand 默认值(与面板默认构造一致)。
+	// 需要裁剪(如视口外不越界)由调用方套 Wui::ClipScope。
+	void LineSegment(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to, const WuiColor& color,
+		float thickness = 1.0f);
+
 	// 带禁用态 + 理由的按钮(材质/内容浏览器面板里 ActionButton / ModalActionButton 的库化入口)。
 	// 与 Button 的差别只在"可选主按钮配色 + 明确的可用性":
 	//  · enabled=false:同尺寸弱化绘制(填充 theme.PanelBg、描边 theme.Border、文字 theme.TextDisabled),
 	//    不响应点击/键盘;无障碍节点仍登记(**Enabled=false**、Interactive=true),
 	//    Value/Tooltip = tooltip —— 灰按钮不能没有理由("为什么不可用"这句话就是 tooltip 参数);
+	//  · P1c-LIB3 裁决:enabled=false **不进 Tab 焦点链** —— 不登记进焦点表(同时不画焦点环),
+	//    Tab/Shift+Tab 扫不到、程序化 SetFocus 下一帧也会被"消失即失焦"清掉;启用态与 Button 同一条登记路径。
 	//  · primary=true(启用态)= Accent 填充 + theme.WindowBg 文字;
 	//  · 启用态悬停 = ButtonHover 填充 + Accent 描边 + Hand 光标;tooltip 非空时悬停登记提示;
 	//  · 键盘与 Button 同口径:焦点在它上面时 Enter/Space = 激活一次。
