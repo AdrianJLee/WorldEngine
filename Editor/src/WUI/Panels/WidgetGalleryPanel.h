@@ -105,9 +105,11 @@ namespace World
 		};
 
 		WbLayout ComputeLayout(const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
-		void DrawTopBar(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme);
+		// uiScale:面板内部字号乘法因子(WUI-P1c-b W2);与 density 分开,不混用。
+		void DrawTopBar(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
+			float uiScale);
 		void DrawInfoBar(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
-			const Wui::WuiComponentDesc* desc);
+			const Wui::WuiComponentDesc* desc, float uiScale);
 		// 左树过滤(搜索框)后的组件表 —— 树绘制与"当前选中"解析共用同一顺序。
 		std::vector<const Wui::WuiComponentDesc*> FilteredComponents() const;
 		const Wui::WuiComponentDesc* ResolveSelection(
@@ -117,7 +119,7 @@ namespace World
 			const char* how);
 		// 返回本帧选中的登记项(可能来自左树的点击)。
 		const Wui::WuiComponentDesc* DrawTree(Wui::WuiContext& ctx, const WbLayout& layout,
-			const Wui::WuiTheme& theme);
+			const Wui::WuiTheme& theme, float uiScale);
 		// overlayStage = true:画布走"专用舞台"(先画布,其余内容由 OnRender 画到更深一层)。
 		void DrawCanvas(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
 			const Wui::WuiComponentDesc* desc, float density, float uiScale, bool overlayStage);

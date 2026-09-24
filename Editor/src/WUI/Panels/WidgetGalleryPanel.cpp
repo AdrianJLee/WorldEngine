@@ -106,6 +106,30 @@ namespace World
 			return buffer;
 		}
 
+		// WUI-P1c-b W2:字号缩放因子(UiScale)。面板/画布里的字号都要乘它,与 density 分开 ——
+		// density 只压行高/槽位高度,缩放只放大字号。**只放大字号,不动布局度量**:行高、间距、
+		// 控件高仍是设计单位(后端会按 UiScale 放大),否则会和画布槽位(已按 UiScale 放大)叠两次。
+		float FontScale(float uiScale)
+		{
+			return uiScale > 0.0f ? uiScale : 1.0f;
+		}
+
+		// showcase 用的主题副本:只把字体令牌乘 scale(颜色/圆角/行高/内边距保持原样)。
+		// 为什么要副本而不是改全局主题:组件 showcase 内部字号全部读 theme.FontSize*(Engine 侧代码),
+		// 工作台能改的只有"传进去的那份主题";不动 Engine 公共接口。
+		Wui::WuiTheme ScaledFontTheme(const Wui::WuiTheme& theme, float scale)
+		{
+			if (scale <= 0.0f || std::abs(scale - 1.0f) < 0.001f)
+				return theme;
+			Wui::WuiTheme out = theme;
+			out.FontSizeCaption *= scale;
+			out.FontSizeSmall *= scale;
+			out.FontSizeBody *= scale;
+			out.FontSizeTitle *= scale;
+			out.FontSizeHeading *= scale;
+			return out;
+		}
+
 		// ---- 落盘目录:`<build>/wui-workbench`(与 plan P0-4 的 `build/wui-workbench/**` 同义)----
 		// 注意:引擎的 Exe 运行时会自己把工作目录切到 WLD_OUTPUT_DIR(实测:相对路径会落在
 		// build/x64-Debug 下),因此这里用**构建期常量** WLD_OUTPUT_DIR 解析,不依赖 cwd。
@@ -358,18 +382,19 @@ namespace World
 	}
 
 	void WidgetGalleryPanel::DrawTopBar(Wui::WuiContext& ctx, const WbLayout& layout,
-		const Wui::WuiTheme& theme)
+		const Wui::WuiTheme& theme, float uiScale)
 	{
 		const Wui::WuiRect bar = layout.TopBar;
 		Wui::PanelBackground(ctx, bar, theme.PanelHeader, theme.Radius);
 		const bool twoRows = bar.H > 40.0f;
+		const float labelSize = 12.0f * FontScale(uiScale);
 
 		float x = bar.X + 8.0f;
 		float rowY = bar.Y + 2.0f;
 		const float buttonH = twoRows ? 24.0f : bar.H - 4.0f;
 
 		Wui::Label(ctx, { x, rowY + 5.0f }, Wui::Tr("workbench.global.density", "Density"),
-			theme.TextMuted, 12.0f);
+			theme.TextMuted, labelSize);
 		x += 56.0f;
 		if (Wui::Button(ctx, Wui::HashId("wui.workbench.btn.density.comfortable"),
 			{ x, rowY, 92.0f, buttonH },
@@ -389,7 +414,7 @@ namespace World
 		x += 82.0f;
 
 		Wui::Label(ctx, { x, rowY + 5.0f }, Wui::Tr("workbench.global.scale", "UI scale"),
-			theme.TextMuted, 12.0f);
+			theme.TextMuted, labelSize);
 		x += 52.0f;
 		static const float kScales[3] = { 1.0f, 1.25f, 1.5f };
 		static const char* kScaleLabels[3] = { "100%", "125%", "150%" };
@@ -416,7 +441,7 @@ namespace World
 
 		m_LanguageOptions = { "en", "zh-CN" };
 		Wui::Label(ctx, { x, rowY + 5.0f }, Wui::Tr("workbench.global.language", "Language"),
-			theme.TextMuted, 12.0f);
+			theme.TextMuted, labelSize);
 		x += 54.0f;
 		const Wui::WuiId languageComboId = Wui::HashId("wui.workbench.btn.language");
 		if (Wui::Combo(ctx, languageComboId, { x, rowY, 96.0f, buttonH },
@@ -456,9 +481,9 @@ namespace World
 	}
 
 	void WidgetGalleryPanel::DrawInfoBar(Wui::WuiContext& ctx, const WbLayout& layout,
-		const Wui::WuiTheme& theme, const Wui::WuiComponentDesc* desc)
+		const Wui::WuiTheme& theme, const Wui::WuiComponentDesc* desc, float uiScale)
 	{
-		const float size = 12.0f;
+		const float size = 12.0f * FontScale(uiScale);
 		std::string left = Wui::Tr("workbench.info.registry", "Registry: ")
 			+ std::to_string(Wui::WuiComponentRegistry::Count()) + " components";
 		if (desc != nullptr)
@@ -519,12 +544,13 @@ namespace World
 	}
 
 	const Wui::WuiComponentDesc* WidgetGalleryPanel::DrawTree(Wui::WuiContext& ctx,
-		const WbLayout& layout, const Wui::WuiTheme& theme)
+		const WbLayout& layout, const Wui::WuiTheme& theme, float uiScale)
 	{
 		const Wui::WuiRect area = layout.Tree;
+		const float fontScale = FontScale(uiScale);
 		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
 		Wui::SectionHeader(ctx, { area.X, area.Y, area.W, 22.0f },
-			Wui::Tr("workbench.tree.title", "Components"), theme.Accent, theme, 14.0f);
+			Wui::Tr("workbench.tree.title", "Components"), theme.Accent, theme, 14.0f * fontScale);
 
 		const float rowH = m_DensityIndex == 1 ? 20.0f : 24.0f;
 		const Wui::WuiRect search { area.X + 6.0f, area.Y + 26.0f,
@@ -613,7 +639,8 @@ namespace World
 			{
 				lastCategory = item->Category;
 				if (y + 20.0f > list.Y && y < listBottom)
-					Wui::Label(ctx, { list.X + 4.0f, y + 3.0f }, lastCategory, theme.TextMuted, 12.0f);
+					Wui::Label(ctx, { list.X + 4.0f, y + 3.0f }, lastCategory, theme.TextMuted,
+						12.0f * fontScale);
 				y += 20.0f;
 			}
 			const Wui::WuiRect row { list.X, y, list.W, rowH };
@@ -633,10 +660,11 @@ namespace World
 
 			const float badgeW = 66.0f;
 			Wui::Label(ctx, { row.X + 6.0f, row.Y + 3.0f },
-				ClipText(ctx, item->DisplayName, std::max(20.0f, row.W - badgeW - 12.0f), 13.0f),
-				active ? theme.Text : theme.TextMuted, 13.0f);
+				ClipText(ctx, item->DisplayName, std::max(20.0f, row.W - badgeW - 12.0f),
+					13.0f * fontScale),
+				active ? theme.Text : theme.TextMuted, 13.0f * fontScale);
 			Wui::Label(ctx, { row.X + row.W - badgeW - 2.0f, row.Y + 4.0f }, StatusText(item->Status),
-				StatusColor(item->Status, theme), 11.0f);
+				StatusColor(item->Status, theme), 11.0f * fontScale);
 
 			// 行 id 按**过滤后序**稳定编号;精确选中项另有 wui.workbench.canvas.selected 节点,
 			// 探针不必从行号反推组件 id。
@@ -713,9 +741,10 @@ namespace World
 		bool overlayStage)
 	{
 		const Wui::WuiRect area = layout.Canvas;
+		const float fontScale = FontScale(uiScale);
 		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
 		Wui::SectionHeader(ctx, { area.X, area.Y, area.W, 22.0f },
-			Wui::Tr("workbench.canvas.title", "Canvas"), theme.Accent, theme, 14.0f);
+			Wui::Tr("workbench.canvas.title", "Canvas"), theme.Accent, theme, 14.0f * fontScale);
 
 		const Wui::WuiRect inner { area.X + 8.0f, area.Y + 28.0f,
 			std::max(40.0f, area.W - 16.0f), std::max(40.0f, area.H - 36.0f) };
@@ -751,7 +780,8 @@ namespace World
 		if (desc == nullptr)
 		{
 			Wui::Label(ctx, { inner.X + 10.0f, inner.Y + 12.0f },
-				Wui::Tr("workbench.canvas.empty", "No component selected"), theme.TextMuted, 14.0f);
+				Wui::Tr("workbench.canvas.empty", "No component selected"), theme.TextMuted,
+				14.0f * fontScale);
 			RegisterWorkbenchNode(Wui::HashId(kCanvasId), "canvas", area, std::string(),
 				std::string(), true, false);
 			return;
@@ -793,7 +823,7 @@ namespace World
 		const std::string label = desc->DisplayName + "  " + FormatFloat(width) + " x "
 			+ FormatFloat(height);
 		Wui::Label(ctx, { slot.X, slot.Y + slot.H + 4.0f },
-			ClipText(ctx, label, inner.W, 12.0f), theme.TextMuted, 12.0f);
+			ClipText(ctx, label, inner.W, 12.0f * fontScale), theme.TextMuted, 12.0f * fontScale);
 		RegisterWorkbenchNode(Wui::HashId(kCanvasLabelId), "text",
 			{ slot.X, slot.Y + slot.H + 4.0f, inner.W, 16.0f }, label, std::string(), true, false);
 	}
@@ -822,9 +852,13 @@ namespace World
 		}
 		if (desc.Showcase != nullptr)
 		{
+			// W2:showcase 内部字号读的是传进去的 theme 令牌(Engine 侧不改)→ 这里传一份
+			// **只把字体令牌乘 scale** 的副本,让组件内部文字跟着 UiScale 一起变大。
+			// 画布槽位本来就按 uiScale 放大,字号跟上之后"外框变大、内部字不跟"的错位才消失。
+			const Wui::WuiTheme showcaseTheme = ScaledFontTheme(theme, scale);
 			Wui::WuiComponentDraw draw;
 			draw.Context = &ctx;
-			draw.Theme = &theme;
+			draw.Theme = &showcaseTheme;
 			draw.Rect = slot;
 			draw.State = m_ForceState;
 			draw.Properties = m_AppliedProperties;
@@ -866,14 +900,16 @@ namespace World
 		const Wui::WuiTheme& theme, const Wui::WuiComponentDesc* desc, float density, float uiScale)
 	{
 		const Wui::WuiRect area = layout.Props;
+		const float fontScale = FontScale(uiScale);
 		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
 		Wui::SectionHeader(ctx, { area.X, area.Y, area.W, 22.0f },
-			Wui::Tr("workbench.props.title", "Properties"), theme.Accent, theme, 14.0f);
+			Wui::Tr("workbench.props.title", "Properties"), theme.Accent, theme, 14.0f * fontScale);
 
 		if (desc == nullptr)
 		{
 			Wui::Label(ctx, { area.X + 8.0f, area.Y + 32.0f },
-				Wui::Tr("workbench.props.empty", "Select a component"), theme.TextMuted, 13.0f);
+				Wui::Tr("workbench.props.empty", "Select a component"), theme.TextMuted,
+				13.0f * fontScale);
 			return;
 		}
 
@@ -909,7 +945,7 @@ namespace World
 					selectedIndex = static_cast<int>(index);
 			}
 			Wui::Label(ctx, { content.X + 2.0f, y + 4.0f },
-				Wui::Tr("workbench.props.state", "State"), theme.TextMuted, 12.0f);
+				Wui::Tr("workbench.props.state", "State"), theme.TextMuted, 12.0f * fontScale);
 			int& stateIndex = ctx.Persist<int>(Wui::HashId("wui.workbench.prop.__state_index"),
 				selectedIndex);
 			if (stateIndex < 0 || stateIndex >= static_cast<int>(desc->States.size()))
@@ -985,7 +1021,8 @@ namespace World
 				const std::string propId = std::string(kPropLabelPrefix) + desc->Id + "."
 					+ std::to_string(index);
 				Wui::Label(ctx, { row.X + 2.0f, row.Y + 4.0f },
-					ClipText(ctx, prop.Name, 72.0f, 12.0f), theme.TextMuted, 12.0f);
+					ClipText(ctx, prop.Name, 72.0f, 12.0f * fontScale), theme.TextMuted,
+					12.0f * fontScale);
 				const Wui::WuiRect control { row.X + 76.0f, row.Y,
 					std::max(60.0f, row.W - 80.0f), rowH };
 				const std::string value = PropertyValue(*desc, prop);
@@ -1073,7 +1110,7 @@ namespace World
 		}
 
 		// ---- 元信息:登记表里的说明与实现文件(追责/文档)----
-		const float metaSize = 12.0f;
+		const float metaSize = 12.0f * fontScale;
 		const auto metaLine = [&](const std::string& text, const Wui::WuiColor& color)
 		{
 			if (y + 16.0f > content.Y && y < content.Y + content.H)
@@ -1105,6 +1142,7 @@ namespace World
 		const Wui::WuiRect bar = layout.Actions;
 		Wui::PanelBackground(ctx, bar, theme.PanelHeader, theme.Radius);
 		const float density = m_DensityIndex == 1 ? 0.85f : 1.0f;
+		const float fontSize = 12.0f * FontScale(uiScale);
 
 		if (Wui::Button(ctx, Wui::HashId(kCaptureButtonId), { bar.X + 8.0f, bar.Y + 3.0f, 110.0f, 24.0f },
 			Wui::Tr("workbench.action.capture", "Capture"), theme))
@@ -1150,7 +1188,8 @@ namespace World
 				"Idle. Capture writes metadata; the probe crops the screenshot.")
 			: m_Status;
 		Wui::Label(ctx, { bar.X + 266.0f, bar.Y + 7.0f },
-			ClipText(ctx, status, std::max(40.0f, bar.W - 274.0f), 12.0f), theme.TextMuted, 12.0f);
+			ClipText(ctx, status, std::max(40.0f, bar.W - 274.0f), 12.0f * fontSize),
+			theme.TextMuted, fontSize);
 		RegisterWorkbenchNode(Wui::HashId(kStatusId), "text", bar, status, m_ForceState, true, false);
 	}
 
@@ -1377,14 +1416,30 @@ namespace World
 		std::vector<std::pair<std::string, std::string>> out;
 		out.reserve(desc.Properties.size() + 3);
 		// 全局开关作为"已知属性名"注入:showcase 认识就这样用,不认识会忽略(登记表契约)。
+		// 这三个与用户编辑无关,每帧都要发(密度/缩放/语言是整块面板的全局语义)。
 		out.emplace_back("density", FormatFloat(density));
 		out.emplace_back("uiScale", FormatFloat(uiScale));
 		out.emplace_back("locale", Wui::GetLanguage().empty() ? "en" : Wui::GetLanguage());
+
+		// WUI-P1c-b W1:只发**用户真正改过**的键(m_PropertyValues 里有记录的)。
+		// 为什么:属性是 showcase 的"覆盖值",而 Toggle/Checkbox 这类控件**每帧无条件**应用
+		// 覆盖(见 WuiComponentRegistry 的 BoolOverride / BoolProperty)→ 逐帧把登记默认值
+		// 也发过去,就会把控件自己的持久态盖回去:用户在画布里点一下/按 Space,下一帧被冲掉,
+		// AI 通道与键盘操作都观察不到(探针报的 "Space 后 a11y value 没变")。
+		// 没改过的键一律不发,showcase 退回它自己的默认/持久态(登记表契约:未知属性名忽略)。
+		// 长文本压力(m_LongText)是全局开关:开着时 Text 类属性仍作为覆盖发出去(语义不变)。
+		const auto component = m_PropertyValues.find(desc.Id);
+		const std::map<std::string, std::string>* edited =
+			component != m_PropertyValues.end() ? &component->second : nullptr;
 		for (const Wui::WuiComponentProperty& prop : desc.Properties)
 		{
-			std::string value = PropertyValue(desc, prop);
+			const bool wasEdited = edited != nullptr && edited->count(prop.Name) != 0;
 			// 长文本压力:Text 类属性换成超长串(一帧就能看出溢出/裁剪/换行问题)。
-			if (m_LongText && prop.Type == Wui::WuiComponentProperty::Kind::Text)
+			const bool longText = m_LongText && prop.Type == Wui::WuiComponentProperty::Kind::Text;
+			if (!wasEdited && !longText)
+				continue;
+			std::string value = PropertyValue(desc, prop);
+			if (longText)
 				value = "Long text stress: " + std::string(160, 'W')
 					+ " / 长文本压力测试(检查溢出、裁剪与换行)";
 			out.emplace_back(prop.Name, value);
@@ -1417,12 +1472,12 @@ namespace World
 			// 内容画在 depth ≥ 该深度才不会被它挡住(见 DrawCanvas 的注释)。
 			ctx.PushOverlay();
 			ctx.PushOverlay();
-			DrawTopBar(ctx, layout, theme);
+			DrawTopBar(ctx, layout, theme, uiScale);
 			const Wui::WuiComponentDesc* selected = nullptr;
 			if (!layout.Stacked)
 			{
-				selected = DrawTree(ctx, layout, theme);
-				DrawInfoBar(ctx, layout, theme, selected);
+				selected = DrawTree(ctx, layout, theme, uiScale);
+				DrawInfoBar(ctx, layout, theme, selected, uiScale);
 				DrawProperties(ctx, layout, theme, selected, density, uiScale);
 			}
 			else
@@ -1430,10 +1485,10 @@ namespace World
 				// 窄窗:树/属性仍然走 body 滚动(画布已单独画在它的位置上)。
 				const float contentHeight = layout.Props.Y + layout.Props.H + 8.0f - layout.Body.Y;
 				Wui::BeginScrollArea(ctx, layout.Body, contentHeight, m_BodyScroll, theme);
-				selected = DrawTree(ctx, layout, theme);
+				selected = DrawTree(ctx, layout, theme, uiScale);
 				DrawProperties(ctx, layout, theme, selected, density, uiScale);
 				Wui::EndScrollArea(ctx);
-				DrawInfoBar(ctx, layout, theme, selected);
+				DrawInfoBar(ctx, layout, theme, selected, uiScale);
 			}
 			DrawActions(ctx, layout, theme, selected, uiScale);
 			ctx.PopOverlay();
@@ -1445,13 +1500,13 @@ namespace World
 		}
 		else
 		{
-			DrawTopBar(ctx, layout, theme);
+			DrawTopBar(ctx, layout, theme, uiScale);
 			const Wui::WuiComponentDesc* selected = nullptr;
 
 			if (!layout.Stacked)
 			{
-				selected = DrawTree(ctx, layout, theme);
-				DrawInfoBar(ctx, layout, theme, selected);
+				selected = DrawTree(ctx, layout, theme, uiScale);
+				DrawInfoBar(ctx, layout, theme, selected, uiScale);
 				DrawCanvas(ctx, layout, theme, selected, density, uiScale, false);
 				DrawProperties(ctx, layout, theme, selected, density, uiScale);
 			}
@@ -1460,11 +1515,11 @@ namespace World
 				// 窄窗:三段纵向排布,整个 body 一起滚动(窗口够小时仍能看到全部区域)。
 				const float contentHeight = layout.Props.Y + layout.Props.H + 8.0f - layout.Body.Y;
 				Wui::BeginScrollArea(ctx, layout.Body, contentHeight, m_BodyScroll, theme);
-				selected = DrawTree(ctx, layout, theme);
+				selected = DrawTree(ctx, layout, theme, uiScale);
 				DrawCanvas(ctx, layout, theme, selected, density, uiScale, false);
 				DrawProperties(ctx, layout, theme, selected, density, uiScale);
 				Wui::EndScrollArea(ctx);
-				DrawInfoBar(ctx, layout, theme, selected);
+				DrawInfoBar(ctx, layout, theme, selected, uiScale);
 			}
 
 			DrawActions(ctx, layout, theme, selected, uiScale);
