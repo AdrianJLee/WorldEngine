@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include <utility>
 
 namespace World::Wui
 {
@@ -41,6 +42,14 @@ namespace World::Wui
 			std::snprintf(buffer, sizeof(buffer), "%.3f", value);
 			return buffer;
 		}
+
+		// P1c-LIB2:有状态滚动条:拖动状态(按下时抓住的滑块内偏移)。拖动期间按
+		// "鼠标位置 − 抓点"反算滚动量,所以鼠标离开轨道也不会中断拖动(与 WuiSplitterState 同一套手感)。
+		struct WuiScrollBarState
+		{
+			bool Dragging = false;
+			float GrabOffset = 0.0f;
+		};
 
 		void AppendUtf8(std::string& buffer, uint32_t codepoint)
 		{
@@ -421,6 +430,55 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, pressed ? theme.Accent : theme.Text, 0, 1.0f, label, 15.0f, false });
 		DrawFocusRing(ctx, rect, id, theme);
 		return (hovered && ctx.Input().MouseClicked[0]) || keyActivated;
+	}
+
+	// P1c-LIB2:带禁用态 + 理由的按钮 —— 画法与面板侧 ActionButton/ModalActionButton 同源,
+	// 语义收进库:"不可用"必须同时体现在 Enabled 与 Value/Tooltip(禁用的理由)上。
+	bool ButtonEx(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		const WuiTheme& theme, bool enabled, bool primary, const std::string& tooltip)
+	{
+		const bool hovered = ctx.IsHovered(rect);
+		const bool focused = ctx.Focus() == id;
+		const WuiColor fill = !enabled
+			? theme.PanelBg
+			: (primary ? theme.Accent : (hovered ? theme.ButtonHover : theme.ButtonBg));
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
+			enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f });
+		// accent 填充上压深色文字(白字对比度不够);禁用态用 TextDisabled。
+		const WuiColor textColor = !enabled ? theme.TextDisabled : (primary ? theme.WindowBg : theme.Text);
+		ctx.Commands().push_back({ WuiDrawKind::Text,
+			{ rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, textColor, 0, 1.0f, label, 15.0f, false });
+		// 灰按钮不能没有理由:禁用时这一句进 Value 与 Tooltip(启用时是普通用途说明)。
+		if (id != 0)
+		{
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = label;
+			node.Value = tooltip;
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = true;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
+		ctx.RegisterFocusable(id, rect);
+		DrawFocusRing(ctx, rect, id, theme);
+		if (hovered && !tooltip.empty())
+			Tooltip(ctx, rect, tooltip);
+		if (enabled)
+		{
+			if (hovered)
+				ctx.SetCursor(WuiCursor::Hand);
+			const bool keyActivated = focused
+				&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+			return (hovered && ctx.Input().MouseClicked[0]) || keyActivated;
+		}
+		return false;
 	}
 
 	bool Toggle(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme)
@@ -1751,6 +1809,27 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Image, rect, theme.Text, 0, 1.0f, "", 15.0f, false, textureId, uv });
 	}
 
+	// P1c-LIB2:渐变填充原语 —— 一条 Gradient 命令,Kind/Rect/Corners 三项就是全部画面输入。
+	// 与面板手写渐变的等价判据:同一 rect、同一四角颜色、同一顺序 ⇒ 逐字节相同的命令。
+	void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& topLeft, const WuiColor& topRight,
+		const WuiColor& bottomRight, const WuiColor& bottomLeft)
+	{
+		WuiDrawCommand command;
+		command.Kind = WuiDrawKind::Gradient;
+		command.Rect = rect;
+		command.Corners = { topLeft, topRight, bottomRight, bottomLeft };
+		ctx.Commands().push_back(std::move(command));
+	}
+
+	void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& from, const WuiColor& to,
+		bool vertical)
+	{
+		if (vertical)
+			GradientFill(ctx, rect, from, from, to, to);
+		else
+			GradientFill(ctx, rect, from, to, to, from);
+	}
+
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme)
 	{
@@ -2200,6 +2279,134 @@ namespace World::Wui
 	{
 		ctx.Commands().push_back({ WuiDrawKind::ClipPop });
 		ctx.PopClipRect();
+	}
+
+	// P1c-LIB2:有状态滚动条 —— 位置读得出(value="scroll=<y>/<max> ratio=<0..1>")、也设得进
+	// (拖滑块 / 点轨道 / 上下按钮 / 键盘)。几何与 BeginScrollArea 的滚动口径同源,滚轮不在这。
+	bool ScrollBar(WuiContext& ctx, WuiId id, const WuiRect& rect, float contentHeight, float viewportHeight,
+		float& scrollY, const WuiTheme& theme, bool pageButtons)
+	{
+		if (rect.W <= 0.0f || rect.H <= 0.0f || viewportHeight <= 0.0f)
+			return false;
+		const float maxScroll = std::max(0.0f, contentHeight - viewportHeight);
+		const bool enabled = maxScroll > 0.001f;
+		const float before = scrollY;
+		scrollY = std::max(0.0f, std::min(scrollY, maxScroll));
+
+		// 上下按钮只在放得下时画(≥ 3 个 24px 行高);否则整条 rect 都是轨道。
+		const float buttonHeight = (pageButtons && rect.H >= 72.0f) ? 24.0f : 0.0f;
+		const WuiRect track { rect.X, rect.Y + buttonHeight, rect.W,
+			std::max(2.0f, rect.H - buttonHeight * 2.0f) };
+		const float trackInner = track.H;
+		const float thumbLength = enabled
+			? std::min(trackInner, std::max(24.0f,
+				viewportHeight * viewportHeight / std::max(viewportHeight, contentHeight)))
+			: trackInner;
+		const float travel = std::max(0.0f, trackInner - thumbLength);
+		const float fraction = maxScroll > 0.0f ? std::max(0.0f, std::min(scrollY / maxScroll, 1.0f)) : 0.0f;
+		const WuiRect thumb { track.X, track.Y + travel * fraction, track.W, thumbLength };
+		const WuiRect upButton { rect.X, rect.Y, rect.W, buttonHeight };
+		const WuiRect downButton { rect.X, rect.Y + rect.H - buttonHeight, rect.W, buttonHeight };
+		const float page = std::max(40.0f, viewportHeight * 0.9f);
+
+		const bool focused = ctx.Focus() == id;
+		WuiScrollBarState& state = ctx.Persist<WuiScrollBarState>(id, {});
+		const bool hovered = ctx.IsHovered(rect);
+		const bool hoveredThumb = enabled && ctx.IsHovered(thumb);
+		const glm::vec2 mouse = ctx.Input().MousePos;
+
+		// 鼠标:按下滑块 = 抓拖;按下轨道空白 = 直接定位并继续拖(同一次按下不重复处理)。
+		if (enabled && ctx.Input().MouseClicked[0] && hovered)
+		{
+			ctx.SetFocus(id);
+			state.Dragging = true;
+			if (hoveredThumb)
+				state.GrabOffset = mouse.y - thumb.Y;
+			else
+			{
+				state.GrabOffset = thumbLength * 0.5f;
+				scrollY = travel > 0.0f
+					? std::max(0.0f, std::min((mouse.y - track.Y - state.GrabOffset) / travel, 1.0f)) * maxScroll
+					: 0.0f;
+			}
+		}
+		if (state.Dragging)
+		{
+			if (ctx.Input().MouseReleased[0] || !ctx.Input().MouseDown[0])
+				state.Dragging = false;
+			else if (travel > 0.0f)
+				scrollY = std::max(0.0f,
+					std::min((mouse.y - track.Y - state.GrabOffset) / travel, 1.0f)) * maxScroll;
+		}
+
+		// 上下按钮:各翻一页;到底/到顶时按钮本身也弱化(节点不再可点)。
+		if (enabled && buttonHeight > 0.0f)
+		{
+			if (scrollY > 0.001f && ctx.IsClicked(upButton))
+				scrollY = std::max(0.0f, scrollY - page);
+			if (scrollY < maxScroll - 0.001f && ctx.IsClicked(downButton))
+				scrollY = std::min(maxScroll, scrollY + page);
+		}
+
+		// 键盘:与 BeginScrollArea 同键位(焦点在滚动条上时)。
+		if (enabled && focused && !state.Dragging)
+		{
+			if (ctx.WasKeyPressed(KeyCodes::Down))
+				scrollY += 40.0f;
+			else if (ctx.WasKeyPressed(KeyCodes::Up))
+				scrollY -= 40.0f;
+			else if (ctx.WasKeyPressed(KeyCodes::PageDown) || ctx.WasKeyPressed(KeyCodes::Space))
+				scrollY += page;
+			else if (ctx.WasKeyPressed(KeyCodes::PageUp))
+				scrollY -= page;
+			else if (ctx.WasKeyPressed(KeyCodes::Home))
+				scrollY = 0.0f;
+			else if (ctx.WasKeyPressed(KeyCodes::End))
+				scrollY = maxScroll;
+		}
+		scrollY = std::max(0.0f, std::min(scrollY, maxScroll));
+
+		// 视觉:轨道 PanelHeader、按钮 ButtonBg/HoverBg、滑块 Accent(与面板手写的配色一致)。
+		const auto fill = [&ctx](const WuiRect& area, const WuiColor& color)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, area, color, 2.0f });
+		};
+		fill(track, theme.PanelHeader);
+		if (buttonHeight > 0.0f)
+		{
+			const bool upActive = enabled && scrollY > 0.001f;
+			const bool downActive = enabled && scrollY < maxScroll - 0.001f;
+			fill(upButton, ctx.IsHovered(upButton) ? theme.ButtonHover : theme.ButtonBg);
+			fill(downButton, ctx.IsHovered(downButton) ? theme.ButtonHover : theme.ButtonBg);
+			ctx.Commands().push_back({ WuiDrawKind::Text, { upButton.X + 1.0f, upButton.Y + 4.0f, 0, 0 },
+				upActive ? theme.Text : theme.TextDisabled, 0, 1.0f, "^", 13.0f, false });
+			ctx.Commands().push_back({ WuiDrawKind::Text, { downButton.X + 1.0f, downButton.Y + 4.0f, 0, 0 },
+				downActive ? theme.Text : theme.TextDisabled, 0, 1.0f, "v", 13.0f, false });
+		}
+		fill(thumb, enabled ? (hoveredThumb || state.Dragging ? theme.Accent : theme.BorderStrong) : theme.Border);
+		DrawFocusRing(ctx, rect, id, theme);
+
+		// 节点:值格式与 BeginScrollArea 的 "scroll=<y>/<max>" 前缀同口径,附加 ratio 便于脚本直接读比例。
+		if (id != 0)
+		{
+			const float ratio = maxScroll > 0.0f ? scrollY / maxScroll : 0.0f;
+			char buffer[64] = {};
+			std::snprintf(buffer, sizeof(buffer), "scroll=%.0f/%.0f ratio=%.2f", scrollY, maxScroll, ratio);
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "scrollbar";
+			node.Value = buffer;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = enabled;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
+		if (enabled)
+			ctx.RegisterFocusable(id, rect);
+		return scrollY != before;
 	}
 
 	WuiRect TableCell(const WuiRect& table, const std::vector<float>& columns, size_t row, size_t column, float rowHeight)

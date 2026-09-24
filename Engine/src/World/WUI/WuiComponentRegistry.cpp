@@ -1359,6 +1359,88 @@ namespace World::Wui
 			PaintRetained(draw, column, slot.Rect);
 		}
 
+		// ---- P1c-LIB2:渐变填充 / 可折叠分区标题 / 禁用+理由按钮 / 有状态滚动条 ----
+
+		void ShowGradient(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 220.0f, 64.0f);
+			const WuiId id = BeginShowcase(draw, "gradient", "Gradient Fill", slot.Rect);
+			(void)id;   // 纯绘制原语:外框锚点已是唯一节点,不再自己登记
+			glm::vec4& top = DrivenColor(ctx, "showcase.gradient.top", draw, "top", { 0.24f, 0.27f, 0.33f, 1.0f });
+			glm::vec4& bottom = DrivenColor(ctx, "showcase.gradient.bottom", draw, "bottom", { 0.05f, 0.06f, 0.08f, 1.0f });
+			const WuiColor from { top.r, top.g, top.b, top.a };
+			const WuiColor to { bottom.r, bottom.g, bottom.b, bottom.a };
+			// 方向是本件唯一的可变视觉口径:default = 上→下,horizontal = 左→右。
+			GradientFill(ctx, slot.Rect, from, to, draw.State != "horizontal");
+		}
+
+		void ShowCollapsibleHeader(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 260.0f, 24.0f);
+			const WuiId id = BeginShowcase(draw, "collapsible", "Section Header (Collapsible)", slot.Rect);
+			bool& openState = BoolState(ctx, "showcase.collapsible.open", true);
+			// 覆盖优先级:state(collapsed)> 属性(open)> 持久槽(真实点击的结果)。覆盖**只影响本帧**,
+			// 只有"没有任何覆盖"的帧才把结果写回槽 —— 否则一次合成状态/一次误触就会把默认态永久改掉
+			// (实测:先跑 gradient 再跑 collapsible 时,默认态会被写成 closed)。
+			const std::optional<bool> forcedOpen = BoolOverride(draw, "open");
+			const bool overridden = draw.State == "collapsed" || forcedOpen.has_value();
+			bool open = forcedOpen.value_or(draw.State == "collapsed" ? false : openState);
+			PseudoState pseudo(draw, id, slot.Rect);
+			CollapsibleHeader(ctx, id, slot.Rect,
+				LocalizedText(draw, "title", "Shader Parameters", "着色器参数"), open, theme,
+				LocalizedText(draw, "term", "", ""),
+				LocalizedText(draw, "trailing", "12 items", "12 项"),
+				LocalizedText(draw, "tooltip", "Parameters declared by the shader this material references.",
+					"材质的着色器声明的参数。"),
+				14.0f * slot.Scale);
+			if (!overridden)
+				openState = open;
+		}
+
+		void ShowButtonEx(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 148.0f);
+			const WuiId id = BeginShowcase(draw, "button.disabled", "Button (Disabled + Reason)", slot.Rect);
+			const bool enabled = draw.State != "disabled" && !BoolProperty(draw, "disabled", false);
+			const bool primary = draw.State == "primary" || BoolProperty(draw, "primary", false);
+			PseudoState pseudo(draw, id, slot.Rect, true);
+			ButtonEx(ctx, id, slot.Rect,
+				MaybeLongText(draw, LocalizedText(draw, "label", "Assign", "指定")), theme, enabled, primary,
+				LocalizedText(draw, "reason", "Select a material instance first", "先选择一个材质实例"));
+		}
+
+		void ShowScrollBar(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 14.0f, 168.0f);
+			const WuiId id = BeginShowcase(draw, "scrollbar", "Scroll Bar", slot.Rect);
+			PseudoState pseudo(draw, id, slot.Rect);
+			float& scroll = DrivenFloat(ctx, "showcase.scrollbar.scroll", draw, "scroll", 60.0f, 0.0f, 400.0f);
+			// disabled = 内容装得下(没有滚动量):节点 Enabled/Interactive=false,整条退化成纯轨道。
+			const float viewport = 200.0f;
+			const float content = draw.State == "disabled" ? 160.0f : 400.0f;
+			const bool overridden = draw.State == "top" || draw.State == "bottom" || draw.State == "disabled";
+			float value = scroll;
+			if (draw.State == "top")
+				value = 0.0f;
+			else if (draw.State == "bottom")
+				value = content - viewport;
+			// 状态帧先写回槽:滑块位置与 value 同源(否则切换状态后的第一帧滑块还停在旧位置);
+			// 但状态覆盖**不**写回持久槽 —— 只有真实拖动/键盘的结果才算数(切回 default 时位置稳定)。
+			if (!overridden)
+				scroll = value;
+			ScrollBar(ctx, id, slot.Rect, content, viewport, value, theme);
+			if (!overridden)
+				scroll = value;
+		}
+
 		// ---- 登记存储 ----
 
 		struct RegistryStore
@@ -2013,6 +2095,49 @@ namespace World::Wui
 				StateList({ "default", "disabled" }),
 				{ PropFloat("value", 0.0f, 1.0f, 0.01f), PropBool("disabled") },
 				&ShowProgress));
+
+			// ---- P1c-LIB2:渐变填充 / 可折叠分区标题 / 禁用+理由按钮 / 有状态滚动条 ----
+			WuiComponentRegistry::Register(Desc(
+				"gradient", "GradientFill", "Gradient Fill", "Chrome", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=无(纯绘制原语,不登记节点);外壳锚点 kind=component-root、interactive=false;四角颜色顺序 TL/TR/BR/BL(与 WuiDrawCommand::Corners 一致),矩形逐字段透传、不裁剪不圆角",
+				"showcase 首选 220x64;两个方向态(纵向上→下 / 横向左→右)共用同一块矩形;四角颜色由调用方给,控件不改几何",
+				ShellIds("gradient"),
+				StateList({ "default", "horizontal" }),
+				{ PropText("top", "#3D4554"), PropText("bottom", "#0D0F14") },
+				&ShowGradient));
+
+			WuiComponentRegistry::Register(Desc(
+				"collapsible", "CollapsibleHeader", "Section Header (Collapsible)", "Containers",
+				WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
+				"role=button;id=HashId('showcase.collapsible')(控件自己登记;面板用 caller-provided 稳定 id,如 properties.section.<DisplayName> 的 HashId);label=title、value=open/closed、interactive=true、focused 跟随焦点;进焦点表(Tab 可达),Enter/Space = 切换",
+				"showcase 首选 260x24;整行可点;展开/折叠只改底色与标记,自身矩形不变(布局高度由调用方按 open 算)",
+				ShellIds("collapsible"),
+				StateList({ "default", "collapsed", "hover", "focus" }),
+				{ PropText("title", "Shader Parameters"), PropText("trailing", "12 items"), PropBool("open") },
+				&ShowCollapsibleHeader));
+
+			WuiComponentRegistry::Register(Desc(
+				"button.disabled", "ButtonEx", "Button (Disabled + Reason)", "Buttons", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=button;id=HashId('showcase.button.disabled')(控件自己登记);label=label 属性;enabled=false 时 Enabled=false 且 Value/Tooltip=理由(灰按钮不能没有理由),Interactive 仍为 true;焦点环走 DrawFocusRing,Enter/Space = 激活",
+				"showcase 首选 148x24(高 = theme.ControlHeight);禁用态同尺寸弱化绘制,不改矩形;primary=true 时 Accent 填充",
+				ShellIds("button.disabled"),
+				StateList({ "default", "hover", "focus", "disabled", "primary", "long-text" }),
+				{ PropText("label", "Assign"), PropText("reason", "Select a material instance first"),
+					PropBool("disabled"), PropBool("primary") },
+				&ShowButtonEx));
+
+			WuiComponentRegistry::Register(Desc(
+				"scrollbar", "ScrollBar", "Scroll Bar", "Containers", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=scrollbar;id=HashId('showcase.scrollbar')(控件自己登记);value='scroll=<y>/<max> ratio=<0..1>'(前缀与 BeginScrollArea 的 scroll=<y>/<max> 同口径);还有滚动量时 Enabled/Interactive=true 并进焦点表,内容装得下时 Enabled/Interactive=false",
+				"showcase 首选 14x168(rect.H >= 72 才画上下翻页按钮,按钮高 24);内容高/视口高由调用方给,控件不改布局",
+				ShellIds("scrollbar"),
+				StateList({ "default", "hover", "focus", "top", "bottom", "disabled" }),
+				{ PropFloat("scroll", 0.0f, 400.0f, 1.0f) },
+				&ShowScrollBar));
 		}
 	}
 }

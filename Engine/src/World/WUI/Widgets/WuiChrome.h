@@ -29,6 +29,22 @@ namespace World::Wui
 	void SectionHeader(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiColor& color,
 		const WuiTheme& theme, float fontSize = 15.0f);
 
+	// ---- P1c-LIB2:即时可折叠分区标题(面板标题行的库化入口) ----
+
+	// 形态:整行圆角底(展开 = theme.ActiveBg / 折叠 = theme.PanelHeader,悬停 = theme.HoverBg)
+	//   + 左侧展开标记("- " / "+ ")+ 主文案(+ 可选英文术语,走 LabelWithTerm 的裁剪口径)
+	//   + 右侧可选后缀文本(trailing,右对齐、按 MeasureTextWidth 定位,如分组计数)。
+	//   **不画** SectionHeader 那条底部 1px 分隔线(要不要分隔线由调用方决定)。
+	// 交互:点击整行(或焦点在它上面时 Enter/Space)切换 open;悬停 = Hand 光标;tooltip 非空时悬停登记提示。
+	// a11y:一个节点,id = 传入 id(稳定;面板按 "properties.section.<DisplayName>" 这类字符串算 HashId)、
+	//   kind="button"、label=title、value="open"/"closed"、interactive=true、focused 跟随焦点;
+	//   进焦点表(Tab 可达)。
+	// 返回 true = 本帧切换了 open(调用方据此记操作记录 / 更新布局)。
+	bool CollapsibleHeader(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& title, bool& open,
+		const WuiTheme& theme, const std::string& term = std::string(),
+		const std::string& trailing = std::string(), const std::string& tooltip = std::string(),
+		float fontSize = 14.0f);
+
 	// ---- P1c-LIB1:徽标 / 染色图标 / 即时裁剪作用域(面板缺件 → 库件) ----
 
 	// 文本徽标:纯填充底 + 居中文字。着色器/Prefab 这类"类型徽标"、实例条上的强调字标

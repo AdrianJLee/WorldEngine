@@ -168,6 +168,32 @@ namespace World::Wui
 	bool TextFieldEx(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
 		const WuiTheme& theme, const std::string& error, const TextFieldA11y* a11y = nullptr);
 	void Image(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv, const WuiTheme& theme);
+
+	// ---- P1c-LIB2:渐变填充 / 禁用态按钮(面板缺件 → 库件) ----
+
+	// 即时渐变填充:**一条** WuiDrawKind::Gradient 命令,矩形逐字段透传(不裁剪、不圆角、不做
+	// 任何几何改写 —— 需要裁剪由调用方套 ClipScope)。四个角颜色顺序 = TL → TR → BR → BL,
+	// 与 WuiDrawCommand::Corners 的固定顺序一致;把这四项写成面板手写的
+	// `{Gradient, rect, Corners={…}}` 就是同一条命令(逐字段等价)。
+	void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& topLeft, const WuiColor& topRight,
+		const WuiColor& bottomRight, const WuiColor& bottomLeft);
+	// 双色便捷版:vertical=true(默认)= 上→下,false = 左→右;等价于把 from/to 复制到相应两角。
+	void GradientFill(WuiContext& ctx, const WuiRect& rect, const WuiColor& from, const WuiColor& to,
+		bool vertical = true);
+
+	// 带禁用态 + 理由的按钮(材质/内容浏览器面板里 ActionButton / ModalActionButton 的库化入口)。
+	// 与 Button 的差别只在"可选主按钮配色 + 明确的可用性":
+	//  · enabled=false:同尺寸弱化绘制(填充 theme.PanelBg、描边 theme.Border、文字 theme.TextDisabled),
+	//    不响应点击/键盘;无障碍节点仍登记(**Enabled=false**、Interactive=true),
+	//    Value/Tooltip = tooltip —— 灰按钮不能没有理由("为什么不可用"这句话就是 tooltip 参数);
+	//  · primary=true(启用态)= Accent 填充 + theme.WindowBg 文字;
+	//  · 启用态悬停 = ButtonHover 填充 + Accent 描边 + Hand 光标;tooltip 非空时悬停登记提示;
+	//  · 键盘与 Button 同口径:焦点在它上面时 Enter/Space = 激活一次。
+	// 返回 true = 本帧被点击/键盘激活(enabled=false 恒 false)。
+	bool ButtonEx(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		const WuiTheme& theme, bool enabled = true, bool primary = false,
+		const std::string& tooltip = std::string());
+
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);
 	// 可搜索下拉(资源选择用):点击/输入展开带输入框的弹层,按子串过滤选项,
@@ -197,6 +223,20 @@ namespace World::Wui
 	bool BeginScrollArea(WuiContext& ctx, const WuiRect& viewport, float contentHeight, float& scrollY,
 		const WuiTheme& theme, WuiId id = 0);
 	void EndScrollArea(WuiContext& ctx);
+
+	// P1c-LIB2:有状态滚动条(轨道 + 可选上下翻页按钮 + 滑块;位置既读得出、也设得进)。
+	//  · 口径与 BeginScrollArea 一致:contentHeight / viewportHeight / scrollY 都由调用方持有,
+	//    最大滚动量 = max(0, contentHeight − viewportHeight),滑块长度 = clamp(v²/content, 24, 行程);
+	//  · 轨道路径:按下滑块 = 抓住拖动;按下轨道空白 = 直接定位(也是脚本可用的"设值"入口);
+	//    上下按钮(仅 rect.H ≥ 72 时画,高 24)= 翻一页(0.9 × viewportHeight);
+	//  · 焦点在它上面时 ↑/↓ = ±40、PageUp/PageDown = ±0.9 屏、Home/End = 两端(与 BeginScrollArea 同键位);
+	//    **不处理滚轮** —— 滚轮归 BeginScrollArea,避免同一次滚轮被算两遍;
+	//  · a11y:一个节点,id = 传入 id、kind="scrollbar"、value="scroll=<y>/<max> ratio=<0..1>"
+	//    (前缀与 BeginScrollArea 的 value 同口径,脚本按同一套字符串读);还有滚动量时
+	//    Enabled/Interactive=true 且进焦点表(Tab 可达),没有滚动量时 Enabled/Interactive=false。
+	// 返回 true = 本帧 scrollY 真的变了(调用方据此记操作记录)。
+	bool ScrollBar(WuiContext& ctx, WuiId id, const WuiRect& rect, float contentHeight, float viewportHeight,
+		float& scrollY, const WuiTheme& theme, bool pageButtons = true);
 
 	// 表格单元矩形(按列宽累计)。
 	WuiRect TableCell(const WuiRect& table, const std::vector<float>& columns, size_t row, size_t column, float rowHeight);

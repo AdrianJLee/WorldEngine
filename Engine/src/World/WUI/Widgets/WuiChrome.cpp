@@ -92,6 +92,64 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y + rect.H - 1.0f, rect.W, 1.0f }, theme.Border, 0.0f });
 	}
 
+	// ---- P1c-LIB2:即时可折叠分区标题 ----
+
+	bool CollapsibleHeader(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& title, bool& open,
+		const WuiTheme& theme, const std::string& term, const std::string& trailing,
+		const std::string& tooltip, float fontSize)
+	{
+		const bool focused = id != 0 && ctx.Focus() == id;
+		const bool hovered = ctx.IsHovered(rect);
+		// 底色:展开用 ActiveBg / 折叠用 PanelHeader,悬停统一 HoverBg(不另外叠一层)。
+		const WuiColor fill = hovered ? theme.HoverBg : (open ? theme.ActiveBg : theme.PanelHeader);
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 2.0f });
+
+		const float textSize = fontSize > 0.0f ? fontSize : theme.FontSizeBody;
+		const float trailingSize = std::max(theme.FontSizeCaption, textSize - 2.0f);
+		const float trailingWidth = trailing.empty() ? 0.0f : ctx.MeasureTextWidth(trailing, trailingSize) + 12.0f;
+		// 标题预算 = 整行宽 − 左内边距 − 右侧后缀占位;LabelWithTerm 自己按预算逐级降级。
+		const float titleBudget = std::max(40.0f, rect.W - 12.0f - trailingWidth);
+		Wui::LabelWithTerm(ctx, { rect.X + 6.0f, rect.Y + (rect.H - textSize) * 0.5f - 2.0f },
+			(open ? "- " : "+ ") + title, term, theme.Text, textSize, theme, titleBudget);
+		if (!trailing.empty())
+			PushText(ctx, { rect.X + rect.W - trailingWidth + 4.0f, rect.Y + (rect.H - trailingSize) * 0.5f },
+				trailing, theme.TextMuted, trailingSize);
+
+		// 交互走整行:点击(或焦点上 Enter/Space)切换;hover 给 Hand 光标与可选提示。
+		bool toggled = false;
+		if ((ctx.IsClicked(rect)) || (focused
+				&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))))
+			toggled = true;
+		if (hovered)
+		{
+			ctx.SetCursor(WuiCursor::Hand);
+			if (!tooltip.empty())
+				Tooltip(ctx, rect, tooltip);
+		}
+		if (toggled)
+			open = !open;
+
+		if (id != 0)
+		{
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = title;
+			node.Value = open ? "open" : "closed";
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
+		ctx.RegisterFocusable(id, rect);
+		DrawFocusRing(ctx, rect, id, theme);
+		return toggled;
+	}
+
 	// ---- P1c-LIB1:徽标 / 染色图标(ClipScope 是纯 RAII,定义在头文件里) ----
 
 	void Badge(WuiContext& ctx, const WuiRect& rect, const std::string& text, const WuiColor& fill,

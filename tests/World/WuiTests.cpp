@@ -2293,6 +2293,279 @@ int main()
 			accessibility.Clear();
 		}
 
+		// 25. P1c-LIB2:渐变填充 / 可折叠分区标题 / 禁用+理由按钮 / 有状态滚动条 —— 四条硬口径:
+		//     ① GradientFill 与面板手写的 Gradient 命令逐字段等价(矩形 + 四角颜色/顺序),
+		//        双色便捷版的两个方向各自等价于把 from/to 复制到对应两角;
+		//     ② CollapsibleHeader 点击/键盘(Enter)都切换 open,稳定 a11y id 的 value 跟着 open/closed;
+		//     ③ ButtonEx 禁用时点击不触发、节点 Enabled=false 且 Value/Tooltip 都带理由;
+		//        启用时点击与键盘激活都能触发;
+		//     ④ ScrollBar 的值字符串读得出("scroll=<y>/<max> ratio=…",与 BeginScrollArea 同前缀),
+		//        拖动/点击轨道/键盘都能设值,内容装得下时节点 Enabled=false。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme = CurrentTheme();
+			WuiInputState base;
+			base.ViewportSize = { 640.0f, 480.0f };
+
+			// ---- ① GradientFill:单条命令 + 四角顺序 + 双色方向 ----
+			{
+				WuiContext ctx;
+				ctx.BeginFrame(base);
+				const WuiRect rect { 10.0f, 20.0f, 120.0f, 60.0f };
+				const WuiColor tl { 1, 0, 0, 1 };
+				const WuiColor tr { 0, 1, 0, 1 };
+				const WuiColor br { 0, 0, 1, 1 };
+				const WuiColor bl { 1, 1, 1, 1 };
+				GradientFill(ctx, rect, tl, tr, br, bl);
+				CHECK(ctx.Commands().size() == 1);
+				const WuiDrawCommand& command = ctx.Commands()[0];
+				CHECK(command.Kind == WuiDrawKind::Gradient);
+				CHECK(Near(command.Rect.X, rect.X) && Near(command.Rect.Y, rect.Y)
+					&& Near(command.Rect.W, rect.W) && Near(command.Rect.H, rect.H));
+				CHECK(Near(command.Corners[0].R, 1.0f) && Near(command.Corners[0].G, 0.0f));
+				CHECK(Near(command.Corners[1].G, 1.0f) && Near(command.Corners[1].R, 0.0f));
+				CHECK(Near(command.Corners[2].B, 1.0f) && Near(command.Corners[2].R, 0.0f));
+				CHECK(Near(command.Corners[3].R, 1.0f) && Near(command.Corners[3].G, 1.0f)
+					&& Near(command.Corners[3].B, 1.0f));
+				// 纵向双色:上排两角 = from、下排两角 = to;横向双色:左列 = from、右列 = to。
+				const WuiColor from { 1, 0, 0, 1 };
+				const WuiColor to { 0, 0, 1, 1 };
+				GradientFill(ctx, rect, from, to);
+				const WuiDrawCommand& vertical = ctx.Commands().back();
+				CHECK(Near(vertical.Corners[0].R, 1.0f) && Near(vertical.Corners[1].R, 1.0f)
+					&& Near(vertical.Corners[2].B, 1.0f) && Near(vertical.Corners[3].B, 1.0f));
+				GradientFill(ctx, rect, from, to, false);
+				const WuiDrawCommand& horizontal = ctx.Commands().back();
+				CHECK(Near(horizontal.Corners[0].R, 1.0f) && Near(horizontal.Corners[3].R, 1.0f)
+					&& Near(horizontal.Corners[1].B, 1.0f) && Near(horizontal.Corners[2].B, 1.0f));
+				ctx.EndFrame();
+			}
+
+			// ---- ② CollapsibleHeader:点击 / 键盘切换 + 稳定 a11y id 的 open/closed ----
+			{
+				const WuiId id = HashId("test.lib2.section");
+				const WuiRect rect { 20.0f, 20.0f, 200.0f, 24.0f };
+				bool open = true;
+				WuiContext ctx;
+				{
+					WuiInputState click = base;
+					click.MousePos = { rect.X + 40.0f, rect.Y + rect.H * 0.5f };
+					click.MouseClicked[0] = true;
+					accessibility.BeginFrame("main", click.ViewportSize);
+					accessibility.SetPanel("showcase");
+					ctx.BeginFrame(click);
+					CHECK(CollapsibleHeader(ctx, id, rect, "Transform", open, theme));
+					ctx.EndFrame();
+					CHECK(!open);
+					const WuiAccessNode* node = accessibility.Find(id);
+					CHECK(node != nullptr);
+					if (node != nullptr)
+					{
+						CHECK(node->Kind == "button" && node->Label == "Transform");
+						CHECK(node->Value == "closed" && node->Enabled && node->Interactive);
+						CHECK(Near(node->Rect.W, rect.W));   // 节点矩形就是传入的整行
+					}
+				}
+				{
+					WuiInputState key = base;
+					key.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Enter) };
+					accessibility.BeginFrame("main", key.ViewportSize);
+					accessibility.SetPanel("showcase");
+					ctx.BeginFrame(key);
+					ctx.SetFocus(id);
+					CHECK(CollapsibleHeader(ctx, id, rect, "Transform", open, theme));
+					ctx.EndFrame();
+					CHECK(open);
+					const WuiAccessNode* node = accessibility.Find(id);
+					CHECK(node != nullptr && node->Value == "open");
+				}
+				// 展开/折叠 = 两种主题底色(ActiveBg / PanelHeader),且不画 SectionHeader 那条底部分隔线。
+				{
+					WuiContext openCtx;
+					openCtx.BeginFrame(base);
+					bool openState = true;
+					CollapsibleHeader(openCtx, id, rect, "Transform", openState, theme);
+					openCtx.EndFrame();
+					WuiContext closedCtx;
+					closedCtx.BeginFrame(base);
+					bool closedState = false;
+					CollapsibleHeader(closedCtx, id, rect, "Transform", closedState, theme);
+					closedCtx.EndFrame();
+					CHECK(openCtx.Commands().size() == closedCtx.Commands().size());
+					CHECK(Near(openCtx.Commands()[0].Color.R, theme.ActiveBg.R));
+					CHECK(Near(closedCtx.Commands()[0].Color.R, theme.PanelHeader.R));
+					CHECK(!Near(theme.ActiveBg.R, theme.PanelHeader.R));
+				}
+			}
+
+			// ---- ③ ButtonEx:禁用理由进 a11y,启用态点击/键盘都能触发 ----
+			{
+				const WuiId id = HashId("test.lib2.button");
+				const WuiRect rect { 20.0f, 20.0f, 140.0f, 24.0f };
+				const std::string reason = "Select a material instance first";
+				{
+					WuiContext ctx;
+					WuiInputState click = base;
+					click.MousePos = { rect.X + 10.0f, rect.Y + rect.H * 0.5f };
+					click.MouseClicked[0] = true;
+					accessibility.BeginFrame("main", click.ViewportSize);
+					accessibility.SetPanel("showcase");
+					ctx.BeginFrame(click);
+					CHECK(!ButtonEx(ctx, id, rect, "Assign", theme, false, false, reason));
+					ctx.EndFrame();
+					const WuiAccessNode* node = accessibility.Find(id);
+					CHECK(node != nullptr);
+					if (node != nullptr)
+					{
+						CHECK(node->Kind == "button" && node->Label == "Assign");
+						CHECK(!node->Enabled && node->Interactive);
+						CHECK(node->Value == reason && node->Tooltip == reason);
+					}
+				}
+				{
+					WuiContext ctx;
+					WuiInputState click = base;
+					click.MousePos = { rect.X + 10.0f, rect.Y + rect.H * 0.5f };
+					click.MouseClicked[0] = true;
+					accessibility.BeginFrame("main", click.ViewportSize);
+					accessibility.SetPanel("showcase");
+					ctx.BeginFrame(click);
+					CHECK(ButtonEx(ctx, id, rect, "Assign", theme, true, false, reason));
+					ctx.EndFrame();
+					const WuiAccessNode* node = accessibility.Find(id);
+					CHECK(node != nullptr && node->Enabled);
+				}
+				{
+					WuiContext ctx;
+					WuiInputState key = base;
+					key.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Enter) };
+					ctx.BeginFrame(key);
+					ctx.SetFocus(id);
+					CHECK(ButtonEx(ctx, id, rect, "Assign", theme));
+					ctx.EndFrame();
+				}
+			}
+
+			// ---- ④ ScrollBar:值可读 + 拖动/轨道点击/键盘可设 + 无滚动量时禁用 ----
+			{
+				const WuiId id = HashId("test.lib2.scrollbar");
+				const WuiRect rect { 500.0f, 20.0f, 12.0f, 168.0f };
+				const float content = 400.0f;
+				const float viewport = 200.0f;
+				float scroll = 60.0f;
+				WuiContext ctx;
+				const auto frame = [&](WuiContext& target, const WuiInputState& input)
+				{
+					accessibility.BeginFrame("main", input.ViewportSize);
+					accessibility.SetPanel("showcase");
+					target.BeginFrame(input);
+					const bool changed = ScrollBar(target, id, rect, content, viewport, scroll, theme);
+					target.EndFrame();
+					return changed;
+				};
+				// 默认帧:值字符串与 BeginScrollArea 同前缀(位置/比例都读得到)。
+				{
+					WuiInputState idle = base;
+					frame(ctx, idle);
+					const WuiAccessNode* node = accessibility.Find(id);
+					CHECK(node != nullptr);
+					if (node != nullptr)
+					{
+						CHECK(node->Kind == "scrollbar");
+						CHECK(node->Value == "scroll=60/200 ratio=0.30");
+						CHECK(node->Enabled && node->Interactive);
+					}
+				}
+				// 按下滑块(y≈100 落在滑块内)→ 下一帧拖到 y=114 = 往下滚。
+				{
+					WuiInputState press = base;
+					press.MousePos = { rect.X + 6.0f, 100.0f };
+					press.MouseClicked[0] = true;
+					press.MouseDown[0] = true;
+					frame(ctx, press);
+					CHECK(Near(scroll, 60.0f));   // 按下滑块不跳值
+					WuiInputState drag = base;
+					drag.MousePos = { rect.X + 6.0f, 105.0f };
+					drag.MouseDown[0] = true;
+					CHECK(frame(ctx, drag));
+					CHECK(scroll > 60.0f && scroll < 200.0f);
+					WuiInputState release = base;
+					release.MousePos = drag.MousePos;
+					release.MouseReleased[0] = true;
+					frame(ctx, release);
+				}
+				// 点轨道空白(滑块之外)= 直接定位(脚本可用的"设值"入口)。
+				{
+					scroll = 0.0f;
+					WuiInputState jump = base;
+					jump.MousePos = { rect.X + 6.0f, 154.0f };
+					jump.MouseClicked[0] = true;
+					jump.MouseDown[0] = true;
+					CHECK(frame(ctx, jump));
+					CHECK(Near(scroll, 200.0f));   // 轨道空白 = 直接定位;越界夹取到两端
+					WuiInputState release = base;
+					release.MousePos = jump.MousePos;
+					release.MouseReleased[0] = true;
+					frame(ctx, release);
+				}
+				// 键盘:焦点在滚动条上时 Home/End = 两端(与 BeginScrollArea 同键位)。
+				{
+					WuiInputState home = base;
+					home.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Home) };
+					ctx.BeginFrame(home);
+					ctx.SetFocus(id);
+					ScrollBar(ctx, id, rect, content, viewport, scroll, theme);
+					ctx.EndFrame();
+					CHECK(Near(scroll, 0.0f));
+					WuiInputState end = base;
+					end.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::End) };
+					ctx.BeginFrame(end);
+					ctx.SetFocus(id);
+					ScrollBar(ctx, id, rect, content, viewport, scroll, theme);
+					ctx.EndFrame();
+					CHECK(Near(scroll, 200.0f));
+					const WuiAccessNode* node = accessibility.Find(id);
+					CHECK(node != nullptr && node->Value == "scroll=200/200 ratio=1.00");
+				}
+				// 内容装得下(没有滚动量):节点 Enabled/Interactive=false,值仍是可读的 0/0。
+				{
+					float none = 0.0f;
+					WuiInputState idle = base;
+					accessibility.BeginFrame("main", idle.ViewportSize);
+					accessibility.SetPanel("showcase");
+					ctx.BeginFrame(idle);
+					CHECK(!ScrollBar(ctx, id, rect, 160.0f, 200.0f, none, theme));
+					ctx.EndFrame();
+					const WuiAccessNode* node = accessibility.Find(id);
+					CHECK(node != nullptr);
+					if (node != nullptr)
+					{
+						CHECK(!node->Enabled && !node->Interactive);
+						CHECK(node->Value == "scroll=0/0 ratio=0.00");
+					}
+				}
+			}
+
+			// ---- ⑤ 登记表:四条新库件都在登记表里(showcase 的真实控件路径由 §20 的通用循环跑) ----
+			{
+				const WuiComponentDesc* gradient = WuiComponentRegistry::Find("gradient");
+				const WuiComponentDesc* collapsible = WuiComponentRegistry::Find("collapsible");
+				const WuiComponentDesc* buttonEx = WuiComponentRegistry::Find("button.disabled");
+				const WuiComponentDesc* scrollbar = WuiComponentRegistry::Find("scrollbar");
+				CHECK(gradient != nullptr && gradient->TypeName == "GradientFill");
+				CHECK(collapsible != nullptr && collapsible->TypeName == "CollapsibleHeader");
+				CHECK(buttonEx != nullptr && buttonEx->TypeName == "ButtonEx");
+				CHECK(scrollbar != nullptr && scrollbar->TypeName == "ScrollBar");
+				CHECK(gradient != nullptr && gradient->Category == "Chrome");
+				CHECK(collapsible != nullptr && collapsible->Category == "Containers");
+				CHECK(scrollbar != nullptr && scrollbar->Category == "Containers");
+			}
+
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}
