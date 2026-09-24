@@ -14,6 +14,10 @@
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiModal.h"
+// WUI-P1c-W3.1:面板不再自己拼底色/描边/文字 —— 统一走 WUI 库的"基础表面与高亮"
+// (PanelBackground / HighlightOutline)与 Wui::Label。逐条分类与缺件清单见
+// tools/agents/reports/WUI-P1c-w3.1-properties.md。
+#include "World/WUI/Widgets/WuiChrome.h"
 
 #include <algorithm>
 #include <array>
@@ -67,13 +71,14 @@ namespace World
 			const std::string& label, const std::string& tooltip, bool enabled, const Wui::WuiTheme& theme)
 		{
 			const bool hovered = ctx.IsHovered(rect);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect,
-				enabled ? (hovered ? theme.ButtonHover : theme.ButtonBg) : theme.PanelBg, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect,
-				hovered && enabled ? theme.Accent : theme.Border, 3.0f, 1.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-				{ rect.X + 9.0f, rect.Y + (rect.H - 13.0f) * 0.5f, 0.0f, 0.0f },
-				enabled ? theme.Text : theme.TextDisabled, 0.0f, 1.0f, label, 13.0f, false });
+			// 绘制走库原语(底色/描边/文字),与替换前逐命令等价。**禁用语义仍是本函数的**:
+			// Wui::Button 没有 enabled 形参,也没有"为什么不可用"的 tooltip 与禁用 a11y 值,
+			// 所以"带禁用态 + 理由的按钮"记在缺件清单里(报告 §缺件)。
+			Wui::PanelBackground(ctx, rect,
+				enabled ? (hovered ? theme.ButtonHover : theme.ButtonBg) : theme.PanelBg, 3.0f);
+			Wui::HighlightOutline(ctx, rect, hovered && enabled ? theme.Accent : theme.Border, 3.0f, 1.0f);
+			Wui::Label(ctx, { rect.X + 9.0f, rect.Y + (rect.H - 13.0f) * 0.5f }, label,
+				enabled ? theme.Text : theme.TextDisabled, 13.0f);
 			RegisterNode(Wui::HashId(idText), "button", rect, label, tooltip, enabled, tooltip);
 			if (hovered)
 			{
@@ -817,10 +822,9 @@ namespace World
 		const std::string unpackText = Wui::Tr("panel.properties.prefab.unpack", "Unpack");
 
 		// 卡片底 + 左侧 accent 条:与 prefab 编辑横幅同一套"这是资产链接,不是普通组件"的表达。
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, rect, theme.PanelHeader, theme.Radius });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect,
-			{ rect.X, rect.Y, 3.0f, rect.H }, theme.Accent, 0.0f });
-		ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect, theme.Border, theme.Radius, 1.0f });
+		Wui::PanelBackground(ctx, rect, theme.PanelHeader, theme.Radius);
+		Wui::PanelBackground(ctx, { rect.X, rect.Y, 3.0f, rect.H }, theme.Accent, 0.0f);
+		Wui::HighlightOutline(ctx, rect, theme.Border, theme.Radius, 1.0f);
 		RegisterNode(Wui::HashId("properties.prefab.bar"), "group",
 			{ rect.X, rect.Y, rect.W, titleHeight + pad },
 			Wui::Tr("panel.properties.prefab.bar", "Prefab instance"), info.Source,
@@ -829,7 +833,9 @@ namespace World
 
 		// 标题行:[预] 文件名 · N 处覆盖
 		const Wui::WuiRect badge { rect.X + pad, rect.Y + pad + 2.0f, 16.0f, 16.0f };
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, badge, theme.Accent, badge.H * 0.5f });
+		Wui::PanelBackground(ctx, badge, theme.Accent, badge.H * 0.5f);
+		// 徽标字形要**粗体**,库里的 Wui::Label 没有 bold 变体 —— 这行留作"缺件"证据:
+		// 需要一件 WuiBadge(16×16 圆形强调色 + 粗体字形),本轮不硬造。
 		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { badge.X + 3.0f, badge.Y + 2.0f, 0.0f, 0.0f },
 			Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, 0.0f, 1.0f,
 			Wui::Tr("panel.properties.prefab.badge", "预"), 11.0f, true });
@@ -1174,7 +1180,9 @@ namespace World
 				++total;
 			}
 			// 侧栏底色用列表/输入框的 ContentBg(比模态面板底更深一档,形成"分栏"层次)。
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, sidebarRect, theme.ContentBg, 4.0f });
+			Wui::PanelBackground(ctx, sidebarRect, theme.ContentBg, 4.0f);
+			// 下面的"只裁剪、不滚动"作用域仍是裸命令:库里没有即时版裁剪入口
+			// (Wui::BeginScrollArea 附带滚轮与底色填充语义,会改变这里的行为)。缺件见报告。
 			ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sidebarRect });
 			float itemY = sidebarRect.Y + 4.0f;
 			// filter:"" + all=true → 全部;all=false 时 filter 为空 = 未分类,非空 = 该分类。
@@ -1187,7 +1195,7 @@ namespace World
 					return;   // 栏高之外:不绘制也不登记(与滚动区同一口径)
 				const bool selectedCategory = m_AddCategoryAll == all && m_AddCategoryFilter == filter;
 				if (selectedCategory)
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, item, theme.ActiveBg, 3.0f });
+					Wui::PanelBackground(ctx, item, theme.ActiveBg, 3.0f);
 				const std::string text = label + "  (" + std::to_string(count) + ")";
 				if (Wui::MenuItem(ctx, Wui::HashId(id.c_str()), item, text, true, theme))
 				{
@@ -1299,8 +1307,7 @@ namespace World
 			const bool highlighted = itemIndex == m_AddHighlight;
 			const bool hovered = ctx.IsHovered(item);
 			if (highlighted || hovered)
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, item,
-					highlighted ? theme.ActiveBg : theme.ButtonHover, 2.0f });
+				Wui::PanelBackground(ctx, item, highlighted ? theme.ActiveBg : theme.ButtonHover, 2.0f);
 			if (highlighted)
 			{
 				highlightTop = item.Y;
@@ -1367,9 +1374,9 @@ namespace World
 			const float fraction = maxScroll > 0.0f ? std::clamp(m_AddScroll / maxScroll, 0.0f, 1.0f) : 0.0f;
 			const Wui::WuiRect thumb { scrollTrack.X + 2.0f, scrollTrack.Y + travel * fraction,
 				scrollTrack.W - 4.0f, thumbLength };
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, scrollTrack, theme.PanelHeader, 3.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, thumb,
-				(m_AddThumbDragging || ctx.IsHovered(thumb)) ? theme.Accent : theme.ButtonHover, 3.0f });
+			Wui::PanelBackground(ctx, scrollTrack, theme.PanelHeader, 3.0f);
+			Wui::PanelBackground(ctx, thumb,
+				(m_AddThumbDragging || ctx.IsHovered(thumb)) ? theme.Accent : theme.ButtonHover, 3.0f);
 			RegisterNode(Wui::HashId("prop.add.scroll"), "scrollbar", scrollTrack,
 				Wui::Tr("panel.properties.add.scroll", "Scroll"), std::to_string(static_cast<int>(fraction * 100.0f + 0.5f)) + "%",
 				false);
@@ -1642,7 +1649,11 @@ namespace World
 			// (properties.section.<DisplayName>),脚本可展开/折叠分区。
 			const float rowY = contentRect.Y + sectionY;
 			const Wui::WuiRect header { contentRect.X, rowY, contentRect.W, kSectionHeader };
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, header, open ? Wui::WuiColor { 0.27f, 0.28f, 0.31f, 1 } : Wui::WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 2.0f });
+			// 底色走库;标题行本体(展开标记 + 术语 + 悬停 Doc + 移除按钮 + 稳定 a11y id)仍由本面板
+			// 组装:Wui::SectionHeader 会多画一条分隔线且不含展开/折叠,保留模式 WuiSection 又接不进
+			// 这里的上一帧实测高度滚动布局 —— 即时版可折叠分区记入缺件。
+			Wui::PanelBackground(ctx, header,
+				open ? Wui::WuiColor { 0.27f, 0.28f, 0.31f, 1 } : Wui::WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 2.0f);
 			// 标题 = 主文案(中文界面为译文)+ 英文术语(Caption/次要色,窄处自动省略);前缀仍是展开标记。
 			const Wui::LocalizedLabel sectionLabel = SchemaComponentLabel(*schema);
 			// P4-U9:分区标题悬停 = 组件说明(schema Doc),右侧留出"移除组件"按钮的位置。
@@ -1681,11 +1692,9 @@ namespace World
 					: blockedReason;
 				const bool hoverRemove = ctx.IsHovered(removeRect);
 				if (hoverRemove && canRemove)
-					ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, removeRect, Wui::WuiColor { 0.97f, 0.32f, 0.29f, 0.22f }, 3.0f });
-				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
-					{ removeRect.X + 5.0f, removeRect.Y + 1.0f, 0, 0 },
-					canRemove ? (hoverRemove ? theme.Danger : theme.TextMuted) : theme.TextDisabled,
-					0, 1.0f, "x", 13.0f, false });
+					Wui::PanelBackground(ctx, removeRect, Wui::WuiColor { 0.97f, 0.32f, 0.29f, 0.22f }, 3.0f);
+				Wui::Label(ctx, { removeRect.X + 5.0f, removeRect.Y + 1.0f }, "x",
+					canRemove ? (hoverRemove ? theme.Danger : theme.TextMuted) : theme.TextDisabled, 13.0f);
 				if (hoverRemove)
 				{
 					if (canRemove)
@@ -1732,12 +1741,14 @@ namespace World
 			const Wui::WuiRect downButton { track.X, track.Y + track.H - kSectionHeader, track.W, kSectionHeader };
 			const Wui::WuiRect thumb { track.X, track.Y + kSectionHeader + thumbTravel * fraction, track.W, thumbLength };
 
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, track, theme.PanelHeader, 2.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, upButton, ctx.IsHovered(upButton) ? theme.ButtonHover : theme.ButtonBg, 2.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, downButton, ctx.IsHovered(downButton) ? theme.ButtonHover : theme.ButtonBg, 2.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, thumb, theme.Accent, 2.0f });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { upButton.X + 1, upButton.Y + 4, 0, 0 }, theme.Text, 0, 1.0f, "^", 13.0f, false });
-			ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { downButton.X + 1, downButton.Y + 4, 0, 0 }, theme.Text, 0, 1.0f, "v", 13.0f, false });
+			// 轨道/上下按钮/滑块底色与箭头字形都走库原语;状态机(点击翻页 + 拖动定位 + 稳定
+			// a11y id)仍在本面板 —— "有状态滚动条"是缺件,见报告。
+			Wui::PanelBackground(ctx, track, theme.PanelHeader, 2.0f);
+			Wui::PanelBackground(ctx, upButton, ctx.IsHovered(upButton) ? theme.ButtonHover : theme.ButtonBg, 2.0f);
+			Wui::PanelBackground(ctx, downButton, ctx.IsHovered(downButton) ? theme.ButtonHover : theme.ButtonBg, 2.0f);
+			Wui::PanelBackground(ctx, thumb, theme.Accent, 2.0f);
+			Wui::Label(ctx, { upButton.X + 1, upButton.Y + 4 }, "^", theme.Text, 13.0f);
+			Wui::Label(ctx, { downButton.X + 1, downButton.Y + 4 }, "v", theme.Text, 13.0f);
 
 			const bool canScrollUp = scroll.Offset > kScrollEpsilon;
 			const bool canScrollDown = scroll.Offset < maxScroll - kScrollEpsilon;
