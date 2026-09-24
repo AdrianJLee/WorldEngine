@@ -400,7 +400,8 @@ namespace World::Wui
 		ctx.PopOverlay();
 	}
 
-	void DrawFocusRing(WuiContext& ctx, const WuiRect& rect, WuiId id, const WuiTheme& theme)
+	void DrawFocusRing(WuiContext& ctx, const WuiRect& rect, WuiId id, const WuiTheme& theme,
+		const WuiColor* ringColor)
 	{
 		if (id == 0 || ctx.Focus() != id)
 			return;
@@ -410,11 +411,48 @@ namespace World::Wui
 		// 走 overlay 命令层:焦点环在全部普通控件之后绘制,后画的兄弟控件不会盖住它
 		// (与 tooltip 同一套机制,不新增层级)。1.5px 描边、圆角取主题令牌。
 		ctx.PushOverlay();
-		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.FocusRing, theme.Radius, 1.5f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
+			ringColor != nullptr ? *ringColor : theme.FocusRing, theme.Radius, 1.5f });
 		ctx.PopOverlay();
 	}
 
-	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme)
+	namespace
+	{
+		// WUI-P1.5:按"当前视觉状态 + 通道"取样式色;槽未覆盖 = 调用方给的兜底(主题令牌/旧口径)。
+		enum class ButtonStyleChannel
+		{
+			Bg = 0,
+			Border = 1,
+			Text = 2,
+		};
+
+		WuiColor ResolveButtonColor(const WuiButtonStyle* style, WuiButtonStyle::State state,
+			ButtonStyleChannel channel, const WuiColor& fallback)
+		{
+			if (style == nullptr)
+				return fallback;
+			const WuiButtonStateColors& colors = style->Colors[static_cast<size_t>(state)];
+			const std::optional<WuiColor>* slot = &colors.Bg;
+			if (channel == ButtonStyleChannel::Border)
+				slot = &colors.Border;
+			else if (channel == ButtonStyleChannel::Text)
+				slot = &colors.Text;
+			return slot->has_value() ? **slot : fallback;
+		}
+
+		// border.focus 覆盖同时作用于焦点环(未覆盖 = 主题 FocusRing,与改动前完全一致)。
+		const WuiColor* FocusRingOverride(const WuiButtonStyle* style)
+		{
+			if (style == nullptr)
+				return nullptr;
+			const std::optional<WuiColor>& border =
+				style->Colors[static_cast<size_t>(WuiButtonStyle::State::Focused)].Border;
+			return border.has_value() ? &*border : nullptr;
+		}
+	}
+
+	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme,
+		const WuiButtonStyle* style)
 	{
 		const bool focused = ctx.Focus() == id;
 		RegisterAccessNode(id, "button", rect, label, std::string(), true, true, focused);
@@ -424,11 +462,26 @@ namespace World::Wui
 		// U2A 键盘激活:焦点在按钮上时 Enter/Space = 点击一次(KeyPressed 只含本帧新按下,长按不连发)。
 		const bool keyActivated = focused
 			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
-		const WuiColor fill = hovered ? theme.ButtonHover : theme.ButtonBg;
+		// WUI-P1.5:状态优先级 pressed > hover > focus > normal;全部槽都未覆盖时下面三个兜底
+		// 就是改动前的取值(ButtonHover/ButtonBg、Border、pressed?Accent:Text)⇒ 命令流逐字节不变。
+		const WuiButtonStyle::State visual = style != nullptr && style->Disabled
+			? WuiButtonStyle::State::Disabled
+			: (pressed ? WuiButtonStyle::State::Pressed
+				: (hovered ? WuiButtonStyle::State::Hover
+					: (focused ? WuiButtonStyle::State::Focused : WuiButtonStyle::State::Normal)));
+		const float padding = style != nullptr && style->PaddingX >= 0.0f ? style->PaddingX : 8.0f;
+		const float fontSize = style != nullptr && style->FontSize > 0.0f ? style->FontSize : 15.0f;
+		const bool bold = style != nullptr && style->Bold;
+		const WuiColor fill = ResolveButtonColor(style, visual, ButtonStyleChannel::Bg,
+			hovered ? theme.ButtonHover : theme.ButtonBg);
+		const WuiColor border = ResolveButtonColor(style, visual, ButtonStyleChannel::Border, theme.Border);
+		const WuiColor textColor = ResolveButtonColor(style, visual, ButtonStyleChannel::Text,
+			pressed ? theme.Accent : theme.Text);
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });
-		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
-		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 8.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 }, pressed ? theme.Accent : theme.Text, 0, 1.0f, label, 15.0f, false });
-		DrawFocusRing(ctx, rect, id, theme);
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, border, 3.0f, 1.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + padding, rect.Y + (rect.H - fontSize) * 0.5f, 0, 0 },
+			textColor, 0, 1.0f, label, fontSize, bold });
+		DrawFocusRing(ctx, rect, id, theme, FocusRingOverride(style));
 		return (hovered && ctx.Input().MouseClicked[0]) || keyActivated;
 	}
 

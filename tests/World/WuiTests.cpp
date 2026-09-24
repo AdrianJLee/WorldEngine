@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -52,6 +53,32 @@ namespace
 	{
 		const float delta = a - b;
 		return delta > -0.001f && delta < 0.001f;
+	}
+
+	// WUI-P1.5a:命令流哈希 —— "画布像素哈希"的 headless 等价物:逐命令把影响像素的字段喂进
+	// FNV-1a,任何一处颜色/矩形/字号/粗体/文本变化都会改哈希(真实像素证据由探针 matrix 阶段给)。
+	uint64_t CommandStreamHash(const std::vector<WuiDrawCommand>& commands)
+	{
+		uint32_t hash = 2166136261u;
+		const auto feed = [&hash](const void* data, size_t size)
+		{
+			const uint8_t* bytes = static_cast<const uint8_t*>(data);
+			for (size_t index = 0; index < size; ++index)
+				hash = (hash ^ bytes[index]) * 16777619u;
+		};
+		for (const WuiDrawCommand& command : commands)
+		{
+			feed(&command.Kind, sizeof(command.Kind));
+			feed(&command.Rect, sizeof(command.Rect));
+			feed(&command.Color, sizeof(command.Color));
+			feed(&command.Rounding, sizeof(command.Rounding));
+			feed(&command.Thickness, sizeof(command.Thickness));
+			feed(command.Text.data(), command.Text.size());
+			feed(&command.FontSize, sizeof(command.FontSize));
+			feed(&command.Bold, sizeof(command.Bold));
+			feed(&command.Image, sizeof(command.Image));
+		}
+		return hash;
 	}
 
 	// P1a:登记的 TypeName 必须真的能在 WUI 头文件里找到声明 —— 保留模式控件是 struct/class
@@ -2760,6 +2787,296 @@ int main()
 
 			accessibility.SetEnabled(false);
 			accessibility.Clear();
+		}
+
+		// 27. WUI-P1.5a:属性 schema 扩展 + 交互契约 + Button style 化 —— 五段硬口径:
+		//     ① 值编码协议:颜色 #RRGGBB[AA] / 尺寸 WxH 可解析、规范写法可回写、坏文本不抛不改值;
+		//     ② 登记表:button 补齐 Content/Style/Layout/Behavior 四组属性 + 交互契约(hover/click/key),
+		//        静态件保持空契约;
+		//     ③ style 覆盖**真实生效**:5 态颜色只作用于自己那一态,字号/粗细/内边距改的是画布命令,
+		//        未覆盖 = 旧硬编码/主题令牌(命令流逐字节相同 = 旧基线不动);
+		//     ④ Layout:preferred("WxH")改画布槽位(宽/高/竖直居中),坏值忽略;
+		//     ⑤ 微基准:1000 帧 button 命令流的 CPU 时间(数字进报告,供 P1.5B 对比)。
+		{
+			// ---- ① 值编码协议 ----
+			{
+				WuiColor color {};
+				CHECK(ParseComponentColor("#4C8DFF", color));
+				CHECK(Near(color.R, 0x4C / 255.0f) && Near(color.G, 0x8D / 255.0f)
+					&& Near(color.B, 0xFF / 255.0f));
+				CHECK(Near(color.A, 1.0f));                       // 6 位 = 不透明
+				CHECK(ParseComponentColor("2b313899", color));     // 可省 '#'、大小写不限
+				CHECK(Near(color.A, 0x99 / 255.0f));
+				CHECK(!ParseComponentColor("#12345", color));      // 5 位 = 非法
+				CHECK(!ParseComponentColor("rgba(1,2,3)", color)); // 认不出的写法 = 没给
+				CHECK(Near(color.A, 0x99 / 255.0f));               // 失败不改 out(调用方保留当前值)
+				CHECK(FormatComponentColor(WuiColor { 0x22 / 255.0f, 0x27 / 255.0f, 0x2F / 255.0f, 1.0f })
+					== "#22272F");
+				CHECK(FormatComponentColor(WuiColor { 0.0f, 0.0f, 0.0f, 0.6f }) == "#00000099");
+
+				float width = 0.0f;
+				float height = 0.0f;
+				CHECK(ParseComponentSize("200x32", width, height) && Near(width, 200.0f)
+					&& Near(height, 32.0f));
+				CHECK(ParseComponentSize(" 128 X 24 ", width, height) && Near(width, 128.0f)
+					&& Near(height, 24.0f));
+				CHECK(ParseComponentSize("96*28", width, height) && Near(height, 28.0f));
+				CHECK(!ParseComponentSize("128", width, height));        // 缺分隔符
+				CHECK(!ParseComponentSize("12px", width, height));       // 残留字符
+				CHECK(!ParseComponentSize("128x24x2", width, height));   // 多一段
+				CHECK(Near(width, 96.0f));                               // 失败不改 out
+				CHECK(FormatComponentSize(128.0f, 24.5f) == "128x24.5");
+			}
+
+			// ---- ② 登记表:四组属性 + 交互契约 ----
+			const WuiComponentDesc* button = WuiComponentRegistry::Find("button");
+			CHECK(button != nullptr);
+			if (button != nullptr)
+			{
+				size_t content = 0;
+				size_t style = 0;
+				size_t layout = 0;
+				size_t behavior = 0;
+				size_t stateScopedColors = 0;
+				bool labelIsText = false;
+				bool fontSizeOk = false;
+				bool preferredOk = false;
+				bool hoverColorOk = false;
+				for (const WuiComponentProperty& property : button->Properties)
+				{
+					switch (property.Group)
+					{
+					case WuiComponentPropertyGroup::Content:
+						++content;
+						labelIsText = labelIsText
+							|| (property.Name == "label" && property.Type == WuiComponentProperty::Kind::Text
+								&& !property.DefaultText.empty());
+						break;
+					case WuiComponentPropertyGroup::Style:
+						++style;
+						if (property.Type == WuiComponentProperty::Kind::Color && property.StateScoped)
+							++stateScopedColors;
+						fontSizeOk = fontSizeOk
+							|| (property.Name == "fontSize" && property.Type == WuiComponentProperty::Kind::Float
+								&& Near(property.DefaultNumber, 15.0f) && property.Unit == "px"
+								&& !property.Doc.empty());
+						hoverColorOk = hoverColorOk
+							|| (property.Name == "bg.hover" && property.Type == WuiComponentProperty::Kind::Color
+								&& property.StateScoped && !property.DefaultText.empty());
+						break;
+					case WuiComponentPropertyGroup::Layout:
+						++layout;
+						preferredOk = preferredOk
+							|| (property.Name == "preferred" && property.Type == WuiComponentProperty::Kind::Size2
+								&& Near(property.DefaultSize.x, 128.0f) && Near(property.DefaultSize.y, 24.0f)
+								&& property.DefaultText == "128x24" && !property.Doc.empty());
+						break;
+					case WuiComponentPropertyGroup::Behavior:
+						++behavior;
+						break;
+					}
+				}
+				CHECK(content == 1 && labelIsText);          // Content = 文本(label)
+				CHECK(style == 18);                          // Style = 字号/粗细/内边距 + 5 态 × 3 通道颜色
+				CHECK(stateScopedColors == 15);              // 15 条颜色都按状态分槽
+				CHECK(layout == 1 && preferredOk);           // Layout = preferred size
+				CHECK(behavior == 1);                        // Behavior = disabled
+				CHECK(fontSizeOk && hoverColorOk);
+
+				// 交互契约:hover / click / key,目标都是本件稳定 a11y id;步骤与备注不能空。
+				size_t hover = 0;
+				size_t click = 0;
+				size_t key = 0;
+				for (const WuiComponentInteraction& interaction : button->Interactions)
+				{
+					CHECK(interaction.TargetId == "showcase.button");
+					CHECK(!interaction.Steps.empty());
+					CHECK(!interaction.Note.empty());
+					switch (interaction.Kind)
+					{
+					case WuiInteractionKind::Hover:
+						++hover;
+						CHECK(interaction.Expect == WuiInteractionExpect::PixelChange);
+						break;
+					case WuiInteractionKind::Click:
+						++click;
+						CHECK(interaction.Expect == WuiInteractionExpect::Event);
+						break;
+					case WuiInteractionKind::Key:
+						++key;
+						CHECK(interaction.Expect == WuiInteractionExpect::Event);
+						break;
+					default:
+						break;
+					}
+				}
+				CHECK(hover == 1 && click == 1 && key == 1);
+			}
+			// 静态件保持空契约(图片没有可交互语义;P1.6 口径:声明空表 = 工作台标"静态件")。
+			const WuiComponentDesc* image = WuiComponentRegistry::Find("image");
+			CHECK(image != nullptr && image->Interactions.empty());
+
+			// ---- ③④ style / 尺寸覆盖:同一件、同一条真实控件路径 ----
+			WuiAccessibility::Get().SetEnabled(false);
+			WuiAccessibility::Get().Clear();
+			const auto DrawButton = [](const std::vector<std::pair<std::string, std::string>>& properties,
+				const std::string& state, std::vector<WuiDrawCommand>& out, std::vector<WuiDrawCommand>& overlay)
+			{
+				WuiContext ctx;
+				WuiInputState input;
+				input.ViewportSize = { 640.0f, 480.0f };
+				ctx.BeginFrame(input);
+				WuiComponentDraw draw;
+				draw.Context = &ctx;
+				draw.Theme = &CurrentTheme();
+				draw.Rect = { 12.0f, 12.0f, 420.0f, 160.0f };
+				draw.State = state;
+				draw.Properties = properties;
+				draw.UiScale = 1.0f;
+				draw.Density = 1.0f;
+				draw.Locale = "en";
+				const WuiComponentDesc* component = WuiComponentRegistry::Find("button");
+				CHECK(component != nullptr && component->Showcase != nullptr);
+				if (component != nullptr && component->Showcase != nullptr)
+					component->Showcase(draw);
+				ctx.EndFrame();
+				out = ctx.Commands();
+				overlay = ctx.OverlayCommands();
+			};
+			const WuiTheme& theme = CurrentTheme();
+			std::vector<WuiDrawCommand> plainDefault;
+			std::vector<WuiDrawCommand> plainDefaultOverlay;
+			DrawButton({}, "default", plainDefault, plainDefaultOverlay);
+			CHECK(plainDefault.size() == 3);                  // 填充 + 描边 + 文本(焦点环走 overlay)
+			CHECK(Near(plainDefault[0].Color.R, theme.ButtonBg.R)
+				&& Near(plainDefault[0].Color.G, theme.ButtonBg.G)
+				&& Near(plainDefault[0].Color.B, theme.ButtonBg.B));
+			CHECK(Near(plainDefault[1].Color.R, theme.Border.R));
+			CHECK(Near(plainDefault[2].Color.R, theme.Text.R));
+			CHECK(Near(plainDefault[2].Rect.X, 20.0f));       // 12(画布左缘)+ 8(旧口径内边距)
+			CHECK(Near(plainDefault[2].FontSize, 15.0f));     // 旧口径字号
+			CHECK(!plainDefault[2].Bold);
+			CHECK(Near(plainDefault[0].Rect.W, 128.0f) && Near(plainDefault[0].Rect.H, 24.0f));
+
+			std::vector<WuiDrawCommand> plainHover;
+			std::vector<WuiDrawCommand> plainHoverOverlay;
+			DrawButton({}, "hover", plainHover, plainHoverOverlay);
+			CHECK(Near(plainHover[0].Color.R, theme.ButtonHover.R));
+
+			// ③ 5 态颜色:只影响自己那一态;未覆盖的通道原样回退主题令牌。
+			std::vector<WuiDrawCommand> hoverOverride;
+			std::vector<WuiDrawCommand> hoverOverrideOverlay;
+			DrawButton({ { "bg.hover", "#FF0000" } }, "hover", hoverOverride, hoverOverrideOverlay);
+			CHECK(Near(hoverOverride[0].Color.R, 1.0f) && Near(hoverOverride[0].Color.G, 0.0f)
+				&& Near(hoverOverride[0].Color.B, 0.0f));
+			CHECK(Near(hoverOverride[1].Color.R, theme.Border.R));   // 描边未覆盖 → 主题
+			CHECK(Near(hoverOverride[2].Color.R, theme.Text.R));     // 文字未覆盖 → 主题
+			CHECK(CommandStreamHash(hoverOverride) != CommandStreamHash(plainHover));
+			CHECK(CommandStreamHash(hoverOverrideOverlay) == CommandStreamHash(plainHoverOverlay));
+
+			// 状态作用域:改 bg.default 不该动 hover 态(改前/改后逐字段相同)。
+			std::vector<WuiDrawCommand> defaultOnly;
+			std::vector<WuiDrawCommand> defaultOnlyOverlay;
+			DrawButton({ { "bg.default", "#00FF00" } }, "hover", defaultOnly, defaultOnlyOverlay);
+			CHECK(CommandStreamHash(defaultOnly) == CommandStreamHash(plainHover));
+
+			std::vector<WuiDrawCommand> pressedText;
+			std::vector<WuiDrawCommand> pressedTextOverlay;
+			DrawButton({ { "text.pressed", "#00FF00" } }, "pressed", pressedText, pressedTextOverlay);
+			CHECK(Near(pressedText[2].Color.R, 0.0f) && Near(pressedText[2].Color.G, 1.0f));
+			CHECK(CommandStreamHash(pressedText) != CommandStreamHash(plainDefault));
+
+			// 排版三件套:字号 / 内边距 / 粗体都进真实绘制参数。
+			std::vector<WuiDrawCommand> typography;
+			std::vector<WuiDrawCommand> typographyOverlay;
+			DrawButton({ { "fontSize", "24" }, { "padding", "20" }, { "bold", "1" } }, "default",
+				typography, typographyOverlay);
+			CHECK(Near(typography[2].FontSize, 24.0f));
+			CHECK(Near(typography[2].Rect.X, 32.0f));
+			CHECK(typography[2].Bold);
+			CHECK(CommandStreamHash(typography) != CommandStreamHash(plainDefault));
+
+			// 坏值 / 未知键:一律忽略(退回当前口径),不抛、不崩、不改命令流。
+			std::vector<WuiDrawCommand> brokenValues;
+			std::vector<WuiDrawCommand> brokenValuesOverlay;
+			DrawButton({ { "bg.hover", "not-a-color" }, { "padding", "NaN" }, { "fontSize", "-4" },
+				{ "preferred", "wide" }, { "bogus", "x" } }, "hover", brokenValues, brokenValuesOverlay);
+			CHECK(CommandStreamHash(brokenValues) == CommandStreamHash(plainHover));
+
+			// 焦点:border.focus 同时改按钮描边与焦点环(环在 overlay 层);未覆盖 = 主题 FocusRing。
+			std::vector<WuiDrawCommand> focusPlain;
+			std::vector<WuiDrawCommand> focusPlainOverlay;
+			DrawButton({}, "focus", focusPlain, focusPlainOverlay);
+			CHECK(focusPlainOverlay.size() == 1);
+			CHECK(Near(focusPlainOverlay[0].Color.R, theme.FocusRing.R));
+			std::vector<WuiDrawCommand> focusOverride;
+			std::vector<WuiDrawCommand> focusOverrideOverlay;
+			DrawButton({ { "border.focus", "#FF00FF" } }, "focus", focusOverride, focusOverrideOverlay);
+			CHECK(Near(focusOverride[1].Color.R, 1.0f) && Near(focusOverride[1].Color.G, 0.0f)
+				&& Near(focusOverride[1].Color.B, 1.0f));
+			CHECK(focusOverrideOverlay.size() == 1);
+			CHECK(Near(focusOverrideOverlay[0].Color.R, 1.0f)
+				&& Near(focusOverrideOverlay[0].Color.G, 0.0f)
+				&& Near(focusOverrideOverlay[0].Color.B, 1.0f));
+
+			// 禁用态:仍走主题禁用令牌(未覆盖);bg.disabled 覆盖后只改填充。
+			std::vector<WuiDrawCommand> disabledPlain;
+			std::vector<WuiDrawCommand> disabledPlainOverlay;
+			DrawButton({}, "disabled", disabledPlain, disabledPlainOverlay);
+			CHECK(Near(disabledPlain[0].Color.R, theme.ContentBg.R));
+			CHECK(Near(disabledPlain[2].Color.R, theme.TextDisabled.R));
+			std::vector<WuiDrawCommand> disabledOverride;
+			std::vector<WuiDrawCommand> disabledOverrideOverlay;
+			DrawButton({ { "bg.disabled", "#010203" } }, "disabled", disabledOverride, disabledOverrideOverlay);
+			CHECK(Near(disabledOverride[0].Color.R, 1.0f / 255.0f));
+			CHECK(Near(disabledOverride[2].Color.R, theme.TextDisabled.R));
+
+			// ④ Layout:preferred 决定画布槽位(宽/高都换,且竖直居中不出画布)。
+			std::vector<WuiDrawCommand> sized;
+			std::vector<WuiDrawCommand> sizedOverlay;
+			DrawButton({ { "preferred", "200x32" } }, "default", sized, sizedOverlay);
+			CHECK(Near(sized[0].Rect.W, 200.0f) && Near(sized[0].Rect.H, 32.0f));
+			CHECK(Near(sized[0].Rect.Y, 12.0f + (160.0f - 32.0f) * 0.5f));
+			CHECK(CommandStreamHash(sized) != CommandStreamHash(plainDefault));
+			std::vector<WuiDrawCommand> oversized;
+			std::vector<WuiDrawCommand> oversizedOverlay;
+			DrawButton({ { "preferred", "9999x9999" } }, "default", oversized, oversizedOverlay);
+			CHECK(Near(oversized[0].Rect.W, 420.0f) && Near(oversized[0].Rect.H, 160.0f));   // 夹在画布内
+
+			// ---- ⑤ 微基准:1000 帧 button 命令流(数字只记录,不做性能门禁)----
+			{
+				WuiContext ctx;
+				WuiInputState input;
+				input.ViewportSize = { 640.0f, 480.0f };
+				WuiComponentDraw draw;
+				draw.Context = &ctx;
+				draw.Theme = &CurrentTheme();
+				draw.Rect = { 12.0f, 12.0f, 420.0f, 160.0f };
+				draw.State = "default";
+				draw.Properties = { { "label", "Apply" }, { "bg.hover", "#2A3038" } };
+				draw.UiScale = 1.0f;
+				draw.Density = 1.0f;
+				draw.Locale = "en";
+				const WuiComponentDesc* component = WuiComponentRegistry::Find("button");
+				CHECK(component != nullptr && component->Showcase != nullptr);
+				size_t commands = 0;
+				const auto started = std::chrono::steady_clock::now();
+				for (int frame = 0; frame < 1000; ++frame)
+				{
+					ctx.BeginFrame(input);
+					if (component != nullptr && component->Showcase != nullptr)
+						component->Showcase(draw);
+					commands += ctx.Commands().size();
+					ctx.EndFrame();
+				}
+				const double elapsedMs = std::chrono::duration<double, std::milli>(
+					std::chrono::steady_clock::now() - started).count();
+				std::printf("[bench] button command stream: 1000 frames in %.3f ms (%.4f ms/frame, %zu commands total)\n",
+					elapsedMs, elapsedMs / 1000.0, commands);
+				CHECK(commands == 3000);          // 3 条/帧(填充 + 描边 + 文本)
+				CHECK(elapsedMs > 0.0);
+				CHECK(elapsedMs < 20000.0);       // 只挡"荒谬量级"退化;真实数字进报告
+			}
 		}
 
 		std::printf("World.Wui: all checks passed\n");

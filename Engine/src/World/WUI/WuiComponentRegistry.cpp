@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
 #include <mutex>
@@ -40,6 +41,10 @@
 //     纯立即模式控件填 WuiWidgets.h / WuiChrome.h / WuiCodeEditor.h 里的入口名(如 "Segmented")。
 //     门禁 tools/agents/check-ui-components.ps1 按这个字段比对"面板用到的控件类型是否都已登记",
 //     单测 §19 要求它非空、且能在 Engine/src/World/WUI 的头文件里找到同名声明。
+//  6) WUI-P1.5 起:属性覆盖的**值编码协议**由 ParseComponentColor / ParseComponentSize 定义
+//     (颜色 #RRGGBB[AA]、尺寸 WxH),属性的 Group/Unit/Doc/StateScoped/类型化默认只是元数据;
+//     showcase 侧的语义是"没覆盖 = 沿用主题令牌或旧硬编码口径" —— 因此旧基线不因加值而漂移,
+//     per-state 颜色只在用户真的改了那一态时生效。
 
 namespace World::Wui
 {
@@ -47,6 +52,7 @@ namespace World::Wui
 	{
 		using Property = WuiComponentProperty;
 		using State = WuiComponentState;
+		using Interaction = WuiComponentInteraction;
 
 		// ---- 属性覆盖解析 ----
 
@@ -544,14 +550,72 @@ namespace World::Wui
 
 		// ---- 组件 showcase(每条正好一件真实控件) ----
 
+		// WUI-P1.5:Button 的 5 态后缀 —— 顺序 = WuiButtonStyle::State(Normal/Hover/Pressed/Disabled/Focused),
+		// 也是登记属性名里的状态段(如 "bg.hover")。
+		const char* const kButtonStateSuffix[] = { "default", "hover", "pressed", "disabled", "focus" };
+
+		// 通道 → "<通道>.<状态>" 文本覆盖 → 颜色槽;没覆盖/写坏 = 空槽(回退主题令牌)。
+		std::optional<WuiColor> ColorOverride(const WuiComponentDraw& draw, const char* channel, const char* state)
+		{
+			const std::string name = std::string(channel) + "." + state;
+			const std::string* text = FindProperty(draw, name.c_str());
+			if (text == nullptr || text->empty())
+				return std::nullopt;
+			WuiColor parsed {};
+			return ParseComponentColor(*text, parsed) ? std::optional<WuiColor>(parsed) : std::nullopt;
+		}
+
+		// 登记属性 → WuiButtonStyle(只填用户/工作台真的覆盖过的槽)。
+		WuiButtonStyle ButtonStyle(const WuiComponentDraw& draw)
+		{
+			WuiButtonStyle style;
+			// 越界/非有限值一律当"没给"(showcase 属性协议:非法值忽略、退回当前口径),
+			// 而不是夹到边界 —— 夹取会把 "-4px 字号"变成"最小字号",用户看不出是写错了。
+			if (const std::optional<float> padding = FloatOverride(draw, "padding"))
+				if (*padding >= 0.0f && *padding <= 64.0f)
+					style.PaddingX = *padding;
+			if (const std::optional<float> fontSize = FloatOverride(draw, "fontSize"))
+				if (*fontSize >= 6.0f && *fontSize <= 48.0f)
+					style.FontSize = *fontSize;
+			style.Bold = BoolProperty(draw, "bold", false);
+			style.Disabled = DisabledFor(draw);
+			for (size_t index = 0; index < WuiButtonStyle::StateCount; ++index)
+			{
+				WuiButtonStateColors& colors = style.Colors[index];
+				colors.Bg = ColorOverride(draw, "bg", kButtonStateSuffix[index]);
+				colors.Border = ColorOverride(draw, "border", kButtonStateSuffix[index]);
+				colors.Text = ColorOverride(draw, "text", kButtonStateSuffix[index]);
+			}
+			return style;
+		}
+
+		// Layout 组:首选尺寸("WxH")→ 画布槽位;没覆盖/写坏 = 该件自己的 preferred 保持不变。
+		// 高度 <= 0 = 用主题行高(与 Canvas 的默认口径一致)。
+		void PreferredSizeOverride(const WuiComponentDraw& draw, float& width, float& height)
+		{
+			const std::string* text = FindProperty(draw, "preferred");
+			if (text == nullptr || text->empty())
+				return;
+			float parsedWidth = 0.0f;
+			float parsedHeight = 0.0f;
+			if (!ParseComponentSize(*text, parsedWidth, parsedHeight) || parsedWidth <= 0.0f)
+				return;
+			width = parsedWidth;
+			height = parsedHeight > 0.0f ? parsedHeight : 0.0f;
+		}
+
 		void ShowButton(const WuiComponentDraw& draw)
 		{
 			WuiContext& ctx = *draw.Context;
 			const WuiTheme themed = ThemedFor(draw, *draw.Theme);
-			const Slot slot = Canvas(draw, *draw.Theme, 128.0f);
+			float preferredWidth = 128.0f;
+			float preferredHeight = 0.0f;
+			PreferredSizeOverride(draw, preferredWidth, preferredHeight);
+			const Slot slot = Canvas(draw, *draw.Theme, preferredWidth, preferredHeight);
 			const WuiId id = BeginShowcase(draw, "button", "Button", slot.Rect);
 			PseudoState pseudo(draw, id, slot.Rect, true);
-			Button(ctx, id, slot.Rect, MaybeLongText(draw, LocalizedText(draw, "label", "Apply", "应用")), themed);
+			const WuiButtonStyle style = ButtonStyle(draw);
+			Button(ctx, id, slot.Rect, MaybeLongText(draw, LocalizedText(draw, "label", "Apply", "应用")), themed, &style);
 		}
 
 		void ShowIconButton(const WuiComponentDraw& draw)
@@ -1555,6 +1619,99 @@ namespace World::Wui
 		return Store().Items.size();
 	}
 
+	// ---- 属性覆盖的值编码协议(WUI-P1.5;声明与口径见 WuiComponentRegistry.h)----
+
+	bool ParseComponentColor(const std::string& text, WuiColor& out)
+	{
+		glm::vec4 parsed {};
+		if (!ParseHexColor(text, parsed))
+			return false;
+		out = { parsed.r, parsed.g, parsed.b, parsed.a };
+		return true;
+	}
+
+	bool ParseComponentSize(const std::string& text, float& width, float& height)
+	{
+		// "<宽>x<高>":分隔符接受 'x' / 'X' / '*',两侧允许空格;两个数都必须是有限数,
+		// 且除了空白不允许有别的残留字符("128x24x2"、"12px" 一律判非法)。
+		size_t begin = 0;
+		size_t end = text.size();
+		while (begin < end && (text[begin] == ' ' || text[begin] == '\t'))
+			++begin;
+		while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t'))
+			--end;
+		if (begin >= end)
+			return false;
+		const std::string token = text.substr(begin, end - begin);
+		const size_t split = token.find_first_of("xX*");
+		if (split == std::string::npos || split == 0 || split + 1 >= token.size())
+			return false;
+		const std::string left = token.substr(0, split);
+		const std::string right = token.substr(split + 1);
+		char* leftEnd = nullptr;
+		char* rightEnd = nullptr;
+		const float parsedWidth = std::strtof(left.c_str(), &leftEnd);
+		const float parsedHeight = std::strtof(right.c_str(), &rightEnd);
+		const auto onlySpace = [](const char* tail)
+		{
+			for (; *tail != '\0'; ++tail)
+				if (*tail != ' ' && *tail != '\t')
+					return false;
+			return true;
+		};
+		if (leftEnd == left.c_str() || rightEnd == right.c_str())
+			return false;
+		if (!std::isfinite(parsedWidth) || !std::isfinite(parsedHeight))
+			return false;
+		if (!onlySpace(leftEnd) || !onlySpace(rightEnd))
+			return false;
+		width = parsedWidth;
+		height = parsedHeight;
+		return true;
+	}
+
+	namespace
+	{
+		// 0..1 通道 → 两位大写 hex(自动夹取,面板回显用)。
+		std::string FormatColorChannel(float value)
+		{
+			const float clamped = ClampFloat(value, 0.0f, 1.0f);
+			const int quantized = static_cast<int>(clamped * 255.0f + 0.5f);
+			static const char kDigits[] = "0123456789ABCDEF";
+			std::string out;
+			out.push_back(kDigits[(quantized >> 4) & 0xF]);
+			out.push_back(kDigits[quantized & 0xF]);
+			return out;
+		}
+
+		// 设计单位 → 最多两位小数、去尾零、去尾点("128.00" → "128")。
+		std::string FormatDimension(float value)
+		{
+			char buffer[32] = {};
+			std::snprintf(buffer, sizeof(buffer), "%.2f", static_cast<double>(value));
+			std::string out = buffer;
+			while (!out.empty() && out.back() == '0')
+				out.pop_back();
+			if (!out.empty() && out.back() == '.')
+				out.pop_back();
+			return out.empty() ? std::string("0") : out;
+		}
+	}
+
+	std::string FormatComponentColor(const WuiColor& color)
+	{
+		std::string out = "#" + FormatColorChannel(color.R) + FormatColorChannel(color.G)
+			+ FormatColorChannel(color.B);
+		if (color.A < 0.999f)
+			out += FormatColorChannel(color.A);
+		return out;
+	}
+
+	std::string FormatComponentSize(float width, float height)
+	{
+		return FormatDimension(width) + "x" + FormatDimension(height);
+	}
+
 	namespace
 	{
 		// ---- 登记表构造小工具 ----
@@ -1596,6 +1753,68 @@ namespace World::Wui
 			property.Type = Property::Kind::Text;
 			property.DefaultText = sample;
 			return property;
+		}
+
+		// ---- WUI-P1.5 加值:分组 / 单位 / 类型化默认 / Color / Size2 / 交互契约 ----
+
+		Property Grouped(Property property, WuiComponentPropertyGroup group, const char* doc)
+		{
+			property.Group = group;
+			property.Doc = doc;
+			return property;
+		}
+
+		Property UnitOf(Property property, const char* unit)
+		{
+			property.Unit = unit;
+			return property;
+		}
+
+		Property NumberDefault(Property property, float value)
+		{
+			property.DefaultNumber = value;
+			return property;
+		}
+
+		// 颜色属性:DefaultText 与 DefaultColor 都写(旧文本行编辑器只认前者,新面板用后者)。
+		Property PropColor(const char* name, const char* defaultText, bool stateScoped, const char* doc)
+		{
+			Property property;
+			property.Name = name;
+			property.Type = Property::Kind::Color;
+			property.DefaultText = defaultText;
+			WuiColor parsed {};
+			if (ParseComponentColor(defaultText, parsed))
+				property.DefaultColor = parsed;
+			property.StateScoped = stateScoped;
+			property.Group = WuiComponentPropertyGroup::Style;
+			property.Doc = doc;
+			return property;
+		}
+
+		// 尺寸属性(宽×高,设计单位)。
+		Property PropSize2(const char* name, float width, float height, const char* doc)
+		{
+			Property property;
+			property.Name = name;
+			property.Type = Property::Kind::Size2;
+			property.DefaultSize = { width, height };
+			property.DefaultText = FormatComponentSize(width, height);
+			property.Group = WuiComponentPropertyGroup::Layout;
+			property.Doc = doc;
+			return property;
+		}
+
+		Interaction Item(WuiInteractionKind kind, const char* targetId, WuiInteractionExpect expect,
+			const char* steps, const char* note)
+		{
+			Interaction out;
+			out.Kind = kind;
+			out.TargetId = targetId;
+			out.Expect = expect;
+			out.Steps = steps;
+			out.Note = note;
+			return out;
 		}
 
 		const char* StateLabel(const std::string& id)
@@ -1655,10 +1874,11 @@ namespace World::Wui
 		}
 
 		// typeName 见文件头约定 5):面板侧控件入口名(保留模式类名,或立即模式控件入口名)。
+		// interactions(P1.5)= 交互契约;不传 = 空表(静态件/尚未声明的件),既有登记条目一个都不用改。
 		WuiComponentDesc Desc(const char* id, const char* typeName, const char* displayName, const char* category,
 			WuiComponentStatus status, const char* sourceFile, const char* a11yNotes, const char* sizeNotes,
 			std::vector<std::string> extraA11yIds, std::vector<State> states, std::vector<Property> properties,
-			void (*showcase)(const WuiComponentDraw&))
+			void (*showcase)(const WuiComponentDraw&), std::vector<Interaction> interactions = {})
 		{
 			WuiComponentDesc desc;
 			desc.Id = id;
@@ -1672,6 +1892,7 @@ namespace World::Wui
 			desc.ExtraA11yIds = std::move(extraA11yIds);
 			desc.States = std::move(states);
 			desc.Properties = std::move(properties);
+			desc.Interactions = std::move(interactions);
 			desc.Showcase = showcase;
 			return desc;
 		}
@@ -1683,15 +1904,63 @@ namespace World::Wui
 		void RegisterBuiltins()
 		{
 			// ---- Buttons ----
+			// WUI-P1.5:Button 样板 —— 属性按 UE 式三块 + Behavior 分组;5 态颜色是**真实生效**的
+			// 覆盖值(名字 "<通道>.<状态>",StateScoped=true),`preferred` 决定画布槽位,
+			// 字号/粗细/内边距改的是真实绘制参数;全部未覆盖 = 旧硬编码/主题令牌(像素基线不动)。
 			WuiComponentRegistry::Register(Desc(
 				"button", "WuiButton", "Button", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=button;id=HashId('showcase.button')(控件自身登记);label=label 属性;disabled 用主题禁用令牌;焦点环走 DrawFocusRing",
-				"showcase 首选 128x24;控件无最小宽(窄于文字会溢出);H=theme.ControlHeight×Density×UiScale",
+				"showcase 首选 128x24(preferred 属性可覆盖,宽×高设计单位);控件无最小宽(窄于文字会溢出);H=preferred 高度(未覆盖=theme.ControlHeight)×Density×UiScale",
 				ShellIds("button"),
 				StateList({ "default", "hover", "pressed", "focus", "disabled", "long-text" }),
-				{ PropText("label", "Apply"), PropBool("disabled") },
-				&ShowButton));
+				{
+					// Content
+					Grouped(PropText("label", "Apply"), WuiComponentPropertyGroup::Content,
+						"按钮上的文字(文本归 Content;字号/颜色归 Style)。"),
+					// Style:排版 + 内边距
+					Grouped(UnitOf(NumberDefault(PropFloat("fontSize", 6.0f, 48.0f, 1.0f), 15.0f), "px"),
+						WuiComponentPropertyGroup::Style, "文字字号(设计单位;未覆盖 = 15)。"),
+					Grouped(PropBool("bold"), WuiComponentPropertyGroup::Style,
+						"文字是否粗体(未覆盖 = 常规)。"),
+					Grouped(UnitOf(NumberDefault(PropFloat("padding", 0.0f, 40.0f, 1.0f), 8.0f), "px"),
+						WuiComponentPropertyGroup::Style, "文字左内边距(未覆盖 = 8)。"),
+					// Style:5 态 × 3 通道颜色(#RRGGBB / #RRGGBBAA;未覆盖 = 主题令牌)
+					PropColor("bg.default", "#22272F", true, "Normal 态填充(未覆盖 = 主题 ButtonBg)。"),
+					PropColor("bg.hover", "#2A3038", true, "Hover 态填充(未覆盖 = 主题 ButtonHover)。"),
+					PropColor("bg.pressed", "#2A3038", true, "Pressed 态填充(未覆盖 = Hover 的兜底值)。"),
+					PropColor("bg.focus", "#22272F", true, "Focus 且未悬停时的填充(未覆盖 = Normal 的兜底值)。"),
+					PropColor("bg.disabled", "#101318", true, "Disabled 态填充(未覆盖 = 主题 ContentBg)。"),
+					PropColor("border.default", "#2B3138", true, "Normal 态描边(未覆盖 = 主题 Border)。"),
+					PropColor("border.hover", "#2B3138", true, "Hover 态描边(未覆盖 = 主题 Border)。"),
+					PropColor("border.pressed", "#2B3138", true, "Pressed 态描边(未覆盖 = 主题 Border)。"),
+					PropColor("border.focus", "#4C8DFF", true,
+						"Focus 态描边 + 焦点环颜色(未覆盖 = 主题 FocusRing)。"),
+					PropColor("border.disabled", "#2B313899", true,
+						"Disabled 态描边(未覆盖 = 主题 Border 的 60% alpha)。"),
+					PropColor("text.default", "#D7DCE3", true, "Normal 态文字(未覆盖 = 主题 Text)。"),
+					PropColor("text.hover", "#D7DCE3", true, "Hover 态文字(未覆盖 = 主题 Text)。"),
+					PropColor("text.pressed", "#4C8DFF", true, "Pressed 态文字(未覆盖 = 主题 Accent)。"),
+					PropColor("text.focus", "#D7DCE3", true, "Focus 态文字(未覆盖 = 主题 Text)。"),
+					PropColor("text.disabled", "#5A626D", true, "Disabled 态文字(未覆盖 = 主题 TextDisabled)。"),
+					// Layout
+					PropSize2("preferred", 128.0f, 24.0f, "首选尺寸 宽×高(设计单位;未覆盖 = 128x24)。"),
+					// Behavior
+					Grouped(PropBool("disabled"), WuiComponentPropertyGroup::Behavior,
+						"按禁用态绘制(禁用的**行为**由 ButtonEx/调用方决定)。"),
+				},
+				&ShowButton,
+				{
+					Item(WuiInteractionKind::Hover, "showcase.button", WuiInteractionExpect::PixelChange,
+						"鼠标移到按钮中心(1 帧)→ 移开(1 帧)",
+						"悬停填充 = bg.hover(未覆盖 = 主题 ButtonHover);两帧的像素哈希应不同"),
+					Item(WuiInteractionKind::Click, "showcase.button", WuiInteractionExpect::Event,
+						"在按钮中心注入按下(1 帧)+ 抬起(1 帧)",
+						"一次激活;画布命令数不因点击变化,事件由操作记录/调用方观测"),
+					Item(WuiInteractionKind::Key, "showcase.button", WuiInteractionExpect::Event,
+						"Tab 到按钮出现焦点环 → Enter;再验一次 Space",
+						"Enter/Space 等价于一次点击(只认本帧新按下);焦点环颜色 = border.focus"),
+				}));
 
 			WuiComponentRegistry::Register(Desc(
 				"button.icon", "WuiImageButton", "Icon Button", "Buttons", WuiComponentStatus::Draft,

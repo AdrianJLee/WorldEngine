@@ -90,8 +90,40 @@ namespace World::Wui
 	// P4-UX6 焦点环:id 是当前焦点控件时,按主题令牌画 1.5px 圆角描边(颜色 = theme.FocusRing)。
 	// 控件在**自身绘制末尾**调用;环走 overlay 命令层(与 tooltip 同一机制),因此后画的兄弟控件
 	// 不会盖住它。没有焦点时什么都不画,既有控件的命令流逐字节不变。
-	void DrawFocusRing(WuiContext& ctx, const WuiRect& rect, WuiId id, const WuiTheme& theme);
-	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
+	// ringColor 非空 = 用这个颜色代替主题的 FocusRing(P1.5:per-state 的 border.focus 覆盖;
+	// 不传 = 既有口径,其它调用点逐字节不变)。
+	void DrawFocusRing(WuiContext& ctx, const WuiRect& rect, WuiId id, const WuiTheme& theme,
+		const WuiColor* ringColor = nullptr);
+
+	// ---- WUI-P1.5:Button 的样式结构(库默认 → 实例覆盖)----
+	// 每个槽都有"未设置"哨兵(false / <0 / 空 optional):未设置 = 回退到**主题令牌或旧硬编码口径**,
+	// 因此不传 style(既有调用点)与传"没覆盖任何槽"的 style 产生的命令流**逐字节相同**。
+	// 状态归属:Normal/Hover/Pressed/Focused 由控件按真实输入与焦点判定;Disabled 由调用方声明
+	// (与 showcase 既有"主题禁用令牌"路径同源,行为不变)。
+	struct WuiButtonStateColors
+	{
+		std::optional<WuiColor> Bg;      // 填充
+		std::optional<WuiColor> Border;  // 描边;Focused 槽的 Border = 焦点环颜色
+		std::optional<WuiColor> Text;    // 文字
+	};
+
+	struct WuiButtonStyle
+	{
+		// 槽顺序 = 登记属性名的状态后缀顺序(default/hover/pressed/disabled/focus),
+		// 见 WuiComponentRegistry.cpp 的 kButtonStateSuffix。
+		enum class State : uint8_t { Normal = 0, Hover = 1, Pressed = 2, Disabled = 3, Focused = 4 };
+		static constexpr size_t StateCount = 5;
+
+		float FontSize = -1.0f;    // Style 组;<0 = 旧口径 15(设计单位)
+		float PaddingX = -1.0f;    // Style 组;文字左内边距,<0 = 旧口径 8
+		bool Bold = false;         // Style 组
+		std::array<WuiButtonStateColors, StateCount> Colors {};   // Style 组:5 态 × bg/border/text
+		bool Disabled = false;     // Behavior 组:按禁用态绘制(行为开关仍归调用方/ButtonEx)
+	};
+
+	// style = nullptr(默认)= 既有行为:主题令牌 + 硬编码 8px/15px。
+	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme,
+		const WuiButtonStyle* style = nullptr);
 	bool Toggle(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme);
 	// P4-UX6 单行标签条:每个标签等分 rect.W,活跃标签 = ActiveBg 填充 + 底部 2px Accent 下划线;
 	// 每个标签登记无障碍节点 kind="tab"、value=(active==i),可被 ui.invoke 点击。
