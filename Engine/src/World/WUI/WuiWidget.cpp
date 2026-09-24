@@ -451,6 +451,11 @@ namespace World::Wui
 	{
 		WuiContext& ctx = context.Context();
 		const bool hovered = ctx.IsHovered(m_Rect);
+		// P1c-E4:行也是键盘入口(与 Button/TreeNode 同一口径)。以前行只进 a11y 树、不进焦点表 ——
+		// "看得见、读得到、但键盘永远到不了"。SetId 过的行才参与(Id==0 的叶控件不受影响),
+		// Tab 能停、焦点环画在行上、Enter/Space 与点击走同一个 OnClick。
+		const bool focused = Focused(ctx);
+		RegisterFocusable(context);
 		if (Selected)
 			ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, SelectedFill, 2.0f });
 		else if (hovered)
@@ -470,11 +475,15 @@ namespace World::Wui
 			node.Value = AccessValue;
 			node.Tooltip = AccessTooltip;
 			node.Rect = m_Rect;
+			node.Focused = focused;
 			WuiAccessibility::Get().Register(node);
 		}
+		PaintFocusRing(context);
 		// P4-U7:穿透由 WuiContext 的输入捕获统一处理(捕获层 + 覆盖层矩形 + 打开即消费点击),
 		// 这里不再加"有弹层就全禁"的局部补丁(那会连弹层外的行一起挡掉)。
-		if (ctx.IsClicked(m_Rect) && OnClick)
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		if ((ctx.IsClicked(m_Rect) || keyActivated) && OnClick)
 			OnClick();
 	}
 

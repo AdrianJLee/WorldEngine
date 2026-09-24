@@ -104,11 +104,17 @@ namespace World::Wui
 	void ContextMenuSeparator(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme);
 
 	// ---- 面包屑 ----
-	// 显示以 '/' 分隔的路径;返回被点击的段索引(-1 = 未点击)。
-	int Breadcrumb(WuiContext& ctx, const WuiRect& area, const std::string& path, const WuiTheme& theme);
+	// 显示以 '/' 分隔的路径;返回被点击(或键盘激活)的段索引(-1 = 未触发)。
+	// P1c-E4:id != 0 时整条面包屑进焦点表(Tab 可达)并画焦点环,←/→ 移动段光标(画在段上)、
+	// Enter/Space 激活光标段(返回值 = 该段下标);旧调用点不传 id,行为逐字节不变。
+	int Breadcrumb(WuiContext& ctx, const WuiRect& area, const std::string& path, const WuiTheme& theme,
+		WuiId id = 0);
 
 	// ---- 搜索框 ----
 	// 带放大镜占位与清除按钮的文本框;返回回车提交。
+	// P1c-E4:id != 0 时**无条件**进焦点表并登记 kind="text-field" 节点(label=占位文案、
+	// value=内容或占位、focused 跟随焦点)—— 旧实现只在 ctx.Focus()==id 时才调 TextField,
+	// 而焦点登记在那条路径里,Tab/脚本都到不了("先有鸡还是先有蛋")。
 	bool SearchField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
 		const std::string& placeholder, const WuiTheme& theme);
 
@@ -131,11 +137,19 @@ namespace World::Wui
 		int ContextClicked = -1;  // 右键(用于上下文菜单)
 		int Hovered = -1;
 		std::vector<WuiRect> ItemRects; // 与 items 一一对应(调用方据此保留拖拽/重命名等自定义交互)
+		// P1c-E4:id != 0 时才有意义(与 TreeView 的 U2e 契约一致:控件只报告"要做什么",
+		// 选中推进/展开/激活语义仍由调用方决定)。
+		int KeyMoveTo = -1;      // Up/Down/Home/End:把选中移到该下标(夹取两端、跳过 Disabled)
+		int KeyActivate = -1;    // Enter/Space:激活当前项(打开/重命名等,语义由调用方定)
 	};
 
 	// 行列表:自带滚动裁剪与滚轮滚动(scrollY 由调用方持有)。
+	// P1c-E4:id != 0 时列表整体进焦点表(Tab 可达)并画焦点环,容器登记 kind="list" 节点
+	// (rect = 可见行带、focused 跟随焦点、value="items=N[ selected=<行>]");行节点只在
+	// "焦点在列表上"时把当前选中行标成 focused;↑/↓/Home/End/Enter/Space 走 KeyMoveTo/KeyActivate。
+	// 旧调用点不传 id = 行为不变。
 	ListViewResult ListView(WuiContext& ctx, const WuiRect& area, const std::vector<ListViewItem>& items,
-		float rowHeight, float& scrollY, const WuiTheme& theme);
+		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id = 0);
 
 	// ---- 网格视图 ----
 	struct GridViewItem
@@ -191,6 +205,8 @@ namespace World::Wui
 	// 目录/层级树:行 = 缩进 + 展开箭头 + 标题,自带滚动裁剪。
 	// id != 0 时整棵树进焦点表(Tab 可达)并画焦点环,同时吃 ↑/↓/←/→/Home/End/Enter 键,
 	// 结果写进 KeyMoveTo / KeyToggleExpand / KeyActivate(旧调用点不传 id,行为不变)。
+	// P1c-E4:容器登记 kind="tree" 节点(id 同 id、rect=可见行带、value="items=N[ selected=<行>]"),
+	// 焦点在树上时容器与当前行都带 focused=true —— 焦点位从 a11y 读得到(以前只有行节点、无焦点位)。
 	TreeViewResult TreeView(WuiContext& ctx, const WuiRect& area, const std::vector<TreeViewItem>& items,
 		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id = 0);
 

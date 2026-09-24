@@ -457,7 +457,13 @@ namespace World::Wui
 		// 标签条本体的节点(P1c-a):标签等分整条矩形 → 节点矩形里任何一点都落在某个标签上,
 		// 按它注入的点击(= 组中心那一格)一定激活一个真实标签;要精确点某一个仍用子节点
 		// kind="tab"(派生 id)。
-		RegisterAccessNode(id, "tab-bar", rect, std::string(), tabs[static_cast<size_t>(active)], true, true);
+		// P1c-E4:焦点停在**某个标签**上(子 id),组节点按"组里有焦点"报 focused=true —— 这样
+		// AI 既能按组 id 判"标签条整体有键盘焦点",也能从子节点读"焦点在第几个标签"。
+		bool groupFocused = ctx.Focus() == id;
+		for (size_t i = 0; i < tabs.size() && !groupFocused; ++i)
+			groupFocused = ctx.Focus() == DerivedChildId(id, ".tab.", i);
+		RegisterAccessNode(id, "tab-bar", rect, std::string(), tabs[static_cast<size_t>(active)], true, true,
+			groupFocused);
 		// 整条底边线:让标签条与下方内容有分界(取面板边框色,不新增样式常量)。
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y + rect.H - 1.0f, rect.W, 1.0f }, theme.Border, 0.0f });
 		for (size_t i = 0; i < tabs.size(); ++i)
@@ -466,7 +472,9 @@ namespace World::Wui
 			const WuiId tabId = DerivedChildId(id, ".tab.", i);
 			const bool isActive = static_cast<int>(i) == active;
 			const bool hovered = ctx.IsHovered(tab);
-			RegisterAccessNode(tabId, "tab", tab, tabs[i], isActive ? "true" : "false");
+			// P1c-E4:子节点的 focused 实参以前缺省(false)→ "焦点在哪一页"AI 看不见。
+			RegisterAccessNode(tabId, "tab", tab, tabs[i], isActive ? "true" : "false", true, true,
+				ctx.Focus() == tabId);
 			ctx.RegisterFocusable(tabId, tab);
 			if (isActive)
 				ctx.Commands().push_back({ WuiDrawKind::Rect, tab, theme.ActiveBg, 0.0f });
@@ -513,7 +521,13 @@ namespace World::Wui
 		// 组节点 + 逐个分段节点都登记(P1c-a):分段把整条矩形铺满,所以**组节点也是真的可点**——
 		// 按组节点注入的点击落在组中心,命中的是那里那一格分段,与用户点击走同一条路径
 		// (于是 interactive=true 不撒谎);要精确选某一格仍用 kind="segmented-option" 的子节点。
-		RegisterAccessNode(id, "segmented", rect, std::string(), options[static_cast<size_t>(selected)], true, true);
+		// P1c-E4:焦点停在**某一格**上(子 id),组节点按"组里有焦点"报 focused=true —— AI 既能按组
+		// id 判"分段控件有键盘焦点",也能从子节点读"焦点在第几格"。
+		bool groupFocused = ctx.Focus() == id;
+		for (size_t i = 0; i < options.size() && !groupFocused; ++i)
+			groupFocused = ctx.Focus() == DerivedChildId(id, ".segment.", i);
+		RegisterAccessNode(id, "segmented", rect, std::string(), options[static_cast<size_t>(selected)],
+			true, true, groupFocused);
 		// 同一圆角外壳:铺底 + 1px 描边,内部等分(选中项 ActiveBg + Accent 文本)。
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonBg, theme.Radius });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, theme.Radius, 1.0f });
@@ -524,7 +538,9 @@ namespace World::Wui
 			const WuiId optionId = DerivedChildId(id, ".segment.", i);
 			const bool isSelected = static_cast<int>(i) == selected;
 			const bool hovered = ctx.IsHovered(option);
-			RegisterAccessNode(optionId, "segmented-option", option, options[i], isSelected ? "true" : "false");
+			// P1c-E4:子节点的 focused 实参以前缺省(false)→ "焦点在哪一格"AI 看不见。
+			RegisterAccessNode(optionId, "segmented-option", option, options[i], isSelected ? "true" : "false",
+				true, true, ctx.Focus() == optionId);
 			ctx.RegisterFocusable(optionId, option);
 			const WuiRect inner { option.X + 1.0f, option.Y + 1.0f,
 				std::max(0.0f, option.W - 2.0f), std::max(0.0f, option.H - 2.0f) };
@@ -2121,13 +2137,59 @@ namespace World::Wui
 		ctx.PopOverlay();
 	}
 
-	bool BeginScrollArea(WuiContext& ctx, const WuiRect& viewport, float contentHeight, float& scrollY, const WuiTheme& theme)
+	bool BeginScrollArea(WuiContext& ctx, const WuiRect& viewport, float contentHeight, float& scrollY,
+		const WuiTheme& theme, WuiId id)
 	{
 		if (ctx.IsHovered(viewport))
 			scrollY -= ctx.Input().Wheel * 40.0f;
+		// P1c-E4:id != 0 时滚动区本身就是个可聚焦控件 —— 以前键盘完全没有滚动入口
+		// (只有"鼠标悬停 + 滚轮"),Tab 到不了、↑/↓ 也没人接。焦点在它上面时:
+		// ↑/↓ = 40px、PageUp/PageDown = 0.9 屏、Space = 下一页(浏览器同款)、Home/End = 两端。
+		const bool focused = id != 0 && ctx.Focus() == id;
+		if (id != 0)
+		{
+			ctx.RegisterFocusable(id, viewport);
+			if (focused)
+			{
+				const float page = std::max(40.0f, viewport.H * 0.9f);
+				if (ctx.WasKeyPressed(KeyCodes::Down))
+					scrollY += 40.0f;
+				else if (ctx.WasKeyPressed(KeyCodes::Up))
+					scrollY -= 40.0f;
+				else if (ctx.WasKeyPressed(KeyCodes::PageDown) || ctx.WasKeyPressed(KeyCodes::Space))
+					scrollY += page;
+				else if (ctx.WasKeyPressed(KeyCodes::PageUp))
+					scrollY -= page;
+				else if (ctx.WasKeyPressed(KeyCodes::Home))
+					scrollY = 0.0f;
+				else if (ctx.WasKeyPressed(KeyCodes::End))
+					scrollY = contentHeight;
+			}
+		}
 		scrollY = std::max(0.0f, std::min(scrollY, std::max(0.0f, contentHeight - viewport.H)));
 		ctx.Commands().push_back({ WuiDrawKind::ClipPush, viewport, theme.PanelBg });
 		ctx.PushClipRect(viewport);
+		if (id != 0)
+		{
+			// 节点:kind="scroll-area"、value="scroll=<y>/<max>"(键盘与滚轮都会改它,AI 读得到)。
+			// 容器自己不是点击目标(点得到的是里面的行)→ interactive=false,不冒充按钮;
+			// 聚焦/可见/焦点位照常暴露。
+			char buffer[64] = {};
+			std::snprintf(buffer, sizeof(buffer), "scroll=%.0f/%.0f", scrollY,
+				std::max(0.0f, contentHeight - viewport.H));
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "scroll-area";
+			node.Value = buffer;
+			node.Rect = viewport;
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+			DrawFocusRing(ctx, viewport, id, theme);
+		}
 		return true;
 	}
 

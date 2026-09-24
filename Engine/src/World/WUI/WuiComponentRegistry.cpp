@@ -890,15 +890,25 @@ namespace World::Wui
 			const Slot slot = Canvas(draw, *draw.Theme, 230.0f, 96.0f);
 			const WuiId id = BeginShowcase(draw, "treeview", "Tree View", slot.Rect);
 			PseudoState pseudo(draw, id, slot.Rect);
+			// P1c-E4:键盘光标与展开态由持久槽驱动 —— 焦点在树上时 ↑/↓ 与 Enter 会改它们,
+			// 画布/节点 value 立刻跟着变(键盘契约因此有可观察的结果,不是"按键没人接")。
+			int64_t& cursorState = DrivenInt(ctx, "showcase.treeview.cursor", draw, "cursor", 1, 0, 3);
+			bool& rootOpen = BoolState(ctx, "showcase.treeview.open", true);
 			std::vector<TreeViewItem> items;
 			items.push_back({ ShellId("treeview.item.0"), LocalizedText(draw, "label", "Assets", "资源"),
-				0, true, true, false, false });
-			items.push_back({ ShellId("treeview.item.1"), "Textures", 1, false, false, true, false });
-			items.push_back({ ShellId("treeview.item.2"), "Materials", 1, false, false, false, false });
+				0, true, rootOpen, cursorState == 0, false });
+			items.push_back({ ShellId("treeview.item.1"), "Textures", 1, false, false, cursorState == 1, false });
+			items.push_back({ ShellId("treeview.item.2"), "Materials", 1, false, false, cursorState == 2, false });
 			items.push_back({ ShellId("treeview.item.3"), LocalizedText(draw, "disabled", "Locked", "已锁定"),
-				1, false, false, false, true });
+				1, false, false, cursorState == 3, true });
 			float& scroll = DrivenFloat(ctx, "showcase.treeview.scroll", draw, "scroll", 0.0f, 0.0f, 200.0f);
-			TreeView(ctx, slot.Rect, items, 22.0f * slot.Scale * slot.Density, scroll, theme, id);
+			const TreeViewResult tree = TreeView(ctx, slot.Rect, items,
+				22.0f * slot.Scale * slot.Density, scroll, theme, id);
+			if (tree.KeyMoveTo >= 0)
+				cursorState = tree.KeyMoveTo;
+			// ←/→ 只对可展开行发 KeyToggleExpand;Enter 激活当前项(演示里只有"Assets"可折叠)。
+			if (tree.KeyToggleExpand >= 0 || tree.KeyActivate == 0)
+				rootOpen = !rootOpen;
 		}
 
 		void ShowListView(const WuiComponentDraw& draw)
@@ -908,28 +918,35 @@ namespace World::Wui
 			const Slot slot = Canvas(draw, *draw.Theme, 230.0f, 96.0f);
 			const WuiId id = BeginShowcase(draw, "listview", "List View", slot.Rect);
 			PseudoState pseudo(draw, id, slot.Rect);
+			// P1c-E4:选中行由持久槽驱动 —— 焦点在列表上时 ↑/↓/Home/End 改它(KeyMoveTo),
+			// 节点 value / 行 focused / 画布同时更新。
+			int64_t& activeState = DrivenInt(ctx, "showcase.listview.active", draw, "active", 0, 0, 2);
 			std::vector<ListViewItem> items;
 			ListViewItem assets;
 			assets.Id = ShellId("listview.item.0");
 			assets.Label = LocalizedText(draw, "label", "Textures", "贴图");
 			assets.SubLabel = "12";
-			assets.Selected = true;
+			assets.Selected = activeState == 0;
 			items.push_back(assets);
 			ListViewItem materials = assets;
 			materials.Id = ShellId("listview.item.1");
 			materials.Label = "Materials";
 			materials.SubLabel = "4";
-			materials.Selected = false;
+			materials.Selected = activeState == 1;
 			items.push_back(materials);
 			ListViewItem locked = assets;
 			locked.Id = ShellId("listview.item.2");
 			locked.Label = LocalizedText(draw, "disabled", "Locked", "已锁定");
 			locked.SubLabel.clear();
-			locked.Selected = false;
+			locked.Selected = activeState == 2;
 			locked.Disabled = true;
 			items.push_back(locked);
 			float& scroll = DrivenFloat(ctx, "showcase.listview.scroll", draw, "scroll", 0.0f, 0.0f, 200.0f);
-			ListView(ctx, slot.Rect, items, 24.0f * slot.Scale * slot.Density, scroll, theme);
+			const ListViewResult list = ListView(ctx, slot.Rect, items,
+				24.0f * slot.Scale * slot.Density, scroll, theme, id);
+			if (list.KeyMoveTo >= 0)
+				activeState = list.KeyMoveTo;
+			// KeyActivate(Enter/Space)在演示里没有可展示的副作用:"打开/重命名"由真实调用方决定。
 		}
 
 		void ShowTableHeader(const WuiComponentDraw& draw)
@@ -978,7 +995,9 @@ namespace World::Wui
 			float& scroll = DrivenFloat(ctx, "showcase.scrollarea.scroll", draw, "scroll", 0.0f, 0.0f, 400.0f);
 			if (draw.State == "scrolled")
 				scroll = rowHeight * 3.0f;
-			if (BeginScrollArea(ctx, slot.Rect, contentHeight, scroll, theme))
+			// P1c-E4:id 下沉进滚动区 —— Tab 可达 + ↑/↓/PageUp/PageDown/Space/Home/End 可滚
+			// (以前只有"鼠标悬停 + 滚轮"一条路径)。
+			if (BeginScrollArea(ctx, slot.Rect, contentHeight, scroll, theme, id))
 			{
 				for (int i = 0; i < 8; ++i)
 				{
@@ -1060,24 +1079,10 @@ namespace World::Wui
 			const Slot slot = Canvas(draw, *draw.Theme, 230.0f);
 			const WuiId id = BeginShowcase(draw, "breadcrumb", "Breadcrumb", slot.Rect);
 			const std::string path = TextProperty(draw, "path", "assets/textures/icon.png");
-			// P1c-a:面包屑目前没有 id 参数(公开头文件里加参数归主 agent),由外壳登记"整条
-			// 面包屑"的交互节点覆盖 component-root 锚点:点它 = 命中组中心所在的那一段(与用户
-			// 点击同一条命中路径,控件照常返回被点段下标)。面板真的采用面包屑时,应把 id 参数
-			// 下沉进控件,让每个面板实例都能登记(见任务报告未决项)。
-			if (WuiAccessibility::Get().Enabled())
-			{
-				WuiAccessNode node;
-				node.Id = id;
-				node.Window = WuiAccessibility::Get().CurrentWindow();
-				node.Panel = WuiAccessibility::Get().CurrentPanel();
-				node.Kind = "breadcrumb";
-				node.Label = "Breadcrumb";
-				node.Value = path;
-				node.Rect = slot.Rect;
-				node.Interactive = true;
-				WuiAccessibility::Get().Register(node);
-			}
-			Breadcrumb(ctx, slot.Rect, path, themed);
+			// P1c-E4:id 已下沉进 Breadcrumb —— 节点/焦点入口由控件自己登记,删掉 P1c-a 的
+			// "外壳代登记"(那次是公开头文件还没改的权宜;现在不造第二份节点)。
+			// 返回段下标 = 鼠标点击或键盘(←/→ 移光标、Enter/Space 激活)的结果。
+			Breadcrumb(ctx, slot.Rect, path, themed, id);
 		}
 
 		void ShowContextMenu(const WuiComponentDraw& draw)
@@ -1260,6 +1265,9 @@ namespace World::Wui
 			const WuiTheme& theme = *draw.Theme;
 			const Slot slot = Canvas(draw, theme, 224.0f, 72.0f);
 			const WuiId id = BeginShowcase(draw, "listrow", "List Row", slot.Rect);
+			// P1c-E4:行进了焦点表 —— Enter/Space(焦点在行上)= 与点击同一个 OnClick。
+			// 演示里"点击/激活"切换本行选中,所以键盘激活在画布与节点 value 上都看得见。
+			bool& selectedState = BoolState(ctx, "showcase.listrow.selected", false);
 			auto column = std::make_shared<WuiBox>();
 			column->Direction = WuiDirection::Column;
 			column->Gap = 2.0f * slot.Scale;
@@ -1270,8 +1278,11 @@ namespace World::Wui
 			row->Text = MaybeLongText(draw, LocalizedText(draw, "label", "Textures/Icon.png", "textures/Icon.png"));
 			row->FontSize = 14.0f * slot.Scale;
 			row->Indent = DrivenFloat(ctx, "showcase.listrow.indent", draw, "indent", 14.0f, 0.0f, 32.0f) * slot.Scale;
-			row->Selected = draw.State == "selected" || BoolProperty(draw, "selected", false);
+			if (const std::optional<bool> forced = BoolOverride(draw, "selected"))
+				selectedState = *forced;
+			row->Selected = draw.State == "selected" || selectedState;
 			row->AccessValue = row->Selected ? "depth=1 selected=true" : "depth=1 selected=false";
+			row->OnClick = [&selectedState]() { selectedState = !selectedState; };
 			column->Add(row);
 
 			column->Add(RetainedLabel(LocalizedText(draw, "sibling", "Scenes", "场景"), 13.0f * slot.Scale, theme.TextMuted));
@@ -1511,7 +1522,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"button.icon", "WuiImageButton", "Icon Button", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
-				"role=button;id=HashId('showcase.button.icon')(控件自己登记,与保留模式 WuiImageButton 同一口径);label=label 属性;enabled/interactive 跟随 enabled(disabled 态为 false);textureId=0 时退化成语义文字",
+				"role=button;id=HashId('showcase.button.icon')(控件自己登记,与保留模式 WuiImageButton 同一口径);label=label 属性;enabled/interactive/focused 跟随 enabled 与焦点;enabled=true 时进焦点表(Tab 可达、Enter/Space 激活,P1c-E4);disabled 不进焦点表但节点仍在;textureId=0 时退化成语义文字",
 				"showcase 首选 32x24(方形图标位);enabled=false 时节点仍在,enabled/interactive 都是 false",
 				ShellIds("button.icon"),
 				StateList({ "default", "hover", "disabled", "long-text" }),
@@ -1541,7 +1552,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"segmented", "Segmented", "Segmented", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=segmented;id=HashId('showcase.segmented')(控件自己登记,覆盖外壳锚点);组节点 interactive=true —— 分段铺满整条矩形,按它注入的点击落在组中心那一格分段;逐格精确点击用子节点 kind=segmented-option(派生 id=HashId(str(父id)+'.segment.'+i));value=当前选中项文案",
+				"role=segmented;id=HashId('showcase.segmented')(控件自己登记,覆盖外壳锚点);组节点 interactive=true —— 分段铺满整条矩形,按它注入的点击落在组中心那一格分段;组节点 focused=组内是否有焦点(P1c-E4);逐格精确点击/读焦点位用子节点 kind=segmented-option(派生 id=HashId(str(父id)+'.segment.'+i),focused=焦点是否在该格);value=当前选中项文案",
 				"showcase 首选 210x24;项等分宽度;建议 2–4 项(空表直接返回)",
 				ShellIds("segmented"),
 				StateList({ "default", "hover", "focus" }),
@@ -1687,7 +1698,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"searchfield", "SearchField", "Search Field", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
-				"role=无(空且未聚焦时不登记节点);focus 后内部转发 TextField(id=HashId('showcase.searchfield')) → kind=text-field;showcase 外壳锚点 kind=component-root",
+				"role=text-field;id=HashId('showcase.searchfield') —— P1c-E4 起**无条件**登记节点并进焦点表(Tab 可达;以前空且未聚焦时不登记节点,焦点入口又藏在聚焦分支里 → 永远到不了);label=占位文案、value=内容(空时回落占位文案)、focused 跟随焦点;聚焦后同一节点由内部 TextField 重登记(同 id/同 kind)",
 				"showcase 首选 200x24;放大镜占 18px、清除按钮占 18px",
 				ShellIds("searchfield"),
 				StateList({ "default", "focus", "disabled" }),
@@ -1697,7 +1708,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"codeeditor", "CodeEditor", "Code Editor", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiCodeEditor.cpp",
-				"role=code-editor;id=HashId('showcase.codeeditor')(控件自己登记);interactive=true(点它 = 聚焦 + caret 定位,之后 ui.type/ui.key 落在该焦点上);enabled=!readonly;value='<n> lines[/, read-only]';补全浮层可见时另登记 '<CompletionIdPrefix>.<i>' 与 '.status',悬停登记 '.hover'",
+				"role=code-editor;id=HashId('showcase.codeeditor')(控件自己登记);interactive=true(点它 = 聚焦 + caret 定位,之后 ui.type/ui.key 落在该焦点上);enabled=!readonly;value='<n> lines[/, read-only]';P1c-E4 起进焦点表(Tab 可达、DrawFocusRing),持焦后 Tab 归编辑器(缩进)、Escape 退出;补全浮层可见时另登记 '<CompletionIdPrefix>.<i>' 与 '.status',悬停登记 '.hover'",
 				"showcase 首选 280x104;行高 19×UiScale;ErrorLine 用 state=error 展示",
 				ShellIds("codeeditor"),
 				StateList({ "default", "focus", "error" }),
@@ -1708,7 +1719,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"tabs", "TabBar", "Tabs", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=tab-bar;id=HashId('showcase.tabs')(控件自己登记,覆盖外壳锚点);父节点 interactive=true —— 标签等分整条矩形,按它注入的点击落在组中心那一个标签上;逐标签精确点击用子节点 kind=tab(id=HashId(str(父id)+'.tab.'+i),value=true/false)",
+				"role=tab-bar;id=HashId('showcase.tabs')(控件自己登记,覆盖外壳锚点);父节点 interactive=true —— 标签等分整条矩形,按它注入的点击落在组中心那一个标签上;父节点 focused=组内是否有焦点(P1c-E4);逐标签精确点击/读焦点位用子节点 kind=tab(id=HashId(str(父id)+'.tab.'+i),value=true/false,focused=焦点是否在该标签)",
 				"showcase 首选 240x24;标签等分整条矩形;中键点击上报 closeRequested(本 showcase 不接)",
 				ShellIds("tabs"),
 				StateList({ "default", "hover", "focus" }),
@@ -1728,7 +1739,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"treeview", "TreeView", "Tree View", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiChrome.cpp",
-				"role=tree-item(每行节点 id=条目自己的 Id —— showcase 用 HashId('showcase.treeview.item.N'),ExtraA11yIds 可复算);value='depth=.. expanded=.. children=..';父容器不登记节点",
+				"role=tree(容器,id 同传入 id)+ tree-item(每行节点 id=条目自己的 Id —— showcase 用 HashId('showcase.treeview.item.N'),ExtraA11yIds 可复算;value='depth=.. expanded=.. children=..');容器 P1c-E4 起登记:rect=可见行带、value='items=N selected=<行>'、interactive=true(点它 = 命中中心那一行)、focused=焦点在树上;焦点在树上时容器与当前行都带 focused=true;键盘:↑/↓/Home/End 移光标、←/→ 折叠展开、Enter 激活(只报告,改模型归调用方)",
 				"showcase 首选 230x96(自带滚动裁剪);行高 22×Density;半滚出行不登记节点(中心必须落在可视区)",
 				A11yIds({ "showcase.treeview", "showcase.treeview.item.0", "showcase.treeview.item.1",
 					"showcase.treeview.item.2", "showcase.treeview.item.3" }),
@@ -1739,7 +1750,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"listview", "ListView", "List View", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiChrome.cpp",
-				"role=list-row(控件用调用方给的 items[i].Id 登记,showcase 用 HashId('showcase.listview.item.N'));label=行文案、value=SubLabel、disabled 行 enabled/interactive=false;行中心必须落在可视区内才登记(半滚出的行不登记)",
+				"role=list(容器,P1c-E4 起 id 由调用方下沉:rect=可见行带、value='items=N selected=<行>'、interactive=true(点它 = 命中中心那一行)、focused=焦点在列表上)+ list-row(控件用调用方给的 items[i].Id 登记,showcase 用 HashId('showcase.listview.item.N'));label=行文案、value=SubLabel、disabled 行 enabled/interactive=false;焦点在列表上时当前行 focused=true;键盘:↑/↓/Home/End 移光标(KeyMoveTo)、Enter/Space 激活(KeyActivate,只报告);行中心必须落在可视区内才登记(半滚出的行不登记)",
 				"showcase 首选 230x96(自带滚动裁剪);行高 24×Density;选中行底色 theme.PanelBg、悬停 ButtonHover",
 				A11yIds({ "showcase.listview", "showcase.listview.item.0", "showcase.listview.item.1",
 					"showcase.listview.item.2" }),
@@ -1760,7 +1771,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"scrollarea", "WuiScrollArea", "Scroll Area", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=无(裁剪容器不登记节点,调用方给内容行各自登记);外壳锚点 kind=component-root;滚轮只改 scrollY",
+				"role=scroll-area(P1c-E4:id 由调用方下沉;value='scroll=<y>/<max>'、interactive=false —— 容器自己不是点击目标,内容行才是);进焦点表后 Tab 可达并画焦点环,焦点在它上面时 ↑/↓=40px、PageUp/PageDown=0.9 屏、Space=下一页、Home/End=两端;鼠标悬停滚轮照旧(旧调用点不传 id = 行为不变)",
 				"showcase 首选 220x96,内容 8 行×24;state=scrolled 展示滚动后的裁剪边界",
 				ShellIds("scrollarea"),
 				StateList({ "default", "scrolled" }),
@@ -1822,7 +1833,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"listrow", "WuiListRow", "List Row", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidget.cpp",
-				"role=list-row(SetId 后才进树:id=HashId('showcase.listrow');label=行文本;value=AccessValue);外层 WuiBox/同级标题不登记节点",
+				"role=list-row(SetId 后才进树与焦点表:id=HashId('showcase.listrow');label=行文本;value=AccessValue;focused=焦点在该行;P1c-E4 起 Tab 可达,Enter/Space 与点击走同一个 OnClick — 行级焦点,不抢调用方的选中模型);外层 WuiBox/同级标题不登记节点",
 				"showcase 首选 224x72(父行 + 本行 + 兄弟行);行高 = FontSize+6;Indent 只挪文字,不动选中/悬停底色",
 				ShellIds("listrow"),
 				StateList({ "default", "hover", "selected" }),
@@ -1843,7 +1854,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"breadcrumb", "Breadcrumb", "Breadcrumb", "Chrome", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
-				"role=breadcrumb;id=HashId('showcase.breadcrumb')(外壳代登记:控件没有 id 参数,面板零调用点);interactive=true —— 点它 = 命中组中心所在的那一段,控件按 '/' 分段命中并返回被点段下标;路径段本身不单独登记节点",
+				"role=breadcrumb;id=HashId('showcase.breadcrumb')(P1c-E4 起由控件自己登记:id 参数已下沉进 Breadcrumb,以前的外壳代登记已删);interactive=true —— 点它 = 命中组中心所在的那一段;label=整条路径、value='segments=N cursor=<光标段>'、focused=焦点在整条上;键盘:←/→ 移段光标(该段画悬停同档高亮)、Enter/Space 激活光标段(返回值 = 段下标,与点击同语义);路径段不单独登记节点",
 				"showcase 首选 230x20;段宽按粗略字宽(7px/字符)算,仅影响命中不影响绘制",
 				ShellIds("breadcrumb"),
 				StateList({ "default", "hover" }),

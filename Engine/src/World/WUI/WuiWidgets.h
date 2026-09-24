@@ -190,7 +190,12 @@ namespace World::Wui
 	void EndModal(WuiContext& ctx, WuiId id);
 
 	// 滚动区:Begin 后子项按 -scrollY 偏移绘制,End 恢复裁剪。
-	bool BeginScrollArea(WuiContext& ctx, const WuiRect& viewport, float contentHeight, float& scrollY, const WuiTheme& theme);
+	// P1c-E4:id != 0 时滚动区进焦点表(Tab 可达)并登记 kind="scroll-area" 节点(value="scroll=<y>/<max>",
+	// focused 跟随焦点;滚动区自己不是点击目标 → interactive=false,滚轮走 ui.wheel、键盘走下面的键)。
+	// 焦点在它上面时 ↑/↓ = ±40px、PageUp/PageDown = ±一屏(0.9×H)、Space = +一屏、Home/End = 两端。
+	// ListView/TreeView 这类自带容器节点的调用方传 0(避免同一矩形出现两个停靠点/两个节点)。
+	bool BeginScrollArea(WuiContext& ctx, const WuiRect& viewport, float contentHeight, float& scrollY,
+		const WuiTheme& theme, WuiId id = 0);
 	void EndScrollArea(WuiContext& ctx);
 
 	// 表格单元矩形(按列宽累计)。

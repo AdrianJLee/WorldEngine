@@ -11,6 +11,14 @@ namespace World::Wui
 {
 	namespace
 	{
+		// 子控件(标签 / 分段项 / 光标槽)的无障碍 id:与 WuiWidgets.cpp 的 DerivedChildId
+		// 同一套约定(父 id + 类别 + 下标,哈希走 Wui::HashId),脚本可按同一算法复算。
+		WuiId DerivedChildId(WuiId parent, const char* category, size_t index)
+		{
+			const std::string key = std::to_string(parent) + category + std::to_string(index);
+			return HashId(key.c_str());
+		}
+
 		void PushText(WuiContext& ctx, const glm::vec2& pos, const std::string& text,
 			const WuiColor& color, float size, bool bold = false)
 		{
@@ -208,6 +216,11 @@ namespace World::Wui
 		const WuiRect& uv, const std::string& fallbackLabel, const WuiTheme& theme, bool enabled)
 	{
 		const bool hovered = ctx.IsHovered(rect);
+		// P1c-E4:图标按钮也是键盘入口(Tab 可达 + Enter/Space 激活)。disabled 时既不进焦点表
+		// 也不吃键,与 ResetDefaultButton 同一条口径(节点仍然登记,让 AI 读得到"它被禁用了")。
+		const bool focused = enabled && ctx.Focus() == id;
+		if (enabled)
+			ctx.RegisterFocusable(id, rect);
 		if (hovered && enabled)
 		{
 			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 3.0f });
@@ -233,9 +246,13 @@ namespace World::Wui
 			node.Rect = rect;
 			node.Enabled = enabled;
 			node.Interactive = enabled;
+			node.Focused = focused;
 			WuiAccessibility::Get().Register(node);
 		}
-		return enabled && ctx.IsClicked(rect);
+		DrawFocusRing(ctx, rect, id, theme);
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		return enabled && (ctx.IsClicked(rect) || keyActivated);
 	}
 
 	void ToolbarSeparator(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme)
@@ -290,9 +307,66 @@ namespace World::Wui
 
 	// ---- 面包屑 ----
 
-	int Breadcrumb(WuiContext& ctx, const WuiRect& area, const std::string& path, const WuiTheme& theme)
+	int Breadcrumb(WuiContext& ctx, const WuiRect& area, const std::string& path, const WuiTheme& theme,
+		WuiId id)
 	{
 		int clicked = -1;
+		// P1c-E4:键盘入口(id != 0)。绘制仍在下面的原循环里逐段进行(布局逐字节不变),
+		// 这里只多算一份段表给"光标段"用。
+		const bool focused = id != 0 && ctx.Focus() == id;
+		int cursor = -1;
+		int keyboardActivated = -1;
+		std::vector<std::string> segments;
+		if (id != 0)
+		{
+			size_t scan = 0;
+			while (scan <= path.size())
+			{
+				const size_t slash = path.find('/', scan);
+				const std::string segment = path.substr(scan,
+					slash == std::string::npos ? std::string::npos : slash - scan);
+				if (!segment.empty())
+					segments.push_back(segment);
+				if (slash == std::string::npos)
+					break;
+				scan = slash + 1;
+			}
+			ctx.RegisterFocusable(id, area);
+			int& stored = ctx.Persist<int>(DerivedChildId(id, ".cursor.", 0), 0);
+			if (segments.empty())
+				stored = 0;
+			else
+			{
+				stored = std::max(0, std::min(stored, static_cast<int>(segments.size()) - 1));
+				if (focused)
+				{
+					// ←/→ 移动段光标;Enter/Space = 激活光标段(返回值与鼠标点击同一语义)。
+					if (ctx.WasKeyPressed(KeyCodes::Left))
+						stored = std::max(0, stored - 1);
+					else if (ctx.WasKeyPressed(KeyCodes::Right))
+						stored = std::min(static_cast<int>(segments.size()) - 1, stored + 1);
+					if (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))
+						keyboardActivated = stored;
+				}
+				cursor = stored;
+			}
+			// 节点语义:label = 整条路径(用户看到的文本)、value = 段数与光标段(键盘位读得到);
+			// 点它 = 命中组中心所在的那一段(与鼠标同一条命中路径)。
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "breadcrumb";
+			node.Label = path;
+			node.Value = cursor >= 0
+				? ("segments=" + std::to_string(segments.size()) + " cursor=" + segments[static_cast<size_t>(cursor)])
+				: std::string("segments=0");
+			node.Rect = area;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
 		float x = area.X + 2.0f;
 		size_t start = 0;
 		int index = 0;
@@ -306,13 +380,16 @@ namespace World::Wui
 				const float w = textW * static_cast<float>(segment.size()) + 8.0f;
 				const WuiRect item { x, area.Y, w, area.H };
 				const bool hovered = ctx.IsHovered(item);
-				if (hovered)
+				// 键盘光标段与悬停同一档视觉(焦点在整条上时才画),让"Tab 进来之后按 ←/→"看得见。
+				const bool cursorHere = focused && index == cursor;
+				if (hovered || cursorHere)
 				{
 					ctx.Commands().push_back({ WuiDrawKind::Rect, item, theme.ButtonHover, 2.0f });
-					ctx.SetCursor(WuiCursor::Hand);
+					if (hovered)
+						ctx.SetCursor(WuiCursor::Hand);
 				}
 				PushText(ctx, { item.X + 4.0f, item.Y + (item.H - 13.0f) * 0.5f }, segment,
-					hovered ? theme.Text : theme.TextMuted, 13.0f);
+					(hovered || cursorHere) ? theme.Text : theme.TextMuted, 13.0f);
 				if (ctx.IsClicked(item))
 					clicked = index;
 				x += w;
@@ -327,7 +404,8 @@ namespace World::Wui
 				break;
 			start = slash + 1;
 		}
-		return clicked;
+		DrawFocusRing(ctx, area, id, theme);
+		return keyboardActivated >= 0 ? keyboardActivated : clicked;
 	}
 
 	// ---- 搜索框 ----
@@ -342,6 +420,29 @@ namespace World::Wui
 
 		const WuiRect field { rect.X + 18.0f, rect.Y, std::max(20.0f, rect.W - 38.0f), rect.H };
 		const WuiRect clearRect { rect.X + rect.W - 18.0f, rect.Y + rect.H * 0.5f - 7.0f, 14.0f, 14.0f };
+		// P1c-E4:焦点入口 / a11y 节点必须**无条件**登记 —— 旧实现只在 ctx.Focus()==id 的分支里
+		// 转发 TextField,而 TextFieldCore 才登记焦点表与节点 → Tab 与 ui.invoke 永远到不了这里。
+		// 节点语义与 TextField 保持一致(label=占位文案、value=内容、空时回落到占位文案),
+		// 聚焦那一帧由 TextFieldCore 用同一份 a11y 描述重登记(同 id、同 kind,后写覆盖)。
+		TextFieldA11y a11y;
+		a11y.Label = placeholder;
+		a11y.Placeholder = placeholder;
+		if (id != 0)
+		{
+			ctx.RegisterFocusable(id, field);
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text-field";
+			node.Label = placeholder;
+			node.Value = buffer.empty() ? placeholder : buffer;
+			node.Rect = field;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Focused = ctx.Focus() == id;
+			WuiAccessibility::Get().Register(node);
+		}
 		bool submitted = false;
 		if (buffer.empty())
 		{
@@ -352,11 +453,11 @@ namespace World::Wui
 				ctx.SetFocus(id);
 			// 聚焦后进入编辑(空字符串也要能输入):直接转发 TextField。
 			if (ctx.Focus() == id)
-				submitted = TextField(ctx, id, field, buffer, theme);
+				submitted = TextField(ctx, id, field, buffer, theme, nullptr, &a11y);
 		}
 		else
 		{
-			submitted = TextField(ctx, id, field, buffer, theme);
+			submitted = TextField(ctx, id, field, buffer, theme, nullptr, &a11y);
 			if (ctx.IsHovered(clearRect))
 			{
 				ctx.Commands().push_back({ WuiDrawKind::Rect, clearRect, theme.ButtonHover, 2.0f });
@@ -375,12 +476,50 @@ namespace World::Wui
 	// ---- 列表视图 ----
 
 	ListViewResult ListView(WuiContext& ctx, const WuiRect& area, const std::vector<ListViewItem>& items,
-		float rowHeight, float& scrollY, const WuiTheme& theme)
+		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id)
 	{
 		ListViewResult result;
 		const float contentHeight = rowHeight * static_cast<float>(items.size()) + 8.0f;
 		result.ItemRects.reserve(items.size());
+		// P1c-E4:列表整体是键盘入口(id != 0 时)。行节点归行自己,容器节点归这里 ——
+		// 空列表没有可导航的行,就不进焦点表、也不登记节点(不造"点不动的空壳")。
+		const bool focused = id != 0 && ctx.Focus() == id;
+		if (id != 0 && !items.empty())
+			ctx.RegisterFocusable(id, area);
 		BeginScrollArea(ctx, area, contentHeight, scrollY, theme);
+		if (id != 0 && !items.empty())
+		{
+			// 容器节点矩形取"可见行带"(行堆叠范围与列表矩形的**交集**)而不是整个视口:
+			// 行是连续排布的,这个矩形的中心必定落在某一行上 —— interactive=true 因此不撒谎
+			// (点它 = 命中中心那一行,与用户点击走同一条命中路径)。
+			int selected = -1;
+			for (size_t i = 0; i < items.size(); ++i)
+			{
+				if (items[i].Selected && !items[i].Disabled)
+				{
+					selected = static_cast<int>(i);
+					break;
+				}
+			}
+			const float bandTop = std::max(area.Y, area.Y + 4.0f - scrollY);
+			const float bandBottom = std::min(area.Y + area.H,
+				area.Y + 4.0f + rowHeight * static_cast<float>(items.size()) - scrollY);
+			if (bandBottom > bandTop)
+			{
+				WuiAccessNode node;
+				node.Id = id;
+				node.Window = WuiAccessibility::Get().CurrentWindow();
+				node.Panel = WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "list";
+				node.Value = "items=" + std::to_string(items.size())
+					+ (selected >= 0 ? " selected=" + items[static_cast<size_t>(selected)].Label : std::string());
+				node.Rect = { area.X, bandTop, area.W, bandBottom - bandTop };
+				node.Enabled = true;
+				node.Interactive = true;
+				node.Focused = focused;
+				WuiAccessibility::Get().Register(node);
+			}
+		}
 		for (size_t i = 0; i < items.size(); ++i)
 		{
 			const ListViewItem& item = items[i];
@@ -405,6 +544,9 @@ namespace World::Wui
 				node.Rect = row;
 				node.Enabled = !item.Disabled;
 				node.Interactive = !item.Disabled;
+				// 焦点在列表上时,当前行(调用方给的 Selected)就是键盘光标位置 —— AI 据此读到
+				// "焦点在第几行",不必猜。
+				node.Focused = focused && item.Selected;
 				WuiAccessibility::Get().Register(node);
 			}
 			const bool hovered = !item.Disabled && ctx.IsHovered(row);
@@ -439,6 +581,52 @@ namespace World::Wui
 				result.DoubleClicked = static_cast<int>(i);
 			else if (ctx.IsClicked(row))
 				result.Clicked = static_cast<int>(i);
+		}
+		// 键盘(仅焦点在列表上时,与 TreeView 的 U2e 契约一致:控件只**报告**目标下标,
+		// 选中推进/激活语义仍由调用方改模型):↑/↓/Home/End 移动光标(跳过 Disabled),
+		// Enter/Space 激活当前项。没有当前项时 ↓/Home 落到第一项、↑/End 落到最后一项。
+		if (focused && !items.empty())
+		{
+			int current = -1;
+			for (size_t i = 0; i < items.size(); ++i)
+			{
+				if (items[i].Selected)
+				{
+					current = static_cast<int>(i);
+					break;
+				}
+			}
+			const auto enabledAt = [&items](int index)
+			{
+				return index >= 0 && index < static_cast<int>(items.size()) && !items[static_cast<size_t>(index)].Disabled;
+			};
+			int target = -1;
+			if (ctx.WasKeyPressed(KeyCodes::Down))
+			{
+				for (int i = (current < 0 ? 0 : current + 1); i < static_cast<int>(items.size()); ++i)
+					if (enabledAt(i)) { target = i; break; }
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::Up))
+			{
+				for (int i = (current < 0 ? static_cast<int>(items.size()) - 1 : current - 1); i >= 0; --i)
+					if (enabledAt(i)) { target = i; break; }
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::Home))
+			{
+				for (int i = 0; i < static_cast<int>(items.size()); ++i)
+					if (enabledAt(i)) { target = i; break; }
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::End))
+			{
+				for (int i = static_cast<int>(items.size()) - 1; i >= 0; --i)
+					if (enabledAt(i)) { target = i; break; }
+			}
+			if (target >= 0 && target != current)
+				result.KeyMoveTo = target;
+			if (result.KeyMoveTo < 0 && enabledAt(current)
+				&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space)))
+				result.KeyActivate = current;
+			DrawFocusRing(ctx, area, id, theme);
 		}
 		EndScrollArea(ctx);
 		return result;
@@ -519,6 +707,40 @@ namespace World::Wui
 		if (id != 0)
 		{
 			ctx.RegisterFocusable(id, area);
+			// P1c-E4:容器节点(以前只有行节点 —— "焦点在树上"AI 读不到,只能看到各行都不带 focused)。
+			// 矩形取"可见行带"(行堆叠范围 ∩ 树矩形):行连续排布,中心必定落在某一行上,
+			// interactive=true 因此不撒谎(点它 = 命中中心那一行);value 带上当前选中行,
+			// 键盘光标位置从 a11y 直接可读(行节点也会在焦点于树上时给选中行标 focused)。
+			if (!items.empty())
+			{
+				int selected = -1;
+				for (size_t i = 0; i < items.size(); ++i)
+				{
+					if (items[i].Selected && !items[i].Disabled)
+					{
+						selected = static_cast<int>(i);
+						break;
+					}
+				}
+				const float bandTop = std::max(area.Y, area.Y + 4.0f - scrollY);
+				const float bandBottom = std::min(area.Y + area.H,
+					area.Y + 4.0f + rowHeight * static_cast<float>(items.size()) - scrollY);
+				if (bandBottom > bandTop)
+				{
+					WuiAccessNode node;
+					node.Id = id;
+					node.Window = WuiAccessibility::Get().CurrentWindow();
+					node.Panel = WuiAccessibility::Get().CurrentPanel();
+					node.Kind = "tree";
+					node.Value = "items=" + std::to_string(items.size())
+						+ (selected >= 0 ? " selected=" + items[static_cast<size_t>(selected)].Label : std::string());
+					node.Rect = { area.X, bandTop, area.W, bandBottom - bandTop };
+					node.Enabled = true;
+					node.Interactive = true;
+					node.Focused = focused;
+					WuiAccessibility::Get().Register(node);
+				}
+			}
 			if (focused)
 				DrawFocusRing(ctx, area, id, theme);
 		}
@@ -566,6 +788,8 @@ namespace World::Wui
 				node.Rect = labelRect;
 				node.Enabled = !item.Disabled;
 				node.Interactive = !item.Disabled;
+				// 焦点在树上时,当前项(调用方给的 Selected)就是键盘光标位置。
+				node.Focused = focused && item.Selected;
 				WuiAccessibility::Get().Register(node);
 			}
 

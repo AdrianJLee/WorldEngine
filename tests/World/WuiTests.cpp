@@ -11,6 +11,7 @@
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/WUI/WuiCodeEditor.h"
 #include "World/WUI/Widgets/WuiControls.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/Core/KeyCodes.h"
@@ -1771,6 +1772,230 @@ int main()
 					CHECK(ctx.IsPopupOpen(id));
 				}
 			}
+		}
+
+		// 23. P1c-E4:键盘可达性契约(引擎侧)。每件都按同一条两帧节奏验证:
+		//     ①先画一帧(登记焦点表)→ ②下一帧注入 Tab(以及该件的契约键)→
+		//     Tab 必须停到它的焦点 id,且该 id 的 a11y 节点带 focused=true、可见、可读;
+		//     按键报告/状态变化由各段自己的回调记录。覆盖 7 件"必须改引擎"
+		//     (button.icon / searchfield / codeeditor / listrow / listview / breadcrumb / scrollarea)
+		//     加上 segmented/tabs 的子焦点暴露与 treeview 容器节点。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme& theme = CurrentTheme();
+			// keys 除 Tab 外的键在**同一帧**注入(控件在焦点已落到自己身上后处理它们)。
+			const auto ContractNode = [&](WuiId widgetId, WuiId focusId, std::initializer_list<uint32_t> keys,
+				const std::function<void(WuiContext&, WuiId)>& paint) -> const WuiAccessNode*
+			{
+				WuiContext ctx;
+				WuiInputState idle;
+				idle.ViewportSize = { 640.0f, 480.0f };
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(idle);
+				paint(ctx, widgetId);
+				ctx.EndFrame();
+
+				WuiInputState press = idle;
+				press.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Tab) };
+				for (uint32_t key : keys)
+					press.KeyPressed.push_back(key);
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(press);
+				paint(ctx, widgetId);
+				ctx.EndFrame();
+				CHECK(ctx.Focus() == focusId);
+				return accessibility.Find(focusId);
+			};
+
+			// ① button.icon:ToolbarIconButton 进焦点表 + Enter/Space 激活(以前从不 RegisterFocusable)。
+			{
+				const WuiId id = HashId("test.e4.icon-button");
+				const WuiRect button { 20.0f, 20.0f, 32.0f, 24.0f };
+				bool activated = false;
+				const WuiAccessNode* node = ContractNode(id, id,
+					{ static_cast<uint32_t>(World::KeyCodes::Space) },
+					[&](WuiContext& ctx, WuiId widgetId)
+					{
+						activated = ToolbarIconButton(ctx, widgetId, button, 0, { 0, 0, 1, 1 }, "Save", theme, true);
+					});
+				CHECK(node != nullptr);
+				CHECK(node != nullptr && node->Kind == "button" && node->Focused && node->Interactive && node->Visible);
+				CHECK(activated);
+			}
+
+			// ② searchfield:无条件登记焦点/节点(旧实现把焦点登记藏在"已聚焦"分支里 → 先有鸡后有蛋)。
+			{
+				const WuiId id = HashId("test.e4.search");
+				const WuiRect search { 20.0f, 20.0f, 200.0f, 24.0f };
+				std::string buffer;
+				const WuiAccessNode* node = ContractNode(id, id, {},
+					[&](WuiContext& ctx, WuiId widgetId)
+					{
+						SearchField(ctx, widgetId, search, buffer, "Search assets", theme);
+					});
+				CHECK(node != nullptr && node->Kind == "text-field" && node->Focused && node->Interactive);
+				CHECK(node != nullptr && node->Label == "Search assets" && node->Value == "Search assets");
+			}
+
+			// ③ codeeditor:补焦点表入口(节点与 focused 本来就有,Tab 进不来)。
+			{
+				const WuiId id = HashId("test.e4.code-editor");
+				const WuiRect editor { 20.0f, 20.0f, 240.0f, 80.0f };
+				WuiTextBuffer buffer;
+				buffer.SetText("local x = 1\n");
+				WuiCodeEditorOptions options;
+				const WuiAccessNode* node = ContractNode(id, id, {},
+					[&](WuiContext& ctx, WuiId widgetId)
+					{
+						CodeEditor(ctx, widgetId, editor, buffer, options);
+					});
+				CHECK(node != nullptr && node->Kind == "code-editor" && node->Focused);
+			}
+
+			// ④ listrow(WuiListRow):行进焦点表,Enter 与点击走同一个 OnClick。
+			{
+				const WuiId id = HashId("test.e4.list-row");
+				int clicks = 0;
+				auto row = std::make_shared<WuiListRow>();
+				row->Text = "Row";
+				row->SetId(id);
+				row->OnClick = [&clicks]() { ++clicks; };
+				LayoutWidgetTree(row, { 20.0f, 20.0f, 200.0f, 22.0f });
+				const WuiAccessNode* node = ContractNode(id, id,
+					{ static_cast<uint32_t>(World::KeyCodes::Enter) },
+					[&](WuiContext& ctx, WuiId)
+					{
+						WuiPaintContext paint(ctx);
+						row->Paint(paint);
+					});
+				CHECK(node != nullptr && node->Kind == "list-row" && node->Focused);
+				CHECK(clicks == 1);
+			}
+
+			// ⑤ listview:容器节点 + 键盘光标(↑/↓ 只报告 KeyMoveTo,改选中归调用方)。
+			{
+				const WuiId id = HashId("test.e4.list");
+				std::vector<ListViewItem> items(3);
+				items[0].Id = HashId("test.e4.list.0");
+				items[0].Label = "One";
+				items[0].Selected = true;
+				items[1].Id = HashId("test.e4.list.1");
+				items[1].Label = "Two";
+				items[2].Id = HashId("test.e4.list.2");
+				items[2].Label = "Three";
+				items[2].Disabled = true;   // 末行禁用:↓ 不许停到它
+				const WuiRect list { 20.0f, 20.0f, 200.0f, 96.0f };
+				float scroll = 0.0f;
+				int moveTo = -1;
+				int activate = -1;
+				const WuiAccessNode* node = ContractNode(id, id,
+					{ static_cast<uint32_t>(World::KeyCodes::Down) },
+					[&](WuiContext& ctx, WuiId widgetId)
+					{
+						const ListViewResult result = ListView(ctx, list, items, 24.0f, scroll, theme, widgetId);
+						moveTo = result.KeyMoveTo;
+						activate = result.KeyActivate;
+					});
+				CHECK(node != nullptr && node->Kind == "list" && node->Focused && node->Interactive);
+				CHECK(moveTo == 1 && activate == -1);
+				const WuiAccessNode* current = accessibility.Find(items[0].Id);
+				CHECK(current != nullptr && current->Focused);   // 当前行的焦点位可读
+			}
+
+			// ⑥ treeview:容器节点 kind="tree" + 焦点位(行节点同时在焦点于树上时标 focused)。
+			{
+				const WuiId id = HashId("test.e4.tree");
+				std::vector<TreeViewItem> items(3);
+				items[0] = { HashId("test.e4.tree.0"), "Assets", 0, true, true, true, false };
+				items[1] = { HashId("test.e4.tree.1"), "Textures", 1, false, false, false, false };
+				items[2] = { HashId("test.e4.tree.2"), "Materials", 1, false, false, false, false };
+				const WuiRect treeArea { 20.0f, 20.0f, 200.0f, 96.0f };
+				float scroll = 0.0f;
+				int toggle = -1;
+				const WuiAccessNode* node = ContractNode(id, id,
+					{ static_cast<uint32_t>(World::KeyCodes::Right) },
+					[&](WuiContext& ctx, WuiId widgetId)
+					{
+						const TreeViewResult result = TreeView(ctx, treeArea, items, 22.0f, scroll, theme, widgetId);
+						toggle = result.KeyToggleExpand;
+					});
+				CHECK(node != nullptr && node->Kind == "tree" && node->Focused && node->Interactive);
+				CHECK(toggle == 0);   // 当前项(有子节点)收到 ←/→ 的折叠报告
+				const WuiAccessNode* current = accessibility.Find(items[0].Id);
+				CHECK(current != nullptr && current->Focused);
+			}
+
+			// ⑦ breadcrumb:id 下沉后由控件自己登记节点并进焦点表;←/→ 移段光标、Enter 激活它。
+			{
+				const WuiId id = HashId("test.e4.breadcrumb");
+				const WuiRect crumb { 20.0f, 20.0f, 230.0f, 20.0f };
+				int picked = -1;
+				const WuiAccessNode* node = ContractNode(id, id,
+					{ static_cast<uint32_t>(World::KeyCodes::Right), static_cast<uint32_t>(World::KeyCodes::Enter) },
+					[&](WuiContext& ctx, WuiId widgetId)
+					{
+						const int clicked = Breadcrumb(ctx, crumb, "assets/textures/icon.png", theme, widgetId);
+						if (clicked >= 0)
+							picked = clicked;
+					});
+				CHECK(node != nullptr && node->Kind == "breadcrumb" && node->Focused && node->Interactive);
+				CHECK(picked == 1);   // 段光标从第 0 段推到第 1 段,Enter 激活它
+			}
+
+			// ⑧ scrollarea:id 下沉后进焦点表 + 键盘滚动(以前只有"悬停 + 滚轮")。
+			{
+				const WuiId id = HashId("test.e4.scroll");
+				const WuiRect viewport { 20.0f, 20.0f, 200.0f, 96.0f };
+				float scroll = 0.0f;
+				const WuiAccessNode* node = ContractNode(id, id,
+					{ static_cast<uint32_t>(World::KeyCodes::Down) },
+					[&](WuiContext& ctx, WuiId widgetId)
+					{
+						BeginScrollArea(ctx, viewport, 400.0f, scroll, theme, widgetId);
+						EndScrollArea(ctx);
+					});
+				CHECK(node != nullptr && node->Kind == "scroll-area" && node->Focused);
+				CHECK(node != nullptr && !node->Interactive);   // 容器自己不是点击目标
+				CHECK(Near(scroll, 40.0f));                     // ↓ = 40px
+			}
+
+			// ⑨ segmented / tabs:焦点停在**子项**上 —— 组节点按"组内有焦点"报 focused,
+			//    子节点按"焦点在这一格/这一页"报 focused(以前子节点恒 false,AI 读不到焦点位)。
+			{
+				const WuiId segmentedId = HashId("test.e4.segmented");
+				const WuiId segmentChild = HashId((std::to_string(segmentedId) + ".segment.0").c_str());
+				const std::vector<std::string> options { "Light", "Medium", "Heavy" };
+				int selected = 0;
+				const WuiRect bar { 20.0f, 20.0f, 210.0f, 24.0f };
+				ContractNode(segmentedId, segmentChild, {},
+					[&](WuiContext& ctx, WuiId widgetId)
+					{
+						Segmented(ctx, widgetId, bar, options, selected, theme);
+					});
+				const WuiAccessNode* group = accessibility.Find(segmentedId);
+				const WuiAccessNode* option = accessibility.Find(segmentChild);
+				CHECK(group != nullptr && group->Kind == "segmented" && group->Focused);
+				CHECK(option != nullptr && option->Kind == "segmented-option" && option->Focused);
+
+				const WuiId tabsId = HashId("test.e4.tabs");
+				const WuiId tabChild = HashId((std::to_string(tabsId) + ".tab.0").c_str());
+				int active = 0;
+				ContractNode(tabsId, tabChild, {},
+					[&](WuiContext& ctx, WuiId widgetId)
+					{
+						TabBar(ctx, widgetId, bar, options, active, theme, nullptr);
+					});
+				const WuiAccessNode* tabBar = accessibility.Find(tabsId);
+				const WuiAccessNode* tab = accessibility.Find(tabChild);
+				CHECK(tabBar != nullptr && tabBar->Kind == "tab-bar" && tabBar->Focused);
+				CHECK(tab != nullptr && tab->Kind == "tab" && tab->Focused);
+			}
+
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
 		}
 
 		std::printf("World.Wui: all checks passed\n");

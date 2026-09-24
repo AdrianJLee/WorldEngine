@@ -3,6 +3,7 @@
 
 #include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiWidgets.h"   // DrawFocusRing / CurrentTheme(焦点环与其它控件同一套 token)
 
 #include <algorithm>
 #include <cmath>
@@ -1401,6 +1402,15 @@ namespace World::Wui
 			}
 		}
 
+		// P1c-E4:编辑器本体进焦点表 —— 旧实现只有"点进去"(鼠标)才 SetFocus,键盘/AI 到不了它
+		// (a11y 节点一直存在、focused 也一直报,但焦点表里没有入口 → Tab 永远扫不到)。
+		// 焦点环沿用全局 token(overlay 层);文本焦点持焦后 Tab 仍是编辑器自己的缩进(见 U2e 口径),
+		// 退出用 Escape。
+		if (id != 0)
+		{
+			ctx.RegisterFocusable(id, rect);
+			DrawFocusRing(ctx, rect, id, CurrentTheme());
+		}
 		result.Changed = buffer.Revision() != revisionAtStart;
 		return result;
 	}
