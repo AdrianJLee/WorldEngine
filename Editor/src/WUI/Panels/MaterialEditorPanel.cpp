@@ -3319,17 +3319,13 @@ namespace World
 			// 渐变背景:预览目标清成透明,先在下面画一层 WUI 渐变(2D 通道,不需要改 3D)。
 			if (m_PreviewBackground == PreviewBackground::Gradient)
 			{
-				// ②缺件(库内没有可用库件,本轮不硬造):本面板唯一一条即时绘制 ——
-				// 库里只有 ColorField 内部的渐变,没有"调用方给几何 + 四角色"的渐变原语。
-				// 语义缺口与建议接口见 reports/WUI-P1c-w3.3-material-editor.md §4。
-				Wui::WuiDrawCommand gradient;
-				gradient.Kind = Wui::WuiDrawKind::Gradient;
-				gradient.Rect = pixelView;
-				gradient.Corners = { Wui::WuiColor { 0.24f, 0.27f, 0.33f, 1.0f },
-					Wui::WuiColor { 0.24f, 0.27f, 0.33f, 1.0f },
-					Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f },
-					Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f } };
-				ctx.Commands().push_back(std::move(gradient));
+				// W3.5:改走库件 P1c-LIB2 的 Wui::GradientFill(四角重载)—— 库实现就是
+				// Kind=Gradient + Rect + Corners 三项 + push_back,与这里原来手搓的命令逐字段等价
+				// (见 Engine/src/World/WUI/WuiWidgets.cpp 的同名重载);
+				// 面板不再需要自己拼 WuiDrawCommand(本面板最后一条即时绘制)。
+				Wui::GradientFill(ctx, pixelView,
+					Wui::WuiColor { 0.24f, 0.27f, 0.33f, 1.0f }, Wui::WuiColor { 0.24f, 0.27f, 0.33f, 1.0f },
+					Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f }, Wui::WuiColor { 0.05f, 0.06f, 0.08f, 1.0f });
 			}
 			// U22:离屏预览按引擎统一口径贴({0,1,1,-1},与主视口同一行序约定)。
 			// 之前用 {0,0,1,1} 会上下镜像:主光(仰角 +45°)会画到球的下方,

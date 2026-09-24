@@ -833,12 +833,12 @@ namespace World
 
 		// 标题行:[预] 文件名 · N 处覆盖
 		const Wui::WuiRect badge { rect.X + pad, rect.Y + pad + 2.0f, 16.0f, 16.0f };
-		Wui::PanelBackground(ctx, badge, theme.Accent, badge.H * 0.5f);
-		// 徽标字形要**粗体**,库里的 Wui::Label 没有 bold 变体 —— 这行留作"缺件"证据:
-		// 需要一件 WuiBadge(16×16 圆形强调色 + 粗体字形),本轮不硬造。
-		ctx.Commands().push_back({ Wui::WuiDrawKind::Text, { badge.X + 3.0f, badge.Y + 2.0f, 0.0f, 0.0f },
-			Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, 0.0f, 1.0f,
-			Wui::Tr("panel.properties.prefab.badge", "预"), 11.0f, true });
+		// W3.5:圆形强调色底 + 粗体字形 = 库件 P1c-LIB1 的 Wui::Badge(本面板最后一条即时绘制)。
+		// 底色命令逐字段等价(PanelBackground(Accent, H*0.5) 与 Badge 的 radius 参数同形);
+		// 字形改用库件的居中口径:水平 (16 − 字形宽)/2、垂直 (16 − 11)/2 = 2.5 —— 与原手写
+		// 的 (X+3.0, Y+2.0) 有 0/0.5px 级的差,已按像素证据记录(见 W3.5 报告 §3)。
+		Wui::Badge(ctx, badge, Wui::Tr("panel.properties.prefab.badge", "预"), theme.Accent,
+			Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, 11.0f, true, badge.H * 0.5f);
 		const float nameX = badge.X + badge.W + 6.0f;
 		Wui::Label(ctx, { nameX, rect.Y + pad + 3.0f }, fileName, theme.Text, 13.0f);
 		const std::string countText = std::to_string(info.Overrides) + " "
@@ -1181,9 +1181,11 @@ namespace World
 			}
 			// 侧栏底色用列表/输入框的 ContentBg(比模态面板底更深一档,形成"分栏"层次)。
 			Wui::PanelBackground(ctx, sidebarRect, theme.ContentBg, 4.0f);
-			// 下面的"只裁剪、不滚动"作用域仍是裸命令:库里没有即时版裁剪入口
-			// (Wui::BeginScrollArea 附带滚轮与底色填充语义,会改变这里的行为)。缺件见报告。
-			ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, sidebarRect });
+			// W3.5:"只裁剪、不滚动"走库件 P1c-LIB1 的 Wui::ClipScope(RAII):
+			// 渲染裁剪(ClipPush/ClipPop)与裁剪栈(PushClipRect/PopClipRect)同进同出 ——
+			// 比原来只发渲染命令多维护 ClipAllows(焦点环/条目剔除)一处,作用域位置逐字对齐
+			// (原来 ClipPop 是本块最后一条语句,现在 = 析构点)。
+			Wui::ClipScope sidebarClip(ctx, sidebarRect);
 			float itemY = sidebarRect.Y + 4.0f;
 			// filter:"" + all=true → 全部;all=false 时 filter 为空 = 未分类,非空 = 该分类。
 			const auto sidebarItem = [&](const std::string& id, const std::string& label,
@@ -1217,7 +1219,7 @@ namespace World
 				sidebarItem("prop.add.cat.uncategorized",
 					Wui::Tr("panel.properties.add.uncategorized", "Uncategorized"), false, std::string(),
 					counts[std::string()]);
-			ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
+			// (析构点 = 原来的 ClipPop:作用域随本块结束)
 		}
 
 		// ---- 列表:本帧最终搜索词决定行(与用户看到的同帧一致)----
@@ -1632,98 +1634,103 @@ namespace World
 		const Wui::WuiRect contentRect { rect.X + 6, rect.Y + contentTop - scroll.Offset,
 			rect.W - 12 - kScrollbarWidth, contentHeight };
 		float sectionY = 0.0f;
-		ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPush, scrollViewport });
-		for (size_t i = 0; i < m_Sections.size(); ++i)
+		// W3.5:分区滚动区的裁剪改走库件 P1c-LIB1 的 Wui::ClipScope(RAII);作用域 = 原来的
+		// ClipPush…ClipPop,额外维护的 ClipAllows 让"滚出视口的控件不画焦点环"这条语义在这里
+		// 同样成立(本作用域内有控件绘制,实测差异见本片报告 §3)。
 		{
-			if (i >= componentSchemas.size())
-				break;
-			const Schema::TypeSchema* schema = componentSchemas[i];
-			SectionEntry& section = m_Sections[i];
-			// 分区顺序可能因 schema 列表变化而与 m_Sections 错位:名字不同则本帧跳过绘制。
-			if (section.Title != schema->DisplayName)
-				break;
-			const bool defaultOpen = schema->Id.Name == "World::LuaScriptComponent";
-			bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), defaultOpen);
-
-			// 标题行:与 WuiSection 相同的底色/文字与展开行为;同时登记为可点节点
-			// (properties.section.<DisplayName>),脚本可展开/折叠分区。
-			const float rowY = contentRect.Y + sectionY;
-			const Wui::WuiRect header { contentRect.X, rowY, contentRect.W, kSectionHeader };
-			// 底色走库;标题行本体(展开标记 + 术语 + 悬停 Doc + 移除按钮 + 稳定 a11y id)仍由本面板
-			// 组装:Wui::SectionHeader 会多画一条分隔线且不含展开/折叠,保留模式 WuiSection 又接不进
-			// 这里的上一帧实测高度滚动布局 —— 即时版可折叠分区记入缺件。
-			Wui::PanelBackground(ctx, header,
-				open ? Wui::WuiColor { 0.27f, 0.28f, 0.31f, 1 } : Wui::WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 2.0f);
-			// 标题 = 主文案(中文界面为译文)+ 英文术语(Caption/次要色,窄处自动省略);前缀仍是展开标记。
-			const Wui::LocalizedLabel sectionLabel = SchemaComponentLabel(*schema);
-			// P4-U9:分区标题悬停 = 组件说明(schema Doc),右侧留出"移除组件"按钮的位置。
-			const std::string componentDoc = ComponentDocLabel(*schema);
-			if (!componentDoc.empty())
-				Wui::Tooltip(ctx, { header.X, header.Y, header.W - 24.0f, header.H }, componentDoc);
-			const float titleBudget = std::max(60.0f, header.W - 12.0f - 24.0f);
-			Wui::LabelWithTerm(ctx, { header.X + 6, header.Y + 3 }, (open ? "- " : "+ ") + sectionLabel.Text,
-				sectionLabel.Term, theme.Text, 14.0f, theme, titleBudget);
-			// 无障碍 id / 操作记录仍用 section.Title(=<DisplayName>),节点 id 逐字节不变。
-			const std::string headerId = "properties.section." + section.Title;
-			RegisterNode(Wui::HashId(headerId.c_str()), "button", header, TermText(sectionLabel),
-				open ? "open" : "closed", true, componentDoc);
-			if (ctx.IsClicked({ header.X, header.Y, header.W - 24.0f, header.H }))
+			Wui::ClipScope sectionScrollClip(ctx, scrollViewport);
+			for (size_t i = 0; i < m_Sections.size(); ++i)
 			{
-				open = !open;
-				section.Open = open;
-				ctx.RecordOp("properties", "toggle-section", section.Title, open ? "open" : "closed");
-			}
+				if (i >= componentSchemas.size())
+					break;
+				const Schema::TypeSchema* schema = componentSchemas[i];
+				SectionEntry& section = m_Sections[i];
+				// 分区顺序可能因 schema 列表变化而与 m_Sections 错位:名字不同则本帧跳过绘制。
+				if (section.Title != schema->DisplayName)
+					break;
+				const bool defaultOpen = schema->Id.Name == "World::LuaScriptComponent";
+				bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), defaultOpen);
 
-			// ---- P4-U9:移除组件(核心组件禁止移除;破坏性操作走确认模态)----
-			{
-				const Wui::WuiRect removeRect { header.X + header.W - 22.0f, header.Y + 2.0f, 18.0f, 18.0f };
-				std::string blockedReason;
-				const bool core = schema->Core;
-				const bool canRemove = !m_ReadOnly && !core
-					&& entity.CanRemoveComponent(schema->Storage->ComponentId, &blockedReason);
-				if (core)
-					blockedReason = Wui::Tr("panel.properties.remove.core",
-						"Core components cannot be removed");
-				else if (m_ReadOnly)
-					blockedReason = Wui::Tr("panel.properties.remove.readonly",
-						"Read-only while Play/Simulate is running");
-				const std::string removeHint = canRemove
-					? Wui::Tr("panel.properties.remove.tooltip", "Remove this component")
-					: blockedReason;
-				const bool hoverRemove = ctx.IsHovered(removeRect);
-				if (hoverRemove && canRemove)
-					Wui::PanelBackground(ctx, removeRect, Wui::WuiColor { 0.97f, 0.32f, 0.29f, 0.22f }, 3.0f);
-				Wui::Label(ctx, { removeRect.X + 5.0f, removeRect.Y + 1.0f }, "x",
-					canRemove ? (hoverRemove ? theme.Danger : theme.TextMuted) : theme.TextDisabled, 13.0f);
-				if (hoverRemove)
+				// 标题行:与 WuiSection 相同的底色/文字与展开行为;同时登记为可点节点
+				// (properties.section.<DisplayName>),脚本可展开/折叠分区。
+				const float rowY = contentRect.Y + sectionY;
+				const Wui::WuiRect header { contentRect.X, rowY, contentRect.W, kSectionHeader };
+				// 底色走库;标题行本体(展开标记 + 术语 + 悬停 Doc + 移除按钮 + 稳定 a11y id)仍由本面板
+				// 组装:Wui::SectionHeader 会多画一条分隔线且不含展开/折叠,保留模式 WuiSection 又接不进
+				// 这里的上一帧实测高度滚动布局 —— 即时版可折叠分区记入缺件。
+				Wui::PanelBackground(ctx, header,
+					open ? Wui::WuiColor { 0.27f, 0.28f, 0.31f, 1 } : Wui::WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 2.0f);
+				// 标题 = 主文案(中文界面为译文)+ 英文术语(Caption/次要色,窄处自动省略);前缀仍是展开标记。
+				const Wui::LocalizedLabel sectionLabel = SchemaComponentLabel(*schema);
+				// P4-U9:分区标题悬停 = 组件说明(schema Doc),右侧留出"移除组件"按钮的位置。
+				const std::string componentDoc = ComponentDocLabel(*schema);
+				if (!componentDoc.empty())
+					Wui::Tooltip(ctx, { header.X, header.Y, header.W - 24.0f, header.H }, componentDoc);
+				const float titleBudget = std::max(60.0f, header.W - 12.0f - 24.0f);
+				Wui::LabelWithTerm(ctx, { header.X + 6, header.Y + 3 }, (open ? "- " : "+ ") + sectionLabel.Text,
+					sectionLabel.Term, theme.Text, 14.0f, theme, titleBudget);
+				// 无障碍 id / 操作记录仍用 section.Title(=<DisplayName>),节点 id 逐字节不变。
+				const std::string headerId = "properties.section." + section.Title;
+				RegisterNode(Wui::HashId(headerId.c_str()), "button", header, TermText(sectionLabel),
+					open ? "open" : "closed", true, componentDoc);
+				if (ctx.IsClicked({ header.X, header.Y, header.W - 24.0f, header.H }))
 				{
-					if (canRemove)
-						ctx.SetCursor(Wui::WuiCursor::Hand);
-					if (!removeHint.empty())
-						ctx.SetTooltip(removeHint);
+					open = !open;
+					section.Open = open;
+					ctx.RecordOp("properties", "toggle-section", section.Title, open ? "open" : "closed");
 				}
-				const std::string removeId = "properties.section.remove." + section.Title;
-				RegisterNode(Wui::HashId(removeId.c_str()), "button", removeRect,
-					Wui::Tr("panel.properties.remove_component", "Remove Component"), removeHint,
-					canRemove, removeHint);
-				if (canRemove && ctx.IsClicked(removeRect))
-					OpenRemoveComponentConfirm(ctx, schema->Storage->ComponentId, schema->DisplayName);
-			}
 
-			const Wui::WuiRect inner { contentRect.X + 10, rowY + kSectionHeader, contentRect.W - 10, 0 };
-			if (open)
-			{
-				const float measured = DrawComponentInspector(ctx, inner, entity, *schema, visibleContent);
-				section.ContentHeight = measured + 4.0f;
-				sectionY += kSectionHeader + section.ContentHeight + kSectionGap;
+				// ---- P4-U9:移除组件(核心组件禁止移除;破坏性操作走确认模态)----
+				{
+					const Wui::WuiRect removeRect { header.X + header.W - 22.0f, header.Y + 2.0f, 18.0f, 18.0f };
+					std::string blockedReason;
+					const bool core = schema->Core;
+					const bool canRemove = !m_ReadOnly && !core
+						&& entity.CanRemoveComponent(schema->Storage->ComponentId, &blockedReason);
+					if (core)
+						blockedReason = Wui::Tr("panel.properties.remove.core",
+							"Core components cannot be removed");
+					else if (m_ReadOnly)
+						blockedReason = Wui::Tr("panel.properties.remove.readonly",
+							"Read-only while Play/Simulate is running");
+					const std::string removeHint = canRemove
+						? Wui::Tr("panel.properties.remove.tooltip", "Remove this component")
+						: blockedReason;
+					const bool hoverRemove = ctx.IsHovered(removeRect);
+					if (hoverRemove && canRemove)
+						Wui::PanelBackground(ctx, removeRect, Wui::WuiColor { 0.97f, 0.32f, 0.29f, 0.22f }, 3.0f);
+					Wui::Label(ctx, { removeRect.X + 5.0f, removeRect.Y + 1.0f }, "x",
+						canRemove ? (hoverRemove ? theme.Danger : theme.TextMuted) : theme.TextDisabled, 13.0f);
+					if (hoverRemove)
+					{
+						if (canRemove)
+							ctx.SetCursor(Wui::WuiCursor::Hand);
+						if (!removeHint.empty())
+							ctx.SetTooltip(removeHint);
+					}
+					const std::string removeId = "properties.section.remove." + section.Title;
+					RegisterNode(Wui::HashId(removeId.c_str()), "button", removeRect,
+						Wui::Tr("panel.properties.remove_component", "Remove Component"), removeHint,
+						canRemove, removeHint);
+					if (canRemove && ctx.IsClicked(removeRect))
+						OpenRemoveComponentConfirm(ctx, schema->Storage->ComponentId, schema->DisplayName);
+				}
+
+				const Wui::WuiRect inner { contentRect.X + 10, rowY + kSectionHeader, contentRect.W - 10, 0 };
+				if (open)
+				{
+					const float measured = DrawComponentInspector(ctx, inner, entity, *schema, visibleContent);
+					section.ContentHeight = measured + 4.0f;
+					sectionY += kSectionHeader + section.ContentHeight + kSectionGap;
+				}
+				else
+				{
+					// 折叠态保留上次实测高度:重新展开时不会把布局跳成 0 再恢复。
+					sectionY += kSectionHeader + kSectionGap;
+				}
 			}
-			else
-			{
-				// 折叠态保留上次实测高度:重新展开时不会把布局跳成 0 再恢复。
-				sectionY += kSectionHeader + kSectionGap;
-			}
+			// (析构点 = 原来的 ClipPop:作用域随本块结束)
 		}
-		ctx.Commands().push_back({ Wui::WuiDrawKind::ClipPop });
 
 		// ---- 滚动条 + 上/下翻页按钮(始终固定在可视区右缘;脚本可 ui.invoke)----
 		// 只有确实还有内容可滚时才登记为可点节点,disabled 时 ui.invoke 的拒绝文案与
