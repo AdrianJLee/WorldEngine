@@ -3,6 +3,7 @@
 
 #include "../../EditorPreferences.h"
 
+#include "World/Core/KeyCodes.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiWidgets.h"
@@ -36,13 +37,13 @@ namespace World
 		constexpr const char* kApproveButtonId = "wui.workbench.btn.approve";
 		constexpr const char* kTreeSearchId = "wui.workbench.tree.search";
 		constexpr const char* kTreeRowPrefix = "wui.workbench.tree.row.";
+		constexpr const char* kTreeListId = "wui.workbench.tree.list";
 		constexpr const char* kCanvasId = "wui.workbench.canvas";
 		constexpr const char* kCanvasLabelId = "wui.workbench.canvas.label";
 		constexpr const char* kStateComboId = "wui.workbench.prop.__state";
 		constexpr const char* kStatusId = "wui.workbench.status";
 		constexpr const char* kInfoId = "wui.workbench.info";
 		constexpr const char* kPropLabelPrefix = "wui.workbench.prop.";
-		constexpr const char* kSelectPrefix = "wui.workbench.select.";
 
 		constexpr float kMinCanvasSize = 120.0f;
 		constexpr float kMaxCanvasSize = 640.0f;
@@ -263,6 +264,24 @@ namespace World
 			}
 		}
 
+		// showcase 是否往 overlay 层画了**整窗大小**的矩形 = 模态遮罩的指纹(视角无关,不看组件名)。
+		// 只有这种组件需要"专用舞台":它的遮挡区会把工作台整块面板的命中打死(实测踩过)。
+		bool DetectsFullWindowOverlay(const Wui::WuiContext& ctx, size_t from)
+		{
+			const glm::vec2 viewport = ctx.ViewportSize();
+			const float windowArea = std::max(1.0f, viewport.x * viewport.y);
+			const std::vector<Wui::WuiDrawCommand>& overlay = ctx.OverlayCommands();
+			for (size_t index = from; index < overlay.size(); ++index)
+			{
+				const Wui::WuiDrawCommand& command = overlay[index];
+				if (command.Kind != Wui::WuiDrawKind::Rect)
+					continue;
+				if (command.Rect.W * command.Rect.H >= windowArea * 0.6f)
+					return true;
+			}
+			return false;
+		}
+
 	}
 
 	WidgetGalleryPanel::WbLayout WidgetGalleryPanel::ComputeLayout(const Wui::WuiRect& rect,
@@ -371,7 +390,8 @@ namespace World
 		Wui::Label(ctx, { x, rowY + 5.0f }, Wui::Tr("workbench.global.language", "Language"),
 			theme.TextMuted, 12.0f);
 		x += 54.0f;
-		if (Wui::Combo(ctx, Wui::HashId("wui.workbench.btn.language"), { x, rowY, 96.0f, buttonH },
+		const Wui::WuiId languageComboId = Wui::HashId("wui.workbench.btn.language");
+		if (Wui::Combo(ctx, languageComboId, { x, rowY, 96.0f, buttonH },
 			std::string(), m_LanguageOptions, m_LanguageIndex, theme))
 		{
 			m_LanguageIndex = std::clamp(m_LanguageIndex, 0,
@@ -381,6 +401,8 @@ namespace World
 			Wui::SetLanguage(language);
 			ctx.RecordOp("gallery", "global", "Language", language);
 		}
+		if (ctx.IsPopupOpen(languageComboId))
+			m_PopupOpenNow = true;   // 弹层开着:↑/↓ 归它,组件树不抢键
 		x += 104.0f;
 
 		if (Wui::Button(ctx, Wui::HashId("wui.workbench.btn.longtext"),
@@ -422,24 +444,12 @@ namespace World
 		RegisterWorkbenchNode(Wui::HashId(kInfoId), "text", layout.InfoBar, left, m_LastAction, true, false);
 	}
 
-	const Wui::WuiComponentDesc* WidgetGalleryPanel::DrawTree(Wui::WuiContext& ctx,
-		const WbLayout& layout, const Wui::WuiTheme& theme)
+	std::vector<const Wui::WuiComponentDesc*> WidgetGalleryPanel::FilteredComponents() const
 	{
-		const Wui::WuiRect area = layout.Tree;
-		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
-		Wui::SectionHeader(ctx, { area.X, area.Y, area.W, 22.0f },
-			Wui::Tr("workbench.tree.title", "Components"), theme.Accent, theme, 14.0f);
-
-		const float rowH = m_DensityIndex == 1 ? 20.0f : 24.0f;
-		const Wui::WuiRect search { area.X + 6.0f, area.Y + 26.0f,
-			std::max(60.0f, area.W - 12.0f), 24.0f };
-		if (Wui::SearchField(ctx, Wui::HashId(kTreeSearchId), search, m_Search,
-			Wui::Tr("workbench.tree.search", "Search components"), theme))
-			ctx.RecordOp("gallery", "filter", "Components", m_Search);
-
 		// 过滤后按 Category → DisplayName 分组(登记表已按此排序,这里保持原序)。
 		const auto& all = Wui::WuiComponentRegistry::All();
 		std::vector<const Wui::WuiComponentDesc*> visible;
+		visible.reserve(all.size());
 		for (const Wui::WuiComponentDesc& item : all)
 		{
 			if (!m_Search.empty())
@@ -455,6 +465,47 @@ namespace World
 			}
 			visible.push_back(&item);
 		}
+		return visible;
+	}
+
+	const Wui::WuiComponentDesc* WidgetGalleryPanel::ResolveSelection(
+		const std::vector<const Wui::WuiComponentDesc*>& visible) const
+	{
+		for (const Wui::WuiComponentDesc* item : visible)
+			if (item->Id == m_SelectedId)
+				return item;
+		// 还没选过 / 选中件被搜索过滤掉:退回过滤后的第一件(与左树高亮同一口径)。
+		return visible.empty() ? nullptr : visible.front();
+	}
+
+	void WidgetGalleryPanel::SelectComponent(Wui::WuiContext& ctx, const Wui::WuiComponentDesc& desc,
+		const char* how)
+	{
+		m_SelectedId = desc.Id;
+		m_ForceState = "default";
+		ResetPropertyValues(desc.Id);
+		m_PropScroll = 0.0f;
+		m_LastAction = std::string("selected ") + desc.Id
+			+ (std::string(how) == "select" ? std::string() : std::string(" (") + how + ")");
+		ctx.RecordOp("gallery", how, "Component", desc.Id);
+	}
+
+	const Wui::WuiComponentDesc* WidgetGalleryPanel::DrawTree(Wui::WuiContext& ctx,
+		const WbLayout& layout, const Wui::WuiTheme& theme)
+	{
+		const Wui::WuiRect area = layout.Tree;
+		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
+		Wui::SectionHeader(ctx, { area.X, area.Y, area.W, 22.0f },
+			Wui::Tr("workbench.tree.title", "Components"), theme.Accent, theme, 14.0f);
+
+		const float rowH = m_DensityIndex == 1 ? 20.0f : 24.0f;
+		const Wui::WuiRect search { area.X + 6.0f, area.Y + 26.0f,
+			std::max(60.0f, area.W - 12.0f), 24.0f };
+		if (Wui::SearchField(ctx, Wui::HashId(kTreeSearchId), search, m_Search,
+			Wui::Tr("workbench.tree.search", "Search components"), theme))
+			ctx.RecordOp("gallery", "filter", "Components", m_Search);
+
+		const std::vector<const Wui::WuiComponentDesc*> visible = FilteredComponents();
 
 		const float listTop = search.Y + search.H + 6.0f;
 		const float listHeight = std::max(40.0f, area.Y + area.H - listTop - 6.0f);
@@ -474,13 +525,55 @@ namespace World
 				contentHeight += rowH;
 			}
 		}
+		// 滚轮归属要在 BeginScrollArea **之前**取:滚动区自己会登记裁剪/覆盖层矩形,
+		// 之后 IsHovered 不再代表"指针在我的列表里"(与弹出层"点外关闭"同一口径)。
+		const bool listHovered = ctx.IsHovered(list);
+		const bool listHoveredRaw = ctx.HitTestRaw(list, ctx.Input().MousePos);
+		const float wheel = ctx.Input().Wheel;
+		const float maxScroll = std::max(0.0f, contentHeight - list.H);
+
 		Wui::BeginScrollArea(ctx, list, contentHeight, m_TreeScroll, theme);
-		// 滚轮归属:滚动区自己登记过覆盖层矩形(打给"上层盖住下层"用),所以 IsHovered
-		// 会对滚动区自身返回 false —— 判"指针是否在我的滚动区里"要用不带遮挡的原始命中
-		// (与弹出层自己的"点外关闭"同一口径)。
-		if (ctx.Input().Wheel != 0.0f && ctx.HitTestRaw(list, ctx.Input().MousePos))
-			m_TreeScroll = std::clamp(m_TreeScroll - ctx.Input().Wheel * (rowH + 4.0f), 0.0f,
-				std::max(0.0f, contentHeight - list.H));
+		// 覆盖层(模态遮罩/弹层)盖住列表时 BeginScrollArea 的 IsHovered 判 false,但用户指着
+		// 列表滚动时列表仍应跟着滚 —— 用不带遮挡的原始命中补一次。两条路径互斥:同时应用会
+		// 把同一格滚轮算两遍(实测 40+28px),列表"滚过头"、逐件定位的探针也会更难收敛。
+		if (wheel != 0.0f && listHoveredRaw && !listHovered)
+			m_TreeScroll = std::clamp(m_TreeScroll - wheel * 40.0f, 0.0f, maxScroll);
+
+		// 键盘导航归属:指针在列表里,或最近一次交互(点行 / 滚轮)落在列表里。
+		if (wheel != 0.0f && listHoveredRaw)
+			m_TreeKeyboardFocus = true;
+		else if (ctx.Input().MouseClicked[0] && ctx.HitTestRaw(m_PanelRect, ctx.Input().MousePos)
+			&& !listHoveredRaw)
+			m_TreeKeyboardFocus = false;   // 在面板别处点了:键盘导航交还出去
+
+		// ↑/↓/Home/End 切换选中件(键盘可选的验收项)。弹层开着时键盘归弹层,组件树不抢键;
+		// 文本编辑中同理(搜索框里按 ↑/↓ 不该跳组件)。
+		if (!visible.empty() && (listHoveredRaw || m_TreeKeyboardFocus)
+			&& !ctx.IsTextInputActive() && !m_PopupOpenPrev)
+		{
+			size_t index = 0;
+			bool found = false;
+			for (size_t probe = 0; probe < visible.size(); ++probe)
+			{
+				if (visible[probe]->Id == m_SelectedId)
+				{
+					index = probe;
+					found = true;
+					break;
+				}
+			}
+			size_t next = index;
+			if (ctx.WasKeyTriggered(KeyCodes::Down))
+				next = std::min(visible.size() - 1, index + 1);
+			else if (ctx.WasKeyTriggered(KeyCodes::Up))
+				next = index == 0 ? 0 : index - 1;
+			else if (ctx.WasKeyTriggered(KeyCodes::Home))
+				next = 0;
+			else if (ctx.WasKeyTriggered(KeyCodes::End))
+				next = visible.size() - 1;
+			if (next != index || !found)
+				SelectComponent(ctx, *visible[next], "keyboard");
+		}
 
 		const Wui::WuiComponentDesc* selected = nullptr;
 		int rowIndex = 0;
@@ -525,17 +618,18 @@ namespace World
 
 			if (hovered && ctx.Input().MouseClicked[0] && !ctx.IsPointerClickConsumed(0))
 			{
-				m_SelectedId = item->Id;
-				m_ForceState = "default";
-				ResetPropertyValues(item->Id);
-				m_PropScroll = 0.0f;
-				m_LastAction = "selected " + item->Id;
-				ctx.RecordOp("gallery", "select", "Component", item->Id);
+				if (std::getenv("WLD_TRACE_UI"))
+					WLD_CORE_INFO("[workbench] row click {0} at ({1},{2})",
+						item->Id, static_cast<int>(ctx.Input().MousePos.x),
+						static_cast<int>(ctx.Input().MousePos.y));
+				SelectComponent(ctx, *item, "select");
+				m_TreeKeyboardFocus = true;
 			}
 			++rowIndex;
 		}
 		Wui::EndScrollArea(ctx);
 
+		// 选中件被搜索过滤掉 / 首次进入:退回过滤后的第一件(与左树高亮同一口径)。
 		if (selected == nullptr && !visible.empty())
 		{
 			selected = visible.front();
@@ -576,6 +670,10 @@ namespace World
 				m_TreeScroll = std::min(std::max(0.0f, contentHeight - list.H),
 					selectedBottom - list.Y - 4.0f - list.H);
 		}
+		// 列表本身的稳定锚点(探针用它滚动 / 发键盘事件),以及"当前选中件"的只读节点。
+		RegisterWorkbenchNode(Wui::HashId(kTreeListId), "list", list,
+			Wui::Tr("workbench.tree.title", "Components"),
+			selected != nullptr ? selected->Id : std::string(), true, true);
 		RegisterWorkbenchNode(Wui::HashId("wui.workbench.canvas.selected"), "text", list,
 			selected != nullptr ? selected->DisplayName : std::string(),
 			selected != nullptr ? selected->Id : std::string(), true, false);
@@ -583,7 +681,8 @@ namespace World
 	}
 
 	void WidgetGalleryPanel::DrawCanvas(Wui::WuiContext& ctx, const WbLayout& layout,
-		const Wui::WuiTheme& theme, const Wui::WuiComponentDesc* desc, float density, float uiScale)
+		const Wui::WuiTheme& theme, const Wui::WuiComponentDesc* desc, float density, float uiScale,
+		bool overlayStage)
 	{
 		const Wui::WuiRect area = layout.Canvas;
 		Wui::PanelBackground(ctx, area, theme.ContentBg, theme.Radius);
@@ -654,7 +753,44 @@ namespace World
 		Wui::PanelBackground(ctx, { slot.X - 2.0f, slot.Y - 2.0f, slot.W + 4.0f, slot.H + 4.0f },
 			theme.WindowBg, 2.0f);
 
-		if (desc->Showcase != nullptr)
+		m_CanvasSlot = slot;
+		// 非专用舞台:showcase 就在画布位置画。专用舞台的 showcase 由 OnRender 在**内容之后**
+		// 再画(见 DrawCanvasOverlay):顺序很重要 —— 模态打开时会 ConsumePointerClick,
+		// 先画会把本帧落在树/按钮上的点击一起吞掉。
+		if (!overlayStage)
+			DrawCanvasShowcase(ctx, theme, *desc, density, uiScale, false, area);
+
+		RegisterWorkbenchNode(Wui::HashId(kCanvasId), "canvas", slot, desc->DisplayName,
+			desc->Id + "|" + m_ForceState, true, false);
+		const std::string label = desc->DisplayName + "  " + FormatFloat(width) + " x "
+			+ FormatFloat(height);
+		Wui::Label(ctx, { slot.X, slot.Y + slot.H + 4.0f },
+			ClipText(ctx, label, inner.W, 12.0f), theme.TextMuted, 12.0f);
+		RegisterWorkbenchNode(Wui::HashId(kCanvasLabelId), "text",
+			{ slot.X, slot.Y + slot.H + 4.0f, inner.W, 16.0f }, label, std::string(), true, false);
+	}
+
+	// 画布里的 showcase 本体。overlayStage=true:整段画在 overlay 层并被裁剪到画布矩形 ——
+	// 整窗遮罩(模态)因此只落在画布里,不压暗组件树/属性区;它的遮挡区按 overlay 深度登记,
+	// 不会把工作台自己的控件挡掉(见 OnRender 的分层顺序)。
+	void WidgetGalleryPanel::DrawCanvasShowcase(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+		const Wui::WuiComponentDesc& desc, float density, float uiScale, bool overlayStage,
+		const Wui::WuiRect& clipRect)
+	{
+		const Wui::WuiRect slot = m_CanvasSlot;
+		const float scale = std::max(0.5f, uiScale);
+		const size_t overlayBefore = ctx.OverlayCommands().size();
+		if (overlayStage)
+		{
+			ctx.PushOverlay();
+			Wui::WuiDrawCommand clipPush;
+			clipPush.Kind = Wui::WuiDrawKind::ClipPush;
+			clipPush.Rect = clipRect;
+			clipPush.Color = theme.PanelBg;
+			ctx.Commands().push_back(clipPush);
+			ctx.PushClipRect(clipRect);
+		}
+		if (desc.Showcase != nullptr)
 		{
 			Wui::WuiComponentDraw draw;
 			draw.Context = &ctx;
@@ -665,25 +801,30 @@ namespace World
 			draw.UiScale = scale;
 			draw.Density = density;
 			draw.Locale = Wui::GetLanguage();
-			desc->Showcase(draw);
+			desc.Showcase(draw);
 		}
 		else
 		{
-			Wui::Label(ctx, { slot.X + 8.0f, slot.Y + 8.0f }, desc->DisplayName, theme.Text, 14.0f);
+			Wui::Label(ctx, { slot.X + 8.0f, slot.Y + 8.0f }, desc.DisplayName, theme.Text, 14.0f);
 			Wui::Label(ctx, { slot.X + 8.0f, slot.Y + 28.0f },
 				Wui::Tr("workbench.canvas.no_showcase",
 					"Showcase pending (registered by the component owner)"),
 				theme.TextMuted, 12.0f);
 		}
-
-		RegisterWorkbenchNode(Wui::HashId(kCanvasId), "canvas", slot, desc->DisplayName,
-			desc->Id + "|" + m_ForceState, true, false);
-		const std::string label = desc->DisplayName + "  " + FormatFloat(width) + " x "
-			+ FormatFloat(height);
-		Wui::Label(ctx, { slot.X, slot.Y + slot.H + 4.0f },
-			ClipText(ctx, label, inner.W, 12.0f), theme.TextMuted, 12.0f);
-		RegisterWorkbenchNode(Wui::HashId(kCanvasLabelId), "text",
-			{ slot.X, slot.Y + slot.H + 4.0f, inner.W, 16.0f }, label, std::string(), true, false);
+		if (overlayStage)
+		{
+			Wui::WuiDrawCommand clipPop;
+			clipPop.Kind = Wui::WuiDrawKind::ClipPop;
+			ctx.Commands().push_back(clipPop);
+			ctx.PopClipRect();
+			ctx.PopOverlay();
+		}
+		else if (DetectsFullWindowOverlay(ctx, overlayBefore))
+		{
+			// 首次遇到这个组件就往 overlay 层画了整窗矩形(模态遮罩)——记下来,下一帧起改走
+			// 专用舞台,免得它登记的全窗遮挡区把工作台自己也点不动(实测踩过)。
+			m_OverlayStageComponents.insert(desc.Id);
+		}
 	}
 
 	void WidgetGalleryPanel::DrawProperties(Wui::WuiContext& ctx, const WbLayout& layout,
@@ -743,6 +884,8 @@ namespace World
 			{
 				m_ForceState = desc->States[static_cast<size_t>(stateIndex)].Id;
 			}
+			if (ctx.IsPopupOpen(Wui::HashId(kStateComboId)))
+				m_PopupOpenNow = true;   // 状态下拉开着:↑/↓ 归它,组件树不抢键
 			y += rowH + rowGap;
 		}
 
@@ -821,6 +964,8 @@ namespace World
 						SetPropertyValue(desc->Id, prop.Name, chosen);
 						m_LastAction = prop.Name + " = " + chosen;
 					}
+					if (ctx.IsPopupOpen(Wui::HashId(propId.c_str())))
+						m_PopupOpenNow = true;
 					break;
 				}
 				case Wui::WuiComponentProperty::Kind::Text:
@@ -943,6 +1088,7 @@ namespace World
 			<< ", \"w\": " << m_CanvasInner.W << ", \"h\": " << m_CanvasInner.H << "},\n";
 		out << "  \"uiScale\": " << uiScale << ",\n";
 		out << "  \"density\": " << density << ",\n";
+		out << "  \"overlayStage\": " << (m_CanvasOverlayStage ? "true" : "false") << ",\n";
 		out << "  \"locale\": \"" << JsonEscape(Wui::GetLanguage()) << "\",\n";
 		out << "  \"longText\": " << (m_LongText ? "true" : "false") << ",\n";
 		out << "  \"a11yIds\": [";
@@ -1151,29 +1297,79 @@ namespace World
 		const WbLayout layout = ComputeLayout(rect, theme);
 		const float density = m_DensityIndex == 1 ? 0.85f : 1.0f;
 		const float uiScale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+		m_PanelRect = rect;
+		m_PopupOpenNow = false;
 
-		DrawTopBar(ctx, layout, theme);
-		const Wui::WuiComponentDesc* selected = nullptr;
+		// "专用舞台"顺序(覆盖层组件):画布先画,其余内容画到更深的分层 —— 否则模态遮罩登记的
+		// 全窗遮挡区会把工作台自己整块面板的命中打死(实测:选中 modal 之后连 Capture 都点不动,
+		// 逐件遍历从 scrollarea 起全部卡死)。
+		const std::vector<const Wui::WuiComponentDesc*> visible = FilteredComponents();
+		const Wui::WuiComponentDesc* ahead = ResolveSelection(visible);
+		const bool overlayStage = ahead != nullptr && m_OverlayStageComponents.count(ahead->Id) != 0;
+		m_CanvasOverlayStage = overlayStage;
 
-		if (!layout.Stacked)
+		if (overlayStage)
 		{
-			selected = DrawTree(ctx, layout, theme);
-			DrawInfoBar(ctx, layout, theme, selected);
-			DrawCanvas(ctx, layout, theme, selected, density, uiScale);
-			DrawProperties(ctx, layout, theme, selected, density, uiScale);
+			// 画布底(背景/网格/槽位)先画 —— 它在正常命令层,遮罩盖在它上面才是"画布里的模态"。
+			DrawCanvas(ctx, layout, theme, ahead, density, uiScale, true);
+			// 内容层比 showcase 深两层:showcase 里的模态自己在 depth+1 上登记遮挡区,
+			// 内容画在 depth ≥ 该深度才不会被它挡住(见 DrawCanvas 的注释)。
+			ctx.PushOverlay();
+			ctx.PushOverlay();
+			DrawTopBar(ctx, layout, theme);
+			const Wui::WuiComponentDesc* selected = nullptr;
+			if (!layout.Stacked)
+			{
+				selected = DrawTree(ctx, layout, theme);
+				DrawInfoBar(ctx, layout, theme, selected);
+				DrawProperties(ctx, layout, theme, selected, density, uiScale);
+			}
+			else
+			{
+				// 窄窗:树/属性仍然走 body 滚动(画布已单独画在它的位置上)。
+				const float contentHeight = layout.Props.Y + layout.Props.H + 8.0f - layout.Body.Y;
+				Wui::BeginScrollArea(ctx, layout.Body, contentHeight, m_BodyScroll, theme);
+				selected = DrawTree(ctx, layout, theme);
+				DrawProperties(ctx, layout, theme, selected, density, uiScale);
+				Wui::EndScrollArea(ctx);
+				DrawInfoBar(ctx, layout, theme, selected);
+			}
+			DrawActions(ctx, layout, theme, selected, uiScale);
+			ctx.PopOverlay();
+			ctx.PopOverlay();
+			// showcase 最后画(仍在 overlay 层、裁剪到画布矩形):模态打开会 ConsumePointerClick,
+			// 放在内容之后才吞不到本帧落在树/属性/按钮上的点击;裁剪则保证整窗遮罩只盖画布。
+			if (ahead != nullptr)
+				DrawCanvasShowcase(ctx, theme, *ahead, density, uiScale, true, layout.Canvas);
 		}
 		else
 		{
-			// 窄窗:三段纵向排布,整个 body 一起滚动(窗口够小时仍能看到全部区域)。
-			const float contentHeight = layout.Props.Y + layout.Props.H + 8.0f - layout.Body.Y;
-			Wui::BeginScrollArea(ctx, layout.Body, contentHeight, m_BodyScroll, theme);
-			selected = DrawTree(ctx, layout, theme);
-			DrawCanvas(ctx, layout, theme, selected, density, uiScale);
-			DrawProperties(ctx, layout, theme, selected, density, uiScale);
-			Wui::EndScrollArea(ctx);
-			DrawInfoBar(ctx, layout, theme, selected);
+			DrawTopBar(ctx, layout, theme);
+			const Wui::WuiComponentDesc* selected = nullptr;
+
+			if (!layout.Stacked)
+			{
+				selected = DrawTree(ctx, layout, theme);
+				DrawInfoBar(ctx, layout, theme, selected);
+				DrawCanvas(ctx, layout, theme, selected, density, uiScale, false);
+				DrawProperties(ctx, layout, theme, selected, density, uiScale);
+			}
+			else
+			{
+				// 窄窗:三段纵向排布,整个 body 一起滚动(窗口够小时仍能看到全部区域)。
+				const float contentHeight = layout.Props.Y + layout.Props.H + 8.0f - layout.Body.Y;
+				Wui::BeginScrollArea(ctx, layout.Body, contentHeight, m_BodyScroll, theme);
+				selected = DrawTree(ctx, layout, theme);
+				DrawCanvas(ctx, layout, theme, selected, density, uiScale, false);
+				DrawProperties(ctx, layout, theme, selected, density, uiScale);
+				Wui::EndScrollArea(ctx);
+				DrawInfoBar(ctx, layout, theme, selected);
+			}
+
+			DrawActions(ctx, layout, theme, selected, uiScale);
 		}
 
-		DrawActions(ctx, layout, theme, selected, uiScale);
+		// 下一帧左树画在本帧之前,所以"弹层开着 → ↑/↓ 归弹层"只能用上一帧的结果。
+		m_PopupOpenPrev = m_PopupOpenNow;
 	}
 }

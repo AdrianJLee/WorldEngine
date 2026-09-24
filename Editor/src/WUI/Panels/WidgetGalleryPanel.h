@@ -8,6 +8,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -43,14 +44,33 @@ namespace World
 		float m_PropScroll = 0.0f;
 		float m_BodyScroll = 0.0f;            // 窄窗单列时的整体滚动
 		bool m_LongText = false;              // 长文本压力
+		// 键盘导航:指针在列表里、或最近一次交互(点击行 / 滚轮)落在列表里 → ↑/↓ 切换选中。
+		// 指针离开列表后仍保留(键盘优先的操作习惯),在面板别处点击时清掉(见 DrawTree)。
+		bool m_TreeKeyboardFocus = false;
+		// 本帧是否有工作台自己的弹层开着(状态下拉 / 属性枚举下拉 / 语言下拉)。
+		// 弹层开着时 ↑/↓ 归弹层,组件树不抢键 —— 树先画,所以用上一帧的结果(m_PopupOpenPrev)。
+		bool m_PopupOpenNow = false;
+		bool m_PopupOpenPrev = false;
 		int m_DensityIndex = 0;               // 0 = comfortable / 1 = compact
 		int m_UiScaleIndex = 1;               // 0 = 100% / 1 = 125% / 2 = 150%
 		int m_LanguageIndex = 0;              // 0 = en / 1 = zh-CN
 		bool m_ShowGrid = true;
 
+		// ---- 覆盖层组件的"专用舞台"(WUI-P0b-2)----
+		// showcase 若往 overlay 层画了**整窗大小**的矩形(模态遮罩),它就不能和面板控件同层:
+		// 那条遮挡区会盖住整窗,下一帧把工作台自己的树/属性/按钮全部点不动(实测:选中 modal
+		// 之后整块面板失去命中,探针从 scrollarea 起全部报 "selection did not stick")。
+		// 检测到这种组件就记下 id,之后每帧走"专用舞台"顺序:先把画布 + showcase 画在浅层
+		// (遮罩只盖画布),再把其余面板内容画到更深的 overlay 层(盖掉遮罩的其它部分,
+		// 而且不会被它的遮挡区挡住)。检测按"整窗矩形面积"判定,与具体组件名无关。
+		std::set<std::string> m_OverlayStageComponents;
+		Wui::WuiRect m_PanelRect {};          // 本帧面板矩形(清键盘焦点用)
+		bool m_CanvasOverlayStage = false;    // 本帧画布是否走专用舞台(写进捕获元数据)
+
 		// 画布实测矩形(客户区坐标)+ 该帧实际送进 showcase 的属性(写 Capture 元数据用)。
 		Wui::WuiRect m_CanvasRect {};
 		Wui::WuiRect m_CanvasInner {};
+		Wui::WuiRect m_CanvasSlot {};         // 本帧 showcase 的槽位矩形
 		bool m_CanvasValid = false;
 		std::string m_AppliedState = "default";
 		std::vector<std::pair<std::string, std::string>> m_AppliedProperties;
@@ -85,11 +105,23 @@ namespace World
 		void DrawTopBar(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme);
 		void DrawInfoBar(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
 			const Wui::WuiComponentDesc* desc);
+		// 左树过滤(搜索框)后的组件表 —— 树绘制与"当前选中"解析共用同一顺序。
+		std::vector<const Wui::WuiComponentDesc*> FilteredComponents() const;
+		const Wui::WuiComponentDesc* ResolveSelection(
+			const std::vector<const Wui::WuiComponentDesc*>& visible) const;
+		// 切换选中件(鼠标点行 / 键盘 ↑↓ 同一条路径):清强制状态与属性覆盖、页面回到顶部。
+		void SelectComponent(Wui::WuiContext& ctx, const Wui::WuiComponentDesc& desc,
+			const char* how);
 		// 返回本帧选中的登记项(可能来自左树的点击)。
 		const Wui::WuiComponentDesc* DrawTree(Wui::WuiContext& ctx, const WbLayout& layout,
 			const Wui::WuiTheme& theme);
+		// overlayStage = true:画布走"专用舞台"(先画布,其余内容由 OnRender 画到更深一层)。
 		void DrawCanvas(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
-			const Wui::WuiComponentDesc* desc, float density, float uiScale);
+			const Wui::WuiComponentDesc* desc, float density, float uiScale, bool overlayStage);
+		// 画布里的 showcase 本体(专用舞台时被 OnRender 延后到内容之后调用)。
+		void DrawCanvasShowcase(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+			const Wui::WuiComponentDesc& desc, float density, float uiScale, bool overlayStage,
+			const Wui::WuiRect& clipRect);
 		void DrawProperties(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
 			const Wui::WuiComponentDesc* desc, float density, float uiScale);
 		void DrawActions(Wui::WuiContext& ctx, const WbLayout& layout, const Wui::WuiTheme& theme,
