@@ -3,6 +3,13 @@
 // M4-S2 / Slang-B1:材质着色器(`.slang`)的逐行语法高亮 —— 高亮的是 Slang 源,
 // HLSL 语法是它的子集,所以关键字表按这一族语言给。
 //
+// MAT-INTEL2:关键字 / 内建 / 引擎契约符号的事实源挪到 `SlangKeywords.h`(唯一一张表,补全
+// 与高亮共用 —— 旧版两张表漂移:补全只有 11 条关键字)。本文件只留"怎么 token 化":
+//   - 标识符分类(见 ClassifyIdentifier):唯一表 → Keyword/Global;引擎契约字段
+//     (MaterialSurfaceContract 的 X-macro)→ Global;本文件 `//! param` 声明的参数名 → Global;
+//     点号后的成员(`surface.BaseColor` / `input.UV` / `Tint.rgb` / `map.Sample`)→ Global;
+//   - 没被任何规则命中的标识符(局部变量名等)保持默认色 —— 不为了"好看"发明新的引擎 token kind。
+//
 // 与 LuauHighlighter(Engine/src/World/Script/LuauHighlighter.h)同一套口径,便于复用
 // Wui::CodeEditor 的内核(行号、选区、滚动、诊断行、Ctrl+S 全在核心里,这里只提供 token):
 //   - 逐行接口 HighlightLine:行首状态进、行尾状态出 —— 跨行的 /* */ 块注释靠它在行间延续
@@ -12,12 +19,15 @@
 //   - **只在编辑器侧**:引擎内核不依赖它,所以是 header-only(inline),不新增 Editor 源文件,
 //     不需要 CMake reconfigure。
 
+#include "SlangKeywords.h"
+
 #include "World/WUI/WuiCodeEditor.h"
 #include "World/WUI/WuiTextBuffer.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -37,13 +47,40 @@ namespace World
 		bool operator!=(const SlangHighlightState& other) const { return !(*this == other); }
 	};
 
+	// 文件级符号(本文件 `//! param` 声明的参数名):高亮与补全读同一份扫描结果
+	// (SlangAnnotations::CollectDeclaredNames)。指针为空 = 只用内置表 + 契约字段。
+	struct SlangHighlightSymbols
+	{
+		const std::vector<std::string>* FileNames = nullptr;
+	};
+
+	// token kind 的稳定名字:探针 dump(面板的 WLD_SLANG_TOKEN_DUMP / scratch 的独立 dumper)
+	// 与日志共用一份,避免两处 switch 漂移。
+	namespace SlangTokens
+	{
+		inline const char* KindName(Wui::WuiCodeTokenKind kind)
+		{
+			switch (kind)
+			{
+				case Wui::WuiCodeTokenKind::Default: return "default";
+				case Wui::WuiCodeTokenKind::Keyword: return "keyword";
+				case Wui::WuiCodeTokenKind::String: return "string";
+				case Wui::WuiCodeTokenKind::Comment: return "comment";
+				case Wui::WuiCodeTokenKind::Number: return "number";
+				case Wui::WuiCodeTokenKind::Global: return "global";
+				case Wui::WuiCodeTokenKind::Operator: return "operator";
+			}
+			return "?";
+		}
+	}
+
 	class SlangHighlighter
 	{
 	public:
 		// 高亮一行:state 为行首状态,返回后为该行行尾状态(交给下一行)。
 		// line 不含换行符(允许带行尾 '\r',视为空白)。
 		static void HighlightLine(std::string_view line, SlangHighlightState& state,
-			std::vector<Wui::WuiCodeToken>& out)
+			std::vector<Wui::WuiCodeToken>& out, const SlangHighlightSymbols* symbols = nullptr)
 		{
 			out.clear();
 			const size_t size = line.size();
@@ -184,10 +221,9 @@ namespace World
 					while (end < size && IsIdentChar(line[end]))
 						++end;
 					const std::string_view word = line.substr(index, end - index);
-					if (IsKeyword(word))
-						emit(index, end, Wui::WuiCodeTokenKind::Keyword);
-					else if (IsIntrinsic(word))
-						emit(index, end, Wui::WuiCodeTokenKind::Global);
+					Wui::WuiCodeTokenKind kind = Wui::WuiCodeTokenKind::Default;
+					if (ClassifyIdentifier(word, line, index, symbols, kind))
+						emit(index, end, kind);
 					index = end;
 					continue;
 				}
@@ -221,77 +257,124 @@ namespace World
 					return false;
 			}
 		}
-		// 关键字 + 内建类型/结构名(Slang 与 HLSL 共享的类型/关键字同一组着色)。
-		// Slang-B1:补上 Slang 源里会真的出现的名字 —— 组合采样器(Sampler2D 等,
-		// 严格子集里贴图参数就是组合采样器)与 Slang 的模块/泛型关键字。
-		static bool IsKeyword(std::string_view word)
+
+		// 标识符分类(着色顺序无关,先命中的优先):
+		//   ① 唯一符号表(SlangKeywords.h):关键字/类型 → Keyword;引擎类型/内建/引擎函数 → Global;
+		//   ② 引擎契约字段名(MaterialSurfaceContract 的 X-macro)→ Global;
+		//   ③ 本文件 `//! param` 声明的参数名 → Global;
+		//   ④ 点号后的成员访问 → Global(点号字段:`surface.BaseColor` / `input.UV` / `Tint.rgb`);
+		//   ⑤ 其余标识符不着色(保持默认色)。
+		static bool ClassifyIdentifier(std::string_view word, std::string_view line, size_t start,
+			const SlangHighlightSymbols* symbols, Wui::WuiCodeTokenKind& out)
 		{
-			static constexpr std::string_view kWords[] = {
-				"bool", "int", "uint", "dword", "half", "float", "double",
-				"int2", "int3", "int4", "uint2", "uint3", "uint4",
-				"float2", "float3", "float4", "float2x2", "float3x3", "float4x4",
-				"min16float", "matrix", "void", "struct", "cbuffer", "tbuffer", "register",
-				"Texture1D", "Texture2D", "Texture3D", "TextureCube", "SamplerState",
-				"SamplerComparisonState", "RWTexture2D", "ByteAddressBuffer",
-				"Texture2DArray", "TextureCubeArray", "Sampler1D", "Sampler2D", "Sampler3D",
-				"SamplerCube", "Sampler2DArray", "SamplerCubeArray",
-				"static", "const", "inline", "uniform", "in", "out", "inout", "volatile",
-				"true", "false", "if", "else", "for", "while", "do", "switch", "case",
-				"default", "break", "continue", "return", "discard", "namespace", "typedef",
-				"nointerpolation", "noperspective", "linear", "centroid", "sample",
-				"packoffset", "row_major", "column_major", "groupshared", "snorm", "unorm",
-				// Slang 语言层(模块/泛型/接口)—— 高亮它们让"这是 Slang 源"读得出来。
-				"import", "module", "interface", "associatedtype", "enum",
-				"where", "each", "expand", "func",
-			};
-			for (const std::string_view candidate : kWords)
-				if (candidate == word)
-					return true;
+			if (SlangSymbols::HighlightKind(word, out))
+				return true;
+			if (SlangSymbols::IsContractField(word))
+			{
+				out = Wui::WuiCodeTokenKind::Global;
+				return true;
+			}
+			if (symbols != nullptr && symbols->FileNames != nullptr)
+			{
+				for (const std::string& name : *symbols->FileNames)
+				{
+					if (name == word)
+					{
+						out = Wui::WuiCodeTokenKind::Global;
+						return true;
+					}
+				}
+			}
+			if (IsMemberAccess(line, start))
+			{
+				out = Wui::WuiCodeTokenKind::Global;
+				return true;
+			}
 			return false;
 		}
-		// 内建函数(着色与类型区分开,与脚本编辑器对全局符号的处理同口径)。
-		static bool IsIntrinsic(std::string_view word)
+
+		// 标识符前面(跳过空格/Tab)是不是 '.'。
+		static bool IsMemberAccess(std::string_view line, size_t start)
 		{
-			static constexpr std::string_view kWords[] = {
-				"abs", "acos", "all", "any", "asin", "atan", "atan2", "ceil", "clamp",
-				"cos", "cosh", "cross", "ddx", "ddy", "ddx_coarse", "ddy_coarse",
-				"degrees", "determinant", "distance", "dot", "exp", "exp2", "faceforward",
-				"floor", "fmod", "frac", "length", "lerp", "log", "log2", "mad", "max",
-				"min", "modf", "mul", "normalize", "pow", "radians", "reflect", "refract",
-				"round", "rsqrt", "saturate", "sign", "sin", "sincos", "sinh", "smoothstep",
-				"sqrt", "step", "tan", "tanh", "transpose", "trunc", "Sample", "SampleLevel",
-				"SampleCmp", "GetDimensions", "WeLinearizeColor",
-			};
-			for (const std::string_view candidate : kWords)
-				if (candidate == word)
-					return true;
-			return false;
+			size_t probe = start;
+			while (probe > 0 && (line[probe - 1] == ' ' || line[probe - 1] == '\t'))
+				--probe;
+			return probe > 0 && line[probe - 1] == '.';
 		}
 	};
+
+	// `//!` 注解行的逐行 token(偏移平移到整行):前导空白 + `//!`(含其后的一个空格)是 Comment,
+	// 注解体按 Slang 语法着色 —— 于是 `param` / 类型 / `group(...)` / 参数名各有颜色,
+	// 而 `label("…")` 这类字符串仍是 String 色。
+	//
+	// 为什么必须分开着色:WuiCodeEditor 只在"光标不在 String/Comment token 里"时查询补全
+	// provider(见 WuiCodeEditor.cpp 的 caretInStringOrComment),注解体若整行 Comment,
+	// `//! param …` 上永远弹不出补全。
+	namespace SlangAnnotations
+	{
+		inline void HighlightLineWithAnnotations(std::string_view line, SlangHighlightState& state,
+			std::vector<Wui::WuiCodeToken>& out, const SlangHighlightSymbols* symbols = nullptr)
+		{
+			out.clear();
+			if (!IsAnnotationLine(line))
+			{
+				SlangHighlighter::HighlightLine(line, state, out, symbols);
+				return;
+			}
+			const std::size_t body = BodyStart(line);
+			if (body > 0)
+			{
+				out.push_back(Wui::WuiCodeToken { 0, static_cast<uint32_t>(body),
+					Wui::WuiCodeTokenKind::Comment });
+			}
+			// 注解行不可能接在块注释里(行首就是 `//!`),所以注解体从零状态起。
+			SlangHighlightState bodyState;
+			std::vector<Wui::WuiCodeToken> bodyTokens;
+			SlangHighlighter::HighlightLine(line.substr(body), bodyState, bodyTokens, symbols);
+			for (const Wui::WuiCodeToken& token : bodyTokens)
+			{
+				out.push_back(Wui::WuiCodeToken {
+					token.StartByte + static_cast<uint32_t>(body),
+					token.EndByte + static_cast<uint32_t>(body), token.Kind });
+			}
+			state = bodyState;
+		}
+	}
 
 	// 按行 token 缓存(与 LuauHighlightCache 同一口径):只有"内容或行首延续状态变了"的行
 	// 才重新 token 化;Find 用行文本指针 + 长度定位,编辑导致缓冲区重分配时自然失配。
 	class SlangHighlightCache
 	{
 	public:
-		void Update(const Wui::WuiTextBuffer& buffer)
+		// fileNames = 本文件 `//! param` 声明的名字(见 SlangAnnotations::CollectDeclaredNames):
+		// 参数名参与着色,所以名字表变了也要重算(表很小,直接按值比较)。
+		void Update(const Wui::WuiTextBuffer& buffer, const std::vector<std::string>& fileNames)
 		{
-			if (m_Revision == buffer.Revision() && m_LineCount == buffer.LineCount())
+			if (m_Revision == buffer.Revision() && m_LineCount == buffer.LineCount()
+				&& m_FileNames == fileNames)
 				return;
 			m_Revision = buffer.Revision();
 			m_LineCount = buffer.LineCount();
+			m_FileNames = fileNames;
 			m_Lines.clear();
 			m_ByPointer.clear();
 			m_Lines.reserve(static_cast<size_t>(std::max(0, m_LineCount)));
+			SlangHighlightSymbols symbols;
+			symbols.FileNames = &m_FileNames;
 			SlangHighlightState state;
 			for (int line = 0; line < m_LineCount; ++line)
 			{
 				const std::pair<size_t, size_t> range = buffer.LineRange(line);
 				const char* text = buffer.Text().data() + range.first;
 				const size_t size = range.second - range.first;
+				const std::string_view content(text, size);
 				Entry entry;
 				entry.Start = state;
-				SlangHighlighter::HighlightLine(std::string_view(text, size), state, entry.Tokens);
+				// 与面板回调同一条口径:`//!` 注解行交给 HighlightLineWithAnnotations。
+				if (SlangAnnotations::IsAnnotationLine(content))
+					SlangAnnotations::HighlightLineWithAnnotations(content, state, entry.Tokens, &symbols);
+				else
+					SlangHighlighter::HighlightLine(content, state, entry.Tokens, &symbols);
 				entry.End = state;
 				entry.Text = text;
 				entry.TextSize = size;
@@ -306,6 +389,7 @@ namespace World
 			m_ByPointer.clear();
 			m_Revision = ~0ull;
 			m_LineCount = -1;
+			m_FileNames.clear();
 		}
 
 		const std::vector<Wui::WuiCodeToken>& Tokens(int line) const
@@ -341,6 +425,7 @@ namespace World
 
 		std::vector<Entry> m_Lines;
 		std::unordered_map<const char*, size_t> m_ByPointer;
+		std::vector<std::string> m_FileNames;
 		uint64_t m_Revision = ~0ull;
 		int m_LineCount = -1;
 	};

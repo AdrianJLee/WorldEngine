@@ -2,6 +2,10 @@
 
 // MAT-INTEL(用户 2026-09-24:「接下来做材质编辑器代码的智能提示,格式化以及完善知识库和资料」):
 // 材质着色器(`.slang`)的补全 + 悬停文档表 —— 编辑器侧 header-only(与 SlangHighlight.h 同一口径)。
+// MAT-INTEL2(用户 2026-09-24:「interface 这种关键字没有提示」):关键字 / 内建 / 引擎契约符号与
+// 高亮一样只从 `SlangKeywords.h` 的**唯一一张表**取 —— 旧版补全自己只有 11 条关键字,而高亮认得
+// `interface`/`enum`/`where`…,于是"高亮得出、补全不出来"。本文件只留"选哪些候选 / 怎么过滤排序 /
+// 悬停给什么文档",词表不再复制。
 //
 // 复用 Wui::CodeEditor 已经具备的补全浮层 / Hover 基础设施(见 WuiCodeEditor.h 的
 // `Completion` / `Hover` / `CompletionIdPrefix`):候选与文档用引擎冻结结构 `LuauCompletionItem`
@@ -11,7 +15,8 @@
 //   - `MaterialInputs` / `Surface` 的字段名、类型、语义、默认表达式 =
 //     `World/Renderer/MaterialSurfaceContract.hlsli` 的 X-macro(MaterialEditorPanel.h 已经
 //     通过 World/Renderer/MaterialSurface.h 看到它;这里直接读 `MaterialSurfaceContract::*Fields`);
-//   - 注解语法 = `docs/dev/shader-contract.md` §6;引擎函数名同该文档 §2/§4 与包装模板;
+//   - 关键字 / 内建 / 引擎类型与函数 / 注解词 = `SlangKeywords.h`(高亮读同一张表);
+//   - 注解语法 = `docs/dev/shader-contract.md` §6,解析实现在 `SlangKeywords.h` 的 SlangAnnotations;
 //   - 本文件声明的 `//! param` 名字来自当前缓冲(SetFileSource)。
 //
 // 查询口径(与 LuauCompletionIndex 一致,让两个编辑器的候选行为对得上):
@@ -28,7 +33,6 @@
 #include "World/WUI/WuiCodeEditor.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -38,108 +42,32 @@
 
 namespace World
 {
-	// ---- `//!` 注解行(补全闸门的关键:见 HighlightLineWithAnnotations 的说明)----
-	namespace SlangAnnotations
-	{
-		inline bool IsSpace(char c)
-		{
-			return c == ' ' || c == '\t' || c == '\r';
-		}
-
-		// 行首(允许前置空白)是不是 `//!` 注解行。
-		inline bool IsAnnotationLine(std::string_view line)
-		{
-			std::size_t index = 0;
-			while (index < line.size() && IsSpace(line[index]))
-				++index;
-			if (line.size() - index < 3)
-				return false;
-			return line[index] == '/' && line[index + 1] == '/' && line[index + 2] == '!';
-		}
-
-		// 注解体起点 = 前导空白 + `//!` + 一个可选空格;不是注解行返回 0。
-		inline std::size_t BodyStart(std::string_view line)
-		{
-			if (!IsAnnotationLine(line))
-				return 0;
-			std::size_t index = 0;
-			while (index < line.size() && IsSpace(line[index]))
-				++index;
-			index += 3;
-			if (index < line.size() && line[index] == ' ')
-				++index;
-			return index;
-		}
-
-		// 逐行 token(注解行专用):前导空白 + `//!`(含其后的一个空格)是 Comment,注解体按
-		// Slang 语法着色(偏移平移到整行),行尾状态交给下一行。
-		//
-		// 为什么必须分开着色:WuiCodeEditor 只在"光标不在 String/Comment token 里"时查询补全
-		// provider(见 WuiCodeEditor.cpp 的 caretInStringOrComment)。注解体若整行 Comment,
-		// `//! param …` 上永远弹不出补全;分开后注解体里的光标落在普通 token/空隙上,补全恢复,
-		// 而 `label("…")` 这类字符串仍是 String 色 —— 字符串里照旧不弹(与代码区一致)。
-		inline void HighlightLineWithAnnotations(std::string_view line, SlangHighlightState& state,
-			std::vector<Wui::WuiCodeToken>& out)
-		{
-			out.clear();
-			if (!IsAnnotationLine(line))
-			{
-				SlangHighlighter::HighlightLine(line, state, out);
-				return;
-			}
-			const std::size_t body = BodyStart(line);
-			if (body > 0)
-			{
-				out.push_back(Wui::WuiCodeToken { 0, static_cast<uint32_t>(body),
-					Wui::WuiCodeTokenKind::Comment });
-			}
-			// 注解行不可能接在块注释里(行首就是 `//!`),所以注解体从零状态起。
-			SlangHighlightState bodyState;
-			std::vector<Wui::WuiCodeToken> bodyTokens;
-			SlangHighlighter::HighlightLine(line.substr(body), bodyState, bodyTokens);
-			for (const Wui::WuiCodeToken& token : bodyTokens)
-			{
-				out.push_back(Wui::WuiCodeToken {
-					token.StartByte + static_cast<uint32_t>(body),
-					token.EndByte + static_cast<uint32_t>(body), token.Kind });
-			}
-			state = bodyState;
-		}
-	}
-
 	class SlangCompletionIndex
 	{
 	public:
-		// 清空文件符号(字段/引擎函数/类型/内建/关键字/注解是内置表,不在这里)。
-		void Clear() { m_FileParams.clear(); }
+		// 清空文件符号(词表在 SlangKeywords.h,不在这里)。
+		void Clear()
+		{
+			m_FileParams.clear();
+			m_DeclaredNames.clear();
+		}
 
-		// 当前文件源码:扫描 `//! param <type> <name> = …` 的名字与类型,作为顶层候选与悬停文档。
+		// 当前文件源码:扫描 `//! param <type> <name> = …`(解析在 SlangKeywords.h 的
+		// SlangAnnotations::ParseParamDecl —— 与高亮读同一个实现),名字同时给高亮着色用。
 		// 容错:少了 `//!` 后的空格(`//!param`)也认;缺名字的行跳过。重复调用替换上一次结果。
 		void SetFileSource(std::string_view fileText)
 		{
-			m_FileParams.clear();
-			std::size_t start = 0;
-			for (;;)
-			{
-				const std::size_t end = fileText.find('\n', start);
-				const std::size_t lineEnd = end == std::string_view::npos ? fileText.size() : end;
-				std::string_view line = fileText.substr(start, lineEnd - start);
-				if (!line.empty() && line.back() == '\r')
-					line.remove_suffix(1);
-				FileParam param;
-				if (ParseParamAnnotation(line, param))
-					m_FileParams.push_back(std::move(param));
-				if (end == std::string_view::npos)
-					break;
-				start = end + 1;
-			}
+			SlangAnnotations::ScanParamDecls(fileText, m_FileParams);
+			SlangAnnotations::CollectDeclaredNames(fileText, m_DeclaredNames);
 		}
 
-		// 符号总数 = 内置表 + 文件参数(诊断/自检用,口径与 LuauCompletionIndex 同义)。
+		// 本文件 `//! param` 声明的参数名(高亮把这些名字着成 Global 色;已去重)。
+		const std::vector<std::string>& DeclaredNames() const { return m_DeclaredNames; }
+
+		// 符号总数 = 词表 + 契约字段 + 文件参数(诊断/自检用,口径与 LuauCompletionIndex 同义)。
 		std::size_t SymbolCount() const
 		{
-			return MaterialInputCount() + SurfaceCount() + EngineHelperCount() + TypeCount()
-				+ BuiltinCount() + KeywordCount() + AnnotationCount() + m_FileParams.size();
+			return SlangSymbols::Count() + MaterialInputCount() + SurfaceCount() + m_FileParams.size();
 		}
 
 		// 按光标前片段补全。maxItems = 0 表示不截断。
@@ -153,7 +81,7 @@ namespace World
 			if (SlangAnnotations::IsAnnotationLine(linePrefix))
 			{
 				prefix = TrailingIdentifier(linePrefix);
-				AppendTable(candidates, AnnotationTable(), AnnotationCount());
+				AppendSymbols(candidates, /*annotationContext=*/true);
 			}
 			else
 			{
@@ -178,7 +106,12 @@ namespace World
 			if (word.empty())
 				return false;
 			if (SlangAnnotations::IsAnnotationLine(linePrefix))
-				return DescribeTable(AnnotationTable(), AnnotationCount(), word, out);
+			{
+				// 注解行:先查注解词表(param / 类型 / 属性 / [min,max]),再退化到语言符号。
+				if (DescribeSymbol(word, /*annotationContext=*/true, out))
+					return true;
+				return DescribeSymbol(word, /*annotationContext=*/false, out);
+			}
 			// 接收者判定与 Query 同一条解析:把 word 接回 linePrefix 再解析上下文。
 			std::string receiver;
 			char separator = '\0';
@@ -194,74 +127,15 @@ namespace World
 			}
 			if (DescribeFileParam(word, out))
 				return true;
-			if (DescribeTable(EngineHelperTable(), EngineHelperCount(), word, out))
-				return true;
-			if (DescribeTable(TypeTable(), TypeCount(), word, out))
-				return true;
-			if (DescribeTable(BuiltinTable(), BuiltinCount(), word, out))
-				return true;
-			return DescribeTable(KeywordTable(), KeywordCount(), word, out);
+			// 语言关键字 / 类型 / 引擎类型与函数 / 内建 —— 同一张表(高亮读的就是它)。
+			return DescribeSymbol(word, /*annotationContext=*/false, out);
 		}
 
 	private:
-		// 一条内置候选(Name/Type/Doc 都是静态字面量,生命周期 = 程序)。
-		struct Entry
-		{
-			std::string_view Name;
-			std::string_view Type;
-			std::string_view Doc;
-			LuauCompletionItem::KindType Kind;
-		};
-
-		struct FileParam
-		{
-			std::string Name;
-			std::string Type;
-			std::string Default;
-		};
+		// 词表条目 = SlangKeywords.h 的唯一表(高亮读同一份)。
+		using Symbol = SlangSymbols::Symbol;
 
 		// ---- 过滤 / 排序 / 截断 ----
-		static char LowerAscii(char c)
-		{
-			return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-		}
-
-		static bool StartsWithIgnoreCase(std::string_view text, std::string_view prefix)
-		{
-			if (prefix.size() > text.size())
-				return false;
-			for (std::size_t i = 0; i < prefix.size(); ++i)
-				if (LowerAscii(text[i]) != LowerAscii(prefix[i]))
-					return false;
-			return true;
-		}
-
-		static bool ContainsIgnoreCase(std::string_view text, std::string_view needle)
-		{
-			if (needle.empty())
-				return true;
-			if (needle.size() > text.size())
-				return false;
-			for (std::size_t start = 0; start + needle.size() <= text.size(); ++start)
-				if (StartsWithIgnoreCase(text.substr(start), needle))
-					return true;
-			return false;
-		}
-
-		// 大小写不敏感的名字比较(同档内的排序口径;严格弱序)。
-		static bool NameLess(std::string_view a, std::string_view b)
-		{
-			const std::size_t shared = std::min(a.size(), b.size());
-			for (std::size_t i = 0; i < shared; ++i)
-			{
-				const char left = LowerAscii(a[i]);
-				const char right = LowerAscii(b[i]);
-				if (left != right)
-					return left < right;
-			}
-			return a.size() < b.size();
-		}
-
 		static int KindRank(LuauCompletionItem::KindType kind)
 		{
 			switch (kind)
@@ -281,7 +155,7 @@ namespace World
 				return;
 			std::vector<LuauCompletionItem> starts;
 			for (const LuauCompletionItem& item : items)
-				if (StartsWithIgnoreCase(item.Name, prefix))
+				if (SlangText::StartsWithIgnoreCase(item.Name, prefix))
 					starts.push_back(item);
 			if (!starts.empty())
 			{
@@ -290,7 +164,7 @@ namespace World
 			}
 			std::vector<LuauCompletionItem> contains;
 			for (const LuauCompletionItem& item : items)
-				if (ContainsIgnoreCase(item.Name, prefix))
+				if (SlangText::ContainsIgnoreCase(item.Name, prefix))
 					contains.push_back(item);
 			items.swap(contains);
 		}
@@ -303,7 +177,7 @@ namespace World
 				const int rankB = KindRank(b.Kind);
 				if (rankA != rankB)
 					return rankA < rankB;
-				return NameLess(a.Name, b.Name);
+				return SlangText::NameLess(a.Name, b.Name);
 			});
 			if (maxItems > 0 && items.size() > maxItems)
 				items.resize(maxItems);
@@ -327,33 +201,58 @@ namespace World
 			return linePrefix.substr(start, end - start);
 		}
 
-		static LuauCompletionItem MakeItem(const Entry& entry)
+		// 词表条目 → 候选(注解属性插入 `group("")` 这类形态,其余用名字本身)。
+		static LuauCompletionItem MakeSymbolItem(const Symbol& symbol)
 		{
 			LuauCompletionItem item;
-			item.Name.assign(entry.Name);
-			item.Type.assign(entry.Type);
-			item.Doc.assign(entry.Doc);
-			item.Kind = entry.Kind;
+			item.Name.assign(symbol.Insert.empty() ? symbol.Name : symbol.Insert);
+			item.Type.assign(symbol.Category);
+			item.Doc.assign(symbol.Doc);
+			item.Kind = KindFor(symbol.Kind);
 			return item;
 		}
 
-		static void AppendTable(std::vector<LuauCompletionItem>& out, const Entry* table, std::size_t count)
+		// 词表分类 → 补全 Kind(排序档位由它决定:Field → Method → Global → Keyword)。
+		static LuauCompletionItem::KindType KindFor(SlangSymbols::Class kind)
 		{
-			for (std::size_t i = 0; i < count; ++i)
-				out.push_back(MakeItem(table[i]));
+			switch (kind)
+			{
+				case SlangSymbols::Class::Keyword:
+				case SlangSymbols::Class::Type:
+				case SlangSymbols::Class::EngineType:
+				case SlangSymbols::Class::AnnotationType:
+					return LuauCompletionItem::KindType::Keyword;
+				case SlangSymbols::Class::AnnotationKey:
+				case SlangSymbols::Class::AnnotationSyntax:
+					return LuauCompletionItem::KindType::Field;
+				default: // Intrinsic / EngineFunction / AnnotationAttr
+					return LuauCompletionItem::KindType::Method;
+			}
 		}
 
-		static bool DescribeTable(const Entry* table, std::size_t count, std::string_view word,
-			LuauCompletionItem& out)
+		// 这个词在这一上下文里算不算候选(高亮不看上下文,补全要看:注解词不进代码候选池)。
+		static bool SymbolInContext(const Symbol& symbol, bool annotationContext)
 		{
-			for (std::size_t i = 0; i < count; ++i)
-			{
-				if (table[i].Name != word)
-					continue;
-				out = MakeItem(table[i]);
+			if (symbol.Where == SlangSymbols::Context::Both)
 				return true;
-			}
-			return false;
+			return annotationContext ? symbol.Where == SlangSymbols::Context::Annotation
+				: symbol.Where == SlangSymbols::Context::Code;
+		}
+
+		static void AppendSymbols(std::vector<LuauCompletionItem>& out, bool annotationContext)
+		{
+			for (std::size_t i = 0; i < SlangSymbols::Count(); ++i)
+				if (SymbolInContext(SlangSymbols::kSymbols[i], annotationContext))
+					out.push_back(MakeSymbolItem(SlangSymbols::kSymbols[i]));
+		}
+
+		static bool DescribeSymbol(std::string_view word, bool annotationContext, LuauCompletionItem& out)
+		{
+			const Symbol* symbol = SlangSymbols::Find(word);
+			if (symbol == nullptr || !SymbolInContext(*symbol, annotationContext))
+				return false;
+			out = MakeSymbolItem(*symbol);
+			return true;
 		}
 
 		static bool DescribeItems(const std::vector<LuauCompletionItem>& items, std::string_view word,
@@ -371,7 +270,7 @@ namespace World
 
 		bool DescribeFileParam(std::string_view word, LuauCompletionItem& out) const
 		{
-			for (const FileParam& param : m_FileParams)
+			for (const SlangAnnotations::ParamDecl& param : m_FileParams)
 			{
 				if (param.Name != word)
 					continue;
@@ -381,7 +280,7 @@ namespace World
 			return false;
 		}
 
-		static LuauCompletionItem MakeFileParamItem(const FileParam& param)
+		static LuauCompletionItem MakeFileParamItem(const SlangAnnotations::ParamDecl& param)
 		{
 			LuauCompletionItem item;
 			item.Name = param.Name;
@@ -392,235 +291,11 @@ namespace World
 			return item;
 		}
 
-		// `//! param <type> <name> = <default> …` → 名字 / 类型 / 默认值(容错:缺空格也认)。
-		// 默认值取到 `[` 或 group(/label(/unit( 之前的文本(注解里这几项互不嵌套)。
-		static bool ParseParamAnnotation(std::string_view line, FileParam& out)
-		{
-			if (!SlangAnnotations::IsAnnotationLine(line))
-				return false;
-			const std::string_view body = line.substr(SlangAnnotations::BodyStart(line));
-			if (body.size() < 5 || !StartsWithIgnoreCase(body, "param"))
-				return false;
-			std::size_t index = 5;
-			auto skipSpace = [&]()
-			{
-				while (index < body.size() && (body[index] == ' ' || body[index] == '\t'))
-					++index;
-			};
-			auto readWord = [&]() -> std::string_view
-			{
-				const std::size_t start = index;
-				while (index < body.size())
-				{
-					const char c = body[index];
-					const bool ident = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-						|| (c >= '0' && c <= '9') || c == '_';
-					if (!ident)
-						break;
-					++index;
-				}
-				return body.substr(start, index - start);
-			};
-			skipSpace();
-			const std::string_view type = readWord();
-			skipSpace();
-			const std::string_view name = readWord();
-			if (type.empty() || name.empty())
-				return false;
-			out.Type.assign(type);
-			out.Name.assign(name);
-			out.Default.clear();
-			skipSpace();
-			if (index >= body.size() || body[index] != '=')
-				return true;
-			++index;
-			while (index < body.size() && (body[index] == ' ' || body[index] == '\t'))
-				++index;
-			std::size_t end = body.size();
-			for (std::size_t probe = index; probe < body.size(); ++probe)
-			{
-				const bool attribute = body[probe] == '['
-					|| (body[probe] == ' ' && (StartsWithIgnoreCase(body.substr(probe + 1), "group(")
-						|| StartsWithIgnoreCase(body.substr(probe + 1), "label(")
-						|| StartsWithIgnoreCase(body.substr(probe + 1), "unit(")));
-				if (attribute)
-				{
-					end = probe;
-					break;
-				}
-			}
-			while (end > index && (body[end - 1] == ' ' || body[end - 1] == '\t'))
-				--end;
-			out.Default.assign(body.substr(index, end - index));
-			return true;
-		}
-
-		// ---- 内置表 ----
-		// 引擎包装层提供的函数(名字与 docs/dev/shader-contract.md §2/§4、包装模板一致)。
-		static const Entry* EngineHelperTable()
-		{
-			static const Entry kTable[] = {
-				{ "MakeDefaultSurface", "Surface",
-					"Engine default surface. Take it first, then set only the fields this material needs.",
-					LuauCompletionItem::KindType::Method },
-				{ "WeLinearizeColor", "float3(float3)",
-					"Convert an sRGB colour to linear RGB. Surface colours are linear; display encoding is handled by the engine.",
-					LuauCompletionItem::KindType::Method },
-				{ "WeDefaultNormal", "float3",
-					"Default tangent-space normal (0,0,1) — keeps the normal the engine sampled.",
-					LuauCompletionItem::KindType::Method },
-				{ "WeIdentityMatrix", "float4x4",
-					"Identity matrix helper from the wrapper (skinning fallback).",
-					LuauCompletionItem::KindType::Method },
-				{ "Evaluate", "Surface(MaterialInputs)",
-					"The entry point the engine wraps. Signature is fixed: Surface Evaluate(MaterialInputs input).",
-					LuauCompletionItem::KindType::Method },
-			};
-			return kTable;
-		}
-		static constexpr std::size_t EngineHelperCount() { return 5; }
-
-		// Slang 标量/向量类型(严格子集里会真的用到的那些;与 SlangHighlighter 的关键字表同源)。
-		static const Entry* TypeTable()
-		{
-			static const Entry kTable[] = {
-				{ "float", "scalar", "32-bit float scalar. Slang does not convert widths implicitly.",
-					LuauCompletionItem::KindType::Keyword },
-				{ "float2", "vector", "2-component float vector. Construct explicitly: float2(a, b).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "float3", "vector", "3-component float vector. Truncate with .xyz/.rgb — implicit width conversion is an error.",
-					LuauCompletionItem::KindType::Keyword },
-				{ "float4", "vector", "4-component float vector (colour literals are usually float4: r, g, b, a).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "float3x3", "matrix", "3x3 float matrix.", LuauCompletionItem::KindType::Keyword },
-				{ "float4x4", "matrix", "4x4 float matrix (skin/bone transforms).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "half", "scalar", "16-bit float scalar (no implicit conversions).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "double", "scalar", "64-bit float scalar (no implicit narrowing to float).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "int", "scalar", "32-bit signed integer scalar.", LuauCompletionItem::KindType::Keyword },
-				{ "uint", "scalar", "32-bit unsigned integer scalar.", LuauCompletionItem::KindType::Keyword },
-				{ "bool", "scalar", "Boolean scalar (true / false).", LuauCompletionItem::KindType::Keyword },
-				{ "MaterialInputs", "struct",
-					"Per-pixel inputs handed to Evaluate: input.UV / input.WorldPosition / input.WorldNormal / input.WorldTangent / input.WorldBitangent (contract §2).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "Surface", "struct",
-					"What Evaluate returns: surface.BaseColor / Metallic / Roughness / Emissive / Normal / Opacity / AmbientOcclusion (contract §2).",
-					LuauCompletionItem::KindType::Keyword },
-			};
-			return kTable;
-		}
-		static constexpr std::size_t TypeCount() { return 13; }
-
-		// Slang 内建函数(与 SlangHighlight.h 的 IsIntrinsic 同一族;Type 是参数占位,插入时自动补 `()`)。
-		static const Entry* BuiltinTable()
-		{
-			static const Entry kTable[] = {
-				{ "abs", "x", "Absolute value.", LuauCompletionItem::KindType::Method },
-				{ "acos", "x", "Arc cosine (radians).", LuauCompletionItem::KindType::Method },
-				{ "asin", "x", "Arc sine (radians).", LuauCompletionItem::KindType::Method },
-				{ "atan", "x", "Arc tangent (radians).", LuauCompletionItem::KindType::Method },
-				{ "atan2", "y, x", "Four-quadrant arc tangent (radians).", LuauCompletionItem::KindType::Method },
-				{ "ceil", "x", "Round up to the nearest integer value.", LuauCompletionItem::KindType::Method },
-				{ "clamp", "x, min, max", "Clamp x into [min, max].", LuauCompletionItem::KindType::Method },
-				{ "cos", "x", "Cosine (radians).", LuauCompletionItem::KindType::Method },
-				{ "cross", "a, b", "Cross product of two float3 vectors.", LuauCompletionItem::KindType::Method },
-				{ "degrees", "x", "Radians to degrees.", LuauCompletionItem::KindType::Method },
-				{ "distance", "a, b", "Distance between two points.", LuauCompletionItem::KindType::Method },
-				{ "dot", "a, b", "Dot product.", LuauCompletionItem::KindType::Method },
-				{ "exp", "x", "e^x.", LuauCompletionItem::KindType::Method },
-				{ "exp2", "x", "2^x.", LuauCompletionItem::KindType::Method },
-				{ "floor", "x", "Round down to the nearest integer value.", LuauCompletionItem::KindType::Method },
-				{ "frac", "x", "Fractional part.", LuauCompletionItem::KindType::Method },
-				{ "length", "v", "Vector length.", LuauCompletionItem::KindType::Method },
-				{ "lerp", "a, b, t", "Linear interpolation: a + (b - a) * t.", LuauCompletionItem::KindType::Method },
-				{ "log", "x", "Natural logarithm.", LuauCompletionItem::KindType::Method },
-				{ "log2", "x", "Base-2 logarithm.", LuauCompletionItem::KindType::Method },
-				{ "mad", "a, b, c", "a * b + c.", LuauCompletionItem::KindType::Method },
-				{ "max", "a, b", "Component-wise maximum.", LuauCompletionItem::KindType::Method },
-				{ "min", "a, b", "Component-wise minimum.", LuauCompletionItem::KindType::Method },
-				{ "mul", "a, b", "Matrix/vector multiply.", LuauCompletionItem::KindType::Method },
-				{ "normalize", "v", "Unit vector (zero-length input stays zero).", LuauCompletionItem::KindType::Method },
-				{ "pow", "x, y", "x^y. Wrap negative bases in saturate() yourself.", LuauCompletionItem::KindType::Method },
-				{ "radians", "x", "Degrees to radians.", LuauCompletionItem::KindType::Method },
-				{ "reflect", "i, n", "Reflect vector i about normal n.", LuauCompletionItem::KindType::Method },
-				{ "refract", "i, n, eta", "Refract vector i through normal n.", LuauCompletionItem::KindType::Method },
-				{ "round", "x", "Round to the nearest integer value.", LuauCompletionItem::KindType::Method },
-				{ "rsqrt", "x", "1 / sqrt(x).", LuauCompletionItem::KindType::Method },
-				{ "saturate", "x", "Clamp to [0,1] (works on scalars and vectors).", LuauCompletionItem::KindType::Method },
-				{ "sign", "x", "-1, 0 or 1.", LuauCompletionItem::KindType::Method },
-				{ "sin", "x", "Sine (radians).", LuauCompletionItem::KindType::Method },
-				{ "smoothstep", "min, max, x", "Smooth Hermite interpolation between min and max.", LuauCompletionItem::KindType::Method },
-				{ "sqrt", "x", "Square root.", LuauCompletionItem::KindType::Method },
-				{ "step", "edge, x", "0 when x < edge, 1 otherwise.", LuauCompletionItem::KindType::Method },
-				{ "tan", "x", "Tangent (radians).", LuauCompletionItem::KindType::Method },
-				{ "transpose", "m", "Matrix transpose.", LuauCompletionItem::KindType::Method },
-			};
-			return kTable;
-		}
-		static constexpr std::size_t BuiltinCount() { return 39; }
-
-		// Slang/HLSL 关键字与字面量(与 SlangHighlight.h 的关键字表同一族)。
-		static const Entry* KeywordTable()
-		{
-			static const Entry kTable[] = {
-				{ "static", "keyword", "File-scope static declaration.", LuauCompletionItem::KindType::Keyword },
-				{ "const", "keyword", "Read-only value (usual for helper constants).", LuauCompletionItem::KindType::Keyword },
-				{ "struct", "keyword", "Struct definition (helper data for Evaluate).", LuauCompletionItem::KindType::Keyword },
-				{ "if", "keyword", "Conditional branch — parameter-driven shading lives here.", LuauCompletionItem::KindType::Keyword },
-				{ "else", "keyword", "Alternative branch.", LuauCompletionItem::KindType::Keyword },
-				{ "for", "keyword", "Loop (keep it bounded: this runs per pixel).", LuauCompletionItem::KindType::Keyword },
-				{ "while", "keyword", "Loop with a condition.", LuauCompletionItem::KindType::Keyword },
-				{ "return", "keyword", "Return the Surface from Evaluate.", LuauCompletionItem::KindType::Keyword },
-				{ "discard", "keyword", "Discard the fragment (alpha-cutout style effects).", LuauCompletionItem::KindType::Keyword },
-				{ "true", "literal", "Boolean true.", LuauCompletionItem::KindType::Keyword },
-				{ "false", "literal", "Boolean false.", LuauCompletionItem::KindType::Keyword },
-			};
-			return kTable;
-		}
-		static constexpr std::size_t KeywordCount() { return 11; }
-
-		// `//!` 注解行候选(语法见 docs/dev/shader-contract.md §6)。
-		// group/label/unit 写成 `名字("")` 形态:接受后插入 `group("")` 并选中那段字符串(引擎 W9.8
-		// 的片段导航会选中第一个参数)。
-		static const Entry* AnnotationTable()
-		{
-			static const Entry kTable[] = {
-				{ "param", "annotation",
-					"//! param <type> <name> = <default> [min,max] unit(\"\") group(\"\") label(\"\") — the annotation is the single source of truth for editor rows, cbuffer layout and slots.",
-					LuauCompletionItem::KindType::Field },
-				{ "group(\"\")", "\"Group\"",
-					"group(\"Appearance\") — row group in the material editor (empty = Parameters).",
-					LuauCompletionItem::KindType::Method },
-				{ "label(\"\")", "\"Label\"",
-					"label(\"Tint\") — display name for the row (empty = the parameter name).",
-					LuauCompletionItem::KindType::Method },
-				{ "unit(\"\")", "\"%\"", "unit(\"%\") — unit suffix shown next to the value.",
-					LuauCompletionItem::KindType::Method },
-				{ "[min,max]", "range",
-					"[0,1] — value range; Float/Int only, default [0,1], the default must fall inside.",
-					LuauCompletionItem::KindType::Field },
-				{ "Float", "annotation type", "Float — number; [min,max] applies.",
-					LuauCompletionItem::KindType::Keyword },
-				{ "Int", "annotation type", "Int — integer; [min,max] applies.",
-					LuauCompletionItem::KindType::Keyword },
-				{ "Bool", "annotation type", "Bool — true / false.", LuauCompletionItem::KindType::Keyword },
-				{ "Vec2", "annotation type", "Vec2 — two comma-separated literals (no [min,max]).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "Vec3", "annotation type", "Vec3 — three comma-separated literals (no [min,max]).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "Vec4", "annotation type", "Vec4 — four comma-separated literals (no [min,max]).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "Color", "annotation type", "Color — r, g, b, a literals (linear; no [min,max]).",
-					LuauCompletionItem::KindType::Keyword },
-				{ "Texture2D", "annotation type",
-					"Texture2D — content-root relative path (\"\" = white 1×1 fallback). Slots t4..t11 by annotation order, max 8.",
-					LuauCompletionItem::KindType::Keyword },
-			};
-			return kTable;
-		}
-		static constexpr std::size_t AnnotationCount() { return 13; }
+		// 参数注解的解析 `//! param …` 与高亮共用(见 SlangKeywords.h 的
+		// SlangAnnotations::ParseParamDecl / ScanParamDecls —— 本类不再自己解析一份),
+		// 关键字 / 内建 / 引擎类型与函数 / 注解词同样只从 SlangSymbols 的唯一表取
+		// (旧版本的 EngineHelperTable / TypeTable / BuiltinTable / KeywordTable / AnnotationTable
+		//  已删除:它们高亮一份、补全另一份,正是"高亮得出、补全不出来"的根因)。
 
 		// ---- 候选收集 ----
 		void CollectMembers(std::vector<LuauCompletionItem>& out, std::string_view receiver) const
@@ -636,12 +311,10 @@ namespace World
 
 		void CollectGlobals(std::vector<LuauCompletionItem>& out) const
 		{
-			for (const FileParam& param : m_FileParams)
+			for (const SlangAnnotations::ParamDecl& param : m_FileParams)
 				out.push_back(MakeFileParamItem(param));
-			AppendTable(out, EngineHelperTable(), EngineHelperCount());
-			AppendTable(out, TypeTable(), TypeCount());
-			AppendTable(out, BuiltinTable(), BuiltinCount());
-			AppendTable(out, KeywordTable(), KeywordCount());
+			// 代码上下文 = 文件参数 + 唯一词表(关键字/类型/引擎类型与函数/内建;注解词不进这里)。
+			AppendSymbols(out, /*annotationContext=*/false);
 		}
 
 		void AppendContractFields(std::vector<LuauCompletionItem>& out,
@@ -674,6 +347,7 @@ namespace World
 				/ sizeof(MaterialSurfaceContract::SurfaceFields[0]);
 		}
 
-		std::vector<FileParam> m_FileParams;
+		std::vector<SlangAnnotations::ParamDecl> m_FileParams;
+		std::vector<std::string> m_DeclaredNames; // 给高亮用的参数名(`//! param` 声明,已去重)
 	};
 }

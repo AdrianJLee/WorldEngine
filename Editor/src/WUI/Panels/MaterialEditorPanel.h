@@ -397,6 +397,9 @@ namespace World
 		float DrawShaderDocument(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		float DrawShaderHeader(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		void DrawShaderCode(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
+		// MAT-INTEL2 探针钩子:把代码列**真正用到的**逐行 token 落盘(白色比例/关键字覆盖率的
+		// 量化证据;触发 = WLD_SLANG_TOKEN_DUMP,不设环境变量时不会被调用,不影响正常使用)。
+		void DumpShaderTokens(const char* path);
 		float DrawShaderParams(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		// 从磁盘读源码(打开 / Revert);解析失败也**不丢文件**(面板显示错误行,仍可编辑保存)。
 		void LoadShaderFromDisk();

@@ -5673,6 +5673,59 @@ namespace World
 		return headerHeight;
 	}
 
+	// MAT-INTEL2(探针钩子):把代码列**真正用到**的逐行 token 落盘 —— 白色比例与关键字覆盖率的
+	// 量化证据来源(解析器见 tools/agents/scratch/mat-intel2-white-ratio.py)。格式:
+	//   FILE <逻辑路径>
+	//   LINE <行号> <字节数> <start>-<end>:<kind> …
+	// 触发 = `WLD_SLANG_TOKEN_DUMP=<绝对路径>`;`WLD_SLANG_TOKEN_DUMP_SHADER=<逻辑路径后缀>` 可把
+	// dump 限定在某个着色器上(同一个进程里每个着色器只写一次)。不设环境变量时本函数不会被调用。
+	void MaterialEditorPanel::DumpShaderTokens(const char* path)
+	{
+		const char* only = std::getenv("WLD_SLANG_TOKEN_DUMP_SHADER");
+		if (only != nullptr && *only != '\0')
+		{
+			const std::size_t suffix = std::strlen(only);
+			if (m_ShaderPath.size() < suffix
+				|| m_ShaderPath.compare(m_ShaderPath.size() - suffix, suffix, only) != 0)
+				return;
+		}
+		static std::vector<std::string> written;
+		for (const std::string& done : written)
+			if (done == m_ShaderPath)
+				return;
+		std::ofstream out(path, std::ios::binary);
+		if (!out)
+		{
+			WLD_CORE_WARN("[matintel2] token dump 写不进去: {0}", path);
+			return;
+		}
+		written.push_back(m_ShaderPath);
+		out << "FILE " << m_ShaderPath << "\n";
+		SlangHighlightSymbols symbols;
+		symbols.FileNames = &m_ShaderCompletion.DeclaredNames();
+		SlangHighlightState state;
+		std::vector<Wui::WuiCodeToken> tokens;
+		for (int line = 0; line < m_ShaderBuffer.LineCount(); ++line)
+		{
+			const std::pair<size_t, size_t> range = m_ShaderBuffer.LineRange(line);
+			const std::string_view text(m_ShaderBuffer.Text().data() + range.first,
+				range.second - range.first);
+			if (SlangAnnotations::IsAnnotationLine(text))
+				SlangAnnotations::HighlightLineWithAnnotations(text, state, tokens, &symbols);
+			else
+				SlangHighlighter::HighlightLine(text, state, tokens, &symbols);
+			out << "LINE " << line << ' ' << text.size();
+			for (const Wui::WuiCodeToken& token : tokens)
+			{
+				out << ' ' << token.StartByte << '-' << token.EndByte << ':'
+					<< SlangTokens::KindName(token.Kind);
+			}
+			out << "\n";
+		}
+		WLD_CORE_INFO("[matintel2] token dump written: {0} ({1} lines, shader '{2}')",
+			path, m_ShaderBuffer.LineCount(), m_ShaderPath);
+	}
+
 	// ---- M4-S2:代码列(复用 Wui::CodeEditor 内核)----
 	void MaterialEditorPanel::DrawShaderCode(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
@@ -5700,13 +5753,18 @@ namespace World
 		editorNode.Interactive = true;
 		Wui::WuiAccessibility::Get().Register(editorNode);
 
-		m_ShaderHighlight.Update(m_ShaderBuffer);
 		// MAT-INTEL:补全/Hover 的文档表 —— 本文件声明的 `//! param` 名字进候选(Revision 变化才重扫)。
 		if (m_ShaderCompletionRevision != m_ShaderBuffer.Revision())
 		{
 			m_ShaderCompletionRevision = m_ShaderBuffer.Revision();
 			m_ShaderCompletion.SetFileSource(m_ShaderBuffer.Text());
 		}
+		// MAT-INTEL2:高亮与补全读同一份词表(SlangKeywords.h)+ 同一份参数名扫描 —— 缓存 Update
+		// 放在索引刷新之后,改注解声明的那一帧颜色就是对的。
+		m_ShaderHighlight.Update(m_ShaderBuffer, m_ShaderCompletion.DeclaredNames());
+		// MAT-INTEL2 探针钩子(只读;不设 WLD_SLANG_TOKEN_DUMP 时这条分支不执行)。
+		if (const char* tokenDump = std::getenv("WLD_SLANG_TOKEN_DUMP"))
+			DumpShaderTokens(tokenDump);
 		Wui::WuiCodeEditorOptions options;
 		options.FontSize = fontSize;
 		options.LineHeight = std::round(fontSize * (20.0f / 14.0f));
@@ -5714,28 +5772,27 @@ namespace World
 		options.ReadOnly = readOnly;
 		options.Highlight = [this](std::string_view text, std::vector<Wui::WuiCodeToken>& out)
 		{
-			// `//!` 注解行:整行注释色会让 WuiCodeEditor 的"注释里不弹补全"闸门挡住注解体,
-			// 所以注解体按 Slang 语法着色(见 SlangAnnotations::HighlightLineWithAnnotations)。
-			if (SlangAnnotations::IsAnnotationLine(text))
-			{
-				SlangHighlightState state;
-				SlangAnnotations::HighlightLineWithAnnotations(text, state, out);
-				return;
-			}
+			// 注解行与代码行同一条路径:`//!` 行的注解体按 Slang 语法着色(整行注释色会让
+			// WuiCodeEditor "注释里不弹补全"的闸门挡住注解体),缓存里已经这么算。
 			if (const std::vector<Wui::WuiCodeToken>* cached = m_ShaderHighlight.Find(text))
 			{
 				out = *cached;
 				return;
 			}
 			// 本帧改过文本(缓冲区重分配)→ 重建缓存后重试;仍未命中就现场兜底。
-			m_ShaderHighlight.Update(m_ShaderBuffer);
+			m_ShaderHighlight.Update(m_ShaderBuffer, m_ShaderCompletion.DeclaredNames());
 			if (const std::vector<Wui::WuiCodeToken>* refreshed = m_ShaderHighlight.Find(text))
 			{
 				out = *refreshed;
 				return;
 			}
+			SlangHighlightSymbols symbols;
+			symbols.FileNames = &m_ShaderCompletion.DeclaredNames();
 			SlangHighlightState state;
-			SlangHighlighter::HighlightLine(text, state, out);
+			if (SlangAnnotations::IsAnnotationLine(text))
+				SlangAnnotations::HighlightLineWithAnnotations(text, state, out, &symbols);
+			else
+				SlangHighlighter::HighlightLine(text, state, out, &symbols);
 		};
 		// MAT-INTEL:补全(成员 / 文件参数+引擎函数+类型+内建+关键字 / `//!` 注解)+ 悬停同一份文档。
 		options.CompletionIdPrefix = "material.suggest";
