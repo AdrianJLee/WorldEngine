@@ -108,6 +108,10 @@ namespace World::Wui
 		float UiScale = 1.0f;                             // 缩放(100% = 1.0)
 		float Density = 1.0f;                             // 1.0 = comfortable,<1 = compact
 		std::string Locale = "en";                        // "en" / "zh-CN"
+		// WUI-P1.6(Play 模式):true = **真实输入直通** —— 不模拟状态、不动鼠标/焦点、
+		// 不清按下/抬起沿(hover/pressed/focus 由真实交互自然产生)。默认 false = Edit 模式,
+		// 行为与既有基线逐字节一致(伪状态仍按原口径清输入)。
+		bool RouteRealInput = false;
 	};
 
 	// 一件组件在库里的登记。`Showcase` 必须是**真实控件代码路径**(不是复刻 demo),

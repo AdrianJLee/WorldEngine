@@ -221,22 +221,34 @@ namespace World::Wui
 		// 键盘激活:焦点在本按钮上时 Enter / Space = 点击一次(KeyPressed 只含本帧新按下,长按不连发)。
 		const bool keyActivated = focused
 			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
-		const WuiColor fill = !Enabled ? theme.ContentBg
-			: (pressed ? theme.ActiveBg : (hovered ? theme.ButtonHover : theme.ButtonBg));
-		const WuiColor text = Enabled ? theme.Text : theme.TextDisabled;
-		ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, fill, theme.Radius });
+		// WUI-P1.5a2:样式解析与立即模式 Wui::Button 走**同一份实现**(ResolveButtonStyle)——
+		// 同一状态优先级、同一 per-state 覆盖判据、同一"未覆盖 = 旧口径"哨兵。本类旧口径 =
+		// 主题令牌(禁用 = ContentBg/TextDisabled)+ 仅交互态描边(BorderStrong);
+		// Style 为空槽时下面每个字段都与改动前逐字节相同。
+		const bool disabled = !Enabled || Style.Disabled;
+		const WuiButtonResolvedStyle resolved = ResolveButtonStyle(&Style, disabled, pressed, hovered, focused,
+			disabled ? theme.ContentBg
+				: (pressed ? theme.ActiveBg : (hovered ? theme.ButtonHover : theme.ButtonBg)),
+			theme.BorderStrong, disabled ? theme.TextDisabled : theme.Text, theme.FocusRing);
+		ctx.Commands().push_back({ WuiDrawKind::Rect, m_Rect, resolved.Bg, theme.Radius });
 		// 只在悬停/按下时给一圈边:默认态干净,悬停态才有"可点"的反馈。
-		if (Enabled && (hovered || pressed || focused))
-			ctx.Commands().push_back({ WuiDrawKind::RectOutline, m_Rect, theme.BorderStrong, theme.Radius, 1.0f });
-		float textX = m_Rect.X + 8.0f;
+		// 显式覆盖了当前状态的 border 槽时也必须描边 —— 否则"改 border.default"在保留模式上是个
+		// 看不见的属性(与立即模式同一条"覆盖即生效"语义)。
+		if ((!disabled && (hovered || pressed || focused)) || resolved.BorderCovered)
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, m_Rect, resolved.Border, theme.Radius, 1.0f });
+		float textX = m_Rect.X + resolved.PaddingX;
 		if (CenterLabel)
 		{
-			const float width = ctx.MeasureTextWidth(Label, 15.0f);
+			const float width = ctx.MeasureTextWidth(Label, resolved.FontSize);
 			textX = m_Rect.X + std::max(2.0f, (m_Rect.W - width) * 0.5f);
 		}
-		ctx.Commands().push_back({ WuiDrawKind::Text, { textX, m_Rect.Y + (m_Rect.H - 15.0f) * 0.5f, 0, 0 },
-			text, 0, 1.0f, Label, 15.0f, false });
-		PaintFocusRing(context);
+		ctx.Commands().push_back({ WuiDrawKind::Text,
+			{ textX, m_Rect.Y + (m_Rect.H - resolved.FontSize) * 0.5f, 0, 0 },
+			resolved.Text, 0, 1.0f, Label, resolved.FontSize, resolved.Bold });
+		if (resolved.FocusRingCovered)
+			DrawFocusRing(ctx, m_Rect, Id(), theme, &resolved.FocusRing);
+		else
+			PaintFocusRing(context);
 		// P4-U7:对象式按钮也要进无障碍树 —— 菜单栏 File/View/Window、工具条按钮此前
 		// 只登记焦点、不登记节点,"AI 通道点不开菜单"(也就无从验证菜单穿透)。
 		if (Id() != 0)

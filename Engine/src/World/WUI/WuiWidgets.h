@@ -121,6 +121,34 @@ namespace World::Wui
 		bool Disabled = false;     // Behavior 组:按禁用态绘制(行为开关仍归调用方/ButtonEx)
 	};
 
+	// ---- WUI-P1.5a2:两面共用的 style 解析(只有这一份实现)----
+	// 保留模式 `Wui::WuiButton`(WuiWidget.h/.cpp)与立即模式 `Wui::Button` 都走
+	// `ResolveButtonStyle`:"状态优先级 / 5×3 槽的覆盖判据 / 未设置哨兵(字号<=0、内边距<0、空 optional)
+	// / Focused 槽 Border 兼作焦点环颜色"都只写在这里。
+	// fallback* = 未覆盖槽该用的**历史口径**,由两面各自传入(立即模式传主题令牌,保留模式传它自己的旧口径)
+	// ⇒ 没人覆盖任何槽时,两面的命令流与改动前逐字节相同。
+	struct WuiButtonResolvedStyle
+	{
+		WuiButtonStyle::State State = WuiButtonStyle::State::Normal;
+		WuiColor Bg {};                 // 填充
+		WuiColor Border {};             // 描边
+		WuiColor Text {};               // 文字
+		WuiColor FocusRing {};          // 焦点环(Focused 槽的 Border 覆盖优先)
+		// "*Covered" = 该槽有显式覆盖。保留模式用它决定"默认态该不该冒出一条描边"
+		// (旧口径只在悬停/按下/聚焦时描边,但显式覆盖的 border 必须看得见)。
+		bool BgCovered = false;
+		bool BorderCovered = false;
+		bool TextCovered = false;
+		bool FocusRingCovered = false;
+		float PaddingX = 8.0f;          // 未覆盖 = 8(旧口径)
+		float FontSize = 15.0f;         // 未覆盖 = 15(旧口径)
+		bool Bold = false;
+	};
+
+	WuiButtonResolvedStyle ResolveButtonStyle(const WuiButtonStyle* style, bool disabled, bool pressed,
+		bool hovered, bool focused, const WuiColor& fallbackBg, const WuiColor& fallbackBorder,
+		const WuiColor& fallbackText, const WuiColor& fallbackFocusRing);
+
 	// style = nullptr(默认)= 既有行为:主题令牌 + 硬编码 8px/15px。
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme,
 		const WuiButtonStyle* style = nullptr);

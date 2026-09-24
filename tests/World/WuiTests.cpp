@@ -81,6 +81,158 @@ namespace
 		return hash;
 	}
 
+	// WUI-P1.5a2:把一条按钮命令流压成"逐字段可比"的投影 —— 保留模式 WuiButton 与立即模式 Button
+	// 的差异清单就是这些字段(而不是"看起来差不多");任何新增的意外差异都会让 §28 失败。
+	struct ButtonPaintFields
+	{
+		size_t FillCount = 0;
+		WuiColor Fill {};
+		float FillRounding = 0.0f;
+		bool BorderDrawn = false;
+		WuiColor Border {};
+		float BorderRounding = 0.0f;
+		float BorderThickness = 0.0f;
+		bool TextDrawn = false;
+		WuiColor Text {};
+		float TextX = 0.0f;
+		float TextY = 0.0f;
+		float FontSize = 0.0f;
+		bool Bold = false;
+		bool RingDrawn = false;
+		WuiColor Ring {};
+		float RingRounding = 0.0f;
+	};
+
+	bool SameColor(const WuiColor& a, const WuiColor& b)
+	{
+		return Near(a.R, b.R) && Near(a.G, b.G) && Near(a.B, b.B) && Near(a.A, b.A);
+	}
+
+	ButtonPaintFields ProjectButtonPaint(const std::vector<WuiDrawCommand>& commands,
+		const std::vector<WuiDrawCommand>& overlay)
+	{
+		ButtonPaintFields fields;
+		for (const WuiDrawCommand& command : commands)
+		{
+			if (command.Kind == WuiDrawKind::Rect)
+			{
+				if (fields.FillCount == 0)
+				{
+					fields.Fill = command.Color;
+					fields.FillRounding = command.Rounding;
+				}
+				++fields.FillCount;
+			}
+			else if (command.Kind == WuiDrawKind::RectOutline)
+			{
+				fields.BorderDrawn = true;
+				fields.Border = command.Color;
+				fields.BorderRounding = command.Rounding;
+				fields.BorderThickness = command.Thickness;
+			}
+			else if (command.Kind == WuiDrawKind::Text)
+			{
+				fields.TextDrawn = true;
+				fields.Text = command.Color;
+				fields.TextX = command.Rect.X;
+				fields.TextY = command.Rect.Y;
+				fields.FontSize = command.FontSize;
+				fields.Bold = command.Bold;
+			}
+		}
+		// 焦点环走 overlay 层(与 tooltip 同一机制)。
+		for (const WuiDrawCommand& command : overlay)
+		{
+			if (command.Kind != WuiDrawKind::RectOutline)
+				continue;
+			fields.RingDrawn = true;
+			fields.Ring = command.Color;
+			fields.RingRounding = command.Rounding;
+			break;
+		}
+		return fields;
+	}
+
+	std::vector<std::string> DiffButtonPaint(const ButtonPaintFields& retained, const ButtonPaintFields& immediate)
+	{
+		std::vector<std::string> deltas;
+		const auto note = [&deltas](bool differs, const char* name)
+		{
+			if (differs)
+				deltas.emplace_back(name);
+		};
+		note(retained.FillCount != immediate.FillCount, "fill.count");
+		note(!SameColor(retained.Fill, immediate.Fill), "fill.color");
+		note(!Near(retained.FillRounding, immediate.FillRounding), "fill.rounding");
+		note(retained.BorderDrawn != immediate.BorderDrawn, "border.drawn");
+		const bool borders = retained.BorderDrawn && immediate.BorderDrawn;
+		note(borders && !SameColor(retained.Border, immediate.Border), "border.color");
+		note(borders && !Near(retained.BorderRounding, immediate.BorderRounding), "border.rounding");
+		note(borders && !Near(retained.BorderThickness, immediate.BorderThickness), "border.thickness");
+		note(retained.TextDrawn != immediate.TextDrawn, "text.drawn");
+		note(!SameColor(retained.Text, immediate.Text), "text.color");
+		note(!Near(retained.TextX, immediate.TextX), "text.x");
+		note(!Near(retained.TextY, immediate.TextY), "text.y");
+		note(!Near(retained.FontSize, immediate.FontSize), "fontSize");
+		note(retained.Bold != immediate.Bold, "bold");
+		note(retained.RingDrawn != immediate.RingDrawn, "ring.drawn");
+		const bool rings = retained.RingDrawn && immediate.RingDrawn;
+		note(rings && !SameColor(retained.Ring, immediate.Ring), "ring.color");
+		note(rings && !Near(retained.RingRounding, immediate.RingRounding), "ring.rounding");
+		return deltas;
+	}
+
+	// 差异清单不符时把**实际**清单打出来(只看 CHECK 表达式看不出来差在哪)。
+	void ExpectDeltas(const std::vector<std::string>& actual, const std::vector<std::string>& expected, int line)
+	{
+		if (actual == expected)
+			return;
+		std::string message = "line " + std::to_string(line) + ": two-face style deltas = [";
+		for (size_t index = 0; index < actual.size(); ++index)
+			message += (index == 0 ? "" : ",") + actual[index];
+		message += "] expected [";
+		for (size_t index = 0; index < expected.size(); ++index)
+			message += (index == 0 ? "" : ",") + expected[index];
+		message += "]";
+		throw std::runtime_error(message);
+	}
+
+	// "除圆角外逐字节相同"的判据:同 CommandStreamHash,但不喂 Rounding(圆角是两面唯一记在案的残差);
+	// 圆角差异单独计数,避免"把残差也哈希进去"导致判据永远不成立。
+	uint64_t CommandStreamHashNoRounding(const std::vector<WuiDrawCommand>& commands)
+	{
+		uint32_t hash = 2166136261u;
+		const auto feed = [&hash](const void* data, size_t size)
+		{
+			const uint8_t* bytes = static_cast<const uint8_t*>(data);
+			for (size_t index = 0; index < size; ++index)
+				hash = (hash ^ bytes[index]) * 16777619u;
+		};
+		for (const WuiDrawCommand& command : commands)
+		{
+			feed(&command.Kind, sizeof(command.Kind));
+			feed(&command.Rect, sizeof(command.Rect));
+			feed(&command.Color, sizeof(command.Color));
+			feed(&command.Thickness, sizeof(command.Thickness));
+			feed(command.Text.data(), command.Text.size());
+			feed(&command.FontSize, sizeof(command.FontSize));
+			feed(&command.Bold, sizeof(command.Bold));
+			feed(&command.Image, sizeof(command.Image));
+		}
+		return hash;
+	}
+
+	size_t CountRoundingDiffs(const std::vector<WuiDrawCommand>& a, const std::vector<WuiDrawCommand>& b)
+	{
+		if (a.size() != b.size())
+			return static_cast<size_t>(-1);
+		size_t count = 0;
+		for (size_t index = 0; index < a.size(); ++index)
+			if (!Near(a[index].Rounding, b[index].Rounding))
+				++count;
+		return count;
+	}
+
 	// P1a:登记的 TypeName 必须真的能在 WUI 头文件里找到声明 —— 保留模式控件是 struct/class
 	// (如 "WuiButton"),纯立即模式控件是头文件里的入口函数(如 "Segmented")。名字不能是编出来的。
 	// 头文件文本从仓库根读(ctest 的 WORKING_DIRECTORY 就是 ${CMAKE_SOURCE_DIR});读不到时再按
@@ -3077,6 +3229,249 @@ int main()
 				CHECK(elapsedMs > 0.0);
 				CHECK(elapsedMs < 20000.0);       // 只挡"荒谬量级"退化;真实数字进报告
 			}
+		}
+
+		// 28. WUI-P1.5a2:保留模式 Wui::WuiButton(WuiWidget.h/.cpp)与立即模式 Wui::Button(WuiWidgets.cpp)
+		//     读**同一份** WuiButtonStyle + 同一份解析 ResolveButtonStyle —— 四段硬口径:
+		//     ① 解析器:状态优先级 disabled > pressed > hover > focus > normal,单槽覆盖只动那一槽,
+		//        未设置哨兵(字号<=0 / 内边距<0 / 空 optional)= 8px·15px·非常规粗体·调用方兜底色;
+		//     ② 未覆盖:两面的命令流差异**逐字段**钉成清单(不是"大概一样";任何意外差异即失败);
+		//     ③ 覆盖:同一份覆盖值 → 两面样式字段全同,残差只有圆角(保留模式 = 主题令牌 theme.Radius,
+		//        立即模式 = 历史字面量 3.0)—— 记录在案,不为了对齐改掉任何一面的可视结果;
+		//     ④ 保留模式旧口径不漂:默认 Style = 主题令牌 + 仅交互态描边(无 Style 的按钮命令流不变)。
+		{
+			WuiAccessibility::Get().SetEnabled(false);
+			WuiAccessibility::Get().Clear();
+			const WuiTheme& theme = CurrentTheme();
+			const WuiRect rect { 40.0f, 30.0f, 128.0f, 24.0f };
+			const WuiId id = HashId("tests.two-faces.button");
+			const std::string label = "Apply";
+
+			// ---- ① 解析器(两面唯一的实现)----
+			const WuiColor fallbackBg { 0.11f, 0.12f, 0.13f, 1.0f };
+			const WuiColor fallbackBorder { 0.21f, 0.22f, 0.23f, 1.0f };
+			const WuiColor fallbackText { 0.31f, 0.32f, 0.33f, 1.0f };
+			const WuiColor fallbackRing { 0.41f, 0.42f, 0.43f, 1.0f };
+			const auto Resolve = [&](const WuiButtonStyle* style, bool disabled, bool pressed, bool hovered, bool focused)
+			{
+				return ResolveButtonStyle(style, disabled, pressed, hovered, focused,
+					fallbackBg, fallbackBorder, fallbackText, fallbackRing);
+			};
+			const WuiButtonResolvedStyle raw = Resolve(nullptr, false, false, false, false);
+			CHECK(raw.State == WuiButtonStyle::State::Normal);
+			CHECK(!raw.BgCovered && !raw.BorderCovered && !raw.TextCovered && !raw.FocusRingCovered);
+			CHECK(SameColor(raw.Bg, fallbackBg) && SameColor(raw.Border, fallbackBorder)
+				&& SameColor(raw.Text, fallbackText) && SameColor(raw.FocusRing, fallbackRing));
+			CHECK(Near(raw.PaddingX, 8.0f) && Near(raw.FontSize, 15.0f) && !raw.Bold);
+			CHECK(Resolve(nullptr, true, true, true, true).State == WuiButtonStyle::State::Disabled);
+			CHECK(Resolve(nullptr, false, true, true, true).State == WuiButtonStyle::State::Pressed);
+			CHECK(Resolve(nullptr, false, false, true, true).State == WuiButtonStyle::State::Hover);
+			CHECK(Resolve(nullptr, false, false, false, true).State == WuiButtonStyle::State::Focused);
+			WuiButtonStyle single;
+			single.Colors[static_cast<size_t>(WuiButtonStyle::State::Hover)].Bg = WuiColor { 1.0f, 0.0f, 0.0f, 1.0f };
+			const WuiButtonResolvedStyle singleResolved = Resolve(&single, false, false, true, false);
+			CHECK(singleResolved.BgCovered && !singleResolved.BorderCovered && !singleResolved.TextCovered);
+			CHECK(Near(singleResolved.Bg.R, 1.0f) && SameColor(singleResolved.Border, fallbackBorder)
+				&& SameColor(singleResolved.Text, fallbackText));
+			WuiButtonStyle sentinel;
+			sentinel.FontSize = 0.0f;      // 哨兵:<=0 = 没给
+			sentinel.PaddingX = -1.0f;     // 哨兵:<0 = 没给
+			const WuiButtonResolvedStyle sentinelResolved = Resolve(&sentinel, false, false, false, false);
+			CHECK(Near(sentinelResolved.PaddingX, 8.0f) && Near(sentinelResolved.FontSize, 15.0f)
+				&& !sentinelResolved.Bold && !sentinelResolved.FocusRingCovered
+				&& SameColor(sentinelResolved.FocusRing, fallbackRing));
+
+			// ---- 两面的真实绘制路径 ----
+			const auto FillInput = [&rect](const std::string& state, WuiInputState& input)
+			{
+				if (state == "hover" || state == "pressed" || state == "hover-focus")
+					input.MousePos = { rect.X + rect.W * 0.5f, rect.Y + rect.H * 0.5f };
+				if (state == "pressed")
+					input.MouseDown[0] = true;
+			};
+			const auto PaintRetained = [&](const std::string& state, bool enabled, const WuiButtonStyle& style,
+				std::vector<WuiDrawCommand>& out, std::vector<WuiDrawCommand>& overlay)
+			{
+				WuiContext ctx;
+				WuiInputState input;
+				input.ViewportSize = { 640.0f, 480.0f };
+				FillInput(state, input);
+				ctx.BeginFrame(input);
+				if (state == "focus" || state == "hover-focus")
+					ctx.SetFocus(id);
+				const std::shared_ptr<WuiButton> button = std::make_shared<WuiButton>();
+				button->SetId(id);
+				button->Label = label;
+				button->Enabled = enabled;
+				button->Style = style;
+				button->Arrange(rect);
+				WuiPaintContext paint(ctx);
+				button->Paint(paint);
+				ctx.EndFrame();
+				out = ctx.Commands();
+				overlay = ctx.OverlayCommands();
+			};
+			const auto PaintImmediate = [&](const std::string& state, const WuiButtonStyle* style,
+				std::vector<WuiDrawCommand>& out, std::vector<WuiDrawCommand>& overlay)
+			{
+				WuiContext ctx;
+				WuiInputState input;
+				input.ViewportSize = { 640.0f, 480.0f };
+				FillInput(state, input);
+				ctx.BeginFrame(input);
+				if (state == "focus" || state == "hover-focus")
+					ctx.SetFocus(id);
+				CHECK(!Button(ctx, id, rect, label, theme, style));   // 注入的输入不含点击/按键沿 ⇒ 不激活
+				ctx.EndFrame();
+				out = ctx.Commands();
+				overlay = ctx.OverlayCommands();
+			};
+			// 同一状态、同一矩形、同一份 style:两面各画一次,产出逐字段投影 + 差异清单。
+			const auto PaintPair = [&](const std::string& state, bool retainedEnabled, const WuiButtonStyle* style,
+				std::vector<std::string>& deltas, ButtonPaintFields& retainedFields, ButtonPaintFields& immediateFields)
+			{
+				std::vector<WuiDrawCommand> retained;
+				std::vector<WuiDrawCommand> retainedOverlay;
+				PaintRetained(state, retainedEnabled, style != nullptr ? *style : WuiButtonStyle {}, retained, retainedOverlay);
+				std::vector<WuiDrawCommand> immediate;
+				std::vector<WuiDrawCommand> immediateOverlay;
+				PaintImmediate(state, style, immediate, immediateOverlay);
+				retainedFields = ProjectButtonPaint(retained, retainedOverlay);
+				immediateFields = ProjectButtonPaint(immediate, immediateOverlay);
+				deltas = DiffButtonPaint(retainedFields, immediateFields);
+			};
+
+			ButtonPaintFields retainedFields;
+			ButtonPaintFields immediateFields;
+			std::vector<std::string> deltas;
+
+			// ---- ② 未覆盖(style = nullptr / 默认 Style):差异清单 = 这张表 ----
+			PaintPair("normal", true, nullptr, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.rounding", "border.drawn" }, __LINE__);
+			// 未覆盖 = 同一组旧口径默认值:8px 内边距 / 15px 字号 / 非常规粗体,两面都成立。
+			CHECK(Near(retainedFields.TextX, rect.X + 8.0f) && Near(immediateFields.TextX, rect.X + 8.0f));
+			CHECK(Near(retainedFields.FontSize, 15.0f) && Near(immediateFields.FontSize, 15.0f));
+			CHECK(!retainedFields.Bold && !immediateFields.Bold);
+			CHECK(Near(retainedFields.TextY, immediateFields.TextY));
+			// 保留模式默认态:干净(无描边)、填充 ButtonBg、文字 Text —— P4-UX13 的既定外观。
+			CHECK(!retainedFields.BorderDrawn);
+			CHECK(SameColor(retainedFields.Fill, theme.ButtonBg) && SameColor(retainedFields.Text, theme.Text));
+			// 立即模式默认态:常驻底色描边 theme.Border。
+			CHECK(immediateFields.BorderDrawn && SameColor(immediateFields.Border, theme.Border));
+			CHECK(Near(retainedFields.FillRounding, theme.Radius) && Near(immediateFields.FillRounding, 3.0f));
+
+			PaintPair("hover", true, nullptr, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.rounding", "border.color", "border.rounding" }, __LINE__);
+			CHECK(SameColor(retainedFields.Fill, theme.ButtonHover) && SameColor(immediateFields.Fill, theme.ButtonHover));
+			CHECK(SameColor(retainedFields.Border, theme.BorderStrong) && SameColor(immediateFields.Border, theme.Border));
+
+			PaintPair("pressed", true, nullptr, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.rounding", "border.color", "border.rounding", "text.color" }, __LINE__);
+			// 按下填充:两面用**不同令牌**(保留模式 ActiveBg、立即模式 ButtonHover);当前主题两者取值相同
+			// (所以不构成差异),主题一旦把它们分开就会显形 —— 这里显式钉住"各自用哪个令牌"。
+			CHECK(SameColor(retainedFields.Fill, theme.ActiveBg) && SameColor(immediateFields.Fill, theme.ButtonHover));
+			CHECK(SameColor(retainedFields.Text, theme.Text) && SameColor(immediateFields.Text, theme.Accent));
+
+			PaintPair("focus", true, nullptr, deltas, retainedFields, immediateFields);
+			// 焦点环两面共用 DrawFocusRing(圆角 = 主题令牌)→ 环本身没有残差;差异只在填充/描边。
+			ExpectDeltas(deltas, { "fill.rounding", "border.color", "border.rounding" }, __LINE__);
+			CHECK(retainedFields.RingDrawn && immediateFields.RingDrawn);
+			CHECK(SameColor(retainedFields.Ring, theme.FocusRing) && SameColor(immediateFields.Ring, theme.FocusRing));
+
+			// 禁用态未覆盖:保留模式用自身 Enabled(主题禁用令牌 ContentBg/TextDisabled,且旧口径**不描边**);
+			// 立即模式要调用方给禁用外观 —— 展示台走 DisabledTheme 令牌替换,直接调用时只有样式里的
+			// disabled 开关(未覆盖颜色 = 正常态兜底)。这就是两面"禁用来源"的既有差异。
+			WuiButtonStyle disabledFlag;
+			disabledFlag.Disabled = true;
+			PaintPair("normal", false, &disabledFlag, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.color", "fill.rounding", "border.drawn", "text.color" }, __LINE__);
+			CHECK(SameColor(retainedFields.Fill, theme.ContentBg) && SameColor(retainedFields.Text, theme.TextDisabled));
+			CHECK(!retainedFields.BorderDrawn && SameColor(immediateFields.Fill, theme.ButtonBg));
+
+			// ---- ③ 覆盖:同一覆盖值 → 两面样式字段全同(残差 = 圆角令牌 vs 字面量)----
+			const auto MakeCoveredStyle = []()
+			{
+				// 每态每通道取互不相同的值 → "取错状态/取错通道"立刻可辨(不是"两边都错所以相等")。
+				WuiButtonStyle style;
+				const float steps[WuiButtonStyle::StateCount] = { 0.10f, 0.30f, 0.50f, 0.70f, 0.90f };
+				for (size_t state = 0; state < WuiButtonStyle::StateCount; ++state)
+				{
+					style.Colors[state].Bg = WuiColor { steps[state], 0.05f, 0.05f, 1.0f };
+					style.Colors[state].Border = WuiColor { 0.05f, steps[state], 0.05f, 1.0f };
+					style.Colors[state].Text = WuiColor { 0.05f, 0.05f, steps[state], 1.0f };
+				}
+				style.PaddingX = 13.0f;
+				style.FontSize = 19.0f;
+				style.Bold = true;
+				return style;
+			};
+			const WuiButtonStyle covered = MakeCoveredStyle();
+			PaintPair("normal", true, &covered, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.rounding", "border.rounding" }, __LINE__);
+			CHECK(Near(retainedFields.Fill.R, 0.10f) && Near(retainedFields.Border.G, 0.10f)
+				&& Near(retainedFields.Text.B, 0.10f));
+			CHECK(Near(retainedFields.TextX, rect.X + 13.0f) && Near(retainedFields.FontSize, 19.0f)
+				&& retainedFields.Bold);
+			// border.default 覆盖让保留模式默认态也描边(旧口径不描边 ⇒ 否则这个属性看不见)。
+			CHECK(retainedFields.BorderDrawn && immediateFields.BorderDrawn);
+			// 残差的实测来源(不在本单消除:改任何一面都是改可视结果)。
+			CHECK(Near(retainedFields.FillRounding, theme.Radius) && Near(immediateFields.FillRounding, 3.0f));
+
+			PaintPair("hover", true, &covered, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.rounding", "border.rounding" }, __LINE__);
+			CHECK(Near(retainedFields.Fill.R, 0.30f) && Near(immediateFields.Fill.R, 0.30f));
+			// 同一覆盖值 → 命令流**除圆角外逐字节相同**(判据:不含 Rounding 的 FNV 相等,
+			// 且圆角差异恰好只出现在"填充 + 描边"两条上;焦点环共用 DrawFocusRing,圆角本来就一致)。
+			{
+				std::vector<WuiDrawCommand> retainedStream;
+				std::vector<WuiDrawCommand> retainedOverlayStream;
+				PaintRetained("hover", true, covered, retainedStream, retainedOverlayStream);
+				std::vector<WuiDrawCommand> immediateStream;
+				std::vector<WuiDrawCommand> immediateOverlayStream;
+				PaintImmediate("hover", &covered, immediateStream, immediateOverlayStream);
+				CHECK(retainedStream.size() == 3 && immediateStream.size() == 3);
+				CHECK(CommandStreamHashNoRounding(retainedStream) == CommandStreamHashNoRounding(immediateStream));
+				CHECK(CountRoundingDiffs(retainedStream, immediateStream) == 2);
+				CHECK(CommandStreamHashNoRounding(retainedOverlayStream)
+					== CommandStreamHashNoRounding(immediateOverlayStream));
+			}
+
+			PaintPair("pressed", true, &covered, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.rounding", "border.rounding" }, __LINE__);
+			CHECK(Near(retainedFields.Fill.R, 0.50f) && Near(retainedFields.Text.B, 0.50f));
+
+			PaintPair("focus", true, &covered, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.rounding", "border.rounding" }, __LINE__);
+			CHECK(Near(retainedFields.Fill.R, 0.90f));
+			CHECK(Near(retainedFields.Ring.G, 0.90f));       // border.focus 覆盖同时是焦点环颜色
+			CHECK(Near(immediateFields.Ring.G, 0.90f));
+
+			// 优先级:hover 赢 focus(两面同一判据)。
+			PaintPair("hover-focus", true, &covered, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.rounding", "border.rounding" }, __LINE__);
+			CHECK(Near(retainedFields.Fill.R, 0.30f) && Near(immediateFields.Fill.R, 0.30f));
+
+			// disabled 覆盖一切(悬停 + 禁用 = 禁用槽),且 border.disabled 覆盖后保留模式禁用态也描边。
+			WuiButtonStyle coveredDisabled = covered;
+			coveredDisabled.Disabled = true;
+			PaintPair("hover", false, &coveredDisabled, deltas, retainedFields, immediateFields);
+			ExpectDeltas(deltas, { "fill.rounding", "border.rounding" }, __LINE__);
+			CHECK(Near(retainedFields.Fill.R, 0.70f) && Near(immediateFields.Fill.R, 0.70f));
+			CHECK(retainedFields.BorderDrawn && Near(retainedFields.Border.G, 0.70f));
+
+			// ---- ④ 单槽覆盖(不是"全槽覆盖"的副作用):border.default 必须看得见,其余仍是旧口径 ----
+			WuiButtonStyle onlyBorderDefault;
+			onlyBorderDefault.Colors[static_cast<size_t>(WuiButtonStyle::State::Normal)].Border =
+				WuiColor { 0.2f, 0.4f, 0.6f, 1.0f };
+			std::vector<WuiDrawCommand> retainedOnly;
+			std::vector<WuiDrawCommand> retainedOnlyOverlay;
+			PaintRetained("normal", true, onlyBorderDefault, retainedOnly, retainedOnlyOverlay);
+			const ButtonPaintFields onlyFields = ProjectButtonPaint(retainedOnly, retainedOnlyOverlay);
+			CHECK(retainedOnly.size() == 3);      // 填充 + 描边 + 文本
+			CHECK(onlyFields.BorderDrawn && SameColor(onlyFields.Border, WuiColor { 0.2f, 0.4f, 0.6f, 1.0f }));
+			CHECK(SameColor(onlyFields.Fill, theme.ButtonBg) && SameColor(onlyFields.Text, theme.Text));
+			CHECK(Near(onlyFields.TextX, rect.X + 8.0f) && Near(onlyFields.FontSize, 15.0f) && !onlyFields.Bold);
+			CHECK(!onlyFields.RingDrawn);
 		}
 
 		std::printf("World.Wui: all checks passed\n");

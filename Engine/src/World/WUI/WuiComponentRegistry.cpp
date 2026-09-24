@@ -45,6 +45,10 @@
 //     (颜色 #RRGGBB[AA]、尺寸 WxH),属性的 Group/Unit/Doc/StateScoped/类型化默认只是元数据;
 //     showcase 侧的语义是"没覆盖 = 沿用主题令牌或旧硬编码口径" —— 因此旧基线不因加值而漂移,
 //     per-state 颜色只在用户真的改了那一态时生效。
+//  7) WUI-P1.5a2 起,`button` 的两张脸读**同一份** WuiButtonStyle + 同一份解析 ResolveButtonStyle:
+//     展示台/面板走立即模式入口 Wui::Button(WuiWidgets.cpp),面板里的保留模式类 Wui::WuiButton
+//     (WuiWidget.h/.cpp,成员 `Style`)用同一套状态优先级/覆盖判据/内边距·字号哨兵;
+//     未覆盖槽各自回退历史口径(两面差异清单钉在 tests/World/WuiTests.cpp §28)。
 
 namespace World::Wui
 {
@@ -420,6 +424,10 @@ namespace World::Wui
 			PseudoState(const WuiComponentDraw& draw, WuiId focusId, const WuiRect& rect, bool allowPress = false)
 				: m_Context(*draw.Context), m_SavedInput(draw.Context->Input()), m_SavedFocus(draw.Context->Focus())
 			{
+				// WUI-P1.6:Play 模式直通真实输入 —— 不挪鼠标/不设焦点/不清按下沿,
+				// hover/pressed/focus 由用户真实交互产生(Edit 模式默认 false,行为不变)。
+				if (draw.RouteRealInput)
+					return;
 				const bool hover = draw.State == "hover" || (allowPress && draw.State == "pressed");
 				if (hover)
 					m_Context.Input().MousePos = { rect.X + rect.W * 0.5f, rect.Y + rect.H * 0.5f };

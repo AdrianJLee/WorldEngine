@@ -416,39 +416,35 @@ namespace World::Wui
 		ctx.PopOverlay();
 	}
 
-	namespace
+	// WUI-P1.5a2:按"当前视觉状态 + 通道"取样式色 —— 保留模式 WuiButton 与立即模式 Button 的**唯一**实现。
+	// 槽未覆盖 = 调用方给的兜底(主题令牌/旧口径);哨兵口径(字号<=0 / 内边距<0 / 空 optional)也在这里。
+	WuiButtonResolvedStyle ResolveButtonStyle(const WuiButtonStyle* style, bool disabled, bool pressed,
+		bool hovered, bool focused, const WuiColor& fallbackBg, const WuiColor& fallbackBorder,
+		const WuiColor& fallbackText, const WuiColor& fallbackFocusRing)
 	{
-		// WUI-P1.5:按"当前视觉状态 + 通道"取样式色;槽未覆盖 = 调用方给的兜底(主题令牌/旧口径)。
-		enum class ButtonStyleChannel
-		{
-			Bg = 0,
-			Border = 1,
-			Text = 2,
-		};
-
-		WuiColor ResolveButtonColor(const WuiButtonStyle* style, WuiButtonStyle::State state,
-			ButtonStyleChannel channel, const WuiColor& fallback)
-		{
-			if (style == nullptr)
-				return fallback;
-			const WuiButtonStateColors& colors = style->Colors[static_cast<size_t>(state)];
-			const std::optional<WuiColor>* slot = &colors.Bg;
-			if (channel == ButtonStyleChannel::Border)
-				slot = &colors.Border;
-			else if (channel == ButtonStyleChannel::Text)
-				slot = &colors.Text;
-			return slot->has_value() ? **slot : fallback;
-		}
-
-		// border.focus 覆盖同时作用于焦点环(未覆盖 = 主题 FocusRing,与改动前完全一致)。
-		const WuiColor* FocusRingOverride(const WuiButtonStyle* style)
-		{
-			if (style == nullptr)
-				return nullptr;
-			const std::optional<WuiColor>& border =
-				style->Colors[static_cast<size_t>(WuiButtonStyle::State::Focused)].Border;
-			return border.has_value() ? &*border : nullptr;
-		}
+		const WuiButtonStyle::State state = disabled ? WuiButtonStyle::State::Disabled
+			: (pressed ? WuiButtonStyle::State::Pressed
+				: (hovered ? WuiButtonStyle::State::Hover
+					: (focused ? WuiButtonStyle::State::Focused : WuiButtonStyle::State::Normal)));
+		const WuiButtonStateColors* colors = style != nullptr
+			? &style->Colors[static_cast<size_t>(state)] : nullptr;
+		WuiButtonResolvedStyle resolved;
+		resolved.State = state;
+		resolved.BgCovered = colors != nullptr && colors->Bg.has_value();
+		resolved.BorderCovered = colors != nullptr && colors->Border.has_value();
+		resolved.TextCovered = colors != nullptr && colors->Text.has_value();
+		resolved.Bg = resolved.BgCovered ? *colors->Bg : fallbackBg;
+		resolved.Border = resolved.BorderCovered ? *colors->Border : fallbackBorder;
+		resolved.Text = resolved.TextCovered ? *colors->Text : fallbackText;
+		// border.focus 覆盖同时作用于焦点环(与当前状态无关);未覆盖 = 调用方给的主题 FocusRing。
+		const std::optional<WuiColor>* ring = style != nullptr
+			? &style->Colors[static_cast<size_t>(WuiButtonStyle::State::Focused)].Border : nullptr;
+		resolved.FocusRingCovered = ring != nullptr && ring->has_value();
+		resolved.FocusRing = resolved.FocusRingCovered ? **ring : fallbackFocusRing;
+		resolved.PaddingX = style != nullptr && style->PaddingX >= 0.0f ? style->PaddingX : 8.0f;
+		resolved.FontSize = style != nullptr && style->FontSize > 0.0f ? style->FontSize : 15.0f;
+		resolved.Bold = style != nullptr && style->Bold;
+		return resolved;
 	}
 
 	bool Button(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label, const WuiTheme& theme,
@@ -462,26 +458,17 @@ namespace World::Wui
 		// U2A 键盘激活:焦点在按钮上时 Enter/Space = 点击一次(KeyPressed 只含本帧新按下,长按不连发)。
 		const bool keyActivated = focused
 			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
-		// WUI-P1.5:状态优先级 pressed > hover > focus > normal;全部槽都未覆盖时下面三个兜底
-		// 就是改动前的取值(ButtonHover/ButtonBg、Border、pressed?Accent:Text)⇒ 命令流逐字节不变。
-		const WuiButtonStyle::State visual = style != nullptr && style->Disabled
-			? WuiButtonStyle::State::Disabled
-			: (pressed ? WuiButtonStyle::State::Pressed
-				: (hovered ? WuiButtonStyle::State::Hover
-					: (focused ? WuiButtonStyle::State::Focused : WuiButtonStyle::State::Normal)));
-		const float padding = style != nullptr && style->PaddingX >= 0.0f ? style->PaddingX : 8.0f;
-		const float fontSize = style != nullptr && style->FontSize > 0.0f ? style->FontSize : 15.0f;
-		const bool bold = style != nullptr && style->Bold;
-		const WuiColor fill = ResolveButtonColor(style, visual, ButtonStyleChannel::Bg,
-			hovered ? theme.ButtonHover : theme.ButtonBg);
-		const WuiColor border = ResolveButtonColor(style, visual, ButtonStyleChannel::Border, theme.Border);
-		const WuiColor textColor = ResolveButtonColor(style, visual, ButtonStyleChannel::Text,
-			pressed ? theme.Accent : theme.Text);
-		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });
-		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, border, 3.0f, 1.0f });
-		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + padding, rect.Y + (rect.H - fontSize) * 0.5f, 0, 0 },
-			textColor, 0, 1.0f, label, fontSize, bold });
-		DrawFocusRing(ctx, rect, id, theme, FocusRingOverride(style));
+		// WUI-P1.5:状态优先级 pressed > hover > focus > normal,disabled 覆盖一切;全部槽都未覆盖时
+		// 下面三个兜底就是改动前的取值(ButtonHover/ButtonBg、Border、pressed?Accent:Text)⇒ 命令流逐字节不变。
+		const WuiButtonResolvedStyle resolved = ResolveButtonStyle(style, style != nullptr && style->Disabled,
+			pressed, hovered, focused, hovered ? theme.ButtonHover : theme.ButtonBg,
+			theme.Border, pressed ? theme.Accent : theme.Text, theme.FocusRing);
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, resolved.Bg, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, resolved.Border, 3.0f, 1.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Text,
+			{ rect.X + resolved.PaddingX, rect.Y + (rect.H - resolved.FontSize) * 0.5f, 0, 0 },
+			resolved.Text, 0, 1.0f, label, resolved.FontSize, resolved.Bold });
+		DrawFocusRing(ctx, rect, id, theme, resolved.FocusRingCovered ? &resolved.FocusRing : nullptr);
 		return (hovered && ctx.Input().MouseClicked[0]) || keyActivated;
 	}
 

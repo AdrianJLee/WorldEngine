@@ -147,6 +147,10 @@ namespace World::Wui
 		bool Enabled = true;
 		// P4-UX13:图标按钮(‹ › ↑ 这类单字形)需要**居中**;文字按钮保持左对齐(默认)。
 		bool CenterLabel = false;
+		// WUI-P1.5a2:与立即模式 Wui::Button **同一份**样式结构 + 同一份解析(ResolveButtonStyle):
+		// 同一 per-state 颜色、同一内边距/字号哨兵口径。空槽 = 本类旧口径(主题令牌 / 仅交互态描边),
+		// 所以没设置过 Style 的按钮命令流与改动前逐字节相同;覆盖过的槽两面画出同一个颜色。
+		WuiButtonStyle Style;
 
 		WuiMeasure Measure(const WuiConstraints& constraints) override;
 		void Paint(WuiPaintContext& context) override;
