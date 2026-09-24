@@ -62,6 +62,9 @@ namespace World::Wui
 	struct WuiComponentDesc
 	{
 		std::string Id;                    // 唯一 id,如 "button.primary"、"dragfloat"
+		// 该条登记包装的控件结构体名(如 "WuiButton"、"WuiDragFloat")。
+		// 门禁用它比对"面板用到的控件类型是否都已在库里登记"(空 = 未声明,门禁会报缺口)。
+		std::string TypeName;
 		std::string DisplayName;           // 工作台显示名(默认英文;可用 i18n key 覆盖)
 		std::string Category;              // 分组,如 "Buttons" / "Inputs" / "Containers"
 		WuiComponentStatus Status = WuiComponentStatus::Draft;

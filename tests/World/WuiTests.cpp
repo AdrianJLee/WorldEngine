@@ -14,11 +14,14 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/Core/KeyCodes.h"
 
-#include <filesystem>
+#include <cctype>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <initializer_list>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -44,6 +47,73 @@ namespace
 	{
 		const float delta = a - b;
 		return delta > -0.001f && delta < 0.001f;
+	}
+
+	// P1a:登记的 TypeName 必须真的能在 WUI 头文件里找到声明 —— 保留模式控件是 struct/class
+	// (如 "WuiButton"),纯立即模式控件是头文件里的入口函数(如 "Segmented")。名字不能是编出来的。
+	// 头文件文本从仓库根读(ctest 的 WORKING_DIRECTORY 就是 ${CMAKE_SOURCE_DIR});读不到时再按
+	// __FILE__ 反推,兼容直接从 build 目录手跑。
+	std::vector<std::string> LoadWuiHeaderTexts()
+	{
+		std::vector<std::string> texts;
+		const std::filesystem::path candidates[] = {
+			std::filesystem::current_path() / "Engine/src/World/WUI",
+			std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() / "Engine/src/World/WUI",
+		};
+		for (const std::filesystem::path& dir : candidates)
+		{
+			if (!std::filesystem::exists(dir))
+				continue;
+			for (const std::filesystem::directory_entry& file : std::filesystem::recursive_directory_iterator(dir))
+			{
+				if (!file.is_regular_file() || file.path().extension() != ".h")
+					continue;
+				std::ifstream stream(file.path(), std::ios::binary);
+				if (!stream)
+					continue;
+				std::stringstream buffer;
+				buffer << stream.rdbuf();
+				texts.push_back(buffer.str());
+			}
+			if (!texts.empty())
+				break;
+		}
+		return texts;
+	}
+
+	bool DeclaredInWuiHeaders(const std::vector<std::string>& texts, const std::string& name)
+	{
+		const auto isWordChar = [](char ch)
+		{
+			return std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_';
+		};
+		const auto isBlank = [](char ch) { return ch == ' ' || ch == '\t'; };
+		for (const std::string& text : texts)
+		{
+			size_t at = text.find(name);
+			while (at != std::string::npos)
+			{
+				const size_t end = at + name.size();
+				const bool leftOk = at == 0 || !isWordChar(text[at - 1]);
+				const bool rightOk = end >= text.size() || !isWordChar(text[end]);
+				if (leftOk && rightOk)
+				{
+					size_t before = at;
+					while (before > 0 && isBlank(text[before - 1]))
+						--before;
+					const bool asType = (before >= 6 && text.compare(before - 6, 6, "struct") == 0)
+						|| (before >= 5 && text.compare(before - 5, 5, "class") == 0);
+					size_t after = end;
+					while (after < text.size() && isBlank(text[after]))
+						++after;
+					const bool asEntry = after < text.size() && text[after] == '(';
+					if (asType || asEntry)
+						return true;
+				}
+				at = text.find(name, at + 1);
+			}
+		}
+		return false;
 	}
 }
 
@@ -1106,11 +1176,19 @@ int main()
 			const std::vector<WuiComponentDesc>& all = WuiComponentRegistry::All();
 			CHECK(all.size() >= 20);
 			CHECK(WuiComponentRegistry::Count() == all.size());
+			// P1a:TypeName = 该件在**面板侧**的控件入口名(保留模式类名,或立即模式控件入口名)。
+			// 头文件文本读一次,循环里逐条断言"名字真的存在",挡住编出来的名字。
+			const std::vector<std::string> wuiHeaders = LoadWuiHeaderTexts();
+			CHECK(!wuiHeaders.empty());
 			std::set<std::string> ids;
+			std::set<std::string> typeNames;
 			for (const WuiComponentDesc& desc : all)
 			{
 				CHECK(!desc.Id.empty());
 				CHECK(ids.insert(desc.Id).second);      // id 唯一
+				CHECK(!desc.TypeName.empty());          // 面板侧控件入口名必须声明
+				CHECK(DeclaredInWuiHeaders(wuiHeaders, desc.TypeName));
+				typeNames.insert(desc.TypeName);
 				CHECK(!desc.DisplayName.empty());
 				CHECK(!desc.Category.empty());
 				CHECK(!desc.SourceFile.empty());
@@ -1124,6 +1202,12 @@ int main()
 						hasDefault = true;
 				CHECK(hasDefault);
 			}
+			// 面板源码里实际引用的控件类型(Editor/src/WUI/Panels/** 的 `Wui::WuiXxx`)必须都能在
+			// 登记表的 TypeName 里找到 —— 门禁 tools/agents/check-ui-components.ps1 从面板源码推导
+			// 同一张名单;这里是它的运行时版本,同时钉住"这 10 件不被顺手删掉"。
+			for (const char* panelType : { "WuiBox", "WuiButton", "WuiImage", "WuiImageButton", "WuiLabel",
+					 "WuiListRow", "WuiProgress", "WuiScrollArea", "WuiSpacer", "WuiTextField" })
+				CHECK(typeNames.count(panelType) == 1);
 			// All() 稳定排序:连调两次逐条一致,且按 Category → DisplayName → Id 有序。
 			const std::vector<WuiComponentDesc>& again = WuiComponentRegistry::All();
 			CHECK(again.size() == all.size());

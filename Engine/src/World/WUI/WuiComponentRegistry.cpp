@@ -35,6 +35,10 @@
 //     未知属性名、非法数值一律忽略并退回当前值 —— 不抛异常、不崩。
 //  4) 状态:除 default 外的伪状态由 PseudoState 在本帧临时改输入/焦点,作用域结束即恢复;
 //     没有对应视觉/交互表达的控件不登记该状态(States 只列"画得出来"的)。
+//  5) TypeName = 该件在**面板侧**的控件入口名:面板以保留模式类出现时填类名(如 "WuiButton"),
+//     纯立即模式控件填 WuiWidgets.h / WuiChrome.h / WuiCodeEditor.h 里的入口名(如 "Segmented")。
+//     门禁 tools/agents/check-ui-components.ps1 按这个字段比对"面板用到的控件类型是否都已登记",
+//     单测 §19 要求它非空、且能在 Engine/src/World/WUI 的头文件里找到同名声明。
 
 namespace World::Wui
 {
@@ -1118,6 +1122,127 @@ namespace World::Wui
 			CodeEditor(ctx, id, slot.Rect, buffer, options);
 		}
 
+		// ---- P1a:面板里的保留模式件(WuiLabel / WuiImage / WuiBox / WuiSpacer / WuiListRow)----
+		// 这五件只在面板里以**对象树**出现(Editor/src/WUI/Panels/**),showcase 走与 WuiProgress
+		// 完全相同的路径:建树 → LayoutWidgetTree → WuiPaintContext::Paint —— 不是复刻 demo。
+
+		void PaintRetained(const WuiComponentDraw& draw, const WuiWidgetPtr& root, const WuiRect& rect)
+		{
+			LayoutWidgetTree(root, rect);
+			WuiPaintContext paint(*draw.Context);
+			root->Paint(paint);
+		}
+
+		WuiWidgetPtr RetainedLabel(const std::string& text, float fontSize, const WuiColor& color, bool bold = false)
+		{
+			auto label = std::make_shared<WuiLabel>();
+			label->Text = text;
+			label->FontSize = fontSize;
+			label->Color = color;
+			label->Bold = bold;
+			return label;
+		}
+
+		void ShowLabel(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 220.0f, 20.0f);
+			const WuiId id = BeginShowcase(draw, "label", "Label", slot.Rect);
+			(void)id;
+			auto label = std::make_shared<WuiLabel>();
+			label->Text = MaybeLongText(draw, LocalizedText(draw, "text", "Player Name", "玩家名称"));
+			label->FontSize = DrivenFloat(ctx, "showcase.label.fontSize", draw, "fontSize", 15.0f, 8.0f, 32.0f) * slot.Scale;
+			label->Bold = BoolProperty(draw, "bold", false);
+			label->Color = theme.Text;
+			PaintRetained(draw, label, slot.Rect);
+		}
+
+		void ShowImage(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 96.0f, 96.0f);
+			const WuiId id = BeginShowcase(draw, "image", "Image", slot.Rect);
+			(void)id;
+			// WuiImage 只画纹理:纹理 id 由宿主用 WuiTextureRegistry 注册后交给面板(视口/预览都是
+			// 这条路径),默认 0 = 空图 —— 控件不造假外观。工作台可用 textureId 属性填一个已注册的
+			// 纹理 id 看真实效果(tint 只影响着色,不会凭空造出内容)。
+			auto image = std::make_shared<WuiImage>();
+			image->TextureId = static_cast<uint64_t>(DrivenInt(ctx, "showcase.image.textureId", draw, "textureId", 0, 0, 100000));
+			image->Uv = { 0.0f, 0.0f, 1.0f, 1.0f };
+			const glm::vec4 tint = DrivenColor(ctx, "showcase.image.tint", draw, "tint", glm::vec4 { 1.0f, 1.0f, 1.0f, 1.0f });
+			image->Tint = WuiColor { tint.r, tint.g, tint.b, tint.a };
+			PaintRetained(draw, image, slot.Rect);
+		}
+
+		void ShowBox(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 240.0f, 84.0f);
+			const WuiId id = BeginShowcase(draw, "box", "Box (Layout)", slot.Rect);
+			(void)id;
+			auto box = std::make_shared<WuiBox>();
+			box->Direction = (draw.State == "row" || TrimmedLower(TextProperty(draw, "direction", "column")) == "row")
+				? WuiDirection::Row
+				: WuiDirection::Column;
+			box->Gap = DrivenFloat(ctx, "showcase.box.gap", draw, "gap", 6.0f, 0.0f, 24.0f) * slot.Scale;
+			box->AlignCross = WuiAlign::Stretch;
+			box->Add(RetainedLabel(LocalizedText(draw, "first", "Header row", "标题行"), 15.0f * slot.Scale, theme.Text));
+			box->Add(RetainedLabel(MaybeLongText(draw, LocalizedText(draw, "second", "Body text", "正文")),
+				14.0f * slot.Scale, theme.TextMuted));
+			box->Add(RetainedLabel(LocalizedText(draw, "third", "Footer row", "页脚行"), 13.0f * slot.Scale, theme.TextMuted));
+			PaintRetained(draw, box, slot.Rect);
+		}
+
+		void ShowSpacer(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 220.0f, 20.0f);
+			const WuiId id = BeginShowcase(draw, "spacer", "Spacer", slot.Rect);
+			(void)id;
+			// WuiSpacer::Paint 是空的 —— 它不画像素、只撑开**布局间距**。showcase 用两个真实
+			// WuiLabel 夹一个 spacer,把"它撑开的距离"画出来(而不是画一个假占位块)。
+			auto row = std::make_shared<WuiBox>();
+			row->Direction = WuiDirection::Row;
+			row->AlignCross = WuiAlign::Center;
+			row->Add(RetainedLabel(LocalizedText(draw, "left", "Left", "左"), 15.0f * slot.Scale, theme.Text));
+			auto spacer = std::make_shared<WuiSpacer>();
+			spacer->Width = DrivenFloat(ctx, "showcase.spacer.width", draw, "width", 48.0f, 0.0f, 240.0f) * slot.Scale;
+			spacer->Height = 1.0f;
+			row->Add(spacer);
+			row->Add(RetainedLabel(LocalizedText(draw, "right", "Right", "右"), 15.0f * slot.Scale, theme.Text));
+			PaintRetained(draw, row, slot.Rect);
+		}
+
+		void ShowListRow(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme& theme = *draw.Theme;
+			const Slot slot = Canvas(draw, theme, 224.0f, 72.0f);
+			const WuiId id = BeginShowcase(draw, "listrow", "List Row", slot.Rect);
+			auto column = std::make_shared<WuiBox>();
+			column->Direction = WuiDirection::Column;
+			column->Gap = 2.0f * slot.Scale;
+			column->Add(RetainedLabel(LocalizedText(draw, "root", "Assets", "资源"), 13.0f * slot.Scale, theme.TextMuted));
+
+			auto row = std::make_shared<WuiListRow>();
+			row->SetId(id);   // 行自己登记 kind=list-row(与层级面板同一条 a11y 契约),覆盖外壳锚点
+			row->Text = MaybeLongText(draw, LocalizedText(draw, "label", "Textures/Icon.png", "textures/Icon.png"));
+			row->FontSize = 14.0f * slot.Scale;
+			row->Indent = DrivenFloat(ctx, "showcase.listrow.indent", draw, "indent", 14.0f, 0.0f, 32.0f) * slot.Scale;
+			row->Selected = draw.State == "selected" || BoolProperty(draw, "selected", false);
+			row->AccessValue = row->Selected ? "depth=1 selected=true" : "depth=1 selected=false";
+			column->Add(row);
+
+			column->Add(RetainedLabel(LocalizedText(draw, "sibling", "Scenes", "场景"), 13.0f * slot.Scale, theme.TextMuted));
+			// hover 伪状态:鼠标落到画布中心 ≈ 中间那行的位置(布局变化时仍落在行内)。
+			PseudoState pseudo(draw, id, slot.Rect);
+			PaintRetained(draw, column, slot.Rect);
+		}
+
 		// ---- 登记存储 ----
 
 		struct RegistryStore
@@ -1307,13 +1432,15 @@ namespace World::Wui
 			return ids;
 		}
 
-		WuiComponentDesc Desc(const char* id, const char* displayName, const char* category, WuiComponentStatus status,
-			const char* sourceFile, const char* a11yNotes, const char* sizeNotes,
+		// typeName 见文件头约定 5):面板侧控件入口名(保留模式类名,或立即模式控件入口名)。
+		WuiComponentDesc Desc(const char* id, const char* typeName, const char* displayName, const char* category,
+			WuiComponentStatus status, const char* sourceFile, const char* a11yNotes, const char* sizeNotes,
 			std::vector<std::string> extraA11yIds, std::vector<State> states, std::vector<Property> properties,
 			void (*showcase)(const WuiComponentDraw&))
 		{
 			WuiComponentDesc desc;
 			desc.Id = id;
+			desc.TypeName = typeName;
 			desc.DisplayName = displayName;
 			desc.Category = category;
 			desc.Status = status;
@@ -1328,14 +1455,14 @@ namespace World::Wui
 		}
 
 		// ---- 登记现有控件(P0-2) ----
-		// Status:Approved = 外观与行为已定(既有单测 + a11y/id 契约 + 面板长期使用);
-		// 仍是 P1 之前的初判 —— P1 补状态矩阵/像素基线时按需改成 Draft 或记批准提交号。
+		// Status:P1a 起**全部为 Draft**。Approved 只能由 P1 的"像素基线 + 探针 + 批准提交号"证据产生
+		// (工作台的 Approve 记录在 build/**/approved.json,不直接改登记表);Deprecated 留给将来退役的件。
 
 		void RegisterBuiltins()
 		{
 			// ---- Buttons ----
 			WuiComponentRegistry::Register(Desc(
-				"button", "Button", "Buttons", WuiComponentStatus::Approved,
+				"button", "WuiButton", "Button", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=button;id=HashId('showcase.button')(控件自身登记);label=label 属性;disabled 用主题禁用令牌;焦点环走 DrawFocusRing",
 				"showcase 首选 128x24;控件无最小宽(窄于文字会溢出);H=theme.ControlHeight×Density×UiScale",
@@ -1345,7 +1472,7 @@ namespace World::Wui
 				&ShowButton));
 
 			WuiComponentRegistry::Register(Desc(
-				"button.icon", "Icon Button", "Buttons", WuiComponentStatus::Draft,
+				"button.icon", "WuiImageButton", "Icon Button", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
 				"role=无(控件不登记节点);showcase 外壳节点 kind=component-root、interactive=false;label=label 属性;textureId=0 时退化成语义文字",
 				"showcase 首选 32x24(方形图标位);enabled=false 时节点仍由外壳提供",
@@ -1355,7 +1482,7 @@ namespace World::Wui
 				&ShowIconButton));
 
 			WuiComponentRegistry::Register(Desc(
-				"button.reset-default", "Reset Default", "Buttons", WuiComponentStatus::Draft,
+				"button.reset-default", "ResetDefaultButton", "Reset Default", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=reset-default;id=HashId('showcase.button.reset-default')(控件自身登记);value=modified/default;enabled/interactive 跟随 modified;tooltip 进节点 Tooltip",
 				"固定占位:首选 24x24(设计口径:调用方按行高恒定预留);不因 modified 变尺寸",
@@ -1365,7 +1492,7 @@ namespace World::Wui
 				&ShowResetDefaultButton));
 
 			WuiComponentRegistry::Register(Desc(
-				"toggle", "Toggle", "Buttons", WuiComponentStatus::Approved,
+				"toggle", "Toggle", "Toggle", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=toggle;id=HashId('showcase.toggle')(控件自身登记);value=on/off;状态写回控件自己的 Persist<bool>(id)",
 				"showcase 首选 148x24;标签从 24px 起画,16x16 方块垂直居中;H 同上",
@@ -1375,7 +1502,7 @@ namespace World::Wui
 				&ShowToggle));
 
 			WuiComponentRegistry::Register(Desc(
-				"segmented", "Segmented", "Buttons", WuiComponentStatus::Draft,
+				"segmented", "Segmented", "Segmented", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=segmented(组,interactive=false)+ 子节点 kind=segmented-option(派生 id=HashId(str(父id)+'.segment.'+i));组节点覆盖外壳锚点;value=当前下标",
 				"showcase 首选 210x24;项等分宽度;建议 2–4 项(空表直接返回)",
@@ -1386,7 +1513,7 @@ namespace World::Wui
 
 			// ---- Inputs ----
 			WuiComponentRegistry::Register(Desc(
-				"checkbox", "Checkbox", "Inputs", WuiComponentStatus::Approved,
+				"checkbox", "Checkbox", "Checkbox", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=checkbox;id=HashId('showcase.checkbox')(控件自身登记);value=true/false;返回值=本帧是否改值",
 				"showcase 首选 168x24;16x16 方块 + 24px 起画文字;H 同上",
@@ -1396,7 +1523,7 @@ namespace World::Wui
 				&ShowCheckbox));
 
 			WuiComponentRegistry::Register(Desc(
-				"checkbox.mixed", "Checkbox (Mixed)", "Inputs", WuiComponentStatus::Approved,
+				"checkbox.mixed", "CheckboxMixed", "Checkbox (Mixed)", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=checkbox;id=HashId('showcase.checkbox.mixed');value=mixed/true/false;mixed 由调用方按值传入(本控件不持久化三态)",
 				"同 checkbox:首选 168x24",
@@ -1406,7 +1533,7 @@ namespace World::Wui
 				&ShowCheckboxMixed));
 
 			WuiComponentRegistry::Register(Desc(
-				"slider.float", "Slider", "Inputs", WuiComponentStatus::Approved,
+				"slider.float", "SliderFloat", "Slider", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=slider;id=HashId('showcase.slider.float')(控件自身登记);value=三位小数文本;焦点上 ←/→ = 1% 值域步进",
 				"showcase 首选 190x24;轨道 4px 垂直居中;min/max 覆盖非法时退回 0..1",
@@ -1417,7 +1544,7 @@ namespace World::Wui
 				&ShowSliderFloat));
 
 			WuiComponentRegistry::Register(Desc(
-				"dragfloat", "Drag Float", "Inputs", WuiComponentStatus::Approved,
+				"dragfloat", "DragFloat", "Drag Float", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=drag-float(编辑态切 text-field);id=HashId('showcase.dragfloat');value=数值文本;↑/↓ = 步进,speed 为拖动灵敏度",
 				"showcase 首选 150x24;范围默认 0..10;min>=max 视为无界(与控件哨兵约定一致)",
@@ -1429,7 +1556,7 @@ namespace World::Wui
 				&ShowDragFloat));
 
 			WuiComponentRegistry::Register(Desc(
-				"dragbar.float", "Drag Bar", "Inputs", WuiComponentStatus::Draft,
+				"dragbar.float", "DragBarFloat", "Drag Bar", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=slider(编辑态切 text-field);id=HashId('showcase.dragbar.float');value=显示值+单位;右侧值区宽度固定(style.ValueWidth,最小 40)",
 				"showcase 首选 200x24;值区固定宽度是「点恢复默认不改行矩形」的前提",
@@ -1440,7 +1567,7 @@ namespace World::Wui
 				&ShowDragBarFloat));
 
 			WuiComponentRegistry::Register(Desc(
-				"numberfield.int", "Number Field", "Inputs", WuiComponentStatus::Draft,
+				"numberfield.int", "NumberFieldInt", "Number Field", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=number-field(编辑态切 text-field);id=HashId('showcase.numberfield.int');value=整数+单位;steppers=true 时额外登记 DerivedChildId(id,'.dec'/'.inc',0) 两个 stepper-button",
 				"showcase 首选 128x24;步进钮宽 = clamp(18..24, 18% 宽);计数/索引类字段不做拖动改值",
@@ -1450,7 +1577,7 @@ namespace World::Wui
 				&ShowNumberFieldInt));
 
 			WuiComponentRegistry::Register(Desc(
-				"stepper.int", "Stepper", "Inputs", WuiComponentStatus::Draft,
+				"stepper.int", "StepperInt", "Stepper", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=stepper(编辑态切 text-field);id=HashId('showcase.stepper.int');[−]/[+] 为 DerivedChildId(id,'.dec'/'.inc',0)",
 				"showcase 首选 132x24;小范围整数(本条目展示 1..16);值区可键入",
@@ -1460,7 +1587,7 @@ namespace World::Wui
 				&ShowStepperInt));
 
 			WuiComponentRegistry::Register(Desc(
-				"textfield", "Text Field", "Inputs", WuiComponentStatus::Approved,
+				"textfield", "WuiTextField", "Text Field", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=text-field;id=HashId('showcase.textfield')(控件自身登记);label=属性 label、占位=属性 placeholder(label/value 都进节点);光标走 TextCursorByte",
 				"showcase 首选 210x24;行内无纵向余量;长文本由控件自己滚动/裁剪",
@@ -1471,7 +1598,7 @@ namespace World::Wui
 				&ShowTextField));
 
 			WuiComponentRegistry::Register(Desc(
-				"textfield.error", "Text Field (Error)", "Inputs", WuiComponentStatus::Draft,
+				"textfield.error", "TextFieldEx", "Text Field (Error)", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=text-field;id=HashId('showcase.textfield.error');value 追加 ' error=<文本>';错误行画在控件下方一行(Caption),调用方负责留高度",
 				"showcase 首选 210x24 + 下方 14px 错误行;错误态描边用 theme.Danger",
@@ -1481,7 +1608,7 @@ namespace World::Wui
 				&ShowTextFieldError));
 
 			WuiComponentRegistry::Register(Desc(
-				"combo", "Combo", "Inputs", WuiComponentStatus::Approved,
+				"combo", "Combo", "Combo", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=combo;id=HashId('showcase.combo');弹层条目 kind=combo-option(id=HashId(str(父id)+'.option.'+i));state=open 时 showcase 打开弹层",
 				"showcase 首选 190x24;弹层高 = 条目 22px×n + 8,在画布下方需要留空间",
@@ -1491,7 +1618,7 @@ namespace World::Wui
 				&ShowCombo));
 
 			WuiComponentRegistry::Register(Desc(
-				"combo.searchable", "Searchable Combo", "Inputs", WuiComponentStatus::Draft,
+				"combo.searchable", "SearchableCombo", "Searchable Combo", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=search-combo;id=HashId('showcase.combo.searchable');弹层 combo-option + combo-item(id=HashId(itemKey));过滤串用 id^0x5A17 的持久槽(与编辑缓冲不同 id)",
 				"showcase 首选 190x24;选项多时用滚轮;同一 id 的不同类型持久槽是崩溃源,勿混用",
@@ -1501,7 +1628,7 @@ namespace World::Wui
 				&ShowSearchableCombo));
 
 			WuiComponentRegistry::Register(Desc(
-				"colorfield", "Color Field", "Inputs", WuiComponentStatus::Approved,
+				"colorfield", "ColorField", "Color Field", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=color-field;id=HashId('showcase.colorfield');value=#RRGGBB(带 alpha 8 位);弹层子节点 .sv./.hue./.alpha./.slider./.preset./.hex.(派生 id 见 WuiWidgets.cpp DerivedChildId)",
 				"showcase 首选 190x22;弹层 220x132 需要画布右侧/下方留空间",
@@ -1511,7 +1638,7 @@ namespace World::Wui
 				&ShowColorField));
 
 			WuiComponentRegistry::Register(Desc(
-				"vec3field", "Vec3 Field", "Inputs", WuiComponentStatus::Draft,
+				"vec3field", "Vec3Field", "Vec3 Field", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=vec3-field;id=HashId('showcase.vec3field');value='x,y,z';三个分量各登记 vec3-axis(id=HashId(str(父id)+'.axis.'+i))",
 				"showcase 首选 220x24;窄画布(<约 220)时 layout=1 竖排(本条目用 state=vertical 展示)",
@@ -1521,7 +1648,7 @@ namespace World::Wui
 				&ShowVec3Field));
 
 			WuiComponentRegistry::Register(Desc(
-				"searchfield", "Search Field", "Inputs", WuiComponentStatus::Draft,
+				"searchfield", "SearchField", "Search Field", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
 				"role=无(空且未聚焦时不登记节点);focus 后内部转发 TextField(id=HashId('showcase.searchfield')) → kind=text-field;showcase 外壳锚点 kind=component-root",
 				"showcase 首选 200x24;放大镜占 18px、清除按钮占 18px",
@@ -1531,7 +1658,7 @@ namespace World::Wui
 				&ShowSearchField));
 
 			WuiComponentRegistry::Register(Desc(
-				"codeeditor", "Code Editor", "Inputs", WuiComponentStatus::Draft,
+				"codeeditor", "CodeEditor", "Code Editor", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiCodeEditor.cpp",
 				"role=无根节点(编辑器只在补全浮层可见时登记 '<CompletionIdPrefix>.<i>' 与 '.status',悬停登记 '.hover');showcase 外壳锚点 kind=component-root;本条目 = Draft,探针先按像素/命令断言",
 				"showcase 首选 280x104;行高 19×UiScale;ErrorLine 用 state=error 展示",
@@ -1542,7 +1669,7 @@ namespace World::Wui
 
 			// ---- Containers ----
 			WuiComponentRegistry::Register(Desc(
-				"tabs", "Tabs", "Containers", WuiComponentStatus::Approved,
+				"tabs", "TabBar", "Tabs", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=tab(每个标签一个子节点,id=HashId(str(父id)+'.tab.'+i),value=true/false);父节点不登记 —— showcase 外壳锚点 kind=component-root",
 				"showcase 首选 240x24;标签等分整条矩形;中键点击上报 closeRequested(本 showcase 不接)",
@@ -1552,7 +1679,7 @@ namespace World::Wui
 				&ShowTabs));
 
 			WuiComponentRegistry::Register(Desc(
-				"treenode", "Tree Node", "Containers", WuiComponentStatus::Draft,
+				"treenode", "TreeNode", "Tree Node", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=tree-node;id=HashId('showcase.treenode')(控件自身登记);value=open/closed;leaf=true 时 interactive=false 且不进 Tab 顺序",
 				"showcase 首选 190x20;展开/收起标记用 '+'/'-' 文本,不依赖字体箭头字形",
@@ -1562,7 +1689,7 @@ namespace World::Wui
 				&ShowTreeNode));
 
 			WuiComponentRegistry::Register(Desc(
-				"treeview", "Tree View", "Containers", WuiComponentStatus::Approved,
+				"treeview", "TreeView", "Tree View", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiChrome.cpp",
 				"role=tree-item(每行节点 id=条目自己的 Id —— showcase 用 HashId('showcase.treeview.item.N'),ExtraA11yIds 可复算);value='depth=.. expanded=.. children=..';父容器不登记节点",
 				"showcase 首选 230x96(自带滚动裁剪);行高 22×Density;半滚出行不登记节点(中心必须落在可视区)",
@@ -1573,7 +1700,7 @@ namespace World::Wui
 				&ShowTreeView));
 
 			WuiComponentRegistry::Register(Desc(
-				"listview", "List View", "Containers", WuiComponentStatus::Approved,
+				"listview", "ListView", "List View", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiChrome.cpp",
 				"role=无(列表行不登记 a11y 节点);showcase 外壳锚点 kind=component-root、interactive=false;行 Id 仍是稳定 id 但只用于调用方交互",
 				"showcase 首选 230x96(自带滚动裁剪);行高 24×Density;选中行底色 theme.PanelBg、悬停 ButtonHover",
@@ -1583,7 +1710,7 @@ namespace World::Wui
 				&ShowListView));
 
 			WuiComponentRegistry::Register(Desc(
-				"table.header", "Table Header", "Containers", WuiComponentStatus::Approved,
+				"table.header", "TableHeader", "Table Header", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=table-header(每列一个子节点 id=HashId(str(父id)+'.col.'+i),value=asc/desc/空);父节点不登记 —— 外壳锚点 kind=component-root",
 				"showcase 首选 260x24 表头 + 22px 数据行;列宽等分(真实表格由调用方给列宽表)",
@@ -1593,7 +1720,7 @@ namespace World::Wui
 				&ShowTableHeader));
 
 			WuiComponentRegistry::Register(Desc(
-				"scrollarea", "Scroll Area", "Containers", WuiComponentStatus::Draft,
+				"scrollarea", "WuiScrollArea", "Scroll Area", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=无(裁剪容器不登记节点,调用方给内容行各自登记);外壳锚点 kind=component-root;滚轮只改 scrollY",
 				"showcase 首选 220x96,内容 8 行×24;state=scrolled 展示滚动后的裁剪边界",
@@ -1603,7 +1730,7 @@ namespace World::Wui
 				&ShowScrollArea));
 
 			WuiComponentRegistry::Register(Desc(
-				"modal", "Modal Dialog", "Containers", WuiComponentStatus::Approved,
+				"modal", "BeginModal", "Modal Dialog", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=无(外框不登记节点;内部按钮各自登记 button = HashId('showcase.modal.confirm'/'showcase.modal.cancel'));外壳锚点 kind=component-root",
 				"居中外框按 ctx.ViewportSize() 计算:size 传入即被采用;遮罩/外框会登记覆盖层(下一帧挡下层),工作台宜给它独立画布",
@@ -1614,7 +1741,7 @@ namespace World::Wui
 				&ShowModal));
 
 			WuiComponentRegistry::Register(Desc(
-				"empty.state", "Empty State", "Containers", WuiComponentStatus::Approved,
+				"empty.state", "EmptyState", "Empty State", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=empty-state;节点 id = actionLabel 非空时 DerivedChildId(actionId,'.empty-state.',0),否则 HashId('empty-state:'+title);value=hint;interactive=false;有 action 时按钮由 Button 自己登记",
 				"showcase 首选 280x120;左右各留 24px 安全边距;state=empty 展示无 glyph/无按钮的纯文案形态",
@@ -1625,7 +1752,7 @@ namespace World::Wui
 				&ShowEmptyState));
 
 			WuiComponentRegistry::Register(Desc(
-				"splitter", "Splitter", "Containers", WuiComponentStatus::Draft,
+				"splitter", "Splitter", "Splitter", "Containers", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=splitter;id=HashId('showcase.splitter')(控件自身登记);value=当前值;命中带宽固定 6px(传入矩形即那条带)",
 				"showcase 首选 200x72(两栏各一块底板);拖动按按下时的值 + 轴向位移累加,夹在 [min,max]",
@@ -1634,9 +1761,39 @@ namespace World::Wui
 				{ PropFloat("value", 24.0f, 200.0f, 1.0f) },
 				&ShowSplitter));
 
+			WuiComponentRegistry::Register(Desc(
+				"box", "WuiBox", "Box (Layout)", "Containers", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidget.cpp",
+				"role=无(布局容器不登记节点;子件各自登记自己的 a11y);showcase 外壳锚点 kind=component-root、interactive=false",
+				"填满画布(showcase 首选 240x84);Direction/Gap 由属性控制;子件按 intrinsic 尺寸经 SolveFlex 排布 —— 与面板同一条布局路径",
+				ShellIds("box"),
+				StateList({ "default", "row" }),
+				{ PropFloat("gap", 0.0f, 24.0f, 1.0f), PropText("direction", "column") },
+				&ShowBox));
+
+			WuiComponentRegistry::Register(Desc(
+				"spacer", "WuiSpacer", "Spacer", "Containers", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidget.cpp",
+				"role=无(不画像素、不进焦点表,所以没有自己的节点);showcase 外壳锚点 kind=component-root、interactive=false,并用左右两个 WuiLabel 标出它撑开的间距",
+				"自身尺寸 = Width×Height(默认 0x0,由调用方给);showcase 首选 220x20;示例间距 48px(UiScale 参与缩放)",
+				ShellIds("spacer"),
+				StateList({ "default" }),
+				{ PropFloat("width", 0.0f, 240.0f, 1.0f), PropText("left", "Left"), PropText("right", "Right") },
+				&ShowSpacer));
+
+			WuiComponentRegistry::Register(Desc(
+				"listrow", "WuiListRow", "List Row", "Containers", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidget.cpp",
+				"role=list-row(SetId 后才进树:id=HashId('showcase.listrow');label=行文本;value=AccessValue);外层 WuiBox/同级标题不登记节点",
+				"showcase 首选 224x72(父行 + 本行 + 兄弟行);行高 = FontSize+6;Indent 只挪文字,不动选中/悬停底色",
+				ShellIds("listrow"),
+				StateList({ "default", "hover", "selected" }),
+				{ PropText("label", "Textures/Icon.png"), PropBool("selected"), PropFloat("indent", 0.0f, 32.0f, 1.0f) },
+				&ShowListRow));
+
 			// ---- Chrome ----
 			WuiComponentRegistry::Register(Desc(
-				"sectionheader", "Section Header", "Chrome", WuiComponentStatus::Approved,
+				"sectionheader", "SectionHeader", "Section Header", "Chrome", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
 				"role=无(纯展示);外壳锚点 kind=component-root、interactive=false;字号默认 15(UiScale 参与缩放)",
 				"showcase 首选 220x24;标题 + 下方 1px 分隔线;长标题按传入宽度绘制(控件不自行省略)",
@@ -1646,7 +1803,7 @@ namespace World::Wui
 				&ShowSectionHeader));
 
 			WuiComponentRegistry::Register(Desc(
-				"breadcrumb", "Breadcrumb", "Chrome", WuiComponentStatus::Draft,
+				"breadcrumb", "Breadcrumb", "Breadcrumb", "Chrome", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
 				"role=无(路径段不登记节点);外壳锚点 kind=component-root;命中按 '/' 分段,返回被点段下标",
 				"showcase 首选 230x20;段宽按粗略字宽(7px/字符)算,仅影响命中不影响绘制",
@@ -1656,7 +1813,7 @@ namespace World::Wui
 				&ShowBreadcrumb));
 
 			WuiComponentRegistry::Register(Desc(
-				"tooltip", "Tooltip", "Chrome", WuiComponentStatus::Draft,
+				"tooltip", "Tooltip", "Tooltip", "Chrome", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
 				"role=无独立节点(tooltip 是文本,不是可聚焦控件);宿主画完所有面板后调 DrawTooltip 一次,画到 overlay;文本进 ctx.Tooltip() 并由调用控件带进 a11y 节点 Tooltip 字段",
 				"气泡跟随光标右下 16/20,超出视口翻到另一侧;最大文本宽 380px,超宽换行",
@@ -1665,9 +1822,29 @@ namespace World::Wui
 				{ PropText("label", "Hover me"), PropText("tooltip", "Adds a new entity to the current scene.") },
 				&ShowTooltip));
 
+			WuiComponentRegistry::Register(Desc(
+				"label", "WuiLabel", "Label", "Chrome", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidget.cpp",
+				"role=无(WuiLabel 不登记节点,纯展示);showcase 外壳锚点 kind=component-root、interactive=false;文本/字号/粗体都由调用方给",
+				"showcase 首选 220x20;宽高 = 字宽×文本 / FontSize+6;不裁剪(超宽会溢出调用方的矩形)",
+				ShellIds("label"),
+				StateList({ "default", "long-text" }),
+				{ PropText("text", "Player Name"), PropFloat("fontSize", 8.0f, 32.0f, 1.0f), PropBool("bold") },
+				&ShowLabel));
+
+			WuiComponentRegistry::Register(Desc(
+				"image", "WuiImage", "Image", "Chrome", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidget.cpp",
+				"role=无(纯展示纹理,不登记节点);showcase 外壳锚点 kind=component-root、interactive=false;纹理 id 必须来自宿主的 WuiTextureRegistry(0 = 空图,节点仍在)",
+				"showcase 首选 96x96;纹理 id / UV / tint 由调用方给(视口、材质预览、模型预览都是这条路径)",
+				ShellIds("image"),
+				StateList({ "default" }),
+				{ PropInt("textureId", 0.0f, 100000.0f, 1.0f), PropText("tint", "#FFFFFF") },
+				&ShowImage));
+
 			// ---- Menus ----
 			WuiComponentRegistry::Register(Desc(
-				"contextmenu", "Context Menu", "Menus", WuiComponentStatus::Approved,
+				"contextmenu", "BeginContextMenu", "Context Menu", "Menus", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/Widgets/WuiChrome.cpp",
 				"role=menu-item(每项 id=HashId('showcase.contextmenu.<action>'));带勾选项 value=checked/unchecked;菜单面板本身不登记节点;位置在打开时钉住",
 				"面板高 = 条目 22px×itemCount + 8;showcase 画 4 项(含 1 分隔与 1 禁用项)",
@@ -1680,7 +1857,7 @@ namespace World::Wui
 
 			// ---- Feedback ----
 			WuiComponentRegistry::Register(Desc(
-				"progress", "Progress Bar", "Feedback", WuiComponentStatus::Draft,
+				"progress", "WuiProgress", "Progress Bar", "Feedback", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidget.cpp",
 				"role=无(WuiProgress 不登记节点 —— 它是保留模式控件,读数面板用同样的 LayoutWidgetTree+Paint);外壳锚点 kind=component-root;Fraction 夹在 0..1",
 				"showcase 首选 200x12;轨道/填充都是 3px 圆角矩形;调用方决定行高",
