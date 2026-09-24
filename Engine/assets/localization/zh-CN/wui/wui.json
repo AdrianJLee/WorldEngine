@@ -1,0 +1,11 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "engine",
+  "$language": "zh-CN",
+  "$owns": [
+    "wui."
+  ],
+  "wui.color.saturation_value": "饱和度 / 明度",
+  "wui.color.hue": "色相",
+  "wui.color.alpha": "不透明度"
+}

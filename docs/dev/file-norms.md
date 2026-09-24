@@ -58,7 +58,8 @@ tools/    vendor/     World/
 | 构建脚本/PS | kebab-case | `check-environment.ps1`、`verify-pixel-baseline.ps1` |
 | Python 探针 | `<批次-id>-<主题>-probe.py`,放 `tools/agents/scratch/` | `m4s3-slang-live-probe.py` |
 | 任务/派工/报告 | 任务 ID = `YYYYMMDD-HHMM-短名`;报告 = `reports/<任务ID>-<角色>.md` | `reports/M4-S3-kernel.md` |
-| 本地化 key | 点分层,面板前缀;英文为基准,`zh-CN.json` 只覆盖 | `panel.material.shader.compile.ok` |
+| 本地化 key | 点分层,面板/域前缀;英文为基准(源码内联),目录只做覆盖 | `panel.material.shader.compile.ok` |
+| 本地化目录 | 层=模块,目录=域,文件=域内件;文件头 `$owns` 声明键前缀;递归扫 `<lang>/**/*.json`,高优先层覆盖 | `Editor/assets/localization/zh-CN/panels/material_editor.json` |
 | a11y / 可脚本化 id | 小写点分层,与命令面板 id 同源,稳定不随文案改 | `material.save`、`material.shader.compile.status` |
 | 工具面目录(过程层/协作协议/skill) | **工具中立**命名,不出现产品名 | `tools/agents/**`(目标;现状 `tools/agents/**`) |
 | 产品专用配置(某工具才读的文件) | 只放**根级 dot-dir 的薄适配层**,内容引用中立文件 | `.codex/agents/*.toml`、`.claude/**`、`.github/copilot-instructions.md` |

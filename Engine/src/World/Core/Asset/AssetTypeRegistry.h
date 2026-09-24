@@ -22,7 +22,8 @@ namespace World
 		// 同时是本地化键 `asset.type.<Id>` 与无障碍节点 id(`browser.…new.<Id>`)的组成部分 ——
 		// 改名等于改对外契约,新增类型不要复用别人的 id。
 		std::string Id;
-		// 内联英文默认值(本地化键 asset.type.<Id>);中文名进 Editor/assets/localization/zh-CN.json。
+		// 内联英文默认值(本地化键 asset.type.<Id>);中文名进语言包
+		// `Editor/assets/localization/zh-CN/panels/content_browser.json`(层/域/件,见 docs/dev/file-norms.md)。
 		std::string Label;
 		// 术语/别名(默认与 Label 相同):语言切换或歧义对照时用。
 		std::string Term;

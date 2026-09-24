@@ -1,0 +1,10 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "editor",
+  "$language": "zh-CN",
+  "$owns": [
+    "panel.levels."
+  ],
+  "panel.levels.not_found": "未找到 levels.welevel(项目清单同级的关卡清单)。",
+  "panel.levels.empty": "关卡清单为空。"
+}

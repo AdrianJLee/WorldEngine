@@ -27,7 +27,7 @@ namespace World::Editor
 	// 面板只按注册表分组渲染(Editor/src/WUI/SettingsUi.*),不再手写一行行控件。
 	struct EditorPreferencesData
 	{
-		std::string Language = "en";                    // en / zh-CN(目录见 Editor/assets/localization)
+		std::string Language = "en";                    // en / zh-CN(语言包见 Editor/assets/localization/zh-CN/)
 		Wui::WuiThemeMode Theme = Wui::WuiThemeMode::Dark;
 		// P4-UX2c:内容缩放(布局 + 控件 + 文字一起)。默认值由 DPI 推定(96 DPI → 1.30,
 		// 见 WuiTheme.cpp 的 ScaleFromEnvironment);这里是偏好文件缺失时的兜底值。

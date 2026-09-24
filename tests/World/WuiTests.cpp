@@ -8,12 +8,14 @@
 #include "World/WUI/WuiDock.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLayoutStore.h"
+#include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/Widgets/WuiControls.h"
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/Core/KeyCodes.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
@@ -1280,6 +1282,202 @@ int main()
 			CHECK(drawn >= 20);
 			accessibility.SetEnabled(false);
 			accessibility.Clear();
+		}
+
+		// 21. 本地化分层加载(S1):多层叠加/来源诊断、层内重复记账、$ 元数据跳过、
+		//     结构化条目前向兼容、SetLocalizationDirectory 兼容壳、英文内联回退、ReloadLocalization 重扫。
+		//     夹具 = 临时目录(root 下每用例一个子目录),最后统一删除;用例结束恢复全局态。
+		{
+			namespace fs = std::filesystem;
+			const fs::path root = fs::temp_directory_path() / "wld-wui-tests-localization";
+			{
+				std::error_code reset;
+				fs::remove_all(root, reset);
+			}
+			const auto WriteText = [](const fs::path& path, const std::string& text)
+			{
+				fs::create_directories(path.parent_path());
+				std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+				CHECK(static_cast<bool>(stream));
+				stream << text;
+				stream.close();
+				CHECK(fs::exists(path));
+			};
+			const auto HasEntry = [](const std::vector<std::string>& entries, const std::string& wanted)
+			{
+				return std::find(entries.begin(), entries.end(), wanted) != entries.end();
+			};
+
+			// 21a. 三层叠加:priority 高者覆盖、缺键回退低层、来源可诊断、跨层同键不算冲突。
+			{
+				const fs::path dir = root / "layers";
+				WriteText(dir / "engine" / "zh-CN" / "base.json",
+					"{ \"a\": \"engine-a\", \"b\": \"engine-b\", \"$owns\": [\"a\", \"b\"] }");
+				WriteText(dir / "editor" / "zh-CN" / "panel.json", "{ \"a\": \"editor-a\" }");
+				WriteText(dir / "project" / "zh-CN" / "override.json", "{ \"a\": \"project-a\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("project", dir / "project", 20);   // 故意乱序注册:排序只看 priority
+				RegisterLocalizationLayer("engine", dir / "engine", 0);
+				RegisterLocalizationLayer("editor", dir / "editor", 10);
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(GetLanguage() == "zh-CN");
+				CHECK(Tr("a", "fallback") == "project-a");               // 高优先级胜
+				CHECK(Tr("b", "fallback") == "engine-b");                // 层没定义 → 用低层,不是 fallback
+				CHECK(LocalizationSource("a") == "project/override.json");
+				CHECK(LocalizationSource("b") == "engine/base.json");
+				CHECK(LocalizationSource("no.such.key").empty());
+				CHECK(LocalizationConflicts().empty());                  // 跨层同键 = 正常覆盖
+				CHECK(Tr("no.such.key", "fallback") == "fallback");
+				CHECK(HasEntry(MissingLocalizationKeys(), "no.such.key"));
+			}
+
+			// 21b. 同 priority:按注册顺序,后注册者覆盖。
+			{
+				const fs::path dir = root / "tie";
+				WriteText(dir / "first" / "zh-CN" / "a.json", "{ \"tie\": \"first\" }");
+				WriteText(dir / "second" / "zh-CN" / "a.json", "{ \"tie\": \"second\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("first", dir / "first", 5);
+				RegisterLocalizationLayer("second", dir / "second", 5);
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(Tr("tie", "fallback") == "second");
+				CHECK(LocalizationSource("tie") == "second/a.json");
+			}
+
+			// 21c. 层内重复:文件名序先出现者生效,后出现的记冲突;非 .json 文件不参与扫描;
+			//      `$` 前缀 = 文件元数据,不作文案。
+			{
+				const fs::path dir = root / "dup";
+				WriteText(dir / "dup" / "zh-CN" / "aa.json",
+					"{ \"k\": \"first\", \"$format\": \"wld-localization/1\" }");
+				WriteText(dir / "dup" / "zh-CN" / "bb.json", "{ \"k\": \"second\", \"k2\": \"ok\" }");
+				WriteText(dir / "dup" / "zh-CN" / "cc.json", "{ \"j\": \"one\", \"j\": \"two\" }");
+				WriteText(dir / "dup" / "zh-CN" / "zzz.txt", "{ \"k\": \"third\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("dup", dir / "dup", 0);
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(Tr("k", "fallback") == "first");                   // 文件名序:aa.json 胜 bb.json
+				CHECK(Tr("k2", "fallback") == "ok");
+				CHECK(Tr("j", "fallback") == "one");                     // 同一文件里重复:先出现者胜
+				CHECK(Tr("$format", "meta-fallback") == "meta-fallback");
+				CHECK(LocalizationSource("$format").empty());
+				CHECK(LocalizationSource("k") == "dup/aa.json");
+				const std::vector<std::string> conflicts = LocalizationConflicts();
+				CHECK(conflicts.size() == 2);                            // zzz.txt 未被读 → 不是 3 条
+				CHECK(HasEntry(conflicts, "dup/bb.json:k"));
+				CHECK(HasEntry(conflicts, "dup/cc.json:j"));
+			}
+
+			// 21d. 结构化条目前向兼容:`{"text": …}` 可读、未知字段忽略、非文本值不进表。
+			{
+				const fs::path dir = root / "structured";
+				WriteText(dir / "structured" / "zh-CN" / "entry.json",
+					"{ \"obj\": { \"text\": \"structured-text\", \"context\": \"probe\", \"status\": \"reviewed\","
+					" \"maxLength\": 32 }, \"num\": 5, \"arr\": [1, 2], \"none\": null, \"flag\": true }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("structured", dir / "structured", 0);
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(Tr("obj", "fallback") == "structured-text");
+				CHECK(LocalizationSource("obj") == "structured/entry.json");
+				CHECK(Tr("num", "fallback") == "fallback");
+				CHECK(Tr("none", "fallback") == "fallback");
+				CHECK(HasEntry(MissingLocalizationKeys(), "num"));
+			}
+
+			// 21e. SetLocalizationDirectory 兼容壳 = 清空后注册单层("default", 0);
+			//      GetLocalizationDirectory 报第一层目录;再加一层即覆盖。
+			{
+				const fs::path dir = root / "compat";
+				WriteText(dir / "compat" / "zh-CN" / "only.json", "{ \"compat.key\": \"compat-v\" }");
+				WriteText(dir / "compat-override" / "zh-CN" / "only.json", "{ \"compat.key\": \"override-v\" }");
+				SetLocalizationDirectory(dir / "compat");
+				CHECK(GetLocalizationDirectory() == dir / "compat");
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(Tr("compat.key", "fallback") == "compat-v");
+				CHECK(LocalizationSource("compat.key") == "default/only.json");
+				RegisterLocalizationLayer("override", dir / "compat-override", 5);
+				ReloadLocalization();
+				CHECK(Tr("compat.key", "fallback") == "override-v");
+				CHECK(GetLocalizationDirectory() == dir / "compat");
+			}
+
+			// 21f. 默认语言(en / en-US / 空)= 源码内联文案:层已注册也不查表。
+			{
+				const fs::path dir = root / "inline";
+				WriteText(dir / "inline" / "zh-CN" / "a.json", "{ \"a\": \"zh-a\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("inline", dir / "inline", 0);
+				SetLanguage("en");
+				ReloadLocalization();
+				CHECK(Tr("a", "inline-a") == "inline-a");
+				CHECK(LocalizationSource("a").empty());
+				CHECK(LocalizationConflicts().empty());
+				SetLanguage("en-US");
+				ReloadLocalization();
+				CHECK(Tr("a", "inline-a") == "inline-a");
+				SetLanguage("");
+				ReloadLocalization();
+				CHECK(GetLanguage().empty());
+				CHECK(Tr("a", "inline-a") == "inline-a");
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(Tr("a", "inline-a") == "zh-a");                    // 同层换语言 → 查表
+			}
+
+			// 21g. ReloadLocalization:重扫全部层 + Generation++;改盘上的语言包不重启即生效(热重载地基)。
+			{
+				const fs::path dir = root / "reload";
+				const fs::path file = dir / "hot" / "zh-CN" / "a.json";
+				WriteText(file, "{ \"hot.key\": \"v1\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("hot", dir / "hot", 0);
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(Tr("hot.key", "fallback") == "v1");
+				const uint32_t generation = LocalizationGeneration();
+				WriteText(file, "{ \"hot.key\": \"v2\" }");
+				CHECK(Tr("hot.key", "fallback") == "v1");                // 未重载 = 不重读盘
+				ReloadLocalization();
+				CHECK(Tr("hot.key", "fallback") == "v2");
+				CHECK(LocalizationGeneration() > generation);
+			}
+
+			// 21h. 递归扫描:语言包按域分文件夹(`panels/`、`shell/`…)时子目录里的文件照样被加载;
+			//      层内排序键 = 相对 `<lang>` 的路径(POSIX 分隔符,逐字节),
+			//      因此"先出现者生效"跨目录也按路径序判,而不是按目录迭代顺序。
+			{
+				const fs::path dir = root / "recursive";
+				WriteText(dir / "rec" / "zh-CN" / "zz-top.json", "{ \"dup.key\": \"top\" }");
+				WriteText(dir / "rec" / "zh-CN" / "panels" / "a.json",
+					"{ \"dup.key\": \"sub\", \"panel.one\": \"panel-v\" }");
+				WriteText(dir / "rec" / "zh-CN" / "panels" / "nested" / "deep.json", "{ \"deep.key\": \"deep-v\" }");
+				ClearLocalizationLayers();
+				RegisterLocalizationLayer("rec", dir / "rec", 0);
+				SetLanguage("zh-CN");
+				ReloadLocalization();
+				CHECK(Tr("panel.one", "fallback") == "panel-v");              // 子目录文件被扫到
+				CHECK(LocalizationSource("panel.one") == "rec/panels/a.json");
+				CHECK(Tr("deep.key", "fallback") == "deep-v");                // 递归到二级子目录
+				CHECK(LocalizationSource("deep.key") == "rec/panels/nested/deep.json");
+				CHECK(Tr("dup.key", "fallback") == "sub");                    // "panels/a.json" < "zz-top.json"
+				CHECK(LocalizationSource("dup.key") == "rec/panels/a.json");
+				const std::vector<std::string> recursiveConflicts = LocalizationConflicts();
+				CHECK(recursiveConflicts.size() == 1);
+				CHECK(HasEntry(recursiveConflicts, "rec/zz-top.json:dup.key"));   // 记被忽略的那次定义
+			}
+
+			// 收尾:恢复全局态(清层 + 英文内联),删除夹具目录。
+			ClearLocalizationLayers();
+			SetLanguage("en");
+			CHECK(Tr("panel.hierarchy.title", "Hierarchy") == "Hierarchy");
+			std::error_code cleanup;
+			fs::remove_all(root, cleanup);
+			CHECK(!fs::exists(root));
 		}
 
 		std::printf("World.Wui: all checks passed\n");

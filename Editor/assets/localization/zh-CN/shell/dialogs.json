@@ -1,0 +1,23 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "editor",
+  "$language": "zh-CN",
+  "$owns": [
+    "modal."
+  ],
+  "modal.restore.title": "恢复独立窗口",
+  "modal.prefab.unsaved.title": "预制体有未保存的改动",
+  "modal.prefab.unsaved.line1_open": "完整编辑器会从磁盘重新读这个资产。",
+  "modal.prefab.unsaved.line2_open": "继续会把窗口里做的编辑丢掉。",
+  "modal.prefab.unsaved.line1_close": "这个窗口里还有没保存的预制体编辑。",
+  "modal.prefab.unsaved.line2_close": "关闭会丢掉它们;保存会把它们写回资产。",
+  "modal.prefab.unsaved.discard": "丢弃",
+  "modal.prefab.unsaved.cancel": "取消",
+  "modal.restore.body": "上次退出时这些窗口是开着的:",
+  "modal.restore.more": " 等",
+  "modal.restore.hint": "恢复为顶栏标签最干净:不弹窗口、不抢焦点;按上次形态恢复时,浮窗也不会抢焦点。",
+  "modal.restore.remember": "记住我的选择",
+  "modal.restore.tabs": "恢复为顶栏标签",
+  "modal.restore.layout": "按上次形态恢复",
+  "modal.restore.none": "不恢复"
+}

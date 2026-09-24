@@ -1,0 +1,18 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "editor",
+  "$language": "zh-CN",
+  "$owns": [
+    "status.",
+    "notice."
+  ],
+  "status.scene": "场景",
+  "status.selection": "选中",
+  "status.selection.none": "无",
+  "status.view": "视图",
+  "notice.restore": "已恢复上次的窗口",
+  "notice.restore.tabs": "在顶栏可以找到",
+  "notice.restore.skipped": "已跳过恢复上次的窗口(下次启动还会询问)",
+  "notice.label": "状态提示",
+  "notice.tooltip": "点一下或按 Esc 关闭;鼠标停在这里时不会自动消失"
+}

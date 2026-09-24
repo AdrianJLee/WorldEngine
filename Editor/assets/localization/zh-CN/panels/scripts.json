@@ -1,0 +1,11 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "editor",
+  "$language": "zh-CN",
+  "$owns": [
+    "panel.scripts."
+  ],
+  "panel.scripts.open_in_engine": "在引擎内打开",
+  "panel.scripts.empty.title": "还没有脚本",
+  "panel.scripts.empty.hint": "在内容浏览器里新建 .luau 脚本,然后在这里打开。"
+}

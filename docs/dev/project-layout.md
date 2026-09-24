@@ -56,9 +56,13 @@ Engine/
 
 | 类别 | 位置 | 入库 | 备注 |
 | --- | --- | --- | --- |
-| 引擎/宿主自带运行时资源 | `Engine/assets/**`、`Editor/assets/**` | 是 | 引擎 shader、编辑器本地化与图标 |
+| 引擎/宿主自带运行时资源 | `Engine/assets/**`、`Editor/assets/**` | 是 | 引擎 shader;本地化按层分域(`<层>/assets/localization/<lang>/{shell,panels}/…`);编辑器图标/字体 |
 | 项目内容(内容根) | `projects/<名>/**` | 是(生成物除外) | 资产系统只扫内容根 |
 | 本机状态 | `local/**` | 否 | 删除即复位 |
+
+本地化目录树(2026-09-24,S1):`<层>/assets/localization/<lang>/<域>/<件>.json`,文件头 `$owns` 声明
+该文件拥有的键前缀;层序 `engine → editor → project`(高优先层覆盖,缺翻译回退内联英文);加载器递归扫描。
+方案与迁移记录见 `tools/agents/tasks/20260924-1200-localization-layers/plan.md`。
 
 ## 4. 生成物三档
 

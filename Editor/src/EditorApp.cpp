@@ -113,8 +113,18 @@ namespace World
 		}
 
 		// P4-UX1:编辑器偏好(用户级)必须在 EditorShell 构造之前装载 —— 面板标题/主题/字号
-		// 都在创建期取一次快照。语言目录也在编辑器自己的资源里(游戏内容的语言包在 Game 下)。
-		World::Wui::SetLocalizationDirectory(std::filesystem::path(WLD_EDITOR_DIR) / "assets" / "localization");
+		// 都在创建期取一次快照。语言目录也在编辑器自己的资源里(游戏内容的语言包在
+		// `projects/<名>/assets/localization` 下)。
+		// WLD-L10N-S1:语言包改成三层注册 —— engine(引擎自带件)→ editor(编辑器 UI)→ project
+		// (项目覆盖),priority 升序解析,后者覆盖前者;每层目录下 `<语言>/**/*.json` 自动扫描,
+		// 缺一层只告警(回退内联英文),不影响其它层。项目层可覆盖引擎/编辑器文案。
+		World::Wui::ClearLocalizationLayers();
+		World::Wui::RegisterLocalizationLayer("engine",
+			std::filesystem::path(WLD_WORLD_DIR) / "assets" / "localization", 0);
+		World::Wui::RegisterLocalizationLayer("editor",
+			std::filesystem::path(WLD_EDITOR_DIR) / "assets" / "localization", 100);
+		World::Wui::RegisterLocalizationLayer("project",
+			std::filesystem::path(WLD_PROJECT_DIR) / "assets" / "localization", 200);
 		// 本机状态目录(编辑器偏好/布局/窗口/最近使用):不入库;首次运行自动创建。
 		std::filesystem::create_directories(std::filesystem::path(WLD_LOCAL_DIR));
 		World::Editor::EditorPreferences::Get().Load(
