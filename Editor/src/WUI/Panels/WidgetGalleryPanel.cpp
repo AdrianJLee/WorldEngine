@@ -993,7 +993,24 @@ namespace World
 				|| (m_SelectedId.empty() && !visible.empty() && item == visible.front());
 			if (active)
 				selected = item;
-			if (row.Y + row.H <= list.Y || row.Y >= listBottom)
+
+			// WUI-P1.6c:行的 a11y 节点**每一行每帧都登记**,不再"只登记视口内的行"。
+			// 懒登记时脚本只看得见当前这一屏,于是"往滚动区的另一头找某一行"在脚本侧
+			// 连方向都算不出来 —— 比当前屏更靠前的行一律变成"滚不到"(实测:选中
+			// `contextmenu`(末行)之后,`separator`/`badge`/`icon`/`button.disabled`
+			// 四件报 `tree: 左树里滚到底也到不了这一行`,而用户用滚轮其实够得到)。
+			// 整张表登记之后:任意一条登记都能被**发现**(rect = 它滚动后的真实位置),
+			// 脚本据此往正确方向滚,滚进来这一行才变成 interactive=true。
+			// 视口外的行 interactive=false:它不在用户眼前,就不该被 `ui.invoke` 点到
+			// (AiCommands 的 resolveNode 只认 interactive && enabled,与"尺寸不对 =
+			// visible:false 且不可点"同一口径);绘制路径不在这里 —— 视口外的行仍然不画。
+			const bool inView = row.Y + row.H > list.Y && row.Y < listBottom;
+			const std::string rowId = std::string(kTreeRowPrefix) + std::to_string(rowIndex);
+			// 行 id 按**过滤后序**稳定编号;精确选中项另有 wui.workbench.canvas.selected 节点,
+			// 探针不必从行号反推组件 id。
+			RegisterWorkbenchNode(Wui::HashId(rowId.c_str()), "list-item", row,
+				item->DisplayName, item->Id + "|" + StatusText(item->Status), true, inView);
+			if (!inView)
 			{
 				++rowIndex;
 				continue;
@@ -1010,12 +1027,6 @@ namespace World
 			Wui::Label(ctx, { row.X + row.W - badgeW - 2.0f, row.Y + 4.0f }, StatusText(item->Status),
 				StatusColor(item->Status, theme), 11.0f * fontScale);
 
-			// 行 id 按**过滤后序**稳定编号;精确选中项另有 wui.workbench.canvas.selected 节点,
-			// 探针不必从行号反推组件 id。
-			const std::string rowId = std::string(kTreeRowPrefix) + std::to_string(rowIndex);
-			RegisterWorkbenchNode(Wui::HashId(rowId.c_str()), "list-item", row,
-				item->DisplayName, item->Id + "|" + StatusText(item->Status), true, true);
-
 			if (hovered && ctx.Input().MouseClicked[0] && !ctx.IsPointerClickConsumed(0))
 			{
 				if (std::getenv("WLD_TRACE_UI"))
@@ -1029,11 +1040,23 @@ namespace World
 		}
 		Wui::EndScrollArea(ctx);
 
-		// 选中件被搜索过滤掉 / 首次进入:退回过滤后的第一件(与左树高亮同一口径)。
-		if (selected == nullptr && !visible.empty())
+		// WUI-P1.6d(用户报的 bug):**不再**在"选中项没命中过滤结果"时静默改选过滤后的第一件
+		// —— 那会让"点别的件"偶发变成"莫名选中 Button"(默认列表的 front() 就是 button)。
+		// 现在只做两件事:
+		//   ① 从未选过(m_SelectedId 空)且列表非空 → 初始化一次;
+		//   ② 选过但被搜索过滤掉 → 从全量登记里把选中的件找回来(画布/属性面板保持它),
+		//      高亮会随搜索自然消失,清空搜索后原选中自动回来。
+		if (selected == nullptr)
 		{
-			selected = visible.front();
-			m_SelectedId = selected->Id;
+			if (m_SelectedId.empty() && !visible.empty())
+			{
+				selected = visible.front();
+				m_SelectedId = selected->Id;
+			}
+			else if (!m_SelectedId.empty())
+			{
+				selected = Wui::WuiComponentRegistry::Find(m_SelectedId);
+			}
 		}
 
 		if (!visible.empty() && m_LastScrolledSelection != m_SelectedId)
