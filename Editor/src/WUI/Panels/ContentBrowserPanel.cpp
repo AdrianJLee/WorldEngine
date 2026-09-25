@@ -19,6 +19,7 @@
 // M4-S2/Slang-B1:Material Shader(`.slang`)的起始代码取自内核的 MaterialSurfaceCompiler
 // (不在这里再抄一份表面函数骨架);契约注释头由 ShaderContractHeader() 提供。
 #include "World/Renderer/MaterialSurface.h"
+#include "World/Renderer/TextureCompiler.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/SceneSerializer.h"
 
@@ -51,6 +52,38 @@ namespace World
 			char buffer[64];
 			std::snprintf(buffer, sizeof(buffer), "%.2f %s", value, units[unit]);
 			return buffer;
+		}
+
+		// M4-TEX P4:纹理源图徽标的短文案(网格胶囊 / 列表类型列后缀共用同一份口径)。
+		std::string TextureArtifactBadgeText(Editor::TextureArtifactState state)
+		{
+			switch (state)
+			{
+				case Editor::TextureArtifactState::Fresh:
+					return Wui::Tr("panel.content_browser.badge.texture_baked", "Baked");
+				case Editor::TextureArtifactState::Stale:
+					return Wui::Tr("panel.content_browser.badge.texture_needs_bake", "Needs bake");
+				case Editor::TextureArtifactState::NoSource:
+				case Editor::TextureArtifactState::Invalid:
+					return Wui::Tr("panel.content_browser.badge.texture_unreadable", "Unreadable");
+				case Editor::TextureArtifactState::NoArtifact:
+				default:
+					return Wui::Tr("panel.content_browser.badge.texture_unbaked", "Unbaked");
+			}
+		}
+
+		// 产物状态码(无障碍节点 value):脚本按它断言,不用读本地化文字。
+		const char* TextureArtifactBadgeCode(Editor::TextureArtifactState state)
+		{
+			switch (state)
+			{
+				case Editor::TextureArtifactState::Fresh: return "baked";
+				case Editor::TextureArtifactState::Stale: return "needs-rebake";
+				case Editor::TextureArtifactState::NoSource: return "no-source";
+				case Editor::TextureArtifactState::Invalid: return "unreadable";
+				case Editor::TextureArtifactState::NoArtifact:
+				default: return "unbaked";
+			}
 		}
 
 		// 判断 candidate 是否等于 root 或位于 root 的子树内。
@@ -651,6 +684,12 @@ namespace World
 		}
 		if (path.extension() == ".wd")
 			m_Host.OpenScene(path);
+		else if (LowerExtension(path) == ".wtex")
+		{
+			// M4-TEX P4:纹理**资产**双击 → 打开 Texture Settings(编辑设置 + source:,
+			// Apply 保存 `.wtex` 并就地重烘 `<源图>.wtexc`)。源图行不承担设置入口。
+			OpenTextureSettingsFor(path, false);
+		}
 		else if (path.extension() == ".wmat")
 		{
 			// D3:材质资产双击 → 材质编辑器(独立窗口)载入。
@@ -1400,6 +1439,35 @@ namespace World
 					theme.Accent, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
 			}
 
+			// M4-TEX P4:纹理源图的两枚常驻徽标 —— "有资产 / 默认设置"(设置住在 `.wtex` 资产里,
+			// 源图自己不再是设置入口)+ 产物状态("已烘焙 / 需重烘 / 未烘焙")。文字保持 2 词内,
+			// 免得在 96px 格子里压住居中的图标;完整状态连同 a11y 节点一起给脚本读。
+			if (slice.TextureArtifactKnown)
+			{
+				const float badgeSize = infoSize;
+				const float badgeH = badgeSize + 4.0f;
+				float badgeX = cell.X + gap;
+				const std::string assetText = slice.HasTextureAsset
+					? Wui::Tr("panel.content_browser.badge.texture_asset", "Asset")
+					: Wui::Tr("panel.content_browser.badge.texture_defaults", "Defaults");
+				const float assetW = ctx.MeasureTextWidth(assetText, badgeSize) + theme.PadSmall * 2.0f;
+				Wui::Badge(ctx, { badgeX, cell.Y + gap, assetW, badgeH }, assetText,
+					slice.HasTextureAsset ? theme.Accent : theme.ActiveBg, theme.Text, theme, badgeSize);
+				badgeX += assetW + theme.PadSmall;
+				const std::string artifactText = TextureArtifactBadgeText(slice.TextureArtifact);
+				const float artifactW = ctx.MeasureTextWidth(artifactText, badgeSize) + theme.PadSmall * 2.0f;
+				const bool fresh = slice.TextureArtifact == Editor::TextureArtifactState::Fresh;
+				const bool broken = slice.TextureArtifact == Editor::TextureArtifactState::Invalid
+					|| slice.TextureArtifact == Editor::TextureArtifactState::NoSource;
+				Wui::Badge(ctx, { badgeX, cell.Y + gap, artifactW, badgeH }, artifactText,
+					fresh ? theme.Success : (broken ? theme.Danger : (slice.TextureArtifact == Editor::TextureArtifactState::Stale
+						? theme.Warning : theme.ActiveBg)),
+					Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
+				badgeX += artifactW;
+				RegisterTextureBadgeNode(slice,
+					{ cell.X + gap, cell.Y + gap, std::max(1.0f, badgeX - cell.X - gap), badgeH });
+			}
+
 			// 名称(居中;选中时先铺一层 Selection 底再画文字)。
 			const float infoY = cell.Y + cell.H - gap - infoSize;
 			const float nameY = infoY - theme.PadSmall - nameSize;
@@ -1518,7 +1586,19 @@ namespace World
 				Wui::Label(ctx, { nameX, row.Y + (row.H - theme.FontSizeBody) * 0.5f },
 					nameText, theme.Text, theme.FontSizeBody);
 
-			const std::string typeText = EllipsizeToWidth(ctx, slice.TypeLabel,
+			// M4-TEX P4:源图行的类型列追加两枚徽标的文字版(有资产 / 已烘焙),并登记同一枚
+			// badge 无障碍节点 —— 列表模式没有胶囊位,但状态同样要能被脚本/读屏读到。
+			std::string typeLabel = slice.TypeLabel;
+			if (slice.TextureArtifactKnown)
+			{
+				typeLabel += " · "
+					+ (slice.HasTextureAsset
+						? Wui::Tr("panel.content_browser.badge.texture_asset", "Asset")
+						: Wui::Tr("panel.content_browser.badge.texture_defaults", "Defaults"))
+					+ " · " + TextureArtifactBadgeText(slice.TextureArtifact);
+				RegisterTextureBadgeNode(slice, { typeX, row.Y, typeW, row.H });
+			}
+			const std::string typeText = EllipsizeToWidth(ctx, typeLabel,
 				std::max(0.0f, typeW - theme.PadSmall * 2.0f), smallSize);
 			if (!typeText.empty())
 				Wui::Label(ctx, { typeX + theme.PadSmall, row.Y + (row.H - smallSize) * 0.5f },
@@ -2564,6 +2644,158 @@ namespace World
 		Wui::WuiAccessibility::Get().Register(node);
 	}
 
+	// ---- M4-TEX P4:纹理资产(`.wtex`)与源图 ----
+
+	bool ContentBrowserPanel::LogicalPathFor(const std::filesystem::path& path, std::string* outLogical) const
+	{
+		std::error_code relativeError;
+		const std::filesystem::path relative = std::filesystem::relative(path, m_Model.Root, relativeError);
+		if (relativeError || relative.empty())
+			return false;
+		if (outLogical)
+			*outLogical = relative.generic_string();
+		return true;
+	}
+
+	Editor::TextureArtifactState ContentBrowserPanel::ResolveTextureBadge(
+		const std::filesystem::path& sourcePath, bool* hasAsset)
+	{
+		std::error_code stampError;
+		const std::filesystem::file_time_type sourceStamp =
+			std::filesystem::last_write_time(sourcePath, stampError);
+		const std::filesystem::path assetPath = TextureAssetPathForSource(sourcePath.generic_string());
+		const std::filesystem::path artifactPath = sourcePath.string() + ".wtexc";
+		const bool assetExists = std::filesystem::is_regular_file(assetPath, stampError);
+		const std::filesystem::file_time_type assetStamp = assetExists
+			? std::filesystem::last_write_time(assetPath, stampError)
+			: std::filesystem::file_time_type {};
+		const bool artifactExists = std::filesystem::is_regular_file(artifactPath, stampError);
+		const std::filesystem::file_time_type artifactStamp = artifactExists
+			? std::filesystem::last_write_time(artifactPath, stampError)
+			: std::filesystem::file_time_type {};
+		if (hasAsset)
+			*hasAsset = assetExists;
+
+		TextureBadgeEntry& entry = m_TextureBadges[sourcePath];
+		if (entry.Valid && entry.HasAsset == assetExists && entry.HasArtifact == artifactExists
+			&& entry.SourceStamp == sourceStamp && entry.AssetStamp == assetStamp
+			&& entry.ArtifactStamp == artifactStamp)
+			return entry.Artifact;
+
+		std::string logical;
+		if (!LogicalPathFor(sourcePath, &logical))
+			logical = sourcePath.filename().generic_string();
+		// 判定本身要读源字节算 sha256 —— 只在上面三项 mtime 真的变了时才走到这里。
+		entry.Artifact = Editor::InspectTextureArtifact(m_Model.Root, logical, nullptr).State;
+		entry.HasAsset = assetExists;
+		entry.HasArtifact = artifactExists;
+		entry.SourceStamp = sourceStamp;
+		entry.AssetStamp = assetStamp;
+		entry.ArtifactStamp = artifactStamp;
+		entry.Valid = true;
+		return entry.Artifact;
+	}
+
+	void ContentBrowserPanel::RegisterTextureBadgeNode(const BrowserSlice& slice, const Wui::WuiRect& rect)
+	{
+		std::string logical;
+		if (!LogicalPathFor(slice.Path, &logical))
+			logical = slice.Path.filename().generic_string();
+		Wui::WuiAccessNode node;
+		node.Id = Wui::HashId(("browser.texture.badge." + logical).c_str());
+		node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+		node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+		node.Kind = "badge";
+		node.Label = (slice.HasTextureAsset
+			? Wui::Tr("panel.content_browser.badge.texture_asset", "Asset")
+			: Wui::Tr("panel.content_browser.badge.texture_defaults", "Defaults"))
+			+ " · " + TextureArtifactBadgeText(slice.TextureArtifact);
+		node.Value = std::string("asset=") + (slice.HasTextureAsset ? "yes" : "no")
+			+ ";artifact=" + TextureArtifactBadgeCode(slice.TextureArtifact);
+		node.Tooltip = Wui::Tr("panel.content_browser.badge.texture_tooltip",
+			"Source image of a texture: its import settings live in the sibling .wtex asset, and the "
+			"status is the baked artifact (<source>.wtexc).") + "  " + logical;
+		node.Rect = rect;
+		node.Enabled = true;
+		node.Interactive = false;
+		node.Visible = true;
+		Wui::WuiAccessibility::Get().Register(node);
+	}
+
+	void ContentBrowserPanel::OpenTextureSettingsFor(const std::filesystem::path& path, bool resetConfirm)
+	{
+		std::string logical;
+		if (!LogicalPathFor(path, &logical))
+		{
+			NotifyAssetFailure(Wui::Tr("panel.content_browser.texture.outside_root",
+				"Texture settings need an asset inside the content root."));
+			return;
+		}
+		// 内容浏览器只写请求:可见性/布局切换在 EditorShell 的帧边界执行(见 TextureSettingsRequests)。
+		Editor::TextureSettingsRequests::Get().Request(logical, resetConfirm
+			? Editor::TextureSettingsRequests::Kind::ResetDefaults
+			: Editor::TextureSettingsRequests::Kind::Open);
+		if (m_Ctx)
+			m_Ctx->RecordOp("browser", resetConfirm ? "texture-reset-ask" : "texture-settings", logical, "");
+	}
+
+	void ContentBrowserPanel::CreateTextureAssetFor(const std::filesystem::path& sourcePath)
+	{
+		std::string logical;
+		if (!LogicalPathFor(sourcePath, &logical))
+		{
+			NotifyAssetFailure(Wui::Tr("panel.content_browser.texture.outside_root",
+				"Texture settings need an asset inside the content root."));
+			return;
+		}
+		std::string assetLogical;
+		std::string error;
+		if (!Editor::CreateTextureAssetForSource(m_Model.Root, logical, &assetLogical, error))
+		{
+			NotifyAssetFailure(error);
+			WLD_CORE_WARN("[texture] create texture asset failed: {0}", error);
+			return;
+		}
+		InvalidateContents();
+		m_TextureBadges.erase(sourcePath);   // 徽标立刻重算("默认设置" → "有资产")
+		m_Host.Notify(Wui::TrFormat("panel.content_browser.notice.texture_asset_created",
+			"Created {asset}", { { "asset", assetLogical } }));
+		WLD_CORE_INFO("[texture] created texture asset: {0}", assetLogical);
+		const std::filesystem::path assetPath = m_Model.Root / assetLogical;
+		SelectCreated(assetPath, "create-texture-asset");
+		OpenTextureSettingsFor(assetPath, false);
+	}
+
+	void ContentBrowserPanel::ReimportTextureAsset(const std::filesystem::path& assetPath)
+	{
+		std::string logical;
+		if (!LogicalPathFor(assetPath, &logical))
+		{
+			NotifyAssetFailure(Wui::Tr("panel.content_browser.texture.outside_root",
+				"Texture settings need an asset inside the content root."));
+			return;
+		}
+		TextureImportSettings settings;
+		std::string error;
+		if (!LoadTextureImportSettings(assetPath, settings, error))
+		{
+			NotifyAssetFailure(error);
+			return;
+		}
+		std::string source;
+		if (!Editor::ResolveTextureSourceLogical(m_Model.Root, logical, settings, source, error)
+			|| !Editor::BakeTextureArtifactNow(m_Model.Root, source, settings, error))
+		{
+			NotifyAssetFailure(error);
+			WLD_CORE_WARN("[texture] reimport '{0}' failed: {1}", logical, error);
+			return;
+		}
+		m_TextureBadges.clear();   // 产物 mtime 变了;清表保证徽标立刻反映结果
+		m_Host.Notify(Wui::TrFormat("panel.content_browser.notice.texture_reimported",
+			"Re-baked {source}", { { "source", source } }));
+		WLD_CORE_INFO("[texture] reimport ok: {0} (source {1})", logical, source);
+	}
+
 	bool ContentBrowserPanel::GlobalCursorScreen(const Wui::WuiContext& ctx, float* outX, float* outY) const
 	{
 		if (!Application::HasInstance())
@@ -3304,6 +3536,13 @@ namespace World
 			slice.Type = type.Name;
 			slice.Kind = type.Kind;
 			slice.Extension = LowerExtension(path);
+			// M4-TEX P4:源图行的两枚徽标输入(有资产 / 已烘焙)。判定要读源字节算 sha256,
+			// 所以按 (源图 / .wtex / .wtexc) 的 mtime 缓存,只有真变了才重算。
+			if (slice.Kind == EditorAssetKind::TextureSource && !slice.IsDir)
+			{
+				slice.TextureArtifact = ResolveTextureBadge(path, &slice.HasTextureAsset);
+				slice.TextureArtifactKnown = true;
+			}
 			// P4-U10:切片上显示的类型文案走本地化;glTF/GLB 明确写成"导入源(导入用)",
 			// 不再和原生 .wmodel 混在一起(用户 2026-09-21 报的歧义)。
 			switch (type.Kind)
@@ -3318,7 +3557,13 @@ namespace World
 				case EditorAssetKind::Model: slice.TypeLabel = Wui::Tr("asset.file.model", "Model"); break;
 				case EditorAssetKind::ModelSource:
 					slice.TypeLabel = Wui::Tr("asset.file.model_source", "glTF source (import only)"); break;
-				case EditorAssetKind::Texture: slice.TypeLabel = Wui::Tr("asset.file.texture", "Texture"); break;
+				// M4-TEX P4:`.wtex` = 纹理资产(设置 + source:),图片 = 它的源(材质引用源图路径)。
+				case EditorAssetKind::TextureAsset:
+					slice.TypeLabel = Wui::Tr("asset.file.texture", "Texture");
+					break;
+				case EditorAssetKind::TextureSource:
+					slice.TypeLabel = Wui::Tr("asset.file.texture_source", "Texture source");
+					break;
 				case EditorAssetKind::Script: slice.TypeLabel = Wui::Tr("asset.file.script", "Script"); break;
 				default: slice.TypeLabel = type.Name; break;
 			}
@@ -3557,6 +3802,15 @@ namespace World
 			const bool prefabFile =
 				!std::filesystem::is_directory(m_Model.ContextMenuPath)
 				&& LowerExtension(m_Model.ContextMenuPath) == ".wprefab";
+			// M4-TEX P4:`.wtex` = 纹理资产(设置 / 重烘 / 回到默认);源图行只提供
+			// "Create Texture Asset"(还没有资产时)—— 设置入口归资产行,源图不再单独承担。
+			const std::string contextExtension = std::filesystem::is_directory(m_Model.ContextMenuPath)
+				? std::string() : LowerExtension(m_Model.ContextMenuPath);
+			const bool textureAssetFile = contextExtension == ".wtex";
+			const bool textureSourceFile = TextureCompiler::IsTextureSourceExtension(contextExtension);
+			const bool textureSourceHasAsset = textureSourceFile
+				&& std::filesystem::exists(
+					TextureAssetPathForSource(m_Model.ContextMenuPath.generic_string()));
 			std::vector<BrowserItem> items;
 			if (prefabFile)
 			{
@@ -3596,6 +3850,21 @@ namespace World
 				items.push_back({ Wui::Tr("panel.content_browser.item.delete", "Delete"),
 					[this] { m_Model.ShowDeleteModal = true; } });
 			}
+			else if (textureAssetFile)
+			{
+				items.push_back({ Wui::Tr("panel.content_browser.item.texture_settings", "Texture Settings…"),
+					[this] { OpenTextureSettingsFor(m_Model.ContextMenuPath, false); } });
+				items.push_back({ Wui::Tr("panel.content_browser.item.texture_reimport", "Reimport"),
+					[this] { ReimportTextureAsset(m_Model.ContextMenuPath); } });
+				items.push_back({ Wui::Tr("panel.content_browser.item.texture_reset", "Reset to Defaults"),
+					[this] { OpenTextureSettingsFor(m_Model.ContextMenuPath, true); } });
+				items.push_back({ Wui::Tr("panel.content_browser.item.rename", "Rename"),
+					[this, single] { if (single && m_Ctx) StartRename(*m_Ctx, m_Model.ContextMenuPath); } });
+				items.push_back({ Wui::Tr("panel.content_browser.item.reveal", "Show in Explorer"),
+					[this] { OpenInExplorer(m_Model.ContextMenuPath); } });
+				items.push_back({ Wui::Tr("panel.content_browser.item.delete", "Delete"),
+					[this] { m_Model.ShowDeleteModal = true; } });
+			}
 			else
 			{
 				items = {
@@ -3607,6 +3876,13 @@ namespace World
 					{ "Open in Explorer", [this] { OpenInExplorer(m_Model.ContextMenuPath); } },
 					{ "Delete", [this] { m_Model.ShowDeleteModal = true; } },
 				};
+				// 还没有资产的源图:排在最前的一条 = 建资产(设置的家就是它,见 P0 §3)。
+				if (textureSourceFile && !textureSourceHasAsset)
+				{
+					items.insert(items.begin(), BrowserItem {
+						Wui::Tr("panel.content_browser.item.create_texture_asset", "Create Texture Asset"),
+						[this] { CreateTextureAssetFor(m_Model.ContextMenuPath); } });
+				}
 			}
 			// 右键菜单走组件(ContextMenu):位置钉住 + 外部点击/Esc 关闭统一处理。
 			Wui::WuiRect menuPanel;

@@ -20,9 +20,17 @@ namespace World
 		Model,          // .wmodel(引擎原生模型资产)
 		ModelSource,    // .gltf/.glb(源资产;双击 = 导入 + 打开预览)
 		Prefab,         // .wprefab(可复用实体子树;双击 = 打开编辑)
-		Texture,
+		// M4-TEX P4:纹理是"源 + 资产"两件 —— 与 `.gltf`/`.wmodel` 同款关系:
+		//   TextureSource = png/jpg/jpeg/tga/bmp(解码输入;**材质引用的就是它**的路径)
+		//   TextureAsset  = .wtex(导入设置 + `source:` 的唯一家;双击 = 打开 Texture Settings)
+		TextureSource,
+		TextureAsset,
 		Script,
 		Folder,
+		// 兼容别名:P4 之前的代码把"贴图"叫 Texture(= 源图)。新代码请用上面两个名字。
+		// **必须放在最后**:枚举值按"上一个枚举项"自增,别名插在中间会把后面的项顶成重复值
+		// (实测:插在 Script 之前 → Script 与 TextureAsset 同值 → C2196)。
+		Texture = TextureSource,
 	};
 
 	struct EditorAssetType
@@ -60,8 +68,13 @@ namespace World
 			return { EditorAssetKind::ModelSource, "glTF Source" };
 		if (extension == ".wprefab")
 			return { EditorAssetKind::Prefab, "Prefab" };
-		if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".tga")
-			return { EditorAssetKind::Texture, "Texture" };
+		// M4-TEX P4:内容根的图片是**源图**(材质引用它;产物 `<源图>.wtexc` 由它烘出来);
+		// `.wtex` 才是可编辑的纹理**资产**(设置 + `source:`)。
+		if (extension == ".wtex")
+			return { EditorAssetKind::TextureAsset, "Texture" };
+		if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".tga"
+			|| extension == ".bmp")
+			return { EditorAssetKind::TextureSource, "Texture Source" };
 		if (extension == ".lua" || extension == ".luau")
 			return { EditorAssetKind::Script, "Script" };
 		return { EditorAssetKind::Unknown, "File" };

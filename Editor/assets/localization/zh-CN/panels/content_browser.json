@@ -137,5 +137,20 @@
   "panel.content_browser.new_shader.ok.tooltip": "把起始代码写到上面的路径,并在材质编辑器里以代码形态打开它。",
   "panel.content_browser.new_shader.cancel": "取消",
   "panel.content_browser.new_shader.cancel.tooltip": "什么都不写就关闭(Esc)",
-  "panel.content_browser.new_shader.created": "已创建 "
+  "panel.content_browser.new_shader.created": "已创建 ",
+  "asset.file.texture_source": "贴图源",
+  "panel.content_browser.badge.texture_asset": "有资产",
+  "panel.content_browser.badge.texture_defaults": "默认设置",
+  "panel.content_browser.badge.texture_baked": "已烘焙",
+  "panel.content_browser.badge.texture_needs_bake": "需重烘",
+  "panel.content_browser.badge.texture_unbaked": "未烘焙",
+  "panel.content_browser.badge.texture_unreadable": "不可读",
+  "panel.content_browser.badge.texture_tooltip": "纹理的源图:设置住在同名的 .wtex 资产里,状态指的是烘出来的 <源图>.wtexc。",
+  "panel.content_browser.item.texture_settings": "纹理设置…",
+  "panel.content_browser.item.texture_reimport": "重新导入",
+  "panel.content_browser.item.texture_reset": "恢复默认设置",
+  "panel.content_browser.item.create_texture_asset": "创建纹理资产",
+  "panel.content_browser.texture.outside_root": "纹理设置需要内容根里的资产。",
+  "panel.content_browser.notice.texture_asset_created": "已创建 {asset}",
+  "panel.content_browser.notice.texture_reimported": "已重烘 {source}"
 }

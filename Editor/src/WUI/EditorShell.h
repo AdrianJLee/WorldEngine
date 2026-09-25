@@ -8,6 +8,7 @@
 #include "Panels/SavePanel.h"
 #include "Panels/LevelPanel.h"
 #include "Panels/MaterialEditorPanel.h"
+#include "Panels/TextureSettingsPanel.h"
 #include "Panels/ScriptEditorPanel.h"
 #include "Panels/ScriptsPanel.h"
 #include "Panels/ViewportPanel.h"

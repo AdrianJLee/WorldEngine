@@ -2,6 +2,9 @@
 
 #include "EditorPanel.h"
 #include "EditorAssetTypes.h"
+// M4-TEX P4:纹理资产的设置检查器(内容浏览器双击 `.wtex` / 右键菜单)与它的共享判定
+// (源图徽标、重烘、请求通道)都在这条头文件里 —— 面板之间只走这一份口径。
+#include "TextureSettingsPanel.h"
 #include "World/Core/Asset/AssetTypeRegistry.h"
 #include "World/Renderer/Material.h"
 #include "World/Renderer/Texture.h"
@@ -81,6 +84,12 @@ namespace World
 		std::string Type;      // EditorAssetTypes 的类型名(Folder / Scene / Material / …)
 		// M4-S2/Slang-B1:类型枚举(切片绘制按它区分渲染:着色器的图标染色与类型徽标)。
 		EditorAssetKind Kind = EditorAssetKind::Unknown;
+		// M4-TEX P4:纹理源图两枚徽标的输入(网格:胶囊徽标;列表:类型列后缀)。
+		//   HasTextureAsset  = 同目录同主名的 `.wtex` 资产在场("有资产" / "默认设置")
+		//   TextureArtifact  = 该源图的 `.wtexc` 状态("已烘焙" / "需重烘")
+		bool HasTextureAsset = false;
+		Editor::TextureArtifactState TextureArtifact = Editor::TextureArtifactState::NoArtifact;
+		bool TextureArtifactKnown = false;
 		// P4-U10:本地化后的类型文案(切片展示用);glTF/GLB 明确标成"导入源"。
 		std::string TypeLabel;
 		std::string Extension; // 小写扩展名(含点);文件夹为空。着色器:.slang(唯一)
@@ -195,6 +204,21 @@ namespace World
 		void StartRename(Wui::WuiContext& ctx, const std::filesystem::path& path);
 		void RenderRenameField(Wui::WuiContext& ctx, const std::filesystem::path& path, const Wui::WuiRect& rect, const Wui::WuiTheme& theme);
 		void OpenInExplorer(const std::filesystem::path& path);
+		// ---- M4-TEX P4:纹理资产(`.wtex`)与源图 ----
+		// 打开纹理设置:内容浏览器只写"请求",真正的可见性切换在 EditorShell 的帧边界
+		// (面板渲染中途不能改布局;见 Editor::TextureSettingsRequests)。
+		void OpenTextureSettingsFor(const std::filesystem::path& path, bool resetConfirm);
+		// 右键 Reimport:读 `.wtex` + 解析源图 + 就地重烘 `<源图>.wtexc` + 失效材质贴图缓存。
+		void ReimportTextureAsset(const std::filesystem::path& assetPath);
+		// 右键"Create Texture Asset":写一份最小 `.wtex`(内容 = 默认设置),已存在 = 失败(不覆盖)。
+		void CreateTextureAssetFor(const std::filesystem::path& sourcePath);
+		// 源图一行的徽标状态(按 (源图/资产/产物) 的 mtime 缓存;只有真变了才重算 sha256)。
+		Editor::TextureArtifactState ResolveTextureBadge(const std::filesystem::path& sourcePath,
+			bool* hasAsset);
+		// 绝对路径 → 内容根相对逻辑路径(失败返回 false)。
+		bool LogicalPathFor(const std::filesystem::path& path, std::string* outLogical) const;
+		// 把源图行的徽标登记进无障碍树(可脚本读:label = "Asset"/"Baked"…,value = 状态码)。
+		void RegisterTextureBadgeNode(const BrowserSlice& slice, const Wui::WuiRect& rect);
 		// D10-6:树行菜单「在资源管理器打开」——直接打开该目录本身(不是 /select 选中它)。
 		void OpenFolderInExplorer(const std::filesystem::path& path);
 		void Cut();
@@ -219,6 +243,19 @@ namespace World
 
 		PanelHost& m_Host;
 		ContentBrowserModel m_Model;
+		// M4-TEX P4:纹理源图徽标的状态缓存(键 = 源图绝对路径)。判定要读源字节算 sha256
+		// (4K 源几十 MB),所以只在 (源图 / `.wtex` / `.wtexc`) 的 mtime 真的变了时才重算。
+		struct TextureBadgeEntry
+		{
+			bool Valid = false;
+			bool HasAsset = false;
+			bool HasArtifact = false;
+			std::filesystem::file_time_type SourceStamp {};
+			std::filesystem::file_time_type AssetStamp {};
+			std::filesystem::file_time_type ArtifactStamp {};
+			Editor::TextureArtifactState Artifact = Editor::TextureArtifactState::NoArtifact;
+		};
+		std::map<std::filesystem::path, TextureBadgeEntry> m_TextureBadges;
 		// ---- U25-M2:"新建材质"向导(面板级模态)----
 		bool m_NewMaterialOpen = false;
 		uint32_t m_NewMaterialOpenedFrame = 0;

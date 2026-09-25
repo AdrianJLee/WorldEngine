@@ -49,11 +49,15 @@ namespace World
 					const std::string extension = LowerExtension(path);
 					return extension == ".gltf" || extension == ".glb";
 				}
-				case EditorAssetKind::Texture:
+				case EditorAssetKind::TextureSource:
 				{
 					const std::string extension = LowerExtension(path);
-					return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".tga";
+					// M4-TEX P4:材质/字段引用的贴图路径 = **源图**(`<源图>.wtexc` 是它的产物),
+					// 所以 `Texture` 一族只含图片源;`.wtex` 是设置资产,不进可引用列表。
+					return extension == ".png" || extension == ".jpg" || extension == ".jpeg"
+						|| extension == ".tga" || extension == ".bmp";
 				}
+				case EditorAssetKind::TextureAsset: return LowerExtension(path) == ".wtex";
 				case EditorAssetKind::Script:
 				{
 					const std::string extension = LowerExtension(path);

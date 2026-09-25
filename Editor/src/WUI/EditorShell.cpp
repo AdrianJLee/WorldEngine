@@ -93,6 +93,10 @@ namespace World
 			{ "content_browser", EditorShell::PanelForm::Docked, {} },
 			{ "view",            EditorShell::PanelForm::Docked, {} },
 			{ "stats",           EditorShell::PanelForm::Docked, {} },
+			// M4-TEX P4:纹理设置(Texture Settings)—— 编辑一个 `.wtex` 资产(设置 + source:)。
+			// 形态与 Project Settings 同款(独立窗口形态,默认打开 = 附加到主窗口的标签):
+			// 内容浏览器双击 `.wtex` / 右键 → 与 Window 菜单、AI `ui.activate` 落到同一条路径。
+			{ "texture_settings", EditorShell::PanelForm::Independent, { 260.0f, 180.0f, 720.0f, 520.0f } },
 			// 项目设置(用户 2026-09-20:应为独立窗口):声明为独立窗口形态 —— 默认打开仍走
 			// TogglePanel → OpenPanelAttached(附加到主窗口的标签切换),可拖出为独立 OS 窗口。
 			// 布局存档里的旧停靠记录由 StripIndependentPanelsFromTree 丢弃(不会再停靠回树)。
@@ -167,6 +171,7 @@ namespace World
 		m_PanelRegistry.emplace("input", std::make_unique<InputMapPanel>());
 		m_PanelRegistry.emplace("gallery", std::make_unique<WidgetGalleryPanel>());
 		m_PanelRegistry.emplace("material", std::make_unique<MaterialEditorPanel>());
+		m_PanelRegistry.emplace("texture_settings", std::make_unique<TextureSettingsPanel>());
 		m_PanelRegistry.emplace("scripts", std::make_unique<ScriptsPanel>());
 
 		// P4-UX10:恢复"上次退出时开着"的独立窗口。
@@ -826,6 +831,7 @@ namespace World
 			{ "gallery",         { "panel.gallery", "Widget Gallery" } },
 			{ "input",           { "panel.input", "Input Map" } },
 			{ "scripts",         { "panel.scripts", "Scripts" } },
+			{ "texture_settings", { "panel.texture_settings", "Texture Settings" } },
 		};
 		(void)kTitles;
 		if (const auto found = titles.find(id); found != titles.end())
@@ -1101,6 +1107,22 @@ namespace World
 			for (const std::string& path : pending)
 				OpenScriptEditorNow(path);
 		}
+		// M4-TEX P4:内容浏览器(双击 `.wtex` / 右键 Texture Settings…/Reimport/Reset)在渲染期间
+		// 只能写"打开纹理设置"的请求 —— 可见性/布局不能在面板渲染中途改。这里在帧边界统一执行,
+		// 与 Window 菜单、AI 通道 `ui.open` 落到同一条开关路径(AiActivatePanel)。
+		{
+			std::string textureAsset;
+			Editor::TextureSettingsRequests::Kind textureKind = Editor::TextureSettingsRequests::Kind::Open;
+			while (Editor::TextureSettingsRequests::Get().Take(textureAsset, textureKind))
+			{
+				const auto found = m_PanelRegistry.find("texture_settings");
+				if (found == m_PanelRegistry.end() || !found->second)
+					continue;
+				static_cast<TextureSettingsPanel*>(found->second.get())->RequestOpenAsset(textureAsset,
+					textureKind == Editor::TextureSettingsRequests::Kind::ResetDefaults);
+				AiActivatePanel("texture_settings", nullptr);
+			}
+		}
 		// AI 无障碍树:主窗口这一帧的节点从这里开始重新登记(见 WuiAccessibility)。
 		Wui::WuiAccessibility::Get().BeginFrame("main", ctx.ViewportSize());
 		// U25-M2:跨窗口拖放桥的落点登记每帧重建(独立窗口在本帧稍后登记自己).
@@ -1204,7 +1226,19 @@ namespace World
 		{
 			const auto attached = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), m_ActiveWindowTag);
 			if (attached != m_AttachedPanels.end())
+			{
+				// M4-TEX P4(2026-09-25 补,口径同 P4-U6b):面板级模态的拥有者**不管渲染在停靠组里还是
+				// 附加视图里**都必须能命中自己的模态 —— 画它之前解整窗输入封锁,画完封回去。
+				// 此前只有 RenderTabs(停靠路径)做了这件事:附加视图里的面板模态的按钮
+				// 全部落在封锁区里,点不动(实测:纹理设置的"回到默认设置"确认框)。
+				const bool ownsPanelModal =
+					!m_PanelModalOwner.empty() && m_PanelModalOwner == m_ActiveWindowTag;
+				if (ownsPanelModal)
+					Wui::EndModalInputBlock(ctx);
 				RenderPanelContent(ctx, m_ActiveWindowTag, editorArea);
+				if (ownsPanelModal)
+					Wui::BeginModalInputBlock(ctx);
+			}
 			else
 				m_ActiveWindowTag.clear();
 		}
