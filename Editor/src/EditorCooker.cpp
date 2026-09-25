@@ -439,9 +439,13 @@ namespace World::Editor
 					continue;
 				}
 				const std::string logical = relative.generic_string();
-				const fs::path artifactPath = cookedContentDir / (logical + ".wtexc");
+				// 产物命名 = `<同目录>/<主名>.wtexc`(不带源扩展名);旧命名 `<源图>.wtexc` 作为容错候选。
+				const fs::path artifactPath = cookedContentDir / relative.parent_path()
+					/ (relative.stem().generic_string() + ".wtexc");
+				const fs::path legacyArtifactPath = cookedContentDir / (logical + ".wtexc");
 				std::error_code existsEc;
-				if (!fs::is_regular_file(artifactPath, existsEc))
+				if (!fs::is_regular_file(artifactPath, existsEc)
+					&& !fs::is_regular_file(legacyArtifactPath, existsEc))
 				{
 					++result.Failed;
 					if (result.Error.empty())
@@ -465,10 +469,20 @@ namespace World::Editor
 				std::error_code fileEc;
 				if (!entry.is_regular_file(fileEc) || entry.path().extension() != ".wtexc")
 					continue;
-				const fs::path sourcePath = entry.path().parent_path() / entry.path().filename().stem();
-				const fs::path assetPath = sourcePath.parent_path()
-					/ (sourcePath.filename().string() + ".wtex");   // `<主名>.wtex` = 项目侧纹理资产
-				const size_t removed = removePair(sourcePath, assetPath);
+				// 产物名只带主名 ⇒ 源图要按"主名 + 受支持扩展名"逐个探(同主名多扩展名时全清)。
+				const fs::path directory = entry.path().parent_path();
+				const std::string stem = entry.path().filename().stem().string();
+				const fs::path assetPath = directory / (stem + ".wtex");   // `<主名>.wtex` = 项目侧纹理资产
+				size_t removed = 0;
+				const auto removeOne = [&removed](const fs::path& target)
+				{
+					std::error_code removeEc;
+					if (fs::remove(target, removeEc))
+						++removed;
+				};
+				for (const char* extension : { ".png", ".jpg", ".jpeg", ".tga", ".bmp" })
+					removeOne(directory / (stem + extension));
+				removeOne(assetPath);   // 产物本身**必须保留**(它就是要进包的东西)
 				result.Stripped += removed;
 				result.Orphans += removed;
 			}

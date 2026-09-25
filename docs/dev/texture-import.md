@@ -10,15 +10,18 @@
 ```
 assets/textures/Icon.png          ← 源(画师产物;png/jpg/jpeg/tga/bmp)
 assets/textures/Icon.wtex         ← **纹理资产**(YAML:导入设置 + `source:` 指向源图)
-cooked/textures/Icon.png.wtexc    ← 平台产物(自描述头 + 逐 mip 块数据;**按源图命名**;进 .pak)
+cooked/textures/Icon.wtexc        ← 平台产物(自描述头 + 逐 mip 块数据;**按主名命名**;进 .pak)
 ```
 
 - **与模型管线同构**(见知识库 `traps/wimport-removed.md`):`源(.gltf) → 资产(.wmodel) → 产物`,
   纹理是 `源(.png) → 资产(.wtex) → 产物(.wtexc)`。**没有旁路设置文件**:设置的家只有 `.wtex` 这一个。
+- **产物名 = `<主名>.wtexc`**(2026-09-25 用户口径:不带源图扩展名);`.wtexc` 是生成物,
+  **内容浏览器不显示它**(它不是资产,列目录时过滤)。
+- 同一目录同主名的两个源图(`Icon.png` + `Icon.jpg`)= 产物撞名:资产指到的那个优先,其余报错(不猜、不覆盖)。
 - **不存在"用一种新图片格式替代 PNG"**:源格式只是解码输入,运行时格式由烘焙决定。
 - 设置**不是**导入向导的一次性选项:编辑器面板 / 文本 / CI 脚本随时可改,改完重烘。
 - 删除 `.wtex` = 回到自动默认(不是错误);产物自带校验信息,能识别"陈旧产物"。
-- 没有资产的源图照旧可用:按引擎默认(usage=color)烘焙,产物同样落在 `<源图>.wtexc`。
+- 没有资产的源图照旧可用:按引擎默认(usage=color)烘焙,产物同样落在 `<同目录>/<主名>.wtexc`。
 
 ## 2. 源格式
 
@@ -96,7 +99,7 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 
 - 内核入口:`TextureCompiler::BakeBytes`(纯函数:同输入两次逐字节一致)/ `BakeFile` / `BakeDirectory`。
 - 目录烘焙:① 遍历资产 `<sourceRoot>/**/*.wtex`(每个资产解析自己的源图:`source:` 或同主名图片);
-  ② 没有资产的源图按默认设置;都烘到 `<outputRoot>/<**源图**逻辑路径>.wtexc`。
+  ② 没有资产的源图按默认设置;都烘到 `<outputRoot>/<同目录>/<**主名**>.wtexc`(如 `textures/Icon.wtexc`)。
   同主名资产坏掉时,对应源图**不会**用默认设置偷偷烘一份(失败在资产上,报错可见)。
 - 缓存键 = `sha256(源字节) + settingsHash + 产物版本` ⇒ 改源或改设置都会自动失效;缓存目录可整体删除重建。
 - `--cook` 摘要输出 `baked / uptodate / skipped / failed`(`TextureBakeStats`),失败带人话错误。
@@ -106,7 +109,7 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 > - **接线点**:`--cook` 的 step 4d —— 内容已由 `CookPipeline` 复制进 `cooked/cooked/`(step 3)、
 >   着色器烘完(step 4)之后,**打包(step 5)之前**。`sourceRoot` = 清单解析出的内容根
 >   (`projects/<项目>/assets`),`outputRoot` = `<build>/cooked/cooked` ⇒ 产物落
->   `cooked/<同逻辑路径>.wtexc`。打包按目录遍历,产物自动进 `.pak`(打包格式未改)。
+>   `cooked/<同目录>/<主名>.wtexc`。打包按目录遍历,产物自动进 `.pak`(打包格式未改)。
 > - **缓存目录** = `build/x64-<配置>/texture-cache/<源sha256>-<设置hash>-v<产物版本>.wtexc`
 >   (build 树里,可整体删除重建;与 `intermediate/ShaderCache/` 同一口径)。
 > - **日志**:`[tex] baked=N uptodate=N skipped=N failed=N`(每次 cook 一行);
@@ -133,7 +136,7 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 
 ## 7. 运行时消费(产物优先)
 
-1. 逻辑路径 `<path>`:先找 `<path>.wtexc`(打包态在 `.pak` 里),命中则解头 + 逐 mip 上传,
+1. 逻辑路径 `<path>`:先找 `<同目录>/<主名>.wtexc`(打包态在 `.pak` 里),命中则解头 + 逐 mip 上传,
    **不**解码源图;格式/尺寸/sRGB 全部来自产物头。
 2. 没有产物(开发态或未烘焙)⇒ 回退今天的 stb 路径(RGBA8),行为与旧版一致。
 3. **陈旧产物**:运行时**只信产物头**(不做源字节比对);"需重烘"由编辑器徽标(P4)与 cook(P3)
@@ -163,7 +166,8 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 
 ## 8. 编辑器交互(Texture Settings)
 
-- `.wtex` 是**资产类型**(内容浏览器里可选中、可双击);源图是它的源(与 `.gltf`/`.wmodel` 同款关系)。
+- `.wtex` 是**资产类型**(内容浏览器里可选中、可双击;双击源图 = 自动建资产并打开设置);源图是它的源
+  (与 `.gltf`/`.wmodel` 同款关系);`.wtexc` 不显示。
 - 面板(`Texture Settings`)编辑**资产**:source / usage / compression / sRGB / mips / mip_filter /
   max_size / wrap / filter / anisotropy / premultiply / flipY + 预览 + `Apply(保存 .wtex)`;
   改字段 → 重烘 → 预览更新(与 `.wmat` 热重载同一套语义)。

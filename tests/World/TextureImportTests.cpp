@@ -330,6 +330,9 @@ int main()
 			WriteFile(sourceRoot / "textures" / "B.tga", MakeTga(8, 8, MakeGradient(8, 8)));
 			WriteFile(sourceRoot / "textures" / "C.tga", MakeTga(8, 8, MakeGradient(8, 8)));
 			WriteFile(sourceRoot / "textures" / "D.tga", MakeTga(8, 8, MakeGradient(8, 8)));
+			// 同主名两个源图(无资产)= 产物名撞车(<主名>.wtexc)⇒ 只烘一个,另一个报错。
+			WriteFile(sourceRoot / "textures" / "E.png", MakeTga(8, 8, MakeGradient(8, 8)));
+			WriteFile(sourceRoot / "textures" / "E.jpg", MakeTga(8, 8, MakeGradient(8, 8)));
 			{
 				// 资产 = `<主名>.wtex`;缺省 source = 同目录同主名的图片。
 				std::ofstream asset(sourceRoot / "textures" / "B.wtex", std::ios::trunc);
@@ -348,13 +351,16 @@ int main()
 
 			TextureBakeOptions options;
 			TextureBakeStats first = TextureCompiler::BakeDirectory(sourceRoot, outputRoot, cacheDir, options);
-			CHECK(first.Baked == 3);            // A(默认)+ B(资产)+ C(资产别名)
-			CHECK(first.Failed == 1);           // D 的坏 source 被拒
+			// A 与 E 的源字节相同、设置相同(color 默认)⇒ 内容寻址缓存共用,只真烘一次。
+			CHECK(first.Baked == 3 && first.UpToDate == 1);
+			CHECK(first.Failed == 2);           // D 的坏 source + E 主名撞车
 			CHECK(!first.Errors.empty());
-			CHECK(std::filesystem::exists(outputRoot / "textures" / "icons" / "A.tga.wtexc"));
-			CHECK(std::filesystem::exists(outputRoot / "textures" / "B.tga.wtexc"));
-			CHECK(std::filesystem::exists(outputRoot / "textures" / "C.tga.wtexc"));   // 产物按**源图**命名
-			CHECK(!std::filesystem::exists(outputRoot / "textures" / "D.tga.wtexc"));
+			// 产物名 = `<主名>.wtexc`(不带源图扩展名)。
+			CHECK(std::filesystem::exists(outputRoot / "textures" / "icons" / "A.wtexc"));
+			CHECK(std::filesystem::exists(outputRoot / "textures" / "B.wtexc"));
+			CHECK(std::filesystem::exists(outputRoot / "textures" / "C.wtexc"));
+			CHECK(!std::filesystem::exists(outputRoot / "textures" / "D.wtexc"));
+			CHECK(std::filesystem::exists(outputRoot / "textures" / "E.wtexc"));
 
 			// A 没有资产 ⇒ 默认 color(BC7+sRGB);C 用资产里的显式 compression: bc7 + data(线性)。
 			auto readArtifact = [&](const std::filesystem::path& path,
@@ -373,26 +379,26 @@ int main()
 			};
 
 			TextureArtifactHeader aHeader;
-			CHECK(readArtifact(outputRoot / "textures" / "icons" / "A.tga.wtexc", aHeader));
+			CHECK(readArtifact(outputRoot / "textures" / "icons" / "A.wtexc", aHeader));
 			CHECK(aHeader.Format == TextureBlockFormat::Bc7 && aHeader.Srgb);
 			TextureArtifactHeader cHeader;
-			CHECK(readArtifact(outputRoot / "textures" / "C.tga.wtexc", cHeader));
+			CHECK(readArtifact(outputRoot / "textures" / "C.wtexc", cHeader));
 			CHECK(cHeader.Format == TextureBlockFormat::Bc7 && !cHeader.Srgb);
 
 			TextureArtifactHeader bHeader;
-			CHECK(readArtifact(outputRoot / "textures" / "B.tga.wtexc", bHeader));
+			CHECK(readArtifact(outputRoot / "textures" / "B.wtexc", bHeader));
 			CHECK(bHeader.Format == TextureBlockFormat::Bc5);
 
 			TextureBakeStats second = TextureCompiler::BakeDirectory(sourceRoot, outputRoot, cacheDir, options);
-			CHECK(second.Baked == 0 && second.UpToDate == 3);
-			CHECK(second.Failed == 1);          // 坏资产仍被拒(不静默)
+			CHECK(second.Baked == 0 && second.UpToDate == 4);
+			CHECK(second.Failed == 2);          // 坏资产/撞名仍被拒(不静默)
 
 			{
 				std::ofstream asset(sourceRoot / "textures" / "B.wtex", std::ios::trunc);
 				asset << "usage: data\n";
 			}
 			TextureBakeStats third = TextureCompiler::BakeDirectory(sourceRoot, outputRoot, cacheDir, options);
-			CHECK(third.Baked == 1 && third.UpToDate == 2);
+			CHECK(third.Baked == 1 && third.UpToDate == 3);
 			std::printf("World.TextureImport: dir bake baked=%zu uptodate=%zu\n",
 				third.Baked, third.UpToDate);
 		}

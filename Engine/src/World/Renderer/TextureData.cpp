@@ -104,10 +104,23 @@ namespace World
 				&& text.compare(text.size() - suffixLength, suffixLength, suffix) == 0;
 		}
 
-		// 逻辑路径 → 产物路径:契约是 `<逻辑路径>.wtexc`;已经带后缀时原样使用(容错)。
-		std::string ArtifactPathFor(const std::string& path)
+		// 逻辑路径 → 产物候选(按顺序找,第一个能解出头的生效):
+		//   ① `<同目录>/<主名>.wtexc` —— 契约命名(2026-09-25 起,不再带源图扩展名);
+		//   ② `<逻辑路径>.wtexc` —— 容错:手工放置的旧命名(如 `Icon.png.wtexc`)仍能读到。
+		std::vector<std::string> ArtifactPathCandidates(const std::string& path)
 		{
-			return EndsWith(path, ".wtexc") ? path : path + ".wtexc";
+			std::vector<std::string> candidates;
+			if (EndsWith(path, ".wtexc"))
+			{
+				candidates.push_back(path);
+				return candidates;
+			}
+			const size_t slash = path.find_last_of('/');
+			const size_t dot = path.find_last_of('.');
+			if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+				candidates.push_back(path.substr(0, dot) + ".wtexc");
+			candidates.push_back(path + ".wtexc");
+			return candidates;
 		}
 	}
 
@@ -164,10 +177,12 @@ namespace World
 			return asset;
 		}
 
-		const std::string artifactPath = ArtifactPathFor(path);
-		std::vector<uint8_t> bytes;
-		if (ReadAssetBytes(artifactPath, bytes))
+		const std::vector<std::string> candidates = ArtifactPathCandidates(path);
+		for (const std::string& artifactPath : candidates)
 		{
+			std::vector<uint8_t> bytes;
+			if (!ReadAssetBytes(artifactPath, bytes))
+				continue;
 			TextureArtifactHeader header;
 			std::string error;
 			if (ParseTextureArtifact(bytes, header, error))

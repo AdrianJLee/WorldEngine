@@ -473,6 +473,18 @@ namespace World
 		};
 		std::vector<BakeItem> items;
 		std::vector<std::string> claimed;
+		// 产物名 = `<主名>.wtexc`(用户 2026-09-25:「名字里不需要有源文件的后缀」)
+		// ⇒ **同一目录同主名**的两个源图会撞名:资产指到的那个优先,其余判冲突报错(不猜、不覆盖)。
+		std::vector<std::string> claimedArtifacts;
+		const auto artifactKey = [](const std::filesystem::path& relative)
+		{
+			std::string key = relative.parent_path().generic_string();
+			key += "/";
+			key += relative.stem().generic_string();
+			std::transform(key.begin(), key.end(), key.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			return key;
+		};
 
 		for (const std::filesystem::path& asset : assets)
 		{
@@ -553,6 +565,7 @@ namespace World
 				continue;
 			}
 			claimed.push_back(logical);
+			claimedArtifacts.push_back(artifactKey(relative));
 			items.push_back(BakeItem { source, relative, settings, true });
 		}
 
@@ -578,6 +591,15 @@ namespace World
 			const std::string logical = relative.generic_string();
 			if (std::find(claimed.begin(), claimed.end(), logical) != claimed.end())
 				continue;   // 已由资产接管
+			const std::string key = artifactKey(relative);
+			if (std::find(claimedArtifacts.begin(), claimedArtifacts.end(), key) != claimedArtifacts.end())
+			{
+				++stats.Failed;
+				stats.Errors.push_back("two sources map to the same artifact name (<stem>.wtexc): "
+					+ logical + " — keep one image per stem, or give the extra one its own .wtex asset");
+				continue;
+			}
+			claimedArtifacts.push_back(key);
 			items.push_back(BakeItem { image, relative, TextureImportSettings {}, false });
 		}
 
@@ -599,8 +621,9 @@ namespace World
 				+ std::to_string(settings.Hash()) + "-v" + std::to_string(kTextureArtifactVersion) + ".wtexc";
 			const std::filesystem::path cachePath = cacheDir.empty() ? std::filesystem::path()
 				: cacheDir / cacheKey;
-			const std::filesystem::path outputPath =
-				outputRoot / std::filesystem::path(item.Relative.generic_string() + ".wtexc");
+			// 产物名 = `<主名>.wtexc`(同目录),例如 textures/Icon.png → textures/Icon.wtexc。
+			const std::filesystem::path outputPath = outputRoot / item.Relative.parent_path()
+				/ (item.Relative.stem().generic_string() + ".wtexc");
 
 			std::vector<uint8_t> artifact;
 			bool reused = false;
