@@ -5,6 +5,15 @@
 #ifndef GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
 #define GL_COMPRESSED_RGBA_S3TC_DXT1_EXT 0x83F1
 #endif
+#ifndef GL_COMPRESSED_SRGB_S3TC_DXT1_EXT
+#define GL_COMPRESSED_SRGB_S3TC_DXT1_EXT 0x8C4C
+#endif
+#ifndef GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+#define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT 0x8C4F
+#endif
+#ifndef GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM
+#define GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM 0x8E8D
+#endif
 #ifndef GL_COMPRESSED_RGBA_S3TC_DXT3_EXT
 #define GL_COMPRESSED_RGBA_S3TC_DXT3_EXT 0x83F2
 #endif
@@ -70,6 +79,10 @@ namespace World::Rhi::OpenGL
 			case Format::BC4_UNORM:             return GL_COMPRESSED_RED_RGTC1;
 			case Format::BC5_UNORM:             return GL_COMPRESSED_RG_RGTC2;
 			case Format::BC7_UNORM:             return GL_COMPRESSED_RGBA_BPTC_UNORM;
+			// M4-TEX:块格式 sRGB 变体(采样时硬件解码到线性)。
+			case Format::BC1_UNORM_SRGB:        return GL_COMPRESSED_SRGB_S3TC_DXT1_EXT;
+			case Format::BC3_UNORM_SRGB:        return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT;
+			case Format::BC7_UNORM_SRGB:        return GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM;
 			default:                            return 0;
 		}
 	}

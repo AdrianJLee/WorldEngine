@@ -81,6 +81,10 @@ namespace World::Rhi
 		BC4_UNORM,
 		BC5_UNORM,
 		BC7_UNORM,
+		// M4-TEX:块格式的 sRGB 变体(采样时硬件解码到线性)。追加在末尾 —— 不改既有数值。
+		BC1_UNORM_SRGB,
+		BC3_UNORM_SRGB,
+		BC7_UNORM_SRGB,
 		Count,
 	};
 

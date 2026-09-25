@@ -162,6 +162,9 @@ target_include_directories(World PRIVATE
     "${CMAKE_SOURCE_DIR}/third_party/Glad/include"
     "${CMAKE_SOURCE_DIR}/third_party/stb_image"
     "${CMAKE_SOURCE_DIR}/third_party/stb"
+    # M4-TEX:纹理块压缩编码器(bc7enc16 = BC7,rgbcx = BC1–BC5)。
+    "${CMAKE_SOURCE_DIR}/third_party/bc7enc16"
+    "${CMAKE_SOURCE_DIR}/third_party/rgbcx"
     "${CMAKE_SOURCE_DIR}/third_party/vulkan-headers/include"
     "${CMAKE_SOURCE_DIR}/third_party/volk"
     ${Vulkan_INCLUDE_DIRS} # 自动解析的 Vulkan 路径
@@ -182,6 +185,10 @@ file(GLOB_RECURSE WORLD_SOURCES
     "src/*.cpp"
     "${WE_THIRD_PARTY}/stb_image/*.h"
     "${WE_THIRD_PARTY}/stb_image/*.cpp"
+    "${WE_THIRD_PARTY}/bc7enc16/*.c"
+    "${WE_THIRD_PARTY}/bc7enc16/*.h"
+    "${WE_THIRD_PARTY}/rgbcx/*.cpp"
+    "${WE_THIRD_PARTY}/rgbcx/*.h"
     "${WE_THIRD_PARTY}/glm/glm/**.hpp"
 	"${WE_THIRD_PARTY}/glm/glm/**.inl"
     "${WE_THIRD_PARTY}/volk/*.c"

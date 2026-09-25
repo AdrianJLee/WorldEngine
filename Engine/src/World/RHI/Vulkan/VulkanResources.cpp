@@ -56,6 +56,10 @@ namespace World::Rhi::Vulkan
 				case Format::BC3_UNORM: return VK_FORMAT_BC3_UNORM_BLOCK;
 				case Format::BC5_UNORM: return VK_FORMAT_BC5_UNORM_BLOCK;
 				case Format::BC7_UNORM: return VK_FORMAT_BC7_UNORM_BLOCK;
+				// M4-TEX:块格式 sRGB 变体(硬件解码)。
+				case Format::BC1_UNORM_SRGB: return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+				case Format::BC3_UNORM_SRGB: return VK_FORMAT_BC3_SRGB_BLOCK;
+				case Format::BC7_UNORM_SRGB: return VK_FORMAT_BC7_SRGB_BLOCK;
 				default: return VK_FORMAT_UNDEFINED;
 			}
 		}
