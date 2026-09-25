@@ -8,8 +8,10 @@
 // 悬停给什么文档",词表不再复制。
 // MAT-INTEL3(用户 2026-09-24:「函数内局部变量没有提示」):补上**当前缓冲的保守语义索引**
 // (形参 / 局部变量 / 文件级声明 / 文件内类型名,见 `SlangSemantics`):候选按光标所在函数作用域
-// 过滤,索引里的符号排在词表前面(Kind=Field/Global),悬停给同一份文档。高亮侧读同一份名字集合
-// (`DeclaredNames()`),所以"局部变量不再是白字";着色不区分作用域(见 SlangHighlight.h 的说明)。
+// 过滤,索引里的符号排在词表前面(Kind=Field/Global),悬停给同一份文档。
+// MAT-INTEL4(用户 2026-09-24「类型标识颜色应该和名字分开」):高亮**不再**读这份名字集合
+// (变量/参数/局部名保持默认色,类型标识走 `SlangKeywords.h` 的 Highlight 类别,见 SlangHighlight.h);
+// `DeclaredNames()` 仍由面板传给高亮缓存,单纯为了不改面板接口。
 //
 // 复用 Wui::CodeEditor 已经具备的补全浮层 / Hover 基础设施(见 WuiCodeEditor.h 的
 // `Completion` / `Hover` / `CompletionIdPrefix`):候选与文档用引擎冻结结构 `LuauCompletionItem`
@@ -53,7 +55,7 @@ namespace World
 	//   - 文件级声明 / 辅助函数名 / struct·interface·class·enum 名 → 全文件可用(Origin::FileScope);
 	//   - 函数形参 → 只在所属函数体内可见(Origin::Parameter);
 	//   - 函数体里的局部变量 → 同一函数体内、声明行**之后**(含同一行)可见(Origin::Local);
-	//   - struct/interface 里的字段与方法 → 只参与着色,不进顶层候选(Origin::Member);
+	//   - struct/interface 里的字段与方法 → 不进顶层候选(Origin::Member;着色由类型名/关键字规则决定);
 	//   - 跨函数不可见;文件级符号不区分"声明在前还是在后"(一律可用)。
 	//
 	// 已知的**保守近似**(宁可多给,不静默少给;逐条列在报告"未决"里):
@@ -706,8 +708,8 @@ namespace World
 			}
 		}
 
-		// 本文件里参与着色的名字(已去重)= `//! param` 声明 + 语义索引(形参 / 局部变量 /
-		// 文件级声明 / 类型名 / 成员)。高亮按名字集合上色(**不区分作用域**,见 SlangHighlight.h)。
+		// 本文件里已声明的名字(已去重)= `//! param` 声明 + 语义索引(形参 / 局部变量 /
+		// 文件级声明 / 类型名 / 成员)。MAT-INTEL4 起**只用于补全/悬停与缓存失效**,不再参与着色。
 		const std::vector<std::string>& DeclaredNames() const { return m_DeclaredNames; }
 
 		// 语义索引里的声明数(诊断/自检用;局部/形参/文件级/成员都算)。
@@ -878,6 +880,9 @@ namespace World
 		}
 
 		// 词表分类 → 补全 Kind(排序档位由它决定:Field → Method → Global → Keyword)。
+		// MAT-INTEL4:浮层只画"名字 + Type 列 + 文档",**没有 kind 列**,所以这里不改引擎结构:
+		// 类别语义与高亮一致(类型/关键字 → Keyword 档、函数 → Method 档、字段/注解键 → Field 档),
+		// `Type` 列文字仍是表里的 Category(引擎侧已把该列改成类型色)。
 		static LuauCompletionItem::KindType KindFor(SlangSymbols::Class kind)
 		{
 			switch (kind)
@@ -1005,7 +1010,7 @@ namespace World
 		}
 
 		// 光标所在行可见的索引符号:文件级总可用;局部/形参只在同一函数体内、声明行之后可用
-		// (跨函数不可见);结构体字段/方法只参与着色,不进顶层候选。
+		// (跨函数不可见);结构体字段/方法不进顶层候选(MAT-INTEL4 起名字也不着色)。
 		void CollectIndexed(std::vector<LuauCompletionItem>& out, int caretLine) const
 		{
 			const int scope = CaretScope(caretLine);

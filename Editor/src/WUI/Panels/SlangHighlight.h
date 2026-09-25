@@ -4,11 +4,18 @@
 // HLSL 语法是它的子集,所以关键字表按这一族语言给。
 //
 // MAT-INTEL2:关键字 / 内建 / 引擎契约符号的事实源挪到 `SlangKeywords.h`(唯一一张表,补全
-// 与高亮共用 —— 旧版两张表漂移:补全只有 11 条关键字)。本文件只留"怎么 token 化":
-//   - 标识符分类(见 ClassifyIdentifier):唯一表 → Keyword/Global;引擎契约字段
-//     (MaterialSurfaceContract 的 X-macro)→ Global;本文件 `//! param` 声明的参数名 → Global;
-//     点号后的成员(`surface.BaseColor` / `input.UV` / `Tint.rgb` / `map.Sample`)→ Global;
-//   - 没被任何规则命中的标识符(局部变量名等)保持默认色 —— 不为了"好看"发明新的引擎 token kind。
+// 与高亮共用 —— 旧版两张表漂移:补全只有 11 条关键字)。本文件只留"怎么 token 化"。
+//
+// MAT-INTEL4(用户 2026-09-24「类型标识颜色应该和名字分开。重新设计下颜色标识」)—— 着色改为
+// **按类别上色**,名字不吃色:
+//   - 唯一表的 `Highlight` 类别 = 引擎 token kind:Type / Function / Field / Annotation / Keyword
+//     (表里标 Default 的**名字**条目,如 `input`,与未收录词一样不着色);
+//   - 引擎契约字段(MaterialSurfaceContract 的 X-macro)与**点号后的成员**
+//     (`surface.BaseColor` / `input.UV` / `Tint.rgb` / `map.Sample(uv).rgb`)→ Field;
+//   - **变量名 / 参数名 / 局部名 / 用户自定义类型名保持 Default** —— 于是"类型标识(teal)"
+//     与"名字(近白)"在像素上一眼分开。MAT-INTEL3 曾把语义索引里的名字上 Global 色(为了少留白字),
+//     本单按用户口径取代它:`SlangHighlightSymbols::FileNames` 的管道**保留**(面板不用改),
+//     但着色不再读它 —— 要恢复那套行为,在 ClassifyIdentifier 里加回一段即可。
 //
 // 与 LuauHighlighter(Engine/src/World/Script/LuauHighlighter.h)同一套口径,便于复用
 // Wui::CodeEditor 的内核(行号、选区、滚动、诊断行、Ctrl+S 全在核心里,这里只提供 token):
@@ -47,10 +54,9 @@ namespace World
 		bool operator!=(const SlangHighlightState& other) const { return !(*this == other); }
 	};
 
-	// 本文件里参与着色的名字:高亮与补全读同一份结果(SlangCompletionIndex::DeclaredNames)
-	// = `//! param` 声明 + MAT-INTEL3 的语义索引(局部变量 / 形参 / 文件级声明 / 类型名 / 成员)。
-	// **着色按名字集合,不区分作用域**(高亮没有"光标行"这一维):索引里的名字在整个文件里都着
-	// Global 色,所以跨函数的同名标识符会一起着色 —— 口径见 SlangCompletion.h 的 SlangSemantics。
+	// 本文件里参与着色/补全的名字(SlangCompletionIndex::DeclaredNames = `//! param` 声明 +
+	// MAT-INTEL3 的语义索引:局部变量 / 形参 / 文件级声明 / 类型名 / 成员)。
+	// MAT-INTEL4:高亮**不再读**它(名字保持 Default,见文件头);悬停/补全仍用同一份索引。
 	// 指针为空 = 只用内置表 + 契约字段。
 	struct SlangHighlightSymbols
 	{
@@ -72,6 +78,11 @@ namespace World
 				case Wui::WuiCodeTokenKind::Number: return "number";
 				case Wui::WuiCodeTokenKind::Global: return "global";
 				case Wui::WuiCodeTokenKind::Operator: return "operator";
+				// MAT-INTEL4:类别色(dump 里的名字就是探针断言用的字面量,不要改)。
+				case Wui::WuiCodeTokenKind::Type: return "type";
+				case Wui::WuiCodeTokenKind::Function: return "function";
+				case Wui::WuiCodeTokenKind::Field: return "field";
+				case Wui::WuiCodeTokenKind::Annotation: return "annotation";
 			}
 			return "?";
 		}
@@ -262,11 +273,13 @@ namespace World
 		}
 
 		// 标识符分类(着色顺序无关,先命中的优先):
-		//   ① 唯一符号表(SlangKeywords.h):关键字/类型 → Keyword;引擎类型/内建/引擎函数 → Global;
-		//   ② 引擎契约字段名(MaterialSurfaceContract 的 X-macro)→ Global;
-		//   ③ 本文件 `//! param` 声明的参数名 → Global;
-		//   ④ 点号后的成员访问 → Global(点号字段:`surface.BaseColor` / `input.UV` / `Tint.rgb`);
-		//   ⑤ 其余标识符不着色(保持默认色)。
+		//   ① 唯一符号表(SlangKeywords.h)按**类别**着色:类型 → Type、函数 → Function、
+		//      关键字 → Keyword、注解关键字 → Annotation(表里的 Default 条目不返回,继续往下走);
+		//   ② 引擎契约字段名(MaterialSurfaceContract 的 X-macro)→ Field;
+		//   ③ 点号后的成员访问 → Field(`surface.BaseColor` / `input.UV` / `Tint.rgb`);
+		//   ④ 其余标识符不着色(Default)—— 含**变量名 / 参数名 / 局部名 / 用户自定义类型名**。
+		// 注:表里的词优先于点号规则,所以 `map.Sample(uv)` 的 `Sample` 是"函数色"(它确实是纹理方法),
+		// 而不是成员色;要反过来(点号成员一律 Field)把 ②③ 挪到 ① 之前即可。
 		static bool ClassifyIdentifier(std::string_view word, std::string_view line, size_t start,
 			const SlangHighlightSymbols* symbols, Wui::WuiCodeTokenKind& out)
 		{
@@ -274,25 +287,15 @@ namespace World
 				return true;
 			if (SlangSymbols::IsContractField(word))
 			{
-				out = Wui::WuiCodeTokenKind::Global;
+				out = Wui::WuiCodeTokenKind::Field;
 				return true;
-			}
-			if (symbols != nullptr && symbols->FileNames != nullptr)
-			{
-				for (const std::string& name : *symbols->FileNames)
-				{
-					if (name == word)
-					{
-						out = Wui::WuiCodeTokenKind::Global;
-						return true;
-					}
-				}
 			}
 			if (IsMemberAccess(line, start))
 			{
-				out = Wui::WuiCodeTokenKind::Global;
+				out = Wui::WuiCodeTokenKind::Field;
 				return true;
 			}
+			(void)symbols;   // MAT-INTEL4:名字集合不再参与着色(见文件头与 SlangHighlightSymbols 的说明)
 			return false;
 		}
 
@@ -350,7 +353,8 @@ namespace World
 	{
 	public:
 		// fileNames = 本文件 `//! param` 声明的名字(见 SlangAnnotations::CollectDeclaredNames):
-		// 参数名参与着色,所以名字表变了也要重算(表很小,直接按值比较)。
+		// MAT-INTEL4 起名字不参与着色,这条依赖留着是为了"恢复名字着色时不用改面板";
+		// 名字表变了仍会重算(表很小,按值比较)。
 		void Update(const Wui::WuiTextBuffer& buffer, const std::vector<std::string>& fileNames)
 		{
 			if (m_Revision == buffer.Revision() && m_LineCount == buffer.LineCount()

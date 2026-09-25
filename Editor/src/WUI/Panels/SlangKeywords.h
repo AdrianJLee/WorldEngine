@@ -14,14 +14,20 @@
 //   **字段名不在这张表里** —— 它们的事实源是 `World/Renderer/MaterialSurfaceContract.hlsli` 的
 //   X-macro(补全的 `input.`/`surface.` 成员表与高亮的 `IsContractField` 读同一份)。
 //
-// 分类(Class)决定"怎么着色 / 进哪个候选池":
-//   Keyword / Type                                   → 高亮 Keyword 色;补全 Kind=Keyword
-//   EngineType                                       → 高亮 Global 色;补全 Kind=Keyword
-//   Intrinsic / EngineFunction                       → 高亮 Global 色;补全 Kind=Method(插入补 `()`)
-//   AnnotationKey / AnnotationSyntax                 → 注解行候选 Kind=Field
-//   AnnotationAttr                                   → 注解行候选 Kind=Method(插入 `group("")` 形态)
-//   AnnotationType                                   → 注解行候选 Kind=Keyword
-// 上下文(Context)决定词进哪个候选池;高亮**不看**上下文(一个词出现在代码里就按 Class 着色,
+// 两个维度分开(每条都显式写出,不靠推导):
+//   - **Class**(补全语义 / 候选池):决定补全 Kind、排序档位与插入形态;
+//       Keyword / Type / EngineType / AnnotationType  → 补全 Kind=Keyword
+//       AnnotationKey / AnnotationSyntax              → 注解行候选 Kind=Field
+//       AnnotationAttr                                → 注解行候选 Kind=Method(插入 `group("")` 形态)
+//       Intrinsic / EngineFunction                    → 补全 Kind=Method(插入补 `()`)
+//   - **TokenKind Highlight**(高亮类别,MAT-INTEL4;用户 2026-09-24「类型标识颜色应该和名字分开」):
+//       Keyword    控制流 / 声明关键字
+//       Type       Slang 标量·向量·矩阵 + 资源·采样器类型 + 引擎契约结构(含 `void`)
+//       Function   Slang 内建 + 引擎包装函数
+//       Field      字段 / 点号成员(表里暂无条目 —— 契约字段与 `x.y` 成员由高亮器按规则给)
+//       Annotation `//!` 注解关键字(param / 类型 / group·label·unit / [min,max])
+//       Default    **名字条目**(`input` = Evaluate 的契约形参名):不着色,补全仍有条目
+// 上下文(Context)决定词进哪个候选池;高亮**不看**上下文(一个词出现在代码里就按 Highlight 着色,
 // 注解词出现在代码里也无害 —— 少一层状态,注解行与代码行共用同一条 token 化路径)。
 
 #include "World/Renderer/MaterialSurfaceContract.hlsli"
@@ -104,247 +110,254 @@ namespace World
 			Both,       // 两边都进(如 Texture2D)
 		};
 
+		// 高亮类别 = 引擎 token kind 本身(MAT-INTEL4):表里**每条**显式写自己的类别,
+		// 高亮器只做"取类别 → 上色",不再从 Class 二次推导(避免两套口径漂移)。
+		// 新增词时**必须**写出 TokenKind::… —— 漏写会退化成 Default(不着色),
+		// 探针 mat-intel4-color-probe.py 有一条静态断言守着这件事。
+		using TokenKind = Wui::WuiCodeTokenKind;
+
 		struct Symbol
 		{
 			std::string_view Name;
 			std::string_view Category; // 补全的 "类型" 列
 			std::string_view Doc;
-			Class Kind = Class::Keyword;
+			Class Kind = Class::Keyword;            // 补全语义(候选池 / Kind / 插入形态)
+			TokenKind Highlight = TokenKind::Default; // MAT-INTEL4:高亮类别(每条显式写)
 			Context Where = Context::Code;
-			std::string_view Insert;   // 补全插入文本(空 = 用 Name;`group` → `group("")`)
+			std::string_view Insert;                // 补全插入文本(空 = 用 Name;`group` → `group("")`)
 		};
 
 		// 唯一表。加词只改这里:高亮与补全同时生效(名字必须唯一 —— 见下方 Index() 的说明)。
 		inline constexpr Symbol kSymbols[] = {
 			// ---- Slang / HLSL 标量与向量类型 ----
-			{ "bool", "scalar", "Boolean scalar (true / false).", Class::Type },
-			{ "int", "scalar", "32-bit signed integer scalar.", Class::Type },
-			{ "uint", "scalar", "32-bit unsigned integer scalar.", Class::Type },
-			{ "dword", "scalar", "32-bit unsigned integer alias (HLSL).", Class::Type },
-			{ "half", "scalar", "16-bit float scalar (no implicit conversions).", Class::Type },
-			{ "min16float", "scalar", "16-bit minimum-precision float (HLSL).", Class::Type },
-			{ "float", "scalar", "32-bit float scalar. Slang does not convert widths implicitly.", Class::Type },
-			{ "double", "scalar", "64-bit float scalar (no implicit narrowing to float).", Class::Type },
-			{ "float2", "vector", "2-component float vector. Construct explicitly: float2(a, b).", Class::Type },
-			{ "float3", "vector", "3-component float vector. Truncate with .xyz/.rgb — implicit width conversion is an error.", Class::Type },
-			{ "float4", "vector", "4-component float vector (colour literals are usually float4: r, g, b, a).", Class::Type },
-			{ "int2", "vector", "2-component signed integer vector.", Class::Type },
-			{ "int3", "vector", "3-component signed integer vector.", Class::Type },
-			{ "int4", "vector", "4-component signed integer vector.", Class::Type },
-			{ "uint2", "vector", "2-component unsigned integer vector.", Class::Type },
-			{ "uint3", "vector", "3-component unsigned integer vector.", Class::Type },
-			{ "uint4", "vector", "4-component unsigned integer vector.", Class::Type },
-			{ "matrix", "matrix", "Generic matrix type.", Class::Type },
-			{ "float2x2", "matrix", "2x2 float matrix.", Class::Type },
-			{ "float3x3", "matrix", "3x3 float matrix.", Class::Type },
-			{ "float4x4", "matrix", "4x4 float matrix (skin/bone transforms).", Class::Type },
-			{ "void", "keyword", "No-return type (helpers that only write their out parameters).", Class::Keyword },
+			{ "bool", "scalar", "Boolean scalar (true / false).", Class::Type, TokenKind::Type },
+			{ "int", "scalar", "32-bit signed integer scalar.", Class::Type, TokenKind::Type },
+			{ "uint", "scalar", "32-bit unsigned integer scalar.", Class::Type, TokenKind::Type },
+			{ "dword", "scalar", "32-bit unsigned integer alias (HLSL).", Class::Type, TokenKind::Type },
+			{ "half", "scalar", "16-bit float scalar (no implicit conversions).", Class::Type, TokenKind::Type },
+			{ "min16float", "scalar", "16-bit minimum-precision float (HLSL).", Class::Type, TokenKind::Type },
+			{ "float", "scalar", "32-bit float scalar. Slang does not convert widths implicitly.", Class::Type, TokenKind::Type },
+			{ "double", "scalar", "64-bit float scalar (no implicit narrowing to float).", Class::Type, TokenKind::Type },
+			{ "float2", "vector", "2-component float vector. Construct explicitly: float2(a, b).", Class::Type, TokenKind::Type },
+			{ "float3", "vector", "3-component float vector. Truncate with .xyz/.rgb — implicit width conversion is an error.", Class::Type, TokenKind::Type },
+			{ "float4", "vector", "4-component float vector (colour literals are usually float4: r, g, b, a).", Class::Type, TokenKind::Type },
+			{ "int2", "vector", "2-component signed integer vector.", Class::Type, TokenKind::Type },
+			{ "int3", "vector", "3-component signed integer vector.", Class::Type, TokenKind::Type },
+			{ "int4", "vector", "4-component signed integer vector.", Class::Type, TokenKind::Type },
+			{ "uint2", "vector", "2-component unsigned integer vector.", Class::Type, TokenKind::Type },
+			{ "uint3", "vector", "3-component unsigned integer vector.", Class::Type, TokenKind::Type },
+			{ "uint4", "vector", "4-component unsigned integer vector.", Class::Type, TokenKind::Type },
+			{ "matrix", "matrix", "Generic matrix type.", Class::Type, TokenKind::Type },
+			{ "float2x2", "matrix", "2x2 float matrix.", Class::Type, TokenKind::Type },
+			{ "float3x3", "matrix", "3x3 float matrix.", Class::Type, TokenKind::Type },
+			{ "float4x4", "matrix", "4x4 float matrix (skin/bone transforms).", Class::Type, TokenKind::Type },
+			{ "void", "keyword", "No-return type (helpers that only write their out parameters).", Class::Keyword, TokenKind::Type },
 
 			// ---- 资源 / 采样器类型(严格子集里贴图参数生成 Sampler2D)----
-			{ "Texture1D", "resource", "1D texture resource type.", Class::Keyword },
+			{ "Texture1D", "resource", "1D texture resource type.", Class::Keyword, TokenKind::Type },
 			{ "Texture2D", "resource",
 				"Texture resource. As a `//! param` type it means a content-root relative path (\"\" = white 1x1 "
-				"fallback); slots t4..t11 by annotation order, max 8, sampled as `name.Sample(uv)`.", Class::Keyword,
+				"fallback); slots t4..t11 by annotation order, max 8, sampled as `name.Sample(uv)`.", Class::Keyword, TokenKind::Type,
 				Context::Both },
-			{ "Texture3D", "resource", "3D texture resource type.", Class::Keyword },
-			{ "TextureCube", "resource", "Cube texture resource type.", Class::Keyword },
-			{ "Texture2DArray", "resource", "Arrayed 2D texture resource type.", Class::Keyword },
-			{ "TextureCubeArray", "resource", "Arrayed cube texture resource type.", Class::Keyword },
-			{ "RWTexture2D", "resource", "Read-write 2D texture resource type (compute).", Class::Keyword },
-			{ "ByteAddressBuffer", "resource", "Raw byte-address buffer resource type.", Class::Keyword },
-			{ "SamplerState", "resource", "Sampler state resource type.", Class::Keyword },
-			{ "SamplerComparisonState", "resource", "Comparison sampler state resource type.", Class::Keyword },
-			{ "Sampler1D", "resource", "Combined 1D sampler (engine binds this for Texture1D parameters).", Class::Keyword },
-			{ "Sampler2D", "resource", "Combined 2D sampler (engine binds this for Texture2D parameters).", Class::Keyword },
-			{ "Sampler3D", "resource", "Combined 3D sampler.", Class::Keyword },
-			{ "SamplerCube", "resource", "Combined cube sampler.", Class::Keyword },
-			{ "Sampler2DArray", "resource", "Combined arrayed 2D sampler.", Class::Keyword },
-			{ "SamplerCubeArray", "resource", "Combined arrayed cube sampler.", Class::Keyword },
+			{ "Texture3D", "resource", "3D texture resource type.", Class::Keyword, TokenKind::Type },
+			{ "TextureCube", "resource", "Cube texture resource type.", Class::Keyword, TokenKind::Type },
+			{ "Texture2DArray", "resource", "Arrayed 2D texture resource type.", Class::Keyword, TokenKind::Type },
+			{ "TextureCubeArray", "resource", "Arrayed cube texture resource type.", Class::Keyword, TokenKind::Type },
+			{ "RWTexture2D", "resource", "Read-write 2D texture resource type (compute).", Class::Keyword, TokenKind::Type },
+			{ "ByteAddressBuffer", "resource", "Raw byte-address buffer resource type.", Class::Keyword, TokenKind::Type },
+			{ "SamplerState", "resource", "Sampler state resource type.", Class::Keyword, TokenKind::Type },
+			{ "SamplerComparisonState", "resource", "Comparison sampler state resource type.", Class::Keyword, TokenKind::Type },
+			{ "Sampler1D", "resource", "Combined 1D sampler (engine binds this for Texture1D parameters).", Class::Keyword, TokenKind::Type },
+			{ "Sampler2D", "resource", "Combined 2D sampler (engine binds this for Texture2D parameters).", Class::Keyword, TokenKind::Type },
+			{ "Sampler3D", "resource", "Combined 3D sampler.", Class::Keyword, TokenKind::Type },
+			{ "SamplerCube", "resource", "Combined cube sampler.", Class::Keyword, TokenKind::Type },
+			{ "Sampler2DArray", "resource", "Combined arrayed 2D sampler.", Class::Keyword, TokenKind::Type },
+			{ "SamplerCubeArray", "resource", "Combined arrayed cube sampler.", Class::Keyword, TokenKind::Type },
 
 			// ---- 声明 / 存储 / 绑定修饰 ----
-			{ "static", "keyword", "File-scope static declaration.", Class::Keyword },
-			{ "const", "keyword", "Read-only value (usual for helper constants).", Class::Keyword },
-			{ "inline", "keyword", "Inline function (helpers are inlined by the compiler anyway).", Class::Keyword },
-			{ "uniform", "keyword", "Uniform value (read-only per draw).", Class::Keyword },
-			{ "in", "keyword", "Input parameter / input-stage qualifier.", Class::Keyword },
-			{ "out", "keyword", "Output parameter / output-stage qualifier.", Class::Keyword },
-			{ "inout", "keyword", "Read-write parameter.", Class::Keyword },
-			{ "volatile", "keyword", "Volatile value (no optimisation across accesses).", Class::Keyword },
-			{ "cbuffer", "keyword", "Constant buffer block (engine generates the real ones from annotations).", Class::Keyword },
-			{ "tbuffer", "keyword", "Texture/sampler buffer block.", Class::Keyword },
-			{ "register", "keyword", "Explicit register binding — engine binds resources from annotations, so user sources do not write it.", Class::Keyword },
-			{ "packoffset", "keyword", "Packing offset inside a constant buffer.", Class::Keyword },
-			{ "row_major", "keyword", "Row-major matrix layout.", Class::Keyword },
-			{ "column_major", "keyword", "Column-major matrix layout (Slang default).", Class::Keyword },
-			{ "groupshared", "keyword", "Compute group-shared storage.", Class::Keyword },
-			{ "nointerpolation", "keyword", "Do not interpolate this varying.", Class::Keyword },
-			{ "noperspective", "keyword", "Interpolate without perspective correction.", Class::Keyword },
-			{ "linear", "keyword", "Linear interpolation modifier.", Class::Keyword },
-			{ "centroid", "keyword", "Centroid sampling modifier.", Class::Keyword },
-			{ "sample", "keyword", "Sample-frequency interpolation modifier.", Class::Keyword },
-			{ "snorm", "keyword", "Signed normalised value qualifier.", Class::Keyword },
-			{ "unorm", "keyword", "Unsigned normalised value qualifier.", Class::Keyword },
+			{ "static", "keyword", "File-scope static declaration.", Class::Keyword, TokenKind::Keyword },
+			{ "const", "keyword", "Read-only value (usual for helper constants).", Class::Keyword, TokenKind::Keyword },
+			{ "inline", "keyword", "Inline function (helpers are inlined by the compiler anyway).", Class::Keyword, TokenKind::Keyword },
+			{ "uniform", "keyword", "Uniform value (read-only per draw).", Class::Keyword, TokenKind::Keyword },
+			{ "in", "keyword", "Input parameter / input-stage qualifier.", Class::Keyword, TokenKind::Keyword },
+			{ "out", "keyword", "Output parameter / output-stage qualifier.", Class::Keyword, TokenKind::Keyword },
+			{ "inout", "keyword", "Read-write parameter.", Class::Keyword, TokenKind::Keyword },
+			{ "volatile", "keyword", "Volatile value (no optimisation across accesses).", Class::Keyword, TokenKind::Keyword },
+			{ "cbuffer", "keyword", "Constant buffer block (engine generates the real ones from annotations).", Class::Keyword, TokenKind::Keyword },
+			{ "tbuffer", "keyword", "Texture/sampler buffer block.", Class::Keyword, TokenKind::Keyword },
+			{ "register", "keyword", "Explicit register binding — engine binds resources from annotations, so user sources do not write it.", Class::Keyword, TokenKind::Keyword },
+			{ "packoffset", "keyword", "Packing offset inside a constant buffer.", Class::Keyword, TokenKind::Keyword },
+			{ "row_major", "keyword", "Row-major matrix layout.", Class::Keyword, TokenKind::Keyword },
+			{ "column_major", "keyword", "Column-major matrix layout (Slang default).", Class::Keyword, TokenKind::Keyword },
+			{ "groupshared", "keyword", "Compute group-shared storage.", Class::Keyword, TokenKind::Keyword },
+			{ "nointerpolation", "keyword", "Do not interpolate this varying.", Class::Keyword, TokenKind::Keyword },
+			{ "noperspective", "keyword", "Interpolate without perspective correction.", Class::Keyword, TokenKind::Keyword },
+			{ "linear", "keyword", "Linear interpolation modifier.", Class::Keyword, TokenKind::Keyword },
+			{ "centroid", "keyword", "Centroid sampling modifier.", Class::Keyword, TokenKind::Keyword },
+			{ "sample", "keyword", "Sample-frequency interpolation modifier.", Class::Keyword, TokenKind::Keyword },
+			{ "snorm", "keyword", "Signed normalised value qualifier.", Class::Keyword, TokenKind::Keyword },
+			{ "unorm", "keyword", "Unsigned normalised value qualifier.", Class::Keyword, TokenKind::Keyword },
 
 			// ---- 语句 / 表达式关键字与字面量 ----
-			{ "if", "keyword", "Conditional branch — parameter-driven shading lives here.", Class::Keyword },
-			{ "else", "keyword", "Alternative branch.", Class::Keyword },
-			{ "for", "keyword", "Loop (keep it bounded: this runs per pixel).", Class::Keyword },
-			{ "while", "keyword", "Loop with a condition.", Class::Keyword },
-			{ "do", "keyword", "Do/while loop body.", Class::Keyword },
-			{ "switch", "keyword", "Switch statement (must be exhaustive for scalars).", Class::Keyword },
-			{ "case", "keyword", "Switch case label.", Class::Keyword },
-			{ "default", "keyword", "Default branch / default switch label.", Class::Keyword },
-			{ "break", "keyword", "Break out of the innermost loop or switch.", Class::Keyword },
-			{ "continue", "keyword", "Continue the innermost loop.", Class::Keyword },
-			{ "return", "keyword", "Return the Surface from Evaluate.", Class::Keyword },
-			{ "discard", "keyword", "Discard the fragment (alpha-cutout style effects).", Class::Keyword },
-			{ "true", "literal", "Boolean true.", Class::Keyword },
-			{ "false", "literal", "Boolean false.", Class::Keyword },
-			{ "this", "keyword", "Current instance inside a method.", Class::Keyword },
-			{ "new", "keyword", "Allocate a reference-type instance.", Class::Keyword },
+			{ "if", "keyword", "Conditional branch — parameter-driven shading lives here.", Class::Keyword, TokenKind::Keyword },
+			{ "else", "keyword", "Alternative branch.", Class::Keyword, TokenKind::Keyword },
+			{ "for", "keyword", "Loop (keep it bounded: this runs per pixel).", Class::Keyword, TokenKind::Keyword },
+			{ "while", "keyword", "Loop with a condition.", Class::Keyword, TokenKind::Keyword },
+			{ "do", "keyword", "Do/while loop body.", Class::Keyword, TokenKind::Keyword },
+			{ "switch", "keyword", "Switch statement (must be exhaustive for scalars).", Class::Keyword, TokenKind::Keyword },
+			{ "case", "keyword", "Switch case label.", Class::Keyword, TokenKind::Keyword },
+			{ "default", "keyword", "Default branch / default switch label.", Class::Keyword, TokenKind::Keyword },
+			{ "break", "keyword", "Break out of the innermost loop or switch.", Class::Keyword, TokenKind::Keyword },
+			{ "continue", "keyword", "Continue the innermost loop.", Class::Keyword, TokenKind::Keyword },
+			{ "return", "keyword", "Return the Surface from Evaluate.", Class::Keyword, TokenKind::Keyword },
+			{ "discard", "keyword", "Discard the fragment (alpha-cutout style effects).", Class::Keyword, TokenKind::Keyword },
+			{ "true", "literal", "Boolean true.", Class::Keyword, TokenKind::Keyword },
+			{ "false", "literal", "Boolean false.", Class::Keyword, TokenKind::Keyword },
+			{ "this", "keyword", "Current instance inside a method.", Class::Keyword, TokenKind::Keyword },
+			{ "new", "keyword", "Allocate a reference-type instance.", Class::Keyword, TokenKind::Keyword },
 
 			// ---- Slang 语言层(模块 / 泛型 / 接口)—— 高亮它们让"这是 Slang 源"读得出来 ----
-			{ "struct", "keyword", "Struct definition (helper data for Evaluate).", Class::Keyword },
-			{ "class", "keyword", "Reference type with methods (Slang).", Class::Keyword },
-			{ "enum", "keyword", "Enumeration definition (Slang).", Class::Keyword },
-			{ "namespace", "keyword", "Namespace declaration (Slang module scoping).", Class::Keyword },
-			{ "module", "keyword", "Slang module (compiled separately and imported).", Class::Keyword },
-			{ "import", "keyword", "Import a Slang module into this file.", Class::Keyword },
-			{ "using", "keyword", "Type alias / using declaration.", Class::Keyword },
-			{ "typedef", "keyword", "C-style type alias.", Class::Keyword },
+			{ "struct", "keyword", "Struct definition (helper data for Evaluate).", Class::Keyword, TokenKind::Keyword },
+			{ "class", "keyword", "Reference type with methods (Slang).", Class::Keyword, TokenKind::Keyword },
+			{ "enum", "keyword", "Enumeration definition (Slang).", Class::Keyword, TokenKind::Keyword },
+			{ "namespace", "keyword", "Namespace declaration (Slang module scoping).", Class::Keyword, TokenKind::Keyword },
+			{ "module", "keyword", "Slang module (compiled separately and imported).", Class::Keyword, TokenKind::Keyword },
+			{ "import", "keyword", "Import a Slang module into this file.", Class::Keyword, TokenKind::Keyword },
+			{ "using", "keyword", "Type alias / using declaration.", Class::Keyword, TokenKind::Keyword },
+			{ "typedef", "keyword", "C-style type alias.", Class::Keyword, TokenKind::Keyword },
 			{ "interface", "keyword",
 				"Slang interface: a set of required members that a concrete type implements (generic constraint `T : I`).",
-				Class::Keyword },
-			{ "associatedtype", "keyword", "Interface member type that implementers bind.", Class::Keyword },
-			{ "extension", "keyword", "Extend an existing type with new members (Slang).", Class::Keyword },
-			{ "property", "keyword", "Property accessor block (Slang).", Class::Keyword },
-			{ "get", "keyword", "Property getter.", Class::Keyword },
-			{ "set", "keyword", "Property setter.", Class::Keyword },
-			{ "public", "keyword", "Public visibility.", Class::Keyword },
-			{ "internal", "keyword", "Module-internal visibility.", Class::Keyword },
-			{ "private", "keyword", "Private visibility.", Class::Keyword },
-			{ "extern", "keyword", "Externally defined declaration.", Class::Keyword },
-			{ "where", "keyword", "Generic constraint clause (`<T> where T : IUVTransform`).", Class::Keyword },
-			{ "each", "keyword", "Slang `each` generic expansion.", Class::Keyword },
-			{ "expand", "keyword", "Slang `expand` generic expansion.", Class::Keyword },
-			{ "func", "keyword", "Function type declarator (Slang).", Class::Keyword },
-			{ "let", "keyword", "Immutable local binding.", Class::Keyword },
-			{ "var", "keyword", "Mutable local binding.", Class::Keyword },
-			{ "__subscript", "keyword", "Slang subscript operator member.", Class::Keyword },
-			{ "__init", "keyword", "Slang initialiser member.", Class::Keyword },
-			{ "__generic", "keyword", "Slang generic type parameter list.", Class::Keyword },
+				Class::Keyword, TokenKind::Keyword },
+			{ "associatedtype", "keyword", "Interface member type that implementers bind.", Class::Keyword, TokenKind::Keyword },
+			{ "extension", "keyword", "Extend an existing type with new members (Slang).", Class::Keyword, TokenKind::Keyword },
+			{ "property", "keyword", "Property accessor block (Slang).", Class::Keyword, TokenKind::Keyword },
+			{ "get", "keyword", "Property getter.", Class::Keyword, TokenKind::Keyword },
+			{ "set", "keyword", "Property setter.", Class::Keyword, TokenKind::Keyword },
+			{ "public", "keyword", "Public visibility.", Class::Keyword, TokenKind::Keyword },
+			{ "internal", "keyword", "Module-internal visibility.", Class::Keyword, TokenKind::Keyword },
+			{ "private", "keyword", "Private visibility.", Class::Keyword, TokenKind::Keyword },
+			{ "extern", "keyword", "Externally defined declaration.", Class::Keyword, TokenKind::Keyword },
+			{ "where", "keyword", "Generic constraint clause (`<T> where T : IUVTransform`).", Class::Keyword, TokenKind::Keyword },
+			{ "each", "keyword", "Slang `each` generic expansion.", Class::Keyword, TokenKind::Keyword },
+			{ "expand", "keyword", "Slang `expand` generic expansion.", Class::Keyword, TokenKind::Keyword },
+			{ "func", "keyword", "Function type declarator (Slang).", Class::Keyword, TokenKind::Keyword },
+			{ "let", "keyword", "Immutable local binding.", Class::Keyword, TokenKind::Keyword },
+			{ "var", "keyword", "Mutable local binding.", Class::Keyword, TokenKind::Keyword },
+			{ "__subscript", "keyword", "Slang subscript operator member.", Class::Keyword, TokenKind::Keyword },
+			{ "__init", "keyword", "Slang initialiser member.", Class::Keyword, TokenKind::Keyword },
+			{ "__generic", "keyword", "Slang generic type parameter list.", Class::Keyword, TokenKind::Keyword },
 
-			// ---- 引擎契约结构(高亮 Global 色;补全里和类型同档)----
+			// ---- 引擎契约结构(高亮 Type 色;补全里和类型同档)----
 			{ "MaterialInputs", "struct",
 				"Per-pixel inputs handed to Evaluate: input.UV / input.WorldPosition / input.WorldNormal / "
-				"input.WorldTangent / input.WorldBitangent (contract §2).", Class::EngineType },
+				"input.WorldTangent / input.WorldBitangent (contract §2).", Class::EngineType, TokenKind::Type },
 			{ "Surface", "struct",
 				"What Evaluate returns: surface.BaseColor / Metallic / Roughness / Emissive / Normal / Opacity / "
-				"AmbientOcclusion (contract §2).", Class::EngineType },
+				"AmbientOcclusion (contract §2).", Class::EngineType, TokenKind::Type },
 			{ "input", "MaterialInputs",
 				"The MaterialInputs parameter of Evaluate — the engine fixes its name "
 				"(Surface Evaluate(MaterialInputs input)), so it is always in scope (contract §2).",
-				Class::EngineType },
+				Class::EngineType, TokenKind::Default },
 
 			// ---- 引擎包装层函数(docs/dev/shader-contract.md §2/§4 与包装模板一致)----
 			{ "MakeDefaultSurface", "Surface",
 				"Engine default surface. Take it first, then set only the fields this material needs.",
-				Class::EngineFunction },
+				Class::EngineFunction, TokenKind::Function },
 			{ "WeLinearizeColor", "float3(float3)",
 				"Convert an sRGB colour to linear RGB. Surface colours are linear; display encoding is handled by the engine.",
-				Class::EngineFunction },
+				Class::EngineFunction, TokenKind::Function },
 			{ "WeDefaultNormal", "float3",
-				"Default tangent-space normal (0,0,1) — keeps the normal the engine sampled.", Class::EngineFunction },
+				"Default tangent-space normal (0,0,1) — keeps the normal the engine sampled.", Class::EngineFunction, TokenKind::Function },
 			{ "WeIdentityMatrix", "float4x4",
-				"Identity matrix helper from the wrapper (skinning fallback).", Class::EngineFunction },
+				"Identity matrix helper from the wrapper (skinning fallback).", Class::EngineFunction, TokenKind::Function },
 			{ "Evaluate", "Surface(MaterialInputs)",
 				"The entry point the engine wraps. Signature is fixed: Surface Evaluate(MaterialInputs input).",
-				Class::EngineFunction },
+				Class::EngineFunction, TokenKind::Function },
 
 			// ---- Slang 内建 / 纹理方法(插入时补 `()`)----
-			{ "abs", "x", "Absolute value.", Class::Intrinsic },
-			{ "acos", "x", "Arc cosine (radians).", Class::Intrinsic },
-			{ "all", "x", "True when every component is non-zero.", Class::Intrinsic },
-			{ "any", "x", "True when any component is non-zero.", Class::Intrinsic },
-			{ "asin", "x", "Arc sine (radians).", Class::Intrinsic },
-			{ "atan", "x", "Arc tangent (radians).", Class::Intrinsic },
-			{ "atan2", "y, x", "Four-quadrant arc tangent (radians).", Class::Intrinsic },
-			{ "ceil", "x", "Round up to the nearest integer value.", Class::Intrinsic },
-			{ "clamp", "x, min, max", "Clamp x into [min, max].", Class::Intrinsic },
-			{ "cos", "x", "Cosine (radians).", Class::Intrinsic },
-			{ "cosh", "x", "Hyperbolic cosine.", Class::Intrinsic },
-			{ "cross", "a, b", "Cross product of two float3 vectors.", Class::Intrinsic },
-			{ "ddx", "x", "Screen-space derivative along x (per 2x2 quad).", Class::Intrinsic },
-			{ "ddy", "x", "Screen-space derivative along y (per 2x2 quad).", Class::Intrinsic },
-			{ "ddx_coarse", "x", "Coarse screen-space derivative along x.", Class::Intrinsic },
-			{ "ddy_coarse", "x", "Coarse screen-space derivative along y.", Class::Intrinsic },
-			{ "degrees", "x", "Radians to degrees.", Class::Intrinsic },
-			{ "determinant", "m", "Matrix determinant.", Class::Intrinsic },
-			{ "distance", "a, b", "Distance between two points.", Class::Intrinsic },
-			{ "dot", "a, b", "Dot product.", Class::Intrinsic },
-			{ "exp", "x", "e^x.", Class::Intrinsic },
-			{ "exp2", "x", "2^x.", Class::Intrinsic },
-			{ "faceforward", "n, i, ng", "Flip n so that it faces away from i.", Class::Intrinsic },
-			{ "floor", "x", "Round down to the nearest integer value.", Class::Intrinsic },
-			{ "fmod", "x, y", "Floating-point remainder of x / y.", Class::Intrinsic },
-			{ "frac", "x", "Fractional part.", Class::Intrinsic },
-			{ "length", "v", "Vector length.", Class::Intrinsic },
-			{ "lerp", "a, b, t", "Linear interpolation: a + (b - a) * t.", Class::Intrinsic },
-			{ "log", "x", "Natural logarithm.", Class::Intrinsic },
-			{ "log2", "x", "Base-2 logarithm.", Class::Intrinsic },
-			{ "mad", "a, b, c", "a * b + c.", Class::Intrinsic },
-			{ "max", "a, b", "Component-wise maximum.", Class::Intrinsic },
-			{ "min", "a, b", "Component-wise minimum.", Class::Intrinsic },
-			{ "modf", "x, out ip", "Split x into fractional and integer parts.", Class::Intrinsic },
-			{ "mul", "a, b", "Matrix/vector multiply.", Class::Intrinsic },
-			{ "normalize", "v", "Unit vector (zero-length input stays zero).", Class::Intrinsic },
-			{ "pow", "x, y", "x^y. Wrap negative bases in saturate() yourself.", Class::Intrinsic },
-			{ "radians", "x", "Degrees to radians.", Class::Intrinsic },
-			{ "reflect", "i, n", "Reflect vector i about normal n.", Class::Intrinsic },
-			{ "refract", "i, n, eta", "Refract vector i through normal n.", Class::Intrinsic },
-			{ "round", "x", "Round to the nearest integer value.", Class::Intrinsic },
-			{ "rsqrt", "x", "1 / sqrt(x).", Class::Intrinsic },
-			{ "saturate", "x", "Clamp to [0,1] (works on scalars and vectors).", Class::Intrinsic },
-			{ "sign", "x", "-1, 0 or 1.", Class::Intrinsic },
-			{ "sin", "x", "Sine (radians).", Class::Intrinsic },
-			{ "sincos", "x, out s, out c", "Sine and cosine in one call.", Class::Intrinsic },
-			{ "sinh", "x", "Hyperbolic sine.", Class::Intrinsic },
-			{ "smoothstep", "min, max, x", "Smooth Hermite interpolation between min and max.", Class::Intrinsic },
-			{ "sqrt", "x", "Square root.", Class::Intrinsic },
-			{ "step", "edge, x", "0 when x < edge, 1 otherwise.", Class::Intrinsic },
-			{ "tan", "x", "Tangent (radians).", Class::Intrinsic },
-			{ "tanh", "x", "Hyperbolic tangent.", Class::Intrinsic },
-			{ "transpose", "m", "Matrix transpose.", Class::Intrinsic },
-			{ "trunc", "x", "Truncate toward zero.", Class::Intrinsic },
-			{ "Sample", "uv", "Sample the combined sampler at uv (no separate sampler parameter).", Class::Intrinsic },
-			{ "SampleLevel", "uv, lod", "Sample at an explicit mip level.", Class::Intrinsic },
-			{ "SampleCmp", "uv, compare", "Comparison sample (shadow-style lookups).", Class::Intrinsic },
-			{ "GetDimensions", "out w, out h", "Query the resource size.", Class::Intrinsic },
+			{ "abs", "x", "Absolute value.", Class::Intrinsic, TokenKind::Function },
+			{ "acos", "x", "Arc cosine (radians).", Class::Intrinsic, TokenKind::Function },
+			{ "all", "x", "True when every component is non-zero.", Class::Intrinsic, TokenKind::Function },
+			{ "any", "x", "True when any component is non-zero.", Class::Intrinsic, TokenKind::Function },
+			{ "asin", "x", "Arc sine (radians).", Class::Intrinsic, TokenKind::Function },
+			{ "atan", "x", "Arc tangent (radians).", Class::Intrinsic, TokenKind::Function },
+			{ "atan2", "y, x", "Four-quadrant arc tangent (radians).", Class::Intrinsic, TokenKind::Function },
+			{ "ceil", "x", "Round up to the nearest integer value.", Class::Intrinsic, TokenKind::Function },
+			{ "clamp", "x, min, max", "Clamp x into [min, max].", Class::Intrinsic, TokenKind::Function },
+			{ "cos", "x", "Cosine (radians).", Class::Intrinsic, TokenKind::Function },
+			{ "cosh", "x", "Hyperbolic cosine.", Class::Intrinsic, TokenKind::Function },
+			{ "cross", "a, b", "Cross product of two float3 vectors.", Class::Intrinsic, TokenKind::Function },
+			{ "ddx", "x", "Screen-space derivative along x (per 2x2 quad).", Class::Intrinsic, TokenKind::Function },
+			{ "ddy", "x", "Screen-space derivative along y (per 2x2 quad).", Class::Intrinsic, TokenKind::Function },
+			{ "ddx_coarse", "x", "Coarse screen-space derivative along x.", Class::Intrinsic, TokenKind::Function },
+			{ "ddy_coarse", "x", "Coarse screen-space derivative along y.", Class::Intrinsic, TokenKind::Function },
+			{ "degrees", "x", "Radians to degrees.", Class::Intrinsic, TokenKind::Function },
+			{ "determinant", "m", "Matrix determinant.", Class::Intrinsic, TokenKind::Function },
+			{ "distance", "a, b", "Distance between two points.", Class::Intrinsic, TokenKind::Function },
+			{ "dot", "a, b", "Dot product.", Class::Intrinsic, TokenKind::Function },
+			{ "exp", "x", "e^x.", Class::Intrinsic, TokenKind::Function },
+			{ "exp2", "x", "2^x.", Class::Intrinsic, TokenKind::Function },
+			{ "faceforward", "n, i, ng", "Flip n so that it faces away from i.", Class::Intrinsic, TokenKind::Function },
+			{ "floor", "x", "Round down to the nearest integer value.", Class::Intrinsic, TokenKind::Function },
+			{ "fmod", "x, y", "Floating-point remainder of x / y.", Class::Intrinsic, TokenKind::Function },
+			{ "frac", "x", "Fractional part.", Class::Intrinsic, TokenKind::Function },
+			{ "length", "v", "Vector length.", Class::Intrinsic, TokenKind::Function },
+			{ "lerp", "a, b, t", "Linear interpolation: a + (b - a) * t.", Class::Intrinsic, TokenKind::Function },
+			{ "log", "x", "Natural logarithm.", Class::Intrinsic, TokenKind::Function },
+			{ "log2", "x", "Base-2 logarithm.", Class::Intrinsic, TokenKind::Function },
+			{ "mad", "a, b, c", "a * b + c.", Class::Intrinsic, TokenKind::Function },
+			{ "max", "a, b", "Component-wise maximum.", Class::Intrinsic, TokenKind::Function },
+			{ "min", "a, b", "Component-wise minimum.", Class::Intrinsic, TokenKind::Function },
+			{ "modf", "x, out ip", "Split x into fractional and integer parts.", Class::Intrinsic, TokenKind::Function },
+			{ "mul", "a, b", "Matrix/vector multiply.", Class::Intrinsic, TokenKind::Function },
+			{ "normalize", "v", "Unit vector (zero-length input stays zero).", Class::Intrinsic, TokenKind::Function },
+			{ "pow", "x, y", "x^y. Wrap negative bases in saturate() yourself.", Class::Intrinsic, TokenKind::Function },
+			{ "radians", "x", "Degrees to radians.", Class::Intrinsic, TokenKind::Function },
+			{ "reflect", "i, n", "Reflect vector i about normal n.", Class::Intrinsic, TokenKind::Function },
+			{ "refract", "i, n, eta", "Refract vector i through normal n.", Class::Intrinsic, TokenKind::Function },
+			{ "round", "x", "Round to the nearest integer value.", Class::Intrinsic, TokenKind::Function },
+			{ "rsqrt", "x", "1 / sqrt(x).", Class::Intrinsic, TokenKind::Function },
+			{ "saturate", "x", "Clamp to [0,1] (works on scalars and vectors).", Class::Intrinsic, TokenKind::Function },
+			{ "sign", "x", "-1, 0 or 1.", Class::Intrinsic, TokenKind::Function },
+			{ "sin", "x", "Sine (radians).", Class::Intrinsic, TokenKind::Function },
+			{ "sincos", "x, out s, out c", "Sine and cosine in one call.", Class::Intrinsic, TokenKind::Function },
+			{ "sinh", "x", "Hyperbolic sine.", Class::Intrinsic, TokenKind::Function },
+			{ "smoothstep", "min, max, x", "Smooth Hermite interpolation between min and max.", Class::Intrinsic, TokenKind::Function },
+			{ "sqrt", "x", "Square root.", Class::Intrinsic, TokenKind::Function },
+			{ "step", "edge, x", "0 when x < edge, 1 otherwise.", Class::Intrinsic, TokenKind::Function },
+			{ "tan", "x", "Tangent (radians).", Class::Intrinsic, TokenKind::Function },
+			{ "tanh", "x", "Hyperbolic tangent.", Class::Intrinsic, TokenKind::Function },
+			{ "transpose", "m", "Matrix transpose.", Class::Intrinsic, TokenKind::Function },
+			{ "trunc", "x", "Truncate toward zero.", Class::Intrinsic, TokenKind::Function },
+			{ "Sample", "uv", "Sample the combined sampler at uv (no separate sampler parameter).", Class::Intrinsic, TokenKind::Function },
+			{ "SampleLevel", "uv, lod", "Sample at an explicit mip level.", Class::Intrinsic, TokenKind::Function },
+			{ "SampleCmp", "uv, compare", "Comparison sample (shadow-style lookups).", Class::Intrinsic, TokenKind::Function },
+			{ "GetDimensions", "out w, out h", "Query the resource size.", Class::Intrinsic, TokenKind::Function },
 
 			// ---- `//!` 注解行(docs/dev/shader-contract.md §6)----
 			{ "param", "annotation",
 				"//! param <type> <name> = <default> [min,max] unit(\"\") group(\"\") label(\"\") — the annotation is "
 				"the single source of truth for editor rows, cbuffer layout and slots.",
-				Class::AnnotationKey, Context::Annotation },
+				Class::AnnotationKey, TokenKind::Annotation, Context::Annotation },
 			{ "group", "\"Group\"", "group(\"Appearance\") — row group in the material editor (empty = Parameters).",
-				Class::AnnotationAttr, Context::Annotation, "group(\"\")" },
+				Class::AnnotationAttr, TokenKind::Annotation, Context::Annotation, "group(\"\")" },
 			{ "label", "\"Label\"", "label(\"Tint\") — display name for the row (empty = the parameter name).",
-				Class::AnnotationAttr, Context::Annotation, "label(\"\")" },
+				Class::AnnotationAttr, TokenKind::Annotation, Context::Annotation, "label(\"\")" },
 			{ "unit", "\"%\"", "unit(\"%\") — unit suffix shown next to the value.",
-				Class::AnnotationAttr, Context::Annotation, "unit(\"\")" },
+				Class::AnnotationAttr, TokenKind::Annotation, Context::Annotation, "unit(\"\")" },
 			{ "[min,max]", "range", "[0,1] — value range; Float/Int only, default [0,1], the default must fall inside.",
-				Class::AnnotationSyntax, Context::Annotation },
-			{ "Float", "annotation type", "Float — number; [min,max] applies.", Class::AnnotationType, Context::Annotation },
-			{ "Int", "annotation type", "Int — integer; [min,max] applies.", Class::AnnotationType, Context::Annotation },
-			{ "Bool", "annotation type", "Bool — true / false.", Class::AnnotationType, Context::Annotation },
+				Class::AnnotationSyntax, TokenKind::Annotation, Context::Annotation },
+			{ "Float", "annotation type", "Float — number; [min,max] applies.", Class::AnnotationType, TokenKind::Annotation, Context::Annotation },
+			{ "Int", "annotation type", "Int — integer; [min,max] applies.", Class::AnnotationType, TokenKind::Annotation, Context::Annotation },
+			{ "Bool", "annotation type", "Bool — true / false.", Class::AnnotationType, TokenKind::Annotation, Context::Annotation },
 			{ "Vec2", "annotation type", "Vec2 — two comma-separated literals (no [min,max]).",
-				Class::AnnotationType, Context::Annotation },
+				Class::AnnotationType, TokenKind::Annotation, Context::Annotation },
 			{ "Vec3", "annotation type", "Vec3 — three comma-separated literals (no [min,max]).",
-				Class::AnnotationType, Context::Annotation },
+				Class::AnnotationType, TokenKind::Annotation, Context::Annotation },
 			{ "Vec4", "annotation type", "Vec4 — four comma-separated literals (no [min,max]).",
-				Class::AnnotationType, Context::Annotation },
+				Class::AnnotationType, TokenKind::Annotation, Context::Annotation },
 			{ "Color", "annotation type", "Color — r, g, b, a literals (linear; no [min,max]).",
-				Class::AnnotationType, Context::Annotation },
+				Class::AnnotationType, TokenKind::Annotation, Context::Annotation },
 		};
 
 		inline constexpr std::size_t Count() { return sizeof(kSymbols) / sizeof(kSymbols[0]); }
@@ -370,32 +383,15 @@ namespace World
 			return found == Index().end() ? nullptr : found->second;
 		}
 
-		// 高亮分类:词 → 颜色(不在表里返回 false,由调用方决定(点号成员/默认色))。
-		// 与补全 Kind 对齐:候选 Kind=Keyword/Field(关键字/类型/`param`)→ Keyword 色;
-		// Kind=Method/Global(内建/引擎函数/`group(...)` 这类属性)→ Global 色。
+		// 高亮分类:词 → 颜色(不在表里、或表里标了 Default 的**名字**条目 → 返回 false,
+		// 由调用方决定:契约字段 / 点号成员 → Field,其余保持默认色)。
 		inline bool HighlightKind(std::string_view word, Wui::WuiCodeTokenKind& out)
 		{
 			const Symbol* symbol = Find(word);
-			if (symbol == nullptr)
+			if (symbol == nullptr || symbol->Highlight == Wui::WuiCodeTokenKind::Default)
 				return false;
-			switch (symbol->Kind)
-			{
-				case Class::Keyword:
-				case Class::Type:
-				case Class::AnnotationKey:    // Kind=Field
-				case Class::AnnotationType:   // Kind=Keyword
-				case Class::AnnotationSyntax: // Kind=Field(语法片段,一般不是标识符)
-					out = Wui::WuiCodeTokenKind::Keyword;
-					return true;
-				case Class::EngineType:
-				case Class::Intrinsic:
-				case Class::EngineFunction:
-				case Class::AnnotationAttr:   // Kind=Method:group() / label() / unit()
-					out = Wui::WuiCodeTokenKind::Global;
-					return true;
-				default:
-					return false;
-			}
+			out = symbol->Highlight;
+			return true;
 		}
 
 		// 引擎契约字段名(MaterialInputs + Surface)= MaterialSurfaceContract.hlsli 的 X-macro 并集。
