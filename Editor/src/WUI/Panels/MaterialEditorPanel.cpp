@@ -7,6 +7,9 @@
 #include "TextureSettingsPanel.h"
 #include "ViewportPanel.h"
 #include "../../EditorPreferences.h"
+// M4-TEX-P11:纹理引用的扫描 / 现场判定 / 徽标 / "源图 → 单文件容器"导入的唯一实现
+// (概念归属表 texture-ref 的数据侧;面板不再自己维护候选表与判定)。
+#include "../TextureRefCatalog.h"
 
 #include "World/Core/KeyCodes.h"
 #include "World/Core/Application.h"
@@ -110,18 +113,15 @@ namespace World
 			return type == ParamType::Vec4 ? rowHeight * 2.0f : rowHeight;
 		}
 
-		// ---- M4-TEX-P6a:纹理引用(源图 / `.wtex` 资产)的排版令牌 ----
-		// 路径框最小宽 + 选择按钮 + 清空按钮(& 两个间距)= 控件簇放不下的门槛。
-		constexpr float kTexturePathMinWidth = 120.0f;
-		// 按钮宽度按**最长文案**给足("Pick…"/"Clear" 的英文与"选择…"/"清空"的中文都放得下;
-		// 窄于文案时 ActionButton 的文字会画出按钮外、被窗口裁掉 —— 实测踩过"右边看不到了")。
-		constexpr float kTexturePickWidth = 56.0f;
-		constexpr float kTextureClearWidth = 52.0f;
-		constexpr float kTextureActionGap = 4.0f;
-		constexpr float kTextureClusterMinWidth = kTexturePathMinWidth + kTexturePickWidth
-			+ kTextureClearWidth + 2.0f * kTextureActionGap;
-		// 行尾"定位"按钮(在内容浏览器里选中这条引用);只在有引用时画。
-		constexpr float kTextureLocateWidth = 56.0f;
+		// ---- M4-TEX-P11:纹理引用(`Wui::WuiTexturePicker`)的排版令牌 ----
+		// 组件内部自己切"列表 | 徽标条 | 定位按钮(26 + 6)"(WuiTexturePicker.cpp 的
+		// kMinComboWidth 64 / kRevealWidth 26 / kSlotGap 6):面板只判断"够不够放下一件完整的
+		// 控件",不够就把标签换行 —— 面板不再预留/自绘定位槽与选择/清空按钮。
+		constexpr float kTexturePickerMinWidth = 96.0f;
+		// 控件行高(与组件默认高度一致)与行内说明的间距(高度公式与绘制共用)。
+		constexpr float kTextureControlLineHeight = 22.0f;
+		constexpr float kTextureLabelLineHeight = 18.0f;
+		constexpr float kTextureWarningGap = 2.0f;
 
 		// MAT-UI7b:注解里的 `doc("…")` 是**用户写的参数说明**(用户 2026-09-25:
 		// 「材质编辑器中的参数没法写注释来解释这个参数」)。两个形态(`.wmat` 实例列 /
@@ -242,12 +242,6 @@ namespace World
 				|| extension == ".tga" || extension == ".bmp" || extension == ".wtex";
 		}
 
-		bool IsTextureSourceExtension(const std::string& extension)
-		{
-			return extension == ".png" || extension == ".jpg" || extension == ".jpeg"
-				|| extension == ".tga" || extension == ".bmp";
-		}
-
 		// Save As / 新建向导共用的"基础名":去首尾空白 + 剥掉用户多打的 .wmat 后缀
 		// (后缀在落点回显行里常显),不做其它"善意改写" —— 非法字符由校验行说出来。
 		std::string MaterialBaseName(const std::string& raw)
@@ -346,36 +340,7 @@ namespace World
 			return dots;
 		}
 
-		// M4-TEX-P6a(用户 2026-09-25「材质编辑器超出水平地方看不到了」):长路径按列宽从**中间**
-		// 省略(`textures/…/Icon.wtex`)—— 头尾都是辨识度最高的部分(目录 + 文件名);
-		// 全文仍由 tooltip / 无障碍节点给出,不丢信息。按 UTF-8 码点边界切,不切碎中文。
-		std::string EllipsizeMiddleToWidth(const Wui::WuiContext& ctx, const std::string& text, float width,
-			float fontSize)
-		{
-			if (text.empty() || width <= 0.0f)
-				return {};
-			if (ctx.MeasureTextWidth(text, fontSize) <= width)
-				return text;
-			const std::string dots = "…";
-			std::vector<size_t> boundaries;
-			for (size_t index = 0; index < text.size(); ++index)
-				if ((static_cast<unsigned char>(text[index]) & 0xC0) != 0x80)
-					boundaries.push_back(index);
-			// 先砍尾巴(保留目录前缀 + 文件名的头),再砍中段:头尾各留约一半。
-			for (size_t tail = boundaries.size(); tail > 0; --tail)
-			{
-				for (size_t head = tail; head > 0; --head)
-				{
-					const std::string candidate = text.substr(0, boundaries[head - 1]) + dots
-						+ text.substr(boundaries[tail - 1]);
-					if (ctx.MeasureTextWidth(candidate, fontSize) <= width)
-						return candidate;
-				}
-			}
-			return dots;
-		}
-
-		// U2d:未落盘材质的"另存为"目标路径校验,返回给用户看的具体原因(空字符串 = 可提交)。
+	// U2d:未落盘材质的"另存为"目标路径校验,返回给用户看的具体原因(空字符串 = 可提交)。
 		// 与 MaterialLibrary::Save + MaterialIO::WriteFileText 的落盘规则一致:
 		//  - 缺 .wmat 后缀会自动补;  - 写入目标为项目内容根。
 		// 名字里真正非法的只有 < > : " | ? *(反斜杠/斜杠是路径分隔符,不是非法字符)。
@@ -1123,7 +1088,7 @@ namespace World
 		m_ValidationRevision = 0;
 		m_ValidationPath.clear();
 		RefreshCatalog();
-		RefreshPickerIndices();
+		RefreshMaterialPickIndex();
 		WLD_CORE_INFO("[material-ui] opened material '{0}'", m_Path);
 	}
 
@@ -1135,282 +1100,12 @@ namespace World
 			return;
 		m_CatalogRefreshTime = now;
 		m_MaterialPaths = MaterialLibrary::Get().ScanMaterials();
-		m_TextureCatalog = BuildTextureCatalog();
-		// 当前材质引用但不在扫描结果里的路径(绝对路径 / 内容根外 / 已被删除):补一条**兜底条目**,
-		// 否则下拉会回显 "(无)" 而材质其实还引用着它 —— 那是误导(校验区另有缺失提示)。
-		if (m_Material)
-		{
-			const MaterialDesc& desc = m_Material->GetDesc();
-			const std::string referenced[2] = { desc.AlbedoTexture, desc.NormalTexture };
-			for (const std::string& value : referenced)
-			{
-				if (value.empty())
-					continue;
-				const std::string normalized = MaterialLibrary::NormalizePath(value);
-				bool found = false;
-				for (const TextureCatalogEntry& entry : m_TextureCatalog)
-					if (entry.Logical == normalized)
-					{
-						found = true;
-						break;
-					}
-				if (found)
-					continue;
-				const TextureRefInfo info = InspectTextureRef(normalized);
-				TextureCatalogEntry extra;
-				extra.Logical = normalized;
-				const std::filesystem::path path(normalized);
-				// 兜底条目没有扫描结果可依赖:显示名用**完整逻辑路径**(与扫描条目同一口径)。
-				extra.Label = normalized;
-				extra.Source = info.Source;
-				extra.IsAsset = info.IsAsset;
-				extra.AssetExists = info.AssetExists;
-				extra.SourceExists = info.SourceExists;
-				extra.InContentRoot = info.InContentRoot;
-				extra.InCatalog = false;
-				extra.Note = info.Error;
-				m_TextureCatalog.push_back(std::move(extra));
-			}
-		}
-		// 显示名 = **完整逻辑路径**(用户 2026-09-25:「现在选择不如之前」—— 之前就是路径,
-		// 光主名既搜不到路径也认不出目录)。资产条目额外把源图名带在括号里,方便按熟悉的名字搜。
-		m_TexturePaths.clear();
-		m_TextureLabels.clear();
-		m_TexturePaths.reserve(m_TextureCatalog.size());
-		m_TextureLabels.reserve(m_TextureCatalog.size());
-		for (const TextureCatalogEntry& entry : m_TextureCatalog)
-		{
-			m_TexturePaths.push_back(entry.Logical);
-			m_TextureLabels.push_back(entry.Label);
-		}
-		RefreshPickerIndices();
+		RefreshMaterialPickIndex();
+		// M4-TEX-P11:纹理候选清单(资产 / 源图 + 徽标)由 `Editor::TextureRefCatalog` 自己按
+		// 1.5s TTL 维护 —— 三个调用点(槽位 / `.wmat` 参数行 / `.slang` 参数列)共用同一份缓存。
+		// 刚导入/刚赋值那种"盘上变了、要立刻看见"的场合由调用点显式 `InvalidateTextureRefCatalog()`。
 	}
 
-	// M4-TEX-P6a:一轮纹理引用的**唯一扫描**(内容根,按逻辑路径排序):
-	//   ① `.wtex` 资产 —— 显示资产主名(例 `Icon`),并顺带解析 `source:` → 源图;
-	//   ② 没有同目录同主名资产的源图 —— 显示文件名(例 `Icon.png`);
-	//   ③ 同目录同主名的情况下只留资产条目(一份设置资产 = 一个用户可见的纹理)。
-	// 解析失败(资产坏 / 源图缺)仍进表并带 Note:条目要在下拉里看得见,问题由校验区/行内提示说。
-	std::vector<MaterialEditorPanel::TextureCatalogEntry> MaterialEditorPanel::BuildTextureCatalog() const
-	{
-		std::vector<TextureCatalogEntry> entries;
-		std::error_code ec;
-		const std::filesystem::path root = ContentRootPath();
-		if (!std::filesystem::exists(root, ec))
-			return entries;
-		std::vector<std::string> assetPaths;
-		std::vector<std::string> sourcePaths;
-		for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root,
-			std::filesystem::directory_options::skip_permission_denied, ec))
-		{
-			if (!entry.is_regular_file(ec))
-				continue;
-			const std::string extension = LowerExtension(entry.path().generic_string());
-			const bool asset = extension == ".wtex";
-			if (!asset && !IsTextureSourceExtension(extension))
-				continue;
-			const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, ec);
-			if (ec)
-				continue;
-			const std::string logical = MaterialLibrary::NormalizePath(relative.generic_string());
-			(asset ? assetPaths : sourcePaths).push_back(logical);
-		}
-		std::sort(assetPaths.begin(), assetPaths.end());
-		std::sort(sourcePaths.begin(), sourcePaths.end());
-
-		for (const std::string& logical : assetPaths)
-		{
-			TextureCatalogEntry item;
-			item.Logical = logical;
-			item.IsAsset = true;
-			item.AssetExists = true;
-			// 显示名 = 资产路径;解析出源图后括号带上源图文件名(按 `Icon.png` 搜也能命中)。
-			item.Label = logical;
-			TextureImportSettings settings;
-			// M4-TEX P9:`.wtex` 按**资产文件**读(容器 / 旧式自动区分;整份文件当 YAML 解析会把
-			// 内嵌 payload 读成 YAML 错 → 误报 "no source image")。
-			const Editor::TextureAssetDocument document =
-				Editor::LoadTextureAssetDocument(root, logical);
-			if (!document.Valid)
-			{
-				item.Note = document.Error;
-			}
-			else
-			{
-				settings = document.Settings;
-				Editor::TextureSourceResolution resolution;
-				// 与烘焙器/纹理设置面板**同一份**解析口径(容器 = 内嵌 payload;旧式 = 外部源图)。
-				if (Editor::ResolveTextureSource(root, logical, settings, resolution))
-				{
-					item.Source = resolution.ImportSourceLogical;
-					std::error_code sourceEc;
-					item.SourceExists = resolution.Embedded
-						|| (!resolution.BytesLogical.empty() && std::filesystem::is_regular_file(
-							root / std::filesystem::path(resolution.BytesLogical), sourceEc));
-					const std::string sourceName =
-						std::filesystem::path(item.Source).filename().string();
-					if (!sourceName.empty() && sourceName != std::filesystem::path(logical).filename().string())
-						item.Label += " (" + sourceName + ")";
-				}
-				else
-				{
-					item.Note = resolution.Error;
-				}
-			}
-			entries.push_back(std::move(item));
-		}
-
-		for (const std::string& logical : sourcePaths)
-		{
-			const std::filesystem::path path(logical);
-			const std::string directory = path.parent_path().generic_string();
-			const std::string stem = path.stem().string();
-			bool hiddenByAsset = false;
-			for (const TextureCatalogEntry& asset : entries)
-			{
-				if (!asset.IsAsset)
-					continue;
-				const std::filesystem::path assetPath(asset.Logical);
-				if (assetPath.parent_path().generic_string() == directory && assetPath.stem().string() == stem)
-				{
-					hiddenByAsset = true;
-					break;
-				}
-			}
-			if (hiddenByAsset)
-				continue;
-			TextureCatalogEntry item;
-			item.Logical = logical;
-			item.Label = logical;
-			item.Source = logical;
-			item.SourceExists = true;
-			entries.push_back(std::move(item));
-		}
-		// 与"之前"一致:整张清单按**逻辑路径**排序(资产/源图不再各排一段,浏览顺序稳定)。
-		std::sort(entries.begin(), entries.end(),
-			[](const TextureCatalogEntry& left, const TextureCatalogEntry& right)
-			{
-				return left.Logical < right.Logical;
-			});
-		return entries;
-	}
-
-	MaterialEditorPanel::TextureRefInfo MaterialEditorPanel::InspectTextureRef(const std::string& logical) const
-	{
-		TextureRefInfo info;
-		if (logical.empty())
-			return info;
-		info.Known = true;
-		const std::string normalized = MaterialLibrary::NormalizePath(logical);
-		const std::filesystem::path declared(normalized);
-		info.InContentRoot = !declared.is_absolute() && !declared.has_root_name();
-		for (const std::filesystem::path& part : declared)
-			if (part == "..")
-				info.InContentRoot = false;
-		info.IsAsset = IsTextureAssetPath(normalized);
-		const std::filesystem::path root = ContentRootPath();
-		const std::filesystem::path file = declared.is_absolute() ? declared : root / declared;
-		std::error_code fileError;
-		if (info.IsAsset)
-		{
-			info.AssetExists = std::filesystem::is_regular_file(file, fileError);
-			if (!info.AssetExists)
-				return info;
-			// M4-TEX P9:`.wtex` 一律按资产文件读(容器 = 设置 + 内嵌源字节;旧式 = 设置 + 外部源图)。
-			const Editor::TextureAssetDocument document = Editor::LoadTextureAssetDocument(root, normalized);
-			info.Container = document.Container;
-			info.Legacy = document.Exists && !document.Container;
-			if (!document.Valid)
-			{
-				info.Error = document.Error;
-				return info;   // 资产读不出来(坏 YAML / 未知字段)→ 原因进 Error
-			}
-			Editor::TextureSourceResolution resolution;
-			if (!Editor::ResolveTextureSource(root, normalized, document.Settings, resolution))
-			{
-				info.Error = resolution.Error;
-				info.Legacy = true;   // 旧式(或资产头坏)才会走到这里:容器永远能解析
-				return info;
-			}
-			info.Embedded = resolution.Embedded;
-			info.Source = resolution.BytesLogical;
-			info.ImportSource = resolution.ImportSourceLogical;
-			std::error_code sourceErrorCode;
-			// 容器:字节在资产里 ⇒ 一定有"源"(内嵌);旧式:外部源图必须在场。
-			info.SourceExists = resolution.Embedded
-				|| (!resolution.BytesLogical.empty() && std::filesystem::is_regular_file(
-					root / std::filesystem::path(resolution.BytesLogical), sourceErrorCode));
-			return info;
-		}
-		info.Source = normalized;
-		info.SourceExists = std::filesystem::is_regular_file(file, fileError);
-		return info;
-	}
-
-	const MaterialEditorPanel::TextureCatalogEntry* MaterialEditorPanel::FindTextureCatalogEntry(
-		const std::string& logical) const
-	{
-		const std::string normalized = MaterialLibrary::NormalizePath(logical);
-		for (const TextureCatalogEntry& entry : m_TextureCatalog)
-			if (entry.Logical == normalized)
-				return &entry;
-		return nullptr;
-	}
-
-	// "资产 → 源图"关系 + 缺失原因(工具提示与无障碍节点共用一句;空引用返回空串)。
-	std::string MaterialEditorPanel::TextureRefDoc(const std::string& logical) const
-	{
-		if (logical.empty())
-			return {};
-		const TextureRefInfo info = InspectTextureRef(logical);
-		std::string doc = Wui::Tr("panel.material.texture.ref.tooltip", "Referenced texture: ") + logical;
-		if (info.IsAsset)
-		{
-			if (info.Embedded)
-			{
-				// M4-TEX P9:单文件容器 —— 设置与源字节都在这个 `.wtex` 里(源图只是导入源)。
-				doc += "\n" + Wui::TrFormat("panel.material.texture.ref.asset_embedded",
-					"Single-file texture asset: {asset} — import settings and source bytes live in this "
-					"one file",
-					{ { "asset", logical } });
-				if (!info.ImportSource.empty())
-					doc += "\n" + Wui::TrFormat("panel.material.texture.ref.asset_import_source",
-						"Import source on disk (optional): {source}",
-						{ { "source", info.ImportSource } });
-			}
-			else
-			{
-				const std::string source = info.Source.empty()
-					? Wui::Tr("panel.material.texture.ref.source_none", "(no source image)")
-					: info.Source;
-				doc += "\n" + Wui::TrFormat("panel.material.texture.ref.asset_source",
-					"Texture asset → source image: {asset} → {source}",
-					{ { "asset", logical }, { "source", source } });
-			}
-			if (!info.AssetExists)
-				doc += "\n" + Wui::Tr("panel.material.texture.ref.asset_missing",
-					"The texture asset file is missing on disk (the .wtex was moved, renamed or deleted).");
-			else if (!info.Embedded && !info.Error.empty())
-				doc += "\n" + Wui::Tr("panel.material.texture.ref.source_unresolved",
-					"The source image cannot be resolved from this asset: ") + info.Error;
-			else if (!info.Embedded && !info.SourceExists)
-				doc += "\n" + Wui::Tr("panel.material.texture.ref.source_missing",
-					"The source image the asset points at is missing on disk.");
-			if (info.Legacy && !info.Embedded)
-				doc += "\n" + Wui::Tr("panel.material.texture.ref.legacy_hint",
-					"Old-style settings file (settings only): re-import the image in the editor to get a "
-					"single-file asset.");
-		}
-		else if (!info.SourceExists)
-		{
-			doc += "\n" + Wui::Tr("panel.material.texture.ref.image_missing",
-				"The image file is missing on disk.");
-		}
-		if (!info.InContentRoot)
-			doc += "\n" + Wui::Tr("panel.material.texture.ref.outside",
-				"The path is outside the content root, so a packaged build will not ship it.");
-		return doc;
-	}
 
 	bool MaterialEditorPanel::TextureFieldHasIssue(const std::string& key) const
 	{
@@ -1421,69 +1116,15 @@ namespace World
 		return false;
 	}
 
-	// 行内校验的一句话(不是静默通过):源图缺失 / 资产缺失 / 资产 → 源图缺失都各有一句。
-	std::string MaterialEditorPanel::TextureInlineWarning(const std::string& logical) const
-	{
-		if (logical.empty())
-			return {};
-		const TextureRefInfo info = InspectTextureRef(logical);
-		if (!info.IsAsset)
-		{
-			if (info.SourceExists)
-				return {};
-			return Wui::Tr("panel.material.texture.warn.image_missing",
-				"Image not found on disk: ") + logical;
-		}
-		if (!info.AssetExists)
-			return Wui::Tr("panel.material.texture.warn.asset_missing",
-				"Texture asset not found on disk (moved, renamed or deleted): ") + logical;
-		// M4-TEX P9:单文件容器 = 有效(源字节内嵌),外部源图缺失**不是**问题。
-		if (info.Embedded)
-			return {};
-		// 旧式(没有内嵌 payload):源图缺失/解析不了才是问题,并给"可重新导入"的提示。
-		if (!info.Error.empty() || !info.SourceExists)
-		{
-			const std::string source = info.Source.empty()
-				? Wui::Tr("panel.material.texture.ref.source_none", "(no source image)")
-				: info.Source;
-			if (info.Legacy)
-				return Wui::Tr("panel.material.texture.warn.legacy_source",
-					"Old-style settings file without embedded bytes and no usable source image: ")
-					+ logical + " → " + source + " — "
-					+ Wui::Tr("panel.material.texture.warn.legacy_hint",
-						"re-import the image in the editor to get a single-file asset");
-			if (!info.Error.empty())
-				return Wui::Tr("panel.material.texture.warn.source_unresolved",
-					"The asset's source image cannot be resolved: ") + logical + " — " + info.Error;
-			return Wui::Tr("panel.material.texture.warn.source_missing",
-				"Texture asset has no source image: ") + logical + " → " + source;
-		}
-		return {};
-	}
-
-	void MaterialEditorPanel::RefreshPickerIndices()
+	// 材质名下拉的选中下标(下标表 = m_MaterialPaths;找不到 = -1 = 未落盘的新材质)。
+	void MaterialEditorPanel::RefreshMaterialPickIndex()
 	{
 		if (!m_Material)
 			return;
-		const MaterialDesc& desc = m_Material->GetDesc();
 		m_MaterialPickIndex = -1;
 		for (size_t i = 0; i < m_MaterialPaths.size(); ++i)
 			if (m_MaterialPaths[i] == m_Path)
 				m_MaterialPickIndex = static_cast<int>(i);
-		// 贴图下拉的选项是 "(无)" + m_TexturePaths,所以选中索引要 **+1** 对齐;
-		// 之前少了这个偏移,选了一张贴图后下一帧索引回算成 0/错位 → 显示/生效成另一张。
-		// M4-TEX-P6a:比较用**规范化后的**逻辑路径(资产引用与源图引用都在同一张表里,
-		// 显示名是短名,值仍是逻辑路径)。
-		const std::string albedo = MaterialLibrary::NormalizePath(desc.AlbedoTexture);
-		const std::string normal = MaterialLibrary::NormalizePath(desc.NormalTexture);
-		m_AlbedoPickIndex = 0;
-		for (size_t i = 0; i < m_TexturePaths.size(); ++i)
-			if (MaterialLibrary::NormalizePath(m_TexturePaths[i]) == albedo)
-				m_AlbedoPickIndex = static_cast<int>(i) + 1;
-		m_NormalPickIndex = 0;
-		for (size_t i = 0; i < m_TexturePaths.size(); ++i)
-			if (MaterialLibrary::NormalizePath(m_TexturePaths[i]) == normal)
-				m_NormalPickIndex = static_cast<int>(i) + 1;
 	}
 
 	bool MaterialEditorPanel::FieldModified(const std::string& key) const
@@ -1677,7 +1318,8 @@ namespace World
 		{
 			if (logical.empty())
 				return;
-			const TextureRefInfo info = InspectTextureRef(logical);
+			// M4-TEX-P11:现场判定(能不能用)来自编辑器侧适配层,面板不再自己解析资产/源图。
+			const Editor::TextureRefFacts info = Editor::TextureRefFactsFor(logical);
 			// ① 引用不在内容根内(绝对路径 / `..` 逃逸):打包/复制项目会丢 —— 第三类问题。
 			if (!info.InContentRoot)
 			{
@@ -2262,7 +1904,7 @@ namespace World
 		}
 		m_Path = m_Material->GetPath();
 		SetMaterialPathForPanel(m_Path);
-		RefreshPickerIndices();
+		RefreshMaterialPickIndex();
 		// 保存 = 磁盘与内存一致:校验缓存要重算(缺贴图可能刚补上)。
 		m_ValidationRevision = 0;
 		m_Status = Wui::Tr("panel.material.status.saved", "Saved ") + m_Path;
@@ -2448,7 +2090,7 @@ namespace World
 						std::string error;
 						if (MaterialLibrary::Get().Reload(m_Path, &error))
 						{
-							RefreshPickerIndices();
+							RefreshMaterialPickIndex();
 							m_ValidationRevision = 0;
 							m_SyncNameBuffer = true;
 							m_Status = Wui::Tr("panel.material.status.reloaded", "Reloaded from disk ") + m_Path;
@@ -2637,7 +2279,7 @@ namespace World
 				{
 					// 与绘制端同一份排版(含"资产 → 源图"缺失时的行内说明那一行)。
 					const float labelWidthIn = std::min(kLabelColumnMax, std::max(84.0f, columnWidth * 0.30f));
-					const bool withError = !TextureInlineWarning(
+					const bool withError = !Editor::TextureInlineWarning(
 						m_Material->ResolvedParamValue(decl.Name)).empty();
 					height += TextureRowLayoutFor(theme,
 						ShaderTextureInlineControlWidth(columnWidth, labelWidthIn),
@@ -2677,7 +2319,7 @@ namespace World
 				if (decl.Type == ParamType::Texture2D)
 				{
 					const float labelWidthIn = std::min(kLabelColumnMax, std::max(84.0f, contentRect.W * 0.30f));
-					const bool withError = !TextureInlineWarning(
+					const bool withError = !Editor::TextureInlineWarning(
 						m_Material->ResolvedParamValue(decl.Name)).empty();
 					blockHeight += TextureRowLayoutFor(theme,
 						ShaderTextureInlineControlWidth(contentRect.W, labelWidthIn),
@@ -2815,8 +2457,8 @@ namespace World
 				const float stackedControlWidth = std::max(60.0f, rowWidth - reserved);
 				const TextureRowLayout layout = textureDecl
 					? TextureRowLayoutFor(theme, inlineControlWidth, stackedControlWidth,
-						!TextureInlineWarning(resolved).empty())
-					: TextureRowLayout { false, 1, ShaderParamRowHeight(decl.Type, kShaderRowHeight) };
+						!Editor::TextureInlineWarning(resolved).empty())
+					: TextureRowLayout { false, ShaderParamRowHeight(decl.Type, kShaderRowHeight) };
 				const float labelWidth = layout.StackLabel ? std::max(40.0f, rowWidth - reserved)
 					: labelWidthIn;
 				const float controlX = layout.StackLabel ? rowX : rowX + labelWidth + 8.0f;
@@ -2840,7 +2482,8 @@ namespace World
 					EllipsizeToWidth(ctx, label, labelWidth, 12.0f),
 					isOverride ? theme.Text : theme.TextMuted, 12.0f);
 				std::string edited = resolved;
-				if (DrawShaderParamControl(ctx, theme, decl, controlRect, resolved, &edited) && edited != resolved)
+				if (DrawShaderParamControl(ctx, host, theme, decl, controlRect, resolved, &edited)
+					&& edited != resolved)
 				{
 					std::string normalized = edited;
 					std::string valueError;
@@ -2850,8 +2493,12 @@ namespace World
 						m_Material->SetParamOverride(decl.Name, normalized);
 						if (m_Material->GetRevision() != revision)
 							m_Material->MarkDirty(true);
-						m_Status = Wui::Tr("panel.material.status.param_override",
-							"Parameter override written (press Save to keep it): ") + decl.Name;
+						// M4-TEX-P11:选中的是源图时先导入成单文件容器(适配层),状态行先说这件事。
+						m_Status = m_TextureChoiceNote.empty()
+							? Wui::Tr("panel.material.status.param_override",
+								"Parameter override written (press Save to keep it): ") + decl.Name
+							: m_TextureChoiceNote;
+						m_TextureChoiceNote.clear();
 						m_StatusIsError = false;
 					}
 					else
@@ -2894,7 +2541,7 @@ namespace World
 				// M4-TEX-P6a:纹理参数把"资产 → 源图"关系与缺失原因接在同一句里(全文路径不丢)。
 				if (decl.Type == ParamType::Texture2D)
 				{
-					const std::string textureDoc = TextureRefDoc(resolved);
+					const std::string textureDoc = Editor::TextureRefDoc(resolved);
 					if (!textureDoc.empty())
 						doc += "\n" + textureDoc;
 				}
@@ -2910,7 +2557,7 @@ namespace World
 					node.Kind = "text";
 					node.Label = label + Wui::Tr("panel.material.texture.ref.path_label", " — path");
 					node.Value = resolved;
-					node.Tooltip = TextureRefDoc(resolved);
+					node.Tooltip = Editor::TextureRefDoc(resolved);
 					node.Rect = { rowX, y + rowHeight - 2.0f, std::max(20.0f, rowWidth), 2.0f };
 					node.Enabled = true;
 					node.Interactive = false;
@@ -3000,13 +2647,12 @@ namespace World
 		// U27:多列网格里**每一格**都留出同宽的占位(连只读格也一样),各列的值区才会严格对齐;
 		// 单列沿用旧口径(只读行占满,不给不存在的按钮留白)。
 		const bool reserveResetSlot = hasResetSlot || (gridCell && row.ReadOnly);
-		// M4-TEX-P6a:贴图行在复位槽之外再固定留一个"定位"槽(在内容浏览器里选中这条引用;
-		// 源图与 `.wtex` 资产都认)。只在真的有引用时画,但**宽度恒定预留** —— 与 U24 的
-		// "固定占位 / 零位移"同一条口径,选了贴图不会让控件跳一下。
+		// M4-TEX-P11:贴图行给组件**整个控件矩形**(定位按钮由组件在自己的槽位里切分:列表 |
+		// 徽标条 | 定位 26+6)—— 面板不再额外预留定位宽、也不再自绘定位按钮(旧口径在"有引用"时
+		// 会把定位宽从控件里再扣一次 ⇒ 下拉变窄、显示名被重新省略,实测踩过)。
 		const bool textureRow = row.Key == std::string("albedo") || row.Key == std::string("normal");
 		const float controlX = stacked ? x : x + labelWidth + 8.0f;
-		const float reserved = (reserveResetSlot ? kResetWidth + 6.0f : 0.0f)
-			+ (textureRow ? kTextureLocateWidth + 6.0f : 0.0f);
+		const float reserved = reserveResetSlot ? kResetWidth + 6.0f : 0.0f;
 		const float controlWidth = std::max(60.0f, width - (controlX - x) - reserved);
 		const Wui::WuiRect controlRect { controlX, controlY, controlWidth, controlHeight };
 		// MAT-UI3b:可编辑控件的矩形进"会接手焦点"名单(点空白清焦点时按它豁免)。
@@ -3031,7 +2677,7 @@ namespace World
 		{
 			const std::string& referenced = row.Key == std::string("normal")
 				? desc.NormalTexture : desc.AlbedoTexture;
-			const std::string textureDoc = TextureRefDoc(referenced);
+			const std::string textureDoc = Editor::TextureRefDoc(referenced);
 			if (!textureDoc.empty())
 				rowDoc += "\n" + textureDoc;
 		}
@@ -3132,58 +2778,60 @@ namespace World
 		}
 		else if (textureRow)
 		{
-			// U25-M2 B:贴图槽 = 跨窗口资产拖放的落点(内容浏览器 → 本面板)。
-			// M4-TEX-P6a:清单里**资产条目在前**(显示主名)、没有同名资产的源图在后(显示文件名);
-			// 两项都写进同一个字段;`.wtex` 与图片都能拖进来。
+			// U25-M2 B + M4-TEX-P11:贴图槽 = `Wui::WuiTexturePicker` 的**整槽矩形**
+			// (清单 | 徽标条 | 定位按钮都由组件切分;a11y id 口径保持 `material.<key>` /
+			// `material.<key>.locate`,新增 `material.<key>.state`)。
+			const bool isNormal = row.Key == std::string("normal");
+			const std::string current = isNormal ? desc.NormalTexture : desc.AlbedoTexture;
 			RegisterSlotDrop(ctx, host, row.Key, controlRect);
-			// 定位槽**恒定预留**(与 U24 的"固定占位 / 零位移"同一条)且与控件矩形**互不重叠**:
-			// reserved(见上)已经把"定位 + 复位"从行宽里扣掉,locate 画在控件右侧的专属槽位上。
-			// (曾经的写法在"有引用"时把定位宽从控件里再扣一次 ⇒ 下拉变窄、显示名被重新省略 ——
-			//  同一份清单在两次打开之间长得不一样,实测踩到。)
-			const Wui::WuiRect comboRect = controlRect;
-			const Wui::WuiRect locateRect { controlRect.X + controlRect.W + 6.0f, controlRect.Y,
-				kTextureLocateWidth, controlRect.H };
-			// 显示名按控件宽从中间省略(长路径不能画出控件外 —— 用户报的"右边看不到了")。
-			std::vector<std::string> options;
-			options.reserve(m_TextureLabels.size() + 1);
-			options.push_back(Wui::Tr("panel.material.texture_none", "(none)"));
-			for (const std::string& label : m_TextureLabels)
-				options.push_back(label);   // 完整逻辑路径进选项:搜索/读屏/回显都用它
-				// (用户 2026-09-25:「现在选择不如之前」—— 提前截断会让搜索与读屏都拿不到路径。
-				//  越界改为**绘制期**省略:WUI 的 Combo/SearchableCombo 自己按矩形宽度中间省略。)
-			int& pickIndex = row.Key == std::string("normal") ? m_NormalPickIndex : m_AlbedoPickIndex;
-			const std::string current = row.Key == std::string("normal")
-				? desc.NormalTexture : desc.AlbedoTexture;
-			if (Wui::SearchableCombo(ctx, controlId, comboRect, row.Label, options,
-				pickIndex, theme))
+			// 跨窗口拖放:面板取走一次投放 → 组件应用(Options::DroppedValue);同窗口由组件自收。
+			std::string dropped;
+			const bool consumedDrop = TakeSlotDrop(host, row.Key, &dropped);
+			auto options = Editor::TexturePickerOptions(current, row.Label, "material." + row.Key,
+				consumedDrop ? dropped : std::string());
+			bool revealRequested = false;
+			options.RevealRequested = &revealRequested;
+			// 值 = 组件自己的进出参:返回值 = **值有没有变**(变才写材质 —— 每帧写会让 Revision 逐帧
+			// +1,渲染侧每帧重建材质描述符集 → 预览逐帧闪)。
+			std::string value = current;
+			const bool changed = Wui::WuiTexturePicker(ctx, controlId, controlRect, value, options, theme);
+			if (changed)
 			{
-				// 只在**真的换了一张**时才写回材质:否则每帧调用会让 Revision 每帧 +1,
-				// 渲染侧每帧重建材质描述符集 → 预览逐帧闪。
-				const size_t valueIndex = static_cast<size_t>(pickIndex - 1);
-				const std::string chosenRaw = pickIndex <= 0 || valueIndex >= m_TexturePaths.size()
-					? std::string() : m_TexturePaths[valueIndex];
 				// M4-TEX P9:选中源图 = 当场导入成单文件容器资产,材质引用资产。
 				std::string importNote;
-				const std::string chosen = NormalizeTextureChoice(chosenRaw, &importNote);
+				const std::string chosen = Editor::NormalizeTextureChoice(value, &importNote);
+				m_TextureChoiceNote.clear();   // 槽位导入反馈直接进状态行(不给后续写入路径留陈旧句子)
 				if (chosen != current)
+				{
 					applyEdit([&]
 					{
-						if (row.Key == std::string("normal"))
+						if (isNormal)
 							m_Material->SetNormalTexture(chosen);
 						else
 							m_Material->SetAlbedoTexture(chosen);
 					});
-				if (!importNote.empty())
-				{
-					m_Status = importNote;
-					m_StatusIsError = false;
+					Editor::InvalidateTextureRefCatalog();   // 刚导入的资产下一帧就能在清单里看到
 					m_ValidationRevision = 0;
+					if (!importNote.empty())
+					{
+						m_Status = importNote;
+						m_StatusIsError = false;
+					}
+					else if (consumedDrop)
+					{
+						m_Status = Wui::Tr("panel.material.status.texture_dropped",
+							"Texture assigned by drop: ") + chosen;
+						m_StatusIsError = false;
+					}
+					WLD_CORE_INFO("[material-ui] texture pick '{0}' -> slot '{1}' (assigned '{2}')", value,
+						row.Key, chosen);
 				}
 			}
-			DrawTextureLocateButton(ctx, host, theme, current, locateRect,
-				"material." + row.Key + ".locate");
-			// 完整路径 + "资产 → 源图"关系进无障碍节点(下拉里显示的是短名,脚本/读屏按它读值)。
-			if (!current.empty())
+			if (revealRequested)
+				RevealTextureRef(host, value.empty() ? current : value);
+			// 完整逻辑路径 + "资产 → 源图"关系进无障碍节点(下拉里显示的是完整路径,脚本/读屏按它读值)。
+			const std::string shown = changed ? value : current;
+			if (!shown.empty())
 			{
 				Wui::WuiAccessNode node;
 				node.Id = Wui::HashId(("material.texture." + row.Key + ".path").c_str());
@@ -3191,15 +2839,14 @@ namespace World
 				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 				node.Kind = "text";
 				node.Label = row.Label + Wui::Tr("panel.material.texture.ref.path_label", " — path");
-				node.Value = current;
-				node.Tooltip = TextureRefDoc(current);
-				node.Rect = { comboRect.X, comboRect.Y + comboRect.H, comboRect.W, 2.0f };
+				node.Value = shown;
+				node.Tooltip = Editor::TextureRefDoc(shown);
+				node.Rect = { controlRect.X, controlRect.Y + controlRect.H, controlRect.W, 2.0f };
 				node.Enabled = true;
 				node.Interactive = false;
 				node.Visible = true;
 				Wui::WuiAccessibility::Get().Register(node);
 			}
-			TakeSlotDrop(host, row.Key);
 		}
 		else if (row.Key == std::string("name"))
 		{
@@ -4773,9 +4420,14 @@ namespace World
 		Editor::AssetDropBridge::Get().Register(target);
 	}
 
-	bool MaterialEditorPanel::TakeSlotDrop(PanelHost& host, const std::string& key)
+	// 跨窗口拖放的**交接**:面板只取走一次投放并把逻辑路径转出来(`PayloadToLogical`),值怎么写、
+	// 能不能写由调用点(组件返回值 + 写入口)决定 —— 拖放与下拉选择走**同一条**赋值路径。
+	// 载荷不可用(拖 .wmat 到槽位 / 不支持的扩展名)在这里给出可读状态行,并算"已消费"。
+	bool MaterialEditorPanel::TakeSlotDrop(PanelHost& host, const std::string& key, std::string* outLogical)
 	{
 		(void)host;
+		if (outLogical)
+			outLogical->clear();
 		Editor::AssetDropBridge::Drop drop;
 		if (!Editor::AssetDropBridge::Get().TakeDrop(m_PanelId, "texture-slot", key, &drop))
 			return false;
@@ -4799,54 +4451,38 @@ namespace World
 			m_StatusIsError = true;
 			return true;
 		}
-		const MaterialDesc& desc = m_Material->GetDesc();
-		const std::string& current = key == "normal" ? desc.NormalTexture : desc.AlbedoTexture;
-		// M4-TEX P9:拖进来的源图同样"先导入成单文件容器资产再引用"。
-		std::string importNote;
-		const std::string assigned = NormalizeTextureChoice(logical, &importNote);
-		if (current == assigned)
+		const std::string normalized = MaterialLibrary::NormalizePath(logical);
+		const std::string& current = ResolvedTextureRefFor(key);
+		if (MaterialLibrary::NormalizePath(current) == normalized)
 		{
 			m_Status = Wui::Tr("panel.material.status.drop_same", "Already uses this texture: ") + logical;
 			m_StatusIsError = false;
 			return true;
 		}
-		// 与下拉选择**同一条写入口**(Material 的 setter → Revision 自增 → 渲染侧重建)。
-		const uint32_t revision = m_Material->GetRevision();
-		if (key == "normal")
-			m_Material->SetNormalTexture(assigned);
-		else
-			m_Material->SetAlbedoTexture(assigned);
-		if (m_Material->GetRevision() != revision)
-			m_Material->MarkDirty(true);
-		// 下拉索引与目录缓存跟上(否则回显会落在"(none)")。
-		m_CatalogRefreshTime = 0.0;
-		RefreshCatalog();
-		m_ValidationRevision = 0;
-		WLD_CORE_INFO("[material-ui] texture drop '{0}' -> slot '{1}' (assigned '{2}')", logical, key,
-			assigned);
-		m_Status = importNote.empty()
-			? Wui::Tr("panel.material.status.texture_dropped", "Texture assigned by drop: ") + assigned
-			: importNote;
-		m_StatusIsError = false;
+		if (outLogical)
+			*outLogical = normalized;
 		return true;
 	}
 
-	// ---- M4-TEX-P6a:贴图引用的定位 + 纹理选取模态 ----
+	std::string MaterialEditorPanel::ResolvedTextureRefFor(const std::string& key) const
+	{
+		if (!m_Material)
+			return {};
+		const MaterialDesc& desc = m_Material->GetDesc();
+		if (key == "normal")
+			return desc.NormalTexture;
+		if (key == "albedo")
+			return desc.AlbedoTexture;
+		return m_Material->ResolvedParamValue(key);
+	}
+
+	// ---- M4-TEX-P11:贴图引用的定位 ----
 	//
 	// 定位 = 复用宿主既有的"在内容浏览器选中"通道(`PanelHost::SelectContentAsset`);
-	// 源图(`.png`)与纹理资产(`.wtex`)走同一条 —— 不再只对图片扩展名开放。
-	void MaterialEditorPanel::DrawTextureLocateButton(Wui::WuiContext& ctx, PanelHost& host,
-		const Wui::WuiTheme& theme, const std::string& logical, const Wui::WuiRect& rect,
-		const std::string& id)
+	// 源图(`.png`)与纹理资产(`.wtex`)走同一条。按钮由 `Wui::WuiTexturePicker` 画
+	// (`IdPrefix + ".locate"`),这里只处理它置位的那一次请求。
+	void MaterialEditorPanel::RevealTextureRef(PanelHost& host, const std::string& logical)
 	{
-		const std::string label = Wui::Tr("panel.material.texture.locate", "Locate");
-		const std::string doc = logical.empty()
-			? Wui::Tr("panel.material.texture.locate.none", "No texture reference to locate yet")
-			: Wui::Tr("panel.material.texture.locate.tooltip",
-				"Select this texture in the Content Browser and navigate to its folder. Image sources "
-				"and .wtex texture assets both work.");
-		if (!ActionButton(ctx, Wui::HashId(id.c_str()), rect, label, doc, !logical.empty(), false, theme))
-			return;
 		if (logical.empty())
 			return;
 		if (host.SelectContentAsset(logical, "material-texture"))
@@ -4861,302 +4497,6 @@ namespace World
 				"Cannot locate this texture in the Content Browser (missing on disk?): ") + logical;
 			m_StatusIsError = true;
 		}
-	}
-
-	void MaterialEditorPanel::OpenTexturePicker(Wui::WuiContext& ctx, const std::string& target)
-	{
-		m_TexturePickerOpen = true;
-		m_TexturePickerTarget = target;
-		m_TexturePickerSearch.clear();
-		m_TexturePickerScroll = 0.0f;
-		// 打开时刷新一次目录:刚新建的 `.wtex` 不该等到 TTL 到期才出现在清单里。
-		m_CatalogRefreshTime = 0.0;
-		RefreshCatalog();
-		ctx.SetModal(Wui::HashId("material.texturepick.modal"));
-		ctx.SetFocus(Wui::HashId("material.texturepick.search"));
-		ctx.RecordOp("material", "texture-pick-open", target, m_Path);
-	}
-
-	void MaterialEditorPanel::CloseTexturePicker(Wui::WuiContext& ctx)
-	{
-		m_TexturePickerOpen = false;
-		m_TexturePickerTarget.clear();
-		m_TexturePickerSearch.clear();
-		if (ctx.Modal() == Wui::HashId("material.texturepick.modal"))
-			ctx.ClearModal();
-	}
-
-	// M4-TEX P9:赋纹理前先"确保资产" —— 选中的若是**源图**而它还没有同主名 `.wtex`,
-	// 当场导入成**单文件容器**(设置 + 该图片字节),并让材质引用资产(一张纹理 = 一个文件)。
-	// 已存在资产 = 原样返回资产路径(不动 payload);导入失败不拦引用(与既有校验口径一致)。
-	std::string MaterialEditorPanel::NormalizeTextureChoice(const std::string& logical, std::string* outNote)
-	{
-		if (outNote)
-			outNote->clear();
-		if (logical.empty())
-			return logical;
-		const std::string normalized = MaterialLibrary::NormalizePath(logical);
-		if (IsTextureAssetPath(normalized))
-			return normalized;
-		if (!IsTextureSourceExtension(LowerExtension(normalized)))
-			return normalized;   // 非纹理扩展名交给调用方既有的可读反馈
-		std::string assetLogical;
-		bool created = false;
-		std::string error;
-		if (!Editor::EnsureTextureAssetForSource(ContentRootPath(), normalized, &assetLogical, &created,
-				error))
-		{
-			if (outNote)
-				*outNote = Wui::TrFormat("panel.material.status.texture_import_failed",
-					"Could not import this image as a texture asset: {detail}",
-					{ { "detail", error } });
-			WLD_CORE_WARN("[material-ui] texture import failed for '{0}': {1}", normalized, error);
-			return normalized;
-		}
-		if (outNote && created)
-			*outNote = Wui::TrFormat("panel.material.status.texture_imported",
-				"Imported {source} as a single-file texture asset: {asset}",
-				{ { "source", normalized }, { "asset", assetLogical } });
-		if (created)
-			WLD_CORE_INFO("[material-ui] assigned source '{0}' -> imported container '{1}'", normalized,
-				assetLogical);
-		return assetLogical;
-	}
-
-	// 采纳一次纹理选取(清空 = 空路径):
-	//   * `.wmat` 槽位(`albedo`/`normal`)= 写材质字段(与下拉/拖放同一条写入口);
-	//   * 代码形态的注解参数(`param:<名字>`)= 走既有的"待提交 → 改写注解"路径;
-	//   * `.wmat` 形态的 shader 参数 = 写参数覆盖(与右侧控件同一条写入口)。
-	void MaterialEditorPanel::ApplyTextureChoice(const std::string& target, const std::string& logical)
-	{
-		if (!m_Material)
-			return;
-		// M4-TEX P9:所有"赋纹理"入口共用一次导入归一(源图 → 单文件容器资产)。
-		std::string importNote;
-		const std::string assigned = NormalizeTextureChoice(logical, &importNote);
-		if (target == "albedo" || target == "normal")
-		{
-			const MaterialDesc& desc = m_Material->GetDesc();
-			const std::string current = target == "normal" ? desc.NormalTexture : desc.AlbedoTexture;
-			if (current == assigned)
-				return;
-			const uint32_t revision = m_Material->GetRevision();
-			if (target == "normal")
-				m_Material->SetNormalTexture(assigned);
-			else
-				m_Material->SetAlbedoTexture(assigned);
-			if (m_Material->GetRevision() != revision)
-				m_Material->MarkDirty(true);
-			m_CatalogRefreshTime = 0.0;
-			RefreshCatalog();
-			m_ValidationRevision = 0;
-			m_Status = !importNote.empty()
-				? importNote
-				: (assigned.empty()
-				? Wui::Tr("panel.material.status.texture_cleared", "Texture reference cleared: ") + target
-				: Wui::Tr("panel.material.status.texture_dropped", "Texture assigned by drop: ") + assigned);
-			m_StatusIsError = false;
-			WLD_CORE_INFO("[material-ui] texture pick '{0}' -> slot '{1}' (assigned '{2}')", logical,
-				target, assigned);
-			return;
-		}
-		if (target.rfind("param:", 0) != 0)
-			return;
-		const std::string name = target.substr(6);
-		if (name.empty())
-			return;
-		if (m_ShaderMode)
-		{
-			const MaterialParamDecl* decl = FindParamDecl(m_ShaderParams, name);
-			if (decl == nullptr)
-				return;
-			if (decl->Default == assigned)
-				return;
-			// 与参数控件同一套"待提交"口径:本帧只置位,帧内末尾才改写注解(一次 = 一个撤销步)。
-			m_ShaderPendingParamName = name;
-			m_ShaderPendingParamValue = assigned;
-			m_ShaderStatus = assigned.empty()
-				? Wui::Tr("panel.material.shader.status.texture_cleared", "Texture parameter cleared: ") + name
-				: Wui::Tr("panel.material.shader.status.texture_set",
-					"Texture parameter set (press Save to keep it): ") + name + " = " + logical;
-			m_ShaderStatusIsError = false;
-			return;
-		}
-		std::string normalized = logical;
-		std::string valueError;
-		if (!NormalizeParamValue(ParamType::Texture2D, normalized, &normalized, &valueError))
-		{
-			m_Status = Wui::Tr("panel.material.status.param_override_invalid",
-				"Parameter value rejected: ") + (valueError.empty() ? logical : valueError);
-			m_StatusIsError = true;
-			return;
-		}
-		const uint32_t revision = m_Material->GetRevision();
-		m_Material->SetParamOverride(name, normalized);
-		if (m_Material->GetRevision() != revision)
-			m_Material->MarkDirty(true);
-		m_Status = Wui::Tr("panel.material.status.param_override",
-			"Parameter override written (press Save to keep it): ") + name;
-		m_StatusIsError = false;
-	}
-
-	void MaterialEditorPanel::DrawTexturePickerModal(Wui::WuiContext& ctx, PanelHost& host)
-	{
-		if (!m_TexturePickerOpen)
-			return;
-		const Wui::WuiId modalId = Wui::HashId("material.texturepick.modal");
-		const Wui::WuiTheme& theme = host.Theme();
-		Wui::ModalFrameDesc frameDesc;
-		frameDesc.Id = modalId;
-		frameDesc.Title = Wui::Tr("panel.material.texture.pick.title", "Select Texture");
-		frameDesc.Size = { 560.0f, 420.0f };
-		Wui::WuiRect frame;
-		bool escapePressed = false;
-		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
-		{
-			// 模态被别处清掉:收回状态,不留悬空(与 Save As 同一条规则)。
-			CloseTexturePicker(ctx);
-			return;
-		}
-
-		// 搜索框(资产主名 / 逻辑路径 / 源图路径都能搜)。
-		const Wui::WuiId searchId = Wui::HashId("material.texturepick.search");
-		Wui::TextFieldA11y searchA11y;
-		searchA11y.Label = Wui::Tr("panel.material.texture.pick.search", "Search textures");
-		searchA11y.Placeholder = Wui::Tr("panel.material.texture.pick.search.hint",
-			"Asset name or path…");
-		const Wui::WuiRect searchRect { frame.X + 16.0f, frame.Y + 44.0f, frame.W - 32.0f, 24.0f };
-		NoteFocusOwningRect(searchRect);
-		Wui::TextField(ctx, searchId, searchRect, m_TexturePickerSearch, theme, nullptr, &searchA11y);
-		const std::string hint = Wui::Tr("panel.material.texture.pick.hint",
-			"Texture assets (.wtex) come first, then image sources that have no asset. A row writes "
-			"that logical path; the first row clears the reference.");
-		Wui::Label(ctx, { searchRect.X, searchRect.Y + searchRect.H + 4.0f },
-			EllipsizeToWidth(ctx, hint, searchRect.W, 11.0f), theme.TextMuted, 11.0f);
-		{
-			Wui::WuiAccessNode node;
-			node.Id = Wui::HashId("material.texturepick.hint");
-			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-			node.Kind = "text";
-			node.Label = Wui::Tr("panel.material.texture.pick.title", "Select Texture");
-			node.Value = hint;
-			node.Tooltip = hint;
-			node.Rect = { searchRect.X, searchRect.Y + searchRect.H + 2.0f, searchRect.W, 16.0f };
-			node.Enabled = true;
-			node.Interactive = false;
-			node.Visible = true;
-			Wui::WuiAccessibility::Get().Register(node);
-		}
-
-		// 行清单:资产在前(扫描顺序已经排好),再是没有同名资产的源图。
-		const std::string needle = ToLowerAscii(m_TexturePickerSearch);
-		std::vector<const TextureCatalogEntry*> rows;
-		for (const TextureCatalogEntry& entry : m_TextureCatalog)
-		{
-			if (!needle.empty())
-			{
-				const std::string haystack = ToLowerAscii(entry.Label + " " + entry.Logical + " "
-					+ entry.Source);
-				if (haystack.find(needle) == std::string::npos)
-					continue;
-			}
-			rows.push_back(&entry);
-		}
-		constexpr float rowHeight = 34.0f;
-		const float listTop = searchRect.Y + searchRect.H + 22.0f;
-		const float footerY = frame.Y + frame.H - Wui::ModalFooterPadding - Wui::ModalFooterHeight;
-		const Wui::WuiRect listRect { frame.X + 16.0f, listTop, frame.W - 32.0f,
-			std::max(40.0f, footerY - listTop - 8.0f) };
-		const float contentHeight = rowHeight * static_cast<float>(rows.size() + 1) + 4.0f;
-		Wui::BeginScrollArea(ctx, listRect, contentHeight, m_TexturePickerScroll, theme);
-		float rowY = listRect.Y + 2.0f - m_TexturePickerScroll;
-		bool closeRequested = false;
-		const auto drawRow = [&](const std::string& idKey, const std::string& label,
-			const std::string& value, const std::string& secondary, const std::string& tooltip,
-			const std::string& logical)
-		{
-			const Wui::WuiRect rowRect { listRect.X, rowY, listRect.W, rowHeight - 2.0f };
-			if (rowY + rowHeight >= listRect.Y && rowY <= listRect.Y + listRect.H)
-			{
-				const Wui::WuiRect rowArea { rowRect.X, rowRect.Y, rowRect.W, rowRect.H };
-				const bool hovered = ctx.IsHovered(rowArea);
-				Wui::HoverRow(ctx, rowArea, hovered, false, theme, 3.0f);
-				Wui::Label(ctx, { rowArea.X + 8.0f, rowArea.Y + 4.0f },
-					EllipsizeToWidth(ctx, label, rowArea.W - 16.0f, 13.0f), theme.Text, 13.0f);
-				if (!secondary.empty())
-					Wui::Label(ctx, { rowArea.X + 8.0f, rowArea.Y + 19.0f },
-						EllipsizeMiddleToWidth(ctx, secondary, rowArea.W - 16.0f, 11.0f),
-						theme.TextMuted, 11.0f);
-				Wui::WuiAccessNode node;
-				node.Id = Wui::HashId(idKey.c_str());
-				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
-				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
-				node.Kind = "button";
-				node.Label = label;
-				node.Value = value;
-				node.Tooltip = tooltip;
-				node.Rect = rowArea;
-				node.Enabled = true;
-				node.Interactive = true;
-				node.Visible = true;
-				Wui::WuiAccessibility::Get().Register(node);
-				if (hovered)
-				{
-					ctx.SetCursor(Wui::WuiCursor::Hand);
-					if (!tooltip.empty())
-						Wui::Tooltip(ctx, rowArea, tooltip);
-				}
-				if (ctx.IsClicked(rowArea))
-				{
-					ApplyTextureChoice(m_TexturePickerTarget, logical);
-					closeRequested = true;
-				}
-			}
-			rowY += rowHeight;
-		};
-		// 第一行 = 清空引用(与下拉里的 "(无)" 同一语义)。
-		drawRow("material.texturepick.row.none", Wui::Tr("panel.material.texture_none", "(none)"),
-			Wui::Tr("panel.material.texture.pick.none_value", "(clear)"),
-			Wui::Tr("panel.material.texture.pick.none.secondary",
-				"Clear the reference (empty path = no texture)"),
-			Wui::Tr("panel.material.texture.pick.none.tooltip",
-				"Assigns an empty path: albedo/normal fall back to the base colour / flat surface; a "
-				"shader texture parameter is written back as an empty string."),
-			std::string());
-		for (const TextureCatalogEntry* entry : rows)
-		{
-			const std::string kindTag = entry->IsAsset
-				? Wui::Tr("panel.material.texture.pick.kind.asset", "asset")
-				: Wui::Tr("panel.material.texture.pick.kind.source", "image");
-			std::string secondary = kindTag + " · " + entry->Logical;
-			std::string tooltip = TextureRefDoc(entry->Logical);
-			if (entry->IsAsset && !entry->Source.empty())
-				secondary += " → " + entry->Source;
-			if (!entry->InCatalog)
-				tooltip += "\n" + Wui::Tr("panel.material.texture.pick.not_in_catalog",
-					"This path is referenced by the material but is not part of the scanned asset list.");
-			drawRow("material.texturepick.row." + entry->Logical, entry->Label, entry->Logical,
-				secondary, tooltip, entry->Logical);
-		}
-		Wui::EndScrollArea(ctx);
-		if (rows.empty() && !needle.empty())
-			Wui::Label(ctx, { listRect.X + 8.0f, listRect.Y + 12.0f },
-				EllipsizeToWidth(ctx, Wui::Tr("panel.material.texture.pick.no_match",
-					"No texture matches the search"), listRect.W - 16.0f, 13.0f), theme.TextMuted, 13.0f);
-
-		// 底部:只留 Cancel(点一行 = 直接采纳并关闭,不再多一步确认)。
-		const Wui::WuiRect cancelButton { frame.X + frame.W - 16.0f - 96.0f, footerY, 96.0f,
-			Wui::ModalFooterHeight };
-		if (ActionButton(ctx, Wui::HashId("material.texturepick.cancel"), cancelButton,
-			Wui::Tr("panel.material.texture.pick.cancel", "Cancel"),
-			Wui::Tr("panel.material.texture.pick.cancel.tooltip",
-				"Close without changing the texture reference (Esc)"), true, false, theme)
-			|| escapePressed)
-			closeRequested = true;
-		Wui::EndModalFrame(ctx);
-		if (closeRequested && ctx.Modal() == modalId)
-			CloseTexturePicker(ctx);
 	}
 
 	void MaterialEditorPanel::RegisterHeaderDrop(const Wui::WuiContext& ctx, PanelHost& host,
@@ -6127,7 +5467,7 @@ namespace World
 		m_ShaderParams = std::move(parsed);
 		// 文本编辑缓冲跟随新表重建(参数名集合可能变了)。
 		m_ShaderParamTextBuffers.clear();
-		m_TextureParamBuffers.clear();   // M4-TEX-P6a:换文档时纹理路径输入缓冲一起清
+		m_TextureChoiceNote.clear();     // M4-TEX-P11:换文档时上一份文档的导入反馈一起清
 		// Slang-S7 修复(关键):预览替身材质也要像 `.wmat` 一样**引用这份 shader**,
 		// 否则它没有注解表 → 参数(尤其贴图)解析不出默认值 → 引擎绑白色 1×1 →
 		// 法线贴图退化成 (1,1,1) → 光照≈0 → 代码形态预览**全黑**。
@@ -7201,36 +6541,30 @@ namespace World
 		return std::max(60.0f, rowWidth - (kResetWidth + 6.0f));
 	}
 
-	// 高度在这里算,**绘制端只按 Controls 值摆位** —— 两处不会再各算一套(那会让滚动范围错)。
+	// 高度在这里算,**绘制端只按这里的判据与结果摆位** —— 两处不会再各算一套(那会让滚动范围错)。
+	// M4-TEX-P11:控件换成 `Wui::WuiTexturePicker`(下拉 + 徽标 + 清空 + 定位)后,控件本体**恒定一行**;
+	// 放不下就只拆标签(组件内部自己切列表/徽标/定位,不再有"路径框下面排按钮"的 2/3 行形态)。
 	MaterialEditorPanel::TextureRowLayout MaterialEditorPanel::TextureRowLayoutFor(
 		const Wui::WuiTheme& theme, float inlineControlWidth, float stackedControlWidth, bool withError) const
 	{
-		constexpr float controlLineHeight = 22.0f;
-		constexpr float labelLineHeight = 18.0f;
 		constexpr float baseRowHeight = 26.0f;
+		(void)stackedControlWidth;   // 组件自己内部布局:行高不再依赖"控件簇拆成几行"
 		TextureRowLayout layout;
-		if (inlineControlWidth < kTextureClusterMinWidth)
-		{
-			layout.StackLabel = true;
-			if (stackedControlWidth < kTextureClusterMinWidth)
-			{
-				const float perButton = (std::max(40.0f, stackedControlWidth) - kTextureActionGap) * 0.5f;
-				layout.ControlLines = perButton < kTextureClearWidth ? 3 : 2;
-			}
-		}
+		if (inlineControlWidth < kTexturePickerMinWidth)
+			layout.StackLabel = true;   // 标签独占一行,控件拿整行宽
 		float height = layout.StackLabel
-			? labelLineHeight + controlLineHeight * static_cast<float>(layout.ControlLines)
-				+ 2.0f * static_cast<float>(layout.ControlLines - 1)
-			: std::max(baseRowHeight, controlLineHeight);
+			? kTextureLabelLineHeight + kTextureControlLineHeight + kTextureWarningGap
+			: std::max(baseRowHeight, kTextureControlLineHeight);
+		// 行内校验说明:控件下一行一句话(绘制端用同一组常量摆位,见 DrawShaderParamControl)。
 		if (withError)
-			height += theme.FontSizeCaption + 3.0f;
+			height += kTextureWarningGap + theme.FontSizeCaption + kTextureWarningGap;
 		layout.Height = height;
 		return layout;
 	}
 
-	bool MaterialEditorPanel::DrawShaderParamControl(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
-		const MaterialParamDecl& decl, const Wui::WuiRect& controlRect, const std::string& current,
-		std::string* outText)
+	bool MaterialEditorPanel::DrawShaderParamControl(Wui::WuiContext& ctx, PanelHost& host,
+		const Wui::WuiTheme& theme, const MaterialParamDecl& decl, const Wui::WuiRect& controlRect,
+		const std::string& current, std::string* outText)
 	{
 		// 控件 id 是**稳定契约**(派工单点名):material.shader.params.<name>。
 		const Wui::WuiId id = Wui::HashId(("material.shader.params." + decl.Name).c_str());
@@ -7357,70 +6691,42 @@ namespace World
 			case ParamType::Texture2D:
 			default:
 			{
-				// M4-TEX-P6a:纹理参数 = **路径框(可填)** + 选择(纹理选取模态:资产在前、
-				// 无资产的源图在后)+ 清空。资产路径(`.wtex`)与源图路径都能填/都能选;
-				// 校验口径与 .wmat 槽位一致(缺失 / 资产缺源图 → 行内一句话,不静默通过)。
+				// M4-TEX-P11:纹理参数 = `Wui::WuiTexturePicker`(可搜索下拉:资产 / 源图 + 徽标 +
+				// 清空 + 定位 + 拖放)。整块矩形给组件(它内部切列表 | 徽标条 | 定位),面板不再画
+				// 路径框 / `Pick…` / 清空那三件套(D1 已确认不保留手输路径)。
+				// 口径与 `.wmat` 槽位完全一致:同一份候选清单、同一条"选中源图 = 当场导入成容器"
+				// 归一、同一条行内校验一句话(缺失 / 资产缺源图不静默通过)。
 				const std::string label = decl.Label.empty() ? decl.Name : decl.Label;
-				const std::string inlineWarning = TextureInlineWarning(current);
+				const std::string inlineWarning = Editor::TextureInlineWarning(current);
 				const float width = std::max(40.0f, controlRect.W);
-				const bool twoLine = width < kTextureClusterMinWidth;
-				const bool threeLine = twoLine
-					&& (width - kTextureActionGap) * 0.5f < kTextureClearWidth;
-				const float perButton = std::max(40.0f, (width - kTextureActionGap) * 0.5f);
-				const float fieldWidth = twoLine ? width
-					: std::max(40.0f, width - kTexturePickWidth - kTextureClearWidth - 2.0f * kTextureActionGap);
-				const Wui::WuiRect fieldRect { controlRect.X, controlRect.Y, fieldWidth, 22.0f };
-				const Wui::WuiRect pickRect = !twoLine
-					? Wui::WuiRect { fieldRect.X + fieldRect.W + kTextureActionGap, controlRect.Y,
-						kTexturePickWidth, 22.0f }
-					: Wui::WuiRect { controlRect.X, controlRect.Y + 24.0f, perButton, 22.0f };
-				const Wui::WuiRect clearRect = !twoLine
-					? Wui::WuiRect { pickRect.X + pickRect.W + kTextureActionGap, controlRect.Y,
-						kTextureClearWidth, 22.0f }
-					: (threeLine
-						? Wui::WuiRect { controlRect.X, controlRect.Y + 48.0f, width, 22.0f }
-						: Wui::WuiRect { pickRect.X + pickRect.W + kTextureActionGap, pickRect.Y,
-							perButton, 22.0f });
-				std::string& buffer = m_TextureParamBuffers[decl.Name];
-				if (ctx.Focus() != id)
-					buffer = current;
-				Wui::TextFieldA11y a11y;
-				a11y.Label = label + Wui::Tr("panel.material.texture.path.label", " — texture path");
-				a11y.Placeholder = Wui::Tr("panel.material.texture.path.placeholder",
-					"textures/Icon.png or textures/Icon.wtex");
-				const bool submitted = Wui::TextFieldEx(ctx, id, fieldRect, buffer, theme,
-					std::string(), &a11y);
-				if (submitted && buffer != current)
+				// 跨窗口拖放:与槽位**同一 sink**,key = 参数名(组件用 Options::DroppedValue 应用)。
+				RegisterSlotDrop(ctx, host, decl.Name, controlRect);
+				std::string dropped;
+				const bool consumedDrop = TakeSlotDrop(host, decl.Name, &dropped);
+				auto options = Editor::TexturePickerOptions(current, label,
+					"material.shader.params." + decl.Name, consumedDrop ? dropped : std::string());
+				bool revealRequested = false;
+				options.RevealRequested = &revealRequested;
+				// 值 = 组件自己的进出参:返回值 = **值有没有变**(变才写材质/注解 —— 每帧写会让
+				// Revision 逐帧 +1,渲染侧每帧重建材质描述符集 → 预览逐帧闪)。
+				std::string value = current;
+				const bool changed = Wui::WuiTexturePicker(ctx, id, controlRect, value, options, theme);
+				if (changed)
 				{
-					*outText = buffer;
-					return true;
+					// M4-TEX P9:选中的是源图 = 先导入成单文件容器资产(注解/覆盖写资产路径);
+					// 导入说明由上层写入路径消费(状态行)。
+					std::string importNote;
+					const std::string assigned = Editor::NormalizeTextureChoice(value, &importNote);
+					m_TextureChoiceNote = importNote;
+					*outText = assigned;
+					return assigned != current;
 				}
-				const std::string pickId = "material.shader.params." + decl.Name + ".pick";
-				const std::string pickLabel = Wui::Tr("panel.material.texture.pick.button", "Pick…");
-				const std::string pickDoc = Wui::Tr("panel.material.texture.pick.button.tooltip",
-					"Open the texture picker: .wtex assets first, then image sources without an asset; "
-					"the first row clears the reference.");
-				if (ActionButton(ctx, Wui::HashId(pickId.c_str()), pickRect, pickLabel, pickDoc, true,
-					false, theme))
-					OpenTexturePicker(ctx, "param:" + decl.Name);
-				const std::string clearId = "material.shader.params." + decl.Name + ".clear";
-				if (ActionButton(ctx, Wui::HashId(clearId.c_str()), clearRect,
-					Wui::Tr("panel.material.texture.clear.button", "Clear"),
-					current.empty()
-						? Wui::Tr("panel.material.texture.clear.none", "Already empty")
-						: Wui::Tr("panel.material.texture.clear.tooltip",
-							"Clear the reference (empty path = no texture)"),
-					!current.empty(), false, theme))
-				{
-					*outText = std::string();
-					return true;
-				}
-				// 行内校验(资产缺源图 / 文件缺失):画在控件簇**下面**一行,窄列下也不会压住按钮。
+				if (revealRequested)
+					RevealTextureRef(host, value.empty() ? current : value);
+				// 行内校验(资产缺源图 / 文件缺失):画在控件**下面**一行(与高度公式同一组常量)。
 				if (!inlineWarning.empty())
 				{
-					const int controlLines = threeLine ? 3 : (twoLine ? 2 : 1);
-					const float warningY = controlRect.Y + 22.0f * static_cast<float>(controlLines)
-						+ 2.0f * static_cast<float>(controlLines - 1) + 2.0f;
+					const float warningY = controlRect.Y + kTextureControlLineHeight + kTextureWarningGap;
 					const Wui::WuiRect warningRect { controlRect.X, warningY, width,
 						theme.FontSizeCaption + 2.0f };
 					Wui::Label(ctx, { warningRect.X + 2.0f, warningRect.Y },
@@ -7433,7 +6739,7 @@ namespace World
 					node.Kind = "text";
 					node.Label = label + Wui::Tr("panel.material.texture.warn.label", " — texture warning");
 					node.Value = inlineWarning;
-					node.Tooltip = TextureRefDoc(current);
+					node.Tooltip = Editor::TextureRefDoc(current);
 					node.Rect = warningRect;
 					node.Enabled = true;
 					node.Interactive = false;
@@ -7613,7 +6919,7 @@ namespace World
 					if (decl.Type == ParamType::Texture2D)
 					{
 						const float labelWidthIn = std::min(140.0f, std::max(70.0f, content.W * 0.34f));
-						const bool withError = !TextureInlineWarning(decl.Default).empty();
+						const bool withError = !Editor::TextureInlineWarning(decl.Default).empty();
 						rows += TextureRowLayoutFor(theme,
 							std::max(60.0f, content.W - labelWidthIn - 16.0f),
 							std::max(40.0f, content.W), withError).Height;
@@ -7664,11 +6970,11 @@ namespace World
 			const float labelWidthIn = std::min(140.0f, std::max(70.0f, content.W * 0.34f));
 			const std::string rowRawValue = decl.Default;
 			const std::string rowWarning = decl.Type == ParamType::Texture2D
-				? TextureInlineWarning(rowRawValue) : std::string();
+				? Editor::TextureInlineWarning(rowRawValue) : std::string();
 			const TextureRowLayout layout = decl.Type == ParamType::Texture2D
 				? TextureRowLayoutFor(theme, std::max(60.0f, content.W - labelWidthIn - 16.0f),
 					std::max(40.0f, content.W), !rowWarning.empty())
-				: TextureRowLayout { false, 1, ShaderParamRowHeight(decl.Type, 26.0f) };
+				: TextureRowLayout { false, ShaderParamRowHeight(decl.Type, 26.0f) };
 			const float rowHeight = layout.Height;
 			const Wui::WuiRect rowRect { content.X, cursor, std::max(40.0f, content.W), rowHeight };
 			const float labelWidth = layout.StackLabel ? std::max(40.0f, content.W - 8.0f) : labelWidthIn;
@@ -7691,7 +6997,7 @@ namespace World
 				&& !m_ShaderPendingParamValue.empty())
 				rowValue = m_ShaderPendingParamValue;
 			std::string valueText = rowValue;
-			if (DrawShaderParamControl(ctx, theme, decl, controlRect, rowValue, &valueText))
+			if (DrawShaderParamControl(ctx, host, theme, decl, controlRect, rowValue, &valueText))
 			{
 				if (m_ShaderPendingParamName != decl.Name || m_ShaderPendingParamValue != valueText)
 				{
@@ -7717,7 +7023,7 @@ namespace World
 			// M4-TEX-P6a:纹理参数补"资产 → 源图"关系(全文路径与缺失原因都在这句里)。
 			if (decl.Type == ParamType::Texture2D)
 			{
-				const std::string textureDoc = TextureRefDoc(decl.Default);
+				const std::string textureDoc = Editor::TextureRefDoc(decl.Default);
 				if (!textureDoc.empty())
 					doc += "\n" + textureDoc;
 			}
@@ -7733,7 +7039,7 @@ namespace World
 				node.Kind = "text";
 				node.Label = label + Wui::Tr("panel.material.texture.ref.path_label", " — path");
 				node.Value = decl.Default;
-				node.Tooltip = TextureRefDoc(decl.Default);
+				node.Tooltip = Editor::TextureRefDoc(decl.Default);
 				node.Rect = { content.X, cursor + rowHeight - 2.0f, std::max(20.0f, content.W), 2.0f };
 				node.Enabled = true;
 				node.Interactive = false;
@@ -7783,16 +7089,24 @@ namespace World
 			m_ShaderPendingParamValue.clear();
 			const MaterialParamDecl* pendingDecl = FindParamDecl(m_ShaderParams, pendingName);
 			// M4-TEX P9:Texture2D 参数赋的是**源图**时,先导入成单文件容器资产,注解写资产路径。
+			// M4-TEX-P11:下拉选源图时适配层已经归一过,这里再走一遍是兜底(资产路径原样返回),
+			// 状态行反馈优先用控件那一帧留下的导入说明。
 			if (pendingDecl != nullptr && pendingDecl->Type == ParamType::Texture2D)
 			{
 				std::string importNote;
-				pendingValue = NormalizeTextureChoice(pendingValue, &importNote);
+				pendingValue = Editor::NormalizeTextureChoice(pendingValue, &importNote);
 				if (!importNote.empty())
 				{
 					m_ShaderStatus = importNote;
 					m_ValidationRevision = 0;
 				}
+				else if (!m_TextureChoiceNote.empty())
+				{
+					m_ShaderStatus = m_TextureChoiceNote;
+					m_ValidationRevision = 0;
+				}
 			}
+			m_TextureChoiceNote.clear();
 			const bool written = pendingDecl != nullptr
 				&& WriteShaderParamDefault(*pendingDecl, pendingValue);
 			// MAT-UI45:注解没落上(找不到行 / 写回回读校验失败)= 拖动期间推给预览的覆盖值必须撤回,
@@ -7905,17 +7219,9 @@ namespace World
 		// `.wmat` 路径的既有行为一行不动。
 		if (m_ShaderMode)
 		{
-			// M4-TEX-P6a:代码形态也会开面板级模态(纹理选取)—— 与 .wmat 形态同一条三段式:
-			// 内容之前登记整窗遮挡,画完内容解开遮挡再画模态本体。
-			const bool shaderModal = HasPanelModal();
-			if (shaderModal)
-				Wui::BeginModalInputBlock(ctx);
+			// M4-TEX-P11:纹理选取改成**行内下拉**后,代码形态不再有面板级模态
+			// (旧的纹理选取模态已删除;Save As / 打开确认只存在于 `.wmat` 形态)。
 			DrawShaderDocument(ctx, rect, host);
-			if (shaderModal)
-			{
-				Wui::EndModalInputBlock(ctx);
-				DrawTexturePickerModal(ctx, host);
-			}
 			ResetFocusAfterPanelBlankClick(ctx, rect, focusAtFrameStart);
 			return;
 		}
@@ -7927,9 +7233,6 @@ namespace World
 			Wui::BeginModalInputBlock(ctx);
 		if (!m_Material)
 		{
-			// 没有材质(加载失败 / 面板刚建):纹理选取模态没有可写对象 —— 收回状态,不留悬空模态。
-			if (m_TexturePickerOpen)
-				CloseTexturePicker(ctx);
 			// M3:加载失败的面板要给出**可读原因**(循环引用 / 父级链坏 / 文件读不到),
 			// 不能只剩一句"没有材质"。整句同时进无障碍节点(material.load_error)与悬停。
 			const std::string message = m_LoadError.empty()
@@ -8025,7 +7328,6 @@ namespace World
 			Wui::EndModalInputBlock(ctx);
 			DrawSaveAsModal(ctx, host);
 			DrawOpenConfirmModal(ctx, host);
-			DrawTexturePickerModal(ctx, host);
 		}
 		ResetFocusAfterPanelBlankClick(ctx, rect, focusAtFrameStart);
 	}
