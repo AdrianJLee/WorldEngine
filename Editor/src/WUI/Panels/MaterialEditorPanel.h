@@ -238,6 +238,18 @@ namespace World
 		// (否则一次拖动会往撤销历史里塞几十步)。
 		std::string m_ShaderPendingParamName;
 		std::string m_ShaderPendingParamValue;
+		// ---- MAT-UI45:代码列 `//! param Color` 行尾色块 ----
+		// 逐可见行(其实按全缓冲)扫出来的 Color 注解:`//! param Color <name> = r, g, b[, a]`。
+		// 只收**解析成功**的行(名字 / 4 个分量都可解析);非法值不进表 → 不画色块。
+		struct ShaderColorSwatch
+		{
+			int Line = -1;                 // 0 基行号
+			std::string Name;              // 参数名(注解里的名字)
+			glm::vec4 Rgba { 1.0f };       // 解析出的 RGBA(缺 alpha 按 1)
+			std::string Hex;               // `#RRGGBB` / `#RRGGBBAA`(a11y value;与 ColorField 同口径)
+		};
+		std::vector<ShaderColorSwatch> m_ShaderColorSwatches;
+		uint64_t m_ShaderColorSwatchRevision = ~0ull;   // 已扫过的缓冲区版本
 		std::string m_Path;                 // 当前材质路径(空 = 未落盘新材质)
 		std::string m_NewPathBuffer;        // 未落盘时的目标路径输入
 		bool m_NewPathAttempted = false;    // U2d:点过 Save 之后才把"路径不能为空"标成行内错误
@@ -409,6 +421,12 @@ namespace World
 		// MAT-INTEL2 探针钩子:把代码列**真正用到的**逐行 token 落盘(白色比例/关键字覆盖率的
 		// 量化证据;触发 = WLD_SLANG_TOKEN_DUMP,不设环境变量时不会被调用,不影响正常使用)。
 		void DumpShaderTokens(const char* path);
+		// MAT-UI45:按缓冲区版本扫描 `//! param Color` 行(供代码列行尾色块 + a11y 节点)。
+		void RefreshShaderColorSwatches();
+		// MAT-UI45:画一行 Color 注解的色块(棋盘底 + 颜色覆盖 + 1px 描边)+ 登记只读 a11y 节点;
+		// 放不下(会压住文本)时直接不画。绘制全部走库件(PanelBackground / HighlightOutline)。
+		void DrawShaderColorSwatch(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+			const ShaderColorSwatch& swatch, const Wui::WuiRect& lineRect, float textEndX);
 		float DrawShaderParams(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		// 从磁盘读源码(打开 / Revert);解析失败也**不丢文件**(面板显示错误行,仍可编辑保存)。
 		void LoadShaderFromDisk();
@@ -460,6 +478,9 @@ namespace World
 		bool WriteShaderParamDefault(MaterialParamDecl decl, const std::string& valueText);
 		// 注解参数 → 预览替身材质(baseColor / metallic / roughness / emissive / albedo / normal)。
 		void ApplyShaderDefaultsToPreview();
+		// MAT-UI45:拖动中的参数值**只**推给预览替身材质(参数覆盖 + Revision → 渲染侧重打包参数块),
+		// 不碰源码文本;松手那一帧仍由 WriteShaderParamDefault 落注解(一次撤销步)。
+		void ApplyShaderParamLivePreview(const MaterialParamDecl& decl, const std::string& valueText);
 		// 右栏一行的控件(按参数类型;返回是否有编辑,编辑值写进 outText)。
 		bool DrawShaderParamControl(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
 			const MaterialParamDecl& decl, const Wui::WuiRect& controlRect, const std::string& current,

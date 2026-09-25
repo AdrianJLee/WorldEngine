@@ -5257,6 +5257,22 @@ namespace World
 			m_Material->SetParamOverride(decl.Name, decl.Default);
 	}
 
+	// MAT-UI45:拖动中的值只进**预览替身材质**的参数覆盖(SetParamOverride 在值真的变了时才
+	// BumpRevision → 渲染侧按新 Revision 重打包参数块 → 预览逐帧跟随),不改源码文本。
+	// 正式值仍在松手那一帧写进注解(一次撤销步);写回失败时调用方会把覆盖撤回。
+	void MaterialEditorPanel::ApplyShaderParamLivePreview(const MaterialParamDecl& decl,
+		const std::string& valueText)
+	{
+		if (!m_Material || valueText.empty())
+			return;
+		// 值方言与注解默认值同一份(控件返回的就是这个方言);这里只做"必须可归一"的前置校验,
+		// 坏值(半截输入 / 非法分量)不进预览。类型判定交给 Material::SetParamOverride。
+		std::string normalized = valueText;
+		if (!NormalizeParamValue(decl.Type, normalized, &normalized, nullptr))
+			return;
+		m_Material->SetParamOverride(decl.Name, normalized);
+	}
+
 	bool MaterialEditorPanel::WriteShaderParamDefault(MaterialParamDecl decl, const std::string& valueText)
 	{
 		// 1) 先按内核方言规范化(颜色补齐 4 个分量、浮点最短往返),失败就不改文件。
@@ -5935,6 +5951,112 @@ namespace World
 	}
 
 	// ---- M4-S2:代码列(复用 Wui::CodeEditor 内核)----
+	// MAT-UI45:色块的 a11y 文本 —— `#RRGGBB` / `#RRGGBBAA`(与 Wui::ColorField 的 canonical 同口径)。
+	namespace
+	{
+		std::string FormatShaderSwatchHex(const glm::vec4& rgba)
+		{
+			const auto channel = [](float value)
+			{
+				return static_cast<unsigned>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+			};
+			char buffer[16] = {};
+			if (rgba.a >= 0.999f)
+				std::snprintf(buffer, sizeof(buffer), "#%02X%02X%02X",
+					channel(rgba.r), channel(rgba.g), channel(rgba.b));
+			else
+				std::snprintf(buffer, sizeof(buffer), "#%02X%02X%02X%02X",
+					channel(rgba.r), channel(rgba.g), channel(rgba.b), channel(rgba.a));
+			return buffer;
+		}
+	}
+
+	// MAT-UI45:按缓冲区版本扫一遍 `//! param Color <name> = r, g, b[, a]`。
+	// 只收解析成功的行(类型 = Color、4 个分量都能解析;缺 alpha 按 1)—— 非法值不进表,不画色块。
+	void MaterialEditorPanel::RefreshShaderColorSwatches()
+	{
+		const uint64_t revision = m_ShaderBuffer.Revision();
+		if (m_ShaderColorSwatchRevision == revision)
+			return;
+		m_ShaderColorSwatchRevision = revision;
+		m_ShaderColorSwatches.clear();
+		const std::string& text = m_ShaderBuffer.Text();
+		for (int line = 0; line < m_ShaderBuffer.LineCount(); ++line)
+		{
+			const std::pair<size_t, size_t> range = m_ShaderBuffer.LineRange(line);
+			const std::string_view lineView(text.data() + range.first, range.second - range.first);
+			SlangAnnotations::ParamDecl decl;
+			if (!SlangAnnotations::ParseParamDecl(lineView, decl))
+				continue;
+			ParamType type = ParamType::Float;
+			if (!ParseParamTypeName(decl.Type, &type) || type != ParamType::Color)
+				continue;
+			float rgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+			if (!ParseParamFloatComponents(decl.Default, ParamType::Color, rgba, 4))
+				continue;
+			ShaderColorSwatch swatch;
+			swatch.Line = line;
+			swatch.Name = decl.Name;
+			swatch.Rgba = glm::vec4 { rgba[0], rgba[1], rgba[2], rgba[3] };
+			swatch.Hex = FormatShaderSwatchHex(swatch.Rgba);
+			m_ShaderColorSwatches.push_back(std::move(swatch));
+		}
+	}
+
+	// MAT-UI45:行尾 12×12 圆角色块(棋盘底 + 颜色覆盖 + 1px 描边)+ 只读 a11y 节点。
+	// 位置:首选紧跟本行文本右端(textEndX + 6);注解行通常带 group()/label() 而代码列不宽,
+	// 所以放不下时**贴文本带右缘**(避免色块被裁掉 = 功能在窄列里彻底看不见;代价是极长行会
+	// 盖住右端 ~12px 的正文,拖宽代码列即可看到全文)。绘制全走库件(不引入裸绘制)。
+	void MaterialEditorPanel::DrawShaderColorSwatch(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
+		const ShaderColorSwatch& swatch, const Wui::WuiRect& lineRect, float textEndX)
+	{
+		constexpr float kSwatchSize = 12.0f;      // 派工口径:12×12
+		constexpr float kSwatchGap = 6.0f;        // 文本右端 → 色块左缘
+		constexpr float kSwatchRadius = 3.0f;
+		constexpr float kCheckerCell = 4.0f;      // 与取色器折叠态色块同一档(4px)
+		const float maxX = lineRect.X + lineRect.W - 2.0f - kSwatchSize;
+		const float x = std::min(textEndX + kSwatchGap, maxX);
+		if (x < lineRect.X)
+			return;   // 文本带比色块还窄(极端布局):不画,不越界
+		const Wui::WuiRect rect { x, lineRect.Y + std::max(0.0f, (lineRect.H - kSwatchSize) * 0.5f),
+			kSwatchSize, kSwatchSize };
+		// 棋盘底:底色 + 交替格(与 ColorField 的折叠态色块同一视觉口径)。
+		Wui::PanelBackground(ctx, rect, theme.ButtonBg, kSwatchRadius);
+		const int cells = static_cast<int>(std::ceil(kSwatchSize / kCheckerCell));
+		for (int cellX = 0; cellX < cells; ++cellX)
+			for (int cellY = 0; cellY < cells; ++cellY)
+			{
+				if (((cellX + cellY) & 1) == 0)
+					continue;
+				const Wui::WuiRect cell { rect.X + kCheckerCell * static_cast<float>(cellX),
+					rect.Y + kCheckerCell * static_cast<float>(cellY),
+					std::min(kCheckerCell, rect.X + rect.W - (rect.X + kCheckerCell * cellX)),
+					std::min(kCheckerCell, rect.Y + rect.H - (rect.Y + kCheckerCell * cellY)) };
+				if (cell.W <= 0.0f || cell.H <= 0.0f)
+					continue;
+				Wui::PanelBackground(ctx, cell, theme.ButtonHover, 0.0f);
+			}
+		Wui::PanelBackground(ctx, rect, Wui::WuiColor { std::clamp(swatch.Rgba.r, 0.0f, 1.0f),
+			std::clamp(swatch.Rgba.g, 0.0f, 1.0f), std::clamp(swatch.Rgba.b, 0.0f, 1.0f),
+			std::clamp(swatch.Rgba.a, 0.0f, 1.0f) }, kSwatchRadius);
+		Wui::HighlightOutline(ctx, rect, theme.Border, kSwatchRadius, 1.0f);
+		// 只读 a11y 节点:脚本/读屏按 kind="color-swatch" 直接读色块矩形与规范色值。
+		Wui::WuiAccessNode node;
+		node.Id = Wui::HashId(("material.shader.swatch." + swatch.Name).c_str());
+		node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+		node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+		node.Kind = "color-swatch";
+		node.Label = swatch.Name;
+		node.Value = swatch.Hex;
+		node.Tooltip = Wui::Tr("panel.material.shader.swatch.tooltip",
+			"Color of the //! param Color annotation on this line: ") + swatch.Hex;
+		node.Rect = rect;
+		node.Enabled = true;
+		node.Interactive = false;
+		node.Visible = true;
+		Wui::WuiAccessibility::Get().Register(node);
+	}
+
 	// MAT-INTEL3:补全索引 = "按缓冲区版本刷新"。除了代码列帧首,**补全 / 悬停回调进入前也刷一次**:
 	// `WuiCodeEditor` 在同一帧里先插入文本再查候选,只用帧首版本会让"这一帧刚敲出来的那一行"还没进索引
 	// —— 光标行落在函数体区间之外,局部变量/形参被误判成不可见(实测:文末新起一行时必现)。
@@ -6043,6 +6165,19 @@ namespace World
 				return false;
 			Application::Get().GetWindow().SetClipboardText(std::string(text));
 			return true;
+		};
+		// MAT-UI45:代码列行尾 Color 色块 —— `//! param Color …` 解析成功才画(非法值不画),
+		// 位置由引擎的逐行几何给出(含滚动/裁剪),浮层(补全/Hover)天然盖在色块之上。
+		RefreshShaderColorSwatches();
+		options.LineDecorator = [this, &theme](Wui::WuiContext& decoratorCtx, int line,
+			const Wui::WuiRect& lineRect, float textEndX)
+		{
+			for (const ShaderColorSwatch& swatch : m_ShaderColorSwatches)
+				if (swatch.Line == line)
+				{
+					DrawShaderColorSwatch(decoratorCtx, theme, swatch, lineRect, textEndX);
+					break;
+				}
 		};
 		const Wui::WuiCodeEditorResult result =
 			Wui::CodeEditor(ctx, Wui::HashId("material.shader.code"), editorRect, m_ShaderBuffer, options);
@@ -6362,14 +6497,26 @@ namespace World
 			const std::string label = decl.Label.empty() ? decl.Name : decl.Label;
 			Wui::Label(ctx, { content.X, cursor + 4.0f },
 				EllipsizeToWidth(ctx, label, labelWidth, 12.0f), theme.Text, 12.0f);
-			std::string valueText = decl.Default;
-			if (DrawShaderParamControl(ctx, theme, decl, controlRect, decl.Default, &valueText))
+			// MAT-UI45(用户复报「颜色板按住拖拽,颜色不会变」):拖动期间**以控件自己的值为准** ——
+			// 把待提交值回灌给控件,而不是每帧把注解里的旧文本再喂回去。旧行为下控件内部的 HSV
+			// 编辑态每帧被旧文本顶回去:取色器标记/折叠态色块/预览都停在旧色,只有松手才跳变。
+			// 鼠标按住 = 拖动中(键盘输入与点击都是单帧提交,仍走常规路径,语义不变)。
+			std::string rowValue = decl.Default;
+			if (ctx.Input().MouseDown[0] && m_ShaderPendingParamName == decl.Name
+				&& !m_ShaderPendingParamValue.empty())
+				rowValue = m_ShaderPendingParamValue;
+			std::string valueText = rowValue;
+			if (DrawShaderParamControl(ctx, theme, decl, controlRect, rowValue, &valueText))
 			{
 				if (m_ShaderPendingParamName != decl.Name || m_ShaderPendingParamValue != valueText)
 				{
 					m_ShaderPendingParamName = decl.Name;
 					m_ShaderPendingParamValue = valueText;
 				}
+				// 拖动期间把值实时推给预览替身材质(只写内存覆盖,不动源码文本 → 不塞撤销历史、
+				// 不触发每帧重解析/重编译);松手那一帧仍由下面的 WriteShaderParamDefault 落注解。
+				if (ctx.Input().MouseDown[0])
+					ApplyShaderParamLivePreview(decl, valueText);
 			}
 			// 悬停说明:类型 / 范围 / 单位 / 分组 / 当前默认值。
 			std::string doc = Wui::Tr("panel.material.shader.param.type", "Type: ")
@@ -6412,8 +6559,13 @@ namespace World
 			const std::string pendingValue = m_ShaderPendingParamValue;
 			m_ShaderPendingParamName.clear();
 			m_ShaderPendingParamValue.clear();
-			if (const MaterialParamDecl* pendingDecl = FindParamDecl(m_ShaderParams, pendingName))
-				WriteShaderParamDefault(*pendingDecl, pendingValue);
+			const MaterialParamDecl* pendingDecl = FindParamDecl(m_ShaderParams, pendingName);
+			const bool written = pendingDecl != nullptr
+				&& WriteShaderParamDefault(*pendingDecl, pendingValue);
+			// MAT-UI45:注解没落上(找不到行 / 写回回读校验失败)= 拖动期间推给预览的覆盖值必须撤回,
+			// 让"文件是唯一事实源"重新成立(预览不许停在文本里没有的颜色上)。
+			if (!written)
+				ApplyShaderDefaultsToPreview();
 		}
 		if (m_ShaderParams.empty() && m_ShaderParseError.empty())
 			Wui::Label(ctx, { content.X, content.Y + 2.0f },
