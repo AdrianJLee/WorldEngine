@@ -8,14 +8,17 @@
 ## 1. 三层结构(源文件永远不动)
 
 ```
-assets/textures/Icon.png          ← 源(画师产物;VCS 里唯一事实源,可以是 png/jpg/jpeg/tga/bmp)
-assets/textures/Icon.png.wtex     ← 设置 sidecar(YAML;**持久**设置,任何时刻可改)
-cooked/textures/Icon.png.wtexc    ← 烘焙产物(自描述头 + 逐 mip 块数据;进 .pak)
+assets/textures/Icon.png          ← 源(画师产物;png/jpg/jpeg/tga/bmp)
+assets/textures/Icon.wtex         ← **纹理资产**(YAML:导入设置 + `source:` 指向源图)
+cooked/textures/Icon.png.wtexc    ← 平台产物(自描述头 + 逐 mip 块数据;**按源图命名**;进 .pak)
 ```
 
+- **与模型管线同构**(见知识库 `traps/wimport-removed.md`):`源(.gltf) → 资产(.wmodel) → 产物`,
+  纹理是 `源(.png) → 资产(.wtex) → 产物(.wtexc)`。**没有旁路设置文件**:设置的家只有 `.wtex` 这一个。
 - **不存在"用一种新图片格式替代 PNG"**:源格式只是解码输入,运行时格式由烘焙决定。
 - 设置**不是**导入向导的一次性选项:编辑器面板 / 文本 / CI 脚本随时可改,改完重烘。
-- 删除 sidecar = 回到自动默认(不是错误);产物自带校验信息,能识别"陈旧产物"。
+- 删除 `.wtex` = 回到自动默认(不是错误);产物自带校验信息,能识别"陈旧产物"。
+- 没有资产的源图照旧可用:按引擎默认(usage=color)烘焙,产物同样落在 `<源图>.wtexc`。
 
 ## 2. 源格式
 
@@ -29,12 +32,14 @@ cooked/textures/Icon.png.wtexc    ← 烘焙产物(自描述头 + 逐 mip 块数
 美术规范:入库前统一到 sRGB PNG(需要 alpha 时 32 位);法线贴图用无损格式。引擎**不做**色彩空间猜测,
 色彩管理由美术流程负责。
 
-## 3. `.wtex` 设置(YAML;JSON 是 YAML 子集)
+## 3. `.wtex` 资产(YAML;JSON 是 YAML 子集)
 
-sidecar 路径 = **源完整名 + `.wtex`**(`Icon.png.wtex`、`Icon.jpg.wtex`)。
-未知字段 = **错误**(拼错字段名不会静默变成默认行为)。
+资产路径 = **源图换扩展名**(`textures/Icon.png` → `textures/Icon.wtex`;jpg/tga/bmp 同理)。
+`source:` 可显式指向别处的源图(内容根相对路径);缺省 = 同目录、同主名的图片(按
+`.png/.jpg/.jpeg/.tga/.bmp` 依次找)。未知字段 = **错误**(拼错字段名不会静默变成默认行为)。
 
 ```yaml
+source: textures/Icon.png   # 缺省 = 同目录同主名图片;显式写必须是内容根相对路径(不许 .. / 绝对路径)
 usage: normal          # color | normal | data | hdr | ui
 compression: bc7       # auto | none | bc7 | bc5 | bc4 | bc1 | bc3   (auto = 按 usage)
 srgb: false            # 缺省由 usage 派生;显式写才覆盖
@@ -48,7 +53,9 @@ premultiply_alpha: false
 flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 ```
 
-序列化只写**显式**字段(默认值不落盘),所以手工写的 sidecar 很短。
+序列化只写**显式**字段(默认值不落盘;`source:` 只在显式时才写),所以手工写的资产很短。
+策略上等价于模型的 `ModelImportSettings`:资产里的设置 > 引擎默认;**改设置 = 重烘**
+(cook / 编辑器 Reimport),运行时只吃产物。
 
 ## 4. 格式选择(compression: auto)
 
@@ -88,8 +95,9 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 ## 6. 烘焙与缓存
 
 - 内核入口:`TextureCompiler::BakeBytes`(纯函数:同输入两次逐字节一致)/ `BakeFile` / `BakeDirectory`。
-- 目录烘焙:`<sourceRoot>/**/*.{png,jpg,jpeg,tga,bmp}` → `<outputRoot>/<逻辑路径>.wtexc`;
-  同目录 `<源名>.wtex` 是设置。
+- 目录烘焙:① 遍历资产 `<sourceRoot>/**/*.wtex`(每个资产解析自己的源图:`source:` 或同主名图片);
+  ② 没有资产的源图按默认设置;都烘到 `<outputRoot>/<**源图**逻辑路径>.wtexc`。
+  同主名资产坏掉时,对应源图**不会**用默认设置偷偷烘一份(失败在资产上,报错可见)。
 - 缓存键 = `sha256(源字节) + settingsHash + 产物版本` ⇒ 改源或改设置都会自动失效;缓存目录可整体删除重建。
 - `--cook` 摘要输出 `baked / uptodate / skipped / failed`(`TextureBakeStats`),失败带人话错误。
 - 发行包:默认保留源图(开发/热重载用);`--strip-source-textures` 只带 `.wtexc`。
@@ -102,25 +110,25 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 > - **缓存目录** = `build/x64-<配置>/texture-cache/<源sha256>-<设置hash>-v<产物版本>.wtexc`
 >   (build 树里,可整体删除重建;与 `intermediate/ShaderCache/` 同一口径)。
 > - **日志**:`[tex] baked=N uptodate=N skipped=N failed=N`(每次 cook 一行);
->   `[tex] restored source copies: sources=N sidecars=N failed=N`(见下"源图在场性自愈");
+>   `[tex] restored source copies: sources=N assets=N failed=N`(见下"源图在场性自愈");
 >   开了剥离则多一行 `[tex] strip-source-textures: sources=N artifacts=N removed=N (orphans=N)
 >   unattributed=N failed=N`;失败时 `stats.Errors` 逐条 `[tex] <人话>` 打到 ERROR,**cook 退出码非零**。
 > - **`--check` 不跑纹理烘焙**(在 step 3 就返回,与着色器烘焙同一口径):检查耗时不变,日志里没有
 >   `[tex]` 行;想校验烘焙结果就跑完整 `--cook`。
 > - **增量口径**(实测 2026-09-25,`projects/default` 当前 4 张源图;数字随手头内容变化):冷缓存
->   `baked=4`;第二次 cook `baked=0 uptodate=4`;临时加一张 `Icon.png.wtex`(随后逐字节还原)
+>   `baked=4`;第二次 cook `baked=0 uptodate=4`;临时加一张 `Icon.wtex`(随后逐字节还原)
 >   `baked=1 uptodate=3` ⇒ 只重烘改设置的那一张;剥离后的下一次 cook 会打印
 >   `restored source copies: sources=4` 把源图带回开发包。
-> - **`--strip-source-textures`(默认关)**:内容根里的源图与 `.wtex` sidecar 不进包,只留 `.wtexc`。
->   三遍:①按内容根逐张要求产物在场(有源图没产物 = **报错并保留**源图),再删源图 + sidecar;
->   ②按 cooked 里每张 `.wtexc` 反推源图/sidecar 落点,清"成对孤儿"(源图已删、旧拷贝仍在);
+> - **`--strip-source-textures`(默认关)**:内容根里的源图与 `.wtex` 资产不进包,只留 `.wtexc`。
+>   三遍:①按内容根逐张要求产物在场(有源图没产物 = **报错并保留**源图),再删源图 + `.wtex` 资产;
+>   ②按 cooked 里每张 `.wtexc` 反推源图/资产落点,清"成对孤儿"(源图已删、旧拷贝仍在);
 >   ③**审计不删**剩余同扩展名文件 —— 它们是**导入器产物**(如 glTF 导入生成的
 >   `textures/<源 stem>_0.png`,材质直接引用),删了会打断材质 ⇒ 只计数 + WARN。
 >   实测(2026-09-25):剥离包里**内容根源图 0 张、`.wtex` 0 个**,`.wtexc` 与引擎 `shaders/**`
 >   (80 个 SPIR-V)全在;剥离包从发布目录直接跑 Runtime,两个后端都画出场景(0 device lost / VUID)。
 > - **源图在场性自愈**:`CookPipeline` 的增量只认 `cook.db.json`,不会发现 cooked 里的文件被删掉,
 >   而剥离正是"删掉 cooked 里源图"的合法动作 —— 所以贴图步骤每次 cook 补回**缺失**的内容根
->   源图/sidecar(`restored source copies` 行)。没有这一步,剥离之后的下一次普通 cook 会静默
+>   源图/资产(`restored source copies` 行)。没有这一步,剥离之后的下一次普通 cook 会静默
 >   产出"只剩产物"的开发包(与"默认保留源图"的契约相反)。
 
 ## 7. 运行时消费(产物优先)
@@ -128,8 +136,10 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 1. 逻辑路径 `<path>`:先找 `<path>.wtexc`(打包态在 `.pak` 里),命中则解头 + 逐 mip 上传,
    **不**解码源图;格式/尺寸/sRGB 全部来自产物头。
 2. 没有产物(开发态或未烘焙)⇒ 回退今天的 stb 路径(RGBA8),行为与旧版一致。
-3. 产物与设置不一致(源改过但没重烘)⇒ 编辑器打"需重烘"徽标,cook 重烘,运行时校验失败回退源图。
-4. 法线贴图:产物格式为 BC5 时,采样后按 `z = sqrt(max(0, 1 - x² - y²))` 重建;源图仍按 `R=X, G=Y` 写。
+3. **陈旧产物**:运行时**只信产物头**(不做源字节比对);"需重烘"由编辑器徽标(P4)与 cook(P3)
+   负责判源/设置是否变过。运行时遇到头/魔数/版本/mip 表不自洽 ⇒ 记警告并回退源图。
+4. 法线贴图:产物格式为 BC5 时,采样后按 `z = sqrt(max(0, 1 - x² - y²))` 重建(包装层与引擎标准
+   着色器两条路径都已接,开关见 `docs/dev/shader-contract.md` 法线段);源图仍按 `R=X, G=Y` 写。
 
 > 落地实况(2026-09-25,M4-TEX P2):
 > - `World/Renderer/TextureData.*`:`LoadTextureAsset(path)` 返回"是否来自产物 + 头 + 逐 mip 数据"
@@ -140,23 +150,27 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 >   "走的产物路径、没有 stb 解码"的证据。
 > - OpenGL 块上传走 `glCompressedTextureSubImage2D`(旧 `SetData` 对块格式没有 `dataFormat` 映射,
 >   会断言);Vulkan 原有 `vkCmdCopyBufferToImage` 已按 mip 支持块格式。
-> - **采样状态(wrap/filter/anisotropy)还没接**:材质贴图共用渲染器的单个采样器
->   (`Renderer3D` 的 `state.MaterialSampler`,按项目 `rendering.anisotropy` 建),per-texture 采样器
->   需要改描述符写入侧;产物头里的值已解析可用,接线点见 `tools/agents/reports/M4-TEX-P2-runtime.md`。
-> - BC5 法线的 Z 重建在**包装层**(`MaterialSurface.cpp` 的 PS 模板 + `WE_NORMAL_TEXTURE_BC5` 开关);
->   引擎标准着色器那条路径尚未接(见 `docs/dev/shader-contract.md` §10 与
->   `tools/agents/reports/M4-TEX-P2-runtime.md` 的实测数字)。
+> - **采样状态(P2b 已接)**:产物命中时 `MaterialTextureCache::GetSampler(path, srgb)` 按产物头的
+>   `(wrap, filter, anisotropy)` 建/取 **per-texture 采样器**(按 `Capabilities::MaxSamplerAnisotropy`
+>   clamp,不支持各向异性时退 1);`Renderer3D.cpp` 的三处材质描述符写入改用它。**仅产物命中生效**,
+>   回退 stb 路径继续用共享 sampler(`state.MaterialSampler`)⇒ 老资产行为不变。采样器缓存随设备
+>   重建失效(Clear/设备变化一起清)。首次创建打一条
+>   `[material] per-texture sampler '<path>': wrap=… filter=… aniso=…` 日志。
+> - **BC5 法线重建(P2b 已接两条路径)**:包装层(`MaterialSurface.cpp` 的 PS 模板 +
+>   `WE_NORMAL_TEXTURE_BC5` 开关)与引擎标准着色器(`Renderer3D_Solid.slang` 的 `u_Flags.w`,
+>   数据源 = `MaterialTextureCache::IsBc5Artifact`);回退路径恒不解码 BC5,口径见
+>   `docs/dev/shader-contract.md` 法线段。
 
 ## 8. 编辑器交互(Texture Settings)
 
-- 内容浏览器:源图行有"已烘焙 / 需重烘 / 有设置"徽标;右键 `Texture Settings…` / `Reimport` /
-  `Reset to Defaults`。
-- 面板:usage / compression / sRGB / mips / mip_filter / max_size / wrap / filter / anisotropy /
-  premultiply / flipY + 预览 + `Apply(保存 sidecar)`;改字段 → 重烘 → 预览更新(与 `.wmat` 热重载同一套语义)。
+- `.wtex` 是**资产类型**(内容浏览器里可选中、可双击);源图是它的源(与 `.gltf`/`.wmodel` 同款关系)。
+- 面板(`Texture Settings`)编辑**资产**:source / usage / compression / sRGB / mips / mip_filter /
+  max_size / wrap / filter / anisotropy / premultiply / flipY + 预览 + `Apply(保存 .wtex)`;
+  改字段 → 重烘 → 预览更新(与 `.wmat` 热重载同一套语义)。
 
 ## 9. 验证口径
 
-- 单测 `World.TextureImport`(55 号测试):默认派生表 / YAML 解析(未知字段与越界报错)/ 产物往返 /
+- 单测 `World.TextureImport`:默认派生表 / YAML 解析(未知字段、越界、非标量报错)/ 产物往返 /
   **确定性**(同输入两次逐字节一致)/ mip 尺寸链 / 非 4 倍边长 / max_size 缩放 / 目录烘焙缓存命中与失效 /
   SHA-256 标准向量。
 - 运行时:双后端(Vulkan / OpenGL)抓图对比(BC7 产物 vs RGBA8 参考,阈值化 maxDiff + 平均误差),

@@ -30,6 +30,11 @@ projects/*/assets/models/**/*.wmodel
 projects/*/assets/models/**/materials/
 projects/*/assets/models/**/textures/
 
+# M4-TEX:开发期的纹理产物(`.wtexc`)是**生成物**:cook 会重新烘进 cooked/,
+# 编辑器 Texture Settings 的 Apply/Reimport 就地刷新它(供开发态运行时命中产物路径)。
+# 仓库只存源图 + `.wtex` 资产,不存产物。
+projects/*/assets/**/*.wtexc
+
 # W8:编辑器脚本工作区脚手架(create-if-missing 生成;用户改过的配置不入库即保留)。
 # 上面的 `.vscode` 忽略规则会连带排除父目录,必须先把目录本身取消忽略,再放行其内容。
 !projects/default/.vscode/

@@ -184,19 +184,22 @@ int main()
 			CHECK(a.Hash() != b.Hash());
 		}
 
-		// 4. sidecar 磁盘往返 + 缺文件 = 默认。
+		// 4. 资产磁盘往返 + 缺文件 = 默认 + 资产路径口径。
 		{
 			TempDir temp;
-			const std::filesystem::path sidecar = temp.path / "textures" / "Icon.png.wtex";
+			const std::filesystem::path asset = temp.path / "textures" / "Icon.wtex";
 			TextureImportSettings original;
 			original.Usage = TextureUsage::Normal;
 			original.MaxSize = 1024;
 			std::string error;
-			CHECK(SaveTextureImportSettings(sidecar, original, error));
-			CHECK(World::TextureSettingsPath("textures/Icon.png") == "textures/Icon.png.wtex");
+			CHECK(SaveTextureImportSettings(asset, original, error));
+			CHECK(World::TextureAssetPathForSource("textures/Icon.png") == "textures/Icon.wtex");
+			CHECK(World::TextureAssetPathForSource("textures/icons/Icon.jpg") == "textures/icons/Icon.wtex");
+			CHECK(World::IsTextureAssetPath("textures/Icon.wtex"));
+			CHECK(!World::IsTextureAssetPath("textures/Icon.png"));
 
 			TextureImportSettings loaded;
-			CHECK(LoadTextureImportSettings(sidecar, loaded, error));
+			CHECK(LoadTextureImportSettings(asset, loaded, error));
 			CHECK(loaded.Usage == TextureUsage::Normal);
 			CHECK(loaded.MaxSize == 1024);
 			CHECK(loaded.Hash() == original.Hash());
@@ -204,6 +207,14 @@ int main()
 			TextureImportSettings missing;
 			CHECK(LoadTextureImportSettings(temp.path / "nope.wtex", missing, error));
 			CHECK(missing.Usage == TextureUsage::Color);
+
+			// `source:` 解析 + 坏值(有 `..`)在目录烘焙时被拒(见 §9)。
+			TextureImportSettings withSource;
+			CHECK(TextureImportSettings::Parse("source: \"textures/Other.png\"\nusage: data\n",
+				withSource, error));
+			CHECK(withSource.Source == "textures/Other.png");
+			CHECK(withSource.Usage == TextureUsage::Data);
+			CHECK(TextureImportSettings::Parse("source: \"\"\n", withSource, error) == false);
 		}
 
 		// 5. SHA-256 标准向量(空串 + "abc")。
@@ -309,7 +320,7 @@ int main()
 			CHECK(!error.empty());
 		}
 
-		// 9. 目录烘焙:sidecar 生效 + 缓存命中 + 改设置后重烘。
+		// 9. 目录烘焙:资产(`.wtex`)生效 + 无资产源图走默认 + 缓存命中 + 改设置后重烘 + 坏资产被拒。
 		{
 			TempDir temp;
 			const std::filesystem::path sourceRoot = temp.path / "assets";
@@ -317,39 +328,71 @@ int main()
 			const std::filesystem::path cacheDir = temp.path / "cache";
 			WriteFile(sourceRoot / "textures" / "icons" / "A.tga", MakeTga(8, 8, MakeGradient(8, 8)));
 			WriteFile(sourceRoot / "textures" / "B.tga", MakeTga(8, 8, MakeGradient(8, 8)));
+			WriteFile(sourceRoot / "textures" / "C.tga", MakeTga(8, 8, MakeGradient(8, 8)));
+			WriteFile(sourceRoot / "textures" / "D.tga", MakeTga(8, 8, MakeGradient(8, 8)));
 			{
-				std::ofstream sidecar(sourceRoot / "textures" / "B.tga.wtex", std::ios::trunc);
-				sidecar << "usage: normal\n";
+				// 资产 = `<主名>.wtex`;缺省 source = 同目录同主名的图片。
+				std::ofstream asset(sourceRoot / "textures" / "B.wtex", std::ios::trunc);
+				asset << "usage: normal\n";
+			}
+			{
+				// 显式 source:资产与源图不同名(资产在别处也可)。
+				std::ofstream asset(sourceRoot / "textures" / "C-alias.wtex", std::ios::trunc);
+				asset << "source: \"textures/C.tga\"\nusage: data\ncompression: bc7\n";
+			}
+			{
+				// 坏资产:source 逃出内容根 ⇒ 只这一条失败,其它照烘。
+				std::ofstream asset(sourceRoot / "textures" / "D.wtex", std::ios::trunc);
+				asset << "source: \"../outside.png\"\n";
 			}
 
 			TextureBakeOptions options;
 			TextureBakeStats first = TextureCompiler::BakeDirectory(sourceRoot, outputRoot, cacheDir, options);
-			CHECK(first.Baked == 2);
-			CHECK(first.Failed == 0);
+			CHECK(first.Baked == 3);            // A(默认)+ B(资产)+ C(资产别名)
+			CHECK(first.Failed == 1);           // D 的坏 source 被拒
+			CHECK(!first.Errors.empty());
 			CHECK(std::filesystem::exists(outputRoot / "textures" / "icons" / "A.tga.wtexc"));
 			CHECK(std::filesystem::exists(outputRoot / "textures" / "B.tga.wtexc"));
+			CHECK(std::filesystem::exists(outputRoot / "textures" / "C.tga.wtexc"));   // 产物按**源图**命名
+			CHECK(!std::filesystem::exists(outputRoot / "textures" / "D.tga.wtexc"));
 
-			std::vector<uint8_t> bBytes;
+			// A 没有资产 ⇒ 默认 color(BC7+sRGB);C 用资产里的显式 compression: bc7 + data(线性)。
+			auto readArtifact = [&](const std::filesystem::path& path,
+				TextureArtifactHeader& out) -> bool
 			{
-				std::ifstream input(outputRoot / "textures" / "B.tga.wtexc", std::ios::binary | std::ios::ate);
-				bBytes.resize(static_cast<size_t>(input.tellg()));
+				std::vector<uint8_t> bytes;
+				std::ifstream input(path, std::ios::binary | std::ios::ate);
+				if (!input)
+					return false;
+				bytes.resize(static_cast<size_t>(input.tellg()));
 				input.seekg(0);
-				input.read(reinterpret_cast<char*>(bBytes.data()), static_cast<std::streamsize>(bBytes.size()));
-			}
+				input.read(reinterpret_cast<char*>(bytes.data()),
+					static_cast<std::streamsize>(bytes.size()));
+				std::string error;
+				return ParseTextureArtifact(bytes, out, error);
+			};
+
+			TextureArtifactHeader aHeader;
+			CHECK(readArtifact(outputRoot / "textures" / "icons" / "A.tga.wtexc", aHeader));
+			CHECK(aHeader.Format == TextureBlockFormat::Bc7 && aHeader.Srgb);
+			TextureArtifactHeader cHeader;
+			CHECK(readArtifact(outputRoot / "textures" / "C.tga.wtexc", cHeader));
+			CHECK(cHeader.Format == TextureBlockFormat::Bc7 && !cHeader.Srgb);
+
 			TextureArtifactHeader bHeader;
-			std::string error;
-			CHECK(ParseTextureArtifact(bBytes, bHeader, error));
+			CHECK(readArtifact(outputRoot / "textures" / "B.tga.wtexc", bHeader));
 			CHECK(bHeader.Format == TextureBlockFormat::Bc5);
 
 			TextureBakeStats second = TextureCompiler::BakeDirectory(sourceRoot, outputRoot, cacheDir, options);
-			CHECK(second.Baked == 0 && second.UpToDate == 2);
+			CHECK(second.Baked == 0 && second.UpToDate == 3);
+			CHECK(second.Failed == 1);          // 坏资产仍被拒(不静默)
 
 			{
-				std::ofstream sidecar(sourceRoot / "textures" / "B.tga.wtex", std::ios::trunc);
-				sidecar << "usage: data\n";
+				std::ofstream asset(sourceRoot / "textures" / "B.wtex", std::ios::trunc);
+				asset << "usage: data\n";
 			}
 			TextureBakeStats third = TextureCompiler::BakeDirectory(sourceRoot, outputRoot, cacheDir, options);
-			CHECK(third.Baked == 1 && third.UpToDate == 1);
+			CHECK(third.Baked == 1 && third.UpToDate == 2);
 			std::printf("World.TextureImport: dir bake baked=%zu uptodate=%zu\n",
 				third.Baked, third.UpToDate);
 		}

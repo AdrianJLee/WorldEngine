@@ -103,6 +103,7 @@ namespace World
 		const std::unordered_map<std::string, bool>& KnownFields()
 		{
 			static const std::unordered_map<std::string, bool> fields = {
+				{ "source", true },
 				{ "usage", true }, { "srgb", true }, { "compression", true },
 				{ "mipmaps", true }, { "mip_filter", true }, { "max_size", true },
 				{ "wrap", true }, { "filter", true }, { "anisotropy", true },
@@ -179,7 +180,22 @@ namespace World
 				return false;
 			}
 			const YAML::Node& value = entry.second;
-			if (key == "usage")
+			if (!value.IsScalar())
+			{
+				// 结构性错误要在"字段类型转换抛异常"之前拦下来:坏 .wtex 不能崩 cook。
+				error = key + ": expected a scalar value";
+				return false;
+			}
+			if (key == "source")
+			{
+				out.Source = value.as<std::string>();
+				if (out.Source.empty())
+				{
+					error = "source: must not be empty (omit the field to use the sibling image)";
+					return false;
+				}
+			}
+			else if (key == "usage")
 			{
 				if (!EnumFromName(kUsageNames, std::size(kUsageNames), value.as<std::string>(),
 						out.Usage, "usage", error))
@@ -253,9 +269,13 @@ namespace World
 	std::string TextureImportSettings::Serialize() const
 	{
 		std::ostringstream out;
-		out << "# Texture import settings (see docs/dev/texture-import.md)\n";
+		out << "# Texture asset (see docs/dev/texture-import.md): import settings + source image.\n";
 		out << "# Re-editable at any time: edit here or use the editor's Texture Settings panel,\n";
 		out << "# then re-bake (cook / live preview). Delete this file to fall back to defaults.\n";
+		if (!Source.empty())
+			out << "# source: content-root relative path of the image (default = sibling with same stem).\n";
+		if (!Source.empty())
+			out << "source: \"" << Source << "\"\n";
 		out << "usage: " << TextureUsageName(Usage) << "\n";
 		if (SrgbExplicit)
 			out << "srgb: " << (Srgb ? "true" : "false") << "\n";
@@ -326,6 +346,7 @@ namespace World
 	uint64_t TextureImportSettings::Hash() const
 	{
 		// FNV1a64 over 生效值的规范化文本(显式但与默认等效的字段不改变键)。
+		// 注意:Source **不进**键 —— 源图的字节 hash 才是缓存键的一部分(改指向另一张图 ⇒ 源 sha 变)。
 		std::string canonical;
 		canonical += TextureUsageName(Usage);
 		canonical += EffectiveSrgb() ? "|srgb" : "|linear";
@@ -352,9 +373,20 @@ namespace World
 		return hash;
 	}
 
-	std::string TextureSettingsPath(const std::string& sourcePath)
+	bool IsTextureAssetPath(const std::string& path)
 	{
-		return sourcePath + ".wtex";
+		return path.size() > 5 && path.compare(path.size() - 5, 5, ".wtex") == 0;
+	}
+
+	std::string TextureAssetPathForSource(const std::string& sourcePath)
+	{
+		// 只换最后一段的扩展名(textures/Icon.png → textures/Icon.wtex);
+		// 没有扩展名的源(少见)直接加后缀,调用方按内容根解析。
+		const size_t slash = sourcePath.find_last_of('/');
+		const size_t dot = sourcePath.find_last_of('.');
+		if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
+			return sourcePath + ".wtex";
+		return sourcePath.substr(0, dot) + ".wtex";
 	}
 
 	bool LoadTextureImportSettings(const std::filesystem::path& sidecarPath,

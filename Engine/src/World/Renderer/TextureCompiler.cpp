@@ -442,7 +442,11 @@ namespace World
 			return stats;
 		}
 
-		std::vector<std::filesystem::path> sources;
+		// M4-TEX P0(资产形态):设置的家是**资产** `<主名>.wtex`(与 .wmodel 同构),
+		// 不是旁路 sidecar。一轮烘焙 = ① 遍历资产(用资产里的设置)→ ② 没有资产的源图按默认设置。
+		// 产物一律按**源图**逻辑路径命名(`textures/Icon.png.wtexc`),运行时只有一条查找规则。
+		std::vector<std::filesystem::path> assets;
+		std::vector<std::filesystem::path> images;
 		for (std::filesystem::recursive_directory_iterator iterator(sourceRoot,
 				std::filesystem::directory_options::skip_permission_denied, rootError), end;
 			iterator != end; iterator.increment(rootError))
@@ -451,13 +455,87 @@ namespace World
 				break;
 			if (!iterator->is_regular_file(rootError))
 				continue;
-			if (IsTextureSourceExtension(LowerExtension(iterator->path())))
-				sources.push_back(iterator->path());
+			const std::string extension = LowerExtension(iterator->path());
+			if (extension == ".wtex")
+				assets.push_back(iterator->path());
+			else if (IsTextureSourceExtension(extension))
+				images.push_back(iterator->path());
 		}
-		std::sort(sources.begin(), sources.end());
+		std::sort(assets.begin(), assets.end());
+		std::sort(images.begin(), images.end());
 
-		for (const std::filesystem::path& source : sources)
+		struct BakeItem
 		{
+			std::filesystem::path Source;
+			std::filesystem::path Relative;
+			TextureImportSettings Settings;
+			bool FromAsset = false;
+		};
+		std::vector<BakeItem> items;
+		std::vector<std::string> claimed;
+
+		for (const std::filesystem::path& asset : assets)
+		{
+			TextureImportSettings settings;
+			std::string error;
+			if (!LoadTextureImportSettings(asset, settings, error))
+			{
+				++stats.Failed;
+				stats.Errors.push_back(error);
+				continue;
+			}
+
+			std::filesystem::path source;
+			if (!settings.Source.empty())
+			{
+				// 显式 source:内容根相对路径;不许绝对路径、不许 ".." 逃出内容根。
+				const std::filesystem::path declared(settings.Source);
+				bool escapes = declared.is_absolute() || declared.has_root_name();
+				for (const auto& part : declared)
+					if (part == "..")
+						escapes = true;
+				if (escapes)
+				{
+					++stats.Failed;
+					stats.Errors.push_back(asset.generic_string()
+						+ ": source must be a content-root relative path without '..'");
+					continue;
+				}
+				source = sourceRoot / declared;
+				if (!IsTextureSourceExtension(LowerExtension(source)))
+				{
+					++stats.Failed;
+					stats.Errors.push_back(asset.generic_string() + ": source '" + settings.Source
+						+ "' is not a supported image extension");
+					continue;
+				}
+			}
+			else
+			{
+				// 缺省:同目录、同主名的图片(按固定扩展名顺序找第一个存在的)。
+				static const char* const kCandidates[] =
+					{ ".png", ".jpg", ".jpeg", ".tga", ".bmp" };
+				for (const char* extension : kCandidates)
+				{
+					const std::filesystem::path candidate =
+						asset.parent_path() / (asset.stem().string() + extension);
+					std::error_code existsError;
+					if (std::filesystem::is_regular_file(candidate, existsError))
+					{
+						source = candidate;
+						break;
+					}
+				}
+			}
+			std::error_code existsError;
+			if (source.empty() || !std::filesystem::is_regular_file(source, existsError))
+			{
+				++stats.Failed;
+				stats.Errors.push_back(asset.generic_string()
+					+ ": no source image (put the image next to the asset or set `source:`)");
+				continue;
+			}
+
 			std::error_code relativeError;
 			const std::filesystem::path relative =
 				std::filesystem::relative(source, sourceRoot, relativeError);
@@ -467,16 +545,47 @@ namespace World
 				stats.Errors.push_back("cannot relativize " + source.generic_string());
 				continue;
 			}
-
-			TextureImportSettings settings;
-			std::string error;
-			const std::filesystem::path sidecar = source.string() + ".wtex";
-			if (!LoadTextureImportSettings(sidecar, settings, error))
+			const std::string logical = relative.generic_string();
+			if (std::find(claimed.begin(), claimed.end(), logical) != claimed.end())
 			{
 				++stats.Failed;
-				stats.Errors.push_back(error);
+				stats.Errors.push_back("two texture assets point at the same source: " + logical);
 				continue;
 			}
+			claimed.push_back(logical);
+			items.push_back(BakeItem { source, relative, settings, true });
+		}
+
+		for (const std::filesystem::path& image : images)
+		{
+			// 同主名资产在场 ⇒ 这张源图归资产管:资产坏就**失败在资产上**,
+			// 不在这里用默认设置偷偷烘一份(否则"坏资产"会变成静默的错误贴图)。
+			const std::filesystem::path siblingAsset =
+				image.parent_path() / (image.stem().string() + ".wtex");
+			std::error_code siblingError;
+			if (std::filesystem::is_regular_file(siblingAsset, siblingError))
+				continue;
+
+			std::error_code relativeError;
+			const std::filesystem::path relative =
+				std::filesystem::relative(image, sourceRoot, relativeError);
+			if (relativeError || relative.empty())
+			{
+				++stats.Failed;
+				stats.Errors.push_back("cannot relativize " + image.generic_string());
+				continue;
+			}
+			const std::string logical = relative.generic_string();
+			if (std::find(claimed.begin(), claimed.end(), logical) != claimed.end())
+				continue;   // 已由资产接管
+			items.push_back(BakeItem { image, relative, TextureImportSettings {}, false });
+		}
+
+		for (const BakeItem& item : items)
+		{
+			const std::filesystem::path& source = item.Source;
+			const TextureImportSettings& settings = item.Settings;
+			std::string error;
 
 			std::vector<uint8_t> sourceBytes;
 			if (!ReadFileBytes(source, sourceBytes, error) || sourceBytes.empty())
@@ -491,7 +600,7 @@ namespace World
 			const std::filesystem::path cachePath = cacheDir.empty() ? std::filesystem::path()
 				: cacheDir / cacheKey;
 			const std::filesystem::path outputPath =
-				outputRoot / std::filesystem::path(relative.generic_string() + ".wtexc");
+				outputRoot / std::filesystem::path(item.Relative.generic_string() + ".wtexc");
 
 			std::vector<uint8_t> artifact;
 			bool reused = false;

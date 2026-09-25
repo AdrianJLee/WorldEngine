@@ -309,7 +309,7 @@ namespace World::Editor
 			return extension;
 		}
 
-		// M4-TEX P3:保证 cooked 里有内容根的源图与 `.wtex` sidecar(只补**缺失**的那些)。
+		// M4-TEX P3:保证 cooked 里有内容根的源图与 `.wtex` 资产(只补**缺失**的那些)。
 		//
 		// 为什么需要:`CookPipeline` 的增量只认 `cook.db.json`(源字节指纹),它不会发现 cooked 里的文件
 		// 被人删掉了 —— 而 `--strip-source-textures` 正是"删掉 cooked 里源图"的合法动作。没有这一步,
@@ -318,7 +318,7 @@ namespace World::Editor
 		struct CookedSourceCopyResult
 		{
 			size_t Sources = 0;    // 补回的源图数
-			size_t Sidecars = 0;   // 补回的 `.wtex` 数
+			size_t Assets = 0;     // 补回的 `.wtex` 资产数
 			size_t Failed = 0;
 			std::string Error;
 		};
@@ -363,7 +363,7 @@ namespace World::Editor
 				if (isSource)
 					++result.Sources;
 				else
-					++result.Sidecars;
+					++result.Assets;
 			}
 			return result;
 		}
@@ -374,14 +374,14 @@ namespace World::Editor
 		// `cooked/cooked/` 里的落点,因此引擎着色器(`shaders/**` 来自引擎目录)、本地化、
 		// 任何非内容根产物都不可能被误删。有源图但没有产物 = 记失败并**保留**该源图
 		// (宁可包里多一张源图,也不静默删掉唯一能读的数据)。
-		// 三遍:①内容根逐张要求产物在场并删源图/sidecar;②按 cooked 里的每张 `.wtexc` 反推它的
-		// 源图+sidecar 落点(清"成对的孤儿");③清**已删资产**在 cooked 里的残留拷贝 —— 判据是
+		// 三遍:①内容根逐张要求产物在场并删源图/资产;②按 cooked 里的每张 `.wtexc` 反推它的
+		// 源图+资产落点(清"成对的孤儿");③清**已删资产**在 cooked 里的残留拷贝 —— 判据是
 		// "既不在内容根、也不在引擎资产树的同相对路径上",所以引擎自带内容与仍在内容根的源图都不会碰。
 		struct TextureStripResult
 		{
 			size_t Sources = 0;     // 内容根下的源图数
 			size_t Artifacts = 0;   // 确认存在、保留的 `.wtexc` 数
-			size_t Stripped = 0;    // 实际删掉的文件数(源图 + `.wtex` sidecar)
+			size_t Stripped = 0;    // 实际删掉的文件数(源图 + `.wtex` 资产)
 			size_t Orphans = 0;     // 源图已不在内容根、只剩 cooked 旧拷贝的清理数(第二/三遍)
 			size_t Unattributed = 0; // 导入器产物等"非内容根源图":只审计、不删
 			size_t Failed = 0;
@@ -399,11 +399,11 @@ namespace World::Editor
 				return result;
 			}
 
-			// 删除这两条路径(源图 + sidecar)。不存在 = 不是错误(没设置 / 已经删过)。
-			const auto removePair = [&result](const fs::path& sourcePath, const fs::path& sidecarPath) -> size_t
+			// 删除这两条路径(源图 + `.wtex` 资产)。不存在 = 不是错误(没有资产 / 已经删过)。
+			const auto removePair = [&result](const fs::path& sourcePath, const fs::path& assetPath) -> size_t
 			{
 				size_t removed = 0;
-				for (const fs::path& target : { sourcePath, sidecarPath })
+				for (const fs::path& target : { sourcePath, assetPath })
 				{
 					std::error_code removeEc;
 					if (fs::remove(target, removeEc))
@@ -450,12 +450,12 @@ namespace World::Editor
 					continue;   // 没有产物 ⇒ 不删这张源图
 				}
 				++result.Artifacts;
-				result.Stripped += removePair(cookedContentDir / logical, cookedContentDir / (logical + ".wtex"));
+				result.Stripped += removePair(cookedContentDir / logical, cookedContentDir / World::TextureAssetPathForSource(logical));
 			}
 
 			// 第二遍(cooked 侧):清**孤儿**拷贝。CookPipeline 只覆盖/新增、从不回收 —— 源图被删掉后
 			// cooked 里的旧拷贝会一直留着,只扫源树就会漏掉它,发行包于是仍然带源图。这里逐张 `.wtexc`
-			// 反推它的源图 + sidecar 落点(仍是"与产物成对"的文件),因此引擎/本地化等非纹理产物不受影响。
+			// 反推它的源图 + 资产落点(仍是"与产物成对"的文件),因此引擎/本地化等非纹理产物不受影响。
 			std::error_code bakedWalkEc;
 			for (const fs::directory_entry& entry : fs::recursive_directory_iterator(cookedContentDir,
 				fs::directory_options::skip_permission_denied, bakedWalkEc))
@@ -466,18 +466,18 @@ namespace World::Editor
 				if (!entry.is_regular_file(fileEc) || entry.path().extension() != ".wtexc")
 					continue;
 				const fs::path sourcePath = entry.path().parent_path() / entry.path().filename().stem();
-				const fs::path sidecarPath = sourcePath.parent_path()
-					/ (sourcePath.filename().string() + ".wtex");
-				const size_t removed = removePair(sourcePath, sidecarPath);
+				const fs::path assetPath = sourcePath.parent_path()
+					/ (sourcePath.filename().string() + ".wtex");   // `<主名>.wtex` = 项目侧纹理资产
+				const size_t removed = removePair(sourcePath, assetPath);
 				result.Stripped += removed;
 				result.Orphans += removed;
 			}
 
-			// 第三遍(cooked 侧**审计,不删**):上面两类之外仍留在 cooked 里的源图扩展名文件/sidecar
+			// 第三遍(cooked 侧**审计,不删**):上面两类之外仍留在 cooked 里的源图扩展名文件/`.wtex`
 			// 不是内容根的资产,而是**导入器产物** —— 例如 glTF 导入按"扁平 `models/<源 stem>.wmodel` +
 			// materials/ + textures/"布局生成 `textures/<源 stem>_0.png`,材质直接引用它。删掉它会打断
 			// 引用它的材质,所以这里只计数、告警,不越界删除。剥离的保证因此精确表述为:
-			// **内容根里的源图与 `.wtex` sidecar 不进包**(它们要么有 `.wtexc`,要么在内容根缺席)。
+			// **内容根里的源图与 `.wtex` 资产不进包**(它们要么有 `.wtexc`,要么在内容根缺席)。
 			const fs::path engineAssetRoot = fs::path(WLD_WORLD_DIR) / "assets";
 			std::string unattributedSample;
 			std::error_code sweepEc;
@@ -759,7 +759,7 @@ namespace World::Editor
 			result.SurfaceArtifacts = surfaces.Artifacts;
 			result.ShaderArtifacts = baked.Artifacts + distribution.Artifacts + surfaces.Artifacts;
 
-			// 4d. 贴图烘焙(M4-TEX P3):内容根下的源图 + `.wtex` sidecar → `cooked/<逻辑路径>.wtexc`。
+			// 4d. 贴图烘焙(M4-TEX P3):内容根下的源图(经其 `.wtex` 资产设置)→ `cooked/<源图逻辑路径>.wtexc`。
 			//     读取路径 = 内容根(与表面材质同一解析),产物落点 = 内容根相对路径 + `.wtexc`;
 			//     打包阶段(step 5)按目录遍历,`.wtexc` 自动进包(PackageProvider 不需要改)。
 			//     缓存 = `<build>/texture-cache/<源sha256>-<设置hash>-v<产物版本>.wtexc`,跨 cook 复用;
@@ -782,17 +782,17 @@ namespace World::Editor
 			result.TextureUpToDate = textures.UpToDate;
 			result.TextureSkipped = textures.Skipped;
 
-			// 4d-1. 源图/sidecar 在场性自愈(见 EnsureCookedSourceCopies:剥离之后的下一次
+			// 4d-1. 源图/资产在场性自愈(见 EnsureCookedSourceCopies:剥离之后的下一次
 			//       普通 cook 必须重新带上源图,否则"默认保留源图"的开发包契约会静默失效)。
 			const CookedSourceCopyResult restored =
 				EnsureCookedSourceCopies(surfaceContentRoot, cookedContentDir);
-			WLD_CORE_INFO("[tex] restored source copies: sources={0} sidecars={1} failed={2}",
-				restored.Sources, restored.Sidecars, restored.Failed);
+			WLD_CORE_INFO("[tex] restored source copies: sources={0} assets={1} failed={2}",
+				restored.Sources, restored.Assets, restored.Failed);
 			if (restored.Failed)
 				throw std::runtime_error("Restoring cooked source copies failed: " + restored.Error);
-			result.RestoredSourceCopies = restored.Sources + restored.Sidecars;
+			result.RestoredSourceCopies = restored.Sources + restored.Assets;
 
-			// 4e. `--strip-source-textures`(默认关):发货包只带 `.wtexc`,源图与 sidecar 从 cooked 目录删掉。
+			// 4e. `--strip-source-textures`(默认关):发货包只带 `.wtexc`,源图与 `.wtex` 资产从 cooked 目录删掉。
 			//     删除范围限定在"内容根映射过来的路径"内(见 StripSourceTextures),打包前一步完成。
 			if (options.StripSourceTextures)
 			{
