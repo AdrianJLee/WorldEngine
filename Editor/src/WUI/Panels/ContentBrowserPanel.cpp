@@ -2963,21 +2963,27 @@ namespace World
 				"Texture settings need an asset inside the content root."));
 			return;
 		}
-		TextureImportSettings settings;
+		// M4-TEX P9:`.wtex` 按资产文件读(容器 = 内嵌源字节;旧式 = 设置 + 外部源图),
+		// 重烘走"字节来源"解析出来的逻辑路径(容器 = 资产自身)。
+		const Editor::TextureAssetDocument document =
+			Editor::LoadTextureAssetDocument(m_Model.Root, logical);
 		std::string error;
-		if (!LoadTextureImportSettings(assetPath, settings, error))
+		if (!document.Valid)
 		{
-			NotifyAssetFailure(error);
+			NotifyAssetFailure(document.Error);
 			return;
 		}
-		std::string source;
-		if (!Editor::ResolveTextureSourceLogical(m_Model.Root, logical, settings, source, error)
-			|| !Editor::BakeTextureArtifactNow(m_Model.Root, source, settings, error))
+		Editor::TextureSourceResolution resolution;
+		if (!Editor::ResolveTextureSource(m_Model.Root, logical, document.Settings, resolution)
+			|| !Editor::BakeTextureArtifactNow(m_Model.Root, resolution.BytesLogical, document.Settings,
+				error))
 		{
-			NotifyAssetFailure(error);
-			WLD_CORE_WARN("[texture] reimport '{0}' failed: {1}", logical, error);
+			const std::string detail = resolution.Error.empty() ? error : resolution.Error;
+			NotifyAssetFailure(detail);
+			WLD_CORE_WARN("[texture] reimport '{0}' failed: {1}", logical, detail);
 			return;
 		}
+		const std::string source = resolution.BytesLogical;
 		m_TextureBadges.clear();   // 产物 mtime 变了;清表保证徽标立刻反映结果
 		m_Host.Notify(Wui::TrFormat("panel.content_browser.notice.texture_reimported",
 			"Re-baked {source}", { { "source", source } }));

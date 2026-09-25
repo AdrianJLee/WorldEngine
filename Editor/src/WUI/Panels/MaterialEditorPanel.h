@@ -302,7 +302,13 @@ namespace World
 			bool AssetExists = false;
 			bool SourceExists = false;
 			bool InContentRoot = true;
+			// M4-TEX P9:`.wtex` = 单文件容器 —— 字节在资产里(Embedded),源图只是可选的导入源;
+			// 旧式(无 `---payload`)才依赖外部源图(Legacy)。
+			bool Embedded = false;
+			bool Container = false;
+			bool Legacy = false;
 			std::string Source;          // 资产 → 源图(源图引用 = 自己)
+			std::string ImportSource;    // 盘上的可选导入源(容器没有也能用)
 			std::string Error;           // 解析不了的原因(空 = 没有解析错误)
 		};
 		std::vector<TextureCatalogEntry> m_TextureCatalog;
@@ -649,6 +655,10 @@ namespace World
 		std::string TextureRefDoc(const std::string& logical) const;
 		// 行内校验的一句话(缺失 / 资产缺源图;正常返回空串)—— 纹理参数行与槽位共用同一份口径。
 		std::string TextureInlineWarning(const std::string& logical) const;
+		// M4-TEX P9:给材质"赋纹理"时的唯一入口 —— 选中的若是**源图**而它还没有同主名 `.wtex`,
+		// 就当场导入成**单文件容器**资产,并返回资产逻辑路径(材质引用资产;已存在 = 原样返回资产,
+		// 不碰 payload)。outNote 非空时填一句给状态行的人话(导入成功 / 失败原因)。
+		std::string NormalizeTextureChoice(const std::string& logical, std::string* outNote);
 		// 该参数的校验里有没有"贴图缺失/资产缺源图"这类问题(行内提示用)。
 		bool TextureFieldHasIssue(const std::string& key) const;
 		void DrawTextureLocateButton(Wui::WuiContext& ctx, PanelHost& host, const Wui::WuiTheme& theme,

@@ -1227,29 +1227,34 @@ namespace World
 			// 显示名 = 资产路径;解析出源图后括号带上源图文件名(按 `Icon.png` 搜也能命中)。
 			item.Label = logical;
 			TextureImportSettings settings;
-			std::string loadError;
-			if (!LoadTextureImportSettings(root / std::filesystem::path(logical), settings, loadError))
+			// M4-TEX P9:`.wtex` 按**资产文件**读(容器 / 旧式自动区分;整份文件当 YAML 解析会把
+			// 内嵌 payload 读成 YAML 错 → 误报 "no source image")。
+			const Editor::TextureAssetDocument document =
+				Editor::LoadTextureAssetDocument(root, logical);
+			if (!document.Valid)
 			{
-				item.Note = loadError;
+				item.Note = document.Error;
 			}
 			else
 			{
-				std::string source;
-				std::string sourceError;
-				// 与烘焙器/纹理设置面板**同一份**解析口径(显式 `source:` 优先,否则同目录同主名)。
-				if (Editor::ResolveTextureSourceLogical(root, logical, settings, source, sourceError))
+				settings = document.Settings;
+				Editor::TextureSourceResolution resolution;
+				// 与烘焙器/纹理设置面板**同一份**解析口径(容器 = 内嵌 payload;旧式 = 外部源图)。
+				if (Editor::ResolveTextureSource(root, logical, settings, resolution))
 				{
-					item.Source = source;
+					item.Source = resolution.ImportSourceLogical;
 					std::error_code sourceEc;
-					item.SourceExists = !source.empty()
-						&& std::filesystem::is_regular_file(root / std::filesystem::path(source), sourceEc);
-					const std::string sourceName = std::filesystem::path(source).filename().string();
+					item.SourceExists = resolution.Embedded
+						|| (!resolution.BytesLogical.empty() && std::filesystem::is_regular_file(
+							root / std::filesystem::path(resolution.BytesLogical), sourceEc));
+					const std::string sourceName =
+						std::filesystem::path(item.Source).filename().string();
 					if (!sourceName.empty() && sourceName != std::filesystem::path(logical).filename().string())
 						item.Label += " (" + sourceName + ")";
 				}
 				else
 				{
-					item.Note = sourceError;
+					item.Note = resolution.Error;
 				}
 			}
 			entries.push_back(std::move(item));
@@ -1311,20 +1316,30 @@ namespace World
 			info.AssetExists = std::filesystem::is_regular_file(file, fileError);
 			if (!info.AssetExists)
 				return info;
-			TextureImportSettings settings;
-			if (!LoadTextureImportSettings(file, settings, info.Error))
-				return info;   // 资产读不出来(坏 YAML / 未知字段)→ 原因进 Error
-			std::string source;
-			std::string sourceError;
-			if (!Editor::ResolveTextureSourceLogical(root, normalized, settings, source, sourceError))
+			// M4-TEX P9:`.wtex` 一律按资产文件读(容器 = 设置 + 内嵌源字节;旧式 = 设置 + 外部源图)。
+			const Editor::TextureAssetDocument document = Editor::LoadTextureAssetDocument(root, normalized);
+			info.Container = document.Container;
+			info.Legacy = document.Exists && !document.Container;
+			if (!document.Valid)
 			{
-				info.Error = sourceError;
+				info.Error = document.Error;
+				return info;   // 资产读不出来(坏 YAML / 未知字段)→ 原因进 Error
+			}
+			Editor::TextureSourceResolution resolution;
+			if (!Editor::ResolveTextureSource(root, normalized, document.Settings, resolution))
+			{
+				info.Error = resolution.Error;
+				info.Legacy = true;   // 旧式(或资产头坏)才会走到这里:容器永远能解析
 				return info;
 			}
-			info.Source = source;
+			info.Embedded = resolution.Embedded;
+			info.Source = resolution.BytesLogical;
+			info.ImportSource = resolution.ImportSourceLogical;
 			std::error_code sourceErrorCode;
-			info.SourceExists = !source.empty()
-				&& std::filesystem::is_regular_file(root / std::filesystem::path(source), sourceErrorCode);
+			// 容器:字节在资产里 ⇒ 一定有"源"(内嵌);旧式:外部源图必须在场。
+			info.SourceExists = resolution.Embedded
+				|| (!resolution.BytesLogical.empty() && std::filesystem::is_regular_file(
+					root / std::filesystem::path(resolution.BytesLogical), sourceErrorCode));
 			return info;
 		}
 		info.Source = normalized;
@@ -1351,21 +1366,40 @@ namespace World
 		std::string doc = Wui::Tr("panel.material.texture.ref.tooltip", "Referenced texture: ") + logical;
 		if (info.IsAsset)
 		{
-			const std::string source = info.Source.empty()
-				? Wui::Tr("panel.material.texture.ref.source_none", "(no source image)")
-				: info.Source;
-			doc += "\n" + Wui::TrFormat("panel.material.texture.ref.asset_source",
-				"Texture asset → source image: {asset} → {source}",
-				{ { "asset", logical }, { "source", source } });
+			if (info.Embedded)
+			{
+				// M4-TEX P9:单文件容器 —— 设置与源字节都在这个 `.wtex` 里(源图只是导入源)。
+				doc += "\n" + Wui::TrFormat("panel.material.texture.ref.asset_embedded",
+					"Single-file texture asset: {asset} — import settings and source bytes live in this "
+					"one file",
+					{ { "asset", logical } });
+				if (!info.ImportSource.empty())
+					doc += "\n" + Wui::TrFormat("panel.material.texture.ref.asset_import_source",
+						"Import source on disk (optional): {source}",
+						{ { "source", info.ImportSource } });
+			}
+			else
+			{
+				const std::string source = info.Source.empty()
+					? Wui::Tr("panel.material.texture.ref.source_none", "(no source image)")
+					: info.Source;
+				doc += "\n" + Wui::TrFormat("panel.material.texture.ref.asset_source",
+					"Texture asset → source image: {asset} → {source}",
+					{ { "asset", logical }, { "source", source } });
+			}
 			if (!info.AssetExists)
 				doc += "\n" + Wui::Tr("panel.material.texture.ref.asset_missing",
 					"The texture asset file is missing on disk (the .wtex was moved, renamed or deleted).");
-			else if (!info.Error.empty())
+			else if (!info.Embedded && !info.Error.empty())
 				doc += "\n" + Wui::Tr("panel.material.texture.ref.source_unresolved",
 					"The source image cannot be resolved from this asset: ") + info.Error;
-			else if (!info.SourceExists)
+			else if (!info.Embedded && !info.SourceExists)
 				doc += "\n" + Wui::Tr("panel.material.texture.ref.source_missing",
 					"The source image the asset points at is missing on disk.");
+			if (info.Legacy && !info.Embedded)
+				doc += "\n" + Wui::Tr("panel.material.texture.ref.legacy_hint",
+					"Old-style settings file (settings only): re-import the image in the editor to get a "
+					"single-file asset.");
 		}
 		else if (!info.SourceExists)
 		{
@@ -1403,15 +1437,27 @@ namespace World
 		if (!info.AssetExists)
 			return Wui::Tr("panel.material.texture.warn.asset_missing",
 				"Texture asset not found on disk (moved, renamed or deleted): ") + logical;
-		if (!info.Error.empty())
-			return Wui::Tr("panel.material.texture.warn.source_unresolved",
-				"The asset's source image cannot be resolved: ") + logical + " — " + info.Error;
-		if (!info.SourceExists)
+		// M4-TEX P9:单文件容器 = 有效(源字节内嵌),外部源图缺失**不是**问题。
+		if (info.Embedded)
+			return {};
+		// 旧式(没有内嵌 payload):源图缺失/解析不了才是问题,并给"可重新导入"的提示。
+		if (!info.Error.empty() || !info.SourceExists)
+		{
+			const std::string source = info.Source.empty()
+				? Wui::Tr("panel.material.texture.ref.source_none", "(no source image)")
+				: info.Source;
+			if (info.Legacy)
+				return Wui::Tr("panel.material.texture.warn.legacy_source",
+					"Old-style settings file without embedded bytes and no usable source image: ")
+					+ logical + " → " + source + " — "
+					+ Wui::Tr("panel.material.texture.warn.legacy_hint",
+						"re-import the image in the editor to get a single-file asset");
+			if (!info.Error.empty())
+				return Wui::Tr("panel.material.texture.warn.source_unresolved",
+					"The asset's source image cannot be resolved: ") + logical + " — " + info.Error;
 			return Wui::Tr("panel.material.texture.warn.source_missing",
-				"Texture asset has no source image: ") + logical + " → "
-				+ (info.Source.empty()
-					? Wui::Tr("panel.material.texture.ref.source_none", "(no source image)")
-					: info.Source);
+				"Texture asset has no source image: ") + logical + " → " + source;
+		}
 		return {};
 	}
 
@@ -1647,13 +1693,18 @@ namespace World
 					m_Validation.push_back({ field, missingAsset + ": " + logical, "missing" });
 					return;
 				}
-				if (!info.Error.empty() || !info.SourceExists)
+				// M4-TEX P9:单文件容器 = 有效(设置 + 内嵌源字节在一个文件里),不报 missing-source。
+				// 只有**旧式**(无 `---payload`)且 `source:` 缺失/找不到才报,并给"可重新导入"的提示。
+				if (!info.Embedded && (!info.Error.empty() || !info.SourceExists))
 				{
 					const std::string source = info.Source.empty()
 						? Wui::Tr("panel.material.texture.ref.source_none", "(no source image)")
 						: info.Source;
-					m_Validation.push_back({ field, assetWithoutSource + ": " + logical + " → " + source,
-						"missing-source" });
+					std::string detail = assetWithoutSource + ": " + logical + " → " + source;
+					if (info.Legacy)
+						detail += " — " + Wui::Tr("panel.material.texture.warn.legacy_hint",
+							"re-import the image in the editor to get a single-file asset");
+					m_Validation.push_back({ field, detail, "missing-source" });
 				}
 				return;
 			}
@@ -3109,8 +3160,11 @@ namespace World
 				// 只在**真的换了一张**时才写回材质:否则每帧调用会让 Revision 每帧 +1,
 				// 渲染侧每帧重建材质描述符集 → 预览逐帧闪。
 				const size_t valueIndex = static_cast<size_t>(pickIndex - 1);
-				const std::string chosen = pickIndex <= 0 || valueIndex >= m_TexturePaths.size()
+				const std::string chosenRaw = pickIndex <= 0 || valueIndex >= m_TexturePaths.size()
 					? std::string() : m_TexturePaths[valueIndex];
+				// M4-TEX P9:选中源图 = 当场导入成单文件容器资产,材质引用资产。
+				std::string importNote;
+				const std::string chosen = NormalizeTextureChoice(chosenRaw, &importNote);
 				if (chosen != current)
 					applyEdit([&]
 					{
@@ -3119,6 +3173,12 @@ namespace World
 						else
 							m_Material->SetAlbedoTexture(chosen);
 					});
+				if (!importNote.empty())
+				{
+					m_Status = importNote;
+					m_StatusIsError = false;
+					m_ValidationRevision = 0;
+				}
 			}
 			DrawTextureLocateButton(ctx, host, theme, current, locateRect,
 				"material." + row.Key + ".locate");
@@ -4741,7 +4801,10 @@ namespace World
 		}
 		const MaterialDesc& desc = m_Material->GetDesc();
 		const std::string& current = key == "normal" ? desc.NormalTexture : desc.AlbedoTexture;
-		if (current == logical)
+		// M4-TEX P9:拖进来的源图同样"先导入成单文件容器资产再引用"。
+		std::string importNote;
+		const std::string assigned = NormalizeTextureChoice(logical, &importNote);
+		if (current == assigned)
 		{
 			m_Status = Wui::Tr("panel.material.status.drop_same", "Already uses this texture: ") + logical;
 			m_StatusIsError = false;
@@ -4750,17 +4813,20 @@ namespace World
 		// 与下拉选择**同一条写入口**(Material 的 setter → Revision 自增 → 渲染侧重建)。
 		const uint32_t revision = m_Material->GetRevision();
 		if (key == "normal")
-			m_Material->SetNormalTexture(logical);
+			m_Material->SetNormalTexture(assigned);
 		else
-			m_Material->SetAlbedoTexture(logical);
+			m_Material->SetAlbedoTexture(assigned);
 		if (m_Material->GetRevision() != revision)
 			m_Material->MarkDirty(true);
 		// 下拉索引与目录缓存跟上(否则回显会落在"(none)")。
 		m_CatalogRefreshTime = 0.0;
 		RefreshCatalog();
 		m_ValidationRevision = 0;
-		WLD_CORE_INFO("[material-ui] texture drop '{0}' -> slot '{1}'", logical, key);
-		m_Status = Wui::Tr("panel.material.status.texture_dropped", "Texture assigned by drop: ") + logical;
+		WLD_CORE_INFO("[material-ui] texture drop '{0}' -> slot '{1}' (assigned '{2}')", logical, key,
+			assigned);
+		m_Status = importNote.empty()
+			? Wui::Tr("panel.material.status.texture_dropped", "Texture assigned by drop: ") + assigned
+			: importNote;
 		m_StatusIsError = false;
 		return true;
 	}
@@ -4820,6 +4886,43 @@ namespace World
 			ctx.ClearModal();
 	}
 
+	// M4-TEX P9:赋纹理前先"确保资产" —— 选中的若是**源图**而它还没有同主名 `.wtex`,
+	// 当场导入成**单文件容器**(设置 + 该图片字节),并让材质引用资产(一张纹理 = 一个文件)。
+	// 已存在资产 = 原样返回资产路径(不动 payload);导入失败不拦引用(与既有校验口径一致)。
+	std::string MaterialEditorPanel::NormalizeTextureChoice(const std::string& logical, std::string* outNote)
+	{
+		if (outNote)
+			outNote->clear();
+		if (logical.empty())
+			return logical;
+		const std::string normalized = MaterialLibrary::NormalizePath(logical);
+		if (IsTextureAssetPath(normalized))
+			return normalized;
+		if (!IsTextureSourceExtension(LowerExtension(normalized)))
+			return normalized;   // 非纹理扩展名交给调用方既有的可读反馈
+		std::string assetLogical;
+		bool created = false;
+		std::string error;
+		if (!Editor::EnsureTextureAssetForSource(ContentRootPath(), normalized, &assetLogical, &created,
+				error))
+		{
+			if (outNote)
+				*outNote = Wui::TrFormat("panel.material.status.texture_import_failed",
+					"Could not import this image as a texture asset: {detail}",
+					{ { "detail", error } });
+			WLD_CORE_WARN("[material-ui] texture import failed for '{0}': {1}", normalized, error);
+			return normalized;
+		}
+		if (outNote && created)
+			*outNote = Wui::TrFormat("panel.material.status.texture_imported",
+				"Imported {source} as a single-file texture asset: {asset}",
+				{ { "source", normalized }, { "asset", assetLogical } });
+		if (created)
+			WLD_CORE_INFO("[material-ui] assigned source '{0}' -> imported container '{1}'", normalized,
+				assetLogical);
+		return assetLogical;
+	}
+
 	// 采纳一次纹理选取(清空 = 空路径):
 	//   * `.wmat` 槽位(`albedo`/`normal`)= 写材质字段(与下拉/拖放同一条写入口);
 	//   * 代码形态的注解参数(`param:<名字>`)= 走既有的"待提交 → 改写注解"路径;
@@ -4828,27 +4931,33 @@ namespace World
 	{
 		if (!m_Material)
 			return;
+		// M4-TEX P9:所有"赋纹理"入口共用一次导入归一(源图 → 单文件容器资产)。
+		std::string importNote;
+		const std::string assigned = NormalizeTextureChoice(logical, &importNote);
 		if (target == "albedo" || target == "normal")
 		{
 			const MaterialDesc& desc = m_Material->GetDesc();
 			const std::string current = target == "normal" ? desc.NormalTexture : desc.AlbedoTexture;
-			if (current == logical)
+			if (current == assigned)
 				return;
 			const uint32_t revision = m_Material->GetRevision();
 			if (target == "normal")
-				m_Material->SetNormalTexture(logical);
+				m_Material->SetNormalTexture(assigned);
 			else
-				m_Material->SetAlbedoTexture(logical);
+				m_Material->SetAlbedoTexture(assigned);
 			if (m_Material->GetRevision() != revision)
 				m_Material->MarkDirty(true);
 			m_CatalogRefreshTime = 0.0;
 			RefreshCatalog();
 			m_ValidationRevision = 0;
-			m_Status = logical.empty()
+			m_Status = !importNote.empty()
+				? importNote
+				: (assigned.empty()
 				? Wui::Tr("panel.material.status.texture_cleared", "Texture reference cleared: ") + target
-				: Wui::Tr("panel.material.status.texture_dropped", "Texture assigned by drop: ") + logical;
+				: Wui::Tr("panel.material.status.texture_dropped", "Texture assigned by drop: ") + assigned);
 			m_StatusIsError = false;
-			WLD_CORE_INFO("[material-ui] texture pick '{0}' -> slot '{1}'", logical, target);
+			WLD_CORE_INFO("[material-ui] texture pick '{0}' -> slot '{1}' (assigned '{2}')", logical,
+				target, assigned);
 			return;
 		}
 		if (target.rfind("param:", 0) != 0)
@@ -4861,12 +4970,12 @@ namespace World
 			const MaterialParamDecl* decl = FindParamDecl(m_ShaderParams, name);
 			if (decl == nullptr)
 				return;
-			if (decl->Default == logical)
+			if (decl->Default == assigned)
 				return;
 			// 与参数控件同一套"待提交"口径:本帧只置位,帧内末尾才改写注解(一次 = 一个撤销步)。
 			m_ShaderPendingParamName = name;
-			m_ShaderPendingParamValue = logical;
-			m_ShaderStatus = logical.empty()
+			m_ShaderPendingParamValue = assigned;
+			m_ShaderStatus = assigned.empty()
 				? Wui::Tr("panel.material.shader.status.texture_cleared", "Texture parameter cleared: ") + name
 				: Wui::Tr("panel.material.shader.status.texture_set",
 					"Texture parameter set (press Save to keep it): ") + name + " = " + logical;
@@ -7669,10 +7778,21 @@ namespace World
 			&& (!ctx.Input().MouseDown[0] || ctx.Input().MouseReleased[0]))
 		{
 			const std::string pendingName = m_ShaderPendingParamName;
-			const std::string pendingValue = m_ShaderPendingParamValue;
+			std::string pendingValue = m_ShaderPendingParamValue;
 			m_ShaderPendingParamName.clear();
 			m_ShaderPendingParamValue.clear();
 			const MaterialParamDecl* pendingDecl = FindParamDecl(m_ShaderParams, pendingName);
+			// M4-TEX P9:Texture2D 参数赋的是**源图**时,先导入成单文件容器资产,注解写资产路径。
+			if (pendingDecl != nullptr && pendingDecl->Type == ParamType::Texture2D)
+			{
+				std::string importNote;
+				pendingValue = NormalizeTextureChoice(pendingValue, &importNote);
+				if (!importNote.empty())
+				{
+					m_ShaderStatus = importNote;
+					m_ValidationRevision = 0;
+				}
+			}
 			const bool written = pendingDecl != nullptr
 				&& WriteShaderParamDefault(*pendingDecl, pendingValue);
 			// MAT-UI45:注解没落上(找不到行 / 写回回读校验失败)= 拖动期间推给预览的覆盖值必须撤回,

@@ -423,53 +423,170 @@ namespace World
 			return true;
 		}
 
+		// `.wtex` 资产的逻辑路径规范化:传进来的可能是源图(按同主名换算成资产)。空 = 不是纹理路径。
+		std::string AssetLogicalForTexturePath(const std::string& logicalPath)
+		{
+			if (IsTextureAssetPath(logicalPath))
+				return logicalPath;
+			if (TextureCompiler::IsTextureSourceExtension(LowerExtension(logicalPath)))
+				return TextureAssetPathForSource(logicalPath);
+			return {};
+		}
+
+		// `source:` 文本 → 逻辑路径(与烘焙器同一口径:内容根相对、不许绝对路径 / '..'、扩展名受支持)。
+		bool ResolveDeclaredSource(const std::string& declaredText, std::string& outLogical,
+			std::string& outError)
+		{
+			outLogical.clear();
+			outError.clear();
+			const std::filesystem::path declared(declaredText);
+			bool escapes = declared.is_absolute() || declared.has_root_name();
+			for (const std::filesystem::path& part : declared)
+				if (part == "..")
+					escapes = true;
+			if (escapes)
+			{
+				outError = "source must be a content-root relative path without '..'";
+				return false;
+			}
+			if (!TextureCompiler::IsTextureSourceExtension(LowerExtension(declared)))
+			{
+				outError = "source '" + declaredText + "' is not a supported image extension";
+				return false;
+			}
+			outLogical = declared.generic_string();
+			return true;
+		}
+
+		// M4-TEX P9:`.wtex` 一律按**资产文件**读(`LoadTextureAssetFile` 自动区分容器 / 旧式)。
+		// 旧口径(整份文件当 YAML 解析)会把容器里的二进制 payload 当 YAML 读 → 报错 →
+		// 校验区误报 "no source image"(实测 `textures/quadrants.wtex`)。
+		TextureAssetDocument LoadTextureAssetDocument(const std::filesystem::path& contentRoot,
+			const std::string& logicalPath)
+		{
+			TextureAssetDocument document;
+			const std::string assetLogical = AssetLogicalForTexturePath(logicalPath);
+			if (assetLogical.empty())
+			{
+				document.Valid = false;
+				document.Error = "'" + logicalPath + "' is not a .wtex asset (or its source image)";
+				return document;
+			}
+			const std::filesystem::path assetFile = contentRoot / assetLogical;
+			std::error_code existsError;
+			document.Exists = std::filesystem::is_regular_file(assetFile, existsError);
+			if (!document.Exists)
+				return document;   // 缺 `.wtex` = 全默认(与内核 LoadTextureImportSettings 同一口径)
+			TextureAssetFile file;
+			std::string error;
+			if (!LoadTextureAssetFile(assetFile, file, error))
+			{
+				document.Valid = false;
+				document.Error = error;
+				return document;
+			}
+			document.Settings = file.Settings;
+			document.Payload = file.Payload;
+			document.Container = !file.Payload.empty();
+			document.LegacySource = file.LegacySource;
+			return document;
+		}
+
+		bool ResolveTextureSource(const std::filesystem::path& contentRoot, const std::string& logicalPath,
+			const TextureImportSettings& settings, TextureSourceResolution& out)
+		{
+			out = TextureSourceResolution {};
+			if (logicalPath.empty())
+			{
+				out.Error = "no texture path";
+				return false;
+			}
+			// ① 传进来的就是源图(内容浏览器里的 png/jpg/…):它自己就是字节来源。
+			if (!IsTextureAssetPath(logicalPath))
+			{
+				if (!TextureCompiler::IsTextureSourceExtension(LowerExtension(logicalPath)))
+				{
+					out.Error = "'" + logicalPath + "' is not a texture asset or a supported image";
+					return false;
+				}
+				out.BytesLogical = logicalPath;
+				out.ImportSourceLogical = logicalPath;
+				return true;
+			}
+			// ② `.wtex`:容器以**内嵌 payload** 为准 —— 外部源图只是导入源(可缺、可删)。
+			const TextureAssetDocument assetLogicalDoc = LoadTextureAssetDocument(contentRoot, logicalPath);
+			out.AssetExists = assetLogicalDoc.Exists;
+			out.Container = assetLogicalDoc.Container;
+			if (!assetLogicalDoc.Valid)
+			{
+				out.Error = assetLogicalDoc.Error;
+				return false;
+			}
+			// 盘上的外部导入源(可选):显式 `source:` 优先,否则同目录同主名图片。
+			if (!settings.Source.empty())
+			{
+				std::string declared;
+				std::string declaredError;
+				if (ResolveDeclaredSource(settings.Source, declared, declaredError))
+					out.ImportSourceLogical = declared;
+				else if (!assetLogicalDoc.Container)
+				{
+					out.Error = declaredError;
+					return false;
+				}
+			}
+			else
+			{
+				const std::filesystem::path asset(logicalPath);
+				for (const char* extension : kSourceCandidates)
+				{
+					const std::filesystem::path candidate =
+						asset.parent_path() / (asset.stem().string() + extension);
+					std::error_code existsError;
+					if (std::filesystem::is_regular_file(contentRoot / candidate, existsError))
+					{
+						out.ImportSourceLogical = candidate.generic_string();
+						break;
+					}
+				}
+			}
+			if (!out.ImportSourceLogical.empty())
+			{
+				std::error_code existsError;
+				if (!std::filesystem::is_regular_file(contentRoot / out.ImportSourceLogical, existsError))
+					out.ImportSourceLogical.clear();
+			}
+			if (assetLogicalDoc.Container)
+			{
+				out.Embedded = true;
+				out.BytesLogical = logicalPath;   // 字节在资产自身里(烘焙/预览读 payload)
+				return true;
+			}
+			// ③ 旧式设置文件(没有 `---payload`):字节必须来自外部源图,否则才是真的 missing-source。
+			if (out.ImportSourceLogical.empty())
+			{
+				out.Error = "no source image (old-style settings file: re-import it as a single file)";
+				return false;
+			}
+			out.BytesLogical = out.ImportSourceLogical;
+			return true;
+		}
+
+		// 兼容入口:调用方只关心"字节从哪来"时给逻辑路径(容器 = 资产自身)。
 		bool ResolveTextureSourceLogical(const std::filesystem::path& contentRoot,
 			const std::string& logicalPath, const TextureImportSettings& settings,
 			std::string& outSourceLogical, std::string& outError)
 		{
-			outSourceLogical.clear();
+			TextureSourceResolution resolution;
+			if (!ResolveTextureSource(contentRoot, logicalPath, settings, resolution))
+			{
+				outSourceLogical.clear();
+				outError = resolution.Error;
+				return false;
+			}
+			outSourceLogical = resolution.BytesLogical;
 			outError.clear();
-			// 传进来的就是源图(内容浏览器里的 png/jpg/…):它自己就是源。
-			if (!IsTextureAssetPath(logicalPath))
-			{
-				outSourceLogical = logicalPath;
-				return true;
-			}
-			if (!settings.Source.empty())
-			{
-				// 与烘焙器同一口径:内容根相对、不许绝对路径 / '..'。
-				const std::filesystem::path declared(settings.Source);
-				bool escapes = declared.is_absolute() || declared.has_root_name();
-				for (const std::filesystem::path& part : declared)
-					if (part == "..")
-						escapes = true;
-				if (escapes)
-				{
-					outError = "source must be a content-root relative path without '..'";
-					return false;
-				}
-				if (!TextureCompiler::IsTextureSourceExtension(LowerExtension(declared)))
-				{
-					outError = "source '" + settings.Source + "' is not a supported image extension";
-					return false;
-				}
-				outSourceLogical = declared.generic_string();
-				return true;
-			}
-			const std::filesystem::path asset(logicalPath);
-			for (const char* extension : kSourceCandidates)
-			{
-				const std::filesystem::path candidate =
-					asset.parent_path() / (asset.stem().string() + extension);
-				std::error_code existsError;
-				if (std::filesystem::is_regular_file(contentRoot / candidate, existsError))
-				{
-					outSourceLogical = candidate.generic_string();
-					return true;
-				}
-			}
-			outError = "no source image (put the image next to the asset or set `source:`)";
-			return false;
+			return true;
 		}
 
 		bool ValidateTextureSourceText(const std::filesystem::path& contentRoot, const std::string& text,
@@ -527,19 +644,34 @@ namespace World
 			}
 
 			TextureImportSettings settings;
-			if (settingsOverride != nullptr)
-				settings = *settingsOverride;
-			else
+			// M4-TEX P9:`.wtex` 一律按资产文件读(容器 = 内嵌 payload;旧式 = 设置 + 外部源图)。
+			// 旧口径把容器整份文件当 YAML 解析,会读失败 → 面板/浏览器误报 "no source image"。
+			TextureAssetDocument document;
+			bool container = false;
+			if (IsTextureAssetPath(sourceLogical))
 			{
-				const std::filesystem::path assetFile = contentRoot / TextureAssetPathForSource(sourceLogical);
-				std::string loadError;
-				if (!LoadTextureImportSettings(assetFile, settings, loadError))
+				document = LoadTextureAssetDocument(contentRoot, sourceLogical);
+				if (!document.Valid)
 				{
 					status.State = TextureArtifactState::Invalid;
-					status.Detail = loadError;
+					status.Detail = document.Error;
 					return status;
 				}
+				container = document.Container;
 			}
+			else
+			{
+				// 源图引用:同主名 `.wtex` 在场 = 这张图归资产管 → 按**资产**判定(容器 = 内嵌字节);
+				// 不在场 = 按图本身 + 默认设置判定(与内核"缺 sidecar = 默认设置"同一口径)。
+				const std::string siblingAsset = TextureAssetPathForSource(sourceLogical);
+				std::error_code siblingError;
+				if (std::filesystem::is_regular_file(contentRoot / siblingAsset, siblingError))
+					return InspectTextureArtifact(contentRoot, siblingAsset, settingsOverride);
+			}
+			if (settingsOverride != nullptr)
+				settings = *settingsOverride;
+			else if (container)
+				settings = document.Settings;
 
 			const std::filesystem::path artifactFile = ArtifactPathForSource(sourceFile);
 			std::vector<uint8_t> artifactBytes;
@@ -561,8 +693,11 @@ namespace World
 			}
 			status.Header = header;
 
+			// 源字节口径与烘焙器一致:容器 = 内嵌 payload;源图/旧式 = 文件本身。
 			std::vector<uint8_t> sourceBytes;
-			if (!ReadFileBytes(sourceFile, sourceBytes, readError))
+			if (container)
+				sourceBytes = document.Payload;
+			else if (!ReadFileBytes(sourceFile, sourceBytes, readError))
 			{
 				status.State = TextureArtifactState::Invalid;
 				status.Detail = readError;
@@ -610,12 +745,28 @@ namespace World
 				outError = "texture asset already exists: " + assetLogical;
 				return false;
 			}
-			const std::string text = TextureImportSettings {}.Serialize();
-			if (!WriteTextFileAtomic(assetFile, text, outError))
+			// M4-TEX P9:导入 = 写**单文件容器**(YAML 头默认设置 + 该图片的原始字节)。
+			// 旧口径(只有 `usage: color` 的设置文件 + `source:`)已废弃:一张纹理 = 一个文件。
+			std::vector<uint8_t> payload;
+			std::string readError;
+			if (!ReadFileBytes(sourceFile, payload, readError) || payload.empty())
+			{
+				outError = readError.empty() ? ("empty source image: " + sourceLogical) : readError;
 				return false;
+			}
+			TextureAssetFile container;
+			container.Settings = TextureImportSettings {};
+			container.Payload = std::move(payload);
+			std::string saveError;
+			if (!SaveTextureAssetFile(assetFile, container, saveError))
+			{
+				outError = saveError;
+				return false;
+			}
 			if (outAssetLogical)
 				*outAssetLogical = assetLogical;
-			WLD_CORE_INFO("[texture] created texture asset {0} for {1}", assetLogical, sourceLogical);
+			WLD_CORE_INFO("[texture] created single-file texture asset {0} for {1} ({2} bytes embedded)",
+				assetLogical, sourceLogical, container.Payload.size());
 			return true;
 		}
 
@@ -662,7 +813,29 @@ namespace World
 			std::vector<uint8_t> artifactBytes;
 			TextureArtifactHeader header;
 			std::string bakeError;
-			if (!TextureCompiler::BakeFile(sourceFile, settings, artifactBytes, header, bakeError))
+			bool baked = false;
+			// M4-TEX P9:容器(`.wtex` + 内嵌 payload)按**内嵌字节**烘(与 cook 同一口径:
+			// 产物头的 sourceSha256 = sha256(payload)),不读外部源图。
+			if (IsTextureAssetPath(sourceLogical))
+			{
+				const TextureAssetDocument document = LoadTextureAssetDocument(contentRoot, sourceLogical);
+				if (!document.Valid)
+				{
+					outError = document.Error;
+					return false;
+				}
+				if (!document.Container)
+				{
+					outError = "old-style settings file has no embedded source bytes "
+						"(re-import it as a single file: double-click its source image in the Content Browser)";
+					return false;
+				}
+				baked = TextureCompiler::BakeBytes(document.Payload, settings, artifactBytes, header,
+					bakeError);
+			}
+			else
+				baked = TextureCompiler::BakeFile(sourceFile, settings, artifactBytes, header, bakeError);
+			if (!baked)
 			{
 				outError = bakeError;
 				return false;
@@ -685,6 +858,22 @@ namespace World
 					legacyArtifact.filename().generic_string());
 			// 材质贴图缓存按**逻辑路径**失效:下一次 Get 重新读盘(命中新产物)。
 			MaterialTextureCache::Get().Invalidate(sourceLogical);
+			// 同一份纹理可能被"资产引用"与"源图引用"两种写法引用:两条缓冲键都失效。
+			const std::string assetLogical = TextureAssetPathForSource(sourceLogical);
+			if (assetLogical != sourceLogical)
+				MaterialTextureCache::Get().Invalidate(assetLogical);
+			else
+			{
+				const std::filesystem::path asset(sourceLogical);
+				for (const char* extension : kSourceCandidates)
+				{
+					const std::string sibling =
+						(asset.parent_path() / (asset.stem().string() + extension)).generic_string();
+					std::error_code siblingError;
+					if (std::filesystem::is_regular_file(contentRoot / sibling, siblingError))
+						MaterialTextureCache::Get().Invalidate(sibling);
+				}
+			}
 			WLD_CORE_INFO("[texture] baked {0} -> {1} ({2}, {3}x{4}, {5} mips)", sourceLogical,
 				artifactFile.filename().generic_string(), TextureBlockFormatName(header.Format),
 				header.Width, header.Height, header.MipCount);
@@ -771,6 +960,12 @@ namespace World
 			m_DiskChanged = false;
 			m_Scroll = 0.0f;
 			m_SourceError.clear();
+			m_Payload.clear();
+			m_Container = false;
+			m_LegacyAsset = false;
+			m_ImportSourceLogical.clear();
+			m_AssetFormNote.clear();
+			m_LoadedSourceText.clear();
 			m_Channel = PreviewChannel::Rgb;
 			m_ZoomFactor = 1.0f;
 			m_CenterU = 0.5f;
@@ -782,6 +977,7 @@ namespace World
 			m_PreviewSourceHeight = 0;
 			m_PreviewSourceValid = false;
 			m_PreviewSourceStampValid = false;
+			m_PreviewSourceEmbedded = false;
 			m_PreviewRevision = 0;
 			m_BakedRevision = 0;
 			m_BakeDueSeconds = 0.0;
@@ -810,21 +1006,34 @@ namespace World
 		const std::filesystem::path assetFile = AssetAbsolutePath();
 		std::error_code existsError;
 		m_AssetFileExists = !assetFile.empty() && std::filesystem::is_regular_file(assetFile, existsError);
-		std::string loadError;
-		if (!LoadTextureImportSettings(assetFile, m_Settings, loadError))
+		// M4-TEX P9:`.wtex` 一律按**资产文件**读(容器 / 旧式自动区分;旧口径会把内嵌 payload
+		// 当 YAML 解析而报错 —— 那正是校验区误报 "no source image" 的来源)。
+		const Editor::TextureAssetDocument document =
+			Editor::LoadTextureAssetDocument(m_ContentRoot, m_AssetLogical);
+		if (!document.Valid)
 		{
-			m_LoadError = loadError;
+			m_LoadError = document.Error;
 			m_Loaded = false;
 			m_SourceLogical.clear();
 			m_SourceBuffer.clear();
+			m_Payload.clear();
+			m_Container = false;
+			m_LegacyAsset = false;
+			m_ImportSourceLogical.clear();
+			m_AssetFormNote.clear();
 			m_Artifact = Editor::TextureArtifactStatus {};
 			m_Artifact.State = Editor::TextureArtifactState::Invalid;
-			m_Artifact.Detail = loadError;
+			m_Artifact.Detail = document.Error;
 			return;
 		}
+		m_Settings = document.Settings;
+		m_Payload = document.Payload;
+		m_Container = document.Container;
+		m_LegacyAsset = document.Exists && !document.Container;
 		m_Loaded = true;
 		m_Dirty = false;
 		m_SourceBuffer = m_Settings.Source;
+		m_LoadedSourceText = TrimAscii(m_SourceBuffer);
 		m_SourceError.clear();
 		if (!m_Settings.Source.empty())
 			Editor::ValidateTextureSourceText(m_ContentRoot, m_Settings.Source, m_SourceError);
@@ -840,20 +1049,35 @@ namespace World
 			}
 		}
 
-		std::string resolveError;
-		std::string source;
+		Editor::TextureSourceResolution resolution;
 		m_LoadDiskArtifactRequested = true;
 		// 盘上读出来的设置 = 新的预览版本(外部改写 `.wtex` 之后,产物预览要重新判定)。
 		TouchPreviewRevision();
-		if (!Editor::ResolveTextureSourceLogical(m_ContentRoot, m_AssetLogical, m_Settings, source, resolveError))
+		if (!Editor::ResolveTextureSource(m_ContentRoot, m_AssetLogical, m_Settings, resolution))
 		{
+			m_ImportSourceLogical.clear();
 			m_SourceLogical.clear();
 			m_Artifact = Editor::TextureArtifactStatus {};
 			m_Artifact.State = Editor::TextureArtifactState::NoSource;
-			m_Artifact.Detail = resolveError;
+			m_Artifact.Detail = resolution.Error;
+			m_AssetFormNote = m_LegacyAsset
+				? Wui::Tr("panel.texture.form.legacy_broken",
+					"Old-style settings file: no embedded source bytes and no source image — re-import "
+					"the image to get a single-file asset.")
+				: std::string();
 			return;
 		}
-		m_SourceLogical = source;
+		m_SourceLogical = resolution.BytesLogical;
+		m_ImportSourceLogical = resolution.ImportSourceLogical;
+		m_AssetFormNote = resolution.Embedded
+			? Wui::TrFormat("panel.texture.form.container",
+				"Single-file asset: {bytes} bytes embedded; the import source is optional.",
+				{ { "bytes", std::to_string(m_Payload.size()) } })
+			: (m_LegacyAsset
+				? Wui::Tr("panel.texture.form.legacy",
+					"Old-style settings file (no embedded bytes). Press Apply to re-import it as a "
+					"single-file asset.")
+				: std::string());
 		RefreshArtifactState();
 	}
 
@@ -913,17 +1137,43 @@ namespace World
 			m_Ctx->RecordOp("texture", "edit", m_AssetLogical, field ? field : "");
 	}
 
-	void TextureSettingsPanel::RefreshPreviewSource(const std::string& absoluteSource)
+	bool TextureSettingsPanel::CurrentSourceBytes(std::vector<uint8_t>& outBytes,
+		std::string& outAbsoluteSource, bool& outEmbedded) const
 	{
+		outBytes.clear();
+		outAbsoluteSource.clear();
+		outEmbedded = false;
+		// M4-TEX P9:容器以**内嵌 payload**为准(源图只是导入源,可缺、可删)。
+		if (m_Container && !m_Payload.empty())
+		{
+			outBytes = m_Payload;
+			outEmbedded = true;
+			return true;
+		}
+		if (m_SourceLogical.empty())
+			return false;
+		outAbsoluteSource = (m_ContentRoot / m_SourceLogical).string();
+		return true;
+	}
+
+	void TextureSettingsPanel::RefreshPreviewSource()
+	{
+		// 字节来源(唯一口径):容器 = 内嵌 payload(版本 = `.wtex` 自己的 mtime);
+		// 旧式 = 外部源图(版本 = 源图 mtime)。
+		const bool embedded = m_Container && !m_Payload.empty();
+		const std::filesystem::path bytesFile = embedded
+			? m_ContentRoot / m_AssetLogical
+			: (m_SourceLogical.empty() ? std::filesystem::path() : m_ContentRoot / m_SourceLogical);
 		std::error_code stampError;
-		const std::filesystem::file_time_type stamp = absoluteSource.empty()
+		const std::filesystem::file_time_type stamp = bytesFile.empty()
 			? std::filesystem::file_time_type {}
-			: std::filesystem::last_write_time(absoluteSource, stampError);
+			: std::filesystem::last_write_time(bytesFile, stampError);
 		if (m_PreviewSourceStampValid && !stampError && m_PreviewSourceLogical == m_SourceLogical
-			&& stamp == m_PreviewSourceStamp)
+			&& m_PreviewSourceEmbedded == embedded && stamp == m_PreviewSourceStamp)
 			return;
 
 		m_PreviewSourceLogical = m_SourceLogical;
+		m_PreviewSourceEmbedded = embedded;
 		m_PreviewSourceStamp = stamp;
 		m_PreviewSourceStampValid = !stampError;
 		m_PreviewSourcePixels.clear();
@@ -933,9 +1183,11 @@ namespace World
 		m_SourceWidth = 0;
 		m_SourceHeight = 0;
 
-		if (!absoluteSource.empty())
+		if (!bytesFile.empty())
 		{
-			const TextureData data = LoadTextureData(absoluteSource, /*flipVertically*/ false);
+			const TextureData data = embedded
+				? LoadTextureDataFromMemory(m_Payload, /*flipVertically*/ false)
+				: LoadTextureData(bytesFile.string(), /*flipVertically*/ false);
 			if (data.Valid && data.Width > 0 && data.Height > 0 && !data.Pixels.empty())
 			{
 				m_SourceWidth = data.Width;
@@ -949,9 +1201,9 @@ namespace World
 				m_PreviewSourceHeight = keptHeight;
 				m_PreviewSourceValid = true;
 			}
-			WLD_CORE_INFO("[tex-preview] source '{0}': {1}x{2} (decoded once; {3}x{4} kept for the preview)",
-				m_SourceLogical, m_SourceWidth, m_SourceHeight, m_PreviewSourceWidth,
-				m_PreviewSourceHeight);
+			WLD_CORE_INFO("[tex-preview] source '{0}'{1}: {2}x{3} (decoded once; {4}x{5} kept for the preview)",
+				m_SourceLogical, embedded ? " (embedded payload)" : "", m_SourceWidth, m_SourceHeight,
+				m_PreviewSourceWidth, m_PreviewSourceHeight);
 		}
 		// 源变了 = 旧产物/旧草稿都不再代表这份源:版本 +1,草稿重建,防抖重烘重新排队。
 		TouchPreviewRevision();
@@ -1184,22 +1436,27 @@ namespace World
 		return UploadArtifactPreview(bytes, m_PreviewRevision);
 	}
 
-	void TextureSettingsPanel::DispatchPreviewBake(const std::string& absoluteSource)
+	void TextureSettingsPanel::DispatchPreviewBake()
 	{
+		std::vector<uint8_t> bytes;
+		std::string absoluteSource;
+		bool embedded = false;
+		CurrentSourceBytes(bytes, absoluteSource, embedded);
 		{
 			std::lock_guard<std::mutex> lock(m_BakeMutex);
 			if (m_BakeThreadStop)
 				return;
 			m_BakeSerial = m_PreviewRevision;
 			m_BakeRequest.Serial = m_PreviewRevision;
-			m_BakeRequest.AbsoluteSource = absoluteSource;
+			m_BakeRequest.AbsoluteSource = std::move(absoluteSource);
+			m_BakeRequest.Bytes = std::move(bytes);
 			m_BakeRequest.Settings = m_Settings;
 			m_BakeRequestPending = true;
 		}
 		m_BakeInFlight = true;
 		m_BakeCv.notify_one();
-		WLD_CORE_INFO("[tex-preview] preview bake dispatch #{0} for '{1}' ({2}x{3}?)", m_BakeSerial,
-			m_SourceLogical, m_SourceWidth, m_SourceHeight);
+		WLD_CORE_INFO("[tex-preview] preview bake dispatch #{0} for '{1}'{2} ({3}x{4}?)", m_BakeSerial,
+			m_SourceLogical, embedded ? " (embedded)" : "", m_SourceWidth, m_SourceHeight);
 	}
 
 	void TextureSettingsPanel::PreviewBakeWorkerLoop()
@@ -1223,8 +1480,12 @@ namespace World
 			result.Serial = request.Serial;
 			const double started = WallClockSeconds();
 			TextureArtifactHeader header;
-			result.Success = TextureCompiler::BakeFile(std::filesystem::path(request.AbsoluteSource),
-				request.Settings, result.Bytes, header, result.Error);
+			// 容器:按内嵌字节烘(与 cook 同一口径);旧式:按外部源图文件烘。
+			result.Success = !request.Bytes.empty()
+				? TextureCompiler::BakeBytes(request.Bytes, request.Settings, result.Bytes, header,
+					result.Error)
+				: TextureCompiler::BakeFile(std::filesystem::path(request.AbsoluteSource),
+					request.Settings, result.Bytes, header, result.Error);
 			result.ElapsedMs = (WallClockSeconds() - started) * 1000.0;
 			{
 				std::lock_guard<std::mutex> lock(m_BakeMutex);
@@ -1236,9 +1497,14 @@ namespace World
 		}
 	}
 
-	void TextureSettingsPanel::PumpPreviewBake(const std::string& absoluteSource)
+	void TextureSettingsPanel::PumpPreviewBake()
 	{
 		const double now = WallClockSeconds();
+		// 本帧有没有可烘的字节(容器 = 内嵌 payload;旧式 = 外部源图)。
+		std::vector<uint8_t> sourceBytes;
+		std::string absoluteSource;
+		bool embedded = false;
+		const bool hasSourceBytes = CurrentSourceBytes(sourceBytes, absoluteSource, embedded);
 		// 0) 宿主/设备重建(GL 上下文或 RHI 设备):旧句柄全部作废,草稿与产物都重建。
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (m_PreviewGeneration != registry.Generation() || m_PreviewEpoch != m_HostTextureEpoch)
@@ -1306,16 +1572,19 @@ namespace World
 		if (m_BakeDueSeconds != 0.0 && now >= m_BakeDueSeconds && !m_BakeInFlight)
 		{
 			m_BakeDueSeconds = 0.0;
-			if (absoluteSource.empty())
+			if (!hasSourceBytes)
 			{
 				m_PreviewState = PreviewState::Idle;
-				m_PreviewDetail = "no source image";
+				m_PreviewDetail = m_LegacyAsset
+					? Wui::Tr("panel.texture.preview.no_bytes",
+						"no embedded source bytes (old-style settings file: re-import the image)")
+					: "no source image";
 			}
 			else
 			{
 				m_PreviewState = PreviewState::Encoding;
 				m_PreviewDetail.clear();
-				DispatchPreviewBake(absoluteSource);
+				DispatchPreviewBake();
 			}
 		}
 		else if (m_BakeInFlight)
@@ -1458,11 +1727,11 @@ namespace World
 			return;
 		}
 
-		// 每帧管线:源像素(解码一次)→ 磁盘产物状态 → 预览重烘(防抖/工作线程)→ 草稿 → 选一张画。
-		const std::string absoluteSource = SourceAbsolutePath();
-		RefreshPreviewSource(absoluteSource);
+		// 每帧管线:源像素(解码一次;容器 = 内嵌 payload)→ 磁盘产物状态 → 预览重烘(防抖/工作线程)
+		// → 草稿 → 选一张画。
+		RefreshPreviewSource();
 		RefreshArtifactState();
-		PumpPreviewBake(absoluteSource);
+		PumpPreviewBake();
 		EnsureDraftPreview();
 		SelectShownPreview();
 
@@ -1892,21 +2161,23 @@ namespace World
 		const Wui::WuiRect labelRect { x, y, std::max(0.0f, width - buttonW - theme.PadSmall),
 			theme.ControlHeight };
 		Wui::Label(ctx, { labelRect.X, y + (theme.ControlHeight - theme.FontSizeBody) * 0.5f },
-			EllipsizeToWidth(ctx, Wui::Tr("panel.texture.source", "Source image"), labelRect.W,
+			EllipsizeToWidth(ctx, Wui::Tr("panel.texture.source", "Import source"), labelRect.W,
 				theme.FontSizeBody),
 			theme.TextMuted, theme.FontSizeBody);
 		Wui::Tooltip(ctx, labelRect, Wui::Tr("panel.texture.source.tooltip",
-			"Content-root relative path of the image this asset bakes. Leave it empty to use the "
-			"sibling image with the same name (.png / .jpg / .jpeg / .tga / .bmp)."));
+			"Optional: content-root relative path of the image this single-file asset was imported "
+			"from. The asset stores the source bytes itself, so an empty path (or a source image that "
+			"moved away) still works; type a path and press Apply to re-embed that image."));
 		const Wui::WuiRect revealRect { x + width - buttonW, y, buttonW, theme.ControlHeight };
 		const bool canReveal = !m_SourceLogical.empty();
 		if (Wui::ButtonEx(ctx, Wui::HashId("texture.field.source.reveal"), revealRect,
 				Wui::Tr("panel.texture.source.reveal", "Show in Explorer"), theme, canReveal, false,
 				canReveal
 					? Wui::Tr("panel.texture.source.reveal.tooltip",
-						"Reveal the source image in Windows Explorer (/select).")
+						"Reveal this texture in Windows Explorer (/select): a single-file asset points at "
+						"its own .wtex, an old-style asset at its source image.")
 					: Wui::Tr("panel.texture.source.reveal.tooltip.none",
-						"No source image to reveal (fix the source path first).")))
+						"Nothing to reveal yet: import a source image first.")))
 		{
 			RevealPathInExplorer(m_ContentRoot / m_SourceLogical);
 			if (m_Ctx)
@@ -1916,9 +2187,9 @@ namespace World
 
 		// 路径输入框:非法 / 不存在 → 行内错误(TextFieldEx 自己画在框下方),**不落盘**。
 		Wui::TextFieldA11y a11y;
-		a11y.Label = Wui::Tr("panel.texture.source", "Source image");
+		a11y.Label = Wui::Tr("panel.texture.source", "Import source");
 		a11y.Placeholder = Wui::Tr("panel.texture.source.placeholder",
-			"(sibling image with the same name)");
+			"(embedded bytes — optional import source)");
 		const bool committed = Wui::TextFieldEx(ctx, Wui::HashId("texture.field.source"),
 			{ x, y, width, theme.ControlHeight }, m_SourceBuffer, theme, m_SourceError, &a11y);
 		y += theme.ControlHeight;
@@ -1947,13 +2218,81 @@ namespace World
 			}
 		}
 
-		// 解析结果(空值 = 同目录同主名规则的结果;找不到则标红)。
-		const std::string resolved = m_SourceLogical.empty()
-			? Wui::Tr("panel.texture.source.resolved.none", "Resolved: (not found)")
-			: Wui::TrFormat("panel.texture.source.resolved", "Resolved: {path}",
-				{ { "path", m_SourceLogical } });
-		Wui::Label(ctx, { x, y }, EllipsizeToWidth(ctx, resolved, width, theme.FontSizeCaption),
-			m_SourceLogical.empty() ? theme.Danger : theme.TextDisabled, theme.FontSizeCaption);
+		// 字节来源 / 资产形态(M4-TEX P9):容器 = 内嵌源字节(源图只是可选的导入源);
+		// 旧式 = 必须有一个外部源图,否则给"可重新导入"的提示。同一句话进 a11y 节点给脚本读。
+		std::string form;
+		std::string formCode;
+		if (m_Container)
+		{
+			formCode = "container";
+			form = m_AssetFormNote.empty()
+				? Wui::TrFormat("panel.texture.form.container",
+					"Single-file asset: {bytes} bytes embedded; the import source is optional.",
+					{ { "bytes", std::to_string(m_Payload.size()) } })
+				: m_AssetFormNote;
+			if (!m_ImportSourceLogical.empty())
+				form += "  " + Wui::TrFormat("panel.texture.source.import_on_disk",
+					"Import source on disk: {path}",
+					{ { "path", m_ImportSourceLogical } });
+		}
+		else if (m_LegacyAsset)
+		{
+			formCode = m_SourceLogical.empty() ? "legacy-broken" : "legacy";
+			form = m_AssetFormNote.empty()
+				? Wui::Tr("panel.texture.form.legacy",
+					"Old-style settings file (no embedded bytes). Press Apply to re-import it as a "
+					"single-file asset.")
+				: m_AssetFormNote;
+			if (!m_SourceLogical.empty())
+				form += "  " + Wui::TrFormat("panel.texture.source.resolved", "Resolved: {path}",
+					{ { "path", m_SourceLogical } });
+		}
+		else
+		{
+			formCode = m_SourceLogical.empty() ? "none" : "external";
+			form = m_SourceLogical.empty()
+				? Wui::Tr("panel.texture.source.resolved.none", "Resolved: (not found)")
+				: Wui::TrFormat("panel.texture.source.resolved", "Resolved: {path}",
+					{ { "path", m_SourceLogical } });
+		}
+		Wui::Label(ctx, { x, y }, EllipsizeToWidth(ctx, form, width, theme.FontSizeCaption),
+			formCode == "none" ? theme.Danger
+				: (formCode == "legacy" ? theme.Warning : theme.TextDisabled),
+			theme.FontSizeCaption);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("texture.source.form");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "status";
+			node.Label = Wui::Tr("panel.texture.source.form.label", "Asset form / byte source");
+			node.Value = formCode;
+			node.Tooltip = form;
+			node.Rect = { x, y, width, theme.FontSizeCaption };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		{
+			// 预览/烘焙真正读的那个字节来源(容器 = 资产自身;旧式 = 外部源图)——
+			// "在资源管理器中显示"指向的也是它(P9:容器指向 `.wtex` 自己)。
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("texture.source.bytes");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = Wui::Tr("panel.texture.source.bytes.label", "Byte source");
+			node.Value = m_SourceLogical;
+			node.Tooltip = Wui::Tr("panel.texture.source.bytes.tooltip",
+				"Logical path the preview and the bake read: a single-file asset reads itself, an "
+				"old-style asset reads its source image. Show in Explorer targets the same path.");
+			node.Rect = { x, y + theme.FontSizeCaption, width, 2.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
 		y += theme.FontSizeCaption + theme.PadSmall;
 		return y;
 	}
@@ -2316,8 +2655,8 @@ namespace World
 			return;
 		EnsureContentRoot();
 
-		// 源图先按设置解析(显式 source: 或同目录同主名),否则没有东西可烘。
-		// 文本框里的值先在**这里**校验:非法 / 不存在 → 行内错误 + 不落盘(不改 .wtex、不重烘)。
+		// 导入源(可选)先在**这里**校验:非法 / 不存在 → 行内错误 + 不落盘(不改 .wtex、不重烘)。
+		// M4-TEX P9:容器不依赖它(留空 = 用内嵌 payload);旧式文件(没有 payload)才必须有源图。
 		const std::string trimmedSource = TrimAscii(m_SourceBuffer);
 		std::string sourceTextError;
 		if (!Editor::ValidateTextureSourceText(m_ContentRoot, trimmedSource, sourceTextError))
@@ -2338,25 +2677,48 @@ namespace World
 		if (sourceChanged)
 			TouchPreviewRevision();
 
-		std::string resolveError;
-		std::string source;
-		if (!Editor::ResolveTextureSourceLogical(m_ContentRoot, m_AssetLogical, m_Settings, source,
-				resolveError))
+		// 1) 定 payload(一张纹理 = 一个文件 = 设置头 + 内嵌源字节):
+		//    * 已有容器 payload → **逐字节保持**(只改设置不碰 payload);
+		//    * 导入源这一行被改过(或还没有 payload)→ 用该文件的原始字节(同一张图重导入 = 同字节);
+		//    * 两者都没有 → 没有可内嵌的源,给可读错误(不再写旧式文件)。
+		std::vector<uint8_t> payload = m_Payload;
+		const bool sourceEdited = trimmedSource != m_LoadedSourceText;
+		if (!trimmedSource.empty() && (payload.empty() || sourceEdited))
 		{
-			m_Status = Wui::TrFormat("panel.texture.status.no_source_error",
-				"Cannot bake: {detail}", { { "detail", resolveError } });
+			const std::filesystem::path imported = m_ContentRoot / std::filesystem::path(trimmedSource);
+			std::vector<uint8_t> bytes;
+			std::string readError;
+			if (!ReadFileBytes(imported, bytes, readError) || bytes.empty())
+			{
+				m_Status = Wui::TrFormat("panel.texture.status.import_failed",
+					"Cannot import '{path}': {detail}",
+					{ { "path", trimmedSource }, { "detail", readError.empty()
+							? std::string("empty file") : readError } });
+				m_StatusIsError = true;
+				m_SourceError = readError;
+				if (m_Ctx)
+					m_Ctx->RecordOp("texture", "apply-failed", m_AssetLogical, readError);
+				return;
+			}
+			payload = std::move(bytes);
+		}
+		if (payload.empty())
+		{
+			m_Status = Wui::Tr("panel.texture.status.no_bytes",
+				"Cannot apply: this asset has no embedded source bytes yet — set an import source "
+				"(.png/.jpg/.jpeg/.tga/.bmp) or re-import the image, then Apply again.");
 			m_StatusIsError = true;
-			m_SourceError = resolveError;
 			if (m_Ctx)
-				m_Ctx->RecordOp("texture", "apply-failed", m_AssetLogical, resolveError);
+				m_Ctx->RecordOp("texture", "apply-rejected", m_AssetLogical, "no embedded payload");
 			return;
 		}
-		m_SourceLogical = source;
 
-		// 1) 保存资产(只有显式字段落盘;默认值不写 —— 空资产 = 全默认)。
-		const std::string serialized = m_Settings.Serialize();
+		// 2) 保存资产 = **单文件容器**(头 + `---payload` + 源字节;原子替换)。
 		std::string writeError;
-		if (!WriteTextFileAtomic(std::filesystem::path(AssetAbsolutePath()), serialized, writeError))
+		TextureAssetFile container;
+		container.Settings = m_Settings;
+		container.Payload = payload;
+		if (!SaveTextureAssetFile(std::filesystem::path(AssetAbsolutePath()), container, writeError))
 		{
 			m_Status = Wui::TrFormat("panel.texture.status.save_failed", "Cannot save the asset: {detail}",
 				{ { "detail", writeError } });
@@ -2365,6 +2727,12 @@ namespace World
 				m_Ctx->RecordOp("texture", "apply-failed", m_AssetLogical, writeError);
 			return;
 		}
+		m_Payload = std::move(payload);
+		m_Container = true;
+		m_LegacyAsset = false;
+		m_LoadedSourceText = trimmedSource;
+		// 字节来源 = 资产自身(容器);外部源图只是可选的导入源。
+		m_SourceLogical = m_AssetLogical;
 		m_AssetFileExists = true;
 		m_Dirty = false;
 		m_DiskChanged = false;
@@ -2378,9 +2746,9 @@ namespace World
 				m_AssetStamp = stamp;
 		}
 
-		// 2) 就地重烘 `<源图主名>.wtexc`(内容根)+ 失效材质贴图缓存。
+		// 3) 就地重烘 `<主名>.wtexc`(内容根)+ 失效材质贴图缓存。
 		std::string bakeError;
-		if (!Editor::BakeTextureArtifactNow(m_ContentRoot, m_SourceLogical, m_Settings, bakeError))
+		if (!Editor::BakeTextureArtifactNow(m_ContentRoot, m_AssetLogical, m_Settings, bakeError))
 		{
 			m_Status = Wui::TrFormat("panel.texture.status.bake_failed", "Bake failed: {detail}",
 				{ { "detail", bakeError } });
@@ -2394,6 +2762,14 @@ namespace World
 			"Saved {asset} and baked {artifact}", { { "asset", m_AssetLogical },
 				{ "artifact", std::filesystem::path(ArtifactAbsolutePath()).filename().generic_string() } });
 		m_StatusIsError = false;
+		// 形态说明 + 盘上的可选导入源(容器本身不依赖它)。
+		Editor::TextureSourceResolution resolution;
+		m_ImportSourceLogical.clear();
+		if (Editor::ResolveTextureSource(m_ContentRoot, m_AssetLogical, m_Settings, resolution))
+			m_ImportSourceLogical = resolution.ImportSourceLogical;
+		m_AssetFormNote = Wui::TrFormat("panel.texture.form.container",
+			"Single-file asset: {bytes} bytes embedded; the import source is optional.",
+			{ { "bytes", std::to_string(m_Payload.size()) } });
 		RefreshArtifactState(true);
 		// 3) 刚写出的产物直接当预览(不必等防抖的第二次烘)。
 		if (UploadArtifactFromDisk())
@@ -2416,7 +2792,13 @@ namespace World
 		std::error_code removeError;
 		const bool removed = std::filesystem::remove(assetFile, removeError);
 		m_Settings = TextureImportSettings {};
+		m_Payload.clear();
+		m_Container = false;
+		m_LegacyAsset = false;
+		m_ImportSourceLogical.clear();
+		m_AssetFormNote.clear();
 		m_SourceBuffer.clear();
+		m_LoadedSourceText.clear();
 		m_SourceError.clear();
 		m_AssetFileExists = false;
 		m_AssetStampValid = false;

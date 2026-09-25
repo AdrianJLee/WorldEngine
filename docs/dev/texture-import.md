@@ -8,13 +8,15 @@
 ## 1. 三层结构(源文件永远不动)
 
 ```
-assets/textures/Icon.png          ← 源(画师产物;png/jpg/jpeg/tga/bmp)
-assets/textures/Icon.wtex         ← **纹理资产**(YAML:导入设置 + `source:` 指向源图)
+assets/textures/Icon.png          ← 导入源(可选;导入后可删,像 .gltf 之于 .wmodel)
+assets/textures/Icon.wtex         ← **纹理资产 = 单文件容器**(YAML 头 + `---payload` + 内嵌图像字节)
 cooked/textures/Icon.wtexc        ← 平台产物(自描述头 + 逐 mip 块数据;**按主名命名**;进 .pak)
 ```
 
 - **与模型管线同构**(见知识库 `traps/wimport-removed.md`):`源(.gltf) → 资产(.wmodel) → 产物`,
   纹理是 `源(.png) → 资产(.wtex) → 产物(.wtexc)`。**没有旁路设置文件**:设置的家只有 `.wtex` 这一个。
+- **资产是自足的**:`.wtex` 里就带着图像字节 —— 一张纹理 = **一个文件**;`.png` 只是导入源,
+  导入后删掉也不影响烘焙与开发态出画(实测:把 `.png` 改名后材质预览照常)。
 - **产物名 = `<主名>.wtexc`**(2026-09-25 用户口径:不带源图扩展名);`.wtexc` 是生成物,
   **内容浏览器不显示它**(它不是资产,列目录时过滤)。
 - 同一目录同主名的两个源图(`Icon.png` + `Icon.jpg`)= 产物撞名:资产指到的那个优先,其余报错(不猜、不覆盖)。
@@ -35,14 +37,21 @@ cooked/textures/Icon.wtexc        ← 平台产物(自描述头 + 逐 mip 块数
 美术规范:入库前统一到 sRGB PNG(需要 alpha 时 32 位);法线贴图用无损格式。引擎**不做**色彩空间猜测,
 色彩管理由美术流程负责。
 
-## 3. `.wtex` 资产(YAML;JSON 是 YAML 子集)
+## 3. `.wtex` 资产 = 单文件容器
 
-资产路径 = **源图换扩展名**(`textures/Icon.png` → `textures/Icon.wtex`;jpg/tga/bmp 同理)。
-`source:` 可显式指向别处的源图(内容根相对路径);缺省 = 同目录、同主名的图片(按
-`.png/.jpg/.jpeg/.tga/.bmp` 依次找)。未知字段 = **错误**(拼错字段名不会静默变成默认行为)。
+```
+<YAML 头:下面的设置字段>
+---payload
+<内嵌图像字节(png/jpg/jpeg/tga/bmp 原样;不重编码)>
+```
+
+- 资产路径 = **源图换扩展名**(`textures/Icon.png` → `textures/Icon.wtex`;jpg/tga/bmp 同理)。
+- 头是可读文本(diff 友好);`---payload` 必须独占一行,其后到文件末尾全是图像字节。
+- 读侧兼容旧式"只有头 + `source:`"的文件(legacy):那种文件会在编辑器的校验区提示"可重新导入";
+  保存一律写容器形态。
+- 未知字段 = **错误**(拼错字段名不会静默变成默认行为)。
 
 ```yaml
-source: textures/Icon.png   # 缺省 = 同目录同主名图片;显式写必须是内容根相对路径(不许 .. / 绝对路径)
 usage: normal          # color | normal | data | hdr | ui
 compression: bc7       # auto | none | bc7 | bc5 | bc4 | bc1 | bc3   (auto = 按 usage)
 srgb: false            # 缺省由 usage 派生;显式写才覆盖
@@ -56,9 +65,9 @@ premultiply_alpha: false
 flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 ```
 
-序列化只写**显式**字段(默认值不落盘;`source:` 只在显式时才写),所以手工写的资产很短。
+序列化只写**显式**字段(默认值不落盘),所以手工写的头很短。
 策略上等价于模型的 `ModelImportSettings`:资产里的设置 > 引擎默认;**改设置 = 重烘**
-(cook / 编辑器 Reimport),运行时只吃产物。
+(cook / 编辑器 Reimport),运行时只吃产物。**改设置不改 payload**(编辑器 Apply 逐字节保留内嵌图像)。
 
 ## 4. 格式选择(compression: auto)
 
@@ -98,7 +107,7 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 ## 6. 烘焙与缓存
 
 - 内核入口:`TextureCompiler::BakeBytes`(纯函数:同输入两次逐字节一致)/ `BakeFile` / `BakeDirectory`。
-- 目录烘焙:① 遍历资产 `<sourceRoot>/**/*.wtex`(每个资产解析自己的源图:`source:` 或同主名图片);
+- 目录烘焙:① 遍历资产 `<sourceRoot>/**/*.wtex`(容器:直接吃**内嵌字节**;旧式:按 `source:` 或同主名图片);
   ② 没有资产的源图按默认设置;都烘到 `<outputRoot>/<同目录>/<**主名**>.wtexc`(如 `textures/Icon.wtexc`)。
   同主名资产坏掉时,对应源图**不会**用默认设置偷偷烘一份(失败在资产上,报错可见)。
 - 缓存键 = `sha256(源字节) + settingsHash + 产物版本` ⇒ 改源或改设置都会自动失效;缓存目录可整体删除重建。
@@ -139,8 +148,8 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 1. 逻辑路径 `<path>`:先找 `<同目录>/<主名>.wtexc`(打包态在 `.pak` 里),命中则解头 + 逐 mip 上传,
    **不**解码源图;格式/尺寸/sRGB 全部来自产物头。
    **`<path>` 可写源图(`textures/Icon.png`)或纹理资产(`textures/Icon.wtex`)** —— 两者都解析到同一个
-   产物 `<同目录>/<主名>.wtexc`;引用资产且**没有产物**时,运行时读资产里的 `source:`
-   (缺省 = 同目录同主名图片)回退解码 ⇒ 开发态两种写法都能出画。
+   产物 `<同目录>/<主名>.wtexc`;引用资产且**没有产物**时,运行时解码资产**内嵌的图像字节**
+   (旧式文件回退到 `source:`)⇒ 开发态不依赖外部 PNG,把源图删掉也能出画。
 2. 没有产物(开发态或未烘焙)⇒ 回退今天的 stb 路径(RGBA8),行为与旧版一致。
 3. **陈旧产物**:运行时**只信产物头**(不做源字节比对);"需重烘"由编辑器徽标(P4)与 cook(P3)
    负责判源/设置是否变过。运行时遇到头/魔数/版本/mip 表不自洽 ⇒ 记警告并回退源图。

@@ -63,6 +63,46 @@ namespace World
 			const std::string& logicalPath, const TextureImportSettings& settings,
 			std::string& outSourceLogical, std::string& outError);
 
+		// ---- M4-TEX P9:`.wtex` = 单文件容器 ----
+		//
+		// 用户口径(2026-09-25):一张纹理 = **一个文件**;源图只是导入源(导入后可删)。
+		//
+		//     <YAML 头:导入设置>
+		//     ---payload
+		//     <内嵌源图原始字节(png/jpg/tga/bmp)>
+		//
+		// 编辑器侧的**唯一读取口径**:`.wtex` 一律按 `LoadTextureAssetFile` 读(容器 / 旧式自动区分),
+		// 不再拿整份文件当 YAML 解析(容器里含二进制 payload,旧口径会报 YAML 错 → 误报 "no source image")。
+		struct TextureAssetDocument
+		{
+			bool Exists = false;          // `.wtex` 在盘上
+			bool Container = false;       // 有 `---payload`(源字节内嵌)
+			bool Valid = true;            // 读盘/解析成功(缺文件 = 全默认,仍算 Valid)
+			TextureImportSettings Settings;
+			std::vector<uint8_t> Payload; // 容器内嵌的源图原始字节(逐字节上盘)
+			std::string LegacySource;     // 旧式文件的 `source:`(容器时为空)
+			std::string Error;            // Valid=false 时的可读原因
+		};
+		// logicalPath 接受 `.wtex` 资产或它的源图(源图按同主名换算成资产路径)。
+		TextureAssetDocument LoadTextureAssetDocument(const std::filesystem::path& contentRoot,
+			const std::string& logicalPath);
+
+		// 资产的**字节来源**(P9):
+		//   ① 容器:字节在资产内嵌 payload 里(Embedded=true,BytesLogical = 资产自身),外部源图可有可无;
+		//   ② 旧式(无 payload):字节必须来自 `source:` / 同目录同主名图片,找不到 = 失败(报 missing-source)。
+		// ImportSourceLogical 是盘上那个**可选**的外部导入源(容器没有也能正常工作)。
+		struct TextureSourceResolution
+		{
+			std::string BytesLogical;        // 预览/烘焙要读字节的逻辑路径(容器 = 资产自身)
+			std::string ImportSourceLogical; // 外部导入源(没有 = 空;仅展示/再导入用)
+			bool Embedded = false;
+			bool AssetExists = false;
+			bool Container = false;
+			std::string Error;
+		};
+		bool ResolveTextureSource(const std::filesystem::path& contentRoot, const std::string& logicalPath,
+			const TextureImportSettings& settings, TextureSourceResolution& out);
+
 		// 现场判定产物是否与"源 + 设置"一致(读源字节算 sha256,与产物头的 sourceSha256/settingsHash 比对)。
 		// settingsOverride 非空 = 用调用方的内存设置(面板的可编辑状态);否则从 `.wtex` 读盘
 		// (缺资产 = 默认设置)。
@@ -171,7 +211,8 @@ namespace World
 		struct PreviewBakeRequest
 		{
 			uint64_t Serial = 0;           // = 派发时的 m_PreviewRevision
-			std::string AbsoluteSource;
+			std::string AbsoluteSource;    // 外部源图(旧式资产用;容器为空)
+			std::vector<uint8_t> Bytes;    // 容器内嵌字节(非空 = 按字节烘,不读磁盘)
 			TextureImportSettings Settings;
 		};
 		struct PreviewBakeResult
@@ -193,6 +234,13 @@ namespace World
 		bool m_Loaded = false;           // 至少有一次成功读盘(缺 `.wtex` 也算:那是默认设置)
 		bool m_Dirty = false;            // 字段改过但还没 Apply
 		bool m_AssetFileExists = false;  // `.wtex` 在盘上(决定 Reset to Defaults 是否可用)
+		// ---- M4-TEX P9:单文件容器状态 ----
+		std::vector<uint8_t> m_Payload;    // 容器内嵌源字节(空 = 还没有 payload)
+		bool m_Container = false;          // 盘上的 `.wtex` 是单文件容器
+		bool m_LegacyAsset = false;        // 旧式设置文件(无 payload;可重新导入成容器)
+		std::string m_ImportSourceLogical; // 盘上的外部导入源(可选;仅展示/再导入)
+		std::string m_LoadedSourceText;    // 读盘时的导入源文本(判断这一行是否被改过)
+		std::string m_AssetFormNote;       // 资产形态说明(容器 / 旧式;进状态行与 a11y 节点)
 		std::string m_LoadError;         // 资产读不出来时的可读原因(非空 = 面板进入只读错误态)
 		std::string m_Status;            // 最近一次操作结果(Apply / Reimport / Reset)
 		bool m_StatusIsError = false;
@@ -219,6 +267,7 @@ namespace World
 		bool m_PreviewSourceValid = false;
 		std::filesystem::file_time_type m_PreviewSourceStamp {};
 		bool m_PreviewSourceStampValid = false;
+		bool m_PreviewSourceEmbedded = false;   // 这份像素来自容器的内嵌 payload
 
 		// ---- 预览显示态 ----
 		PreviewChannel m_Channel = PreviewChannel::Rgb;
@@ -268,12 +317,16 @@ namespace World
 		void ReloadFromDisk(bool keepStatus);
 		void RefreshArtifactState(bool force = false);
 		// 源像素解码(一次)+ mtime 检测;源变了 → 设置版本 +1(产物需重烘)。
-		void RefreshPreviewSource(const std::string& absoluteSource);
+		void RefreshPreviewSource();
 		// 立即路径:草稿纹理(缩放 / FlipY / 预乘 / 通道掩码 → RGBA8 上传)。
 		void EnsureDraftPreview();
 		// 防抖 + 工作线程派发 + 结果取回(每帧一次)。
-		void PumpPreviewBake(const std::string& absoluteSource);
-		void DispatchPreviewBake(const std::string& absoluteSource);
+		void PumpPreviewBake();
+		void DispatchPreviewBake();
+		// 本帧的字节来源:容器 = 内嵌 payload(embedded=true,absolute 为空);
+		// 旧式 = 外部源图文件(absolute 非空)。两者都没有 = false。
+		bool CurrentSourceBytes(std::vector<uint8_t>& outBytes, std::string& outAbsoluteSource,
+			bool& outEmbedded) const;
 		void PreviewBakeWorkerLoop();
 		// 产物字节(内存里的重烘结果 / 盘上产物)→ 原生块格式上 GPU。
 		bool UploadArtifactPreview(const std::vector<uint8_t>& bytes, uint64_t revision);
