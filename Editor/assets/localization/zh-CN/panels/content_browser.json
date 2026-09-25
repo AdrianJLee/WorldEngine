@@ -7,7 +7,9 @@
     "asset."
   ],
   "panel.content_browser.drop.unsupported": "不支持该类型: ",
-  "panel.content_browser.drop.unsupported_hint": "(当前只支持拖入 .gltf / .glb 导入)",
+  "panel.content_browser.drop.unsupported_hint": "(拖入 .gltf / .glb 导入模型,或拖入 .png / .jpg / .jpeg / .tga / .bmp 导入纹理)",
+  "panel.content_browser.drop.texture_dir_failed": "创建导入目录失败:{detail}",
+  "panel.content_browser.drop.texture_copy_failed": "复制拖入的图片失败:{detail}",
   "panel.content_browser.empty.title": "文件夹为空",
   "panel.content_browser.empty.hint": "在这里新建文件夹,或把 .gltf / .glb 模型拖进窗口导入。",
   "panel.content_browser.empty.action": "新建文件夹",
@@ -152,5 +154,6 @@
   "panel.content_browser.item.create_texture_asset": "创建纹理资产",
   "panel.content_browser.texture.outside_root": "纹理设置需要内容根里的资产。",
   "panel.content_browser.notice.texture_asset_created": "已创建 {asset}",
-  "panel.content_browser.notice.texture_reimported": "已重烘 {source}"
+  "panel.content_browser.notice.texture_reimported": "已重烘 {source}",
+  "panel.content_browser.notice.texture_imported": "已导入 {source}(设置:{asset})"
 }

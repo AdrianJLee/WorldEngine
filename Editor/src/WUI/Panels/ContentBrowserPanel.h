@@ -212,6 +212,9 @@ namespace World
 		void ReimportTextureAsset(const std::filesystem::path& assetPath);
 		// 右键"Create Texture Asset":写一份最小 `.wtex`(内容 = 默认设置),已存在 = 失败(不覆盖)。
 		void CreateTextureAssetFor(const std::filesystem::path& sourcePath);
+		// M4-TEX P5:拖放导入图片 —— 复制进内容根(重名加 -1 后缀,不覆盖)+ 写最小 `.wtex` + 选中。
+		// 落点:光标在内容浏览器里 = 当前目录;拖到视口等其它区域 = 内容根默认 `textures/`。
+		void ImportDroppedTexture(const std::filesystem::path& source, const Wui::WuiRect& panelRect);
 		// 源图一行的徽标状态(按 (源图/资产/产物) 的 mtime 缓存;只有真变了才重算 sha256)。
 		Editor::TextureArtifactState ResolveTextureBadge(const std::filesystem::path& sourcePath,
 			bool* hasAsset);

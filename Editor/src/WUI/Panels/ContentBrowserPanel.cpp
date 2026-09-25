@@ -96,6 +96,76 @@ namespace World
 			return !text.empty() && text.rfind("..", 0) != 0;
 		}
 
+		// M4-TEX P5:内容浏览器里**不显示**的产物流(目前只有纹理烘焙产物 `.wtexc`)。
+		// 它们由 `.wtex` 资产烘出来、运行时按逻辑路径找;用户既不该双击也不该误删,
+		// 所以列目录 / 搜索 / a11y 树里一律过滤(用户 2026-09-25:「wtexc 没必要显示在引擎里吧」)。
+		bool IsHiddenContentArtifact(const std::filesystem::path& path)
+		{
+			return LowerExtension(path) == ".wtexc";
+		}
+
+		// M4-TEX P5:拖放导入的目标名字(重名自动加 -1 / -2 … 后缀,**不覆盖**已有文件)。
+		std::filesystem::path MakeUniqueFileName(const std::filesystem::path& dir,
+			const std::string& fileName)
+		{
+			const std::filesystem::path name(fileName);
+			std::filesystem::path candidate = dir / name;
+			int counter = 1;
+			std::error_code existsError;
+			while (std::filesystem::exists(candidate, existsError))
+				candidate = dir / (name.stem().string() + "-" + std::to_string(counter++)
+					+ name.extension().string());
+			return candidate;
+		}
+
+		// 图片源(png/jpg/jpeg/tga/bmp)= 纹理导入的入口类型。
+		bool IsTextureSourcePath(const std::filesystem::path& path)
+		{
+			return DescribeAssetType(path, false).Kind == EditorAssetKind::TextureSource;
+		}
+
+		// M4-TEX P5 探针钩子:`WLD_DROP_FILES="a.png;b.png"` 把路径注进**同一个**队列消费点。
+		// 为什么不用真 WM_DROPFILES:HDROP 必须由系统在目标进程里分配(收到消息的一方会
+		// DragFinish→GlobalFree 它),进程外伪造不可靠。判据完全相同:鼠标位置决定落点目录、
+		// 重名去重、写 `.wtex`、选中。真实拖放链路(平台层队列)保持原样。
+		// `WLD_DROP_TRIGGER`(可选)= 触发文件路径:它出现之后才注入 —— 让探针先把光标移到目标
+		// 区域、把浏览器切到目标目录,从而把"落点由鼠标位置决定"这条规则变成可复现的判据。
+		void AppendInjectedDroppedFiles(std::vector<std::string>& dropped)
+		{
+			static bool injected = false;
+			if (injected)
+				return;
+			const char* inject = std::getenv("WLD_DROP_FILES");
+			if (inject == nullptr || *inject == '\0')
+				return;
+			if (const char* trigger = std::getenv("WLD_DROP_TRIGGER"); trigger != nullptr && *trigger != '\0')
+			{
+				std::error_code triggerError;
+				if (!std::filesystem::exists(std::filesystem::path(trigger), triggerError))
+					return;
+			}
+			injected = true;
+			const std::string list(inject);
+			size_t start = 0;
+			size_t added = 0;
+			while (start <= list.size())
+			{
+				const size_t end = list.find(';', start);
+				const std::string item = list.substr(start,
+					end == std::string::npos ? std::string::npos : end - start);
+				if (!item.empty())
+				{
+					dropped.push_back(item);
+					++added;
+				}
+				if (end == std::string::npos)
+					break;
+				start = end + 1;
+			}
+			WLD_CORE_INFO("[switch] WLD_DROP_FILES: injected {0} path(s) into the content browser drop queue",
+				added);
+		}
+
 		// 仅按 ASCII 大小写比较:重命名到"仅大小写不同"的名字在 Windows 上是合法操作,
 		// 不能把它当成"同目录已有同名文件"拦掉。
 		// P4-UX15:重命名框默认只编辑主名(后缀藏起来),提交时如果用户没写后缀就补回原名后缀。
@@ -432,6 +502,9 @@ namespace World
 		{
 			if (searchError)
 				break;
+			// M4-TEX P5:`.wtexc` 是烘出来的**平台产物**,不是资产 —— 不进列表、不参与搜索/选择。
+			if (IsHiddenContentArtifact(entry.path()))
+				continue;
 			std::string name = entry.path().filename().string();
 			std::transform(name.begin(), name.end(), name.begin(), ::tolower);
 			if (name.find(query) != std::string::npos)
@@ -517,6 +590,10 @@ namespace World
 		{
 			if (listError)
 				break;
+			// M4-TEX P5:`.wtexc` 是烘出来的平台产物(用户 2026-09-25:「wtexc 没必要显示在引擎里吧」),
+			// 列目录时直接过滤 —— 刷新 / 搜索 / 选择 / a11y 树里都不出现。
+			if (IsHiddenContentArtifact(entry.path()))
+				continue;
 			m_Model.Listing.push_back(entry.path());
 		}
 		std::sort(m_Model.Listing.begin(), m_Model.Listing.end());
@@ -689,6 +766,45 @@ namespace World
 			// M4-TEX P4:纹理**资产**双击 → 打开 Texture Settings(编辑设置 + source:,
 			// Apply 保存 `.wtex` 并就地重烘 `<源图>.wtexc`)。源图行不承担设置入口。
 			OpenTextureSettingsFor(path, false);
+		}
+		else if (IsTextureSourcePath(path))
+		{
+			// M4-TEX P5(用户 2026-09-25:「对于原始图片格式,双击自动创建」):双击源图 = **导入** ——
+			// 缺同主名 `.wtex` 就先写一份最小资产(默认字段,不写 `source:`;缺省就是同目录同主名),
+			// 然后打开 Texture Settings。已有资产 = 直接打开(不覆盖用户的设置)。
+			std::string logical;
+			if (!LogicalPathFor(path, &logical))
+			{
+				NotifyAssetFailure(Wui::Tr("panel.content_browser.texture.outside_root",
+					"Texture settings need an asset inside the content root."));
+			}
+			else
+			{
+				std::string assetLogical;
+				bool created = false;
+				std::string error;
+				if (!Editor::EnsureTextureAssetForSource(m_Model.Root, logical, &assetLogical, &created,
+						error))
+				{
+					NotifyAssetFailure(error);
+					WLD_CORE_WARN("[texture] double-click import failed for '{0}': {1}", logical, error);
+				}
+				else
+				{
+					InvalidateContents();
+					m_TextureBadges.erase(path);   // 徽标立刻重算("默认设置" → "有资产")
+					if (created)
+					{
+						WLD_CORE_INFO("[texture] double-click created texture asset: {0}", assetLogical);
+						if (m_Ctx)
+							m_Ctx->RecordOp("browser", "create-texture-asset", logical, assetLogical);
+						m_Host.Notify(Wui::TrFormat(
+							"panel.content_browser.notice.texture_asset_created", "Created {asset}",
+							{ { "asset", assetLogical } }));
+					}
+					OpenTextureSettingsFor(m_Model.Root / assetLogical, false);
+				}
+			}
 		}
 		else if (path.extension() == ".wmat")
 		{
@@ -2664,7 +2780,13 @@ namespace World
 		const std::filesystem::file_time_type sourceStamp =
 			std::filesystem::last_write_time(sourcePath, stampError);
 		const std::filesystem::path assetPath = TextureAssetPathForSource(sourcePath.generic_string());
-		const std::filesystem::path artifactPath = sourcePath.string() + ".wtexc";
+		// 产物 = `<同目录>/<源图主名>.wtexc`(契约名);旧命名 `<源图全名>.wtexc` 只作容错候选,
+		// 与内核 TextureData 的查找顺序一致(.wtexc 不是资产 —— 浏览器里一律不显示)。
+		std::filesystem::path artifactPath = sourcePath.parent_path()
+			/ (sourcePath.stem().string() + ".wtexc");
+		std::error_code artifactStampError;
+		if (!std::filesystem::is_regular_file(artifactPath, artifactStampError))
+			artifactPath = std::filesystem::path(sourcePath.string() + ".wtexc");
 		const bool assetExists = std::filesystem::is_regular_file(assetPath, stampError);
 		const std::filesystem::file_time_type assetStamp = assetExists
 			? std::filesystem::last_write_time(assetPath, stampError)
@@ -2714,7 +2836,7 @@ namespace World
 			+ ";artifact=" + TextureArtifactBadgeCode(slice.TextureArtifact);
 		node.Tooltip = Wui::Tr("panel.content_browser.badge.texture_tooltip",
 			"Source image of a texture: its import settings live in the sibling .wtex asset, and the "
-			"status is the baked artifact (<source>.wtexc).") + "  " + logical;
+			"status is the baked artifact (<stem>.wtexc).") + "  " + logical;
 		node.Rect = rect;
 		node.Enabled = true;
 		node.Interactive = false;
@@ -2764,6 +2886,72 @@ namespace World
 		const std::filesystem::path assetPath = m_Model.Root / assetLogical;
 		SelectCreated(assetPath, "create-texture-asset");
 		OpenTextureSettingsFor(assetPath, false);
+	}
+
+	// M4-TEX P5:把拖进来的图片**导入**到内容根(用户:「拖拽原始图片进入引擎应该执行导入功能」)。
+	// 落点:光标在内容浏览器里 = 当前目录;拖到视口等其它区域 = 内容根默认 `textures/`。
+	// 重名加 `-1`/`-2` 后缀(**不覆盖**已有文件);`.wtex` 写失败时把刚复制的文件一并删掉,不留半成品。
+	void ContentBrowserPanel::ImportDroppedTexture(const std::filesystem::path& source,
+		const Wui::WuiRect& panelRect)
+	{
+		std::filesystem::path destination = m_Model.Current;
+		const bool overBrowser = m_Ctx != nullptr && m_Ctx->IsHovered(panelRect);
+		if (!overBrowser || !IsWithinOrEqual(destination, m_Model.Root))
+			destination = m_Model.Root / "textures";
+		std::error_code directoryError;
+		std::filesystem::create_directories(destination, directoryError);
+		if (directoryError)
+		{
+			const std::string message = Wui::TrFormat("panel.content_browser.drop.texture_dir_failed",
+				"Cannot create the import folder: {detail}",
+				{ { "detail", directoryError.message() } });
+			NotifyAssetFailure(message);
+			WLD_CORE_WARN("[drop] {0}", message);
+			return;
+		}
+		const std::filesystem::path target = MakeUniqueFileName(destination, source.filename().string());
+		std::error_code copyError;
+		std::filesystem::copy_file(source, target, std::filesystem::copy_options::none, copyError);
+		if (copyError)
+		{
+			const std::string message = Wui::TrFormat("panel.content_browser.drop.texture_copy_failed",
+				"Cannot copy the dropped image: {detail}", { { "detail", copyError.message() } });
+			NotifyAssetFailure(message);
+			WLD_CORE_WARN("[drop] {0}", message);
+			return;
+		}
+		std::string logical;
+		if (!LogicalPathFor(target, &logical))
+		{
+			std::error_code cleanupError;
+			std::filesystem::remove(target, cleanupError);
+			NotifyAssetFailure(Wui::Tr("panel.content_browser.texture.outside_root",
+				"Texture settings need an asset inside the content root."));
+			return;
+		}
+		std::string assetLogical;
+		std::string error;
+		if (!Editor::EnsureTextureAssetForSource(m_Model.Root, logical, &assetLogical, nullptr, error))
+		{
+			// 资产写不出来 = 这次导入没有意义:把刚复制进来的文件也清掉(不留半成品)。
+			std::error_code cleanupError;
+			std::filesystem::remove(target, cleanupError);
+			NotifyAssetFailure(error);
+			WLD_CORE_WARN("[drop] texture import failed for '{0}': {1}", logical, error);
+			return;
+		}
+		InvalidateContents();
+		if (m_Model.Search[0])
+			UpdateSearch();
+		m_TextureBadges.erase(target);
+		m_Host.Notify(Wui::TrFormat("panel.content_browser.notice.texture_imported",
+			"Imported {source} (settings: {asset})",
+			{ { "source", logical }, { "asset", assetLogical } }));
+		WLD_CORE_INFO("[drop] imported texture '{0}' → '{1}' (settings {2})", source.string(), logical,
+			assetLogical);
+		if (m_Ctx)
+			m_Ctx->RecordOp("browser", "drop-import-texture", source.filename().string(), logical);
+		SelectAsset(logical, "import-texture");
 	}
 
 	void ContentBrowserPanel::ReimportTextureAsset(const std::filesystem::path& assetPath)
@@ -2888,10 +3076,11 @@ namespace World
 		// 其它类型明确提示"不支持该类型",不静默丢弃。
 		{
 			std::vector<std::string> dropped = Application::Get().GetWindow().ConsumeDroppedFiles();
+			AppendInjectedDroppedFiles(dropped);   // 探针钩子(见 helper 注释;真实链路不变)
 			for (const std::string& droppedPath : dropped)
 			{
 				const std::filesystem::path source(droppedPath);
-				const std::string extension = source.extension().string();
+				const std::string extension = LowerExtension(source);
 				if (extension == ".gltf" || extension == ".glb")
 				{
 					std::error_code destError;
@@ -2922,13 +3111,20 @@ namespace World
 						}
 					}
 				}
+				else if (IsTextureSourcePath(source))
+				{
+					// M4-TEX P5(用户 2026-09-25:「拖拽原始图片进入引擎应该执行导入功能」):
+					// 图片从资源管理器拖进来 = 导入 → 复制进内容根 + 写最小 `.wtex` + 选中。
+					ImportDroppedTexture(source, rect);
+				}
 				else
 				{
 					// Q2:非 glTF 类型不支持(不复制、不静默)。
 					const std::string message = Wui::Tr("panel.content_browser.drop.unsupported",
 						"Unsupported file type: ") + extension
 						+ Wui::Tr("panel.content_browser.drop.unsupported_hint",
-							"(only .gltf / .glb can be dropped for import)");
+							"(drop .gltf / .glb to import a model, or .png / .jpg / .jpeg / .tga / .bmp "
+							"to import a texture)");
 					WLD_CORE_WARN("[drop] {0}", message);
 					if (m_Ctx) m_Ctx->RecordOp("browser", "drop-rejected",
 						source.filename().string(), message);
