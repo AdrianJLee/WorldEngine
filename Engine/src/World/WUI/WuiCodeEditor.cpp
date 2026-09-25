@@ -29,16 +29,23 @@ namespace World::Wui
 		const WuiColor kSuggestBorder { 0.30f, 0.32f, 0.36f, 1.0f };
 		const WuiColor kSuggestSelected { 0.20f, 0.30f, 0.46f, 1.0f };
 		const WuiColor kSuggestName { 0.86f, 0.89f, 0.93f, 1.0f };
-		const WuiColor kSuggestType { 0.55f, 0.58f, 0.63f, 1.0f };
+		// WUI-MAT-INTEL4:类型列用"类型色"(teal)而不是灰 —— 与名字(近白)一眼分开。
+		const WuiColor kSuggestType { 0.31f, 0.79f, 0.69f, 1.0f };
 		const WuiColor kSuggestDoc { 0.66f, 0.69f, 0.74f, 1.0f };
-		const WuiColor kTokenColors[7] = {
-			{ 0.82f, 0.84f, 0.87f, 1.0f },
-			{ 0.45f, 0.62f, 0.95f, 1.0f },
-			{ 0.62f, 0.78f, 0.45f, 1.0f },
-			{ 0.45f, 0.50f, 0.45f, 1.0f },
-			{ 0.85f, 0.70f, 0.45f, 1.0f },
-			{ 0.70f, 0.60f, 0.95f, 1.0f },
-			{ 0.75f, 0.75f, 0.80f, 1.0f },
+		// WUI-MAT-INTEL4 配色(VS Code Dark+ 风格):名字(Default)保持中性;类型=青绿、函数=暖黄、
+		// 字段/全局=浅蓝、注解关键字=紫 —— 与关键字(蓝)/字符串/数字/注释/运算符分开。
+		const WuiColor kTokenColors[11] = {
+			{ 0.83f, 0.83f, 0.83f, 1.0f },   // Default(变量/名字/标点)
+			{ 0.34f, 0.61f, 0.84f, 1.0f },   // Keyword
+			{ 0.81f, 0.57f, 0.47f, 1.0f },   // String
+			{ 0.42f, 0.60f, 0.33f, 1.0f },   // Comment
+			{ 0.71f, 0.81f, 0.66f, 1.0f },   // Number
+			{ 0.61f, 0.86f, 1.00f, 1.0f },   // Global
+			{ 0.83f, 0.83f, 0.83f, 1.0f },   // Operator
+			{ 0.31f, 0.79f, 0.69f, 1.0f },   // Type(类型标识:teal)
+			{ 0.86f, 0.86f, 0.67f, 1.0f },   // Function(函数:暖黄)
+			{ 0.61f, 0.86f, 1.00f, 1.0f },   // Field(成员/字段:浅蓝)
+			{ 0.77f, 0.53f, 0.75f, 1.0f },   // Annotation(注解关键字:紫)
 		};
 
 		// W9.5 补全浮层:最多 12 行可滚动 + 底部一行 Doc。

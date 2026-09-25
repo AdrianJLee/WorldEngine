@@ -22,6 +22,12 @@ namespace World::Wui
 		Number,
 		Global,
 		Operator,
+		// WUI-MAT-INTEL4:给高亮加"类别色" —— 类型 / 函数 / 字段(成员) / 注解关键字各一色,
+		// 让"类型标识"与"名字/变量"在视觉上分开(值与顺序**追加**在末尾,旧 kind 的索引不变)。
+		Type,
+		Function,
+		Field,
+		Annotation,
 	};
 
 	// 一行的语法 token:偏移是相对该行首的字节偏移(行文本不含 '\n' 与行尾 '\r')。
