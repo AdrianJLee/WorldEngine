@@ -5391,20 +5391,29 @@ namespace World
 				continue;
 			view.remove_prefix(1);
 			skipSpaces(view);
-			// 默认值一直取到 `[` / `unit(` / `group(` / `label(` 或行尾(行尾可能带 '\r')。
+			// 默认值一直取到 `[` / `unit(` / `group(` / `label(` / `doc(` 或行尾(行尾可能带 '\r')。
+			// MAT-FN2(收尾 MAT-UI7a §3 点名的遗留):终点表必须与写出侧
+			// (`FormatMaterialParamAnnotation`)认得**同一组字段** —— 旧表漏了 `doc(`,于是
+			// `= 0.4 doc("…")`(doc 排在第一位、无范围/无 unit/group/label)在面板改默认值时
+			// 会被整段当成默认值替换掉:说明静默消失,而且回读校验还是通过。
+			// 行尾注释 ` //`(空白后紧跟)同理:它不是默认值的一部分。
 			const size_t valueOffsetInView = lineText.size() - (marker + 3) - view.size();
 			size_t valueLength = 0;
+			bool inQuotes = false;   // 引号内的 `//` 是贴图路径(如 "textures//Icon.png"),不是注释
 			while (valueLength < view.size())
 			{
 				const char c = view[valueLength];
+				if (c == '"')
+					inQuotes = !inQuotes;
 				if (c == '[' || c == '\r' || c == '\n')
 					break;
-				// 只看行内切片:紧跟 value 的 ` unit(` / ` group(` / ` label(` 是下一段。
-				if (c == ' ')
+				// 只看行内切片:紧跟 value 的 ` unit(` / ` group(` / ` label(` / ` doc(` 是下一段。
+				if (c == ' ' && !inQuotes)
 				{
 					const std::string_view rest = view.substr(valueLength + 1);
 					if (rest.rfind("unit(", 0) == 0 || rest.rfind("group(", 0) == 0
-						|| rest.rfind("label(", 0) == 0)
+						|| rest.rfind("label(", 0) == 0 || rest.rfind("doc(", 0) == 0
+						|| rest.rfind("//", 0) == 0)
 						break;
 				}
 				++valueLength;

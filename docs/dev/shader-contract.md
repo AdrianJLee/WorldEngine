@@ -48,6 +48,8 @@ Surface Evaluate(MaterialInputs input)
   `[[vk::binding(4 + n, 2)]] Sampler2D <名字>;`,采样写 `<名字>.Sample(uv)`。
 - 引擎 uniform(`u_` 开头,如 `u_BaseColor`、`u_AlbedoTexture`)由包装层声明;用户源里只读,
   不要自己声明(`u_` 前缀也是注解参数名的保留前缀)。
+- 可复用的纯函数不要复制粘贴:放进 `assets/shaders/lib/<名字>.slang`,材质侧
+  `#include "lib/<名字>.slang"` 后直接调用(见 §9「材质函数」)。
 
 ## 2. 表面函数契约
 
@@ -174,7 +176,76 @@ GL 口径:描述符绑定单元 = `binding`(**忽略 set**),所以 UBO 单元占
 (`MaterialSurfaceContract.hlsli`)与 C++ 里的内嵌源码不受扩展名规则影响。
 改完记得重编:缓存键含源码与注解哈希,不会串用旧产物。
 
-## 9. 边界与未验证
+## 9. 材质函数(`assets/shaders/lib/*.slang`)
+
+材质函数 = **可复用的纯函数**:一份图案/渐变/调色逻辑写一次,多个材质 include 后用。
+示例库与真实用法:[`projects/default/assets/shaders/lib/pattern.slang`](../../projects/default/assets/shaders/lib/pattern.slang)
+(`ApplyTint` / `CheckerPattern` / `CheckerBlend` / `RadialMask`);
+示例材质 [`ShowcaseMaterial.slang`](../../projects/default/assets/shaders/examples/ShowcaseMaterial.slang)
+include 了它,并在 `Evaluate()` 里用 `ApplyTint` → `CheckerBlend` 做棋盘细节。
+
+**怎么创建**:在项目内容根下新建 `assets/shaders/lib/<名字>.slang`(建议按用途命名,如
+`pattern.slang`、`noise.slang`)。一个文件一个主题;库文件本身**不是材质资产** ——
+它没有入口,不能单独被渲染,只能在材质里 `#include`。
+
+**怎么写**:
+
+- **纯函数**:输入 → 输出。不声明 `Evaluate`,不读写材质的 `input` / `surface`(它们属于材质),
+  不引用材质参数名(那会让库与某个材质绑死,别的材质 include 进来会编译不过)。
+- **不能有自己的贴图/采样器**:库文件里不写 `Texture2D` / `Sampler2D` 变量声明 ——
+  贴图槽位由**材质**的 `//! param Texture2D` 注解决定(§4/§5)。需要采样时把
+  `Sampler2D` 作为形参传进来:`float3 WeSampleTinted(Sampler2D map, float2 uv, float3 tint)`,
+  材质侧调用 `WeSampleTinted(albedoMap, uv, tint.rgb)`。
+- **参数带默认值**:末尾参数给默认值,调用点可以少写;Slang 不做隐式宽度转换,默认值类型要写对
+  (`float2 center = float2(0.5, 0.5)`,不要指望 `0.5` 自动变成 `float2`)。
+- **`doc` 与注解**:库里的说明用普通 `//` 注释(参数说明 `doc("…")` 是**材质注解**的字段,
+  只属于 `//! param` 行;写在库文件里不会被任何东西读取)。
+- **命名与版本**:共享库建议加 2–4 字母前缀,避免与材质自己的辅助函数、引擎包装符号重名(同一个
+  翻译单元);破坏性改动**加新函数**(`CheckerPatternV2`)而不是改签名 —— 材质各自 include,
+  改签名会一次打断所有调用点。
+
+**怎么用**:材质里 `#include "lib/<名字>.slang"`,然后像普通函数一样调用。解析顺序是
+**先材质自身目录、再项目 `assets/shaders` 根**,所以写 `lib/pattern.slang`(相对
+`assets/shaders`)与 `my_helper.slang`(同目录)都能命中;库文件不要在 include 里用绝对路径
+或 `../` 逃出内容根。
+
+**改库 = 重烘**:表面着色器缓存键含**被包含文件的路径 + 内容哈希**(递归 `#include`),
+所以改库一个字符,所有依赖它的材质会重新编译;发布包里的 baked 产物同样跟着更新。
+新增材质函数**不需要**注册任何东西 —— 它只是被你自己的材质源码引用的普通 Slang 代码。
+
+**边界:材质 vs 材质函数**
+
+| | 材质(`assets/shaders/**/*.slang`) | 材质函数(`assets/shaders/lib/*.slang`) |
+| --- | --- | --- |
+| 入口 | 必须写 `Surface Evaluate(MaterialInputs input)` | 没有入口,只被 include |
+| 参数 | `//! param …` 注解 = 面板行 / cbuffer 布局 / 贴图槽位 | 普通函数形参(+ 默认值),没有注解、不占槽位 |
+| 资源 | 由注解生成 `Sampler2D` 绑定,`map.Sample(uv)` 采样 | 不能声明资源;需要就作为形参传入 |
+| 管线 | 编译成双目标 SPIR-V、进缓存、进包 | 不单独编译/不单独进包,随引用它的材质一起烘 |
+| 改动影响 | 只有该材质重烘 | 所有依赖它的材质重烘 |
+
+最小对照示例(与 `lib/pattern.slang` 的写法一致):
+
+```hlsl
+// assets/shaders/lib/tint.slang —— 材质函数:纯数值,无绑定
+float3 ApplyTint(float3 baseColor, float3 tint, float amount = 1.0)
+{
+    return lerp(baseColor, baseColor * tint, saturate(amount));
+}
+
+// assets/shaders/examples/MyMaterial.slang —— 材质:入口 + 注解 + 调用库
+#include "lib/tint.slang"
+
+//! param Color Tint = 0.85, 0.72, 0.55, 1 group("Surface") label("Tint") doc("表面基色。")
+
+Surface Evaluate(MaterialInputs input)
+{
+    Surface surface = MakeDefaultSurface();
+    surface.BaseColor = ApplyTint(surface.BaseColor, Tint.rgb, 0.5);
+    return surface;
+}
+```
+
+## 10. 边界与未验证
 
 - 跨厂商未验证:GL_SPIRV + 组合采样器是驱动敏感区,目前只在 NVIDIA 610.62 上实测;换 A 卡/N 卡外驱动要重跑抓图。
 - 材质表面着色器的 **OpenGL 实时预览**尚未接入(`MaterialSurfaceRuntime::Install` 目前只允许 Vulkan),

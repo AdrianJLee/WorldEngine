@@ -345,6 +345,8 @@ namespace World
 				Class::AnnotationAttr, TokenKind::Annotation, Context::Annotation, "label(\"\")" },
 			{ "unit", "\"%\"", "unit(\"%\") — unit suffix shown next to the value.",
 				Class::AnnotationAttr, TokenKind::Annotation, Context::Annotation, "unit(\"\")" },
+			{ "doc", "\"Text\"", "doc(\"Base tint color\") — the parameter's description (row hover + screen reader).",
+				Class::AnnotationAttr, TokenKind::Annotation, Context::Annotation, "doc(\"\")" },
 			{ "[min,max]", "range", "[0,1] — value range; Float/Int only, default [0,1], the default must fall inside.",
 				Class::AnnotationSyntax, TokenKind::Annotation, Context::Annotation },
 			{ "Float", "annotation type", "Float — number; [min,max] applies.", Class::AnnotationType, TokenKind::Annotation, Context::Annotation },
