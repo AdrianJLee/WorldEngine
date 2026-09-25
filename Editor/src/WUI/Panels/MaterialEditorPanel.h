@@ -274,11 +274,52 @@ namespace World
 		// 文件读不到都不能只剩一句"没有材质")。
 		std::string m_LoadError;
 		std::vector<std::string> m_MaterialPaths;
+		// ---- M4-TEX-P6a:纹理引用(源图 / `.wtex` 资产)----
+		//
+		// 一轮纹理引用的**唯一事实源**:`m_TexturePaths`(写进材质的逻辑路径)与
+		// `m_TextureLabels`(下拉里的显示名)是两张**平行**表(同一下标 = 同一条目)。
+		// 显示名口径(用户 2026-09-25「之前的材质选取纹理也得改」):
+		//   * `.wtex` 资产 = 资产主名(`Icon`);
+		//   * 没有同名资产的源图 = 文件名(`Icon.png`);
+		//   * 同名(同目录同主名)时只留资产条目;显示名撞车时补目录(`props/Icon`)。
+		struct TextureCatalogEntry
+		{
+			std::string Logical;      // 写进材质的逻辑路径(资产 = `.wtex`,源图 = 图片)
+			std::string Label;        // 下拉显示名(短名;撞车时带目录)
+			std::string Source;       // 资产解析出的源图逻辑路径(源图条目 = 自己)
+			bool IsAsset = false;
+			bool AssetExists = false;
+			bool SourceExists = false;
+			bool InContentRoot = true;   // 路径是内容根相对且不含 ".."
+			bool InCatalog = true;       // false = 只为"当前引用"补的兜底条目(不在扫描结果里)
+			std::string Note;            // 解析/校验的可读原因(空 = 正常)
+		};
+		// 一次"这条纹理引用能不能用"的判定(校验区 / 行内提示 / 工具提示共用这一份)。
+		struct TextureRefInfo
+		{
+			bool Known = false;          // 非空引用才算 Known
+			bool IsAsset = false;
+			bool AssetExists = false;
+			bool SourceExists = false;
+			bool InContentRoot = true;
+			std::string Source;          // 资产 → 源图(源图引用 = 自己)
+			std::string Error;           // 解析不了的原因(空 = 没有解析错误)
+		};
+		std::vector<TextureCatalogEntry> m_TextureCatalog;
+		std::vector<std::string> m_TextureLabels;
 		std::vector<std::string> m_TexturePaths;
 		int m_MaterialPickIndex = -1;
 		int m_AlbedoPickIndex = 0;
 		int m_NormalPickIndex = 0;
 		double m_CatalogRefreshTime = 0.0;
+		// 纹理选取模态(.slang 形态的 Texture2D 参数:路径框 + 选择 + 清空)。
+		// Target = "albedo" / "normal"(.wmat 槽)或 "param:<名字>"(注解参数)。
+		bool m_TexturePickerOpen = false;
+		std::string m_TexturePickerTarget;
+		std::string m_TexturePickerSearch;
+		float m_TexturePickerScroll = 0.0f;
+		// Texture2D 注解参数的**路径输入缓冲**(TextField 需要跨帧稳定的 std::string)。
+		std::map<std::string, std::string> m_TextureParamBuffers;
 
 		// ---- U21:参数区(搜索 / 分组折叠 / 定位)----
 		std::string m_Search;               // 搜索框内容(参数名 / 分组 / 说明,不区分大小写)
@@ -500,12 +541,27 @@ namespace World
 		bool DrawShaderParamControl(Wui::WuiContext& ctx, const Wui::WuiTheme& theme,
 			const MaterialParamDecl& decl, const Wui::WuiRect& controlRect, const std::string& current,
 			std::string* outText);
+		// M4-TEX-P6a:Texture2D 参数的一行怎么排 —— **高度公式与绘制共用的唯一一份**排版结果
+		// (内容高度/滚动范围与实际画出来的行必须一致;窄列下先拆标签,再拆控件簇)。
+		// inlineControlWidth = "标签与控件并排"时控件能拿到的宽;stackedControlWidth = 标签换行后
+		// 控件能拿到的宽(两个都按各站点的排版口径算好再传进来,函数只做判据与高度)。
+		struct TextureRowLayout
+		{
+			bool StackLabel = false;   // 标签独占一行(控件簇与标签并排放不下)
+			int ControlLines = 1;      // 控件占几行:1 = 路径框 + 选择 + 清空同行;2/3 = 路径框下面排按钮
+			float Height = 26.0f;      // 本行总高(含行内说明)
+		};
+		TextureRowLayout TextureRowLayoutFor(const Wui::WuiTheme& theme, float inlineControlWidth,
+			float stackedControlWidth, bool withError) const;
+		// `.wmat` 形态的 shader 参数行:两种排版下控件能拿到的宽(高度计算与绘制共用同一份口径)。
+		float ShaderTextureInlineControlWidth(float columnWidth, float labelWidthIn) const;
+		float ShaderTextureStackedControlWidth(float columnWidth) const;
 		// 参数区(搜索 + 分组 + 每字段控件 + 校验区);返回占用高度。
 		float DrawParameters(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host);
 		// ---- M4-S2:`Shader:` 引用的参数(材质实例形态)----
 		// 参数表 = shader 的 `//! param` 注解;本文件只存覆盖(三态:覆盖 / 父级 / shader 默认)。
 		// 没有 `Shader:` 的 `.wmat` 这两条都不占位(既有材质面板的布局逐像素不变)。
-		float ShaderParamSectionHeight() const;
+		float ShaderParamSectionHeight(const Wui::WuiTheme& theme, float columnWidth) const;
 		float DrawShaderParamSection(Wui::WuiContext& ctx, PanelHost& host, const Wui::WuiTheme& theme,
 			const Wui::WuiRect& contentRect, float y);
 		// 一行参数:标签 + 控件 + 恢复默认 + 悬停说明 + 无障碍节点。
@@ -556,7 +612,7 @@ namespace World
 		// 切换本文档的材质:有未保存改动时先弹确认(由调用方在同一帧画)。
 		void RequestOpenMaterial(Wui::WuiContext& ctx, const std::string& path, PanelHost& host);
 		void DrawOpenConfirmModal(Wui::WuiContext& ctx, PanelHost& host);
-		bool HasPanelModal() const { return m_SaveAsOpen || m_OpenConfirmOpen; }
+		bool HasPanelModal() const { return m_SaveAsOpen || m_OpenConfirmOpen || m_TexturePickerOpen; }
 		// payload("file:<逻辑路径>")→ 逻辑路径;前缀不符返回 false。
 		static bool PayloadToLogical(const std::string& payload, std::string* logical);
 		bool FieldModified(const std::string& key) const;
@@ -582,6 +638,27 @@ namespace World
 		void SaveCurrent();
 		void RefreshCatalog();
 		void RefreshPickerIndices();
+		// ---- M4-TEX-P6a:纹理引用(源图 / .wtex 资产)----
+		// 扫描内容根 → 资产条目在前、无同名资产的源图在后(唯一口径,刷新走 1.5s TTL)。
+		std::vector<TextureCatalogEntry> BuildTextureCatalog() const;
+		// 一条引用的现场判定(资产是否存在 / 资产 → 源图是否解析得到且存在 / 是否在内容根内)。
+		TextureRefInfo InspectTextureRef(const std::string& logical) const;
+		// 当前表里的条目(找不到返回 nullptr;`InCatalog=false` 的兜底条目也算)。
+		const TextureCatalogEntry* FindTextureCatalogEntry(const std::string& logical) const;
+		// 引用的工具提示句:"资产 → 源图"关系 + 缺失原因(空引用返回空串)。
+		std::string TextureRefDoc(const std::string& logical) const;
+		// 行内校验的一句话(缺失 / 资产缺源图;正常返回空串)—— 纹理参数行与槽位共用同一份口径。
+		std::string TextureInlineWarning(const std::string& logical) const;
+		// 该参数的校验里有没有"贴图缺失/资产缺源图"这类问题(行内提示用)。
+		bool TextureFieldHasIssue(const std::string& key) const;
+		void DrawTextureLocateButton(Wui::WuiContext& ctx, PanelHost& host, const Wui::WuiTheme& theme,
+			const std::string& logical, const Wui::WuiRect& rect, const std::string& id);
+		// 纹理选取模态(.slang Texture2D 参数:能填 / 能选 / 能清空)。
+		void OpenTexturePicker(Wui::WuiContext& ctx, const std::string& target);
+		void CloseTexturePicker(Wui::WuiContext& ctx);
+		void DrawTexturePickerModal(Wui::WuiContext& ctx, PanelHost& host);
+		// 采纳一次纹理选取(槽位写材质字段;注解参数写回默认值)。
+		void ApplyTextureChoice(const std::string& target, const std::string& logical);
 		// MAT-UI3b(用户 2026-09-25「点其他地方这个状态应该就结束了」):面板内部的点击若没有
 		// 任何控件接手焦点(点在空白/非焦点控件上),就结束当前聚焦态 —— 焦点环下一帧消失。
 		void ResetFocusAfterPanelBlankClick(Wui::WuiContext& ctx, const Wui::WuiRect& panelRect,
