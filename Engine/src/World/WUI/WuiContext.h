@@ -185,6 +185,13 @@ namespace World::Wui
 		void BeginFrame(const WuiInputState& input);
 		void EndFrame();
 
+		// ---- 系统剪贴板(宿主注入;MAT-UI8)----
+		// 单行文本框(查找/替换、重命名、属性文本、Combo 过滤、十六进制输入……)的
+		// Ctrl+C/X/V 走这两个回调:编辑器两个宿主都指向同一份 GLFW 系统剪贴板。
+		// 未注入 = 该窗口没有剪贴板能力,控件按"没有可复制/粘贴内容"静默 no-op(不报错)。
+		std::function<bool(std::string& out)> GetClipboard;
+		std::function<bool(std::string_view text)> SetClipboard;
+
 		WuiInputState& Input() { return m_Input; }
 		const WuiInputState& Input() const { return m_Input; }
 		std::vector<WuiDrawCommand>& Commands() { return m_OverlayDepth > 0 ? m_OverlayCommands : m_Commands; }

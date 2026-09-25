@@ -944,6 +944,49 @@ namespace World::Wui
 				selEnd = Utf8Count(buffer);
 				cursor = selEnd;
 			}
+			// MAT-UI8:剪贴板 Ctrl+C/X/V(2026-09-25 用户实测"Ctrl+F 查找框里只能手打" ——
+			// 单行文本框此前只有 Ctrl+A,复制/剪切/粘贴全是 no-op)。索引口径:selStart/selEnd/
+			// cursor 都是**码点**索引,与 buffer 的字节偏移之间走 Utf8Offset/Utf8Count。
+			// 回调由宿主注入(见 WuiContext::GetClipboard/SetClipboard);未注入则静默 no-op。
+			if (ctx.Input().Ctrl)
+			{
+				const bool hasSelection = selStart >= 0 && selEnd > selStart;
+				if (ctx.WasKeyPressed(KeyCodes::C) && ctx.SetClipboard && hasSelection)
+				{
+					const size_t from = Utf8Offset(buffer, selStart);
+					const size_t to = Utf8Offset(buffer, selEnd);
+					ctx.SetClipboard(std::string_view(buffer).substr(from, to - from));
+				}
+				if (ctx.WasKeyPressed(KeyCodes::X) && ctx.SetClipboard && hasSelection)
+				{
+					const size_t from = Utf8Offset(buffer, selStart);
+					const size_t to = Utf8Offset(buffer, selEnd);
+					ctx.SetClipboard(std::string_view(buffer).substr(from, to - from));
+					buffer.erase(from, to - from);
+					cursor = selStart;
+					selStart = -1;
+					selEnd = -1;
+				}
+				if (ctx.WasKeyPressed(KeyCodes::V) && ctx.GetClipboard)
+				{
+					std::string clip;
+					if (ctx.GetClipboard(clip) && !clip.empty())
+					{
+						// 单行控件:换行/回车直接丢掉(不插 '\n'、也不截成第一行),其余原样插入。
+						clip.erase(std::remove(clip.begin(), clip.end(), '\r'), clip.end());
+						clip.erase(std::remove(clip.begin(), clip.end(), '\n'), clip.end());
+						const bool replacing = selStart >= 0 && selEnd > selStart;
+						const int insertAt = replacing ? selStart : cursor;
+						const size_t byteAt = Utf8Offset(buffer, insertAt);
+						if (replacing)
+							buffer.erase(byteAt, Utf8Offset(buffer, selEnd) - byteAt);
+						buffer.insert(byteAt, clip);
+						cursor = insertAt + Utf8Count(clip);
+						selStart = -1;
+						selEnd = -1;
+					}
+				}
+			}
 			for (uint32_t codepoint : ctx.Input().TextInput)
 			{
 				if (selStart >= 0 && selEnd > selStart)

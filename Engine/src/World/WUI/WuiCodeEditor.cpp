@@ -140,6 +140,11 @@ namespace World::Wui
 			bool FindScanned = false;
 			int FindCurrent = -1;      // 当前命中下标(FindMatches 内;-1 = 无)
 			size_t FindAnchor = 0;     // 打开/上次导航落点:重扫后从这里往后挑当前命中
+			// MAT-UI6d:上一帧的代码区选区(码点索引)。条内再按 Ctrl+F 时用它区分
+			// "用户刚做出的新选区"(重播种)与"上一次查找留下的旧选区"(不重播种,否则
+			// 会把用户刚在查找框里改好的查询改写回旧文字)。
+			int LastSelectionStart = -1;
+			int LastSelectionEnd = -1;
 			// 同词高亮缓存:键 = (词, 文本版本, 大小写口径)。
 			std::vector<WuiCodeFindMatch> OccurrenceMatches;
 			std::string OccurrenceWord;
@@ -592,8 +597,10 @@ namespace World::Wui
 			return match.Start == selStart && match.End == selEnd;
 		}
 
-		// 打开查找条 / 条已打开时再按 Ctrl+F 的公共播种步骤(两条路径同一口径)。
+		// Ctrl+F 的播种步骤(只在**代码区持焦**那条路径调用;条内再按 Ctrl+F 不改查询,见下面)。
 		// 返回 true = 查询已按选区刷新并置好重扫标记(首个命中 = 选区起点处/之后的第一个命中)。
+		// 没有可用选区时返回 false(= 查询沿用上一次;光标所在单词**不**播种,这是 MAT-UI6c 定下
+		// 的口径:空选区按 Ctrl+F 就是空查询,用户想搜词先双击/拖选,或从剪贴板粘贴)。
 		bool ApplyFindQueryFromSelection(WuiCodeEditorState& state, const WuiTextBuffer& buffer)
 		{
 			const auto [selStart, selEnd] = buffer.Selection();
@@ -631,6 +638,16 @@ namespace World::Wui
 		const float lineHeight = (options.LineHeight > 0.0f ? options.LineHeight : 20.0f) * zoom;
 		result.UiZoom = zoom;
 		const uint64_t revisionAtStart = buffer.Revision();
+		// MAT-UI6d:代码区选区是否"这一帧刚变"(与上一帧的落点比)。条内 Ctrl+F 只在
+		// 刚变了才重播种 —— 上一次查找留下的旧选区不会被当成"用户的新选择"。
+		bool selectionChangedThisFrame = false;
+		{
+			const auto [selStartNow, selEndNow] = buffer.Selection();
+			selectionChangedThisFrame = state.LastSelectionStart != static_cast<int>(selStartNow)
+				|| state.LastSelectionEnd != static_cast<int>(selEndNow);
+			state.LastSelectionStart = static_cast<int>(selStartNow);
+			state.LastSelectionEnd = static_cast<int>(selEndNow);
+		}
 		const int lineCount = std::max(1, buffer.LineCount());
 		const float digitWidth = ctx.MeasureTextWidth("0", fontSize, WuiFontFamily::Monospace);
 		const float gutterWidth = options.GutterWidth > 0.0f
@@ -1194,15 +1211,17 @@ namespace World::Wui
 		if (state.FindVisible)
 		{
 			// 条内再按 Ctrl+F / Ctrl+H:焦点回到查找输入框(不改查询、不关条)。
-			// MAT-UI6c:Ctrl+F 另按"选中即搜索"刷新查询 —— 条已打开时在代码区选中别的内容
-			// 再按 Ctrl+F = 用新选区重搜(代码区持焦的那条路径已在上面的 focused 分支播种,
-			// 这里只补"焦点在查找框/替换框"的情形,同一帧不重复播种)。
+			// MAT-UI6c 口径:条已打开时在代码区选中**别的内容**再 Ctrl+F = 用新选区刷新查询。
+			// MAT-UI6d:只认"这一帧刚变"的选区。实测 bug:播种把命中选中后,用户在查找框里
+			// 改成别的查询(命中表随新查询重算,旧选区不再是"当前命中"),此时 Ctrl+F 会把
+			// 查询改写回旧选区文字 —— 等于吃掉用户刚打的字。新选区在代码区做,焦点必然会
+			// 先交给代码区(走上面的 focused 分支),这条路径只需覆盖"选区刚被改动"的帧。
 			const bool findKey = input.Ctrl && !input.Shift && ctx.WasKeyTriggered(KeyCodes::F);
 			const bool replaceKey = input.Ctrl && !input.Shift && !readOnly
 				&& ctx.WasKeyTriggered(KeyCodes::H);
 			if (findKey || replaceKey)
 			{
-				if (findKey && !focused)
+				if (findKey && !focused && selectionChangedThisFrame)
 					ApplyFindQueryFromSelection(state, buffer);
 				ctx.SetFocus(findFieldId);
 			}

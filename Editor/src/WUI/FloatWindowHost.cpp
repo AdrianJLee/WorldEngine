@@ -38,6 +38,22 @@ namespace World
 
 		m_Backend.UseLocalInput({ static_cast<float>(m_Window->GetWidth()), static_cast<float>(m_Window->GetHeight()) });
 		m_Backend.SetCursorWindow(m_Window->GetNativeWindow());
+		// MAT-UI8:本窗口 WUI 上下文接系统剪贴板(单行文本框的 Ctrl+C/X/V)。
+		// 浮窗与主窗口读写的都是同一份 OS 剪贴板,窗口之间复制粘贴因此天然互通。
+		m_Context.GetClipboard = [this](std::string& out)
+		{
+			if (!m_Window)
+				return false;
+			out = m_Window->GetClipboardText();
+			return !out.empty();
+		};
+		m_Context.SetClipboard = [this](std::string_view text)
+		{
+			if (!m_Window)
+				return false;
+			m_Window->SetClipboardText(std::string(text));
+			return true;
+		};
 		const bool skipTarget = std::getenv("WLD_FLOAT_NO_TARGET") != nullptr;
 		if (!skipTarget && Renderer::GetBackendName() == "vulkan")
 		{

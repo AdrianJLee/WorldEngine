@@ -200,6 +200,19 @@ namespace World
 		}
 		// 主窗口无边框:顶部第一行(挂靠栏)即窗口栏位,可拖动/关闭;边缘缩放保留。
 		Application::Get().GetWindow().SetFrameless(true);
+		// MAT-UI8:主窗口 WUI 上下文接系统剪贴板 —— 单行文本框(查找/替换、重命名、
+		// 属性文本、Combo 过滤等)的 Ctrl+C/X/V。独立窗口在 FloatWindowHost 里各自接线,
+		// 两者指向同一份 OS 剪贴板(Windows 走 glfwGet/SetClipboardString)。
+		m_WuiContext.GetClipboard = [](std::string& out)
+		{
+			out = Application::Get().GetWindow().GetClipboardText();
+			return !out.empty();
+		};
+		m_WuiContext.SetClipboard = [](std::string_view text)
+		{
+			Application::Get().GetWindow().SetClipboardText(std::string(text));
+			return true;
+		};
 		// Layout-S6:Game 模块是 Game 组件 schema 的注册者,也是自动存根生成的输入来源。
 		// 加载失败时下面会**停用**自动存根生成(见那儿的原因)。
 		std::string moduleError;
