@@ -43,6 +43,19 @@ namespace World::Wui
 			return buffer;
 		}
 
+		// MAT-UI3a:焦点环的两笔几何/透明度(见 WuiWidgets.h DrawFocusRing 的说明)。
+		// 属于控件几何,不进主题令牌(与 kColorSwatchWidth / kSplitterHitWidth 同一处理)。
+		constexpr float kFocusRingCoreAlpha = 0.72f;
+		constexpr float kFocusRingCoreThickness = 1.25f;
+		constexpr float kFocusRingGlowAlpha = 0.16f;
+		constexpr float kFocusRingGlowThickness = 2.5f;
+		constexpr float kFocusRingGlowInset = 1.5f;
+		// 取色器拖动跟随:一次按下归属哪一个子区域(0 = 没有拖动)。
+		constexpr int kColorDragNone = 0;
+		constexpr int kColorDragSv = 1;
+		constexpr int kColorDragHue = 2;
+		constexpr int kColorDragAlpha = 3;
+
 		// P1c-LIB2:有状态滚动条:拖动状态(按下时抓住的滑块内偏移)。拖动期间按
 		// "鼠标位置 − 抓点"反算滚动量,所以鼠标离开轨道也不会中断拖动(与 WuiSplitterState 同一套手感)。
 		struct WuiScrollBarState
@@ -409,10 +422,29 @@ namespace World::Wui
 		if (!ctx.ClipAllows(rect))
 			return;
 		// 走 overlay 命令层:焦点环在全部普通控件之后绘制,后画的兄弟控件不会盖住它
-		// (与 tooltip 同一套机制,不新增层级)。1.5px 描边、圆角取主题令牌。
+		// (与 tooltip 同一套机制,不新增层级)。
+		//
+		// MAT-UI3a(用户 2026-09-25「这个聚焦选中能否按照人类美学重新设计下」):从"1.5px 不透明
+		// 强调色硬描边"改成"圆角细描边 + 外发光",两条都以基色为色相、按低透明度画:
+		//   ① 主环:贴着控件矩形(不动几何),1.25px,圆角 = theme.Radius,alpha × 0.72;
+		//   ② 发光:矩形外扩 1.5px,2.5px,圆角 = theme.Radius + 2.5,alpha × 0.16 —— 只添氛围,
+		//      不占布局、不进命中、不动 a11y(环是纯绘制)。
+		// 可辨识性优先:主环 alpha 0.72 + 1.25px 实线在明暗两套主题上都明确可辨(比旧口径低一档
+		// 透明度,但描边更圆更细,视觉噪声小得多);禁用件仍走各自"不画环"的分支,与本函数无关。
+		// 顺序:主环在前(投影/断言里它就是"这条焦点环"),发光在后(纯附加)。
+		const WuiColor base = ringColor != nullptr ? *ringColor : theme.FocusRing;
+		const auto scaled = [](const WuiColor& color, float alphaScale)
+		{
+			return WuiColor { color.R, color.G, color.B,
+				std::clamp(color.A * alphaScale, 0.0f, 1.0f) };
+		};
 		ctx.PushOverlay();
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
-			ringColor != nullptr ? *ringColor : theme.FocusRing, theme.Radius, 1.5f });
+			scaled(base, kFocusRingCoreAlpha), theme.Radius, kFocusRingCoreThickness });
+		const float glow = kFocusRingGlowInset;
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline,
+			{ rect.X - glow, rect.Y - glow, rect.W + glow * 2.0f, rect.H + glow * 2.0f },
+			scaled(base, kFocusRingGlowAlpha), theme.Radius + 2.5f, kFocusRingGlowThickness });
 		ctx.PopOverlay();
 	}
 
@@ -1387,8 +1419,27 @@ namespace World::Wui
 			std::max(1.0f, valueRect.W - 8.0f - unitW), valueRect.H };
 
 		const bool hovered = ctx.IsHovered(rect);
-		const bool hoverBar = !state.Editing && ctx.IsHovered(bar);
-		const bool hoverValue = !state.Editing && ctx.IsHovered(valueRect);
+		// MAT-UI3a:条体/值区的**原始**命中(不看编辑态)—— 用于"编辑态下按条体就立刻拖动"这一步。
+		const bool hoverBarRaw = ctx.IsHovered(bar);
+		const bool hoverValueRaw = ctx.IsHovered(valueRect);
+		// 编辑态里按条体 = 先提交编辑(与 Enter 同一条路径:非法文本保留原值并给红框),再把这帧
+		// 交给下面的"条体按下"分支 —— 用户不必先点别处退出编辑(用户原话:「点击右侧值后左侧滑条
+		// 没法滑动了」)。按值区仍继续编辑;按控件外仍是提交并结束。
+		if (state.Editing && ctx.Input().MouseClicked[0] && hoverBarRaw)
+		{
+			float parsed = 0.0f;
+			if (ParseFloatText(state.Buffer, &parsed))
+			{
+				const float next = std::max(lo, std::min(hi, parsed));
+				changed = changed || next != value;
+				value = next;
+			}
+			else
+				state.ErrorFrames = 90;   // 与 Enter 提交失败同一条反馈:保留原值 + 缓冲
+			EndNumericEdit(state);
+		}
+		const bool hoverBar = !state.Editing && hoverBarRaw;
+		const bool hoverValue = !state.Editing && hoverValueRaw;
 		if (state.Editing)
 		{
 			bool submitted = false, cancelled = false;
@@ -1551,6 +1602,24 @@ namespace World::Wui
 
 			if (steppers)
 			{
+				// MAT-UI3a:步进钮与"正在编辑的缓冲"是同一类冲突(与 DragBar 的"值编辑挡住条体拖动"
+				// 同源)—— 点 +/− 前先把缓冲提交,否则这次步进会被随后的 Enter/点别处用旧缓冲覆盖,
+				// 用户看到"按了 + 却没有变化"。非法缓冲沿用旧口径:保留原值 + 红框,并结束编辑。
+				const bool stepperPress = ctx.Input().MouseClicked[0]
+					&& (ctx.IsHovered(decRect) || ctx.IsHovered(incRect));
+				if (stepperPress && state.Editing)
+				{
+					int64_t parsed = 0;
+					if (ParseIntText(state.Buffer, &parsed))
+					{
+						const int64_t next = std::max(lo, std::min(hi, parsed));
+						changed = changed || next != value;
+						value = next;
+					}
+					else
+						state.ErrorFrames = 90;
+					EndNumericEdit(state);
+				}
 				if (ctx.IsClicked(decRect))
 				{
 					const int64_t next = std::max(lo, value - 1);
@@ -2499,6 +2568,9 @@ namespace World::Wui
 			float S = 0.0f;
 			float V = 1.0f;
 			bool HsvValid = false;
+			// MAT-UI3a:拖动跟随的归属(0 = 无;1 = SV 板;2 = 色相条;3 = alpha 条)。
+			// 按下那一刻定归属,松手才清 —— 期间指针移到哪儿都继续按当前坐标夹取更新。
+			int DragTarget = 0;
 		};
 
 		// 分隔条:拖动锚点(按下那一帧的值与轴向坐标)。拖动期间按"锚点 + 轴向位移"累加,
@@ -2771,7 +2843,11 @@ namespace World::Wui
 			}
 		}
 		if (!ctx.IsPopupOpen(id))
+		{
+			// 弹层关闭 = 拖动收口(不留幽灵捕获:否则下次打开时第一帧会用旧归属改写颜色)。
+			state.DragTarget = kColorDragNone;
 			return false;
+		}
 
 		// ---- 弹层(与 Combo 同一套 ctx.OpenPopup/ClosePopup/IsPopupOpen,不自造)----
 		ctx.PushOverlay();
@@ -2827,17 +2903,23 @@ namespace World::Wui
 			RegisterAccessNode(DerivedChildId(id, ".sv.", 0), "color-area", svRect,
 				Wui::Tr("wui.color.saturation_value", "Saturation / Value"),
 				FloatToText(state.S) + "," + FloatToText(state.V), true, true, false);
-			// 交互:按下即定位,按住拖动持续更新(取色器的标准手感)。
-			const bool active = ctx.IsHovered(svRect)
-				&& (ctx.Input().MouseClicked[0] || ctx.Input().MouseDown[0]);
-			if (active)
+			// 交互(MAT-UI3a):按下起手 → **松手才结束**的拖动跟随。起手必须落在 SV 区内(或按住
+			// 扫入,兼容旧口径);起手之后指针移到哪儿都用**当前坐标**按 SV 区夹取更新,每一帧都写回
+			// —— 旧实现每帧要求 `IsHovered(svRect)`,拖出那块 110px 高的板就停更(用户报的
+			// 「选取颜色板左键拖拽不松开,颜色不会变」)。
+			if (ctx.Input().MouseClicked[0] && ctx.IsHovered(svRect))
+				state.DragTarget = kColorDragSv;
+			else if (state.DragTarget == kColorDragNone && ctx.Input().MouseDown[0] && ctx.IsHovered(svRect))
+				state.DragTarget = kColorDragSv;
+			if (state.DragTarget == kColorDragSv)
 			{
 				state.S = std::clamp((ctx.Input().MousePos.x - svRect.X) / std::max(1.0f, svRect.W), 0.0f, 1.0f);
 				state.V = 1.0f - std::clamp((ctx.Input().MousePos.y - svRect.Y) / std::max(1.0f, svRect.H), 0.0f, 1.0f);
-				if (ctx.Input().MouseClicked[0])
-					ctx.SetCursor(WuiCursor::Hand);
+				ctx.SetCursor(WuiCursor::Hand);
+				if (!ctx.Input().MouseDown[0])
+					state.DragTarget = kColorDragNone;   // release 帧:落最终值后收口
 			}
-			if (ctx.IsHovered(svRect))
+			else if (ctx.IsHovered(svRect))
 				ctx.SetCursor(WuiCursor::Hand);
 		}
 
@@ -2864,13 +2946,20 @@ namespace World::Wui
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline, thumb, { 1, 1, 1, 1 }, 2.0f, 2.0f });
 			RegisterAccessNode(DerivedChildId(id, ".hue.", 0), "slider", hueRect,
 				Wui::Tr("wui.color.hue", "Hue"), FloatToText(state.H) + "°", true, true, false);
-			if (ctx.IsHovered(hueRect) && (ctx.Input().MouseClicked[0] || ctx.Input().MouseDown[0]))
+			// 交互与 SV 板同一口径(MAT-UI3a):按下起手 → 松手才结束;色相条只有 12px 高,
+			// 旧实现"每帧要求悬停在条内"最容易表现为"拖到一半就不动了"。
+			if (ctx.Input().MouseClicked[0] && ctx.IsHovered(hueRect))
+				state.DragTarget = kColorDragHue;
+			else if (state.DragTarget == kColorDragNone && ctx.Input().MouseDown[0] && ctx.IsHovered(hueRect))
+				state.DragTarget = kColorDragHue;
+			if (state.DragTarget == kColorDragHue)
 			{
 				state.H = std::clamp((ctx.Input().MousePos.x - hueRect.X) / std::max(1.0f, hueRect.W), 0.0f, 1.0f) * 360.0f;
-				if (ctx.Input().MouseClicked[0])
-					ctx.SetCursor(WuiCursor::Hand);
+				ctx.SetCursor(WuiCursor::Hand);
+				if (!ctx.Input().MouseDown[0])
+					state.DragTarget = kColorDragNone;
 			}
-			if (ctx.IsHovered(hueRect))
+			else if (ctx.IsHovered(hueRect))
 				ctx.SetCursor(WuiCursor::Hand);
 		}
 
@@ -2903,14 +2992,20 @@ namespace World::Wui
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline, thumb, { 1, 1, 1, 1 }, 2.0f, 2.0f });
 			RegisterAccessNode(DerivedChildId(id, ".alpha.", 0), "slider", alphaRect,
 				Wui::Tr("wui.color.alpha", "Alpha"), FloatToText(rgba.a), true, true, false);
-			if (ctx.IsHovered(alphaRect) && (ctx.Input().MouseClicked[0] || ctx.Input().MouseDown[0]))
+			// 交互与色相条同一口径(MAT-UI3a):按下起手 → 松手才结束。
+			if (ctx.Input().MouseClicked[0] && ctx.IsHovered(alphaRect))
+				state.DragTarget = kColorDragAlpha;
+			else if (state.DragTarget == kColorDragNone && ctx.Input().MouseDown[0] && ctx.IsHovered(alphaRect))
+				state.DragTarget = kColorDragAlpha;
+			if (state.DragTarget == kColorDragAlpha)
 			{
 				rgba.a = std::clamp((ctx.Input().MousePos.x - alphaRect.X) / std::max(1.0f, alphaRect.W), 0.0f, 1.0f);
 				changed = true;
-				if (ctx.Input().MouseClicked[0])
-					ctx.SetCursor(WuiCursor::Hand);
+				ctx.SetCursor(WuiCursor::Hand);
+				if (!ctx.Input().MouseDown[0])
+					state.DragTarget = kColorDragNone;
 			}
-			if (ctx.IsHovered(alphaRect))
+			else if (ctx.IsHovered(alphaRect))
 				ctx.SetCursor(WuiCursor::Hand);
 		}
 
@@ -3111,13 +3206,14 @@ namespace World::Wui
 		return changed;
 	}
 
-	// ---- P4-UX12 / U2C:向量字段 / 空状态 ----
+	// ---- P4-UX12 / U2C / MAT-UI3a:向量字段(2/3/4 分量共用同一份实现) / 空状态 ----
 	namespace
 	{
-		// 向量字段的持久化状态:同一时刻只可能有一个分量处于"按下/拖动/编辑",所以三个分量共用一份
+		// 向量字段的持久化状态:同一时刻只可能有一个分量处于"按下/拖动/编辑",所以所有分量共用一份
 		// 状态,用 Axis 记住是哪一个(与 DragFloat 的 WuiNumericState 同族,但**不能**共用 id ——
-		// Persist 用同一 id 换类型会按错误类型解释内存)。
-		struct WuiVec3FieldState
+		// Persist 用同一 id 换类型会按错误类型解释内存)。MAT-UI3a 起 2/3/4 分量共用本结构:
+		// 分量的上限由调用参数 count 决定,越界的 Axis 在 Core 里被夹回 [0,count)。
+		struct WuiVecFieldState
 		{
 			bool Pressed = false;
 			bool Dragging = false;
@@ -3133,33 +3229,45 @@ namespace World::Wui
 
 		// 分量左侧的轴标签列宽(派工确认 12px):属于控件几何,不进主题令牌(与 U2B 的
 		// kColorSwatchWidth / kSplitterHitWidth 同一处理)。
-		constexpr float kVec3AxisLabelWidth = 12.0f;
+		constexpr float kVecAxisLabelWidth = 12.0f;
 		// 空状态左右安全边距与 action 按钮的内边距(派工确认 24px)。
 		constexpr float kEmptyStateSideMargin = 24.0f;
 		constexpr float kEmptyStateButtonPad = 24.0f;
 
 		// 分量数值文本:两位小数(派工确认)。显示与编辑缓冲共用同一套文本,
 		// 避免"看到的数"与"点进去的数"不一致(DragFloat 用同一策略,只是三位小数)。
-		std::string Vec3AxisText(float value)
+		std::string VecAxisText(float value)
 		{
 			char buffer[32] = {};
 			std::snprintf(buffer, sizeof(buffer), "%.2f", value);
 			return buffer;
 		}
 
-		// 整体无障碍节点的 value:"x,y,z"(分量顺序固定,脚本可直接按 ',' 切分)。
-		std::string Vec3Text(const glm::vec3& value)
+		// 整体无障碍节点的 value:"x,y[,z[,w]]"(分量顺序固定,脚本可直接按 ',' 切分)。
+		std::string VecFieldText(const float* value, int count)
 		{
-			return Vec3AxisText(value.x) + "," + Vec3AxisText(value.y) + "," + Vec3AxisText(value.z);
+			std::string text;
+			for (int axis = 0; axis < count; ++axis)
+				text += (axis == 0 ? "" : ",") + VecAxisText(value[axis]);
+			return text;
 		}
+
+		// 标签一律大写单字母(与 Vec3Field 既有外观一致:11px Caption 下大写更清楚)。
+		const char* const kVec2AxisLabels[2] = { "X", "Y" };
+		const char* const kVec3AxisLabels[3] = { "X", "Y", "Z" };
+		const char* const kVec4AxisLabels[4] = { "X", "Y", "Z", "W" };
 	}
 
-	bool Vec3Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec3& value, float speed,
-		float minValue, float maxValue, const WuiTheme& theme, int layout)
+	// 向量字段唯一实现:count = 2/3/4 的分量数,columns = 横排(layout 0)时的每行列数。
+	// count==3 / columns==3 / labels=X,Y,Z 时输出与 P4-UX12 的 Vec3Field **逐命令相同**
+	// (槽宽公式、(slotW+gap)*axis 的排布、子节点 id ".axis."、kind 前缀都由同一份代码给出)。
+	bool VecFieldCore(WuiContext& ctx, WuiId id, const WuiRect& rect, float* value, int count,
+		int columns, const char* roleKind, const char* axisKind, const char* const* axisLabels,
+		float speed, float minValue, float maxValue, const WuiTheme& theme, int layout)
 	{
 		const bool focused = ctx.Focus() == id;
-		WuiVec3FieldState& state = ctx.Persist<WuiVec3FieldState>(id, {});
-		if (state.Axis < 0 || state.Axis > 2)
+		WuiVecFieldState& state = ctx.Persist<WuiVecFieldState>(id, {});
+		if (state.Axis < 0 || state.Axis >= count)
 			state.Axis = 0;
 		// min >= max = 无界(与 DragFloat 的哨兵逐条一致:既有调用点的 (-1, 1) 写法不必改)。
 		const float lo = minValue < maxValue ? minValue : -1e30f;
@@ -3167,25 +3275,35 @@ namespace World::Wui
 		// 键盘步长取 speed 的绝对值(与 DragFloat 一致;speed 传 0 时退化为 1)。
 		const float keyboardStep = std::fabs(speed) > 0.0f ? std::fabs(speed) : 1.0f;
 		const bool vertical = layout == 1;
-		RegisterAccessNode(id, "vec3-field", rect, std::string(), Vec3Text(value), true, true, focused);
+		RegisterAccessNode(id, roleKind, rect, std::string(), VecFieldText(value, count), true, true, focused);
 		ctx.RegisterFocusable(id, rect);
 		bool changed = false;
 
-		// 每个分量的槽 = 轴标签(12px)+ 输入框;横排三等分(分量之间留 PadSmall),竖排三行等分高度。
+		// 每个分量的槽 = 轴标签(12px)+ 输入框;横排按 columns 列分栏(列间留 PadSmall),
+		// 竖排 count 行等分高度。count==3/columns==3 == 既有 Vec3Field 的横排三等分。
 		const float axisGap = vertical ? 0.0f : theme.PadSmall;
 		const auto slotRect = [&](int axis) -> WuiRect
 		{
 			if (vertical)
 			{
-				const float rowH = rect.H / 3.0f;
+				const float rowH = rect.H / static_cast<float>(count);
 				return { rect.X, rect.Y + rowH * static_cast<float>(axis), rect.W, rowH };
 			}
-			const float slotW = std::max(0.0f, (rect.W - axisGap * 2.0f) / 3.0f);
-			return { rect.X + (slotW + axisGap) * static_cast<float>(axis), rect.Y, slotW, rect.H };
+			const float rows = static_cast<float>((count + columns - 1) / columns);
+			const float rowsClamped = std::max(1.0f, rows);
+			const float slotW = std::max(0.0f,
+				(rect.W - axisGap * static_cast<float>(columns - 1)) / static_cast<float>(columns));
+			const float slotH = rect.H / rowsClamped;
+			const int row = axis / columns;
+			const int column = axis % columns;
+			// row == 0 时显式用 rect.Y(不做 `+ slotH * 0`,保证与既有 Vec3Field 的矩形逐位相同)。
+			const float slotY = row == 0 ? rect.Y : rect.Y + slotH * static_cast<float>(row);
+			return { rect.X + (slotW + axisGap) * static_cast<float>(column),
+				slotY, slotW, slotH };
 		};
 		const auto fieldRect = [&](const WuiRect& slot) -> WuiRect
 		{
-			const float labelW = std::min(kVec3AxisLabelWidth, slot.W);
+			const float labelW = std::min(kVecAxisLabelWidth, slot.W);
 			return { slot.X + labelW, slot.Y, std::max(0.0f, slot.W - labelW), slot.H };
 		};
 
@@ -3240,7 +3358,7 @@ namespace World::Wui
 		{
 			if (ctx.Input().MouseClicked[0])
 			{
-				for (int axis = 0; axis < 3; ++axis)
+				for (int axis = 0; axis < count; ++axis)
 				{
 					if (!ctx.IsHovered(slotRect(axis)))
 						continue;
@@ -3274,7 +3392,7 @@ namespace World::Wui
 					if (!state.Dragging)
 					{
 						state.Editing = true;
-						state.Buffer = Vec3AxisText(value[state.Axis]);
+					state.Buffer = VecAxisText(value[state.Axis]);
 						state.Cursor = -1;
 						state.SelStart = 0;
 						state.SelEnd = Utf8Count(state.Buffer);
@@ -3304,9 +3422,8 @@ namespace World::Wui
 			}
 		}
 
-		static const char* const kAxisLabels[3] = { "X", "Y", "Z" };
 		const float textSize = theme.FontSizeBody;
-		for (int axis = 0; axis < 3; ++axis)
+		for (int axis = 0; axis < count; ++axis)
 		{
 			const WuiRect slot = slotRect(axis);
 			const WuiRect field = fieldRect(slot);
@@ -3315,20 +3432,20 @@ namespace World::Wui
 			const bool axisEditing = state.Editing && axisCurrent;
 			const bool hovered = ctx.IsHovered(slot);
 			// 子节点:交互可点(脚本注入坐标 = 鼠标点该分量),但不是独立焦点项(焦点始终在整体上)。
-			RegisterAccessNode(DerivedChildId(id, ".axis.", static_cast<size_t>(axis)), "vec3-axis", slot,
-				kAxisLabels[axis], Vec3AxisText(value[axis]));
+			RegisterAccessNode(DerivedChildId(id, ".axis.", static_cast<size_t>(axis)), axisKind, slot,
+				axisLabels[axis], VecAxisText(value[axis]));
 			if (hovered)
 				ctx.SetCursor(axisEditing ? WuiCursor::IBeam : WuiCursor::ResizeEW);
 			// 轴标签:拖动中的分量用强调色高亮,其余 = 次要色 + Caption 字号。
 			ctx.Commands().push_back({ WuiDrawKind::Text,
 				{ slot.X, slot.Y + (slot.H - theme.FontSizeCaption) * 0.5f, 0, 0 },
-				axisDragging ? theme.Accent : theme.TextMuted, 0, 1.0f, kAxisLabels[axis],
+				axisDragging ? theme.Accent : theme.TextMuted, 0, 1.0f, axisLabels[axis],
 				theme.FontSizeCaption, false });
 			ctx.Commands().push_back({ WuiDrawKind::Rect, field,
 				axisEditing ? theme.ButtonHover : theme.ButtonBg, theme.Radius });
 			ctx.Commands().push_back({ WuiDrawKind::RectOutline, field,
 				(axisEditing || hovered || axisDragging) ? theme.Accent : theme.Border, theme.Radius, 1.0f });
-			const std::string text = axisEditing ? state.Buffer : Vec3AxisText(value[axis]);
+			const std::string text = axisEditing ? state.Buffer : VecAxisText(value[axis]);
 			WuiDrawCommand command { WuiDrawKind::Text,
 				{ field.X + 5.0f, field.Y + (field.H - textSize) * 0.5f, 0, 0 },
 				axisDragging ? theme.Accent : theme.Text, 0, 1.0f, text, textSize, false };
@@ -3343,6 +3460,31 @@ namespace World::Wui
 		}
 		DrawFocusRing(ctx, rect, id, theme);
 		return changed;
+	}
+
+	// 三个公开入口都只是"填参数":同一份 VecFieldCore,所以手感/子节点/无障碍口径天然一致。
+	bool Vec2Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec2& value, float speed,
+		float minValue, float maxValue, const WuiTheme& theme, int layout)
+	{
+		return VecFieldCore(ctx, id, rect, &value[0], 2, 2, "vec2-field", "vec2-axis",
+			kVec2AxisLabels, speed, minValue, maxValue, theme, layout);
+	}
+
+	bool Vec3Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec3& value, float speed,
+		float minValue, float maxValue, const WuiTheme& theme, int layout)
+	{
+		return VecFieldCore(ctx, id, rect, &value[0], 3, 3, "vec3-field", "vec3-axis",
+			kVec3AxisLabels, speed, minValue, maxValue, theme, layout);
+	}
+
+	// Vec4 的默认排布 = 2×2(columns = 2):四段并排会把每个输入框压到 45px 以下
+	//(标签固定 12px + 两位小数),2×2 在材质参数行/属性面板的 ~200-300 宽控件列里
+	// 给每个分量约 100-145px,读数与拖动手感与 Vec3Field 一致;窄列用 layout=1 四行。
+	bool Vec4Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& value, float speed,
+		float minValue, float maxValue, const WuiTheme& theme, int layout)
+	{
+		return VecFieldCore(ctx, id, rect, &value[0], 4, 2, "vec4-field", "vec4-axis",
+			kVec4AxisLabels, speed, minValue, maxValue, theme, layout);
 	}
 
 	bool EmptyState(WuiContext& ctx, const WuiRect& rect, const std::string& glyph, const std::string& title,

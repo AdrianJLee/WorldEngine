@@ -108,6 +108,14 @@ namespace
 		return Near(a.R, b.R) && Near(a.G, b.G) && Near(a.B, b.B) && Near(a.A, b.A);
 	}
 
+	// MAT-UI3a:焦点环从"不透明硬描边"改成"基色 × 低透明度"的两笔(主环 alpha × 0.72
+	// + 外发光 alpha × 0.16,见 WuiWidgets.h DrawFocusRing)。这里的换算必须与控件同一口径,
+	// 否则"两面共用同一份 DrawFocusRing"的断言会被颜色漂移掩盖。
+	WuiColor DimmedRing(const WuiColor& base, float alphaScale)
+	{
+		return WuiColor { base.R, base.G, base.B, base.A * alphaScale };
+	}
+
 	ButtonPaintFields ProjectButtonPaint(const std::vector<WuiDrawCommand>& commands,
 		const std::vector<WuiDrawCommand>& overlay)
 	{
@@ -3156,17 +3164,18 @@ int main()
 			CHECK(CommandStreamHash(brokenValues) == CommandStreamHash(plainHover));
 
 			// 焦点:border.focus 同时改按钮描边与焦点环(环在 overlay 层);未覆盖 = 主题 FocusRing。
+			// MAT-UI3a:焦点环是两笔(主环 + 外发光,见 §33),这里只断言"颜色跟着基色走"。
 			std::vector<WuiDrawCommand> focusPlain;
 			std::vector<WuiDrawCommand> focusPlainOverlay;
 			DrawButton({}, "focus", focusPlain, focusPlainOverlay);
-			CHECK(focusPlainOverlay.size() == 1);
+			CHECK(focusPlainOverlay.size() == 2);
 			CHECK(Near(focusPlainOverlay[0].Color.R, theme.FocusRing.R));
 			std::vector<WuiDrawCommand> focusOverride;
 			std::vector<WuiDrawCommand> focusOverrideOverlay;
 			DrawButton({ { "border.focus", "#FF00FF" } }, "focus", focusOverride, focusOverrideOverlay);
 			CHECK(Near(focusOverride[1].Color.R, 1.0f) && Near(focusOverride[1].Color.G, 0.0f)
 				&& Near(focusOverride[1].Color.B, 1.0f));
-			CHECK(focusOverrideOverlay.size() == 1);
+			CHECK(focusOverrideOverlay.size() == 2);
 			CHECK(Near(focusOverrideOverlay[0].Color.R, 1.0f)
 				&& Near(focusOverrideOverlay[0].Color.G, 0.0f)
 				&& Near(focusOverrideOverlay[0].Color.B, 1.0f));
@@ -3373,10 +3382,12 @@ int main()
 			CHECK(SameColor(retainedFields.Text, theme.Text) && SameColor(immediateFields.Text, theme.Accent));
 
 			PaintPair("focus", true, nullptr, deltas, retainedFields, immediateFields);
-			// 焦点环两面共用 DrawFocusRing(圆角 = 主题令牌)→ 环本身没有残差;差异只在填充/描边。
+			// 焦点环两面共用 DrawFocusRing(圆角 = 主题令牌,颜色 = 主题 FocusRing × 主环 alpha)
+			// → 环本身没有残差;差异只在填充/描边。
 			ExpectDeltas(deltas, { "fill.rounding", "border.color", "border.rounding" }, __LINE__);
 			CHECK(retainedFields.RingDrawn && immediateFields.RingDrawn);
-			CHECK(SameColor(retainedFields.Ring, theme.FocusRing) && SameColor(immediateFields.Ring, theme.FocusRing));
+			const WuiColor expectedRing = DimmedRing(theme.FocusRing, 0.72f);
+			CHECK(SameColor(retainedFields.Ring, expectedRing) && SameColor(immediateFields.Ring, expectedRing));
 
 			// 禁用态未覆盖:保留模式用自身 Enabled(主题禁用令牌 ContentBg/TextDisabled,且旧口径**不描边**);
 			// 立即模式要调用方给禁用外观 —— 展示台走 DisabledTheme 令牌替换,直接调用时只有样式里的
@@ -3443,8 +3454,11 @@ int main()
 			PaintPair("focus", true, &covered, deltas, retainedFields, immediateFields);
 			ExpectDeltas(deltas, { "fill.rounding", "border.rounding" }, __LINE__);
 			CHECK(Near(retainedFields.Fill.R, 0.90f));
-			CHECK(Near(retainedFields.Ring.G, 0.90f));       // border.focus 覆盖同时是焦点环颜色
+			// MAT-UI3a:border.focus 覆盖是焦点环的**基色**(RGB 不动);"低透明度"只落在 alpha 上
+			// (1.0 × 0.72 = 主环 alpha)。
+			CHECK(Near(retainedFields.Ring.G, 0.90f));
 			CHECK(Near(immediateFields.Ring.G, 0.90f));
+			CHECK(Near(retainedFields.Ring.A, 0.72f) && Near(immediateFields.Ring.A, 0.72f));
 
 			// 优先级:hover 赢 focus(两面同一判据)。
 			PaintPair("hover-focus", true, &covered, deltas, retainedFields, immediateFields);
@@ -3472,6 +3486,423 @@ int main()
 			CHECK(SameColor(onlyFields.Fill, theme.ButtonBg) && SameColor(onlyFields.Text, theme.Text));
 			CHECK(Near(onlyFields.TextX, rect.X + 8.0f) && Near(onlyFields.FontSize, 15.0f) && !onlyFields.Bold);
 			CHECK(!onlyFields.RingDrawn);
+		}
+
+		// 29. MAT-UI3a:取色器(色板/色相条/alpha 条)的**按住拖动逐帧跟随**。
+		//     用户原话:「选取颜色板左键拖拽不松开,颜色不会变」。复现口径 = 逐帧注入
+		//     press → move×N → release(不是"点击两帧"),并且**每一步都读值**:
+		//     ① 区内每一步都必须改值;
+		//     ② 拖出那块 110px 高的色板/12px 高的条(指针离开命中区)仍必须继续按当前坐标夹取更新
+		//        —— 旧实现每帧要求 `IsHovered(子区域)`,这里就是"拖到一半不动了"的真因;
+		//     ③ 松手帧落最终值,松手后同一位置不再改值(捕获收口)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme {};
+			const WuiId colorId = HashId("test.mat-ui3a.colorfield");
+			const WuiRect fieldRect { 100.0f, 100.0f, 200.0f, 22.0f };
+			glm::vec4 color { 1.0f, 0.0f, 0.0f, 1.0f };   // 纯红:H=0,S=1,V=1 → 色相可观察
+			WuiContext ctx;
+			const auto Draw = [&](const WuiInputState& input)
+			{
+				accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+				accessibility.SetPanel("test.mat-ui3a");
+				ctx.BeginFrame(input);
+				const bool changed = ColorField(ctx, colorId, fieldRect, color, theme);
+				ctx.EndFrame();
+				return changed;
+			};
+			const auto ChildRect = [&](const char* suffix, size_t index)
+			{
+				const std::string key = std::to_string(colorId) + suffix + std::to_string(index);
+				const WuiAccessNode* node = accessibility.Find(HashId(key.c_str()));
+				return node != nullptr ? node->Rect : WuiRect { 0.0f, 0.0f, 0.0f, 0.0f };
+			};
+			const auto Frame = [](glm::vec2 pos, bool down, bool clicked, bool released)
+			{
+				WuiInputState input;
+				input.ViewportSize = { 1280.0f, 720.0f };
+				input.MousePos = pos;
+				input.MouseDown[0] = down;
+				input.MouseClicked[0] = clicked;
+				input.MouseReleased[0] = released;
+				return input;
+			};
+			// 打开弹层:折叠态字段上的 press 帧(点击即展开,与既有口径一致)。
+			Draw(Frame({ fieldRect.X + 20.0f, fieldRect.Y + 11.0f }, true, true, false));
+			CHECK(ctx.IsPopupOpen(colorId));
+			const WuiRect sv = ChildRect(".sv.", 0);
+			const WuiRect hue = ChildRect(".hue.", 0);
+			const WuiRect alpha = ChildRect(".alpha.", 0);
+			CHECK(sv.W > 20.0f && sv.H > 20.0f);
+			CHECK(hue.W > 20.0f && hue.H > 0.0f);
+			CHECK(alpha.W > 20.0f && alpha.H > 0.0f);
+			// ---- ① 色板:press → move×4(后两步在色板外)→ release ----
+			const std::vector<glm::vec2> svPath {
+				{ sv.X + sv.W * 0.60f, sv.Y + sv.H * 0.40f },
+				{ sv.X + sv.W * 0.90f, sv.Y + sv.H * 0.20f },
+				{ sv.X + sv.W * 2.00f, sv.Y + sv.H * 2.00f },   // 出区(右下)→ S=1,V=0(黑)
+				{ sv.X - sv.W * 0.50f, sv.Y - sv.H * 0.50f },   // 出区(左上)→ S=0,V=1(白)
+			};
+			CHECK(Draw(Frame(svPath[0], true, true, false)));
+			std::vector<glm::vec4> held;
+			held.push_back(color);
+			for (size_t step = 1; step < svPath.size(); ++step)
+			{
+				CHECK(Draw(Frame(svPath[step], true, false, false)));
+				held.push_back(color);
+			}
+			CHECK(held[0] != held[1] && held[1] != held[2] && held[2] != held[3]);
+			// 出区那两帧是被夹取后的结果:右下 = 黑(S=1,V=0)、左上 = 白(S=0,V=1)。
+			CHECK(Near(held[2].g, 0.0f) && Near(held[2].b, 0.0f));
+			CHECK(held[3].r > 0.999f && held[3].g > 0.999f && held[3].b > 0.999f);
+			// 松手帧:落最终值(松手位置 = 区内的 S=0.25 / V=0.25,H 仍为 0 → HSV(0,0.25,0.25)
+			// = (0.25, 0.1875, 0.1875):c = V·S = 0.0625、m = V − c = 0.1875)。
+			const glm::vec2 releasePoint { sv.X + sv.W * 0.25f, sv.Y + sv.H * 0.75f };
+			CHECK(Draw(Frame(releasePoint, false, false, true)));
+			CHECK(Near(color.r, 0.25f) && Near(color.g, 0.1875f) && Near(color.b, 0.1875f));
+			// 松手后同一位置不再改值(捕获收口,不会"幽灵拖动")。
+			CHECK(!Draw(Frame(releasePoint, false, false, false)));
+			// ---- ② 色相条:先把 S/V 拨到 1/1,再"起手在条内、跟到条外" ----
+			const glm::vec2 saturated { sv.X + sv.W - 0.25f, sv.Y + 0.25f };   // S≈1,V≈1(纯色)
+			Draw(Frame(saturated, true, true, false));
+			Draw(Frame(saturated, false, false, true));
+			CHECK(color.r > 0.99f && color.g < 0.01f && color.b < 0.01f);   // 仍是纯红(H=0)
+			Draw(Frame({ hue.X + 1.0f, hue.Y + hue.H * 0.5f }, true, true, false));
+			const bool hueChanged = Draw(Frame({ hue.X + hue.W * 0.5f, hue.Y + hue.H + 6.0f }, true, false, false));
+			CHECK(hueChanged);
+			CHECK(color.r < 0.02f && color.g > 0.98f && color.b > 0.98f);   // H=180° 青
+			Draw(Frame({ hue.X + hue.W * 0.5f, hue.Y + hue.H + 6.0f }, false, false, true));
+			// ---- ③ alpha 条:同样"起手在条内、跟到条外" ----
+			Draw(Frame({ alpha.X + alpha.W * 0.5f, alpha.Y + alpha.H * 0.5f }, true, true, false));
+			const bool alphaChanged = Draw(Frame({ alpha.X - 30.0f, alpha.Y + alpha.H + 8.0f }, true, false, false));
+			CHECK(alphaChanged);
+			CHECK(Near(color.a, 0.0f));   // 出区左侧 = 夹到 0
+			Draw(Frame({ alpha.X - 30.0f, alpha.Y + alpha.H + 8.0f }, false, false, true));
+			CHECK(Near(color.a, 0.0f));
+			// 弹层仍然开着(拖动过程中不允许被误关),RGB 已经跟着走。
+			CHECK(ctx.IsPopupOpen(colorId));
+			CHECK(color.r < 0.02f && color.g > 0.98f && color.b > 0.98f);
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
+		// 30. MAT-UI3a:DragBar 的"值编辑态挡住条体拖动"。
+		//     用户原话:「在点击右侧值后左侧滑条没法滑动了」。逐帧口径:点击值区 → 进入文本编辑 →
+		//     **不先点别处**直接按条体 → 同一帧先提交编辑、再按像素比例改值,并逐帧跟随到松手。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme {};
+			const WuiId barId = HashId("test.mat-ui3a.dragbar");
+			const WuiRect barRect { 100.0f, 200.0f, 200.0f, 22.0f };
+			// 控件内部几何:valueW = max(40, min(style.ValueWidth = 56, 200×0.45 = 90)) = 56,
+			// bar = {100,200,138,22},值区 = {244,200,56,22}。
+			const WuiRect barZone { 100.0f, 200.0f, 138.0f, 22.0f };
+			const WuiRect valueZone { 244.0f, 200.0f, 56.0f, 22.0f };
+			float value = 0.45f;
+			const WuiNumberStyle style {};
+			WuiContext ctx;
+			const auto Draw = [&](const WuiInputState& input)
+			{
+				accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+				accessibility.SetPanel("test.mat-ui3a");
+				ctx.BeginFrame(input);
+				const bool changed = DragBarFloat(ctx, barId, barRect, value, 0.0f, 1.0f, theme, style);
+				ctx.EndFrame();
+				return changed;
+			};
+			const auto Frame = [](glm::vec2 pos, bool down, bool clicked, bool released)
+			{
+				WuiInputState input;
+				input.ViewportSize = { 1280.0f, 720.0f };
+				input.MousePos = pos;
+				input.MouseDown[0] = down;
+				input.MouseClicked[0] = clicked;
+				input.MouseReleased[0] = released;
+				return input;
+			};
+			const auto Kind = [&]()
+			{
+				const WuiAccessNode* node = accessibility.Find(barId);
+				return node != nullptr ? node->Kind : std::string("<none>");
+			};
+			const WuiRect valueCenter { valueZone.X + valueZone.W * 0.5f, valueZone.Y + valueZone.H * 0.5f,
+				0.0f, 0.0f };
+			// ① 点值区 → 松手进入文本编辑(值不变)。
+			Draw(Frame({ valueCenter.X, valueCenter.Y }, true, true, false));
+			Draw(Frame({ valueCenter.X, valueCenter.Y }, false, false, true));
+			CHECK(Near(value, 0.45f));
+			Draw(Frame({ valueCenter.X, valueCenter.Y }, false, false, false));
+			CHECK(Kind() == "text-field");   // 编辑态:值区此刻是文本输入(kind 切换 + 缓冲文本)
+			CHECK(accessibility.Find(barId) != nullptr && accessibility.Find(barId)->Value == "0.45");
+			// ② 编辑态下直接按条体:同一帧先提交编辑,再按条体位置改值(中点 = 0.5)。
+			const float barMidX = barZone.X + barZone.W * 0.5f;
+			CHECK(Draw(Frame({ barMidX, barZone.Y + 11.0f }, true, true, false)));
+			CHECK(Near(value, 0.5f));
+			// ③ 按住继续跟随(绝对位置映射),④ 拖出条体右端 → 夹到 1.0,⑤ 松手收口。
+			CHECK(Draw(Frame({ barZone.X + barZone.W * 0.9f, barZone.Y + 11.0f }, true, false, false)));
+			CHECK(Near(value, 0.9f));
+			CHECK(Kind() == "slider");       // 编辑已结束(不再吃掉后续拖动)
+			CHECK(Draw(Frame({ barZone.X + barZone.W + 40.0f, barZone.Y + 11.0f }, true, false, false)));
+			CHECK(Near(value, 1.0f));
+			Draw(Frame({ barZone.X + barZone.W + 40.0f, barZone.Y + 11.0f }, false, false, true));
+			CHECK(Near(value, 1.0f));
+			// ⑥ 非法缓冲:编辑态下按条体仍先走 Enter 的提交路径 —— 保留原值、给红框,并退出编辑。
+			Draw(Frame({ valueCenter.X, valueCenter.Y }, true, true, false));
+			Draw(Frame({ valueCenter.X, valueCenter.Y }, false, false, true));
+			{
+				WuiInputState typing;
+				typing.ViewportSize = { 1280.0f, 720.0f };
+				typing.MousePos = { valueCenter.X, valueCenter.Y };
+				typing.TextInput = { 'a', 'b', 'c' };   // 覆盖"进入编辑时全选"的缓冲 → 非法文本
+				Draw(typing);
+			}
+			const float beforeInvalid = value;
+			bool dangerDrawn = false;
+			{
+				accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+				accessibility.SetPanel("test.mat-ui3a");
+				ctx.BeginFrame(Frame({ barMidX, barZone.Y + 11.0f }, true, true, false));
+				DragBarFloat(ctx, barId, barRect, value, 0.0f, 1.0f, theme, style);
+				for (const WuiDrawCommand& command : ctx.Commands())
+					if (command.Kind == WuiDrawKind::RectOutline && command.Rect.W == valueZone.W
+						&& command.Rect.X == valueZone.X && SameColor(command.Color, theme.Danger))
+						dangerDrawn = true;
+				ctx.EndFrame();
+			}
+			CHECK(beforeInvalid >= 0.0f && beforeInvalid <= 1.0f);
+			CHECK(dangerDrawn);                       // 非法缓冲 → 与 Enter 提交失败同一条反馈(红框)
+			CHECK(Near(value, 0.5f));                 // 提交没有写坏值;条体按下立刻生效
+			// 收尾:松开这次按下,避免把按下态带出本节。
+			Draw(Frame({ barMidX, barZone.Y + 11.0f }, false, false, true));
+			Draw(Frame({ barMidX, barZone.Y + 11.0f }, false, false, false));
+			CHECK(Kind() == "slider");                // 编辑态确实结束了(不是"看着提交、其实还在编辑")
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
+		// 31. MAT-UI3a:Vec2Field / Vec4Field(与 Vec3Field 同一份实现)。
+		//     ① 排布:Vec2 = 一行两段;Vec4 = 2×2(第一行 x y / 第二行 z w),layout=1 = 竖排;
+		//     ② 无障碍:整体 kind=vec2-field/vec4-field、value='x,y' / 'x,y,z,w',每个分量一个
+		//        kind=vec2-axis/vec4-axis 子节点(id = DerivedChildId(id,'.axis.',i)、label 大写单字母);
+		//     ③ 拖动改值逐帧生效、只动当前分量;Vec3Field 的老排布/老 id 口径不变(§32 再钉一次)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme {};
+			const auto ChildRect = [&](WuiId parent, size_t index)
+			{
+				const std::string key = std::to_string(parent) + ".axis." + std::to_string(index);
+				const WuiAccessNode* node = accessibility.Find(HashId(key.c_str()));
+				return node != nullptr ? node->Rect : WuiRect { 0.0f, 0.0f, 0.0f, 0.0f };
+			};
+			const auto ChildNode = [&](WuiId parent, size_t index)
+			{
+				const std::string key = std::to_string(parent) + ".axis." + std::to_string(index);
+				return accessibility.Find(HashId(key.c_str()));
+			};
+			const auto Frame = [](glm::vec2 pos, bool down, bool clicked, bool released)
+			{
+				WuiInputState input;
+				input.ViewportSize = { 1280.0f, 720.0f };
+				input.MousePos = pos;
+				input.MouseDown[0] = down;
+				input.MouseClicked[0] = clicked;
+				input.MouseReleased[0] = released;
+				return input;
+			};
+			// ---- Vec2Field:一行两段 ----
+			const WuiId vec2Id = HashId("test.mat-ui3a.vec2");
+			const WuiRect vec2Rect { 100.0f, 300.0f, 220.0f, 24.0f };
+			glm::vec2 vec2Value { 0.0f, 1.0f };
+			WuiContext ctx2;
+			const auto Draw2 = [&](const WuiInputState& input)
+			{
+				accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+				accessibility.SetPanel("test.mat-ui3a");
+				ctx2.BeginFrame(input);
+				const bool changed = Vec2Field(ctx2, vec2Id, vec2Rect, vec2Value, 0.01f, -100.0f, 100.0f, theme, 0);
+				ctx2.EndFrame();
+				return changed;
+			};
+			Draw2(Frame({ 0.0f, 0.0f }, false, false, false));
+			{
+				const WuiAccessNode* overall = accessibility.Find(vec2Id);
+				CHECK(overall != nullptr && overall->Kind == "vec2-field");
+				CHECK(overall != nullptr && overall->Value == "0.00,1.00");
+			}
+			// 槽宽 = (220 − PadSmall×1) / 2 = 108;分量 X 的槽 = {100,300,108,24}、Y = {212,300,...}。
+			const WuiRect xSlot = ChildRect(vec2Id, 0);
+			const WuiRect ySlot = ChildRect(vec2Id, 1);
+			CHECK(Near(xSlot.X, 100.0f) && Near(xSlot.W, 108.0f) && Near(xSlot.Y, 300.0f) && Near(xSlot.H, 24.0f));
+			CHECK(Near(ySlot.X, 212.0f) && Near(ySlot.W, 108.0f));
+			CHECK(ChildNode(vec2Id, 0) != nullptr && ChildNode(vec2Id, 0)->Kind == "vec2-axis"
+				&& ChildNode(vec2Id, 0)->Label == "X");
+			CHECK(ChildNode(vec2Id, 1) != nullptr && ChildNode(vec2Id, 1)->Label == "Y");
+			// 拖动 X 分量:按下即取焦点,位移 > 1.5px 进入拖动 → value.x = 0 + 10×0.01 = 0.10,Y 不动。
+			const glm::vec2 xCenter { xSlot.X + xSlot.W * 0.5f, xSlot.Y + xSlot.H * 0.5f };
+			CHECK(!Draw2(Frame(xCenter, true, true, false)));
+			CHECK(Draw2(Frame({ xCenter.x + 10.0f, xCenter.y }, true, false, false)));
+			CHECK(Near(vec2Value.x, 0.10f) && Near(vec2Value.y, 1.0f));
+			CHECK(Draw2(Frame({ xCenter.x + 25.0f, xCenter.y }, true, false, false)));
+			CHECK(Near(vec2Value.x, 0.25f) && Near(vec2Value.y, 1.0f));
+			Draw2(Frame({ xCenter.x + 25.0f, xCenter.y }, false, false, true));
+			// 键盘:焦点在整体上,Up/Down 按 |speed| 步进当前分量(刚拖过的 X)。
+			{
+				WuiInputState input;
+				input.ViewportSize = { 1280.0f, 720.0f };
+				input.MousePos = xCenter;
+				input.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Up) };
+				CHECK(Draw2(input));
+				CHECK(Near(vec2Value.x, 0.26f));
+			}
+			// 竖排:两行等分(窄列口径)。
+			const WuiId vec2VerticalId = HashId("test.mat-ui3a.vec2.vertical");
+			glm::vec2 vec2Vertical { 0.0f, 1.0f };
+			WuiContext ctx2v;
+			accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+			accessibility.SetPanel("test.mat-ui3a");
+			ctx2v.BeginFrame(Frame({ 0.0f, 0.0f }, false, false, false));
+			Vec2Field(ctx2v, vec2VerticalId, { 100.0f, 300.0f, 220.0f, 48.0f }, vec2Vertical,
+				0.01f, -100.0f, 100.0f, theme, 1);
+			ctx2v.EndFrame();
+			CHECK(Near(ChildRect(vec2VerticalId, 0).H, 24.0f) && Near(ChildRect(vec2VerticalId, 1).Y, 324.0f));
+			// ---- Vec4Field:2×2 默认排布 + 拖 W 分量 ----
+			const WuiId vec4Id = HashId("test.mat-ui3a.vec4");
+			const WuiRect vec4Rect { 100.0f, 400.0f, 220.0f, 52.0f };
+			glm::vec4 vec4Value { 0.0f, 1.0f, 0.0f, 1.0f };
+			WuiContext ctx4;
+			const auto Draw4 = [&](const WuiInputState& input)
+			{
+				accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+				accessibility.SetPanel("test.mat-ui3a");
+				ctx4.BeginFrame(input);
+				const bool changed = Vec4Field(ctx4, vec4Id, vec4Rect, vec4Value, 0.01f, -100.0f, 100.0f, theme, 0);
+				ctx4.EndFrame();
+				return changed;
+			};
+			Draw4(Frame({ 0.0f, 0.0f }, false, false, false));
+			{
+				const WuiAccessNode* overall = accessibility.Find(vec4Id);
+				CHECK(overall != nullptr && overall->Kind == "vec4-field");
+				CHECK(overall != nullptr && overall->Value == "0.00,1.00,0.00,1.00");
+			}
+			// 2×2:槽宽 = (220 − 4) / 2 = 108,行高 = 52 / 2 = 26 → x{100,400} y{212,400} z{100,426} w{212,426}。
+			CHECK(Near(ChildRect(vec4Id, 0).X, 100.0f) && Near(ChildRect(vec4Id, 0).Y, 400.0f)
+				&& Near(ChildRect(vec4Id, 0).W, 108.0f) && Near(ChildRect(vec4Id, 0).H, 26.0f));
+			CHECK(Near(ChildRect(vec4Id, 1).X, 212.0f) && Near(ChildRect(vec4Id, 1).Y, 400.0f));
+			CHECK(Near(ChildRect(vec4Id, 2).X, 100.0f) && Near(ChildRect(vec4Id, 2).Y, 426.0f));
+			CHECK(Near(ChildRect(vec4Id, 3).X, 212.0f) && Near(ChildRect(vec4Id, 3).Y, 426.0f));
+			CHECK(ChildNode(vec4Id, 3) != nullptr && ChildNode(vec4Id, 3)->Label == "W");
+			const WuiRect wSlot = ChildRect(vec4Id, 3);
+			const glm::vec2 wCenter { wSlot.X + wSlot.W * 0.5f, wSlot.Y + wSlot.H * 0.5f };
+			CHECK(!Draw4(Frame(wCenter, true, true, false)));
+			CHECK(Draw4(Frame({ wCenter.x + 25.0f, wCenter.y }, true, false, false)));
+			CHECK(Near(vec4Value.w, 1.25f) && Near(vec4Value.x, 0.0f) && Near(vec4Value.y, 1.0f)
+				&& Near(vec4Value.z, 0.0f));
+			Draw4(Frame({ wCenter.x + 25.0f, wCenter.y }, false, false, true));
+			// 竖排:四行等分。
+			const WuiId vec4VerticalId = HashId("test.mat-ui3a.vec4.vertical");
+			glm::vec4 vec4Vertical { 0.0f, 1.0f, 0.0f, 1.0f };
+			WuiContext ctx4v;
+			accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+			accessibility.SetPanel("test.mat-ui3a");
+			ctx4v.BeginFrame(Frame({ 0.0f, 0.0f }, false, false, false));
+			Vec4Field(ctx4v, vec4VerticalId, { 100.0f, 400.0f, 220.0f, 96.0f }, vec4Vertical,
+				0.01f, -100.0f, 100.0f, theme, 1);
+			ctx4v.EndFrame();
+			for (size_t axis = 1; axis < 4; ++axis)
+				CHECK(Near(ChildRect(vec4VerticalId, axis).Y, 400.0f + 24.0f * static_cast<float>(axis)));
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
+		// 32. MAT-UI3a:Vec3Field 的老口径没漂(2/3/4 分量共用 VecFieldCore 之后):
+		//     老槽宽公式 (W − PadSmall×2)/3、老排布、老 id/kind 全部逐条保留。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme {};
+			const WuiId vec3Id = HashId("test.mat-ui3a.vec3");
+			const WuiRect vec3Rect { 100.0f, 500.0f, 220.0f, 24.0f };
+			glm::vec3 vec3Value { 0.0f, 1.0f, 0.0f };
+			WuiContext ctx;
+			accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+			accessibility.SetPanel("test.mat-ui3a");
+			WuiInputState input;
+			input.ViewportSize = { 1280.0f, 720.0f };
+			ctx.BeginFrame(input);
+			Vec3Field(ctx, vec3Id, vec3Rect, vec3Value, 0.01f, -100.0f, 100.0f, theme, 0);
+			ctx.EndFrame();
+			const WuiAccessNode* overall = accessibility.Find(vec3Id);
+			CHECK(overall != nullptr && overall->Kind == "vec3-field" && overall->Value == "0.00,1.00,0.00");
+			const float slotW = (vec3Rect.W - theme.PadSmall * 2.0f) / 3.0f;
+			for (size_t axis = 0; axis < 3; ++axis)
+			{
+				const std::string key = std::to_string(vec3Id) + ".axis." + std::to_string(axis);
+				const WuiAccessNode* node = accessibility.Find(HashId(key.c_str()));
+				CHECK(node != nullptr && node->Kind == "vec3-axis");
+				CHECK(node != nullptr && Near(node->Rect.X, vec3Rect.X + (slotW + theme.PadSmall)
+					* static_cast<float>(axis)));
+				CHECK(node != nullptr && Near(node->Rect.W, slotW) && Near(node->Rect.H, vec3Rect.H));
+			}
+			const WuiAccessNode* firstAxis = accessibility.Find(HashId((std::to_string(vec3Id) + ".axis.0").c_str()));
+			CHECK(firstAxis != nullptr && firstAxis->Label == "X");
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
+		// 33. MAT-UI3a:焦点环视觉(圆角细描边 + 外发光,accent 低透明度)。
+		//     用户原话:「这个聚焦选中能否按照人类美学重新设计下」。这里把新口径钉成命令流事实:
+		//     ① 没有焦点 → 什么都不画(既有不变量);
+		//     ② 有焦点 → 恰好两笔 overlay 描边:主环(控件自身矩形、1.25px、圆角 theme.Radius、
+		//        基色 × 0.72)+ 外发光(外扩 1.5px、2.5px、圆角 theme.Radius + 2.5、基色 × 0.16);
+		//     ③ 可辨识性:主环 alpha ≥ 0.7(不是"看不到"的装饰),基色仍可被 border.focus 覆盖。
+		{
+			WuiTheme theme {};
+			const WuiId ringId = HashId("test.mat-ui3a.focusring");
+			const WuiRect rect { 40.0f, 40.0f, 120.0f, 24.0f };
+			WuiContext ctx;
+			WuiInputState input;
+			input.ViewportSize = { 1280.0f, 720.0f };
+			ctx.BeginFrame(input);
+			DrawFocusRing(ctx, rect, ringId, theme);   // 焦点不在这件上 → 无输出
+			CHECK(ctx.OverlayCommands().empty());
+			ctx.EndFrame();
+			ctx.BeginFrame(input);
+			ctx.SetFocus(ringId);
+			DrawFocusRing(ctx, rect, ringId, theme);
+			CHECK(ctx.OverlayCommands().size() == 2);
+			if (ctx.OverlayCommands().size() == 2)
+			{
+				const WuiDrawCommand& core = ctx.OverlayCommands()[0];
+				const WuiDrawCommand& glow = ctx.OverlayCommands()[1];
+				CHECK(core.Kind == WuiDrawKind::RectOutline && glow.Kind == WuiDrawKind::RectOutline);
+				CHECK(Near(core.Rect.X, rect.X) && Near(core.Rect.Y, rect.Y)
+					&& Near(core.Rect.W, rect.W) && Near(core.Rect.H, rect.H));
+				CHECK(Near(core.Rounding, theme.Radius) && Near(core.Thickness, 1.25f));
+				CHECK(SameColor(core.Color, DimmedRing(theme.FocusRing, 0.72f)));
+				CHECK(core.Color.A >= 0.7f);            // 可辨识:主环不是"几乎透明"
+				CHECK(Near(glow.Rect.X, rect.X - 1.5f) && Near(glow.Rect.Y, rect.Y - 1.5f)
+					&& Near(glow.Rect.W, rect.W + 3.0f) && Near(glow.Rect.H, rect.H + 3.0f));
+				CHECK(Near(glow.Rounding, theme.Radius + 2.5f) && Near(glow.Thickness, 2.5f));
+				CHECK(SameColor(glow.Color, DimmedRing(theme.FocusRing, 0.16f)));
+			}
+			ctx.EndFrame();
+			// border.focus 覆盖 = 换基色(下面这条同时证明"覆盖不会绕过低透明度口径")。
+			const WuiColor override { 0.2f, 0.4f, 0.9f, 1.0f };
+			WuiContext ctxOverride;
+			ctxOverride.BeginFrame(input);
+			ctxOverride.SetFocus(ringId);
+			DrawFocusRing(ctxOverride, rect, ringId, theme, &override);
+			CHECK(ctxOverride.OverlayCommands().size() == 2);
+			if (ctxOverride.OverlayCommands().size() == 2)
+			{
+				CHECK(SameColor(ctxOverride.OverlayCommands()[0].Color, DimmedRing(override, 0.72f)));
+				CHECK(SameColor(ctxOverride.OverlayCommands()[1].Color, DimmedRing(override, 0.16f)));
+			}
+			ctxOverride.EndFrame();
 		}
 
 		std::printf("World.Wui: all checks passed\n");

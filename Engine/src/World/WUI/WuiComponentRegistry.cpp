@@ -556,6 +556,56 @@ namespace World::Wui
 			return state.Value;
 		}
 
+		// MAT-UI3a:"x,y" / "x,y,z,w" 形式的向量覆盖值(Vec2/Vec4 与 Vec3 同一套解析规则:
+		// 逗号/分号/竖线/空格分隔、非法文本忽略、数目必须正好等于 count 才写回)。
+		struct VecNSlot
+		{
+			glm::vec4 Value { 0.0f, 0.0f, 0.0f, 0.0f };
+			std::string Applied;
+			bool Initialized = false;
+		};
+
+		glm::vec4& DrivenVecN(WuiContext& ctx, const char* slot, const WuiComponentDraw& draw, const char* name,
+			int count, const glm::vec4& initial)
+		{
+			VecNSlot& state = ctx.Persist<VecNSlot>(HashId(slot), VecNSlot {});
+			if (!state.Initialized)
+			{
+				state.Value = initial;
+				state.Initialized = true;
+			}
+			const std::string* text = FindProperty(draw, name);
+			const std::string applied = text ? *text : std::string();
+			if (text && applied != state.Applied)
+			{
+				glm::vec4 parsed { 0.0f, 0.0f, 0.0f, 0.0f };
+				int found = 0;
+				size_t start = 0;
+				while (start <= text->size() && found < count)
+				{
+					const size_t separator = text->find_first_of(",;| ", start);
+					const std::string token = text->substr(start,
+						separator == std::string::npos ? std::string::npos : separator - start);
+					if (!token.empty())
+					{
+						char* end = nullptr;
+						const float value = std::strtof(token.c_str(), &end);
+						if (end != token.c_str() && std::isfinite(value))
+							parsed[found++] = value;
+					}
+					if (separator == std::string::npos)
+						break;
+					start = separator + 1;
+				}
+				if (found == count)
+					state.Value = parsed;
+				state.Applied = applied;
+			}
+			else if (!text)
+				state.Applied.clear();
+			return state.Value;
+		}
+
 		// ---- 组件 showcase(每条正好一件真实控件) ----
 
 		// WUI-P1.5:Button 的 5 态后缀 —— 顺序 = WuiButtonStyle::State(Normal/Hover/Pressed/Disabled/Focused),
@@ -889,6 +939,39 @@ namespace World::Wui
 			glm::vec3& value = DrivenVec3(ctx, "showcase.vec3.value", draw, "value", { 0.0f, 1.0f, 0.0f });
 			const float speed = FloatOverride(draw, "speed").value_or(0.01f);
 			Vec3Field(ctx, id, slot.Rect, value, speed, -100.0f, 100.0f, themed,
+				draw.State == "vertical" ? 1 : 0);
+		}
+
+		void ShowVec2Field(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme themed = ThemedFor(draw, *draw.Theme);
+			// 一行两段:与 Vec3Field 同一行高(theme.ControlHeight),不做加高。
+			const Slot slot = Canvas(draw, *draw.Theme, 220.0f);
+			const WuiId id = BeginShowcase(draw, "vec2field", "Vec2 Field", slot.Rect);
+			PseudoState pseudo(draw, id, slot.Rect);
+			glm::vec4& driven = DrivenVecN(ctx, "showcase.vec2.value", draw, "value", 2,
+				{ 0.0f, 1.0f, 0.0f, 0.0f });
+			glm::vec2 value { driven.x, driven.y };
+			const float speed = FloatOverride(draw, "speed").value_or(0.01f);
+			Vec2Field(ctx, id, slot.Rect, value, speed, -100.0f, 100.0f, themed,
+				draw.State == "vertical" ? 1 : 0);
+			driven.x = value.x;
+			driven.y = value.y;
+		}
+
+		void ShowVec4Field(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme themed = ThemedFor(draw, *draw.Theme);
+			// 2×2 需要两行真实行高,否则每行只剩 12px(值区高度与 Vec3Field 一致:24×2 = 48 + 4)。
+			const Slot slot = Canvas(draw, *draw.Theme, 220.0f, 52.0f);
+			const WuiId id = BeginShowcase(draw, "vec4field", "Vec4 Field", slot.Rect);
+			PseudoState pseudo(draw, id, slot.Rect);
+			glm::vec4& value = DrivenVecN(ctx, "showcase.vec4.value", draw, "value", 4,
+				{ 0.0f, 1.0f, 0.0f, 1.0f });
+			const float speed = FloatOverride(draw, "speed").value_or(0.01f);
+			Vec4Field(ctx, id, slot.Rect, value, speed, -100.0f, 100.0f, themed,
 				draw.State == "vertical" ? 1 : 0);
 		}
 
@@ -2145,6 +2228,26 @@ namespace World::Wui
 				StateList({ "default", "hover", "focus", "vertical", "disabled" }),
 				{ PropText("value", "0,1,0"), PropFloat("speed", 0.001f, 1.0f, 0.001f), PropBool("disabled") },
 				&ShowVec3Field));
+
+			WuiComponentRegistry::Register(Desc(
+				"vec2field", "Vec2Field", "Vec2 Field", "Inputs", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=vec2-field;id=HashId('showcase.vec2field');value='x,y';两个分量各登记 vec2-axis(id=HashId(str(父id)+'.axis.'+i),label='X'/'Y');默认一行两段,layout=1 两行",
+				"showcase 首选 220x24;一行两段(与 Vec3Field 同一行高);窄列(<约 140)用 layout=1 竖排(本条目用 state=vertical 展示)",
+				ShellIds("vec2field"),
+				StateList({ "default", "hover", "focus", "vertical", "disabled" }),
+				{ PropText("value", "0,1"), PropFloat("speed", 0.001f, 1.0f, 0.001f), PropBool("disabled") },
+				&ShowVec2Field));
+
+			WuiComponentRegistry::Register(Desc(
+				"vec4field", "Vec4Field", "Vec4 Field", "Inputs", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=vec4-field;id=HashId('showcase.vec4field');value='x,y,z,w';四个分量各登记 vec4-axis(id=HashId(str(父id)+'.axis.'+i),label='X'/'Y'/'Z'/'W');默认 2×2(第一行 x y / 第二行 z w),layout=1 四行",
+				"showcase 首选 220x52(2×2:两行各 26);layout=1 竖排要 4 行(窄列/矮槽下更挤,本条目用 state=vertical 展示)",
+				ShellIds("vec4field"),
+				StateList({ "default", "hover", "focus", "vertical", "disabled" }),
+				{ PropText("value", "0,1,0,1"), PropFloat("speed", 0.001f, 1.0f, 0.001f), PropBool("disabled") },
+				&ShowVec4Field));
 
 			WuiComponentRegistry::Register(Desc(
 				"searchfield", "SearchField", "Search Field", "Inputs", WuiComponentStatus::Draft,

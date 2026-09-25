@@ -87,11 +87,16 @@ namespace World::Wui
 	// 文案约定(见 skill engine-ui-patterns):名称 + 一句用途 + 默认值/范围 + 生效时机 + 禁用原因。
 	void Tooltip(WuiContext& ctx, const WuiRect& hoverRect, const std::string& text);
 	void DrawTooltip(WuiContext& ctx, const WuiTheme& theme);
-	// P4-UX6 焦点环:id 是当前焦点控件时,按主题令牌画 1.5px 圆角描边(颜色 = theme.FocusRing)。
+	// P4-UX6 焦点环:id 是当前焦点控件时画"圆角细描边 + 外发光"(颜色基色 = theme.FocusRing)。
 	// 控件在**自身绘制末尾**调用;环走 overlay 命令层(与 tooltip 同一机制),因此后画的兄弟控件
-	// 不会盖住它。没有焦点时什么都不画,既有控件的命令流逐字节不变。
-	// ringColor 非空 = 用这个颜色代替主题的 FocusRing(P1.5:per-state 的 border.focus 覆盖;
-	// 不传 = 既有口径,其它调用点逐字节不变)。
+	// 不会盖住它。没有焦点时什么都不画。
+	// MAT-UI3a(用户 2026-09-25:「这个聚焦选中能否按照人类美学重新设计下」)把口径从"1.5px 不透明
+	// 硬描边"改成两笔,两条都取基色并按**低透明度**画(圆角收敛到控件自身的 theme.Radius):
+	//   ① 主环  = rect 本身、1.25px、圆角 theme.Radius、alpha × 0.72(清晰但不再是荧光框);
+	//   ② 外发光 = rect 外扩 1.5px、2.5px、圆角 theme.Radius + 2.5、alpha × 0.16(只加"氛围",
+	//      不改变控件几何,也不动命中/布局)。
+	// 可辨识性:主环 alpha ≥ 0.7 且仍是实心细线,键盘焦点在任何主题底色上都读得出来;两条都不改
+	// 控件自身的矩形/a11y 节点。ringColor 非空 = 用它当基色(P1.5:per-state 的 border.focus 覆盖)。
 	void DrawFocusRing(WuiContext& ctx, const WuiRect& rect, WuiId id, const WuiTheme& theme,
 		const WuiColor* ringColor = nullptr);
 
@@ -185,6 +190,10 @@ namespace World::Wui
 	//   · DragBarFloat  = 感知型归一化区间(0..1 比例、角度、强度、透明度、平铺系数等
 	//                      "用拖动找手感"的值):进度条 + 右侧**固定宽度**数值区(右对齐);
 	//                      拖条体 = 按像素比例改值,单击值区 = 文本输入,↑/↓(←/→)= 1% 值域步进。
+	//                      MAT-UI3a:值区进入文本编辑后,按**条体**必须立刻开始拖动 —— 先走 Enter
+	//                      的同一条提交路径(非法文本仍保留原值 + 红框,退出编辑),再把这帧当条体
+	//                      按下处理;不再要求用户先点别处退出编辑(用户原话:「在点击右侧值后左侧
+	//                      滑条没法滑动了」)。按值区 / 控件外仍沿用旧口径(值区 = 继续编辑;外部 = 提交)。
 	//   · NumberFieldInt = 计数/索引/ID/大范围整数(UV 通道、MeshIndex、材质索引、上限值…):
 	//                      数字输入框(可带单位后缀与步进箭头),不做"拖出大整数"的拖动。
 	//   · StepperInt    = 小范围整数(1..16 的枚举式数量,如平铺次数、细分级别):[−] 值 [+];
@@ -337,6 +346,10 @@ namespace World::Wui
 	//  6 位 = 不透明)。非法输入保持原值,并由 TextFieldEx 标红边 + 行内说明,失焦回到规范值。
 	//  无障碍:字段本身 kind="color-field"、value="#RRGGBB"(带 alpha 时 8 位);弹层内的滑杆与
 	//  hex 输入各自登记节点(走控件自身的登记,不需要额外节点)。
+	//  MAT-UI3a 拖动口径:SV 色板 / 色相条 / alpha 条一旦在**该区域内按下**,就进入"拖动跟随"直到
+	//  松手 —— 指针移出该区域(甚至拖到弹层外)仍按当前坐标夹取更新,期间每一帧都写回 rgba;
+	//  松手那一帧落最终值。修的是用户报的「选取颜色板左键拖拽不松开,颜色不会变」:旧实现每帧都要
+	//  `IsHovered(子区域)`,拖动一离开那个十几像素高的条/板就停更,看起来像"只有松手才变"。
 	//  返回 true = 本次通过滑杆或 hex 改动了 rgba。
 	bool ColorField(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& rgba, const WuiTheme& theme);
 	// 分隔条:vertical=true = 竖向条(左右拖动改 value,光标 ResizeEW);false = 横向条(上下拖动,
@@ -363,6 +376,23 @@ namespace World::Wui
 	//  (id = DerivedChildId(id, ".axis.", i)、label="X"/"Y"/"Z"、value = 该分量的字符串化数值、
 	//  interactive=true、不是独立焦点项)。返回值 = 本帧 value 是否真的被改动。
 	bool Vec3Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec3& value, float speed,
+		float minValue, float maxValue, const WuiTheme& theme, int layout = 0);
+	// Vec2/Vec4 同族(与 Vec3Field **同一份实现** VecFieldCore,手感/子节点约定逐条一致):
+	//  - 分量左侧 12px 画 X/Y(/Z/W)小标签(与 Vec3Field 同一外观:theme.TextMuted + Caption 字号;
+	//    拖动中的分量用 theme.Accent);
+	//  - 数值区两位小数、单击进入文本编辑(Enter 提交 / Escape 取消 / 点别处提交);
+	//  - 按下取焦点、水平位移 > 1.5px 进入拖动、Up/Down 按 |speed| 步进当前分量。
+	//  排布(设计单位;MEMORY-P4:材质参数行 / 属性面板的控件列约 200–300 宽):
+	//  - Vec2Field layout 0 = **一行两段**(x y 并排,放得下时用);layout 1 = 两行(窄列);
+	//  - Vec4Field layout 0 = **2×2**(第一行 x y / 第二行 z w),理由是四段并排会把每个输入框压到
+	//    <45px(标签 12 + 数字两位小数),2×2 在同样的 220 宽里给每个分量 ~105px,读数与拖动手感
+	//    与 Vec3Field 一致;layout 1 = 四行(每行"标签 + 输入",窄列用)。
+	//  无障碍:整体 kind="vec2-field"/"vec4-field"、value="x,y" / "x,y,z,w";每个分量登记
+	//  kind="vec2-axis"/"vec4-axis" 子节点(id = DerivedChildId(id, ".axis.", i)、label="X"/"Y"…)。
+	//  返回 true = 本帧 value 是否真的被改动。
+	bool Vec2Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec2& value, float speed,
+		float minValue, float maxValue, const WuiTheme& theme, int layout = 0);
+	bool Vec4Field(WuiContext& ctx, WuiId id, const WuiRect& rect, glm::vec4& value, float speed,
 		float minValue, float maxValue, const WuiTheme& theme, int layout = 0);
 	// 空状态(列表/面板没有内容时的统一表达):垂直居中依次排 glyph(可空,FontSizeHeading +
 	//  theme.TextMuted)→ title(FontSizeTitle + theme.Text)→ hint(可空,FontSizeSmall + theme.TextMuted,
