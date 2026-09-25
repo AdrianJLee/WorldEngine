@@ -893,10 +893,16 @@ namespace World::Wui
 			int64_t& selectedState = DrivenInt(ctx, slotKey.c_str(), draw, "selected", 1, 0,
 				static_cast<int64_t>(options.size()) - 1);
 			int selected = static_cast<int>(selectedState);
-			if (draw.State == "open" && !ctx.IsPopupOpen(id))
-				ctx.OpenPopup(id);
-			else if (draw.State != "open" && ctx.IsPopupOpen(id))
-				ctx.ClosePopup(id);
+			// MAT-UI4a:弹层的"强制状态"同步只在 Edit(伪状态)模式做。Play 模式是真实输入直通,
+			// draw.State 恒为 "default"(见 WidgetGalleryPanel::DrawCanvasShowcase),每帧同步会在
+			// 用户点开弹层后的下一帧把它关掉 —— 现象就是"点一下弹出来立刻消失"。
+			if (!draw.RouteRealInput)
+			{
+				if (draw.State == "open" && !ctx.IsPopupOpen(id))
+					ctx.OpenPopup(id);
+				else if (draw.State != "open" && ctx.IsPopupOpen(id))
+					ctx.ClosePopup(id);
+			}
 			if (searchable)
 				SearchableCombo(ctx, id, slot.Rect, LocalizedText(draw, "label", "Material", "材质"), options, selected, themed);
 			else
@@ -921,10 +927,15 @@ namespace World::Wui
 			const Slot slot = Canvas(draw, *draw.Theme, 190.0f);
 			const WuiId id = BeginShowcase(draw, "colorfield", "Color Field", slot.Rect);
 			PseudoState pseudo(draw, id, slot.Rect);
-			if (draw.State == "open" && !ctx.IsPopupOpen(id))
-				ctx.OpenPopup(id);
-			else if (draw.State != "open" && ctx.IsPopupOpen(id))
-				ctx.ClosePopup(id);
+			// MAT-UI4a:同 ShowComboImpl —— Play(真实输入)下不做强制状态 → 弹层同步,否则
+			// 用户点开的取色器弹层会在下一帧被这条同步关掉(Edit 模式的基线口径不变)。
+			if (!draw.RouteRealInput)
+			{
+				if (draw.State == "open" && !ctx.IsPopupOpen(id))
+					ctx.OpenPopup(id);
+				else if (draw.State != "open" && ctx.IsPopupOpen(id))
+					ctx.ClosePopup(id);
+			}
 			glm::vec4& color = DrivenColor(ctx, "showcase.colorfield.value", draw, "color", { 0.30f, 0.55f, 1.00f, 1.00f });
 			ColorField(ctx, id, slot.Rect, color, themed);
 		}

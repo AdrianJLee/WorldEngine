@@ -433,13 +433,66 @@ namespace World
 				SurfaceVariantLabel(variant), key, reason);
 		}
 
+		// 注解类型在参数块里占的字节数(与 MaterialParams.cpp 的 ComponentCount * 4 同一口径;
+		// bool 在 SPIR-V 侧是 uint32)。
+		uint32_t ParamTypeByteSize(ParamType type)
+		{
+			switch (type)
+			{
+				case ParamType::Float:
+				case ParamType::Int:
+				case ParamType::Bool:  return 4;
+				case ParamType::Vec2:  return 8;
+				case ParamType::Vec3:  return 12;
+				case ParamType::Vec4:
+				case ParamType::Color: return 16;
+				default:               return 0;   // Texture2D 是绑定,不进参数块
+			}
+		}
+
 		// 参数块的字节:生效值 = 本文件覆盖 > 父级覆盖 > 注解默认。
-		// 打包失败(注解表与编译产物对不上 / 值文本坏)时退一步只写注解默认;再失败留零值 ——
-		// 一个坏参数值不该让整个绘制中断,但必须留下可读警告。
+		// MAT-UI4a:注解表(材质,来自磁盘源码)与参数块布局(编译产物反射)可能不同步 ——
+		// 典型场景是编辑器里复制/改名了一条 `//! param` 但还没保存:布局里多一个成员,
+		// 材质注解表里没有它。旧实现遇到这种字段就整块写零(PackParamValues 直接失败),
+		// 表现为预览全黑。这里先把对不上的字段从布局里剔掉(它们保持 0 = 缺省),其余字段
+		// 照常打包;只有"注解里声明了、但值文本坏掉"才退到注解默认值。单个字段的问题
+		// 不再能把整块参数清零,并且每次都留下可读警告。
 		void PackSurfaceParamBytes(const Ref<Material>& material, const MaterialParamLayout& layout,
 			std::vector<uint8_t>* out)
 		{
 			const std::vector<MaterialParamDecl>& table = material->Params();
+			MaterialParamLayout packable = layout;
+			packable.Fields.clear();
+			std::vector<std::string> skipped;
+			for (const MaterialParamLayoutField& field : layout.Fields)
+			{
+				const MaterialParamDecl* decl = FindParamDecl(table, field.Name);
+				if (!decl)
+				{
+					skipped.push_back(field.Name + "(缺注解声明)");
+					continue;
+				}
+				if (!IsReflectedTypeCompatible(decl->Type, field.ReflectedType)
+					|| ParamTypeByteSize(decl->Type) != field.Size)
+				{
+					skipped.push_back(field.Name + "(注解类型与布局不符)");
+					continue;
+				}
+				if (field.Offset + field.Size > layout.CbufferSize)
+				{
+					skipped.push_back(field.Name + "(字段越界)");
+					continue;
+				}
+				packable.Fields.push_back(field);
+			}
+			if (!skipped.empty())
+			{
+				std::string names;
+				for (const std::string& name : skipped)
+					names += (names.empty() ? "" : ", ") + name;
+				WLD_CORE_WARN("Renderer3D: 材质 '{0}' 的参数块与注解表不一致,跳过 {1} 个字段(按 0 写入,其余参数照常):{2}",
+					material->GetPath(), skipped.size(), names);
+			}
 			std::vector<MaterialParamOverride> resolved;
 			resolved.reserve(table.size());
 			for (const MaterialParamDecl& decl : table)
@@ -449,11 +502,11 @@ namespace World
 				resolved.push_back(MaterialParamOverride { decl.Name, material->ResolvedParamValue(decl.Name) });
 			}
 			std::string error;
-			if (PackParamValues(layout, table, resolved, out, &error))
+			if (PackParamValues(packable, table, resolved, out, &error))
 				return;
 			WLD_CORE_WARN("Renderer3D: 材质参数打包失败,退到注解默认值:{0}", error);
 			resolved.clear();
-			if (PackParamValues(layout, table, resolved, out, &error))
+			if (PackParamValues(packable, table, resolved, out, &error))
 				return;
 			WLD_CORE_WARN("Renderer3D: 材质参数默认值也不能打包,本次写零值:{0}", error);
 			out->assign(layout.CbufferSize, 0);

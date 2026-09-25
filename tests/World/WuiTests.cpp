@@ -2,6 +2,7 @@
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiComponentRegistry.h"
 #include "World/WUI/WuiContext.h"
+#include "World/WUI/WuiInputCollector.h"
 #include "World/WUI/WuiOperationLog.h"
 #include "World/WUI/WuiUndoStack.h"
 #include "World/WUI/WuiWidgets.h"
@@ -1472,6 +1473,116 @@ int main()
 			CHECK(drawn >= 20);
 			accessibility.SetEnabled(false);
 			accessibility.Clear();
+		}
+
+		// 20b. 小键盘回车 = 回车(MAT-UI4a):GLFW 的 KP_ENTER(335)在 OS 键码进入 WUI 的
+		//      唯一入口(WuiInputCollector)归一成 Enter(257)。控件层的 Enter 语义因此
+		//      一并成立:文本行提交 / 数值编辑提交 / 代码列接受补全 / 下拉与菜单键盘激活。
+		{
+			CHECK(World::KeyCodes::Enter == 257 && World::KeyCodes::KPEnter == 335);   // GLFW 键码口径
+			WuiInputCollector collector;
+			WuiInputState input;
+			collector.OnKey(World::KeyCodes::KPEnter, true, false);
+			collector.BeginFrame(input, { 1280.0f, 720.0f }, 60.0f);
+			CHECK(std::find(input.KeyPressed.begin(), input.KeyPressed.end(), World::KeyCodes::Enter)
+				!= input.KeyPressed.end());
+			CHECK(std::find(input.KeyDown.begin(), input.KeyDown.end(), World::KeyCodes::Enter)
+				!= input.KeyDown.end());
+			CHECK(std::find(input.KeyDown.begin(), input.KeyDown.end(), World::KeyCodes::KPEnter)
+				== input.KeyDown.end());
+			collector.EndFrame();
+			collector.OnKey(World::KeyCodes::KPEnter, false, false);          // 抬起同样归一,不留幽灵按住
+			collector.BeginFrame(input, { 1280.0f, 720.0f }, 60.0f);
+			CHECK(std::find(input.KeyDown.begin(), input.KeyDown.end(), World::KeyCodes::Enter)
+				== input.KeyDown.end());
+			collector.EndFrame();
+			collector.OnKey(World::KeyCodes::Enter, true, false);             // 主 Enter 不受影响
+			collector.BeginFrame(input, { 1280.0f, 720.0f }, 60.0f);
+			CHECK(std::find(input.KeyPressed.begin(), input.KeyPressed.end(), World::KeyCodes::Enter)
+				!= input.KeyPressed.end());
+			collector.EndFrame();
+
+			// 端到端一段:归一后的 KPEnter 走的是 TextField 的"回车提交"路径(返回 true)。
+			WuiContext ctx;
+			const WuiTheme theme;
+			const WuiId fieldId = HashId("test.kpenter.field");
+			const WuiRect fieldRect { 20.0f, 20.0f, 200.0f, 22.0f };
+			std::string buffer = "value";
+			WuiInputState idle;
+			idle.ViewportSize = { 1280.0f, 720.0f };
+			ctx.BeginFrame(idle);
+			ctx.SetFocus(fieldId);
+			TextField(ctx, fieldId, fieldRect, buffer, theme);
+			ctx.EndFrame();
+			collector.OnKey(World::KeyCodes::KPEnter, true, false);
+			collector.BeginFrame(input, { 1280.0f, 720.0f }, 60.0f);
+			ctx.BeginFrame(input);
+			CHECK(TextField(ctx, fieldId, fieldRect, buffer, theme));
+			ctx.EndFrame();
+			collector.EndFrame();
+		}
+
+		// 20c. 工作台 showcase 的弹层生命周期(MAT-UI4a):Play 模式(draw.RouteRealInput=true,
+		//      Play 下 State 恒为 "default")里点开 ColorField / Combo 的弹层后,**后续帧不得被
+		//      "强制状态 → 弹层"同步关掉**(用户现象:点一下弹出来立刻消失),点外部才关。
+		{
+			for (const char* component : { "colorfield", "combo" })
+			{
+				const WuiComponentDesc* desc = WuiComponentRegistry::Find(component);
+				CHECK(desc != nullptr && desc->Showcase != nullptr);
+				if (desc == nullptr || desc->Showcase == nullptr)
+					continue;
+				WuiContext ctx;
+				const WuiTheme theme;
+				const WuiId id = HashId((std::string("showcase.") + component).c_str());
+				const WuiRect rect { 40.0f, 40.0f, 190.0f, 22.0f };
+				WuiComponentDraw draw;
+				draw.Context = &ctx;
+				draw.Theme = &theme;
+				draw.Rect = rect;
+				draw.State = "default";          // Play 模式的口径:状态恒为 default
+				draw.RouteRealInput = true;      // 真实输入直通(不套伪状态、不清按下沿)
+
+				WuiInputState idle;
+				idle.ViewportSize = { 1280.0f, 720.0f };
+				idle.MousePos = { rect.X + 20.0f, rect.Y + rect.H * 0.5f };
+				ctx.BeginFrame(idle);
+				desc->Showcase(draw);
+				CHECK(!ctx.IsPopupOpen(id));     // 初始关闭
+				ctx.EndFrame();
+
+				WuiInputState press;             // 点一下控件本身 → 弹层打开
+				press.ViewportSize = { 1280.0f, 720.0f };
+				press.MousePos = { rect.X + 20.0f, rect.Y + rect.H * 0.5f };
+				press.MouseDown[0] = true;
+				press.MouseClicked[0] = true;
+				ctx.BeginFrame(press);
+				desc->Showcase(draw);
+				CHECK(ctx.IsPopupOpen(id));
+				ctx.EndFrame();
+
+				WuiInputState release;           // 抬起帧 + 之后空闲帧:弹层必须还在
+				release.ViewportSize = { 1280.0f, 720.0f };
+				release.MousePos = press.MousePos;
+				release.MouseReleased[0] = true;
+				ctx.BeginFrame(release);
+				desc->Showcase(draw);
+				CHECK(ctx.IsPopupOpen(id));      // 旧实现:这里被状态同步关掉
+				ctx.EndFrame();
+				ctx.BeginFrame(idle);
+				desc->Showcase(draw);
+				CHECK(ctx.IsPopupOpen(id));      // 稳定存在(≥1 帧空闲)
+				ctx.EndFrame();
+
+				WuiInputState outside;           // 点弹层外的空白 → 才关
+				outside.ViewportSize = { 1280.0f, 720.0f };
+				outside.MousePos = { rect.X + rect.W + 420.0f, rect.Y + rect.H + 300.0f };
+				outside.MouseClicked[0] = true;
+				ctx.BeginFrame(outside);
+				desc->Showcase(draw);
+				CHECK(!ctx.IsPopupOpen(id));
+				ctx.EndFrame();
+			}
 		}
 
 		// 21. 本地化分层加载(S1):多层叠加/来源诊断、层内重复记账、$ 元数据跳过、

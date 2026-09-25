@@ -59,6 +59,12 @@ namespace World::Wui
 
 	void WuiInputCollector::OnKey(uint32_t keyCode, bool down, bool repeat)
 	{
+		// MAT-UI4a:小键盘回车 = 回车。GLFW 的 KP_ENTER(335)与主 Enter(257)是两个键码,
+		// 但控件层的"提交 / 接受"只有一个语义 —— 在 OS 键码进入 WUI 的唯一入口归一,
+		// 文本行提交、数值编辑提交、代码列接受补全、下拉/菜单键盘激活全部自动一致,
+		// 不需要在几十个控件里各补一遍 KPEnter 分支(按下与抬起都归一,KeyDown 表才自洽)。
+		if (keyCode == KeyCodes::KPEnter)
+			keyCode = KeyCodes::Enter;
 		if (down)
 		{
 			// 沿与重复分开锁存:控件按"一次动作"消费沿,长按由 OS 重复事件驱动。
