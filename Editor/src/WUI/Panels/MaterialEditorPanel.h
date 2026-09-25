@@ -190,6 +190,9 @@ namespace World
 		};
 		// 派工口径:最后一次编辑后 350ms 触发一次编译(300–500 可调)。
 		static constexpr double kShaderCompileDebounceSeconds = 0.35;
+		// MAT-UI2:诊断"定稿"延迟 —— 编辑后 1s 内或括号未闭合时,不把编译错误当最终结果展示
+		// (用户报"代码还没写完就报错");预览仍按 350ms 消抖照常编译,只影响错误的**呈现**。
+		static constexpr double kShaderDiagnosticsSettleSeconds = 1.0;
 		// 着色器热重载的轮询节流(单个文件 stat,不递归目录)。
 		static constexpr double kShaderDiskPollSeconds = 0.75;
 		std::string m_ShaderCompileStatus;      // 状态行:成功 = 字节数 + 耗时 + 键;失败 = 第一条错误(含行列号)
@@ -209,6 +212,7 @@ namespace World
 		uint64_t m_ShaderRequestedRevision = ~0ull;    // 已投递请求对应的缓冲区版本
 		uint64_t m_ShaderSeenRevision = 0;             // 上次看到的缓冲区版本(消抖计时的起点)
 		double m_ShaderEditTime = 0.0;                 // 最后一次编辑的墙钟(0 = 没有待编译的编辑)
+		double m_ShaderLastEditTime = 0.0;             // 最后一次编辑的墙钟(不被投递清零;诊断定稿用)
 		double m_ShaderCompileDispatchedTime = 0.0;    // 投递时刻(状态行显示耗时)
 		bool m_ShaderForceCompile = false;             // 打开 / 重载 / 保存 / Compile 按钮:跳过消抖立即编译
 		// 键分离(D2)的事实:磁盘内容。缓冲与它相等 = 已保存 → 路径键;不等 = 未保存 → 预览键。
@@ -440,6 +444,9 @@ namespace World
 		static std::string ShaderDiagnosticHelp(const ShaderDiagnostic& diagnostic);
 		// 状态行文案:编译结果(成功 = 字节数 + 耗时 + 键;失败 = 第一条错误含行列号)。
 		std::string ShaderCompileStatusLine() const;
+		// MAT-UI2:诊断是否已"定稿" —— 编辑后 kShaderDiagnosticsSettleSeconds 内,或源码括号未闭合时,
+		// 不把编译错误当最终结果展示(预览仍照常按 350ms 消抖编译)。
+		bool ShaderDiagnosticsUnsettled() const;
 		// 重新解析注解参数表 + 定位错误行;顺带把认识的参数映射进预览替身材质。
 		void RefreshShaderParams();
 		// 把某个参数的默认值写回**注解文本**(参数默认值的唯一事实源是文件本身)。

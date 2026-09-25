@@ -322,6 +322,8 @@
   "panel.material.shader.compile.status.label": "着色器编译状态",
   "panel.material.shader.compile.running": "编译中…(后台线程,",
   "panel.material.shader.compile.debounce": "编译中…(等待 350 ms 防抖)",
+  "panel.material.shader.compile.checking": "检查中…(停手后显示错误)",
+  "panel.material.shader.diagnostic.settling": "检查中…(停手后显示错误)",
   "panel.material.shader.compile.ok_elapsed": ",耗时 ",
   "panel.material.shader.compile.ok_key": " ms → 键 ",
   "panel.material.shader.compile.ok_version": "(已发布 v",

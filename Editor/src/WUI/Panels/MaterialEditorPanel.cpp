@@ -4677,6 +4677,7 @@ namespace World
 		{
 			m_ShaderSeenRevision = revision;
 			m_ShaderEditTime = now;
+			m_ShaderLastEditTime = now;   // MAT-UI2:诊断定稿计时(投递时不清零)
 		}
 		// 2) 消费后台结果 —— 只有主线程会 Install / 改预览材质。
 		ShaderCompileOutcome outcome;
@@ -4810,6 +4811,8 @@ namespace World
 		std::string status;
 		const bool debouncePending = m_ShaderEditTime > 0.0
 			&& m_ShaderBuffer.Revision() != m_ShaderRequestedRevision;
+		// MAT-UI2:编辑后 1s 内的编译结果只是"过程",不当最终错误展示(用户报"代码还没写完就报")。
+		const bool unsettled = ShaderDiagnosticsUnsettled();
 		if (m_ShaderCompileInFlight)
 		{
 			const double elapsed = (ShaderWallClockSeconds() - m_ShaderCompileDispatchedTime) * 1000.0;
@@ -4820,6 +4823,11 @@ namespace World
 		{
 			status = Wui::Tr("panel.material.shader.compile.debounce",
 				"Compiling… (waiting for the 350 ms debounce)");
+		}
+		else if (unsettled && m_ShaderCompileFailed)
+		{
+			status = Wui::Tr("panel.material.shader.compile.checking",
+				"Checking… (errors appear when you pause typing)");
 		}
 		else if (!m_ShaderCompileStatus.empty())
 		{
@@ -4834,6 +4842,82 @@ namespace World
 				"overwritten (Revert to load the file).");
 		}
 		return status;
+	}
+
+	bool MaterialEditorPanel::ShaderDiagnosticsUnsettled() const
+	{
+		const double now = ShaderWallClockSeconds();
+		if (m_ShaderLastEditTime > 0.0 && (now - m_ShaderLastEditTime) < kShaderDiagnosticsSettleSeconds)
+			return true;
+		// 括号没闭合 = 明显写一半:即使停手也不急着把错误当定稿(避免"刚打完 { 就报错")。
+		int braces = 0;
+		int parens = 0;
+		int brackets = 0;
+		bool inString = false;
+		bool inLineComment = false;
+		bool inBlockComment = false;
+		const std::string& text = m_ShaderBuffer.Text();
+		for (size_t index = 0; index < text.size(); ++index)
+		{
+			const char c = text[index];
+			const char next = index + 1 < text.size() ? text[index + 1] : '\0';
+			if (inLineComment)
+			{
+				if (c == '\n')
+					inLineComment = false;
+				continue;
+			}
+			if (inBlockComment)
+			{
+				if (c == '*' && next == '/')
+				{
+					inBlockComment = false;
+					++index;
+				}
+				continue;
+			}
+			if (inString)
+			{
+				if (c == '\\')
+				{
+					++index;
+					continue;
+				}
+				if (c == '"')
+					inString = false;
+				continue;
+			}
+			if (c == '/' && next == '/')
+			{
+				inLineComment = true;
+				++index;
+				continue;
+			}
+			if (c == '/' && next == '*')
+			{
+				inBlockComment = true;
+				++index;
+				continue;
+			}
+			if (c == '"')
+			{
+				inString = true;
+				continue;
+			}
+			if (c == '{')
+				++braces;
+			else if (c == '}')
+				--braces;
+			else if (c == '(')
+				++parens;
+			else if (c == ')')
+				--parens;
+			else if (c == '[')
+				++brackets;
+			else if (c == ']')
+				--brackets;
+		}
+		return braces != 0 || parens != 0 || brackets != 0 || inString || inBlockComment;
 	}
 
 	void MaterialEditorPanel::PollShaderDiskChange(double now)
@@ -5536,11 +5620,12 @@ namespace World
 				Wui::Tr("panel.material.shader.revert.tooltip",
 					"Revert (Ctrl+R): drop unsaved edits and read the .slang from disk again."),
 				true, false },
-			{ "material.shader.compile", Wui::Tr("panel.material.shader.compile", "Compile"),
-				Wui::Tr("panel.material.shader.compile.tooltip",
-					"Compile now (skips the 350 ms debounce): the surface-function compiler runs on a "
-					"worker thread and its diagnostics refer to line:column in this file. Live edits "
-					"are compiled automatically; the scene switches only after Save."),
+			// MAT-UI2:按钮语义写清楚 —— 平时是"跳过消抖立即编译 / 失败后重试",自动编译照常。
+			// 标签用字面量(与 Format 同口径:新增 Tr 键会动语言包,不在本片边界)。
+			{ "material.shader.compile", "Compile now",
+				"Compile now (skip the 350 ms debounce). Live edits are compiled automatically on a "
+				"worker thread; use this button to compile immediately, or to retry after a failure. "
+				"The preview follows the newest successful compile; the scene only switches after Save.",
 				true, false },
 			// MAT-INTEL:格式化(标签/说明用字面量 —— 语言包不在本单边界内,新增 Tr 键会被
 			// audit-localization 判成"代码用了但目录没有";脚本编辑器的 Format 按钮同样是字面量)。
@@ -5776,7 +5861,9 @@ namespace World
 		Wui::WuiCodeEditorOptions options;
 		options.FontSize = fontSize;
 		options.LineHeight = std::round(fontSize * (20.0f / 14.0f));
-		options.ErrorLine = m_ShaderErrorLine > 0 ? m_ShaderErrorLine - 1 : -1;
+		// MAT-UI2:诊断没"定稿"时不给代码列标红(错误仍在状态行/诊断条里,等停手再出现)。
+		const bool diagnosticsUnsettled = ShaderDiagnosticsUnsettled();
+		options.ErrorLine = (!diagnosticsUnsettled && m_ShaderErrorLine > 0) ? m_ShaderErrorLine - 1 : -1;
 		options.ReadOnly = readOnly;
 		options.Highlight = [this](std::string_view text, std::vector<Wui::WuiCodeToken>& out)
 		{
@@ -5844,17 +5931,30 @@ namespace World
 		Wui::WuiAccessibility::Get().Register(editorNode);
 		if (result.SaveRequested)
 			m_PendingShaderSave = true;
-		if (result.Changed && m_ShaderParseError.empty())
+		if (result.Changed)
 		{
 			// 编辑中的注解文本可能已经不合法:每帧重解析只在"源码里出现过 //! 或错误尚未清除"时做,
 			// 避免大文件每帧全量解析。
+			// MAT-UI2 修复(用户报"属性报错改正后不消失,保存才消失"):旧代码还有 `m_ShaderParseError.empty()`
+			// 前置 —— 一旦注解解析报错就**再也不刷新**,必须保存/重载才清。现在只要有 `//!` 就重解析,
+			// 改对了当帧就清掉参数错误、参数表同步更新。
 			static const std::string kMarker = "//!";
 			if (m_ShaderBuffer.Text().find(kMarker) != std::string::npos)
 				RefreshShaderParams();
 		}
 		if (stripHeight > 0.0f)
-			DrawShaderDiagnostics(ctx, { editorRect.X, editorRect.Y + editorRect.H + 2.0f,
-				editorRect.W, stripHeight }, host);
+		{
+			// MAT-UI2:未定稿时只画一行中性提示,不列错误行(打一半不吓人)。
+			const Wui::WuiRect strip { editorRect.X, editorRect.Y + editorRect.H + 2.0f,
+				editorRect.W, stripHeight };
+			if (diagnosticsUnsettled)
+				Wui::Label(ctx, { strip.X + 4.0f, strip.Y + 2.0f },
+					Wui::Tr("panel.material.shader.diagnostic.settling",
+						"Checking… (errors appear when you pause typing)"),
+					theme.TextMuted, 11.0f);
+			else
+				DrawShaderDiagnostics(ctx, strip, host);
+		}
 	}
 
 	// ---- M4-S2:参数列(注解 = 事实源;改默认值 = 改写注解) ----
