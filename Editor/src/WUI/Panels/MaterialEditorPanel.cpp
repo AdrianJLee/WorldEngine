@@ -105,6 +105,39 @@ namespace World
 			return type == ParamType::Vec4 ? rowHeight * 2.0f : rowHeight;
 		}
 
+		// MAT-UI7b:注解里的 `doc("…")` 是**用户写的参数说明**(用户 2026-09-25:
+		// 「材质编辑器中的参数没法写注释来解释这个参数」)。两个形态(`.wmat` 实例列 /
+		// `.slang` 代码形态的参数列)共用这一份口径:
+		//  - 悬停 tooltip:有 doc → doc 文本占第一行,后面接原有的类型/范围/单位/来源行;
+		//    没有 doc → 与旧口径逐字相同("空则回落")。
+		std::string ShaderParamRowTooltip(const MaterialParamDecl& decl, const std::string& meta)
+		{
+			return decl.Doc.empty() ? meta : (decl.Doc + "\n" + meta);
+		}
+
+		// MAT-UI7b:说明也要进无障碍树 —— `material.param.<Name>.doc`(只在有 doc 时登记)的
+		// Value/Tooltip 都是 doc 文本**原文**,读屏与 AI 通道(ui.tree)按稳定 id 直接读说明。
+		// 不覆盖 `.source` 节点的 Value("override"/"parent"/"shader-default" 是三态语义)。
+		void RegisterShaderParamDocNode(const MaterialParamDecl& decl, const std::string& label,
+			const Wui::WuiRect& rowRect)
+		{
+			if (decl.Doc.empty())
+				return;
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId(("material.param." + decl.Name + ".doc").c_str());
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = label + Wui::Tr("panel.material.shader.param.doc.label", " — description");
+			node.Value = decl.Doc;
+			node.Tooltip = decl.Doc;
+			node.Rect = { rowRect.X, rowRect.Y, 2.0f, rowRect.H };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
 		// U27:预览列宽**会话内跨面板记住**(切材质、关掉再打开都不重置;<= 0 = 还没设过)。
 		// 只记用户拖出来的值 —— 窗口变窄时只在本帧夹取,不覆写记忆,窗口再变宽能回到原位置。
 		float& SessionPreviewColumnWidth()
@@ -2379,7 +2412,8 @@ namespace World
 					if (m_Material->GetRevision() != revision)
 						m_Material->MarkDirty(true);
 				}
-				// 悬停:类型 / 范围 / 单位 + 三态来源(读屏看不到强调条,必须能读出来)。
+				// 悬停:注解 doc("…") 说明(有则第一行,MAT-UI7b)+ 类型 / 范围 / 单位 + 三态来源
+				// (读屏看不到强调条,必须能读出来)。
 				std::string doc = Wui::Tr("panel.material.shader.param.type", "Type: ")
 					+ ParamTypeName(decl.Type);
 				if (decl.Type == ParamType::Float || decl.Type == ParamType::Int)
@@ -2393,7 +2427,9 @@ namespace World
 						? Wui::Tr("panel.material.shader.param.source.parent", "From parent override: ")
 						: Wui::Tr("panel.material.shader.param.source.shader_default", "From shader default: ")))
 					+ resolved;
-				Wui::Tooltip(ctx, rowRect, doc);
+				const std::string rowDoc = ShaderParamRowTooltip(decl, doc);
+				Wui::Tooltip(ctx, rowRect, rowDoc);
+				RegisterShaderParamDocNode(decl, label, rowRect);
 				{
 					Wui::WuiAccessNode node;
 					node.Id = Wui::HashId(("material.param." + decl.Name + ".source").c_str());
@@ -2403,7 +2439,7 @@ namespace World
 					node.Label = label + Wui::Tr("panel.material.shader.param.source.label", " — source");
 					node.Value = isOverride ? "override"
 						: (source == MaterialParamSource::Parent ? "parent" : "shader-default");
-					node.Tooltip = doc;
+					node.Tooltip = rowDoc;
 					node.Rect = { rowX, y, 2.0f, rowHeight };
 					node.Enabled = true;
 					node.Interactive = false;
@@ -6105,6 +6141,9 @@ namespace World
 		if (const char* tokenDump = std::getenv("WLD_SLANG_TOKEN_DUMP"))
 			DumpShaderTokens(tokenDump);
 		Wui::WuiCodeEditorOptions options;
+		// MAT-UI6b:会话缩放初值(内核只在实例第一次出现时读它;之后以内核状态为准)。
+		// 材质代码列与脚本编辑器**各一份**,互不影响;任何缩放路径都不写偏好文件。
+		options.UiZoom = m_ShaderZoom;
 		options.FontSize = fontSize;
 		options.LineHeight = std::round(fontSize * (20.0f / 14.0f));
 		// MAT-UI2:诊断没"定稿"时不给代码列标红(错误仍在状态行/诊断条里,等停手再出现)。
@@ -6190,6 +6229,12 @@ namespace World
 		Wui::WuiAccessibility::Get().Register(editorNode);
 		if (result.SaveRequested)
 			m_PendingShaderSave = true;
+		// MAT-UI6b:回读内核会话缩放(内核是唯一事实源;Ctrl+滚轮 / Ctrl+0 都在 WuiCodeEditor 内,
+		// 宿主不再有第二条缩放路径)。值一变就刷新宿主会话值;指示画在参数列的状态行上。
+		if (std::fabs(result.UiZoom - m_ShaderZoom) > 1e-6f)
+			m_ShaderZoom = result.UiZoom;
+		if (result.ZoomChanged)
+			m_ShaderZoomIndicatorUntil = ShaderWallClockSeconds() + 2.0;
 		if (result.Changed)
 		{
 			// 编辑中的注解文本可能已经不合法:每帧重解析只在"源码里出现过 //! 或错误尚未清除"时做,
@@ -6518,7 +6563,8 @@ namespace World
 				if (ctx.Input().MouseDown[0])
 					ApplyShaderParamLivePreview(decl, valueText);
 			}
-			// 悬停说明:类型 / 范围 / 单位 / 分组 / 当前默认值。
+			// 悬停说明:注解 doc("…") 说明(有则第一行,MAT-UI7b)+ 类型 / 范围 / 单位 / 当前默认值。
+			// (原来的 "在这里编辑会改写 //! param 注解;按保存才写盘" 一句按用户 2026-09-25 的要求整条删除。)
 			std::string doc = Wui::Tr("panel.material.shader.param.type", "Type: ")
 				+ ParamTypeName(decl.Type);
 			if (decl.Type == ParamType::Float || decl.Type == ParamType::Int)
@@ -6528,9 +6574,9 @@ namespace World
 				doc += "\n" + Wui::Tr("panel.material.shader.param.unit", "Unit: ") + decl.Unit;
 			doc += "\n" + Wui::Tr("panel.material.shader.param.default", "Default (from the annotation): ")
 				+ decl.Default;
-			doc += "\n" + Wui::Tr("panel.material.shader.param.edit_hint",
-				"Editing here rewrites the //! param annotation; press Save (Ctrl+S) to write the file.");
-			Wui::Tooltip(ctx, rowRect, doc);
+			const std::string rowDoc = ShaderParamRowTooltip(decl, doc);
+			Wui::Tooltip(ctx, rowRect, rowDoc);
+			RegisterShaderParamDocNode(decl, label, rowRect);
 			{
 				Wui::WuiAccessNode node;
 				node.Id = Wui::HashId(("material.param." + decl.Name + ".source").c_str());
@@ -6540,7 +6586,7 @@ namespace World
 				node.Label = label + Wui::Tr("panel.material.shader.param.source.label", " — source");
 				node.Value = "shader-default";
 				// 行说明与 `.wmat` 形态同一份(类型 / 范围 / 单位 / 来源),读屏两态一致。
-				node.Tooltip = doc;
+				node.Tooltip = rowDoc;
 				node.Rect = { content.X, cursor, 2.0f, rowHeight };
 				node.Enabled = true;
 				node.Interactive = false;
@@ -6602,7 +6648,14 @@ namespace World
 			node.Visible = true;
 			Wui::WuiAccessibility::Get().Register(node);
 		}
-		const std::string status = m_ShaderStatus;
+		// MAT-UI6b:状态行尾巴上的会话缩放指示(`Font N%`)—— 缩放 ≠ 100% 时常显,
+		// 刚缩放过的 2 秒内即使回到 100% 也留一行(Ctrl+0 复位据此可见/可断言)。
+		std::string status = m_ShaderStatus;
+		{
+			const int zoomPercent = static_cast<int>(std::lround(m_ShaderZoom * 100.0f));
+			if (zoomPercent != 100 || ShaderWallClockSeconds() < m_ShaderZoomIndicatorUntil)
+				status += "   Font " + std::to_string(zoomPercent) + "%";
+		}
 		Wui::Label(ctx, { rect.X + 2.0f, statusY },
 			EllipsizeToWidth(ctx, status, std::max(40.0f, rect.W - 4.0f), 11.0f),
 			m_ShaderStatusIsError ? theme.Danger : theme.TextMuted, 11.0f);

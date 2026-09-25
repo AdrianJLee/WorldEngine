@@ -146,6 +146,12 @@ namespace World
 		bool m_ShaderCompileScheduled = false; // 面板自绘的"编译"按钮 → 下一帧执行(避免在绘制中调工具)
 		// 会话内记住代码列宽(与预览列宽的记住口径一致;<= 0 = 还没设过)。
 		float m_ShaderCodeColumnWidth = 0.0f;
+		// MAT-UI6b:代码列的**会话缩放**(与脚本编辑器各一份,互不影响)。内核(WuiCodeEditor)是
+		// 唯一事实源:宿主把这里的值作为 options.UiZoom 初值播种,之后每帧回读 result.UiZoom;
+		// 只活在本次会话,任何缩放路径都不写偏好文件(editor-prefs.json 逐字节不变)。
+		float m_ShaderZoom = 1.0f;
+		// MAT-UI6b:状态行 `Font N%` 指示的保留截止时间(秒,记时器 = 本文件的 ShaderWallClockSeconds)。
+		double m_ShaderZoomIndicatorUntil = 0.0;
 		// ---- M4-S3:代码态实时预览(防抖 + 后台编译 + 键分离)----
 		// 一条结构化诊断:Line/Column 是**用户源**的 1 基行列号(0 = 不在用户源里,非用户源诊断报的是包装模板)。
 		struct ShaderDiagnostic

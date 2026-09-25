@@ -564,7 +564,13 @@ namespace World
 			status += "  *";
 		if (readOnly)
 			status += Wui::Tr("panel.script.readonly_tag_short", "  [read-only]");
-		status += "  " + std::to_string(static_cast<int>(std::round(m_FontSize))) + "px";
+		// MAT-UI6b:信息行显示**生效**字号(基础字号 × 会话缩放)+ 缩放指示。
+		// 生效字号由内核算(request.UiZoom),这里按同一口径显示;缩放 ≠ 100% 时常显 `Font N%`,
+		// 刚缩放过的 2 秒内即使回到 100% 也留一行指示(让 Ctrl+0 复位看得见)。
+		const int zoomPercent = static_cast<int>(std::lround(m_SessionZoom * 100.0f));
+		status += "  " + std::to_string(static_cast<int>(std::lround(m_FontSize * m_SessionZoom))) + "px";
+		if (zoomPercent != 100 || NowSeconds() < m_ZoomIndicatorUntil)
+			status += "  Font " + std::to_string(zoomPercent) + "%";
 		if (!m_Status.empty())
 			status += "   |   " + m_Status;
 		RegisterReadonlyNode(Wui::HashId("script.status"), "status", "script status", status, statusRect);
@@ -593,15 +599,10 @@ namespace World
 		// ---- 正文:代码编辑器(语法高亮 / 行号 / 选区 / 撤销 / 滚动条)----
 		const Wui::WuiRect editorRect { rect.X + 8.0f, rect.Y + kToolbarHeight, rect.W - 16.0f,
 			std::max(0.0f, rect.H - kToolbarHeight - kStatusHeight) };
-		// ---- 字号缩放(W9 追加):Ctrl+滚轮 / Ctrl+= / Ctrl+- / Ctrl+0 复位 ----
-		if (ctx.IsHovered(editorRect) && ctx.Input().Ctrl && ctx.Input().Wheel != 0.0f)
-			m_FontSize = std::max(10.0f, std::min(32.0f, m_FontSize + ctx.Input().Wheel * 1.0f));
-		if (ctx.Input().Ctrl && ctx.WasKeyTriggered(World::KeyCodes::Equal))
-			m_FontSize = std::min(32.0f, m_FontSize + 1.0f);
-		if (ctx.Input().Ctrl && ctx.WasKeyTriggered(World::KeyCodes::Minus))
-			m_FontSize = std::max(10.0f, m_FontSize - 1.0f);
-		if (ctx.Input().Ctrl && ctx.WasKeyTriggered(World::KeyCodes::D0))
-			m_FontSize = Editor::EditorPreferences::Get().Data().ScriptFontSize;
+		// MAT-UI6b:字号缩放**只有一条路径** —— WuiCodeEditor 内核的 Ctrl+滚轮 / Ctrl+0 改会话缩放
+		// (引擎侧 MAT-UI6a:`ZoomChanged` / `UiZoom`)。面板侧旧的"Ctrl+滚轮 / Ctrl+± / Ctrl+0 改
+		// **基础字号**"已删除:它与内核缩放叠加会变成双重缩放,且基础字号属于偏好口径,不该被
+		// 临时手势改掉。宿主只做两件事:首帧把会话值播种给内核、每帧回读 result.UiZoom。
 		auto& accessibility = Wui::WuiAccessibility::Get();
 		Wui::WuiAccessNode editorNode;
 		editorNode.Id = Wui::HashId("script.editor");
@@ -624,6 +625,8 @@ namespace World
 			m_Completion.SetFileSource(m_Buffer.Text());
 		}
 		Wui::WuiCodeEditorOptions options;
+		// MAT-UI6b:会话缩放初值(内核只在实例第一次出现时读它;之后以内核状态为准)。
+		options.UiZoom = m_SessionZoom;
 		options.FontSize = m_FontSize;
 		options.LineHeight = std::round(m_FontSize * (20.0f / 14.0f));
 		options.ErrorLine = (m_ErrorLine > 0) ? m_ErrorLine - 1 : -1;
@@ -680,5 +683,11 @@ namespace World
 			Wui::CodeEditor(ctx, Wui::HashId("script.editor"), editorRect, m_Buffer, options);
 		if (result.SaveRequested)
 			ApplySave(host);
+		// MAT-UI6b:回读内核会话缩放(内核是唯一事实源)。值一变就刷新宿主会话值并点亮指示;
+		// 指示本身画在下一帧的信息行上(信息行在本帧代码编辑器之前绘制)。
+		if (std::fabs(result.UiZoom - m_SessionZoom) > 1e-6f)
+			m_SessionZoom = result.UiZoom;
+		if (result.ZoomChanged)
+			m_ZoomIndicatorUntil = NowSeconds() + 2.0;
 	}
 }

@@ -76,10 +76,18 @@ namespace World
 		uint64_t m_CompletionFileRevision = ~0ull;
 		bool m_CompletionStubReady = false;
 		bool m_CompletionStubFailed = false;
-		// W9:代码字号(会话内记忆)。Ctrl+滚轮 / Ctrl+± / Ctrl+0 调整。
+		// W9:代码**基础字号**(会话内记忆;初值来自偏好 ScriptFontSize,偏好改了才重新套用)。
+		// MAT-UI6b:缩放不再改这里 —— Ctrl+滚轮 / Ctrl+0 由 `Wui::CodeEditor` 内核直接调**会话缩放**
+		// (m_SessionZoom),宿主只回读;旧实现"改基础字号"与内核缩放叠加 = 双重缩放。
 		float m_FontSize = 14.0f;
-		// P4-UX7:上一次套用过的偏好字号(偏好改了才覆盖会话内的 Ctrl+滚轮缩放)。
+		// P4-UX7:上一次套用过的偏好字号(偏好改了才覆盖基础字号)。
 		float m_PreferenceFontSize = -1.0f;
+		// MAT-UI6b:会话缩放(与材质代码列**各一份**,互不影响)。内核是唯一事实源:宿主把自己的
+		// 会话值作为 options.UiZoom 的**初值**播种(内核只认第一次),之后每帧从 result.UiZoom 回读。
+		// 只活在本次会话(内核 ctx.Persist 按编辑器 id 持有);**任何路径都不写偏好文件**。
+		float m_SessionZoom = 1.0f;
+		// MAT-UI6b:信息行 `Font N%` 指示的保留截止时间(每次缩放变化后 2 秒有指示;缩放 ≠ 100% 时常显)。
+		double m_ZoomIndicatorUntil = 0.0;
 		// W9.7:防抖语法检查与出错行标记(1-based;0 = 无错误)。
 		int m_ErrorLine = 0;
 		uint64_t m_SyntaxCheckedRevision = ~0ull;

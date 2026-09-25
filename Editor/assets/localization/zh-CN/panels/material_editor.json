@@ -307,7 +307,7 @@
   "panel.material.shader.param.range": "范围:",
   "panel.material.shader.param.unit": "单位:",
   "panel.material.shader.param.default": "默认值(来自注解):",
-  "panel.material.shader.param.edit_hint": "在这里编辑会改写 //! param 注解;按 保存(Ctrl+S)才写盘。",
+  "panel.material.shader.param.doc.label": " —— 说明",
   "panel.material.shader.swatch.tooltip": "这一行 //! param Color 注解的颜色:",
   "panel.material.shader.param.source.label": " —— 来源",
   "panel.material.shader.param.source.shader_default": "来自着色器默认:",

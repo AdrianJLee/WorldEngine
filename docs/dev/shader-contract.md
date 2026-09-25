@@ -13,7 +13,8 @@
 > —— 覆盖全部注解类型与修饰符、组合采样器、切线空间法线、参数驱动分支、以及 Slang 的
 > `interface` + 泛型约束写法;该文件已在双目标上实编译验证(Vulkan/GL 各 `spirv-val` = 0,GL 模块 SPIR-V 1.0)。
 >
-> **两条硬性写法**(踩过才写在这里):① **注解行必须独占一行** —— `//! param …` 行尾不能再跟 `// 注释`;
+> **两条硬性写法**(踩过才写在这里):① **注解行必须独占一行** —— `//! param …` 行尾不能再跟 `// 注释`
+> (要解释某个参数,用注解里的 `doc("…")`,它会在参数行悬停与读屏里显示);
 > ② `[min,max]` **只适用于 Float/Int**(写在 Vec2/Vec3/Color 上会解析失败)。
 >
 > **一条渲染陷阱**:`Texture2D` 参数为空(`""`)或路径不存在时,引擎绑定的是**白色 1×1 兜底贴图**。
@@ -26,7 +27,7 @@
 Slang 不需要任何语法改写):
 
 ```hlsl
-//! param Color Tint = 1, 1, 1, 1 group("Appearance") label("Tint")
+//! param Color Tint = 1, 1, 1, 1 group("Appearance") label("Tint") doc("Base tint color")
 //! param Float Roughness = 0.5 [0,1] group("Appearance")
 //! param Texture2D Albedo = "textures/Icon.png" group("Appearance")
 
@@ -128,14 +129,16 @@ GL 口径:描述符绑定单元 = `binding`(**忽略 set**),所以 UBO 单元占
 ## 6. `//! param` 注解语法
 
 ```
-//! param <type> <name> = <default> [min,max] unit("…") group("…") label("…")
+//! param <type> <name> = <default> [min,max] unit("…") group("…") label("…") doc("…")
 ```
 
 - `<type>`:`Float` / `Vec2` / `Vec3` / `Vec4` / `Color` / `Int` / `Bool` / `Texture2D`(大小写敏感)。
 - `<default>` **必填**:数值是逗号分隔字面量(`0.25`、`1, 0.5, 0.25, 1`);`Bool` 是 `true/false`;
   `Texture2D` 是内容根相对路径(`""` = 无贴图)。
 - `[min,max]` 只对 `Float`/`Int` 有效(默认 `[0,1]`),默认值必须落在区间内。
-- `unit/group/label` 是双引号字符串,可空;每条注解里每个字段最多出现一次。
+- `unit/group/label/doc` 是双引号字符串,可空;每条注解里每个字段最多出现一次。
+- `doc("…")`:这个参数的**说明**,给读的人看 —— 编辑器参数行的悬停 tooltip 与无障碍/读屏
+  文本都用它(空 = 不显示说明);`doc` 里可以有空格,也可以与其它字段任意顺序混排。
 - 参数名:合法标识符,**不能以 `u_` 开头**、不能与模板标识符冲突(`MaterialParams`、`PSMain`、`input`、`surface` …)。
 - 注解顺序 = 贴图槽顺序(t4、t5…);第 9 张 `Texture2D` 会被编译器直接拒绝。
 - 解析失败给 `行:列: 原因`(1 基,列指向出错 token);注解错误只报错、不写盘,原文件不变。
