@@ -403,6 +403,49 @@ int main()
 				third.Baked, third.UpToDate);
 		}
 
+		// 10. 单文件容器(`.wtex` = 设置 + `---payload` + 内嵌图像):不依赖任何外部源图。
+		{
+			TempDir temp;
+			const std::filesystem::path sourceRoot = temp.path / "assets";
+			const std::filesystem::path outputRoot = temp.path / "cooked";
+			const std::filesystem::path cacheDir = temp.path / "cache";
+			const std::filesystem::path asset = sourceRoot / "textures" / "Embedded.wtex";
+			const std::vector<uint8_t> payload = MakeTga(8, 8, MakeGradient(8, 8));
+			TextureAssetFile container;
+			container.Settings.Usage = TextureUsage::Normal;   // → BC5
+			container.Payload = payload;
+			std::string error;
+			CHECK(SaveTextureAssetFile(asset, container, error));
+
+			// 读回:头与 payload 都完整。
+			TextureAssetFile reloaded;
+			CHECK(LoadTextureAssetFile(asset, reloaded, error));
+			CHECK(reloaded.Settings.Usage == TextureUsage::Normal);
+			CHECK(reloaded.Payload == payload);
+			CHECK(reloaded.LegacySource.empty());
+
+			// 烘焙:直接用内嵌字节(删除外部任何图片都不影响)。
+			TextureBakeStats stats = TextureCompiler::BakeDirectory(sourceRoot, outputRoot, cacheDir,
+				TextureBakeOptions {});
+			CHECK(stats.Baked == 1 && stats.Failed == 0);
+			const std::filesystem::path artifact = outputRoot / "textures" / "Embedded.wtexc";
+			CHECK(std::filesystem::exists(artifact));
+			TextureArtifactHeader header;
+			{
+				std::vector<uint8_t> bytes;
+				std::ifstream input(artifact, std::ios::binary | std::ios::ate);
+				bytes.resize(static_cast<size_t>(input.tellg()));
+				input.seekg(0);
+				input.read(reinterpret_cast<char*>(bytes.data()),
+					static_cast<std::streamsize>(bytes.size()));
+				CHECK(ParseTextureArtifact(bytes, header, error));
+			}
+			CHECK(header.Format == TextureBlockFormat::Bc5);
+			// 头里的 sourceSha256 = **内嵌字节**的 sha256(源图已不是外部文件)。
+			const World::Crypto::Sha256Digest digest = World::Crypto::Sha256(payload);
+			CHECK(std::memcmp(header.SourceSha256, digest.Bytes, 32) == 0);
+		}
+
 		std::printf("World.TextureImport: all checks passed\n");
 		return 0;
 	}

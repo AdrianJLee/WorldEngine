@@ -30,8 +30,8 @@
 //! param Float     metallic        = 0.10 [0, 1] group("Surface") label("Metallic") doc("金属度:0 = 绝缘体,1 = 金属(改变漫反射/高光配比)。")
 //! param Vec3      sheen           = 0.10, 0.20, 0.30 group("Surface") label("Sheen Tint") doc("边缘偏色;也用作棋盘图案的图案色。")
 //! param Int       shadingMode     = 0 [0, 2] group("Surface") label("Shading Mode (0/1/2)") doc("着色模式:0 常规 PBR,1 纯色调试,2 金属化。")
-//! param Texture2D albedoMap       = "textures/Icon.png" group("Maps") label("Albedo") doc("基色贴图;空 = 引擎白色 1x1 兜底。")
-//! param Texture2D normalMap       = "textures/flat_normal.png" group("Maps") label("Normal") doc("切线空间法线贴图;请指向真实贴图,否则光照会退化。")
+//! param Texture2D albedoMap       = "textures/Icon.wtex" group("Maps") label("Albedo") doc("基色贴图;空 = 引擎白色 1x1 兜底。")
+//! param Texture2D normalMap       = "textures/flat_normal.wtex" group("Maps") label("Normal") doc("切线空间法线贴图;请指向真实贴图,否则光照会退化。")
 //   ↑ 法线贴图的默认值必须指向**真实**的平面法线贴图:空路径/缺失会绑到引擎的白色 1×1,
 //     于是 `texel*2-1` = (1,1,1) 退化法线 → 光照几乎为 0(表现为全黑)。
 //! param Bool      useNormalMap    = true group("Maps") label("Use Normal Map") doc("关掉则忽略法线贴图,保留引擎采样到的法线。")

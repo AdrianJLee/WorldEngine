@@ -469,6 +469,8 @@ namespace World
 			std::filesystem::path Source;
 			std::filesystem::path Relative;
 			TextureImportSettings Settings;
+			// 单文件容器(`.wtex` 内嵌图像)优先;为空才去读 `Source` 的字节。
+			std::vector<uint8_t> Payload;
 			bool FromAsset = false;
 		};
 		std::vector<BakeItem> items;
@@ -488,15 +490,56 @@ namespace World
 
 		for (const std::filesystem::path& asset : assets)
 		{
-			TextureImportSettings settings;
+			TextureAssetFile container;
 			std::string error;
-			if (!LoadTextureImportSettings(asset, settings, error))
+			if (!LoadTextureAssetFile(asset, container, error))
 			{
 				++stats.Failed;
 				stats.Errors.push_back(error);
 				continue;
 			}
+			const TextureImportSettings& settings = container.Settings;
 
+			// ① 单文件容器:直接用内嵌字节烘,不依赖任何外部源图(用户口径「都是一个的东西为什么不用一个」)。
+			if (!container.Payload.empty())
+			{
+				std::error_code relativeError;
+				const std::filesystem::path relative =
+					std::filesystem::relative(asset, sourceRoot, relativeError);
+				if (relativeError || relative.empty())
+				{
+					++stats.Failed;
+					stats.Errors.push_back("cannot relativize " + asset.generic_string());
+					continue;
+				}
+				const std::string logical = relative.generic_string();
+				if (std::find(claimed.begin(), claimed.end(), logical) != claimed.end())
+				{
+					++stats.Failed;
+					stats.Errors.push_back("two texture assets point at the same source: " + logical);
+					continue;
+				}
+				claimed.push_back(logical);
+				const std::string key = artifactKey(relative);
+				if (std::find(claimedArtifacts.begin(), claimedArtifacts.end(), key) != claimedArtifacts.end())
+				{
+					++stats.Failed;
+					stats.Errors.push_back("two sources map to the same artifact name (<stem>.wtexc): "
+						+ logical);
+					continue;
+				}
+				claimedArtifacts.push_back(key);
+				BakeItem item;
+				item.Source = asset;
+				item.Relative = relative;
+				item.Settings = settings;
+				item.Payload = container.Payload;
+				item.FromAsset = true;
+				items.push_back(std::move(item));
+				continue;
+			}
+
+			// ② legacy:只有设置 + `source:`(或同主名图片)的旧式文件。
 			std::filesystem::path source;
 			if (!settings.Source.empty())
 			{
@@ -566,7 +609,12 @@ namespace World
 			}
 			claimed.push_back(logical);
 			claimedArtifacts.push_back(artifactKey(relative));
-			items.push_back(BakeItem { source, relative, settings, true });
+			BakeItem legacy;
+			legacy.Source = source;
+			legacy.Relative = relative;
+			legacy.Settings = settings;
+			legacy.FromAsset = true;
+			items.push_back(std::move(legacy));
 		}
 
 		for (const std::filesystem::path& image : images)
@@ -600,7 +648,11 @@ namespace World
 				continue;
 			}
 			claimedArtifacts.push_back(key);
-			items.push_back(BakeItem { image, relative, TextureImportSettings {}, false });
+			BakeItem plain;
+			plain.Source = image;
+			plain.Relative = relative;
+			plain.FromAsset = false;
+			items.push_back(std::move(plain));
 		}
 
 		for (const BakeItem& item : items)
@@ -609,8 +661,9 @@ namespace World
 			const TextureImportSettings& settings = item.Settings;
 			std::string error;
 
-			std::vector<uint8_t> sourceBytes;
-			if (!ReadFileBytes(source, sourceBytes, error) || sourceBytes.empty())
+			std::vector<uint8_t> sourceBytes = item.Payload;
+			if (sourceBytes.empty()
+				&& (!ReadFileBytes(source, sourceBytes, error) || sourceBytes.empty()))
 			{
 				++stats.Skipped;
 				stats.Errors.push_back("empty/unreadable source: " + source.generic_string());

@@ -200,6 +200,34 @@ namespace World
 		return data;
 	}
 
+	// M4-TEX P9:从**内存字节**解码(单文件 `.wtex` 容器内嵌的图像字节走这条;
+	// 与 LoadTextureData 同一套解码口径与兜底行为)。
+	TextureData LoadTextureDataFromMemory(const std::vector<uint8_t>& bytes, bool flipVertically)
+	{
+		if (bytes.empty())
+			return MakeWhiteFallback();
+		stbi_set_flip_vertically_on_load(flipVertically ? 1 : 0);
+		int width = 1;
+		int height = 1;
+		int channels = 4;
+		stbi_uc* pixels = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+			&width, &height, &channels, 4);
+		if (!pixels)
+		{
+			WLD_CORE_WARN("Failed to decode embedded texture payload ({0} bytes); "
+				"using 1x1 white fallback", bytes.size());
+			return MakeWhiteFallback();
+		}
+		TextureData data;
+		data.Width = static_cast<uint32_t>(width);
+		data.Height = static_cast<uint32_t>(height);
+		data.Channels = channels;
+		data.Valid = true;
+		data.Pixels.assign(pixels, pixels + static_cast<size_t>(width) * height * 4);
+		stbi_image_free(pixels);
+		return data;
+	}
+
 	const uint8_t* TextureAsset::MipData(uint32_t mip) const
 	{
 		if (!FromArtifact || mip >= Header.MipCount)
@@ -245,6 +273,21 @@ namespace World
 				artifactPath, error);
 		}
 
+		// 单文件容器(`.wtex` = 设置 + 内嵌图像字节):没有产物就直接解码**内嵌**字节,
+		// 不需要任何外部源图(用户口径「都是一个的东西为什么不用一个」)。
+		if (IsTextureAssetPath(path))
+		{
+			std::filesystem::path assetFile(path);
+			if (!assetFile.is_absolute())
+				assetFile = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+			TextureAssetFile container;
+			std::string containerError;
+			if (LoadTextureAssetFile(assetFile, container, containerError) && !container.Payload.empty())
+			{
+				asset.Source = LoadTextureDataFromMemory(container.Payload, flipVertically);
+				return asset;
+			}
+		}
 		asset.Source = LoadTextureData(SourcePathForFallback(path), flipVertically);
 		return asset;
 	}

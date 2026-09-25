@@ -450,4 +450,119 @@ namespace World
 		}
 		return true;
 	}
+
+	namespace
+	{
+		// 头/payload 分界:`---payload` 必须**独占一行**(允许行尾 \r)。
+		size_t FindPayloadMarker(const std::string& text, size_t* payloadStart)
+		{
+			const std::string marker = kTextureAssetPayloadMarker;
+			size_t offset = 0;
+			while (offset <= text.size())
+			{
+				const size_t lineEnd = text.find('\n', offset);
+				const size_t end = lineEnd == std::string::npos ? text.size() : lineEnd;
+				std::string_view line(text.data() + offset, end - offset);
+				if (!line.empty() && line.back() == '\r')
+					line.remove_suffix(1);
+				if (line == marker)
+				{
+					if (payloadStart)
+						*payloadStart = lineEnd == std::string::npos ? text.size() : lineEnd + 1;
+					return offset;
+				}
+				if (lineEnd == std::string::npos)
+					break;
+				offset = lineEnd + 1;
+			}
+			return std::string::npos;
+		}
+	}
+
+	bool LoadTextureAssetFile(const std::filesystem::path& path, TextureAssetFile& out,
+		std::string& error)
+	{
+		out = TextureAssetFile {};
+		error.clear();
+		std::vector<uint8_t> bytes;
+		{
+			std::ifstream input(path, std::ios::binary | std::ios::ate);
+			if (!input.is_open())
+			{
+				error = "cannot open " + path.generic_string();
+				return false;
+			}
+			const std::streamoff size = input.tellg();
+			input.seekg(0);
+			bytes.resize(static_cast<size_t>(std::max<std::streamoff>(0, size)));
+			if (!bytes.empty())
+				input.read(reinterpret_cast<char*>(bytes.data()), size);
+		}
+
+		const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+		size_t payloadStart = text.size();
+		const size_t markerAt = FindPayloadMarker(text, &payloadStart);
+		const std::string header = markerAt == std::string::npos ? text : text.substr(0, markerAt);
+
+		if (!TextureImportSettings::Parse(header, out.Settings, error))
+		{
+			error = path.generic_string() + ": " + error;
+			return false;
+		}
+		if (markerAt == std::string::npos)
+		{
+			// legacy:纯设置文件 + `source:` 指向外部源图。
+			out.LegacySource = out.Settings.Source;
+			return true;
+		}
+		out.Payload.assign(bytes.begin() + static_cast<std::ptrdiff_t>(payloadStart), bytes.end());
+		return true;
+	}
+
+	bool SaveTextureAssetFile(const std::filesystem::path& path, const TextureAssetFile& asset,
+		std::string& error)
+	{
+		error.clear();
+		if (asset.Payload.empty())
+		{
+			error = "texture asset payload is empty (a .wtex container must embed the source bytes)";
+			return false;
+		}
+		std::error_code directoryError;
+		if (!path.parent_path().empty())
+			std::filesystem::create_directories(path.parent_path(), directoryError);
+
+		const std::filesystem::path temporary = path.string() + ".tmp-write";
+		{
+			std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+			if (!output.is_open())
+			{
+				error = "cannot write " + temporary.generic_string();
+				return false;
+			}
+			TextureImportSettings settings = asset.Settings;
+			settings.Source.clear();   // 源图已内嵌,不再写 `source:`
+			output << settings.Serialize();
+			output << kTextureAssetPayloadMarker << "\n";
+			output.write(reinterpret_cast<const char*>(asset.Payload.data()),
+				static_cast<std::streamsize>(asset.Payload.size()));
+		}
+		std::error_code renameError;
+		std::filesystem::rename(temporary, path, renameError);
+		if (renameError)
+		{
+			std::error_code removeError;
+			std::filesystem::remove(path, removeError);
+			renameError.clear();
+			std::filesystem::rename(temporary, path, renameError);
+		}
+		if (renameError)
+		{
+			error = "cannot replace " + path.generic_string() + ": " + renameError.message();
+			std::error_code cleanupError;
+			std::filesystem::remove(temporary, cleanupError);
+			return false;
+		}
+		return true;
+	}
 }

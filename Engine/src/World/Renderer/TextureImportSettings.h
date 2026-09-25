@@ -87,6 +87,35 @@ namespace World
 	// 该路径是否看起来是纹理资产(`.wtex`)。
 	WLD_API bool IsTextureAssetPath(const std::string& path);
 
+	// ---- 纹理资产文件(`.wtex` = 单文件容器)----
+	//
+	// 形态(2026-09-25 用户口径「都是一个的东西为什么不用一个」):
+	//
+	//     <YAML 头:导入设置>
+	//     ---payload
+	//     <源图原始字节:png/jpg/tga/bmp …>
+	//
+	// 一张纹理 = **一个文件**;源图(如果有)只是导入源,导入后可以删。头是可读文本(diff 友好),
+	// payload 是原始字节(不重编码)。没有 `---payload` 的旧式"只有设置 + `source:`"文件仍能读
+	// (legacy 兼容),但保存一律写容器形态。
+	struct WLD_API TextureAssetFile
+	{
+		TextureImportSettings Settings;
+		std::vector<uint8_t> Payload;
+		// legacy:没有 payload 时,`source:` 指向的外部源图(内容根相对);
+		// 容器形态下为空(源图已内嵌)。
+		std::string LegacySource;
+	};
+
+	constexpr const char* kTextureAssetPayloadMarker = "---payload";
+
+	// 读:自动区分容器 / 旧式设置文件(没有文件 → ok=false + 人话错误)。
+	WLD_API bool LoadTextureAssetFile(const std::filesystem::path& path, TextureAssetFile& out,
+		std::string& error);
+	// 写:头 + `---payload` + payload;原子替换(临时文件 + rename)。
+	WLD_API bool SaveTextureAssetFile(const std::filesystem::path& path, const TextureAssetFile& asset,
+		std::string& error);
+
 	// 磁盘读写(由调用方给绝对路径:烘焙器用内容根拼,编辑器面板同理)。
 	// 缺文件 = 返回默认值且 ok=true(删除 sidecar 等价于"回到自动默认")。
 	WLD_API bool LoadTextureImportSettings(const std::filesystem::path& sidecarPath,
