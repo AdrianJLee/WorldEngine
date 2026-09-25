@@ -4670,6 +4670,198 @@ int main()
 			accessibility.Clear();
 		}
 
+		// 42. M4-TEX-P6b:代码列水平滚动 —— 长行不再被右边界截断。四条:
+		//     ① 长行(400 字符)+ End ⇒ ScrollX > 0,且 caret 画在**可视文本区内**(右侧留 ~2 字符);
+		//     ② 短行文档 ⇒ ScrollX 恒为 0(Shift+滚轮也不动)、正文不左移、不登记横条节点;
+		//     ③ 拖水平滚动条到最右 ⇒ 行尾字符画进可视区;
+		//     ④ 滚过之后点击仍落在"看到的那个字符"上(绘制 / 命中同一套 -ScrollX)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiRect editor { 0.0f, 0.0f, 320.0f, 140.0f };
+			const WuiId id = HashId("test.m4tex.p6b.hscroll");
+			const WuiId hTrackId = HashId("code-editor.hscroll");
+			const WuiId hThumbId = HashId("code-editor.hscroll.thumb");
+			const float editorFontSize = 14.0f;
+			const float charWidth = MeasureTextWithHook("x", editorFontSize, WuiFontFamily::Monospace);
+			CHECK(charWidth > 0.0f);
+			// 文本区裁剪矩形 = 本帧第一条 ClipPush(正文裁剪);caret 的屏幕 X = 承载 caret 的文本
+			// 命令起点 + 段内前缀宽度 —— 与 WuiRhiBackend::DrawText 同一套度量。
+			const auto TextClip = [](const std::vector<WuiDrawCommand>& commands)
+			{
+				for (const WuiDrawCommand& command : commands)
+					if (command.Kind == WuiDrawKind::ClipPush)
+						return command.Rect;
+				return WuiRect { 0.0f, 0.0f, 0.0f, 0.0f };
+			};
+			const auto CaretDrawX = [](const std::vector<WuiDrawCommand>& commands)
+			{
+				for (const WuiDrawCommand& command : commands)
+				{
+					if (command.Kind != WuiDrawKind::Text || command.TextCaretByte < 0)
+						continue;
+					return command.Rect.X + MeasureTextWithHook(
+						std::string_view(command.Text).substr(0, static_cast<std::size_t>(command.TextCaretByte)),
+						command.FontSize, command.Family);
+				}
+				return -1.0f;
+			};
+			// 长行正文(全是 'x')的绘制右端:证明"行尾字符真的画进了可视区",而不是只算了个数。
+			const auto LineEndDrawX = [](const std::vector<WuiDrawCommand>& commands)
+			{
+				float endX = -1.0f;
+				for (const WuiDrawCommand& command : commands)
+				{
+					if (command.Kind != WuiDrawKind::Text || command.Text.empty())
+						continue;
+					if (command.Text.find_first_not_of('x') != std::string::npos)
+						continue;   // 行号/其他文本:只看长行正文那一段
+					endX = std::max(endX, command.Rect.X + MeasureTextWithHook(
+						command.Text, command.FontSize, command.Family));
+				}
+				return endX;
+			};
+
+			const std::string longLine(400, 'x');
+			WuiContext ctx;
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+			WuiTextBuffer buffer;
+			buffer.SetText(longLine);
+			WuiCodeEditorOptions options;
+			options.FontSize = editorFontSize;
+			options.LineHeight = 20.0f;
+			const auto Frame = [&](const WuiInputState& in)
+			{
+				ctx.BeginFrame(in);
+				ctx.SetFocus(id);
+				return CodeEditor(ctx, id, editor, buffer, options);
+			};
+
+			// ---- ① 长行 + End:横向滚起来,caret 留在可视区内 ----
+			const WuiCodeEditorResult initial = Frame(idle);
+			const WuiRect clipInitial = TextClip(ctx.Commands());
+			CHECK(Near(initial.ScrollX, 0.0f));                 // 还没把 caret 移到行尾
+			CHECK(clipInitial.H < editor.H);                    // 装不下 ⇒ 横条占位(文本区变矮)
+			CHECK(accessibility.Find(hTrackId) != nullptr);
+			CHECK(accessibility.Find(hThumbId) != nullptr);
+			WuiInputState endKey = idle;
+			endKey.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::End) };
+			const WuiCodeEditorResult afterEnd = Frame(endKey);
+			const WuiRect clipEnd = TextClip(ctx.Commands());
+			const float caretEndX = CaretDrawX(ctx.Commands());
+			CHECK(afterEnd.ScrollX > 0.0f);
+			CHECK(caretEndX >= clipEnd.X - 0.5f);
+			CHECK(caretEndX <= clipEnd.X + clipEnd.W - charWidth);   // 右缘仍留 ≥1 个字符(口径 2 个)
+			CHECK(afterEnd.ScrollX >= static_cast<float>(longLine.size()) * charWidth - clipEnd.W - 0.5f);
+
+			// ---- ③ 先 Home 回到行首(ScrollX 归 0),再把横条 thumb 拖到最右 ----
+			WuiInputState homeKey = idle;
+			homeKey.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Home) };
+			CHECK(Near(Frame(homeKey).ScrollX, 0.0f));
+			const WuiAccessNode* thumbBefore = accessibility.Find(hThumbId);
+			const WuiAccessNode* trackBefore = accessibility.Find(hTrackId);
+			CHECK(thumbBefore != nullptr && trackBefore != nullptr);
+			const float thumbBeforeX = thumbBefore->Rect.X;
+			WuiInputState grab = idle;
+			grab.MousePos = { thumbBefore->Rect.X + thumbBefore->Rect.W * 0.5f,
+				thumbBefore->Rect.Y + thumbBefore->Rect.H * 0.5f };
+			grab.MouseClicked[0] = true;
+			grab.MouseDown[0] = true;
+			Frame(grab);
+			WuiInputState drag = idle;
+			drag.MousePos = { trackBefore->Rect.X + trackBefore->Rect.W + 64.0f, grab.MousePos.y };
+			drag.MouseDown[0] = true;
+			const WuiCodeEditorResult dragged = Frame(drag);
+			WuiInputState release = idle;
+			release.MousePos = drag.MousePos;
+			release.MouseReleased[0] = true;
+			Frame(release);
+			CHECK(dragged.ScrollX > 0.0f);
+			CHECK(dragged.ScrollX >= static_cast<float>(longLine.size()) * charWidth - TextClip(ctx.Commands()).W - 0.5f);
+			const WuiAccessNode* thumbAfter = accessibility.Find(hThumbId);
+			CHECK(thumbAfter != nullptr && thumbAfter->Rect.X > thumbBeforeX + 1.0f);
+			// 行尾(含 caret)确实落在可视文本区里:字符绘制右端 ≤ 裁剪右缘。
+			const WuiRect clipDragged = TextClip(ctx.Commands());
+			const float lineEndX = LineEndDrawX(ctx.Commands());
+			CHECK(lineEndX >= clipDragged.X && lineEndX <= clipDragged.X + clipDragged.W + 0.5f);
+			// Shift+滚轮 = 第二条横向输入口径(WUI 只有单轴 Wheel,没有 deltaX):向上滚 → 向左。
+			WuiInputState shiftWheelLong = idle;
+			shiftWheelLong.Shift = true;
+			shiftWheelLong.MousePos = { clipDragged.X + 24.0f, clipDragged.Y + 5.0f };
+			shiftWheelLong.Wheel = 2.0f;
+			const WuiCodeEditorResult wheeledLong = Frame(shiftWheelLong);
+			CHECK(wheeledLong.ScrollX < dragged.ScrollX && wheeledLong.ScrollX >= 0.0f);
+			WuiInputState endAgain = idle;
+			endAgain.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::End) };
+			const WuiCodeEditorResult endAgainResult = Frame(endAgain);
+			const WuiRect clipEndAgain = TextClip(ctx.Commands());
+			const float caretEndAgainX = CaretDrawX(ctx.Commands());
+			CHECK(caretEndAgainX >= clipEndAgain.X - 0.5f);
+			CHECK(caretEndAgainX <= clipEndAgain.X + clipEndAgain.W + 0.5f);
+
+			// ---- ④ 滚过之后命中仍落在"看到的那个字符"上 ----
+			// 在可视文本带里"左缘往里 ~20 个字符"的位置点一下。命中若忘了 ScrollX,caret 会落回
+			// 第 ~20 个字节;按同一套 -ScrollX 平移,则应落在 caretContentX 处。
+			WuiInputState click = idle;
+			click.MousePos = { clipEndAgain.X + charWidth * 20.25f, clipEndAgain.Y + 5.0f };
+			click.MouseClicked[0] = true;
+			click.MouseDown[0] = true;
+			Frame(click);
+			const float clickContentX = (click.MousePos.x - clipEndAgain.X) + endAgainResult.ScrollX;
+			const std::size_t expectedOffset = static_cast<std::size_t>(clickContentX / charWidth + 0.5f);
+			CHECK(expectedOffset > 100);   // 命中确实按 ScrollX 平移过(否则只会是 ~20)
+			CHECK(buffer.Caret() == expectedOffset);
+			WuiInputState clickRelease = idle;
+			clickRelease.MousePos = click.MousePos;
+			clickRelease.MouseReleased[0] = true;
+			Frame(clickRelease);
+
+			// ---- ② 短行文档:内容装得下 ⇒ ScrollX 恒为 0,正文不左移、横条不登记 ----
+			// a11y 树是单例:上一段(长行 ctx)登记的横条节点先清掉,这里读到的才是短文档这一帧的事实。
+			accessibility.Clear();
+			WuiContext shortCtx;
+			WuiTextBuffer shortBuffer;
+			shortBuffer.SetText("local x = 1\nreturn x\n");
+			const auto ShortFrame = [&](const WuiInputState& in)
+			{
+				shortCtx.BeginFrame(in);
+				shortCtx.SetFocus(id);
+				return CodeEditor(shortCtx, id, editor, shortBuffer, options);
+			};
+			const WuiCodeEditorResult shortPainted = ShortFrame(idle);
+			CHECK(Near(shortPainted.ScrollX, 0.0f));
+			const WuiRect shortClip = TextClip(shortCtx.Commands());
+			CHECK(Near(shortClip.H, editor.H));   // 装得下 ⇒ 横条不占位
+			CHECK(accessibility.Find(hTrackId) == nullptr);
+			CHECK(accessibility.Find(hThumbId) == nullptr);
+			// Shift+滚轮(横向口径)在装得下时不许动 —— "内容装得下 ScrollX 恒为 0"。
+			WuiInputState shiftWheel = idle;
+			shiftWheel.Shift = true;
+			shiftWheel.MousePos = { shortClip.X + 30.0f, shortClip.Y + 5.0f };
+			shiftWheel.Wheel = -3.0f;
+			CHECK(Near(ShortFrame(shiftWheel).ScrollX, 0.0f));
+			// 点第 1 行第 3 个字符右缘 ⇒ caret = 3:ScrollX = 0 时命中口径逐字节不变。
+			WuiInputState shortClick = idle;
+			shortClick.MousePos = { shortClip.X + MeasureTextWithHook("loc", editorFontSize,
+				WuiFontFamily::Monospace) + 0.25f, shortClip.Y + 5.0f };
+			shortClick.MouseClicked[0] = true;
+			shortClick.MouseDown[0] = true;
+			ShortFrame(shortClick);
+			CHECK(shortBuffer.Caret() == 3);
+			// 正文第一段仍然从文本区左缘开始(没有"半套平移")。
+			bool foundBody = false;
+			for (const WuiDrawCommand& command : shortCtx.Commands())
+				if (command.Kind == WuiDrawKind::Text && command.Text == "local x = 1")
+				{
+					foundBody = true;
+					CHECK(Near(command.Rect.X, shortClip.X));
+				}
+			CHECK(foundBody);
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}

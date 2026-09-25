@@ -16,6 +16,12 @@ namespace World::Wui
 		constexpr float kGutterPaddingLeft = 6.0f;
 		constexpr float kGutterPaddingRight = 8.0f;
 		constexpr float kThumbMinHeight = 24.0f;
+		// M4-TEX-P6b:水平滚动条与竖向同一档尺寸(上下各留 2px 内边距 = thumb 高 6px)。
+		constexpr float kThumbMinWidth = 24.0f;
+		// caret 横向跟随 / 内容右内边距共用的一条口径:caret(或行尾)与可视区边缘之间至少保留的
+		// 字符数。两处用同一个值,"滚到最右"时行尾也正好留出这么多,不会出现"跟随留 2 字符、
+		// 上限只留 0"那种自相矛盾的口径。
+		constexpr float kCaretScrollMarginChars = 2.0f;
 
 		const WuiColor kBackground { 0.10f, 0.105f, 0.11f, 1.0f };
 		const WuiColor kGutterBackground { 0.13f, 0.135f, 0.14f, 1.0f };
@@ -92,6 +98,19 @@ namespace World::Wui
 		struct WuiCodeEditorState
 		{
 			float ScrollY = 0.0f;
+			// ---- M4-TEX-P6b:水平滚动(像素) ----
+			// 0 = 未滚。只有"内容宽(行号槽 + 最长行像素宽 + 右内边距)"超过"可视宽"时才可能 > 0;
+			// 装得下时被夹回 0(见布局段与 caret 跟随段)。绘制/命中/光标/浮层锚点全部按 -ScrollX 平移。
+			float ScrollX = 0.0f;
+			bool DraggingHThumb = false;
+			float HThumbGrabOffset = 0.0f;
+			// 最长行像素宽缓存:键 = (文本版本, 生效字号, 单字宽)。单字宽随 UiScale 变(度量钩子按
+			// 设计单位回答),所以缩放拖动时缓存自动失效;正文没动时不会逐帧全文件重新度量。
+			float MaxLineWidth = 0.0f;
+			uint64_t MaxLineWidthRevision = 0;
+			float MaxLineWidthFontSize = 0.0f;
+			float MaxLineWidthDigit = 0.0f;
+			bool MaxLineWidthValid = false;
 			bool MouseSelecting = false;
 			bool DraggingThumb = false;
 			float ThumbGrabOffset = 0.0f;
@@ -654,11 +673,46 @@ namespace World::Wui
 			? options.GutterWidth
 			: kGutterPaddingLeft + digitWidth * static_cast<float>(std::to_string(lineCount).size()) + kGutterPaddingRight;
 		const float scrollbarWidth = rect.W > gutterWidth + kScrollbarWidth ? kScrollbarWidth : 0.0f;
-		const WuiRect textRect { rect.X + gutterWidth, rect.Y,
-			std::max(0.0f, rect.W - gutterWidth - scrollbarWidth), rect.H };
+		const float textWidth = std::max(0.0f, rect.W - gutterWidth - scrollbarWidth);
+		// M4-TEX-P6b:水平滚动的唯一口径 ——
+		//   内容宽 = 行号槽 + 最长行像素宽 + 右内边距(= 2 个字符宽,与 caret 跟随的边距同一条口径);
+		//   可视宽 = 行号槽 + 文本区宽(= 编辑器宽 - 竖向滚动条槽);
+		//   ScrollX ∈ [0, max(0, 内容宽 - 可视宽)]。装得下时上限为 0 ⇒ ScrollX 恒为 0。
+		// 最长行宽按 (文本版本, 生效字号, 单字宽) 缓存:正文/缩放真的变了才全文件量一遍。
+		const auto MeasureMaxLineWidth = [&]() -> float
+		{
+			const uint64_t revision = buffer.Revision();
+			if (state.MaxLineWidthValid && state.MaxLineWidthRevision == revision
+				&& state.MaxLineWidthFontSize == fontSize && state.MaxLineWidthDigit == digitWidth)
+				return state.MaxLineWidth;
+			float widest = 0.0f;
+			for (int line = 0; line < lineCount; ++line)
+			{
+				size_t lineOffset = 0;
+				widest = std::max(widest, ctx.MeasureTextWidth(
+					LineView(buffer, line, lineOffset), fontSize, WuiFontFamily::Monospace));
+			}
+			state.MaxLineWidth = widest;
+			state.MaxLineWidthRevision = revision;
+			state.MaxLineWidthFontSize = fontSize;
+			state.MaxLineWidthDigit = digitWidth;
+			state.MaxLineWidthValid = true;
+			return widest;
+		};
+		const float hScrollPadRight = digitWidth * kCaretScrollMarginChars;
+		// 注意:这两个值在**帧首**算一次(布局/滚动条用);caret 跟随之前会用同一个 lambda 重算一次 ——
+		// 本帧刚插入文本时帧首的缓存还是旧 revision,不重算会出现"刚打完长行却不跟随"的 bug(实测)。
+		float contentWidth = gutterWidth + MeasureMaxLineWidth() + hScrollPadRight;
+		const float viewWidth = gutterWidth + textWidth;
+		float maxScrollX = std::max(0.0f, contentWidth - viewWidth);
+		// 横条占位:装得下 / 编辑器矮到连一条滚动条都放不下时不占位(此时文本区仍是整高)。
+		const float hbarHeight = (maxScrollX > 0.0f && rect.H > kScrollbarWidth * 2.0f) ? kScrollbarWidth : 0.0f;
+		const WuiRect textRect { rect.X + gutterWidth, rect.Y, textWidth,
+			std::max(0.0f, rect.H - hbarHeight) };
+		const WuiRect hbarTrack { rect.X, rect.Y + rect.H - hbarHeight, viewWidth, hbarHeight };
 		const WuiRect track { rect.X + rect.W - kScrollbarWidth, rect.Y, kScrollbarWidth, rect.H };
 		const float contentHeight = static_cast<float>(lineCount) * lineHeight;
-		const float maxScroll = std::max(0.0f, contentHeight - rect.H);
+		const float maxScroll = std::max(0.0f, contentHeight - textRect.H);
 		const bool needScrollbar = scrollbarWidth > 0.0f && maxScroll > 0.0f;
 		bool focused = ctx.Focus() == id;
 		const bool readOnly = options.ReadOnly;
@@ -697,7 +751,8 @@ namespace World::Wui
 			line = std::max(0, std::min(line, lineCount - 1));
 			size_t lineStart = 0;
 			const std::string_view view = LineView(buffer, line, lineStart);
-			const float x = std::max(0.0f, mouseX - textRect.X);
+			// M4-TEX-P6b:命中也跟着水平滚动走 —— 看到的字与点到的地方必须是同一套 x。
+			const float x = std::max(0.0f, mouseX - textRect.X + state.ScrollX);
 			return lineStart + OffsetAtX(ctx, view, x, fontSize);
 		};
 
@@ -756,6 +811,12 @@ namespace World::Wui
 					result.ZoomChanged = true;
 					result.UiZoom = next;
 				}
+			}
+			else if (input.Shift)
+			{
+				// M4-TEX-P6b:Shift+滚轮 = 水平滚动。WUI 的输入状态只有单轴 Wheel(GLFW 的
+				// deltaX 没有传上来),所以横向用"Shift + 纵向滚轮"这一条口径;每格 ~3 个字符宽。
+				state.ScrollX -= input.Wheel * digitWidth * 3.0f;
 			}
 			else
 				state.ScrollY -= input.Wheel * lineHeight * 3.0f;
@@ -950,7 +1011,7 @@ namespace World::Wui
 			{
 				const bool ctrl = input.Ctrl;
 				const bool shift = input.Shift;
-				const int pageLines = std::max(1, static_cast<int>(rect.H / lineHeight) - 1);
+				const int pageLines = std::max(1, static_cast<int>(textRect.H / lineHeight) - 1);
 				if (ctrl)
 				{
 					if (ctx.WasKeyTriggered(KeyCodes::S) && !readOnly)
@@ -1532,7 +1593,7 @@ namespace World::Wui
 				state.HoverVisible = false;
 		}
 
-		// ---- caret 跟随:滚动到刚移动/编辑的 caret 行 ----
+		// ---- caret 跟随:滚动到刚移动/编辑的 caret 行(竖向)与 caret 列(横向,M4-TEX-P6b)----
 		if (state.FollowCaret && maxScroll > 0.0f)
 		{
 			const float caretTop = static_cast<float>(buffer.LineOfOffset(buffer.Caret())) * lineHeight;
@@ -1541,11 +1602,35 @@ namespace World::Wui
 			const float barHeight = FindBarHeight(state.FindVisible, state.FindReplaceMode, readOnly);
 			if (caretTop < state.ScrollY + barHeight)
 				state.ScrollY = std::max(0.0f, caretTop - barHeight);
-			else if (caretTop + lineHeight > state.ScrollY + rect.H)
-				state.ScrollY = caretTop + lineHeight - rect.H;
+			else if (caretTop + lineHeight > state.ScrollY + textRect.H)
+				state.ScrollY = caretTop + lineHeight - textRect.H;
+		}
+		if (state.FollowCaret)
+		{
+			// M4-TEX-P6b:caret 的 X 超出可视区就滚(左右各留 ~2 个字符)。打字 / 点击定位 /
+			// Home·End / Ctrl+←→ / 接受补全 / 查找跳转都会置 FollowCaret,统一走这里。
+			// 内容宽在这里**重算**(缓存键含 revision ⇒ 只有正文真变过才全文件量):帧首那次是给
+			// 布局用的,本帧的插入/删除还没发生。
+			contentWidth = gutterWidth + MeasureMaxLineWidth() + hScrollPadRight;
+			maxScrollX = std::max(0.0f, contentWidth - viewWidth);
+			const float margin = digitWidth * kCaretScrollMarginChars;
+			const size_t localCaret = std::min(buffer.Caret(),
+				caretLineStart + caretLineText.size()) - caretLineStart;
+			const float caretX = ctx.MeasureTextWidth(caretLineText.substr(0, localCaret),
+				fontSize, WuiFontFamily::Monospace);
+			const float scrollXBefore = state.ScrollX;
+			if (caretX - state.ScrollX < margin)
+				state.ScrollX = std::max(0.0f, caretX - margin);
+			else if (caretX - state.ScrollX > textRect.W - margin)
+				state.ScrollX = caretX - textRect.W + margin;
+			// 补全浮层的锚点是"打开时固定的 caret 屏幕位置";横向跟着 caret 走时锚点也要平移,
+			// 否则浮层与 caret 会错位(竖向滚动时锚点固定不动是既有口径)。
+			if (state.PopupVisible && std::fabs(state.ScrollX - scrollXBefore) > 1e-6f)
+				state.PopupAnchorX -= state.ScrollX - scrollXBefore;
 		}
 		state.FollowCaret = false;
 		state.ScrollY = std::max(0.0f, std::min(state.ScrollY, maxScroll));
+		state.ScrollX = std::max(0.0f, std::min(state.ScrollX, maxScrollX));
 
 		// ---- W9.5 补全浮层:位置(空间不足翻到上方)/鼠标 hover·点击/绘制/无障碍 ----
 		{
@@ -1696,8 +1781,8 @@ namespace World::Wui
 		float thumbY = 0.0f;
 		if (needScrollbar)
 		{
-			thumbHeight = std::min(rect.H, std::max(kThumbMinHeight, rect.H * (rect.H / contentHeight)));
-			float travel = std::max(1.0f, rect.H - thumbHeight);
+			thumbHeight = std::min(textRect.H, std::max(kThumbMinHeight, textRect.H * (textRect.H / contentHeight)));
+			float travel = std::max(1.0f, textRect.H - thumbHeight);
 			thumbY = rect.Y + (maxScroll > 0.0f ? state.ScrollY / maxScroll : 0.0f) * travel;
 			const WuiRect thumb { track.X + 2.0f, thumbY, track.W - 4.0f, thumbHeight };
 			if (input.MouseClicked[0] && ctx.IsHovered(track))
@@ -1709,19 +1794,76 @@ namespace World::Wui
 				}
 				else
 				{
-					state.ScrollY += (input.MousePos.y < thumbY ? -1.0f : 1.0f) * rect.H;
+					state.ScrollY += (input.MousePos.y < thumbY ? -1.0f : 1.0f) * textRect.H;
 				}
 			}
 			if (state.DraggingThumb && input.MouseDown[0])
 			{
-				const float travelNow = std::max(1.0f, rect.H - thumbHeight);
+				const float travelNow = std::max(1.0f, textRect.H - thumbHeight);
 				state.ScrollY = (input.MousePos.y - state.ThumbGrabOffset - rect.Y) / travelNow * maxScroll;
 			}
 			if (state.DraggingThumb && input.MouseReleased[0])
 				state.DraggingThumb = false;
 			state.ScrollY = std::max(0.0f, std::min(state.ScrollY, maxScroll));
-			travel = std::max(1.0f, rect.H - thumbHeight);
+			travel = std::max(1.0f, textRect.H - thumbHeight);
 			thumbY = rect.Y + (maxScroll > 0.0f ? state.ScrollY / maxScroll : 0.0f) * travel;
+		}
+
+		// ---- M4-TEX-P6b:水平滚动条(复用竖向那套画法/命中口径)----
+		// 文本区装得下时 hbarHeight = 0:不画、不命中、也不登记节点。thumb 比例 = 可视宽 / 内容宽,
+		// 位置 = ScrollX / maxScrollX;点轨道左右翻一页,按住 thumb 拖动逐像素跟随。
+		float hThumbWidth = 0.0f;
+		float hThumbX = 0.0f;
+		if (hbarHeight > 0.0f)
+		{
+			const float hThumbHeight = std::max(0.0f, hbarTrack.H - 4.0f);
+			hThumbWidth = std::min(viewWidth, std::max(kThumbMinWidth, viewWidth * (viewWidth / contentWidth)));
+			float travel = std::max(1.0f, viewWidth - hThumbWidth);
+			hThumbX = hbarTrack.X + (maxScrollX > 0.0f ? state.ScrollX / maxScrollX : 0.0f) * travel;
+			const WuiRect thumb { hThumbX, hbarTrack.Y + 2.0f, hThumbWidth, hThumbHeight };
+			if (input.MouseClicked[0] && ctx.IsHovered(hbarTrack))
+			{
+				if (ctx.IsHovered(thumb))
+				{
+					state.DraggingHThumb = true;
+					state.HThumbGrabOffset = input.MousePos.x - hThumbX;
+				}
+				else
+					state.ScrollX += (input.MousePos.x < hThumbX ? -1.0f : 1.0f) * textRect.W;
+			}
+			if (state.DraggingHThumb && input.MouseDown[0])
+			{
+				const float travelNow = std::max(1.0f, viewWidth - hThumbWidth);
+				state.ScrollX = (input.MousePos.x - state.HThumbGrabOffset - hbarTrack.X) / travelNow * maxScrollX;
+			}
+			if (state.DraggingHThumb && input.MouseReleased[0])
+				state.DraggingHThumb = false;
+			state.ScrollX = std::max(0.0f, std::min(state.ScrollX, maxScrollX));
+			travel = std::max(1.0f, viewWidth - hThumbWidth);
+			hThumbX = hbarTrack.X + (maxScrollX > 0.0f ? state.ScrollX / maxScrollX : 0.0f) * travel;
+			// 无障碍:轨道 + thumb(脚本按 id 取矩形做真实拖拽注入;固定 id 口径与查找条一致)。
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			if (accessibility.Enabled())
+			{
+				WuiAccessNode trackNode;
+				trackNode.Id = HashId("code-editor.hscroll");
+				trackNode.Window = accessibility.CurrentWindow();
+				trackNode.Panel = accessibility.CurrentPanel();
+				trackNode.Kind = "scrollbar";
+				trackNode.Label = "horizontal scrollbar";
+				trackNode.Value = "x " + std::to_string(static_cast<int>(state.ScrollX))
+					+ " / max " + std::to_string(static_cast<int>(maxScrollX));
+				trackNode.Rect = hbarTrack;
+				trackNode.Interactive = false;
+				accessibility.Register(trackNode);
+				WuiAccessNode thumbNode = trackNode;
+				thumbNode.Id = HashId("code-editor.hscroll.thumb");
+				thumbNode.Kind = "scrollbar-thumb";
+				thumbNode.Label = "horizontal scroll thumb";
+				thumbNode.Rect = { hThumbX, hbarTrack.Y + 2.0f, hThumbWidth, hThumbHeight };
+				thumbNode.Interactive = true;
+				accessibility.Register(thumbNode);
+			}
 		}
 
 		// ---- 绘制(只画可见行) ----
@@ -1785,9 +1927,9 @@ namespace World::Wui
 					const size_t end = std::min(hit->End, lineAbsEnd);
 					if (end <= start)
 						continue;
-					const float x1 = textRect.X + ctx.MeasureTextWidth(
+					const float x1 = textRect.X - state.ScrollX + ctx.MeasureTextWidth(
 						lineView.substr(0, start - lineAbsStart), fontSize, WuiFontFamily::Monospace);
-					const float x2 = textRect.X + ctx.MeasureTextWidth(
+					const float x2 = textRect.X - state.ScrollX + ctx.MeasureTextWidth(
 						lineView.substr(0, end - lineAbsStart), fontSize, WuiFontFamily::Monospace);
 					const bool current = hit->Start == state.OccurrenceWordStart
 						&& hit->End == state.OccurrenceWordEnd;
@@ -1835,7 +1977,8 @@ namespace World::Wui
 					caretByte = static_cast<int>(caretOffset - absStart);
 					caretDrawn = true;
 				}
-				pushText(textRect.X + pen, lineY + textPadY, kTokenColors[static_cast<size_t>(kind)],
+				// M4-TEX-P6b:正文按 -ScrollX 平移(被 ClipPush(textRect) 裁掉左/右溢出的部分)。
+				pushText(textRect.X - state.ScrollX + pen, lineY + textPadY, kTokenColors[static_cast<size_t>(kind)],
 					std::string(segment), localSelStart, localSelEnd, caretByte);
 				pen += ctx.MeasureTextWidth(segment, fontSize, WuiFontFamily::Monospace);
 			};
@@ -1855,12 +1998,15 @@ namespace World::Wui
 			drawSegment(cursor, lineView.size(), WuiCodeTokenKind::Default);
 			// 空行 / caret 在行尾:补一个空文本命令,让后端按真实度量画 caret。
 			if (focused && line == drawCaretLine && !caretDrawn)
-				pushText(textRect.X + pen, lineY + textPadY, kCaretColor, std::string(), -1, -1, 0);
+				pushText(textRect.X - state.ScrollX + pen, lineY + textPadY, kCaretColor, std::string(), -1, -1, 0);
 			// MAT-UI45(纯追加):逐可见行装饰回调 —— 在正文之后、浮层(补全/Hover)之前,
 			// 仍在文本区裁剪内。pen = 本行文本的度量右端(相对文本区左缘)。
+			// M4-TEX-P6b:lineRect.X/W 仍是**可视文本带**(不含滚动,调用方的夹取边界必须落在看得见的
+			// 区域里);textEndX = 行内 pen 终点 + (-ScrollX),即屏幕坐标下真实的文本右端 ——
+			// 装饰跟着正文走,滚出可视区时由调用方夹回文本带内。
 			if (options.LineDecorator)
 				options.LineDecorator(ctx, line, { textRect.X, lineY, textRect.W, lineHeight },
-					textRect.X + pen);
+					textRect.X - state.ScrollX + pen);
 		}
 		ctx.Commands().push_back({ WuiDrawKind::ClipPop });
 
@@ -1869,6 +2015,13 @@ namespace World::Wui
 			ctx.Commands().push_back({ WuiDrawKind::Rect, track, kScrollbarTrack, 0.0f });
 			ctx.Commands().push_back({ WuiDrawKind::Rect,
 				{ track.X + 2.0f, thumbY, track.W - 4.0f, thumbHeight }, kScrollbarThumb, 2.0f });
+		}
+		if (hbarHeight > 0.0f)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, hbarTrack, kScrollbarTrack, 0.0f });
+			ctx.Commands().push_back({ WuiDrawKind::Rect,
+				{ hThumbX, hbarTrack.Y + 2.0f, hThumbWidth, std::max(0.0f, hbarTrack.H - 4.0f) },
+				kScrollbarThumb, 2.0f });
 		}
 
 		// ---- W9.5 补全浮层绘制:必须在编辑区主体之后(顺序 = 绘制顺序,先画会被正文盖掉) ----
@@ -2251,6 +2404,7 @@ namespace World::Wui
 			ctx.RegisterFocusable(id, rect);
 			DrawFocusRing(ctx, rect, id, CurrentTheme());
 		}
+		result.ScrollX = state.ScrollX;
 		result.Changed = buffer.Revision() != revisionAtStart;
 		return result;
 	}

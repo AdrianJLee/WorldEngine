@@ -118,15 +118,24 @@ namespace World::Wui
 		bool ZoomChanged = false;
 		// 当前**生效**的会话缩放(每帧都回报;宿主不必自己夹取,也不用猜内核口径)。
 		float UiZoom = 1.0f;
+		// M4-TEX-P6b:本帧**生效**的水平滚动量(像素,0 = 未滚)。每帧都回报,宿主/探针可直接读;
+		// 内容装得下时为恒 0(内核用"最长行像素宽 + 右内边距"算上限,见 WuiCodeEditor.cpp 布局段)。
+		float ScrollX = 0.0f;
 	};
 
 	// 多行代码编辑控件:可见行裁剪绘制 + 行号栏 + 当前行高亮 + 选区 + caret 闪烁;
 	// 滚轮/拖动滚动 + 竖向滚动条;真实字形度量的鼠标命中;上下/Home/End/PageUp/PageDown/
 	// Ctrl+←→/Shift 选区/Ctrl+A/C/X/V/Z/Y/Tab/Enter/Backspace/Delete;双击选词。
+	// M4-TEX-P6b:长行不再被右边界截断 —— 内容(行号槽 + 最长行宽 + 右内边距)装不下时,
+	// 绘制/命中/caret/同词高亮/查找命中/行装饰全部按 -ScrollX 平移,文本区底部出现可拖拽的
+	// 水平滚动条;caret 跟随(打字/Home·End/Ctrl+←→/点击)左右各留 ~2 字符。横向滚动两条输入口径:
+	// 拖水平滚动条,或 Shift+滚轮(WUI 输入只有单轴 Wheel,没有 deltaX;Ctrl+滚轮仍是缩放)。
 	// ReadOnly = true 时只导航/选择/复制,不改 buffer。
 	// MAT-UI6c:Ctrl+F 查找条带"选中即搜索"(单行非空选区直接预填查询,首个命中落在选区
 	// 起点处/之后)、Ctrl+H 替换;条上每个按钮悬停有"说明 + 快捷键"tooltip,同一句同时进
 	// a11y 节点的 Tooltip;关闭那一帧就不再登记查找条节点(`code-editor.find*`)。
+	// 横向滚动条的无障碍节点固定 id:`code-editor.hscroll`(轨道,只读,value = 当前 x / 上限)与
+	// `code-editor.hscroll.thumb`(可交互);装得下时不登记(与"看不见的东西不许被点到"同一条口径)。
 	WLD_API WuiCodeEditorResult CodeEditor(WuiContext& ctx, WuiId id, const WuiRect& rect,
 		WuiTextBuffer& buffer, const WuiCodeEditorOptions& options);
 }
