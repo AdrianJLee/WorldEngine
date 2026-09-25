@@ -109,6 +109,17 @@ namespace
 		return Near(a.R, b.R) && Near(a.G, b.G) && Near(a.B, b.B) && Near(a.A, b.A);
 	}
 
+	// M4-TEX-P7:按绘制位置取一条文本命令(Combo/SearchableCombo 的当前值与候选行都是 Text)。
+	// 省略只发生在**绘制命令**的 Text 字段上,所以断言必须落到命令本身,而不是控件数据 ——
+	// 数据侧(选项串 / a11y value / 返回值)另有一组断言证明没被改写。
+	const WuiDrawCommand* FindTextCommand(const std::vector<WuiDrawCommand>& commands, float x, float y)
+	{
+		for (const WuiDrawCommand& command : commands)
+			if (command.Kind == WuiDrawKind::Text && Near(command.Rect.X, x) && Near(command.Rect.Y, y))
+				return &command;
+		return nullptr;
+	}
+
 	// MAT-UI3a:焦点环从"不透明硬描边"改成"基色 × 低透明度"的两笔(主环 alpha × 0.72
 	// + 外发光 alpha × 0.16,见 WuiWidgets.h DrawFocusRing)。这里的换算必须与控件同一口径,
 	// 否则"两面共用同一份 DrawFocusRing"的断言会被颜色漂移掩盖。
@@ -2070,6 +2081,264 @@ int main()
 					CHECK(ctx.IsPopupOpen(id));
 				}
 			}
+		}
+
+		// 22b. M4-TEX-P7(用户 2026-09-25「现在选择不如之前」):Combo / SearchableCombo 的越界文本只在
+		// **绘制期**做中间省略。数据侧一律完整 —— 选项字符串、无障碍节点 value/label、点击写回的 selected、
+		// 搜索过滤读的都是原串,只有绘制命令的 Text 变短。三段硬口径:
+		//   ① 装得下 ⇒ 命令流与改动前**逐字段相同**(对"旧口径"手写期望比命令流哈希,命令条数也要一致);
+		//   ② 超宽   ⇒ 闭合态当前值 1 条 + 展开态每个可见行都在绘制命令里含 '…' 且宽度 ≤ 可用宽,
+		//              同帧 a11y 节点仍是完整串;
+		//   ③ SearchableCombo 按**绘制上不可见的路径尾部**过滤到该项并回车选中 ⇒ 选项串没被截断。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme;
+			const std::string longPath =
+				"textures/very/deep/nested/path/Background_Forest_HD.wtex (Background_Forest_HD.png)";
+			const std::vector<std::string> options {
+				"textures/Icon.wtex (Icon.png)", longPath, "materials/glass_red.wmat" };
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+
+			// ① 装得下:闭合态整条命令流 = 改动前的逐字段期望(Rect / Outline / Text / 折角两条细线);
+			//    条数一致 = 不引入新绘制命令。
+			{
+				const WuiRect rect { 100.0f, 100.0f, 240.0f, 22.0f };
+				const std::vector<std::string> fits { "Low", "Medium" };
+				int selected = 1;
+				WuiContext ctx;
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(idle);
+				CHECK(!Combo(ctx, HashId("test.m4texp7.fits"), rect, "Quality", fits, selected, theme));
+				ctx.EndFrame();
+				const float caretX = rect.X + rect.W - 12.0f;
+				const float caretY = rect.Y + rect.H * 0.5f - 3.0f;
+				const std::vector<WuiDrawCommand> expected {
+					{ WuiDrawKind::Rect, rect, theme.ButtonBg, 3.0f },
+					{ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f },
+					{ WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
+						theme.Text, 0, 1.0f, "Medium", 15.0f, false },
+					{ WuiDrawKind::Rect, { caretX, caretY, 7.0f, 1.5f }, theme.TextMuted, 1.0f },
+					{ WuiDrawKind::Rect, { caretX + 1.5f, caretY + 3.0f, 4.0f, 1.5f }, theme.TextMuted, 1.0f },
+				};
+				CHECK(ctx.Commands().size() == expected.size());
+				CHECK(CommandStreamHash(ctx.Commands()) == CommandStreamHash(expected));
+			}
+
+			// ② 装得下(展开态):候选行的绘制文本 = 选项原串(弹层条目的命中/遮挡登记不改命令)。
+			{
+				const WuiRect rect { 100.0f, 100.0f, 240.0f, 22.0f };
+				const std::vector<std::string> fits { "Low", "Medium" };
+				const WuiId id = HashId("test.m4texp7.fits-open");
+				int selected = 0;
+				WuiContext ctx;
+				const auto Frame = [&](const WuiInputState& in)
+				{
+					accessibility.BeginFrame("main", idle.ViewportSize);
+					accessibility.SetPanel("test");
+					ctx.BeginFrame(in);
+					const bool changed = Combo(ctx, id, rect, "Quality", fits, selected, theme);
+					DrawTooltip(ctx, theme);   // 宿主帧末收口:弹层绘制在这里补进命令流
+					ctx.EndFrame();
+					return changed;
+				};
+				Frame(idle);
+				{
+					WuiInputState click = idle;
+					click.MousePos = { rect.X + 10.0f, rect.Y + rect.H * 0.5f };
+					click.MouseClicked[0] = true;
+					Frame(click);
+				}
+				CHECK(ctx.IsPopupOpen(id));
+				// 弹层条目 = {rect.X+4, rect.Y+rect.H+2+4+22*i, rect.W-8, 22},文字在条目内 +6/+3。
+				// 弹层绘制被 P4-U29 延后到宿主帧末(DrawTooltip 的收口),落在 overlay 命令表里。
+				for (size_t index = 0; index < fits.size(); ++index)
+				{
+					const WuiDrawCommand* row = FindTextCommand(ctx.OverlayCommands(), rect.X + 10.0f,
+						rect.Y + rect.H + 9.0f + 22.0f * static_cast<float>(index));
+					CHECK(row != nullptr);
+					CHECK(row != nullptr && row->Text == fits[index]);
+				}
+			}
+
+			// ③ 超宽:闭合态当前值 + 展开态每个可见行都只在绘制命令里省略,a11y / selected 仍是完整串。
+			{
+				const WuiRect rect { 100.0f, 100.0f, 170.0f, 22.0f };
+				const WuiId id = HashId("test.m4texp7.ellipsis");
+				const float caretX = rect.X + rect.W - 12.0f;
+				const float valueBudget = caretX - (rect.X + 6.0f) - 4.0f;   // 与内核同一条几何
+				const float rowBudget = (rect.W - 8.0f) - 12.0f;
+				int selected = 0;
+				WuiContext ctx;
+				const auto Frame = [&](const WuiInputState& in)
+				{
+					accessibility.BeginFrame("main", idle.ViewportSize);
+					accessibility.SetPanel("test");
+					ctx.BeginFrame(in);
+					const bool changed = Combo(ctx, id, rect, "Albedo", options, selected, theme);
+					DrawTooltip(ctx, theme);   // 宿主帧末收口:弹层绘制在这里补进命令流
+					ctx.EndFrame();
+					return changed;
+				};
+				CHECK(!Frame(idle));
+				{
+					const WuiDrawCommand* value = FindTextCommand(ctx.Commands(), rect.X + 6.0f,
+						rect.Y + (rect.H - 15.0f) * 0.5f);
+					CHECK(value != nullptr);
+					CHECK(value != nullptr && value->Text.find("…") != std::string::npos);
+					CHECK(value != nullptr && value->Text != options[0]);
+					CHECK(value != nullptr
+						&& MeasureTextWithHook(value->Text, value->FontSize, WuiFontFamily::Ui) <= valueBudget);
+					const WuiAccessNode* node = accessibility.Find(id);
+					CHECK(node != nullptr && node->Kind == "combo" && node->Value == options[0]);
+				}
+				{
+					WuiInputState click = idle;
+					click.MousePos = { rect.X + 10.0f, rect.Y + rect.H * 0.5f };
+					click.MouseClicked[0] = true;
+					Frame(click);
+				}
+				CHECK(ctx.IsPopupOpen(id));
+				{
+					size_t rows = 0;
+					for (const WuiDrawCommand& command : ctx.OverlayCommands())
+					{
+						if (command.Kind != WuiDrawKind::Text)
+							continue;
+						const float relativeX = command.Rect.X - rect.X;
+						if (relativeX < 4.0f || relativeX > rect.W - 4.0f || command.Rect.Y <= rect.Y + rect.H)
+							continue;   // 只取弹层里的行文本(触发器文字在同一行上、y 更小)
+						++rows;
+						CHECK(command.Text.find("…") != std::string::npos);
+						CHECK(MeasureTextWithHook(command.Text, command.FontSize, WuiFontFamily::Ui) <= rowBudget);
+					}
+					CHECK(rows == options.size());
+					const WuiAccessNode* longNode = accessibility.FindByLabel(longPath, "combo-option");
+					CHECK(longNode != nullptr && longNode->Value == "false");
+				}
+				{
+					// 点击第 2 行(长路径):返回值 true、selected 写回的是**完整选项串**、弹层关闭。
+					const glm::vec2 point { rect.X + rect.W * 0.5f, rect.Y + rect.H + 9.0f + 22.0f + 11.0f };
+					WuiInputState press = idle;
+					press.MousePos = point;
+					press.MouseClicked[0] = true;
+					press.MouseDown[0] = true;
+					CHECK(!Frame(press));
+					WuiInputState release = idle;
+					release.MousePos = point;
+					release.MouseReleased[0] = true;
+					CHECK(Frame(release));
+				}
+				CHECK(selected == 1);
+				CHECK(options[1] == longPath);
+				CHECK(!ctx.IsPopupOpen(id));
+				{
+					CHECK(!Frame(idle));
+					const WuiAccessNode* node = accessibility.Find(id);
+					CHECK(node != nullptr && node->Value == longPath);
+					const WuiDrawCommand* value = FindTextCommand(ctx.Commands(), rect.X + 6.0f,
+						rect.Y + (rect.H - 15.0f) * 0.5f);
+					CHECK(value != nullptr && value->Text.find("…") != std::string::npos);
+					CHECK(value != nullptr && value->Text != longPath);
+				}
+			}
+
+			// ④ SearchableCombo:同样的绘制期省略;过滤词只出现在长路径的**尾部**(绘制上不可见),
+			//    能过滤到它并回车选中 ⇒ 搜索读的是没被截断的原串。
+			{
+				const WuiId searchId = HashId("test.m4texp7.search");
+				const WuiRect searchRect { 100.0f, 240.0f, 170.0f, 22.0f };
+				int searchSelected = 0;
+				WuiContext searchCtx;
+				const auto SearchFrame = [&](const WuiInputState& in)
+				{
+					accessibility.BeginFrame("main", idle.ViewportSize);
+					accessibility.SetPanel("test");
+					searchCtx.BeginFrame(in);
+					const bool changed = SearchableCombo(searchCtx, searchId, searchRect, "Albedo", options,
+						searchSelected, theme);
+					DrawTooltip(searchCtx, theme);   // 宿主帧末收口:弹层绘制在这里补进命令流
+					searchCtx.EndFrame();
+					return changed;
+				};
+				CHECK(!SearchFrame(idle));
+				{
+					// 闭合态:当前值(0 号 = Icon.wtex 完整路径)在绘制命令里省略,a11y value 完整。
+					const WuiDrawCommand* value = FindTextCommand(searchCtx.Commands(),
+						searchRect.X + 1.0f + 6.0f, searchRect.Y + (searchRect.H - 15.0f) * 0.5f);
+					const float budget = (searchRect.X + searchRect.W - 22.0f) - (searchRect.X + 1.0f + 6.0f);
+					CHECK(value != nullptr);
+					CHECK(value != nullptr && value->Text.find("…") != std::string::npos);
+					CHECK(value != nullptr
+						&& MeasureTextWithHook(value->Text, value->FontSize, WuiFontFamily::Ui) <= budget);
+					const WuiAccessNode* node = accessibility.Find(searchId);
+					CHECK(node != nullptr && node->Kind == "search-combo" && node->Value == options[0]);
+				}
+				{
+					WuiInputState click = idle;
+					click.MousePos = { searchRect.X + 10.0f, searchRect.Y + searchRect.H * 0.5f };
+					click.MouseClicked[0] = true;
+					SearchFrame(click);
+				}
+				CHECK(searchCtx.IsPopupOpen(searchId));
+				{
+					WuiInputState click = idle;
+					click.MousePos = { searchRect.X + 10.0f, searchRect.Y + searchRect.H + 16.0f };
+					click.MouseClicked[0] = true;
+					SearchFrame(click);
+				}
+				{
+					WuiInputState type = idle;
+					type.MousePos = { searchRect.X + 10.0f, searchRect.Y + searchRect.H + 16.0f };
+					type.TextInput = { 'f', 'o', 'r', 'e', 's', 't' };
+					SearchFrame(type);
+				}
+				CHECK(searchCtx.IsPopupOpen(searchId));
+				{
+					// 过滤后只剩长路径那一行:绘制文本仍省略在行宽内;两个 a11y 节点 label 都是完整串。
+					const WuiRect listRect { searchRect.X + 4.0f, searchRect.Y + 22.0f + 2.0f + 30.0f,
+						searchRect.W - 8.0f, 22.0f };
+					size_t rows = 0;
+					for (const WuiDrawCommand& command : searchCtx.OverlayCommands())
+					{
+						if (command.Kind != WuiDrawKind::Text
+							|| !listRect.Contains(glm::vec2 { command.Rect.X, command.Rect.Y }))
+							continue;
+						++rows;
+						CHECK(command.Text.find("…") != std::string::npos);
+						CHECK(MeasureTextWithHook(command.Text, command.FontSize, WuiFontFamily::Ui)
+							<= listRect.W - 12.0f);
+					}
+					CHECK(rows == 1);
+					const WuiAccessNode* optionNode = accessibility.FindByLabel(longPath, "combo-option");
+					CHECK(optionNode != nullptr);
+					const WuiAccessNode* legacyNode = accessibility.Find(
+						HashId(("combo-item:" + std::to_string(searchId) + ":1").c_str()));
+					CHECK(legacyNode != nullptr && legacyNode->Label == longPath);
+				}
+				{
+					WuiInputState enter = idle;
+					enter.MousePos = { searchRect.X + 10.0f, searchRect.Y + searchRect.H + 16.0f };
+					enter.KeyDown = { World::KeyCodes::Enter };
+					CHECK(SearchFrame(enter));
+				}
+				CHECK(searchSelected == 1);
+				CHECK(options[1] == longPath);
+				CHECK(!searchCtx.IsPopupOpen(searchId));
+				{
+					CHECK(!SearchFrame(idle));
+					const WuiAccessNode* node = accessibility.Find(searchId);
+					CHECK(node != nullptr && node->Value == longPath);
+					const WuiDrawCommand* value = FindTextCommand(searchCtx.Commands(),
+						searchRect.X + 1.0f + 6.0f, searchRect.Y + (searchRect.H - 15.0f) * 0.5f);
+					CHECK(value != nullptr && value->Text.find("…") != std::string::npos);
+					CHECK(value != nullptr && value->Text != longPath);
+				}
+			}
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
 		}
 
 		// 23. P1c-E4:键盘可达性契约(引擎侧)。每件都按同一条两帧节奏验证:

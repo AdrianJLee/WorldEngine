@@ -2009,6 +2009,37 @@ namespace World::Wui
 		ctx.Commands().push_back(std::move(command));
 	}
 
+	// M4-TEX-P7:Combo / SearchableCombo 共用的**绘制期**中间省略(声明与口径见 WuiWidgets.h)。
+	// 背景(用户 2026-09-25「现在选择不如之前」):贴图下拉曾被面板提前截断成 `textures/Ico…g`,
+	// 搜索/读屏/回显都拿不到完整路径;数据侧(选项字符串)必须保持完整,越界只在**画之前**裁。
+	// 算法逐条对齐编辑器侧 MaterialEditorPanel::EllipsizeMiddleToWidth:先测整串(装得下原样返回),
+	// 再按"尾部保留 1 个码点 → 逐步放宽尾部"的顺序取**最长的头**;只对调用方真的要画的那一条文本度量。
+	std::string EllipsizeMiddleToWidth(const WuiContext& ctx, std::string_view text, float width, float fontSize)
+	{
+		if (text.empty() || width <= 0.0f)
+			return {};
+		if (ctx.MeasureTextWidth(text, fontSize) <= width)
+			return std::string(text);
+		const std::string dots = "…";
+		std::vector<size_t> boundaries;
+		boundaries.reserve(text.size());
+		for (size_t index = 0; index < text.size(); ++index)
+			if ((static_cast<unsigned char>(text[index]) & 0xC0) != 0x80)
+				boundaries.push_back(index);
+		for (size_t tail = boundaries.size(); tail > 0; --tail)
+		{
+			for (size_t head = tail; head > 0; --head)
+			{
+				std::string candidate(text.substr(0, boundaries[head - 1]));
+				candidate += dots;
+				candidate.append(text.substr(boundaries[tail - 1]));
+				if (ctx.MeasureTextWidth(candidate, fontSize) <= width)
+					return candidate;
+			}
+		}
+		return dots;
+	}
+
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme)
 	{
@@ -2020,14 +2051,17 @@ namespace World::Wui
 		const bool hovered = ctx.IsHovered(rect);
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, hovered ? theme.ButtonHover : theme.ButtonBg, 3.0f });
 		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
-		// P4-UX1:下拉只画**当前值**(label 仅用于无障碍节点)。
-		// 面板的排版约定是"标签在左、控件在右",把 label 也画进框里会出现
-		// "阴影贴图: 2048" / "界面语言: 简体中文" 这种重复且臃肿的文本。
-		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
-			theme.Text, 0, 1.0f, options[selected], 15.0f, false });
 		// 下拉提示:右下角两段细线组成的小折角(不依赖字体里的箭头字形)。
 		const float caretX = rect.X + rect.W - 12.0f;
 		const float caretY = rect.Y + rect.H * 0.5f - 3.0f;
+		// P4-UX1:下拉只画**当前值**(label 仅用于无障碍节点)。
+		// 面板的排版约定是"标签在左、控件在右",把 label 也画进框里会出现
+		// "阴影贴图: 2048" / "界面语言: 简体中文" 这种重复且臃肿的文本。
+		// M4-TEX-P7:当前值超出可用宽(左内边距 6 → 折角左侧再留 4px 呼吸距离)时,只在这条**绘制命令**里
+		// 做中间省略;options / a11y value / 返回值保持完整(搜索、读屏、回显都拿完整路径)。
+		const float valueBudget = caretX - (rect.X + 6.0f) - 4.0f;
+		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
+			theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, options[selected], valueBudget, 15.0f), 15.0f, false });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX, caretY, 7.0f, 1.5f }, theme.TextMuted, 1.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX + 1.5f, caretY + 3.0f, 4.0f, 1.5f }, theme.TextMuted, 1.0f });
 		DrawFocusRing(ctx, rect, id, theme);
@@ -2077,7 +2111,10 @@ namespace World::Wui
 					ctx.ConsumePointerClick();
 					ctx.ClosePopup(id);
 				}
-				ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + 6.0f, item.Y + 3.0f, 0, 0 }, theme.Text, 0, 1.0f, options[i], 15.0f, false });
+				// M4-TEX-P7:候选行同样只在**绘制命令**里省略(条目没有箭头/滚动条 ⇒ 右侧留 6px 呼吸距离,
+				// 文本不会越过条目矩形);上面的 a11y 节点与点击写回的 selected 仍是完整选项串。
+				ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + 6.0f, item.Y + 3.0f, 0, 0 }, theme.Text, 0, 1.0f,
+					EllipsizeMiddleToWidth(ctx, options[i], item.W - 12.0f, 15.0f), 15.0f, false });
 			}
 			ctx.ClosePopupsOnOutsideClick({ id }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
@@ -2124,8 +2161,13 @@ namespace World::Wui
 		// 未展开时显示当前选中项;展开时输入框承担过滤。
 		const WuiRect fieldRect { rect.X + 1.0f, rect.Y + 1.0f, rect.W - 24.0f, rect.H - 2.0f };
 		if (!open)
+		{
+			// M4-TEX-P7:右侧给 "v"/"^" 箭头(画在 rect.X + rect.W - 18)留 4px 呼吸距离;当前值超宽时
+			// 只在这条**绘制命令**里中间省略 —— 上面的 a11y value(current)保持完整路径。
+			const float valueBudget = (rect.X + rect.W - 22.0f) - (fieldRect.X + 6.0f);
 			ctx.Commands().push_back({ WuiDrawKind::Text, { fieldRect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
-				theme.Text, 0, 1.0f, current, 15.0f, false });
+				theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, current, valueBudget, 15.0f), 15.0f, false });
+		}
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + rect.W - 18.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
 			theme.TextMuted, 0, 1.0f, open ? "^" : "v", 14.0f, false });
 		DrawFocusRing(ctx, rect, id, theme);
@@ -2226,8 +2268,11 @@ namespace World::Wui
 				// 自己的 IBeam(更早绘制),不会被这里覆盖。
 				ctx.SetCursor(WuiCursor::Hand);
 			}
+			// M4-TEX-P7:可见候选行只在**绘制命令**里中间省略(条目右侧留 6px 呼吸距离);上面两个 a11y
+			// 节点(combo-option / combo-item)的 label 仍是完整选项串 —— 脚本按完整路径点选与搜索都不受影响。
 			ctx.Commands().push_back({ WuiDrawKind::Text, { item.X + 6.0f, item.Y + 3.0f, 0, 0 },
-				theme.Text, 0, 1.0f, options[optionIndex], 15.0f, false });
+				theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, options[optionIndex], item.W - 12.0f, 15.0f),
+				15.0f, false });
 			ctx.Commands().push_back({ WuiDrawKind::ClipPop });
 			// P4-U28:与 Combo 同一条 release 确认口径(拖出弹层后松手不选中)。
 			if (ctx.IsClickCompleted(ComboOptionId(id, static_cast<size_t>(optionIndex)), item))

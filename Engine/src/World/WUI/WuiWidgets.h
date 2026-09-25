@@ -80,6 +80,16 @@ namespace World::Wui
 	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
 		const WuiColor& color, float fontSize, const WuiTheme& theme);
 
+	// M4-TEX-P7 中间省略(文本进不了可用宽度时的**绘制期**裁剪口径;与编辑器侧
+	// MaterialEditorPanel::EllipsizeMiddleToWidth 同款做法,内核侧由 Combo / SearchableCombo 复用这一份):
+	//  - 装得下 ⇒ **原样返回**(调用方的绘制命令逐字段不变,不引入新命令);
+	//  - 超宽   ⇒ 保留最长的头(目录前缀)+ '…' + 尾部,从"尾部只留 1 个码点"起按需放宽尾部,
+	//             按 UTF-8 码点边界切(不会把多字节字符切一半);连一个码点都放不下时返回 "…";
+	//  - 只裁"要画的这一条文本":选项字符串、无障碍 value/label、控件返回值都由调用方保持完整,
+	//    搜索/读屏/回显读的仍是原串。
+	// width <= 0 或空文本 ⇒ 空串(没有可画的空间)。
+	std::string EllipsizeMiddleToWidth(const WuiContext& ctx, std::string_view text, float width, float fontSize);
+
 	// P4-UX4 悬停提示(用户 2026-09-20:"鼠标悬停在一个设置里的选项是不是得有介绍"):
 	//  - `Tooltip(ctx, hoverRect, text)`:鼠标在该矩形内时登记文本(后登记覆盖先登记);
 	//  - `DrawTooltip(ctx, theme)`:宿主在**画完所有面板之后**调用一次,画到 overlay 层
