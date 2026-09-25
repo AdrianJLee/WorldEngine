@@ -125,6 +125,11 @@ namespace World
 		// 参数列与代码列都走下面这套状态,不触碰 `.wmat` 的字段/继承逻辑。
 		bool m_ShaderMode = false;
 		std::string m_ShaderPath;              // 逻辑路径(相对内容根)
+		// MAT-FN3:这份 `.slang` 是**材质函数库**(内容根下 `shaders/lib/**`)—— 不是材质资产:
+		// 没有 `Evaluate` 入口,不单独编译/烘焙,只被材质 `#include` 引用
+		// (docs/dev/shader-contract.md §9)。参数列因此不显示 `//! param` 表,改用统一说明;
+		// 编辑 / 保存 / 磁盘热重载与普通 `.slang` 完全相同。
+		bool m_ShaderIsLibrary = false;
 		// `.wmat` 形态:`Shader:` 引用的参数组是否展开(与其它分组同一条"折叠也看得见计数"的规则)。
 		bool m_ShaderParamsOpen = true;
 		Wui::WuiTextBuffer m_ShaderBuffer;     // 源码(编辑 / 撤销 / 脏标记)
@@ -182,6 +187,10 @@ namespace World
 			// 装配侧的 MaterialSurfaceRuntime::Install 会校验 artifact.Backend 与设备一致)。
 			// 在主线程取,避免工作线程读渲染器状态。
 			SurfaceShaderBackend Target = SurfaceShaderBackend::VulkanSpirV;
+			// MAT-FN3:材质 `#include` 的解析根(绝对路径;在主线程按当前逻辑路径算好)——
+			// 材质自身目录 + 内容根下的 `shaders/`(`#include "lib/pattern.slang"` 命中的那一层)。
+			// 传给 MaterialSurfaceCompiler 的 includeRoots;被包含文件的内容哈希进缓存键。
+			std::vector<std::filesystem::path> IncludeRoots;
 		};
 		struct ShaderCompileOutcome
 		{

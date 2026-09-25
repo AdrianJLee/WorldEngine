@@ -38,8 +38,53 @@ namespace World::Editor
 			size_t Shaders = 0;
 			size_t Artifacts = 0;
 			size_t Failed = 0;
+			// MAT-FN3:被跳过的材质函数库(`shaders/lib/**/*.slang`)—— 它们不是材质资产,
+			// 不单独烘焙(随引用它们的材质一起烘)。
+			size_t Libraries = 0;
 			std::string Error;
 		};
+
+		// MAT-FN3:材质函数库 = 内容根下 `shaders/lib/**` 的 `.slang`
+		// (docs/dev/shader-contract.md §9;与材质编辑器的库文件识别同一口径)。
+		bool IsMaterialLibraryShader(const fs::path& relativePath)
+		{
+			const std::string normalized = relativePath.generic_string();
+			const std::string marker = "shaders/lib/";
+			size_t at = normalized.find(marker);
+			while (at != std::string::npos)
+			{
+				if (at == 0 || normalized[at - 1] == '/')
+					return true;
+				at = normalized.find(marker, at + 1);
+			}
+			return false;
+		}
+
+		// MAT-FN3:表面材质编译器的 include 根(绝对路径)。顺序 = 文档 §9 的解析顺序:
+		// **先材质自身目录、再项目 `assets/shaders` 根**(`#include "lib/pattern.slang"` 命中的
+		// 就是这一层)。只收集真实存在的目录;顺序固定,根本身不进缓存键
+		// (缓存键含被包含文件的路径 + 内容哈希,见 MaterialSurface.cpp)。
+		std::vector<fs::path> SurfaceIncludeRoots(const fs::path& contentRoot, const fs::path& shaderFile)
+		{
+			std::vector<fs::path> roots;
+			const auto add = [&roots](const fs::path& candidate)
+			{
+				if (candidate.empty())
+					return;
+				std::error_code ec;
+				if (!fs::is_directory(candidate, ec))
+					return;
+				const fs::path absolute = fs::absolute(candidate, ec);
+				if (ec || absolute.empty())
+					return;
+				const fs::path normalized = absolute.lexically_normal();
+				if (std::find(roots.begin(), roots.end(), normalized) == roots.end())
+					roots.push_back(normalized);
+			};
+			add(shaderFile.parent_path());
+			add(contentRoot / "shaders");
+			return roots;
+		}
 
 		bool WriteFileBytes(const fs::path& path, const std::vector<uint8_t>& bytes, std::string& error)
 		{
@@ -168,14 +213,26 @@ namespace World::Editor
 				// 同时当作排列键:编辑器与 cooker 对同一份着色器源因此落在**同一个缓存条目**上
 				// (cook 不重编编辑器刚编过的东西,产物也一致)。
 				const std::string shaderPath = relative.generic_string();
+
+				// MAT-FN3:材质函数库(`shaders/lib/**`)不是材质资产 —— 它没有 `Evaluate` 入口,
+				// **不单独编译/烘焙**(随引用它的材质一起烘,见 docs/dev/shader-contract.md §9)。
+				// 只跳过并计数,不算失败。
+				if (IsMaterialLibraryShader(relative))
+				{
+					++result.Libraries;
+					continue;
+				}
 				++result.Shaders;
 
+				// MAT-FN3:材质 `#include` 的解析根(材质自身目录 + 项目 `assets/shaders` 根),
+				// 绝对路径 —— 与材质编辑器的实时预览同一个口径。
+				const std::vector<fs::path> includeRoots = SurfaceIncludeRoots(contentRoot, entry.path());
 				for (const World::SurfaceShaderBackend backend :
 					{ World::SurfaceShaderBackend::VulkanSpirV, World::SurfaceShaderBackend::OpenGLSpirV })
 				{
 					const bool gl = backend == World::SurfaceShaderBackend::OpenGLSpirV;
 					const World::SurfaceCompileResult compiled =
-						World::MaterialSurfaceCompiler::CompileSurface(source, shaderPath, backend);
+						World::MaterialSurfaceCompiler::CompileSurface(source, shaderPath, backend, includeRoots);
 					if (!compiled.Success)
 					{
 						++result.Failed;
@@ -478,8 +535,9 @@ namespace World::Editor
 
 			const fs::path surfaceContentRoot = manifest.ResolveContentRoot(projectManifestPath);
 			const SurfaceBakeResult surfaces = BakeSurfaceMaterials(surfaceContentRoot, cookedContentDir);
-			WLD_CORE_INFO("Baked surface materials: {0} shaders, {1} artifacts ({2} failed)",
-				surfaces.Shaders, surfaces.Artifacts, surfaces.Failed);
+			WLD_CORE_INFO("Baked surface materials: {0} shaders, {1} artifacts ({2} failed, "
+				"{3} material functions skipped)",
+				surfaces.Shaders, surfaces.Artifacts, surfaces.Failed, surfaces.Libraries);
 			if (surfaces.Failed)
 				throw std::runtime_error("Surface material baking failed: " + surfaces.Error);
 

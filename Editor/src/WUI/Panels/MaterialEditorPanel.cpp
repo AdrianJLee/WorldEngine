@@ -376,6 +376,64 @@ namespace World
 			return std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
 		}
 
+		// ---- MAT-FN3:材质函数库与 `#include` 根 ----
+		//
+		// 库文件 = 内容根下 `shaders/lib/**` 里的 `.slang`(docs/dev/shader-contract.md §9;
+		// 与 EditorCooker 的烘焙扫描同一口径)。它不是材质资产:没有 `Evaluate` 入口、
+		// 不单独编译/烘焙,只被材质 `#include` 引用 —— 因此**不能**按材质编译预览。
+		bool IsMaterialLibraryShaderPath(const std::string& logicalPath)
+		{
+			std::string normalized = MaterialLibrary::NormalizePath(logicalPath);
+			std::replace(normalized.begin(), normalized.end(), '\\', '/');
+			std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			// 唯一扩展名是 `.slang`(Slang-B1)。
+			const std::string extension = ".slang";
+			if (normalized.size() <= extension.size()
+				|| normalized.compare(normalized.size() - extension.size(), extension.size(), extension) != 0)
+				return false;
+			// 只要路径里出现 `shaders/lib/` 这一段就算库文件(相对内容根的 `shaders/lib/x.slang`
+			// 与绝对路径 `<…>/assets/shaders/lib/x.slang` 都命中),别处出现同样片段的不算。
+			const std::string marker = "shaders/lib/";
+			size_t at = normalized.find(marker);
+			while (at != std::string::npos)
+			{
+				if (at == 0 || normalized[at - 1] == '/')
+					return true;
+				at = normalized.find(marker, at + 1);
+			}
+			return false;
+		}
+
+		// 表面材质编译器的 include 根(绝对路径)。顺序 = docs/dev/shader-contract.md §9 的解析
+		// 顺序:**先材质自身目录、再项目 `assets/shaders` 根**(`#include "lib/pattern.slang"`
+		// 命中的就是这一层)。只收集真实存在的目录 —— 还没落盘的新材质推出来的目录可能不存在,
+		// 这时命中的只能是项目根,和"没写这个根"等价;顺序固定,根本身不进缓存键。
+		std::vector<std::filesystem::path> SurfaceIncludeRoots(const std::filesystem::path& contentRoot,
+			const std::string& shaderLogicalPath)
+		{
+			std::vector<std::filesystem::path> roots;
+			const auto add = [&roots](const std::filesystem::path& candidate)
+			{
+				if (candidate.empty())
+					return;
+				std::error_code ec;
+				if (!std::filesystem::is_directory(candidate, ec))
+					return;
+				const std::filesystem::path absolute = std::filesystem::absolute(candidate, ec);
+				if (ec || absolute.empty())
+					return;
+				const std::filesystem::path normalized = absolute.lexically_normal();
+				if (std::find(roots.begin(), roots.end(), normalized) == roots.end())
+					roots.push_back(normalized);
+			};
+			// 材质自身目录:未落盘时按逻辑路径推(绝对路径直接用)。
+			const std::filesystem::path shaderFile(shaderLogicalPath);
+			add((shaderFile.is_absolute() ? shaderFile : contentRoot / shaderFile).parent_path());
+			add(contentRoot / "shaders");
+			return roots;
+		}
+
 		// 逻辑贴图路径是否能在磁盘上找到(绝对路径也支持:编辑器自带资源用绝对路径)。
 		bool TextureAssetExists(const std::string& logical)
 		{
@@ -4427,7 +4485,12 @@ namespace World
 		SetMaterialPathForPanel(normalized);
 		m_ShaderMode = true;
 		m_ShaderPath = MaterialLibrary::NormalizePath(normalized);
-		m_PanelTitle = Wui::Tr("panel.material.shader.window_title", "Material Shader - ")
+		// MAT-FN3:`shaders/lib/**` 里的 `.slang` 是材质函数库(不是材质资产)—— 窗口标题与
+		// 右栏(参数区)都按"库文件"呈现;面板 id 不变(还是 material:<逻辑路径>)。
+		m_ShaderIsLibrary = IsMaterialLibraryShaderPath(m_ShaderPath);
+		m_PanelTitle = (m_ShaderIsLibrary
+			? Wui::Tr("panel.material.shader.library.window_title", "Material Function - ")
+			: Wui::Tr("panel.material.shader.window_title", "Material Shader - "))
 			+ std::filesystem::path(m_ShaderPath).stem().string();
 		// 代码形态不是材质资产:材质字段/引用者/另存这些路径不参与。
 		m_Path.clear();
@@ -4502,7 +4565,9 @@ namespace World
 		m_ShaderDiskChangedNotice = false;
 		m_ShaderRequestedRevision = ~0ull;
 		m_ShaderSeenRevision = m_ShaderBuffer.Revision();
-		m_ShaderForceCompile = true;
+		// MAT-FN3:普通材质着色器打开即编译一次(场景/预览的基线);材质函数库不编译
+		// —— 它没有 `Evaluate`,只随引用它的材质一起烘。
+		m_ShaderForceCompile = !m_ShaderIsLibrary;
 		m_ShaderStatus = Wui::Tr("panel.material.shader.status.loaded", "Loaded ") + m_ShaderPath;
 		m_ShaderStatusIsError = false;
 		WLD_CORE_INFO("[material-ui] opened shader '{0}'", m_ShaderPath);
@@ -4682,6 +4747,9 @@ namespace World
 		// 排列键仍是逻辑路径(M4-S2 口径):预览键/路径键只决定 Install 的落点,
 		// 不参与编译缓存 —— 同一份内容两边共用产物,不会重复跑编译器。
 		request.PermutationKey = m_ShaderPath;
+		// MAT-FN3:材质 `#include` 的解析根(绝对路径;在主线程算,工作线程只读)。
+		// 先在**当前**主线程取,避免工作线程读面板状态 / 内容根。
+		request.IncludeRoots = SurfaceIncludeRoots(ContentRootPath(), m_ShaderPath);
 		{
 			std::lock_guard<std::mutex> lock(m_ShaderCompileMutex);
 			m_ShaderCompileRequest = std::move(request);
@@ -4714,7 +4782,7 @@ namespace World
 			// 工作线程只跑 slangc(内核自带缓存与互斥);不碰 UI / 渲染 / 面板状态。
 			const SurfaceCompileResult result =
 				MaterialSurfaceCompiler::CompileSurface(request.Source, request.PermutationKey,
-					request.Target);
+					request.Target, request.IncludeRoots);
 			ShaderCompileOutcome outcome;
 			outcome.Serial = request.Serial;
 			outcome.Success = result.Success;
@@ -4754,8 +4822,12 @@ namespace World
 		if (revision != m_ShaderSeenRevision)
 		{
 			m_ShaderSeenRevision = revision;
-			m_ShaderEditTime = now;
-			m_ShaderLastEditTime = now;   // MAT-UI2:诊断定稿计时(投递时不清零)
+			// MAT-FN3:材质函数库不编译 —— 不记编辑时刻,状态行也就不会停在"编译中…"。
+			if (!m_ShaderIsLibrary)
+			{
+				m_ShaderEditTime = now;
+				m_ShaderLastEditTime = now;   // MAT-UI2:诊断定稿计时(投递时不清零)
+			}
 		}
 		// 2) 消费后台结果 —— 只有主线程会 Install / 改预览材质。
 		ShaderCompileOutcome outcome;
@@ -4783,6 +4855,11 @@ namespace World
 			}
 		}
 		// 3) 单飞投递:有请求在飞就不投;消抖到点(或强制:打开 / 重载 / Compile 按钮)才投。
+		// MAT-FN3:材质函数库(`shaders/lib/**`)没有 `Evaluate` 入口,不当作材质编译 ——
+		// 打开 / 编辑 / 保存都不投递(依赖它的材质各自编译)。上面第 2 步照常消费旧结果,
+		// 单飞标记不会卡住(换文档后仍能编译)。
+		if (m_ShaderIsLibrary)
+			return;
 		if (m_ShaderCompileInFlight)
 			return;
 		const bool sourceStale = revision != m_ShaderRequestedRevision;
@@ -4947,7 +5024,8 @@ namespace World
 	std::string MaterialEditorPanel::ShaderCompileStatusLine() const
 	{
 		std::string status;
-		const bool debouncePending = m_ShaderEditTime > 0.0
+		// MAT-FN3:库文件永不投递编译,状态行也就没有"编译中…"可言。
+		const bool debouncePending = !m_ShaderIsLibrary && m_ShaderEditTime > 0.0
 			&& m_ShaderBuffer.Revision() != m_ShaderRequestedRevision;
 		// MAT-UI2:编辑后 1s 内的编译结果只是"过程",不当最终错误展示(用户报"代码还没写完就报")。
 		const bool unsettled = ShaderDiagnosticsUnsettled();
@@ -5229,7 +5307,9 @@ namespace World
 		// 否则它没有注解表 → 参数(尤其贴图)解析不出默认值 → 引擎绑白色 1×1 →
 		// 法线贴图退化成 (1,1,1) → 光照≈0 → 代码形态预览**全黑**。
 		// 渲染侧的管线选择仍只认 `SetSurfaceKeyOverride` 的键(未保存编辑只进预览)。
-		if (m_Material && !m_ShaderPath.empty())
+		// MAT-FN3:材质函数库不是材质,预览替身材质**不引用**它(否则渲染侧会把它当成
+		// 材质着色器去装配管线);库文件下预览只是引擎默认表面。
+		if (m_Material && !m_ShaderPath.empty() && !m_ShaderIsLibrary)
 		{
 			m_Material->SetShaderPath(m_ShaderPath);
 			MaterialLibrary::Get().RefreshParams(*m_Material);
@@ -5581,13 +5661,18 @@ namespace World
 		{
 			// 带错保存 / 编译还没回来:照常写盘(用户意图),但不 Install ——
 			// 场景继续用上一份可用管线(D6:不做静默降级,状态行说明)。
-			const std::string reason = publishFailed
-				? publishNote
-				: (m_ShaderCompileFailed
-					? Wui::Tr("panel.material.shader.status.saved_errors",
-						"the shader has errors — the scene keeps the last good pipeline")
-					: Wui::Tr("panel.material.shader.status.saved_compiling",
-						"compiling — the scene keeps the last good pipeline until it succeeds"));
+			// MAT-FN3:库文件不编译,状态行不能写"编译中…"(它永远不会编译成管线)。
+			const std::string reason = m_ShaderIsLibrary
+				? Wui::Tr("panel.material.shader.library.status_saved",
+					"material function library — not compiled or baked on its own; materials pick it up "
+					"through #include")
+				: (publishFailed
+					? publishNote
+					: (m_ShaderCompileFailed
+						? Wui::Tr("panel.material.shader.status.saved_errors",
+							"the shader has errors — the scene keeps the last good pipeline")
+						: Wui::Tr("panel.material.shader.status.saved_compiling",
+							"compiling — the scene keeps the last good pipeline until it succeeds")));
 			m_ShaderStatus = Wui::Tr("panel.material.shader.status.saved", "Saved ") + m_ShaderPath
 				+ " (" + reason + ")";
 			// 带错保存本身不算操作失败(文件确实写下去了);只有发布失败才是错误色。
@@ -5803,12 +5888,17 @@ namespace World
 				true, false },
 			// MAT-UI2:按钮语义写清楚 —— 平时是"跳过消抖立即编译 / 失败后重试",自动编译照常。
 			// MAT-UI3b:标签/说明进目录(新增键落在 panels/material_editor.json)。
+			// MAT-FN3:材质函数库没有 `Evaluate`,不单独编译 —— 按钮禁用,悬停说明为什么。
 			{ "material.shader.compile", Wui::Tr("panel.material.shader.compile_now", "Compile now"),
-				Wui::Tr("panel.material.shader.compile_now.tooltip",
-					"Compile now (skip the 350 ms debounce). Live edits are compiled automatically on a "
-					"worker thread; use this button to compile immediately, or to retry after a failure. "
-					"The preview follows the newest successful compile; the scene only switches after Save."),
-				true, false },
+				m_ShaderIsLibrary
+					? Wui::Tr("panel.material.shader.compile_now.tooltip.library",
+						"Material function libraries are not compiled on their own: there is no Evaluate "
+						"entry, so only the materials that include the library are compiled and baked.")
+					: Wui::Tr("panel.material.shader.compile_now.tooltip",
+						"Compile now (skip the 350 ms debounce). Live edits are compiled automatically on a "
+						"worker thread; use this button to compile immediately, or to retry after a failure. "
+						"The preview follows the newest successful compile; the scene only switches after Save."),
+				!m_ShaderIsLibrary, false },
 			// MAT-INTEL:格式化 —— MAT-UI3b 起标签/说明也走目录。
 			{ "material.shader.format", Wui::Tr("panel.material.shader.format", "Format"),
 				Wui::Tr("panel.material.shader.format.tooltip",
@@ -6427,7 +6517,11 @@ namespace World
 		const Wui::WuiTheme& theme = host.Theme();
 		float y = rect.Y;
 		// 顶部:标题 + 参数条数(读屏/脚本由此确认"右栏就是注解参数表")。
-		const std::string title = Wui::Tr("panel.material.shader.params", "Shader Parameters");
+		// MAT-FN3:`shaders/lib/**` 的库文件不是材质:标题换成"材质函数库",不列
+		// `//! param` 参数表(库文件不应有参数,参数写在使用它的材质里),只给一条统一说明。
+		const std::string title = m_ShaderIsLibrary
+			? Wui::Tr("panel.material.shader.library.title", "Material Function Library")
+			: Wui::Tr("panel.material.shader.params", "Shader Parameters");
 		Wui::Label(ctx, { rect.X, y + 2.0f }, title, theme.Text, 13.0f);
 		{
 			Wui::WuiAccessNode node;
@@ -6436,11 +6530,23 @@ namespace World
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 			node.Kind = "group";
 			node.Label = title;
-			node.Value = std::to_string(m_ShaderParams.size())
-				+ Wui::Tr("panel.material.shader.params.declared", " declared parameters");
-			node.Tooltip = Wui::Tr("panel.material.shader.params.tooltip",
-				"Parameters declared by the //! param annotations in this file. Editing a value here "
-				"rewrites the annotation default (the file stays the single source of truth).");
+			if (m_ShaderIsLibrary)
+			{
+				node.Value = Wui::Tr("panel.material.shader.library.params_hidden",
+					"library file — //! param lines are not shown here");
+				node.Tooltip = Wui::Tr("panel.material.shader.library.tooltip",
+					"A material function library has no Evaluate entry, is never compiled or baked on its "
+					"own, and is used by materials through #include. Its functions are pure: resources "
+					"(Sampler2D) and values come from the material as parameters.");
+			}
+			else
+			{
+				node.Value = std::to_string(m_ShaderParams.size())
+					+ Wui::Tr("panel.material.shader.params.declared", " declared parameters");
+				node.Tooltip = Wui::Tr("panel.material.shader.params.tooltip",
+					"Parameters declared by the //! param annotations in this file. Editing a value here "
+					"rewrites the annotation default (the file stays the single source of truth).");
+			}
 			node.Rect = { rect.X, y, std::max(40.0f, rect.W), 20.0f };
 			node.Enabled = true;
 			node.Interactive = false;
@@ -6448,7 +6554,7 @@ namespace World
 			Wui::WuiAccessibility::Get().Register(node);
 		}
 		y += 22.0f;
-		if (!m_ShaderParseError.empty())
+		if (!m_ShaderParseError.empty() && !m_ShaderIsLibrary)
 		{
 			Wui::Label(ctx, { rect.X, y }, Wui::Tr("panel.material.shader.parse_error", "Annotation error: ")
 				+ EllipsizeToWidth(ctx, m_ShaderParseError, std::max(40.0f, rect.W), 12.0f), theme.Danger, 12.0f);
@@ -6477,7 +6583,10 @@ namespace World
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 			node.Kind = "text";
 			node.Label = Wui::Tr("panel.material.shader.params.count.label", "Declared parameters");
-			node.Value = std::to_string(m_ShaderParams.size());
+			node.Value = m_ShaderIsLibrary
+				? Wui::Tr("panel.material.shader.library.params_hidden",
+					"library file — //! param lines are not shown here")
+				: std::to_string(m_ShaderParams.size());
 			node.Tooltip = title;
 			node.Rect = { rect.X, y, std::max(40.0f, rect.W), 14.0f };
 			node.Enabled = true;
@@ -6487,13 +6596,76 @@ namespace World
 		}
 		y += 18.0f;
 
+		// MAT-FN3:库文件的统一说明(库文件没有参数表可列)。逐词折行 —— 整句要看得见,
+		// 窄列下不能被截断;同一句话也进无障碍节点(读屏/脚本的断言锚点)。
+		if (m_ShaderIsLibrary)
+		{
+			const std::string notice = Wui::Tr("panel.material.shader.library.notice",
+				"Material function library: no Evaluate entry — it is not baked on its own; materials "
+				"use it through #include. You can still edit and save it here.");
+			const float noticeWidth = std::max(40.0f, rect.W - 4.0f);
+			const float noticeTop = y;
+			std::vector<std::string> lines;
+			std::string line;
+			size_t index = 0;
+			while (index < notice.size())
+			{
+				size_t end = notice.find(' ', index);
+				if (end == std::string::npos)
+					end = notice.size();
+				const std::string word = notice.substr(index, end - index);
+				index = end + 1;
+				if (word.empty())
+					continue;
+				const std::string candidate = line.empty() ? word : line + " " + word;
+				if (!line.empty() && ctx.MeasureTextWidth(candidate, 12.0f) > noticeWidth)
+				{
+					lines.push_back(line);
+					line = word;
+				}
+				else
+				{
+					line = candidate;
+				}
+			}
+			if (!line.empty())
+				lines.push_back(line);
+			for (const std::string& noticeLine : lines)
+			{
+				Wui::Label(ctx, { rect.X, y }, noticeLine, theme.TextMuted, 12.0f);
+				y += 15.0f;
+			}
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("material.shader.library.notice");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text";
+			node.Label = title;
+			node.Value = notice;
+			node.Tooltip = Wui::Tr("panel.material.shader.library.tooltip",
+				"A material function library has no Evaluate entry, is never compiled or baked on its "
+				"own, and is used by materials through #include. Its functions are pure: resources "
+				"(Sampler2D) and values come from the material as parameters.");
+			node.Rect = { rect.X, noticeTop - 2.0f, noticeWidth, std::max(18.0f, y - noticeTop) };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+			y += 6.0f;
+		}
+
 		// M4-S3:底部现在是两行 —— 编译状态(字节数 + 耗时 + 键 / 第一条错误的行列号)在上一行。
 		const Wui::WuiRect content { rect.X, y, rect.W, std::max(20.0f, rect.Y + rect.H - y - 38.0f) };
+		// MAT-FN3:库文件不显示 `//! param` 面板区(库文件不应有参数 —— 参数写在使用它的材质里)。
+		// 参数表为空表,下面的分组/行/空态提示因此都不出现。
+		static const std::vector<MaterialParamDecl> kNoShaderParams;
+		const std::vector<MaterialParamDecl>& paramRows =
+			m_ShaderIsLibrary ? kNoShaderParams : m_ShaderParams;
 		// 内容高度 ≈ 组头 20 + 每行 26(与下面绘制一致;折叠组只多留一点余量,不影响可读性)。
 		const std::string defaultGroupLabel =
 			Wui::Tr("panel.material.shader.params.group.default", "Parameters");
 		std::vector<std::string> groups;
-		for (const MaterialParamDecl& decl : m_ShaderParams)
+		for (const MaterialParamDecl& decl : paramRows)
 		{
 			const std::string group = decl.Group.empty() ? defaultGroupLabel : decl.Group;
 			if (std::find(groups.begin(), groups.end(), group) == groups.end())
@@ -6503,7 +6675,7 @@ namespace World
 			+ [&]
 			{
 				float rows = 0.0f;
-				for (const MaterialParamDecl& decl : m_ShaderParams)
+				for (const MaterialParamDecl& decl : paramRows)
 					rows += ShaderParamRowHeight(decl.Type, 26.0f);
 				return rows;
 			}() + 4.0f;
@@ -6513,7 +6685,7 @@ namespace World
 		float cursor = content.Y + 2.0f - m_ScrollY;
 		std::string currentGroup;
 		bool groupOpen = true;
-		for (const MaterialParamDecl& decl : m_ShaderParams)
+		for (const MaterialParamDecl& decl : paramRows)
 		{
 			const std::string group = decl.Group.empty()
 				? defaultGroupLabel : decl.Group;
@@ -6622,7 +6794,7 @@ namespace World
 			if (!written)
 				ApplyShaderDefaultsToPreview();
 		}
-		if (m_ShaderParams.empty() && m_ShaderParseError.empty())
+		if (paramRows.empty() && m_ShaderParseError.empty() && !m_ShaderIsLibrary)
 			Wui::Label(ctx, { content.X, content.Y + 2.0f },
 				Wui::Tr("panel.material.shader.params.none",
 					"This shader declares no parameters yet — add //! param lines in the code column."),

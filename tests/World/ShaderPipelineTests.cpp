@@ -817,6 +817,263 @@ int main()
 			CHECK(foundAnnotationDiagnostic);
 		}
 
+		// 3c. MAT-FN1b:材质函数(库文件)的 include 搜索路径 + 依赖哈希进缓存键
+		{
+			using World::MaterialParamDecl;
+			using World::MaterialParamLayout;
+			using World::MaterialSurfaceCompiler;
+			using World::SurfaceCompileResult;
+			using World::SurfaceShaderBackend;
+
+			const std::string runTag = temp.path.filename().string();
+			// 夹具 = 临时内容根 <temp>/assets/shaders/lib/** 下的**纯函数库**(无入口、无注解、无绑定);
+			// 材质侧 `#include "lib/pattern_lib.slang"` 后直接调用。根用**绝对路径**(调用方给,引擎不猜)。
+			const std::filesystem::path includeRoot = temp.path / "assets" / "shaders";
+			const std::filesystem::path libraryPath = includeRoot / "lib" / "pattern_lib.slang";
+			const std::filesystem::path nestedLibraryPath = includeRoot / "lib" / "sub" / "tint_lib.slang";
+			const std::string nestedLibrarySource =
+				"// 材质函数库(被 pattern_lib.slang 再 include —— 依赖扫描必须递归)\n"
+				"// matfn1b nested " + runTag + "\n"
+				"float3 MatFnTint(float3 color, float3 tint, float amount)\n"
+				"{\n"
+				"    return lerp(color, color * tint, saturate(amount));\n"
+				"}\n";
+			const std::string librarySource =
+				"// 材质函数库:纯函数,资源/参数由材质传入(自己不占槽位)\n"
+				"// matfn1b library " + runTag + "\n"
+				"#include \"sub/tint_lib.slang\"\n"
+				"float3 MatFnPattern(float3 color, float2 uv, float scale)\n"
+				"{\n"
+				"    float checker = step(0.5f, fmod(abs(floor(uv.x * scale) + floor(uv.y * scale)), 2.0f));\n"
+				"    return MatFnTint(color, float3(0.9f, 0.6f, 0.3f), checker);\n"
+				"}\n";
+			WriteText(nestedLibraryPath, nestedLibrarySource);
+			WriteText(libraryPath, librarySource);
+
+			const std::string libraryUser = "// 材质侧:include 材质函数库后直接调用\n"
+				"#include \"lib/pattern_lib.slang\"\n"
+				"// matfn1b user " + runTag + "\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    Surface surface = MakeDefaultSurface();\n"
+				"    surface.BaseColor = MatFnPattern(surface.BaseColor, input.UV, 8.0f);\n"
+				"    return surface;\n"
+				"}\n";
+
+			// ① 搜索根是承重的:不带根 → slangc 找不到库文件(结构化失败);带根 → 编译成功。
+			const SurfaceCompileResult withoutRoots = MaterialSurfaceCompiler::CompileSurface(
+				libraryUser, "matfn1b-without-roots");
+			CHECK(!withoutRoots.Success);
+			CHECK(withoutRoots.RawToolOutput.find("pattern_lib.slang") != std::string::npos);
+
+			const SurfaceCompileResult withRoots = MaterialSurfaceCompiler::CompileSurface(
+				libraryUser, "matfn1b-with-roots", SurfaceShaderBackend::VulkanSpirV, { includeRoot });
+			CHECK(withRoots.Success);
+			CHECK(!withRoots.Artifact.Bytecode.empty());
+			CHECK(withRoots.Artifact.VertexStages.size() == 3);
+			CHECK(withRoots.Artifact.CacheKey.size() == 16);
+
+			// ①b import 与 #include 同规则(Slang 的模块名 → 文件约定 `a.b` → `a/b.slang`,-I 同样生效):
+			//     带根编译成功;改被 import 的模块 → 键变化(依赖哈希同样覆盖 import)。
+			const std::filesystem::path importedLibraryPath = includeRoot / "lib" / "import_lib.slang";
+			const std::string importedLibrarySource =
+				"// 材质函数库(被 import 引用;模块文件导出的符号要 public)\n"
+				"// matfn1b import " + runTag + "\n"
+				"public float3 MatFnImportBlend(float3 color, float3 tint)\n"
+				"{\n"
+				"    return lerp(color, tint, 0.25f);\n"
+				"}\n";
+			WriteText(importedLibraryPath, importedLibrarySource);
+			const std::string importUser = "// 材质侧:import 材质函数库(与 #include 同一套搜索规则)\n"
+				"import lib.import_lib;\n"
+				"// matfn1b import user " + runTag + "\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    Surface surface = MakeDefaultSurface();\n"
+				"    surface.BaseColor = MatFnImportBlend(surface.BaseColor, float3(0.2f, 0.4f, 0.6f));\n"
+				"    return surface;\n"
+				"}\n";
+			const SurfaceCompileResult importFirst = MaterialSurfaceCompiler::CompileSurface(
+				importUser, "matfn1b-import", SurfaceShaderBackend::VulkanSpirV, { includeRoot });
+			CHECK(importFirst.Success);
+			CHECK(importFirst.Artifact.VertexStages.size() == 3);
+			WriteText(importedLibraryPath, importedLibrarySource + "// 改库:import 的模块内容也进键\n");
+			const SurfaceCompileResult importSecond = MaterialSurfaceCompiler::CompileSurface(
+				importUser, "matfn1b-import", SurfaceShaderBackend::VulkanSpirV, { includeRoot });
+			CHECK(importSecond.Success);
+			CHECK(!importSecond.CacheHit);
+			CHECK(importSecond.Artifact.CacheKey != importFirst.Artifact.CacheKey);
+			std::printf("World.ShaderPipeline: MAT-FN1b import keys before=%s after=%s\n",
+				importFirst.Artifact.CacheKey.c_str(), importSecond.Artifact.CacheKey.c_str());
+
+			// ② 改库(材质源一字不动)→ 依赖哈希进键 → 键变化 + 真的重编译。
+			std::string editedNested = nestedLibrarySource;
+			const size_t amountTextAt = editedNested.find("saturate(amount)");
+			CHECK(amountTextAt != std::string::npos);
+			editedNested.replace(amountTextAt, std::string("saturate(amount)").size(),
+				"saturate(amount * 1.25f)");
+			CHECK(editedNested != nestedLibrarySource);
+			WriteText(nestedLibraryPath, editedNested);
+			const size_t missesBeforeLibraryEdit = MaterialSurfaceCompiler::CacheMissCount();
+			const SurfaceCompileResult withEditedLibrary = MaterialSurfaceCompiler::CompileSurface(
+				libraryUser, "matfn1b-with-roots", SurfaceShaderBackend::VulkanSpirV, { includeRoot });
+			CHECK(withEditedLibrary.Success);
+			CHECK(!withEditedLibrary.CacheHit);
+			CHECK(withEditedLibrary.Artifact.CacheKey != withRoots.Artifact.CacheKey);
+			CHECK(MaterialSurfaceCompiler::CacheMissCount() == missesBeforeLibraryEdit + 1);
+			// 库里改的是真代码(不是注释)→ 产物字节也必须跟着变,不是"换了键还是旧产物"。
+			CHECK(withEditedLibrary.Artifact.Bytecode != withRoots.Artifact.Bytecode);
+			std::printf("World.ShaderPipeline: MAT-FN1b library keys base=%s edited=%s\n",
+				withRoots.Artifact.CacheKey.c_str(), withEditedLibrary.Artifact.CacheKey.c_str());
+
+			// ③ 嵌套库被删 → 结构化诊断带文件名(依赖扫描不短路,让 slangc 报错;不崩)。
+			std::error_code removeLibraryEc;
+			CHECK(std::filesystem::remove(nestedLibraryPath, removeLibraryEc));
+			const SurfaceCompileResult missingLibrary = MaterialSurfaceCompiler::CompileSurface(
+				libraryUser, "matfn1b-missing-library", SurfaceShaderBackend::VulkanSpirV, { includeRoot });
+			CHECK(!missingLibrary.Success);
+			bool mentionsMissingFile = missingLibrary.RawToolOutput.find("tint_lib.slang") != std::string::npos;
+			bool hasErrorDiagnostic = false;
+			for (const World::SurfaceDiagnostic& diagnostic : missingLibrary.Diagnostics)
+			{
+				if (diagnostic.Severity == "error")
+					hasErrorDiagnostic = true;
+				if (diagnostic.Message.find("tint_lib.slang") != std::string::npos)
+					mentionsMissingFile = true;
+			}
+			CHECK(mentionsMissingFile);
+			CHECK(hasErrorDiagnostic);
+			std::printf("World.ShaderPipeline: MAT-FN1b missing library raw=%.200s\n",
+				missingLibrary.RawToolOutput.c_str());
+			// 恢复夹具:后面的检查继续用这份库(③ 的失败键目录留着,不清理)。
+			WriteText(nestedLibraryPath, editedNested);
+
+			// ④ 源里没有 include/import → 传不传根,键与产物字节都必须一致(默认空 ⇒ 逐字节不变)。
+			const std::string noIncludeSource = "Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    Surface surface = MakeDefaultSurface();\n"
+				"    surface.Roughness = saturate(0.25f + input.UV.x * 0.0f);\n"
+				"    return surface;\n"
+				"}\n"
+				"// matfn1b no-include baseline " + runTag + "\n";
+			const size_t missesBeforeNoInclude = MaterialSurfaceCompiler::CacheMissCount();
+			const SurfaceCompileResult noIncludePlain = MaterialSurfaceCompiler::CompileSurface(
+				noIncludeSource, "matfn1b-no-include");
+			CHECK(noIncludePlain.Success);
+			CHECK(MaterialSurfaceCompiler::CacheMissCount() == missesBeforeNoInclude + 1);
+			const SurfaceCompileResult noIncludeWithRoots = MaterialSurfaceCompiler::CompileSurface(
+				noIncludeSource, "matfn1b-no-include", SurfaceShaderBackend::VulkanSpirV,
+				{ includeRoot, temp.path });
+			CHECK(noIncludeWithRoots.Success);
+			CHECK(noIncludeWithRoots.CacheHit);   // 同一个键 → 命中,没有多编译一次
+			CHECK(noIncludeWithRoots.Artifact.CacheKey == noIncludePlain.Artifact.CacheKey);
+			CHECK(noIncludeWithRoots.Artifact.Bytecode == noIncludePlain.Artifact.Bytecode);
+			std::printf("World.ShaderPipeline: MAT-FN1b no-include key=%s (roots 不影响)\n",
+				noIncludePlain.Artifact.CacheKey.c_str());
+
+			// ⑤ 真实示例(不是手工 slangc):ShowcaseMaterial.slang 的 `#include "lib/pattern.slang"`
+			// 走**引擎路径**在两个后端都编过。
+			const std::filesystem::path shadersRoot =
+				std::filesystem::path(WLD_ASSETPATH) / "shaders";
+			const std::filesystem::path showcasePath = shadersRoot / "examples"
+				/ "ShowcaseMaterial.slang";
+			CHECK(std::filesystem::is_regular_file(showcasePath));
+			std::string showcaseSource;
+			{
+				std::ifstream stream(showcasePath, std::ios::binary);
+				CHECK(stream.good());
+				std::ostringstream buffer;
+				buffer << stream.rdbuf();
+				showcaseSource = buffer.str();
+			}
+			std::vector<MaterialParamDecl> showcaseTable;
+			std::string showcaseError;
+			CHECK(World::ParseMaterialParams(showcaseSource, &showcaseTable, &showcaseError));
+			const SurfaceCompileResult showcaseVulkan = MaterialSurfaceCompiler::CompileSurfaceWithParams(
+				showcaseSource, showcaseTable, "shaders/examples/ShowcaseMaterial.slang",
+				SurfaceShaderBackend::VulkanSpirV, { shadersRoot });
+			CHECK(showcaseVulkan.Success);
+			CHECK(showcaseVulkan.Artifact.Backend == "vulkan-spirv");
+			CHECK(showcaseVulkan.Artifact.VertexStages.size() == 3);
+			const SurfaceCompileResult showcaseOpenGl = MaterialSurfaceCompiler::CompileSurfaceWithParams(
+				showcaseSource, showcaseTable, "shaders/examples/ShowcaseMaterial.slang",
+				SurfaceShaderBackend::OpenGLSpirV, { shadersRoot });
+			CHECK(showcaseOpenGl.Success);
+			CHECK(showcaseOpenGl.Artifact.Backend == "opengl-spirv");
+			CHECK(showcaseOpenGl.Artifact.VertexStages.size() == 3);
+			CHECK(showcaseOpenGl.Artifact.Bytecode != showcaseVulkan.Artifact.Bytecode);
+			uint32_t showcaseGlVersion = 0;
+			std::memcpy(&showcaseGlVersion, showcaseOpenGl.Artifact.Bytecode.data() + 4,
+				sizeof(showcaseGlVersion));
+			CHECK(showcaseGlVersion == 0x00010000u);   // GL 目标:SPIR-V 1.0(ARB_gl_spirv)
+			std::printf("World.ShaderPipeline: MAT-FN1b showcase keys vulkan=%s gl=%s\n",
+				showcaseVulkan.Artifact.CacheKey.c_str(), showcaseOpenGl.Artifact.CacheKey.c_str());
+
+			// ⑥ BuildParamLayout 同样接受 include 根并向下透传(同一个源:带根能反射,不带根失败)。
+			const std::string libraryUserWithParam = "//! param Float PatternScale = 8 [1, 64]\n"
+				"// 材质侧:include 材质函数库后直接调用\n"
+				"#include \"lib/pattern_lib.slang\"\n"
+				"// matfn1b user param " + runTag + "\n"
+				"Surface Evaluate(MaterialInputs input)\n"
+				"{\n"
+				"    Surface surface = MakeDefaultSurface();\n"
+				"    surface.BaseColor = MatFnPattern(surface.BaseColor, input.UV, PatternScale);\n"
+				"    return surface;\n"
+				"}\n";
+			std::vector<MaterialParamDecl> libraryUserTable;
+			std::string libraryTableError;
+			CHECK(World::ParseMaterialParams(libraryUserWithParam, &libraryUserTable, &libraryTableError));
+			CHECK(libraryUserTable.size() == 1);
+			MaterialParamLayout libraryLayout;
+			std::string layoutError;
+			CHECK(World::BuildParamLayout(libraryUserWithParam, libraryUserTable,
+				&libraryLayout, &layoutError, { includeRoot }));
+			CHECK(libraryLayout.Fields.size() == 1);
+			CHECK(libraryLayout.Fields[0].Name == "PatternScale");
+			CHECK(libraryLayout.CbufferSize >= 16);
+			CHECK(!World::BuildParamLayout(libraryUserWithParam, libraryUserTable,
+				&libraryLayout, &layoutError, std::vector<std::filesystem::path>()));
+			CHECK(!layoutError.empty());
+			std::printf("World.ShaderPipeline: MAT-FN1b BuildParamLayout with roots ok "
+				"(fields=%zu size=%u)\n", libraryLayout.Fields.size(), libraryLayout.CbufferSize);
+
+			// ⑦ 真实库文件的重烘演示(**不碰仓库资产**):把 shaders/lib 复制到临时目录,改副本里
+			//    pattern.slang 一个常量 → 同一个真实材质的键变化 + 真重编译 + 产物字节跟着变。
+			const std::filesystem::path copiedShaders = temp.path / "shaders-snapshot";
+			const std::filesystem::path realLibraryPath = shadersRoot / "lib" / "pattern.slang";
+			CHECK(std::filesystem::is_regular_file(realLibraryPath));
+			std::string copiedLibrarySource;
+			{
+				std::ifstream stream(realLibraryPath, std::ios::binary);
+				CHECK(stream.good());
+				std::ostringstream buffer;
+				buffer << stream.rdbuf();
+				copiedLibrarySource = buffer.str();
+			}
+			CHECK(!copiedLibrarySource.empty());
+			const std::filesystem::path copiedLibrary = copiedShaders / "lib" / "pattern.slang";
+			WriteText(copiedLibrary, copiedLibrarySource);   // 建父目录并落盘副本
+			CHECK(std::filesystem::is_regular_file(copiedLibrary));
+			const SurfaceCompileResult realLibraryBefore = MaterialSurfaceCompiler::CompileSurfaceWithParams(
+				showcaseSource, showcaseTable, "matfn1b-real-library",
+				SurfaceShaderBackend::VulkanSpirV, { copiedShaders });
+			CHECK(realLibraryBefore.Success);
+			const size_t parityStepAt = copiedLibrarySource.find("step(0.5, parity)");
+			CHECK(parityStepAt != std::string::npos);
+			copiedLibrarySource.replace(parityStepAt, std::string("step(0.5, parity)").size(),
+				"step(0.55, parity)");
+			WriteText(copiedLibrary, copiedLibrarySource);
+			const SurfaceCompileResult realLibraryAfter = MaterialSurfaceCompiler::CompileSurfaceWithParams(
+				showcaseSource, showcaseTable, "matfn1b-real-library",
+				SurfaceShaderBackend::VulkanSpirV, { copiedShaders });
+			CHECK(realLibraryAfter.Success);
+			CHECK(!realLibraryAfter.CacheHit);
+			CHECK(realLibraryAfter.Artifact.CacheKey != realLibraryBefore.Artifact.CacheKey);
+			CHECK(realLibraryAfter.Artifact.Bytecode != realLibraryBefore.Artifact.Bytecode);
+			std::printf("World.ShaderPipeline: MAT-FN1b real lib rebake before=%s after=%s\n",
+				realLibraryBefore.Artifact.CacheKey.c_str(), realLibraryAfter.Artifact.CacheKey.c_str());
+		}
+
 		std::printf("World.ShaderPipeline: all checks passed\n");
 		return 0;
 	}

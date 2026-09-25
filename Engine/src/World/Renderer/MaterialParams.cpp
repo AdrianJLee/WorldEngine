@@ -1500,7 +1500,8 @@ namespace World
 
 	// 端到端:按 table 编译包装源码(slangc)并反射出布局。工具缺失/源码错误 → false + error。
 	bool BuildParamLayout(const std::string& hlslSource, const std::vector<MaterialParamDecl>& table,
-		MaterialParamLayout* out, std::string* error)
+		MaterialParamLayout* out, std::string* error,
+		const std::vector<std::filesystem::path>& includeRoots)
 	{
 		if (!out)
 		{
@@ -1508,7 +1509,7 @@ namespace World
 			return false;
 		}
 		const SurfaceCompileResult compiled = MaterialSurfaceCompiler::CompileSurfaceWithParams(
-			hlslSource, table, kParamPermutationKey);
+			hlslSource, table, kParamPermutationKey, SurfaceShaderBackend::VulkanSpirV, includeRoots);
 		if (!compiled.Success)
 		{
 			std::vector<std::string> messages;

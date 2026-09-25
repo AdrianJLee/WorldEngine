@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -102,16 +103,23 @@ namespace World
 	class WLD_API MaterialSurfaceCompiler
 	{
 	public:
+		// MAT-FN1b:材质可以 `#include "lib/x.slang"` / `import lib.x;` 引用**库文件**(材质函数)。
+		// includeRoots = 调用方传入的**绝对搜索根**(引擎不猜内容根),每个根给 slangc 一个 `-I`;
+		// 被包含文件的**路径 + 内容哈希**参与缓存键(改库 → 依赖它的材质重新编译),
+		// 解析不到的 include 不短路(让 slangc 报结构化诊断)。默认空 = 与旧行为逐字节一致。
 		static SurfaceCompileResult CompileSurface(const std::string& source, const std::string& permutationKey,
-			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);
+			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV,
+			const std::vector<std::filesystem::path>& includeRoots = {});
 
 		// M4-S2:带注解参数表的编译。参数块(`cbuffer MaterialParams` + 贴图槽)由 table 生成,
 		// 插在引擎模板之后、用户源之前 —— 注解是参数的事实源,用户源里不再手写参数块。
 		// CompileSurface(source, key) 等价于先 ParseMaterialParams(source) 再走这里
 		// (注解解析失败 → 结构化诊断,不调用工具)。
+		// MAT-FN1b:includeRoots 与 CompileSurface 同一口径(透传到 slangc 的 `-I` 与依赖扫描)。
 		static SurfaceCompileResult CompileSurfaceWithParams(const std::string& source,
 			const std::vector<MaterialParamDecl>& params, const std::string& permutationKey,
-			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV);
+			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV,
+			const std::vector<std::filesystem::path>& includeRoots = {});
 
 		// S3 的"新建 `.slang` 起始代码":只含用户可编辑的 Evaluate();默认值来自
 		// MakeDefaultSurface(),不会漏字段。

@@ -266,14 +266,169 @@ namespace World
 			return stage + "_5_0+spirv_1_0";
 		}
 
+		// ---- MAT-FN1b:材质函数(库文件)的 include 依赖扫描 -------------------------------
+		//
+		// 材质可以 `#include "lib/pattern.slang"`(或 `import lib.pattern;`)引用**库文件**:
+		// 一个库里只有纯函数(没有 Evaluate、没有 `//! param`、不声明绑定)。
+		// 库文件的内容必须参与表面着色器缓存键 —— 只改包装源/用户源不够:库改了、
+		// 材质源一字未动,也必须重新编译(发布包里的产物同理)。
+		//
+		// 规则(与 slangc 的搜索顺序一致;-I 同时作用于 `#include` 与 `import`):
+		//   - `#include` 与 `import` 同规则、**递归**(库可以再 include 库),visited 防环;
+		//   - 相对路径先相对**包含它的文件所在目录**(嵌套 include 的第一搜索位),再按顺序相对每个 include 根;
+		//   - 解析不到的路径记一条 `missing` 行 —— **不短路**:交给 slangc 报结构化诊断;
+		//   - 一个依赖都没有(源里没有 include/import)时返回**空串**:调用方不往键里混任何东西,
+		//     键与产物因此与"没有这条功能"时逐字节一致(kSurfaceCacheVersion 不升)。
+		std::string NormalizeSurfacePath(const fs::path& path)
+		{
+			std::error_code ec;
+			fs::path absolute = fs::absolute(path, ec);
+			if (ec)
+				absolute = path;
+			return NormalizeSlashes(absolute.lexically_normal().string());
+		}
+
+		// 逐行找 `#include "x"` / `import "x"` / `import a.b;`。注释里的整行 import/import 也会被
+		// 当成依赖(多算不算错:只可能多算一条键材料,不会漏算);行首有代码的语句不看。
+		void CollectSurfaceImportRequests(const std::string& text, std::vector<std::string>& out)
+		{
+			static const std::regex includeDirective(R"(^[ \t]*#[ \t]*include[ \t]*[<"]([^">]+)[>"])",
+				std::regex::ECMAScript);
+			static const std::regex importPathDirective(R"(^[ \t]*import[ \t]*[<"]([^">]+)[>"])",
+				std::regex::ECMAScript);
+			static const std::regex importModuleDirective(
+				R"(^[ \t]*import[ \t]+([A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\.[ \t]*[A-Za-z_][A-Za-z0-9_]*)*))",
+				std::regex::ECMAScript);
+
+			std::istringstream stream(text);
+			std::string line;
+			while (std::getline(stream, line))
+			{
+				if (!line.empty() && line.back() == '\r')
+					line.pop_back();
+				std::smatch match;
+				if (std::regex_search(line, match, includeDirective)
+					|| std::regex_search(line, match, importPathDirective))
+				{
+					out.push_back(match[1].str());
+					continue;
+				}
+				if (std::regex_search(line, match, importModuleDirective))
+				{
+					// `import a.b;` → `a/b.slang`(Slang 的模块名 → 文件路径约定)。
+					std::string path;
+					for (const char ch : match[1].str())
+					{
+						if (ch == '.')
+						{
+							if (!path.empty() && path.back() != '/')
+								path += '/';
+						}
+						else if (ch != ' ' && ch != '\t')
+						{
+							path += ch;
+						}
+					}
+					path += ".slang";
+					out.push_back(path);
+				}
+			}
+		}
+
+		bool ResolveSurfaceImport(const std::string& request, const fs::path& includingDir,
+			const std::vector<fs::path>& includeRoots, fs::path& out)
+		{
+			std::error_code ec;
+			const fs::path requested(request);
+			if (requested.is_absolute())
+			{
+				if (fs::is_regular_file(requested, ec))
+				{
+					out = requested;
+					return true;
+				}
+				return false;
+			}
+			if (!includingDir.empty())
+			{
+				const fs::path candidate = includingDir / requested;
+				if (fs::is_regular_file(candidate, ec))
+				{
+					out = candidate.lexically_normal();
+					return true;
+				}
+			}
+			for (const fs::path& root : includeRoots)
+			{
+				const fs::path candidate = root / requested;
+				if (fs::is_regular_file(candidate, ec))
+				{
+					out = candidate.lexically_normal();
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// 依赖键材料:`<解析后的绝对路径>\t<内容哈希>` 逐行(DFS 顺序,同一输入必得同一串);
+		// 解析不到的行是 `missing\t<源里的原样请求>`。没有任何依赖时返回空串。
+		std::string SurfaceDependencyKeyMaterial(const std::string& source,
+			const std::vector<fs::path>& includeRoots)
+		{
+			std::vector<std::string> lines;
+			std::unordered_map<std::string, bool> visited;
+			std::vector<std::pair<fs::path, std::string>> pending;
+			// 顶层用户源:没有"包含它的文件"(生成的 `surface_user.slang` 落在缓存键目录里,
+			// 不是用户内容的搜索位置),所以只用调用方给的 include 根解析。
+			pending.emplace_back(fs::path(), source);
+
+			std::vector<std::string> requests;
+			while (!pending.empty())
+			{
+				const fs::path includingDir = pending.back().first;
+				std::string text = std::move(pending.back().second);
+				pending.pop_back();
+				requests.clear();
+				CollectSurfaceImportRequests(text, requests);
+				for (const std::string& request : requests)
+				{
+					fs::path resolved;
+					if (!ResolveSurfaceImport(request, includingDir, includeRoots, resolved))
+					{
+						lines.push_back("missing\t" + request);
+						continue;
+					}
+					const std::string path = NormalizeSurfacePath(resolved);
+					if (visited.count(path) != 0)
+						continue;
+					visited.emplace(path, true);
+					lines.push_back(path + "\t" + Hex(HashFileBytes(path)));
+					std::string librarySource;
+					if (ReadAllText(fs::path(path), librarySource))
+						pending.emplace_back(fs::path(path).parent_path(), std::move(librarySource));
+				}
+			}
+
+			if (lines.empty())
+				return {};
+			std::string material;
+			for (const std::string& line : lines)
+			{
+				material += line;
+				material += '\n';
+			}
+			return material;
+		}
+
 		// 一个 stage 的 slangc 命令行。两家目标的差异只有两处(与 T2 的引擎 shader 路径一致):
 		//  - Vulkan:`-fvk-use-entrypoint-name` —— 模块入口名 = 源里的入口名(pipeline 的 pName 直接用);
 		//  - GL:入口名保持 Slang 默认的 "main"(ARB_gl_spirv 的 glSpecializeShader 固定用它),
 		//    并保留 T1 验证过的 `-fvk-use-gl-layout`。
 		// `-reflection-json` 只有像素阶段要(参数反射的事实源;顶点阶段不带参数块)。
+		// MAT-FN1b:每个 include 根追加一个 `-I`(材质 `#include "lib/…"` / `import` 的搜索路径)。
 		std::string BuildSlangArguments(SurfaceShaderBackend backend, const std::string& d3dProfile,
 			const std::string& entryPoint, const std::string& sourcePath, const std::string& outputPath,
-			const std::string& reflectionPath)
+			const std::string& reflectionPath, const std::vector<fs::path>& includeRoots)
 		{
 			std::string arguments = "-target spirv -profile \""
 				+ ProfileForTarget(backend, d3dProfile) + "\" ";
@@ -282,6 +437,8 @@ namespace World
 			arguments += "-entry \"" + entryPoint + "\" \"" + sourcePath + "\" -o \"" + outputPath + "\"";
 			if (!reflectionPath.empty())
 				arguments += " -reflection-json \"" + reflectionPath + "\"";
+			for (const fs::path& root : includeRoots)
+				arguments += " -I \"" + NormalizeSurfacePath(root) + "\"";
 			return arguments;
 		}
 
@@ -1059,7 +1216,8 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 
 				fs::remove(spvPath, ec);
 				const std::string arguments = BuildSlangArguments(backend, "vs_6_0",
-					entry.EntryPoint, wrapperPath.string(), spvPath.string(), std::string());
+					entry.EntryPoint, wrapperPath.string(), spvPath.string(), std::string(),
+					std::vector<fs::path>());
 				int exitCode = -1;
 				std::string toolOutput;
 				s_ToolInvocations.fetch_add(1, std::memory_order_relaxed);
@@ -1221,7 +1379,8 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 	}
 
 	SurfaceCompileResult MaterialSurfaceCompiler::CompileSurface(const std::string& source,
-		const std::string& permutationKey, SurfaceShaderBackend backend)
+		const std::string& permutationKey, SurfaceShaderBackend backend,
+		const std::vector<fs::path>& includeRoots)
 	{
 		// M4-S2:注解是参数的事实源。解析失败 = 结构化诊断(带用户源行列号),不调用编译器。
 		std::vector<MaterialParamDecl> params;
@@ -1259,12 +1418,12 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			result.LastGoodAvailable = LastGood(permutationKey, backend, ignoredLastGood);
 			return result;
 		}
-		return CompileSurfaceWithParams(source, params, permutationKey, backend);
+		return CompileSurfaceWithParams(source, params, permutationKey, backend, includeRoots);
 	}
 
 	SurfaceCompileResult MaterialSurfaceCompiler::CompileSurfaceWithParams(const std::string& source,
 		const std::vector<MaterialParamDecl>& params, const std::string& permutationKey,
-		SurfaceShaderBackend backend)
+		SurfaceShaderBackend backend, const std::vector<fs::path>& includeRoots)
 	{
 		SurfaceCompileResult result;
 		const auto started = std::chrono::steady_clock::now();
@@ -1355,6 +1514,11 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			// 或只改契约头文件,都必须换一份 artifact。
 			keyHash = Mix(keyHash, Hex(Fnv1a64String(paramBlockSource)));
 			keyHash = Mix(keyHash, Hex(Fnv1a64String(contractText)));
+			// MAT-FN1b:被 include/import 的库文件的**路径 + 内容哈希**进键(递归,改库即重编)。
+			// 源里没有任何依赖时这一串是空的 —— 不 Mix,键与产物逐字节不变(kSurfaceCacheVersion 不升)。
+			const std::string dependencyKey = SurfaceDependencyKeyMaterial(effectiveSource, includeRoots);
+			if (!dependencyKey.empty())
+				keyHash = Mix(keyHash, dependencyKey);
 			keyHash = Mix(keyHash, BackendKey(backend));
 			keyHash = Mix(keyHash, permutationKey);
 			keyHash = Mix(keyHash, std::to_string(kSurfaceCacheVersion));
@@ -1429,7 +1593,8 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			// 参数反射(MaterialParams.cpp)直接读这份 `-reflection-json`(不再解析 -Fc 汇编文本);
 			// profile/入口名/布局开关按目标后端分(Slang-T3,T1/T2 已实测)。
 			const std::string arguments = BuildSlangArguments(backend, "ps_6_0",
-				kSurfaceEntryPoint, wrapperPath.string(), spvPath.string(), reflectionPath.string());
+				kSurfaceEntryPoint, wrapperPath.string(), spvPath.string(), reflectionPath.string(),
+				includeRoots);
 			int exitCode = -1;
 			std::string toolOutput;
 			s_ToolInvocations.fetch_add(1, std::memory_order_relaxed);
