@@ -197,7 +197,8 @@ int main(int argc, char** argv)
 
 		TempDir temp;
 		const std::filesystem::path sourcePath = temp.path / "textures" / "T.tga";
-		const std::filesystem::path artifactPath = temp.path / "textures" / "T.tga.wtexc";
+		// 契约命名 = `<同目录>/<主名>.wtexc`(P6b 前叫 `<源图全名>.wtexc`,只作容错候选)。
+		const std::filesystem::path artifactPath = temp.path / "textures" / "T.wtexc";
 		const std::vector<uint8_t> sourceBytes = MakeTga(8, 8, MakeGradient(8, 8));
 		WriteFile(sourcePath, sourceBytes);
 
@@ -283,6 +284,37 @@ int main(int argc, char** argv)
 			CHECK(!asset.FromArtifact);
 			CHECK(!asset.Source.Valid);
 			CHECK(asset.Source.Width == 1 && asset.Source.Height == 1);
+		}
+
+		// 4b. 物质引用 `.wtex`:没有产物时按资产里的 source(缺省 = 同目录同主名图片)回退解码。
+		{
+			const std::filesystem::path assetPath = temp.path / "textures" / "T.wtex";
+			const std::string assetText = "usage: color\n";
+			WriteFile(assetPath, std::vector<uint8_t>(assetText.begin(), assetText.end()));
+			const TextureAsset asset = LoadTextureAsset(assetPath.string());
+			CHECK(!asset.FromArtifact);
+			CHECK(asset.Source.Valid);
+			CHECK(asset.Source.Width == 8 && asset.Source.Height == 8);
+			const TextureData direct = LoadTextureData(sourcePath.string());
+			CHECK(direct.Valid && direct.Pixels == asset.Source.Pixels);
+
+			// 有产物时走产物(资产引用同样按 `<主名>.wtexc` 找)。
+			WriteFile(artifactPath, artifactBytes);
+			const TextureAsset withArtifact = LoadTextureAsset(assetPath.string());
+			CHECK(withArtifact.FromArtifact);
+			CHECK(withArtifact.Header.Format == TextureBlockFormat::Bc7);
+			std::error_code ec;
+			std::filesystem::remove(artifactPath, ec);
+		}
+
+		// 4c. 旧命名 `<源图全名>.wtexc` 仍是容错候选(手工放置/老产物不会被丢)。
+		{
+			const std::filesystem::path legacyArtifact = temp.path / "textures" / "T.tga.wtexc";
+			WriteFile(legacyArtifact, artifactBytes);
+			const TextureAsset asset = LoadTextureAsset(sourcePath.string());
+			CHECK(asset.FromArtifact && asset.Header.Width == 8);
+			std::error_code ec;
+			std::filesystem::remove(legacyArtifact, ec);
 		}
 
 		// 5. 包装层 BC5 开关:默认关(与 RGBA8 时代同源),打开后多一条 #define 与 Z 重建。

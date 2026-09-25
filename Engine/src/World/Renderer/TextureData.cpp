@@ -4,6 +4,7 @@
 
 #include "World/Core/Application.h"
 #include "World/Core/Log.h"
+#include "World/Renderer/TextureImportSettings.h"
 
 #include <stb_image.h>
 
@@ -122,6 +123,42 @@ namespace World
 			candidates.push_back(path + ".wtexc");
 			return candidates;
 		}
+
+		// 引用可以是**源图**(`textures/Icon.png`)或**纹理资产**(`textures/Icon.wtex`)。
+		// 走资产且没有产物时的回退:读资产里的 `source:`(缺省 = 同目录同主名图片)再解码。
+		// 只看磁盘:打包态源图/资产已被剥离 ⇒ 没有产物就是没有数据(契约如此)。
+		std::string SourcePathForFallback(const std::string& path)
+		{
+			if (!EndsWith(path, ".wtex"))
+				return path;
+
+			std::filesystem::path assetFile(path);
+			if (!assetFile.is_absolute())
+				assetFile = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+
+			TextureImportSettings settings;
+			std::string settingsError;
+			if (LoadTextureImportSettings(assetFile, settings, settingsError) && !settings.Source.empty())
+				return settings.Source;
+
+			// source: 缺省(或资产读不了)= 同目录同主名的图片,与烘焙器的候选顺序一致。
+			static const char* const kCandidates[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp" };
+			for (const char* extension : kCandidates)
+			{
+				std::error_code existsError;
+				const std::filesystem::path candidate =
+					assetFile.parent_path() / (assetFile.stem().string() + extension);
+				if (std::filesystem::is_regular_file(candidate, existsError))
+				{
+					// 转回逻辑路径(绝对路径也能被 LoadTextureData 直接吃)。
+					return candidate.is_absolute() ? candidate.generic_string()
+						: candidate.generic_string();
+				}
+			}
+			if (!settingsError.empty())
+				WLD_CORE_WARN("Texture asset '{0}': {1}", path, settingsError);
+			return path;   // 真找不到:交给 LoadTextureData 走它自己的兜底(白纹理 + 警告)
+		}
 	}
 
 	TextureData LoadTextureData(const std::string& path, bool flipVertically)
@@ -197,7 +234,7 @@ namespace World
 				artifactPath, error);
 		}
 
-		asset.Source = LoadTextureData(path, flipVertically);
+		asset.Source = LoadTextureData(SourcePathForFallback(path), flipVertically);
 		return asset;
 	}
 }
