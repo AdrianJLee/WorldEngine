@@ -1160,10 +1160,8 @@ namespace World
 				TextureCatalogEntry extra;
 				extra.Logical = normalized;
 				const std::filesystem::path path(normalized);
-				// 兜底条目没有扫描结果可依赖:显示名用文件名(资产用主名),完整路径进 tooltip。
-				extra.Label = info.IsAsset ? path.stem().string() : path.filename().string();
-				if (extra.Label.empty())
-					extra.Label = normalized;
+				// 兜底条目没有扫描结果可依赖:显示名用**完整逻辑路径**(与扫描条目同一口径)。
+				extra.Label = normalized;
 				extra.Source = info.Source;
 				extra.IsAsset = info.IsAsset;
 				extra.AssetExists = info.AssetExists;
@@ -1174,21 +1172,8 @@ namespace World
 				m_TextureCatalog.push_back(std::move(extra));
 			}
 		}
-		// 显示名撞车(不同目录里的同名资产/同名图片)时补目录前缀 —— 下拉里不能出现两个一样的名字。
-		{
-			std::map<std::string, int> counts;
-			for (const TextureCatalogEntry& entry : m_TextureCatalog)
-				++counts[entry.Label];
-			for (TextureCatalogEntry& entry : m_TextureCatalog)
-			{
-				if (counts[entry.Label] <= 1)
-					continue;
-				const std::filesystem::path path(entry.Logical);
-				const std::string directory = path.parent_path().generic_string();
-				if (!directory.empty() && directory != ".")
-					entry.Label = directory + "/" + entry.Label;
-			}
-		}
+		// 显示名 = **完整逻辑路径**(用户 2026-09-25:「现在选择不如之前」—— 之前就是路径,
+		// 光主名既搜不到路径也认不出目录)。资产条目额外把源图名带在括号里,方便按熟悉的名字搜。
 		m_TexturePaths.clear();
 		m_TextureLabels.clear();
 		m_TexturePaths.reserve(m_TextureCatalog.size());
@@ -1239,9 +1224,8 @@ namespace World
 			item.Logical = logical;
 			item.IsAsset = true;
 			item.AssetExists = true;
-			item.Label = std::filesystem::path(logical).stem().string();
-			if (item.Label.empty())
-				item.Label = logical;
+			// 显示名 = 资产路径;解析出源图后括号带上源图文件名(按 `Icon.png` 搜也能命中)。
+			item.Label = logical;
 			TextureImportSettings settings;
 			std::string loadError;
 			if (!LoadTextureImportSettings(root / std::filesystem::path(logical), settings, loadError))
@@ -1259,6 +1243,9 @@ namespace World
 					std::error_code sourceEc;
 					item.SourceExists = !source.empty()
 						&& std::filesystem::is_regular_file(root / std::filesystem::path(source), sourceEc);
+					const std::string sourceName = std::filesystem::path(source).filename().string();
+					if (!sourceName.empty() && sourceName != std::filesystem::path(logical).filename().string())
+						item.Label += " (" + sourceName + ")";
 				}
 				else
 				{
@@ -1289,11 +1276,17 @@ namespace World
 				continue;
 			TextureCatalogEntry item;
 			item.Logical = logical;
-			item.Label = path.filename().string();
+			item.Label = logical;
 			item.Source = logical;
 			item.SourceExists = true;
 			entries.push_back(std::move(item));
 		}
+		// 与"之前"一致:整张清单按**逻辑路径**排序(资产/源图不再各排一段,浏览顺序稳定)。
+		std::sort(entries.begin(), entries.end(),
+			[](const TextureCatalogEntry& left, const TextureCatalogEntry& right)
+			{
+				return left.Logical < right.Logical;
+			});
 		return entries;
 	}
 
@@ -3104,8 +3097,9 @@ namespace World
 			options.reserve(m_TextureLabels.size() + 1);
 			options.push_back(Wui::Tr("panel.material.texture_none", "(none)"));
 			for (const std::string& label : m_TextureLabels)
-				options.push_back(EllipsizeMiddleToWidth(ctx, label,
-					std::max(20.0f, comboRect.W - 30.0f), 15.0f));
+				options.push_back(label);   // 完整逻辑路径进选项:搜索/读屏/回显都用它
+				// (用户 2026-09-25:「现在选择不如之前」—— 提前截断会让搜索与读屏都拿不到路径。
+				//  越界改为**绘制期**省略:WUI 的 Combo/SearchableCombo 自己按矩形宽度中间省略。)
 			int& pickIndex = row.Key == std::string("normal") ? m_NormalPickIndex : m_AlbedoPickIndex;
 			const std::string current = row.Key == std::string("normal")
 				? desc.NormalTexture : desc.AlbedoTexture;

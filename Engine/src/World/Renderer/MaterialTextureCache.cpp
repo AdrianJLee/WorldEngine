@@ -290,8 +290,10 @@ namespace World
 			// 失败原因已记日志;继续走下面的源图回退(行为与 P2 之前一致)。
 		}
 
+		// 产物在但建纹理失败 / 没产物:回退解码**源图**。资产引用必须先解析到源图 ——
+		// 直接拿 `.wtex` 去 stb 只会拿到 1x1 白兜底(实测:'AssetOnly.wtex' → 白球)。
 		const TextureData data = asset.FromArtifact
-			? LoadTextureData(normalizedPath, /*flipVertically*/ false)
+			? LoadTextureData(ResolveTextureSourcePath(normalizedPath), /*flipVertically*/ false)
 			: asset.Source;
 		if (std::getenv("WLD_TRACE_3D"))
 			WLD_CORE_INFO("[material] load texture '{0}' srgb={1} valid={2} size={3}x{4}",

@@ -13,7 +13,9 @@ namespace World
 
 		// D3:查找/兜底逻辑抽到 TextureData(与 RHI 原生上传共用同一份策略)。
 		// flipVertically=true 保持 GL 纹理的历史朝向(UV (0,0) 在左下)。
-		const TextureData textureData = LoadTextureData(m_Path, /*flipVertically*/ true);
+		// M4-TEX P6c:路径可能是纹理资产(`.wtex`)⇒ 先解析到它的源图,再交给 stb。
+		const TextureData textureData = LoadTextureData(ResolveTextureSourcePath(m_Path),
+			/*flipVertically*/ true);
 		const uint32_t width = textureData.Width;
 		const uint32_t height = textureData.Height;
 		const int channels = textureData.Channels;

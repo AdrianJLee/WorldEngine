@@ -26,6 +26,12 @@ namespace World
 	// 由调用方显式选择,避免依赖全局 stb 状态。
 	WLD_API TextureData LoadTextureData(const std::string& path, bool flipVertically = false);
 
+	// M4-TEX P6c:`<path>` 可以写源图(`textures/Icon.png`)或纹理资产(`textures/Icon.wtex`)。
+	// 本函数把**资产引用**解析成它的源图路径(资产里的 `source:`,缺省 = 同目录同主名图片);
+	// 源图引用原样返回。给"产物命中但建纹理失败 / 别处只想解码源图"的调用点用 ——
+	// 直接拿 `.wtex` 去 stb 解码只会拿到 1x1 白兜底(实测)。
+	WLD_API std::string ResolveTextureSourcePath(const std::string& path);
+
 	// M4-TEX P2:产物优先的纹理加载结果(契约见 docs/dev/texture-import.md §7)。
 	//
 	// 解析口径与 LoadTextureData 同一套:逻辑路径 `<path>` → 先找 `<path>.wtexc`

@@ -136,10 +136,15 @@ namespace World
 			if (!assetFile.is_absolute())
 				assetFile = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
 
-			TextureImportSettings settings;
-			std::string settingsError;
-			if (LoadTextureImportSettings(assetFile, settings, settingsError) && !settings.Source.empty())
-				return settings.Source;
+		TextureImportSettings settings;
+		std::string settingsError;
+		const bool assetLoaded = LoadTextureImportSettings(assetFile, settings, settingsError);
+		if (std::getenv("WLD_TRACE_TEX"))
+			WLD_CORE_INFO("[tex-resolve] '{0}' assetFile='{1}' loaded={2} source='{3}' error='{4}'",
+				path, assetFile.generic_string(), static_cast<int>(assetLoaded), settings.Source,
+				settingsError);
+		if (assetLoaded && !settings.Source.empty())
+			return settings.Source;
 
 			// source: 缺省(或资产读不了)= 同目录同主名的图片,与烘焙器的候选顺序一致。
 			static const char* const kCandidates[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp" };
@@ -159,6 +164,12 @@ namespace World
 				WLD_CORE_WARN("Texture asset '{0}': {1}", path, settingsError);
 			return path;   // 真找不到:交给 LoadTextureData 走它自己的兜底(白纹理 + 警告)
 		}
+	}
+
+	// 公开入口(见 TextureData.h):资产引用 → 源图路径。内部实现就是上面那份(唯一口径)。
+	std::string ResolveTextureSourcePath(const std::string& path)
+	{
+		return SourcePathForFallback(path);
 	}
 
 	TextureData LoadTextureData(const std::string& path, bool flipVertically)
