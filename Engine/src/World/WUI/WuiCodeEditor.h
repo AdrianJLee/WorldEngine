@@ -124,6 +124,9 @@ namespace World::Wui
 	// 滚轮/拖动滚动 + 竖向滚动条;真实字形度量的鼠标命中;上下/Home/End/PageUp/PageDown/
 	// Ctrl+←→/Shift 选区/Ctrl+A/C/X/V/Z/Y/Tab/Enter/Backspace/Delete;双击选词。
 	// ReadOnly = true 时只导航/选择/复制,不改 buffer。
+	// MAT-UI6c:Ctrl+F 查找条带"选中即搜索"(单行非空选区直接预填查询,首个命中落在选区
+	// 起点处/之后)、Ctrl+H 替换;条上每个按钮悬停有"说明 + 快捷键"tooltip,同一句同时进
+	// a11y 节点的 Tooltip;关闭那一帧就不再登记查找条节点(`code-editor.find*`)。
 	WLD_API WuiCodeEditorResult CodeEditor(WuiContext& ctx, WuiId id, const WuiRect& rect,
 		WuiTextBuffer& buffer, const WuiCodeEditorOptions& options);
 }

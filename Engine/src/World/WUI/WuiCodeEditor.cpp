@@ -40,6 +40,8 @@ namespace World::Wui
 		const WuiColor kFindBarText { 0.80f, 0.83f, 0.87f, 1.0f };
 		const WuiColor kFindBarTextActive { 0.92f, 0.95f, 0.99f, 1.0f };
 		const WuiColor kFindBarNoMatch { 0.92f, 0.55f, 0.50f, 1.0f };
+		// MAT-UI6c:空查询时框内的占位文案(比 kFindBarText 低一档,不与真实输入混淆)。
+		const WuiColor kFindBarPlaceholder { 0.52f, 0.55f, 0.60f, 1.0f };
 		constexpr float kFindBarRowHeight = 22.0f;
 		constexpr float kFindBarPad = 4.0f;
 		constexpr float kFindBarGap = 3.0f;
@@ -556,6 +558,58 @@ namespace World::Wui
 		return static_cast<int>(matches.size()) - 1;   // 回绕到最后一个
 	}
 
+	namespace
+	{
+		// MAT-UI6c:"选中即搜索"的播种口径 —— 从当前选区取出可填进查找框的查询文本。
+		// 只认**单行**选区:查找框是单行控件,多行选区取第一行只会拿到半行代码/半截标识符,
+		// 所以多行直接**跳过**(口径见 MAT-UI6c 报告);首尾空格/制表裁掉后为空也跳过。
+		bool SeedFindQueryFromSelection(std::string_view text, size_t selStart, size_t selEnd,
+			std::string& out)
+		{
+			if (selEnd <= selStart || selEnd > text.size())
+				return false;
+			std::string_view selection = text.substr(selStart, selEnd - selStart);
+			if (selection.find('\n') != std::string_view::npos
+				|| selection.find('\r') != std::string_view::npos)
+				return false;
+			while (!selection.empty() && (selection.front() == ' ' || selection.front() == '\t'))
+				selection.remove_prefix(1);
+			while (!selection.empty() && (selection.back() == ' ' || selection.back() == '\t'))
+				selection.remove_suffix(1);
+			if (selection.empty())
+				return false;
+			out.assign(selection);
+			return true;
+		}
+
+		// 选区是否正好就是"当前命中":连按 Ctrl+F(或上一次查找刚选中了它)时不该把输入框里
+		// 的查询改写成命中文本(命中的大小写会跟着变),这种情况只把焦点送回查找框。
+		bool SelectionIsCurrentFindMatch(const WuiCodeEditorState& state, size_t selStart, size_t selEnd)
+		{
+			if (state.FindCurrent < 0 || state.FindCurrent >= static_cast<int>(state.FindMatches.size()))
+				return false;
+			const WuiCodeFindMatch& match = state.FindMatches[static_cast<size_t>(state.FindCurrent)];
+			return match.Start == selStart && match.End == selEnd;
+		}
+
+		// 打开查找条 / 条已打开时再按 Ctrl+F 的公共播种步骤(两条路径同一口径)。
+		// 返回 true = 查询已按选区刷新并置好重扫标记(首个命中 = 选区起点处/之后的第一个命中)。
+		bool ApplyFindQueryFromSelection(WuiCodeEditorState& state, const WuiTextBuffer& buffer)
+		{
+			const auto [selStart, selEnd] = buffer.Selection();
+			if (SelectionIsCurrentFindMatch(state, selStart, selEnd))
+				return false;
+			std::string seed;
+			if (!SeedFindQueryFromSelection(buffer.Text(), selStart, selEnd, seed))
+				return false;
+			state.FindQuery = std::move(seed);
+			state.FindAnchor = selStart;
+			state.FindScanned = false;   // 强制重扫:当帧就出计数并选中首个命中
+			state.FindCurrent = -1;      // 重扫时从 FindAnchor 往后挑,不用旧的当前命中
+			return true;
+		}
+	}
+
 	WuiCodeEditorResult CodeEditor(WuiContext& ctx, WuiId id, const WuiRect& rect,
 		WuiTextBuffer& buffer, const WuiCodeEditorOptions& options)
 	{
@@ -700,6 +754,9 @@ namespace World::Wui
 		CompletionRequest completionRequest;
 
 		// ---- 键盘(仅聚焦时;浮层可见时下列键优先被浮层消费,caret 不动)----
+		// MAT-UI6c:补全浮层吃掉的那一次 Esc(只关浮层、代码区仍持焦)不能在同一个 frame 里
+		// 再把查找条也关掉;查找条的 Esc 统一收口在下面的条内路由段(见那里的注释)。
+		bool escapeConsumedByPopup = false;
 		if (focused)
 		{
 			ctx.SetTextInputActive(true);
@@ -720,6 +777,7 @@ namespace World::Wui
 					// Esc 只关浮层:保持文本焦点(浮层不可见时 Esc 仍是失焦)。
 					state.PopupVisible = false;
 					escapeHandledByPopup = true;
+					escapeConsumedByPopup = true;
 				}
 				else if (ctx.WasKeyTriggered(KeyCodes::Up))
 				{
@@ -883,11 +941,15 @@ namespace World::Wui
 					// MAT-UI6a:Ctrl+F / Ctrl+H 打开查找条(顶部覆盖条),焦点进查找输入框。
 					// Ctrl+H(替换)只读模式不开;Ctrl+Shift+F 留给宿主(两个宿主都拿它当"格式化"),
 					// 所以这里**不带 Shift** 才算查找。打开时关掉补全浮层,避免两层浮层叠着。
+					// MAT-UI6c:选中即搜索 —— 有单行非空选区就用它预填查询并立即搜索
+					// (FindAnchor = 选区起点 ⇒ 首个命中落在选区处/之后,通常就是选区自己);
+					// 没有可用选区时保持旧行为(锚点 = caret,查询沿用上一次)。
 					if (!input.Shift && ctx.WasKeyTriggered(KeyCodes::F))
 					{
 						state.FindVisible = true;
-						state.FindAnchor = std::min(buffer.Caret(), buffer.Text().size());
 						state.PopupVisible = false;
+						if (!ApplyFindQueryFromSelection(state, buffer))
+							state.FindAnchor = std::min(buffer.Caret(), buffer.Text().size());
 						ctx.SetFocus(findFieldId);
 					}
 					if (!input.Shift && ctx.WasKeyTriggered(KeyCodes::H) && !readOnly)
@@ -1110,10 +1172,40 @@ namespace World::Wui
 		};
 		if (state.FindVisible)
 		{
+			// MAT-UI6c:Esc 在**绘制之前**关条 —— 关闭当帧就不再登记查找条 a11y 节点。
+			// 旧实现:焦点在查找框里时,`focused` 分支不跑,是 TextField 的 cancelledOut 在
+			// 画完(节点已登记)之后才关 ⇒ 节点多留一帧,脚本"关条后立即读树"会读到幽灵行。
+			// 被补全浮层吃掉的那一次 Esc 只关浮层(与 focused 分支同一条口径),不动查找条。
+			if (!escapeConsumedByPopup && ctx.WasKeyTriggered(KeyCodes::Escape)
+				&& (focused || barFocused))
+			{
+				state.FindVisible = false;
+				state.FindReplaceMode = false;
+				if (!focused)
+				{
+					// 焦点在查找框/替换框:关条后还给代码区。本帧没画 TextField,所以这里要按
+					// 代码区补登记一次"文本输入态" —— 否则本帧文本焦点登记为空,宿主帧末的
+					// 文本焦点快照(= 场景撤销/重做让位的依据)会掉一拍,下帧 Ctrl+Z 可能双重撤销。
+					ctx.SetFocus(id);
+					ctx.SetTextInputActive(true);
+				}
+			}
+		}
+		if (state.FindVisible)
+		{
 			// 条内再按 Ctrl+F / Ctrl+H:焦点回到查找输入框(不改查询、不关条)。
-			if (input.Ctrl && !input.Shift && (ctx.WasKeyTriggered(KeyCodes::F)
-				|| (ctx.WasKeyTriggered(KeyCodes::H) && !readOnly)))
+			// MAT-UI6c:Ctrl+F 另按"选中即搜索"刷新查询 —— 条已打开时在代码区选中别的内容
+			// 再按 Ctrl+F = 用新选区重搜(代码区持焦的那条路径已在上面的 focused 分支播种,
+			// 这里只补"焦点在查找框/替换框"的情形,同一帧不重复播种)。
+			const bool findKey = input.Ctrl && !input.Shift && ctx.WasKeyTriggered(KeyCodes::F);
+			const bool replaceKey = input.Ctrl && !input.Shift && !readOnly
+				&& ctx.WasKeyTriggered(KeyCodes::H);
+			if (findKey || replaceKey)
+			{
+				if (findKey && !focused)
+					ApplyFindQueryFromSelection(state, buffer);
 				ctx.SetFocus(findFieldId);
+			}
 			// 条内 Ctrl+Z/Ctrl+Y:撤销/重做**代码缓冲**(替换完不用先 Esc 再撤销;文本焦点在条里
 			// 时宿主的场景撤销本来就让位,不会双重撤销)。
 			if (!readOnly && barFocused && input.Ctrl && ctx.WasKeyTriggered(KeyCodes::Z))
@@ -1978,10 +2070,25 @@ namespace World::Wui
 				ctx.Commands().push_back({ WuiDrawKind::Rect,
 					{ barRect.X, barRect.Y + barRect.H - 1.0f, barRect.W, 1.0f }, kSuggestBorder, 0.0f });
 
-				const TextFieldA11y findA11y { "Find", "Search in this code" };
+				// MAT-UI6c:占位文案带快捷键(空查询时 a11y value 用 Placeholder,与框内那行同一句);
+				// 有查询时 value = 查询本身,与用户看到的一致。
+				const TextFieldA11y findA11y { "Find", "Find (Ctrl+F)" };
 				bool findCancelled = false;
 				const bool findSubmitted = TextField(ctx, findFieldId, findFieldRect, state.FindQuery,
 					theme, &findCancelled, &findA11y);
+				if (state.FindQuery.empty())
+				{
+					// 空查询时框内画一行低对比占位文案(TextField 自己只画 buffer,a11y 侧另登记)。
+					// 画在 TextField 的底色/描边之后,所以压在底色上而不会被盖住。
+					WuiDrawCommand placeholder;
+					placeholder.Kind = WuiDrawKind::Text;
+					placeholder.Rect = { findFieldRect.X + 6.0f,
+						findFieldRect.Y + (findFieldRect.H - kFindBarFontSize) * 0.5f, 0.0f, 0.0f };
+					placeholder.Color = kFindBarPlaceholder;
+					placeholder.Text = "Find (Ctrl+F)";
+					placeholder.FontSize = kFindBarFontSize;
+					ctx.Commands().push_back(std::move(placeholder));
+				}
 				bool replaceSubmitted = false;
 				bool replaceCancelled = false;
 				if (replaceRow)
@@ -2022,8 +2129,11 @@ namespace World::Wui
 					node.Interactive = false;
 					accessibility.Register(node);
 				}
+				// MAT-UI6c:每个按钮都要"说明 + 快捷键" —— hover 时登记 tooltip(宿主在面板之后
+				// 统一 DrawTooltip),同一句话同时进 a11y 节点的 Tooltip;value 给快捷键/开关态。
 				const auto barButton = [&](const WuiRect& r, const std::string& label, WuiId buttonId,
-					const std::string& kind, const std::string& value, bool active)
+					const std::string& kind, const std::string& value, bool active,
+					const std::string& tooltip)
 				{
 					const bool hovered = ctx.HitTestRaw(r, input.MousePos);
 					ctx.Commands().push_back({ WuiDrawKind::Rect, r,
@@ -2039,7 +2149,10 @@ namespace World::Wui
 					text.FontSize = kFindBarFontSize;
 					ctx.Commands().push_back(std::move(text));
 					if (hovered)
+					{
 						ctx.SetCursor(WuiCursor::Hand);
+						ctx.SetTooltip(tooltip);
+					}
 					if (accessibility.Enabled())
 					{
 						WuiAccessNode node;
@@ -2049,24 +2162,28 @@ namespace World::Wui
 						node.Kind = kind;
 						node.Label = label;
 						node.Value = value;
+						node.Tooltip = tooltip;
 						node.Rect = r;
 						node.Interactive = true;
 						accessibility.Register(node);
 					}
 				};
 				barButton(caseRect, "Aa", HashId("code-editor.find.case"), "toggle",
-					findCaseSetting ? "on" : "off", findCaseSetting);
+					findCaseSetting ? "on" : "off", findCaseSetting, "Match case");
 				barButton(wordRect, "ab", HashId("code-editor.find.word"), "toggle",
-					findWordSetting ? "on" : "off", findWordSetting);
-				barButton(prevRect, "<", HashId("code-editor.find.prev"), "button", std::string(), false);
-				barButton(nextRect, ">", HashId("code-editor.find.next"), "button", std::string(), false);
-				barButton(closeRect, "X", HashId("code-editor.find.close"), "button", std::string(), false);
+					findWordSetting ? "on" : "off", findWordSetting, "Whole word");
+				barButton(prevRect, "<", HashId("code-editor.find.prev"), "button",
+					"Shift+Enter / Shift+F3", false, "Previous match (Shift+Enter / Shift+F3)");
+				barButton(nextRect, ">", HashId("code-editor.find.next"), "button",
+					"Enter / F3", false, "Next match (Enter / F3)");
+				barButton(closeRect, "X", HashId("code-editor.find.close"), "button",
+					"Esc", false, "Close (Esc)");
 				if (replaceRow)
 				{
 					barButton(replaceRect, "Replace", HashId("code-editor.find.replace"), "button",
-						std::string(), false);
+						"Ctrl+H", false, "Replace (Ctrl+H)");
 					barButton(replaceAllRect, "All", HashId("code-editor.find.replace_all"), "button",
-						std::string(), false);
+						"Replace all", false, "Replace all");
 				}
 				ctx.Commands().push_back({ WuiDrawKind::ClipPop });
 				ctx.PopOverlay();

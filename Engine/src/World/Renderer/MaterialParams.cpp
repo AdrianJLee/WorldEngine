@@ -37,6 +37,80 @@ namespace World
 			return text.substr(begin, end - begin + 1);
 		}
 
+		// MAT-UI7a:注解里的双引号字符串(unit/group/label/doc 与 Texture2D 默认值)写出时转义,
+		// 与 AnnotationLine::Unquote 的读取规则一一对应:`\"` / `\\` / `\n`。
+		// 不转义的话含引号/反斜杠的说明文本写出去就读不回来(既有字段同样的潜在缺陷,一并收口)。
+		std::string QuoteAnnotationText(const std::string& value)
+		{
+			std::string out;
+			out.reserve(value.size() + 2);
+			out.push_back('"');
+			for (const char ch : value)
+			{
+				if (ch == '\\' || ch == '"')
+				{
+					out.push_back('\\');
+					out.push_back(ch);
+				}
+				else if (ch == '\n')
+				{
+					out += "\\n";
+				}
+				else
+				{
+					out.push_back(ch);
+				}
+			}
+			out.push_back('"');
+			return out;
+		}
+
+		// MAT-UI7a:doc(...) 文本超长时截断到 kMaxMaterialParamDocBytes;按 UTF-8 码点边界回退,
+		// 不会留下半个多字节字符(解析与写出共用,保证"写出 → 读回"稳定)。
+		std::string TruncateDocText(const std::string& text)
+		{
+			if (text.size() <= kMaxMaterialParamDocBytes)
+				return text;
+			size_t end = kMaxMaterialParamDocBytes;
+			while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0u) == 0x80u)
+				--end;
+			return text.substr(0, end);
+		}
+
+		// MAT-UI7a:注解行尾的 `// 注释` 起点(返回 npos = 没有注释)。只认**引号外**、且前面是
+		// 空白(或 `//` 就在注解体段首)的双斜杠:
+		//   - 字符串里的 `//`(如 `"textures//x.png"`、说明文本里的 URL)被跳过,不受影响;
+		//   - 没有空白前缀的 `//`(如不带引号的路径 `textures//x.png`)也不是注释,保持原义。
+		// 未闭合的字符串直接交给后面的解析器报"引号没有闭合",这里不猜。
+		size_t FindAnnotationCommentStart(const std::string& text, size_t from)
+		{
+			bool inString = false;
+			for (size_t index = from; index + 1 < text.size(); ++index)
+			{
+				const char ch = text[index];
+				if (inString)
+				{
+					if (ch == '\\')
+					{
+						++index;
+						continue;
+					}
+					if (ch == '"')
+						inString = false;
+					continue;
+				}
+				if (ch == '"')
+				{
+					inString = true;
+					continue;
+				}
+				if (ch == '/' && text[index + 1] == '/'
+					&& (index == from || text[index - 1] == ' ' || text[index - 1] == '\t'))
+					return index;
+			}
+			return std::string::npos;
+		}
+
 		bool IsIdentifierStart(char ch)
 		{
 			return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_';
@@ -443,6 +517,7 @@ namespace World
 					if (m_Text.compare(m_Pos, 5, "unit(") == 0) field = "unit";
 					else if (m_Text.compare(m_Pos, 6, "group(") == 0) field = "group";
 					else if (m_Text.compare(m_Pos, 6, "label(") == 0) field = "label";
+					else if (m_Text.compare(m_Pos, 4, "doc(") == 0) field = "doc";
 					else return Fail(optionColumn, "无法识别的注解内容 '" + Trim(m_Text.substr(m_Pos)) + "'");
 
 					m_Pos += field.size() + 1;
@@ -464,7 +539,8 @@ namespace World
 					m_SeenFields.insert(field);
 					if (field == "unit") m_Decl.Unit = value;
 					else if (field == "group") m_Decl.Group = value;
-					else m_Decl.Label = value;
+					else if (field == "label") m_Decl.Label = value;
+					else m_Decl.Doc = TruncateDocText(value);
 				}
 				return true;
 			}
@@ -1134,9 +1210,7 @@ namespace World
 		{
 			if (decl.Type == ParamType::Texture2D)
 			{
-				text += "\"";
-				text += normalized;
-				text += "\"";
+				text += QuoteAnnotationText(normalized);
 			}
 			else
 			{
@@ -1146,7 +1220,7 @@ namespace World
 		else
 		{
 			// 值本身不合法(编辑器里的半成品):照原样引号包住,读回来会报同一条错误。
-			text += "\"" + decl.Default + "\"";
+			text += QuoteAnnotationText(decl.Default);
 		}
 		if (decl.Type == ParamType::Float || decl.Type == ParamType::Int)
 		{
@@ -1160,11 +1234,15 @@ namespace World
 			}
 		}
 		if (!decl.Unit.empty())
-			text += " unit(\"" + decl.Unit + "\")";
+			text += " unit(" + QuoteAnnotationText(decl.Unit) + ")";
 		if (!decl.Group.empty())
-			text += " group(\"" + decl.Group + "\")";
+			text += " group(" + QuoteAnnotationText(decl.Group) + ")";
 		if (!decl.Label.empty())
-			text += " label(\"" + decl.Label + "\")";
+			text += " label(" + QuoteAnnotationText(decl.Label) + ")";
+		// MAT-UI7a:参数说明写在最后 —— 既有注解(没有 doc)的写出字节完全不变。
+		const std::string doc = TruncateDocText(decl.Doc);
+		if (!doc.empty())
+			text += " doc(" + QuoteAnnotationText(doc) + ")";
 		return text;
 	}
 
@@ -1216,7 +1294,14 @@ namespace World
 			if (line.compare(index, 3, "//!") != 0)
 				continue;
 
-			AnnotationLine annotation(line, lineNumber);
+			// MAT-UI7a:行尾注释(引号外的 `//`)先切掉再解析,列号仍按原行计算(只截尾,不动前缀);
+			// 字符串里的 `//` 与没有空白前缀的双斜杠不受影响(见 FindAnnotationCommentStart)。
+			std::string annotationText = line;
+			const size_t commentStart = FindAnnotationCommentStart(annotationText, index + 3);
+			if (commentStart != std::string::npos)
+				annotationText.erase(commentStart);
+
+			AnnotationLine annotation(annotationText, lineNumber);
 			if (!annotation.Parse(index + 3))
 			{
 				if (error) *error = annotation.Error();

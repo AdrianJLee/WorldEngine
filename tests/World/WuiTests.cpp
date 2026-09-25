@@ -4241,12 +4241,15 @@ int main()
 			Paint(f3);
 			CHECK(buffer.Selection().first == 15);
 
-			// Esc:关条 + 焦点还给代码区(当帧仍画着那条,下一帧起 a11y 节点消失)。
+			// Esc:关条 + 焦点还给代码区(MAT-UI6c 起,关条当帧节点就不再登记)。
 			WuiInputState escape = idle;
 			escape.KeyDown = { static_cast<uint32_t>(World::KeyCodes::Escape) };
 			escape.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Escape) };
 			Paint(escape);
 			CHECK(ctx.Focus() == id);
+			// MAT-UI6c:关条那一帧就不再登记查找条节点(旧实现是 TextField 登记完之后才关,
+			// 节点多留一帧)。下面两行合起来 = "当帧即消失"。
+			CHECK(accessibility.Find(findId) == nullptr);
 			Paint(idle);
 			CHECK(accessibility.Find(findId) == nullptr);
 
@@ -4352,6 +4355,317 @@ int main()
 			const WuiCodeEditorResult undone = Paint(undo);
 			CHECK(undone.Changed);
 			CHECK(buffer.Text() == original);
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
+		// 39. MAT-UI6c:选中即搜索 —— Ctrl+F 用**单行非空选区**预填查询并立即搜索,首个命中
+		//     落在选区起点处/之后(= 通常就是选区自己);条已打开时再 Ctrl+F 用新选区刷新查询;
+		//     多行选区跳过、选区正好是"当前命中"时不改写查询(不留口径暗坑,口径见报告)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiRect editor { 0.0f, 0.0f, 420.0f, 200.0f };
+			const WuiId id = HashId("test.mat-ui6c.seed");
+			const WuiId findId = HashId("code-editor.find");
+			// 字节偏移(0 基):第 1 行 `Tint` = [6,10),第 2 行 = [15,19) / [22,26),第 3 行 = [31,35)。
+			WuiTextBuffer buffer;
+			buffer.SetText("local Tint = 1\nTint = Tint + 1\nTint = 2\n");
+			WuiCodeEditorOptions options;
+			WuiContext ctx;
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+			const auto Paint = [&](const WuiInputState& in) -> WuiCodeEditorResult
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(in);
+				const WuiCodeEditorResult painted = CodeEditor(ctx, id, editor, buffer, options);
+				ctx.EndFrame();
+				return painted;
+			};
+			const auto CtrlF = [&]()
+			{
+				WuiInputState open = idle;
+				open.Ctrl = true;
+				open.KeyDown = { static_cast<uint32_t>(World::KeyCodes::F) };
+				open.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::F) };
+				Paint(open);
+			};
+			Paint(idle);
+			// 先点进代码区(真实聚焦路径),再把选区定在第 3 个 `Tint` 上。
+			WuiInputState focusClick = idle;
+			focusClick.MousePos = { 30.0f, 5.0f };
+			focusClick.MouseClicked[0] = true;
+			focusClick.MouseDown[0] = true;
+			Paint(focusClick);
+			WuiInputState releaseClick = idle;
+			releaseClick.MousePos = focusClick.MousePos;
+			releaseClick.MouseReleased[0] = true;
+			Paint(releaseClick);
+			CHECK(ctx.Focus() == id);
+			buffer.SetCaret(22, false);
+			buffer.SetCaret(26, true);
+			CHECK(buffer.HasSelection());
+
+			CtrlF();
+			CHECK(ctx.Focus() == findId);
+			{
+				const WuiAccessNode* findNode = accessibility.Find(findId);
+				CHECK(findNode != nullptr && findNode->Value == "Tint");   // 查询框 = 选区文本
+			}
+			{
+				const WuiAccessNode* status = accessibility.Find(HashId("code-editor.find.status"));
+				CHECK(status != nullptr && status->Value == "3/4");        // 计数 > 0,当前 = 第 3 个
+			}
+			// 首个命中落在选区处(不再是文档里第一个 `Tint` = [6,10))。
+			CHECK(buffer.Selection().first == 22 && buffer.Selection().second == 26);
+
+			// 条已打开(焦点在查找框)时选中别的内容再 Ctrl+F = 用新选区刷新查询。
+			buffer.SetCaret(0, false);
+			buffer.SetCaret(5, true);
+			CtrlF();
+			{
+				const WuiAccessNode* findNode = accessibility.Find(findId);
+				CHECK(findNode != nullptr && findNode->Value == "local");
+			}
+			{
+				const WuiAccessNode* status = accessibility.Find(HashId("code-editor.find.status"));
+				CHECK(status != nullptr && status->Value == "1/1");
+			}
+			CHECK(buffer.Selection().first == 0 && buffer.Selection().second == 5);
+
+			// 多行选区跳过:查询/计数/选区都不动(口径 = 不拿半行代码当查询)。
+			buffer.SetCaret(0, false);
+			buffer.SetCaret(20, true);
+			CtrlF();
+			{
+				const WuiAccessNode* findNode = accessibility.Find(findId);
+				CHECK(findNode != nullptr && findNode->Value == "local");
+			}
+			{
+				const WuiAccessNode* status = accessibility.Find(HashId("code-editor.find.status"));
+				CHECK(status != nullptr && status->Value == "1/1");
+			}
+			CHECK(buffer.Selection().first == 0 && buffer.Selection().second == 20);
+
+			// 首尾空白裁掉:选 " Tint"([5,10)) → 查询 = "Tint",命中从选区起点往后挑。
+			buffer.SetCaret(5, false);
+			buffer.SetCaret(10, true);
+			CtrlF();
+			{
+				const WuiAccessNode* findNode = accessibility.Find(findId);
+				CHECK(findNode != nullptr && findNode->Value == "Tint");
+			}
+			{
+				const WuiAccessNode* status = accessibility.Find(HashId("code-editor.find.status"));
+				CHECK(status != nullptr && status->Value == "1/4");
+			}
+			CHECK(buffer.Selection().first == 6 && buffer.Selection().second == 10);
+
+			// 选区正好是"当前命中"时不改写查询:把查询改成小写 "tint"(Ctrl+A 后重打),
+			// 再按 Ctrl+F —— 输入框仍是 `tint`,不会被命中文本改写回 `Tint`。
+			WuiInputState selectQuery = idle;
+			selectQuery.Ctrl = true;
+			selectQuery.KeyDown = { static_cast<uint32_t>(World::KeyCodes::A) };
+			selectQuery.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::A) };
+			Paint(selectQuery);
+			WuiInputState typeQuery = idle;
+			typeQuery.TextInput = { 't', 'i', 'n', 't' };
+			Paint(typeQuery);
+			// 文本控件的 a11y 节点在 EditUpdate **之前**登记(与"用户能看到的"同一帧语义),
+			// 所以刚打完字的那一帧节点里还是旧值 —— 多走一帧再断言(与第 37 段同一口径)。
+			Paint(idle);
+			{
+				const WuiAccessNode* findNode = accessibility.Find(findId);
+				CHECK(findNode != nullptr && findNode->Value == "tint");
+			}
+			CHECK(buffer.Selection().first == 6 && buffer.Selection().second == 10);
+			CtrlF();
+			{
+				const WuiAccessNode* findNode = accessibility.Find(findId);
+				CHECK(findNode != nullptr && findNode->Value == "tint");
+			}
+			{
+				const WuiAccessNode* status = accessibility.Find(HashId("code-editor.find.status"));
+				CHECK(status != nullptr && status->Value == "1/4");
+			}
+			// 换成另一个 `Tint` 选区再 Ctrl+F → 这次真的用选区刷新(当前 = 第 3 个)。
+			buffer.SetCaret(22, false);
+			buffer.SetCaret(26, true);
+			CtrlF();
+			{
+				const WuiAccessNode* findNode = accessibility.Find(findId);
+				CHECK(findNode != nullptr && findNode->Value == "Tint");
+			}
+			{
+				const WuiAccessNode* status = accessibility.Find(HashId("code-editor.find.status"));
+				CHECK(status != nullptr && status->Value == "3/4");
+			}
+			CHECK(buffer.Selection().first == 22 && buffer.Selection().second == 26);
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
+		// 40. MAT-UI6c:查找条每个按钮都有"说明 + 快捷键" —— hover 的 tooltip 文本与 a11y 节点的
+		//     Tooltip/Value 同一句;空查询时输入框 a11y value = 占位 "Find (Ctrl+F)"(框内同句)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiRect editor { 0.0f, 0.0f, 460.0f, 200.0f };
+			const WuiId id = HashId("test.mat-ui6c.tooltip");
+			const WuiId findId = HashId("code-editor.find");
+			WuiTextBuffer buffer;
+			buffer.SetText("local tint = 1\ntint = tint + 1\n");
+			WuiCodeEditorOptions options;
+			WuiContext ctx;
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+			const auto Paint = [&](const WuiInputState& in) -> WuiCodeEditorResult
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(in);
+				const WuiCodeEditorResult painted = CodeEditor(ctx, id, editor, buffer, options);
+				ctx.EndFrame();
+				return painted;
+			};
+			const auto NodeTooltip = [&](const char* idText) -> std::string
+			{
+				const WuiAccessNode* node = accessibility.Find(HashId(idText));
+				CHECK(node != nullptr);
+				// 先取值:下面 Paint 会 BeginFrame 重建节点表,指针随即失效。
+				const std::string tooltip = node->Tooltip;
+				const std::string value = node->Value;
+				const glm::vec2 point { node->Rect.X + node->Rect.W * 0.5f,
+					node->Rect.Y + node->Rect.H * 0.5f };
+				CHECK(!tooltip.empty() && !value.empty());
+				WuiInputState hover = idle;
+				hover.MousePos = point;
+				Paint(hover);
+				CHECK(ctx.Tooltip() == tooltip);   // 悬停当帧登记进 ctx 的必须是同一句
+				return tooltip;
+			};
+			Paint(idle);
+			WuiInputState focusClick = idle;
+			focusClick.MousePos = { 30.0f, 5.0f };
+			focusClick.MouseClicked[0] = true;
+			focusClick.MouseDown[0] = true;
+			Paint(focusClick);
+			WuiInputState releaseClick = idle;
+			releaseClick.MousePos = focusClick.MousePos;
+			releaseClick.MouseReleased[0] = true;
+			Paint(releaseClick);
+			CHECK(ctx.Focus() == id);
+			buffer.SetCaret(2);   // 锚点固定且**无选区**(不触发选中即搜索)
+			WuiInputState openReplace = idle;
+			openReplace.Ctrl = true;
+			openReplace.KeyDown = { static_cast<uint32_t>(World::KeyCodes::H) };
+			openReplace.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::H) };
+			Paint(openReplace);
+			CHECK(ctx.Focus() == findId);
+			// 空查询:输入框 a11y value = 占位;框内也画同一句(命令流里的 Text)。
+			{
+				const WuiAccessNode* findNode = accessibility.Find(findId);
+				CHECK(findNode != nullptr && findNode->Label == "Find");
+				CHECK(findNode->Value == "Find (Ctrl+F)");
+			}
+			{
+				bool placeholderDrawn = false;
+				// 查找条画在 overlay 层(PushOverlay),所以占位文案在 OverlayCommands() 里。
+				for (const WuiDrawCommand& command : ctx.OverlayCommands())
+					if (command.Kind == WuiDrawKind::Text && command.Text == "Find (Ctrl+F)")
+						placeholderDrawn = true;
+				CHECK(placeholderDrawn);
+			}
+			CHECK(NodeTooltip("code-editor.find.case") == "Match case");
+			CHECK(NodeTooltip("code-editor.find.word") == "Whole word");
+			CHECK(NodeTooltip("code-editor.find.prev") == "Previous match (Shift+Enter / Shift+F3)");
+			CHECK(NodeTooltip("code-editor.find.next") == "Next match (Enter / F3)");
+			CHECK(NodeTooltip("code-editor.find.close") == "Close (Esc)");
+			CHECK(NodeTooltip("code-editor.find.replace") == "Replace (Ctrl+H)");
+			CHECK(NodeTooltip("code-editor.find.replace_all") == "Replace all");
+			// 动作按钮的 value = 该动作的快捷键(有快捷键的给键位;没有的给动作名)。
+			CHECK(accessibility.Find(HashId("code-editor.find.next"))->Value == "Enter / F3");
+			CHECK(accessibility.Find(HashId("code-editor.find.prev"))->Value == "Shift+Enter / Shift+F3");
+			CHECK(accessibility.Find(HashId("code-editor.find.close"))->Value == "Esc");
+			CHECK(accessibility.Find(HashId("code-editor.find.replace"))->Value == "Ctrl+H");
+			CHECK(accessibility.Find(HashId("code-editor.find.replace_all"))->Value == "Replace all");
+			CHECK(accessibility.Find(HashId("code-editor.find.case"))->Value == "off");
+			CHECK(accessibility.Find(HashId("code-editor.find.word"))->Value == "off");
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
+		// 41. MAT-UI6c:关条当帧不再登记查找条 a11y 节点 —— Esc(焦点在查找框)与点 X 两条路径。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiRect editor { 0.0f, 0.0f, 420.0f, 200.0f };
+			const WuiId id = HashId("test.mat-ui6c.closeframe");
+			const WuiId findId = HashId("code-editor.find");
+			WuiTextBuffer buffer;
+			buffer.SetText("local tint = 1\ntint = tint + 1\n");
+			WuiCodeEditorOptions options;
+			WuiContext ctx;
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+			const auto Paint = [&](const WuiInputState& in) -> WuiCodeEditorResult
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(in);
+				const WuiCodeEditorResult painted = CodeEditor(ctx, id, editor, buffer, options);
+				ctx.EndFrame();
+				return painted;
+			};
+			Paint(idle);
+			WuiInputState focusClick = idle;
+			focusClick.MousePos = { 30.0f, 5.0f };
+			focusClick.MouseClicked[0] = true;
+			focusClick.MouseDown[0] = true;
+			Paint(focusClick);
+			WuiInputState releaseClick = idle;
+			releaseClick.MousePos = focusClick.MousePos;
+			releaseClick.MouseReleased[0] = true;
+			Paint(releaseClick);
+			CHECK(ctx.Focus() == id);
+			buffer.SetCaret(2);
+			WuiInputState open = idle;
+			open.Ctrl = true;
+			open.KeyDown = { static_cast<uint32_t>(World::KeyCodes::F) };
+			open.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::F) };
+			Paint(open);
+			CHECK(ctx.Focus() == findId);
+			CHECK(accessibility.Find(findId) != nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.status")) != nullptr);
+
+			// ① Esc(焦点在查找框 = 旧实现里"节点多留一帧"的那条路径)。
+			WuiInputState escape = idle;
+			escape.KeyDown = { static_cast<uint32_t>(World::KeyCodes::Escape) };
+			escape.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Escape) };
+			Paint(escape);
+			CHECK(ctx.Focus() == id);
+			CHECK(accessibility.Find(findId) == nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.status")) == nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.next")) == nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.close")) == nullptr);
+
+			// ② 点 X(节点矩形来自上一帧的 a11y 树,和脚本走同一条路)。
+			Paint(open);
+			CHECK(accessibility.Find(findId) != nullptr);
+			const WuiAccessNode* closeNode = accessibility.Find(HashId("code-editor.find.close"));
+			CHECK(closeNode != nullptr);
+			WuiInputState clickClose = idle;
+			clickClose.MousePos = { closeNode->Rect.X + closeNode->Rect.W * 0.5f,
+				closeNode->Rect.Y + closeNode->Rect.H * 0.5f };
+			clickClose.MouseClicked[0] = true;
+			clickClose.MouseDown[0] = true;
+			Paint(clickClose);
+			CHECK(ctx.Focus() == id);
+			CHECK(accessibility.Find(findId) == nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.status")) == nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.prev")) == nullptr);
 			accessibility.SetEnabled(false);
 			accessibility.Clear();
 		}

@@ -2,6 +2,7 @@
 
 #include "World/Core/Export.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -13,7 +14,7 @@ namespace World
 	// 注解是参数的事实源(编辑器据此生成 DragBar / 取色器 / 资产下拉 / 复选框 / 步进,
 	// 运行时据此生成 cbuffer 布局):
 	//
-	//   //! param <type> <name> = <default> [min,max] unit("") group("") label("")
+	//   //! param <type> <name> = <default> [min,max] unit("") group("") label("") doc("")
 	//
 	// 语法细则(逐行,`//!` 之后第一条指令必须是 param):
 	//   - <type>    :Float / Vec2 / Vec3 / Vec4 / Color / Int / Bool / Texture2D(大小写敏感);
@@ -21,7 +22,18 @@ namespace World
 	//   - <default> :**必填**。数值型是逗号分隔的字面量(`0.25` / `1, 1, 1`);Bool 是
 	//                 `true`/`false`;Texture2D 是相对内容根的路径(`""` = 无贴图,可带引号);
 	//   - [min,max] :只对 Float / Int 有效(其余类型报错),min <= max,默认值必须落在区间内;
-	//   - unit/group/label:双引号字符串,可空;每条注解里每个字段最多出现一次。
+	//   - unit/group/label/doc:双引号字符串,可空;每条注解里每个字段最多出现一次。
+	//     · 字段顺序任意(与 [min,max] 混排也可以);写出(FormatMaterialParamAnnotation)统一用
+	//       `[min,max] unit(...) group(...) label(...) doc(...)` 的规范顺序,写在最后的 `doc(...)`
+	//       不会动到既有行的字节(旧注解的写出结果不变)。
+	//     · 字符串里的 `)` 不需要转义(引号内的内容不参与结构解析);字符串按与既有字段一致的
+	//       转义规则读:`\"` → `"`、`\\` → `\`、`\n` → 换行。
+	//     · `doc(...)` = 参数说明(编辑器侧作参数行 tooltip / 无障碍 Tooltip);缺省 = 空。
+	//       Doc 上限 = kMaxMaterialParamDocBytes(256 字节,与 label/unit 这类 UI 文案同量级);
+	//       超长按 UTF-8 码点边界截断,解析与写出都截 —— 保证"写出 → 读回"稳定、不劈半个字符。
+	//   - 行尾注释(可选):`//` 在**引号外**且前面是空白(或位于注解体段首)时 = 注释,一直忽略到
+	//     行尾。字符串里的 `//`(如贴图路径 `"textures//icon.png"`)与没有空白前缀的 `//` 不算注释。
+	//     只有注释、没有 param 的 `//!` 行仍是"缺少注解指令"错误(注释不替注解行)。
 	// 失败时 error 的格式固定为 `<行>:<列>: <原因>`(1 基,列号指向出错的 token),
 	// 供编辑器直接显示 / 定位。
 	//
@@ -63,7 +75,12 @@ namespace World
 		std::string Unit;
 		std::string Group;
 		std::string Label;
+		std::string Doc;                     // MAT-UI7a:参数说明(注解 `doc("…")`;空 = 无)
 	};
+
+	// MAT-UI7a:`doc(...)` 文本的字节上限(与 label/unit 这类 UI 文案同量级)。解析与写出都在
+	// UTF-8 码点边界截断到该长度;需要同一口径的 UI(tooltip 换行等)复用它,不要各写一份。
+	inline constexpr std::size_t kMaxMaterialParamDocBytes = 256;
 
 	// 冻结 API(M4-S2 派工):注解解析。
 	//  - 成功 = out 按文件出现顺序填好,error 清空;
@@ -106,6 +123,8 @@ namespace World
 	// 注解 → 文本(不带 `//! ` 前缀)。编辑器改写材质着色器里的注解行时用它,保证
 	// "写出的行"能被 ParseMaterialParams 原样读回来(同一套值文本 / 引号 / 范围口径)。
 	// 范围只在 (Min,Max) != (0,1) 时写出 —— 保持"没写范围"与"[0,1]"在解析结果上等价。
+	// 字段顺序固定为 `[min,max] unit group label doc`,`doc` 空则不写;字符串按读取口径转义
+	// (`"` / `\` / 换行),Doc 超长先按 kMaxMaterialParamDocBytes 截断。
 	WLD_API std::string FormatMaterialParamAnnotation(const MaterialParamDecl& decl);
 
 	// ---- 反射布局(由 Slang 的反射 JSON 读出,不手写结构体) ----

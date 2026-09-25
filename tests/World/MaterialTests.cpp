@@ -1018,7 +1018,7 @@ int main()
 					"//! param Color Base = 0.8,0.2,0.1\n"
 					"//! param Int Steps = 3 [0,8] unit(\"steps\")\n"
 					"//! param Bool Glow = true group(\"Emissive\")\n"
-					"//! param Texture2D Albedo = \"textures/icon.png\" label(\"Albedo\")\n"
+					"//! param Texture2D Albedo = \"textures/icon.png\" label(\"Albedo\") doc(\"Albedo map (RGBA); 空 = 白色\")\n"
 					"//! param Texture2D NoMap = \"\"\n"
 					"Surface Evaluate(MaterialInputs input)\n"
 					"{\n"
@@ -1036,6 +1036,7 @@ int main()
 				CHECK(table[0].Min == 0.0f && table[0].Max == 1.0f);
 				CHECK(table[0].Group == "Surface" && table[0].Label == "Roughness");
 				CHECK(table[0].Unit.empty());
+				CHECK(table[0].Doc.empty());
 				CHECK(table[1].Type == ParamType::Vec2 && table[1].Default == "1, 2");
 				CHECK(table[1].Unit == "tiles" && table[1].Group == "UV");
 				CHECK(table[2].Type == ParamType::Vec3 && table[2].Default == "1, 0.5, 0.25");
@@ -1045,6 +1046,7 @@ int main()
 				CHECK(table[5].Min == 0.0f && table[5].Max == 8.0f && table[5].Unit == "steps");
 				CHECK(table[6].Type == ParamType::Bool && table[6].Default == "true");
 				CHECK(table[7].Type == ParamType::Texture2D && table[7].Default == "textures/icon.png");
+				CHECK(table[7].Doc == "Albedo map (RGBA); 空 = 白色");
 				CHECK(table[8].Type == ParamType::Texture2D && table[8].Default.empty());
 
 				// 注解写出 → 读回:编辑器改默认值/文案时走这条路径,口径必须闭环。
@@ -1058,7 +1060,7 @@ int main()
 					CHECK(reparsed[0].Default == decl.Default);
 					CHECK(reparsed[0].Min == decl.Min && reparsed[0].Max == decl.Max);
 					CHECK(reparsed[0].Unit == decl.Unit && reparsed[0].Group == decl.Group
-						&& reparsed[0].Label == decl.Label);
+						&& reparsed[0].Label == decl.Label && reparsed[0].Doc == decl.Doc);
 				}
 
 				// 空源 / 没有注解 → 空表(不是错误)。
@@ -1155,6 +1157,147 @@ int main()
 				CHECK(!IsReflectedTypeCompatible(ParamType::Int, "uint"));
 				CHECK(IsReflectedTypeCompatible(ParamType::Bool, "uint"));
 				CHECK(!IsReflectedTypeCompatible(ParamType::Bool, "int"));
+			}
+
+			// 24b. MAT-UI7a:注解 `doc("…")`(参数说明)+ 行尾 `//` 注释。
+			{
+				// 文本协议:`doc(...)` 与其它字段同级、顺序任意、可省略;字符串规则与既有字段一致
+				// (引号内的 `)` 不参与结构解析;`\"` / `\\` / `\n` 按既有转义读)。
+				const std::string source =
+					"//! param Float Roughness = 0.4 [0,1] unit(\"m\") group(\"Surface\") "
+						"label(\"Roughness\") doc(\"表面粗糙度:0 = 镜面。\")\n"
+					"//! param Vec2 Tiling = 1, 2 doc(\"UV 密度\") unit(\"tiles\")\n"          // 字段顺序任意
+					"//! param Bool Glow = true // 行尾注释:说明不一定要写进 doc()\n"
+					"//! param Texture2D Albedo = \"textures//icon.png\" doc(\"路径里的 // 原样保留\")\n"
+					"//! param Int Steps = 3 [0,8] doc(\"clamp(x, 0, 1) 里的 ) 不需要转义\")\n"
+					"//! param Float Escaped = 0.5 doc(\"带引号 \\\" 与反斜杠 \\\\ 的说明\")\n";
+				std::vector<MaterialParamDecl> table;
+				std::string error = "sentinel";
+				if (!ParseMaterialParams(source, &table, &error))
+					std::printf("MaterialTests: MAT-UI7a doc parse failed: %s\n", error.c_str());
+				CHECK(ParseMaterialParams(source, &table, &error));
+				CHECK(error.empty());
+				CHECK(table.size() == 6);
+				CHECK(table[0].Doc == "表面粗糙度:0 = 镜面。");
+				CHECK(table[0].Unit == "m" && table[0].Group == "Surface"
+					&& table[0].Label == "Roughness");
+				CHECK(table[1].Type == ParamType::Vec2 && table[1].Default == "1, 2");
+				CHECK(table[1].Doc == "UV 密度" && table[1].Unit == "tiles");
+				CHECK(table[2].Default == "true" && table[2].Doc.empty());
+				CHECK(table[3].Default == "textures//icon.png");        // 引号里的 // 不是注释
+				CHECK(table[3].Doc == "路径里的 // 原样保留");
+				CHECK(table[4].Doc == "clamp(x, 0, 1) 里的 ) 不需要转义");
+				CHECK(table[5].Doc == "带引号 \" 与反斜杠 \\ 的说明");
+
+				// 规范顺序的写出往返:文本、空格、引号逐字节一致(doc 写在最后,不动既有字段的排版)。
+				// 范围故意用非默认值 [0.02,1] —— [0,1] 与"没写范围"等价,写出时会被省略。
+				const std::string canonical =
+					"//! param Float Roughness = 0.4 [0.02,1] unit(\"m\") group(\"Surface\") "
+						"label(\"Roughness\") doc(\"表面粗糙度:0 = 镜面。\")\n";
+				std::vector<MaterialParamDecl> canonicalTable;
+				CHECK(ParseMaterialParams(canonical, &canonicalTable, &error));
+				CHECK(canonicalTable.size() == 1);
+				const std::string written =
+					"//! " + FormatMaterialParamAnnotation(canonicalTable[0]) + "\n";
+				CHECK(written == canonical);
+
+				// 非规范顺序 / 含转义的文本:写出会规范化字段顺序并转义,但值逐字节保留;
+				// 再写一次结果不变(幂等)。
+				for (const MaterialParamDecl& decl : table)
+				{
+					const std::string first = FormatMaterialParamAnnotation(decl);
+					std::vector<MaterialParamDecl> reparsed;
+					CHECK(ParseMaterialParams("//! " + first + "\n", &reparsed, &error));
+					CHECK(reparsed.size() == 1);
+					CHECK(reparsed[0].Name == decl.Name && reparsed[0].Type == decl.Type);
+					CHECK(reparsed[0].Default == decl.Default);
+					CHECK(reparsed[0].Unit == decl.Unit && reparsed[0].Group == decl.Group
+						&& reparsed[0].Label == decl.Label && reparsed[0].Doc == decl.Doc);
+					CHECK(FormatMaterialParamAnnotation(reparsed[0]) == first);
+				}
+
+				// 未写 doc(...) 的旧注解:字段缺省为空,写出字节与旧口径一致([0,1] 与"没写范围"
+				// 等价,写出时省略 —— 与 MAT-UI7a 之前的行为相同)。
+				std::vector<MaterialParamDecl> legacy;
+				CHECK(ParseMaterialParams("//! param Float Old = 0.25 [0,1] unit(\"x\") group(\"G\") label(\"L\")\n",
+					&legacy, &error));
+				CHECK(legacy.size() == 1 && legacy[0].Doc.empty());
+				CHECK(FormatMaterialParamAnnotation(legacy[0])
+					== "param Float Old = 0.25 unit(\"x\") group(\"G\") label(\"L\")");
+
+				// 超长:解析与写出都截断到 kMaxMaterialParamDocBytes(256 字节)。
+				const std::string longAscii(400, 'a');
+				std::vector<MaterialParamDecl> longTable;
+				CHECK(ParseMaterialParams("//! param Float Long = 0 doc(\"" + longAscii + "\")\n",
+					&longTable, &error));
+				CHECK(longTable.size() == 1);
+				CHECK(longTable[0].Doc.size() == kMaxMaterialParamDocBytes);
+				CHECK(longTable[0].Doc == longAscii.substr(0, kMaxMaterialParamDocBytes));
+
+				// 多字节文本按 UTF-8 码点边界截断(100 个「中」= 300 字节),不劈半个字符。
+				const auto isValidUtf8 = [](const std::string& text)
+				{
+					size_t index = 0;
+					while (index < text.size())
+					{
+						const unsigned char lead = static_cast<unsigned char>(text[index]);
+						size_t extra = 0;
+						if (lead < 0x80u) extra = 0;
+						else if ((lead & 0xE0u) == 0xC0u) extra = 1;
+						else if ((lead & 0xF0u) == 0xE0u) extra = 2;
+						else if ((lead & 0xF8u) == 0xF0u) extra = 3;
+						else return false;
+						if (index + extra >= text.size())
+							return false;
+						for (size_t step = 1; step <= extra; ++step)
+							if ((static_cast<unsigned char>(text[index + step]) & 0xC0u) != 0x80u)
+								return false;
+						index += extra + 1;
+					}
+					return true;
+				};
+				std::string cjk;
+				for (int index = 0; index < 100; ++index)
+					cjk += "中";
+				std::vector<MaterialParamDecl> cjkTable;
+				CHECK(ParseMaterialParams("//! param Float Wide = 0 doc(\"" + cjk + "\")\n",
+					&cjkTable, &error));
+				CHECK(cjkTable.size() == 1);
+				CHECK(cjkTable[0].Doc.size() <= kMaxMaterialParamDocBytes);
+				CHECK(cjkTable[0].Doc == cjk.substr(0, cjkTable[0].Doc.size()));
+				CHECK(isValidUtf8(cjkTable[0].Doc));
+				// 写出侧同一口径:手工表里的超长 Doc 写出去 → 读回来就是截断后的文本。
+				MaterialParamDecl manual;
+				manual.Name = "Manual";
+				manual.Type = ParamType::Float;
+				manual.Default = "1";
+				manual.Doc = std::string(400, 'b');
+				std::vector<MaterialParamDecl> manualBack;
+				CHECK(ParseMaterialParams("//! " + FormatMaterialParamAnnotation(manual) + "\n",
+					&manualBack, &error));
+				CHECK(manualBack.size() == 1
+					&& manualBack[0].Doc.size() == kMaxMaterialParamDocBytes);
+
+				// 非法:每个错误都给可读原因(与其它字段同一套文案)。
+				const auto expectDocError = [](const std::string& text, const std::string& reasonHint)
+				{
+					std::vector<MaterialParamDecl> bad;
+					std::string badError;
+					const bool parsed = ParseMaterialParams(text, &bad, &badError);
+					if (parsed || !bad.empty() || badError.find(reasonHint) == std::string::npos)
+						std::printf("MaterialTests: MAT-UI7a want '%s', got: %s\n",
+							reasonHint.c_str(), badError.c_str());
+					CHECK(!parsed);
+					CHECK(bad.empty());
+					CHECK(badError.find(reasonHint) != std::string::npos);
+				};
+				expectDocError("//! param Float X = 1 doc(Tint)\n", "需要双引号字符串");
+				expectDocError("//! param Float X = 1 doc(\"没有收尾\n", "引号没有闭合");
+				expectDocError("//! param Float X = 1 doc(\"x\"\n", "缺少右括号");
+				expectDocError("//! param Float X = 1 doc(\"a\") doc(\"b\")\n", "字段 doc(...) 重复");
+				expectDocError("//! param Float X = 1 docs(\"x\")\n", "无法识别的注解内容");
+				// 只有注释、没有 param 的行仍是错误(注释不替注解行)。
+				expectDocError("//! // 只有注释\n", "缺少注解指令");
 			}
 
 			// 25. 反射(Slang-T3):从 `-reflection-json` + 同一份 SPIR-V 二进制读成员偏移/类型/绑定
