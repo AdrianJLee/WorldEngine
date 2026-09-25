@@ -98,6 +98,12 @@ namespace World
 		constexpr float kShaderDefaultCodeRatio = 0.45f;
 		constexpr float kShaderRowHeight = 26.0f;
 		constexpr float kShaderGroupHeaderHeight = 20.0f;
+		// MAT-UI3b:参数行的行高 —— Vec4 用 we_engine 的 `Wui::Vec4Field`(2×2:两行高),
+		// Vec2/Vec3 与其它类型仍是单行(行高按行类型随行变化,容器高度同步按它累加)。
+		float ShaderParamRowHeight(ParamType type, float rowHeight)
+		{
+			return type == ParamType::Vec4 ? rowHeight * 2.0f : rowHeight;
+		}
 
 		// U27:预览列宽**会话内跨面板记住**(切材质、关掉再打开都不重置;<= 0 = 还没设过)。
 		// 只记用户拖出来的值 —— 窗口变窄时只在本帧夹取,不覆写记忆,窗口再变宽能回到原位置。
@@ -949,8 +955,8 @@ namespace World
 		std::filesystem::path file(key);
 		std::string name = file.stem().string();
 		if (name.empty())
-			name = "Material";
-		m_PanelTitle = "Material - " + name;
+			name = Wui::Tr("panel.material.untitled", "Material");
+		m_PanelTitle = Wui::Tr("panel.material.window_title", "Material - ") + name;
 		m_Search.clear();
 		m_ScrollY = 0.0f;
 		m_RevealField.clear();
@@ -1267,7 +1273,9 @@ namespace World
 			if (value >= minimum && value <= maximum)
 				return;
 			char buffer[128] = {};
-			std::snprintf(buffer, sizeof(buffer), "%s out of range [%g, %g]: %g", label,
+			// MAT-UI3b:校验条目的句子也要走目录(字段名保持技术原名:它就是 .wmat 里的字段)。
+			std::snprintf(buffer, sizeof(buffer),
+				Wui::Tr("panel.material.validation.range", "%s out of range [%g, %g]: %g").c_str(), label,
 				static_cast<double>(minimum), static_cast<double>(maximum), static_cast<double>(value));
 			m_Validation.push_back({ field, buffer, "range" });
 		};
@@ -1963,7 +1971,8 @@ namespace World
 					{
 						m_Status = Wui::Tr("panel.material.status.extract_failed",
 							"Extract from Selection failed: ")
-							+ (message.empty() ? std::string("no selection") : message);
+							+ (message.empty()
+								? Wui::Tr("panel.material.status.no_selection", "no selection") : message);
 						m_StatusIsError = true;
 					}
 				}
@@ -2083,7 +2092,7 @@ namespace World
 		std::filesystem::path file(m_Path.empty() ? std::string() : m_Path);
 		std::string fallbackName = file.stem().string();
 		if (fallbackName.empty())
-			fallbackName = "Material";
+			fallbackName = Wui::Tr("panel.material.untitled", "Material");
 		const std::string name = desc.Name.empty() ? fallbackName : desc.Name;
 		const float nameWidth = std::max(40.0f,
 			std::min(rect.W * 0.5f, ctx.MeasureTextWidth(name, 13.0f)));
@@ -2124,6 +2133,7 @@ namespace World
 		{
 			// 未落盘材质:给出"另存为"路径输入 + 行内校验。
 			const Wui::WuiRect field { x, rect.Y + used + gap, rect.W - 8.0f, 22.0f };
+			NoteFocusOwningRect(field);   // MAT-UI3b:未落盘材质的路径输入自己接手焦点
 			const std::string pathError = NewMaterialPathError(m_NewPathBuffer);
 			const std::string shownError = m_NewPathBuffer.empty()
 				? (m_NewPathAttempted ? pathError : std::string()) : pathError;
@@ -2164,7 +2174,8 @@ namespace World
 			return 0.0f;   // 没有 Shader / 没有警告:整块不占位(既有 .wmat 布局逐像素不变)
 		float height = kShaderGroupHeaderHeight;
 		if (m_ShaderParamsOpen)
-			height += static_cast<float>(rows) * kShaderRowHeight;
+			for (const MaterialParamDecl& decl : m_Material->Params())
+				height += ShaderParamRowHeight(decl.Type, kShaderRowHeight);
 		if (warnings > 0)
 			height += 6.0f + static_cast<float>(warnings) * 16.0f;
 		return height + kGroupGap;
@@ -2191,7 +2202,8 @@ namespace World
 		// 容器(与其它分组同一条视觉语言:底 + 圆角描边 + 左侧归属竖条 + 子项缩进)。
 		float blockHeight = kShaderGroupHeaderHeight;
 		if (m_ShaderParamsOpen)
-			blockHeight += static_cast<float>(decls.size()) * kShaderRowHeight;
+			for (const MaterialParamDecl& decl : decls)
+				blockHeight += ShaderParamRowHeight(decl.Type, kShaderRowHeight);
 		if (warningCount > 0)
 			blockHeight += 6.0f + static_cast<float>(warningCount) * 16.0f;
 		const Wui::WuiRect blockRect { contentRect.X + 2.0f, y - 3.0f,
@@ -2213,7 +2225,9 @@ namespace World
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 			node.Kind = "group";
 			node.Label = Wui::Tr("material.group.shader", "Shader Parameters");
-			node.Value = std::to_string(decls.size()) + " items, " + std::to_string(overridden) + " modified";
+			node.Value = std::to_string(decls.size())
+				+ Wui::Tr("panel.material.a11y.items", " items, ")
+				+ std::to_string(overridden) + Wui::Tr("panel.material.a11y.modified", " modified");
 			node.Tooltip = Wui::Tr("material.group.shader.tooltip",
 				"Parameters declared by the shader this material references (Shader: <path>). "
 				"Each row shows whether the value is overridden here, inherited from the parent "
@@ -2271,7 +2285,9 @@ namespace World
 			node.Kind = "section";
 			node.Label = Wui::Tr("material.group.shader", "Shader Parameters");
 			node.Value = (m_ShaderParamsOpen ? std::string("expanded") : std::string("collapsed"))
-				+ ", " + std::to_string(decls.size()) + " items, " + std::to_string(overridden) + " modified";
+				+ ", " + std::to_string(decls.size())
+				+ Wui::Tr("panel.material.a11y.items", " items, ")
+				+ std::to_string(overridden) + Wui::Tr("panel.material.a11y.modified", " modified");
 			node.Tooltip = Wui::Tr("panel.material.section.tooltip",
 				"Click to expand or collapse this group.");
 			node.Rect = toggleRect;
@@ -2311,15 +2327,18 @@ namespace World
 				const float rowWidth = std::max(80.0f, contentRect.W - kGroupIndent - 6.0f);
 				const float controlX = rowX + labelWidth + 8.0f;
 				const float reserved = kResetWidth + 6.0f;
-				const Wui::WuiRect rowRect { rowX, y, rowWidth, kShaderRowHeight };
-				const Wui::WuiRect controlRect { controlX, y, std::max(60.0f, rowWidth - (controlX - rowX) - reserved), 22.0f };
+				const float rowHeight = ShaderParamRowHeight(decl.Type, kShaderRowHeight);
+				const Wui::WuiRect rowRect { rowX, y, rowWidth, rowHeight };
+				const Wui::WuiRect controlRect { controlX, y, std::max(60.0f, rowWidth - (controlX - rowX) - reserved),
+					std::max(22.0f, rowHeight - 4.0f) };
 				const Wui::WuiRect resetRect { rowX + rowWidth - kResetWidth - 2.0f, y + 1.0f,
 					kResetWidth, kResetWidth };
+				NoteFocusOwningRect(controlRect);   // MAT-UI3b:参数控件自己接手焦点
 				const std::string label = decl.Label.empty() ? decl.Name : decl.Label;
 				// 三态强调条(与 M3 的字段行同一条语言:覆盖 = Accent / 父级 = BorderStrong / shader 默认 = Border)。
 				const Wui::WuiColor stateColor = isOverride ? theme.Accent
 					: (source == MaterialParamSource::Parent ? theme.BorderStrong : theme.Border);
-				Wui::PanelBackground(ctx, { rowX - 6.0f, y + 3.0f, 2.0f, kShaderRowHeight - 6.0f },
+				Wui::PanelBackground(ctx, { rowX - 6.0f, y + 3.0f, 2.0f, rowHeight - 6.0f },
 					stateColor, 1.0f);
 				Wui::Label(ctx, { rowX, y + 4.0f }, EllipsizeToWidth(ctx, label, labelWidth, 12.0f),
 					isOverride ? theme.Text : theme.TextMuted, 12.0f);
@@ -2385,13 +2404,13 @@ namespace World
 					node.Value = isOverride ? "override"
 						: (source == MaterialParamSource::Parent ? "parent" : "shader-default");
 					node.Tooltip = doc;
-					node.Rect = { rowX, y, 2.0f, kShaderRowHeight };
+					node.Rect = { rowX, y, 2.0f, rowHeight };
 					node.Enabled = true;
 					node.Interactive = false;
 					node.Visible = true;
 					Wui::WuiAccessibility::Get().Register(node);
 				}
-				y += kShaderRowHeight;
+				y += rowHeight;
 			}
 		}
 		// 警告区(未声明参数 / 值类型不符 / shader 读不到):**可读**且不阻断面板。
@@ -2462,6 +2481,9 @@ namespace World
 		const float reserved = reserveResetSlot ? kResetWidth + 6.0f : 0.0f;
 		const float controlWidth = std::max(60.0f, width - (controlX - x) - reserved);
 		const Wui::WuiRect controlRect { controlX, controlY, controlWidth, controlHeight };
+		// MAT-UI3b:可编辑控件的矩形进"会接手焦点"名单(点空白清焦点时按它豁免)。
+		if (!row.ReadOnly)
+			NoteFocusOwningRect(controlRect);
 		const Wui::WuiRect rowRect { x, y, width, row.Height };
 		// 数值行的悬停说明补一句"条体拖动 / 值区输入 / ↑↓ 步进"(分类规则落在 DragBar 上的行)。
 		// M3:继承态的字段把"继承自 <父>: <值>"拼进同一句悬停说明(读屏与脚本同源)。
@@ -2817,6 +2839,7 @@ namespace World
 		// 顶部的空白带一并去掉(用户 2026-09-22「上面有空行」)。
 		const float searchHeight = theme.ControlHeight;
 		const Wui::WuiRect searchRect { rect.X, rect.Y, rect.W, searchHeight };
+		NoteFocusOwningRect(searchRect);   // MAT-UI3b:搜索框自己接手焦点
 		if (Wui::TextField(ctx, Wui::HashId("material.search"), searchRect, m_Search, theme,
 			nullptr, &searchA11y))
 			m_ScrollY = 0.0f;
@@ -2890,15 +2913,18 @@ namespace World
 			else if (plan.Key == std::string("sampler"))
 			{
 				char samplerText[128] = {};
-				std::snprintf(samplerText, sizeof(samplerText), "%s, anisotropy %.0f",
+				std::snprintf(samplerText, sizeof(samplerText),
+					Wui::Tr("panel.material.value.sampler.aniso", "%s, anisotropy %.0f").c_str(),
 					Wui::Tr("material.value.sampler", "Linear filter, repeat wrap").c_str(),
 					static_cast<double>(RenderSettings::Get().Anisotropy));
 				plan.Value = samplerText;
 			}
 			else if (plan.Key == std::string("format"))
-				plan.Value = "FormatVersion " + std::to_string(m_Material->GetFormatVersion());
+				plan.Value = Wui::Tr("panel.material.value.format", "FormatVersion ")
+					+ std::to_string(m_Material->GetFormatVersion());
 			else if (plan.Key == std::string("revision"))
-				plan.Value = "Revision " + std::to_string(m_Material->GetRevision());
+				plan.Value = Wui::Tr("panel.material.value.revision", "Revision ")
+					+ std::to_string(m_Material->GetRevision());
 			else if (plan.Key == std::string("disk"))
 				plan.Value = m_Material->IsDirty()
 					? Wui::Tr("material.value.dirty", "modified (unsaved edits in memory)")
@@ -3008,8 +3034,9 @@ namespace World
 				groupNode.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 				groupNode.Kind = "group";
 				groupNode.Label = GroupLabel(group);
-				groupNode.Value = std::to_string(rowCount) + " items, "
-					+ std::to_string(modified) + " modified";
+				groupNode.Value = std::to_string(rowCount)
+					+ Wui::Tr("panel.material.a11y.items", " items, ")
+					+ std::to_string(modified) + Wui::Tr("panel.material.a11y.modified", " modified");
 				groupNode.Tooltip = Wui::Tr("panel.material.group.tooltip",
 					"Group container: its header and every parameter row of this group are drawn "
 					"inside this rectangle (rows are indented to show ownership).");
@@ -3059,7 +3086,9 @@ namespace World
 					node.Kind = "section";
 					node.Label = GroupLabel(group);
 					node.Value = (open ? std::string("expanded") : std::string("collapsed")) + ", "
-						+ std::to_string(rowCount) + " items, " + std::to_string(modified) + " modified";
+						+ std::to_string(rowCount)
+						+ Wui::Tr("panel.material.a11y.items", " items, ")
+						+ std::to_string(modified) + Wui::Tr("panel.material.a11y.modified", " modified");
 					node.Tooltip = sectionDoc;
 					node.Rect = headerRect;
 					node.Enabled = true;
@@ -3482,7 +3511,8 @@ namespace World
 			node.Kind = "image";
 			node.Label = Wui::Tr("panel.material.preview", "Preview");
 			node.Value = textureId != 0
-				? ("preview of " + m_Path + " (" + std::to_string(m_PreviewTargetW) + "x"
+				? (Wui::Tr("panel.material.preview.of", "preview of ") + m_Path + " ("
+					+ std::to_string(m_PreviewTargetW) + "x"
 					+ std::to_string(m_PreviewTargetH) + ")")
 				: Wui::Tr("panel.material.preview_unavailable", "Preview unavailable (RHI device not ready)");
 			node.Tooltip = hint;
@@ -3744,7 +3774,8 @@ namespace World
 		if (!host.AssignMaterialToSelection(m_Path, &target, &previous, &message))
 		{
 			m_Status = Wui::Tr("panel.material.status.assign_failed", "Assign failed: ")
-				+ (message.empty() ? std::string("no selection") : message);
+				+ (message.empty()
+					? Wui::Tr("panel.material.status.no_selection", "no selection") : message);
 			m_StatusIsError = true;
 			return;
 		}
@@ -3769,7 +3800,8 @@ namespace World
 		if (!host.SetEntityMaterialPath(m_AssignUndoEntity, m_AssignUndoPath, &message))
 		{
 			m_Status = Wui::Tr("panel.material.status.undo_failed", "Undo Assign failed: ")
-				+ (message.empty() ? std::string("the entity is gone") : message);
+				+ (message.empty()
+					? Wui::Tr("panel.material.status.entity_gone", "the entity is gone") : message);
 			m_StatusIsError = true;
 			// 实体已失效(被删除/换场景):不再提供撤销,避免反复失败。
 			m_AssignUndoValid = false;
@@ -3895,6 +3927,7 @@ namespace World
 		Wui::Label(ctx, { labelX, frame.Y + 49.0f },
 			Wui::Tr("panel.material.saveas.name", "Name"), theme.TextMuted, 13.0f);
 		const Wui::WuiRect nameRect { fieldX, frame.Y + 44.0f, fieldW, 24.0f };
+		NoteFocusOwningRect(nameRect);   // MAT-UI3b:模态里的名称输入自己接手焦点
 		const bool nameFocused = ctx.Focus() == nameId;
 		Wui::TextFieldA11y nameA11y;
 		nameA11y.Label = Wui::Tr("panel.material.saveas.name", "Name");
@@ -4086,7 +4119,8 @@ namespace World
 			}
 			if (savedPath.empty())
 			{
-				m_SaveAsFailure = error.empty() ? std::string("Save As failed") : error;
+				m_SaveAsFailure = error.empty()
+					? Wui::Tr("panel.material.saveas.failed", "Save As failed") : error;
 				m_SaveAsFailureFor = target;
 				host.Notify(m_SaveAsFailure);
 				WLD_CORE_WARN("Save As failed: {0}", m_SaveAsFailure);
@@ -4357,7 +4391,8 @@ namespace World
 		SetMaterialPathForPanel(normalized);
 		m_ShaderMode = true;
 		m_ShaderPath = MaterialLibrary::NormalizePath(normalized);
-		m_PanelTitle = "Material Shader - " + std::filesystem::path(m_ShaderPath).stem().string();
+		m_PanelTitle = Wui::Tr("panel.material.shader.window_title", "Material Shader - ")
+			+ std::filesystem::path(m_ShaderPath).stem().string();
 		// 代码形态不是材质资产:材质字段/引用者/另存这些路径不参与。
 		m_Path.clear();
 		m_LoadError.clear();
@@ -4489,7 +4524,14 @@ namespace World
 		std::string text = diagnostic.Severity.empty() ? std::string("error") : diagnostic.Severity;
 		text += ": ";
 		if (diagnostic.InUserSource && diagnostic.Line > 0)
-			text += "line " + std::to_string(diagnostic.Line) + ":" + std::to_string(diagnostic.Column) + "  ";
+		{
+			char position[64] = {};
+			std::snprintf(position, sizeof(position),
+				Wui::Tr("panel.material.shader.diagnostic.line", "line %u:%u").c_str(),
+				diagnostic.Line, diagnostic.Column);
+			text += position;
+			text += "  ";
+		}
 		text += diagnostic.Message;
 		return text;
 	}
@@ -4719,6 +4761,45 @@ namespace World
 		}
 	}
 
+	bool MaterialEditorPanel::PreviewParamTableMatchesMaterial() const
+	{
+		if (!m_Material)
+			return true;
+		// 判据只看"内存注解里有的参数,材质的表里有没有、类型一不一样":
+		//  - 内存多出来的参数 → 编译出的布局里有这个成员,渲染侧却拿不到它的声明
+		//    (decl 缺失 = PackParamValues 直接失败 → 整块写零 → 预览全黑);
+		//  - 同名但类型不同 → 偏移/宽度按错的口径写,颜色/向量会读错;
+		//  - 内存少掉的参数不影响打包(布局里没有它,表里多一条而已)。
+		const std::vector<MaterialParamDecl>& table = m_Material->Params();
+		for (const MaterialParamDecl& decl : m_ShaderParams)
+		{
+			const MaterialParamDecl* known = FindParamDecl(table, decl.Name);
+			if (known == nullptr || known->Type != decl.Type)
+				return false;
+		}
+		return true;
+	}
+
+	void MaterialEditorPanel::ResetFocusAfterPanelBlankClick(Wui::WuiContext& ctx,
+		const Wui::WuiRect& panelRect, Wui::WuiId focusAtFrameStart)
+	{
+		if (focusAtFrameStart == 0 || ctx.Focus() != focusAtFrameStart)
+			return;   // 本帧没有焦点 / 已经有控件接手了焦点(点开下拉、拖滑条、点代码列…)
+		if (!ctx.Input().MouseClicked[0] || ctx.IsPointerClickConsumed())
+			return;   // 没有点击,或这一下已被弹层(模态 / 下拉)消费
+		// 只认"落在这个面板里"的点击:窗口内坐标系由宿主给出,点到别的面板/视口不归本面板管。
+		if (!ctx.HitTestRaw(panelRect, ctx.Input().MousePos))
+			return;
+		// 落在"会自己接手焦点"的控件上(滑条 / 输入框 / 下拉 / 代码列 / 分隔条):这一下归它,
+		// 重复点同一个控件不该把状态清掉(拖动条体时会重复按下同一个 id)。
+		for (const Wui::WuiRect& rect : m_FocusOwningRects)
+			if (ctx.HitTestRaw(rect, ctx.Input().MousePos))
+				return;
+		// 点在空白(或不吃焦点的按钮/复选框)上 = 结束聚焦/选中态:焦点环下一帧不再画;
+		// 读屏与脚本读到的 focused 也回到 false(两个通道同源:都看 ctx.Focus())。
+		ctx.SetFocus(0);
+	}
+
 	void MaterialEditorPanel::ApplyShaderCompileOutcome(const ShaderCompileOutcome& outcome)
 	{
 		m_ShaderDiagnostics = outcome.Diagnostics;
@@ -4773,6 +4854,27 @@ namespace World
 		{
 			m_ShaderCompileStatus = summary + Wui::Tr("panel.material.shader.compile.no_key",
 				" — no Install: the shader has no logical path yet");
+			return;
+		}
+		// MAT-UI3b(用户 2026-09-25「把 tint 那行复制一次、改名,左侧预览就变黑了」):
+		// 未保存的注解改动里**新增/改名/改类型**的参数,材质的注解表(磁盘那份)还没有 ——
+		// 布局(按内存注解编译)与表对不上时渲染侧打包参数块会失败并退到零值(整块清零),
+		// 预览就是全黑。这里先不 Install,预览继续用上一份可用管线(参数默认值照旧可见),
+		// 并在状态行说清"保存后才进预览"。
+		// 取证开关(WLD_MATERIAL_PREVIEW_LAYOUT_GUARD=0)= 关掉这道守卫、回到旧行为(照装):
+		// 探针用它做"改前 vs 改后"的**同一二进制**对照(旧行为:渲染侧打包失败 → 写零 → 预览全黑)。
+		static const bool previewLayoutGuardDisabled = []
+		{
+			const char* value = std::getenv("WLD_MATERIAL_PREVIEW_LAYOUT_GUARD");
+			return value != nullptr && *value != '\0' && std::string(value) == "0";
+		}();
+		if (!savedContents && !previewLayoutGuardDisabled && !PreviewParamTableMatchesMaterial())
+		{
+			m_ShaderCompileStatus = summary + Wui::Tr("panel.material.shader.params.layout_pending",
+				" — the parameter set changed (added / renamed / retyped): the preview keeps the last "
+				"working pipeline and the new parameters appear after Save (Ctrl+S).");
+			WLD_CORE_INFO("[material-ui] preview install skipped (in-memory parameter table differs "
+				"from the material's) key='{0}'", key);
 			return;
 		}
 		const MaterialSurfaceRuntime::InstallResult install =
@@ -5070,7 +5172,8 @@ namespace World
 		if (!ParseMaterialParams(m_ShaderBuffer.Text(), &parsed, &error))
 		{
 			m_ShaderParseError = error.empty()
-				? std::string("the parameter annotations could not be parsed") : error;
+				? Wui::Tr("panel.material.shader.parse_error.fallback",
+					"the parameter annotations could not be parsed") : error;
 			// 内核的错误格式固定为 `<行>:<列>: <原因>`(1 基)—— 行号直接进代码编辑器的红标。
 			const size_t colon = m_ShaderParseError.find(':');
 			if (colon != std::string::npos && colon > 0)
@@ -5156,12 +5259,27 @@ namespace World
 
 	bool MaterialEditorPanel::WriteShaderParamDefault(MaterialParamDecl decl, const std::string& valueText)
 	{
-		// 1) 先按内核方言规范化(颜色补齐 4 个分量、浮点最短往返、贴图空串写成 ""),失败就不改文件。
+		// 1) 先按内核方言规范化(颜色补齐 4 个分量、浮点最短往返),失败就不改文件。
+		// MAT-UI3b(用户 2026-09-25「图片选取后无法选回无」):贴图路径必须**带引号**写回注解。
+		// NormalizeParamValue(Texture2D) 的输出是**去引号**的路径(空 = 空串),旧代码把它的结果
+		// 直接写回去,于是"选回 (无)"会写成 `= group(...)`(默认值整体消失)→ 回读校验不通过 →
+		// 回滚 + "无法把默认值写回注解",表现就是选了图之后再也清不掉。这里补引号后写。
 		std::string normalized = valueText;
 		std::string error;
-		if (decl.Type == ParamType::Texture2D && normalized.empty())
-			normalized = "\"\"";
-		if (!NormalizeParamValue(decl.Type, normalized, &normalized, &error))
+		if (decl.Type == ParamType::Texture2D)
+		{
+			std::string path;
+			if (!NormalizeParamValue(ParamType::Texture2D, normalized, &path, &error))
+			{
+				m_ShaderStatus = Wui::Tr("panel.material.shader.status.value_invalid",
+					"Value rejected: ") + (error.empty() ? valueText : error);
+				m_ShaderStatusIsError = true;
+				return false;
+			}
+			// 空路径 = 引擎绑白色 1×1(与 `.wmat` 的空贴图字段同一语义),注解里写成 `""`。
+			normalized = "\"" + path + "\"";
+		}
+		else if (!NormalizeParamValue(decl.Type, normalized, &normalized, &error))
 		{
 			m_ShaderStatus = Wui::Tr("panel.material.shader.status.value_invalid",
 				"Value rejected: ") + (error.empty() ? valueText : error);
@@ -5533,6 +5651,8 @@ namespace World
 			const Wui::WuiId codeSplitId = Wui::HashId("material.shader.splitter.code");
 			const Wui::WuiRect previewBand { previewAxis - 3.0f, rowY, 6.0f, rowH };
 			const Wui::WuiRect codeBand { codeAxis - 3.0f, rowY, 6.0f, rowH };
+			NoteFocusOwningRect(previewBand);   // MAT-UI3b:分隔条按下会拿焦点,重复点不清状态
+			NoteFocusOwningRect(codeBand);
 			const float defaultPreviewW = std::clamp(body.W * 0.28f, kShaderPreviewMinWidth,
 				std::max(kShaderPreviewMinWidth, usable - kShaderCodeMinWidth - kShaderParamsMinWidth));
 			const float defaultCodeW = std::clamp(usable * kShaderDefaultCodeRatio, kShaderCodeMinWidth,
@@ -5621,19 +5741,20 @@ namespace World
 					"Revert (Ctrl+R): drop unsaved edits and read the .slang from disk again."),
 				true, false },
 			// MAT-UI2:按钮语义写清楚 —— 平时是"跳过消抖立即编译 / 失败后重试",自动编译照常。
-			// 标签用字面量(与 Format 同口径:新增 Tr 键会动语言包,不在本片边界)。
-			{ "material.shader.compile", "Compile now",
-				"Compile now (skip the 350 ms debounce). Live edits are compiled automatically on a "
-				"worker thread; use this button to compile immediately, or to retry after a failure. "
-				"The preview follows the newest successful compile; the scene only switches after Save.",
+			// MAT-UI3b:标签/说明进目录(新增键落在 panels/material_editor.json)。
+			{ "material.shader.compile", Wui::Tr("panel.material.shader.compile_now", "Compile now"),
+				Wui::Tr("panel.material.shader.compile_now.tooltip",
+					"Compile now (skip the 350 ms debounce). Live edits are compiled automatically on a "
+					"worker thread; use this button to compile immediately, or to retry after a failure. "
+					"The preview follows the newest successful compile; the scene only switches after Save."),
 				true, false },
-			// MAT-INTEL:格式化(标签/说明用字面量 —— 语言包不在本单边界内,新增 Tr 键会被
-			// audit-localization 判成"代码用了但目录没有";脚本编辑器的 Format 按钮同样是字面量)。
-			{ "material.shader.format", "Format",
-				"Format (Ctrl+Shift+F): whitespace only — trailing whitespace removed, tabs → 4 spaces, "
-				"braces drive a 4-space indent, runs of 3+ blank lines collapse to one, one trailing "
-				"newline, `//!` gets a space. Identifiers and expressions are untouched. The formatted "
-				"text goes into the edit buffer (Ctrl+Z undoes it); Save writes it back to disk.",
+			// MAT-INTEL:格式化 —— MAT-UI3b 起标签/说明也走目录。
+			{ "material.shader.format", Wui::Tr("panel.material.shader.format", "Format"),
+				Wui::Tr("panel.material.shader.format.tooltip",
+					"Format (Ctrl+Shift+F): whitespace only — trailing whitespace removed, tabs → 4 spaces, "
+					"braces drive a 4-space indent, runs of 3+ blank lines collapse to one, one trailing "
+					"newline, `//!` gets a space. Identifiers and expressions are untouched. The formatted "
+					"text goes into the edit buffer (Ctrl+Z undoes it); Save writes it back to disk."),
 				!readOnly, false },
 			{ "material.shader.reveal", Wui::Tr("panel.material.shader.reveal", "Reveal"),
 				Wui::Tr("panel.material.shader.reveal.tooltip",
@@ -5743,7 +5864,9 @@ namespace World
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 			node.Kind = "text";
 			node.Label = Wui::Tr("panel.material.shader.title", "Material Shader");
-			node.Value = m_ShaderPath + (dirty ? " (unsaved)" : " (saved)");
+			node.Value = m_ShaderPath + (dirty
+				? Wui::Tr("panel.material.shader.unsaved", " (unsaved)")
+				: Wui::Tr("panel.material.shader.saved", " (saved)"));
 			node.Tooltip = Wui::Tr("panel.material.shader.title.tooltip",
 				"Logical path of this .slang (relative to the content root). The material editor opens "
 				"shaders in code form: preview | code | declared parameters.");
@@ -5848,6 +5971,7 @@ namespace World
 		editorNode.Enabled = !readOnly;
 		editorNode.Interactive = true;
 		Wui::WuiAccessibility::Get().Register(editorNode);
+		NoteFocusOwningRect(editorRect);   // MAT-UI3b:代码列自己接手焦点
 
 		// MAT-INTEL:补全/Hover 的文档表 —— 本文件声明的 `//! param` 名字进候选(Revision 变化才重扫);
 		// MAT-INTEL3 起同一份索引也带语义索引(形参 / 局部变量 / 文件级声明)。
@@ -6035,14 +6159,45 @@ namespace World
 			case ParamType::Vec3:
 			case ParamType::Vec4:
 			{
+				// MAT-UI3b:Vec2/Vec4 改用 we_engine 的同族部件(Vec2Field / Vec4Field,与
+				// Vec3Field 同一份 VecFieldCore 实现:小标签 + 数值区 + 拖动/键入/↑↓)。
+				// [min,max] 只对 Float/Int 有效(内核口径):向量统一用固定宽容区间。
+				const float vectorMin = -8.0f;
+				const float vectorMax = 8.0f;
+				if (decl.Type == ParamType::Vec2)
+				{
+					glm::vec2 value { 0.0f };
+					float xy[2] = { 0.0f, 0.0f };
+					if (ParseParamFloatComponents(current, ParamType::Vec2, xy, 2))
+						value = glm::vec2 { xy[0], xy[1] };
+					if (Wui::Vec2Field(ctx, id, controlRect, value, 0.01f, vectorMin, vectorMax, theme, 0))
+					{
+						*outText = FormatParamFloatText(value.x) + ", " + FormatParamFloatText(value.y);
+						return true;
+					}
+					return false;
+				}
+				if (decl.Type == ParamType::Vec4)
+				{
+					glm::vec4 value { 0.0f };
+					float xyzw[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+					if (ParseParamFloatComponents(current, ParamType::Vec4, xyzw, 4))
+						value = glm::vec4 { xyzw[0], xyzw[1], xyzw[2], xyzw[3] };
+					if (Wui::Vec4Field(ctx, id, controlRect, value, 0.01f, vectorMin, vectorMax, theme, 0))
+					{
+						*outText = FormatParamFloatText(value.x) + ", " + FormatParamFloatText(value.y)
+							+ ", " + FormatParamFloatText(value.z) + ", " + FormatParamFloatText(value.w);
+						return true;
+					}
+					return false;
+				}
 				if (decl.Type == ParamType::Vec3)
 				{
 					glm::vec3 value { 0.0f };
 					float rgb[3] = { 0.0f, 0.0f, 0.0f };
 					if (ParseParamFloatComponents(current, ParamType::Vec3, rgb, 3))
 						value = glm::vec3 { rgb[0], rgb[1], rgb[2] };
-					// [min,max] 只对 Float/Int 有效(内核口径):向量用固定宽容区间。
-					if (Wui::Vec3Field(ctx, id, controlRect, value, 0.01f, -8.0f, 8.0f, theme, 0))
+					if (Wui::Vec3Field(ctx, id, controlRect, value, 0.01f, vectorMin, vectorMax, theme, 0))
 					{
 						*outText = FormatParamFloatText(value.x) + ", " + FormatParamFloatText(value.y)
 							+ ", " + FormatParamFloatText(value.z);
@@ -6050,29 +6205,7 @@ namespace World
 					}
 					return false;
 				}
-				// Vec2 / Vec4:没有专用控件 —— 用逗号文本输入(值的方言就是逗号分隔),
-				// 提交(回车 / 失焦)时按内核的 NormalizeParamValue 校验。
-				std::string& buffer = m_ShaderParamTextBuffers[decl.Name];
-				if (buffer.empty())
-					buffer = current;
-				Wui::TextFieldA11y a11y;
-				a11y.Label = decl.Label.empty() ? decl.Name : decl.Label;
-				a11y.Placeholder = decl.Type == ParamType::Vec2 ? "x, y" : "x, y, z, w";
-				if (Wui::TextField(ctx, id, controlRect, buffer, theme, nullptr, &a11y))
-				{
-					std::string normalized;
-					std::string error;
-					if (NormalizeParamValue(decl.Type, buffer, &normalized, &error))
-					{
-						buffer = normalized;
-						*outText = normalized;
-						return true;
-					}
-					m_ShaderStatus = Wui::Tr("panel.material.shader.status.value_invalid",
-						"Value rejected: ") + (error.empty() ? buffer : error);
-					m_ShaderStatusIsError = true;
-					buffer = current;   // 回显合法值,不改文件
-				}
+				// Vec2 / Vec3 / Vec4 三条都在上面返回:这里不可达(留一个显式断言,防将来加类型漏接线)。
 				return false;
 			}
 			case ParamType::Texture2D:
@@ -6114,7 +6247,8 @@ namespace World
 			node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
 			node.Kind = "group";
 			node.Label = title;
-			node.Value = std::to_string(m_ShaderParams.size()) + " declared parameters";
+			node.Value = std::to_string(m_ShaderParams.size())
+				+ Wui::Tr("panel.material.shader.params.declared", " declared parameters");
 			node.Tooltip = Wui::Tr("panel.material.shader.params.tooltip",
 				"Parameters declared by the //! param annotations in this file. Editing a value here "
 				"rewrites the annotation default (the file stays the single source of truth).");
@@ -6177,7 +6311,13 @@ namespace World
 				groups.push_back(group);
 		}
 		const float contentHeight = static_cast<float>(groups.size()) * 20.0f
-			+ static_cast<float>(m_ShaderParams.size()) * 26.0f + 4.0f;
+			+ [&]
+			{
+				float rows = 0.0f;
+				for (const MaterialParamDecl& decl : m_ShaderParams)
+					rows += ShaderParamRowHeight(decl.Type, 26.0f);
+				return rows;
+			}() + 4.0f;
 		// 滚动位置复用 m_ScrollY(材质字段列与代码形态不会同屏出现)。
 		Wui::BeginScrollArea(ctx, content, contentHeight, m_ScrollY, theme);
 		// 简化:参数不多(注解表通常几条到十几条),不做虚拟化;直接按分组顺序画。
@@ -6213,11 +6353,12 @@ namespace World
 			if (!groupOpen)
 				continue;
 			// 一行 = 标签 + 控件(+ 单位/范围/类型说明)。
-			const float rowHeight = 26.0f;
+			const float rowHeight = ShaderParamRowHeight(decl.Type, 26.0f);
 			const Wui::WuiRect rowRect { content.X, cursor, std::max(40.0f, content.W), rowHeight };
 			const float labelWidth = std::min(140.0f, std::max(70.0f, content.W * 0.34f));
 			const Wui::WuiRect controlRect { content.X + labelWidth + 8.0f, cursor,
-				std::max(60.0f, content.W - labelWidth - 16.0f), 22.0f };
+				std::max(60.0f, content.W - labelWidth - 16.0f), std::max(22.0f, rowHeight - 4.0f) };
+			NoteFocusOwningRect(controlRect);   // MAT-UI3b:注解参数行自己接手焦点
 			const std::string label = decl.Label.empty() ? decl.Name : decl.Label;
 			Wui::Label(ctx, { content.X, cursor + 4.0f },
 				EllipsizeToWidth(ctx, label, labelWidth, 12.0f), theme.Text, 12.0f);
@@ -6365,11 +6506,15 @@ namespace World
 			}
 		}
 		const Wui::WuiTheme& theme = host.Theme();
+		// MAT-UI3b:这一帧开始时谁持焦(面板内点空白 = 结束这个状态;见函数注释)。
+		const Wui::WuiId focusAtFrameStart = ctx.Focus();
+		m_FocusOwningRects.clear();   // 每帧重建:本轮画过的"会接手焦点"的控件矩形
 		// M4-S2:代码形态(`.slang`)与材质形态(`.wmat`)是本面板的两种形态,布局/动作各走一条;
 		// `.wmat` 路径的既有行为一行不动。
 		if (m_ShaderMode)
 		{
 			DrawShaderDocument(ctx, rect, host);
+			ResetFocusAfterPanelBlankClick(ctx, rect, focusAtFrameStart);
 			return;
 		}
 		// U25-M2:面板级模态(Save As… / 丢弃未保存改动再打开)按"自己的输入封锁"处理 ——
@@ -6399,6 +6544,7 @@ namespace World
 			}
 			if (panelModal)
 				Wui::EndModalInputBlock(ctx);
+			ResetFocusAfterPanelBlankClick(ctx, rect, focusAtFrameStart);
 			return;
 		}
 		const float headerHeight = DrawHeader(ctx, { rect.X, rect.Y, rect.W, kHeaderBaseHeight }, host);
@@ -6431,6 +6577,7 @@ namespace World
 			const Wui::WuiRect splitterRect { splitAxis, body.Y + gap, 1.0f,
 				std::max(40.0f, body.H - gap - pad) };
 			const Wui::WuiRect splitterBand { splitAxis - 3.0f, splitterRect.Y, 6.0f, splitterRect.H };
+			NoteFocusOwningRect(splitterBand);   // MAT-UI3b:分隔条自己接手焦点
 			// 双击复位必须在控件调用**之前**:控件在按下那一帧把"当前值"记成拖拽锚点,
 			// 先复位再按下 = 锚点就是默认值,不会出现"拖一下又跳回旧位置"。
 			const Wui::WuiId splitterId = Wui::HashId("material.splitter");
@@ -6474,5 +6621,6 @@ namespace World
 			DrawSaveAsModal(ctx, host);
 			DrawOpenConfirmModal(ctx, host);
 		}
+		ResetFocusAfterPanelBlankClick(ctx, rect, focusAtFrameStart);
 	}
 }

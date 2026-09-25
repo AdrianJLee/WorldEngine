@@ -425,6 +425,11 @@ namespace World
 		void ShaderCompileWorkerLoop();
 		// 主线程:消费一份编译结果 —— 成功才 Install(键按"缓冲是否已保存"选),失败不 Install。
 		void ApplyShaderCompileOutcome(const ShaderCompileOutcome& outcome);
+		// MAT-UI3b:预览替身材质的注解参数表是否与本帧内存里的注解表一致(名字 + 类型)。
+		// 不一致 = 预览管线布局(按**内存注解**编译)与材质表(按**磁盘注解**加载)对不上:
+		// 渲染侧打包参数块会失败并退到零值(整块清零 → 预览全黑),所以这份产物先不 Install,
+		// 预览沿用上一份可用管线;保存(Ctrl+S)后表与布局重新对齐,新参数才进预览。
+		bool PreviewParamTableMatchesMaterial() const;
 		// 键(D2):缓冲有未保存改动 → `<路径>#preview`;否则 → `<路径>`(场景与预览共用)。
 		std::string ShaderPathKey() const;
 		std::string ShaderPreviewKey() const;
@@ -541,5 +546,14 @@ namespace World
 		void SaveCurrent();
 		void RefreshCatalog();
 		void RefreshPickerIndices();
+		// MAT-UI3b(用户 2026-09-25「点其他地方这个状态应该就结束了」):面板内部的点击若没有
+		// 任何控件接手焦点(点在空白/非焦点控件上),就结束当前聚焦态 —— 焦点环下一帧消失。
+		void ResetFocusAfterPanelBlankClick(Wui::WuiContext& ctx, const Wui::WuiRect& panelRect,
+			Wui::WuiId focusAtFrameStart);
+		// 上面那条规则的"哪些控件会自己接手焦点"名单:绘制时登记矩形,帧首清空。
+		// 点在这张表里 = 这一下归那个控件(重复点同一个滑条/输入框不该把状态清掉);
+		// 点在这张表外 = 空白 / 按钮 / 只读文字 → 结束聚焦态。
+		void NoteFocusOwningRect(const Wui::WuiRect& rect) { m_FocusOwningRects.push_back(rect); }
+		std::vector<Wui::WuiRect> m_FocusOwningRects;
 	};
 }
