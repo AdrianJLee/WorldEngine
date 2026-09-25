@@ -7,7 +7,9 @@
 
 #include <stb_image.h>
 
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 
 namespace World
 {
@@ -60,6 +62,53 @@ namespace World
 				std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
 			return stbi_load(diskPath.string().c_str(), &width, &height, &channels, desiredChannels);
 		}
+
+		// 与 LoadPixels 同一套解析口径的**字节**读取(VFS 优先 → 磁盘回退),
+		// 给烘焙产物 `.wtexc` 用:产物不需要解码,只需要原始字节。
+		bool ReadAssetBytes(const std::string& path, std::vector<uint8_t>& out)
+		{
+			out.clear();
+			if (Application::HasInstance())
+			{
+				std::error_code vfsError;
+				if (Application::Get().GetContext().Vfs().Read(path, out, vfsError) && !out.empty())
+					return true;
+			}
+
+			const std::filesystem::path requested(path);
+			const std::filesystem::path diskPath = requested.is_absolute()
+				? requested
+				: std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+
+			std::ifstream input(diskPath, std::ios::binary | std::ios::ate);
+			if (!input)
+				return false;
+			const std::streamoff size = input.tellg();
+			if (size <= 0)
+				return false;
+			out.resize(static_cast<size_t>(size));
+			input.seekg(0);
+			input.read(reinterpret_cast<char*>(out.data()), size);
+			if (!input)
+			{
+				out.clear();
+				return false;
+			}
+			return true;
+		}
+
+		bool EndsWith(const std::string& text, const char* suffix)
+		{
+			const size_t suffixLength = std::strlen(suffix);
+			return text.size() >= suffixLength
+				&& text.compare(text.size() - suffixLength, suffixLength, suffix) == 0;
+		}
+
+		// 逻辑路径 → 产物路径:契约是 `<逻辑路径>.wtexc`;已经带后缀时原样使用(容错)。
+		std::string ArtifactPathFor(const std::string& path)
+		{
+			return EndsWith(path, ".wtexc") ? path : path + ".wtexc";
+		}
 	}
 
 	TextureData LoadTextureData(const std::string& path, bool flipVertically)
@@ -88,5 +137,52 @@ namespace World
 		data.Pixels.assign(pixels, pixels + static_cast<size_t>(width) * height * 4);
 		stbi_image_free(pixels);
 		return data;
+	}
+
+	const uint8_t* TextureAsset::MipData(uint32_t mip) const
+	{
+		if (!FromArtifact || mip >= Header.MipCount)
+			return nullptr;
+		const uint64_t start = static_cast<uint64_t>(kTextureArtifactHeaderSize) + Header.Mips[mip].Offset;
+		if (start + Header.Mips[mip].Size > Bytes.size())
+			return nullptr;
+		return Bytes.data() + start;
+	}
+
+	uint64_t TextureAsset::MipSize(uint32_t mip) const
+	{
+		const uint8_t* data = MipData(mip);
+		return data ? Header.Mips[mip].Size : 0;
+	}
+
+	TextureAsset LoadTextureAsset(const std::string& path, bool flipVertically)
+	{
+		TextureAsset asset;
+		if (path.empty())
+		{
+			asset.Source = MakeWhiteFallback();
+			return asset;
+		}
+
+		const std::string artifactPath = ArtifactPathFor(path);
+		std::vector<uint8_t> bytes;
+		if (ReadAssetBytes(artifactPath, bytes))
+		{
+			TextureArtifactHeader header;
+			std::string error;
+			if (ParseTextureArtifact(bytes, header, error))
+			{
+				asset.FromArtifact = true;
+				asset.Header = header;
+				asset.Bytes = std::move(bytes);
+				return asset;
+			}
+			// 坏产物不静默:警告 + 回退源图(契约 §7.3),进程不受影响。
+			WLD_CORE_WARN("Texture artifact '{0}' rejected: {1}; falling back to the source image",
+				artifactPath, error);
+		}
+
+		asset.Source = LoadTextureData(path, flipVertically);
+		return asset;
 	}
 }

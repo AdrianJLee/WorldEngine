@@ -4,6 +4,50 @@
 
 namespace World::Rhi::OpenGL
 {
+	namespace
+	{
+		// 块压缩格式:上传走 glCompressedTextureSubImage*(ToGLDataFormat/ToGLDataType
+		// 对它们没有映射 —— 旧路径会断言,这就是 M4-TEX P2 要修的那条)。
+		bool IsBlockCompressedFormat(Format format)
+		{
+			switch (format)
+			{
+				case Format::BC1_UNORM:
+				case Format::BC2_UNORM:
+				case Format::BC3_UNORM:
+				case Format::BC4_UNORM:
+				case Format::BC5_UNORM:
+				case Format::BC7_UNORM:
+				case Format::BC1_UNORM_SRGB:
+				case Format::BC3_UNORM_SRGB:
+				case Format::BC7_UNORM_SRGB:
+					return true;
+				default:
+					return false;
+			}
+		}
+
+		uint32_t BlockSizeBytes(Format format)
+		{
+			switch (format)
+			{
+				case Format::BC1_UNORM:
+				case Format::BC1_UNORM_SRGB:
+				case Format::BC4_UNORM:
+					return 8;
+				case Format::BC2_UNORM:
+				case Format::BC3_UNORM:
+				case Format::BC3_UNORM_SRGB:
+				case Format::BC5_UNORM:
+				case Format::BC7_UNORM:
+				case Format::BC7_UNORM_SRGB:
+					return 16;
+				default:
+					return 0;
+			}
+		}
+	}
+
 	OpenGLTexture::OpenGLTexture(const TextureDesc& desc)
 		: m_Desc(desc)
 	{
@@ -65,7 +109,7 @@ namespace World::Rhi::OpenGL
 			glDeleteTextures(1, &m_ID);
 	}
 
-	void OpenGLTexture::SetData(const void* data, uint64_t /*size*/, uint32_t layer, uint32_t mip)
+	void OpenGLTexture::SetData(const void* data, uint64_t size, uint32_t layer, uint32_t mip)
 	{
 		// 多采样纹理不能上传/写入(glTextureSubImage* 对它一律 GL_INVALID_OPERATION):
 		// 内容只能由绘制写入,再经 resolve 到单采样纹理后读回/采样。
@@ -77,16 +121,57 @@ namespace World::Rhi::OpenGL
 			return;
 		}
 
-		const GLenum dataFormat = ToGLDataFormat(m_Desc.Format);
-		const GLenum dataType = ToGLDataType(m_Desc.Format);
-		WLD_CORE_ASSERT(dataFormat != 0 && dataType != 0, "Texture format has no upload mapping in OpenGL backend");
-
 		const auto levelExtent = [&]()
 		{
 			return Extent3D{ std::max(1u, m_Desc.Extent.Width >> mip),
 				std::max(1u, m_Desc.Extent.Height >> mip),
 				std::max(1u, m_Desc.Extent.Depth >> mip) };
 		};
+
+		// 块压缩 = 一段 blocks 直接上传:`format` 用与 glTextureStorage2D 相同的内部格式
+		// (GL 的 glCompressedTextureSubImage* 要求 format 是压缩格式枚举),imageSize 用
+		// 调用方给的字节数(产物头算出来的 ceil(w/4)*ceil(h/4)*blockBytes)。
+		if (IsBlockCompressedFormat(m_Desc.Format))
+		{
+			const GLenum compressedFormat = ToGLInternalFormat(m_Desc.Format);
+			WLD_CORE_ASSERT(compressedFormat != 0 && size > 0,
+				"Block-compressed texture upload needs a known GL format and non-zero size");
+			const auto extent = levelExtent();
+			const GLsizei imageSize = static_cast<GLsizei>(size);
+			switch (m_Desc.Type)
+			{
+				case TextureType::Texture1D:
+					glCompressedTextureSubImage1D(m_ID, mip, 0, static_cast<GLsizei>(extent.Width),
+						compressedFormat, imageSize, data);
+					break;
+				case TextureType::Texture2D:
+					glCompressedTextureSubImage2D(m_ID, mip, 0, 0, static_cast<GLsizei>(extent.Width),
+						static_cast<GLsizei>(extent.Height), compressedFormat, imageSize, data);
+					break;
+				case TextureType::Cube:
+				{
+					// 每面字节数按块对齐算(旧 RGBA8 分支的 *4 对块格式不成立)。
+					const uint64_t faceSize = static_cast<uint64_t>((extent.Width + 3) / 4)
+						* ((extent.Height + 3) / 4) * BlockSizeBytes(m_Desc.Format);
+					for (uint32_t face = 0; face < 6; face++)
+						glCompressedTextureSubImage3D(m_ID, mip, 0, 0, static_cast<GLint>(face),
+							static_cast<GLsizei>(extent.Width), static_cast<GLsizei>(extent.Height), 1,
+							compressedFormat, static_cast<GLsizei>(faceSize),
+							static_cast<const uint8_t*>(data) + face * faceSize);
+					break;
+				}
+				case TextureType::Texture3D:
+					glCompressedTextureSubImage3D(m_ID, mip, 0, 0, 0, static_cast<GLsizei>(extent.Width),
+						static_cast<GLsizei>(extent.Height), static_cast<GLsizei>(extent.Depth),
+						compressedFormat, imageSize, data);
+					break;
+			}
+			return;
+		}
+
+		const GLenum dataFormat = ToGLDataFormat(m_Desc.Format);
+		const GLenum dataType = ToGLDataType(m_Desc.Format);
+		WLD_CORE_ASSERT(dataFormat != 0 && dataType != 0, "Texture format has no upload mapping in OpenGL backend");
 
 		switch (m_Desc.Type)
 		{

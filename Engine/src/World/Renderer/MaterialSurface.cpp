@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -442,9 +443,24 @@ namespace World
 			return arguments;
 		}
 
+		// M4-TEX P2:法线贴图 BC5 重建开关(包装层)。
+		//  - 排列键里含 `normal-bc5` 记号(大小写不敏感)= 该材质的法线贴图来自 BC5 产物;
+		//  - `WLD_SURFACE_NORMAL_BC5=1` = 诊断覆盖(同一材质开/关重建的 A/B 抓图用)。
+		// 两者都改变包装源码 ⇒ 缓存键(wrapper 源哈希)自然区分,不会串用旧产物;
+		// LastGood 的键同样带上这个标志,避免"开关翻了却 still 返回旧产物"。
+		bool NormalTextureIsBc5(const std::string& permutationKey)
+		{
+			const char* overrideValue = std::getenv("WLD_SURFACE_NORMAL_BC5");
+			if (overrideValue && overrideValue[0] != '\0' && std::strcmp(overrideValue, "0") != 0)
+				return true;
+			return LowerAscii(permutationKey).find("normal-bc5") != std::string::npos;
+		}
+
 		std::string LastGoodKey(const std::string& permutationKey, SurfaceShaderBackend backend)
 		{
-			return BackendKey(backend) + "\n" + permutationKey;
+			return BackendKey(backend) + "\n"
+				+ (NormalTextureIsBc5(permutationKey) ? std::string("normal-bc5\n") : std::string())
+				+ permutationKey;
 		}
 
 		void StoreLastGood(const std::string& permutationKey, SurfaceShaderBackend backend,
@@ -750,7 +766,15 @@ namespace World
 		// 引擎模板:顶点/光照/阴影/实例化/蒙皮/雾钩子由引擎提供。
 		// 注意:雾目前只有一个恒等钩子 —— 当前全局 UBO 里没有雾参数,不伪造接口;
 		// S2/S3 接入雾 uniform 时替换 ApplyEngineFog() 即可。
-		const char* kSurfaceTemplatePrefix = R"WESURFACE(
+	const char* kSurfaceTemplatePrefix = R"WESURFACE(
+// M4-TEX P2:法线贴图 BC5(RGTC2:只存 R=X / G=Y)时,包装层按单位向量重建 Z。
+// 默认 0 = 与 RGBA8 时代逐字节相同的采样路径(RGBA8 里 Z 本来就在贴图里)。
+// 打开方式:`normal-bc5` 记号进排列键(见 MaterialSurface.cpp 的 NormalTextureIsBc5),
+// 或诊断覆盖 WLD_SURFACE_NORMAL_BC5=1。约定见 docs/dev/shader-contract.md 法线段。
+#ifndef WE_NORMAL_TEXTURE_BC5
+#define WE_NORMAL_TEXTURE_BC5 0
+#endif
+
 // ============================================================================
 // Engine wrapper below: vertex stage / lighting / shadows / instancing /
 // skinning are provided by WorldEngine. Only Evaluate() comes from the user.
@@ -1015,9 +1039,22 @@ float3 ResolveShadingNormal(SurfaceVSOutput input, MaterialInputs materialInputs
 {
     float3 tangentNormal = float3(0.0f, 0.0f, 1.0f);
     if (u_Flags.y > 0.5f)
+    {
         tangentNormal = u_NormalTexture.Sample(input.UV).xyz * 2.0f - 1.0f;
+#if WE_NORMAL_TEXTURE_BC5
+        // BC5 的第三通道恒为 0(采样后在 B 里);按切线空间单位向量重建 Z。
+        tangentNormal.z = sqrt(saturate(1.0f - dot(tangentNormal.xy, tangentNormal.xy)));
+#endif
+    }
     // Surface.Normal 是"在引擎采样结果之上的切空间扰动";默认 (0,0,1) 保持采样值。
+#if WE_NORMAL_TEXTURE_BC5
+    // BC5:重建出来的 Z 必须参与合并 —— 否则它会被 surface.Normal.z 覆盖,等于白重建。
+    // z 权重取 surface.Normal.z(默认 1 = 完整保留采样法线,与契约 §2 的口径一致);
+    // 没有法线贴图时 tangentNormal 仍是 (0,0,1),这一行与 RGBA8 分支逐值相同。
+    float3 combined = float3(tangentNormal.xy + surface.Normal.xy, surface.Normal.z * tangentNormal.z);
+#else
     float3 combined = float3(tangentNormal.xy + surface.Normal.xy, surface.Normal.z);
+#endif
     if (dot(combined, combined) < 1e-12f)
         combined = float3(0.0f, 0.0f, 1.0f);
     tangentNormal = normalize(combined);
@@ -1113,7 +1150,16 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			wrapper += BackendKey(backend);
 			wrapper += "\n// permutation: ";
 			wrapper += SanitizeComment(permutationKey);
-			wrapper += "\n\n// ---- MaterialSurfaceContract.hlsli (embedded) ----\n";
+			wrapper += "\n";
+			// M4-TEX P2:法线贴图 BC5 重建开关(默认在模板里是 0,打开时在这里先定义)。
+			if (NormalTextureIsBc5(permutationKey))
+			{
+				wrapper += "// normal texture is BC5 (RGTC2): the wrapper reconstructs tangent Z.\n";
+				wrapper += "#define WE_NORMAL_TEXTURE_BC5 1\n";
+				WLD_CORE_INFO("[surface] BC5 normal map: the wrapper reconstructs tangent Z "
+					"(key='{0}')", permutationKey);
+			}
+			wrapper += "\n// ---- MaterialSurfaceContract.hlsli (embedded) ----\n";
 			wrapper += contractText;
 			if (wrapper.empty() || wrapper.back() != '\n')
 				wrapper += '\n';

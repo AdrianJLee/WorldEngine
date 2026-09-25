@@ -8,8 +8,10 @@
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/ShaderUtils.h"
+#include "World/Renderer/TextureCompiler.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <memory>
@@ -299,6 +301,217 @@ namespace World::Editor
 			return result;
 		}
 
+		std::string LowercaseExtension(const fs::path& path)
+		{
+			std::string extension = path.extension().string();
+			std::transform(extension.begin(), extension.end(), extension.begin(),
+				[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+			return extension;
+		}
+
+		// M4-TEX P3:保证 cooked 里有内容根的源图与 `.wtex` sidecar(只补**缺失**的那些)。
+		//
+		// 为什么需要:`CookPipeline` 的增量只认 `cook.db.json`(源字节指纹),它不会发现 cooked 里的文件
+		// 被人删掉了 —— 而 `--strip-source-textures` 正是"删掉 cooked 里源图"的合法动作。没有这一步,
+		// 剥离之后的**下一次普通 cook** 会静默产出"只剩产物"的开发包(与"默认保留源图"的契约相反)。
+		// 代价:只有紧跟剥离的那一次 cook 会真的拷文件(其余情况目标已存在,一个字节都不动)。
+		struct CookedSourceCopyResult
+		{
+			size_t Sources = 0;    // 补回的源图数
+			size_t Sidecars = 0;   // 补回的 `.wtex` 数
+			size_t Failed = 0;
+			std::string Error;
+		};
+
+		CookedSourceCopyResult EnsureCookedSourceCopies(const fs::path& contentRoot,
+			const fs::path& cookedContentDir)
+		{
+			CookedSourceCopyResult result;
+			std::error_code walkEc;
+			for (const fs::directory_entry& entry : fs::recursive_directory_iterator(contentRoot,
+				fs::directory_options::skip_permission_denied, walkEc))
+			{
+				if (walkEc)
+					break;
+				std::error_code fileEc;
+				if (!entry.is_regular_file(fileEc))
+					continue;
+				const std::string extension = LowercaseExtension(entry.path());
+				const bool isSource = World::TextureCompiler::IsTextureSourceExtension(extension);
+				const bool isSidecar = extension == ".wtex";
+				if (!isSource && !isSidecar)
+					continue;
+				std::error_code relativeEc;
+				const fs::path relative = fs::relative(entry.path(), contentRoot, relativeEc);
+				if (relativeEc || relative.empty())
+					continue;
+				const fs::path target = cookedContentDir / relative;
+				std::error_code existsEc;
+				if (fs::is_regular_file(target, existsEc))
+					continue;
+				std::error_code copyEc;
+				fs::create_directories(target.parent_path(), copyEc);
+				if (!copyEc)
+					fs::copy_file(entry.path(), target, fs::copy_options::none, copyEc);
+				if (copyEc)
+				{
+					++result.Failed;
+					if (result.Error.empty())
+						result.Error = "cannot restore " + target.string() + ": " + copyEc.message();
+					continue;
+				}
+				if (isSource)
+					++result.Sources;
+				else
+					++result.Sidecars;
+			}
+			return result;
+		}
+
+		// M4-TEX P3:`--strip-source-textures` —— 发行包只带烘焙产物(`.wtexc`)。
+		//
+		// 事实源是**内容根**(不是 cooked 目录):逐张源图按"内容根相对路径"算出产物与源图在
+		// `cooked/cooked/` 里的落点,因此引擎着色器(`shaders/**` 来自引擎目录)、本地化、
+		// 任何非内容根产物都不可能被误删。有源图但没有产物 = 记失败并**保留**该源图
+		// (宁可包里多一张源图,也不静默删掉唯一能读的数据)。
+		// 三遍:①内容根逐张要求产物在场并删源图/sidecar;②按 cooked 里的每张 `.wtexc` 反推它的
+		// 源图+sidecar 落点(清"成对的孤儿");③清**已删资产**在 cooked 里的残留拷贝 —— 判据是
+		// "既不在内容根、也不在引擎资产树的同相对路径上",所以引擎自带内容与仍在内容根的源图都不会碰。
+		struct TextureStripResult
+		{
+			size_t Sources = 0;     // 内容根下的源图数
+			size_t Artifacts = 0;   // 确认存在、保留的 `.wtexc` 数
+			size_t Stripped = 0;    // 实际删掉的文件数(源图 + `.wtex` sidecar)
+			size_t Orphans = 0;     // 源图已不在内容根、只剩 cooked 旧拷贝的清理数(第二/三遍)
+			size_t Unattributed = 0; // 导入器产物等"非内容根源图":只审计、不删
+			size_t Failed = 0;
+			std::string Error;
+		};
+
+		TextureStripResult StripSourceTextures(const fs::path& contentRoot, const fs::path& cookedContentDir)
+		{
+			TextureStripResult result;
+			std::error_code rootEc;
+			if (!fs::is_directory(contentRoot, rootEc))
+			{
+				++result.Failed;
+				result.Error = "content root is not a directory: " + contentRoot.string();
+				return result;
+			}
+
+			// 删除这两条路径(源图 + sidecar)。不存在 = 不是错误(没设置 / 已经删过)。
+			const auto removePair = [&result](const fs::path& sourcePath, const fs::path& sidecarPath) -> size_t
+			{
+				size_t removed = 0;
+				for (const fs::path& target : { sourcePath, sidecarPath })
+				{
+					std::error_code removeEc;
+					if (fs::remove(target, removeEc))
+						++removed;
+					else if (removeEc && result.Error.empty())
+						result.Error = "cannot remove " + target.string() + ": " + removeEc.message();
+				}
+				return removed;
+			};
+
+			// 第一遍(内容根侧):逐张源图要求产物在场 —— 有源图没有产物 = 失败并保留源图。
+			std::error_code walkEc;
+			for (const fs::directory_entry& entry : fs::recursive_directory_iterator(contentRoot,
+				fs::directory_options::skip_permission_denied, walkEc))
+			{
+				if (walkEc)
+					break;
+				std::error_code fileEc;
+				if (!entry.is_regular_file(fileEc))
+					continue;
+				const std::string extension = LowercaseExtension(entry.path());
+				if (!World::TextureCompiler::IsTextureSourceExtension(extension))
+					continue;
+				++result.Sources;
+
+				std::error_code relativeEc;
+				const fs::path relative = fs::relative(entry.path(), contentRoot, relativeEc);
+				if (relativeEc || relative.empty())
+				{
+					++result.Failed;
+					if (result.Error.empty())
+						result.Error = "cannot relativize " + entry.path().string();
+					continue;
+				}
+				const std::string logical = relative.generic_string();
+				const fs::path artifactPath = cookedContentDir / (logical + ".wtexc");
+				std::error_code existsEc;
+				if (!fs::is_regular_file(artifactPath, existsEc))
+				{
+					++result.Failed;
+					if (result.Error.empty())
+						result.Error = "source texture has no baked artifact: " + logical
+							+ " (expected " + artifactPath.string() + ")";
+					continue;   // 没有产物 ⇒ 不删这张源图
+				}
+				++result.Artifacts;
+				result.Stripped += removePair(cookedContentDir / logical, cookedContentDir / (logical + ".wtex"));
+			}
+
+			// 第二遍(cooked 侧):清**孤儿**拷贝。CookPipeline 只覆盖/新增、从不回收 —— 源图被删掉后
+			// cooked 里的旧拷贝会一直留着,只扫源树就会漏掉它,发行包于是仍然带源图。这里逐张 `.wtexc`
+			// 反推它的源图 + sidecar 落点(仍是"与产物成对"的文件),因此引擎/本地化等非纹理产物不受影响。
+			std::error_code bakedWalkEc;
+			for (const fs::directory_entry& entry : fs::recursive_directory_iterator(cookedContentDir,
+				fs::directory_options::skip_permission_denied, bakedWalkEc))
+			{
+				if (bakedWalkEc)
+					break;
+				std::error_code fileEc;
+				if (!entry.is_regular_file(fileEc) || entry.path().extension() != ".wtexc")
+					continue;
+				const fs::path sourcePath = entry.path().parent_path() / entry.path().filename().stem();
+				const fs::path sidecarPath = sourcePath.parent_path()
+					/ (sourcePath.filename().string() + ".wtex");
+				const size_t removed = removePair(sourcePath, sidecarPath);
+				result.Stripped += removed;
+				result.Orphans += removed;
+			}
+
+			// 第三遍(cooked 侧**审计,不删**):上面两类之外仍留在 cooked 里的源图扩展名文件/sidecar
+			// 不是内容根的资产,而是**导入器产物** —— 例如 glTF 导入按"扁平 `models/<源 stem>.wmodel` +
+			// materials/ + textures/"布局生成 `textures/<源 stem>_0.png`,材质直接引用它。删掉它会打断
+			// 引用它的材质,所以这里只计数、告警,不越界删除。剥离的保证因此精确表述为:
+			// **内容根里的源图与 `.wtex` sidecar 不进包**(它们要么有 `.wtexc`,要么在内容根缺席)。
+			const fs::path engineAssetRoot = fs::path(WLD_WORLD_DIR) / "assets";
+			std::string unattributedSample;
+			std::error_code sweepEc;
+			for (const fs::directory_entry& entry : fs::recursive_directory_iterator(cookedContentDir,
+				fs::directory_options::skip_permission_denied, sweepEc))
+			{
+				if (sweepEc)
+					break;
+				std::error_code fileEc;
+				if (!entry.is_regular_file(fileEc))
+					continue;
+				const std::string extension = LowercaseExtension(entry.path());
+				if (extension != ".wtex" && !World::TextureCompiler::IsTextureSourceExtension(extension))
+					continue;
+				std::error_code relativeEc;
+				const fs::path relative = fs::relative(entry.path(), cookedContentDir, relativeEc);
+				if (relativeEc || relative.empty())
+					continue;
+				std::error_code existsEc;
+				if (fs::is_regular_file(contentRoot / relative, existsEc)
+					|| fs::is_regular_file(engineAssetRoot / relative, existsEc))
+					continue;
+				++result.Unattributed;
+				if (result.Unattributed <= 5)
+					unattributedSample += (unattributedSample.empty() ? "" : ", ") + relative.generic_string();
+			}
+			if (result.Unattributed)
+			{
+				WLD_CORE_WARN("[tex] {0} file(s) with texture-source extensions are importer outputs, not "
+					"content sources (kept): {1}", result.Unattributed, unattributedSample);
+			}
+			return result;
+		}
+
 		// `--cook --check` 的一次性输出目录:CookPipeline 的产物与 cook.db.json 都写进这里,
 		// 函数返回(含异常路径)时整体删除 —— check 因此不会触碰 build 树里的增量判定事实源。
 		class CookCheckScratch
@@ -545,6 +758,56 @@ namespace World::Editor
 			result.SurfaceShaders = surfaces.Shaders;
 			result.SurfaceArtifacts = surfaces.Artifacts;
 			result.ShaderArtifacts = baked.Artifacts + distribution.Artifacts + surfaces.Artifacts;
+
+			// 4d. 贴图烘焙(M4-TEX P3):内容根下的源图 + `.wtex` sidecar → `cooked/<逻辑路径>.wtexc`。
+			//     读取路径 = 内容根(与表面材质同一解析),产物落点 = 内容根相对路径 + `.wtexc`;
+			//     打包阶段(step 5)按目录遍历,`.wtexc` 自动进包(PackageProvider 不需要改)。
+			//     缓存 = `<build>/texture-cache/<源sha256>-<设置hash>-v<产物版本>.wtexc`,跨 cook 复用;
+			//     命中缓存但产物缺失时内核会补齐产物,所以"删掉 cooked/ 再 cook"也是全命中。
+			//     注意 `--check` 在 step 3 就返回(与着色器烘焙同一口径),不会走到这里。
+			const fs::path textureCacheDir = fs::absolute(std::string(WLD_OUTPUT_DIR) + "texture-cache");
+			const World::TextureBakeStats textures = World::TextureCompiler::BakeDirectory(
+				surfaceContentRoot, cookedContentDir, textureCacheDir, World::TextureBakeOptions {});
+			WLD_CORE_INFO("[tex] baked={0} uptodate={1} skipped={2} failed={3}",
+				textures.Baked, textures.UpToDate, textures.Skipped, textures.Failed);
+			// 内核把"读不了的源""没产物的源"也写进 Errors(计数在 skipped/failed 上),逐条打出来:
+			// 打包日志是用户唯一能看到的地方。
+			for (const std::string& textureError : textures.Errors)
+				WLD_CORE_ERROR("[tex] {0}", textureError);
+			if (textures.Failed)
+				throw std::runtime_error("Texture baking failed (" + std::to_string(textures.Failed)
+					+ " failed): "
+					+ (textures.Errors.empty() ? std::string("unknown error") : textures.Errors.front()));
+			result.TextureBaked = textures.Baked;
+			result.TextureUpToDate = textures.UpToDate;
+			result.TextureSkipped = textures.Skipped;
+
+			// 4d-1. 源图/sidecar 在场性自愈(见 EnsureCookedSourceCopies:剥离之后的下一次
+			//       普通 cook 必须重新带上源图,否则"默认保留源图"的开发包契约会静默失效)。
+			const CookedSourceCopyResult restored =
+				EnsureCookedSourceCopies(surfaceContentRoot, cookedContentDir);
+			WLD_CORE_INFO("[tex] restored source copies: sources={0} sidecars={1} failed={2}",
+				restored.Sources, restored.Sidecars, restored.Failed);
+			if (restored.Failed)
+				throw std::runtime_error("Restoring cooked source copies failed: " + restored.Error);
+			result.RestoredSourceCopies = restored.Sources + restored.Sidecars;
+
+			// 4e. `--strip-source-textures`(默认关):发货包只带 `.wtexc`,源图与 sidecar 从 cooked 目录删掉。
+			//     删除范围限定在"内容根映射过来的路径"内(见 StripSourceTextures),打包前一步完成。
+			if (options.StripSourceTextures)
+			{
+				const TextureStripResult stripped = StripSourceTextures(surfaceContentRoot, cookedContentDir);
+				WLD_CORE_INFO("[tex] strip-source-textures: sources={0} artifacts={1} removed={2} "
+					"(orphans={3}) unattributed={4} failed={5}",
+					stripped.Sources, stripped.Artifacts, stripped.Stripped, stripped.Orphans,
+					stripped.Unattributed, stripped.Failed);
+				if (!stripped.Error.empty())
+					WLD_CORE_ERROR("[tex] {0}", stripped.Error);
+				if (stripped.Failed)
+					throw std::runtime_error("Source texture stripping failed ("
+						+ std::to_string(stripped.Failed) + " failed): " + stripped.Error);
+				result.StrippedSourceTextures = stripped.Stripped;
+			}
 
 			// 5. 打包 cooked 产物为发行包。
 			const fs::path outPakFile = options.PublishDir / manifest.Packages[0];

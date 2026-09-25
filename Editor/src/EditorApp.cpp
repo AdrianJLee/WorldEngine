@@ -74,8 +74,10 @@ namespace World
 
 	Application* CreateApplication(World::WorldContext& context)
 	{
-		// 无窗口打包:`Editor.exe --cook <publishDir> [--scene <relative>] [--check]`。
+		// 无窗口打包:`Editor.exe --cook <publishDir> [--scene <relative>] [--check]
+		// [--languages=zh-CN,en] [--strip-source-textures]`。
 		// `--check` 只跑资产预检(含脚本编译门),不写发行目录。
+		// `--strip-source-textures`(M4-TEX P3)让发行包只带烘焙产物 `.wtexc`,不带源图与 `.wtex` sidecar。
 		// 与编辑器 Cook 按钮共用 EditorCooker,供 CI/命令行使用(不创建窗口)。
 		std::vector<std::string> arguments;
 		for (int i = 1; i < __argc; ++i)
@@ -148,6 +150,12 @@ namespace World
 					++next;
 					continue;
 				}
+				if (arguments[next] == "--strip-source-textures")
+				{
+					options.StripSourceTextures = true;
+					++next;
+					continue;
+				}
 				if (arguments[next].rfind("--languages=", 0) == 0)
 				{
 					const std::string list = arguments[next].substr(std::strlen("--languages="));
@@ -181,14 +189,18 @@ namespace World
 					languageList += ",";
 				languageList += language;
 			}
-			std::printf("[cook] publish dir: %s (languages: %s)\n", options.PublishDir.string().c_str(),
-				languageList.empty() ? "(all)" : languageList.c_str());
+			std::printf("[cook] publish dir: %s (languages: %s, strip source textures: %s)\n",
+				options.PublishDir.string().c_str(), languageList.empty() ? "(all)" : languageList.c_str(),
+				options.StripSourceTextures ? "yes" : "no");
 			const World::Editor::CookResult cooked = World::Editor::CookProject(options);
 			if (cooked.Ok)
 			{
 				std::printf("[cook] OK: %zu assets (%zu changed), %zu shader artifacts, "
+					"%zu textures (%zu baked, %zu uptodate, %zu stripped), "
 					"%zu localization files (%zu languages)\n",
 					cooked.AssetsTotal, cooked.AssetsChanged, cooked.ShaderArtifacts,
+					cooked.TextureBaked + cooked.TextureUpToDate + cooked.TextureSkipped,
+					cooked.TextureBaked, cooked.TextureUpToDate, cooked.StrippedSourceTextures,
 					cooked.LocalizationFiles, cooked.LocalizationLanguages);
 				std::exit(0);
 			}

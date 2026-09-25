@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Core/Export.h"
+#include "World/Renderer/TextureArtifact.h"
 
 #include <cstdint>
 #include <string>
@@ -24,4 +25,27 @@ namespace World
 	// 即"上传后 UV (0,0) 在左下";RHI 原生的 3D 贴图按 Vulkan/GL 共同的左上原点约定,
 	// 由调用方显式选择,避免依赖全局 stb 状态。
 	WLD_API TextureData LoadTextureData(const std::string& path, bool flipVertically = false);
+
+	// M4-TEX P2:产物优先的纹理加载结果(契约见 docs/dev/texture-import.md §7)。
+	//
+	// 解析口径与 LoadTextureData 同一套:逻辑路径 `<path>` → 先找 `<path>.wtexc`
+	// (VFS 优先、磁盘回退),命中且头/逐 mip 表自洽 ⇒ FromArtifact=true,数据由
+	// Bytes + Header.Mips 描述(每级数据 = Bytes[headerSize + offset, +size))。
+	// 没有产物 / 产物坏 / 头不合法 ⇒ FromArtifact=false,走 Source(stb RGBA8 回退,
+	// 行为与 P2 之前逐字节一致),坏产物只打一条警告,不抛异常。
+	struct WLD_API TextureAsset
+	{
+		bool FromArtifact = false;
+		TextureArtifactHeader Header {};   // FromArtifact 时有效
+		std::vector<uint8_t> Bytes;        // 完整产物(头 + 数据段);FromArtifact 时非空
+		TextureData Source;                // 回退路径的 stb 结果(FromArtifact=false 时有效)
+
+		// 第 mip 级的数据指针/字节数(越界或未命中返回 nullptr / 0)。
+		const uint8_t* MipData(uint32_t mip) const;
+		uint64_t MipSize(uint32_t mip) const;
+	};
+
+	// 产物优先:命中 <path>.wtexc 用产物(逐 mip 块数据 + 采样状态),否则回退源图。
+	// flipVertically 只作用于回退的 stb 路径 —— 产物在烘焙期已按设置定好朝向(块数据无法事后翻转)。
+	WLD_API TextureAsset LoadTextureAsset(const std::string& path, bool flipVertically = false);
 }

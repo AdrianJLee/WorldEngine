@@ -13,6 +13,9 @@ namespace World::Editor
 		std::filesystem::path PublishDir;          // 发行目录(会被创建;CheckOnly 时不创建)
 		std::filesystem::path StartSceneOverride;  // 可选:覆盖清单里的启动场景(相对内容根)
 		bool CheckOnly = false;                    // W7-2:只跑资产导入(含脚本编译门),跳过发行步骤
+		// M4-TEX P3:发行包剥离纹理源图(默认关)。开启时打包前删掉 cooked 里内容根映射过来的
+		// `.png/.jpg/.jpeg/.tga/.bmp` 与 `.wtex` sidecar,只留 `.wtexc` 产物。
+		bool StripSourceTextures = false;
 		// WLD-L10N-S2:发行包只带选中的语言(空 = 扫描 engine/project 两层目录得到的全部语言)。
 		// 语言 = 层目录下的语言子目录名(`zh-CN`、`en`…),不写死清单;编辑器层从不进游戏包。
 		std::vector<std::string> Languages;
@@ -31,6 +34,11 @@ namespace World::Editor
 		size_t SurfaceArtifacts = 0;        // Slang-T5:表面材质的 SPIR-V + 反射 JSON 产物数
 		size_t LocalizationLanguages = 0;   // WLD-L10N-S2:发行包实际带上的语言数(engine ∪ project)
 		size_t LocalizationFiles = 0;       // WLD-L10N-S2:拷贝的语言包文件数(域文件 + catalog.json)
+		size_t TextureBaked = 0;            // M4-TEX P3:本次真烘的贴图数(缓存未命中)
+		size_t TextureUpToDate = 0;         // M4-TEX P3:命中纹理缓存(源与设置都没变)的张数
+		size_t TextureSkipped = 0;          // M4-TEX P3:源图空/读不了而跳过的张数
+		size_t StrippedSourceTextures = 0;  // M4-TEX P3:剥离掉的源图 + sidecar 文件数(未开开关 = 0)
+		size_t RestoredSourceCopies = 0;    // M4-TEX P3:剥离后自愈补回的源图 + sidecar 文件数(通常 0)
 	};
 
 	// 执行一次完整打包:项目清单 → 增量烘焙 → 着色器烘焙 → 内容包 →
