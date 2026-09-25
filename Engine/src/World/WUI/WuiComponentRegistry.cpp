@@ -6,6 +6,7 @@
 #include "World/WUI/WuiCodeEditor.h"
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiTextBuffer.h"
+#include "World/WUI/WuiTexturePicker.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -918,6 +919,93 @@ namespace World::Wui
 		void ShowSearchableCombo(const WuiComponentDraw& draw)
 		{
 			ShowComboImpl(draw, "combo.searchable", "Searchable Combo", true);
+		}
+
+		// M4-TEX-P10:纹理引用的状态词 → 组件状态枚举(属性面板的 State 下拉用同一套 token)。
+		WuiTexturePickerState TexturePickerState(const std::string& text)
+		{
+			const std::string lower = TrimmedLower(text);
+			if (lower == "empty") return WuiTexturePickerState::Empty;
+			if (lower == "set") return WuiTexturePickerState::Set;
+			if (lower == "missing") return WuiTexturePickerState::Missing;
+			if (lower == "missing-source") return WuiTexturePickerState::MissingSource;
+			if (lower == "stale") return WuiTexturePickerState::Stale;
+			if (lower == "unbaked") return WuiTexturePickerState::Unbaked;
+			if (lower == "legacy") return WuiTexturePickerState::Legacy;
+			if (lower == "container") return WuiTexturePickerState::Container;
+			return WuiTexturePickerState::Auto;
+		}
+
+		// 一件纹理引用:当前值 + 徽标 + 清空/定位 + 可搜索列表(整条都是库件的真实路径)。
+		// 状态按钮 = 预设的"值 + 徽标 token";属性覆盖(Value/Badges/State/Allow*/ReadOnly)优先。
+		void ShowTexturePicker(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme themed = ThemedFor(draw, *draw.Theme);
+			float preferredWidth = 300.0f;
+			float preferredHeight = 0.0f;
+			PreferredSizeOverride(draw, preferredWidth, preferredHeight);
+			const Slot slot = Canvas(draw, *draw.Theme, preferredWidth, preferredHeight);
+			const WuiId id = BeginShowcase(draw, "wui.texture-picker", "Texture Picker", slot.Rect);
+			PseudoState pseudo(draw, id, slot.Rect);
+
+			std::string value = "textures/Icon.wtex";
+			std::string badges = "asset,container,baked";
+			if (StateIs(draw, { "empty" }))
+			{
+				value.clear();
+				badges.clear();
+			}
+			else if (StateIs(draw, { "missing" }))
+				badges = "asset,missing";
+			else if (StateIs(draw, { "missing-source" }))
+				badges = "asset,missing-source";
+			else if (StateIs(draw, { "stale" }))
+				badges = "asset,stale";
+			else if (StateIs(draw, { "unbaked" }))
+				badges = "asset,unbaked";
+			else if (StateIs(draw, { "legacy" }))
+				badges = "legacy";
+			else if (StateIs(draw, { "container" }))
+				badges = "asset,container,baked";
+			else if (StateIs(draw, { "long-text" }))
+				value = "textures/environment/props/studio_scan/Icon_from_artist_v12_final.wtex";
+			else if (StateIs(draw, { "external" }))
+				value = "C:/external/textures/Icon.png";   // 内容根外的引用(兜底条目的真实路径)
+
+			WuiTexturePickerOptions options;
+			options.Label = LocalizedText(draw, "label", "Albedo", "反照率");
+			options.IdPrefix = "showcase.wui.texture-picker";
+			options.ImportSourceName = TextProperty(draw, "ImportSourceName", "Icon.png");
+			options.Entries = {
+				{ "textures/Icon.wtex", "textures/Icon.wtex (Icon.png)", "asset,container,baked" },
+				{ "textures/quadrants.wtex", "textures/quadrants.wtex (quadrants.png)", "asset,baked" },
+				{ "textures/Icon.png", "textures/Icon.png", "source" },
+			};
+			value = TextProperty(draw, "Value", value);
+			options.Badges = TextProperty(draw, "Badges", badges);
+			options.AllowClear = BoolProperty(draw, "AllowClear", true);
+			options.AllowReveal = BoolProperty(draw, "AllowReveal", true);
+			options.AllowPick = BoolProperty(draw, "AllowPick", true);
+			options.ReadOnly = StateIs(draw, { "disabled" }) || BoolProperty(draw, "ReadOnly", false);
+			options.State = TexturePickerState(TextProperty(draw, "State", "auto"));
+			if (const std::optional<float> fontSize = FloatOverride(draw, "badgeFontSize"))
+				options.BadgeFontSize = *fontSize;
+			if (const std::optional<float> fillAlpha = FloatOverride(draw, "badgeFillAlpha"))
+				options.BadgeFillAlpha = *fillAlpha;
+			// Edit 模式:state=open 时强制展开(与 Combo/SearchableCombo 同一条同步口径);
+			// Play 模式是真实输入直通,每帧同步会把用户刚点开的弹层立刻关掉(实测过)。
+			if (!draw.RouteRealInput)
+			{
+				if (draw.State == "open" && !ctx.IsPopupOpen(id))
+					ctx.OpenPopup(id);
+				else if (draw.State != "open" && ctx.IsPopupOpen(id))
+					ctx.ClosePopup(id);
+			}
+			bool revealRequested = false;
+			options.RevealRequested = &revealRequested;
+			const bool changed = WuiTexturePicker(ctx, id, slot.Rect, value, options, themed);
+			(void)changed;   // 工作台只展示:值变化由组件的持久槽 + 属性覆盖决定
 		}
 
 		void ShowColorField(const WuiComponentDraw& draw)
@@ -2219,6 +2307,64 @@ namespace World::Wui
 				StateList({ "default", "hover", "focus", "open" }),
 				{ PropText("options", "Low,Medium,High,Ultra"), PropInt("selected", 0, 3, 1) },
 				&ShowSearchableCombo));
+
+			// M4-TEX-P10:纹理引用的**唯一实现**(概念归属表 tools/agents/wui-concept-owners.json 的
+			// owner)。面板的材质槽位 / `.slang` 参数行 / Texture Settings 都不许再自建 —— 一律走本件。
+			// 属性按 P1.5 三块 + Behavior;状态词与 a11y value 都是稳定 token(探针不读中英文文案)。
+			WuiComponentRegistry::Register(Desc(
+				"wui.texture-picker", "WuiTexturePicker", "Texture Picker", "Inputs",
+				WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiTexturePicker.cpp",
+				"role=search-combo(id=调用方 id;工作台 = HashId('showcase.wui.texture-picker'));状态节点 <IdPrefix>.state(kind=texture-ref,value=auto/empty/set/missing/missing-source/stale/unbaked/legacy/container);定位按钮 <IdPrefix>.locate;候选项 combo-option/combo-item 由 SearchableCombo 登记(搜索匹配完整逻辑路径,越界只在绘制期中间省略);只读/不可挑选时节点 enabled/interactive=false",
+				"showcase 首选 300x24;定位按钮恒定 26+6,徽标条最多占槽宽 45%(放不下的徽标不画,状态与 token 表仍在 a11y 上);列表弹层由 SearchableCombo 画在槽位上下方(空间不够自动向上翻)",
+				A11yIds({ "showcase.wui.texture-picker", "showcase.wui.texture-picker.state",
+					"showcase.wui.texture-picker.locate" }),
+				StateList({ "default", "hover", "focus", "open", "empty", "missing", "missing-source", "stale",
+					"unbaked", "legacy", "container", "external", "long-text", "disabled" }),
+				{
+					// ---- Content ----
+					Grouped(PropText("label", "Albedo"), WuiComponentPropertyGroup::Content,
+						"控件标签(a11y label + 列表搜索框的占位)。"),
+					Grouped(PropText("Value", "textures/Icon.wtex"), WuiComponentPropertyGroup::Content,
+						"当前纹理引用(逻辑路径:源图或 .wtex 资产)。不在候选清单里时补一条兜底条目,"
+						"下拉不会回显成 '(none)'。"),
+					Grouped(PropText("Badges", "asset,container,baked"), WuiComponentPropertyGroup::Content,
+						"当前值的徽标 token 表(逗号/竖线/分号分隔):asset/source/container/baked/stale/"
+						"needs-rebake/unbaked/legacy/missing/missing-source/no-source/unreadable;"
+						"未知 token 原样以中性色显示(不静默吞掉)。"),
+					Grouped(PropText("ImportSourceName", "Icon.png"), WuiComponentPropertyGroup::Content,
+						"导入源名(只用于括号里的显示与兜底条目名;值本身仍是逻辑路径)。"),
+					// ---- Style ----
+					Grouped(UnitOf(NumberDefault(PropFloat("badgeFontSize", 8.0f, 16.0f, 0.5f), 11.0f), "px"),
+						WuiComponentPropertyGroup::Style,
+						"徽标字号(未覆盖 = 11px);徽标高 = 字号 + 5,宽度按量出来的文本宽 + 10。"),
+					Grouped(NumberDefault(PropFloat("badgeFillAlpha", 0.0f, 1.0f, 0.05f), 0.22f),
+						WuiComponentPropertyGroup::Style,
+						"徽标底色透明度(未覆盖 = 0.22;文字色始终是语义色的不透明版)。"),
+					// ---- Layout ----
+					PropSize2("preferred", 300.0f, 24.0f, "首选尺寸 宽×高(设计单位;未覆盖 = 300x24)。"),
+					// ---- Behavior ----
+					Grouped(PropBool("AllowClear"), WuiComponentPropertyGroup::Behavior,
+						"列表里给 '(none)' 项,选中即清空引用(工作台上默认开)。"),
+					Grouped(PropBool("AllowReveal"), WuiComponentPropertyGroup::Behavior,
+						"右侧定位按钮(在资源管理器中显示);值空时按钮禁用并给出理由。"),
+					Grouped(PropBool("AllowPick"), WuiComponentPropertyGroup::Behavior,
+						"点击展开搜索列表;关闭 = 只展示引用(不可挑选,节点 interactive=false)。"),
+					Grouped(PropBool("ReadOnly"), WuiComponentPropertyGroup::Behavior,
+						"只读:不可挑选、不可拖放、不响应键盘,节点 enabled=false。"),
+					Grouped(PropText("State", "auto"), WuiComponentPropertyGroup::Behavior,
+						"显式状态(auto/empty/set/missing/missing-source/stale/unbaked/legacy/container);"
+						"auto = 由 Value + Badges 推导。"),
+				},
+				&ShowTexturePicker,
+				{
+					Item(WuiInteractionKind::Click, "showcase.wui.texture-picker", WuiInteractionExpect::PixelChange,
+						"点击槽位中心 → 展开搜索列表(弹层画出候选项)",
+						"候选项 label 是完整逻辑路径(资产带 '(源图名)' 后缀);越界只在绘制期中间省略"),
+					Item(WuiInteractionKind::Key, "showcase.wui.texture-picker", WuiInteractionExpect::PixelChange,
+						"Tab 到槽位 → Enter 展开;Esc 关闭",
+						"与点击同一条打开路径;焦点在槽位上时 Enter/Space 都展开"),
+				}));
 
 			WuiComponentRegistry::Register(Desc(
 				"colorfield", "ColorField", "Color Field", "Inputs", WuiComponentStatus::Draft,

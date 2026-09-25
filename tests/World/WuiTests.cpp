@@ -11,6 +11,7 @@
 #include "World/WUI/WuiLayoutStore.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiScriptedInput.h"
+#include "World/WUI/WuiTexturePicker.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiCodeEditor.h"
 #include "World/WUI/Widgets/WuiControls.h"
@@ -5129,6 +5130,273 @@ int main()
 			CHECK(foundBody);
 			accessibility.SetEnabled(false);
 			accessibility.Clear();
+		}
+
+		// 43. M4-TEX-P10:纹理引用库件 `Wui::WuiTexturePicker` —— 一条引用槽 = 当前值 + 徽标 +
+		//     清空 + 定位 + 拖放 + 可搜索列表(概念归属表的 owner;面板不许再自建)。
+		//     ① 展开 / 按完整路径过滤(命中"绘制上被省略的中段")/ 选中 / 清空;
+		//     ② 徽标与 Badges/State 入参一致(语义色 → 绘制文本;a11y value = 稳定 state token);
+		//     ③ 装得下时与直接调用 SearchableCombo 的命令流**逐字段相同**(不引入新绘制命令);
+		//     ④ 只读 / 拖放交接 / 状态推导(Auto)。
+		{
+			const WuiTheme theme;
+			const WuiRect rect { 120.0f, 120.0f, 240.0f, 24.0f };
+			const WuiId id = HashId("test.m4tex.p10.picker");
+			const std::string longPath =
+				"textures/environment/props/studio_scan/Icon_from_artist_v12_final.wtex";
+			const std::string longLabel = longPath + " (scan.png)";   // 资产条目的显示名(完整路径 + 源图名)
+			const float searchY = rect.Y + rect.H + 16.0f;   // 弹层搜索框中心(panel.Y = rect.Y+H+2,+4..+26)
+			const auto HasText = [](const std::vector<WuiDrawCommand>& commands, const std::string& text)
+			{
+				for (const WuiDrawCommand& command : commands)
+					if (command.Kind == WuiDrawKind::Text && command.Text == text)
+						return true;
+				return false;
+			};
+
+			// ---- ① 展开 → 过滤(完整路径的中段)→ 选中 → 清空 ----
+			{
+				WuiAccessibility& accessibility = WuiAccessibility::Get();
+				accessibility.SetEnabled(true);
+				WuiTexturePickerOptions options;
+				options.Label = "Albedo";
+				options.IdPrefix = "test.m4tex.p10";
+				options.NoneLabel = "(none)";
+				options.Badges = "asset,container,baked";   // 状态节点读到的是推导后的稳定 token
+				options.Entries = {
+					{ "textures/Icon.wtex", "textures/Icon.wtex (Icon.png)", "asset,container,baked" },
+					{ longPath, longLabel, "asset,baked" },
+				};
+				std::string value = "textures/Icon.wtex";
+				WuiContext ctx;
+				const auto Frame = [&](const WuiInputState& in)
+				{
+					ctx.BeginFrame(in);
+					const bool changed = WuiTexturePicker(ctx, id, rect, value, options, theme);
+					// 宿主帧末收口(EditorShell/FloatWindowHost 同款):延后的弹层命令在这一步落进 overlay 层。
+					DrawTooltip(ctx, theme);
+					ctx.EndFrame();
+					return changed;
+				};
+				// 点击槽位 = 展开搜索列表(不改值)。
+				WuiInputState click;
+				click.MousePos = { rect.X + 20.0f, rect.Y + rect.H * 0.5f };
+				click.MouseClicked[0] = true;
+				click.MouseDown[0] = true;
+				CHECK(!Frame(click));
+				CHECK(ctx.IsPopupOpen(id));
+				CHECK(value == "textures/Icon.wtex");
+				// 状态节点:一个稳定 id + 状态值(稳定 token,不是中英文文案)。
+				const WuiAccessNode* stateNode = accessibility.Find(HashId("test.m4tex.p10.state"));
+				CHECK(stateNode != nullptr);
+				CHECK(stateNode->Kind == std::string("texture-ref"));
+				CHECK(stateNode->Value == std::string("container"));
+				// 过滤词 "studio_scan" 取自完整路径的**中段**(绘制上会被中间省略的那一段)。
+				WuiInputState typing;
+				typing.MousePos = { rect.X + 20.0f, searchY };
+				for (char ch : std::string("studio_scan"))
+					typing.TextInput.push_back(static_cast<uint32_t>(static_cast<unsigned char>(ch)));
+				CHECK(!Frame(typing));
+				CHECK(ctx.IsPopupOpen(id));
+				CHECK(value == "textures/Icon.wtex");   // 过滤阶段不动值
+				// 候选项 label(读屏 / 脚本按它点选)仍是**完整**逻辑路径。
+				CHECK(accessibility.FindByLabel(longLabel, "combo-option") != nullptr);
+				// 绘制的确是"中间省略"的那一条 —— 搜索命中的正是被省略的中段。
+				// (弹层命令走 P4-U29 的延后 overlay 层:`ctx.Commands()` 是面板层,弹层在 OverlayCommands()。)
+				bool elidedDrawn = false;
+				const std::vector<WuiDrawCommand>* layers[2] = {
+					&ctx.Commands(), &ctx.OverlayCommands() };
+				for (const std::vector<WuiDrawCommand>* layer : layers)
+					for (const WuiDrawCommand& command : *layer)
+						if (command.Kind == WuiDrawKind::Text && command.Text != longLabel
+							&& command.Text.find("\xE2\x80\xA6") != std::string::npos)
+							elidedDrawn = true;
+				CHECK(elidedDrawn);
+				// 回车确认过滤后的第一项:写回的是**完整**路径(不是省略后的绘制文本)。
+				WuiInputState confirm = typing;
+				confirm.TextInput.clear();
+				confirm.KeyDown = { World::KeyCodes::Enter };
+				CHECK(Frame(confirm));
+				CHECK(value == longPath);
+				CHECK(!ctx.IsPopupOpen(id));
+				// 清空:重新展开 → 点搜索框拿焦点 → 回车选中第一条 = "(none)" → 值清空。
+				// (重新展开的那一帧弹层内的搜索框还没画过:同 SearchableCombo 的既有焦点口径,
+				//  焦点要在下一帧点进搜索框才成立 —— 面板用户路径同样如此,不属于本件的行为。)
+				CHECK(!Frame(click));
+				CHECK(ctx.IsPopupOpen(id));
+				WuiInputState focusSearch;
+				focusSearch.MousePos = { rect.X + 20.0f, searchY };
+				focusSearch.MouseClicked[0] = true;
+				focusSearch.MouseDown[0] = true;
+				CHECK(!Frame(focusSearch));
+				WuiInputState clearConfirm;
+				clearConfirm.MousePos = { rect.X + 20.0f, searchY };
+				clearConfirm.KeyDown = { World::KeyCodes::Enter };
+				CHECK(Frame(clearConfirm));
+				CHECK(value.empty());
+				CHECK(!ctx.IsPopupOpen(id));
+				accessibility.SetEnabled(false);
+				accessibility.Clear();
+			}
+
+			// ---- ② 徽标 / 状态:入参 → 绘制文本 + a11y state token ----
+			{
+				WuiAccessibility& accessibility = WuiAccessibility::Get();
+				accessibility.SetEnabled(true);
+				const auto DrawPicker = [&](const std::string& badges, const std::string& value,
+					WuiTexturePickerState state, std::vector<WuiDrawCommand>& out, std::string* stateToken)
+				{
+					WuiTexturePickerOptions options;
+					options.Label = "Albedo";
+					options.IdPrefix = "test.m4tex.p10.badge";
+					options.Entries = { { value, value, "" } };
+					options.Badges = badges;
+					options.State = state;
+					std::string mutableValue = value;
+					WuiContext ctx;
+					WuiInputState input;
+					input.MousePos = { 0.0f, 0.0f };
+					accessibility.Clear();
+					ctx.BeginFrame(input);
+					const bool changed = WuiTexturePicker(ctx, id, rect, mutableValue, options, theme);
+					ctx.EndFrame();
+					out = ctx.Commands();
+					const WuiAccessNode* node = accessibility.Find(HashId("test.m4tex.p10.badge.state"));
+					if (stateToken != nullptr)
+						*stateToken = node != nullptr ? node->Value : std::string("<missing>");
+					return changed;
+				};
+				std::vector<WuiDrawCommand> commands;
+				std::string token;
+				CHECK(!DrawPicker("asset,baked", "textures/Icon.wtex", WuiTexturePickerState::Auto,
+					commands, &token));
+				CHECK(token == std::string("set"));
+				CHECK(HasText(commands, "Asset"));
+				CHECK(HasText(commands, "Baked"));
+				CHECK(!HasText(commands, "Missing"));
+				CHECK(!DrawPicker("missing", "textures/Icon.wtex", WuiTexturePickerState::Auto,
+					commands, &token));
+				CHECK(token == std::string("missing"));
+				CHECK(HasText(commands, "Missing"));
+				// 未知 token(派工单里的 "flake")原样显示、不改变状态 —— 组件不猜调用方的标记。
+				DrawPicker("flake", "textures/Icon.wtex", WuiTexturePickerState::Auto, commands, &token);
+				CHECK(token == std::string("set"));
+				CHECK(HasText(commands, "flake"));
+				// 显式 State 优先于 token 推导(调用方知道磁盘事实)。
+				DrawPicker("", "textures/Icon.wtex", WuiTexturePickerState::Stale, commands, &token);
+				CHECK(token == std::string("stale"));
+				CHECK(HasText(commands, "Needs rebake"));
+				// 空值 = Empty(没有引用时不给任何徽标)。
+				DrawPicker("", "", WuiTexturePickerState::Auto, commands, &token);
+				CHECK(token == std::string("empty"));
+				CHECK(!HasText(commands, "Asset"));
+				accessibility.SetEnabled(false);
+				accessibility.Clear();
+			}
+
+			// ---- ③ 装得下时逐字段不变:纯列表路径与直接调用 SearchableCombo 的命令流相同 ----
+			{
+				const std::vector<std::string> directOptions {
+					"textures/Icon.wtex", "textures/Icon.png" };
+				WuiTexturePickerOptions pick;
+				pick.Label = "Albedo";
+				pick.AllowClear = false;
+				pick.AllowReveal = false;
+				pick.Entries = {
+					{ "textures/Icon.wtex", "textures/Icon.wtex", "asset,baked" },
+					{ "textures/Icon.png", "textures/Icon.png", "" },
+				};
+				std::string value = "textures/Icon.wtex";
+				int directSelected = 0;
+				WuiInputState idleInput;
+				idleInput.MousePos = { rect.X + 12.0f, rect.Y + 10.0f };
+				WuiContext pickCtx;
+				pickCtx.BeginFrame(idleInput);
+				CHECK(!WuiTexturePicker(pickCtx, id, rect, value, pick, theme));
+				pickCtx.EndFrame();
+				WuiContext directCtx;
+				directCtx.BeginFrame(idleInput);
+				CHECK(!SearchableCombo(directCtx, id, rect, "Albedo", directOptions, directSelected, theme));
+				directCtx.EndFrame();
+				const std::vector<WuiDrawCommand>& pickCommands = pickCtx.Commands();
+				const std::vector<WuiDrawCommand>& directCommands = directCtx.Commands();
+				CHECK(pickCommands.size() == directCommands.size());
+				if (pickCommands.size() == directCommands.size())
+				{
+					bool identical = true;
+					for (size_t i = 0; i < pickCommands.size(); ++i)
+					{
+						const WuiDrawCommand& a = pickCommands[i];
+						const WuiDrawCommand& b = directCommands[i];
+						identical = identical && a.Kind == b.Kind
+							&& Near(a.Rect.X, b.Rect.X) && Near(a.Rect.Y, b.Rect.Y)
+							&& Near(a.Rect.W, b.Rect.W) && Near(a.Rect.H, b.Rect.H)
+							&& SameColor(a.Color, b.Color)
+							&& Near(a.Rounding, b.Rounding) && Near(a.Thickness, b.Thickness)
+							&& a.Text == b.Text && Near(a.FontSize, b.FontSize)
+							&& a.Bold == b.Bold && a.Image == b.Image && a.Family == b.Family;
+					}
+					CHECK(identical);
+				}
+				CHECK(value == "textures/Icon.wtex");
+			}
+
+			// ---- ④ 只读 / 拖放交接 / 状态推导(Auto) ----
+			{
+				WuiAccessibility& accessibility = WuiAccessibility::Get();
+				accessibility.SetEnabled(true);
+				WuiTexturePickerOptions readOnly;
+				readOnly.Label = "Albedo";
+				readOnly.IdPrefix = "test.m4tex.p10.ro";
+				readOnly.ReadOnly = true;
+				readOnly.Entries = { { "textures/Icon.wtex", "textures/Icon.wtex", "asset,baked" } };
+				std::string value = "textures/Icon.wtex";
+				WuiInputState click;
+				click.MousePos = { rect.X + 20.0f, rect.Y + rect.H * 0.5f };
+				click.MouseClicked[0] = true;
+				click.MouseDown[0] = true;
+				WuiContext ctx;
+				ctx.BeginFrame(click);
+				CHECK(!WuiTexturePicker(ctx, id, rect, value, readOnly, theme));
+				ctx.EndFrame();
+				CHECK(!ctx.IsPopupOpen(id));            // 只读:点不开弹层
+				CHECK(value == "textures/Icon.wtex");
+				const WuiAccessNode* node = accessibility.Find(id);
+				CHECK(node != nullptr);
+				CHECK(node != nullptr && !node->Interactive && !node->Enabled);
+				accessibility.SetEnabled(false);
+				accessibility.Clear();
+
+				// 拖放交接:调用方(编辑器 AssetDropBridge)把一次投放转成逻辑路径 → 组件写值。
+				WuiTexturePickerOptions drop;
+				drop.Label = "Albedo";
+				drop.AllowReveal = false;
+				drop.AllowClear = false;
+				drop.Entries = { { "textures/Icon.png", "textures/Icon.png", "source" } };
+				drop.DroppedValue = "textures/dropped.wtex";
+				std::string dropped = "textures/Icon.png";
+				WuiContext dropCtx;
+				WuiInputState idle;
+				dropCtx.BeginFrame(idle);
+				CHECK(WuiTexturePicker(dropCtx, id, rect, dropped, drop, theme));
+				dropCtx.EndFrame();
+				CHECK(dropped == "textures/dropped.wtex");
+
+				// 状态推导(Auto):token 表 → 稳定 token;未知 token 原样返回、不改状态。
+				CHECK(WuiTexturePickerStateToken(WuiTexturePickerDeriveState("", ""))
+					== std::string("empty"));
+				CHECK(WuiTexturePickerStateToken(WuiTexturePickerDeriveState("a.wtex", "asset"))
+					== std::string("set"));
+				CHECK(WuiTexturePickerStateToken(WuiTexturePickerDeriveState("a.wtex", "asset,stale"))
+					== std::string("stale"));
+				CHECK(WuiTexturePickerStateToken(WuiTexturePickerDeriveState("a.wtex", "asset,missing-source"))
+					== std::string("missing-source"));
+				CHECK(WuiTexturePickerStateToken(WuiTexturePickerDeriveState("a.wtex", "asset,missing"))
+					== std::string("missing"));
+				CHECK(WuiTexturePickerStateToken(WuiTexturePickerDeriveState("a.wtex", "legacy"))
+					== std::string("legacy"));
+				CHECK(WuiTexturePickerBadgeText("flake") == std::string("flake"));
+			}
 		}
 
 		std::printf("World.Wui: all checks passed\n");

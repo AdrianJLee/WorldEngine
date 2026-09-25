@@ -7,5 +7,22 @@
   ],
   "wui.color.saturation_value": "饱和度 / 明度",
   "wui.color.hue": "色相",
-  "wui.color.alpha": "不透明度"
+  "wui.color.alpha": "不透明度",
+  "wui.texture-picker.label": "纹理",
+  "wui.texture-picker.none": "(无 / 清空)",
+  "wui.texture-picker.reveal": "定位",
+  "wui.texture-picker.reveal.none": "还没有可定位的纹理引用",
+  "wui.texture-picker.reveal.tooltip": "在内容浏览器里选中这张纹理并导航到它所在目录。源图与 .wtex 资产都支持。",
+  "wui.texture-picker.readonly": "只读:这里不能改这条纹理引用",
+  "wui.texture-picker.no-pick": "这条引用按原样显示;挑选入口已关闭",
+  "wui.texture-picker.badge.asset": "资产",
+  "wui.texture-picker.badge.source": "源图",
+  "wui.texture-picker.badge.container": "单文件",
+  "wui.texture-picker.badge.baked": "已烘焙",
+  "wui.texture-picker.badge.stale": "需重烘",
+  "wui.texture-picker.badge.unbaked": "未烘焙",
+  "wui.texture-picker.badge.legacy": "旧式设置",
+  "wui.texture-picker.badge.missing": "缺失",
+  "wui.texture-picker.badge.missing-source": "源图缺失",
+  "wui.texture-picker.badge.unreadable": "无法读取"
 }
