@@ -57,7 +57,7 @@ namespace World
 			// D3 材质标量(sRGB 空间颜色;标量用 vec4 承载,与 HLSL std140 布局逐字段对应)。
 			glm::vec4 MetallicRoughness { 0.0f, 0.5f, 0.0f, 0.0f };
 			glm::vec4 Emissive { 0.0f };
-			glm::vec4 Flags { 0.0f };   // x = 有 albedo, y = 有法线, z = 双面
+			glm::vec4 Flags { 0.0f };   // x = 有 albedo, y = 有法线, z = 双面, w = 法线是 BC5 产物
 			// D7-1c:视口点选用的实体 id(SV_Target1),用 int4 承载(见 hlsl 里的说明:
 			// 标量+短向量在 HLSL 与 std140 下偏移不一致)。
 			glm::ivec4 EntityId { -1, 0, 0, 0 };
@@ -634,6 +634,35 @@ namespace World
 			return draw;
 		}
 
+		// M4-TEX P2b:u_Flags.w = 法线贴图来自 BC5 产物(引擎标准着色器据此重建 Z)。
+		//  - 数据源 = MaterialTextureCache 的产物查询(回退 stb 路径恒 0 ⇒ RGBA8 行为逐字节不变);
+		//  - WLD_ENGINE_NORMAL_BC5=0 = 诊断覆盖,与包装层的 WLD_SURFACE_NORMAL_BC5 对称(A/B 抓图用)。
+		// 首次加载那一帧查询可能未命中(描述符也要下一帧才写),与既有的一帧描述符滞后同口径。
+		float NormalBc5Flag(const MaterialDesc* desc)
+		{
+			if (!desc || desc->NormalTexture.empty())
+				return 0.0f;
+			static const bool s_Disabled = []()
+			{
+				const char* value = std::getenv("WLD_ENGINE_NORMAL_BC5");
+				return value && value[0] != '\0' && std::strcmp(value, "0") == 0;
+			}();
+			if (s_Disabled)
+				return 0.0f;
+			return MaterialTextureCache::Get().IsBc5Artifact(desc->NormalTexture, /*srgb*/ false)
+				? 1.0f : 0.0f;
+		}
+
+		// M4-TEX P2b:材质贴图描述符的采样器来源 —— 产物命中时用产物头的 per-texture sampler
+		// (wrap/filter/anisotropy,已按设备上限 clamp);其余(回退 stb / 共享白纹理 / 创建失败)
+		// 继续用渲染器共享 sampler,老资产行为逐字节不变。
+		Rhi::Handle<Rhi::Sampler> TextureSamplerFor(const std::string& path, bool srgb,
+			const Rhi::Handle<Rhi::Sampler>& shared)
+		{
+			Rhi::Handle<Rhi::Sampler> sampler = MaterialTextureCache::Get().GetSampler(path, srgb);
+			return sampler ? sampler : shared;
+		}
+
 		// 在渲染通道**之外**(BeginScene)补写挂起的表面材质描述符。
 		void FlushSurfaceUpdates(State& state)
 		{
@@ -656,13 +685,13 @@ namespace World
 				albedo.Binding = 1;
 				albedo.Type = Rhi::DescriptorType::CombinedImageSampler;
 				albedo.Texture = MaterialTextureCache::Get().Get(desc.AlbedoTexture, /*srgb*/ true);
-				albedo.Sampler = state.MaterialSampler;
+				albedo.Sampler = TextureSamplerFor(desc.AlbedoTexture, /*srgb*/ true, state.MaterialSampler);
 				writes.push_back(albedo);
 				Rhi::DescriptorWrite normal;
 				normal.Binding = 2;
 				normal.Type = Rhi::DescriptorType::CombinedImageSampler;
 				normal.Texture = MaterialTextureCache::Get().Get(desc.NormalTexture, /*srgb*/ false);
-				normal.Sampler = state.MaterialSampler;
+				normal.Sampler = TextureSamplerFor(desc.NormalTexture, /*srgb*/ false, state.MaterialSampler);
 				writes.push_back(normal);
 				// 注解声明的贴图参数:绑定 = 反射到的 slot(t4..t11);没赋值 → 默认白贴图。
 				// 着色器**静态**使用这些槽,不写描述符在 Vulkan 下是 VUID-vkCmdDrawIndexed-None-08600。
@@ -675,7 +704,8 @@ namespace World
 					// 目前没有区分入口 —— 需要时由主 agent 决定加注解字段)。
 					write.Texture = MaterialTextureCache::Get().Get(material->ResolvedParamValue(texture.Name),
 						/*srgb*/ true);
-					write.Sampler = state.MaterialSampler;
+					write.Sampler = TextureSamplerFor(material->ResolvedParamValue(texture.Name),
+						/*srgb*/ true, state.MaterialSampler);
 					writes.push_back(write);
 				}
 				set->Update(writes);
@@ -723,7 +753,7 @@ namespace World
 					desc->AlbedoTexture.empty() ? 0.0f : 1.0f,
 					desc->NormalTexture.empty() ? 0.0f : 1.0f,
 					desc->DoubleSided ? 1.0f : 0.0f,
-					0.0f };
+					NormalBc5Flag(desc) };
 			}
 			else
 			{
@@ -798,12 +828,12 @@ namespace World
 				albedo.Binding = 1;
 				albedo.Type = Rhi::DescriptorType::CombinedImageSampler;
 				albedo.Texture = MaterialTextureCache::Get().Get(desc.AlbedoTexture, /*srgb*/ true);
-				albedo.Sampler = state.MaterialSampler;
+				albedo.Sampler = TextureSamplerFor(desc.AlbedoTexture, /*srgb*/ true, state.MaterialSampler);
 				Rhi::DescriptorWrite normal;
 				normal.Binding = 2;
 				normal.Type = Rhi::DescriptorType::CombinedImageSampler;
 				normal.Texture = MaterialTextureCache::Get().Get(desc.NormalTexture, /*srgb*/ false);
-				normal.Sampler = state.MaterialSampler;
+				normal.Sampler = TextureSamplerFor(desc.NormalTexture, /*srgb*/ false, state.MaterialSampler);
 				gpu.Sets[slot]->Update({ albedo, normal });
 				gpu.Revision[slot] = material->GetRevision();
 			}
@@ -901,7 +931,7 @@ namespace World
 					desc->AlbedoTexture.empty() ? 0.0f : 1.0f,
 					desc->NormalTexture.empty() ? 0.0f : 1.0f,
 					desc->DoubleSided ? 1.0f : 0.0f,
-					0.0f };
+					NormalBc5Flag(desc) };
 			}
 			else
 			{
@@ -1061,12 +1091,12 @@ namespace World
 			albedo.Binding = 1;
 			albedo.Type = Rhi::DescriptorType::CombinedImageSampler;
 			albedo.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ true);
-			albedo.Sampler = state.MaterialSampler;
+			albedo.Sampler = TextureSamplerFor(std::string(), /*srgb*/ true, state.MaterialSampler);
 			Rhi::DescriptorWrite normal;
 			normal.Binding = 2;
 			normal.Type = Rhi::DescriptorType::CombinedImageSampler;
 			normal.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ false);
-			normal.Sampler = state.MaterialSampler;
+			normal.Sampler = TextureSamplerFor(std::string(), /*srgb*/ false, state.MaterialSampler);
 			state.DefaultMaterialSets[slot]->Update({ albedo, normal });
 		}
 
@@ -1098,12 +1128,12 @@ namespace World
 				albedo.Binding = 1;
 				albedo.Type = Rhi::DescriptorType::CombinedImageSampler;
 				albedo.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ true);
-				albedo.Sampler = state.MaterialSampler;
+				albedo.Sampler = TextureSamplerFor(std::string(), /*srgb*/ true, state.MaterialSampler);
 				Rhi::DescriptorWrite normal;
 				normal.Binding = 2;
 				normal.Type = Rhi::DescriptorType::CombinedImageSampler;
 				normal.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ false);
-				normal.Sampler = state.MaterialSampler;
+				normal.Sampler = TextureSamplerFor(std::string(), /*srgb*/ false, state.MaterialSampler);
 				std::vector<Rhi::DescriptorWrite> writes { albedo, normal };
 				for (uint32_t index = 0; index < kMaxMaterialTextureSlots; ++index)
 				{
@@ -1111,7 +1141,7 @@ namespace World
 					texture.Binding = ParamTextureBaseBinding() + index;
 					texture.Type = Rhi::DescriptorType::CombinedImageSampler;
 					texture.Texture = MaterialTextureCache::Get().Get(std::string(), /*srgb*/ true);
-					texture.Sampler = state.MaterialSampler;
+					texture.Sampler = TextureSamplerFor(std::string(), /*srgb*/ true, state.MaterialSampler);
 					writes.push_back(texture);
 				}
 				state.SurfaceDefaultSets[slot]->Update(writes);
@@ -1780,7 +1810,7 @@ namespace World
 				desc->AlbedoTexture.empty() ? 0.0f : 1.0f,
 				desc->NormalTexture.empty() ? 0.0f : 1.0f,
 				desc->DoubleSided ? 1.0f : 0.0f,
-				0.0f };
+				NormalBc5Flag(desc) };
 		}
 		else
 		{

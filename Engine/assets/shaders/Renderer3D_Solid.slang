@@ -106,7 +106,7 @@ struct GpuLight
     // D3 材质标量(sRGB 空间颜色;标量用 float4 承载,与 C++ std140 布局严格一致)。
     float4 u_MetallicRoughness;   // x = metallic, y = roughness
     float4 u_Emissive;            // rgb = emissive
-    float4 u_Flags;               // x = 有 albedo 贴图, y = 有法线贴图, z = 双面
+    float4 u_Flags;               // x = 有 albedo 贴图, y = 有法线贴图, z = 双面, w = 法线是 BC5 产物(重建 Z)
     // P1b D7-1c:视口点选用的实体 id(写进 SV_Target1);-1 = 不可拾取。
     // 用 int4 而不是 int/int3:标量+短向量在 HLSL 与 std140 下的偏移不一致,
     // GL 的 SPIR-V 环境(std140)不接受这种块布局(旧 GLSL 路径同样拒绝过)。
@@ -263,7 +263,14 @@ PS_OUTPUT PSMain(VS_OUTPUT input)
         const float3 tangent = normalize(dpdx * duvdy.y - dpdy * duvdx.y + 1e-6f);
         const float3 bitangent = normalize(cross(normal, tangent));
         const float3 sampled = u_NormalTexture.Sample(input.v_TexCoord).xyz * 2.0f - 1.0f;
-        normal = normalize(tangent * sampled.x + bitangent * sampled.y + normal * sampled.z);
+        // M4-TEX P2b:BC5(RGTC2)只存 X/Y,第三通道恒为 -1;u_Flags.w = 法线贴图来自 BC5 产物
+        // (Renderer3D 的 NormalBc5Flag)时按切线空间单位向量重建 Z。w = 0(含全部 RGBA8 源图/
+        // 回退路径)保持今天的 xyz 解码逐值不变。约定见 docs/dev/shader-contract.md 法线段。
+        const float3 tangentNormal = u_Flags.w > 0.5f
+            ? float3(sampled.xy, sqrt(saturate(1.0f - dot(sampled.xy, sampled.xy))))
+            : sampled;
+        normal = normalize(tangent * tangentNormal.x + bitangent * tangentNormal.y
+            + normal * tangentNormal.z);
     }
 
     // P1b D4:环境项 + 方向光/点光(Lambert + 以 metallic/roughness 调的简化高光)

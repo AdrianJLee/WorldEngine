@@ -128,18 +128,27 @@ GL 口径:描述符绑定单元 = `binding`(**忽略 set**),所以 UBO 单元占
 `0=相机、1=物体、2=灯光、3=骨骼、4=材质参数` —— 新加 UBO 必须避开这五个;贴图走 GL 纹理单元,
 与 UBO 不同命名空间。
 
-**法线贴图的格式约定(M4-TEX P2,2026-09-25)**:材质法线槽(`u_NormalTexture`,set 2 binding 2)
+**法线贴图的格式约定(M4-TEX P2/P2b,2026-09-25)**:材质法线槽(`u_NormalTexture`,set 2 binding 2)
 可以是 RGBA8 源图,也可以是烘焙产物 `.wtexc` 里的 **BC5(RGTC2)**。BC5 只存 **`R=X` / `G=Y`**,
-包装层按 `z = sqrt(saturate(1 - x² - y²))` 重建 Z(与 UE / Unity 的切线空间法线约定一致)。
-重建由包装层的编译期开关 `WE_NORMAL_TEXTURE_BC5` 控制:排列键里带 `normal-bc5` 记号即打开
-(`WLD_SURFACE_NORMAL_BC5=1` 是诊断覆盖,用于同一材质开/关的 A/B 抓图);默认 `0`
-= 与 RGBA8 时代**完全相同**的采样路径(块数据不解码到 CPU,重建必须在着色器里做)。
-实现见 `Engine/src/World/Renderer/MaterialSurface.cpp` 的 `ResolveShadingNormal`。
-BC5 打开时重建出的 Z **参与合并**(`z = surface.Normal.z * z_reconstructed`;默认权重 1);
-而 RGBA8 的既有实现在合并时把 z 直接写成 `surface.Normal.z`(默认 1)= **忽略采样到的 Z**
-(法线被压平)。这是 P2 之前就有的行为,按验收口径**未改动** —— 也就是说:
-同一张法线贴图写成 RGBA8 与烘成 BC5,在包装层里的 Z 口径目前不一致;
-统一(把 RGBA8 也改成用采样 Z)会改变既有输出,属于新范围,需要单独确认。
+两条消费路径都按 `z = sqrt(saturate(1 - x² - y²))` 重建 Z(与 UE / Unity 的切线空间法线约定一致):
+
+- **引擎标准着色器**(没有发布表面管线的材质,v1 材质与未接包装层的 v2 材质):
+  `Renderer3D_Solid.slang` 的 `u_Flags.y` 分支在采样后看 **`u_Flags.w`** —— 打包点 =
+  `Renderer3D.cpp` 的三处 `uniforms.Flags = {…}`(逐物体 / 蒙皮 / 实例化),数据源 =
+  `MaterialTextureCache::IsBc5Artifact(path, srgb=false)`(产物头 `Format == Bc5`)。产物命中即
+  重建;**回退 stb 路径恒 `w=0`**,xyz 解码与旧版逐值相同。诊断覆盖 `WLD_ENGINE_NORMAL_BC5=0`
+  可强制关闭(A/B 抓图),与包装层的 `WLD_SURFACE_NORMAL_BC5` 对称。
+- **包装层**(用材质着色器的材质):编译期开关 `WE_NORMAL_TEXTURE_BC5` —— 排列键里带
+  `normal-bc5` 记号即打开(`WLD_SURFACE_NORMAL_BC5=1` 是诊断覆盖);默认 `0` = 与 RGBA8 时代
+  **完全相同**的采样路径。打开时重建的 Z **参与合并**(`z = surface.Normal.z * z_reconstructed`;
+  默认权重 1)。实现见 `Engine/src/World/Renderer/MaterialSurface.cpp` 的 `ResolveShadingNormal`。
+
+块数据不解码到 CPU,重建必须在着色器里做。**Z 口径的已知差异(有意保留,未改)**:包装层的
+RGBA8 既有实现在合并时把 z 写成 `surface.Normal.z`(=1)⇒ **忽略采样 Z**;引擎标准着色器与
+包装层的 BC5 分支用采样/重建的 Z。同一张法线贴图写成 RGBA8 与烘成 BC5,包装层里的输出本就
+不同。统一(把包装层 RGBA8 也改成用采样 Z)会改变既有输出与像素基线,属于新范围,需要单独确认。
+**采样状态**同样来自产物头:P2b 起产物命中时用 per-texture 采样器(wrap/filter/anisotropy,
+按设备上限 clamp),回退路径继续用渲染器共享 sampler;见 `docs/dev/texture-import.md` §7。
 
 ## 6. `//! param` 注解语法
 
@@ -267,8 +276,7 @@ Surface Evaluate(MaterialInputs input)
 - 材质表面着色器的 **OpenGL 实时预览**尚未接入(`MaterialSurfaceRuntime::Install` 目前只允许 Vulkan),
   归 M4-S4;GL 产物本身(`spirv-val --target-env opengl4.5` = 0、SPIR-V 1.0)已经就绪。
 - `OriginUpperLeft`(Vulkan)与 GL lower-left 在 derivative/法线贴图上的差异还没有含法线贴图的门禁用例。
-- BC5 法线重建目前只接在**包装层**(用材质着色器的材质,M4-TEX P2)。引擎标准着色器
-  [`Renderer3D_Solid.slang`](../../Engine/assets/shaders/Renderer3D_Solid.slang) 的法线采样
-  (`u_Flags.y` 分支)还没有 BC5 重建 —— 那条路径要用 `u_Flags.w`(当前空闲)或一个 `#define` 补同样的
-  `z = sqrt(saturate(1 - x² - y²))`,接线点分别是该 shader 与 `Renderer3D.cpp` 的 `u_Flags` 打包处。
-  未接线前,把 BC5 产物用在标准材质法线槽会得到 z≈-1 的退化法线(光照错误)。
+- BC5 法线重建已接**两条**路径(引擎标准着色器 `u_Flags.w` + 包装层 `WE_NORMAL_TEXTURE_BC5`,
+  M4-TEX P2b)。**包装层的排列键还没有产品接线**:`normal-bc5` 记号目前只有诊断 env 会置位,
+  编译调用点(`MaterialParams.cpp` / `MaterialSurfaceRuntime`)不在 P2b 的文件边界内,归主 agent
+  决定(在此之前,用材质着色器 + BC5 法线的材质需要 `WLD_SURFACE_NORMAL_BC5=1` 才重建 Z)。
