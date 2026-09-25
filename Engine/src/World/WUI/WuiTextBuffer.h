@@ -86,6 +86,10 @@ namespace World::Wui
 		// Shift+Tab 反缩进当前行。
 		void IndentSelection(bool outdent);
 		bool Paste(std::string_view text);
+		// MAT-UI6a:把 [start,end) 换成 text(单次撤销步:替换全部也只算一步,Ctrl+Z 一次回到替换前)。
+		// 两端会被夹到 [0,size] 并对齐码点边界;text 为空 = 纯删除。结果与原文相同 → 不改动、返回 false。
+		// caret/anchor 落到插入内容之后。
+		bool ReplaceRange(size_t start, size_t end, std::string_view text);
 
 		// ---- 导航 ----
 		// pageLines:PageUp/PageDown 一次翻过的行数(宿主按视口高度传入,至少 1)。

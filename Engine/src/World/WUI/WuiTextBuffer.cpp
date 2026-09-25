@@ -275,6 +275,20 @@ namespace World::Wui
 		CommitEdit(EditKind::Insert, m_Caret, std::string(), std::string(text), caretAfter, caretAfter);
 	}
 
+	bool WuiTextBuffer::ReplaceRange(size_t start, size_t end, std::string_view text)
+	{
+		start = ClampOffset(std::min(start, m_Text.size()));
+		end = ClampOffset(std::max(end, start));
+		const std::string_view erased(m_Text.data() + start, end - start);
+		if (erased.empty() && text.empty())
+			return false;
+		if (erased == text)
+			return false;
+		const size_t caretAfter = start + text.size();
+		CommitEdit(EditKind::Replace, start, std::string(erased), std::string(text), caretAfter, caretAfter);
+		return true;
+	}
+
 	void WuiTextBuffer::Backspace()
 	{
 		if (HasSelection())

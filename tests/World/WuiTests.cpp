@@ -4016,6 +4016,346 @@ int main()
 			ctxOverride.EndFrame();
 		}
 
+		// 34. MAT-UI6a:查找匹配器口径(大小写 / 全词 / 计数 / 空查询 / UTF-8)。
+		//     查找条计数与上下跳、同词高亮共用这一份实现(不复制匹配逻辑)。
+		{
+			const std::string text = "Tint tint Tint2 TINt\n";
+			// 大小写不敏感(默认)、非全词:0 / 5 / 10 / 16 四处。
+			const std::vector<WuiCodeFindMatch> insensitive = FindCodeMatches(text, "tint", {});
+			CHECK(insensitive.size() == 4);
+			if (insensitive.size() == 4)
+			{
+				CHECK(insensitive[0].Start == 0 && insensitive[0].End == 4);
+				CHECK(insensitive[1].Start == 5 && insensitive[1].End == 9);
+				CHECK(insensitive[2].Start == 10 && insensitive[2].End == 14);
+				CHECK(insensitive[3].Start == 16 && insensitive[3].End == 20);
+			}
+			// 全词:排除 "Tint2" 里的前缀 → 3 处。
+			CHECK(FindCodeMatches(text, "tint", { false, true }).size() == 3);
+			// 区分大小写:小写针只剩 5(全小写那处)—— "Tint"/"TINt" 都不算;
+			// 换成大写针 "Tint" 则是 0 与 10("Tint2" 的前缀)。两条一起证明大小写口径真的生效。
+			const std::vector<WuiCodeFindMatch> sensitive = FindCodeMatches(text, "tint", { true, false });
+			CHECK(sensitive.size() == 1);
+			if (sensitive.size() == 1)
+				CHECK(sensitive[0].Start == 5 && sensitive[0].End == 9);
+			const std::vector<WuiCodeFindMatch> sensitiveUpper = FindCodeMatches(text, "Tint", { true, false });
+			CHECK(sensitiveUpper.size() == 2);
+			if (sensitiveUpper.size() == 2)
+				CHECK(sensitiveUpper[0].Start == 0 && sensitiveUpper[1].Start == 10);
+			// 空查询 / 超长查询 → 空表(空输入不该"命中全文")。
+			CHECK(FindCodeMatches(text, "", {}).empty());
+			CHECK(FindCodeMatches(text, std::string(200, 'x'), {}).empty());
+			// UTF-8:按字节偏移返回,不拆码点。
+			const std::string cjk = "颜色 Tint 颜色";
+			const std::vector<WuiCodeFindMatch> cjkMatches = FindCodeMatches(cjk, "颜色", {});
+			CHECK(cjkMatches.size() == 2);
+			if (cjkMatches.size() == 2)
+			{
+				CHECK(cjkMatches[0].Start == 0 && cjkMatches[0].End == 6);
+				CHECK(cjkMatches[1].Start == 12 && cjkMatches[1].End == 18);
+			}
+		}
+
+		// 35. MAT-UI6a:查找上下跳的换行边界(下一个 = Start >= from,没有则回绕到第一个;上一个反之)。
+		{
+			const std::vector<WuiCodeFindMatch> matches = { { 0, 3 }, { 10, 13 } };
+			CHECK(NextCodeMatchIndex(matches, 0) == 0);
+			CHECK(NextCodeMatchIndex(matches, 3) == 1);
+			// 口径 = "第一个 Start >= from":from 落在命中中间(12)时没有满足的命中 → 回绕到第一个。
+			// (导航路径传的 from 是当前选区的 start/end,所以"选中一个命中再按下一个"永远是下一个。)
+			CHECK(NextCodeMatchIndex(matches, 12) == 0);
+			CHECK(NextCodeMatchIndex(matches, 13) == 0);      // 末尾之后再下一个 → 回绕到第一个
+			CHECK(NextCodeMatchIndex(matches, 9999) == 0);    // 越界也是回绕,不是 -1
+			CHECK(PrevCodeMatchIndex(matches, 0) == 1);       // 开头之前再上一个 → 回绕到最后一个
+			CHECK(PrevCodeMatchIndex(matches, 10) == 0);
+			CHECK(PrevCodeMatchIndex(matches, 13) == 1);
+			CHECK(NextCodeMatchIndex({}, 0) == -1);
+			CHECK(PrevCodeMatchIndex({}, 0) == -1);
+		}
+
+		// 36. MAT-UI6a:会话缩放 —— Ctrl+滚轮 0.05 步进(生效字号 = FontSize × 缩放)、
+		//     上下夹到 [0.5,3.0]、Ctrl+0 复位 1.0;全程不碰任何偏好文件(内核只回报)。
+		{
+			WuiContext ctx;
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+			const WuiRect editor { 0.0f, 0.0f, 300.0f, 120.0f };
+			const WuiId id = HashId("test.mat-ui6a.zoom");
+			WuiTextBuffer buffer;
+			buffer.SetText("local x = 1\n");
+			WuiCodeEditorOptions options;
+			options.FontSize = 14.0f;
+			options.LineHeight = 20.0f;
+			ctx.BeginFrame(idle);
+			ctx.SetFocus(id);
+			const WuiCodeEditorResult initial = CodeEditor(ctx, id, editor, buffer, options);
+			CHECK(!initial.ZoomChanged && Near(initial.UiZoom, 1.0f));
+			ctx.EndFrame();
+
+			// Ctrl+滚轮向上 3 格 = +0.15;回报本轮新值(本帧字号仍是旧值,下一帧起生效)。
+			WuiInputState zoomIn = idle;
+			zoomIn.Ctrl = true;
+			zoomIn.MousePos = { 40.0f, 60.0f };
+			zoomIn.Wheel = 3.0f;
+			ctx.BeginFrame(zoomIn);
+			ctx.SetFocus(id);
+			const WuiCodeEditorResult zoomed = CodeEditor(ctx, id, editor, buffer, options);
+			CHECK(zoomed.ZoomChanged && Near(zoomed.UiZoom, 1.15f));
+			ctx.EndFrame();
+			ctx.BeginFrame(idle);
+			ctx.SetFocus(id);
+			CodeEditor(ctx, id, editor, buffer, options);
+			float drawnFontSize = 0.0f;
+			for (const WuiDrawCommand& command : ctx.Commands())
+				if (command.Kind == WuiDrawKind::Text)
+					drawnFontSize = std::max(drawnFontSize, command.FontSize);
+			ctx.EndFrame();
+			CHECK(Near(drawnFontSize, 14.0f * 1.15f));
+
+			// 上限夹取:连续放大 60 格 → 停在 3.0(不回绕、不溢出)。
+			float lastZoom = 0.0f;
+			for (int step = 0; step < 60; ++step)
+			{
+				WuiInputState wheel = idle;
+				wheel.Ctrl = true;
+				wheel.MousePos = { 40.0f, 60.0f };
+				wheel.Wheel = 1.0f;
+				ctx.BeginFrame(wheel);
+				ctx.SetFocus(id);
+				lastZoom = CodeEditor(ctx, id, editor, buffer, options).UiZoom;
+				ctx.EndFrame();
+			}
+			CHECK(Near(lastZoom, kCodeEditorZoomMax));
+			// 下限夹取:连续缩小 120 格 → 停在 0.5。
+			for (int step = 0; step < 120; ++step)
+			{
+				WuiInputState wheel = idle;
+				wheel.Ctrl = true;
+				wheel.MousePos = { 40.0f, 60.0f };
+				wheel.Wheel = -1.0f;
+				ctx.BeginFrame(wheel);
+				ctx.SetFocus(id);
+				lastZoom = CodeEditor(ctx, id, editor, buffer, options).UiZoom;
+				ctx.EndFrame();
+			}
+			CHECK(Near(lastZoom, kCodeEditorZoomMin));
+			// Ctrl+0:复位到 1.0(= 基础字号回到偏好值)。
+			WuiInputState reset = idle;
+			reset.Ctrl = true;
+			reset.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::D0) };
+			ctx.BeginFrame(reset);
+			ctx.SetFocus(id);
+			const WuiCodeEditorResult resetResult = CodeEditor(ctx, id, editor, buffer, options);
+			CHECK(resetResult.ZoomChanged && Near(resetResult.UiZoom, 1.0f));
+			ctx.EndFrame();
+		}
+
+		// 37. MAT-UI6a:查找条(Ctrl+F 打开 → 真实输入 → 计数/当前命中 → Enter/Shift+Enter →
+		//     Esc 关条还焦点;a11y 稳定 id 与同词高亮状态节点)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiRect editor { 0.0f, 0.0f, 420.0f, 160.0f };
+			const WuiId id = HashId("test.mat-ui6a.find");
+			const WuiId findId = HashId("code-editor.find");
+			WuiTextBuffer buffer;
+			buffer.SetText("local tint = 1\ntint = tint + 1\n");
+			WuiCodeEditorOptions options;
+			WuiContext ctx;
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+			const auto Paint = [&](const WuiInputState& in) -> WuiCodeEditorResult
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(in);
+				const WuiCodeEditorResult painted = CodeEditor(ctx, id, editor, buffer, options);
+				ctx.EndFrame();
+				return painted;
+			};
+			Paint(idle);
+			CHECK(accessibility.Find(findId) == nullptr);   // 未打开时没有查找条节点
+			// 先点进代码区(真实聚焦路径),再 Ctrl+F。
+			WuiInputState focusClick = idle;
+			focusClick.MousePos = { 30.0f, 5.0f };
+			focusClick.MouseClicked[0] = true;
+			focusClick.MouseDown[0] = true;
+			Paint(focusClick);
+			CHECK(ctx.Focus() == id);
+			WuiInputState releaseClick = idle;
+			releaseClick.MousePos = focusClick.MousePos;
+			releaseClick.MouseReleased[0] = true;
+			Paint(releaseClick);
+			buffer.SetCaret(0);   // 锚点固定:查找从文档头开始挑第一个命中
+
+			WuiInputState open = idle;
+			open.Ctrl = true;
+			open.KeyDown = { static_cast<uint32_t>(World::KeyCodes::F) };
+			open.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::F) };
+			Paint(open);
+			CHECK(ctx.Focus() == findId);
+			CHECK(accessibility.Find(findId) != nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.status")) != nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.prev")) != nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.next")) != nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.close")) != nullptr);
+
+			// 输入 "tint"(焦点在查找框 → 走真实 TextField 路径);下一帧重扫并选中第一个命中。
+			WuiInputState type = idle;
+			type.TextInput = { 't', 'i', 'n', 't' };
+			Paint(type);
+			CHECK(ctx.Focus() == findId);
+			Paint(idle);
+			{
+				const auto [selStart, selEnd] = buffer.Selection();
+				CHECK(selStart == 6 && selEnd == 10);
+			}
+			const WuiAccessNode* status = accessibility.Find(HashId("code-editor.find.status"));
+			CHECK(status != nullptr && status->Value == "1/3");
+			const WuiAccessNode* occurrences = accessibility.Find(HashId("code-editor.occurrences"));
+			CHECK(occurrences != nullptr && occurrences->Value == "3 occurrences: tint");
+
+			// Enter = 下一个(回车后焦点留在查找框,可以连按);Shift+Enter = 上一个。
+			WuiInputState enterNext = idle;
+			enterNext.KeyDown = { static_cast<uint32_t>(World::KeyCodes::Enter) };
+			enterNext.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Enter) };
+			Paint(enterNext);
+			CHECK(ctx.Focus() == findId);
+			{
+				const auto [selStart, selEnd] = buffer.Selection();
+				CHECK(selStart == 15 && selEnd == 19);
+			}
+			WuiInputState enterPrev = idle;
+			enterPrev.Shift = true;
+			enterPrev.KeyDown = { static_cast<uint32_t>(World::KeyCodes::Enter) };
+			enterPrev.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Enter) };
+			Paint(enterPrev);
+			{
+				const auto [selStart, selEnd] = buffer.Selection();
+				CHECK(selStart == 6 && selEnd == 10);
+			}
+			// F3 与 Enter 同一条导航(不需要输入焦点在查找框里;Shift+F3 = 上一个)。
+			WuiInputState f3 = idle;
+			f3.KeyDown = { static_cast<uint32_t>(World::KeyCodes::F3) };
+			f3.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::F3) };
+			Paint(f3);
+			CHECK(buffer.Selection().first == 15);
+
+			// Esc:关条 + 焦点还给代码区(当帧仍画着那条,下一帧起 a11y 节点消失)。
+			WuiInputState escape = idle;
+			escape.KeyDown = { static_cast<uint32_t>(World::KeyCodes::Escape) };
+			escape.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Escape) };
+			Paint(escape);
+			CHECK(ctx.Focus() == id);
+			Paint(idle);
+			CHECK(accessibility.Find(findId) == nullptr);
+
+			// Ctrl+Shift+F 是宿主的"格式化"键位(脚本编辑器 / 材质代码列都占用):
+			// 内核只在**不带 Shift** 时把 Ctrl+F 当查找,别把宿主的快捷键吃掉。
+			WuiInputState ctrlShiftF = idle;
+			ctrlShiftF.Ctrl = true;
+			ctrlShiftF.Shift = true;
+			ctrlShiftF.KeyDown = { static_cast<uint32_t>(World::KeyCodes::F) };
+			ctrlShiftF.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::F) };
+			Paint(ctrlShiftF);
+			CHECK(accessibility.Find(findId) == nullptr);
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
+		// 38. MAT-UI6a:Ctrl+H 全部替换(一次区间替换 = 一步撤销)+ 条内 Ctrl+Z 复原。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiRect editor { 0.0f, 0.0f, 420.0f, 160.0f };
+			const WuiId id = HashId("test.mat-ui6a.replace");
+			const WuiId findId = HashId("code-editor.find");
+			const WuiId replaceFieldId = HashId("code-editor.replace");
+			const std::string original = "local tint = 1\ntint = tint + 1\n";
+			WuiTextBuffer buffer;
+			buffer.SetText(original);
+			WuiCodeEditorOptions options;
+			WuiContext ctx;
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+			const auto Paint = [&](const WuiInputState& in) -> WuiCodeEditorResult
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(in);
+				const WuiCodeEditorResult painted = CodeEditor(ctx, id, editor, buffer, options);
+				ctx.EndFrame();
+				return painted;
+			};
+			// 聚焦代码区 → Ctrl+H(带替换行)。
+			Paint(idle);
+			WuiInputState focusClick = idle;
+			focusClick.MousePos = { 30.0f, 5.0f };
+			focusClick.MouseClicked[0] = true;
+			focusClick.MouseDown[0] = true;
+			Paint(focusClick);
+			CHECK(ctx.Focus() == id);
+			WuiInputState releaseClick = idle;
+			releaseClick.MousePos = focusClick.MousePos;
+			releaseClick.MouseReleased[0] = true;
+			Paint(releaseClick);
+			buffer.SetCaret(0);
+			WuiInputState openReplace = idle;
+			openReplace.Ctrl = true;
+			openReplace.KeyDown = { static_cast<uint32_t>(World::KeyCodes::H) };
+			openReplace.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::H) };
+			Paint(openReplace);
+			CHECK(ctx.Focus() == findId);
+			CHECK(accessibility.Find(replaceFieldId) != nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.replace")) != nullptr);
+			CHECK(accessibility.Find(HashId("code-editor.find.replace_all")) != nullptr);
+			// 查询 "tint"(3 处,大小写不敏感)。
+			WuiInputState typeQuery = idle;
+			typeQuery.TextInput = { 't', 'i', 'n', 't' };
+			Paint(typeQuery);
+			Paint(idle);
+			CHECK(buffer.Selection().first == 6 && buffer.Selection().second == 10);
+			// 点替换输入框(用 a11y 节点矩形 = 脚本/用户真正能点到的地方),输入 "0"。
+			const WuiAccessNode* replaceNode = accessibility.Find(replaceFieldId);
+			CHECK(replaceNode != nullptr);
+			const glm::vec2 replacePoint { replaceNode->Rect.X + replaceNode->Rect.W * 0.5f,
+				replaceNode->Rect.Y + replaceNode->Rect.H * 0.5f };
+			WuiInputState clickReplace = idle;
+			clickReplace.MousePos = replacePoint;
+			clickReplace.MouseClicked[0] = true;
+			clickReplace.MouseDown[0] = true;
+			Paint(clickReplace);
+			CHECK(ctx.Focus() == replaceFieldId);
+			WuiInputState releaseReplace = idle;
+			releaseReplace.MousePos = replacePoint;
+			releaseReplace.MouseReleased[0] = true;
+			Paint(releaseReplace);
+			WuiInputState typeReplace = idle;
+			typeReplace.TextInput = { '0' };
+			Paint(typeReplace);
+			// 点 "All" → 全部替换(一步撤销)。
+			const WuiAccessNode* allNode = accessibility.Find(HashId("code-editor.find.replace_all"));
+			CHECK(allNode != nullptr);
+			WuiInputState clickAll = idle;
+			clickAll.MousePos = { allNode->Rect.X + allNode->Rect.W * 0.5f,
+				allNode->Rect.Y + allNode->Rect.H * 0.5f };
+			clickAll.MouseClicked[0] = true;
+			clickAll.MouseDown[0] = true;
+			const WuiCodeEditorResult replaced = Paint(clickAll);
+			CHECK(replaced.Changed);
+			CHECK(buffer.Text() == "local 0 = 1\n0 = 0 + 1\n");
+			// 条内 Ctrl+Z:一次撤销回到替换前(整批替换 = 一步)。
+			WuiInputState undo = idle;
+			undo.Ctrl = true;
+			undo.KeyDown = { static_cast<uint32_t>(World::KeyCodes::Z) };
+			undo.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Z) };
+			const WuiCodeEditorResult undone = Paint(undo);
+			CHECK(undone.Changed);
+			CHECK(buffer.Text() == original);
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}
