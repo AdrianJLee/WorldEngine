@@ -299,9 +299,18 @@ namespace World
 				"Same starting code plus a block of `//! param` declarations that show every type "
 				"(float / colour / texture / bool / int) and how ranges, groups and labels are written "
 				"(the hard-rules comment header is on both templates)." },
+			// MAT-FN4:材质函数(库文件)—— 没有 Evaluate 入口、不单独编译,只被材质 #include。
+			// 起始代码与 §9 契约一致:纯函数 + Sampler2D 形参 + 显式类型默认值。
+			{ "panel.content_browser.new_shader.tpl.library", "Material function (library)",
+				"panel.content_browser.new_shader.tpl.library.doc",
+				"Reusable pure functions for materials to `#include`: no Evaluate entry, no material "
+				"parameters, not compiled on its own. Lives under assets/shaders/lib/ and is included "
+				"as `#include \"lib/<file>.slang\"`; editing it re-bakes every material that includes it." },
 		};
 		constexpr int kNewShaderTemplateCount =
 			static_cast<int>(sizeof(kNewShaderTemplates) / sizeof(kNewShaderTemplates[0]));
+		// 材质函数模板的下标(模板表最后一条):切到它时把目录默认到 shaders/lib。
+		constexpr int kNewShaderLibraryTemplate = kNewShaderTemplateCount - 1;
 
 		// 两行折行(说明文案长于一行时按空白切一刀,第二行超出部分省略)。
 		std::pair<std::string, std::string> WrapTwoLines(const Wui::WuiContext& ctx,
@@ -2109,6 +2118,31 @@ namespace World
 
 	std::string ContentBrowserPanel::ShaderTemplateSource(int templateIndex)
 	{
+		// MAT-FN4:材质函数(库文件)= 纯函数模板 —— 没有 Evaluate 入口,也没有 //! param。
+		if (templateIndex == kNewShaderLibraryTemplate)
+		{
+			std::string source;
+			source += "// Material function library (.slang) -- reusable pure functions.\n";
+			source += "//\n";
+			source += "// Use it from a material (the include path is relative to assets/shaders):\n";
+			source += "//     #include \"lib/<this file name>.slang\"\n";
+			source += "// then call the functions below like any other function.\n";
+			source += "//\n";
+			source += "// Rules (contract: docs/dev/shader-contract.md §9):\n";
+			source += "//   * pure functions only -- no Evaluate() entry, no `//! param` annotations,\n";
+			source += "//     no material `input` / `surface` access;\n";
+			source += "//   * no Texture2D / Sampler2D declarations -- take a Sampler2D parameter if you\n";
+			source += "//     need to sample (the material owns the texture slot);\n";
+			source += "//   * strict Slang types (no implicit width conversion); trailing parameters may\n";
+			source += "//     carry defaults, written with explicit types (float2(0.5, 0.5)).\n";
+			source += "\n";
+			source += "// Smallest working example -- rename it and add your own functions below.\n";
+			source += "float3 WeTint(float3 baseColor, float3 tint, float amount = 1.0)\n";
+			source += "{\n";
+			source += "    return lerp(baseColor, baseColor * tint, saturate(amount));\n";
+			source += "}\n";
+			return source;
+		}
 		// 起始代码来自内核(M4-S1 的 MaterialSurfaceCompiler):契约字段有默认值,空改动也能编译。
 		// 引擎不在这里留副本 —— 内核改骨架,新建的文件跟着变。
 		std::string source = MaterialSurfaceCompiler::DefaultSurfaceFunctionSource();
@@ -2244,8 +2278,27 @@ namespace World
 		for (const NewShaderTemplate& entry : kNewShaderTemplates)
 			templateOptions.push_back(Wui::Tr(entry.LabelKey, entry.LabelEn));
 		const Wui::WuiRect templateRect { fieldX, cursorY, fieldW, 24.0f };
+		const int templateBefore = m_NewShaderTemplate;
 		Wui::Combo(ctx, templateId, templateRect, templateLabel, templateOptions, m_NewShaderTemplate, theme);
 		const int templateIndex = std::clamp(m_NewShaderTemplate, 0, kNewShaderTemplateCount - 1);
+		// MAT-FN4:切到"材质函数(库文件)"时把落点默认到 assets/shaders/lib(不存在也没关系:
+		// 创建时会建目录),名称默认值也换成 my_function(只在用户没改过默认名时替换)。
+		if (templateIndex != templateBefore && templateIndex == kNewShaderLibraryTemplate)
+		{
+			auto library = std::find(m_NewShaderFolders.begin(), m_NewShaderFolders.end(),
+				std::string("shaders/lib"));
+			if (library == m_NewShaderFolders.end())
+			{
+				m_NewShaderFolders.push_back("shaders/lib");
+				std::sort(m_NewShaderFolders.begin(), m_NewShaderFolders.end());
+				library = std::find(m_NewShaderFolders.begin(), m_NewShaderFolders.end(),
+					std::string("shaders/lib"));
+			}
+			if (library != m_NewShaderFolders.end())
+				m_NewShaderFolderIndex = static_cast<int>(library - m_NewShaderFolders.begin());
+			if (m_NewShaderName == "material_shader")
+				m_NewShaderName = "my_function";
+		}
 		const std::string templateDoc = Wui::Tr(kNewShaderTemplates[templateIndex].DocKey,
 			kNewShaderTemplates[templateIndex].DocEn);
 		cursorY += 30.0f;

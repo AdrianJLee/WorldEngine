@@ -184,9 +184,12 @@ GL 口径:描述符绑定单元 = `binding`(**忽略 set**),所以 UBO 单元占
 示例材质 [`ShowcaseMaterial.slang`](../../projects/default/assets/shaders/examples/ShowcaseMaterial.slang)
 include 了它,并在 `Evaluate()` 里用 `ApplyTint` → `CheckerBlend` 做棋盘细节。
 
-**怎么创建**:在项目内容根下新建 `assets/shaders/lib/<名字>.slang`(建议按用途命名,如
-`pattern.slang`、`noise.slang`)。一个文件一个主题;库文件本身**不是材质资产** ——
-它没有入口,不能单独被渲染,只能在材质里 `#include`。
+**怎么创建**:编辑器里走内容浏览器 `New ▸ Material Shader…`,起始代码选
+**Material function (library)** —— 目录会自动落到 `assets/shaders/lib`(不存在时创建),
+文件名就是 `#include` 里用的名字。也可以直接在项目内容根下新建
+`assets/shaders/lib/<名字>.slang`(建议按用途命名,如 `pattern.slang`、`noise.slang`)。
+一个文件一个主题;库文件本身**不是材质资产** —— 它没有入口,不能单独被渲染、不单独烘,
+只能在材质里 `#include`(在编辑器里打开它 = 库文件形态:不投递预览编译)。
 
 **怎么写**:
 

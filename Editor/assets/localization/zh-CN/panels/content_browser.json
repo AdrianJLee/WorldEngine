@@ -117,6 +117,8 @@
   "panel.content_browser.new_shader.tpl.surface.doc": "可直接编译的起始代码:Surface Evaluate(MaterialInputs input),每个字段的默认值都由引擎给出;文件开头带三条硬规则的注释头(严格类型 / 组合采样器 / 显式 binding)。",
   "panel.content_browser.new_shader.tpl.params": "表面函数 + 注解参数",
   "panel.content_browser.new_shader.tpl.params.doc": "同一份起始代码,外加一组 `//! param` 声明示例(浮点/颜色/贴图/布尔/整数,以及范围、分组、显示名怎么写);两条模板都带硬规则注释头。",
+  "panel.content_browser.new_shader.tpl.library": "材质函数(库文件)",
+  "panel.content_browser.new_shader.tpl.library.doc": "可复用的纯函数:没有 Evaluate 入口、不单独编译。放在 assets/shaders/lib/ 下,材质里用 `#include \"lib/<文件名>.slang\"` 引用;这个文件一改,引用它的材质全部重烘。",
   "panel.content_browser.new_shader.name": "名称",
   "panel.content_browser.new_shader.name.placeholder": "着色器名称",
   "panel.content_browser.new_shader.name.empty": "名称不能为空",
