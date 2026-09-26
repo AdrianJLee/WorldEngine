@@ -535,28 +535,6 @@ namespace World
 			return function;
 		}
 
-		ScriptValue PrintImplementation(const ScriptValue* args, std::size_t argCount)
-		{
-			ScriptEngine::AssertOwnerThread();
-			std::string text = "[Lua]";
-			ScriptFunctionRef tostring;
-			if (!s_Vm->GetGlobal("tostring").AsFunction(&tostring))
-				throw std::runtime_error("tostring is not available");
-			for (std::size_t index = 0; index < argCount; ++index)
-			{
-				ScriptValue converted;
-				std::string error;
-				if (!tostring.Call(&args[index], 1, &converted, &error))
-					throw std::runtime_error(error);
-				std::string piece;
-				if (!converted.AsString(&piece))
-					piece = "?";
-				text += " " + piece;
-			}
-			if (Log::GetClientLogger()) WLD_TRACE("{0}", text);
-			return ScriptValue::Nil();
-		}
-
 		void ShutdownInternal()
 		{
 			// W4:VM 关闭前先丢弃事件/计时器订阅(引用在 VM 关闭后一律失效)。
@@ -596,10 +574,10 @@ namespace World
 			if (!s_Bindings->IsValid())
 				throw std::runtime_error("[Lua] failed to create the script binding context");
 
-			// 沙箱纪律(T1 坑 #1):print 替换与宿主注入必须发生在**编译脚本之前**,
-			// 否则无 env 的 chunk 已在 load 期解析过 import,替换对已编译函数无效。
-			if (!s_Vm->SetGlobal("print", s_Bindings->CreateFunction("print", &PrintImplementation)))
-				throw std::runtime_error("[Lua] failed to install the print implementation");
+			// SCRIPT-V11:脚本的 `print` 由 `LuauVm::Init` 装好(`[script] ` + INFO,见 LuauVm.cpp 的
+			// scriptPrint),这里**不得再覆盖** —— 旧覆盖把它换成 trace 级的 `[Lua] …`,
+			// 默认 log_level=info 下用户在编辑器/Scripts 面板完全看不到脚本输出。
+			// (沙箱纪律不变:所有宿主注入仍必须发生在**编译脚本之前**。)
 
 			s_LookupField = CompileHelper(kFieldLookupSource, "WorldEngine.FieldLookup", &error);
 			s_CollectFieldNames = CompileHelper(kFieldCollectorSource, "WorldEngine.FieldNames", &error);

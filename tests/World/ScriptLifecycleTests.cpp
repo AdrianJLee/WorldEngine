@@ -1158,6 +1158,24 @@ namespace
         CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Deletes == 0);   // 工厂没了:实例无法释放(泄漏),但不会被二次使用
     }
 
+    // SCRIPT-V11:脚本 `print` 必须真的落进引擎日志(默认 INFO 级、`[script] ` 前缀)。
+    // 回归点:ScriptEngine::Init 曾用 trace 级的 `[Lua] …` 实现覆盖 LuauVm 装好的 print,
+    // 默认 log_level=info 下用户在编辑器里完全看不到脚本输出(RESUME 遗留项 ③)。
+    void ScriptPrintReachesEngineLog()
+    {
+        const std::string token = "SCRIPT-V11-PRINT-TOKEN-" + std::to_string(GetCurrentProcessId());
+        RunLua("print('" + token + "')");
+
+        const std::vector<std::string> lines = World::Log::RecentLines(200);
+        bool found = false;
+        for (const std::string& line : lines)
+        {
+            if (line.find("[script]") != std::string::npos && line.find(token) != std::string::npos)
+                found = true;
+        }
+        CHECK(found);
+    }
+
     void SandboxBudgetIsolationAndMargin()
     {
         const Sandbox::Policy defaultPolicy = ScriptEngine::GetSandboxPolicy();
@@ -1294,6 +1312,7 @@ int main(int argc, char** argv)
             { "deterministic and atomic stub generation", StubGenerationContracts },
             { "real static-link bindings and template", RealBindingsAndTemplate },
             { "VM restart keeps metadata unique", VmRestartKeepsUniqueMetadata },
+            { "script print reaches the engine log at INFO with the [script] prefix", ScriptPrintReachesEngineLog },
             { "sandbox budget isolation and headroom", SandboxBudgetIsolationAndMargin },
             { "unregistered script factory is reported instead of silently leaked", UnregisteredFactoryIsReportedInsteadOfSilentlyLeaked }
         };
