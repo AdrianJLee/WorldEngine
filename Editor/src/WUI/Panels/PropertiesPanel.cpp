@@ -33,6 +33,7 @@
 #include <iterator>
 #include <map>
 #include <sstream>
+#include <utility>
 
 namespace World
 {
@@ -438,6 +439,9 @@ namespace World
 				case Schema::Kind::Vec2: return Schema::Value(glm::vec2(0.0f));
 				case Schema::Kind::Vec3: return Schema::Value(glm::vec3(0.0f));
 				case Schema::Kind::Vec4: return Schema::Value(glm::vec4(0.0f));
+				// B 期:结构化表的值在 `Children` 里,`Value` 保持空表(monostate)——
+				// 与 `ScriptProperties::ValueMatchesKind` 同一口径,不往 variant 里塞表数据。
+				case Schema::Kind::Object: return Schema::Value();
 				default: return Schema::Value();
 			}
 		}
@@ -461,6 +465,8 @@ namespace World
 				case Schema::Kind::Vec2: return std::holds_alternative<glm::vec2>(property.Value);
 				case Schema::Kind::Vec3: return std::holds_alternative<glm::vec3>(property.Value);
 				case Schema::Kind::Vec4: return std::holds_alternative<glm::vec4>(property.Value);
+				// B 期:Object 的"值"是 Children(空表 = monostate),永远算匹配。
+				case Schema::Kind::Object: return std::holds_alternative<std::monostate>(property.Value);
 				default: return false;
 			}
 		}
@@ -473,6 +479,182 @@ namespace World
 		{
 			return ScriptPropertyValueMatchesType(property)
 				? property.Value : DefaultScriptPropertyValue(property.Type);
+		}
+
+		// ---- VEC-B3:嵌套 `---@class`(Object)属性的合成 schema ----
+		//
+		// `DrawSchemaFields` 的 Object 行只认 `Schema::FieldSchema` 里的**无捕获函数指针**
+		// (`Get/Set/GetPtr/GetNested`),所以:
+		//   * 子字段 i 的 Get/Set 以"父 ScriptProperty*"为 instance,读写 `Children[i].Value`;
+		//   * 子字段 i 若是 Object,它的 GetPtr 以父为 instance,返回 `&Children[i]`(递归层用);
+		//   * 节点 k 的 GetNested 返回 arena 里的第 k 个合成 TypeSchema。
+		// 按编译期下标实例化访问器,运行时用下标表选中(与 B2 的护栏同口径:单层 <= 64、
+		// 深度 <= 4)。arena 节点数另有面板侧上限;任何溢出都降级成只读摘要行,不崩、不展开错行。
+		constexpr size_t kScriptTableMaxChildren = 64;
+		constexpr size_t kScriptTableMaxNodes = 256;
+		constexpr size_t kScriptTableMaxDepth = 4;
+		constexpr size_t kScriptTableNoNode = static_cast<size_t>(-1);
+
+		struct ScriptTableChildAccessors
+		{
+			Schema::Value (*Get)(const void*) = nullptr;
+			void (*Set)(void*, const Schema::Value&) = nullptr;
+			void* (*GetPtr)(void*) = nullptr;
+			const void* (*GetPtrConst)(const void*) = nullptr;
+		};
+
+		struct ScriptTableSchemaArena
+		{
+			std::array<Schema::TypeSchema, kScriptTableMaxNodes> Nodes;
+			size_t Used = 0;
+		};
+
+		ScriptTableSchemaArena& ScriptTableArena()
+		{
+			static thread_local ScriptTableSchemaArena arena;
+			return arena;
+		}
+
+		template <size_t Index>
+		Schema::Value ScriptTableChildGet(const void* instance)
+		{
+			const auto* parent = static_cast<const ScriptProperty*>(instance);
+			if (!parent || Index >= parent->Children.size())
+				return Schema::Value();   // 合成与绘制同帧同源,正常不可达;防越界 UB
+			return ScriptPropertyDisplayValue(parent->Children[Index]);
+		}
+
+		template <size_t Index>
+		void ScriptTableChildSet(void* instance, const Schema::Value& edited)
+		{
+			auto* parent = static_cast<ScriptProperty*>(instance);
+			if (parent && Index < parent->Children.size())
+				parent->Children[Index].Value = edited;
+		}
+
+		template <size_t Index>
+		void* ScriptTableChildPtr(void* instance)
+		{
+			auto* parent = static_cast<ScriptProperty*>(instance);
+			return (parent && Index < parent->Children.size())
+				? static_cast<void*>(&parent->Children[Index]) : nullptr;
+		}
+
+		template <size_t Index>
+		const void* ScriptTableChildPtrConst(const void* instance)
+		{
+			const auto* parent = static_cast<const ScriptProperty*>(instance);
+			return (parent && Index < parent->Children.size())
+				? static_cast<const void*>(&parent->Children[Index]) : nullptr;
+		}
+
+		template <size_t Node>
+		const Schema::TypeSchema* ScriptTableNode()
+		{
+			ScriptTableSchemaArena& arena = ScriptTableArena();
+			return Node < arena.Used ? &arena.Nodes[Node] : nullptr;
+		}
+
+		template <size_t... Index>
+		constexpr std::array<ScriptTableChildAccessors, sizeof...(Index)> MakeScriptTableChildAccessors(
+			std::index_sequence<Index...>)
+		{
+			return { ScriptTableChildAccessors { &ScriptTableChildGet<Index>, &ScriptTableChildSet<Index>,
+				&ScriptTableChildPtr<Index>, &ScriptTableChildPtrConst<Index> }... };
+		}
+
+		template <size_t... Node>
+		constexpr std::array<const Schema::TypeSchema* (*)(), sizeof...(Node)> MakeScriptTableNodeTable(
+			std::index_sequence<Node...>)
+		{
+			return { &ScriptTableNode<Node>... };
+		}
+
+		const auto kScriptTableChildAccessors =
+			MakeScriptTableChildAccessors(std::make_index_sequence<kScriptTableMaxChildren> {});
+		const auto kScriptTableNodeTable =
+			MakeScriptTableNodeTable(std::make_index_sequence<kScriptTableMaxNodes> {});
+
+		// 顶层 Object 属性行的 instance 就是该属性本身:子 schema 的实例直接透传,
+		// 子字段访问器再从它身上取 `Children[i]`。
+		void* ScriptTableIdentityPtr(void* instance) { return instance; }
+		const void* ScriptTableIdentityPtrConst(const void* instance) { return instance; }
+
+		// 把一条结构化表属性递归合成成 arena 节点(返回下标;失败 = kScriptTableNoNode)。
+		// `idPath` 同时是合成 TypeSchema 的 DisplayName:DrawSchemaFields 递归时拿它当行 id
+		// 前缀,于是子行 id = `properties.<组件>.<属性>.<子字段>`(递归同名规则)。
+		size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string& idPath, size_t depth)
+		{
+			ScriptTableSchemaArena& arena = ScriptTableArena();
+			if (depth > kScriptTableMaxDepth || arena.Used >= kScriptTableMaxNodes)
+				return kScriptTableNoNode;
+			const size_t nodeIndex = arena.Used++;
+			Schema::TypeSchema& node = arena.Nodes[nodeIndex];
+			node = Schema::TypeSchema {};
+			node.DisplayName = idPath;
+			node.Category = Schema::TypeCategory::Struct;
+			const size_t childCount = std::min(property.Children.size(), kScriptTableMaxChildren);
+			node.Fields.reserve(childCount);
+			for (size_t index = 0; index < childCount; ++index)
+			{
+				const ScriptProperty& child = property.Children[index];
+				Schema::FieldSchema field;
+				field.Name = child.Name;
+				field.K = child.Type;
+				field.Meta.Doc = child.Doc;
+				if (child.Type == Schema::Kind::Object)
+				{
+					// 裸 table / 空结构 / 超护栏 → 只读摘要行(摘要文本由 Meta.DisplayName 携带,
+					// 面板侧与 DrawSchemaFields 的 scriptPropertyRow 摘要分支同一判据)。
+					const size_t childNode = (child.ReadOnly || child.Children.empty())
+						? kScriptTableNoNode
+						: BuildScriptTableSchema(child, idPath + "." + child.Name, depth + 1);
+					if (childNode == kScriptTableNoNode)
+					{
+						field.Meta.DisplayName = "table";
+					}
+					else
+					{
+						field.GetNested = kScriptTableNodeTable[childNode];
+						field.GetPtr = kScriptTableChildAccessors[index].GetPtr;
+						field.GetPtrConst = kScriptTableChildAccessors[index].GetPtrConst;
+					}
+				}
+				else
+				{
+					field.Get = kScriptTableChildAccessors[index].Get;
+					field.Set = kScriptTableChildAccessors[index].Set;
+				}
+				node.Fields.push_back(std::move(field));
+			}
+			return nodeIndex;
+		}
+
+		// 顶层 Object 属性:可展开 → 填 GetNested/GetPtr;只读/降级 → 不填 nested,
+		// 由 DrawSchemaFields 的 scriptPropertyRow 摘要分支画一行 `table`,不可展开、不进存档。
+		// 注:摘要里的 N keys 需要运行期摘要,当前冻结模型没有该字段(见 VEC-B3 报告),
+		// 所以拿不到 N 时只写类型名 `table`。
+		Schema::FieldSchema MakeScriptTableField(const ScriptProperty& property, const std::string& idPath)
+		{
+			Schema::FieldSchema field;
+			field.Name = property.Name;
+			field.K = Schema::Kind::Object;
+			field.Meta.Doc = property.Doc;
+			if (property.ReadOnly || property.Children.empty())
+			{
+				field.Meta.DisplayName = "table";
+				return field;
+			}
+			const size_t nodeIndex = BuildScriptTableSchema(property, idPath, 1);
+			if (nodeIndex == kScriptTableNoNode)
+			{
+				field.Meta.DisplayName = "table";
+				return field;
+			}
+			field.GetNested = kScriptTableNodeTable[nodeIndex];
+			field.GetPtr = ScriptTableIdentityPtr;
+			field.GetPtrConst = ScriptTableIdentityPtrConst;
+			return field;
 		}
 
 		// 按名字在 schema 类型里找字段(C++ 脚本的字段说明 / 默认值都挂在 schema 上)。
@@ -1956,6 +2138,22 @@ namespace World
 				const std::string idText = propId(typeName, field.Name);
 				const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
 				void* nestedInstance = field.GetPtr ? field.GetPtr(instance) : nullptr;
+				// VEC-B3:脚本属性里的裸 table / 面板侧降级的结构化表 = 只读摘要行。
+				// 这一支只对脚本属性行开放(`scriptPropertyRow`),普通 schema 的 Object 字段
+				// 行为不变;摘要行不可展开、不可编辑、不进存档(值根本没有合成到这里)。
+				if (scriptPropertyRow && (!nested || !nestedInstance))
+				{
+					const std::string summary = field.Meta.DisplayName.empty()
+						? std::string("table") : field.Meta.DisplayName;
+					const std::string summaryDoc = fieldDocFor(field);
+					if (!summaryDoc.empty())
+						Wui::Tooltip(ctx, row, summaryDoc);
+					Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text + "  " + summary,
+						label.Term, theme.TextMuted, 13.0f, theme, row.W - 8.0f);
+					RegisterNode(Wui::HashId(idText.c_str()), "text", row, labelText, summary, false, summaryDoc);
+					y += 20;
+					continue;
+				}
 				// UUID 等身份标识只读展示,不提供编辑控件。
 				if (nested && nestedInstance && (nested->Id.Name == "World::UUID" || nested->DisplayName == "UUID"))
 				{
@@ -1990,7 +2188,8 @@ namespace World
 				y += 20;
 				if (open && nested && nestedInstance)
 					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u, { row.X + 10, row.Y + 20, row.W - 10, 0 },
-						nestedInstance, nested->DisplayName, *nested, visibleRect, changedFields);
+						nestedInstance, nested->DisplayName, *nested, visibleRect, changedFields,
+						scriptPropertyRow);
 				continue;
 			}
 
@@ -2615,6 +2814,9 @@ namespace World
 		}
 		else
 		{
+			// VEC-B3:合成 schema 的 arena 每个脚本组件重建一次;下面的循环只增不减,
+			// 固定数组地址稳定,递归绘制期间不会失效。
+			ScriptTableArena().Used = 0;
 			for (ScriptProperty& property : properties)
 			{
 				if (!ScriptProperties::IsPropertyKind(property.Type))
@@ -2625,13 +2827,22 @@ namespace World
 				// 行悬停/读屏 = 脚本注释(`ScriptProperty::Doc`,由脚本派生、不进存档);
 				// 空 → 中性兜底(绝不回落 schema 的字段说明,见 DrawSchemaFields 的 fieldDocFor)。
 				field.Meta.Doc = property.Doc;
-				// Get/Set 直连这条属性(instance 传 &property):无捕获 lambda → 函数指针。
-				// Get 走**展示值**:未设(monostate)/ 类型不匹配时给规范零值但**不写回**组件 ——
-				// "未设"要保持未设,真实默认值由引擎的属性入口填(审查 P1-1:不能编辑期写成 0 落盘)。
-				field.Get = [](const void* value)
-				{ return ScriptPropertyDisplayValue(*static_cast<const ScriptProperty*>(value)); };
-				field.Set = [](void* value, const Schema::Value& edited)
-				{ static_cast<ScriptProperty*>(value)->Value = edited; };
+				if (property.Type == Schema::Kind::Object)
+				{
+					// 嵌套 `---@class`:合成 GetNested/GetPtr(可展开、子行可编辑);
+					// 裸 table / 空结构 / 超护栏:降级成只读摘要行(看得到、不可编辑、不进存档)。
+					field = MakeScriptTableField(property, schema.DisplayName + "." + property.Name);
+				}
+				else
+				{
+					// Get/Set 直连这条属性(instance 传 &property):无捕获 lambda → 函数指针。
+					// Get 走**展示值**:未设(monostate)/ 类型不匹配时给规范零值但**不写回**组件 ——
+					// "未设"要保持未设,真实默认值由引擎的属性入口填(审查 P1-1:不能编辑期写成 0 落盘)。
+					field.Get = [](const void* value)
+					{ return ScriptPropertyDisplayValue(*static_cast<const ScriptProperty*>(value)); };
+					field.Set = [](void* value, const Schema::Value& edited)
+					{ static_cast<ScriptProperty*>(value)->Value = edited; };
+				}
 				Schema::TypeSchema rowSchema;
 				rowSchema.DisplayName = schema.DisplayName;
 				rowSchema.Category = Schema::TypeCategory::Struct;
