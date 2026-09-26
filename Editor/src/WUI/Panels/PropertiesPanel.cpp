@@ -12,6 +12,9 @@
 #include "World/Gameplay/Prefab.h"
 // 2026-09-26 脚本组件重写:属性表(`ScriptProperty`)的唯一维护点(注解/schema 声明 → 属性表)。
 #include "World/Script/ScriptProperties.h"
+// 2026-09-26 SCRIPT-V6:声明的权威解析在引擎侧(名字/类型/Doc/**脚本里的默认值**)——
+// 编辑器只调 `ScriptEngine::SyncScriptDeclarations`,不再自己扫注解。
+#include "World/Scene/ScriptEngine.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
@@ -562,20 +565,13 @@ namespace World
 			return declarations;
 		}
 
-		// Luau:按脚本注解重同步属性表(保留同名同类型值)+ 回填每条属性的 Doc。
-		// TODO(SCRIPT-V1):引擎入口落地后,这里只剩一次引擎调用(现在这两件事都是编辑器侧兜的)。
+		// Luau:按脚本重同步属性表(保留同名同类型值;新字段带注解 Doc 与**脚本里的默认值**)。
+		// SCRIPT-V1 起这是引擎侧唯一入口:声明解析、Doc、默认值、诊断都在 ScriptEngine 里,
+		// 编辑器不再自己扫注解(第二份实现已废弃,见下面的 LuaScriptDeclarations 仅作兼容保留)。
 		void SyncLuauPropertiesFromAnnotations(LuauScriptComponent& component)
 		{
-			const std::vector<LuaFieldDeclaration> declarations = LuaScriptDeclarations(component.ScriptPath);
-			std::vector<std::pair<std::string, Schema::Kind>> pairs;
-			pairs.reserve(declarations.size());
-			for (const LuaFieldDeclaration& declaration : declarations)
-				pairs.emplace_back(declaration.Name, declaration.Kind);
-			ScriptProperties::SyncFromDeclarations(component.Properties, pairs);
-			// Doc 由脚本派生、不进存档:每次同步按注解回填(空 = 行悬停走中性兜底)。
-			for (const LuaFieldDeclaration& declaration : declarations)
-				if (ScriptProperty* property = ScriptProperties::Find(component.Properties, declaration.Name))
-					property->Doc = declaration.Doc;
+			std::string error;
+			ScriptEngine::SyncScriptDeclarations(component, nullptr, &error);
 		}
 
 		// 面板里诊断/错误只显示第一行并截断;完整文本由 AI 通道 script.status 提供。
