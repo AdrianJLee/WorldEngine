@@ -25,6 +25,7 @@
 | `bin/Game.dll` | 游戏 DLL |
 | `packages/Base.wpak` | 内容包,名字来自项目清单的 `packages:` |
 | `project.we.yaml` | 发行清单:起始场景、渲染后端等 |
+| `localization/<engine\|project>/<语言>/**` | 语言包副本:引擎层来自 `Engine/assets/localization`,项目层来自项目内容根;编辑器自己的语言包(`Editor/assets/localization`)不进游戏包 |
 
 运行方式:在发行目录里启动 `Runtime.exe`(`Runtime.exe` 是工作目录,资产从内容包解析)。
 开发期的中间产物(`<构建目录>/cooked/`)不随发行目录发布。
