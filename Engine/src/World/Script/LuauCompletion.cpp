@@ -274,6 +274,89 @@ namespace World
 			}
 			return spec;
 		}
+
+		// ---- V9:注解的**类型位**(用户反馈:「注释中填类型时没有提示」)----
+		//
+		// 认这四种位(其余位置不是类型位,不要给人塞类型候选):
+		//   `---@type <前缀>`            —— 标签后第 1 个 token
+		//   `---@field <名字> <前缀>`     —— 第 2 个 token
+		//   `---@param <名字> <前缀>`     —— 第 2 个 token
+		//   `---@class <名字> : <前缀>`   —— 继承位(冒号之后的那个 token;`X:` 连写也算)
+		// linePrefix = 光标前的整行片段;outPrefix = 正在输入的标识符前缀(可为空)。
+		bool IsAnnotationTypePosition(std::string_view linePrefix, std::string_view* outPrefix)
+		{
+			const std::size_t at = linePrefix.rfind("---@");
+			if (at == std::string_view::npos)
+				return false;
+			const std::string_view body = linePrefix.substr(at + 4);
+			// 光标前的 partial token:标识符前缀(空 = 刚打完空格,准备输入类型)。
+			std::size_t tokenStart = body.size();
+			while (tokenStart > 0 && IsIdentPart(body[tokenStart - 1]))
+				--tokenStart;
+			if (tokenStart < body.size() && !IsIdentStart(body[tokenStart]))
+				return false;   // 光标前既不是标识符也不是空白/行首
+			const std::string_view partial = body.substr(tokenStart);
+			// 之前的部分按空白切 token(注解语法里 token 之间只有空白)。
+			std::vector<std::string_view> tokens;
+			{
+				const std::string_view head = body.substr(0, tokenStart);
+				std::size_t cursor = 0;
+				while (cursor < head.size())
+				{
+					while (cursor < head.size() && IsBlank(head[cursor]))
+						++cursor;
+					const std::size_t start = cursor;
+					while (cursor < head.size() && !IsBlank(head[cursor]))
+						++cursor;
+					if (cursor > start)
+						tokens.push_back(head.substr(start, cursor - start));
+				}
+			}
+			if (tokens.empty())
+				return false;
+			const std::string_view tag = tokens.front();
+			if (tag == "class")
+			{
+				// 继承位 = 最后一个 token 以 ':' 结尾(`---@class X : ` 或 `---@class X: `)。
+				const std::string_view last = tokens.back();
+				if (tokens.size() >= 2 && !last.empty() && last.back() == ':')
+				{
+					*outPrefix = partial;
+					return true;
+				}
+				return false;
+			}
+			const std::size_t expectedTokens = (tag == "type") ? 1u : 2u;
+			if (tag != "type" && tag != "field" && tag != "param")
+				return false;
+			if (tokens.size() != expectedTokens)
+				return false;   // 说明文本(第 3 个 token 起)/ 别的 tag 位置不给类型候选
+			*outPrefix = partial;
+			return true;
+		}
+
+		// V9:注解类型位的"基础类型"档(固定顺序,排在类型/类名之前)。
+		struct AnnotationBaseType
+		{
+			const char* Name;
+			const char* Doc;
+		};
+
+		constexpr AnnotationBaseType kAnnotationBaseTypes[] = {
+			{ "any", "任意类型(不检查成员)" },
+			{ "boolean", "布尔值(true / false)" },
+			{ "buffer", "二进制缓冲区" },
+			{ "function", "函数(可用 fun(...): ... 细化签名)" },
+			{ "integer", "整数(64 位整数值)" },
+			{ "never", "永不返回(如 error 的返回类型)" },
+			{ "nil", "空值" },
+			{ "number", "数值(Luau 的 number)" },
+			{ "string", "字符串" },
+			{ "table", "表(可用 { [K]: V } 细化)" },
+			{ "thread", "协程线程" },
+			{ "unknown", "未知类型(使用前需要收窄)" },
+			{ "vector", "向量(如 vec3.new 的返回)" },
+		};
 	}
 
 	void LuauCompletionIndex::Clear()
@@ -283,6 +366,7 @@ namespace World
 		m_StubClasses.clear();
 		m_FileItems.clear();
 		m_FileClasses.clear();
+		m_AnnotationFields.clear();
 	}
 
 	bool LuauCompletionIndex::LoadStub(std::string_view text, std::string* error)
@@ -575,6 +659,8 @@ namespace World
 		bool docTaken = false;
 		std::string blockDoc;
 		std::size_t currentClass = kNone;
+		// V9:文件符号每次都整份替换,注解字段表跟着一起重建(SetFileSource 的语义)。
+		m_AnnotationFields.clear();
 
 		auto resetBlock = [&]()
 		{
@@ -681,10 +767,29 @@ namespace World
 					}
 					else if (tag == "field")
 					{
-						if (currentClass != kNone)
+						const FieldSpec spec = ParseFieldSpec(rest);
+						if (!spec.Name.empty() && IsIdentStart(spec.Name.front()))
 						{
-							const FieldSpec spec = ParseFieldSpec(rest);
-							if (!spec.Name.empty() && IsIdentStart(spec.Name.front()))
+							// V9:注解字段**总是**记一份(悬停 / 裸名解析用)——脚本不一定先写
+							// `---@class`(用户实测:只有 `---@field` 时鼠标停在字段名上没有任何提示)。
+							// 与类成员是两回事:类作用域内再额外进成员表(给 `self.` 列表用)。
+							bool known = false;
+							for (const LuauCompletionItem& existing : m_AnnotationFields)
+								if (existing.Name == spec.Name)
+								{
+									known = true;
+									break;
+								}
+							if (!known)
+							{
+								LuauCompletionItem field;
+								field.Name.assign(spec.Name);
+								field.Type.assign(spec.Type);
+								field.Doc.assign(spec.Desc);
+								field.Kind = LuauCompletionItem::KindType::Field;
+								m_AnnotationFields.push_back(std::move(field));
+							}
+							if (currentClass != kNone)
 								addFileMember(currentClass, spec.Name, spec.Type, spec.Desc,
 									LuauCompletionItem::KindType::Field);
 						}
@@ -772,6 +877,9 @@ namespace World
 	{
 		m_FileItems.clear();
 		m_FileClasses.clear();
+		// V9b:注解字段表也随"换一份文件"清空 —— 空文本走的是下面的提前返回分支,
+		// 不能只依赖 ParseFileText 里的清表(否则上一份文件的 `---@field` 会残留成幽灵提示)。
+		m_AnnotationFields.clear();
 		if (!Trim(fileText).empty())
 			ParseFileText(fileText);
 	}
@@ -868,6 +976,19 @@ namespace World
 						out.resize(maxItems);
 					return;
 				}
+			}
+		}
+
+		// V9:注解的**类型位**(`---@type ` / `---@field <名字> ` / `---@param <名字> ` /
+		// `---@class X : `)给 Luau 基础类型 + 已声明的类型/类名(用户反馈:「注释中填类型时没有提示」)。
+		{
+			std::string_view typePrefix;
+			if (IsAnnotationTypePosition(linePrefix, &typePrefix))
+			{
+				CollectTypeCandidates(typePrefix, out);
+				if (maxItems != 0 && out.size() > maxItems)
+					out.resize(maxItems);
+				return;
 			}
 		}
 
@@ -991,7 +1112,106 @@ namespace World
 				out = item;
 				return true;
 			}
+		// V9:当前文件注解里声明的字段(`---@field Speed number 移动速度`)。
+		//
+		// 为什么需要这一步:①悬停在**注解行里的字段名**上时,光标前缀是 `---@field `,Query 给的是
+		// 类型候选,拿不到这个字段自己;②脚本没写 `---@class`(只有 `---@field`)时,字段不在
+		// 任何类成员里,`self.Speed` / 裸 `Speed` 也解析不到。这里按"当前文件注解"兜底:
+		// 接收者成员/全局已经解析到的仍然优先(它们信息更全、上下文更准)。
+		for (const LuauCompletionItem& item : m_AnnotationFields)
+			if (item.Name == word)
+			{
+				out = item;
+				return true;
+			}
+		for (const LuauCompletionItem& item : m_AnnotationFields)
+			if (EqualsIgnoreCase(item.Name, word))
+			{
+				out = item;
+				return true;
+			}
+		// V9b:注解行上的**类型名** hover —— word 命中内置类型 / 已声明类型名时给它的说明。
+		//
+		// 为什么需要:内核传的 linePrefix 是"词之前的整行片段",悬停**字段名**时前缀是 `---@field `(名字位,
+		// 本来拿不到类型候选),字段名解析成功后紧跟着 hover 类型名(`number`)也要有解释;
+		// 另外 `---@field Speed number` 这种行无论光标落在哪一段,类型名都该能讲清是什么。
+		// 只在**行前缀出现 `---@`** 时启用:代码里的同名标识符不能被当成类型讲解。
+		// 类型表复用 CollectTypeCandidates(基础类型 + 已声明类型/类名),不另抄第二份。
+		if (linePrefix.rfind("---@") != std::string_view::npos)
+		{
+			std::vector<LuauCompletionItem> types;
+			CollectTypeCandidates(word, types);
+			for (const LuauCompletionItem& item : types)
+				if (item.Name == word)
+				{
+					out = item;
+					return true;
+				}
+			for (const LuauCompletionItem& item : types)
+				if (EqualsIgnoreCase(item.Name, word))
+				{
+					out = item;
+					return true;
+				}
+		}
 		return false;
+	}
+
+	// V9:注解类型位的候选 = Luau 基础类型(固定顺序,**排在前面**)+ 索引里已声明的类型/类名
+	// (存根 + 当前文件的 `---@class`,按字典序)。前缀按大小写不敏感前缀过滤(类型名短,不做子串兜底)。
+	void LuauCompletionIndex::CollectTypeCandidates(std::string_view prefix,
+		std::vector<LuauCompletionItem>& out) const
+	{
+		out.clear();
+		for (const AnnotationBaseType& base : kAnnotationBaseTypes)
+		{
+			if (!prefix.empty() && !StartsWithIgnoreCase(base.Name, prefix))
+				continue;
+			LuauCompletionItem item;
+			item.Name.assign(base.Name);
+			item.Doc.assign(base.Doc);
+			item.Kind = LuauCompletionItem::KindType::Keyword;
+			out.push_back(std::move(item));
+		}
+
+		// 已声明的类型/类名:名字去重(大小写不敏感);说明优先取同名符号项里已有的 Doc
+		// (存根的 `---@class` 前注释块进的就是它)。
+		std::vector<LuauCompletionItem> named;
+		const auto addClass = [&](std::string_view name)
+		{
+			if (name.empty())
+				return;
+			for (const LuauCompletionItem& existing : named)
+				if (EqualsIgnoreCase(existing.Name, name))
+					return;
+			LuauCompletionItem item;
+			item.Name.assign(name);
+			item.Kind = LuauCompletionItem::KindType::Class;
+			for (const LuauCompletionItem& source : m_Items)
+				if (EqualsIgnoreCase(source.Name, name))
+				{
+					item.Doc = source.Doc;
+					break;
+				}
+			named.push_back(std::move(item));
+		};
+		for (const ClassInfo& info : m_StubClasses)
+			addClass(info.Name);
+		for (const ClassInfo& info : m_FileClasses)
+			addClass(info.Name);
+
+		// 基础类型之后按字典序(与索引里其它排序同口径:先大小写不敏感,再逐字节)。
+		std::sort(named.begin(), named.end(),
+			[](const LuauCompletionItem& left, const LuauCompletionItem& right)
+			{
+				const int order = CompareIgnoreCase(left.Name, right.Name);
+				if (order != 0)
+					return order < 0;
+				return left.Name < right.Name;
+			});
+		for (LuauCompletionItem& item : named)
+			if (prefix.empty() || StartsWithIgnoreCase(item.Name, prefix))
+				out.push_back(std::move(item));
 	}
 
 	void LuauCompletionIndex::ParseContext(std::string_view linePrefix, std::string& receiver,

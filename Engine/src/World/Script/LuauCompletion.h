@@ -13,6 +13,13 @@
 //     `function x`/`X = {...}`),作为"文件内符号"参与无接收者查询,并给 `self.` 提供类成员。
 //   - 符号源三:Luau 关键字(Keyword)与沙箱允许的内置库/基础函数(Global;清单与
 //     LuauVm.cpp 的 kAllowedLibraries + lbaselib 减去 kForbiddenGlobals 对齐)。
+//   - V9(用户反馈「注释中填类型时没有提示」「鼠标在字段上时没有类型提示」):
+//     * **类型位补全**:`---@type <前缀>` / `---@field <名字> <前缀>` / `---@param <名字> <前缀>` /
+//       `---@class <名字> : <前缀>`(继承位)给"Luau 基础类型(排在前面,带一句话说明)+
+//       存根/当前文件里 `---@class` 声明的类型名(按字典序)";说明之后的位置不是类型位。
+//     * **注解字段悬停/裸名解析**:当前文件 `---@field Speed number 移动速度` 里的字段
+//       (不要求先写 `---@class`)进 `m_AnnotationFields`;悬停注解行里的字段名、代码里的
+//       `self.Speed` 或裸 `Speed` 都能拿到"类型 + 注解第三段说明"。
 //
 // Query 流程 = 上下文(光标前片段)→ 候选(接收者成员 / 全局+文件符号+关键字)→
 // 过滤(前缀大小写不敏感;前缀零命中时子串兜底)→ 排序(Field→Method→Global→Class→
@@ -106,12 +113,17 @@ namespace World
 		void CollectClassMembers(const ClassInfo* info,
 			std::vector<const LuauCompletionItem*>& out) const;
 		void CollectGlobals(std::vector<const LuauCompletionItem*>& out, bool includeKeywords) const;
+		// V9:注解类型位的候选(基础类型在前 + 已声明的类型/类名按字典序)。
+		void CollectTypeCandidates(std::string_view prefix, std::vector<LuauCompletionItem>& out) const;
 
 		std::vector<LuauCompletionItem> m_Items;   // 存根顶层项 + 关键字 + 沙箱内置
 		std::vector<LuauCompletionItem> m_Tags;    // `---@` 注解标签(只在注解上下文给候选)
 		std::vector<ClassInfo> m_StubClasses;
 		std::vector<LuauCompletionItem> m_FileItems;   // 文件内符号(SetFileSource)
 		std::vector<ClassInfo> m_FileClasses;          // 文件内 ---@class(通常 1 个)
+		// V9:当前文件 `---@field` 注解(名称 → 类型/说明)。悬停与"裸名/注解里字段名"解析用;
+		// 与 m_FileClasses 的成员是**两回事**:这里不要求先写 `---@class`(用户实测的缺提示场景)。
+		std::vector<LuauCompletionItem> m_AnnotationFields;
 		std::unordered_map<std::string, std::size_t> m_ItemByName;   // 名字 → m_Items 下标(去重)
 	};
 }

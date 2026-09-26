@@ -536,6 +536,93 @@ int main()
 				kIterations, totalUs / 1000.0, totalUs / kIterations, seen);
 			CHECK(seen > 0);
 		}
+
+		// ---- 8. V9:注解类型位补全 + 注解字段悬停(用户反馈:「注释中填类型时没有提示」
+		//         「鼠标在字段上时没有类型提示」) ----
+		{
+			CHECK(index.LoadStubFile(StubPath(), nullptr));
+			index.SetFileSource(
+				"---@class PlayerScript : WorldScript\n"
+				"---@field Speed number 移动速度\n"
+				"---@field Name string 显示名称\n"
+				"local PlayerScript = { Speed = 5.0 }\n"
+				"function PlayerScript:OnUpdate(dt)\n"
+				"    local s = self.Speed\n"
+				"end\n");
+
+			std::vector<LuauCompletionItem> items;
+			const auto indexOf = [&items](std::string_view name) -> int
+			{
+				for (std::size_t i = 0; i < items.size(); ++i)
+					if (items[i].Name == name)
+						return static_cast<int>(i);
+				return -1;
+			};
+
+			// ① `---@field <名字> ` ⇒ 基础类型 + 已声明的类型/类名;基础类型排在最前
+			index.Query("---@field Speed ", 0, items);
+			CHECK(HasName(items, "number") && HasName(items, "string") && HasName(items, "integer"));
+			CHECK(HasName(items, "Entity"));        // 存根 ---@class
+			CHECK(HasName(items, "WorldScript"));   // 存根里的纯注解类(无运行时全局)
+			CHECK(HasName(items, "PlayerScript"));  // 当前文件的 ---@class
+			CHECK(items.front().Name == "any");     // 基础类型固定顺序:any 在最前
+			CHECK(items.front().Kind == LuauCompletionItem::KindType::Keyword);   // 基础类型档
+			const LuauCompletionItem* number = FindName(items, "number");
+			CHECK(number != nullptr && !number->Doc.empty());   // 类型候选带一句话说明
+			CHECK(indexOf("any") == 0 && indexOf("number") > indexOf("any")
+				&& indexOf("Entity") > indexOf("number"));     // 基础类型都在类名之前
+
+			// ② `---@type ` / `---@param <名字> ` 同样是类型位
+			index.Query("---@type ", 0, items);
+			CHECK(HasName(items, "number") && HasName(items, "Entity"));
+			CHECK(!HasName(items, "Speed"));   // 类型位不给字段名(字段不是全局符号)
+			index.Query("---@param dt ", 0, items);
+			CHECK(HasName(items, "number") && HasName(items, "boolean"));
+
+			// ③ `---@class X : `(继承位)只给类型名,并按前缀过滤
+			index.Query("---@class Derived : ", 0, items);
+			CHECK(HasName(items, "WorldScript") && HasName(items, "Entity"));
+			index.Query("---@class Derived : World", 0, items);
+			CHECK(HasName(items, "WorldScript") && !HasName(items, "Entity"));
+
+			// ④ 说明文本位置(第 3 个 token 起)不是类型位:不给类型专属候选
+			index.Query("---@field Speed number ", 0, items);
+			CHECK(!HasName(items, "never") && !HasName(items, "integer") && !HasName(items, "buffer")
+				&& !HasName(items, "vector"));
+
+			// ⑤ 前缀过滤大小写不敏感 + maxItems 截断(截断发生在基础类型档内)
+			index.Query("---@field Speed n", 0, items);
+			CHECK(HasName(items, "number") && HasName(items, "never") && !HasName(items, "string"));
+			index.Query("---@field Speed ", 2, items);
+			CHECK(items.size() == 2 && items[0].Name == "any" && items[1].Name == "boolean");
+
+			// ⑥ 悬停:注解行里的字段名 / 代码里的 self. 与裸名 / 类型名本身
+			LuauCompletionItem described;
+			CHECK(index.Describe("---@field ", "Speed", described));
+			CHECK(described.Name == "Speed" && described.Type == "number" && described.Doc == "移动速度");
+			CHECK(index.Describe("self.", "Speed", described));
+			CHECK(described.Type == "number" && described.Doc == "移动速度");
+			CHECK(index.Describe("local v = ", "Name", described));
+			CHECK(described.Type == "string" && described.Doc == "显示名称");
+			CHECK(index.Describe("---@field ", "number", described));
+			CHECK(described.Name == "number" && !described.Doc.empty());
+			// 内核给的前缀是"词之前的整行片段":真实悬停类型名时前缀是 `---@field Speed `(类型位)。
+			CHECK(index.Describe("---@field Speed ", "number", described));
+			CHECK(described.Name == "number" && !described.Doc.empty());
+			LuauCompletionItem missing;
+			CHECK(!index.Describe("local v = ", "DefinitelyNotAField", missing));   // 命中不到 → 不弹空框
+
+			// ⑦ 用户实测场景:脚本**没有** `---@class`(只有 ---@field)时也要有类型提示
+			index.SetFileSource("---@field Speed number 移动速度\nlocal X = { Speed = 5.0 }\n");
+			CHECK(index.Describe("---@field ", "Speed", described));
+			CHECK(described.Type == "number" && described.Doc == "移动速度");
+			CHECK(index.Describe("self.", "Speed", described));
+			CHECK(described.Type == "number" && described.Doc == "移动速度");
+
+			// ⑧ SetFileSource("") 之后注解字段表随之清空(不残留上一份文件的提示)
+			index.SetFileSource("");
+			CHECK(!index.Describe("---@field ", "Speed", described));
+		}
 	}
 	catch (const std::exception& exception)
 	{
