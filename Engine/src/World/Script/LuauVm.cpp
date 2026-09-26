@@ -212,6 +212,29 @@ namespace World
 		Sandbox::InstallHook(m_State);
 
 		OpenAllowedLibraries();
+		// 2026-09-26:脚本的 `print` 在**冻结全局表之前**装好(冻结后再写全局会被沙箱拒绝)。
+		// GUI 宿主看不到进程 stdout(用户报"print 看不到打印"),所以直接写引擎日志:
+		// 参数按 Lua 惯例用 tab 连接,非字符串走 luaL_tolstring(与官方 print 的 tostring 语义一致)。
+		// 先存成变量再传:`lua_pushcfunction` 是宏,直接把带逗号的 lambda 当宏参数会被预处理器拆错。
+		const auto scriptPrint = [](lua_State* state) -> int
+		{
+			const int count = lua_gettop(state);
+			std::string text;
+			for (int index = 1; index <= count; ++index)
+			{
+				size_t length = 0;
+				const char* chunk = luaL_tolstring(state, index, &length);
+				if (index > 1)
+					text.push_back('\t');
+				text.append(chunk ? std::string(chunk, length) : std::string("nil"));
+				lua_pop(state, 1);   // luaL_tolstring 会把结果压栈
+			}
+			WLD_CORE_INFO("[script] {0}", text);
+			return 0;
+		};
+		// Luau 的 lua_pushcfunction 是**三参宏**(L, fn, debugname) —— 少传 debugname 会报 C2059。
+		lua_pushcfunction(m_State, scriptPrint, "print");
+		lua_setglobal(m_State, "print");
 		ApplySandbox();
 		WLD_CORE_INFO("[luau] vm initialized (libs=base/math/string/table/bit32/coroutine/utf8)");
 		return true;
