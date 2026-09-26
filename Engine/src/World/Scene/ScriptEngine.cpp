@@ -215,11 +215,103 @@ namespace World
 
 		// W7-3:容器字节(不嵌源码)跳过 `---@field` 注解解析 → 字段类型走"旧值推断"回退;
 		// 源码字节保持既有注解解析。判定只看前 4 字节 magic(与 LoadChunk 同一条判定)。
-		AnnotationList ParseAnnotationsForBytes(const std::vector<uint8_t>& bytes)
+		// B 期:`---@class` 块(名字 / 基类 / 字段列表;顺序 = 源码顺序)。
+		struct ClassAnnotation
+		{
+			std::string Name;
+			std::string Base;
+			AnnotationList Fields;
+		};
+		using ClassList = std::vector<ClassAnnotation>;
+
+		// 一次解析的完整结果:扁平字段表(老口径,`ParseFieldAnnotations` 仍用它)+ 类块(嵌套表用)。
+		struct ScriptAnnotations
+		{
+			AnnotationList Flat;
+			ClassList Classes;
+		};
+
+		constexpr int kMaxObjectDepth = 4;      // 与 ScriptProperties 的护栏同口径(plan v2 §B)
+		constexpr size_t kMaxObjectFields = 64;
+
+		ClassList ParseClassAnnotationListInternal(const std::string& text)
+		{
+			ClassList classes;
+			std::istringstream stream(text);
+			std::string line;
+			while (std::getline(stream, line))
+			{
+				const size_t start = line.find_first_not_of(" \t\r\n");
+				if (start == std::string::npos)
+					continue;
+				const std::string trimmed = line.substr(start);
+				if (trimmed.rfind("---@class", 0) == 0)
+				{
+					std::istringstream rest(trimmed.substr(9));
+					ClassAnnotation entry;
+					if (!(rest >> entry.Name))
+						continue;
+					std::string token;
+					if (rest >> token)
+					{
+						if (token == ":")
+							rest >> entry.Base;
+						else if (token.size() > 1 && token.front() == ':')
+							entry.Base = token.substr(1);
+					}
+					classes.push_back(std::move(entry));
+					continue;
+				}
+				if (trimmed.rfind("---@field", 0) != 0 || classes.empty())
+					continue;
+				std::istringstream rest(trimmed.substr(9));
+				FieldAnnotation annotation;
+				if (!(rest >> annotation.Name) || !(rest >> annotation.TypeName))
+					continue;
+				std::string remainder;
+				std::getline(rest, remainder);
+				annotation.Doc = TrimWhitespace(remainder);
+				ClassAnnotation& owner = classes.back();
+				if (std::any_of(owner.Fields.begin(), owner.Fields.end(),
+						[&annotation](const FieldAnnotation& item) { return item.Name == annotation.Name; }))
+					continue;   // 重复声明以第一次为准(与扁平解析同口径)
+				owner.Fields.push_back(std::move(annotation));
+			}
+			return classes;
+		}
+
+		ScriptAnnotations ParseScriptAnnotationsInternal(const std::string& text)
+		{
+			ScriptAnnotations parsed;
+			parsed.Flat = ParseFieldAnnotationListInternal(text);
+			parsed.Classes = ParseClassAnnotationListInternal(text);
+			return parsed;
+		}
+
+		// 根字段表:优先 `: WorldScript` 的类(脚本类);否则第一个类;一个类都没有 → 扁平表(老口径)。
+		const AnnotationList& RootAnnotationsOf(const ScriptAnnotations& parsed)
+		{
+			for (const ClassAnnotation& entry : parsed.Classes)
+				if (entry.Base == "WorldScript")
+					return entry.Fields;
+			if (!parsed.Classes.empty())
+				return parsed.Classes.front().Fields;
+			return parsed.Flat;
+		}
+
+		const ClassAnnotation* FindClassInternal(const ClassList& classes, const std::string& name)
+		{
+			for (const ClassAnnotation& entry : classes)
+				if (entry.Name == name)
+					return &entry;
+			return nullptr;
+		}
+
+		ScriptAnnotations ParseAnnotationsForBytes(const std::vector<uint8_t>& bytes)
 		{
 			if (Asset::ScriptArtifact::IsArtifactBytes(bytes.data(), bytes.size()))
 				return {};
-			return ParseFieldAnnotationListInternal(std::string(bytes.begin(), bytes.end()));
+			return ParseScriptAnnotationsInternal(std::string(bytes.begin(), bytes.end()));
 		}
 
 		// VEC-A1(D2):VM 与绑定上下文都活着才做 userdata 的装箱/解包。
@@ -423,7 +515,7 @@ namespace World
 		//         字段不在表里也保留声明(编辑器要显示),默认值 = monostate(未设,不写零值);
 		//   无注解字段(容器脚本 / 未写注解的表项):按值推断类型,默认值 = 表里的值。
 		std::vector<ScriptProperties::Declaration> BuildDeclarations(const ScriptTableRef& table,
-			const AnnotationList& annotations, const std::string& scriptPath, std::vector<std::string>* diagnostics)
+			const ScriptAnnotations& annotations, const std::string& scriptPath, std::vector<std::string>* diagnostics)
 		{
 			const std::vector<std::string> names = CollectOwnFieldNames(table);
 			const auto isField = [&names](const std::string& name)
@@ -435,43 +527,97 @@ namespace World
 				return name.empty() || name[0] == '_' || name == "entity";
 			};
 
-			std::vector<ScriptProperties::Declaration> declared;
-			std::unordered_set<std::string> visited;
-			for (const FieldAnnotation& annotation : annotations)
-			{
-				if (visited.count(annotation.Name) || skipName(annotation.Name))
-					continue;
-				visited.insert(annotation.Name);
-				const Schema::Kind kind = AnnotationToKindInternal(annotation.TypeName);
-				if (kind == Schema::Kind::None)
-				{
-					if (diagnostics)
-						diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
-							"' declares unsupported type '" + annotation.TypeName +
-							"' (expected number/integer/boolean/string/vec2/vec3/vec4); the field is not exposed as a script property");
-					continue;
-				}
+			// B 期:注解 → 声明(递归)。Object = `---@class` 结构化表(子字段递归)或裸 `table`(只读摘要);
+			// 叶子沿用老口径(固定映射 + 从脚本表读默认值,类型不符 → 诊断 + 跳过)。
+			std::function<void(const ScriptTableRef&, const AnnotationList&, int, std::vector<std::string>&,
+				std::unordered_set<std::string>&, std::vector<ScriptProperties::Declaration>&)> buildList;
+			std::function<void(const ScriptTableRef&, const std::vector<std::string>&, const FieldAnnotation&, int,
+				std::vector<std::string>&, ScriptProperties::Declaration&)> buildOne;
 
-				ScriptProperties::Declaration declaration;
-				declaration.Name = annotation.Name;
-				declaration.Type = kind;
-				declaration.Doc = annotation.Doc;
-				if (isField(annotation.Name))
+			buildOne = [&](const ScriptTableRef& ownerTable, const std::vector<std::string>& ownerNames,
+				const FieldAnnotation& annotation, int depth, std::vector<std::string>& classStack,
+				ScriptProperties::Declaration& out)
+			{
+				out = ScriptProperties::Declaration {};
+				out.Name = annotation.Name;
+				out.Doc = annotation.Doc;
+				// 只读**自有字段**(rawget 口径):`__index` 继承/错误元表不能在这里被触发
+				// (旧口径同此 —— 否则"加载期就该报的错"会提前在这里以别的形态炸掉)。
+				const bool hasOwnField = std::find(ownerNames.begin(), ownerNames.end(), annotation.Name) != ownerNames.end();
+				const ScriptValue fieldValue = hasOwnField ? ownerTable.GetField(annotation.Name.c_str()) : ScriptValue {};
+				const Schema::Kind kind = AnnotationToKindInternal(annotation.TypeName);
+				if (kind != Schema::Kind::None)
 				{
-					Schema::Value value;
-					if (!ReadPropertyValueInternal(table.GetField(annotation.Name.c_str()), kind, &value))
+					out.Type = kind;
+					if (!fieldValue.IsNil() && !ReadPropertyValueInternal(fieldValue, kind, &out.Default))
 					{
 						if (diagnostics)
 							diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
 								"' declares type '" + annotation.TypeName +
-								"' but the script table holds a different value type; the field is not exposed as a script property");
-						continue;
+								"' but the script table holds a different value type; "
+								"the field is not exposed as a script property");
+						out.Type = Schema::Kind::None;
 					}
-					declaration.Default = std::move(value);
+					return;
 				}
-				// 表里没有这个字段:声明仍成立,默认值保持 monostate(未设)—— 绝不写类型零值。
-				declared.push_back(std::move(declaration));
-			}
+
+				const bool bareTable = annotation.TypeName == "table";
+				const ClassAnnotation* nested = bareTable ? nullptr : FindClassInternal(annotations.Classes, annotation.TypeName);
+				if (!bareTable && !nested)
+				{
+					if (diagnostics)
+						diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
+							"' declares unsupported type '" + annotation.TypeName +
+							"' (expected number/integer/boolean/string/vec2/vec3/vec4/table, or a ---@class "
+							"declared in this file); the field is not exposed as a script property");
+					out.Type = Schema::Kind::None;
+					return;
+				}
+
+				out.Type = Schema::Kind::Object;
+				out.TypeName = bareTable ? std::string("table") : nested->Name;
+				if (bareTable || depth >= kMaxObjectDepth)
+					return;   // 裸 table = 只读摘要;深度护栏 = 不再展开
+				if (std::find(classStack.begin(), classStack.end(), nested->Name) != classStack.end())
+				{
+					if (diagnostics)
+						diagnostics->push_back("[script] " + scriptPath + ": class '" + nested->Name +
+							"' forms a reference cycle; the field is shown read-only");
+					return;
+				}
+				ScriptTableRef nestedTable;
+				fieldValue.AsTable(&nestedTable);   // 不是表 → 子字段全部保持"未设"(不猜、不写零值)
+				classStack.push_back(nested->Name);
+				std::unordered_set<std::string> nestedVisited;
+				buildList(nestedTable, nested->Fields, depth + 1, classStack, nestedVisited, out.Fields);
+				classStack.pop_back();
+			};
+
+			buildList = [&](const ScriptTableRef& ownerTable, const AnnotationList& list, int depth,
+				std::vector<std::string>& classStack, std::unordered_set<std::string>& visited,
+				std::vector<ScriptProperties::Declaration>& out)
+			{
+				const std::vector<std::string> ownerNames = CollectOwnFieldNames(ownerTable);
+				for (const FieldAnnotation& annotation : list)
+				{
+					if (visited.count(annotation.Name) || skipName(annotation.Name))
+						continue;
+					if (out.size() >= kMaxObjectFields)
+						break;   // 单层子字段上限(护栏)
+					visited.insert(annotation.Name);
+					ScriptProperties::Declaration declaration;
+					buildOne(ownerTable, ownerNames, annotation, depth, classStack, declaration);
+					if (declaration.Type == Schema::Kind::None)
+						continue;
+					out.push_back(std::move(declaration));
+				}
+			};
+
+			std::vector<ScriptProperties::Declaration> declared;
+			std::unordered_set<std::string> visited;
+			std::vector<std::string> classStack;
+			// 表里没有声明的字段:声明仍成立,默认值保持 monostate(未设)—— 绝不写类型零值。
+			buildList(table, RootAnnotationsOf(annotations), 0, classStack, visited, declared);
 			for (const std::string& name : names)
 			{
 				if (visited.count(name) || skipName(name))
@@ -498,7 +644,7 @@ namespace World
 		//      编辑器改过的值),新字段/类型变化取声明里的默认值或保持"未设"。
 		// 优先级:活表 > 场景保存值 > 脚本默认值(NULL 保持未设,绝不写零值)。
 		void SyncPropertiesFromScript(LuauScriptComponent& script, const ScriptTableRef& table,
-			const AnnotationList& annotations, const ScriptTableRef* liveTable, std::vector<std::string>* diagnostics)
+			const ScriptAnnotations& annotations, const ScriptTableRef* liveTable, std::vector<std::string>* diagnostics)
 		{
 			const std::vector<ScriptProperties::Declaration> declarations =
 				BuildDeclarations(table, annotations, script.ScriptPath, diagnostics);
@@ -562,13 +708,40 @@ namespace World
 		}
 
 		// 属性表 → 脚本表(实例创建 / 热重载交换前写入)。空值字段跳过:保留脚本自己的默认值。
+		// B 期:Object 属性递归建表;一个子字段都没设过 → Nil(不动脚本自己的那张表)。
+		ScriptValue BuildObjectScriptValue(const ScriptProperty& property)
+		{
+			if (!s_Vm)
+				return ScriptValue::Nil();
+			ScriptTableRef table = s_Vm->CreateTable();
+			if (!table.IsValid())
+				return ScriptValue::Nil();
+			bool wrote = false;
+			for (const ScriptProperty& child : property.Children)
+			{
+				ScriptValue childValue;
+				if (child.Type == Schema::Kind::Object)
+					childValue = BuildObjectScriptValue(child);
+				else if (!std::holds_alternative<std::monostate>(child.Value))
+					childValue = ToScriptValueInternal(child.Value);
+				if (childValue.IsNil())
+					continue;
+				if (!table.SetField(child.Name.c_str(), childValue))
+					throw std::logic_error("Cannot assign script table field '" + child.Name + "'");
+				wrote = true;
+			}
+			return wrote ? table.ToValue() : ScriptValue::Nil();
+		}
+
 		void ApplyProperties(LuauScriptComponent& script)
 		{
 			for (const ScriptProperty& property : script.Properties)
 			{
-				if (std::holds_alternative<std::monostate>(property.Value))
-					continue;
-				const ScriptValue value = ToScriptValueInternal(property.Value);
+				ScriptValue value;
+				if (property.Type == Schema::Kind::Object)
+					value = BuildObjectScriptValue(property);
+				else if (!std::holds_alternative<std::monostate>(property.Value))
+					value = ToScriptValueInternal(property.Value);
 				// VEC-A1(D2):无 VM/绑定不可用时向量装箱返回 Nil —— 跳过而不是写 nil(写 nil 会删掉脚本字段)。
 				if (value.IsNil())
 					continue;
@@ -901,7 +1074,7 @@ namespace World
 			return true;
 		}
 
-		const AnnotationList annotations = ParseAnnotationsForBytes(bytes);
+		const ScriptAnnotations annotations = ParseAnnotationsForBytes(bytes);
 		std::vector<std::string> localDiagnostics;
 		ScriptTableRef table;
 		if (vmAvailable)
