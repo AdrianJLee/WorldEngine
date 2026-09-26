@@ -514,6 +514,51 @@ namespace World
 		//   注解:类型走固定映射(number→Float);字段在表里时按声明类型取默认值(类型不符 → 跳过 + 诊断);
 		//         字段不在表里也保留声明(编辑器要显示),默认值 = monostate(未设,不写零值);
 		//   无注解字段(容器脚本 / 未写注解的表项):按值推断类型,默认值 = 表里的值。
+		// B 期 v3:未注解字段的类型推导 —— 叶子沿用旧口径;字符串键的表 → Struct(命名子行,递归,带初值);
+		// 含数字键的表(数组/混合)与空表 → 只读摘要(TypeName="table",无子字段)。
+		bool InferDeclarationFromValueInternal(const ScriptValue& value, const std::string& name, int depth,
+			ScriptProperties::Declaration& out)
+		{
+			out = ScriptProperties::Declaration {};
+			out.Name = name;
+			const Schema::Kind kind = InferKindFromValueInternal(value);
+			if (kind != Schema::Kind::None)
+			{
+				out.Type = kind;
+				return ReadPropertyValueInternal(value, kind, &out.Default);
+			}
+			ScriptTableRef nested;
+			if (!value.AsTable(&nested) || !nested.IsValid())
+				return false;
+			out.Type = Schema::Kind::Object;
+			out.TypeName = "table";
+			if (depth >= kMaxObjectDepth)
+				return true;   // 深度护栏 → 只读摘要
+			const std::vector<std::string> childNames = CollectOwnFieldNames(nested);
+			if (childNames.empty())
+				return true;   // 空表 → 只读摘要
+			for (const std::string& child : childNames)
+			{
+				const bool numeric = !child.empty() && std::all_of(child.begin(), child.end(),
+					[](char c) { return c >= '0' && c <= '9'; });
+				if (numeric)
+					return true;   // 数组/混合键:顺序不可靠 → 只读摘要(数组类型下一步做)
+			}
+			std::unordered_set<std::string> visited;
+			for (const std::string& child : childNames)
+			{
+				if (visited.count(child) || child.empty() || child[0] == '_')
+					continue;
+				if (out.Fields.size() >= kMaxObjectFields)
+					break;
+				visited.insert(child);
+				ScriptProperties::Declaration field;
+				if (InferDeclarationFromValueInternal(nested.GetField(child.c_str()), child, depth + 1, field))
+					out.Fields.push_back(std::move(field));
+			}
+			return true;
+		}
+
 		std::vector<ScriptProperties::Declaration> BuildDeclarations(const ScriptTableRef& table,
 			const ScriptAnnotations& annotations, const std::string& scriptPath, std::vector<std::string>* diagnostics)
 		{
@@ -624,13 +669,8 @@ namespace World
 					continue;
 				visited.insert(name);
 				const ScriptValue value = table.GetField(name.c_str());
-				const Schema::Kind kind = InferKindFromValueInternal(value);
-				if (kind == Schema::Kind::None)
-					continue;
 				ScriptProperties::Declaration declaration;
-				declaration.Name = name;
-				declaration.Type = kind;
-				if (!ReadPropertyValueInternal(value, kind, &declaration.Default))
+				if (!InferDeclarationFromValueInternal(value, name, 0, declaration))
 					continue;
 				declared.push_back(std::move(declaration));
 			}

@@ -36,6 +36,14 @@ local FeatureShowcase = {
         note = "运行期自用，不进场景",
         level = 1,
     },
+    -- 未写 `---@field` 的表：引擎按值推导类型（字符串键 → 可展开的结构化行，初值一起进属性面板）
+    InferredStats = {
+        Level = 3,
+        Title = "自动推导",
+        Scale = 1.25,
+    },
+    -- 未写注解的数组：数字键顺序不可靠 → 属性面板给一行只读摘要（数组类型推导是下一步）
+    RawScores = { 90, 85, 77 },
 }
 
 -- 运行时内部状态（非反射导出字段，无需在 @field 中声明）
@@ -50,6 +58,9 @@ function FeatureShowcase:OnCreate()
     -- 演示：结构化表的字段在运行期就是普通 Lua 表字段（面板改过的值会被写回这里）
     print(string.format("[FeatureShowcase] Stats: Damage=%.1f Range=%.1f Label='%s'",
         self.Stats.Damage, self.Stats.Range, self.Stats.Label))
+    -- 未注解字段同样会在属性面板里出现(推导类型 + 初值):这里读回来验证运行期就是普通 Lua 字段
+    print(string.format("[FeatureShowcase] InferredStats: Level=%d Title='%s' Scale=%.2f",
+        self.InferredStats.Level, self.InferredStats.Title, self.InferredStats.Scale))
 
     -- 演示：timers 计时器系统。创建周期性触发的定时器（每 1.0 秒触发一次，0 或缺省表示无限重复）
     self.timerTicks = 0
