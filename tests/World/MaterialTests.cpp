@@ -452,7 +452,9 @@ int main()
 		// 12. W5-L1 路径 bug 回归:无 Application 实例时 TextureData 的磁盘回退能吃内容根。
 		// 修复前拼的是 Game/textures/Icon.png(不存在)→ 1x1 白纹理兜底(Valid=false)。
 		{
-			const TextureData data = LoadTextureData("textures/Icon.png", /*flipVertically*/ false);
+			// 2026-09-26:纹理导入管线落地后源图 PNG 已删,资产是自包含单文件容器 ⇒
+			// 这条回归改读资产(`TextureData` 已支持容器内嵌字节),640×640 断言不变。
+			const TextureData data = LoadTextureData("textures/Icon.wtex", /*flipVertically*/ false);
 			CHECK(data.Valid);
 			CHECK(data.Width == 640);
 			CHECK(data.Height == 640);

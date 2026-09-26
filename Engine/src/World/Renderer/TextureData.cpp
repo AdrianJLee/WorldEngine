@@ -177,6 +177,20 @@ namespace World
 		if (path.empty())
 			return MakeWhiteFallback();
 
+		// 2026-09-26:单文件 `.wtex` 容器 = 设置 + 内嵌源图字节 —— 源图 PNG 删除后
+		// 这条磁盘回退也必须能出画(与运行时资产路径同一口径:先读容器,解码 payload)。
+		// 旧式(只有 `source:`)没有 payload,继续走下面的既有解析。
+		if (IsTextureAssetPath(path))
+		{
+			std::filesystem::path assetFile(path);
+			if (!assetFile.is_absolute())
+				assetFile = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+			TextureAssetFile asset;
+			std::string containerError;
+			if (LoadTextureAssetFile(assetFile, asset, containerError) && !asset.Payload.empty())
+				return LoadTextureDataFromMemory(asset.Payload, flipVertically);
+		}
+
 		int width = 1;
 		int height = 1;
 		int channels = 4;
