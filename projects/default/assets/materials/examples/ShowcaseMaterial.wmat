@@ -13,4 +13,4 @@ Params:
   emissiveTint: 0.2, 0.6, 1.0, 1
   opacity: 1
   ambientOcclusion: 1
-  albedoMap: textures/Icon.png
+  albedoMap: textures/Icon.wtex

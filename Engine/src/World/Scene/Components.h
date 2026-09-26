@@ -369,6 +369,9 @@ namespace World
 		std::string Name;
 		Schema::Kind Type = Schema::Kind::None;
 		Schema::Value Value;
+		// 脚本里声明的说明(注解 `---@field Speed number 移动速度` 的第三段 / C++ 的 `Doc("…")`)。
+		// **由脚本派生**:不进存档、不参与比较;检视器只用它做行悬停与读屏提示。
+		std::string Doc;
 	};
 
 	// C++ 行为组件(原 NativeScriptComponent;2026-09-26 重写)。

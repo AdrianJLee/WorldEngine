@@ -50,7 +50,7 @@ end
 function UiProbe:OnUI()
     -- ui.image 需要渲染设备;headless 下必须是可读 Lua error,不能触发 GL 断言。
     if self.failOnImage then
-        ui.image(0, 0, 10, 10, "textures/Icon.png")
+        ui.image(0, 0, 10, 10, "textures/Icon.wtex")
     end
     -- Error-isolation mode: an empty widget id is rejected by the binding with a
     -- readable Lua error and must only fault this instance.

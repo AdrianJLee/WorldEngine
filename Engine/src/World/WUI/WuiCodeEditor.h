@@ -28,6 +28,10 @@ namespace World::Wui
 		Function,
 		Field,
 		Annotation,
+		Constant,   // true / false / nil
+		Self,       // self
+		Parameter,
+		Punctuation,
 	};
 
 	// 一行的语法 token:偏移是相对该行首的字节偏移(行文本不含 '\n' 与行尾 '\r')。

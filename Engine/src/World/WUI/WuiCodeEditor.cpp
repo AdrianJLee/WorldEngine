@@ -57,8 +57,8 @@ namespace World::Wui
 		const WuiColor kOccurrenceWeak { 0.34f, 0.37f, 0.42f, 0.32f };
 		// WUI-MAT-INTEL4 配色(VS Code Dark+ 风格):名字(Default)保持中性;类型=青绿、函数=暖黄、
 		// 字段/全局=浅蓝、注解关键字=紫 —— 与关键字(蓝)/字符串/数字/注释/运算符分开。
-		const WuiColor kTokenColors[11] = {
-			{ 0.83f, 0.83f, 0.83f, 1.0f },   // Default(变量/名字/标点)
+		const WuiColor kTokenColors[15] = {
+			{ 0.83f, 0.83f, 0.83f, 1.0f },   // Default(变量/名字)
 			{ 0.34f, 0.61f, 0.84f, 1.0f },   // Keyword
 			{ 0.81f, 0.57f, 0.47f, 1.0f },   // String
 			{ 0.42f, 0.60f, 0.33f, 1.0f },   // Comment
@@ -67,8 +67,12 @@ namespace World::Wui
 			{ 0.83f, 0.83f, 0.83f, 1.0f },   // Operator
 			{ 0.31f, 0.79f, 0.69f, 1.0f },   // Type(类型标识:teal)
 			{ 0.86f, 0.86f, 0.67f, 1.0f },   // Function(函数:暖黄)
-			{ 0.61f, 0.86f, 1.00f, 1.0f },   // Field(成员/字段:浅蓝)
+			{ 0.67f, 0.84f, 0.94f, 1.0f },   // Field(成员/字段:浅蓝)
 			{ 0.77f, 0.53f, 0.75f, 1.0f },   // Annotation(注解关键字:紫)
+			{ 0.34f, 0.71f, 0.76f, 1.0f },   // Constant(true/false/nil)
+			{ 0.77f, 0.53f, 0.75f, 1.0f },   // Self(self)
+			{ 0.67f, 0.84f, 0.94f, 1.0f },   // Parameter
+			{ 0.63f, 0.66f, 0.70f, 1.0f },   // Punctuation
 		};
 
 		// W9.5 补全浮层:最多 12 行可滚动 + 底部一行 Doc。

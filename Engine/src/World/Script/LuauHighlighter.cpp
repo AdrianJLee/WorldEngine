@@ -22,32 +22,51 @@ namespace World
 			return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 		}
 		bool IsIdentPart(char c) { return IsIdentStart(c) || IsAsciiDigit(c); }
-		bool IsOperatorChar(char c)
+		// 标点符号字符(( ) { } [ ] , ;)。'.' 与 ':' 因可能构成 '..' / '...' / '::' 单独判定。
+		bool IsPunctuationChar(char c)
 		{
 			switch (c)
 			{
-				case '+': case '-': case '*': case '/': case '%': case '^': case '#':
-				case '=': case '<': case '>': case ';': case ':': case ',': case '.':
 				case '(': case ')': case '{': case '}': case '[': case ']':
-				case '&': case '|': case '~': case '?': case '@': case '$':
+				case ',': case ';':
 					return true;
 				default:
 					return false;
 			}
 		}
 
-		// Luau 关键字(含 Luau 追加的 continue/export/type/typeof)。
+		// 纯运算符字符(+ - * / % ^ # == ~= <= >= < > = 等)。
+		bool IsOpChar(char c)
+		{
+			switch (c)
+			{
+				case '+': case '-': case '*': case '/': case '%': case '^': case '#':
+				case '=': case '<': case '>': case '~': case '&': case '|':
+				case '?': case '@': case '$':
+					return true;
+				default:
+					return false;
+			}
+		}
+
+		// Luau 关键字(含 Luau 追加的 continue/export/type/typeof;true/false/nil 单独作为 Constant 处理)。
 		bool IsKeyword(std::string_view text)
 		{
 			static constexpr std::string_view kKeywords[] = {
-				"and", "break", "continue", "do", "else", "elseif", "end", "export", "false",
-				"for", "function", "if", "in", "local", "nil", "not", "or", "repeat", "return",
-				"then", "true", "type", "typeof", "until", "while",
+				"and", "break", "continue", "do", "else", "elseif", "end", "export",
+				"for", "function", "if", "in", "local", "not", "or", "repeat", "return",
+				"then", "type", "typeof", "until", "while",
 			};
 			for (const std::string_view keyword : kKeywords)
 				if (text == keyword)
 					return true;
 			return false;
+		}
+
+		// 常量字面量(true / false / nil)。
+		bool IsConstant(std::string_view text)
+		{
+			return text == "true" || text == "false" || text == "nil";
 		}
 
 		// 引擎已知全局名(脚本层暴露给用户的入口;未列出的标识符按 Default 处理)。
@@ -186,17 +205,13 @@ namespace World
 			return i;
 		}
 
-		// 运算符连续段;遇到 `--`(注释)或长括号起始就让位给更高优先级的规则。
+		// 运算符连续段;遇到 `--`(注释)就让位给更高优先级的规则。
 		size_t ScanOperator(std::string_view line, size_t start)
 		{
 			size_t i = start;
-			while (i < line.size() && IsOperatorChar(line[i]))
+			while (i < line.size() && IsOpChar(line[i]))
 			{
 				if (line[i] == '-' && i + 1 < line.size() && line[i + 1] == '-')
-					break;
-				int equals = 0;
-				size_t openLength = 0;
-				if (line[i] == '[' && TryLongBracketOpen(line, i, equals, openLength))
 					break;
 				++i;
 			}
@@ -220,10 +235,21 @@ namespace World
 	{
 		out.clear();
 		const size_t size = line.size();
-		const auto push = [&out](size_t start, size_t end, WuiCodeTokenKind kind)
+
+		// 中间词法结构:包含单行内所有 token(含暂定 Default 的标识符与标点),便于单行浅层 lookahead。
+		struct RawToken
+		{
+			uint32_t Start = 0;
+			uint32_t End = 0;
+			WuiCodeTokenKind Kind = WuiCodeTokenKind::Default;
+		};
+		std::vector<RawToken> rawTokens;
+		rawTokens.reserve(size / 4 + 4);
+
+		const auto pushRaw = [&rawTokens](size_t start, size_t end, WuiCodeTokenKind kind)
 		{
 			if (end > start)
-				out.push_back({ static_cast<uint32_t>(start), static_cast<uint32_t>(end), kind });
+				rawTokens.push_back({ static_cast<uint32_t>(start), static_cast<uint32_t>(end), kind });
 		};
 
 		size_t i = 0;
@@ -233,24 +259,30 @@ namespace World
 			const size_t close = FindLongBracketClose(line, 0, state.BlockCommentLevel);
 			if (close == kNone)
 			{
-				push(0, size, WuiCodeTokenKind::Comment);
-				return;
+				pushRaw(0, size, WuiCodeTokenKind::Comment);
+				i = size;
 			}
-			push(0, close, WuiCodeTokenKind::Comment);
-			i = close;
-			state.BlockCommentLevel = -1;
+			else
+			{
+				pushRaw(0, close, WuiCodeTokenKind::Comment);
+				i = close;
+				state.BlockCommentLevel = -1;
+			}
 		}
 		else if (state.LongStringLevel >= 0)
 		{
 			const size_t close = FindLongBracketClose(line, 0, state.LongStringLevel);
 			if (close == kNone)
 			{
-				push(0, size, WuiCodeTokenKind::String);
-				return;
+				pushRaw(0, size, WuiCodeTokenKind::String);
+				i = size;
 			}
-			push(0, close, WuiCodeTokenKind::String);
-			i = close;
-			state.LongStringLevel = -1;
+			else
+			{
+				pushRaw(0, close, WuiCodeTokenKind::String);
+				i = close;
+				state.LongStringLevel = -1;
+			}
 		}
 
 		while (i < size)
@@ -272,16 +304,16 @@ namespace World
 					const size_t close = FindLongBracketClose(line, cursor + openLength, equals);
 					if (close == kNone)
 					{
-						push(i, size, WuiCodeTokenKind::Comment);
+						pushRaw(i, size, WuiCodeTokenKind::Comment);
 						state.BlockCommentLevel = equals;
-						return;
+						break;
 					}
-					push(i, close, WuiCodeTokenKind::Comment);
+					pushRaw(i, close, WuiCodeTokenKind::Comment);
 					i = close;
 					continue;
 				}
-				push(i, size, WuiCodeTokenKind::Comment);
-				return;
+				pushRaw(i, size, WuiCodeTokenKind::Comment);
+				break;
 			}
 			// 长括号字符串:[[ .. ]] / [=[ .. ]=]。
 			if (c == '[')
@@ -293,11 +325,11 @@ namespace World
 					const size_t close = FindLongBracketClose(line, i + openLength, equals);
 					if (close == kNone)
 					{
-						push(i, size, WuiCodeTokenKind::String);
+						pushRaw(i, size, WuiCodeTokenKind::String);
 						state.LongStringLevel = equals;
-						return;
+						break;
 					}
-					push(i, close, WuiCodeTokenKind::String);
+					pushRaw(i, close, WuiCodeTokenKind::String);
 					i = close;
 					continue;
 				}
@@ -306,7 +338,7 @@ namespace World
 			if (c == '"' || c == '\'')
 			{
 				const size_t end = ScanQuoted(line, i);
-				push(i, end, WuiCodeTokenKind::String);
+				pushRaw(i, end, WuiCodeTokenKind::String);
 				i = end;
 				continue;
 			}
@@ -314,22 +346,78 @@ namespace World
 			if (IsAsciiDigit(c) || (c == '.' && i + 1 < size && IsAsciiDigit(line[i + 1])))
 			{
 				const size_t end = ScanNumber(line, i);
-				push(i, end, WuiCodeTokenKind::Number);
+				pushRaw(i, end, WuiCodeTokenKind::Number);
 				i = end;
 				continue;
 			}
-			// 标识符:关键字 / 已知全局名 / 普通标识符(普通标识符不产 token = Default)。
+			// 标识符:常量 / self / 关键字 / 已知全局名 / 普通标识符(暂记 Default,留待语义规则修饰)。
 			if (IsIdentStart(c))
 			{
 				size_t end = i + 1;
 				while (end < size && IsIdentPart(line[end]))
 					++end;
 				const std::string_view word = line.substr(i, end - i);
-				if (IsKeyword(word))
-					push(i, end, WuiCodeTokenKind::Keyword);
+				WuiCodeTokenKind kind = WuiCodeTokenKind::Default;
+				if (IsConstant(word))
+					kind = WuiCodeTokenKind::Constant;
+				else if (word == "self")
+					kind = WuiCodeTokenKind::Self;
+				else if (IsKeyword(word))
+					kind = WuiCodeTokenKind::Keyword;
 				else if (IsKnownGlobal(word))
-					push(i, end, WuiCodeTokenKind::Global);
+					kind = WuiCodeTokenKind::Global;
+				pushRaw(i, end, kind);
 				i = end;
+				continue;
+			}
+			// 标点与运算符:点号(成员访问 . vs 连接符 .. / 变参 ... / 复合赋值 ..=)。
+			if (c == '.')
+			{
+				if (i + 1 < size && line[i + 1] == '.')
+				{
+					if (i + 2 < size && line[i + 2] == '.')
+					{
+						pushRaw(i, i + 3, WuiCodeTokenKind::Operator);
+						i += 3;
+					}
+					else if (i + 2 < size && line[i + 2] == '=')
+					{
+						pushRaw(i, i + 3, WuiCodeTokenKind::Operator);
+						i += 3;
+					}
+					else
+					{
+						pushRaw(i, i + 2, WuiCodeTokenKind::Operator);
+						i += 2;
+					}
+				}
+				else
+				{
+					pushRaw(i, i + 1, WuiCodeTokenKind::Punctuation);
+					i += 1;
+				}
+				continue;
+			}
+			// 标点与运算符:冒号(方法/类型声明 : vs 类型强转 ::)。
+			if (c == ':')
+			{
+				if (i + 1 < size && line[i + 1] == ':')
+				{
+					pushRaw(i, i + 2, WuiCodeTokenKind::Operator);
+					i += 2;
+				}
+				else
+				{
+					pushRaw(i, i + 1, WuiCodeTokenKind::Punctuation);
+					i += 1;
+				}
+				continue;
+			}
+			// 其余标点符号:( ) { } [ ] , ;
+			if (IsPunctuationChar(c))
+			{
+				pushRaw(i, i + 1, WuiCodeTokenKind::Punctuation);
+				i += 1;
 				continue;
 			}
 			// 其余非 ASCII 字节(如未加引号的中文)按 Default 跳过,保证不切碎多字节序列。
@@ -338,15 +426,143 @@ namespace World
 				++i;
 				continue;
 			}
-			// 运算符(连续段一个 token)。
-			if (IsOperatorChar(c))
+			// 纯运算符(连续段一个 token)。
+			if (IsOpChar(c))
 			{
 				const size_t end = ScanOperator(line, i);
-				push(i, end, WuiCodeTokenKind::Operator);
+				pushRaw(i, end, WuiCodeTokenKind::Operator);
 				i = end;
 				continue;
 			}
 			++i;
+		}
+
+		// 第二阶段:单行浅层 lookahead 与语义规则修饰
+		const auto tokenText = [&line](const RawToken& t) -> std::string_view
+		{
+			return line.substr(t.Start, t.End - t.Start);
+		};
+
+		const size_t tokenCount = rawTokens.size();
+
+		// 规则 2 & 4: 单行内函数声明与形参列表
+		for (size_t t = 0; t < tokenCount; ++t)
+		{
+			if (rawTokens[t].Kind == WuiCodeTokenKind::Keyword && tokenText(rawTokens[t]) == "function")
+			{
+				size_t k = t + 1;
+				// 函数名(单行内)
+				if (k < tokenCount && tokenText(rawTokens[k]) != "(")
+				{
+					// 若函数名不带 . 或 : 则为普通函数名 foo -> Function
+					const bool followedByDotOrColon = (k + 1 < tokenCount)
+						&& (tokenText(rawTokens[k + 1]) == "." || tokenText(rawTokens[k + 1]) == ":");
+					if (!followedByDotOrColon)
+					{
+						if (rawTokens[k].Kind == WuiCodeTokenKind::Default)
+							rawTokens[k].Kind = WuiCodeTokenKind::Function;
+						++k;
+					}
+
+					// 遍历后续的点号字段名与冒号方法名
+					while (k < tokenCount && tokenText(rawTokens[k]) != "(")
+					{
+						const std::string_view sep = tokenText(rawTokens[k]);
+						if (sep == ".")
+						{
+							++k;
+							if (k < tokenCount && tokenText(rawTokens[k]) != "(")
+							{
+								if (rawTokens[k].Kind == WuiCodeTokenKind::Default)
+									rawTokens[k].Kind = WuiCodeTokenKind::Field;
+								++k;
+							}
+						}
+						else if (sep == ":")
+						{
+							++k;
+							if (k < tokenCount && tokenText(rawTokens[k]) != "(")
+							{
+								if (rawTokens[k].Kind == WuiCodeTokenKind::Default)
+									rawTokens[k].Kind = WuiCodeTokenKind::Function;
+								++k;
+							}
+						}
+						else
+						{
+							++k;
+						}
+					}
+				}
+
+				// 形参列表(规则 4: 只在 function <...>( a, b, c ) 括号内,超出本行不追踪)
+				if (k < tokenCount && rawTokens[k].Kind == WuiCodeTokenKind::Punctuation && tokenText(rawTokens[k]) == "(")
+				{
+					int parenDepth = 1;
+					bool expectingParam = true;
+					++k;
+					while (k < tokenCount && parenDepth > 0)
+					{
+						const std::string_view txt = tokenText(rawTokens[k]);
+						if (rawTokens[k].Kind == WuiCodeTokenKind::Punctuation)
+						{
+							if (txt == "(")
+							{
+								++parenDepth;
+							}
+							else if (txt == ")")
+							{
+								--parenDepth;
+								if (parenDepth == 0)
+									break;
+							}
+							else if (txt == "," && parenDepth == 1)
+							{
+								expectingParam = true;
+							}
+							else if (txt == ":" && parenDepth == 1)
+							{
+								expectingParam = false;
+							}
+						}
+						else if (rawTokens[k].Kind == WuiCodeTokenKind::Operator && txt == "=" && parenDepth == 1)
+						{
+							expectingParam = false;
+						}
+						else if (expectingParam && parenDepth == 1)
+						{
+							// 优先级 5: 注释/串/数字 > 关键字 > Constant/Self > 新规则 > Global > Default
+							// 非关键字、非 Constant、非 Self 标识符均归为 Parameter
+							if (rawTokens[k].Kind == WuiCodeTokenKind::Default || rawTokens[k].Kind == WuiCodeTokenKind::Global)
+							{
+								rawTokens[k].Kind = WuiCodeTokenKind::Parameter;
+								expectingParam = false;
+							}
+						}
+						++k;
+					}
+				}
+			}
+		}
+
+		// 规则 3: 调用点 <ident>( 且该 ident 不是关键字、不是已知全局
+		for (size_t t = 0; t < tokenCount; ++t)
+		{
+			if (rawTokens[t].Kind == WuiCodeTokenKind::Default)
+			{
+				if (t + 1 < tokenCount && rawTokens[t + 1].Kind == WuiCodeTokenKind::Punctuation
+					&& tokenText(rawTokens[t + 1]) == "(")
+				{
+					rawTokens[t].Kind = WuiCodeTokenKind::Function;
+				}
+			}
+		}
+
+		// 第三阶段:输出语义 token(空隙表示 Default,由编辑器按 Default 补齐)
+		for (const RawToken& token : rawTokens)
+		{
+			if (token.Kind != WuiCodeTokenKind::Default && token.End > token.Start)
+				out.push_back({ token.Start, token.End, token.Kind });
 		}
 	}
 
