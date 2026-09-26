@@ -120,7 +120,8 @@ namespace
 		entity.AddComponent<TransformComponent>();
 		CameraComponent& camera = entity.AddComponent<CameraComponent>();
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(kCameraProbePath);
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		std::string declarationError;
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, &declarationError));
 
 		// OnCreate 阶段:读默认投影字段 + 枚举名/数值两种写法(相机模式让 OnUpdate 保持安静)。
 		SetGlobal("TEST_LuaPhase", "create");
@@ -181,7 +182,8 @@ namespace
 		Entity entity = Entity::CreateEntity(&scene, "runtime camera");
 		entity.AddComponent<TransformComponent>();
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(kCameraProbePath);
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		std::string declarationError;
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, &declarationError));
 		SetGlobal("TEST_CameraProbeMode", "none");
 
 		scene.OnScriptStart();

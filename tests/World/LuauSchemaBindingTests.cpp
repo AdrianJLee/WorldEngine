@@ -228,7 +228,8 @@ body.FixedRotation = true
 		TransformComponent& transform = entity.AddComponent<TransformComponent>();
 		transform.SetLocation(glm::vec3(0.0f));
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(kLuaFixturePath);
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		std::string declarationError;
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, &declarationError));
 
 		LuauVm& vm = ScriptEngine::GetState();
 		ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();

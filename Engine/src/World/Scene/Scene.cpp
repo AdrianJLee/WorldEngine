@@ -507,6 +507,20 @@ namespace World
 						const Schema::FieldSchema* field = FindSchemaField(*type, property.Name);
 						if (!field || !field->Set || field->K != property.Type)
 							continue;
+						// P2-②:手改场景 / 坏存档可能让值停在 monostate 或 variant 备选与声明类型不符 ——
+						// 直接 Set 会抛 bad_variant_access 把整条脚本打成 Faulted。未设值 = 跳过(保留脚本默认),
+						// 类型不符 = 跳过 + 一条可读诊断。
+						if (ScriptProperties::IsUnset(property))
+							continue;
+						if (!ScriptProperties::ValueMatchesKind(property.Value, property.Type))
+						{
+							if (Log::GetCoreLogger())
+								WLD_CORE_WARN("[Native] {0} entity={1} phase=Properties: field '{2}' has a value "
+									"that does not match type {3}; the saved value was skipped",
+									script.ScriptName, static_cast<uint32_t>(entity), property.Name,
+									ScriptProperties::KindName(property.Type));
+							continue;
+						}
 						field->Set(dynamic_cast<void*>(script.Instance), property.Value);
 					}
 					script.Runtime.CreateEntered = true;
@@ -554,6 +568,16 @@ namespace World
 			const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script->ScriptName) : nullptr;
 			if (script->Instance && type && type->Script && type->Script->Destroy)
 				InvokeCallback(source, [&] { type->Script->Destroy(script->Instance); });
+			else if (script->Instance)
+			{
+				// P2-①:实例还在但脚本已经取不到工厂(未注册 / 脚本模块未加载)——原先静默把指针丢掉 = 泄漏。
+				// 实例无法安全释放(Destroy 回调不可得),这里只写一条可读警告;释放路径只走一次:
+				// 拿不到工厂时不调用任何释放函数,函数末尾统一把 Instance 置空。
+				if (Log::GetCoreLogger())
+					WLD_CORE_WARN("[Native] {0} entity={1} phase=Release: script factory is not registered; "
+						"the live instance cannot be released and is leaked",
+						script->ScriptName, static_cast<uint32_t>(entity));
+			}
 		}
 		catch (const std::exception& error) { script->Runtime.LastError += "\n" + NativeError(*script, entity, "Release", error.what()); Report(script->Runtime.LastError); faulted = true; }
 		catch (...) { Report("Native script release threw an unknown exception"); faulted = true; }

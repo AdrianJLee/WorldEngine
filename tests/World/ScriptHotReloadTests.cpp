@@ -9,7 +9,8 @@
 //   6. 拒绝语义:State ∈ {Creating, Destroying} 与回调内(非安全点)拒绝,帧边界可重载;
 //   7. generation:热重载后进入独立域(最高位置位),与 Scene 启动期分配值及上一次重载值都不同。
 //   8. 活字段迁移:OnUpdate 里 self.X = ... 的运行期值(活表)优先于场景保存的属性值,活表缺失才回退属性表;
-//   9. 指纹基线:编辑器预览与运行期两条加载路径成功后 SourceFingerprint 与当前文件一致,不改文件零次重载。
+//   9. 指纹基线:运行期加载成功后 SourceFingerprint 与当前文件一致,不改文件零次重载;
+//      编辑态声明同步只更新属性表,不建立/覆盖运行期指纹(SCRIPT-V7 起旧编辑态入口已删除)。
 //
 // headless:真实 Scene 调度(OnScriptStart/OnScriptUpdate),脚本写在构建产物的临时目录里,
 // 逻辑路径是相对 WLD_ASSETPATH 的带 ".." 路径(与 ScriptLifecycleTests 同一模式)。
@@ -330,7 +331,7 @@ return {
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
 		// 编辑器预览路径先登记 v1 的行为描述(A,B 两个字段)。
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
 		const BehaviorDesc* before = BehaviorRegistry::Instance().Find(BehaviorRegistry::LuaModuleId(logical));
 		CHECK(before != nullptr);
 		CHECK(before->Fields.size() == 2);
@@ -425,7 +426,7 @@ return {
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "type change probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表由脚本注解/默认值构建
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));   // 属性表由脚本注解/默认值构建
 		scene.OnScriptStart();
 		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 		std::get<int32_t>(FIELD(script.Properties, "A").Value) = 7;
@@ -481,7 +482,7 @@ return {
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "rollback probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表由脚本注解/默认值构建
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));   // 属性表由脚本注解/默认值构建
 		scene.OnScriptStart();
 		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 		std::get<int32_t>(FIELD(script.Properties, "A").Value) = 41;
@@ -544,7 +545,7 @@ return {
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "watch probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表由脚本注解/默认值构建
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));   // 属性表由脚本注解/默认值构建
 		scene.OnScriptStart();
 		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 		CHECK(std::get<int32_t>(FIELD(script.Properties, "C").Value) == 1);
@@ -638,7 +639,7 @@ return {
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "safety probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表由脚本注解/默认值构建
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));   // 属性表由脚本注解/默认值构建
 		scene.OnScriptStart();
 		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 
@@ -704,7 +705,7 @@ return {
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "live field probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表初始为 {A=1,B=2}
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));   // 属性表初始为 {A=1,B=2}
 		scene.OnScriptStart();
 		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 
@@ -743,7 +744,7 @@ return {
 		CHECK(script.Runtime.LastError.empty());
 		scene.OnRuntimeStop();
 
-		// 真实宿主不调用 InitScriptForEditor:属性表为空,首次加载后的运行期赋值同样要能迁移。
+		// 真实宿主不经过编辑态同步:属性表为空,首次加载后的运行期赋值同样要能迁移。
 		const fs::path runtimeFile = ScriptPath("hotreload_live_runtime.lua");
 		WriteScript(runtimeFile, kLiveFieldV1);
 		const std::string runtimeLogical = LogicalPath(runtimeFile);
@@ -802,7 +803,7 @@ return {
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "property order probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
 
 		CHECK(script.Properties.size() == 4);   // Odd 被跳过
 		CHECK(script.Properties[0].Name == "Gamma" && script.Properties[0].Type == Schema::Kind::Int32);
@@ -816,7 +817,7 @@ return {
 
 		// 编辑器改值 → 重新预览(重开场景同一条路径)必须保值;顺序与类型不变。
 		std::get<std::string>(script.Properties[1].Value) = "edited";
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
 		CHECK(script.Properties.size() == 4);
 		CHECK(script.Properties[1].Name == "Alpha");
 		CHECK(std::get<std::string>(script.Properties[1].Value) == "edited");
@@ -948,6 +949,18 @@ return PlayerScript
 		CHECK(ScriptProperties::IsUnset(FIELD(script.Properties, "Unset")));
 		CHECK(script.Runtime.LastError.empty());
 		scene.OnRuntimeStop();
+
+		// SCRIPT-V7 P2-④:脚本路径由**任何来源**变化(这里直接改字段 = `scene.set` / 反序列化同一落点)
+		// 也必须重建属性表 —— 面板每帧调引擎入口,引擎按"路径 + 内容指纹"判定是否重解析。
+		const fs::path otherFile = ScriptPath("hotreload_declarations_other.lua");
+		WriteScript(otherFile, kPropertyOrderSource);
+		script.ScriptPath = LogicalPath(otherFile);
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, &error));
+		CHECK(error.empty());
+		CHECK(script.Properties.size() == 4);                                    // 按新脚本的声明重建
+		CHECK(ScriptProperties::Find(script.Properties, "Speed") == nullptr);    // 旧脚本字段被丢弃
+		CHECK(FIELD(script.Properties, "Gamma").Type == Schema::Kind::Int32);
+		CHECK(FIELD(script.Properties, "Beta").Type == Schema::Kind::Float);
 	}
 
 	// ---- 7. 指纹基线:两条加载路径 + 监听零假阳性 ----
@@ -962,18 +975,18 @@ return PlayerScript
 		CHECK(expected.FromContent);
 		CHECK(expected.Value != 0);
 
-		// 1) 编辑器预览路径:成功后写入当前文件指纹,并清掉遗留诊断。
+		// 1) 编辑态声明同步:属性表跟着脚本走,但**不碰运行期状态**(指纹/诊断属于运行实例;
+		//    编辑态写指纹会让热重载监听误判"实例已是最新")。SCRIPT-V7:InitScriptForEditor 已删除。
 		Scene editorScene(TestContext());
 		Entity editorEntity = Entity::CreateEntity(&editorScene, "baseline preview");
 		LuauScriptComponent& preview = editorEntity.AddComponent<LuauScriptComponent>(logical);
 		preview.ReloadDiagnostic = "stale preview diagnostic";
-		CHECK(ScriptEngine::InitScriptForEditor(preview));
-		CHECK(preview.SourceFingerprint != 0);
-		CHECK(preview.SourceFingerprint == expected.Value);
-		CHECK(preview.SourceFingerprint == FingerprintScriptSource(logical).Value);   // 宿主比较口径
-		CHECK(preview.ReloadDiagnostic.empty());
+		CHECK(ScriptEngine::SyncScriptDeclarations(preview, nullptr, nullptr));
+		CHECK(preview.Properties.size() == 2);                 // A / C 两条声明同步进组件
+		CHECK(preview.SourceFingerprint == 0);                 // 编辑态不建立运行期基线
+		CHECK(preview.ReloadDiagnostic == "stale preview diagnostic");   // 也不清运行期诊断
 
-		// 2) 运行期路径:不经过 InitScriptForEditor,OnCreateScript 成功后同样建立基线。
+		// 2) 运行期路径:不经过编辑态同步,OnCreateScript 成功后建立基线。
 		Scene runtimeScene(TestContext());
 		Entity runtimeEntity = Entity::CreateEntity(&runtimeScene, "baseline runtime");
 		LuauScriptComponent& runtime = runtimeEntity.AddComponent<LuauScriptComponent>(logical);
@@ -1000,7 +1013,7 @@ return PlayerScript
 		}
 		CHECK(reloads == 0);
 		CHECK(runtime.SourceFingerprint == FingerprintScriptSource(logical).Value);
-		CHECK(preview.SourceFingerprint == FingerprintScriptSource(logical).Value);
+		CHECK(preview.SourceFingerprint == 0);   // 编辑态组件没有运行期基线:宿主比较不会假阳性
 		CHECK(runtime.Runtime.LastError.empty());
 
 		runtimeScene.OnRuntimeStop();

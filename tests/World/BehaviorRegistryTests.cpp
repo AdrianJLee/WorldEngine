@@ -257,7 +257,10 @@ namespace
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "lua behavior");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(kLuaFixturePath);
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		// SCRIPT-V7:编辑态入口统一为引擎的声明同步(旧的 InitScriptForEditor 已作为死代码删除)。
+		std::string syncError;
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, &syncError));
+		CHECK(syncError.empty());
 
 		const std::string moduleId = BehaviorRegistry::LuaModuleId(kLuaFixturePath);
 		CHECK(moduleId == std::string("Lua:") + kLuaFixturePath);
@@ -321,7 +324,8 @@ namespace
 		Entity both = Entity::CreateEntity(&scene, "two behaviors");
 		both.AddComponent<CppScriptComponent>().ScriptName = "ProbeBehavior"; // 短名,走 schema 解析
 		LuauScriptComponent& lua = both.AddComponent<LuauScriptComponent>(kLuaFixturePath);
-		CHECK(ScriptEngine::InitScriptForEditor(lua));
+		std::string syncError;
+		CHECK(ScriptEngine::SyncScriptDeclarations(lua, nullptr, &syncError));
 
 		const auto first = registry.DescribeEntity(scene, static_cast<entt::entity>(both));
 		CHECK(first.size() == 2);
@@ -366,8 +370,10 @@ namespace
 		CppScriptComponent& native = entity.AddComponent<CppScriptComponent>();
 		native.ScriptName = "ProbeBehavior";
 		LuauScriptComponent& lua = entity.AddComponent<LuauScriptComponent>(kLuaFixturePath);
-		CHECK(ScriptEngine::InitScriptForEditor(lua));
-		CHECK(lua.Runtime.State == ScriptInstanceState::Stopped);
+		std::string syncError;
+		CHECK(ScriptEngine::SyncScriptDeclarations(lua, nullptr, &syncError));
+		// 声明同步不碰运行期状态:组件保持 Pending,Play 时由 Scene::StartPendingScripts 拉起。
+		CHECK(lua.Runtime.State == ScriptInstanceState::Pending);
 
 		CHECK(registry.DescribeEntity(entity).size() == 2);
 

@@ -9,7 +9,7 @@
 //   失败路径:包内容器被改一字节 → 加载失败且 LastError 含固定短语 payload checksum mismatch。
 //   回归:源码脚本仍按既有方式(注解解析)加载。
 //   指纹:容器脚本的基线指纹 = 容器字节的 FNV-1a64(不是源码文本);热重载后仍来自容器字节。
-//   编辑器预览:InitScriptForEditor 也吃容器字节并跳过 ---@field 注解解析。
+//   编辑态声明同步(ScriptEngine::SyncScriptDeclarations)也吃容器字节并跳过 ---@field 注解解析。
 //
 // 头布局(由 W7-1 冻结):magic "WSL1" + 28 字节头 + payload;本测只经公开 API 使用。
 
@@ -231,8 +231,9 @@ return {
 		Entity entity = Entity::CreateEntity(&scene, "source probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
-		// 宿主既有流程:编辑器预览先按注解建字段缓存,运行期再把缓存写进脚本表。
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		// 宿主既有流程:编辑态声明同步先按注解建属性表,运行期再把值写进脚本表。
+		// SCRIPT-V7:统一走引擎的声明入口(旧的 InitScriptForEditor 已作为死代码删除)。
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
 		const ScriptProperty* cached = ScriptProperties::Find(script.Properties, "amount");
 		CHECK(cached != nullptr);
 		CHECK(cached->Type == Schema::Kind::String);   // 源码路径仍按注解
@@ -270,8 +271,8 @@ return {
 		Entity entity = Entity::CreateEntity(&scene, "reload probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
-		// 编辑器预览先建缓存(容器 → 注解被跳过 → Int),运行期把它写进脚本表。
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		// 编辑态声明同步先建属性表(容器 → 注解被跳过 → Int),运行期把值写进脚本表。
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
 		const ScriptProperty* previewFields = ScriptProperties::Find(script.Properties, "amount");
 		CHECK(previewFields != nullptr);
 		CHECK(previewFields->Type == Schema::Kind::Int32);
@@ -301,7 +302,7 @@ return {
 		scene.OnRuntimeStop();
 	}
 
-	// ---- 编辑器预览:InitScriptForEditor 也吃容器字节并跳过注解 ----
+	// ---- 编辑态声明同步:容器字节也跳过注解;运行期基线只在 Play/Reload 建立 ----
 
 	void EditorPreviewLoadsContainerWithoutAnnotations()
 	{
@@ -314,10 +315,11 @@ return {
 		Entity entity = Entity::CreateEntity(&scene, "preview probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
-		CHECK(ScriptEngine::InitScriptForEditor(script));
-		CHECK(script.Runtime.State == ScriptInstanceState::Stopped);
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
+		// 编辑态声明同步:不建实例、不进运行态;运行期基线(指纹)由 Play/Reload 建立。
+		CHECK(script.Runtime.State == ScriptInstanceState::Pending);
 		CHECK(script.Runtime.LastError.empty());
-		CHECK(script.SourceFingerprint == FingerprintScriptBytes(container.data(), container.size()));
+		CHECK(script.SourceFingerprint == 0);
 		const ScriptProperty* amount = ScriptProperties::Find(script.Properties, "amount");
 		CHECK(amount != nullptr);
 		CHECK(amount->Type == Schema::Kind::Int32);   // 注解被跳过(否则会被丢弃)
@@ -328,11 +330,10 @@ return {
 		Entity sourceEntity = Entity::CreateEntity(&scene, "preview source probe");
 		LuauScriptComponent& sourceScript =
 			sourceEntity.AddComponent<LuauScriptComponent>(LogicalPath(sourceFile));
-		CHECK(ScriptEngine::InitScriptForEditor(sourceScript));
+		CHECK(ScriptEngine::SyncScriptDeclarations(sourceScript, nullptr, nullptr));
 		CHECK(sourceScript.Runtime.LastError.empty());
 		CHECK(ScriptProperties::Find(sourceScript.Properties, "amount") == nullptr);
-		CHECK(sourceScript.SourceFingerprint ==
-			FingerprintScriptBytes(kProbeSource, std::strlen(kProbeSource)));
+		CHECK(sourceScript.SourceFingerprint == 0);
 	}
 
 	// ---- 开发树 vs 服务包:同一逻辑路径的源文件与包内容器互不影响(VFS 优先级决定命中) ----
@@ -364,14 +365,11 @@ return {
 		Entity entity = Entity::CreateEntity(&scene, "devtree probe");
 		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
-		// 开发树(目录 provider,优先级更高)命中源码:注解生效、指纹 = 源文件字节。
-		CHECK(ScriptEngine::InitScriptForEditor(script));
+		// 开发树(目录 provider,优先级更高)命中源码:注解生效(容器那侧看不到注解)。
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
 		const ScriptProperty* devFields = ScriptProperties::Find(script.Properties, "amount");
 		CHECK(devFields != nullptr);
 		CHECK(devFields->Type == Schema::Kind::String);
-		const uint64_t devFingerprint = FingerprintScriptBytes(devSource, std::strlen(devSource));
-		CHECK(script.SourceFingerprint == devFingerprint);
-		CHECK(script.SourceFingerprint != FingerprintScriptBytes(container.data(), container.size()));
 
 		g_ProbeCalls.clear();
 		scene.OnRuntimeStart();

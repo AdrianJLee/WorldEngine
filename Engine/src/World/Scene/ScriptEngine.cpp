@@ -909,52 +909,13 @@ namespace World
 			return true;
 		}
 		ScriptProperties::SyncFromDeclarations(script.Properties, declarations);
+		// W2a:声明变了 → 刷新行为注册表里的 Luau 描述(与旧的编辑态预览路径同一落点:
+		// 只写行为注册表,登记失败只记日志,不影响属性同步结果)。
+		std::string behaviorError;
+		if (!EnsureLuaBehavior(script, &behaviorError) && Log::GetCoreLogger())
+			WLD_CORE_WARN("[Behavior] {0}", behaviorError);
 		if (error) error->clear();
 		return true;
-	}
-
-	bool ScriptEngine::InitScriptForEditor(LuauScriptComponent& script)
-	{
-		AssertOwnerThread();
-		// 编辑态预览:不实例化脚本(不建环境、不调 OnCreate),只同步属性表。
-		// 已经持有活动引用的组件(Play 中 / Faulted 但引用未释放)直接拒绝,避免覆盖运行实例。
-		if (script.ScriptPath.empty() || script.ScriptTable.IsValid() ||
-			script.Runtime.State == ScriptInstanceState::Creating ||
-			script.Runtime.State == ScriptInstanceState::Running ||
-			script.Runtime.State == ScriptInstanceState::Destroying) return false;
-		try
-		{
-			// 1. 读取脚本字节;源码才静态解析 ---@field 注解(容器不嵌源码,跳过注解)。
-			const std::vector<uint8_t> bytes = ReadScriptBytes(script.ScriptPath);
-			const AnnotationList annotations = ParseAnnotationsForBytes(bytes);
-
-			// 2. 在独立 environment 里执行脚本，获取默认值表（不保留引用：编辑器预览只同步属性）。
-			ScriptTableRef environment = s_Vm->CreateEnvironment();
-			if (!environment.IsValid()) throw std::logic_error("Cannot create a script environment");
-			ScriptTableRef table = InstantiateScriptTable(bytes, script.ScriptPath.c_str(), environment);
-
-			// 3. 属性表:声明(注解序 → 表序)定类型/顺序;同名同类型保留编辑器里已存的值,
-			//    新字段取新脚本自己的默认值。
-			std::vector<std::string> diagnostics;
-			SyncPropertiesFromScript(script, table, annotations, nullptr, &diagnostics);
-			if (Log::GetCoreLogger())
-				for (const std::string& line : diagnostics) WLD_CORE_WARN("{0}", line);
-			// W2a：把该脚本登记成 Luau 行为描述（字段来自属性表）。只写行为注册表，
-			// 不改变加载/预览语义：登记失败只记日志，返回值与状态机仍由下面的旧逻辑决定。
-			std::string behaviorError;
-			if (!EnsureLuaBehavior(script, &behaviorError) && Log::GetCoreLogger())
-				WLD_CORE_WARN("[Behavior] {0}", behaviorError);
-			script.Runtime.LastError.clear();
-			script.Runtime.State = ScriptInstanceState::Stopped;
-			// W5a-2/W7-3:加载成功即建立源指纹基线(容器 = 容器字节,源码 = 源码字节),
-			// 并清掉上一次遗留的重载诊断。基线必须与本次装载用的是同一份字节。
-			script.SourceFingerprint = FingerprintScriptBytes(bytes.data(), bytes.size());
-			script.ReloadDiagnostic.clear();
-			return true;
-		}
-		catch (const std::exception& error) { script.Runtime.LastError.clear(); ReportLuaError(script, "EditorLoad", error.what()); }
-		catch (...) { script.Runtime.LastError.clear(); ReportLuaError(script, "EditorLoad", "Unknown exception"); }
-		return false;
 	}
 
 	void ScriptEngine::OnCreateScript(LuauScriptComponent& script, Entity entity)

@@ -465,109 +465,9 @@ namespace World
 			return nullptr;
 		}
 
-		// 脚本文件的磁盘指纹(mtime + size)。读不到(不存在 / 权限)返回 false —— 调用方据此跳过重扫,
-		// 值保持现状(不做"文件没了就把属性表清空"这种破坏性动作)。
-		bool ScriptDiskFingerprint(const std::string& logicalPath, int64_t* outStamp, uint64_t* outSize)
-		{
-			if (logicalPath.empty())
-				return false;
-			const std::filesystem::path& contentRoot = CachedContentRoot();
-			if (contentRoot.empty())
-				return false;
-			const std::filesystem::path file = contentRoot / std::filesystem::path(logicalPath);
-			std::error_code error;
-			const uintmax_t size = std::filesystem::file_size(file, error);
-			if (error)
-				return false;
-			const std::filesystem::file_time_type stamp = std::filesystem::last_write_time(file, error);
-			if (error)
-				return false;
-			if (outSize)
-				*outSize = static_cast<uint64_t>(size);
-			if (outStamp)
-				*outStamp = static_cast<int64_t>(stamp.time_since_epoch().count());
-			return true;
-		}
-
-		// 一条 Luau 注解声明:名字 + 类型 + 说明(第三段,`---@field Speed number 移动速度`)。
-		struct LuaFieldDeclaration
-		{
-			std::string Name;
-			Schema::Kind Kind = Schema::Kind::None;
-			std::string Doc;
-		};
-
-		// Luau `---@field <name> <type> [<说明>]` 注解 → **有序**声明(名字 + Schema::Kind + Doc)。
-		//
-		// 编辑态硬约束(方案 v2 §3):**不执行脚本、不建 VM** —— 这里只按行静态扫注解文本。
-		// 顺序 = 注解出现顺序;重复名字以第一次为准。类型名映射与脚本加载期同一口径:
-		// number→Float、integer/int→Int32、boolean/bool→Bool、string→String,其余(向量/表…)
-		// 不进属性表。编译产物(容器)没有注解 → 空表。
-		//
-		// TODO(SCRIPT-V1):引擎的"有序注解声明入口(名称/类型/doc/默认值)"落地后,**删掉本函数**
-		// (连同下面的 Doc 回填与面板里的同步记忆),改调引擎入口 —— 派工单口径:接口没到之前先用
-		// 现有 `ScriptProperties::SyncFromDeclarations` 接,并在报告里回报。
-		std::vector<LuaFieldDeclaration> LuaScriptDeclarations(const std::string& logicalPath)
-		{
-			std::vector<LuaFieldDeclaration> declarations;
-			if (logicalPath.empty())
-				return declarations;
-			const std::filesystem::path& contentRoot = CachedContentRoot();
-			if (contentRoot.empty())
-				return declarations;
-			std::ifstream file(contentRoot / std::filesystem::path(logicalPath), std::ios::binary);
-			if (!file.is_open())
-				return declarations;
-			const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-			if (text.empty() || Asset::ScriptArtifact::IsArtifactBytes(text.data(), text.size()))
-				return declarations;
-			std::istringstream stream(text);
-			std::string line;
-			while (std::getline(stream, line))
-			{
-				const size_t start = line.find_first_not_of(" \t\r\n");
-				if (start == std::string::npos)
-					continue;
-				const std::string trimmed = line.substr(start);
-				if (trimmed.rfind("---@field", 0) != 0)
-					continue;
-				std::istringstream rest(trimmed.substr(9));
-				std::string name;
-				std::string typeName;
-				if (!(rest >> name >> typeName))
-					continue;
-				Schema::Kind kind = Schema::Kind::None;
-				if (typeName == "number")
-					kind = Schema::Kind::Float;
-				else if (typeName == "integer" || typeName == "int")
-					kind = Schema::Kind::Int32;
-				else if (typeName == "boolean" || typeName == "bool")
-					kind = Schema::Kind::Bool;
-				else if (typeName == "string")
-					kind = Schema::Kind::String;
-				if (!ScriptProperties::IsPropertyKind(kind))
-					continue;
-				if (std::any_of(declarations.begin(), declarations.end(),
-						[&name](const LuaFieldDeclaration& item) { return item.Name == name; }))
-					continue;
-				LuaFieldDeclaration declaration;
-				declaration.Name = name;
-				declaration.Kind = kind;
-				// 第三段(可选)= 脚本里给这个字段写的说明;整行剩余部分原样收,前后空白去掉。
-				std::string doc;
-				std::getline(rest, doc);
-				const size_t firstNonSpace = doc.find_first_not_of(" \t\r\n");
-				const size_t lastNonSpace = doc.find_last_not_of(" \t\r\n");
-				if (firstNonSpace != std::string::npos && lastNonSpace != std::string::npos)
-					declaration.Doc = doc.substr(firstNonSpace, lastNonSpace - firstNonSpace + 1);
-				declarations.push_back(std::move(declaration));
-			}
-			return declarations;
-		}
-
 		// Luau:按脚本重同步属性表(保留同名同类型值;新字段带注解 Doc 与**脚本里的默认值**)。
 		// SCRIPT-V1 起这是引擎侧唯一入口:声明解析、Doc、默认值、诊断都在 ScriptEngine 里,
-		// 编辑器不再自己扫注解(第二份实现已废弃,见下面的 LuaScriptDeclarations 仅作兼容保留)。
+		// 编辑器不再自己扫注解(第二份实现已删除;声明顺序/类型/doc/默认值只有引擎这一份)。
 		void SyncLuauPropertiesFromAnnotations(LuauScriptComponent& component)
 		{
 			std::string error;
@@ -2459,28 +2359,13 @@ namespace World
 			for (ScriptProperty& property : cpp->Properties)
 				if (const Schema::FieldSchema* field = FindScriptSchemaField(*cppSchema, property.Name))
 					property.Doc = field->Meta.Doc;
-		// Luau:脚本注解 = 属性表的唯一声明来源。**文件指纹(mtime + size)变了 / 换脚本 / 换实体 /
-		// 面板重开**才重扫文件 —— 用户反馈②「脚本里新加字段不显示、Reload 也不管用」的落点:
-		// 保存/Reload 都会改磁盘 mtime,下一帧即重同步(保留同名同类型值)。
-		// TODO(SCRIPT-V1):引擎的"有序注解声明入口"落地后,本记忆与编辑器侧的注解扫描一起删除。
-		const std::string syncKey = schema.DisplayName + "#" + std::to_string(handle);
-		ScriptDeclSync& syncMemo = m_ScriptDeclSync[syncKey];
-		if (luau)
-		{
-			int64_t stamp = 0;
-			uint64_t size = 0;
-			const bool haveFingerprint = ScriptDiskFingerprint(lua->ScriptPath, &stamp, &size);
-			// Play/Simulate 是只读态:不在这期间重建属性表(退出后再按指纹同步一次)。
-			if (!m_ReadOnly && haveFingerprint && (!syncMemo.Valid || syncMemo.Path != lua->ScriptPath
-				|| syncMemo.WriteStamp != stamp || syncMemo.Size != size))
-			{
-				SyncLuauPropertiesFromAnnotations(*lua);
-				syncMemo.Path = lua->ScriptPath;
-				syncMemo.WriteStamp = stamp;
-				syncMemo.Size = size;
-				syncMemo.Valid = true;
-			}
-		}
+		// Luau:脚本注解 = 属性表的唯一声明来源。**脚本路径由任何来源变化**(下拉改选 / `scene.set` /
+		// 反序列化 / Reload / 换实体 / 面板重开)都在这里收敛一次 —— 用户反馈②「脚本里新加字段
+		// 不显示、Reload 也不管用」的落点。是否真的重新解析由引擎按"路径 + 内容指纹 + VM 可用性"
+		// 判定(引擎内部单槽缓存):这里可以每帧调,但不会每帧重解析;同名同类型值继续保留。
+		// Play/Simulate 是只读态:不在这期间重建属性表。
+		if (luau && !m_ReadOnly)
+			SyncLuauPropertiesFromAnnotations(*lua);
 
 		// ---- 脚本引用行 ----
 		const float labelWidth = std::min(140.0f, rect.W * 0.45f);
@@ -2533,12 +2418,11 @@ namespace World
 				if (Wui::SearchableCombo(ctx, refId, refCtrl, "", options, selected, theme)
 					&& selected != beforePick)
 				{
-					lua->ScriptPath = selected <= 0 ? std::string() : options[static_cast<size_t>(selected)];
-					// 换脚本 = 属性表按**新脚本的注解声明**重建(同名同类型保留值,其余丢弃)。
-					// TODO(SCRIPT-V1):改调引擎的"有序注解声明入口"(现在编辑器侧兜一层注解扫描)。
-					SyncLuauPropertiesFromAnnotations(*lua);
-					syncMemo.Valid = false;   // 下一帧按新脚本的指纹再核对一次(路径/内容都换了)
-					changed = true;
+				lua->ScriptPath = selected <= 0 ? std::string() : options[static_cast<size_t>(selected)];
+				// 换脚本 = 属性表按**新脚本的注解声明**重建(同名同类型保留值,其余丢弃)。
+				// 引擎入口内部按"路径 + 内容指纹"判定,换路径必然重解析;这里同步调一次让本帧就用新表。
+				SyncLuauPropertiesFromAnnotations(*lua);
+				changed = true;
 					if (changedFields)
 						changedFields->push_back(schema.DisplayName + ".ScriptPath");
 				}

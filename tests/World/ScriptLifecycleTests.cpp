@@ -723,6 +723,27 @@ namespace
         }
     }
 
+    // SCRIPT-V7 P2-②:属性值的 variant 与声明类型不符(手改场景 / 坏存档)时不能抛 bad_variant_access ——
+    // 跳过该字段 + 保留脚本自己的构造默认值,脚本照常 Running(不是 Faulted)。
+    void MismatchedPropertyVariantIsSkipped()
+    {
+        Fixture fixture;
+        auto entity = fixture.AddNative();
+        auto& script = entity.GetComponent<CppScriptComponent>();
+        // Type 说 Float,值却是 string:写入前必须被拦下。
+        script.Properties.push_back(ScriptProperty{ "Value", Schema::Kind::Float, Schema::Value(std::string("hand-edited")) });
+        // 未设值(monostate)同样跳过:保留脚本默认,不写 0。
+        script.Properties.push_back(ScriptProperty{ "MissingField", Schema::Kind::Float, Schema::Value {} });
+
+        fixture.World->OnScriptStart();
+        CHECK(script.Runtime.State == ScriptInstanceState::Running);
+        CHECK(script.Instance != nullptr);
+        CHECK(static_cast<NativeProbe*>(script.Instance)->Value == 7.5f);   // 构造默认值,不是 0 / 不是 Faulted
+        CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Creates == 1);
+        fixture.Stop();
+        CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Deletes == 1);
+    }
+
     void CloneOnlyConfiguration()
     {
         Fixture fixture;
@@ -974,15 +995,18 @@ namespace
         fixture.Stop();
         auto preview = fixture.AddLua("scripts/tests/CallbackErrors.lua");
         auto& script = preview.GetComponent<LuauScriptComponent>();
-        CHECK(ScriptEngine::InitScriptForEditor(script));
+        CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
         SetLuaString(preview, "FailStage", "Saved editor value");
+        // 换成语法坏掉的脚本:声明同步读不到默认值(只留诊断),但**不碰**组件属性表,
+        // 也不把编辑态组件打成 Faulted(SCRIPT-V7:旧 InitScriptForEditor 的 EditorLoad 失败语义已删除)。
         script.ScriptPath = invalid.GetComponent<LuauScriptComponent>().ScriptPath;
-        CHECK(!ScriptEngine::InitScriptForEditor(script));
-        // 失败的预览不碰属性表:编辑器里已改的值保留。
+        std::vector<std::string> declarationDiagnostics;
+        CHECK(ScriptEngine::SyncScriptDeclarations(script, &declarationDiagnostics, nullptr));
+        CHECK(!declarationDiagnostics.empty());   // 读默认值失败有可读诊断
         const ScriptProperty* savedFailStage = ScriptProperties::Find(script.Properties, "FailStage");
         CHECK(savedFailStage != nullptr);
         CHECK(std::get<std::string>(savedFailStage->Value) == "Saved editor value");
-        CHECK(script.Runtime.State == ScriptInstanceState::Faulted);
+        CHECK(script.Runtime.State != ScriptInstanceState::Faulted);
         CHECK(!script.LuaEnv.IsValid() && !script.ScriptTable.IsValid());
     }
 
@@ -1112,6 +1136,28 @@ namespace
     //    继续更新、场景仍 active;诊断带路径 + phase=OnUpdate + stack traceback。
     //    测试用 RAII 恢复默认策略(同进程共享 VM,后续组必须看到默认值)。
     // 2) 默认预算(1e6 指令)余量标定:32 个真实夹具脚本一帧的总命中数。
+    // SCRIPT-V7 P2-①:销毁时工厂已经消失(脚本模块被卸载 / schema 注销)不能静默丢指针 ——
+    // 走"警告 + 只置空一次"的路径,不崩、不重复释放(实例此时无法安全释放)。
+    // 本用例会注销 Test 模块的脚本 schema,所以必须排在测试列表**最后**(注册不再恢复)。
+    void UnregisteredFactoryIsReportedInsteadOfSilentlyLeaked()
+    {
+        Fixture fixture;
+        auto entity = fixture.AddNative();
+        fixture.World->OnScriptStart();
+        auto& script = entity.GetComponent<CppScriptComponent>();
+        CHECK(script.Instance != nullptr);
+        CHECK(script.Runtime.State == ScriptInstanceState::Running);
+
+        // 拔掉工厂:与"Game.dll 没加载 / 模块被卸载"同一个失败面。
+        TestContext().Schemas().UnregisterModule(Schema::ModuleId{ "Test", 1 });
+
+        fixture.Stop();   // OnDestroy 仍走实例(引用还在),Destroy 工厂取不到 → 警告,不重复释放
+        CHECK(script.Instance == nullptr);
+        CHECK(script.Runtime.State != ScriptInstanceState::Running);
+        CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Destroys == 1);
+        CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Deletes == 0);   // 工厂没了:实例无法释放(泄漏),但不会被二次使用
+    }
+
     void SandboxBudgetIsolationAndMargin()
     {
         const Sandbox::Policy defaultPolicy = ScriptEngine::GetSandboxPolicy();
@@ -1239,6 +1285,7 @@ int main(int argc, char** argv)
             { "Lua load/type/callback errors and isolation", LuaErrorsReleaseExactlyOnce },
             { "inherited Lua lifecycle callbacks and protected lookup", InheritedLuaCallbacksAndLookupErrors },
             { "clone configuration without instances or bodies", CloneOnlyConfiguration },
+            { "mismatched or unset property variants are skipped", MismatchedPropertyVariantIsSkipped },
             { "body removal and component dependencies", PhysicsRemovalAndDependencies },
             { "camera reacquisition and expired Entity", CameraReacquisitionAndExpiredHandles },
             { "non-owning LayerStack detach order", NonOwningLayerDetachOrder },
@@ -1247,7 +1294,8 @@ int main(int argc, char** argv)
             { "deterministic and atomic stub generation", StubGenerationContracts },
             { "real static-link bindings and template", RealBindingsAndTemplate },
             { "VM restart keeps metadata unique", VmRestartKeepsUniqueMetadata },
-            { "sandbox budget isolation and headroom", SandboxBudgetIsolationAndMargin }
+            { "sandbox budget isolation and headroom", SandboxBudgetIsolationAndMargin },
+            { "unregistered script factory is reported instead of silently leaked", UnregisteredFactoryIsReportedInsteadOfSilentlyLeaked }
         };
         int failures = 0;
         for (const auto& [name, test] : tests)

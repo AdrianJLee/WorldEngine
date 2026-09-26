@@ -159,6 +159,26 @@ namespace World
 			return std::holds_alternative<std::monostate>(property.Value);
 		}
 
+		bool ValueMatchesKind(const Schema::Value& value, Schema::Kind kind)
+		{
+			switch (kind)
+			{
+				case Schema::Kind::Bool: return std::holds_alternative<bool>(value);
+				case Schema::Kind::Int8: return std::holds_alternative<int8_t>(value);
+				case Schema::Kind::Int16: return std::holds_alternative<int16_t>(value);
+				case Schema::Kind::Int32: return std::holds_alternative<int32_t>(value);
+				case Schema::Kind::Int64: return std::holds_alternative<int64_t>(value);
+				case Schema::Kind::UInt8: return std::holds_alternative<uint8_t>(value);
+				case Schema::Kind::UInt16: return std::holds_alternative<uint16_t>(value);
+				case Schema::Kind::UInt32: return std::holds_alternative<uint32_t>(value);
+				case Schema::Kind::UInt64: return std::holds_alternative<uint64_t>(value);
+				case Schema::Kind::Float: return std::holds_alternative<float>(value);
+				case Schema::Kind::Double: return std::holds_alternative<double>(value);
+				case Schema::Kind::String: return std::holds_alternative<std::string>(value);
+				default: return false;
+			}
+		}
+
 		ScriptProperty* Find(std::vector<ScriptProperty>& properties, const std::string& name)
 		{
 			const auto found = std::find_if(properties.begin(), properties.end(),

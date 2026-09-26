@@ -113,9 +113,6 @@ namespace World
 		// W3a-A2(追加):带显式 schema 注册表的存根生成;组件块来自
 		// schemas.List(TypeCategory::Component)。零参调用在宿主上下文中委托到这里。
 		static bool GenerateLuaStubs(const Schema::SchemaRegistry& schemas);
-		// 编辑态预览(2026-09-26 重写):执行脚本取默认值表 → 同步组件的属性表(声明顺序/类型,
-		// 同名同类型保留场景里已存的值),**不创建实例、不调 OnCreate、不保留环境引用**。
-		static bool InitScriptForEditor(LuauScriptComponent& component);
 		// 从 Lua 脚本源码文本静态解析 `---@field Name Type` 注解，返回字段名到 Lua 类型名的映射（不执行脚本）。
 		static std::unordered_map<std::string, std::string> ParseFieldAnnotations(const std::string& scriptText);
 
@@ -138,6 +135,7 @@ namespace World
 
 		// 编辑态即时同步的唯一入口:按脚本路径取声明 → 同步组件属性表
 		// (保留同名同类型的已有值;新字段/未设字段按默认值处理;声明里没有的旧属性丢弃 + 诊断)。
+		// 同时刷新 BehaviorRegistry 里的 Luau 行为描述(旧编辑态预览路径的落点,随死代码一起搬到这里)。
 		// 失败时组件原样不动并返回 false(error 说明原因;诊断追加到 diagnostics,可为 null)。
 		static bool SyncScriptDeclarations(LuauScriptComponent& script,
 			std::vector<std::string>* diagnostics = nullptr, std::string* error = nullptr);

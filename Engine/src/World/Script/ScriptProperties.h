@@ -58,6 +58,10 @@ namespace World
 		// 未设值(monostate)判定:检视器/写入路径用它区分"没有值"与"值为 0"。
 		WLD_API bool IsUnset(const ScriptProperty& property);
 
+		// 值的 variant 备选是否**正好**是 kind 对应的那一支(手改场景 / 坏存档的防线;
+		// monostate 不算匹配 —— 未设值请先用 IsUnset 判定)。
+		WLD_API bool ValueMatchesKind(const Schema::Value& value, Schema::Kind kind);
+
 		WLD_API ScriptProperty* Find(std::vector<ScriptProperty>& properties, const std::string& name);
 		WLD_API const ScriptProperty* Find(const std::vector<ScriptProperty>& properties, const std::string& name);
 	}
