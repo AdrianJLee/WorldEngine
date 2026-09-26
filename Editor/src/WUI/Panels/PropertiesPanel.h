@@ -6,6 +6,7 @@
 #include "World/WUI/WuiWidgets.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -38,7 +39,7 @@ namespace World
 
 		float DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect, void* instance,
 			const std::string& typeName, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
-			std::vector<std::string>* changedFields = nullptr);
+			std::vector<std::string>* changedFields = nullptr, bool scriptPropertyRow = false);
 		float DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect);
 		float DrawTransformInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, TransformComponent& transform,
@@ -132,6 +133,19 @@ namespace World
 		std::string m_LuaReloadMessage;
 		uint32_t m_LuaReloadHandle = ~0u;
 		bool m_LuaReloadOk = true;
+		// SCRIPT-V2:脚本属性表的注解同步记忆(键 = "<组件显示名>#<实体句柄>")。
+		// 只在**脚本文件指纹(mtime + size)变化 / 换实体 / 换脚本**时重扫注解并重同步属性表 ——
+		// 用户反馈「脚本里新加的字段不显示、Reload 也不管用」:Reload 会改磁盘 mtime,下一帧即重扫。
+		// TODO(SCRIPT-V1):引擎的"有序注解声明入口(名称/类型/doc/默认值)"落地后,本记忆与编辑器侧的
+		// 注解扫描一起删除,改为只调引擎入口(现口径见派工单:先用现有 SyncFromDeclarations 接)。
+		struct ScriptDeclSync
+		{
+			std::string Path;         // 上次同步的脚本逻辑路径
+			int64_t WriteStamp = 0;   // 磁盘 mtime(time_since_epoch 计数)
+			uint64_t Size = 0;        // 磁盘字节数(与 mtime 一起当指纹)
+			bool Valid = false;
+		};
+		std::map<std::string, ScriptDeclSync> m_ScriptDeclSync;
 		// ---- U6:选择器状态(只属于本面板对象,不进任何全局表)----
 		std::string m_StatePath;                     // <local>/wui-properties.json
 		std::vector<std::string> m_RecentComponents; // 最近使用(短类型名,MRU 顺序)

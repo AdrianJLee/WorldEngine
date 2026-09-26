@@ -34,6 +34,7 @@
   "panel.properties.script_no_registered": "还没有注册任何 C++ 脚本",
   "panel.properties.script_unregistered": "这个 C++ 脚本没有注册(对应的模块没加载?)",
   "panel.properties.script_no_properties": "这个脚本还没有声明可编辑的属性",
+  "panel.properties.script_field_no_doc": "没有为这个字段写说明",
   "panel.properties.script_readonly_notice": "Play/Simulate:脚本属性只读(暂停或退出后可编辑)",
   "panel.properties.script_readonly_reason": "Play/Simulate 是只读的:暂停或退出后才能重载脚本",
   "panel.properties.reload_script.tooltip": "按脚本资产重新加载这个实例(与脚本面板、script.reload 同一条入口)",

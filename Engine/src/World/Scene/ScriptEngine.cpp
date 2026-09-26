@@ -52,6 +52,19 @@ namespace World
 		ScriptFunctionRef s_LookupField;
 		// 受保护的字段名收集:脚本返回的表可能有 __index 元表,只收集**自有字符串键**。
 		ScriptFunctionRef s_CollectFieldNames;
+
+		// V1:声明查询的单槽缓存(检视器可能每帧调用)。键 = 逻辑路径 + 内容指纹 + VM 是否可用。
+		// 只存纯数据(不含 VM 引用),Shutdown/Init 后依然有效;内容变了或 VM 可用性变了自动失效。
+		struct DeclarationCache
+		{
+			bool Valid = false;
+			std::string Path;
+			uint64_t Fingerprint = 0;
+			bool VmAvailable = false;
+			std::vector<ScriptProperties::Declaration> Declarations;
+			std::vector<std::string> Diagnostics;
+		};
+		DeclarationCache s_DeclarationCache;
 		std::thread::id s_OwnerThread;
 
 		const char* const kFieldLookupSource = "return function(target, key) return target[key] end";
@@ -143,8 +156,24 @@ namespace World
 			return type;
 		}
 
-		// 名字 + Lua 注解类型名(声明顺序;重复声明以第一次为准)。
-		using AnnotationList = std::vector<std::pair<std::string, std::string>>;
+		// V1:一条 `---@field` 注解 —— 名字 / Lua 类型名 / 第三段说明(整段剩余文本,去掉首尾空白)。
+		// 顺序 = 源码里的注解顺序;重复声明以第一次为准。
+		struct FieldAnnotation
+		{
+			std::string Name;
+			std::string TypeName;
+			std::string Doc;
+		};
+		using AnnotationList = std::vector<FieldAnnotation>;
+
+		std::string TrimWhitespace(const std::string& text)
+		{
+			const size_t begin = text.find_first_not_of(" \t\r\n");
+			if (begin == std::string::npos)
+				return {};
+			const size_t end = text.find_last_not_of(" \t\r\n");
+			return text.substr(begin, end - begin + 1);
+		}
 
 		AnnotationList ParseFieldAnnotationListInternal(const std::string& text)
 		{
@@ -159,16 +188,19 @@ namespace World
 				const std::string trimmed = line.substr(start);
 				if (trimmed.rfind("---@field", 0) != 0)
 					continue;
-				std::istringstream rest(trimmed.substr(9));
-				std::string name, type;
-				if (!(rest >> name))
-					continue;
-				if (!(rest >> type))
-					continue;
-				if (std::any_of(schema.begin(), schema.end(),
-						[&name](const auto& item) { return item.first == name; }))
-					continue;   // 重复声明以第一次为准(与 ScriptProperties::SyncFromDeclarations 同口径)
-				schema.emplace_back(std::move(name), std::move(type));
+			std::istringstream rest(trimmed.substr(9));
+			FieldAnnotation annotation;
+			if (!(rest >> annotation.Name))
+				continue;
+			if (!(rest >> annotation.TypeName))
+				continue;
+			std::string remainder;
+			std::getline(rest, remainder);
+			annotation.Doc = TrimWhitespace(remainder);   // 第三段 = 类型之后的整段剩余文本
+			if (std::any_of(schema.begin(), schema.end(),
+					[&annotation](const auto& item) { return item.Name == annotation.Name; }))
+				continue;   // 重复声明以第一次为准(与 ScriptProperties::SyncFromDeclarations 同口径)
+			schema.push_back(std::move(annotation));
 			}
 			return schema;
 		}
@@ -176,8 +208,8 @@ namespace World
 		std::unordered_map<std::string, std::string> ParseFieldAnnotationsInternal(const std::string& text)
 		{
 			std::unordered_map<std::string, std::string> schema;
-			for (const auto& [name, type] : ParseFieldAnnotationListInternal(text))
-				schema.emplace(name, type);
+			for (const FieldAnnotation& annotation : ParseFieldAnnotationListInternal(text))
+				schema.emplace(annotation.Name, annotation.TypeName);
 			return schema;
 		}
 
@@ -190,28 +222,16 @@ namespace World
 			return ParseFieldAnnotationListInternal(std::string(bytes.begin(), bytes.end()));
 		}
 
-		// 2026-09-26 重写(统一属性模型):注解类型名 → schema 值类型。
-		//   number  → 整数值 Int32 / 其它 Float(Lua 只有 number;沿用旧的按值区分口径)
-		//   integer/int → Int32,boolean/bool → Bool,string → String
-		// 未知类型名或"注解与当前值类型不符" → None(该字段不成为脚本属性)。
-		Schema::Kind AnnotationToKindInternal(const std::string& typeName, const ScriptValue& value)
+		// V1(2026-09-26):注解类型名 → schema 值类型 —— **与值无关的固定映射**。
+		//   number       → Float(两侧统一:编辑器和引擎都是 Float;P1-2 的"编辑值被判类型变了"由此消除)
+		//   integer/int  → Int32,boolean/bool → Bool,string → String
+		// 未知类型名 → None(跳过该字段 + 诊断)。
+		Schema::Kind AnnotationToKindInternal(const std::string& typeName)
 		{
-			if (typeName == "number")
-			{
-				double number = 0.0;
-				if (!value.AsNumber(&number))
-					return Schema::Kind::None;
-				if (std::isfinite(number) && number == std::floor(number) &&
-					number >= (std::numeric_limits<int32_t>::min)() && number <= (std::numeric_limits<int32_t>::max)())
-					return Schema::Kind::Int32;
-				return Schema::Kind::Float;
-			}
-			if (typeName == "integer" || typeName == "int")
-				return value.IsNumber() ? Schema::Kind::Int32 : Schema::Kind::None;
-			if (typeName == "boolean" || typeName == "bool")
-				return value.IsBoolean() ? Schema::Kind::Bool : Schema::Kind::None;
-			if (typeName == "string")
-				return value.IsString() ? Schema::Kind::String : Schema::Kind::None;
+			if (typeName == "number") return Schema::Kind::Float;
+			if (typeName == "integer" || typeName == "int") return Schema::Kind::Int32;
+			if (typeName == "boolean" || typeName == "bool") return Schema::Kind::Bool;
+			if (typeName == "string") return Schema::Kind::String;
 			return Schema::Kind::None;
 		}
 
@@ -301,16 +321,12 @@ namespace World
 			return ScriptValue::Nil();
 		}
 
-		struct ScriptFieldDeclaration
-		{
-			std::string Name;
-			Schema::Kind Type = Schema::Kind::None;
-		};
-
 		// 脚本返回表的**自有字符串键**(跳过 `_` 前缀与 `entity`),顺序 = 表遍历顺序。
 		std::vector<std::string> CollectOwnFieldNames(const ScriptTableRef& table)
 		{
 			std::vector<std::string> names;
+			if (!table.IsValid())
+				return names;   // VM 不可用 / 表无效:声明退回"只有注解"的形态
 			ScriptValue namesValue;
 			std::string error;
 			const ScriptValue args[] = { table.ToValue() };
@@ -329,9 +345,12 @@ namespace World
 			return names;
 		}
 
-		// 脚本表 + 注解 → 属性声明表。顺序 = 注解顺序(先声明先显示)→ 表里其余字段的顺序;
-		// 未知注解类型 / 注解与值类型不符 → 跳过该字段并写一条诊断(旧行为是静默跳过)。
-		std::vector<ScriptFieldDeclaration> BuildDeclarations(const ScriptTableRef& table,
+		// V1:脚本表 + 注解 → 有序声明表(name / Schema::Kind / Doc / 默认值)。
+		//   顺序 = 注解顺序(先声明先显示)→ 表里其余字段顺序;
+		//   注解:类型走固定映射(number→Float);字段在表里时按声明类型取默认值(类型不符 → 跳过 + 诊断);
+		//         字段不在表里也保留声明(编辑器要显示),默认值 = monostate(未设,不写零值);
+		//   无注解字段(容器脚本 / 未写注解的表项):按值推断类型,默认值 = 表里的值。
+		std::vector<ScriptProperties::Declaration> BuildDeclarations(const ScriptTableRef& table,
 			const AnnotationList& annotations, const std::string& scriptPath, std::vector<std::string>* diagnostics)
 		{
 			const std::vector<std::string> names = CollectOwnFieldNames(table);
@@ -344,52 +363,77 @@ namespace World
 				return name.empty() || name[0] == '_' || name == "entity";
 			};
 
-			std::vector<ScriptFieldDeclaration> declared;
+			std::vector<ScriptProperties::Declaration> declared;
 			std::unordered_set<std::string> visited;
-			for (const auto& [name, typeName] : annotations)
+			for (const FieldAnnotation& annotation : annotations)
 			{
-				if (visited.count(name) || skipName(name) || !isField(name))
+				if (visited.count(annotation.Name) || skipName(annotation.Name))
 					continue;
-				visited.insert(name);
-				const Schema::Kind kind = AnnotationToKindInternal(typeName, table.GetField(name.c_str()));
+				visited.insert(annotation.Name);
+				const Schema::Kind kind = AnnotationToKindInternal(annotation.TypeName);
 				if (kind == Schema::Kind::None)
 				{
 					if (diagnostics)
-						diagnostics->push_back("[script] " + scriptPath + ": field '" + name +
-							"' declares unsupported type '" + typeName +
+						diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
+							"' declares unsupported type '" + annotation.TypeName +
 							"' (expected number/integer/boolean/string); the field is not exposed as a script property");
 					continue;
 				}
-				declared.push_back({ name, kind });
+
+				ScriptProperties::Declaration declaration;
+				declaration.Name = annotation.Name;
+				declaration.Type = kind;
+				declaration.Doc = annotation.Doc;
+				if (isField(annotation.Name))
+				{
+					Schema::Value value;
+					if (!ReadPropertyValueInternal(table.GetField(annotation.Name.c_str()), kind, &value))
+					{
+						if (diagnostics)
+							diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
+								"' declares type '" + annotation.TypeName +
+								"' but the script table holds a different value type; the field is not exposed as a script property");
+						continue;
+					}
+					declaration.Default = std::move(value);
+				}
+				// 表里没有这个字段:声明仍成立,默认值保持 monostate(未设)—— 绝不写类型零值。
+				declared.push_back(std::move(declaration));
 			}
 			for (const std::string& name : names)
 			{
 				if (visited.count(name) || skipName(name))
 					continue;
 				visited.insert(name);
-				const Schema::Kind kind = InferKindFromValueInternal(table.GetField(name.c_str()));
+				const ScriptValue value = table.GetField(name.c_str());
+				const Schema::Kind kind = InferKindFromValueInternal(value);
 				if (kind == Schema::Kind::None)
 					continue;
-				declared.push_back({ name, kind });
+				ScriptProperties::Declaration declaration;
+				declaration.Name = name;
+				declaration.Type = kind;
+				if (!ReadPropertyValueInternal(value, kind, &declaration.Default))
+					continue;
+				declared.push_back(std::move(declaration));
 			}
 			return declared;
 		}
 
 		// 新脚本 → 属性表同步(Luau 的所有加载路径唯一的入口):
-		//   1. 声明表 = 注解顺序 → 表序(见 BuildDeclarations);
+		//   1. 声明表 = 注解顺序 → 表序(含 Doc 与脚本里的默认值,见 BuildDeclarations);
 		//   2. liveTable(只有热重载传)里同名同类型的自有值覆盖旧值(运行期 self.X=... 的真实状态);
-		//   3. ScriptProperties::SyncFromDeclarations:同名同类型保留旧值(场景保存值),其余待定;
-		//   4. 待定字段用新脚本自己的默认值填上。
-		// 优先级:活表 > 场景保存值 > 新脚本默认值。
+		//   3. ScriptProperties::SyncFromDeclarations 合并:同名同类型保留旧值(场景保存值 /
+		//      编辑器改过的值),新字段/类型变化取声明里的默认值或保持"未设"。
+		// 优先级:活表 > 场景保存值 > 脚本默认值(NULL 保持未设,绝不写零值)。
 		void SyncPropertiesFromScript(LuauScriptComponent& script, const ScriptTableRef& table,
 			const AnnotationList& annotations, const ScriptTableRef* liveTable, std::vector<std::string>* diagnostics)
 		{
-			const std::vector<ScriptFieldDeclaration> declarations =
+			const std::vector<ScriptProperties::Declaration> declarations =
 				BuildDeclarations(table, annotations, script.ScriptPath, diagnostics);
 
 			if (liveTable)
 			{
-				for (const ScriptFieldDeclaration& declaration : declarations)
+				for (const ScriptProperties::Declaration& declaration : declarations)
 				{
 					ScriptProperty* property = ScriptProperties::Find(script.Properties, declaration.Name);
 					if (!property || property->Type != declaration.Type)
@@ -400,20 +444,7 @@ namespace World
 				}
 			}
 
-			std::vector<std::pair<std::string, Schema::Kind>> declared;
-			declared.reserve(declarations.size());
-			for (const ScriptFieldDeclaration& declaration : declarations)
-				declared.emplace_back(declaration.Name, declaration.Type);
-			ScriptProperties::SyncFromDeclarations(script.Properties, declared);
-
-			for (ScriptProperty& property : script.Properties)
-			{
-				if (!std::holds_alternative<std::monostate>(property.Value))
-					continue;
-				Schema::Value value;
-				if (ReadPropertyValueInternal(table.GetField(property.Name.c_str()), property.Type, &value))
-					property.Value = std::move(value);
-			}
+			ScriptProperties::SyncFromDeclarations(script.Properties, declarations);
 		}
 
 		// 脚本表上的回调:走 __index 继承;非函数非 nil 视为加载错误。
@@ -784,6 +815,102 @@ namespace World
 	std::unordered_map<std::string, std::string> ScriptEngine::ParseFieldAnnotations(const std::string& scriptText)
 	{
 		return ParseFieldAnnotationsInternal(scriptText);
+	}
+
+	bool ScriptEngine::DescribeScriptDeclarations(const std::string& scriptPath,
+		std::vector<ScriptProperties::Declaration>& out,
+		std::vector<std::string>* diagnostics, std::string* error)
+	{
+		// VM 不可用(纯工具/无脚本环境)也要能给出注解声明 → 只在已初始化时校验线程归属。
+		if (IsInitialized()) AssertOwnerThread();
+		out.clear();
+		if (diagnostics) diagnostics->clear();
+		if (scriptPath.empty())
+		{
+			if (error) *error = "script path is empty";
+			return false;
+		}
+
+		std::vector<uint8_t> bytes;
+		try { bytes = ReadScriptBytes(scriptPath); }
+		catch (const std::exception& exception) { if (error) *error = exception.what(); return false; }
+		catch (...) { if (error) *error = "unknown exception while reading the script bytes"; return false; }
+
+		const uint64_t fingerprint = FingerprintScriptBytes(bytes.data(), bytes.size());
+		const bool vmAvailable = s_Vm != nullptr;
+		if (s_DeclarationCache.Valid && s_DeclarationCache.Path == scriptPath &&
+			s_DeclarationCache.Fingerprint == fingerprint && s_DeclarationCache.VmAvailable == vmAvailable)
+		{
+			out = s_DeclarationCache.Declarations;
+			if (diagnostics) *diagnostics = s_DeclarationCache.Diagnostics;
+			if (error) error->clear();
+			return true;
+		}
+
+		const AnnotationList annotations = ParseAnnotationsForBytes(bytes);
+		std::vector<std::string> localDiagnostics;
+		ScriptTableRef table;
+		if (vmAvailable)
+		{
+			// 编辑态只 load 脚本模块 + 读它的默认表:不建实例、不调 OnCreate/OnUpdate、不注册行为。
+			// environment / table 都是局部引用,函数返回即释放(不挂在任何组件上)。
+			try
+			{
+				ScriptTableRef environment = s_Vm->CreateEnvironment();
+				if (!environment.IsValid())
+					throw std::logic_error("cannot create a script environment");
+				table = InstantiateScriptTable(bytes, scriptPath.c_str(), environment);
+			}
+			catch (const std::exception& exception)
+			{
+				table = {};
+				localDiagnostics.push_back("[script] " + scriptPath +
+					": could not read the script defaults (" + exception.what() +
+					"); declarations fall back to the annotations without default values");
+			}
+			catch (...)
+			{
+				table = {};
+				localDiagnostics.push_back("[script] " + scriptPath +
+					": could not read the script defaults (unknown exception); "
+					"declarations fall back to the annotations without default values");
+			}
+		}
+
+		out = BuildDeclarations(table, annotations, scriptPath, &localDiagnostics);
+		if (diagnostics) *diagnostics = localDiagnostics;
+		if (error) error->clear();
+
+		s_DeclarationCache.Valid = true;
+		s_DeclarationCache.Path = scriptPath;
+		s_DeclarationCache.Fingerprint = fingerprint;
+		s_DeclarationCache.VmAvailable = vmAvailable;
+		s_DeclarationCache.Declarations = out;
+		s_DeclarationCache.Diagnostics = localDiagnostics;
+		return true;
+	}
+
+	bool ScriptEngine::SyncScriptDeclarations(LuauScriptComponent& script,
+		std::vector<std::string>* diagnostics, std::string* error)
+	{
+		// 编辑态即时同步:检视器每次打开/绘制、Reload 成功、脚本文件变化后都走这里。
+		std::vector<ScriptProperties::Declaration> declarations;
+		std::string localError;
+		if (!DescribeScriptDeclarations(script.ScriptPath, declarations, diagnostics, &localError))
+		{
+			if (error) *error = localError;
+			return false;
+		}
+		if (declarations.empty())
+		{
+			// 读不到任何声明(没有注解、也没有可读的默认表):不动组件属性表,
+			// 避免把场景里已有的值清空;删字段由运行期/热重载那条路径负责。
+			if (error) error->clear();
+			return true;
+		}
+		ScriptProperties::SyncFromDeclarations(script.Properties, declarations);
+		if (error) error->clear();
+		return true;
 	}
 
 	bool ScriptEngine::InitScriptForEditor(LuauScriptComponent& script)

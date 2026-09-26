@@ -443,29 +443,70 @@ namespace World
 			}
 		}
 
-		// 一条属性的值对齐到它的类型(不匹配 = 落回默认值)。返回 false = 这个类型不是脚本属性类型。
-		bool NormalizeScriptProperty(ScriptProperty& property)
+		// 画属性行用的**展示值**:值没设(monostate)或类型不匹配时给该类型的规范零值(**不写回**组件)。
+		//
+		// 为什么不能写回:审查 P1-1 / 用户反馈④ —— "未设"必须保持未设,编辑期把它写成 0 会随场景落盘;
+		// 真实默认值来自脚本本体,由引擎侧的属性入口填进 `ScriptProperty.Value`(到了这里自然显示真值)。
+		Schema::Value ScriptPropertyDisplayValue(const ScriptProperty& property)
 		{
-			if (!ScriptProperties::IsPropertyKind(property.Type))
+			return ScriptPropertyValueMatchesType(property)
+				? property.Value : DefaultScriptPropertyValue(property.Type);
+		}
+
+		// 按名字在 schema 类型里找字段(C++ 脚本的字段说明 / 默认值都挂在 schema 上)。
+		const Schema::FieldSchema* FindScriptSchemaField(const Schema::TypeSchema& schema, const std::string& name)
+		{
+			for (const Schema::FieldSchema& field : schema.Fields)
+				if (field.Name == name)
+					return &field;
+			return nullptr;
+		}
+
+		// 脚本文件的磁盘指纹(mtime + size)。读不到(不存在 / 权限)返回 false —— 调用方据此跳过重扫,
+		// 值保持现状(不做"文件没了就把属性表清空"这种破坏性动作)。
+		bool ScriptDiskFingerprint(const std::string& logicalPath, int64_t* outStamp, uint64_t* outSize)
+		{
+			if (logicalPath.empty())
 				return false;
-			if (!ScriptPropertyValueMatchesType(property))
-				property.Value = DefaultScriptPropertyValue(property.Type);
+			const std::filesystem::path& contentRoot = CachedContentRoot();
+			if (contentRoot.empty())
+				return false;
+			const std::filesystem::path file = contentRoot / std::filesystem::path(logicalPath);
+			std::error_code error;
+			const uintmax_t size = std::filesystem::file_size(file, error);
+			if (error)
+				return false;
+			const std::filesystem::file_time_type stamp = std::filesystem::last_write_time(file, error);
+			if (error)
+				return false;
+			if (outSize)
+				*outSize = static_cast<uint64_t>(size);
+			if (outStamp)
+				*outStamp = static_cast<int64_t>(stamp.time_since_epoch().count());
 			return true;
 		}
 
-		// Luau `---@field <name> <type>` 注解 → **有序**声明(name + Schema::Kind)。
+		// 一条 Luau 注解声明:名字 + 类型 + 说明(第三段,`---@field Speed number 移动速度`)。
+		struct LuaFieldDeclaration
+		{
+			std::string Name;
+			Schema::Kind Kind = Schema::Kind::None;
+			std::string Doc;
+		};
+
+		// Luau `---@field <name> <type> [<说明>]` 注解 → **有序**声明(名字 + Schema::Kind + Doc)。
 		//
 		// 编辑态硬约束(方案 v2 §3):**不执行脚本、不建 VM** —— 这里只按行静态扫注解文本。
 		// 顺序 = 注解出现顺序;重复名字以第一次为准。类型名映射与脚本加载期同一口径:
 		// number→Float、integer/int→Int32、boolean/bool→Bool、string→String,其余(向量/表…)
 		// 不进属性表。编译产物(容器)没有注解 → 空表。
 		//
-		// 备注(已写进任务报告):`ScriptEngine::ParseFieldAnnotations` 是公开入口,但返回
-		// unordered_map(拿不到声明顺序),所以这里自己扫一遍;若引擎侧以后暴露"有序声明"入口,
-		// 本函数应改为调它(类型映射只应有一份)。
-		std::vector<std::pair<std::string, Schema::Kind>> LuaScriptDeclarations(const std::string& logicalPath)
+		// TODO(SCRIPT-V1):引擎的"有序注解声明入口(名称/类型/doc/默认值)"落地后,**删掉本函数**
+		// (连同下面的 Doc 回填与面板里的同步记忆),改调引擎入口 —— 派工单口径:接口没到之前先用
+		// 现有 `ScriptProperties::SyncFromDeclarations` 接,并在报告里回报。
+		std::vector<LuaFieldDeclaration> LuaScriptDeclarations(const std::string& logicalPath)
 		{
-			std::vector<std::pair<std::string, Schema::Kind>> declarations;
+			std::vector<LuaFieldDeclaration> declarations;
 			if (logicalPath.empty())
 				return declarations;
 			const std::filesystem::path& contentRoot = CachedContentRoot();
@@ -504,11 +545,37 @@ namespace World
 				if (!ScriptProperties::IsPropertyKind(kind))
 					continue;
 				if (std::any_of(declarations.begin(), declarations.end(),
-						[&name](const auto& item) { return item.first == name; }))
+						[&name](const LuaFieldDeclaration& item) { return item.Name == name; }))
 					continue;
-				declarations.emplace_back(name, kind);
+				LuaFieldDeclaration declaration;
+				declaration.Name = name;
+				declaration.Kind = kind;
+				// 第三段(可选)= 脚本里给这个字段写的说明;整行剩余部分原样收,前后空白去掉。
+				std::string doc;
+				std::getline(rest, doc);
+				const size_t firstNonSpace = doc.find_first_not_of(" \t\r\n");
+				const size_t lastNonSpace = doc.find_last_not_of(" \t\r\n");
+				if (firstNonSpace != std::string::npos && lastNonSpace != std::string::npos)
+					declaration.Doc = doc.substr(firstNonSpace, lastNonSpace - firstNonSpace + 1);
+				declarations.push_back(std::move(declaration));
 			}
 			return declarations;
+		}
+
+		// Luau:按脚本注解重同步属性表(保留同名同类型值)+ 回填每条属性的 Doc。
+		// TODO(SCRIPT-V1):引擎入口落地后,这里只剩一次引擎调用(现在这两件事都是编辑器侧兜的)。
+		void SyncLuauPropertiesFromAnnotations(LuauScriptComponent& component)
+		{
+			const std::vector<LuaFieldDeclaration> declarations = LuaScriptDeclarations(component.ScriptPath);
+			std::vector<std::pair<std::string, Schema::Kind>> pairs;
+			pairs.reserve(declarations.size());
+			for (const LuaFieldDeclaration& declaration : declarations)
+				pairs.emplace_back(declaration.Name, declaration.Kind);
+			ScriptProperties::SyncFromDeclarations(component.Properties, pairs);
+			// Doc 由脚本派生、不进存档:每次同步按注解回填(空 = 行悬停走中性兜底)。
+			for (const LuaFieldDeclaration& declaration : declarations)
+				if (ScriptProperty* property = ScriptProperties::Find(component.Properties, declaration.Name))
+					property->Doc = declaration.Doc;
 		}
 
 		// 面板里诊断/错误只显示第一行并截断;完整文本由 AI 通道 script.status 提供。
@@ -1920,7 +1987,7 @@ namespace World
 
 	float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect,
 		void* instance, const std::string& typeName, const Schema::TypeSchema& schema,
-		const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields)
+		const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields, bool scriptPropertyRow)
 	{
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		float y = 0;
@@ -1940,6 +2007,18 @@ namespace World
 				&& control.Y + control.H * 0.5f >= visibleRect.Y
 				&& control.Y + control.H * 0.5f <= visibleRect.Y + visibleRect.H;
 		};
+		// SCRIPT-V2:脚本属性行的说明 = 脚本自己的注释(`ScriptProperty::Doc`,由调用方带进
+		// `FieldSchema.Meta.Doc`)—— **不**回落 schema 的 `schema.field.<Name>.doc`;没写说明就给
+		// 中性兜底,不假装有文档。普通 schema 字段行为不变(仍走 schema 本地化表)。
+		const auto fieldDocFor = [&](const Schema::FieldSchema& candidate)
+		{
+			if (!scriptPropertyRow)
+				return FieldDocLabel(schema, candidate);
+			if (!candidate.Meta.Doc.empty())
+				return candidate.Meta.Doc;
+			return std::string(Wui::Tr("panel.properties.script_field_no_doc",
+				"No description for this field"));
+		};
 		for (const Schema::FieldSchema& field : schema.Fields)
 		{
 			if (field.Meta.Transient)
@@ -1947,9 +2026,13 @@ namespace World
 			const Wui::WuiId fid = Wui::HashId(("f." + typeName + "." + field.Name).c_str()) ^ base;
 			const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, 22 };
 			const Wui::WuiRect ctrl { row.X + labelWidth, row.Y + 1, row.W - labelWidth - 4, 20 };
-			// 显示文案:Meta.DisplayName 优先,空则人类可读化 C++ 字段名后查目录;
+			// 显示文案:普通字段 = Meta.DisplayName 优先,空则人类可读化 C++ 字段名后查目录;
+			// **脚本属性行 = 脚本里的原始字段名,一律不过本地化表** —— 脚本字段不是 schema 字段,
+			// 同名查 `schema.field.*` 会串台(用户实测:脚本字段 `Speed` 显示成别的组件的「速度」)。
 			// 行 id(fid / propId)与持久化仍用 field.Name,不受影响。
-			const Wui::LocalizedLabel label = SchemaFieldLabel(field);
+			const Wui::LocalizedLabel label = scriptPropertyRow
+				? Wui::LocalizedLabel { field.Name, std::string() }
+				: SchemaFieldLabel(field);
 			// 无障碍节点 label 按约定写成 "中文 (English)";显示值/句子本身不加英文。
 			const std::string labelText = TermText(label);
 
@@ -1982,7 +2065,7 @@ namespace World
 				bool& open = ctx.Persist<bool>(fid, false);
 				if (ctx.IsClicked(row))
 					open = !open;
-				const std::string nestedDoc = FieldDocLabel(schema, field);
+				const std::string nestedDoc = fieldDocFor(field);
 				if (!nestedDoc.empty())
 					Wui::Tooltip(ctx, row, nestedDoc);
 				Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, (open ? "- " : "+ ") + label.Text, label.Term,
@@ -1999,7 +2082,7 @@ namespace World
 			if (m_ReadOnly || field.Meta.ReadOnly || !field.Get || !field.Set)
 			{
 				const std::string idText = propId(typeName, field.Name);
-				const std::string docText = FieldDocLabel(schema, field);
+				const std::string docText = fieldDocFor(field);
 				// 只读也要显示"值":否则 Play/Simulate 下属性面板只剩字段名,看起来像"什么都不显示"。
 				std::string text = label.Text;
 				if (field.Get)
@@ -2021,7 +2104,7 @@ namespace World
 			// (脚本用 properties.<Type>.<Field> 直接 ui.invoke)。
 			const std::string idText = propId(typeName, field.Name);
 			// P4-U9:字段说明(如果有)—— 悬停提示 + 无障碍节点 Tooltip。
-			const std::string fieldDoc = FieldDocLabel(schema, field);
+			const std::string fieldDoc = fieldDocFor(field);
 			if (!fieldDoc.empty())
 				Wui::Tooltip(ctx, row, fieldDoc);
 			RegisterNode(Wui::HashId(idText.c_str()), "label", row, labelText, std::string(), false, fieldDoc);
@@ -2369,6 +2452,39 @@ namespace World
 		bool changed = false;
 		// 控件 id 混入组件显示名(与通用路径同一条:`f.<type>.<field>` ^ base)。
 		const Wui::WuiId base = Wui::HashId(schema.DisplayName.c_str());
+		// 实体句柄(Reload 结果按它区分;脚本注解同步记忆也按它分键)。
+		const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
+
+		// ---- SCRIPT-V2:属性表按脚本**声明**保持新鲜(Doc 由脚本派生、不进存档,必须每次重建)----
+		// C++:字段说明来自 schema 的 `Doc("…")` —— 每次画都从 schema 取回(查不到 = 留空,走中性兜底)。
+		const Schema::TypeSchema* cppSchema = (!luau && !cpp->ScriptName.empty())
+			? schemas.Find(cpp->ScriptName) : nullptr;
+		if (cppSchema)
+			for (ScriptProperty& property : cpp->Properties)
+				if (const Schema::FieldSchema* field = FindScriptSchemaField(*cppSchema, property.Name))
+					property.Doc = field->Meta.Doc;
+		// Luau:脚本注解 = 属性表的唯一声明来源。**文件指纹(mtime + size)变了 / 换脚本 / 换实体 /
+		// 面板重开**才重扫文件 —— 用户反馈②「脚本里新加字段不显示、Reload 也不管用」的落点:
+		// 保存/Reload 都会改磁盘 mtime,下一帧即重同步(保留同名同类型值)。
+		// TODO(SCRIPT-V1):引擎的"有序注解声明入口"落地后,本记忆与编辑器侧的注解扫描一起删除。
+		const std::string syncKey = schema.DisplayName + "#" + std::to_string(handle);
+		ScriptDeclSync& syncMemo = m_ScriptDeclSync[syncKey];
+		if (luau)
+		{
+			int64_t stamp = 0;
+			uint64_t size = 0;
+			const bool haveFingerprint = ScriptDiskFingerprint(lua->ScriptPath, &stamp, &size);
+			// Play/Simulate 是只读态:不在这期间重建属性表(退出后再按指纹同步一次)。
+			if (!m_ReadOnly && haveFingerprint && (!syncMemo.Valid || syncMemo.Path != lua->ScriptPath
+				|| syncMemo.WriteStamp != stamp || syncMemo.Size != size))
+			{
+				SyncLuauPropertiesFromAnnotations(*lua);
+				syncMemo.Path = lua->ScriptPath;
+				syncMemo.WriteStamp = stamp;
+				syncMemo.Size = size;
+				syncMemo.Valid = true;
+			}
+		}
 
 		// ---- 脚本引用行 ----
 		const float labelWidth = std::min(140.0f, rect.W * 0.45f);
@@ -2423,7 +2539,9 @@ namespace World
 				{
 					lua->ScriptPath = selected <= 0 ? std::string() : options[static_cast<size_t>(selected)];
 					// 换脚本 = 属性表按**新脚本的注解声明**重建(同名同类型保留值,其余丢弃)。
-					ScriptProperties::SyncFromDeclarations(lua->Properties, LuaScriptDeclarations(lua->ScriptPath));
+					// TODO(SCRIPT-V1):改调引擎的"有序注解声明入口"(现在编辑器侧兜一层注解扫描)。
+					SyncLuauPropertiesFromAnnotations(*lua);
+					syncMemo.Valid = false;   // 下一帧按新脚本的指纹再核对一次(路径/内容都换了)
 					changed = true;
 					if (changedFields)
 						changedFields->push_back(schema.DisplayName + ".ScriptPath");
@@ -2573,19 +2691,25 @@ namespace World
 			// Play/Simulate + 运行实例在场:C++ 按**实例**读真实值(只读;不创建、不写)。
 			const Schema::TypeSchema* liveSchema = schemas.Find(cpp->ScriptName);
 			y += DrawSchemaFields(ctx, base ^ 0x51u, { rect.X, rect.Y + y, rect.W, 0 }, cpp->Instance,
-				schema.DisplayName, *liveSchema, visibleRect, changedFields);
+				schema.DisplayName, *liveSchema, visibleRect, changedFields, /*scriptPropertyRow=*/true);
 		}
 		else
 		{
 			for (ScriptProperty& property : properties)
 			{
-				if (!NormalizeScriptProperty(property))
+				if (!ScriptProperties::IsPropertyKind(property.Type))
 					continue;   // 非脚本属性类型(理论上不会进表):不画,也不写
 				Schema::FieldSchema field;
 				field.Name = property.Name;
 				field.K = property.Type;
-				// Get/Set 直连这条属性的值(instance 传 &property):无捕获 lambda → 函数指针。
-				field.Get = [](const void* value) { return static_cast<const ScriptProperty*>(value)->Value; };
+				// 行悬停/读屏 = 脚本注释(`ScriptProperty::Doc`,由脚本派生、不进存档);
+				// 空 → 中性兜底(绝不回落 schema 的字段说明,见 DrawSchemaFields 的 fieldDocFor)。
+				field.Meta.Doc = property.Doc;
+				// Get/Set 直连这条属性(instance 传 &property):无捕获 lambda → 函数指针。
+				// Get 走**展示值**:未设(monostate)/ 类型不匹配时给规范零值但**不写回**组件 ——
+				// "未设"要保持未设,真实默认值由引擎的属性入口填(审查 P1-1:不能编辑期写成 0 落盘)。
+				field.Get = [](const void* value)
+				{ return ScriptPropertyDisplayValue(*static_cast<const ScriptProperty*>(value)); };
 				field.Set = [](void* value, const Schema::Value& edited)
 				{ static_cast<ScriptProperty*>(value)->Value = edited; };
 				Schema::TypeSchema rowSchema;
@@ -2595,7 +2719,7 @@ namespace World
 				// 属性名固定 → 行 id 稳定(可用 ui.invoke 直接驱动)。
 				const Wui::WuiId rowBase = base ^ Wui::HashId(("script.prop." + property.Name).c_str());
 				y += DrawSchemaFields(ctx, rowBase, { rect.X, rect.Y + y, rect.W, 0 }, &property,
-					schema.DisplayName, rowSchema, visibleRect, changedFields);
+					schema.DisplayName, rowSchema, visibleRect, changedFields, /*scriptPropertyRow=*/true);
 			}
 		}
 
@@ -2612,7 +2736,6 @@ namespace World
 						"Reload this instance from the script asset (same entry as the Scripts panel and script.reload)"),
 				!m_ReadOnly, theme))
 			{
-				const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
 				std::string message;
 				const bool ok = EditorLayer::ReloadLuauScriptComponent(*lua, scene, &message);
 				m_LuaReloadOk = ok;
@@ -2623,7 +2746,6 @@ namespace World
 					lua->ScriptPath, m_LuaReloadMessage);
 			}
 			y += 26.0f;
-			const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
 			if (m_LuaReloadHandle == handle && !m_LuaReloadMessage.empty())
 			{
 				Label(ctx, { rect.X + 4.0f, rect.Y + y - 4.0f }, TruncateForPanel(m_LuaReloadMessage),

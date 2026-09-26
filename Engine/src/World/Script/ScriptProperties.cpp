@@ -71,9 +71,14 @@ namespace World
 
 		namespace
 		{
-			void Apply(std::vector<ScriptProperty>& properties,
-				const std::vector<std::pair<std::string, Schema::Kind>>& declared,
-				const std::vector<Schema::Value>& defaults)
+			// V1 契约开关(2026-09-26):声明里的默认值是"同步时就写进组件"还是"只作为显示/Play 兜底"?
+			// 派工单 item 3 要"把默认值填进 ScriptProperty.Value";item 4① / 验收 #3 要
+			// "未改过就不落盘"。两者互斥 —— 由主 agent 裁决,这里保留一个开关便于一键切换。
+			// true  = 新字段/未设字段直接材料化脚本默认值(面板零改动也不显示 0);
+			// false = 保持 monostate(未设),默认值只放在 Declaration.Default 里给检视器显示。
+			constexpr bool kMaterializeDeclarationDefaults = true;
+
+			void Apply(std::vector<ScriptProperty>& properties, const std::vector<Declaration>& declarations)
 			{
 				std::unordered_map<std::string, ScriptProperty> previous;
 				previous.reserve(properties.size());
@@ -81,21 +86,27 @@ namespace World
 					previous.emplace(property.Name, std::move(property));
 
 				std::vector<ScriptProperty> next;
-				next.reserve(declared.size());
-				for (std::size_t index = 0; index < declared.size(); ++index)
+				next.reserve(declarations.size());
+				for (const Declaration& declaration : declarations)
 				{
-					const std::string& name = declared[index].first;
-					const Schema::Kind kind = declared[index].second;
-					if (!IsPropertyKind(kind))
+					if (!IsPropertyKind(declaration.Type))
 						continue;
+					if (std::any_of(next.begin(), next.end(),
+							[&declaration](const ScriptProperty& item) { return item.Name == declaration.Name; }))
+						continue;   // 重复声明以第一次为准(与注解解析同口径)
 
 					ScriptProperty property;
-					property.Name = name;
-					property.Type = kind;
-					property.Value = index < defaults.size() ? defaults[index] : Schema::Value {};
+					property.Name = declaration.Name;
+					property.Type = declaration.Type;
+					property.Doc = declaration.Doc;
+					property.Value = declaration.Default;   // 没有默认值 → monostate(未设),不写零值
 
-					const auto found = previous.find(name);
-					if (found != previous.end() && found->second.Type == kind)
+					// 场景保存值 / 编辑器改过的值优先;同名同类型时原样保留(未设也保留,除非开关要求补默认值)。
+					const auto found = previous.find(declaration.Name);
+					const bool sameType = found != previous.end() && found->second.Type == declaration.Type;
+					const bool unsetExisting =
+						sameType && std::holds_alternative<std::monostate>(found->second.Value);
+					if (sameType && !(kMaterializeDeclarationDefaults && unsetExisting))
 						property.Value = std::move(found->second.Value);
 					next.push_back(std::move(property));
 				}
@@ -105,33 +116,47 @@ namespace World
 
 		void SyncFromSchema(std::vector<ScriptProperty>& properties, const Schema::TypeSchema& type)
 		{
-			std::vector<std::pair<std::string, Schema::Kind>> declared;
-			std::vector<Schema::Value> defaults;
+			std::vector<Declaration> declared;
 			for (const Schema::FieldSchema& field : type.Fields)
 			{
 				if (!IsPropertyKind(field.K))
 					continue;
-				declared.emplace_back(field.Name, field.K);
-				defaults.push_back(field.Default);
+				Declaration declaration;
+				declaration.Name = field.Name;
+				declaration.Type = field.K;
+				declaration.Doc = field.Meta.Doc;     // C++ 脚本的说明来自 schema 的 Doc("…")
+				declaration.Default = field.Default;
+				declared.push_back(std::move(declaration));
 			}
-			Apply(properties, declared, defaults);
+			Apply(properties, declared);
+		}
+
+		void SyncFromDeclarations(std::vector<ScriptProperty>& properties,
+			const std::vector<Declaration>& declarations)
+		{
+			Apply(properties, declarations);
 		}
 
 		void SyncFromDeclarations(std::vector<ScriptProperty>& properties,
 			const std::vector<std::pair<std::string, Schema::Kind>>& declarations)
 		{
-			std::vector<std::pair<std::string, Schema::Kind>> declared;
+			std::vector<Declaration> declared;
 			declared.reserve(declarations.size());
 			for (const auto& [name, kind] : declarations)
 			{
 				if (!IsPropertyKind(kind))
 					continue;
-				if (std::any_of(declared.begin(), declared.end(),
-						[&name](const auto& item) { return item.first == name; }))
-					continue;   // 重复声明以第一次为准(与注解解析同口径)
-				declared.emplace_back(name, kind);
+				Declaration declaration;
+				declaration.Name = name;
+				declaration.Type = kind;
+				declared.push_back(std::move(declaration));
 			}
-			Apply(properties, declared, std::vector<Schema::Value>(declared.size()));
+			Apply(properties, declared);
+		}
+
+		bool IsUnset(const ScriptProperty& property)
+		{
+			return std::holds_alternative<std::monostate>(property.Value);
 		}
 
 		ScriptProperty* Find(std::vector<ScriptProperty>& properties, const std::string& name)

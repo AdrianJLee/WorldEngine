@@ -27,6 +27,7 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Scene/SceneSerializer.h"
 
 #include <algorithm>
 #include <any>
@@ -836,6 +837,119 @@ return {
 		scene.OnRuntimeStop();
 	}
 
+	// ---- 6c. V1:声明入口(注解说明 / 脚本默认值 / number 统一 Float / 即时同步) ----
+
+	// 注解第三段 = 说明;默认值在脚本体里(local PlayerScript = { … });
+	// Unset 只有注解、表里没有 → 声明成立但默认值未设。
+	const char* const kDeclarationSource = R"LUA(---@field Speed number 移动速度
+---@field Name string 显示名称
+---@field Unset integer
+local PlayerScript = { Speed = 5.0, Name = "player" }
+return PlayerScript
+)LUA";
+
+	const char* const kDeclarationSourceChanged = R"LUA(---@field Speed number 移动速度
+---@field Name string 显示名称
+---@field Unset integer
+---@field Health number 生命值
+local PlayerScript = { Speed = 5.0, Name = "player", Health = 42 }
+return PlayerScript
+)LUA";
+
+	void DeclarationsCarryDocAndScriptDefaults()
+	{
+		const fs::path file = ScriptPath("hotreload_declarations.lua");
+		WriteScript(file, kDeclarationSource);
+		const std::string logical = LogicalPath(file);
+
+		std::vector<std::string> diagnostics;
+		std::string error;
+		std::vector<ScriptProperties::Declaration> declarations;
+		CHECK(ScriptEngine::DescribeScriptDeclarations(logical, declarations, &diagnostics, &error));
+		CHECK(error.empty());
+		CHECK(declarations.size() == 3);
+
+		// ① 注解第三段 → Doc(类型之后的整段剩余文本,去掉首尾空白)。
+		CHECK(declarations[0].Name == "Speed" && declarations[0].Type == Schema::Kind::Float);
+		CHECK(declarations[0].Doc == "移动速度");
+		CHECK(declarations[1].Name == "Name" && declarations[1].Type == Schema::Kind::String);
+		CHECK(declarations[1].Doc == "显示名称");
+		CHECK(declarations[2].Name == "Unset" && declarations[2].Type == Schema::Kind::Int32);
+		CHECK(declarations[2].Doc.empty());
+
+		// ② 默认值 = 脚本里的真值;没有默认值的字段保持"未设"(monostate)。
+		CHECK(std::holds_alternative<float>(declarations[0].Default));
+		CHECK(std::get<float>(declarations[0].Default) == 5.0f);
+		CHECK(std::holds_alternative<std::string>(declarations[1].Default));
+		CHECK(std::get<std::string>(declarations[1].Default) == "player");
+		CHECK(std::holds_alternative<std::monostate>(declarations[2].Default));
+
+		// 同步进组件:Doc 进属性行;新字段取脚本默认值;未设字段保持未设。
+		Scene scene(TestContext());
+		Entity entity = Entity::CreateEntity(&scene, "declaration probe");
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, &error));
+		CHECK(error.empty());
+		CHECK(script.Properties.size() == 3);
+		CHECK(FIELD(script.Properties, "Speed").Doc == "移动速度");
+		CHECK(FIELD(script.Properties, "Name").Doc == "显示名称");
+		CHECK(std::get<float>(FIELD(script.Properties, "Speed").Value) == 5.0f);
+		CHECK(std::get<std::string>(FIELD(script.Properties, "Name").Value) == "player");
+		// ③ 没有默认值的字段保持"未设":不改写为 0。
+		CHECK(ScriptProperties::IsUnset(FIELD(script.Properties, "Unset")));
+		CHECK(std::holds_alternative<std::monostate>(FIELD(script.Properties, "Unset").Value));
+
+		// 同名同类型 → 编辑器改过的值在重同步后保留;重复同步不改变表形态。
+		std::get<float>(FIELD(script.Properties, "Speed").Value) = 9.0f;
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, &error));
+		CHECK(script.Properties.size() == 3);
+		CHECK(std::get<float>(FIELD(script.Properties, "Speed").Value) == 9.0f);
+
+		// ③ 未设值不落盘、不改写为 0:序列化里 Unset 是 null(YAML `~`),不是类型零值。
+		{
+			Ref<Scene> serializeScene = CreateRef<Scene>(TestContext());
+			Entity probe = Entity::CreateEntity(serializeScene.get(), "unset serialization probe");
+			CHECK(ScriptEngine::SyncScriptDeclarations(
+				probe.AddComponent<LuauScriptComponent>(logical), nullptr, &error));
+			const fs::path scenePath = ScriptPath("hotreload_unset_scene.wscene");
+			SceneSerializer serializer(serializeScene);
+			CHECK(serializer.Serialize(scenePath.string()));
+			const std::string yaml = ReadText(scenePath);
+			const size_t unsetAt = yaml.find("Name: Unset");
+			CHECK(unsetAt != std::string::npos);
+			const size_t valueAt = yaml.find("Value:", unsetAt);
+			CHECK(valueAt != std::string::npos);
+			const size_t valueEnd = yaml.find('\n', valueAt);
+			const std::string valueLine = yaml.substr(valueAt, valueEnd - valueAt);
+			CHECK(valueLine.find("0") == std::string::npos);   // 绝不写类型零值
+			CHECK(valueLine.find("~") != std::string::npos);   // 未设 = YAML null
+		}
+
+		// ⑤ 文件改动后重新解析能拿到新字段(声明缓存按内容指纹失效)。
+		WriteScript(file, kDeclarationSourceChanged);
+		std::vector<std::string> changedDiagnostics;
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, &changedDiagnostics, &error));
+		CHECK(error.empty());
+		CHECK(script.Properties.size() == 4);
+		const ScriptProperty* health = ScriptProperties::Find(script.Properties, "Health");
+		CHECK(health != nullptr);
+		CHECK(health->Doc == "生命值");
+		// ④ number 两侧都是 Float:脚本里写 42(整数)也进 Float,不会再和编辑器判"类型变了"。
+		CHECK(health->Type == Schema::Kind::Float);
+		CHECK(std::get<float>(health->Value) == 42.0f);
+		CHECK(std::get<float>(FIELD(script.Properties, "Speed").Value) == 9.0f);   // 编辑值继续保留
+
+		// 运行期同一口径:number 仍是 Float,已设值优先,未设字段保持未设。
+		scene.OnScriptStart();
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(FIELD(script.Properties, "Speed").Type == Schema::Kind::Float);
+		CHECK(std::get<float>(FIELD(script.Properties, "Speed").Value) == 9.0f);
+		CHECK(std::get<float>(FIELD(script.Properties, "Health").Value) == 42.0f);
+		CHECK(ScriptProperties::IsUnset(FIELD(script.Properties, "Unset")));
+		CHECK(script.Runtime.LastError.empty());
+		scene.OnRuntimeStop();
+	}
+
 	// ---- 7. 指纹基线:两条加载路径 + 监听零假阳性 ----
 
 	void LoadPathsEstablishFingerprintBaseline()
@@ -916,6 +1030,7 @@ int main()
 			{ "unsafe states and in-callback reloads are rejected", RejectsUnsafeStatesAndCallbackReload },
 			{ "live script table wins field migration and saved values are the fallback", LiveFieldsTakePriorityOverSavedValues },
 			{ "properties follow declaration order and keep same-type values", PropertiesFollowDeclarationOrderAndKeepValues },
+			{ "declarations carry annotation doc and script defaults", DeclarationsCarryDocAndScriptDefaults },
 			{ "both load paths establish the source fingerprint baseline", LoadPathsEstablishFingerprintBaseline },
 		};
 

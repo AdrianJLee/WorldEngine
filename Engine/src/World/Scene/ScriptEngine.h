@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "World/Core/Export.h"
 #include "World/Script/Sandbox.h"
+#include "World/Script/ScriptProperties.h"
 #include "Scene.h"
 #include <algorithm>
 #include <cstddef>
@@ -117,6 +118,29 @@ namespace World
 		static bool InitScriptForEditor(LuauScriptComponent& component);
 		// 从 Lua 脚本源码文本静态解析 `---@field Name Type` 注解，返回字段名到 Lua 类型名的映射（不执行脚本）。
 		static std::unordered_map<std::string, std::string> ParseFieldAnnotations(const std::string& scriptText);
+
+		// ---- V1(2026-09-26 用户反馈):脚本声明的**唯一入口** ----
+		// 编辑器/检视器只许调这里,不许再自己扫注解(声明顺序 / 类型映射 / 诊断只有这一份)。
+		//
+		// 按脚本路径取有序声明(name → Schema::Kind → Doc → 默认值):
+		//   * 顺序 = 注解顺序(先声明先显示)→ 脚本表里其余字段的顺序;
+		//   * Doc = 注解第三段的整段剩余文本(`---@field Speed number 移动速度` → "移动速度"),
+		//     没有第三段则空;
+		//   * 默认值 = 脚本模块自己的默认值:在沙箱 VM 里只 **load 模块 + 读返回的表**
+		//     (`local PlayerScript = { Speed = 5.0 }`),**不调 OnCreate/OnUpdate、不建实例、
+		//     不注册行为**;VM 不可用 / 容器字节 / 字段不在表里 → Default 为 monostate(未设);
+		//   * 注解与脚本表值类型不符、未知注解类型 → 跳过该字段 + 一条诊断(沿用旧口径)。
+		// 结果按(路径 + 内容指纹 + VM 是否可用)做单槽缓存 → 检视器可以每次绘制都调。
+		// 路径为空 / 读不到脚本 → false + error;此时 out 清空。
+		static bool DescribeScriptDeclarations(const std::string& scriptPath,
+			std::vector<ScriptProperties::Declaration>& out,
+			std::vector<std::string>* diagnostics = nullptr, std::string* error = nullptr);
+
+		// 编辑态即时同步的唯一入口:按脚本路径取声明 → 同步组件属性表
+		// (保留同名同类型的已有值;新字段/未设字段按默认值处理;声明里没有的旧属性丢弃 + 诊断)。
+		// 失败时组件原样不动并返回 false(error 说明原因;诊断追加到 diagnostics,可为 null)。
+		static bool SyncScriptDeclarations(LuauScriptComponent& script,
+			std::vector<std::string>* diagnostics = nullptr, std::string* error = nullptr);
 		// 核心：处理单个实体的脚本实例化和每帧更新
 		static void OnCreateScript(LuauScriptComponent& scriptComponent, Entity entity);
 		static void OnUpdateScript(LuauScriptComponent& scriptComponent, Timestep ts);
