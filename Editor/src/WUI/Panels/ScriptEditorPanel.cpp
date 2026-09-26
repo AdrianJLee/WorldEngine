@@ -681,6 +681,13 @@ namespace World
 		}
 		const Wui::WuiCodeEditorResult result =
 			Wui::CodeEditor(ctx, Wui::HashId("script.editor"), editorRect, m_Buffer, options);
+		// P1c-a(72c9ca2)起 WuiCodeEditor 自己也会登记一个同 id、kind=code-editor 的本体节点,
+		// 把上面面板登记的 kind=editor 节点顶掉(Register 同 id 以最后一次为准);而 AI 通道
+		// ui.type 的 kind 闸门只认 editor / text-field —— 脚本编辑器因此按 id 注入文本会被拒。
+		// VEC-A6:与 MaterialEditorPanel 同一条做法,在 CodeEditor 之后重登记面板自己的节点 ——
+		// kind=editor(可注入)、label/value 与 P1c-a 之前一致,focused 反映真实焦点。
+		editorNode.Focused = ctx.Focus() == Wui::HashId("script.editor");
+		accessibility.Register(editorNode);
 		if (result.SaveRequested)
 			ApplySave(host);
 		// MAT-UI6b:回读内核会话缩放(内核是唯一事实源)。值一变就刷新宿主会话值并点亮指示;

@@ -47,6 +47,25 @@ namespace World
 		// 就地编辑的行距/控件尺寸(与属性面板同一密度)。
 		constexpr float kFieldRowHeight = 22.0f;
 		constexpr float kReadOnlyLineHeight = 16.0f;
+		// ---- VEC-A4:Vec3 字段走 WUI 组件库 `Wui::Vec3Field` ----
+		// 控件列窄于 kVecFieldNarrowWidth 时用库件的竖排(layout 1),行高按"每个分量一格
+		// kVecFieldSlotHeight"给足(库件把 rect 等分;高度不够会把两位小数的读数压重叠)。
+		constexpr float kVecFieldNarrowWidth = 180.0f;
+		constexpr float kVecFieldSlotHeight = 20.0f;
+
+		int VecFieldLayout(float controlWidth)
+		{
+			return controlWidth < kVecFieldNarrowWidth ? 1 : 0;
+		}
+
+		// 行高:横排 = kVecFieldSlotHeight + 上下各 1px(与旧的 18px 控件/22px 行距同节奏),
+		// 竖排 = 每个分量一行。返回的正是 DrawVec3Row 消费掉的高度(EstimateEditorHeight 用的
+		// 宽屏基线 + 窄列增量必须与它一致,否则滚动范围算错)。
+		float VecRowHeight(float fieldsWidth)
+		{
+			const int rows = VecFieldLayout(fieldsWidth) == 1 ? 3 : 1;
+			return kVecFieldSlotHeight * static_cast<float>(rows) + 2.0f;
+		}
 		// P4-U13f:预览离屏目标的长边范围(等比缩放;4K 窗口不把预览拖成大目标)。
 		constexpr float kPreviewTargetMaxSide = 2048.0f;
 		constexpr float kPreviewTargetMinSide = 128.0f;
@@ -1415,7 +1434,9 @@ namespace World
 
 	// ---- P4-U13e:就地编辑(右侧第一段) ----
 
-	// 一行 vec3:标签 + X/Y/Z 三个 drag-float(与属性面板同一控件/同一"1,-1 = 无界"哨兵)。
+	// 一行 vec3:标签 + 库件 `Wui::Vec3Field`(轴标签 + 数值区 + 拖动/键入/↑↓;与属性面板
+	// 同一个控件、同一条"1,-1 = 无界"哨兵)。行 id = HashId(idPrefix),分量无障碍节点由库件
+	// 登记为 `...axis.0/1/2`。返回本行占用的高度(窄控件列竖排时是单行的 3 倍)。
 	float PrefabPanel::DrawVec3Row(Wui::WuiContext& ctx, float x, float y, float width, const char* idPrefix,
 		const std::string& label, const std::string& tooltip, glm::vec3& value, float speed,
 		const Wui::WuiTheme& theme, bool& changed)
@@ -1423,26 +1444,12 @@ namespace World
 		const float labelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
 		Wui::Label(ctx, { x, y + 3.0f }, TruncateUtf8(label, 48), theme.TextMuted, 12.0f);
 		const float fieldsWidth = std::max(60.0f, width - labelWidth);
-		const float slotWidth = fieldsWidth / 3.0f;
-		static const char* const kAxisNames[3] = { "x", "y", "z" };
-		for (int axis = 0; axis < 3; ++axis)
-		{
-			const Wui::WuiRect slot { x + labelWidth + slotWidth * static_cast<float>(axis), y,
-				std::max(18.0f, slotWidth - 2.0f), 18.0f };
-			const std::string idText = std::string(idPrefix) + "." + kAxisNames[axis];
-			float component = value[axis];
-			if (Wui::DragFloat(ctx, Wui::HashId(idText.c_str()), slot, component, speed, 1.0f, -1.0f, theme)
-				&& component != value[axis])
-			{
-				value[axis] = component;
-				changed = true;
-			}
-			// 覆盖控件自己的登记(空 label):脚本/读屏要读到"哪个字段的哪个轴"。
-			RegisterNode(Wui::HashId(idText.c_str()), "drag-float", slot,
-				label + " " + kAxisNames[axis], FormatFloat(value[axis]), true, tooltip, true);
-			Wui::Tooltip(ctx, slot, tooltip);
-		}
-		return kFieldRowHeight;
+		const int layout = VecFieldLayout(fieldsWidth);
+		const Wui::WuiRect field { x + labelWidth, y, fieldsWidth, VecRowHeight(fieldsWidth) };
+		if (Wui::Vec3Field(ctx, Wui::HashId(idPrefix), field, value, speed, 1.0f, -1.0f, theme, layout))
+			changed = true;
+		Wui::Tooltip(ctx, field, tooltip);
+		return field.H;
 	}
 
 	float PrefabPanel::DrawScalarRow(Wui::WuiContext& ctx, float x, float y, float width, const char* idText,
@@ -1572,10 +1579,24 @@ namespace World
 			std::max(0.0f, rect.H - kSectionHeaderHeight - 1.0f) };
 		if (viewport.H <= 8.0f || viewport.W <= 40.0f)
 			return;
-		Wui::BeginScrollArea(ctx, viewport, std::max(viewport.H, EstimateEditorHeight()), m_DetailsScroll,
-			theme);
 		const float x = viewport.X + 2.0f;
 		const float width = std::max(40.0f, viewport.W - 4.0f);
+		// VEC-A4:窄控件列时 T/R/S 三行走库件的竖排(每行 3 格),比宽屏的 22px 单行高。
+		// EstimateEditorHeight() 是宽屏基线(不带宽度参数),这里按同一套行高公式补出增量,
+		// 否则竖排多出来的部分会被裁掉又滚不到。
+		float contentHeight = EstimateEditorHeight();
+		if (rowSelected && m_Staging)
+		{
+			const entt::entity selectedHandle = m_Rows[static_cast<std::size_t>(m_SelectedRow)].Handle;
+			entt::registry& selectedRegistry = m_Staging->GetRegistry();
+			if (selectedRegistry.valid(selectedHandle) && selectedRegistry.try_get<TransformComponent>(selectedHandle))
+			{
+				const float vecLabelWidth = std::clamp(width * 0.32f, 56.0f, 120.0f);
+				const float vecFieldsWidth = std::max(60.0f, width - vecLabelWidth);
+				contentHeight += 3.0f * (VecRowHeight(vecFieldsWidth) - kFieldRowHeight);
+			}
+		}
+		Wui::BeginScrollArea(ctx, viewport, std::max(viewport.H, contentHeight), m_DetailsScroll, theme);
 		float y = viewport.Y + 2.0f;
 		if (!rowSelected || !m_Staging)
 		{
@@ -1595,7 +1616,7 @@ namespace World
 			return;
 		}
 
-		// ---- Transform:T/R/S 三行 drag-float(与属性面板同控件)----
+		// ---- Transform:T/R/S 三行(库件 `Wui::Vec3Field`,与属性面板同控件)----
 		if (auto* transform = registry.try_get<TransformComponent>(handle))
 		{
 			Wui::SectionHeader(ctx, { x, y, width, 18.0f },

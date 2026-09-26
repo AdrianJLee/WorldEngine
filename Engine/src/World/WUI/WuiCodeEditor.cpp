@@ -252,6 +252,56 @@ namespace World::Wui
 				|| (c >= 'a' && c <= 'z') || c == '_';
 		}
 
+		bool IsBlankByte(char c)
+		{
+			return c == ' ' || c == '\t';
+		}
+
+		// 注解上下文:`---@` 之后光标仍在标签名或注解语法的"类型位"上。
+		// 标签位 = `---@` / `---@fie`(候选是标签,由索引给)。
+		// 类型位(与 LuauCompletion::IsAnnotationTypePosition 同一语法口径):
+		//   `---@type <partial>`、`---@field <名字> <partial>`、`---@param <名字> <partial>`、
+		//   `---@class <名字> : <partial>`(冒号连写 `名字: ` 也算)。
+		// 字段名位/说明文字位不算:注释里不能冒出全局候选。
+		bool IsAnnotationContextBody(std::string_view body)
+		{
+			std::size_t tokenStart = body.size();
+			while (tokenStart > 0 && IsIdentByte(body[tokenStart - 1]))
+				--tokenStart;
+			if (tokenStart < body.size() && !IsIdentByte(body[tokenStart]))
+				return false;   // 光标前既不是标识符也不是空白/行首(如 `---@field Speed.`)
+			if (tokenStart == 0)
+				return true;    // 标签名位置:`---@` / `---@fie`
+
+			const std::string_view head = body.substr(0, tokenStart);
+			std::vector<std::string_view> tokens;
+			std::size_t cursor = 0;
+			while (cursor < head.size())
+			{
+				while (cursor < head.size() && IsBlankByte(head[cursor]))
+					++cursor;
+				const std::size_t start = cursor;
+				while (cursor < head.size() && !IsBlankByte(head[cursor]))
+					++cursor;
+				if (cursor > start)
+					tokens.push_back(head.substr(start, cursor - start));
+			}
+			if (tokens.empty())
+				return false;
+			const std::string_view tag = tokens.front();
+			if (tag == "class")
+			{
+				// `---@class Name : ` 或 `---@class Name: ` 之后才是继承类型位。
+				if (tokens.size() == 2 && tokens[1].size() > 1 && tokens[1].back() == ':')
+					return true;
+				return tokens.size() == 3 && tokens[2] == ":";
+			}
+			if (tag != "type" && tag != "field" && tag != "param")
+				return false;
+			const std::size_t expectedTokens = (tag == "type") ? 1u : 2u;
+			return tokens.size() == expectedTokens;
+		}
+
 		// 接受补全时的插入形态:方法/函数插 name() 且 caret 落括号内;其余插 name。
 		bool InsertAsCall(const World::LuauCompletionItem& item)
 		{
@@ -1386,6 +1436,7 @@ namespace World::Wui
 		bool keepPopupOpen = false;
 		bool textHadSeparator = false;
 		bool typedVisible = false;
+		bool typedBlank = false;
 		if (focused && !readOnly && !input.Ctrl)
 		{
 			for (uint32_t codepoint : input.TextInput)
@@ -1397,6 +1448,8 @@ namespace World::Wui
 				EncodeUtf8(encoded, codepoint);
 				buffer.InsertAtCaret(encoded);
 				typedVisible = true;
+				if (codepoint == ' ')
+					typedBlank = true;
 				if (codepoint == '.' || codepoint == ':')
 					textHadSeparator = true;
 			}
@@ -1447,7 +1500,10 @@ namespace World::Wui
 				}
 			}
 		}
-		// 注解上下文:`---@` 之后没有空白——注释行里也要给 `---@class/@field/...` 标签候选。
+		// 注解上下文:注释行里的 `---@` 标记,且光标仍在标签名或类型位
+		// (`---@cl` 标签候选;`---@field Speed ` / `---@type ` / `---@param dt ` /
+		//  `---@class Player : ` 类型候选)。`---@` 之前必须是空白,避免代码/散文注释误判;
+		//  说明文字位不算,候选不会被无关全局符号污染。
 		bool annotationContext = false;
 		{
 			const size_t localCaret = std::min(buffer.Caret(), caretLineStart + caretLineText.size())
@@ -1456,12 +1512,21 @@ namespace World::Wui
 			const std::size_t at = caretLinePrefixBytes.rfind("---@");
 			if (at != std::string_view::npos)
 			{
-				annotationContext = true;
-				for (const char c : caretLinePrefixBytes.substr(at + 4))
-					if (!IsIdentByte(c))
-						annotationContext = false;
+				bool markerAtLineIndent = true;
+				for (const char c : caretLinePrefixBytes.substr(0, at))
+					if (!IsBlankByte(c))
+					{
+						markerAtLineIndent = false;
+						break;
+					}
+				if (markerAtLineIndent)
+					annotationContext = IsAnnotationContextBody(caretLinePrefixBytes.substr(at + 4));
 			}
 		}
+		// 注解上下文里刚输入空白(`---@field Speed ` 的尾空格)要主动请求一次补全;
+		// Explicit=false → Enter 保持换行,候选仍完全由索引 provider 决定。
+		if (focused && annotationContext && typedBlank && !completionRequest.Wanted)
+			completionRequest = { true, false, false };
 		if (completionRequest.Wanted && focused && options.Completion && !readOnly
 			&& (!caretInStringOrComment || annotationContext))
 		{

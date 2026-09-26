@@ -9,9 +9,11 @@
 #include "World/WUI/WuiTextBuffer.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Script/LuauHighlighter.h"
+#include "World/Script/LuauCompletion.h"
 
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -68,6 +70,7 @@ namespace
 	{
 		std::vector<World::LuauCompletionItem> Items;
 		std::vector<std::string> Prefixes;
+		std::vector<std::vector<World::LuauCompletionItem>> Results;
 	};
 
 	WuiCodeEditorOptions OptionsWith(ProviderProbe& probe)
@@ -91,8 +94,31 @@ namespace
 		{
 			probe.Prefixes.emplace_back(linePrefix);
 			out = probe.Items;
+			probe.Results.push_back(out);
 		};
 		return options;
+	}
+
+	std::string StubPath()
+	{
+		const std::filesystem::path assets(WLD_ASSETPATH);
+		return (assets / "scripts" / "intermediate" / "WorldEngineAPI.luau").string();
+	}
+
+	bool HasName(const std::vector<World::LuauCompletionItem>& items, std::string_view name)
+	{
+		for (const World::LuauCompletionItem& item : items)
+			if (item.Name == name)
+				return true;
+		return false;
+	}
+
+	int NameIndex(const std::vector<World::LuauCompletionItem>& items, std::string_view name)
+	{
+		for (std::size_t i = 0; i < items.size(); ++i)
+			if (items[i].Name == name)
+				return static_cast<int>(i);
+		return -1;
 	}
 
 	WuiCodeEditorResult RunFrame(WuiContext& ctx, WuiTextBuffer& buffer, const WuiRect& rect,
@@ -400,6 +426,116 @@ int main()
 			TypeChars(ctx, annotation, editorRect, options, { '-', '-', '-', '@', 'f', 'i', 'e' });
 			CHECK(probe.Prefixes.back() == "---@fie");
 			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+		}
+		WuiAccessibility::Get().Clear();
+
+		// ---- 4a. 注解上下文(真实索引):标签位/类型位弹,字段名位与说明文字位不弹 ----
+		{
+			World::LuauCompletionIndex index;
+			std::string loadError = "stale";
+			CHECK(index.LoadStubFile(StubPath(), &loadError));
+			CHECK(loadError.empty());
+
+			WuiContext ctx;
+			ctx.SetFocus(HashId("test.editor"));
+			ProviderProbe probe;
+			WuiCodeEditorOptions options;
+			options.FontSize = 14.0f;
+			options.LineHeight = 20.0f;
+			options.CompletionIdPrefix = "test.suggest";
+			options.Highlight = [](std::string_view line, std::vector<WuiCodeToken>& out)
+			{
+				World::LuauHighlightState state;
+				World::LuauHighlighter::HighlightLine(line, state, out);
+			};
+			options.Completion = [&](std::string_view linePrefix,
+				std::vector<World::LuauCompletionItem>& out)
+			{
+				probe.Prefixes.emplace_back(linePrefix);
+				index.Query(linePrefix, 50, out);
+				probe.Results.push_back(out);
+			};
+
+			// ① `---@field Speed ` 打完最后一个空格就该弹;前 13 条含 7 个引擎类型。
+			WuiTextBuffer typeSlot;
+			SetTextAtEnd(typeSlot, "---@field Speed");
+			TypeChars(ctx, typeSlot, editorRect, options, { ' ' });
+			CHECK(typeSlot.Text() == "---@field Speed ");
+			CHECK(probe.Prefixes.size() == 1);
+			CHECK(probe.Prefixes.back() == "---@field Speed ");
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+			const std::vector<World::LuauCompletionItem>& typeItems = probe.Results.back();
+			CHECK(typeItems.size() >= 13);
+			for (const char* name : { "vec2", "vec3", "vec4", "mat3", "mat4", "Entity", "WorldScript" })
+			{
+				const int at = NameIndex(typeItems, name);
+				CHECK(at >= 0 && at < 13);
+			}
+			std::string firstNames;
+			for (std::size_t i = 0; i < typeItems.size() && i < 13; ++i)
+			{
+				if (!firstNames.empty())
+					firstNames += ", ";
+				firstNames += typeItems[i].Name;
+			}
+			std::printf("[wui] annotation '%s' -> %zu items; first13: %s\n",
+				probe.Prefixes.back().c_str(), typeItems.size(), firstNames.c_str());
+
+			// 自动弹出(Explicit=false)时 Enter 不能被候选吃掉:关浮层 + 正常换行。
+			PressKey(ctx, typeSlot, editorRect, options, World::KeyCodes::Enter);
+			CHECK(typeSlot.Text() == "---@field Speed \n");
+			CHECK(FindSuggest(HashId("test.suggest.status")) == nullptr);
+
+			// ② `---@field Speed vec` 过滤出 vec2/vec3/vec4(不混入其它引擎类型)。
+			WuiTextBuffer filtered;
+			SetTextAtEnd(filtered, "---@field Speed ve");
+			TypeChars(ctx, filtered, editorRect, options, { 'c' });
+			CHECK(probe.Prefixes.back() == "---@field Speed vec");
+			CHECK(HasName(probe.Results.back(), "vec2"));
+			CHECK(HasName(probe.Results.back(), "vec3"));
+			CHECK(HasName(probe.Results.back(), "vec4"));
+			CHECK(!HasName(probe.Results.back(), "mat3"));
+			CHECK(!HasName(probe.Results.back(), "mat4"));
+			CHECK(!HasName(probe.Results.back(), "Entity"));
+			CHECK(!HasName(probe.Results.back(), "WorldScript"));
+			CHECK(!HasName(probe.Results.back(), "number"));
+
+			// ②b 派工列出的其它类型位形态同样算注解上下文(候选由索引给)。
+			for (const char* context : { "---@type ", "---@param dt ", "---@class Player : " })
+			{
+				WuiTextBuffer contextBuffer;
+				SetTextAtEnd(contextBuffer, context);
+				const std::size_t queriesBeforeContext = probe.Prefixes.size();
+				OpenPopupAtEnd(ctx, contextBuffer, editorRect, options);
+				CHECK(probe.Prefixes.size() == queriesBeforeContext + 1);
+				CHECK(probe.Prefixes.back() == context);
+				CHECK(HasName(probe.Results.back(), "vec2"));
+				CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+			}
+
+			// ③ 第 3 段说明文字位:即使 Ctrl+Space 强制召唤也不查询、不弹。
+			WuiTextBuffer description;
+			SetTextAtEnd(description, "---@field Speed number 移动");
+			const std::size_t queriesBeforeDescription = probe.Prefixes.size();
+			OpenPopupAtEnd(ctx, description, editorRect, options);
+			CHECK(probe.Prefixes.size() == queriesBeforeDescription);
+			CHECK(FindSuggest(HashId("test.suggest.status")) == nullptr);
+
+			// ④ `---@cl` 仍给标签候选(标签位行为不回归)。
+			WuiTextBuffer tag;
+			SetTextAtEnd(tag, "---@c");
+			TypeChars(ctx, tag, editorRect, options, { 'l' });
+			CHECK(probe.Prefixes.back() == "---@cl");
+			CHECK(HasName(probe.Results.back(), "class"));
+			CHECK(FindSuggest(HashId("test.suggest.status")) != nullptr);
+
+			// ⑤ 普通散文注释(没有 `---@`)不弹,即使 Ctrl+Space。
+			WuiTextBuffer prose;
+			SetTextAtEnd(prose, "--- 只是注释");
+			const std::size_t queriesBeforeProse = probe.Prefixes.size();
+			OpenPopupAtEnd(ctx, prose, editorRect, options);
+			CHECK(probe.Prefixes.size() == queriesBeforeProse);
+			CHECK(FindSuggest(HashId("test.suggest.status")) == nullptr);
 		}
 		WuiAccessibility::Get().Clear();
 

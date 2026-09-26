@@ -47,6 +47,32 @@ namespace World
 		// 只有在"确实还有内容可滚"时,上/下按钮才注册成可点击节点(与真实可用性一致)。
 		constexpr float kScrollEpsilon = 0.5f;
 
+		// ---- VEC-A4:向量行统一走 WUI 组件库(Vec2Field/Vec3Field/Vec4Field) ----
+		// 控件列窄于 kVecFieldNarrowWidth 时用库件的竖排(layout 1);行高按"每个分量一格
+		// kVecFieldSlotHeight"给足 —— 库件把传入 rect 等分给各分量,高度不够会把两位小数的
+		// 读数压到互相重叠(材质编辑器对 Vec4 的 2×2 用两倍行高,是同一条口径)。
+		constexpr float kVecFieldNarrowWidth = 180.0f;
+		constexpr float kVecFieldSlotHeight = 20.0f;
+
+		int VecFieldLayout(float controlWidth)
+		{
+			return controlWidth < kVecFieldNarrowWidth ? 1 : 0;
+		}
+
+		// 与 WuiWidgets.cpp 的 VecFieldCore 同一条排布:横排 Vec2/Vec3 = 一行,Vec4 = 2×2
+		// 两行;竖排(layout 1)= 每个分量一行。
+		int VecFieldRows(int layout, int components)
+		{
+			if (layout == 1)
+				return components;
+			return components == 4 ? 2 : 1;
+		}
+
+		float VecFieldHeight(int layout, int components)
+		{
+			return kVecFieldSlotHeight * static_cast<float>(VecFieldRows(layout, components));
+		}
+
 		// ---- 无障碍登记(与 WuiWidgets.cpp 的 RegisterAccessNode 同一格式) ----
 		// 面板内的字段/只读值/自定义检查器统一登记,id 由脚本用 Wui::HashId 直接计算。
 		void RegisterNode(Wui::WuiId id, const char* kind, const Wui::WuiRect& rect, const std::string& label,
@@ -318,39 +344,24 @@ namespace World
 			return { rect.X, rect.Y + kRowHeight * static_cast<float>(index), rect.W, height };
 		}
 
-		Wui::WuiRect ScaledComponentRect(const Wui::WuiRect& rect, int index, int count)
-		{
-			const float slot = rect.W / static_cast<float>(count);
-			return { rect.X + slot * static_cast<float>(index), rect.Y, slot - 2.0f, rect.H };
-		}
-
-		// 自定义检查器的 Vec3 行(度/单位由调用方处理),返回本帧是否有编辑。
-		bool DrawVec3Row(Wui::WuiContext& ctx, const std::string& baseId, const Wui::WuiRect& row,
-			const Wui::LocalizedLabel& label, glm::vec3& value, const Wui::WuiTheme& theme, bool reachable)
+		// 自定义检查器的 Vec3 行(度/单位由调用方处理)。VEC-A4:控件本体 = 库件
+		// `Wui::Vec3Field`(轴标签 / 拖动 / 键入 / ↑↓ 是库件那一套),行 id 仍是
+		// `properties.<组件>.<字段>`;分量无障碍节点由库件登记(`...axis.0/1/2`)。
+		// 返回本行占用的高度(竖排时是单行的 3 倍)。
+		float DrawVec3Row(Wui::WuiContext& ctx, const std::string& baseId, float x, float y, float width,
+			const Wui::LocalizedLabel& label, glm::vec3& value, const Wui::WuiTheme& theme, bool& changed)
 		{
 			// 术语对照的文本预算 = 本行真实标签列宽(控件列起点 - 标签起点),窄处自动省略。
-			const float labelBudget = std::min(140.0f, row.W * 0.45f) - 4.0f;
-			const std::string labelText = TermText(label);
-			Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f, theme, labelBudget);
-			const Wui::WuiRect ctrl { row.X + std::min(140.0f, row.W * 0.45f), row.Y + 1,
-				row.W - std::min(140.0f, row.W * 0.45f) - 4, 20 };
-			static const char* const kSuffix[3] = { ".x", ".y", ".z" };
-			static const char* const kShort[3] = { "x", "y", "z" };
-			bool changed = false;
-			for (int c = 0; c < 3; ++c)
-			{
-				float component = value[c];
-				const Wui::WuiRect slot = ScaledComponentRect(ctrl, c, 3);
-				Wui::DragFloat(ctx, Wui::HashId((baseId + kSuffix[c]).c_str()), slot, component, 0.01f, 1.0f, -1.0f, theme);
-				if (component != value[c])
-				{
-					value[c] = component;
-					changed = true;
-				}
-				RegisterNode(Wui::HashId((baseId + kSuffix[c]).c_str()), "drag-float", slot,
-					labelText + "." + kShort[c], FormatFloatText(component), reachable);
-			}
-			return changed;
+			const float labelBudget = std::min(140.0f, width * 0.45f) - 4.0f;
+			Wui::LabelWithTerm(ctx, { x + 4, y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f, theme, labelBudget);
+			const Wui::WuiRect ctrl { x + std::min(140.0f, width * 0.45f), y + 1,
+				width - std::min(140.0f, width * 0.45f) - 4, 0.0f };
+			const int layout = VecFieldLayout(ctrl.W);
+			const Wui::WuiRect field { ctrl.X, ctrl.Y, ctrl.W, VecFieldHeight(layout, 3) };
+			changed = Wui::Vec3Field(ctx, Wui::HashId(baseId.c_str()), field, value, 0.01f, 1.0f, -1.0f,
+				theme, layout);
+			// 行高 = 控件高 + 上下各 1px(与旧的 20px 控件 + 2px 行距逐像素对齐)。
+			return field.H + 2.0f;
 		}
 
 		// 浮点行(带范围;无范围时用 1/-1 哨兵,与 schema 字段路径一致)。
@@ -2016,6 +2027,8 @@ namespace World
 				theme, labelBudget);
 			Schema::Value value = field.Get(instance);
 			bool fieldChanged = false;
+			// 本行推进量:普通行 22px;向量行按库件排布给足高度(见 VecFieldHeight)。
+			float rowAdvance = kRowHeight;
 			switch (field.K)
 			{
 				case Schema::Kind::Bool:
@@ -2117,27 +2130,46 @@ namespace World
 						break;
 					}
 					const int components = field.K == Schema::Kind::Vec2 ? 2 : (field.K == Schema::Kind::Vec3 ? 3 : 4);
-					const float slot = ctrl.W / components;
-					for (int c = 0; c < components; ++c)
+					// VEC-A4:向量行 = 库件 `Vec2Field`/`Vec3Field`/`Vec4Field`(与材质编辑器的
+					// 参数行同一个控件:轴标签 + 数值区 + 拖动/键入/↑↓),不再逐分量手拼 DragFloat。
+					// 行 id 仍是 `properties.<组件>.<字段>`;分量节点由库件登记为 `...axis.0/1/2/3`
+					// (不再手写 `.x/.y/.z/.w` 节点)。
+					const int layout = VecFieldLayout(ctrl.W);
+					const float fieldHeight = VecFieldHeight(layout, components);
+					const Wui::WuiRect fieldRect { ctrl.X, ctrl.Y, ctrl.W, fieldHeight };
+					const Wui::WuiId rowId = Wui::HashId(idText.c_str());
+					if (components == 2)
 					{
-						float f = field.K == Schema::Kind::Vec2 ? std::get<glm::vec2>(value)[c]
-							: field.K == Schema::Kind::Vec3 ? std::get<glm::vec3>(value)[c] : std::get<glm::vec4>(value)[c];
-						const float before = f;
-						DragFloat(ctx, fid ^ static_cast<Wui::WuiId>(c + 1), { ctrl.X + slot * c, ctrl.Y, slot - 2, ctrl.H }, f, 0.01f, 1.0f, -1.0f, theme);
-						if (f != before)
+						glm::vec2 vector = std::get<glm::vec2>(value);
+						if (Wui::Vec2Field(ctx, rowId, fieldRect, vector, 0.01f, 1.0f, -1.0f, theme, layout))
 						{
+							value = vector;
 							fieldChanged = true;
-							if (field.K == Schema::Kind::Vec2) std::get<glm::vec2>(value)[c] = f;
-							else if (field.K == Schema::Kind::Vec3) std::get<glm::vec3>(value)[c] = f;
-							else std::get<glm::vec4>(value)[c] = f;
 						}
-						static const char* const kSuffix[4] = { ".x", ".y", ".z", ".w" };
-						static const char* const kShort[4] = { "x", "y", "z", "w" };
-						const std::string componentId = idText + kSuffix[c];
-						const Wui::WuiRect slotRect { ctrl.X + slot * static_cast<float>(c), ctrl.Y, slot - 2, ctrl.H };
-						RegisterNode(Wui::HashId(componentId.c_str()), "drag-float", slotRect,
-							labelText + "." + kShort[c], FormatFloatText(f), reachable(slotRect), fieldDoc);
 					}
+					else if (components == 3)
+					{
+						glm::vec3 vector = std::get<glm::vec3>(value);
+						if (Wui::Vec3Field(ctx, rowId, fieldRect, vector, 0.01f, 1.0f, -1.0f, theme, layout))
+						{
+							value = vector;
+							fieldChanged = true;
+						}
+					}
+					else
+					{
+						glm::vec4 vector = std::get<glm::vec4>(value);
+						if (Wui::Vec4Field(ctx, rowId, fieldRect, vector, 0.01f, 1.0f, -1.0f, theme, layout))
+						{
+							value = vector;
+							fieldChanged = true;
+						}
+					}
+					// 行变高(Vec4 横排 2×2 = 两行)后悬停说明仍覆盖整行:外层 tooltip 登记在
+					// 行首 22px 的行矩形上,这里对控件矩形再挂一次(库件自身不带 tooltip)。
+					if (!fieldDoc.empty())
+						Wui::Tooltip(ctx, fieldRect, fieldDoc);
+					rowAdvance = fieldHeight + 2.0f;
 					break;
 				}
 				case Schema::Kind::String:
@@ -2279,7 +2311,7 @@ namespace World
 				if (changedFields)
 					changedFields->push_back(typeName + "." + field.Name);
 			}
-			y += 22;
+			y += rowAdvance;
 		}
 
 		if (changed)
@@ -2680,24 +2712,19 @@ namespace World
 		bool changed = false;
 		// Rotation 面板按度数显示;写回统一走 SetTransform(同步 RotationQuat 与矩阵)。
 		glm::vec3 rotationDegrees = glm::degrees(transform.Rotation);
-		const auto reachable = [&visibleRect](const Wui::WuiRect& control)
-		{
-			return control.X + control.W * 0.5f >= visibleRect.X
-				&& control.X + control.W * 0.5f <= visibleRect.X + visibleRect.W
-				&& control.Y + control.H * 0.5f >= visibleRect.Y
-				&& control.Y + control.H * 0.5f <= visibleRect.Y + visibleRect.H;
-		};
-		const Wui::WuiRect locationRow = ComponentRect(rect, 0, 20);
-		const Wui::WuiRect rotationRow = ComponentRect(rect, 1, 20);
-		const Wui::WuiRect scaleRow = ComponentRect(rect, 2, 20);
 		// 逐行取"这一行是否被编辑":覆盖登记要精确到 Location/Rotation/Scale,
 		// 不能只记"Transform 动过"(否则覆盖计数与实际改动对不上)。
-		const bool locationChanged = DrawVec3Row(ctx, PropPath(typeName, "Location"), locationRow,
-			locationLabel, transform.Location, theme, reachable(locationRow));
-		const bool rotationChanged = DrawVec3Row(ctx, PropPath(typeName, "Rotation"), rotationRow,
-			rotationLabel, rotationDegrees, theme, reachable(rotationRow));
-		const bool scaleChanged = DrawVec3Row(ctx, PropPath(typeName, "Scale"), scaleRow,
-			scaleLabel, transform.Scale, theme, reachable(scaleRow));
+		// 行高由库件的横排/竖排决定(窄控件列竖排 = 3 倍行高),下一行用上一行的返回值累加;
+		// 行内无障碍节点由库件登记(前面板自算的 reachable 不再被向量行使用)。
+		bool locationChanged = false;
+		const float locationHeight = DrawVec3Row(ctx, PropPath(typeName, "Location"), rect.X, rect.Y, rect.W,
+			locationLabel, transform.Location, theme, locationChanged);
+		bool rotationChanged = false;
+		const float rotationHeight = DrawVec3Row(ctx, PropPath(typeName, "Rotation"), rect.X,
+			rect.Y + locationHeight, rect.W, rotationLabel, rotationDegrees, theme, rotationChanged);
+		bool scaleChanged = false;
+		const float scaleHeight = DrawVec3Row(ctx, PropPath(typeName, "Scale"), rect.X,
+			rect.Y + locationHeight + rotationHeight, rect.W, scaleLabel, transform.Scale, theme, scaleChanged);
 		changed |= locationChanged || rotationChanged || scaleChanged;
 		if (changed)
 		{
@@ -2710,7 +2737,7 @@ namespace World
 				if (scaleChanged) changedFields->push_back(typeName + ".Scale");
 			}
 		}
-		return 66.0f;
+		return locationHeight + rotationHeight + scaleHeight;
 	}
 
 	float PropertiesPanel::DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
