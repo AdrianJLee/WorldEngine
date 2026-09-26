@@ -403,9 +403,11 @@ namespace World
 		// ---- 2026-09-26 脚本组件重写:统一脚本检视器的三个数据侧小工具 ----
 		//
 		// `ScriptProperty::Value` 的类型编码必须与 schema 一致
-		// (Bool→bool、Int*→对应宽度、Float→float、Double→double、String→string):
-		// 属性行复用 `DrawSchemaFields`,那里按 Kind 直接 `std::get<T>(value)`,
-		// 值停在 monostate(刚声明还没填值 / 手改过的场景缺 Value)会抛 std::bad_variant_access。
+		// (Bool→bool、Int*→对应宽度、Float→float、Double→double、String→string、
+		//  Vec2/3/4→glm::vec2/3/4):属性行复用 `DrawSchemaFields`,那里按 Kind 直接
+		// `std::get<T>(value)`,值停在 monostate(刚声明还没填值 / 手改过的场景缺 Value)
+		// 会抛 std::bad_variant_access —— 向量行必须在下面补零值兜底,否则 A 期放行
+		// Vec2/3/4 后脚本属性里"声明了但没值"的向量行会直接崩面板。
 		Schema::Value DefaultScriptPropertyValue(Schema::Kind kind)
 		{
 			switch (kind)
@@ -422,6 +424,9 @@ namespace World
 				case Schema::Kind::Float: return Schema::Value(0.0f);
 				case Schema::Kind::Double: return Schema::Value(0.0);
 				case Schema::Kind::String: return Schema::Value(std::string());
+				case Schema::Kind::Vec2: return Schema::Value(glm::vec2(0.0f));
+				case Schema::Kind::Vec3: return Schema::Value(glm::vec3(0.0f));
+				case Schema::Kind::Vec4: return Schema::Value(glm::vec4(0.0f));
 				default: return Schema::Value();
 			}
 		}
@@ -442,6 +447,9 @@ namespace World
 				case Schema::Kind::Float: return std::holds_alternative<float>(property.Value);
 				case Schema::Kind::Double: return std::holds_alternative<double>(property.Value);
 				case Schema::Kind::String: return std::holds_alternative<std::string>(property.Value);
+				case Schema::Kind::Vec2: return std::holds_alternative<glm::vec2>(property.Value);
+				case Schema::Kind::Vec3: return std::holds_alternative<glm::vec3>(property.Value);
+				case Schema::Kind::Vec4: return std::holds_alternative<glm::vec4>(property.Value);
 				default: return false;
 			}
 		}

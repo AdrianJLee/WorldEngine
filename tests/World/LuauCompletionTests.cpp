@@ -559,18 +559,26 @@ int main()
 				return -1;
 			};
 
-			// ① `---@field <名字> ` ⇒ 基础类型 + 已声明的类型/类名;基础类型排在最前
+			// ① `---@field <名字> ` ⇒ 常用基础类型 + 引擎类型 + 其余类型/类名
 			index.Query("---@field Speed ", 0, items);
 			CHECK(HasName(items, "number") && HasName(items, "string") && HasName(items, "integer"));
 			CHECK(HasName(items, "Entity"));        // 存根 ---@class
 			CHECK(HasName(items, "WorldScript"));   // 存根里的纯注解类(无运行时全局)
 			CHECK(HasName(items, "PlayerScript"));  // 当前文件的 ---@class
-			CHECK(items.front().Name == "any");     // 基础类型固定顺序:any 在最前
-			CHECK(items.front().Kind == LuauCompletionItem::KindType::Keyword);   // 基础类型档
+			// VEC-A1(D1):常用基础(6,固定顺序)在最前,引擎类型(7)紧随其后。
+			CHECK(items.size() >= 13);
+			CHECK(items[0].Name == "number" && items[1].Name == "string" && items[2].Name == "boolean"
+				&& items[3].Name == "integer" && items[4].Name == "table" && items[5].Name == "any");
+			CHECK(items[0].Kind == LuauCompletionItem::KindType::Keyword);   // 基础类型档
+			CHECK(items[6].Name == "vec2" && items[7].Name == "vec3" && items[8].Name == "vec4"
+				&& items[9].Name == "mat3" && items[10].Name == "mat4"
+				&& items[11].Name == "Entity" && items[12].Name == "WorldScript");
+			CHECK(items[6].Kind == LuauCompletionItem::KindType::Class);     // 引擎类型档
 			const LuauCompletionItem* number = FindName(items, "number");
 			CHECK(number != nullptr && !number->Doc.empty());   // 类型候选带一句话说明
-			CHECK(indexOf("any") == 0 && indexOf("number") > indexOf("any")
-				&& indexOf("Entity") > indexOf("number"));     // 基础类型都在类名之前
+			const LuauCompletionItem* vec3Type = FindName(items, "vec3");
+			CHECK(vec3Type != nullptr && !vec3Type->Doc.empty());   // 存根没写说明时用兜底:悬停可用
+			CHECK(indexOf("number") < indexOf("vec3") && indexOf("vec3") < indexOf("PlayerScript"));
 
 			// ② `---@type ` / `---@param <名字> ` 同样是类型位
 			index.Query("---@type ", 0, items);
@@ -590,11 +598,11 @@ int main()
 			CHECK(!HasName(items, "never") && !HasName(items, "integer") && !HasName(items, "buffer")
 				&& !HasName(items, "vector"));
 
-			// ⑤ 前缀过滤大小写不敏感 + maxItems 截断(截断发生在基础类型档内)
+			// ⑤ 前缀过滤大小写不敏感 + maxItems 截断(截断发生在常用基础档内)
 			index.Query("---@field Speed n", 0, items);
 			CHECK(HasName(items, "number") && HasName(items, "never") && !HasName(items, "string"));
 			index.Query("---@field Speed ", 2, items);
-			CHECK(items.size() == 2 && items[0].Name == "any" && items[1].Name == "boolean");
+			CHECK(items.size() == 2 && items[0].Name == "number" && items[1].Name == "string");
 
 			// ⑥ 悬停:注解行里的字段名 / 代码里的 self. 与裸名 / 类型名本身
 			LuauCompletionItem described;
@@ -622,6 +630,53 @@ int main()
 			// ⑧ SetFileSource("") 之后注解字段表随之清空(不残留上一份文件的提示)
 			index.SetFileSource("");
 			CHECK(!index.Describe("---@field ", "Speed", described));
+		}
+
+		// ---- 9. VEC-A1(D1):类型位候选分档(常用基础 → 引擎类型 → 其余基础 → 其余类名)----
+		//        修复前(13 条基础类型固定在最前 + 类名字典序)实测名次(1-based,共 49 个候选):
+		//        Entity=23、mat3=29、mat4=30、vec2=46、vec3=47、vec4=48、WorldScript=49 ——
+		//        类型位弹窗首屏(约 10-12 行)看不到任何引擎类型,只能先打 `vec` 前缀。
+		{
+			CHECK(index.LoadStubFile(StubPath(), nullptr));
+			index.SetFileSource("");
+
+			std::vector<LuauCompletionItem> items;
+			index.Query("---@field Speed ", 0, items);
+			const auto indexOf = [&items](std::string_view name) -> int
+			{
+				for (std::size_t i = 0; i < items.size(); ++i)
+					if (items[i].Name == name)
+						return static_cast<int>(i);
+				return -1;
+			};
+
+			// 分档顺序:常用 6 → 引擎 7 → 其余基础 7 → 其余类名(字典序)。
+			const char* const common[] = { "number", "string", "boolean", "integer", "table", "any" };
+			const char* const engine[] = { "vec2", "vec3", "vec4", "mat3", "mat4", "Entity", "WorldScript" };
+			const char* const other[] = { "buffer", "function", "never", "nil", "thread", "unknown", "vector" };
+			constexpr std::size_t kCommonCount = 6;
+			constexpr std::size_t kEngineCount = 7;
+			constexpr std::size_t kOtherCount = 7;
+			for (std::size_t i = 0; i < kCommonCount; ++i)
+				CHECK(items[i].Name == common[i] && items[i].Kind == LuauCompletionItem::KindType::Keyword);
+			for (std::size_t i = 0; i < kEngineCount; ++i)
+				CHECK(items[kCommonCount + i].Name == engine[i]
+					&& items[kCommonCount + i].Kind == LuauCompletionItem::KindType::Class);
+			for (std::size_t i = 0; i < kOtherCount; ++i)
+				CHECK(items[kCommonCount + kEngineCount + i].Name == other[i]);
+			// 其余类名档从第 21 条(0-based 20)起:第一个类名按字典序 = AmbientLightComponent。
+			CHECK(items[kCommonCount + kEngineCount + kOtherCount].Name == "AmbientLightComponent");
+
+			// 引擎类型全部落在前 13 条内(修复前 23-49 位),且类型位说明非空。
+			for (const char* name : engine)
+			{
+				const int position = indexOf(name);
+				CHECK(position >= 0 && position < 13);
+				const LuauCompletionItem* item = FindName(items, name);
+				CHECK(item != nullptr && !item->Doc.empty());
+			}
+			std::printf("[type-order] candidates=%zu | before-fix: Entity=23 mat3=29 mat4=30 vec2=46 vec3=47 vec4=48 WorldScript=49"
+				" | now: %s\n", items.size(), JoinNames(items, 13).c_str());
 		}
 	}
 	catch (const std::exception& exception)

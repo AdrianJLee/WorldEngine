@@ -1010,6 +1010,123 @@ namespace
         CHECK(!script.LuaEnv.IsValid() && !script.ScriptTable.IsValid());
     }
 
+    // VEC-A1(D2):向量属性 —— 注解 `vec3/vec2/vec4` → 属性表;默认值取脚本表里的向量 userdata
+    // (**拷贝**出来,不存指针);同名同类型保值;未设保持 monostate;类型不符 → 诊断 + 不进属性表;
+    // C++ 侧 schema 的 Vec3 字段走同一条 SyncFromSchema 模型。
+    void VectorPropertiesFromAnnotationsAndSchema()
+    {
+        const auto vectorPath = s_OutputDirectory / "vec_properties.lua";
+        {
+            std::ofstream file(vectorPath, std::ios::binary);
+            file <<
+                "---@field Offset vec3 位置偏移\n"
+                "---@field Scale vec2 缩放\n"
+                "---@field UnsetVec vec4\n"
+                "return { Offset = vec3.new(1.5, 2.5, 3.5), Scale = vec2.new(0.25, 0.5) }\n";
+            CHECK(file.good());
+        }
+        const std::string logical = vectorPath.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+
+        // ① 注解 vec3/vec2/vec4 → Schema::Kind 的对应支;Doc 取注解第三段。
+        std::vector<ScriptProperties::Declaration> declarations;
+        std::vector<std::string> diagnostics;
+        std::string error;
+        CHECK(ScriptEngine::DescribeScriptDeclarations(logical, declarations, &diagnostics, &error));
+        CHECK(error.empty());
+        CHECK(diagnostics.empty());
+        CHECK(declarations.size() == 3);
+        CHECK(declarations[0].Name == "Offset" && declarations[0].Type == Schema::Kind::Vec3);
+        CHECK(declarations[0].Doc == "位置偏移");
+        CHECK(declarations[1].Name == "Scale" && declarations[1].Type == Schema::Kind::Vec2);
+        CHECK(declarations[1].Doc == "缩放");
+        CHECK(declarations[2].Name == "UnsetVec" && declarations[2].Type == Schema::Kind::Vec4);
+
+        // ② 默认值 = 脚本表里的 vec3.new(...)/vec2.new(...),从 userdata 拷出来(不存指针)。
+        CHECK(std::holds_alternative<glm::vec3>(declarations[0].Default));
+        CHECK(std::get<glm::vec3>(declarations[0].Default) == glm::vec3(1.5f, 2.5f, 3.5f));
+        CHECK(std::holds_alternative<glm::vec2>(declarations[1].Default));
+        CHECK(std::get<glm::vec2>(declarations[1].Default) == glm::vec2(0.25f, 0.5f));
+        // ④ 注解在、脚本表里没有 → 默认值保持未设(monostate),绝不写零值。
+        CHECK(std::holds_alternative<std::monostate>(declarations[2].Default));
+
+        // 夹具同时只允许一个(Fixture 构造断言)。
+        {
+            Fixture fixture;
+            auto entity = fixture.AddLua(logical);
+            auto& script = entity.GetComponent<LuauScriptComponent>();
+            CHECK(ScriptEngine::SyncScriptDeclarations(script, &diagnostics, &error));
+            CHECK(error.empty());
+            CHECK(script.Properties.size() == 3);
+            const ScriptProperty* offset = ScriptProperties::Find(script.Properties, "Offset");
+            CHECK(offset != nullptr && offset->Type == Schema::Kind::Vec3);
+            CHECK(std::get<glm::vec3>(offset->Value) == glm::vec3(1.5f, 2.5f, 3.5f));
+            CHECK(ScriptProperties::IsUnset(*ScriptProperties::Find(script.Properties, "UnsetVec")));
+
+            // ③ 编辑器改值 → 重新同步(同名同类型)保留改过的值;未设字段仍是未设。
+            std::get<glm::vec3>(ScriptProperties::Find(script.Properties, "Offset")->Value) = glm::vec3(9.0f, 8.0f, 7.0f);
+            CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, &error));
+            CHECK(std::get<glm::vec3>(ScriptProperties::Find(script.Properties, "Offset")->Value) == glm::vec3(9.0f, 8.0f, 7.0f));
+            CHECK(ScriptProperties::IsUnset(*ScriptProperties::Find(script.Properties, "UnsetVec")));
+
+            // 运行期:属性以 vec3 userdata 写回脚本表(类型不丢,坐标可读)。
+            fixture.World->OnScriptStart();
+            CHECK(script.Runtime.State == ScriptInstanceState::Running);
+            World::ScriptValue runtimeOffset = script.ScriptTable.GetField("Offset");
+            CHECK(ScriptEngine::GetBindingContext().IsUserdataOfType("vec3", runtimeOffset));
+            glm::vec3* runtimePointer = nullptr;
+            CHECK(ScriptEngine::GetBindingContext().Unwrap("vec3", runtimeOffset, &runtimePointer) && runtimePointer != nullptr);
+            CHECK(*runtimePointer == glm::vec3(9.0f, 8.0f, 7.0f));
+            fixture.Stop();
+        }
+
+        // ⑤ 注解写 vec3、脚本表里放 number → 诊断 + 该字段不进属性表(不静默)。
+        const auto mismatchPath = s_OutputDirectory / "vec_mismatch.lua";
+        {
+            std::ofstream file(mismatchPath, std::ios::binary);
+            file << "---@field Offset vec3 位置偏移\nreturn { Offset = 1.0 }\n";
+            CHECK(file.good());
+        }
+        const std::string mismatchLogical = mismatchPath.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+        std::vector<ScriptProperties::Declaration> mismatchDeclarations;
+        std::vector<std::string> mismatchDiagnostics;
+        CHECK(ScriptEngine::DescribeScriptDeclarations(mismatchLogical, mismatchDeclarations, &mismatchDiagnostics, &error));
+        CHECK(error.empty());
+        CHECK(mismatchDeclarations.empty());
+        CHECK(mismatchDiagnostics.size() == 1);
+        CHECK(mismatchDiagnostics.front().find("different value type") != std::string::npos);
+        {
+            Fixture mismatchFixture;
+            auto mismatchEntity = mismatchFixture.AddLua(mismatchLogical);
+            auto& mismatchScript = mismatchEntity.GetComponent<LuauScriptComponent>();
+            std::vector<std::string> syncDiagnostics;
+            CHECK(ScriptEngine::SyncScriptDeclarations(mismatchScript, &syncDiagnostics, &error));
+            CHECK(error.empty());
+            CHECK(syncDiagnostics.size() == 1);
+            CHECK(mismatchScript.Properties.empty());
+        }
+
+        // ⑥ C++ 侧:Schema::TypeSchema 里的 Vec3 字段经 SyncFromSchema 进同一份属性模型;
+        //    KindName/KindFromName 是存档里 `Type: Vec3` 的读写对。
+        Schema::FieldSchema vectorField;
+        vectorField.Id = Schema::FieldId{ Schema::Fnv1a64("VecPropertyProbe.Offset") };
+        vectorField.Name = "Offset";
+        vectorField.K = Schema::Kind::Vec3;
+        vectorField.Default = glm::vec3(1.0f, 2.0f, 3.0f);
+        Schema::TypeSchema vectorType;
+        vectorType.Id = Schema::TypeId("VecPropertyProbe");
+        vectorType.DisplayName = "VecPropertyProbe";
+        vectorType.Category = Schema::TypeCategory::Script;
+        vectorType.Fields.push_back(vectorField);
+        std::vector<ScriptProperty> schemaProperties;
+        ScriptProperties::SyncFromSchema(schemaProperties, vectorType);
+        CHECK(schemaProperties.size() == 1);
+        CHECK(schemaProperties[0].Name == "Offset" && schemaProperties[0].Type == Schema::Kind::Vec3);
+        CHECK(std::get<glm::vec3>(schemaProperties[0].Value) == glm::vec3(1.0f, 2.0f, 3.0f));
+        CHECK(std::string(ScriptProperties::KindName(Schema::Kind::Vec3)) == "Vec3");
+        CHECK(ScriptProperties::KindFromName("Vec3") == Schema::Kind::Vec3);
+        CHECK(ScriptProperties::KindFromName("Nope") == Schema::Kind::None);
+    }
+
     void StubGenerationContracts()
     {
         auto types = LuaReflectionRegistry::GetTable();
@@ -1309,6 +1426,7 @@ int main(int argc, char** argv)
             { "non-owning LayerStack detach order", NonOwningLayerDetachOrder },
             { "native properties configure the factory instance", NativePropertiesConfigureFactoryInstance },
             { "syntax errors preserve preview cache", SyntaxErrorsAndPreviewCache },
+            { "Vec2/Vec3/Vec4 properties from annotations and schema", VectorPropertiesFromAnnotationsAndSchema },
             { "deterministic and atomic stub generation", StubGenerationContracts },
             { "real static-link bindings and template", RealBindingsAndTemplate },
             { "VM restart keeps metadata unique", VmRestartKeepsUniqueMetadata },

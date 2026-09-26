@@ -335,27 +335,52 @@ namespace World
 			return true;
 		}
 
-		// V9:注解类型位的"基础类型"档(固定顺序,排在类型/类名之前)。
+		// V9:注解类型位的"基础类型"档(固定顺序)。
 		struct AnnotationBaseType
 		{
 			const char* Name;
 			const char* Doc;
 		};
 
-		constexpr AnnotationBaseType kAnnotationBaseTypes[] = {
-			{ "any", "任意类型(不检查成员)" },
-			{ "boolean", "布尔值(true / false)" },
-			{ "buffer", "二进制缓冲区" },
-			{ "function", "函数(可用 fun(...): ... 细化签名)" },
-			{ "integer", "整数(64 位整数值)" },
-			{ "never", "永不返回(如 error 的返回类型)" },
-			{ "nil", "空值" },
+		// D1(2026-09-26):常用基础类型排在候选最前(首屏预算约 10-12 行)。
+		constexpr AnnotationBaseType kAnnotationCommonBaseTypes[] = {
 			{ "number", "数值(Luau 的 number)" },
 			{ "string", "字符串" },
+			{ "boolean", "布尔值(true / false)" },
+			{ "integer", "整数(64 位整数值)" },
 			{ "table", "表(可用 { [K]: V } 细化)" },
+			{ "any", "任意类型(不检查成员)" },
+		};
+
+		// 其余 Luau 基础类型:顺序保持修复前不变;只是挪到引擎类型之后(打前缀仍能命中)。
+		constexpr AnnotationBaseType kAnnotationOtherBaseTypes[] = {
+			{ "buffer", "二进制缓冲区" },
+			{ "function", "函数(可用 fun(...): ... 细化签名)" },
+			{ "never", "永不返回(如 error 的返回类型)" },
+			{ "nil", "空值" },
 			{ "thread", "协程线程" },
 			{ "unknown", "未知类型(使用前需要收窄)" },
 			{ "vector", "向量(如 vec3.new 的返回)" },
+		};
+
+		// D1:引擎类型档 —— 顺序即方案 D1 的固定顺序;**是否出现由索引里是否真有同名
+		// `---@class`(存根或当前文件)决定**,不凭名字硬造候选。Doc 优先取存根注释块;
+		// 存根(`LuaStubGenerator`)对 vec2/vec3/vec4/mat3/mat4/Entity 没有散文说明,这里给
+		// 一句话兜底(存根将来补了说明就以存根为准,不另抄第二份)。
+		struct AnnotationEngineType
+		{
+			const char* Name;
+			const char* FallbackDoc;
+		};
+
+		constexpr AnnotationEngineType kAnnotationEngineTypes[] = {
+			{ "vec2", "引擎向量类型(Lua 侧是 userdata;vec2.new 构造,含 x/y 坐标)" },
+			{ "vec3", "引擎向量类型(Lua 侧是 userdata;vec3.new 构造,含 x/y/z 坐标)" },
+			{ "vec4", "引擎向量类型(Lua 侧是 userdata;vec4.new 构造,含 x/y/z/w 坐标)" },
+			{ "mat3", "引擎矩阵类型(Lua 侧是 userdata;mat3.new 构造)" },
+			{ "mat4", "引擎矩阵类型(Lua 侧是 userdata;mat4.new 构造)" },
+			{ "Entity", "实体句柄(Lua 侧是 userdata;Entity 方法表的接收者)" },
+			{ "WorldScript", "脚本实例(注解形态的类;回调里的 self 就是它)" },
 		};
 	}
 
@@ -1157,24 +1182,70 @@ namespace World
 		return false;
 	}
 
-	// V9:注解类型位的候选 = Luau 基础类型(固定顺序,**排在前面**)+ 索引里已声明的类型/类名
-	// (存根 + 当前文件的 `---@class`,按字典序)。前缀按大小写不敏感前缀过滤(类型名短,不做子串兜底)。
+	// V9:注解类型位的候选 = 常用基础类型 → 引擎类型(vec2/vec3/vec4/mat3/mat4/Entity/WorldScript)
+	// → 其余基础类型 → 索引里其余已声明的类型/类名(存根 + 当前文件,按字典序)。
+	// D1(2026-09-26):原来的 13 条基础类型固定排在最前,把引擎类型挤出首屏 —— 实测存根 36 个类时
+	// vec2/vec3/vec4 在 49 个候选里排第 46/47/48 位(WorldScript 第 49 位);现在前 13 条 =
+	// 常用基础(6)+ 引擎类型(7),冷门基础类型仍可打前缀命中(不删任何候选)。
+	// 前缀按大小写不敏感前缀过滤(类型名短,不做子串兜底)。
 	void LuauCompletionIndex::CollectTypeCandidates(std::string_view prefix,
 		std::vector<LuauCompletionItem>& out) const
 	{
 		out.clear();
-		for (const AnnotationBaseType& base : kAnnotationBaseTypes)
+
+		const auto appendBase = [&](const AnnotationBaseType& base)
 		{
 			if (!prefix.empty() && !StartsWithIgnoreCase(base.Name, prefix))
-				continue;
+				return;
 			LuauCompletionItem item;
 			item.Name.assign(base.Name);
 			item.Doc.assign(base.Doc);
 			item.Kind = LuauCompletionItem::KindType::Keyword;
 			out.push_back(std::move(item));
+		};
+		for (const AnnotationBaseType& base : kAnnotationCommonBaseTypes)
+			appendBase(base);
+
+		// 引擎类型档:名单与顺序来自 D1;只有索引里真的声明了这个 `---@class`(存根或当前文件)
+		// 才出现 —— 不凭名字硬造候选。Doc 优先取存根注释块,存根没写说明时用兜底一句话。
+		const auto findClass = [this](std::string_view name) -> const ClassInfo*
+		{
+			for (const ClassInfo& info : m_StubClasses)
+				if (EqualsIgnoreCase(info.Name, name))
+					return &info;
+			for (const ClassInfo& info : m_FileClasses)
+				if (EqualsIgnoreCase(info.Name, name))
+					return &info;
+			return nullptr;
+		};
+		const auto findItemDoc = [this](std::string_view name) -> std::string
+		{
+			for (const LuauCompletionItem& item : m_Items)
+				if (EqualsIgnoreCase(item.Name, name))
+					return item.Doc;
+			return {};
+		};
+		for (const AnnotationEngineType& engine : kAnnotationEngineTypes)
+		{
+			if (!prefix.empty() && !StartsWithIgnoreCase(engine.Name, prefix))
+				continue;
+			if (!findClass(engine.Name))
+				continue;
+			std::string doc = findItemDoc(engine.Name);
+			if (doc.empty())
+				doc = engine.FallbackDoc;
+			LuauCompletionItem item;
+			item.Name.assign(engine.Name);
+			item.Doc = std::move(doc);
+			item.Kind = LuauCompletionItem::KindType::Class;
+			out.push_back(std::move(item));
 		}
 
-		// 已声明的类型/类名:名字去重(大小写不敏感);说明优先取同名符号项里已有的 Doc
+		for (const AnnotationBaseType& base : kAnnotationOtherBaseTypes)
+			appendBase(base);
+
+		// 其余已声明的类型/类名:名字去重(大小写不敏感;基础/引擎档已占的名字不重复出现);
+		// 说明优先取同名符号项里已有的 Doc
 		// (存根的 `---@class` 前注释块进的就是它)。
 		std::vector<LuauCompletionItem> named;
 		const auto addClass = [&](std::string_view name)
@@ -1184,6 +1255,9 @@ namespace World
 			for (const LuauCompletionItem& existing : named)
 				if (EqualsIgnoreCase(existing.Name, name))
 					return;
+			for (const LuauCompletionItem& existing : out)
+				if (EqualsIgnoreCase(existing.Name, name))
+					return;   // 基础类型 / 引擎类型档优先(同名类不再进"其余类名")
 			LuauCompletionItem item;
 			item.Name.assign(name);
 			item.Kind = LuauCompletionItem::KindType::Class;

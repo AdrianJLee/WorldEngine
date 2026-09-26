@@ -222,9 +222,18 @@ namespace World
 			return ParseFieldAnnotationListInternal(std::string(bytes.begin(), bytes.end()));
 		}
 
+		// VEC-A1(D2):VM 与绑定上下文都活着才做 userdata 的装箱/解包。
+		// 纯工具或 VM 不可用(离线声明解析、Shutdown 之后)时保持旧行为:
+		// 读值失败 → 该字段跳过;写值返回 Nil → 调用方跳过,**绝不把脚本字段清成 nil**。
+		ScriptBindingContext* BindingContextIfAvailable()
+		{
+			return (s_Vm && s_Bindings) ? s_Bindings.get() : nullptr;
+		}
+
 		// V1(2026-09-26):注解类型名 → schema 值类型 —— **与值无关的固定映射**。
 		//   number       → Float(两侧统一:编辑器和引擎都是 Float;P1-2 的"编辑值被判类型变了"由此消除)
 		//   integer/int  → Int32,boolean/bool → Bool,string → String
+		//   vec2/vec3/vec4 → Vec2/Vec3/Vec4(Luau 侧是 userdata;读写都走绑定上下文,值按**拷贝**进出)
 		// 未知类型名 → None(跳过该字段 + 诊断)。
 		Schema::Kind AnnotationToKindInternal(const std::string& typeName)
 		{
@@ -232,6 +241,9 @@ namespace World
 			if (typeName == "integer" || typeName == "int") return Schema::Kind::Int32;
 			if (typeName == "boolean" || typeName == "bool") return Schema::Kind::Bool;
 			if (typeName == "string") return Schema::Kind::String;
+			if (typeName == "vec2") return Schema::Kind::Vec2;
+			if (typeName == "vec3") return Schema::Kind::Vec3;
+			if (typeName == "vec4") return Schema::Kind::Vec4;
 			return Schema::Kind::None;
 		}
 
@@ -248,6 +260,18 @@ namespace World
 			}
 			if (value.IsBoolean()) return Schema::Kind::Bool;
 			if (value.IsString()) return Schema::Kind::String;
+			// VEC-A1(D2):脚本表里的向量 userdata 也要能进属性表(未写注解的现状保持)。
+			// 只有能安全问到 userdata 类型名时才推断(无 VM / 非本 VM 的值 → 维持旧行为 None,不猜)。
+			if (value.IsUserdata())
+			{
+				if (ScriptBindingContext* bindings = BindingContextIfAvailable())
+				{
+					if (bindings->IsUserdataOfType("vec2", value)) return Schema::Kind::Vec2;
+					if (bindings->IsUserdataOfType("vec3", value)) return Schema::Kind::Vec3;
+					if (bindings->IsUserdataOfType("vec4", value)) return Schema::Kind::Vec4;
+				}
+				return Schema::Kind::None;
+			}
 			return Schema::Kind::None;
 		}
 
@@ -293,6 +317,35 @@ namespace World
 					*out = std::move(text);
 					return true;
 				}
+				// VEC-A1(D2):Luau 向量是 userdata —— 按类型名解包后**拷贝**成 glm 值,
+				// 绝不把脚本侧指针存进属性表(userdata 随脚本表/GC 释放)。
+				case Schema::Kind::Vec2:
+				{
+					ScriptBindingContext* bindings = BindingContextIfAvailable();
+					glm::vec2* source = nullptr;
+					if (!bindings || !bindings->Unwrap("vec2", value, &source) || !source)
+						return false;
+					*out = *source;
+					return true;
+				}
+				case Schema::Kind::Vec3:
+				{
+					ScriptBindingContext* bindings = BindingContextIfAvailable();
+					glm::vec3* source = nullptr;
+					if (!bindings || !bindings->Unwrap("vec3", value, &source) || !source)
+						return false;
+					*out = *source;
+					return true;
+				}
+				case Schema::Kind::Vec4:
+				{
+					ScriptBindingContext* bindings = BindingContextIfAvailable();
+					glm::vec4* source = nullptr;
+					if (!bindings || !bindings->Unwrap("vec4", value, &source) || !source)
+						return false;
+					*out = *source;
+					return true;
+				}
 				default:
 					return false;
 			}
@@ -308,6 +361,22 @@ namespace World
 			return ReadPropertyValueInternal(table.GetField(name.c_str()), kind, out);
 		}
 
+		// VEC-A1(D2):glm 向量 → vecN userdata(写回脚本表 / 热重载迁移用)。
+		// VM 不可用时返回 Nil,调用方跳过(不清脚本字段)。
+		template <typename T>
+		ScriptValue NewVectorUserdata(const char* typeName, const T& vector)
+		{
+			ScriptBindingContext* bindings = BindingContextIfAvailable();
+			if (!bindings)
+				return ScriptValue::Nil();
+			ScriptValue result = bindings->NewUserdata(typeName);
+			T* target = nullptr;
+			if (!bindings->Unwrap(typeName, result, &target) || !target)
+				return ScriptValue::Nil();
+			new (target) T(vector);
+			return result;
+		}
+
 		// 属性值 → 脚本值(写回脚本表用);空值(monostate)返回 Nil,调用方跳过。
 		ScriptValue ToScriptValueInternal(const Schema::Value& value)
 		{
@@ -318,6 +387,9 @@ namespace World
 			if (const int64_t* number = std::get_if<int64_t>(&value)) return ScriptValue::Number(static_cast<double>(*number));
 			if (const uint32_t* number = std::get_if<uint32_t>(&value)) return ScriptValue::Number(static_cast<double>(*number));
 			if (const std::string* text = std::get_if<std::string>(&value)) return ScriptValue::String(*text);
+			if (const glm::vec2* vector = std::get_if<glm::vec2>(&value)) return NewVectorUserdata("vec2", *vector);
+			if (const glm::vec3* vector = std::get_if<glm::vec3>(&value)) return NewVectorUserdata("vec3", *vector);
+			if (const glm::vec4* vector = std::get_if<glm::vec4>(&value)) return NewVectorUserdata("vec4", *vector);
 			return ScriptValue::Nil();
 		}
 
@@ -376,7 +448,7 @@ namespace World
 					if (diagnostics)
 						diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
 							"' declares unsupported type '" + annotation.TypeName +
-							"' (expected number/integer/boolean/string); the field is not exposed as a script property");
+							"' (expected number/integer/boolean/string/vec2/vec3/vec4); the field is not exposed as a script property");
 					continue;
 				}
 
@@ -496,7 +568,11 @@ namespace World
 			{
 				if (std::holds_alternative<std::monostate>(property.Value))
 					continue;
-				if (!script.ScriptTable.SetField(property.Name.c_str(), ToScriptValueInternal(property.Value)))
+				const ScriptValue value = ToScriptValueInternal(property.Value);
+				// VEC-A1(D2):无 VM/绑定不可用时向量装箱返回 Nil —— 跳过而不是写 nil(写 nil 会删掉脚本字段)。
+				if (value.IsNil())
+					continue;
+				if (!script.ScriptTable.SetField(property.Name.c_str(), value))
 					throw std::logic_error("Cannot assign script field '" + property.Name + "'");
 			}
 		}

@@ -24,6 +24,11 @@ namespace World
 				case Schema::Kind::UInt64: return "UInt64";
 				case Schema::Kind::Float: return "Float";
 				case Schema::Kind::Double: return "Double";
+				// VEC-A1(D2):向量属性走同一份模型;Kinds 名与 Schema::Kind 一一对应,
+				// 存档里的 `Type: Vec3` 由这里写、KindFromName 读回。
+				case Schema::Kind::Vec2: return "Vec2";
+				case Schema::Kind::Vec3: return "Vec3";
+				case Schema::Kind::Vec4: return "Vec4";
 				case Schema::Kind::String: return "String";
 				case Schema::Kind::None:
 				default: return "None";
@@ -43,6 +48,9 @@ namespace World
 			if (name == "UInt64") return Schema::Kind::UInt64;
 			if (name == "Float") return Schema::Kind::Float;
 			if (name == "Double") return Schema::Kind::Double;
+			if (name == "Vec2") return Schema::Kind::Vec2;
+			if (name == "Vec3") return Schema::Kind::Vec3;
+			if (name == "Vec4") return Schema::Kind::Vec4;
 			if (name == "String") return Schema::Kind::String;
 			return Schema::Kind::None;
 		}
@@ -62,6 +70,9 @@ namespace World
 				case Schema::Kind::UInt64:
 				case Schema::Kind::Float:
 				case Schema::Kind::Double:
+				case Schema::Kind::Vec2:
+				case Schema::Kind::Vec3:
+				case Schema::Kind::Vec4:
 				case Schema::Kind::String:
 					return true;
 				default:
@@ -174,6 +185,9 @@ namespace World
 				case Schema::Kind::UInt64: return std::holds_alternative<uint64_t>(value);
 				case Schema::Kind::Float: return std::holds_alternative<float>(value);
 				case Schema::Kind::Double: return std::holds_alternative<double>(value);
+				case Schema::Kind::Vec2: return std::holds_alternative<glm::vec2>(value);
+				case Schema::Kind::Vec3: return std::holds_alternative<glm::vec3>(value);
+				case Schema::Kind::Vec4: return std::holds_alternative<glm::vec4>(value);
 				case Schema::Kind::String: return std::holds_alternative<std::string>(value);
 				default: return false;
 			}

@@ -963,6 +963,100 @@ return PlayerScript
 		CHECK(FIELD(script.Properties, "Beta").Type == Schema::Kind::Float);
 	}
 
+	// ---- 6d. VEC-A1(D2):vec 字段的热重载迁移 ----
+
+	// v1:Offset 是 vec3 属性;OnUpdate 里整体替换(self.Offset = vec3.new(...))。
+	const char* const kVectorMigrateV1 = R"LUA(---@field Offset vec3 位置偏移
+---@field Speed number
+return {
+    Offset = vec3.new(1.0, 2.0, 3.0),
+    Speed = 5.0,
+    OnCreate = function(self) HotReloadProbe("create:vec:v1") end,
+    OnUpdate = function(self)
+        self.Offset = vec3.new(9.0, 8.0, 7.0)
+        HotReloadProbe("update:vec:v1")
+    end,
+    OnDestroy = function(self) HotReloadProbe("destroy:vec:v1") end,
+}
+)LUA";
+
+	// v2:同名同类型 → 迁移活表里的 (9,8,7);新表里 self.Offset 仍是 vec3 userdata,
+	// `.x` 可读、整体替换可写(把 x+1 写回去,帧后由 C++ 侧复核)。
+	const char* const kVectorMigrateV2 = R"LUA(---@field Offset vec3 位置偏移(热重载后)
+---@field Speed number
+return {
+    Offset = vec3.new(0.0, 0.0, 0.0),
+    Speed = 1.0,
+    OnCreate = function(self) HotReloadProbe("create:vec:v2") end,
+    OnUpdate = function(self)
+        HotReloadProbe("update:vec:v2")
+        HotReloadProbe("vec-type=" .. type(self.Offset))
+        HotReloadProbe("vec-x=" .. tostring(self.Offset.x))
+        self.Offset = vec3.new(self.Offset.x + 1.0, self.Offset.y, self.Offset.z)
+        HotReloadProbe("vec-x2=" .. tostring(self.Offset.x))
+    end,
+    OnDestroy = function(self) HotReloadProbe("destroy:vec:v2") end,
+}
+)LUA";
+
+	void VectorFieldsMigrateAcrossHotReload()
+	{
+		const fs::path file = ScriptPath("hotreload_vec_fields.lua");
+		WriteScript(file, kVectorMigrateV1);
+		const std::string logical = LogicalPath(file);
+
+		Scene scene(TestContext());
+		Entity entity = Entity::CreateEntity(&scene, "vec field probe");
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
+		CHECK(FIELD(script.Properties, "Offset").Type == Schema::Kind::Vec3);
+		CHECK(std::get<glm::vec3>(FIELD(script.Properties, "Offset").Value) == glm::vec3(1.0f, 2.0f, 3.0f));
+
+		scene.OnScriptStart();
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		g_ProbeCalls.clear();
+		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCalled("update:vec:v1"));
+		CHECK(script.Runtime.LastError.empty());
+
+		// 运行期活表里是 vec3 userdata(整体替换后的 9,8,7;属性表还是脚本默认值 1,2,3)。
+		CHECK(ScriptEngine::GetBindingContext().IsUserdataOfType("vec3", script.ScriptTable.GetField("Offset")));
+		CHECK(std::get<glm::vec3>(FIELD(script.Properties, "Offset").Value) == glm::vec3(1.0f, 2.0f, 3.0f));
+
+		WriteScript(file, kVectorMigrateV2);
+		std::string diagnostic;
+		CHECK(ScriptEngine::ReloadScript(script, &diagnostic));
+		CHECK(diagnostic.empty());
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.LastError.empty());
+
+		// 同名同类型 → 迁移活表里的 (9,8,7),不是新脚本默认值 (0,0,0);Doc 跟着新注解走。
+		CHECK(FIELD(script.Properties, "Offset").Type == Schema::Kind::Vec3);
+		CHECK(std::get<glm::vec3>(FIELD(script.Properties, "Offset").Value) == glm::vec3(9.0f, 8.0f, 7.0f));
+		CHECK(FIELD(script.Properties, "Offset").Doc == "位置偏移(热重载后)");
+		CHECK(std::get<float>(FIELD(script.Properties, "Speed").Value) == 5.0f);
+
+		// 新表里 self.Offset 仍是 vec3 userdata(类型不丢)。
+		glm::vec3* migrated = nullptr;
+		CHECK(ScriptEngine::GetBindingContext().Unwrap("vec3", script.ScriptTable.GetField("Offset"), &migrated)
+			&& migrated != nullptr);
+		CHECK(*migrated == glm::vec3(9.0f, 8.0f, 7.0f));
+
+		// 脚本侧读 `.x`(9)并整体替换(+1)→ 活表变 (10,8,7)。
+		g_ProbeCalls.clear();
+		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCalled("update:vec:v2"));
+		CHECK(ProbeCalled("vec-type=userdata"));
+		CHECK(ProbeCalled("vec-x=9"));
+		CHECK(ProbeCalled("vec-x2=10"));
+		CHECK(script.Runtime.LastError.empty());
+		glm::vec3* replaced = nullptr;
+		CHECK(ScriptEngine::GetBindingContext().Unwrap("vec3", script.ScriptTable.GetField("Offset"), &replaced)
+			&& replaced != nullptr);
+		CHECK(*replaced == glm::vec3(10.0f, 8.0f, 7.0f));
+		scene.OnRuntimeStop();
+	}
+
 	// ---- 7. 指纹基线:两条加载路径 + 监听零假阳性 ----
 
 	void LoadPathsEstablishFingerprintBaseline()
@@ -1044,6 +1138,7 @@ int main()
 			{ "live script table wins field migration and saved values are the fallback", LiveFieldsTakePriorityOverSavedValues },
 			{ "properties follow declaration order and keep same-type values", PropertiesFollowDeclarationOrderAndKeepValues },
 			{ "declarations carry annotation doc and script defaults", DeclarationsCarryDocAndScriptDefaults },
+			{ "vec fields migrate across hot reload", VectorFieldsMigrateAcrossHotReload },
 			{ "both load paths establish the source fingerprint baseline", LoadPathsEstablishFingerprintBaseline },
 		};
 
