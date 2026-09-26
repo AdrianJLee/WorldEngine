@@ -176,6 +176,51 @@ namespace World
 		}
 		m_CompletionStubReady = true;
 		WLD_CORE_INFO("[script-editor] completion index loaded ({0} symbols)", m_Completion.SymbolCount());
+		RefreshEngineTypes();   // VEC-A7:存根就绪即建"引擎类型档"色标名单
+	}
+
+	// VEC-A7:引擎外部类的唯一来源 = 完成索引的类型位候选里**引擎类型档**那一段
+	// (顺序:常用基础 6 条 Keyword → 引擎类型 7 条 Class → 其余基础 Keyword → 其余类名)。
+	// 取"前 6 条 Keyword 之后、下一个 Keyword 之前"的连续 Class 区块;存根缺失 → 空集合(不染色)。
+	void ScriptEditorPanel::RefreshEngineTypes()
+	{
+		std::vector<World::LuauCompletionItem> candidates;
+		m_Completion.Query("---@type ", 0, candidates);
+
+		std::vector<std::string> names;
+		std::size_t commonBaseCount = 0;
+		bool insideEngineTier = false;
+		for (const World::LuauCompletionItem& item : candidates)
+		{
+			using Kind = World::LuauCompletionItem::KindType;
+			if (!insideEngineTier)
+			{
+				if (item.Kind == Kind::Keyword && commonBaseCount < 6)
+				{
+					++commonBaseCount;
+					continue;
+				}
+				insideEngineTier = true;
+			}
+			if (item.Kind == Kind::Keyword)
+				break;                      // 引擎类型档结束(其余基础类型开始)
+			if (item.Kind == Kind::Class)
+				names.push_back(item.Name);
+		}
+		if (names.empty())
+			m_EngineTypes.Clear();
+		else
+			m_EngineTypes.Set(std::move(names));
+		// 诊断:色标名单是"引擎类型档"的实际内容(空的 = 不染色,排查时一眼能看出来)。
+		std::string joined;
+		for (const std::string& name : m_EngineTypes.Names())
+		{
+			if (!joined.empty())
+				joined += ", ";
+			joined += name;
+		}
+		WLD_CORE_INFO("[script-editor] engine type highlight names: {0}",
+			joined.empty() ? std::string("(none)") : joined);
 	}
 
 	ScriptEditorPanel::ScriptEditorPanel(std::string logicalPath)
@@ -616,13 +661,14 @@ namespace World
 		editorNode.Interactive = true; // 点击进入编辑区(只读时仍可选中/复制)
 		accessibility.Register(editorNode);
 
-		m_Highlight.Update(m_Buffer);
+		m_Highlight.Update(m_Buffer, &m_EngineTypes);
 		// W9.5:懒加载补全索引 + 同步当前脚本文件符号(Revision 变化才重建)。
 		EnsureCompletionReady();
 		if (m_CompletionStubReady && m_CompletionFileRevision != m_Buffer.Revision())
 		{
 			m_CompletionFileRevision = m_Buffer.Revision();
 			m_Completion.SetFileSource(m_Buffer.Text());
+			RefreshEngineTypes();   // 文件里的 ---@class 也会进引擎类型档 → 名单/缓存同步
 		}
 		Wui::WuiCodeEditorOptions options;
 		// MAT-UI6b:会话缩放初值(内核只在实例第一次出现时读它;之后以内核状态为准)。
@@ -640,14 +686,14 @@ namespace World
 			}
 			// 本帧编辑器改过文本(缓冲区重分配)→ 用当前 buffer 重建缓存后重试;
 			// 仍未命中就现场按"行首无延续状态"兜底(下一帧必然命中缓存)。
-			m_Highlight.Update(m_Buffer);
+			m_Highlight.Update(m_Buffer, &m_EngineTypes);
 			if (const std::vector<Wui::WuiCodeToken>* refreshed = m_Highlight.Find(text))
 			{
 				out = *refreshed;
 				return;
 			}
 			LuauHighlightState state;
-			LuauHighlighter::HighlightLine(text, state, out);
+			LuauHighlighter::HighlightLine(text, state, out, &m_EngineTypes);
 		};
 		options.GetClipboard = [](std::string& out)
 		{

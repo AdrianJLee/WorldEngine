@@ -53,6 +53,8 @@ namespace World
 		void ReloadSceneInstances(PanelHost& host);
 		// W9.5:懒加载入库 WorldEngineAPI.luau 补全索引;失败只报一次并关闭补全。
 		void EnsureCompletionReady();
+		// VEC-A7:从完成索引的"引擎类型档"刷新高亮用的引擎外部类名集合(不写死第二份名单)。
+		void RefreshEngineTypes();
 		// W9.7:轻量格式化(4 空格缩进 + 去行尾空白),整篇一次撤销步。
 		void ApplyFormat();
 		void SetStatus(std::string text, bool error);
@@ -64,6 +66,8 @@ namespace World
 		bool m_DiskBacked = false;
 		Wui::WuiTextBuffer m_Buffer;
 		LuauHighlightCache m_Highlight;
+		// VEC-A7:vec2/vec3/vec4/mat3/mat4/Entity/WorldScript —— 代码里给它们单独的类色。
+		World::LuauEngineTypeSet m_EngineTypes;
 		uint64_t m_DiskFingerprint = 0;     // 打开/保存/重载时记录的磁盘内容指纹
 		uint64_t m_IgnoredFingerprint = 0;  // Keep 忽略的磁盘版本(0 = 无)
 		uint64_t m_ConflictFingerprint = 0; // 触发当前冲突的磁盘版本(Keep 用它登记忽略)

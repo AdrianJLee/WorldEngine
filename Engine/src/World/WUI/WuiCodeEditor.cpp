@@ -57,7 +57,7 @@ namespace World::Wui
 		const WuiColor kOccurrenceWeak { 0.34f, 0.37f, 0.42f, 0.32f };
 		// WUI-MAT-INTEL4 配色(VS Code Dark+ 风格):名字(Default)保持中性;类型=青绿、函数=暖黄、
 		// 字段/全局=浅蓝、注解关键字=紫 —— 与关键字(蓝)/字符串/数字/注释/运算符分开。
-		const WuiColor kTokenColors[15] = {
+		const WuiColor kTokenColors[16] = {
 			{ 0.83f, 0.83f, 0.83f, 1.0f },   // Default(变量/名字)
 			{ 0.34f, 0.61f, 0.84f, 1.0f },   // Keyword
 			{ 0.81f, 0.57f, 0.47f, 1.0f },   // String
@@ -73,6 +73,9 @@ namespace World::Wui
 			{ 0.77f, 0.53f, 0.75f, 1.0f },   // Self(self)
 			{ 0.67f, 0.84f, 0.94f, 1.0f },   // Parameter
 			{ 0.63f, 0.66f, 0.70f, 1.0f },   // Punctuation
+			// VEC-A7:引擎外部类名(vec2/vec3/vec4/mat3/mat4/Entity/WorldScript)= 柔紫,
+			// 与 Keyword 蓝 / Type 青 / Function 暖黄 / Global 浅蓝 / Annotation 紫红都可区分。
+			{ 0.70f, 0.62f, 0.95f, 1.0f },   // EngineType(引擎外部类)
 		};
 
 		// W9.5 补全浮层:最多 12 行可滚动 + 底部一行 Doc。

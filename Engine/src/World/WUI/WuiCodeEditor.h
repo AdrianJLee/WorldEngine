@@ -32,6 +32,9 @@ namespace World::Wui
 		Self,       // self
 		Parameter,
 		Punctuation,
+		// VEC-A7:引擎外部类名(vec2/vec3/vec4/mat3/mat4/Entity/WorldScript)。
+		// 追加在末尾 —— 旧 kind 的下标不变,`kTokenColors` 按同一顺序扩到 16 项。
+		EngineType,
 	};
 
 	// 一行的语法 token:偏移是相对该行首的字节偏移(行文本不含 '\n' 与行尾 '\r')。

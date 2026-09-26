@@ -2,6 +2,7 @@
 #include "World/Script/LuauHighlighter.h"
 
 #include <cstring>
+#include <algorithm>
 
 namespace World
 {
@@ -230,8 +231,28 @@ namespace World
 		}
 	}
 
+	namespace
+	{
+		// VEC-A7:标识符前面是不是成员访问(`a.b` / `a:b`)——成员名不染引擎类型色。
+		// `..`(连接)与 `::`(类型强转)不算成员访问。
+		bool PrecededByMemberAccess(std::string_view line, size_t pos)
+		{
+			size_t cursor = pos;
+			while (cursor > 0 && (line[cursor - 1] == ' ' || line[cursor - 1] == '\t'))
+				--cursor;
+			if (cursor == 0)
+				return false;
+			const char separator = line[cursor - 1];
+			if (separator == '.')
+				return !(cursor >= 2 && line[cursor - 2] == '.');
+			if (separator == ':')
+				return !(cursor >= 2 && line[cursor - 2] == ':');
+			return false;
+		}
+	}
+
 	void LuauHighlighter::HighlightLine(std::string_view line, LuauHighlightState& state,
-		std::vector<Wui::WuiCodeToken>& out)
+		std::vector<Wui::WuiCodeToken>& out, const LuauEngineTypeSet* engineTypes)
 	{
 		out.clear();
 		const size_t size = line.size();
@@ -364,6 +385,12 @@ namespace World
 					kind = WuiCodeTokenKind::Self;
 				else if (IsKeyword(word))
 					kind = WuiCodeTokenKind::Keyword;
+				// VEC-A7:引擎外部类名(vec2/vec3/…/Entity/WorldScript)→ EngineType。
+				// 覆盖 Default 与 Global(Entity/WorldScript 今天就是 Global),不覆盖关键字/常量/self;
+				// 紧跟 `.`/`:` 的成员名(transform.Location)保持 Default。
+				else if (engineTypes && !engineTypes->Empty() && !PrecededByMemberAccess(line, i)
+					&& engineTypes->Contains(word))
+					kind = WuiCodeTokenKind::EngineType;
 				else if (IsKnownGlobal(word))
 					kind = WuiCodeTokenKind::Global;
 				pushRaw(i, end, kind);
@@ -572,13 +599,52 @@ namespace World
 		m_ByPointer.clear();
 		m_Revision = ~0ull;
 		m_LineCount = -1;
+		m_EngineTypeHash = 0;
 	}
 
-	void LuauHighlightCache::Update(const Wui::WuiTextBuffer& buffer)
+	// VEC-A7:引擎外部类名集合(字典序去重 + FNV-1a 内容指纹)。名单由调用方从既有来源填进来。
+	void LuauEngineTypeSet::Set(std::vector<std::string> names)
+	{
+		std::sort(names.begin(), names.end());
+		names.erase(std::unique(names.begin(), names.end()), names.end());
+		m_Names = std::move(names);
+		m_Hash = 1469598103934665603ull;
+		for (const std::string& name : m_Names)
+		{
+			for (const char c : name)
+			{
+				m_Hash ^= static_cast<unsigned char>(c);
+				m_Hash *= 1099511628211ull;
+			}
+			m_Hash ^= 0xffu;   // 名字分隔:避免 {"ab","c"} 与 {"a","bc"} 撞哈希
+			m_Hash *= 1099511628211ull;
+		}
+	}
+
+	void LuauEngineTypeSet::Clear()
+	{
+		m_Names.clear();
+		m_Hash = 0;
+	}
+
+	bool LuauEngineTypeSet::Contains(std::string_view name) const
+	{
+		return !m_Names.empty() && std::binary_search(m_Names.begin(), m_Names.end(), name);
+	}
+
+	void LuauHighlightCache::Update(const Wui::WuiTextBuffer& buffer, const LuauEngineTypeSet* engineTypes)
 	{
 		const int count = std::max(1, buffer.LineCount());
-		if (m_Revision == buffer.Revision() && m_LineCount == count)
+		const uint64_t engineHash = engineTypes ? engineTypes->Hash() : 0ull;
+		if (m_Revision == buffer.Revision() && m_LineCount == count && m_EngineTypeHash == engineHash)
 			return;
+		if (m_EngineTypeHash != engineHash)
+		{
+			// 集合变了(存根加载完 / 打开新脚本):旧 token 里的 EngineType 判定全部作废。
+			m_Lines.clear();
+			m_ByPointer.clear();
+		}
+		m_EngineTypeHash = engineHash;
 		m_Revision = buffer.Revision();
 		m_LineCount = count;
 
@@ -605,7 +671,7 @@ namespace World
 			else
 			{
 				LuauHighlightState scanning = entry.Start;
-				LuauHighlighter::HighlightLine(view, scanning, entry.Tokens);
+				LuauHighlighter::HighlightLine(view, scanning, entry.Tokens, engineTypes);
 				entry.End = scanning;
 			}
 			state = entry.End;

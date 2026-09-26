@@ -41,8 +41,30 @@ namespace World
 	public:
 		// 高亮一行:state 为行首状态,返回后 state 为该行行尾状态(交给下一行)。
 		// line 不含换行符(允许带行尾 '\r',会被当作空白)。
+		// engineTypes(VEC-A7,可空):引擎外部类名集合(vec2/vec3/vec4/mat3/mat4/Entity/WorldScript)。
+		// 传了 → 命中的标识符发 EngineType(覆盖 Default/Global,但不覆盖关键字/常量/self/成员名);
+		// 不传 → 输出与加这个参数之前逐字节一致(老调用方零影响)。
 		static void HighlightLine(std::string_view line, LuauHighlightState& state,
-			std::vector<Wui::WuiCodeToken>& out);
+			std::vector<Wui::WuiCodeToken>& out, const class LuauEngineTypeSet* engineTypes = nullptr);
+	};
+
+	// 引擎外部类名集合(有序去重;唯一职责 = "这个名字是不是引擎类")。
+	// 名单由调用方从**既有来源**(完成索引的引擎类型档 / 存根 ---@class)填进来,本类不内置第二份名单。
+	class WLD_API LuauEngineTypeSet
+	{
+	public:
+		void Set(std::vector<std::string> names);
+		void Clear();
+		bool Empty() const { return m_Names.empty(); }
+		bool Contains(std::string_view name) const;
+		// 名字集合的内容指纹(面板据此判断"要不要让高亮缓存失效")。
+		uint64_t Hash() const { return m_Hash; }
+		// 只读名字表(字典序;诊断/探针用,不参与判定)。
+		const std::vector<std::string>& Names() const { return m_Names; }
+
+	private:
+		std::vector<std::string> m_Names;   // 字典序去重
+		uint64_t m_Hash = 0;
 	};
 
 	// 按行 token 缓存(面板每帧调用 Update;WuiCodeEditor 的 Highlight 回调按行取用):
@@ -53,7 +75,8 @@ namespace World
 	{
 	public:
 		// 更新到 buffer 的当前内容(buffer.Revision() 与行数都没变时零成本返回)。
-		void Update(const Wui::WuiTextBuffer& buffer);
+		// engineTypes(VEC-A7,可空):集合内容指纹变化时缓存全量失效(调用方不需要自己记得 Clear)。
+		void Update(const Wui::WuiTextBuffer& buffer, const LuauEngineTypeSet* engineTypes = nullptr);
 		void Clear();
 
 		// 该行的 token(行号越界返回空表)。
@@ -76,6 +99,7 @@ namespace World
 		std::vector<Entry> m_Lines;
 		std::unordered_map<const char*, size_t> m_ByPointer;
 		uint64_t m_Revision = ~0ull;
+		uint64_t m_EngineTypeHash = 0;
 		int m_LineCount = -1;
 	};
 }

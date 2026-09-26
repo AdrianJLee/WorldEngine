@@ -18,6 +18,7 @@ namespace
 	using World::LuauHighlightCache;
 	using World::LuauHighlighter;
 	using World::LuauHighlightState;
+	using World::LuauEngineTypeSet;
 	using World::Wui::WuiCodeToken;
 	using World::Wui::WuiCodeTokenKind;
 	using World::Wui::WuiTextBuffer;
@@ -239,6 +240,47 @@ int main()
 				buffer.Text().size(), milliseconds, tokenCount);
 			CHECK(cache.LineCount() == 10001);
 			CHECK(tokenCount >= 10000 * 3);
+		}
+
+		// ---- 8. VEC-A7:引擎外部类名色标(可选集合;不传 = 与加这个参数之前逐字节一致)----
+		{
+			LuauEngineTypeSet engineTypes;
+			engineTypes.Set({ "vec2", "vec3", "vec4", "mat3", "mat4", "Entity", "WorldScript" });
+			CHECK(!engineTypes.Empty() && engineTypes.Contains("vec3") && !engineTypes.Contains("ui"));
+
+			const std::string code = "local v = vec3.new(1.0, 0.0, 0.0)";
+			LuauHighlightState state;
+			std::vector<WuiCodeToken> tokens;
+			LuauHighlighter::HighlightLine(code, state, tokens, &engineTypes);
+			CHECK(KindAt(tokens, code.find("vec3")) == WuiCodeTokenKind::EngineType);
+			CHECK(KindAt(tokens, code.find("new")) == WuiCodeTokenKind::Function);
+
+			// 成员名不染:`transform.Location` 的 `Location` 保持 Default(与修复前一致)。
+			const std::string member = "transform.Location = vec3.new(0.0)";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(member, state, tokens, &engineTypes);
+			CHECK(KindAt(tokens, member.find("Location")) == WuiCodeTokenKind::Default);
+			CHECK(KindAt(tokens, member.find("transform")) == WuiCodeTokenKind::Default);
+			CHECK(KindAt(tokens, member.find("vec3")) == WuiCodeTokenKind::EngineType);
+
+			// Entity 今天在 kGlobals 名单里:集合命中时 EngineType 覆盖 Global;ui 不在集合里 → 保持 Global。
+			const std::string globals = "Entity.new() ui.panel()";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(globals, state, tokens, &engineTypes);
+			CHECK(KindAt(tokens, globals.find("Entity")) == WuiCodeTokenKind::EngineType);
+			CHECK(KindAt(tokens, globals.find("ui")) == WuiCodeTokenKind::Global);
+
+			// 字符串/注释里的类名不判定。
+			const std::string quoted = "local s = \"vec3\" -- vec3 comment";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(quoted, state, tokens, &engineTypes);
+			CHECK(KindAt(tokens, quoted.find("\"vec3\"") + 1) == WuiCodeTokenKind::String);
+			CHECK(KindAt(tokens, quoted.find("comment")) == WuiCodeTokenKind::Comment);
+
+			// 不传集合 = 修复前行为(vec3 是 Default),老调用方零影响。
+			tokens.clear();
+			LuauHighlighter::HighlightLine(code, state, tokens);
+			CHECK(KindAt(tokens, code.find("vec3")) == WuiCodeTokenKind::Default);
 		}
 
 		std::printf("World.LuauHighlighter: all checks passed\n");
