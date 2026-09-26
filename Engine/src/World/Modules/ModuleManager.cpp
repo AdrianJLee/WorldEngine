@@ -45,7 +45,9 @@ namespace World::Modules
 		}
 
 		const WeModule* module = query(WE_MODULE_ABI_VERSION);
-		if (!module || module->StructSize != sizeof(WeModule) || module->AbiVersion > WE_MODULE_ABI_VERSION || !module->Register)
+		// 等值校验(不是 >=):脚本组件重写改过 schema 传递结构(`Schema::ScriptBinding`)的形状,
+		// 旧模块必须被拒绝而不是按新布局解释。
+		if (!module || module->StructSize != sizeof(WeModule) || module->AbiVersion != WE_MODULE_ABI_VERSION || !module->Register)
 		{
 			library->Unload();
 			if (error) *error = "module ABI/struct mismatch in " + path.string();

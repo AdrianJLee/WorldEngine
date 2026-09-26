@@ -352,106 +352,80 @@ namespace World
 
 	enum class ScriptInstanceState { Pending, Creating, Running, Destroying, Stopped, Faulted };
 
-	struct NativeScriptComponent
+	// 两个脚本组件共用的运行期状态。**不进存档**:Play/Simulate 期间它才有效,
+	// Generation 用于"回调执行期间实例被重建/销毁"的失效判定(T02 语义,2026-09-26 重写保留)。
+	struct ScriptRuntimeState
 	{
-		ScriptableEntity* Instance = nullptr;
 		ScriptInstanceState State = ScriptInstanceState::Pending;
 		std::string LastError;
 		uint64_t Generation = 0;
 		bool CreateEntered = false;
-		ScriptableEntity* (*InstantiateScript)() = nullptr;
-		void (*DestroyScript)(ScriptableEntity*&) = nullptr;
+	};
 
+	// 脚本属性:两种前端(C++ / Luau)**同一份表示** —— 编辑器、存档、热重载迁移都只用这一种模型。
+	// Type = schema 值类型(Float / Int32 / Bool / String …);Value = 当前值(缺省时用脚本声明的默认值)。
+	struct ScriptProperty
+	{
+		std::string Name;
+		Schema::Kind Type = Schema::Kind::None;
+		Schema::Value Value;
+	};
+
+	// C++ 行为组件(原 NativeScriptComponent;2026-09-26 重写)。
+	//
+	// ScriptName = schema 里 Category==Script 的类型全名(如 "Game::ExampleScript")。
+	// 实例化按名字走 **schema 的脚本绑定(工厂)**,组件自己不再持函数指针 ⇒
+	// 存档往返、预制体克隆、AI 通道读写都与"这个组件是不是 C++ 代码建出来的"无关。
+	// Instance 只在 Play/Simulate 期间有效。
+	struct CppScriptComponent
+	{
 		std::string ScriptName;
-		std::unordered_map<std::string, Schema::Value> FieldValues;
+		std::vector<ScriptProperty> Properties;
+		ScriptRuntimeState Runtime;
+		ScriptableEntity* Instance = nullptr;
 
-		template <typename T>
-		void Bind()
-		{
-			InstantiateScript = []()
-			{
-				return static_cast<ScriptableEntity*>(WLD_POOL_NEW(T));
-			};
-			DestroyScript = [](ScriptableEntity*& scriptableEntity)
-			{
-				WLD_POOL_DELETE(T, PoolTag::General, scriptableEntity);
-				scriptableEntity = nullptr;
-			};
-		}
-
-		WE_SCHEMA_BODY(World, NativeScriptComponent, Component)
+		WE_SCHEMA_BODY(World, CppScriptComponent, Component)
 			WE_SCHEMA_META(Category("Scripting"),
-				Doc("C++ behavior instance created per entity when Play starts; ScriptName selects the registered script and the remaining fields are runtime state."))
-			WE_FIELD(ScriptName, String);
+				Doc("C++ behavior attached to the entity: ScriptName selects a registered script and the property list is saved with the scene and applied when Play starts."))
+			WE_FIELD(ScriptName, String,
+				Doc("Registered C++ script id (schema name), e.g. Game::ExampleScript."));
 		WE_SCHEMA_END
-
-		// 与 UI 框架解耦的字段访问合同,供 Editor Inspector 与测试共用;运行期场景也用它应用字段。
-		ScriptableEntity* GetOrCreateEditorInstance(bool allowCreate, bool& outOwned);
-		void ReleaseEditorInstance(ScriptableEntity* preview);
-		void ResetEditorFieldState();
-		Schema::Value GetErasedFieldValue(const Schema::TypeSchema& typeSchema, const Schema::FieldSchema& field, ScriptableEntity* instance);
-		void SetErasedFieldValue(const Schema::TypeSchema& typeSchema, const Schema::FieldSchema& field, ScriptableEntity* instance, const Schema::Value& value);
-
-	private:
-		bool isFirstDraw = true;
 	};
 
-	enum class LuaFieldType { None, Float, Int, Bool, String };
-	struct LuaScriptField
+	// Luau 脚本组件(原 LuaScriptComponent;2026-09-26 重写)。
+	//
+	// ScriptPath = 内容根相对逻辑路径(如 scripts/Player.luau);Properties 来自脚本里的
+	// `---@field Name Type` 声明 + 场景里保存的当前值。
+	// 运行期引用(环境 / 脚本表 / 四个回调)不进 schema、不序列化,由 ScriptEngine 在加载期重建。
+	struct LuauScriptComponent
 	{
-		LuaFieldType Type = LuaFieldType::None;
-		std::any Value;
+		std::string ScriptPath;
+		std::vector<ScriptProperty> Properties;
 
-		static std::string GetLuaTypeName(LuaFieldType type)
-		{
-			switch (type)
-			{
-				case LuaFieldType::None: return "any";
-				case LuaFieldType::Float: return "number";
-				case LuaFieldType::Int: return "number";
-				case LuaFieldType::Bool: return "boolean";
-				case LuaFieldType::String: return "string";
-				default: return "any";
-			}
-		}
-	};
-
-	struct LuaScriptComponent
-	{
-		std::string ScriptFilePath = ""; // 例如 "assets/scripts/Player.lua"
-
-		// 每个实体独立的 Luau environment,防止变量冲突(W1b 起为绑定层引用)。
+		// 每实体独立的 Luau environment(防变量冲突)与四个生命周期回调(W5 热重载整体交换)。
 		ScriptTableRef LuaEnv;
 		ScriptTableRef ScriptTable;
 		ScriptFunctionRef OnCreateFunc;
 		ScriptFunctionRef OnUpdateFunc;
 		ScriptFunctionRef OnDestroyFunc;
-		// W3c:UI 阶段的每帧回调(命令式脚本 UI)。宿主在 UI 阶段调用它,
-		// 脚本在其中用 ui.* 画控件;热重载时与新表一起整体交换。
 		ScriptFunctionRef OnUiFunc;
 
-		std::unordered_map<std::string, LuaScriptField> CachedFields;
-		std::filesystem::file_time_type LastModifiedTime;
 		// W5:热重载用的源指纹(优先内容哈希,退化为 mtime+size)与最近一次重载诊断。
-		// 都是运行期状态,不进 schema、不参与序列化;克隆配置时只带指纹(源文件身份)。
+		// 运行期状态,不进 schema、不参与序列化;克隆配置时只带指纹(源文件身份)。
 		uint64_t SourceFingerprint = 0;
 		std::string ReloadDiagnostic;
 
-		bool IsLoaded = false;
-		ScriptInstanceState State = ScriptInstanceState::Pending;
-		std::string LastError;
-		uint64_t Generation = 0;
-		bool CreateEntered = false;
+		ScriptRuntimeState Runtime;
 		Entity RuntimeEntity;
 
-		LuaScriptComponent() = default;
-		LuaScriptComponent(const LuaScriptComponent&) = default;
-		LuaScriptComponent(const std::string& path) : ScriptFilePath(path) {}
+		LuauScriptComponent() = default;
+		LuauScriptComponent(const LuauScriptComponent&) = default;
+		LuauScriptComponent(const std::string& path) : ScriptPath(path) {}
 
-		WE_SCHEMA_BODY(World, LuaScriptComponent, Component)
+		WE_SCHEMA_BODY(World, LuauScriptComponent, Component)
 			WE_SCHEMA_META(Category("Scripting"),
-				Doc("Luau script attached to the entity: only ScriptFilePath is serialized, the environment, callbacks and cached fields are rebuilt at load."))
-			WE_FIELD(ScriptFilePath, String, Asset("Script"),
+				Doc("Luau script attached to the entity: ScriptPath points at a .luau/.lua asset under the project content root; properties come from the script's ---@field declarations."))
+			WE_FIELD(ScriptPath, String, Asset("Script"),
 				Doc("Luau script asset (.luau/.lua) relative to the project content root, e.g. scripts/Player.luau."));
 		WE_SCHEMA_END
 	};
@@ -662,7 +636,7 @@ namespace World
 	};
 
 	// 组件配置克隆特化(剔除运行态)。
-	NativeScriptComponent CloneComponentConfiguration(const NativeScriptComponent& source);
-	LuaScriptComponent CloneComponentConfiguration(const LuaScriptComponent& source);
+	CppScriptComponent CloneComponentConfiguration(const CppScriptComponent& source);
+	LuauScriptComponent CloneComponentConfiguration(const LuauScriptComponent& source);
 	RigidBody2DComponent CloneComponentConfiguration(const RigidBody2DComponent& source);
 }

@@ -400,10 +400,10 @@ namespace World
 		int matched = 0;
 		int failed = 0;
 		std::string lastError;
-		for (const entt::entity handle : registry.view<LuaScriptComponent>())
+		for (const entt::entity handle : registry.view<LuauScriptComponent>())
 		{
-			const LuaScriptComponent& script = registry.get<LuaScriptComponent>(handle);
-			if (script.ScriptFilePath.empty() || !SameLogicalPath(script.ScriptFilePath, m_LogicalPath))
+			const LuauScriptComponent& script = registry.get<LuauScriptComponent>(handle);
+			if (script.ScriptPath.empty() || !SameLogicalPath(script.ScriptPath, m_LogicalPath))
 				continue;
 			++matched;
 			std::string message;

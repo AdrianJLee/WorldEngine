@@ -82,13 +82,13 @@ namespace World
 
 	// 字段迁移诊断规则(previous = 旧实例状态,next = 新脚本合并后的字段表):
 	//   - 旧无、新有(新增字段):取新脚本默认值,不产生诊断;
-	//   - 同名同类型:保留旧值(合并由 ScriptEngine::BuildFieldCache 完成);
+	//   - 同名同类型:保留旧值(合并由 ScriptEngine 的属性表同步完成);
 	//   - 同名类型变化:回新默认值 + 一条诊断(含 BehaviorRegistry::LuaFieldId 稳定 id);
 	//   - 旧有新无(字段被删):丢弃旧值 + 一条诊断(含稳定 id)。
 	// 输出按字段名升序,保证跨平台/跨运行稳定;diagnostics 可为 null。
 	WLD_API void DescribeScriptFieldMigration(
-		const std::unordered_map<std::string, LuaScriptField>& previous,
-		const std::unordered_map<std::string, LuaScriptField>& next,
+		const std::vector<ScriptProperty>& previous,
+		const std::vector<ScriptProperty>& next,
 		const std::string& scriptPath,
 		std::vector<std::string>* diagnostics);
 

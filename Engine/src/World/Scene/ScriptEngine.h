@@ -90,7 +90,7 @@ namespace World
 	// W3a-A1:组件字段代理(Entity:GetComponent 的返回值;Kind → Lua 映射表见 Script/BindComponentAccess.h)。
 	WLD_API bool RegisterComponentProxyBinding(ScriptBindingContext& bindings, std::string* error);
 
-	struct LuaScriptComponent;
+	struct LuauScriptComponent;
 	class ScriptEngine
 	{
 	public:
@@ -112,16 +112,18 @@ namespace World
 		// W3a-A2(追加):带显式 schema 注册表的存根生成;组件块来自
 		// schemas.List(TypeCategory::Component)。零参调用在宿主上下文中委托到这里。
 		static bool GenerateLuaStubs(const Schema::SchemaRegistry& schemas);
-		static bool InitScriptForEditor(LuaScriptComponent& component);
+		// 编辑态预览(2026-09-26 重写):执行脚本取默认值表 → 同步组件的属性表(声明顺序/类型,
+		// 同名同类型保留场景里已存的值),**不创建实例、不调 OnCreate、不保留环境引用**。
+		static bool InitScriptForEditor(LuauScriptComponent& component);
 		// 从 Lua 脚本源码文本静态解析 `---@field Name Type` 注解，返回字段名到 Lua 类型名的映射（不执行脚本）。
 		static std::unordered_map<std::string, std::string> ParseFieldAnnotations(const std::string& scriptText);
 		// 核心：处理单个实体的脚本实例化和每帧更新
-		static void OnCreateScript(LuaScriptComponent& scriptComponent, Entity entity);
-		static void OnUpdateScript(LuaScriptComponent& scriptComponent, Timestep ts);
-		static void OnDestroyScript(LuaScriptComponent& scriptComponent);
+		static void OnCreateScript(LuauScriptComponent& scriptComponent, Entity entity);
+		static void OnUpdateScript(LuauScriptComponent& scriptComponent, Timestep ts);
+		static void OnDestroyScript(LuauScriptComponent& scriptComponent);
 
 		// ---- P2 W3c:脚本 UI 的宿主入口(UI 阶段每帧一次) ----
-		// 遍历场景里"已运行且带 OnUI 回调"的 LuaScriptComponent,逐个建立当前 UI 上下文
+		// 遍历场景里"已运行且带 OnUI 回调"的 LuauScriptComponent,逐个建立当前 UI 上下文
 		// (ui.* 读取的 WuiContext + 脚本逻辑路径前缀)并调用 OnUI(self)。
 		// 单个脚本回调出错只把该实例置 Faulted(ReportLuaError),其它实例继续绘制;
 		// 返回本帧出错的脚本数(0 = 全部成功)。
@@ -142,25 +144,27 @@ namespace World
 		// ---- P2 W2a:行为注册层（只登记/查询，不参与调度）----
 		// 进程内行为注册表：与 VM 生命周期无关（Init/Shutdown 不清空），宿主与测试共用。
 		static BehaviorRegistry& Behaviors();
-		// 幂等登记/刷新一个 Luau 行为（字段来自 CachedFields；路径为空 → false + error）。
+		// 幂等登记/刷新一个 Luau 行为（字段来自组件的属性表；路径为空 → false + error）。
 		// 同模块 id 描述一致 → 直接返回 true；描述变化（脚本编辑/热重载）→ Replace 刷新。
-		static bool EnsureLuaBehavior(LuaScriptComponent& script, std::string* error = nullptr);
+		static bool EnsureLuaBehavior(LuauScriptComponent& script, std::string* error = nullptr);
 		// 幂等登记/刷新 schema 注册表里全部 Category==Script 的 C++ 行为；
 		// 返回已登记/已确认的模块数，失败项写入 errors（可为 null）。
 		static std::size_t EnsureSchemaBehaviors(const Schema::SchemaRegistry& schemas,
 			std::vector<std::string>* errors = nullptr);
 
 		// ---- P2 W5:L2 脚本热重载(引擎侧)----
-		// 重新加载组件当前脚本并**整体交换**实例引用(环境/脚本表/四个回调),字段按
-		// 同名+同类型迁移(见 Script/HotReload.h),成功后 generation 进入热重载域并刷新
+		// 重新加载组件当前脚本并**整体交换**实例引用(环境/脚本表/四个回调)与属性表,
+		// 属性按"活表 > 场景保存值(同名+同类型) > 新脚本默认值"迁移(见 Script/HotReload.h),
+		// 成功后 Runtime.Generation 进入热重载域并刷新
 		// BehaviorRegistry 描述;任一步失败都保留旧版本,只写 ReloadDiagnostic。
 		//   - 成功:ReloadDiagnostic 清空;diagnostics(可空)收迁移警告(类型变化/字段删除);
 		//   - 失败:ReloadDiagnostic 与 diagnostics 都是可读诊断(含脚本路径,编译器给了行号时
 		//     行号原样保留);State 不会被置 Faulted,旧引用不会被清;
-		//   - 拒绝:State ∈ {Creating, Destroying}、没有活动实例(Running+IsLoaded)、
+		//   - 拒绝:Runtime.State ∈ {Creating, Destroying}、没有活动实例(Runtime.State != Running
+		//     或无脚本表/环境引用)、
 		//     或 RuntimeEntity 所属场景不在安全点(Scene::CanApplyScriptReload()==false)。
 		// 宿主应在帧边界调用;引擎在能取到场景时会再校验一次安全点。
-		static bool ReloadScript(LuaScriptComponent& component, std::string* diagnostics = nullptr);
+		static bool ReloadScript(LuauScriptComponent& component, std::string* diagnostics = nullptr);
 
 		// ---- P2 W6:沙箱预算旋钮 ----
 		// 进程内默认策略(Init 时下发到 VM;不随 Shutdown 复位)。0 = 该维度不限;

@@ -227,7 +227,7 @@ body.FixedRotation = true
 		Entity entity = Entity::CreateEntity(&scene, "proxy dispatch");
 		TransformComponent& transform = entity.AddComponent<TransformComponent>();
 		transform.SetLocation(glm::vec3(0.0f));
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(kLuaFixturePath);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(kLuaFixturePath);
 		CHECK(ScriptEngine::InitScriptForEditor(script));
 
 		LuauVm& vm = ScriptEngine::GetState();
@@ -246,14 +246,14 @@ end
 		CHECK(vm.SetGlobal("T02Action", action.ToValue()));
 
 		scene.OnScriptStart();
-		CHECK(script.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 		CHECK(transform.Location.x == 0.0f);   // OnCreate 阶段没有写
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(transform.Location.x == 1.0f && transform.Location.y == 2.0f && transform.Location.z == 3.0f);
 		CHECK(transform.Transform[3].x == 1.0f);
 		scene.OnRuntimeStop();
-		CHECK(script.State == ScriptInstanceState::Stopped);
+		CHECK(script.Runtime.State == ScriptInstanceState::Stopped);
 
 		vm.ClearGlobal("T02Action");
 		vm.ClearGlobal("T02Record");

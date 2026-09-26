@@ -103,7 +103,7 @@ namespace World::Asset
 		// W7-2:Script 导入器。"源码 → 包内容"的唯一入口是 ScriptArtifact::Pack,
 		// 产物 = 28 字节 WSL1 头 + Luau 字节码(不再复制源码),失败一律不写产物。
 		// Version 1 → 2 是必需:cook 的复合指纹含导入器名与版本,旧 cook.db 因此整体
-		// 重烘,包里不会残留源码副本。逻辑路径不变(场景里的 ScriptFilePath 无需改)。
+		// 重烘,包里不会残留源码副本。逻辑路径不变(场景里的 ScriptPath 无需改)。
 		class ScriptImporter final : public ExtensionImporter
 		{
 		public:

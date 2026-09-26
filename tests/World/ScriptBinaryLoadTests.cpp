@@ -4,7 +4,7 @@
 //   U3(核心,不依赖 cook、不依赖源码树):
 //     ScriptArtifact::Pack 造容器字节 → 写进临时目录的 cooked/ 结构 →
 //     PackageProvider::BuildFromDirectory 打包 → ScriptEngine::Init(ctx)(**只挂包 provider**)→
-//     场景里挂该逻辑路径的 LuaScriptComponent → OnRuntimeStart() 后实例 Running、
+//     场景里挂该逻辑路径的 LuauScriptComponent → OnRuntimeStart() 后实例 Running、
 //     OnCreate/OnUpdate 探针被调用、LastError 为空;并断言磁盘上不存在该逻辑路径。
 //   失败路径:包内容器被改一字节 → 加载失败且 LastError 含固定短语 payload checksum mismatch。
 //   回归:源码脚本仍按既有方式(注解解析)加载。
@@ -22,6 +22,7 @@
 #include "World/Script/HotReload.h"
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
+#include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptValue.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
@@ -160,18 +161,17 @@ return {
 
 		Scene scene(context);
 		Entity entity = Entity::CreateEntity(&scene, "u3 package probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
 		g_ProbeCalls.clear();
 		scene.OnRuntimeStart();
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(script.IsLoaded);
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(ProbeCalled("create"));
 
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCalled("update"));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 
 		// 基线指纹来自容器字节(不是源码文本),且脚本表里的字段值原样可用。
 		const ScriptValue amount = script.ScriptTable.GetField("amount");
@@ -199,15 +199,14 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "tampered probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
 		g_ProbeCalls.clear();
 		scene.OnRuntimeStart();
-		CHECK(script.State == ScriptInstanceState::Faulted);
-		CHECK(!script.IsLoaded);
-		CHECK(Contains(script.LastError, "script container payload checksum mismatch"));
-		CHECK(Contains(script.LastError, logical));
-		CHECK(Contains(script.LastError, "phase=Load"));
+		CHECK(script.Runtime.State == ScriptInstanceState::Faulted);
+		CHECK(Contains(script.Runtime.LastError, "script container payload checksum mismatch"));
+		CHECK(Contains(script.Runtime.LastError, logical));
+		CHECK(Contains(script.Runtime.LastError, "phase=Load"));
 		CHECK(!ProbeCalled("create"));   // 坏容器不会静默降级成源码执行
 		scene.OnRuntimeStop();
 	}
@@ -230,20 +229,19 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "source probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
 		// 宿主既有流程:编辑器预览先按注解建字段缓存,运行期再把缓存写进脚本表。
 		CHECK(ScriptEngine::InitScriptForEditor(script));
-		const auto cached = script.CachedFields.find("amount");
-		CHECK(cached != script.CachedFields.end());
-		CHECK(cached->second.Type == LuaFieldType::String);   // 源码路径仍按注解
-		CHECK(std::any_cast<std::string>(cached->second.Value) == "seven");
+		const ScriptProperty* cached = ScriptProperties::Find(script.Properties, "amount");
+		CHECK(cached != nullptr);
+		CHECK(cached->Type == Schema::Kind::String);   // 源码路径仍按注解
+		CHECK(std::get<std::string>(cached->Value) == "seven");
 
 		g_ProbeCalls.clear();
 		scene.OnRuntimeStart();
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(script.IsLoaded);
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(ProbeCalled("source-create"));
 
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
@@ -270,17 +268,17 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "reload probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
 		// 编辑器预览先建缓存(容器 → 注解被跳过 → Int),运行期把它写进脚本表。
 		CHECK(ScriptEngine::InitScriptForEditor(script));
-		const auto previewFields = script.CachedFields.find("amount");
-		CHECK(previewFields != script.CachedFields.end());
-		CHECK(previewFields->second.Type == LuaFieldType::Int);
+		const ScriptProperty* previewFields = ScriptProperties::Find(script.Properties, "amount");
+		CHECK(previewFields != nullptr);
+		CHECK(previewFields->Type == Schema::Kind::Int32);
 
 		scene.OnRuntimeStart();
-		CHECK(script.State == ScriptInstanceState::Running);
-		const uint64_t generationBefore = script.Generation;
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		const uint64_t generationBefore = script.Runtime.Generation;
 		const uint64_t containerFingerprint = FingerprintScriptBytes(container.data(), container.size());
 		CHECK(script.SourceFingerprint == containerFingerprint);
 
@@ -289,18 +287,17 @@ return {
 		CHECK(ScriptEngine::ReloadScript(script, &diagnostics));
 		CHECK(diagnostics.empty());
 		CHECK(script.ReloadDiagnostic.empty());
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(script.IsLoaded);
-		CHECK(script.LastError.empty());
-		CHECK(script.Generation != generationBefore);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.LastError.empty());
+		CHECK(script.Runtime.Generation != generationBefore);
 		CHECK(script.SourceFingerprint == containerFingerprint);   // 基线仍来自同一份容器字节
-		const auto reloadedFields = script.CachedFields.find("amount");
-		CHECK(reloadedFields != script.CachedFields.end());
-		CHECK(reloadedFields->second.Type == LuaFieldType::Int);   // 重载同样跳过容器脚本的注解
+		const ScriptProperty* reloadedFields = ScriptProperties::Find(script.Properties, "amount");
+		CHECK(reloadedFields != nullptr);
+		CHECK(reloadedFields->Type == Schema::Kind::Int32);   // 重载同样跳过容器脚本的注解
 
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCalled("update"));   // 新版本(容器)的回调真的在跑
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 		scene.OnRuntimeStop();
 	}
 
@@ -315,26 +312,25 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "preview probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
 		CHECK(ScriptEngine::InitScriptForEditor(script));
-		CHECK(script.State == ScriptInstanceState::Stopped);
-		CHECK(!script.IsLoaded);
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.State == ScriptInstanceState::Stopped);
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(script.SourceFingerprint == FingerprintScriptBytes(container.data(), container.size()));
-		const auto amount = script.CachedFields.find("amount");
-		CHECK(amount != script.CachedFields.end());
-		CHECK(amount->second.Type == LuaFieldType::Int);   // 注解被跳过(否则会被丢弃)
+		const ScriptProperty* amount = ScriptProperties::Find(script.Properties, "amount");
+		CHECK(amount != nullptr);
+		CHECK(amount->Type == Schema::Kind::Int32);   // 注解被跳过(否则会被丢弃)
 
 		// 对照:同一段源码(注解声明 string、运行期值是数字 7)走源码路径时注解生效 → 字段被丢弃。
 		const fs::path sourceFile = RunPath("preview_source_probe.lua");
 		WriteText(sourceFile, kProbeSource);
 		Entity sourceEntity = Entity::CreateEntity(&scene, "preview source probe");
-		LuaScriptComponent& sourceScript =
-			sourceEntity.AddComponent<LuaScriptComponent>(LogicalPath(sourceFile));
+		LuauScriptComponent& sourceScript =
+			sourceEntity.AddComponent<LuauScriptComponent>(LogicalPath(sourceFile));
 		CHECK(ScriptEngine::InitScriptForEditor(sourceScript));
-		CHECK(sourceScript.LastError.empty());
-		CHECK(sourceScript.CachedFields.find("amount") == sourceScript.CachedFields.end());
+		CHECK(sourceScript.Runtime.LastError.empty());
+		CHECK(ScriptProperties::Find(sourceScript.Properties, "amount") == nullptr);
 		CHECK(sourceScript.SourceFingerprint ==
 			FingerprintScriptBytes(kProbeSource, std::strlen(kProbeSource)));
 	}
@@ -366,21 +362,21 @@ return {
 
 		Scene scene(context);
 		Entity entity = Entity::CreateEntity(&scene, "devtree probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
 		// 开发树(目录 provider,优先级更高)命中源码:注解生效、指纹 = 源文件字节。
 		CHECK(ScriptEngine::InitScriptForEditor(script));
-		const auto devFields = script.CachedFields.find("amount");
-		CHECK(devFields != script.CachedFields.end());
-		CHECK(devFields->second.Type == LuaFieldType::String);
+		const ScriptProperty* devFields = ScriptProperties::Find(script.Properties, "amount");
+		CHECK(devFields != nullptr);
+		CHECK(devFields->Type == Schema::Kind::String);
 		const uint64_t devFingerprint = FingerprintScriptBytes(devSource, std::strlen(devSource));
 		CHECK(script.SourceFingerprint == devFingerprint);
 		CHECK(script.SourceFingerprint != FingerprintScriptBytes(container.data(), container.size()));
 
 		g_ProbeCalls.clear();
 		scene.OnRuntimeStart();
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(ProbeCalled("devtree-create"));
 
 		// 摘掉开发树 → 同一逻辑路径回落到包内容器:重载后指纹变回容器字节、注解重新被跳过
@@ -388,17 +384,17 @@ return {
 		CHECK(context.Vfs().Unmount(dirMount));
 		std::string diagnostics;
 		CHECK(ScriptEngine::ReloadScript(script, &diagnostics));
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(script.SourceFingerprint == FingerprintScriptBytes(container.data(), container.size()));
-		const auto containerFields = script.CachedFields.find("amount");
-		CHECK(containerFields != script.CachedFields.end());
-		CHECK(containerFields->second.Type == LuaFieldType::Int);
+		const ScriptProperty* containerFields = ScriptProperties::Find(script.Properties, "amount");
+		CHECK(containerFields != nullptr);
+		CHECK(containerFields->Type == Schema::Kind::Int32);
 
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCalled("update"));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 		scene.OnRuntimeStop();
 	}
 }

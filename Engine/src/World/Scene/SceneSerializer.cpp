@@ -6,6 +6,7 @@
 #include "World/Scene/Hierarchy.h"
 #include "World/Core/UUID.h"
 #include "World/Gameplay/PrefabTypes.h"
+#include "World/Script/ScriptProperties.h"
 #include "World/Schema/SchemaWriter.h"
 
 #include <filesystem>
@@ -19,8 +20,8 @@ namespace World
 {
 	namespace
 	{
-		constexpr const char* kNativeScriptType = "World::NativeScriptComponent";
-		constexpr const char* kLuaScriptType = "World::LuaScriptComponent";
+		constexpr const char* kNativeScriptType = "World::CppScriptComponent";
+		constexpr const char* kLuaScriptType = "World::LuauScriptComponent";
 
 		bool IsLeafKind(Schema::Kind kind)
 		{
@@ -41,100 +42,55 @@ namespace World
 			return true;
 		}
 
-		void SerializeNativeScriptFieldValues(YAML::Emitter& out, NativeScriptComponent& script,
-			const Schema::SchemaRegistry& schemas, Schema::YamlSchemaWriter& writer)
+		// 2026-09-26 重写:两个脚本组件的属性表**同一份 YAML 形态**(顺序 = 声明顺序):
+		//   Properties:
+		//     - { Name: Health, Type: Float, Value: 100 }
+		// Type 写类型名(可读、可手改);值按 Kind 走 schema 的读写器,和普通字段同一条口径。
+		void SerializeScriptProperties(YAML::Emitter& out, const std::vector<ScriptProperty>& properties,
+			Schema::YamlSchemaWriter& writer)
 		{
-			if (script.FieldValues.empty())
+			if (properties.empty())
 				return;
-			const Schema::TypeSchema* scriptType = schemas.Find(script.ScriptName);
-			if (!scriptType)
-				return;
-
-			out << YAML::Key << "FieldValues" << YAML::Value << YAML::BeginMap;
-			for (const Schema::FieldSchema& field : scriptType->Fields)
+			out << YAML::Key << "Properties" << YAML::Value << YAML::BeginSeq;
+			for (const ScriptProperty& property : properties)
 			{
-				if (field.Meta.Transient || !IsLeafKind(field.K))
+				if (!ScriptProperties::IsPropertyKind(property.Type))
 					continue;
-				const auto it = script.FieldValues.find(field.Name);
-				if (it == script.FieldValues.end())
-					continue;
-				out << YAML::Key << field.Name << YAML::Value;
-				writer.WriteValue(field, it->second);
-			}
-			out << YAML::EndMap;
-		}
-
-		void DeserializeNativeScriptFieldValues(const YAML::Node& node, NativeScriptComponent& script,
-			const Schema::SchemaRegistry& schemas, Schema::YamlSchemaReader& reader)
-		{
-			const YAML::Node fields = node["FieldValues"];
-			if (!fields || !fields.IsMap())
-				return;
-			const Schema::TypeSchema* scriptType = schemas.Find(script.ScriptName);
-			if (!scriptType)
-				return;
-			for (const Schema::FieldSchema& field : scriptType->Fields)
-			{
-				if (field.Meta.Transient || !IsLeafKind(field.K))
-					continue;
-				const YAML::Node fieldNode = fields[field.Name];
-				if (!fieldNode)
-					continue;
-				Schema::Value value;
-				if (reader.ReadFieldValue(field, &value, fieldNode))
-					script.FieldValues[field.Name] = std::move(value);
-			}
-		}
-
-		void SerializeLuaCachedFields(YAML::Emitter& out, LuaScriptComponent& script)
-		{
-			if (script.CachedFields.empty())
-				return;
-			out << YAML::Key << "CachedFields" << YAML::Value << YAML::BeginMap;
-			for (const auto& [name, field] : script.CachedFields)
-			{
-				if (field.Type == LuaFieldType::None || !field.Value.has_value())
-					continue;
-				out << YAML::Key << name << YAML::Value << YAML::BeginMap;
-				out << YAML::Key << "Type" << YAML::Value << static_cast<int>(field.Type);
+				out << YAML::BeginMap;
+				out << YAML::Key << "Name" << YAML::Value << property.Name;
+				out << YAML::Key << "Type" << YAML::Value << ScriptProperties::KindName(property.Type);
 				out << YAML::Key << "Value" << YAML::Value;
-				switch (field.Type)
-				{
-					case LuaFieldType::Float: out << std::any_cast<float>(field.Value); break;
-					case LuaFieldType::Int: out << std::any_cast<int>(field.Value); break;
-					case LuaFieldType::Bool: out << std::any_cast<bool>(field.Value); break;
-					case LuaFieldType::String: out << std::any_cast<std::string>(field.Value); break;
-					default: break;
-				}
+				Schema::FieldSchema probe;
+				probe.K = property.Type;
+				writer.WriteValue(probe, property.Value);
 				out << YAML::EndMap;
 			}
-			out << YAML::EndMap;
+			out << YAML::EndSeq;
 		}
 
-		void DeserializeLuaCachedFields(const YAML::Node& node, LuaScriptComponent& script)
+		void DeserializeScriptProperties(const YAML::Node& node, std::vector<ScriptProperty>& properties)
 		{
-			const YAML::Node fields = node["CachedFields"];
-			if (!fields || !fields.IsMap())
+			properties.clear();
+			const YAML::Node list = node["Properties"];
+			if (!list || !list.IsSequence())
 				return;
-			for (const auto& kv : fields)
+			Schema::YamlSchemaReader reader;
+			for (const YAML::Node& item : list)
 			{
-				const std::string name = kv.first.as<std::string>();
-				const YAML::Node typeNode = kv.second["Type"];
-				const YAML::Node valueNode = kv.second["Value"];
-				if (!typeNode || !valueNode)
+				if (!item || !item.IsMap() || !item["Name"])
 					continue;
-
-				LuaScriptField field;
-				field.Type = static_cast<LuaFieldType>(typeNode.as<int>());
-				switch (field.Type)
-				{
-					case LuaFieldType::Float: field.Value = valueNode.as<float>(); break;
-					case LuaFieldType::Int: field.Value = valueNode.as<int>(); break;
-					case LuaFieldType::Bool: field.Value = valueNode.as<bool>(); break;
-					case LuaFieldType::String: field.Value = valueNode.as<std::string>(); break;
-					default: continue;
-				}
-				script.CachedFields[name] = std::move(field);
+				ScriptProperty property;
+				property.Name = item["Name"].as<std::string>();
+				const std::string typeName = item["Type"] ? item["Type"].as<std::string>() : std::string();
+				property.Type = ScriptProperties::KindFromName(typeName);
+				if (!ScriptProperties::IsPropertyKind(property.Type))
+					continue;
+				Schema::FieldSchema probe;
+				probe.K = property.Type;
+				Schema::Value value;
+				if (item["Value"] && reader.ReadFieldValue(probe, &value, item["Value"]))
+					property.Value = std::move(value);
+				properties.push_back(std::move(property));
 			}
 		}
 
@@ -161,9 +117,9 @@ namespace World
 					writer.WriteField(field, instance);
 
 				if (schema->Id.Name == kNativeScriptType)
-					SerializeNativeScriptFieldValues(out, *static_cast<NativeScriptComponent*>(instance), schemas, writer);
+					SerializeScriptProperties(out, static_cast<CppScriptComponent*>(instance)->Properties, writer);
 				else if (schema->Id.Name == kLuaScriptType)
-					SerializeLuaCachedFields(out, *static_cast<LuaScriptComponent*>(instance));
+					SerializeScriptProperties(out, static_cast<LuauScriptComponent*>(instance)->Properties, writer);
 				writer.EndType(*schema);
 			}
 
@@ -482,17 +438,21 @@ namespace World
 
 					if (schema->Id.Name == kNativeScriptType)
 					{
-						NativeScriptComponent* nativeScript = static_cast<NativeScriptComponent*>(rawInstance);
-						DeserializeNativeScriptFieldValues(compNode, *nativeScript, schemas, reader);
+						CppScriptComponent* nativeScript = static_cast<CppScriptComponent*>(rawInstance);
+						DeserializeScriptProperties(compNode, nativeScript->Properties);
+						// 脚本类型已知时以 schema 为准补齐/裁剪属性表(声明顺序 = 显示顺序)。
 						const Schema::TypeSchema* scriptType = schemas.Find(nativeScript->ScriptName);
-						if (scriptType && scriptType->Script)
-							scriptType->Script->Bind(static_cast<void*>(nativeScript));
+						if (scriptType && scriptType->Category == Schema::TypeCategory::Script)
+							ScriptProperties::SyncFromSchema(nativeScript->Properties, *scriptType);
 						else if (!nativeScript->ScriptName.empty())
-							WLD_CORE_ERROR("Could not find script type '{0}' for NativeScriptComponent!", nativeScript->ScriptName);
+							WLD_CORE_WARN("C++ script is not registered (its properties are kept as data): {0}",
+								nativeScript->ScriptName);
 					}
 					else if (schema->Id.Name == kLuaScriptType)
 					{
-						DeserializeLuaCachedFields(compNode, *static_cast<LuaScriptComponent*>(rawInstance));
+						// Luau 的字段声明来自脚本文件,这里只读回场景里保存的值;
+						// 声明同步在脚本加载/编辑器打开时由 ScriptEngine 做。
+						DeserializeScriptProperties(compNode, static_cast<LuauScriptComponent*>(rawInstance)->Properties);
 					}
 				}
 

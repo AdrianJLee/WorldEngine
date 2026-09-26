@@ -12,12 +12,14 @@
 #include "World/Script/BehaviorRegistry.h"
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
+#include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptValue.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/ScriptEngine.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -247,14 +249,14 @@ namespace
 		CHECK(registry.Size() == listed.size());
 	}
 
-	// 2. Luau 行为能从 CachedFields 产出 BehaviorDesc(真实编辑器加载路径),
+	// 2. Luau 行为能从组件的属性表产出 BehaviorDesc(真实编辑器加载路径),
 	//    field id 复用现成的 Fnv1a64;描述变化走 Replace 刷新而不是新增。
 	void LuaBehaviorDescriptions()
 	{
 		BehaviorRegistry& registry = BehaviorRegistry::Instance();
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "lua behavior");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(kLuaFixturePath);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(kLuaFixturePath);
 		CHECK(ScriptEngine::InitScriptForEditor(script));
 
 		const std::string moduleId = BehaviorRegistry::LuaModuleId(kLuaFixturePath);
@@ -267,16 +269,16 @@ namespace
 		CHECK(desc->Fields.size() == 2);
 		// 夹具注解:---@field LocalUpdates integer / ---@field Mode string
 		CHECK(desc->Fields[0].Name == "LocalUpdates" && desc->Fields[0].Type == Schema::Kind::Int32);
-		CHECK(desc->Fields[0].FieldId == 0x4BDD718EF303013Cull);
+		CHECK(desc->Fields[0].FieldId == 0x0AB6714B6118D96Dull);
 		CHECK(desc->Fields[1].Name == "Mode" && desc->Fields[1].Type == Schema::Kind::String);
-		CHECK(desc->Fields[1].FieldId == 0x7FC545586A0ED318ull);
+		CHECK(desc->Fields[1].FieldId == 0x6152AB3E0AEBD39Dull);
 		CHECK(desc->Lifecycle.OnCreate && desc->Lifecycle.OnUpdate && desc->Lifecycle.OnDestroy);
 		CHECK(!desc->Lifecycle.OnEvent);
 
 		// field id 派生规则 = 现成的 Fnv1a64,不是新哈希;跨进程稳定(硬编码值见上)。
-		CHECK(BehaviorRegistry::LuaFieldId("Mode") == Schema::Fnv1a64(std::string("World::LuaScriptComponent.Mode")));
+		CHECK(BehaviorRegistry::LuaFieldId("Mode") == Schema::Fnv1a64(std::string("World::LuauScriptComponent.Mode")));
 		CHECK(BehaviorRegistry::LuaFieldId("Mode") != BehaviorRegistry::LuaFieldId("LocalUpdates"));
-		CHECK(BehaviorRegistry::LuaFieldId("") == Schema::Fnv1a64(std::string("World::LuaScriptComponent.")));
+		CHECK(BehaviorRegistry::LuaFieldId("") == Schema::Fnv1a64(std::string("World::LuauScriptComponent.")));
 
 		// 幂等:同模块同描述 → true 且条数不变。
 		const std::size_t before = registry.Size();
@@ -286,8 +288,10 @@ namespace
 		CHECK(BehaviorDescEquals(*registry.Find(moduleId), *desc));
 
 		// 脚本编辑(字段集合变化)→ 刷新同一条描述,而不是新增/被拒。
-		script.CachedFields.erase("Mode");
-		script.CachedFields["Speed"] = { LuaFieldType::Float, 3.5f };
+		std::vector<ScriptProperty>& properties = script.Properties;
+		properties.erase(std::remove_if(properties.begin(), properties.end(),
+			[](const ScriptProperty& property) { return property.Name == "Mode"; }), properties.end());
+		properties.push_back(ScriptProperty{ "Speed", Schema::Kind::Float, Schema::Value(3.5f) });
 		error.clear();
 		CHECK(ScriptEngine::EnsureLuaBehavior(script, &error) && error.empty());
 		CHECK(registry.Size() == before);
@@ -295,10 +299,10 @@ namespace
 		CHECK(desc != nullptr && desc->Fields.size() == 2);
 		CHECK(desc->Fields[0].Name == "LocalUpdates" && desc->Fields[0].Type == Schema::Kind::Int32);
 		CHECK(desc->Fields[1].Name == "Speed" && desc->Fields[1].Type == Schema::Kind::Float);
-		CHECK(desc->Fields[1].FieldId == 0xEDB8CFC04F67C11Aull);
+		CHECK(desc->Fields[1].FieldId == 0x9BB1DDD29EEE6CA9ull);
 
 		// 空路径 / 未登记脚本:不产生描述。
-		LuaScriptComponent empty;
+		LuauScriptComponent empty;
 		error.clear();
 		CHECK(!ScriptEngine::EnsureLuaBehavior(empty, &error) && !error.empty());
 		CHECK(registry.Find(BehaviorRegistry::LuaModuleId("scripts/tests/NotLoaded.lua")) == nullptr);
@@ -315,8 +319,8 @@ namespace
 		Scene scene(TestContext());
 
 		Entity both = Entity::CreateEntity(&scene, "two behaviors");
-		both.AddComponent<NativeScriptComponent>().ScriptName = "ProbeBehavior"; // 短名,走 schema 解析
-		LuaScriptComponent& lua = both.AddComponent<LuaScriptComponent>(kLuaFixturePath);
+		both.AddComponent<CppScriptComponent>().ScriptName = "ProbeBehavior"; // 短名,走 schema 解析
+		LuauScriptComponent& lua = both.AddComponent<LuauScriptComponent>(kLuaFixturePath);
 		CHECK(ScriptEngine::InitScriptForEditor(lua));
 
 		const auto first = registry.DescribeEntity(scene, static_cast<entt::entity>(both));
@@ -334,14 +338,14 @@ namespace
 
 		// 全名直查路径:ScriptName 用模块 id 全名时也能解析。
 		Entity named = Entity::CreateEntity(&scene, "full name");
-		named.AddComponent<NativeScriptComponent>().ScriptName = "BehaviorTest::ZetaBehavior";
+		named.AddComponent<CppScriptComponent>().ScriptName = "BehaviorTest::ZetaBehavior";
 		const auto listed = registry.DescribeEntity(named);
 		CHECK(listed.size() == 1 && listed[0]->ModuleId == "BehaviorTest::ZetaBehavior");
 
 		// 未注册脚本(只有组件、没有描述)→ 不出现,不抛。
 		Entity unknown = Entity::CreateEntity(&scene, "unknown behavior");
-		unknown.AddComponent<NativeScriptComponent>().ScriptName = "BehaviorTest::MissingBehavior";
-		unknown.AddComponent<LuaScriptComponent>("scripts/tests/NotRegistered.lua");
+		unknown.AddComponent<CppScriptComponent>().ScriptName = "BehaviorTest::MissingBehavior";
+		unknown.AddComponent<LuauScriptComponent>("scripts/tests/NotRegistered.lua");
 		CHECK(registry.DescribeEntity(scene, static_cast<entt::entity>(unknown)).empty());
 
 		Entity empty = Entity::CreateEntity(&scene, "no behaviors");
@@ -359,18 +363,18 @@ namespace
 		BehaviorRegistry& registry = BehaviorRegistry::Instance();
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "coexistence");
-		NativeScriptComponent& native = entity.AddComponent<NativeScriptComponent>();
+		CppScriptComponent& native = entity.AddComponent<CppScriptComponent>();
 		native.ScriptName = "ProbeBehavior";
-		LuaScriptComponent& lua = entity.AddComponent<LuaScriptComponent>(kLuaFixturePath);
+		LuauScriptComponent& lua = entity.AddComponent<LuauScriptComponent>(kLuaFixturePath);
 		CHECK(ScriptEngine::InitScriptForEditor(lua));
-		CHECK(lua.State == ScriptInstanceState::Stopped);
+		CHECK(lua.Runtime.State == ScriptInstanceState::Stopped);
 
 		CHECK(registry.DescribeEntity(entity).size() == 2);
 
 		scene.OnScriptStart();
-		CHECK(native.State == ScriptInstanceState::Running);
+		CHECK(native.Runtime.State == ScriptInstanceState::Running);
 		CHECK(native.Instance != nullptr);
-		CHECK(lua.State == ScriptInstanceState::Running);
+		CHECK(lua.Runtime.State == ScriptInstanceState::Running);
 		CHECK(s_NativeCreates == 1 && s_LuaCreates == 1);
 		CHECK(s_NativeUpdates == 0 && s_LuaUpdates == 0);
 
@@ -381,8 +385,8 @@ namespace
 
 		scene.OnRuntimeStop();
 		CHECK(s_NativeDestroys == 1 && s_LuaDestroys == 1);
-		CHECK(native.State == ScriptInstanceState::Stopped);
-		CHECK(lua.State == ScriptInstanceState::Stopped);
+		CHECK(native.Runtime.State == ScriptInstanceState::Stopped);
+		CHECK(lua.Runtime.State == ScriptInstanceState::Stopped);
 	}
 
 	// 5. 描述等价判定:字段顺序无关(身份只看 id/名字/类型)。

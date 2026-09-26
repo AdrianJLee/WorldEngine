@@ -207,7 +207,7 @@ namespace
 		for (const std::string& name : names)
 		{
 			Entity entity = Entity::CreateEntity(scene.get(), name);
-			entity.AddComponent<LuaScriptComponent>(kProbePath);
+			entity.AddComponent<LuauScriptComponent>(kProbePath);
 		}
 		return scene;
 	}
@@ -366,10 +366,10 @@ TIMER_OWNER_ERROR = timerError
 		Entity first = FindByName(*scene, "probe A");
 		Entity second = FindByName(*scene, "probe B");
 		CHECK(first.IsValid() && second.IsValid());
-		LuaScriptComponent& firstScript = first.GetComponent<LuaScriptComponent>();
-		CHECK(firstScript.State == ScriptInstanceState::Faulted);
-		CHECK(firstScript.LastError.find("probe handler exploded") != std::string::npos);
-		CHECK(second.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+		LuauScriptComponent& firstScript = first.GetComponent<LuauScriptComponent>();
+		CHECK(firstScript.Runtime.State == ScriptInstanceState::Faulted);
+		CHECK(firstScript.Runtime.LastError.find("probe handler exploded") != std::string::npos);
+		CHECK(second.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
 
 		// Faulted 实例的其它订阅(以及它的计时器)已整体丢弃:后续事件只送达存活实例。
 		Calls().clear();
@@ -520,10 +520,10 @@ return Probe
 		Gameplay::GameHost host;
 		World::Ref<Scene> scene = World::CreateRef<Scene>(TestContext());
 		Entity entity = Entity::CreateEntity(scene.get(), "reload probe");
-		entity.AddComponent<LuaScriptComponent>(LogicalPath(scriptPath));
+		entity.AddComponent<LuauScriptComponent>(LogicalPath(scriptPath));
 		SetProbeMode("default");
 		StartHost(host, scene);
-		CHECK(entity.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+		CHECK(entity.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
 
 		Calls().clear();
 		RUN_OK("events.emit('probe:order', 1)", "reload_v1_emit");
@@ -534,10 +534,10 @@ return Probe
 		// 热重载失败:旧订阅与旧闭包原样保留(State 仍 Running,失败不置 Faulted)。
 		WriteScript(scriptPath, kReloadBroken);
 		std::string diagnostics;
-		LuaScriptComponent& script = entity.GetComponent<LuaScriptComponent>();
+		LuauScriptComponent& script = entity.GetComponent<LuauScriptComponent>();
 		CHECK(!ScriptEngine::ReloadScript(script, &diagnostics));
 		CHECK(!diagnostics.empty());
-		CHECK(script.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 		Calls().clear();
 		RUN_OK("events.emit('probe:order', 2)", "reload_failed_emit");
 		host.Tick(Timestep(kStep), false);
@@ -546,7 +546,7 @@ return Probe
 
 		// 热重载成功:旧 generation 的订阅整体退订,旧闭包不再被调用。
 		WriteScript(scriptPath, kReloadV2);
-		CHECK(ScriptEngine::ReloadScript(entity.GetComponent<LuaScriptComponent>(), &diagnostics));
+		CHECK(ScriptEngine::ReloadScript(entity.GetComponent<LuauScriptComponent>(), &diagnostics));
 		Calls().clear();
 		RUN_OK("events.emit('probe:order', 3)", "reload_success_emit");
 		host.Tick(Timestep(kStep), false);
@@ -554,10 +554,10 @@ return Probe
 
 		// Pending 复活路径(编辑器 W5b Reload 对 Faulted/未加载实例走的就是它):
 		// 新版本的 OnCreate 重新建立订阅,之后事件送达新闭包。
-		LuaScriptComponent& revived = entity.GetComponent<LuaScriptComponent>();
-		revived.State = ScriptInstanceState::Pending;
+		LuauScriptComponent& revived = entity.GetComponent<LuauScriptComponent>();
+		revived.Runtime.State = ScriptInstanceState::Pending;
 		scene->OnScriptUpdate(Timestep(kStep));
-		CHECK(revived.State == ScriptInstanceState::Running);
+		CHECK(revived.Runtime.State == ScriptInstanceState::Running);
 		Calls().clear();
 		RUN_OK("events.emit('probe:order', 4)", "reload_revived_emit");
 		host.Tick(Timestep(kStep), false);

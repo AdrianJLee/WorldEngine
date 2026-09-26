@@ -52,19 +52,19 @@ namespace
 	{
 		Ref<Scene> scene = CreateRef<Scene>(TestContext());
 		Entity entity = Entity::CreateEntity(scene.get(), "ui probe");
-		entity.AddComponent<LuaScriptComponent>(scriptPath);
-		ScriptEngine::OnCreateScript(entity.GetComponent<LuaScriptComponent>(), entity);
+		entity.AddComponent<LuauScriptComponent>(scriptPath);
+		ScriptEngine::OnCreateScript(entity.GetComponent<LuauScriptComponent>(), entity);
 		if (outEntity)
 			*outEntity = entity;
 		return scene;
 	}
 
-	ScriptValue Field(LuaScriptComponent& script, const char* name)
+	ScriptValue Field(LuauScriptComponent& script, const char* name)
 	{
 		return script.ScriptTable.GetField(name);
 	}
 
-	bool BoolField(LuaScriptComponent& script, const char* name)
+	bool BoolField(LuauScriptComponent& script, const char* name)
 	{
 		bool value = false;
 		if (!Field(script, name).AsBool(&value))
@@ -72,7 +72,7 @@ namespace
 		return value;
 	}
 
-	double NumberField(LuaScriptComponent& script, const char* name)
+	double NumberField(LuauScriptComponent& script, const char* name)
 	{
 		double value = 0.0;
 		if (!Field(script, name).AsNumber(&value))
@@ -80,12 +80,12 @@ namespace
 		return value;
 	}
 
-	void SetBoolField(LuaScriptComponent& script, const char* name, bool value)
+	void SetBoolField(LuauScriptComponent& script, const char* name, bool value)
 	{
 		CHECK(script.ScriptTable.SetField(name, ScriptValue::Boolean(value)));
 	}
 
-	void SetNumberField(LuaScriptComponent& script, const char* name, double value)
+	void SetNumberField(LuauScriptComponent& script, const char* name, double value)
 	{
 		CHECK(script.ScriptTable.SetField(name, ScriptValue::Number(value)));
 	}
@@ -144,8 +144,8 @@ namespace
 	{
 		Entity entity;
 		Ref<Scene> scene = CreateSceneWithEntity(&entity, "scripts/tests/UiProbe.lua");
-		LuaScriptComponent& script = entity.GetComponent<LuaScriptComponent>();
-		CHECK(script.State == ScriptInstanceState::Running);
+		LuauScriptComponent& script = entity.GetComponent<LuauScriptComponent>();
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 		CHECK(script.OnUiFunc.IsValid());
 
 		WuiContext context;
@@ -192,7 +192,7 @@ namespace
 	{
 		Entity entity;
 		Ref<Scene> scene = CreateSceneWithEntity(&entity, "scripts/tests/UiProbe.lua");
-		LuaScriptComponent& script = entity.GetComponent<LuaScriptComponent>();
+		LuauScriptComponent& script = entity.GetComponent<LuauScriptComponent>();
 		WuiContext context;
 
 		// 未命中:点击远处不应改变任何脚本字段。
@@ -240,22 +240,22 @@ namespace
 	{
 		Ref<Scene> scene = CreateRef<Scene>(TestContext());
 		Entity goodEntity = Entity::CreateEntity(scene.get(), "ui good");
-		goodEntity.AddComponent<LuaScriptComponent>("scripts/tests/UiProbe.lua");
-		ScriptEngine::OnCreateScript(goodEntity.GetComponent<LuaScriptComponent>(), goodEntity);
+		goodEntity.AddComponent<LuauScriptComponent>("scripts/tests/UiProbe.lua");
+		ScriptEngine::OnCreateScript(goodEntity.GetComponent<LuauScriptComponent>(), goodEntity);
 		Entity badEntity = Entity::CreateEntity(scene.get(), "ui bad");
-		badEntity.AddComponent<LuaScriptComponent>("scripts/tests/UiProbe.lua");
-		ScriptEngine::OnCreateScript(badEntity.GetComponent<LuaScriptComponent>(), badEntity);
-		LuaScriptComponent& good = goodEntity.GetComponent<LuaScriptComponent>();
-		LuaScriptComponent& bad = badEntity.GetComponent<LuaScriptComponent>();
+		badEntity.AddComponent<LuauScriptComponent>("scripts/tests/UiProbe.lua");
+		ScriptEngine::OnCreateScript(badEntity.GetComponent<LuauScriptComponent>(), badEntity);
+		LuauScriptComponent& good = goodEntity.GetComponent<LuauScriptComponent>();
+		LuauScriptComponent& bad = badEntity.GetComponent<LuauScriptComponent>();
 		SetBoolField(bad, "failOnUi", true);
 
 		WuiContext context;
 		WuiInputState input;
 		input.ViewportSize = { 800, 600 };
 		CHECK(DrawFrame(*scene, context, input) == 1);
-		CHECK(bad.State == ScriptInstanceState::Faulted);
-		CHECK(bad.LastError.find("non-empty string") != std::string::npos);
-		CHECK(good.State == ScriptInstanceState::Running);
+		CHECK(bad.Runtime.State == ScriptInstanceState::Faulted);
+		CHECK(bad.Runtime.LastError.find("non-empty string") != std::string::npos);
+		CHECK(good.Runtime.State == ScriptInstanceState::Running);
 		CHECK(FindText(context.Commands(), "Go") != nullptr);
 
 		// 第二帧:Faulted 实例不再被调用(错误数回到 0),good 实例继续绘制。
@@ -270,8 +270,8 @@ namespace
 	{
 		Entity entity;
 		Ref<Scene> scene = CreateSceneWithEntity(&entity, "scripts/tests/ServicesProbe.lua");
-		LuaScriptComponent& script = entity.GetComponent<LuaScriptComponent>();
-		CHECK(script.State == ScriptInstanceState::Running);
+		LuauScriptComponent& script = entity.GetComponent<LuauScriptComponent>();
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 		CHECK(!script.OnUiFunc.IsValid());
 
 		WuiContext context;
@@ -305,7 +305,7 @@ namespace
 	{
 		Entity entity;
 		Ref<Scene> scene = CreateSceneWithEntity(&entity, "scripts/tests/UiProbe.lua");
-		LuaScriptComponent& script = entity.GetComponent<LuaScriptComponent>();
+		LuauScriptComponent& script = entity.GetComponent<LuauScriptComponent>();
 		const int before = script.OnUiFunc.RefId();
 		std::string diagnostics;
 		CHECK(ScriptEngine::ReloadScript(script, &diagnostics));
@@ -326,14 +326,14 @@ namespace
 	{
 		Entity entity;
 		Ref<Scene> scene = CreateSceneWithEntity(&entity, "scripts/tests/UiProbe.lua");
-		LuaScriptComponent& script = entity.GetComponent<LuaScriptComponent>();
+		LuauScriptComponent& script = entity.GetComponent<LuauScriptComponent>();
 		SetBoolField(script, "failOnImage", true);
 		WuiContext context;
 		WuiInputState input;
 		input.ViewportSize = { 800, 600 };
 		CHECK(DrawFrame(*scene, context, input) == 1);
-		CHECK(script.State == ScriptInstanceState::Faulted);
-		CHECK(script.LastError.find("initialized renderer device") != std::string::npos);
+		CHECK(script.Runtime.State == ScriptInstanceState::Faulted);
+		CHECK(script.Runtime.LastError.find("initialized renderer device") != std::string::npos);
 	}
 
 	// 8.W3c/OnUI 快照化 + 结构写:活动场景里 OnUI 能做白名单结构写(建子实体 + 挂纯数据
@@ -343,9 +343,9 @@ namespace
 	{
 		Ref<Scene> scene = CreateRef<Scene>(TestContext());
 		Entity spawner = Entity::CreateEntity(scene.get(), "ui spawner");
-		spawner.AddComponent<LuaScriptComponent>("scripts/tests/UiSpawn.lua");
+		spawner.AddComponent<LuauScriptComponent>("scripts/tests/UiSpawn.lua");
 		Entity ticker = Entity::CreateEntity(scene.get(), "ui ticker");
-		ticker.AddComponent<LuaScriptComponent>("scripts/tests/UiTick.lua");
+		ticker.AddComponent<LuauScriptComponent>("scripts/tests/UiTick.lua");
 
 		// 活动场景:回调外的结构写被拒绝(既有契约),OnUI 必须拿到与生命周期回调同样的写窗口。
 		scene->OnRuntimeStart();
@@ -356,11 +356,11 @@ namespace
 		input.ViewportSize = { 800, 600 };
 		CHECK(DrawFrame(*scene, context, input) == 0);
 
-		LuaScriptComponent& spawnScript = spawner.GetComponent<LuaScriptComponent>();
+		LuauScriptComponent& spawnScript = spawner.GetComponent<LuauScriptComponent>();
 		CHECK(NumberField(spawnScript, "spawned") == 1.0);
 		CHECK(BoolField(spawnScript, "childVisible"));   // 结构写同帧可见
 		CHECK(NumberField(spawnScript, "uiTicks") == 1.0);
-		LuaScriptComponent& tickScript = ticker.GetComponent<LuaScriptComponent>();
+		LuauScriptComponent& tickScript = ticker.GetComponent<LuauScriptComponent>();
 		CHECK(NumberField(tickScript, "uiTicks") == 1.0);   // 同一趟里另一个实例也照常跑
 
 		// Tag + Transform 都真的落进注册表(同步提交,不是延迟到下一帧)。

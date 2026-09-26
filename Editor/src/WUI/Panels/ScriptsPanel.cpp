@@ -177,18 +177,20 @@ namespace World
 			// 入口会触发"结构写禁令"断言。
 			const Scene& sceneRef = *scene;
 			const entt::registry& registry = sceneRef.GetRegistry();
-			for (const entt::entity handle : registry.view<LuaScriptComponent>())
+			for (const entt::entity handle : registry.view<LuauScriptComponent>())
 			{
-				const LuaScriptComponent& script = registry.get<LuaScriptComponent>(handle);
+				const LuauScriptComponent& script = registry.get<LuauScriptComponent>(handle);
 				SceneRow row;
 				row.Handle = handle;
 				if (const TagComponent* tag = registry.try_get<TagComponent>(handle))
 					row.Tag = tag->Tag;
 				if (row.Tag.empty())
 					row.Tag = "Entity " + std::to_string(static_cast<uint32_t>(handle));
-				row.Path = script.ScriptFilePath.empty() ? std::string("(no script path)") : script.ScriptFilePath;
-				row.State = ScriptStateText(script.State);
-				row.Diagnostic = !script.ReloadDiagnostic.empty() ? script.ReloadDiagnostic : script.LastError;
+				row.Path = script.ScriptPath.empty() ? std::string("(no script path)") : script.ScriptPath;
+				// 2026-09-26 重写:运行态收进 `Runtime`(State/LastError),重载诊断仍在组件上。
+				row.State = ScriptStateText(script.Runtime.State);
+				row.Diagnostic = !script.ReloadDiagnostic.empty()
+					? script.ReloadDiagnostic : script.Runtime.LastError;
 				sceneRows.push_back(std::move(row));
 			}
 			std::sort(sceneRows.begin(), sceneRows.end(),
@@ -270,7 +272,7 @@ namespace World
 		if (sceneRows.empty())
 		{
 			Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f },
-				"current scene has no LuaScriptComponent", theme.TextMuted, 12.0f);
+				"current scene has no LuauScriptComponent", theme.TextMuted, 12.0f);
 			y += 18.0f;
 		}
 

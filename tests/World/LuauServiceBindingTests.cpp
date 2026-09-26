@@ -118,7 +118,7 @@ namespace
 		Entity entity = Entity::CreateEntity(scene.get(), "services probe host");
 		// CreateEntity 已经带 TagComponent + UUIDComponent,这里只补探针需要的组件。
 		entity.AddComponent<TransformComponent>();
-		entity.AddComponent<LuaScriptComponent>("scripts/tests/ServicesProbe.lua");
+		entity.AddComponent<LuauScriptComponent>("scripts/tests/ServicesProbe.lua");
 		if (outEntity)
 			*outEntity = entity;
 		return scene;
@@ -165,7 +165,7 @@ namespace
 		host.Init(desc);
 		host.SetScene(initialScene, true);
 		CHECK(initialScene->IsRunning());
-		CHECK(movingEntity.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+		CHECK(movingEntity.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
 
 		// 输入映射:Move = 手柄 LX 轴(宿主不喂手柄,状态由测试注入);Jump = 鼠标键 0(宿主会喂,
 		// 测试在喂入之后覆写以制造真实边沿)。

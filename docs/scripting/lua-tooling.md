@@ -59,7 +59,7 @@ Entity 句柄会校验场景寿命与实体代数。脚本可以用 `self.entity
 GetEntity().GetScene()->DeferStructuralChange([position](World::Scene& scene) {
     auto entity = World::Entity::CreateEntity(&scene, "Spawned");
     entity.AddComponent<World::TransformComponent>().SetLocation(position);
-    entity.AddComponent<World::LuaScriptComponent>("scripts/Test.lua");
+    entity.AddComponent<World::LuauScriptComponent>("scripts/Test.lua");
 });
 ```
 

@@ -1,6 +1,6 @@
 -- P2 W3c headless fixture for the immediate-mode `ui` script table.
 -- The test host drives one WuiContext frame per call to ScriptEngine::DrawScriptUi
--- and reads the script fields back through LuaScriptComponent::ScriptTable.
+-- and reads the script fields back through LuauScriptComponent::ScriptTable.
 ---@class UiProbe : WorldScript
 ---@field clicks integer
 ---@field checked boolean

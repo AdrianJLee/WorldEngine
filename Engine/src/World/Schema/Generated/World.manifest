@@ -10,8 +10,8 @@ struct World::CameraComponent
 struct World::DirectionalLightComponent
 struct World::PointLightComponent
 struct World::AmbientLightComponent
-struct World::NativeScriptComponent
-struct World::LuaScriptComponent
+struct World::CppScriptComponent
+struct World::LuauScriptComponent
 struct World::RigidBody2DComponent
 struct World::BoxCollider2DComponent
 struct World::CircleCollider2DComponent

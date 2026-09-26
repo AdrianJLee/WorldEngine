@@ -83,7 +83,7 @@ namespace World
 	{
 		Scene* ScenePtr = nullptr;
 		Entity EntityRef;                 // 含场景令牌 + entt 版本位
-		std::uint64_t Component = 0;      // LuaScriptComponent 的 entt type hash
+		std::uint64_t Component = 0;      // LuauScriptComponent 的 entt type hash
 		std::uint64_t Generation = 0;     // 实例 generation(热重载会进入另一个域)
 	};
 

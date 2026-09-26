@@ -125,7 +125,7 @@ namespace
 			body.Type = type;
 			if (collider)
 				entity.AddComponent<BoxCollider2DComponent>();
-			entity.AddComponent<LuaScriptComponent>(kPhysicsProbePath);
+			entity.AddComponent<LuauScriptComponent>(kPhysicsProbePath);
 			SetGlobal("TEST_Physics2DMode", mode);
 			return entity;
 		}
@@ -134,7 +134,7 @@ namespace
 		{
 			Entity entity = Entity::CreateEntity(&World, tag);
 			entity.AddComponent<TransformComponent>();
-			entity.AddComponent<LuaScriptComponent>(kPhysicsProbePath);
+			entity.AddComponent<LuauScriptComponent>(kPhysicsProbePath);
 			SetGlobal("TEST_Physics2DMode", mode);
 			return entity;
 		}
@@ -155,12 +155,12 @@ namespace
 		// 探针脚本出错会置 Faulted 并把错误写进 LastError:测试里直接失败,避免"静默通过"。
 		bool CheckProbeScript()
 		{
-			for (const entt::entity handle : static_cast<const Scene&>(World).GetRegistry().view<LuaScriptComponent>())
+			for (const entt::entity handle : static_cast<const Scene&>(World).GetRegistry().view<LuauScriptComponent>())
 			{
-				const LuaScriptComponent& script = static_cast<const Scene&>(World).GetRegistry().get<LuaScriptComponent>(handle);
-				if (!script.LastError.empty())
+				const LuauScriptComponent& script = static_cast<const Scene&>(World).GetRegistry().get<LuauScriptComponent>(handle);
+				if (!script.Runtime.LastError.empty())
 				{
-					std::fprintf(stderr, "Physics2DProbe.lua failed: %s\n", script.LastError.c_str());
+					std::fprintf(stderr, "Physics2DProbe.lua failed: %s\n", script.Runtime.LastError.c_str());
 					return false;
 				}
 			}
@@ -345,7 +345,7 @@ namespace
 		Entity entity = Entity::CreateEntity(&fixture.World, "runtime body");
 		TransformComponent& transform = entity.AddComponent<TransformComponent>();
 		transform.SetLocation(glm::vec3(0.0f, 1.0f, 0.0f));
-		entity.AddComponent<LuaScriptComponent>(kPhysicsProbePath);
+		entity.AddComponent<LuauScriptComponent>(kPhysicsProbePath);
 		SetGlobal("TEST_Physics2DMode", "add_body");
 		fixture.Start();
 		CHECK(!entity.HasComponent<RigidBody2DComponent>());

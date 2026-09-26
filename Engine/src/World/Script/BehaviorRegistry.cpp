@@ -5,6 +5,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
+#include "World/Script/ScriptProperties.h"
 
 #include <algorithm>
 #include <utility>
@@ -15,9 +16,9 @@ namespace World
 	{
 		// Lua 行为的模块/字段 id 命名空间。字段 id 与 schema-compiler 的
 		// Fnv1a64("<Module>::<Type>.<FieldName>") 是同一条派生规则,只是把 Lua 行为
-		// 视作 World::LuaScriptComponent 上的字段;不引入第二套哈希。
+		// 视作 World::LuauScriptComponent 上的字段;不引入第二套哈希。
 		constexpr const char* kLuaModulePrefix = "Lua:";
-		constexpr const char* kLuaFieldScope = "World::LuaScriptComponent.";
+		constexpr const char* kLuaFieldScope = "World::LuauScriptComponent.";
 
 		void SetError(std::string* error, std::string message)
 		{
@@ -61,17 +62,6 @@ namespace World
 		// 现有两类行为在前端上都能被三个生命周期入口调度;OnEvent 留到 W4。
 		constexpr BehaviorLifecycleSlots kExistingFrontendSlots { true, true, true, false };
 
-		Schema::Kind LuaFieldKind(LuaFieldType type)
-		{
-			switch (type)
-			{
-				case LuaFieldType::Float: return Schema::Kind::Float;
-				case LuaFieldType::Int: return Schema::Kind::Int32;
-				case LuaFieldType::Bool: return Schema::Kind::Bool;
-				case LuaFieldType::String: return Schema::Kind::String;
-				default: return Schema::Kind::None;
-			}
-		}
 	}
 
 	const char* BehaviorLanguageName(BehaviorLanguage language)
@@ -189,18 +179,18 @@ namespace World
 		return desc;
 	}
 
-	BehaviorDesc BehaviorRegistry::MakeLuaDesc(const LuaScriptComponent& script)
+	BehaviorDesc BehaviorRegistry::MakeLuaDesc(const LuauScriptComponent& script)
 	{
 		BehaviorDesc desc;
-		desc.ModuleId = LuaModuleId(script.ScriptFilePath);
-		desc.DisplayName = script.ScriptFilePath;
+		desc.ModuleId = LuaModuleId(script.ScriptPath);
+		desc.DisplayName = script.ScriptPath;
 		desc.Language = BehaviorLanguage::Luau;
-		desc.Fields.reserve(script.CachedFields.size());
-		for (const auto& [name, field] : script.CachedFields)
+		desc.Fields.reserve(script.Properties.size());
+		for (const ScriptProperty& property : script.Properties)
 		{
-			const Schema::Kind kind = LuaFieldKind(field.Type);
-			if (kind == Schema::Kind::None) continue;
-			desc.Fields.push_back(BehaviorFieldDesc{ LuaFieldId(name), name, kind });
+			if (!ScriptProperties::IsPropertyKind(property.Type))
+				continue;
+			desc.Fields.push_back(BehaviorFieldDesc{ LuaFieldId(property.Name), property.Name, property.Type });
 		}
 		SortFields(desc.Fields);
 		desc.Lifecycle = kExistingFrontendSlots;
@@ -217,9 +207,9 @@ namespace World
 		return Register(MakeNativeDesc(type), error);
 	}
 
-	bool BehaviorRegistry::RegisterLua(const LuaScriptComponent& script, std::string* error)
+	bool BehaviorRegistry::RegisterLua(const LuauScriptComponent& script, std::string* error)
 	{
-		if (script.ScriptFilePath.empty())
+		if (script.ScriptPath.empty())
 		{
 			SetError(error, "lua behavior requires a non-empty script path");
 			return false;
@@ -233,7 +223,7 @@ namespace World
 		const entt::registry& registry = scene.GetRegistry();
 		if (!registry.valid(entity)) return result;
 
-		if (const NativeScriptComponent* native = registry.try_get<NativeScriptComponent>(entity))
+		if (const CppScriptComponent* native = registry.try_get<CppScriptComponent>(entity))
 		{
 			if (!native->ScriptName.empty())
 			{
@@ -249,11 +239,11 @@ namespace World
 			}
 		}
 
-		if (const LuaScriptComponent* lua = registry.try_get<LuaScriptComponent>(entity))
+		if (const LuauScriptComponent* lua = registry.try_get<LuauScriptComponent>(entity))
 		{
-			if (!lua->ScriptFilePath.empty())
+			if (!lua->ScriptPath.empty())
 			{
-				if (const BehaviorDesc* desc = Find(LuaModuleId(lua->ScriptFilePath)))
+				if (const BehaviorDesc* desc = Find(LuaModuleId(lua->ScriptPath)))
 					result.push_back(desc);
 			}
 		}

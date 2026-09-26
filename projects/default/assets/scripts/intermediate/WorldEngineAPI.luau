@@ -569,6 +569,10 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Thickness number
 ---@field Color vec4
 
+-- Component fields are exposed through Entity:GetComponent("CppScriptComponent"); there is no runtime global named CppScriptComponent.
+---@class CppScriptComponent
+---@field ScriptName string
+
 -- Component fields are exposed through Entity:GetComponent("DirectionalLightComponent"); there is no runtime global named DirectionalLightComponent.
 ---@class DirectionalLightComponent
 ---@field Color vec3
@@ -581,9 +585,9 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field Parent number
 ---@field InheritTransform boolean
 
--- Component fields are exposed through Entity:GetComponent("LuaScriptComponent"); there is no runtime global named LuaScriptComponent.
----@class LuaScriptComponent
----@field ScriptFilePath string
+-- Component fields are exposed through Entity:GetComponent("LuauScriptComponent"); there is no runtime global named LuauScriptComponent.
+---@class LuauScriptComponent
+---@field ScriptPath string
 
 -- Component fields are exposed through Entity:GetComponent("MeshCollider3DComponent"); there is no runtime global named MeshCollider3DComponent.
 ---@class MeshCollider3DComponent
@@ -597,10 +601,6 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@field MeshIndex number
 ---@field MeshPath string
 ---@field Primitive string
-
--- Component fields are exposed through Entity:GetComponent("NativeScriptComponent"); there is no runtime global named NativeScriptComponent.
----@class NativeScriptComponent
----@field ScriptName string
 
 -- Component fields are exposed through Entity:GetComponent("PointLightComponent"); there is no runtime global named PointLightComponent.
 ---@class PointLightComponent

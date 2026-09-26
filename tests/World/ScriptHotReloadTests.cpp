@@ -8,7 +8,7 @@
 //   5. 轮询监听:改内容恰好一次重载、不改零次、连续写 debounce 归并成一次;
 //   6. 拒绝语义:State ∈ {Creating, Destroying} 与回调内(非安全点)拒绝,帧边界可重载;
 //   7. generation:热重载后进入独立域(最高位置位),与 Scene 启动期分配值及上一次重载值都不同。
-//   8. 活字段迁移:OnUpdate 里 self.X = ... 的运行期值(活表)优先于 CachedFields,活表缺失才回退缓存;
+//   8. 活字段迁移:OnUpdate 里 self.X = ... 的运行期值(活表)优先于场景保存的属性值,活表缺失才回退属性表;
 //   9. 指纹基线:编辑器预览与运行期两条加载路径成功后 SourceFingerprint 与当前文件一致,不改文件零次重载。
 //
 // headless:真实 Scene 调度(OnScriptStart/OnScriptUpdate),脚本写在构建产物的临时目录里,
@@ -21,6 +21,7 @@
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptFileWatch.h"
+#include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptValue.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
@@ -115,7 +116,7 @@ namespace
 	// ---- 宿主探针:脚本通过它上报 OnUpdate 行为(注入必须发生在任何脚本编译之前)----
 
 	std::vector<std::string> g_ProbeCalls;
-	LuaScriptComponent* g_SafePointProbe = nullptr;
+	LuauScriptComponent* g_SafePointProbe = nullptr;
 	bool g_SafePointRejected = false;
 	std::string g_SafePointDiagnostic;
 
@@ -146,15 +147,14 @@ namespace
 		return static_cast<int>(std::count(g_ProbeCalls.begin(), g_ProbeCalls.end(), tag));
 	}
 
-	// 带行号的字段查表:缺失字段时报出具体行与字段名,而不是 STL 的通用 out_of_range 文本。
-	LuaScriptField& Field(std::unordered_map<std::string, LuaScriptField>& fields,
-		const char* name, int line)
+	// 带行号的属性查表:缺失属性时报出具体行与字段名,而不是 STL 的通用 out_of_range 文本。
+	ScriptProperty& Field(std::vector<ScriptProperty>& properties, const char* name, int line)
 	{
-		const auto found = fields.find(name);
-		if (found == fields.end())
+		ScriptProperty* found = ScriptProperties::Find(properties, name);
+		if (!found)
 			throw std::runtime_error(std::string("line ") + std::to_string(line) +
-				": script field '" + name + "' is missing");
-		return found->second;
+				": script property '" + name + "' is missing");
+		return *found;
 	}
 #define FIELD(fields, name) Field((fields), (name), __LINE__)
 
@@ -276,7 +276,7 @@ return {
 			"}\n";
 	}
 
-	// 活字段迁移:OnUpdate 里 self.X = ... 只写当前脚本表,注解默认值与 CachedFields 保持原样。
+	// 活字段迁移:OnUpdate 里 self.X = ... 只写当前脚本表,注解默认值与组件的属性表保持原样。
 	const char* const kLiveFieldV1 = R"LUA(---@field A integer
 ---@field B integer
 return {
@@ -326,7 +326,7 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "migration probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
 
 		// 编辑器预览路径先登记 v1 的行为描述(A,B 两个字段)。
 		CHECK(ScriptEngine::InitScriptForEditor(script));
@@ -335,9 +335,9 @@ return {
 		CHECK(before->Fields.size() == 2);
 
 		scene.OnScriptStart();
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(script.CachedFields.size() == 2);
-		const uint64_t sceneGeneration = script.Generation;
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.Properties.size() == 2);
+		const uint64_t sceneGeneration = script.Runtime.Generation;
 		CHECK(sceneGeneration != 0);
 		CHECK(sceneGeneration < (uint64_t(1) << 63));   // Scene 启动期分配的是小整数
 
@@ -345,12 +345,12 @@ return {
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCalled("update:v1"));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 
-		// 改 A:运行期赋值落在当前脚本表(W5a-2 起活表是首选迁移源);CachedFields 仍是注解默认值 1。
+		// 改 A:运行期赋值落在当前脚本表(W5a-2 起活表是首选迁移源);属性表仍是注解默认值 1。
 		const int tableRefBefore = script.ScriptTable.RefId();
 		CHECK(script.ScriptTable.SetField("A", ScriptValue::Number(41)));
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "A").Value) == 1);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "A").Value) == 1);
 
 		WriteScript(file, kMigrateV2);
 		const ScriptSourceFingerprint fingerprintV2 = FingerprintScriptSource(logical);
@@ -361,19 +361,19 @@ return {
 		CHECK(ScriptEngine::ReloadScript(script, &diagnostic));
 		CHECK(diagnostic.empty());                      // 新增字段取默认,不产生警告
 		CHECK(script.ReloadDiagnostic.empty());         // 成功路径清空诊断
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(script.IsLoaded);
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.ScriptTable.IsValid());
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(script.SourceFingerprint == fingerprintV2.Value);
 		CHECK(script.ScriptTable.RefId() != tableRefBefore);   // 整体交换:脚本表引用换了
 
 		// 字段迁移结果:A 保留实例值,B 保留,C 取新默认。
-		CHECK(script.CachedFields.size() == 3);
-		CHECK(FIELD(script.CachedFields, "A").Type == LuaFieldType::Int);
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "A").Value) == 41);
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "B").Value) == 2);
-		CHECK(FIELD(script.CachedFields, "C").Type == LuaFieldType::Int);
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "C").Value) == 30);
+		CHECK(script.Properties.size() == 3);
+		CHECK(FIELD(script.Properties, "A").Type == Schema::Kind::Int32);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "A").Value) == 41);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "B").Value) == 2);
+		CHECK(FIELD(script.Properties, "C").Type == Schema::Kind::Int32);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "C").Value) == 30);
 
 		// 行为描述已刷新(按 LuaFieldId 稳定 id 断言):3 个字段、按 id 升序、类型映射不变。
 		const BehaviorDesc* after = BehaviorRegistry::Instance().Find(BehaviorRegistry::LuaModuleId(logical));
@@ -399,18 +399,18 @@ return {
 		CHECK(ProbeCalled("A=41"));
 		CHECK(ProbeCalled("B=2"));
 		CHECK(ProbeCalled("C=30"));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 
 		// generation:重载后进入独立域(最高位置位),与 Scene 分配值和上一次重载值都不同。
-		const uint64_t firstReloadGeneration = script.Generation;
+		const uint64_t firstReloadGeneration = script.Runtime.Generation;
 		CHECK(firstReloadGeneration >= (uint64_t(1) << 63));
 		CHECK(firstReloadGeneration != sceneGeneration);
 		CHECK(ScriptEngine::ReloadScript(script, &diagnostic));   // 同内容再重载一次也允许
-		CHECK(script.Generation > firstReloadGeneration);
-		CHECK(script.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.Generation > firstReloadGeneration);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 
 		scene.OnRuntimeStop();
-		CHECK(script.State == ScriptInstanceState::Stopped);
+		CHECK(script.Runtime.State == ScriptInstanceState::Stopped);
 	}
 
 	// ---- 2. 类型变化 → 回新默认 + 诊断 ----
@@ -423,11 +423,11 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "type change probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // CachedFields 由脚本注解/默认值构建
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
+		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表由脚本注解/默认值构建
 		scene.OnScriptStart();
-		CHECK(script.State == ScriptInstanceState::Running);
-		std::any_cast<int&>(FIELD(script.CachedFields, "A").Value) = 7;
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		std::get<int32_t>(FIELD(script.Properties, "A").Value) = 7;
 
 		WriteScript(file, kTypeChangeV2);
 		std::string diagnostic;
@@ -437,17 +437,17 @@ return {
 		CHECK(diagnostic.find("type changed") != std::string::npos);
 		CHECK(diagnostic.find("id=" + FieldIdText("A")) != std::string::npos);
 		CHECK(script.ReloadDiagnostic.empty());   // 成功路径:ReloadDiagnostic 清空,警告走 diagnostics
-		CHECK(script.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 
-		CHECK(FIELD(script.CachedFields, "A").Type == LuaFieldType::String);
-		CHECK(std::any_cast<std::string>(FIELD(script.CachedFields, "A").Value) == "fresh");
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "B").Value) == 2);
+		CHECK(FIELD(script.Properties, "A").Type == Schema::Kind::String);
+		CHECK(std::get<std::string>(FIELD(script.Properties, "A").Value) == "fresh");
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "B").Value) == 2);
 
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCalled("update:type"));
 		CHECK(ProbeCalled("A=fresh"));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 
 		// 字段被删除(B 从新版本消失)→ 丢弃旧值 + 诊断。
 		WriteScript(file, kTypeChangeV3);
@@ -456,15 +456,15 @@ return {
 		CHECK(diagnostic.find("field 'B'") != std::string::npos);
 		CHECK(diagnostic.find("missing in the new script") != std::string::npos);
 		CHECK(diagnostic.find("id=" + FieldIdText("B")) != std::string::npos);
-		CHECK(script.CachedFields.size() == 1);
-		CHECK(FIELD(script.CachedFields, "A").Type == LuaFieldType::String);
+		CHECK(script.Properties.size() == 1);
+		CHECK(FIELD(script.Properties, "A").Type == Schema::Kind::String);
 		// 同名同类型 → 保留旧值("fresh"),新脚本里的 "again" 只是默认值。
-		CHECK(std::any_cast<std::string>(FIELD(script.CachedFields, "A").Value) == "fresh");
+		CHECK(std::get<std::string>(FIELD(script.Properties, "A").Value) == "fresh");
 
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCalled("update:type3"));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 
 		scene.OnRuntimeStop();
 	}
@@ -479,11 +479,11 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "rollback probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // CachedFields 由脚本注解/默认值构建
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
+		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表由脚本注解/默认值构建
 		scene.OnScriptStart();
-		CHECK(script.State == ScriptInstanceState::Running);
-		std::any_cast<int&>(FIELD(script.CachedFields, "A").Value) = 41;
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		std::get<int32_t>(FIELD(script.Properties, "A").Value) = 41;
 
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
@@ -492,7 +492,7 @@ return {
 		const int environmentRef = script.LuaEnv.RefId();
 		const int tableRef = script.ScriptTable.RefId();
 		const int updateRef = script.OnUpdateFunc.RefId();
-		const std::string lastError = script.LastError;
+		const std::string lastError = script.Runtime.LastError;
 
 		WriteScript(file, kRollbackBrokenV2);
 		std::string diagnostic;
@@ -503,21 +503,21 @@ return {
 		CHECK(script.ReloadDiagnostic == diagnostic);
 
 		// 失败语义:State 不被置 Faulted、旧引用与字段不动、LastError 不被污染。
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(script.IsLoaded);
-		CHECK(script.LastError.empty());
-		CHECK(script.LastError == lastError);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.ScriptTable.IsValid());
+		CHECK(script.Runtime.LastError.empty());
+		CHECK(script.Runtime.LastError == lastError);
 		CHECK(script.LuaEnv.RefId() == environmentRef);
 		CHECK(script.ScriptTable.RefId() == tableRef);
 		CHECK(script.OnUpdateFunc.RefId() == updateRef);
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "A").Value) == 41);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "A").Value) == 41);
 
 		// 下一帧仍然执行 v1 的行为。
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCount("update:rollback:v1") == 1);
 		CHECK(ProbeCount("update:rollback:v2") == 0);
-		CHECK(script.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 
 		// 修好之后同一实例可以继续重载(失败不粘滞)。
 		WriteScript(file, kRollbackFixedV2);
@@ -542,11 +542,11 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "watch probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // CachedFields 由脚本注解/默认值构建
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
+		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表由脚本注解/默认值构建
 		scene.OnScriptStart();
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "C").Value) == 1);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "C").Value) == 1);
 
 		ScriptFileWatch watch;
 		CHECK(watch.DebounceSeconds() == ScriptFileWatch::kDefaultDebounceSeconds);
@@ -583,7 +583,7 @@ return {
 		}
 		CHECK(reloads == 1);
 		// 同名同类型 → 实例值保留(这里 C 仍是初始的 1;版本变化体现在代码标记上)。
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "C").Value) == 1);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "C").Value) == 1);
 		CHECK(watch.Poll(0.5).empty());   // 恰好一次:没有重复报告
 		CHECK(reloads == 1);
 		g_ProbeCalls.clear();
@@ -608,14 +608,14 @@ return {
 		}
 		CHECK(changeCount == 1);
 		CHECK(reloads == 2);   // v2 一次 + v3/v4 归并一次
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "C").Value) == 1);   // 字段值继续保留
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "C").Value) == 1);   // 字段值继续保留
 		CHECK(script.SourceFingerprint == FingerprintScriptText(ReadText(file)));
 
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCalled("watch:v4"));      // 以最后一份内容为准
 		CHECK(!ProbeCalled("watch:v3"));     // 中间版本从未被加载
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 
 		watch.Unwatch(logical);
 		CHECK(watch.Size() == 0);
@@ -636,34 +636,34 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "safety probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // CachedFields 由脚本注解/默认值构建
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
+		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表由脚本注解/默认值构建
 		scene.OnScriptStart();
-		CHECK(script.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 
 		const int tableRef = script.ScriptTable.RefId();
 		std::string diagnostic;
 
 		// State=Creating → 拒绝,不动旧引用。
-		script.State = ScriptInstanceState::Creating;
+		script.Runtime.State = ScriptInstanceState::Creating;
 		CHECK(!ScriptEngine::ReloadScript(script, &diagnostic));
 		CHECK(diagnostic.find("Creating") != std::string::npos);
 		CHECK(script.ReloadDiagnostic == diagnostic);
 		CHECK(script.ScriptTable.RefId() == tableRef);
 
 		// State=Destroying → 拒绝,不动旧引用。
-		script.State = ScriptInstanceState::Destroying;
+		script.Runtime.State = ScriptInstanceState::Destroying;
 		diagnostic.clear();
 		CHECK(!ScriptEngine::ReloadScript(script, &diagnostic));
 		CHECK(diagnostic.find("Destroying") != std::string::npos);
 		CHECK(script.ScriptTable.RefId() == tableRef);
 
 		// 没有活动实例(Pending/Stopped/Faulted)→ 拒绝(没有可回滚的旧版本)。
-		script.State = ScriptInstanceState::Stopped;
+		script.Runtime.State = ScriptInstanceState::Stopped;
 		diagnostic.clear();
 		CHECK(!ScriptEngine::ReloadScript(script, &diagnostic));
 		CHECK(diagnostic.find("running script instance") != std::string::npos);
-		script.State = ScriptInstanceState::Running;
+		script.Runtime.State = ScriptInstanceState::Running;
 
 		// 回调内(OnUpdate 里通过探针调用)→ 非安全点,拒绝;回到帧边界后同样的重载成功。
 		WriteScript(file, kSafetyV2);
@@ -674,27 +674,27 @@ return {
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(g_SafePointRejected);
 		CHECK(g_SafePointDiagnostic.find("safe point") != std::string::npos);
-		CHECK(script.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 		CHECK(script.ReloadDiagnostic.find("safe point") != std::string::npos);
-		CHECK(script.CachedFields.size() == 1);   // 回调内的拒绝没有换掉任何东西
+		CHECK(script.Properties.size() == 1);   // 回调内的拒绝没有换掉任何东西
 
 		g_SafePointProbe = nullptr;
 		diagnostic.clear();
 		CHECK(ScriptEngine::ReloadScript(script, &diagnostic));
 		CHECK(script.ReloadDiagnostic.empty());
-		CHECK(script.CachedFields.size() == 2);
+		CHECK(script.Properties.size() == 2);
 
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCount("safe-check") == 1);     // 探针不再调用重载,只上报
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 
 		scene.OnRuntimeStop();
 	}
 
-	// ---- 6. 活字段迁移:活表优先,CachedFields 兜底 ----
+	// ---- 6. 活字段迁移:活表优先,场景保存的属性值兜底 ----
 
-	void LiveFieldsTakePriorityOverCachedFields()
+	void LiveFieldsTakePriorityOverSavedValues()
 	{
 		const fs::path file = ScriptPath("hotreload_live_fields.lua");
 		WriteScript(file, kLiveFieldV1);
@@ -702,14 +702,14 @@ return {
 
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "live field probe");
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(logical);
-		CHECK(ScriptEngine::InitScriptForEditor(script));   // CachedFields 初始为 {A=1,B=2}
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
+		CHECK(ScriptEngine::InitScriptForEditor(script));   // 属性表初始为 {A=1,B=2}
 		scene.OnScriptStart();
-		CHECK(script.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
 
 		// 缓存值与运行期值刻意不同:重载必须以活表为准。
-		std::any_cast<int&>(FIELD(script.CachedFields, "A").Value) = 7;
-		std::any_cast<int&>(FIELD(script.CachedFields, "B").Value) = 8;
+		std::get<int32_t>(FIELD(script.Properties, "A").Value) = 7;
+		std::get<int32_t>(FIELD(script.Properties, "B").Value) = 8;
 
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
@@ -719,9 +719,9 @@ return {
 		double liveA = 0.0;
 		CHECK(script.ScriptTable.GetField("A").AsNumber(&liveA));
 		CHECK(liveA == 123.0);
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "A").Value) == 7);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "A").Value) == 7);
 
-		// 当前表没有 B(运行期把它置 nil)→ B 只能回退 CachedFields(8),不是新默认 2。
+		// 当前表没有 B(运行期把它置 nil)→ B 只能回退属性表里的保存值(8),不是新默认 2。
 		CHECK(script.ScriptTable.SetField("B", ScriptValue::Nil()));
 		CHECK(!script.ScriptTable.HasField("B"));
 
@@ -729,30 +729,30 @@ return {
 		std::string diagnostic;
 		CHECK(ScriptEngine::ReloadScript(script, &diagnostic));
 		CHECK(diagnostic.empty());
-		CHECK(FIELD(script.CachedFields, "A").Type == LuaFieldType::Int);
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "A").Value) == 123);   // 活表优先
-		CHECK(FIELD(script.CachedFields, "B").Type == LuaFieldType::Int);
-		CHECK(std::any_cast<int>(FIELD(script.CachedFields, "B").Value) == 8);     // 活表缺失 → 缓存
+		CHECK(FIELD(script.Properties, "A").Type == Schema::Kind::Int32);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "A").Value) == 123);   // 活表优先
+		CHECK(FIELD(script.Properties, "B").Type == Schema::Kind::Int32);
+		CHECK(std::get<int32_t>(FIELD(script.Properties, "B").Value) == 8);     // 活表缺失 → 缓存
 
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCount("update:live:v2") == 1);
 		CHECK(ProbeCalled("A=123"));
 		CHECK(ProbeCalled("B=8"));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 		scene.OnRuntimeStop();
 
-		// 真实宿主不调用 InitScriptForEditor:CachedFields 为空,首次加载后的运行期赋值同样要能迁移。
+		// 真实宿主不调用 InitScriptForEditor:属性表为空,首次加载后的运行期赋值同样要能迁移。
 		const fs::path runtimeFile = ScriptPath("hotreload_live_runtime.lua");
 		WriteScript(runtimeFile, kLiveFieldV1);
 		const std::string runtimeLogical = LogicalPath(runtimeFile);
 
 		Scene runtimeScene(TestContext());
 		Entity runtimeEntity = Entity::CreateEntity(&runtimeScene, "runtime live probe");
-		LuaScriptComponent& runtimeScript = runtimeEntity.AddComponent<LuaScriptComponent>(runtimeLogical);
-		CHECK(runtimeScript.CachedFields.empty());
+		LuauScriptComponent& runtimeScript = runtimeEntity.AddComponent<LuauScriptComponent>(runtimeLogical);
+		CHECK(runtimeScript.Properties.empty());
 		runtimeScene.OnScriptStart();
-		CHECK(runtimeScript.State == ScriptInstanceState::Running);
+		CHECK(runtimeScript.Runtime.State == ScriptInstanceState::Running);
 		g_ProbeCalls.clear();
 		runtimeScene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCalled("update:live:v1"));
@@ -760,14 +760,80 @@ return {
 		WriteScript(runtimeFile, kLiveFieldV2);
 		diagnostic.clear();
 		CHECK(ScriptEngine::ReloadScript(runtimeScript, &diagnostic));
-		CHECK(std::any_cast<int>(FIELD(runtimeScript.CachedFields, "A").Value) == 123);
-		CHECK(std::any_cast<int>(FIELD(runtimeScript.CachedFields, "B").Value) == 456);
+		CHECK(std::get<int32_t>(FIELD(runtimeScript.Properties, "A").Value) == 123);
+		CHECK(std::get<int32_t>(FIELD(runtimeScript.Properties, "B").Value) == 456);
 		g_ProbeCalls.clear();
 		runtimeScene.OnScriptUpdate(Timestep(1.0f / 60.0f));
 		CHECK(ProbeCalled("A=123"));
 		CHECK(ProbeCalled("B=456"));
-		CHECK(runtimeScript.LastError.empty());
+		CHECK(runtimeScript.Runtime.LastError.empty());
 		runtimeScene.OnRuntimeStop();
+	}
+
+	// ---- 6b. 属性表:声明顺序 + 同名同类型保值 + 注解 → Schema::Kind 映射 ----
+
+	// 注解顺序(Gamma/Alpha/Beta/Flag/Odd)刻意与表项顺序不同:
+	//   * 属性表顺序 = 注解顺序(先声明先显示);
+	//   * integer→Int32、string→String、number→Float(值 2.5 非整数)、boolean→Bool;
+	//   * 未知注解类型(TypeThatIsNotBound)→ 跳过该字段 + 一条诊断(热重载 diagnostics)。
+	const char* const kPropertyOrderSource = R"LUA(---@field Gamma integer
+---@field Alpha string
+---@field Beta number
+---@field Flag boolean
+---@field Odd TypeThatIsNotBound
+return {
+    OnCreate = function(self) HotReloadProbe("create:order") end,
+    OnUpdate = function(self) HotReloadProbe("update:order") end,
+    Beta = 2.5,
+    Alpha = "first",
+    Gamma = 7,
+    Flag = true,
+    Odd = { 1, 2 },
+}
+)LUA";
+
+	void PropertiesFollowDeclarationOrderAndKeepValues()
+	{
+		const fs::path file = ScriptPath("hotreload_property_order.lua");
+		WriteScript(file, kPropertyOrderSource);
+		const std::string logical = LogicalPath(file);
+
+		Scene scene(TestContext());
+		Entity entity = Entity::CreateEntity(&scene, "property order probe");
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
+		CHECK(ScriptEngine::InitScriptForEditor(script));
+
+		CHECK(script.Properties.size() == 4);   // Odd 被跳过
+		CHECK(script.Properties[0].Name == "Gamma" && script.Properties[0].Type == Schema::Kind::Int32);
+		CHECK(script.Properties[1].Name == "Alpha" && script.Properties[1].Type == Schema::Kind::String);
+		CHECK(script.Properties[2].Name == "Beta" && script.Properties[2].Type == Schema::Kind::Float);
+		CHECK(script.Properties[3].Name == "Flag" && script.Properties[3].Type == Schema::Kind::Bool);
+		CHECK(std::get<int32_t>(script.Properties[0].Value) == 7);
+		CHECK(std::get<std::string>(script.Properties[1].Value) == "first");
+		CHECK(std::get<float>(script.Properties[2].Value) == 2.5f);
+		CHECK(std::get<bool>(script.Properties[3].Value) == true);
+
+		// 编辑器改值 → 重新预览(重开场景同一条路径)必须保值;顺序与类型不变。
+		std::get<std::string>(script.Properties[1].Value) = "edited";
+		CHECK(ScriptEngine::InitScriptForEditor(script));
+		CHECK(script.Properties.size() == 4);
+		CHECK(script.Properties[1].Name == "Alpha");
+		CHECK(std::get<std::string>(script.Properties[1].Value) == "edited");
+		CHECK(script.Properties[0].Name == "Gamma" && std::get<int32_t>(script.Properties[0].Value) == 7);
+
+		// 运行期同样按注解声明同步;未知注解类型在 diagnostics 里可见。
+		scene.OnScriptStart();
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		g_ProbeCalls.clear();
+		std::string diagnostic;
+		CHECK(ScriptEngine::ReloadScript(script, &diagnostic));
+		CHECK(diagnostic.find("field 'Odd'") != std::string::npos);
+		CHECK(diagnostic.find("unsupported type") != std::string::npos);
+		CHECK(std::get<std::string>(FIELD(script.Properties, "Alpha").Value) == "edited");
+		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCalled("update:order"));
+		CHECK(script.Runtime.LastError.empty());
+		scene.OnRuntimeStop();
 	}
 
 	// ---- 7. 指纹基线:两条加载路径 + 监听零假阳性 ----
@@ -785,7 +851,7 @@ return {
 		// 1) 编辑器预览路径:成功后写入当前文件指纹,并清掉遗留诊断。
 		Scene editorScene(TestContext());
 		Entity editorEntity = Entity::CreateEntity(&editorScene, "baseline preview");
-		LuaScriptComponent& preview = editorEntity.AddComponent<LuaScriptComponent>(logical);
+		LuauScriptComponent& preview = editorEntity.AddComponent<LuauScriptComponent>(logical);
 		preview.ReloadDiagnostic = "stale preview diagnostic";
 		CHECK(ScriptEngine::InitScriptForEditor(preview));
 		CHECK(preview.SourceFingerprint != 0);
@@ -796,10 +862,10 @@ return {
 		// 2) 运行期路径:不经过 InitScriptForEditor,OnCreateScript 成功后同样建立基线。
 		Scene runtimeScene(TestContext());
 		Entity runtimeEntity = Entity::CreateEntity(&runtimeScene, "baseline runtime");
-		LuaScriptComponent& runtime = runtimeEntity.AddComponent<LuaScriptComponent>(logical);
+		LuauScriptComponent& runtime = runtimeEntity.AddComponent<LuauScriptComponent>(logical);
 		runtime.ReloadDiagnostic = "stale runtime diagnostic";
 		runtimeScene.OnScriptStart();
-		CHECK(runtime.State == ScriptInstanceState::Running);
+		CHECK(runtime.Runtime.State == ScriptInstanceState::Running);
 		CHECK(runtime.SourceFingerprint != 0);
 		CHECK(runtime.SourceFingerprint == expected.Value);
 		CHECK(runtime.ReloadDiagnostic.empty());
@@ -821,7 +887,7 @@ return {
 		CHECK(reloads == 0);
 		CHECK(runtime.SourceFingerprint == FingerprintScriptSource(logical).Value);
 		CHECK(preview.SourceFingerprint == FingerprintScriptSource(logical).Value);
-		CHECK(runtime.LastError.empty());
+		CHECK(runtime.Runtime.LastError.empty());
 
 		runtimeScene.OnRuntimeStop();
 		editorScene.OnRuntimeStop();
@@ -848,7 +914,8 @@ int main()
 			{ "failed reload keeps the old version and its behaviour", FailedReloadKeepsOldVersion },
 			{ "watcher ignores same content and debounces consecutive writes", WatcherDebouncesAndIgnoresSameContent },
 			{ "unsafe states and in-callback reloads are rejected", RejectsUnsafeStatesAndCallbackReload },
-			{ "live script table wins field migration and cache is the fallback", LiveFieldsTakePriorityOverCachedFields },
+			{ "live script table wins field migration and saved values are the fallback", LiveFieldsTakePriorityOverSavedValues },
+			{ "properties follow declaration order and keep same-type values", PropertiesFollowDeclarationOrderAndKeepValues },
 			{ "both load paths establish the source fingerprint baseline", LoadPathsEstablishFingerprintBaseline },
 		};
 

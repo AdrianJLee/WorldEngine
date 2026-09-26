@@ -119,7 +119,7 @@ namespace
 		Entity entity = Entity::CreateEntity(&scene, "camera probe");
 		entity.AddComponent<TransformComponent>();
 		CameraComponent& camera = entity.AddComponent<CameraComponent>();
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(kCameraProbePath);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(kCameraProbePath);
 		CHECK(ScriptEngine::InitScriptForEditor(script));
 
 		// OnCreate 阶段:读默认投影字段 + 枚举名/数值两种写法(相机模式让 OnUpdate 保持安静)。
@@ -132,15 +132,15 @@ namespace
 				bindings.CreateFunction("TEST_ReportCameraProbe", &CaptureReport)));
 		}
 		scene.OnScriptStart();
-		CHECK(script.State == ScriptInstanceState::Running);
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(s_LastReport == "create-ok");
 		CHECK(camera.Camera.GetProjectionType() == SceneCamera::ProjectionType::Orthographic);
 
 		// OnUpdate 阶段:写投影/正交/FOV/裁剪面。
 		SetGlobal("TEST_CameraProbeMode", "write");
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(camera.Camera.GetProjectionType() == SceneCamera::ProjectionType::Perspective);
 		CHECK(std::abs(camera.Camera.GetPerspectiveFOV() - 60.0f) < kFloatTolerance);
 		CHECK(std::abs(camera.Camera.GetPerspectiveNearClip() - 0.25f) < kFloatTolerance);
@@ -155,18 +155,18 @@ namespace
 		// Transient 嵌套字段:可读不可写。
 		SetGlobal("TEST_CameraProbeMode", "write_transient");
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 
 		// 嵌套 Object 字段自身只读;未知嵌套字段报可读错误。
 		SetGlobal("TEST_CameraProbeMode", "write_object");
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 		SetGlobal("TEST_CameraProbeMode", "bad_field");
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 
 		scene.OnRuntimeStop();
-		CHECK(script.State == ScriptInstanceState::Stopped);
+		CHECK(script.Runtime.State == ScriptInstanceState::Stopped);
 
 		CHECK(ScriptEngine::GetState().ClearGlobal("TEST_ReportCameraProbe"));
 		CHECK(ScriptEngine::GetState().ClearGlobal("TEST_LuaPhase"));
@@ -180,7 +180,7 @@ namespace
 		Scene scene(TestContext());
 		Entity entity = Entity::CreateEntity(&scene, "runtime camera");
 		entity.AddComponent<TransformComponent>();
-		LuaScriptComponent& script = entity.AddComponent<LuaScriptComponent>(kCameraProbePath);
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(kCameraProbePath);
 		CHECK(ScriptEngine::InitScriptForEditor(script));
 		SetGlobal("TEST_CameraProbeMode", "none");
 
@@ -212,7 +212,7 @@ assert(camera.m_ProjectionType == 1)
 		CHECK(fixtureUpdate.IsValid());
 		script.OnUpdateFunc = action;
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
-		CHECK(script.LastError.empty());
+		CHECK(script.Runtime.LastError.empty());
 		CHECK(entity.HasComponent<CameraComponent>());
 		CHECK(std::abs(entity.GetComponent<CameraComponent>().Camera.GetOrthographicZoom() - 3.0f) < kFloatTolerance);
 		CHECK(entity.GetComponent<CameraComponent>().Camera.GetProjectionType() == SceneCamera::ProjectionType::Orthographic);

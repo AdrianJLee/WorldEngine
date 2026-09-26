@@ -1244,7 +1244,7 @@ namespace World
 		// 命令格式(字段全部扁平):
 		//   script.status [handle=<id>|name=<tag>|path=<逻辑脚本路径>]   只读状态(缺省=当前选中实体)
 		//   script.reload [handle=<id>|name=<tag>|path=<逻辑脚本路径>]   触发一次重载(缺省=当前选中实体)
-		// reload 与帧边界轮询、属性面板的 Reload 按钮共用 EditorLayer::ReloadLuaScriptComponent:
+		// reload 与帧边界轮询、属性面板的 Reload 按钮共用 EditorLayer::ReloadLuauScriptComponent:
 		// Running 实例走 ScriptEngine::ReloadScript(失败保留旧版本),Faulted/未加载的实例复位成
 		// Pending 交给 Scene 在下一帧重建。单个实例重载失败(语法错误等)不算命令失败:结果 JSON
 		// 带着 state/lastError/reloadDiagnostic 供脚本断言。
@@ -1274,9 +1274,9 @@ namespace World
 					error = "entity not found: handle=" + arg("handle");
 					return false;
 				}
-				if (!registry.all_of<LuaScriptComponent>(handle))
+				if (!registry.all_of<LuauScriptComponent>(handle))
 				{
-					error = "entity has no LuaScriptComponent: handle=" + arg("handle");
+					error = "entity has no LuauScriptComponent: handle=" + arg("handle");
 					return false;
 				}
 				targets.push_back(handle);
@@ -1285,18 +1285,18 @@ namespace World
 			{
 				for (const entt::entity handle : registry.view<TagComponent>())
 					if (registry.get<TagComponent>(handle).Tag == arg("name") &&
-						registry.all_of<LuaScriptComponent>(handle))
+						registry.all_of<LuauScriptComponent>(handle))
 						targets.push_back(handle);
 				if (targets.empty())
 				{
-					error = "no entity with a LuaScriptComponent named '" + arg("name") + "'";
+					error = "no entity with a LuauScriptComponent named '" + arg("name") + "'";
 					return false;
 				}
 			}
 			else if (!arg("path").empty())
 			{
-				for (const entt::entity handle : registry.view<LuaScriptComponent>())
-					if (registry.get<LuaScriptComponent>(handle).ScriptFilePath == arg("path"))
+				for (const entt::entity handle : registry.view<LuauScriptComponent>())
+					if (registry.get<LuauScriptComponent>(handle).ScriptPath == arg("path"))
 						targets.push_back(handle);
 				if (targets.empty())
 				{
@@ -1312,9 +1312,9 @@ namespace World
 					return false;
 				}
 				const entt::entity handle = static_cast<entt::entity>(m_SelectedEntity);
-				if (!registry.all_of<LuaScriptComponent>(handle))
+				if (!registry.all_of<LuauScriptComponent>(handle))
 				{
-					error = "selected entity has no LuaScriptComponent; pass handle=/name=/path=";
+					error = "selected entity has no LuauScriptComponent; pass handle=/name=/path=";
 					return false;
 				}
 				targets.push_back(handle);
@@ -1331,8 +1331,8 @@ namespace World
 			{
 				const entt::entity handle = targets[index];
 				Entity entity(m_ActiveScene.get(), handle);
-				auto* script = static_cast<LuaScriptComponent*>(
-					entity.GetComponent(entt::type_id<LuaScriptComponent>().hash()));
+				auto* script = static_cast<LuauScriptComponent*>(
+					entity.GetComponent(entt::type_id<LuauScriptComponent>().hash()));
 				if (index)
 					out << ",";
 				if (!script)
@@ -1345,7 +1345,7 @@ namespace World
 				std::string message;
 				bool ok = true;
 				if (reload)
-					ok = EditorLayer::ReloadLuaScriptComponent(*script, m_ActiveScene.get(), &message);
+					ok = EditorLayer::ReloadLuauScriptComponent(*script, m_ActiveScene.get(), &message);
 				if (ok)
 					++succeeded;
 				else
@@ -1354,12 +1354,15 @@ namespace World
 					<< ",\"ok\":" << (ok ? "true" : "false")
 					<< ",\"name\":\"" << JsonEscape(
 						registry.all_of<TagComponent>(handle) ? registry.get<TagComponent>(handle).Tag : std::string())
-					<< "\",\"path\":\"" << JsonEscape(script->ScriptFilePath)
-					<< "\",\"state\":\"" << ScriptStateLabel(script->State)
-					<< "\",\"loaded\":" << (script->IsLoaded ? "true" : "false")
-					<< ",\"generation\":" << script->Generation
+					<< "\",\"path\":\"" << JsonEscape(script->ScriptPath)
+					// 2026-09-26 组件重写:运行态收进 Runtime;`loaded` 字段名保留,
+					// 值 = State==Running(旧的双轨加载标记已删除,语义等价)。
+					<< "\",\"state\":\"" << ScriptStateLabel(script->Runtime.State)
+					<< "\",\"loaded\":" << (script->Runtime.State == ScriptInstanceState::Running
+						? "true" : "false")
+					<< ",\"generation\":" << script->Runtime.Generation
 					<< ",\"reloadDiagnostic\":\"" << JsonEscape(script->ReloadDiagnostic)
-					<< "\",\"lastError\":\"" << JsonEscape(script->LastError)
+					<< "\",\"lastError\":\"" << JsonEscape(script->Runtime.LastError)
 					<< "\",\"message\":\"" << JsonEscape(message) << "\"}";
 			}
 			out << "],\"succeeded\":" << succeeded << ",\"failed\":" << failed << "}";

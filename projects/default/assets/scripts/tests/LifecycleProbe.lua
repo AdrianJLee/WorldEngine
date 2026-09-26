@@ -20,8 +20,8 @@ function LifecycleProbe:OnUpdate(dt)
         self.entity:Destroy()
         self.entity:Destroy()
     elseif self.Mode == "remove" then
-        self.entity:RemoveComponent("LuaScriptComponent")
-        self.entity:RemoveComponent("LuaScriptComponent")
+        self.entity:RemoveComponent("LuauScriptComponent")
+        self.entity:RemoveComponent("LuauScriptComponent")
     elseif self.Mode == "add" and self.LocalUpdates == 1 then
         self.entity:AddComponent("TransformComponent")
     end

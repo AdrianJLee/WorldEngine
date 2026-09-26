@@ -3,22 +3,21 @@
 
 namespace World
 {
-	NativeScriptComponent CloneComponentConfiguration(const NativeScriptComponent& source)
+	// 2026-09-26 重写:组件只带"配置"(脚本引用 + 属性表 + 源指纹);运行态(状态机 / 实例 /
+	// 环境 / 回调)一律不克隆 —— 预制体与克隆体各自从 Pending 起跑。
+	CppScriptComponent CloneComponentConfiguration(const CppScriptComponent& source)
 	{
-		NativeScriptComponent copy;
+		CppScriptComponent copy;
 		copy.ScriptName = source.ScriptName;
-		copy.FieldValues = source.FieldValues;
-		copy.InstantiateScript = source.InstantiateScript;
-		copy.DestroyScript = source.DestroyScript;
+		copy.Properties = source.Properties;
 		return copy;
 	}
 
-	LuaScriptComponent CloneComponentConfiguration(const LuaScriptComponent& source)
+	LuauScriptComponent CloneComponentConfiguration(const LuauScriptComponent& source)
 	{
-		LuaScriptComponent copy;
-		copy.ScriptFilePath = source.ScriptFilePath;
-		copy.CachedFields = source.CachedFields;
-		copy.LastModifiedTime = source.LastModifiedTime;
+		LuauScriptComponent copy;
+		copy.ScriptPath = source.ScriptPath;
+		copy.Properties = source.Properties;
 		copy.SourceFingerprint = source.SourceFingerprint;
 		return copy;
 	}
@@ -31,58 +30,4 @@ namespace World
 		return copy;
 	}
 
-	ScriptableEntity* NativeScriptComponent::GetOrCreateEditorInstance(bool allowCreate, bool& outOwned)
-	{
-		outOwned = false;
-		if (Instance)
-			return Instance;
-		if (allowCreate && isFirstDraw && InstantiateScript)
-		{
-			ScriptableEntity* preview = InstantiateScript();
-			if (preview)
-			{
-				outOwned = true;
-				isFirstDraw = false;
-				return preview;
-			}
-		}
-		return nullptr;
-	}
-
-	void NativeScriptComponent::ReleaseEditorInstance(ScriptableEntity* preview)
-	{
-		if (!preview || preview == Instance || !DestroyScript)
-			return;
-		DestroyScript(preview);
-	}
-
-	void NativeScriptComponent::ResetEditorFieldState()
-	{
-		FieldValues.clear();
-		isFirstDraw = true;
-	}
-
-	Schema::Value NativeScriptComponent::GetErasedFieldValue(const Schema::TypeSchema&, const Schema::FieldSchema& field, ScriptableEntity* instance)
-	{
-		if (instance)
-		{
-			Schema::Value value = field.Get(instance);
-			FieldValues[field.Name] = value;
-			return value;
-		}
-
-		auto it = FieldValues.find(field.Name);
-		if (it != FieldValues.end())
-			return it->second;
-		FieldValues[field.Name] = field.Default;
-		return field.Default;
-	}
-
-	void NativeScriptComponent::SetErasedFieldValue(const Schema::TypeSchema&, const Schema::FieldSchema& field, ScriptableEntity* instance, const Schema::Value& value)
-	{
-		if (instance)
-			field.Set(instance, value);
-		else
-			FieldValues[field.Name] = value;
-	}
 }

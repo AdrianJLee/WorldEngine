@@ -15,6 +15,11 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+namespace World
+{
+	class ScriptableEntity;   // ScriptBinding 的工厂签名只需要前置声明
+}
+
 namespace World::Schema
 {
 	constexpr uint32_t WE_SCHEMA_ABI_VERSION = 1;
@@ -152,10 +157,15 @@ namespace World::Schema
 		void (*CopyAll)(void* dstRegistry, void* srcRegistry, const void* entityMap) = nullptr;
 	};
 
-	// 原生脚本绑定:桥接文件把 void* 转换回 NativeScriptComponent&。
+	// 脚本工厂绑定(2026-09-26 重写):schema 里 Category==Script 的类型 = 一个工厂,
+	// 由桥接文件生成(见 ComponentSchemaBridge.h 的 MakeScriptBinding<T>())。
+	//
+	// 旧口径是 `Bind(void* nativeScript)`,把函数指针写进 CppScriptComponent —— 那让"组件数据"
+	// 与"只能由 C++ 现场填的绑定"混在一起。现在组件只存 ScriptName,实例化时按名字查这里的工厂。
 	struct ScriptBinding
 	{
-		void (*Bind)(void* nativeScript) = nullptr;
+		ScriptableEntity* (*Create)() = nullptr;
+		void (*Destroy)(ScriptableEntity*) = nullptr;
 	};
 
 	// schema-compiler 在模块生成 TU 中显式特化这两个模板;头文件只通过

@@ -21,10 +21,21 @@ namespace World
 			return { view.begin(), view.end() };
 		}
 
-		std::string NativeError(const NativeScriptComponent& script, entt::entity entity, const char* phase, const char* error)
+		std::string NativeError(const CppScriptComponent& script, entt::entity entity, const char* phase, const char* error)
 		{
 			return "[Native] " + script.ScriptName + " entity=" + std::to_string(static_cast<uint32_t>(entity)) +
 				" phase=" + phase + ": " + error;
+		}
+
+		// 脚本属性按名字找 schema 字段(大小写敏感;不含嵌套/非叶类型)。
+		const Schema::FieldSchema* FindSchemaField(const Schema::TypeSchema& type, const std::string& name)
+		{
+			for (const Schema::FieldSchema& field : type.Fields)
+			{
+				if (field.Name == name)
+					return &field;
+			}
+			return nullptr;
 		}
 
 		void Report(const std::string& error)
@@ -325,15 +336,15 @@ namespace World
 		if (source.EntityHandle == entt::null) return true;
 		if (!m_Registry.valid(source.EntityHandle) || IsPendingDestroy(source.EntityHandle) ||
 			IsPendingRemoval(source.EntityHandle, source.Component)) return false;
-		if (source.Component == entt::type_id<NativeScriptComponent>().hash())
+		if (source.Component == entt::type_id<CppScriptComponent>().hash())
 		{
-			auto* script = m_Registry.try_get<NativeScriptComponent>(source.EntityHandle);
-			return script && script->Generation == source.Generation && script->State == ScriptInstanceState::Running;
+			auto* script = m_Registry.try_get<CppScriptComponent>(source.EntityHandle);
+			return script && script->Runtime.Generation == source.Generation && script->Runtime.State == ScriptInstanceState::Running;
 		}
-		if (source.Component == entt::type_id<LuaScriptComponent>().hash())
+		if (source.Component == entt::type_id<LuauScriptComponent>().hash())
 		{
-			auto* script = m_Registry.try_get<LuaScriptComponent>(source.EntityHandle);
-			return script && script->Generation == source.Generation && script->State == ScriptInstanceState::Running;
+			auto* script = m_Registry.try_get<LuauScriptComponent>(source.EntityHandle);
+			return script && script->Runtime.Generation == source.Generation && script->Runtime.State == ScriptInstanceState::Running;
 		}
 		return false;
 	}
@@ -432,34 +443,34 @@ namespace World
 		std::string scriptName;
 		if (m_Registry.valid(source.EntityHandle))
 		{
-			if (source.Component == entt::type_id<NativeScriptComponent>().hash())
+			if (source.Component == entt::type_id<CppScriptComponent>().hash())
 			{
-				if (auto* script = m_Registry.try_get<NativeScriptComponent>(source.EntityHandle)) scriptName = script->ScriptName;
+				if (auto* script = m_Registry.try_get<CppScriptComponent>(source.EntityHandle)) scriptName = script->ScriptName;
 			}
-			else if (source.Component == entt::type_id<LuaScriptComponent>().hash())
+			else if (source.Component == entt::type_id<LuauScriptComponent>().hash())
 			{
-				if (auto* script = m_Registry.try_get<LuaScriptComponent>(source.EntityHandle)) scriptName = script->ScriptFilePath;
+				if (auto* script = m_Registry.try_get<LuauScriptComponent>(source.EntityHandle)) scriptName = script->ScriptPath;
 			}
 		}
 		const std::string message = "[Scene] " + scriptName + " entity=" + std::to_string(static_cast<uint32_t>(source.EntityHandle)) +
 			" phase=StructuralChange: " + error;
 		Report(message);
 		if (!m_Registry.valid(source.EntityHandle)) return;
-		if (source.Component == entt::type_id<NativeScriptComponent>().hash())
+		if (source.Component == entt::type_id<CppScriptComponent>().hash())
 		{
-			auto* script = m_Registry.try_get<NativeScriptComponent>(source.EntityHandle);
-			if (script && script->Generation == source.Generation)
+			auto* script = m_Registry.try_get<CppScriptComponent>(source.EntityHandle);
+			if (script && script->Runtime.Generation == source.Generation)
 			{
-				script->LastError = message;
+				script->Runtime.LastError = message;
 				DestroyNativeScript(source.EntityHandle, true);
 			}
 		}
-		else if (source.Component == entt::type_id<LuaScriptComponent>().hash())
+		else if (source.Component == entt::type_id<LuauScriptComponent>().hash())
 		{
-			auto* script = m_Registry.try_get<LuaScriptComponent>(source.EntityHandle);
-			if (script && script->Generation == source.Generation)
+			auto* script = m_Registry.try_get<LuauScriptComponent>(source.EntityHandle);
+			if (script && script->Runtime.Generation == source.Generation)
 			{
-				script->LastError = message;
+				script->Runtime.LastError = message;
 				DestroyLuaScript(source.EntityHandle, true);
 			}
 		}
@@ -467,94 +478,96 @@ namespace World
 
 	void Scene::StartPendingScripts()
 	{
-		for (const auto entity : Snapshot<NativeScriptComponent>(m_Registry))
+		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
 		{
 			if (m_StopRequested) break;
-			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<NativeScriptComponent>().hash())) continue;
-			auto& script = m_Registry.get<NativeScriptComponent>(entity);
-			if (script.State != ScriptInstanceState::Pending) continue;
-			script.Generation = ++m_NextGeneration;
-			script.State = ScriptInstanceState::Creating;
-			script.LastError.clear();
-			const ScriptSource source{ entity, entt::type_id<NativeScriptComponent>().hash(), script.Generation };
+			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<CppScriptComponent>().hash())) continue;
+			auto& script = m_Registry.get<CppScriptComponent>(entity);
+			if (script.Runtime.State != ScriptInstanceState::Pending) continue;
+			script.Runtime.Generation = ++m_NextGeneration;
+			script.Runtime.State = ScriptInstanceState::Creating;
+			script.Runtime.LastError.clear();
+			const ScriptSource source{ entity, entt::type_id<CppScriptComponent>().hash(), script.Runtime.Generation };
 			try
 			{
 				InvokeCallback(source, [&] {
 					const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script.ScriptName) : nullptr;
-					if (!script.InstantiateScript && type && type->Script)
-						type->Script->Bind(static_cast<void*>(&script));
-					if (!script.InstantiateScript && script.ScriptName.empty()) { script.State = ScriptInstanceState::Stopped; return; }
-					if (!script.InstantiateScript || !script.DestroyScript) throw std::logic_error("Native script requires paired instantiate/destroy functions");
-					script.Instance = script.InstantiateScript();
+					// 2026-09-26 重写:实例化只认 schema 的脚本绑定(工厂)—— 组件不再持函数指针,
+					// 所以"从 YAML 读出来的组件"和"C++ 现场建的组件"走**同一条**创建路径。
+					if (script.ScriptName.empty()) { script.Runtime.State = ScriptInstanceState::Stopped; return; }
+					if (!type || type->Category != Schema::TypeCategory::Script || !type->Script ||
+						!type->Script->Create || !type->Script->Destroy)
+						throw std::logic_error("C++ script is not registered: " + script.ScriptName);
+					script.Instance = type->Script->Create();
 					if (!script.Instance) throw std::runtime_error("Native script factory returned null");
 					script.Instance->m_Entity = Entity(this, entity);
-					if (type)
+					// 属性表 → 实例。缺项保留脚本自己的构造默认值(与 schema 注解默认值同源)。
+					for (const ScriptProperty& property : script.Properties)
 					{
-						for (const Schema::FieldSchema& field : type->Fields)
-						{
-							const auto it = script.FieldValues.find(field.Name);
-							if (it != script.FieldValues.end())
-								field.Set(dynamic_cast<void*>(script.Instance), it->second);
-						}
+						const Schema::FieldSchema* field = FindSchemaField(*type, property.Name);
+						if (!field || !field->Set || field->K != property.Type)
+							continue;
+						field->Set(dynamic_cast<void*>(script.Instance), property.Value);
 					}
-					script.CreateEntered = true;
+					script.Runtime.CreateEntered = true;
 					script.Instance->OnCreate();
-					script.State = ScriptInstanceState::Running;
+					script.Runtime.State = ScriptInstanceState::Running;
 				});
 			}
-			catch (const std::exception& error) { script.LastError = NativeError(script, entity, "OnCreate", error.what()); Report(script.LastError); DestroyNativeScript(entity, true); }
-			catch (...) { script.LastError = NativeError(script, entity, "OnCreate", "Unknown exception"); Report(script.LastError); DestroyNativeScript(entity, true); }
+			catch (const std::exception& error) { script.Runtime.LastError = NativeError(script, entity, "OnCreate", error.what()); Report(script.Runtime.LastError); DestroyNativeScript(entity, true); }
+			catch (...) { script.Runtime.LastError = NativeError(script, entity, "OnCreate", "Unknown exception"); Report(script.Runtime.LastError); DestroyNativeScript(entity, true); }
 		}
-		for (const auto entity : Snapshot<LuaScriptComponent>(m_Registry))
+		for (const auto entity : Snapshot<LuauScriptComponent>(m_Registry))
 		{
 			if (m_StopRequested) break;
-			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<LuaScriptComponent>().hash())) continue;
-			auto& script = m_Registry.get<LuaScriptComponent>(entity);
-			if (script.State != ScriptInstanceState::Pending) continue;
-			script.Generation = ++m_NextGeneration;
-			const ScriptSource source{ entity, entt::type_id<LuaScriptComponent>().hash(), script.Generation };
+			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<LuauScriptComponent>().hash())) continue;
+			auto& script = m_Registry.get<LuauScriptComponent>(entity);
+			if (script.Runtime.State != ScriptInstanceState::Pending) continue;
+			script.Runtime.Generation = ++m_NextGeneration;
+			const ScriptSource source{ entity, entt::type_id<LuauScriptComponent>().hash(), script.Runtime.Generation };
 			try { InvokeCallback(source, [&] { ScriptEngine::OnCreateScript(script, Entity(this, entity)); }); }
-			catch (const std::exception& error) { script.LastError = error.what(); script.State = ScriptInstanceState::Faulted; Report(script.LastError); }
-			catch (...) { script.LastError = "Unknown Lua creation exception"; script.State = ScriptInstanceState::Faulted; Report(script.LastError); }
-			if (script.State == ScriptInstanceState::Faulted) DestroyLuaScript(entity, true);
+			catch (const std::exception& error) { script.Runtime.LastError = error.what(); script.Runtime.State = ScriptInstanceState::Faulted; Report(script.Runtime.LastError); }
+			catch (...) { script.Runtime.LastError = "Unknown Lua creation exception"; script.Runtime.State = ScriptInstanceState::Faulted; Report(script.Runtime.LastError); }
+			if (script.Runtime.State == ScriptInstanceState::Faulted) DestroyLuaScript(entity, true);
 		}
 	}
 
 	void Scene::DestroyNativeScript(entt::entity entity, bool faulted)
 	{
-		auto* script = m_Registry.try_get<NativeScriptComponent>(entity);
-		if (!script || script->State == ScriptInstanceState::Destroying) return;
-		faulted = faulted || script->State == ScriptInstanceState::Faulted;
-		script->State = ScriptInstanceState::Destroying;
-		const ScriptSource source{ entity, entt::type_id<NativeScriptComponent>().hash(), script->Generation, true };
+		auto* script = m_Registry.try_get<CppScriptComponent>(entity);
+		if (!script || script->Runtime.State == ScriptInstanceState::Destroying) return;
+		faulted = faulted || script->Runtime.State == ScriptInstanceState::Faulted;
+		script->Runtime.State = ScriptInstanceState::Destroying;
+		const ScriptSource source{ entity, entt::type_id<CppScriptComponent>().hash(), script->Runtime.Generation, true };
 		try
 		{
-			if (script->Instance && script->CreateEntered)
+			if (script->Instance && script->Runtime.CreateEntered)
 			{
-				script->CreateEntered = false;
+				script->Runtime.CreateEntered = false;
 				InvokeCallback(source, [&] { script->Instance->OnDestroy(); });
 			}
 		}
-		catch (const std::exception& error) { script->LastError += "\n" + NativeError(*script, entity, "OnDestroy", error.what()); Report(script->LastError); faulted = true; }
-		catch (...) { script->LastError += "\n" + NativeError(*script, entity, "OnDestroy", "Unknown exception"); Report(script->LastError); faulted = true; }
+		catch (const std::exception& error) { script->Runtime.LastError += "\n" + NativeError(*script, entity, "OnDestroy", error.what()); Report(script->Runtime.LastError); faulted = true; }
+		catch (...) { script->Runtime.LastError += "\n" + NativeError(*script, entity, "OnDestroy", "Unknown exception"); Report(script->Runtime.LastError); faulted = true; }
 		try
 		{
-			if (script->Instance && script->DestroyScript)
-				InvokeCallback(source, [&] { script->DestroyScript(script->Instance); });
+			const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script->ScriptName) : nullptr;
+			if (script->Instance && type && type->Script && type->Script->Destroy)
+				InvokeCallback(source, [&] { type->Script->Destroy(script->Instance); });
 		}
-		catch (const std::exception& error) { script->LastError += "\n" + NativeError(*script, entity, "Release", error.what()); Report(script->LastError); faulted = true; }
+		catch (const std::exception& error) { script->Runtime.LastError += "\n" + NativeError(*script, entity, "Release", error.what()); Report(script->Runtime.LastError); faulted = true; }
 		catch (...) { Report("Native script release threw an unknown exception"); faulted = true; }
 		script->Instance = nullptr;
-		script->CreateEntered = false;
-		script->State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
+		script->Runtime.CreateEntered = false;
+		script->Runtime.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
 	}
 
 	void Scene::DestroyLuaScript(entt::entity entity, bool faulted)
 	{
-		auto* script = m_Registry.try_get<LuaScriptComponent>(entity);
-		if (!script || script->State == ScriptInstanceState::Destroying) return;
-		if (faulted) script->State = ScriptInstanceState::Faulted;
-		const ScriptSource source{ entity, entt::type_id<LuaScriptComponent>().hash(), script->Generation, true };
+		auto* script = m_Registry.try_get<LuauScriptComponent>(entity);
+		if (!script || script->Runtime.State == ScriptInstanceState::Destroying) return;
+		if (faulted) script->Runtime.State = ScriptInstanceState::Faulted;
+		const ScriptSource source{ entity, entt::type_id<LuauScriptComponent>().hash(), script->Runtime.Generation, true };
 		InvokeCallback(source, [&] { ScriptEngine::OnDestroyScript(*script); });
 	}
 
@@ -661,8 +674,8 @@ namespace World
 			std::string reason;
 			if (target.HasComponent(component) && target.CanRemoveComponent(component, &reason))
 			{
-				if (component == entt::type_id<NativeScriptComponent>().hash()) DestroyNativeScript(entity);
-				else if (component == entt::type_id<LuaScriptComponent>().hash()) DestroyLuaScript(entity);
+				if (component == entt::type_id<CppScriptComponent>().hash()) DestroyNativeScript(entity);
+				else if (component == entt::type_id<LuauScriptComponent>().hash()) DestroyLuaScript(entity);
 				else if (component == entt::type_id<RigidBody2DComponent>().hash()) DestroyPhysicsBody(entity);
 				else if (component == entt::type_id<RigidBody3DComponent>().hash()) { if (m_Physics3D) m_Physics3D->DestroyBody(entity); }
 				if (auto* storage = m_Registry.storage(component)) storage->remove(entity);
@@ -726,17 +739,17 @@ namespace World
 		if (m_CallbackDepth || m_Committing) throw std::logic_error("Scene cannot start inside a callback or structural command");
 		m_State = SceneState::Starting;
 		m_StopRequested = false;
-		for (const auto entity : Snapshot<NativeScriptComponent>(m_Registry))
+		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
 		{
-			auto& script = m_Registry.get<NativeScriptComponent>(entity);
-			script.State = ScriptInstanceState::Pending;
-			script.LastError.clear();
+			auto& script = m_Registry.get<CppScriptComponent>(entity);
+			script.Runtime.State = ScriptInstanceState::Pending;
+			script.Runtime.LastError.clear();
 		}
-		for (const auto entity : Snapshot<LuaScriptComponent>(m_Registry))
+		for (const auto entity : Snapshot<LuauScriptComponent>(m_Registry))
 		{
-			auto& script = m_Registry.get<LuaScriptComponent>(entity);
-			script.State = ScriptInstanceState::Pending;
-			script.LastError.clear();
+			auto& script = m_Registry.get<LuauScriptComponent>(entity);
+			script.Runtime.State = ScriptInstanceState::Pending;
+			script.Runtime.LastError.clear();
 		}
 		StartPendingScripts();
 		if (m_StopRequested) StopScene();
@@ -752,10 +765,10 @@ namespace World
 		if (!IsRunning()) return;
 		// Only instances already running at this update boundary may receive OnUpdate.
 		std::vector<entt::entity> native, lua;
-		for (const auto entity : Snapshot<NativeScriptComponent>(m_Registry))
-			if (m_Registry.get<NativeScriptComponent>(entity).State == ScriptInstanceState::Running) native.push_back(entity);
-		for (const auto entity : Snapshot<LuaScriptComponent>(m_Registry))
-			if (m_Registry.get<LuaScriptComponent>(entity).State == ScriptInstanceState::Running) lua.push_back(entity);
+		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
+			if (m_Registry.get<CppScriptComponent>(entity).Runtime.State == ScriptInstanceState::Running) native.push_back(entity);
+		for (const auto entity : Snapshot<LuauScriptComponent>(m_Registry))
+			if (m_Registry.get<LuauScriptComponent>(entity).Runtime.State == ScriptInstanceState::Running) lua.push_back(entity);
 		StartPendingScripts();
 		if (m_StopRequested) { StopScene(); return; }
 		OnUpdatePhysics2D(ts);
@@ -799,25 +812,25 @@ namespace World
 		for (const auto entity : native)
 		{
 			if (m_StopRequested) break;
-			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<NativeScriptComponent>().hash())) continue;
-			auto* script = m_Registry.try_get<NativeScriptComponent>(entity);
-			if (!script || script->State != ScriptInstanceState::Running || !script->Instance) continue;
-			const ScriptSource source{ entity, entt::type_id<NativeScriptComponent>().hash(), script->Generation };
+			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<CppScriptComponent>().hash())) continue;
+			auto* script = m_Registry.try_get<CppScriptComponent>(entity);
+			if (!script || script->Runtime.State != ScriptInstanceState::Running || !script->Instance) continue;
+			const ScriptSource source{ entity, entt::type_id<CppScriptComponent>().hash(), script->Runtime.Generation };
 			try { InvokeCallback(source, [&] { script->Instance->OnUpdate(ts); }); }
-			catch (const std::exception& error) { script->LastError = NativeError(*script, entity, "OnUpdate", error.what()); Report(script->LastError); DestroyNativeScript(entity, true); }
-			catch (...) { script->LastError = NativeError(*script, entity, "OnUpdate", "Unknown exception"); Report(script->LastError); DestroyNativeScript(entity, true); }
+			catch (const std::exception& error) { script->Runtime.LastError = NativeError(*script, entity, "OnUpdate", error.what()); Report(script->Runtime.LastError); DestroyNativeScript(entity, true); }
+			catch (...) { script->Runtime.LastError = NativeError(*script, entity, "OnUpdate", "Unknown exception"); Report(script->Runtime.LastError); DestroyNativeScript(entity, true); }
 		}
 		for (const auto entity : lua)
 		{
 			if (m_StopRequested) break;
-			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<LuaScriptComponent>().hash())) continue;
-			auto* script = m_Registry.try_get<LuaScriptComponent>(entity);
-			if (!script || script->State != ScriptInstanceState::Running) continue;
-			const ScriptSource source{ entity, entt::type_id<LuaScriptComponent>().hash(), script->Generation };
+			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<LuauScriptComponent>().hash())) continue;
+			auto* script = m_Registry.try_get<LuauScriptComponent>(entity);
+			if (!script || script->Runtime.State != ScriptInstanceState::Running) continue;
+			const ScriptSource source{ entity, entt::type_id<LuauScriptComponent>().hash(), script->Runtime.Generation };
 			try { InvokeCallback(source, [&] { ScriptEngine::OnUpdateScript(*script, ts); }); }
-			catch (const std::exception& error) { script->LastError = error.what(); script->State = ScriptInstanceState::Faulted; Report(script->LastError); }
-			catch (...) { script->LastError = "Unknown Lua update exception"; script->State = ScriptInstanceState::Faulted; Report(script->LastError); }
-			if (script->State == ScriptInstanceState::Faulted) DestroyLuaScript(entity, true);
+			catch (const std::exception& error) { script->Runtime.LastError = error.what(); script->Runtime.State = ScriptInstanceState::Faulted; Report(script->Runtime.LastError); }
+			catch (...) { script->Runtime.LastError = "Unknown Lua update exception"; script->Runtime.State = ScriptInstanceState::Faulted; Report(script->Runtime.LastError); }
+			if (script->Runtime.State == ScriptInstanceState::Faulted) DestroyLuaScript(entity, true);
 		}
 	}
 
@@ -836,8 +849,8 @@ namespace World
 		m_StopRequested = false;
 		// Never instantiate Pending scripts during stop. Keep component storage readable in OnDestroy.
 		m_Changes.clear();
-		for (const auto entity : Snapshot<NativeScriptComponent>(m_Registry)) DestroyNativeScript(entity);
-		for (const auto entity : Snapshot<LuaScriptComponent>(m_Registry)) DestroyLuaScript(entity);
+		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry)) DestroyNativeScript(entity);
+		for (const auto entity : Snapshot<LuauScriptComponent>(m_Registry)) DestroyLuaScript(entity);
 		OnPhysics2DStop();
 		OnPhysics3DStop();
 		// Destruction callbacks may request further idempotent deletes/removals, but no general work.

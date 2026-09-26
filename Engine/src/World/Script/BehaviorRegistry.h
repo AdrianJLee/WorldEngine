@@ -3,8 +3,8 @@
 // P2 W2a:语言无关的行为注册层。
 //
 // 行为 = 挂在实体上的一段生命周期逻辑。当前引擎里有两类现成行为:
-//   - C++:NativeScriptComponent + ScriptableEntity,字段来自 schema 反射(TypeSchema);
-//   - Luau:LuaScriptComponent,字段来自 CachedFields 的类型信息。
+//   - C++:CppScriptComponent + ScriptableEntity,字段来自 schema 反射(TypeSchema);
+//   - Luau:LuauScriptComponent,字段来自组件的属性表(ScriptProperty:名字 + Schema 值类型)。
 // 本层把"行为"从"具体组件类型"里抽象出来:稳定模块 id / 显示名 / 语言标记 /
 // 字段描述(名字 + schema 值类型 + 稳定 field id)/ 四个生命周期槽位。
 //
@@ -25,7 +25,7 @@ namespace World
 {
 	class Entity;
 	class Scene;
-	struct LuaScriptComponent;
+	struct LuauScriptComponent;
 
 	// 行为前端语言标记。
 	enum class BehaviorLanguage : uint8_t
@@ -100,24 +100,24 @@ namespace World
 
 		// 现有两类行为的描述构造(纯数据;字段/生命周期见各前端规则)。
 		static BehaviorDesc MakeNativeDesc(const Schema::TypeSchema& type);
-		// CachedFields 的类型映射:None→None、Float→Float、Int→Int32、Bool→Bool、String→String。
-		static BehaviorDesc MakeLuaDesc(const LuaScriptComponent& script);
+		// 属性表的类型就是 Schema::Kind(脚本声明阶段已归一):None 不出现,其余原样带进描述。
+		static BehaviorDesc MakeLuaDesc(const LuauScriptComponent& script);
 		// 严格注册(重复即拒绝);类型不是 Category==Script / 路径为空时返回 false + error。
 		bool RegisterNative(const Schema::TypeSchema& type, std::string* error = nullptr);
-		bool RegisterLua(const LuaScriptComponent& script, std::string* error = nullptr);
+		bool RegisterLua(const LuauScriptComponent& script, std::string* error = nullptr);
 
 		// 稳定 id 规则(唯一来源,调用方不要重复实现):
 		//   NativeModuleId = schema TypeId 全名,例如 "Game::ExampleScript";
 		//   LuaModuleId    = "Lua:" + 脚本逻辑路径,例如 "Lua:scripts/player.luau";
-		//   LuaFieldId     = Fnv1a64("World::LuaScriptComponent." + 字段名)
+		//   LuaFieldId     = Fnv1a64("World::LuauScriptComponent." + 字段名)
 		//                    (与 schema-compiler 的 Fnv1a64("Module::Type.FieldName") 同一条规则)。
 		static std::string NativeModuleId(const Schema::TypeSchema& type);
 		static std::string LuaModuleId(const std::string& scriptFilePath);
 		static uint64_t LuaFieldId(const std::string& fieldName);
 
-		// 给定实体枚举行为描述:C++ 取 NativeScriptComponent.ScriptName(全名直查,未命中再按
+		// 给定实体枚举行为描述:C++ 取 CppScriptComponent.ScriptName(全名直查,未命中再按
 		// 该场景的 schema 注册表解析,与 Scene::StartPendingScripts 同一条路径);Luau 取
-		// LuaScriptComponent.ScriptFilePath。结果按 ModuleId 升序;未注册的模块不出现。
+		// LuauScriptComponent.ScriptPath。结果按 ModuleId 升序;未注册的模块不出现。
 		// 只读场景(走 const registry),Play/Simulate 下也可调用。
 		std::vector<const BehaviorDesc*> DescribeEntity(const Scene& scene, entt::entity entity) const;
 		std::vector<const BehaviorDesc*> DescribeEntity(const Entity& entity) const;

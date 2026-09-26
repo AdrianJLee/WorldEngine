@@ -19,6 +19,7 @@
 #include "World/Scene/ScriptEngine.h"
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
+#include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Script/ScriptValue.h"
 
@@ -130,7 +131,7 @@ namespace
 		Entity AddLua(const std::string& path = "scripts/tests/EntitySpawnProbe.lua")
 		{
 			Entity entity = Entity::CreateEntity(World.get(), "Lua probe");
-			entity.AddComponent<LuaScriptComponent>(path);
+			entity.AddComponent<LuauScriptComponent>(path);
 			return entity;
 		}
 
@@ -147,7 +148,14 @@ namespace
 
 	void SetLuaString(Entity entity, const std::string& name, const std::string& value)
 	{
-		entity.GetComponent<LuaScriptComponent>().CachedFields[name] = { LuaFieldType::String, value };
+		std::vector<ScriptProperty>& properties = entity.GetComponent<LuauScriptComponent>().Properties;
+		if (ScriptProperty* property = ScriptProperties::Find(properties, name))
+		{
+			property->Type = Schema::Kind::String;
+			property->Value = value;
+			return;
+		}
+		properties.push_back(ScriptProperty{ name, Schema::Kind::String, Schema::Value(value) });
 	}
 
 	// 回调内 CreateChild + 白名单 AddComponent 当帧生效;第二个脚本同帧按快照看不到它。
@@ -161,10 +169,10 @@ namespace
 		fixture.World->OnScriptStart();
 		fixture.Step();
 
-		CHECK(spawner.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
-		CHECK(spawner.GetComponent<LuaScriptComponent>().LastError.empty());
-		CHECK(observer.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
-		CHECK(observer.GetComponent<LuaScriptComponent>().LastError.empty());
+		CHECK(spawner.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
+		CHECK(spawner.GetComponent<LuauScriptComponent>().Runtime.LastError.empty());
+		CHECK(observer.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
+		CHECK(observer.GetComponent<LuauScriptComponent>().Runtime.LastError.empty());
 
 		// OnScriptUpdate 结束后的宿主视角:实体、Transform、Sprite 与父层级都已提交。
 		Entity child = FindTagged(*fixture.World, "A");
@@ -288,8 +296,8 @@ assert(W3dTarget:SetParent(W3dDoomed) == false)
 		fixture.World->OnScriptStart();
 		fixture.Step();
 
-		CHECK(instantiator.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
-		CHECK(instantiator.GetComponent<LuaScriptComponent>().LastError.empty());
+		CHECK(instantiator.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
+		CHECK(instantiator.GetComponent<LuauScriptComponent>().Runtime.LastError.empty());
 		CHECK(s_CapturedEntity.IsValid());
 		CHECK(static_cast<uint64_t>(s_CapturedEntity.GetComponent<UUIDComponent>().ID) != static_cast<uint64_t>(sourceUuid));
 		CHECK(s_CapturedEntity.GetComponent<TagComponent>().Tag == "PrefabRoot");
@@ -309,8 +317,8 @@ assert(W3dTarget:SetParent(W3dDoomed) == false)
 			ScriptEngine::GetBindingContext().CreateFunction("TEST_CaptureEntity", &CaptureEntity)));
 		relative.World->OnScriptStart();
 		relative.Step();
-		CHECK(relativeInstantiator.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
-		CHECK(relativeInstantiator.GetComponent<LuaScriptComponent>().LastError.empty());
+		CHECK(relativeInstantiator.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
+		CHECK(relativeInstantiator.GetComponent<LuauScriptComponent>().Runtime.LastError.empty());
 		CHECK(s_CapturedEntity.IsValid());
 		CHECK(s_CapturedEntity.GetComponent<TagComponent>().Tag == "Example Sprite");
 		relative.Stop();

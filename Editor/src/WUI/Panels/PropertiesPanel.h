@@ -47,6 +47,12 @@ namespace World
 		float DrawCameraInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
+		// 2026-09-26 脚本组件重写:统一脚本检视器(两个脚本组件共用一条路径)。
+		// 引用行(Luau 资产下拉 + 打开脚本编辑器 / C++ 已注册脚本下拉)→ 状态行 → 属性表 → 动作行;
+		// 编辑态直接读写 `Properties`(不实例化脚本),Play/Simulate 只读。
+		float DrawScriptComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity,
+			void* instance, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+			std::vector<std::string>* changedFields = nullptr);
 
 		// ---- P4-U13b:prefab 实例条(选中实体属于某实例时画在组件列表最上方)----
 		// 实例归属/来源/覆盖计数来自宿主(Scene 持有实例记录);来源资产找不到时实例条

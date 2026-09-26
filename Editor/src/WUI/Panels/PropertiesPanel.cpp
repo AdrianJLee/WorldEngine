@@ -7,8 +7,11 @@
 #include "../../EditorLayer.h"
 
 #include "World/Core/KeyCodes.h"
+#include "World/Core/Asset/ScriptArtifact.h"
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Gameplay/Prefab.h"
+// 2026-09-26 脚本组件重写:属性表(`ScriptProperty`)的唯一维护点(注解/schema 声明 → 属性表)。
+#include "World/Script/ScriptProperties.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
@@ -26,6 +29,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <sstream>
 
 namespace World
 {
@@ -391,6 +395,120 @@ namespace World
 			if (name == "?")
 				return name;   // 未知状态保持原占位符
 			return Wui::Tr("panel.properties.script_state." + name, name);
+		}
+
+		// ---- 2026-09-26 脚本组件重写:统一脚本检视器的三个数据侧小工具 ----
+		//
+		// `ScriptProperty::Value` 的类型编码必须与 schema 一致
+		// (Bool→bool、Int*→对应宽度、Float→float、Double→double、String→string):
+		// 属性行复用 `DrawSchemaFields`,那里按 Kind 直接 `std::get<T>(value)`,
+		// 值停在 monostate(刚声明还没填值 / 手改过的场景缺 Value)会抛 std::bad_variant_access。
+		Schema::Value DefaultScriptPropertyValue(Schema::Kind kind)
+		{
+			switch (kind)
+			{
+				case Schema::Kind::Bool: return Schema::Value(false);
+				case Schema::Kind::Int8: return Schema::Value(static_cast<int8_t>(0));
+				case Schema::Kind::Int16: return Schema::Value(static_cast<int16_t>(0));
+				case Schema::Kind::Int32: return Schema::Value(static_cast<int32_t>(0));
+				case Schema::Kind::Int64: return Schema::Value(static_cast<int64_t>(0));
+				case Schema::Kind::UInt8: return Schema::Value(static_cast<uint8_t>(0));
+				case Schema::Kind::UInt16: return Schema::Value(static_cast<uint16_t>(0));
+				case Schema::Kind::UInt32: return Schema::Value(static_cast<uint32_t>(0));
+				case Schema::Kind::UInt64: return Schema::Value(static_cast<uint64_t>(0));
+				case Schema::Kind::Float: return Schema::Value(0.0f);
+				case Schema::Kind::Double: return Schema::Value(0.0);
+				case Schema::Kind::String: return Schema::Value(std::string());
+				default: return Schema::Value();
+			}
+		}
+
+		bool ScriptPropertyValueMatchesType(const ScriptProperty& property)
+		{
+			switch (property.Type)
+			{
+				case Schema::Kind::Bool: return std::holds_alternative<bool>(property.Value);
+				case Schema::Kind::Int8: return std::holds_alternative<int8_t>(property.Value);
+				case Schema::Kind::Int16: return std::holds_alternative<int16_t>(property.Value);
+				case Schema::Kind::Int32: return std::holds_alternative<int32_t>(property.Value);
+				case Schema::Kind::Int64: return std::holds_alternative<int64_t>(property.Value);
+				case Schema::Kind::UInt8: return std::holds_alternative<uint8_t>(property.Value);
+				case Schema::Kind::UInt16: return std::holds_alternative<uint16_t>(property.Value);
+				case Schema::Kind::UInt32: return std::holds_alternative<uint32_t>(property.Value);
+				case Schema::Kind::UInt64: return std::holds_alternative<uint64_t>(property.Value);
+				case Schema::Kind::Float: return std::holds_alternative<float>(property.Value);
+				case Schema::Kind::Double: return std::holds_alternative<double>(property.Value);
+				case Schema::Kind::String: return std::holds_alternative<std::string>(property.Value);
+				default: return false;
+			}
+		}
+
+		// 一条属性的值对齐到它的类型(不匹配 = 落回默认值)。返回 false = 这个类型不是脚本属性类型。
+		bool NormalizeScriptProperty(ScriptProperty& property)
+		{
+			if (!ScriptProperties::IsPropertyKind(property.Type))
+				return false;
+			if (!ScriptPropertyValueMatchesType(property))
+				property.Value = DefaultScriptPropertyValue(property.Type);
+			return true;
+		}
+
+		// Luau `---@field <name> <type>` 注解 → **有序**声明(name + Schema::Kind)。
+		//
+		// 编辑态硬约束(方案 v2 §3):**不执行脚本、不建 VM** —— 这里只按行静态扫注解文本。
+		// 顺序 = 注解出现顺序;重复名字以第一次为准。类型名映射与脚本加载期同一口径:
+		// number→Float、integer/int→Int32、boolean/bool→Bool、string→String,其余(向量/表…)
+		// 不进属性表。编译产物(容器)没有注解 → 空表。
+		//
+		// 备注(已写进任务报告):`ScriptEngine::ParseFieldAnnotations` 是公开入口,但返回
+		// unordered_map(拿不到声明顺序),所以这里自己扫一遍;若引擎侧以后暴露"有序声明"入口,
+		// 本函数应改为调它(类型映射只应有一份)。
+		std::vector<std::pair<std::string, Schema::Kind>> LuaScriptDeclarations(const std::string& logicalPath)
+		{
+			std::vector<std::pair<std::string, Schema::Kind>> declarations;
+			if (logicalPath.empty())
+				return declarations;
+			const std::filesystem::path& contentRoot = CachedContentRoot();
+			if (contentRoot.empty())
+				return declarations;
+			std::ifstream file(contentRoot / std::filesystem::path(logicalPath), std::ios::binary);
+			if (!file.is_open())
+				return declarations;
+			const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+			if (text.empty() || Asset::ScriptArtifact::IsArtifactBytes(text.data(), text.size()))
+				return declarations;
+			std::istringstream stream(text);
+			std::string line;
+			while (std::getline(stream, line))
+			{
+				const size_t start = line.find_first_not_of(" \t\r\n");
+				if (start == std::string::npos)
+					continue;
+				const std::string trimmed = line.substr(start);
+				if (trimmed.rfind("---@field", 0) != 0)
+					continue;
+				std::istringstream rest(trimmed.substr(9));
+				std::string name;
+				std::string typeName;
+				if (!(rest >> name >> typeName))
+					continue;
+				Schema::Kind kind = Schema::Kind::None;
+				if (typeName == "number")
+					kind = Schema::Kind::Float;
+				else if (typeName == "integer" || typeName == "int")
+					kind = Schema::Kind::Int32;
+				else if (typeName == "boolean" || typeName == "bool")
+					kind = Schema::Kind::Bool;
+				else if (typeName == "string")
+					kind = Schema::Kind::String;
+				if (!ScriptProperties::IsPropertyKind(kind))
+					continue;
+				if (std::any_of(declarations.begin(), declarations.end(),
+						[&name](const auto& item) { return item.first == name; }))
+					continue;
+				declarations.emplace_back(name, kind);
+			}
+			return declarations;
 		}
 
 		// 面板里诊断/错误只显示第一行并截断;完整文本由 AI 通道 script.status 提供。
@@ -1277,7 +1395,7 @@ namespace World
 			// MRU 置顶并落盘(<local>/wui-properties.json)。
 			TouchRecent(SchemaTypeKeyName(schema));
 			// 新分区自动展开(与分区绘制读同一个持久化键),再由 OnRender 连续几帧滚到可见。
-			const bool defaultOpen = schema.Id.Name == "World::LuaScriptComponent";
+			const bool defaultOpen = schema.Id.Name == "World::LuauScriptComponent";
 			ctx.Persist<bool>(Wui::HashId(("prop.open." + schema.DisplayName).c_str()), defaultOpen) = true;
 			m_RevealSection = schema.DisplayName;
 			m_RevealFrames = kPickerRevealFrames;
@@ -1575,7 +1693,7 @@ namespace World
 			{
 				// P2 W5b:Lua 脚本分区默认展开 —— 诊断与 Reload 按钮必须真的在无障碍树里,
 				// 才能被 AI 通道 ui.invoke 无鼠标驱动(其它组件分区保持默认折叠)。
-				const bool defaultOpen = schema->Id.Name == "World::LuaScriptComponent";
+				const bool defaultOpen = schema->Id.Name == "World::LuauScriptComponent";
 				m_Sections.push_back({ schema->DisplayName, defaultOpen, 0.0f });
 			}
 		}
@@ -1592,7 +1710,7 @@ namespace World
 			if (i >= componentSchemas.size())
 				break;
 			const Schema::TypeSchema* schema = componentSchemas[i];
-			const bool defaultOpen = schema->Id.Name == "World::LuaScriptComponent";
+			const bool defaultOpen = schema->Id.Name == "World::LuauScriptComponent";
 			bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), defaultOpen);
 			m_Sections[i].Open = open;
 			if (!m_RevealSection.empty() && m_Sections[i].Title == m_RevealSection)
@@ -1648,7 +1766,7 @@ namespace World
 				// 分区顺序可能因 schema 列表变化而与 m_Sections 错位:名字不同则本帧跳过绘制。
 				if (section.Title != schema->DisplayName)
 					break;
-				const bool defaultOpen = schema->Id.Name == "World::LuaScriptComponent";
+				const bool defaultOpen = schema->Id.Name == "World::LuauScriptComponent";
 				bool& open = ctx.Persist<bool>(Wui::HashId(("prop.open." + schema->DisplayName).c_str()), defaultOpen);
 
 				// 标题行:与 WuiSection 相同的底色/文字与展开行为;同时登记为可点节点
@@ -2202,119 +2320,10 @@ namespace World
 		// 自定义检查器:Primary / Fixed Aspect Ratio + 投影类型下拉 + 对应参数组。
 		else if (schema.Id.Name == "World::CameraComponent")
 			height = DrawCameraInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
-		else if (schema.Id.Name == "World::NativeScriptComponent")
-		{
-			auto* script = static_cast<NativeScriptComponent*>(instance);
-			Scene* scene = entity.GetScene();
-			Schema::SchemaRegistry& schemas = scene->GetContext().Schemas();
-			std::vector<std::string> names;    // 原始脚本名:匹配与写回都用它(稳定标识)
-			std::vector<std::string> labels;   // 下拉显示文案(可本地化)
-			// 下拉 label 只进无障碍节点(Combo 只画当前值):按术语约定写成 "脚本 (Script)"。
-			const Wui::LocalizedLabel scriptFieldLabel = Wui::TrLabel("panel.properties.native_script", "Script");
-			std::vector<const Schema::TypeSchema*> scripts = schemas.List(Schema::TypeCategory::Script);
-			int selected = -1;
-			for (size_t i = 0; i < scripts.size(); ++i)
-			{
-				names.push_back(scripts[i]->DisplayName);
-				labels.push_back(Wui::Tr("schema.script." + scripts[i]->DisplayName, scripts[i]->DisplayName));
-				if (scripts[i]->DisplayName == script->ScriptName)
-					selected = static_cast<int>(i);
-			}
-			if (Combo(ctx, base ^ 1u, { rect.X, rect.Y, rect.W, 22 }, TermText(scriptFieldLabel), labels, selected, theme)
-				&& selected >= 0)
-			{
-				if (scripts[selected]->Script)
-					scripts[selected]->Script->Bind(static_cast<void*>(script));
-				// 写回原字符串而不是显示文案:ScriptName 必须与 schema 名逐字一致。
-				script->ScriptName = names[selected];
-				script->ResetEditorFieldState();
-				m_Host.MarkDocumentDirty();
-				changedFields.push_back(schema.DisplayName + ".Script");
-			}
-			float y = 26;
-			Label(ctx, { rect.X, rect.Y + y },
-				Wui::Tr("panel.properties.script_state", "state") + ": " + ScriptStateLabel(script->State),
-				theme.TextMuted, 13.0f);
-			y += 18;
-			if (!script->LastError.empty())
-			{
-				Label(ctx, { rect.X, rect.Y + y }, script->LastError, { 1, 0.4f, 0.4f, 1 }, 12.0f);
-				y += 18;
-			}
-			const Schema::TypeSchema* scriptSchema = schemas.Find(script->ScriptName);
-			if (scriptSchema)
-			{
-				bool owned = false;
-				ScriptableEntity* preview = script->GetOrCreateEditorInstance(!scene->IsActive(), owned);
-				if (preview)
-				{
-					y += DrawSchemaFields(ctx, base ^ 2u, { rect.X, rect.Y + y, rect.W, 0 }, preview,
-						scriptSchema->DisplayName, *scriptSchema, visibleRect, &changedFields);
-					for (const Schema::FieldSchema& field : scriptSchema->Fields)
-						if (field.Get)
-							script->FieldValues[field.Name] = field.Get(preview);
-					script->ReleaseEditorInstance(preview);
-				}
-			}
-			height = y;
-		}
-
-		else if (schema.Id.Name == "World::LuaScriptComponent")
-		{
-			auto* script = static_cast<LuaScriptComponent*>(instance);
-			const std::string before = script->ScriptFilePath;
-			TextField(ctx, base ^ 1u, { rect.X, rect.Y, rect.W, 22 }, script->ScriptFilePath, theme);
-			if (script->ScriptFilePath != before)
-			{
-				m_Host.MarkDocumentDirty();
-				changedFields.push_back(schema.DisplayName + ".ScriptFilePath");
-			}
-
-			// P2 W5b:状态 + 重载诊断 + 脚本错误 + Reload 按钮(稳定 id → 进无障碍树,
-			// 可被 AI 通道 ui.invoke 无鼠标驱动)。
-			const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
-			float y = 26;
-			// 状态行只走 Tr(状态词,不加英文术语);状态名/前后缀都不参与比较或存储。
-			std::string state = Wui::Tr("panel.properties.script_state", "state") + ": " + ScriptStateLabel(script->State);
-			state += " " + (script->IsLoaded
-				? Wui::Tr("panel.properties.script_loaded", "(loaded)")
-				: Wui::Tr("panel.properties.script_not_loaded", "(not loaded)"));
-			Label(ctx, { rect.X, rect.Y + y }, state, theme.TextMuted, 13.0f);
-			y += 18;
-			if (!script->ReloadDiagnostic.empty())
-			{
-				Label(ctx, { rect.X, rect.Y + y },
-					Wui::Tr("panel.properties.reload_prefix", "[reload]") + " " + TruncateForPanel(script->ReloadDiagnostic),
-					{ 1.0f, 0.75f, 0.3f, 1 }, 12.0f);
-				y += 16;
-			}
-			if (!script->LastError.empty())
-			{
-				Label(ctx, { rect.X, rect.Y + y },
-					Wui::Tr("panel.properties.error_prefix", "[error]") + " " + TruncateForPanel(script->LastError),
-					{ 1, 0.4f, 0.4f, 1 }, 12.0f);
-				y += 16;
-			}
-			if (Button(ctx, Wui::HashId("lua.reload"), { rect.X, rect.Y + y, std::min(rect.W, 160.0f), 22 },
-				Wui::Tr("panel.properties.reload_script", "Reload Script"), theme))
-			{
-				std::string message;
-				const bool ok = EditorLayer::ReloadLuaScriptComponent(*script, entity.GetScene(), &message);
-				m_LuaReloadOk = ok;
-				m_LuaReloadMessage = ok ? message : (Wui::Tr("panel.properties.reload_failed", "failed:") + " " + message);
-				m_LuaReloadHandle = handle;
-				WLD_CORE_INFO("[hot-reload] properties button (handle={0}, path='{1}'): {2}",
-					handle, script->ScriptFilePath, m_LuaReloadMessage);
-			}
-			y += 26;
-			if (m_LuaReloadHandle == handle && !m_LuaReloadMessage.empty())
-			{
-				Label(ctx, { rect.X, rect.Y + y }, TruncateForPanel(m_LuaReloadMessage),
-					m_LuaReloadOk ? theme.TextMuted : Wui::WuiColor { 1, 0.4f, 0.4f, 1 }, 12.0f);
-				y += 16;
-			}
-			height = y + 4;
-		}
+		// 2026-09-26 脚本组件重写:两个脚本组件走**同一条**统一检视器(引用行 / 状态行 / 属性表 /
+		// 动作行),不再各写一套。编辑态不创建脚本实例;Play/Simulate 只读。
+		else if (schema.Id.Name == "World::CppScriptComponent" || schema.Id.Name == "World::LuauScriptComponent")
+			height = DrawScriptComponentInspector(ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
 		else
 			height = DrawSchemaFields(ctx, base, rect, instance, schema.DisplayName, schema, visibleRect,
@@ -2322,6 +2331,312 @@ namespace World
 
 		RegisterPrefabOverrides(entity, changedFields);
 		return height;
+	}
+
+	// ---- 2026-09-26 脚本组件重写:统一脚本检视器(两个脚本组件共用)----
+	//
+	// 布局:脚本引用行 → 状态行(State + LastError,Luau 再加 ReloadDiagnostic)→ 属性表
+	//      (每个 `ScriptProperty` 一行)→ 动作行(Luau 的 Reload,id 保持 `lua.reload`)。
+	//
+	// 三条硬口径(方案 v2 §3 + 派工单):
+	//   ① **编辑态不实例化脚本**:属性直接读写组件里的 `Properties`;不建 VM、不跑 OnCreate、
+	//      不构造 `ScriptableEntity`(实例只由 Scene 在 Play/Simulate 按 schema 工厂创建);
+	//   ② **Play/Simulate 只读**:控件走既有只读行 / 禁用按钮契约 + 一行只读说明;
+	//      C++ 组件在运行实例在场时按**实例**读真实值(只读展示),Luau 用组件里保存的值;
+	//   ③ **属性行复用既有类型化行渲染**:每条属性造一条临时 `FieldSchema`(Get/Set 直连属性值),
+	//      逐个调用 `DrawSchemaFields` —— 控件 / 只读行 / 无障碍节点 / 悬停说明 / 预制体覆盖登记
+	//      都不另写一套。
+	//
+	// 无障碍 id 契约:`properties.<组件名>.<属性名>`(脚本可直接算);状态与诊断行见各段注释。
+	float PropertiesPanel::DrawScriptComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect,
+		Entity entity, void* instance, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+		std::vector<std::string>* changedFields)
+	{
+		const Wui::WuiTheme& theme = m_Host.Theme();
+		const bool luau = schema.Id.Name == "World::LuauScriptComponent";
+		CppScriptComponent* cpp = luau ? nullptr : static_cast<CppScriptComponent*>(instance);
+		LuauScriptComponent* lua = luau ? static_cast<LuauScriptComponent*>(instance) : nullptr;
+		if ((!luau && !cpp) || (luau && !lua))
+			return 0.0f;
+		ScriptRuntimeState& runtime = luau ? lua->Runtime : cpp->Runtime;
+		std::vector<ScriptProperty>& properties = luau ? lua->Properties : cpp->Properties;
+		Scene* scene = entity.GetScene();
+		if (!scene)
+			return 0.0f;
+		Schema::SchemaRegistry& schemas = scene->GetContext().Schemas();
+
+		float y = 0.0f;
+		bool changed = false;
+		// 控件 id 混入组件显示名(与通用路径同一条:`f.<type>.<field>` ^ base)。
+		const Wui::WuiId base = Wui::HashId(schema.DisplayName.c_str());
+
+		// ---- 脚本引用行 ----
+		const float labelWidth = std::min(140.0f, rect.W * 0.45f);
+		const Wui::WuiRect refRow { rect.X, rect.Y, rect.W, 22.0f };
+		// 引用行标签沿用面板既有 key(两个组件同一句话:这一行 = 脚本引用)。
+		const Wui::LocalizedLabel refLabel = Wui::TrLabel("panel.properties.native_script", "Script");
+		const std::string refLabelText = TermText(refLabel);
+		Wui::LabelWithTerm(ctx, { refRow.X + 4.0f, refRow.Y + 3.0f }, refLabel.Text, refLabel.Term,
+			theme.TextMuted, 13.0f, theme, labelWidth - 4.0f);
+		// Luau 右侧留出"在脚本编辑器里打开"按钮;C++ 不要按钮(整行给下拉)。
+		constexpr float kOpenButtonWidth = 132.0f;
+		const float refCtrlWidth = std::max(40.0f,
+			refRow.W - labelWidth - 4.0f - (luau ? kOpenButtonWidth + 6.0f : 0.0f));
+		const Wui::WuiRect refCtrl { refRow.X + labelWidth, refRow.Y + 1.0f, refCtrlWidth, 20.0f };
+		const std::string refIdText = PropPath(schema.DisplayName, luau ? "ScriptPath" : "ScriptName");
+		const Wui::WuiId refId = Wui::HashId(refIdText.c_str());
+		const auto reachable = [&visibleRect](const Wui::WuiRect& control)
+		{
+			return control.X + control.W * 0.5f >= visibleRect.X
+				&& control.X + control.W * 0.5f <= visibleRect.X + visibleRect.W
+				&& control.Y + control.H * 0.5f >= visibleRect.Y
+				&& control.Y + control.H * 0.5f <= visibleRect.Y + visibleRect.H;
+		};
+
+		if (luau)
+		{
+			// Luau = 脚本**资产**下拉(与 `Asset("Script")` 同一份清单:内容根下 .lua/.luau),
+			// 可搜索;`(none)` = 清空引用;当前值不在清单里也照实显示(不假装是"(无)")。
+			if (m_ReadOnly)
+			{
+				DrawReadOnlyRow(ctx, refIdText, refRow, refLabel, lua->ScriptPath, theme);
+			}
+			else
+			{
+				const std::vector<std::string>& paths = Editor::AssetCatalog::PathsForName("Script");
+				std::vector<std::string> options;
+				options.reserve(paths.size() + 2);
+				options.push_back(Wui::Tr("panel.properties.asset_none", "(none)"));
+				options.insert(options.end(), paths.begin(), paths.end());
+				int selected = 0;
+				const auto found = std::find(paths.begin(), paths.end(), lua->ScriptPath);
+				if (found != paths.end())
+					selected = static_cast<int>(found - paths.begin()) + 1;
+				else if (!lua->ScriptPath.empty())
+				{
+					options.push_back(lua->ScriptPath);
+					selected = static_cast<int>(options.size()) - 1;
+				}
+				const int beforePick = selected;
+				if (Wui::SearchableCombo(ctx, refId, refCtrl, "", options, selected, theme)
+					&& selected != beforePick)
+				{
+					lua->ScriptPath = selected <= 0 ? std::string() : options[static_cast<size_t>(selected)];
+					// 换脚本 = 属性表按**新脚本的注解声明**重建(同名同类型保留值,其余丢弃)。
+					ScriptProperties::SyncFromDeclarations(lua->Properties, LuaScriptDeclarations(lua->ScriptPath));
+					changed = true;
+					if (changedFields)
+						changedFields->push_back(schema.DisplayName + ".ScriptPath");
+				}
+				RegisterNode(refId, "searchable-combo", refCtrl, refLabelText, lua->ScriptPath,
+					reachable(refCtrl),
+					Wui::Tr("panel.properties.script_path.tooltip",
+						"Luau script asset under the project content root (.luau/.lua); (none) clears the reference"));
+			}
+			// "在脚本编辑器里打开"(有脚本才可用;与内容浏览器双击同一条 EditorShell::OpenScriptEditor)。
+			const Wui::WuiRect openRect { refCtrl.X + refCtrl.W + 6.0f, refRow.Y + 1.0f,
+				std::min(kOpenButtonWidth, std::max(40.0f, refRow.W - (refCtrl.X + refCtrl.W + 6.0f))), 20.0f };
+			// Play/Simulate 只读:打开脚本编辑器也一并禁用(与"这一块只读"同一句原因)。
+			const bool hasScript = !lua->ScriptPath.empty();
+			if (InstanceBarButton(ctx, "script.open_in_editor", openRect,
+				Wui::Tr("panel.properties.open_script_editor", "Open in Editor"),
+				m_ReadOnly
+					? Wui::Tr("panel.properties.script_readonly_reason",
+						"Play/Simulate is read-only: pause or stop to reload the script")
+					: (hasScript
+					? Wui::Tr("panel.properties.open_script_editor.tooltip",
+						"Open this script asset in the built-in script editor (same panel as double-clicking it in the Content Browser)")
+					: Wui::Tr("panel.properties.open_script_editor.none", "Pick a script asset first")),
+				hasScript && !m_ReadOnly, theme))
+			{
+				m_Host.OpenScriptEditor(lua->ScriptPath);
+				WLD_CORE_INFO("[script-ui] open in script editor: '{0}'", lua->ScriptPath);
+			}
+		}
+		else
+		{
+			// C++ = **已注册脚本**下拉(schema `TypeCategory::Script`)。写回的是类型全名
+			// (如 `Game::ExampleScript`)—— Scene 实例化就是按 `Schemas().Find(ScriptName)`
+			// 解析 schema 工厂的;显示名只用于文案。
+			const std::vector<const Schema::TypeSchema*> scripts = schemas.List(Schema::TypeCategory::Script);
+			std::vector<std::string> ids;
+			std::vector<std::string> labels;
+			ids.reserve(scripts.size());
+			labels.reserve(scripts.size());
+			int selected = -1;
+			for (const Schema::TypeSchema* script : scripts)
+			{
+				if (!script)
+					continue;
+				ids.push_back(script->Id.Name);
+				labels.push_back(Wui::Tr("schema.script." + SchemaTypeKeyName(*script), script->DisplayName));
+				if (script->Id.Name == cpp->ScriptName)
+					selected = static_cast<int>(ids.size()) - 1;
+			}
+			if (m_ReadOnly)
+			{
+				const std::string shown = cpp->ScriptName.empty()
+					? Wui::Tr("panel.properties.value_none", "(none)") : cpp->ScriptName;
+				DrawReadOnlyRow(ctx, refIdText, refRow, refLabel, shown, theme);
+			}
+			else if (ids.empty())
+			{
+				const std::string hint = Wui::Tr("panel.properties.script_no_registered",
+					"no C++ script is registered yet");
+				Label(ctx, { refCtrl.X, refCtrl.Y + 3.0f }, hint, theme.TextMuted, 12.0f);
+				RegisterNode(refId, "text", refCtrl, refLabelText, hint, false);
+			}
+			else
+			{
+				const int beforePick = selected;
+				if (Wui::Combo(ctx, refId, refCtrl, "", labels, selected, theme)
+					&& selected != beforePick && selected >= 0)
+				{
+					cpp->ScriptName = ids[static_cast<size_t>(selected)];
+					// 换脚本 = 属性表按**新脚本的 schema 字段**重建(同名同类型保留值)。
+					ScriptProperties::SyncFromSchema(cpp->Properties, *scripts[static_cast<size_t>(selected)]);
+					changed = true;
+					if (changedFields)
+						changedFields->push_back(schema.DisplayName + ".ScriptName");
+				}
+				RegisterNode(refId, "combo", refCtrl, refLabelText, cpp->ScriptName, reachable(refCtrl),
+					Wui::Tr("panel.properties.script_name.tooltip",
+						"Registered C++ script (schema category Script); the property list follows the script you pick"));
+			}
+		}
+		y = 26.0f;
+
+		// 未注册提示行:存的名字在注册表里查不到(旧场景 / 模块没加载 / 脚本被删)→ 说出来,不静默。
+		if (!luau && !cpp->ScriptName.empty() && schemas.Find(cpp->ScriptName) == nullptr)
+		{
+			const std::string hint = Wui::Tr("panel.properties.script_unregistered",
+				"this C++ script is not registered (is its module loaded?)") + " " + cpp->ScriptName;
+			Label(ctx, { rect.X + 4.0f, rect.Y + y }, TruncateForPanel(hint, 96), theme.Warning, 12.0f);
+			RegisterNode(Wui::HashId((PropPath(schema.DisplayName, "ScriptName.unregistered")).c_str()),
+				"text", { rect.X, rect.Y + y - 2.0f, rect.W, 18.0f }, hint, hint, false);
+			y += 18.0f;
+		}
+
+		// ---- 状态行:Runtime.State + LastError(Luau 再加 ReloadDiagnostic)----
+		// 状态名只用于显示(拼接结果不参与比较/存储)。"loaded" 的等价口径 = State==Running
+		// (旧的双轨加载标记已随重写删除;AI 通道 script.status 的 loaded 字段用同一条口径)。
+		std::string stateText = Wui::Tr("panel.properties.script_state", "state") + ": "
+			+ ScriptStateLabel(runtime.State);
+		stateText += " " + (runtime.State == ScriptInstanceState::Running
+			? Wui::Tr("panel.properties.script_loaded", "(loaded)")
+			: Wui::Tr("panel.properties.script_not_loaded", "(not loaded)"));
+		Label(ctx, { rect.X + 4.0f, rect.Y + y }, stateText, theme.TextMuted, 13.0f);
+		RegisterNode(Wui::HashId((PropPath(schema.DisplayName, "Runtime.State")).c_str()), "text",
+			{ rect.X, rect.Y + y - 2.0f, rect.W, 18.0f }, stateText, stateText, false);
+		y += 18.0f;
+		if (luau && !lua->ReloadDiagnostic.empty())
+		{
+			const std::string text = Wui::Tr("panel.properties.reload_prefix", "[reload]") + " "
+				+ TruncateForPanel(lua->ReloadDiagnostic);
+			Label(ctx, { rect.X + 4.0f, rect.Y + y }, text, Wui::WuiColor { 1.0f, 0.75f, 0.3f, 1.0f }, 12.0f);
+			RegisterNode(Wui::HashId((PropPath(schema.DisplayName, "Runtime.ReloadDiagnostic")).c_str()),
+				"text", { rect.X, rect.Y + y - 2.0f, rect.W, 16.0f }, text, lua->ReloadDiagnostic, false);
+			y += 16.0f;
+		}
+		if (!runtime.LastError.empty())
+		{
+			const std::string text = Wui::Tr("panel.properties.error_prefix", "[error]") + " "
+				+ TruncateForPanel(runtime.LastError);
+			Label(ctx, { rect.X + 4.0f, rect.Y + y }, text, Wui::WuiColor { 1.0f, 0.4f, 0.4f, 1.0f }, 12.0f);
+			RegisterNode(Wui::HashId((PropPath(schema.DisplayName, "Runtime.LastError")).c_str()), "text",
+				{ rect.X, rect.Y + y - 2.0f, rect.W, 16.0f }, text, runtime.LastError, false);
+			y += 16.0f;
+		}
+		if (m_ReadOnly)
+		{
+			// 逐面板的只读说明(全局提示条之外,这一块自己说清楚为什么改不了)。
+			const std::string notice = Wui::Tr("panel.properties.script_readonly_notice",
+				"Play/Simulate: script properties are read-only (pause or stop to edit)");
+			Label(ctx, { rect.X + 4.0f, rect.Y + y }, TruncateForPanel(notice, 110), theme.TextDisabled, 12.0f);
+			RegisterNode(Wui::HashId((PropPath(schema.DisplayName, "Runtime.ReadOnly")).c_str()), "text",
+				{ rect.X, rect.Y + y - 2.0f, rect.W, 16.0f }, notice, notice, false);
+			y += 16.0f;
+		}
+
+		// ---- 属性表(本次核心)----
+		if (properties.empty())
+		{
+			Label(ctx, { rect.X + 4.0f, rect.Y + y },
+				Wui::Tr("panel.properties.script_no_properties",
+					"This script declares no editable properties yet"),
+				theme.TextMuted, 12.0f);
+			y += 20.0f;
+		}
+		else if (!luau && m_ReadOnly && cpp->Instance != nullptr
+			&& !cpp->ScriptName.empty() && schemas.Find(cpp->ScriptName) != nullptr)
+		{
+			// Play/Simulate + 运行实例在场:C++ 按**实例**读真实值(只读;不创建、不写)。
+			const Schema::TypeSchema* liveSchema = schemas.Find(cpp->ScriptName);
+			y += DrawSchemaFields(ctx, base ^ 0x51u, { rect.X, rect.Y + y, rect.W, 0 }, cpp->Instance,
+				schema.DisplayName, *liveSchema, visibleRect, changedFields);
+		}
+		else
+		{
+			for (ScriptProperty& property : properties)
+			{
+				if (!NormalizeScriptProperty(property))
+					continue;   // 非脚本属性类型(理论上不会进表):不画,也不写
+				Schema::FieldSchema field;
+				field.Name = property.Name;
+				field.K = property.Type;
+				// Get/Set 直连这条属性的值(instance 传 &property):无捕获 lambda → 函数指针。
+				field.Get = [](const void* value) { return static_cast<const ScriptProperty*>(value)->Value; };
+				field.Set = [](void* value, const Schema::Value& edited)
+				{ static_cast<ScriptProperty*>(value)->Value = edited; };
+				Schema::TypeSchema rowSchema;
+				rowSchema.DisplayName = schema.DisplayName;
+				rowSchema.Category = Schema::TypeCategory::Struct;
+				rowSchema.Fields.push_back(field);
+				// 属性名固定 → 行 id 稳定(可用 ui.invoke 直接驱动)。
+				const Wui::WuiId rowBase = base ^ Wui::HashId(("script.prop." + property.Name).c_str());
+				y += DrawSchemaFields(ctx, rowBase, { rect.X, rect.Y + y, rect.W, 0 }, &property,
+					schema.DisplayName, rowSchema, visibleRect, changedFields);
+			}
+		}
+
+		// ---- 动作行:Luau 保留 Reload(唯一入口 EditorLayer::ReloadLuauScriptComponent;id = lua.reload)----
+		if (luau)
+		{
+			const Wui::WuiRect reloadRect { rect.X, rect.Y + y, std::min(rect.W, 160.0f), 22.0f };
+			if (InstanceBarButton(ctx, "lua.reload", reloadRect,
+				Wui::Tr("panel.properties.reload_script", "Reload Script"),
+				m_ReadOnly
+					? Wui::Tr("panel.properties.script_readonly_reason",
+						"Play/Simulate is read-only: pause or stop to reload the script")
+					: Wui::Tr("panel.properties.reload_script.tooltip",
+						"Reload this instance from the script asset (same entry as the Scripts panel and script.reload)"),
+				!m_ReadOnly, theme))
+			{
+				const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
+				std::string message;
+				const bool ok = EditorLayer::ReloadLuauScriptComponent(*lua, scene, &message);
+				m_LuaReloadOk = ok;
+				m_LuaReloadMessage = ok
+					? message : (Wui::Tr("panel.properties.reload_failed", "failed:") + " " + message);
+				m_LuaReloadHandle = handle;
+				WLD_CORE_INFO("[hot-reload] properties button (handle={0}, path='{1}'): {2}", handle,
+					lua->ScriptPath, m_LuaReloadMessage);
+			}
+			y += 26.0f;
+			const uint32_t handle = static_cast<uint32_t>(static_cast<entt::entity>(entity));
+			if (m_LuaReloadHandle == handle && !m_LuaReloadMessage.empty())
+			{
+				Label(ctx, { rect.X + 4.0f, rect.Y + y - 4.0f }, TruncateForPanel(m_LuaReloadMessage),
+					m_LuaReloadOk ? theme.TextMuted : Wui::WuiColor { 1.0f, 0.4f, 0.4f, 1.0f }, 12.0f);
+				RegisterNode(Wui::HashId((PropPath(schema.DisplayName, "reload_result")).c_str()), "text",
+					{ rect.X, rect.Y + y - 6.0f, rect.W, 16.0f }, m_LuaReloadMessage, m_LuaReloadMessage, false);
+				y += 16.0f;
+			}
+		}
+
+		if (changed)
+			m_Host.MarkDocumentDirty();
+		return y;
 	}
 
 	float PropertiesPanel::DrawTransformInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect,

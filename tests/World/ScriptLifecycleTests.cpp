@@ -8,6 +8,7 @@
 #include "World/Script/LuauVm.h"
 #include "World/Script/Sandbox.h"
 #include "World/Script/ScriptBindingContext.h"
+#include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptValue.h"
 
 #include <box2d/box2d.h>
@@ -150,14 +151,11 @@ namespace
         uint32_t m_Id = 0;
     };
 
-    void BindProbe(NativeScriptComponent& script)
+    // 2026-09-26 重写:组件只存脚本引用(ScriptName);实例化走 schema 的脚本工厂
+    // —— 工厂在本文件 main() 里随 probeSchema 注册(factory 需要当前 ProbeContext)。
+    void BindProbe(CppScriptComponent& script)
     {
         script.ScriptName = "T02NativeProbe";
-        script.InstantiateScript = []() -> ScriptableEntity* {
-            if (!s_ProbeContext) throw std::logic_error("Missing test context");
-            return new NativeProbe(*s_ProbeContext);
-        };
-        script.DestroyScript = [](ScriptableEntity*& instance) { delete instance; instance = nullptr; };
     }
 
     struct Fixture
@@ -212,13 +210,13 @@ namespace
         Entity AddNative()
         {
             auto entity = Entity::CreateEntity(World.get(), "Native probe");
-            BindProbe(entity.AddComponent<NativeScriptComponent>());
+            BindProbe(entity.AddComponent<CppScriptComponent>());
             return entity;
         }
         Entity AddLua(const std::string& path = "scripts/tests/LifecycleProbe.lua")
         {
             auto entity = Entity::CreateEntity(World.get(), "Lua probe");
-            entity.AddComponent<LuaScriptComponent>(path);
+            entity.AddComponent<LuauScriptComponent>(path);
             return entity;
         }
         void Step()
@@ -231,14 +229,22 @@ namespace
 
     void SetLuaString(Entity entity, const std::string& name, const std::string& value)
     {
-        entity.GetComponent<LuaScriptComponent>().CachedFields[name] = { LuaFieldType::String, value };
+        std::vector<ScriptProperty>& properties = entity.GetComponent<LuauScriptComponent>().Properties;
+        ScriptProperty* found = ScriptProperties::Find(properties, name);
+        if (!found)
+        {
+            properties.push_back(ScriptProperty{ name, Schema::Kind::String, Schema::Value(value) });
+            return;
+        }
+        found->Type = Schema::Kind::String;
+        found->Value = value;
     }
 
     void CheckLuaReleased(Entity entity)
     {
-        const auto& script = entity.GetComponent<LuaScriptComponent>();
-        CHECK(!script.IsLoaded);
-        CHECK(!script.CreateEntered);
+        const auto& script = entity.GetComponent<LuauScriptComponent>();
+        CHECK(script.Runtime.State != ScriptInstanceState::Running);
+        CHECK(!script.Runtime.CreateEntered);
         CHECK(!script.LuaEnv.IsValid());
         CHECK(!script.ScriptTable.IsValid());
         CHECK(!script.OnCreateFunc.IsValid());
@@ -315,8 +321,8 @@ namespace
                 }
                 else
                 {
-                    entity.RemoveComponent<NativeScriptComponent>();
-                    entity.RemoveComponent<NativeScriptComponent>();
+                    entity.RemoveComponent<CppScriptComponent>();
+                    entity.RemoveComponent<CppScriptComponent>();
                 }
             };
             fixture.World->OnScriptStart();
@@ -326,7 +332,7 @@ namespace
             CHECK(n.Updates == 1 && n.Returns == 1 && n.Destroys == 1 && n.Deletes == 1);
             CHECK(l.Updates == 1 && l.Returns == 1 && l.Destroys == 1);
             if (mode == "destroy") CHECK(!native && !lua);
-            else CHECK(native && lua && !native.HasComponent<NativeScriptComponent>() && !lua.HasComponent<LuaScriptComponent>());
+            else CHECK(native && lua && !native.HasComponent<CppScriptComponent>() && !lua.HasComponent<LuauScriptComponent>());
             fixture.Step();
             fixture.Stop();
             CHECK(n.Updates == 1 && n.Destroys == 1 && l.Updates == 1 && l.Destroys == 1);
@@ -338,7 +344,7 @@ namespace
         Fixture fixture;
         fixture.AddNative();
         fixture.AddNative();
-        auto view = static_cast<const Scene&>(*fixture.World).GetRegistry().view<NativeScriptComponent>();
+        auto view = static_cast<const Scene&>(*fixture.World).GetRegistry().view<CppScriptComponent>();
         auto iterator = view.begin();
         Entity first(fixture.World.get(), *iterator++);
         Entity second(fixture.World.get(), *iterator);
@@ -369,7 +375,7 @@ namespace
             CHECK(entity.GetScene()->DeferStructuralChange([&fixture](Scene& scene) {
                 auto child = Entity::CreateEntity(&scene, "Deferred child");
                 child.AddComponent<TransformComponent>();
-                BindProbe(child.AddComponent<NativeScriptComponent>());
+                BindProbe(child.AddComponent<CppScriptComponent>());
                 ++fixture.Context.Observed["first batch"];
                 CHECK(scene.DeferStructuralChange([&fixture](Scene&) { ++fixture.Context.Observed["next batch"]; }));
             }));
@@ -380,10 +386,10 @@ namespace
         CHECK(fixture.Context.Observed["first batch"] == 1 && fixture.Context.Observed["next batch"] == 0);
         Entity child;
         const auto& registry = static_cast<const Scene&>(*fixture.World).GetRegistry();
-        for (auto handle : registry.view<NativeScriptComponent>())
+        for (auto handle : registry.view<CppScriptComponent>())
             if (handle != static_cast<entt::entity>(source)) child = Entity(fixture.World.get(), handle);
         CHECK(child && child.HasComponent<TransformComponent>());
-        CHECK(child.GetComponent<NativeScriptComponent>().State == ScriptInstanceState::Pending);
+        CHECK(child.GetComponent<CppScriptComponent>().Runtime.State == ScriptInstanceState::Pending);
         CHECK(fixture.Context.Native.size() == 1); // Paused flush did not call OnCreate/OnUpdate.
         fixture.Step();
         CHECK(fixture.Context.Observed["next batch"] == 1);
@@ -409,8 +415,8 @@ namespace
                 if (cause == "fault") throw std::runtime_error("intentional source failure");
                 if (cause == "remove")
                 {
-                    if (lua) entity.RemoveComponent<LuaScriptComponent>();
-                    else entity.RemoveComponent<NativeScriptComponent>();
+                    if (lua) entity.RemoveComponent<LuauScriptComponent>();
+                    else entity.RemoveComponent<CppScriptComponent>();
                 }
                 else Entity::DestroyEntity(entity.GetScene(), entity);
             };
@@ -423,8 +429,8 @@ namespace
             CHECK((lua ? fixture.Context.Lua : fixture.Context.Native).at(static_cast<uint32_t>(source)).Destroys == 1);
             if (cause == "fault")
             {
-                if (lua) CHECK(source.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Faulted);
-                else CHECK(source.GetComponent<NativeScriptComponent>().State == ScriptInstanceState::Faulted);
+                if (lua) CHECK(source.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Faulted);
+                else CHECK(source.GetComponent<CppScriptComponent>().Runtime.State == ScriptInstanceState::Faulted);
             }
         }
     }
@@ -442,13 +448,13 @@ namespace
                 fixture.Context.Observed["rejections"] += RejectsLogic([&] { Entity::CreateEntity(scene); });
                 fixture.Context.Observed["rejections"] += RejectsLogic([&] { entity.AddComponent<TransformComponent>(); });
                 fixture.Context.Observed["rejections"] += RejectsLogic([&] { scene->GetRegistry(); });
-                fixture.Context.Observed["rejections"] += RejectsLogic([&] { entity.AddOrReplaceComponent<NativeScriptComponent>(); });
+                fixture.Context.Observed["rejections"] += RejectsLogic([&] { entity.AddOrReplaceComponent<CppScriptComponent>(); });
             };
             fixture.World->OnScriptStart();
             fixture.Step();
             CHECK(fixture.Context.Observed["rejections"] == 4);
             CHECK(!source.HasComponent<TransformComponent>());
-            CHECK(source.GetComponent<NativeScriptComponent>().State == ScriptInstanceState::Running);
+            CHECK(source.GetComponent<CppScriptComponent>().Runtime.State == ScriptInstanceState::Running);
         }
 
         // Lua 白名单:OnUpdate 内 CreateChild/AddComponent 当帧同步生效,
@@ -461,10 +467,10 @@ namespace
             SetLuaString(observer, "Mode", "query");
             fixture.World->OnScriptStart();
             fixture.Step();
-            CHECK(spawner.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
-            CHECK(spawner.GetComponent<LuaScriptComponent>().LastError.empty());
-            CHECK(observer.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
-            CHECK(observer.GetComponent<LuaScriptComponent>().LastError.empty());
+            CHECK(spawner.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
+            CHECK(spawner.GetComponent<LuauScriptComponent>().Runtime.LastError.empty());
+            CHECK(observer.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
+            CHECK(observer.GetComponent<LuauScriptComponent>().Runtime.LastError.empty());
 
             // OnScriptUpdate 结束后、渲染前实体与组件已经在场景里(当帧可见)。
             const auto& registry = static_cast<const Scene&>(*fixture.World).GetRegistry();
@@ -491,8 +497,8 @@ namespace
             fixture.World->OnScriptStart();
             fixture.Step();
             CHECK(lua.HasComponent<TransformComponent>());
-            CHECK(lua.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
-            CHECK(lua.GetComponent<LuaScriptComponent>().LastError.empty());
+            CHECK(lua.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
+            CHECK(lua.GetComponent<LuauScriptComponent>().Runtime.LastError.empty());
             fixture.Stop();
         }
 
@@ -503,7 +509,7 @@ namespace
             SetLuaString(destroyer, "Mode", "destroy");
             destroyFixture.World->OnScriptStart();
             destroyFixture.Step();
-            CHECK(destroyer.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+            CHECK(destroyer.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
             const auto& registry = static_cast<const Scene&>(*destroyFixture.World).GetRegistry();
             bool doomedAlive = false;
             for (const entt::entity handle : registry.view<TagComponent>())
@@ -517,7 +523,7 @@ namespace
             SetLuaString(remover, "Mode", "remove");
             removeFixture.World->OnScriptStart();
             removeFixture.Step();
-            CHECK(remover.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+            CHECK(remover.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
             CHECK(!remover.HasComponent<TransformComponent>());
         }
     }
@@ -537,7 +543,7 @@ namespace
                         ++fixture.Context.Observed["C2 executed"];
                     }));
                     if (cause == "destroy") Entity::DestroyEntity(&scene, source);
-                    else if (cause == "remove") source.RemoveComponent<NativeScriptComponent>();
+                    else if (cause == "remove") source.RemoveComponent<CppScriptComponent>();
                     else if (cause == "fault") throw std::runtime_error("intentional C1 failure");
                     ++fixture.Context.Observed["C1 returned"];
                 }));
@@ -555,13 +561,13 @@ namespace
             CHECK(counts.Destroys == (cause == "alive" ? 0 : 1));
             CHECK(counts.Deletes == counts.Destroys);
             if (cause == "destroy") CHECK(!source);
-            else if (cause == "remove") CHECK(source && !source.HasComponent<NativeScriptComponent>());
+            else if (cause == "remove") CHECK(source && !source.HasComponent<CppScriptComponent>());
             else if (cause == "fault")
             {
-                const auto& script = source.GetComponent<NativeScriptComponent>();
-                CHECK(script.State == ScriptInstanceState::Faulted && script.Instance == nullptr);
-                CHECK(script.LastError.find("phase=StructuralChange") != std::string::npos);
-                CHECK(script.LastError.find("intentional C1 failure") != std::string::npos);
+                const auto& script = source.GetComponent<CppScriptComponent>();
+                CHECK(script.Runtime.State == ScriptInstanceState::Faulted && script.Instance == nullptr);
+                CHECK(script.Runtime.LastError.find("phase=StructuralChange") != std::string::npos);
+                CHECK(script.Runtime.LastError.find("intentional C1 failure") != std::string::npos);
             }
         }
     }
@@ -572,7 +578,8 @@ namespace
         auto runningNative = fixture.AddNative();
         auto runningLua = fixture.AddLua();
         auto faultNative = fixture.AddNative();
-        faultNative.GetComponent<NativeScriptComponent>().InstantiateScript = []() -> ScriptableEntity* { return nullptr; };
+        // 2026-09-26 重写:创建失败的判定不再是"工厂返回 null",而是 ScriptName 没有注册的类型。
+        faultNative.GetComponent<CppScriptComponent>().ScriptName = "T02MissingProbe";
         auto faultLua = fixture.AddLua("scripts/tests/does-not-exist.lua");
         fixture.World->OnScriptStart();
         Entity pendingNative, pendingLua;
@@ -580,30 +587,30 @@ namespace
             pendingNative = fixture.AddNative(); pendingLua = fixture.AddLua();
         }));
         fixture.World->FlushStructuralChanges();
-        auto* oldInstance = runningNative.GetComponent<NativeScriptComponent>().Instance;
+        auto* oldInstance = runningNative.GetComponent<CppScriptComponent>().Instance;
         CHECK(fixture.World->DeferStructuralChange([&](Scene&) {
             for (auto entity : { runningNative, pendingNative, faultNative })
-                fixture.Context.Observed["replace rejected"] += RejectsLogic([&] { entity.AddOrReplaceComponent<NativeScriptComponent>(); });
+                fixture.Context.Observed["replace rejected"] += RejectsLogic([&] { entity.AddOrReplaceComponent<CppScriptComponent>(); });
             for (auto entity : { runningLua, pendingLua, faultLua })
-                fixture.Context.Observed["replace rejected"] += RejectsLogic([&] { entity.AddOrReplaceComponent<LuaScriptComponent>(); });
+                fixture.Context.Observed["replace rejected"] += RejectsLogic([&] { entity.AddOrReplaceComponent<LuauScriptComponent>(); });
         }));
         fixture.World->FlushStructuralChanges();
         CHECK(fixture.Context.Observed["replace rejected"] == 6);
-        CHECK(runningNative.GetComponent<NativeScriptComponent>().Instance == oldInstance);
-        CHECK(pendingNative.GetComponent<NativeScriptComponent>().State == ScriptInstanceState::Pending);
-        CHECK(faultNative.GetComponent<NativeScriptComponent>().State == ScriptInstanceState::Faulted);
-        CHECK(faultLua.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Faulted);
-        CHECK(faultNative.GetComponent<NativeScriptComponent>().Instance == nullptr);
+        CHECK(runningNative.GetComponent<CppScriptComponent>().Instance == oldInstance);
+        CHECK(pendingNative.GetComponent<CppScriptComponent>().Runtime.State == ScriptInstanceState::Pending);
+        CHECK(faultNative.GetComponent<CppScriptComponent>().Runtime.State == ScriptInstanceState::Faulted);
+        CHECK(faultLua.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Faulted);
+        CHECK(faultNative.GetComponent<CppScriptComponent>().Instance == nullptr);
         CHECK(fixture.Context.Native.find(static_cast<uint32_t>(faultNative)) == fixture.Context.Native.end());
         CHECK(fixture.Context.Lua.find(static_cast<uint32_t>(faultLua)) == fixture.Context.Lua.end());
-        runningNative.RemoveComponent<NativeScriptComponent>();
-        runningLua.RemoveComponent<LuaScriptComponent>();
+        runningNative.RemoveComponent<CppScriptComponent>();
+        runningLua.RemoveComponent<LuauScriptComponent>();
         fixture.World->FlushStructuralChanges();
         CHECK(fixture.Context.Native.at(static_cast<uint32_t>(runningNative)).Deletes == 1);
         CHECK(fixture.Context.Lua.at(static_cast<uint32_t>(runningLua)).Destroys == 1);
         CHECK(fixture.World->DeferStructuralChange([=](Scene&) mutable {
-            BindProbe(runningNative.AddComponent<NativeScriptComponent>());
-            runningLua.AddComponent<LuaScriptComponent>("scripts/tests/LifecycleProbe.lua");
+            BindProbe(runningNative.AddComponent<CppScriptComponent>());
+            runningLua.AddComponent<LuauScriptComponent>("scripts/tests/LifecycleProbe.lua");
         }));
         fixture.World->FlushStructuralChanges();
         fixture.Step();
@@ -627,7 +634,7 @@ namespace
             else if (phase == "destroy")
             {
                 fixture.Context.Observed["destroy refuses create"] = !entity.GetScene()->DeferStructuralChange([](Scene&) {});
-                entity.RemoveComponent<NativeScriptComponent>();
+                entity.RemoveComponent<CppScriptComponent>();
                 Entity::DestroyEntity(entity.GetScene(), entity);
             }
         };
@@ -657,15 +664,15 @@ namespace
             fixture.World->OnScriptStart();
             fixture.Step();
             if (stage == "destroy") fixture.Stop();
-            auto& script = bad.GetComponent<NativeScriptComponent>();
-            CHECK(script.State == ScriptInstanceState::Faulted && script.Instance == nullptr && !script.CreateEntered);
-            CHECK(script.LastError.find("T02NativeProbe") != std::string::npos);
-            CHECK(script.LastError.find("entity=") != std::string::npos);
-            const auto error = script.LastError;
+            auto& script = bad.GetComponent<CppScriptComponent>();
+            CHECK(script.Runtime.State == ScriptInstanceState::Faulted && script.Instance == nullptr && !script.Runtime.CreateEntered);
+            CHECK(script.Runtime.LastError.find("T02NativeProbe") != std::string::npos);
+            CHECK(script.Runtime.LastError.find("entity=") != std::string::npos);
+            const auto error = script.Runtime.LastError;
             fixture.Step();
             fixture.Stop();
             fixture.Stop();
-            CHECK(script.LastError == error);
+            CHECK(script.Runtime.LastError == error);
             const auto& count = fixture.Context.Native.at(static_cast<uint32_t>(bad));
             CHECK(count.Creates == 1 && count.Destroys == 1 && count.Deletes == 1);
             CHECK(count.Updates == (stage == "create" ? 0 : 1));
@@ -684,18 +691,18 @@ namespace
             fixture.World->OnScriptStart();
             fixture.Step();
             if (stage == "OnDestroy") fixture.Stop();
-            auto& script = bad.GetComponent<LuaScriptComponent>();
-            CHECK(script.State == ScriptInstanceState::Faulted);
-            CHECK(script.LastError.find("CallbackErrors.lua") != std::string::npos);
-            CHECK(script.LastError.find("entity=") != std::string::npos);
-            CHECK(script.LastError.find("phase=" + stage) != std::string::npos);
-            CHECK(script.LastError.find("stack traceback") != std::string::npos);
+            auto& script = bad.GetComponent<LuauScriptComponent>();
+            CHECK(script.Runtime.State == ScriptInstanceState::Faulted);
+            CHECK(script.Runtime.LastError.find("CallbackErrors.lua") != std::string::npos);
+            CHECK(script.Runtime.LastError.find("entity=") != std::string::npos);
+            CHECK(script.Runtime.LastError.find("phase=" + stage) != std::string::npos);
+            CHECK(script.Runtime.LastError.find("stack traceback") != std::string::npos);
             CheckLuaReleased(bad);
-            const auto error = script.LastError;
+            const auto error = script.Runtime.LastError;
             fixture.Step();
             fixture.Stop();
             fixture.Stop();
-            CHECK(script.LastError == error);
+            CHECK(script.Runtime.LastError == error);
             const auto& count = fixture.Context.Lua.at(static_cast<uint32_t>(bad));
             CHECK(count.Creates == 1 && count.Destroys == 1);
             CHECK(count.Updates == (stage == "OnCreate" ? 0 : 1));
@@ -709,7 +716,7 @@ namespace
             auto good = fixture.AddLua();
             fixture.World->OnScriptStart();
             fixture.Step();
-            CHECK(bad.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Faulted);
+            CHECK(bad.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Faulted);
             CheckLuaReleased(bad);
             CHECK(fixture.Context.Lua.find(static_cast<uint32_t>(bad)) == fixture.Context.Lua.end());
             CHECK(fixture.Context.Lua.at(static_cast<uint32_t>(good)).Updates == 1);
@@ -720,34 +727,38 @@ namespace
     {
         Fixture fixture;
         auto source = fixture.AddNative();
-        source.AddComponent<LuaScriptComponent>("scripts/tests/LifecycleProbe.lua");
+        source.AddComponent<LuauScriptComponent>("scripts/tests/LifecycleProbe.lua");
         source.AddComponent<TransformComponent>();
         source.AddComponent<RigidBody2DComponent>().Type = RigidBody2DComponent::BodyType::Dynamic;
         source.AddComponent<BoxCollider2DComponent>();
-        source.GetComponent<NativeScriptComponent>().FieldValues["Value"] = 19.0f;
+        source.GetComponent<CppScriptComponent>().Properties.push_back(
+            ScriptProperty{ "Value", Schema::Kind::Float, Schema::Value(19.0f) });
         SetLuaString(source, "Mode", "normal");
         fixture.World->OnRuntimeStart();
         CHECK(b2Body_IsValid(source.GetComponent<RigidBody2DComponent>().RuntimeBodyId));
         auto clone = CreateRef<Scene>(TestContext());
         Scene::CopyScene(fixture.World, clone);
-        auto view = static_cast<const Scene&>(*clone).GetRegistry().view<NativeScriptComponent, LuaScriptComponent, RigidBody2DComponent>();
+        auto view = static_cast<const Scene&>(*clone).GetRegistry().view<CppScriptComponent, LuauScriptComponent, RigidBody2DComponent>();
         CHECK(view.begin() != view.end());
         Entity copy(clone.get(), *view.begin());
-        auto& native = copy.GetComponent<NativeScriptComponent>();
-        CHECK(native.Instance == nullptr && native.State == ScriptInstanceState::Pending && native.Generation == 0);
-        CHECK(native.InstantiateScript == source.GetComponent<NativeScriptComponent>().InstantiateScript);
-        CHECK(std::get<float>(native.FieldValues.at("Value")) == 19.0f);
+        auto& native = copy.GetComponent<CppScriptComponent>();
+        CHECK(native.Instance == nullptr && native.Runtime.State == ScriptInstanceState::Pending && native.Runtime.Generation == 0);
+        // 克隆只带配置:脚本引用 + 属性表;运行实例/状态从 Pending 重新起跑。
+        CHECK(native.ScriptName == source.GetComponent<CppScriptComponent>().ScriptName);
+        const ScriptProperty* clonedValue = ScriptProperties::Find(native.Properties, "Value");
+        CHECK(clonedValue != nullptr && std::get<float>(clonedValue->Value) == 19.0f);
         CheckLuaReleased(copy);
-        CHECK(copy.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Pending);
-        CHECK(copy.GetComponent<LuaScriptComponent>().Generation == 0);
-        CHECK(std::any_cast<std::string>(copy.GetComponent<LuaScriptComponent>().CachedFields.at("Mode").Value) == "normal");
+        CHECK(copy.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Pending);
+        CHECK(copy.GetComponent<LuauScriptComponent>().Runtime.Generation == 0);
+        const ScriptProperty* clonedMode = ScriptProperties::Find(copy.GetComponent<LuauScriptComponent>().Properties, "Mode");
+        CHECK(clonedMode != nullptr && std::get<std::string>(clonedMode->Value) == "normal");
         CHECK(B2_IS_NULL(copy.GetComponent<RigidBody2DComponent>().RuntimeBodyId));
         clone.reset();
-        CHECK(source.GetComponent<NativeScriptComponent>().Instance != nullptr);
-        CHECK(source.GetComponent<LuaScriptComponent>().IsLoaded);
+        CHECK(source.GetComponent<CppScriptComponent>().Instance != nullptr);
+        CHECK(source.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
         fixture.Stop();
         fixture.World->DuplicateEntity(source);
-        CHECK(static_cast<const Scene&>(*fixture.World).GetRegistry().view<NativeScriptComponent>().size() == 2);
+        CHECK(static_cast<const Scene&>(*fixture.World).GetRegistry().view<CppScriptComponent>().size() == 2);
     }
 
     void InheritedLuaCallbacksAndLookupErrors()
@@ -765,7 +776,7 @@ namespace
             {
                 const auto& counts = fixture.Context.Lua.at(static_cast<uint32_t>(entity));
                 CHECK(counts.Creates == 1 && counts.Updates == 2 && counts.Destroys == 1);
-                CHECK(entity.GetComponent<LuaScriptComponent>().LastError.empty());
+                CHECK(entity.GetComponent<LuauScriptComponent>().Runtime.LastError.empty());
                 CheckLuaReleased(entity);
             }
             CHECK(fixture.Context.CorrectThread && fixture.Context.SeparateTables);
@@ -777,15 +788,15 @@ namespace
             auto healthy = fixture.AddLua();
             fixture.World->OnScriptStart();
             fixture.Step();
-            auto& script = bad.GetComponent<LuaScriptComponent>();
-            CHECK(script.State == ScriptInstanceState::Faulted);
-            CHECK(script.LastError.find("intentional inherited lookup failure") != std::string::npos);
-            CHECK(script.LastError.find("CallbackErrors.lua") != std::string::npos);
-            CHECK(script.LastError.find("stack traceback") != std::string::npos);
+            auto& script = bad.GetComponent<LuauScriptComponent>();
+            CHECK(script.Runtime.State == ScriptInstanceState::Faulted);
+            CHECK(script.Runtime.LastError.find("intentional inherited lookup failure") != std::string::npos);
+            CHECK(script.Runtime.LastError.find("CallbackErrors.lua") != std::string::npos);
+            CHECK(script.Runtime.LastError.find("stack traceback") != std::string::npos);
             CheckLuaReleased(bad);
-            const auto error = script.LastError;
+            const auto error = script.Runtime.LastError;
             fixture.Step();
-            CHECK(script.LastError == error);
+            CHECK(script.Runtime.LastError == error);
             CHECK(fixture.Context.Lua.find(static_cast<uint32_t>(bad)) == fixture.Context.Lua.end());
             CHECK(fixture.Context.Lua.at(static_cast<uint32_t>(healthy)).Updates == 2);
         }
@@ -907,34 +918,36 @@ namespace
         CHECK(destructed == 4);
     }
 
-    void NativeInspectorBorrowsRunningInstance()
+    void NativePropertiesConfigureFactoryInstance()
     {
         Fixture fixture;
         auto entity = fixture.AddNative();
+        auto& script = entity.GetComponent<CppScriptComponent>();
+
+        // 编辑态(2026-09-26 重写):不实例化脚本,属性表就是唯一配置来源。
+        CHECK(script.Instance == nullptr);
+        CHECK(script.Runtime.State == ScriptInstanceState::Pending);
+        script.Properties.push_back(ScriptProperty{ "Value", Schema::Kind::Float, Schema::Value(19.0f) });
+        const ScriptProperty* saved = ScriptProperties::Find(script.Properties, "Value");
+        CHECK(saved != nullptr);
+        CHECK(std::get<float>(saved->Value) == 19.0f);
+        CHECK(fixture.Context.Native.find(static_cast<uint32_t>(entity)) == fixture.Context.Native.end());
+
+        // Play:实例由 schema 的脚本工厂按 ScriptName 创建,创建前把保存的属性值套用到实例字段。
         fixture.World->OnScriptStart();
-        auto& script = entity.GetComponent<NativeScriptComponent>();
-        auto* instance = script.Instance;
-        CHECK(instance != nullptr);
+        CHECK(script.Runtime.State == ScriptInstanceState::Running);
+        CHECK(script.Instance != nullptr);
+        CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Creates == 1);
+        auto* instance = static_cast<NativeProbe*>(script.Instance);
+        CHECK(instance->Value == 19.0f);   // 场景保存的属性值覆盖了脚本构造默认值 7.5
 
-        // T04：经与 UI 框架解耦的字段访问合同，验证“借用运行实例、不新建、不销毁、FieldValues 回填”。
-        bool owned = false;
-        ScriptableEntity* preview = script.GetOrCreateEditorInstance(!fixture.World->IsActive(), owned);
-        CHECK(preview == instance);
-        CHECK(!owned);
-        const Schema::TypeSchema* typeSchema = TestContext().Schemas().Find(script.ScriptName);
-        CHECK(typeSchema != nullptr);
-        if (typeSchema)
-        {
-            for (const Schema::FieldSchema& field : typeSchema->Fields)
-                script.GetErasedFieldValue(*typeSchema, field, preview);
-        }
-        script.ReleaseEditorInstance(preview); // 借用路径不销毁
-
-        CHECK(entity.GetComponent<NativeScriptComponent>().Instance == instance);
+        // 运行期读取不新建、不销毁实例。
+        CHECK(entity.GetComponent<CppScriptComponent>().Instance == script.Instance);
         CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Deletes == 0);
-        CHECK(entity.GetComponent<NativeScriptComponent>().FieldValues.count("Value") == 1); // Field body was actually visited.
+
         fixture.Step();
         fixture.Stop();
+        CHECK(script.Instance == nullptr);
         CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Destroys == 1);
         CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Deletes == 1);
     }
@@ -955,18 +968,21 @@ namespace
         Fixture fixture;
         auto invalid = fixture.AddLua(invalidPath.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string());
         fixture.World->OnScriptStart();
-        CHECK(invalid.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Faulted);
-        CHECK(invalid.GetComponent<LuaScriptComponent>().LastError.find("phase=Load") != std::string::npos);
+        CHECK(invalid.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Faulted);
+        CHECK(invalid.GetComponent<LuauScriptComponent>().Runtime.LastError.find("phase=Load") != std::string::npos);
         CheckLuaReleased(invalid);
         fixture.Stop();
         auto preview = fixture.AddLua("scripts/tests/CallbackErrors.lua");
-        auto& script = preview.GetComponent<LuaScriptComponent>();
+        auto& script = preview.GetComponent<LuauScriptComponent>();
         CHECK(ScriptEngine::InitScriptForEditor(script));
         SetLuaString(preview, "FailStage", "Saved editor value");
-        script.ScriptFilePath = invalid.GetComponent<LuaScriptComponent>().ScriptFilePath;
+        script.ScriptPath = invalid.GetComponent<LuauScriptComponent>().ScriptPath;
         CHECK(!ScriptEngine::InitScriptForEditor(script));
-        CHECK(std::any_cast<std::string>(script.CachedFields.at("FailStage").Value) == "Saved editor value");
-        CHECK(script.State == ScriptInstanceState::Faulted && !script.IsLoaded);
+        // 失败的预览不碰属性表:编辑器里已改的值保留。
+        const ScriptProperty* savedFailStage = ScriptProperties::Find(script.Properties, "FailStage");
+        CHECK(savedFailStage != nullptr);
+        CHECK(std::get<std::string>(savedFailStage->Value) == "Saved editor value");
+        CHECK(script.Runtime.State == ScriptInstanceState::Faulted);
         CHECK(!script.LuaEnv.IsValid() && !script.ScriptTable.IsValid());
     }
 
@@ -1062,12 +1078,12 @@ namespace
             print(42, true, false, nil, { test = "tostring semantics" })
         )lua");
         fixture.World->OnScriptStart();
-        CHECK(entity.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+        CHECK(entity.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
         fixture.Step();
-        CHECK(entity.GetComponent<LuaScriptComponent>().State == ScriptInstanceState::Running);
+        CHECK(entity.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Running);
         fixture.Stop();
         CheckLuaReleased(entity);
-        CHECK(entity.GetComponent<LuaScriptComponent>().LastError.empty());
+        CHECK(entity.GetComponent<LuauScriptComponent>().Runtime.LastError.empty());
     }
 
     void VmRestartKeepsUniqueMetadata()
@@ -1120,22 +1136,22 @@ namespace
             fixture.World->OnScriptStart();
             fixture.Step();
 
-            auto& script = spin.GetComponent<LuaScriptComponent>();
-            CHECK(script.State == ScriptInstanceState::Faulted);
-            CHECK(script.LastError.find("script budget exceeded") != std::string::npos);
-            CHECK(script.LastError.find("scripts/tests/BudgetSpin.lua") != std::string::npos);
-            CHECK(script.LastError.find("instructions") != std::string::npos);
-            CHECK(script.LastError.find("phase=OnUpdate") != std::string::npos);
-            CHECK(script.LastError.find("stack traceback") != std::string::npos);
+            auto& script = spin.GetComponent<LuauScriptComponent>();
+            CHECK(script.Runtime.State == ScriptInstanceState::Faulted);
+            CHECK(script.Runtime.LastError.find("script budget exceeded") != std::string::npos);
+            CHECK(script.Runtime.LastError.find("scripts/tests/BudgetSpin.lua") != std::string::npos);
+            CHECK(script.Runtime.LastError.find("instructions") != std::string::npos);
+            CHECK(script.Runtime.LastError.find("phase=OnUpdate") != std::string::npos);
+            CHECK(script.Runtime.LastError.find("stack traceback") != std::string::npos);
             CheckLuaReleased(spin);
-            std::cout << "[W6] BudgetSpin fault: " << FirstLine(script.LastError) << '\n';
+            std::cout << "[W6] BudgetSpin fault: " << FirstLine(script.Runtime.LastError) << '\n';
 
             fixture.Step();
             CHECK(fixture.Context.Lua.at(static_cast<uint32_t>(good)).Updates == 2);
             CHECK(fixture.World->IsActive());
-            const std::string error = script.LastError;
+            const std::string error = script.Runtime.LastError;
             fixture.Step();
-            CHECK(script.LastError == error);
+            CHECK(script.Runtime.LastError == error);
             fixture.Stop();
         }
         CHECK(ScriptEngine::GetSandboxPolicy().Instructions == defaultPolicy.Instructions);
@@ -1176,8 +1192,14 @@ int main(int argc, char** argv)
         s_OutputDirectory = fs::path(WORLD_SCRIPT_TEST_OUTPUT_DIR) / ("run-" + std::to_string(GetCurrentProcessId()));
         fs::create_directories(s_OutputDirectory);
         {
+            // 2026-09-26 重写:Category==Script 的 schema 绑定 = 工厂(Create/Destroy),
+            // 组件里不再有函数指针;工厂这里需要当前 ProbeContext 才能建出 NativeProbe。
             static const Schema::ScriptBinding probeBinding = {
-                [](void* raw) { BindProbe(*static_cast<NativeScriptComponent*>(raw)); }
+                []() -> ScriptableEntity* {
+                    if (!s_ProbeContext) throw std::logic_error("Missing test context");
+                    return new NativeProbe(*s_ProbeContext);
+                },
+                [](ScriptableEntity* instance) { delete instance; },
             };
             static const Schema::FieldSchema probeValue = {
                 Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Value") },
@@ -1220,7 +1242,7 @@ int main(int argc, char** argv)
             { "body removal and component dependencies", PhysicsRemovalAndDependencies },
             { "camera reacquisition and expired Entity", CameraReacquisitionAndExpiredHandles },
             { "non-owning LayerStack detach order", NonOwningLayerDetachOrder },
-            { "native Inspector borrows live instance", NativeInspectorBorrowsRunningInstance },
+            { "native properties configure the factory instance", NativePropertiesConfigureFactoryInstance },
             { "syntax errors preserve preview cache", SyntaxErrorsAndPreviewCache },
             { "deterministic and atomic stub generation", StubGenerationContracts },
             { "real static-link bindings and template", RealBindingsAndTemplate },

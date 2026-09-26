@@ -19,7 +19,7 @@
 namespace World
 {
 	// P2 W5b:脚本热重载只按引用操作组件(完整定义在 Scene/Components.h)。
-	struct LuaScriptComponent;
+	struct LuauScriptComponent;
 
 	class EditorLayer : public Layer
 	{
@@ -154,13 +154,15 @@ namespace World
 
 		// ---- P2 W5b:脚本热重载(编辑器侧接线)----
 		// 唯一的重载入口:帧边界轮询、属性面板 Reload 按钮、AI 通道 script.reload 共用。
-		//   - Running + IsLoaded:ScriptEngine::ReloadScript(失败保留旧版本,诊断写进组件);
-		//   - Faulted/未加载:复位 Pending(IsLoaded=false、清 LastError,保留 CachedFields 与
-		//     ScriptFilePath),交给 Scene 既有的 pending 机制在下一个安全点重新实例化 —— 也就是
+		// 2026-09-26 组件重写:`Runtime`(State/LastError/Generation/CreateEntered)是唯一运行态,
+		// 旧的双轨加载标记已删除;"有活动实例"= `Runtime.State == Running`。
+		//   - Running:ScriptEngine::ReloadScript(失败保留旧版本,诊断写进组件);
+		//   - Faulted/Stopped/Pending:复位 Pending(清 Runtime.LastError,保留 Properties 与
+		//     ScriptPath),交给 Scene 既有的 pending 机制在下一个安全点重新实例化 —— 也就是
 		//     "把脚本写坏 → 改好 → Reload 救回来";
 		//   - Creating/Destroying:拒绝(不打断生命周期)。
 		// scene 只用于把"编辑态场景不跑脚本"写进 message,可为 null。
-		static bool ReloadLuaScriptComponent(LuaScriptComponent& script, Scene* scene, std::string* message = nullptr);
+		static bool ReloadLuauScriptComponent(LuauScriptComponent& script, Scene* scene, std::string* message = nullptr);
 
 		// ---- P2 W8:Scripts 面板的宿主能力(EditorShell 作为 PanelHost 转发到这里)----
 		// 重载指定实体的脚本:组件查找走 Entity 的组件指针入口(Play/Simulate 下也不触发

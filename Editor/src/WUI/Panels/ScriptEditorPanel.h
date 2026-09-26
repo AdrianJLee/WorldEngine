@@ -49,7 +49,7 @@ namespace World
 		void ApplySave(PanelHost& host);
 		// 用磁盘版本覆盖 buffer(工具栏 Revert / Ctrl+R / 冲突提示的 Reload)。
 		void ApplyReloadFromDisk(PanelHost& host);
-		// 编辑态下把场景里同一逻辑路径的 LuaScriptComponent 走唯一重载入口刷新。
+		// 编辑态下把场景里同一逻辑路径的 LuauScriptComponent 走唯一重载入口刷新。
 		void ReloadSceneInstances(PanelHost& host);
 		// W9.5:懒加载入库 WorldEngineAPI.luau 补全索引;失败只报一次并关闭补全。
 		void EnsureCompletionReady();

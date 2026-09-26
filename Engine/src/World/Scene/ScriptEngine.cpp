@@ -14,6 +14,7 @@
 #include "World/Script/LuauVm.h"
 #include "World/Script/Sandbox.h"
 #include "World/Script/ScriptBindingContext.h"
+#include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptRef.h"
 #include "World/WUI/WuiContext.h"
 
@@ -25,6 +26,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 
 namespace World
@@ -62,17 +64,17 @@ namespace World
 			"    return names\n"
 			"end";
 
-		void ReportLuaError(LuaScriptComponent& script, const char* phase, const std::string& error)
+		void ReportLuaError(LuauScriptComponent& script, const char* phase, const std::string& error)
 		{
-			const std::string message = "[Lua] " + script.ScriptFilePath + " entity=" +
+			const std::string message = "[Lua] " + script.ScriptPath + " entity=" +
 				std::to_string(static_cast<uint32_t>(script.RuntimeEntity)) + " phase=" + phase + ":\n" + error;
-			if (!script.LastError.empty()) script.LastError += "\n";
-			script.LastError += message;
-			script.State = ScriptInstanceState::Faulted;
+			if (!script.Runtime.LastError.empty()) script.Runtime.LastError += "\n";
+			script.Runtime.LastError += message;
+			script.Runtime.State = ScriptInstanceState::Faulted;
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("{0}", message);
 		}
 
-		void ClearLuaReferences(LuaScriptComponent& script)
+		void ClearLuaReferences(LuauScriptComponent& script)
 		{
 			script.OnCreateFunc.Release();
 			script.OnUpdateFunc.Release();
@@ -81,8 +83,7 @@ namespace World
 			script.ScriptTable.Release();
 			script.LuaEnv.Release();
 			script.RuntimeEntity = {};
-			script.IsLoaded = false;
-			script.CreateEntered = false;
+			script.Runtime.CreateEntered = false;
 		}
 
 		// W7-3:脚本读取的单一入口(二进制安全,容器字节里的 '\0' 原样保留)。
@@ -142,9 +143,12 @@ namespace World
 			return type;
 		}
 
-		std::unordered_map<std::string, std::string> ParseFieldAnnotationsInternal(const std::string& text)
+		// 名字 + Lua 注解类型名(声明顺序;重复声明以第一次为准)。
+		using AnnotationList = std::vector<std::pair<std::string, std::string>>;
+
+		AnnotationList ParseFieldAnnotationListInternal(const std::string& text)
 		{
-			std::unordered_map<std::string, std::string> schema;
+			AnnotationList schema;
 			std::istringstream stream(text);
 			std::string line;
 			while (std::getline(stream, line))
@@ -161,217 +165,255 @@ namespace World
 					continue;
 				if (!(rest >> type))
 					continue;
-				schema[name] = type;
+				if (std::any_of(schema.begin(), schema.end(),
+						[&name](const auto& item) { return item.first == name; }))
+					continue;   // 重复声明以第一次为准(与 ScriptProperties::SyncFromDeclarations 同口径)
+				schema.emplace_back(std::move(name), std::move(type));
 			}
+			return schema;
+		}
+
+		std::unordered_map<std::string, std::string> ParseFieldAnnotationsInternal(const std::string& text)
+		{
+			std::unordered_map<std::string, std::string> schema;
+			for (const auto& [name, type] : ParseFieldAnnotationListInternal(text))
+				schema.emplace(name, type);
 			return schema;
 		}
 
 		// W7-3:容器字节(不嵌源码)跳过 `---@field` 注解解析 → 字段类型走"旧值推断"回退;
 		// 源码字节保持既有注解解析。判定只看前 4 字节 magic(与 LoadChunk 同一条判定)。
-		std::unordered_map<std::string, std::string> ParseAnnotationsForBytes(const std::vector<uint8_t>& bytes)
+		AnnotationList ParseAnnotationsForBytes(const std::vector<uint8_t>& bytes)
 		{
 			if (Asset::ScriptArtifact::IsArtifactBytes(bytes.data(), bytes.size()))
 				return {};
-			return ParseFieldAnnotationsInternal(std::string(bytes.begin(), bytes.end()));
+			return ParseFieldAnnotationListInternal(std::string(bytes.begin(), bytes.end()));
 		}
 
-		LuaFieldType AnnotationToFieldTypeInternal(const std::string& typeName, const ScriptValue& value)
+		// 2026-09-26 重写(统一属性模型):注解类型名 → schema 值类型。
+		//   number  → 整数值 Int32 / 其它 Float(Lua 只有 number;沿用旧的按值区分口径)
+		//   integer/int → Int32,boolean/bool → Bool,string → String
+		// 未知类型名或"注解与当前值类型不符" → None(该字段不成为脚本属性)。
+		Schema::Kind AnnotationToKindInternal(const std::string& typeName, const ScriptValue& value)
 		{
 			if (typeName == "number")
 			{
 				double number = 0.0;
 				if (!value.AsNumber(&number))
-					return LuaFieldType::None;
+					return Schema::Kind::None;
 				if (std::isfinite(number) && number == std::floor(number) &&
-					number >= (std::numeric_limits<int>::min)() && number <= (std::numeric_limits<int>::max)())
-					return LuaFieldType::Int;
-				return LuaFieldType::Float;
+					number >= (std::numeric_limits<int32_t>::min)() && number <= (std::numeric_limits<int32_t>::max)())
+					return Schema::Kind::Int32;
+				return Schema::Kind::Float;
 			}
 			if (typeName == "integer" || typeName == "int")
-				return value.IsNumber() ? LuaFieldType::Int : LuaFieldType::None;
+				return value.IsNumber() ? Schema::Kind::Int32 : Schema::Kind::None;
 			if (typeName == "boolean" || typeName == "bool")
-				return value.IsBoolean() ? LuaFieldType::Bool : LuaFieldType::None;
+				return value.IsBoolean() ? Schema::Kind::Bool : Schema::Kind::None;
 			if (typeName == "string")
-				return value.IsString() ? LuaFieldType::String : LuaFieldType::None;
-			return LuaFieldType::None;
+				return value.IsString() ? Schema::Kind::String : Schema::Kind::None;
+			return Schema::Kind::None;
 		}
 
-		bool ExtractNumber(const ScriptValue& value, double* out)
+		// 没有注解的字段(容器脚本 / 未写注解的表项):按值推断,与旧口径一致。
+		Schema::Kind InferKindFromValueInternal(const ScriptValue& value)
 		{
 			double number = 0.0;
-			if (!value.AsNumber(&number))
-				return false;
-			if (out)
-				*out = number;
-			return true;
+			if (value.AsNumber(&number))
+			{
+				if (std::isfinite(number) && number == std::floor(number) &&
+					number >= (std::numeric_limits<int32_t>::min)() && number <= (std::numeric_limits<int32_t>::max)())
+					return Schema::Kind::Int32;
+				return Schema::Kind::Float;
+			}
+			if (value.IsBoolean()) return Schema::Kind::Bool;
+			if (value.IsString()) return Schema::Kind::String;
+			return Schema::Kind::None;
 		}
 
-		// W5a-2:从"当前脚本表"读一个字段的运行期值,并转成新版本声明的字段类型。
-		// 迁移优先级:活表(同名且类型兼容)→ CachedFields(同名同类型)→ 新脚本默认值。
-		// 只有 rawget 非 nil(真正的自有字段)才算"当前表里有";类型兼容只放宽 number 域:
-		//   声明 Int   → 活值必须是整数值且在 int 范围内;
-		//   声明 Float → 活值可以是任何 number(整数也可以);
-		//   Bool/String → 严格同类型。
-		bool TryReadLiveField(const ScriptTableRef& table, const std::string& name, LuaFieldType type,
-			LuaScriptField* out)
+		// 脚本值 → 属性值:按声明的类型严格转换;失败返回 false 且不改 *out。
+		// 兼容只放宽 number 域:声明 Int32 要求整数值且在 int32 范围内;Float 接受任何 number;
+		// Bool/String 严格同类型。
+		bool ReadPropertyValueInternal(const ScriptValue& value, Schema::Kind kind, Schema::Value* out)
 		{
-			if (!out || !table.IsValid() || !table.HasField(name.c_str()))
+			if (!out)
 				return false;
-
-			const ScriptValue value = table.GetField(name.c_str());
-			LuaScriptField field;
-			field.Type = type;
-			switch (type)
+			switch (kind)
 			{
-				case LuaFieldType::Int:
+				case Schema::Kind::Int32:
 				{
 					double number = 0.0;
 					if (!value.AsNumber(&number) || !std::isfinite(number) || number != std::floor(number) ||
-						number < (std::numeric_limits<int>::min)() || number > (std::numeric_limits<int>::max)())
+						number < (std::numeric_limits<int32_t>::min)() || number > (std::numeric_limits<int32_t>::max)())
 						return false;
-					field.Value = static_cast<int>(number);
-					break;
+					*out = static_cast<int32_t>(number);
+					return true;
 				}
-				case LuaFieldType::Float:
+				case Schema::Kind::Float:
 				{
 					double number = 0.0;
 					if (!value.AsNumber(&number))
 						return false;
-					field.Value = static_cast<float>(number);
-					break;
+					*out = static_cast<float>(number);
+					return true;
 				}
-				case LuaFieldType::Bool:
+				case Schema::Kind::Bool:
 				{
 					bool boolean = false;
 					if (!value.AsBool(&boolean))
 						return false;
-					field.Value = boolean;
-					break;
+					*out = boolean;
+					return true;
 				}
-				case LuaFieldType::String:
+				case Schema::Kind::String:
 				{
 					std::string text;
 					if (!value.AsString(&text))
 						return false;
-					field.Value = std::move(text);
-					break;
+					*out = std::move(text);
+					return true;
 				}
 				default:
 					return false;
 			}
-			*out = std::move(field);
-			return true;
 		}
 
-		// 脚本返回表 -> 内存字段缓存(键仍是字段名;同类型才复用旧值 —— 与 sol2 时期一致)。
-		// liveTable(可空)只用于热重载:活表同名兼容值优先于 CachedFields。
-		std::unordered_map<std::string, LuaScriptField> BuildFieldCache(const ScriptTableRef& table,
-			const std::unordered_map<std::string, std::string>& schema, const LuaScriptComponent& script,
-			const ScriptTableRef* liveTable = nullptr)
+		// 从"活表"(热重载前的旧脚本表)读一个自有字段:只有 rawget 非 nil 才算存在,
+		// 值按新声明的类型转换。缺失/类型不符 → false(回退场景保存值)。
+		bool ReadLiveFieldInternal(const ScriptTableRef& table, const std::string& name, Schema::Kind kind,
+			Schema::Value* out)
 		{
-			std::unordered_map<std::string, LuaScriptField> fields;
+			if (!table.IsValid() || !table.HasField(name.c_str()))
+				return false;
+			return ReadPropertyValueInternal(table.GetField(name.c_str()), kind, out);
+		}
+
+		// 属性值 → 脚本值(写回脚本表用);空值(monostate)返回 Nil,调用方跳过。
+		ScriptValue ToScriptValueInternal(const Schema::Value& value)
+		{
+			if (const bool* boolean = std::get_if<bool>(&value)) return ScriptValue::Boolean(*boolean);
+			if (const int32_t* number = std::get_if<int32_t>(&value)) return ScriptValue::Number(static_cast<double>(*number));
+			if (const float* number = std::get_if<float>(&value)) return ScriptValue::Number(static_cast<double>(*number));
+			if (const double* number = std::get_if<double>(&value)) return ScriptValue::Number(*number);
+			if (const int64_t* number = std::get_if<int64_t>(&value)) return ScriptValue::Number(static_cast<double>(*number));
+			if (const uint32_t* number = std::get_if<uint32_t>(&value)) return ScriptValue::Number(static_cast<double>(*number));
+			if (const std::string* text = std::get_if<std::string>(&value)) return ScriptValue::String(*text);
+			return ScriptValue::Nil();
+		}
+
+		struct ScriptFieldDeclaration
+		{
+			std::string Name;
+			Schema::Kind Type = Schema::Kind::None;
+		};
+
+		// 脚本返回表的**自有字符串键**(跳过 `_` 前缀与 `entity`),顺序 = 表遍历顺序。
+		std::vector<std::string> CollectOwnFieldNames(const ScriptTableRef& table)
+		{
 			std::vector<std::string> names;
+			ScriptValue namesValue;
+			std::string error;
+			const ScriptValue args[] = { table.ToValue() };
+			if (!s_CollectFieldNames.Call(args, 1, &namesValue, &error))
+				throw std::runtime_error(error);
+			ScriptTableRef array;
+			if (namesValue.AsTable(&array))
 			{
-				ScriptValue namesValue;
-				std::string error;
-				const ScriptValue args[] = { table.ToValue() };
-				if (!s_CollectFieldNames.Call(args, 1, &namesValue, &error))
-					throw std::runtime_error(error);
-				ScriptTableRef array;
-				if (namesValue.AsTable(&array))
+				for (const ScriptValue& item : array.GetArray())
 				{
-					for (const ScriptValue& item : array.GetArray())
-					{
-						std::string name;
-						if (item.AsString(&name))
-							names.push_back(std::move(name));
-					}
+					std::string name;
+					if (item.AsString(&name))
+						names.push_back(std::move(name));
+				}
+			}
+			return names;
+		}
+
+		// 脚本表 + 注解 → 属性声明表。顺序 = 注解顺序(先声明先显示)→ 表里其余字段的顺序;
+		// 未知注解类型 / 注解与值类型不符 → 跳过该字段并写一条诊断(旧行为是静默跳过)。
+		std::vector<ScriptFieldDeclaration> BuildDeclarations(const ScriptTableRef& table,
+			const AnnotationList& annotations, const std::string& scriptPath, std::vector<std::string>* diagnostics)
+		{
+			const std::vector<std::string> names = CollectOwnFieldNames(table);
+			const auto isField = [&names](const std::string& name)
+			{
+				return std::find(names.begin(), names.end(), name) != names.end();
+			};
+			const auto skipName = [](const std::string& name)
+			{
+				return name.empty() || name[0] == '_' || name == "entity";
+			};
+
+			std::vector<ScriptFieldDeclaration> declared;
+			std::unordered_set<std::string> visited;
+			for (const auto& [name, typeName] : annotations)
+			{
+				if (visited.count(name) || skipName(name) || !isField(name))
+					continue;
+				visited.insert(name);
+				const Schema::Kind kind = AnnotationToKindInternal(typeName, table.GetField(name.c_str()));
+				if (kind == Schema::Kind::None)
+				{
+					if (diagnostics)
+						diagnostics->push_back("[script] " + scriptPath + ": field '" + name +
+							"' declares unsupported type '" + typeName +
+							"' (expected number/integer/boolean/string); the field is not exposed as a script property");
+					continue;
+				}
+				declared.push_back({ name, kind });
+			}
+			for (const std::string& name : names)
+			{
+				if (visited.count(name) || skipName(name))
+					continue;
+				visited.insert(name);
+				const Schema::Kind kind = InferKindFromValueInternal(table.GetField(name.c_str()));
+				if (kind == Schema::Kind::None)
+					continue;
+				declared.push_back({ name, kind });
+			}
+			return declared;
+		}
+
+		// 新脚本 → 属性表同步(Luau 的所有加载路径唯一的入口):
+		//   1. 声明表 = 注解顺序 → 表序(见 BuildDeclarations);
+		//   2. liveTable(只有热重载传)里同名同类型的自有值覆盖旧值(运行期 self.X=... 的真实状态);
+		//   3. ScriptProperties::SyncFromDeclarations:同名同类型保留旧值(场景保存值),其余待定;
+		//   4. 待定字段用新脚本自己的默认值填上。
+		// 优先级:活表 > 场景保存值 > 新脚本默认值。
+		void SyncPropertiesFromScript(LuauScriptComponent& script, const ScriptTableRef& table,
+			const AnnotationList& annotations, const ScriptTableRef* liveTable, std::vector<std::string>* diagnostics)
+		{
+			const std::vector<ScriptFieldDeclaration> declarations =
+				BuildDeclarations(table, annotations, script.ScriptPath, diagnostics);
+
+			if (liveTable)
+			{
+				for (const ScriptFieldDeclaration& declaration : declarations)
+				{
+					ScriptProperty* property = ScriptProperties::Find(script.Properties, declaration.Name);
+					if (!property || property->Type != declaration.Type)
+						continue;   // 类型变了 → 走"回新默认值"路径,不迁移活值
+					Schema::Value live;
+					if (ReadLiveFieldInternal(*liveTable, declaration.Name, declaration.Type, &live))
+						property->Value = std::move(live);
 				}
 			}
 
-			for (const std::string& name : names)
+			std::vector<std::pair<std::string, Schema::Kind>> declared;
+			declared.reserve(declarations.size());
+			for (const ScriptFieldDeclaration& declaration : declarations)
+				declared.emplace_back(declaration.Name, declaration.Type);
+			ScriptProperties::SyncFromDeclarations(script.Properties, declared);
+
+			for (ScriptProperty& property : script.Properties)
 			{
-				if (name.empty() || name[0] == '_' || name == "entity")
+				if (!std::holds_alternative<std::monostate>(property.Value))
 					continue;
-				const ScriptValue value = table.GetField(name.c_str());
-				LuaScriptField field;
-				const auto schemaIt = schema.find(name);
-				if (schemaIt != schema.end())
-				{
-					field.Type = AnnotationToFieldTypeInternal(schemaIt->second, value);
-					if (field.Type == LuaFieldType::None)
-						continue;
-					switch (field.Type)
-					{
-						case LuaFieldType::Int:
-						{
-							double number = 0.0;
-							ExtractNumber(value, &number);
-							field.Value = static_cast<int>(number);
-							break;
-						}
-						case LuaFieldType::Float:
-						{
-							double number = 0.0;
-							ExtractNumber(value, &number);
-							field.Value = static_cast<float>(number);
-							break;
-						}
-						case LuaFieldType::Bool:
-						{
-							bool boolean = false;
-							value.AsBool(&boolean);
-							field.Value = boolean;
-							break;
-						}
-						case LuaFieldType::String:
-						{
-							std::string text;
-							value.AsString(&text);
-							field.Value = std::move(text);
-							break;
-						}
-						default: break;
-					}
-				}
-				else
-				{
-					double number = 0.0;
-					bool boolean = false;
-					std::string text;
-					if (value.AsNumber(&number))
-					{
-						if (std::isfinite(number) && number == std::floor(number) &&
-							number >= (std::numeric_limits<int>::min)() && number <= (std::numeric_limits<int>::max)())
-							field = { LuaFieldType::Int, static_cast<int>(number) };
-						else
-							field = { LuaFieldType::Float, static_cast<float>(number) };
-					}
-					else if (value.AsBool(&boolean)) field = { LuaFieldType::Bool, boolean };
-					else if (value.AsString(&text)) field = { LuaFieldType::String, std::move(text) };
-				}
-				if (field.Type == LuaFieldType::None)
-					continue;
-				// W5a-2 迁移源优先级:活表(运行期 self.X=... 的真实状态)→ CachedFields → 新默认值。
-				bool migrated = false;
-				if (liveTable)
-				{
-					LuaScriptField live;
-					if (TryReadLiveField(*liveTable, name, field.Type, &live))
-					{
-						field.Value = std::move(live.Value);
-						migrated = true;
-					}
-				}
-				if (!migrated)
-				{
-					const auto old = script.CachedFields.find(name);
-					if (old != script.CachedFields.end() && old->second.Type == field.Type)
-						field.Value = old->second.Value;
-				}
-				fields.emplace(name, std::move(field));
+				Schema::Value value;
+				if (ReadPropertyValueInternal(table.GetField(property.Name.c_str()), property.Type, &value))
+					property.Value = std::move(value);
 			}
-			return fields;
 		}
 
 		// 脚本表上的回调:走 __index 继承;非函数非 nil 视为加载错误。
@@ -411,26 +453,20 @@ namespace World
 			ScriptEventOwner owner;
 			owner.EntityRef = entity;
 			owner.ScenePtr = entity.IsValid() ? entity.GetScene() : nullptr;
-			owner.Component = entt::type_id<LuaScriptComponent>().hash();
+			owner.Component = entt::type_id<LuauScriptComponent>().hash();
 			owner.Generation = generation;
 			return owner;
 		}
 
-		void ApplyCachedFields(LuaScriptComponent& script)
+		// 属性表 → 脚本表(实例创建 / 热重载交换前写入)。空值字段跳过:保留脚本自己的默认值。
+		void ApplyProperties(LuauScriptComponent& script)
 		{
-			for (const auto& [name, field] : script.CachedFields)
+			for (const ScriptProperty& property : script.Properties)
 			{
-				ScriptValue value;
-				switch (field.Type)
-				{
-					case LuaFieldType::Float: value = ScriptValue::Number(std::any_cast<float>(field.Value)); break;
-					case LuaFieldType::Int: value = ScriptValue::Number(std::any_cast<int>(field.Value)); break;
-					case LuaFieldType::Bool: value = ScriptValue::Boolean(std::any_cast<bool>(field.Value)); break;
-					case LuaFieldType::String: value = ScriptValue::String(std::any_cast<std::string>(field.Value)); break;
-					default: continue;
-				}
-				if (!script.ScriptTable.SetField(name.c_str(), value))
-					throw std::logic_error("Cannot assign script field '" + name + "'");
+				if (std::holds_alternative<std::monostate>(property.Value))
+					continue;
+				if (!script.ScriptTable.SetField(property.Name.c_str(), ToScriptValueInternal(property.Value)))
+					throw std::logic_error("Cannot assign script field '" + property.Name + "'");
 			}
 		}
 
@@ -750,63 +786,77 @@ namespace World
 		return ParseFieldAnnotationsInternal(scriptText);
 	}
 
-	bool ScriptEngine::InitScriptForEditor(LuaScriptComponent& script)
+	bool ScriptEngine::InitScriptForEditor(LuauScriptComponent& script)
 	{
 		AssertOwnerThread();
-		if (script.ScriptFilePath.empty() || script.IsLoaded || script.State == ScriptInstanceState::Creating ||
-			script.State == ScriptInstanceState::Running || script.State == ScriptInstanceState::Destroying) return false;
+		// 编辑态预览:不实例化脚本(不建环境、不调 OnCreate),只同步属性表。
+		// 已经持有活动引用的组件(Play 中 / Faulted 但引用未释放)直接拒绝,避免覆盖运行实例。
+		if (script.ScriptPath.empty() || script.ScriptTable.IsValid() ||
+			script.Runtime.State == ScriptInstanceState::Creating ||
+			script.Runtime.State == ScriptInstanceState::Running ||
+			script.Runtime.State == ScriptInstanceState::Destroying) return false;
 		try
 		{
 			// 1. 读取脚本字节;源码才静态解析 ---@field 注解(容器不嵌源码,跳过注解)。
-			const std::vector<uint8_t> bytes = ReadScriptBytes(script.ScriptFilePath);
-			std::unordered_map<std::string, std::string> schema = ParseAnnotationsForBytes(bytes);
+			const std::vector<uint8_t> bytes = ReadScriptBytes(script.ScriptPath);
+			const AnnotationList annotations = ParseAnnotationsForBytes(bytes);
 
-			// 2. 在独立 environment 里执行脚本，获取默认值表（不保留引用：编辑器预览只缓存字段）。
+			// 2. 在独立 environment 里执行脚本，获取默认值表（不保留引用：编辑器预览只同步属性）。
 			ScriptTableRef environment = s_Vm->CreateEnvironment();
 			if (!environment.IsValid()) throw std::logic_error("Cannot create a script environment");
-			ScriptTableRef table = InstantiateScriptTable(bytes, script.ScriptFilePath.c_str(), environment);
+			ScriptTableRef table = InstantiateScriptTable(bytes, script.ScriptPath.c_str(), environment);
 
-			// 3. 构建字段：类型优先取注解，缺失注解走旧值推断兼容路径。
-			script.CachedFields = BuildFieldCache(table, schema, script);
-			// W2a：把该脚本登记成 Luau 行为描述（字段来自 CachedFields）。只写行为注册表，
+			// 3. 属性表:声明(注解序 → 表序)定类型/顺序;同名同类型保留编辑器里已存的值,
+			//    新字段取新脚本自己的默认值。
+			std::vector<std::string> diagnostics;
+			SyncPropertiesFromScript(script, table, annotations, nullptr, &diagnostics);
+			if (Log::GetCoreLogger())
+				for (const std::string& line : diagnostics) WLD_CORE_WARN("{0}", line);
+			// W2a：把该脚本登记成 Luau 行为描述（字段来自属性表）。只写行为注册表，
 			// 不改变加载/预览语义：登记失败只记日志，返回值与状态机仍由下面的旧逻辑决定。
 			std::string behaviorError;
 			if (!EnsureLuaBehavior(script, &behaviorError) && Log::GetCoreLogger())
 				WLD_CORE_WARN("[Behavior] {0}", behaviorError);
-			script.LastError.clear();
-			script.State = ScriptInstanceState::Stopped;
+			script.Runtime.LastError.clear();
+			script.Runtime.State = ScriptInstanceState::Stopped;
 			// W5a-2/W7-3:加载成功即建立源指纹基线(容器 = 容器字节,源码 = 源码字节),
 			// 并清掉上一次遗留的重载诊断。基线必须与本次装载用的是同一份字节。
 			script.SourceFingerprint = FingerprintScriptBytes(bytes.data(), bytes.size());
 			script.ReloadDiagnostic.clear();
 			return true;
 		}
-		catch (const std::exception& error) { script.LastError.clear(); ReportLuaError(script, "EditorLoad", error.what()); }
-		catch (...) { script.LastError.clear(); ReportLuaError(script, "EditorLoad", "Unknown exception"); }
+		catch (const std::exception& error) { script.Runtime.LastError.clear(); ReportLuaError(script, "EditorLoad", error.what()); }
+		catch (...) { script.Runtime.LastError.clear(); ReportLuaError(script, "EditorLoad", "Unknown exception"); }
 		return false;
 	}
 
-	void ScriptEngine::OnCreateScript(LuaScriptComponent& script, Entity entity)
+	void ScriptEngine::OnCreateScript(LuauScriptComponent& script, Entity entity)
 	{
 		AssertOwnerThread();
-		if (script.State != ScriptInstanceState::Pending && script.State != ScriptInstanceState::Stopped) return;
+		if (script.Runtime.State != ScriptInstanceState::Pending && script.Runtime.State != ScriptInstanceState::Stopped) return;
 		ClearLuaReferences(script);
-		script.LastError.clear();
+		script.Runtime.LastError.clear();
 		script.RuntimeEntity = entity;
-		if (script.ScriptFilePath.empty()) { script.State = ScriptInstanceState::Stopped; return; }
-		script.State = ScriptInstanceState::Creating;
+		if (script.ScriptPath.empty()) { script.Runtime.State = ScriptInstanceState::Stopped; return; }
+		script.Runtime.State = ScriptInstanceState::Creating;
 		const char* phase = "Load";
 		try
 		{
 			// W7-3:读取原始字节;容器 → 跳过注解解析,源码 → 既有注解解析。
-			const std::vector<uint8_t> bytes = ReadScriptBytes(script.ScriptFilePath);
+			const std::vector<uint8_t> bytes = ReadScriptBytes(script.ScriptPath);
 			ScriptTableRef environment = s_Vm->CreateEnvironment();
 			if (!environment.IsValid()) throw std::logic_error("Cannot create a script environment");
-			ScriptTableRef table = InstantiateScriptTable(bytes, script.ScriptFilePath.c_str(), environment);
+			ScriptTableRef table = InstantiateScriptTable(bytes, script.ScriptPath.c_str(), environment);
 			script.LuaEnv = environment;
 			script.ScriptTable = table;
 
-			ApplyCachedFields(script);
+			// 2026-09-26 重写:属性表随脚本声明重新同步(顺序/类型以脚本为准),
+			// 场景里保存的同名同类型值优先于新脚本默认值;随后写回脚本表。
+			std::vector<std::string> warnings;
+			SyncPropertiesFromScript(script, table, ParseAnnotationsForBytes(bytes), nullptr, &warnings);
+			if (Log::GetCoreLogger())
+				for (const std::string& line : warnings) WLD_CORE_WARN("{0}", line);
+			ApplyProperties(script);
 			// entity 是这个句柄**唯一**的名字(旧别名 __Entity/__EntityID 已移除)。
 			const ScriptValue entityValue = MakeEntityValue(*s_Bindings, entity);
 			if (!script.ScriptTable.SetField("entity", entityValue))
@@ -823,18 +873,17 @@ namespace World
 			if (!ReadCallback(script.ScriptTable, "OnUI", &script.OnUiFunc, &error))
 				throw std::runtime_error(error);
 
-			script.IsLoaded = true;
-			script.CreateEntered = true;
+			script.Runtime.CreateEntered = true;
 			phase = "OnCreate";
 			if (script.OnCreateFunc.IsValid())
 			{
 				// W4:回调期间 events:on / timers:after/every 归属本实例。
-				const ScriptEventOwnerScope ownerScope(MakeScriptEventOwner(script.RuntimeEntity, script.Generation));
+				const ScriptEventOwnerScope ownerScope(MakeScriptEventOwner(script.RuntimeEntity, script.Runtime.Generation));
 				const ScriptValue args[] = { script.ScriptTable.ToValue() };
 				if (!script.OnCreateFunc.Call(args, 1, nullptr, &error))
 					throw std::runtime_error(error);
 			}
-			script.State = ScriptInstanceState::Running;
+			script.Runtime.State = ScriptInstanceState::Running;
 			// W5a-2/W7-3:运行期首次加载成功同样建立指纹基线(与本次装载同一份字节;
 			// 监听器不改文件时不产生假阳性)。
 			script.SourceFingerprint = FingerprintScriptBytes(bytes.data(), bytes.size());
@@ -844,16 +893,16 @@ namespace World
 		catch (...) { ReportLuaError(script, phase, "Unknown exception"); }
 	}
 
-	void ScriptEngine::OnUpdateScript(LuaScriptComponent& script, Timestep ts)
+	void ScriptEngine::OnUpdateScript(LuauScriptComponent& script, Timestep ts)
 	{
 		AssertOwnerThread();
-		if (script.State != ScriptInstanceState::Running || !script.IsLoaded) return;
+		if (script.Runtime.State != ScriptInstanceState::Running) return;
 		try
 		{
 			if (script.OnUpdateFunc.IsValid())
 			{
 				// W4:回调期间 events:on / timers:after/every 归属本实例。
-				const ScriptEventOwnerScope ownerScope(MakeScriptEventOwner(script.RuntimeEntity, script.Generation));
+				const ScriptEventOwnerScope ownerScope(MakeScriptEventOwner(script.RuntimeEntity, script.Runtime.Generation));
 				std::string error;
 				const ScriptValue args[] = { script.ScriptTable.ToValue(), ScriptValue::Number(ts.GetSeconds()) };
 				if (!script.OnUpdateFunc.Call(args, 2, nullptr, &error))
@@ -864,24 +913,24 @@ namespace World
 		catch (...) { ReportLuaError(script, "OnUpdate", "Unknown exception"); }
 	}
 
-	void ScriptEngine::OnDestroyScript(LuaScriptComponent& script)
+	void ScriptEngine::OnDestroyScript(LuauScriptComponent& script)
 	{
 		// Empty/stopped components can outlive the VM; live references cannot.
 		if (IsInitialized()) AssertOwnerThread();
-		else if (script.IsLoaded || script.LuaEnv.IsValid() || script.ScriptTable.IsValid() ||
+		else if (script.Runtime.State == ScriptInstanceState::Running || script.LuaEnv.IsValid() || script.ScriptTable.IsValid() ||
 			script.OnCreateFunc.IsValid() || script.OnUpdateFunc.IsValid() || script.OnDestroyFunc.IsValid() ||
 			script.OnUiFunc.IsValid())
 			throw std::logic_error("Script references must be released before ScriptEngine::Shutdown");
-		if (script.State == ScriptInstanceState::Destroying) return;
-		bool faulted = script.State == ScriptInstanceState::Faulted;
-		script.State = ScriptInstanceState::Destroying;
+		if (script.Runtime.State == ScriptInstanceState::Destroying) return;
+		bool faulted = script.Runtime.State == ScriptInstanceState::Faulted;
+		script.Runtime.State = ScriptInstanceState::Destroying;
 		// W4:实例销毁时批量退订它的事件/计时器订阅(OnDestroy 里新建的订阅也一并丢弃)。
 		const Entity ownerEntity = script.RuntimeEntity;
-		const uint64_t ownerGeneration = script.Generation;
+		const uint64_t ownerGeneration = script.Runtime.Generation;
 		try
 		{
-			const bool entered = script.CreateEntered;
-			script.CreateEntered = false;
+			const bool entered = script.Runtime.CreateEntered;
+			script.Runtime.CreateEntered = false;
 			if (entered && script.OnDestroyFunc.IsValid())
 			{
 				const ScriptEventOwnerScope ownerScope(MakeScriptEventOwner(ownerEntity, ownerGeneration));
@@ -895,7 +944,7 @@ namespace World
 		catch (...) { ReportLuaError(script, "OnDestroy", "Unknown exception"); faulted = true; }
 		ReleaseScriptEventOwners(ownerEntity, ownerGeneration);
 		ClearLuaReferences(script);
-		script.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
+		script.Runtime.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
 	}
 
 	std::size_t ScriptEngine::DrawScriptUi(Scene& scene, Wui::WuiContext& context)
@@ -909,7 +958,7 @@ namespace World
 		// 在遍历中往组件池里追加;移除则会让 swap-and-pop 跳过/重复条目)。
 		std::vector<entt::entity> entities;
 		{
-			const auto view = registry.view<LuaScriptComponent>();
+			const auto view = registry.view<LuauScriptComponent>();
 			entities.assign(view.begin(), view.end());
 		}
 		for (const entt::entity handle : entities)
@@ -919,25 +968,25 @@ namespace World
 				continue;
 			// 引用来自 const registry,但这里只写组件的运行态字段(State/LastError),
 			// 不会增删实体或组件,因此不会触发结构写断言。
-			const LuaScriptComponent* probe = registry.try_get<LuaScriptComponent>(handle);
+			const LuauScriptComponent* probe = registry.try_get<LuauScriptComponent>(handle);
 			if (!probe)
 				continue;
-			LuaScriptComponent& script = const_cast<LuaScriptComponent&>(*probe);
-			if (!script.IsLoaded || script.State != ScriptInstanceState::Running ||
+			LuauScriptComponent& script = const_cast<LuauScriptComponent&>(*probe);
+			if (script.Runtime.State != ScriptInstanceState::Running ||
 				!script.ScriptTable.IsValid() || !script.OnUiFunc.IsValid())
 				continue;
 			try
 			{
-				ScriptUiScope scope(context, script.ScriptFilePath);
+				ScriptUiScope scope(context, script.ScriptPath);
 				// OnUI 与生命周期回调/事件/计时器同源:抬回调深度 + 打开白名单结构写窗口,
 				// 使 self.entity:CreateChild(...) / AddComponent(纯数据) 在 UI 阶段同样可用。
 				const Scene::ScriptCallbackScope callbackScope(scene, Entity(&scene, handle),
-					entt::type_id<LuaScriptComponent>().hash(), script.Generation);
+					entt::type_id<LuauScriptComponent>().hash(), script.Runtime.Generation);
 				if (!callbackScope.IsValid())
 					continue;   // 实例已销毁/已热重载/非 Running:不调用旧闭包
 				// W4:OnUI 期间 events:on / timers:after/every 同样归属本实例。
 				const ScriptEventOwnerScope ownerScope(
-					MakeScriptEventOwner(Entity(&scene, handle), script.Generation));
+					MakeScriptEventOwner(Entity(&scene, handle), script.Runtime.Generation));
 				std::string error;
 				const ScriptValue args[] = { script.ScriptTable.ToValue() };
 				if (!script.OnUiFunc.Call(args, 1, nullptr, &error))
@@ -956,9 +1005,9 @@ namespace World
 		return BehaviorRegistry::Instance();
 	}
 
-	bool ScriptEngine::EnsureLuaBehavior(LuaScriptComponent& script, std::string* error)
+	bool ScriptEngine::EnsureLuaBehavior(LuauScriptComponent& script, std::string* error)
 	{
-		if (script.ScriptFilePath.empty())
+		if (script.ScriptPath.empty())
 		{
 			if (error) *error = "lua behavior requires a non-empty script path";
 			return false;
@@ -1019,27 +1068,27 @@ namespace World
 		}
 	}
 
-	bool ScriptEngine::ReloadScript(LuaScriptComponent& script, std::string* diagnostics)
+	bool ScriptEngine::ReloadScript(LuauScriptComponent& script, std::string* diagnostics)
 	{
 		AssertOwnerThread();
 
 		const auto reject = [&](const char* phase, const std::string& error)
 		{
-			script.ReloadDiagnostic = FormatScriptReloadFailure(script.ScriptFilePath, phase, error);
+			script.ReloadDiagnostic = FormatScriptReloadFailure(script.ScriptPath, phase, error);
 			if (diagnostics) *diagnostics = script.ReloadDiagnostic;
 			return false;
 		};
 
-		if (script.ScriptFilePath.empty())
+		if (script.ScriptPath.empty())
 			return reject("path check", "script path is empty");
 
-		if (script.State == ScriptInstanceState::Creating)
+		if (script.Runtime.State == ScriptInstanceState::Creating)
 			return reject("state check", "reload is refused while the instance state is Creating");
-		if (script.State == ScriptInstanceState::Destroying)
+		if (script.Runtime.State == ScriptInstanceState::Destroying)
 			return reject("state check", "reload is refused while the instance state is Destroying");
 
 		// 热重载的前提是"有可回滚的旧版本":必须已经加载并且正在运行。
-		if (script.State != ScriptInstanceState::Running || !script.IsLoaded ||
+		if (script.Runtime.State != ScriptInstanceState::Running ||
 			!script.ScriptTable.IsValid() || !script.LuaEnv.IsValid())
 			return reject("state check", "reload requires a running script instance; there is no old version to keep");
 
@@ -1055,7 +1104,7 @@ namespace World
 
 		// W7-3:重载读的也是原始字节(容器 → 字节码;源码 → 文本),指纹与本次装载同一份字节。
 		std::vector<uint8_t> bytes;
-		try { bytes = ReadScriptBytes(script.ScriptFilePath); }
+		try { bytes = ReadScriptBytes(script.ScriptPath); }
 		catch (const std::exception& error) { return reject("read", error.what()); }
 		catch (...) { return reject("read", "unknown exception while reading the script bytes"); }
 		const uint64_t fingerprint = FingerprintScriptBytes(bytes.data(), bytes.size());
@@ -1069,7 +1118,7 @@ namespace World
 			catch (...) { return reject("environment", "unknown exception while creating a script environment"); }
 			if (!newEnvironment.IsValid())
 				return reject("environment", "cannot create a script environment");
-			try { newTable = InstantiateScriptTable(bytes, script.ScriptFilePath.c_str(), newEnvironment); }
+			try { newTable = InstantiateScriptTable(bytes, script.ScriptPath.c_str(), newEnvironment); }
 			catch (const std::exception& error) { return reject("load", error.what()); }
 			catch (...) { return reject("load", "unknown exception while compiling the new script version"); }
 		}
@@ -1090,7 +1139,7 @@ namespace World
 		catch (const std::exception& error) { return reject("callbacks", error.what()); }
 		catch (...) { return reject("callbacks", "unknown exception while reading the lifecycle callbacks"); }
 
-		std::unordered_map<std::string, LuaScriptField> newFields;
+		std::vector<ScriptProperty> newProperties;
 		std::vector<std::string> warnings;
 		try
 		{
@@ -1099,42 +1148,45 @@ namespace World
 			if (!newTable.SetField("entity", entityValue))
 				return reject("bind", "cannot assign the entity handle");
 
-			// 字段迁移:当前活表优先(运行期 self.X=... 只存在于这里),缺失/类型不符再回退 CachedFields,
-			// 两者都没有才用新脚本默认值。
-			newFields = BuildFieldCache(newTable, ParseAnnotationsForBytes(bytes), script, &script.ScriptTable);
-			DescribeScriptFieldMigration(script.CachedFields, newFields, script.ScriptFilePath, &warnings);
-
-			// 把合并后的字段写进**新表**(旧表保持原值,直到整体交换成功)。
-			LuaScriptComponent staging;
+			// 属性迁移(全部在 staging 上做,失败不碰组件):
+			//   活表(运行期 self.X=... 的真实状态) > 场景保存值(同名同类型) > 新脚本默认值;
+			//   类型变化/字段删除的诊断由 DescribeScriptFieldMigration 追加到 warnings。
+			LuauScriptComponent staging;
+			staging.ScriptPath = script.ScriptPath;
 			staging.ScriptTable = newTable;
-			staging.CachedFields = newFields;
-			ApplyCachedFields(staging);
+			staging.Properties = script.Properties;
+			SyncPropertiesFromScript(staging, newTable, ParseAnnotationsForBytes(bytes), &script.ScriptTable, &warnings);
+			DescribeScriptFieldMigration(script.Properties, staging.Properties, script.ScriptPath, &warnings);
+
+			// 把合并后的属性写进**新表**(旧表保持原值,直到整体交换成功)。
+			ApplyProperties(staging);
+			newProperties = std::move(staging.Properties);
 		}
 		catch (const std::exception& error) { return reject("migration", error.what()); }
 		catch (...) { return reject("migration", "unknown exception while migrating the script fields"); }
 
 		// 行为描述刷新:先按"新字段 + 同一路径"替换;失败说明描述非法,旧版本(含旧描述)原样保留。
 		{
-			LuaScriptComponent staging;
-			staging.ScriptFilePath = script.ScriptFilePath;
-			staging.CachedFields = newFields;
+			LuauScriptComponent staging;
+			staging.ScriptPath = script.ScriptPath;
+			staging.Properties = newProperties;
 			std::string behaviorError;
 			if (!BehaviorRegistry::Instance().Replace(BehaviorRegistry::MakeLuaDesc(staging), &behaviorError))
 				return reject("behavior", behaviorError);
 		}
 
-		// 整体交换:引用(环境/脚本表/四个回调)+ 字段 + 指纹 + generation。
-		// State / IsLoaded / CreateEntered / LastError 语义不动(失败路径也从未碰过它们)。
-		const uint64_t previousGeneration = script.Generation;
+		// 整体交换:引用(环境/脚本表/四个回调)+ 属性 + 指纹 + generation。
+		// Runtime 的 State / CreateEntered / LastError 语义不动(失败路径也从未碰过它们)。
+		const uint64_t previousGeneration = script.Runtime.Generation;
 		script.LuaEnv = newEnvironment;
 		script.ScriptTable = newTable;
 		script.OnCreateFunc = newCreate;
 		script.OnUpdateFunc = newUpdate;
 		script.OnDestroyFunc = newDestroy;
 		script.OnUiFunc = newUi;
-		script.CachedFields = newFields;
+		script.Properties = std::move(newProperties);
 		script.SourceFingerprint = fingerprint;
-		script.Generation = NextReloadGeneration();
+		script.Runtime.Generation = NextReloadGeneration();
 		script.ReloadDiagnostic.clear();
 		// W4:热重载成功 = 旧 instance 的事件/计时器订阅整体作废(旧闭包绝不能再被调用);
 		// 新订阅由新版本的 OnCreate 在下一次实例创建/复活(Pending 路径)时建立。
@@ -1160,10 +1212,10 @@ namespace World
 		// 只写组件的运行态字段(State/LastError),不增删实体/组件:与 DrawScriptUi 相同,
 		// 走 const registry 取引用再 const_cast,避免在活动场景上触发结构写断言。
 		const entt::registry& registry = static_cast<const Scene&>(*scene).GetRegistry();
-		const LuaScriptComponent* script =
-			registry.try_get<LuaScriptComponent>(static_cast<entt::entity>(entity));
-		if (!script || script->Generation != generation)
+		const LuauScriptComponent* script =
+			registry.try_get<LuauScriptComponent>(static_cast<entt::entity>(entity));
+		if (!script || script->Runtime.Generation != generation)
 			return;
-		ReportLuaError(const_cast<LuaScriptComponent&>(*script), phase, error);
+		ReportLuaError(const_cast<LuauScriptComponent&>(*script), phase, error);
 	}
 }

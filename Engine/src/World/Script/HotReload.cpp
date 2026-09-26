@@ -3,6 +3,7 @@
 
 #include "World/Core/Application.h"
 #include "World/Script/BehaviorRegistry.h"
+#include "World/Script/ScriptProperties.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -225,35 +226,35 @@ namespace World
 	}
 
 	void DescribeScriptFieldMigration(
-		const std::unordered_map<std::string, LuaScriptField>& previous,
-		const std::unordered_map<std::string, LuaScriptField>& next,
+		const std::vector<ScriptProperty>& previous,
+		const std::vector<ScriptProperty>& next,
 		const std::string& scriptPath,
 		std::vector<std::string>* diagnostics)
 	{
 		if (!diagnostics)
 			return;
 
-		// unordered_map 遍历顺序不稳定 → 先按字段名收集再排序,保证诊断文本可断言/可复现。
+		// 先按字段名收集再排序,保证诊断文本可断言/可复现(与容器顺序无关)。
 		std::vector<std::pair<std::string, std::string>> lines;
 		lines.reserve(previous.size());
-		for (const auto& [name, newField] : next)
+		for (const ScriptProperty& newField : next)
 		{
-			const auto old = previous.find(name);
-			if (old == previous.end())
+			const ScriptProperty* old = ScriptProperties::Find(previous, newField.Name);
+			if (!old)
 				continue;   // 新增字段:取新脚本默认值,不产生诊断。
-			if (old->second.Type == newField.Type)
-				continue;   // 同名同类型:BuildFieldCache 已保留旧值。
-			lines.emplace_back(name,
-				"[hot-reload] " + scriptPath + ": field '" + name + "' (id=" + FieldIdText(name) +
-				") type changed " + LuaScriptField::GetLuaTypeName(old->second.Type) + " -> " +
-				LuaScriptField::GetLuaTypeName(newField.Type) + "; value reset to the new default");
+			if (old->Type == newField.Type)
+				continue;   // 同名同类型:同步时已保留旧值。
+			lines.emplace_back(newField.Name,
+				"[hot-reload] " + scriptPath + ": field '" + newField.Name + "' (id=" + FieldIdText(newField.Name) +
+				") type changed " + ScriptProperties::KindName(old->Type) + " -> " +
+				ScriptProperties::KindName(newField.Type) + "; value reset to the new default");
 		}
-		for (const auto& [name, oldField] : previous)
+		for (const ScriptProperty& oldField : previous)
 		{
-			if (next.find(name) != next.end())
+			if (ScriptProperties::Find(next, oldField.Name))
 				continue;
-			lines.emplace_back(name,
-				"[hot-reload] " + scriptPath + ": field '" + name + "' (id=" + FieldIdText(name) +
+			lines.emplace_back(oldField.Name,
+				"[hot-reload] " + scriptPath + ": field '" + oldField.Name + "' (id=" + FieldIdText(oldField.Name) +
 				") is missing in the new script; its value was dropped");
 		}
 		std::sort(lines.begin(), lines.end(),
