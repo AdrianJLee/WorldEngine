@@ -46,6 +46,37 @@ namespace World
 		//   Properties:
 		//     - { Name: Health, Type: Float, Value: 100 }
 		// Type 写类型名(可读、可手改);值按 Kind 走 schema 的读写器,和普通字段同一条口径。
+		// B 期:一条脚本属性(递归)。叶子写 `Type: Float|Vec3|…` + `Value: <标量/向量>`;
+		// 结构化表写 `Type: Object` + `TypeName: <类名>` + `Value:` 下递归的同形条目
+		// (裸 table / ReadOnly 的只写 Name+Type,值不落盘 —— 与"看得到、不进存档"同口径)。
+		void WriteScriptPropertyItem(YAML::Emitter& out, const ScriptProperty& property,
+			Schema::YamlSchemaWriter& writer)
+		{
+			out << YAML::BeginMap;
+			out << YAML::Key << "Name" << YAML::Value << property.Name;
+			out << YAML::Key << "Type" << YAML::Value << ScriptProperties::KindName(property.Type);
+			if (!property.TypeName.empty())
+				out << YAML::Key << "TypeName" << YAML::Value << property.TypeName;
+			if (property.Type == Schema::Kind::Object)
+			{
+				if (!property.ReadOnly && !property.Children.empty())
+				{
+					out << YAML::Key << "Value" << YAML::Value << YAML::BeginSeq;
+					for (const ScriptProperty& child : property.Children)
+						WriteScriptPropertyItem(out, child, writer);
+					out << YAML::EndSeq;
+				}
+			}
+			else
+			{
+				out << YAML::Key << "Value" << YAML::Value;
+				Schema::FieldSchema probe;
+				probe.K = property.Type;
+				writer.WriteValue(probe, property.Value);
+			}
+			out << YAML::EndMap;
+		}
+
 		void SerializeScriptProperties(YAML::Emitter& out, const std::vector<ScriptProperty>& properties,
 			Schema::YamlSchemaWriter& writer)
 		{
@@ -56,16 +87,46 @@ namespace World
 			{
 				if (!ScriptProperties::IsPropertyKind(property.Type))
 					continue;
-				out << YAML::BeginMap;
-				out << YAML::Key << "Name" << YAML::Value << property.Name;
-				out << YAML::Key << "Type" << YAML::Value << ScriptProperties::KindName(property.Type);
-				out << YAML::Key << "Value" << YAML::Value;
-				Schema::FieldSchema probe;
-				probe.K = property.Type;
-				writer.WriteValue(probe, property.Value);
-				out << YAML::EndMap;
+				WriteScriptPropertyItem(out, property, writer);
 			}
 			out << YAML::EndSeq;
+		}
+
+		bool ReadScriptPropertyItem(const YAML::Node& item, Schema::YamlSchemaReader& reader,
+			ScriptProperty& property)
+		{
+			if (!item || !item.IsMap() || !item["Name"])
+				return false;
+			property = ScriptProperty {};
+			property.Name = item["Name"].as<std::string>();
+			const std::string typeName = item["Type"] ? item["Type"].as<std::string>() : std::string();
+			property.Type = ScriptProperties::KindFromName(typeName);
+			if (!ScriptProperties::IsPropertyKind(property.Type))
+				return false;
+			if (item["TypeName"])
+				property.TypeName = item["TypeName"].as<std::string>();
+			if (property.Type == Schema::Kind::Object)
+			{
+				const YAML::Node value = item["Value"];
+				if (value && value.IsSequence())
+				{
+					for (const YAML::Node& childNode : value)
+					{
+						ScriptProperty child;
+						if (ReadScriptPropertyItem(childNode, reader, child))
+							property.Children.push_back(std::move(child));
+					}
+				}
+				// 存档里没有子字段(裸 table / 只读摘要)→ 保持只读,不假装它有可编辑子行。
+				property.ReadOnly = property.Children.empty();
+				return true;
+			}
+			Schema::FieldSchema probe;
+			probe.K = property.Type;
+			Schema::Value value;
+			if (item["Value"] && reader.ReadFieldValue(probe, &value, item["Value"]))
+				property.Value = std::move(value);
+			return true;
 		}
 
 		void DeserializeScriptProperties(const YAML::Node& node, std::vector<ScriptProperty>& properties)
@@ -77,20 +138,9 @@ namespace World
 			Schema::YamlSchemaReader reader;
 			for (const YAML::Node& item : list)
 			{
-				if (!item || !item.IsMap() || !item["Name"])
-					continue;
 				ScriptProperty property;
-				property.Name = item["Name"].as<std::string>();
-				const std::string typeName = item["Type"] ? item["Type"].as<std::string>() : std::string();
-				property.Type = ScriptProperties::KindFromName(typeName);
-				if (!ScriptProperties::IsPropertyKind(property.Type))
-					continue;
-				Schema::FieldSchema probe;
-				probe.K = property.Type;
-				Schema::Value value;
-				if (item["Value"] && reader.ReadFieldValue(probe, &value, item["Value"]))
-					property.Value = std::move(value);
-				properties.push_back(std::move(property));
+				if (ReadScriptPropertyItem(item, reader, property))
+					properties.push_back(std::move(property));
 			}
 		}
 

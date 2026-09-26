@@ -372,6 +372,14 @@ namespace World
 		// 脚本里声明的说明(注解 `---@field Speed number 移动速度` 的第三段 / C++ 的 `Doc("…")`)。
 		// **由脚本派生**:不进存档、不参与比较;检视器只用它做行悬停与读屏提示。
 		std::string Doc;
+		// B 期(嵌套 `---@class` 结构化表,2026-09-26):
+		//   Type == Schema::Kind::Object 时:TypeName = 声明的类型名(类名,或裸 table 的 "table"),
+		//     Children = 子字段(顺序 = 注解声明顺序,递归同构);
+		//   ReadOnly == true:裸 table(没有 `---@field` 子字段)→ 检视器只画一行摘要,不进存档;
+		//   叶子属性(标量/字符串/Vec2/3/4):TypeName 为空、Children 为空。
+		std::string TypeName;
+		std::vector<ScriptProperty> Children;
+		bool ReadOnly = false;
 	};
 
 	// C++ 行为组件(原 NativeScriptComponent;2026-09-26 重写)。

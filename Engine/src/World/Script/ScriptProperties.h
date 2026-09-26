@@ -17,7 +17,9 @@ namespace World
 	//   * 顺序 = 声明顺序(先声明先显示,生成物/注解顺序稳定);
 	//   * 保留同名同类型的已有值(编辑器改过、场景读过);类型变了 → 用新声明重置该字段;
 	//   * 声明里没有的旧属性直接丢弃(脚本改了就该以脚本为准,不做兼容);
-	//   * 只接受叶子类型(标量 / 字符串 / Vec2 / Vec3 / Vec4);其它类型不参与"脚本属性"。
+	//   * 叶子类型 = 标量 / 字符串 / Vec2 / Vec3 / Vec4;B 期起 `Schema::Kind::Object` 表示
+	//     **嵌套 `---@class` 结构化表**(Fields 递归同构;没有子字段的裸 table = ReadOnly 摘要行);
+	//     其它类型不参与"脚本属性"。
 	namespace ScriptProperties
 	{
 		// V1(2026-09-26 用户反馈):一条脚本属性声明 —— 名字 / schema 类型 / 注解说明 / 脚本里的默认值。
@@ -30,6 +32,9 @@ namespace World
 			Schema::Kind Type = Schema::Kind::None;
 			std::string Doc;
 			Schema::Value Default;
+			// B 期(Object 专用):声明的类型名(类名 / "table")与递归子声明(顺序 = 注解顺序)。
+			std::string TypeName;
+			std::vector<Declaration> Fields;
 		};
 
 		// 该 schema 值类型能不能当脚本属性(与 schema 的叶类型口径一致)。

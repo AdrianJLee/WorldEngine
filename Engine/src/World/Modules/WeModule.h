@@ -14,7 +14,9 @@ namespace World::Modules
 	// 2 = 2026-09-26 脚本组件重写:`Schema::ScriptBinding` 从 `{ void(*Bind)(void*) }` 变成
 	//     `{ Create, Destroy }` + 组件类型改名 ⇒ 旧 Game.dll 必须被**干净拒绝**,不能按旧形状解释
 	//     (旧 DLL 的 Bind 会被当 Create 调用)。宿主侧改成等值校验(见 ModuleManager.cpp)。
-	constexpr uint32_t WE_MODULE_ABI_VERSION = 2;
+	// B 期(2026-09-26):`ScriptProperty` 增加递归子字段(TypeName/Children/ReadOnly)⇒ 组件布局变化,
+	// 旧 Game.dll 与新媒体混用会在属性表上读出错误布局 —— 升版让宿主干净拒绝旧模块。
+	constexpr uint32_t WE_MODULE_ABI_VERSION = 3;
 
 	struct WeModule
 	{

@@ -29,6 +29,7 @@ namespace World
 				case Schema::Kind::Vec2: return "Vec2";
 				case Schema::Kind::Vec3: return "Vec3";
 				case Schema::Kind::Vec4: return "Vec4";
+				case Schema::Kind::Object: return "Object";   // B 期:嵌套 ---@class 结构化表
 				case Schema::Kind::String: return "String";
 				case Schema::Kind::None:
 				default: return "None";
@@ -51,6 +52,7 @@ namespace World
 			if (name == "Vec2") return Schema::Kind::Vec2;
 			if (name == "Vec3") return Schema::Kind::Vec3;
 			if (name == "Vec4") return Schema::Kind::Vec4;
+			if (name == "Object") return Schema::Kind::Object;
 			if (name == "String") return Schema::Kind::String;
 			return Schema::Kind::None;
 		}
@@ -73,6 +75,7 @@ namespace World
 				case Schema::Kind::Vec2:
 				case Schema::Kind::Vec3:
 				case Schema::Kind::Vec4:
+				case Schema::Kind::Object:
 				case Schema::Kind::String:
 					return true;
 				default:
@@ -89,56 +92,111 @@ namespace World
 			// false = 保持 monostate(未设),默认值只放在 Declaration.Default 里给检视器显示。
 			constexpr bool kMaterializeDeclarationDefaults = true;
 
-			void Apply(std::vector<ScriptProperty>& properties, const std::vector<Declaration>& declarations)
-			{
-				std::unordered_map<std::string, ScriptProperty> previous;
-				previous.reserve(properties.size());
-				for (ScriptProperty& property : properties)
-					previous.emplace(property.Name, std::move(property));
+			// B 期:结构化表的递归护栏(与 plan v2 §护栏 一致)。
+			constexpr int kMaxObjectDepth = 4;
+			constexpr size_t kMaxObjectFields = 64;
 
-				std::vector<ScriptProperty> next;
-				next.reserve(declarations.size());
+			// 一条声明 → 一条属性(递归)。previous = 上一轮的属性表(场景保存值 / 编辑器改过的值)。
+			// 叶子:同名同类型旧值优先;Object:Value 保持 monostate,子字段按名字/类型递归对齐,
+			// 声明里消失的子字段丢弃(与"脚本即事实源"同口径)。
+			void ApplyInto(std::vector<ScriptProperty>& out, const std::vector<Declaration>& declarations,
+				const std::vector<ScriptProperty>& previous, int depth)
+			{
+				std::unordered_map<std::string, const ScriptProperty*> previousByName;
+				previousByName.reserve(previous.size());
+				for (const ScriptProperty& property : previous)
+					previousByName.emplace(property.Name, &property);
+
+				static const std::vector<ScriptProperty> kNoChildren;
+				static const std::vector<Declaration> kNoDeclarations;
+
+				out.clear();
+				out.reserve(declarations.size());
 				for (const Declaration& declaration : declarations)
 				{
 					if (!IsPropertyKind(declaration.Type))
 						continue;
-					if (std::any_of(next.begin(), next.end(),
+					if (std::any_of(out.begin(), out.end(),
 							[&declaration](const ScriptProperty& item) { return item.Name == declaration.Name; }))
 						continue;   // 重复声明以第一次为准(与注解解析同口径)
+					if (out.size() >= kMaxObjectFields)
+						break;      // 护栏:单层子字段上限(超出部分不展开,由上层出诊断)
 
 					ScriptProperty property;
 					property.Name = declaration.Name;
 					property.Type = declaration.Type;
 					property.Doc = declaration.Doc;
-					property.Value = declaration.Default;   // 没有默认值 → monostate(未设),不写零值
+					property.TypeName = declaration.TypeName;
 
-					// 场景保存值 / 编辑器改过的值优先;同名同类型时原样保留(未设也保留,除非开关要求补默认值)。
-					const auto found = previous.find(declaration.Name);
-					const bool sameType = found != previous.end() && found->second.Type == declaration.Type;
-					const bool unsetExisting =
-						sameType && std::holds_alternative<std::monostate>(found->second.Value);
-					if (sameType && !(kMaterializeDeclarationDefaults && unsetExisting))
-						property.Value = std::move(found->second.Value);
-					next.push_back(std::move(property));
+					const auto found = previousByName.find(declaration.Name);
+					const ScriptProperty* old = (found != previousByName.end()
+						&& found->second->Type == declaration.Type) ? found->second : nullptr;
+
+					if (declaration.Type == Schema::Kind::Object)
+					{
+						// 没有子字段的裸 table = 只读摘要行(看得到、不进存档);有子字段则递归展开。
+						property.ReadOnly = declaration.Fields.empty();
+						if (!property.ReadOnly && depth < kMaxObjectDepth)
+							ApplyInto(property.Children, declaration.Fields,
+								old ? old->Children : kNoChildren, depth + 1);
+					}
+					else
+					{
+						property.Value = declaration.Default;   // 没有默认值 → monostate(未设),不写零值
+						const bool unsetExisting = old && std::holds_alternative<std::monostate>(old->Value);
+						if (old && !(kMaterializeDeclarationDefaults && unsetExisting))
+							property.Value = old->Value;
+					}
+					out.push_back(std::move(property));
 				}
+			}
+
+			void Apply(std::vector<ScriptProperty>& properties, const std::vector<Declaration>& declarations)
+			{
+				std::vector<ScriptProperty> next;
+				ApplyInto(next, declarations, properties, 0);
 				properties = std::move(next);
+			}
+		}
+
+		namespace
+		{
+			// B 期:schema 侧的 Object 字段(嵌套结构体)递归成子声明 —— 与 Luau 侧同一份模型。
+			void AppendSchemaDeclarations(std::vector<Declaration>& out, const Schema::TypeSchema& type, int depth)
+			{
+				if (depth >= kMaxObjectDepth)
+					return;
+				for (const Schema::FieldSchema& field : type.Fields)
+				{
+					if (!IsPropertyKind(field.K))
+						continue;
+					if (out.size() >= kMaxObjectFields)
+						return;
+					Declaration declaration;
+					declaration.Name = field.Name;
+					declaration.Type = field.K;
+					declaration.Doc = field.Meta.Doc;     // C++ 脚本的说明来自 schema 的 Doc("…")
+					if (field.K == Schema::Kind::Object)
+					{
+						const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
+						if (!nested)
+							continue;                      // 拿不到嵌套 schema:不进属性表(不静默展开成空表)
+						declaration.TypeName = nested->Id.Name;
+						AppendSchemaDeclarations(declaration.Fields, *nested, depth + 1);
+					}
+					else
+					{
+						declaration.Default = field.Default;
+					}
+					out.push_back(std::move(declaration));
+				}
 			}
 		}
 
 		void SyncFromSchema(std::vector<ScriptProperty>& properties, const Schema::TypeSchema& type)
 		{
 			std::vector<Declaration> declared;
-			for (const Schema::FieldSchema& field : type.Fields)
-			{
-				if (!IsPropertyKind(field.K))
-					continue;
-				Declaration declaration;
-				declaration.Name = field.Name;
-				declaration.Type = field.K;
-				declaration.Doc = field.Meta.Doc;     // C++ 脚本的说明来自 schema 的 Doc("…")
-				declaration.Default = field.Default;
-				declared.push_back(std::move(declaration));
-			}
+			AppendSchemaDeclarations(declared, type, 0);
 			Apply(properties, declared);
 		}
 
@@ -188,6 +246,8 @@ namespace World
 				case Schema::Kind::Vec2: return std::holds_alternative<glm::vec2>(value);
 				case Schema::Kind::Vec3: return std::holds_alternative<glm::vec3>(value);
 				case Schema::Kind::Vec4: return std::holds_alternative<glm::vec4>(value);
+				// B 期:结构化表的值在 Children 里,Value 必须是 monostate(空表也是 monostate)。
+				case Schema::Kind::Object: return std::holds_alternative<std::monostate>(value);
 				case Schema::Kind::String: return std::holds_alternative<std::string>(value);
 				default: return false;
 			}
