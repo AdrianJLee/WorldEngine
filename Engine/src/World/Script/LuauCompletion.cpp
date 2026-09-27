@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <unordered_set>
 
@@ -382,6 +383,156 @@ namespace World
 			{ "Entity", "实体句柄(Lua 侧是 userdata;Entity 方法表的接收者)" },
 			{ "WorldScript", "脚本实例(注解形态的类;回调里的 self 就是它)" },
 		};
+
+		// ---- D3(2026-09-27):文件内局部变量/表字段的类型推断用的文本工具 ----
+
+		std::size_t SkipBlanksAt(std::string_view text, std::size_t pos)
+		{
+			while (pos < text.size() && IsBlank(text[pos]))
+				++pos;
+			return pos;
+		}
+
+		// 注释与字符串**内容**替换成空格(引号与换行保留):推断只看代码结构,
+		// 不被注释里的 `local x = 1`、字符串里的 `{ a = 1 }` 干扰。
+		std::string MaskCommentsAndStrings(std::string_view text)
+		{
+			std::string masked(text);
+			std::size_t index = 0;
+			while (index < masked.size())
+			{
+				const char character = masked[index];
+				if (character == '-' && index + 1 < masked.size() && masked[index + 1] == '-')
+				{
+					// 长注释 --[[ … ]] / --[=[ … ]=](简写:-- 后紧跟 '[' 就算)。
+					std::size_t level = 0;
+					std::size_t content = index + 2;
+					bool longComment = false;
+					if (content < masked.size() && masked[content] == '[')
+					{
+						std::size_t probe = content + 1;
+						while (probe < masked.size() && masked[probe] == '=')
+						{
+							++level;
+							++probe;
+						}
+						if (probe < masked.size() && masked[probe] == '[')
+						{
+							longComment = true;
+							content = probe + 1;
+						}
+					}
+					std::size_t stop = masked.size();
+					if (longComment)
+					{
+						const std::string closing = "]" + std::string(level, '=') + "]";
+						const std::size_t found = masked.find(closing, content);
+						stop = found == std::string::npos ? masked.size() : found + closing.size();
+					}
+					else
+					{
+						const std::size_t found = masked.find('\n', index);
+						stop = found == std::string::npos ? masked.size() : found;
+					}
+					for (std::size_t cursor = index; cursor < stop; ++cursor)
+						if (masked[cursor] != '\n')
+							masked[cursor] = ' ';
+					index = stop;
+					continue;
+				}
+				if (character == '"' || character == '\'')
+				{
+					std::size_t cursor = index + 1;
+					while (cursor < masked.size() && masked[cursor] != character)
+					{
+						if (masked[cursor] == '\\' && cursor + 1 < masked.size())
+						{
+							if (masked[cursor + 1] != '\n') masked[cursor + 1] = ' ';
+							cursor += 2;
+							continue;
+						}
+						if (masked[cursor] != '\n') masked[cursor] = ' ';
+						++cursor;
+					}
+					index = cursor < masked.size() ? cursor + 1 : cursor;
+					continue;
+				}
+				if (character == '[' && index + 1 < masked.size() && masked[index + 1] == '[')
+				{
+					const std::size_t found = masked.find("]]", index + 2);
+					const std::size_t stop = found == std::string::npos ? masked.size() : found;
+					for (std::size_t cursor = index + 2; cursor < stop; ++cursor)
+						if (masked[cursor] != '\n')
+							masked[cursor] = ' ';
+					index = found == std::string::npos ? masked.size() : stop + 2;
+					continue;
+				}
+				++index;
+			}
+			return masked;
+		}
+
+		// 一个表达式/值的结尾(顶层 ',' / ';' / 换行 / 收尾括号)。用于跳过已经推断过的值。
+		std::size_t SkipValueExpression(std::string_view masked, std::size_t pos)
+		{
+			int depth = 0;
+			while (pos < masked.size())
+			{
+				const char character = masked[pos];
+				if (character == '{' || character == '(' || character == '[')
+				{
+					++depth;
+					++pos;
+					continue;
+				}
+				if (character == '}' || character == ')' || character == ']')
+				{
+					if (depth == 0)
+						return pos;
+					--depth;
+					++pos;
+					continue;
+				}
+				if (depth == 0 && (character == ',' || character == ';' || character == '\n'))
+					return pos;
+				if (character == '"' || character == '\'')
+				{
+					++pos;
+					while (pos < masked.size() && masked[pos] != character)
+						++pos;
+					if (pos < masked.size())
+						++pos;
+					continue;
+				}
+				++pos;
+			}
+			return pos;
+		}
+
+		std::size_t NextLineStart(std::string_view masked, std::size_t pos)
+		{
+			const std::size_t found = masked.find('\n', pos);
+			return found == std::string_view::npos ? masked.size() : found + 1;
+		}
+
+		// E2(2026-09-27 用户口径「局部变量从函数返回值/成员表达式赋值也要有类型提示」):
+		// `---@return` 可能是联合(`userdata|nil`)——取第一个不是 nil 的备选;全是 nil/空 → 空。
+		std::string FirstReturnType(std::string_view type)
+		{
+			std::size_t start = 0;
+			while (start <= type.size())
+			{
+				const std::size_t bar = type.find('|', start);
+				const std::string_view part = Trim(type.substr(start,
+					bar == std::string_view::npos ? std::string_view::npos : bar - start));
+				if (!part.empty() && part != "nil")
+					return std::string(part);
+				if (bar == std::string_view::npos)
+					break;
+				start = bar + 1;
+			}
+			return std::string();
+		}
 	}
 
 	void LuauCompletionIndex::Clear()
@@ -392,6 +543,7 @@ namespace World
 		m_FileItems.clear();
 		m_FileClasses.clear();
 		m_AnnotationFields.clear();
+		m_Inferred.clear();
 	}
 
 	bool LuauCompletionIndex::LoadStub(std::string_view text, std::string* error)
@@ -683,6 +835,8 @@ namespace World
 		bool inCommentBlock = false;
 		bool docTaken = false;
 		std::string blockDoc;
+		// E2:文件内函数的 `---@return`(与存根同一口径)—— `local y = someCall()` 用它推返回值类型。
+		std::string blockReturn;
 		std::size_t currentClass = kNone;
 		// V9:文件符号每次都整份替换,注解字段表跟着一起重建(SetFileSource 的语义)。
 		m_AnnotationFields.clear();
@@ -692,6 +846,7 @@ namespace World
 			inCommentBlock = false;
 			docTaken = false;
 			blockDoc.clear();
+			blockReturn.clear();
 		};
 
 		auto ensureFileClass = [&](std::string_view name, std::string_view base) -> std::size_t
@@ -770,6 +925,7 @@ namespace World
 					inCommentBlock = true;
 					docTaken = false;
 					blockDoc.clear();
+					blockReturn.clear();
 				}
 				const std::string_view body = line.substr(3);
 				if (StartsWith(body, "@"))
@@ -819,6 +975,15 @@ namespace World
 									LuauCompletionItem::KindType::Field);
 						}
 					}
+					else if (tag == "return")
+					{
+						if (blockReturn.empty())
+						{
+							const std::string_view type = FirstWord(rest);
+							if (!type.empty())
+								blockReturn.assign(type);
+						}
+					}
 				}
 				else
 				{
@@ -837,14 +1002,17 @@ namespace World
 				if (StartsWithWord(line, "local"))
 				{
 					std::string_view rest = Trim(line.substr(5));
-					if (StartsWithWord(rest, "function"))
+					const bool localFunction = StartsWithWord(rest, "function");
+					if (localFunction)
 						rest = Trim(rest.substr(8));
 					std::size_t nameEnd = 0;
 					while (nameEnd < rest.size() && IsIdentPart(rest[nameEnd]))
 						++nameEnd;
 					const std::string_view name = rest.substr(0, nameEnd);
 					if (!name.empty() && IsIdentStart(name.front()))
-						addFileItem(name, std::string_view(), blockDoc,
+						addFileItem(name, localFunction && !blockReturn.empty()
+								? std::string_view(blockReturn) : std::string_view(),
+							blockDoc,
 							LuauCompletionItem::KindType::Global);
 				}
 				else if (StartsWithWord(line, "function"))
@@ -868,11 +1036,13 @@ namespace World
 							rest.substr(ownerEnd + 1, methodEnd - (ownerEnd + 1));
 						if (!method.empty())
 							addFileMember(ensureFileClass(owner, std::string_view()), method,
-								std::string_view(), blockDoc, LuauCompletionItem::KindType::Method);
+								blockReturn, blockDoc, LuauCompletionItem::KindType::Method);
 					}
 					else
 					{
-						addFileItem(owner, "function", blockDoc, LuauCompletionItem::KindType::Global);
+						// `---@return T` 写在函数头上时,Type = T(调用表达式推断);没写仍是 function。
+						addFileItem(owner, blockReturn.empty() ? std::string_view("function") : blockReturn,
+							blockDoc, LuauCompletionItem::KindType::Global);
 					}
 				}
 				else
@@ -905,8 +1075,13 @@ namespace World
 		// V9b:注解字段表也随"换一份文件"清空 —— 空文本走的是下面的提前返回分支,
 		// 不能只依赖 ParseFileText 里的清表(否则上一份文件的 `---@field` 会残留成幽灵提示)。
 		m_AnnotationFields.clear();
+		m_Inferred.clear();   // D3:推断表同样整份重建
 		if (!Trim(fileText).empty())
+		{
 			ParseFileText(fileText);
+			// D3:局部变量/表字段的类型推断(与注解解析分开一趟:表构造可能跨行)。
+			ParseInferredLocals(fileText);
+		}
 	}
 
 	std::size_t LuauCompletionIndex::SymbolCount() const
@@ -958,6 +1133,34 @@ namespace World
 				break;
 			info = ResolveClass(info->Base);
 		}
+	}
+
+	// E2:精确大小写的类查找(存根 + 当前文件)。表达式推断不享受 ResolveClass 的不敏感兜底 ——
+	// `level.Primary()` 里的 `level` 不能因为存根有 `Level` 服务就被当成类。
+	const LuauCompletionIndex::ClassInfo* LuauCompletionIndex::FindClassExact(std::string_view name) const
+	{
+		if (name.empty())
+			return nullptr;
+		for (const ClassInfo& info : m_StubClasses)
+			if (info.Name == name)
+				return &info;
+		for (const ClassInfo& info : m_FileClasses)
+			if (info.Name == name)
+				return &info;
+		return nullptr;
+	}
+
+	const LuauCompletionItem* LuauCompletionIndex::FindMember(const ClassInfo* info,
+		std::string_view name) const
+	{
+		if (!info)
+			return nullptr;
+		std::vector<const LuauCompletionItem*> members;
+		CollectClassMembers(info, members);
+		for (const LuauCompletionItem* member : members)
+			if (member->Name == name)
+				return member;
+		return nullptr;
 	}
 
 	void LuauCompletionIndex::CollectGlobals(std::vector<const LuauCompletionItem*>& out,
@@ -1116,6 +1319,484 @@ namespace World
 			out.push_back(*matched[i]);
 	}
 
+	// ---- D3(2026-09-27 用户口径:悬浮提示要能给出局部变量/表字段的类型) ----
+	//
+	// 纯文本层,不引入 VM:`SetFileSource` 时按整份源码扫一遍
+	//   * `local x = <字面量 | 表构造 | X.new(...)>` → x 的类型(表构造连字段一起记);
+	//   * `x = <…>`(x 是已登记的局部)→ 刷新类型(作用域内赋值);
+	//   * `t.a.b = <…>`(t 是推断出来的局部表)→ 递归补字段(中间层按 table 自动补);
+	//   * `X = { … }`(全局表构造)→ 也登记(未注解字段的悬停/链式解析)。
+	// 同名后写覆盖先写(悬停只拿得到"词之前的整行片段",没有行号,只能按最后一次已知回答);
+	// 推不出来就不登记 —— 悬停保持现状(不弹空框)。
+	const LuauCompletionIndex::InferredSymbol* LuauCompletionIndex::FindInferred(
+		std::string_view name) const
+	{
+		for (auto it = m_Inferred.rbegin(); it != m_Inferred.rend(); ++it)
+			if (it->Name == name)
+				return &*it;
+		return nullptr;
+	}
+
+	std::vector<LuauCompletionIndex::InferredSymbol>::iterator LuauCompletionIndex::FindInferred(
+		std::string_view name)
+	{
+		for (auto it = m_Inferred.end(); it != m_Inferred.begin();)
+		{
+			--it;
+			if (it->Name == name)
+				return it;
+		}
+		return m_Inferred.end();
+	}
+
+	const LuauCompletionIndex::InferredSymbol* LuauCompletionIndex::FindInferredField(
+		const InferredSymbol* symbol, std::string_view name)
+	{
+		if (!symbol)
+			return nullptr;
+		for (auto it = symbol->Fields.rbegin(); it != symbol->Fields.rend(); ++it)
+			if (it->Name == name)
+				return &*it;
+		return nullptr;
+	}
+
+	// E3②/E4:裸名/接收者链的根解析 —— 当前文件推断表里**任意**结构化表的字段(精确大小写)。
+	// 例:`local FX = { ExtraInfo = { note = … } }` 之后悬停裸名 `note`(在表构造字面量里)
+	// 或 `ExtraInfo.note` 的链根 `ExtraInfo`。先深后浅、后写优先(与 FindInferred 同一条口径)。
+	const LuauCompletionIndex::InferredSymbol* LuauCompletionIndex::FindInferredFieldAnywhere(
+		std::string_view name) const
+	{
+		if (name.empty())
+			return nullptr;
+		// 先一层(直接字段),再两层(嵌套字段);每一层都按"后写优先"。
+		for (auto root = m_Inferred.rbegin(); root != m_Inferred.rend(); ++root)
+			if (const InferredSymbol* field = FindInferredField(&*root, name))
+				if (!field->Type.empty())
+					return field;
+		for (auto root = m_Inferred.rbegin(); root != m_Inferred.rend(); ++root)
+			for (auto field = root->Fields.rbegin(); field != root->Fields.rend(); ++field)
+				if (const InferredSymbol* nested = FindInferredField(&*field, name))
+					if (!nested->Type.empty())
+						return nested;
+		return nullptr;
+	}
+
+	void LuauCompletionIndex::ParseInferredLocals(std::string_view text)
+	{
+		m_Inferred.clear();
+		const std::string masked = MaskCommentsAndStrings(text);
+		if (masked.empty())
+			return;
+
+		// 表构造里的字段(递归):`{ x = 1.5, stats = { hp = 10 } }`。
+		std::function<void(std::size_t, int, std::vector<InferredSymbol>&)> parseFields;
+		// 表达式 → 类型名(推不出来 = 空串);fields 非空时收表构造里的字段。
+		std::function<std::string(std::size_t, int, std::vector<InferredSymbol>*)> inferType;
+
+		parseFields = [&](std::size_t brace, int depth, std::vector<InferredSymbol>& out)
+		{
+			if (depth > 4)
+				return;
+			std::size_t pos = brace + 1;
+			while (pos < masked.size())
+			{
+				pos = SkipBlanksAt(masked, pos);
+				while (pos < masked.size() && (masked[pos] == ',' || masked[pos] == ';'))
+					pos = SkipBlanksAt(masked, pos + 1);
+				if (pos >= masked.size() || masked[pos] == '}')
+					break;
+				if (!IsIdentStart(masked[pos]))
+				{
+					// [expr] = value / 位置值:跳过(畸形输入兜底:一定要前进)
+					const std::size_t before = pos;
+					pos = SkipValueExpression(masked, pos);
+					if (pos == before)
+						++pos;
+					continue;
+				}
+				std::size_t nameEnd = pos;
+				while (nameEnd < masked.size() && IsIdentPart(masked[nameEnd]))
+					++nameEnd;
+				const std::string fieldName = masked.substr(pos, nameEnd - pos);
+				std::size_t after = SkipBlanksAt(masked, nameEnd);
+				if (after >= masked.size() || masked[after] != '=' ||
+					(after + 1 < masked.size() && masked[after + 1] == '='))
+				{
+					// 位置值:跳过(畸形输入兜底:一定要前进)
+					const std::size_t before = pos;
+					pos = SkipValueExpression(masked, pos);
+					if (pos == before)
+						++pos;
+					continue;
+				}
+				std::vector<InferredSymbol> nested;
+				const std::string type = inferType(after + 1, depth + 1, &nested);
+				if (!type.empty())
+				{
+					InferredSymbol field;
+					field.Name = fieldName;
+					field.Type = type;
+					field.Fields = std::move(nested);
+					const auto existing = std::find_if(out.begin(), out.end(),
+						[&fieldName](const InferredSymbol& item) { return item.Name == fieldName; });
+					if (existing != out.end())
+						*existing = std::move(field);
+					else
+						out.push_back(std::move(field));
+				}
+				pos = SkipValueExpression(masked, after + 1);
+			}
+		};
+
+		inferType = [&](std::size_t pos, int depth, std::vector<InferredSymbol>* fields) -> std::string
+		{
+			if (fields)
+				fields->clear();
+			pos = SkipBlanksAt(masked, pos);
+			if (pos >= masked.size() || depth > 4)
+				return std::string();
+			const char first = masked[pos];
+			if (first == '{')
+			{
+				if (fields)
+					parseFields(pos, depth, *fields);
+				return "table";
+			}
+			if (first == '"' || first == '\'')
+				return "string";
+			if (first == '[' && pos + 1 < masked.size() && masked[pos + 1] == '[')
+				return "string";   // 长字符串 [[…]]
+			if (first >= '0' && first <= '9')
+			{
+				std::size_t probe = pos;
+				while (probe < masked.size() && (IsIdentPart(masked[probe]) || masked[probe] == '.'))
+					++probe;
+				return "number";   // 十进制/浮点/十六进制字面量
+			}
+			if ((first == '-' || first == '+') && pos + 1 < masked.size())
+			{
+				const std::size_t next = SkipBlanksAt(masked, pos + 1);
+				if (next < masked.size() && masked[next] >= '0' && masked[next] <= '9')
+				{
+					std::size_t probe = next;
+					while (probe < masked.size() && (IsIdentPart(masked[probe]) || masked[probe] == '.'))
+						++probe;
+					return "number";
+				}
+				return std::string();
+			}
+			if (!IsIdentStart(first))
+				return std::string();
+			std::size_t end = pos;
+			while (end < masked.size() && IsIdentPart(masked[end]))
+				++end;
+			const std::string name = masked.substr(pos, end - pos);
+			if (name == "true" || name == "false")
+				return "boolean";
+			if (name == "nil")
+				return "nil";
+			if (name == "function")
+				return "function";
+			// `X.new(...)`:类型名 = X(只认索引里真有的 `---@class`,不凭名字硬造)。
+			const std::size_t after = SkipBlanksAt(masked, end);
+			if (after < masked.size() && masked[after] == '.' && ResolveClass(name))
+			{
+				std::size_t memberEnd = SkipBlanksAt(masked, after + 1);
+				std::size_t cursor = memberEnd;
+				while (cursor < masked.size() && IsIdentPart(masked[cursor]))
+					++cursor;
+				if (masked.substr(memberEnd, cursor - memberEnd) == "new")
+					return name;
+			}
+
+			// ---- E2(2026-09-27 用户口径):成员表达式 / 函数调用结果 ----
+			// `a.b` / `self.ExtraInfo.note` / `recv:Method(...)` / `recv.Method(...)` / `f(...)`。
+			// 根 = 本文件推断出的表或局部 / `self`(文件类)/ 已声明类名;每段按**精确大小写**取成员,
+			// 段的类型就是该成员的类型(`---@field` 或方法上的 `---@return`)。推不出来 → 空(不猜)。
+			{
+				const LuauCompletionIndex& lookup =
+					*static_cast<const LuauCompletionIndex*>(this);   // 走 const 查询重载
+				const InferredSymbol* tableSymbol = nullptr;   // 当前值是推断表时指向它(可查字段)
+				std::string type;                              // 当前值的类型名
+				bool resolved = false;
+				// 文件里的 `local function f` / `function f` 带 `---@return` 注解时,Type 就是返回类型
+				// (`function` 只是"不知道签名"的旧兜底)——这种情况要能支撑 `local y = f()`。
+				// 顺序:推断表(带字段,链式解析要用)→ 文件函数/符号的注解类型 → 推断出的局部类型。
+				const InferredSymbol* root = lookup.FindInferred(name);
+				if (root && root->Type == "table")
+				{
+					type = root->Type;
+					tableSymbol = root;
+					resolved = true;
+				}
+				else
+				{
+					for (const LuauCompletionItem& item : m_FileItems)
+					{
+						if (item.Name == name && !item.Type.empty())
+						{
+							type = item.Type;
+							resolved = true;
+							break;
+						}
+					}
+					if (!resolved && root && !root->Type.empty())
+					{
+						type = root->Type;
+						resolved = true;
+					}
+				}
+				if (!resolved && name == "self" && !m_FileClasses.empty())
+				{
+					if (const InferredSymbol* classTable = lookup.FindInferred(m_FileClasses.front().Name))
+					{
+						type = classTable->Type;
+						tableSymbol = (type == "table") ? classTable : nullptr;
+						resolved = !type.empty();
+					}
+					if (!resolved)
+					{
+						type = m_FileClasses.front().Name;
+						resolved = true;
+					}
+				}
+				if (!resolved && FindClassExact(name))
+				{
+					type = name;
+					resolved = true;
+				}
+				std::size_t cursor = end;
+				while (resolved)
+				{
+					const std::size_t separatorPos = SkipBlanksAt(masked, cursor);
+					if (separatorPos >= masked.size()
+						|| (masked[separatorPos] != '.' && masked[separatorPos] != ':'))
+						break;
+					const std::size_t memberStart = SkipBlanksAt(masked, separatorPos + 1);
+					std::size_t memberEnd = memberStart;
+					while (memberEnd < masked.size() && IsIdentPart(masked[memberEnd]))
+						++memberEnd;
+					if (memberEnd == memberStart || !IsIdentStart(masked[memberStart]))
+					{
+						resolved = false;
+						break;
+					}
+					const std::string member = masked.substr(memberStart, memberEnd - memberStart);
+					if (tableSymbol)
+					{
+						const InferredSymbol* field = FindInferredField(tableSymbol, member);
+						if (!field || field->Type.empty())
+						{
+							resolved = false;
+							break;
+						}
+						type = field->Type;
+						tableSymbol = (type == "table") ? field : nullptr;
+					}
+					else
+					{
+						const LuauCompletionItem* item = FindMember(FindClassExact(type), member);
+						if (!item || item->Type.empty())
+						{
+							resolved = false;
+							break;
+						}
+						type = item->Type;
+					}
+					cursor = memberEnd;
+				}
+				// 表达式本身就是表(`local y = FX.ExtraInfo`)→ 字段表一起带走(链式悬停继续可用)。
+				if (resolved && type == "table" && fields && tableSymbol)
+					*fields = tableSymbol->Fields;
+				// 调用:表达式后面紧跟 '(' → 结果 = 被调成员的返回类型(联合取第一个非 nil)。
+				if (resolved)
+				{
+					const std::size_t callPos = SkipBlanksAt(masked, cursor);
+					if (callPos < masked.size() && masked[callPos] == '(')
+						type = FirstReturnType(type);
+					if (!type.empty())
+						return type;
+				}
+			}
+			return std::string();
+		};
+
+		// 表字段的写入(同名字段覆盖)。
+		const auto setField = [](InferredSymbol& container, const std::string& name,
+			const std::string& type, std::vector<InferredSymbol> fields)
+		{
+			for (InferredSymbol& field : container.Fields)
+			{
+				if (field.Name == name)
+				{
+					field.Type = type;
+					field.Fields = std::move(fields);
+					return;
+				}
+			}
+			InferredSymbol field;
+			field.Name = name;
+			field.Type = type;
+			field.Fields = std::move(fields);
+			container.Fields.push_back(std::move(field));
+		};
+		const auto ensureTableField = [&setField](InferredSymbol& container, const std::string& name)
+			-> InferredSymbol*
+		{
+			for (InferredSymbol& field : container.Fields)
+				if (field.Name == name)
+					return &field;
+			InferredSymbol field;
+			field.Name = name;
+			field.Type = "table";
+			container.Fields.push_back(std::move(field));
+			return &container.Fields.back();
+		};
+		const auto appendSymbol = [this](std::string name, std::string type,
+			std::vector<InferredSymbol> fields)
+		{
+			InferredSymbol symbol;
+			symbol.Name = std::move(name);
+			symbol.Type = std::move(type);
+			symbol.Fields = std::move(fields);
+			// D3:同名文件符号(ParseFileText 登记的 `local x` / `X = {}`)顺手补上类型 ——
+			// Query/补全列表的 Type 列同样受益(首次登记的类型保留,不来回覆盖)。
+			for (LuauCompletionItem& item : m_FileItems)
+			{
+				if (item.Name == symbol.Name)
+				{
+					if (item.Type.empty() && !symbol.Type.empty())
+						item.Type = symbol.Type;
+					break;
+				}
+			}
+			m_Inferred.push_back(std::move(symbol));
+		};
+
+		std::size_t index = 0;
+		while (index < masked.size())
+		{
+			if (IsBlank(masked[index]))
+			{
+				++index;
+				continue;
+			}
+			if (!IsIdentStart(masked[index]))
+			{
+				index = NextLineStart(masked, index);
+				continue;
+			}
+
+			const std::string_view view(masked);
+			const bool isLocal = StartsWithWord(view.substr(index), "local");
+			std::size_t cursor = isLocal ? SkipBlanksAt(masked, index + 5) : index;
+			const bool functionDecl = StartsWithWord(view.substr(cursor), "function");
+			if (functionDecl)
+				cursor = SkipBlanksAt(masked, cursor + 8);
+			std::size_t nameEnd = cursor;
+			while (nameEnd < masked.size() && IsIdentPart(masked[nameEnd]))
+				++nameEnd;
+			if (nameEnd == cursor || !IsIdentStart(masked[cursor]))
+			{
+				index = NextLineStart(masked, index);
+				continue;
+			}
+			const std::string name = masked.substr(cursor, nameEnd - cursor);
+			std::size_t after = SkipBlanksAt(masked, nameEnd);
+			if (functionDecl)
+			{
+				// `local function f(...)` / `function f(...)`:类型就是 function。
+				// `function X:Method(...)` / `function X.Method(...)`:方法,不登记 X。
+				if (isLocal || after >= masked.size() ||
+					(masked[after] != ':' && masked[after] != '.'))
+					appendSymbol(name, "function", {});
+				index = NextLineStart(masked, index);
+				continue;
+			}
+			if (after < masked.size() && (masked[after] == ',' || masked[after] == '('))
+			{
+				index = NextLineStart(masked, index);   // 多名字列表 / 调用语句:不猜
+				continue;
+			}
+			const bool assignment = after < masked.size() && masked[after] == '=' &&
+				(after + 1 >= masked.size() || masked[after + 1] != '=');
+			if (assignment)
+			{
+				std::vector<InferredSymbol> fields;
+				const std::string type = inferType(after + 1, 0, &fields);
+				if (isLocal)
+				{
+					appendSymbol(name, type, std::move(fields));
+				}
+				else if (auto existing = FindInferred(name); existing != m_Inferred.end())
+				{
+					// 作用域内赋值:`local a = 1` 之后 `a = 2.5` —— 推得出来就刷新。
+					if (!type.empty())
+					{
+						existing->Type = type;
+						if (type == "table")
+							existing->Fields = std::move(fields);
+					}
+				}
+				index = SkipValueExpression(masked, after + 1);
+				continue;
+			}
+			if (!isLocal && after < masked.size() && masked[after] == '{')
+			{
+				// 全局表构造 `X = { … }`:登记未注解字段(供链式悬停用;不做补全)。
+				std::vector<InferredSymbol> fields;
+				const std::string type = inferType(after, 0, &fields);
+				if (!type.empty())
+					appendSymbol(name, type, std::move(fields));
+				index = SkipValueExpression(masked, after);
+				continue;
+			}
+			if (!isLocal && after < masked.size() && masked[after] == '.')
+			{
+				// 字段赋值 `t.stats.hp = <值>`:根必须是推断出来的局部/全局表。
+				std::vector<std::string> chain { name };
+				std::size_t chainEnd = after;
+				while (chainEnd < masked.size() && masked[chainEnd] == '.')
+				{
+					const std::size_t segment = SkipBlanksAt(masked, chainEnd + 1);
+					std::size_t segmentEnd = segment;
+					while (segmentEnd < masked.size() && IsIdentPart(masked[segmentEnd]))
+						++segmentEnd;
+					if (segmentEnd == segment || !IsIdentStart(masked[segment]))
+						break;
+					chain.push_back(masked.substr(segment, segmentEnd - segment));
+					chainEnd = SkipBlanksAt(masked, segmentEnd);
+				}
+				if (chain.size() >= 2 && chainEnd < masked.size() && masked[chainEnd] == '=' &&
+					(chainEnd + 1 >= masked.size() || masked[chainEnd + 1] != '='))
+				{
+					const auto root = FindInferred(chain.front());
+					if (root != m_Inferred.end() && root->Type == "table")
+					{
+						std::vector<InferredSymbol> fields;
+						const std::string type = inferType(chainEnd + 1, 0, &fields);
+						if (!type.empty())
+						{
+							InferredSymbol* container = &*root;
+							for (std::size_t step = 1; container && step + 1 < chain.size(); ++step)
+								container = ensureTableField(*container, chain[step]);
+							if (container)
+								setField(*container, chain.back(), type, std::move(fields));
+						}
+					}
+				}
+				index = SkipValueExpression(masked, chainEnd + 1);
+				continue;
+			}
+			if (isLocal)
+			{
+				// `local a`(没有初值):登记空类型;后续 `a = 2.5` 能补上(推不出来就不弹)。
+				appendSymbol(name, std::string(), {});
+			}
+			index = NextLineStart(masked, index);
+		}
+	}
+
 	bool LuauCompletionIndex::Describe(std::string_view linePrefix, std::string_view word,
 		LuauCompletionItem& out) const
 	{
@@ -1125,18 +1806,24 @@ namespace World
 		// 这里只挑出与 word 同名的那一条。
 		std::vector<LuauCompletionItem> items;
 		Query(linePrefix, 0, items);
+		// D3:名字命中但没有类型/文档的项(文件内符号的默认形态)先留作兜底 ——
+		// 下面的类型推断能给同一个名字补上类型时优先用它;补不上再原样返回(旧行为)。
+		LuauCompletionItem untyped;
 		for (const LuauCompletionItem& item : items)
 			if (item.Name == word)
 			{
-				out = item;
-				return true;
+				if (!item.Type.empty() || !item.Doc.empty())
+				{
+					out = item;
+					return true;
+				}
+				if (untyped.Name.empty())
+					untyped = item;
 			}
-		for (const LuauCompletionItem& item : items)
-			if (EqualsIgnoreCase(item.Name, word))
-			{
-				out = item;
-				return true;
-			}
+		// VEC-E1(E4):大小写不敏感的"名字兜底"**不再紧跟在精确匹配后面** —— 它要排在"本文件
+		// 自己的推断结果"之后(见下面的 D3/E3② 块)。修复前悬停 `ExtraInfo = { level = 1 }` 里的
+		// `level` 会先命中存根里仅大小写不同的 `Level` 全局服务(tooltip 变成 Level 服务的说明,
+		// 用户:「很奇怪,不知道从哪读的」)。
 		// V9:当前文件注解里声明的字段(`---@field Speed number 移动速度`)。
 		//
 		// 为什么需要这一步:①悬停在**注解行里的字段名**上时,光标前缀是 `---@field `,Query 给的是
@@ -1178,6 +1865,112 @@ namespace World
 					out = item;
 					return true;
 				}
+		}
+		// D3 / E3②(2026-09-27 用户口径:悬浮也要能推出局部变量/表字段的类型;推断结果要参与
+		// **接收者链**解析):
+		//   * 接收者链 `t.x` / `t.stats.hp` / `self.ExtraInfo.note` / `ExtraInfo.note` —— 悬停字段名时
+		//     linePrefix 以 '.' 结尾,从右往左解析标识符链;根按 推断表 → `self`(文件类)→
+		//     本文件任意结构化表的字段(如 `ExtraInfo`,它只是 `local X = {...}` 的子字段)解析;
+		//   * 裸名 —— `local a = 1` 之后悬停 `a`,或悬停表构造字面量里的字段名(`note` / `level`);
+		//   * **优先于**大小写不敏感的全局兜底(E4 的串台修复)。
+		// 全部推不出来 → 保持现状(不弹空框)。
+		{
+			const auto trimmed = [](std::string_view value)
+			{
+				std::size_t end = value.size();
+				while (end > 0 && IsBlank(value[end - 1]))
+					--end;
+				return value.substr(0, end);
+			};
+
+			std::string_view prefix = trimmed(linePrefix);
+			if (!prefix.empty() && prefix.back() == '.')
+			{
+				prefix.remove_suffix(1);
+				std::vector<std::string> chain;
+				bool valid = true;
+				while (true)
+				{
+					prefix = trimmed(prefix);
+					const std::size_t end = prefix.size();
+					std::size_t start = end;
+					while (start > 0 && IsIdentPart(prefix[start - 1]))
+						--start;
+					if (start == end || !IsIdentStart(prefix[start]) || chain.size() >= 8)
+					{
+						valid = false;
+						break;
+					}
+					chain.insert(chain.begin(), std::string(prefix.substr(start, end - start)));
+					prefix = trimmed(prefix.substr(0, start));
+					if (!prefix.empty() && prefix.back() == '.')
+					{
+						prefix.remove_suffix(1);
+						continue;
+					}
+					break;
+				}
+				if (valid && !chain.empty())
+				{
+					const InferredSymbol* symbol = FindInferred(chain.front());
+					// `self.ExtraInfo.note`:self = 文件类的值(推出来的类表,退化成类名)。
+					if (!symbol && chain.front() == "self" && !m_FileClasses.empty())
+						symbol = FindInferred(m_FileClasses.front().Name);
+					// `ExtraInfo.note`:ExtraInfo 只是 `local X = { ExtraInfo = {...} }` 的子字段。
+					if (!symbol)
+						symbol = FindInferredFieldAnywhere(chain.front());
+					for (std::size_t step = 1; symbol && step < chain.size(); ++step)
+						symbol = FindInferredField(symbol, chain[step]);
+					if (symbol && symbol->Type == "table")
+					{
+						const InferredSymbol* field = FindInferredField(symbol, word);
+						if (field && !field->Type.empty())
+						{
+							out.Name.assign(word);
+							out.Type = field->Type;
+							out.Kind = LuauCompletionItem::KindType::Field;
+							return true;
+						}
+					}
+				}
+			}
+
+			if (const InferredSymbol* local = FindInferred(word))
+			{
+				if (!local->Type.empty())
+				{
+					out.Name.assign(word);
+					out.Type = local->Type;
+					out.Kind = LuauCompletionItem::KindType::Global;
+					return true;
+				}
+			}
+			// 裸名命中"本文件某个表构造里的字段"(悬停字面量里的 `note` / `level`)。
+			if (const InferredSymbol* field = FindInferredFieldAnywhere(word))
+			{
+				out.Name.assign(word);
+				out.Type = field->Type;
+				out.Kind = LuauCompletionItem::KindType::Field;
+				return true;
+			}
+		}
+		// 大小写不敏感的名字兜底(VEC-E1:排在推断之后 —— 只在"本文件没有任何自己的解释"时才生效)。
+		for (const LuauCompletionItem& item : items)
+			if (EqualsIgnoreCase(item.Name, word))
+			{
+				if (!item.Type.empty() || !item.Doc.empty())
+				{
+					out = item;
+					return true;
+				}
+				if (untyped.Name.empty())
+					untyped = item;
+			}
+		// 名字命中但类型/文档都推不出来 → 维持旧行为(返回那条空项,不弹新框)。
+		if (!untyped.Name.empty())
+		{
+			out = untyped;
+			return true;
 		}
 		return false;
 	}

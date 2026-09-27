@@ -1958,11 +1958,22 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, kBackground, 0.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y, gutterWidth, rect.H }, kGutterBackground, 0.0f });
 
+		// E1(VEC-E1,2026-09-27 用户口径「脚本编辑器左侧要显示行号」):行号槽在 textRect **左边**,
+		// 必须画在 ClipPush(textRect) 之前 —— 画在文本裁剪里会被整列裁掉(修复前实测:只留下一条
+		// 空深色 gutter,亮像素 = 0)。数字与正文同一套行标:lineY 里带 -ScrollY,滚动/换行天然对齐。
 		const int drawCaretLine = focused ? buffer.LineOfOffset(buffer.Caret()) : -1;
 		const int firstVisible = std::max(0, static_cast<int>(std::floor(state.ScrollY / lineHeight)));
 		const int lastVisible = std::min(lineCount - 1,
 			static_cast<int>(std::floor((state.ScrollY + rect.H) / lineHeight)) + 1);
 		const float textPadY = (lineHeight - fontSize) * 0.5f;
+		for (int line = firstVisible; line <= lastVisible; ++line)
+		{
+			const float lineY = textRect.Y + static_cast<float>(line) * lineHeight - state.ScrollY;
+			const std::string number = std::to_string(line + 1);
+			const float numberWidth = ctx.MeasureTextWidth(number, fontSize, WuiFontFamily::Monospace);
+			pushText(rect.X + gutterWidth - kGutterPaddingRight - numberWidth, lineY + textPadY,
+				line == drawCaretLine ? kGutterTextCurrent : kGutterText, number, -1, -1, -1);
+		}
 
 		ctx.Commands().push_back({ WuiDrawKind::ClipPush, textRect, kBackground });
 		std::vector<WuiCodeToken> tokens;
@@ -2009,12 +2020,6 @@ namespace World::Wui
 						current ? kOccurrenceStrong : kOccurrenceWeak, 0.0f });
 				}
 			}
-
-			// 行号栏
-			const std::string number = std::to_string(line + 1);
-			const float numberWidth = ctx.MeasureTextWidth(number, fontSize, WuiFontFamily::Monospace);
-			pushText(rect.X + gutterWidth - kGutterPaddingRight - numberWidth, lineY + textPadY,
-				line == drawCaretLine ? kGutterTextCurrent : kGutterText, number, -1, -1, -1);
 
 			// 语法分段:token 之间按 Default 补齐(不丢字符,也不打乱像素推进)。
 			tokens.clear();

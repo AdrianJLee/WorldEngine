@@ -678,6 +678,134 @@ int main()
 			std::printf("[type-order] candidates=%zu | before-fix: Entity=23 mat3=29 mat4=30 vec2=46 vec3=47 vec4=48 WorldScript=49"
 				" | now: %s\n", items.size(), JoinNames(items, 13).c_str());
 		}
+
+		// ---- 10. VEC-D3(用户口径「局部变量/表字段也要能推」):`local a = 1` 之后悬停 a 给 number;
+		//         `local t = { x = 1.5, s = "hi" }` 之后 t.x/t.s;嵌套表 t.stats.hp;作用域内赋值;
+		//         推不出来 → 保持现状(不弹空框)。纯文本层,不建 VM。----
+		{
+			CHECK(index.LoadStubFile(StubPath(), nullptr));
+			index.SetFileSource(
+				"-- 推断用例:局部变量 / 表构造 / 嵌套表 / 作用域内赋值\n"
+				"local a = 1\n"
+				"local t = { x = 1.5, s = \"hi\", flag = true, stats = { hp = 10, name = 'boss' } }\n"
+				"local empty = someCall()\n"
+				"local later\n"
+				"local f = function() end\n"
+				"local origin = vec3.new(1.0, 2.0, 3.0)\n"
+				"a = 2.5\n"
+				"later = \"filled\"\n"
+				"t.extra = false\n"
+				"t.stats.hp = 42\n");
+
+			LuauCompletionItem described;
+			// 裸名:声明 + 作用域内赋值(赋值是 number,类型不丢)。
+			CHECK(index.Describe("    print(", "a", described));
+			CHECK(described.Name == "a" && described.Type == "number");
+			// 表构造里的字段(字符串/布尔同样要推)。
+			CHECK(index.Describe("    print(t.", "x", described));
+			CHECK(described.Name == "x" && described.Type == "number");
+			CHECK(index.Describe("    print(t.", "s", described));
+			CHECK(described.Type == "string");
+			CHECK(index.Describe("    print(t.", "flag", described));
+			CHECK(described.Type == "boolean");
+			// 嵌套表:t.stats.hp / t.stats.name。
+			CHECK(index.Describe("    print(t.stats.", "hp", described));
+			CHECK(described.Name == "hp" && described.Type == "number");
+			CHECK(index.Describe("    print(t.stats.", "name", described));
+			CHECK(described.Type == "string");
+			// 作用域内字段赋值 / 先声明后赋值的局部。
+			CHECK(index.Describe("    print(t.", "extra", described));
+			CHECK(described.Type == "boolean");
+			CHECK(index.Describe("    print(", "later", described));
+			CHECK(described.Type == "string");
+			// 函数与引擎类型构造器(存根里真的声明了 vec3)。
+			CHECK(index.Describe("    print(", "f", described));
+			CHECK(described.Type == "function");
+			CHECK(index.Describe("    print(", "origin", described));
+			CHECK(described.Type == "vec3");
+			// 推不出来 → 保持现状:不弹空框(字段不存在 / 值不是字面量)。
+			LuauCompletionItem missing;
+			CHECK(!index.Describe("    print(t.", "missing", missing));
+			// `local empty = someCall()`:推断不出类型 → 不凭空给类型(既有的"名字命中但没类型"原样保留)。
+			CHECK(!index.Describe("    print(", "empty", missing) || missing.Type.empty());
+			CHECK(!index.Describe("    print(", "definitely_not_defined", missing));
+			std::printf("[infer-hover] a=number t.x=number t.s=string t.stats.hp=number origin=vec3\n");
+		}
+
+		// ---- 11. VEC-E1(E2/E3②/E4,2026-09-27 用户口径):函数返回值/成员表达式赋值的局部变量也要有
+		//         类型提示;裸 table 的字段(`note`/`level`)给**本字段自己的**推断类型,不再串到存根里
+		//         仅大小写不同的 `Level` 全局服务;`self.X` / `ExtraInfo.note` 的接收者链要能解析。----
+		{
+			CHECK(index.LoadStubFile(StubPath(), nullptr));
+			index.SetFileSource(
+				"local FX = { ExtraInfo = { note = \"hi\", level = 1 }, Num = 2.5 }\n"
+				"local fromMember = FX.Num\n"
+				"local fromNested = FX.ExtraInfo.note\n"
+				"local fromSelf = self.Speed\n"
+				"local fromEntity = self.entity:GetComponent(\"TransformComponent\")\n"
+				"---@return number\n"
+				"local function probeHelper() end\n"
+				"local fromCall = Level.Primary()\n"
+				"local fromFunc = probeHelper()\n"
+				"---@class E1HoverProbe : WorldScript\n"
+				"---@field Speed number 移动速度\n"
+				"local E1HoverProbe = { Speed = 5.0, ExtraInfo = { note = \"x\", level = 1 } }\n");
+
+			LuauCompletionItem described;
+			const auto describeLine = [&index](const char* prefix, const char* word) -> std::string
+			{
+				LuauCompletionItem item;
+				if (!index.Describe(prefix, word, item))
+					return "<none>";
+				return item.Name + " type='" + item.Type + "' doc='" + item.Doc + "'";
+			};
+			std::printf("[e1-hover] fromMember=%s\n", describeLine("    print(", "fromMember").c_str());
+			std::printf("[e1-hover] fromNested=%s\n", describeLine("    print(", "fromNested").c_str());
+			std::printf("[e1-hover] fromSelf=%s\n", describeLine("    print(", "fromSelf").c_str());
+			std::printf("[e1-hover] fromEntity=%s\n", describeLine("    print(", "fromEntity").c_str());
+			std::printf("[e1-hover] fromCall=%s\n", describeLine("    print(", "fromCall").c_str());
+			std::printf("[e1-hover] fromFunc=%s\n", describeLine("    print(", "fromFunc").c_str());
+			std::printf("[e1-hover] note=%s\n", describeLine("    print(", "note").c_str());
+			std::printf("[e1-hover] level=%s\n", describeLine("    print(", "level").c_str());
+			std::printf("[e1-hover] ExtraInfo.note=%s\n",
+				describeLine("    print(ExtraInfo.", "note").c_str());
+			std::printf("[e1-hover] self.ExtraInfo.level=%s\n",
+				describeLine("    print(self.ExtraInfo.", "level").c_str());
+			// E2:成员表达式(`a.b`)/ 接收者链。
+			CHECK(index.Describe("    print(", "fromMember", described));
+			CHECK(described.Type == "number");
+			CHECK(index.Describe("    print(", "fromNested", described));
+			CHECK(described.Type == "string");
+			// E2:`self.Member`(文件类注解字段)。
+			CHECK(index.Describe("    print(", "fromSelf", described));
+			CHECK(described.Type == "number");
+			// E2:函数调用结果 —— 存根 `---@return userdata|nil` 取第一个非 nil 类型。
+			CHECK(index.Describe("    print(", "fromEntity", described));
+			CHECK(described.Type == "userdata");
+			// E2:存根方法返回类型(`Level:Primary()` → string)。
+			CHECK(index.Describe("    print(", "fromCall", described));
+			CHECK(described.Type == "string");
+			// E2:本文件 `---@return number` 的函数。
+			CHECK(index.Describe("    print(", "fromFunc", described));
+			CHECK(described.Type == "number");
+			// E3②:表构造里的裸字段 → 本文件自己的推断类型。
+			CHECK(index.Describe("    print(", "note", described));
+			CHECK(described.Type == "string");
+			// E4:`level` 必须给 number(修复前命中存根 Level 服务,Doc 是 "level/flow service…")。
+			CHECK(index.Describe("    print(", "level", described));
+			CHECK(described.Type == "number");
+			CHECK(described.Doc.find("level/flow service") == std::string::npos);
+			// E3②:接收者链 —— 根是"表的字段"(`ExtraInfo`)或 `self`(文件类)都要能解析。
+			CHECK(index.Describe("    print(ExtraInfo.", "note", described));
+			CHECK(described.Type == "string");
+			CHECK(index.Describe("    print(self.ExtraInfo.", "level", described));
+			CHECK(described.Type == "number");
+			// 推不出来 → 不弹(未知名字)。
+			LuauCompletionItem missing;
+			CHECK(!index.Describe("    print(", "definitely_not_defined", missing));
+			std::printf("[e1-hover] fromMember=number fromNested=string fromSelf=number "
+				"fromEntity=userdata fromCall=string fromFunc=number note=string level=number\n");
+		}
 	}
 	catch (const std::exception& exception)
 	{

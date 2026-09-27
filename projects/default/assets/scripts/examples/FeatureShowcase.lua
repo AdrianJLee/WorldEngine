@@ -5,6 +5,13 @@
 --   * 叶子字段(number/string/boolean/vec3…)：一行一个控件；
 --   * 结构化表(---@class)：属性面板里可展开成子行、逐字段编辑、随场景保存；
 --     裸 `table`(没有子字段声明)只做只读展示，不进存档。
+-- 集合字段(数组/映射)的声明写法：
+--   * 数组 `---@field Scores {number}`：每个元素一行（行标签 = 下标），行尾 `-` 删除、底部 `+` 追加；
+--   * 映射 `---@field Config {string: number}`：每个键一行（行标签 = 键名），`+` 会先让你输入键名；
+--   * 嵌套数组 `---@field Grid {{number}}`：元素本身还是数组（行里再展开一层）；
+--   * 初值 = **默认形状**：没被编辑过的元素显示脚本里的初值、不写进场景；
+--     编辑过/增删过的形状以场景为准（重开场景后仍是你的元素个数与键名）。
+-- 复位（行尾 `↺`）= 回到“未设”：该字段从场景里消失，重新按脚本里的初值显示。
 
 -- 结构化表的字段声明：属性面板会按这份声明展开子行（顺序 = 这里的顺序）。
 ---@class FeatureShowcaseStats
@@ -19,6 +26,9 @@
 ---@field Label string HUD 上显示的标题文本
 ---@field Stats FeatureShowcaseStats 数值展示（结构化表：可展开、可编辑、随场景保存）
 ---@field ExtraInfo table 任意表（只读展示，不进存档）
+---@field Scores {number} 分数数组（数组声明：元素按下标成行，可增删）
+---@field Config {string: number} 配置映射（映射声明：键名以场景为准，可加键）
+---@field Grid {{number}} 二维网格（嵌套数组声明：每个元素本身是数组）
 local FeatureShowcase = {
     -- 演示：字段声明与默认值。这些字段由编辑器属性面板反射识别并支持保存到场景
     Speed = 2.0,
@@ -36,20 +46,26 @@ local FeatureShowcase = {
         note = "运行期自用，不进场景",
         level = 1,
     },
+    -- 数组声明：初值 = 默认形状（3 个元素）。改了/加了元素之后形状按场景保存
+    Scores = { 1.5, 2.5, 3.5 },
+    -- 映射声明：初值 = 默认键集合（hp/mp）；新增的键会跟着场景保存
+    Config = { hp = 10, mp = 20 },
+    -- 嵌套数组声明：外层 2 行，每行是一个 2 元素的数组
+    Grid = { { 1, 2 }, { 3, 4 } },
     -- 未写 `---@field` 的表：引擎按值推导类型（字符串键 → 可展开的结构化行，初值一起进属性面板）
     InferredStats = {
         Level = 3,
         Title = "自动推导",
         Scale = 1.25,
     },
-    -- 未写注解的数组：数字键顺序不可靠 → 属性面板给一行只读摘要（数组类型推导是下一步）
+    -- 未写注解的数组：引擎按值推导成**数组行**（元素类型取自首个元素，初值一起进属性面板）
     RawScores = { 90, 85, 77 },
 }
 
 -- 运行时内部状态（非反射导出字段，无需在 @field 中声明）
 FeatureShowcase.timerTicks = 0
 FeatureShowcase.timerHandle = 0
-FeatureShowcase.elapsedTime = 0.0
+FeatureShowcase.elapsedTime = 0.1
 
 -- 演示：OnCreate 生命周期。脚本实例启动时被引擎调用一次，适合执行一次性初始化
 function FeatureShowcase:OnCreate()
@@ -61,6 +77,13 @@ function FeatureShowcase:OnCreate()
     -- 未注解字段同样会在属性面板里出现(推导类型 + 初值):这里读回来验证运行期就是普通 Lua 字段
     print(string.format("[FeatureShowcase] InferredStats: Level=%d Title='%s' Scale=%.2f",
         self.InferredStats.Level, self.InferredStats.Title, self.InferredStats.Scale))
+    -- 集合字段在运行期也是普通 Lua 值:数组是连续下标的表,映射是键值表(面板做的增删/改值都会写回这里)
+    print(string.format("[FeatureShowcase] Scores: %d 个元素, 第 1 个 = %.1f",
+        #self.Scores, self.Scores[1] or 0.0))
+    print(string.format("[FeatureShowcase] Config: hp=%.1f mp=%.1f",
+        self.Config.hp or 0.0, self.Config.mp or 0.0))
+    print(string.format("[FeatureShowcase] Grid: %d 行, 第 1 行第 2 列 = %.1f",
+        #self.Grid, (self.Grid[1] and self.Grid[1][2]) or 0.0))
 
     -- 演示：timers 计时器系统。创建周期性触发的定时器（每 1.0 秒触发一次，0 或缺省表示无限重复）
     self.timerTicks = 0

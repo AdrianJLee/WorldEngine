@@ -362,6 +362,22 @@ namespace World
 		bool CreateEntered = false;
 	};
 
+	// C 期(数组/映射,2026-09-26):脚本属性的**集合形态**。
+	//   None   = 叶子(标量 / 字符串 / Vec2/3/4),Type = 叶子的 schema 类型;
+	//   Struct = `---@class` 结构化表(现状;Type == Object,TypeName = 类名或裸 table 的 "table");
+	//   Array  = `---@field Scores {number}`(Children 顺序 = 下标 1..n,Name = 下标字符串);
+	//   Map    = `---@field Config {string: number}`(Children = 键值行,Name = 键)。
+	// 容器属性的 Type 一律是 Schema::Kind::Object(值在 Children 里,Value 保持 monostate),
+	// 由 Collection + ElementKind/KeyKind 描述元素与键;**不新增 Schema::Kind**(编译器与 schema
+	// 反射不认识集合类型,集合只存在于脚本属性这一层)。
+	enum class ScriptPropertyCollection : uint8_t
+	{
+		None = 0,
+		Struct,
+		Array,
+		Map,
+	};
+
 	// 脚本属性:两种前端(C++ / Luau)**同一份表示** —— 编辑器、存档、热重载迁移都只用这一种模型。
 	// Type = schema 值类型(Float / Int32 / Bool / String …);Value = 当前值(缺省时用脚本声明的默认值)。
 	struct ScriptProperty
@@ -380,6 +396,24 @@ namespace World
 		std::string TypeName;
 		std::vector<ScriptProperty> Children;
 		bool ReadOnly = false;
+		// C 期:集合形态与元素/键类型(**只追加在尾部** —— 既有 `ScriptProperty{name, type, value}`
+		// 聚合初始化保持有效)。ElementKind = 数组元素类型 / 映射值类型(元素本身是集合时 = Object,
+		// 由子项各自的 Collection 描述);KeyKind = 映射键类型(默认 String,仅 Map 使用)。
+		ScriptPropertyCollection Collection = ScriptPropertyCollection::None;
+		Schema::Kind ElementKind = Schema::Kind::None;
+		Schema::Kind KeyKind = Schema::Kind::String;
+		// D1(2026-09-27 用户口径:复位 = 回到"未设"):脚本/schema 声明的默认值。
+		// **只用于展示与 Play 兜底,不写进场景** —— `Value` 仍是编辑器/存档认定的当前值,
+		// 但"这条属性要不要进场景"由 `ScriptProperties::IsSceneRecorded` 判定:
+		// Value 未设(monostate)或与 Default 相同 → 视为未设,整条不写;
+		// Default 为 monostate = 声明没有给出默认值(此时 Value 就是场景自己的值)。
+		// 每次 SyncFromDeclarations/SyncFromSchema 刷新;不进存档(Doc 同样由脚本派生)。
+		Schema::Value Default;
+		// D2(2026-09-27 用户口径:集合形状跨进程以场景为准):读档时**场景里真的写了**
+		// 这个数组/映射(有 `Value:` 节点,含空 seq/map)→ true。只有此时合并才保留场景的
+		// 元素个数/键名(声明只按名字补默认值与说明);否则容器形状用声明的默认形状重建。
+		// 由 SceneSerializer 读档置位,合并时原样继承,不进存档。
+		bool ShapeFromScene = false;
 	};
 
 	// C++ 行为组件(原 NativeScriptComponent;2026-09-26 重写)。

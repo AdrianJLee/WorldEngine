@@ -52,6 +52,11 @@ namespace World
 		ScriptFunctionRef s_LookupField;
 		// 受保护的字段名收集:脚本返回的表可能有 __index 元表,只收集**自有字符串键**。
 		ScriptFunctionRef s_CollectFieldNames;
+		// C 期(数组/映射):受保护的"自有键条目"收集(string 或 number 键 + 值)与"按键写值"。
+		// 数字键在 C++ 侧的脚本表 API(ScriptTableRef::SetField/GetField 是字符串键)上无法表达,
+		// 因此这两条走受保护的小 helper(与 s_CollectFieldNames 同一条安全口径)。
+		ScriptFunctionRef s_CollectEntries;
+		ScriptFunctionRef s_SetIndex;
 
 		// V1:声明查询的单槽缓存(检视器可能每帧调用)。键 = 逻辑路径 + 内容指纹 + VM 是否可用。
 		// 只存纯数据(不含 VM 引用),Shutdown/Init 后依然有效;内容变了或 VM 可用性变了自动失效。
@@ -75,6 +80,24 @@ namespace World
 			"        if type(key) == 'string' then table.insert(names, key) end\n"
 			"    end\n"
 			"    return names\n"
+			"end";
+		// C 期:收集自有键的条目 {name = tostring(key), number = key, value = value}。
+		// wantNumeric = true → 只收 number 键(映射/数组),false → 只收 string 键(结构化表)。
+		const char* const kEntryCollectorSource =
+			"return function(target, wantNumeric)\n"
+			"    local entries = {}\n"
+			"    for key, value in pairs(target) do\n"
+			"        local kind = type(key)\n"
+			"        if (wantNumeric and kind == 'number') or (not wantNumeric and kind == 'string') then\n"
+			"            table.insert(entries, { name = tostring(key), number = key, value = value })\n"
+			"        end\n"
+			"    end\n"
+			"    return entries\n"
+			"end";
+		// C 期:按键写值(数字键的唯一写入口;字符串键也有 SetField,这里只为映射统一)。
+		const char* const kSetIndexSource =
+			"return function(target, key, value)\n"
+			"    target[key] = value\n"
 			"end";
 
 		void ReportLuaError(LuauScriptComponent& script, const char* phase, const std::string& error)
@@ -161,7 +184,7 @@ namespace World
 		struct FieldAnnotation
 		{
 			std::string Name;
-			std::string TypeName;
+			std::string TypeName;   // C 期起可能是类型表达式(`{number}` / `{string: number}` / `{{number}}`)
 			std::string Doc;
 		};
 		using AnnotationList = std::vector<FieldAnnotation>;
@@ -173,6 +196,56 @@ namespace World
 				return {};
 			const size_t end = text.find_last_not_of(" \t\r\n");
 			return text.substr(begin, end - begin + 1);
+		}
+
+		// C 期:把 `---@field` 之后的剩余文本拆成"名字 + 类型表达式 + 说明"。
+		// 类型表达式 = 平衡花括号的 `{…}`(**可含空格**,如 `{string: number}`)或第一个空白分隔的 token;
+		// 说明 = 类型表达式之后的整段剩余文本(去掉首尾空白);没有类型 / 括号不闭合 → false(该行跳过,
+		// 与旧口径一致:解析不了就不猜)。
+		bool ParseFieldAnnotationRest(const std::string& rest, FieldAnnotation& annotation)
+		{
+			std::istringstream stream(rest);
+			if (!(stream >> annotation.Name))
+				return false;
+			std::string remainder;
+			std::getline(stream, remainder);
+			const std::string text = TrimWhitespace(remainder);
+			if (text.empty())
+				return false;
+			std::size_t cursor = 0;
+			if (text.front() == '{')
+			{
+				int nesting = 0;
+				bool closed = false;
+				for (; cursor < text.size(); ++cursor)
+				{
+					if (text[cursor] == '{')
+						++nesting;
+					else if (text[cursor] == '}')
+					{
+						--nesting;
+						if (nesting == 0)
+						{
+							++cursor;
+							closed = true;
+							break;
+						}
+						if (nesting < 0)
+							break;
+					}
+				}
+				if (!closed)
+					return false;
+			}
+			else
+			{
+				cursor = text.find_first_of(" \t");
+				if (cursor == std::string::npos)
+					cursor = text.size();
+			}
+			annotation.TypeName = text.substr(0, cursor);
+			annotation.Doc = TrimWhitespace(text.substr(cursor));
+			return !annotation.TypeName.empty();
 		}
 
 		AnnotationList ParseFieldAnnotationListInternal(const std::string& text)
@@ -188,19 +261,13 @@ namespace World
 				const std::string trimmed = line.substr(start);
 				if (trimmed.rfind("---@field", 0) != 0)
 					continue;
-			std::istringstream rest(trimmed.substr(9));
-			FieldAnnotation annotation;
-			if (!(rest >> annotation.Name))
-				continue;
-			if (!(rest >> annotation.TypeName))
-				continue;
-			std::string remainder;
-			std::getline(rest, remainder);
-			annotation.Doc = TrimWhitespace(remainder);   // 第三段 = 类型之后的整段剩余文本
-			if (std::any_of(schema.begin(), schema.end(),
-					[&annotation](const auto& item) { return item.Name == annotation.Name; }))
-				continue;   // 重复声明以第一次为准(与 ScriptProperties::SyncFromDeclarations 同口径)
-			schema.push_back(std::move(annotation));
+				FieldAnnotation annotation;
+				if (!ParseFieldAnnotationRest(trimmed.substr(9), annotation))
+					continue;
+				if (std::any_of(schema.begin(), schema.end(),
+						[&annotation](const auto& item) { return item.Name == annotation.Name; }))
+					continue;   // 重复声明以第一次为准(与 ScriptProperties::SyncFromDeclarations 同口径)
+				schema.push_back(std::move(annotation));
 			}
 			return schema;
 		}
@@ -233,6 +300,88 @@ namespace World
 
 		constexpr int kMaxObjectDepth = 4;      // 与 ScriptProperties 的护栏同口径(plan v2 §B)
 		constexpr size_t kMaxObjectFields = 64;
+		// C 期:注解里的集合嵌套层数上限 —— `{number}`/`{string: number}` = 1 层,`{{number}}` = 2 层;
+		// 再深(如 `{{{number}}}`)→ 解析失败 → 只读摘要 + 诊断(不静默、不无限展开)。
+		constexpr int kMaxCollectionDepth = 2;
+
+		// C 期:一个类型表达式 —— 叶子(类型名)/ 数组 `{T}`(1 个参数)/ 映射 `{K: V}`(2 个参数)。
+		struct TypeExpression
+		{
+			std::string Name;                      // 叶子类型名(容器时为空)
+			std::vector<TypeExpression> Arguments; // 容器:1 = 元素;2 = (键, 值)
+			bool IsContainer = false;
+		};
+
+		// `{…}` 里的顶层 `:` 分隔键与值(嵌套花括号里的 `:` 不算)。
+		std::size_t FindTopLevelColon(const std::string& text)
+		{
+			int nesting = 0;
+			for (std::size_t index = 0; index < text.size(); ++index)
+			{
+				const char character = text[index];
+				if (character == '{')
+					++nesting;
+				else if (character == '}')
+					--nesting;
+				else if (character == ':' && nesting == 0)
+					return index;
+			}
+			return std::string::npos;
+		}
+
+		// 类型表达式解析:`{T}` / `{K: V}`(递归)。解析失败(空 / 花括号不闭合 / 嵌套超护栏)→ false + reason,
+		// 调用方降级为只读摘要并出诊断 —— 绝不把读不懂的写法当成某个默认类型。
+		bool ParseTypeExpression(const std::string& text, int depth, TypeExpression& out, std::string& reason)
+		{
+			const std::string trimmed = TrimWhitespace(text);
+			if (trimmed.empty())
+			{
+				reason = "empty type";
+				return false;
+			}
+			if (trimmed.front() != '{')
+			{
+				if (trimmed.find_first_of(" \t{}:") != std::string::npos)
+				{
+					reason = "malformed type name '" + trimmed + "'";
+					return false;
+				}
+				out.Name = trimmed;
+				return true;
+			}
+			if (trimmed.size() < 2 || trimmed.back() != '}')
+			{
+				reason = "unbalanced braces in '" + trimmed + "'";
+				return false;
+			}
+			if (depth >= kMaxCollectionDepth)
+			{
+				reason = "collection type nesting is deeper than the supported " +
+					std::to_string(kMaxCollectionDepth) + " levels";
+				return false;
+			}
+			out.IsContainer = true;
+			const std::string inner = trimmed.substr(1, trimmed.size() - 2);
+			const std::size_t colon = FindTopLevelColon(inner);
+			if (colon == std::string::npos)
+			{
+				out.Arguments.resize(1);
+				return ParseTypeExpression(inner, depth + 1, out.Arguments[0], reason);
+			}
+			out.Arguments.resize(2);
+			return ParseTypeExpression(inner.substr(0, colon), depth + 1, out.Arguments[0], reason) &&
+				ParseTypeExpression(inner.substr(colon + 1), depth + 1, out.Arguments[1], reason);
+		}
+
+		// 诊断里回显类型表达式的原始写法(`{string: number}` / `{{number}}`)。
+		std::string TypeExpressionText(const TypeExpression& type)
+		{
+			if (!type.IsContainer)
+				return type.Name;
+			if (type.Arguments.size() == 1)
+				return "{" + TypeExpressionText(type.Arguments[0]) + "}";
+			return "{" + TypeExpressionText(type.Arguments[0]) + ": " + TypeExpressionText(type.Arguments[1]) + "}";
+		}
 
 		ClassList ParseClassAnnotationListInternal(const std::string& text)
 		{
@@ -264,13 +413,9 @@ namespace World
 				}
 				if (trimmed.rfind("---@field", 0) != 0 || classes.empty())
 					continue;
-				std::istringstream rest(trimmed.substr(9));
 				FieldAnnotation annotation;
-				if (!(rest >> annotation.Name) || !(rest >> annotation.TypeName))
+				if (!ParseFieldAnnotationRest(trimmed.substr(9), annotation))
 					continue;
-				std::string remainder;
-				std::getline(rest, remainder);
-				annotation.Doc = TrimWhitespace(remainder);
 				ClassAnnotation& owner = classes.back();
 				if (std::any_of(owner.Fields.begin(), owner.Fields.end(),
 						[&annotation](const FieldAnnotation& item) { return item.Name == annotation.Name; }))
@@ -509,14 +654,88 @@ namespace World
 			return names;
 		}
 
+		// C 期:一条"自有键"条目(名字 / 数值键 / 值)。pairs 的键可能是 string 或 number,
+		// 名字统一取 tostring(与检视器行标签、存档键一致)。
+		struct OwnEntry
+		{
+			std::string Name;
+			double Number = 0.0;
+			bool HasNumber = false;
+			ScriptValue Value;
+		};
+
+		// 收集目标表的自有键条目(numeric = true → number 键;false → string 键)。
+		// 顺序 = pairs 的遍历顺序;需要顺序的地方(数组 = 下标 1..n、结构化表 = 注解顺序)各自对齐。
+		std::vector<OwnEntry> CollectOwnEntries(const ScriptTableRef& table, bool numeric)
+		{
+			std::vector<OwnEntry> entries;
+			if (!table.IsValid())
+				return entries;
+			ScriptValue result;
+			std::string error;
+			const ScriptValue args[] = { table.ToValue(), ScriptValue::Boolean(numeric) };
+			if (!s_CollectEntries.Call(args, 2, &result, &error))
+				throw std::runtime_error(error);
+			ScriptTableRef rows;
+			if (!result.AsTable(&rows))
+				return entries;
+			for (const ScriptValue& row : rows.GetArray())
+			{
+				ScriptTableRef fields;
+				if (!row.AsTable(&fields))
+					continue;
+				OwnEntry entry;
+				std::string name;
+				if (fields.GetField("name").AsString(&name))
+					entry.Name = std::move(name);
+				double number = 0.0;
+				if (fields.GetField("number").AsNumber(&number))
+				{
+					entry.Number = number;
+					entry.HasNumber = true;
+				}
+				entry.Value = fields.GetField("value");
+				entries.push_back(std::move(entry));
+			}
+			return entries;
+		}
+
+		// C 期:表的形态判定(未注解字段的类型推导用)——
+		//   Empty          无自有 string/number 键 → 空表(只读摘要);
+		//   StringKeys     只有字符串键 → 结构化表(命名子行,递归,带初值);
+		//   ArrayLike      恰好是连续整数键 1..n(Length() = 连续段,且数字键个数相等)→ 数组;
+		//   Opaque         数字键不连续 / 数字与字符串混合 → 只读摘要 + 诊断(顺序不可靠,不猜)。
+		enum class TableShape { Empty, StringKeys, ArrayLike, Opaque };
+
+		TableShape ClassifyTable(const ScriptTableRef& table, std::vector<ScriptValue>& elements)
+		{
+			elements.clear();
+			if (!table.IsValid())
+				return TableShape::Empty;
+			const std::size_t numericKeys = CollectOwnEntries(table, true).size();
+			const std::size_t stringKeys = CollectOwnEntries(table, false).size();
+			if (numericKeys == 0 && stringKeys == 0)
+				return TableShape::Empty;
+			if (numericKeys == 0)
+				return TableShape::StringKeys;
+			if (stringKeys != 0)
+				return TableShape::Opaque;
+			const std::size_t length = table.Length();   // 1,2,3… 走到第一个 nil(整数连续语义)
+			if (length == 0 || length != numericKeys)
+				return TableShape::Opaque;
+			elements = table.GetArray();
+			return TableShape::ArrayLike;
+		}
+
 		// V1:脚本表 + 注解 → 有序声明表(name / Schema::Kind / Doc / 默认值)。
 		//   顺序 = 注解顺序(先声明先显示)→ 表里其余字段顺序;
 		//   注解:类型走固定映射(number→Float);字段在表里时按声明类型取默认值(类型不符 → 跳过 + 诊断);
 		//         字段不在表里也保留声明(编辑器要显示),默认值 = monostate(未设,不写零值);
 		//   无注解字段(容器脚本 / 未写注解的表项):按值推断类型,默认值 = 表里的值。
 		// B 期 v3:未注解字段的类型推导 —— 叶子沿用旧口径;字符串键的表 → Struct(命名子行,递归,带初值);
-		// 含数字键的表(数组/混合)与空表 → 只读摘要(TypeName="table",无子字段)。
+		// C 期:连续整数键 1..n 的表 → Array(元素同型才可编辑;异质/不连续/混合/空表 → 只读摘要 + 诊断)。
 		bool InferDeclarationFromValueInternal(const ScriptValue& value, const std::string& name, int depth,
+			const std::string& scriptPath, std::vector<std::string>* diagnostics,
 			ScriptProperties::Declaration& out)
 		{
 			out = ScriptProperties::Declaration {};
@@ -530,57 +749,412 @@ namespace World
 			ScriptTableRef nested;
 			if (!value.AsTable(&nested) || !nested.IsValid())
 				return false;
-			out.Type = Schema::Kind::Object;
-			out.TypeName = "table";
-			if (depth >= kMaxObjectDepth)
-				return true;   // 深度护栏 → 只读摘要
-			const std::vector<std::string> childNames = CollectOwnFieldNames(nested);
-			if (childNames.empty())
-				return true;   // 空表 → 只读摘要
-			for (const std::string& child : childNames)
+
+			const auto report = [&](const std::string& detail)
 			{
-				const bool numeric = !child.empty() && std::all_of(child.begin(), child.end(),
-					[](char c) { return c >= '0' && c <= '9'; });
-				if (numeric)
-					return true;   // 数组/混合键:顺序不可靠 → 只读摘要(数组类型下一步做)
+				if (diagnostics)
+					diagnostics->push_back("[script] " + scriptPath + ": field '" + name + "' " + detail);
+			};
+			// 只读摘要:看得到、不进存档(裸 table / 空表 / 不支持的键形态 / 超护栏共用)。
+			const auto summary = [&](const std::string& detail, ScriptPropertyCollection collection)
+			{
+				out.Type = Schema::Kind::Object;
+				out.Collection = collection;
+				out.TypeName = "table";
+				out.ElementKind = Schema::Kind::None;
+				out.ReadOnly = true;
+				out.Fields.clear();
+				report(detail);
+			};
+
+			std::vector<ScriptValue> elements;
+			const TableShape shape = ClassifyTable(nested, elements);
+			if (shape == TableShape::Empty)
+			{
+				summary("is an empty table; the field is shown read-only",
+					ScriptPropertyCollection::Struct);
+				return true;
 			}
-			std::unordered_set<std::string> visited;
-			for (const std::string& child : childNames)
+			if (shape == TableShape::Opaque)
 			{
-				if (visited.count(child) || child.empty() || child[0] == '_')
-					continue;
-				if (out.Fields.size() >= kMaxObjectFields)
+				summary("has non-consecutive numeric keys or mixes numeric and string keys; "
+					"the field is shown read-only", ScriptPropertyCollection::Struct);
+				return true;
+			}
+			if (shape == TableShape::StringKeys)
+			{
+				out.Type = Schema::Kind::Object;
+				out.Collection = ScriptPropertyCollection::Struct;
+				out.TypeName = "table";
+				if (depth >= kMaxObjectDepth)
+				{
+					summary("nests deeper than the supported " + std::to_string(kMaxObjectDepth) +
+						" levels; the field is shown read-only", ScriptPropertyCollection::Struct);
+					return true;
+				}
+				const std::vector<std::string> childNames = CollectOwnFieldNames(nested);
+				std::unordered_set<std::string> visited;
+				for (const std::string& child : childNames)
+				{
+					if (visited.count(child) || child.empty() || child[0] == '_')
+						continue;
+					if (out.Fields.size() >= kMaxObjectFields)
+						break;
+					visited.insert(child);
+					ScriptProperties::Declaration field;
+					if (InferDeclarationFromValueInternal(nested.GetField(child.c_str()), child, depth + 1,
+							scriptPath, diagnostics, field))
+						out.Fields.push_back(std::move(field));
+				}
+				if (out.Fields.empty())
+				{
+					// 只有下划线/entity 一类被跳过的键 → 与空表同一落点(只读摘要)。
+					summary("has no exposable fields; the field is shown read-only",
+						ScriptPropertyCollection::Struct);
+				}
+				return true;
+			}
+
+			// ArrayLike:连续整数键 1..n。元素同型(数值 Int32/Float 之间按 Float 提升)才可编辑;
+			// 元素本身是表 → 递归推断(元组/嵌套数组);异质 → 只读摘要 + 诊断。
+			out.Type = Schema::Kind::Object;
+			out.Collection = ScriptPropertyCollection::Array;
+			out.TypeName = "array";
+			if (depth >= kMaxObjectDepth)
+			{
+				summary("nests deeper than the supported " + std::to_string(kMaxObjectDepth) +
+					" levels; the field is shown read-only", ScriptPropertyCollection::Array);
+				return true;
+			}
+			if (elements.size() > kMaxObjectFields)
+			{
+				summary("has more than " + std::to_string(kMaxObjectFields) +
+					" elements; the field is shown read-only", ScriptPropertyCollection::Array);
+				return true;
+			}
+			std::size_t tableElements = 0;
+			Schema::Kind elementKind = Schema::Kind::None;
+			bool heterogeneous = false;
+			for (const ScriptValue& element : elements)
+			{
+				const Schema::Kind elementValueKind = InferKindFromValueInternal(element);
+				if (elementValueKind == Schema::Kind::None)
+				{
+					ScriptTableRef probe;
+					if (element.AsTable(&probe) && probe.IsValid())
+					{
+						++tableElements;
+						continue;
+					}
+					heterogeneous = true;   // 函数 / userdata / 其它非表值 → 不作为数组元素类型
 					break;
-				visited.insert(child);
-				ScriptProperties::Declaration field;
-				if (InferDeclarationFromValueInternal(nested.GetField(child.c_str()), child, depth + 1, field))
-					out.Fields.push_back(std::move(field));
+				}
+				if (elementKind == Schema::Kind::None)
+					elementKind = elementValueKind;
+				else if (elementKind != elementValueKind)
+				{
+					const bool bothNumeric =
+						(elementKind == Schema::Kind::Int32 || elementKind == Schema::Kind::Float) &&
+						(elementValueKind == Schema::Kind::Int32 || elementValueKind == Schema::Kind::Float);
+					if (bothNumeric)
+						elementKind = Schema::Kind::Float;   // 整数与浮点混排 → 统一 Float
+					else
+					{
+						heterogeneous = true;
+						break;
+					}
+				}
+			}
+			if (!heterogeneous && tableElements != 0 && tableElements != elements.size())
+				heterogeneous = true;   // 表元素与叶子元素混排
+			if (heterogeneous)
+			{
+				summary("looks like an array but its elements have different value types; "
+					"the field is shown read-only", ScriptPropertyCollection::Array);
+				return true;
+			}
+			if (tableElements == elements.size())
+			{
+				// 元素本身是集合(如 `{{number}}` 的值侧):逐元素递归,任一元素读不出来 → 整条只读。
+				out.ElementKind = Schema::Kind::Object;
+				for (std::size_t index = 0; index < elements.size(); ++index)
+				{
+					ScriptProperties::Declaration element;
+					if (!InferDeclarationFromValueInternal(elements[index], std::to_string(index + 1),
+							depth + 1, scriptPath, diagnostics, element) || element.ReadOnly)
+					{
+						summary("is an array of tables that could not be inferred element by element; "
+							"the field is shown read-only", ScriptPropertyCollection::Array);
+						return true;
+					}
+					out.Fields.push_back(std::move(element));
+				}
+				return true;
+			}
+			out.ElementKind = elementKind;
+			for (std::size_t index = 0; index < elements.size(); ++index)
+			{
+				ScriptProperties::Declaration element;
+				element.Name = std::to_string(index + 1);   // 数组行名 = 下标字符串(1 起)
+				element.Type = elementKind;
+				if (!ReadPropertyValueInternal(elements[index], elementKind, &element.Default))
+				{
+					summary("looks like an array but its elements have different value types; "
+						"the field is shown read-only", ScriptPropertyCollection::Array);
+					return true;
+				}
+				out.Fields.push_back(std::move(element));
 			}
 			return true;
 		}
+
+		// C 期:值 + 类型表达式 → 声明的结果分类(决定顶层是"跳过"还是"只读摘要" + 诊断措辞)。
+		enum class ValueBuild
+		{
+			Ok,
+			UnsupportedType,   // 类型名不认识(元素/键/字段)
+			Mismatch,          // 类型认识,但脚本表里的值不是这个类型
+			BadShape,          // 表形态读不出来(不连续 / 混合键 / 嵌套超护栏 / 元素异质)
+		};
 
 		std::vector<ScriptProperties::Declaration> BuildDeclarations(const ScriptTableRef& table,
 			const ScriptAnnotations& annotations, const std::string& scriptPath, std::vector<std::string>* diagnostics)
 		{
 			const std::vector<std::string> names = CollectOwnFieldNames(table);
-			const auto isField = [&names](const std::string& name)
-			{
-				return std::find(names.begin(), names.end(), name) != names.end();
-			};
 			const auto skipName = [](const std::string& name)
 			{
 				return name.empty() || name[0] == '_' || name == "entity";
 			};
 
-			// B 期:注解 → 声明(递归)。Object = `---@class` 结构化表(子字段递归)或裸 `table`(只读摘要);
-			// 叶子沿用老口径(固定映射 + 从脚本表读默认值,类型不符 → 诊断 + 跳过)。
-			std::function<void(const ScriptTableRef&, const AnnotationList&, int, std::vector<std::string>&,
-				std::unordered_set<std::string>&, std::vector<ScriptProperties::Declaration>&)> buildList;
-			std::function<void(const ScriptTableRef&, const std::vector<std::string>&, const FieldAnnotation&, int,
-				std::vector<std::string>&, ScriptProperties::Declaration&)> buildOne;
+			// C 期:类型表达式 + 脚本值 → 一条声明(不含 Name/Doc,由调用方填)。
+			// 叶子沿用老口径(固定映射 + 从脚本表读默认值);容器 = 数组/映射(元素/键值行递归);
+			// `---@class` = B 期结构化表(子字段按注解顺序递归,坏子字段跳过)。
+			std::function<ValueBuild(const TypeExpression&, const ScriptValue&, bool, int,
+				std::vector<std::string>&, const std::string&, ScriptProperties::Declaration&, std::string&)> buildValue;
+			// 一条注解字段 → 一条声明(Name/Doc + 诊断)。
+			std::function<void(const FieldAnnotation&, const ScriptTableRef&, const std::vector<std::string>&,
+				int, std::vector<std::string>&, ScriptProperties::Declaration&)> buildOne;
 
-			buildOne = [&](const ScriptTableRef& ownerTable, const std::vector<std::string>& ownerNames,
-				const FieldAnnotation& annotation, int depth, std::vector<std::string>& classStack,
+			buildValue = [&](const TypeExpression& type, const ScriptValue& value, bool hasValue, int depth,
+				std::vector<std::string>& classStack, const std::string& fieldPath,
+				ScriptProperties::Declaration& out, std::string& reason) -> ValueBuild
+			{
+				out = ScriptProperties::Declaration {};
+				const bool usableValue = hasValue && !value.IsNil();
+				if (!type.IsContainer)
+				{
+					const Schema::Kind kind = AnnotationToKindInternal(type.Name);
+					if (kind != Schema::Kind::None)
+					{
+						out.Type = kind;
+						if (usableValue && !ReadPropertyValueInternal(value, kind, &out.Default))
+							return ValueBuild::Mismatch;
+						return ValueBuild::Ok;
+					}
+					if (type.Name == "table")
+					{
+						// E3①(2026-09-27 用户口径:第 45 行 `ExtraInfo` 这种裸 table 要"全部进面板"):
+						// 用脚本表里的**实际值**递归推断结构 —— 字符串键 → 结构化行(可展开、可编辑、
+						// 随场景保存),连续整数键 1..n → 数组行(`+`/`-` 可增删),与 `---@class` 走
+						// 同一条渲染/存档路径(Collection/Children/ElementKind)。
+						// 推不出来(空表 / 键不连续或混合 / 元素异质 / 超护栏 / 没有值)→ 保持旧口径:
+						// 只读摘要(看得到、不进存档),诊断由推断函数给出。
+						if (usableValue)
+						{
+							ScriptProperties::Declaration inferred;
+							if (InferDeclarationFromValueInternal(value, fieldPath, depth, scriptPath,
+									diagnostics, inferred) && !inferred.ReadOnly)
+							{
+								out = std::move(inferred);
+								out.Name.clear();   // buildValue 的契约:名字/说明由调用方(buildOne)恢复
+								out.Doc.clear();
+								return ValueBuild::Ok;
+							}
+						}
+						out.Type = Schema::Kind::Object;
+						out.Collection = ScriptPropertyCollection::Struct;
+						out.TypeName = "table";
+						out.ReadOnly = true;
+						return ValueBuild::Ok;
+					}
+					const ClassAnnotation* nested = FindClassInternal(annotations.Classes, type.Name);
+					if (!nested)
+					{
+						reason = type.Name;
+						return ValueBuild::UnsupportedType;
+					}
+					out.Type = Schema::Kind::Object;
+					out.Collection = ScriptPropertyCollection::Struct;
+					out.TypeName = nested->Name;
+					if (depth >= kMaxObjectDepth)
+					{
+						if (diagnostics)
+							diagnostics->push_back("[script] " + scriptPath + ": field '" + fieldPath +
+								"' nests deeper than the supported " + std::to_string(kMaxObjectDepth) +
+								" levels; the field is shown read-only");
+						out.ReadOnly = true;
+						return ValueBuild::Ok;
+					}
+					if (std::find(classStack.begin(), classStack.end(), nested->Name) != classStack.end())
+					{
+						if (diagnostics)
+							diagnostics->push_back("[script] " + scriptPath + ": class '" + nested->Name +
+								"' forms a reference cycle; the field is shown read-only");
+						out.ReadOnly = true;
+						return ValueBuild::Ok;
+					}
+					ScriptTableRef nestedTable;
+					if (usableValue)
+						value.AsTable(&nestedTable);   // 不是表 → 子字段全部保持"未设"(不猜、不写零值)
+					const std::vector<std::string> nestedNames = CollectOwnFieldNames(nestedTable);
+					classStack.push_back(nested->Name);
+					std::unordered_set<std::string> nestedVisited;
+					for (const FieldAnnotation& child : nested->Fields)
+					{
+						if (nestedVisited.count(child.Name) || skipName(child.Name))
+							continue;
+						if (out.Fields.size() >= kMaxObjectFields)
+							break;   // 单层子字段上限(护栏)
+						nestedVisited.insert(child.Name);
+						ScriptProperties::Declaration childDeclaration;
+						buildOne(child, nestedTable, nestedNames, depth + 1, classStack, childDeclaration);
+						if (childDeclaration.Type == Schema::Kind::None)
+							continue;
+						out.Fields.push_back(std::move(childDeclaration));
+					}
+					classStack.pop_back();
+					return ValueBuild::Ok;
+				}
+
+				// ---- C 期:数组 / 映射 ----
+				const bool map = type.Arguments.size() == 2;
+				out.Type = Schema::Kind::Object;
+				out.Collection = map ? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+				out.TypeName = map ? "map" : "array";
+				const TypeExpression& element = type.Arguments.back();
+				if (map)
+				{
+					const TypeExpression& key = type.Arguments.front();
+					if (key.IsContainer)
+					{
+						reason = "a map key cannot be a collection";
+						return ValueBuild::BadShape;
+					}
+					const Schema::Kind keyKind = AnnotationToKindInternal(key.Name);
+					if (keyKind != Schema::Kind::String && keyKind != Schema::Kind::Int32 && keyKind != Schema::Kind::Float)
+					{
+						reason = key.Name;
+						return ValueBuild::UnsupportedType;
+					}
+					out.KeyKind = keyKind;
+				}
+				ScriptTableRef containerTable;
+				if (usableValue)
+				{
+					if (!value.AsTable(&containerTable) || !containerTable.IsValid())
+					{
+						reason = "the script table holds a different value type";
+						return ValueBuild::Mismatch;
+					}
+				}
+				// 键/元素行:元素是叶子时按 ElementKind 逐行读值;元素本身是集合时递归。
+				const Schema::Kind elementKind = element.IsContainer
+					? Schema::Kind::Object : AnnotationToKindInternal(element.Name);
+				if (elementKind == Schema::Kind::None)
+				{
+					reason = element.Name;
+					return ValueBuild::UnsupportedType;
+				}
+				out.ElementKind = elementKind;
+				// 没有 VM(读不到默认表)/ 脚本表里没有这个字段 → 元素行未知:合并时保留场景里已有的元素值。
+				out.FieldsUnknown = !usableValue;
+				if (map)
+				{
+					// 键类型不匹配的键(例如声明 {string: number} 但表里有数字键)不能静默丢 —— 降级只读。
+					const std::vector<OwnEntry> otherKeys = CollectOwnEntries(containerTable, out.KeyKind == Schema::Kind::String);
+					if (!otherKeys.empty())
+					{
+						reason = "the script table holds keys of a different type";
+						return ValueBuild::BadShape;
+					}
+					for (const OwnEntry& entry : CollectOwnEntries(containerTable, out.KeyKind != Schema::Kind::String))
+					{
+						if (out.Fields.size() >= kMaxObjectFields)
+						{
+							reason = "the map has more than " + std::to_string(kMaxObjectFields) + " entries";
+							return ValueBuild::BadShape;
+						}
+						ScriptProperties::Declaration child;
+						if (elementKind == Schema::Kind::Object)
+						{
+							std::string nestedReason;
+							const ValueBuild nested = buildValue(element, entry.Value, true, depth + 1, classStack,
+								fieldPath + "[" + entry.Name + "]", child, nestedReason);
+							if (nested != ValueBuild::Ok)
+							{
+								reason = nestedReason;
+								return nested;
+							}
+						}
+						else
+						{
+							child.Type = elementKind;
+							if (!ReadPropertyValueInternal(entry.Value, elementKind, &child.Default))
+							{
+								reason = "the script table holds a different value type in the map";
+								return ValueBuild::Mismatch;
+							}
+						}
+						child.Name = entry.Name;   // 行名 = 键(mapping 行标签;nested 分支在上面会重置 Name)
+						out.Fields.push_back(std::move(child));
+					}
+					return ValueBuild::Ok;
+				}
+				std::vector<ScriptValue> elements;
+				const TableShape shape = ClassifyTable(containerTable, elements);
+				if (shape == TableShape::StringKeys || shape == TableShape::Opaque)
+				{
+					reason = shape == TableShape::Opaque
+						? "the script table holds non-consecutive numeric keys or mixed keys"
+						: "the script table holds a table with string keys where the annotation declares an array";
+					return ValueBuild::BadShape;
+				}
+				if (elements.size() > kMaxObjectFields)
+				{
+					reason = "the array has more than " + std::to_string(kMaxObjectFields) + " elements";
+					return ValueBuild::BadShape;
+				}
+				for (std::size_t index = 0; index < elements.size(); ++index)
+				{
+					ScriptProperties::Declaration child;
+					if (elementKind == Schema::Kind::Object)
+					{
+						std::string nestedReason;
+						const ValueBuild nested = buildValue(element, elements[index], true, depth + 1, classStack,
+							fieldPath + "[" + std::to_string(index + 1) + "]", child, nestedReason);
+						if (nested != ValueBuild::Ok)
+						{
+							reason = nestedReason;
+							return nested;
+						}
+					}
+					else
+					{
+						child.Type = elementKind;
+						if (!ReadPropertyValueInternal(elements[index], elementKind, &child.Default))
+						{
+							reason = "the script table holds a different value type in the array";
+							return ValueBuild::Mismatch;
+						}
+					}
+					child.Name = std::to_string(index + 1);   // 数组行名 = 下标字符串(1 起;nested 分支会重置 Name)
+					out.Fields.push_back(std::move(child));
+				}
+				return ValueBuild::Ok;
+			};
+
+			buildOne = [&](const FieldAnnotation& annotation, const ScriptTableRef& ownerTable,
+				const std::vector<std::string>& ownerNames, int depth, std::vector<std::string>& classStack,
 				ScriptProperties::Declaration& out)
 			{
 				out = ScriptProperties::Declaration {};
@@ -590,55 +1164,71 @@ namespace World
 				// (旧口径同此 —— 否则"加载期就该报的错"会提前在这里以别的形态炸掉)。
 				const bool hasOwnField = std::find(ownerNames.begin(), ownerNames.end(), annotation.Name) != ownerNames.end();
 				const ScriptValue fieldValue = hasOwnField ? ownerTable.GetField(annotation.Name.c_str()) : ScriptValue {};
-				const Schema::Kind kind = AnnotationToKindInternal(annotation.TypeName);
-				if (kind != Schema::Kind::None)
+
+				TypeExpression expression;
+				std::string parseError;
+				if (!ParseTypeExpression(annotation.TypeName, 0, expression, parseError))
 				{
-					out.Type = kind;
-					if (!fieldValue.IsNil() && !ReadPropertyValueInternal(fieldValue, kind, &out.Default))
+					if (diagnostics)
+						diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
+							"' declares unsupported type '" + annotation.TypeName + "' (" + parseError +
+							"); the field is shown read-only");
+					out.Type = Schema::Kind::Object;
+					out.Collection = ScriptPropertyCollection::Struct;
+					out.TypeName = "table";
+					out.ReadOnly = true;
+					return;
+				}
+
+				std::string reason;
+				const ValueBuild built = buildValue(expression, fieldValue, hasOwnField, depth, classStack,
+					annotation.Name, out, reason);
+				// buildValue 会整条重置 out(它是"不含名字/说明"的构造器)→ 这里把注解的两段恢复回来。
+				out.Name = annotation.Name;
+				out.Doc = annotation.Doc;
+				if (built == ValueBuild::Ok)
+					return;
+				if (!expression.IsContainer)
+				{
+					// 叶子/类名:沿用旧口径 —— 读不出来就**不进属性表**(与 A/B 期一致)。
+					if (diagnostics)
 					{
-						if (diagnostics)
+						if (built == ValueBuild::Mismatch)
 							diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
 								"' declares type '" + annotation.TypeName +
 								"' but the script table holds a different value type; "
 								"the field is not exposed as a script property");
-						out.Type = Schema::Kind::None;
+						else
+							diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
+								"' declares unsupported type '" + annotation.TypeName +
+								"' (expected number/integer/boolean/string/vec2/vec3/vec4/table, "
+								"`{T}`/`{K: V}` for arrays/maps, or a ---@class declared in this file); "
+								"the field is not exposed as a script property");
 					}
-					return;
-				}
-
-				const bool bareTable = annotation.TypeName == "table";
-				const ClassAnnotation* nested = bareTable ? nullptr : FindClassInternal(annotations.Classes, annotation.TypeName);
-				if (!bareTable && !nested)
-				{
-					if (diagnostics)
-						diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name +
-							"' declares unsupported type '" + annotation.TypeName +
-							"' (expected number/integer/boolean/string/vec2/vec3/vec4/table, or a ---@class "
-							"declared in this file); the field is not exposed as a script property");
 					out.Type = Schema::Kind::None;
 					return;
 				}
-
-				out.Type = Schema::Kind::Object;
-				out.TypeName = bareTable ? std::string("table") : nested->Name;
-				if (bareTable || depth >= kMaxObjectDepth)
-					return;   // 裸 table = 只读摘要;深度护栏 = 不再展开
-				if (std::find(classStack.begin(), classStack.end(), nested->Name) != classStack.end())
+				// C 期:数组/映射读不出来 → **只读摘要**(看得到、不进存档),诊断必须说明原因。
+				if (diagnostics)
 				{
-					if (diagnostics)
-						diagnostics->push_back("[script] " + scriptPath + ": class '" + nested->Name +
-							"' forms a reference cycle; the field is shown read-only");
-					return;
+					const std::string detail = built == ValueBuild::UnsupportedType
+						? "' declares unsupported type '" + annotation.TypeName + "' (" + reason + ")"
+						: "' declares type '" + annotation.TypeName + "' but " + reason;
+					diagnostics->push_back("[script] " + scriptPath + ": field '" + annotation.Name + detail +
+						"; the field is shown read-only");
 				}
-				ScriptTableRef nestedTable;
-				fieldValue.AsTable(&nestedTable);   // 不是表 → 子字段全部保持"未设"(不猜、不写零值)
-				classStack.push_back(nested->Name);
-				std::unordered_set<std::string> nestedVisited;
-				buildList(nestedTable, nested->Fields, depth + 1, classStack, nestedVisited, out.Fields);
-				classStack.pop_back();
+				out = ScriptProperties::Declaration {};
+				out.Name = annotation.Name;
+				out.Doc = annotation.Doc;
+				out.Type = Schema::Kind::Object;
+				out.Collection = expression.Arguments.size() == 2
+					? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+				out.TypeName = "table";
+				out.ReadOnly = true;
 			};
 
-			buildList = [&](const ScriptTableRef& ownerTable, const AnnotationList& list, int depth,
+			// 注解字段:按注解顺序(先声明先显示);重复声明以第一次为准。
+			const auto buildList = [&](const ScriptTableRef& ownerTable, const AnnotationList& list, int depth,
 				std::vector<std::string>& classStack, std::unordered_set<std::string>& visited,
 				std::vector<ScriptProperties::Declaration>& out)
 			{
@@ -651,7 +1241,7 @@ namespace World
 						break;   // 单层子字段上限(护栏)
 					visited.insert(annotation.Name);
 					ScriptProperties::Declaration declaration;
-					buildOne(ownerTable, ownerNames, annotation, depth, classStack, declaration);
+					buildOne(annotation, ownerTable, ownerNames, depth, classStack, declaration);
 					if (declaration.Type == Schema::Kind::None)
 						continue;
 					out.push_back(std::move(declaration));
@@ -670,7 +1260,7 @@ namespace World
 				visited.insert(name);
 				const ScriptValue value = table.GetField(name.c_str());
 				ScriptProperties::Declaration declaration;
-				if (!InferDeclarationFromValueInternal(value, name, 0, declaration))
+				if (!InferDeclarationFromValueInternal(value, name, 0, scriptPath, diagnostics, declaration))
 					continue;
 				declared.push_back(std::move(declaration));
 			}
@@ -696,6 +1286,8 @@ namespace World
 					ScriptProperty* property = ScriptProperties::Find(script.Properties, declaration.Name);
 					if (!property || property->Type != declaration.Type)
 						continue;   // 类型变了 → 走"回新默认值"路径,不迁移活值
+					if (declaration.Collection != ScriptPropertyCollection::None)
+						continue;   // C 期:数组/映射/结构化表的活值迁移不做(热重载以场景保存值为准)
 					Schema::Value live;
 					if (ReadLiveFieldInternal(*liveTable, declaration.Name, declaration.Type, &live))
 						property->Value = std::move(live);
@@ -747,28 +1339,82 @@ namespace World
 			return owner;
 		}
 
+		// C 期:按键写值 —— 字符串键走 ScriptTableRef::SetField;数字键(映射的 number/integer 键)
+		// 没有对应的 C++ 脚本表 API,走受保护的小 helper(受保护的调用失败 → 抛错,与 SetField 同落点)。
+		void SetScriptTableKey(const ScriptTableRef& table, const std::string& name, Schema::Kind keyKind,
+			const ScriptValue& value)
+		{
+			if (keyKind == Schema::Kind::String)
+			{
+				if (!table.SetField(name.c_str(), value))
+					throw std::logic_error("Cannot assign script map key '" + name + "'");
+				return;
+			}
+			double number = 0.0;
+			try { number = std::stod(name); }
+			catch (...) { throw std::logic_error("Invalid numeric map key '" + name + "'"); }
+			ScriptValue result;
+			std::string error;
+			const ScriptValue args[] = { table.ToValue(), ScriptValue::Number(number), value };
+			if (!s_SetIndex.Call(args, 3, &result, &error))
+				throw std::runtime_error(error.empty()
+					? "Cannot assign script map key '" + name + "'" : error);
+		}
+
 		// 属性表 → 脚本表(实例创建 / 热重载交换前写入)。空值字段跳过:保留脚本自己的默认值。
-		// B 期:Object 属性递归建表;一个子字段都没设过 → Nil(不动脚本自己的那张表)。
-		ScriptValue BuildObjectScriptValue(const ScriptProperty& property)
+		// B/C 期:Object(Struct/Array/Map)属性递归建表;一个子项都没设过 → Nil(不动脚本自己的那张表)。
+		//   * Struct:子字段按名字写(未设的子字段跳过);
+		//   * Array:Lua 数组 1..n(第一个未设元素之后的元素不写 —— 数组不能有洞);
+		//   * Map:键按 KeyKind 写(字符串键 / 数字键)。
+		ScriptValue BuildPropertyScriptValue(const ScriptProperty& property)
 		{
 			if (!s_Vm)
 				return ScriptValue::Nil();
+			if (property.Type != Schema::Kind::Object)
+			{
+				if (std::holds_alternative<std::monostate>(property.Value))
+					return ScriptValue::Nil();   // 未设 → 跳过(不写 nil,不清脚本字段)
+				return ToScriptValueInternal(property.Value);
+			}
 			ScriptTableRef table = s_Vm->CreateTable();
 			if (!table.IsValid())
 				return ScriptValue::Nil();
 			bool wrote = false;
-			for (const ScriptProperty& child : property.Children)
+			if (property.Collection == ScriptPropertyCollection::Map)
 			{
-				ScriptValue childValue;
-				if (child.Type == Schema::Kind::Object)
-					childValue = BuildObjectScriptValue(child);
-				else if (!std::holds_alternative<std::monostate>(child.Value))
-					childValue = ToScriptValueInternal(child.Value);
-				if (childValue.IsNil())
-					continue;
-				if (!table.SetField(child.Name.c_str(), childValue))
-					throw std::logic_error("Cannot assign script table field '" + child.Name + "'");
-				wrote = true;
+				for (const ScriptProperty& child : property.Children)
+				{
+					const ScriptValue childValue = BuildPropertyScriptValue(child);
+					if (childValue.IsNil())
+						continue;   // 未设的键跳过(保留脚本自己的条目)
+					SetScriptTableKey(table, child.Name, property.KeyKind, childValue);
+					wrote = true;
+				}
+			}
+			else if (property.Collection == ScriptPropertyCollection::Array)
+			{
+				std::size_t index = 0;
+				for (const ScriptProperty& child : property.Children)
+				{
+					const ScriptValue childValue = BuildPropertyScriptValue(child);
+					if (childValue.IsNil())
+						break;   // 数组不能有洞:第一个未设元素之后不再写
+					if (!table.SetArrayElement(++index, childValue))
+						throw std::logic_error("Cannot assign script array element " + std::to_string(index));
+					wrote = true;
+				}
+			}
+			else
+			{
+				for (const ScriptProperty& child : property.Children)
+				{
+					const ScriptValue childValue = BuildPropertyScriptValue(child);
+					if (childValue.IsNil())
+						continue;   // 未设的子字段跳过(保留脚本自己的默认值)
+					if (!table.SetField(child.Name.c_str(), childValue))
+						throw std::logic_error("Cannot assign script table field '" + child.Name + "'");
+					wrote = true;
+				}
 			}
 			return wrote ? table.ToValue() : ScriptValue::Nil();
 		}
@@ -777,11 +1423,7 @@ namespace World
 		{
 			for (const ScriptProperty& property : script.Properties)
 			{
-				ScriptValue value;
-				if (property.Type == Schema::Kind::Object)
-					value = BuildObjectScriptValue(property);
-				else if (!std::holds_alternative<std::monostate>(property.Value))
-					value = ToScriptValueInternal(property.Value);
+				const ScriptValue value = BuildPropertyScriptValue(property);
 				// VEC-A1(D2):无 VM/绑定不可用时向量装箱返回 Nil —— 跳过而不是写 nil(写 nil 会删掉脚本字段)。
 				if (value.IsNil())
 					continue;
@@ -830,6 +1472,8 @@ namespace World
 			ResetScriptEventSubscriptions();
 			s_LookupField.Release();
 			s_CollectFieldNames.Release();
+			s_CollectEntries.Release();
+			s_SetIndex.Release();
 			s_Bindings.reset();
 			if (s_Vm)
 				s_Vm->Shutdown();
@@ -870,7 +1514,10 @@ namespace World
 
 			s_LookupField = CompileHelper(kFieldLookupSource, "WorldEngine.FieldLookup", &error);
 			s_CollectFieldNames = CompileHelper(kFieldCollectorSource, "WorldEngine.FieldNames", &error);
-			if (!s_LookupField.IsValid() || !s_CollectFieldNames.IsValid())
+			s_CollectEntries = CompileHelper(kEntryCollectorSource, "WorldEngine.FieldEntries", &error);
+			s_SetIndex = CompileHelper(kSetIndexSource, "WorldEngine.SetIndex", &error);
+			if (!s_LookupField.IsValid() || !s_CollectFieldNames.IsValid() ||
+				!s_CollectEntries.IsValid() || !s_SetIndex.IsValid())
 				throw std::runtime_error("[Lua] failed to create script helpers: " + error);
 
 			RegisterMathTypes();

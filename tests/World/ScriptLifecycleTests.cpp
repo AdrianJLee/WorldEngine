@@ -4,6 +4,7 @@
 #include "World/Core/LayerStack.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Scene/SceneSerializer.h"
 #include "World/Scene/LuaStubGenerator.h"
 #include "World/Script/LuauVm.h"
 #include "World/Script/Sandbox.h"
@@ -1127,6 +1128,777 @@ namespace
         CHECK(ScriptProperties::KindFromName("Nope") == Schema::Kind::None);
     }
 
+    // VEC-E1(E3①,2026-09-27 用户口径「第 45 行 ExtraInfo 这种裸 table 要全部进面板」):
+    // `---@field X table` 不再只给一行只读摘要 —— 用脚本表里的值递归推断结构:
+    // 字符串键 → 结构化子行(可展开/可编辑/随场景保存);连续整数键 1..n → 数组行(可增删);
+    // 推不出来的形态(数字与字符串混键 / 数字键不连续)仍然只读摘要 + 诊断(不猜)。
+    void BareTableAnnotationsInferStructure()
+    {
+        const auto path = s_OutputDirectory / "bare_table_inference.lua";
+        {
+            std::ofstream file(path, std::ios::binary);
+            file <<
+                "---@field ExtraInfo table 任意表(裸 table)\n"
+                "---@field RawNumbers table 裸 table 数组\n"
+                "---@field Opaque table 推不出来的表\n"
+                "---@field Unset table 没有初值\n"
+                "return {\n"
+                "    ExtraInfo = { note = \"运行期自用\", level = 1, inner = { depth = 2 } },\n"
+                "    RawNumbers = { 10, 20, 30 },\n"
+                "    Opaque = { [1] = 1, extra = 2 },\n"
+                "}\n";
+            CHECK(file.good());
+        }
+        const std::string logical = path.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+
+        const auto findDeclaration = [](const std::vector<ScriptProperties::Declaration>& list,
+            const std::string& name) -> const ScriptProperties::Declaration*
+        {
+            for (const ScriptProperties::Declaration& item : list)
+                if (item.Name == name)
+                    return &item;
+            return nullptr;
+        };
+
+        std::vector<ScriptProperties::Declaration> declarations;
+        std::vector<std::string> diagnostics;
+        std::string error;
+        CHECK(ScriptEngine::DescribeScriptDeclarations(logical, declarations, &diagnostics, &error));
+        CHECK(error.empty());
+
+        // ① 字符串键 → 结构化子行:子字段带类型与脚本里的初值(嵌套表递归)。
+        const ScriptProperties::Declaration* extra = findDeclaration(declarations, "ExtraInfo");
+        CHECK(extra != nullptr);
+        CHECK(extra->Type == Schema::Kind::Object);
+        CHECK(extra->Collection == ScriptPropertyCollection::Struct);
+        CHECK(extra->TypeName == "table");
+        CHECK(!extra->ReadOnly);
+        CHECK(extra->Doc == "任意表(裸 table)");
+        CHECK(extra->Fields.size() == 3);
+        {
+            const ScriptProperties::Declaration* note = findDeclaration(extra->Fields, "note");
+            const ScriptProperties::Declaration* level = findDeclaration(extra->Fields, "level");
+            const ScriptProperties::Declaration* inner = findDeclaration(extra->Fields, "inner");
+            CHECK(note != nullptr && note->Type == Schema::Kind::String);
+            CHECK(std::get<std::string>(note->Default) == "运行期自用");
+            CHECK(level != nullptr && level->Type == Schema::Kind::Int32);
+            CHECK(std::get<int32_t>(level->Default) == 1);
+            CHECK(inner != nullptr && inner->Collection == ScriptPropertyCollection::Struct);
+            CHECK(inner->Fields.size() == 1 && inner->Fields[0].Name == "depth");
+            CHECK(std::get<int32_t>(inner->Fields[0].Default) == 2);
+        }
+
+        // ② 连续整数键 1..n → 数组行(元素类型 + 初值;面板侧同一条 +/- 增删路径)。
+        const ScriptProperties::Declaration* raw = findDeclaration(declarations, "RawNumbers");
+        CHECK(raw != nullptr);
+        CHECK(raw->Collection == ScriptPropertyCollection::Array);
+        CHECK(raw->ElementKind == Schema::Kind::Int32);
+        CHECK(!raw->ReadOnly);
+        CHECK(raw->Fields.size() == 3);
+        CHECK(raw->Fields[0].Name == "1" && std::get<int32_t>(raw->Fields[0].Default) == 10);
+        CHECK(std::get<int32_t>(raw->Fields[2].Default) == 30);
+
+        // ③ 推不出来的形态 → 只读摘要 + 诊断(与"不静默丢弃、也不猜"同一口径)。
+        const ScriptProperties::Declaration* opaque = findDeclaration(declarations, "Opaque");
+        CHECK(opaque != nullptr);
+        CHECK(opaque->ReadOnly);
+        CHECK(opaque->Fields.empty());
+        CHECK(diagnostics.size() == 1);
+        CHECK(diagnostics.front().find("non-consecutive") != std::string::npos
+            || diagnostics.front().find("mixes numeric and string keys") != std::string::npos);
+
+        // ④ 只有声明、没有初值 → 连结构都推不出来,保持只读摘要(不凭空展开)。
+        const ScriptProperties::Declaration* unset = findDeclaration(declarations, "Unset");
+        CHECK(unset != nullptr);
+        CHECK(unset->ReadOnly);
+        CHECK(unset->Fields.empty());
+
+        // ⑤ Luau 组件同步入口同样吃到这份结构(面板/存档用的是 ScriptProperty)。
+        Fixture fixture;
+        auto entity = fixture.AddLua(logical);
+        auto& script = entity.GetComponent<LuauScriptComponent>();
+        std::vector<std::string> syncDiagnostics;
+        CHECK(ScriptEngine::SyncScriptDeclarations(script, &syncDiagnostics, &error));
+        CHECK(error.empty());
+        const ScriptProperty* property = ScriptProperties::Find(script.Properties, "ExtraInfo");
+        CHECK(property != nullptr);
+        CHECK(!property->ReadOnly);
+        CHECK(property->Collection == ScriptPropertyCollection::Struct);
+        CHECK(ScriptProperties::Find(property->Children, "note") != nullptr);
+        CHECK(std::get<std::string>(ScriptProperties::Find(property->Children, "note")->Value) == "运行期自用");
+        const ScriptProperty* numbers = ScriptProperties::Find(script.Properties, "RawNumbers");
+        CHECK(numbers != nullptr && numbers->Collection == ScriptPropertyCollection::Array);
+        CHECK(numbers->Children.size() == 3);
+    }
+
+    // VEC-C1(数组/映射):注解 `{T}` / `{K: V}`、未注解数组的类型推导、合并对齐与 Luau 读写。
+    void CollectionPropertiesFromAnnotationsAndInference()
+    {
+        const auto path = s_OutputDirectory / "collection_properties.lua";
+        {
+            std::ofstream file(path, std::ios::binary);
+            file <<
+                "---@field Scores {number} 得分列表\n"
+                "---@field Config {string: number} 数值配置\n"
+                "---@field Grid {{number}} 网格(数组的数组)\n"
+                "---@field Vecs {string: vec3} 向量表\n"
+                "---@field Unset {number}\n"
+                "return {\n"
+                "    Scores = { 12.5, 13.5 },\n"
+                "    Config = { hp = 10.0, mp = 5.0 },\n"
+                "    Grid = { { 1.5, 2.5 }, { 3.5, 4.5 } },\n"
+                "    Vecs = { eye = vec3.new(1.0, 2.0, 3.0) },\n"
+                "    RawScores = { 1, 2, 3 },\n"
+                "    BadList = { 1, \"two\" },\n"
+                "}\n";
+            CHECK(file.good());
+        }
+        const std::string logical = path.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+
+        const auto findDeclaration = [](const std::vector<ScriptProperties::Declaration>& list,
+            const std::string& name) -> const ScriptProperties::Declaration*
+        {
+            for (const ScriptProperties::Declaration& item : list)
+                if (item.Name == name)
+                    return &item;
+            return nullptr;
+        };
+
+        // ① 注解:`{number}` → Array(Float);`{string: number}` → Map(String→Float);
+        //    嵌套 `{{number}}` / `{string: vec3}` 在护栏内支持一层;元素初值 = 脚本表里的值。
+        std::vector<ScriptProperties::Declaration> declarations;
+        std::vector<std::string> diagnostics;
+        std::string error;
+        CHECK(ScriptEngine::DescribeScriptDeclarations(logical, declarations, &diagnostics, &error));
+        CHECK(error.empty());
+        CHECK(declarations.size() == 7);   // 注解 5 条 + 推断 2 条(RawScores / BadList)
+
+        const ScriptProperties::Declaration* scores = findDeclaration(declarations, "Scores");
+        CHECK(scores != nullptr);
+        CHECK(scores->Type == Schema::Kind::Object);
+        CHECK(scores->Collection == ScriptPropertyCollection::Array);
+        CHECK(scores->ElementKind == Schema::Kind::Float);
+        CHECK(scores->Doc == "得分列表");
+        CHECK(scores->Fields.size() == 2);
+        CHECK(scores->Fields[0].Name == "1" && scores->Fields[0].Type == Schema::Kind::Float);
+        CHECK(std::get<float>(scores->Fields[0].Default) == 12.5f);
+        CHECK(std::get<float>(scores->Fields[1].Default) == 13.5f);
+
+        const ScriptProperties::Declaration* config = findDeclaration(declarations, "Config");
+        CHECK(config != nullptr);
+        CHECK(config->Collection == ScriptPropertyCollection::Map);
+        CHECK(config->KeyKind == Schema::Kind::String);
+        CHECK(config->ElementKind == Schema::Kind::Float);
+        CHECK(config->Fields.size() == 2);
+        {
+            const ScriptProperties::Declaration* hp = findDeclaration(config->Fields, "hp");
+            const ScriptProperties::Declaration* mp = findDeclaration(config->Fields, "mp");
+            CHECK(hp != nullptr && std::get<float>(hp->Default) == 10.0f);
+            CHECK(mp != nullptr && std::get<float>(mp->Default) == 5.0f);
+        }
+
+        const ScriptProperties::Declaration* grid = findDeclaration(declarations, "Grid");
+        CHECK(grid != nullptr);
+        CHECK(grid->Collection == ScriptPropertyCollection::Array);
+        CHECK(grid->ElementKind == Schema::Kind::Object);   // 元素本身是集合
+        CHECK(grid->Fields.size() == 2);
+        CHECK(grid->Fields[0].Name == "1");
+        CHECK(grid->Fields[0].Collection == ScriptPropertyCollection::Array);
+        CHECK(grid->Fields[0].ElementKind == Schema::Kind::Float);
+        CHECK(grid->Fields[0].Fields.size() == 2);
+        CHECK(std::get<float>(grid->Fields[0].Fields[1].Default) == 2.5f);
+        CHECK(std::get<float>(grid->Fields[1].Fields[0].Default) == 3.5f);
+
+        const ScriptProperties::Declaration* vecs = findDeclaration(declarations, "Vecs");
+        CHECK(vecs != nullptr);
+        CHECK(vecs->Collection == ScriptPropertyCollection::Map);
+        CHECK(vecs->ElementKind == Schema::Kind::Vec3);
+        CHECK(vecs->Fields.size() == 1 && vecs->Fields[0].Name == "eye");
+        CHECK(std::get<glm::vec3>(vecs->Fields[0].Default) == glm::vec3(1.0f, 2.0f, 3.0f));
+
+        // 只有注解、脚本表里没有 → 可编辑的空数组(不是只读摘要)。
+        const ScriptProperties::Declaration* unset = findDeclaration(declarations, "Unset");
+        CHECK(unset != nullptr);
+        CHECK(unset->Collection == ScriptPropertyCollection::Array);
+        CHECK(unset->ElementKind == Schema::Kind::Float);
+        CHECK(unset->Fields.empty() && !unset->ReadOnly);
+
+        // ② 未注解 `{1, 2, 3}` → 连续整数键推断成 Array,元素初值 1/2/3。
+        const ScriptProperties::Declaration* raw = findDeclaration(declarations, "RawScores");
+        CHECK(raw != nullptr);
+        CHECK(raw->Collection == ScriptPropertyCollection::Array);
+        CHECK(raw->ElementKind == Schema::Kind::Int32);
+        CHECK(raw->Fields.size() == 3);
+        CHECK(raw->Fields[0].Name == "1" && std::get<int32_t>(raw->Fields[0].Default) == 1);
+        CHECK(std::get<int32_t>(raw->Fields[2].Default) == 3);
+
+        // ③ 异质数组 `{1, "two"}` → 只读摘要 + 诊断(不静默丢弃、也不猜类型)。
+        const ScriptProperties::Declaration* bad = findDeclaration(declarations, "BadList");
+        CHECK(bad != nullptr);
+        CHECK(bad->ReadOnly);
+        CHECK(bad->Collection == ScriptPropertyCollection::Array);
+        CHECK(bad->Fields.empty());
+        CHECK(diagnostics.size() == 1);
+        CHECK(diagnostics.front().find("different value types") != std::string::npos);
+
+        // ⑤ 合并:同名同类型(含数组元素下标 / 映射键)保值;元素/键增删后按名对齐。
+        const auto arrayDeclaration = [](const std::vector<Schema::Value>& values)
+        {
+            ScriptProperties::Declaration declaration;
+            declaration.Name = "Scores";
+            declaration.Type = Schema::Kind::Object;
+            declaration.Collection = ScriptPropertyCollection::Array;
+            for (std::size_t index = 0; index < values.size(); ++index)
+            {
+                ScriptProperties::Declaration child;
+                child.Name = std::to_string(index + 1);
+                child.Type = Schema::Kind::Float;
+                child.Default = values[index];
+                declaration.Fields.push_back(std::move(child));
+            }
+            declaration.ElementKind = Schema::Kind::Float;
+            return declaration;
+        };
+        const auto mapDeclaration = [](const std::vector<std::pair<std::string, Schema::Value>>& entries)
+        {
+            ScriptProperties::Declaration declaration;
+            declaration.Name = "Config";
+            declaration.Type = Schema::Kind::Object;
+            declaration.Collection = ScriptPropertyCollection::Map;
+            declaration.KeyKind = Schema::Kind::String;
+            declaration.ElementKind = Schema::Kind::Float;
+            for (const auto& [key, value] : entries)
+            {
+                ScriptProperties::Declaration child;
+                child.Name = key;
+                child.Type = Schema::Kind::Float;
+                child.Default = value;
+                declaration.Fields.push_back(std::move(child));
+            }
+            return declaration;
+        };
+
+        std::vector<ScriptProperty> merged;
+        ScriptProperties::SyncFromDeclarations(merged, { arrayDeclaration({ 1.0f, 2.0f, 3.0f }) });
+        CHECK(merged.size() == 1 && merged[0].Children.size() == 3);
+        std::get<float>(merged[0].Children[1].Value) = 99.0f;   // 编辑器改过第 2 个元素
+        ScriptProperties::SyncFromDeclarations(merged, { arrayDeclaration({ 0.0f, 0.0f }) });
+        CHECK(merged[0].Children.size() == 2);                   // 第 3 个元素删除
+        // D1:第 1 个元素从没被编辑过(值 == 旧声明默认值 1.0)→ 视为"未设",取新默认值 0.0;
+        // 第 2 个元素是编辑器改过的(99.0 ≠ 旧默认值 2.0)→ 按下标(名字)对齐保值。
+        CHECK(std::get<float>(merged[0].Children[0].Value) == 0.0f);
+        CHECK(std::get<float>(merged[0].Children[1].Value) == 99.0f);
+
+        ScriptProperties::SyncFromDeclarations(merged,
+            { mapDeclaration({ { "hp", Schema::Value(10.0f) }, { "mp", Schema::Value(5.0f) } }) });
+        ScriptProperty* configProperty = ScriptProperties::Find(merged, "Config");
+        CHECK(configProperty != nullptr && configProperty->Children.size() == 2);
+        std::get<float>(ScriptProperties::Find(configProperty->Children, "hp")->Value) = 77.0f;
+        ScriptProperties::SyncFromDeclarations(merged,
+            { mapDeclaration({ { "hp", Schema::Value(0.0f) }, { "sp", Schema::Value(3.0f) } }) });
+        configProperty = ScriptProperties::Find(merged, "Config");
+        CHECK(configProperty->Children.size() == 2);
+        CHECK(ScriptProperties::Find(configProperty->Children, "mp") == nullptr);   // 删掉的键丢弃
+        CHECK(std::get<float>(ScriptProperties::Find(configProperty->Children, "hp")->Value) == 77.0f);
+        CHECK(std::get<float>(ScriptProperties::Find(configProperty->Children, "sp")->Value) == 3.0f);
+
+        // 元素类型变了(Array(Float) → Array(Int32))→ 回新默认值,不拿旧值按新形状解释。
+        {
+            ScriptProperties::Declaration changed = arrayDeclaration({ 7.0f, 8.0f });
+            changed.ElementKind = Schema::Kind::Int32;
+            for (ScriptProperties::Declaration& child : changed.Fields)
+            {
+                child.Type = Schema::Kind::Int32;
+                child.Default = static_cast<int32_t>(std::get<float>(child.Default));
+            }
+            ScriptProperties::SyncFromDeclarations(merged, { changed });
+            CHECK(std::get<int32_t>(merged[0].Children[1].Value) == 8);
+        }
+
+        // 元素行读不出来(无 VM 的注解声明)时保留场景里的元素值,不按"空数组"清掉。
+        {
+            ScriptProperties::Declaration unknown;
+            unknown.Name = "Scores";
+            unknown.Type = Schema::Kind::Object;
+            unknown.Collection = ScriptPropertyCollection::Array;
+            unknown.ElementKind = Schema::Kind::Int32;
+            unknown.FieldsUnknown = true;
+            ScriptProperties::SyncFromDeclarations(merged, { unknown });
+            CHECK(merged[0].Children.size() == 2);
+            CHECK(std::get<int32_t>(merged[0].Children[1].Value) == 8);
+        }
+
+        // ⑥ Luau 读写:属性表 → 脚本表是**数组表**(连续下标)与**键值表**;嵌套集合递归建表。
+        {
+            Fixture fixture;
+            auto entity = fixture.AddLua(logical);
+            auto& script = entity.GetComponent<LuauScriptComponent>();
+            CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, &error));
+            CHECK(error.empty());
+            ScriptProperty* runtimeScores = ScriptProperties::Find(script.Properties, "Scores");
+            CHECK(runtimeScores != nullptr && runtimeScores->Children.size() == 2);
+            std::get<float>(runtimeScores->Children[0].Value) = 100.0f;   // 编辑器/场景值
+            ScriptProperty* runtimeConfig = ScriptProperties::Find(script.Properties, "Config");
+            CHECK(runtimeConfig != nullptr && runtimeConfig->Children.size() == 2);
+            std::get<float>(ScriptProperties::Find(runtimeConfig->Children, "hp")->Value) = 42.0f;
+
+            fixture.World->OnScriptStart();
+            CHECK(script.Runtime.State == ScriptInstanceState::Running);
+            CHECK(script.Runtime.LastError.empty());
+
+            ScriptTableRef scoresTable;
+            CHECK(script.ScriptTable.GetField("Scores").AsTable(&scoresTable) && scoresTable.IsValid());
+            CHECK(scoresTable.Length() == 2);
+            const std::vector<ScriptValue> runtimeElements = scoresTable.GetArray();
+            double first = 0.0;
+            double second = 0.0;
+            CHECK(runtimeElements[0].AsNumber(&first) && first == 100.0);
+            CHECK(runtimeElements[1].AsNumber(&second) && second == 13.5);
+
+            ScriptTableRef configTable;
+            CHECK(script.ScriptTable.GetField("Config").AsTable(&configTable) && configTable.IsValid());
+            double hp = 0.0;
+            CHECK(configTable.GetField("hp").AsNumber(&hp) && hp == 42.0);
+
+            ScriptTableRef gridTable;
+            CHECK(script.ScriptTable.GetField("Grid").AsTable(&gridTable) && gridTable.IsValid());
+            ScriptTableRef innerGrid;
+            CHECK(gridTable.GetField("1").IsNil());   // 数组表:不能用字符串 "1" 读
+            const std::vector<ScriptValue> gridRows = gridTable.GetArray();
+            CHECK(gridRows.size() == 2);
+            CHECK(gridRows[0].AsTable(&innerGrid) && innerGrid.Length() == 2);
+            double inner = 0.0;
+            CHECK(innerGrid.GetArray()[1].AsNumber(&inner) && inner == 2.5);
+
+            // 只读摘要(BadList)不进脚本表覆盖:脚本自己的值保持原样(仍是 { 1, "two" })。
+            ScriptTableRef badTable;
+            CHECK(script.ScriptTable.GetField("BadList").AsTable(&badTable));
+            CHECK(badTable.Length() == 2);
+            std::string secondText;
+            CHECK(badTable.GetArray()[1].AsString(&secondText) && secondText == "two");
+            fixture.Stop();
+        }
+    }
+
+    // VEC-C1:数组/映射的存档往返(`Type: Array|Map` + ElementType/KeyType/ValueType + Value)。
+    void CollectionPropertiesRoundTripThroughSceneSerializer()
+    {
+        const fs::path scenePath = s_OutputDirectory / "collections_round_trip.wd";
+        {
+            Ref<Scene> scene = CreateRef<Scene>(TestContext());
+            Entity entity = Entity::CreateEntity(scene.get(), "collection save probe");
+            LuauScriptComponent& script =
+                entity.AddComponent<LuauScriptComponent>("scripts/tests/Collections.lua");
+
+            ScriptProperty scores;
+            scores.Name = "Scores";
+            scores.Type = Schema::Kind::Object;
+            scores.Collection = ScriptPropertyCollection::Array;
+            scores.ElementKind = Schema::Kind::Float;
+            for (int index = 0; index < 3; ++index)
+            {
+                ScriptProperty element;
+                element.Name = std::to_string(index + 1);
+                element.Type = Schema::Kind::Float;
+                element.Value = 12.5f + static_cast<float>(index);
+                scores.Children.push_back(std::move(element));
+            }
+            script.Properties.push_back(std::move(scores));
+
+            ScriptProperty config;
+            config.Name = "Config";
+            config.Type = Schema::Kind::Object;
+            config.Collection = ScriptPropertyCollection::Map;
+            config.KeyKind = Schema::Kind::String;
+            config.ElementKind = Schema::Kind::Float;
+            for (const auto& [key, value] : std::vector<std::pair<const char*, float>> {
+                    { "hp", 10.5f }, { "mp", 5.5f } })
+            {
+                ScriptProperty entry;
+                entry.Name = key;
+                entry.Type = Schema::Kind::Float;
+                entry.Value = value;
+                config.Children.push_back(std::move(entry));
+            }
+            script.Properties.push_back(std::move(config));
+
+            ScriptProperty grid;
+            grid.Name = "Grid";
+            grid.Type = Schema::Kind::Object;
+            grid.Collection = ScriptPropertyCollection::Array;
+            grid.ElementKind = Schema::Kind::Object;   // 元素本身是数组 → 子条目 seq
+            for (int row = 0; row < 2; ++row)
+            {
+                ScriptProperty inner;
+                inner.Name = std::to_string(row + 1);
+                inner.Type = Schema::Kind::Object;
+                inner.Collection = ScriptPropertyCollection::Array;
+                inner.ElementKind = Schema::Kind::Float;
+                for (int column = 0; column < 2; ++column)
+                {
+                    ScriptProperty element;
+                    element.Name = std::to_string(column + 1);
+                    element.Type = Schema::Kind::Float;
+                    element.Value = static_cast<float>(row * 2 + column) + 0.5f;
+                    inner.Children.push_back(std::move(element));
+                }
+                grid.Children.push_back(std::move(inner));
+            }
+            script.Properties.push_back(std::move(grid));
+
+            ScriptProperty extra;
+            extra.Name = "Extra";
+            extra.Type = Schema::Kind::Object;
+            extra.Collection = ScriptPropertyCollection::Struct;
+            extra.TypeName = "table";
+            extra.ReadOnly = true;   // 只读摘要:看得到、不进存档
+            script.Properties.push_back(std::move(extra));
+
+            SceneSerializer writer(scene);
+            CHECK(writer.Serialize(scenePath.string()));
+        }
+
+        const std::string yaml = ReadFile(scenePath);
+        const std::size_t scoresAt = yaml.find("Name: Scores");
+        const std::size_t configAt = yaml.find("Name: Config", scoresAt);
+        const std::size_t gridAt = yaml.find("Name: Grid", configAt);
+        const std::size_t extraAt = yaml.find("Name: Extra", gridAt);
+        CHECK(scoresAt != std::string::npos && configAt != std::string::npos);
+        CHECK(gridAt != std::string::npos && extraAt != std::string::npos);
+
+        // 数组:`Type: Array` + `ElementType: Float` + `Value: [12.5, 13.5, …]`(纯值 seq)。
+        const std::string scoresBlock = yaml.substr(scoresAt, configAt - scoresAt);
+        CHECK(scoresBlock.find("Type: Array") != std::string::npos);
+        CHECK(scoresBlock.find("ElementType: Float") != std::string::npos);
+        CHECK(scoresBlock.find("Value: [") != std::string::npos);
+        CHECK(scoresBlock.find("12.5") != std::string::npos);
+        CHECK(scoresBlock.find("14.5") != std::string::npos);
+        CHECK(scoresBlock.find("Name:", 1) == std::string::npos);   // 不是子条目 seq
+
+        // 映射:`Type: Map` + `KeyType: String` + `ValueType: Float` + `Value: { hp: …, mp: … }`。
+        const std::string configBlock = yaml.substr(configAt, gridAt - configAt);
+        CHECK(configBlock.find("Type: Map") != std::string::npos);
+        CHECK(configBlock.find("KeyType: String") != std::string::npos);
+        CHECK(configBlock.find("ValueType: Float") != std::string::npos);
+        CHECK(configBlock.find("Value: {") != std::string::npos);
+        CHECK(configBlock.find("hp") != std::string::npos);
+        CHECK(configBlock.find("Name:", 1) == std::string::npos);   // 不是子条目 seq
+
+        // 嵌套集合(`{{number}}`):`ElementType: Object` + 子条目 seq(每项自带 Name/Type)。
+        const std::string gridBlock = yaml.substr(gridAt, extraAt - gridAt);
+        CHECK(gridBlock.find("Type: Array") != std::string::npos);
+        CHECK(gridBlock.find("ElementType: Object") != std::string::npos);
+        CHECK(gridBlock.find("- Name:") != std::string::npos);
+
+        // 只读摘要整条不写 Value(与"看得到、不进存档"同口径)。
+        const std::size_t componentEnd = yaml.find("\n    World::", extraAt);
+        const std::string extraBlock = yaml.substr(extraAt,
+            componentEnd == std::string::npos ? std::string::npos : componentEnd - extraAt);
+        CHECK(extraBlock.find("Type: Object") != std::string::npos);
+        CHECK(extraBlock.find("Value:") == std::string::npos);
+
+        // 读回:结构与值都还在(元素/键按名字对齐)。
+        Ref<Scene> loaded = CreateRef<Scene>(TestContext());
+        SceneSerializer reader(loaded);
+        CHECK(reader.Deserialize(scenePath.string()));
+        CHECK(reader.GetLastError().empty());
+        LuauScriptComponent* loadedScript = nullptr;
+        for (const entt::entity handle : loaded->GetRegistry().view<LuauScriptComponent>())
+            loadedScript = &loaded->GetRegistry().get<LuauScriptComponent>(handle);
+        CHECK(loadedScript != nullptr);
+
+        const ScriptProperty* loadedScores = ScriptProperties::Find(loadedScript->Properties, "Scores");
+        CHECK(loadedScores != nullptr);
+        CHECK(loadedScores->Collection == ScriptPropertyCollection::Array);
+        CHECK(loadedScores->ElementKind == Schema::Kind::Float);
+        CHECK(!loadedScores->ReadOnly && loadedScores->Children.size() == 3);
+        CHECK(loadedScores->Children[0].Name == "1");
+        CHECK(std::get<float>(loadedScores->Children[2].Value) == 14.5f);
+
+        const ScriptProperty* loadedConfig = ScriptProperties::Find(loadedScript->Properties, "Config");
+        CHECK(loadedConfig != nullptr);
+        CHECK(loadedConfig->Collection == ScriptPropertyCollection::Map);
+        CHECK(loadedConfig->KeyKind == Schema::Kind::String);
+        CHECK(loadedConfig->ElementKind == Schema::Kind::Float);
+        CHECK(loadedConfig->Children.size() == 2);
+        CHECK(std::get<float>(ScriptProperties::Find(loadedConfig->Children, "hp")->Value) == 10.5f);
+
+        const ScriptProperty* loadedGrid = ScriptProperties::Find(loadedScript->Properties, "Grid");
+        CHECK(loadedGrid != nullptr);
+        CHECK(loadedGrid->Collection == ScriptPropertyCollection::Array);
+        CHECK(loadedGrid->ElementKind == Schema::Kind::Object);
+        CHECK(loadedGrid->Children.size() == 2);
+        CHECK(loadedGrid->Children[1].Collection == ScriptPropertyCollection::Array);
+        CHECK(loadedGrid->Children[1].ElementKind == Schema::Kind::Float);
+        CHECK(std::get<float>(loadedGrid->Children[1].Children[0].Value) == 2.5f);
+
+        const ScriptProperty* loadedExtra = ScriptProperties::Find(loadedScript->Properties, "Extra");
+        CHECK(loadedExtra != nullptr);
+        CHECK(loadedExtra->ReadOnly && loadedExtra->Children.empty());
+    }
+
+    // VEC-D1(用户口径:复位 = 回到"未设"):声明默认值只用于展示/Play 兜底 ——
+    //   * 没编辑过 / 复位过的字段不进场景(整条不写;改脚本默认值后老场景跟着变);
+    //   * 编辑过的字段才落盘,且不被新默认值覆盖;
+    //   * 结构化表的子字段同一条规则(只写被记录的子行)。
+    void ScriptDefaultsStayOutOfTheScene()
+    {
+        const fs::path scenePath = s_OutputDirectory / "d1_unset_round_trip.wd";
+
+        const auto declarations = [](float speed, float damage)
+        {
+            ScriptProperties::Declaration speedField;
+            speedField.Name = "Speed";
+            speedField.Type = Schema::Kind::Float;
+            speedField.Default = Schema::Value(speed);
+
+            ScriptProperties::Declaration statsField;
+            statsField.Name = "Stats";
+            statsField.Type = Schema::Kind::Object;
+            statsField.Collection = ScriptPropertyCollection::Struct;
+            statsField.TypeName = "ProbeStats";
+            ScriptProperties::Declaration damageField;
+            damageField.Name = "Damage";
+            damageField.Type = Schema::Kind::Float;
+            damageField.Default = Schema::Value(damage);
+            statsField.Fields.push_back(std::move(damageField));
+
+            std::vector<ScriptProperties::Declaration> list;
+            list.push_back(std::move(speedField));
+            list.push_back(std::move(statsField));
+            return list;
+        };
+        const auto writeScene = [](const fs::path& path, const std::vector<ScriptProperty>& properties)
+        {
+            Ref<Scene> scene = CreateRef<Scene>(TestContext());
+            Entity entity = Entity::CreateEntity(scene.get(), "unset semantics probe");
+            LuauScriptComponent& script =
+                entity.AddComponent<LuauScriptComponent>("scripts/tests/UnsetProbe.lua");
+            script.Properties = properties;
+            SceneSerializer writer(scene);
+            CHECK(writer.Serialize(path.string()));
+        };
+
+        // ① 新字段:Value = 声明默认值(面板不显示 0),但"场景没记录过"。
+        std::vector<ScriptProperty> properties;
+        ScriptProperties::SyncFromDeclarations(properties, declarations(5.0f, 12.0f));
+        CHECK(properties.size() == 2);
+        const ScriptProperty* speed = ScriptProperties::Find(properties, "Speed");
+        CHECK(speed != nullptr && std::get<float>(speed->Value) == 5.0f);
+        CHECK(ScriptProperties::IsDefaultValue(*speed));
+        CHECK(!ScriptProperties::IsSceneRecorded(*speed));
+        const ScriptProperty* stats = ScriptProperties::Find(properties, "Stats");
+        CHECK(stats != nullptr && stats->Children.size() == 1);
+        CHECK(std::get<float>(stats->Children[0].Value) == 12.0f);
+        CHECK(!ScriptProperties::IsSceneRecorded(*stats));
+
+        // ② 存场景:两条都不写,Properties 段整段消失。
+        writeScene(scenePath, properties);
+        {
+            const std::string yaml = ReadFile(scenePath);
+            CHECK(yaml.find("Name: Speed") == std::string::npos);
+            CHECK(yaml.find("Name: Stats") == std::string::npos);
+            CHECK(yaml.find("Properties:") == std::string::npos);
+        }
+
+        // ③ 编辑 Speed(7.0)+ 结构化表子字段(20.0)→ 只有这两行落盘。
+        std::get<float>(ScriptProperties::Find(properties, "Speed")->Value) = 7.0f;
+        std::get<float>(ScriptProperties::Find(ScriptProperties::Find(properties, "Stats")->Children,
+            "Damage")->Value) = 20.0f;
+        ScriptProperties::SyncFromDeclarations(properties, declarations(5.0f, 12.0f));
+        CHECK(std::get<float>(ScriptProperties::Find(properties, "Speed")->Value) == 7.0f);
+        CHECK(ScriptProperties::IsSceneRecorded(*ScriptProperties::Find(properties, "Speed")));
+        writeScene(scenePath, properties);
+        {
+            const std::string yaml = ReadFile(scenePath);
+            const std::size_t speedAt = yaml.find("Name: Speed");
+            CHECK(speedAt != std::string::npos);
+            CHECK(yaml.find("7", speedAt) != std::string::npos);
+            const std::size_t statsAt = yaml.find("Name: Stats");
+            CHECK(statsAt != std::string::npos);
+            CHECK(yaml.find("Name: Damage", statsAt) != std::string::npos);
+            CHECK(yaml.find("20", statsAt) != std::string::npos);
+        }
+
+        // ④ 复位(值清成 monostate;面板 `↺` 走同一条)+ 再同步 → 回到"未设":显示脚本默认值、场景不写。
+        ScriptProperties::Find(properties, "Speed")->Value = Schema::Value {};
+        ScriptProperties::SyncFromDeclarations(properties, declarations(5.0f, 12.0f));
+        const ScriptProperty* resetSpeed = ScriptProperties::Find(properties, "Speed");
+        CHECK(std::get<float>(resetSpeed->Value) == 5.0f);   // 展示值 = 脚本默认值
+        CHECK(!ScriptProperties::IsSceneRecorded(*resetSpeed));
+        writeScene(scenePath, properties);
+        {
+            const std::string yaml = ReadFile(scenePath);
+            CHECK(yaml.find("Name: Speed") == std::string::npos);
+            CHECK(yaml.find("Name: Stats") != std::string::npos);   // Damage 改过 → 结构体仍在
+        }
+
+        // ⑤ 改脚本默认值(5 → 9):没记过的字段跟着走;记过的字段保持场景值。
+        ScriptProperties::SyncFromDeclarations(properties, declarations(9.0f, 12.0f));
+        CHECK(std::get<float>(ScriptProperties::Find(properties, "Speed")->Value) == 9.0f);
+        CHECK(!ScriptProperties::IsSceneRecorded(*ScriptProperties::Find(properties, "Speed")));
+        std::get<float>(ScriptProperties::Find(properties, "Speed")->Value) = 7.0f;
+        ScriptProperties::SyncFromDeclarations(properties, declarations(9.0f, 12.0f));
+        CHECK(std::get<float>(ScriptProperties::Find(properties, "Speed")->Value) == 7.0f);
+        CHECK(ScriptProperties::IsSceneRecorded(*ScriptProperties::Find(properties, "Speed")));
+
+        // ⑥ 值相等判定:variant 同支才算相等(类型不符的坏存档不会误判成"未设")。
+        CHECK(ScriptProperties::ValuesEqual(Schema::Value(3.5f), Schema::Value(3.5f)));
+        CHECK(!ScriptProperties::ValuesEqual(Schema::Value(3.5f), Schema::Value(3.25f)));
+        CHECK(!ScriptProperties::ValuesEqual(Schema::Value(3.5f), Schema::Value(3.5)));
+        CHECK(ScriptProperties::ValuesEqual(Schema::Value(glm::vec3(1.0f, 2.0f, 3.0f)),
+            Schema::Value(glm::vec3(1.0f, 2.0f, 3.0f))));
+        CHECK(!ScriptProperties::ValuesEqual(Schema::Value(glm::vec3(1.0f, 2.0f, 3.0f)),
+            Schema::Value(glm::vec3(1.0f, 2.0f, 3.5f))));
+    }
+
+    // VEC-D2(用户口径:集合形状跨进程以场景为准):场景里记下的元素个数/键名在重开 + 声明同步后
+    // 必须保留(声明只给默认形状与行默认值);未设的行写 `~` → 脚本改默认值后这些行照样跟着走。
+    void SceneOwnedCollectionShapesSurviveRestart()
+    {
+        const fs::path firstPath = s_OutputDirectory / "d2_shape_first.wd";
+        const fs::path secondPath = s_OutputDirectory / "d2_shape_second.wd";
+
+        // ① 场景:4 个元素的数组(第 4 个元素是场景自己的值)+ 3 个键的映射(第 3 个键 = "编辑器新增")。
+        {
+            Ref<Scene> scene = CreateRef<Scene>(TestContext());
+            Entity entity = Entity::CreateEntity(scene.get(), "scene shape probe");
+            LuauScriptComponent& script =
+                entity.AddComponent<LuauScriptComponent>("scripts/tests/ShapeProbe.lua");
+
+            ScriptProperty scores;
+            scores.Name = "Scores";
+            scores.Type = Schema::Kind::Object;
+            scores.Collection = ScriptPropertyCollection::Array;
+            scores.ElementKind = Schema::Kind::Float;
+            const float values[] = { 1.5f, 2.5f, 3.5f, 9.5f };
+            for (int index = 0; index < 4; ++index)
+            {
+                ScriptProperty element;
+                element.Name = std::to_string(index + 1);
+                element.Type = Schema::Kind::Float;
+                element.Value = values[index];
+                scores.Children.push_back(std::move(element));
+            }
+            script.Properties.push_back(std::move(scores));
+
+            ScriptProperty config;
+            config.Name = "Config";
+            config.Type = Schema::Kind::Object;
+            config.Collection = ScriptPropertyCollection::Map;
+            config.KeyKind = Schema::Kind::String;
+            config.ElementKind = Schema::Kind::Float;
+            for (const auto& [key, value] : std::vector<std::pair<const char*, float>> {
+                    { "hp", 10.0f }, { "mp", 20.0f }, { "sp", 30.0f } })
+            {
+                ScriptProperty entry;
+                entry.Name = key;
+                entry.Type = Schema::Kind::Float;
+                entry.Value = value;
+                config.Children.push_back(std::move(entry));
+            }
+            script.Properties.push_back(std::move(config));
+
+            SceneSerializer writer(scene);
+            CHECK(writer.Serialize(firstPath.string()));
+        }
+
+        // ② 声明只有 3 个元素 / hp+mp(脚本侧默认形状)。
+        std::vector<ScriptProperties::Declaration> declared;
+        {
+            ScriptProperties::Declaration scoresDeclaration;
+            scoresDeclaration.Name = "Scores";
+            scoresDeclaration.Type = Schema::Kind::Object;
+            scoresDeclaration.Collection = ScriptPropertyCollection::Array;
+            scoresDeclaration.ElementKind = Schema::Kind::Float;
+            for (const float value : { 1.5f, 2.5f, 3.5f })
+            {
+                ScriptProperties::Declaration element;
+                element.Name = std::to_string(scoresDeclaration.Fields.size() + 1);
+                element.Type = Schema::Kind::Float;
+                element.Default = Schema::Value(value);
+                scoresDeclaration.Fields.push_back(std::move(element));
+            }
+            declared.push_back(std::move(scoresDeclaration));
+
+            ScriptProperties::Declaration configDeclaration;
+            configDeclaration.Name = "Config";
+            configDeclaration.Type = Schema::Kind::Object;
+            configDeclaration.Collection = ScriptPropertyCollection::Map;
+            configDeclaration.KeyKind = Schema::Kind::String;
+            configDeclaration.ElementKind = Schema::Kind::Float;
+            for (const auto& [key, value] : std::vector<std::pair<const char*, float>> {
+                    { "hp", 10.0f }, { "mp", 20.0f } })
+            {
+                ScriptProperties::Declaration entry;
+                entry.Name = key;
+                entry.Type = Schema::Kind::Float;
+                entry.Default = Schema::Value(value);
+                configDeclaration.Fields.push_back(std::move(entry));
+            }
+            declared.push_back(std::move(configDeclaration));
+        }
+
+        // ③ 读回 + 同步:场景形状(4 个元素 / 3 个键)必须保留,声明只按行名补默认值。
+        Ref<Scene> loaded = CreateRef<Scene>(TestContext());
+        {
+            SceneSerializer reader(loaded);
+            CHECK(reader.Deserialize(firstPath.string()));
+            CHECK(reader.GetLastError().empty());
+            LuauScriptComponent* script = nullptr;
+            for (const entt::entity handle : loaded->GetRegistry().view<LuauScriptComponent>())
+                script = &loaded->GetRegistry().get<LuauScriptComponent>(handle);
+            CHECK(script != nullptr);
+            ScriptProperties::SyncFromDeclarations(script->Properties, declared);
+
+            const ScriptProperty* scores = ScriptProperties::Find(script->Properties, "Scores");
+            CHECK(scores != nullptr && scores->Children.size() == 4);
+            CHECK(scores->ShapeFromScene);
+            CHECK(std::get<float>(scores->Children[0].Value) == 1.5f);   // 未设行:显示声明默认值
+            CHECK(!ScriptProperties::IsSceneRecorded(scores->Children[0]));
+            CHECK(std::get<float>(scores->Children[3].Value) == 9.5f);   // 场景自己的值
+            CHECK(ScriptProperties::IsSceneRecorded(scores->Children[3]));
+            CHECK(ScriptProperties::IsSceneRecorded(*scores));
+
+            const ScriptProperty* config = ScriptProperties::Find(script->Properties, "Config");
+            CHECK(config != nullptr && config->Children.size() == 3);
+            CHECK(config->ShapeFromScene);
+            CHECK(ScriptProperties::Find(config->Children, "sp") != nullptr);   // 新增键保留
+            CHECK(!ScriptProperties::IsSceneRecorded(*ScriptProperties::Find(config->Children, "hp")));
+            CHECK(std::get<float>(ScriptProperties::Find(config->Children, "sp")->Value) == 30.0f);
+        }
+
+        // ④ 再存盘:形状仍在(4 个元素:3 个未设写 `~` + 1 个场景值),再读回仍是 4 个元素 / 3 个键。
+        {
+            SceneSerializer writer(loaded);
+            CHECK(writer.Serialize(secondPath.string()));
+            const std::string yaml = ReadFile(secondPath);
+            const std::size_t scoresAt = yaml.find("Name: Scores");
+            const std::size_t configAt = yaml.find("Name: Config");
+            CHECK(scoresAt != std::string::npos && configAt != std::string::npos);
+            const std::size_t valueAt = yaml.find("Value: [", scoresAt);
+            CHECK(valueAt != std::string::npos && valueAt < configAt);
+            const std::size_t valueEnd = yaml.find(']', valueAt);
+            CHECK(valueEnd != std::string::npos);
+            const std::string scoresValue = yaml.substr(valueAt, valueEnd - valueAt);
+            CHECK(std::count(scoresValue.begin(), scoresValue.end(), ',') == 3);   // 4 个元素
+            CHECK(std::count(scoresValue.begin(), scoresValue.end(), '~') == 3);   // 3 行回到"未设"
+            CHECK(scoresValue.find("9.5") != std::string::npos);                   // 场景自己的值还在
+
+            Ref<Scene> second = CreateRef<Scene>(TestContext());
+            SceneSerializer reader(second);
+            CHECK(reader.Deserialize(secondPath.string()));
+            LuauScriptComponent* script = nullptr;
+            for (const entt::entity handle : second->GetRegistry().view<LuauScriptComponent>())
+                script = &second->GetRegistry().get<LuauScriptComponent>(handle);
+            CHECK(script != nullptr);
+            const ScriptProperty* scores = ScriptProperties::Find(script->Properties, "Scores");
+            CHECK(scores != nullptr && scores->Children.size() == 4);
+            const ScriptProperty* config = ScriptProperties::Find(script->Properties, "Config");
+            CHECK(config != nullptr && config->Children.size() == 3);
+        }
+    }
+
     void StubGenerationContracts()
     {
         auto types = LuaReflectionRegistry::GetTable();
@@ -1427,6 +2199,14 @@ int main(int argc, char** argv)
             { "native properties configure the factory instance", NativePropertiesConfigureFactoryInstance },
             { "syntax errors preserve preview cache", SyntaxErrorsAndPreviewCache },
             { "Vec2/Vec3/Vec4 properties from annotations and schema", VectorPropertiesFromAnnotationsAndSchema },
+            { "array/map properties from annotations, inference and Luau read/write",
+                CollectionPropertiesFromAnnotationsAndInference },
+            { "bare table annotations infer struct/array rows", BareTableAnnotationsInferStructure },
+            { "array/map properties round-trip through the scene serializer",
+                CollectionPropertiesRoundTripThroughSceneSerializer },
+            { "declaration defaults stay out of the scene (reset = unset)", ScriptDefaultsStayOutOfTheScene },
+            { "scene-owned collection shapes survive restart and declaration sync",
+                SceneOwnedCollectionShapesSurviveRestart },
             { "deterministic and atomic stub generation", StubGenerationContracts },
             { "real static-link bindings and template", RealBindingsAndTemplate },
             { "VM restart keeps metadata unique", VmRestartKeepsUniqueMetadata },

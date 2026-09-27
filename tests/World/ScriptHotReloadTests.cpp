@@ -460,8 +460,10 @@ return {
 		CHECK(diagnostic.find("id=" + FieldIdText("B")) != std::string::npos);
 		CHECK(script.Properties.size() == 1);
 		CHECK(FIELD(script.Properties, "A").Type == Schema::Kind::String);
-		// 同名同类型 → 保留旧值("fresh"),新脚本里的 "again" 只是默认值。
-		CHECK(std::get<std::string>(FIELD(script.Properties, "A").Value) == "fresh");
+		// VEC-D1:上一版的值 "fresh" 是**旧声明的默认值**(类型变化时材料化出来的,从没被编辑/
+		// 场景记录)→ 视为"未设",跟着新脚本的默认值 "again" 走(改脚本默认值后老场景跟着变)。
+		// 被编辑过的值(如上面的 B)仍然保值。
+		CHECK(std::get<std::string>(FIELD(script.Properties, "A").Value) == "again");
 
 		g_ProbeCalls.clear();
 		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
@@ -906,7 +908,8 @@ return PlayerScript
 		CHECK(script.Properties.size() == 3);
 		CHECK(std::get<float>(FIELD(script.Properties, "Speed").Value) == 9.0f);
 
-		// ③ 未设值不落盘、不改写为 0:序列化里 Unset 是 null(YAML `~`),不是类型零值。
+		// ③ VEC-D1:未设值(以及等于声明默认值的值)不落盘 —— 该字段整条不写进场景,
+		//    既不是类型零值,也不再写 `Value: ~`(复位/未改过的字段在场景里就该看不到)。
 		{
 			Ref<Scene> serializeScene = CreateRef<Scene>(TestContext());
 			Entity probe = Entity::CreateEntity(serializeScene.get(), "unset serialization probe");
@@ -916,14 +919,11 @@ return PlayerScript
 			SceneSerializer serializer(serializeScene);
 			CHECK(serializer.Serialize(scenePath.string()));
 			const std::string yaml = ReadText(scenePath);
-			const size_t unsetAt = yaml.find("Name: Unset");
-			CHECK(unsetAt != std::string::npos);
-			const size_t valueAt = yaml.find("Value:", unsetAt);
-			CHECK(valueAt != std::string::npos);
-			const size_t valueEnd = yaml.find('\n', valueAt);
-			const std::string valueLine = yaml.substr(valueAt, valueEnd - valueAt);
-			CHECK(valueLine.find("0") == std::string::npos);   // 绝不写类型零值
-			CHECK(valueLine.find("~") != std::string::npos);   // 未设 = YAML null
+			CHECK(yaml.find("Name: Unset") == std::string::npos);   // 未设 → 整条不写
+			CHECK(yaml.find("Value: ~") == std::string::npos);      // 旧的"未设写 null"口径已废弃
+			// 这个夹具里 Speed/Name 也都还等于脚本默认值(没编辑过)→ Properties 段整段消失。
+			CHECK(yaml.find("Name: Speed") == std::string::npos);
+			CHECK(yaml.find("Properties:") == std::string::npos);
 		}
 
 		// ⑤ 文件改动后重新解析能拿到新字段(声明缓存按内容指纹失效)。
@@ -1034,7 +1034,8 @@ return {
 		CHECK(FIELD(script.Properties, "Offset").Type == Schema::Kind::Vec3);
 		CHECK(std::get<glm::vec3>(FIELD(script.Properties, "Offset").Value) == glm::vec3(9.0f, 8.0f, 7.0f));
 		CHECK(FIELD(script.Properties, "Offset").Doc == "位置偏移(热重载后)");
-		CHECK(std::get<float>(FIELD(script.Properties, "Speed").Value) == 5.0f);
+		// VEC-D1:Speed 没被编辑过(值 5.0 == V1 的声明默认值)→ 视为"未设",跟新脚本默认值 1.0 走。
+		CHECK(std::get<float>(FIELD(script.Properties, "Speed").Value) == 1.0f);
 
 		// 新表里 self.Offset 仍是 vec3 userdata(类型不丢)。
 		glm::vec3* migrated = nullptr;
@@ -1054,6 +1055,117 @@ return {
 		CHECK(ScriptEngine::GetBindingContext().Unwrap("vec3", script.ScriptTable.GetField("Offset"), &replaced)
 			&& replaced != nullptr);
 		CHECK(*replaced == glm::vec3(10.0f, 8.0f, 7.0f));
+		scene.OnRuntimeStop();
+	}
+
+	// ---- 6e. VEC-C1:数组/映射字段的热重载迁移(按元素下标/键对齐;活值不迁移,以场景保存值为准) ----
+
+	const char* const kCollectionMigrateV1 = R"LUA(---@field Scores {number} 得分列表
+return {
+    Scores = { 1.0, 2.0, 3.0 },
+    OnCreate = function(self) HotReloadProbe("create:coll:v1") end,
+    OnUpdate = function(self)
+        HotReloadProbe("update:coll:v1")
+        HotReloadProbe("s1=" .. tostring(self.Scores[1]))
+    end,
+}
+)LUA";
+
+	// v2:元素增到 4 个(新增的取脚本里 0.0),第 1/2/3 个按**下标**保留场景值。
+	const char* const kCollectionMigrateV2 = R"LUA(---@field Scores {number} 得分列表(新)
+return {
+    Scores = { 0.0, 0.0, 0.0, 0.0 },
+    OnCreate = function(self) HotReloadProbe("create:coll:v2") end,
+    OnUpdate = function(self)
+        HotReloadProbe("update:coll:v2")
+        HotReloadProbe("s1=" .. tostring(self.Scores[1]))
+        HotReloadProbe("s2=" .. tostring(self.Scores[2]))
+        HotReloadProbe("s4=" .. tostring(self.Scores[4]))
+    end,
+}
+)LUA";
+
+	// v3:同一字段从数组变成映射 → 形状变了,旧数组值不按映射解释(回新默认值)。
+	const char* const kCollectionMigrateV3 = R"LUA(---@field Scores {string: number} 改成了映射
+return {
+    Scores = { alpha = 9.0 },
+    OnUpdate = function(self)
+        HotReloadProbe("update:coll:v3")
+        HotReloadProbe("alpha=" .. tostring(self.Scores.alpha))
+    end,
+}
+)LUA";
+
+	void CollectionFieldsMigrateAcrossHotReload()
+	{
+		const fs::path file = ScriptPath("hotreload_collection_fields.lua");
+		WriteScript(file, kCollectionMigrateV1);
+		const std::string logical = LogicalPath(file);
+
+		Scene scene(TestContext());
+		Entity entity = Entity::CreateEntity(&scene, "collection field probe");
+		LuauScriptComponent& script = entity.AddComponent<LuauScriptComponent>(logical);
+		CHECK(ScriptEngine::SyncScriptDeclarations(script, nullptr, nullptr));
+		CHECK(script.Properties.size() == 1);
+		CHECK(FIELD(script.Properties, "Scores").Collection == ScriptPropertyCollection::Array);
+		CHECK(FIELD(script.Properties, "Scores").ElementKind == Schema::Kind::Float);
+		CHECK(FIELD(script.Properties, "Scores").Children.size() == 3);
+		CHECK(std::get<float>(FIELD(script.Properties, "Scores").Children[0].Value) == 1.0f);
+		std::get<float>(FIELD(script.Properties, "Scores").Children[1].Value) = 7.5f;   // 编辑器改过
+
+		scene.OnScriptStart();
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		g_ProbeCalls.clear();
+		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCalled("update:coll:v1"));
+		CHECK(ProbeCalled("s1=1"));
+		CHECK(script.Runtime.LastError.empty());
+
+		// 数组属性 → 脚本表是连续下标的数组表(第 2 个 = 编辑值)。
+		ScriptTableRef liveScores;
+		CHECK(script.ScriptTable.GetField("Scores").AsTable(&liveScores) && liveScores.IsValid());
+		CHECK(liveScores.Length() == 3);
+		double second = 0.0;
+		CHECK(liveScores.GetArray()[1].AsNumber(&second) && second == 7.5);
+
+		// 元素增加:同名(下标)保值,新增元素取新脚本默认值;Doc 跟着新注解走。
+		WriteScript(file, kCollectionMigrateV2);
+		std::string diagnostic;
+		CHECK(ScriptEngine::ReloadScript(script, &diagnostic));
+		CHECK(diagnostic.empty());
+		CHECK(script.Runtime.State == ScriptInstanceState::Running);
+		CHECK(script.Runtime.LastError.empty());
+		CHECK(FIELD(script.Properties, "Scores").Doc == "得分列表(新)");
+		CHECK(FIELD(script.Properties, "Scores").Children.size() == 4);
+		// VEC-D1:第 1/3 个元素没被编辑过(值 == V1 的声明默认值)→ 视为"未设",取 V2 的新默认值 0.0;
+		// 第 2 个元素是编辑器改过的(7.5 ≠ 旧默认值 2.0)→ 按下标保留。
+		CHECK(std::get<float>(FIELD(script.Properties, "Scores").Children[0].Value) == 0.0f);
+		CHECK(std::get<float>(FIELD(script.Properties, "Scores").Children[1].Value) == 7.5f);
+		CHECK(std::get<float>(FIELD(script.Properties, "Scores").Children[2].Value) == 0.0f);
+		CHECK(std::get<float>(FIELD(script.Properties, "Scores").Children[3].Value) == 0.0f);
+
+		g_ProbeCalls.clear();
+		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCalled("update:coll:v2"));
+		CHECK(ProbeCalled("s1=0"));
+		CHECK(ProbeCalled("s2=7.5"));
+		CHECK(ProbeCalled("s4=0"));
+		CHECK(script.Runtime.LastError.empty());
+
+		// 形状变化(Array → Map):不迁移旧值,按新声明的默认值重建。
+		WriteScript(file, kCollectionMigrateV3);
+		diagnostic.clear();
+		CHECK(ScriptEngine::ReloadScript(script, &diagnostic));
+		CHECK(FIELD(script.Properties, "Scores").Collection == ScriptPropertyCollection::Map);
+		CHECK(FIELD(script.Properties, "Scores").KeyKind == Schema::Kind::String);
+		CHECK(FIELD(script.Properties, "Scores").Children.size() == 1);
+		CHECK(FIELD(script.Properties, "Scores").Children[0].Name == "alpha");
+		CHECK(std::get<float>(FIELD(script.Properties, "Scores").Children[0].Value) == 9.0f);
+		g_ProbeCalls.clear();
+		scene.OnScriptUpdate(Timestep(1.0f / 60.0f));
+		CHECK(ProbeCalled("update:coll:v3"));
+		CHECK(ProbeCalled("alpha=9"));
+		CHECK(script.Runtime.LastError.empty());
 		scene.OnRuntimeStop();
 	}
 
@@ -1139,6 +1251,8 @@ int main()
 			{ "properties follow declaration order and keep same-type values", PropertiesFollowDeclarationOrderAndKeepValues },
 			{ "declarations carry annotation doc and script defaults", DeclarationsCarryDocAndScriptDefaults },
 			{ "vec fields migrate across hot reload", VectorFieldsMigrateAcrossHotReload },
+			{ "array/map fields migrate across hot reload and write back to the script table",
+				CollectionFieldsMigrateAcrossHotReload },
 			{ "both load paths establish the source fingerprint baseline", LoadPathsEstablishFingerprintBaseline },
 		};
 

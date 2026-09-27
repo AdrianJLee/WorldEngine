@@ -111,11 +111,37 @@ namespace World
 		void ParseStubText(std::string_view text);
 		void ParseFileText(std::string_view text);
 		const ClassInfo* ResolveClass(std::string_view name) const;
+		// E2(2026-09-27 用户口径):表达式推断用的**精确大小写**类查找(Lua 标识符大小写敏感;
+		// ResolveClass 的不敏感兜底只服务补全列表,不参与"这个表达式是什么类型"的判断)。
+		const ClassInfo* FindClassExact(std::string_view name) const;
+		// 类成员查找(含基类链,精确大小写)。
+		const LuauCompletionItem* FindMember(const ClassInfo* info, std::string_view name) const;
 		void CollectClassMembers(const ClassInfo* info,
 			std::vector<const LuauCompletionItem*>& out) const;
 		void CollectGlobals(std::vector<const LuauCompletionItem*>& out, bool includeKeywords) const;
 		// V9:注解类型位的候选(基础类型在前 + 已声明的类型/类名按字典序)。
 		void CollectTypeCandidates(std::string_view prefix, std::vector<LuauCompletionItem>& out) const;
+
+		// D3(2026-09-27 用户口径):**文件内局部变量与表字段的类型推断**(纯文本层,不引入 VM)。
+		// 一条推断出来的符号:`Type` = 复用既有类型名口径(number/string/boolean/nil/function/table/
+		// 引擎类型名…;空 = 推不出来,悬停保持现状不弹);`Fields` = 表构造/赋值里认识的字段。
+		// 作用域按**文件级**近似:同名后出现的声明/赋值覆盖先前的类型(悬停拿不到行号,
+		// 只能按"最后一次已知"回答;推不出来就不弹,不猜)。
+		struct InferredSymbol
+		{
+			std::string Name;
+			std::string Type;
+			std::vector<InferredSymbol> Fields;   // 表构造/字段赋值里认识的字段(递归:`t.stats.hp`)
+		};
+		// SetFileSource 时扫描:`local x = <字面量|表构造|X.new(...)>`、
+		// `x = <…>`(已登记的局部)、`t.a.b = <…>`(表字段;中间层按 table 自动补)。
+		void ParseInferredLocals(std::string_view text);
+		std::vector<InferredSymbol>::iterator FindInferred(std::string_view name);
+		const InferredSymbol* FindInferred(std::string_view name) const;
+		static const InferredSymbol* FindInferredField(const InferredSymbol* symbol, std::string_view name);
+		// E3②/E4:当前文件的推断表里按名找字段(先根符号的字段,再任意结构化表的字段,深度 ≤ 2)。
+		// 精确大小写 —— 修复前悬停 `ExtraInfo = { level = 1 }` 的 `level` 会串到存根里的 `Level` 服务。
+		const InferredSymbol* FindInferredFieldAnywhere(std::string_view name) const;
 
 		std::vector<LuauCompletionItem> m_Items;   // 存根顶层项 + 关键字 + 沙箱内置
 		std::vector<LuauCompletionItem> m_Tags;    // `---@` 注解标签(只在注解上下文给候选)
@@ -125,6 +151,8 @@ namespace World
 		// V9:当前文件 `---@field` 注解(名称 → 类型/说明)。悬停与"裸名/注解里字段名"解析用;
 		// 与 m_FileClasses 的成员是**两回事**:这里不要求先写 `---@class`(用户实测的缺提示场景)。
 		std::vector<LuauCompletionItem> m_AnnotationFields;
+		// D3:当前文件推断出来的局部变量/表字段(SetFileSource 整份重建)。
+		std::vector<InferredSymbol> m_Inferred;
 		std::unordered_map<std::string, std::size_t> m_ItemByName;   // 名字 → m_Items 下标(去重)
 	};
 }
