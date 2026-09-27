@@ -16,9 +16,11 @@ namespace World::Wui
 	{
 		// 控件绘制时登记无障碍节点(AI 控制通道的 ui.tree / ui.invoke 数据源)。
 		// 关闭控制通道时这一步只是往一个 vector 里追加,无额外分配以外的副作用。
+		// VEC-H7:tooltip 也进节点 —— "看得到的信息"与悬停提示必须同源(禁用件的理由走它)。
 		void RegisterAccessNode(WuiId id, const char* kind, const WuiRect& rect,
 			const std::string& label, const std::string& value,
-			bool enabled = true, bool interactive = true, bool focused = false)
+			bool enabled = true, bool interactive = true, bool focused = false,
+			const std::string& tooltip = std::string())
 		{
 			if (id == 0)
 				return;
@@ -29,6 +31,7 @@ namespace World::Wui
 			node.Kind = kind;
 			node.Label = label;
 			node.Value = value;
+			node.Tooltip = tooltip;
 			node.Rect = rect;
 			node.Enabled = enabled;
 			node.Interactive = interactive;
@@ -1816,6 +1819,21 @@ namespace World::Wui
 		return changed;
 	}
 
+	// VEC-H7(用户 2026-09-27:「对于一个普通值的属性展示,右侧恢复按钮在鼠标悬浮时几乎看不到」):
+	// 复位按钮 = **一眼可见的可点控件** —— 外观语言与行内 `-`/`+` 的 RowActionButton 对齐
+	// (底色 + 描边 + 亮字形),不再"常态只剩一条灰线、悬停还可能被底色盖住"。
+	//
+	//  · 命中区 = 调用方给的 rect(属性行 = 24×24,4px 栅格,≥ 20×20);**可见底板** = 20×20 居中在命中区里
+	//    (设计口径的"20×20 图标按钮"):缩小绘制面,不缩小可点面;
+	//  · 四态 —— default(ButtonBg 底 + Border 描边 + Text 字形,**不靠 hover 才出现**)/
+	//    hover(ButtonHover 底 + Accent 描边 + Accent 字形)/ pressed(Selection 底 + Accent 描边,内容不位移)/
+	//    disabled(PanelBg 底 + Border 描边 + TextDisabled 字形,理由进 tooltip);
+	//  · focus 走 DrawFocusRing(overlay 层,后画的兄弟控件盖不住);
+	//  · **绘制顺序契约**:调用方必须先画行/容器底色再调本控件 —— VEC-H7 前的 PropertyRow 把本控件画在
+	//    行悬停底色之前,行一悬停 ↺ 就被底色整块盖掉(用户看到的就是"悬浮时几乎看不到");
+	//  · 字形 = 自己画的回旋箭头(不依赖字体里有没有 ↺ 字形),弧线 + 箭头随底板等比缩放,线宽 ≥ 1px;
+	//  · 无障碍:kind="button"(与行内 `-`/`+`、分组头、ButtonEx 同一契约)、value="modified"/"default"、
+	//    enabled/interactive 跟随 modified、tooltip 进节点 Tooltip(禁用态 = 那条理由,与悬停提示同源)。
 	bool ResetDefaultButton(WuiContext& ctx, WuiId id, const WuiRect& rect, bool modified,
 		const WuiTheme& theme, const std::string& label, const std::string& tooltip)
 	{
@@ -1823,20 +1841,24 @@ namespace World::Wui
 			return false;
 		// 固定占位:两种状态都登记同一个 id/rect;modified=false 时 enabled/interactive=false,
 		// 且不参与焦点表 —— 尺寸与位置逐像素不变,只是弱化。
+		const float box = std::min(std::min(rect.W, rect.H), 20.0f);
+		const WuiRect face { rect.X + (rect.W - box) * 0.5f, rect.Y + (rect.H - box) * 0.5f, box, box };
+		const bool hoveredAny = ctx.IsHovered(rect);
+		const bool hovered = modified && hoveredAny;
 		const bool focused = modified && ctx.Focus() == id;
-		RegisterAccessNode(id, "reset-default", rect, label.empty() ? std::string("Reset") : label,
-			modified ? "modified" : "default", modified, modified, focused);
-		if (modified)
-			ctx.RegisterFocusable(id, rect);
-		const bool hovered = modified && ctx.IsHovered(rect);
-		if (hovered)
-			ctx.SetCursor(WuiCursor::Hand);
-		if (modified && (hovered || focused))
-			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, hovered ? theme.HoverBg : theme.ActiveBg, 3.0f });
-		const WuiColor color = modified ? ((hovered || focused) ? theme.Text : theme.TextMuted) : theme.TextDisabled;
-		const float cx = rect.X + rect.W * 0.5f;
-		const float cy = rect.Y + rect.H * 0.5f;
-		const float radius = std::max(3.0f, std::min(6.5f, std::min(rect.W, rect.H) * 0.30f));
+		const bool pressed = hovered && ctx.Input().MouseDown[0];
+		const WuiColor fill = !modified ? theme.PanelBg
+			: (pressed ? theme.Selection : (hovered ? theme.ButtonHover : theme.ButtonBg));
+		const WuiColor outline = !modified ? theme.Border
+			: ((hovered || pressed) ? theme.Accent : theme.Border);
+		const WuiColor color = !modified ? theme.TextDisabled
+			: (pressed ? theme.Text : (hovered ? theme.Accent : theme.Text));
+		ctx.Commands().push_back({ WuiDrawKind::Rect, face, fill, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, face, outline, 3.0f, 1.0f });
+		const float cx = face.X + face.W * 0.5f;
+		const float cy = face.Y + face.H * 0.5f;
+		const float radius = std::max(3.0f, std::min(6.5f, box * 0.30f));
+		const float stroke = std::max(1.0f, box * 0.08f);
 		constexpr float kPi = 3.14159265358979323846f;
 		const float startAngle = -0.55f * kPi;
 		const float sweep = 1.62f * kPi;
@@ -1846,20 +1868,29 @@ namespace World::Wui
 		{
 			const float angle = startAngle + sweep * (static_cast<float>(i) / static_cast<float>(kSegments));
 			const glm::vec2 point { cx + radius * std::cos(angle), cy + radius * std::sin(angle) };
-			PushLineQuad(ctx, previous, point, 1.6f, color);
+			PushLineQuad(ctx, previous, point, stroke, color);
 			previous = point;
 		}
-		// 回旋箭头(不依赖字体里有没有 ↺ 字形):在弧线末端按切线方向画两段短线。
+		// 回旋箭头(不依赖字体里有没有 ↺ 字形):在弧线末端按切线方向画两段短线,长度随弧半径等比。
 		const float tangentX = -std::sin(startAngle + sweep);
 		const float tangentY = std::cos(startAngle + sweep);
-		const glm::vec2 arrowA { previous.x - tangentX * 3.4f + tangentY * 1.6f,
-			previous.y - tangentY * 3.4f - tangentX * 1.6f };
-		const glm::vec2 arrowB { previous.x - tangentX * 3.4f - tangentY * 1.6f,
-			previous.y - tangentY * 3.4f + tangentX * 1.6f };
-		PushLineQuad(ctx, previous, arrowA, 1.6f, color);
-		PushLineQuad(ctx, previous, arrowB, 1.6f, color);
+		const float arrowLength = radius * 0.52f;
+		const float arrowHalf = radius * 0.25f;
+		const glm::vec2 arrowA { previous.x - tangentX * arrowLength + tangentY * arrowHalf,
+			previous.y - tangentY * arrowLength - tangentX * arrowHalf };
+		const glm::vec2 arrowB { previous.x - tangentX * arrowLength - tangentY * arrowHalf,
+			previous.y - tangentY * arrowLength + tangentX * arrowHalf };
+		PushLineQuad(ctx, previous, arrowA, stroke, color);
+		PushLineQuad(ctx, previous, arrowB, stroke, color);
+		RegisterAccessNode(id, "button", rect, label.empty() ? std::string("Reset") : label,
+			modified ? "modified" : "default", modified, modified, focused, tooltip);
+		if (modified)
+			ctx.RegisterFocusable(id, rect);
+		if (hovered)
+			ctx.SetCursor(WuiCursor::Hand);
 		DrawFocusRing(ctx, rect, id, theme);
-		if (modified && !tooltip.empty())
+		// 禁用态也要给理由(与 RowActionButton / ButtonEx 同一口径):悬停提示与 a11y 的 Tooltip 同源。
+		if (hoveredAny && !tooltip.empty())
 			Tooltip(ctx, rect, tooltip);
 		const bool keyActivated = focused
 			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
@@ -2085,17 +2116,6 @@ namespace World::Wui
 			result.FieldRect.H = desc.FieldHeight;
 			result.FieldRect.Y = row.Y + (row.H - desc.FieldHeight) * 0.5f;
 		}
-		// VEC-H6:ShowReset 决定**占位**(几何不变);ResetModified=false = 该行与脚本默认一致 →
-		// 不画 ↺、也不登记节点(用户口径「一致时不出现」,不是禁用态)。
-		if (desc.ShowReset && desc.ResetModified)
-		{
-			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
-				desc.ResetLabel, desc.ResetTooltip);
-			// 库件登记过同一 id(不带悬停说明):再登记一次补 label/tooltip,值以控件为准。
-			RegisterRowNode(desc.ResetId, "reset-default", result.ResetRect, desc.ResetLabel,
-				desc.ResetEnabled ? "modified" : "default", desc.ResetEnabled, desc.ResetEnabled, false,
-				desc.ResetTooltip);
-		}
 		const bool hovered = ctx.IsHovered(row);
 		RowHoverBackdrop(ctx, row, hovered, desc.Enabled, theme);
 		if (desc.Modified)
@@ -2128,6 +2148,16 @@ namespace World::Wui
 			desc.A11yValue, desc.A11yEnabled, desc.A11yEnabled, false, desc.Tooltip);
 		if (hovered && !desc.Tooltip.empty())
 			Tooltip(ctx, row, desc.Tooltip);
+		// VEC-H6:ShowReset 决定**占位**(几何不变);ResetModified=false = 该行与脚本默认一致 →
+		// 不画 ↺、也不登记节点(用户口径「一致时不出现」,不是禁用态)。
+		// VEC-H7:**必须在行悬停底色之后画** —— 之前画在底色之前,行一悬停 ↺ 就被 HoverBg 整块盖掉
+		// (用户口径「右侧恢复按钮在鼠标悬浮时几乎看不到」的真因);本控件自己登记完整的
+		// kind/label/value/enabled/tooltip + 悬停提示,面板/库件都不再补登记。
+		if (desc.ShowReset && desc.ResetModified)
+		{
+			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
+				desc.ResetLabel, desc.ResetTooltip);
+		}
 		return result;
 	}
 
@@ -2192,14 +2222,10 @@ namespace World::Wui
 				Tooltip(ctx, row, desc.Tooltip);
 		}
 		// VEC-H6:集合头同口径 —— 集合里有任一元素/键值/形状偏离默认才画 ↺(占位槽不变)。
+		// VEC-H7:本控件自己登记 a11y(kind=button + label/value/enabled/tooltip),这里不再补登记。
 		if (desc.ShowReset && desc.ResetModified)
-		{
 			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
 				desc.ResetLabel, desc.ResetTooltip);
-			RegisterRowNode(desc.ResetId, "reset-default", result.ResetRect, desc.ResetLabel,
-				desc.ResetEnabled ? "modified" : "default", desc.ResetEnabled, desc.ResetEnabled, false,
-				desc.ResetTooltip);
-		}
 		if (desc.ShowRemove)
 			result.RemoveClicked = RowActionButton(ctx, desc.RemoveId, result.RemoveRect, "x", desc.RemoveLabel,
 				desc.RemoveTooltip, desc.RemoveEnabled, theme, true);
@@ -2261,14 +2287,10 @@ namespace World::Wui
 		if (hovered && !desc.Tooltip.empty())
 			Tooltip(ctx, content, desc.Tooltip);
 		// VEC-H6:元素/键值行同口径(单项 ↺ 只在偏离默认时出现)。
+		// VEC-H7:本控件自己登记 a11y(kind=button + label/value/enabled/tooltip),这里不再补登记。
 		if (desc.ShowReset && desc.ResetModified)
-		{
 			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
 				desc.ResetLabel, desc.ResetTooltip);
-			RegisterRowNode(desc.ResetId, "reset-default", result.ResetRect, desc.ResetLabel,
-				desc.ResetEnabled ? "modified" : "default", desc.ResetEnabled, desc.ResetEnabled, false,
-				desc.ResetTooltip);
-		}
 		if (desc.ShowRemove)
 			result.RemoveClicked = RowActionButton(ctx, desc.RemoveId, result.RemoveRect, "-", std::string(),
 				desc.RemoveTooltip, desc.RemoveEnabled, theme, true);

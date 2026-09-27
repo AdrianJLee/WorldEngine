@@ -5736,7 +5736,8 @@ int main()
 			CHECK(resetShown);
 			{
 				const WuiAccessNode* resetNode = accessibility.Find(resetId);
-				CHECK(resetNode != nullptr && resetNode->Kind == "reset-default");
+				// VEC-H7:复位按钮的 a11y kind 由 reset-default 改成 button(与行内 `-`/`+`、分组头同一契约)。
+				CHECK(resetNode != nullptr && resetNode->Kind == "button");
 				CHECK(resetNode != nullptr && resetNode->Value == "modified");
 				CHECK(resetNode != nullptr && resetNode->Enabled && resetNode->Interactive && resetNode->Visible);
 			}
@@ -5836,6 +5837,247 @@ int main()
 				const WuiAccessNode* node = accessibility.Find(openId);
 				CHECK(node != nullptr && !node->Enabled && !node->Interactive);
 				CHECK(node != nullptr && node->Label == openLabel && node->Tooltip == "Pick a script asset first");
+			}
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
+		// 45. VEC-H7:复位 `↺` = 一眼可见的可点控件(用户口径「对于一个普通值的属性展示,右侧恢复按钮
+		//     在鼠标悬浮时几乎看不到」)。四条断言:
+		//     ① 绘制顺序 —— 行悬停底色先画、复位按钮后画;VEC-H7 前是反的 ⇒ 行一悬停 ↺ 就被底色整块盖掉
+		//        (这就是"悬浮时几乎看不到"的真因);
+		//     ② 四态外观 —— default(ButtonBg 底 + Border 描边 + Text 字形,**常态就可见**)/
+		//        hover(ButtonHover + Accent 描边 + Accent 字形)/ pressed(Selection 底 + Accent 描边)/
+		//        disabled(PanelBg 底 + Border 描边 + TextDisabled 字形,理由进 tooltip);
+		//     ③ a11y —— kind=button、rect ≥ 20×20(4px 栅格:命中区 24×24)、enabled/interactive 跟随
+		//        modified、tooltip 与悬停提示同源(禁用态 = 那句理由);
+		//     ④ 命中区 vs 底板 —— 命中 = 调用方 rect(24×24),可见底板 = 20×20 居中(缩小绘制面、
+		//        不缩小可点面);禁用态不进焦点表(幽灵焦点被 EndFrame 清掉)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme {};
+			WuiInputState idle;
+			idle.ViewportSize = { 1280.0f, 720.0f };
+			idle.MousePos = { 20.0f, 20.0f };
+			const WuiRect row { 300.0f, 300.0f, 300.0f, 24.0f };
+			const WuiId rowId = HashId("test.vec-h7.row");
+			const WuiId resetId = HashId("test.vec-h7.row.reset");
+			const std::string resetLabel = "Reset this item to the script default";
+			const std::string resetTip =
+				"Restore only this item to the script's default value (the row goes back to unset)";
+			const std::string disabledTip =
+				"Play/Simulate: script properties are read-only (pause or stop to edit)";
+			struct RowPaint
+			{
+				std::vector<WuiDrawCommand> Commands;
+				std::vector<WuiDrawCommand> Overlay;
+				PropertyRowResult Result;
+			};
+			const auto PaintRow = [&](const WuiInputState& input, bool resettable)
+			{
+				PropertyRowDesc desc;
+				desc.Label = "Speed";
+				desc.A11yKind = "label";
+				desc.A11yLabel = "Speed";
+				desc.A11yEnabled = false;
+				desc.ShowReset = true;
+				desc.ResetEnabled = resettable;
+				desc.ResetModified = true;
+				desc.ResetId = resetId;
+				desc.ResetLabel = resetLabel;
+				desc.ResetTooltip = resettable ? resetTip : disabledTip;
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h7");
+				WuiContext ctx;
+				ctx.BeginFrame(input);
+				RowPaint painted;
+				painted.Result = PropertyRow(ctx, rowId, row, desc, theme);
+				painted.Commands = ctx.Commands();
+				painted.Overlay = ctx.OverlayCommands();
+				ctx.EndFrame();
+				return painted;
+			};
+			// 命令定位:底板/描边按 Rect 精确匹配;字形(Quad)按四个顶点的中心是否落在底板里取。
+			const auto CommandIndex = [](const std::vector<WuiDrawCommand>& commands, WuiDrawKind kind,
+				const WuiRect& rect)
+			{
+				for (size_t i = 0; i < commands.size(); ++i)
+					if (commands[i].Kind == kind && Near(commands[i].Rect.X, rect.X)
+						&& Near(commands[i].Rect.Y, rect.Y) && Near(commands[i].Rect.W, rect.W)
+						&& Near(commands[i].Rect.H, rect.H))
+						return i;
+				return commands.size();
+			};
+			const auto GlyphIndex = [](const std::vector<WuiDrawCommand>& commands, const WuiRect& face)
+			{
+				for (size_t i = 0; i < commands.size(); ++i)
+				{
+					if (commands[i].Kind != WuiDrawKind::Quad)
+						continue;
+					glm::vec2 centre { 0.0f, 0.0f };
+					for (const glm::vec2& vertex : commands[i].Vertices)
+						centre += vertex;
+					centre *= 0.25f;
+					if (centre.x >= face.X - 1.0f && centre.x <= face.X + face.W + 1.0f
+						&& centre.y >= face.Y - 1.0f && centre.y <= face.Y + face.H + 1.0f)
+						return i;
+				}
+				return commands.size();
+			};
+			// ---- ① 常态:底板 + 描边 + 亮字形都在(不靠 hover 才可见)----
+			const RowPaint idlePaint = PaintRow(idle, true);
+			const WuiRect resetRect = idlePaint.Result.ResetRect;
+			CHECK(resetRect.W >= 20.0f && resetRect.H >= 20.0f);            // 命中区 ≥ 20×20
+			const WuiRect face { resetRect.X + (resetRect.W - 20.0f) * 0.5f,
+				resetRect.Y + (resetRect.H - 20.0f) * 0.5f, 20.0f, 20.0f };  // 可见底板 = 20×20 居中
+			const size_t idleFill = CommandIndex(idlePaint.Commands, WuiDrawKind::Rect, face);
+			const size_t idleOutline = CommandIndex(idlePaint.Commands, WuiDrawKind::RectOutline, face);
+			const size_t idleGlyph = GlyphIndex(idlePaint.Commands, face);
+			CHECK(idleFill < idlePaint.Commands.size() && SameColor(idlePaint.Commands[idleFill].Color, theme.ButtonBg));
+			CHECK(idleOutline < idlePaint.Commands.size()
+				&& SameColor(idlePaint.Commands[idleOutline].Color, theme.Border));
+			CHECK(idleGlyph < idlePaint.Commands.size()
+				&& SameColor(idlePaint.Commands[idleGlyph].Color, theme.Text));
+
+			// ---- ① 行悬停(鼠标在标签上,不在按钮上):底色先画、按钮后画 ⇒ ↺ 不被盖掉 ----
+			WuiInputState rowHover = idle;
+			rowHover.MousePos = { row.X + 10.0f, row.Y + row.H * 0.5f };
+			const RowPaint rowHoverPaint = PaintRow(rowHover, true);
+			const size_t band = CommandIndex(rowHoverPaint.Commands, WuiDrawKind::Rect, row);
+			const size_t bandFill = CommandIndex(rowHoverPaint.Commands, WuiDrawKind::Rect, face);
+			const size_t bandOutline = CommandIndex(rowHoverPaint.Commands, WuiDrawKind::RectOutline, face);
+			const size_t bandGlyph = GlyphIndex(rowHoverPaint.Commands, face);
+			CHECK(band < rowHoverPaint.Commands.size()
+				&& SameColor(rowHoverPaint.Commands[band].Color, theme.HoverBg));
+			CHECK(band < bandFill && band < bandOutline && band < bandGlyph);
+
+			// ---- ② hover:提亮 + Accent 描边 + Accent 字形(与常态命令流不同)----
+			WuiInputState buttonHover = idle;
+			buttonHover.MousePos = { resetRect.X + resetRect.W * 0.5f, resetRect.Y + resetRect.H * 0.5f };
+			const RowPaint hoverPaint = PaintRow(buttonHover, true);
+			const size_t hoverFill = CommandIndex(hoverPaint.Commands, WuiDrawKind::Rect, face);
+			const size_t hoverOutline = CommandIndex(hoverPaint.Commands, WuiDrawKind::RectOutline, face);
+			const size_t hoverGlyph = GlyphIndex(hoverPaint.Commands, face);
+			CHECK(hoverFill < hoverPaint.Commands.size()
+				&& SameColor(hoverPaint.Commands[hoverFill].Color, theme.ButtonHover));
+			CHECK(hoverOutline < hoverPaint.Commands.size()
+				&& SameColor(hoverPaint.Commands[hoverOutline].Color, theme.Accent));
+			CHECK(hoverGlyph < hoverPaint.Commands.size()
+				&& SameColor(hoverPaint.Commands[hoverGlyph].Color, theme.Accent));
+			CHECK(CommandStreamHash(hoverPaint.Commands) != CommandStreamHash(idlePaint.Commands));
+
+			// ---- ② pressed:Selection 底 + Accent 描边(与 hover 也不同),且不触发复位 ----
+			WuiInputState pressedInput = buttonHover;
+			pressedInput.MouseDown[0] = true;
+			const RowPaint pressedPaint = PaintRow(pressedInput, true);
+			const size_t pressedFill = CommandIndex(pressedPaint.Commands, WuiDrawKind::Rect, face);
+			const size_t pressedOutline = CommandIndex(pressedPaint.Commands, WuiDrawKind::RectOutline, face);
+			CHECK(pressedFill < pressedPaint.Commands.size()
+				&& SameColor(pressedPaint.Commands[pressedFill].Color, theme.Selection));
+			CHECK(pressedOutline < pressedPaint.Commands.size()
+				&& SameColor(pressedPaint.Commands[pressedOutline].Color, theme.Accent));
+			CHECK(CommandStreamHash(pressedPaint.Commands) != CommandStreamHash(hoverPaint.Commands));
+			CHECK(!pressedPaint.Result.ResetClicked);
+
+			// ---- ③ a11y:kind=button + 完整语义 + 命中区矩形 ----
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h7");
+				WuiContext ctx;
+				ctx.BeginFrame(idle);
+				PropertyRowDesc desc;
+				desc.Label = "Speed";
+				desc.A11yKind = "label";
+				desc.A11yLabel = "Speed";
+				desc.A11yEnabled = false;
+				desc.ShowReset = true;
+				desc.ResetEnabled = true;
+				desc.ResetModified = true;
+				desc.ResetId = resetId;
+				desc.ResetLabel = resetLabel;
+				desc.ResetTooltip = resetTip;
+				PropertyRow(ctx, rowId, row, desc, theme);
+				ctx.EndFrame();
+				const WuiAccessNode* resetNode = accessibility.Find(resetId);
+				CHECK(resetNode != nullptr && resetNode->Kind == "button");
+				CHECK(resetNode != nullptr && resetNode->Value == "modified");
+				CHECK(resetNode != nullptr && resetNode->Enabled && resetNode->Interactive);
+				CHECK(resetNode != nullptr && resetNode->Label == resetLabel
+					&& resetNode->Tooltip == resetTip);
+				CHECK(resetNode != nullptr && resetNode->Rect.W >= 20.0f && resetNode->Rect.H >= 20.0f
+					&& Near(resetNode->Rect.W, resetRect.W) && Near(resetNode->Rect.H, resetRect.H));
+			}
+
+			// ---- ②③ disabled(Play/只读):弱化 + 理由进 tooltip;键盘不可激活、不进焦点表 ----
+			{
+				WuiInputState disabledHover = idle;
+				disabledHover.MousePos = { resetRect.X + resetRect.W * 0.5f, resetRect.Y + resetRect.H * 0.5f };
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h7");
+				WuiContext ctx;
+				ctx.BeginFrame(disabledHover);
+				PropertyRowDesc disabledDesc;
+				disabledDesc.Label = "Speed";
+				disabledDesc.A11yKind = "label";
+				disabledDesc.A11yLabel = "Speed";
+				disabledDesc.A11yEnabled = false;
+				disabledDesc.ShowReset = true;
+				disabledDesc.ResetEnabled = false;                 // Play/只读:偏离默认但没有复位权限
+				disabledDesc.ResetModified = true;
+				disabledDesc.ResetId = resetId;
+				disabledDesc.ResetLabel = resetLabel;
+				disabledDesc.ResetTooltip = disabledTip;
+				const PropertyRowResult disabledResult = PropertyRow(ctx, rowId, row, disabledDesc, theme);
+				CHECK(!disabledResult.ResetClicked);
+				CHECK(ctx.Tooltip() == disabledTip);                 // 禁用也解释理由(悬停提示 = a11y Tooltip)
+				CHECK(ctx.Cursor() != WuiCursor::Hand);
+				const size_t disabledFill = CommandIndex(ctx.Commands(), WuiDrawKind::Rect, face);
+				const size_t disabledGlyph = GlyphIndex(ctx.Commands(), face);
+				CHECK(disabledFill < ctx.Commands().size()
+					&& SameColor(ctx.Commands()[disabledFill].Color, theme.PanelBg));
+				CHECK(disabledGlyph < ctx.Commands().size()
+					&& SameColor(ctx.Commands()[disabledGlyph].Color, theme.TextDisabled));
+				ctx.EndFrame();
+				const WuiAccessNode* resetNode = accessibility.Find(resetId);
+				CHECK(resetNode != nullptr && resetNode->Kind == "button");
+				CHECK(resetNode != nullptr && !resetNode->Enabled && !resetNode->Interactive);
+				CHECK(resetNode != nullptr && resetNode->Value == "default"
+					&& resetNode->Tooltip == disabledTip);
+			}
+			{
+				// 焦点:启用态进焦点表(Enter 可激活);下一帧变禁用 ⇒ 不在表里 ⇒ 幽灵焦点被清掉。
+				WuiContext ctx;
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h7");
+				ctx.BeginFrame(idle);
+				ctx.SetFocus(resetId);
+				ResetDefaultButton(ctx, resetId, resetRect, true, theme, resetLabel, resetTip);
+				ctx.EndFrame();
+				CHECK(ctx.Focus() == resetId);
+				CHECK(!ctx.OverlayCommands().empty());
+				CHECK(SameColor(ctx.OverlayCommands()[0].Color, DimmedRing(theme.FocusRing, 0.72f)));
+				WuiInputState enter = idle;
+				enter.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Enter) };
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h7");
+				ctx.BeginFrame(enter);
+				ctx.SetFocus(resetId);
+				CHECK(ResetDefaultButton(ctx, resetId, resetRect, true, theme, resetLabel, resetTip));
+				ctx.EndFrame();
+				// 禁用 + Enter:节点还在,但不激活、不进焦点表。
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h7");
+				ctx.BeginFrame(enter);
+				ctx.SetFocus(resetId);
+				CHECK(!ResetDefaultButton(ctx, resetId, resetRect, false, theme, resetLabel, disabledTip));
+				ctx.EndFrame();
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h7");
+				ctx.BeginFrame(idle);
+				ResetDefaultButton(ctx, resetId, resetRect, false, theme, resetLabel, disabledTip);
+				ctx.EndFrame();
+				CHECK(ctx.Focus() == 0);
 			}
 			accessibility.SetEnabled(false);
 			accessibility.Clear();

@@ -695,9 +695,11 @@ namespace World::Wui
 			const WuiTheme themed = ThemedFor(draw, *draw.Theme);
 			const Slot slot = Canvas(draw, *draw.Theme, 24.0f);
 			const WuiId id = BeginShowcase(draw, "button.reset-default", "Reset Default", slot.Rect);
-			PseudoState pseudo(draw, id, slot.Rect);
+			// VEC-H7:pressed 需要"悬停 + 按下"两件套(allowPress=true),与 button/button.icon 的 showcase 同口径。
+			PseudoState pseudo(draw, id, slot.Rect, true);
 			const bool modified = StateIs(draw, { "modified" }) || BoolProperty(draw, "modified", true);
-			ResetDefaultButton(ctx, id, slot.Rect, modified, themed,
+			// disabled 状态 = "偏离默认但当前不可复位"(面板的 Play/只读口径):弱化绘制 + tooltip 带理由。
+			ResetDefaultButton(ctx, id, slot.Rect, !DisabledFor(draw) && modified, themed,
 				LocalizedText(draw, "label", "Reset", "重置"),
 				LocalizedText(draw, "tooltip", "Restore the default value", "恢复默认值"));
 		}
@@ -2343,15 +2345,36 @@ namespace World::Wui
 						"Enter/Space 等价于一次点击(启用态才进焦点表)"),
 				}));
 
+			// VEC-H7:复位 `↺` 从"常态只剩一条灰线"改成一眼可见的可点控件 —— 四态 + 20×20 底板 +
+			// 完整 a11y(与行内 `-`/`+` 同一套外观与节点契约)。
 			WuiComponentRegistry::Register(Desc(
 				"button.reset-default", "ResetDefaultButton", "Reset Default", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=reset-default;id=HashId('showcase.button.reset-default')(控件自身登记);value=modified/default;enabled/interactive 跟随 modified;tooltip 进节点 Tooltip",
-				"固定占位:首选 24x24(设计口径:调用方按行高恒定预留);不因 modified 变尺寸",
+				"role=button(VEC-H7 起;此前 role=reset-default,与行内 `-`/`+`/分组头对齐);"
+				"id=HashId('showcase.button.reset-default')(控件自身登记);value=modified/default;"
+				"enabled/interactive 跟随 modified(禁用态仍登记节点 + 理由进 Tooltip,不进焦点表);"
+				"tooltip 进节点 Tooltip —— 悬停提示与读屏第二通道同源",
+				"命中区 = 调用方给的 rect(属性行 24x24,4px 栅格,≥ 20x20);可见底板 = 20x20 居中"
+				"(缩小绘制面、不缩小可点面);字形自己画(弧线 + 箭头随底板等比、线宽 ≥ 1px),不依赖图标字体/纹理",
 				ShellIds("button.reset-default"),
-				StateList({ "default", "modified", "hover", "disabled" }),
+				StateList({ "default", "modified", "hover", "focus", "pressed", "disabled" }),
 				{ PropText("label", "Reset"), PropText("tooltip", "Restore the default value"), PropBool("modified") },
-				&ShowResetDefaultButton));
+				&ShowResetDefaultButton,
+				{
+					Item(WuiInteractionKind::Hover, "showcase.button.reset-default",
+						WuiInteractionExpect::PixelChange,
+						"鼠标移到按钮中心(1 帧)→ 移开(1 帧)",
+						"常态本来就有底板/描边/亮字形(VEC-H7);悬停再变 ButtonHover 底 + Accent 描边 + Accent 字形"
+						"(两帧像素哈希应不同)"),
+					Item(WuiInteractionKind::Click, "showcase.button.reset-default",
+						WuiInteractionExpect::Event,
+						"在按钮中心注入按下(1 帧,按下态 = Selection 底 + Accent 描边)+ 抬起(1 帧)",
+						"一次复位事件(调用方把值写回默认);画布命令数不因点击变化"),
+					Item(WuiInteractionKind::Key, "showcase.button.reset-default",
+						WuiInteractionExpect::Event,
+						"Tab 到按钮出现焦点环 → Enter;再验一次 Space",
+						"Enter/Space 等价于一次复位(启用态才进焦点表;disabled 不进焦点表)"),
+				}));
 
 			WuiComponentRegistry::Register(Desc(
 				"toggle", "Toggle", "Toggle", "Buttons", WuiComponentStatus::Draft,
@@ -2874,7 +2897,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"property-row", "PropertyRow", "Property Row", "Properties", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=label/调用方声明的行 kind(交互字段的标签节点 A11yEnabled=false、只读值行走 kind=text);id=调用方的稳定行 id(面板:HashId('properties.<组件>.<字段>'));label=A11yLabel、value=A11yValue、tooltip=悬停说明/禁用理由(同源);行尾复位是子节点 kind=reset-default(调用方按 HashId(行 id 文本 + '.reset') 给 id,固定占位、两态同矩形);VEC-H6:ResetModified=false(值 == 脚本默认)→ 行尾复位**不出现**(不画图标、不登记节点,占位槽照旧)",
+				"role=label/调用方声明的行 kind(交互字段的标签节点 A11yEnabled=false、只读值行走 kind=text);id=调用方的稳定行 id(面板:HashId('properties.<组件>.<字段>'));label=A11yLabel、value=A11yValue、tooltip=悬停说明/禁用理由(同源);行尾复位是子节点 kind=button(VEC-H7 起;此前 reset-default,调用方按 HashId(行 id 文本 + '.reset') 给 id,固定占位、两态同矩形,按钮自己登记 label/value/enabled/tooltip);VEC-H6:ResetModified=false(值 == 脚本默认)→ 行尾复位**不出现**(不画图标、不登记节点,占位槽照旧);VEC-H7:复位按钮必须在行悬停底色之后绘制,否则悬停时被底色盖掉",
 				"行高 24(4px 栅格)、字段列高 20、行尾动作列 24;标签列宽 = min(140, 行宽×0.45)(PropertyRowLabelWidth;同一面板传同一值 ⇒ 竖向对齐);字段列 = 行宽 − 标签列 − 4 − 动作列;行矩形与动作落点不随状态变化;LabelIndent = 只挪标签文字(每层 12px + 1px 树导线),**值列不跟着挪**(缩进不破坏列对齐);FieldPlaceholder 非空时值列画占位文本(多值不同/值不可用的 \"—\"),此时调用方不画字段控件",
 				A11yIds({ "showcase.property-row", "showcase.property-row.reset" }),
 				StateList({ "default", "hover", "focus", "modified", "mixed", "disabled" }),
@@ -2905,7 +2928,7 @@ namespace World::Wui
 				"property-group-header", "PropertyGroupHeader", "Property Group Header", "Properties",
 				WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=button;id=调用方稳定 id(面板:HashId('properties.<组件>.<字段>') / 'properties.section.<DisplayName>');label=A11yLabel、value=open/closed、interactive=true、focused 跟随焦点;进焦点表(Tab 可达),Enter/Space = 切换;行尾动作(复位/删除)各是子节点(kind=reset-default / button),点动作不会折叠",
+				"role=button;id=调用方稳定 id(面板:HashId('properties.<组件>.<字段>') / 'properties.section.<DisplayName>');label=A11yLabel、value=open/closed、interactive=true、focused 跟随焦点;进焦点表(Tab 可达),Enter/Space = 切换;行尾动作(复位/删除)各是子节点(VEC-H7 起都是 kind=button),点动作不会折叠",
 				"行高 24;展开 = theme.ActiveBg、折叠 = theme.PanelHeader、悬停 = theme.HoverBg(CollapsibleHeader 同语法);折叠命中区 = 整行减去动作列(或调用方传入的 ToggleWidth);Trailing 文本右对齐在动作列左侧;标签列 = 行宽 − 动作列 − Trailing(调用方不给 LabelWidth 时的默认;VEC-H5:分区头不受属性行 140 上限约束,长组件名 + 英文术语对照要放得下);展开标记 ▶/▼ 单独一笔画、固定推进 13px,不参与主名缩略(主名优先于英文术语降级,见 LabelWithTerm)",
 				A11yIds({ "showcase.property-group-header", "showcase.property-group-header.reset" }),
 				StateList({ "default", "collapsed", "hover", "focus", "modified", "disabled" }),

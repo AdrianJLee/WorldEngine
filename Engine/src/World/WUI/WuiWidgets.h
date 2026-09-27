@@ -225,10 +225,17 @@ namespace World::Wui
 		int64_t min, int64_t max, const WuiTheme& theme, const WuiNumberStyle& style = {});
 	bool StepperInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int& value, int min, int max,
 		const WuiTheme& theme, const WuiNumberStyle& style = {});
-	// **固定占位"恢复默认"**:调用方按行高**恒定预留** rect(例如 24×24 图标位);偏离默认
-	//   (modified=true)时高亮可点,等于默认时同尺寸弱化/禁用 —— 控件自身不读写任何布局,
-	//   因此"点恢复默认前/后行矩形逐像素相同"。返回值 = 本帧被点击(调用方写回默认值)。
-	//   无障碍:kind="reset-default"、value="modified"/"default"、enabled/interactive 跟随 modified。
+	// **固定占位"恢复默认"**:调用方按行高**恒定预留** rect(例如 24×24 命中位;VEC-H7 起可见底板
+	//   = 20×20 居中在里面,设计口径的"20×20 图标按钮");偏离默认(modified=true)时高亮可点,
+	//   等于默认时同尺寸弱化/禁用 —— 控件自身不读写任何布局,因此"点恢复默认前/后行矩形逐像素相同"。
+	//   VEC-H7 四态:default(ButtonBg 底 + Border 描边 + Text 字形,**常态就可见**,不靠 hover)/
+	//   hover(ButtonHover 底 + Accent 描边 + Accent 字形)/ pressed(Selection 底 + Accent 描边)/
+	//   disabled(PanelBg 底 + Border 描边 + TextDisabled 字形,理由进 tooltip)。字形 = 自画回旋箭头,
+	//   弧线 + 箭头随底板等比缩放,线宽 ≥ 1px(1x / 1.25x 缩放都不糊)。
+	//   **绘制顺序契约**:调用方必须先画行/容器底色再调本控件(否则行悬停底色会盖掉按钮 —— VEC-H7 的真因)。
+	//   返回值 = 本帧被点击或键盘激活(modified=false 恒 false,调用方据此写回默认值)。
+	//   无障碍:kind="button"(与行内 `-`/`+`、分组头同一契约)、value="modified"/"default"、
+	//   enabled/interactive 跟随 modified、tooltip 进节点 Tooltip(禁用态 = 那条理由)。
 	bool ResetDefaultButton(WuiContext& ctx, WuiId id, const WuiRect& rect, bool modified,
 		const WuiTheme& theme, const std::string& label = std::string(),
 		const std::string& tooltip = std::string());
@@ -298,7 +305,8 @@ namespace World::Wui
 		// 非空时库件在值列画它(theme.TextMuted;Enabled=false 时 theme.TextDisabled),
 		// 调用方不再为该状态画字段控件。无障碍 value 仍以 A11yValue 为准(契约由调用方声明)。
 		std::string FieldPlaceholder;
-		// 行尾"恢复默认"(复用 ResetDefaultButton;固定占位,两态同矩形)。
+		// 行尾"恢复默认"(复用 ResetDefaultButton;固定占位,两态同矩形)。VEC-H7 起按钮自己登记
+		// 完整的 a11y(kind=button + label/value/enabled/tooltip),行库件不再补登记。
 		WuiId ResetId = 0;             // 调用方按自己的 id 契约算(如 HashId(行 id 文本 + ".reset"))
 		bool ShowReset = false;
 		bool ResetEnabled = false;
