@@ -77,7 +77,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | --- | --- |
 | Game developers | [`docs/user/`](docs/user/) — getting started, editor, assets, scripting, packaging, FAQ |
 | Engine / build contributors | [`docs/dev/`](docs/dev/) — build and run, architecture, extension points |
-| Scripting and code completion | [`docs/scripting/lua-tooling.md`](docs/scripting/lua-tooling.md) |
+| Scripting and code completion | [`docs/user/scripting/lua-tooling.md`](docs/user/scripting/lua-tooling.md) |
 
 ## Asset and script types
 

@@ -24,6 +24,23 @@ return MyScript
 - 脚本必须返回一个 table;`self.entity` 是当前实体句柄。
 - 用 `---@class` / `---@field` / `---@param` 描述自己新增的类型,补全与悬停提示会跟着变好。
 
+## 属性与类型（由脚本声明生成）
+
+属性面板直接反映脚本里的声明,不需要在编辑器里另配一份:
+
+- **基础与引擎类型**:`number` / `boolean` / `string`,以及 `vec2` / `vec3` / `vec4`
+  (行控件与数值编辑器一致;未赋值保持"未设",不会变成 0)。
+- **嵌套结构**:用 `---@class` 声明结构、`---@field Stats SomeClass` 引用它,会展开成可折叠子行;
+  未注解的 `table` 只显示只读摘要。
+- **数组与映射**:`{number}`、`{string: number}`(可嵌套)显示元素行并支持增删;元素形状由场景持有,存读往返保持。
+- **类型推导**:没写 `---@field` 的字段也会出现 —— 能从初值推出类型的进入属性表,推不出的保留只读摘要。
+- **提示与重置**:悬停显示注解说明,没有说明时回落显示类型名;行尾 `↺` 只把该值恢复为"未设"(回到脚本默认值),
+  集合表头的重置会整表复原并先确认。
+- 字段名按脚本里的声明原样显示(不本地化)。
+
+脚本示例见 `projects/default/assets/scripts/examples/FeatureShowcase.lua`;属性模型变化会同步升
+`WE_MODULE_ABI_VERSION`(当前 5)。
+
 ## 生命周期与结构修改
 
 - 三个回调都由场景在**同一线程**调用;实例由场景拥有与释放。
@@ -38,7 +55,7 @@ return MyScript
   **不要** `require` 或运行它。
 - VS Code 打开仓库根即可(根 `.luarc.json` 生效);`projects/default/.vscode/settings.json` 与
   `projects/default/.luau-lsp/config.json` 给 Luau LSP 喂同一份声明。
-- 细节(工作区配置、补全范围、已知限制)见 [Lua 脚本与代码提示](../../scripting/lua-tooling.md)。
+- 细节(工作区配置、补全范围、已知限制)见 [Lua 脚本与代码提示](lua-tooling.md)。
 
 ## 调试
 

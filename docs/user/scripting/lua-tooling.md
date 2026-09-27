@@ -1,7 +1,7 @@
 # 脚本与代码提示
 
 引擎内嵌的脚本运行时是 **Luau**。工程里用**语言服务器**提供补全:根 `.luarc.json` 给 LuaLS
-(`sumneko.lua`)用,`Game/.vscode/settings.json` 与 `Game/.luau-lsp/config.json` 给 Luau LSP 用,
+(`sumneko.lua`)用,`projects/default/.vscode/settings.json` 与 `projects/default/.luau-lsp/config.json` 给 Luau LSP 用,
 两者指向同一份声明文件。项目不会替你改编辑器设置,也不会自动装扩展。
 
 ## 工作区
@@ -9,7 +9,7 @@
 | 打开方式 | 生效的配置 | 补全来源 |
 | --- | --- | --- |
 | 用 VS Code 打开仓库根 | 根 `.luarc.json` | `projects/default/assets/scripts/intermediate/WorldEngineAPI.luau` |
-| 用 VS Code 打开 `Game/` | `Game/.vscode/settings.json` + `Game/.luau-lsp/config.json` | 同上(路径按 `Game/` 相对) |
+| 用 VS Code 打开 `projects/default/` | `projects/default/.vscode/settings.json` + `projects/default/.luau-lsp/config.json` | 同上(路径按 `projects/default/` 相对) |
 
 `.luarc.json` 里的 `runtime.version` 是 LuaLS 自身的设置项(LuaLS 没有 Luau 运行时档位);
 实际执行脚本的是引擎里的 Luau 版本,两者不是同一个东西。
@@ -41,8 +41,8 @@ return PlayerScript
 也可以从菜单手动刷新。新增 C++ 侧脚本 API 后要重新构建并启动编辑器才会出现在声明里;Runtime 不生成提示文件。
 
 目前 `Entity:GetComponent(name)` 返回不透明的 `userdata|nil`,没有通用组件字段代理,因此不承诺 Transform
-等组件字段的补全。`GetID()` 返回当前场景的运行句柄整数,不是持久 UUID。`self.__Entity` / `self.__EntityID`
-保留旧脚本兼容,新脚本用 `self.entity`。
+等组件字段的补全。`GetID()` 返回当前场景的运行句柄整数,不是持久 UUID。实体句柄只有 `self.entity`
+一个名字(旧别名 `self.__Entity` / `self.__EntityID` 已移除)。
 
 ## 生命周期和结构修改
 

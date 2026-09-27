@@ -9,7 +9,16 @@
 | [build.md](build.md) | 从零配置 → 构建 → 运行 → 跑测试:真实命令、产物路径、常见失败 |
 | [architecture.md](architecture.md) | 模块与产物、依赖方向、渲染 / 场景 / 资产 / 脚本的分层 |
 | [extension.md](extension.md) | 扩展点:加组件、加资产类型、加面板、从 Game 接入、加脚本绑定 |
+| [naming.md](naming.md) | 命名对照表:类型 / 文件 / 目录 / 资产 |
+| [file-norms.md](file-norms.md) | 文件与目录归属规范:过程层进 `tools/agents/**`、什么能丢、什么只归档 |
+| [project-layout.md](project-layout.md) | 目录布局与模块职责(Engine / Editor / Runtime / projects / tests / vendor) |
+| [formats.md](formats.md) | 引擎自有文件格式登记表(先登记再使用) |
+| [localization.md](localization.md) | 本地化三层目录、回退链、工具链与门禁 |
 | [shader-contract.md](shader-contract.md) | 材质着色器怎么写:表面函数契约、`//! param` 注解、严格类型、组合采样器、槽位表、诊断码、迁移 |
+| [texture-import.md](texture-import.md) | 纹理三层:源图 → `.wtex` 资产(唯一设置家)→ `.wtexc` 产物;格式表 / 缓存键 / 剥离口径 |
+
+用户侧文档在 [`../user/`](../user/);脚本作者的工作区与补全细节在
+[`../user/scripting/lua-tooling.md`](../user/scripting/lua-tooling.md)。
 
 ## 仓库结构(速查)
 

@@ -69,7 +69,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | --- | --- |
 | 做游戏的人 | [`docs/user/`](docs/user/) —— 入门、编辑器、资产、脚本、打包、常见问题 |
 | 改引擎 / 构建 | [`docs/dev/`](docs/dev/) —— 构建与运行、架构、扩展点 |
-| 脚本与代码提示 | [`docs/scripting/lua-tooling.md`](docs/scripting/lua-tooling.md) |
+| 脚本与代码提示 | [`docs/user/scripting/lua-tooling.md`](docs/user/scripting/lua-tooling.md) |
 
 ## 资产与脚本类型
 
