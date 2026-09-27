@@ -70,6 +70,45 @@ namespace World
 			void* instance, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
 
+		// ---- VEC-F2:两级复原(单项 / 整个集合)----
+		//
+		// 用户口径:「对于数组或 Map 类型的属性,复原按钮会把整个都复原而非单个值」→ 拆成两级:
+		//   * 单项 `↺`(叶子 / 数组元素 / 映射值行)= 只把**这一行**清成"未设",显示回落脚本默认值,
+		//     同一集合里其它元素的行/值/形状都不动;
+		//   * 集合头 `↺`(数组 / 映射 / 结构化表的折叠头行)= 复原**整个集合**到脚本声明的默认形状
+		//     与默认值(丢弃所有增删改)—— 破坏性动作,先弹确认(与"移除组件"同一套面板级模态)。
+		//
+		// 确认请求按**名字路径**记(实体 + 组件 id + 顶层属性名 → 逐层子行名),不存
+		// `ScriptProperty*` —— 声明同步会整体重建属性表,指针会失效;映射键原样是一段,不按 '.' 拆串。
+		struct ScriptCollectionResetRequest
+		{
+			Entity Target;
+			uint32_t ComponentId = 0;
+			bool Luau = false;
+			std::string FieldText;           // prefab 覆盖登记用(与 changedFields 同一条口径)
+			std::vector<std::string> Path;   // 顶层属性名 → 子行名
+		};
+		ScriptCollectionResetRequest m_ScriptCollectionResetRequest;
+		// 当前正在绘制的脚本组件(集合头 `↺` 打开确认时带上实体/组件/语言)。
+		Entity m_ScriptInspectingEntity;
+		uint32_t m_ScriptInspectingComponentId = 0;
+		bool m_ScriptInspectingLuau = false;
+		// true = 当前属性表来自组件的 `ScriptProperty` 合成路径(false = Play 里 C++ 实例的真实结构体)。
+		bool m_ScriptInspectingScriptRows = false;
+		std::string m_ScriptInspectingComponentName;   // schema.DisplayName(prefab 覆盖登记用)
+		// 当前绘制位置的**容器路径**(行路径 = 它 + 字段名);只有脚本属性行的递归维护它。
+		std::vector<std::string> m_ScriptRowPath;
+		void OpenScriptCollectionResetConfirm(Wui::WuiContext& ctx, ScriptProperty& container);
+		void CloseScriptCollectionResetConfirm(Wui::WuiContext& ctx);
+		void DrawScriptCollectionResetConfirm(Wui::WuiContext& ctx);
+		// 确认后落地:Luau 按**单条声明**重建这一条(默认形状 + 默认值);C++ 结构化表递归回默认值。
+		void ApplyScriptCollectionReset();
+		// VEC-F2:单项 `↺` 的落地 —— Luau 按名字路径把该行对齐到脚本**当前声明**的默认值
+		// (Value 清成"未设" + Default 刷新):面板 `+`/`-` 只重排行名,旧 Default 会挂在改名后的行上,
+		// 只回落到旧 Default 会显示"不是当前声明的默认值"。返回 false = 声明拿不到(C++ / 无 VM),
+		// 调用方退回"只清 Value"的旧路径。
+		bool ApplyScriptRowDeclaredReset(const std::string& rowName);
+
 		// ---- P4-U13b:prefab 实例条(选中实体属于某实例时画在组件列表最上方)----
 		// 实例归属/来源/覆盖计数来自宿主(Scene 持有实例记录);来源资产找不到时实例条
 		// 给出可读提示并进入只读:回滚/应用需要来源文件,断开链接仍可用(它是唯一出路)。
@@ -130,9 +169,6 @@ namespace World
 		PanelHost& m_Host;
 		// Play/Simulate 期间为 true:字段只显示不落值(只读查看)。
 		bool m_ReadOnly = false;
-		// VEC-C2:本帧有脚本属性叶子行被复位(清成"未设")→ 属性表画完统一让**声明**同步把
-		// 默认值材料化回来(见 DrawScriptComponentInspector 的收口;默认值来源只有引擎一份)。
-		bool m_ScriptResetPending = false;
 		// U6b:"添加组件"是**居中模态**(用户 2026-09-21:「为什么不弹出个居中窗口呢」)——
 		// 打开期间由宿主封锁整窗输入,面板自身在选中行后回车/点 Add 落地。
 		bool m_AddOpen = false;

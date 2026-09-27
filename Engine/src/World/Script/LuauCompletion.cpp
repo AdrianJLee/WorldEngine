@@ -1809,17 +1809,38 @@ namespace World
 		// D3:名字命中但没有类型/文档的项(文件内符号的默认形态)先留作兜底 ——
 		// 下面的类型推断能给同一个名字补上类型时优先用它;补不上再原样返回(旧行为)。
 		LuauCompletionItem untyped;
-		for (const LuauCompletionItem& item : items)
-			if (item.Name == word)
-			{
-				if (!item.Type.empty() || !item.Doc.empty())
+		const auto matchExactName = [&items, &untyped, word, &out]() -> bool
+		{
+			for (const LuauCompletionItem& item : items)
+				if (item.Name == word)
 				{
-					out = item;
-					return true;
+					if (!item.Type.empty() || !item.Doc.empty())
+					{
+						out = item;
+						return true;
+					}
+					if (untyped.Name.empty())
+						untyped = item;
 				}
-				if (untyped.Name.empty())
-					untyped = item;
-			}
+			return false;
+		};
+		// VEC-F1(2026-09-27 用户口径「Level 也要修复」):"本文件推断"与"名字命中"的先后按
+		// **接收者是不是类系统认识的名字**决定(ParseContext 的 receiver 只取分隔符前紧邻的一段,
+		// `a.b.` 的接收者是 `b`):
+		//   * 认识(self 有文件类 / 存根或文件里声明过的类)→ 类成员(`---@field`/方法,带 Doc)
+		//     先于本文件推断:`self.Speed` / `vec3.new` 的注解说明保持原样;
+		//   * 不认识(`self.InferredStats.` 的 `InferredStats` 只是表构造字段)或没有接收者
+		//     (裸 `Level`)→ 名字命中推迟到本文件推断之后(下面的 D3/E3② 块),否则存根里同名的
+		//     `---@class Level` 服务表会把文件内 `Level` 字段的提示抢走(E1 只修了大小写不同的 `level`)。
+		std::string contextReceiver;
+		std::string contextPrefix;
+		char contextSeparator = '\0';
+		ParseContext(linePrefix, contextReceiver, contextSeparator, contextPrefix);
+		const bool receiverIsKnownClass = contextSeparator != '\0' && !contextReceiver.empty()
+			&& ((contextReceiver == "self" && !m_FileClasses.empty())
+				|| ResolveClass(contextReceiver) != nullptr);
+		if (receiverIsKnownClass && matchExactName())
+			return true;
 		// VEC-E1(E4):大小写不敏感的"名字兜底"**不再紧跟在精确匹配后面** —— 它要排在"本文件
 		// 自己的推断结果"之后(见下面的 D3/E3② 块)。修复前悬停 `ExtraInfo = { level = 1 }` 里的
 		// `level` 会先命中存根里仅大小写不同的 `Level` 全局服务(tooltip 变成 Level 服务的说明,
@@ -1914,8 +1935,23 @@ namespace World
 				{
 					const InferredSymbol* symbol = FindInferred(chain.front());
 					// `self.ExtraInfo.note`:self = 文件类的值(推出来的类表,退化成类名)。
+					// VEC-F1:文件里可能有多个 `---@class`(子结构体声明在脚本类**之前**,如
+					// FeatureShowcase.lua 的 FeatureShowcaseStats)——`self` 要绑**带同名推断表**的
+					// 脚本类;`front()` 不一定是它(三层链因此曾解析不出来)。
 					if (!symbol && chain.front() == "self" && !m_FileClasses.empty())
-						symbol = FindInferred(m_FileClasses.front().Name);
+					{
+						for (const ClassInfo& info : m_FileClasses)
+						{
+							const InferredSymbol* classTable = FindInferred(info.Name);
+							if (classTable && classTable->Type == "table")
+							{
+								symbol = classTable;
+								break;
+							}
+						}
+						if (!symbol)
+							symbol = FindInferred(m_FileClasses.front().Name);
+					}
 					// `ExtraInfo.note`:ExtraInfo 只是 `local X = { ExtraInfo = {...} }` 的子字段。
 					if (!symbol)
 						symbol = FindInferredFieldAnywhere(chain.front());
@@ -1954,6 +1990,10 @@ namespace World
 				return true;
 			}
 		}
+		// VEC-F1:接收者未知/没有接收者时,精确的名字命中被推迟到这里 —— 本文件推断没答上
+		// 再走存根/全局/文件符号(已知类接收者在上面已经查过)。
+		if (!receiverIsKnownClass && matchExactName())
+			return true;
 		// 大小写不敏感的名字兜底(VEC-E1:排在推断之后 —— 只在"本文件没有任何自己的解释"时才生效)。
 		for (const LuauCompletionItem& item : items)
 			if (EqualsIgnoreCase(item.Name, word))

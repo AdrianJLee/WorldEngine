@@ -806,6 +806,98 @@ int main()
 			std::printf("[e1-hover] fromMember=number fromNested=string fromSelf=number "
 				"fromEntity=userdata fromCall=string fromFunc=number note=string level=number\n");
 		}
+
+		// ---- 12. VEC-F1(2026-09-27 用户口径「Level 也要修复」):本文件推断优先于存根同名符号;
+		//         链式访问(`self.InferredStats.Level` / `Config.mp`)按接收者链解析到本字段类型;
+		//         文件里没有同名来源时,存根 `Level` 服务表说明与 `Level:Primary()` 的返回类型照旧。----
+		{
+			CHECK(index.LoadStubFile(StubPath(), nullptr));
+			// 夹具形态与 projects/default/assets/scripts/examples/FeatureShowcase.lua 一致:
+			// 结构体 `---@class` 声明在脚本类**之前**,脚本类的表里再嵌套未注解的表字段
+			// (`InferredStats.Level` / `Config.mp`);E1 的夹具只有一个类,盖不到这个形态。
+			index.SetFileSource(
+				"---@class F1Stats\n"
+				"---@field Damage number 攻击力\n"
+				"---@class F1Showcase : WorldScript\n"
+				"---@field Speed number 移动速度\n"
+				"local F1Showcase = {\n"
+				"    Speed = 2.0,\n"
+				"    ExtraInfo = { note = \"运行期自用\", level = 1 },\n"
+				"    Config = { hp = 10, mp = 20 },\n"
+				"    InferredStats = {\n"
+				"        Level = 3,\n"
+				"        Title = \"自动推导\",\n"
+				"        Nested = { Deep = 7 },\n"
+				"    },\n"
+				"}\n"
+				"return F1Showcase\n");
+
+			LuauCompletionItem described;
+			const auto describe = [&index](const char* prefix, const char* word)
+			{
+				LuauCompletionItem item;
+				if (!index.Describe(prefix, word, item))
+					return std::string("<none>");
+				return item.Name + " type='" + item.Type + "' doc='" + item.Doc + "'";
+			};
+			// 修复前/后的 tooltip 原文(先打印再判定:修复前该用例 FAIL 时也有对比数据)。
+			std::printf("[f1-hover] bare Level=%s | self.InferredStats.Level=%s | F1Showcase.chain=%s | "
+				"self.InferredStats.Nested.Deep=%s | self.Config.mp=%s | level=%s | note=%s | "
+				"self.Speed=%s\n",
+				describe("        ", "Level").c_str(),
+				describe("    print(self.InferredStats.", "Level").c_str(),
+				describe("    print(F1Showcase.InferredStats.", "Level").c_str(),
+				describe("    print(self.InferredStats.Nested.", "Deep").c_str(),
+				describe("    print(self.Config.", "mp").c_str(),
+				describe("    print(", "level").c_str(),
+				describe("    print(self.ExtraInfo.", "note").c_str(),
+				describe("    print(self.", "Speed").c_str());
+			// VEC-F1 核心①:裸 `Level`(表构造字段,行前缀只有缩进)给**本文件**的 number,
+			// 不再是存根 `---@class Level` 服务表的说明(修复前 tooltip 标题/内容就是它)。
+			CHECK(index.Describe("        ", "Level", described));
+			CHECK(described.Name == "Level" && described.Type == "number");
+			CHECK(described.Doc.find("level/flow service") == std::string::npos);
+			// VEC-F1 核心②:链式 `self.InferredStats.Level` —— `self` 必须绑定"带推断表的脚本类";
+			// m_FileClasses 的第一个是 F1Stats(不是脚本类),旧实现因此解析不出这条链。
+			CHECK(index.Describe("    print(self.InferredStats.", "Level", described));
+			CHECK(described.Name == "Level" && described.Type == "number");
+			CHECK(described.Doc.find("level/flow service") == std::string::npos);
+			// 无 `self` 前缀的链式与映射值同样按接收者链解析。
+			CHECK(index.Describe("    print(F1Showcase.InferredStats.", "Level", described));
+			CHECK(described.Type == "number");
+			// 三层链(`self.InferredStats.Nested.Deep`):裸名兜底只扫到两层,这条只能靠
+			// 接收者链(`self` 绑定带推断表的脚本类)解析 —— 修复前没有提示。
+			CHECK(index.Describe("    print(self.InferredStats.Nested.", "Deep", described));
+			CHECK(described.Name == "Deep" && described.Type == "number");
+			CHECK(index.Describe("    print(self.Config.", "mp", described));
+			CHECK(described.Name == "mp" && described.Type == "number");
+			// E1 口径回归:裸 `level`(小写)仍是本字段 number;`self.ExtraInfo.note` 是 string;
+			// 注解声明的成员仍带注解说明(`self.Speed` → number + "移动速度")。
+			CHECK(index.Describe("    print(", "level", described));
+			CHECK(described.Type == "number");
+			CHECK(index.Describe("    print(self.ExtraInfo.", "note", described));
+			CHECK(described.Type == "string");
+			CHECK(index.Describe("    print(self.", "Speed", described));
+			CHECK(described.Type == "number" && described.Doc == "移动速度");
+
+			// 反证/回归:文件里**没有** `Level` 的任何本地/推断来源时 —— 存根 `Level` 服务表
+			// 照旧(说明还是存根那份),`Level.Primary()` 的结果仍是 string(存根 `---@return`)。
+			index.SetFileSource(
+				"local fromCall = Level.Primary()\n"
+				"return fromCall\n");
+			std::printf("[f1-hover] no-local-source: Level=%s | fromCall=%s | vec3.new=%s\n",
+				describe("    print(", "Level").c_str(),
+				describe("    print(", "fromCall").c_str(),
+				describe("    print(vec3.", "new").c_str());
+			CHECK(index.Describe("    print(", "Level", described));
+			CHECK(described.Name == "Level");
+			CHECK(described.Doc.find("level/flow service") != std::string::npos);
+			CHECK(index.Describe("    print(", "fromCall", described));
+			CHECK(described.Type == "string");
+			// 服务表/类的成员悬停不受影响(`vec3.new` 仍是存根成员)。
+			CHECK(index.Describe("    print(vec3.", "new", described));
+			CHECK(described.Name == "new" && !described.Type.empty());
+		}
 	}
 	catch (const std::exception& exception)
 	{

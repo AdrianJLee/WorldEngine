@@ -482,8 +482,15 @@ namespace World
 		//
 		// 为什么不能写回:审查 P1-1 / 用户反馈④ —— "未设"必须保持未设,编辑期把它写成 0 会随场景落盘;
 		// 真实默认值来自脚本本体,由引擎侧的属性入口填进 `ScriptProperty.Value`(到了这里自然显示真值)。
+		//
+		// VEC-F2:单项 `↺` 现在只把该行清成"未设"(不再触发整表重同步)—— 展示值必须自己回落到
+		// 声明默认值 `ScriptProperty::Default`,否则复位会让该行瞬间显示成 0(与 D1 的
+		// "未设 = 显示脚本默认值、存档不写"口径不一致)。同样是**只读回退**,不写回组件。
 		Schema::Value ScriptPropertyDisplayValue(const ScriptProperty& property)
 		{
+			if (std::holds_alternative<std::monostate>(property.Value)
+				&& ScriptProperties::ValueMatchesKind(property.Default, property.Type))
+				return property.Default;
 			return ScriptPropertyValueMatchesType(property)
 				? property.Value : DefaultScriptPropertyValue(property.Type);
 		}
@@ -705,6 +712,103 @@ namespace World
 		{
 			for (size_t index = 0; index < container.Children.size(); ++index)
 				container.Children[index].Name = std::to_string(index + 1);
+		}
+
+		// ---- VEC-F2:两级复原的公共口径 ----
+		//
+		// 单项 `↺` = 把该行清成"未设"(monostate):显示走 `ScriptPropertyDisplayValue` 回落
+		// 声明默认值,存档按 D1 判定"未设 → 整条不写"。**不触发任何整表重同步** ——
+		// 旧实现在复位后强制 `SyncScriptDeclarations`,会把同一集合里用户刚做的增删(形状)按声明重建,
+		// 表现就是"点一个元素的 `↺`,整个集合都回去了"。
+		//
+		// 集合头 `↺` = 复原整个集合:Luau 只对**这一条声明**做一次 `SyncFromDeclarations`
+		// (默认形状 + 默认值,其它集合/其它属性一律不动);C++ 结构化表没有数组/映射
+		// (增删只存在于脚本侧),递归把叶子清成默认值即可。
+		// 按"名字路径"解析一条脚本属性(名字逐段比较:映射键里的 '.' 不会被拆成两段)。
+		ScriptProperty* ResolveScriptRowPath(std::vector<ScriptProperty>& properties,
+			const std::vector<std::string>& path, size_t index = 0)
+		{
+			if (index >= path.size())
+				return nullptr;
+			for (ScriptProperty& property : properties)
+			{
+				if (property.Name != path[index])
+					continue;
+				if (index + 1 == path.size())
+					return &property;
+				return ResolveScriptRowPath(property.Children, path, index + 1);
+			}
+			return nullptr;
+		}
+
+		const ScriptProperties::Declaration* ResolveDeclarationPath(
+			const std::vector<ScriptProperties::Declaration>& declarations,
+			const std::vector<std::string>& path, size_t index = 0)
+		{
+			if (index >= path.size())
+				return nullptr;
+			for (const ScriptProperties::Declaration& declaration : declarations)
+			{
+				if (declaration.Name != path[index])
+					continue;
+				if (index + 1 == path.size())
+					return &declaration;
+				return ResolveDeclarationPath(declaration.Fields, path, index + 1);
+			}
+			return nullptr;
+		}
+
+		// 把一条属性子树里的每个**叶子**清成声明默认值(容器递归;容器自身没有 Value)。
+		// 用于 C++ 结构化表(形状由 schema 决定)与"声明的默认形状读不出来"时的 Luau 兜底:
+		// 形状保持,值全部回到默认 —— 不猜一个可能不存在的默认形状。
+		void ResetScriptRowValues(ScriptProperty& row)
+		{
+			const bool container = row.Type == Schema::Kind::Object
+				|| row.Collection == ScriptPropertyCollection::Array
+				|| row.Collection == ScriptPropertyCollection::Map;
+			if (container)
+			{
+				for (ScriptProperty& child : row.Children)
+					ResetScriptRowValues(child);
+				return;
+			}
+			row.Value = row.Default;
+		}
+
+		std::string ScriptRowPathText(const std::vector<std::string>& path)
+		{
+			std::string text;
+			for (const std::string& segment : path)
+			{
+				if (!text.empty())
+					text += '.';
+				text += segment;
+			}
+			return text;
+		}
+
+		// 集合头 `↺` 的按钮文案按集合形态分(数组 / 映射 / 结构化表)—— 与单项 `↺` 一眼可分。
+		std::string ScriptCollectionHeadResetLabel(ScriptPropertyCollection collection)
+		{
+			switch (collection)
+			{
+				case ScriptPropertyCollection::Array: return "Reset the whole array";
+				case ScriptPropertyCollection::Map: return "Reset the whole map";
+				default: return "Reset the whole struct";
+			}
+		}
+
+		// 集合头 `↺` 的悬停说明:说清"是整集合 + 会丢什么"(用户口径:复原整个集合,丢弃所有增删改)。
+		const char* ScriptCollectionHeadResetDoc()
+		{
+			return "Restore the entire collection to the script's default shape and values "
+				"(discards all adds, edits and removals)";
+		}
+
+		// 单项 `↺` 的悬停说明:与集合头区分 —— 只动这一项。
+		const char* ScriptItemResetDoc()
+		{
+			return "Restore only this item to the script's default value (the row goes back to unset)";
 		}
 
 		// 顶层 Object 属性行的 instance 就是该属性本身:子 schema 的实例直接透传,
@@ -1163,6 +1267,174 @@ namespace World
 		Wui::EndModalFrame(ctx);
 		if (closeRequested && ctx.Modal() == frameDesc.Id)
 			CloseRemoveComponentConfirm(ctx);
+	}
+
+	// ---- VEC-F2:集合头 `↺`(复原整个集合)的二次确认 ----
+	//
+	// 用户口径:数组 / 映射属性的 `↺` 过去只做"整集合复原",单项改不了 —— 现在拆成两级。
+	// 集合头是**破坏性**动作(丢弃这个集合的全部增删改),与"移除组件"同一套面板级模态:
+	// 打开 = SetModal + 面板级输入封锁;确认后才落地;Esc / Cancel 一律不改。
+	void PropertiesPanel::OpenScriptCollectionResetConfirm(Wui::WuiContext& ctx, ScriptProperty& container)
+	{
+		if (m_ReadOnly || container.ReadOnly)
+			return;
+		m_ScriptCollectionResetRequest.Target = m_ScriptInspectingEntity;
+		m_ScriptCollectionResetRequest.ComponentId = m_ScriptInspectingComponentId;
+		m_ScriptCollectionResetRequest.Luau = m_ScriptInspectingLuau;
+		m_ScriptCollectionResetRequest.Path = m_ScriptRowPath;
+		m_ScriptCollectionResetRequest.Path.push_back(container.Name);
+		m_ScriptCollectionResetRequest.FieldText =
+			m_ScriptInspectingComponentName + "." + ScriptRowPathText(m_ScriptCollectionResetRequest.Path);
+		ctx.SetModal(Wui::HashId("prop.script.collection.reset.modal"));
+		m_Host.SetPanelModalOwner(Id());
+		ctx.RecordOp("properties", "script-collection-reset-ask",
+			ScriptRowPathText(m_ScriptCollectionResetRequest.Path), container.Name);
+	}
+
+	void PropertiesPanel::CloseScriptCollectionResetConfirm(Wui::WuiContext& ctx)
+	{
+		m_ScriptCollectionResetRequest = ScriptCollectionResetRequest {};
+		ctx.ClearModal();
+		m_Host.SetPanelModalOwner(std::string());
+	}
+
+	void PropertiesPanel::ApplyScriptCollectionReset()
+	{
+		const ScriptCollectionResetRequest request = m_ScriptCollectionResetRequest;
+		if (request.Path.empty() || request.ComponentId == 0)
+			return;
+		Entity entity = request.Target;
+		if (!entity.IsValid() || entity.GetScene() == nullptr || !entity.HasComponent(request.ComponentId))
+			return;
+
+		if (request.Luau)
+		{
+			auto* lua = static_cast<LuauScriptComponent*>(entity.GetComponent(request.ComponentId));
+			if (!lua)
+				return;
+			ScriptProperty* container = ResolveScriptRowPath(lua->Properties, request.Path);
+			if (!container || container->ReadOnly)
+				return;
+			// 只重建**这一条**:按脚本当前声明取这一条子树,把形状/值换成声明的默认。
+			// 声明拿不到 / 默认形状读不出来(FieldsUnknown)= 形状保持,只把值清成默认(不猜形状)。
+			const ScriptProperties::Declaration* declaration = nullptr;
+			std::vector<ScriptProperties::Declaration> declarations;
+			if (ScriptEngine::DescribeScriptDeclarations(lua->ScriptPath, declarations, nullptr, nullptr))
+				declaration = ResolveDeclarationPath(declarations, request.Path);
+			if (declaration && !declaration->FieldsUnknown && !declaration->ReadOnly)
+			{
+				// seed 与目标同形(名字/类型对齐),但子行清空 + 形状归属清零:
+				// 合并后 = 声明的默认形状 + 每行的默认值(全"未设" ⇒ 存档整条不写)。
+				ScriptProperty seed = *container;
+				seed.Children.clear();
+				seed.ShapeFromScene = false;
+				std::vector<ScriptProperty> next { std::move(seed) };
+				ScriptProperties::SyncFromDeclarations(next, { *declaration });
+				if (!next.empty() && next[0].Name == request.Path.back())
+				{
+					*container = std::move(next[0]);
+				}
+				else
+				{
+					ResetScriptRowValues(*container);
+				}
+			}
+			else
+			{
+				ResetScriptRowValues(*container);
+			}
+		}
+		else
+		{
+			auto* cpp = static_cast<CppScriptComponent*>(entity.GetComponent(request.ComponentId));
+			if (!cpp)
+				return;
+			ScriptProperty* container = ResolveScriptRowPath(cpp->Properties, request.Path);
+			if (!container || container->ReadOnly)
+				return;
+			ResetScriptRowValues(*container);
+		}
+
+		m_Host.MarkDocumentDirty();
+		// prefab 实例里的编辑同样记进覆盖集合(路径口径与 changedFields 一致)。
+		RegisterPrefabOverrides(entity, { request.FieldText });
+	}
+
+	bool PropertiesPanel::ApplyScriptRowDeclaredReset(const std::string& rowName)
+	{
+		if (!m_ScriptInspectingScriptRows || !m_ScriptInspectingLuau)
+			return false;   // C++ 的字段名不会被面板改(`+`/`-` 只存在于脚本集合):走"只清值"
+		Entity entity = m_ScriptInspectingEntity;
+		if (!entity.IsValid() || m_ScriptInspectingComponentId == 0
+			|| !entity.HasComponent(m_ScriptInspectingComponentId))
+			return false;
+		auto* lua = static_cast<LuauScriptComponent*>(entity.GetComponent(m_ScriptInspectingComponentId));
+		if (!lua)
+			return false;
+		std::vector<std::string> path = m_ScriptRowPath;
+		path.push_back(rowName);
+		ScriptProperty* row = ResolveScriptRowPath(lua->Properties, path);
+		if (!row)
+			return false;
+		std::vector<ScriptProperties::Declaration> declarations;
+		if (!ScriptEngine::DescribeScriptDeclarations(lua->ScriptPath, declarations, nullptr, nullptr))
+			return false;
+		const ScriptProperties::Declaration* declaration = ResolveDeclarationPath(declarations, path);
+		if (!declaration || declaration->FieldsUnknown)
+			return false;
+		if (declaration->Type == Schema::Kind::Object)
+			return false;   // 容器行走集合头 `↺`(二次确认),不是单项
+		row->Default = declaration->Default;
+		row->Value = Schema::Value {};
+		return true;
+	}
+
+	void PropertiesPanel::DrawScriptCollectionResetConfirm(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiTheme& theme = m_Host.Theme();
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = Wui::HashId("prop.script.collection.reset.modal");
+		frameDesc.Title = Wui::Tr("panel.properties.script_collection_reset.title",
+			"Reset Collection to Script Default");
+		frameDesc.Size = { 480.0f, 190.0f };
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, theme))
+			return;
+
+		// 文案说清"会丢什么" + "丢的是哪一个集合"(破坏性操作不能只给一个按钮)。
+		Wui::Label(ctx, { frame.X + 16.0f, frame.Y + 48.0f },
+			Wui::Tr("panel.properties.script_collection_reset.body",
+				"Reset this whole collection to the script's declared default?"),
+			theme.Text, 13.0f);
+		Wui::Label(ctx, { frame.X + 16.0f, frame.Y + 70.0f },
+			Wui::Tr("panel.properties.script_collection_reset.warning",
+				"All added, edited and removed rows are discarded; the scene stores it as unset."),
+			theme.TextMuted, 13.0f);
+		Wui::LabelWithTerm(ctx, { frame.X + 16.0f, frame.Y + 94.0f },
+			ScriptRowPathText(m_ScriptCollectionResetRequest.Path), std::string(), theme.Warning, 13.0f,
+			theme, frame.W - 32.0f);
+
+		const Wui::ModalButtonDesc buttons[2] = {
+			{ Wui::Tr("panel.properties.remove_cancel", "Cancel"),
+				Wui::HashId("prop.script.collection.reset.cancel"), true },
+			{ Wui::Tr("panel.properties.script_collection_reset.confirm", "Reset"),
+				Wui::HashId("prop.script.collection.reset.confirm"), true },
+		};
+		const int clicked = Wui::ModalButtons(ctx, frame, buttons, 2, theme);
+		bool closeRequested = false;
+		if (clicked == 1)
+		{
+			ApplyScriptCollectionReset();
+			ctx.RecordOp("properties", "script-collection-reset",
+				ScriptRowPathText(m_ScriptCollectionResetRequest.Path), "applied");
+			closeRequested = true;
+		}
+		else if (clicked == 0 || escapePressed)
+			closeRequested = true;
+		Wui::EndModalFrame(ctx);
+		if (closeRequested && ctx.Modal() == frameDesc.Id)
+			CloseScriptCollectionResetConfirm(ctx);
 	}
 
 	// ---- P4-U13b:prefab 实例条 + 破坏性动作确认 ----
@@ -2017,6 +2289,9 @@ namespace World
 		// P4-U13b:实例破坏性动作(应用到资产 / 断开链接)的确认模态。
 		if (m_PrefabActionPending != PrefabAction::None)
 			DrawPrefabActionConfirm(ctx);
+		// VEC-F2:集合头 `↺`(复原整个集合)的二次确认。
+		if (!m_ScriptCollectionResetRequest.Path.empty())
+			DrawScriptCollectionResetConfirm(ctx);
 
 		// 组件分区进入保留模式布局树;字段内容复用已测的 schema 绘制逻辑。
 		std::vector<const Schema::TypeSchema*> componentSchemas;
@@ -2300,7 +2575,8 @@ namespace World
 			const Wui::WuiRect button { rect.X + rect.W + 2.0f, rowTop + 2.0f,
 				kCollectionActionWidth - 2.0f, 18.0f };
 			if (InstanceBarButton(ctx, (collectionRows->IdText + ".remove." + rowName).c_str(), button, "-",
-				"Remove this element from the collection (the scene stores the list)", true, theme))
+				Wui::Tr("panel.properties.collection_remove.tooltip",
+					"Remove this element from the collection (the scene stores the list)"), true, theme))
 				pendingEraseName = rowName;
 		};
 		// SCRIPT-V2:脚本属性行的说明 = 脚本自己的注释(`ScriptProperty::Doc`,由调用方带进
@@ -2328,18 +2604,20 @@ namespace World
 			const Wui::WuiRect ctrl { row.X + labelWidth, row.Y + 1,
 				std::max(24.0f, row.W - labelWidth - 4.0f - resetReserve), 20 };
 			const std::string rowIdText = propId(typeName, field.Name);
-			// VEC-C2:`↺` 复位(方案 v4 §4)。`modified` 语义 = "编辑态可复位":Play/只读态用
-			// 同一 rect 画禁用占位(库件两态共用同一几何,行布局零位移)。
-			// 默认值不在面板里存第二份 —— 点中后把该叶子清成"未设",由声明同步把脚本/schema
-			// 默认值材料化回来(收口见 DrawScriptComponentInspector;与"场景里从没写过"同一口径)。
+			// VEC-C2 / VEC-F2:**单项** `↺` 复位(叶子 / 数组元素 / 映射值行)。`modified` 语义 =
+			// "编辑态可复位":Play/只读态用同一 rect 画禁用占位(库件两态共用同一几何,行布局零位移)。
+			// 点中后只把**这一行**清成"未设" —— 显示由 `ScriptPropertyDisplayValue` 回落脚本默认值,
+			// 存档按 D1 判定"未设不写";不再触发整表重同步(那会把同一集合的增删按声明重建 =
+			// 用户反馈的"点一个元素把整个集合都复原了")。
 			const auto drawResetButton = [&](bool resettable)
 			{
 				const Wui::WuiRect resetRect { rect.X + rect.W - (collectionRows ? kCollectionActionWidth : 0.0f)
 					- kResetButtonWidth - 2.0f, row.Y + 1.0f, kResetButtonWidth, 18.0f };
 				const Wui::WuiId resetId = Wui::HashId((rowIdText + ".reset").c_str());
-				const std::string resetLabel = "Reset to script default";
+				const std::string resetLabel = Wui::Tr("panel.properties.script_reset",
+					"Reset this item to the script default");
 				const std::string resetDoc = resettable
-					? "Restore this field to the default declared by the script"
+					? Wui::Tr("panel.properties.script_reset.tooltip", ScriptItemResetDoc())
 					: Wui::Tr("panel.properties.script_readonly_notice",
 						"Play/Simulate: script properties are read-only (pause or stop to edit)");
 				const bool clicked = Wui::ResetDefaultButton(ctx, resetId, resetRect, resettable, theme,
@@ -2350,8 +2628,12 @@ namespace World
 					resettable ? "modified" : "default", resettable, resetDoc);
 				if (!clicked || !field.Set)
 					return;
-				field.Set(instance, Schema::Value {});
-				m_ScriptResetPending = true;
+				// VEC-F2:单项复位 = 该行回到"未设",显示回落**脚本当前声明**里同名位置的默认值。
+				// Luau 的数组在面板里 `+`/`-` 后会重排下标,行的旧 Default 会留在改名后的行上 ——
+				// 所以先按声明刷新这一行的 Default;声明拿不到(C++ / 无 VM)才退回"只清 Value"。
+				const bool declared = scriptPropertyRow && ApplyScriptRowDeclaredReset(field.Name);
+				if (!declared)
+					field.Set(instance, Schema::Value {});
 				changed = true;
 				if (changedFields)
 					changedFields->push_back(typeName + "." + field.Name);
@@ -2411,7 +2693,20 @@ namespace World
 					continue;
 				}
 				bool& open = ctx.Persist<bool>(fid, false);
-				if (ctx.IsClicked(row))
+				// VEC-F2:集合头 `↺`(数组 / 映射 / 结构化表的折叠头行)= 复原**整个集合** ——
+				// 与单项 `↺` 同一图标,但文案/说明说清"整集合 + 丢弃所有增删改",并且**先弹确认**。
+				// 只读/Play 画禁用占位并给只读理由(与叶子行同一套 disabled hint 口径)。
+				const Wui::WuiRect headResetRect { rect.X + rect.W - (collectionRows ? kCollectionActionWidth : 0.0f)
+					- kResetButtonWidth - 2.0f, row.Y + 1.0f, kResetButtonWidth, 18.0f };
+				const bool headResetDrawn = scriptPropertyRow && nested != nullptr && nestedInstance != nullptr;
+				// `nestedInstance` 只有在合成属性表路径上才是 `ScriptProperty*`(Play 里 C++ 实例走真实
+				// 结构体指针)→ 形态/复位只对合成路径成立;Play 那一路只画禁用占位。
+				const bool headScriptRow = headResetDrawn && m_ScriptInspectingScriptRows;
+				const bool headResettable = headScriptRow && !m_ReadOnly && !field.Meta.ReadOnly;
+				// 展开/折叠的命中区**不含复位按钮那一列**:点 `↺` 不顺带把行折起来。
+				const float toggleWidth = headResetDrawn
+					? std::max(0.0f, headResetRect.X - row.X) : row.W;
+				if (ctx.IsClicked({ row.X, row.Y, toggleWidth, row.H }))
 					open = !open;
 				const std::string nestedDoc = fieldDocFor(field);
 				if (!nestedDoc.empty())
@@ -2420,6 +2715,26 @@ namespace World
 					theme.Text, 13.0f, theme, labelBudget);
 				RegisterNode(Wui::HashId(idText.c_str()), "button", row, labelText, open ? "open" : "closed",
 					reachable(row), nestedDoc);
+				if (headResetDrawn)
+				{
+					// id 契约:`properties.<组件>.<属性>[.<下标|键>].reset`(单项 `↺` 同一契约;
+					// 集合头的那一个落在容器行上,单项的落在元素/键值行上)。
+					ScriptPropertyCollection headKind = ScriptPropertyCollection::Struct;
+					if (headScriptRow)
+						headKind = static_cast<const ScriptProperty*>(nestedInstance)->Collection;
+					const std::string headLabel = ScriptCollectionHeadResetLabel(headKind);
+					const std::string headDoc = headResettable
+						? std::string(ScriptCollectionHeadResetDoc())
+						: Wui::Tr("panel.properties.script_readonly_notice",
+							"Play/Simulate: script properties are read-only (pause or stop to edit)");
+					const Wui::WuiId headResetId = Wui::HashId((idText + ".reset").c_str());
+					const bool headClicked = Wui::ResetDefaultButton(ctx, headResetId, headResetRect,
+						headResettable, theme, headLabel, headDoc);
+					RegisterNode(headResetId, "reset-default", headResetRect, headLabel,
+						headResettable ? "modified" : "default", headResettable, headDoc);
+					if (headClicked && headResettable)
+						OpenScriptCollectionResetConfirm(ctx, *static_cast<ScriptProperty*>(nestedInstance));
+				}
 				drawCollectionRemove(field.Name, row.Y);
 				y += 20;
 				if (open && nested && nestedInstance)
@@ -2442,10 +2757,14 @@ namespace World
 						}
 					}
 					const float actionReserve = nestedRowsPtr ? kCollectionActionWidth : 0.0f;
+					if (m_ScriptInspectingScriptRows)
+						m_ScriptRowPath.push_back(field.Name);   // 子行路径 = 容器路径 + 本行名
 					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u,
 						{ row.X + 10, row.Y + 20, std::max(40.0f, row.W - 10.0f - actionReserve), 0 },
 						nestedInstance, nested->DisplayName, *nested, visibleRect, changedFields,
 						scriptPropertyRow, nestedRowsPtr);
+					if (m_ScriptInspectingScriptRows)
+						m_ScriptRowPath.pop_back();
 				}
 				continue;
 			}
@@ -2805,7 +3124,8 @@ namespace World
 				const std::string keyText = keyState.Buffer;
 				RegisterNode(keyFieldId, "text-field", keyRect, "key",
 					keyText.empty() ? "new key" : keyText, true,
-					"Type a new key name, then press Enter to add the row (empty or duplicate keys are ignored)");
+					Wui::Tr("panel.properties.collection_add_key.tooltip",
+						"Type a new key name, then press Enter to add the row (empty or duplicate keys are ignored)"));
 				if (committed)
 				{
 					if (!keyText.empty() && !CollectionKeyTaken(container, keyText))
@@ -2832,7 +3152,9 @@ namespace World
 				const Wui::WuiRect addButton { rect.X + rect.W + 2.0f, rect.Y + y + 1.0f,
 					kCollectionActionWidth - 2.0f, 18.0f };
 				const std::string addDoc = collectionRows->Kind == ScriptPropertyCollection::Map
-					? "Add a key/value row (the key name is typed next)" : "Append one element to the list";
+					? Wui::Tr("panel.properties.collection_add_map.tooltip",
+						"Add a key/value row (the key name is typed next)")
+					: Wui::Tr("panel.properties.collection_append.tooltip", "Append one element to the list");
 				if (InstanceBarButton(ctx, (collectionRows->IdText + ".add").c_str(), addButton, "+",
 					addDoc, true, theme))
 				{
@@ -3184,6 +3506,7 @@ namespace World
 			&& !cpp->ScriptName.empty() && schemas.Find(cpp->ScriptName) != nullptr)
 		{
 			// Play/Simulate + 运行实例在场:C++ 按**实例**读真实值(只读;不创建、不写)。
+			m_ScriptInspectingScriptRows = false;
 			const Schema::TypeSchema* liveSchema = schemas.Find(cpp->ScriptName);
 			y += DrawSchemaFields(ctx, base ^ 0x51u, { rect.X, rect.Y + y, rect.W, 0 }, cpp->Instance,
 				schema.DisplayName, *liveSchema, visibleRect, changedFields, /*scriptPropertyRow=*/true);
@@ -3193,6 +3516,13 @@ namespace World
 			// VEC-B3:合成 schema 的 arena 每个脚本组件重建一次;下面的循环只增不减,
 			// 固定数组地址稳定,递归绘制期间不会失效。
 			ScriptTableArena().Used = 0;
+			// VEC-F2:集合头 `↺` 的确认请求要知道"正在画哪一个脚本组件"以及"这一行在哪条路径上"。
+			m_ScriptInspectingEntity = entity;
+			m_ScriptInspectingComponentId = schema.Storage ? schema.Storage->ComponentId : 0;
+			m_ScriptInspectingLuau = luau;
+			m_ScriptInspectingScriptRows = true;
+			m_ScriptInspectingComponentName = schema.DisplayName;
+			m_ScriptRowPath.clear();
 			for (ScriptProperty& property : properties)
 			{
 				if (!ScriptProperties::IsPropertyKind(property.Type))
@@ -3228,21 +3558,7 @@ namespace World
 				y += DrawSchemaFields(ctx, rowBase, { rect.X, rect.Y + y, rect.W, 0 }, &property,
 					schema.DisplayName, rowSchema, visibleRect, changedFields, /*scriptPropertyRow=*/true);
 			}
-		}
-
-		// ---- VEC-C2 ④:复位收口 ----
-		// `↺` 只把该叶子清成"未设";脚本/ schema 声明的默认值由**引擎**材料化回来
-		// (`ScriptProperties::ApplyInto` 的 kMaterializeDeclarationDefaults 口径),面板不复制默认值。
-		// Luau 每帧本就同步;C++ 只在换脚本时同步,这里显式补一次。同步会整体重建属性表,
-		// 必须放在绘制循环**之后**(循环里持有 `properties` 的引用)。
-		if (m_ScriptResetPending)
-		{
-			m_ScriptResetPending = false;
-			if (luau)
-				SyncLuauPropertiesFromAnnotations(*lua);
-			else if (cppSchema)
-				ScriptProperties::SyncFromSchema(cpp->Properties, *cppSchema);
-			m_Host.MarkDocumentDirty();
+			m_ScriptRowPath.clear();
 		}
 
 		// ---- 动作行:Luau 保留 Reload(唯一入口 EditorLayer::ReloadLuauScriptComponent;id = lua.reload)----
