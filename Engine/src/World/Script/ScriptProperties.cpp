@@ -29,6 +29,18 @@ namespace World
 				case Schema::Kind::Vec2: return "Vec2";
 				case Schema::Kind::Vec3: return "Vec3";
 				case Schema::Kind::Vec4: return "Vec4";
+				// CPPT-2:未支持 Kind 的只读摘要行也需要可读名(诊断/摘要行文本)。
+				case Schema::Kind::IVec2: return "IVec2";
+				case Schema::Kind::IVec3: return "IVec3";
+				case Schema::Kind::IVec4: return "IVec4";
+				case Schema::Kind::UVec2: return "UVec2";
+				case Schema::Kind::UVec3: return "UVec3";
+				case Schema::Kind::UVec4: return "UVec4";
+				case Schema::Kind::Quat: return "Quat";
+				case Schema::Kind::Mat3: return "Mat3";
+				case Schema::Kind::Mat4: return "Mat4";
+				case Schema::Kind::Enum: return "Enum";
+				case Schema::Kind::Asset: return "Asset";
 				case Schema::Kind::Object: return "Object";   // B 期:嵌套 ---@class 结构化表
 				case Schema::Kind::String: return "String";
 				case Schema::Kind::None:
@@ -52,6 +64,17 @@ namespace World
 			if (name == "Vec2") return Schema::Kind::Vec2;
 			if (name == "Vec3") return Schema::Kind::Vec3;
 			if (name == "Vec4") return Schema::Kind::Vec4;
+			if (name == "IVec2") return Schema::Kind::IVec2;
+			if (name == "IVec3") return Schema::Kind::IVec3;
+			if (name == "IVec4") return Schema::Kind::IVec4;
+			if (name == "UVec2") return Schema::Kind::UVec2;
+			if (name == "UVec3") return Schema::Kind::UVec3;
+			if (name == "UVec4") return Schema::Kind::UVec4;
+			if (name == "Quat") return Schema::Kind::Quat;
+			if (name == "Mat3") return Schema::Kind::Mat3;
+			if (name == "Mat4") return Schema::Kind::Mat4;
+			if (name == "Enum") return Schema::Kind::Enum;
+			if (name == "Asset") return Schema::Kind::Asset;
 			if (name == "Object") return Schema::Kind::Object;
 			if (name == "String") return Schema::Kind::String;
 			return Schema::Kind::None;
@@ -77,6 +100,27 @@ namespace World
 				case Schema::Kind::Vec4:
 				case Schema::Kind::Object:
 				case Schema::Kind::String:
+				case Schema::Kind::Enum:
+				case Schema::Kind::Asset:
+					return true;
+				default:
+					return false;
+			}
+		}
+
+		bool IsSummaryKind(Schema::Kind kind)
+		{
+			switch (kind)
+			{
+				case Schema::Kind::IVec2:
+				case Schema::Kind::IVec3:
+				case Schema::Kind::IVec4:
+				case Schema::Kind::UVec2:
+				case Schema::Kind::UVec3:
+				case Schema::Kind::UVec4:
+				case Schema::Kind::Quat:
+				case Schema::Kind::Mat3:
+				case Schema::Kind::Mat4:
 					return true;
 				default:
 					return false;
@@ -258,7 +302,7 @@ namespace World
 				out.reserve(declarations.size());
 				for (const Declaration& declaration : declarations)
 				{
-					if (!IsPropertyKind(declaration.Type))
+					if (!IsPropertyKind(declaration.Type) && !IsSummaryKind(declaration.Type))
 						continue;
 					if (std::any_of(out.begin(), out.end(),
 							[&declaration](const ScriptProperty& item) { return item.Name == declaration.Name; }))
@@ -274,11 +318,20 @@ namespace World
 					property.Collection = declaration.Collection;
 					property.ElementKind = declaration.ElementKind;
 					property.KeyKind = declaration.KeyKind;
+					property.ReadOnly = declaration.ReadOnly;
 
 					const auto found = previousByName.find(declaration.Name);
 					const ScriptProperty* old = (found != previousByName.end()
 						&& SameShape(*found->second, declaration)) ? found->second : nullptr;
 
+					if (!IsPropertyKind(declaration.Type))
+					{
+						// CPPT-2:未支持 Kind(IVec*/UVec*/Quat/Mat3/Mat4)—— 只读摘要行:
+						// 看得到(类型/说明),不可编辑、不进存档;Value 保持未设。
+						property.ReadOnly = true;
+						out.push_back(std::move(property));
+						continue;
+					}
 					if (declaration.Collection == ScriptPropertyCollection::Array ||
 						declaration.Collection == ScriptPropertyCollection::Map)
 					{
@@ -335,13 +388,15 @@ namespace World
 		namespace
 		{
 			// B 期:schema 侧的 Object 字段(嵌套结构体)递归成子声明 —— 与 Luau 侧同一份模型。
+			// CPPT-2:Enum(枚举下拉)/Asset(资产下拉)放行为可编辑属性;IVec*/UVec*/Quat/Mat* 降级
+			// 只读摘要行(看得到、不进存档);Enum 拿不到枚举 schema 时同样降级,不静默丢弃。
 			void AppendSchemaDeclarations(std::vector<Declaration>& out, const Schema::TypeSchema& type, int depth)
 			{
 				if (depth >= kMaxObjectDepth)
 					return;
 				for (const Schema::FieldSchema& field : type.Fields)
 				{
-					if (!IsPropertyKind(field.K))
+					if (!IsPropertyKind(field.K) && !IsSummaryKind(field.K))
 						continue;
 					if (out.size() >= kMaxObjectFields)
 						return;
@@ -357,6 +412,28 @@ namespace World
 						declaration.Collection = ScriptPropertyCollection::Struct;   // C 期:结构化表(不是数组/映射)
 						declaration.TypeName = nested->Id.Name;
 						AppendSchemaDeclarations(declaration.Fields, *nested, depth + 1);
+					}
+					else if (field.K == Schema::Kind::Enum)
+					{
+						const Schema::EnumSchema* enumSchema = field.GetEnum ? field.GetEnum() : nullptr;
+						if (!enumSchema)
+						{
+							declaration.ReadOnly = true;   // 枚举 schema 缺失:仍显示一行,不可编辑
+						}
+						else
+						{
+							declaration.TypeName = enumSchema->Name;
+							declaration.Default = field.Default;
+						}
+					}
+					else if (field.K == Schema::Kind::Asset)
+					{
+						declaration.TypeName = field.AssetTypeName ? field.AssetTypeName : "";
+						declaration.Default = field.Default;
+					}
+					else if (IsSummaryKind(field.K))
+					{
+						declaration.ReadOnly = true;       // 面板无行控件:只读摘要,不进存档
 					}
 					else
 					{
@@ -483,6 +560,11 @@ namespace World
 				// B 期:结构化表的值在 Children 里,Value 必须是 monostate(空表也是 monostate)。
 				case Schema::Kind::Object: return std::holds_alternative<std::monostate>(value);
 				case Schema::Kind::String: return std::holds_alternative<std::string>(value);
+				// CPPT-2:Enum 存整数(与组件 Enum 字段同一读写器;有符号/无符号按底层类型)、
+				// Asset 存逻辑路径字符串。
+				case Schema::Kind::Enum:
+					return std::holds_alternative<int64_t>(value) || std::holds_alternative<uint64_t>(value);
+				case Schema::Kind::Asset: return std::holds_alternative<std::string>(value);
 				default: return false;
 			}
 		}

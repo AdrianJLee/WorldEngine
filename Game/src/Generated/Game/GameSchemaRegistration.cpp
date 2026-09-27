@@ -114,7 +114,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
             Value(0.0),
         };
         return schema;
@@ -132,7 +132,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "", false, "", {  }, "", std::nullopt },
             Value(0.0),
         };
         return schema;
@@ -150,7 +150,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
             Value(false),
         };
         return schema;
@@ -168,7 +168,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
             Value(glm::vec2(0.0f)),
         };
         return schema;
@@ -186,7 +186,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
             Value(0),
         };
         return schema;
@@ -204,7 +204,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "", false, "", {  }, "", std::nullopt },
             Value(0.0),
         };
         return schema;
@@ -222,7 +222,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, true, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, true, false, "", false, "", {  }, "", std::nullopt },
             Value(std::string()),
         };
         return schema;
@@ -240,7 +240,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
             Value(std::string()),
         };
         return schema;
@@ -272,6 +272,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             "Project",
             "Game-module sample component used to exercise schema-driven editing; its eight fields cover bool, integer, float, vector and string kinds.",
+            false,
         };
         return schema;
     }
@@ -313,8 +314,8 @@ struct GeneratedAccess<World::ExampleScript>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
-            Value(0.0),
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1000.000000f), false, false, "Hit points used by the example; the declared default is 100.", false, "", {  }, "hp", std::optional<float>(1.000000f) },
+            Value(100.0f),
         };
         return schema;
     }
@@ -331,8 +332,8 @@ struct GeneratedAccess<World::ExampleScript>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
-            Value(0.0),
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Movement speed in metres per second; the declared default is 1.", false, "", {  }, "m/s", std::optional<float>(0.100000f) },
+            Value(1.0f),
         };
         return schema;
     }
@@ -355,8 +356,9 @@ struct GeneratedAccess<World::ExampleScript>
             },
             nullptr,
             &ScriptBindingOf(),
-            "",
-            "",
+            "Scripting/Examples",
+            "Sample C++ behavior: shows declared fields, defaults, units and edit metadata in the inspector.",
+            false,
         };
         return schema;
     }
@@ -399,6 +401,16 @@ struct GeneratedAccess<World::StressTest>
     {
         return &WeEnumSchemaOf_StressTestType();
     }
+    static Value Get_Icon(const void* instance)
+    {
+        const World::StressTest* self = static_cast<const World::StressTest*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Icon)>>::GetPath(self->Icon));
+    }
+    static void Set_Icon(void* instance, const Value& value)
+    {
+        World::StressTest* self = static_cast<World::StressTest*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Icon)>>::SetPath(self->Icon, std::get<std::string>(value));
+    }
     static const FieldSchema& Field_Weight()
     {
         static const FieldSchema schema = {
@@ -412,8 +424,8 @@ struct GeneratedAccess<World::StressTest>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
-            Value(0),
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(128.000000f), false, false, "Number of entities created by the first batch (declared default 1).", false, "", {  }, "", std::optional<float>(1.000000f) },
+            Value(1),
         };
         return schema;
     }
@@ -430,8 +442,8 @@ struct GeneratedAccess<World::StressTest>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
-            Value(0),
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(128.000000f), false, false, "Stack depth used by the stress fixture (declared default 1).", false, "", {  }, "", std::optional<float>(1.000000f) },
+            Value(1),
         };
         return schema;
     }
@@ -448,8 +460,26 @@ struct GeneratedAccess<World::StressTest>
             nullptr,
             &GetEnum_m_Type,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false },
-            Value(static_cast<int64_t>(0)),
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Stress mode selector; stored as an integer and edited through an enum dropdown.", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Icon()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA0F74AC3C9062F6Eull },
+            "Icon",
+            Kind::Asset,
+            &Get_Icon,
+            &Set_Icon,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Texture2D",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Asset sample: a texture path edited through the searchable asset dropdown.", false, "", {  }, "", std::nullopt },
+            Value(),
         };
         return schema;
     }
@@ -470,11 +500,13 @@ struct GeneratedAccess<World::StressTest>
                 Field_Weight(),
                 Field_Height(),
                 Field_m_Type(),
+                Field_Icon(),
             },
             nullptr,
             &ScriptBindingOf(),
-            "",
-            "",
+            "Scripting/Examples",
+            "Stress fixture: allocates and destroys entities to exercise the scripting lifecycle.",
+            false,
         };
         return schema;
     }

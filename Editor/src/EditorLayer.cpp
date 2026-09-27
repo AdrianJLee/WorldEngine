@@ -14,6 +14,7 @@
 #include "World/Gameplay/ModelInstance.h"
 #include "World/Gameplay/Prefab.h"
 #include "World/Modules/GameModuleHost.h"
+#include "World/Modules/GameModuleReload.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/AnimationSystem.h"
@@ -25,6 +26,7 @@
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiLocalization.h"
 #include <filesystem>
 #include <shellapi.h>
 #include <stdexcept>
@@ -157,6 +159,26 @@ namespace World
 			static const bool enabled = std::getenv("WLD_PAN_TRACE") != nullptr;
 			return enabled;
 		}
+
+		// CPPT-3:AI `module.status` 的 JSON 文本转义(路径/诊断可能含引号或反斜杠)。
+		std::string JsonEscape(const std::string& text)
+		{
+			std::string escaped;
+			escaped.reserve(text.size() + 8);
+			for (char c : text)
+			{
+				switch (c)
+				{
+					case '"': escaped += "\\\""; break;
+					case '\\': escaped += "\\\\"; break;
+					case '\n': escaped += "\\n"; break;
+					case '\r': escaped += "\\r"; break;
+					case '\t': escaped += "\\t"; break;
+					default: escaped += c; break;
+				}
+			}
+			return escaped;
+		}
 	}
 
 	EditorLayer::EditorLayer()
@@ -219,6 +241,12 @@ namespace World
 		m_GameModuleLoaded = LoadGameModuleForEditor(Application::Get().GetContext(), &moduleError);
 		if (!m_GameModuleLoaded)
 			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
+		// CPPT-3:热重载状态机的初始状态与实况一致(启动加载失败 = unloaded,状态栏显式提示;
+		// 该窗口里存根生成被拒绝,见 GenerateLuaStubsAction)。
+		m_CppModuleStatus.State = m_GameModuleLoaded ? CppModuleState::Loaded : CppModuleState::Unloaded;
+		m_CppModuleStatus.Ok = m_GameModuleLoaded;
+		m_CppModuleStatus.Message = m_GameModuleLoaded
+			? std::string("Game module loaded") : moduleError;
 
 		// 开发期资产:编辑器与 Runtime 一致,经 VFS 目录 provider 读内容。
 		// 目录 provider 已由 Application::MountProjectContent 统一挂载,此处不再重复。
@@ -1610,13 +1638,141 @@ namespace World
 
 	void EditorLayer::GenerateLuaStubsAction()
 	{
-		// Layout-S6:这是用户的显式请求,照旧执行;但 Game 模块缺失时结果会少 Game 组件块,
-		// 而文件是入库的那一份,所以把代价先讲清楚。
-		if (!m_GameModuleLoaded)
-			WLD_CORE_WARN("[Lua] Game module is not registered; the generated stub will lack the Game "
-				"component blocks and will overwrite the committed file.");
+		// CPPT-3(T5b 硬要求):模块未加载窗口(启动失败 / `unloaded` / `reloading`)**禁止**跑
+		// Lua 存根生成 —— Game 组件 schema 不在注册表里,写出来的存根缺 Game 组件块,而目标
+		// 是入库文件(Layout-S6 实测:World.ScriptWorkflow 漂移门禁因此变红)。这里从"只警告"
+		// 升级为"拒绝执行 + 显式提示";加载或回滚成功后(rolled-back 仍加载着旧模块)恢复可用。
+		if (!IsCppModuleLoaded())
+		{
+			const std::string reason = Wui::Tr("notice.cppmodule.stub_blocked",
+				"Lua stub generation is disabled while the C++ module (Game.dll) is not loaded; "
+				"reload the module first, then generate the stubs");
+			WLD_CORE_WARN("[Lua] {0}", reason);
+			m_Shell.Notify(reason);
+			return;
+		}
 		if (!ScriptEngine::GenerateLuaStubs())
 			WLD_CORE_ERROR("Lua API stub generation failed; keeping the last valid declarations.");
+	}
+
+	// ---- CPPT-3:Game 模块(`Game.dll`)热重载(编辑器入口;plan CPPT-2 §6.1 T5b)----
+
+	const char* EditorLayer::CppModuleStateName() const
+	{
+		switch (m_CppModuleStatus.State)
+		{
+			case CppModuleState::Loaded: return "loaded";
+			case CppModuleState::Unloaded: return "unloaded";
+			case CppModuleState::Reloading: return "reloading";
+			case CppModuleState::RolledBack: return "rolled-back";
+		}
+		return "unloaded";
+	}
+
+	bool EditorLayer::IsCppModuleLoaded() const
+	{
+		// 引擎实况(按模块 id 查当前模块表):重载第一段完成后这里立刻为 false,
+		// `reloading` 窗口因此天然落进"未加载"分支(存根门禁、C++ 脚本下拉的未注册提示)。
+		return !Modules::GameModuleReload::IsUnloaded(Application::Get().GetContext());
+	}
+
+	void EditorLayer::PublishCppModuleResult(const Modules::GameModuleReloadResult& result,
+		CppModuleState state, bool ok)
+	{
+		CppModuleStatus& status = m_CppModuleStatus;
+		status.State = state;
+		status.Ok = ok;
+		status.RolledBack = result.RolledBack;
+		status.AbiVersion = result.AbiVersion;
+		status.InstancesDrained = result.InstancesDrained;
+		status.InstancesRestored = result.InstancesRestored;
+		status.ModulePath = result.ModulePath;
+		status.Message = result.Message;
+		status.Diagnostics = result.Diagnostics;
+		++status.Sequence;
+		// Layout-S6 的模块标记与实况对齐(自动/手动存根生成的门禁都用它)。
+		m_GameModuleLoaded = IsCppModuleLoaded();
+	}
+
+	bool EditorLayer::UnloadCppModule(std::string* message)
+	{
+		WorldContext& context = Application::Get().GetContext();
+		if (Modules::GameModuleReload::IsUnloaded(context))
+		{
+			// 幂等:已经是未加载状态,不报错;把状态对齐成 unloaded(文件可重编)。
+			m_CppModuleStatus.State = CppModuleState::Unloaded;
+			m_CppModuleStatus.Ok = true;
+			m_CppModuleStatus.RolledBack = false;
+			m_CppModuleStatus.Message = "Game module is not loaded";
+			++m_CppModuleStatus.Sequence;
+			m_GameModuleLoaded = false;
+			if (message)
+				*message = m_CppModuleStatus.Message;
+			return true;
+		}
+		Modules::GameModuleReloadResult result;
+		const bool ok = Modules::GameModuleReload::Unload(context, m_ActiveScene.get(), &result);
+		// 失败(多数是"不在安全点")时模块仍加载着 —— 不要谎报 unloaded。
+		PublishCppModuleResult(result, ok ? CppModuleState::Unloaded : CppModuleState::Loaded, ok);
+		WLD_CORE_INFO("[cppmodule] unload ok={0} drained={1} message='{2}'",
+			ok ? "true" : "false", result.InstancesDrained, result.Message);
+		if (message)
+			*message = result.Message;
+		return ok;
+	}
+
+	bool EditorLayer::ReloadCppModule(std::string* message)
+	{
+		WorldContext& context = Application::Get().GetContext();
+		Modules::GameModuleReloadResult result;
+		if (Modules::GameModuleReload::IsUnloaded(context))
+		{
+			// 第二段:加载(引擎内含 ABI 等值门 + 失败自动回滚)。
+			const bool ok = Modules::GameModuleReload::Load(context, m_ActiveScene.get(), &result);
+			const CppModuleState state = ok ? CppModuleState::Loaded
+				: (result.RolledBack ? CppModuleState::RolledBack : CppModuleState::Unloaded);
+			PublishCppModuleResult(result, state, ok);
+			WLD_CORE_INFO("[cppmodule] load ok={0} rolledBack={1} abi={2} restored={3} message='{4}'",
+				ok ? "true" : "false", result.RolledBack ? "true" : "false", result.AbiVersion,
+				result.InstancesRestored, result.Message);
+		}
+		else
+		{
+			// 第一段:卸载(解锁 `Game.dll` 供重编);状态停在 reloading,直到再次触发加载新构建。
+			const bool ok = Modules::GameModuleReload::Unload(context, m_ActiveScene.get(), &result);
+			PublishCppModuleResult(result, ok ? CppModuleState::Reloading : CppModuleState::Loaded, ok);
+			WLD_CORE_INFO("[cppmodule] reload segment 1 (unload) ok={0} drained={1} message='{2}'",
+				ok ? "true" : "false", result.InstancesDrained, result.Message);
+		}
+		if (message)
+			*message = m_CppModuleStatus.Message;
+		return m_CppModuleStatus.State == CppModuleState::Reloading || m_CppModuleStatus.Ok;
+	}
+
+	std::string EditorLayer::CppModuleStatusJson() const
+	{
+		const CppModuleStatus& status = m_CppModuleStatus;
+		std::ostringstream out;
+		out << "{\"command\":\"module.status\""
+			<< ",\"state\":\"" << CppModuleStateName() << "\""
+			<< ",\"moduleLoaded\":" << (IsCppModuleLoaded() ? "true" : "false")
+			<< ",\"ok\":" << (status.Ok ? "true" : "false")
+			<< ",\"rolledBack\":" << (status.RolledBack ? "true" : "false")
+			<< ",\"abiVersion\":" << status.AbiVersion
+			<< ",\"instancesDrained\":" << status.InstancesDrained
+			<< ",\"instancesRestored\":" << status.InstancesRestored
+			<< ",\"sequence\":" << status.Sequence
+			<< ",\"modulePath\":\"" << JsonEscape(status.ModulePath) << "\""
+			<< ",\"message\":\"" << JsonEscape(status.Message) << "\""
+			<< ",\"diagnostics\":[";
+		for (size_t index = 0; index < status.Diagnostics.size(); ++index)
+		{
+			if (index)
+				out << ",";
+			out << "\"" << JsonEscape(status.Diagnostics[index]) << "\"";
+		}
+		out << "]}";
+		return out.str();
 	}
 
 	void EditorLayer::CloseAction()

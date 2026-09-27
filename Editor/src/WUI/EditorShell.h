@@ -320,6 +320,10 @@ namespace World
 		std::string PanelTitle(const std::string& id) const;
 		// P4-UX6:主窗口底部状态栏(场景/选择/后端/帧率),同时登记无障碍节点 `shell.status`。
 		void DrawStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& rect);
+		// CPPT-3:Game 模块热重载状态的中文/英文显示文案(状态栏 + 菜单动作反馈共用;
+		// 稳定字面量在 EditorLayer::CppModuleStateName,这里只做显示)。
+		std::string CppModuleStateText() const;
+		std::string CppModuleHintText() const;
 
 		EditorLayer& m_Editor;
 		Wui::DockLayout m_Layout;

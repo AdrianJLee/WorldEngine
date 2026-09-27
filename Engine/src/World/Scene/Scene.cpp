@@ -586,6 +586,54 @@ namespace World
 		script->Runtime.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
 	}
 
+	// ---- CPPT-2(T5b):模块级热重载的实例编排(调用方保证在安全点)----
+
+	std::size_t Scene::DrainNativeScriptInstances()
+	{
+		AssertOwnerThread();
+		std::size_t drained = 0;
+		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
+		{
+			auto* script = m_Registry.try_get<CppScriptComponent>(entity);
+			if (!script)
+				continue;
+			const bool hadInstance = script->Instance != nullptr
+				|| script->Runtime.CreateEntered
+				|| script->Runtime.State == ScriptInstanceState::Running
+				|| script->Runtime.State == ScriptInstanceState::Faulted;
+			// 收 OnDestroy + 释放实例(工厂来自旧模块);配置态 ScriptName/Properties 不动。
+			DestroyNativeScript(entity, /*faulted=*/false);
+			// 热重载不是 Faulted 语义:旧实例收干净后统一置 Stopped(等新模块的 Pending 起跑)。
+			if (script->Runtime.State != ScriptInstanceState::Stopped)
+				script->Runtime.State = ScriptInstanceState::Stopped;
+			if (hadInstance)
+				++drained;
+		}
+		return drained;
+	}
+
+	std::size_t Scene::RestoreNativeScriptInstances()
+	{
+		AssertOwnerThread();
+		std::size_t restored = 0;
+		for (const auto entity : Snapshot<CppScriptComponent>(m_Registry))
+		{
+			auto* script = m_Registry.try_get<CppScriptComponent>(entity);
+			if (!script)
+				continue;
+			script->Instance = nullptr;
+			script->Runtime.CreateEntered = false;
+			script->Runtime.LastError.clear();
+			// 迁移配置态:同名同类型保旧值;新字段取新声明默认值;被删字段丢弃(与 SyncFromSchema 同口径)。
+			const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script->ScriptName) : nullptr;
+			if (type && type->Category == Schema::TypeCategory::Script)
+				ScriptProperties::SyncFromSchema(script->Properties, *type);
+			script->Runtime.State = ScriptInstanceState::Pending;
+			++restored;
+		}
+		return restored;
+	}
+
 	void Scene::DestroyLuaScript(entt::entity entity, bool faulted)
 	{
 		auto* script = m_Registry.try_get<LuauScriptComponent>(entity);

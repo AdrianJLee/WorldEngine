@@ -1551,6 +1551,89 @@ namespace World
 		const float rightWidth = ctx.MeasureTextWidth(rightText, 12.0f);
 		const float textY = rect.Y + (rect.H - 14.0f) * 0.5f;
 		Wui::Label(ctx, { rect.X + 10.0f, textY }, left, m_Theme.TextMuted, 12.0f);
+
+		// ---- CPPT-3:Game 模块热重载状态(loaded / unloaded / reloading / rolled-back)----
+		// 常驻显示:模块未加载窗口(启动失败 / module.unload / reloading)必须显式提示 ——
+		// 该窗口里 Lua 存根生成被拒绝、C++ 脚本下拉为空,用户要能一眼看出"是模块没加载"。
+		// 无障碍:`cppmodule.status`(kind=status,value = 稳定字面量)供 AI/探针断言;
+		// 发生过模块动作后追加 `cppmodule.result` 反馈节点(module.reload 的 ok/回滚/计数)。
+		{
+			const EditorLayer::CppModuleStatus& module = m_Editor.GetCppModuleStatus();
+			const std::string moduleTitle = std::string(Wui::Tr("status.cppmodule", "C++ module")) + ": "
+				+ CppModuleStateText();
+			const std::string moduleHint = CppModuleHintText();
+			std::string chipText = moduleHint.empty() ? moduleTitle : (moduleTitle + " — " + moduleHint);
+			const float leftWidth = ctx.MeasureTextWidth(left, 12.0f);
+			const float rightReserve = rightWidth + 24.0f;
+			float chipX = rect.X + 10.0f + leftWidth + 12.0f;
+			float chipWidth = ctx.MeasureTextWidth(chipText, 12.0f) + 12.0f;
+			// 空间不足(窄窗口 + 长场景名)时按字节截断,不盖住右侧后端/FPS 文本。
+			const float limit = rect.X + rect.W - rightReserve;
+			if (chipX + chipWidth > limit)
+			{
+				std::string cut = chipText;
+				while (cut.size() > 8 && ctx.MeasureTextWidth(cut + "…", 12.0f) + 12.0f > limit - chipX)
+				{
+					cut.pop_back();
+					while (!cut.empty() && (static_cast<unsigned char>(cut.back()) & 0xC0u) == 0x80u)
+						cut.pop_back();
+				}
+				chipText = cut.empty() ? std::string() : (cut + "…");
+				chipWidth = std::max(0.0f, limit - chipX);
+			}
+			const bool moduleLoaded = m_Editor.IsCppModuleLoaded();
+			const Wui::WuiRect chip { chipX, rect.Y + 2.0f, std::max(0.0f, chipWidth), rect.H - 4.0f };
+			if (!chipText.empty() && chip.W > 4.0f)
+				Wui::Label(ctx, { chip.X + 6.0f, textY }, chipText,
+					moduleLoaded ? m_Theme.TextMuted : m_Theme.Warning, 12.0f);
+			// a11y Tooltip = 本地化提示 + 引擎消息 + 最近一次诊断(按行截断,避免超长)。
+			std::string moduleTooltip = CppModuleHintText();
+			if (!module.Message.empty())
+				moduleTooltip += (moduleTooltip.empty() ? "" : "\n") + module.Message;
+			size_t shown = 0;
+			for (const std::string& diagnostic : module.Diagnostics)
+			{
+				if (shown++ >= 5)
+					break;
+				moduleTooltip += "\n" + diagnostic;
+			}
+			Wui::WuiAccessNode moduleNode;
+			moduleNode.Id = Wui::HashId("cppmodule.status");
+			moduleNode.Window = "main";
+			moduleNode.Panel = "shell";
+			moduleNode.Kind = "status";
+			moduleNode.Label = Wui::Tr("status.cppmodule.label", "C++ module status");
+			moduleNode.Value = m_Editor.CppModuleStateName();
+			moduleNode.Tooltip = moduleTooltip;
+			moduleNode.Rect = chip;
+			moduleNode.Enabled = false;
+			moduleNode.Interactive = false;
+			moduleNode.Visible = true;
+			Wui::WuiAccessibility::Get().Register(moduleNode);
+			// 反馈节点:只在发生过模块动作后出现(module.reload / module.unload 的最终结果)。
+			if (module.Sequence > 0)
+			{
+				std::string summary = std::string("ok=") + (module.Ok ? "true" : "false")
+					+ " rolledBack=" + (module.RolledBack ? "true" : "false")
+					+ " abi=" + std::to_string(module.AbiVersion)
+					+ " drained=" + std::to_string(module.InstancesDrained)
+					+ " restored=" + std::to_string(module.InstancesRestored)
+					+ " diagnostics=" + std::to_string(module.Diagnostics.size());
+				Wui::WuiAccessNode resultNode;
+				resultNode.Id = Wui::HashId("cppmodule.result");
+				resultNode.Window = "main";
+				resultNode.Panel = "shell";
+				resultNode.Kind = "status";
+				resultNode.Label = Wui::Tr("status.cppmodule.result", "C++ module reload result");
+				resultNode.Value = summary;
+				resultNode.Tooltip = moduleTooltip;
+				resultNode.Rect = chip;
+				resultNode.Enabled = false;
+				resultNode.Interactive = false;
+				resultNode.Visible = true;
+				Wui::WuiAccessibility::Get().Register(resultNode);
+			}
+		}
 		Wui::Label(ctx, { rect.X + rect.W - rightWidth - 10.0f, textY }, rightText,
 			m_Theme.TextMuted, 12.0f);
 		// 无障碍:脚本/AI 通道可直接读整条状态(不依赖像素)。
@@ -1567,6 +1650,39 @@ namespace World
 		node.Visible = true;
 		Wui::WuiAccessibility::Get().Register(node);
 		DrawStatusNotice(ctx, rect);
+	}
+
+	// CPPT-3:Game 模块状态显示文案(稳定字面量 → 本地化显示;`rolled-back` 用连字符口径)。
+	std::string EditorShell::CppModuleStateText() const
+	{
+		switch (m_Editor.GetCppModuleStatus().State)
+		{
+			case EditorLayer::CppModuleState::Loaded: return Wui::Tr("status.cppmodule.loaded", "loaded");
+			case EditorLayer::CppModuleState::Unloaded: return Wui::Tr("status.cppmodule.unloaded", "unloaded");
+			case EditorLayer::CppModuleState::Reloading: return Wui::Tr("status.cppmodule.reloading", "reloading");
+			case EditorLayer::CppModuleState::RolledBack: return Wui::Tr("status.cppmodule.rolled_back", "rolled-back");
+		}
+		return Wui::Tr("status.cppmodule.unloaded", "unloaded");
+	}
+
+	// 未加载窗口的显式提示(unloaded / reloading 都提示"先重建、再重载");loaded = 无提示。
+	std::string EditorShell::CppModuleHintText() const
+	{
+		switch (m_Editor.GetCppModuleStatus().State)
+		{
+			case EditorLayer::CppModuleState::Unloaded:
+				return Wui::Tr("status.cppmodule.hint.unloaded",
+					"Game.dll is not loaded — rebuild it, then File ▸ Reload C++ Module again");
+			case EditorLayer::CppModuleState::Reloading:
+				return Wui::Tr("status.cppmodule.hint.reloading",
+					"Game.dll unloaded for rebuild — build it, then File ▸ Reload C++ Module to load the new build");
+			case EditorLayer::CppModuleState::RolledBack:
+				return Wui::Tr("status.cppmodule.hint.rolled_back",
+					"the new build was rejected; the previous Game.dll is loaded again (see diagnostics)");
+			case EditorLayer::CppModuleState::Loaded:
+				break;
+		}
+		return std::string();
 	}
 
 	void EditorShell::RenderNode(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -4112,6 +4228,9 @@ namespace World
 			std::function<void()> Action;
 			bool Header = false;
 			std::string Tooltip;
+			// CPPT-3:显式无障碍 id(空 = 沿用"菜单名 + 本地化标签"的既有派生口径)。
+			// 需要跨语言稳定 id 的项(如 menu.file.reload_cpp_module)必须显式给。
+			Wui::WuiId ExplicitId = 0;
 		};
 
 		const Wui::WuiId menuFile = Wui::HashId("menu.file");
@@ -4212,7 +4331,9 @@ namespace World
 						Wui::WuiAccessibility::Get().Register(header);
 						continue;
 					}
-					const Wui::WuiId itemId = Wui::HashId((menuIdName + "." + entries[i].Label).c_str());
+					const Wui::WuiId itemId = entries[i].ExplicitId != 0
+						? entries[i].ExplicitId
+						: Wui::HashId((menuIdName + "." + entries[i].Label).c_str());
 					// P4-U8:悬停解释(勾选项的"关掉是什么效果"这类信息读不出来,只能靠提示)。
 					if (!entries[i].Tooltip.empty())
 						Wui::Tooltip(ctx, item, entries[i].Tooltip);
@@ -4267,6 +4388,22 @@ namespace World
 			{ Wui::Tr("menu.file.open", "Open"), false, [this] { m_Editor.OpenScene(); } },
 			{ Wui::Tr("menu.file.save", "Save"), false, [this] { m_Editor.SaveScene(); } },
 			{ Wui::Tr("menu.file.import", "Import glTF..."), false, [this] { m_Editor.ImportModelDialog(); } },
+			{ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
+				[this]
+				{
+					std::string message;
+					m_Editor.ReloadCppModule(&message);
+					// 两段式反馈:第一段 = 已卸载(等重建 Game.dll);第二段 = 已加载 / 已回滚 / 失败。
+					std::string text = CppModuleStateText();
+					if (!message.empty())
+						text += " — " + message;
+					Notify(text);
+				}, false,
+				Wui::Tr("menu.file.reload_cpp_module.tooltip",
+					"Reload the Game.dll module. First activation unloads it so the build can replace "
+					"the file; activate again to load the new build. C++ script instances are destroyed "
+					"and re-created from Pending via OnCreate."),
+				Wui::HashId("menu.file.reload_cpp_module") },
 			{ Wui::Tr("menu.file.project_settings", "Project Settings"), false, [this]
 				{
 					// P4-UX11:项目设置只有一处入口 = 独立窗口的 Settings 面板(渲染/物理/启动与内容)。

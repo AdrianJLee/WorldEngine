@@ -1152,6 +1152,25 @@ set_tests_properties(World.SchemaDrift PROPERTIES
     TIMEOUT 60
 )
 
+# CPPT-2:Game 模块生成物漂移门禁(与 World.SchemaDrift 同形态)。改 Game 的 WE_FIELD/注解/
+# 属性元数据却不重跑 schema-compiler → 此测试红灯;新生成物 = Game/src/Generated + Game.manifest。
+add_test(NAME Game.SchemaDrift
+    COMMAND schema-compiler
+        --input "${CMAKE_SOURCE_DIR}/Game/src/Components/SampleDataComponent.h"
+        --input "${CMAKE_SOURCE_DIR}/Game/src/Scripts/ExampleScript.h"
+        --input "${CMAKE_SOURCE_DIR}/Game/src/Scripts/StressTest.h"
+        --module Game
+        --output "${CMAKE_SOURCE_DIR}/Game/src/Generated"
+        --manifest "${CMAKE_SOURCE_DIR}/Game/src/Generated/Game.manifest"
+        --reg-include "Components/SampleDataComponent.h"
+        --reg-include "Scripts/ExampleScript.h"
+        --reg-include "Scripts/StressTest.h"
+        --check)
+set_tests_properties(Game.SchemaDrift PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P4-UX16:"新建资产"类型注册表(注册/覆盖/反注册/排序/Create 落盘;菜单数据源)。
 add_executable(WorldAssetTypeRegistryTests World/AssetTypeRegistryTests.cpp)
 target_link_libraries(WorldAssetTypeRegistryTests PRIVATE World)

@@ -209,6 +209,9 @@ namespace World
 			return 0;
 		}
 
+		// 定义在下方(CPPT-3 的只读摘要与行悬停共用);先声明以便 FormatReadOnlyValue 引用。
+		std::string ScriptLeafTypeText(Schema::Kind kind);
+
 		std::string FormatReadOnlyValue(const Schema::FieldSchema& field, const Schema::Value& value)
 		{
 			if (field.K == Schema::Kind::Enum)
@@ -217,6 +220,11 @@ namespace World
 				if (schema)
 					return EnumNameOf(*schema, EnumRawOf(*schema, value));
 			}
+			// CPPT-3:没有行控件的数学类型(IVec*/UVec*/Quat/Mat*)→ 只读摘要显示类型名。
+			// 这些值不进属性表/不进存档(引擎侧同步成 ReadOnly 摘要行),显示 "(0, 0, 0)" 一类
+			// 伪值会误导 —— 与 Luau 裸 table 的 `table` 摘要同一口径。
+			if (ScriptProperties::IsSummaryKind(field.K))
+				return ScriptLeafTypeText(field.K);
 			return FormatValueByVariant(value);
 		}
 
@@ -430,6 +438,19 @@ namespace World
 				case Schema::Kind::Vec2: return Schema::Value(glm::vec2(0.0f));
 				case Schema::Kind::Vec3: return Schema::Value(glm::vec3(0.0f));
 				case Schema::Kind::Vec4: return Schema::Value(glm::vec4(0.0f));
+				// CPPT-3:只读摘要行(IVec*/UVec*/Quat/Mat*)与 Enum/Asset 的规范零值;
+				// Enum 走有符号口径(与 EnumSchema::IsSigned 的默认一致)、Asset = 空路径。
+				case Schema::Kind::IVec2: return Schema::Value(glm::ivec2(0));
+				case Schema::Kind::IVec3: return Schema::Value(glm::ivec3(0));
+				case Schema::Kind::IVec4: return Schema::Value(glm::ivec4(0));
+				case Schema::Kind::UVec2: return Schema::Value(glm::uvec2(0u));
+				case Schema::Kind::UVec3: return Schema::Value(glm::uvec3(0u));
+				case Schema::Kind::UVec4: return Schema::Value(glm::uvec4(0u));
+				case Schema::Kind::Quat: return Schema::Value(glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+				case Schema::Kind::Mat3: return Schema::Value(glm::mat3(1.0f));
+				case Schema::Kind::Mat4: return Schema::Value(glm::mat4(1.0f));
+				case Schema::Kind::Enum: return Schema::Value(static_cast<int64_t>(0));
+				case Schema::Kind::Asset: return Schema::Value(std::string());
 				// B 期:结构化表的值在 `Children` 里,`Value` 保持空表(monostate)——
 				// 与 `ScriptProperties::ValueMatchesKind` 同一口径,不往 variant 里塞表数据。
 				case Schema::Kind::Object: return Schema::Value();
@@ -456,6 +477,19 @@ namespace World
 				case Schema::Kind::Vec2: return std::holds_alternative<glm::vec2>(property.Value);
 				case Schema::Kind::Vec3: return std::holds_alternative<glm::vec3>(property.Value);
 				case Schema::Kind::Vec4: return std::holds_alternative<glm::vec4>(property.Value);
+				case Schema::Kind::IVec2: return std::holds_alternative<glm::ivec2>(property.Value);
+				case Schema::Kind::IVec3: return std::holds_alternative<glm::ivec3>(property.Value);
+				case Schema::Kind::IVec4: return std::holds_alternative<glm::ivec4>(property.Value);
+				case Schema::Kind::UVec2: return std::holds_alternative<glm::uvec2>(property.Value);
+				case Schema::Kind::UVec3: return std::holds_alternative<glm::uvec3>(property.Value);
+				case Schema::Kind::UVec4: return std::holds_alternative<glm::uvec4>(property.Value);
+				case Schema::Kind::Quat: return std::holds_alternative<glm::quat>(property.Value);
+				case Schema::Kind::Mat3: return std::holds_alternative<glm::mat3>(property.Value);
+				case Schema::Kind::Mat4: return std::holds_alternative<glm::mat4>(property.Value);
+				// Enum 存整数(有符号/无符号两种编码都可能出现在场景文本里)。
+				case Schema::Kind::Enum: return std::holds_alternative<int64_t>(property.Value)
+					|| std::holds_alternative<uint64_t>(property.Value);
+				case Schema::Kind::Asset: return std::holds_alternative<std::string>(property.Value);
 				// B 期:Object 的"值"是 Children(空表 = monostate),永远算匹配。
 				case Schema::Kind::Object: return std::holds_alternative<std::monostate>(property.Value);
 				default: return false;
@@ -516,6 +550,16 @@ namespace World
 				case Schema::Kind::Vec2: return "vec2";
 				case Schema::Kind::Vec3: return "vec3";
 				case Schema::Kind::Vec4: return "vec4";
+				// CPPT-3:面板没有行控件的数学类型也用脚本作者写下的类型名(只读摘要行/行悬停)。
+				case Schema::Kind::IVec2: return "ivec2";
+				case Schema::Kind::IVec3: return "ivec3";
+				case Schema::Kind::IVec4: return "ivec4";
+				case Schema::Kind::UVec2: return "uvec2";
+				case Schema::Kind::UVec3: return "uvec3";
+				case Schema::Kind::UVec4: return "uvec4";
+				case Schema::Kind::Quat: return "quat";
+				case Schema::Kind::Mat3: return "mat3";
+				case Schema::Kind::Mat4: return "mat4";
 				default: return "table";
 			}
 		}
@@ -534,6 +578,11 @@ namespace World
 				const bool expandable = !property.ReadOnly && !property.Children.empty();
 				return expandable ? "struct" : "table";
 			}
+			// CPPT-3:Enum/Asset 的类型文案带上声明名(枚举名 / 资产类型),没有 Doc 时行悬停用它。
+			if (property.Type == Schema::Kind::Enum)
+				return property.TypeName.empty() ? std::string("enum") : property.TypeName;
+			if (property.Type == Schema::Kind::Asset)
+				return property.TypeName.empty() ? std::string("asset") : property.TypeName;
 			return ScriptLeafTypeText(property.Type);
 		}
 
@@ -659,6 +708,60 @@ namespace World
 			MakeScriptTableChildAccessors(std::make_index_sequence<kScriptTableMaxChildren> {});
 		const auto kScriptTableNodeTable =
 			MakeScriptTableNodeTable(std::make_index_sequence<kScriptTableMaxNodes> {});
+
+		// ---- CPPT-3:C++ Enum 属性的合成 schema ----
+		//
+		// 枚举行只认 `FieldSchema::GetEnum`(**无捕获**函数指针),所以把注册表里的 EnumSchema
+		// 拷进一个稳定 arena,再用编译期下标表选中(与上面的脚本表访问器同一手法)。
+		// arena 在绘制脚本属性表前重置;32 个枚举行/帧是面板侧护栏,溢出 = 该行降级只读摘要。
+		constexpr size_t kScriptEnumMax = 32;
+
+		struct ScriptEnumArena
+		{
+			std::array<Schema::EnumSchema, kScriptEnumMax> Enums {};
+			size_t Used = 0;
+		};
+
+		ScriptEnumArena& ScriptEnumArenaStore()
+		{
+			static thread_local ScriptEnumArena arena;
+			return arena;
+		}
+
+		template <size_t Index>
+		const Schema::EnumSchema* ScriptEnumNode()
+		{
+			ScriptEnumArena& arena = ScriptEnumArenaStore();
+			return Index < arena.Used ? &arena.Enums[Index] : nullptr;
+		}
+
+		template <size_t... Index>
+		constexpr std::array<const Schema::EnumSchema* (*)(), sizeof...(Index)> MakeScriptEnumTable(
+			std::index_sequence<Index...>)
+		{
+			return { &ScriptEnumNode<Index>... };
+		}
+
+		const auto kScriptEnumTable = MakeScriptEnumTable(std::make_index_sequence<kScriptEnumMax> {});
+
+		using ScriptEnumGetter = const Schema::EnumSchema* (*)();
+
+		// 从注册表取枚举 schema 的稳定访问器(nullptr = 找不到 / arena 溢出 → 行降级只读摘要)。
+		ScriptEnumGetter ScriptEnumAccessorFor(const Schema::SchemaRegistry& schemas,
+			const std::string& enumName)
+		{
+			if (enumName.empty())
+				return nullptr;
+			const Schema::EnumSchema* source = schemas.FindEnum(enumName);
+			if (!source)
+				return nullptr;
+			ScriptEnumArena& arena = ScriptEnumArenaStore();
+			if (arena.Used >= kScriptEnumMax)
+				return nullptr;
+			const size_t index = arena.Used++;
+			arena.Enums[index] = *source;
+			return kScriptEnumTable[index];
+		}
 
 		// 合成节点 → 集合形态。指针不在 arena 范围内(普通 schema 节点)= None:数组/映射的
 		// 增删路径只对脚本合成 schema 生效,不会走到 Play 里 C++ 实例的嵌套结构上。
@@ -895,7 +998,8 @@ namespace World
 		// 把一条结构化表属性递归合成成 arena 节点(返回下标;失败 = kScriptTableNoNode)。
 		// `idPath` 同时是合成 TypeSchema 的 DisplayName:DrawSchemaFields 递归时拿它当行 id
 		// 前缀,于是子行 id = `properties.<组件>.<属性>.<子字段>`(递归同名规则)。
-		size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string& idPath, size_t depth)
+		size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string& idPath, size_t depth,
+			const Schema::SchemaRegistry* schemas)
 		{
 			ScriptTableSchemaArena& arena = ScriptTableArena();
 			if (depth > kScriptTableMaxDepth || arena.Used >= kScriptTableMaxNodes)
@@ -916,6 +1020,25 @@ namespace World
 				field.Name = child.Name;
 				field.K = child.Type;
 				field.Meta.Doc = child.Doc;
+				// CPPT-3:子行也吃终态口径 —— ReadOnly 透传;Enum 从注册表合成下拉所需的
+				// EnumSchema(拿不到 = 只读摘要);Asset 的资产类型名写进 Meta.AssetType;
+				// 面板没有行控件的数学类型直接标只读(不进存档)。
+				field.Meta.ReadOnly = child.ReadOnly;
+				if (child.Type == Schema::Kind::Enum)
+				{
+					if (schemas && !child.TypeName.empty())
+						field.GetEnum = ScriptEnumAccessorFor(*schemas, child.TypeName);
+					if (!field.GetEnum)
+						field.Meta.ReadOnly = true;
+				}
+				else if (child.Type == Schema::Kind::Asset)
+				{
+					field.Meta.AssetType = child.TypeName;
+				}
+				else if (ScriptProperties::IsSummaryKind(child.Type))
+				{
+					field.Meta.ReadOnly = true;
+				}
 				if (child.Type == Schema::Kind::Object)
 				{
 					// 裸 table / 空结构 / 超护栏 → 只读摘要行(摘要文本由 Meta.DisplayName 携带,
@@ -924,7 +1047,7 @@ namespace World
 					// 说明时行悬停用它回落(v4 §1);空数组/空映射仍可展开(子行只有底部 `+`)。
 					field.Meta.DisplayName = ScriptPropertyTypeText(child);
 					const size_t childNode = ScriptPropertyExpandable(child)
-						? BuildScriptTableSchema(child, idPath + "." + child.Name, depth + 1)
+						? BuildScriptTableSchema(child, idPath + "." + child.Name, depth + 1, schemas)
 						: kScriptTableNoNode;
 					if (childNode == kScriptTableNoNode)
 					{
@@ -951,7 +1074,8 @@ namespace World
 		// 由 DrawSchemaFields 的 scriptPropertyRow 摘要分支画一行 `table`,不可展开、不进存档。
 		// 注:摘要里的 N keys 需要运行期摘要,当前冻结模型没有该字段(见 VEC-B3 报告),
 		// 所以拿不到 N 时只写类型名 `table`。
-		Schema::FieldSchema MakeScriptTableField(const ScriptProperty& property, const std::string& idPath)
+		Schema::FieldSchema MakeScriptTableField(const ScriptProperty& property, const std::string& idPath,
+			const Schema::SchemaRegistry* schemas)
 		{
 			Schema::FieldSchema field;
 			field.Name = property.Name;
@@ -962,7 +1086,7 @@ namespace World
 			field.Meta.DisplayName = ScriptPropertyTypeText(property);
 			if (!ScriptPropertyExpandable(property))
 				return field;
-			const size_t nodeIndex = BuildScriptTableSchema(property, idPath, 1);
+			const size_t nodeIndex = BuildScriptTableSchema(property, idPath, 1, schemas);
 			if (nodeIndex == kScriptTableNoNode)
 			{
 				field.Meta.DisplayName = "table";
@@ -2823,8 +2947,14 @@ namespace World
 					const std::string reason = m_ReadOnly
 						? Wui::Tr("panel.properties.readonly_notice",
 							"Play/Simulate running: read-only (pause or exit to edit)")
-						: Wui::Tr("panel.properties.field_core_readonly",
-							"Core field: read-only by design, it cannot be edited here");
+						: (scriptPropertyRow && ScriptProperties::IsSummaryKind(field.K)
+							// CPPT-3:IVec*/UVec*/Quat/Mat* —— 面板没有行控件;值不进属性表/不进存档,
+							// 这里给"为什么只读"的可读理由(禁用必须能解释原因)。
+							? Wui::Tr("panel.properties.script_summary_readonly",
+								"This field type has no editor control yet — shown as a read-only "
+								"summary and not saved here")
+							: Wui::Tr("panel.properties.field_core_readonly",
+								"Core field: read-only by design, it cannot be edited here"));
 					desc.Tooltip = docText.empty() ? reason : (docText + "\n" + reason);
 				}
 				// 只读态:复位按钮可见但禁用(disabled hint = 面板顶部那行"Play/Simulate 只读"说明)。
@@ -3438,14 +3568,45 @@ namespace World
 			m_ScriptDeclarationsValid = ScriptEngine::DescribeScriptDeclarations(lua->ScriptPath,
 				m_ScriptDeclarations, nullptr, nullptr) && !m_ScriptDeclarations.empty();
 
-		// ---- SCRIPT-V2:属性表按脚本**声明**保持新鲜(Doc 由脚本派生、不进存档,必须每次重建)----
-		// C++:字段说明来自 schema 的 `Doc("…")` —— 每次画都从 schema 取回(查不到 = 留空,走中性兜底)。
+		// ---- SCRIPT-V2 + CPPT-3:属性表按脚本**声明**保持新鲜 ----
+		// C++:字段说明来自 schema 的 `Doc("…")` —— 每次画都从 schema 取回(查不到 = 留空,走中性兜底);
+		// **声明签名(名字 + Kind + 枚举/资产类型 + ReadOnly)变化才整体重建**(plan §4.6 "补 C++ 声明
+		// 签名门"):重编 Game.dll → 同会话热重载 → 新字段/类型立即生效;签名不变时不重建,
+		// 与 Luau 的 VEC-C2 签名门同一口径(不把面板刚做的值按声明还原)。
 		const Schema::TypeSchema* cppSchema = (!luau && !cpp->ScriptName.empty())
 			? schemas.Find(cpp->ScriptName) : nullptr;
-		if (cppSchema)
+		if (cppSchema && !m_ReadOnly)
+		{
+			std::string declarationSignature;
+			for (const Schema::FieldSchema& field : cppSchema->Fields)
+			{
+				declarationSignature += field.Name;
+				declarationSignature += '|';
+				declarationSignature += ScriptProperties::KindName(field.K);
+				declarationSignature += '|';
+				if (field.GetEnum)
+					if (const Schema::EnumSchema* enumSchema = field.GetEnum())
+						declarationSignature += enumSchema->Name;
+				declarationSignature += '|';
+				declarationSignature += field.AssetTypeName ? field.AssetTypeName : "";
+				if (field.Meta.ReadOnly)
+					declarationSignature += "|ro";
+				declarationSignature += ';';
+			}
+			const Wui::WuiId cppSignatureId = Wui::HashId(
+				("cpp.script.decl.sig." + std::to_string(handle) + "." + schema.DisplayName).c_str());
+			std::string& cppLastSignature = ctx.Persist<std::string>(cppSignatureId, std::string());
+			if (declarationSignature != cppLastSignature)
+			{
+				// 迁移(同名同类型保值 / 新字段取声明默认值)由引擎的 SyncFromSchema 完成;
+				// 模块热重载后的实例迁移在 Scene::RestoreNativeScriptInstances,这里是同会话兜底。
+				ScriptProperties::SyncFromSchema(cpp->Properties, *cppSchema);
+				cppLastSignature = declarationSignature;
+			}
 			for (ScriptProperty& property : cpp->Properties)
 				if (const Schema::FieldSchema* field = FindScriptSchemaField(*cppSchema, property.Name))
 					property.Doc = field->Meta.Doc;
+		}
 		// Luau:脚本注解 = 属性表的唯一声明来源。**脚本路径由任何来源变化**(下拉改选 / `scene.set` /
 		// 反序列化 / Reload / 换实体 / 面板重开)都在这里收敛一次 —— 用户反馈②「脚本里新加字段
 		// 不显示、Reload 也不管用」的落点。是否真的重新解析由引擎按"路径 + 内容指纹 + VM 可用性"
@@ -3687,8 +3848,9 @@ namespace World
 		else
 		{
 			// VEC-B3:合成 schema 的 arena 每个脚本组件重建一次;下面的循环只增不减,
-			// 固定数组地址稳定,递归绘制期间不会失效。
+			// 固定数组地址稳定,递归绘制期间不会失效。CPPT-3:枚举 arena 同帧重置。
 			ScriptTableArena().Used = 0;
+			ScriptEnumArenaStore().Used = 0;
 			// VEC-F2:集合头 `↺` 的确认请求要知道"正在画哪一个脚本组件"以及"这一行在哪条路径上"。
 			m_ScriptInspectingEntity = entity;
 			m_ScriptInspectingComponentId = schema.Storage ? schema.Storage->ComponentId : 0;
@@ -3698,19 +3860,53 @@ namespace World
 			m_ScriptRowPath.clear();
 			for (ScriptProperty& property : properties)
 			{
-				if (!ScriptProperties::IsPropertyKind(property.Type))
-					continue;   // 非脚本属性类型(理论上不会进表):不画,也不写
+				const bool editableKind = ScriptProperties::IsPropertyKind(property.Type);
+				const bool summaryKind = ScriptProperties::IsSummaryKind(property.Type);
+				if (!editableKind && !summaryKind)
+					continue;   // Kind::None 等真正不认识、也没有摘要文案的类型(引擎不会产出)
+				// CPPT-3:编辑元数据(颜色/范围/单位/固定集合/资产类型/说明)按名字从 schema
+				// 声明回读 —— 不复制进属性表、不进存档(plan §4.4)。
+				const Schema::FieldSchema* declared = cppSchema
+					? FindScriptSchemaField(*cppSchema, property.Name) : nullptr;
 				Schema::FieldSchema field;
 				field.Name = property.Name;
 				field.K = property.Type;
 				// 行悬停/读屏 = 脚本注释(`ScriptProperty::Doc`,由脚本派生、不进存档);
 				// 空 → 中性兜底(绝不回落 schema 的字段说明,见 DrawSchemaFields 的 fieldDocFor)。
 				field.Meta.Doc = property.Doc;
+				// CPPT-3:ReadOnly 透传(引擎把不可编辑的类型/缺枚举 schema 的字段标成只读摘要)。
+				field.Meta.ReadOnly = property.ReadOnly || summaryKind;
+				if (declared)
+				{
+					field.Meta.Color = declared->Meta.Color;
+					field.Meta.Min = declared->Meta.Min;
+					field.Meta.Max = declared->Meta.Max;
+					field.Meta.Unit = declared->Meta.Unit;
+					field.Meta.Step = declared->Meta.Step;
+					field.Meta.Choices = declared->Meta.Choices;
+					if (!declared->Meta.AssetType.empty())
+						field.Meta.AssetType = declared->Meta.AssetType;
+					else if (declared->AssetTypeName)
+						field.Meta.AssetType = declared->AssetTypeName;
+				}
+				if (property.Type == Schema::Kind::Enum)
+				{
+					// 枚举下拉要吃 EnumSchema:按 TypeName 从注册表取(拿不到 = 只读摘要,不静默)。
+					field.GetEnum = ScriptEnumAccessorFor(schemas, property.TypeName);
+					if (!field.GetEnum)
+						field.Meta.ReadOnly = true;
+				}
+				else if (property.Type == Schema::Kind::Asset && field.Meta.AssetType.empty())
+				{
+					// 资产下拉:注册的资产类型名(引擎写进 ScriptProperty::TypeName)。
+					field.Meta.AssetType = property.TypeName;
+				}
 				if (property.Type == Schema::Kind::Object)
 				{
 					// 嵌套 `---@class`:合成 GetNested/GetPtr(可展开、子行可编辑);
 					// 裸 table / 空结构 / 超护栏:降级成只读摘要行(看得到、不可编辑、不进存档)。
-					field = MakeScriptTableField(property, schema.DisplayName + "." + property.Name);
+					field = MakeScriptTableField(property, schema.DisplayName + "." + property.Name, &schemas);
+					field.Meta.ReadOnly = field.Meta.ReadOnly || property.ReadOnly;
 				}
 				else
 				{
@@ -3719,8 +3915,10 @@ namespace World
 					// "未设"要保持未设,真实默认值由引擎的属性入口填(审查 P1-1:不能编辑期写成 0 落盘)。
 					field.Get = [](const void* value)
 					{ return ScriptPropertyDisplayValueForRow(*static_cast<const ScriptProperty*>(value)); };
-					field.Set = [](void* value, const Schema::Value& edited)
-					{ static_cast<ScriptProperty*>(value)->Value = edited; };
+					// 只读摘要(引擎标记 / 摘要 Kind)→ 不给 Set,行走只读行(值列显示摘要/类型)。
+					if (!field.Meta.ReadOnly)
+						field.Set = [](void* value, const Schema::Value& edited)
+						{ static_cast<ScriptProperty*>(value)->Value = edited; };
 				}
 				Schema::TypeSchema rowSchema;
 				rowSchema.DisplayName = schema.DisplayName;

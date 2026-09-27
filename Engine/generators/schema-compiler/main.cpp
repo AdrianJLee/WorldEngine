@@ -616,6 +616,9 @@ namespace
 		bool IsColor = false;                   // Color() → Vec3/Vec4 用取色器
 		std::string AssetType;                  // Asset("Material") → 字符串字段是资产路径
 		std::vector<std::string> Choices;       // Choices("cube","plane") → 字符串字段固定集合
+		// ---- CPPT-2:计量单位与拖拽步长(编辑期提示;进 FieldMetadata 尾部) ----
+		std::string Unit;                       // Unit("m") → 行后缀
+		std::optional<float> Step;              // Step(0.1) → 数值拖拽步长
 	};
 
 	FieldOptions ParseOptions(const FieldDecl& field, const std::string& file)
@@ -710,6 +713,22 @@ namespace
 						Fail(file, attr.Pos, "attribute 'Choices' expects string literals only");
 					options.Choices.push_back(Unquote(group[0].Text));
 				}
+			}
+			else if (attr.Name == "Unit")
+			{
+				if (attr.Args.size() != 1 || attr.Args[0].size() != 1 || attr.Args[0][0].type != Token::Type::String)
+					Fail(file, attr.Pos, "attribute 'Unit' expects a single string literal");
+				if (!options.Unit.empty())
+					Fail(file, attr.Pos, "duplicate attribute 'Unit'");
+				options.Unit = Unquote(attr.Args[0][0].Text);
+			}
+			else if (attr.Name == "Step")
+			{
+				if (attr.Args.size() != 1 || attr.Args[0].empty())
+					Fail(file, attr.Pos, "attribute 'Step' expects one number");
+				options.Step = std::stof(JoinTokens(attr.Args[0]));
+				if (!(options.Step.value() > 0.0f))
+					Fail(file, attr.Pos, "attribute 'Step' must be a positive number");
 			}
 			else
 			{
@@ -875,9 +894,16 @@ namespace
 				<< "\"" << options.AssetType << "\", { ";
 			for (size_t i = 0; i < options.Choices.size(); ++i)
 				out << (i ? ", " : "") << "\"" << options.Choices[i] << "\"";
-			out << " } },\n";
+			out << " }, \"" << options.Unit << "\", " << OptionalText(options.Step) << " },\n";
 			std::string def;
-			if (field.Kind == "Enum")
+			// CPPT-2(F-1):Category==Script 的字段只有**显式 Default(<expr>)** 才算声明默认值;
+			// 否则 Default = monostate("未设")—— 类型零值不再是默认值,检视器显示"未设(脚本默认)",
+			// Play 时跳过 Set ⇒ 实例保留成员初值,复位(↺)回到未设且不落盘。
+			if (decl.Category == "Script" && !options.DefaultExpr.has_value())
+			{
+				def = "Value()";
+			}
+			else if (field.Kind == "Enum")
 			{
 				const auto enumIt = enumsByName.find(options.Of.value());
 				const EnumInfo info = UnderlyingInfo(enumIt->second.Underlying);
@@ -1240,6 +1266,10 @@ int main(int argc, char** argv)
 					Fail(decl.File, field.Pos, "field '" + field.Name + "' references unknown enum '" + options.Of.value() + "'");
 				if (options.Min.has_value() && !NumericKinds().count(field.Kind))
 					Fail(decl.File, field.Pos, "Range is only valid on numeric fields");
+				if (!options.Unit.empty() && !NumericKinds().count(field.Kind) && field.Kind != "String")
+					Fail(decl.File, field.Pos, "Unit is only valid on numeric or String fields");
+				if (options.Step.has_value() && !NumericKinds().count(field.Kind))
+					Fail(decl.File, field.Pos, "Step is only valid on numeric fields");
 				if (options.Entity32 && field.Kind != "UInt64")
 					Fail(decl.File, field.Pos, "Entity32 is only valid on UInt64 fields (entt::entity packed into 64-bit storage)");
 			}

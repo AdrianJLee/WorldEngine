@@ -31,5 +31,7 @@
   "menu.view.collider_outlines_all": "碰撞体轮廓:全部",
   "menu.file.lua_stubs": "生成 Lua API 存根",
   "menu.file.cooking": "烘焙(Cook)",
-  "menu.file.export_ops": "导出操作日志"
+  "menu.file.export_ops": "导出操作日志",
+  "menu.file.reload_cpp_module": "重载 C++ 模块(Game.dll)",
+  "menu.file.reload_cpp_module.tooltip": "重载 Game.dll 模块。第一次激活先卸载(让构建能改写该文件),再次激活加载新构建。C++ 脚本实例会销毁重建:新实例从 Pending 起跑、走 OnCreate。"
 }

@@ -7,6 +7,7 @@
 #include "World/Renderer/EditorCamera3D.h"
 #include "World/Renderer/AssetHotReload.h"
 #include "World/Script/ScriptFileWatch.h"
+#include "World/Modules/GameModuleReload.h"
 #include "Document/EditorDocument.h"
 #include "World/WUI/WuiCommand.h"
 #include "World/WUI/WuiGizmo.h"
@@ -173,6 +174,49 @@ namespace World
 		// 从 scripts/templates/WorldScript.lua 复制出 scripts/script_<n>.lua(冲突递增、永不覆盖)。
 		bool ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message = nullptr);
 
+		// ---- CPPT-3:Game 模块(`Game.dll`)热重载(编辑器入口;契约 = plan CPPT-2 §6.1 T5b)----
+		//
+		// 两段式(Windows 上 Editor 已映射 `Game.dll` 时链接器无法改写该文件,重编必须发生在
+		// 模块卸载之后;见 plan §6.1 实现要点 5):
+		//   File ▸ Reload C++ Module / AI `module.reload`:
+		//     已加载 → 第一段:卸载(文件可重编)→ state = `reloading`;
+		//     未加载 → 第二段:加载新构建(引擎内含 ABI 等值门 + 失败回滚)→ `loaded` / `rolled-back`。
+		//   AI `module.unload`:显式卸载 → state = `unloaded`(再 `module.reload` 即加载)。
+		// `reloading` 语义 = "重载进行中:模块已卸载,等待重建后再次触发加载" —— 该窗口与
+		// `unloaded` 一样**未加载 Game 模块**,存根生成必须被拒绝(Layout-S6:缺 Game 组件块的
+		// 存根会把入库存根改坏,World.ScriptWorkflow 门禁红)。
+		enum class CppModuleState
+		{
+			Loaded,
+			Unloaded,
+			Reloading,
+			RolledBack,
+		};
+		struct CppModuleStatus
+		{
+			CppModuleState State = CppModuleState::Unloaded;
+			bool Ok = false;                 // 最近一次完成的动作是否成功
+			bool RolledBack = false;         // 最近一次 Load 失败后回到了回滚副本
+			uint32_t AbiVersion = 0;         // 新模块实际报告的 ABI(等值门证据)
+			size_t InstancesDrained = 0;     // 收到 OnDestroy 的旧实例数
+			size_t InstancesRestored = 0;    // 置回 Pending 的组件数
+			std::string ModulePath;          // 最近一次重载目标 DLL
+			std::string Message;             // 引擎给的可读消息(含阶段;英文 canonical)
+			std::vector<std::string> Diagnostics;
+			uint64_t Sequence = 0;           // 完成的动作数(反馈节点/探针判"发生过重载")
+		};
+		const CppModuleStatus& GetCppModuleStatus() const { return m_CppModuleStatus; }
+		// 稳定字面量:`loaded` / `unloaded` / `reloading` / `rolled-back`(AI JSON 与 a11y 节点同源)。
+		const char* CppModuleStateName() const;
+		// AI `module.status` 的 result(扁平 JSON 文本)。
+		std::string CppModuleStatusJson() const;
+		// File 菜单与 AI `module.reload` 共用入口(两段式,见上方注释)。
+		bool ReloadCppModule(std::string* message = nullptr);
+		// AI `module.unload`:显式卸载(幂等;已卸载时仍返回 true 并把状态对齐成 unloaded)。
+		bool UnloadCppModule(std::string* message = nullptr);
+		// 引擎实况:当前是否真的加载着 Game 模块(存根生成门禁按它判定)。
+		bool IsCppModuleLoaded() const;
+
 		// ---- P2 W5-L1:资产热重载(材质/贴图自动重载;文档场景只提示 + 一键重开)----
 		// 文档场景(.wd)在磁盘上被外部改动 → 视口提示条;重开会走未保存确认(不静默丢弃修改)。
 		bool ExternalSceneChanged() const { return m_ExternalSceneChanged; }
@@ -231,6 +275,9 @@ namespace World
 		void LoadIconTextures();
 		void ShowError(const std::string& message);
 		void StartCooking(const std::string& target);
+		// CPPT-3:把一次模块热重载结果写进 `m_CppModuleStatus`(+ 同步 Layout-S6 的模块标记)。
+		void PublishCppModuleResult(const Modules::GameModuleReloadResult& result,
+			CppModuleState state, bool ok);
 		// 开发验证:WLD_CAPTURE_FRAMES=N 后把场景渲染目标写 PPM(后端无关 RHI 读回)。
 		void CaptureFrameIfRequested();
 		// 开发验证:WLD_HIERARCHY_CLICK=<进入 Play 后的帧数> 触发层级面板首行的真实点击回调,
@@ -252,6 +299,8 @@ namespace World
 		// Layout-S6:Game 模块(模块加载成功 = Game 组件 schema 已注册)。自动存根生成要求它为真,
 		// 否则渲染结果缺少 Game 组件块,写回入库文件即造成漂移门禁失败。
 		bool m_GameModuleLoaded = false;
+		// CPPT-3:Game 模块热重载状态(AI module.status / 状态栏节点 cppmodule.status 同一来源)。
+		CppModuleStatus m_CppModuleStatus;
 
 		Ref<Scene> m_ActiveScene;
 		Ref<Scene> m_RuntimeScene;

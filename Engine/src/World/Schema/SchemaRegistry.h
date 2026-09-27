@@ -20,6 +20,7 @@ namespace World::Schema
 			DuplicateComponentId, // 不同模块共用同一组件存储 id
 			Conflict,             // 跨模块同名组件等不允许的组合
 			AbiMismatch,          // schema ABI 版本超出宿主支持
+			InvalidScript,        // CPPT-2:Category==Script 缺显示名或工厂绑定
 		};
 
 		static const char* StatusName(Status status);
@@ -36,6 +37,9 @@ namespace World::Schema
 		const EnumSchema* FindEnum(const std::string& name) const;
 
 		std::vector<const TypeSchema*> List(TypeCategory category) const;
+		// CPPT-2(T5b):按模块名清点该模块已注册的类型(热重载卸载/行为注销用;
+		// 只比 ModuleId.Name,与 UnregisterModule 同一口径,返回稳定注册顺序)。
+		std::vector<const TypeSchema*> ListByModule(const std::string& moduleName) const;
 
 		size_t TypeCount() const { return m_Entries.size(); }
 		size_t EnumCount() const { return m_EnumEntries.size(); }

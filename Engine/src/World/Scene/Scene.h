@@ -193,6 +193,14 @@ namespace World
 		// W5:脚本热重载只允许在安全点提交——不在脚本回调内、不在结构提交点内、
 		// 也不在 Stop 流程中。宿主(编辑器/Runtime)应在帧边界调用,并以此判定是否可重载。
 		bool CanApplyScriptReload() const;
+		// CPPT-2(T5b 模块级热重载):卸载 Game 模块前的实例编排 —— 每个 CppScriptComponent
+		// 收一次 OnDestroy(仍可读到的配置态 ScriptName + Properties 原样保留),State=Stopped;
+		// 返回真的收过实例(= 原本 Running/Faulted/CreateEntered/持实例)的组件数。
+		// 加载新模块后调用 RestoreNativeScriptInstances():按新 schema 迁移属性(同名同类型保值),
+		// 清实例句柄并置回 Pending —— 下一安全点由既有 pending 机制调 OnCreate。
+		// 两者都必须与 CanApplyScriptReload() 同一安全点语义(宿主在帧边界调用)。
+		std::size_t DrainNativeScriptInstances();
+		std::size_t RestoreNativeScriptInstances();
 		// Accepted commands execute once at a safe point; callbacks enqueue the next batch.
 		bool DeferStructuralChange(std::function<void(Scene&)> command);
 		void FlushStructuralChanges();

@@ -125,7 +125,11 @@ namespace World
 			const bool map = property.Collection == ScriptPropertyCollection::Map;
 			out << YAML::Key << "Type" << YAML::Value
 				<< (array ? "Array" : (map ? "Map" : ScriptProperties::KindName(property.Type)));
-			if (property.Collection == ScriptPropertyCollection::Struct && !property.TypeName.empty())
+			// CPPT-2:Enum / Asset 行的 TypeName 必写 —— Enum 读回要用它找枚举 schema(判断有无符号),
+			// Asset 的 TypeName 是资产类型名(面板据此选下拉)。
+			const bool needsTypeName = property.Collection == ScriptPropertyCollection::Struct
+				|| property.Type == Schema::Kind::Enum || property.Type == Schema::Kind::Asset;
+			if (needsTypeName && !property.TypeName.empty())
 				out << YAML::Key << "TypeName" << YAML::Value << property.TypeName;
 			if (array || map)
 			{
@@ -188,8 +192,14 @@ namespace World
 		// 读档侧的护栏:集合/结构化表的递归深度与模型同量级(超出的子条目丢弃并降级只读)。
 		constexpr int kMaxSerializedPropertyDepth = 8;
 
+		// CPPT-2(F-6):Schema::FieldSchema::GetEnum 是无捕获函数指针,而读回时要按行的 TypeName
+		// 现查枚举 schema(判断有符号/无符号)。用线程局部指针把当前行的枚举喂给
+		// Schema::YamlSchemaReader 的既有 Enum 分支,不复制 kind 读写逻辑(读档是单线程路径)。
+		thread_local const Schema::EnumSchema* s_ReadbackEnum = nullptr;
+		const Schema::EnumSchema* ReadbackEnumSchema() { return s_ReadbackEnum; }
+
 		bool ReadScriptPropertyItem(const YAML::Node& item, Schema::YamlSchemaReader& reader,
-			ScriptProperty& property, int depth)
+			ScriptProperty& property, int depth, const Schema::SchemaRegistry* schemas)
 		{
 			if (!item || !item.IsMap() || !item["Name"])
 				return false;
@@ -235,7 +245,7 @@ namespace World
 						for (const YAML::Node& childNode : value)
 						{
 							ScriptProperty child;
-							if (ReadScriptPropertyItem(childNode, reader, child, depth + 1))
+							if (ReadScriptPropertyItem(childNode, reader, child, depth + 1, schemas))
 								property.Children.push_back(std::move(child));
 						}
 					}
@@ -293,7 +303,7 @@ namespace World
 					for (const YAML::Node& childNode : value)
 					{
 						ScriptProperty child;
-						if (ReadScriptPropertyItem(childNode, reader, child, depth + 1))
+						if (ReadScriptPropertyItem(childNode, reader, child, depth + 1, schemas))
 							property.Children.push_back(std::move(child));
 					}
 				}
@@ -304,12 +314,20 @@ namespace World
 			Schema::FieldSchema probe;
 			probe.K = property.Type;
 			Schema::Value value;
+			if (property.Type == Schema::Kind::Enum && schemas && !property.TypeName.empty())
+			{
+				s_ReadbackEnum = schemas->FindEnum(property.TypeName);
+				if (s_ReadbackEnum)
+					probe.GetEnum = &ReadbackEnumSchema;
+			}
 			if (item["Value"] && reader.ReadFieldValue(probe, &value, item["Value"]))
 				property.Value = std::move(value);
+			s_ReadbackEnum = nullptr;
 			return true;
 		}
 
-		void DeserializeScriptProperties(const YAML::Node& node, std::vector<ScriptProperty>& properties)
+		void DeserializeScriptProperties(const YAML::Node& node, std::vector<ScriptProperty>& properties,
+			const Schema::SchemaRegistry* schemas)
 		{
 			properties.clear();
 			const YAML::Node list = node["Properties"];
@@ -319,7 +337,7 @@ namespace World
 			for (const YAML::Node& item : list)
 			{
 				ScriptProperty property;
-				if (ReadScriptPropertyItem(item, reader, property, 0))
+				if (ReadScriptPropertyItem(item, reader, property, 0, schemas))
 					properties.push_back(std::move(property));
 			}
 		}
@@ -669,7 +687,7 @@ namespace World
 					if (schema->Id.Name == kNativeScriptType)
 					{
 						CppScriptComponent* nativeScript = static_cast<CppScriptComponent*>(rawInstance);
-						DeserializeScriptProperties(compNode, nativeScript->Properties);
+						DeserializeScriptProperties(compNode, nativeScript->Properties, &schemas);
 						// 脚本类型已知时以 schema 为准补齐/裁剪属性表(声明顺序 = 显示顺序)。
 						const Schema::TypeSchema* scriptType = schemas.Find(nativeScript->ScriptName);
 						if (scriptType && scriptType->Category == Schema::TypeCategory::Script)
@@ -682,7 +700,7 @@ namespace World
 					{
 						// Luau 的字段声明来自脚本文件,这里先读回场景里保存的值。
 						LuauScriptComponent* luaScript = static_cast<LuauScriptComponent*>(rawInstance);
-						DeserializeScriptProperties(compNode, luaScript->Properties);
+						DeserializeScriptProperties(compNode, luaScript->Properties, &schemas);
 						// D1(2026-09-27 用户口径「复位 = 未设;场景里不写默认值,**加载时取脚本默认值**」):
 						// 读档后立刻按声明同步一次 —— 未设字段在这里材料化出脚本默认值(只用于展示/Play
 						// 兜底,`Value == 默认值` 的判定仍让它们不落盘),场景记录过的值与集合形状由合并

@@ -11,6 +11,8 @@
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptValue.h"
+#include "World/Modules/GameModuleReload.h"
+#include "World/Script/BehaviorRegistry.h"
 
 #include <box2d/box2d.h>
 #include <atomic>
@@ -125,6 +127,10 @@ namespace
         explicit NativeProbe(ProbeContext& context) : m_Context(context) {}
         ~NativeProbe() override { ++m_Context.Native[m_Id].Deletes; }
         float Value = 7.5f;
+        // CPPT-2:Enum / Asset / 只读摘要(IVec3)字段 —— 与生成物里真实脚本字段走同一条 schema 通道。
+        int64_t Mode = 0;
+        std::string Icon;
+        glm::ivec3 Cell { 0 };
 
     private:
         void OnCreate() override
@@ -2129,6 +2135,312 @@ namespace
     }
 }
 
+namespace
+{
+    // CPPT-2:Enum/Asset/只读摘要探针 —— 与生成物里的真实脚本字段走同一条 schema 通道。
+    const Schema::EnumSchema* ProbeModeEnum()
+    {
+        static const Schema::EnumSchema schema = {
+            "ProbeMode", true, 4, { { "Off", 0 }, { "On", 1 } },
+        };
+        return &schema;
+    }
+
+    // CPPT-2(F-1/D-D):纯模型层验收 —— Enum/Asset 放行、未支持 Kind 只读摘要、
+    // "只有显式 Default 才是声明默认值"(不再把类型零值当默认值)。
+    void CppSchemaPropertyModel()
+    {
+        Schema::SchemaRegistry schemas;
+        CHECK(schemas.RegisterEnum({ "Test", 1 }, *ProbeModeEnum()) == Schema::SchemaRegistry::Status::Ok);
+
+        static const Schema::EnumSchema* s_Enum = schemas.FindEnum("ProbeMode");
+        CHECK(s_Enum != nullptr);
+        const auto getEnum = +[]() -> const Schema::EnumSchema* { return s_Enum; };
+
+        Schema::FieldSchema unsetFloat;
+        unsetFloat.Name = "Speed";
+        unsetFloat.K = Schema::Kind::Float;
+        unsetFloat.Default = Schema::Value {};          // 生成器:Category==Script 且无 Default(...) → monostate
+        Schema::FieldSchema defaultFloat;
+        defaultFloat.Name = "Health";
+        defaultFloat.K = Schema::Kind::Float;
+        defaultFloat.Default = Schema::Value(100.0f);
+        defaultFloat.Meta.Unit = "hp";
+        Schema::FieldSchema enumField;
+        enumField.Name = "Mode";
+        enumField.K = Schema::Kind::Enum;
+        enumField.GetEnum = getEnum;
+        enumField.Default = Schema::Value {};
+        Schema::FieldSchema assetField;
+        assetField.Name = "Icon";
+        assetField.K = Schema::Kind::Asset;
+        assetField.AssetTypeName = "Texture2D";
+        assetField.Default = Schema::Value {};
+        Schema::FieldSchema cellField;
+        cellField.Name = "Cell";
+        cellField.K = Schema::Kind::IVec3;              // 面板没有行控件 → 只读摘要
+
+        Schema::TypeSchema type;
+        type.Id = Schema::TypeId { "Test::CppSchemaProbe" };
+        type.DisplayName = "CppSchemaProbe";
+        type.Category = Schema::TypeCategory::Script;
+        type.Fields = { unsetFloat, defaultFloat, enumField, assetField, cellField };
+
+        std::vector<ScriptProperty> properties;
+        ScriptProperties::SyncFromSchema(properties, type);
+        CHECK(properties.size() == 5);
+        // 顺序 = 声明顺序;未声明默认值 → 未设(类型零值不再是默认值)。
+        CHECK(properties[0].Name == "Speed");
+        CHECK(ScriptProperties::IsUnset(properties[0]));
+        CHECK(std::holds_alternative<std::monostate>(properties[0].Default));
+        CHECK(!ScriptProperties::IsSceneRecorded(properties[0]));
+        // 显式默认值:展示值 = 声明值,未改过不进场景;改值后进场景。
+        CHECK(properties[1].Name == "Health" && std::get<float>(properties[1].Value) == 100.0f);
+        CHECK(!ScriptProperties::IsSceneRecorded(properties[1]));
+        properties[1].Value = 42.0f;
+        CHECK(ScriptProperties::IsSceneRecorded(properties[1]));
+        // Enum:TypeName = 枚举名(读回要用),值走整数;Asset:TypeName = 资产类型名,值走字符串。
+        CHECK(properties[2].Type == Schema::Kind::Enum && properties[2].TypeName == "ProbeMode");
+        CHECK(ScriptProperties::ValueMatchesKind(Schema::Value(static_cast<int64_t>(1)), Schema::Kind::Enum));
+        CHECK(!ScriptProperties::ValueMatchesKind(Schema::Value(std::string("On")), Schema::Kind::Enum));
+        CHECK(properties[3].Type == Schema::Kind::Asset && properties[3].TypeName == "Texture2D");
+        CHECK(ScriptProperties::ValueMatchesKind(Schema::Value(std::string("textures/Icon.wtex")), Schema::Kind::Asset));
+        // 未支持 Kind:只读摘要行 —— 看得到、不进存档、值不匹配任何 kind。
+        CHECK(properties[4].Type == Schema::Kind::IVec3 && properties[4].ReadOnly);
+        CHECK(!ScriptProperties::IsSceneRecorded(properties[4]));
+        CHECK(!ScriptProperties::ValueMatchesKind(Schema::Value(glm::ivec3(1)), Schema::Kind::IVec3));
+        // 再次同步:同名同类型保值(场景/编辑器值优先),容器形状不变。
+        properties[0].Value = 3.5f;
+        properties[2].Value = Schema::Value(static_cast<int64_t>(1));
+        ScriptProperties::SyncFromSchema(properties, type);
+        CHECK(properties.size() == 5);
+        CHECK(std::get<float>(properties[0].Value) == 3.5f);
+        CHECK(std::get<float>(properties[1].Value) == 42.0f);
+        CHECK(std::get<int64_t>(properties[2].Value) == 1);
+        // 声明里删掉的字段丢弃(脚本即事实源)。
+        type.Fields = { unsetFloat };
+        ScriptProperties::SyncFromSchema(properties, type);
+        CHECK(properties.size() == 1 && properties[0].Name == "Speed");
+        CHECK(std::get<float>(properties[0].Value) == 3.5f);
+    }
+
+    // CPPT-2:Enum/Asset 属性经场景序列化往返 —— 存档写 Type: Enum/Asset + TypeName,
+    // 读回用 SchemaRegistry::FindEnum 合成枚举 probe(F-6)。
+    void CppSchemaPropertiesRoundTrip()
+    {
+        const fs::path scenePath = s_OutputDirectory / "cpp_schema_round_trip.wd";
+        const auto setProperty = [](std::vector<ScriptProperty>& properties, const char* name, Schema::Value value)
+        {
+            ScriptProperty* property = ScriptProperties::Find(properties, name);
+            CHECK(property != nullptr);
+            property->Value = std::move(value);
+        };
+
+        {
+            Ref<Scene> scene = CreateRef<Scene>(TestContext());
+            Entity entity = Entity::CreateEntity(scene.get(), "cpp schema probe");
+            entity.AddComponent<CppScriptComponent>().ScriptName = "T02NativeProbe";
+            auto& script = entity.GetComponent<CppScriptComponent>();
+            const Schema::TypeSchema* type = TestContext().Schemas().Find("T02NativeProbe");
+            CHECK(type != nullptr);
+            ScriptProperties::SyncFromSchema(script.Properties, *type);
+            setProperty(script.Properties, "Value", Schema::Value(19.0f));
+            setProperty(script.Properties, "Mode", Schema::Value(static_cast<int64_t>(1)));
+            setProperty(script.Properties, "Icon", Schema::Value(std::string("textures/Icon.wtex")));
+
+            SceneSerializer writer(scene);
+            CHECK(writer.Serialize(scenePath.string()));
+        }
+
+        const std::string yaml = ReadFile(scenePath);
+        CHECK(yaml.find("Type: Enum") != std::string::npos);
+        CHECK(yaml.find("TypeName: ProbeMode") != std::string::npos);
+        CHECK(yaml.find("Type: Asset") != std::string::npos);
+        CHECK(yaml.find("TypeName: Texture2D") != std::string::npos);
+        CHECK(yaml.find("textures/Icon.wtex") != std::string::npos);
+
+        {
+            Ref<Scene> loaded = CreateRef<Scene>(TestContext());
+            SceneSerializer reader(loaded);
+            CHECK(reader.Deserialize(scenePath.string()));
+            CppScriptComponent* reloaded = nullptr;
+            for (const entt::entity handle : loaded->GetRegistry().view<CppScriptComponent>())
+                reloaded = &loaded->GetRegistry().get<CppScriptComponent>(handle);
+            CHECK(reloaded != nullptr);
+            const ScriptProperty* value = ScriptProperties::Find(reloaded->Properties, "Value");
+            const ScriptProperty* mode = ScriptProperties::Find(reloaded->Properties, "Mode");
+            const ScriptProperty* icon = ScriptProperties::Find(reloaded->Properties, "Icon");
+            const ScriptProperty* cell = ScriptProperties::Find(reloaded->Properties, "Cell");
+            CHECK(value && std::get<float>(value->Value) == 19.0f);
+            CHECK(mode && mode->Type == Schema::Kind::Enum && mode->TypeName == "ProbeMode");
+            CHECK(mode && std::get<int64_t>(mode->Value) == 1);
+            CHECK(icon && icon->Type == Schema::Kind::Asset && icon->TypeName == "Texture2D");
+            CHECK(icon && std::get<std::string>(icon->Value) == "textures/Icon.wtex");
+            CHECK(cell && cell->Type == Schema::Kind::IVec3 && cell->ReadOnly);
+        }
+    }
+
+    // CPPT-2(T5b):卸载前的实例收容(OnDestroy 各一次、配置态原样)→ 加载后的配置态迁移 + Pending 重跑。
+    void ModuleReloadDrainAndRestore()
+    {
+        Fixture fixture;
+        auto entity = fixture.AddNative();
+        auto& script = entity.GetComponent<CppScriptComponent>();
+        const Schema::TypeSchema* type = TestContext().Schemas().Find("T02NativeProbe");
+        CHECK(type != nullptr);
+        ScriptProperties::SyncFromSchema(script.Properties, *type);
+        ScriptProperty* value = ScriptProperties::Find(script.Properties, "Value");
+        CHECK(value != nullptr);
+        value->Value = 19.0f;
+
+        fixture.World->OnScriptStart();
+        CHECK(script.Runtime.State == ScriptInstanceState::Running && script.Instance != nullptr);
+        CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Creates == 1);
+        const uint64_t firstGeneration = script.Runtime.Generation;
+        CHECK(fixture.World->CanApplyScriptReload());
+
+        CHECK(fixture.World->DrainNativeScriptInstances() == 1);
+        CHECK(script.Instance == nullptr);
+        CHECK(script.Runtime.State == ScriptInstanceState::Stopped);
+        CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Destroys == 1);
+        // 配置态(ScriptName + Properties)是热重载迁移的输入:原样保留。
+        CHECK(script.ScriptName == "T02NativeProbe");
+        CHECK(std::get<float>(ScriptProperties::Find(script.Properties, "Value")->Value) == 19.0f);
+
+        CHECK(fixture.World->RestoreNativeScriptInstances() == 1);
+        CHECK(script.Runtime.State == ScriptInstanceState::Pending);
+        CHECK(script.Instance == nullptr);
+        CHECK(std::get<float>(ScriptProperties::Find(script.Properties, "Value")->Value) == 19.0f);
+
+        // 下一安全点:既有 pending 机制起新实例(Generation 换代),Play 套用配置态。
+        fixture.Step();
+        CHECK(script.Runtime.State == ScriptInstanceState::Running && script.Instance != nullptr);
+        CHECK(script.Runtime.Generation != firstGeneration);
+        CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Creates == 2);
+        CHECK(static_cast<NativeProbe*>(script.Instance)->Value == 19.0f);
+
+        fixture.Stop();
+        CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Destroys == 2);
+    }
+
+    // CPPT-2(T5b):重载编排的安全点门 —— 脚本回调里拒绝(NotSafePoint),回调外的帧边界报真实状态
+    // (本测试进程没有 Game 模块 → NotFound);两种情况都不假装卸载/加载过。
+    void ModuleReloadOrchestrationGuards()
+    {
+        Fixture fixture;
+        auto entity = fixture.AddNative();
+        fixture.World->OnScriptStart();
+
+        Modules::GameModuleReloadResult result;
+        bool rejectedInCallback = false;
+        fixture.Context.NativeAction = [&](Entity, const std::string& phase)
+        {
+            if (phase != "update")
+                return;
+            rejectedInCallback = !Modules::GameModuleReload::Unload(TestContext(), fixture.World.get(), &result)
+                && result.Status == Modules::ModuleManager::Status::NotSafePoint
+                && !result.ModuleUnloaded;
+        };
+        fixture.Step();
+        CHECK(rejectedInCallback);
+        CHECK(fixture.World->CanApplyScriptReload());
+
+        // 结果变量同时给出一致的"没加载"状态:未加载不是重载失败。
+        CHECK(Modules::GameModuleReload::IsUnloaded(TestContext()));
+        CHECK(!Modules::GameModuleReload::Unload(TestContext(), fixture.World.get(), &result));
+        CHECK(result.Status == Modules::ModuleManager::Status::NotFound);
+        CHECK(!result.ModuleUnloaded && !result.RolledBack && result.InstancesDrained == 0);
+        fixture.Stop();
+    }
+
+    // CPPT-2(T5b)实机取证(不属于常规单测:依赖构建产物 Game.dll):
+    //   `WorldScriptTests.exe --module-probe <Game.dll>` 走一遍真实模块的 加载 → 卸载 → 再加载,
+    //   覆盖:ABI 等值门(旧 DLL 必须 AbiMismatch)、schema/行为注销与重建(F-5 接线)、
+    //   实例收容与配置态迁移(同名同类型保值 + Pending)。退出码 0 = 全绿。
+    int RunModuleProbe(const char* modulePath)
+    {
+        WorldContext& context = TestContext();
+        std::string error;
+        const auto status = context.Modules().Load(modulePath, context, &error);
+        std::cout << "[probe] load status=" << Modules::ModuleManager::StatusName(status)
+            << " error=" << error << '\n';
+        if (status != Modules::ModuleManager::Status::Ok)
+            return 2;
+        const Modules::WeModule* module = context.Modules().FindById("game");
+        std::cout << "[probe] abi=" << (module ? module->AbiVersion : 0u)
+            << " behaviors=" << BehaviorRegistry::Instance().Size() << '\n';
+        if (!module || module->AbiVersion != Modules::WE_MODULE_ABI_VERSION)
+            return 3;
+
+        Ref<Scene> scene = CreateRef<Scene>(context);
+        Entity entity = Entity::CreateEntity(scene.get(), "cpp module probe");
+        CppScriptComponent& script = entity.AddComponent<CppScriptComponent>();
+        script.ScriptName = "Game::StressTest";
+        const Schema::TypeSchema* type = context.Schemas().Find("Game::StressTest");
+        if (!type)
+        {
+            std::cout << "[probe] Game::StressTest is not registered\n";
+            return 4;
+        }
+        ScriptProperties::SyncFromSchema(script.Properties, *type);
+        ScriptProperty* weight = ScriptProperties::Find(script.Properties, "Weight");
+        ScriptProperty* icon = ScriptProperties::Find(script.Properties, "Icon");
+        if (!weight || !icon)
+        {
+            std::cout << "[probe] expected Weight/Icon property rows\n";
+            return 5;
+        }
+        weight->Value = Schema::Value(static_cast<int32_t>(4));
+        icon->Value = Schema::Value(std::string("textures/Icon.wtex"));
+
+        Modules::GameModuleReloadResult unloaded;
+        if (!Modules::GameModuleReload::Unload(context, scene.get(), &unloaded))
+        {
+            std::cout << "[probe] unload failed: " << unloaded.Message << '\n';
+            return 6;
+        }
+        std::cout << "[probe] unload drained=" << unloaded.InstancesDrained
+            << " unloaded=" << unloaded.ModuleUnloaded << " msg=" << unloaded.Message << '\n';
+        if (context.Schemas().Find("Game::StressTest") || BehaviorRegistry::Instance().Find("Game::StressTest"))
+        {
+            std::cout << "[probe] schema or behavior survived unload\n";
+            return 7;
+        }
+        if (std::get<int32_t>(ScriptProperties::Find(script.Properties, "Weight")->Value) != 4)
+        {
+            std::cout << "[probe] configuration lost during unload\n";
+            return 8;
+        }
+
+        Modules::GameModuleReloadResult loaded;
+        if (!Modules::GameModuleReload::Load(context, scene.get(), &loaded))
+        {
+            std::cout << "[probe] reload failed: " << loaded.Message << '\n';
+            return 9;
+        }
+        std::cout << "[probe] reload abi=" << loaded.AbiVersion
+            << " restored=" << loaded.InstancesRestored << '\n';
+        const ScriptProperty* weightAfter = ScriptProperties::Find(script.Properties, "Weight");
+        const ScriptProperty* iconAfter = ScriptProperties::Find(script.Properties, "Icon");
+        if (!weightAfter || std::get<int32_t>(weightAfter->Value) != 4)
+            return 10;
+        if (!iconAfter || std::get<std::string>(iconAfter->Value) != "textures/Icon.wtex")
+            return 11;
+        if (loaded.AbiVersion != Modules::WE_MODULE_ABI_VERSION
+            || loaded.InstancesRestored != 1
+            || script.Runtime.State != ScriptInstanceState::Pending
+            || !BehaviorRegistry::Instance().Find("Game::StressTest"))
+            return 12;
+
+        // 收尾:可重复卸载,退出时不留 Game 模块。
+        Modules::GameModuleReloadResult cleanup;
+        if (!Modules::GameModuleReload::Unload(context, scene.get(), &cleanup))
+            return 13;
+        std::cout << "[probe] ok\n";
+        return 0;
+    }
+}
+
 int main(int argc, char** argv)
 {
     try
@@ -2140,6 +2452,13 @@ int main(int argc, char** argv)
             const bool generated = World::ScriptEngine::GenerateLuaStubs();
             World::ScriptEngine::Shutdown();
             return generated ? 0 : 1;
+        }
+        // CPPT-2(T5b)实机取证入口:加载/卸载/再加载真实 Game.dll(见 RunModuleProbe 注释)。
+        if (argc == 3 && std::string(argv[1]) == "--module-probe")
+        {
+            const int probe = RunModuleProbe(argv[2]);
+            World::ScriptEngine::Shutdown();
+            return probe;
         }
         if (argc != 1) throw std::runtime_error("Usage: WorldScriptTests [--generate-stubs]");
         s_OutputDirectory = fs::path(WORLD_SCRIPT_TEST_OUTPUT_DIR) / ("run-" + std::to_string(GetCurrentProcessId()));
@@ -2164,16 +2483,48 @@ int main(int argc, char** argv)
                 Schema::FieldMetadata{},
                 Schema::Value(0.0f),
             };
+            // CPPT-2:Enum / Asset / 未支持 Kind(IVec3 只读摘要)三条探针字段。
+            static const Schema::FieldSchema probeMode = {
+                Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Mode") },
+                "Mode",
+                Schema::Kind::Enum,
+                [](const void* instance) { return Schema::Value(static_cast<const NativeProbe*>(instance)->Mode); },
+                [](void* instance, const Schema::Value& value) { static_cast<NativeProbe*>(instance)->Mode = std::get<int64_t>(value); },
+                nullptr, nullptr, nullptr, &ProbeModeEnum, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value {},
+            };
+            static const Schema::FieldSchema probeIcon = {
+                Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Icon") },
+                "Icon",
+                Schema::Kind::Asset,
+                [](const void* instance) { return Schema::Value(static_cast<const NativeProbe*>(instance)->Icon); },
+                [](void* instance, const Schema::Value& value) { static_cast<NativeProbe*>(instance)->Icon = std::get<std::string>(value); },
+                nullptr, nullptr, nullptr, nullptr, "Texture2D",
+                Schema::FieldMetadata{},
+                Schema::Value {},
+            };
+            static const Schema::FieldSchema probeCell = {
+                Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Cell") },
+                "Cell",
+                Schema::Kind::IVec3,
+                [](const void* instance) { return Schema::Value(static_cast<const NativeProbe*>(instance)->Cell); },
+                [](void* instance, const Schema::Value& value) { static_cast<NativeProbe*>(instance)->Cell = std::get<glm::ivec3>(value); },
+                nullptr, nullptr, nullptr, nullptr, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value {},
+            };
             static const Schema::TypeSchema probeSchema = {
                 Schema::TypeId{ "T02NativeProbe" },
                 "T02NativeProbe",
                 Schema::WE_SCHEMA_ABI_VERSION,
                 sizeof(NativeProbe),
                 Schema::TypeCategory::Script,
-                { probeValue },
+                { probeValue, probeMode, probeIcon, probeCell },
                 nullptr,
                 &probeBinding,
             };
+            CHECK(TestContext().Schemas().RegisterEnum({ "Test", 1 }, *ProbeModeEnum()) == Schema::SchemaRegistry::Status::Ok);
             CHECK(TestContext().Schemas().Register({ "Test", 1 }, probeSchema) == Schema::SchemaRegistry::Status::Ok);
         }
 
@@ -2212,6 +2563,11 @@ int main(int argc, char** argv)
             { "VM restart keeps metadata unique", VmRestartKeepsUniqueMetadata },
             { "script print reaches the engine log at INFO with the [script] prefix", ScriptPrintReachesEngineLog },
             { "sandbox budget isolation and headroom", SandboxBudgetIsolationAndMargin },
+            { "C++ schema properties: enum/asset editable and unsupported kinds read-only", CppSchemaPropertyModel },
+            { "C++ schema enum/asset properties round-trip through the scene serializer", CppSchemaPropertiesRoundTrip },
+            { "module reload drains instances and restores configuration as pending", ModuleReloadDrainAndRestore },
+            { "module reload orchestration guards (safe point, unloaded state)", ModuleReloadOrchestrationGuards },
+            // 注意:本用例注销 Test 模块的脚本 schema(不再恢复),必须排在最后。
             { "unregistered script factory is reported instead of silently leaked", UnregisteredFactoryIsReportedInsteadOfSilentlyLeaked }
         };
         int failures = 0;

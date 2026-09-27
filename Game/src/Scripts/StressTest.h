@@ -55,10 +55,20 @@ namespace World
 
 		StressTestType m_Type = StressTestType::None;
 
+		// CPPT-2:Asset 属性样例(资产类型名进 TypeName,面板走可搜索资产下拉;逻辑路径字符串)。
+		Ref<Texture2D> Icon;
+
 		WE_SCHEMA_BODY(Game, StressTest, Script)
-			WE_FIELD(Weight, Int32);
-			WE_FIELD(Height, Int32);
-			WE_FIELD(m_Type, Enum, Of(StressTestType));
+			WE_SCHEMA_META(Category("Scripting/Examples"),
+				Doc("Stress fixture: allocates and destroys entities to exercise the scripting lifecycle."))
+			WE_FIELD(Weight, Int32, Default(1), Range(0.0f, 128.0f), Step(1.0f),
+				Doc("Number of entities created by the first batch (declared default 1)."));
+			WE_FIELD(Height, Int32, Default(1), Range(0.0f, 128.0f), Step(1.0f),
+				Doc("Stack depth used by the stress fixture (declared default 1)."));
+			WE_FIELD(m_Type, Enum, Of(StressTestType),
+				Doc("Stress mode selector; stored as an integer and edited through an enum dropdown."));
+			WE_FIELD(Icon, Asset, Of("Texture2D"),
+				Doc("Asset sample: a texture path edited through the searchable asset dropdown."));
 		WE_SCHEMA_END
 	};
 }

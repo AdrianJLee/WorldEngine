@@ -11,9 +11,10 @@ namespace World
 	// P2 W8:脚本工作流面板(独立窗口:id "scripts"、标题 "Scripts")。
 	//
 	// 两段内容:
-	//   ① 场景脚本:当前活动场景里全部 LuauScriptComponent 的 Tag / 脚本路径 / State /
-	//      LastError / ReloadDiagnostic + 每行 Reload 按钮(经 PanelHost,最终复用
-	//      EditorLayer::ReloadLuauScriptComponent 这条唯一重载入口);
+	//   ① 场景脚本:当前活动场景里**两个脚本组件**(LuauScriptComponent + CppScriptComponent,
+	//      CPPT-3 起)的 Tag / 语言 / 脚本路径(或 C++ 类型名)/ State / LastError / ReloadDiagnostic;
+	//      Luau 行带 Reload 按钮(经 PanelHost,最终复用 EditorLayer::ReloadLuauScriptComponent
+	//      这条唯一重载入口);C++ 行提示走模块级 File ▸ Reload C++ Module(实例重载不支持);
 	//   ② 磁盘脚本:扫 WLD_ASSETPATH/scripts(0.5s 节流,排除 intermediate/),按逻辑路径
 	//      排序,每行主按钮"在引擎内打开"(W9-2:EditorShell::OpenScriptEditor,默认附加到
 	//      主窗口)+ 次按钮 External(系统默认程序打开)+ 顶部 New(从 templates/WorldScript.lua

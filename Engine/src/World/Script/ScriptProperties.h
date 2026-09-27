@@ -50,7 +50,12 @@ namespace World
 		};
 
 		// 该 schema 值类型能不能当脚本属性(与 schema 的叶类型口径一致)。
+		// CPPT-2(2026-09-27):Enum / Asset 也放行(C++ 字段来自 schema 反射,Enum 走枚举下拉、
+		// Asset 走可搜索资产下拉;不是"脚本属性"的类型用 IsSummaryKind 判只读摘要)。
 		WLD_API bool IsPropertyKind(Schema::Kind kind);
+		// CPPT-2:面板没有行控件、但需要"看得到"的 Kind(IVec*/UVec*/Quat/Mat3/Mat4)。
+		// 这类字段同步成**只读摘要行**(显示类型与值、不可编辑、不进存档),不静默丢弃。
+		WLD_API bool IsSummaryKind(Schema::Kind kind);
 
 		// 类型的可读名 / 反查(存档里写名字,便于手改与排查;未知名 → Kind::None)。
 		WLD_API const char* KindName(Schema::Kind kind);

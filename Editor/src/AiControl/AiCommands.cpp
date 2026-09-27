@@ -7,10 +7,12 @@
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Scene/Components.h"
+#include "World/Script/ScriptProperties.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiScriptedInput.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cwctype>
 #include <filesystem>
@@ -80,6 +82,78 @@ namespace World
 				case ScriptInstanceState::Faulted: return "Faulted";
 				default: return "?";
 			}
+		}
+
+		// CPPT-3:脚本属性值的一行文本(script.status 的 properties 数组;只做断言用,
+		// 不做本地化 —— 与属性面板的展示格式同量级:整数/浮点/向量/字符串)。
+		std::string ScriptValueText(const Schema::Value& value)
+		{
+			char buffer[192] = {};
+			return std::visit([&buffer](const auto& item) -> std::string
+			{
+				using T = std::decay_t<decltype(item)>;
+				if constexpr (std::is_same_v<T, std::monostate>)
+					return std::string();
+				else if constexpr (std::is_same_v<T, bool>)
+					return item ? "true" : "false";
+				else if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t>
+					|| std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>)
+					return std::to_string(static_cast<int64_t>(item));
+				else if constexpr (std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t>
+					|| std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t>)
+					return std::to_string(static_cast<uint64_t>(item));
+				else if constexpr (std::is_same_v<T, float>)
+				{
+					std::snprintf(buffer, sizeof(buffer), "%.6g", static_cast<double>(item));
+					return buffer;
+				}
+				else if constexpr (std::is_same_v<T, double>)
+				{
+					std::snprintf(buffer, sizeof(buffer), "%.6g", item);
+					return buffer;
+				}
+				else if constexpr (std::is_same_v<T, glm::vec2>)
+				{
+					std::snprintf(buffer, sizeof(buffer), "(%.4g, %.4g)", item.x, item.y);
+					return buffer;
+				}
+				else if constexpr (std::is_same_v<T, glm::vec3>)
+				{
+					std::snprintf(buffer, sizeof(buffer), "(%.4g, %.4g, %.4g)", item.x, item.y, item.z);
+					return buffer;
+				}
+				else if constexpr (std::is_same_v<T, glm::vec4>)
+				{
+					std::snprintf(buffer, sizeof(buffer), "(%.4g, %.4g, %.4g, %.4g)",
+						item.x, item.y, item.z, item.w);
+					return buffer;
+				}
+				else if constexpr (std::is_same_v<T, glm::ivec2>)
+				{
+					std::snprintf(buffer, sizeof(buffer), "(%d, %d)", item.x, item.y);
+					return buffer;
+				}
+				else if constexpr (std::is_same_v<T, glm::ivec3>)
+				{
+					std::snprintf(buffer, sizeof(buffer), "(%d, %d, %d)", item.x, item.y, item.z);
+					return buffer;
+				}
+				else if constexpr (std::is_same_v<T, glm::ivec4>)
+				{
+					std::snprintf(buffer, sizeof(buffer), "(%d, %d, %d, %d)",
+						item.x, item.y, item.z, item.w);
+					return buffer;
+				}
+				else if constexpr (std::is_same_v<T, glm::uvec2> || std::is_same_v<T, glm::uvec3>
+					|| std::is_same_v<T, glm::uvec4>)
+				{
+					return "(unsigned)";
+				}
+				else if constexpr (std::is_same_v<T, std::string>)
+					return item;
+				else
+					return "(complex)";
+			}, value);
 		}
 
 		// ui.type 的返回文案用"字符数":统计 UTF-8 码点数(中文按 1 个字符),与控件
@@ -1271,7 +1345,7 @@ namespace World
 				+ " paused=" + (m_ScenePaused ? "true" : "false");
 			return true;
 		}
-		// ---- P2 W5b:脚本热重载 ----
+		// ---- P2 W5b:脚本热重载(CPPT-3:两个脚本组件都进状态表)----
 		// 命令格式(字段全部扁平):
 		//   script.status [handle=<id>|name=<tag>|path=<逻辑脚本路径>]   只读状态(缺省=当前选中实体)
 		//   script.reload [handle=<id>|name=<tag>|path=<逻辑脚本路径>]   触发一次重载(缺省=当前选中实体)
@@ -1279,6 +1353,11 @@ namespace World
 		// Running 实例走 ScriptEngine::ReloadScript(失败保留旧版本),Faulted/未加载的实例复位成
 		// Pending 交给 Scene 在下一帧重建。单个实例重载失败(语法错误等)不算命令失败:结果 JSON
 		// 带着 state/lastError/reloadDiagnostic 供脚本断言。
+		//
+		// 2026-09-27(CPPT-3):`CppScriptComponent` 也进状态表(handle/language/name/state/generation/
+		// lastError + **属性表**);`path=` 对 Luau = ScriptPath、对 C++ = ScriptName。
+		// C++ **实例**重载不支持(代码在 Game.dll 里,单实例重载无意义):per-component `ok=false` +
+		// `reload`/message 指向模块级命令 `module.reload`,不假装成功(plan CPPT-2 §4.6)。
 		if (cmd == "script.status" || cmd == "script.reload")
 		{
 			if (!m_ActiveScene)
@@ -1296,6 +1375,10 @@ namespace World
 			// 会触发"活动场景禁止结构写"断言。
 			const Scene& scene = *m_ActiveScene;
 			const entt::registry& registry = scene.GetRegistry();
+			const auto hasScriptComponent = [&registry](entt::entity handle)
+			{
+				return registry.all_of<LuauScriptComponent>(handle) || registry.all_of<CppScriptComponent>(handle);
+			};
 			std::vector<entt::entity> targets;
 			if (!arg("handle").empty())
 			{
@@ -1305,9 +1388,9 @@ namespace World
 					error = "entity not found: handle=" + arg("handle");
 					return false;
 				}
-				if (!registry.all_of<LuauScriptComponent>(handle))
+				if (!hasScriptComponent(handle))
 				{
-					error = "entity has no LuauScriptComponent: handle=" + arg("handle");
+					error = "entity has no script component (Luau or C++): handle=" + arg("handle");
 					return false;
 				}
 				targets.push_back(handle);
@@ -1316,11 +1399,11 @@ namespace World
 			{
 				for (const entt::entity handle : registry.view<TagComponent>())
 					if (registry.get<TagComponent>(handle).Tag == arg("name") &&
-						registry.all_of<LuauScriptComponent>(handle))
+						hasScriptComponent(handle))
 						targets.push_back(handle);
 				if (targets.empty())
 				{
-					error = "no entity with a LuauScriptComponent named '" + arg("name") + "'";
+					error = "no entity with a script component named '" + arg("name") + "'";
 					return false;
 				}
 			}
@@ -1329,9 +1412,13 @@ namespace World
 				for (const entt::entity handle : registry.view<LuauScriptComponent>())
 					if (registry.get<LuauScriptComponent>(handle).ScriptPath == arg("path"))
 						targets.push_back(handle);
+				for (const entt::entity handle : registry.view<CppScriptComponent>())
+					if (registry.get<CppScriptComponent>(handle).ScriptName == arg("path") &&
+						std::find(targets.begin(), targets.end(), handle) == targets.end())
+						targets.push_back(handle);
 				if (targets.empty())
 				{
-					error = "no Lua script component uses path=" + arg("path");
+					error = "no script component uses path=" + arg("path");
 					return false;
 				}
 			}
@@ -1343,9 +1430,9 @@ namespace World
 					return false;
 				}
 				const entt::entity handle = static_cast<entt::entity>(m_SelectedEntity);
-				if (!registry.all_of<LuauScriptComponent>(handle))
+				if (!hasScriptComponent(handle))
 				{
-					error = "selected entity has no LuauScriptComponent; pass handle=/name=/path=";
+					error = "selected entity has no script component; pass handle=/name=/path=";
 					return false;
 				}
 				targets.push_back(handle);
@@ -1358,46 +1445,130 @@ namespace World
 				<< ",\"playState\":" << static_cast<int>(m_SceneState)
 				<< ",\"targets\":" << targets.size()
 				<< ",\"components\":[";
-			for (size_t index = 0; index < targets.size(); ++index)
+			bool firstComponent = true;
+			// 一条组件行(两个语言前端共用):properties 数组 = 当前配置态属性表
+			// (热重载前后逐条比对的断言入口)。
+			const auto emitComponent = [&](uint32_t handleValue, const char* language, bool ok,
+				const std::string& name, const std::string& path, const char* state, bool loaded,
+				uint64_t generation, const std::string& reloadField, const std::string& reloadDiagnostic,
+				const std::string& lastError, const std::string& message,
+				const std::vector<ScriptProperty>* properties)
 			{
-				const entt::entity handle = targets[index];
-				Entity entity(m_ActiveScene.get(), handle);
-				auto* script = static_cast<LuauScriptComponent*>(
-					entity.GetComponent(entt::type_id<LuauScriptComponent>().hash()));
-				if (index)
+				if (!firstComponent)
 					out << ",";
-				if (!script)
-				{
-					++failed;
-					out << "{\"handle\":" << static_cast<uint32_t>(handle) << ",\"ok\":false"
-						<< ",\"message\":\"component disappeared\"}";
-					continue;
-				}
-				std::string message;
-				bool ok = true;
-				if (reload)
-					ok = EditorLayer::ReloadLuauScriptComponent(*script, m_ActiveScene.get(), &message);
+				firstComponent = false;
 				if (ok)
 					++succeeded;
 				else
 					++failed;
-				out << "{\"handle\":" << static_cast<uint32_t>(handle)
+				out << "{\"handle\":" << handleValue
+					<< ",\"language\":\"" << language << "\""
 					<< ",\"ok\":" << (ok ? "true" : "false")
-					<< ",\"name\":\"" << JsonEscape(
-						registry.all_of<TagComponent>(handle) ? registry.get<TagComponent>(handle).Tag : std::string())
-					<< "\",\"path\":\"" << JsonEscape(script->ScriptPath)
-					// 2026-09-26 组件重写:运行态收进 Runtime;`loaded` 字段名保留,
-					// 值 = State==Running(旧的双轨加载标记已删除,语义等价)。
-					<< "\",\"state\":\"" << ScriptStateLabel(script->Runtime.State)
-					<< "\",\"loaded\":" << (script->Runtime.State == ScriptInstanceState::Running
-						? "true" : "false")
-					<< ",\"generation\":" << script->Runtime.Generation
-					<< ",\"reloadDiagnostic\":\"" << JsonEscape(script->ReloadDiagnostic)
-					<< "\",\"lastError\":\"" << JsonEscape(script->Runtime.LastError)
-					<< "\",\"message\":\"" << JsonEscape(message) << "\"}";
+					<< ",\"name\":\"" << JsonEscape(name) << "\""
+					<< ",\"path\":\"" << JsonEscape(path) << "\""
+					<< ",\"state\":\"" << state << "\""
+					<< ",\"loaded\":" << (loaded ? "true" : "false")
+					<< ",\"generation\":" << generation
+					<< ",\"reload\":\"" << JsonEscape(reloadField) << "\""
+					<< ",\"reloadDiagnostic\":\"" << JsonEscape(reloadDiagnostic) << "\""
+					<< ",\"lastError\":\"" << JsonEscape(lastError) << "\""
+					<< ",\"message\":\"" << JsonEscape(message) << "\""
+					<< ",\"properties\":[";
+				if (properties)
+				{
+					for (size_t propertyIndex = 0; propertyIndex < properties->size(); ++propertyIndex)
+					{
+						const ScriptProperty& property = (*properties)[propertyIndex];
+						if (propertyIndex)
+							out << ",";
+						out << "{\"name\":\"" << JsonEscape(property.Name) << "\""
+							<< ",\"type\":\"" << ScriptProperties::KindName(property.Type) << "\""
+							<< ",\"typeName\":\"" << JsonEscape(property.TypeName) << "\""
+							<< ",\"readOnly\":" << (property.ReadOnly ? "true" : "false")
+							<< ",\"unset\":" << (ScriptProperties::IsUnset(property) ? "true" : "false")
+							<< ",\"value\":\"" << JsonEscape(ScriptValueText(property.Value)) << "\""
+							<< ",\"children\":" << property.Children.size()
+							<< "}";
+					}
+				}
+				out << "]}";
+			};
+			for (const entt::entity handle : targets)
+			{
+				const uint32_t handleValue = static_cast<uint32_t>(handle);
+				const std::string tag = registry.all_of<TagComponent>(handle)
+					? registry.get<TagComponent>(handle).Tag : std::string();
+				// 组件查找走 Entity 的组件指针入口(Play/Simulate 下也不触发"活动场景禁止结构写"断言);
+				// 枚举仍走上面的 const registry。
+				Entity entity(m_ActiveScene.get(), handle);
+				// Luau 行(存在就输出;reload = 实例热重载,失败保留旧版本)。
+				if (auto* script = static_cast<LuauScriptComponent*>(
+						entity.GetComponent(entt::type_id<LuauScriptComponent>().hash())))
+				{
+					std::string message;
+					const bool ok = reload
+						? EditorLayer::ReloadLuauScriptComponent(*script, m_ActiveScene.get(), &message)
+						: true;
+					emitComponent(handleValue, "luau", ok, tag, script->ScriptPath,
+						ScriptStateLabel(script->Runtime.State),
+						script->Runtime.State == ScriptInstanceState::Running,
+						script->Runtime.Generation, std::string(), script->ReloadDiagnostic,
+						script->Runtime.LastError, message, &script->Properties);
+				}
+				// C++ 行(CPPT-3):状态可读;实例重载不支持,提示走模块级 module.reload。
+				if (auto* script = static_cast<CppScriptComponent*>(
+						entity.GetComponent(entt::type_id<CppScriptComponent>().hash())))
+				{
+					const std::string unsupported =
+						"unsupported: C++ script code lives in Game.dll; use module.reload";
+					emitComponent(handleValue, "cpp", !reload, tag, script->ScriptName,
+						ScriptStateLabel(script->Runtime.State),
+						script->Runtime.State == ScriptInstanceState::Running,
+						script->Runtime.Generation, unsupported, std::string(),
+						script->Runtime.LastError, reload ? unsupported : std::string(),
+						&script->Properties);
+				}
 			}
 			out << "],\"succeeded\":" << succeeded << ",\"failed\":" << failed << "}";
 			result = out.str();
+			return true;
+		}
+		// ---- CPPT-3:Game 模块(`Game.dll`)级热重载(契约 = plan CPPT-2 §6.1 T5b)----
+		//   module.status   当前状态(loaded|unloaded|reloading|rolled-back + 计数/诊断/ABI)
+		//   module.unload   第一段:显式卸载(释放文件锁,Game.dll 可重编)
+		//   module.reload   已加载 → 第一段卸载(进入 reloading);未加载 → 第二段加载新构建
+		//                   (引擎内含 ABI 等值门;加载失败自动回滚到旧副本 → rolled-back)
+		// 两段式是 Windows 文件锁的现实:Editor 映射着 Game.dll 时链接器无法改写该文件。
+		// 人工作业顺序 = File ▸ Reload C++ Module(卸载)→ 重编 Game.dll → 再次激活(加载)。
+		if (cmd == "module.status")
+		{
+			result = CppModuleStatusJson();
+			return true;
+		}
+		if (cmd == "module.unload")
+		{
+			std::string message;
+			const bool ok = UnloadCppModule(&message);
+			result = CppModuleStatusJson();
+			if (!ok)
+			{
+				error = message.empty() ? "module unload failed" : message;
+				return false;
+			}
+			return true;
+		}
+		if (cmd == "module.reload")
+		{
+			std::string message;
+			const bool ok = ReloadCppModule(&message);
+			// 回滚(rolled-back)在命令层算"已执行":结果 JSON 里 ok=false + rolledBack=true,
+			// 探针按字段断言,不吞掉结构化诊断。
+			result = CppModuleStatusJson();
+			if (!ok && !GetCppModuleStatus().RolledBack)
+			{
+				error = message.empty() ? "module reload failed" : message;
+				return false;
+			}
 			return true;
 		}
 		// ---- W9-2:内置脚本编辑器 ----

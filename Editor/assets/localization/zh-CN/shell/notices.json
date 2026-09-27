@@ -14,5 +14,16 @@
   "notice.restore.tabs": "在顶栏可以找到",
   "notice.restore.skipped": "已跳过恢复上次的窗口(下次启动还会询问)",
   "notice.label": "状态提示",
-  "notice.tooltip": "点一下或按 Esc 关闭;鼠标停在这里时不会自动消失"
+  "notice.tooltip": "点一下或按 Esc 关闭;鼠标停在这里时不会自动消失",
+  "notice.cppmodule.stub_blocked": "C++ 模块(Game.dll)未加载时不生成 Lua 存根;先重载模块,再生成存根",
+  "status.cppmodule": "C++ 模块",
+  "status.cppmodule.label": "C++ 模块状态",
+  "status.cppmodule.result": "C++ 模块重载结果",
+  "status.cppmodule.loaded": "已加载",
+  "status.cppmodule.unloaded": "未加载",
+  "status.cppmodule.reloading": "重载中",
+  "status.cppmodule.rolled_back": "已回滚",
+  "status.cppmodule.hint.unloaded": "Game.dll 未加载 — 先重新构建,再用「文件 ▸ 重载 C++ 模块」加载",
+  "status.cppmodule.hint.reloading": "Game.dll 已卸载,可以重新构建 — 构建完成后用「文件 ▸ 重载 C++ 模块」加载新构建",
+  "status.cppmodule.hint.rolled_back": "新构建被拒绝;已重新加载上一份 Game.dll(详见诊断)"
 }

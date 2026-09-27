@@ -22,7 +22,9 @@ namespace World
 
 namespace World::Schema
 {
-	constexpr uint32_t WE_SCHEMA_ABI_VERSION = 1;
+	// 2 = CPPT-2(2026-09-27):FieldMetadata 尾部追加 Unit/Step(编辑期提示)⇒ 反射结构布局变化,
+	//     旧 Game.dll 必须被宿主按**等值**模块 ABI 拒绝(见 Modules/WeModule.h 的升版说明)。
+	constexpr uint32_t WE_SCHEMA_ABI_VERSION = 2;
 
 	// ---- 稳定身份 ----
 	constexpr uint64_t Fnv1a64(const char* text)
@@ -143,6 +145,12 @@ namespace World::Schema
 		std::string AssetType;
 		// 非空 = 这个字符串字段是从固定集合里选(如 Primitive = cube/plane/sphere)→ 用下拉。
 		std::vector<std::string> Choices;
+		// ---- CPPT-2(2026-09-27):计量单位与拖拽步长(编辑期提示,不参与存储/ABI 比较) ----
+		// Unit = 行后缀(如 "m" / "deg" / "%";空 = 无单位,面板不画后缀);
+		// Step = 数值拖拽步长(空 = 面板默认)。两者只由 schema-compiler 从
+		// WE_FIELD(..., Unit("m"), Step(0.1)) 带进生成物,序列化与属性表都不写它们。
+		std::string Unit;
+		std::optional<float> Step;
 	};
 
 	struct TypeSchema;

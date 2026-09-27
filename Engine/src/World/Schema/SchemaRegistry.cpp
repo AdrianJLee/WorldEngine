@@ -30,6 +30,7 @@ namespace World::Schema
 			case Status::DuplicateComponentId: return "duplicate component storage id";
 			case Status::Conflict: return "conflicting registration";
 			case Status::AbiMismatch: return "schema abi version not supported";
+			case Status::InvalidScript: return "script type needs a display name and a Create/Destroy binding";
 			default: return "unknown";
 		}
 	}
@@ -40,6 +41,17 @@ namespace World::Schema
 		{
 			*outStatus = Status::AbiMismatch;
 			return false;
+		}
+
+		// CPPT-2:Category==Script 的类型就是行为清单的事实源(不要再维护第二本账)——
+		// 缺显示名或工厂绑定会在 Play/选择器里变成静默空行,注册期直接给出可读拒绝。
+		if (schema.Category == TypeCategory::Script)
+		{
+			if (schema.DisplayName.empty() || !schema.Script || !schema.Script->Create || !schema.Script->Destroy)
+			{
+				*outStatus = Status::InvalidScript;
+				return false;
+			}
 		}
 
 		auto byName = m_ByName.find(schema.Id.Name);
@@ -224,6 +236,15 @@ namespace World::Schema
 		std::vector<const TypeSchema*> result;
 		for (const TypeEntry& entry : m_Entries)
 			if (entry.Schema.Category == category)
+				result.push_back(&entry.Schema);
+		return result;
+	}
+
+	std::vector<const TypeSchema*> SchemaRegistry::ListByModule(const std::string& moduleName) const
+	{
+		std::vector<const TypeSchema*> result;
+		for (const TypeEntry& entry : m_Entries)
+			if (entry.Module.Name == moduleName)
 				result.push_back(&entry.Schema);
 		return result;
 	}

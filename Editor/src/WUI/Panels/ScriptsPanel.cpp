@@ -166,6 +166,8 @@ namespace World
 		{
 			entt::entity Handle {};
 			std::string Tag;
+			std::string Language;     // "Luau" / "C++"(CPPT-3:两个脚本组件都进表)
+			bool Luau = false;        // 只有 Luau 行支持实例热重载(C++ 走模块级 module.reload)
 			std::string Path;
 			std::string State;
 			std::string Diagnostic;
@@ -182,6 +184,8 @@ namespace World
 				const LuauScriptComponent& script = registry.get<LuauScriptComponent>(handle);
 				SceneRow row;
 				row.Handle = handle;
+				row.Luau = true;
+				row.Language = "Luau";
 				if (const TagComponent* tag = registry.try_get<TagComponent>(handle))
 					row.Tag = tag->Tag;
 				if (row.Tag.empty())
@@ -193,8 +197,31 @@ namespace World
 					? script.ReloadDiagnostic : script.Runtime.LastError;
 				sceneRows.push_back(std::move(row));
 			}
+			// CPPT-3:C++ 脚本组件也进场景表(状态/类型名可读;实例重载不支持,提示走模块重载)。
+			for (const entt::entity handle : registry.view<CppScriptComponent>())
+			{
+				const CppScriptComponent& script = registry.get<CppScriptComponent>(handle);
+				SceneRow row;
+				row.Handle = handle;
+				row.Luau = false;
+				row.Language = "C++";
+				if (const TagComponent* tag = registry.try_get<TagComponent>(handle))
+					row.Tag = tag->Tag;
+				if (row.Tag.empty())
+					row.Tag = "Entity " + std::to_string(static_cast<uint32_t>(handle));
+				row.Path = script.ScriptName.empty() ? std::string("(no script type)") : script.ScriptName;
+				row.State = ScriptStateText(script.Runtime.State);
+				row.Diagnostic = script.Runtime.LastError;
+				sceneRows.push_back(std::move(row));
+			}
 			std::sort(sceneRows.begin(), sceneRows.end(),
-				[](const SceneRow& left, const SceneRow& right) { return left.Tag < right.Tag; });
+				[](const SceneRow& left, const SceneRow& right)
+				{
+					if (left.Tag != right.Tag)
+						return left.Tag < right.Tag;
+					// 同一实体同时挂 Luau + C++:Luau 行在前(与检视器的"两个组件各自一段"一致)。
+					return left.Luau && !right.Luau;
+				});
 		}
 
 		// ---- 底部状态行(也是无障碍节点,便于 AI 断言动作结果);空状态分支与正常分支共用 ----
@@ -245,7 +272,7 @@ namespace World
 				"list-item", row.Tag, detail, rowRect);
 
 			Wui::Label(ctx, { rowRect.X + 8.0f, rowRect.Y + 4.0f },
-				row.Tag + "  [" + row.State + "]", theme.Text, 13.0f);
+				row.Tag + "  [" + row.Language + " · " + row.State + "]", theme.Text, 13.0f);
 			std::string line = row.Path;
 			if (!row.Diagnostic.empty())
 				line += "  -  " + row.Diagnostic;
@@ -254,12 +281,23 @@ namespace World
 
 			const Wui::WuiRect reloadRect {
 				rowRect.X + rowRect.W - 72.0f, rowRect.Y + 6.0f, 66.0f, kRowButtonHeight };
-			if (Wui::Button(ctx, Wui::HashId(("scripts.reload." + std::to_string(index)).c_str()),
-				reloadRect, "Reload", theme))
+			if (row.Luau)
 			{
-				std::string message;
-				const bool ok = host.ScriptsReloadInstance(row.Handle, &message);
-				SetStatus("reload: " + (message.empty() ? (ok ? std::string("queued") : std::string("failed")) : message), !ok);
+				if (Wui::Button(ctx, Wui::HashId(("scripts.reload." + std::to_string(index)).c_str()),
+					reloadRect, "Reload", theme))
+				{
+					std::string message;
+					const bool ok = host.ScriptsReloadInstance(row.Handle, &message);
+					SetStatus("reload: " + (message.empty() ? (ok ? std::string("queued") : std::string("failed")) : message), !ok);
+				}
+			}
+			else
+			{
+				// C++ 实例重载不支持(代码在 Game.dll 里):给指路文案,不画一个按不动的假按钮。
+				Wui::Label(ctx, { rowRect.X + rowRect.W - 236.0f, rowRect.Y + 8.0f },
+					Wui::Tr("panel.scripts.cpp_module_hint",
+						"instance reload: not supported (use File ▸ Reload C++ Module)"),
+					theme.TextMuted, 11.0f);
 			}
 			y += kSceneRowHeight;
 		}
@@ -272,7 +310,8 @@ namespace World
 		if (sceneRows.empty())
 		{
 			Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f },
-				"current scene has no LuauScriptComponent", theme.TextMuted, 12.0f);
+				Wui::Tr("panel.scripts.scene_empty", "current scene has no script components"),
+				theme.TextMuted, 12.0f);
 			y += 18.0f;
 		}
 

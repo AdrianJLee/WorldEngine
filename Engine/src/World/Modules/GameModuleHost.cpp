@@ -78,4 +78,14 @@ namespace World::Modules
 			*error = failure;
 		return false;
 	}
+
+	std::filesystem::path GameModuleHost::ResolveDefaultPath()
+	{
+		// 与 LoadDefault 的候选顺序保持一致(打包布局优先,开发布局锚定兜底)。
+		std::filesystem::path besideExeSearchDir;
+		const std::filesystem::path besideExe = FindGameDllBesideExecutable(besideExeSearchDir);
+		if (!besideExe.empty())
+			return besideExe;
+		return AnchoredGameDllPath();
+	}
 }

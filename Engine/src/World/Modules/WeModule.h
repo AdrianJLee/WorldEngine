@@ -21,7 +21,11 @@ namespace World::Modules
 	// D 期(2026-09-27):`ScriptProperty` 又增加"声明默认值"(Default)与"集合形状归场景"
 	// (ShapeFromScene)两个尾部字段 ⇒ 布局再次变化(旧 Game.dll 会按旧布局读属性表),
 	// 同一条理由再升一版让宿主干净拒绝旧模块。
-	constexpr uint32_t WE_MODULE_ABI_VERSION = 5;
+	// CPPT-2(2026-09-27,D-B 模块级热重载):`Schema::FieldMetadata` 尾部追加 Unit/Step
+	// (编辑期提示)⇒ FieldSchema/TypeSchema 的布局再次变化;同时 Category==Script 的
+	// "未声明 Default = 未设(monostate)"语义变化也会让旧 Game.dll 按零值默认值解释属性表。
+	// 宿主与模块仍走 ModuleManager 的**等值**校验 ⇒ 旧 DLL 必须被干净拒绝(不按新布局解释)。
+	constexpr uint32_t WE_MODULE_ABI_VERSION = 6;
 
 	struct WeModule
 	{
