@@ -55,6 +55,13 @@ namespace World
 		constexpr float kVecFieldNarrowWidth = 180.0f;
 		constexpr float kVecFieldSlotHeight = 20.0f;
 
+		// ---- VEC-C2:脚本属性行的行尾动作列 ----
+		// `↺` 复位(库件 ResetDefaultButton:自己画回旋箭头,不依赖字体字形)、数组/映射元素行的
+		// `-` 删除列。两列都在**控件列**右侧:控件列宽相应收窄,集合行的删除列在缩进后的行矩形之外
+		// (容器把子行矩形按 kCollectionActionWidth 收窄后再递归,按钮落回容器行的右缘)。
+		constexpr float kResetButtonWidth = 20.0f;
+		constexpr float kCollectionActionWidth = 22.0f;
+
 		int VecFieldLayout(float controlWidth)
 		{
 			return controlWidth < kVecFieldNarrowWidth ? 1 : 0;
@@ -481,6 +488,75 @@ namespace World
 				? property.Value : DefaultScriptPropertyValue(property.Type);
 		}
 
+		// ---- VEC-C2:脚本属性行的**类型文案**(方案 v4 §1)----
+		//
+		// 脚本属性行没有注解说明(`ScriptProperty::Doc` 为空)时,行悬停/读屏回落成类型文案
+		// (`number/string/boolean/vec3/table/struct/array/map`),不再给英文兜底
+		// "No description for this field"。类型名是脚本作者写的标识符(`---@field Speed number`),
+		// 与脚本字段名同一条口径:**不过本地化目录**(不查 `schema.field.*`,也不进目录)。
+		std::string ScriptLeafTypeText(Schema::Kind kind)
+		{
+			switch (kind)
+			{
+				case Schema::Kind::Bool: return "boolean";
+				case Schema::Kind::Int8:
+				case Schema::Kind::Int16:
+				case Schema::Kind::Int32:
+				case Schema::Kind::Int64:
+				case Schema::Kind::UInt8:
+				case Schema::Kind::UInt16:
+				case Schema::Kind::UInt32:
+				case Schema::Kind::UInt64: return "integer";
+				case Schema::Kind::Float:
+				case Schema::Kind::Double: return "number";
+				case Schema::Kind::String: return "string";
+				case Schema::Kind::Vec2: return "vec2";
+				case Schema::Kind::Vec3: return "vec3";
+				case Schema::Kind::Vec4: return "vec4";
+				default: return "table";
+			}
+		}
+
+		std::string ScriptPropertyTypeText(const ScriptProperty& property)
+		{
+			switch (property.Collection)
+			{
+				case ScriptPropertyCollection::Array: return "array";
+				case ScriptPropertyCollection::Map: return "map";
+				default: break;
+			}
+			if (property.Type == Schema::Kind::Object)
+			{
+				// 结构化表:能展开 = `struct`;裸 table / 降级只读摘要 = `table`(B3 的摘要口径不变)。
+				const bool expandable = !property.ReadOnly && !property.Children.empty();
+				return expandable ? "struct" : "table";
+			}
+			return ScriptLeafTypeText(property.Type);
+		}
+
+		// 数组/映射即使**一个元素都没有**也可以展开(底部有 `+` 加元素/键);结构化表没有子字段时
+		// 才是只读摘要(裸 table)。两处判据(顶层行 / 嵌套子行)共用这一份,避免口径分叉。
+		bool ScriptPropertyExpandable(const ScriptProperty& property)
+		{
+			if (property.ReadOnly)
+				return false;
+			if (property.Collection == ScriptPropertyCollection::Array
+				|| property.Collection == ScriptPropertyCollection::Map)
+				return true;
+			return !property.Children.empty();
+		}
+
+		// 字段 schema 的类型文案:Object 行的合成 schema 把类型文案写在 `Meta.DisplayName`
+		// (只读摘要行的文本同源),叶子行按 Kind 反推。
+		std::string ScriptFieldTypeText(const Schema::FieldSchema& field)
+		{
+			if (field.K != Schema::Kind::Object)
+				return ScriptLeafTypeText(field.K);
+			if (!field.Meta.DisplayName.empty())
+				return field.Meta.DisplayName;
+			return field.GetNested ? "struct" : "table";
+		}
+
 		// ---- VEC-B3:嵌套 `---@class`(Object)属性的合成 schema ----
 		//
 		// `DrawSchemaFields` 的 Object 行只认 `Schema::FieldSchema` 里的**无捕获函数指针**
@@ -506,6 +582,9 @@ namespace World
 		struct ScriptTableSchemaArena
 		{
 			std::array<Schema::TypeSchema, kScriptTableMaxNodes> Nodes;
+			// VEC-C2:每个节点对应的集合形态(容器行靠它判断"正在画的子行属于数组/映射")。
+			// Nodes 与 Collections 同下标;普通 schema 的节点不在 arena 里 → 查不到 = None。
+			std::array<ScriptPropertyCollection, kScriptTableMaxNodes> Collections {};
 			size_t Used = 0;
 		};
 
@@ -575,6 +654,59 @@ namespace World
 		const auto kScriptTableNodeTable =
 			MakeScriptTableNodeTable(std::make_index_sequence<kScriptTableMaxNodes> {});
 
+		// 合成节点 → 集合形态。指针不在 arena 范围内(普通 schema 节点)= None:数组/映射的
+		// 增删路径只对脚本合成 schema 生效,不会走到 Play 里 C++ 实例的嵌套结构上。
+		ScriptPropertyCollection ScriptTableCollectionOf(const Schema::TypeSchema* node)
+		{
+			if (!node)
+				return ScriptPropertyCollection::None;
+			ScriptTableSchemaArena& arena = ScriptTableArena();
+			// 用地址比较(不同对象之间的指针序在标准里未定义;地址转整数后比较是确定的)。
+			const uintptr_t address = reinterpret_cast<uintptr_t>(node);
+			const uintptr_t begin = reinterpret_cast<uintptr_t>(arena.Nodes.data());
+			const uintptr_t end = reinterpret_cast<uintptr_t>(arena.Nodes.data() + arena.Used);
+			if (address < begin || address >= end)
+				return ScriptPropertyCollection::None;
+			return arena.Collections[static_cast<size_t>(node - arena.Nodes.data())];
+		}
+
+		// ---- VEC-C2:数组/映射的元素增删(面板侧只改 `Children`)----
+		//
+		// 新增元素的值 = 该类型的规范零值(`+` 是"造一行",不是"设一个值");元素本身是嵌套集合
+		// (如 `{{number}}`)时模板取已有同类元素的形态(Collection/ElementKind/KeyKind 在子项上),
+		// 空容器没有模板 —— 不猜嵌套结构,按叶子样式落一行(可编辑、可存档)。
+		ScriptProperty MakeCollectionElement(const ScriptProperty& container)
+		{
+			ScriptProperty child;
+			child.Type = container.ElementKind;
+			if (!container.Children.empty())
+			{
+				const ScriptProperty& model = container.Children.back();
+				child.Type = model.Type;
+				child.TypeName = model.TypeName;
+				child.Collection = model.Collection;
+				child.ElementKind = model.ElementKind;
+				child.KeyKind = model.KeyKind;
+				child.ReadOnly = model.ReadOnly;
+			}
+			child.Value = DefaultScriptPropertyValue(child.Type);
+			return child;
+		}
+
+		bool CollectionKeyTaken(const ScriptProperty& container, const std::string& key)
+		{
+			return std::any_of(container.Children.begin(), container.Children.end(),
+				[&key](const ScriptProperty& child) { return child.Name == key; });
+		}
+
+		// 数组行名 = 下标字符串 1..n:删掉中间元素后重排,让行 id / 存档顺序 / 脚本写回(`1..n`)
+		// 共用同一份下标口径。
+		void RenumberArrayChildren(ScriptProperty& container)
+		{
+			for (size_t index = 0; index < container.Children.size(); ++index)
+				container.Children[index].Name = std::to_string(index + 1);
+		}
+
 		// 顶层 Object 属性行的 instance 就是该属性本身:子 schema 的实例直接透传,
 		// 子字段访问器再从它身上取 `Children[i]`。
 		void* ScriptTableIdentityPtr(void* instance) { return instance; }
@@ -593,6 +725,7 @@ namespace World
 			node = Schema::TypeSchema {};
 			node.DisplayName = idPath;
 			node.Category = Schema::TypeCategory::Struct;
+			arena.Collections[nodeIndex] = property.Collection;
 			const size_t childCount = std::min(property.Children.size(), kScriptTableMaxChildren);
 			node.Fields.reserve(childCount);
 			for (size_t index = 0; index < childCount; ++index)
@@ -606,9 +739,12 @@ namespace World
 				{
 					// 裸 table / 空结构 / 超护栏 → 只读摘要行(摘要文本由 Meta.DisplayName 携带,
 					// 面板侧与 DrawSchemaFields 的 scriptPropertyRow 摘要分支同一判据)。
-					const size_t childNode = (child.ReadOnly || child.Children.empty())
-						? kScriptTableNoNode
-						: BuildScriptTableSchema(child, idPath + "." + child.Name, depth + 1);
+					// VEC-C2:类型文案(含 `struct`/`array`/`map`)也走 Meta.DisplayName —— 没有注解
+					// 说明时行悬停用它回落(v4 §1);空数组/空映射仍可展开(子行只有底部 `+`)。
+					field.Meta.DisplayName = ScriptPropertyTypeText(child);
+					const size_t childNode = ScriptPropertyExpandable(child)
+						? BuildScriptTableSchema(child, idPath + "." + child.Name, depth + 1)
+						: kScriptTableNoNode;
 					if (childNode == kScriptTableNoNode)
 					{
 						field.Meta.DisplayName = "table";
@@ -640,11 +776,11 @@ namespace World
 			field.Name = property.Name;
 			field.K = Schema::Kind::Object;
 			field.Meta.Doc = property.Doc;
-			if (property.ReadOnly || property.Children.empty())
-			{
-				field.Meta.DisplayName = "table";
+			// VEC-C2:类型文案(裸 table → `table`;只读数组/映射 → `array`/`map`;可展开结构 → `struct`)
+			// —— 摘要行文本与"没有注解说明"时的行悬停回落共用它(v4 §1)。
+			field.Meta.DisplayName = ScriptPropertyTypeText(property);
+			if (!ScriptPropertyExpandable(property))
 				return field;
-			}
 			const size_t nodeIndex = BuildScriptTableSchema(property, idPath, 1);
 			if (nodeIndex == kScriptTableNoNode)
 			{
@@ -673,6 +809,51 @@ namespace World
 		{
 			std::string error;
 			ScriptEngine::SyncScriptDeclarations(component, nullptr, &error);
+		}
+
+		// ---- VEC-C2:脚本声明签名(编辑态同步的门)----
+		//
+		// 为什么需要门:引擎的合并**在集合形状上以脚本声明为准**(`ScriptProperties::ApplyInto`:
+		// 数组/映射的子行按声明的名字重建),而面板的 `+`/`-`(方案 v3 §4 / v4 §3 的验收)改的是
+		// 组件里的 `Children` —— 每帧无条件重合并会把面板刚做的增删还原回去。声明签名不变时跳过
+		// 合并 ⇒ 值/形状以组件(场景)为准;脚本一改(内容指纹变 → 签名变)照旧整体重建,
+		// 新字段/新说明/新默认值立即生效。
+		//
+		// 签名含:顺序 / 名字 / 类型 / 集合形态 / 元素与键类型 / 只读标记 / 元素行是否未知 /
+		// 说明(改注释也要跟着刷新)/ 默认值(脚本表初值改了,没改过的字段要回新初值)。
+		void AppendDeclarationSignature(std::string& out,
+			const std::vector<ScriptProperties::Declaration>& declarations, int depth)
+		{
+			if (depth > 6)
+				return;
+			for (const ScriptProperties::Declaration& declaration : declarations)
+			{
+				out += declaration.Name;
+				out += '|';
+				out += ScriptProperties::KindName(declaration.Type);
+				out += '|';
+				out += ScriptProperties::CollectionName(declaration.Collection);
+				out += '|';
+				out += ScriptProperties::KindName(declaration.ElementKind);
+				out += '|';
+				out += ScriptProperties::KindName(declaration.KeyKind);
+				out += declaration.ReadOnly ? "|ro" : "";
+				out += declaration.FieldsUnknown ? "|unknown" : "";
+				out += '|';
+				out += declaration.Doc;
+				out += '|';
+				out += FormatValueByVariant(declaration.Default);
+				out += '{';
+				AppendDeclarationSignature(out, declaration.Fields, depth + 1);
+				out += '}';
+			}
+		}
+
+		std::string ScriptDeclarationSignature(const std::vector<ScriptProperties::Declaration>& declarations)
+		{
+			std::string out;
+			AppendDeclarationSignature(out, declarations, 0);
+			return out;
 		}
 
 		// 面板里诊断/错误只显示第一行并截断;完整文本由 AI 通道 script.status 提供。
@@ -2084,7 +2265,8 @@ namespace World
 
 	float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect,
 		void* instance, const std::string& typeName, const Schema::TypeSchema& schema,
-		const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields, bool scriptPropertyRow)
+		const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields, bool scriptPropertyRow,
+		ScriptCollectionRows* collectionRows)
 	{
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		float y = 0;
@@ -2104,17 +2286,35 @@ namespace World
 				&& control.Y + control.H * 0.5f >= visibleRect.Y
 				&& control.Y + control.H * 0.5f <= visibleRect.Y + visibleRect.H;
 		};
+		// VEC-C2:数组/映射元素行的行尾 `-`(删除)。**只登记"这一行要删"**,真正的 erase /
+		// 重排在本调用画完所有元素行之后统一做 —— 合成 schema 的元素访问器按编译期下标实例化,
+		// 循环中途 erase 会让后面的行读到错元素(同帧一帧错位)。
+		// 只读态不画增删控件(Play 里这些行本来就不出现;这条兜住 C++ 实例只读展示的路径)。
+		const bool collectionWritable = collectionRows != nullptr && collectionRows->Writable
+			&& collectionRows->Container != nullptr;
+		std::string pendingEraseName;
+		const auto drawCollectionRemove = [&](const std::string& rowName, float rowTop)
+		{
+			if (!collectionWritable)
+				return;
+			const Wui::WuiRect button { rect.X + rect.W + 2.0f, rowTop + 2.0f,
+				kCollectionActionWidth - 2.0f, 18.0f };
+			if (InstanceBarButton(ctx, (collectionRows->IdText + ".remove." + rowName).c_str(), button, "-",
+				"Remove this element from the collection (the scene stores the list)", true, theme))
+				pendingEraseName = rowName;
+		};
 		// SCRIPT-V2:脚本属性行的说明 = 脚本自己的注释(`ScriptProperty::Doc`,由调用方带进
-		// `FieldSchema.Meta.Doc`)—— **不**回落 schema 的 `schema.field.<Name>.doc`;没写说明就给
-		// 中性兜底,不假装有文档。普通 schema 字段行为不变(仍走 schema 本地化表)。
+		// `FieldSchema.Meta.Doc`)—— **不**回落 schema 的 `schema.field.<Name>.doc`;没写说明就回落
+		// 类型文案(VEC-C2 / v4 §1),不假装有文档。普通 schema 字段行为不变(仍走 schema 本地化表)。
 		const auto fieldDocFor = [&](const Schema::FieldSchema& candidate)
 		{
 			if (!scriptPropertyRow)
 				return FieldDocLabel(schema, candidate);
 			if (!candidate.Meta.Doc.empty())
 				return candidate.Meta.Doc;
-			return std::string(Wui::Tr("panel.properties.script_field_no_doc",
-				"No description for this field"));
+			// VEC-C2(方案 v4 §1):没有注解说明 → 回落成**类型文案**,不再给英文兜底文案。
+			// 推导字段(`level` 这类)与数组/映射子行同样走这一条。
+			return ScriptFieldTypeText(candidate);
 		};
 		for (const Schema::FieldSchema& field : schema.Fields)
 		{
@@ -2122,7 +2322,40 @@ namespace World
 				continue;
 			const Wui::WuiId fid = Wui::HashId(("f." + typeName + "." + field.Name).c_str()) ^ base;
 			const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, 22 };
-			const Wui::WuiRect ctrl { row.X + labelWidth, row.Y + 1, row.W - labelWidth - 4, 20 };
+			// VEC-C2:脚本属性行的行尾留给 `↺` 复位(固定占位:两种状态同一矩形,行布局零位移)。
+			// 集合元素行的 `-` 删除列在**外面**(容器的子行矩形已按 kCollectionActionWidth 收窄)。
+			const float resetReserve = scriptPropertyRow ? kResetButtonWidth + 2.0f : 0.0f;
+			const Wui::WuiRect ctrl { row.X + labelWidth, row.Y + 1,
+				std::max(24.0f, row.W - labelWidth - 4.0f - resetReserve), 20 };
+			const std::string rowIdText = propId(typeName, field.Name);
+			// VEC-C2:`↺` 复位(方案 v4 §4)。`modified` 语义 = "编辑态可复位":Play/只读态用
+			// 同一 rect 画禁用占位(库件两态共用同一几何,行布局零位移)。
+			// 默认值不在面板里存第二份 —— 点中后把该叶子清成"未设",由声明同步把脚本/schema
+			// 默认值材料化回来(收口见 DrawScriptComponentInspector;与"场景里从没写过"同一口径)。
+			const auto drawResetButton = [&](bool resettable)
+			{
+				const Wui::WuiRect resetRect { rect.X + rect.W - (collectionRows ? kCollectionActionWidth : 0.0f)
+					- kResetButtonWidth - 2.0f, row.Y + 1.0f, kResetButtonWidth, 18.0f };
+				const Wui::WuiId resetId = Wui::HashId((rowIdText + ".reset").c_str());
+				const std::string resetLabel = "Reset to script default";
+				const std::string resetDoc = resettable
+					? "Restore this field to the default declared by the script"
+					: Wui::Tr("panel.properties.script_readonly_notice",
+						"Play/Simulate: script properties are read-only (pause or stop to edit)");
+				const bool clicked = Wui::ResetDefaultButton(ctx, resetId, resetRect, resettable, theme,
+					resetLabel, resetDoc);
+				// 库件登记过 a11y(kind=reset-default、value=modified/default、enabled 跟随 modified),
+				// 但它不带悬停说明 —— 用同一 id 再登记一次补 label/tooltip(后登记覆盖,值以控件为准)。
+				RegisterNode(resetId, "reset-default", resetRect, resetLabel,
+					resettable ? "modified" : "default", resettable, resetDoc);
+				if (!clicked || !field.Set)
+					return;
+				field.Set(instance, Schema::Value {});
+				m_ScriptResetPending = true;
+				changed = true;
+				if (changedFields)
+					changedFields->push_back(typeName + "." + field.Name);
+			};
 			// 显示文案:普通字段 = Meta.DisplayName 优先,空则人类可读化 C++ 字段名后查目录;
 			// **脚本属性行 = 脚本里的原始字段名,一律不过本地化表** —— 脚本字段不是 schema 字段,
 			// 同名查 `schema.field.*` 会串台(用户实测:脚本字段 `Speed` 显示成别的组件的「速度」)。
@@ -2151,6 +2384,7 @@ namespace World
 					Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text + "  " + summary,
 						label.Term, theme.TextMuted, 13.0f, theme, row.W - 8.0f);
 					RegisterNode(Wui::HashId(idText.c_str()), "text", row, labelText, summary, false, summaryDoc);
+					drawCollectionRemove(field.Name, row.Y);
 					y += 20;
 					continue;
 				}
@@ -2172,6 +2406,7 @@ namespace World
 						theme, labelBudget);
 					Label(ctx, { ctrl.X, row.Y + 3 }, display, theme.Text, 13.0f);
 					RegisterNode(Wui::HashId(idText.c_str()), "text", row, labelText, display, false);
+					drawCollectionRemove(field.Name, row.Y);
 					y += 20;
 					continue;
 				}
@@ -2185,11 +2420,33 @@ namespace World
 					theme.Text, 13.0f, theme, labelBudget);
 				RegisterNode(Wui::HashId(idText.c_str()), "button", row, labelText, open ? "open" : "closed",
 					reachable(row), nestedDoc);
+				drawCollectionRemove(field.Name, row.Y);
 				y += 20;
 				if (open && nested && nestedInstance)
-					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u, { row.X + 10, row.Y + 20, row.W - 10, 0 },
+				{
+					// VEC-C2:元素自身是数组/映射(嵌套集合,如 `{{number}}`)时,它的子行也要能增删;
+					// 普通结构化表的子行不是集合行 —— 集合形态只从合成 arena 查(`None` = 不传上下文)。
+					ScriptCollectionRows nestedRows;
+					ScriptCollectionRows* nestedRowsPtr = nullptr;
+					if (scriptPropertyRow)
+					{
+						const ScriptPropertyCollection nestedCollection = ScriptTableCollectionOf(nested);
+						if (nestedCollection == ScriptPropertyCollection::Array
+							|| nestedCollection == ScriptPropertyCollection::Map)
+						{
+							nestedRows.Container = static_cast<ScriptProperty*>(nestedInstance);
+							nestedRows.Kind = nestedCollection;
+							nestedRows.IdText = idText;
+							nestedRows.Writable = !m_ReadOnly;
+							nestedRowsPtr = &nestedRows;
+						}
+					}
+					const float actionReserve = nestedRowsPtr ? kCollectionActionWidth : 0.0f;
+					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u,
+						{ row.X + 10, row.Y + 20, std::max(40.0f, row.W - 10.0f - actionReserve), 0 },
 						nestedInstance, nested->DisplayName, *nested, visibleRect, changedFields,
-						scriptPropertyRow);
+						scriptPropertyRow, nestedRowsPtr);
+				}
 				continue;
 			}
 
@@ -2210,6 +2467,9 @@ namespace World
 				RegisterNode(Wui::HashId(idText.c_str()), "text", row,
 					labelText, field.Get ? FormatReadOnlyValue(field, field.Get(instance)) : std::string(),
 					false, docText);
+				// 只读态:复位按钮可见但禁用(disabled hint = 面板顶部那行"Play/Simulate 只读"说明)。
+				if (scriptPropertyRow)
+					drawResetButton(false);
 				y += 20;
 				continue;
 			}
@@ -2510,7 +2770,104 @@ namespace World
 				if (changedFields)
 					changedFields->push_back(typeName + "." + field.Name);
 			}
+			// 叶子行尾复位(数组/映射元素行同一条路径;只读态在上面那一支处理)。
+			if (scriptPropertyRow)
+				drawResetButton(!m_ReadOnly);
+			// 数组/映射的**叶子元素行**行尾 `-`(Object 元素行在各自分支里画)。
+			drawCollectionRemove(field.Name, row.Y);
 			y += rowAdvance;
+		}
+
+		// ---- VEC-C2:数组/映射容器的收口(删除 / 追加 / 映射键名输入)----
+		//
+		// 放在所有元素行画完之后:合成 schema 的元素访问器按编译期下标实例化,循环中途 erase 会让
+		// 后面的行读到错元素。删除按**行名**(数组 = 下标字符串,映射 = 键)定位,数组删完重排 1..n。
+		if (collectionWritable)
+		{
+			ScriptProperty& container = *collectionRows->Container;
+			const Wui::WuiId addingId = Wui::HashId(("script.collection.adding." + collectionRows->IdText).c_str());
+			bool& adding = ctx.Persist<bool>(addingId, false);
+			const Wui::WuiId keyFieldId = Wui::HashId((collectionRows->IdText + ".add.key").c_str());
+			SchemaTextState& keyState = ctx.Persist<SchemaTextState>(
+				Wui::HashId(("script.collection.add.state." + collectionRows->IdText).c_str()), {});
+			const auto markContainerChanged = [&]()
+			{
+				changed = true;
+				if (changedFields)
+					changedFields->push_back(typeName);
+			};
+			if (collectionRows->Kind == ScriptPropertyCollection::Map && adding)
+			{
+				// 映射 `+`:先给一个**键名文本输入**,回车建行(空键 / 重名忽略;Esc 取消)。
+				const Wui::WuiRect keyRect { rect.X, rect.Y + y, std::max(60.0f, rect.W - 4.0f), 20.0f };
+				bool cancelled = false;
+				const bool committed = Wui::TextField(ctx, keyFieldId, keyRect, keyState.Buffer, theme, &cancelled);
+				const std::string keyText = keyState.Buffer;
+				RegisterNode(keyFieldId, "text-field", keyRect, "key",
+					keyText.empty() ? "new key" : keyText, true,
+					"Type a new key name, then press Enter to add the row (empty or duplicate keys are ignored)");
+				if (committed)
+				{
+					if (!keyText.empty() && !CollectionKeyTaken(container, keyText))
+					{
+						ScriptProperty child = MakeCollectionElement(container);
+						child.Name = keyText;
+						container.Children.push_back(std::move(child));
+						markContainerChanged();
+						WLD_CORE_INFO("[script-ui] collection add: {0}.{1}[{2}]", typeName, container.Name, keyText);
+					}
+					keyState.Buffer.clear();
+					adding = false;
+				}
+				else if (cancelled || (keyText.empty() && ctx.Focus() != keyFieldId))
+				{
+					// Esc / 点空且没输入内容:收起输入行,不建行。
+					keyState.Buffer.clear();
+					adding = false;
+				}
+				y += kRowHeight;
+			}
+			else
+			{
+				const Wui::WuiRect addButton { rect.X + rect.W + 2.0f, rect.Y + y + 1.0f,
+					kCollectionActionWidth - 2.0f, 18.0f };
+				const std::string addDoc = collectionRows->Kind == ScriptPropertyCollection::Map
+					? "Add a key/value row (the key name is typed next)" : "Append one element to the list";
+				if (InstanceBarButton(ctx, (collectionRows->IdText + ".add").c_str(), addButton, "+",
+					addDoc, true, theme))
+				{
+					if (collectionRows->Kind == ScriptPropertyCollection::Array)
+					{
+						ScriptProperty child = MakeCollectionElement(container);
+						child.Name = std::to_string(container.Children.size() + 1);
+						container.Children.push_back(std::move(child));
+						markContainerChanged();
+						WLD_CORE_INFO("[script-ui] collection add: {0}.{1} -> {2} element(s)", typeName,
+							container.Name, container.Children.size());
+					}
+					else
+					{
+						adding = true;
+						keyState.Buffer.clear();
+						ctx.SetFocus(keyFieldId);
+					}
+				}
+				y += kRowHeight;
+			}
+			if (!pendingEraseName.empty())
+			{
+				const auto found = std::find_if(container.Children.begin(), container.Children.end(),
+					[&pendingEraseName](const ScriptProperty& child) { return child.Name == pendingEraseName; });
+				if (found != container.Children.end())
+				{
+					WLD_CORE_INFO("[script-ui] collection remove: {0}.{1}[{2}]", typeName, container.Name,
+						pendingEraseName);
+					container.Children.erase(found);
+					if (collectionRows->Kind == ScriptPropertyCollection::Array)
+						RenumberArrayChildren(container);
+					markContainerChanged();
+				}
+			}
 		}
 
 		if (changed)
@@ -2604,7 +2961,26 @@ namespace World
 		// 判定(引擎内部单槽缓存):这里可以每帧调,但不会每帧重解析;同名同类型值继续保留。
 		// Play/Simulate 是只读态:不在这期间重建属性表。
 		if (luau && !m_ReadOnly)
-			SyncLuauPropertiesFromAnnotations(*lua);
+		{
+			// VEC-C2:每帧无条件重合并会把面板刚做的集合增删(`+`/`-`)按脚本声明还原回去
+			// (引擎的合并以声明为集合形状的事实源)。所以按**声明签名**设门:签名不变 = 脚本没改
+			// → 属性表(值与形状)以组件/场景为准;签名变了才整体重建(新字段/新说明/新初值立即生效)。
+			// 声明读不出来(路径空 / 文件没了)→ 维持既有行为,交给引擎入口出诊断。
+			std::vector<ScriptProperties::Declaration> declarations;
+			std::string declarationSignature;
+			const bool described = ScriptEngine::DescribeScriptDeclarations(lua->ScriptPath, declarations,
+				nullptr, nullptr) && !declarations.empty();
+			if (described)
+				declarationSignature = ScriptDeclarationSignature(declarations);
+			const Wui::WuiId signatureId = Wui::HashId(
+				("script.decl.sig." + std::to_string(handle) + "." + schema.DisplayName).c_str());
+			std::string& lastSignature = ctx.Persist<std::string>(signatureId, std::string());
+			if (!described || declarationSignature != lastSignature)
+			{
+				SyncLuauPropertiesFromAnnotations(*lua);
+				lastSignature = declarationSignature;
+			}
+		}
 
 		// ---- 脚本引用行 ----
 		const float labelWidth = std::min(140.0f, rect.W * 0.45f);
@@ -2852,6 +3228,21 @@ namespace World
 				y += DrawSchemaFields(ctx, rowBase, { rect.X, rect.Y + y, rect.W, 0 }, &property,
 					schema.DisplayName, rowSchema, visibleRect, changedFields, /*scriptPropertyRow=*/true);
 			}
+		}
+
+		// ---- VEC-C2 ④:复位收口 ----
+		// `↺` 只把该叶子清成"未设";脚本/ schema 声明的默认值由**引擎**材料化回来
+		// (`ScriptProperties::ApplyInto` 的 kMaterializeDeclarationDefaults 口径),面板不复制默认值。
+		// Luau 每帧本就同步;C++ 只在换脚本时同步,这里显式补一次。同步会整体重建属性表,
+		// 必须放在绘制循环**之后**(循环里持有 `properties` 的引用)。
+		if (m_ScriptResetPending)
+		{
+			m_ScriptResetPending = false;
+			if (luau)
+				SyncLuauPropertiesFromAnnotations(*lua);
+			else if (cppSchema)
+				ScriptProperties::SyncFromSchema(cpp->Properties, *cppSchema);
+			m_Host.MarkDocumentDirty();
 		}
 
 		// ---- 动作行:Luau 保留 Reload(唯一入口 EditorLayer::ReloadLuauScriptComponent;id = lua.reload)----

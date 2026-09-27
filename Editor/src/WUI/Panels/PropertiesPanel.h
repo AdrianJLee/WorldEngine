@@ -37,9 +37,24 @@ namespace World
 			float Offset = 0;
 		};
 
+		// ---- VEC-C2:数组/映射行上下文(只有脚本属性行的容器会带)----
+		//
+		// `Container` = 容器自身的 `ScriptProperty`(元素行要能直接增删 `Children`);
+		// `IdText` = 容器行的无障碍 id(`properties.<组件>.<属性>`),`.add` / `.remove.<下标|键>`
+		// 由它派生;`Writable` = 编辑态(Play/只读态只画禁用占位,不画增删)。
+		// **只对脚本合成路径生效**:`ScriptTableCollectionOf` 只在合成 arena 里查得到集合形态,
+		// 普通 schema 的 Object 字段(Play 里 C++ 实例的嵌套结构)拿不到上下文,增删路径不误走。
+		struct ScriptCollectionRows
+		{
+			ScriptProperty* Container = nullptr;
+			ScriptPropertyCollection Kind = ScriptPropertyCollection::None;
+			std::string IdText;
+			bool Writable = false;
+		};
 		float DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect, void* instance,
 			const std::string& typeName, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
-			std::vector<std::string>* changedFields = nullptr, bool scriptPropertyRow = false);
+			std::vector<std::string>* changedFields = nullptr, bool scriptPropertyRow = false,
+			ScriptCollectionRows* collectionRows = nullptr);
 		float DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect);
 		float DrawTransformInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, TransformComponent& transform,
@@ -115,6 +130,9 @@ namespace World
 		PanelHost& m_Host;
 		// Play/Simulate 期间为 true:字段只显示不落值(只读查看)。
 		bool m_ReadOnly = false;
+		// VEC-C2:本帧有脚本属性叶子行被复位(清成"未设")→ 属性表画完统一让**声明**同步把
+		// 默认值材料化回来(见 DrawScriptComponentInspector 的收口;默认值来源只有引擎一份)。
+		bool m_ScriptResetPending = false;
 		// U6b:"添加组件"是**居中模态**(用户 2026-09-21:「为什么不弹出个居中窗口呢」)——
 		// 打开期间由宿主封锁整窗输入,面板自身在选中行后回车/点 Add 落地。
 		bool m_AddOpen = false;
