@@ -80,9 +80,20 @@ namespace World
 	WLD_API bool EnsureScriptEditorScaffold(const std::filesystem::path& contentRoot,
 		std::string* error = nullptr);
 
+	// CPPT-2(FIX1):迁移诊断的调用方选项 —— Luau 热重载与 C++ 模块重载复用同一条实现:
+	//   * Tag:每条诊断的前缀("[hot-reload]" / "[module-reload]");
+	//   * ReportAddedFields:新增字段是否也出一条(模块级重载的验收要求"类型变化 / 字段被删 /
+	//     新增字段"三类各一条;Luau 热重载保持"新增字段 = 取新默认值,无诊断"的原语义,
+	//     默认 false)。
+	struct ScriptFieldMigrationOptions
+	{
+		const char* Tag = "[hot-reload]";
+		bool ReportAddedFields = false;
+	};
+
 	// 字段迁移诊断规则(previous = 旧实例状态,next = 新脚本合并后的字段表):
-	//   - 旧无、新有(新增字段):取新脚本默认值,不产生诊断;
-	//   - 同名同类型:保留旧值(合并由 ScriptEngine 的属性表同步完成);
+	//   - 旧无、新有(新增字段):取新脚本默认值;默认不产生诊断,ReportAddedFields=true 时出一条;
+	//   - 同名同类型:保留旧值(合并由 SyncFromSchema / ScriptEngine 的属性表同步完成),不产生诊断;
 	//   - 同名类型变化:回新默认值 + 一条诊断(含 BehaviorRegistry::LuaFieldId 稳定 id);
 	//   - 旧有新无(字段被删):丢弃旧值 + 一条诊断(含稳定 id)。
 	// 输出按字段名升序,保证跨平台/跨运行稳定;diagnostics 可为 null。
@@ -90,7 +101,8 @@ namespace World
 		const std::vector<ScriptProperty>& previous,
 		const std::vector<ScriptProperty>& next,
 		const std::string& scriptPath,
-		std::vector<std::string>* diagnostics);
+		std::vector<std::string>* diagnostics,
+		const ScriptFieldMigrationOptions& options = {});
 
 	// 失败诊断统一格式:`[hot-reload] <脚本路径>: <phase> failed: <error>`。
 	// 编译器给的错误文本本身带 "<路径>:<行号>:" 前缀时,行号原样保留。

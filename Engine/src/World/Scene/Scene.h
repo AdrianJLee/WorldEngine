@@ -198,9 +198,11 @@ namespace World
 		// 返回真的收过实例(= 原本 Running/Faulted/CreateEntered/持实例)的组件数。
 		// 加载新模块后调用 RestoreNativeScriptInstances():按新 schema 迁移属性(同名同类型保值),
 		// 清实例句柄并置回 Pending —— 下一安全点由既有 pending 机制调 OnCreate。
+		// CPPT-2(FIX1):diagnostics 非空时收集每个组件的迁移诊断(类型变化 / 字段被删 / 新增字段
+		// 各一条,含实体与字段名;同名同类型保值不产生诊断),供 GameModuleReloadResult 上报。
 		// 两者都必须与 CanApplyScriptReload() 同一安全点语义(宿主在帧边界调用)。
 		std::size_t DrainNativeScriptInstances();
-		std::size_t RestoreNativeScriptInstances();
+		std::size_t RestoreNativeScriptInstances(std::vector<std::string>* diagnostics = nullptr);
 		// Accepted commands execute once at a safe point; callbacks enqueue the next batch.
 		bool DeferStructuralChange(std::function<void(Scene&)> command);
 		void FlushStructuralChanges();

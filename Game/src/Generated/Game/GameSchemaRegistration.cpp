@@ -301,6 +301,16 @@ struct GeneratedAccess<World::ExampleScript>
         World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
         self->Speed = std::get<float>(value);
     }
+    static Value Get_GridCell(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return Value(self->GridCell);
+    }
+    static void Set_GridCell(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        self->GridCell = std::get<glm::ivec3>(value);
+    }
     static const FieldSchema& Field_Health()
     {
         static const FieldSchema schema = {
@@ -337,6 +347,24 @@ struct GeneratedAccess<World::ExampleScript>
         };
         return schema;
     }
+    static const FieldSchema& Field_GridCell()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xF7854C6B9FE7C02Aull },
+            "GridCell",
+            Kind::IVec3,
+            &Get_GridCell,
+            &Set_GridCell,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Read-only summary sample: an integer grid cell; the inspector shows a non-editable summary row and the value never enters the scene file.", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
     static const ScriptBinding& ScriptBindingOf()
     {
         static const ScriptBinding binding = MakeScriptBinding<World::ExampleScript>();
@@ -353,6 +381,7 @@ struct GeneratedAccess<World::ExampleScript>
             {
                 Field_Health(),
                 Field_Speed(),
+                Field_GridCell(),
             },
             nullptr,
             &ScriptBindingOf(),

@@ -196,6 +196,9 @@ namespace World
 		void RequestImportDestination(const std::string& sourcePath) override;
 		// P4-UX16:面板级短提示统一进状态栏(见 PushNotice 的 4s/悬停冻结/移开宽限节奏)。
 		void Notify(const std::string& message) override;
+		// CPPT-3-FIX1:模块动作完成后的可见反馈(状态 + 引擎消息 + 迁移诊断计数与首条)——
+		// 菜单项与 AI `module.reload` 走 EditorLayer 的同一条入口,这里只做一次提示文案组装。
+		void NotifyCppModuleResult();
 		// P4-U6b:面板级模态占用(属性面板的"添加组件"居中窗口)。
 		void SetPanelModalOwner(const std::string& panelId) override { m_PanelModalOwner = panelId; }
 		// W9-2 三层快捷键路由第 2 层:当前焦点面板。

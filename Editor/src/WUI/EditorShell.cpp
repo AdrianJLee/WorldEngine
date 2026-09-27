@@ -1593,9 +1593,18 @@ namespace World
 			size_t shown = 0;
 			for (const std::string& diagnostic : module.Diagnostics)
 			{
-				if (shown++ >= 5)
+				// CPPT-3-FIX1:迁移诊断(类型变化 / 字段删除 / 新增字段)逐条进 tooltip;
+				// 上限 10 条避免无限长,超出只报剩余条数。
+				if (shown >= 10)
 					break;
+				++shown;
 				moduleTooltip += "\n" + diagnostic;
+			}
+			if (module.Diagnostics.size() > shown)
+			{
+				moduleTooltip += "\n" + std::to_string(module.Diagnostics.size() - shown) + " "
+					+ Wui::Tr("status.cppmodule.diagnostics.more",
+						"more migration diagnostics (see the AI channel module.status)");
 			}
 			Wui::WuiAccessNode moduleNode;
 			moduleNode.Id = Wui::HashId("cppmodule.status");
@@ -1680,9 +1689,35 @@ namespace World
 				return Wui::Tr("status.cppmodule.hint.rolled_back",
 					"the new build was rejected; the previous Game.dll is loaded again (see diagnostics)");
 			case EditorLayer::CppModuleState::Loaded:
+			{
+				// CPPT-3-FIX1:加载成功但发生了属性迁移(类型变化 / 字段删除 / 新增字段)时,
+				// 状态栏常驻显示诊断条数(逐条文本在 tooltip / AI module.status / 加载提示里)。
+				const size_t diagnostics = m_Editor.GetCppModuleStatus().Diagnostics.size();
+				if (diagnostics > 0)
+					return std::to_string(diagnostics) + " " + Wui::Tr("status.cppmodule.hint.diagnostics",
+						"field migration diagnostics — hover here for the details");
 				break;
+			}
 		}
 		return std::string();
+	}
+
+	// CPPT-3-FIX1:模块动作的可见反馈:菜单项与 AI `module.reload` 共用一条(此前只有菜单单独
+	// Notify,AI 通道没有提示;诊断条数/首条文本要能被用户看到,不能只藏在 a11y 节点里)。
+	void EditorShell::NotifyCppModuleResult()
+	{
+		const EditorLayer::CppModuleStatus& module = m_Editor.GetCppModuleStatus();
+		std::string text = CppModuleStateText();
+		if (!module.Message.empty())
+			text += " — " + module.Message;
+		if (!module.Diagnostics.empty())
+		{
+			// 诊断文本是引擎的英文 canonical 口径(含实体/字段名),不翻译;只翻译前缀。
+			text += " — " + std::to_string(module.Diagnostics.size()) + " "
+				+ Wui::Tr("notice.cppmodule.diagnostics", "field migration diagnostics") + ": "
+				+ module.Diagnostics.front();
+		}
+		Notify(text);
 	}
 
 	void EditorShell::RenderNode(Wui::WuiContext& ctx, Wui::DockNode& node, const Wui::WuiRect& area)
@@ -4391,13 +4426,10 @@ namespace World
 			{ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
 				[this]
 				{
-					std::string message;
-					m_Editor.ReloadCppModule(&message);
-					// 两段式反馈:第一段 = 已卸载(等重建 Game.dll);第二段 = 已加载 / 已回滚 / 失败。
-					std::string text = CppModuleStateText();
-					if (!message.empty())
-						text += " — " + message;
-					Notify(text);
+					// 两段式反馈(第一段 = 已卸载等重建;第二段 = 已加载 / 已回滚 / 失败)统一由
+					// EditorLayer → NotifyCppModuleResult() 给出:菜单与 AI `module.reload` 同一条提示,
+					// 迁移诊断的条数与首条文本一起显示(CPPT-3-FIX1)。
+					m_Editor.ReloadCppModule();
 				}, false,
 				Wui::Tr("menu.file.reload_cpp_module.tooltip",
 					"Reload the Game.dll module. First activation unloads it so the build can replace "

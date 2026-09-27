@@ -110,7 +110,7 @@ namespace World::Modules
 			if (const WeModule* module = context.Modules().FindById(GameModuleId))
 				out.AbiVersion = module->AbiVersion;
 			if (scene)
-				out.InstancesRestored = scene->RestoreNativeScriptInstances();
+				out.InstancesRestored = scene->RestoreNativeScriptInstances(&out.Diagnostics);
 			out.Message = "Game module loaded: " + std::to_string(out.InstancesRestored)
 				+ " instance(s) pending";
 			return true;
@@ -135,7 +135,7 @@ namespace World::Modules
 		if (const WeModule* module = context.Modules().FindById(GameModuleId))
 			out.AbiVersion = module->AbiVersion;
 		if (scene)
-			out.InstancesRestored = scene->RestoreNativeScriptInstances();
+			out.InstancesRestored = scene->RestoreNativeScriptInstances(&out.Diagnostics);
 		out.Message += "; rolled back to the previous module copy";
 		return false;   // 重载本身失败(旧行为已恢复,由编辑器显示诊断)
 	}

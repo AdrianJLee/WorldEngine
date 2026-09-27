@@ -2,6 +2,7 @@
 #include "Scene.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Script/HotReload.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Gameplay/SystemRegistry.h"
 #include "World/Physics/Physics3D.h"
@@ -612,7 +613,7 @@ namespace World
 		return drained;
 	}
 
-	std::size_t Scene::RestoreNativeScriptInstances()
+	std::size_t Scene::RestoreNativeScriptInstances(std::vector<std::string>* diagnostics)
 	{
 		AssertOwnerThread();
 		std::size_t restored = 0;
@@ -625,9 +626,24 @@ namespace World
 			script->Runtime.CreateEntered = false;
 			script->Runtime.LastError.clear();
 			// 迁移配置态:同名同类型保旧值;新字段取新声明默认值;被删字段丢弃(与 SyncFromSchema 同口径)。
+			// CPPT-2(FIX1):迁移前后各留一份快照,诊断走同一份 DescribeScriptFieldMigration
+			// (类型变化 / 字段被删 / 新增字段各一条,含实体与字段名;不写第二套规则)。
+			std::vector<ScriptProperty> previous;
+			if (diagnostics)
+				previous = script->Properties;
 			const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script->ScriptName) : nullptr;
-			if (type && type->Category == Schema::TypeCategory::Script)
+			const bool migrated = type && type->Category == Schema::TypeCategory::Script;
+			if (migrated)
 				ScriptProperties::SyncFromSchema(script->Properties, *type);
+			if (diagnostics && migrated)
+			{
+				ScriptFieldMigrationOptions options;
+				options.Tag = "[module-reload]";
+				options.ReportAddedFields = true;
+				const std::string label = script->ScriptName + " (entity " +
+					std::to_string(static_cast<uint32_t>(entity)) + ")";
+				DescribeScriptFieldMigration(previous, script->Properties, label, diagnostics, options);
+			}
 			script->Runtime.State = ScriptInstanceState::Pending;
 			++restored;
 		}

@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -114,6 +115,36 @@ namespace World
 			char buffer[48] = {};
 			std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
 			return buffer;
+		}
+
+		// ---- CPPT-3-FIX1:数值行的 Unit / Step 接线 ----
+		// Step → 显示小数位(0.1 → 1 位、0.01 → 2 位、≥1 → 0 位;未声明 = 既有 3 位口径)。
+		int StepDecimals(bool hasStep, float step)
+		{
+			if (!hasStep || !(step > 0.0f))
+				return 3;
+			if (step >= 1.0f) return 0;
+			if (step >= 0.1f) return 1;
+			if (step >= 0.01f) return 2;
+			return 3;
+		}
+
+		// 整数数值行的控件选型:声明了 Unit 的行改走 `NumberFieldInt`(值区固定宽 + 单位后缀,
+		// Step(1) 时给 [−]/[+] 步进 —— 该件的步进粒度就是 1);没有 Unit 的行保持既有 `DragInt`
+		// (自由拖动;Step 的"1 单位"本来就是拖动/方向键的固有粒度)。
+		void DrawScriptIntControl(Wui::WuiContext& ctx, Wui::WuiId id, const Wui::WuiRect& rect,
+			int64_t& raw, int64_t lo, int64_t hi, const Schema::FieldMetadata& meta, const Wui::WuiTheme& theme)
+		{
+			if (meta.Unit.empty())
+			{
+				Wui::DragInt(ctx, id, rect, raw, lo, hi, theme);
+				return;
+			}
+			Wui::WuiNumberStyle style;
+			style.Unit = meta.Unit.c_str();
+			style.Decimals = 0;
+			style.Steppers = meta.Step.has_value() && std::fabs(*meta.Step - 1.0f) < 1e-4f;
+			Wui::NumberFieldInt(ctx, id, rect, raw, lo, hi, theme, style);
 		}
 
 		// 内容根(开发布局 projects/default/assets,打包由清单决定):**解析一次**缓存起来。
@@ -3096,7 +3127,9 @@ namespace World
 					const int64_t before = raw;
 					const int64_t lo = field.Meta.Min.has_value() ? static_cast<int64_t>(*field.Meta.Min) : INT64_MIN;
 					const int64_t hi = field.Meta.Max.has_value() ? static_cast<int64_t>(*field.Meta.Max) : INT64_MAX;
-					DragInt(ctx, fid, ctrl, raw, lo, hi, theme);
+					// CPPT-3-FIX1:声明 Unit 的行把行后缀接进库件数值样式(`WuiNumberStyle.Unit`)。
+					const bool unitRow = !field.Meta.Unit.empty();
+					DrawScriptIntControl(ctx, fid, ctrl, raw, lo, hi, field.Meta, theme);
 					fieldChanged = raw != before;
 					if (fieldChanged)
 					{
@@ -3105,7 +3138,8 @@ namespace World
 						else if (field.K == Schema::Kind::Int32) value = static_cast<int32_t>(raw);
 						else value = raw;
 					}
-					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, labelText, std::to_string(raw),
+					RegisterNode(Wui::HashId(idText.c_str()), unitRow ? "number-field" : "drag-int", ctrl, labelText,
+						unitRow ? (std::to_string(raw) + " " + field.Meta.Unit) : std::to_string(raw),
 						reachable(ctrl), fieldDoc);
 					break;
 				}
@@ -3121,7 +3155,9 @@ namespace World
 					const int64_t before = signedRaw;
 					const int64_t lo = field.Meta.Min.has_value() ? static_cast<int64_t>(*field.Meta.Min) : 0;
 					const int64_t hi = field.Meta.Max.has_value() ? static_cast<int64_t>(*field.Meta.Max) : INT64_MAX;
-					DragInt(ctx, fid, ctrl, signedRaw, lo, hi, theme);
+					// CPPT-3-FIX1:与有符号分支同一口径(Unit → NumberFieldInt + 单位后缀)。
+					const bool unitRow = !field.Meta.Unit.empty();
+					DrawScriptIntControl(ctx, fid, ctrl, signedRaw, lo, hi, field.Meta, theme);
 					fieldChanged = signedRaw != before;
 					if (fieldChanged)
 					{
@@ -3130,7 +3166,8 @@ namespace World
 						else if (field.K == Schema::Kind::UInt32) value = static_cast<uint32_t>(signedRaw);
 						else value = static_cast<uint64_t>(signedRaw);
 					}
-					RegisterNode(Wui::HashId(idText.c_str()), "drag-int", ctrl, labelText, std::to_string(signedRaw),
+					RegisterNode(Wui::HashId(idText.c_str()), unitRow ? "number-field" : "drag-int", ctrl, labelText,
+						unitRow ? (std::to_string(signedRaw) + " " + field.Meta.Unit) : std::to_string(signedRaw),
 						reachable(ctrl), fieldDoc);
 					break;
 				}
@@ -3141,11 +3178,35 @@ namespace World
 					const float before = f;
 					const float lo = field.Meta.Min.has_value() ? *field.Meta.Min : 1.0f;   // 1,-1 哨兵 = 无范围
 					const float hi = field.Meta.Max.has_value() ? *field.Meta.Max : -1.0f;
-					DragFloat(ctx, fid, ctrl, f, 0.01f, lo, hi, theme);
+					// CPPT-3-FIX1:声明 Unit 的浮点行把行后缀接进既有 WUI 数值样式(`WuiNumberStyle.Unit`;
+					// DragBarFloat = 值区固定宽度 + 单位右对齐,与材质预览的角度行同一件)。
+					// 只在**声明了有效范围**时改走 DragBarFloat:它的条体拖动按值域映射(无范围时内部用
+					// ±1e30 哨兵,拖一次就冲出量程)—— 无范围的带单位行保持 DragFloat,拖拽/方向键步长 = Step。
+					const std::string& unit = field.Meta.Unit;
+					const int decimals = StepDecimals(field.Meta.Step.has_value(),
+						field.Meta.Step.has_value() ? *field.Meta.Step : 0.0f);
+					const float speed = (field.Meta.Step.has_value() && *field.Meta.Step > 0.0f)
+						? *field.Meta.Step : 0.01f;
+					if (!unit.empty() && lo < hi)
+					{
+						Wui::WuiNumberStyle style;
+						style.Unit = unit.c_str();
+						style.Decimals = decimals;
+						style.ValueWidth = 68.0f;   // "-1000.0 hp" 这类值 + 单位也能完整显示
+						Wui::DragBarFloat(ctx, fid, ctrl, f, lo, hi, theme, style);
+					}
+					else
+					{
+						DragFloat(ctx, fid, ctrl, f, speed, lo, hi, theme);
+					}
 					fieldChanged = f != before;
 					if (fieldChanged) value = field.K == Schema::Kind::Float ? Schema::Value(f) : Schema::Value(static_cast<double>(f));
-					RegisterNode(Wui::HashId(idText.c_str()), "drag-float", ctrl, labelText, FormatFloatText(f),
-						reachable(ctrl), fieldDoc);
+					if (!unit.empty() && lo < hi)
+						RegisterNode(Wui::HashId(idText.c_str()), "slider", ctrl, labelText,
+							FormatFloatText(f, decimals) + " " + unit, reachable(ctrl), fieldDoc);
+					else
+						RegisterNode(Wui::HashId(idText.c_str()), "drag-float", ctrl, labelText,
+							FormatFloatText(f), reachable(ctrl), fieldDoc);
 					break;
 				}
 				case Schema::Kind::Vec2:

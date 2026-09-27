@@ -6,8 +6,10 @@
 //   * 重载单位 = 整个 Game 模块;重载后同一实体的 C++ 脚本是**新实例**:
 //     旧实例收一次 OnDestroy(若 CreateEntered)→ 卸载旧 DLL → 加载/注册新 DLL →
 //     新实例 State=Pending,由 Scene 既有 pending 机制在下一安全点 OnCreate;
-//   * 迁移 = 配置态(ScriptName + Properties):同名同类型保旧值,类型变化/字段删除出诊断
-//     (诊断由编辑器侧用 HotReload::DescribeScriptFieldMigration 生成,复用同一份属性模型);
+//   * 迁移 = 配置态(ScriptName + Properties):同名同类型保旧值,类型变化/字段删除/新增字段
+//     各出一条可读诊断(引擎侧在 Scene::RestoreNativeScriptInstances 用
+//     HotReload::DescribeScriptFieldMigration 收集进本结果的 Diagnostics;复用同一份规则,
+//     编辑器只负责显示诊断计数/文本);
 //   * 不迁移 = 实例 C++ 成员可变状态、事件/计时器订阅、以实例指针为键的外部注册 ——
 //     它们随旧实例销毁,由新实例 OnCreate 重建(不假装迁移);Luau 实例不受影响;
 //   * 回滚副本 = 卸载前把当前 DLL 拷成同目录 `Game.rollback-<abi>.dll`(不入库,只留最近一份);

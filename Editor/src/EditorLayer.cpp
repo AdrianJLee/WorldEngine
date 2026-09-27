@@ -1732,6 +1732,9 @@ namespace World
 			const CppModuleState state = ok ? CppModuleState::Loaded
 				: (result.RolledBack ? CppModuleState::RolledBack : CppModuleState::Unloaded);
 			PublishCppModuleResult(result, state, ok);
+			// CPPT-3-FIX1:加载段结束后给一次可见反馈(含迁移诊断的条数与首条文本);
+			// 菜单项与 AI `module.reload` 共用这一条,不再由菜单单独 Notify。
+			m_Shell.NotifyCppModuleResult();
 			WLD_CORE_INFO("[cppmodule] load ok={0} rolledBack={1} abi={2} restored={3} message='{4}'",
 				ok ? "true" : "false", result.RolledBack ? "true" : "false", result.AbiVersion,
 				result.InstancesRestored, result.Message);
@@ -1741,6 +1744,7 @@ namespace World
 			// 第一段:卸载(解锁 `Game.dll` 供重编);状态停在 reloading,直到再次触发加载新构建。
 			const bool ok = Modules::GameModuleReload::Unload(context, m_ActiveScene.get(), &result);
 			PublishCppModuleResult(result, ok ? CppModuleState::Reloading : CppModuleState::Loaded, ok);
+			m_Shell.NotifyCppModuleResult();
 			WLD_CORE_INFO("[cppmodule] reload segment 1 (unload) ok={0} drained={1} message='{2}'",
 				ok ? "true" : "false", result.InstancesDrained, result.Message);
 		}

@@ -15,6 +15,7 @@
 #include "World/Script/BehaviorRegistry.h"
 
 #include <box2d/box2d.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -2323,6 +2324,62 @@ namespace
         CHECK(fixture.Context.Native.at(static_cast<uint32_t>(entity)).Destroys == 2);
     }
 
+    // CPPT-2(FIX1):模块级重载的属性迁移诊断 —— 同名同类型保值不产生诊断;类型变化 / 字段被删 /
+    // 新增字段各一条人话诊断(含实体、字段名与稳定 id),由 Scene::RestoreNativeScriptInstances
+    // 收集、GameModuleReload::Load 上报到 GameModuleReloadResult.Diagnostics。
+    void ModuleReloadMigrationDiagnostics()
+    {
+        Fixture fixture;
+        auto entity = fixture.AddNative();
+        auto& script = entity.GetComponent<CppScriptComponent>();
+        const Schema::TypeSchema* type = TestContext().Schemas().Find("T02NativeProbe");
+        CHECK(type != nullptr);
+        ScriptProperties::SyncFromSchema(script.Properties, *type);
+        CHECK(script.Properties.size() == 4);
+
+        // 旧配置态(重载前):① Value 的类型被上一版模块改成 Int32(类型变化);
+        // ② 另加一条新声明里没有的 Removed 字段(字段被删);
+        // ③ 从旧配置态删掉 Icon 行,让新 schema 声明重新把它加回来(新增字段)。
+        ScriptProperty* value = ScriptProperties::Find(script.Properties, "Value");
+        CHECK(value != nullptr);
+        value->Type = Schema::Kind::Int32;
+        value->Value = Schema::Value(static_cast<int32_t>(7));
+        ScriptProperty removed;
+        removed.Name = "Removed";
+        removed.Type = Schema::Kind::Float;
+        removed.Value = Schema::Value(2.5f);
+        script.Properties.push_back(removed);
+        const auto iconRow = std::find_if(script.Properties.begin(), script.Properties.end(),
+            [](const ScriptProperty& property) { return property.Name == "Icon"; });
+        CHECK(iconRow != script.Properties.end());
+        script.Properties.erase(iconRow);
+
+        std::vector<std::string> diagnostics;
+        CHECK(fixture.World->RestoreNativeScriptInstances(&diagnostics) == 1);
+        // 三类各一条,按字段名升序:Icon(新增)/ Removed(字段被删)/ Value(类型变化)。
+        CHECK(diagnostics.size() == 3);
+        CHECK(diagnostics[0].find("[module-reload]") != std::string::npos);
+        CHECK(diagnostics[0].find("field 'Icon'") != std::string::npos);
+        CHECK(diagnostics[0].find("is new in the reloaded script") != std::string::npos);
+        CHECK(diagnostics[1].find("field 'Removed'") != std::string::npos);
+        CHECK(diagnostics[1].find("value was dropped") != std::string::npos);
+        CHECK(diagnostics[2].find("field 'Value'") != std::string::npos);
+        CHECK(diagnostics[2].find("type changed Int32 -> Float") != std::string::npos);
+        // 迁移本身照旧生效:类型变化回新声明默认值,被删字段消失,新增字段按声明出现。
+        CHECK(script.Runtime.State == ScriptInstanceState::Pending);
+        const ScriptProperty* valueAfter = ScriptProperties::Find(script.Properties, "Value");
+        CHECK(valueAfter != nullptr && valueAfter->Type == Schema::Kind::Float);
+        CHECK(std::get<float>(valueAfter->Value) == 0.0f);
+        CHECK(ScriptProperties::Find(script.Properties, "Removed") == nullptr);
+        const ScriptProperty* iconAfter = ScriptProperties::Find(script.Properties, "Icon");
+        CHECK(iconAfter != nullptr && ScriptProperties::IsUnset(*iconAfter));
+
+        // 同名同类型保值:第二次恢复(同样的新 schema)不再产生任何诊断。
+        diagnostics.clear();
+        CHECK(fixture.World->RestoreNativeScriptInstances(&diagnostics) == 1);
+        CHECK(diagnostics.empty());
+    }
+
     // CPPT-2(T5b):重载编排的安全点门 —— 脚本回调里拒绝(NotSafePoint),回调外的帧边界报真实状态
     // (本测试进程没有 Game 模块 → NotFound);两种情况都不假装卸载/加载过。
     void ModuleReloadOrchestrationGuards()
@@ -2356,7 +2413,8 @@ namespace
     // CPPT-2(T5b)实机取证(不属于常规单测:依赖构建产物 Game.dll):
     //   `WorldScriptTests.exe --module-probe <Game.dll>` 走一遍真实模块的 加载 → 卸载 → 再加载,
     //   覆盖:ABI 等值门(旧 DLL 必须 AbiMismatch)、schema/行为注销与重建(F-5 接线)、
-    //   实例收容与配置态迁移(同名同类型保值 + Pending)。退出码 0 = 全绿。
+    //   实例收容与配置态迁移(同名同类型保值 + Pending + 诊断为空)、
+    //   IVec* 只读摘要行(FIX1:ReadOnly=true、未设、不进存档)。退出码 0 = 全绿。
     int RunModuleProbe(const char* modulePath)
     {
         WorldContext& context = TestContext();
@@ -2393,6 +2451,38 @@ namespace
         weight->Value = Schema::Value(static_cast<int32_t>(4));
         icon->Value = Schema::Value(std::string("textures/Icon.wtex"));
 
+        // CPPT-2(FIX1):IVec* 只读摘要行的实机证据 —— Game::ExampleScript.GridCell
+        // (ReadOnly=true、值未设、不进存档;输出供编辑器截图与人工核对)。
+        Entity summaryEntity = Entity::CreateEntity(scene.get(), "cpp module summary probe");
+        CppScriptComponent& summaryScript = summaryEntity.AddComponent<CppScriptComponent>();
+        summaryScript.ScriptName = "Game::ExampleScript";
+        const Schema::TypeSchema* summaryType = context.Schemas().Find("Game::ExampleScript");
+        if (!summaryType)
+        {
+            std::cout << "[probe] Game::ExampleScript is not registered\n";
+            return 14;
+        }
+        ScriptProperties::SyncFromSchema(summaryScript.Properties, *summaryType);
+        const auto checkSummaryRow = [&summaryScript](const char* phase)
+        {
+            const ScriptProperty* cell = ScriptProperties::Find(summaryScript.Properties, "GridCell");
+            if (!cell)
+            {
+                std::cout << "[probe] " << phase << ": GridCell summary row is missing\n";
+                return false;
+            }
+            const bool unset = ScriptProperties::IsUnset(*cell);
+            const bool recorded = ScriptProperties::IsSceneRecorded(*cell);
+            std::cout << "[probe] " << phase << " read-only summary: Game::ExampleScript.GridCell kind="
+                << ScriptProperties::KindName(cell->Type)
+                << " readOnly=" << (cell->ReadOnly ? "true" : "false")
+                << " unset=" << (unset ? "true" : "false")
+                << " inSave=" << (recorded ? "true" : "false") << '\n';
+            return cell->ReadOnly && cell->Type == Schema::Kind::IVec3 && unset && !recorded;
+        };
+        if (!checkSummaryRow("initial"))
+            return 15;
+
         Modules::GameModuleReloadResult unloaded;
         if (!Modules::GameModuleReload::Unload(context, scene.get(), &unloaded))
         {
@@ -2419,7 +2509,8 @@ namespace
             return 9;
         }
         std::cout << "[probe] reload abi=" << loaded.AbiVersion
-            << " restored=" << loaded.InstancesRestored << '\n';
+            << " restored=" << loaded.InstancesRestored
+            << " diagnostics=" << loaded.Diagnostics.size() << '\n';
         const ScriptProperty* weightAfter = ScriptProperties::Find(script.Properties, "Weight");
         const ScriptProperty* iconAfter = ScriptProperties::Find(script.Properties, "Icon");
         if (!weightAfter || std::get<int32_t>(weightAfter->Value) != 4)
@@ -2427,10 +2518,14 @@ namespace
         if (!iconAfter || std::get<std::string>(iconAfter->Value) != "textures/Icon.wtex")
             return 11;
         if (loaded.AbiVersion != Modules::WE_MODULE_ABI_VERSION
-            || loaded.InstancesRestored != 1
+            || loaded.InstancesRestored != 2
+            || !loaded.Diagnostics.empty()
             || script.Runtime.State != ScriptInstanceState::Pending
             || !BehaviorRegistry::Instance().Find("Game::StressTest"))
             return 12;
+        // 重载后只读摘要行按新 schema 重建,仍是 ReadOnly / 未设 / 不进存档(同名同类型 → 无诊断)。
+        if (!checkSummaryRow("after reload"))
+            return 16;
 
         // 收尾:可重复卸载,退出时不留 Game 模块。
         Modules::GameModuleReloadResult cleanup;
@@ -2566,6 +2661,8 @@ int main(int argc, char** argv)
             { "C++ schema properties: enum/asset editable and unsupported kinds read-only", CppSchemaPropertyModel },
             { "C++ schema enum/asset properties round-trip through the scene serializer", CppSchemaPropertiesRoundTrip },
             { "module reload drains instances and restores configuration as pending", ModuleReloadDrainAndRestore },
+            { "module reload reports type/deleted/added field migration diagnostics",
+                ModuleReloadMigrationDiagnostics },
             { "module reload orchestration guards (safe point, unloaded state)", ModuleReloadOrchestrationGuards },
             // 注意:本用例注销 Test 模块的脚本 schema(不再恢复),必须排在最后。
             { "unregistered script factory is reported instead of silently leaked", UnregisteredFactoryIsReportedInsteadOfSilentlyLeaked }

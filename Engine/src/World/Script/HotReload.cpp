@@ -229,23 +229,33 @@ namespace World
 		const std::vector<ScriptProperty>& previous,
 		const std::vector<ScriptProperty>& next,
 		const std::string& scriptPath,
-		std::vector<std::string>* diagnostics)
+		std::vector<std::string>* diagnostics,
+		const ScriptFieldMigrationOptions& options)
 	{
 		if (!diagnostics)
 			return;
 
 		// 先按字段名收集再排序,保证诊断文本可断言/可复现(与容器顺序无关)。
+		// CPPT-2(FIX1):前缀按调用方选(Luau 热重载 / C++ 模块重载),文本规则只有这一份。
+		const std::string tag = options.Tag ? options.Tag : "[hot-reload]";
 		std::vector<std::pair<std::string, std::string>> lines;
 		lines.reserve(previous.size());
 		for (const ScriptProperty& newField : next)
 		{
 			const ScriptProperty* old = ScriptProperties::Find(previous, newField.Name);
 			if (!old)
-				continue;   // 新增字段:取新脚本默认值,不产生诊断。
+			{
+				// 新增字段:取新脚本默认值;模块级重载按验收也出一条(默认仍不产生)。
+				if (options.ReportAddedFields)
+					lines.emplace_back(newField.Name,
+						tag + " " + scriptPath + ": field '" + newField.Name + "' (id=" + FieldIdText(newField.Name) +
+						") is new in the reloaded script; its value takes the declared default");
+				continue;
+			}
 			if (old->Type == newField.Type)
 				continue;   // 同名同类型:同步时已保留旧值。
 			lines.emplace_back(newField.Name,
-				"[hot-reload] " + scriptPath + ": field '" + newField.Name + "' (id=" + FieldIdText(newField.Name) +
+				tag + " " + scriptPath + ": field '" + newField.Name + "' (id=" + FieldIdText(newField.Name) +
 				") type changed " + ScriptProperties::KindName(old->Type) + " -> " +
 				ScriptProperties::KindName(newField.Type) + "; value reset to the new default");
 		}
@@ -254,7 +264,7 @@ namespace World
 			if (ScriptProperties::Find(next, oldField.Name))
 				continue;
 			lines.emplace_back(oldField.Name,
-				"[hot-reload] " + scriptPath + ": field '" + oldField.Name + "' (id=" + FieldIdText(oldField.Name) +
+				tag + " " + scriptPath + ": field '" + oldField.Name + "' (id=" + FieldIdText(oldField.Name) +
 				") is missing in the new script; its value was dropped");
 		}
 		std::sort(lines.begin(), lines.end(),
