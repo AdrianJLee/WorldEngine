@@ -352,11 +352,28 @@ namespace World
 			return designUnits * scale;
 		}
 
-		bool PostMouseMessage(HWND hwnd, UINT message, WPARAM wparam, const glm::vec2& physical)
+		// VEC-H4:鼠标注入改成**同步**投递(SendMessageW),并统一给失败理由。
+		//
+		// 为什么(证据在 tools/agents/reports/VEC-H3.md):
+		// PostMessageW 的 WM_MOUSEMOVE 会被 Windows 的鼠标消息合并/延后 —— 实测约 10% 的拖动里,
+		// "位移"在 WM_LBUTTONUP **之后**才被派发,控件在按住期间从没看到位移,松手那一帧被当成单击
+		// (DragFloat 走 BeginNumericEdit,值不变 → 探针 20s 超时)。对照实验:全部 PostMessage 4/40 失败;
+		// 全部 SendMessage 1/40、0/60。同步投递保证"位移在抬起之前、且在同一调用点就已落入窗口过程"。
+		// 返回值:成功投递 = true;窗口已销毁 = false + 理由(旧实现忽略返回值,失败是静默的)。
+		bool PostMouseMessage(HWND hwnd, UINT message, WPARAM wparam, const glm::vec2& physical,
+			std::string* error = nullptr)
 		{
+			if (!hwnd || IsWindow(hwnd) == FALSE)
+			{
+				if (error)
+					*error = "injection window is gone (was it closed?)";
+				return false;
+			}
 			const LPARAM lparam = MAKELPARAM(static_cast<int>(physical.x) & 0xFFFF,
 				static_cast<int>(physical.y) & 0xFFFF);
-			return PostMessageW(hwnd, message, wparam, lparam) != FALSE;
+			// 同一个线程拥有窗口 ⇒ SendMessageW 直接调用窗口过程,不经过消息队列,不会死锁。
+			SendMessageW(hwnd, message, wparam, lparam);
+			return true;
 		}
 
 		WPARAM ButtonMaskFor(const ScriptedMouseState& state)
@@ -366,6 +383,11 @@ namespace World
 			if (state.Held[1]) mask |= MK_RBUTTON;
 			if (state.Held[2]) mask |= MK_MBUTTON;
 			return mask;
+		}
+
+		WPARAM ButtonMaskOf(int button)
+		{
+			return button == 1 ? MK_RBUTTON : (button == 2 ? MK_MBUTTON : MK_LBUTTON);
 		}
 
 		const char* ButtonName(int button)
@@ -681,10 +703,12 @@ namespace World
 			{
 				// 同一帧里先移动再按下(与 ui.invoke 的"先悬停再点击"同节拍):悬停在按下那一帧
 				// 就位,面板的 MouseClicked 分支才会把这次按下当成拖拽起点。
-				PostMouseMessage(hwnd, WM_MOUSEMOVE, ButtonMaskFor(mouse), physical);
+				if (!PostMouseMessage(hwnd, WM_MOUSEMOVE, ButtonMaskFor(mouse), physical, &error))
+					return false;
 				const WPARAM ownMask = button == 1 ? MK_RBUTTON : (button == 2 ? MK_MBUTTON : MK_LBUTTON);
 				const UINT message = button == 1 ? WM_RBUTTONDOWN : (button == 2 ? WM_MBUTTONDOWN : WM_LBUTTONDOWN);
-				PostMouseMessage(hwnd, message, ButtonMaskFor(mouse) | ownMask, physical);
+				if (!PostMouseMessage(hwnd, message, ButtonMaskFor(mouse) | ownMask, physical, &error))
+					return false;
 				mouse.Held[button] = true;
 				mouse.LastButton = button;
 				mouse.Last = position;
@@ -697,7 +721,8 @@ namespace World
 			{
 				// 没有按住任何键时 = 纯悬停移动(与真实鼠标移动一致)。拖拽脚本先来一次
 				// 悬停移动、下一帧再 press,能让"上一帧鼠标位置"这类宿主状态先就位。
-				PostMouseMessage(hwnd, WM_MOUSEMOVE, ButtonMaskFor(mouse), physical);
+				if (!PostMouseMessage(hwnd, WM_MOUSEMOVE, ButtonMaskFor(mouse), physical, &error))
+					return false;
 				mouse.Last = position;
 				result = "moved to " + where + (anyHeld ? " (button held)" : " (hover)");
 				return true;
@@ -710,7 +735,13 @@ namespace World
 			}
 			mouse.Held[button] = false;
 			const UINT message = button == 1 ? WM_RBUTTONUP : (button == 2 ? WM_MBUTTONUP : WM_LBUTTONUP);
-			PostMouseMessage(hwnd, message, ButtonMaskFor(mouse), physical);
+			// VEC-H4:抬起前**先把指针同步挪到释放点**。脚本若只发了 press + release(没发 move),
+			// 这一步仍会让控件在按住期间看到最终位移 ⇒ 拖动成立,而不是退化成单击。
+			if (!PostMouseMessage(hwnd, WM_MOUSEMOVE, ButtonMaskFor(mouse) | ButtonMaskOf(button), physical,
+				&error))
+				return false;
+			if (!PostMouseMessage(hwnd, message, ButtonMaskFor(mouse), physical, &error))
+				return false;
 			mouse.Last = position;
 			result = "released " + std::string(ButtonName(button)) + " at " + where;
 			if (!(mouse.Held[0] || mouse.Held[1] || mouse.Held[2]))

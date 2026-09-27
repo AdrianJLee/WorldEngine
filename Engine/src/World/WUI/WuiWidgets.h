@@ -271,6 +271,15 @@ namespace World::Wui
 		std::string InlineValueText;
 		float LabelWidth = 0.0f;       // 0 = PropertyRowLabelWidth(row);同一面板传同一值以对齐
 		float FieldHeight = 0.0f;      // 0 = kPropertyFieldHeight(20);向量这类多行控件传实际高度
+		// ---- VEC-H4:层级与"值不可用" ----
+		// LabelIndent = 只挪**标签文字**的缩进(px;嵌套结构每层 12,见 §规则 2)。
+		// 行矩形与值列矩形不变 ⇒ 同一面板里所有行的值列仍然竖向对齐(缩进只表达层级,不挪列)。
+		// 缩进 > 0 时库件在缩进原点画 1px theme.Border 竖直导线(树导线),让层级不只靠留白。
+		float LabelIndent = 0.0f;
+		// FieldPlaceholder = 值列里的占位文本(如多选/多值不同的 "—"、空集合的提示)。
+		// 非空时库件在值列画它(theme.TextMuted;Enabled=false 时 theme.TextDisabled),
+		// 调用方不再为该状态画字段控件。无障碍 value 仍以 A11yValue 为准(契约由调用方声明)。
+		std::string FieldPlaceholder;
 		// 行尾"恢复默认"(复用 ResetDefaultButton;固定占位,两态同矩形)。
 		WuiId ResetId = 0;             // 调用方按自己的 id 契约算(如 HashId(行 id 文本 + ".reset"))
 		bool ShowReset = false;
@@ -318,6 +327,7 @@ namespace World::Wui
 		bool Modified = false;
 		float LabelWidth = 0.0f;
 		float ToggleWidth = -1.0f;     // 折叠命中区宽;<0 = 整行减去动作列
+		float LabelIndent = 0.0f;      // 标签文字缩进(见 PropertyRowDesc::LabelIndent)
 		WuiId ResetId = 0;
 		bool ShowReset = false;
 		bool ResetEnabled = false;
@@ -358,7 +368,10 @@ namespace World::Wui
 		bool Modified = false;
 		float LabelWidth = 0.0f;
 		float Indent = 0.0f;           // 元素行相对父行的缩进(0 = 与父行同列)
+		float LabelIndent = 0.0f;      // 标签文字缩进(与 PropertyRowDesc 同一口径;与 Indent 叠加)
 		float FieldHeight = 0.0f;      // 0 = kPropertyFieldHeight(20);向量这类多行控件传实际高度
+		// 值列占位文本(与 PropertyRowDesc::FieldPlaceholder 同一语义:多值/值不可用的 "—")。
+		std::string FieldPlaceholder;
 		bool ActionsOutside = false;
 		// 行尾 `↺`(单项复位;元素/键值行同一条库件路径,固定占位、两态同矩形)。
 		WuiId ResetId = 0;

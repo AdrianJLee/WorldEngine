@@ -1718,6 +1718,17 @@ namespace World::Wui
 				"每秒移动单位数(默认 5)。");
 			desc.A11yLabel = desc.Label;
 			desc.A11yValue = FloatText3(value);
+			// VEC-H4:层级缩进(只挪标签文字,不动行/值列)+ 多值/不可用的 "—" 值列占位。
+			const bool mixed = StateIs(draw, { "mixed" }) || BoolProperty(draw, "mixed", false);
+			desc.LabelIndent = FloatOverride(draw, "indent").value_or(0.0f);
+			if (mixed)
+			{
+				desc.FieldPlaceholder = LocalizedText(draw, "mixedText", "—", "—");
+				desc.A11yValue = "mixed";
+				desc.Tooltip = LocalizedText(draw, "mixedTooltip",
+					"Multiple selected objects have different values here; editing writes one value to all of them",
+					"选中的多个对象在这里的值不同;一旦编辑会统一写成同一个值");
+			}
 			desc.Enabled = !StateIs(draw, { "disabled" }) && !BoolProperty(draw, "disabled", false);
 			desc.Modified = StateIs(draw, { "modified" }) || BoolProperty(draw, "modified", false);
 			desc.ShowReset = BoolProperty(draw, "reset", true);
@@ -1727,7 +1738,8 @@ namespace World::Wui
 			desc.ResetTooltip = LocalizedText(draw, "resetTooltip", "Restore the default value (5)",
 				"恢复到默认值(5)");
 			const PropertyRowResult row = PropertyRow(ctx, id, slot.Rect, desc, theme);
-			DragFloat(ctx, ShellId("property-row.field"), row.FieldRect, value, 0.01f, -1.0f, -1.0f, theme);
+			if (!mixed)
+				DragFloat(ctx, ShellId("property-row.field"), row.FieldRect, value, 0.01f, -1.0f, -1.0f, theme);
 		}
 
 		void ShowPropertyGroupHeader(const WuiComponentDraw& draw)
@@ -2350,7 +2362,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"dragfloat", "DragFloat", "Drag Float", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=drag-float(编辑态切 text-field);id=HashId('showcase.dragfloat');value=数值文本;↑/↓ = 步进,speed 为拖动灵敏度",
+				"role=drag-float(编辑态切 text-field);id=HashId('showcase.dragfloat');value=数值文本;↑/↓ = 步进,speed 为拖动灵敏度;Shift = 0.1× 精细、Ctrl = 10× 粗调(拖动与 ↑/↓ 共用同一倍率,VEC-H4)",
 				"showcase 首选 150x24;范围默认 0..10;min>=max 视为无界(与控件哨兵约定一致)",
 				ShellIds("dragfloat"),
 				StateList({ "default", "hover", "focus", "disabled" }),
@@ -2502,7 +2514,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"vec3field", "Vec3Field", "Vec3 Field", "Inputs", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=vec3-field;id=HashId('showcase.vec3field');value='x,y,z';三个分量各登记 vec3-axis(id=HashId(str(父id)+'.axis.'+i))",
+				"role=vec3-field;id=HashId('showcase.vec3field');value='x,y,z';三个分量各登记 vec3-axis(id=HashId(str(父id)+'.axis.'+i));↑/↓ 调当前分量,Shift = 0.1×、Ctrl = 10×(VEC-H4,与 DragFloat 同一倍率)",
 				"showcase 首选 220x24;窄画布(<约 220)时 layout=1 竖排(本条目用 state=vertical 展示)",
 				ShellIds("vec3field"),
 				StateList({ "default", "hover", "focus", "vertical", "disabled" }),
@@ -2817,14 +2829,16 @@ namespace World::Wui
 				"property-row", "PropertyRow", "Property Row", "Properties", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=label/调用方声明的行 kind(交互字段的标签节点 A11yEnabled=false、只读值行走 kind=text);id=调用方的稳定行 id(面板:HashId('properties.<组件>.<字段>'));label=A11yLabel、value=A11yValue、tooltip=悬停说明/禁用理由(同源);行尾复位是子节点 kind=reset-default(调用方按 HashId(行 id 文本 + '.reset') 给 id,固定占位、两态同矩形)",
-				"行高 24(4px 栅格)、字段列高 20、行尾动作列 24;标签列宽 = min(140, 行宽×0.45)(PropertyRowLabelWidth;同一面板传同一值 ⇒ 竖向对齐);字段列 = 行宽 − 标签列 − 4 − 动作列;行矩形与动作落点不随状态变化",
+				"行高 24(4px 栅格)、字段列高 20、行尾动作列 24;标签列宽 = min(140, 行宽×0.45)(PropertyRowLabelWidth;同一面板传同一值 ⇒ 竖向对齐);字段列 = 行宽 − 标签列 − 4 − 动作列;行矩形与动作落点不随状态变化;LabelIndent = 只挪标签文字(每层 12px + 1px 树导线),**值列不跟着挪**(缩进不破坏列对齐);FieldPlaceholder 非空时值列画占位文本(多值不同/值不可用的 \"—\"),此时调用方不画字段控件",
 				A11yIds({ "showcase.property-row", "showcase.property-row.reset" }),
-				StateList({ "default", "hover", "focus", "modified", "disabled" }),
+				StateList({ "default", "hover", "focus", "modified", "mixed", "disabled" }),
 				{
 					PropText("label", "Move Speed"),
 					PropText("tooltip", "Movement speed in units per second (default 5)."),
 					PropFloat("value", 0.0f, 20.0f, 0.1f),
+					PropFloat("indent", 0.0f, 24.0f, 4.0f),
 					PropBool("modified"),
+					PropBool("mixed"),
 					PropBool("reset"),
 					PropBool("disabled"),
 				},

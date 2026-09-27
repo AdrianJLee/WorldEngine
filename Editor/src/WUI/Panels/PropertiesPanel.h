@@ -54,7 +54,7 @@ namespace World
 		float DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect, void* instance,
 			const std::string& typeName, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr, bool scriptPropertyRow = false,
-			ScriptCollectionRows* collectionRows = nullptr);
+			ScriptCollectionRows* collectionRows = nullptr, int depth = 0);
 		float DrawComponentInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, Entity entity,
 			const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect);
 		float DrawTransformInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, TransformComponent& transform,

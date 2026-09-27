@@ -4234,6 +4234,124 @@ int main()
 			accessibility.Clear();
 		}
 
+		// 32b. VEC-H4:属性面板二轮打磨的库件口径(确定性事实,不依赖 GUI)——
+		//     ① 数值键盘微调倍率:↑ = 1×speed、Shift+↑ = 0.1×speed、Ctrl+↑ = 10×speed
+		//        (DragFloat 与向量分量共用同一份口径);
+		//     ② 层级缩进只挪**标签文字**(LabelIndent):标签文字 x += 缩进、缩进原点画 1px 树导线,
+		//        值列(FieldRect)与行矩形都不动 —— 任意深度的字段列仍然竖向对齐;
+		//     ③ 值不可用/多值不同 = 值列画占位文本(FieldPlaceholder,如 "—"),调用方不给字段控件,
+		//        无障碍节点 value 由调用方声明(面板写 "unavailable"/"mixed")。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme {};
+			// ---- ① DragFloat:点击取焦(进入文本编辑)→ Esc 取消(焦点保留)→ 键盘步进 ----
+			const WuiId dragId = HashId("test.vec-h4.drag");
+			const WuiRect dragRect { 100.0f, 100.0f, 120.0f, 20.0f };
+			const glm::vec2 dragCenter { dragRect.X + dragRect.W * 0.5f, dragRect.Y + dragRect.H * 0.5f };
+			float dragValue = 5.0f;
+			WuiContext dragCtx;
+			const auto PaintDrag = [&](const WuiInputState& input)
+			{
+				accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+				accessibility.SetPanel("test.vec-h4");
+				dragCtx.BeginFrame(input);
+				const bool changed = DragFloat(dragCtx, dragId, dragRect, dragValue, 0.01f, -100.0f, 100.0f, theme);
+				dragCtx.EndFrame();
+				return changed;
+			};
+			const auto DragInput = [&](bool down, bool clicked, bool released, bool shift = false,
+				bool ctrl = false, uint32_t key = 0)
+			{
+				WuiInputState input;
+				input.ViewportSize = { 1280.0f, 720.0f };
+				input.MousePos = dragCenter;
+				input.MouseDown[0] = down;
+				input.MouseClicked[0] = clicked;
+				input.MouseReleased[0] = released;
+				input.Shift = shift;
+				input.Ctrl = ctrl;
+				if (key != 0)
+				{
+					// 文本框路径用 ctx.IsKeyPressed(持有态)读 Escape,数值微调用 WasKeyPressed(沿)读 ↑/↓ ——
+					// 两条都要覆盖,所以 KeyDown 与 KeyPressed 同时给(与 WuiScriptedInput 的注入一致)。
+					input.KeyDown = { key };
+					input.KeyPressed = { key };
+				}
+				return input;
+			};
+			PaintDrag(DragInput(true, true, false));
+			PaintDrag(DragInput(false, false, true));            // 松手 = 进入文本编辑(取焦点)
+			PaintDrag(DragInput(false, false, false, false, false,
+				static_cast<uint32_t>(World::KeyCodes::Escape)));   // Esc = 结束编辑,焦点留在字段上
+			CHECK(Near(dragValue, 5.0f));                       // Esc 只退出编辑,不改值
+			PaintDrag(DragInput(false, false, false));          // 下一帧节点 kind 回到 drag-float(本帧登记用的是上一帧的编辑态)
+			{
+				const WuiAccessNode* probeNode = accessibility.Find(dragId);
+				std::printf("[vec-h4] drag node after Esc kind=%s value=%s\n",
+					probeNode ? probeNode->Kind.c_str() : "(null)",
+					probeNode ? probeNode->Value.c_str() : "");
+			}
+			// 编辑结束后节点 kind 必须回到 drag-float(编辑中登记的是 text-field)。
+			CHECK(accessibility.Find(dragId) != nullptr && accessibility.Find(dragId)->Kind == "drag-float");
+			CHECK(PaintDrag(DragInput(false, false, false, false, false,
+				static_cast<uint32_t>(World::KeyCodes::Up))));
+			CHECK(Near(dragValue, 5.01f));                      // ↑ = 1×speed
+			CHECK(PaintDrag(DragInput(false, false, false, true, false,
+				static_cast<uint32_t>(World::KeyCodes::Up))));
+			CHECK(Near(dragValue, 5.011f));                     // Shift+↑ = 0.1×speed
+			CHECK(PaintDrag(DragInput(false, false, false, false, true,
+				static_cast<uint32_t>(World::KeyCodes::Up))));
+			CHECK(Near(dragValue, 5.111f));                     // Ctrl+↑ = 10×speed
+			// ---- ② + ③ 属性行:缩进 / 树导线 / 值列占位 ----
+			const WuiId rowId = HashId("test.vec-h4.row");
+			const WuiRect row { 200.0f, 200.0f, 300.0f, 24.0f };
+			PropertyRowDesc desc;
+			desc.Label = "Speed";
+			desc.LabelIndent = 12.0f;
+			desc.A11yKind = "label";
+			desc.A11yLabel = "Speed";
+			desc.A11yValue = "mixed";
+			desc.A11yEnabled = false;
+			desc.FieldPlaceholder = "\u2014";
+			WuiContext rowCtx;
+			accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+			accessibility.SetPanel("test.vec-h4");
+			{
+				WuiInputState idle;
+				idle.ViewportSize = { 1280.0f, 720.0f };
+				idle.MousePos = { 20.0f, 20.0f };
+				rowCtx.BeginFrame(idle);
+			}
+			const PropertyRowResult rowResult = PropertyRow(rowCtx, rowId, row, desc, theme);
+			float labelTextX = -1.0f;
+			float placeholderX = -1.0f;
+			int guideCount = 0;
+			for (const WuiDrawCommand& command : rowCtx.Commands())
+			{
+				if (command.Kind == WuiDrawKind::Text && command.Text.find("Speed") != std::string::npos)
+					labelTextX = command.Rect.X;
+				if (command.Kind == WuiDrawKind::Text && command.Text == "\u2014")
+					placeholderX = command.Rect.X;
+				if (command.Kind == WuiDrawKind::Rect && Near(command.Rect.W, 1.0f)
+					&& Near(command.Rect.X, row.X + 8.0f) && Near(command.Color.R, theme.Border.R)
+					&& Near(command.Color.G, theme.Border.G) && Near(command.Color.B, theme.Border.B))
+					++guideCount;
+			}
+			rowCtx.EndFrame();
+			CHECK(Near(labelTextX, row.X + 8.0f + 12.0f));       // 标签文字缩进 12(值列不动)
+			CHECK(guideCount == 1);                              // 缩进原点 1px 树导线
+			CHECK(Near(placeholderX, rowResult.FieldRect.X + 8.0f));   // 占位在值列左内边距处
+			CHECK(Near(rowResult.FieldRect.X, row.X + PropertyRowLabelWidth(row)));   // 值列 x 与缩进无关
+			{
+				const WuiAccessNode* rowNode = accessibility.Find(rowId);
+				CHECK(rowNode != nullptr && rowNode->Value == "mixed");
+				CHECK(rowNode != nullptr && Near(rowNode->Rect.W, row.W));
+			}
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		// 33. MAT-UI3a:焦点环视觉(圆角细描边 + 外发光,accent 低透明度)。
 		//     用户原话:「这个聚焦选中能否按照人类美学重新设计下」。这里把新口径钉成命令流事实:
 		//     ① 没有焦点 → 什么都不画(既有不变量);

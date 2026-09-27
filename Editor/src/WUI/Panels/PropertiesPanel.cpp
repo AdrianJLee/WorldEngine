@@ -479,6 +479,18 @@ namespace World
 				? property.Value : DefaultScriptPropertyValue(property.Type);
 		}
 
+		// VEC-H4:**行展示值** = `ScriptPropertyDisplayValue`,但"存的值类型与声明不符"时返回
+		// 空表(monostate),让行落到 `—` 占位(反模式 4:多值/不可用时不许显示伪零)。
+		// 判据只看"真的存了值且类型不符";`Value` 本身为空(未设)+ 默认值不可用仍是旧行为(显示零值,
+		// 可编辑、可写盘)—— A 期验收的 Ghost 行(retro 25/25)因此逐条不变。
+		Schema::Value ScriptPropertyDisplayValueForRow(const ScriptProperty& property)
+		{
+			if (!std::holds_alternative<std::monostate>(property.Value)
+				&& !ScriptPropertyValueMatchesType(property))
+				return Schema::Value();
+			return ScriptPropertyDisplayValue(property);
+		}
+
 		// ---- VEC-C2:脚本属性行的**类型文案**(方案 v4 §1)----
 		//
 		// 脚本属性行没有注解说明(`ScriptProperty::Doc` 为空)时,行悬停/读屏回落成类型文案
@@ -591,7 +603,7 @@ namespace World
 			const auto* parent = static_cast<const ScriptProperty*>(instance);
 			if (!parent || Index >= parent->Children.size())
 				return Schema::Value();   // 合成与绘制同帧同源,正常不可达;防越界 UB
-			return ScriptPropertyDisplayValue(parent->Children[Index]);
+			return ScriptPropertyDisplayValueForRow(parent->Children[Index]);
 		}
 
 		template <size_t Index>
@@ -2213,8 +2225,14 @@ namespace World
 		Entity entity = host.GetSelectedEntity();
 		if (!entity.IsValid() || entity.GetScene() != host.GetActiveScene().get())
 		{
-			Label(ctx, { rect.X + 8, rect.Y + 8 },
-				Wui::Tr("panel.properties.no_entity_selected", "No entity selected"), theme.TextMuted, 14.0f);
+			// VEC-H4:空态走库件 `Wui::EmptyState`(§规则 21):标题 + 一句下一步提示,垂直居中,
+			// 不再是一行贴在左上角的灰字。空态节点由库件登记(kind="empty-state")。
+			Wui::EmptyState(ctx, rect,
+				Wui::Tr("panel.properties.no_entity_glyph", "\u25CC"),
+				Wui::Tr("panel.properties.no_entity_selected", "No entity selected"),
+				Wui::Tr("panel.properties.no_entity_hint",
+					"Select an entity in the hierarchy or the viewport to inspect its properties"),
+				std::string(), 0, theme);
 			return;
 		}
 		Scene* scene = entity.GetScene();
@@ -2505,7 +2523,7 @@ namespace World
 	float PropertiesPanel::DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect,
 		void* instance, const std::string& typeName, const Schema::TypeSchema& schema,
 		const Wui::WuiRect& visibleRect, std::vector<std::string>* changedFields, bool scriptPropertyRow,
-		ScriptCollectionRows* collectionRows)
+		ScriptCollectionRows* collectionRows, int depth)
 	{
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		float y = 0;
@@ -2513,6 +2531,10 @@ namespace World
 		// VEC-H2:标签列宽来自库件(与 PropertyRow/PropertyGroupHeader 共用同一条口径),
 		// 同一面板传同一值 ⇒ 标签列竖向对齐;面板不再自己算 0.45 倍。
 		const float labelWidth = Wui::PropertyRowLabelWidth(rect);
+		// VEC-H4:层级 = 标签文字缩进(每层 12px,4px 栅格)。**值列不跟着挪** —— 面板把同一个
+		// labelWidth 传进每一行,缩进只作用在标签文字上,所以任意深度的字段列仍然竖向对齐。
+		constexpr float kIndentPerLevel = 12.0f;
+		const float labelIndent = static_cast<float>(depth) * kIndentPerLevel;
 		// 稳定无障碍 id 契约:properties.<TypeDisplayName>.<字段名>(脚本用同样字符串算 HashId)。
 		const auto propId = [](const std::string& type, const std::string& field)
 		{ return "properties." + type + "." + field; };
@@ -2628,6 +2650,8 @@ namespace World
 					desc.A11yEnabled = false;
 					desc.InlineValue = true;
 					desc.InlineValueText = summary;
+					desc.LabelWidth = labelWidth;
+					desc.LabelIndent = labelIndent;
 					Wui::PropertyRow(ctx, rowNodeId, row, desc, theme);
 					drawCollectionRemove(field.Name, row);
 					y += kRowHeight;
@@ -2657,6 +2681,8 @@ namespace World
 					desc.A11yEnabled = false;
 					desc.InlineValue = true;
 					desc.InlineValueText = display;
+					desc.LabelWidth = labelWidth;
+					desc.LabelIndent = labelIndent;
 					Wui::PropertyRow(ctx, rowNodeId, row, desc, theme);
 					drawCollectionRemove(field.Name, row);
 					y += kRowHeight;
@@ -2688,6 +2714,20 @@ namespace World
 				head.Label = label.Text;
 				head.Term = label.Term;
 				head.Tooltip = fieldDocFor(field);
+				head.LabelWidth = labelWidth;
+				head.LabelIndent = labelIndent;
+				// VEC-H4:集合头右侧常驻"当前条数"(数组/映射/结构化表都算),折叠时也知道里面有几项。
+				if (headScriptRow && !field.Meta.ReadOnly)
+				{
+					const size_t childCount = static_cast<const ScriptProperty*>(nestedInstance)->Children.size();
+					head.Trailing = Wui::Tr("panel.properties.collection_count", "{n} item(s)");
+					const std::string marker = "{n}";
+					const size_t at = head.Trailing.find(marker);
+					if (at != std::string::npos)
+						head.Trailing.replace(at, marker.size(), std::to_string(childCount));
+					else
+						head.Trailing = std::to_string(childCount);
+				}
 				head.A11yLabel = labelText;
 				head.Open = open;
 				head.Enabled = reachable(row);
@@ -2727,9 +2767,9 @@ namespace World
 					if (m_ScriptInspectingScriptRows)
 						m_ScriptRowPath.push_back(field.Name);   // 子行路径 = 容器路径 + 本行名
 					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u,
-						{ row.X + 10, row.Y + kRowHeight, std::max(40.0f, row.W - 10.0f - actionReserve), 0 },
+						{ row.X, row.Y + kRowHeight, std::max(40.0f, row.W - actionReserve), 0 },
 						nestedInstance, nested->DisplayName, *nested, visibleRect, changedFields,
-						scriptPropertyRow, nestedRowsPtr);
+						scriptPropertyRow, nestedRowsPtr, depth + 1);
 					if (m_ScriptInspectingScriptRows)
 						m_ScriptRowPath.pop_back();
 				}
@@ -2753,6 +2793,19 @@ namespace World
 				desc.A11yEnabled = false;
 				desc.InlineValue = true;
 				desc.InlineValueText = display;
+				desc.LabelWidth = labelWidth;
+				desc.LabelIndent = labelIndent;
+				// VEC-H4:禁用/只读行的 tooltip 必须给出**理由**(Blender HIG 的 disabled hint):
+				// 先写用途,再写为什么现在是灰的。理由与面板顶部那行只读说明同源。
+				if (m_ReadOnly || field.Meta.ReadOnly)
+				{
+					const std::string reason = m_ReadOnly
+						? Wui::Tr("panel.properties.readonly_notice",
+							"Play/Simulate running: read-only (pause or exit to edit)")
+						: Wui::Tr("panel.properties.field_core_readonly",
+							"Core field: read-only by design, it cannot be edited here");
+					desc.Tooltip = docText.empty() ? reason : (docText + "\n" + reason);
+				}
 				// 只读态:复位按钮可见但禁用(disabled hint = 面板顶部那行"Play/Simulate 只读"说明)。
 				desc.ShowReset = scriptPropertyRow;
 				desc.ResetEnabled = false;
@@ -2781,6 +2834,14 @@ namespace World
 			if (vectorRow)
 				rowHeight = VecFieldHeight(VecFieldLayout(measured.Field.W), vectorComponents);
 			const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, rowHeight };
+			// VEC-H4:行值先取(纯读),用来判定"值不可用"(脚本行 + 存的值类型与声明不符)。
+			Schema::Value value = field.Get(instance);
+			const bool valueUnavailable = scriptPropertyRow && field.K != Schema::Kind::Object
+				&& std::holds_alternative<std::monostate>(value);
+			// 不可用 = 值列给 "—"(多值/不可用的统一表达,反模式 4:不显示伪零);原因进 tooltip;
+			// 不画字段控件、不写盘。修复路径:改脚本声明或场景里的那一条值。
+			const std::string unavailableDoc = Wui::Tr("panel.properties.value_unavailable.tooltip",
+				"The stored value's type does not match the script declaration, so it is not editable here");
 			Wui::WuiRect ctrl;
 			if (collectionWritable)
 			{
@@ -2793,6 +2854,14 @@ namespace World
 				element.A11yKind = "label";
 				element.A11yLabel = labelText;
 				element.A11yEnabled = false;
+				element.LabelWidth = labelWidth;
+				// 元素行比容器头再深一层(H4 §规则 2:12px/层,只挪标签,值列仍对齐)。
+				element.LabelIndent = labelIndent + kIndentPerLevel;
+				if (valueUnavailable)
+				{
+					element.FieldPlaceholder = Wui::Tr("panel.properties.value_mixed", "\u2014");
+					element.Tooltip = unavailableDoc;
+				}
 				element.FieldHeight = vectorRow ? rowHeight : 0.0f;
 				element.ActionsOutside = true;
 				element.ShowReset = scriptPropertyRow;
@@ -2821,6 +2890,14 @@ namespace World
 				rowDesc.A11yKind = "label";
 				rowDesc.A11yLabel = labelText;
 				rowDesc.A11yEnabled = false;      // 行标签不可交互;控件本体登记自己的节点
+				rowDesc.LabelWidth = labelWidth;
+				rowDesc.LabelIndent = labelIndent;
+				if (valueUnavailable)
+				{
+					rowDesc.FieldPlaceholder = Wui::Tr("panel.properties.value_mixed", "\u2014");
+					rowDesc.Tooltip = unavailableDoc;
+					rowDesc.A11yValue = "unavailable";
+				}
 				rowDesc.FieldHeight = vectorRow ? rowHeight : 0.0f;
 				rowDesc.ShowReset = scriptPropertyRow;
 				rowDesc.ResetEnabled = resetEnabled;
@@ -2832,10 +2909,15 @@ namespace World
 					applyItemReset();
 				ctrl = rowResult.FieldRect;
 			}
-			Schema::Value value = field.Get(instance);
 			bool fieldChanged = false;
 			// 本行推进量:普通行 = 库件行高(24);向量行按库件排布给足高度(见 VecFieldHeight)。
 			float rowAdvance = rowHeight;
+			if (valueUnavailable)
+			{
+				// 值不可用:值列已经画了 "—"(上面的行控件),这里不画字段控件、不写盘,只推进布局。
+				y += rowAdvance;
+				continue;
+			}
 			switch (field.K)
 			{
 				case Schema::Kind::Bool:
@@ -3144,6 +3226,24 @@ namespace World
 				if (changedFields)
 					changedFields->push_back(typeName);
 			};
+			// VEC-H4:空集合 = 一行次要说明(§规则 21 的空态口径);`+` 按钮仍在下一行,点它出现第一项。
+			if (container.Children.empty())
+			{
+				const Wui::WuiRect emptyRow { rect.X, rect.Y + y, rect.W, kRowHeight };
+				Wui::PropertyRowDesc emptyDesc;
+				emptyDesc.A11yKind = "text";
+				emptyDesc.A11yLabel = collectionRows->IdText;
+				emptyDesc.A11yValue = "0";
+				emptyDesc.A11yEnabled = false;
+				emptyDesc.Enabled = false;
+				emptyDesc.LabelWidth = labelWidth;
+				emptyDesc.LabelIndent = labelIndent + kIndentPerLevel;
+				emptyDesc.InlineValue = true;
+				emptyDesc.InlineValueText = Wui::Tr("panel.properties.collection_empty", "No items yet");
+				Wui::PropertyRow(ctx, Wui::HashId((collectionRows->IdText + ".empty").c_str()), emptyRow,
+					emptyDesc, theme);
+				y += kRowHeight;
+			}
 			if (collectionRows->Kind == ScriptPropertyCollection::Map && adding)
 			{
 				// 映射 `+`:先给一个**键名文本输入**,回车建行(空键 / 重名忽略;Esc 取消)。
@@ -3577,7 +3677,7 @@ namespace World
 					// Get 走**展示值**:未设(monostate)/ 类型不匹配时给规范零值但**不写回**组件 ——
 					// "未设"要保持未设,真实默认值由引擎的属性入口填(审查 P1-1:不能编辑期写成 0 落盘)。
 					field.Get = [](const void* value)
-					{ return ScriptPropertyDisplayValue(*static_cast<const ScriptProperty*>(value)); };
+					{ return ScriptPropertyDisplayValueForRow(*static_cast<const ScriptProperty*>(value)); };
 					field.Set = [](void* value, const Schema::Value& edited)
 					{ static_cast<ScriptProperty*>(value)->Value = edited; };
 				}

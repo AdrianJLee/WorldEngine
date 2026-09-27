@@ -1190,6 +1190,8 @@ namespace World::Wui
 
 	bool DragFloat(WuiContext& ctx, WuiId id, const WuiRect& rect, float& value, float speed, float min, float max, const WuiTheme& theme)
 	{
+		// VEC-H4(§规则 6):Shift = 0.1× 精细微调、Ctrl = 10× 粗调 —— 拖动与 ↑/↓ 共用同一倍率。
+		const float modifier = ctx.Input().Shift ? 0.1f : (ctx.Input().Ctrl ? 10.0f : 1.0f);
 		const bool focused = ctx.Focus() == id;
 		WuiNumericState& state = ctx.Persist<WuiNumericState>(id, {});
 		// U24:编辑态把 kind 切成 "text-field" —— 值区此刻就是文本输入,
@@ -1264,7 +1266,7 @@ namespace World::Wui
 				}
 				if (state.Dragging)
 				{
-					value = std::max(lo, std::min(hi, static_cast<float>(state.PressValue + dx * speed)));
+					value = std::max(lo, std::min(hi, static_cast<float>(state.PressValue + dx * speed * modifier)));
 					changed = true;
 					ctx.SetCursor(WuiCursor::ResizeEW);
 				}
@@ -1284,7 +1286,7 @@ namespace World::Wui
 		// 编辑态下方向键归文本光标(EditUpdate 已消费),这里不抢。
 		if (focused && !state.Editing)
 		{
-			const float step = std::fabs(speed) > 0.0f ? std::fabs(speed) : 1.0f;
+			const float step = (std::fabs(speed) > 0.0f ? std::fabs(speed) : 1.0f) * modifier;
 			if (ctx.WasKeyPressed(KeyCodes::Left) || ctx.WasKeyPressed(KeyCodes::Down))
 			{
 				value = std::max(lo, value - step);
@@ -1313,6 +1315,9 @@ namespace World::Wui
 
 	bool DragInt(WuiContext& ctx, WuiId id, const WuiRect& rect, int64_t& value, int64_t min, int64_t max, const WuiTheme& theme)
 	{
+		// VEC-H4:与 DragFloat 同一口径 —— Shift = 0.1×、Ctrl = 10×(整数按 1 步的倍率取整,最小 1)。
+		const float modifier = ctx.Input().Shift ? 0.1f : (ctx.Input().Ctrl ? 10.0f : 1.0f);
+		const int64_t keyStep = std::max<int64_t>(1, static_cast<int64_t>(std::llround(modifier)));
 		const bool focused = ctx.Focus() == id;
 		WuiNumericState& state = ctx.Persist<WuiNumericState>(id, {});
 		RegisterAccessNode(id, state.Editing ? "text-field" : "drag-int", rect, std::string(),
@@ -1380,7 +1385,8 @@ namespace World::Wui
 				}
 				if (state.Dragging)
 				{
-					value = std::max(lo, std::min(hi, static_cast<int64_t>(state.PressValue + static_cast<double>(dx))));
+					value = std::max(lo, std::min(hi,
+						static_cast<int64_t>(state.PressValue + static_cast<double>(dx) * static_cast<double>(modifier))));
 					changed = true;
 					ctx.SetCursor(WuiCursor::ResizeEW);
 				}
@@ -1401,12 +1407,12 @@ namespace World::Wui
 		{
 			if (ctx.WasKeyPressed(KeyCodes::Left) || ctx.WasKeyPressed(KeyCodes::Down))
 			{
-				value = std::max(lo, value - 1);
+				value = std::max(lo, value - keyStep);
 				changed = true;
 			}
 			if (ctx.WasKeyPressed(KeyCodes::Right) || ctx.WasKeyPressed(KeyCodes::Up))
 			{
-				value = std::min(hi, value + 1);
+				value = std::min(hi, value + keyStep);
 				changed = true;
 			}
 		}
@@ -1867,6 +1873,11 @@ namespace World::Wui
 		constexpr float kPropertyDotSize = 4.0f;
 		constexpr float kPropertyLabelTextX = 8.0f;
 		constexpr float kPropertyFieldGutter = 4.0f;
+		// VEC-H4:嵌套结构的每层缩进(4px 栅格 × 3)。只挪标签文字与树导线,不动行/值列几何 ——
+		// 同一面板里所有行的值列仍然竖向对齐(Unity Inspector / Unreal Details 的层级语法)。
+		constexpr float kPropertyIndentStep = 12.0f;
+		// "值不可用/多值不同"的占位文本在值列里的水平内边距(与字段控件的文字起点一致)。
+		constexpr float kPropertyPlaceholderPadX = 8.0f;
 
 		// 行节点:与 WuiWidgets 既有的 RegisterAccessNode 同一格式 + Tooltip 字段(悬停说明的第二通道)。
 		void RegisterRowNode(WuiId id, const char* kind, const WuiRect& rect, const std::string& label,
@@ -1914,15 +1925,34 @@ namespace World::Wui
 				row.Y + (row.H - kPropertyActionWidth) * 0.5f, kPropertyActionWidth, kPropertyActionWidth };
 		}
 
+		// 顶层行是否带展开标记:展开 = ▼、折叠 = ▶(与 CollapsibleHeader 同一语义,比 "-/+ " 前缀更好认)。
+		const char* RowExpandMarker(bool open)
+		{
+			return open ? "\u25BC " : "\u25B6 ";
+		}
+
+		// VEC-H4:嵌套层级 = 标签文字缩进 + 1px 树导线(导线画在缩进原点,不动行矩形)。
+		void DrawRowIndentGuide(WuiContext& ctx, const WuiRect& row, float labelIndent, const WuiTheme& theme)
+		{
+			if (labelIndent <= 0.0f)
+				return;
+			const float x = row.X + kPropertyLabelTextX + labelIndent - kPropertyIndentStep;
+			ctx.Commands().push_back({ WuiDrawKind::Rect,
+				{ x, row.Y + 2.0f, 1.0f, std::max(0.0f, row.H - 4.0f) }, theme.Border, 0.0f });
+		}
+
 		void DrawRowLabel(WuiContext& ctx, const WuiRect& row, const std::string& label, const std::string& term,
-			bool open, bool expandable, const WuiColor& color, float labelWidth, const WuiTheme& theme)
+			bool open, bool expandable, const WuiColor& color, float labelWidth, const WuiTheme& theme,
+			float labelIndent = 0.0f)
 		{
 			if (label.empty())
 				return;
 			const float size = kPropertyLabelSize;
-			const float budget = std::max(16.0f, labelWidth - kPropertyLabelTextX - kPropertyFieldGutter);
-			Wui::LabelWithTerm(ctx, { row.X + kPropertyLabelTextX, row.Y + (row.H - size) * 0.5f - 2.0f },
-				(expandable ? (open ? "- " : "+ ") : std::string()) + label, term, color, size, theme, budget);
+			const float indent = std::max(0.0f, labelIndent);
+			const float budget = std::max(16.0f, labelWidth - kPropertyLabelTextX - indent - kPropertyFieldGutter);
+			Wui::LabelWithTerm(ctx,
+				{ row.X + kPropertyLabelTextX + indent, row.Y + (row.H - size) * 0.5f - 2.0f },
+				(expandable ? RowExpandMarker(open) : std::string()) + label, term, color, size, theme, budget);
 		}
 
 		// 已修改标记:被改过的字段在标签左侧给一个小圆点(不靠颜色吓人,也不移动文字)。
@@ -1949,8 +1979,17 @@ namespace World::Wui
 			const bool hoveredAny = ctx.IsHovered(rect);
 			const bool hovered = enabled && hoveredAny;
 			const bool focused = enabled && ctx.Focus() == id;
-			WuiColor fill = enabled ? (hovered ? theme.ButtonHover : theme.ButtonBg) : theme.PanelBg;
-			if (hovered && danger)
+			// VEC-H4 四态:default(ButtonBg)/ hover(ButtonHover)/ active(按下 = ActiveBg,内容不位移)/
+			// disabled(PanelBg + TextDisabled,理由进 tooltip)。
+			const bool pressed = hovered && ctx.Input().MouseDown[0];
+			WuiColor fill = enabled ? (pressed ? theme.ActiveBg : (hovered ? theme.ButtonHover : theme.ButtonBg))
+				: theme.PanelBg;
+			if (pressed && danger)
+			{
+				fill = theme.Danger;
+				fill.A = 0.30f;
+			}
+			else if (hovered && danger)
 			{
 				fill = theme.Danger;
 				fill.A = 0.22f;
@@ -2038,6 +2077,7 @@ namespace World::Wui
 		RowHoverBackdrop(ctx, row, hovered, desc.Enabled, theme);
 		if (desc.Modified)
 			DrawModifiedDot(ctx, row, theme);
+		DrawRowIndentGuide(ctx, row, desc.LabelIndent, theme);
 		if (desc.InlineValue)
 		{
 			// 只读行:值跟在标签后面,不占字段列(与旧口径同文本形态「标签: 值」)。
@@ -2051,7 +2091,15 @@ namespace World::Wui
 		else
 		{
 			DrawRowLabel(ctx, row, desc.Label, desc.Term, false, false,
-				desc.Enabled ? theme.Text : theme.TextDisabled, labelWidth, theme);
+				desc.Enabled ? theme.Text : theme.TextDisabled, labelWidth, theme, desc.LabelIndent);
+		}
+		// VEC-H4:值列占位(多值不同 "—" / 空集合提示):调用方不给字段控件,库件只画这一行文本。
+		if (!desc.FieldPlaceholder.empty() && !desc.InlineValue)
+		{
+			Wui::Label(ctx,
+				{ result.FieldRect.X + kPropertyPlaceholderPadX,
+					result.FieldRect.Y + (result.FieldRect.H - kPropertyLabelSize) * 0.5f - 1.0f },
+				desc.FieldPlaceholder, desc.Enabled ? theme.TextMuted : theme.TextDisabled, kPropertyLabelSize);
 		}
 		RegisterRowNode(id, desc.A11yKind, row, desc.A11yLabel.empty() ? desc.Label : desc.A11yLabel,
 			desc.A11yValue, desc.A11yEnabled, desc.A11yEnabled, false, desc.Tooltip);
@@ -2084,8 +2132,9 @@ namespace World::Wui
 		ctx.Commands().push_back({ WuiDrawKind::Rect, row, fill, 2.0f });
 		if (desc.Modified)
 			DrawModifiedDot(ctx, row, theme);
+		DrawRowIndentGuide(ctx, row, desc.LabelIndent, theme);
 		DrawRowLabel(ctx, row, desc.Label, desc.Term, desc.Open, true,
-			desc.Enabled ? theme.Text : theme.TextDisabled, labelWidth, theme);
+			desc.Enabled ? theme.Text : theme.TextDisabled, labelWidth, theme, desc.LabelIndent);
 		if (!desc.Trailing.empty())
 		{
 			const float size = theme.FontSizeSmall;
@@ -2165,8 +2214,16 @@ namespace World::Wui
 		RowHoverBackdrop(ctx, content, hovered, desc.Enabled, theme);
 		if (desc.Modified)
 			DrawModifiedDot(ctx, content, theme);
+		DrawRowIndentGuide(ctx, content, desc.LabelIndent, theme);
 		DrawRowLabel(ctx, content, desc.Label, desc.Term, false, false,
-			desc.Enabled ? theme.Text : theme.TextDisabled, labelWidth, theme);
+			desc.Enabled ? theme.Text : theme.TextDisabled, labelWidth, theme, desc.LabelIndent);
+		if (!desc.FieldPlaceholder.empty())
+		{
+			Wui::Label(ctx,
+				{ result.FieldRect.X + kPropertyPlaceholderPadX,
+					result.FieldRect.Y + (result.FieldRect.H - kPropertyLabelSize) * 0.5f - 1.0f },
+				desc.FieldPlaceholder, desc.Enabled ? theme.TextMuted : theme.TextDisabled, kPropertyLabelSize);
+		}
 		RegisterRowNode(id, desc.A11yKind, content, desc.A11yLabel.empty() ? desc.Label : desc.A11yLabel,
 			desc.A11yValue, desc.A11yEnabled, desc.A11yEnabled, false, desc.Tooltip);
 		if (hovered && !desc.Tooltip.empty())
@@ -3769,6 +3826,8 @@ namespace World::Wui
 
 		// 拖动锚点/编辑缓冲都按"当前轴"落到 value 的分量上;命中范围是整个槽位(含轴标签,点标签
 		// 与点输入框等价 —— 标签只是 12px 的视觉前缀,不是独立控件)。
+		// VEC-H4:与 DragFloat 同一口径 —— Shift = 0.1× 精细、Ctrl = 10× 粗调(拖动与 ↑/↓ 同倍率)。
+		const float modifier = ctx.Input().Shift ? 0.1f : (ctx.Input().Ctrl ? 10.0f : 1.0f);
 		const bool activeHovered = ctx.IsHovered(slotRect(state.Axis));
 		if (state.Editing)
 		{
@@ -3839,7 +3898,8 @@ namespace World::Wui
 					state.Dragging = true;
 				if (state.Dragging)
 				{
-					const float next = std::max(lo, std::min(hi, static_cast<float>(state.PressValue + dx * speed)));
+					const float next = std::max(lo, std::min(hi,
+						static_cast<float>(state.PressValue + dx * speed * modifier)));
 					if (next != value[state.Axis])
 					{
 						value[state.Axis] = next;
@@ -3869,8 +3929,9 @@ namespace World::Wui
 		// (编辑态下这两个键留给别处,不抢)。
 		if (focused && !state.Editing)
 		{
-			const float delta = (ctx.WasKeyPressed(KeyCodes::Up) ? keyboardStep : 0.0f)
-				+ (ctx.WasKeyPressed(KeyCodes::Down) ? -keyboardStep : 0.0f);
+			const float step = keyboardStep * modifier;
+			const float delta = (ctx.WasKeyPressed(KeyCodes::Up) ? step : 0.0f)
+				+ (ctx.WasKeyPressed(KeyCodes::Down) ? -step : 0.0f);
 			if (delta != 0.0f)
 			{
 				const float next = std::clamp(value[state.Axis] + delta, lo, hi);
