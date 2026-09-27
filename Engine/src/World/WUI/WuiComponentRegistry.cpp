@@ -2860,7 +2860,7 @@ namespace World::Wui
 				WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
 				"role=button;id=调用方稳定 id(面板:HashId('properties.<组件>.<字段>') / 'properties.section.<DisplayName>');label=A11yLabel、value=open/closed、interactive=true、focused 跟随焦点;进焦点表(Tab 可达),Enter/Space = 切换;行尾动作(复位/删除)各是子节点(kind=reset-default / button),点动作不会折叠",
-				"行高 24;展开 = theme.ActiveBg、折叠 = theme.PanelHeader、悬停 = theme.HoverBg(CollapsibleHeader 同语法);折叠命中区 = 整行减去动作列(或调用方传入的 ToggleWidth);Trailing 文本右对齐在动作列左侧",
+				"行高 24;展开 = theme.ActiveBg、折叠 = theme.PanelHeader、悬停 = theme.HoverBg(CollapsibleHeader 同语法);折叠命中区 = 整行减去动作列(或调用方传入的 ToggleWidth);Trailing 文本右对齐在动作列左侧;标签列 = 行宽 − 动作列 − Trailing(调用方不给 LabelWidth 时的默认;VEC-H5:分区头不受属性行 140 上限约束,长组件名 + 英文术语对照要放得下);展开标记 ▶/▼ 单独一笔画、固定推进 13px,不参与主名缩略(主名优先于英文术语降级,见 LabelWithTerm)",
 				A11yIds({ "showcase.property-group-header", "showcase.property-group-header.reset" }),
 				StateList({ "default", "collapsed", "hover", "focus", "modified", "disabled" }),
 				{

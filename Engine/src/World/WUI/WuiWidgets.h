@@ -71,8 +71,10 @@ namespace World::Wui
 	// 150 = 现有面板最紧的标签列(SettingsPanel 的控件列在 x+170,标签列到 164)+ 余量。
 	inline constexpr float LabelDefaultWidth = 150.0f;
 	// P4-UX1 术语对照:主文案后追加英文术语(Caption + 次要色)。用于中文界面下的有歧义条目;
-	// 英文界面传空 term 即可。P4-UX5 起显式裁剪:超出 width(设计单位,= 标签列宽)时按优先级降级 ——
-	// ① 术语省略号、② 去掉术语只留主文案、③ 主文案本身按 EllipsizeToWidth 语义截断。
+	// 英文界面传空 term 即可。P4-UX5 起显式裁剪,VEC-H5 起**主名优先**:
+	// 超出 width(设计单位,= 标签列宽)时按优先级降级 —— ① 主名完整 + 术语吃剩余宽度(超宽先缩略、
+	// 放不下就不画术语);② 主名自己都放不下时才缩略主名(EllipsizeToWidth 语义),规格与
+	// 调用方无障碍标签无必然关系 —— 只影响本行绘制文本。
 	// width 省略时用 LabelDefaultWidth;传 0 = 不做宽度裁剪(仅按自身文本绘制)。
 	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
 		const WuiColor& color, float fontSize, const WuiTheme& theme, float width);
@@ -325,6 +327,8 @@ namespace World::Wui
 		bool Open = false;
 		bool Enabled = true;
 		bool Modified = false;
+		// 标签列宽;0 = 用满"行宽 − 动作列 − 计数文本"(分区头没有值列 —— VEC-H5:
+		// 长组件名 + 英文术语对照不能被 140 的属性行上限截掉)。
 		float LabelWidth = 0.0f;
 		float ToggleWidth = -1.0f;     // 折叠命中区宽;<0 = 整行减去动作列
 		float LabelIndent = 0.0f;      // 标签文字缩进(见 PropertyRowDesc::LabelIndent)

@@ -196,9 +196,12 @@ namespace World::Wui
 	void LabelWithTerm(WuiContext& ctx, const glm::vec2& pos, const std::string& text, const std::string& term,
 		const WuiColor& color, float fontSize, const WuiTheme& theme, float width)
 	{
-		// P4-UX5 标签列裁剪(验证者指出"FixedAspectRatio"这类长术语会压住右侧控件):
-		// width = 本标签可用的设计单位宽度(含术语),超出时按优先级降级 ——
-		// ① 术语缩略('…');② 仍放不下就不画术语(保住主文案);③ 主文案自己超宽时同样截断。
+		// P4-UX5 标签列裁剪 + VEC-H5 优先级修正(用户口径:「组件名称有时候会只剩 "..."」):
+		// width = 本标签可用的设计单位宽度(含术语)。降级顺序**永远是主名优先** ——
+		// ① 主名 + 术语都放得下 → 原样;② 主名放得下 → 主名完整,术语只吃剩余宽度(超宽先缩略,
+		//  连一个字符 + 省略号都放不下就不画);③ 主名自己放不下 → 整列归主名缩略,术语让位。
+		// 旧口径先把术语的完整宽度从预算里扣掉,长术语(DirectionalLightComponent 这类)会把主名
+		// 挤成 "…"、甚至把整串(含展开标记)挤得连一个字符都放不下 → 标题只剩省略号/只剩术语。
 		const float gap = 6.0f;
 		const float termSize = theme.FontSizeCaption;
 		const bool hasTerm = !term.empty();
@@ -217,25 +220,29 @@ namespace World::Wui
 			return;
 		}
 
-		// 主文案优先:只给它留出术语的剩余空间(没有术语就整列归主文案)。
-		const float textBudget = hasTerm ? std::max(0.0f, width - gap - termWidth) : width;
-		const std::string shownText = textWidth > textBudget ? EllipsizeToWidth(ctx, text, textBudget, fontSize) : text;
-		const float shownTextWidth = ctx.MeasureTextWidth(shownText, fontSize);
-		Label(ctx, pos, shownText, color, fontSize);
-		if (!hasTerm)
+		// ② 主名先拿"整列优先权":放得下就完整画主名(不因术语被压)。
+		if (textWidth <= width)
+		{
+			Label(ctx, pos, text, color, fontSize);
+			if (!hasTerm)
+				return;
+			const float termBudget = width - textWidth - gap;
+			if (termBudget <= 0.0f)
+				return;   // 主名已占满整列:不画术语
+			const std::string shownTerm = termWidth <= termBudget
+				? term
+				: EllipsizeToWidth(ctx, term, termBudget, termSize);
+			if (shownTerm.empty())
+				return;   // 连一个字符加省略号都放不下:不画术语,而不是画一个孤立 '…'
+			ctx.Commands().push_back({ WuiDrawKind::Text, { pos.x + textWidth + gap, pos.y + (fontSize - termSize) * 0.5f, 0, 0 },
+				theme.TextMuted, 0, 1.0f, shownTerm, termSize, false });
 			return;
+		}
 
-		const float termX = pos.x + shownTextWidth + gap;
-		const float termBudget = width - (shownTextWidth + gap);
-		if (termBudget <= 0.0f)
-			return;   // ② 主文案已占满:不画术语
-		const std::string shownTerm = ctx.MeasureTextWidth(term, termSize) <= termBudget
-			? term
-			: EllipsizeToWidth(ctx, term, termBudget, termSize);
-		if (shownTerm.empty())
-			return;   // ① 连一个字符加省略号都放不下:不画术语,而不是画一个孤立 '…'
-		ctx.Commands().push_back({ WuiDrawKind::Text, { termX, pos.y + (fontSize - termSize) * 0.5f, 0, 0 },
-			theme.TextMuted, 0, 1.0f, shownTerm, termSize, false });
+		// ③ 主名自己也放不下:整列归主名缩略;术语不再参与(它不得反压主名)。
+		const std::string shownText = EllipsizeToWidth(ctx, text, width, fontSize);
+		if (!shownText.empty())
+			Label(ctx, pos, shownText, color, fontSize);
 	}
 
 	namespace
@@ -1931,6 +1938,12 @@ namespace World::Wui
 			return open ? "\u25BC " : "\u25B6 ";
 		}
 
+		// VEC-H5:展开标记的固定推进量(箭头字形 + 尾随空格)。标记字形在字体度量钩子里量不准
+		// (实测:MeasureTextWidth("▶ ") ≈ 4,而渲染实际推进 ≈ 13),所以标记**单独画 + 固定占位**:
+		// ① 主名被缩略时标记不会跟着消失(用户口径「DirectionalLightComponent 没有折叠标识」);
+		// ② 不会因为量成 0 而把主名画到箭头上。13 = 箭头推进 9 + 空格 4(与 13px 标签字号配套)。
+		constexpr float kPropertyExpandMarkerAdvance = 13.0f;
+
 		// VEC-H4:嵌套层级 = 标签文字缩进 + 1px 树导线(导线画在缩进原点,不动行矩形)。
 		void DrawRowIndentGuide(WuiContext& ctx, const WuiRect& row, float labelIndent, const WuiTheme& theme)
 		{
@@ -1949,10 +1962,18 @@ namespace World::Wui
 				return;
 			const float size = kPropertyLabelSize;
 			const float indent = std::max(0.0f, labelIndent);
-			const float budget = std::max(16.0f, labelWidth - kPropertyLabelTextX - indent - kPropertyFieldGutter);
+			const float y = row.Y + (row.H - size) * 0.5f - 2.0f;
+			float x = row.X + kPropertyLabelTextX + indent;
+			float budget = std::max(16.0f, labelWidth - kPropertyLabelTextX - indent - kPropertyFieldGutter);
+			if (expandable)
+			{
+				// VEC-H5:展开标记单独一笔画,且**永不参与主名的缩略** —— 折叠标识始终可见。
+				Wui::Label(ctx, { x, y }, RowExpandMarker(open), color, size);
+				x += kPropertyExpandMarkerAdvance;
+				budget = std::max(16.0f, budget - kPropertyExpandMarkerAdvance);
+			}
 			Wui::LabelWithTerm(ctx,
-				{ row.X + kPropertyLabelTextX + indent, row.Y + (row.H - size) * 0.5f - 2.0f },
-				(expandable ? RowExpandMarker(open) : std::string()) + label, term, color, size, theme, budget);
+				{ x, y }, label, term, color, size, theme, budget);
 		}
 
 		// 已修改标记:被改过的字段在标签左侧给一个小圆点(不靠颜色吓人,也不移动文字)。
@@ -2124,7 +2145,15 @@ namespace World::Wui
 			result.ResetRect = InsideActionRect(row, actionIndex++);
 			actionReserve += kPropertyActionWidth + kPropertyActionGap;
 		}
-		const float labelWidth = RowLabelWidth(row, desc.LabelWidth);
+		// VEC-H5:分区头没有值列 —— 调用方没给 LabelWidth 时,标签列用满"行宽 − 动作列 − 计数文本",
+		// 不再套属性行的 140px 上限(长组件名 + 英文术语对照要在 1280/1600 下都读得全)。
+		// 调用方给了 LabelWidth(如脚本检视器的集合头)时保持原口径,不动既有布局。
+		const float trailingWidth = desc.Trailing.empty() ? 0.0f
+			: ctx.MeasureTextWidth(desc.Trailing, theme.FontSizeSmall);
+		const float labelWidth = desc.LabelWidth > 0.0f
+			? RowLabelWidth(row, desc.LabelWidth)
+			: std::max(0.0f, row.W - actionReserve - kPropertyFieldGutter
+				- (desc.Trailing.empty() ? 0.0f : trailingWidth + kPropertyActionGap));
 		const bool focused = id != 0 && ctx.Focus() == id;
 		const bool hovered = ctx.IsHovered(row);
 		// 底色语法与 CollapsibleHeader 一致:展开 = ActiveBg、折叠 = PanelHeader、悬停 = HoverBg。

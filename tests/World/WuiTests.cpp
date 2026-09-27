@@ -4352,6 +4352,182 @@ int main()
 			accessibility.Clear();
 		}
 
+		// 32c. VEC-H5:分区头主名/英文术语/展开标记的降级顺序(用户口径:「在启用英文术语情况下,
+		//      组件名称有时候会只剩 "..."」「DirectionLightComponent 组件没有折叠标识」)——
+		//      ① 主名优先:预算不够时先缩略/去掉术语,主名必须**完整**;主名自己都放不下才缩略主名;
+		//      ② 展开标记单独一笔画:**永不被主名的缩略吞掉**(旧口径里标记与主名同串,一起被挤没);
+		//      ③ 分区头没有值列 → 标签列用满"行宽 − 动作列 − 计数文本"(不再套属性行的 140 上限)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme {};
+			WuiInputState idle;
+			idle.ViewportSize = { 1280.0f, 720.0f };
+			const std::string mainLabel = "平行光组件";
+			const std::string lightTerm = "DirectionalLightComponent";
+			const float labelSize = 13.0f;
+			const float mainWidth = MeasureTextWithHook(mainLabel, labelSize, WuiFontFamily::Ui);
+			const float termWidth = MeasureTextWithHook(lightTerm, theme.FontSizeCaption, WuiFontFamily::Ui);
+			const auto EndsWithEllipsis = [](const std::string& text)
+			{
+				return text.size() >= 3 && text.compare(text.size() - 3, 3, "\u2026") == 0;
+			};
+			const auto CollectTexts = [](WuiContext& ctx)
+			{
+				std::vector<const WuiDrawCommand*> texts;
+				for (const WuiDrawCommand& command : ctx.Commands())
+					if (command.Kind == WuiDrawKind::Text)
+						texts.push_back(&command);
+				return texts;
+			};
+			const auto HasText = [](const std::vector<const WuiDrawCommand*>& texts, const std::string& wanted)
+			{
+				for (const WuiDrawCommand* command : texts)
+					if (command->Text == wanted)
+						return true;
+				return false;
+			};
+
+			// ---- ① 预算 128(= VEC-H4 分区头 labelWidth 140 − 内边距):中文界面 + 术语对照下,
+			//      旧口径先把术语整宽从预算里扣掉 ⇒ 主名被挤成 "…"(1280×720 与 1600×1200 实测都是)。
+			{
+				WuiContext ctx;
+				ctx.BeginFrame(idle);
+				LabelWithTerm(ctx, { 100.0f, 100.0f }, mainLabel, lightTerm, theme.Text, labelSize, theme, 128.0f);
+				ctx.EndFrame();
+				CHECK(mainWidth + 6.0f + termWidth > 128.0f);        // 前提:主名 + 术语一起放不下
+				const std::vector<const WuiDrawCommand*> texts = CollectTexts(ctx);
+				CHECK(HasText(texts, mainLabel));                    // 主名完整可读
+				CHECK(!HasText(texts, "\u2026"));                    // 绝不出现"只剩省略号"
+				bool termShortened = false;
+				for (const WuiDrawCommand* command : texts)
+				{
+					if (command->Text == mainLabel)
+					{
+						CHECK(Near(command->Rect.X, 100.0f));
+						continue;
+					}
+					// 术语:只吃主名之后的剩余宽度 ⇒ 起点 = 主名右缘 + 6,且一定被缩略(放不下整串)。
+					CHECK(command->Text.size() < lightTerm.size());
+					CHECK(EndsWithEllipsis(command->Text));
+					CHECK(Near(command->Rect.X, 100.0f + mainWidth + 6.0f));
+					termShortened = true;
+				}
+				CHECK(termShortened);
+			}
+
+			// ---- ② 主名自己都放不下(极端窄列):整列归主名缩略,术语整体让位(不得反压主名) ----
+			{
+				WuiContext ctx;
+				ctx.BeginFrame(idle);
+				LabelWithTerm(ctx, { 100.0f, 100.0f }, mainLabel, lightTerm, theme.Text, labelSize, theme,
+					mainWidth * 0.5f);
+				ctx.EndFrame();
+				const std::vector<const WuiDrawCommand*> texts = CollectTexts(ctx);
+				CHECK(!texts.empty());
+				bool mainShortened = false;
+				for (const WuiDrawCommand* command : texts)
+				{
+					CHECK(command->Text.find("Directional") == std::string::npos);   // 术语整体让位
+					if (command->Text != "\u2026")
+						mainShortened = mainShortened || EndsWithEllipsis(command->Text);
+				}
+				CHECK(mainShortened);
+			}
+
+			// ---- ③ 分区头(库件 PropertyGroupHeader):宽行给足标签列 + 折叠标记单独一笔 ----
+			struct SectionPaint
+			{
+				std::vector<std::pair<std::string, float>> Texts;   // (绘制文本, 绘制 x)
+				std::string Kind;
+				std::string Value;
+			};
+			const WuiId sectionId = HashId("test.vec-h5.section");
+			const auto PaintSection = [&](const WuiRect& row, const PropertyGroupHeaderDesc& desc)
+			{
+				SectionPaint paint;
+				WuiContext ctx;
+				accessibility.BeginFrame("main", { 1280.0f, 720.0f });
+				accessibility.SetPanel("test.vec-h5");
+				ctx.BeginFrame(idle);
+				PropertyGroupHeader(ctx, sectionId, row, desc, theme);
+				ctx.EndFrame();
+				for (const WuiDrawCommand& command : ctx.Commands())
+					if (command.Kind == WuiDrawKind::Text)
+						paint.Texts.push_back({ command.Text, command.Rect.X });
+				const WuiAccessNode* node = accessibility.Find(sectionId);
+				if (node)
+				{
+					paint.Kind = node->Kind;
+					paint.Value = node->Value;
+				}
+				return paint;
+			};
+			const auto SectionHasText = [](const SectionPaint& paint, const std::string& wanted)
+			{
+				for (const auto& entry : paint.Texts)
+					if (entry.first == wanted)
+						return true;
+				return false;
+			};
+			const auto SectionTextX = [](const SectionPaint& paint, const std::string& wanted)
+			{
+				for (const auto& entry : paint.Texts)
+					if (entry.first == wanted)
+						return entry.second;
+				return -1.0f;
+			};
+
+			const WuiRect wideRow { 200.0f, 300.0f, 360.0f, 24.0f };
+			PropertyGroupHeaderDesc sectionDesc;
+			sectionDesc.Label = mainLabel;
+			sectionDesc.Term = lightTerm;
+			sectionDesc.Open = false;
+			sectionDesc.ShowRemove = true;
+			sectionDesc.RemoveId = HashId("test.vec-h5.section.remove");
+			sectionDesc.RemoveLabel = "Remove Component";
+			{
+				const SectionPaint paint = PaintSection(wideRow, sectionDesc);
+				CHECK(SectionHasText(paint, "\u25B6 "));             // 折叠标记(▶)是独立一笔
+				CHECK(SectionHasText(paint, mainLabel));             // 中文主名完整
+				CHECK(SectionHasText(paint, lightTerm));             // 术语也放得下(标签列用满行宽)
+				CHECK(Near(SectionTextX(paint, "\u25B6 "), wideRow.X + 8.0f));
+				CHECK(Near(SectionTextX(paint, mainLabel), wideRow.X + 8.0f + 13.0f));
+				const float termRight = SectionTextX(paint, lightTerm)
+					+ MeasureTextWithHook(lightTerm, theme.FontSizeCaption, WuiFontFamily::Ui);
+				CHECK(termRight <= wideRow.X + wideRow.W - 26.0f);   // 不压行尾 ✕(24 宽 + 2 间隔)
+				CHECK(paint.Kind == "button" && paint.Value == "closed");
+			}
+
+			// 折叠/展开:标记字形随状态切换,a11y value = open/closed(与其它分区同一契约)。
+			{
+				PropertyGroupHeaderDesc openDesc = sectionDesc;
+				openDesc.Open = true;
+				const SectionPaint paint = PaintSection(wideRow, openDesc);
+				CHECK(SectionHasText(paint, "\u25BC "));
+				CHECK(paint.Kind == "button" && paint.Value == "open");
+			}
+
+			// 极端窄行(150 宽 + 8 字主名):主名被缩略,但**展开标记必须还在**(旧口径整串消失)。
+			{
+				PropertyGroupHeaderDesc narrowDesc = sectionDesc;
+				narrowDesc.Label = "蒙皮网格渲染组件";
+				narrowDesc.Term = "SkinnedMeshRendererComponent";
+				const WuiRect narrowRow { 200.0f, 340.0f, 150.0f, 24.0f };
+				const SectionPaint paint = PaintSection(narrowRow, narrowDesc);
+				CHECK(SectionHasText(paint, "\u25B6 "));
+				CHECK(!SectionHasText(paint, "\u2026"));             // 不允许"只剩省略号"
+				bool labelShortened = false;
+				for (const auto& entry : paint.Texts)
+					if (entry.first.rfind("\u8499\u76ae", 0) == 0)   // 以"蒙皮"开头 = 主名那一笔
+						labelShortened = EndsWithEllipsis(entry.first);
+				CHECK(labelShortened);
+				CHECK(paint.Kind == "button" && paint.Value == "closed");
+			}
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		// 33. MAT-UI3a:焦点环视觉(圆角细描边 + 外发光,accent 低透明度)。
 		//     用户原话:「这个聚焦选中能否按照人类美学重新设计下」。这里把新口径钉成命令流事实:
 		//     ① 没有焦点 → 什么都不画(既有不变量);
