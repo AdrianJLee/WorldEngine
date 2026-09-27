@@ -386,17 +386,19 @@ namespace World
 	{
 		// 图标是**编辑器资源**(Editor/assets/icons),不是内容根里的游戏资产 ——
 		// 一律走 EditorResourcePath 拼绝对路径(见 EditorResources.h)。
-		m_IconPlay = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Play.png"));
+		// VEC-H6:资产形态 PNG → 引擎单文件容器 `.wtex`(PNG 字节内嵌为 payload,不重编码);
+		// `TextureData::LoadTextureData` 的容器分支解码同一份字节 ⇒ 图标外观逐字节不变。
+		m_IconPlay = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Play.wtex"));
 
-		m_IconStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Stop.png"));
+		m_IconStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Stop.wtex"));
 
-		m_IconPause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Pause.png"));
-		m_IconContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Continue.png"));
+		m_IconPause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Pause.wtex"));
+		m_IconContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_Continue.wtex"));
 
-		m_IconSimulate = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStart.png"));
-		m_IconSimulateStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStop.png"));
-		m_IconSimulatePause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulatePause.png"));
-		m_IconSimulateContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateContinue.png"));
+		m_IconSimulate = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStart.wtex"));
+		m_IconSimulateStop = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateStop.wtex"));
+		m_IconSimulatePause = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulatePause.wtex"));
+		m_IconSimulateContinue = Texture2D::Create(EditorResourcePath("assets/icons/Icon_SimulateContinue.wtex"));
 	}
 
 	void EditorLayer::OnDetach()

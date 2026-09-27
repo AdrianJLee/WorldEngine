@@ -2085,7 +2085,9 @@ namespace World::Wui
 			result.FieldRect.H = desc.FieldHeight;
 			result.FieldRect.Y = row.Y + (row.H - desc.FieldHeight) * 0.5f;
 		}
-		if (desc.ShowReset)
+		// VEC-H6:ShowReset 决定**占位**(几何不变);ResetModified=false = 该行与脚本默认一致 →
+		// 不画 ↺、也不登记节点(用户口径「一致时不出现」,不是禁用态)。
+		if (desc.ShowReset && desc.ResetModified)
 		{
 			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
 				desc.ResetLabel, desc.ResetTooltip);
@@ -2189,7 +2191,8 @@ namespace World::Wui
 			if (!desc.Tooltip.empty())
 				Tooltip(ctx, row, desc.Tooltip);
 		}
-		if (desc.ShowReset)
+		// VEC-H6:集合头同口径 —— 集合里有任一元素/键值/形状偏离默认才画 ↺(占位槽不变)。
+		if (desc.ShowReset && desc.ResetModified)
 		{
 			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
 				desc.ResetLabel, desc.ResetTooltip);
@@ -2257,7 +2260,8 @@ namespace World::Wui
 			desc.A11yValue, desc.A11yEnabled, desc.A11yEnabled, false, desc.Tooltip);
 		if (hovered && !desc.Tooltip.empty())
 			Tooltip(ctx, content, desc.Tooltip);
-		if (desc.ShowReset)
+		// VEC-H6:元素/键值行同口径(单项 ↺ 只在偏离默认时出现)。
+		if (desc.ShowReset && desc.ResetModified)
 		{
 			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
 				desc.ResetLabel, desc.ResetTooltip);
@@ -2296,6 +2300,61 @@ namespace World::Wui
 			enabled ? (danger && hovered ? theme.Danger : theme.Text) : theme.TextDisabled, 0, 1.0f, label, size,
 			false });
 		RegisterRowNode(id, "button", rect, label, tooltip, enabled, enabled, focused, tooltip);
+		if (enabled)
+			ctx.RegisterFocusable(id, rect);
+		DrawFocusRing(ctx, rect, id, theme);
+		if (hoveredAny)
+		{
+			if (enabled)
+				ctx.SetCursor(WuiCursor::Hand);
+			if (!tooltip.empty())
+				Tooltip(ctx, rect, tooltip);
+		}
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		return enabled && (ctx.IsClicked(rect) || keyActivated);
+	}
+
+	bool OpenInEditorButton(WuiContext& ctx, WuiId id, const WuiRect& rect, const WuiTheme& theme, bool enabled,
+		const std::string& label, const std::string& tooltip)
+	{
+		if (rect.W <= 2.0f || rect.H <= 2.0f)
+			return false;
+		// VEC-H6:与 RowActionButton 同一套状态语法(禁用态也要给理由:tooltip 就是那句理由)。
+		const bool hoveredAny = ctx.IsHovered(rect);
+		const bool hovered = enabled && hoveredAny;
+		const bool focused = enabled && ctx.Focus() == id;
+		const bool pressed = hovered && ctx.Input().MouseDown[0];
+		const WuiColor fill = enabled
+			? (pressed ? theme.ActiveBg : (hovered ? theme.ButtonHover : theme.ButtonBg)) : theme.PanelBg;
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
+			enabled ? (hovered ? theme.Accent : theme.Border) : theme.Border, 3.0f, 1.0f });
+		// 纯矢量 glyph `</>`:两段折线尖括号 + 一道斜线。几何按控件短边等比缩放,20x20 与 24x24 同样清楚。
+		const WuiColor color = enabled ? theme.Text : theme.TextDisabled;
+		const float cx = rect.X + rect.W * 0.5f;
+		const float cy = rect.Y + rect.H * 0.5f;
+		const float side = std::min(rect.W, rect.H);
+		// 几何按短边等比:20x20 的图标位里 `</>` 三个笔画都要能分辨。实测两个坑(都靠 ASCII 像素图复核):
+		// ① 斜线太陡 → 与尖括号糊成 "<>";② 斜线太长 → 端点贴上尖括号内侧,整体读成 ")( "。
+		// 所以:尖括号让到外侧(gap × reach)、斜线只占中段(明显短于尖括号高度)。
+		const float half = std::max(3.0f, side * 0.28f);          // 尖括号半高
+		const float reach = std::max(2.4f, side * 0.14f);         // 尖括号横跨
+		const float gap = std::max(3.4f, side * 0.21f);           // 中心到尖括号内侧端点的留白(给斜线让位)
+		const float slashX = std::max(1.4f, side * 0.09f);        // 斜线水平半宽
+		const float slashY = std::max(2.6f, side * 0.17f);        // 斜线纵向半高(短于 half ⇒ 不会贴到尖括号端点)
+		constexpr float kStroke = 1.6f;
+		// 左 `<`
+		PushLineQuad(ctx, { cx - gap, cy - half }, { cx - gap - reach, cy }, kStroke, color);
+		PushLineQuad(ctx, { cx - gap - reach, cy }, { cx - gap, cy + half }, kStroke, color);
+		// 右 `>`
+		PushLineQuad(ctx, { cx + gap, cy - half }, { cx + gap + reach, cy }, kStroke, color);
+		PushLineQuad(ctx, { cx + gap + reach, cy }, { cx + gap, cy + half }, kStroke, color);
+		// 中缝的 `/`(读成代码,而不是一对普通箭头)
+		PushLineQuad(ctx, { cx - slashX, cy + slashY }, { cx + slashX, cy - slashY }, kStroke, color);
+		// 无障碍:图标按钮没有可见文字 —— label/value/tooltip 三处都要有语义(读屏与脚本共用)。
+		RegisterRowNode(id, "button", rect, label.empty() ? std::string("Open in editor") : label, tooltip,
+			enabled, enabled, focused, tooltip);
 		if (enabled)
 			ctx.RegisterFocusable(id, rect);
 		DrawFocusRing(ctx, rect, id, theme);

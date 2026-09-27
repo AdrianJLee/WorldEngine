@@ -5693,6 +5693,154 @@ int main()
 			}
 		}
 
+		// 44. VEC-H6:① 复位 `↺` 只在"值/形状 != 脚本声明默认"时出现 —— 一致时**不画也不登记**
+		//      (不是禁用态),且动作列是固定占位(两种状态行/字段列几何逐像素相同);
+		//      ② "在脚本编辑器里打开" = 纯图标按钮(矢量 `</>` glyph;按钮文字进 tooltip;
+		//      a11y kind=button + label=文案 + value/tooltip=悬停说明;键盘可达;禁用不进焦点表)。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme {};
+			WuiInputState idle;
+			idle.ViewportSize = { 1280.0f, 720.0f };
+			idle.MousePos = { 20.0f, 20.0f };
+			const WuiRect row { 300.0f, 200.0f, 300.0f, 24.0f };
+			const WuiId rowId = HashId("test.vec-h6.row");
+			const WuiId resetId = HashId("test.vec-h6.row.reset");
+			const auto PaintRow = [&](bool showReset, bool resetModified, bool* resetNodePresent)
+			{
+				PropertyRowDesc desc;
+				desc.Label = "Speed";
+				desc.A11yKind = "label";
+				desc.A11yLabel = "Speed";
+				desc.A11yEnabled = false;
+				desc.ShowReset = showReset;
+				desc.ResetEnabled = true;              // 值确实偏离时的可交互口径
+				desc.ResetModified = resetModified;
+				desc.ResetId = resetId;
+				desc.ResetLabel = "Reset this item to the script default";
+				desc.ResetTooltip = "Restore only this item to the script's default value (the row goes back to unset)";
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h6");
+				WuiContext ctx;
+				ctx.BeginFrame(idle);
+				const PropertyRowResult result = PropertyRow(ctx, rowId, row, desc, theme);
+				ctx.EndFrame();
+				if (resetNodePresent != nullptr)
+					*resetNodePresent = accessibility.Find(resetId) != nullptr;
+				CHECK(accessibility.Find(rowId) != nullptr);   // 同一帧里行节点确实登记了(排除"整帧没登记")
+				return result;
+			};
+			bool resetShown = false;
+			const PropertyRowResult modifiedRow = PaintRow(true, /*resetModified=*/true, &resetShown);
+			CHECK(resetShown);
+			{
+				const WuiAccessNode* resetNode = accessibility.Find(resetId);
+				CHECK(resetNode != nullptr && resetNode->Kind == "reset-default");
+				CHECK(resetNode != nullptr && resetNode->Value == "modified");
+				CHECK(resetNode != nullptr && resetNode->Enabled && resetNode->Interactive && resetNode->Visible);
+			}
+			bool resetHidden = false;
+			const PropertyRowResult defaultRow = PaintRow(true, /*resetModified=*/false, &resetHidden);
+			CHECK(!resetHidden);                               // 一致 → 不出现(不是禁用占位)
+			// 预留位:值一致/不一致时行矩形、字段列与复位槽逐像素相同(布局不因 ↺ 出现/消失而跳)。
+			CHECK(Near(defaultRow.FieldRect.X, modifiedRow.FieldRect.X));
+			CHECK(Near(defaultRow.FieldRect.W, modifiedRow.FieldRect.W));
+			CHECK(Near(defaultRow.ResetRect.X, modifiedRow.ResetRect.X));
+			CHECK(Near(defaultRow.ResetRect.W, modifiedRow.ResetRect.W));
+			// 对照:没有预留位的行(ShowReset=false)字段列更宽 —— 预留只由 ShowReset 决定。
+			const PropertyRowResult plainRow = PaintRow(false, true, nullptr);
+			CHECK(plainRow.FieldRect.W > modifiedRow.FieldRect.W);
+
+			// 集合头同口径:ResetModified=false → 头行照常可折叠、可读,但不画集合级 `↺`。
+			const WuiRect headerRow { 300.0f, 230.0f, 300.0f, 24.0f };
+			const WuiId headerId = HashId("test.vec-h6.header");
+			const WuiId headerResetId = HashId("test.vec-h6.header.reset");
+			{
+				PropertyGroupHeaderDesc desc;
+				desc.Label = "Scores";
+				desc.A11yLabel = "Scores";
+				desc.Open = false;
+				desc.ShowReset = true;
+				desc.ResetEnabled = true;
+				desc.ResetModified = false;
+				desc.ResetId = headerResetId;
+				desc.ResetLabel = "Reset the whole array";
+				desc.ResetTooltip = "Restore the entire collection to the script's default shape and values";
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h6");
+				WuiContext ctx;
+				ctx.BeginFrame(idle);
+				const PropertyGroupHeaderResult header = PropertyGroupHeader(ctx, headerId, headerRow, desc, theme);
+				ctx.EndFrame();
+				CHECK(!header.ResetClicked);
+				CHECK(accessibility.Find(headerResetId) == nullptr);
+				const WuiAccessNode* headerNode = accessibility.Find(headerId);
+				CHECK(headerNode != nullptr && headerNode->Kind == "button" && headerNode->Value == "closed");
+			}
+
+			// ② 图标按钮:`</>` = 4 段折线 + 1 段斜线(纯矢量),节点语义三件套齐。
+			const WuiId openId = HashId("test.vec-h6.open");
+			const WuiRect openRect { 320.0f, 260.0f, 20.0f, 20.0f };
+			const std::string openLabel = "Open in Editor";
+			const std::string openTip = "Open in Editor\nOpen this script asset in the built-in script editor";
+			{
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h6");
+				WuiContext ctx;
+				ctx.BeginFrame(idle);
+				CHECK(!OpenInEditorButton(ctx, openId, openRect, theme, true, openLabel, openTip));
+				size_t quads = 0;
+				for (const WuiDrawCommand& command : ctx.Commands())
+					if (command.Kind == WuiDrawKind::Quad)
+						++quads;
+				CHECK(quads == 5);                          // 两个尖括号各 2 段 + 中间斜线 1 段
+				ctx.EndFrame();
+				const WuiAccessNode* node = accessibility.Find(openId);
+				CHECK(node != nullptr && node->Kind == "button");
+				CHECK(node != nullptr && node->Label == openLabel);
+				CHECK(node != nullptr && node->Value == openTip && node->Tooltip == openTip);
+			}
+			{
+				// 键盘:第一帧登记焦点表 → 第二帧 Tab 停到它、Enter 激活(与库件其它按钮同一节奏)。
+				// 焦点表按 WuiContext 持有 ⇒ 两帧必须复用同一个 ctx(与 §23 的契约用例同一条节奏)。
+				WuiContext ctx;
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h6");
+				ctx.BeginFrame(idle);
+				OpenInEditorButton(ctx, openId, openRect, theme, true, openLabel, openTip);
+				ctx.EndFrame();
+				WuiInputState press = idle;
+				press.KeyPressed = { static_cast<uint32_t>(World::KeyCodes::Tab),
+					static_cast<uint32_t>(World::KeyCodes::Enter) };
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h6");
+				ctx.BeginFrame(press);
+				const bool activated = OpenInEditorButton(ctx, openId, openRect, theme, true, openLabel, openTip);
+				ctx.EndFrame();
+				CHECK(ctx.Focus() == openId);
+				CHECK(activated);
+			}
+			{
+				// 禁用(没有脚本 / Play 只读):节点仍在但 Enabled/Interactive=false,点击不触发,理由在 tooltip。
+				WuiInputState click = idle;
+				click.MousePos = { openRect.X + 10.0f, openRect.Y + 10.0f };
+				click.MouseClicked[0] = true;
+				click.MouseDown[0] = true;
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test.vec-h6");
+				WuiContext ctx;
+				ctx.BeginFrame(click);
+				CHECK(!OpenInEditorButton(ctx, openId, openRect, theme, false, openLabel, "Pick a script asset first"));
+				ctx.EndFrame();
+				const WuiAccessNode* node = accessibility.Find(openId);
+				CHECK(node != nullptr && !node->Enabled && !node->Interactive);
+				CHECK(node != nullptr && node->Label == openLabel && node->Tooltip == "Pick a script asset first");
+			}
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}

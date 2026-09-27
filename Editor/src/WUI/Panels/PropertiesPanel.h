@@ -2,6 +2,7 @@
 
 #include "EditorPanel.h"
 #include "World/Scene/Components.h"
+#include "World/Script/ScriptProperties.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
 
@@ -70,26 +71,19 @@ namespace World
 			void* instance, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
 			std::vector<std::string>* changedFields = nullptr);
 
-		// ---- VEC-F2:两级复原(单项 / 整个集合)----
+		// ---- VEC-F2 / VEC-H6:两级复原(单项 / 整个集合)----
 		//
-		// 用户口径:「对于数组或 Map 类型的属性,复原按钮会把整个都复原而非单个值」→ 拆成两级:
+		// 用户口径(VEC-F2):「对于数组或 Map 类型的属性,复原按钮会把整个都复原而非单个值」→ 拆成两级:
 		//   * 单项 `↺`(叶子 / 数组元素 / 映射值行)= 只把**这一行**清成"未设",显示回落脚本默认值,
 		//     同一集合里其它元素的行/值/形状都不动;
 		//   * 集合头 `↺`(数组 / 映射 / 结构化表的折叠头行)= 复原**整个集合**到脚本声明的默认形状
-		//     与默认值(丢弃所有增删改)—— 破坏性动作,先弹确认(与"移除组件"同一套面板级模态)。
+		//     与默认值(丢弃所有增删改)。
 		//
-		// 确认请求按**名字路径**记(实体 + 组件 id + 顶层属性名 → 逐层子行名),不存
-		// `ScriptProperty*` —— 声明同步会整体重建属性表,指针会失效;映射键原样是一段,不按 '.' 拆串。
-		struct ScriptCollectionResetRequest
-		{
-			Entity Target;
-			uint32_t ComponentId = 0;
-			bool Luau = false;
-			std::string FieldText;           // prefab 覆盖登记用(与 changedFields 同一条口径)
-			std::vector<std::string> Path;   // 顶层属性名 → 子行名
-		};
-		ScriptCollectionResetRequest m_ScriptCollectionResetRequest;
-		// 当前正在绘制的脚本组件(集合头 `↺` 打开确认时带上实体/组件/语言)。
+		// 用户口径(VEC-H6,2026-09-27):① 两级 `↺` 都只在"当前值/形状 != 脚本声明默认"时**出现**
+		// (一致时不画 —— 不是禁用态);② 集合头复原**单击即落地**,删除上一轮的二次确认模态。
+		// 复原按**名字路径**做(顶层属性名 → 逐层子行名):声明同步会整体重建属性表,`ScriptProperty*`
+		// 会失效;映射键原样是一段,不按 '.' 拆串。
+		// 当前正在绘制的脚本组件(集合头 `↺` 复原时带上实体/组件/语言)。
 		Entity m_ScriptInspectingEntity;
 		uint32_t m_ScriptInspectingComponentId = 0;
 		bool m_ScriptInspectingLuau = false;
@@ -98,11 +92,19 @@ namespace World
 		std::string m_ScriptInspectingComponentName;   // schema.DisplayName(prefab 覆盖登记用)
 		// 当前绘制位置的**容器路径**(行路径 = 它 + 字段名);只有脚本属性行的递归维护它。
 		std::vector<std::string> m_ScriptRowPath;
-		void OpenScriptCollectionResetConfirm(Wui::WuiContext& ctx, ScriptProperty& container);
-		void CloseScriptCollectionResetConfirm(Wui::WuiContext& ctx);
-		void DrawScriptCollectionResetConfirm(Wui::WuiContext& ctx);
-		// 确认后落地:Luau 按**单条声明**重建这一条(默认形状 + 默认值);C++ 结构化表递归回默认值。
-		void ApplyScriptCollectionReset();
+		// 本帧当前脚本组件的注解/schema 声明(只有 Luau 有):集合头的"形状是否偏离默认"判定要按
+		// 声明的默认形状比较;每帧在 DrawScriptComponentInspector 开头刷新,离开该函数即失效(不再引用)。
+		std::vector<ScriptProperties::Declaration> m_ScriptDeclarations;
+		bool m_ScriptDeclarationsValid = false;
+		// VEC-H6:集合头 `↺` 的落地**推迟到本属性画完** —— 点头部那一帧后面还要按旧合成 schema 递归画
+		// 子行;立刻重建容器会让"schema(旧形状) vs Children(新形状)"错位一帧(与元素增删同一套延后口径)。
+		ScriptProperty* m_PendingCollectionReset = nullptr;
+		bool m_PendingCollectionResetLuau = false;
+		std::vector<std::string> m_PendingCollectionResetPath;
+		// 集合头 `↺` 单击即落地(无二次确认):Luau 按**单条声明**重建这一条(默认形状 + 默认值);
+		// C++ 结构化表递归回默认值。container 就是本帧正在画的那个容器(合成路径下指针稳定)。
+		void ApplyScriptCollectionReset(Wui::WuiContext& ctx, ScriptProperty& container, bool luau,
+			const std::vector<std::string>& path);
 		// VEC-F2:单项 `↺` 的落地 —— Luau 按名字路径把该行对齐到脚本**当前声明**的默认值
 		// (Value 清成"未设" + Default 刷新):面板 `+`/`-` 只重排行名,旧 Default 会挂在改名后的行上,
 		// 只回落到旧 Default 会显示"不是当前声明的默认值"。返回 false = 声明拿不到(C++ / 无 VM),

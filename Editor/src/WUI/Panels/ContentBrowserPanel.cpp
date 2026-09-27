@@ -3146,10 +3146,11 @@ namespace World
 			m_DirIconId = 0;
 			m_FileIconId = 0;
 		}
+		// VEC-H6:编辑器图标资产 PNG → `.wtex` 单文件容器(payload = 原 PNG 字节,外观不变)。
 		if (!m_DirIcon)
-			m_DirIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/DirectoryIcon.png"));
+			m_DirIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/DirectoryIcon.wtex"));
 		if (!m_FileIcon)
-			m_FileIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/FileIcon.png"));
+			m_FileIcon = Texture2D::Create(EditorResourcePath("assets/icons/ContentBrowser/FileIcon.wtex"));
 		Wui::WuiTextureRegistry& registry = Wui::WuiTextureRegistry::Get();
 		if (registry.Generation() != m_IconGeneration)
 		{

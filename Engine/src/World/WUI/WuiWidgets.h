@@ -233,6 +233,22 @@ namespace World::Wui
 		const WuiTheme& theme, const std::string& label = std::string(),
 		const std::string& tooltip = std::string());
 
+	// ---- VEC-H6:"在脚本编辑器里打开"图标按钮(纯图标;按钮文字搬进悬停提示)----
+	//
+	// 用户口径(2026-09-27):「Lua 脚本组件中的"在编辑器里打开"能不能换成一个图标,然后把文字放到悬浮提示里。
+	// 图标你可以想办法绘制。」图标 = **矢量 `</>`**(两段折线尖括号 + 一道斜线),与 ResetDefaultButton
+	// 同一套"控件自己画线"的实现 —— 不依赖图标字体里有没有对应字形,也不依赖外部纹理,任何主题/缩放
+	// 下都画得出来(与引擎既有 `.wtex` 图标并行:这条是纯绘制路径)。
+	//  · 状态:default(ButtonBg)/ hover(ButtonHover + 手型)/ pressed(ActiveBg)/ disabled(PanelBg +
+	//    TextDisabled,理由进 tooltip);enabled=false 时节点仍在(Enabled/Interactive=false)但不进
+	//    焦点表,与 RowActionButton 的"灰按钮不能没有理由"同一条口径;
+	//  · 无障碍:kind="button"、label=语义文案(图标按钮没有可见文字,读屏/脚本靠它)、
+	//    value/tooltip=悬停说明;启用态进焦点表,Tab 可达、Enter/Space 激活。
+	// 返回值 = 本帧被点击/键盘激活(enabled=false 恒 false)。
+	WLD_API bool OpenInEditorButton(WuiContext& ctx, WuiId id, const WuiRect& rect, const WuiTheme& theme,
+		bool enabled = true, const std::string& label = std::string(),
+		const std::string& tooltip = std::string());
+
 	// ---- VEC-H2:属性面板三件结构库件(属性行 / 折叠分组头 / 集合行 + 集合动作按钮) ----
 	//
 	// 背景(用户 2026-09-27:「属性这里的 UI 我不是很满意,而且没进控件库」):属性面板的行语义
@@ -286,6 +302,10 @@ namespace World::Wui
 		WuiId ResetId = 0;             // 调用方按自己的 id 契约算(如 HashId(行 id 文本 + ".reset"))
 		bool ShowReset = false;
 		bool ResetEnabled = false;
+		// VEC-H6(2026-09-27 用户口径「恢复原值的功能能否在检测不一致时才展示」):当前值是否偏离该行
+		// 脚本声明的默认值。false = **不画 ↺、也不登记节点**(不是禁用态),但 ShowReset 的固定占位
+		// 照旧 —— 动作列矩形与 true 时逐像素相同,值与默认一致/不一致不会让行布局跳动。
+		bool ResetModified = true;
 		std::string ResetLabel;
 		std::string ResetTooltip;
 	};
@@ -335,6 +355,9 @@ namespace World::Wui
 		WuiId ResetId = 0;
 		bool ShowReset = false;
 		bool ResetEnabled = false;
+		// VEC-H6:集合里是否**有任一元素/键值/形状**偏离脚本声明的默认(false = 不画 ↺、不登记
+		// 节点;占位槽照旧 —— 同 PropertyRowDesc::ResetModified 的布局口径)。
+		bool ResetModified = true;
 		std::string ResetLabel;
 		std::string ResetTooltip;
 		WuiId RemoveId = 0;
@@ -381,6 +404,9 @@ namespace World::Wui
 		WuiId ResetId = 0;
 		bool ShowReset = false;
 		bool ResetEnabled = false;
+		// VEC-H6:该元素/键值行是否偏离脚本默认值(false = 不画 ↺、不登记节点;占位槽照旧 —— 同
+		// PropertyRowDesc::ResetModified 的布局口径)。
+		bool ResetModified = true;
 		std::string ResetLabel;
 		std::string ResetTooltip;
 		WuiId RemoveId = 0;

@@ -702,6 +702,21 @@ namespace World::Wui
 				LocalizedText(draw, "tooltip", "Restore the default value", "恢复默认值"));
 		}
 
+		void ShowOpenInEditorButton(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme themed = ThemedFor(draw, *draw.Theme);
+			const Slot slot = Canvas(draw, *draw.Theme, 24.0f);
+			const WuiId id = BeginShowcase(draw, "button.open-in-editor", "Open In Editor", slot.Rect);
+			PseudoState pseudo(draw, id, slot.Rect);
+			// 纯图标:按钮上原来的文字搬进 tooltip(用户口径),a11y label 仍是同一句语义文案。
+			OpenInEditorButton(ctx, id, slot.Rect, themed, !DisabledFor(draw),
+				LocalizedText(draw, "label", "Open in Editor", "在编辑器里打开"),
+				MaybeLongText(draw, LocalizedText(draw, "tooltip",
+					"Open this script asset in the built-in script editor",
+					"在内置脚本编辑器里打开这个脚本资产")));
+		}
+
 		void ShowToggle(const WuiComponentDraw& draw)
 		{
 			WuiContext& ctx = *draw.Context;
@@ -2297,6 +2312,37 @@ namespace World::Wui
 				{ PropText("label", "Save"), PropBool("disabled") },
 				&ShowIconButton));
 
+			// VEC-H6:脚本引用行的"在编辑器里打开"图标按钮(纯矢量 glyph `</>`;按钮文字进悬停提示)。
+			// 用户口径:「Lua 脚本组件中的"在编辑器里打开"能不能换成一个图标,然后把文字放到悬浮提示里。」
+			WuiComponentRegistry::Register(Desc(
+				"button.open-in-editor", "OpenInEditorButton", "Open In Editor", "Buttons",
+				WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=button;id=HashId('showcase.button.open-in-editor')(控件自身登记);label=label 属性(图标没有可见文字 —— 语义全在 label/value/tooltip);value=tooltip 属性;enabled=false 时节点仍在(Enabled/Interactive=false)但不进焦点表,悬停仍给理由;启用态进焦点表,Tab 可达、Enter/Space 激活",
+				"showcase 首选 24x24(方形图标位;面板脚本引用行用 20x20,与 kPropertyFieldHeight 对齐);glyph = 矢量 `</>`(两段折线尖括号 + 斜线),不依赖图标字体/纹理,主题与缩放无关",
+				ShellIds("button.open-in-editor"),
+				StateList({ "default", "hover", "focus", "disabled" }),
+				{
+					PropText("label", "Open in Editor"),
+					PropText("tooltip", "Open this script asset in the built-in script editor"),
+					PropBool("disabled"),
+				},
+				&ShowOpenInEditorButton,
+				{
+					Item(WuiInteractionKind::Hover, "showcase.button.open-in-editor",
+						WuiInteractionExpect::PixelChange,
+						"鼠标移到按钮中心(1 帧)→ 移开(1 帧)",
+						"悬停填充 = theme.ButtonHover + Accent 描边(两帧像素哈希应不同)"),
+					Item(WuiInteractionKind::Click, "showcase.button.open-in-editor",
+						WuiInteractionExpect::Event,
+						"在按钮中心注入按下(1 帧)+ 抬起(1 帧)",
+						"一次激活(面板据此打开脚本编辑器);画布命令数不因点击变化"),
+					Item(WuiInteractionKind::Key, "showcase.button.open-in-editor",
+						WuiInteractionExpect::Event,
+						"Tab 到按钮出现焦点环 → Enter;再验一次 Space",
+						"Enter/Space 等价于一次点击(启用态才进焦点表)"),
+				}));
+
 			WuiComponentRegistry::Register(Desc(
 				"button.reset-default", "ResetDefaultButton", "Reset Default", "Buttons", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
@@ -2828,7 +2874,7 @@ namespace World::Wui
 			WuiComponentRegistry::Register(Desc(
 				"property-row", "PropertyRow", "Property Row", "Properties", WuiComponentStatus::Draft,
 				"Engine/src/World/WUI/WuiWidgets.cpp",
-				"role=label/调用方声明的行 kind(交互字段的标签节点 A11yEnabled=false、只读值行走 kind=text);id=调用方的稳定行 id(面板:HashId('properties.<组件>.<字段>'));label=A11yLabel、value=A11yValue、tooltip=悬停说明/禁用理由(同源);行尾复位是子节点 kind=reset-default(调用方按 HashId(行 id 文本 + '.reset') 给 id,固定占位、两态同矩形)",
+				"role=label/调用方声明的行 kind(交互字段的标签节点 A11yEnabled=false、只读值行走 kind=text);id=调用方的稳定行 id(面板:HashId('properties.<组件>.<字段>'));label=A11yLabel、value=A11yValue、tooltip=悬停说明/禁用理由(同源);行尾复位是子节点 kind=reset-default(调用方按 HashId(行 id 文本 + '.reset') 给 id,固定占位、两态同矩形);VEC-H6:ResetModified=false(值 == 脚本默认)→ 行尾复位**不出现**(不画图标、不登记节点,占位槽照旧)",
 				"行高 24(4px 栅格)、字段列高 20、行尾动作列 24;标签列宽 = min(140, 行宽×0.45)(PropertyRowLabelWidth;同一面板传同一值 ⇒ 竖向对齐);字段列 = 行宽 − 标签列 − 4 − 动作列;行矩形与动作落点不随状态变化;LabelIndent = 只挪标签文字(每层 12px + 1px 树导线),**值列不跟着挪**(缩进不破坏列对齐);FieldPlaceholder 非空时值列画占位文本(多值不同/值不可用的 \"—\"),此时调用方不画字段控件",
 				A11yIds({ "showcase.property-row", "showcase.property-row.reset" }),
 				StateList({ "default", "hover", "focus", "modified", "mixed", "disabled" }),
@@ -2849,7 +2895,7 @@ namespace World::Wui
 						"行底 = theme.HoverBg(悬停反馈);行矩形不变,字段控件不被挪动"),
 					Item(WuiInteractionKind::Click, "showcase.property-row.reset", WuiInteractionExpect::Event,
 						"点行尾 ↺ 图标(modified=true 时可用)",
-						"一次复位事件;调用方据此把值写回默认(禁用态 Enabled=false 且带理由)"),
+						"一次复位事件;调用方据此把值写回默认(禁用态 Enabled=false 且带理由;ResetModified=false 时该节点整个不出现)"),
 					Item(WuiInteractionKind::Key, "showcase.property-row.reset", WuiInteractionExpect::Event,
 						"Tab 到 ↺ 出现焦点环 → Enter;再验一次 Space",
 						"启用态进焦点表;禁用态不进(Tab 扫不到)"),
@@ -2880,7 +2926,7 @@ namespace World::Wui
 					Item(WuiInteractionKind::Click, "showcase.property-group-header.reset",
 						WuiInteractionExpect::Event,
 						"点行尾 ↺(reset=true / modified 态)",
-						"集合级复位(破坏性:真实调用方先弹确认,控件只报事件)"),
+						"集合级复位(单击即复原;VEC-H6 起真实调用方不再弹二次确认;ResetModified=false 时该节点整个不出现)"),
 					Item(WuiInteractionKind::Key, "showcase.property-group-header", WuiInteractionExpect::ValueChange,
 						"Tab 到分组头 → Enter;再验一次 Space",
 						"键盘与点击同语义(焦点环 + 值迁移)"),
