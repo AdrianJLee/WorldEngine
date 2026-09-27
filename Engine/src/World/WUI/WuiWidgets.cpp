@@ -1853,6 +1853,378 @@ namespace World::Wui
 		return modified && (ctx.IsClicked(rect) || keyActivated);
 	}
 
+	// ---- VEC-H2:属性行 / 折叠分组头 / 集合行(属性面板的行语义收进库)----
+	namespace
+	{
+		// 几何与字号 = 属性库件的单一事实源(4px 栅格:行高 24、动作列 24、字段高 20)。
+		constexpr float kPropertyRowHeight = 24.0f;
+		constexpr float kPropertyFieldHeight = 20.0f;
+		constexpr float kPropertyActionWidth = 24.0f;
+		constexpr float kPropertyActionGap = 2.0f;
+		constexpr float kPropertyLabelMaxWidth = 140.0f;
+		constexpr float kPropertyLabelSize = 13.0f;
+		constexpr float kPropertyActionGlyphSize = 13.0f;
+		constexpr float kPropertyDotSize = 4.0f;
+		constexpr float kPropertyLabelTextX = 8.0f;
+		constexpr float kPropertyFieldGutter = 4.0f;
+
+		// 行节点:与 WuiWidgets 既有的 RegisterAccessNode 同一格式 + Tooltip 字段(悬停说明的第二通道)。
+		void RegisterRowNode(WuiId id, const char* kind, const WuiRect& rect, const std::string& label,
+			const std::string& value, bool enabled, bool interactive, bool focused, const std::string& tooltip)
+		{
+			if (id == 0)
+				return;
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = kind;
+			node.Label = label;
+			node.Value = value;
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = interactive;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
+
+		float RowLabelWidth(const WuiRect& row, float requested)
+		{
+			const float available = std::max(0.0f, row.W - kPropertyFieldGutter - kPropertyActionWidth);
+			if (requested > 0.0f)
+				return std::min(requested, available);
+			return std::min(kPropertyLabelMaxWidth, std::max(0.0f, std::min(row.W * 0.45f, available)));
+		}
+
+		// 行内动作列(index 从 0 起,自右向左排):固定占位,不随状态改几何。
+		WuiRect InsideActionRect(const WuiRect& row, int index)
+		{
+			const float step = kPropertyActionWidth + kPropertyActionGap;
+			const float x = row.X + row.W - kPropertyActionGap - (static_cast<float>(index) + 1.0f) * step;
+			return WuiRect { x, row.Y + (row.H - kPropertyActionWidth) * 0.5f, kPropertyActionWidth,
+				kPropertyActionWidth };
+		}
+
+		// 行外动作列(index 从 0 起,自左向右排):集合元素行/追加行的动作落在行矩形右侧预留槽里。
+		WuiRect OutsideActionRect(const WuiRect& row, int index)
+		{
+			const float step = kPropertyActionWidth + kPropertyActionGap;
+			return WuiRect { row.X + row.W + kPropertyActionGap + static_cast<float>(index) * step,
+				row.Y + (row.H - kPropertyActionWidth) * 0.5f, kPropertyActionWidth, kPropertyActionWidth };
+		}
+
+		void DrawRowLabel(WuiContext& ctx, const WuiRect& row, const std::string& label, const std::string& term,
+			bool open, bool expandable, const WuiColor& color, float labelWidth, const WuiTheme& theme)
+		{
+			if (label.empty())
+				return;
+			const float size = kPropertyLabelSize;
+			const float budget = std::max(16.0f, labelWidth - kPropertyLabelTextX - kPropertyFieldGutter);
+			Wui::LabelWithTerm(ctx, { row.X + kPropertyLabelTextX, row.Y + (row.H - size) * 0.5f - 2.0f },
+				(expandable ? (open ? "- " : "+ ") : std::string()) + label, term, color, size, theme, budget);
+		}
+
+		// 已修改标记:被改过的字段在标签左侧给一个小圆点(不靠颜色吓人,也不移动文字)。
+		void DrawModifiedDot(WuiContext& ctx, const WuiRect& row, const WuiTheme& theme)
+		{
+			const float size = kPropertyDotSize;
+			ctx.Commands().push_back({ WuiDrawKind::Rect,
+				{ row.X + kPropertyActionGap, row.Y + (row.H - size) * 0.5f, size, size }, theme.Accent,
+				size * 0.5f });
+		}
+
+		void RowHoverBackdrop(WuiContext& ctx, const WuiRect& row, bool hovered, bool enabled, const WuiTheme& theme)
+		{
+			if (!hovered || !enabled)
+				return;
+			ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.HoverBg, 3.0f });
+		}
+
+		// 行尾动作按钮的共用状态机:`-`/`+` 与分组头的删除/复位都走它。
+		bool RowActionButton(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& glyph,
+			const std::string& a11yLabel, const std::string& tooltip, bool enabled, const WuiTheme& theme,
+			bool danger)
+		{
+			const bool hoveredAny = ctx.IsHovered(rect);
+			const bool hovered = enabled && hoveredAny;
+			const bool focused = enabled && ctx.Focus() == id;
+			WuiColor fill = enabled ? (hovered ? theme.ButtonHover : theme.ButtonBg) : theme.PanelBg;
+			if (hovered && danger)
+			{
+				fill = theme.Danger;
+				fill.A = 0.22f;
+			}
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
+				enabled ? (hovered ? (danger ? theme.Danger : theme.Accent) : theme.Border) : theme.Border,
+				3.0f, 1.0f });
+			const float size = kPropertyActionGlyphSize;
+			const float textWidth = ctx.MeasureTextWidth(glyph, size);
+			ctx.Commands().push_back({ WuiDrawKind::Text,
+				{ rect.X + (rect.W - textWidth) * 0.5f, rect.Y + (rect.H - size) * 0.5f - 1.0f, 0, 0 },
+				enabled ? (danger && hovered ? theme.Danger : theme.Text) : theme.TextDisabled, 0, 1.0f, glyph, size,
+				false });
+			RegisterRowNode(id, "button", rect, a11yLabel.empty() ? glyph : a11yLabel, tooltip, enabled, enabled,
+				focused, tooltip);
+			if (enabled)
+				ctx.RegisterFocusable(id, rect);
+			DrawFocusRing(ctx, rect, id, theme);
+			if (hoveredAny)
+			{
+				if (enabled)
+					ctx.SetCursor(WuiCursor::Hand);
+				// 禁用态也要给理由:悬停提示与 a11y 的 Tooltip/Value 同一句。
+				if (!tooltip.empty())
+					Tooltip(ctx, rect, tooltip);
+			}
+			const bool keyActivated = focused
+				&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+			return enabled && (ctx.IsClicked(rect) || keyActivated);
+		}
+	}
+
+	float PropertyRowLabelWidth(const WuiRect& row)
+	{
+		return RowLabelWidth(row, 0.0f);
+	}
+
+	float PropertyRowHeight()
+	{
+		return kPropertyRowHeight;
+	}
+
+	PropertyRowLayout MeasurePropertyRow(const WuiRect& row, float labelWidth, bool showReset)
+	{
+		PropertyRowLayout layout;
+		layout.LabelWidth = RowLabelWidth(row, labelWidth);
+		const float resetReserve = showReset ? kPropertyActionWidth + kPropertyActionGap : 0.0f;
+		layout.Field = { row.X + layout.LabelWidth, row.Y + (row.H - kPropertyFieldHeight) * 0.5f,
+			std::max(24.0f, row.W - layout.LabelWidth - kPropertyFieldGutter - resetReserve), kPropertyFieldHeight };
+		if (showReset)
+			layout.Reset = InsideActionRect(row, 0);
+		return layout;
+	}
+
+	float CollectionActionColumnWidth()
+	{
+		return kPropertyActionWidth + kPropertyActionGap;
+	}
+
+	PropertyRowResult PropertyRow(WuiContext& ctx, WuiId id, const WuiRect& row, const PropertyRowDesc& desc,
+		const WuiTheme& theme)
+	{
+		PropertyRowResult result;
+		const PropertyRowLayout layout = MeasurePropertyRow(row, desc.LabelWidth, desc.ShowReset);
+		const float labelWidth = layout.LabelWidth;
+		result.FieldRect = layout.Field;
+		result.ResetRect = layout.Reset;
+		// 多行控件(向量):字段列高度按实际控件高度给足,垂直居中在行内。
+		if (desc.FieldHeight > 0.0f)
+		{
+			result.FieldRect.H = desc.FieldHeight;
+			result.FieldRect.Y = row.Y + (row.H - desc.FieldHeight) * 0.5f;
+		}
+		if (desc.ShowReset)
+		{
+			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
+				desc.ResetLabel, desc.ResetTooltip);
+			// 库件登记过同一 id(不带悬停说明):再登记一次补 label/tooltip,值以控件为准。
+			RegisterRowNode(desc.ResetId, "reset-default", result.ResetRect, desc.ResetLabel,
+				desc.ResetEnabled ? "modified" : "default", desc.ResetEnabled, desc.ResetEnabled, false,
+				desc.ResetTooltip);
+		}
+		const bool hovered = ctx.IsHovered(row);
+		RowHoverBackdrop(ctx, row, hovered, desc.Enabled, theme);
+		if (desc.Modified)
+			DrawModifiedDot(ctx, row, theme);
+		if (desc.InlineValue)
+		{
+			// 只读行:值跟在标签后面,不占字段列(与旧口径同文本形态「标签: 值」)。
+			const std::string text = desc.Label.empty() ? desc.InlineValueText
+				: (desc.InlineValueText.empty() ? desc.Label : desc.Label + ": " + desc.InlineValueText);
+			Wui::LabelWithTerm(ctx,
+				{ row.X + kPropertyLabelTextX, row.Y + (row.H - kPropertyLabelSize) * 0.5f - 2.0f }, text,
+				desc.Term, desc.Enabled ? theme.TextMuted : theme.TextDisabled, kPropertyLabelSize, theme,
+				std::max(16.0f, row.W - kPropertyLabelTextX - kPropertyFieldGutter));
+		}
+		else
+		{
+			DrawRowLabel(ctx, row, desc.Label, desc.Term, false, false,
+				desc.Enabled ? theme.Text : theme.TextDisabled, labelWidth, theme);
+		}
+		RegisterRowNode(id, desc.A11yKind, row, desc.A11yLabel.empty() ? desc.Label : desc.A11yLabel,
+			desc.A11yValue, desc.A11yEnabled, desc.A11yEnabled, false, desc.Tooltip);
+		if (hovered && !desc.Tooltip.empty())
+			Tooltip(ctx, row, desc.Tooltip);
+		return result;
+	}
+
+	PropertyGroupHeaderResult PropertyGroupHeader(WuiContext& ctx, WuiId id, const WuiRect& row,
+		const PropertyGroupHeaderDesc& desc, const WuiTheme& theme)
+	{
+		PropertyGroupHeaderResult result;
+		int actionIndex = 0;
+		float actionReserve = 0.0f;
+		if (desc.ShowRemove)
+		{
+			result.RemoveRect = InsideActionRect(row, actionIndex++);
+			actionReserve += kPropertyActionWidth + kPropertyActionGap;
+		}
+		if (desc.ShowReset)
+		{
+			result.ResetRect = InsideActionRect(row, actionIndex++);
+			actionReserve += kPropertyActionWidth + kPropertyActionGap;
+		}
+		const float labelWidth = RowLabelWidth(row, desc.LabelWidth);
+		const bool focused = id != 0 && ctx.Focus() == id;
+		const bool hovered = ctx.IsHovered(row);
+		// 底色语法与 CollapsibleHeader 一致:展开 = ActiveBg、折叠 = PanelHeader、悬停 = HoverBg。
+		const WuiColor fill = hovered && desc.Enabled ? theme.HoverBg : (desc.Open ? theme.ActiveBg : theme.PanelHeader);
+		ctx.Commands().push_back({ WuiDrawKind::Rect, row, fill, 2.0f });
+		if (desc.Modified)
+			DrawModifiedDot(ctx, row, theme);
+		DrawRowLabel(ctx, row, desc.Label, desc.Term, desc.Open, true,
+			desc.Enabled ? theme.Text : theme.TextDisabled, labelWidth, theme);
+		if (!desc.Trailing.empty())
+		{
+			const float size = theme.FontSizeSmall;
+			const float width = ctx.MeasureTextWidth(desc.Trailing, size);
+			ctx.Commands().push_back({ WuiDrawKind::Text,
+				{ row.X + row.W - actionReserve - kPropertyActionGap - width, row.Y + (row.H - size) * 0.5f, 0, 0 },
+				theme.TextMuted, 0, 1.0f, desc.Trailing, size, false });
+		}
+		const float toggleWidth = desc.ToggleWidth >= 0.0f ? desc.ToggleWidth
+			: std::max(0.0f, row.W - actionReserve);
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		result.Toggled = desc.Enabled && (ctx.IsClicked({ row.X, row.Y, toggleWidth, row.H }) || keyActivated);
+		RegisterRowNode(id, "button", row, desc.A11yLabel.empty() ? desc.Label : desc.A11yLabel,
+			desc.A11yValue.empty() ? (desc.Open ? "open" : "closed") : desc.A11yValue, desc.Enabled, true, focused,
+			desc.Tooltip);
+		ctx.RegisterFocusable(id, row);
+		DrawFocusRing(ctx, row, id, theme);
+		if (hovered)
+		{
+			if (desc.Enabled && ctx.Input().MousePos.x <= row.X + toggleWidth)
+				ctx.SetCursor(WuiCursor::Hand);
+			if (!desc.Tooltip.empty())
+				Tooltip(ctx, row, desc.Tooltip);
+		}
+		if (desc.ShowReset)
+		{
+			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
+				desc.ResetLabel, desc.ResetTooltip);
+			RegisterRowNode(desc.ResetId, "reset-default", result.ResetRect, desc.ResetLabel,
+				desc.ResetEnabled ? "modified" : "default", desc.ResetEnabled, desc.ResetEnabled, false,
+				desc.ResetTooltip);
+		}
+		if (desc.ShowRemove)
+			result.RemoveClicked = RowActionButton(ctx, desc.RemoveId, result.RemoveRect, "x", desc.RemoveLabel,
+				desc.RemoveTooltip, desc.RemoveEnabled, theme, true);
+		return result;
+	}
+
+	CollectionRowResult CollectionRow(WuiContext& ctx, WuiId id, const WuiRect& row, const CollectionRowDesc& desc,
+		const WuiTheme& theme)
+	{
+		CollectionRowResult result;
+		const float indent = std::max(0.0f, desc.Indent);
+		const WuiRect content { row.X + indent, row.Y, std::max(0.0f, row.W - indent), row.H };
+		int insideIndex = 0;
+		int outsideIndex = 0;
+		float actionReserve = 0.0f;
+		if (desc.ShowReset)
+		{
+			result.ResetRect = InsideActionRect(content, insideIndex++);
+			actionReserve += kPropertyActionWidth + kPropertyActionGap;
+		}
+		if (desc.ShowRemove)
+		{
+			result.RemoveRect = desc.ActionsOutside ? OutsideActionRect(content, outsideIndex++)
+				: InsideActionRect(content, insideIndex++);
+			if (!desc.ActionsOutside)
+				actionReserve += kPropertyActionWidth + kPropertyActionGap;
+		}
+		if (desc.ShowAdd)
+		{
+			result.AddRect = desc.ActionsOutside ? OutsideActionRect(content, outsideIndex++)
+				: InsideActionRect(content, insideIndex++);
+			if (!desc.ActionsOutside)
+				actionReserve += kPropertyActionWidth + kPropertyActionGap;
+		}
+		const float labelWidth = RowLabelWidth(content, desc.LabelWidth);
+		result.FieldRect = { content.X + labelWidth, content.Y + (content.H - kPropertyFieldHeight) * 0.5f,
+			std::max(24.0f, content.W - labelWidth - kPropertyFieldGutter - actionReserve), kPropertyFieldHeight };
+		if (desc.FieldHeight > 0.0f)
+		{
+			result.FieldRect.H = desc.FieldHeight;
+			result.FieldRect.Y = content.Y + (content.H - desc.FieldHeight) * 0.5f;
+		}
+		const bool hovered = ctx.IsHovered(content);
+		RowHoverBackdrop(ctx, content, hovered, desc.Enabled, theme);
+		if (desc.Modified)
+			DrawModifiedDot(ctx, content, theme);
+		DrawRowLabel(ctx, content, desc.Label, desc.Term, false, false,
+			desc.Enabled ? theme.Text : theme.TextDisabled, labelWidth, theme);
+		RegisterRowNode(id, desc.A11yKind, content, desc.A11yLabel.empty() ? desc.Label : desc.A11yLabel,
+			desc.A11yValue, desc.A11yEnabled, desc.A11yEnabled, false, desc.Tooltip);
+		if (hovered && !desc.Tooltip.empty())
+			Tooltip(ctx, content, desc.Tooltip);
+		if (desc.ShowReset)
+		{
+			result.ResetClicked = ResetDefaultButton(ctx, desc.ResetId, result.ResetRect, desc.ResetEnabled, theme,
+				desc.ResetLabel, desc.ResetTooltip);
+			RegisterRowNode(desc.ResetId, "reset-default", result.ResetRect, desc.ResetLabel,
+				desc.ResetEnabled ? "modified" : "default", desc.ResetEnabled, desc.ResetEnabled, false,
+				desc.ResetTooltip);
+		}
+		if (desc.ShowRemove)
+			result.RemoveClicked = RowActionButton(ctx, desc.RemoveId, result.RemoveRect, "-", std::string(),
+				desc.RemoveTooltip, desc.RemoveEnabled, theme, true);
+		if (desc.ShowAdd)
+			result.AddClicked = RowActionButton(ctx, desc.AddId, result.AddRect, "+", std::string(), desc.AddTooltip,
+				desc.AddEnabled, theme, false);
+		return result;
+	}
+
+	bool CollectionActionButton(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& glyph,
+		const std::string& tooltip, bool enabled, const WuiTheme& theme, bool danger)
+	{
+		return RowActionButton(ctx, id, rect, glyph, std::string(), tooltip, enabled, theme, danger);
+	}
+
+	bool ActionButton(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		const WuiTheme& theme, bool enabled, const std::string& tooltip, bool danger)
+	{
+		const bool hoveredAny = ctx.IsHovered(rect);
+		const bool hovered = enabled && hoveredAny;
+		const bool focused = enabled && ctx.Focus() == id;
+		const WuiColor fill = enabled ? (hovered ? theme.ButtonHover : theme.ButtonBg) : theme.PanelBg;
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 3.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
+			enabled ? (hovered ? (danger ? theme.Danger : theme.Accent) : theme.Border) : theme.Border, 3.0f, 1.0f });
+		const float size = kPropertyLabelSize;
+		ctx.Commands().push_back({ WuiDrawKind::Text,
+			{ rect.X + 8.0f, rect.Y + (rect.H - size) * 0.5f - 1.0f, 0, 0 },
+			enabled ? (danger && hovered ? theme.Danger : theme.Text) : theme.TextDisabled, 0, 1.0f, label, size,
+			false });
+		RegisterRowNode(id, "button", rect, label, tooltip, enabled, enabled, focused, tooltip);
+		if (enabled)
+			ctx.RegisterFocusable(id, rect);
+		DrawFocusRing(ctx, rect, id, theme);
+		if (hoveredAny)
+		{
+			if (enabled)
+				ctx.SetCursor(WuiCursor::Hand);
+			if (!tooltip.empty())
+				Tooltip(ctx, rect, tooltip);
+		}
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		return enabled && (ctx.IsClicked(rect) || keyActivated);
+	}
+
 	namespace
 	{
 		// TextField / TextFieldEx 的共同实现(旧签名语义逐条不变,只是多了 error 参数):

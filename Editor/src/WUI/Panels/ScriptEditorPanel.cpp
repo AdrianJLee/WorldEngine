@@ -661,7 +661,6 @@ namespace World
 		editorNode.Interactive = true; // 点击进入编辑区(只读时仍可选中/复制)
 		accessibility.Register(editorNode);
 
-		m_Highlight.Update(m_Buffer, &m_EngineTypes);
 		// W9.5:懒加载补全索引 + 同步当前脚本文件符号(Revision 变化才重建)。
 		EnsureCompletionReady();
 		if (m_CompletionStubReady && m_CompletionFileRevision != m_Buffer.Revision())
@@ -669,7 +668,18 @@ namespace World
 			m_CompletionFileRevision = m_Buffer.Revision();
 			m_Completion.SetFileSource(m_Buffer.Text());
 			RefreshEngineTypes();   // 文件里的 ---@class 也会进引擎类型档 → 名单/缓存同步
+			// VEC-H1:把本文件的字段/局部名喂给高亮 —— 数据字段 `Level` 不再吃服务表的全局色
+			// (字段位置 → Field;本文件的局部名 → Default;裸的服务表用法仍按 Global)。
+			std::vector<std::string> fileLocals;
+			std::vector<std::string> fileFields;
+			m_Completion.CollectFileSymbols(fileLocals, fileFields);
+			m_Highlight.SetFileSymbols(std::move(fileLocals), std::move(fileFields));
+			WLD_CORE_INFO("[script-editor] file symbol highlight names: {0} locals / {1} fields",
+				m_Highlight.FileSymbols().Locals().size(),
+				m_Highlight.FileSymbols().Fields().size());
 		}
+		// 高亮缓存:引擎类型档 + 文件内符号一起按内容指纹失效(LuauHighlightCache::Update)。
+		m_Highlight.Update(m_Buffer, &m_EngineTypes);
 		Wui::WuiCodeEditorOptions options;
 		// MAT-UI6b:会话缩放初值(内核只在实例第一次出现时读它;之后以内核状态为准)。
 		options.UiZoom = m_SessionZoom;
@@ -693,7 +703,8 @@ namespace World
 				return;
 			}
 			LuauHighlightState state;
-			LuauHighlighter::HighlightLine(text, state, out, &m_EngineTypes);
+			LuauHighlighter::HighlightLine(text, state, out, &m_EngineTypes,
+				&m_Highlight.FileSymbols());
 		};
 		options.GetClipboard = [](std::string& out)
 		{

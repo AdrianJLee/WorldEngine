@@ -249,10 +249,25 @@ namespace World
 				return !(cursor >= 2 && line[cursor - 2] == ':');
 			return false;
 		}
+
+		// VEC-H1:标识符后面是不是赋值(`name = <值>`,排除比较 `==`)。
+		// 逐行接口拿不到跨行的 `{`(表构造可以跨行,如 `InferredStats = {\n Level = 3,\n}`),
+		// 所以"表构造键"与"顶层赋值"在本层不可区分 —— 由调用方保证名单里只有**本文件的字段名**
+		// (数据字段 `Level = 3` 走这条;存根服务表的裸用法 `Level.Primary()` 不匹配本函数)。
+		bool FollowedByAssignment(std::string_view line, size_t pos)
+		{
+			size_t cursor = pos;
+			while (cursor < line.size() && (line[cursor] == ' ' || line[cursor] == '\t'))
+				++cursor;
+			if (cursor >= line.size() || line[cursor] != '=')
+				return false;
+			return cursor + 1 >= line.size() || line[cursor + 1] != '=';
+		}
 	}
 
 	void LuauHighlighter::HighlightLine(std::string_view line, LuauHighlightState& state,
-		std::vector<Wui::WuiCodeToken>& out, const LuauEngineTypeSet* engineTypes)
+		std::vector<Wui::WuiCodeToken>& out, const LuauEngineTypeSet* engineTypes,
+		const LuauFileSymbolSet* fileSymbols)
 	{
 		out.clear();
 		const size_t size = line.size();
@@ -385,14 +400,28 @@ namespace World
 					kind = WuiCodeTokenKind::Self;
 				else if (IsKeyword(word))
 					kind = WuiCodeTokenKind::Keyword;
-				// VEC-A7:引擎外部类名(vec2/vec3/…/Entity/WorldScript)→ EngineType。
-				// 覆盖 Default 与 Global(Entity/WorldScript 今天就是 Global),不覆盖关键字/常量/self;
-				// 紧跟 `.`/`:` 的成员名(transform.Location)保持 Default。
-				else if (engineTypes && !engineTypes->Empty() && !PrecededByMemberAccess(line, i)
-					&& engineTypes->Contains(word))
-					kind = WuiCodeTokenKind::EngineType;
-				else if (IsKnownGlobal(word))
-					kind = WuiCodeTokenKind::Global;
+				else
+				{
+					// 紧跟 `.`/`:` 的成员名(transform.Location)不染引擎类型色。
+					const bool memberAccess = PrecededByMemberAccess(line, i);
+					const bool fileScope = fileSymbols && !fileSymbols->Empty();
+					// VEC-H1:文件内符号优先 —— 本文件的**字段**在字段位置(成员 `t.Level` /
+					// 表构造键 `Level = 3`)发 Field;同名局部在裸位置保持 Default。
+					if (fileScope && fileSymbols->ContainsField(word)
+						&& (memberAccess
+							|| (!fileSymbols->ContainsLocal(word) && FollowedByAssignment(line, end))))
+						kind = WuiCodeTokenKind::Field;
+					else if (fileScope && !memberAccess && fileSymbols->ContainsLocal(word))
+						kind = WuiCodeTokenKind::Default;   // 本文件的局部/文件符号:不再是全局服务表
+					// VEC-A7:引擎外部类名(vec2/vec3/…/Entity/WorldScript)→ EngineType。
+					// 覆盖 Default 与 Global(Entity/WorldScript 今天就是 Global),不覆盖关键字/常量/self;
+					// 紧跟 `.`/`:` 的成员名(transform.Location)保持 Default。
+					else if (engineTypes && !engineTypes->Empty() && !memberAccess
+						&& engineTypes->Contains(word))
+						kind = WuiCodeTokenKind::EngineType;
+					else if (IsKnownGlobal(word))
+						kind = WuiCodeTokenKind::Global;
+				}
 				pushRaw(i, end, kind);
 				i = end;
 				continue;
@@ -600,6 +629,8 @@ namespace World
 		m_Revision = ~0ull;
 		m_LineCount = -1;
 		m_EngineTypeHash = 0;
+		m_FileSymbols.Clear();
+		m_FileSymbolHash = 0;
 	}
 
 	// VEC-A7:引擎外部类名集合(字典序去重 + FNV-1a 内容指纹)。名单由调用方从既有来源填进来。
@@ -632,19 +663,82 @@ namespace World
 		return !m_Names.empty() && std::binary_search(m_Names.begin(), m_Names.end(), name);
 	}
 
+	// VEC-H1:文件内符号集合(数据字段 + 局部;两档都字典序去重 + 内容指纹)。
+	namespace
+	{
+		void SortUniqueNames(std::vector<std::string>& names)
+		{
+			std::sort(names.begin(), names.end());
+			names.erase(std::unique(names.begin(), names.end()), names.end());
+		}
+
+		void HashNames(uint64_t& hash, const std::vector<std::string>& names)
+		{
+			for (const std::string& name : names)
+			{
+				for (const char c : name)
+				{
+					hash ^= static_cast<unsigned char>(c);
+					hash *= 1099511628211ull;
+				}
+				hash ^= 0xffu;   // 名字分隔:避免 {"ab","c"} 与 {"a","bc"} 撞哈希
+				hash *= 1099511628211ull;
+			}
+		}
+	}
+
+	void LuauFileSymbolSet::Set(std::vector<std::string> locals, std::vector<std::string> fields)
+	{
+		SortUniqueNames(locals);
+		SortUniqueNames(fields);
+		m_Locals = std::move(locals);
+		m_Fields = std::move(fields);
+		m_Hash = 1469598103934665603ull;
+		HashNames(m_Hash, m_Locals);
+		m_Hash ^= 0xfeu;   // 两档之间的分隔:同名的名字放在 Locals 还是 Fields 必须哈希不同
+		m_Hash *= 1099511628211ull;
+		HashNames(m_Hash, m_Fields);
+	}
+
+	void LuauFileSymbolSet::Clear()
+	{
+		m_Locals.clear();
+		m_Fields.clear();
+		m_Hash = 0;
+	}
+
+	bool LuauFileSymbolSet::ContainsLocal(std::string_view name) const
+	{
+		return !m_Locals.empty() && std::binary_search(m_Locals.begin(), m_Locals.end(), name);
+	}
+
+	bool LuauFileSymbolSet::ContainsField(std::string_view name) const
+	{
+		return !m_Fields.empty() && std::binary_search(m_Fields.begin(), m_Fields.end(), name);
+	}
+
+	void LuauHighlightCache::SetFileSymbols(std::vector<std::string> locals, std::vector<std::string> fields)
+	{
+		// 只存集合;真正的失效在 Update 里按内容指纹判定(与 engineTypes 同一口径)。
+		m_FileSymbols.Set(std::move(locals), std::move(fields));
+	}
+
 	void LuauHighlightCache::Update(const Wui::WuiTextBuffer& buffer, const LuauEngineTypeSet* engineTypes)
 	{
 		const int count = std::max(1, buffer.LineCount());
 		const uint64_t engineHash = engineTypes ? engineTypes->Hash() : 0ull;
-		if (m_Revision == buffer.Revision() && m_LineCount == count && m_EngineTypeHash == engineHash)
+		const uint64_t fileSymbolHash = m_FileSymbols.Hash();
+		if (m_Revision == buffer.Revision() && m_LineCount == count && m_EngineTypeHash == engineHash
+			&& m_FileSymbolHash == fileSymbolHash)
 			return;
-		if (m_EngineTypeHash != engineHash)
+		if (m_EngineTypeHash != engineHash || m_FileSymbolHash != fileSymbolHash)
 		{
-			// 集合变了(存根加载完 / 打开新脚本):旧 token 里的 EngineType 判定全部作废。
+			// 集合变了(存根加载完 / 打开新脚本 / 文件符号变化):旧 token 的判定全部作废。
 			m_Lines.clear();
 			m_ByPointer.clear();
 		}
 		m_EngineTypeHash = engineHash;
+		m_FileSymbolHash = fileSymbolHash;
 		m_Revision = buffer.Revision();
 		m_LineCount = count;
 
@@ -671,7 +765,7 @@ namespace World
 			else
 			{
 				LuauHighlightState scanning = entry.Start;
-				LuauHighlighter::HighlightLine(view, scanning, entry.Tokens, engineTypes);
+				LuauHighlighter::HighlightLine(view, scanning, entry.Tokens, engineTypes, &m_FileSymbols);
 				entry.End = scanning;
 			}
 			state = entry.End;

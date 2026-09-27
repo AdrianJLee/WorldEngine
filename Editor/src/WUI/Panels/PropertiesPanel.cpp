@@ -42,8 +42,9 @@ namespace World
 		// ---- 分区滚动布局常量 ----
 		constexpr float kContentTop = 40.0f;      // "Add Component" 行高
 		constexpr float kSectionHeader = 24.0f;   // 与 WuiSection 的标题行一致
-		constexpr float kSectionGap = 2.0f;
-		constexpr float kRowHeight = 22.0f;
+		constexpr float kSectionGap = 4.0f;       // 4px 栅格
+		// VEC-H2:行高/动作列宽都取自库件(单一事实源),面板不再自带 22/20/9 这类魔法数字。
+		const float kRowHeight = Wui::PropertyRowHeight();
 		constexpr float kScrollbarWidth = 10.0f;
 		// 只有在"确实还有内容可滚"时,上/下按钮才注册成可点击节点(与真实可用性一致)。
 		constexpr float kScrollEpsilon = 0.5f;
@@ -53,14 +54,13 @@ namespace World
 		// kVecFieldSlotHeight"给足 —— 库件把传入 rect 等分给各分量,高度不够会把两位小数的
 		// 读数压到互相重叠(材质编辑器对 Vec4 的 2×2 用两倍行高,是同一条口径)。
 		constexpr float kVecFieldNarrowWidth = 180.0f;
-		constexpr float kVecFieldSlotHeight = 20.0f;
+		const float kVecFieldSlotHeight = Wui::PropertyRowHeight();
 
 		// ---- VEC-C2:脚本属性行的行尾动作列 ----
 		// `↺` 复位(库件 ResetDefaultButton:自己画回旋箭头,不依赖字体字形)、数组/映射元素行的
 		// `-` 删除列。两列都在**控件列**右侧:控件列宽相应收窄,集合行的删除列在缩进后的行矩形之外
 		// (容器把子行矩形按 kCollectionActionWidth 收窄后再递归,按钮落回容器行的右缘)。
-		constexpr float kResetButtonWidth = 20.0f;
-		constexpr float kCollectionActionWidth = 22.0f;
+		const float kCollectionActionWidth = Wui::CollectionActionColumnWidth();
 
 		int VecFieldLayout(float controlWidth)
 		{
@@ -106,30 +106,8 @@ namespace World
 			Wui::WuiAccessibility::Get().Register(node);
 		}
 
-		// P4-U13b:实例条按钮。与周边控件同一套画法;不可用时弱化绘制,并把"为什么不可用"
-		// 同时写进无障碍节点(tooltip/value)与悬停提示 —— 灰按钮不能没有理由。
-		bool InstanceBarButton(Wui::WuiContext& ctx, const char* idText, const Wui::WuiRect& rect,
-			const std::string& label, const std::string& tooltip, bool enabled, const Wui::WuiTheme& theme)
-		{
-			const bool hovered = ctx.IsHovered(rect);
-			// 绘制走库原语(底色/描边/文字),与替换前逐命令等价。**禁用语义仍是本函数的**:
-			// Wui::Button 没有 enabled 形参,也没有"为什么不可用"的 tooltip 与禁用 a11y 值,
-			// 所以"带禁用态 + 理由的按钮"记在缺件清单里(报告 §缺件)。
-			Wui::PanelBackground(ctx, rect,
-				enabled ? (hovered ? theme.ButtonHover : theme.ButtonBg) : theme.PanelBg, 3.0f);
-			Wui::HighlightOutline(ctx, rect, hovered && enabled ? theme.Accent : theme.Border, 3.0f, 1.0f);
-			Wui::Label(ctx, { rect.X + 9.0f, rect.Y + (rect.H - 13.0f) * 0.5f }, label,
-				enabled ? theme.Text : theme.TextDisabled, 13.0f);
-			RegisterNode(Wui::HashId(idText), "button", rect, label, tooltip, enabled, tooltip);
-			if (hovered)
-			{
-				if (enabled)
-					ctx.SetCursor(Wui::WuiCursor::Hand);
-				if (!tooltip.empty())
-					ctx.SetTooltip(tooltip);
-			}
-			return enabled && ctx.IsClicked(rect);
-		}
+		// P4-U13b:实例条/动作行按钮(带禁用态 + 理由)已收进库件 `Wui::ActionButton`
+		// (VEC-H2):同一套底色/描边/文字与"灰按钮不能没有理由"的无障碍口径,面板只做编排。
 
 		std::string FormatFloatText(float value, int decimals = 3)
 		{
@@ -359,27 +337,33 @@ namespace World
 		float DrawVec3Row(Wui::WuiContext& ctx, const std::string& baseId, float x, float y, float width,
 			const Wui::LocalizedLabel& label, glm::vec3& value, const Wui::WuiTheme& theme, bool& changed)
 		{
+			// VEC-H2:列宽/文字起点与库件行同一口径(PropertyRowLabelWidth + 左 8px 起画),保证
+			// Transform 行与库件属性行的标签列严格对齐。
+			const float labelWidth = Wui::PropertyRowLabelWidth({ x, y, width, kRowHeight });
 			// 术语对照的文本预算 = 本行真实标签列宽(控件列起点 - 标签起点),窄处自动省略。
-			const float labelBudget = std::min(140.0f, width * 0.45f) - 4.0f;
-			Wui::LabelWithTerm(ctx, { x + 4, y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f, theme, labelBudget);
-			const Wui::WuiRect ctrl { x + std::min(140.0f, width * 0.45f), y + 1,
-				width - std::min(140.0f, width * 0.45f) - 4, 0.0f };
+			const float labelBudget = labelWidth - 12.0f;
+			Wui::LabelWithTerm(ctx, { x + 8.0f, y + (kRowHeight - 13.0f) * 0.5f - 2.0f }, label.Text, label.Term,
+				theme.TextMuted, 13.0f, theme, labelBudget);
+			const Wui::WuiRect ctrl { x + labelWidth, y, width - labelWidth - 4.0f, 0.0f };
 			const int layout = VecFieldLayout(ctrl.W);
 			const Wui::WuiRect field { ctrl.X, ctrl.Y, ctrl.W, VecFieldHeight(layout, 3) };
 			changed = Wui::Vec3Field(ctx, Wui::HashId(baseId.c_str()), field, value, 0.01f, 1.0f, -1.0f,
 				theme, layout);
-			// 行高 = 控件高 + 上下各 1px(与旧的 20px 控件 + 2px 行距逐像素对齐)。
-			return field.H + 2.0f;
+			// 行高 = 控件高(库件 slot 已是 4px 栅格的行高,行与行直接相邻)。
+			return field.H;
 		}
 
 		// 浮点行(带范围;无范围时用 1/-1 哨兵,与 schema 字段路径一致)。
 		bool DrawFloatRow(Wui::WuiContext& ctx, const std::string& idText, const Wui::WuiRect& row,
 			const Wui::LocalizedLabel& label, float& value, float lo, float hi, const Wui::WuiTheme& theme, bool reachable)
 		{
-			const float labelBudget = std::min(140.0f, row.W * 0.45f) - 4.0f;
-			Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f, theme, labelBudget);
-			const Wui::WuiRect ctrl { row.X + std::min(140.0f, row.W * 0.45f), row.Y + 1,
-				row.W - std::min(140.0f, row.W * 0.45f) - 4, 20 };
+			// VEC-H2:与库件属性行同一列宽/文字起点。
+			const float labelWidth = Wui::PropertyRowLabelWidth(row);
+			const float labelBudget = labelWidth - 12.0f;
+			Wui::LabelWithTerm(ctx, { row.X + 8.0f, row.Y + (row.H - 13.0f) * 0.5f - 2.0f }, label.Text, label.Term,
+				theme.TextMuted, 13.0f, theme, labelBudget);
+			const Wui::WuiRect ctrl { row.X + labelWidth, row.Y + (row.H - 20.0f) * 0.5f,
+				row.W - labelWidth - 4.0f, 20.0f };
 			const float before = value;
 			Wui::DragFloat(ctx, Wui::HashId(idText.c_str()), ctrl, value, 0.01f, lo, hi, theme);
 			RegisterNode(Wui::HashId(idText.c_str()), "drag-float", ctrl, TermText(label), FormatFloatText(value), reachable);
@@ -1613,18 +1597,18 @@ namespace World
 				"Turn this subtree into plain entities (asks for confirmation); it stops following the asset")
 			: Wui::Tr("panel.properties.prefab.readonly", "Read-only while Play/Simulate is running");
 
-		if (InstanceBarButton(ctx, "properties.prefab.revert", layout.Buttons[0], revertText, revertHint,
-			canRevert, theme))
+		if (Wui::ActionButton(ctx, Wui::HashId("properties.prefab.revert"), layout.Buttons[0], revertText, theme,
+			canRevert, revertHint))
 		{
 			std::string message;
 			if (!host.PrefabInstanceRevert(info.Root, &message) || !message.empty())
 				host.Notify(message);
 		}
-		if (InstanceBarButton(ctx, "properties.prefab.apply", layout.Buttons[1], applyText, applyHint,
-			canApply, theme))
+		if (Wui::ActionButton(ctx, Wui::HashId("properties.prefab.apply"), layout.Buttons[1], applyText, theme,
+			canApply, applyHint))
 			OpenPrefabActionConfirm(ctx, PrefabAction::Apply, info.Root, info.Source);
-		if (InstanceBarButton(ctx, "properties.prefab.unpack", layout.Buttons[2], unpackText, unpackHint,
-			canUnpack, theme))
+		if (Wui::ActionButton(ctx, Wui::HashId("properties.prefab.unpack"), layout.Buttons[2], unpackText, theme,
+			canUnpack, unpackHint))
 			OpenPrefabActionConfirm(ctx, PrefabAction::Unpack, info.Root, info.Source);
 
 		// 只读/来源缺失的可读提示(不是"按钮点了没反应")。
@@ -2393,66 +2377,46 @@ namespace World
 				// (properties.section.<DisplayName>),脚本可展开/折叠分区。
 				const float rowY = contentRect.Y + sectionY;
 				const Wui::WuiRect header { contentRect.X, rowY, contentRect.W, kSectionHeader };
-				// 底色走库;标题行本体(展开标记 + 术语 + 悬停 Doc + 移除按钮 + 稳定 a11y id)仍由本面板
-				// 组装:Wui::SectionHeader 会多画一条分隔线且不含展开/折叠,保留模式 WuiSection 又接不进
-				// 这里的上一帧实测高度滚动布局 —— 即时版可折叠分区记入缺件。
-				Wui::PanelBackground(ctx, header,
-					open ? Wui::WuiColor { 0.27f, 0.28f, 0.31f, 1 } : Wui::WuiColor { 0.2f, 0.21f, 0.23f, 1 }, 2.0f);
-				// 标题 = 主文案(中文界面为译文)+ 英文术语(Caption/次要色,窄处自动省略);前缀仍是展开标记。
-				const Wui::LocalizedLabel sectionLabel = SchemaComponentLabel(*schema);
-				// P4-U9:分区标题悬停 = 组件说明(schema Doc),右侧留出"移除组件"按钮的位置。
-				const std::string componentDoc = ComponentDocLabel(*schema);
-				if (!componentDoc.empty())
-					Wui::Tooltip(ctx, { header.X, header.Y, header.W - 24.0f, header.H }, componentDoc);
-				const float titleBudget = std::max(60.0f, header.W - 12.0f - 24.0f);
-				Wui::LabelWithTerm(ctx, { header.X + 6, header.Y + 3 }, (open ? "- " : "+ ") + sectionLabel.Text,
-					sectionLabel.Term, theme.Text, 14.0f, theme, titleBudget);
-				// 无障碍 id / 操作记录仍用 section.Title(=<DisplayName>),节点 id 逐字节不变。
+				// VEC-H2:分区标题走库件 `Wui::PropertyGroupHeader`(展开标记 + 术语 + 悬停 Doc +
+				// 行尾移除按钮;底色用主题令牌的 ActiveBg/PanelHeader/HoverBg,不再是手写灰度)。
+				// 无障碍 id 与文案不变:id=HashId('properties.section.<DisplayName>')、kind=button、
+				// value=open/closed;移除按钮 id=HashId('properties.section.remove.<DisplayName>')。
 				const std::string headerId = "properties.section." + section.Title;
-				RegisterNode(Wui::HashId(headerId.c_str()), "button", header, TermText(sectionLabel),
-					open ? "open" : "closed", true, componentDoc);
-				if (ctx.IsClicked({ header.X, header.Y, header.W - 24.0f, header.H }))
+				std::string blockedReason;
+				const bool core = schema->Core;
+				const bool canRemove = !m_ReadOnly && !core
+					&& entity.CanRemoveComponent(schema->Storage->ComponentId, &blockedReason);
+				if (core)
+					blockedReason = Wui::Tr("panel.properties.remove.core",
+						"Core components cannot be removed");
+				else if (m_ReadOnly)
+					blockedReason = Wui::Tr("panel.properties.remove.readonly",
+						"Read-only while Play/Simulate is running");
+				const std::string removeHint = canRemove
+					? Wui::Tr("panel.properties.remove.tooltip", "Remove this component")
+					: blockedReason;
+				const Wui::LocalizedLabel sectionLabel = SchemaComponentLabel(*schema);
+				Wui::PropertyGroupHeaderDesc sectionHead;
+				sectionHead.Label = sectionLabel.Text;
+				sectionHead.Term = sectionLabel.Term;
+				sectionHead.Tooltip = ComponentDocLabel(*schema);
+				sectionHead.A11yLabel = TermText(sectionLabel);
+				sectionHead.Open = open;
+				sectionHead.ShowRemove = true;
+				sectionHead.RemoveEnabled = canRemove;
+				sectionHead.RemoveId = Wui::HashId(("properties.section.remove." + section.Title).c_str());
+				sectionHead.RemoveLabel = Wui::Tr("panel.properties.remove_component", "Remove Component");
+				sectionHead.RemoveTooltip = removeHint;
+				const Wui::PropertyGroupHeaderResult sectionHeader =
+					Wui::PropertyGroupHeader(ctx, Wui::HashId(headerId.c_str()), header, sectionHead, theme);
+				if (sectionHeader.Toggled)
 				{
 					open = !open;
 					section.Open = open;
 					ctx.RecordOp("properties", "toggle-section", section.Title, open ? "open" : "closed");
 				}
-
-				// ---- P4-U9:移除组件(核心组件禁止移除;破坏性操作走确认模态)----
-				{
-					const Wui::WuiRect removeRect { header.X + header.W - 22.0f, header.Y + 2.0f, 18.0f, 18.0f };
-					std::string blockedReason;
-					const bool core = schema->Core;
-					const bool canRemove = !m_ReadOnly && !core
-						&& entity.CanRemoveComponent(schema->Storage->ComponentId, &blockedReason);
-					if (core)
-						blockedReason = Wui::Tr("panel.properties.remove.core",
-							"Core components cannot be removed");
-					else if (m_ReadOnly)
-						blockedReason = Wui::Tr("panel.properties.remove.readonly",
-							"Read-only while Play/Simulate is running");
-					const std::string removeHint = canRemove
-						? Wui::Tr("panel.properties.remove.tooltip", "Remove this component")
-						: blockedReason;
-					const bool hoverRemove = ctx.IsHovered(removeRect);
-					if (hoverRemove && canRemove)
-						Wui::PanelBackground(ctx, removeRect, Wui::WuiColor { 0.97f, 0.32f, 0.29f, 0.22f }, 3.0f);
-					Wui::Label(ctx, { removeRect.X + 5.0f, removeRect.Y + 1.0f }, "x",
-						canRemove ? (hoverRemove ? theme.Danger : theme.TextMuted) : theme.TextDisabled, 13.0f);
-					if (hoverRemove)
-					{
-						if (canRemove)
-							ctx.SetCursor(Wui::WuiCursor::Hand);
-						if (!removeHint.empty())
-							ctx.SetTooltip(removeHint);
-					}
-					const std::string removeId = "properties.section.remove." + section.Title;
-					RegisterNode(Wui::HashId(removeId.c_str()), "button", removeRect,
-						Wui::Tr("panel.properties.remove_component", "Remove Component"), removeHint,
-						canRemove, removeHint);
-					if (canRemove && ctx.IsClicked(removeRect))
-						OpenRemoveComponentConfirm(ctx, schema->Storage->ComponentId, schema->DisplayName);
-				}
+				if (sectionHeader.RemoveClicked)
+					OpenRemoveComponentConfirm(ctx, schema->Storage->ComponentId, schema->DisplayName);
 
 				const Wui::WuiRect inner { contentRect.X + 10, rowY + kSectionHeader, contentRect.W - 10, 0 };
 				if (open)
@@ -2546,9 +2510,9 @@ namespace World
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		float y = 0;
 		bool changed = false;
-		const float labelWidth = std::min(140.0f, rect.W * 0.45f);
-		// 术语对照的文本预算:标签从 +4 起画,到控件列起点为止(窄处自动省略,不压控件)。
-		const float labelBudget = labelWidth - 4.0f;
+		// VEC-H2:标签列宽来自库件(与 PropertyRow/PropertyGroupHeader 共用同一条口径),
+		// 同一面板传同一值 ⇒ 标签列竖向对齐;面板不再自己算 0.45 倍。
+		const float labelWidth = Wui::PropertyRowLabelWidth(rect);
 		// 稳定无障碍 id 契约:properties.<TypeDisplayName>.<字段名>(脚本用同样字符串算 HashId)。
 		const auto propId = [](const std::string& type, const std::string& field)
 		{ return "properties." + type + "." + field; };
@@ -2568,13 +2532,16 @@ namespace World
 		const bool collectionWritable = collectionRows != nullptr && collectionRows->Writable
 			&& collectionRows->Container != nullptr;
 		std::string pendingEraseName;
-		const auto drawCollectionRemove = [&](const std::string& rowName, float rowTop)
+		// VEC-H2:行尾 `-` 走库件 `Wui::CollectionActionButton`(方按钮 + 悬停/焦点/禁用态),
+		// 落点 = 行矩形右侧的行外动作槽(容器已按 `CollectionActionColumnWidth()` 收窄子行)。
+		const auto drawCollectionRemove = [&](const std::string& rowName, const Wui::WuiRect& row)
 		{
 			if (!collectionWritable)
 				return;
-			const Wui::WuiRect button { rect.X + rect.W + 2.0f, rowTop + 2.0f,
-				kCollectionActionWidth - 2.0f, 18.0f };
-			if (InstanceBarButton(ctx, (collectionRows->IdText + ".remove." + rowName).c_str(), button, "-",
+			const Wui::WuiRect button { row.X + row.W + 2.0f, row.Y + (row.H - kRowHeight) * 0.5f, kRowHeight,
+				kRowHeight };
+			if (Wui::CollectionActionButton(ctx,
+				Wui::HashId((collectionRows->IdText + ".remove." + rowName).c_str()), button, "-",
 				Wui::Tr("panel.properties.collection_remove.tooltip",
 					"Remove this element from the collection (the scene stores the list)"), true, theme))
 				pendingEraseName = rowName;
@@ -2597,36 +2564,24 @@ namespace World
 			if (field.Meta.Transient)
 				continue;
 			const Wui::WuiId fid = Wui::HashId(("f." + typeName + "." + field.Name).c_str()) ^ base;
-			const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, 22 };
-			// VEC-C2:脚本属性行的行尾留给 `↺` 复位(固定占位:两种状态同一矩形,行布局零位移)。
-			// 集合元素行的 `-` 删除列在**外面**(容器的子行矩形已按 kCollectionActionWidth 收窄)。
-			const float resetReserve = scriptPropertyRow ? kResetButtonWidth + 2.0f : 0.0f;
-			const Wui::WuiRect ctrl { row.X + labelWidth, row.Y + 1,
-				std::max(24.0f, row.W - labelWidth - 4.0f - resetReserve), 20 };
 			const std::string rowIdText = propId(typeName, field.Name);
+			const Wui::WuiId rowNodeId = Wui::HashId(rowIdText.c_str());
 			// VEC-C2 / VEC-F2:**单项** `↺` 复位(叶子 / 数组元素 / 映射值行)。`modified` 语义 =
 			// "编辑态可复位":Play/只读态用同一 rect 画禁用占位(库件两态共用同一几何,行布局零位移)。
 			// 点中后只把**这一行**清成"未设" —— 显示由 `ScriptPropertyDisplayValue` 回落脚本默认值,
 			// 存档按 D1 判定"未设不写";不再触发整表重同步(那会把同一集合的增删按声明重建 =
 			// 用户反馈的"点一个元素把整个集合都复原了")。
-			const auto drawResetButton = [&](bool resettable)
+			const Wui::WuiId resetId = Wui::HashId((rowIdText + ".reset").c_str());
+			const bool resetEnabled = scriptPropertyRow && !m_ReadOnly && !field.Meta.ReadOnly;
+			const std::string resetLabel = Wui::Tr("panel.properties.script_reset",
+				"Reset this item to the script default");
+			const std::string resetDoc = resetEnabled
+				? Wui::Tr("panel.properties.script_reset.tooltip", ScriptItemResetDoc())
+				: Wui::Tr("panel.properties.script_readonly_notice",
+					"Play/Simulate: script properties are read-only (pause or stop to edit)");
+			const auto applyItemReset = [&]()
 			{
-				const Wui::WuiRect resetRect { rect.X + rect.W - (collectionRows ? kCollectionActionWidth : 0.0f)
-					- kResetButtonWidth - 2.0f, row.Y + 1.0f, kResetButtonWidth, 18.0f };
-				const Wui::WuiId resetId = Wui::HashId((rowIdText + ".reset").c_str());
-				const std::string resetLabel = Wui::Tr("panel.properties.script_reset",
-					"Reset this item to the script default");
-				const std::string resetDoc = resettable
-					? Wui::Tr("panel.properties.script_reset.tooltip", ScriptItemResetDoc())
-					: Wui::Tr("panel.properties.script_readonly_notice",
-						"Play/Simulate: script properties are read-only (pause or stop to edit)");
-				const bool clicked = Wui::ResetDefaultButton(ctx, resetId, resetRect, resettable, theme,
-					resetLabel, resetDoc);
-				// 库件登记过 a11y(kind=reset-default、value=modified/default、enabled 跟随 modified),
-				// 但它不带悬停说明 —— 用同一 id 再登记一次补 label/tooltip(后登记覆盖,值以控件为准)。
-				RegisterNode(resetId, "reset-default", resetRect, resetLabel,
-					resettable ? "modified" : "default", resettable, resetDoc);
-				if (!clicked || !field.Set)
+				if (!field.Set)
 					return;
 				// VEC-F2:单项复位 = 该行回到"未设",显示回落**脚本当前声明**里同名位置的默认值。
 				// Luau 的数组在面板里 `+`/`-` 后会重排下标,行的旧 Default 会留在改名后的行上 ——
@@ -2650,7 +2605,7 @@ namespace World
 
 			if (field.K == Schema::Kind::Object)
 			{
-				const std::string idText = propId(typeName, field.Name);
+				const std::string& idText = rowIdText;
 				const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
 				void* nestedInstance = field.GetPtr ? field.GetPtr(instance) : nullptr;
 				// VEC-B3:脚本属性里的裸 table / 面板侧降级的结构化表 = 只读摘要行。
@@ -2661,13 +2616,21 @@ namespace World
 					const std::string summary = field.Meta.DisplayName.empty()
 						? std::string("table") : field.Meta.DisplayName;
 					const std::string summaryDoc = fieldDocFor(field);
-					if (!summaryDoc.empty())
-						Wui::Tooltip(ctx, row, summaryDoc);
-					Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text + "  " + summary,
-						label.Term, theme.TextMuted, 13.0f, theme, row.W - 8.0f);
-					RegisterNode(Wui::HashId(idText.c_str()), "text", row, labelText, summary, false, summaryDoc);
-					drawCollectionRemove(field.Name, row.Y);
-					y += 20;
+					// 只读摘要行:行结构走属性行库件(内联值 + 悬停说明 + 行尾动作列),文本形态与旧口径一致。
+					const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, kRowHeight };
+					Wui::PropertyRowDesc desc;
+					desc.Label = label.Text;
+					desc.Term = label.Term;
+					desc.Tooltip = summaryDoc;
+					desc.A11yKind = "text";
+					desc.A11yLabel = labelText;
+					desc.A11yValue = summary;
+					desc.A11yEnabled = false;
+					desc.InlineValue = true;
+					desc.InlineValueText = summary;
+					Wui::PropertyRow(ctx, rowNodeId, row, desc, theme);
+					drawCollectionRemove(field.Name, row);
+					y += kRowHeight;
 					continue;
 				}
 				// UUID 等身份标识只读展示,不提供编辑控件。
@@ -2684,59 +2647,63 @@ namespace World
 							display = buffer;
 						}
 					}
-					Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f,
-						theme, labelBudget);
-					Label(ctx, { ctrl.X, row.Y + 3 }, display, theme.Text, 13.0f);
-					RegisterNode(Wui::HashId(idText.c_str()), "text", row, labelText, display, false);
-					drawCollectionRemove(field.Name, row.Y);
-					y += 20;
+					const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, kRowHeight };
+					Wui::PropertyRowDesc desc;
+					desc.Label = label.Text;
+					desc.Term = label.Term;
+					desc.A11yKind = "text";
+					desc.A11yLabel = labelText;
+					desc.A11yValue = display;
+					desc.A11yEnabled = false;
+					desc.InlineValue = true;
+					desc.InlineValueText = display;
+					Wui::PropertyRow(ctx, rowNodeId, row, desc, theme);
+					drawCollectionRemove(field.Name, row);
+					y += kRowHeight;
 					continue;
 				}
+				// VEC-H2:折叠分组头走库件 `Wui::PropertyGroupHeader`(展开标记 + 标签 + 悬停说明 +
+				// 行尾集合复位;点复位不折叠)。语义与 id 契约与旧实现逐条一致。
+				const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, kRowHeight };
 				bool& open = ctx.Persist<bool>(fid, false);
 				// VEC-F2:集合头 `↺`(数组 / 映射 / 结构化表的折叠头行)= 复原**整个集合** ——
 				// 与单项 `↺` 同一图标,但文案/说明说清"整集合 + 丢弃所有增删改",并且**先弹确认**。
 				// 只读/Play 画禁用占位并给只读理由(与叶子行同一套 disabled hint 口径)。
-				const Wui::WuiRect headResetRect { rect.X + rect.W - (collectionRows ? kCollectionActionWidth : 0.0f)
-					- kResetButtonWidth - 2.0f, row.Y + 1.0f, kResetButtonWidth, 18.0f };
 				const bool headResetDrawn = scriptPropertyRow && nested != nullptr && nestedInstance != nullptr;
 				// `nestedInstance` 只有在合成属性表路径上才是 `ScriptProperty*`(Play 里 C++ 实例走真实
 				// 结构体指针)→ 形态/复位只对合成路径成立;Play 那一路只画禁用占位。
 				const bool headScriptRow = headResetDrawn && m_ScriptInspectingScriptRows;
 				const bool headResettable = headScriptRow && !m_ReadOnly && !field.Meta.ReadOnly;
-				// 展开/折叠的命中区**不含复位按钮那一列**:点 `↺` 不顺带把行折起来。
-				const float toggleWidth = headResetDrawn
-					? std::max(0.0f, headResetRect.X - row.X) : row.W;
-				if (ctx.IsClicked({ row.X, row.Y, toggleWidth, row.H }))
+				// 集合头 `↺` 的 id 契约:`properties.<组件>.<属性>.reset`(与单项同一字符串,
+				// 差别只在落点:集合头落在容器行,单项落在元素/键值行)。
+				ScriptPropertyCollection headKind = ScriptPropertyCollection::Struct;
+				if (headScriptRow)
+					headKind = static_cast<const ScriptProperty*>(nestedInstance)->Collection;
+				const std::string headLabel = ScriptCollectionHeadResetLabel(headKind);
+				const std::string headDoc = headResettable
+					? std::string(ScriptCollectionHeadResetDoc())
+					: Wui::Tr("panel.properties.script_readonly_notice",
+						"Play/Simulate: script properties are read-only (pause or stop to edit)");
+				Wui::PropertyGroupHeaderDesc head;
+				head.Label = label.Text;
+				head.Term = label.Term;
+				head.Tooltip = fieldDocFor(field);
+				head.A11yLabel = labelText;
+				head.Open = open;
+				head.Enabled = reachable(row);
+				head.ShowReset = headResetDrawn;
+				head.ResetEnabled = headResettable;
+				head.ResetId = resetId;
+				head.ResetLabel = headLabel;
+				head.ResetTooltip = headDoc;
+				const Wui::PropertyGroupHeaderResult header =
+					Wui::PropertyGroupHeader(ctx, rowNodeId, row, head, theme);
+				if (header.Toggled)
 					open = !open;
-				const std::string nestedDoc = fieldDocFor(field);
-				if (!nestedDoc.empty())
-					Wui::Tooltip(ctx, row, nestedDoc);
-				Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, (open ? "- " : "+ ") + label.Text, label.Term,
-					theme.Text, 13.0f, theme, labelBudget);
-				RegisterNode(Wui::HashId(idText.c_str()), "button", row, labelText, open ? "open" : "closed",
-					reachable(row), nestedDoc);
-				if (headResetDrawn)
-				{
-					// id 契约:`properties.<组件>.<属性>[.<下标|键>].reset`(单项 `↺` 同一契约;
-					// 集合头的那一个落在容器行上,单项的落在元素/键值行上)。
-					ScriptPropertyCollection headKind = ScriptPropertyCollection::Struct;
-					if (headScriptRow)
-						headKind = static_cast<const ScriptProperty*>(nestedInstance)->Collection;
-					const std::string headLabel = ScriptCollectionHeadResetLabel(headKind);
-					const std::string headDoc = headResettable
-						? std::string(ScriptCollectionHeadResetDoc())
-						: Wui::Tr("panel.properties.script_readonly_notice",
-							"Play/Simulate: script properties are read-only (pause or stop to edit)");
-					const Wui::WuiId headResetId = Wui::HashId((idText + ".reset").c_str());
-					const bool headClicked = Wui::ResetDefaultButton(ctx, headResetId, headResetRect,
-						headResettable, theme, headLabel, headDoc);
-					RegisterNode(headResetId, "reset-default", headResetRect, headLabel,
-						headResettable ? "modified" : "default", headResettable, headDoc);
-					if (headClicked && headResettable)
-						OpenScriptCollectionResetConfirm(ctx, *static_cast<ScriptProperty*>(nestedInstance));
-				}
-				drawCollectionRemove(field.Name, row.Y);
-				y += 20;
+				if (header.ResetClicked && headResettable)
+					OpenScriptCollectionResetConfirm(ctx, *static_cast<ScriptProperty*>(nestedInstance));
+				drawCollectionRemove(field.Name, row);
+				y += kRowHeight;
 				if (open && nested && nestedInstance)
 				{
 					// VEC-C2:元素自身是数组/映射(嵌套集合,如 `{{number}}`)时,它的子行也要能增删;
@@ -2760,7 +2727,7 @@ namespace World
 					if (m_ScriptInspectingScriptRows)
 						m_ScriptRowPath.push_back(field.Name);   // 子行路径 = 容器路径 + 本行名
 					y += DrawSchemaFields(ctx, fid ^ 0x9e3779b9u,
-						{ row.X + 10, row.Y + 20, std::max(40.0f, row.W - 10.0f - actionReserve), 0 },
+						{ row.X + 10, row.Y + kRowHeight, std::max(40.0f, row.W - 10.0f - actionReserve), 0 },
 						nestedInstance, nested->DisplayName, *nested, visibleRect, changedFields,
 						scriptPropertyRow, nestedRowsPtr);
 					if (m_ScriptInspectingScriptRows)
@@ -2771,42 +2738,104 @@ namespace World
 
 			if (m_ReadOnly || field.Meta.ReadOnly || !field.Get || !field.Set)
 			{
-				const std::string idText = propId(typeName, field.Name);
 				const std::string docText = fieldDocFor(field);
 				// 只读也要显示"值":否则 Play/Simulate 下属性面板只剩字段名,看起来像"什么都不显示"。
-				std::string text = label.Text;
-				if (field.Get)
-					text += ": " + FormatReadOnlyValue(field, field.Get(instance));
-				if (!docText.empty())
-					Wui::Tooltip(ctx, row, docText);
-				// 值行整行可用;术语作为行尾 Caption 对照(句子/值本身不加英文)。
-				Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, text, label.Term, theme.TextMuted, 13.0f, theme,
-					row.W - 8.0f);
-				// 只读字段登记为不可交互文本节点:ui.tree 能断言"可见但禁用"。
-				RegisterNode(Wui::HashId(idText.c_str()), "text", row,
-					labelText, field.Get ? FormatReadOnlyValue(field, field.Get(instance)) : std::string(),
-					false, docText);
+				const std::string display = field.Get ? FormatReadOnlyValue(field, field.Get(instance)) : std::string();
+				// VEC-H2:只读行也走属性行库件(内联「标签: 值」+ 不可交互文本节点 + 禁用复位占位)。
+				const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, kRowHeight };
+				Wui::PropertyRowDesc desc;
+				desc.Label = label.Text;
+				desc.Term = label.Term;
+				desc.Tooltip = docText;
+				desc.A11yKind = "text";
+				desc.A11yLabel = labelText;
+				desc.A11yValue = display;
+				desc.A11yEnabled = false;
+				desc.InlineValue = true;
+				desc.InlineValueText = display;
 				// 只读态:复位按钮可见但禁用(disabled hint = 面板顶部那行"Play/Simulate 只读"说明)。
-				if (scriptPropertyRow)
-					drawResetButton(false);
-				y += 20;
+				desc.ShowReset = scriptPropertyRow;
+				desc.ResetEnabled = false;
+				desc.ResetId = resetId;
+				desc.ResetLabel = resetLabel;
+				desc.ResetTooltip = resetDoc;
+				Wui::PropertyRow(ctx, rowNodeId, row, desc, theme);
+				y += kRowHeight;
 				continue;
 			}
 
 			// 交互字段:标签登记为静态节点(不可点),控件本体按真实 kind 登记
 			// (脚本用 properties.<Type>.<Field> 直接 ui.invoke)。
-			const std::string idText = propId(typeName, field.Name);
+			const std::string& idText = rowIdText;
 			// P4-U9:字段说明(如果有)—— 悬停提示 + 无障碍节点 Tooltip。
 			const std::string fieldDoc = fieldDocFor(field);
-			if (!fieldDoc.empty())
-				Wui::Tooltip(ctx, row, fieldDoc);
-			RegisterNode(Wui::HashId(idText.c_str()), "label", row, labelText, std::string(), false, fieldDoc);
-			Wui::LabelWithTerm(ctx, { row.X + 4, row.Y + 3 }, label.Text, label.Term, theme.TextMuted, 13.0f,
-				theme, labelBudget);
+			// VEC-H2:行结构(标签列 + 值列 + 悬停说明 + 行尾复位)走库件;面板只把控件画进 FieldRect。
+			// 向量行(非颜色)是多行控件:先"只算不画"拿值列宽 → 决定排布与行高,再画行。
+			const bool vectorRow = (field.K == Schema::Kind::Vec2 || field.K == Schema::Kind::Vec3
+				|| field.K == Schema::Kind::Vec4) && !(field.Meta.Color && field.K != Schema::Kind::Vec2);
+			const int vectorComponents = field.K == Schema::Kind::Vec2 ? 2
+				: (field.K == Schema::Kind::Vec3 ? 3 : 4);
+			const Wui::PropertyRowLayout measured = Wui::MeasurePropertyRow(
+				{ rect.X, rect.Y + y, rect.W, kRowHeight }, labelWidth, scriptPropertyRow);
+			float rowHeight = kRowHeight;
+			if (vectorRow)
+				rowHeight = VecFieldHeight(VecFieldLayout(measured.Field.W), vectorComponents);
+			const Wui::WuiRect row { rect.X, rect.Y + y, rect.W, rowHeight };
+			Wui::WuiRect ctrl;
+			if (collectionWritable)
+			{
+				// VEC-H2:数组元素 / 映射键值行走库件 `Wui::CollectionRow` —— 行内 `↺`(单项复位)
+				// 与行外 `-`(删除这条元素)都是库件的动作按钮,面板只消费事件(删除延迟到收口统一做)。
+				Wui::CollectionRowDesc element;
+				element.Label = label.Text;
+				element.Term = label.Term;
+				element.Tooltip = fieldDoc;
+				element.A11yKind = "label";
+				element.A11yLabel = labelText;
+				element.A11yEnabled = false;
+				element.FieldHeight = vectorRow ? rowHeight : 0.0f;
+				element.ActionsOutside = true;
+				element.ShowReset = scriptPropertyRow;
+				element.ResetEnabled = resetEnabled;
+				element.ResetId = resetId;
+				element.ResetLabel = resetLabel;
+				element.ResetTooltip = resetDoc;
+				element.ShowRemove = true;
+				element.RemoveId = Wui::HashId((collectionRows->IdText + ".remove." + field.Name).c_str());
+				element.RemoveTooltip = Wui::Tr("panel.properties.collection_remove.tooltip",
+					"Remove this element from the collection (the scene stores the list)");
+				const Wui::CollectionRowResult elementRow =
+					Wui::CollectionRow(ctx, rowNodeId, row, element, theme);
+				if (elementRow.ResetClicked)
+					applyItemReset();
+				if (elementRow.RemoveClicked)
+					pendingEraseName = field.Name;
+				ctrl = elementRow.FieldRect;
+			}
+			else
+			{
+				Wui::PropertyRowDesc rowDesc;
+				rowDesc.Label = label.Text;
+				rowDesc.Term = label.Term;
+				rowDesc.Tooltip = fieldDoc;
+				rowDesc.A11yKind = "label";
+				rowDesc.A11yLabel = labelText;
+				rowDesc.A11yEnabled = false;      // 行标签不可交互;控件本体登记自己的节点
+				rowDesc.FieldHeight = vectorRow ? rowHeight : 0.0f;
+				rowDesc.ShowReset = scriptPropertyRow;
+				rowDesc.ResetEnabled = resetEnabled;
+				rowDesc.ResetId = resetId;
+				rowDesc.ResetLabel = resetLabel;
+				rowDesc.ResetTooltip = resetDoc;
+				const Wui::PropertyRowResult rowResult = Wui::PropertyRow(ctx, rowNodeId, row, rowDesc, theme);
+				if (rowResult.ResetClicked)
+					applyItemReset();
+				ctrl = rowResult.FieldRect;
+			}
 			Schema::Value value = field.Get(instance);
 			bool fieldChanged = false;
-			// 本行推进量:普通行 22px;向量行按库件排布给足高度(见 VecFieldHeight)。
-			float rowAdvance = kRowHeight;
+			// 本行推进量:普通行 = 库件行高(24);向量行按库件排布给足高度(见 VecFieldHeight)。
+			float rowAdvance = rowHeight;
 			switch (field.K)
 			{
 				case Schema::Kind::Bool:
@@ -3089,11 +3118,11 @@ namespace World
 				if (changedFields)
 					changedFields->push_back(typeName + "." + field.Name);
 			}
-			// 叶子行尾复位(数组/映射元素行同一条路径;只读态在上面那一支处理)。
-			if (scriptPropertyRow)
-				drawResetButton(!m_ReadOnly);
 			// 数组/映射的**叶子元素行**行尾 `-`(Object 元素行在各自分支里画)。
-			drawCollectionRemove(field.Name, row.Y);
+			// 叶子行的 `↺` 复位已随行结构(PropertyRow)画过,这里只剩 `-` 与推进。
+			// 集合元素行走 CollectionRow 时,`-` 已由库件画过(不要重复登记/重复绘制)。
+			if (!collectionWritable)
+				drawCollectionRemove(field.Name, row);
 			y += rowAdvance;
 		}
 
@@ -3118,7 +3147,8 @@ namespace World
 			if (collectionRows->Kind == ScriptPropertyCollection::Map && adding)
 			{
 				// 映射 `+`:先给一个**键名文本输入**,回车建行(空键 / 重名忽略;Esc 取消)。
-				const Wui::WuiRect keyRect { rect.X, rect.Y + y, std::max(60.0f, rect.W - 4.0f), 20.0f };
+				const Wui::WuiRect keyRect { rect.X, rect.Y + y + (kRowHeight - 20.0f) * 0.5f,
+					std::max(60.0f, rect.W - 4.0f), 20.0f };
 				bool cancelled = false;
 				const bool committed = Wui::TextField(ctx, keyFieldId, keyRect, keyState.Buffer, theme, &cancelled);
 				const std::string keyText = keyState.Buffer;
@@ -3149,14 +3179,15 @@ namespace World
 			}
 			else
 			{
-				const Wui::WuiRect addButton { rect.X + rect.W + 2.0f, rect.Y + y + 1.0f,
-					kCollectionActionWidth - 2.0f, 18.0f };
+				// 追加行:`+` 与元素行的 `-` 同一条行外动作槽(CollectionActionColumnWidth)。
+				const Wui::WuiRect addButton { rect.X + rect.W + 2.0f,
+					rect.Y + y, kRowHeight, kRowHeight };
 				const std::string addDoc = collectionRows->Kind == ScriptPropertyCollection::Map
 					? Wui::Tr("panel.properties.collection_add_map.tooltip",
 						"Add a key/value row (the key name is typed next)")
 					: Wui::Tr("panel.properties.collection_append.tooltip", "Append one element to the list");
-				if (InstanceBarButton(ctx, (collectionRows->IdText + ".add").c_str(), addButton, "+",
-					addDoc, true, theme))
+				if (Wui::CollectionActionButton(ctx, Wui::HashId((collectionRows->IdText + ".add").c_str()),
+					addButton, "+", addDoc, true, theme, false))
 				{
 					if (collectionRows->Kind == ScriptPropertyCollection::Array)
 					{
@@ -3373,16 +3404,17 @@ namespace World
 				std::min(kOpenButtonWidth, std::max(40.0f, refRow.W - (refCtrl.X + refCtrl.W + 6.0f))), 20.0f };
 			// Play/Simulate 只读:打开脚本编辑器也一并禁用(与"这一块只读"同一句原因)。
 			const bool hasScript = !lua->ScriptPath.empty();
-			if (InstanceBarButton(ctx, "script.open_in_editor", openRect,
+			if (Wui::ActionButton(ctx, Wui::HashId("script.open_in_editor"), openRect,
 				Wui::Tr("panel.properties.open_script_editor", "Open in Editor"),
+				theme,
+				hasScript && !m_ReadOnly,
 				m_ReadOnly
 					? Wui::Tr("panel.properties.script_readonly_reason",
 						"Play/Simulate is read-only: pause or stop to reload the script")
 					: (hasScript
 					? Wui::Tr("panel.properties.open_script_editor.tooltip",
 						"Open this script asset in the built-in script editor (same panel as double-clicking it in the Content Browser)")
-					: Wui::Tr("panel.properties.open_script_editor.none", "Pick a script asset first")),
-				hasScript && !m_ReadOnly, theme))
+					: Wui::Tr("panel.properties.open_script_editor.none", "Pick a script asset first"))))
 			{
 				m_Host.OpenScriptEditor(lua->ScriptPath);
 				WLD_CORE_INFO("[script-ui] open in script editor: '{0}'", lua->ScriptPath);
@@ -3565,14 +3597,15 @@ namespace World
 		if (luau)
 		{
 			const Wui::WuiRect reloadRect { rect.X, rect.Y + y, std::min(rect.W, 160.0f), 22.0f };
-			if (InstanceBarButton(ctx, "lua.reload", reloadRect,
+			if (Wui::ActionButton(ctx, Wui::HashId("lua.reload"), reloadRect,
 				Wui::Tr("panel.properties.reload_script", "Reload Script"),
+				theme,
+				!m_ReadOnly,
 				m_ReadOnly
 					? Wui::Tr("panel.properties.script_readonly_reason",
 						"Play/Simulate is read-only: pause or stop to reload the script")
 					: Wui::Tr("panel.properties.reload_script.tooltip",
-						"Reload this instance from the script asset (same entry as the Scripts panel and script.reload)"),
-				!m_ReadOnly, theme))
+						"Reload this instance from the script asset (same entry as the Scripts panel and script.reload)")))
 			{
 				std::string message;
 				const bool ok = EditorLayer::ReloadLuauScriptComponent(*lua, scene, &message);

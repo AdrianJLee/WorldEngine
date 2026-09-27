@@ -92,6 +92,15 @@ namespace World
 		// 符号总数 = 顶层查询项(全局/类/关键字/内置/文件符号)+ 各类成员(字段/方法)。
 		std::size_t SymbolCount() const;
 
+		// VEC-H1:当前文件的"文件内符号"只读快照(高亮区分"数据字段/局部"与全局服务表用):
+		//   - outLocals = 本文件声明过的局部/文件符号(`local x` / `function x` / `X = {}`);
+		//   - outFields = 本文件里作为**字段名**出现过的名字(表构造键 / 字段赋值 / 子表递归推断,
+		//     以及 `---@field` 注解字段)。
+		// 顺序 = 记录顺序,可能重复(`Set` 侧会去重);只读,不改任何索引状态。
+		// 还没 SetFileSource(或空文件)时两表都为空。
+		void CollectFileSymbols(std::vector<std::string>& outLocals,
+			std::vector<std::string>& outFields) const;
+
 		// 按光标前片段补全:先清空 out,再填候选,最多 maxItems 条(0 = 不截断)。
 		void Query(std::string_view linePrefix, std::size_t maxItems,
 			std::vector<LuauCompletionItem>& out) const;

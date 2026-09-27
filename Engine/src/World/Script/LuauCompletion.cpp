@@ -1084,6 +1084,34 @@ namespace World
 		}
 	}
 
+	// VEC-H1:文件内符号的只读快照(高亮区分"数据字段/局部"与全局服务表用)。
+	// 只读 —— 不改任何索引状态;高亮侧不内置第二份名单,名单只从这里流出去。
+	void LuauCompletionIndex::CollectFileSymbols(std::vector<std::string>& outLocals,
+		std::vector<std::string>& outFields) const
+	{
+		outLocals.clear();
+		outFields.clear();
+		// 局部/文件符号:`local x` / `function x` / `X = {}`(Kind=Global)。
+		// `---@class X` 只有类型名、没有运行时值(Kind=Class)→ 不进"局部"档。
+		for (const LuauCompletionItem& item : m_FileItems)
+			if (item.Kind == LuauCompletionItem::KindType::Global)
+				outLocals.push_back(item.Name);
+		// 数据字段:`---@field` 注解字段 + 推断表里的字段(表构造键 / 字段赋值 / 子表递归)。
+		for (const LuauCompletionItem& field : m_AnnotationFields)
+			outFields.push_back(field.Name);
+		std::function<void(const std::vector<InferredSymbol>&)> collectFields;
+		collectFields = [&collectFields, &outFields](const std::vector<InferredSymbol>& fields)
+		{
+			for (const InferredSymbol& field : fields)
+			{
+				outFields.push_back(field.Name);
+				collectFields(field.Fields);
+			}
+		};
+		for (const InferredSymbol& symbol : m_Inferred)
+			collectFields(symbol.Fields);
+	}
+
 	std::size_t LuauCompletionIndex::SymbolCount() const
 	{
 		std::size_t count = m_Items.size() + m_FileItems.size();

@@ -1693,6 +1693,129 @@ namespace World::Wui
 				LocalizedText(draw, "reason", "Select a material instance first", "先选择一个材质实例"));
 		}
 
+		// ---- VEC-H2:属性行 / 折叠分组头 / 集合行 / 集合动作按钮 ----
+		// showcase 全部走真实控件路径:行结构由库件画,值列里是真实字段控件(DragFloat),
+		// 行尾动作是库件自己的按钮 —— 工作台看到的与属性面板里是同一份代码。
+		std::string FloatText3(float value)
+		{
+			char buffer[32] = {};
+			std::snprintf(buffer, sizeof(buffer), "%.3f", value);
+			return buffer;
+		}
+
+		void ShowPropertyRow(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme theme = ThemedFor(draw, *draw.Theme);
+			const Slot slot = Canvas(draw, *draw.Theme, 280.0f, PropertyRowHeight());
+			const WuiId id = BeginShowcase(draw, "property-row", "Property Row", slot.Rect);
+			PseudoState pseudo(draw, id, slot.Rect);
+			float& value = DrivenFloat(ctx, "showcase.propertyrow.value", draw, "value", 5.0f, 0.0f, 20.0f);
+			PropertyRowDesc desc;
+			desc.Label = LocalizedText(draw, "label", "Move Speed", "移动速度");
+			desc.Term = LocalizedText(draw, "term", "", "Move Speed");
+			desc.Tooltip = LocalizedText(draw, "tooltip", "Movement speed in units per second (default 5).",
+				"每秒移动单位数(默认 5)。");
+			desc.A11yLabel = desc.Label;
+			desc.A11yValue = FloatText3(value);
+			desc.Enabled = !StateIs(draw, { "disabled" }) && !BoolProperty(draw, "disabled", false);
+			desc.Modified = StateIs(draw, { "modified" }) || BoolProperty(draw, "modified", false);
+			desc.ShowReset = BoolProperty(draw, "reset", true);
+			desc.ResetEnabled = desc.ShowReset && desc.Enabled;
+			desc.ResetId = ShellId("property-row.reset");
+			desc.ResetLabel = LocalizedText(draw, "resetLabel", "Reset", "恢复默认值");
+			desc.ResetTooltip = LocalizedText(draw, "resetTooltip", "Restore the default value (5)",
+				"恢复到默认值(5)");
+			const PropertyRowResult row = PropertyRow(ctx, id, slot.Rect, desc, theme);
+			DragFloat(ctx, ShellId("property-row.field"), row.FieldRect, value, 0.01f, -1.0f, -1.0f, theme);
+		}
+
+		void ShowPropertyGroupHeader(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme theme = ThemedFor(draw, *draw.Theme);
+			const Slot slot = Canvas(draw, *draw.Theme, 280.0f, PropertyRowHeight());
+			const WuiId id = BeginShowcase(draw, "property-group-header", "Property Group Header", slot.Rect);
+			bool& openState = BoolState(ctx, "showcase.propertygroupheader.open", true);
+			// 覆盖优先级:state(collapsed)> 属性(open)> 持久槽(真实点击的结果);覆盖只影响本帧。
+			const std::optional<bool> forcedOpen = BoolOverride(draw, "open");
+			const bool overridden = StateIs(draw, { "collapsed" }) || forcedOpen.has_value();
+			bool open = forcedOpen.value_or(StateIs(draw, { "collapsed" }) ? false : openState);
+			PseudoState pseudo(draw, id, slot.Rect);
+			PropertyGroupHeaderDesc desc;
+			desc.Label = LocalizedText(draw, "label", "Scores", "分数表");
+			desc.Term = LocalizedText(draw, "term", "", "Scores");
+			desc.Tooltip = LocalizedText(draw, "tooltip", "Per-level score entries (default 1.5, 2.5, 3.5).",
+				"逐关分数(默认 1.5、2.5、3.5)。");
+			desc.Trailing = LocalizedText(draw, "trailing", "3 items", "3 项");
+			desc.A11yLabel = desc.Label;
+			desc.Open = open;
+			desc.Enabled = !StateIs(draw, { "disabled" }) && !BoolProperty(draw, "disabled", false);
+			desc.Modified = StateIs(draw, { "modified" }) || BoolProperty(draw, "modified", false);
+			// 默认态就画出复位(§19 的 ExtraA11yIds 断言在 default 一帧里找节点;状态只作为额外入口)。
+			desc.ShowReset = BoolProperty(draw, "reset", true) || StateIs(draw, { "modified" });
+			desc.ResetEnabled = desc.ShowReset && desc.Enabled;
+			desc.ResetId = ShellId("property-group-header.reset");
+			desc.ResetLabel = LocalizedText(draw, "resetLabel", "Reset", "恢复默认值");
+			desc.ResetTooltip = LocalizedText(draw, "resetTooltip",
+				"Restore the whole collection (asks for confirmation)", "恢复整个集合(会先弹确认)");
+			const PropertyGroupHeaderResult header = PropertyGroupHeader(ctx, id, slot.Rect, desc, theme);
+			if (header.Toggled)
+				open = !open;
+			if (!overridden)
+				openState = open;
+		}
+
+		void ShowCollectionRow(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme theme = ThemedFor(draw, *draw.Theme);
+			const Slot slot = Canvas(draw, *draw.Theme, 280.0f, PropertyRowHeight());
+			const WuiId id = BeginShowcase(draw, "collection-row", "Collection Row", slot.Rect);
+			PseudoState pseudo(draw, id, slot.Rect);
+			float& value = DrivenFloat(ctx, "showcase.collectionrow.value", draw, "value", 1.5f, 0.0f, 20.0f);
+			CollectionRowDesc desc;
+			desc.Label = TextProperty(draw, "label", "1");
+			desc.Tooltip = LocalizedText(draw, "tooltip", "Element 1 of Scores (default 1.5).",
+				"分数表第 1 个元素(默认 1.5)。");
+			desc.A11yLabel = desc.Label;
+			desc.A11yValue = FloatText3(value);
+			desc.Enabled = !StateIs(draw, { "disabled" }) && !BoolProperty(draw, "disabled", false);
+			desc.ShowReset = BoolProperty(draw, "reset", true);
+			desc.ResetEnabled = desc.ShowReset && desc.Enabled;
+			desc.ResetId = ShellId("collection-row.reset");
+			desc.ResetLabel = LocalizedText(draw, "resetLabel", "Reset", "恢复默认值");
+			desc.ResetTooltip = LocalizedText(draw, "resetTooltip",
+				"Restore this element to the script default", "把该元素恢复到脚本默认值");
+			desc.ShowRemove = BoolProperty(draw, "remove", true);
+			desc.RemoveEnabled = desc.ShowRemove && desc.Enabled;
+			desc.RemoveId = ShellId("collection-row.remove");
+			desc.RemoveTooltip = LocalizedText(draw, "removeTooltip",
+				"Remove this element from the collection (the scene stores the list)",
+				"从集合中移除此元素(场景将保存此列表)");
+			desc.ShowAdd = StateIs(draw, { "add" }) || BoolProperty(draw, "add", false);
+			desc.AddEnabled = desc.ShowAdd && desc.Enabled;
+			desc.AddId = ShellId("collection-row.add");
+			desc.AddTooltip = LocalizedText(draw, "addTooltip", "Append one element to the list",
+				"向列表末尾追加一个元素");
+			const CollectionRowResult row = CollectionRow(ctx, id, slot.Rect, desc, theme);
+			DragFloat(ctx, ShellId("collection-row.field"), row.FieldRect, value, 0.01f, -1.0f, -1.0f, theme);
+		}
+
+		void ShowCollectionActionButton(const WuiComponentDraw& draw)
+		{
+			WuiContext& ctx = *draw.Context;
+			const WuiTheme theme = ThemedFor(draw, *draw.Theme);
+			const Slot slot = Canvas(draw, *draw.Theme, 24.0f, 24.0f);
+			const WuiId id = BeginShowcase(draw, "collection-action-button", "Collection Action Button", slot.Rect);
+			PseudoState pseudo(draw, id, slot.Rect);
+			const bool enabled = !StateIs(draw, { "disabled" }) && !BoolProperty(draw, "disabled", false);
+			CollectionActionButton(ctx, id, slot.Rect, TextProperty(draw, "glyph", "-"),
+				LocalizedText(draw, "tooltip", "Remove this element from the collection",
+					"从集合中移除此元素"),
+				enabled, theme, BoolProperty(draw, "danger", true));
+		}
+
 		void ShowScrollBar(const WuiComponentDraw& draw)
 		{
 			WuiContext& ctx = *draw.Context;
@@ -2688,6 +2811,119 @@ namespace World::Wui
 				StateList({ "default", "collapsed", "hover", "focus" }),
 				{ PropText("title", "Shader Parameters"), PropText("trailing", "12 items"), PropBool("open") },
 				&ShowCollapsibleHeader));
+
+			// ---- VEC-H2:属性面板的行语义(属性行 / 折叠分组头 / 集合行 / 集合动作按钮)----
+			WuiComponentRegistry::Register(Desc(
+				"property-row", "PropertyRow", "Property Row", "Properties", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=label/调用方声明的行 kind(交互字段的标签节点 A11yEnabled=false、只读值行走 kind=text);id=调用方的稳定行 id(面板:HashId('properties.<组件>.<字段>'));label=A11yLabel、value=A11yValue、tooltip=悬停说明/禁用理由(同源);行尾复位是子节点 kind=reset-default(调用方按 HashId(行 id 文本 + '.reset') 给 id,固定占位、两态同矩形)",
+				"行高 24(4px 栅格)、字段列高 20、行尾动作列 24;标签列宽 = min(140, 行宽×0.45)(PropertyRowLabelWidth;同一面板传同一值 ⇒ 竖向对齐);字段列 = 行宽 − 标签列 − 4 − 动作列;行矩形与动作落点不随状态变化",
+				A11yIds({ "showcase.property-row", "showcase.property-row.reset" }),
+				StateList({ "default", "hover", "focus", "modified", "disabled" }),
+				{
+					PropText("label", "Move Speed"),
+					PropText("tooltip", "Movement speed in units per second (default 5)."),
+					PropFloat("value", 0.0f, 20.0f, 0.1f),
+					PropBool("modified"),
+					PropBool("reset"),
+					PropBool("disabled"),
+				},
+				&ShowPropertyRow,
+				{
+					Item(WuiInteractionKind::Hover, "showcase.property-row", WuiInteractionExpect::PixelChange,
+						"鼠标移到行中心(1 帧)→ 移开(1 帧)",
+						"行底 = theme.HoverBg(悬停反馈);行矩形不变,字段控件不被挪动"),
+					Item(WuiInteractionKind::Click, "showcase.property-row.reset", WuiInteractionExpect::Event,
+						"点行尾 ↺ 图标(modified=true 时可用)",
+						"一次复位事件;调用方据此把值写回默认(禁用态 Enabled=false 且带理由)"),
+					Item(WuiInteractionKind::Key, "showcase.property-row.reset", WuiInteractionExpect::Event,
+						"Tab 到 ↺ 出现焦点环 → Enter;再验一次 Space",
+						"启用态进焦点表;禁用态不进(Tab 扫不到)"),
+				}));
+
+			WuiComponentRegistry::Register(Desc(
+				"property-group-header", "PropertyGroupHeader", "Property Group Header", "Properties",
+				WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=button;id=调用方稳定 id(面板:HashId('properties.<组件>.<字段>') / 'properties.section.<DisplayName>');label=A11yLabel、value=open/closed、interactive=true、focused 跟随焦点;进焦点表(Tab 可达),Enter/Space = 切换;行尾动作(复位/删除)各是子节点(kind=reset-default / button),点动作不会折叠",
+				"行高 24;展开 = theme.ActiveBg、折叠 = theme.PanelHeader、悬停 = theme.HoverBg(CollapsibleHeader 同语法);折叠命中区 = 整行减去动作列(或调用方传入的 ToggleWidth);Trailing 文本右对齐在动作列左侧",
+				A11yIds({ "showcase.property-group-header", "showcase.property-group-header.reset" }),
+				StateList({ "default", "collapsed", "hover", "focus", "modified", "disabled" }),
+				{
+					PropText("label", "Scores"),
+					PropText("tooltip", "Per-level score entries (default 1.5, 2.5, 3.5)."),
+					PropText("trailing", "3 items"),
+					PropBool("open"),
+					PropBool("reset"),
+					PropBool("disabled"),
+				},
+				&ShowPropertyGroupHeader,
+				{
+					Item(WuiInteractionKind::Click, "showcase.property-group-header",
+						WuiInteractionExpect::ValueChange,
+						"点分组头左半(避开行尾动作)→ 再点一次",
+						"节点 value 在 open / closed 之间来回;折叠只改底色与 -/+ 标记,自身矩形不变"),
+					Item(WuiInteractionKind::Click, "showcase.property-group-header.reset",
+						WuiInteractionExpect::Event,
+						"点行尾 ↺(reset=true / modified 态)",
+						"集合级复位(破坏性:真实调用方先弹确认,控件只报事件)"),
+					Item(WuiInteractionKind::Key, "showcase.property-group-header", WuiInteractionExpect::ValueChange,
+						"Tab 到分组头 → Enter;再验一次 Space",
+						"键盘与点击同语义(焦点环 + 值迁移)"),
+				}));
+
+			WuiComponentRegistry::Register(Desc(
+				"collection-row", "CollectionRow", "Collection Row", "Properties", WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=label/调用方声明的行 kind;id=调用方稳定行 id(面板:HashId('properties.<组件>.<字段>.<下标|键>'));label=元素下标/键、value=A11yValue、tooltip=悬停说明;行尾 `-` 是子节点 kind=button(id=调用方的 ...remove.<行名>),`+` 同理(...add);ActionsOutside=true 时动作落在行矩形右侧预留槽(面板集合元素的既有几何,槽宽 = CollectionActionColumnWidth())",
+				"行高 24;值列 = 行宽 − 标签列 − 4 − 行内动作列;Indent 只挪本行内容、不改行矩形;动作按钮 24×24(与行同高、居中)",
+				A11yIds({ "showcase.collection-row", "showcase.collection-row.reset",
+					"showcase.collection-row.remove" }),
+				StateList({ "default", "hover", "focus", "add", "disabled" }),
+				{
+					PropText("label", "1"),
+					PropText("tooltip", "Element 1 of Scores (default 1.5)."),
+					PropFloat("value", 0.0f, 20.0f, 0.1f),
+					PropBool("reset"),
+					PropBool("remove"),
+					PropBool("add"),
+					PropBool("disabled"),
+				},
+				&ShowCollectionRow,
+				{
+					Item(WuiInteractionKind::Click, "showcase.collection-row.reset", WuiInteractionExpect::Event,
+						"点元素行尾 `↺`(reset=true / modified 态)",
+						"单项复位(只清这一项;调用方按脚本声明回填默认值)"),
+					Item(WuiInteractionKind::Click, "showcase.collection-row.remove", WuiInteractionExpect::Event,
+						"点元素行尾 `-`",
+						"一次删除事件;真实调用方在画完所有元素行之后统一 erase(避免同帧错位)"),
+					Item(WuiInteractionKind::Click, "showcase.collection-row.field",
+						WuiInteractionExpect::ValueChange, "在值列里横向拖动数值(或点进去键入)",
+						"值列矩形由库件给出(FieldRect),字段控件仍走它自己的输入路径"),
+				}));
+
+			WuiComponentRegistry::Register(Desc(
+				"collection-action-button", "CollectionActionButton", "Collection Action Button", "Buttons",
+				WuiComponentStatus::Draft,
+				"Engine/src/World/WUI/WuiWidgets.cpp",
+				"role=button;id=调用方稳定 id(面板:HashId('...remove.<行名>') / '...add');label=字形(- / + / x)、value=tooltip、tooltip=用途或禁用理由(disabled 时 Enabled=false、Interactive=false,悬停仍给理由);启用态进焦点表,Enter/Space = 激活",
+				"首选 24×24(4px 栅格;与行同高,行内垂直居中);danger=true 时悬停用 theme.Danger 描边 + 22% 底(破坏性动作的既定语法)",
+				A11yIds({ "showcase.collection-action-button" }),
+				StateList({ "default", "hover", "focus", "disabled" }),
+				{
+					PropText("glyph", "-"),
+					PropText("tooltip", "Remove this element from the collection"),
+					PropBool("danger"),
+					PropBool("disabled"),
+				},
+				&ShowCollectionActionButton,
+				{
+					Item(WuiInteractionKind::Click, "showcase.collection-action-button",
+						WuiInteractionExpect::Event, "点按钮中心", "一次激活事件(调用方执行删除/追加)"),
+					Item(WuiInteractionKind::Key, "showcase.collection-action-button",
+						WuiInteractionExpect::Event, "Tab 到按钮 → Enter;再验一次 Space",
+						"键盘与点击同语义"),
+				}));
 
 			WuiComponentRegistry::Register(Desc(
 				"button.disabled", "ButtonEx", "Button (Disabled + Reason)", "Buttons", WuiComponentStatus::Draft,

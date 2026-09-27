@@ -3,6 +3,7 @@
 // 行注释、长括号字符串(含跨行与多等号)、跨行块注释(含多等号)、中文串字节边界、
 // 缓存命中/失效与跨行状态传播、10k 行 token 化耗时。
 
+#include "World/Script/LuauCompletion.h"
 #include "World/Script/LuauHighlighter.h"
 #include "World/WUI/WuiTextBuffer.h"
 
@@ -11,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -19,6 +21,8 @@ namespace
 	using World::LuauHighlighter;
 	using World::LuauHighlightState;
 	using World::LuauEngineTypeSet;
+	using World::LuauFileSymbolSet;
+	using World::LuauCompletionIndex;
 	using World::Wui::WuiCodeToken;
 	using World::Wui::WuiCodeTokenKind;
 	using World::Wui::WuiTextBuffer;
@@ -281,6 +285,131 @@ int main()
 			tokens.clear();
 			LuauHighlighter::HighlightLine(code, state, tokens);
 			CHECK(KindAt(tokens, code.find("vec3")) == WuiCodeTokenKind::Default);
+		}
+
+		// ---- 9. VEC-H1:文件内符号优先(数据字段/局部不再吃服务表的全局色)----
+		{
+			LuauFileSymbolSet fileSymbols;
+			fileSymbols.Set({ "a" }, { "Level" });
+			CHECK(!fileSymbols.Empty());
+			CHECK(fileSymbols.ContainsLocal("a") && !fileSymbols.ContainsField("a"));
+			CHECK(fileSymbols.ContainsField("Level") && !fileSymbols.ContainsLocal("Level"));
+			CHECK(fileSymbols.Hash() != 0);
+
+			LuauHighlightState state;
+			std::vector<WuiCodeToken> tokens;
+
+			// 数据字段:表构造键(含跨行表构造的形态 `InferredStats = {\n Level = 3,\n}`)→ Field。
+			const std::string key = "        Level = 3,";
+			LuauHighlighter::HighlightLine(key, state, tokens, nullptr, &fileSymbols);
+			CHECK(KindAt(tokens, key.find("Level")) == WuiCodeTokenKind::Field);
+			CHECK(KindAt(tokens, key.find('3')) == WuiCodeTokenKind::Number);
+
+			// 同行表构造键同样走 Field。
+			const std::string inlineKey = "local t = { Level = 1 }";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(inlineKey, state, tokens, nullptr, &fileSymbols);
+			CHECK(KindAt(tokens, inlineKey.find("Level")) == WuiCodeTokenKind::Field);
+
+			// 成员位置(self.ExtraInfo.Level)→ Field;接收者链里的名字保持 Default。
+			const std::string member = "local x = self.ExtraInfo.Level";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(member, state, tokens, nullptr, &fileSymbols);
+			CHECK(KindAt(tokens, member.find("Level")) == WuiCodeTokenKind::Field);
+			CHECK(KindAt(tokens, member.find("ExtraInfo")) == WuiCodeTokenKind::Default);
+
+			// 服务表的**裸用法**不在本文件的字段/局部名单里 → 仍 Global 浅蓝(VEC-H1 核心口径)。
+			const std::string service = "local s = Level.Primary()";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(service, state, tokens, nullptr, &fileSymbols);
+			CHECK(KindAt(tokens, service.find("Level")) == WuiCodeTokenKind::Global);
+			// 成员名不吃全局色:它是调用点,按既有规则(规则 3)染 Function,与修复前一致。
+			CHECK(KindAt(tokens, service.find("Primary")) == WuiCodeTokenKind::Function);
+
+			// 本文件声明的局部名 → Default(`a = 1` 这类名字不再染全局色)。
+			const std::string localDecl = "local a = 1";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(localDecl, state, tokens, nullptr, &fileSymbols);
+			CHECK(KindAt(tokens, localDecl.find("a = ")) == WuiCodeTokenKind::Default);
+			const std::string localUse = "a = a + 1";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(localUse, state, tokens, nullptr, &fileSymbols);
+			CHECK(KindAt(tokens, 0) == WuiCodeTokenKind::Default);
+
+			// VEC-A7 不回归:引擎类型档与文件内符号同时传 → vec3 仍 EngineType。
+			LuauEngineTypeSet engineTypes;
+			engineTypes.Set({ "vec3" });
+			const std::string engine = "local v = vec3.new(Level.Primary())";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(engine, state, tokens, &engineTypes, &fileSymbols);
+			CHECK(KindAt(tokens, engine.find("vec3")) == WuiCodeTokenKind::EngineType);
+			CHECK(KindAt(tokens, engine.find("Level")) == WuiCodeTokenKind::Global);
+
+			// 不传文件符号 = 修复前行为:同一个 `Level = 3,` 仍是 Global,老调用方零影响。
+			tokens.clear();
+			LuauHighlighter::HighlightLine(key, state, tokens);
+			CHECK(KindAt(tokens, key.find("Level")) == WuiCodeTokenKind::Global);
+			tokens.clear();
+			LuauHighlighter::HighlightLine(member, state, tokens);
+			CHECK(KindAt(tokens, member.find("Level")) == WuiCodeTokenKind::Global);
+		}
+
+		// ---- 10. VEC-H1 集成:完成索引的文件符号 → 高亮集合(面板的接线口径)----
+		{
+			LuauCompletionIndex index;
+			index.SetFileSource(
+				"---@class PlayerScript : WorldScript\n"
+				"---@field Speed number 移动速度\n"
+				"local PlayerScript = {\n"
+				"    Speed = 5.0,\n"
+				"    InferredStats = {\n"
+				"        Level = 3,\n"
+				"    },\n"
+				"}\n");
+			std::vector<std::string> locals;
+			std::vector<std::string> fields;
+			index.CollectFileSymbols(locals, fields);
+			LuauFileSymbolSet fileSymbols;
+			fileSymbols.Set(std::move(locals), std::move(fields));
+			CHECK(fileSymbols.ContainsLocal("PlayerScript"));   // `local X = {}` 是文件符号
+			CHECK(fileSymbols.ContainsField("Speed"));          // `---@field` 注解字段
+			CHECK(fileSymbols.ContainsField("Level"));          // 嵌套表构造键(推断)
+			CHECK(!fileSymbols.ContainsLocal("Level"));         // Level 只是字段,不是本文件的局部
+
+			LuauHighlightState state;
+			std::vector<WuiCodeToken> tokens;
+			const std::string field = "        Level = 3,";
+			LuauHighlighter::HighlightLine(field, state, tokens, nullptr, &fileSymbols);
+			CHECK(KindAt(tokens, field.find("Level")) == WuiCodeTokenKind::Field);
+			const std::string service = "local s = Level.Primary()";
+			tokens.clear();
+			LuauHighlighter::HighlightLine(service, state, tokens, nullptr, &fileSymbols);
+			CHECK(KindAt(tokens, service.find("Level")) == WuiCodeTokenKind::Global);
+
+			// 空文件(没 SetFileSource)→ 集合为空 → 旧行为。
+			LuauCompletionIndex empty;
+			empty.SetFileSource("");
+			std::vector<std::string> emptyLocals;
+			std::vector<std::string> emptyFields;
+			empty.CollectFileSymbols(emptyLocals, emptyFields);
+			CHECK(emptyLocals.empty() && emptyFields.empty());
+		}
+
+		// ---- 11. VEC-H1:高亮缓存按"文件符号指纹"失效(面板接线契约)----
+		{
+			WuiTextBuffer buffer;
+			buffer.SetText("Level = 3\n");
+			LuauHighlightCache cache;
+			cache.Update(buffer);
+			CHECK(KindAt(cache.Tokens(0), 0) == WuiCodeTokenKind::Global);   // 空集合 = 旧行为
+			cache.SetFileSymbols({}, { "Level" });
+			CHECK(cache.FileSymbols().ContainsField("Level"));
+			cache.Update(buffer);
+			CHECK(KindAt(cache.Tokens(0), 0) == WuiCodeTokenKind::Field);    // 集合变化 → 缓存重建
+			cache.SetFileSymbols({}, {});
+			cache.Update(buffer);
+			CHECK(KindAt(cache.Tokens(0), 0) == WuiCodeTokenKind::Global);   // 清空同样失效
+			CHECK(cache.FileSymbols().Empty());
 		}
 
 		std::printf("World.LuauHighlighter: all checks passed\n");

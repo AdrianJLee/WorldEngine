@@ -230,6 +230,182 @@ namespace World::Wui
 	bool ResetDefaultButton(WuiContext& ctx, WuiId id, const WuiRect& rect, bool modified,
 		const WuiTheme& theme, const std::string& label = std::string(),
 		const std::string& tooltip = std::string());
+
+	// ---- VEC-H2:属性面板三件结构库件(属性行 / 折叠分组头 / 集合行 + 集合动作按钮) ----
+	//
+	// 背景(用户 2026-09-27:「属性这里的 UI 我不是很满意,而且没进控件库」):属性面板的行语义
+	// (标签列 + 值列 + 悬停说明 + 行尾复位/删除)此前是面板自己组装的 —— 每行用什么字号、
+	// 标签列多宽、动作列在哪、禁用怎么写理由,都散在 PropertiesPanel.cpp 里。这一族把
+	// "一行属性长什么样、怎么被点" 收进库,面板只负责:① 决定行数据 ② 把字段控件画进返回的
+	// FieldRect ③ 按返回值改自己的状态。
+	//
+	// 共同口径(参考 Unity Inspector / Unreal Details / Godot Inspector / Blender Properties;
+	// 与 worldengine-editor-ui 的令牌和 4px 栅格一致):
+	//  · 行高 = kPropertyRowHeight(24,4px 栅格);行尾动作列固定 24 宽、与行同高,位置不随行状态变化
+	//    (改前/改后行矩形逐像素相同 —— 与 ResetDefaultButton 的"固定占位"同一约定);
+	//  · 标签列宽 = min(140, 行宽 × 0.45)(PropertyRowLabelWidth;同一面板传同一值 ⇒ 竖向对齐),
+	//    标签文字自 +8 起画(左 4px 留"已修改"圆点),到字段列前留 4px;
+	//  · 标签左对齐、值列右对齐;数字字段的数值由控件自己右对齐;
+	//  · 状态齐四态:default / hover(行底 theme.HoverBg)/ focus(控件自己的焦点环)/
+	//    disabled(theme.TextDisabled + 理由进 a11y Tooltip 与悬停提示);
+	//  · 悬停说明(Tooltip)与无障碍节点的 Tooltip 同源:只靠悬停能看到的信息,脚本/读屏必须也拿得到;
+	//  · 无障碍 id 由调用方给(面板的稳定 id 契约不变),节点 kind/value/label/enabled 由调用方声明;
+	//  · 行内不再出现手写颜色/字号:全部读调用方传入的 WuiTheme。
+
+	// 属性行(叶子行):标签列 + 值列 + 悬停说明 + 可选行尾"恢复默认"(内容 / 样式 / 行为三组之外无附加结构)。
+	struct PropertyRowDesc
+	{
+		// 显示文案(已本地化;不含英文术语)。空 = 只画值列(纯值行)。
+		std::string Label;
+		std::string Term;              // 英文术语对照(中文界面用;走 LabelWithTerm 的裁剪口径)
+		std::string Tooltip;           // 悬停说明;禁用行这里是禁用理由(第二通道同源)
+		// 无障碍节点(节点 id = PropertyRow 的 id 参数;与面板既有 id 契约逐字节一致)。
+		const char* A11yKind = "label";
+		std::string A11yLabel;         // 空 = 用 Label
+		std::string A11yValue;
+		bool A11yEnabled = true;       // 节点 Enabled/Interactive(交互字段的标签节点可为 false)
+		bool Enabled = true;           // 视觉/交互可用性:false = 弱化 + 不响应 + 提示给理由
+		bool Modified = false;         // 行首 4px 强调圆点(该值已偏离默认;只影响观感)
+		// 只读行:把值文本画在行内(「标签: 值」),不占字段列。InlineValue=true 时用 InlineValueText。
+		bool InlineValue = false;
+		std::string InlineValueText;
+		float LabelWidth = 0.0f;       // 0 = PropertyRowLabelWidth(row);同一面板传同一值以对齐
+		float FieldHeight = 0.0f;      // 0 = kPropertyFieldHeight(20);向量这类多行控件传实际高度
+		// 行尾"恢复默认"(复用 ResetDefaultButton;固定占位,两态同矩形)。
+		WuiId ResetId = 0;             // 调用方按自己的 id 契约算(如 HashId(行 id 文本 + ".reset"))
+		bool ShowReset = false;
+		bool ResetEnabled = false;
+		std::string ResetLabel;
+		std::string ResetTooltip;
+	};
+
+	struct PropertyRowResult
+	{
+		WuiRect FieldRect {};          // 值列矩形(调用方把字段控件画在这里)
+		WuiRect ResetRect {};
+		bool ResetClicked = false;
+	};
+
+	// 属性行的默认标签列宽(同一面板传同一值 ⇒ 标签列对齐;见文件末尾设计口径)。
+	WLD_API float PropertyRowLabelWidth(const WuiRect& row);
+	// 属性行的标准行高(24,4px 栅格):面板用它排 y,不再自己写 22。
+	WLD_API float PropertyRowHeight();
+	// 只算不画:值列/复位列矩形(面板要先知道字段宽度才能决定行高,例如向量行 2×2 要两行)。
+	struct PropertyRowLayout
+	{
+		WuiRect Field {};
+		WuiRect Reset {};
+		float LabelWidth = 0.0f;
+	};
+	WLD_API PropertyRowLayout MeasurePropertyRow(const WuiRect& row, float labelWidth, bool showReset);
+	// 属性行。返回值 = 本帧行尾"恢复默认"是否被点击;值列矩形在 result.FieldRect。
+	WLD_API PropertyRowResult PropertyRow(WuiContext& ctx, WuiId id, const WuiRect& row,
+		const PropertyRowDesc& desc, const WuiTheme& theme);
+
+	// 折叠分组头(可折叠行):展开标记 + 标签 + 可选行尾动作(复位 / 删除)+ 悬停说明。
+	// 交互:整行点击(或焦点上 Enter/Space)切换 open;行尾动作各有自己的命中区(点动作不会折叠)。
+	// 无障碍:节点 kind="button"、value="open"/"closed"、label=A11yLabel、focused 跟随焦点,进焦点表。
+	struct PropertyGroupHeaderDesc
+	{
+		std::string Label;
+		std::string Term;
+		std::string Tooltip;
+		std::string Trailing;          // 右侧计数/摘要文本(可选,如 "(3)")
+		std::string A11yLabel;
+		std::string A11yValue;         // 覆盖 value(默认 "open"/"closed")
+		bool Open = false;
+		bool Enabled = true;
+		bool Modified = false;
+		float LabelWidth = 0.0f;
+		float ToggleWidth = -1.0f;     // 折叠命中区宽;<0 = 整行减去动作列
+		WuiId ResetId = 0;
+		bool ShowReset = false;
+		bool ResetEnabled = false;
+		std::string ResetLabel;
+		std::string ResetTooltip;
+		WuiId RemoveId = 0;
+		bool ShowRemove = false;
+		bool RemoveEnabled = true;
+		std::string RemoveLabel;
+		std::string RemoveTooltip;
+	};
+
+	struct PropertyGroupHeaderResult
+	{
+		bool Toggled = false;
+		bool ResetClicked = false;
+		bool RemoveClicked = false;
+		WuiRect ResetRect {};
+		WuiRect RemoveRect {};
+	};
+
+	WLD_API PropertyGroupHeaderResult PropertyGroupHeader(WuiContext& ctx, WuiId id, const WuiRect& row,
+		const PropertyGroupHeaderDesc& desc, const WuiTheme& theme);
+
+	// 集合行(数组元素 / 映射键值行):标签列(= 下标 / 键)+ 值列 + 行尾动作(- 删除;可选 + 追加)。
+	// ActionsOutside=true 时动作列画在**行矩形右侧的预留槽**里(属性面板集合元素的既有几何;
+	// 行矩形由调用方按槽宽收窄),false 时动作列占行内尾部。
+	struct CollectionRowDesc
+	{
+		std::string Label;
+		std::string Term;
+		std::string Tooltip;
+		const char* A11yKind = "label";
+		std::string A11yLabel;
+		std::string A11yValue;
+		bool A11yEnabled = true;
+		bool Enabled = true;
+		bool Modified = false;
+		float LabelWidth = 0.0f;
+		float Indent = 0.0f;           // 元素行相对父行的缩进(0 = 与父行同列)
+		float FieldHeight = 0.0f;      // 0 = kPropertyFieldHeight(20);向量这类多行控件传实际高度
+		bool ActionsOutside = false;
+		// 行尾 `↺`(单项复位;元素/键值行同一条库件路径,固定占位、两态同矩形)。
+		WuiId ResetId = 0;
+		bool ShowReset = false;
+		bool ResetEnabled = false;
+		std::string ResetLabel;
+		std::string ResetTooltip;
+		WuiId RemoveId = 0;
+		bool ShowRemove = false;
+		bool RemoveEnabled = true;
+		std::string RemoveTooltip;
+		WuiId AddId = 0;
+		bool ShowAdd = false;
+		bool AddEnabled = true;
+		std::string AddTooltip;
+	};
+
+	struct CollectionRowResult
+	{
+		WuiRect FieldRect {};
+		WuiRect ResetRect {};
+		WuiRect RemoveRect {};
+		WuiRect AddRect {};
+		bool ResetClicked = false;
+		bool RemoveClicked = false;
+		bool AddClicked = false;
+	};
+
+	WLD_API CollectionRowResult CollectionRow(WuiContext& ctx, WuiId id, const WuiRect& row,
+		const CollectionRowDesc& desc, const WuiTheme& theme);
+
+	// 集合动作按钮(行尾 `-` / `+` 的方按钮):与其它库按钮同一套状态与"禁用给理由"口径。
+	// 无障碍:kind="button"、label=glyph、value/tooltip=tooltip、enabled 跟随;danger = 破坏性(悬停变红)。
+	WLD_API bool CollectionActionButton(WuiContext& ctx, WuiId id, const WuiRect& rect,
+		const std::string& glyph, const std::string& tooltip, bool enabled, const WuiTheme& theme,
+		bool danger = true);
+
+	// 集合行"行外动作列"的总宽度(= 动作按钮宽 + 与行的间隙)。面板按它收窄子行矩形,
+	// 与 CollectionRow/CollectionActionButton 的落点共用一个事实源(4px 栅格)。
+	WLD_API float CollectionActionColumnWidth();
+
+	// 带禁用态 + 理由的紧凑动作按钮(面板实例条 / 脚本按钮的库化入口:文字左对齐、行高按下小字号)。
+	// 与 ButtonEx 的差别只在排版:ButtonEx 是"标准按钮"(大字号),ActionButton 是"工具条按钮"。
+	WLD_API bool ActionButton(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		const WuiTheme& theme, bool enabled = true, const std::string& tooltip = std::string(),
+		bool danger = false);
+
 	// 文本输入:UTF-8 追加/退格;回车提交返回 true,Escape 失焦。
 	// P4-U5a(2026-09-21):无障碍补充信息。**为什么要显式传**:占位提示是各面板自己画的 Label,
 	// 读屏/脚本读不到 —— 实测 search 框的节点 label/value 双空(用户口径:两者不能同时为空)。
