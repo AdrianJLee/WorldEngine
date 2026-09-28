@@ -102,18 +102,41 @@ int main()
 			std::chrono::steady_clock::time_point startA, endA, startB, endB;
 			const auto slowWork = [] { std::this_thread::sleep_for(std::chrono::milliseconds(25)); };
 			CHECK(jobs.Register({ "jobA", SystemPhase::Update, true, {} },
-				[&](World::Timestep) { slowWork(); }));
+				[&](World::Timestep)
+				{
+					startA = std::chrono::steady_clock::now();
+					slowWork();
+					endA = std::chrono::steady_clock::now();
+				}));
 			CHECK(jobs.Register({ "jobB", SystemPhase::Update, true, {} },
-				[&](World::Timestep) { slowWork(); }));
-			startA = std::chrono::steady_clock::now();
-			const uint32_t ran = jobs.RunPhase(SystemPhase::Update, World::Timestep(0.016f));
-			endB = std::chrono::steady_clock::now();
+				[&](World::Timestep)
+				{
+					startB = std::chrono::steady_clock::now();
+					slowWork();
+					endB = std::chrono::steady_clock::now();
+				}));
+			// PROJ-6:抖动修复 —— 原来只测一次总耗时 < 45ms(两作业各睡 25ms:串行 50ms、并发 ~25ms)。
+			// 刚并行重链后的负载窗口里单次测量会偶发超过 45ms,与"是否并发"无关(实测复现 1/57)。
+			// 改成两条判据:①语义 = 两个作业的执行区间必须重叠(串行必然不重叠);
+			//             ②时间 = 最多测 3 次取最快(< 45ms;串行下三次都 >= 50ms,不会误判)。
+			uint32_t ran = 0;
+			double bestElapsedMs = 1.0e9;
+			bool overlapped = false;
+			for (int attempt = 0; attempt < 3; ++attempt)
+			{
+				const auto phaseStart = std::chrono::steady_clock::now();
+				ran = jobs.RunPhase(SystemPhase::Update, World::Timestep(0.016f));
+				const double elapsedMs = std::chrono::duration<double, std::milli>(
+					std::chrono::steady_clock::now() - phaseStart).count();
+				bestElapsedMs = elapsedMs < bestElapsedMs ? elapsedMs : bestElapsedMs;
+				overlapped = overlapped || (startA < endB && startB < endA);
+			}
 			CHECK(ran == 2);
-			const double elapsedMs = std::chrono::duration<double, std::milli>(endB - startA).count();
-			// 串行至少 50ms;并发应显著更快(留足 CI 抖动量)。
-			CHECK(elapsedMs < 45.0);
+			CHECK(overlapped);
+			CHECK(bestElapsedMs < 45.0);
 			CHECK(jobs.GetLastTimings().size() == 2);
-			(void)startB; (void)endA;
+			std::printf("World.Systems: parallel phase best of 3 = %.2f ms (overlap=%s)\n",
+				bestElapsedMs, overlapped ? "true" : "false");
 		}
 		World::JobSystem::Shutdown();
 		std::printf("World.Systems: all checks passed\n");
