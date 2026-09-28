@@ -4,6 +4,7 @@
 #include "World/Core/Application.h"
 #include "World/Script/BehaviorRegistry.h"
 #include "World/Script/ScriptProperties.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -33,10 +34,10 @@ namespace World
 			return hash;
 		}
 
-		// 逻辑路径的磁盘回退位置:与 ScriptEngine 的既有回退路径一致。
+		// 逻辑路径的磁盘回退位置:当前项目内容根/assets,与 ScriptEngine 的既有回退路径一致。
 		std::filesystem::path DiskPathFor(const std::string& logicalPath)
 		{
-			return std::filesystem::path(WLD_ASSETPATH + std::string("/") + logicalPath);
+			return World::Paths::AssetRoot() / logicalPath;
 		}
 
 		std::string FieldIdText(const std::string& fieldName)

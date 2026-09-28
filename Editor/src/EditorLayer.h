@@ -87,6 +87,11 @@ namespace World
 		void DuplicateSelectedEntity();
 		// 请求切换渲染后端;在下一帧 OnUpdate 开头(渲染前)安全重建 GPU 资源。
 		void ApplyRendererChange(const std::string& name);
+		// PROJ-1/T1:打开另一个项目 = 重启编辑器进程到该项目根(不做同进程热切换)。
+		// 复用渲染后端重启那套 CreateProcessW + 环境块 + ShellExecuteW 兜底;子进程拿到
+		// `--project <root>` 与 `WLD_PROJECT_DIR=<root>`(World::Paths 读它),并把工作目录
+		// 设成项目根(清单按 CWD → 项目根解析)。有未保存改动时先走既有的未保存确认模态。
+		void RelaunchWithProject(const std::filesystem::path& projectRoot);
 
 		// ---- WUI 面板访问(W2) ----
 		Ref<Scene> GetActiveScene() const { return m_ActiveScene; }
@@ -270,6 +275,8 @@ namespace World
 		void ProcessPendingRendererChange();
 		// 渲染后端切换:保存设置后自动重启编辑器进程(热切换会串资源)。
 		void RestartForRendererChange();
+		// RelaunchWithProject 的实际执行体(未保存确认之后才跑;会结束当前进程)。
+		void DoRelaunchWithProject(const std::filesystem::path& projectRoot);
 		void RegisterUiTextures();
 		// 重载工具栏/AI 图标(旧式 GL 纹理):窗口或上下文重建后必须重新创建。
 		void LoadIconTextures();

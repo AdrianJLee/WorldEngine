@@ -4,6 +4,7 @@
 
 #include "World/Core/Application.h"
 #include "World/Renderer/MaterialLibrary.h"
+#include "World/Utils/Paths.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -853,7 +854,7 @@ namespace World
 				&& actual.DoubleSided == expected.DoubleSided;
 		}
 
-		// 内容根解析:项目清单的 content_root = assets(相对清单目录 = WLD_PROJECT_DIR)。
+		// 内容根解析:项目清单的 content_root = assets(相对清单目录 = 当前项目根)。
 		// MaterialPath 一律按"**相对内容根**"书写;P4-U12 删掉了"再试 Game/ 旧布局"的候选。
 		namespace
 		{
@@ -861,7 +862,7 @@ namespace World
 			{
 				std::error_code ec;
 				const std::filesystem::path candidate =
-					std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+					World::Paths::AssetRoot() / path;
 				if (forWrite || std::filesystem::exists(candidate, ec))
 					return candidate;
 				return {};
@@ -886,7 +887,7 @@ namespace World
 				}
 			}
 
-			// 2. 磁盘回退:**内容根**(WLD_PROJECT_DIR/assets;绝对路径原样命中,不拼内容根)。
+			// 2. 磁盘回退:**内容根**(当前项目根/assets;绝对路径原样命中,不拼内容根)。
 			// P4-U12:删掉"再试 Editor/ 仓库布局"的第二候选 —— 内容根只有一个。
 			const std::filesystem::path candidate = ResolveOnDisk(path, /*forWrite*/ false);
 			std::ifstream file(candidate, std::ios::binary);

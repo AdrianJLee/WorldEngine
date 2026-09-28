@@ -24,7 +24,7 @@
 #include <system_error>
 
 // 构建期常量由 CMake 注入(见根 CMakeLists 的 WLD_OUTPUT_DIR);单独做语法检查时给个兜底,
-// 不影响正常构建(与其它面板依赖 WLD_PROJECT_DIR/WLD_LOCAL_DIR 的用法一致)。
+// 不影响正常构建(与其它面板依赖 WLD_LOCAL_DIR 的用法一致)。
 #ifndef WLD_OUTPUT_DIR
 #define WLD_OUTPUT_DIR "build/x64-Debug/"
 #endif

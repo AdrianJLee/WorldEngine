@@ -7,6 +7,7 @@
 #include "World/Scene/Hierarchy.h"
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Gameplay/Prefab.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
@@ -1040,7 +1041,7 @@ namespace World
 			Wui::Tr("panel.hierarchy.create_prefab.folder.tooltip",
 				"Folder under the content root (searchable); a missing folder is created on confirm"), true);
 		const std::filesystem::path folderAbsolute =
-			std::filesystem::path(std::string(WLD_ASSETPATH)) / std::filesystem::path(folderText);
+			World::Paths::AssetRoot() / std::filesystem::path(folderText);
 		if (!folderText.empty() && !std::filesystem::is_directory(folderAbsolute))
 		{
 			const std::string note = Wui::Tr("panel.hierarchy.create_prefab.folder.note",
@@ -1069,7 +1070,7 @@ namespace World
 		// ---- 覆盖提示(红字):目标已存在 = 主按钮变 Overwrite ----
 		std::error_code existsError;
 		const bool targetExists = nameError.empty() && std::filesystem::exists(
-			std::filesystem::path(std::string(WLD_ASSETPATH)) / std::filesystem::path(target), existsError);
+			World::Paths::AssetRoot() / std::filesystem::path(target), existsError);
 		std::string warningText;
 		if (!m_CreateFailure.empty())
 			warningText = m_CreateFailure;

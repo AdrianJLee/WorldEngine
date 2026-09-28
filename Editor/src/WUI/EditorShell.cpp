@@ -3,12 +3,17 @@
 
 #include <cstdio>
 #include <fstream>
+#include <shellapi.h>
 #include "../EditorPreferences.h"
 #include "../EditorLayer.h"
+#include "../Project/ProjectScaffolder.h"
 
+#include "World/Core/Application.h"
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Renderer/Renderer.h"
+#include "World/Utils/Paths.h"
+#include "World/Utils/PlatformUtils.h"
 #include "World/WUI/WuiLayoutStore.h"
 #include "World/WUI/WuiWidgets.h"
 #include "World/WUI/WuiAccessibility.h"
@@ -22,6 +27,7 @@
 #include "World/WUI/WuiLocalization.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <map>
@@ -41,6 +47,18 @@ namespace World
 		{
 			return std::chrono::duration<double>(
 				std::chrono::steady_clock::now().time_since_epoch()).count();
+		}
+
+		// PROJ-1/T1:项目名输入框的规范化(两侧空白不进目录名/id)。
+		std::string TrimProjectNameText(const std::string& text)
+		{
+			size_t begin = 0;
+			while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])))
+				++begin;
+			size_t end = text.size();
+			while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])))
+				--end;
+			return text.substr(begin, end - begin);
 		}
 
 		const char* ZoneName(Wui::DropZone zone)
@@ -1107,6 +1125,19 @@ namespace World
 			for (const std::string& path : pending)
 				OpenScriptEditorNow(path);
 		}
+		// PROJ-1/T1:"New Project…" 的 Browse…(原生文件夹对话框)与 Create(写盘)同样是
+		// **帧边界**动作:上一帧只置标记,这里统一执行(渲染中途弹 Win32 模态/写盘会踩坑,
+		// 与 m_PendingScriptOpen 同一条纪律)。
+		if (m_NewProjectBrowsePending)
+		{
+			m_NewProjectBrowsePending = false;
+			RunNewProjectBrowse(ctx);
+		}
+		if (m_NewProjectCreatePending)
+		{
+			m_NewProjectCreatePending = false;
+			RunNewProjectCreate(ctx);
+		}
 		// M4-TEX P4:内容浏览器(双击 `.wtex` / 右键 Texture Settings…/Reimport/Reset)在渲染期间
 		// 只能写"打开纹理设置"的请求 —— 可见性/布局不能在面板渲染中途改。这里在帧边界统一执行,
 		// 与 Window 菜单、AI 通道 `ui.open` 落到同一条开关路径(AiActivatePanel)。
@@ -1170,7 +1201,9 @@ namespace World
 			// P4-U13e:prefab 未保存改动的确认(关窗 / 进文档会话)也是窗口级模态。
 			|| m_PrefabPendingAction != PrefabPendingAction::None
 			// CPPT-6-ED-NEWSCRIPT:"新建 C++ 脚本"模态同样封锁下层命中。
-			|| m_NewCppScriptOpen;
+			|| m_NewCppScriptOpen
+			// PROJ-1/T1:"新建项目"模态(名称/位置/模板/落盘)同样封锁下层命中。
+			|| m_NewProjectOpen;
 		// P4-U6b:面板级模态(属性面板的"添加组件"居中窗口)与 shell 模态同一条封锁路径;
 		// 渲染该面板之前会解开(RenderTabs),画完再封回去。
 		const bool panelModalOpen = !m_PanelModalOwner.empty();
@@ -3370,7 +3403,9 @@ namespace World
 			return;
 		m_ImportSourcePath = std::filesystem::path(sourcePath);
 		m_ImportStatus.clear();
-		m_ImportTreeRoot = std::filesystem::path(WLD_ASSETPATH);
+		// 内容根 = 运行期当前项目根(World::Paths):换项目(--project / WLD_PROJECT_DIR)后
+		// 导入位置选择器跟着切,不再固定成编译期默认项目。
+		m_ImportTreeRoot = World::Paths::AssetRoot();
 		m_ImportDestDir = m_ImportTreeRoot;
 		const std::string panel = "content_browser";
 		if (!m_Layout.Contains(panel))
@@ -4060,6 +4095,315 @@ namespace World
 		Wui::EndModalFrame(ctx);
 		// 创建成功:操作日志/提示/打开编辑器都在 CreateNewCppScript 里完成(单一出口)。
 		(void)created;
+	}
+
+	// ---- PROJ-1/T1:File ▸ New Project…(任意位置新建标准项目)----
+	//
+	// 需求(用户 2026-09-28):在任意位置生成一个**标准、干净**的项目骨架(不含示例)。
+	// 本模态只做三件事:收集 项目名 + 位置;实时回显落点与行内错误;把"浏览…/创建"
+	// 标记成下一帧开头的任务(原生对话框与落盘都不在渲染中途做)。
+	// 生成内核 = Editor::ProjectScaffolder(清单走引擎 writer、空场景走引擎序列化、
+	// 结构来自 templates/project/**);成功后模态换成两个动作:资源管理器打开 / 打开项目。
+
+	std::string EditorShell::NewProjectTrimmedName() const
+	{
+		return TrimProjectNameText(m_NewProjectName);
+	}
+
+	std::string EditorShell::NewProjectNameError() const
+	{
+		return Editor::ProjectScaffolder::ValidateProjectName(m_NewProjectName);
+	}
+
+	std::string EditorShell::NewProjectLocationError() const
+	{
+		return Editor::ProjectScaffolder::ValidateLocation(
+			std::filesystem::u8path(m_NewProjectLocation), m_NewProjectName);
+	}
+
+	std::filesystem::path EditorShell::NewProjectTargetRoot() const
+	{
+		if (m_NewProjectLocation.empty())
+			return {};
+		const std::string name = NewProjectTrimmedName();
+		if (name.empty())
+			return {};
+		// 输入框与原生对话框都是 UTF-8 文本 → 按 UTF-8 解释成路径(非 ASCII 位置不会乱码)。
+		return (std::filesystem::u8path(m_NewProjectLocation) / std::filesystem::u8path(name)).lexically_normal();
+	}
+
+	void EditorShell::OpenNewProjectModal(Wui::WuiContext& ctx)
+	{
+		m_NewProjectOpen = true;
+		m_NewProjectOpenedFrame = static_cast<uint32_t>(ctx.Frame());
+		m_NewProjectCreated = false;
+		m_NewProjectRoot.clear();
+		m_NewProjectCreatedName.clear();
+		m_NewProjectFailure.clear();
+		m_NewProjectFailureFor.clear();
+		m_NewProjectBrowsePending = false;
+		m_NewProjectCreatePending = false;
+		if (m_NewProjectName.empty())
+			m_NewProjectName = "MyProject";
+		if (m_NewProjectLocation.empty())
+			m_NewProjectLocation = Editor::ProjectScaffolder::DefaultProjectLocation().u8string();
+		ctx.SetModal(Wui::HashId("modal.newproject"));
+		ctx.SetFocus(Wui::HashId("project.new.name"));
+		ctx.RecordOp("project", "new-ask", NewProjectTrimmedName(), m_NewProjectLocation);
+	}
+
+	void EditorShell::RunNewProjectBrowse(Wui::WuiContext& ctx)
+	{
+		// 原生"选择文件夹"对话框:只在帧边界打开(取消返回空串 → 保持原值)。
+		const std::string folder = FileDialogs::SelectFolder("选择项目位置");
+		if (folder.empty())
+			return;
+		m_NewProjectLocation = folder;
+		m_NewProjectFailure.clear();
+		m_NewProjectFailureFor.clear();
+		ctx.RecordOp("project", "browse", NewProjectTrimmedName(), folder);
+	}
+
+	void EditorShell::RunNewProjectCreate(Wui::WuiContext& ctx)
+	{
+		const std::string nameError = NewProjectNameError();
+		const std::string locationError = NewProjectLocationError();
+		const std::string templateError = Editor::ProjectScaffolder::ValidateTemplate();
+		const std::string blocked = !nameError.empty() ? nameError
+			: (!locationError.empty() ? locationError : templateError);
+		if (!blocked.empty())
+		{
+			// 模态里已经画过行内错误;这条分支只是拒绝"绕过按钮的第二次调用"。
+			m_NewProjectFailure = blocked;
+			m_NewProjectFailureFor = NewProjectTargetRoot().u8string();
+			return;
+		}
+
+		const std::string name = NewProjectTrimmedName();
+		const Editor::ProjectScaffolder::Result result = Editor::ProjectScaffolder::Create(
+			std::filesystem::u8path(m_NewProjectLocation), name, Application::Get().GetContext());
+		if (!result.Ok)
+		{
+			m_NewProjectFailure = result.Error;
+			m_NewProjectFailureFor = NewProjectTargetRoot().u8string();
+			WLD_CORE_WARN("[new-project] create failed: {0}", result.Error);
+			return;
+		}
+
+		m_NewProjectCreated = true;
+		m_NewProjectRoot = result.ProjectRoot;
+		m_NewProjectCreatedName = name;
+		m_NewProjectFailure.clear();
+		m_NewProjectFailureFor.clear();
+		// 操作日志与状态栏提示:与其它"新建资产"入口同一口径(project / new)。
+		ctx.RecordOp("project", "new", name, result.ProjectRoot.u8string());
+		PushNotice(Wui::TrFormat("notice.newproject.created",
+			"Created standard project {path} (no samples)", { { "path", result.ProjectRoot.u8string() } }));
+		WLD_CORE_INFO("[new-project] created '{0}' ({1} files)", result.ProjectRoot.u8string(),
+			result.Files.size());
+	}
+
+	void EditorShell::DrawNewProjectModal(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiId modalId = Wui::HashId("modal.newproject");
+		if (m_NewProjectOpen)
+			ctx.SetModal(modalId);
+		else if (ctx.Modal() == modalId)
+			ctx.ClearModal();
+		if (!m_NewProjectOpen)
+			return;
+
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("modal.newproject.title", "New Project");
+		frameDesc.Size = { 620.0f, 320.0f };
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
+		{
+			// 模态被别的路径接管/收口:同步清掉宿主状态,避免状态与真实模态脱节。
+			m_NewProjectOpen = false;
+			return;
+		}
+
+		const float labelX = frame.X + 16.0f;
+		const float fieldX = frame.X + 130.0f;
+		const float fieldW = frame.W - 146.0f - 16.0f;
+
+		// ---- 成功态:已生成 + 两个动作按钮(在资源管理器打开 / 打开项目)----
+		if (m_NewProjectCreated)
+		{
+			float cursorY = frame.Y + 48.0f;
+			Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.newproject.created",
+				"Created a standard project skeleton (no samples):"), m_Theme.TextMuted, 12.0f);
+			cursorY += 20.0f;
+			Wui::Label(ctx, { labelX, cursorY }, m_NewProjectRoot.u8string(), m_Theme.Text, 13.0f);
+			cursorY += 24.0f;
+			Wui::Label(ctx, { labelX, cursorY },
+				Wui::Tr("modal.newproject.created.hint",
+					"Open it now (restarts the editor into the new project), or keep working here."),
+				m_Theme.TextMuted, 12.0f);
+
+			const Wui::ModalButtonDesc buttons[3] = {
+				{ Wui::Tr("modal.newproject.open_explorer", "Open in Explorer"),
+					Wui::HashId("project.new.explorer"), true },
+				{ Wui::Tr("modal.newproject.open_project", "Open Project"),
+					Wui::HashId("project.new.open"), true },
+				{ Wui::Tr("modal.newproject.close", "Close"),
+					Wui::HashId("project.new.close"), true },
+			};
+			const int clicked = Wui::ModalButtons(ctx, frame, buttons, 3, m_Theme);
+			if (clicked == 0)
+			{
+				// ShellExecuteW 打开项目目录(与"打开外部脚本"同一条系统关联路径)。
+				const HINSTANCE shellResult = ShellExecuteW(nullptr, L"open",
+					m_NewProjectRoot.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+				if (reinterpret_cast<INT_PTR>(shellResult) <= 32)
+				{
+					PushNotice(Wui::TrFormat("notice.newproject.explorer_failed",
+						"Could not open the project folder: {path}",
+						{ { "path", m_NewProjectRoot.u8string() } }));
+					WLD_CORE_WARN("[new-project] ShellExecuteW failed ({0}) for '{1}'",
+						static_cast<long long>(reinterpret_cast<INT_PTR>(shellResult)),
+						m_NewProjectRoot.u8string());
+				}
+				else
+				{
+					ctx.RecordOp("project", "open-explorer", m_NewProjectCreatedName,
+						m_NewProjectRoot.u8string());
+				}
+			}
+			else if (clicked == 1)
+			{
+				ctx.RecordOp("project", "open", m_NewProjectCreatedName, m_NewProjectRoot.u8string());
+				// 重启编辑器到新项目(有未保存改动时先走既有的未保存确认模态)。
+				m_Editor.RelaunchWithProject(m_NewProjectRoot);
+				m_NewProjectOpen = false;
+				ctx.ClearModal();
+			}
+			else if (clicked == 2 || escapePressed)
+			{
+				m_NewProjectOpen = false;
+				ctx.ClearModal();
+			}
+			Wui::EndModalFrame(ctx);
+			return;
+		}
+
+		const Wui::WuiId nameId = Wui::HashId("project.new.name");
+		const Wui::WuiId locationId = Wui::HashId("project.new.location");
+		const Wui::WuiId browseId = Wui::HashId("project.new.browse");
+		const Wui::WuiId okId = Wui::HashId("project.new.ok");
+		const Wui::WuiId cancelId = Wui::HashId("project.new.cancel");
+		const bool justOpened = ctx.Frame() == m_NewProjectOpenedFrame;
+
+		// 写盘失败原因只对"同一个落点"有效:名称/位置一改就作废(与新建脚本向导同口径)。
+		if (!m_NewProjectFailure.empty() && m_NewProjectFailureFor != NewProjectTargetRoot().u8string())
+		{
+			m_NewProjectFailure.clear();
+			m_NewProjectFailureFor.clear();
+		}
+		const std::string nameError = NewProjectNameError();
+		const std::string locationError = NewProjectLocationError();
+		const std::string templateError = Editor::ProjectScaffolder::ValidateTemplate();
+
+		// ---- 名称(= 目录名;非法/保留名就地报错)----
+		float cursorY = frame.Y + 46.0f;
+		const std::string nameLabel = Wui::Tr("modal.newproject.name", "Name");
+		Wui::Label(ctx, { labelX, cursorY + 5.0f }, nameLabel, m_Theme.TextMuted, 13.0f);
+		const Wui::WuiRect nameRect { fieldX, cursorY, fieldW, 24.0f };
+		Wui::TextFieldA11y nameA11y;
+		nameA11y.Label = nameLabel;
+		nameA11y.Placeholder = Wui::Tr("modal.newproject.name.placeholder", "Project name (folder name)");
+		const bool nameFocused = ctx.Focus() == nameId;
+		const bool nameSubmitted = Wui::TextFieldEx(ctx, nameId, nameRect, m_NewProjectName, m_Theme,
+			nameError, &nameA11y);
+		cursorY += 46.0f;
+
+		// ---- 位置 + Browse…(原生文件夹对话框;帧边界执行)----
+		const float browseW = 84.0f;
+		const float locationW = fieldW - browseW - 8.0f;
+		const std::string locationLabel = Wui::Tr("modal.newproject.location", "Location");
+		Wui::Label(ctx, { labelX, cursorY + 5.0f }, locationLabel, m_Theme.TextMuted, 13.0f);
+		const Wui::WuiRect locationRect { fieldX, cursorY, locationW, 24.0f };
+		Wui::TextFieldA11y locationA11y;
+		locationA11y.Label = locationLabel;
+		locationA11y.Placeholder = Wui::Tr("modal.newproject.location.placeholder",
+			"Folder that will contain the project");
+		const bool locationFocused = ctx.Focus() == locationId;
+		const bool locationSubmitted = Wui::TextFieldEx(ctx, locationId, locationRect, m_NewProjectLocation,
+			m_Theme, locationError, &locationA11y);
+		const Wui::WuiRect browseRect { fieldX + locationW + 8.0f, cursorY, browseW, 24.0f };
+		const bool browseClicked = Wui::Button(ctx, browseId, browseRect,
+			Wui::Tr("modal.newproject.browse", "Browse…"), m_Theme);
+		if (browseClicked)
+			m_NewProjectBrowsePending = true;   // 下一帧开头弹原生对话框
+		cursorY += 46.0f;
+
+		// ---- 实时落点(<位置>/<名称>;绝对路径进节点 Tooltip)----
+		const std::filesystem::path target = NewProjectTargetRoot();
+		const std::string targetText = target.empty() ? std::string("—") : target.u8string();
+		const std::string targetLabel = Wui::Tr("modal.newproject.target", "Will create");
+		Wui::Label(ctx, { labelX, cursorY + 3.0f }, targetLabel, m_Theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { fieldX, cursorY + 1.0f }, targetText,
+			target.empty() ? m_Theme.TextMuted : m_Theme.Text, 13.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("project.new.target");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = "shell";
+			node.Kind = "text";
+			node.Label = targetLabel;
+			node.Value = targetText;
+			node.Tooltip = target.u8string();
+			node.Rect = { fieldX, cursorY - 3.0f, fieldW, 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		cursorY += 24.0f;
+
+		// ---- 模板/落盘的通用错误行(名称与位置各自画在自己的输入框下)----
+		const std::string generalError = !templateError.empty() ? templateError : m_NewProjectFailure;
+		if (!generalError.empty())
+			Wui::Label(ctx, { labelX, cursorY + 2.0f }, generalError, m_Theme.Danger, 12.0f);
+		else
+			Wui::Label(ctx, { labelX, cursorY + 2.0f },
+				Wui::Tr("modal.newproject.hint",
+					"Standard skeleton only — manifest (engine writer), empty content root and an "
+					"empty scene; engine C++ stays in Engine/**, project C++ goes to src/**."),
+				m_Theme.TextMuted, 12.0f);
+
+		// ---- 底部按钮(名称/位置/模板任一不通过时创建按钮禁用并带原因)----
+		const bool canCreate = nameError.empty() && locationError.empty() && templateError.empty();
+		const Wui::ModalResult footerResult = Wui::ModalFooter(ctx, frame,
+			Wui::Tr("modal.newproject.ok", "Create"),
+			Wui::Tr("modal.newproject.cancel", "Cancel"),
+			okId, cancelId, canCreate, m_Theme);
+
+		bool closeRequested = false;
+		if ((footerResult == Wui::ModalResult::Confirm
+				|| ((nameSubmitted && nameFocused) || (locationSubmitted && locationFocused)))
+			&& !justOpened && canCreate)
+		{
+			// 落盘推迟到下一帧开头(与 Browse… 同一条帧边界纪律)。
+			m_NewProjectCreatePending = true;
+		}
+		else if (footerResult == Wui::ModalResult::Cancel || escapePressed)
+		{
+			ctx.RecordOp("project", "new-cancel", NewProjectTrimmedName(), m_NewProjectLocation);
+			closeRequested = true;
+		}
+
+		if (closeRequested)
+		{
+			m_NewProjectOpen = false;
+			m_NewProjectFailure.clear();
+			m_NewProjectFailureFor.clear();
+			ctx.ClearModal();
+		}
+		Wui::EndModalFrame(ctx);
 	}
 
 	void EditorShell::EnsureModelPanelFromId(const std::string& panelId)
@@ -4848,6 +5192,19 @@ namespace World
 			{ Wui::Tr("menu.file.new", "New"), false, [this] { m_Editor.NewScene(); } },
 			{ Wui::Tr("menu.file.open", "Open"), false, [this] { m_Editor.OpenScene(); } },
 			{ Wui::Tr("menu.file.save", "Save"), false, [this] { m_Editor.SaveScene(); } },
+			// PROJ-1/T1:任意位置新建**标准**项目(干净骨架,不含示例)。稳定 id
+			// menu.file.new_project:AI 通道/自动化按 id 点它,不依赖标签语言。
+			{ Wui::Tr("menu.file.new_project", "New Project…"), false,
+				[this]
+				{
+					if (m_Ctx)
+						OpenNewProjectModal(*m_Ctx);
+				}, false,
+				Wui::Tr("menu.file.new_project.tooltip",
+					"Create a standard project skeleton (no samples) at any location: project name + "
+					"location → manifest, content root and an empty scene; then open it in Explorer or "
+					"restart the editor into it."),
+				Wui::HashId("menu.file.new_project") },
 			{ Wui::Tr("menu.file.import", "Import glTF..."), false, [this] { m_Editor.ImportModelDialog(); } },
 			{ Wui::Tr("menu.file.new_cpp_script", "New C++ Script…"), false,
 				[this]
@@ -4942,6 +5299,9 @@ namespace World
 
 		// ---- CPPT-6-ED-NEWSCRIPT:新建 C++ 脚本(窗口级模态) ----
 		DrawNewCppScriptModal(ctx);
+
+		// ---- PROJ-1/T1:新建项目(窗口级模态;成功态换成两个动作按钮) ----
+		DrawNewProjectModal(ctx);
 
 		const Wui::WuiId unsaved = Wui::HashId("modal.unsaved");
 		if (m_Editor.ShowUnsavedModal()) ctx.SetModal(unsaved);

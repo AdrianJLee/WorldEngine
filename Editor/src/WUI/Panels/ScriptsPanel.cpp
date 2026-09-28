@@ -2,6 +2,7 @@
 #include "ScriptsPanel.h"
 
 #include "World/Scene/Components.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -84,7 +85,7 @@ namespace World
 
 		m_DiskScripts.clear();
 		std::error_code error;
-		const std::filesystem::path root = std::filesystem::path(WLD_ASSETPATH) / "scripts";
+		const std::filesystem::path root = World::Paths::AssetRoot() / "scripts";
 		if (!std::filesystem::is_directory(root, error))
 			return;
 

@@ -8,6 +8,7 @@
 #include "World/Script/HotReload.h"
 #include "World/Script/LuauFormatter.h"
 #include "World/Script/LuauSyntax.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/Widgets/WuiChrome.h"
@@ -60,7 +61,7 @@ namespace World
 		}
 
 		// CPPT-6-ED-NEWSCRIPT:模块源码逻辑路径前缀(`module:` + checkout 相对路径,统一 '/')。
-		// Game/src/Scripts/*.h 这一类文件不在内容根(WLD_ASSETPATH)下,ResolveScriptDiskPath
+		// Game/src/Scripts/*.h 这一类文件不在内容根(World::Paths::AssetRoot())下,ResolveScriptDiskPath
 		// 按内容根解析必然失败;这里给它们一条独立的、与 CWD 无关的解析:仓库根 = WLD_REPO_ROOT
 		// (与 WLD_EDITOR_DIR 同源的编译期绝对锚点)。
 		constexpr std::string_view kModuleSourcePrefix = "module:";
@@ -211,7 +212,7 @@ namespace World
 		if (m_CompletionStubReady || m_CompletionStubFailed)
 			return;
 		const std::string stubPath =
-			std::string(WLD_ASSETPATH) + "/scripts/intermediate/WorldEngineAPI.luau";
+			(World::Paths::AssetRoot() / "scripts/intermediate/WorldEngineAPI.luau").string();
 		std::string error;
 		if (!m_Completion.LoadStubFile(stubPath, &error))
 		{

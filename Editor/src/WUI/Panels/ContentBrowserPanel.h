@@ -9,6 +9,7 @@
 #include "World/Renderer/Material.h"
 #include "World/Renderer/Texture.h"
 #include "World/WUI/WuiWidget.h"
+#include "World/Utils/Paths.h"
 
 #include <chrono>
 #include <cstdint>
@@ -32,7 +33,8 @@ namespace World
 	// 内容浏览器状态模型(与绘制分离)。
 	struct ContentBrowserModel
 	{
-		std::filesystem::path Root = WLD_ASSETPATH;
+		// PROJ-1/T3:内容根在**构造时**取运行期值(无覆盖时 = 编译期默认项目根的 assets)。
+		std::filesystem::path Root = World::Paths::AssetRoot();
 		std::filesystem::path Current;
 		char Search[256] = { 0 };
 		std::vector<std::filesystem::path> SearchResults;

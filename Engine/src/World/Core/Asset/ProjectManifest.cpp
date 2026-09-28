@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Core/Asset/ProjectManifest.h"
+#include "World/Utils/Paths.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -846,25 +847,33 @@ namespace World::Asset
 	bool ProjectManifest::Locate(const std::filesystem::path& workingDirectory, std::filesystem::path* manifestPath)
 	{
 		std::error_code ec;
-		for (const char* candidate : { "project.we.yaml", "projects/default/project.we.yaml" })
-		{
-			const std::filesystem::path full = workingDirectory / candidate;
-			if (std::filesystem::is_regular_file(full, ec))
-			{
-				if (manifestPath)
-					*manifestPath = full;
-				return true;
-			}
-		}
-		// 开发树兜底:编译期就知道仓库在哪,所以从 build/ 目录直接启动 exe(cwd 不是仓库根)
-		// 也能找到项目清单。注意这**只扩大清单的搜索范围** —— 内容根与包仍然只由清单决定,
-		// 旧版"找不到清单就猜 ../Game/assets + 扫 cwd/content/*.wpak"的回退已移除(P4-U12)。
-		const std::filesystem::path developmentManifest =
-			std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "project.we.yaml";
-		if (std::filesystem::is_regular_file(developmentManifest, ec))
+		// 1. 工作目录下的清单(打包目录 = exe 旁;或用户正好站在项目根/仓库根)。
+		const std::filesystem::path workingManifest = workingDirectory / "project.we.yaml";
+		if (std::filesystem::is_regular_file(workingManifest, ec))
 		{
 			if (manifestPath)
-				*manifestPath = developmentManifest;
+				*manifestPath = workingManifest;
+			return true;
+		}
+		// 2. **当前项目根**下的清单:编译期默认 = <repo>/projects/default/,可被
+		//    --project / WLD_PROJECT_DIR 覆盖。这一步必须在下面的 cwd "projects/default/"
+		//    猜测之前 —— 换了项目根,清单就必须跟着换,而不是被 cwd 的旧布局拉回默认项目;
+		//    没有覆盖时两者指向同一个仓库默认项目,行为不变。
+		const std::filesystem::path projectManifest = World::Paths::ProjectFile("project.we.yaml");
+		if (std::filesystem::is_regular_file(projectManifest, ec))
+		{
+			if (manifestPath)
+				*manifestPath = projectManifest;
+			return true;
+		}
+		// 3. 旧布局兜底:cwd 下的 projects/default/。注意这**只扩大清单的搜索范围** ——
+		//    内容根与包仍然只由清单决定,旧版"找不到清单就猜 ../Game/assets +
+		//    扫 cwd/content/*.wpak"的回退已移除(P4-U12)。
+		const std::filesystem::path legacyManifest = workingDirectory / "projects/default/project.we.yaml";
+		if (std::filesystem::is_regular_file(legacyManifest, ec))
+		{
+			if (manifestPath)
+				*manifestPath = legacyManifest;
 			return true;
 		}
 		return false;

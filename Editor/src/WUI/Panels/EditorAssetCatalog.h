@@ -1,9 +1,10 @@
 #pragma once
 
-// P4-U9:项目内容根(WLD_ASSETPATH)下的资产目录扫描 —— 属性面板的"资产路径"下拉、材质面板的
+// P4-U9:项目内容根(运行期 `World::Paths::AssetRoot()`)下的资产目录扫描 —— 属性面板的"资产路径"下拉、材质面板的
 // 贴图槽等共用一份结果。每帧都要列表,所以带 TTL 缓存(默认 2s),不每帧扫盘。
 
 #include "EditorAssetTypes.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <chrono>
@@ -74,7 +75,7 @@ namespace World
 			if (kind == EditorAssetKind::Unknown || kind == EditorAssetKind::Folder)
 				return paths;
 			std::error_code ec;
-			const std::filesystem::path root = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
+			const std::filesystem::path root = World::Paths::AssetRoot();
 			if (!std::filesystem::exists(root, ec))
 				return paths;
 			for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root,
@@ -118,7 +119,7 @@ namespace World
 		{
 			std::vector<std::string> dirs;
 			std::error_code ec;
-			const std::filesystem::path root = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
+			const std::filesystem::path root = World::Paths::AssetRoot();
 			if (!std::filesystem::exists(root, ec))
 				return dirs;
 			for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root,

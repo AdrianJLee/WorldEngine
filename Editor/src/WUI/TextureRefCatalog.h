@@ -50,7 +50,7 @@ namespace World
 			Wui::WuiTexturePickerState State = Wui::WuiTexturePickerState::Empty;
 		};
 
-		// 内容根(项目内容资产目录);与纹理设置面板 / 烘焙器同一口径(WLD_PROJECT_DIR/assets)。
+		// 内容根(项目内容资产目录);与纹理设置面板 / 烘焙器同一口径(`World::Paths::AssetRoot()`)。
 		std::filesystem::path ContentRootPath();
 
 		// 候选清单:先扫 `.wtex` 资产、再无同主名资产的源图,整表按**逻辑路径**排序;

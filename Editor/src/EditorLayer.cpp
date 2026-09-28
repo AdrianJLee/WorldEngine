@@ -22,6 +22,7 @@
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Script/HotReload.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiRhiBackend.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/WuiScriptedInput.h"
@@ -105,7 +106,7 @@ namespace World
 		//   * CWD = 仓库根(文档口径)→ 命中 build/x64-<cfg>/bin/<cfg>/Game/<cfg>/Game.dll;
 		//   * CWD = 别处(双击 Editor.exe / 从构建目录或快捷方式启动)→ 找不到 Game.dll,模块不注册,
 		//     于是 ScriptEngine::GenerateLuaStubs() 会把**缺少 Game 组件块**的存根写回入库文件
-		//     (WLD_ASSETPATH 是绝对路径,写的就是仓库里那一份)。
+		//     (内容根 World::Paths::AssetRoot() 默认是绝对路径,写的就是仓库里那一份)。
 		//     2026-09-23 实测(cwd=build/x64-Debug):27266 → 26893 字节,少 11 行 SampleDataComponent
 		//     块,工作区变脏、World.ScriptWorkflow 的存根漂移门禁失败。
 		//
@@ -113,9 +114,10 @@ namespace World
 		// 不新增目录约定。WLD_OUTPUT_DIR 将来若改成绝对路径,path 的 / 运算仍取绝对那一侧,
 		// 这条兜底继续成立。
 		// 仓库根用 WLD_REPO_ROOT(**无**尾分隔符;Layout-S7 新增):WLD_GAME_DIR / WLD_EDITOR_DIR /
-		// WLD_PROJECT_DIR 都写成 "<root>/X/" 带尾分隔符,对它们调 parent_path() 只会去掉那个
-		// 空文件名(实测 2026-09-23:得到 "<root>/X" 而不是 "<root>",拼出来是
-		// "<root>/Game\build/x64-Debug/..." 这种错路径)。
+		// 编译期宏都写成 "<root>/X/" 带尾分隔符,对它们调 parent_path() 只会去掉那个空文件名
+		// (实测 2026-09-23:得到 "<root>/X" 而不是 "<root>",拼出来是
+		// "<root>/Game\build/x64-Debug/..." 这种错路径;运行期项目根改走 World::Paths,
+		// 它返回**无**尾分隔符的绝对路径)。
 		bool LoadGameModuleForEditor(WorldContext& context, std::string* error)
 		{
 			std::string primaryError;
@@ -253,7 +255,7 @@ namespace World
 
 		// Application initialized Lua before attach; Game registration is now merged.
 		// Layout-S6:Game 模块没注册时渲染出来的存根会缺少 Game 组件块,而写出目标是**入库文件**
-		// (WLD_ASSETPATH 与 CWD 无关,写的就是仓库里那一份)——宁可保留上一份有效声明,也不要
+		// (World::Paths::AssetRoot() 与 CWD 无关,写的就是当前项目里那一份)——宁可保留上一份有效声明,也不要
 		// 用不完整的 schema 覆盖它。File ▸ Generate Lua API Stubs 仍可手动强制生成(带告警)。
 		if (!m_GameModuleLoaded)
 		{
@@ -268,7 +270,7 @@ namespace World
 		{
 			// 工作区根 = 项目清单所在目录(projects/default/;清单里的 content_root = assets),与
 			// 入库的 projects/default/.vscode、projects/default/.luau-lsp 一致;没有清单时退回内容根。
-			std::filesystem::path scaffoldRoot = std::filesystem::path(WLD_ASSETPATH);
+			std::filesystem::path scaffoldRoot = World::Paths::AssetRoot();
 			std::filesystem::path manifestPath;
 			if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
 				scaffoldRoot = manifestPath.parent_path();
@@ -1202,7 +1204,7 @@ namespace World
 
 	void EditorLayer::DoOpenPrefab(const std::string& logicalPath)
 	{
-		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH)) / logicalPath;
+		const std::filesystem::path absolute = World::Paths::AssetRoot() / logicalPath;
 		// 记住"进来之前的场景":返回时原样重开(没有就在返回时给一个空场景)。
 		if (!IsEditingPrefab())
 		{
@@ -1225,7 +1227,7 @@ namespace World
 	{
 		if (!IsEditingPrefab())
 			return false;
-		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH)) / m_PrefabEditLogical;
+		const std::filesystem::path absolute = World::Paths::AssetRoot() / m_PrefabEditLogical;
 		if (!m_Document.SaveTo(absolute))
 		{
 			ShowError(m_Document.GetLastError());
@@ -1268,7 +1270,7 @@ namespace World
 				*message = "预制体只能在编辑态实例化(Play/Simulate 下请先退出)";
 			return false;
 		}
-		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH)) / logicalPath;
+		const std::filesystem::path absolute = World::Paths::AssetRoot() / logicalPath;
 		const Gameplay::PrefabInstanceResult result =
 			Gameplay::InstantiateFromFile(absolute, *m_ActiveScene, entt::null);
 		if (!result.IsValid())
@@ -1341,7 +1343,8 @@ namespace World
 	//
 	// 一条内核,两个入口:层级面板的"Create Prefab from Selection…"模态与 AI 通道
 	// `asset.create_prefab`。口径:
-	//  - 只写内容根(WLD_ASSETPATH)内的 .wprefab;缺后缀自动补,越界/非法字符直接拒绝;
+	//  - 只写当前内容根(World::Paths::AssetRoot())内的 .wprefab;缺后缀自动补,
+	//    越界/非法字符直接拒绝;
 	//  - overwrite=false 且目标已存在 = 失败(绝不静默覆盖,把"覆盖"变成显式决定);
 	//  - 成功 = 写盘 + `[prefab] created <逻辑路径> (N entities)` + 内容浏览器选中该资产
 	//    + 打开它的 prefab 资产窗口(不进编辑会话,编辑仍要显式点 Edit Prefab)。
@@ -1406,8 +1409,7 @@ namespace World
 			}
 		}
 
-		const std::filesystem::path absolute = std::filesystem::path(std::string(WLD_ASSETPATH))
-			/ std::filesystem::path(logical);
+		const std::filesystem::path absolute = World::Paths::AssetRoot() / std::filesystem::path(logical);
 		std::error_code existsError;
 		const bool exists = std::filesystem::exists(absolute, existsError);
 		if (exists && !overwrite)
@@ -1943,6 +1945,125 @@ namespace World
 #endif
 	}
 
+	// ---- PROJ-1/T1:打开另一个项目(重启编辑器进程到该项目根)----
+	//
+	// 本批不做同进程热切换(见方案 §P4):"打开项目" = 用渲染后端重启那套机制重启自身,
+	// 但换掉的不是后端而是**项目根**:
+	//   * `--project <root>` 参数(EditorApp 在启动最前面解析,优先级最高)+
+	//     `WLD_PROJECT_DIR=<root>` 环境变量(World::Paths 读它);
+	//   * 子进程工作目录 = 项目根 —— 项目清单按"CWD → projects/default → 开发树"解析,
+	//     CWD 指到项目根后所有面板/内容根/关卡清单都跟着切;
+	//   * 丢掉旧的 WLD_START_SCENE(那是上一个项目的场景,不能在新项目里重开)。
+	// 有未保存改动时先走既有的未保存确认模态(保存/放弃后才真正重启)。
+	void EditorLayer::RelaunchWithProject(const std::filesystem::path& projectRoot)
+	{
+		if (projectRoot.empty())
+			return;
+		RequestAction([this, projectRoot]() { DoRelaunchWithProject(projectRoot); });
+	}
+
+	void EditorLayer::DoRelaunchWithProject(const std::filesystem::path& projectRoot)
+	{
+#ifdef WLD_PLATFORM_WINDOWS
+		std::error_code absoluteError;
+		const std::filesystem::path root = std::filesystem::absolute(projectRoot, absoluteError);
+		if (absoluteError || !std::filesystem::is_directory(root))
+		{
+			const std::string message = "Cannot open the project: the directory does not exist: "
+				+ projectRoot.u8string();
+			WLD_CORE_ERROR("{0}", message);
+			ShowError(message);
+			return;
+		}
+
+		wchar_t exeBuffer[MAX_PATH] = {};
+		if (GetModuleFileNameW(nullptr, exeBuffer, MAX_PATH) == 0)
+		{
+			ShowError("Cannot open the project: the executable path is unknown.");
+			return;
+		}
+		const std::filesystem::path exePath(exeBuffer);
+
+		// 参数按 UTF-8 → UTF-16 转换(非 ASCII 路径不能按字节直接变宽字符)。
+		const std::string arguments = " --project \"" + root.u8string() + "\"";
+		std::wstring wideArguments;
+		{
+			const int wideLength = MultiByteToWideChar(CP_UTF8, 0, arguments.c_str(),
+				static_cast<int>(arguments.size()), nullptr, 0);
+			wideArguments.resize(static_cast<size_t>(std::max(0, wideLength)));
+			if (wideLength > 0)
+				MultiByteToWideChar(CP_UTF8, 0, arguments.c_str(), static_cast<int>(arguments.size()),
+					wideArguments.data(), wideLength);
+		}
+		const std::wstring commandLine = L"\"" + exePath.wstring() + L"\"" + wideArguments;
+		const std::wstring rootWide = root.wstring();
+
+		// 自定义环境块:沿用当前环境,覆盖 WLD_PROJECT_DIR、丢掉旧的 WLD_START_SCENE。
+		std::wstring environmentBlock;
+		if (LPWCH current = GetEnvironmentStringsW())
+		{
+			for (const wchar_t* entry = current; *entry; entry += std::wcslen(entry) + 1)
+			{
+				if (std::wcsncmp(entry, L"WLD_PROJECT_DIR=", 16) == 0)
+					continue;   // 覆盖旧值
+				if (std::wcsncmp(entry, L"WLD_START_SCENE=", 16) == 0)
+					continue;   // 上一个项目的场景:不带进新项目
+				environmentBlock.append(entry);
+				environmentBlock.push_back(L'\0');
+			}
+			FreeEnvironmentStringsW(current);
+		}
+		environmentBlock.append(L"WLD_PROJECT_DIR=");
+		environmentBlock.append(rootWide);
+		environmentBlock.push_back(L'\0');
+		environmentBlock.push_back(L'\0');
+
+		DWORD lastError = 0;
+		STARTUPINFOW startup {};
+		startup.cb = sizeof(startup);
+		PROCESS_INFORMATION process {};
+		std::wstring writableCommandLine = commandLine;   // CreateProcess 可能修改该缓冲
+		const BOOL spawned = CreateProcessW(exePath.wstring().c_str(), writableCommandLine.data(),
+			nullptr, nullptr, FALSE, 0, environmentBlock.data(), rootWide.c_str(), &startup, &process);
+		bool launched = spawned != FALSE;
+		if (launched)
+		{
+			CloseHandle(process.hThread);
+			CloseHandle(process.hProcess);
+		}
+		else
+		{
+			lastError = GetLastError();
+			// CreateProcess 可能被作业对象/权限策略拦下;退一步交给 Shell 启动
+			// (ShellExecuteW 的 lpDirectory 同样把工作目录设成项目根,参数里带着 --project)。
+			const HINSTANCE shellResult = ShellExecuteW(nullptr, L"open", exePath.wstring().c_str(),
+				wideArguments.empty() ? nullptr : wideArguments.c_str(), rootWide.c_str(), SW_SHOWNORMAL);
+			if (reinterpret_cast<INT_PTR>(shellResult) <= 32)
+			{
+				const std::string message = "Opening the project requires an editor restart, but relaunching "
+					"the editor failed (CreateProcess error " + std::to_string(lastError)
+					+ ", ShellExecute error "
+					+ std::to_string(static_cast<int>(reinterpret_cast<INT_PTR>(shellResult))) + ")."
+					" The project was created; start the editor with --project \"" + root.u8string()
+					+ "\" manually.";
+				WLD_CORE_ERROR("{0}", message);
+				ShowError(message);
+				return;
+			}
+			launched = true;
+			WLD_CORE_INFO("Editor relaunched via ShellExecute (CreateProcess error {0})", lastError);
+		}
+
+		WLD_CORE_INFO("Editor restarted into project '{0}'", root.u8string());
+		Application::Get().Close();
+#else
+		const std::string message = "Opening another project requires an editor restart on this platform ("
+			+ projectRoot.u8string() + ").";
+		WLD_CORE_WARN("{0}", message);
+		ShowError(message);
+#endif
+	}
+
 	// D5c-5:把 3D 轨道相机对齐到当前 2D 视图 —— EditorCamera3D 默认朝向(yaw=pitch=0 → +Z)
 	// 与场景/2D 相机(+Z 处朝 -Z)相反,直接切 3D 档会从"背面"看场景,单面几何/蒙皮网格被背面剔除。
 	void EditorLayer::AlignEditorCamera3DWithView()
@@ -2365,7 +2486,7 @@ namespace World
 			if (message)
 				*message = text;
 		};
-		const std::filesystem::path contentRoot = std::filesystem::path(WLD_ASSETPATH);
+		const std::filesystem::path contentRoot = World::Paths::AssetRoot();
 		const std::filesystem::path templatePath = contentRoot / "scripts" / "templates" / "WorldScript.lua";
 		std::error_code templateError;
 		if (!std::filesystem::is_regular_file(templatePath, templateError))
@@ -2505,7 +2626,7 @@ namespace World
 		std::filesystem::path relative;
 		if (documentPath.is_absolute())
 		{
-			relative = std::filesystem::relative(documentPath, std::filesystem::path(WLD_ASSETPATH), ec);
+			relative = std::filesystem::relative(documentPath, World::Paths::AssetRoot(), ec);
 			if (ec || relative.empty() || relative.is_absolute())
 				return {};
 		}
@@ -2574,7 +2695,7 @@ namespace World
 		const std::filesystem::path source = std::filesystem::absolute(sourcePath);
 		World::Asset::GltfImportResult imported;
 		std::string error;
-		if (!World::Asset::ImportFile(source, std::filesystem::path(WLD_ASSETPATH), &imported, &error,
+		if (!World::Asset::ImportFile(source, World::Paths::AssetRoot(), &imported, &error,
 			destinationLogicalDir))
 		{
 			const std::string failure = "glTF 导入失败: " + (error.empty() ? std::string("未知错误") : error);
@@ -2590,7 +2711,7 @@ namespace World
 		{
 			std::error_code ec;
 			const std::filesystem::path relative =
-				std::filesystem::relative(logicalModel, std::filesystem::path(WLD_ASSETPATH), ec);
+				std::filesystem::relative(logicalModel, World::Paths::AssetRoot(), ec);
 			if (!ec && !relative.empty())
 				logicalModel = relative.generic_string();
 		}
@@ -2792,7 +2913,7 @@ namespace World
 				{
 					std::string manifestError;
 					World::Asset::ProjectManifest manifest;
-					const fs::path projectManifestPath = std::string(WLD_PROJECT_DIR) + "project.we.yaml";
+					const fs::path projectManifestPath = World::Paths::ProjectFile("project.we.yaml");
 					if (World::Asset::ProjectManifest::Load(projectManifestPath, &manifest, &manifestError))
 					{
 						const fs::path contentRoot = manifest.ResolveContentRoot(projectManifestPath);

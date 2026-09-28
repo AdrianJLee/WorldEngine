@@ -11,6 +11,7 @@
 #include "World/Renderer/AssetHotReload.h"
 #include "World/Core/Asset/GltfImporter.h"
 #include "World/Core/KeyCodes.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
 #include "World/WUI/WuiAccessibility.h"
@@ -259,7 +260,7 @@ namespace World
 			// 资产还没写进设置时退回项目默认(project.we.yaml 的 imports:)/ 引擎默认。
 			std::string settingsWarning;
 			m_Settings = Asset::ModelImportSettings::ResolveForImport(
-				(std::filesystem::path(WLD_ASSETPATH) / m_LogicalPath).string(),
+				(World::Paths::AssetRoot() / m_LogicalPath).string(),
 				&settingsWarning, &m_SettingsFromAsset);
 			if (!settingsWarning.empty())
 				WLD_CORE_WARN("[model] import settings for '{0}': {1}", m_LogicalPath, settingsWarning);
@@ -327,13 +328,13 @@ namespace World
 			m_StatusIsError = true;
 			return false;
 		}
-		const std::filesystem::path source = std::filesystem::path(WLD_ASSETPATH) / m_SourceLogical;
+		const std::filesystem::path source = World::Paths::AssetRoot() / m_SourceLogical;
 		Asset::GltfImportResult imported;
 		std::string error;
 		// P4-U11:用**面板当前的设置**导入(用户在设置区改完直接应用);设置随 .wmodel 存盘,
 		// 不再写 .wimport 旁路文件。
 		if (!Asset::GltfImporter::ImportFileWithSettings(source.string(),
-			std::filesystem::path(WLD_ASSETPATH).string(), m_Settings, &imported, &error))
+			World::Paths::AssetRoot().string(), m_Settings, &imported, &error))
 		{
 			const std::string text = Wui::Tr("panel.model.reimport.failed", "Reimport failed: ")
 				+ (error.empty() ? Wui::Tr("panel.model.reimport.unknown_error", "unknown error") : error);

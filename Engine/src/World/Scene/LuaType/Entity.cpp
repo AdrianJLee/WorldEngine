@@ -9,6 +9,7 @@
 #include "World/Script/LuauVm.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptValue.h"
+#include "World/Utils/Paths.h"
 #include "LuaTypeHelpers.h"
 
 #include <box2d/box2d.h>
@@ -73,7 +74,7 @@ namespace World
 			const std::filesystem::path requested(path);
 			if (requested.is_absolute())
 				return requested.string();
-			return (std::filesystem::path(WLD_ASSETPATH) / requested).string();
+			return (World::Paths::AssetRoot() / requested).string();
 		}
 
 		// 回调内走白名单结构写窗口;停止(含 OnDestroy)与回调外的活动场景由

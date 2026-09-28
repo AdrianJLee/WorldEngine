@@ -29,6 +29,7 @@
 #include "World/WUI/Widgets/WuiChrome.h"
 #include "World/WUI/Widgets/WuiModal.h"
 #include "World/WUI/WuiWidgets.h"
+#include "World/Utils/Paths.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -360,7 +361,7 @@ namespace World
 				key.append(".wmat");
 			std::error_code existsError;
 			const std::filesystem::path contentRoot =
-				std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
+				World::Paths::AssetRoot();
 			if (std::filesystem::exists(contentRoot / key, existsError))
 				return Wui::Tr("panel.material.newpath.error.exists", "A file already exists at this path");
 			return {};
@@ -368,7 +369,7 @@ namespace World
 
 		std::filesystem::path ContentRootPath()
 		{
-			return std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
+			return World::Paths::AssetRoot();
 		}
 
 		// ---- MAT-FN3:材质函数库与 `#include` 根 ----

@@ -9,6 +9,7 @@
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/TextureCompiler.h"
 #include "World/Renderer/TextureData.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiTextureRegistry.h"
@@ -883,7 +884,7 @@ namespace World
 
 	TextureSettingsPanel::TextureSettingsPanel()
 	{
-		m_ContentRoot = std::filesystem::path(std::string(WLD_ASSETPATH));
+		m_ContentRoot = World::Paths::AssetRoot();
 		// 需要真编码的预览烘培在**工作线程**里跑(与 MaterialEditorPanel 的着色器编译线程同一套
 		// 请求/结果/停止口径):UI 帧只做派发与上传,BC7 4K 也不会卡住编辑器。
 		m_BakeThread = std::thread([this] { PreviewBakeWorkerLoop(); });
@@ -905,7 +906,7 @@ namespace World
 	void TextureSettingsPanel::EnsureContentRoot()
 	{
 		if (m_ContentRoot.empty())
-			m_ContentRoot = std::filesystem::path(std::string(WLD_ASSETPATH));
+			m_ContentRoot = World::Paths::AssetRoot();
 	}
 
 	std::string TextureSettingsPanel::AssetAbsolutePath() const

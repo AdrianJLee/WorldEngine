@@ -1,0 +1,8 @@
+# 关卡清单(levels.welevel):关卡 id → 场景资产(相对内容根 assets/)。
+# 由 Gameplay::LevelService 消费;编辑器的关卡面板列出这里登记的关卡。
+# 新建的空项目还没有关卡;加一条即可在关卡面板里打开、也能被 Runtime/Play 加载:
+#   levels:
+#     - id: main
+#       name: Main
+#       scene: scenes/Main.wd
+levels: []

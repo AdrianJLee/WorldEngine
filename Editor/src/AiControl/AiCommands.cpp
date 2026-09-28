@@ -10,6 +10,7 @@
 #include "World/Script/ScriptProperties.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiScriptedInput.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -1612,7 +1613,7 @@ namespace World
 			}
 			std::filesystem::path resolved(path);
 			if (!resolved.is_absolute())
-				resolved = std::filesystem::path(WLD_ASSETPATH) / resolved;
+				resolved = World::Paths::AssetRoot() / resolved;
 			std::string message;
 			std::string logicalModel;
 			// D10:可选 dest = 目标逻辑目录(相对内容根,如 "models/props");空 = 源所在目录。

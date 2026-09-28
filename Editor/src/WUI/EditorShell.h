@@ -330,7 +330,36 @@ namespace World
 		std::string m_NewCppScriptName;
 		std::string m_NewCppScriptFailure;      // 写盘失败原因(落点变化时清)
 		std::string m_NewCppScriptFailureFor;   // 上面的原因对应的落点(变了就作废)
-		// 打开模态时扫一遍内容根(WLD_ASSETPATH)的目录树(低频操作;权限错误跳过)。
+
+		// ---- PROJ-1/T1:File ▸ New Project…(任意位置新建标准项目)----
+		// 菜单入口 → 模态(项目名 + 位置 + Browse… + 实时落点 + 行内错误)→ 生成标准骨架
+		// (ProjectScaffolder;清单走引擎 writer、空场景走引擎序列化、模板来自 templates/project)。
+		// **原生对话框与落盘都在帧边界执行**(上一帧只置标记;渲染中途弹 Win32 模态/写盘会踩坑,
+		// 与 m_PendingScriptOpen 同一条纪律)。成功后模态换成两个动作:在资源管理器打开 / 打开项目。
+		void OpenNewProjectModal(Wui::WuiContext& ctx);
+		void DrawNewProjectModal(Wui::WuiContext& ctx);
+		// 帧边界执行体(OnRender 开头消费标记)。
+		void RunNewProjectBrowse(Wui::WuiContext& ctx);
+		void RunNewProjectCreate(Wui::WuiContext& ctx);
+		// 校验(行内错误):名称 / 落点 / 模板;空串 = 通过。全部走 ProjectScaffolder 的只读校验。
+		std::string NewProjectNameError() const;
+		std::string NewProjectLocationError() const;
+		// 实时落点(<位置>/<名称>)与规范化后的名称。
+		std::filesystem::path NewProjectTargetRoot() const;
+		std::string NewProjectTrimmedName() const;
+		bool m_NewProjectOpen = false;
+		uint32_t m_NewProjectOpenedFrame = 0;
+		std::string m_NewProjectName;            // 项目名(= 目录名)
+		std::string m_NewProjectLocation;        // 位置(UTF-8,来自输入框或原生文件夹对话框)
+		std::string m_NewProjectFailure;         // 落盘失败原因(名称/落点变化时清)
+		std::string m_NewProjectFailureFor;      // 上面的原因对应的落点(变了就作废)
+		bool m_NewProjectBrowsePending = false;  // 下一帧开头弹"选择项目位置"原生对话框
+		bool m_NewProjectCreatePending = false;  // 下一帧开头落盘
+		bool m_NewProjectCreated = false;        // 成功态(模态画两个动作按钮)
+		std::filesystem::path m_NewProjectRoot;  // 成功后的项目根(绝对)
+		std::string m_NewProjectCreatedName;
+
+		// 打开模态时扫一遍当前内容根(World::Paths::AssetRoot())的目录树(低频操作;权限错误跳过)。
 		void ScanImportTree();
 		void RestoreLayout(const std::string& json);
 		void RecordDockChange(Wui::WuiContext& ctx, const std::string& action, const std::string& target, const std::string& before);
@@ -487,7 +516,7 @@ namespace World
 			bool HasChildren = false;
 		};
 		bool m_ImportModalOpen = false;
-		std::filesystem::path m_ImportTreeRoot;   // 内容根(WLD_ASSETPATH),打开模态时写入
+		std::filesystem::path m_ImportTreeRoot;   // 当前内容根(World::Paths::AssetRoot()),打开模态时写入
 		std::filesystem::path m_ImportSourcePath; // 已选好的源文件(来自 File ▸ Import glTF...)
 		std::filesystem::path m_ImportDestDir;    // 选中目录(默认 = 打开时的内容浏览器当前文件夹)
 		std::string m_ImportStatus;               // 状态行附加文本(成功/失败的可读信息)

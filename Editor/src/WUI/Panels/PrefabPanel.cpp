@@ -9,6 +9,7 @@
 #include "World/Gameplay/Prefab.h"
 #include "World/Gameplay/PrefabTypes.h"
 #include "World/Renderer/RenderSettings.h"
+#include "World/Utils/Paths.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/SceneSerializer.h"
@@ -151,7 +152,7 @@ namespace World
 		// 逻辑路径 → 内容根下的绝对路径。
 		std::filesystem::path AbsoluteAssetPath(const std::string& logical)
 		{
-			return std::filesystem::path(std::string(WLD_ASSETPATH)) / logical;
+			return World::Paths::AssetRoot() / logical;
 		}
 
 		// 内容根里这个逻辑路径是不是真的存在(编辑时的只读校验,不阻断保存)。
@@ -348,7 +349,7 @@ namespace World
 		// 每次重扫都换一个干净场景:Deserialize 不负责清空旧实体,复用会让实体越读越多。
 		m_Staging = CreateRef<Scene>(*context);
 		const std::filesystem::path absolute =
-			std::filesystem::path(std::string(WLD_ASSETPATH)) / m_LogicalPath;
+			World::Paths::AssetRoot() / m_LogicalPath;
 		std::error_code ec;
 		const bool onDisk = std::filesystem::is_regular_file(absolute, ec);
 

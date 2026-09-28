@@ -5,6 +5,7 @@
 #include "EditorPreferences.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/Core/Asset/GltfImporter.h"
+#include "World/Utils/Paths.h"
 
 // 这个文件是整个 Editor 程序的入口，定义了 EditorApp 类并实现了 CreateApplication 函数
 #include "World/Core/EntryPoint.h"
@@ -82,6 +83,17 @@ namespace World
 		std::vector<std::string> arguments;
 		for (int i = 1; i < __argc; ++i)
 			arguments.emplace_back(__argv[i] ? __argv[i] : "");
+		// PROJ-1/T3:运行期项目根覆盖 —— `--project <dir>`(优先级高于 `WLD_PROJECT_DIR`
+		// 环境变量与编译期默认值)。必须先于任何项目路径使用点生效:下面的 glTF 导入、
+		// cook、本地化层注册都按运行期项目根解析。
+		for (size_t i = 0; i + 1 < arguments.size(); ++i)
+		{
+			if (arguments[i] == "--project")
+			{
+				World::Paths::SetProjectDirOverride(arguments[i + 1]);
+				break;
+			}
+		}
 		// 注意:不能写成 `i + 1 < size` 的配对循环 —— `--ai-control=` 这类**自带数值**的
 		// 单个参数会让循环体一次都不执行(实测:通道端口永远是 0,脚本连不上)。
 		for (size_t i = 0; i < arguments.size(); ++i)
@@ -105,7 +117,7 @@ namespace World
 			if (arguments[i] == "--import-gltf" && i + 1 < arguments.size())
 			{
 				const std::filesystem::path source = arguments[i + 1];
-				std::filesystem::path outputRoot = std::filesystem::path(WLD_ASSETPATH);
+				std::filesystem::path outputRoot = World::Paths::AssetRoot();
 				std::string destinationLogicalDir;
 				if (i + 2 < arguments.size() && arguments[i + 2] == "--out" && i + 3 < arguments.size())
 					outputRoot = arguments[i + 3];
@@ -220,7 +232,7 @@ namespace World
 		World::Wui::RegisterLocalizationLayer("editor",
 			std::filesystem::path(WLD_EDITOR_DIR) / "assets" / "localization", 100);
 		World::Wui::RegisterLocalizationLayer("project",
-			std::filesystem::path(WLD_PROJECT_DIR) / "assets" / "localization", 200);
+			World::Paths::ProjectFile("assets/localization"), 200);
 		// 本机状态目录(编辑器偏好/布局/窗口/最近使用):不入库;首次运行自动创建。
 		std::filesystem::create_directories(std::filesystem::path(WLD_LOCAL_DIR));
 		World::Editor::EditorPreferences::Get().Load(

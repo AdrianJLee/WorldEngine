@@ -7,6 +7,7 @@
 #include "World/Renderer/MaterialSurfaceRuntime.h"
 #include "World/Renderer/MaterialTextureCache.h"
 #include "World/Renderer/Renderer.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -24,7 +25,7 @@ namespace World
 		{
 			std::error_code ec;
 			const std::filesystem::path candidate =
-				std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+				World::Paths::AssetRoot() / path;
 			if (std::filesystem::exists(candidate, ec))
 				return candidate;
 			return {};
@@ -807,8 +808,8 @@ namespace World
 	{
 		std::vector<std::string> paths;
 		std::error_code ec;
-		// 内容根 = WLD_PROJECT_DIR/assets(与材质路径的书写约定一致);遍历失败时返回空列表。
-		const std::filesystem::path root = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
+		// 内容根 = 当前项目根/assets(与材质路径的书写约定一致);遍历失败时返回空列表。
+		const std::filesystem::path root = World::Paths::AssetRoot();
 		if (!std::filesystem::exists(root, ec))
 			return paths;
 		for (const std::filesystem::directory_entry& entry :

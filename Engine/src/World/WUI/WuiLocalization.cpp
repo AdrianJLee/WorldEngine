@@ -1,6 +1,7 @@
 #include "wldpch.h"
 #include "World/WUI/WuiLocalization.h"
 #include "World/WUI/WuiJson.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <cctype>
@@ -53,9 +54,9 @@ namespace World::Wui
 			bool Loaded = false;
 			uint32_t Generation = 1;
 			bool TermHints = true;
-			// 没有注册任何层时的默认目录(P4-UX1 的"游戏内容语言包"默认值)。
-			std::filesystem::path Directory =
-				std::filesystem::path(WLD_PROJECT_DIR) / "assets" / "localization";
+			// 没有注册任何层时的默认目录(P4-UX1 的"游戏内容语言包"默认值):
+			// 当前项目内容根下的 localization(项目根可被 --project / WLD_PROJECT_DIR 换掉)。
+			std::filesystem::path Directory = World::Paths::AssetRoot() / "localization";
 			std::vector<LocalizationLayer> Layers;
 			size_t NextLayerOrder = 0;
 			std::unordered_map<std::string, LocalizationEntry> Catalog;

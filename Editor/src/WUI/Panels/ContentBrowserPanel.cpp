@@ -1170,7 +1170,7 @@ namespace World
 		std::filesystem::path* outPath)
 	{
 		// 写一份默认 .wmat 模板(重名自动编号)。
-		// 关键:MaterialIO 的路径解析只认"内容根/<path>"(WLD_PROJECT_DIR/assets),绝对路径原样命中。
+		// 关键:MaterialIO 的路径解析只认"内容根/<path>"(World::Paths::AssetRoot()),绝对路径原样命中。
 		// 历史:早先还会回退 `<Game>/<path>`,相对逻辑路径**新建**时会落到项目目录之外
 		// (实测:内容浏览器新建材质写进了 Game/_ux_probe)。所以这里始终传绝对路径(旧 CreateMaterial 的同一个坑)。
 		const std::filesystem::path target = MakeUniqueAssetPath(dir, "material", ".wmat");

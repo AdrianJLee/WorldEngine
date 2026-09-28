@@ -9,6 +9,7 @@
 #include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/ShaderUtils.h"
 #include "World/Renderer/TextureCompiler.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <cctype>
@@ -569,7 +570,7 @@ namespace World::Editor
 		// WLD-L10N-S2:发行包的语言子集(§11.1 打包布局)。
 		//
 		// 层序 = 运行时的注册序:engine(`WLD_WORLD_DIR/assets/localization`,库自带件/引擎键)
-		// → project(`WLD_PROJECT_DIR/assets/localization`,项目覆盖 + 项目文案);**编辑器层不进游戏包**
+		// → project(运行期内容根 `assets/localization`,项目覆盖 + 项目文案);**编辑器层不进游戏包**
 		// (`Editor/assets/localization` 是编辑器 UI 的语言包,游戏里没有它的消费者)。
 		// 落点:`<publish>/localization/<engine|project>/<语言>/**`,层内相对路径(含域子目录)原样保留;
 		// 只拷域文件 `*.json`(编译产物 `catalog.json` 同样以 `.json` 落在语言根,一起拷走)。
@@ -642,7 +643,7 @@ namespace World::Editor
 		{
 			LocalizationCopyResult result;
 			const fs::path engineLayer = fs::path(WLD_WORLD_DIR) / "assets" / "localization";
-			const fs::path projectLayer = fs::path(WLD_PROJECT_DIR) / "assets" / "localization";
+			const fs::path projectLayer = World::Paths::AssetRoot() / "localization";
 
 			// 空列表 = 扫描到的全部语言(engine ∪ project);显式列表原样尊重(不存在的语言记 skipped)。
 			std::vector<std::string> languages = options.Languages;
@@ -687,7 +688,7 @@ namespace World::Editor
 				fs::create_directories(options.PublishDir);
 
 			// 1. 项目清单(单一事实源)。
-			const fs::path projectManifestPath = std::string(WLD_PROJECT_DIR) + "project.we.yaml";
+			const fs::path projectManifestPath = World::Paths::ProjectFile("project.we.yaml");
 			World::Asset::ProjectManifest manifest;
 			std::string manifestError;
 			if (!World::Asset::ProjectManifest::Load(projectManifestPath, &manifest, &manifestError))

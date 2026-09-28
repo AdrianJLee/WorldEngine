@@ -5,6 +5,7 @@
 #include "World/Renderer/Material.h"
 
 #include "World/Core/Application.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <cmath>
@@ -35,10 +36,10 @@ namespace World
 			return hash;
 		}
 
-		// 逻辑路径的磁盘位置:内容根 = WLD_ASSETPATH(projects/default/assets),与材质路径书写约定一致。
+		// 逻辑路径的磁盘位置:内容根 = 当前项目根/assets,与材质路径书写约定一致。
 		std::filesystem::path DiskPathFor(const std::string& logicalPath)
 		{
-			return std::filesystem::path(WLD_ASSETPATH) / logicalPath;
+			return World::Paths::AssetRoot() / logicalPath;
 		}
 
 		// M3:.wmat 是材质实例(覆盖字段 + Parent),指纹必须含**解析后的父级链**,

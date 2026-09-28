@@ -7,6 +7,7 @@
 
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/TextureImportSettings.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiLocalization.h"
 
 #include <algorithm>
@@ -214,7 +215,7 @@ namespace World
 
 		std::filesystem::path ContentRootPath()
 		{
-			return std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets";
+			return World::Paths::AssetRoot();
 		}
 
 		// 一条引用的**便宜**事实(不含徽标/产物判定:每帧的校验、行内提示、工具提示走这一条)。

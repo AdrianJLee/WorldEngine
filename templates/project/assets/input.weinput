@@ -1,0 +1,15 @@
+# 输入映射(assets/input.weinput):动作 + 轴;编辑器的 Input Map 面板读写这份文件。
+# 新建的空项目没有任何绑定,按下例添加 action(含 bindings)与 axis:
+#   actions:
+#     - name: Jump
+#       bindings:
+#         - device: key
+#           code: 32
+#   axes:
+#     - name: Move
+#       positive: MoveRight
+#       negative: MoveLeft
+#       gamepad: LX
+#       deadzone: 0.15
+actions: []
+axes: []

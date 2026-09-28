@@ -65,7 +65,7 @@ namespace World
 		std::filesystem::path m_DiskPath;   // 解析出的磁盘绝对路径(仅 m_DiskBacked 时有效)
 		bool m_DiskBacked = false;
 		// CPPT-6-ED-NEWSCRIPT:逻辑路径带 `module:` 前缀 = 模块源码(Game/src/Scripts/*.h),
-		// 解析到仓库根(WLD_REPO_ROOT),与内容根(WLD_ASSETPATH)无关;Luau 专属功能
+		// 解析到仓库根(WLD_REPO_ROOT),与内容根(World::Paths::AssetRoot())无关;Luau 专属功能
 		// (语法检查/补全索引)对它关闭 —— 它是 C++ 头,不是 Luau 脚本。
 		bool m_ModuleSource = false;
 		Wui::WuiTextBuffer m_Buffer;

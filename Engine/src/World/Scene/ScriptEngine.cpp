@@ -16,6 +16,7 @@
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptRef.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiContext.h"
 
 #include <any>
@@ -124,7 +125,7 @@ namespace World
 
 		// W7-3:脚本读取的单一入口(二进制安全,容器字节里的 '\0' 原样保留)。
 		// 顺序:登记的内容上下文 VFS(未登记时用既有 Application VFS)→ 磁盘
-		// WLD_ASSETPATH/<逻辑路径>;两者都没命中抛可读错误(文本与既有 ReadScriptSource 一致)。
+		// <当前内容根>/<逻辑路径>;两者都没命中抛可读错误(文本与既有 ReadScriptSource 一致)。
 		std::vector<uint8_t> ReadScriptBytes(const std::string& scriptFilePath)
 		{
 			const Vfs::Vfs* vfs = nullptr;
@@ -140,7 +141,7 @@ namespace World
 					return bytes;
 			}
 			const std::filesystem::path diskPath =
-				WLD_ASSETPATH + std::string("/") + scriptFilePath;
+				World::Paths::AssetRoot() / scriptFilePath;
 			std::ifstream file(diskPath, std::ios::binary);
 			if (file.is_open())
 			{
@@ -1565,7 +1566,7 @@ namespace World
 	// 实现落在本文件是为了复用 ReadScriptBytes 的 VFS 选择顺序:登记的内容上下文优先,
 	// 未登记回退 Application(s_ContentContext 是本文件的文件内静态)。
 	// 语义:Vfs::Normalize 校验(拒绝绝对路径/盘符/"."/".." 段)→ VFS 命中且来源是 Package
-	// → 报"包内不可编辑";否则要求 WLD_ASSETPATH/<path> 是常规文件,成功时返回其绝对路径。
+	// → 报"包内不可编辑";否则要求 <当前内容根>/<path> 是常规文件,成功时返回其绝对路径。
 	bool ResolveScriptDiskPath(std::string_view logicalPath, std::filesystem::path& out, std::string* error)
 	{
 		Vfs::Path normalized;
@@ -1597,7 +1598,7 @@ namespace World
 		}
 
 		const std::filesystem::path diskPath =
-			std::filesystem::path(WLD_ASSETPATH) / std::filesystem::path(normalized);
+			World::Paths::AssetRoot() / std::filesystem::path(normalized);
 		std::error_code fileError;
 		if (!std::filesystem::is_regular_file(diskPath, fileError))
 		{
@@ -1684,7 +1685,7 @@ namespace World
 			return GenerateLuaStubs(Application::Get().GetContext().Schemas());
 
 		std::string error;
-		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.luau"));
+		const std::filesystem::path path(World::Paths::AssetRoot() / "scripts/intermediate/WorldEngineAPI.luau");
 		if (!LuaStubGenerator::Generate(path, error))
 		{
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("[Lua] {0}", error);
@@ -1697,7 +1698,7 @@ namespace World
 	{
 		AssertOwnerThread();
 		std::string error;
-		const std::filesystem::path path(WLD_ASSETPATH + std::string("/scripts/intermediate/WorldEngineAPI.luau"));
+		const std::filesystem::path path(World::Paths::AssetRoot() / "scripts/intermediate/WorldEngineAPI.luau");
 		const std::vector<const Schema::TypeSchema*> components = schemas.List(Schema::TypeCategory::Component);
 		std::size_t serviceCount = 0;
 		const ScriptServiceBinding* services = GameplayServiceBindings(&serviceCount);

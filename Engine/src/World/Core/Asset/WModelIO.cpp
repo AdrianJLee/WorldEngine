@@ -2,6 +2,7 @@
 #include "World/Core/Asset/WModelIO.h"
 
 #include "World/Core/Application.h"
+#include "World/Utils/Paths.h"
 
 #include <cmath>
 #include <cstring>
@@ -939,9 +940,9 @@ namespace World::Asset::WModelIO
 					return true;
 				}
 			}
-			// P4-U12:模型逻辑路径只相对**内容根**(WLD_ASSETPATH);不再回退 Game/ 或 Editor/。
+			// P4-U12:模型逻辑路径只相对**内容根**(当前项目根/assets);不再回退 Game/ 或 Editor/。
 			const std::filesystem::path candidates[] = {
-				std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path,
+				World::Paths::AssetRoot() / path,
 			};
 			for (const std::filesystem::path& candidate : candidates)
 			{

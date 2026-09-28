@@ -4,6 +4,10 @@
 > [`formats.md`](formats.md)、[`../../vendor/README.md`](../../vendor/README.md)(第三方判据)。
 > 本页是**目标形态**;迁移进度见 §6。
 
+> **本页讲引擎仓库自身的布局**;"一个游戏项目长什么样"是另一页:
+> [`project-standard.md`](project-standard.md)(项目根 = `<任意位置>/<名称>/`,
+> 游戏项目层 C++ = `<项目根>/src/**`,引擎层 C++ 永远在 `Engine/**`)。
+
 ## 1. 顶层目录职责(一句话)
 
 | 目录 | 一句话 | 谁依赖它 |
@@ -11,7 +15,7 @@
 | `Engine/` | 引擎共享库(目标 `World` → 产物 `WorldRuntime.dll`);含平台层、WUI、Schema、生成器与引擎资源 | `Editor` / `Runtime` / `Game` / `tests` 全部 |
 | `Editor/` | 编辑器宿主:窗口壳 + 面板 + 编辑器资源 | `Engine` |
 | `Runtime/` | 运行宿主:无编辑器启动游戏 | `Engine` |
-| `Game/` | gameplay DLL(`Game.dll`):只放项目逻辑源码 | `Engine` |
+| `Game/` | **默认项目**的 gameplay DLL(`Game.dll`)源码入口(历史现状:`projects/default` 的示例 C++ 在 `Game/src/**`;新项目按 `project-standard.md` 放 `<项目>/src/**`,迁移见该页 §5) | `Engine` |
 | `projects/<名>/` | **项目内容根**:`project.we.yaml`、`assets/**`、`levels/**`、项目级 dot 配置 | 运行时/编辑器按清单读取 |
 | `tests/<模块>/<概念>Tests.cpp` | 引擎与宿主测试;target 名 `World.<概念>` | `Engine`(部分目标额外编译 Game/TestKit 生成源) |
 | `third_party/<名>/` | 参与编译的第三方**源码**(submodule 优先) | 各 target |

@@ -10,6 +10,8 @@
   "menu.file.new": "新建",
   "menu.file.open": "打开",
   "menu.file.save": "保存",
+  "menu.file.new_project": "新建项目…",
+  "menu.file.new_project.tooltip": "在任意位置生成一个标准项目骨架(不含示例):填项目名 + 选位置 → 生成清单、空内容根与一个空场景;完成后可在资源管理器打开,或重启编辑器到该项目。",
   "menu.file.import": "导入 glTF...",
   "menu.file.new_cpp_script": "新建 C++ 脚本…",
   "menu.file.new_cpp_script.tooltip": "在 Game/src/Scripts/ 下生成一个 C++ 脚本模板(标量/枚举/struct/Array/Map 范例),生成后用内置代码编辑器打开;重建 Game 后执行「文件 ▶ 重载 C++ 模块」生效。",

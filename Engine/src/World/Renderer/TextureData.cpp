@@ -5,6 +5,7 @@
 #include "World/Core/Application.h"
 #include "World/Core/Log.h"
 #include "World/Renderer/TextureImportSettings.h"
+#include "World/Utils/Paths.h"
 
 #include <stb_image.h>
 
@@ -55,12 +56,12 @@ namespace World
 			if (requested.is_absolute())
 				return stbi_load(path.c_str(), &width, &height, &channels, desiredChannels);
 
-			// 相对路径 = 项目内容根(WLD_ASSETPATH)里的资产逻辑路径,与材质路径书写约定一致。
+			// 相对路径 = 当前项目内容根里的资产逻辑路径,与材质路径书写约定一致。
 			// P4-U12:删掉早先"Game/ 与 Editor/ 也算内容根"的旧布局回退 —— 内容根只有一个,
 			// 多候选会让"路径写错却恰好命中旧目录"变成静默成功。
 			std::error_code ec;
 			const std::filesystem::path diskPath =
-				std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+				World::Paths::AssetRoot() / path;
 			return stbi_load(diskPath.string().c_str(), &width, &height, &channels, desiredChannels);
 		}
 
@@ -79,7 +80,7 @@ namespace World
 			const std::filesystem::path requested(path);
 			const std::filesystem::path diskPath = requested.is_absolute()
 				? requested
-				: std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+				: World::Paths::AssetRoot() / path;
 
 			std::ifstream input(diskPath, std::ios::binary | std::ios::ate);
 			if (!input)
@@ -134,7 +135,7 @@ namespace World
 
 			std::filesystem::path assetFile(path);
 			if (!assetFile.is_absolute())
-				assetFile = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+				assetFile = World::Paths::AssetRoot() / path;
 
 		TextureImportSettings settings;
 		std::string settingsError;
@@ -184,7 +185,7 @@ namespace World
 		{
 			std::filesystem::path assetFile(path);
 			if (!assetFile.is_absolute())
-				assetFile = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+				assetFile = World::Paths::AssetRoot() / path;
 			TextureAssetFile asset;
 			std::string containerError;
 			if (LoadTextureAssetFile(assetFile, asset, containerError) && !asset.Payload.empty())
@@ -293,7 +294,7 @@ namespace World
 		{
 			std::filesystem::path assetFile(path);
 			if (!assetFile.is_absolute())
-				assetFile = std::filesystem::path(std::string(WLD_PROJECT_DIR)) / "assets" / path;
+				assetFile = World::Paths::AssetRoot() / path;
 			TextureAssetFile container;
 			std::string containerError;
 			if (LoadTextureAssetFile(assetFile, container, containerError) && !container.Payload.empty())
