@@ -518,6 +518,12 @@ namespace World::Wui
 		const WuiTheme& theme, bool enabled = true, bool primary = false,
 		const std::string& tooltip = std::string());
 
+	// 下拉触发器(P4-UX1:只画当前值,label 只进无障碍节点)。契约(CPPT-5,2026-09-28):
+	//  · `selected < 0` = 无选中;`selected >= options.size()`(陈旧下标)同样按无选中处理。
+	//    **控件不得越界索引 options**:a11y value 与绘制文本共用一次受保护的当前值计算,
+	//    越界 / 空选项时当前值为空串(绘制为空,不崩、不抛)。
+	//  · 控件**不改写**调用方的 `selected`,除非用户在新弹层里点选了条目(此时才写回该项下标)。
+	//  · 返回值 = 本帧是否因用户选择而改值(true = selected 已写为新下标;越界态本身不改值)。
 	bool Combo(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme);
 	// 可搜索下拉(资源选择用):点击/输入展开带输入框的弹层,按子串过滤选项,

@@ -83,6 +83,7 @@
   "panel.properties.add.cancel": "取消",
   "panel.properties.add.confirm": "添加",
   "panel.properties.asset_none": "(无)",
+  "panel.properties.script_none": "(无)",
   "panel.properties.remove_component": "移除组件",
   "panel.properties.remove_confirm_body": "从选中实体上移除这个组件?它的设置会一起丢掉。",
   "panel.properties.remove_cancel": "取消",

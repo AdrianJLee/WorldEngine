@@ -3788,20 +3788,34 @@ namespace World
 			// C++ = **已注册脚本**下拉(schema `TypeCategory::Script`)。写回的是类型全名
 			// (如 `Game::ExampleScript`)—— Scene 实例化就是按 `Schemas().Find(ScriptName)`
 			// 解析 schema 工厂的;显示名只用于文案。
+			// CPPT-5(plan CPPT-2 §14):引用行改为**显式状态模型**(与 Luau 资产下拉同构)——
+			// 选项 0 = "(none)"(空引用),之后是已注册脚本;ScriptName 为空 ⇒ 选中 0;
+			// 非空且已注册 ⇒ 选中它;非空但未注册 ⇒ **原样追加一项并选中**(不静默换项,
+			// 下方"未注册"提示行说明原因)。这样空/未注册值从不把越界下标交给 Combo
+			// (旧实现给 -1,debug STL 在 options[selected] 上断言,见 §14 复现)。
 			const std::vector<const Schema::TypeSchema*> scripts = schemas.List(Schema::TypeCategory::Script);
-			std::vector<std::string> ids;
-			std::vector<std::string> labels;
-			ids.reserve(scripts.size());
-			labels.reserve(scripts.size());
-			int selected = -1;
+			std::vector<std::string> ids;      // 选项 → 写回的脚本类型全名;下标 0 = 空引用
+			std::vector<std::string> labels;   // 选项 → 下拉显示文案
+			ids.reserve(scripts.size() + 2);
+			labels.reserve(scripts.size() + 2);
+			ids.emplace_back();
+			labels.push_back(Wui::Tr("panel.properties.script_none", "(none)"));
+			int selected = 0;
 			for (const Schema::TypeSchema* script : scripts)
 			{
 				if (!script)
 					continue;
 				ids.push_back(script->Id.Name);
 				labels.push_back(Wui::Tr("schema.script." + SchemaTypeKeyName(*script), script->DisplayName));
-				if (script->Id.Name == cpp->ScriptName)
+				if (!cpp->ScriptName.empty() && script->Id.Name == cpp->ScriptName)
 					selected = static_cast<int>(ids.size()) - 1;
+			}
+			if (!cpp->ScriptName.empty() && selected == 0)
+			{
+				// 未注册的旧脚本名:原样显示并选中(不静默改成别的脚本)。
+				ids.push_back(cpp->ScriptName);
+				labels.push_back(cpp->ScriptName);
+				selected = static_cast<int>(ids.size()) - 1;
 			}
 			if (m_ReadOnly)
 			{
@@ -3809,27 +3823,33 @@ namespace World
 					? Wui::Tr("panel.properties.value_none", "(none)") : cpp->ScriptName;
 				DrawReadOnlyRow(ctx, refIdText, refRow, refLabel, shown, theme);
 			}
-			else if (ids.empty())
-			{
-				const std::string hint = Wui::Tr("panel.properties.script_no_registered",
-					"no C++ script is registered yet");
-				Label(ctx, { refCtrl.X, refCtrl.Y + 3.0f }, hint, theme.TextMuted, 12.0f);
-				RegisterNode(refId, "text", refCtrl, refLabelText, hint, false);
-			}
 			else
 			{
 				const int beforePick = selected;
-				if (Wui::Combo(ctx, refId, refCtrl, "", labels, selected, theme)
-					&& selected != beforePick && selected >= 0)
+				if (Wui::Combo(ctx, refId, refCtrl, "", labels, selected, theme) && selected != beforePick)
 				{
-					cpp->ScriptName = ids[static_cast<size_t>(selected)];
-					// 换脚本 = 属性表按**新脚本的 schema 字段**重建(同名同类型保留值)。
-					ScriptProperties::SyncFromSchema(cpp->Properties, *scripts[static_cast<size_t>(selected)]);
+					if (selected <= 0)
+					{
+						// "(none)" = 清空引用;属性表一起清掉 —— 没有脚本就不留过期属性行。
+						cpp->ScriptName.clear();
+						cpp->Properties.clear();
+					}
+					else
+					{
+						cpp->ScriptName = ids[static_cast<size_t>(selected)];
+						// 换脚本 = 属性表按**新脚本的 schema 字段**重建(同名同类型保留值)。
+						if (const Schema::TypeSchema* picked = schemas.Find(cpp->ScriptName))
+							ScriptProperties::SyncFromSchema(cpp->Properties, *picked);
+					}
 					changed = true;
 					if (changedFields)
 						changedFields->push_back(schema.DisplayName + ".ScriptName");
 				}
-				RegisterNode(refId, "combo", refCtrl, refLabelText, cpp->ScriptName, reachable(refCtrl),
+				// a11y value = 当前引用本身:脚本全名,或在 "(none)" 态下就是 "(none)"
+				// (与下拉显示同一状态;脚本/AI 通道据此断言"无脚本"是显式状态)。
+				const std::string shown = selected > 0 ? cpp->ScriptName
+					: Wui::Tr("panel.properties.script_none", "(none)");
+				RegisterNode(refId, "combo", refCtrl, refLabelText, shown, reachable(refCtrl),
 					Wui::Tr("panel.properties.script_name.tooltip",
 						"Registered C++ script (schema category Script); the property list follows the script you pick"));
 			}

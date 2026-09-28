@@ -2583,9 +2583,13 @@ namespace World::Wui
 		const std::vector<std::string>& options, int& selected, const WuiTheme& theme)
 	{
 		const bool focused = ctx.Focus() == id;
-		RegisterAccessNode(id, "combo", rect, label,
-			(selected >= 0 && selected < static_cast<int>(options.size())) ? options[selected] : std::string(),
-			true, true, focused);
+		// CPPT-5(2026-09-28):selected 越界(-1 = 无选中,或 >= size 的陈旧下标)时**不得**索引 options ——
+		// 当前值只在这里做一次受保护计算,a11y 节点与绘制命令共用;selected 仅在新弹层里点选条目时改写。
+		// 背景:空 ScriptName(C++) + 非空脚本注册表 ⇒ selected=-1,旧实现里绘制命令直接 options[-1],
+		// 触发 debug STL "vector subscript out of range" 断言(与 a11y 已有的边界检查不一致)。
+		const std::string current = (selected >= 0 && selected < static_cast<int>(options.size()))
+			? options[selected] : std::string();
+		RegisterAccessNode(id, "combo", rect, label, current, true, true, focused);
 		ctx.RegisterFocusable(id, rect);
 		const bool hovered = ctx.IsHovered(rect);
 		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, hovered ? theme.ButtonHover : theme.ButtonBg, 3.0f });
@@ -2600,7 +2604,7 @@ namespace World::Wui
 		// 做中间省略;options / a11y value / 返回值保持完整(搜索、读屏、回显都拿完整路径)。
 		const float valueBudget = caretX - (rect.X + 6.0f) - 4.0f;
 		ctx.Commands().push_back({ WuiDrawKind::Text, { rect.X + 6.0f, rect.Y + (rect.H - 15.0f) * 0.5f, 0, 0 },
-			theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, options[selected], valueBudget, 15.0f), 15.0f, false });
+			theme.Text, 0, 1.0f, EllipsizeMiddleToWidth(ctx, current, valueBudget, 15.0f), 15.0f, false });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX, caretY, 7.0f, 1.5f }, theme.TextMuted, 1.0f });
 		ctx.Commands().push_back({ WuiDrawKind::Rect, { caretX + 1.5f, caretY + 3.0f, 4.0f, 1.5f }, theme.TextMuted, 1.0f });
 		DrawFocusRing(ctx, rect, id, theme);

@@ -2342,6 +2342,59 @@ int main()
 			accessibility.Clear();
 		}
 
+		// 22c. CPPT-5(2026-09-28):Combo 越界不变量 —— `selected` 为 -1(无选中)或 >= size(陈旧下标)时
+		//     控件不得索引 options(旧实现只在 a11y 节点做了边界检查,绘制命令直接用 options[selected];
+		//     debug STL 下这是 vector subscript out of range 直接 abort 的硬回归守卫):
+		//     ① 不崩、绘制当前值为空(从文本命令读)、返回 false、调用方 selected 保持原值;
+		//     ② selected 在界内时照常绘制该项(正例,防"守卫把正常路径也吞掉")。
+		{
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			accessibility.SetEnabled(true);
+			const WuiTheme theme;
+			const WuiRect rect { 100.0f, 100.0f, 140.0f, 22.0f };
+			const std::vector<std::string> options { "A", "B" };
+			const WuiId id = HashId("test.cppt5.combo-bounds");
+			WuiInputState idle;
+			idle.ViewportSize = { 640.0f, 480.0f };
+			for (const int stale : { -1, 2 })
+			{
+				int selected = stale;
+				WuiContext ctx;
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(idle);
+				const bool changed = Combo(ctx, id, rect, "Script", options, selected, theme);
+				ctx.EndFrame();
+				CHECK(!changed);
+				CHECK(selected == stale);
+				const WuiDrawCommand* value = FindTextCommand(ctx.Commands(), rect.X + 6.0f,
+					rect.Y + (rect.H - 15.0f) * 0.5f);
+				CHECK(value != nullptr);
+				CHECK(value != nullptr && value->Text.empty());
+				const WuiAccessNode* node = accessibility.Find(id);
+				CHECK(node != nullptr && node->Kind == "combo" && node->Value.empty());
+			}
+			{
+				int selected = 1;
+				WuiContext ctx;
+				accessibility.BeginFrame("main", idle.ViewportSize);
+				accessibility.SetPanel("test");
+				ctx.BeginFrame(idle);
+				const bool changed = Combo(ctx, id, rect, "Script", options, selected, theme);
+				ctx.EndFrame();
+				CHECK(!changed);
+				CHECK(selected == 1);
+				const WuiDrawCommand* value = FindTextCommand(ctx.Commands(), rect.X + 6.0f,
+					rect.Y + (rect.H - 15.0f) * 0.5f);
+				CHECK(value != nullptr);
+				CHECK(value != nullptr && value->Text == "B");
+				const WuiAccessNode* node = accessibility.Find(id);
+				CHECK(node != nullptr && node->Value == "B");
+			}
+			accessibility.SetEnabled(false);
+			accessibility.Clear();
+		}
+
 		// 23. P1c-E4:键盘可达性契约(引擎侧)。每件都按同一条两帧节奏验证:
 		//     ①先画一帧(登记焦点表)→ ②下一帧注入 Tab(以及该件的契约键)→
 		//     Tab 必须停到它的焦点 id,且该 id 的 a11y 节点带 focused=true、可见、可读;
