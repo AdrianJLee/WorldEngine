@@ -62,6 +62,28 @@ namespace World
 			return text.substr(begin, end - begin);
 		}
 
+		// PROJ-4/T1(P2):最近项目搜索的 ASCII 大小写折叠 —— "Alpha"/"alpha" 命中同一行;
+		// 非 ASCII 字节原样保留(中文没有大小写,不做 locale 折叠也不会漏)。
+		std::string AsciiLowerCopy(const std::string& text)
+		{
+			std::string lowered = text;
+			for (char& character : lowered)
+			{
+				const unsigned char c = static_cast<unsigned char>(character);
+				if (c >= 'A' && c <= 'Z')
+					character = static_cast<char>(c - 'A' + 'a');
+			}
+			return lowered;
+		}
+
+		// needle 必须已经是 AsciiLowerCopy 的结果(调用方每帧只折叠一次)。
+		bool ContainsCaseInsensitive(const std::string& haystack, const std::string& loweredNeedle)
+		{
+			if (loweredNeedle.empty())
+				return true;
+			return AsciiLowerCopy(haystack).find(loweredNeedle) != std::string::npos;
+		}
+
 		const char* ZoneName(Wui::DropZone zone)
 		{
 			switch (zone)
@@ -4665,92 +4687,171 @@ namespace World
 			return;
 
 		const float pad = 16.0f;
-		// 行高按"最多 10 条不压到提示行/按钮条"反推:10×(24+2) = 260,列表底 = Y+328,
-		// 提示行在 Y+354(430-76),按钮条在 Y+384 —— 三个区间互不重叠。
+		// 行高 24 + 2 间距;列表本体放在标题行与提示行之间,由滚动区裁剪
+		// (上限 30 条,超出时滚轮/键盘滚动;行数少时不出现滚动)。
 		const float rowHeight = 24.0f;
 		const float rowWidth = frame.W - pad * 2.0f;
 		float cursorY = frame.Y + 46.0f;
 		Wui::Label(ctx, { frame.X + pad, cursorY }, Wui::Tr("modal.launcher.recent", "Recent projects"),
 			m_Theme.Text, 13.0f);
-		cursorY += 22.0f;
+
+		// PROJ-4/T1(P2):搜索框 + 清空按钮。占位提示是单独画的 Label,读屏/脚本读不到 →
+		// 显式喂给 TextFieldA11y(与设置页同一口径);清空在空输入时禁用并给理由。
+		const float clearWidth = 64.0f;
+		const float searchWidth = 220.0f;
+		const Wui::WuiRect searchRect { frame.X + frame.W - pad - clearWidth - 8.0f - searchWidth,
+			cursorY - 3.0f, searchWidth, 24.0f };
+		const Wui::WuiRect clearRect { frame.X + frame.W - pad - clearWidth, cursorY - 3.0f, clearWidth, 24.0f };
+		Wui::TextFieldA11y searchA11y;
+		searchA11y.Label = Wui::Tr("modal.launcher.search.a11y", "Search recent projects");
+		searchA11y.Placeholder = Wui::Tr("modal.launcher.search.hint", "Search projects…");
+		Wui::TextField(ctx, Wui::HashId("project.launcher.search"), searchRect, m_LauncherSearch,
+			m_Theme, nullptr, &searchA11y);
+		if (m_LauncherSearch.empty())
+		{
+			Wui::Label(ctx, { searchRect.X + 8.0f, searchRect.Y + 5.0f },
+				Wui::Tr("modal.launcher.search.hint", "Search projects…"), m_Theme.TextDisabled, 12.0f);
+		}
+		if (Wui::ButtonEx(ctx, Wui::HashId("project.launcher.search.clear"), clearRect,
+			Wui::Tr("modal.launcher.search.clear", "Clear"), m_Theme, !m_LauncherSearch.empty(), false,
+			m_LauncherSearch.empty()
+				? Wui::Tr("modal.launcher.search.clear_disabled",
+					"Nothing to clear — the search box is empty")
+				: std::string()))
+		{
+			m_LauncherSearch.clear();
+			m_LauncherScrollY = 0.0f;
+		}
+		cursorY += 30.0f;
 
 		RefreshRecentProjectsIfStale();
 		std::string removePending;
+		std::string removePendingName;
+		std::string openPendingPath;
+		std::string openPendingName;
+		// 过滤只决定"画哪些行";行 id、动作、打开目标一律用**原列表下标** ——
+		// 过滤状态下点第一行打开的仍是它自己对应的项目,不会错位到筛选后的第一条。
+		const std::string loweredNeedle = AsciiLowerCopy(m_LauncherSearch);
+		std::vector<size_t> visibleRows;
+		const size_t recentCount = std::min<size_t>(m_RecentProjects.size(), 30);
+		for (size_t i = 0; i < recentCount; ++i)
+		{
+			const Editor::RecentProjectEntry& entry = m_RecentProjects[i];
+			if (!ContainsCaseInsensitive(entry.Name, loweredNeedle) &&
+				!ContainsCaseInsensitive(entry.Path, loweredNeedle))
+				continue;
+			visibleRows.push_back(i);
+		}
 		if (m_RecentProjects.empty())
 		{
 			Wui::Label(ctx, { frame.X + pad, cursorY + 4.0f },
 				Wui::Tr("modal.launcher.empty",
 					"No recent projects yet — create a new one, or open a folder that contains project.we.yaml."),
 				m_Theme.TextMuted, 13.0f);
-			cursorY += 30.0f;
+		}
+		else if (visibleRows.empty())
+		{
+			// P2:无匹配 ⇒ 空态;文案登记成独立 a11y 节点,脚本按 modal.launcher.no_match 读它。
+			const std::string noMatch = Wui::Tr("modal.launcher.no_match",
+				"No matching projects — try Open Project… to pick a folder.");
+			Wui::Label(ctx, { frame.X + pad, cursorY + 4.0f }, noMatch, m_Theme.TextMuted, 13.0f);
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("modal.launcher.no_match");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = "shell";
+			node.Kind = "text";
+			node.Label = noMatch;
+			node.Value = noMatch;
+			node.Rect = { frame.X + pad, cursorY + 4.0f, rowWidth, 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
 		}
 		else
 		{
-			const size_t count = std::min<size_t>(m_RecentProjects.size(), 10);
-			for (size_t i = 0; i < count; ++i)
+			const Wui::WuiRect listClip { frame.X + pad, cursorY, rowWidth,
+				std::max(40.0f, frame.Y + frame.H - 82.0f - cursorY) };
+			const float contentHeight = static_cast<float>(visibleRows.size()) * (rowHeight + 2.0f);
+			Wui::BeginScrollArea(ctx, listClip, contentHeight, m_LauncherScrollY, m_Theme,
+				Wui::HashId("project.launcher.recent.scroll"));
+			float rowY = listClip.Y - m_LauncherScrollY;
+			for (const size_t i : visibleRows)
 			{
 				const Editor::RecentProjectEntry& entry = m_RecentProjects[i];
 				const std::string path = entry.Path;
-				const Wui::WuiRect row { frame.X + pad, cursorY, rowWidth, rowHeight };
+				const Wui::WuiRect row { listClip.X, rowY, listClip.W, rowHeight };
+				rowY += rowHeight + 2.0f;
+				if (!ctx.ClipAllows(row))
+					continue;   // 滚出视口的行不绘制也不登记(与属性面板滚动区同一口径)
+				const float removeWidth = 84.0f;
+				const Wui::WuiRect removeRect { row.X + row.W - removeWidth, row.Y, removeWidth, rowHeight };
+				const std::string name = entry.Name.empty() ? path : entry.Name;
 				if (entry.Valid)
 				{
-					// 有效行:整行是一个按钮(名称 + 路径;完整路径/时间在 tooltip 里)。
-					const std::string name = entry.Name.empty() ? path : entry.Name;
+					// 有效行:左侧"打开"按钮 + 右侧"移除"(移除只动最近列表,不碰磁盘)。
 					const std::string label = Wui::EllipsizeMiddleToWidth(ctx, name + "    " + entry.Path,
-						rowWidth - 16.0f, 15.0f);
+						removeRect.X - row.X - 16.0f, 15.0f);
 					const std::string tooltip = entry.LastOpened.empty()
 						? entry.Path : entry.Path + "\n" + entry.LastOpened;
-					const bool clicked = Wui::ButtonEx(ctx,
+					if (Wui::ButtonEx(ctx,
 						Wui::HashId(("project.launcher.recent." + std::to_string(i)).c_str()),
-						row, label, m_Theme, true, false, tooltip);
-					if (clicked)
+						{ row.X, row.Y, removeRect.X - row.X - 6.0f, rowHeight }, label, m_Theme,
+						true, false, tooltip))
 					{
-						ctx.RecordOp("project", "open", name, path);
-						// PROJ-3/T1:启动器模式下没有"当前项目"可停留 —— 保留启动器页,
-						// 子进程起来后本进程就退出(RelaunchWithProject 内部负责收尾)。
-						if (!m_LauncherMode)
-						{
-							m_Editor.DismissProjectLauncher();
-							ctx.ClearModal();
-						}
-						m_Editor.RelaunchWithProject(std::filesystem::u8path(path));
-						Wui::EndModalFrame(ctx);
-						return;
+						openPendingPath = path;
+						openPendingName = name;
 					}
 				}
 				else
 				{
-					// 失效行:名称 + 路径 + 失效标记(红),右侧一个"移除"按钮。
-					const float removeWidth = 84.0f;
-					const std::string name = entry.Name.empty() ? path : entry.Name;
+					// 失效行:名称 + 路径 + 失效标记(红)在左;右侧同样可"移除"。
 					const std::string text = name + "  —  " + entry.Path + "  ("
 						+ Wui::Tr("modal.launcher.invalid", "unavailable") + ")";
 					Wui::Label(ctx, { row.X + 2.0f, row.Y + 6.0f },
-						Wui::EllipsizeMiddleToWidth(ctx, text, rowWidth - removeWidth - 16.0f, 12.0f),
+						Wui::EllipsizeMiddleToWidth(ctx, text, removeRect.X - row.X - 10.0f, 12.0f),
 						m_Theme.Danger, 12.0f);
-					if (Wui::ButtonEx(ctx,
-						Wui::HashId(("project.launcher.recent.remove." + std::to_string(i)).c_str()),
-						{ row.X + row.W - removeWidth, row.Y, removeWidth, rowHeight },
-						Wui::Tr("modal.launcher.remove", "Remove"), m_Theme, true, false,
-						entry.InvalidReason))
-					{
-						removePending = path;
-					}
 				}
-				cursorY += rowHeight + 2.0f;
+				if (Wui::ButtonEx(ctx,
+					Wui::HashId(("project.launcher.recent.remove." + std::to_string(i)).c_str()),
+					removeRect, Wui::Tr("modal.launcher.remove", "Remove"), m_Theme, true, false,
+					entry.Valid
+						? Wui::Tr("modal.launcher.remove_hint",
+							"Remove from the recent list (project files on disk stay)")
+						: entry.InvalidReason))
+				{
+					removePending = path;
+					removePendingName = name;
+				}
 			}
+			Wui::EndScrollArea(ctx);
 		}
 
-		// 移除在遍历之后执行(不能在持有 m_RecentProjects 引用时改表)。
+		// 打开/移除都在遍历之后执行(不能在持有 m_RecentProjects 引用时改表)。
+		if (!openPendingPath.empty())
+		{
+			ctx.RecordOp("project", "open", openPendingName, openPendingPath);
+			// PROJ-3/T1:启动器模式下没有"当前项目"可停留 —— 保留启动器页,
+			// 子进程起来后本进程就退出(RelaunchWithProject 内部负责收尾)。
+			if (!m_LauncherMode)
+			{
+				m_Editor.DismissProjectLauncher();
+				ctx.ClearModal();
+			}
+			m_Editor.RelaunchWithProject(std::filesystem::u8path(openPendingPath));
+			Wui::EndModalFrame(ctx);
+			return;
+		}
 		if (!removePending.empty())
 		{
 			std::string error;
 			if (Editor::ProjectLauncher::RemoveRecent(std::filesystem::u8path(removePending), &error))
 			{
-				ctx.RecordOp("project", "recent-remove", "", removePending);
+				ctx.RecordOp("project", "recent-remove", removePendingName, removePending);
 				RefreshRecentProjectsIfStale(/*force=*/true);
 				PushNotice(Wui::TrFormat("notice.project.recent_removed",
-					"Removed from recent projects: {path}", { { "path", removePending } }));
+					"Removed from the recent list: {name} (the project files on disk were not touched)",
+					{ { "name", removePendingName } }));
 			}
 			else
 			{

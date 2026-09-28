@@ -23,7 +23,9 @@ namespace World::Editor
 		namespace fs = std::filesystem;
 
 		constexpr const char* kManifestFileName = "project.we.yaml";
-		constexpr size_t kMaxRecentProjects = 10;
+		// PROJ-4/T1(P2):最近列表上限 10 → 30,与启动器的显示上限(EditorShell 的
+		// std::min(size, 30) + 滚动区)一致 —— 否则存储端先把第 11 条截掉,显示上限形同虚设。
+		constexpr size_t kMaxRecentProjects = 30;
 
 		std::string RandomToken()
 		{

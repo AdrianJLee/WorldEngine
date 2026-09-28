@@ -54,7 +54,8 @@ namespace World
 				std::filesystem::path ProjectRoot;   // Ok=true = <位置>/<名称>(绝对)
 				std::vector<std::string> Files;      // Ok=true = 写出的相对路径(generic,已排序)
 				// PROJ-3/T1(P2b):项目根里的启动入口(相对文件名,已排序):
-				// `WeEdit.exe`/`WePlay.exe`(从构建目录复制,优先)或 `open-editor.cmd`/`run-game.cmd`
+				// PROJ-4/T1(P3)起名字跟项目名:`<项目名>-Edit.exe`/`<项目名>-Play.exe`
+				// (从构建目录的 WeEdit/WePlay 复制,优先)或 `<项目名>-Edit.cmd`/`<项目名>-Play.cmd`
 				// (exe 缺失时的兜底)。两者都写不成 = 空(创建本身仍然成功)。
 				std::vector<std::string> EntryPoints;
 			};

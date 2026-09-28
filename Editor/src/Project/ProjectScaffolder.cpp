@@ -290,12 +290,14 @@ namespace World::Editor
 			return files;
 		}
 
-		// ---- PROJ-3/T1(P2b):项目根的启动入口(exe 优先,缺失则 .cmd 兜底)----
+		// ---- PROJ-3/T1(P2b)+PROJ-4/T1(P3):项目根的启动入口(exe 优先,缺失则 .cmd 兜底)----
 		//
-		// 用户口径(方案 v2 P2):新项目位置双击就能起引擎 —— 引擎自带的小启动器
-		// (WeEdit.exe / WePlay.exe,T2 产出)优先复制进项目根;构建目录里还没有(或复制失败)
-		// 就写 `open-editor.cmd` / `run-game.cmd`。两个入口都是**本机产物**(引擎绝对路径 +
-		// 二进制),因此同时补 `.gitignore` 条目,避免被提交进项目历史。
+		// 用户口径(方案 v2 P2 / PROJ-4 v1 P3):新项目位置双击就能起引擎 —— 引擎自带的小
+		// 启动器(WeEdit.exe / WePlay.exe,T2 产出)优先复制进项目根;构建目录里还没有
+		// (或复制失败)就写 `.cmd` 兜底。落点名字跟项目名走(`<项目名>-Edit.exe` /
+		// `<项目名>-Play.exe` / `<项目名>-Edit.cmd` / `<项目名>-Play.cmd`)。两个入口都是
+		// **本机产物**(引擎绝对路径 + 二进制),因此同时补 `.gitignore` 通配条目,
+		// 避免被提交进项目历史。
 
 		// WLD_OUTPUT_DIR / WLD_BUILD_TYPE / WLD_REPO_ROOT 都可能是"带尾分隔符"的编译期宏;
 		// 拼 Windows 路径前统一去掉尾分隔符。
@@ -444,32 +446,54 @@ namespace World::Editor
 			return text;
 		}
 
-		// P2b 的收尾步骤:优先复制 `WeEdit.exe`/`WePlay.exe`,缺哪个就给哪个写 .cmd 兜底;
-		// 随后补 `.gitignore` 条目。返回写进项目根的入口文件名(排序)。
+		// PROJ-4/T1(P3):启动入口文件名跟项目名走(`<项目名>-Edit.exe` / `<项目名>-Play.exe`,
+		// `.cmd` 兜底同理)。Windows 非法文件名字符与控制字符替换成 `_` —— 只影响文件名,
+		// 不改项目名本身(非 ASCII 字节原样保留)。
+		std::string SanitizeLauncherFileStem(const std::string& projectName)
+		{
+			std::string stem = projectName;
+			for (char& character : stem)
+			{
+				const unsigned char c = static_cast<unsigned char>(character);
+				if (c < 0x20 || c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' ||
+					c == '"' || c == '<' || c == '>' || c == '|')
+					character = '_';
+			}
+			if (stem.empty())
+				stem = "project";
+			return stem;
+		}
+
+		// P2b 的收尾步骤:优先复制 `WeEdit.exe`/`WePlay.exe`(**复制源不变**),按项目名落成
+		// `<项目名>-Edit.exe` / `<项目名>-Play.exe`;缺哪个就给哪个写同名 `.cmd` 兜底;
+		// 随后补 `.gitignore` 通配条目。返回写进项目根的入口文件名(排序)。
 		// **任何失败都不影响项目本体** —— 只记警告,返回已经写成的部分。
-		std::vector<std::string> PlaceLaunchEntryPoints(const fs::path& projectRoot)
+		std::vector<std::string> PlaceLaunchEntryPoints(const fs::path& projectRoot,
+			const std::string& projectName)
 		{
 			const std::string buildType = TrimTrailingSeparators(WLD_BUILD_TYPE);
 			const std::string outputDir = TrimTrailingSeparators(WLD_OUTPUT_DIR);
 			const std::string editorExeRelative = outputDir + "/Editor/" + buildType + "/Editor.exe";
 			const std::string runtimeExeRelative = outputDir + "/Runtime/" + buildType + "/Runtime.exe";
 
+			const std::string stem = SanitizeLauncherFileStem(projectName);
 			struct EntryRequest
 			{
-				const char* ExeName;
-				const char* CmdName;
+				const char* SourceExeName;   // 构建目录里的启动器本体(名字固定)
+				std::string ExeName;         // 落进项目根的名字(跟项目名)
+				std::string CmdName;         // exe 缺失时的兜底脚本名(同样跟项目名)
 				const std::string* TargetExeRelative;
 			};
 			const EntryRequest requests[2] = {
-				{ "WeEdit.exe", "open-editor.cmd", &editorExeRelative },
-				{ "WePlay.exe", "run-game.cmd", &runtimeExeRelative },
+				{ "WeEdit.exe", stem + "-Edit.exe", stem + "-Edit.cmd", &editorExeRelative },
+				{ "WePlay.exe", stem + "-Play.exe", stem + "-Play.cmd", &runtimeExeRelative },
 			};
 
 			std::vector<std::string> placed;
 			for (const EntryRequest& request : requests)
 			{
 				bool copied = false;
-				const fs::path artifact = FindLauncherArtifact(request.ExeName);
+				const fs::path artifact = FindLauncherArtifact(request.SourceExeName);
 				if (!artifact.empty())
 				{
 					std::error_code copyError;
@@ -504,7 +528,7 @@ namespace World::Editor
 
 			std::string gitignoreError;
 			const std::vector<std::string> ignoreEntries = {
-				"WeEdit.exe", "WePlay.exe", "open-editor.cmd", "run-game.cmd", "/build/", "/local/" };
+				"*-Edit.exe", "*-Play.exe", "*-Edit.cmd", "*-Play.cmd", "/build/", "/local/" };
 			if (!EnsureGitignoreEntries(projectRoot, ignoreEntries, &gitignoreError))
 				WLD_CORE_WARN("[project-scaffolder] could not update .gitignore: {0}", gitignoreError);
 
@@ -710,13 +734,13 @@ namespace World::Editor
 			// 裸 `.vscode` 忽略规则会吞掉模板里的同名文件)。
 			built = World::EnsureScriptEditorScaffold(temporary, &error);
 		}
-		// PROJ-3/T1(P2b):启动入口(exe 优先,缺失 ⇒ .cmd)+ `.gitignore` 条目 —— 一次创建的
-		// 收尾步骤,写在临时目录里(与骨架一起改名进目标位置)。失败**不影响项目本体**,
-		// 因此不参与 built 判定:只记警告,能写成几个算几个。
+		// PROJ-3/T1(P2b)+PROJ-4/T1(P3):启动入口(exe 优先,缺失 ⇒ .cmd;名字跟项目名)+
+		// `.gitignore` 通配条目 —— 一次创建的收尾步骤,写在临时目录里(与骨架一起改名进
+		// 目标位置)。失败**不影响项目本体**,因此不参与 built 判定:只记警告,能写成几个算几个。
 		std::vector<std::string> entryPoints;
 		if (built)
 		{
-			entryPoints = PlaceLaunchEntryPoints(temporary);
+			entryPoints = PlaceLaunchEntryPoints(temporary, name);
 			if (!entryPoints.empty())
 				WLD_CORE_INFO("[project-scaffolder] launch entry points: {0}", JoinNames(entryPoints));
 		}

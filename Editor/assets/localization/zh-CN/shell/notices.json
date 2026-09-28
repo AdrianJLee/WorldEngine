@@ -34,7 +34,7 @@
   "notice.newproject.explorer_failed": "打不开项目目录:{path}",
   "notice.project.open_failed": "打开项目失败 {reason}:{path}",
   "notice.project.launcher_closed": "已关闭启动器 —— 停在当前项目;之后可用「文件 ▶ 打开项目…」切换。",
-  "notice.project.recent_removed": "已从最近项目移除:{path}",
+  "notice.project.recent_removed": "已从最近列表移除：{name}（磁盘上的项目文件没有动）",
   "notice.project.recent_remove_failed": "最近项目列表更新失败:{reason}",
   "notice.project.runtime_missing": "Runtime 还没构建({exe})。先构建:{command}",
   "notice.project.runtime_launched": "已启动项目运行时:{path}"

@@ -384,6 +384,10 @@ namespace World
 		const std::vector<Editor::RecentProjectEntry>& RecentProjects();
 		std::vector<Editor::RecentProjectEntry> m_RecentProjects;
 		double m_RecentProjectsLoadedAt = -1.0e9;
+		// PROJ-4/T1(P1/P2):启动器搜索词 + 最近列表滚动位置(过滤只影响"画哪些行",
+		// 行 id / 打开目标 / 移除目标一律用 m_RecentProjects 的原下标,避免筛选后错位)。
+		std::string m_LauncherSearch;
+		float m_LauncherScrollY = 0.0f;
 		// 运行 ▸ 启动项目(Runtime):目标 = 当前项目根(EditorLayer完成定位/启动/日志)。
 		void LaunchCurrentProjectRuntime();
 		// 启动器动作:打开默认**示例**项目(projects/default,文案明确"示例")。

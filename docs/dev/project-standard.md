@@ -73,12 +73,14 @@
 - Runtime:在项目根(或含清单的目录)启动即可 —— 清单解析按 CWD → `projects/default/` → 开发树。
 - 向导里的 `Open Project` = 用 `WLD_PROJECT_DIR` 重启编辑器到该项目(进程级切换,不做同进程热切换)。
 
-### 4.1 项目自带的启动入口(本机产物)
+### 4.1 项目自带的启动入口(本机产物,名字跟着项目走)
 
-- 向导在项目根复制两个零依赖小启动器:`WeEdit.exe`(起 `Editor.exe --project <项目根>`)、
-  `WePlay.exe`(起 `Runtime.exe --project <项目根>`);构建目录里还没有它们时退回生成
-  `open-editor.cmd` / `run-game.cmd`(`WE_ROOT` 可覆盖引擎根;路径用 `%~dp0.` 规避尾反斜杠陷阱)。
-- 入口是**本机产物**:向导会把这些文件名写进项目根的 `.gitignore`(连同 `/build/`、`/local/`),
+- 向导在项目根复制两个零依赖小启动器,文件名带项目名:`<项目名>-Edit.exe`(起 `Editor.exe --project <项目根>`)、
+  `<项目名>-Play.exe`(起 `Runtime.exe --project <项目根>`);构建目录里还没有它们时退回生成
+  `<项目名>-Edit.cmd` / `<项目名>-Play.cmd`(`WE_ROOT` 可覆盖引擎根;路径用 `%~dp0.` 规避尾反斜杠陷阱)。
+  启动器模式由**编译进 exe 的宏**决定、项目根取 exe 自身所在目录 ⇒ 改名/改名复制都不影响行为。
+- 入口是**本机产物**:向导会把这些名字写进项目根的 `.gitignore`(通配 `*-Edit.exe` / `*-Play.exe` /
+  `*-Edit.cmd` / `*-Play.cmd`,连同 `/build/`、`/local/`),
   项目本身不需要它们也能被 `--project` 打开 —— 所以机检把它们算**可选件**(缺 = WARN)。
 - 小启动器本体在引擎仓库的 `Launcher/`(目标 `WeEdit` / `WePlay`);它不链接引擎,只调宿主 exe。
 

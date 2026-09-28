@@ -10,7 +10,8 @@ namespace World::Editor
 	//
 	// 口径(方案 v1 / 派工单):
 	//   * 文件形态 `{ "recent": [ { "path": "...", "name": "...", "lastOpened": "<ISO8601>" } ] }`;
-	//   * 最多 10 条;同路径去重(**大小写不敏感**,新记录置顶、更新时间);
+	//   * 最多 30 条(PROJ-4/T1:10 → 30,与启动器显示上限一致);同路径去重
+	//     (**大小写不敏感**,新记录置顶、更新时间);
 	//   * 原子写(`projects.json.tmp-<随机>` → rename/MoveFileEx 替换);任何失败只报告,不崩;
 	//   * 文件缺失/损坏 → 空列表(记一次警告);坏条目跳过而不是整表丢弃;
 	//   * `Valid` = 目录存在 + `project.we.yaml` 存在且能被 ProjectManifest 解析(展示期判定,只读)。
@@ -32,7 +33,7 @@ namespace World::Editor
 		// 读最近列表(顺序 = 最近在前)。缺失/损坏 = 空列表;逐条填 Valid/InvalidReason。
 		static std::vector<RecentProjectEntry> LoadRecent();
 
-		// 置顶写入一条:同路径(大小写不敏感)去重、刷新 lastOpened、截到 10 条;原子落盘。
+		// 置顶写入一条:同路径(大小写不敏感)去重、刷新 lastOpened、截到 30 条;原子落盘。
 		static bool AddRecent(const std::filesystem::path& projectRoot, std::string* error = nullptr);
 
 		// 移除一条(大小写不敏感匹配);未命中 = true(幂等)。落盘失败 = false + 原因。
