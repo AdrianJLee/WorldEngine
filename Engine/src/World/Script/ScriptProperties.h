@@ -101,6 +101,15 @@ namespace World
 		// monostate 不算匹配 —— 未设值请先用 IsUnset 判定)。
 		WLD_API bool ValueMatchesKind(const Schema::Value& value, Schema::Kind kind);
 
+		// CPPT-6:C++ 容器属性(Array/Map)的 Play 应用值 —— 把集合行模型(Children)折成
+		// schema 容器值(ValueList / ValueMap;命名 struct 的元素 = 字段名 → Value 的 map)。
+		//   * 返回 false = 这条属性**没被场景记录过**(值未设且形状不来自场景)→ 调用方跳过 Set,
+		//     实例保留脚本自己的成员初值(与 D1"未设不覆盖"同口径);
+		//   * 未设的元素/子字段以 monostate 原样传出(生成的拆箱对未设/类型不符回落到类型零值,
+		//     不会抛 bad_variant_access);
+		//   * 非容器属性 → false(outValue 不动)。
+		WLD_API bool BuildContainerValue(const ScriptProperty& property, Schema::Value* outValue);
+
 		WLD_API ScriptProperty* Find(std::vector<ScriptProperty>& properties, const std::string& name);
 		WLD_API const ScriptProperty* Find(const std::vector<ScriptProperty>& properties, const std::string& name);
 	}

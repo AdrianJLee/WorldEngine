@@ -122,6 +122,13 @@ namespace
 
     ProbeContext* s_ProbeContext = nullptr;
 
+    // CPPT-6-FIX2:元素是命名 struct 的容器(Array<struct> / Map<struct>)—— 与容器夹具同一个形状口径。
+    struct ProbeStats
+    {
+        float Health = 0.0f;
+        int32_t Count = 0;
+    };
+
     class NativeProbe final : public ScriptableEntity
     {
     public:
@@ -132,6 +139,14 @@ namespace
         int64_t Mode = 0;
         std::string Icon;
         glm::ivec3 Cell { 0 };
+        // CPPT-6:容器字段(Array/Map)—— 成员初值就是脚本自己的默认形状,场景/属性表未设时原样保留。
+        std::vector<float> Scores { 1.0f, 2.0f };
+        std::map<std::string, float> Costs { { "gold", 3.0f } };
+        std::vector<int64_t> Modes;
+        // CPPT-6-FIX2:容器元素是命名 struct —— 保存/重开/Play 后逐元素保持
+        // (修复前元素行读回 Collection=Struct → 折 ValueList → 整条回落成员初值)。
+        std::vector<ProbeStats> Squad;
+        std::map<std::string, ProbeStats> Units;
 
     private:
         void OnCreate() override
@@ -2281,6 +2296,254 @@ namespace
         }
     }
 
+    // CPPT-6:C++ 容器属性全链路 —— schema 形状 → 集合行(Collection/ElementKind/KeyKind/TypeName)
+    // → 场景往返(`Type: Array|Map` + ElementType/KeyType,含 Array(Enum))→ Play 应用
+    // (BuildContainerValue + field.Set,与 Scene::StartPendingScripts 同一条路径)。
+    void CppContainerProperties()
+    {
+        Fixture fixture;
+        const Schema::TypeSchema* type = TestContext().Schemas().Find("T02NativeProbe");
+        CHECK(type != nullptr);
+
+        // 1) 模型:声明里没有元素行 → 空容器(未设,不进场景);形状/元素/键类型来自 schema。
+        std::vector<ScriptProperty> properties;
+        ScriptProperties::SyncFromSchema(properties, *type);
+        ScriptProperty* scores = ScriptProperties::Find(properties, "Scores");
+        ScriptProperty* costs = ScriptProperties::Find(properties, "Costs");
+        ScriptProperty* modes = ScriptProperties::Find(properties, "Modes");
+        CHECK(scores != nullptr && costs != nullptr && modes != nullptr);
+        CHECK(scores->Type == Schema::Kind::Object && scores->Collection == ScriptPropertyCollection::Array);
+        CHECK(scores->ElementKind == Schema::Kind::Float && scores->KeyKind == Schema::Kind::None);
+        CHECK(scores->Children.empty() && !scores->ReadOnly);
+        CHECK(costs->Collection == ScriptPropertyCollection::Map);
+        CHECK(costs->ElementKind == Schema::Kind::Float && costs->KeyKind == Schema::Kind::String);
+        CHECK(modes->Collection == ScriptPropertyCollection::Array);
+        CHECK(modes->ElementKind == Schema::Kind::Enum && modes->TypeName == "ProbeMode");
+        CHECK(!ScriptProperties::IsSceneRecorded(*scores));
+        // 未设 → 不应用(实例保留脚本成员初值),与 D1"未设不覆盖"同口径。
+        Schema::Value container;
+        CHECK(!ScriptProperties::BuildContainerValue(*scores, &container));
+
+        // 2) 行被记录(等价于编辑器 `+` 后写值 / 场景读档)→ 整条进场景;折成 schema 容器值。
+        scores->Children.push_back(ScriptProperty { "1", Schema::Kind::Float, Schema::Value(4.5f) });
+        scores->Children.push_back(ScriptProperty { "2", Schema::Kind::Float, Schema::Value(6.0f) });
+        costs->Children.push_back(ScriptProperty { "gold", Schema::Kind::Float, Schema::Value(7.5f) });
+        modes->Children.push_back(ScriptProperty { "1", Schema::Kind::Enum, Schema::Value(static_cast<int64_t>(1)) });
+        CHECK(ScriptProperties::IsSceneRecorded(*scores));
+        CHECK(ScriptProperties::BuildContainerValue(*scores, &container));
+        const Schema::ValueList* scoreValues = std::get_if<Schema::ValueList>(&container);
+        CHECK(scoreValues != nullptr && scoreValues->size() == 2);
+        CHECK(std::get<float>((*scoreValues)[0]) == 4.5f);
+        CHECK(std::get<float>((*scoreValues)[1]) == 6.0f);
+        CHECK(ScriptProperties::BuildContainerValue(*costs, &container));
+        const Schema::ValueMap* costValues = std::get_if<Schema::ValueMap>(&container);
+        CHECK(costValues != nullptr && costValues->size() == 1);
+        CHECK(std::get<float>(costValues->at("gold")) == 7.5f);
+        CHECK(ScriptProperties::BuildContainerValue(*modes, &container));
+        const Schema::ValueList* modeValues = std::get_if<Schema::ValueList>(&container);
+        CHECK(modeValues != nullptr && modeValues->size() == 1);
+        CHECK(std::get<int64_t>((*modeValues)[0]) == 1);
+
+        // 3) Play 应用:field.Set(实例, 容器值) → 成员按场景行重建;未设的行回落类型零值。
+        NativeProbe probe(*s_ProbeContext);
+        const Schema::FieldSchema* scoresField = nullptr;
+        const Schema::FieldSchema* costsField = nullptr;
+        const Schema::FieldSchema* modesField = nullptr;
+        for (const Schema::FieldSchema& field : type->Fields)
+        {
+            if (field.Name == "Scores") scoresField = &field;
+            else if (field.Name == "Costs") costsField = &field;
+            else if (field.Name == "Modes") modesField = &field;
+        }
+        CHECK(scoresField && costsField && modesField);
+        CHECK(ScriptProperties::BuildContainerValue(*scores, &container));
+        scoresField->Set(&probe, container);
+        CHECK(probe.Scores.size() == 2 && probe.Scores[0] == 4.5f && probe.Scores[1] == 6.0f);
+        CHECK(ScriptProperties::BuildContainerValue(*costs, &container));
+        costsField->Set(&probe, container);
+        CHECK(probe.Costs.size() == 1 && probe.Costs.at("gold") == 7.5f);
+        CHECK(ScriptProperties::BuildContainerValue(*modes, &container));
+        modesField->Set(&probe, container);
+        CHECK(probe.Modes.size() == 1 && probe.Modes[0] == 1);
+
+        // 4) 场景往返:`Type: Array|Map` + ElementType/KeyType;读回逐值一致(含形状来自场景)。
+        const fs::path scenePath = s_OutputDirectory / "cpp_container_round_trip.wd";
+        {
+            Ref<Scene> scene = CreateRef<Scene>(TestContext());
+            Entity entity = Entity::CreateEntity(scene.get(), "cpp container probe");
+            entity.AddComponent<CppScriptComponent>().ScriptName = "T02NativeProbe";
+            auto& script = entity.GetComponent<CppScriptComponent>();
+            ScriptProperties::SyncFromSchema(script.Properties, *type);
+            ScriptProperty* row = ScriptProperties::Find(script.Properties, "Scores");
+            CHECK(row != nullptr);
+            row->Children.push_back(ScriptProperty { "1", Schema::Kind::Float, Schema::Value(1.5f) });
+            row->Children.push_back(ScriptProperty { "2", Schema::Kind::Float, Schema::Value(2.5f) });
+            row = ScriptProperties::Find(script.Properties, "Costs");
+            CHECK(row != nullptr);
+            row->Children.push_back(ScriptProperty { "gold", Schema::Kind::Float, Schema::Value(9.0f) });
+            row = ScriptProperties::Find(script.Properties, "Modes");
+            CHECK(row != nullptr);
+            row->Children.push_back(ScriptProperty { "1", Schema::Kind::Enum, Schema::Value(static_cast<int64_t>(1)) });
+
+            SceneSerializer writer(scene);
+            CHECK(writer.Serialize(scenePath.string()));
+        }
+        const std::string yaml = ReadFile(scenePath);
+        CHECK(yaml.find("Type: Array") != std::string::npos);
+        CHECK(yaml.find("Type: Map") != std::string::npos);
+        CHECK(yaml.find("ElementType: Float") != std::string::npos);
+        CHECK(yaml.find("KeyType: String") != std::string::npos);
+        CHECK(yaml.find("TypeName: ProbeMode") != std::string::npos);
+        {
+            Ref<Scene> loaded = CreateRef<Scene>(TestContext());
+            SceneSerializer reader(loaded);
+            CHECK(reader.Deserialize(scenePath.string()));
+            CppScriptComponent* reloaded = nullptr;
+            for (const entt::entity handle : loaded->GetRegistry().view<CppScriptComponent>())
+                reloaded = &loaded->GetRegistry().get<CppScriptComponent>(handle);
+            CHECK(reloaded != nullptr);
+            const ScriptProperty* loadedScores = ScriptProperties::Find(reloaded->Properties, "Scores");
+            const ScriptProperty* loadedCosts = ScriptProperties::Find(reloaded->Properties, "Costs");
+            const ScriptProperty* loadedModes = ScriptProperties::Find(reloaded->Properties, "Modes");
+            CHECK(loadedScores && loadedScores->Collection == ScriptPropertyCollection::Array);
+            CHECK(loadedScores && loadedScores->ShapeFromScene);
+            CHECK(loadedScores && loadedScores->Children.size() == 2);
+            CHECK(loadedScores && std::get<float>(loadedScores->Children[0].Value) == 1.5f);
+            CHECK(loadedScores && std::get<float>(loadedScores->Children[1].Value) == 2.5f);
+            CHECK(loadedCosts && loadedCosts->Children.size() == 1);
+            CHECK(loadedCosts && std::get<float>(loadedCosts->Children[0].Value) == 9.0f);
+            CHECK(loadedCosts && loadedCosts->Children[0].Name == "gold");
+            CHECK(loadedModes && loadedModes->Children.size() == 1);
+            CHECK(loadedModes && loadedModes->Children[0].Type == Schema::Kind::Enum);
+            CHECK(loadedModes && std::get<int64_t>(loadedModes->Children[0].Value) == 1);
+            std::error_code ignored;
+            fs::remove(scenePath, ignored);
+        }
+    }
+
+    // CPPT-6-FIX2(端到端回归):Array<Struct> / Map<Struct> 的**元素行**经"保存 → 重开 → Play"
+    // 逐元素保持。修复前的两处口径裂口:
+    //   ① 读档把 `Type: Object` 的元素行读成 Collection=Struct(独立结构化表字段的形状);
+    //   ② ElementValueOf 让 Struct 走 FoldContainer → 元素折成 ValueList,而 WriteStructValue
+    //      只吃 ValueMap ⇒ Play 时整条元素写不进去,字段回落脚本成员初值。
+    void CppStructContainerSurvivesRestartIntoPlay()
+    {
+        Fixture fixture;   // ProbeContext:脚本工厂实例化需要它(并在收尾清干净)
+        const Schema::TypeSchema* type = TestContext().Schemas().Find("T02NativeProbe");
+        CHECK(type != nullptr);
+
+        // 面板模型:命名 struct 元素行 = Collection=None + Type=Object + 子字段(Value 保持未设)。
+        const auto makeElementRow = [](const std::string& name, float health, int32_t count)
+        {
+            ScriptProperty element;
+            element.Name = name;
+            element.Type = Schema::Kind::Object;
+            // 面板同一形状:`+` 出来的 struct 元素行 Value = 空 ValueMap —— Collection=None 的行
+            // 只有非 monostate 的 Value 才算"场景自己的值"(空表也要落盘,否则整条容器不写)。
+            element.Value = Schema::Value(Schema::ValueMap {});
+            ScriptProperty healthRow;
+            healthRow.Name = "Health";
+            healthRow.Type = Schema::Kind::Float;
+            healthRow.Value = Schema::Value(health);
+            ScriptProperty countRow;
+            countRow.Name = "Count";
+            countRow.Type = Schema::Kind::Int32;
+            countRow.Value = Schema::Value(count);
+            element.Children.push_back(std::move(healthRow));
+            element.Children.push_back(std::move(countRow));
+            return element;
+        };
+
+        const fs::path scenePath = s_OutputDirectory / "cpp_struct_container_restart.wd";
+        {
+            Ref<Scene> scene = CreateRef<Scene>(TestContext());
+            Entity entity = Entity::CreateEntity(scene.get(), "cpp struct container probe");
+            auto& script = entity.AddComponent<CppScriptComponent>();
+            BindProbe(script);
+            ScriptProperties::SyncFromSchema(script.Properties, *type);
+            ScriptProperty* squad = ScriptProperties::Find(script.Properties, "Squad");
+            ScriptProperty* units = ScriptProperties::Find(script.Properties, "Units");
+            CHECK(squad != nullptr && units != nullptr);
+            CHECK(squad->Collection == ScriptPropertyCollection::Array && !squad->ReadOnly);
+            CHECK(units->Collection == ScriptPropertyCollection::Map && !units->ReadOnly);
+            squad->Children.push_back(makeElementRow("1", 12.5f, 3));
+            squad->Children.push_back(makeElementRow("2", 7.0f, 1));
+            units->Children.push_back(makeElementRow("boss", 9.0f, 4));
+
+            SceneSerializer writer(scene);
+            CHECK(writer.Serialize(scenePath.string()));
+        }
+
+        const std::string yaml = ReadFile(scenePath);
+        CHECK(yaml.find("Type: Array") != std::string::npos);
+        CHECK(yaml.find("Type: Map") != std::string::npos);
+        CHECK(yaml.find("ElementType: Object") != std::string::npos);
+        CHECK(yaml.find("ValueType: Object") != std::string::npos);
+        CHECK(yaml.find("12.5") != std::string::npos);
+
+        Ref<Scene> loaded = CreateRef<Scene>(TestContext());
+        {
+            SceneSerializer reader(loaded);
+            CHECK(reader.Deserialize(scenePath.string()));
+            CHECK(reader.GetLastError().empty());
+        }
+        CppScriptComponent* reloaded = nullptr;
+        for (const entt::entity handle : loaded->GetRegistry().view<CppScriptComponent>())
+            reloaded = &loaded->GetRegistry().get<CppScriptComponent>(handle);
+        CHECK(reloaded != nullptr);
+        CHECK(reloaded->ScriptName == "T02NativeProbe");
+
+        // ① 读回口径:元素行 = 父容器 + 行位置 → Collection=None(不是 Struct),子字段照旧可编辑。
+        const ScriptProperty* loadedSquad = ScriptProperties::Find(reloaded->Properties, "Squad");
+        const ScriptProperty* loadedUnits = ScriptProperties::Find(reloaded->Properties, "Units");
+        CHECK(loadedSquad != nullptr && loadedUnits != nullptr);
+        CHECK(loadedSquad->Collection == ScriptPropertyCollection::Array);
+        CHECK(loadedSquad->ElementKind == Schema::Kind::Object);
+        CHECK(loadedSquad->ShapeFromScene && loadedSquad->Children.size() == 2);
+        CHECK(loadedSquad->Children[0].Collection == ScriptPropertyCollection::None);
+        CHECK(loadedSquad->Children[0].Type == Schema::Kind::Object);
+        CHECK(std::get<float>(ScriptProperties::Find(loadedSquad->Children[0].Children, "Health")->Value) == 12.5f);
+        CHECK(std::get<int32_t>(ScriptProperties::Find(loadedSquad->Children[1].Children, "Count")->Value) == 1);
+        CHECK(loadedUnits->Collection == ScriptPropertyCollection::Map);
+        CHECK(loadedUnits->Children.size() == 1 && loadedUnits->Children[0].Name == "boss");
+        CHECK(loadedUnits->Children[0].Collection == ScriptPropertyCollection::None);
+        CHECK(std::get<float>(ScriptProperties::Find(loadedUnits->Children[0].Children, "Health")->Value) == 9.0f);
+
+        // ② 声明同步(编辑器打开属性面板走的同一条合并):场景形状/值原样保留。
+        ScriptProperties::SyncFromSchema(reloaded->Properties, *type);
+        loadedSquad = ScriptProperties::Find(reloaded->Properties, "Squad");
+        CHECK(loadedSquad != nullptr && loadedSquad->Children.size() == 2);
+        CHECK(loadedSquad->Children[0].Collection == ScriptPropertyCollection::None);
+        CHECK(std::get<float>(ScriptProperties::Find(loadedSquad->Children[0].Children, "Health")->Value) == 12.5f);
+
+        // ③ Play 折值:数组 → ValueList of ValueMap;映射 → ValueMap of ValueMap(旧实现是 ValueList)。
+        Schema::Value container;
+        CHECK(ScriptProperties::BuildContainerValue(*loadedSquad, &container));
+        const Schema::ValueList* squadValues = std::get_if<Schema::ValueList>(&container);
+        CHECK(squadValues != nullptr && squadValues->size() == 2);
+        const Schema::ValueMap* first = std::get_if<Schema::ValueMap>(&(*squadValues)[0]);
+        CHECK(first != nullptr);
+        CHECK(std::get<float>(first->at("Health")) == 12.5f);
+        CHECK(std::get<int32_t>(first->at("Count")) == 3);
+
+        // ④ Play:同一条应用路径(Scene::StartPendingScripts → BuildContainerValue → field.Set)。
+        loaded->OnScriptStart();
+        CHECK(reloaded->Runtime.State == ScriptInstanceState::Running);
+        const NativeProbe* instance = static_cast<const NativeProbe*>(reloaded->Instance);
+        CHECK(instance != nullptr);
+        CHECK(instance->Squad.size() == 2);
+        CHECK(instance->Squad[0].Health == 12.5f && instance->Squad[0].Count == 3);
+        CHECK(instance->Squad[1].Health == 7.0f && instance->Squad[1].Count == 1);
+        CHECK(instance->Units.size() == 1);
+        CHECK(instance->Units.at("boss").Health == 9.0f && instance->Units.at("boss").Count == 4);
+        loaded->OnScriptDestroy();
+        CHECK(reloaded->Runtime.State == ScriptInstanceState::Stopped);
+
+        loaded.reset();
+        std::error_code ignored;
+        fs::remove(scenePath, ignored);
+    }
+
     // CPPT-2(T5b):卸载前的实例收容(OnDestroy 各一次、配置态原样)→ 加载后的配置态迁移 + Pending 重跑。
     void ModuleReloadDrainAndRestore()
     {
@@ -2335,7 +2598,9 @@ namespace
         const Schema::TypeSchema* type = TestContext().Schemas().Find("T02NativeProbe");
         CHECK(type != nullptr);
         ScriptProperties::SyncFromSchema(script.Properties, *type);
-        CHECK(script.Properties.size() == 4);
+        // CPPT-6:探针新增三个容器字段(Scores/Costs/Modes),同为同名同形状 ⇒ 不产生诊断。
+        // CPPT-6-FIX2:再加 Squad/Units(元素是命名 struct)两个容器字段,同样不产生诊断。
+        CHECK(script.Properties.size() == 9);
 
         // 旧配置态(重载前):① Value 的类型被上一版模块改成 Int32(类型变化);
         // ② 另加一条新声明里没有的 Removed 字段(字段被删);
@@ -2415,6 +2680,8 @@ namespace
     //   覆盖:ABI 等值门(旧 DLL 必须 AbiMismatch)、schema/行为注销与重建(F-5 接线)、
     //   实例收容与配置态迁移(同名同类型保值 + Pending + 诊断为空)、
     //   IVec* 只读摘要行(FIX1:ReadOnly=true、未设、不进存档)。退出码 0 = 全绿。
+    //   CPPT-6:夹具脚本从 Game::StressTest 迁到 Game::ExampleScript(StressTest 已删除);
+    //   配置态属性改用示例的 Health(Float)/Icon(Asset),判据保持不变。
     int RunModuleProbe(const char* modulePath)
     {
         WorldContext& context = TestContext();
@@ -2433,22 +2700,22 @@ namespace
         Ref<Scene> scene = CreateRef<Scene>(context);
         Entity entity = Entity::CreateEntity(scene.get(), "cpp module probe");
         CppScriptComponent& script = entity.AddComponent<CppScriptComponent>();
-        script.ScriptName = "Game::StressTest";
-        const Schema::TypeSchema* type = context.Schemas().Find("Game::StressTest");
+        script.ScriptName = "Game::ExampleScript";
+        const Schema::TypeSchema* type = context.Schemas().Find("Game::ExampleScript");
         if (!type)
         {
-            std::cout << "[probe] Game::StressTest is not registered\n";
+            std::cout << "[probe] Game::ExampleScript is not registered\n";
             return 4;
         }
         ScriptProperties::SyncFromSchema(script.Properties, *type);
-        ScriptProperty* weight = ScriptProperties::Find(script.Properties, "Weight");
+        ScriptProperty* health = ScriptProperties::Find(script.Properties, "Health");
         ScriptProperty* icon = ScriptProperties::Find(script.Properties, "Icon");
-        if (!weight || !icon)
+        if (!health || !icon)
         {
-            std::cout << "[probe] expected Weight/Icon property rows\n";
+            std::cout << "[probe] expected Health/Icon property rows\n";
             return 5;
         }
-        weight->Value = Schema::Value(static_cast<int32_t>(4));
+        health->Value = Schema::Value(250.0f);
         icon->Value = Schema::Value(std::string("textures/Icon.wtex"));
 
         // CPPT-2(FIX1):IVec* 只读摘要行的实机证据 —— Game::ExampleScript.GridCell
@@ -2491,12 +2758,12 @@ namespace
         }
         std::cout << "[probe] unload drained=" << unloaded.InstancesDrained
             << " unloaded=" << unloaded.ModuleUnloaded << " msg=" << unloaded.Message << '\n';
-        if (context.Schemas().Find("Game::StressTest") || BehaviorRegistry::Instance().Find("Game::StressTest"))
+        if (context.Schemas().Find("Game::ExampleScript") || BehaviorRegistry::Instance().Find("Game::ExampleScript"))
         {
             std::cout << "[probe] schema or behavior survived unload\n";
             return 7;
         }
-        if (std::get<int32_t>(ScriptProperties::Find(script.Properties, "Weight")->Value) != 4)
+        if (std::get<float>(ScriptProperties::Find(script.Properties, "Health")->Value) != 250.0f)
         {
             std::cout << "[probe] configuration lost during unload\n";
             return 8;
@@ -2511,9 +2778,9 @@ namespace
         std::cout << "[probe] reload abi=" << loaded.AbiVersion
             << " restored=" << loaded.InstancesRestored
             << " diagnostics=" << loaded.Diagnostics.size() << '\n';
-        const ScriptProperty* weightAfter = ScriptProperties::Find(script.Properties, "Weight");
+        const ScriptProperty* healthAfter = ScriptProperties::Find(script.Properties, "Health");
         const ScriptProperty* iconAfter = ScriptProperties::Find(script.Properties, "Icon");
-        if (!weightAfter || std::get<int32_t>(weightAfter->Value) != 4)
+        if (!healthAfter || std::get<float>(healthAfter->Value) != 250.0f)
             return 10;
         if (!iconAfter || std::get<std::string>(iconAfter->Value) != "textures/Icon.wtex")
             return 11;
@@ -2521,7 +2788,7 @@ namespace
             || loaded.InstancesRestored != 2
             || !loaded.Diagnostics.empty()
             || script.Runtime.State != ScriptInstanceState::Pending
-            || !BehaviorRegistry::Instance().Find("Game::StressTest"))
+            || !BehaviorRegistry::Instance().Find("Game::ExampleScript"))
             return 12;
         // 重载后只读摘要行按新 schema 重建,仍是 ReadOnly / 未设 / 不进存档(同名同类型 → 无诊断)。
         if (!checkSummaryRow("after reload"))
@@ -2609,17 +2876,201 @@ int main(int argc, char** argv)
                 Schema::FieldMetadata{},
                 Schema::Value {},
             };
+            // CPPT-6:容器字段(与生成物同一形态:K 恒为 Object,形状 + 元素/键类型在尾部字段)。
+            static const Schema::FieldSchema probeScores = {
+                Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Scores") },
+                "Scores",
+                Schema::Kind::Object,
+                [](const void* instance)
+                {
+                    const NativeProbe* probe = static_cast<const NativeProbe*>(instance);
+                    return Schema::PackSequence(probe->Scores,
+                        [](const float& item) { return Schema::Value(item); });
+                },
+                [](void* instance, const Schema::Value& value)
+                {
+                    NativeProbe* probe = static_cast<NativeProbe*>(instance);
+                    Schema::UnpackSequence(value, &probe->Scores,
+                        [](const Schema::Value& item)
+                        {
+                            const float* typed = std::get_if<float>(&item);
+                            return typed ? *typed : float {};
+                        });
+                },
+                nullptr, nullptr, nullptr, nullptr, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value {},
+                Schema::CollectionKind::Array,
+                Schema::Kind::Float,
+                Schema::Kind::None,
+                nullptr,
+                nullptr,
+            };
+            static const Schema::FieldSchema probeCosts = {
+                Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Costs") },
+                "Costs",
+                Schema::Kind::Object,
+                [](const void* instance)
+                {
+                    const NativeProbe* probe = static_cast<const NativeProbe*>(instance);
+                    return Schema::PackMap(probe->Costs,
+                        [](const float& item) { return Schema::Value(item); });
+                },
+                [](void* instance, const Schema::Value& value)
+                {
+                    NativeProbe* probe = static_cast<NativeProbe*>(instance);
+                    Schema::UnpackMap(value, &probe->Costs,
+                        [](const Schema::Value& item)
+                        {
+                            const float* typed = std::get_if<float>(&item);
+                            return typed ? *typed : float {};
+                        });
+                },
+                nullptr, nullptr, nullptr, nullptr, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value {},
+                Schema::CollectionKind::Map,
+                Schema::Kind::Float,
+                Schema::Kind::String,
+                nullptr,
+                nullptr,
+            };
+            static const Schema::FieldSchema probeModes = {
+                Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Modes") },
+                "Modes",
+                Schema::Kind::Object,
+                [](const void* instance)
+                {
+                    const NativeProbe* probe = static_cast<const NativeProbe*>(instance);
+                    return Schema::PackSequence(probe->Modes,
+                        [](const int64_t& item) { return Schema::Value(item); });
+                },
+                [](void* instance, const Schema::Value& value)
+                {
+                    NativeProbe* probe = static_cast<NativeProbe*>(instance);
+                    Schema::UnpackSequence(value, &probe->Modes,
+                        [](const Schema::Value& item)
+                        {
+                            if (const int64_t* raw = std::get_if<int64_t>(&item))
+                                return *raw;
+                            if (const uint64_t* raw = std::get_if<uint64_t>(&item))
+                                return static_cast<int64_t>(*raw);
+                            return int64_t(0);
+                        });
+                },
+                nullptr, nullptr, nullptr, &ProbeModeEnum, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value {},
+                Schema::CollectionKind::Array,
+                Schema::Kind::Enum,
+                Schema::Kind::None,
+                "ProbeMode",
+                nullptr,
+            };
+            // CPPT-6-FIX2:元素是命名 struct 的容器 —— 嵌套 struct schema(Health/Count)+
+            // Array/Map 两个形状(与生成物同一形态:元素类型走 ElementTypeName/GetElementNested)。
+            static const Schema::FieldSchema probeStatHealth = {
+                Schema::FieldId{ Schema::Fnv1a64("Test::ProbeStats.Health") },
+                "Health",
+                Schema::Kind::Float,
+                [](const void* instance) { return Schema::Value(static_cast<const ProbeStats*>(instance)->Health); },
+                [](void* instance, const Schema::Value& value) { static_cast<ProbeStats*>(instance)->Health = std::get<float>(value); },
+                nullptr, nullptr, nullptr, nullptr, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value(0.0f),
+            };
+            static const Schema::FieldSchema probeStatCount = {
+                Schema::FieldId{ Schema::Fnv1a64("Test::ProbeStats.Count") },
+                "Count",
+                Schema::Kind::Int32,
+                [](const void* instance) { return Schema::Value(static_cast<const ProbeStats*>(instance)->Count); },
+                [](void* instance, const Schema::Value& value) { static_cast<ProbeStats*>(instance)->Count = std::get<int32_t>(value); },
+                nullptr, nullptr, nullptr, nullptr, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value(static_cast<int32_t>(0)),
+            };
+            static const Schema::TypeSchema probeStatsSchema = {
+                Schema::TypeId{ "Test::ProbeStats" },
+                "ProbeStats",
+                Schema::WE_SCHEMA_ABI_VERSION,
+                sizeof(ProbeStats),
+                Schema::TypeCategory::Struct,
+                { probeStatHealth, probeStatCount },
+                nullptr,
+                nullptr,
+            };
+            static const Schema::FieldSchema probeSquad = {
+                Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Squad") },
+                "Squad",
+                Schema::Kind::Object,
+                [](const void* instance)
+                {
+                    const NativeProbe* probe = static_cast<const NativeProbe*>(instance);
+                    return Schema::PackSequence(probe->Squad,
+                        [](const ProbeStats& item) { return Schema::ReadStructValue(probeStatsSchema, &item); });
+                },
+                [](void* instance, const Schema::Value& value)
+                {
+                    NativeProbe* probe = static_cast<NativeProbe*>(instance);
+                    Schema::UnpackSequence(value, &probe->Squad,
+                        [](const Schema::Value& item) -> ProbeStats
+                        {
+                            ProbeStats out {};
+                            Schema::WriteStructValue(probeStatsSchema, &out, item);
+                            return out;
+                        });
+                },
+                nullptr, nullptr, nullptr, nullptr, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value {},
+                Schema::CollectionKind::Array,
+                Schema::Kind::Object,
+                Schema::Kind::None,
+                "Test::ProbeStats",
+                +[]() -> const Schema::TypeSchema* { return &probeStatsSchema; },
+            };
+            static const Schema::FieldSchema probeUnits = {
+                Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Units") },
+                "Units",
+                Schema::Kind::Object,
+                [](const void* instance)
+                {
+                    const NativeProbe* probe = static_cast<const NativeProbe*>(instance);
+                    return Schema::PackMap(probe->Units,
+                        [](const ProbeStats& item) { return Schema::ReadStructValue(probeStatsSchema, &item); });
+                },
+                [](void* instance, const Schema::Value& value)
+                {
+                    NativeProbe* probe = static_cast<NativeProbe*>(instance);
+                    Schema::UnpackMap(value, &probe->Units,
+                        [](const Schema::Value& item) -> ProbeStats
+                        {
+                            ProbeStats out {};
+                            Schema::WriteStructValue(probeStatsSchema, &out, item);
+                            return out;
+                        });
+                },
+                nullptr, nullptr, nullptr, nullptr, nullptr,
+                Schema::FieldMetadata{},
+                Schema::Value {},
+                Schema::CollectionKind::Map,
+                Schema::Kind::Object,
+                Schema::Kind::String,
+                "Test::ProbeStats",
+                +[]() -> const Schema::TypeSchema* { return &probeStatsSchema; },
+            };
             static const Schema::TypeSchema probeSchema = {
                 Schema::TypeId{ "T02NativeProbe" },
                 "T02NativeProbe",
                 Schema::WE_SCHEMA_ABI_VERSION,
                 sizeof(NativeProbe),
                 Schema::TypeCategory::Script,
-                { probeValue, probeMode, probeIcon, probeCell },
+                { probeValue, probeMode, probeIcon, probeCell, probeScores, probeCosts, probeModes, probeSquad, probeUnits },
                 nullptr,
                 &probeBinding,
             };
             CHECK(TestContext().Schemas().RegisterEnum({ "Test", 1 }, *ProbeModeEnum()) == Schema::SchemaRegistry::Status::Ok);
+            CHECK(TestContext().Schemas().Register({ "Test", 1 }, probeStatsSchema) == Schema::SchemaRegistry::Status::Ok);
             CHECK(TestContext().Schemas().Register({ "Test", 1 }, probeSchema) == Schema::SchemaRegistry::Status::Ok);
         }
 
@@ -2660,6 +3111,8 @@ int main(int argc, char** argv)
             { "sandbox budget isolation and headroom", SandboxBudgetIsolationAndMargin },
             { "C++ schema properties: enum/asset editable and unsupported kinds read-only", CppSchemaPropertyModel },
             { "C++ schema enum/asset properties round-trip through the scene serializer", CppSchemaPropertiesRoundTrip },
+            { "C++ container properties: shapes, scene round-trip and play application", CppContainerProperties },
+            { "C++ struct containers survive save, reopen and Play", CppStructContainerSurvivesRestartIntoPlay },
             { "module reload drains instances and restores configuration as pending", ModuleReloadDrainAndRestore },
             { "module reload reports type/deleted/added field migration diagnostics",
                 ModuleReloadMigrationDiagnostics },

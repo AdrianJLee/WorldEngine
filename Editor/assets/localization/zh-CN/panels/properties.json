@@ -106,6 +106,6 @@
   "panel.properties.value_mixed": "—",
   "panel.properties.value_unavailable.tooltip": "场景里存的这条值与脚本声明的类型不一致,面板不在这一行编辑它(改脚本声明或改场景里那条值)",
   "panel.properties.field_core_readonly": "核心字段只读,不能在这里编辑",
-  "panel.properties.no_entity_glyph": "◌",
+  "panel.properties.no_entity_glyph": "•",
   "panel.properties.no_entity_hint": "在层级或视口里选中一个实体,这里会显示它的属性"
 }

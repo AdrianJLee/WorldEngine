@@ -11,6 +11,8 @@
   "menu.file.open": "打开",
   "menu.file.save": "保存",
   "menu.file.import": "导入 glTF...",
+  "menu.file.new_cpp_script": "新建 C++ 脚本…",
+  "menu.file.new_cpp_script.tooltip": "在 Game/src/Scripts/ 下生成一个 C++ 脚本模板(标量/枚举/struct/Array/Map 范例),生成后用内置代码编辑器打开;重建 Game 后执行「文件 ▶ 重载 C++ 模块」生效。",
   "menu.file.project_settings": "项目设置",
   "menu.file.editor_settings": "编辑器偏好",
   "menu.file.exit": "退出",

@@ -887,12 +887,115 @@ namespace World
 			return false;
 		}
 
+		// ---- CPPT-6-ED-COLLECTIONS:空 struct 容器的元素模板 ----
+		//
+		// 为什么需要:集合的 `+` 原来只从"最后一个已有元素"抄形状(VEC-C2);C++ 脚本的容器在
+		// schema 声明里**没有元素行**(元素初值属于脚本成员,schema 看不到),空容器加出来的命名
+		// struct 元素 = 没有子字段的裸 table(只读摘要)。这里按 schema/节点形状补一份元素模板:
+		// 子字段的名字/类型/说明/初值齐全,空容器 `+` 直接得到可编辑行。
+		//
+		// 形状口径(与引擎 `ScriptProperties::ElementValueOf` / `Schema::ReadStructValue` 对齐):
+		//   * 命名 struct 元素 = Type=Object + **Collection=None** + Children(字段名 → 值):
+		//     `ElementValueOf` 的 Object 分支按字段名折成 ValueMap,而 `Collection=Struct` 会折成
+		//     ValueList —— `ReadStructValue` 只吃 ValueMap(CPPT-6 元素值契约)。
+		//   * 元素是 Enum/Asset 时带上类型名(与容器行同一份 `TypeName`)—— 下拉/资产选择器靠它建;
+		//   * 摘要 Kind(IVec*/UVec*/Quat/Mat*)与拿不到 schema 的嵌套保持只读,与引擎声明同一降级口径;
+		//   * 叶子初值 = schema 声明的 `Default`(类型不符/未声明 → 类型零值),`Default` 留空
+		//     (monostate):这一行算"场景自己的值",保存/重开由场景形状保留(C++ 容器没有声明形状)。
+		Schema::Value CollectionElementLeafSeed(const Schema::FieldSchema& field)
+		{
+			if (ScriptProperties::ValueMatchesKind(field.Default, field.K))
+				return field.Default;
+			if (field.K == Schema::Kind::Enum)
+			{
+				// 枚举零值按声明名的有符号口径(与生成访问器同一编码:无符号枚举 = uint64)。
+				const Schema::EnumSchema* enumSchema = field.GetEnum ? field.GetEnum() : nullptr;
+				if (enumSchema && !enumSchema->IsSigned)
+					return Schema::Value(static_cast<uint64_t>(0));
+			}
+			return DefaultScriptPropertyValue(field.K);
+		}
+
+		void AppendCollectionElementFields(std::vector<ScriptProperty>& out, const Schema::TypeSchema& type, int depth)
+		{
+			if (depth > kScriptTableMaxDepth)
+				return;
+			for (const Schema::FieldSchema& field : type.Fields)
+			{
+				if (!ScriptProperties::IsPropertyKind(field.K) && !ScriptProperties::IsSummaryKind(field.K))
+					continue;
+				if (out.size() >= kScriptTableMaxChildren)
+					return;   // 护栏与合成 arena 同量级(模板建得出,就画得出来)
+				ScriptProperty row;
+				row.Name = field.Name;
+				row.Type = field.K;
+				row.Doc = field.Meta.Doc;
+				if (field.Collection != Schema::CollectionKind::None)
+				{
+					// 命名 struct 里再套容器:建**空容器行**(形状来自 schema),元素由用户再加。
+					row.Type = Schema::Kind::Object;
+					row.Collection = field.Collection == Schema::CollectionKind::Map
+						? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+					row.ElementKind = field.ElementKind;
+					row.KeyKind = field.KeyKind;
+					if (field.ElementKind == Schema::Kind::Object)
+					{
+						const Schema::TypeSchema* nested = field.GetElementNested ? field.GetElementNested() : nullptr;
+						if (!nested)
+							continue;   // 元素 schema 拿不到:不进模板(与引擎"没 schema 不猜"同口径)
+						row.TypeName = nested->Id.Name;
+					}
+					else if (field.ElementKind == Schema::Kind::Enum)
+					{
+						const Schema::EnumSchema* enumSchema = field.GetEnum ? field.GetEnum() : nullptr;
+						if (enumSchema)
+							row.TypeName = enumSchema->Name;
+						else
+							row.ReadOnly = true;
+					}
+					else if (field.ElementKind == Schema::Kind::Asset)
+						row.TypeName = field.AssetTypeName ? field.AssetTypeName : "";
+					else if (ScriptProperties::IsSummaryKind(field.ElementKind))
+						row.ReadOnly = true;
+				}
+				else if (field.K == Schema::Kind::Object)
+				{
+					const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
+					if (!nested)
+						continue;   // 引擎口径:嵌套 schema 拿不到的 Object 不进属性表
+					row.Collection = ScriptPropertyCollection::Struct;
+					row.TypeName = nested->Id.Name;
+					AppendCollectionElementFields(row.Children, *nested, depth + 1);
+					if (row.Children.empty())
+						continue;   // 没有子字段的 struct 只能是裸 table 摘要 —— 不造一行空行
+				}
+				else
+				{
+					if (field.K == Schema::Kind::Enum)
+					{
+						const Schema::EnumSchema* enumSchema = field.GetEnum ? field.GetEnum() : nullptr;
+						if (enumSchema)
+							row.TypeName = enumSchema->Name;
+						else
+							row.ReadOnly = true;
+					}
+					else if (field.K == Schema::Kind::Asset)
+						row.TypeName = field.AssetTypeName ? field.AssetTypeName : "";
+					else if (ScriptProperties::IsSummaryKind(field.K))
+						row.ReadOnly = true;
+					row.Value = CollectionElementLeafSeed(field);
+				}
+				out.push_back(std::move(row));
+			}
+		}
+
 		// ---- VEC-C2:数组/映射的元素增删(面板侧只改 `Children`)----
 		//
-		// 新增元素的值 = 该类型的规范零值(`+` 是"造一行",不是"设一个值");元素本身是嵌套集合
-		// (如 `{{number}}`)时模板取已有同类元素的形态(Collection/ElementKind/KeyKind 在子项上),
-		// 空容器没有模板 —— 不猜嵌套结构,按叶子样式落一行(可编辑、可存档)。
-		ScriptProperty MakeCollectionElement(const ScriptProperty& container)
+		// 新增元素的值 = 该类型的规范值(`+` 是"造一行",不是"设一个值");元素本身是嵌套集合
+		// (如 `{{number}}`)时模板取已有同类元素的形态(Collection/ElementKind/KeyKind 在子项上)。
+		// 空容器没有模型行可抄 → 按声明/节点形状建模板(见上,CPPT-6-ED-COLLECTIONS);
+		// `schemas` 只有 C++ 脚本合成路径传得进来(Luau 的元素来自注解声明,保持既有回落)。
+		ScriptProperty MakeCollectionElement(const ScriptProperty& container, const Schema::SchemaRegistry* schemas)
 		{
 			ScriptProperty child;
 			child.Type = container.ElementKind;
@@ -906,7 +1009,27 @@ namespace World
 				child.KeyKind = model.KeyKind;
 				child.ReadOnly = model.ReadOnly;
 			}
-			child.Value = DefaultScriptPropertyValue(child.Type);
+			else
+			{
+				// 叶子(Float/Vec3/Enum/Asset)只多带一份类型名 —— Enum/Asset 的下拉靠它;
+				// 命名 struct 按元素 schema 递归补齐子字段(这就是"空容器 `+` 直接可编辑"的落点)。
+				child.TypeName = container.TypeName;
+				child.ReadOnly = container.ReadOnly;
+				if (child.Type == Schema::Kind::Object && !child.ReadOnly && schemas && !container.TypeName.empty())
+					if (const Schema::TypeSchema* elementSchema = schemas->Find(container.TypeName))
+						AppendCollectionElementFields(child.Children, *elementSchema, 0);
+				// 命名 struct 元素的行值 = 空 `ValueMap`(字段值在 `Children` 里):
+				//   * 引擎 `ElementValueOf` 对 Collection=None 的 Object 行按字段名折成 `ValueMap`
+				//     (`Schema::ReadStructValue` 只吃 `ValueMap`;Collection=Struct 会被折成 ValueList);
+				//   * `IsSceneRecorded` 对 Collection=None 的行**只看 Value** —— 留 monostate 会被判"未设",
+				//     整个容器不写场景(`+` 出来的元素保存后就没了);空 `ValueMap` 让它按"场景自己的值"落盘。
+				if (!child.Children.empty())
+					child.Value = Schema::Value(Schema::ValueMap {});
+			}
+			// Object 行(结构化表 / 命名 struct 元素)的值是 Children,Value 保持上面定好的形态;
+			// 叶子行才回落类型零值。
+			if (child.Type != Schema::Kind::Object)
+				child.Value = DefaultScriptPropertyValue(child.Type);
 			return child;
 		}
 
@@ -1507,7 +1630,8 @@ namespace World
 	// 上一轮的二次确认模态整体删除;②两级 `↺` 都只在偏离脚本默认时出现(可见性在 DrawSchemaFields)。
 	// 复原语义不变:Luau 只对**这一条声明**重建子树(默认形状 + 默认值,其余属性/集合一律不动);
 	// 声明拿不到 / 默认形状读不出来(FieldsUnknown)= 形状保持,只把值清成默认(不猜形状);
-	// C++ 的结构化表没有数组/映射(增删只存在于脚本侧),递归把叶子清成默认即可。
+	// C++ 的分两支(CPPT-6-ED-COLLECTIONS):数组/映射的声明形状 = **空容器**(元素初值在脚本成员里,
+	// schema 看不到)→ 清 `Children` + 丢掉形状归属;非容器的结构化表形状由 schema 决定 → 递归清值。
 	// container 是本帧正在画的那个容器(合成路径下指针在本次绘制内稳定);path = 该容器的完整名字路径
 	// (调用方在请求时记下 —— 本函数是**延后**落地的,那时 m_ScriptRowPath 已经变了)。
 	void PropertiesPanel::ApplyScriptCollectionReset(Wui::WuiContext& ctx, ScriptProperty& container, bool luau,
@@ -1544,7 +1668,20 @@ namespace World
 		}
 		else
 		{
-			ResetScriptRowValues(container);
+			// CPPT-6-ED-COLLECTIONS:C++ 数组/映射"整集合复原"= 回到声明默认形状(空容器)。
+			// 清掉面板加的增删 + 丢掉"形状来自场景"的归属:复位后这条容器不再是"场景记录过",
+			// 存档跟着不写,Play 时脚本成员初值生效(与 D1"未设不覆盖"同口径);下一帧
+			// `ScriptRowModified` 回到未偏离 → 集合头 `↺` 自动消失。
+			if (container.Collection == ScriptPropertyCollection::Array
+				|| container.Collection == ScriptPropertyCollection::Map)
+			{
+				container.Children.clear();
+				container.ShapeFromScene = false;
+			}
+			else
+			{
+				ResetScriptRowValues(container);
+			}
 		}
 
 		m_Host.MarkDocumentDirty();
@@ -2377,8 +2514,11 @@ namespace World
 		{
 			// VEC-H4:空态走库件 `Wui::EmptyState`(§规则 21):标题 + 一句下一步提示,垂直居中,
 			// 不再是一行贴在左上角的灰字。空态节点由库件登记(kind="empty-state")。
+			// CPPT-6(用户 2026-09-28「有这种乱码符号处理下」):装饰标记用 `•`(U+2022)——
+			// 旧的 `◌`(U+25CC)在 Inter 主面与 Noto 子集里都没有,stbtt 落到 `.notdef`(框+X)。
+			// `•` 在全部 7 个运行时字体里都有(含主面 Inter,不依赖回退)。
 			Wui::EmptyState(ctx, rect,
-				Wui::Tr("panel.properties.no_entity_glyph", "\u25CC"),
+				Wui::Tr("panel.properties.no_entity_glyph", "\u2022"),
 				Wui::Tr("panel.properties.no_entity_selected", "No entity selected"),
 				Wui::Tr("panel.properties.no_entity_hint",
 					"Select an entity in the hierarchy or the viewport to inspect its properties"),
@@ -3430,6 +3570,17 @@ namespace World
 		if (collectionWritable)
 		{
 			ScriptProperty& container = *collectionRows->Container;
+			// CPPT-6-ED-COLLECTIONS:空容器的元素模板要吃 schema(命名 struct 的子字段从哪来)。
+			// 注册表从当前正在画的脚本组件所属场景取;**只有 C++ 脚本属性行走它**
+			// (Luau 的元素形状来自注解声明,传 nullptr = 保持既有的空容器回落)。
+			const Schema::SchemaRegistry* collectionElementSchemas = nullptr;
+			if (m_ScriptInspectingScriptRows && !m_ScriptInspectingLuau)
+			{
+				Entity rowEntity = m_ScriptInspectingEntity;
+				Scene* rowScene = rowEntity.IsValid() ? rowEntity.GetScene() : nullptr;
+				if (rowScene)
+					collectionElementSchemas = &rowScene->GetContext().Schemas();
+			}
 			const Wui::WuiId addingId = Wui::HashId(("script.collection.adding." + collectionRows->IdText).c_str());
 			bool& adding = ctx.Persist<bool>(addingId, false);
 			const Wui::WuiId keyFieldId = Wui::HashId((collectionRows->IdText + ".add.key").c_str());
@@ -3475,7 +3626,7 @@ namespace World
 				{
 					if (!keyText.empty() && !CollectionKeyTaken(container, keyText))
 					{
-						ScriptProperty child = MakeCollectionElement(container);
+						ScriptProperty child = MakeCollectionElement(container, collectionElementSchemas);
 						child.Name = keyText;
 						container.Children.push_back(std::move(child));
 						markContainerChanged();
@@ -3506,7 +3657,7 @@ namespace World
 				{
 					if (collectionRows->Kind == ScriptPropertyCollection::Array)
 					{
-						ScriptProperty child = MakeCollectionElement(container);
+						ScriptProperty child = MakeCollectionElement(container, collectionElementSchemas);
 						child.Name = std::to_string(container.Children.size() + 1);
 						container.Children.push_back(std::move(child));
 						markContainerChanged();
@@ -3806,7 +3957,10 @@ namespace World
 				if (!script)
 					continue;
 				ids.push_back(script->Id.Name);
-				labels.push_back(Wui::Tr("schema.script." + SchemaTypeKeyName(*script), script->DisplayName));
+				// CPPT-6(用户 2026-09-28「c++脚步名称不需要本地化翻译」):C++ 脚本名是代码标识符
+				// (`Game::ExampleScript` 原文),**不进本地化目录** —— 译文无法与源码对应,
+				// 认不出是哪个脚本。中文界面下同样显示原文。
+				labels.push_back(script->DisplayName);
 				if (!cpp->ScriptName.empty() && script->Id.Name == cpp->ScriptName)
 					selected = static_cast<int>(ids.size()) - 1;
 			}

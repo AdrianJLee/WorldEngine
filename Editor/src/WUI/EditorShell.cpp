@@ -1168,7 +1168,9 @@ namespace World
 		const bool shellModalOpen = m_ImportModalOpen || m_Editor.ShowUnsavedModal()
 			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress()
 			// P4-U13e:prefab 未保存改动的确认(关窗 / 进文档会话)也是窗口级模态。
-			|| m_PrefabPendingAction != PrefabPendingAction::None;
+			|| m_PrefabPendingAction != PrefabPendingAction::None
+			// CPPT-6-ED-NEWSCRIPT:"新建 C++ 脚本"模态同样封锁下层命中。
+			|| m_NewCppScriptOpen;
 		// P4-U6b:面板级模态(属性面板的"添加组件"居中窗口)与 shell 模态同一条封锁路径;
 		// 渲染该面板之前会解开(RenderTabs),画完再封回去。
 		const bool panelModalOpen = !m_PanelModalOwner.empty();
@@ -1681,10 +1683,10 @@ namespace World
 		{
 			case EditorLayer::CppModuleState::Unloaded:
 				return Wui::Tr("status.cppmodule.hint.unloaded",
-					"Game.dll is not loaded — rebuild it, then File ▸ Reload C++ Module again");
+					"Game.dll is not loaded — rebuild it, then File ▶ Reload C++ Module again");
 			case EditorLayer::CppModuleState::Reloading:
 				return Wui::Tr("status.cppmodule.hint.reloading",
-					"Game.dll unloaded for rebuild — build it, then File ▸ Reload C++ Module to load the new build");
+					"Game.dll unloaded for rebuild — build it, then File ▶ Reload C++ Module to load the new build");
 			case EditorLayer::CppModuleState::RolledBack:
 				return Wui::Tr("status.cppmodule.hint.rolled_back",
 					"the new build was rejected; the previous Game.dll is loaded again (see diagnostics)");
@@ -3636,6 +3638,430 @@ namespace World
 		Wui::EndModalFrame(ctx);
 	}
 
+	// ---- CPPT-6-ED-NEWSCRIPT:File ▸ New C++ Script… ----
+	//
+	// 与内容浏览器的新建材质 / 新建着色器向导同一套交互骨架(名称 + 实时落点 + 行内错误 +
+	// Enter 确认 / Esc 取消),差别只有两点:
+	//   * 落点在**代码树**(`<checkout>/Game/src/Scripts/<Name>.h`,不在内容根里);
+	//   * 创建后打开的是脚本编辑器面板(内置代码编辑器内核,逻辑路径用 `module:` 前缀)。
+	// 模板语法与 `Game/src/Scripts/ExampleScript.h` 完全一致,可直接参与 Game 构建。
+	namespace
+	{
+		// 名称 → 文件名:去掉用户可能顺手输入的 `.h` 后缀与首尾空白(与内容浏览器同名口径)。
+		std::string CppScriptBaseName(const std::string& text)
+		{
+			std::string name = text;
+			while (!name.empty() && (name.front() == ' ' || name.front() == '\t'))
+				name.erase(name.begin());
+			while (!name.empty() && (name.back() == ' ' || name.back() == '\t'))
+				name.pop_back();
+			if (name.size() > 2 && name.compare(name.size() - 2, 2, ".h") == 0)
+				name.erase(name.size() - 2);
+			return name;
+		}
+
+		// 合法 C++ 标识符:[A-Za-z_][A-Za-z0-9_]*。
+		bool IsValidCppIdentifier(const std::string& name)
+		{
+			if (name.empty())
+				return false;
+			const auto letter = [](unsigned char c)
+			{
+				return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+			};
+			if (!letter(static_cast<unsigned char>(name[0])) && name[0] != '_')
+				return false;
+			for (const char character : name)
+			{
+				const unsigned char c = static_cast<unsigned char>(character);
+				if (!letter(c) && !(c >= '0' && c <= '9') && c != '_')
+					return false;
+			}
+			return true;
+		}
+
+		// 模板正文:头注释(重建 Game 后 File ▶ Reload C++ Module 生效)+ 标量
+		// (Default/Range/Unit/Step/Doc)+ 枚举 + 命名 struct(Object, Of(...))+
+		// Array/Map 容器 + `WE_SCHEMA_BODY(Game, <Name>, Script)`。
+		// 每个类型名都带脚本名前缀(`<Name>Mode` / `<Name>Data`):文件名唯一由校验保证,
+		// 生成注册单元同时包含多个脚本头时也不会重定义。
+		std::string NewCppScriptTemplateSource(const std::string& name)
+		{
+			std::string source;
+			source += "#pragma once\n";
+			source += "#include \"World.h\"\n\n";
+			source += "#include <map>\n";
+			source += "#include <string>\n";
+			source += "#include <vector>\n\n";
+			source += "namespace World\n";
+			source += "{\n";
+			source += "\t// ============================================================================\n";
+			source += "\t// " + name + " — 由编辑器「文件 ▶ 新建 C++ 脚本…」生成的 C++ 脚本模板。\n";
+			source += "\t//\n";
+			source += "\t// 生效步骤:重建 Game 后 File ▶ Reload C++ Module 生效(编辑器不内置编译器 ——\n";
+			source += "\t// 改完这个文件必须重新构建 Game 模块,再在编辑器里重载它)。\n";
+			source += "\t//\n";
+			source += "\t// 结构与 Game/src/Scripts/ExampleScript.h 一致:标量 / 枚举 / 命名 struct /\n";
+			source += "\t// Array / Map 各留一行范例,不需要的字段整行删掉即可。属性面板按 WE_FIELD 的声明\n";
+			source += "\t// 渲染控件;只有被编辑过的值才写进场景(.wd),未编辑时用成员初始化里的默认值。\n";
+			source += "\t// ============================================================================\n\n";
+			source += "\t// 枚举:WE_ENUM_SCHEMA 注册后,`Enum, Of(...)` 在面板里是下拉框,存档写整数。\n";
+			source += "\tenum class " + name + "Mode : int32_t\n";
+			source += "\t{\n";
+			source += "\t\tIdle = 0,\n";
+			source += "\t\tActive = 1,\n";
+			source += "\t};\n";
+			source += "\tWE_ENUM_SCHEMA(Game, " + name + "Mode, Int32)\n";
+			source += "\t\tWE_ENUM_VALUE(Idle);\n";
+			source += "\t\tWE_ENUM_VALUE(Active);\n";
+			source += "\tWE_ENUM_END\n\n";
+			source += "\t// 命名 struct:字段模型只声明一次;标量字段与容器元素复用同一份(面板展开成子行)。\n";
+			source += "\tstruct " + name + "Data\n";
+			source += "\t{\n";
+			source += "\t\tfloat Amount = 1.0f;\n";
+			source += "\t\tint32_t Count = 0;\n\n";
+			source += "\t\tWE_SCHEMA_BODY(Game, " + name + "Data, Struct)\n";
+			source += "\t\t\tWE_FIELD(Amount, Float, Range(0.0f, 1000.0f),\n";
+			source += "\t\t\t\tDoc(\"Nested struct sample: one editable number.\"));\n";
+			source += "\t\t\tWE_FIELD(Count, Int32,\n";
+			source += "\t\t\t\tDoc(\"Nested struct sample: one editable integer.\"));\n";
+			source += "\t\tWE_SCHEMA_END\n";
+			source += "\t};\n\n";
+			source += "\tclass " + name + " : public ScriptableEntity\n";
+			source += "\t{\n";
+			source += "\tpublic:\n";
+			source += "\t\tvoid OnCreate() override\n";
+			source += "\t\t{\n";
+			source += "\t\t\tWLD_INFO(\"[" + name + "] OnCreate: Speed={} Values={} Weights={} Data.Amount={}\",\n";
+			source += "\t\t\t\tSpeed, Values.size(), Weights.size(), Data.Amount);\n";
+			source += "\t\t}\n";
+			source += "\t\tvoid OnUpdate(Timestep ts) override\n";
+			source += "\t\t{\n";
+			source += "\t\t\t(void)ts;\n";
+			source += "\t\t}\n";
+			source += "\t\tvoid OnDestroy() override {}\n\n";
+			source += "\t\t// ---- 标量:Default/Range/Unit/Step/Doc ----\n";
+			source += "\t\tfloat Speed = 1.0f;\n";
+			source += "\t\t" + name + "Mode Mode = " + name + "Mode::Idle;\n";
+			source += "\t\t// ---- 命名 struct:Object, Of(...) ----\n";
+			source += "\t\t" + name + "Data Data {};\n";
+			source += "\t\t// ---- 容器:std::vector<元素> / std::map<std::string, 元素> ----\n";
+			source += "\t\tstd::vector<float> Values {};\n";
+			source += "\t\tstd::map<std::string, float> Weights {};\n\n";
+			source += "\t\tWE_SCHEMA_BODY(Game, " + name + ", Script)\n";
+			source += "\t\t\tWE_SCHEMA_META(Category(\"Scripting\"),\n";
+			source += "\t\t\t\tDoc(\"C++ script template generated from the editor: scalar with edit metadata, enum, nested struct and Array/Map container samples.\"))\n";
+			source += "\t\t\tWE_FIELD(Speed, Float, Default(1.0f), Range(0.0f, 100.0f), Unit(\"m/s\"), Step(0.1f),\n";
+			source += "\t\t\t\tDoc(\"Scalar sample: Step(0.1) is the drag increment; Unit('m/s') is drawn after the value.\"));\n";
+			source += "\t\t\tWE_FIELD(Mode, Enum, Of(" + name + "Mode),\n";
+			source += "\t\t\t\tDoc(\"Enum sample: the dropdown stores the integer value in the scene.\"));\n";
+			source += "\t\t\tWE_FIELD(Data, Object, Of(" + name + "Data),\n";
+			source += "\t\t\t\tDoc(\"Nested struct sample: expandable child rows declared once by " + name + "Data.\"));\n";
+			source += "\t\t\tWE_FIELD(Values, Array, Of(Float),\n";
+			source += "\t\t\t\tDoc(\"Array<Float> sample: one row per element; '+' appends and '-' removes.\"));\n";
+			source += "\t\t\tWE_FIELD(Weights, Map, Of(Float),\n";
+			source += "\t\t\t\tDoc(\"Map<Float> sample: string key -> number; '+' asks for the key name first.\"));\n";
+			source += "\t\tWE_SCHEMA_END\n";
+			source += "\t};\n";
+			source += "}\n";
+			return source;
+		}
+	}
+
+	std::filesystem::path EditorShell::NewCppScriptTargetPath() const
+	{
+		// checkout 根锚点 = WLD_REPO_ROOT:与 WLD_EDITOR_DIR 同源的编译期**绝对**路径,
+		// 与进程 CWD 无关(从 build 目录或快捷方式启动都能定位)。
+		// 注意 WLD_EDITOR_DIR 带尾分隔符,对它调 parent_path() 只会去掉空文件名
+		// (EditorLayer.cpp:115-118 的实测教训),所以不用它推根。
+		return std::filesystem::path(std::string(WLD_REPO_ROOT)) / "Game" / "src" / "Scripts"
+			/ (CppScriptBaseName(m_NewCppScriptName) + ".h");
+	}
+
+	std::string EditorShell::NewCppScriptNameError() const
+	{
+		const std::string name = CppScriptBaseName(m_NewCppScriptName);
+		if (name.empty())
+			return Wui::Tr("modal.newscript.name.empty", "Name cannot be empty");
+		if (!IsValidCppIdentifier(name))
+			return Wui::Tr("modal.newscript.name.invalid",
+				"Name must be a valid C++ identifier: start with a letter or '_' and use only "
+				"letters, digits and '_'");
+		std::error_code existsError;
+		if (std::filesystem::exists(NewCppScriptTargetPath(), existsError))
+		{
+			const std::string relative = "Game/src/Scripts/" + name + ".h";
+			return Wui::TrFormat("modal.newscript.name.exists",
+				"A file with this name already exists: {path}", { { "path", relative } });
+		}
+		return {};
+	}
+
+	void EditorShell::OpenNewCppScriptModal(Wui::WuiContext& ctx)
+	{
+		m_NewCppScriptOpen = true;
+		m_NewCppScriptOpenedFrame = static_cast<uint32_t>(ctx.Frame());
+		m_NewCppScriptName = "MyScript";
+		m_NewCppScriptFailure.clear();
+		m_NewCppScriptFailureFor.clear();
+		ctx.SetModal(Wui::HashId("modal.newscript"));
+		ctx.SetFocus(Wui::HashId("script.new.name"));
+		ctx.RecordOp("script", "new-cpp-ask", m_NewCppScriptName, "Game/src/Scripts");
+	}
+
+	bool EditorShell::CreateNewCppScript(Wui::WuiContext& ctx)
+	{
+		const std::string name = CppScriptBaseName(m_NewCppScriptName);
+		const std::string nameError = NewCppScriptNameError();
+		if (!nameError.empty())
+		{
+			// 模态里已经画过行内错误;这条分支只是拒绝"绕过按钮的第二次调用"。
+			m_NewCppScriptFailure = nameError;
+			m_NewCppScriptFailureFor = NewCppScriptTargetPath().string();
+			return false;
+		}
+
+		const std::filesystem::path target = NewCppScriptTargetPath();
+		const std::filesystem::path parent = target.parent_path();
+		std::error_code folderError;
+		if (!std::filesystem::is_directory(parent, folderError))
+			std::filesystem::create_directories(parent, folderError);
+
+		std::string error;
+		bool wrote = false;
+		if (folderError)
+		{
+			error = Wui::Tr("modal.newscript.folder_failed", "Could not create the folder: ")
+				+ parent.string();
+		}
+		else
+		{
+			// 临时文件 + 同目录改名(与脚本编辑器保存/新建着色器同一套写法);失败不留半成品。
+			const std::filesystem::path temporary = parent / (target.filename().string() + ".tmp-write");
+			std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+			if (!out.is_open())
+			{
+				error = Wui::Tr("modal.newscript.write_failed", "Could not write the file: ")
+					+ temporary.string();
+			}
+			else
+			{
+				out << NewCppScriptTemplateSource(name);
+				out.close();
+				std::error_code renameError;
+				std::filesystem::rename(temporary, target, renameError);
+				if (renameError)
+				{
+					std::error_code cleanupError;
+					std::filesystem::remove(temporary, cleanupError);
+					error = Wui::Tr("modal.newscript.write_failed", "Could not write the file: ")
+						+ target.string() + " (" + renameError.message() + ")";
+				}
+				else
+				{
+					wrote = true;
+				}
+			}
+		}
+		if (!wrote)
+		{
+			m_NewCppScriptFailure = error;
+			m_NewCppScriptFailureFor = target.string();
+			WLD_CORE_WARN("[new-cpp-script] write failed: {0}", error);
+			return false;
+		}
+
+		// manifest 是**双向类型账本**(schema-compiler 拒绝"已声明但未登记"的新类型):
+		// 创建入口把模板声明的三个类型(脚本 / <Name>Data / <Name>Mode)全部登记,
+		// 用户重建 Game 时生成器即可直接通过。手写新脚本的作者仍需自己补这些行
+		// (见 docs/user/scripting/README.md)。
+		{
+			const std::filesystem::path manifest =
+				target.parent_path().parent_path() / "Generated" / "Game.manifest";
+			std::string manifestText;
+			{
+				std::ifstream in(manifest, std::ios::binary);
+				std::string line;
+				while (std::getline(in, line))
+				{
+					if (!line.empty() && line.back() == '\r')
+						line.pop_back();
+					manifestText += line;
+					manifestText.push_back('\n');
+				}
+			}
+			// 模板声明的**每个**类型都要登记(struct/enum 双向账本);漏一个重建 Game 就会被拒。
+			const std::vector<std::string> entries = {
+				"struct World::" + name,
+				"struct World::" + name + "Data",
+				"enum World::" + name + "Mode",
+			};
+			bool manifestChanged = false;
+			for (const std::string& entry : entries)
+			{
+				if (manifestText.find(entry + "\n") != std::string::npos)
+					continue;
+				manifestText += entry;
+				manifestText.push_back('\n');
+				manifestChanged = true;
+			}
+			if (manifestChanged)
+			{
+				const std::filesystem::path temporary = manifest.string() + ".tmp-write";
+				std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+				if (!out.is_open())
+				{
+					WLD_CORE_WARN("[new-cpp-script] could not update manifest '{0}'", manifest.string());
+				}
+				else
+				{
+					out << manifestText;
+					out.close();
+					std::error_code renameError;
+					std::filesystem::rename(temporary, manifest, renameError);
+					if (renameError)
+					{
+						std::error_code cleanupError;
+						std::filesystem::remove(temporary, cleanupError);
+						WLD_CORE_WARN("[new-cpp-script] could not update manifest '{0}': {1}",
+							manifest.string(), renameError.message());
+					}
+				}
+			}
+		}
+
+			const std::string relative = "Game/src/Scripts/" + name + ".h";
+		// 操作日志:与内容浏览器的新建资产(browser.new-shader)同一条口径。
+		ctx.RecordOp("script", "new-cpp", name, relative);
+		WLD_CORE_INFO("[new-cpp-script] created '{0}'", target.string());
+		// 打开内置代码编辑器:走既有的"帧边界延迟打开"安全路径(与内容浏览器双击脚本相同),
+		// 逻辑路径 = `module:` 前缀 + 仓库相对路径(解析见 ScriptEditorPanel)。
+		OpenScriptEditor("module:" + relative);
+		// 状态栏提示:编辑器不内置编译器 —— 必须显式告诉用户"重建 Game 后重载 C++ 模块"。
+		PushNotice(Wui::TrFormat("notice.newscript.created",
+			"Created {path} — rebuild Game, then use File ▶ Reload C++ Module to load it.",
+			{ { "path", relative } }));
+		return true;
+	}
+
+	void EditorShell::DrawNewCppScriptModal(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiId modalId = Wui::HashId("modal.newscript");
+		if (m_NewCppScriptOpen)
+			ctx.SetModal(modalId);
+		else if (ctx.Modal() == modalId)
+			ctx.ClearModal();
+		if (!m_NewCppScriptOpen)
+			return;
+
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("modal.newscript.title", "New C++ Script");
+		frameDesc.Size = { 560.0f, 236.0f };
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
+		{
+			// 模态被别的路径接管/收口:同步清掉宿主状态,避免状态与真实模态脱节。
+			m_NewCppScriptOpen = false;
+			return;
+		}
+
+		const float labelX = frame.X + 16.0f;
+		const float fieldX = frame.X + 130.0f;
+		const float suffixW = 30.0f;
+		const float fieldW = frame.W - 146.0f - suffixW - 16.0f;
+		const Wui::WuiId nameId = Wui::HashId("script.new.name");
+		const Wui::WuiId okId = Wui::HashId("script.new.ok");
+		const Wui::WuiId cancelId = Wui::HashId("script.new.cancel");
+		const bool justOpened = ctx.Frame() == m_NewCppScriptOpenedFrame;
+
+		// ---- 名称(标识符校验 + 重名拒绝都走同一条行内错误)----
+		float cursorY = frame.Y + 46.0f;
+		const std::string nameLabel = Wui::Tr("modal.newscript.name", "Name");
+		Wui::Label(ctx, { labelX, cursorY + 5.0f }, nameLabel, m_Theme.TextMuted, 13.0f);
+		const Wui::WuiRect nameRect { fieldX, cursorY, fieldW, 24.0f };
+		// 写盘失败原因只对"同一个落点"有效:名字一改就作废(与新建着色器向导同口径)。
+		if (!m_NewCppScriptFailure.empty() && m_NewCppScriptFailureFor != NewCppScriptTargetPath().string())
+		{
+			m_NewCppScriptFailure.clear();
+			m_NewCppScriptFailureFor.clear();
+		}
+		const std::string nameError = NewCppScriptNameError();
+		const std::string inlineError = nameError.empty() ? m_NewCppScriptFailure : nameError;
+		Wui::TextFieldA11y nameA11y;
+		nameA11y.Label = nameLabel;
+		nameA11y.Placeholder = Wui::Tr("modal.newscript.name.placeholder", "Script name (valid C++ identifier)");
+		// Enter 提交判定必须在**控件绘制前**取焦点:TextFieldCore 在回车那一帧会 `SetFocus(0)`
+		// (提交即交出焦点),画完再读 ctx.Focus() 已经不是本字段(实测:回车点了不建文件)。
+		const bool nameFocused = ctx.Focus() == nameId;
+		// TextFieldEx:错误就地画在输入框下方(描边 Danger),同时把 error 追加进无障碍节点 value。
+		const bool submitted = Wui::TextFieldEx(ctx, nameId, nameRect, m_NewCppScriptName, m_Theme,
+			inlineError, &nameA11y);
+		Wui::Label(ctx, { nameRect.X + nameRect.W + 8.0f, cursorY + 6.0f }, ".h", m_Theme.TextMuted, 13.0f);
+		cursorY += 46.0f;
+
+		// ---- 实时落点回显(仓库相对路径;绝对路径进节点 Tooltip)----
+		const std::string relative = "Game/src/Scripts/" + CppScriptBaseName(m_NewCppScriptName) + ".h";
+		const std::string targetLabel = Wui::Tr("modal.newscript.target", "Will create");
+		Wui::Label(ctx, { labelX, cursorY + 3.0f }, targetLabel, m_Theme.TextMuted, 12.0f);
+		Wui::Label(ctx, { fieldX, cursorY + 1.0f }, relative, m_Theme.Text, 13.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("script.new.target");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = "shell";
+			node.Kind = "text";
+			node.Label = targetLabel;
+			node.Value = relative;
+			node.Tooltip = NewCppScriptTargetPath().generic_string();
+			node.Rect = { fieldX, cursorY - 3.0f, fieldW + suffixW, 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		cursorY += 24.0f;
+
+		// ---- 生效步骤提示(重建 Game → 重载 C++ 模块;编辑器不内置编译器)----
+		Wui::Label(ctx, { labelX, cursorY + 2.0f },
+			Wui::Tr("modal.newscript.hint",
+				"Rebuild Game, then File ▶ Reload C++ Module (no built-in compiler)."),
+			m_Theme.TextMuted, 12.0f);
+
+		// ---- 底部按钮(名称不合法/重名时创建按钮禁用并带原因)----
+		const bool canCreate = nameError.empty();
+		const Wui::ModalResult footerResult = Wui::ModalFooter(ctx, frame,
+			Wui::Tr("modal.newscript.ok", "Create"),
+			Wui::Tr("modal.newscript.cancel", "Cancel"),
+			okId, cancelId, canCreate, m_Theme);
+
+		bool closeRequested = false;
+		bool created = false;
+		if ((footerResult == Wui::ModalResult::Confirm || (submitted && nameFocused && !justOpened))
+			&& canCreate)
+		{
+			created = CreateNewCppScript(ctx);
+			closeRequested = created;
+		}
+		else if (footerResult == Wui::ModalResult::Cancel || escapePressed)
+		{
+			ctx.RecordOp("script", "new-cpp-cancel", CppScriptBaseName(m_NewCppScriptName), relative);
+			closeRequested = true;
+		}
+
+		if (closeRequested)
+		{
+			m_NewCppScriptOpen = false;
+			m_NewCppScriptFailure.clear();
+			m_NewCppScriptFailureFor.clear();
+			ctx.ClearModal();
+		}
+		Wui::EndModalFrame(ctx);
+		// 创建成功:操作日志/提示/打开编辑器都在 CreateNewCppScript 里完成(单一出口)。
+		(void)created;
+	}
+
 	void EditorShell::EnsureModelPanelFromId(const std::string& panelId)
 	{
 		if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
@@ -4423,6 +4849,17 @@ namespace World
 			{ Wui::Tr("menu.file.open", "Open"), false, [this] { m_Editor.OpenScene(); } },
 			{ Wui::Tr("menu.file.save", "Save"), false, [this] { m_Editor.SaveScene(); } },
 			{ Wui::Tr("menu.file.import", "Import glTF..."), false, [this] { m_Editor.ImportModelDialog(); } },
+			{ Wui::Tr("menu.file.new_cpp_script", "New C++ Script…"), false,
+				[this]
+				{
+					if (m_Ctx)
+						OpenNewCppScriptModal(*m_Ctx);
+				}, false,
+				Wui::Tr("menu.file.new_cpp_script.tooltip",
+					"Create a C++ script template under Game/src/Scripts/ (scalar/enum/struct/Array/Map "
+					"samples) and open it in the built-in code editor. Rebuild Game, then use "
+					"File ▶ Reload C++ Module to load it."),
+				Wui::HashId("menu.file.new_cpp_script") },
 			{ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
 				[this]
 				{
@@ -4502,6 +4939,9 @@ namespace World
 		// 那份错误框必须画在选择器**之上**才看得见(与 D10-9 面板内选择器时期的行为一致);
 		// 选择器保持打开并把失败原因写进 import.dest.status。
 		RenderImportDestinationModal(ctx);
+
+		// ---- CPPT-6-ED-NEWSCRIPT:新建 C++ 脚本(窗口级模态) ----
+		DrawNewCppScriptModal(ctx);
 
 		const Wui::WuiId unsaved = Wui::HashId("modal.unsaved");
 		if (m_Editor.ShowUnsavedModal()) ctx.SetModal(unsaved);

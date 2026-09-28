@@ -383,6 +383,58 @@ namespace World
 				ApplyInto(next, declarations, properties, 0);
 				properties = std::move(next);
 			}
+
+			// CPPT-6:集合行 → schema 容器值(Play 应用 / 测试共用)。元素是叶子时原样带出
+			// (未设 = monostate,由生成的拆箱回落类型零值);元素是命名 struct 时折成
+			// "字段名 → Value" 的 map(递归);嵌套集合(命名 struct 再套容器)递归折。
+			// CPPT-6-FIX2:结构化表的判定只看 **Type==Object**(Collection 为 None 或 Struct 同义),
+			// 两种读回路径(元素行 / 嵌套 struct 字段)折出同一份 ValueMap。
+			Schema::Value ElementValueOf(const ScriptProperty& row);
+
+			Schema::Value FoldContainer(const ScriptProperty& container)
+			{
+				if (container.Collection == ScriptPropertyCollection::Map)
+				{
+					Schema::ValueMap fields;
+					for (const ScriptProperty& row : container.Children)
+					{
+						if (row.ReadOnly)
+							continue;
+						fields.emplace(row.Name, ElementValueOf(row));
+					}
+					return Schema::Value(std::move(fields));
+				}
+				Schema::ValueList items;
+				items.reserve(container.Children.size());
+				for (const ScriptProperty& row : container.Children)
+					items.push_back(ElementValueOf(row));
+				return Schema::Value(std::move(items));
+			}
+
+			Schema::Value ElementValueOf(const ScriptProperty& row)
+			{
+				// 容器行(数组/映射)递归折成 ValueList / ValueMap。
+				if (row.Collection == ScriptPropertyCollection::Array ||
+					row.Collection == ScriptPropertyCollection::Map)
+					return FoldContainer(row);
+				// CPPT-6-FIX2:结构化表的**唯一** schema 值形态是"字段名 → Value"的 map
+				// (读回的元素行 Collection=None、嵌套 struct 字段 Collection=Struct,两者同形;
+				// `Schema::WriteStructValue` / 生成的容器访问器只吃 ValueMap)。
+				// 旧实现让 Struct 走 FoldContainer → 折成 ValueList,Play 时整条 struct 元素写不进去
+				// (字段回落到脚本成员初值)。
+				if (row.Type == Schema::Kind::Object)
+				{
+					Schema::ValueMap fields;
+					for (const ScriptProperty& child : row.Children)
+					{
+						if (child.ReadOnly)
+							continue;
+						fields.emplace(child.Name, ElementValueOf(child));
+					}
+					return Schema::Value(std::move(fields));
+				}
+				return row.Value;
+			}
 		}
 
 		namespace
@@ -404,6 +456,44 @@ namespace World
 					declaration.Name = field.Name;
 					declaration.Type = field.K;
 					declaration.Doc = field.Meta.Doc;     // C++ 脚本的说明来自 schema 的 Doc("…")
+					// CPPT-6:C++ 容器字段 → 与 Luau 集合同一份行模型:Type 仍是 Object,
+					// Collection/ElementKind/KeyKind 描述元素与键;声明里**没有元素行**
+					// (C++ 的元素来自脚本成员初值,schema 看不到)—— 场景记录过形状时按 D2 以场景为准。
+					if (field.Collection != Schema::CollectionKind::None)
+					{
+						declaration.Collection = field.Collection == Schema::CollectionKind::Map
+							? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+						declaration.ElementKind = field.ElementKind;
+						declaration.KeyKind = field.KeyKind;
+						if (field.ElementTypeName)
+							declaration.TypeName = field.ElementTypeName;
+						if (field.ElementKind == Schema::Kind::Object)
+						{
+							const Schema::TypeSchema* nested = field.GetElementNested ? field.GetElementNested() : nullptr;
+							if (nested)
+								declaration.TypeName = nested->Id.Name;
+							else
+								declaration.ReadOnly = true;   // 元素 schema 拿不到:只读摘要行
+						}
+						else if (field.ElementKind == Schema::Kind::Enum)
+						{
+							const Schema::EnumSchema* enumSchema = field.GetEnum ? field.GetEnum() : nullptr;
+							if (enumSchema)
+								declaration.TypeName = enumSchema->Name;
+							else
+								declaration.ReadOnly = true;
+						}
+						else if (field.ElementKind == Schema::Kind::Asset)
+						{
+							declaration.TypeName = field.AssetTypeName ? field.AssetTypeName : "";
+						}
+						else if (IsSummaryKind(field.ElementKind))
+						{
+							declaration.ReadOnly = true;       // 面板没有行控件(与标量摘要行同口径)
+						}
+						out.push_back(std::move(declaration));
+						continue;
+					}
 					if (field.K == Schema::Kind::Object)
 					{
 						const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
@@ -449,6 +539,21 @@ namespace World
 			std::vector<Declaration> declared;
 			AppendSchemaDeclarations(declared, type, 0);
 			Apply(properties, declared);
+		}
+
+		// CPPT-6:容器属性的 Play 应用值(见头文件契约)。"设过"的判据与序列化同源:
+		// 场景记录过任一行(IsSceneRecorded)或场景写过这个容器的形状(ShapeFromScene,含空容器)。
+		bool BuildContainerValue(const ScriptProperty& property, Schema::Value* outValue)
+		{
+			// 只有数组/映射有"容器值";Struct 行(结构化表)不是容器,不在这里折。
+			if (!outValue || property.ReadOnly ||
+				(property.Collection != ScriptPropertyCollection::Array &&
+					property.Collection != ScriptPropertyCollection::Map))
+				return false;
+			if (!IsSceneRecorded(property) && !property.ShapeFromScene)
+				return false;
+			*outValue = FoldContainer(property);
+			return true;
 		}
 
 		void SyncFromDeclarations(std::vector<ScriptProperty>& properties,
@@ -558,7 +663,11 @@ namespace World
 				case Schema::Kind::Vec3: return std::holds_alternative<glm::vec3>(value);
 				case Schema::Kind::Vec4: return std::holds_alternative<glm::vec4>(value);
 				// B 期:结构化表的值在 Children 里,Value 必须是 monostate(空表也是 monostate)。
-				case Schema::Kind::Object: return std::holds_alternative<std::monostate>(value);
+				// CPPT-6:容器的元素/值可以是一层"字段名 → Value"的 map(命名 struct),
+				// 所以 Object 也接受 ValueMap。
+				case Schema::Kind::Object:
+					return std::holds_alternative<std::monostate>(value)
+						|| std::holds_alternative<Schema::ValueMap>(value);
 				case Schema::Kind::String: return std::holds_alternative<std::string>(value);
 				// CPPT-2:Enum 存整数(与组件 Enum 字段同一读写器;有符号/无符号按底层类型)、
 				// Asset 存逻辑路径字符串。

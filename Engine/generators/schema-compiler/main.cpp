@@ -535,10 +535,24 @@ namespace
 		return types.at(kind);
 	}
 
+	// CPPT-6-FIX2:类型零值必须是**这个 kind 自己那一支** variant 备选(与编辑器的
+	// DefaultScriptPropertyValue / ScriptProperties::ValueMatchesKind 同一份口径)。
+	// 旧实现把 Float 写成 `Value(0.0)`(double)、整数族写成 `Value(0)`(int):非 Script 类别
+	// (Struct/Component 的字段)的声明默认值因此类型不符 —— 嵌套 struct 的 Float 子字段在检视器里
+	// 判"值与声明类型不符",只画 `—` 且不可编辑(Stats.Health 实测)。
 	std::string DefaultValue(const std::string& kind)
 	{
 		if (kind == "Bool") return "Value(false)";
-		if (kind == "Float" || kind == "Double") return "Value(0.0)";
+		if (kind == "Int8") return "Value(static_cast<int8_t>(0))";
+		if (kind == "Int16") return "Value(static_cast<int16_t>(0))";
+		if (kind == "Int32") return "Value(static_cast<int32_t>(0))";
+		if (kind == "Int64") return "Value(static_cast<int64_t>(0))";
+		if (kind == "UInt8") return "Value(static_cast<uint8_t>(0))";
+		if (kind == "UInt16") return "Value(static_cast<uint16_t>(0))";
+		if (kind == "UInt32") return "Value(static_cast<uint32_t>(0))";
+		if (kind == "UInt64") return "Value(static_cast<uint64_t>(0))";
+		if (kind == "Float") return "Value(0.0f)";
+		if (kind == "Double") return "Value(0.0)";
 		if (kind == "String") return "Value(std::string())";
 		if (kind == "Vec2") return "Value(glm::vec2(0.0f))";
 		if (kind == "Vec3") return "Value(glm::vec3(0.0f))";
@@ -552,8 +566,9 @@ namespace
 		if (kind == "Quat") return "Value(glm::quat(1.0f, 0.0f, 0.0f, 0.0f))";
 		if (kind == "Mat3") return "Value(glm::mat3(1.0f))";
 		if (kind == "Mat4") return "Value(glm::mat4(1.0f))";
-		if (kind == "Enum" || kind == "Object" || kind == "Asset") return "Value()";
-		return "Value(0)"; // 整数族
+		// Enum/Object/Asset 有各自的默认值分支(见 EmitStruct 里的 def 组装),不经过这里;
+		// 其余 kind 在解析期已被 StructKinds() 白名单拒绝 —— 返回未设值而不是 0,避免静默造出错误变体。
+		return "Value()";
 	}
 
 	std::string JoinTokens(const std::vector<Token>& tokens)
@@ -611,6 +626,9 @@ namespace
 		std::optional<uint64_t> Id;
 		std::optional<std::string> DefaultExpr;
 		std::optional<std::string> Of;
+		// Of(...) 的实参是不是字符串字面量(Asset 的资产类型名写法:`Of("Material")`)。
+		// 容器元素类型解析要靠它区分"资产类型字符串"与"命名 struct/enum"。
+		bool OfIsString = false;
 		// ---- P4-U9:编辑期字段语义(见 Schema.h 的 FieldMetadata) ----
 		std::string Doc;                        // 一句话说明(空 = 未填)
 		bool IsColor = false;                   // Color() → Vec3/Vec4 用取色器
@@ -619,6 +637,9 @@ namespace
 		// ---- CPPT-2:计量单位与拖拽步长(编辑期提示;进 FieldMetadata 尾部) ----
 		std::string Unit;                       // Unit("m") → 行后缀
 		std::optional<float> Step;              // Step(0.1) → 数值拖拽步长
+		// ---- CPPT-6:容器形状(WE_FIELD(Name, Array|Map, Of(...))) ----
+		// 元素类型在 ElementTypeOf 里解析:叶子 kind / 已注册的命名 struct / 命名 enum /
+		// 资产类型字符串(Of("Material"))。Map 键固定 std::string。
 	};
 
 	FieldOptions ParseOptions(const FieldDecl& field, const std::string& file)
@@ -680,6 +701,7 @@ namespace
 					Fail(file, attr.Pos, "attribute 'Of' expects a type name");
 				const bool isString = attr.Args[0].size() == 1 && attr.Args[0][0].type == Token::Type::String;
 				options.Of = isString ? Unquote(attr.Args[0][0].Text) : JoinCompact(attr.Args[0]);
+				options.OfIsString = isString;
 			}
 			else if (attr.Name == "Doc")
 			{
@@ -782,6 +804,212 @@ namespace
 		}
 	};
 
+	// CPPT-6:容器元素类型。Of(x) 的 x 可以是:
+	//   · 叶子 kind 名(Bool / Int32 / Float / Vec3 / … / String);
+	//   · 已注册的命名 struct(→ Object,走 GetElementNested 递归读写);
+	//   · 已注册的命名 enum(→ Enum,整数读写 + GetEnum 判有符号);
+	//   · 资产类型字符串(Of("Material") 或等价的 Of(Asset("Material")) → Asset)。
+	// 更深的匿名嵌套(Of(Array(...)))不支持 —— 用命名 struct 再套容器表达。
+	struct ElementType
+	{
+		std::string Kind;       // 叶 kind 名,或 Object / Enum / Asset
+		std::string Struct;     // Kind==Object:限定名(如 Game::StatEntry)
+		std::string Enum;       // Kind==Enum:枚举短名
+		std::string AssetType;  // Kind==Asset:资产类型名
+	};
+
+	ElementType ResolveElementType(const FieldDecl& field, const FieldOptions& options, const StructDecl& decl,
+		const QualifiedIndex& index, const std::map<std::string, EnumDecl>& enumsByName)
+	{
+		if (!options.Of.has_value())
+			Fail(decl.File, field.Pos, "field '" + field.Name + "' of shape " + field.Kind +
+				" requires Of(<element kind>) (e.g. Of(Float) / Of(Vec3) / Of(MyStruct))");
+		const std::string& of = options.Of.value();
+		if (of == "Array" || of == "Map" || of.rfind("Array(", 0) == 0 || of.rfind("Map(", 0) == 0)
+			Fail(decl.File, field.Pos, "field '" + field.Name + "' of shape " + field.Kind +
+				": nested containers are not supported — wrap the inner container in a named struct and use Of(ThatStruct)");
+		ElementType element;
+		if (options.OfIsString)
+		{
+			element.Kind = "Asset";
+			element.AssetType = of;
+			if (element.AssetType.empty())
+				Fail(decl.File, field.Pos, "field '" + field.Name + "': Of(\"\") must name an asset type (e.g. Of(\"Material\"))");
+			return element;
+		}
+		if (of.rfind("Asset(", 0) == 0 && of.back() == ')')
+		{
+			element.Kind = "Asset";
+			element.AssetType = Unquote(of.substr(6, of.size() - 7));
+			if (element.AssetType.empty())
+				Fail(decl.File, field.Pos, "field '" + field.Name + "': Of(Asset(\"\")) must name an asset type (e.g. Of(\"Material\"))");
+			return element;
+		}
+		if (of == "Object" || of == "Enum" || of == "Asset" || of == "None")
+			Fail(decl.File, field.Pos, "field '" + field.Name + "': Of(" + of + ") needs a named type — " +
+				"use Of(MyStruct) / Of(MyEnum) / Of(\"AssetType\")");
+		if (StructKinds().count(of))
+		{
+			element.Kind = of;
+			return element;
+		}
+		if (enumsByName.count(of))
+		{
+			element.Kind = "Enum";
+			element.Enum = of;
+			return element;
+		}
+		const auto structIt = index.Structs.find(of);
+		if (structIt != index.Structs.end())
+		{
+			element.Kind = "Object";
+			element.Struct = structIt->second;
+			return element;
+		}
+		Fail(decl.File, field.Pos, "field '" + field.Name + "': unknown container element type '" + of +
+			"' (expected a leaf kind like Float/Vec3/String, a registered struct/enum name, or an asset type string like Of(\"Material\"))");
+		return element;
+	}
+
+	// FieldMetadata 的生成文本(普通字段与容器字段共用一份,避免两处漂移)。
+	void EmitFieldMetadata(std::ostringstream& out, const FieldOptions& options)
+	{
+		out << "            FieldMetadata{ \"" << options.DisplayName << "\", \"" << options.Group << "\", "
+			<< OptionalText(options.Min) << ", " << OptionalText(options.Max) << ", "
+			<< (options.ReadOnly ? "true" : "false") << ", " << (options.Transient ? "true" : "false") << ", "
+			<< "\"" << options.Doc << "\", " << (options.IsColor ? "true" : "false") << ", "
+			<< "\"" << options.AssetType << "\", { ";
+		for (size_t i = 0; i < options.Choices.size(); ++i)
+			out << (i ? ", " : "") << "\"" << options.Choices[i] << "\"";
+		out << " }, \"" << options.Unit << "\", " << OptionalText(options.Step) << " },\n";
+	}
+
+	// CPPT-6:容器字段的 Get/Set(整个容器 <-> ValueList / ValueMap)。
+	// Set 对"未设(monostate)/类型不符"的元素回落到类型零值 —— 场景里 `~` 的行、手改坏值
+	// 都不会在 Play 应用时抛 bad_variant_access。元素是命名 struct 时用 Read/WriteStructValue
+	// 递归(值 = 字段名 → Value 的 ValueMap)。
+	void EmitContainerAccessors(std::ostringstream& out, const FieldDecl& field, const std::string& qualified,
+		const FieldOptions& options, const StructDecl& decl, const QualifiedIndex& index,
+		const std::map<std::string, EnumDecl>& enumsByName)
+	{
+		const ElementType element = ResolveElementType(field, options, decl, index, enumsByName);
+		const bool mapShape = field.Kind == "Map";
+		const std::string packName = mapShape ? "PackMap" : "PackSequence";
+		const std::string unpackName = mapShape ? "UnpackMap" : "UnpackSequence";
+
+		std::string packParameter;
+		std::string packBody;
+		std::string unpackReturn;
+		std::string unpackBody;
+		if (element.Kind == "Object")
+		{
+			const std::string& nested = element.Struct;   // 已由 ResolveElementType 解析成限定名
+			packParameter = "const " + nested + "&";
+			packBody = "return ReadStructValue(WeSchemaOf_" + ShortName(nested) + "(), &item);";
+			unpackReturn = nested;
+			unpackBody = "                " + nested + " out {};\n"
+				"                WriteStructValue(WeSchemaOf_" + ShortName(nested) + "(), &out, item);\n"
+				"                return out;";
+		}
+		else if (element.Kind == "Enum")
+		{
+			const auto enumIt = enumsByName.find(element.Enum);
+			const EnumInfo info = UnderlyingInfo(enumIt->second.Underlying);
+			const std::string signedType = info.IsSigned ? "int64_t" : "uint64_t";
+			const std::string enumType = index.Enum(element.Enum, decl.File, field.Pos);
+			packParameter = "const " + enumType + "&";
+			packBody = "return Value(static_cast<" + signedType + ">(item));";
+			unpackReturn = enumType;
+			unpackBody = "                if (const " + signedType + "* raw = std::get_if<" + signedType + ">(&item))\n"
+				"                    return static_cast<" + enumType + ">(*raw);\n"
+				"                return static_cast<" + enumType + ">(0);";
+		}
+		else if (element.Kind == "Asset")
+		{
+			packParameter = "const auto&";
+			packBody = "return Value(AssetOps<std::remove_cv_t<std::remove_reference_t<decltype(item)>>>::GetPath(item));";
+			unpackReturn = "Element";
+			unpackBody = "                Element element {};\n"
+				"                if (const std::string* path = std::get_if<std::string>(&item))\n"
+				"                    AssetOps<Element>::SetPath(element, *path);\n"
+				"                return element;";
+		}
+		else
+		{
+			const std::string& cpp = CppType(element.Kind);
+			packParameter = "const " + cpp + "&";
+			packBody = "return Value(item);";
+			unpackReturn = cpp;
+			unpackBody = "                const " + cpp + "* typed = std::get_if<" + cpp + ">(&item);\n"
+				"                return typed ? *typed : " + cpp + " {};";
+		}
+
+		out << "    static Value Get_" << field.Name << "(const void* instance)\n";
+		out << "    {\n        const " << qualified << "* self = static_cast<const " << qualified << "*>(instance);\n";
+		out << "        return " << packName << "(self->" << field.Name << ",\n";
+		out << "            [](" << packParameter << " item) { " << packBody << " });\n    }\n";
+		out << "    static void Set_" << field.Name << "(void* instance, const Value& value)\n";
+		out << "    {\n        " << qualified << "* self = static_cast<" << qualified << "*>(instance);\n";
+		if (element.Kind == "Asset")
+			out << "        using Element = std::remove_cv_t<std::remove_reference_t<decltype(self->" << field.Name
+				<< ")>>::" << (mapShape ? "mapped_type" : "value_type") << ";\n";
+		out << "        " << unpackName << "(value, &self->" << field.Name << ",\n";
+		out << "            [](const Value& item) -> " << unpackReturn << "\n            {\n"
+			<< unpackBody << "\n            });\n    }\n";
+		if (element.Kind == "Enum")
+			out << "    static const EnumSchema* GetEnum_" << field.Name << "()\n    {\n        return &WeEnumSchemaOf_"
+				<< ShortName(index.Enum(element.Enum, decl.File, field.Pos)) << "();\n    }\n";
+		if (element.Kind == "Object")
+			out << "    static const TypeSchema* GetElementNested_" << field.Name << "()\n    {\n        return &WeSchemaOf_"
+				<< ShortName(element.Struct) << "();\n    }\n";
+	}
+
+	// CPPT-6:容器字段的 FieldSchema(Collection/ElementKind/KeyKind/ElementTypeName/GetElementNested)。
+	// K 恒为 Object(与脚本属性模型一致):容器不是叶子,元素/键类型在形状描述里。
+	void EmitContainerFieldSchema(std::ostringstream& out, const FieldDecl& field, const FieldOptions& options,
+		const StructDecl& decl, const QualifiedIndex& index, const std::map<std::string, EnumDecl>& enumsByName)
+	{
+		const ElementType element = ResolveElementType(field, options, decl, index, enumsByName);
+		const uint64_t fieldId = options.Id.value_or(Fnv1a64(decl.Module + "::" + decl.Type + "." + field.Name));
+		std::ostringstream hex;
+		hex << "0x" << std::uppercase << std::hex << fieldId;
+
+		out << "    static const FieldSchema& Field_" << field.Name << "()\n";
+		out << "    {\n        static const FieldSchema schema = {\n";
+		out << "            FieldId{ " << hex.str() << "ull },\n";
+		out << "            \"" << field.Name << "\",\n";
+		out << "            Kind::Object,\n";
+		out << "            &Get_" << field.Name << ",\n";
+		out << "            &Set_" << field.Name << ",\n";
+		out << "            nullptr,\n            nullptr,\n            nullptr,\n";
+		if (element.Kind == "Enum")
+			out << "            &GetEnum_" << field.Name << ",\n";
+		else
+			out << "            nullptr,\n";
+		if (element.Kind == "Asset")
+			out << "            \"" << element.AssetType << "\",\n";
+		else
+			out << "            nullptr,\n";
+		EmitFieldMetadata(out, options);
+		out << "            Value(),\n";
+		out << "            CollectionKind::" << field.Kind << ",\n";
+		out << "            Kind::" << element.Kind << ",\n";
+		out << "            " << (field.Kind == "Map" ? "Kind::String" : "Kind::None") << ",\n";
+		if (element.Kind == "Object")
+			// 元素类型名与 TypeSchema::Id.Name 同形(Module::Type)—— ScriptProperties 用它
+			// 填 ScriptProperty::TypeName,与 GetElementNested() 的 Id.Name 保持一致。
+			out << "            \"" << decl.Module << "::" << ShortName(element.Struct) << "\",\n";
+		else if (element.Kind == "Enum")
+			out << "            \"" << element.Enum << "\",\n";
+		else
+			out << "            nullptr,\n";
+		if (element.Kind == "Object")
+			out << "            &GetElementNested_" << field.Name << ",\n";
+		else
+			out << "            nullptr,\n";
+		out << "        };\n        return schema;\n    }\n";
+	}
+
 	void EmitStructAccessor(std::ostringstream& out, const StructDecl& decl, const std::string& qualified,
 		const QualifiedIndex& index, const std::map<std::string, EnumDecl>& enumsByName)
 	{
@@ -789,7 +1017,11 @@ namespace
 		for (const FieldDecl& field : decl.Fields)
 		{
 			const FieldOptions options = ParseOptions(field, decl.File);
-			if (field.Kind == "Enum")
+			if (field.Kind == "Array" || field.Kind == "Map")
+			{
+				EmitContainerAccessors(out, field, qualified, options, decl, index, enumsByName);
+			}
+			else if (field.Kind == "Enum")
 			{
 				const auto enumIt = enumsByName.find(options.Of.value());
 				const EnumInfo info = UnderlyingInfo(enumIt->second.Underlying);
@@ -849,6 +1081,11 @@ namespace
 		for (const FieldDecl& field : decl.Fields)
 		{
 			const FieldOptions options = ParseOptions(field, decl.File);
+			if (field.Kind == "Array" || field.Kind == "Map")
+			{
+				EmitContainerFieldSchema(out, field, options, decl, index, enumsByName);
+				continue;
+			}
 			const uint64_t fieldId = options.Id.value_or(Fnv1a64(decl.Module + "::" + decl.Type + "." + field.Name));
 			std::ostringstream hex;
 			hex << "0x" << std::uppercase << std::hex << fieldId;
@@ -887,14 +1124,7 @@ namespace
 				out << "            &Set_" << field.Name << ",\n";
 				out << "            nullptr,\n            nullptr,\n            nullptr,\n            nullptr,\n            nullptr,\n";
 			}
-			out << "            FieldMetadata{ \"" << options.DisplayName << "\", \"" << options.Group << "\", "
-				<< OptionalText(options.Min) << ", " << OptionalText(options.Max) << ", "
-				<< (options.ReadOnly ? "true" : "false") << ", " << (options.Transient ? "true" : "false") << ", "
-				<< "\"" << options.Doc << "\", " << (options.IsColor ? "true" : "false") << ", "
-				<< "\"" << options.AssetType << "\", { ";
-			for (size_t i = 0; i < options.Choices.size(); ++i)
-				out << (i ? ", " : "") << "\"" << options.Choices[i] << "\"";
-			out << " }, \"" << options.Unit << "\", " << OptionalText(options.Step) << " },\n";
+			EmitFieldMetadata(out, options);
 			std::string def;
 			// CPPT-2(F-1):Category==Script 的字段只有**显式 Default(<expr>)** 才算声明默认值;
 			// 否则 Default = monostate("未设")—— 类型零值不再是默认值,检视器显示"未设(脚本默认)",
@@ -1241,6 +1471,9 @@ int main(int argc, char** argv)
 		std::map<std::string, EnumDecl> enumsByName;
 		for (const EnumDecl& decl : enums)
 			enumsByName[decl.Type] = decl;
+		QualifiedIndex manifestIndex;
+		for (const auto& [kind, name] : manifestEntries)
+			manifestIndex.Add(kind, name);
 		for (const StructDecl& decl : structs)
 		{
 			if (!categories.count(decl.Category))
@@ -1250,10 +1483,31 @@ int main(int argc, char** argv)
 			{
 				if (!names.insert(field.Name).second)
 					Fail(decl.File, field.Pos, "duplicate field '" + field.Name + "'");
-				if (!StructKinds().count(field.Kind))
+				// CPPT-6:Array/Map 是**形状**(不是 Kind);元素类型在 ElementTypeOf 里解析。
+				const bool containerShape = field.Kind == "Array" || field.Kind == "Map";
+				if (!containerShape && !StructKinds().count(field.Kind))
 					Fail(decl.File, field.Pos, "unknown field kind '" + field.Kind + "'");
 				const FieldOptions options = ParseOptions(field, decl.File);
-				if (field.Kind == "Enum" || field.Kind == "Object" || field.Kind == "Asset")
+				if (containerShape)
+				{
+					const ElementType element = ResolveElementType(field, options, decl, manifestIndex, enumsByName);
+					if (options.Min.has_value() && !NumericKinds().count(element.Kind))
+						Fail(decl.File, field.Pos, "Range is only valid on numeric element types ('" + field.Name + "')");
+					if (!options.Unit.empty() && !NumericKinds().count(element.Kind) && element.Kind != "String")
+						Fail(decl.File, field.Pos, "Unit is only valid on numeric or String element types ('" + field.Name + "')");
+					if (options.Step.has_value() && !NumericKinds().count(element.Kind))
+						Fail(decl.File, field.Pos, "Step is only valid on numeric element types ('" + field.Name + "')");
+					if (options.Entity32)
+						Fail(decl.File, field.Pos, "Entity32 is not supported on container fields ('" + field.Name + "')");
+					if (options.DefaultExpr.has_value())
+						Fail(decl.File, field.Pos, "Default is not supported on container fields ('" + field.Name +
+							"'); the script member initializer is the default");
+					if (options.IsColor)
+						Fail(decl.File, field.Pos, "Color() is not supported on container fields ('" + field.Name + "')");
+					if (!options.Choices.empty())
+						Fail(decl.File, field.Pos, "Choices(...) is not supported on container fields ('" + field.Name + "')");
+				}
+				else if (field.Kind == "Enum" || field.Kind == "Object" || field.Kind == "Asset")
 				{
 					if (!options.Of.has_value())
 						Fail(decl.File, field.Pos, "field '" + field.Name + "' of kind " + field.Kind + " requires Of(...)");
@@ -1262,15 +1516,15 @@ int main(int argc, char** argv)
 				{
 					Fail(decl.File, field.Pos, "field '" + field.Name + "' must not specify Of(...)");
 				}
-				if (field.Kind == "Enum" && !enumsByName.count(options.Of.value()))
+				if (!containerShape && field.Kind == "Enum" && !enumsByName.count(options.Of.value()))
 					Fail(decl.File, field.Pos, "field '" + field.Name + "' references unknown enum '" + options.Of.value() + "'");
-				if (options.Min.has_value() && !NumericKinds().count(field.Kind))
+				if (!containerShape && options.Min.has_value() && !NumericKinds().count(field.Kind))
 					Fail(decl.File, field.Pos, "Range is only valid on numeric fields");
-				if (!options.Unit.empty() && !NumericKinds().count(field.Kind) && field.Kind != "String")
+				if (!containerShape && !options.Unit.empty() && !NumericKinds().count(field.Kind) && field.Kind != "String")
 					Fail(decl.File, field.Pos, "Unit is only valid on numeric or String fields");
-				if (options.Step.has_value() && !NumericKinds().count(field.Kind))
+				if (!containerShape && options.Step.has_value() && !NumericKinds().count(field.Kind))
 					Fail(decl.File, field.Pos, "Step is only valid on numeric fields");
-				if (options.Entity32 && field.Kind != "UInt64")
+				if (!containerShape && options.Entity32 && field.Kind != "UInt64")
 					Fail(decl.File, field.Pos, "Entity32 is only valid on UInt64 fields (entt::entity packed into 64-bit storage)");
 			}
 		}

@@ -19,5 +19,19 @@
   "modal.restore.remember": "记住我的选择",
   "modal.restore.tabs": "恢复为顶栏标签",
   "modal.restore.layout": "按上次形态恢复",
-  "modal.restore.none": "不恢复"
+  "modal.restore.none": "不恢复",
+  "modal.newscript.title": "新建 C++ 脚本",
+  "modal.newscript.name": "名称",
+  "modal.newscript.name.placeholder": "脚本名(合法 C++ 标识符)",
+  "modal.newscript.name.empty": "名称不能为空",
+  "modal.newscript.name.invalid": "名称必须是合法 C++ 标识符:字母或下划线开头,只含字母、数字、下划线",
+  "modal.newscript.name.exists": "已存在同名文件,请换一个名字:{path}",
+  "modal.newscript.target": "将创建",
+  "modal.newscript.hint": "重建 Game 模块后,用「文件 ▶ 重载 C++ 模块」加载新脚本。编辑器不内置编译器。",
+  "modal.newscript.ok": "创建",
+  "modal.newscript.ok.tooltip": "写入模板并打开内置代码编辑器(Enter)。",
+  "modal.newscript.cancel": "取消",
+  "modal.newscript.cancel.tooltip": "关闭,不写任何文件(Esc)。",
+  "modal.newscript.write_failed": "写入失败:",
+  "modal.newscript.folder_failed": "创建目录失败:"
 }

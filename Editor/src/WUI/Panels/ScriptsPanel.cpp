@@ -296,7 +296,7 @@ namespace World
 				// C++ 实例重载不支持(代码在 Game.dll 里):给指路文案,不画一个按不动的假按钮。
 				Wui::Label(ctx, { rowRect.X + rowRect.W - 236.0f, rowRect.Y + 8.0f },
 					Wui::Tr("panel.scripts.cpp_module_hint",
-						"instance reload: not supported (use File ▸ Reload C++ Module)"),
+						"instance reload: not supported (use File ▶ Reload C++ Module)"),
 					theme.TextMuted, 11.0f);
 			}
 			y += kSceneRowHeight;

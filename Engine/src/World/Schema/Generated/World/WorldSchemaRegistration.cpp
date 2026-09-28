@@ -414,7 +414,7 @@ struct GeneratedAccess<World::SpriteComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Repeats the texture UVs; 1 = once across the quad.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -511,7 +511,7 @@ struct GeneratedAccess<World::CircleRendererComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Ring width as a fraction of the radius: 1 = filled disc, 0.1 = thin ring.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -529,7 +529,7 @@ struct GeneratedAccess<World::CircleRendererComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Normalized softness of the edge (0 = hard edge).", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -1274,7 +1274,7 @@ struct GeneratedAccess<World::DirectionalLightComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Brightness multiplier applied to Color.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -1408,7 +1408,7 @@ struct GeneratedAccess<World::PointLightComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Brightness multiplier applied to Color.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -1426,7 +1426,7 @@ struct GeneratedAccess<World::PointLightComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(1000.000000f), false, false, "Falloff radius in world units: attenuation is (1 - d/Range)² and reaches zero at Range.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -1513,7 +1513,7 @@ struct GeneratedAccess<World::AmbientLightComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Light", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Ambient strength: 0 = no ambient, 0.25 is the engine default when the scene has none.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -1861,7 +1861,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Mass per area: the body mass is density x collider area.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -1879,7 +1879,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Surface friction against other colliders (0 = ice, 1 = rough).", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -1897,7 +1897,7 @@ struct GeneratedAccess<World::BoxCollider2DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bounciness: 0 = no bounce, 1 = perfectly elastic.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2045,7 +2045,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Radius in local units (scaled by the entity transform).", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2063,7 +2063,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Mass per area: the body mass is density x circle area.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2081,7 +2081,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Surface friction against other colliders (0 = ice, 1 = rough).", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2099,7 +2099,7 @@ struct GeneratedAccess<World::CircleCollider2DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bounciness: 0 = no bounce, 1 = perfectly elastic.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2261,7 +2261,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false, "Mass in kilograms used for Dynamic bodies (the shape only contributes inertia).", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2279,7 +2279,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Velocity damping per second: higher values stop a sliding body faster.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2297,7 +2297,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Spin damping per second: higher values stop a rotating body faster.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2315,7 +2315,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Surface friction against other bodies (0 = ice, 1 = rough).", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2333,7 +2333,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Bounciness: 0 = no bounce, 1 = perfectly elastic.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2350,7 +2350,7 @@ struct GeneratedAccess<World::RigidBody3DComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Apply the scene gravity to this body (see Project Settings ▸ Physics).", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Apply the scene gravity to this body (see Project Settings ▶ Physics).", false, "", {  }, "", std::nullopt },
             Value(false),
         };
         return schema;
@@ -2510,7 +2510,7 @@ struct GeneratedAccess<World::SphereCollider3DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false, "Sphere radius in local units (scaled by the entity transform).", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2606,7 +2606,7 @@ struct GeneratedAccess<World::CapsuleCollider3DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false, "Radius of the capsule and its two hemisphere caps.", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2624,7 +2624,7 @@ struct GeneratedAccess<World::CapsuleCollider3DComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100000.000000f), false, false, "Half height of the cylinder segment (excludes the hemisphere caps).", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2791,7 +2791,7 @@ struct GeneratedAccess<World::UUID>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0),
+            Value(static_cast<uint64_t>(0)),
         };
         return schema;
     }
@@ -2935,7 +2935,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, true, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2953,7 +2953,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Orthographic", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2971,7 +2971,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Orthographic", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -2989,7 +2989,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Orthographic", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -3007,7 +3007,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Perspective", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -3025,7 +3025,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Perspective", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -3043,7 +3043,7 @@ struct GeneratedAccess<World::SceneCamera>
             nullptr,
             nullptr,
             FieldMetadata{ "", "Perspective", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }

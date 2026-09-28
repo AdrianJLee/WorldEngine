@@ -327,7 +327,6 @@ target_include_directories(WorldScriptWorkflowTests PRIVATE "${CMAKE_SOURCE_DIR}
 target_sources(WorldScriptWorkflowTests PRIVATE
     "${CMAKE_SOURCE_DIR}/Game/src/Generated/Game/GameSchemaRegistration.cpp"
     "${CMAKE_SOURCE_DIR}/Game/src/Scripts/ExampleScript.cpp"
-    "${CMAKE_SOURCE_DIR}/Game/src/Scripts/StressTest.cpp"
 )
 target_compile_definitions(WorldScriptWorkflowTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
@@ -1156,15 +1155,10 @@ set_tests_properties(World.SchemaDrift PROPERTIES
 # 属性元数据却不重跑 schema-compiler → 此测试红灯;新生成物 = Game/src/Generated + Game.manifest。
 add_test(NAME Game.SchemaDrift
     COMMAND schema-compiler
-        --input "${CMAKE_SOURCE_DIR}/Game/src/Components/SampleDataComponent.h"
-        --input "${CMAKE_SOURCE_DIR}/Game/src/Scripts/ExampleScript.h"
-        --input "${CMAKE_SOURCE_DIR}/Game/src/Scripts/StressTest.h"
+        ${GAME_SCHEMA_ARGS}
         --module Game
         --output "${CMAKE_SOURCE_DIR}/Game/src/Generated"
         --manifest "${CMAKE_SOURCE_DIR}/Game/src/Generated/Game.manifest"
-        --reg-include "Components/SampleDataComponent.h"
-        --reg-include "Scripts/ExampleScript.h"
-        --reg-include "Scripts/StressTest.h"
         --check)
 set_tests_properties(Game.SchemaDrift PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

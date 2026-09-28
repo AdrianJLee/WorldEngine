@@ -1,7 +1,8 @@
-﻿#include "ExampleScript.h"
+#include "ExampleScript.h"
 
 namespace World
 {
-	// 这个脚本只是一个示例，展示了如何创建一个脚本组件，并在场景中使用它。
-	// 在实际项目中，你可以根据需要创建更复杂的脚本，来实现游戏逻辑、交互等功能。
+	// 示例脚本本体完全在头文件里(成员 + WE_SCHEMA_BODY + 生命周期回调)。
+	// 这个 .cpp 只需要出现在构建里,让示例作为一个翻译单元被编译;
+	// 真正的"怎么写属性/容器"说明见 ExampleScript.h 顶部注释。
 }

@@ -23,10 +23,11 @@
   "status.cppmodule.unloaded": "未加载",
   "status.cppmodule.reloading": "重载中",
   "status.cppmodule.rolled_back": "已回滚",
-  "status.cppmodule.hint.unloaded": "Game.dll 未加载 — 先重新构建,再用「文件 ▸ 重载 C++ 模块」加载",
-  "status.cppmodule.hint.reloading": "Game.dll 已卸载,可以重新构建 — 构建完成后用「文件 ▸ 重载 C++ 模块」加载新构建",
+  "status.cppmodule.hint.unloaded": "Game.dll 未加载 — 先重新构建,再用「文件 ▶ 重载 C++ 模块」加载",
+  "status.cppmodule.hint.reloading": "Game.dll 已卸载,可以重新构建 — 构建完成后用「文件 ▶ 重载 C++ 模块」加载新构建",
   "status.cppmodule.hint.rolled_back": "新构建被拒绝;已重新加载上一份 Game.dll(详见诊断)",
   "status.cppmodule.hint.diagnostics": "条字段迁移诊断 — 悬停状态栏查看详情",
   "status.cppmodule.diagnostics.more": "条更多迁移诊断(见 AI 通道 module.status)",
-  "notice.cppmodule.diagnostics": "条字段迁移诊断"
+  "notice.cppmodule.diagnostics": "条字段迁移诊断",
+  "notice.newscript.created": "已创建 {path};重建 Game 后执行「文件 ▶ 重载 C++ 模块」生效"
 }

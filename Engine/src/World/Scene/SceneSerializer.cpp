@@ -127,8 +127,13 @@ namespace World
 				<< (array ? "Array" : (map ? "Map" : ScriptProperties::KindName(property.Type)));
 			// CPPT-2:Enum / Asset 行的 TypeName 必写 —— Enum 读回要用它找枚举 schema(判断有无符号),
 			// Asset 的 TypeName 是资产类型名(面板据此选下拉)。
+			// CPPT-6:容器行同理 —— 元素是 Enum/Asset 时 TypeName 也必写(数组里每一行只是值,
+			// 元素类型名只能挂在容器行上)。
+			const bool containerTypeName = property.Collection != ScriptPropertyCollection::None
+				&& (property.ElementKind == Schema::Kind::Enum || property.ElementKind == Schema::Kind::Asset);
 			const bool needsTypeName = property.Collection == ScriptPropertyCollection::Struct
-				|| property.Type == Schema::Kind::Enum || property.Type == Schema::Kind::Asset;
+				|| property.Type == Schema::Kind::Enum || property.Type == Schema::Kind::Asset
+				|| containerTypeName;
 			if (needsTypeName && !property.TypeName.empty())
 				out << YAML::Key << "TypeName" << YAML::Value << property.TypeName;
 			if (array || map)
@@ -238,6 +243,16 @@ namespace World
 				property.ShapeFromScene = value.IsSequence() || value.IsMap();
 				Schema::FieldSchema probe;
 				probe.K = property.ElementKind;
+				// CPPT-6:元素是 Enum 时按容器行的 TypeName 现查枚举 schema(F-6 同一条通道),
+				// 否则叶读写器读不出整数(行会被丢掉)。thread_local 每次都重设:
+				// 嵌套递归(Object 元素)结束时会把它清空。
+				const Schema::EnumSchema* elementEnum = nullptr;
+				if (property.ElementKind == Schema::Kind::Enum && schemas && !property.TypeName.empty())
+				{
+					elementEnum = schemas->FindEnum(property.TypeName);
+					if (elementEnum)
+						probe.GetEnum = &ReadbackEnumSchema;
+				}
 				if (property.ElementKind == Schema::Kind::Object)
 				{
 					if (value.IsSequence())
@@ -245,8 +260,17 @@ namespace World
 						for (const YAML::Node& childNode : value)
 						{
 							ScriptProperty child;
-							if (ReadScriptPropertyItem(childNode, reader, child, depth + 1, schemas))
-								property.Children.push_back(std::move(child));
+							if (!ReadScriptPropertyItem(childNode, reader, child, depth + 1, schemas))
+								continue;
+							// CPPT-6-FIX2:元素行的形状由**父容器 + 行位置**决定,不是独立的结构化表字段。
+							// ReadScriptPropertyItem 对 `Type: Object` 一律读成 Struct(旧存档/嵌套 struct
+							// 字段都靠它),但容器的元素行必须回到面板写盘时的同一形状
+							// (Collection=None + Type=Object + Children)——否则 ElementValueOf 会把它折成
+							// ValueList,Play 时 WriteStructValue 整条失败(字段回落成员初值)。
+							// 元素本身是容器(嵌套 `{{…}}`)时不在这里改写:那些行读回就是 Array/Map。
+							if (child.Collection == ScriptPropertyCollection::Struct)
+								child.Collection = ScriptPropertyCollection::None;
+							property.Children.push_back(std::move(child));
 						}
 					}
 				}
@@ -259,11 +283,15 @@ namespace World
 							ScriptProperty child;
 							child.Name = entry.first.as<std::string>();
 							child.Type = property.ElementKind;
-							// D1:未设的行写 `~` —— 保留这一行(键名/位置是形状的一部分),值保持未设。
-							if (!entry.second || entry.second.IsNull())
-								property.Children.push_back(std::move(child));
-							else if (reader.ReadFieldValue(probe, &child.Value, entry.second))
-								property.Children.push_back(std::move(child));
+								// D1:未设的行写 `~` —— 保留这一行(键名/位置是形状的一部分),值保持未设。
+								if (!entry.second || entry.second.IsNull())
+									property.Children.push_back(std::move(child));
+								else
+								{
+									s_ReadbackEnum = elementEnum;
+									if (reader.ReadFieldValue(probe, &child.Value, entry.second))
+										property.Children.push_back(std::move(child));
+								}
 						}
 					}
 				}
@@ -275,13 +303,18 @@ namespace World
 						ScriptProperty child;
 						child.Name = std::to_string(++index);   // 数组行名 = 下标字符串(1 起)
 						child.Type = property.ElementKind;
-						// D1:未设的行写 `~` —— 保留这一行(下标是形状的一部分),值保持未设。
-						if (!element || element.IsNull())
-							property.Children.push_back(std::move(child));
-						else if (reader.ReadFieldValue(probe, &child.Value, element))
-							property.Children.push_back(std::move(child));
+							// D1:未设的行写 `~` —— 保留这一行(下标是形状的一部分),值保持未设。
+							if (!element || element.IsNull())
+								property.Children.push_back(std::move(child));
+							else
+							{
+								s_ReadbackEnum = elementEnum;
+								if (reader.ReadFieldValue(probe, &child.Value, element))
+									property.Children.push_back(std::move(child));
+							}
 					}
 				}
+				s_ReadbackEnum = nullptr;
 				return true;
 			}
 			property.Type = ScriptProperties::KindFromName(typeName);

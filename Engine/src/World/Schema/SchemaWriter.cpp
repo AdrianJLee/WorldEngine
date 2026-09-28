@@ -111,6 +111,10 @@ namespace World::Schema
 		if (field.Meta.Transient)
 			return true;
 		*m_Out << YAML::Key << field.Name << YAML::Value;
+		// CPPT-6:容器字段(数组/映射)整值交给 WriteValue —— ValueList → flow seq、ValueMap → flow map;
+		// 命名 struct 的元素/值同样是 ValueMap(键 = 字段名),递归同形。
+		if (field.Collection != CollectionKind::None)
+			return WriteValue(field, field.Get ? field.Get(instance) : Value {});
 		if (field.K == Kind::Object)
 		{
 			const TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
@@ -129,15 +133,89 @@ namespace World::Schema
 		return WriteValue(field, field.Get(instance));
 	}
 
-	bool YamlSchemaWriter::WriteValue(const FieldSchema&, const Value& value)
+	bool YamlSchemaWriter::WriteValue(const FieldSchema& field, const Value& value)
+	{
+		return WriteFieldValue(field, value);
+	}
+
+	bool YamlSchemaWriter::WriteFieldValue(const FieldSchema& field, const Value& value)
+	{
+		const TypeSchema* elementStruct = nullptr;
+		if (field.ElementKind == Kind::Object && field.GetElementNested)
+			elementStruct = field.GetElementNested();
+		if (field.Collection == CollectionKind::Map)
+			return WriteMapValue(value, field.ElementKind == Kind::Object ? elementStruct : nullptr);
+		if (field.Collection == CollectionKind::Array)
+			return WriteAnyValue(value, field.ElementKind == Kind::Object ? elementStruct : nullptr);
+		if (field.K == Kind::Object)
+			return WriteAnyValue(value, field.GetNested ? field.GetNested() : nullptr);
+		return WriteAnyValue(value, nullptr);
+	}
+
+	bool YamlSchemaWriter::WriteMapValue(const Value& value, const TypeSchema* valueStructType)
+	{
+		const ValueMap* fields = std::get_if<ValueMap>(&value);
+		if (!fields)
+			return WriteAnyValue(value, nullptr);
+		*m_Out << YAML::Flow << YAML::BeginMap;
+		for (const auto& [key, item] : *fields)
+		{
+			*m_Out << YAML::Key << key << YAML::Value;
+			WriteAnyValue(item, valueStructType);
+		}
+		*m_Out << YAML::EndMap;
+		return true;
+	}
+
+	bool YamlSchemaWriter::WriteAnyValue(const Value& value, const TypeSchema* structType)
 	{
 		if (value.valueless_by_exception())
 			return false;
+		// CPPT-6:容器值(以及命名 struct 作为元素/值时的同形 map)先于叶 visit 处理。
+		if (const ValueList* items = std::get_if<ValueList>(&value))
+		{
+			*m_Out << YAML::Flow << YAML::BeginSeq;
+			for (const Value& item : *items)
+				WriteAnyValue(item, structType);
+			*m_Out << YAML::EndSeq;
+			return true;
+		}
+		if (const ValueMap* fields = std::get_if<ValueMap>(&value))
+		{
+			*m_Out << YAML::Flow << YAML::BeginMap;
+			if (structType)
+			{
+				// 命名 struct 的值:按声明顺序写;schema 里没有的键丢弃(与 WriteStructValue 同口径)。
+				for (const FieldSchema& child : structType->Fields)
+				{
+					if (child.Meta.Transient)
+						continue;
+					const auto found = fields->find(child.Name);
+					if (found == fields->end())
+						continue;
+					*m_Out << YAML::Key << child.Name << YAML::Value;
+					WriteFieldValue(child, found->second);
+				}
+				*m_Out << YAML::EndMap;
+				return true;
+			}
+			for (const auto& [key, item] : *fields)
+			{
+				*m_Out << YAML::Key << key << YAML::Value;
+				WriteAnyValue(item, nullptr);
+			}
+			*m_Out << YAML::EndMap;
+			return true;
+		}
 		std::visit([this](const auto& raw)
 			{
 				using T = std::decay_t<decltype(raw)>;
 				if constexpr (std::is_same_v<T, std::monostate>)
 					*m_Out << YAML::Null;
+				// 容器替代项在上面已处理(这里只为编译期覆盖全部替代项;yaml-cpp 的
+				// std::map 重载会尝试直接写 Value,必须显式短路)。
+				else if constexpr (std::is_same_v<T, ValueList> || std::is_same_v<T, ValueMap>)
+					(void)raw;
 				else if constexpr (std::is_integral_v<T> && std::is_signed_v<T> && !std::is_same_v<T, bool>)
 					*m_Out << static_cast<int64_t>(raw);
 				else if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>)
@@ -164,6 +242,13 @@ namespace World::Schema
 			const YAML::Node fieldNode = node[field.Name];
 			if (!fieldNode)
 				continue;
+			if (field.Collection != CollectionKind::None)
+			{
+				Value value;
+				if (ReadFieldValue(field, &value, fieldNode) && field.Set)
+					field.Set(instance, value);
+				continue;
+			}
 			if (field.K == Kind::Object)
 			{
 				const TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
@@ -181,6 +266,10 @@ namespace World::Schema
 
 	bool YamlSchemaReader::ReadFieldValue(const FieldSchema& field, Value* outValue, const YAML::Node& node)
 	{
+		if (!outValue)
+			return false;
+		if (field.Collection != CollectionKind::None)
+			return ReadContainerValue(field, node, outValue);
 		switch (field.K)
 		{
 			case Kind::Bool: return Guard([&] { *outValue = Value(node.as<bool>()); });
@@ -219,5 +308,107 @@ namespace World::Schema
 			case Kind::Asset: return Guard([&] { *outValue = Value(node.as<std::string>()); });
 			default: return false;
 		}
+	}
+
+	// CPPT-6:读"一个字段自己的值"(结构子字段 / 容器字段都用它分派)。
+	bool YamlSchemaReader::ReadChildValue(const FieldSchema& field, const YAML::Node& node, Value* outValue)
+	{
+		if (!outValue || !node || node.IsNull())
+			return false;
+		if (field.Collection != CollectionKind::None)
+			return ReadElementValue(field, node, outValue);
+		if (field.K == Kind::Object)
+		{
+			const TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
+			if (!nested)
+				return false;
+			return ReadStructValue(*nested, node, outValue);
+		}
+		return ReadFieldValue(field, outValue, node);
+	}
+
+	bool YamlSchemaReader::ReadElementValue(const FieldSchema& container, const YAML::Node& node, Value* outValue)
+	{
+		if (!outValue || !node || node.IsNull())
+			return false;
+		if (container.ElementKind == Kind::Object)
+		{
+			const TypeSchema* nested = container.GetElementNested ? container.GetElementNested() : nullptr;
+			if (!nested)
+				return false;
+			return ReadStructValue(*nested, node, outValue);
+		}
+		// 叶元素:用一个形状为"元素类型"的 probe 复用既有叶读写器(Enum 用 GetEnum 判有符号,
+		// Asset 读逻辑路径字符串)。
+		FieldSchema probe;
+		probe.K = container.ElementKind;
+		probe.GetEnum = container.GetEnum;
+		probe.AssetTypeName = container.AssetTypeName;
+		return ReadFieldValue(probe, outValue, node);
+	}
+
+	bool YamlSchemaReader::ReadContainerValue(const FieldSchema& field, const YAML::Node& node, Value* outValue)
+	{
+		if (!outValue)
+			return false;
+		if (field.Collection == CollectionKind::Array)
+		{
+			if (!node.IsSequence())
+				return false;
+			ValueList items;
+			items.reserve(node.size());
+			for (const YAML::Node& element : node)
+			{
+				Value item;
+				if (!ReadElementValue(field, element, &item))
+					return false;
+				items.push_back(std::move(item));
+			}
+			*outValue = Value(std::move(items));
+			return true;
+		}
+		if (field.Collection == CollectionKind::Map)
+		{
+			if (!node.IsMap())
+				return false;
+			ValueMap fields;
+			for (const auto& entry : node)
+			{
+				Value item;
+				if (!ReadElementValue(field, entry.second, &item))
+					return false;
+				fields.emplace(entry.first.as<std::string>(), std::move(item));
+			}
+			*outValue = Value(std::move(fields));
+			return true;
+		}
+		return false;
+	}
+
+	// 命名 struct 的值 = 字段名 → Value 的 map(容器元素的 ValueMap 同形);
+	// 缺失/空字段留成 monostate(未设 → 写入时保留实例成员初值),子字段本身可以是
+	// 嵌套 Object 或容器(命名 struct 允许再套容器),统一由 ReadChildValue 递归分派。
+	bool YamlSchemaReader::ReadStructValue(const TypeSchema& type, const YAML::Node& node, Value* outValue)
+	{
+		if (!outValue || !node.IsMap())
+			return false;
+		ValueMap fields;
+		for (const FieldSchema& child : type.Fields)
+		{
+			if (child.Meta.Transient)
+				continue;
+			const YAML::Node childNode = node[child.Name];
+			if (!childNode || childNode.IsNull())
+			{
+				fields.emplace(child.Name, Value {});   // 未设:保留成员初值
+				continue;
+			}
+			Value item;
+			if (!ReadChildValue(child, childNode, &item))
+				return false;
+			fields.emplace(child.Name, std::move(item));
+		}
+		*outValue = Value(std::move(fields));
+		return true;
 	}
 }

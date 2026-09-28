@@ -508,6 +508,15 @@ namespace World
 						const Schema::FieldSchema* field = FindSchemaField(*type, property.Name);
 						if (!field || !field->Set || field->K != property.Type)
 							continue;
+						// CPPT-6:容器属性的值在 Children 行里(Value 保持 monostate),Play 应用时
+						// 先折成容器值再写;未设返回 false(保留脚本成员初值)。
+						if (field->Collection != Schema::CollectionKind::None)
+						{
+							Schema::Value container;
+							if (ScriptProperties::BuildContainerValue(property, &container))
+								field->Set(dynamic_cast<void*>(script.Instance), container);
+							continue;
+						}
 						// P2-②:手改场景 / 坏存档可能让值停在 monostate 或 variant 备选与声明类型不符 ——
 						// 直接 Set 会抛 bad_variant_access 把整条脚本打成 Faulted。未设值 = 跳过(保留脚本默认),
 						// 类型不符 = 跳过 + 一条可读诊断。

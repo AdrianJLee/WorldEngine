@@ -235,6 +235,20 @@ namespace World
 		if (!diagnostics)
 			return;
 
+		// CPPT-6:字段类型文本 —— 容器带形状与元素/键类型(Array<Float> / Map<String, Entry>),
+		// 非容器仍是 KindName。形状变化(Array→Map、元素类型变化)必须与类型变化一样出诊断,
+		// 否则同名同 Kind(Object)的容器会静默重置值。
+		const auto fieldTypeText = [](const ScriptProperty& property)
+		{
+			if (property.Collection == ScriptPropertyCollection::None)
+				return std::string(ScriptProperties::KindName(property.Type));
+			const std::string element = property.ElementKind == Schema::Kind::Object && !property.TypeName.empty()
+				? property.TypeName : std::string(ScriptProperties::KindName(property.ElementKind));
+			if (property.Collection == ScriptPropertyCollection::Map)
+				return std::string("Map<") + ScriptProperties::KindName(property.KeyKind) + ", " + element + ">";
+			return std::string("Array<") + element + ">";
+		};
+
 		// 先按字段名收集再排序,保证诊断文本可断言/可复现(与容器顺序无关)。
 		// CPPT-2(FIX1):前缀按调用方选(Luau 热重载 / C++ 模块重载),文本规则只有这一份。
 		const std::string tag = options.Tag ? options.Tag : "[hot-reload]";
@@ -252,12 +266,15 @@ namespace World
 						") is new in the reloaded script; its value takes the declared default");
 				continue;
 			}
-			if (old->Type == newField.Type)
-				continue;   // 同名同类型:同步时已保留旧值。
+			if (old->Type == newField.Type
+				&& old->Collection == newField.Collection
+				&& old->ElementKind == newField.ElementKind
+				&& old->KeyKind == newField.KeyKind)
+				continue;   // 同名同类型同形状:同步时已保留旧值。
 			lines.emplace_back(newField.Name,
 				tag + " " + scriptPath + ": field '" + newField.Name + "' (id=" + FieldIdText(newField.Name) +
-				") type changed " + ScriptProperties::KindName(old->Type) + " -> " +
-				ScriptProperties::KindName(newField.Type) + "; value reset to the new default");
+				") type changed " + fieldTypeText(*old) + " -> " +
+				fieldTypeText(newField) + "; value reset to the new default");
 		}
 		for (const ScriptProperty& oldField : previous)
 		{

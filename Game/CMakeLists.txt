@@ -22,7 +22,7 @@ target_compile_definitions(Game PRIVATE
     GAME_BUILD_DLL 
 )
 
-file(GLOB_RECURSE Game_SOURCES 
+file(GLOB_RECURSE Game_SOURCES CONFIGURE_DEPENDS
     "src/*.h"
     "src/*.cpp"
 )
@@ -41,3 +41,46 @@ add_custom_command(TARGET Game POST_BUILD
     COMMENT "Copying WorldRuntime.dll next to Game.dll"
     VERBATIM
 )
+
+# CPPT-6:Game schema 输入自动发现 —— 新增脚本/组件头文件免改任何清单。
+# 生成到构建目录,再用 copy_if_different 回写源码树:内容不变时不动 mtime,避免无谓重编。
+file(GLOB GAME_SCHEMA_INPUTS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Components/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Scripts/*.h"
+)
+set(GAME_SCHEMA_ARGS "")
+foreach(input ${GAME_SCHEMA_INPUTS})
+    list(APPEND GAME_SCHEMA_ARGS --input "${input}")
+endforeach()
+foreach(input ${GAME_SCHEMA_INPUTS})
+    file(RELATIVE_PATH rel "${CMAKE_CURRENT_SOURCE_DIR}/src" "${input}")
+    list(APPEND GAME_SCHEMA_ARGS --reg-include "${rel}")
+endforeach()
+# 让 tests/ 的 Game.SchemaDrift 复用同一份输入清单(父作用域 = 根 CMakeLists)。
+set(GAME_SCHEMA_ARGS "${GAME_SCHEMA_ARGS}" PARENT_SCOPE)
+
+set(GAME_SCHEMA_GEN_DIR "${CMAKE_BINARY_DIR}/game-schema")
+set(GAME_SCHEMA_STAMP "${GAME_SCHEMA_GEN_DIR}/game-schema.stamp")
+set(GAME_SCHEMA_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/Generated")
+add_custom_command(OUTPUT "${GAME_SCHEMA_STAMP}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${GAME_SCHEMA_GEN_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${GAME_SCHEMA_SRC_DIR}/Game.manifest" "${GAME_SCHEMA_GEN_DIR}/Game.manifest"
+    COMMAND $<TARGET_FILE:schema-compiler> ${GAME_SCHEMA_ARGS} --module Game
+            --output "${GAME_SCHEMA_GEN_DIR}" --manifest "${GAME_SCHEMA_GEN_DIR}/Game.manifest"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${GAME_SCHEMA_GEN_DIR}/Game/GameSchemaRegistration.h"
+            "${GAME_SCHEMA_SRC_DIR}/Game/GameSchemaRegistration.h"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${GAME_SCHEMA_GEN_DIR}/Game/GameSchemaRegistration.cpp"
+            "${GAME_SCHEMA_SRC_DIR}/Game/GameSchemaRegistration.cpp"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${GAME_SCHEMA_GEN_DIR}/Game.manifest" "${GAME_SCHEMA_SRC_DIR}/Game.manifest"
+    COMMAND ${CMAKE_COMMAND} -E touch "${GAME_SCHEMA_STAMP}"
+    DEPENDS ${GAME_SCHEMA_INPUTS} schema-compiler
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Game schema: regenerate from globbed inputs (copy_if_different)"
+    VERBATIM
+)
+add_custom_target(GameSchema DEPENDS "${GAME_SCHEMA_STAMP}")
+add_dependencies(Game GameSchema)

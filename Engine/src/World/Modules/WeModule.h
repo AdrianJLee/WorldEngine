@@ -25,7 +25,10 @@ namespace World::Modules
 	// (编辑期提示)⇒ FieldSchema/TypeSchema 的布局再次变化;同时 Category==Script 的
 	// "未声明 Default = 未设(monostate)"语义变化也会让旧 Game.dll 按零值默认值解释属性表。
 	// 宿主与模块仍走 ModuleManager 的**等值**校验 ⇒ 旧 DLL 必须被干净拒绝(不按新布局解释)。
-	constexpr uint32_t WE_MODULE_ABI_VERSION = 6;
+	// CPPT-6(2026-09-28,C++ 容器属性):`Schema::Value` 追加容器替代项(数组/映射)、
+	// `Schema::FieldSchema` 尾部追加容器形状描述(Collection/ElementKind/KeyKind/…)
+	// ⇒ 反射与边界值布局再次变化,旧 Game.dll(ABI 6)必须被干净拒绝(同一条等值门)。
+	constexpr uint32_t WE_MODULE_ABI_VERSION = 7;
 
 	struct WeModule
 	{

@@ -368,8 +368,11 @@ namespace World
 	//   Array  = `---@field Scores {number}`(Children 顺序 = 下标 1..n,Name = 下标字符串);
 	//   Map    = `---@field Config {string: number}`(Children = 键值行,Name = 键)。
 	// 容器属性的 Type 一律是 Schema::Kind::Object(值在 Children 里,Value 保持 monostate),
-	// 由 Collection + ElementKind/KeyKind 描述元素与键;**不新增 Schema::Kind**(编译器与 schema
-	// 反射不认识集合类型,集合只存在于脚本属性这一层)。
+	// 由 Collection + ElementKind/KeyKind 描述元素与键。
+	// CPPT-6(2026-09-28)起 **C++ 脚本字段也用这一份模型**:schema-compiler 的
+	// `WE_FIELD(Name, Array|Map, Of(T))` 在 Schema::FieldSchema 上带 Collection/ElementKind/
+	// KeyKind,`ScriptProperties::SyncFromSchema` 1:1 映射成同形属性行 —— 检视器、存档、热重载
+	// 迁移两条前端共用一份表示;**仍然不新增 Schema::Kind**(容器是形状,不是类型)。
 	enum class ScriptPropertyCollection : uint8_t
 	{
 		None = 0,
@@ -598,7 +601,7 @@ namespace World
 			WE_FIELD(Restitution, Float, Id(0x5242334452455354), Range(0.0f, 1.0f),
 				Doc("Bounciness: 0 = no bounce, 1 = perfectly elastic."));
 			WE_FIELD(UseGravity, Bool, Id(0x5242334447525654),
-				Doc("Apply the scene gravity to this body (see Project Settings ▸ Physics)."));
+				Doc("Apply the scene gravity to this body (see Project Settings ▶ Physics)."));
 		WE_SCHEMA_END
 	};
 

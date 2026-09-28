@@ -313,6 +313,23 @@ namespace World
 		// D10-15:DrawModals 里另外四个模态(unsaved/error/cooking/projectsettings)也走同一套
 		// BeginModalFrame + ModalButtons/ModalFooter,并由同一组 Begin/EndModalInputBlock 挡输入。
 		void RenderImportDestinationModal(Wui::WuiContext& ctx);
+		// ---- CPPT-6-ED-NEWSCRIPT:File ▸ New C++ Script… ----
+		// 菜单入口 → 名称模态(合法 C++ 标识符 + 不重名,行内错误)→ 写
+		// `<checkout>/Game/src/Scripts/<Name>.h` 模板 → 打开内置代码编辑器 + 状态栏提示
+		// "重建 Game 后重载 C++ 模块生效";操作日志与内容浏览器的新建资产同口径。
+		void OpenNewCppScriptModal(Wui::WuiContext& ctx);
+		void DrawNewCppScriptModal(Wui::WuiContext& ctx);
+		// 名称校验:空 / 非法标识符 / 目标已存在 → 可读原因;空串 = 通过。
+		std::string NewCppScriptNameError() const;
+		// 目标绝对路径:`<checkout>/Game/src/Scripts/<Name>.h`(checkout 根 = WLD_REPO_ROOT)。
+		std::filesystem::path NewCppScriptTargetPath() const;
+		// 写模板 + 打开编辑器面板 + 状态栏提示 + 操作日志;失败写 m_NewCppScriptFailure 并返回 false。
+		bool CreateNewCppScript(Wui::WuiContext& ctx);
+		bool m_NewCppScriptOpen = false;
+		uint32_t m_NewCppScriptOpenedFrame = 0;
+		std::string m_NewCppScriptName;
+		std::string m_NewCppScriptFailure;      // 写盘失败原因(落点变化时清)
+		std::string m_NewCppScriptFailureFor;   // 上面的原因对应的落点(变了就作废)
 		// 打开模态时扫一遍内容根(WLD_ASSETPATH)的目录树(低频操作;权限错误跳过)。
 		void ScanImportTree();
 		void RestoreLayout(const std::string& json);

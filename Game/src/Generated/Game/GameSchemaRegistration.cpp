@@ -4,14 +4,13 @@
 #include "World/Schema/ComponentSchemaBridge.h"
 #include "Components/SampleDataComponent.h"
 #include "Scripts/ExampleScript.h"
-#include "Scripts/StressTest.h"
 
 namespace World::Schema
 {
 const TypeSchema& WeSchemaOf_SampleDataComponent();
 const TypeSchema& WeSchemaOf_ExampleScript();
-const TypeSchema& WeSchemaOf_StressTest();
-const EnumSchema& WeEnumSchemaOf_StressTestType();
+const TypeSchema& WeSchemaOf_ExampleStats();
+const EnumSchema& WeEnumSchemaOf_ExampleMode();
 
 	namespace
 	{
@@ -115,7 +114,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -133,7 +132,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(10.000000f), false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -187,7 +186,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0),
+            Value(static_cast<int32_t>(0)),
         };
         return schema;
     }
@@ -205,7 +204,7 @@ struct GeneratedAccess<World::SampleDataComponent>
             nullptr,
             nullptr,
             FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "", false, "", {  }, "", std::nullopt },
-            Value(0.0),
+            Value(0.0f),
         };
         return schema;
     }
@@ -301,6 +300,60 @@ struct GeneratedAccess<World::ExampleScript>
         World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
         self->Speed = std::get<float>(value);
     }
+    static Value Get_Enabled(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return Value(self->Enabled);
+    }
+    static void Set_Enabled(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        self->Enabled = std::get<bool>(value);
+    }
+    static Value Get_Label(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return Value(self->Label);
+    }
+    static void Set_Label(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        self->Label = std::get<std::string>(value);
+    }
+    static Value Get_Mode(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return Value(static_cast<int64_t>(self->Mode));
+    }
+    static void Set_Mode(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        self->Mode = static_cast<World::ExampleMode>(std::get<int64_t>(value));
+    }
+    static const EnumSchema* GetEnum_Mode()
+    {
+        return &WeEnumSchemaOf_ExampleMode();
+    }
+    static Value Get_Icon(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return Value(AssetOps<std::remove_reference_t<decltype(self->Icon)>>::GetPath(self->Icon));
+    }
+    static void Set_Icon(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        AssetOps<std::remove_reference_t<decltype(self->Icon)>>::SetPath(self->Icon, std::get<std::string>(value));
+    }
+    static Value Get_SpawnPoint(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return Value(self->SpawnPoint);
+    }
+    static void Set_SpawnPoint(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        self->SpawnPoint = std::get<glm::vec3>(value);
+    }
     static Value Get_GridCell(const void* instance)
     {
         const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
@@ -310,6 +363,139 @@ struct GeneratedAccess<World::ExampleScript>
     {
         World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
         self->GridCell = std::get<glm::ivec3>(value);
+    }
+    static Value Get_PreviewMatrix(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return Value(self->PreviewMatrix);
+    }
+    static void Set_PreviewMatrix(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        self->PreviewMatrix = std::get<glm::mat4>(value);
+    }
+    static void* GetPtr_Stats(void* instance)
+    {
+        return &(static_cast<World::ExampleScript*>(instance)->Stats);
+    }
+    static const void* GetPtrConst_Stats(const void* instance)
+    {
+        return &(static_cast<const World::ExampleScript*>(instance)->Stats);
+    }
+    static const TypeSchema* GetNested_Stats()
+    {
+        return &WeSchemaOf_ExampleStats();
+    }
+    static Value Get_Scores(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return PackSequence(self->Scores,
+            [](const float& item) { return Value(item); });
+    }
+    static void Set_Scores(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        UnpackSequence(value, &self->Scores,
+            [](const Value& item) -> float
+            {
+                const float* typed = std::get_if<float>(&item);
+                return typed ? *typed : float {};
+            });
+    }
+    static Value Get_Path(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return PackSequence(self->Path,
+            [](const glm::vec3& item) { return Value(item); });
+    }
+    static void Set_Path(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        UnpackSequence(value, &self->Path,
+            [](const Value& item) -> glm::vec3
+            {
+                const glm::vec3* typed = std::get_if<glm::vec3>(&item);
+                return typed ? *typed : glm::vec3 {};
+            });
+    }
+    static Value Get_Squad(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return PackSequence(self->Squad,
+            [](const World::ExampleStats& item) { return ReadStructValue(WeSchemaOf_ExampleStats(), &item); });
+    }
+    static void Set_Squad(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        UnpackSequence(value, &self->Squad,
+            [](const Value& item) -> World::ExampleStats
+            {
+                World::ExampleStats out {};
+                WriteStructValue(WeSchemaOf_ExampleStats(), &out, item);
+                return out;
+            });
+    }
+    static const TypeSchema* GetElementNested_Squad()
+    {
+        return &WeSchemaOf_ExampleStats();
+    }
+    static Value Get_Modes(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return PackSequence(self->Modes,
+            [](const World::ExampleMode& item) { return Value(static_cast<int64_t>(item)); });
+    }
+    static void Set_Modes(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        UnpackSequence(value, &self->Modes,
+            [](const Value& item) -> World::ExampleMode
+            {
+                if (const int64_t* raw = std::get_if<int64_t>(&item))
+                    return static_cast<World::ExampleMode>(*raw);
+                return static_cast<World::ExampleMode>(0);
+            });
+    }
+    static const EnumSchema* GetEnum_Modes()
+    {
+        return &WeEnumSchemaOf_ExampleMode();
+    }
+    static Value Get_Costs(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return PackMap(self->Costs,
+            [](const float& item) { return Value(item); });
+    }
+    static void Set_Costs(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        UnpackMap(value, &self->Costs,
+            [](const Value& item) -> float
+            {
+                const float* typed = std::get_if<float>(&item);
+                return typed ? *typed : float {};
+            });
+    }
+    static Value Get_Units(const void* instance)
+    {
+        const World::ExampleScript* self = static_cast<const World::ExampleScript*>(instance);
+        return PackMap(self->Units,
+            [](const World::ExampleStats& item) { return ReadStructValue(WeSchemaOf_ExampleStats(), &item); });
+    }
+    static void Set_Units(void* instance, const Value& value)
+    {
+        World::ExampleScript* self = static_cast<World::ExampleScript*>(instance);
+        UnpackMap(value, &self->Units,
+            [](const Value& item) -> World::ExampleStats
+            {
+                World::ExampleStats out {};
+                WriteStructValue(WeSchemaOf_ExampleStats(), &out, item);
+                return out;
+            });
+    }
+    static const TypeSchema* GetElementNested_Units()
+    {
+        return &WeSchemaOf_ExampleStats();
     }
     static const FieldSchema& Field_Health()
     {
@@ -324,7 +510,7 @@ struct GeneratedAccess<World::ExampleScript>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1000.000000f), false, false, "Hit points used by the example; the declared default is 100.", false, "", {  }, "hp", std::optional<float>(1.000000f) },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1000.000000f), false, false, "Scalar sample: declared default 100; the inspector edits it with a 0..1000 range slider and shows the 'hp' unit.", false, "", {  }, "hp", std::optional<float>(1.000000f) },
             Value(100.0f),
         };
         return schema;
@@ -342,8 +528,98 @@ struct GeneratedAccess<World::ExampleScript>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Movement speed in metres per second; the declared default is 1.", false, "", {  }, "m/s", std::optional<float>(0.100000f) },
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "Scalar sample: declared default 1; Step(0.1) sets the drag/keyboard increment.", false, "", {  }, "m/s", std::optional<float>(0.100000f) },
             Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Enabled()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD8B9168676275FAFull },
+            "Enabled",
+            Kind::Bool,
+            &Get_Enabled,
+            &Set_Enabled,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Bool sample: a checkbox row; the declared default is true.", false, "", {  }, "", std::nullopt },
+            Value(true),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Label()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE9167AD6499380F8ull },
+            "Label",
+            Kind::String,
+            &Get_Label,
+            &Set_Label,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "String sample: free text row; without Default(...) it starts unset and the script member initializer stays in effect.", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Mode()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xE1D6D8FE8B84ED69ull },
+            "Mode",
+            Kind::Enum,
+            &Get_Mode,
+            &Set_Mode,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_Mode,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Enum sample: WE_ENUM_SCHEMA(Game, ExampleMode, Int32) turns this into a dropdown; the scene stores the integer value.", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Icon()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x2065F3DFE312996Full },
+            "Icon",
+            Kind::Asset,
+            &Get_Icon,
+            &Set_Icon,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            "Texture2D",
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Asset sample: searchable asset dropdown (catalog-driven); the scene stores the logical asset path.", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_SpawnPoint()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x9CC88BF8D7946A05ull },
+            "SpawnPoint",
+            Kind::Vec3,
+            &Get_SpawnPoint,
+            &Set_SpawnPoint,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Editable vec3 sample: three numeric components edited together.", false, "", {  }, "", std::nullopt },
+            Value(),
         };
         return schema;
     }
@@ -360,8 +636,182 @@ struct GeneratedAccess<World::ExampleScript>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Read-only summary sample: an integer grid cell; the inspector shows a non-editable summary row and the value never enters the scene file.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Read-only summary sample (IVec3): the inspector shows a non-editable summary row and the value never enters the scene file.", false, "", {  }, "", std::nullopt },
             Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_PreviewMatrix()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD2539DC9353961EBull },
+            "PreviewMatrix",
+            Kind::Mat4,
+            &Get_PreviewMatrix,
+            &Set_PreviewMatrix,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Read-only summary sample (Mat4): same rule as GridCell — keep matrices as runtime state, not scene data.", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Stats()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD4EF3ADE8A5D2851ull },
+            "Stats",
+            Kind::Object,
+            nullptr,
+            nullptr,
+            &GetPtr_Stats,
+            &GetPtrConst_Stats,
+            &GetNested_Stats,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Nested struct sample: expandable child rows defined once by Game::ExampleStats (Health/Count with declared defaults).", false, "", {  }, "", std::nullopt },
+            Value(),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Scores()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x3D2535D958E15841ull },
+            "Scores",
+            Kind::Object,
+            &Get_Scores,
+            &Set_Scores,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Array<Float> sample: one row per element (row label = index), '-' removes and '+' appends.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::Array,
+            Kind::Float,
+            Kind::None,
+            nullptr,
+            nullptr,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Path()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1AF8C169101CDC1ull },
+            "Path",
+            Kind::Object,
+            &Get_Path,
+            &Set_Path,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Array<Vec3> sample: waypoints; each element is an editable vector row.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::Array,
+            Kind::Vec3,
+            Kind::None,
+            nullptr,
+            nullptr,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Squad()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x1BEB9BB48560A2E4ull },
+            "Squad",
+            Kind::Object,
+            &Get_Squad,
+            &Set_Squad,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Array<Struct> sample: elements are Game::ExampleStats, so each row expands into the struct's own child fields.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::Array,
+            Kind::Object,
+            Kind::None,
+            "Game::ExampleStats",
+            &GetElementNested_Squad,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Modes()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x44FFD28712DEE32Eull },
+            "Modes",
+            Kind::Object,
+            &Get_Modes,
+            &Set_Modes,
+            nullptr,
+            nullptr,
+            nullptr,
+            &GetEnum_Modes,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Array<Enum> sample: every element is an ExampleMode dropdown; the scene stores integers.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::Array,
+            Kind::Enum,
+            Kind::None,
+            "ExampleMode",
+            nullptr,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Costs()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x167CFE0856E2CEF0ull },
+            "Costs",
+            Kind::Object,
+            &Get_Costs,
+            &Set_Costs,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Map<Float> sample: one row per key (key = string, value = number); '+' asks for a new key name first.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::Map,
+            Kind::Float,
+            Kind::String,
+            nullptr,
+            nullptr,
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Units()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xAA9BCB535F5BD635ull },
+            "Units",
+            Kind::Object,
+            &Get_Units,
+            &Set_Units,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Map<Struct> sample: string key -> Game::ExampleStats; expand an entry to edit the nested fields.", false, "", {  }, "", std::nullopt },
+            Value(),
+            CollectionKind::Map,
+            Kind::Object,
+            Kind::String,
+            "Game::ExampleStats",
+            &GetElementNested_Units,
         };
         return schema;
     }
@@ -381,12 +831,25 @@ struct GeneratedAccess<World::ExampleScript>
             {
                 Field_Health(),
                 Field_Speed(),
+                Field_Enabled(),
+                Field_Label(),
+                Field_Mode(),
+                Field_Icon(),
+                Field_SpawnPoint(),
                 Field_GridCell(),
+                Field_PreviewMatrix(),
+                Field_Stats(),
+                Field_Scores(),
+                Field_Path(),
+                Field_Squad(),
+                Field_Modes(),
+                Field_Costs(),
+                Field_Units(),
             },
             nullptr,
             &ScriptBindingOf(),
             "Scripting/Examples",
-            "Sample C++ behavior: shows declared fields, defaults, units and edit metadata in the inspector.",
+            "Feature showcase C++ behavior: scalars with edit metadata, bool/string/enum/asset, editable vec3, read-only IVec3/Mat4 summaries, a nested struct and Array/Map container properties with lifecycle usage notes.",
             false,
         };
         return schema;
@@ -394,147 +857,80 @@ struct GeneratedAccess<World::ExampleScript>
 };
 
 template <>
-struct GeneratedAccess<World::StressTest>
+struct GeneratedAccess<World::ExampleStats>
 {
-    static Value Get_Weight(const void* instance)
+    static Value Get_Health(const void* instance)
     {
-        const World::StressTest* self = static_cast<const World::StressTest*>(instance);
-        return Value(self->Weight);
+        const World::ExampleStats* self = static_cast<const World::ExampleStats*>(instance);
+        return Value(self->Health);
     }
-    static void Set_Weight(void* instance, const Value& value)
+    static void Set_Health(void* instance, const Value& value)
     {
-        World::StressTest* self = static_cast<World::StressTest*>(instance);
-        self->Weight = std::get<int32_t>(value);
+        World::ExampleStats* self = static_cast<World::ExampleStats*>(instance);
+        self->Health = std::get<float>(value);
     }
-    static Value Get_Height(const void* instance)
+    static Value Get_Count(const void* instance)
     {
-        const World::StressTest* self = static_cast<const World::StressTest*>(instance);
-        return Value(self->Height);
+        const World::ExampleStats* self = static_cast<const World::ExampleStats*>(instance);
+        return Value(self->Count);
     }
-    static void Set_Height(void* instance, const Value& value)
+    static void Set_Count(void* instance, const Value& value)
     {
-        World::StressTest* self = static_cast<World::StressTest*>(instance);
-        self->Height = std::get<int32_t>(value);
+        World::ExampleStats* self = static_cast<World::ExampleStats*>(instance);
+        self->Count = std::get<int32_t>(value);
     }
-    static Value Get_m_Type(const void* instance)
-    {
-        const World::StressTest* self = static_cast<const World::StressTest*>(instance);
-        return Value(static_cast<int64_t>(self->m_Type));
-    }
-    static void Set_m_Type(void* instance, const Value& value)
-    {
-        World::StressTest* self = static_cast<World::StressTest*>(instance);
-        self->m_Type = static_cast<World::StressTestType>(std::get<int64_t>(value));
-    }
-    static const EnumSchema* GetEnum_m_Type()
-    {
-        return &WeEnumSchemaOf_StressTestType();
-    }
-    static Value Get_Icon(const void* instance)
-    {
-        const World::StressTest* self = static_cast<const World::StressTest*>(instance);
-        return Value(AssetOps<std::remove_reference_t<decltype(self->Icon)>>::GetPath(self->Icon));
-    }
-    static void Set_Icon(void* instance, const Value& value)
-    {
-        World::StressTest* self = static_cast<World::StressTest*>(instance);
-        AssetOps<std::remove_reference_t<decltype(self->Icon)>>::SetPath(self->Icon, std::get<std::string>(value));
-    }
-    static const FieldSchema& Field_Weight()
+    static const FieldSchema& Field_Health()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x622C1702CF6ADF1Bull },
-            "Weight",
+            FieldId{ 0x6D8DB3787D833A52ull },
+            "Health",
+            Kind::Float,
+            &Get_Health,
+            &Set_Health,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(9999.000000f), false, false, "Nested struct sample field: hit points of one entry (declared default 5).", false, "", {  }, "", std::nullopt },
+            Value(0.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Count()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x38D1A538208DEABBull },
+            "Count",
             Kind::Int32,
-            &Get_Weight,
-            &Set_Weight,
+            &Get_Count,
+            &Set_Count,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(128.000000f), false, false, "Number of entities created by the first batch (declared default 1).", false, "", {  }, "", std::optional<float>(1.000000f) },
-            Value(1),
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Nested struct sample field: how many units this entry stands for (declared default 1).", false, "", {  }, "", std::nullopt },
+            Value(static_cast<int32_t>(0)),
         };
         return schema;
-    }
-    static const FieldSchema& Field_Height()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xFD739A7C0B847800ull },
-            "Height",
-            Kind::Int32,
-            &Get_Height,
-            &Set_Height,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(128.000000f), false, false, "Stack depth used by the stress fixture (declared default 1).", false, "", {  }, "", std::optional<float>(1.000000f) },
-            Value(1),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_m_Type()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x60B948BE32335233ull },
-            "m_Type",
-            Kind::Enum,
-            &Get_m_Type,
-            &Set_m_Type,
-            nullptr,
-            nullptr,
-            nullptr,
-            &GetEnum_m_Type,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Stress mode selector; stored as an integer and edited through an enum dropdown.", false, "", {  }, "", std::nullopt },
-            Value(),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_Icon()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xA0F74AC3C9062F6Eull },
-            "Icon",
-            Kind::Asset,
-            &Get_Icon,
-            &Set_Icon,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            "Texture2D",
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Asset sample: a texture path edited through the searchable asset dropdown.", false, "", {  }, "", std::nullopt },
-            Value(),
-        };
-        return schema;
-    }
-    static const ScriptBinding& ScriptBindingOf()
-    {
-        static const ScriptBinding binding = MakeScriptBinding<World::StressTest>();
-        return binding;
     }
     static const TypeSchema& WeSchema()
     {
         static const TypeSchema schema = {
-            TypeId{ "Game::StressTest" },
-            "StressTest",
+            TypeId{ "Game::ExampleStats" },
+            "ExampleStats",
             WE_SCHEMA_ABI_VERSION,
-            sizeof(World::StressTest),
-            TypeCategory::Script,
+            sizeof(World::ExampleStats),
+            TypeCategory::Struct,
             {
-                Field_Weight(),
-                Field_Height(),
-                Field_m_Type(),
-                Field_Icon(),
+                Field_Health(),
+                Field_Count(),
             },
             nullptr,
-            &ScriptBindingOf(),
-            "Scripting/Examples",
-            "Stress fixture: allocates and destroys entities to exercise the scripting lifecycle.",
+            nullptr,
+            "",
+            "",
             false,
         };
         return schema;
@@ -542,18 +938,18 @@ struct GeneratedAccess<World::StressTest>
 };
 
 template <>
-struct GeneratedEnum<World::StressTestType>
+struct GeneratedEnum<World::ExampleMode>
 {
     static const EnumSchema& WeEnumSchema()
     {
         static const EnumSchema schema = {
-            "StressTestType",
+            "ExampleMode",
             true,
             4,
             {
-                { "None", static_cast<int64_t>(World::StressTestType::None) },
-                { "Test1", static_cast<int64_t>(World::StressTestType::Test1) },
-                { "Test2", static_cast<int64_t>(World::StressTestType::Test2) },
+                { "None", static_cast<int64_t>(World::ExampleMode::None) },
+                { "Patrol", static_cast<int64_t>(World::ExampleMode::Patrol) },
+                { "Chase", static_cast<int64_t>(World::ExampleMode::Chase) },
             },
         };
         return schema;
@@ -562,17 +958,17 @@ struct GeneratedEnum<World::StressTestType>
 
 const TypeSchema& WeSchemaOf_SampleDataComponent() { return GeneratedAccess<World::SampleDataComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_ExampleScript() { return GeneratedAccess<World::ExampleScript>::WeSchema(); }
-const TypeSchema& WeSchemaOf_StressTest() { return GeneratedAccess<World::StressTest>::WeSchema(); }
-const EnumSchema& WeEnumSchemaOf_StressTestType() { return GeneratedEnum<World::StressTestType>::WeEnumSchema(); }
+const TypeSchema& WeSchemaOf_ExampleStats() { return GeneratedAccess<World::ExampleStats>::WeSchema(); }
+const EnumSchema& WeEnumSchemaOf_ExampleMode() { return GeneratedEnum<World::ExampleMode>::WeEnumSchema(); }
 
 	bool RegisterGameSchemaModule(SchemaRegistry& registry)
 	{
 		bool ok = true;
-		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_StressTestType()) != SchemaRegistry::Status::Ok) ok = false;
+		if (registry.RegisterEnum(kModule, WeEnumSchemaOf_ExampleMode()) != SchemaRegistry::Status::Ok) ok = false;
 		const std::vector<TypeSchema> schemas = {
 			WeSchemaOf_SampleDataComponent(),
 			WeSchemaOf_ExampleScript(),
-			WeSchemaOf_StressTest(),
+			WeSchemaOf_ExampleStats(),
 		};
 		if (registry.RegisterModule(kModule, schemas) != SchemaRegistry::Status::Ok) ok = false;
 		if (!ok)

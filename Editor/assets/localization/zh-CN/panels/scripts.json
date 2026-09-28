@@ -9,5 +9,5 @@
   "panel.scripts.empty.title": "还没有脚本",
   "panel.scripts.empty.hint": "在内容浏览器里新建 .luau 脚本,然后在这里打开。",
   "panel.scripts.scene_empty": "当前场景没有脚本组件",
-  "panel.scripts.cpp_module_hint": "实例重载不支持(用「文件 ▸ 重载 C++ 模块」)"
+  "panel.scripts.cpp_module_hint": "实例重载不支持(用「文件 ▶ 重载 C++ 模块」)"
 }
