@@ -39,7 +39,10 @@ namespace World::Editor
 		bool AssetHotReload = true;                     // 资产/材质热重载;WLD_ASSET_HOTRELOAD 覆盖
 		// PROJ-2/T1:没有显式项目时,启动自动重启到"最近项目"第一条(只自动打开一次,
 		// 重启后的进程带 --project ⇒ 不再触发)。默认开;关掉 = 每次都显示项目启动器。
-		bool StartupAutoOpenLastProject = true;
+		// PROJ-3/T1(P1b,已确认):默认改为**关** —— 双击 Editor.exe 永远先到项目启动器;
+		// 想要"启动就回到上次项目"的用户把它打开(已有的 local/editor-prefs.json 里
+		// 显式写过的值不受这次默认值变化影响,保持用户自己的选择)。
+		bool StartupAutoOpenLastProject = false;
 		// 启动恢复策略(见 RestoreWindowsMode);`WLD_RESTORE_WINDOWS=ask|tabs|layout|none` 覆盖。
 		RestoreWindowsMode RestoreWindows = RestoreWindowsMode::Ask;
 		// AI 控制通道端口:0 = 关闭。服务器在启动时创建 → 重启生效

@@ -53,6 +53,10 @@ namespace World
 				std::string Error;                   // Ok=false 时可读原因
 				std::filesystem::path ProjectRoot;   // Ok=true = <位置>/<名称>(绝对)
 				std::vector<std::string> Files;      // Ok=true = 写出的相对路径(generic,已排序)
+				// PROJ-3/T1(P2b):项目根里的启动入口(相对文件名,已排序):
+				// `WeEdit.exe`/`WePlay.exe`(从构建目录复制,优先)或 `open-editor.cmd`/`run-game.cmd`
+				// (exe 缺失时的兜底)。两者都写不成 = 空(创建本身仍然成功)。
+				std::vector<std::string> EntryPoints;
 			};
 
 			// 生成骨架。context 只用于构造 Scene 走引擎的场景序列化(写 Main.wd)。

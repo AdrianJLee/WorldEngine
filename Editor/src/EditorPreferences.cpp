@@ -561,7 +561,7 @@ namespace World::Editor
 			"Open Last Project at Startup",
 			"Open the last project at startup\nWhen the editor starts without --project or WLD_PROJECT_DIR, "
 			"restart into the most recent project once (the startup launcher is skipped); turn off to always "
-			"show the project launcher.\nDefault: on. Takes effect after restarting the editor.",
+			"show the project launcher.\nDefault: off. Takes effect after restarting the editor.",
 			[&prefs] { return FormatBool(prefs.Data().StartupAutoOpenLastProject); },
 			[&prefs](const std::string& value, std::string*)
 			{

@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -62,10 +63,11 @@ namespace World
 	public:
 		// PROJ-2/T1:projectExplicit 传给 EditorLayer(启动决策:显式项目不显示启动器、
 		// 也不自动打开最近项目)。
-		EditorApp(World::WorldContext& context, bool projectExplicit)
+		// PROJ-3/T1:launcherMode = 纯启动器模式(不挂载任何项目,窗口只画启动器页)。
+		EditorApp(World::WorldContext& context, bool projectExplicit, bool launcherMode)
 			:Application("Editor", context)
 		{
-			PushLayer(WLD_ENGINE_NEW(EditorLayer, projectExplicit));
+			PushLayer(WLD_ENGINE_NEW(EditorLayer, projectExplicit, launcherMode));
 			// 热重载轮询层:改语言包文件后不重启即生效(与 EditorLayer 同栈,每帧 OnUpdate)。
 			PushLayer(WLD_ENGINE_NEW(LocalizationHotReloadLayer));
 		}
@@ -105,6 +107,27 @@ namespace World
 			const char* environmentProject = std::getenv("WLD_PROJECT_DIR");
 			projectExplicit = environmentProject != nullptr && environmentProject[0] != '\0';
 		}
+		// PROJ-3/T1:纯启动器模式判定(方案 v2 的 P1)。
+		//   * 有 `--project` / 非空 WLD_PROJECT_DIR ⇒ 永远直接进编辑器(脚本、探针、
+		//     项目自带的 open-editor.cmd 都走这条,行为不变);
+		//   * 其余情况:显式 `--launcher`,或命令行里**没有任何"进编辑器干活"的参数**
+		//     (只有 `--ai-control=<port>` 这类自动化辅助参数,或真的没有任何参数)
+		//     ⇒ 启动器模式 —— 双击 Editor.exe 的默认行为。
+		//   注意 `-scene` 不算辅助参数:渲染后端切换的重启命令带它,必须继续进编辑器形态。
+		bool launcherFlag = false;
+		bool editorIntent = false;
+		for (const std::string& argument : arguments)
+		{
+			if (argument == "--launcher")
+			{
+				launcherFlag = true;
+				continue;
+			}
+			if (argument.rfind("--ai-control=", 0) == 0)
+				continue;   // 自动化辅助参数:不改变"启动器形态"的判定
+			editorIntent = true;
+		}
+		const bool launcherMode = !projectExplicit && (launcherFlag || !editorIntent);
 		// 注意:不能写成 `i + 1 < size` 的配对循环 —— `--ai-control=` 这类**自带数值**的
 		// 单个参数会让循环体一次都不执行(实测:通道端口永远是 0,脚本连不上)。
 		for (size_t i = 0; i < arguments.size(); ++i)
@@ -259,6 +282,16 @@ namespace World
 				WLD_CORE_INFO("AI 控制通道端口来自编辑器偏好: {0}", preferencePort);
 			}
 		}
-		return new EditorApp(context, projectExplicit);
+		// PROJ-3/T1:启动器模式的"不挂载任何项目"必须发生在 Application 构造**之前** ——
+		// 基类构造函数里就会 MountProjectContent() 与 Renderer::Init(),两者都按
+		// "进程 CWD + World::Paths" 定位项目清单(理由与做法见 EditorLayer.h 的
+		// LauncherBootScope)。构造完成后作用域立刻析构:CWD 恢复原值(启动目录),
+		// 项目根覆盖保持哨兵值 —— 启动器进程整个生命周期里 ProjectDir() 都不指向真实项目。
+		std::unique_ptr<World::LauncherBootScope> launcherBoot;
+		if (launcherMode)
+			launcherBoot = std::make_unique<World::LauncherBootScope>();
+		Application* editor = new EditorApp(context, projectExplicit, launcherMode);
+		launcherBoot.reset();
+		return editor;
 	}
 }

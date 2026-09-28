@@ -22,13 +22,37 @@ namespace World
 	// P2 W5b:脚本热重载只按引用操作组件(完整定义在 Scene/Components.h)。
 	struct LuauScriptComponent;
 
+	// PROJ-3/T1:`Editor.exe` 纯启动器模式(无参数 / `--launcher`,且没有 `--project`)——
+	// "不挂载任何项目"必须在 Application 构造**之前**生效:Application 的基类构造函数会
+	// 依次 MountProjectContent() 与 Renderer::Init(),两者都按"进程 CWD + World::Paths"
+	// 定位项目清单(见 Engine/src/World/Core/Asset/ProjectManifest.cpp 的 Locate):
+	//   1) World::Paths 的项目根覆盖成哨兵目录(不存在)⇒ 编译期默认 projects/default 不命中;
+	//   2) 构造期间把 CWD 临时切到 Editor.exe 所在目录(与双击 exe 的 CWD 一致)⇒
+	//      `cwd/project.we.yaml` 与 `cwd/projects/default/project.we.yaml` 两条兜底也不命中;
+	//   3) 作用域结束(Application 构造完成)恢复原 CWD —— 之后按 CWD 解析的东西
+	//      (WUI 操作日志导出、AI 抓图白名单)行为与普通编辑器一致。
+	// 结果:引擎走"没有清单 ⇒ 什么都不挂"的既有路径(记一条 ERROR 日志,不崩),
+	// Renderer 用引擎默认设置初始化。哨兵项目根在启动器进程里一直保留:启动器没有"当前项目"。
+	class LauncherBootScope
+	{
+	public:
+		LauncherBootScope();
+		~LauncherBootScope();
+		LauncherBootScope(const LauncherBootScope&) = delete;
+		LauncherBootScope& operator=(const LauncherBootScope&) = delete;
+	private:
+		std::filesystem::path m_PreviousWorkingDirectory;   // 空 = 没有改过 CWD(不需要恢复)
+	};
+
 	class EditorLayer : public Layer
 	{
 	public:
 		// PROJ-2/T1:projectExplicit = 宿主给了显式项目(`--project` 或非空 `WLD_PROJECT_DIR`)。
 		// 显式 ⇒ 不显示项目启动器、也不触发"自动打开上次项目";隐式 ⇒ 按偏好决定
 		// 自动重启到最近项目一次,否则显示启动器(见 OnAttach 的启动决策)。
-		explicit EditorLayer(bool projectExplicit = false);
+		// PROJ-3/T1:launcherMode = 纯启动器模式(宿主在 Application 构造前已按
+		// LauncherBootScope 的口径挡住项目挂载;这里负责跳过项目级初始化、只画启动器页)。
+		explicit EditorLayer(bool projectExplicit = false, bool launcherMode = false);
 		virtual ~EditorLayer() = default;
 		virtual void OnAttach() override;
 		virtual void OnDetach() override;
@@ -99,6 +123,11 @@ namespace World
 		// ---- PROJ-2/T1:项目启动器 + 一键启动项目 ----
 		// 启动器是否可见(启动决策在 OnAttach 定一次;关闭后不再出现)。
 		bool ShowProjectLauncher() const { return m_ShowProjectLauncher; }
+		// PROJ-3/T1:纯启动器模式(不挂载项目;窗口只画启动器页)。
+		bool IsLauncherMode() const { return m_LauncherMode; }
+		// 关闭启动器 = 退出进程(启动器模式没有"当前项目"可停留;固定日志 `[launcher] closed; exiting`)。
+		// 启动器页的"退出"按钮与主窗口关闭事件(Alt+F4 / WM_CLOSE)共用这一条。
+		void RequestLauncherExit();
 		// 关闭启动器:停在当前已挂载的项目(写日志说明),不再显示。
 		void DismissProjectLauncher();
 		// 启动独立 Runtime 进程跑指定项目(不重启编辑器、不要求先切项目):
@@ -383,6 +412,10 @@ namespace World
 		EditorShell m_Shell;
 		// PROJ-2/T1:宿主是否给了显式项目(启动器/自动打开最近都要看它)。
 		bool m_ProjectExplicit = false;
+		// PROJ-3/T1:纯启动器模式(见 LauncherBootScope 与 OnAttach 的启动分支)。
+		bool m_LauncherMode = false;
+		// `[launcher] closed; exiting` 只写一次(退出按钮与窗口关闭事件可能同时到达)。
+		bool m_LauncherExitLogged = false;
 		// 启动器可见性(OnAttach 决策;DismissProjectLauncher 关掉)。
 		bool m_ShowProjectLauncher = false;
 		// "自动打开上次项目一次":OnAttach 定,第一帧 OnUpdate 执行 RelaunchWithProject

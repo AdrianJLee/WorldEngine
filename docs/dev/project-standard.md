@@ -60,6 +60,9 @@
 - 编辑器启动时**不再默认落进 `projects/default`**:显式 `--project`/`WLD_PROJECT_DIR` 直接进;
   否则"启动时自动打开上次项目"(偏好,默认开)进最近项目;再否则显示**项目启动器**
   (最近项目 / 新建 / 打开 / 显式"打开默认示例项目")。最近项目记录在本机态 `local/projects.json`。
+
+  > PROJ-3 起:`Editor.exe` **无参数 = 纯启动器模式** —— 不挂载任何项目(跳过 Game 模块/存根/面板/窗口恢复),
+  > 窗口只有启动器一页;选中项目后以 `--project` 拉起编辑器形态并退出。"启动时打开上次项目"默认改为**关**。
 - 切项目走 `File ▸ Open Project…` / `File ▸ Recent Projects ▸ …`(实现上都是带 `--project` 重启编辑器)。
 - **启动项目**:`运行 ▸ 启动项目(Runtime)`(与新建成功态的按钮)用独立进程跑当前/目标项目 ——
   它直接调用开发布局里的 `<WLD_OUTPUT_DIR>Runtime/<cfg>/Runtime.exe --project <项目根>`,工作目录 = 项目根。
@@ -69,6 +72,15 @@
   `projects/default` 只是**编译期默认值**,不再是唯一可能。
 - Runtime:在项目根(或含清单的目录)启动即可 —— 清单解析按 CWD → `projects/default/` → 开发树。
 - 向导里的 `Open Project` = 用 `WLD_PROJECT_DIR` 重启编辑器到该项目(进程级切换,不做同进程热切换)。
+
+### 4.1 项目自带的启动入口(本机产物)
+
+- 向导在项目根复制两个零依赖小启动器:`WeEdit.exe`(起 `Editor.exe --project <项目根>`)、
+  `WePlay.exe`(起 `Runtime.exe --project <项目根>`);构建目录里还没有它们时退回生成
+  `open-editor.cmd` / `run-game.cmd`(`WE_ROOT` 可覆盖引擎根;路径用 `%~dp0.` 规避尾反斜杠陷阱)。
+- 入口是**本机产物**:向导会把这些文件名写进项目根的 `.gitignore`(连同 `/build/`、`/local/`),
+  项目本身不需要它们也能被 `--project` 打开 —— 所以机检把它们算**可选件**(缺 = WARN)。
+- 小启动器本体在引擎仓库的 `Launcher/`(目标 `WeEdit` / `WePlay`);它不链接引擎,只调宿主 exe。
 
 ## 5. 待办(下一批,需重新确认)
 

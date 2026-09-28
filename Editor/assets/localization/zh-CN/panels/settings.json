@@ -55,7 +55,7 @@
   "settings.editor.general.term_hints.disabled": "仅在界面语言不是英文时可用。",
   "settings.editor.appearance.theme": "主题",
   "settings.editor.workflow.startup_auto_open_last_project": "启动时打开上次的项目",
-  "settings.editor.workflow.startup_auto_open_last_project.tooltip": "启动时自动打开最近的项目\n编辑器启动时若没有 --project 或环境变量 WLD_PROJECT_DIR,就自动重启到最近打开过的那个项目(跳过项目启动器);关掉它则每次都显示项目启动器。\n默认:开\n重启编辑器后生效",
+  "settings.editor.workflow.startup_auto_open_last_project.tooltip": "启动时自动打开最近的项目\n编辑器启动时若没有 --project 或环境变量 WLD_PROJECT_DIR,就自动重启到最近打开过的那个项目(跳过项目启动器);关掉它则每次都显示项目启动器。\n默认:关(双击 Editor.exe 先到项目启动器)\n重启编辑器后生效",
   "settings.editor.appearance.theme.tooltip": "编辑器主题\n暗色为默认;浅色与跟随系统已可用。\n默认:Dark\n立即生效",
   "settings.editor.appearance.theme.option.dark": "暗色",
   "settings.editor.appearance.theme.option.light": "浅色",

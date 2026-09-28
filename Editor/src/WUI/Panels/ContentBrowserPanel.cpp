@@ -626,6 +626,14 @@ namespace World
 
 	void ContentBrowserPanel::SaveState()
 	{
+		// PROJ-3/T4-FIX:内容根还没真正挂上时(典型 = 纯启动器模式的哨兵项目根,或项目 assets 缺失)
+		// 不要写状态 —— 那会用"空浏览位置"覆盖用户上次的位置。LoadState 在这种根下也无法把
+		// 相对路径解析回来,所以这里以"根目录是否存在"为准,而不是靠加载成败记账。
+		{
+			std::error_code rootError;
+			if (m_Model.Root.empty() || !std::filesystem::is_directory(m_Model.Root, rootError))
+				return;
+		}
 		try
 		{
 			Wui::JsonValue root;

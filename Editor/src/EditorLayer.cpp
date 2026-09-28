@@ -184,12 +184,54 @@ namespace World
 		}
 	}
 
-	EditorLayer::EditorLayer(bool projectExplicit)
-		: Layer("EditorLayer"), m_Document(Application::Get().GetContext()), m_Shell(*this)
+	// PROJ-3/T1:启动器模式在 Application 构造前的一次性准备 —— 口径与理由见 EditorLayer.h
+	// 的 LauncherBootScope 注释;这里把"三个动作"落成代码:哨兵项目根 + 临时 CWD + 恢复。
+	LauncherBootScope::LauncherBootScope()
+	{
+		// 1) 项目根 → 哨兵目录(不创建、不读):让 ProjectManifest::Locate 的第 2 步
+		//    (World::Paths::ProjectFile)不命中编译期默认项目 projects/default。
+		World::Paths::SetProjectDirOverride(std::filesystem::path(WLD_LOCAL_DIR) / "launcher-stub");
+
+		// 2) CWD → Editor.exe 所在目录(双击 exe 时 Explorer 给的 CWD):
+		//    第 1 步 cwd/project.we.yaml 与第 3 步 cwd/projects/default/project.we.yaml 都不命中。
+		std::error_code ec;
+		m_PreviousWorkingDirectory = std::filesystem::current_path(ec);
+		if (ec || m_PreviousWorkingDirectory.empty())
+		{
+			// 读不到当前 CWD(极罕见):保持原样 —— 退化成"可能仍挂载默认项目",
+			// 但不引入新的失败分支(启动器页照常显示)。
+			m_PreviousWorkingDirectory.clear();
+			return;
+		}
+		wchar_t exeBuffer[MAX_PATH] = {};
+		const DWORD length = GetModuleFileNameW(nullptr, exeBuffer, MAX_PATH);
+		if (length == 0 || length >= MAX_PATH)
+		{
+			m_PreviousWorkingDirectory.clear();   // 没有改过 CWD:不需要恢复
+			return;
+		}
+		std::error_code changeError;
+		std::filesystem::current_path(std::filesystem::path(exeBuffer).parent_path(), changeError);
+		if (changeError)
+			m_PreviousWorkingDirectory.clear();   // 切换失败 = 没有改过 CWD
+	}
+
+	LauncherBootScope::~LauncherBootScope()
+	{
+		if (m_PreviousWorkingDirectory.empty())
+			return;
+		std::error_code ignored;
+		std::filesystem::current_path(m_PreviousWorkingDirectory, ignored);
+	}
+
+	EditorLayer::EditorLayer(bool projectExplicit, bool launcherMode)
+		: Layer("EditorLayer"), m_Document(Application::Get().GetContext()), m_Shell(*this, launcherMode)
 	{
 		// PROJ-2/T1:显式项目标记来自宿主(EditorApp 解析 --project / WLD_PROJECT_DIR);
 		// 用赋值而不是初始化列表,避免与成员声明顺序无关的重排警告。
 		m_ProjectExplicit = projectExplicit;
+		// PROJ-3/T1:纯启动器模式(宿主已在 Application 构造前挡住项目挂载,见 LauncherBootScope)。
+		m_LauncherMode = launcherMode;
 		m_Commands.Register({ Wui::HashId("cmd.new"), "New", KeyCodes::N, true, false, [this] { NewScene(); } });
 		m_Commands.Register({ Wui::HashId("cmd.open"), "Open", KeyCodes::O, true, false, [this] { OpenScene(); } });
 		m_Commands.Register({ Wui::HashId("cmd.save"), "Save", KeyCodes::S, true, false, [this] { SaveScene(); } });
@@ -241,6 +283,48 @@ namespace World
 			Application::Get().GetWindow().SetClipboardText(std::string(text));
 			return true;
 		};
+
+		// ---- PROJ-3/T1:纯启动器模式(不挂载项目、不做项目级初始化)----
+		// 宿主在 Application 构造前已经挡住项目挂载(见 LauncherBootScope);这里:
+		//   * 不加载 Game 模块、不生成 Lua 存根、不建 Luau LSP 脚手架、不读项目清单;
+		//   * 不新建/打开任何场景(m_ActiveScene 保持空),不创建面板布局与上次窗口恢复;
+		//   * 窗口只画一页"项目启动器"(EditorShell::RenderLauncherPage)。
+		// 场景渲染目标仍按普通路径创建:`state.dump` 等既有读取路径会读它的尺寸,
+		// 而它不接触任何项目内容(渲染器用引擎默认设置初始化)。
+		if (m_LauncherMode)
+		{
+			WLD_CORE_INFO("[launcher] mode=launcher (no project mounted)");
+			m_CppModuleStatus.State = CppModuleState::Unloaded;
+			m_CppModuleStatus.Ok = false;
+			m_CppModuleStatus.Message = "launcher mode: no project mounted";
+
+			m_SceneRenderer = CreateRef<SceneRenderer>();
+			m_SceneRenderer->Init();
+			m_PreviewRenderer = CreateRef<SceneRenderer>();
+			m_PreviewRenderer->Init();
+			m_PreviewRenderer->OnResize(480, 270);
+
+			LoadIconTextures();
+			RegisterUiTextures();
+
+			// 启动决策(与普通隐式启动同源):
+			//   * 偏好 `StartupAutoOpenLastProject` 开着且最近项目第一条有效 ⇒ 第一帧自动重启到它一次
+			//     (PROJ-2 语义不变;该偏好的默认值已按 PROJ-3/P1b 改为关);
+			//   * 否则停在启动器页(本轮的唯一界面),直到用户选项目、或退出。
+			m_ShowProjectLauncher = true;
+			if (Editor::EditorPreferences::Get().Data().StartupAutoOpenLastProject)
+			{
+				const std::vector<Editor::RecentProjectEntry> recent = Editor::ProjectLauncher::LoadRecent();
+				if (!recent.empty() && recent.front().Valid)
+				{
+					m_PendingAutoOpenRecent = true;
+					m_PendingAutoOpenProject = std::filesystem::u8path(recent.front().Path);
+					WLD_CORE_INFO("[launcher] startup: auto-opening the last project '{0}' once "
+						"(preference StartupAutoOpenLastProject is on)", m_PendingAutoOpenProject.u8string());
+				}
+			}
+			return;
+		}
 		// Layout-S6:Game 模块是 Game 组件 schema 的注册者,也是自动存根生成的输入来源。
 		// 加载失败时下面会**停用**自动存根生成(见那儿的原因)。
 		std::string moduleError;
@@ -1174,6 +1258,14 @@ namespace World
 	}
 	bool EditorLayer::OnWindowClose(WindowCloseEvent& e)
 	{
+		// PROJ-3/T1:启动器模式没有项目/文档 —— 关窗(Alt+F4 / WM_CLOSE)= 退出进程,
+		// 不去碰未保存确认/停在空项目上;固定日志 `[launcher] closed; exiting`。
+		if (m_LauncherMode)
+		{
+			RequestLauncherExit();
+			e.m_Handled = true;
+			return true;
+		}
 		// 确认框已打开：继续拦截关闭，等待用户在框内选择。
 		if (m_ShowUnsavedModal)
 		{
@@ -1845,6 +1937,19 @@ namespace World
 		RequestAction([this]() { World::Application::Get().Close(); });
 	}
 
+	// PROJ-3/T1:关闭启动器 = 退出进程(启动器模式没有"当前项目"可停留)。
+	// 启动器页的"退出"按钮、Esc 与主窗口关闭事件(Alt+F4 / WM_CLOSE)共用这一条;
+	// 日志固定一行,只写一次(两条路径可能在同一帧先后到达)。
+	void EditorLayer::RequestLauncherExit()
+	{
+		if (!m_LauncherExitLogged)
+		{
+			m_LauncherExitLogged = true;
+			WLD_CORE_INFO("[launcher] closed; exiting");
+		}
+		World::Application::Get().Close();
+	}
+
 	void EditorLayer::DuplicateSelectedEntity()
 	{
 		Entity selectedEntity = m_SelectedEntity;
@@ -2035,6 +2140,10 @@ namespace World
 			return;
 		}
 
+		// PROJ-3/T1:启动器模式拉起编辑器形态时的固定日志(探针断言点)。
+		if (m_LauncherMode)
+			WLD_CORE_INFO("[launcher] launching editor with --project {0}", root.u8string());
+
 		// PROJ-2/T1:所有"打开项目"的入口(启动器 / File ▸ Open Project / Recent Projects /
 		// 向导成功态的"打开项目")都汇聚到这里 —— 真正重启之前把该项目根记进最近列表
 		// (子进程 OnAttach 还会再记一次,刷新时间戳)。
@@ -2137,6 +2246,10 @@ namespace World
 	// ---- PROJ-2/T1:项目启动器(状态) + 一键启动项目(独立 Runtime 进程)----
 	void EditorLayer::DismissProjectLauncher()
 	{
+		// PROJ-3/T1:启动器模式没有"当前项目"可停留 —— 启动器页上的"退出"走
+		// RequestLauncherExit();这里只服务于普通编辑器形态的模态启动器(PROJ-2 语义)。
+		if (m_LauncherMode)
+			return;
 		if (!m_ShowProjectLauncher)
 			return;
 		m_ShowProjectLauncher = false;
@@ -2415,6 +2528,10 @@ namespace World
 	}
 	bool EditorLayer::OnKeyPressed(KeyPressedEvent& e)
 	{
+		// PROJ-3/T1:启动器模式没有场景/面板 —— 全局命令表(新建/打开/保存场景、Play、Gizmo…)
+		// 一律不触发;启动器页的键盘交互(Esc = 退出)由 WUI 自己的输入路径消费。
+		if (m_LauncherMode)
+			return false;
 		if (e.GetRepeatCount() > 0)
 			return false;
 

@@ -39,7 +39,10 @@ namespace World
 	class EditorShell : public ViewportHost
 	{
 	public:
-		explicit EditorShell(EditorLayer& editor);
+		// PROJ-3/T1:launcherMode = 纯启动器模式 —— 窗口只画一页"项目启动器":
+		// 不读/不写停靠布局存档(local/wui-layout.json),不恢复上次的独立窗口,
+		// 也不画菜单栏 / 挂靠栏 / 停靠区 / 状态栏(渲染分支见 OnRender)。
+		explicit EditorShell(EditorLayer& editor, bool launcherMode = false);
 		~EditorShell();
 		void OnRender(Wui::WuiContext& ctx);
 		// 退出前释放独立窗口(释放其呈现目标/OS 窗口,必须在 RHI 设备销毁前调用)。
@@ -363,10 +366,16 @@ namespace World
 		// 创建结果按创建时的勾选快照进成功态(提示文案 / 交给 ProjectScaffolder 的参数)。
 		bool m_NewProjectStarterScene = true;
 		bool m_NewProjectCreatedStarterScene = true;
+		// PROJ-3/T1(P2b):本次创建写进项目根的启动入口(相对文件名,已排序;
+		// 空 = exe 与 .cmd 都没写成功 —— 成功态不画"启动入口"那一行)。
+		std::vector<std::string> m_NewProjectEntryPoints;
 
 		// ---- PROJ-2/T1:项目启动器 + File ▸ Open Project… + 运行 ▸ 启动项目(Runtime)----
 		// 启动决策(是否显示启动器)在 EditorLayer;这里只渲染最近列表与四个动作、登记 a11y。
 		void DrawProjectLauncherModal(Wui::WuiContext& ctx);
+		// PROJ-3/T1:纯启动器模式的整页渲染(启动器页 + 新建项目向导 + 错误模态;
+		// 没有菜单/停靠区/状态栏/独立窗口)。由 OnRender 在 m_LauncherMode 下调用。
+		void RenderLauncherPage(Wui::WuiContext& ctx);
 		// "打开项目…":选目录(帧边界原生对话框)→ 校验 project.we.yaml → RelaunchWithProject。
 		void RunOpenProjectBrowse(Wui::WuiContext& ctx);
 		bool m_OpenProjectBrowsePending = false;   // 下一帧开头弹"选择项目目录"
@@ -398,6 +407,8 @@ namespace World
 		std::string CppModuleHintText() const;
 
 		EditorLayer& m_Editor;
+		// PROJ-3/T1:纯启动器模式(构造参数;不读布局存档、不恢复独立窗口、只画启动器页)。
+		bool m_LauncherMode = false;
 		Wui::DockLayout m_Layout;
 		std::filesystem::path m_LayoutPath;
 		std::vector<std::string> m_Panels;

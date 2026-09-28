@@ -39,6 +39,8 @@ add_subdirectory(Engine)
 add_subdirectory(Editor)
 add_subdirectory(Game)
 add_subdirectory(Runtime)
+# PROJ-3/T2:项目侧小启动器(WeEdit.exe / WePlay.exe)——零引擎依赖,可单独复制进项目目录。
+add_subdirectory(Launcher)
 
 add_dependencies(Runtime Game)
 add_dependencies(Editor Runtime)

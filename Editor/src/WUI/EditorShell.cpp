@@ -147,8 +147,9 @@ namespace World
 		constexpr const char* kPrefabPanelPrefix = "prefab:";
 	}
 
-	EditorShell::EditorShell(EditorLayer& editor)
-		: m_Editor(editor), m_LayoutPath(std::string(WLD_LOCAL_DIR) + "wui-layout.json")
+	EditorShell::EditorShell(EditorLayer& editor, bool launcherMode)
+		: m_Editor(editor), m_LauncherMode(launcherMode),
+			m_LayoutPath(std::string(WLD_LOCAL_DIR) + "wui-layout.json")
 	{
 		// 面板列表与默认停靠布局都由形态声明生成:独立形态面板不进停靠树。
 		// 注意:"windows"(Independent Windows 面板)与 "attach_slot" 仍未注册(等后续任务),
@@ -161,15 +162,24 @@ namespace World
 				dockedPanels.push_back(spec.Id);
 		}
 		const Wui::DockLayout fallback = Wui::DockLayout::Default(dockedPanels);
-		std::string error;
-		if (!Wui::WuiLayoutStore::Load(m_LayoutPath, fallback, &m_Layout, &error))
-			WLD_CORE_WARN("Failed to load WUI layout, using default: {0}", error);
+		if (m_LauncherMode)
+		{
+			// PROJ-3/T1:启动器模式不读停靠布局存档 —— 启动器页不画面板,也不该因为
+			// "启动一次启动器"而改写用户上一次的编辑器布局(整个启动器进程都不保存布局)。
+			m_Layout = fallback;
+		}
+		else
+		{
+			std::string error;
+			if (!Wui::WuiLayoutStore::Load(m_LayoutPath, fallback, &m_Layout, &error))
+				WLD_CORE_WARN("Failed to load WUI layout, using default: {0}", error);
 
-		// 加载白名单(按声明纠正存档,不尝试"修复"矛盾记录):
-		//  - 未声明的历史面板、声明为独立窗口的面板:从停靠树/浮动记录里直接丢弃;
-		//  - 声明为停靠的面板:临时拖出不跨会话(回停靠树)。
-		StripIndependentPanelsFromTree(m_Layout);
-		RestoreDockedPanelsFromFloat(m_Layout);
+			// 加载白名单(按声明纠正存档,不尝试"修复"矛盾记录):
+			//  - 未声明的历史面板、声明为独立窗口的面板:从停靠树/浮动记录里直接丢弃;
+			//  - 声明为停靠的面板:临时拖出不跨会话(回停靠树)。
+			StripIndependentPanelsFromTree(m_Layout);
+			RestoreDockedPanelsFromFloat(m_Layout);
+		}
 
 		m_PanelRegistry.emplace("hierarchy", std::make_unique<HierarchyPanel>());
 		// P4-UX1:主题来源单一化 —— 默认暗色,`WLD_UI_THEME=light|system` 可覆盖。
@@ -224,7 +234,7 @@ namespace World
 		for (const Wui::DockFloat& entry : m_Layout.FloatMemory)
 			m_LastFloatRects[entry.Panel] = entry.Rect;
 
-		if (!restoreItems.empty())
+		if (!restoreItems.empty() && !m_LauncherMode)
 		{
 			switch (Editor::EditorPreferences::Get().Data().RestoreWindows)
 			{
@@ -869,6 +879,9 @@ namespace World
 
 	void EditorShell::SaveLayout()
 	{
+		// PROJ-3/T1:启动器模式不碰用户的布局存档(既不读也不写,见构造函数)。
+		if (m_LauncherMode)
+			return;
 		std::string error;
 		// 落盘前按形态声明规范化:独立窗口不进停靠树;停靠面板不持久化"临时拖出"。
 		if (!Wui::WuiLayoutStore::Save(m_LayoutPath, LayoutForSave(), &error))
@@ -1145,6 +1158,13 @@ namespace World
 		{
 			m_OpenProjectBrowsePending = false;
 			RunOpenProjectBrowse(ctx);
+		}
+		// PROJ-3/T1:纯启动器模式 —— 窗口只有一页启动器;菜单栏 / 挂靠栏 / 停靠区 /
+		// 状态栏 / 独立窗口全部不画(无障碍树里也就只有启动器页的节点)。
+		if (m_LauncherMode)
+		{
+			RenderLauncherPage(ctx);
+			return;
 		}
 		// M4-TEX P4:内容浏览器(双击 `.wtex` / 右键 Texture Settings…/Reimport/Reset)在渲染期间
 		// 只能写"打开纹理设置"的请求 —— 可见性/布局不能在面板渲染中途改。这里在帧边界统一执行,
@@ -1548,6 +1568,31 @@ namespace World
 		// U26:独立 OS 窗口放在**最后**渲染 —— 它们会把无障碍树的"当前窗口"切到自己,
 		// 放在前面会让菜单栏/状态栏等主窗口节点挂错窗口键(见 RenderIndependentWindows)。
 		RenderIndependentWindows(ctx);
+		m_TextFocusLatched = Wui::WuiTextFocus::Get().Active();
+	}
+
+	// PROJ-3/T1:纯启动器模式的整页渲染。与普通编辑器**共用同一批模态绘制函数**
+	// (DrawModals:新建项目向导 / 项目启动器 / 错误框),但不画菜单栏、挂靠栏、停靠区、
+	// 状态栏与独立窗口 —— 启动器页就是窗口的全部内容;停靠布局在构造期就没有装载,
+	// 也不会有任何"顺手保存布局"的路径(见 SaveLayout 的启动器模式直接返回)。
+	void EditorShell::RenderLauncherPage(Wui::WuiContext& ctx)
+	{
+		// 无障碍帧照常开始:启动器节点就是 a11y 树的全部内容(AI 通道 ui.tree 读的是它)。
+		Wui::WuiAccessibility::Get().BeginFrame("main", ctx.ViewportSize());
+		Editor::AssetDropBridge::Get().BeginFrame(ctx.Frame());
+		ctx.SetWindowKey("main");
+		ctx.ClearDropTarget();
+
+		DrawModals(ctx);
+		ctx.ClearHoverBlockers();
+
+		// 状态提示(打开项目失败 / Runtime 缺失等)在启动器页也要看得见:用窗口底部
+		// 一条当它的落点(与普通路径的状态栏同一份实现,只是这里没有真状态栏)。
+		const glm::vec2 viewport = ctx.ViewportSize();
+		DrawStatusNotice(ctx, { 0.0f, viewport.y - 22.0f, viewport.x, 22.0f });
+		Wui::DrawTooltip(ctx, m_Theme);
+
+		// 文本焦点快照与普通路径同源(下一个 UI 帧的输入判定要用)。
 		m_TextFocusLatched = Wui::WuiTextFocus::Get().Active();
 	}
 
@@ -4150,6 +4195,7 @@ namespace World
 		m_NewProjectOpenedFrame = static_cast<uint32_t>(ctx.Frame());
 		m_NewProjectCreated = false;
 		m_NewProjectCreatedStarterScene = true;
+		m_NewProjectEntryPoints.clear();
 		m_NewProjectRoot.clear();
 		m_NewProjectCreatedName.clear();
 		m_NewProjectFailure.clear();
@@ -4206,6 +4252,7 @@ namespace World
 
 		m_NewProjectCreated = true;
 		m_NewProjectCreatedStarterScene = m_NewProjectStarterScene;
+		m_NewProjectEntryPoints = result.EntryPoints;
 		m_NewProjectRoot = result.ProjectRoot;
 		m_NewProjectCreatedName = name;
 		m_NewProjectFailure.clear();
@@ -4271,25 +4318,75 @@ namespace World
 					m_Theme.Danger, 12.0f);
 			}
 			cursorY += 22.0f;
+			// PROJ-3/T1:启动器模式下没有"留在这里继续工作"这一选项 —— 默认动作是打开新项目。
 			Wui::Label(ctx, { labelX, cursorY },
-				Wui::Tr("modal.newproject.created.hint",
-					"Launch Project runs it in a separate Runtime process; Open Project restarts the "
-					"editor into it; or keep working here."),
+				m_LauncherMode
+					? Wui::Tr("modal.newproject.created.hint.launcher",
+						"In launcher mode: Open Project (the default action) restarts the editor into "
+						"the new project; Launch Project runs it in a separate Runtime process.")
+					: Wui::Tr("modal.newproject.created.hint",
+						"Launch Project runs it in a separate Runtime process; Open Project restarts the "
+						"editor into it; or keep working here."),
 				m_Theme.TextMuted, 12.0f);
+			cursorY += 22.0f;
+			// PROJ-3/T1(P2b):项目根里的启动入口(exe 优先,缺失则 .cmd 兜底)。
+			if (!m_NewProjectEntryPoints.empty())
+			{
+				std::string entryList;
+				for (const std::string& entry : m_NewProjectEntryPoints)
+				{
+					if (!entryList.empty())
+						entryList += ", ";
+					entryList += entry;
+				}
+				Wui::Label(ctx, { labelX, cursorY },
+					Wui::TrFormat("modal.newproject.created.entrypoints",
+						"Launch entry points in the project root: {files} (double-click; no command line needed).",
+						{ { "files", entryList } }),
+					m_Theme.TextMuted, 12.0f);
+			}
 
-			const Wui::ModalButtonDesc buttons[4] = {
-				{ Wui::Tr("modal.newproject.open_explorer", "Open in Explorer"),
-					Wui::HashId("project.new.explorer"), true },
-				{ Wui::Tr("modal.newproject.open_project", "Open Project"),
-					Wui::HashId("project.new.open"), true },
+			// PROJ-3/T1:启动器模式下"打开项目"是默认(最左)动作 —— 启动器进程要做的是把
+			// 用户送进新项目;普通编辑器形态保持 PROJ-2 的按钮顺序。
+			// None = 本帧没有任何按钮被按下(ModalButtons 返回 -1)—— 不能当成 Close,
+			// 否则成功态会在画出来的同一帧把自己关掉。
+			enum class CreateAction { None, Explorer, OpenProject, LaunchProject, Close };
+			CreateAction actionOrder[4];
+			Wui::ModalButtonDesc buttons[4];
+			if (m_LauncherMode)
+			{
+				actionOrder[0] = CreateAction::OpenProject;
+				buttons[0] = { Wui::Tr("modal.newproject.open_project", "Open Project"),
+					Wui::HashId("project.new.open"), true };
+				actionOrder[1] = CreateAction::LaunchProject;
+				buttons[1] = { Wui::Tr("modal.newproject.launch", "Launch Project"),
+					Wui::HashId("project.new.launch"), true };
+				actionOrder[2] = CreateAction::Explorer;
+				buttons[2] = { Wui::Tr("modal.newproject.open_explorer", "Open in Explorer"),
+					Wui::HashId("project.new.explorer"), true };
+				actionOrder[3] = CreateAction::Close;
+				buttons[3] = { Wui::Tr("modal.newproject.close", "Close"),
+					Wui::HashId("project.new.close"), true };
+			}
+			else
+			{
+				actionOrder[0] = CreateAction::Explorer;
+				buttons[0] = { Wui::Tr("modal.newproject.open_explorer", "Open in Explorer"),
+					Wui::HashId("project.new.explorer"), true };
+				actionOrder[1] = CreateAction::OpenProject;
+				buttons[1] = { Wui::Tr("modal.newproject.open_project", "Open Project"),
+					Wui::HashId("project.new.open"), true };
 				// PROJ-2/T1:第三个动作按钮 —— 独立 Runtime 进程直接跑刚建的项目(不重启编辑器)。
-				{ Wui::Tr("modal.newproject.launch", "Launch Project"),
-					Wui::HashId("project.new.launch"), true },
-				{ Wui::Tr("modal.newproject.close", "Close"),
-					Wui::HashId("project.new.close"), true },
-			};
+				actionOrder[2] = CreateAction::LaunchProject;
+				buttons[2] = { Wui::Tr("modal.newproject.launch", "Launch Project"),
+					Wui::HashId("project.new.launch"), true };
+				actionOrder[3] = CreateAction::Close;
+				buttons[3] = { Wui::Tr("modal.newproject.close", "Close"),
+					Wui::HashId("project.new.close"), true };
+			}
 			const int clicked = Wui::ModalButtons(ctx, frame, buttons, 4, m_Theme);
-			if (clicked == 0)
+			const CreateAction action = clicked >= 0 && clicked < 4 ? actionOrder[clicked] : CreateAction::None;
+			if (action == CreateAction::Explorer)
 			{
 				// ShellExecuteW 打开项目目录(与"打开外部脚本"同一条系统关联路径)。
 				const HINSTANCE shellResult = ShellExecuteW(nullptr, L"open",
@@ -4309,7 +4406,7 @@ namespace World
 						m_NewProjectRoot.u8string());
 				}
 			}
-			else if (clicked == 1)
+			else if (action == CreateAction::OpenProject)
 			{
 				ctx.RecordOp("project", "open", m_NewProjectCreatedName, m_NewProjectRoot.u8string());
 				// 重启编辑器到新项目(有未保存改动时先走既有的未保存确认模态)。
@@ -4317,12 +4414,12 @@ namespace World
 				m_NewProjectOpen = false;
 				ctx.ClearModal();
 			}
-			else if (clicked == 2)
+			else if (action == CreateAction::LaunchProject)
 			{
 				// 一键启动:独立 Runtime 进程(定位/命令行/日志/操作记录都在 EditorLayer)。
 				m_Editor.LaunchProjectRuntime(m_NewProjectRoot);
 			}
-			else if (clicked == 3 || escapePressed)
+			else if (action == CreateAction::Close || escapePressed)
 			{
 				m_NewProjectOpen = false;
 				ctx.ClearModal();
@@ -4609,8 +4706,13 @@ namespace World
 					if (clicked)
 					{
 						ctx.RecordOp("project", "open", name, path);
-						m_Editor.DismissProjectLauncher();
-						ctx.ClearModal();
+						// PROJ-3/T1:启动器模式下没有"当前项目"可停留 —— 保留启动器页,
+						// 子进程起来后本进程就退出(RelaunchWithProject 内部负责收尾)。
+						if (!m_LauncherMode)
+						{
+							m_Editor.DismissProjectLauncher();
+							ctx.ClearModal();
+						}
 						m_Editor.RelaunchWithProject(std::filesystem::u8path(path));
 						Wui::EndModalFrame(ctx);
 						return;
@@ -4669,7 +4771,11 @@ namespace World
 			{ Wui::Tr("modal.launcher.open", "Open Project…"), Wui::HashId("project.launcher.open"), true },
 			{ Wui::Tr("modal.launcher.default", "Open Default Sample Project"),
 				Wui::HashId("project.launcher.default"), true },
-			{ Wui::Tr("modal.launcher.close", "Close"), Wui::HashId("project.launcher.close"), true },
+			// PROJ-3/T1:启动器模式下第 4 个动作是"退出"(关掉整个启动器进程);
+			// 普通编辑器形态下仍是 PROJ-2 的"关闭"(停在当前项目)。a11y id 两个形态共用。
+			{ m_LauncherMode ? Wui::Tr("modal.launcher.quit", "Quit")
+				: Wui::Tr("modal.launcher.close", "Close"),
+				Wui::HashId("project.launcher.close"), true },
 		};
 		const int clicked = Wui::ModalButtons(ctx, frame, buttons, 4, m_Theme);
 		Wui::EndModalFrame(ctx);
@@ -4687,10 +4793,18 @@ namespace World
 		}
 		else if (clicked == 3 || escapePressed)
 		{
-			m_Editor.DismissProjectLauncher();
-			ctx.ClearModal();
-			PushNotice(Wui::Tr("notice.project.launcher_closed",
-				"Launcher closed — staying in the current project. Use File ▶ Open Project… to switch later."));
+			if (m_LauncherMode)
+			{
+				// "关窗 ⇒ 直接退出(不停留在空项目上)":日志 + 关闭进程都收在 EditorLayer。
+				m_Editor.RequestLauncherExit();
+			}
+			else
+			{
+				m_Editor.DismissProjectLauncher();
+				ctx.ClearModal();
+				PushNotice(Wui::Tr("notice.project.launcher_closed",
+					"Launcher closed — staying in the current project. Use File ▶ Open Project… to switch later."));
+			}
 		}
 	}
 
