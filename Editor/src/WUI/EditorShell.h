@@ -388,6 +388,16 @@ namespace World
 		// 行 id / 打开目标 / 移除目标一律用 m_RecentProjects 的原下标,避免筛选后错位)。
 		std::string m_LauncherSearch;
 		float m_LauncherScrollY = 0.0f;
+		// PROJ-5/T1:最近项目"删除…"的两步确认状态机(0=关;1=知情;2=逐字输入目录名)。
+		// 打开时把**目标路径与显示名快照下来** —— 之后的列表刷新/筛选/滚动不会让目标串位;
+		// 真正的删除只走 ProjectLauncher::DeleteProjectPermanently(全部守卫在那边,UI 的
+		// 名字匹配只是"确认按钮禁用"的前端双保险)。
+		int m_LauncherDeleteStep = 0;
+		std::string m_LauncherDeletePath;
+		std::string m_LauncherDeleteName;
+		std::string m_LauncherDeleteTyped;
+		std::string m_LauncherDeleteError;
+		void DrawLauncherDeleteFlow(Wui::WuiContext& ctx, const Wui::WuiRect& frame, bool escapePressed);
 		// 运行 ▸ 启动项目(Runtime):目标 = 当前项目根(EditorLayer完成定位/启动/日志)。
 		void LaunchCurrentProjectRuntime();
 		// 启动器动作:打开默认**示例**项目(projects/default,文案明确"示例")。

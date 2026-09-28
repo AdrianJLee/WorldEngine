@@ -3,6 +3,7 @@
 
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Log.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
 
@@ -65,6 +66,56 @@ namespace World::Editor
 			buffer << stream.rdbuf();
 			*out = buffer.str();
 			return true;
+		}
+
+		// PROJ-5/T1:去首尾空白 + ASCII 大小写折叠 —— 与 EditorShell 的 TrimProjectNameText /
+		// AsciiLowerCopy 同一口径(中文等非 ASCII 字节原样比较,不做 locale 折叠)。
+		std::string TrimAsciiWhitespace(const std::string& text)
+		{
+			size_t begin = 0;
+			while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])))
+				++begin;
+			size_t end = text.size();
+			while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])))
+				--end;
+			return text.substr(begin, end - begin);
+		}
+
+		std::string FoldAsciiCase(const std::string& text)
+		{
+			std::string folded = text;
+			for (char& character : folded)
+			{
+				const unsigned char c = static_cast<unsigned char>(character);
+				if (c >= 'A' && c <= 'Z')
+					character = static_cast<char>(c - 'A' + 'a');
+			}
+			return folded;
+		}
+
+		// 二次确认:逐字输入的目录名(去首尾空白后)必须与目录名大小写不敏感相等。
+		bool TypedNameMatches(const std::string& expectedDirectoryName, const std::string& typedName)
+		{
+			if (expectedDirectoryName.empty())
+				return false;
+			const std::string trimmed = TrimAsciiWhitespace(typedName);
+			if (trimmed.empty())
+				return false;
+			return FoldAsciiCase(trimmed) == FoldAsciiCase(expectedDirectoryName);
+		}
+
+		// 路径"段数":根(盘符 / UNC 根)本身算 1 段,再加 relative_path 的每一段 ——
+		// `E:\` = 1、`E:\proj` = 2、`\\server\share` = 1、`\\server\share\proj` = 2。
+		// 与项目侧口径一致("路径段数 < 2"的目标一律拒绝,纯防御)。
+		size_t PathSegmentCount(const std::filesystem::path& path)
+		{
+			size_t count = path.root_path().empty() ? 0 : 1;
+			for (const std::filesystem::path& part : path.relative_path())
+			{
+				if (part != ".")
+					++count;
+			}
+			return count;
 		}
 	}
 
@@ -314,5 +365,105 @@ namespace World::Editor
 		if (entries.size() == before)
 			return true;   // 幂等:本来就不在表里
 		return SaveRecent(entries, error);
+	}
+
+	std::string ProjectLauncher::DeleteProjectPermanently(const std::filesystem::path& projectRoot,
+		const std::string& typedName)
+	{
+		// 目标一律解析成"绝对 + 词法规范化"路径:破坏性删除绝不能跟着调用方的相对路径/CWD 走。
+		std::error_code absoluteError;
+		std::filesystem::path root = projectRoot;
+		if (!root.is_absolute())
+			root = std::filesystem::absolute(root, absoluteError);
+		if (absoluteError)
+			root = projectRoot;
+		root = root.lexically_normal();
+		const std::string rootText = root.empty() ? projectRoot.u8string() : root.u8string();
+
+		// ① 必须存在且真的是目录(文件/符号链接目标/已失效路径一律拒绝)。
+		std::error_code directoryError;
+		if (root.empty() || !std::filesystem::is_directory(root, directoryError))
+		{
+			return Wui::TrFormat("modal.project_delete.error.not_directory",
+				"The target is not an existing folder: {path}", { { "path", rootText } });
+		}
+
+		// ② 危险目标:盘根/UNC 根 + 浅路径(段数 < 2)。这两个先于"名字匹配"判定 ——
+		//    `E:\` 的目录名是空串,若先判名字就永远拿不到"拒绝盘根"这个理由。
+		if (root == root.root_path())
+		{
+			return Wui::TrFormat("modal.project_delete.error.root",
+				"Refusing to delete a drive/UNC root: {path}", { { "path", rootText } });
+		}
+		if (PathSegmentCount(root) < 2)
+		{
+			return Wui::TrFormat("modal.project_delete.error.too_shallow",
+				"Refusing to delete a path this shallow: {path}", { { "path", rootText } });
+		}
+
+		// ③ 引擎仓库锚点:仓库根本身/它的任何祖先(删掉会把整个仓库带走),以及仓库内的目录
+		//    (projects/default 这类随仓库走的项目)。用规范化键做前缀比较,大小写不敏感。
+		const std::string key = NormalizedKey(root);
+		const std::string repoKey = NormalizedKey(std::filesystem::path(std::string(WLD_REPO_ROOT)));
+		if (key == repoKey || repoKey.rfind(key + "/", 0) == 0)
+		{
+			return Wui::TrFormat("modal.project_delete.error.repo_ancestor",
+				"Refusing to delete the engine repository root or one of its parents: {path}",
+				{ { "path", rootText } });
+		}
+		if (key.rfind(repoKey + "/", 0) == 0)
+		{
+			return Wui::TrFormat("modal.project_delete.error.repo_inside",
+				"Refusing to delete a folder inside the engine repository: {path}",
+				{ { "path", rootText } });
+		}
+
+		// ④ 不是项目就拒绝(与"打开项目"同一口径:缺清单 = 不是 WorldEngine 项目)。
+		std::error_code manifestError;
+		if (!std::filesystem::is_regular_file(root / kManifestFileName, manifestError))
+		{
+			return Wui::Tr("modal.project_delete.error.no_manifest",
+				"Not a WorldEngine project: project.we.yaml is missing");
+		}
+
+		// ⑤ 二次确认:逐字输入的目录名必须匹配(大小写不敏感、去首尾空白)。
+		const std::string expectedName = root.filename().u8string();
+		if (!TypedNameMatches(expectedName, typedName))
+		{
+			return Wui::TrFormat("modal.project_delete.error.name_mismatch",
+				"The typed name does not match the project folder name: {expected}",
+				{ { "expected", expectedName } });
+		}
+
+		// ⑥ 编辑器形态下不能删当前打开的项目(启动器形态没有当前项目:ProjectDir() 指向
+		//    local/launcher-stub 哨兵,不会命中真实目标)。
+		if (SamePath(root, World::Paths::ProjectDir()))
+		{
+			return Wui::TrFormat("modal.project_delete.error.current_project",
+				"Cannot delete the currently open project: {path}", { { "path", rootText } });
+		}
+
+		// ---- 以上校验全部通过,下面才开始写 ----
+		// 永久删除(**不走**回收站/Shell/IFileOperation):remove_all 递归删目录树。
+		std::error_code removeError;
+		const std::uintmax_t removed = std::filesystem::remove_all(root, removeError);
+		if (removeError || removed == static_cast<std::uintmax_t>(-1))
+		{
+			return Wui::TrFormat("modal.project_delete.error.remove_failed",
+				"Permanent delete failed: {reason}",
+				{ { "reason", removeError ? removeError.message() : std::string("unknown error") } });
+		}
+		WLD_CORE_INFO("[project] permanently deleted project folder '{0}' ({1} entries removed)",
+			rootText, static_cast<unsigned long long>(removed));
+
+		// 成功后从最近列表移除该条;列表落盘失败不回滚删除(目录已经没了),只记警告 ——
+		// 残留的那条会在下次加载时被判为"路径失效"。失败路径**不**移除列表项。
+		std::string listError;
+		if (!RemoveRecent(root, &listError))
+		{
+			WLD_CORE_WARN("[project] permanent delete succeeded but updating the recent list failed: "
+				"'{0}': {1}", rootText, listError);
+		}
+		return std::string();
 	}
 }

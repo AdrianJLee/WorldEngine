@@ -84,6 +84,26 @@ namespace World
 			return AsciiLowerCopy(haystack).find(loweredNeedle) != std::string::npos;
 		}
 
+		// PROJ-5/T1:"删除…"确认步的目录名匹配 —— 去首尾空白 + ASCII 大小写不敏感,与
+		// ProjectLauncher::DeleteProjectPermanently 的守卫同一口径(UI 这一侧只决定按钮禁用)。
+		bool DeleteNameMatches(const std::string& expectedDirectoryName, const std::string& typedName)
+		{
+			if (expectedDirectoryName.empty() || typedName.empty())
+				return false;
+			return AsciiLowerCopy(TrimProjectNameText(typedName)) == AsciiLowerCopy(expectedDirectoryName);
+		}
+
+		// PROJ-5/T1:危险动作(删除)的按钮主题 —— 只改两个既有的槽位,不新增控件类型:
+		// Accent → Danger 让主按钮填充与悬停描边走危险色,Text → Danger 让非主按钮的文字
+		// 也是危险色(禁用态的灰化仍由 ButtonEx 自己的 enabled=false 分支负责)。
+		Wui::WuiTheme DangerButtonTheme(const Wui::WuiTheme& base)
+		{
+			Wui::WuiTheme theme = base;
+			theme.Accent = base.Danger;
+			theme.Text = base.Danger;
+			return theme;
+		}
+
 		const char* ZoneName(Wui::DropZone zone)
 		{
 			switch (zone)
@@ -4675,16 +4695,35 @@ namespace World
 		else if (ctx.Modal() == modalId)
 			ctx.ClearModal();
 		if (!visible)
+		{
+			// PROJ-5/T1:模态收口/让位时"删除…"流程不悬空 —— 下次打开回到最近列表态。
+			m_LauncherDeleteStep = 0;
+			m_LauncherDeletePath.clear();
+			m_LauncherDeleteName.clear();
+			m_LauncherDeleteTyped.clear();
+			m_LauncherDeleteError.clear();
 			return;
+		}
 
 		Wui::WuiRect frame;
 		bool escapePressed = false;
 		Wui::ModalFrameDesc frameDesc;
 		frameDesc.Id = modalId;
-		frameDesc.Title = Wui::Tr("modal.launcher.title", "Choose a Project");
+		// PROJ-5/T1:删除流程用危险动作标题(模态 id 不变 —— 两步都在同一个模态框里)。
+		frameDesc.Title = m_LauncherDeleteStep > 0
+			? Wui::Tr("modal.project_delete.title", "Permanently delete this project?")
+			: Wui::Tr("modal.launcher.title", "Choose a Project");
 		frameDesc.Size = { 660.0f, 430.0f };
 		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
 			return;
+		if (m_LauncherDeleteStep > 0)
+		{
+			// PROJ-5/T1:两步确认(知情 → 逐字输入目录名)。列表行在这一状态下不再绘制/登记,
+			// 所以模态期间点不到其它项目行。
+			DrawLauncherDeleteFlow(ctx, frame, escapePressed);
+			Wui::EndModalFrame(ctx);
+			return;
+		}
 
 		const float pad = 16.0f;
 		// 行高 24 + 2 间距;列表本体放在标题行与提示行之间,由滚动区裁剪
@@ -4729,6 +4768,9 @@ namespace World
 		std::string removePendingName;
 		std::string openPendingPath;
 		std::string openPendingName;
+		// PROJ-5/T1:点"删除…"⇒下一帧起进入两步确认(本帧先画列表,不改流程状态)。
+		std::string deletePendingPath;
+		std::string deletePendingName;
 		// 过滤只决定"画哪些行";行 id、动作、打开目标一律用**原列表下标** ——
 		// 过滤状态下点第一行打开的仍是它自己对应的项目,不会错位到筛选后的第一条。
 		const std::string loweredNeedle = AsciiLowerCopy(m_LauncherSearch);
@@ -4785,7 +4827,10 @@ namespace World
 				if (!ctx.ClipAllows(row))
 					continue;   // 滚出视口的行不绘制也不登记(与属性面板滚动区同一口径)
 				const float removeWidth = 84.0f;
-				const Wui::WuiRect removeRect { row.X + row.W - removeWidth, row.Y, removeWidth, rowHeight };
+				// PROJ-5/T1:行尾两个动作:右侧"删除…"(危险色)+ 它左边的"移除"(PROJ-4)。
+				const float deleteWidth = 96.0f;
+				const Wui::WuiRect deleteRect { row.X + row.W - deleteWidth, row.Y, deleteWidth, rowHeight };
+				const Wui::WuiRect removeRect { deleteRect.X - 6.0f - removeWidth, row.Y, removeWidth, rowHeight };
 				const std::string name = entry.Name.empty() ? path : entry.Name;
 				if (entry.Valid)
 				{
@@ -4823,6 +4868,19 @@ namespace World
 					removePending = path;
 					removePendingName = name;
 				}
+				// PROJ-5/T1:"删除…"= 永久删除磁盘目录(二次确认)。失效行同样可点开确认流 ——
+				// 全部安全守卫在 API 里(失效/危险目标会被逐条拒绝并给出可读理由),UI 这一层
+				// 只在"输入的名字与目录名不匹配"时禁用确认按钮。
+				if (Wui::ButtonEx(ctx,
+					Wui::HashId(("project.launcher.recent.delete." + std::to_string(i)).c_str()),
+					deleteRect, Wui::Tr("modal.launcher.delete", "Delete…"), DangerButtonTheme(m_Theme),
+					true, false,
+					Wui::Tr("modal.launcher.delete_hint",
+						"Permanently delete this project folder (it will NOT go to the Recycle Bin)")))
+				{
+					deletePendingPath = path;
+					deletePendingName = name;
+				}
 			}
 			Wui::EndScrollArea(ctx);
 		}
@@ -4858,6 +4916,17 @@ namespace World
 				PushNotice(Wui::TrFormat("notice.project.recent_remove_failed",
 					"Could not update the recent projects list: {reason}", { { "reason", error } }));
 			}
+		}
+		if (!deletePendingPath.empty())
+		{
+			// PROJ-5/T1:进入第 1 步(知情)。这里**不**做任何删除 —— 真正的 remove_all 只在
+			// 第 2 步"永久删除"按钮(名字匹配)被点时发生,且守卫全在 ProjectLauncher 里。
+			m_LauncherDeleteStep = 1;
+			m_LauncherDeletePath = deletePendingPath;
+			m_LauncherDeleteName = deletePendingName;
+			m_LauncherDeleteTyped.clear();
+			m_LauncherDeleteError.clear();
+			ctx.RecordOp("project", "delete-ask", deletePendingName, deletePendingPath);
 		}
 
 		// 动作按钮上方的说明(点项目 = 重启编辑器;示例项目 = projects/default)。
@@ -4906,6 +4975,174 @@ namespace World
 				PushNotice(Wui::Tr("notice.project.launcher_closed",
 					"Launcher closed — staying in the current project. Use File ▶ Open Project… to switch later."));
 			}
+		}
+	}
+
+	// PROJ-5/T1:启动器"永久删除项目"的二次确认 —— 同一个模态框里的两步状态机:
+	//   第 1 步(知情)= 完整路径 + "永久删除、不进回收站、不可恢复"警告 + 继续/取消(Esc = 取消);
+	//   第 2 步(逐字输入)= 输入项目**目录名**,匹配前"永久删除"保持禁用;取消随时可退。
+	// 用户可见的删除只发生在第 2 步确认按钮被点(且名字匹配)的那一帧,并且全部安全守卫都在
+	// ProjectLauncher::DeleteProjectPermanently(先全查、再做唯一的写操作 remove_all);
+	// 失败/被拒时列表项**不动**,原因就地显示 + 状态栏通知。
+	void EditorShell::DrawLauncherDeleteFlow(Wui::WuiContext& ctx, const Wui::WuiRect& frame,
+		bool escapePressed)
+	{
+		const float pad = 16.0f;
+		const float contentWidth = frame.W - pad * 2.0f;
+		const std::string path = m_LauncherDeletePath;
+		// 目录名 = 二次确认要比对的"逐字输入"目标(与 API 的守卫同口径:最后一段路径)。
+		const std::string directoryName = std::filesystem::u8path(path).filename().u8string();
+		const auto resetFlow = [this]
+		{
+			m_LauncherDeleteStep = 0;
+			m_LauncherDeletePath.clear();
+			m_LauncherDeleteName.clear();
+			m_LauncherDeleteTyped.clear();
+			m_LauncherDeleteError.clear();
+		};
+
+		float cursorY = frame.Y + 54.0f;
+		// ---- 目标是哪个目录:显示完整路径(读屏/脚本读的节点 Value 是未缩略的原串)----
+		const std::string pathLabel = Wui::Tr("modal.project_delete.path", "Folder to delete");
+		Wui::Label(ctx, { frame.X + pad, cursorY }, pathLabel, m_Theme.TextMuted, 12.0f);
+		cursorY += 18.0f;
+		const std::string shownPath = ctx.MeasureTextWidth(path, 13.0f) <= contentWidth
+			? path : Wui::EllipsizeMiddleToWidth(ctx, path, contentWidth, 13.0f);
+		Wui::Label(ctx, { frame.X + pad, cursorY }, shownPath, m_Theme.Text, 13.0f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("modal.project_delete.path");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = "shell";
+			node.Kind = "text";
+			node.Label = pathLabel;
+			node.Value = path;             // 完整路径:绘制文本超宽才缩略,节点里永远是原串
+			node.Tooltip = path;
+			node.Rect = { frame.X + pad, cursorY - 2.0f, contentWidth, 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		cursorY += 30.0f;
+
+		// ---- 警告:两步都显示(第二步输入时也必须看得见"不可恢复")----
+		const std::string warning = Wui::Tr("modal.project_delete.warning",
+			"Everything inside this folder is deleted permanently — no Recycle Bin, no recovery.");
+		Wui::Label(ctx, { frame.X + pad, cursorY }, warning, m_Theme.Danger, 12.5f);
+		{
+			Wui::WuiAccessNode node;
+			node.Id = Wui::HashId("modal.project_delete.warning");
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = "shell";
+			node.Kind = "text";
+			node.Label = Wui::Tr("modal.project_delete.warning.label", "Warning");
+			node.Value = warning;
+			node.Rect = { frame.X + pad, cursorY - 2.0f, contentWidth, 20.0f };
+			node.Enabled = true;
+			node.Interactive = false;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+		cursorY += 34.0f;
+
+		// 底部按钮与 ModalFooter 同一内边距/高度;这里手排是因为"永久删除"要用危险色主题
+		// (ModalButtons 只吃一个主题),按钮宽度沿用 ModalFooter 的测量口径。
+		const float buttonHeight = Wui::ModalFooterHeight;
+		const float buttonY = frame.Y + frame.H - Wui::ModalFooterPadding - buttonHeight;
+		const std::string cancelLabel = Wui::Tr("modal.project_delete.cancel", "Cancel");
+		const std::string cancelTooltip = Wui::Tr("modal.project_delete.cancel.tooltip",
+			"Cancel the deletion and go back to the project list (Esc)");
+		const float cancelWidth = std::min(160.0f,
+			std::max(90.0f, ctx.MeasureTextWidth(cancelLabel, 15.0f) + 30.0f));
+
+		if (m_LauncherDeleteStep == 1)
+		{
+			// ---- 第 1 步:知情(完整路径 + 永久删除警告)----
+			const std::string continueLabel = Wui::Tr("modal.project_delete.continue", "Continue");
+			const float continueWidth = std::min(200.0f,
+				std::max(110.0f, ctx.MeasureTextWidth(continueLabel, 15.0f) + 30.0f));
+			const float rowX = frame.X + frame.W - pad - (continueWidth + 8.0f + cancelWidth);
+			const Wui::WuiRect continueRect { rowX, buttonY, continueWidth, buttonHeight };
+			const Wui::WuiRect cancelRect { rowX + continueWidth + 8.0f, buttonY, cancelWidth, buttonHeight };
+			const bool continueClicked = Wui::ButtonEx(ctx, Wui::HashId("project.project_delete.continue"),
+				continueRect, continueLabel, m_Theme, true, true, std::string());
+			const bool cancelClicked = Wui::ButtonEx(ctx, Wui::HashId("project.project_delete.cancel"),
+				cancelRect, cancelLabel, m_Theme, true, false, cancelTooltip);
+			if (continueClicked)
+			{
+				// 进第 2 步:焦点直接落到输入框(键盘用户不用再点一次;脚本也能接着 ui.type)。
+				m_LauncherDeleteStep = 2;
+				m_LauncherDeleteTyped.clear();
+				m_LauncherDeleteError.clear();
+				ctx.SetFocus(Wui::HashId("project.project_delete.name"));
+			}
+			else if (cancelClicked || escapePressed)
+			{
+				ctx.RecordOp("project", "delete-cancel", m_LauncherDeleteName, path);
+				resetFlow();
+			}
+			return;
+		}
+
+		// ---- 第 2 步:逐字输入项目目录名 ----
+		const std::string hint = Wui::TrFormat("modal.project_delete.type_hint",
+			"Type the folder name {name} to confirm", { { "name", directoryName } });
+		Wui::Label(ctx, { frame.X + pad, cursorY }, hint, m_Theme.Text, 13.0f);
+		cursorY += 24.0f;
+		const Wui::WuiRect fieldRect { frame.X + pad, cursorY, std::min(380.0f, contentWidth), 26.0f };
+		bool fieldCancelled = false;
+		Wui::TextFieldA11y fieldA11y;
+		fieldA11y.Label = Wui::Tr("modal.project_delete.name.label", "Project folder name");
+		fieldA11y.Placeholder = hint;
+		Wui::TextField(ctx, Wui::HashId("project.project_delete.name"), fieldRect, m_LauncherDeleteTyped,
+			m_Theme, &fieldCancelled, &fieldA11y);
+		cursorY += 34.0f;
+		// 失败/被拒的原因就地显示(上一帧 API 的返回文本);状态栏通知里也有一份。
+		if (!m_LauncherDeleteError.empty())
+			Wui::Label(ctx, { frame.X + pad, cursorY }, m_LauncherDeleteError, m_Theme.Danger, 12.0f);
+
+		const bool matches = DeleteNameMatches(directoryName, m_LauncherDeleteTyped);
+		const std::string mismatchReason = Wui::Tr("modal.project_delete.type_mismatch",
+			"The typed name does not match the project folder name — the delete button stays disabled");
+		const std::string confirmLabel = Wui::Tr("modal.project_delete.confirm", "Delete permanently");
+		const float confirmWidth = std::min(200.0f,
+			std::max(110.0f, ctx.MeasureTextWidth(confirmLabel, 15.0f) + 30.0f));
+		const float rowX = frame.X + frame.W - pad - (confirmWidth + 8.0f + cancelWidth);
+		const Wui::WuiRect confirmRect { rowX, buttonY, confirmWidth, buttonHeight };
+		const Wui::WuiRect cancelRect { rowX + confirmWidth + 8.0f, buttonY, cancelWidth, buttonHeight };
+		const bool confirmClicked = Wui::ButtonEx(ctx, Wui::HashId("project.project_delete.confirm"),
+			confirmRect, confirmLabel, DangerButtonTheme(m_Theme), matches, true,
+			matches ? std::string() : mismatchReason);
+		const bool cancelClicked = Wui::ButtonEx(ctx, Wui::HashId("project.project_delete.cancel"),
+			cancelRect, cancelLabel, m_Theme, true, false, cancelTooltip);
+		if (confirmClicked && matches)
+		{
+			// 唯一写操作:全部守卫 + remove_all 都在 API 里;返回空串 = 成功。
+			const std::string reason = Editor::ProjectLauncher::DeleteProjectPermanently(
+				std::filesystem::u8path(path), m_LauncherDeleteTyped);
+			if (reason.empty())
+			{
+				ctx.RecordOp("project", "delete", m_LauncherDeleteName, path);
+				RefreshRecentProjectsIfStale(/*force=*/true);   // 成功后条目已从最近列表移除
+				PushNotice(Wui::TrFormat("notice.project_delete.done", "Permanently deleted: {path}",
+					{ { "path", path } }));
+				resetFlow();
+			}
+			else
+			{
+				// 失败/被拒 ⇒ 列表项不动(避免"看着删了其实还在");模态留在输入步可重试。
+				ctx.RecordOp("project", "delete-failed", m_LauncherDeleteName, reason);
+				WLD_CORE_WARN("[project] permanent delete refused or failed: '{0}': {1}", path, reason);
+				m_LauncherDeleteError = reason;
+				PushNotice(Wui::TrFormat("notice.project_delete.failed", "Permanent delete failed: {reason}",
+					{ { "reason", reason } }));
+			}
+		}
+		else if (cancelClicked || escapePressed || fieldCancelled)
+		{
+			ctx.RecordOp("project", "delete-cancel", m_LauncherDeleteName, path);
+			resetFlow();
 		}
 	}
 
