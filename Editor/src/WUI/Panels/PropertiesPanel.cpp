@@ -147,7 +147,7 @@ namespace World
 			Wui::NumberFieldInt(ctx, id, rect, raw, lo, hi, theme, style);
 		}
 
-		// 内容根(开发布局 projects/default/assets,打包由清单决定):**解析一次**缓存起来。
+		// 内容根(开发布局 = 当前项目根的 assets,打包由清单决定):**解析一次**缓存起来。
 		// 实例条每帧都要判断"来源资产还在不在",每帧重读 project.we.yaml 是不可接受的。
 		const std::filesystem::path& CachedContentRoot()
 		{

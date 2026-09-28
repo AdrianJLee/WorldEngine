@@ -18,6 +18,7 @@
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Script/ScriptValue.h"
+#include "World/Utils/Paths.h"
 
 #include <box2d/box2d.h>
 #include <cmath>
@@ -383,6 +384,9 @@ int main()
 	try
 	{
 		setvbuf(stdout, nullptr, _IONBF, 0);
+		// PROJ-7/T3:内容根 = 仓库内测试夹具(tests/fixtures/content);探针脚本
+		// `scripts/tests/Physics2DProbe.lua` 按这个内容根解析,不再依赖默认项目。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		World::ScriptEngine::Init();
 

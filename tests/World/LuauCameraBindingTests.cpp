@@ -22,6 +22,7 @@
 #include "World/Scene/Scene.h"
 #include "World/Scene/SceneCamera.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Utils/Paths.h"
 
 #include <cstdio>
 #include <glm/gtc/matrix_transform.hpp>
@@ -317,6 +318,10 @@ int main()
 {
 	try
 	{
+		// PROJ-7/T1:内容根 = 仓库内测试夹具(tests/fixtures/content);探针脚本
+		// (scripts/tests/CameraProbe.lua)走引擎的内容根磁盘回退,所以这里必须覆盖,
+		// 否则读到的还是项目目录里的副本。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		World::ScriptEngine::Init();
 

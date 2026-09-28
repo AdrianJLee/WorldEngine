@@ -13,7 +13,7 @@
 //      编辑态声明同步只更新属性表,不建立/覆盖运行期指纹(SCRIPT-V7 起旧编辑态入口已删除)。
 //
 // headless:真实 Scene 调度(OnScriptStart/OnScriptUpdate),脚本写在构建产物的临时目录里,
-// 逻辑路径是相对 WLD_ASSETPATH 的带 ".." 路径(与 ScriptLifecycleTests 同一模式)。
+// 逻辑路径是相对测试夹具内容根 WLD_TEST_ASSETPATH 的带 ".." 路径(与 ScriptLifecycleTests 同一模式)。
 #include "wldpch.h"
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
@@ -29,6 +29,7 @@
 #include "World/Scene/Scene.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Scene/SceneSerializer.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <any>
@@ -69,7 +70,7 @@ namespace
 
 	std::string LogicalPath(const fs::path& path)
 	{
-		return path.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+		return path.lexically_relative(fs::path(WLD_TEST_ASSETPATH)).generic_string();
 	}
 
 	void WriteScript(const fs::path& path, const std::string& text)
@@ -1231,6 +1232,9 @@ int main()
 {
 	try
 	{
+		// PROJ-7/T3:内容根 = 仓库内测试夹具(tests/fixtures/content);LogicalPath() 的
+		// ".." 逻辑路径与构建产物临时目录都按这个根解析,不再依赖默认项目。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		World::ScriptEngine::Init();
 		// 宿主探针必须在任何脚本编译之前注入(无 env chunk 在 load 期解析 import)。

@@ -127,7 +127,7 @@ flip_y: false          # 内容贴图默认不翻转(UV 原点左上)
 >   unattributed=N failed=N`;失败时 `stats.Errors` 逐条 `[tex] <人话>` 打到 ERROR,**cook 退出码非零**。
 > - **`--check` 不跑纹理烘焙**(在 step 3 就返回,与着色器烘焙同一口径):检查耗时不变,日志里没有
 >   `[tex]` 行;想校验烘焙结果就跑完整 `--cook`。
-> - **增量口径**(实测 2026-09-25,`projects/default` 当前 4 张源图;数字随手头内容变化):冷缓存
+> - **增量口径**(实测 2026-09-25,示例模板当前 4 张源图;数字随手头内容变化):冷缓存
 >   `baked=4`;第二次 cook `baked=0 uptodate=4`;临时加一张 `Icon.wtex`(随后逐字节还原)
 >   `baked=1 uptodate=3` ⇒ 只重烘改设置的那一张;剥离后的下一次 cook 会打印
 >   `restored source copies: sources=4` 把源图带回开发包。

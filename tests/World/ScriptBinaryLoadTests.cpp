@@ -28,6 +28,7 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <any>
@@ -65,8 +66,9 @@ namespace
 
 	std::string LogicalPath(const fs::path& path)
 	{
-		// 与 ScriptHotReloadTests 同一模式:把构建产物临时目录表达成相对 WLD_ASSETPATH 的逻辑路径。
-		return path.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+		// 与 ScriptHotReloadTests 同一模式:把构建产物临时目录表达成相对测试夹具内容根
+		// (WLD_TEST_ASSETPATH)的逻辑路径 —— PROJ-7/T3 起不再依赖默认项目。
+		return path.lexically_relative(fs::path(WLD_TEST_ASSETPATH)).generic_string();
 	}
 
 	bool Contains(const std::string& haystack, const std::string& needle)
@@ -151,7 +153,7 @@ return {
 		CHECK(container.size() > 28);
 
 		// U3 前提:磁盘(源码树)上不存在这个逻辑路径 —— 命中只可能来自包。
-		CHECK(!fs::exists(fs::path(WLD_ASSETPATH) / fs::path(logical)));
+		CHECK(!fs::exists(fs::path(WLD_TEST_ASSETPATH) / fs::path(logical)));
 		CHECK(!FingerprintScriptSource(logical).Exists);
 
 		WorldContext& context = TestContext();
@@ -401,6 +403,9 @@ int main()
 {
 	try
 	{
+		// PROJ-7/T3:内容根 = 仓库内测试夹具(tests/fixtures/content);
+		// 磁盘夹具与"相对内容根 + .."的逻辑路径都按这个根解析,不再依赖默认项目。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		// 登记可以先于 VM 初始化;重复调用覆盖登记(U3 的包 provider 在组内挂载)。
 		World::ScriptEngine::Init(TestContext());

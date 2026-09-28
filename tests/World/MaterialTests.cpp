@@ -3,6 +3,7 @@
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialTextureCache.h"
 #include "World/Renderer/TextureData.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <chrono>
@@ -45,6 +46,12 @@ int main()
 	try
 	{
 		using namespace World;
+
+		// PROJ-7/T3:内容根 = 仓库内测试夹具(tests/fixtures/content)。下面两类路径都必须
+		// 落在同一个根上,否则"绿着但没解耦":
+		//   * 沙箱目录由本测试用宏 WLD_TEST_ASSETPATH 直接读写;
+		//   * 第 12 组的 `textures/Icon.wtex` 走引擎的 World::Paths::AssetRoot() 磁盘解析。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 
 		// 1. 正常解析:各字段落到正确位置。
 		{
@@ -118,16 +125,16 @@ int main()
 
 		// 7. 材质库:缓存同一性 / 保存 / 重载 / Revision 变化。
 		{
-			// 沙箱目录放在内容根(WLD_ASSETPATH)下的临时子目录:MaterialIO 的读写路径约定是
+			// 沙箱目录放在内容根(WLD_TEST_ASSETPATH)下的临时子目录:MaterialIO 的读写路径约定是
 			// "相对内容根",测试与引擎用同一条解析路径才有意义。
-			// 前置:内容根由编译期宏 WLD_ASSETPATH 给出(绝对路径),与进程 CWD 无关。
+			// 前置:内容根由编译期宏 WLD_TEST_ASSETPATH 给出(绝对路径),与进程 CWD 无关。
 			CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
-			const std::filesystem::path directory = std::filesystem::path(WLD_ASSETPATH)
+			const std::filesystem::path directory = std::filesystem::path(WLD_TEST_ASSETPATH)
 				/ "material_tests_tmp";
 			std::error_code ec;
 			std::filesystem::create_directories(directory, ec);
 			const std::string relative = "material_tests_tmp/library_case.wmat";
-			const std::filesystem::path relativeFull = std::filesystem::path(WLD_ASSETPATH) / relative;
+			const std::filesystem::path relativeFull = std::filesystem::path(WLD_TEST_ASSETPATH) / relative;
 			{
 				std::ofstream file(relativeFull, std::ios::binary | std::ios::trunc);
 				file << kSample;
@@ -195,11 +202,11 @@ int main()
 		{
 			CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
 			std::error_code ec;
-			const std::filesystem::path directory = std::filesystem::path(WLD_ASSETPATH)
+			const std::filesystem::path directory = std::filesystem::path(WLD_TEST_ASSETPATH)
 				/ "material_hotreload_tmp";
 			std::filesystem::create_directories(directory, ec);
 			const std::string relative = "material_hotreload_tmp/watch_probe.txt";
-			const std::filesystem::path full = std::filesystem::path(WLD_ASSETPATH) / relative;
+			const std::filesystem::path full = std::filesystem::path(WLD_TEST_ASSETPATH) / relative;
 			const auto writeText = [&full](const std::string& text)
 			{
 				std::ofstream file(full, std::ios::binary | std::ios::trunc);
@@ -277,11 +284,11 @@ int main()
 		// GetDesc() 为新内容;mtime 不变也靠内容哈希检出)。
 		{
 			std::error_code ec;
-			const std::filesystem::path directory = std::filesystem::path(WLD_ASSETPATH)
+			const std::filesystem::path directory = std::filesystem::path(WLD_TEST_ASSETPATH)
 				/ "material_hotreload_tmp";
 			std::filesystem::create_directories(directory, ec);
 			const std::string relative = "material_hotreload_tmp/hot_clean.wmat";
-			const std::filesystem::path full = std::filesystem::path(WLD_ASSETPATH) / relative;
+			const std::filesystem::path full = std::filesystem::path(WLD_TEST_ASSETPATH) / relative;
 			MaterialDesc desc;
 			desc.Name = "HotClean";
 			desc.Roughness = 0.1f;
@@ -341,13 +348,13 @@ int main()
 		// 10. W5-L1:dirty 材质的外部变化只报告不覆盖;坏文件失败保留旧 desc。
 		{
 			std::error_code ec;
-			const std::filesystem::path directory = std::filesystem::path(WLD_ASSETPATH)
+			const std::filesystem::path directory = std::filesystem::path(WLD_TEST_ASSETPATH)
 				/ "material_hotreload_tmp";
 			std::filesystem::create_directories(directory, ec);
 			const std::string dirtyPath = "material_hotreload_tmp/hot_dirty.wmat";
 			const std::string brokenPath = "material_hotreload_tmp/hot_broken.wmat";
-			const std::filesystem::path dirtyFull = std::filesystem::path(WLD_ASSETPATH) / dirtyPath;
-			const std::filesystem::path brokenFull = std::filesystem::path(WLD_ASSETPATH) / brokenPath;
+			const std::filesystem::path dirtyFull = std::filesystem::path(WLD_TEST_ASSETPATH) / dirtyPath;
+			const std::filesystem::path brokenFull = std::filesystem::path(WLD_TEST_ASSETPATH) / brokenPath;
 
 			MaterialDesc dirtyDesc;
 			dirtyDesc.Name = "DirtyBase";
@@ -421,11 +428,11 @@ int main()
 		// 修复前 FileWriteTime 拼的是 Game/ 而不是 Game/assets/,时间戳恒为 min()。
 		{
 			std::error_code ec;
-			const std::filesystem::path directory = std::filesystem::path(WLD_ASSETPATH)
+			const std::filesystem::path directory = std::filesystem::path(WLD_TEST_ASSETPATH)
 				/ "material_hotreload_tmp";
 			std::filesystem::create_directories(directory, ec);
 			const std::string relative = "material_hotreload_tmp/mtime_probe.wmat";
-			const std::filesystem::path full = std::filesystem::path(WLD_ASSETPATH) / relative;
+			const std::filesystem::path full = std::filesystem::path(WLD_TEST_ASSETPATH) / relative;
 			MaterialDesc desc;
 			desc.Name = "MtimeProbe";
 			{
@@ -483,11 +490,11 @@ int main()
 		{
 			CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
 			std::error_code ec;
-			const std::filesystem::path directory = std::filesystem::path(WLD_ASSETPATH)
+			const std::filesystem::path directory = std::filesystem::path(WLD_TEST_ASSETPATH)
 				/ "material_save_precision_tmp";
 			std::filesystem::create_directories(directory, ec);
 			const std::string relative = "material_save_precision_tmp/long_tail.wmat";
-			const std::filesystem::path full = std::filesystem::path(WLD_ASSETPATH) / relative;
+			const std::filesystem::path full = std::filesystem::path(WLD_TEST_ASSETPATH) / relative;
 
 			MaterialLibrary& library = MaterialLibrary::Get();
 			Ref<Material> material = library.CreateDefault("LongTail");
@@ -589,11 +596,11 @@ int main()
 		{
 			CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
 			std::error_code ec;
-			const std::filesystem::path directory = std::filesystem::path(WLD_ASSETPATH)
+			const std::filesystem::path directory = std::filesystem::path(WLD_TEST_ASSETPATH)
 				/ "material_save_precision_tmp";
 			std::filesystem::create_directories(directory, ec);
 			const std::string relative = "material_save_precision_tmp/broken.wmat";
-			const std::filesystem::path full = std::filesystem::path(WLD_ASSETPATH) / relative;
+			const std::filesystem::path full = std::filesystem::path(WLD_TEST_ASSETPATH) / relative;
 
 			MaterialDesc good;
 			good.Name = "GoodBase";
@@ -643,7 +650,7 @@ int main()
 		{
 			CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
 			std::error_code ec;
-			const std::filesystem::path directory = std::filesystem::path(WLD_ASSETPATH)
+			const std::filesystem::path directory = std::filesystem::path(WLD_TEST_ASSETPATH)
 				/ "material_m3_tmp";
 			std::filesystem::remove_all(directory, ec);
 			std::filesystem::create_directories(directory, ec);
@@ -1403,7 +1410,7 @@ int main()
 			{
 				CHECK(std::filesystem::exists(std::filesystem::current_path() / "CMakeLists.txt"));
 				std::error_code ec;
-				const std::filesystem::path directory = std::filesystem::path(WLD_ASSETPATH)
+				const std::filesystem::path directory = std::filesystem::path(WLD_TEST_ASSETPATH)
 					/ "material_m4s2_tmp";
 				std::filesystem::remove_all(directory, ec);
 				std::filesystem::create_directories(directory, ec);

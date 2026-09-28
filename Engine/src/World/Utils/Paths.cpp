@@ -52,7 +52,7 @@ namespace World::Paths
 
 		std::filesystem::path CompileTimeProjectDir()
 		{
-			// 宏是唯一读取点:根 CMake 的 WLD_PROJECT_DIR = <repo>/projects/default/(带尾分隔符)。
+			// 宏是唯一读取点:根 CMake 的 WLD_PROJECT_DIR = <repo>/projects/(带尾分隔符;空的容器 = 没有内置项目)。
 			return NormalizeDirectory(std::filesystem::path(WLD_PROJECT_DIR));
 		}
 

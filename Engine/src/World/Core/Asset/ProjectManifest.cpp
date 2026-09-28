@@ -855,10 +855,9 @@ namespace World::Asset
 				*manifestPath = workingManifest;
 			return true;
 		}
-		// 2. **当前项目根**下的清单:编译期默认 = <repo>/projects/default/,可被
-		//    --project / WLD_PROJECT_DIR 覆盖。这一步必须在下面的 cwd "projects/default/"
-		//    猜测之前 —— 换了项目根,清单就必须跟着换,而不是被 cwd 的旧布局拉回默认项目;
-		//    没有覆盖时两者指向同一个仓库默认项目,行为不变。
+		// 2. **当前项目根**下的清单:编译期默认 = <repo>/projects/(不含项目,只有容器目录),
+		//    可被 --project / WLD_PROJECT_DIR 覆盖。这是"打开任意位置项目"的入口 ——
+		//    换了项目根,清单就必须跟着换。
 		const std::filesystem::path projectManifest = World::Paths::ProjectFile("project.we.yaml");
 		if (std::filesystem::is_regular_file(projectManifest, ec))
 		{
@@ -866,16 +865,9 @@ namespace World::Asset
 				*manifestPath = projectManifest;
 			return true;
 		}
-		// 3. 旧布局兜底:cwd 下的 projects/default/。注意这**只扩大清单的搜索范围** ——
-		//    内容根与包仍然只由清单决定,旧版"找不到清单就猜 ../Game/assets +
-		//    扫 cwd/content/*.wpak"的回退已移除(P4-U12)。
-		const std::filesystem::path legacyManifest = workingDirectory / "projects/default/project.we.yaml";
-		if (std::filesystem::is_regular_file(legacyManifest, ec))
-		{
-			if (manifestPath)
-				*manifestPath = legacyManifest;
-			return true;
-		}
+		// PROJ-7/T3:旧布局兜底 cwd/projects/default/ 已删除 —— 引擎不再有内置默认项目,
+		// 也就没有"站着不动就能猜到的项目"。内容根与包仍然只由清单决定;旧版"找不到清单
+		// 就猜 ../Game/assets + 扫 cwd/content/*.wpak"的回退更早已移除(P4-U12)。
 		return false;
 	}
 }

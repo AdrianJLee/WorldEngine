@@ -20,6 +20,7 @@
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Script/ScriptValue.h"
+#include "World/Utils/Paths.h"
 
 #include <cmath>
 #include <cstdio>
@@ -161,7 +162,7 @@ namespace
 		Gameplay::GameHost host;
 		Gameplay::GameAppDesc desc;
 		desc.ProjectId = "worldengine.luau.service.tests";
-		desc.ContentRoot = WLD_ASSETPATH;
+		desc.ContentRoot = WLD_TEST_ASSETPATH;
 		host.Init(desc);
 		host.SetScene(initialScene, true);
 		CHECK(initialScene->IsRunning());
@@ -283,7 +284,7 @@ INPUT_PLAYER_COUNT = Input.PlayerCount()
 		Gameplay::GameHost host;
 		Gameplay::GameAppDesc desc;
 		desc.ProjectId = "worldengine.luau.level.tests";
-		desc.ContentRoot = WLD_ASSETPATH;
+		desc.ContentRoot = WLD_TEST_ASSETPATH;
 		host.Init(desc);
 		host.SetScene(initialScene, true);
 
@@ -358,7 +359,7 @@ assert(Level.IsLoading() == false)
 		Gameplay::GameHost host;
 		Gameplay::GameAppDesc desc;
 		desc.ProjectId = projectId;
-		desc.ContentRoot = WLD_ASSETPATH;
+		desc.ContentRoot = WLD_TEST_ASSETPATH;
 		host.Init(desc);
 
 		Entity probeEntity;
@@ -451,6 +452,9 @@ int main()
 	try
 	{
 		std::setvbuf(stdout, nullptr, _IONBF, 0);
+		// PROJ-7/T1:内容根 = 仓库内测试夹具(tests/fixtures/content);探针脚本
+		// (scripts/tests/ServicesProbe.lua)走引擎的内容根磁盘回退,desc.ContentRoot 也指夹具。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		World::ScriptEngine::Init();
 

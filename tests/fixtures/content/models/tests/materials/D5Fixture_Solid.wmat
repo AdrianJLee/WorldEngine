@@ -1,0 +1,11 @@
+# WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。
+FormatVersion: 1
+Name: "Solid"
+BaseColor: [0.53252053, 0.7297401, 1, 1]
+Metallic: 0.2
+Roughness: 0.6
+Emissive: [0, 0, 0]
+AlbedoTexture: ""
+NormalTexture: ""
+BlendMode: Opaque
+DoubleSided: false

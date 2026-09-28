@@ -32,8 +32,8 @@
 ## 渲染
 
 - 引擎默认后端是 **OpenGL**;Vulkan 后端与 OpenGL 后端共用同一套 RHI 前端。
-- 后端由项目清单(`projects/default/project.we.yaml`)的 `renderer: opengl | vulkan` 选择;**字段缺省时按 `opengl` 处理**。
-  本仓库示例项目当前写的是 `vulkan`。
+- 后端由项目清单(`<项目根>/project.we.yaml`)的 `renderer: opengl | vulkan` 选择;**字段缺省时按 `opengl` 处理**。
+  示例项目模板(`templates/project-example/project.we.yaml`)当前写的是 `vulkan`。
 - 着色器源是 `Engine/assets/shaders/*.slang`(入口 `VSMain` / `PSMain`,`vs_6_0` / `ps_6_0`),
   唯一编译器是 **Slang**(`slangc`),每个 stage 编出 Vulkan 与 GL 两份 SPIR-V;
   开发期编译到构建目录的着色器缓存,打包产物里带编译好的着色器,运行时不依赖编译器。
@@ -54,7 +54,7 @@
 ## 脚本
 
 - 引擎内嵌 **Luau**;脚本组件挂到实体上,由引擎驱动 `OnCreate` / `OnUpdate` / `OnDestroy` 等回调。
-- 编辑器根据实际注册的绑定生成 `projects/default/assets/scripts/intermediate/WorldEngineAPI.luau`,供语言服务器做补全;
+- 编辑器根据实际注册的绑定生成 `<项目根>/assets/scripts/intermediate/WorldEngineAPI.luau`,供语言服务器做补全;
   生成文件不参与运行,不要 `require`。
 
 ## 验证

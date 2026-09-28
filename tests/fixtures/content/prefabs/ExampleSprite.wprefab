@@ -1,0 +1,16 @@
+FormatVersion: 2
+Scene: ExampleSprite
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000101
+    World::TagComponent:
+      Tag: Example Sprite
+    World::TransformComponent:
+      Location: [0, 0, 0]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::SpriteComponent:
+      Color: [0.25, 0.85, 0.45, 1]
+      Texture: ""
+      TilingFactor: 1

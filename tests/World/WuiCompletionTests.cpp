@@ -101,7 +101,8 @@ namespace
 
 	std::string StubPath()
 	{
-		const std::filesystem::path assets(WLD_ASSETPATH);
+		// PROJ-7/T3:入库存根样本在仓库测试夹具里(WLD_TEST_ASSETPATH),不再依赖默认项目。
+		const std::filesystem::path assets(WLD_TEST_ASSETPATH);
 		return (assets / "scripts" / "intermediate" / "WorldEngineAPI.luau").string();
 	}
 

@@ -189,11 +189,11 @@ namespace World
 	LauncherBootScope::LauncherBootScope()
 	{
 		// 1) 项目根 → 哨兵目录(不创建、不读):让 ProjectManifest::Locate 的第 2 步
-		//    (World::Paths::ProjectFile)不命中编译期默认项目 projects/default。
+		//    (World::Paths::ProjectFile)不命中编译期默认值(空的 projects/ 容器)。
 		World::Paths::SetProjectDirOverride(std::filesystem::path(WLD_LOCAL_DIR) / "launcher-stub");
 
 		// 2) CWD → Editor.exe 所在目录(双击 exe 时 Explorer 给的 CWD):
-		//    第 1 步 cwd/project.we.yaml 与第 3 步 cwd/projects/default/project.we.yaml 都不命中。
+		//    第 1 步 cwd/project.we.yaml 与第 2 步"当前项目根"都不命中。
 		std::error_code ec;
 		m_PreviousWorkingDirectory = std::filesystem::current_path(ec);
 		if (ec || m_PreviousWorkingDirectory.empty())
@@ -356,8 +356,8 @@ namespace World
 		// W8:Luau LSP 脚手架(.vscode/settings.json + .luau-lsp/config.json):create-if-missing,
 		// 磁盘已有(用户改过的)配置绝不覆盖。
 		{
-			// 工作区根 = 项目清单所在目录(projects/default/;清单里的 content_root = assets),与
-			// 入库的 projects/default/.vscode、projects/default/.luau-lsp 一致;没有清单时退回内容根。
+			// 工作区根 = 项目清单所在目录(清单里的 content_root = assets),与项目里的
+			// `.vscode/`、`.luau-lsp/` 一致;没有清单时退回内容根。
 			std::filesystem::path scaffoldRoot = World::Paths::AssetRoot();
 			std::filesystem::path manifestPath;
 			if (World::Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
@@ -504,9 +504,9 @@ namespace World
 		//    ("编辑器成功挂载某项目后写最近列表"的记录时机);
 		// 2) 否则若偏好 StartupAutoOpenLastProject(默认开)且最近列表第一条仍有效 ⇒ 第一帧
 		//    自动重启到它一次(RelaunchWithProject;子进程带 --project ⇒ 不再触发,不循环);
-		// 3) 否则显示项目启动器(不再默默落进编译期默认项目 projects/default)。
-		// 注意 2) 的"不等于当前项目"守卫:隐式启动时当前项目 = projects/default,若最近表
-		// 里恰好是它(用户点过"打开默认示例项目"),仍然显示启动器而不是自动回到默认项目。
+		// 3) 否则显示项目启动器(引擎内已无默认项目,隐式启动没有任何项目可落)。
+		// 注意 2) 的"不等于当前项目"守卫:隐式启动时哨兵项目根不匹配任何真实条目,
+		// 因此最近表里即使有同一路径也会照常自动打开一次,不会来回重启。
 		{
 			const std::filesystem::path currentRoot = World::Paths::ProjectDir();
 			if (m_ProjectExplicit)
@@ -2115,7 +2115,7 @@ namespace World
 	// 但换掉的不是后端而是**项目根**:
 	//   * `--project <root>` 参数(EditorApp 在启动最前面解析,优先级最高)+
 	//     `WLD_PROJECT_DIR=<root>` 环境变量(World::Paths 读它);
-	//   * 子进程工作目录 = 项目根 —— 项目清单按"CWD → projects/default → 开发树"解析,
+	//   * 子进程工作目录 = 项目根 —— 项目清单按"CWD → 当前项目根"解析,
 	//     CWD 指到项目根后所有面板/内容根/关卡清单都跟着切;
 	//   * 丢掉旧的 WLD_START_SCENE(那是上一个项目的场景,不能在新项目里重开)。
 	// 有未保存改动时先走既有的未保存确认模态(保存/放弃后才真正重启)。

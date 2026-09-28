@@ -54,9 +54,16 @@ target_compile_definitions(World PUBLIC
     WLD_LOCAL_DIR="${CMAKE_SOURCE_DIR}/local/"
     # WLD_GAME_DIR = Game **模块**目录(只放 gameplay DLL 源码);项目内容根见 WLD_PROJECT_DIR。
     WLD_GAME_DIR="${CMAKE_SOURCE_DIR}/Game/"
-    # Layout-S7:项目内容(清单/关卡表/assets)在 projects/<名>/;默认项目 = projects/default/。
-    WLD_PROJECT_DIR="${CMAKE_SOURCE_DIR}/projects/default/"
-    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/projects/default/assets"
+    # Layout-S7:项目内容(清单/关卡表/assets)在 projects/<名>/。
+    # PROJ-7/T3:引擎不再内置默认项目 —— projects/ 只是"项目默认放在仓库里"的容器目录
+    # (见 projects/README.md),本身不是项目。宏名与运行期语义不变:--project / 环境变量
+    # WLD_PROJECT_DIR 仍是唯一入口;下面两个默认值指向不存在的资产目录是**有意的**
+    # (= "没有当前项目":没有清单就没有内容根,宿主据此只出项目启动器)。
+    WLD_PROJECT_DIR="${CMAKE_SOURCE_DIR}/projects/"
+    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/projects/assets"
+    # PROJ-7/T1:测试夹具内容根 —— 只给 tests/ 用,把"测试真的读的项目内容"从项目目录搬进
+    # 仓库内夹具(tests/fixtures/content);WLD_PROJECT_DIR / WLD_ASSETPATH 的运行期语义不变。
+    WLD_TEST_ASSETPATH="${CMAKE_SOURCE_DIR}/tests/fixtures/content"
     WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
     WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/Engine/"
     # Slang-T5:唯一工具目录入口(见上面的 WLD_SLANG_DIR 说明)。

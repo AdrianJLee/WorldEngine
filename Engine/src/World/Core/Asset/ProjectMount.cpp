@@ -30,7 +30,7 @@ namespace World::Asset
 				// 发行形态:按 manifest 逐条挂载包,失败只记错误继续。
 				for (const std::string& package : manifest.Packages)
 				{
-					// 包路径相对清单所在目录解析(发行目录 = 清单目录;开发目录 = projects/default/)。
+					// 包路径相对清单所在目录解析(发行目录 = 清单目录;开发目录 = 当前项目根)。
 					std::filesystem::path pakPath = manifestPath.parent_path() / package;
 					std::error_code existsEc;
 					if (!std::filesystem::is_regular_file(pakPath, existsEc))

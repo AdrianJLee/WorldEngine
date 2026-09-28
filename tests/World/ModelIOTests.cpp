@@ -325,13 +325,13 @@ namespace
 		fs::remove_all(root);
 	}
 
-	// 4.真实 glTF 夹具导入 + Mesh::LoadWModel 读回(fixture 见 projects/default/assets/models/tests/D5Fixture.gltf)。
+	// 4.真实 glTF 夹具导入 + Mesh::LoadWModel 读回(fixture 见 tests/fixtures/content/models/tests/D5Fixture.gltf)。
 	void GltfFixtureImportsAndLoadsBack()
 	{
 		const fs::path root = TestRoot() / "import";
 		fs::remove_all(root);
 		fs::create_directories(root);
-		const fs::path fixture = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
+		const fs::path fixture = fs::path(WLD_TEST_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
 		CHECK(fs::exists(fixture));
 
 		Asset::GltfImportResult result;
@@ -571,7 +571,7 @@ namespace
 		const fs::path root = TestRoot() / "kernel";
 		fs::remove_all(root);
 		fs::create_directories(root);
-		const fs::path fixture = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
+		const fs::path fixture = fs::path(WLD_TEST_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
 		CHECK(fs::exists(fixture));
 		// 该用例比较的是"内核字节"与"ImportFile 写盘字节":**两条路径都显式传 Default()**,
 		// 因此逐字节可比 —— 夹具目录里是否留着一份早先导入的 .wmodel(资产自描述的逐源设置)
@@ -644,7 +644,7 @@ namespace
 		const fs::path root = TestRoot() / "instance";
 		fs::remove_all(root);
 		fs::create_directories(root);
-		const fs::path fixture = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
+		const fs::path fixture = fs::path(WLD_TEST_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
 		Asset::GltfImportResult imported;
 		std::string error;
 		// 顺带覆盖 filesystem::path 的免费函数入口(编辑器 --import-gltf 用同一个)。
@@ -687,7 +687,7 @@ namespace
 	// D5b 工具:把真实夹具复制进临时内容根(源-only 项目:只有 .gltf)。
 	void CopyFixture(const fs::path& content)
 	{
-		const fs::path source = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
+		const fs::path source = fs::path(WLD_TEST_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
 		CHECK(fs::exists(source));
 		fs::create_directories(content / "models" / "tests");
 		fs::copy_file(source, content / "models" / "tests" / "D5Fixture.gltf",
@@ -903,7 +903,7 @@ namespace
 		const fs::path root = TestRoot() / "destination";
 		fs::remove_all(root);
 		fs::create_directories(root);
-		const fs::path fixture = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
+		const fs::path fixture = fs::path(WLD_TEST_ASSETPATH) / "models" / "tests" / "D5Fixture.gltf";
 		CHECK(fs::exists(fixture));
 
 		// ① 目的地目录:产物必须落在 models/props/(模型 + 它的 materials//textures/ 子目录)。
@@ -1075,7 +1075,7 @@ namespace
 
 		// 入库存根必须已经带上该字段(由编辑器启动路径重生成;World.ScriptWorkflow 是逐字节门禁,
 		// 这里再给一条直接的可见断言)。
-		const fs::path stub = fs::path(WLD_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.luau";
+		const fs::path stub = fs::path(WLD_TEST_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.luau";
 		CHECK(fs::exists(stub));
 		const std::string stubText = ReadText(stub);
 		CHECK(Contains(stubText, "MeshRenderer"));
@@ -1429,7 +1429,7 @@ namespace
 	bool ImportSkinFixture(const fs::path& root, const Asset::ModelImportSettings& settings,
 		Asset::GltfImportBytesResult& bytes, Asset::WModelData& model, std::string& error)
 	{
-		const fs::path fixture = fs::path(WLD_ASSETPATH) / "models" / "tests" / "D5SkinFixture.gltf";
+		const fs::path fixture = fs::path(WLD_TEST_ASSETPATH) / "models" / "tests" / "D5SkinFixture.gltf";
 		if (!fs::exists(fixture))
 		{
 			error = "fixture not found: " + fixture.string();

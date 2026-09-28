@@ -1,0 +1,7 @@
+{
+  "id": "example",
+  "name": "Example Project",
+  "description": "The standard skeleton plus the engine's sample content: four test scenes, sample materials, prefabs, scripts and shaders.",
+  "order": 2,
+  "defaultScene": "scenes/3DTest.wd"
+}

@@ -1,22 +1,22 @@
 # 脚本与代码提示
 
-引擎内嵌的脚本运行时是 **Luau**。工程里用**语言服务器**提供补全:根 `.luarc.json` 给 LuaLS
-(`sumneko.lua`)用,`projects/default/.vscode/settings.json` 与 `projects/default/.luau-lsp/config.json` 给 Luau LSP 用,
-两者指向同一份声明文件。项目不会替你改编辑器设置,也不会自动装扩展。
+引擎内嵌的脚本运行时是 **Luau**。工程里用**语言服务器**提供补全:`<项目根>/.vscode/settings.json` 与
+`<项目根>/.luau-lsp/config.json`(编辑器新建项目时生成)给 Luau LSP 用;仓库根的 `.luarc.json` 给 LuaLS(`sumneko.lua`)用,
+指向引擎内的入库存根样本。项目不会替你改编辑器设置,也不会自动装扩展。
 
 ## 工作区
 
 | 打开方式 | 生效的配置 | 补全来源 |
 | --- | --- | --- |
-| 用 VS Code 打开仓库根 | 根 `.luarc.json` | `projects/default/assets/scripts/intermediate/WorldEngineAPI.luau` |
-| 用 VS Code 打开 `projects/default/` | `projects/default/.vscode/settings.json` + `projects/default/.luau-lsp/config.json` | 同上(路径按 `projects/default/` 相对) |
+| 用 VS Code 打开**项目根** | `<项目根>/.vscode/settings.json` + `<项目根>/.luau-lsp/config.json` | `<项目根>/assets/scripts/intermediate/WorldEngineAPI.luau`(编辑器生成) |
+| 用 VS Code 打开引擎仓库根 | 根 `.luarc.json` | `tests/fixtures/content/scripts/intermediate/WorldEngineAPI.luau`(入库存根样本) |
 
 `.luarc.json` 里的 `runtime.version` 是 LuaLS 自身的设置项(LuaLS 没有 Luau 运行时档位);
 实际执行脚本的是引擎里的 Luau 版本,两者不是同一个东西。
 
 ## 写一个脚本
 
-从 `projects/default/assets/scripts/templates/WorldScript.lua` 复制新脚本,修改类名和字段。用
+从 `<项目根>/assets/scripts/templates/WorldScript.lua` 复制新脚本,修改类名和字段。用
 `---@class YourScript : WorldScript`、`---@field`、`---@param` 描述自己新增的类型。脚本必须返回一个 table。
 
 ```lua
@@ -36,8 +36,8 @@ return PlayerScript
 在 `self.entity:` 后使用补全;输入 `vec3.new(` 后看参数提示;悬停 `direction`、`dt`、`self.Speed` 查看类型。
 `WorldScript` 只描述脚本形状,不能调用 `WorldScript.new()`;构造数学对象用实际绑定的 `.new(...)`。
 
-`projects/default/assets/scripts/intermediate/WorldEngineAPI.luau` 由编辑器按**实际注册的绑定**生成,仅供语言服务器读取,
-**不要 require 或运行它**。仓库保留生成基线;编辑器注册完 API 会自动刷新(内容不变就不改写,失败保留原文件),
+`<项目根>/assets/scripts/intermediate/WorldEngineAPI.luau` 由编辑器按**实际注册的绑定**生成,仅供语言服务器读取,
+**不要 require 或运行它**。编辑器注册完 API 会自动刷新(内容不变就不改写,失败保留原文件),
 也可以从菜单手动刷新。新增 C++ 侧脚本 API 后要重新构建并启动编辑器才会出现在声明里;Runtime 不生成提示文件。
 
 目前 `Entity:GetComponent(name)` 返回不透明的 `userdata|nil`,没有通用组件字段代理,因此不承诺 Transform

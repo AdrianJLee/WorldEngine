@@ -23,6 +23,7 @@
 #include "World/Script/LuauFormatter.h"
 #include "World/Script/LuauHighlighter.h"
 #include "World/Script/LuauSyntax.h"
+#include "World/Utils/Paths.h"
 #include "World/WUI/WuiTextBuffer.h"
 
 #include "Generated/Game/GameSchemaRegistration.h"
@@ -92,7 +93,7 @@ namespace
 	void ResolveDiskPathHitsRealFile()
 	{
 		const std::string logical = "scripts/tests/UiProbe.lua";
-		const fs::path expected = fs::path(WLD_ASSETPATH) / fs::path(logical);
+		const fs::path expected = fs::path(WLD_TEST_ASSETPATH) / fs::path(logical);
 		CHECK(fs::is_regular_file(expected));   // 前提:入库的开发树脚本
 
 		fs::path resolved;
@@ -163,7 +164,7 @@ namespace
 		CHECK(!error);
 
 		// 前提:磁盘(开发树)上不存在该逻辑路径 —— 命中只可能来自包。
-		CHECK(!fs::exists(fs::path(WLD_ASSETPATH) / fs::path(logical)));
+		CHECK(!fs::exists(fs::path(WLD_TEST_ASSETPATH) / fs::path(logical)));
 
 		WorldContext& context = TestContext();
 		const Vfs::MountId mountId = context.Vfs().Mount("w8-script-workflow-package", provider, 100);
@@ -197,10 +198,11 @@ namespace
 		CHECK(fs::is_regular_file(settings));
 		CHECK(fs::is_regular_file(lspConfig));
 
-		// 内容正确:与入库的 projects/default/ 两份脚手架文件逐字节一致(同一份常量,不会各自漂移)。
-		const fs::path projectRoot = fs::path(WLD_ASSETPATH).parent_path();
-		CHECK(ReadText(settings) == ReadText(projectRoot / ".vscode" / "settings.json"));
-		CHECK(ReadText(lspConfig) == ReadText(projectRoot / ".luau-lsp" / "config.json"));
+		// 内容正确:与入库夹具里的期望样本逐字节一致(HotReload.cpp 的常量文本;`.vscode/`
+		// 与 `.luau-lsp/` 是代码生成物、不在任何项目/模板目录里,样本放在夹具的 scaffold-expected/)。
+		const fs::path expectedScaffold = fs::path(WLD_TEST_ASSETPATH) / "scaffold-expected";
+		CHECK(ReadText(settings) == ReadText(expectedScaffold / "vscode-settings.json"));
+		CHECK(ReadText(lspConfig) == ReadText(expectedScaffold / "luau-lsp-config.json"));
 		CHECK(ReadText(settings).find("assets/scripts/intermediate/WorldEngineAPI.luau") != std::string::npos);
 		CHECK(ReadText(lspConfig).find("assets/scripts/intermediate/WorldEngineAPI.luau") != std::string::npos);
 
@@ -253,7 +255,7 @@ namespace
 		CHECK(LuaStubGenerator::Render(LuaReflectionRegistry::GetTable(), components, serviceList, uiList,
 			rendered, error));
 
-		const fs::path committed = fs::path(WLD_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.luau";
+		const fs::path committed = fs::path(WLD_TEST_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.luau";
 		CHECK(fs::is_regular_file(committed));
 		// 漂移门禁:逐字节一致(比较前统一 CRLF→LF —— 仓库走 core.autocrlf 时工作树可能是 CRLF,
 		// 那是行尾差异不是内容漂移;2026-09-23 实测过该误报,见 docs/dev/file-norms.md §R3)。
@@ -275,7 +277,7 @@ namespace
 		CHECK(rendered.find("---@field OnCreate? fun(self: WorldScript)") != std::string::npos);
 
 		// 旧文件名不得回归:入库制品只有 .luau 一份。
-		CHECK(!fs::exists(fs::path(WLD_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.lua"));
+		CHECK(!fs::exists(fs::path(WLD_TEST_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.lua"));
 		World::Schema::UnregisterGameSchemaModule(context.Schemas());
 	}
 
@@ -380,6 +382,10 @@ int main()
 {
 	try
 	{
+		// PROJ-7/T1:内容根 = 仓库内测试夹具(tests/fixtures/content)。ResolveScriptDiskPath
+		// 走引擎的 World::Paths::AssetRoot() 磁盘回退,必须与夹具一致,否则下面断言到的
+		// 只是项目目录里的副本;脚手架期望样本与存根也都在夹具里。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		World::ScriptEngine::Init();
 		const int failures = RunAll();

@@ -363,7 +363,7 @@ namespace World::Editor
 		}
 
 		// ③ 引擎仓库锚点:仓库根本身/它的任何祖先(删掉会把整个仓库带走),以及仓库内的目录
-		//    (projects/default 这类随仓库走的项目)。用规范化键做前缀比较,大小写不敏感。
+		//    (随仓库一起分发的项目/模板都住在那里)。用规范化键做前缀比较,大小写不敏感。
 		const std::string key = NormalizedKey(root);
 		const std::string repoKey = NormalizedKey(std::filesystem::path(std::string(WLD_REPO_ROOT)));
 		if (key == repoKey || repoKey.rfind(key + "/", 0) == 0)

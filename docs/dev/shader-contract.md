@@ -9,7 +9,7 @@
 > 相关决策与证据:`tools/agents/tasks/20260923-1700-slang-refactor/plan.md`(v3.1 §12/§13)、
 > `tools/agents/reports/Slang-T1-gl-spirv.md`、`Slang-T3-kernel.md`。
 >
-> **完整示例(可直接在编辑器里打开)**:[`projects/default/assets/shaders/examples/ShowcaseMaterial.slang`](../../projects/default/assets/shaders/examples/ShowcaseMaterial.slang)
+> **完整示例(用示例模板建项目后可直接在编辑器里打开)**:[`templates/project-example/assets/shaders/examples/ShowcaseMaterial.slang`](../../templates/project-example/assets/shaders/examples/ShowcaseMaterial.slang)
 > —— 覆盖全部注解类型与修饰符、组合采样器、切线空间法线、参数驱动分支、以及 Slang 的
 > `interface` + 泛型约束写法;该文件已在双目标上实编译验证(Vulkan/GL 各 `spirv-val` = 0,GL 模块 SPIR-V 1.0)。
 >
@@ -201,9 +201,9 @@ RGBA8 既有实现在合并时把 z 写成 `surface.Normal.z`(=1)⇒ **忽略采
 ## 9. 材质函数(`assets/shaders/lib/*.slang`)
 
 材质函数 = **可复用的纯函数**:一份图案/渐变/调色逻辑写一次,多个材质 include 后用。
-示例库与真实用法:[`projects/default/assets/shaders/lib/pattern.slang`](../../projects/default/assets/shaders/lib/pattern.slang)
+示例库与真实用法:[`templates/project-example/assets/shaders/lib/pattern.slang`](../../templates/project-example/assets/shaders/lib/pattern.slang)
 (`ApplyTint` / `CheckerPattern` / `CheckerBlend` / `RadialMask`);
-示例材质 [`ShowcaseMaterial.slang`](../../projects/default/assets/shaders/examples/ShowcaseMaterial.slang)
+示例材质 [`ShowcaseMaterial.slang`](../../templates/project-example/assets/shaders/examples/ShowcaseMaterial.slang)
 include 了它,并在 `Evaluate()` 里用 `ApplyTint` → `CheckerBlend` 做棋盘细节。
 
 **怎么创建**:编辑器里走内容浏览器 `New ▸ Material Shader…`,起始代码选

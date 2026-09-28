@@ -4209,7 +4209,7 @@ namespace World
 	// 本模态只做三件事:收集 项目名 + 位置;实时回显落点与行内错误;把"浏览…/创建"
 	// 标记成下一帧开头的任务(原生对话框与落盘都不在渲染中途做)。
 	// 生成内核 = Editor::ProjectScaffolder(清单走引擎 writer、Main.wd 走引擎序列化、
-	// 结构来自 templates/project/**);成功后模态换成两个动作:资源管理器打开 / 打开项目。
+	// 结构来自所选模板 templates/project-<id>/**);成功后模态换成两个动作:资源管理器打开 / 打开项目。
 	// PROJ-2/T1 追加:可勾选"最小可运行场景"(默认勾选),成功态第三个动作 = 启动项目
 	// (独立 Runtime 进程,不重启编辑器)。
 
@@ -4240,12 +4240,51 @@ namespace World
 		return (std::filesystem::u8path(m_NewProjectLocation) / std::filesystem::u8path(name)).lexically_normal();
 	}
 
-	void EditorShell::OpenNewProjectModal(Wui::WuiContext& ctx)
+	// PROJ-7/T2:模板库刷新(模板 = 磁盘事实 templates/project-*/template.json)。打开模态时强制
+	// 刷一次;模态开着时按 2s 节流 —— 目录扫描不进每帧路径。选中项按 id 保持;被删/首次打开时
+	// 优先回退到 empty,再退第一个模板。
+	void EditorShell::RefreshNewProjectTemplates(bool force)
+	{
+		const double now = std::chrono::duration<double>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+		if (!force && m_NewProjectTemplatesScannedAt > 0.0 && now - m_NewProjectTemplatesScannedAt < 2.0)
+			return;
+		m_NewProjectTemplatesScannedAt = now;
+		m_NewProjectTemplates = Editor::ProjectScaffolder::ListTemplates();
+		const auto has = [this](const std::string& id)
+		{
+			return std::any_of(m_NewProjectTemplates.begin(), m_NewProjectTemplates.end(),
+				[&id](const Editor::ProjectScaffolder::TemplateInfo& info) { return info.Id == id; });
+		};
+		if (!has(m_NewProjectTemplateId))
+		{
+			m_NewProjectTemplateId.clear();
+			if (has("empty"))
+				m_NewProjectTemplateId = "empty";
+			else if (!m_NewProjectTemplates.empty())
+				m_NewProjectTemplateId = m_NewProjectTemplates.front().Id;
+			// 换了模板:上一次的落盘失败原因不再对应当前选择(与"名称/落点一改就作废"同口径)。
+			m_NewProjectFailure.clear();
+			m_NewProjectFailureFor.clear();
+		}
+	}
+
+	const Editor::ProjectScaffolder::TemplateInfo* EditorShell::SelectedNewProjectTemplate() const
+	{
+		for (const Editor::ProjectScaffolder::TemplateInfo& info : m_NewProjectTemplates)
+			if (info.Id == m_NewProjectTemplateId)
+				return &info;
+		return nullptr;
+	}
+
+	void EditorShell::OpenNewProjectModal(Wui::WuiContext& ctx, const std::string& preselectTemplateId)
 	{
 		m_NewProjectOpen = true;
 		m_NewProjectOpenedFrame = static_cast<uint32_t>(ctx.Frame());
 		m_NewProjectCreated = false;
 		m_NewProjectCreatedStarterScene = true;
+		m_NewProjectCreatedTemplateName.clear();
+		m_NewProjectCreatedStartScene.clear();
 		m_NewProjectEntryPoints.clear();
 		m_NewProjectRoot.clear();
 		m_NewProjectCreatedName.clear();
@@ -4253,6 +4292,12 @@ namespace World
 		m_NewProjectFailureFor.clear();
 		m_NewProjectBrowsePending = false;
 		m_NewProjectCreatePending = false;
+		// PROJ-7/T3b:调用方可以预选模板(启动器"新建示例项目…" ⇒ example)。必须写在强制刷新
+		// **之前** —— RefreshNewProjectTemplates 只在"选中 id 不在模板库里"时才回退,所以预选值
+		// 存在就保留;模板缺失时自动降级到 empty/第一个模板(不额外报错)。
+		if (!preselectTemplateId.empty())
+			m_NewProjectTemplateId = preselectTemplateId;
+		RefreshNewProjectTemplates(true);   // 模态打开这一帧就把模板列出来(磁盘事实)
 		if (m_NewProjectName.empty())
 			m_NewProjectName = "MyProject";
 		if (m_NewProjectLocation.empty())
@@ -4276,9 +4321,14 @@ namespace World
 
 	void EditorShell::RunNewProjectCreate(Wui::WuiContext& ctx)
 	{
+		RefreshNewProjectTemplates(false);
+		const Editor::ProjectScaffolder::TemplateInfo* selected = SelectedNewProjectTemplate();
+		// 所选模板自带启动场景(声明 defaultScene)时不生成最小可运行场景:向导里那个勾选框
+		// 此时是禁用态(见 DrawNewProjectModal),这里再夹一次,防止"绕过按钮的第二次调用"。
+		const bool templateOwnsStartScene = selected != nullptr && !selected->DefaultScene.empty();
 		const std::string nameError = NewProjectNameError();
 		const std::string locationError = NewProjectLocationError();
-		const std::string templateError = Editor::ProjectScaffolder::ValidateTemplate();
+		const std::string templateError = Editor::ProjectScaffolder::ValidateTemplate(m_NewProjectTemplateId);
 		const std::string blocked = !nameError.empty() ? nameError
 			: (!locationError.empty() ? locationError : templateError);
 		if (!blocked.empty())
@@ -4292,7 +4342,7 @@ namespace World
 		const std::string name = NewProjectTrimmedName();
 		const Editor::ProjectScaffolder::Result result = Editor::ProjectScaffolder::Create(
 			std::filesystem::u8path(m_NewProjectLocation), name, Application::Get().GetContext(),
-			m_NewProjectStarterScene);
+			templateOwnsStartScene ? false : m_NewProjectStarterScene, m_NewProjectTemplateId);
 		if (!result.Ok)
 		{
 			m_NewProjectFailure = result.Error;
@@ -4302,16 +4352,21 @@ namespace World
 		}
 
 		m_NewProjectCreated = true;
-		m_NewProjectCreatedStarterScene = m_NewProjectStarterScene;
+		m_NewProjectCreatedStarterScene = !templateOwnsStartScene && m_NewProjectStarterScene;
+		m_NewProjectCreatedTemplateName = selected != nullptr ? selected->Name : m_NewProjectTemplateId;
+		m_NewProjectCreatedStartScene = templateOwnsStartScene ? selected->DefaultScene : std::string();
 		m_NewProjectEntryPoints = result.EntryPoints;
 		m_NewProjectRoot = result.ProjectRoot;
 		m_NewProjectCreatedName = name;
 		m_NewProjectFailure.clear();
 		m_NewProjectFailureFor.clear();
 		// 操作日志与状态栏提示:与其它"新建资产"入口同一口径(project / new)。
-		ctx.RecordOp("project", "new", name, result.ProjectRoot.u8string());
+		// 细节里带上模板 id:验证者/脚本从 ops.tail 就能确认"用了哪个模板"。
+		ctx.RecordOp("project", "new", name,
+			result.ProjectRoot.u8string() + " [template " + m_NewProjectTemplateId + "]");
 		PushNotice(Wui::TrFormat("notice.newproject.created",
-			"Created standard project {path} (no samples)", { { "path", result.ProjectRoot.u8string() } }));
+			"Created project {path} (template: {template})",
+			{ { "path", result.ProjectRoot.u8string() }, { "template", m_NewProjectCreatedTemplateName } }));
 		WLD_CORE_INFO("[new-project] created '{0}' ({1} files)", result.ProjectRoot.u8string(),
 			result.Files.size());
 	}
@@ -4331,7 +4386,8 @@ namespace World
 		Wui::ModalFrameDesc frameDesc;
 		frameDesc.Id = modalId;
 		frameDesc.Title = Wui::Tr("modal.newproject.title", "New Project");
-		frameDesc.Size = { 620.0f, 320.0f };
+		// PROJ-7/T2:模板选择 + 说明/提示各占一行 ⇒ 比 PROJ-2 的 320 高 100px。
+		frameDesc.Size = { 620.0f, 420.0f };
 		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
 		{
 			// 模态被别的路径接管/收口:同步清掉宿主状态,避免状态与真实模态脱节。
@@ -4347,12 +4403,52 @@ namespace World
 		if (m_NewProjectCreated)
 		{
 			float cursorY = frame.Y + 48.0f;
-			Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.newproject.created",
-				"Created a standard project skeleton (no samples):"), m_Theme.TextMuted, 12.0f);
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.newproject.created",
+				"Created the project (template: {template}):",
+				{ { "template", m_NewProjectCreatedTemplateName } }), m_Theme.TextMuted, 12.0f);
 			cursorY += 20.0f;
 			Wui::Label(ctx, { labelX, cursorY }, m_NewProjectRoot.u8string(), m_Theme.Text, 13.0f);
 			cursorY += 24.0f;
-			if (m_NewProjectCreatedStarterScene)
+			// 成功态也把"实际用的模板 / 清单 start_scene"登记进无障碍树:验证者按 id 读,
+			// 不用从提示文案里猜(ops.tail 里的 project/new 也带模板 id)。
+			{
+				Wui::WuiAccessNode templateNode;
+				templateNode.Id = Wui::HashId("project.new.created.template");
+				templateNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				templateNode.Panel = "shell";
+				templateNode.Kind = "text";
+				templateNode.Label = Wui::Tr("modal.newproject.template", "Template");
+				templateNode.Value = m_NewProjectCreatedTemplateName;
+				templateNode.Rect = { labelX, frame.Y + 46.0f, frame.W - (labelX - frame.X) - 16.0f, 18.0f };
+				templateNode.Enabled = true;
+				templateNode.Interactive = false;
+				templateNode.Visible = true;
+				Wui::WuiAccessibility::Get().Register(templateNode);
+
+				Wui::WuiAccessNode sceneNode;
+				sceneNode.Id = Wui::HashId("project.new.created.scene");
+				sceneNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				sceneNode.Panel = "shell";
+				sceneNode.Kind = "text";
+				sceneNode.Label = Wui::Tr("modal.newproject.created.scene_label", "Start scene");
+				sceneNode.Value = m_NewProjectCreatedStartScene.empty()
+					? std::string("scenes/Main.wd") : m_NewProjectCreatedStartScene;
+				sceneNode.Rect = { labelX, frame.Y + 66.0f, frame.W - (labelX - frame.X) - 16.0f, 18.0f };
+				sceneNode.Enabled = true;
+				sceneNode.Interactive = false;
+				sceneNode.Visible = true;
+				Wui::WuiAccessibility::Get().Register(sceneNode);
+			}
+			if (!m_NewProjectCreatedStartScene.empty())
+			{
+				// PROJ-7/T2:模板自带启动场景(example ⇒ scenes/3DTest.wd)—— 没有生成 Main.wd。
+				Wui::Label(ctx, { labelX, cursorY },
+					Wui::TrFormat("modal.newproject.created.template_scene",
+						"Start scene: {scene} (ships with the template).",
+						{ { "scene", m_NewProjectCreatedStartScene } }),
+					m_Theme.TextMuted, 12.0f);
+			}
+			else if (m_NewProjectCreatedStarterScene)
 			{
 				Wui::Label(ctx, { labelX, cursorY },
 					Wui::Tr("modal.newproject.created.starter",
@@ -4485,6 +4581,11 @@ namespace World
 		const Wui::WuiId okId = Wui::HashId("project.new.ok");
 		const Wui::WuiId cancelId = Wui::HashId("project.new.cancel");
 		const bool justOpened = ctx.Frame() == m_NewProjectOpenedFrame;
+		// PROJ-7/T2:模板库按 2s 节流刷新(打开模态那一帧已经在 OpenNewProjectModal 里强制刷过)。
+		RefreshNewProjectTemplates(false);
+		const Editor::ProjectScaffolder::TemplateInfo* selectedTemplate = SelectedNewProjectTemplate();
+		// 模板自带启动场景(声明 defaultScene)⇒ 那个"最小可运行场景"勾选框不可用(灰显 + 理由)。
+		const bool templateOwnsStartScene = selectedTemplate != nullptr && !selectedTemplate->DefaultScene.empty();
 
 		// 写盘失败原因只对"同一个落点"有效:名称/位置一改就作废(与新建脚本向导同口径)。
 		if (!m_NewProjectFailure.empty() && m_NewProjectFailureFor != NewProjectTargetRoot().u8string())
@@ -4494,7 +4595,7 @@ namespace World
 		}
 		const std::string nameError = NewProjectNameError();
 		const std::string locationError = NewProjectLocationError();
-		const std::string templateError = Editor::ProjectScaffolder::ValidateTemplate();
+		const std::string templateError = Editor::ProjectScaffolder::ValidateTemplate(m_NewProjectTemplateId);
 
 		// ---- 名称(= 目录名;非法/保留名就地报错)----
 		float cursorY = frame.Y + 46.0f;
@@ -4553,33 +4654,172 @@ namespace World
 		}
 		cursorY += 24.0f;
 
-		// ---- PROJ-2/T1:最小可运行场景(相机 + 方向光;默认勾选)----
+		// ---- PROJ-7/T2:模板选择(分段按钮;每项一个稳定 a11y id project.new.template.<id>)----
+		// 模板库 = templates/project-*/template.json(引擎自带);name 画在按钮上,description
+		// 是悬停提示 + 选中行说明。坏模板(缺 template.json / 缺必需条目)也列出来 —— 选中它
+		// 在下面给可读的行内错误,而不是从列表里静默消失。
+		{
+			const std::string templateLabel = Wui::Tr("modal.newproject.template", "Template");
+			Wui::Label(ctx, { labelX, cursorY + 5.0f }, templateLabel, m_Theme.TextMuted, 13.0f);
+			{
+				Wui::WuiAccessNode node;
+				node.Id = Wui::HashId("project.new.template");
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = "shell";
+				node.Kind = "group";
+				node.Label = templateLabel;
+				node.Value = m_NewProjectTemplateId;   // 稳定 id(脚本按它断言,不按显示名)
+				node.Tooltip = selectedTemplate != nullptr ? selectedTemplate->Description : std::string();
+				node.Rect = { fieldX, cursorY - 3.0f, fieldW, 26.0f };
+				node.Enabled = true;
+				node.Interactive = false;
+				node.Visible = true;
+				Wui::WuiAccessibility::Get().Register(node);
+			}
+			float segmentX = fieldX;
+			constexpr float segmentW = 168.0f;
+			constexpr float segmentGap = 8.0f;
+			for (const Editor::ProjectScaffolder::TemplateInfo& info : m_NewProjectTemplates)
+			{
+				// 放不下就换行(模板数量由磁盘决定,不假设只有两个)。
+				if (segmentX > fieldX && segmentX + segmentW > fieldX + fieldW + 0.5f)
+				{
+					segmentX = fieldX;
+					cursorY += 30.0f;
+				}
+				const std::string segmentLabel = info.Valid ? info.Name
+					: Wui::TrFormat("modal.newproject.template.unavailable", "{name} (unavailable)",
+						{ { "name", info.Name } });
+				const Wui::WuiId segmentId = Wui::HashId(("project.new.template." + info.Id).c_str());
+				if (Wui::ButtonEx(ctx, segmentId, { segmentX, cursorY, segmentW, 24.0f }, segmentLabel,
+					m_Theme, true, info.Id == m_NewProjectTemplateId,
+					info.Valid ? info.Description : info.Error))
+				{
+					m_NewProjectTemplateId = info.Id;
+					m_NewProjectFailure.clear();
+					m_NewProjectFailureFor.clear();
+				}
+				segmentX += segmentW + segmentGap;
+			}
+			cursorY += 30.0f;
+			if (selectedTemplate != nullptr && !selectedTemplate->Description.empty())
+			{
+				Wui::Label(ctx, { labelX, cursorY }, selectedTemplate->Description, m_Theme.TextMuted, 12.0f);
+				Wui::WuiAccessNode node;
+				node.Id = Wui::HashId("project.new.template.description");
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = "shell";
+				node.Kind = "text";
+				node.Label = templateLabel;
+				node.Value = selectedTemplate->Description;
+				node.Tooltip = selectedTemplate->Id;
+				node.Rect = { labelX, cursorY - 2.0f, frame.W - (labelX - frame.X) - 16.0f, 18.0f };
+				node.Enabled = true;
+				node.Interactive = false;
+				node.Visible = true;
+				Wui::WuiAccessibility::Get().Register(node);
+			}
+			cursorY += 20.0f;
+			// 带示例内容的模板(assets/scripts/examples/)给一行"示例内容随模板走"的提示。
+			if (selectedTemplate != nullptr && selectedTemplate->HasSamples)
+			{
+				const std::string hint = Wui::Tr("modal.newproject.template.samples",
+					"Brings in the sample scenes, materials and scripts (sample content ships with the template).");
+				Wui::Label(ctx, { labelX, cursorY }, hint, m_Theme.Warning, 12.0f);
+				Wui::WuiAccessNode node;
+				node.Id = Wui::HashId("project.new.template.hint");
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = "shell";
+				node.Kind = "text";
+				node.Label = templateLabel;
+				node.Value = hint;
+				node.Tooltip = selectedTemplate->Id;
+				node.Rect = { labelX, cursorY - 2.0f, frame.W - (labelX - frame.X) - 16.0f, 18.0f };
+				node.Enabled = true;
+				node.Interactive = false;
+				node.Visible = true;
+				Wui::WuiAccessibility::Get().Register(node);
+				cursorY += 20.0f;
+			}
+		}
+
+		// ---- PROJ-2/T1 + PROJ-7/T2:最小可运行场景(相机 + 方向光;默认勾选)----
 		// 勾选 = assets/scenes/Main.wd 由引擎序列化写入一台 Camera3D + 一盏方向光(不含示例);
 		// 不勾 = 旧口径的空场景,成功态会给"启动后是空画面"的提示。
+		// 所选模板自带启动场景(example ⇒ scenes/3DTest.wd)时该勾选框**禁用**(灰显 + 理由):
+		// 清单的 start_scene 指向模板自带场景,不再生成 Main.wd —— 勾选没有意义。
 		{
 			const Wui::WuiId starterId = Wui::HashId("project.new.starter_scene");
 			const Wui::WuiRect starterRect { labelX, cursorY, frame.W - (labelX - frame.X) - 16.0f, 22.0f };
-			Wui::Checkbox(ctx, starterId, starterRect,
-				Wui::Tr("modal.newproject.starter",
-					"Include a minimal runnable scene (camera + directional light)"),
-				m_NewProjectStarterScene, m_Theme);
-			Wui::Tooltip(ctx, starterRect,
-				Wui::Tr("modal.newproject.starter.tooltip",
-					"Writes assets/scenes/Main.wd with a Camera3D at [0, 1, 5] and a directional "
-					"light, so Launch Project renders a picture. No sample assets, materials or "
-					"scripts are copied."));
+			const std::string starterLabel = Wui::Tr("modal.newproject.starter",
+				"Include a minimal runnable scene (camera + directional light)");
+			if (templateOwnsStartScene)
+			{
+				const std::string lockedReason = Wui::TrFormat("modal.newproject.starter.locked",
+					"The template ships its own start scene ({scene}); no minimal scene is generated.",
+					{ { "scene", selectedTemplate->DefaultScene } });
+				// 禁用态 = 与 Wui::Checkbox 同形状,但灰显且不响应点击(Engine 的 Checkbox 没有
+				// 禁用参数,Engine/** 不在本任务白名单内 ⇒ 这里按 ButtonEx 的禁用口径自绘)。
+				const Wui::WuiRect box { starterRect.X, starterRect.Y + (starterRect.H - 16.0f) * 0.5f, 16.0f, 16.0f };
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Rect, box, m_Theme.PanelBg, 3.0f });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::RectOutline, box, m_Theme.Border, 3.0f, 1.0f });
+				ctx.Commands().push_back({ Wui::WuiDrawKind::Text,
+					{ starterRect.X + 24.0f, starterRect.Y + (starterRect.H - 15.0f) * 0.5f, 0, 0 },
+					m_Theme.TextDisabled, 0, 1.0f, starterLabel, 15.0f, false });
+				Wui::WuiAccessNode node;
+				node.Id = starterId;
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = "shell";
+				node.Kind = "checkbox";
+				node.Label = starterLabel;
+				node.Value = lockedReason;   // 灰件不能没有理由(理由同时进悬停提示)
+				node.Tooltip = lockedReason;
+				node.Rect = starterRect;
+				node.Enabled = false;
+				node.Interactive = true;
+				node.Visible = true;
+				Wui::WuiAccessibility::Get().Register(node);
+				Wui::Tooltip(ctx, starterRect, lockedReason);
+			}
+			else
+			{
+				Wui::Checkbox(ctx, starterId, starterRect, starterLabel, m_NewProjectStarterScene, m_Theme);
+				Wui::Tooltip(ctx, starterRect,
+					Wui::Tr("modal.newproject.starter.tooltip",
+						"Writes assets/scenes/Main.wd with a Camera3D at [0, 1, 5] and a directional "
+						"light, so Launch Project renders a picture. No sample assets, materials or "
+						"scripts are copied."));
+			}
 		}
 		cursorY += 30.0f;
 
 		// ---- 模板/落盘的通用错误行(名称与位置各自画在自己的输入框下)----
 		const std::string generalError = !templateError.empty() ? templateError : m_NewProjectFailure;
 		if (!generalError.empty())
+		{
 			Wui::Label(ctx, { labelX, cursorY + 2.0f }, generalError, m_Theme.Danger, 12.0f);
+			// 行内错误也进无障碍树(标签本身不登记节点):自动化/验证者用 project.new.error
+			// 读"为什么建不了",不必截图猜文字。
+			Wui::WuiAccessNode errorNode;
+			errorNode.Id = Wui::HashId("project.new.error");
+			errorNode.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			errorNode.Panel = "shell";
+			errorNode.Kind = "text";
+			errorNode.Label = Wui::Tr("modal.newproject.error.label", "Cannot create");
+			errorNode.Value = generalError;
+			errorNode.Tooltip = generalError;
+			errorNode.Rect = { labelX, cursorY, frame.W - (labelX - frame.X) - 16.0f, 18.0f };
+			errorNode.Enabled = true;
+			errorNode.Interactive = false;
+			errorNode.Visible = true;
+			Wui::WuiAccessibility::Get().Register(errorNode);
+		}
 		else
 			Wui::Label(ctx, { labelX, cursorY + 2.0f },
 				Wui::Tr("modal.newproject.hint",
-					"Standard skeleton only — manifest (engine writer), empty content root and an "
-					"empty scene; engine C++ stays in Engine/**, project C++ goes to src/**."),
+					"Content comes from the selected template (templates/project-<id>/**, copied file by "
+					"file); the manifest is written by the engine writer; engine C++ stays in Engine/**, "
+					"project C++ goes to src/**."),
 				m_Theme.TextMuted, 12.0f);
 
 		// ---- 底部按钮(名称/位置/模板任一不通过时创建按钮禁用并带原因)----
@@ -4616,7 +4856,8 @@ namespace World
 	// ---- PROJ-2/T1:项目启动器 / File ▸ Open Project… / 运行 ▸ 启动项目(Runtime) ----
 	//
 	// 启动决策(显式项目 / 自动打开最近一次 / 显示启动器)在 EditorLayer;本文件只做:
-	//   * 启动器模态的渲染与四个动作(新建项目向导 / 打开项目… / 打开默认示例项目 / 关闭);
+	//   * 启动器模态的渲染与四个动作(新建项目向导 / 新建示例项目向导(预选 example 模板) /
+	//     打开项目… / 关闭·退出);
 	//   * 最近列表的缓存刷新与"移除失效项";
 	//   * File ▸ Open Project… 的入口(与启动器共用同一条"选目录 → 校验 → 重启"路径);
 	//   * 运行 ▸ 启动项目(Runtime)= EditorLayer::LaunchProjectRuntime(当前项目根)。
@@ -4667,24 +4908,6 @@ namespace World
 		m_Editor.RelaunchWithProject(root);
 	}
 
-	void EditorShell::OpenDefaultSampleProject(Wui::WuiContext& ctx)
-	{
-		// 显式入口:编译期默认项目 projects/default(文案里点明"示例")。走同一条重启路径
-		// (也会记进最近列表,但 EditorLayer 的启动决策不会把 projects/default 当作自动打开目标)。
-		const std::filesystem::path root = std::filesystem::path(WLD_PROJECT_DIR);
-		std::string reason;
-		if (!Editor::ProjectLauncher::IsValidProjectRoot(root, &reason))
-		{
-			PushNotice(Wui::TrFormat("notice.project.open_failed", "{reason}: {path}",
-				{ { "reason", reason }, { "path", root.u8string() } }));
-			WLD_CORE_WARN("[project] default sample project is unavailable: '{0}': {1}",
-				root.u8string(), reason);
-			return;
-		}
-		ctx.RecordOp("project", "open-sample", "default", root.u8string());
-		m_Editor.RelaunchWithProject(root);
-	}
-
 	void EditorShell::LaunchCurrentProjectRuntime()
 	{
 		// 目标项目 = 当前项目根(定位 Runtime / 命令行 / 日志 / 操作记录全在 EditorLayer)。
@@ -4699,6 +4922,10 @@ namespace World
 			m_PrefabPendingAction != PrefabPendingAction::None || m_Editor.ShowUnsavedModal() ||
 			m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress();
 		const bool visible = m_Editor.ShowProjectLauncher() && !blockedByOtherModal;
+		// PROJ-7/T3b:刚回到前台的那一帧吞掉点击/Esc(理由见头文件 m_LauncherModalVisible 注释):
+		// 向导的"取消"与启动器按钮在同一帧收口时,上一次输入的落点会命中启动器按钮。
+		const bool justBecameVisible = visible && !m_LauncherModalVisible;
+		m_LauncherModalVisible = visible;
 		if (visible)
 			ctx.SetModal(modalId);
 		else if (ctx.Modal() == modalId)
@@ -4909,25 +5136,31 @@ namespace World
 			ctx.RecordOp("project", "delete-ask", deletePendingName, deletePendingPath);
 		}
 
-		// 动作按钮上方的说明(点项目 = 重启编辑器;示例项目 = projects/default)。
+		// 动作按钮上方的说明(点项目 = 重启编辑器;"新建示例项目…"= 向导预选示例模板)。
 		Wui::Label(ctx, { frame.X + pad, frame.Y + frame.H - 76.0f },
 			Wui::Tr("modal.launcher.hint",
-				"Picking a project restarts the editor into it. The default sample project is "
-				"projects/default (the built-in example)."),
+				"Picking a project restarts the editor into it. New Example Project uses the example "
+				"template (scenes, materials, scripts)."),
 			m_Theme.TextMuted, 12.0f);
 
+		// PROJ-7/T3b:动作顺序 = 新建项目… / 新建示例项目… / 打开项目… / 退出(编辑器形态=关闭)。
+		// "新建示例项目…"只是打开同一个向导并预选 example 模板 —— 示例内容来自
+		// templates/project-example/**,仓库里已没有任何"内置默认项目"可打开。
 		const Wui::ModalButtonDesc buttons[4] = {
 			{ Wui::Tr("modal.launcher.new", "New Project…"), Wui::HashId("project.launcher.new"), true },
+			{ Wui::Tr("modal.launcher.new_example", "New Example Project…"),
+				Wui::HashId("project.launcher.new_example"), true },
 			{ Wui::Tr("modal.launcher.open", "Open Project…"), Wui::HashId("project.launcher.open"), true },
-			{ Wui::Tr("modal.launcher.default", "Open Default Sample Project"),
-				Wui::HashId("project.launcher.default"), true },
 			// PROJ-3/T1:启动器模式下第 4 个动作是"退出"(关掉整个启动器进程);
 			// 普通编辑器形态下仍是 PROJ-2 的"关闭"(停在当前项目)。a11y id 两个形态共用。
 			{ m_LauncherMode ? Wui::Tr("modal.launcher.quit", "Quit")
 				: Wui::Tr("modal.launcher.close", "Close"),
 				Wui::HashId("project.launcher.close"), true },
 		};
-		const int clicked = Wui::ModalButtons(ctx, frame, buttons, 4, m_Theme);
+		// 按钮照常绘制/登记(不能因为吞输入那一帧就少画),只丢掉这一帧的动作。
+		const int clickedRaw = Wui::ModalButtons(ctx, frame, buttons, 4, m_Theme);
+		const int clicked = justBecameVisible ? -1 : clickedRaw;
+		const bool launcherEscape = justBecameVisible ? false : escapePressed;
 		Wui::EndModalFrame(ctx);
 		if (clicked == 0)
 		{
@@ -4935,13 +5168,13 @@ namespace World
 		}
 		else if (clicked == 1)
 		{
-			RequestOpenProjectBrowse(ctx);
+			OpenNewProjectModal(ctx, "example");   // 同一个向导,但预选示例模板
 		}
 		else if (clicked == 2)
 		{
-			OpenDefaultSampleProject(ctx);
+			RequestOpenProjectBrowse(ctx);
 		}
-		else if (clicked == 3 || escapePressed)
+		else if (clicked == 3 || launcherEscape)
 		{
 			if (m_LauncherMode)
 			{

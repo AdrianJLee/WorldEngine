@@ -58,7 +58,7 @@ namespace World::Editor
 		//   ① 目标存在且是目录;
 		//   ② 拒绝盘根/UNC 根与"路径段数 < 2"的浅路径;
 		//   ③ 拒绝 WLD_REPO_ROOT 本身或它的任何祖先(删掉会把整个仓库带走),
-		//      以及引擎仓库内的目录(如 projects/default 这类随仓库走的项目);
+		//      以及引擎仓库内的目录(随仓库一起分发的项目都住在那里);
 		//   ④ 含 project.we.yaml(不是项目就拒绝);
 		//   ⑤ 编辑器形态下拒绝当前打开的项目(启动器形态没有当前项目,ProjectDir() 指向
 		//      local/launcher-stub 哨兵,不会命中真实目标)。

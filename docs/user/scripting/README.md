@@ -4,7 +4,7 @@
 
 ## 快速开始
 
-1. 复制模板 `projects/default/assets/scripts/templates/WorldScript.lua`,改类名与字段,放到内容树的脚本目录下。
+1. 复制项目里的模板 `<项目根>/assets/scripts/templates/WorldScript.lua`(新建项目时就带上了),改类名与字段,放到内容树的脚本目录下。
 2. 给实体添加脚本组件,填脚本路径(相对内容根,例如 `scripts/MyScript.lua`)。
 3. `Play`:引擎为每个脚本组件创建实例,并调用 `OnCreate` / `OnUpdate(dt)` / `OnDestroy`。
 
@@ -38,7 +38,7 @@ return MyScript
   集合表头的重置会整表复原并先确认。
 - 字段名按脚本里的声明原样显示(不本地化)。
 
-脚本示例见 `projects/default/assets/scripts/examples/FeatureShowcase.lua`;属性模型变化会同步升
+脚本示例见示例模板 `templates/project-example/assets/scripts/examples/FeatureShowcase.lua`;属性模型变化会同步升
 `WE_MODULE_ABI_VERSION`(当前 7)。
 
 ## 生命周期与结构修改
@@ -51,10 +51,9 @@ return MyScript
 
 ## 代码提示
 
-- 编辑器按实际注册的绑定生成 `projects/default/assets/scripts/intermediate/WorldEngineAPI.luau`;它是声明基线,
+- 编辑器按实际注册的绑定生成 `<项目根>/assets/scripts/intermediate/WorldEngineAPI.luau`;它是当前项目的声明基线,
   **不要** `require` 或运行它。
-- VS Code 打开仓库根即可(根 `.luarc.json` 生效);`projects/default/.vscode/settings.json` 与
-  `projects/default/.luau-lsp/config.json` 给 Luau LSP 喂同一份声明。
+- VS Code 打开**项目根**即可:项目里的 `.vscode/settings.json` 与 `.luau-lsp/config.json`(新建项目时生成)给 Luau LSP 喂同一份声明。
 - 细节(工作区配置、补全范围、已知限制)见 [Lua 脚本与代码提示](lua-tooling.md)。
 
 ## C++ 脚本（原生脚本组件）

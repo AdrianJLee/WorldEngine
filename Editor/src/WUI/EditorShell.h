@@ -17,6 +17,7 @@
 #include "Panels/AttachSlotPanel.h"
 #include "FloatWindowHost.h"
 #include "../Project/ProjectLauncher.h"
+#include "../Project/ProjectScaffolder.h"
 
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiDock.h"
@@ -335,13 +336,22 @@ namespace World
 		std::string m_NewCppScriptFailure;      // 写盘失败原因(落点变化时清)
 		std::string m_NewCppScriptFailureFor;   // 上面的原因对应的落点(变了就作废)
 
-		// ---- PROJ-1/T1:File ▸ New Project…(任意位置新建标准项目)----
-		// 菜单入口 → 模态(项目名 + 位置 + Browse… + 实时落点 + 行内错误)→ 生成标准骨架
-		// (ProjectScaffolder;清单走引擎 writer、空场景走引擎序列化、模板来自 templates/project)。
+		// ---- PROJ-1/T1 + PROJ-7/T2:File ▸ New Project…(任意位置新建标准项目)----
+		// 菜单入口 → 模态(项目名 + 位置 + Browse… + **模板选择** + 实时落点 + 行内错误)→
+		// 生成骨架(ProjectScaffolder;清单走引擎 writer、启动场景来自模板或引擎序列化、
+		// 模板来自 templates/project-*/)。
 		// **原生对话框与落盘都在帧边界执行**(上一帧只置标记;渲染中途弹 Win32 模态/写盘会踩坑,
 		// 与 m_PendingScriptOpen 同一条纪律)。成功后模态换成两个动作:在资源管理器打开 / 打开项目。
-		void OpenNewProjectModal(Wui::WuiContext& ctx);
+		// preselectTemplateId(PROJ-7/T3b,可选):打开时预选的模板 id(空 = 保持上次选择/默认 empty)。
+		// 启动器"新建示例项目…"用它把 example 模板带进向导;该模板不存在时按既有回退规则
+		// (empty → 第一个模板)降级,不额外报错。
+		void OpenNewProjectModal(Wui::WuiContext& ctx, const std::string& preselectTemplateId = std::string());
 		void DrawNewProjectModal(Wui::WuiContext& ctx);
+		// 模板库刷新(打开模态时强制刷;模态开着时按 2s 节流刷 —— 模板是磁盘事实,
+		// 但**不**每帧扫目录)。选中项被删时退回第一个模板。
+		void RefreshNewProjectTemplates(bool force);
+		// 当前选中的模板(找不到 = nullptr;调用方先 RefreshNewProjectTemplates)。
+		const Editor::ProjectScaffolder::TemplateInfo* SelectedNewProjectTemplate() const;
 		// 帧边界执行体(OnRender 开头消费标记)。
 		void RunNewProjectBrowse(Wui::WuiContext& ctx);
 		void RunNewProjectCreate(Wui::WuiContext& ctx);
@@ -362,8 +372,16 @@ namespace World
 		bool m_NewProjectCreated = false;        // 成功态(模态画两个动作按钮)
 		std::filesystem::path m_NewProjectRoot;  // 成功后的项目根(绝对)
 		std::string m_NewProjectCreatedName;
+		// PROJ-7/T2:模板选择。模板库 = templates/project-*/template.json(ListTemplates 扫描);
+		// 默认选 empty(没有 empty 就选第一个模板)。破坏性/失败原因按"选中模板"失效。
+		std::vector<Editor::ProjectScaffolder::TemplateInfo> m_NewProjectTemplates;
+		double m_NewProjectTemplatesScannedAt = 0.0;   // steady_clock 秒;0 = 本会话还没扫过
+		std::string m_NewProjectTemplateId = "empty";  // 当前选中的模板 id
+		std::string m_NewProjectCreatedTemplateName;   // 成功态:实际用的模板名
+		std::string m_NewProjectCreatedStartScene;     // 成功态:清单里的 start_scene(相对内容根)
 		// PROJ-2/T1:P4 —— 向导复选框"包含最小可运行场景(相机 + 方向光)",默认勾选;
 		// 创建结果按创建时的勾选快照进成功态(提示文案 / 交给 ProjectScaffolder 的参数)。
+		// PROJ-7/T2:所选模板声明了 defaultScene(自带启动场景)时该勾选框禁用(灰显 + 理由)。
 		bool m_NewProjectStarterScene = true;
 		bool m_NewProjectCreatedStarterScene = true;
 		// PROJ-3/T1(P2b):本次创建写进项目根的启动入口(相对文件名,已排序;
@@ -396,11 +414,15 @@ namespace World
 		std::string m_LauncherDeletePath;
 		std::string m_LauncherDeleteName;
 		std::string m_LauncherDeleteError;
+		// PROJ-7/T3b:启动器模态"刚回到前台"的那一帧吞掉输入 —— 向导(新建项目)的
+		// 取消/关闭与启动器按钮在同一帧收口时,上一帧的点击/Esc 会与启动器按钮的
+		// 屏幕矩形重叠,同帧判定会把"取消向导"误判成"点了启动器按钮"(实测:取消后
+		// 同帧又开了一次向导,op 日志同一帧两条;Esc 在启动器模式下会把整个进程退掉)。
+		// 只在"不可见 → 可见"的过渡帧生效,之后正常响应。
+		bool m_LauncherModalVisible = false;
 		void DrawLauncherDeleteFlow(Wui::WuiContext& ctx, const Wui::WuiRect& frame, bool escapePressed);
 		// 运行 ▸ 启动项目(Runtime):目标 = 当前项目根(EditorLayer完成定位/启动/日志)。
 		void LaunchCurrentProjectRuntime();
-		// 启动器动作:打开默认**示例**项目(projects/default,文案明确"示例")。
-		void OpenDefaultSampleProject(Wui::WuiContext& ctx);
 		// 启动器的"打开项目…"入口(与 File ▸ Open Project… 同一条帧边界路径)。
 		void RequestOpenProjectBrowse(Wui::WuiContext& ctx);
 

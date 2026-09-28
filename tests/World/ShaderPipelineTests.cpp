@@ -973,8 +973,9 @@ int main()
 
 			// ⑤ 真实示例(不是手工 slangc):ShowcaseMaterial.slang 的 `#include "lib/pattern.slang"`
 			// 走**引擎路径**在两个后端都编过。
+			// PROJ-7/T3:示例着色器从仓库测试夹具读(WLD_TEST_ASSETPATH),不再依赖默认项目。
 			const std::filesystem::path shadersRoot =
-				std::filesystem::path(WLD_ASSETPATH) / "shaders";
+				std::filesystem::path(WLD_TEST_ASSETPATH) / "shaders";
 			const std::filesystem::path showcasePath = shadersRoot / "examples"
 				/ "ShowcaseMaterial.slang";
 			CHECK(std::filesystem::is_regular_file(showcasePath));

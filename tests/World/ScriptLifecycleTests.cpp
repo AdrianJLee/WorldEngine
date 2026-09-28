@@ -13,6 +13,7 @@
 #include "World/Script/ScriptValue.h"
 #include "World/Modules/GameModuleReload.h"
 #include "World/Script/BehaviorRegistry.h"
+#include "World/Utils/Paths.h"
 
 #include <box2d/box2d.h>
 #include <algorithm>
@@ -1010,7 +1011,7 @@ namespace
         const auto invalidPath = s_OutputDirectory / "invalid.lua";
         { std::ofstream file(invalidPath, std::ios::binary); file << "return { OnCreate = function( }\n"; CHECK(file.good()); }
         Fixture fixture;
-        auto invalid = fixture.AddLua(invalidPath.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string());
+        auto invalid = fixture.AddLua(invalidPath.lexically_relative(fs::path(WLD_TEST_ASSETPATH)).generic_string());
         fixture.World->OnScriptStart();
         CHECK(invalid.GetComponent<LuauScriptComponent>().Runtime.State == ScriptInstanceState::Faulted);
         CHECK(invalid.GetComponent<LuauScriptComponent>().Runtime.LastError.find("phase=Load") != std::string::npos);
@@ -1048,7 +1049,7 @@ namespace
                 "return { Offset = vec3.new(1.5, 2.5, 3.5), Scale = vec2.new(0.25, 0.5) }\n";
             CHECK(file.good());
         }
-        const std::string logical = vectorPath.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+        const std::string logical = vectorPath.lexically_relative(fs::path(WLD_TEST_ASSETPATH)).generic_string();
 
         // ① 注解 vec3/vec2/vec4 → Schema::Kind 的对应支;Doc 取注解第三段。
         std::vector<ScriptProperties::Declaration> declarations;
@@ -1109,7 +1110,7 @@ namespace
             file << "---@field Offset vec3 位置偏移\nreturn { Offset = 1.0 }\n";
             CHECK(file.good());
         }
-        const std::string mismatchLogical = mismatchPath.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+        const std::string mismatchLogical = mismatchPath.lexically_relative(fs::path(WLD_TEST_ASSETPATH)).generic_string();
         std::vector<ScriptProperties::Declaration> mismatchDeclarations;
         std::vector<std::string> mismatchDiagnostics;
         CHECK(ScriptEngine::DescribeScriptDeclarations(mismatchLogical, mismatchDeclarations, &mismatchDiagnostics, &error));
@@ -1171,7 +1172,7 @@ namespace
                 "}\n";
             CHECK(file.good());
         }
-        const std::string logical = path.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+        const std::string logical = path.lexically_relative(fs::path(WLD_TEST_ASSETPATH)).generic_string();
 
         const auto findDeclaration = [](const std::vector<ScriptProperties::Declaration>& list,
             const std::string& name) -> const ScriptProperties::Declaration*
@@ -1275,7 +1276,7 @@ namespace
                 "}\n";
             CHECK(file.good());
         }
-        const std::string logical = path.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+        const std::string logical = path.lexically_relative(fs::path(WLD_TEST_ASSETPATH)).generic_string();
 
         const auto findDeclaration = [](const std::vector<ScriptProperties::Declaration>& list,
             const std::string& name) -> const ScriptProperties::Declaration*
@@ -2807,6 +2808,10 @@ int main(int argc, char** argv)
 {
     try
     {
+        // PROJ-7/T3:内容根 = 仓库内测试夹具(tests/fixtures/content)。探针脚本
+        // (scripts/tests/*.lua)与"相对内容根的 .. 逻辑路径"(指向构建产物临时目录)
+        // 都按这个根解析,不再依赖默认项目。
+        World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
         World::Log::Init();
         World::ScriptEngine::Init();
         if (argc == 2 && std::string(argv[1]) == "--generate-stubs")

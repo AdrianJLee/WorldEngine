@@ -9,6 +9,7 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneSerializer.h"
 #include "World/Script/HotReload.h"
+#include "World/WUI/WuiJson.h"
 #include "World/WUI/WuiLocalization.h"
 
 #include <cctype>
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <random>
 #include <system_error>
 
@@ -36,6 +38,11 @@ namespace World::Editor
 
 		constexpr const char* kManifestFileName = "project.we.yaml";
 		constexpr const char* kMainSceneRelative = "assets/scenes/Main.wd";
+
+		// PROJ-7/T2:模板库 = <checkout>/templates/project-<id>/,每个模板一个
+		// template.json(id/name/description/order/defaultScene)。
+		constexpr const char* kTemplateManifestName = "template.json";
+		constexpr const char* kTemplateDirectoryPrefix = "project-";
 
 		// 模板里必须存在的条目(模板缺失/被删空时向导给可读的行内错误,而不是生成
 		// 一个残缺项目)。目录条目用尾部 '/' 表示。
@@ -98,6 +105,104 @@ namespace World::Editor
 				if (EqualsIgnoreCase(stem, candidate))
 					return true;
 			return false;
+		}
+
+		// 模板 id 直接拼进目录名(project-<id>)与向导的无障碍 id(project.new.template.<id>):
+		// 只接受一段安全 ASCII 名字 —— 路径分隔符 / ".." / 空段一律拒绝(不做路径拼接)。
+		bool IsValidTemplateId(const std::string& id)
+		{
+			if (id.empty() || id == "." || id == "..")
+				return false;
+			if (std::isalnum(static_cast<unsigned char>(id.front())) == 0)
+				return false;
+			for (const char character : id)
+			{
+				const unsigned char c = static_cast<unsigned char>(character);
+				if (std::isalnum(c) == 0 && c != '.' && c != '_' && c != '-')
+					return false;
+			}
+			return true;
+		}
+
+		bool IsTemplateDirectoryName(const std::string& name)
+		{
+			const size_t prefixLength = std::strlen(kTemplateDirectoryPrefix);
+			return name.size() > prefixLength
+				&& name.compare(0, prefixLength, kTemplateDirectoryPrefix) == 0;
+		}
+
+		// 读一个模板目录(template.json → TemplateInfo):成功 = true(*info 填好且 Valid=true);
+		// 失败 = false,且 *error 是可读(已本地化)的原因。ListTemplates(列出坏模板)与
+		// ValidateTemplate(选中时的行内错误)/ Create(前置守卫)共用这一条口径。
+		bool LoadTemplateInfo(const fs::path& directory, const std::string& id,
+			ProjectScaffolder::TemplateInfo* info, std::string* error)
+		{
+			info->Id = id;
+			info->Name = id;
+			info->Directory = directory;
+			info->Valid = true;
+
+			std::error_code ec;
+			if (!fs::is_directory(directory, ec))
+			{
+				if (error)
+					*error = Wui::TrFormat("modal.newproject.error.template_missing",
+						"Project template is missing: {path}", { { "path", directory.u8string() } });
+				return false;
+			}
+			const fs::path manifestPath = directory / kTemplateManifestName;
+			if (!fs::is_regular_file(manifestPath, ec))
+			{
+				if (error)
+					*error = Wui::TrFormat("modal.newproject.error.template_manifest_missing",
+						"Project template has no template.json: {path}",
+						{ { "path", manifestPath.u8string() } });
+				return false;
+			}
+			const auto invalid = [&manifestPath, error](const std::string& reason)
+			{
+				if (error)
+					*error = Wui::TrFormat("modal.newproject.error.template_invalid",
+						"Cannot read the project template: {path} ({reason})",
+						{ { "path", manifestPath.u8string() }, { "reason", reason } });
+				return false;
+			};
+
+			std::ifstream stream(manifestPath, std::ios::binary);
+			if (!stream)
+				return invalid("cannot open the file");
+			const std::string text((std::istreambuf_iterator<char>(stream)),
+				std::istreambuf_iterator<char>());
+			std::string parseError;
+			const std::optional<Wui::JsonValue> root = Wui::JsonValue::Parse(text, &parseError);
+			if (!root || root->type != Wui::JsonValue::Type::Object)
+				return invalid(parseError.empty() ? std::string("not a JSON object") : parseError);
+			// 目录名是 id 的事实源(目录唯一);template.json 里写了 id 就必须与它一致。
+			if (const Wui::JsonValue* declaredId = root->Find("id"))
+			{
+				const std::string value = declaredId->AsString();
+				if (!value.empty() && value != id)
+					return invalid("id '" + value + "' does not match the directory name '"
+						+ std::string(kTemplateDirectoryPrefix) + id + "'");
+			}
+			if (const Wui::JsonValue* name = root->Find("name"))
+			{
+				const std::string value = name->AsString();
+				if (!value.empty())
+					info->Name = value;
+			}
+			if (const Wui::JsonValue* description = root->Find("description"))
+				info->Description = description->AsString();
+			if (const Wui::JsonValue* scene = root->Find("defaultScene"))
+				info->DefaultScene = scene->AsString();
+			if (const Wui::JsonValue* order = root->Find("order"))
+				if (order->type == Wui::JsonValue::Type::Number)
+					info->Order = static_cast<int>(order->Number);
+			// 示例内容提示的判据 = 模板里有没有 assets/scripts/examples/(示例脚本随模板走);
+			// 在扫描期算一次,不进每帧路径。
+			std::error_code samplesError;
+			info->HasSamples = fs::is_directory(directory / "assets" / "scripts" / "examples", samplesError);
+			return true;
 		}
 
 		std::string RandomToken()
@@ -178,29 +283,51 @@ namespace World::Editor
 			return true;
 		}
 
-		// 清单的 renderer / rendering / physics 取"默认项目同口径":默认项目的清单是这三个
-		// **设置**字段的参考(读不到就退回 ProjectManifest 的引擎默认值)。注意这里只借
-		// 设置值,绝不复制默认项目的任何内容/示例。
+		// 清单的 renderer / rendering / physics 是**代码常量**(PROJ-7/T2 裁决 4):项目骨架
+		// 只由"所选模板 + 引擎代码生成"构成(仓库里没有可参照的具体项目),脚手架不能依赖
+		// 任何项目文件。取值 = 模板化之前那份示例项目清单的等价口径(旧清单位于
+		// 注释 kStandardXxx;逐字段"旧值 → 新常量"对照见 tools/agents/reports/PROJ7-T2.md):
+		//   renderer: vulkan
+		//   rendering: culling=true / shadows=false / shadow_map_size=2048 /
+		//              max_directional_lights=1 / max_point_lights=7 / gpu_timing=false /
+		//              vsync=true / instancing=true / anisotropy=1 / render_scale=1.0 / msaa=1
+		//   physics:   fixed_step_hz=60 / gravity=-9.81
+		// 显式逐字段赋值(**不**依赖 RenderingSettings / PhysicsSettingsData 的默认值):
+		// 引擎默认值将来若改,标准项目的清单不该跟着漂 —— 要改就改这里并重新过 T2 的对照表。
 		void ApplyStandardSettingDefaults(Asset::ProjectManifest& manifest)
 		{
-			Asset::ProjectManifest reference;
-			std::string error;
-			const fs::path referencePath = RepoRoot() / "projects" / "default" / kManifestFileName;
-			if (Asset::ProjectManifest::Load(referencePath, &reference, &error))
-			{
-				manifest.Renderer = reference.Renderer;
-				manifest.Rendering = reference.Rendering;
-				manifest.Physics = reference.Physics;
-			}
+			manifest.Renderer = "vulkan";
+
+			Asset::RenderingSettings rendering;
+			rendering.Culling = true;
+			rendering.Shadows = false;
+			rendering.ShadowMapSize = 2048;
+			rendering.MaxDirectionalLights = 1;
+			rendering.MaxPointLights = 7;
+			rendering.GpuTiming = false;
+			rendering.Vsync = true;
+			rendering.Instancing = true;
+			rendering.Anisotropy = 1;
+			rendering.RenderScale = 1.0f;
+			rendering.Msaa = 1;
+			manifest.Rendering = rendering;
+
+			Asset::PhysicsSettingsData physics;
+			physics.FixedStepHz = 60;
+			physics.Gravity = -9.81f;
+			manifest.Physics = physics;
 		}
 
-		bool WriteStandardManifest(const fs::path& projectRoot, const std::string& name, std::string* error)
+		// startScene = 内容根(assets/)相对路径:模板声明了 defaultScene 就用它,否则用
+		// 引擎序列化写出的 Main.wd(kStandardStartScene)。
+		bool WriteStandardManifest(const fs::path& projectRoot, const std::string& name,
+			const std::string& startScene, std::string* error)
 		{
 			Asset::ProjectManifest manifest;
 			manifest.Id = ProjectScaffolder::ManifestId(name);
 			manifest.Version = kStandardVersion;
 			manifest.ContentRoot = kStandardContentRoot;
-			manifest.StartScene = kStandardStartScene;
+			manifest.StartScene = startScene;
 			ApplyStandardSettingDefaults(manifest);
 			manifest.Packages.clear();   // 新项目还没有发行包(默认项目的 Base.wpak 是引擎内容)
 			return Asset::ProjectManifest::Save(projectRoot / kManifestFileName, manifest, error);
@@ -209,8 +336,8 @@ namespace World::Editor
 		// Main.wd 走引擎序列化(不手写 YAML):Scene 需要一个 WorldContext,序列化完即弃。
 		// includeStarterScene = true 时写入"最小可运行场景":一台 Camera3D(位置 [0,1,5]、
 		// Primary、透视)+ 一盏方向光 —— 只由引擎组件构成,不带任何示例资产/材质/脚本;
-		// false 时保持旧行为(空场景)。形态与 projects/default/assets/scenes/3DTest.wd 的
-		// 相机/灯光序列化形态同源(同一个 writer)。
+		// false 时保持旧行为(空场景)。形态与示例模板自带的 scenes/3DTest.wd
+		// (templates/project-example/assets/scenes/3DTest.wd)同源(同一个 writer)。
 		bool WriteMainScene(const fs::path& projectRoot, WorldContext& context, bool includeStarterScene,
 			std::string* error)
 		{
@@ -539,7 +666,67 @@ namespace World::Editor
 
 	fs::path ProjectScaffolder::TemplateRoot()
 	{
-		return RepoRoot() / "templates" / "project";
+		return RepoRoot() / "templates";
+	}
+
+	fs::path ProjectScaffolder::TemplateDirectory(const std::string& templateId)
+	{
+		if (!IsValidTemplateId(templateId))
+			return {};
+		return TemplateRoot() / (std::string(kTemplateDirectoryPrefix) + templateId);
+	}
+
+	std::vector<ProjectScaffolder::TemplateInfo> ProjectScaffolder::ListTemplates()
+	{
+		std::vector<TemplateInfo> templates;
+		std::error_code ec;
+		const fs::path root = TemplateRoot();
+		fs::directory_iterator iterator(root, ec);
+		if (ec)
+			return templates;   // 模板根不存在/读不了 = 空库(ValidateTemplate 给可读原因)
+		const fs::directory_iterator end;
+		while (iterator != end)
+		{
+			const fs::directory_entry& entry = *iterator;
+			std::error_code typeError;
+			if (entry.is_directory(typeError))
+			{
+				const std::string directoryName = entry.path().filename().u8string();
+				if (IsTemplateDirectoryName(directoryName))
+				{
+					TemplateInfo info;
+					const std::string id = directoryName.substr(std::strlen(kTemplateDirectoryPrefix));
+					std::string error;
+					if (!IsValidTemplateId(id))
+					{
+						info.Id = id;
+						info.Name = id;
+						info.Directory = entry.path();
+						info.Valid = false;
+						info.Error = Wui::TrFormat("modal.newproject.error.template_id_invalid",
+							"Invalid project template id (letters, digits, '.', '_' and '-' only): {id}",
+							{ { "id", id } });
+					}
+					else if (!LoadTemplateInfo(entry.path(), id, &info, &error))
+					{
+						info.Valid = false;
+						info.Error = error;
+					}
+					templates.push_back(std::move(info));
+				}
+			}
+			iterator.increment(ec);
+			if (ec)
+				break;
+		}
+		std::sort(templates.begin(), templates.end(),
+			[](const TemplateInfo& a, const TemplateInfo& b)
+			{
+				if (a.Order != b.Order)
+					return a.Order < b.Order;
+				return a.Id < b.Id;
+			});
+		return templates;
 	}
 
 	fs::path ProjectScaffolder::DefaultProjectLocation()
@@ -607,17 +794,31 @@ namespace World::Editor
 		return {};
 	}
 
-	std::string ProjectScaffolder::ValidateTemplate()
+	std::string ProjectScaffolder::ValidateTemplate(const std::string& templateId)
 	{
 		const fs::path root = TemplateRoot();
 		std::error_code ec;
 		if (!fs::is_directory(root, ec))
 			return Wui::TrFormat("modal.newproject.error.template_missing",
 				"Project template is missing: {path}", { { "path", root.u8string() } });
+		// 一个模板都没有(空 id)⇒ 报模板根:比"id 非法"更接近用户看到的事实。
+		if (templateId.empty())
+			return Wui::TrFormat("modal.newproject.error.template_missing",
+				"Project template is missing: {path}", { { "path", root.u8string() } });
+		if (!IsValidTemplateId(templateId))
+			return Wui::TrFormat("modal.newproject.error.template_id_invalid",
+				"Invalid project template id (letters, digits, '.', '_' and '-' only): {id}",
+				{ { "id", templateId } });
+
+		const fs::path directory = TemplateDirectory(templateId);
+		TemplateInfo info;
+		std::string reason;
+		if (!LoadTemplateInfo(directory, templateId, &info, &reason))
+			return reason;
 		for (const char* entry : kRequiredTemplateEntries)
 		{
 			const bool wantsDirectory = entry[std::strlen(entry) - 1] == '/';
-			const fs::path path = root / fs::u8path(wantsDirectory ? std::string(entry, std::strlen(entry) - 1)
+			const fs::path path = directory / fs::u8path(wantsDirectory ? std::string(entry, std::strlen(entry) - 1)
 				: std::string(entry));
 			std::error_code entryError;
 			const bool present = wantsDirectory ? fs::is_directory(path, entryError)
@@ -625,6 +826,17 @@ namespace World::Editor
 			if (!present)
 				return Wui::TrFormat("modal.newproject.error.template_missing",
 					"Project template is missing: {path}", { { "path", path.u8string() } });
+		}
+		// 模板声明的启动场景必须真的在模板里(相对内容根 assets/)—— 否则生成的清单会指向
+		// 一个不存在的场景,用户第一次"打开项目"就踩空。
+		if (!info.DefaultScene.empty())
+		{
+			const fs::path scenePath = directory / "assets" / fs::u8path(info.DefaultScene);
+			std::error_code sceneError;
+			if (!fs::is_regular_file(scenePath, sceneError))
+				return Wui::TrFormat("modal.newproject.error.template_scene_missing",
+					"Project template scene is missing: {scene}",
+					{ { "scene", scenePath.u8string() } });
 		}
 		return {};
 	}
@@ -651,7 +863,7 @@ namespace World::Editor
 	}
 
 	ProjectScaffolder::Result ProjectScaffolder::Create(const fs::path& location, const std::string& rawName,
-		WorldContext& context, bool includeStarterScene)
+		WorldContext& context, bool includeStarterScene, const std::string& templateId)
 	{
 		Result result;
 		const auto fail = [&result](const std::string& message)
@@ -672,9 +884,17 @@ namespace World::Editor
 		const std::string locationError = ValidateLocation(location, name);
 		if (!locationError.empty())
 			return fail(locationError);
-		const std::string templateError = ValidateTemplate();
+		const std::string templateError = ValidateTemplate(templateId);
 		if (!templateError.empty())
 			return fail(templateError);
+		// 校验已通过:再读一次模板信息拿 defaultScene(与 ValidateTemplate 同一条读取口径)。
+		TemplateInfo templateInfo;
+		std::string templateInfoError;
+		if (!LoadTemplateInfo(TemplateDirectory(templateId), templateId, &templateInfo, &templateInfoError))
+			return fail(templateInfoError);
+		const std::string startScene = templateInfo.DefaultScene.empty()
+			? std::string(kStandardStartScene) : templateInfo.DefaultScene;
+		const bool templateOwnsStartScene = !templateInfo.DefaultScene.empty();
 
 		std::error_code ec;
 		const fs::path locationAbs = fs::absolute(location, ec);
@@ -722,10 +942,13 @@ namespace World::Editor
 		}
 
 		std::string error;
-		bool built = CopyTemplateTree(TemplateRoot(), temporary, &error);
+		bool built = CopyTemplateTree(templateInfo.Directory, temporary, &error);
 		if (built)
-			built = WriteStandardManifest(temporary, name, &error);
-		if (built)
+			built = WriteStandardManifest(temporary, name, startScene, &error);
+		// 模板自带启动场景(example)时不写 Main.wd —— 清单的 start_scene 已经指向模板里的场景,
+		// 再写一份只会多出一个用不到的场景;没有 defaultScene 的模板(empty)保持原口径:
+		// includeStarterScene = 相机 + 方向光 / 空场景。
+		if (built && !templateOwnsStartScene)
 			built = WriteMainScene(temporary, context, includeStarterScene, &error);
 		if (built)
 		{
@@ -777,10 +1000,11 @@ namespace World::Editor
 		result.ProjectRoot = target;
 		result.EntryPoints = entryPoints;
 		result.Files = CollectRelativeFiles(target);
-		WLD_CORE_INFO("[project-scaffolder] created '{0}' ({1} files, no samples)", target.u8string(),
-			result.Files.size());
-		WLD_CORE_INFO("[project-scaffolder] Main.wd: {0}", includeStarterScene
-			? "starter scene (Camera3D + Directional Light)" : "empty scene");
+		WLD_CORE_INFO("[project-scaffolder] created '{0}' ({1} files, template '{2}')", target.u8string(),
+			result.Files.size(), templateInfo.Id);
+		WLD_CORE_INFO("[project-scaffolder] template '{0}'; start scene '{1}'{2}", templateInfo.Id, startScene,
+			templateOwnsStartScene ? " (from the template)"
+				: (includeStarterScene ? " (starter scene: Camera3D + Directional Light)" : " (empty scene)"));
 		return result;
 	}
 }

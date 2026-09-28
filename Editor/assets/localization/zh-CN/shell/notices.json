@@ -30,7 +30,7 @@
   "status.cppmodule.diagnostics.more": "条更多迁移诊断(见 AI 通道 module.status)",
   "notice.cppmodule.diagnostics": "条字段迁移诊断",
   "notice.newscript.created": "已创建 {path};重建 Game 后执行「文件 ▶ 重载 C++ 模块」生效",
-  "notice.newproject.created": "已创建标准项目 {path}(不含示例)",
+  "notice.newproject.created": "已创建项目 {path}(模板:{template})",
   "notice.newproject.explorer_failed": "打不开项目目录:{path}",
   "notice.project.open_failed": "打开项目失败 {reason}:{path}",
   "notice.project.launcher_closed": "已关闭启动器 —— 停在当前项目;之后可用「文件 ▶ 打开项目…」切换。",

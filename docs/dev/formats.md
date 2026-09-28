@@ -8,7 +8,7 @@
 | `.we.yaml` | 项目清单 / 场景级清单 | `Engine`(ProjectManifest 等) | 有(清单内版本) | 默认 `projects/<名>/project.we.yaml` |
 | `.wmat` | 材质**实例** | `Engine`(MaterialLibrary) | `DocumentFormatVersion` | 只存覆盖值 + 贴图 + `Shader:` 引用;父级继承 |
 | `.wmodel` | 模型资产 | `Engine`(ModelIO/导入器) | 有 | 由 glTF 导入器生成(入库策略见 `.gitignore`) |
-| `.welevel` | 关卡 | `Engine`(Level) | 有 | 例:`projects/default/levels.welevel` |
+| `.welevel` | 关卡 | `Engine`(Level) | 有 | 例:`templates/project-example/levels.welevel`(项目里的同名文件) |
 | `.slang` | **材质着色器(材质本身)/ 引擎着色器源**(Slang 源) | 用户 + `Engine`(MaterialSurfaceCompiler / ShaderCompiler) | 契约版本在缓存键里 | `//! param` 注解 = 参数事实源;HLSL 语法是 Slang 的子集 |
 | `.hlsli` | 引擎着色器**共享头片段**(Slang / C++ 共用,非独立翻译单元) | `Engine` | 同契约版本 | 如 `MaterialSurfaceContract.hlsli` |
 | `.luau` | 脚本 / 生成存根 | `Engine`(Luau VM) + 编辑器 | — | 存根:工程 `assets/scripts/intermediate/**`,有漂移门禁 |

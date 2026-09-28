@@ -36,11 +36,8 @@ projects/*/assets/models/**/textures/
 projects/*/assets/**/*.wtexc
 
 # W8:编辑器脚本工作区脚手架(create-if-missing 生成;用户改过的配置不入库即保留)。
-# 上面的 `.vscode` 忽略规则会连带排除父目录,必须先把目录本身取消忽略,再放行其内容。
-!projects/default/.vscode/
-!projects/default/.vscode/**
-!projects/default/.luau-lsp/
-!projects/default/.luau-lsp/**
+# 上面的 `.vscode` 忽略规则会连带排除父目录;PROJ-7 起引擎内不再有内置项目,
+# 项目里的 `.vscode/`/`.luau-lsp/` 由编辑器在**项目目录**生成(仓库外,不需要放行规则)。
 # 2026-09-22:docs/ 随仓库走,但只放**公开**文档(做游戏的人 docs/user/** + 改引擎的公开部分 docs/dev/**);
 # 内部知识(不变量/契约/决策/陷阱/验证口径/术语/工作流数据)不在本仓库里。
 # 父目录先解忽略,子项才能被重新包含。

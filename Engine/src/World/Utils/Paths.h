@@ -9,11 +9,11 @@ namespace World
 	// PROJ-1 P4:运行期"当前项目根 / 内容根"的唯一入口。
 	//
 	// 为什么要有它:项目根在改造前是编译期常量(WLD_PROJECT_DIR / WLD_ASSETPATH),
-	// 于是"打开任意位置的项目"不可能 —— 资产/本地化/清单永远解析回 projects/default。
+	// 于是"打开任意位置的项目"不可能 —— 资产/本地化/清单永远解析回仓库里那一个内置项目。
 	// 解析优先级:
 	//   SetProjectDirOverride()(--project 等宿主显式入口)
 	//     > 环境变量 WLD_PROJECT_DIR(非空)
-	//       > 编译期默认值(宏 WLD_PROJECT_DIR,即仓库的 projects/default/)。
+	//       > 编译期默认值(宏 WLD_PROJECT_DIR;PROJ-7 起引擎内不再有内置项目,它指向空的 `projects/` 容器)。
 	// 内容根默认 = ProjectDir()/"assets"(标准清单的 content_root: assets);
 	// 只有单独 SetAssetRootOverride() 过的宿主,内容根才与项目根解耦。
 	//

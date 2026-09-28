@@ -13,7 +13,7 @@
 //
 // headless:真实 Scene 调度(OnRuntimeStart/OnScriptUpdate)+ GameApp::Tick,脚本夹具
 // `scripts/tests/EventProbe.lua`;热重载脚本写在构建产物的临时目录里,逻辑路径是
-// 相对 WLD_ASSETPATH 的带 ".." 路径(与 ScriptHotReloadTests 同一模式)。
+// 相对测试夹具内容根(WLD_TEST_ASSETPATH)的带 ".." 路径(与 ScriptHotReloadTests 同一模式)。
 #include "wldpch.h"
 #include "World/Core/Log.h"
 #include "World/Core/Timestep.h"
@@ -30,6 +30,7 @@
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Script/ScriptValue.h"
+#include "World/Utils/Paths.h"
 
 #include <cmath>
 #include <cstdio>
@@ -70,7 +71,7 @@ namespace
 
 	std::string LogicalPath(const fs::path& path)
 	{
-		return path.lexically_relative(fs::path(WLD_ASSETPATH)).generic_string();
+		return path.lexically_relative(fs::path(WLD_TEST_ASSETPATH)).generic_string();
 	}
 
 	void WriteScript(const fs::path& path, const std::string& text)
@@ -216,7 +217,7 @@ namespace
 	{
 		Gameplay::GameAppDesc desc;
 		desc.ProjectId = "worldengine.luau.event.tests";
-		desc.ContentRoot = WLD_ASSETPATH;
+		desc.ContentRoot = WLD_TEST_ASSETPATH;
 		desc.FixedStepHz = 60;
 		host.Init(desc);
 		host.SetScene(scene, /*startRuntime=*/true);
@@ -572,6 +573,9 @@ int main()
 	try
 	{
 		std::setvbuf(stdout, nullptr, _IONBF, 0);
+		// PROJ-7/T1:内容根 = 仓库内测试夹具(tests/fixtures/content);LogicalPath() 的
+		// ".." 逻辑路径与探针脚本都按同一个内容根解析,所以这里必须覆盖。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		World::ScriptEngine::Init();
 		// 宿主探针必须在任何脚本编译之前注入(脚本 environment 的 __index 回退到线程全局)。

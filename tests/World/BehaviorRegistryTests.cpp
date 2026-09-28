@@ -18,6 +18,7 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -425,6 +426,9 @@ int main()
 {
 	try
 	{
+		// PROJ-7/T1:内容根 = 仓库内测试夹具(tests/fixtures/content);Luau 行为描述读的
+		// scripts/tests/LifecycleProbe.lua 走引擎的内容根磁盘回退,必须与夹具一致。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		World::ScriptEngine::Init();
 		World::BehaviorRegistry::Instance().Clear();

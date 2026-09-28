@@ -22,6 +22,7 @@
 #include "World/Script/ScriptProperties.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Script/ScriptValue.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -308,7 +309,7 @@ assert(W3dTarget:SetParent(W3dDoomed) == false)
 		ScriptEngine::GetState().ClearGlobal("TEST_CaptureEntity");
 		s_CapturedEntity = Entity {};
 
-		// 相对路径:先按内容根(WLD_ASSETPATH)解析,而不是相对进程 CWD。
+		// 相对路径:先按内容根(WLD_TEST_ASSETPATH 夹具根)解析,而不是相对进程 CWD。
 		Fixture relative;
 		Entity relativeInstantiator = relative.AddLua("scripts/tests/EntitySpawnProbe.lua");
 		SetLuaString(relativeInstantiator, "Mode", "prefab");
@@ -351,6 +352,10 @@ int main()
 {
 	try
 	{
+		// PROJ-7/T1:内容根 = 仓库内测试夹具(tests/fixtures/content)——探针脚本
+		// (scripts/tests/EntitySpawnProbe.lua)与相对路径预制体(prefabs/ExampleSprite.wprefab)
+		// 都走引擎的 World::Paths::AssetRoot(),必须覆盖成夹具根。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
 		World::Log::Init();
 		World::ScriptEngine::Init();
 

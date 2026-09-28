@@ -27,7 +27,8 @@ namespace
 
 	std::string StubPath()
 	{
-		const std::filesystem::path assets(WLD_ASSETPATH);
+		// PROJ-7/T1:存根样本(入库存根的历史快照)在仓库内测试夹具里,不再读项目内容根。
+		const std::filesystem::path assets(WLD_TEST_ASSETPATH);
 		return (assets / "scripts" / "intermediate" / "WorldEngineAPI.luau").string();
 	}
 
@@ -812,7 +813,7 @@ int main()
 		//         文件里没有同名来源时,存根 `Level` 服务表说明与 `Level:Primary()` 的返回类型照旧。----
 		{
 			CHECK(index.LoadStubFile(StubPath(), nullptr));
-			// 夹具形态与 projects/default/assets/scripts/examples/FeatureShowcase.lua 一致:
+			// 夹具形态与示例模板的 assets/scripts/examples/FeatureShowcase.lua 一致:
 			// 结构体 `---@class` 声明在脚本类**之前**,脚本类的表里再嵌套未注解的表字段
 			// (`InferredStats.Level` / `Config.mp`);E1 的夹具只有一个类,盖不到这个形态。
 			index.SetFileSource(

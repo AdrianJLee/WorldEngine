@@ -166,7 +166,7 @@ tools/    vendor/     World/
 
 仓库没有 `.gitattributes`,而本机 `core.autocrlf` 生效:签出会写 CRLF,`git add` 又转回 LF。
 后果:`tests/World/ScriptWorkflowTests.cpp` 的"存根漂移门禁"做**逐字节比较**
-(`projects/default/assets/scripts/intermediate/WorldEngineAPI.luau`),工作树一旦是 CRLF 就**误报失败**
+(`tests/fixtures/content/scripts/intermediate/WorldEngineAPI.luau`,引擎内项目模板生成同形存根),工作树一旦是 CRLF 就**误报失败**
 (2026-09-23 实测:内容逐行相同、仅 CRLF 差异 → 门禁失败)。
 
 建议:新增 `.gitattributes`,至少 `* text=auto eol=lf` + `*.luau text eol=lf`,并给该门禁加
