@@ -31,5 +31,11 @@
   "notice.cppmodule.diagnostics": "条字段迁移诊断",
   "notice.newscript.created": "已创建 {path};重建 Game 后执行「文件 ▶ 重载 C++ 模块」生效",
   "notice.newproject.created": "已创建标准项目 {path}(不含示例)",
-  "notice.newproject.explorer_failed": "打不开项目目录:{path}"
+  "notice.newproject.explorer_failed": "打不开项目目录:{path}",
+  "notice.project.open_failed": "打开项目失败 {reason}:{path}",
+  "notice.project.launcher_closed": "已关闭启动器 —— 停在当前项目;之后可用「文件 ▶ 打开项目…」切换。",
+  "notice.project.recent_removed": "已从最近项目移除:{path}",
+  "notice.project.recent_remove_failed": "最近项目列表更新失败:{reason}",
+  "notice.project.runtime_missing": "Runtime 还没构建({exe})。先构建:{command}",
+  "notice.project.runtime_launched": "已启动项目运行时:{path}"
 }

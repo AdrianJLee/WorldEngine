@@ -25,7 +25,10 @@ namespace World
 	class EditorLayer : public Layer
 	{
 	public:
-		EditorLayer();
+		// PROJ-2/T1:projectExplicit = 宿主给了显式项目(`--project` 或非空 `WLD_PROJECT_DIR`)。
+		// 显式 ⇒ 不显示项目启动器、也不触发"自动打开上次项目";隐式 ⇒ 按偏好决定
+		// 自动重启到最近项目一次,否则显示启动器(见 OnAttach 的启动决策)。
+		explicit EditorLayer(bool projectExplicit = false);
 		virtual ~EditorLayer() = default;
 		virtual void OnAttach() override;
 		virtual void OnDetach() override;
@@ -92,6 +95,17 @@ namespace World
 		// `--project <root>` 与 `WLD_PROJECT_DIR=<root>`(World::Paths 读它),并把工作目录
 		// 设成项目根(清单按 CWD → 项目根解析)。有未保存改动时先走既有的未保存确认模态。
 		void RelaunchWithProject(const std::filesystem::path& projectRoot);
+
+		// ---- PROJ-2/T1:项目启动器 + 一键启动项目 ----
+		// 启动器是否可见(启动决策在 OnAttach 定一次;关闭后不再出现)。
+		bool ShowProjectLauncher() const { return m_ShowProjectLauncher; }
+		// 关闭启动器:停在当前已挂载的项目(写日志说明),不再显示。
+		void DismissProjectLauncher();
+		// 启动独立 Runtime 进程跑指定项目(不重启编辑器、不要求先切项目):
+		// 定位 `<WLD_REPO_ROOT>/<WLD_OUTPUT_DIR>Runtime/<WLD_BUILD_TYPE>/Runtime.exe` + 同级
+		// WorldRuntime.dll;缺失 ⇒ 通知里给一行可复制的构建命令;固定日志行
+		// `[project] launch runtime: exe=<abs> project=<abs> mode=<launch|shell|missing>`。
+		void LaunchProjectRuntime(const std::filesystem::path& projectRoot);
 
 		// ---- WUI 面板访问(W2) ----
 		Ref<Scene> GetActiveScene() const { return m_ActiveScene; }
@@ -367,6 +381,14 @@ namespace World
 
 		Wui::WuiCommandRegistry m_Commands;
 		EditorShell m_Shell;
+		// PROJ-2/T1:宿主是否给了显式项目(启动器/自动打开最近都要看它)。
+		bool m_ProjectExplicit = false;
+		// 启动器可见性(OnAttach 决策;DismissProjectLauncher 关掉)。
+		bool m_ShowProjectLauncher = false;
+		// "自动打开上次项目一次":OnAttach 定,第一帧 OnUpdate 执行 RelaunchWithProject
+		// (重启后的进程带 --project ⇒ 不会再触发,天然不循环)。
+		bool m_PendingAutoOpenRecent = false;
+		std::filesystem::path m_PendingAutoOpenProject;
 		// AI 控制通道(默认关闭;EditorApp 解析 --ai-control=<port> 后开启)。
 		std::unique_ptr<Editor::AiControlServer> m_AiServer;
 		// 命令分发:在主线程帧内执行,结果/错误以文本返回给控制通道。

@@ -55,10 +55,15 @@ namespace World
 				std::vector<std::string> Files;      // Ok=true = 写出的相对路径(generic,已排序)
 			};
 
-			// 生成骨架。context 只用于构造一个空 Scene 走引擎的场景序列化(写 Main.wd)。
+			// 生成骨架。context 只用于构造 Scene 走引擎的场景序列化(写 Main.wd)。
+			// includeStarterScene(PROJ-2/T1,调用方默认传 true):
+			//   true  ⇒ Main.wd = 最小可运行场景:一台 Camera3D(Primary,位置 [0,1,5])+ 一盏
+			//           方向光 —— 启动 Runtime 就有可看的画面;**不含**任何示例资产/材质/脚本
+			//           (新项目里 `rg -i "example|stress"` 必须仍 0 命中);
+			//   false ⇒ 保持旧行为(空场景,启动后是空画面)。
 			// 目标目录已存在且为空时:改名阶段先移除那个空目录,再整体 rename 进来。
 			static Result Create(const std::filesystem::path& location, const std::string& name,
-				WorldContext& context);
+				WorldContext& context, bool includeStarterScene);
 		};
 	}
 }

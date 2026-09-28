@@ -145,6 +145,8 @@ namespace World::Editor
 						m_Data.ScriptFontSize = std::clamp(static_cast<float>(value.Number), 10.0f, 32.0f);
 					else if (key == "asset_hot_reload" && isBool)
 						m_Data.AssetHotReload = value.Bool;
+					else if (key == "startup_auto_open_last_project" && isBool)
+						m_Data.StartupAutoOpenLastProject = value.Bool;
 					else if (key == "restore_windows" && isString)
 						m_Data.RestoreWindows = RestoreModeFromString(value.String);
 					else if (key == "ai_control_port" && isNumber)
@@ -248,6 +250,7 @@ namespace World::Editor
 			<< "  \"term_hints\": " << FormatBool(m_Data.TermHints) << ",\n"
 			<< "  \"script_font_size\": " << FormatFloat(m_Data.ScriptFontSize) << ",\n"
 			<< "  \"asset_hot_reload\": " << FormatBool(m_Data.AssetHotReload) << ",\n"
+			<< "  \"startup_auto_open_last_project\": " << FormatBool(m_Data.StartupAutoOpenLastProject) << ",\n"
 			<< "  \"restore_windows\": \"" << RestoreModeToString(m_Data.RestoreWindows) << "\",\n"
 			<< "  \"ai_control_port\": " << m_Data.AiControlPort << ",\n"
 			<< "  \"log_level\": \"" << kLogLevels[ClampLogLevel(m_Data.LogLevel)].Value << "\",\n"
@@ -321,6 +324,14 @@ namespace World::Editor
 		if (m_Data.AssetHotReload == enabled)
 			return;
 		m_Data.AssetHotReload = enabled;
+		Commit();
+	}
+
+	void EditorPreferences::SetStartupAutoOpenLastProject(bool enabled)
+	{
+		if (m_Data.StartupAutoOpenLastProject == enabled)
+			return;
+		m_Data.StartupAutoOpenLastProject = enabled;
 		Commit();
 	}
 
@@ -542,6 +553,23 @@ namespace World::Editor
 			[&prefs](const std::string& value, std::string*) { prefs.SetAssetHotReload(value == "true"); return true; },
 			[&prefs] { return prefs.Data().AssetHotReload; },
 			[&prefs] { prefs.SetAssetHotReload(true); return true; });
+
+		// PROJ-2/T1:启动时自动打开"最近项目"第一条(只自动打开一次)。面板条目按注册表
+		// 自动出现;注册文案是英文 canonical,中文键(shell 之外的 panels/settings.json)
+		// 由后续任务补(缺省回退英文,不出现裸 key)。
+		addBool("editor.workflow.startup_auto_open_last_project", "Workflow", SettingApply::Restart,
+			"Open Last Project at Startup",
+			"Open the last project at startup\nWhen the editor starts without --project or WLD_PROJECT_DIR, "
+			"restart into the most recent project once (the startup launcher is skipped); turn off to always "
+			"show the project launcher.\nDefault: on. Takes effect after restarting the editor.",
+			[&prefs] { return FormatBool(prefs.Data().StartupAutoOpenLastProject); },
+			[&prefs](const std::string& value, std::string*)
+			{
+				prefs.SetStartupAutoOpenLastProject(value == "true");
+				return true;
+			},
+			[&prefs] { return prefs.Data().StartupAutoOpenLastProject; },
+			[&prefs] { prefs.SetStartupAutoOpenLastProject(true); return true; });
 
 		// ---- 自动化 Automation ----
 		// 启动恢复上次的独立窗口:默认 Ask(用户 2026-09-20:"默认设置应该是询问")。

@@ -6,6 +6,7 @@
 #include <shellapi.h>
 #include "../EditorPreferences.h"
 #include "../EditorLayer.h"
+#include "../Project/ProjectLauncher.h"
 #include "../Project/ProjectScaffolder.h"
 
 #include "World/Core/Application.h"
@@ -1138,6 +1139,13 @@ namespace World
 			m_NewProjectCreatePending = false;
 			RunNewProjectCreate(ctx);
 		}
+		// PROJ-2/T1:File ▸ Open Project… / 启动器 ▸ 打开项目… 的"选择目录"原生对话框
+		// 同样只在帧边界弹(上一帧只置标记;与 New Project 向导同一条纪律)。
+		if (m_OpenProjectBrowsePending)
+		{
+			m_OpenProjectBrowsePending = false;
+			RunOpenProjectBrowse(ctx);
+		}
 		// M4-TEX P4:内容浏览器(双击 `.wtex` / 右键 Texture Settings…/Reimport/Reset)在渲染期间
 		// 只能写"打开纹理设置"的请求 —— 可见性/布局不能在面板渲染中途改。这里在帧边界统一执行,
 		// 与 Window 菜单、AI 通道 `ui.open` 落到同一条开关路径(AiActivatePanel)。
@@ -1203,7 +1211,9 @@ namespace World
 			// CPPT-6-ED-NEWSCRIPT:"新建 C++ 脚本"模态同样封锁下层命中。
 			|| m_NewCppScriptOpen
 			// PROJ-1/T1:"新建项目"模态(名称/位置/模板/落盘)同样封锁下层命中。
-			|| m_NewProjectOpen;
+			|| m_NewProjectOpen
+			// PROJ-2/T1:项目启动器(启动态窗口级模态)同样封锁下层命中。
+			|| m_Editor.ShowProjectLauncher();
 		// P4-U6b:面板级模态(属性面板的"添加组件"居中窗口)与 shell 模态同一条封锁路径;
 		// 渲染该面板之前会解开(RenderTabs),画完再封回去。
 		const bool panelModalOpen = !m_PanelModalOwner.empty();
@@ -4102,8 +4112,10 @@ namespace World
 	// 需求(用户 2026-09-28):在任意位置生成一个**标准、干净**的项目骨架(不含示例)。
 	// 本模态只做三件事:收集 项目名 + 位置;实时回显落点与行内错误;把"浏览…/创建"
 	// 标记成下一帧开头的任务(原生对话框与落盘都不在渲染中途做)。
-	// 生成内核 = Editor::ProjectScaffolder(清单走引擎 writer、空场景走引擎序列化、
+	// 生成内核 = Editor::ProjectScaffolder(清单走引擎 writer、Main.wd 走引擎序列化、
 	// 结构来自 templates/project/**);成功后模态换成两个动作:资源管理器打开 / 打开项目。
+	// PROJ-2/T1 追加:可勾选"最小可运行场景"(默认勾选),成功态第三个动作 = 启动项目
+	// (独立 Runtime 进程,不重启编辑器)。
 
 	std::string EditorShell::NewProjectTrimmedName() const
 	{
@@ -4137,6 +4149,7 @@ namespace World
 		m_NewProjectOpen = true;
 		m_NewProjectOpenedFrame = static_cast<uint32_t>(ctx.Frame());
 		m_NewProjectCreated = false;
+		m_NewProjectCreatedStarterScene = true;
 		m_NewProjectRoot.clear();
 		m_NewProjectCreatedName.clear();
 		m_NewProjectFailure.clear();
@@ -4181,7 +4194,8 @@ namespace World
 
 		const std::string name = NewProjectTrimmedName();
 		const Editor::ProjectScaffolder::Result result = Editor::ProjectScaffolder::Create(
-			std::filesystem::u8path(m_NewProjectLocation), name, Application::Get().GetContext());
+			std::filesystem::u8path(m_NewProjectLocation), name, Application::Get().GetContext(),
+			m_NewProjectStarterScene);
 		if (!result.Ok)
 		{
 			m_NewProjectFailure = result.Error;
@@ -4191,6 +4205,7 @@ namespace World
 		}
 
 		m_NewProjectCreated = true;
+		m_NewProjectCreatedStarterScene = m_NewProjectStarterScene;
 		m_NewProjectRoot = result.ProjectRoot;
 		m_NewProjectCreatedName = name;
 		m_NewProjectFailure.clear();
@@ -4230,7 +4245,7 @@ namespace World
 		const float fieldX = frame.X + 130.0f;
 		const float fieldW = frame.W - 146.0f - 16.0f;
 
-		// ---- 成功态:已生成 + 两个动作按钮(在资源管理器打开 / 打开项目)----
+			// ---- 成功态:已生成 + 三个动作按钮(资源管理器打开 / 打开项目 / 启动项目)----
 		if (m_NewProjectCreated)
 		{
 			float cursorY = frame.Y + 48.0f;
@@ -4239,20 +4254,41 @@ namespace World
 			cursorY += 20.0f;
 			Wui::Label(ctx, { labelX, cursorY }, m_NewProjectRoot.u8string(), m_Theme.Text, 13.0f);
 			cursorY += 24.0f;
+			if (m_NewProjectCreatedStarterScene)
+			{
+				Wui::Label(ctx, { labelX, cursorY },
+					Wui::Tr("modal.newproject.created.starter",
+						"assets/scenes/Main.wd has a minimal scene (camera + directional light) — "
+						"Launch Project shows a picture right away."),
+					m_Theme.TextMuted, 12.0f);
+			}
+			else
+			{
+				Wui::Label(ctx, { labelX, cursorY },
+					Wui::Tr("modal.newproject.created.empty_scene",
+						"The scene is empty — launching the project shows a blank picture. "
+						"Tick the starter-scene option next time, or add content in the editor."),
+					m_Theme.Danger, 12.0f);
+			}
+			cursorY += 22.0f;
 			Wui::Label(ctx, { labelX, cursorY },
 				Wui::Tr("modal.newproject.created.hint",
-					"Open it now (restarts the editor into the new project), or keep working here."),
+					"Launch Project runs it in a separate Runtime process; Open Project restarts the "
+					"editor into it; or keep working here."),
 				m_Theme.TextMuted, 12.0f);
 
-			const Wui::ModalButtonDesc buttons[3] = {
+			const Wui::ModalButtonDesc buttons[4] = {
 				{ Wui::Tr("modal.newproject.open_explorer", "Open in Explorer"),
 					Wui::HashId("project.new.explorer"), true },
 				{ Wui::Tr("modal.newproject.open_project", "Open Project"),
 					Wui::HashId("project.new.open"), true },
+				// PROJ-2/T1:第三个动作按钮 —— 独立 Runtime 进程直接跑刚建的项目(不重启编辑器)。
+				{ Wui::Tr("modal.newproject.launch", "Launch Project"),
+					Wui::HashId("project.new.launch"), true },
 				{ Wui::Tr("modal.newproject.close", "Close"),
 					Wui::HashId("project.new.close"), true },
 			};
-			const int clicked = Wui::ModalButtons(ctx, frame, buttons, 3, m_Theme);
+			const int clicked = Wui::ModalButtons(ctx, frame, buttons, 4, m_Theme);
 			if (clicked == 0)
 			{
 				// ShellExecuteW 打开项目目录(与"打开外部脚本"同一条系统关联路径)。
@@ -4281,7 +4317,12 @@ namespace World
 				m_NewProjectOpen = false;
 				ctx.ClearModal();
 			}
-			else if (clicked == 2 || escapePressed)
+			else if (clicked == 2)
+			{
+				// 一键启动:独立 Runtime 进程(定位/命令行/日志/操作记录都在 EditorLayer)。
+				m_Editor.LaunchProjectRuntime(m_NewProjectRoot);
+			}
+			else if (clicked == 3 || escapePressed)
 			{
 				m_NewProjectOpen = false;
 				ctx.ClearModal();
@@ -4364,6 +4405,24 @@ namespace World
 		}
 		cursorY += 24.0f;
 
+		// ---- PROJ-2/T1:最小可运行场景(相机 + 方向光;默认勾选)----
+		// 勾选 = assets/scenes/Main.wd 由引擎序列化写入一台 Camera3D + 一盏方向光(不含示例);
+		// 不勾 = 旧口径的空场景,成功态会给"启动后是空画面"的提示。
+		{
+			const Wui::WuiId starterId = Wui::HashId("project.new.starter_scene");
+			const Wui::WuiRect starterRect { labelX, cursorY, frame.W - (labelX - frame.X) - 16.0f, 22.0f };
+			Wui::Checkbox(ctx, starterId, starterRect,
+				Wui::Tr("modal.newproject.starter",
+					"Include a minimal runnable scene (camera + directional light)"),
+				m_NewProjectStarterScene, m_Theme);
+			Wui::Tooltip(ctx, starterRect,
+				Wui::Tr("modal.newproject.starter.tooltip",
+					"Writes assets/scenes/Main.wd with a Camera3D at [0, 1, 5] and a directional "
+					"light, so Launch Project renders a picture. No sample assets, materials or "
+					"scripts are copied."));
+		}
+		cursorY += 30.0f;
+
 		// ---- 模板/落盘的通用错误行(名称与位置各自画在自己的输入框下)----
 		const std::string generalError = !templateError.empty() ? templateError : m_NewProjectFailure;
 		if (!generalError.empty())
@@ -4404,6 +4463,235 @@ namespace World
 			ctx.ClearModal();
 		}
 		Wui::EndModalFrame(ctx);
+	}
+
+	// ---- PROJ-2/T1:项目启动器 / File ▸ Open Project… / 运行 ▸ 启动项目(Runtime) ----
+	//
+	// 启动决策(显式项目 / 自动打开最近一次 / 显示启动器)在 EditorLayer;本文件只做:
+	//   * 启动器模态的渲染与四个动作(新建项目向导 / 打开项目… / 打开默认示例项目 / 关闭);
+	//   * 最近列表的缓存刷新与"移除失效项";
+	//   * File ▸ Open Project… 的入口(与启动器共用同一条"选目录 → 校验 → 重启"路径);
+	//   * 运行 ▸ 启动项目(Runtime)= EditorLayer::LaunchProjectRuntime(当前项目根)。
+	// 原生目录对话框与重启都在**帧边界**发生:这里只置 m_OpenProjectBrowsePending。
+
+	void EditorShell::RefreshRecentProjectsIfStale(bool force)
+	{
+		// 最近列表只在下拉/启动器可见时按 1 秒节流刷新(逐帧查盘 + 解析清单会白烧 IO)。
+		const double now = ShellNowSeconds();
+		if (!force && m_RecentProjectsLoadedAt > 0.0 && now - m_RecentProjectsLoadedAt < 1.0)
+			return;
+		m_RecentProjectsLoadedAt = now;
+		m_RecentProjects = Editor::ProjectLauncher::LoadRecent();
+	}
+
+	const std::vector<Editor::RecentProjectEntry>& EditorShell::RecentProjects()
+	{
+		RefreshRecentProjectsIfStale();
+		return m_RecentProjects;
+	}
+
+	void EditorShell::RequestOpenProjectBrowse(Wui::WuiContext& ctx)
+	{
+		if (m_OpenProjectBrowsePending)
+			return;
+		m_OpenProjectBrowsePending = true;   // 下一帧开头弹原生"选择项目目录"
+		ctx.RecordOp("project", "open-ask", "", "");
+	}
+
+	void EditorShell::RunOpenProjectBrowse(Wui::WuiContext& ctx)
+	{
+		// 原生"选择文件夹"对话框:只在帧边界打开(取消返回空串 → 什么都不做)。
+		const std::string folder = FileDialogs::SelectFolder("Open Project");
+		if (folder.empty())
+			return;
+		const std::filesystem::path root = std::filesystem::u8path(folder);
+		std::string reason;
+		if (!Editor::ProjectLauncher::IsValidProjectRoot(root, &reason))
+		{
+			// 选中的目录不是项目(缺清单/清单解析失败):通知里给可读原因,不重启。
+			ctx.RecordOp("project", "open-failed", folder, reason);
+			WLD_CORE_WARN("[project] open failed: '{0}': {1}", folder, reason);
+			PushNotice(Wui::TrFormat("notice.project.open_failed", "{reason}: {path}",
+				{ { "reason", reason }, { "path", folder } }));
+			return;
+		}
+		ctx.RecordOp("project", "open", Editor::ProjectLauncher::DisplayName(root), root.u8string());
+		m_Editor.RelaunchWithProject(root);
+	}
+
+	void EditorShell::OpenDefaultSampleProject(Wui::WuiContext& ctx)
+	{
+		// 显式入口:编译期默认项目 projects/default(文案里点明"示例")。走同一条重启路径
+		// (也会记进最近列表,但 EditorLayer 的启动决策不会把 projects/default 当作自动打开目标)。
+		const std::filesystem::path root = std::filesystem::path(WLD_PROJECT_DIR);
+		std::string reason;
+		if (!Editor::ProjectLauncher::IsValidProjectRoot(root, &reason))
+		{
+			PushNotice(Wui::TrFormat("notice.project.open_failed", "{reason}: {path}",
+				{ { "reason", reason }, { "path", root.u8string() } }));
+			WLD_CORE_WARN("[project] default sample project is unavailable: '{0}': {1}",
+				root.u8string(), reason);
+			return;
+		}
+		ctx.RecordOp("project", "open-sample", "default", root.u8string());
+		m_Editor.RelaunchWithProject(root);
+	}
+
+	void EditorShell::LaunchCurrentProjectRuntime()
+	{
+		// 目标项目 = 当前项目根(定位 Runtime / 命令行 / 日志 / 操作记录全在 EditorLayer)。
+		m_Editor.LaunchProjectRuntime(World::Paths::ProjectDir());
+	}
+
+	void EditorShell::DrawProjectLauncherModal(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiId modalId = Wui::HashId("modal.project_launcher");
+		// 其它模态在前时让位(启动期最可能的来源是错误框);它们收口后启动器会回到前台。
+		const bool blockedByOtherModal = m_NewProjectOpen || m_NewCppScriptOpen || m_ImportModalOpen ||
+			m_PrefabPendingAction != PrefabPendingAction::None || m_Editor.ShowUnsavedModal() ||
+			m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress();
+		const bool visible = m_Editor.ShowProjectLauncher() && !blockedByOtherModal;
+		if (visible)
+			ctx.SetModal(modalId);
+		else if (ctx.Modal() == modalId)
+			ctx.ClearModal();
+		if (!visible)
+			return;
+
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("modal.launcher.title", "Choose a Project");
+		frameDesc.Size = { 660.0f, 430.0f };
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
+			return;
+
+		const float pad = 16.0f;
+		// 行高按"最多 10 条不压到提示行/按钮条"反推:10×(24+2) = 260,列表底 = Y+328,
+		// 提示行在 Y+354(430-76),按钮条在 Y+384 —— 三个区间互不重叠。
+		const float rowHeight = 24.0f;
+		const float rowWidth = frame.W - pad * 2.0f;
+		float cursorY = frame.Y + 46.0f;
+		Wui::Label(ctx, { frame.X + pad, cursorY }, Wui::Tr("modal.launcher.recent", "Recent projects"),
+			m_Theme.Text, 13.0f);
+		cursorY += 22.0f;
+
+		RefreshRecentProjectsIfStale();
+		std::string removePending;
+		if (m_RecentProjects.empty())
+		{
+			Wui::Label(ctx, { frame.X + pad, cursorY + 4.0f },
+				Wui::Tr("modal.launcher.empty",
+					"No recent projects yet — create a new one, or open a folder that contains project.we.yaml."),
+				m_Theme.TextMuted, 13.0f);
+			cursorY += 30.0f;
+		}
+		else
+		{
+			const size_t count = std::min<size_t>(m_RecentProjects.size(), 10);
+			for (size_t i = 0; i < count; ++i)
+			{
+				const Editor::RecentProjectEntry& entry = m_RecentProjects[i];
+				const std::string path = entry.Path;
+				const Wui::WuiRect row { frame.X + pad, cursorY, rowWidth, rowHeight };
+				if (entry.Valid)
+				{
+					// 有效行:整行是一个按钮(名称 + 路径;完整路径/时间在 tooltip 里)。
+					const std::string name = entry.Name.empty() ? path : entry.Name;
+					const std::string label = Wui::EllipsizeMiddleToWidth(ctx, name + "    " + entry.Path,
+						rowWidth - 16.0f, 15.0f);
+					const std::string tooltip = entry.LastOpened.empty()
+						? entry.Path : entry.Path + "\n" + entry.LastOpened;
+					const bool clicked = Wui::ButtonEx(ctx,
+						Wui::HashId(("project.launcher.recent." + std::to_string(i)).c_str()),
+						row, label, m_Theme, true, false, tooltip);
+					if (clicked)
+					{
+						ctx.RecordOp("project", "open", name, path);
+						m_Editor.DismissProjectLauncher();
+						ctx.ClearModal();
+						m_Editor.RelaunchWithProject(std::filesystem::u8path(path));
+						Wui::EndModalFrame(ctx);
+						return;
+					}
+				}
+				else
+				{
+					// 失效行:名称 + 路径 + 失效标记(红),右侧一个"移除"按钮。
+					const float removeWidth = 84.0f;
+					const std::string name = entry.Name.empty() ? path : entry.Name;
+					const std::string text = name + "  —  " + entry.Path + "  ("
+						+ Wui::Tr("modal.launcher.invalid", "unavailable") + ")";
+					Wui::Label(ctx, { row.X + 2.0f, row.Y + 6.0f },
+						Wui::EllipsizeMiddleToWidth(ctx, text, rowWidth - removeWidth - 16.0f, 12.0f),
+						m_Theme.Danger, 12.0f);
+					if (Wui::ButtonEx(ctx,
+						Wui::HashId(("project.launcher.recent.remove." + std::to_string(i)).c_str()),
+						{ row.X + row.W - removeWidth, row.Y, removeWidth, rowHeight },
+						Wui::Tr("modal.launcher.remove", "Remove"), m_Theme, true, false,
+						entry.InvalidReason))
+					{
+						removePending = path;
+					}
+				}
+				cursorY += rowHeight + 2.0f;
+			}
+		}
+
+		// 移除在遍历之后执行(不能在持有 m_RecentProjects 引用时改表)。
+		if (!removePending.empty())
+		{
+			std::string error;
+			if (Editor::ProjectLauncher::RemoveRecent(std::filesystem::u8path(removePending), &error))
+			{
+				ctx.RecordOp("project", "recent-remove", "", removePending);
+				RefreshRecentProjectsIfStale(/*force=*/true);
+				PushNotice(Wui::TrFormat("notice.project.recent_removed",
+					"Removed from recent projects: {path}", { { "path", removePending } }));
+			}
+			else
+			{
+				PushNotice(Wui::TrFormat("notice.project.recent_remove_failed",
+					"Could not update the recent projects list: {reason}", { { "reason", error } }));
+			}
+		}
+
+		// 动作按钮上方的说明(点项目 = 重启编辑器;示例项目 = projects/default)。
+		Wui::Label(ctx, { frame.X + pad, frame.Y + frame.H - 76.0f },
+			Wui::Tr("modal.launcher.hint",
+				"Picking a project restarts the editor into it. The default sample project is "
+				"projects/default (the built-in example)."),
+			m_Theme.TextMuted, 12.0f);
+
+		const Wui::ModalButtonDesc buttons[4] = {
+			{ Wui::Tr("modal.launcher.new", "New Project…"), Wui::HashId("project.launcher.new"), true },
+			{ Wui::Tr("modal.launcher.open", "Open Project…"), Wui::HashId("project.launcher.open"), true },
+			{ Wui::Tr("modal.launcher.default", "Open Default Sample Project"),
+				Wui::HashId("project.launcher.default"), true },
+			{ Wui::Tr("modal.launcher.close", "Close"), Wui::HashId("project.launcher.close"), true },
+		};
+		const int clicked = Wui::ModalButtons(ctx, frame, buttons, 4, m_Theme);
+		Wui::EndModalFrame(ctx);
+		if (clicked == 0)
+		{
+			OpenNewProjectModal(ctx);   // 向导接管模态(启动器保持"待显示",向导收口后回来)
+		}
+		else if (clicked == 1)
+		{
+			RequestOpenProjectBrowse(ctx);
+		}
+		else if (clicked == 2)
+		{
+			OpenDefaultSampleProject(ctx);
+		}
+		else if (clicked == 3 || escapePressed)
+		{
+			m_Editor.DismissProjectLauncher();
+			ctx.ClearModal();
+			PushNotice(Wui::Tr("notice.project.launcher_closed",
+				"Launcher closed — staying in the current project. Use File ▶ Open Project… to switch later."));
+		}
 	}
 
 	void EditorShell::EnsureModelPanelFromId(const std::string& panelId)
@@ -5036,10 +5324,13 @@ namespace World
 			// CPPT-3:显式无障碍 id(空 = 沿用"菜单名 + 本地化标签"的既有派生口径)。
 			// 需要跨语言稳定 id 的项(如 menu.file.reload_cpp_module)必须显式给。
 			Wui::WuiId ExplicitId = 0;
+			// PROJ-2/T1:失效的"最近项目"行灰显(可读不可点);其余菜单项默认可用。
+			bool Enabled = true;
 		};
 
 		const Wui::WuiId menuFile = Wui::HashId("menu.file");
 		const Wui::WuiId menuWindow = Wui::HashId("menu.window");
+		const Wui::WuiId menuRun = Wui::HashId("menu.run");
 		if (!m_MenuBar)
 		{
 			m_MenuBar = std::make_shared<Wui::WuiBox>();
@@ -5081,6 +5372,24 @@ namespace World
 						m_Ctx->ClosePopup(menuWindow);
 				};
 			m_MenuBar->Add(m_WindowButton, { 78, 78, 0, 22, 0 });
+			// PROJ-2/T1:运行菜单 —— 独立 Runtime 进程的"启动项目"入口(不重启编辑器)。
+			m_RunButton = std::make_shared<Wui::WuiButton>();
+			m_RunButton->SetId(menuRun);
+			m_RunButton->Label = Wui::Tr("menu.run", "Run");
+			m_RunButton->OnClick = [this, menuRun]
+				{
+					const bool opening = m_OpenMenu != menuRun;
+					m_OpenMenu = opening ? menuRun : 0;
+					if (opening)
+					{
+						m_Ctx->CloseAllPopups();
+						m_MenuHeaderRect = m_RunButton->Rect();
+						m_Ctx->OpenPopup(menuRun);
+					}
+					else
+						m_Ctx->ClosePopup(menuRun);
+				};
+			m_MenuBar->Add(m_RunButton, { 64, 64, 0, 22, 0 });
 		}
 
 		// 菜单栏下移一行:顶部第一行现在是挂靠栏。
@@ -5142,7 +5451,7 @@ namespace World
 					// P4-U8:悬停解释(勾选项的"关掉是什么效果"这类信息读不出来,只能靠提示)。
 					if (!entries[i].Tooltip.empty())
 						Wui::Tooltip(ctx, item, entries[i].Tooltip);
-					if (MenuItem(ctx, itemId, item, entries[i].Label, entries[i].Checked, true, m_Theme))
+					if (MenuItem(ctx, itemId, item, entries[i].Label, entries[i].Checked, entries[i].Enabled, m_Theme))
 					{
 						entries[i].Action();
 						ctx.RecordOp("menu", "item", entries[i].Label, menuIdName);
@@ -5161,6 +5470,8 @@ namespace World
 						node.Value = entries[i].Checked ? "checked" : "unchecked";
 						node.Tooltip = entries[i].Tooltip;
 						node.Rect = item;
+						node.Enabled = entries[i].Enabled;
+						node.Interactive = entries[i].Enabled;
 						Wui::WuiAccessibility::Get().Register(node);
 					}
 				}
@@ -5188,13 +5499,25 @@ namespace World
 			}
 		};
 
-		drawMenu(menuFile, "menu.file", {
-			{ Wui::Tr("menu.file.new", "New"), false, [this] { m_Editor.NewScene(); } },
-			{ Wui::Tr("menu.file.open", "Open"), false, [this] { m_Editor.OpenScene(); } },
-			{ Wui::Tr("menu.file.save", "Save"), false, [this] { m_Editor.SaveScene(); } },
-			// PROJ-1/T1:任意位置新建**标准**项目(干净骨架,不含示例)。稳定 id
-			// menu.file.new_project:AI 通道/自动化按 id 点它,不依赖标签语言。
-			{ Wui::Tr("menu.file.new_project", "New Project…"), false,
+		std::vector<MenuEntry> fileEntries;
+		fileEntries.push_back({ Wui::Tr("menu.file.new", "New"), false, [this] { m_Editor.NewScene(); } });
+		fileEntries.push_back({ Wui::Tr("menu.file.open", "Open"), false, [this] { m_Editor.OpenScene(); } });
+		fileEntries.push_back({ Wui::Tr("menu.file.save", "Save"), false, [this] { m_Editor.SaveScene(); } });
+		// PROJ-2/T1:File ▸ Open Project…(选目录 → 校验 project.we.yaml → 重启到该项目)。
+		// 原生对话框推迟到下一帧开头(见 OnRender 的 m_OpenProjectBrowsePending 分支)。
+		fileEntries.push_back({ Wui::Tr("menu.file.open_project", "Open Project…"), false,
+			[this]
+			{
+				if (m_Ctx)
+					RequestOpenProjectBrowse(*m_Ctx);
+			}, false,
+			Wui::Tr("menu.file.open_project.tooltip",
+				"Open a project from any folder: pick the project root (the folder that contains "
+				"project.we.yaml), validate the manifest, then the editor restarts into it."),
+			Wui::HashId("menu.file.open_project") });
+		// PROJ-1/T1:任意位置新建**标准**项目(干净骨架,不含示例)。稳定 id
+		// menu.file.new_project:AI 通道/自动化按 id 点它,不依赖标签语言。
+		fileEntries.push_back({ Wui::Tr("menu.file.new_project", "New Project…"), false,
 				[this]
 				{
 					if (m_Ctx)
@@ -5202,11 +5525,41 @@ namespace World
 				}, false,
 				Wui::Tr("menu.file.new_project.tooltip",
 					"Create a standard project skeleton (no samples) at any location: project name + "
-					"location → manifest, content root and an empty scene; then open it in Explorer or "
-					"restart the editor into it."),
-				Wui::HashId("menu.file.new_project") },
-			{ Wui::Tr("menu.file.import", "Import glTF..."), false, [this] { m_Editor.ImportModelDialog(); } },
-			{ Wui::Tr("menu.file.new_cpp_script", "New C++ Script…"), false,
+					"location → manifest, content root and a minimal runnable scene (camera + directional "
+					"light, can be turned off); then open it in Explorer, restart the editor into it, or "
+					"launch it."),
+				Wui::HashId("menu.file.new_project") });
+		// PROJ-2/T1:Recent Projects 分区(最多 10 条;失效项灰显,仍带完整路径与原因提示)。
+		// 只在有记录时出现;列表在弹出后节流刷新(见 RefreshRecentProjectsIfStale)。
+		if (ctx.IsPopupOpen(menuFile))
+		{
+			RefreshRecentProjectsIfStale();
+			const size_t recentCount = std::min<size_t>(m_RecentProjects.size(), 10);
+			if (recentCount > 0)
+			{
+				MenuEntry header;
+				header.Label = Wui::Tr("menu.file.recent", "Recent Projects");
+				header.Checked = false;
+				header.Header = true;
+				fileEntries.push_back(std::move(header));
+			}
+			for (size_t i = 0; i < recentCount; ++i)
+			{
+				const Editor::RecentProjectEntry& entry = m_RecentProjects[i];
+				MenuEntry item;
+				item.Label = entry.Name.empty() ? entry.Path : entry.Name;
+				item.Checked = false;
+				item.Enabled = entry.Valid;
+				const std::string path = entry.Path;
+				item.Action = [this, path] { m_Editor.RelaunchWithProject(std::filesystem::u8path(path)); };
+				item.Tooltip = entry.Valid ? path : path + " — " + entry.InvalidReason;
+				item.ExplicitId = Wui::HashId(("menu.file.recent." + std::to_string(i)).c_str());
+				fileEntries.push_back(std::move(item));
+			}
+		}
+		fileEntries.push_back({ Wui::Tr("menu.file.import", "Import glTF..."), false,
+			[this] { m_Editor.ImportModelDialog(); } });
+		fileEntries.push_back({ Wui::Tr("menu.file.new_cpp_script", "New C++ Script…"), false,
 				[this]
 				{
 					if (m_Ctx)
@@ -5216,8 +5569,8 @@ namespace World
 					"Create a C++ script template under Game/src/Scripts/ (scalar/enum/struct/Array/Map "
 					"samples) and open it in the built-in code editor. Rebuild Game, then use "
 					"File ▶ Reload C++ Module to load it."),
-				Wui::HashId("menu.file.new_cpp_script") },
-			{ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
+				Wui::HashId("menu.file.new_cpp_script") });
+		fileEntries.push_back({ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
 				[this]
 				{
 					// 两段式反馈(第一段 = 已卸载等重建;第二段 = 已加载 / 已回滚 / 失败)统一由
@@ -5229,24 +5582,38 @@ namespace World
 					"Reload the Game.dll module. First activation unloads it so the build can replace "
 					"the file; activate again to load the new build. C++ script instances are destroyed "
 					"and re-created from Pending via OnCreate."),
-				Wui::HashId("menu.file.reload_cpp_module") },
-			{ Wui::Tr("menu.file.project_settings", "Project Settings"), false, [this]
+				Wui::HashId("menu.file.reload_cpp_module") });
+		fileEntries.push_back({ Wui::Tr("menu.file.project_settings", "Project Settings"), false, [this]
 				{
 					// P4-UX11:项目设置只有一处入口 = 独立窗口的 Settings 面板(渲染/物理/启动与内容)。
 					// 旧的"只有渲染后端一项"的模态框已删除,避免两套界面互相打架。
 					if (m_Ctx)
 						TogglePanel(*m_Ctx, "settings");
-				} },
-			{ Wui::Tr("menu.file.editor_settings", "Editor Preferences"), false, [this, &ctx]
+				} });
+		fileEntries.push_back({ Wui::Tr("menu.file.editor_settings", "Editor Preferences"), false, [this, &ctx]
 				{
 					if (!FindFloatHost("prefs") && !m_Layout.Contains("prefs"))
 						OpenIndependentPanel("prefs");
 					TogglePanel(ctx, "prefs");
-				} },
-			{ Wui::Tr("menu.file.lua_stubs", "Generate Lua API Stubs"), false, [this] { m_Editor.GenerateLuaStubsAction(); } },
-			{ Wui::Tr("menu.file.cooking", "Cooking"), false, [this] { m_Editor.StartCookingAction(); } },
-			{ Wui::Tr("menu.file.export_ops", "Export Operation Log"), false, [this] { m_Editor.ExportOperationLog(); } },
-			{ Wui::Tr("menu.file.exit", "Exit"), false, [this] { m_Editor.CloseAction(); } },
+				} });
+		fileEntries.push_back({ Wui::Tr("menu.file.lua_stubs", "Generate Lua API Stubs"), false,
+			[this] { m_Editor.GenerateLuaStubsAction(); } });
+		fileEntries.push_back({ Wui::Tr("menu.file.cooking", "Cooking"), false,
+			[this] { m_Editor.StartCookingAction(); } });
+		fileEntries.push_back({ Wui::Tr("menu.file.export_ops", "Export Operation Log"), false,
+			[this] { m_Editor.ExportOperationLog(); } });
+		fileEntries.push_back({ Wui::Tr("menu.file.exit", "Exit"), false, [this] { m_Editor.CloseAction(); } });
+		drawMenu(menuFile, "menu.file", fileEntries);
+
+		// PROJ-2/T1:运行 ▸ 启动项目(Runtime)—— 独立 Runtime 进程跑当前项目的 start_scene,
+		// 不重启编辑器、不需要先进 Play。
+		drawMenu(menuRun, "menu.run", {
+			{ Wui::Tr("menu.run.launch_project", "Launch Project (Runtime)"), false,
+				[this] { LaunchCurrentProjectRuntime(); }, false,
+				Wui::Tr("menu.run.launch_project.tooltip",
+					"Start the current project in a separate Runtime process (manifest start_scene). "
+					"The editor keeps running; no restart and no Play session needed."),
+				Wui::HashId("menu.run.launch_project") },
 		});
 
 		// 菜单分组:独立窗口(自带 OS 窗口)与停靠面板分开列,并给出不可点击的分组标题 ——
@@ -5302,6 +5669,9 @@ namespace World
 
 		// ---- PROJ-1/T1:新建项目(窗口级模态;成功态换成两个动作按钮) ----
 		DrawNewProjectModal(ctx);
+
+		// ---- PROJ-2/T1:项目启动器(启动态窗口级模态;其它模态在前时让位) ----
+		DrawProjectLauncherModal(ctx);
 
 		const Wui::WuiId unsaved = Wui::HashId("modal.unsaved");
 		if (m_Editor.ShowUnsavedModal()) ctx.SetModal(unsaved);

@@ -60,10 +60,12 @@ namespace World
 	class EditorApp : public Application
 	{
 	public:
-		EditorApp(World::WorldContext& context)
+		// PROJ-2/T1:projectExplicit 传给 EditorLayer(启动决策:显式项目不显示启动器、
+		// 也不自动打开最近项目)。
+		EditorApp(World::WorldContext& context, bool projectExplicit)
 			:Application("Editor", context)
 		{
-			PushLayer(WLD_ENGINE_NEW(EditorLayer));
+			PushLayer(WLD_ENGINE_NEW(EditorLayer, projectExplicit));
 			// 热重载轮询层:改语言包文件后不重启即生效(与 EditorLayer 同栈,每帧 OnUpdate)。
 			PushLayer(WLD_ENGINE_NEW(LocalizationHotReloadLayer));
 		}
@@ -86,13 +88,22 @@ namespace World
 		// PROJ-1/T3:运行期项目根覆盖 —— `--project <dir>`(优先级高于 `WLD_PROJECT_DIR`
 		// 环境变量与编译期默认值)。必须先于任何项目路径使用点生效:下面的 glTF 导入、
 		// cook、本地化层注册都按运行期项目根解析。
+		// PROJ-2/T1:同一趟解析里记住"是否有显式项目"(`--project` 或非空 `WLD_PROJECT_DIR`),
+		// 供 EditorLayer 的启动决策使用(显式 ⇒ 不显示项目启动器)。
+		bool projectExplicit = false;
 		for (size_t i = 0; i + 1 < arguments.size(); ++i)
 		{
 			if (arguments[i] == "--project")
 			{
 				World::Paths::SetProjectDirOverride(arguments[i + 1]);
+				projectExplicit = true;
 				break;
 			}
+		}
+		if (!projectExplicit)
+		{
+			const char* environmentProject = std::getenv("WLD_PROJECT_DIR");
+			projectExplicit = environmentProject != nullptr && environmentProject[0] != '\0';
 		}
 		// 注意:不能写成 `i + 1 < size` 的配对循环 —— `--ai-control=` 这类**自带数值**的
 		// 单个参数会让循环体一次都不执行(实测:通道端口永远是 0,脚本连不上)。
@@ -248,6 +259,6 @@ namespace World
 				WLD_CORE_INFO("AI 控制通道端口来自编辑器偏好: {0}", preferencePort);
 			}
 		}
-		return new EditorApp(context);
+		return new EditorApp(context, projectExplicit);
 	}
 }

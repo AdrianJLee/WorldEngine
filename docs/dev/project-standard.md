@@ -48,11 +48,21 @@
 
 1. 编辑器 `File ▸ New Project…`:选**位置** + 项目名 → 由仓库模板 `templates/project/**` +
    引擎 `ProjectManifest::Save` 生成;实现上先写临时目录再整体改名,**永不覆盖**已有内容。
+   向导默认勾选"包含最小可运行场景(相机 + 方向光)":生成的 `assets/scenes/Main.wd` 里会放一台
+   `CameraComponent Primary=true` 的实体与一盏方向光 —— 这是**可运行的最低要求**,不是示例内容
+   (示例资产/脚本只在 `projects/default`);不勾则写空场景。
 2. 等价手动流程:复制 `templates/project/**` 到目标位置改名,再改清单字段。
    两种流程都必须满足 §2,不得从 `projects/default` 复制(会带入示例)。
 3. 机检:`pwsh tools/agents/check-project-layout.ps1 -ProjectRoot <项目根>`(exit 0 = 合规)。
 
 ## 4. 打开与运行
+
+- 编辑器启动时**不再默认落进 `projects/default`**:显式 `--project`/`WLD_PROJECT_DIR` 直接进;
+  否则"启动时自动打开上次项目"(偏好,默认开)进最近项目;再否则显示**项目启动器**
+  (最近项目 / 新建 / 打开 / 显式"打开默认示例项目")。最近项目记录在本机态 `local/projects.json`。
+- 切项目走 `File ▸ Open Project…` / `File ▸ Recent Projects ▸ …`(实现上都是带 `--project` 重启编辑器)。
+- **启动项目**:`运行 ▸ 启动项目(Runtime)`(与新建成功态的按钮)用独立进程跑当前/目标项目 ——
+  它直接调用开发布局里的 `<WLD_OUTPUT_DIR>Runtime/<cfg>/Runtime.exe --project <项目根>`,工作目录 = 项目根。
 
 - 编辑器:`Editor.exe --project <项目根>`(或环境变量 `WLD_PROJECT_DIR=<项目根>`)。
   引擎侧的"当前项目根/内容根"唯一入口是 `World::Paths::ProjectDir()` / `AssetRoot()`;

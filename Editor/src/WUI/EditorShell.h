@@ -16,6 +16,7 @@
 #include "Panels/WindowsPanel.h"
 #include "Panels/AttachSlotPanel.h"
 #include "FloatWindowHost.h"
+#include "../Project/ProjectLauncher.h"
 
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiDock.h"
@@ -358,6 +359,28 @@ namespace World
 		bool m_NewProjectCreated = false;        // 成功态(模态画两个动作按钮)
 		std::filesystem::path m_NewProjectRoot;  // 成功后的项目根(绝对)
 		std::string m_NewProjectCreatedName;
+		// PROJ-2/T1:P4 —— 向导复选框"包含最小可运行场景(相机 + 方向光)",默认勾选;
+		// 创建结果按创建时的勾选快照进成功态(提示文案 / 交给 ProjectScaffolder 的参数)。
+		bool m_NewProjectStarterScene = true;
+		bool m_NewProjectCreatedStarterScene = true;
+
+		// ---- PROJ-2/T1:项目启动器 + File ▸ Open Project… + 运行 ▸ 启动项目(Runtime)----
+		// 启动决策(是否显示启动器)在 EditorLayer;这里只渲染最近列表与四个动作、登记 a11y。
+		void DrawProjectLauncherModal(Wui::WuiContext& ctx);
+		// "打开项目…":选目录(帧边界原生对话框)→ 校验 project.we.yaml → RelaunchWithProject。
+		void RunOpenProjectBrowse(Wui::WuiContext& ctx);
+		bool m_OpenProjectBrowsePending = false;   // 下一帧开头弹"选择项目目录"
+		// 最近项目缓存(避免逐帧查盘;列表可见时 1 秒节流刷新,见实现)。
+		void RefreshRecentProjectsIfStale(bool force = false);
+		const std::vector<Editor::RecentProjectEntry>& RecentProjects();
+		std::vector<Editor::RecentProjectEntry> m_RecentProjects;
+		double m_RecentProjectsLoadedAt = -1.0e9;
+		// 运行 ▸ 启动项目(Runtime):目标 = 当前项目根(EditorLayer完成定位/启动/日志)。
+		void LaunchCurrentProjectRuntime();
+		// 启动器动作:打开默认**示例**项目(projects/default,文案明确"示例")。
+		void OpenDefaultSampleProject(Wui::WuiContext& ctx);
+		// 启动器的"打开项目…"入口(与 File ▸ Open Project… 同一条帧边界路径)。
+		void RequestOpenProjectBrowse(Wui::WuiContext& ctx);
 
 		// 打开模态时扫一遍当前内容根(World::Paths::AssetRoot())的目录树(低频操作;权限错误跳过)。
 		void ScanImportTree();
@@ -499,6 +522,8 @@ namespace World
 		std::shared_ptr<Wui::WuiButton> m_FileButton;
 		// P4-U6b:View 菜单(相机模式/预览 + 范围可视化开关)。
 		std::shared_ptr<Wui::WuiButton> m_WindowButton;
+		// PROJ-2/T1:运行菜单(运行 ▸ 启动项目(Runtime))。
+		std::shared_ptr<Wui::WuiButton> m_RunButton;
 		// P4-U6b:当前显示帧级模态的面板(空 = 无)。帧初封锁输入,渲染该面板前解开。
 		std::string m_PanelModalOwner;
 		Wui::WuiId m_OpenMenu = 0;

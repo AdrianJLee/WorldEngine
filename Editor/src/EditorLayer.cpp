@@ -3,6 +3,7 @@
 #include "EditorPreferences.h"
 #include "EditorResources.h"
 #include "EditorStartup.h"
+#include "Project/ProjectLauncher.h"
 #include "World/Core/Asset/BuiltinImporters.h"
 #include "World/Core/Asset/CookPipeline.h"
 #include "World/Core/Asset/GltfImporter.h"
@@ -183,9 +184,12 @@ namespace World
 		}
 	}
 
-	EditorLayer::EditorLayer()
+	EditorLayer::EditorLayer(bool projectExplicit)
 		: Layer("EditorLayer"), m_Document(Application::Get().GetContext()), m_Shell(*this)
 	{
+		// PROJ-2/T1:显式项目标记来自宿主(EditorApp 解析 --project / WLD_PROJECT_DIR);
+		// 用赋值而不是初始化列表,避免与成员声明顺序无关的重排警告。
+		m_ProjectExplicit = projectExplicit;
 		m_Commands.Register({ Wui::HashId("cmd.new"), "New", KeyCodes::N, true, false, [this] { NewScene(); } });
 		m_Commands.Register({ Wui::HashId("cmd.open"), "Open", KeyCodes::O, true, false, [this] { OpenScene(); } });
 		m_Commands.Register({ Wui::HashId("cmd.save"), "Save", KeyCodes::S, true, false, [this] { SaveScene(); } });
@@ -409,6 +413,51 @@ namespace World
 					WLD_CORE_WARN("[dev] hierarchy demo: fewer than two sprites in the scene");
 			}
 		}
+
+		// ---- PROJ-2/T1:启动决策(显式项目 / 自动打开最近一次 / 项目启动器)----
+		//
+		// 1) `--project` 或非空 `WLD_PROJECT_DIR` = 显式项目:不显示启动器,顺带记进最近列表
+		//    ("编辑器成功挂载某项目后写最近列表"的记录时机);
+		// 2) 否则若偏好 StartupAutoOpenLastProject(默认开)且最近列表第一条仍有效 ⇒ 第一帧
+		//    自动重启到它一次(RelaunchWithProject;子进程带 --project ⇒ 不再触发,不循环);
+		// 3) 否则显示项目启动器(不再默默落进编译期默认项目 projects/default)。
+		// 注意 2) 的"不等于当前项目"守卫:隐式启动时当前项目 = projects/default,若最近表
+		// 里恰好是它(用户点过"打开默认示例项目"),仍然显示启动器而不是自动回到默认项目。
+		{
+			const std::filesystem::path currentRoot = World::Paths::ProjectDir();
+			if (m_ProjectExplicit)
+			{
+				std::string recentError;
+				if (Editor::ProjectLauncher::AddRecent(currentRoot, &recentError))
+					WLD_CORE_INFO("[project] recent: recorded '{0}'", currentRoot.u8string());
+				else
+					WLD_CORE_WARN("[project] recent: could not record '{0}': {1}",
+						currentRoot.u8string(), recentError);
+			}
+			else
+			{
+				const bool autoOpen = Editor::EditorPreferences::Get().Data().StartupAutoOpenLastProject;
+				const std::vector<Editor::RecentProjectEntry> recent = autoOpen
+					? Editor::ProjectLauncher::LoadRecent() : std::vector<Editor::RecentProjectEntry>();
+				if (!recent.empty() && recent.front().Valid)
+				{
+					const std::filesystem::path root = std::filesystem::u8path(recent.front().Path);
+					if (!Editor::ProjectLauncher::SamePath(root, currentRoot))
+					{
+						m_PendingAutoOpenRecent = true;
+						m_PendingAutoOpenProject = root;
+						WLD_CORE_INFO("[project] startup: auto-opening the last project '{0}' once "
+							"(preference StartupAutoOpenLastProject is on)", root.u8string());
+					}
+				}
+				if (!m_PendingAutoOpenRecent)
+				{
+					m_ShowProjectLauncher = true;
+					WLD_CORE_INFO("[project] startup: no explicit project — showing the project launcher "
+						"(current project '{0}')", currentRoot.u8string());
+				}
+			}
+		}
 	}
 
 	// 图标是旧式(GL)纹理:窗口/上下文重建后必须重新加载,否则渲染出的图标会错乱。
@@ -472,6 +521,16 @@ namespace World
 		// D5c-4a:渲染发生在面板绘制里(RenderScene),那里拿不到 Timestep —— 先缓存一帧。
 		m_LastDeltaSeconds = ts.GetSeconds();
 		ProcessPendingRendererChange();
+		// PROJ-2/T1:启动期"自动打开最近项目一次"。放在第一帧(窗口/渲染器已经初始化)执行,
+		// 而不是 OnAttach 里直接关进程;RelaunchWithProject 内部仍走未保存确认(启动期无改动)。
+		if (m_PendingAutoOpenRecent)
+		{
+			m_PendingAutoOpenRecent = false;
+			const std::filesystem::path root = m_PendingAutoOpenProject;
+			m_PendingAutoOpenProject.clear();
+			if (!root.empty())
+				RelaunchWithProject(root);
+		}
 		m_HasRenderedScene = false;
 		// 视口目标重建节流:尺寸稳定(约 100ms)后再真正重建渲染目标。
 		if (m_PendingViewportSize.x > 0 && m_PendingViewportSize.y > 0)
@@ -1976,6 +2035,17 @@ namespace World
 			return;
 		}
 
+		// PROJ-2/T1:所有"打开项目"的入口(启动器 / File ▸ Open Project / Recent Projects /
+		// 向导成功态的"打开项目")都汇聚到这里 —— 真正重启之前把该项目根记进最近列表
+		// (子进程 OnAttach 还会再记一次,刷新时间戳)。
+		{
+			std::string recentError;
+			if (Editor::ProjectLauncher::AddRecent(root, &recentError))
+				WLD_CORE_INFO("[project] recent: recorded '{0}' (opening)", root.u8string());
+			else
+				WLD_CORE_WARN("[project] recent: could not record '{0}': {1}", root.u8string(), recentError);
+		}
+
 		wchar_t exeBuffer[MAX_PATH] = {};
 		if (GetModuleFileNameW(nullptr, exeBuffer, MAX_PATH) == 0)
 		{
@@ -2061,6 +2131,127 @@ namespace World
 			+ projectRoot.u8string() + ").";
 		WLD_CORE_WARN("{0}", message);
 		ShowError(message);
+#endif
+	}
+
+	// ---- PROJ-2/T1:项目启动器(状态) + 一键启动项目(独立 Runtime 进程)----
+	void EditorLayer::DismissProjectLauncher()
+	{
+		if (!m_ShowProjectLauncher)
+			return;
+		m_ShowProjectLauncher = false;
+		WLD_CORE_INFO("[project] launcher closed; staying in the current project '{0}'",
+			World::Paths::ProjectDir().u8string());
+	}
+
+	void EditorLayer::LaunchProjectRuntime(const std::filesystem::path& projectRoot)
+	{
+#ifdef WLD_PLATFORM_WINDOWS
+		std::error_code absoluteError;
+		const std::filesystem::path root = std::filesystem::absolute(projectRoot, absoluteError)
+			.lexically_normal();
+		if (absoluteError || !std::filesystem::is_directory(root))
+		{
+			ShowError("Cannot launch the project: the directory does not exist: " + projectRoot.u8string());
+			return;
+		}
+
+		// 开发布局定位(与 EditorCooker 拷贝 Runtime 的口径一致):
+		//   <WLD_REPO_ROOT>/<WLD_OUTPUT_DIR>Runtime/<WLD_BUILD_TYPE>/Runtime.exe
+		// 两个宏本身带尾分隔符,拼出来与 cooker 的字符串拼接逐字节等价;lexically_normal()
+		// 只用于日志/通知里的可读路径(与进程 CWD 无关)。
+		const std::filesystem::path runtimeDirectory =
+			std::filesystem::path(WLD_REPO_ROOT) / WLD_OUTPUT_DIR / "Runtime" / WLD_BUILD_TYPE;
+		const std::filesystem::path runtimeExe = runtimeDirectory / "Runtime.exe";
+		const std::filesystem::path runtimeDll = runtimeDirectory / "WorldRuntime.dll";
+		std::error_code exeError;
+		std::error_code dllError;
+		const bool runtimePresent = std::filesystem::is_regular_file(runtimeExe, exeError) &&
+			std::filesystem::is_regular_file(runtimeDll, dllError);
+
+		const std::string exeText = runtimeExe.lexically_normal().u8string();
+		const std::string projectText = root.u8string();
+		if (!runtimePresent)
+		{
+			// 缺失 ⇒ 通知里给一条可复制的构建命令(目录/配置取自编译期宏,不是写死 Debug)。
+			std::string buildDirectory = std::string(WLD_OUTPUT_DIR);
+			while (!buildDirectory.empty() && (buildDirectory.back() == '/' || buildDirectory.back() == '\\'))
+				buildDirectory.pop_back();
+			std::string configuration = std::string(WLD_BUILD_TYPE);
+			while (!configuration.empty() && (configuration.back() == '/' || configuration.back() == '\\'))
+				configuration.pop_back();
+			const std::string command = "cmake --build " + buildDirectory + " --config " + configuration
+				+ " --target Runtime";
+			WLD_CORE_ERROR("[project] launch runtime: exe={0} project={1} mode=missing", exeText, projectText);
+			WLD_CORE_ERROR("[project] launch runtime: Runtime build is missing — {0}", command);
+			m_Shell.Notify(Wui::TrFormat("notice.project.runtime_missing",
+				"Runtime is not built yet ({exe}). Build it first: {command}",
+				{ { "exe", exeText }, { "command", command } }));
+			m_WuiContext.RecordOp("project", "run-failed", Editor::ProjectLauncher::DisplayName(root), projectText);
+			return;
+		}
+
+		// 参数按 UTF-8 → UTF-16 转换(非 ASCII 项目路径不能按字节直接变宽字符);
+		// 工作目录 = 项目根(清单/内容根按 CWD → 项目根解析)。
+		const std::string arguments = " --project \"" + projectText + "\"";
+		std::wstring wideArguments;
+		{
+			const int wideLength = MultiByteToWideChar(CP_UTF8, 0, arguments.c_str(),
+				static_cast<int>(arguments.size()), nullptr, 0);
+			wideArguments.resize(static_cast<size_t>(std::max(0, wideLength)));
+			if (wideLength > 0)
+				MultiByteToWideChar(CP_UTF8, 0, arguments.c_str(), static_cast<int>(arguments.size()),
+					wideArguments.data(), wideLength);
+		}
+		const std::wstring commandLine = L"\"" + runtimeExe.wstring() + L"\"" + wideArguments;
+		const std::wstring workingDirectory = root.wstring();
+
+		DWORD lastError = 0;
+		std::string mode;
+		STARTUPINFOW startup {};
+		startup.cb = sizeof(startup);
+		PROCESS_INFORMATION process {};
+		std::wstring writableCommandLine = commandLine;   // CreateProcess 可能修改该缓冲
+		const BOOL spawned = CreateProcessW(runtimeExe.wstring().c_str(), writableCommandLine.data(),
+			nullptr, nullptr, FALSE, 0, nullptr, workingDirectory.c_str(), &startup, &process);
+		if (spawned)
+		{
+			CloseHandle(process.hThread);
+			CloseHandle(process.hProcess);
+			mode = "launch";
+		}
+		else
+		{
+			lastError = GetLastError();
+			// CreateProcess 可能被作业对象/权限策略拦下;退一步交给 Shell 启动
+			// (ShellExecuteW 的 lpDirectory 同样把工作目录设成项目根,参数里带着 --project)。
+			const HINSTANCE shellResult = ShellExecuteW(nullptr, L"open", runtimeExe.wstring().c_str(),
+				wideArguments.empty() ? nullptr : wideArguments.c_str(), workingDirectory.c_str(),
+				SW_SHOWNORMAL);
+			if (reinterpret_cast<INT_PTR>(shellResult) <= 32)
+			{
+				const std::string message = "Launching the project runtime failed (CreateProcess error "
+					+ std::to_string(static_cast<unsigned long>(lastError)) + ", ShellExecute error "
+					+ std::to_string(static_cast<int>(reinterpret_cast<INT_PTR>(shellResult))) + "): "
+					+ exeText;
+				WLD_CORE_ERROR("[project] launch runtime: exe={0} project={1} launch-failed", exeText, projectText);
+				WLD_CORE_ERROR("{0}", message);
+				ShowError(message);
+				m_WuiContext.RecordOp("project", "run-failed", Editor::ProjectLauncher::DisplayName(root), projectText);
+				return;
+			}
+			mode = "shell";
+		}
+
+		WLD_CORE_INFO("[project] launch runtime: exe={0} project={1} mode={2}", exeText, projectText, mode);
+		m_WuiContext.RecordOp("project", "run", Editor::ProjectLauncher::DisplayName(root), projectText);
+		m_Shell.Notify(Wui::TrFormat("notice.project.runtime_launched",
+			"Started the project runtime: {path}", { { "path", projectText } }));
+#else
+		// 非 Windows 平台本批不提供独立启动(与 Editor 其它重启路径同口径)。
+		WLD_CORE_WARN("Launching the project runtime is not supported on this platform ({0}).",
+			projectRoot.u8string());
+		ShowError("Launching the project runtime is not supported on this platform.");
 #endif
 	}
 

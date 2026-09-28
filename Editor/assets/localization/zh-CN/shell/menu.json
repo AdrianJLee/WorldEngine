@@ -11,7 +11,10 @@
   "menu.file.open": "打开",
   "menu.file.save": "保存",
   "menu.file.new_project": "新建项目…",
-  "menu.file.new_project.tooltip": "在任意位置生成一个标准项目骨架(不含示例):填项目名 + 选位置 → 生成清单、空内容根与一个空场景;完成后可在资源管理器打开,或重启编辑器到该项目。",
+  "menu.file.new_project.tooltip": "在任意位置生成一个标准项目骨架(不含示例):填项目名 + 选位置 → 生成清单、内容根与一个最小可运行场景(相机 + 方向光,可取消勾选);完成后可在资源管理器打开、重启编辑器进入,或直接启动项目。",
+  "menu.file.open_project": "打开项目…",
+  "menu.file.open_project.tooltip": "从任意位置打开项目:选项目根(含 project.we.yaml 的文件夹)→ 校验清单 → 重启编辑器进入该项目。",
+  "menu.file.recent": "最近项目",
   "menu.file.import": "导入 glTF...",
   "menu.file.new_cpp_script": "新建 C++ 脚本…",
   "menu.file.new_cpp_script.tooltip": "在 Game/src/Scripts/ 下生成一个 C++ 脚本模板(标量/枚举/struct/Array/Map 范例),生成后用内置代码编辑器打开;重建 Game 后执行「文件 ▶ 重载 C++ 模块」生效。",
@@ -37,5 +40,8 @@
   "menu.file.cooking": "烘焙(Cook)",
   "menu.file.export_ops": "导出操作日志",
   "menu.file.reload_cpp_module": "重载 C++ 模块(Game.dll)",
-  "menu.file.reload_cpp_module.tooltip": "重载 Game.dll 模块。第一次激活先卸载(让构建能改写该文件),再次激活加载新构建。C++ 脚本实例会销毁重建:新实例从 Pending 起跑、走 OnCreate。"
+  "menu.file.reload_cpp_module.tooltip": "重载 Game.dll 模块。第一次激活先卸载(让构建能改写该文件),再次激活加载新构建。C++ 脚本实例会销毁重建:新实例从 Pending 起跑、走 OnCreate。",
+  "menu.run": "运行",
+  "menu.run.launch_project": "启动项目(Runtime)",
+  "menu.run.launch_project.tooltip": "用独立的 Runtime 进程启动当前项目(按清单里的 start_scene 运行)。编辑器不重启、不需要先进 Play;项目根 = 当前项目。"
 }

@@ -37,6 +37,9 @@ namespace World::Editor
 		// ---- P4-UX7:编辑器 / 工作流 / 自动化 / 诊断 ----
 		float ScriptFontSize = 14.0f;                   // 10..32,脚本编辑器初始字号(用户明确要过)
 		bool AssetHotReload = true;                     // 资产/材质热重载;WLD_ASSET_HOTRELOAD 覆盖
+		// PROJ-2/T1:没有显式项目时,启动自动重启到"最近项目"第一条(只自动打开一次,
+		// 重启后的进程带 --project ⇒ 不再触发)。默认开;关掉 = 每次都显示项目启动器。
+		bool StartupAutoOpenLastProject = true;
 		// 启动恢复策略(见 RestoreWindowsMode);`WLD_RESTORE_WINDOWS=ask|tabs|layout|none` 覆盖。
 		RestoreWindowsMode RestoreWindows = RestoreWindowsMode::Ask;
 		// AI 控制通道端口:0 = 关闭。服务器在启动时创建 → 重启生效
@@ -74,6 +77,7 @@ namespace World::Editor
 		void SetShowTermHints(bool enabled);
 		void SetScriptFontSize(float size);
 		void SetAssetHotReload(bool enabled);
+		void SetStartupAutoOpenLastProject(bool enabled);
 		void SetRestoreWindows(RestoreWindowsMode mode);
 		void SetAiControlPort(int port);
 		void SetLogLevel(int level);

@@ -5,6 +5,8 @@
 #include "World/Core/Core.h"
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Scene.h"
+#include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
 #include "World/Scene/SceneSerializer.h"
 #include "World/Script/HotReload.h"
 #include "World/WUI/WuiLocalization.h"
@@ -202,8 +204,13 @@ namespace World::Editor
 			return Asset::ProjectManifest::Save(projectRoot / kManifestFileName, manifest, error);
 		}
 
-		// 空场景走引擎序列化(不手写 YAML):Scene 需要一个 WorldContext,序列化完即弃。
-		bool WriteEmptyScene(const fs::path& projectRoot, WorldContext& context, std::string* error)
+		// Main.wd 走引擎序列化(不手写 YAML):Scene 需要一个 WorldContext,序列化完即弃。
+		// includeStarterScene = true 时写入"最小可运行场景":一台 Camera3D(位置 [0,1,5]、
+		// Primary、透视)+ 一盏方向光 —— 只由引擎组件构成,不带任何示例资产/材质/脚本;
+		// false 时保持旧行为(空场景)。形态与 projects/default/assets/scenes/3DTest.wd 的
+		// 相机/灯光序列化形态同源(同一个 writer)。
+		bool WriteMainScene(const fs::path& projectRoot, WorldContext& context, bool includeStarterScene,
+			std::string* error)
 		{
 			const fs::path scenePath = projectRoot / kMainSceneRelative;
 			std::error_code ec;
@@ -215,6 +222,29 @@ namespace World::Editor
 				return false;
 			}
 			const Ref<Scene> scene = CreateRef<Scene>(context);
+			if (includeStarterScene)
+			{
+				try
+				{
+					Entity camera = Entity::CreateEntity(scene.get(), "Camera3D");
+					camera.AddComponent<TransformComponent>(glm::vec3 { 0.0f, 1.0f, 5.0f });
+					CameraComponent cameraComponent;
+					cameraComponent.Camera.SetProjectionType(SceneCamera::ProjectionType::Perspective);
+					cameraComponent.Camera.SetPerspectiveFarClip(200.0f);
+					cameraComponent.Primary = true;
+					camera.AddComponent<CameraComponent>(cameraComponent);
+
+					Entity light = Entity::CreateEntity(scene.get(), "Directional Light");
+					light.AddComponent<TransformComponent>();
+					light.AddComponent<DirectionalLightComponent>();
+				}
+				catch (const std::exception& exception)
+				{
+					if (error)
+						*error = std::string("starter scene setup failed: ") + exception.what();
+					return false;
+				}
+			}
 			SceneSerializer serializer(scene);
 			if (!serializer.Serialize(scenePath.string()))
 			{
@@ -373,7 +403,7 @@ namespace World::Editor
 	}
 
 	ProjectScaffolder::Result ProjectScaffolder::Create(const fs::path& location, const std::string& rawName,
-		WorldContext& context)
+		WorldContext& context, bool includeStarterScene)
 	{
 		Result result;
 		const auto fail = [&result](const std::string& message)
@@ -448,7 +478,7 @@ namespace World::Editor
 		if (built)
 			built = WriteStandardManifest(temporary, name, &error);
 		if (built)
-			built = WriteEmptyScene(temporary, context, &error);
+			built = WriteMainScene(temporary, context, includeStarterScene, &error);
 		if (built)
 		{
 			// Luau LSP 脚手架(.vscode/settings.json + .luau-lsp/config.json)走引擎既有实现:
@@ -490,6 +520,8 @@ namespace World::Editor
 		result.Files = CollectRelativeFiles(target);
 		WLD_CORE_INFO("[project-scaffolder] created '{0}' ({1} files, no samples)", target.u8string(),
 			result.Files.size());
+		WLD_CORE_INFO("[project-scaffolder] Main.wd: {0}", includeStarterScene
+			? "starter scene (Camera3D + Directional Light)" : "empty scene");
 		return result;
 	}
 }
