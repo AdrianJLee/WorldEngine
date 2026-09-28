@@ -1,4 +1,10 @@
-﻿set(WE_THIRD_PARTY "${CMAKE_SOURCE_DIR}/third_party")
+﻿set(WE_THIRD_PARTY "${WLD_ENGINE_ROOT}/third_party")
+
+# PROJ-8/T2:WLD_ENGINE_ROOT = 引擎仓库根(根 CMakeLists 定义;子项目模式下 ≠ CMAKE_SOURCE_DIR)。
+# 单独配置 Engine 时兜底成它的上一级目录,保持"第三方/引擎路径锚在引擎仓库"的语义。
+if(NOT DEFINED WLD_ENGINE_ROOT)
+    get_filename_component(WLD_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+endif()
 
 add_subdirectory(${WE_THIRD_PARTY}/GLFW ${CMAKE_BINARY_DIR}/third_party/GLFW)
 add_subdirectory(${WE_THIRD_PARTY}/Glad ${CMAKE_BINARY_DIR}/third_party/Glad)
@@ -51,8 +57,8 @@ set(WE_BOX2D_SOURCES
 )
 add_library(WorldBox2d OBJECT ${WE_BOX2D_SOURCES})
 target_include_directories(WorldBox2d
-    PUBLIC "${CMAKE_SOURCE_DIR}/third_party/box2d/include"
-    PRIVATE "${CMAKE_SOURCE_DIR}/third_party/box2d/src"
+    PUBLIC "${WLD_ENGINE_ROOT}/third_party/box2d/include"
+    PRIVATE "${WLD_ENGINE_ROOT}/third_party/box2d/src"
 )
 set_target_properties(WorldBox2d PROPERTIES
     C_STANDARD 17
@@ -66,7 +72,7 @@ endif()
 # P1b D5:glTF 2.0 导入(cgltf,锁定 v1.15)。单头库 + 本地包装源,与 stb_image 同款
 # "普通 vendor 目录"做法(不进 submodule);include 只暴露给 World。
 add_library(cgltf STATIC ${WE_THIRD_PARTY}/cgltf/cgltf.c)
-target_include_directories(cgltf PUBLIC "${CMAKE_SOURCE_DIR}/third_party/cgltf")
+target_include_directories(cgltf PUBLIC "${WLD_ENGINE_ROOT}/third_party/cgltf")
 set_target_properties(cgltf PROPERTIES
     C_STANDARD 17
     C_STANDARD_REQUIRED YES
@@ -148,35 +154,35 @@ target_compile_definitions(World PRIVATE
     YAML_CPP_STATIC_DEFINE
     GLFW_INCLUDE_VULKAN
     NOMINMAX
-    WLD_CURRENT_DIR="${CMAKE_SOURCE_DIR}/Engine/"
+    WLD_CURRENT_DIR="${WLD_ENGINE_ROOT}/Engine/"
 )
 target_compile_definitions(World PUBLIC 
     WLD_CORE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/"
-    WLD_ROOT_DIR="${CMAKE_SOURCE_DIR}/"
+    WLD_ROOT_DIR="${WLD_ENGINE_ROOT}/"
     WLD_INTERMEDIATE_DIR="${CMAKE_BINARY_DIR}/intermediate/"
 )
 
 # 头文件路径
 target_include_directories(World PRIVATE 
-    "${CMAKE_SOURCE_DIR}/third_party/GLFW/include"
-    "${CMAKE_SOURCE_DIR}/third_party/Glad/include"
-    "${CMAKE_SOURCE_DIR}/third_party/stb_image"
-    "${CMAKE_SOURCE_DIR}/third_party/stb"
+    "${WLD_ENGINE_ROOT}/third_party/GLFW/include"
+    "${WLD_ENGINE_ROOT}/third_party/Glad/include"
+    "${WLD_ENGINE_ROOT}/third_party/stb_image"
+    "${WLD_ENGINE_ROOT}/third_party/stb"
     # M4-TEX:纹理块压缩编码器(bc7enc16 = BC7,rgbcx = BC1–BC5)。
-    "${CMAKE_SOURCE_DIR}/third_party/bc7enc16"
-    "${CMAKE_SOURCE_DIR}/third_party/rgbcx"
-    "${CMAKE_SOURCE_DIR}/third_party/vulkan-headers/include"
-    "${CMAKE_SOURCE_DIR}/third_party/volk"
+    "${WLD_ENGINE_ROOT}/third_party/bc7enc16"
+    "${WLD_ENGINE_ROOT}/third_party/rgbcx"
+    "${WLD_ENGINE_ROOT}/third_party/vulkan-headers/include"
+    "${WLD_ENGINE_ROOT}/third_party/volk"
     ${Vulkan_INCLUDE_DIRS} # 自动解析的 Vulkan 路径
 )
 target_include_directories(World PUBLIC 
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    "${CMAKE_SOURCE_DIR}/third_party/glm"
-    "${CMAKE_SOURCE_DIR}/third_party/entt/include"
-    "${CMAKE_SOURCE_DIR}/third_party/yaml/include"
-    "${CMAKE_SOURCE_DIR}/third_party/spdlog/include"
-    "${CMAKE_SOURCE_DIR}/third_party/box2d/src"
-    "${CMAKE_SOURCE_DIR}/third_party/box2d/include"
+    "${WLD_ENGINE_ROOT}/third_party/glm"
+    "${WLD_ENGINE_ROOT}/third_party/entt/include"
+    "${WLD_ENGINE_ROOT}/third_party/yaml/include"
+    "${WLD_ENGINE_ROOT}/third_party/spdlog/include"
+    "${WLD_ENGINE_ROOT}/third_party/box2d/src"
+    "${WLD_ENGINE_ROOT}/third_party/box2d/include"
 )
 
 # 递归获取源文件
@@ -201,7 +207,7 @@ target_sources(World PRIVATE ${WORLD_SOURCES} $<TARGET_OBJECTS:WorldBox2d>)
 
 # volk 需要在启用 Win32 平台宏时编译,才会导出 VkWin32SurfaceCreateInfoKHR /
 # vkCreateWin32SurfaceKHR 等平台符号(VulkanSwapchain 用它们创建表面)。
-set_source_files_properties("${CMAKE_SOURCE_DIR}/third_party/volk/volk.c"
+set_source_files_properties("${WLD_ENGINE_ROOT}/third_party/volk/volk.c"
     PROPERTIES COMPILE_DEFINITIONS "VK_USE_PLATFORM_WIN32_KHR")
 
 # 链接库 (Vulkan::Vulkan 解决了 vulkan-1.lib 路径问题)

@@ -321,12 +321,14 @@ set_tests_properties(World.ScriptBinaryLoad PROPERTIES
 add_executable(WorldScriptWorkflowTests World/ScriptWorkflowTests.cpp)
 target_link_libraries(WorldScriptWorkflowTests PRIVATE World)
 target_compile_features(WorldScriptWorkflowTests PRIVATE cxx_std_17)
-# 存根漂移门禁要复现"编辑器同一输入":额外编译 Game 的生成式 schema 注册源
-# (GameAPI.cpp 运行时走同一条 RegisterGameSchemaModule)。
-target_include_directories(WorldScriptWorkflowTests PRIVATE "${CMAKE_SOURCE_DIR}/Game/src")
+# 存根漂移门禁要复现"编辑器同一输入":额外编译 Game 模块的生成式 schema 注册源
+# (GameAPI.cpp 运行时走同一条 RegisterGameSchemaModule)。PROJ-8/T2 起示例 C++ 属于项目层/
+# 示例模板,引擎 Game/src 只剩骨架 ⇒ 测试改指**测试夹具** tests/fixtures/game-module/
+# (同名同形:Game::SampleDataComponent / Game::ExampleScript,存根夹具逐字节可比)。
+target_include_directories(WorldScriptWorkflowTests PRIVATE "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src")
 target_sources(WorldScriptWorkflowTests PRIVATE
-    "${CMAKE_SOURCE_DIR}/Game/src/Generated/Game/GameSchemaRegistration.cpp"
-    "${CMAKE_SOURCE_DIR}/Game/src/Scripts/ExampleScript.cpp"
+    "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Generated/Game/GameSchemaRegistration.cpp"
+    "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Scripts/ExampleScript.cpp"
 )
 target_compile_definitions(WorldScriptWorkflowTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
@@ -1151,14 +1153,19 @@ set_tests_properties(World.SchemaDrift PROPERTIES
     TIMEOUT 60
 )
 
-# CPPT-2:Game 模块生成物漂移门禁(与 World.SchemaDrift 同形态)。改 Game 的 WE_FIELD/注解/
-# 属性元数据却不重跑 schema-compiler → 此测试红灯;新生成物 = Game/src/Generated + Game.manifest。
+# CPPT-2:Game 模块生成物漂移门禁(与 World.SchemaDrift 同形态)。改 WE_FIELD/注解/属性元数据
+# 却不重跑 schema-compiler → 此测试红灯。
+# PROJ-8/T2:输入改指**测试夹具** tests/fixtures/game-module/src/**(引擎 Game/src 只剩骨架,
+# 示例 C++ 随示例模板来到项目层);夹具与 WorldScriptWorkflowTests 编译的是同一套输入/生成物。
 add_test(NAME Game.SchemaDrift
     COMMAND schema-compiler
-        ${GAME_SCHEMA_ARGS}
+        --input "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Components/SampleDataComponent.h"
+        --input "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Scripts/ExampleScript.h"
         --module Game
-        --output "${CMAKE_SOURCE_DIR}/Game/src/Generated"
-        --manifest "${CMAKE_SOURCE_DIR}/Game/src/Generated/Game.manifest"
+        --output "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Generated"
+        --manifest "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Generated/Game.manifest"
+        --reg-include "Components/SampleDataComponent.h"
+        --reg-include "Scripts/ExampleScript.h"
         --check)
 set_tests_properties(Game.SchemaDrift PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

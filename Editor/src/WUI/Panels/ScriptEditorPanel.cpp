@@ -60,54 +60,6 @@ namespace World
 			return NormalizeLogicalPath(left) == NormalizeLogicalPath(right);
 		}
 
-		// CPPT-6-ED-NEWSCRIPT:模块源码逻辑路径前缀(`module:` + checkout 相对路径,统一 '/')。
-		// Game/src/Scripts/*.h 这一类文件不在内容根(World::Paths::AssetRoot())下,ResolveScriptDiskPath
-		// 按内容根解析必然失败;这里给它们一条独立的、与 CWD 无关的解析:仓库根 = WLD_REPO_ROOT
-		// (与 WLD_EDITOR_DIR 同源的编译期绝对锚点)。
-		constexpr std::string_view kModuleSourcePrefix = "module:";
-
-		bool ResolveModuleSourceDiskPath(std::string_view logicalPath, std::filesystem::path& out,
-			std::string* error)
-		{
-			std::string relative(logicalPath.substr(kModuleSourcePrefix.size()));
-			std::replace(relative.begin(), relative.end(), '\\', '/');
-			// 只接受仓库相对路径:拒绝绝对路径 / 盘符与 `.`、`..` 段(不越出 checkout)。
-			bool escape = false;
-			for (std::size_t start = 0; start <= relative.size();)
-			{
-				const std::size_t end = relative.find('/', start);
-				const std::size_t stop = end == std::string::npos ? relative.size() : end;
-				const std::string_view segment(relative.data() + start, stop - start);
-				if (segment == ".." || segment == ".")
-					escape = true;
-				if (end == std::string::npos)
-					break;
-				start = end + 1;
-			}
-			const bool looksAbsolute = !relative.empty()
-				&& (relative[0] == '/' || relative.find(':') != std::string::npos);
-			if (relative.empty() || looksAbsolute || escape)
-			{
-				if (error)
-					*error = "invalid module source path (a checkout-relative path is required): "
-						+ std::string(logicalPath);
-				return false;
-			}
-			const std::filesystem::path diskPath =
-				std::filesystem::path(std::string(WLD_REPO_ROOT)) / std::filesystem::path(relative);
-			std::error_code fileError;
-			if (!std::filesystem::is_regular_file(diskPath, fileError))
-			{
-				if (error)
-					*error = "module source file not found on disk: " + diskPath.string();
-				return false;
-			}
-			out = diskPath;
-			if (error)
-				error->clear();
-			return true;
-		}
-
 		bool ReadDiskFile(const std::filesystem::path& path, std::string& out, std::string* error)
 		{
 			std::ifstream input(path, std::ios::binary);
@@ -305,12 +257,10 @@ namespace World
 
 		std::filesystem::path resolved;
 		std::string resolveError;
-		// CPPT-6-ED-NEWSCRIPT:`module:` 前缀 = 模块源码(checkout 相对路径),其余仍走
-		// 内容根的脚本解析;两条路径的读/写/外部改动检测后续共用。
-		m_ModuleSource = m_LogicalPath.rfind(kModuleSourcePrefix, 0) == 0;
-		const bool resolvedOk = m_ModuleSource
-			? ResolveModuleSourceDiskPath(m_LogicalPath, resolved, &resolveError)
-			: ResolveScriptDiskPath(m_LogicalPath, resolved, &resolveError);
+		// CPPT-7/PROJ-8:内置编辑器只服务 Lua/Luau —— 解析永远按内容根(脚本逻辑路径)。
+		// C++ 源码不再有专用解析通道;被误送进来的 `.h/.cpp`(或旧的 `module:` 路径)解析失败,
+		// 面板退化成"只读 + 状态行错误",不会出现内置 C++ 编辑态。
+		const bool resolvedOk = ResolveScriptDiskPath(m_LogicalPath, resolved, &resolveError);
 		if (!resolvedOk)
 		{
 			// 包内/非法/不存在:面板仍显示,只读 + 状态行错误文本(不伪造占位内容)。
@@ -590,14 +540,14 @@ namespace World
 		PollExternalChange();
 
 		// W9.7 编辑防抖语法检查(≈300ms @60fps):状态行给出第一条错误,出错行由编辑器标红。
-		// W9.7 的 Luau 语法检查只对脚本生效:模块源码是 C++ 头,C++ 语法不由编辑器检查。
-		if (!m_ModuleSource && !readOnly && m_Buffer.Revision() != m_SyntaxCheckedRevision)
+		// 面板只编辑 Luau 脚本(CPPT-7/PROJ-8),语法检查对面板里的内容永远适用。
+		if (!readOnly && m_Buffer.Revision() != m_SyntaxCheckedRevision)
 		{
 			m_SyntaxCheckedRevision = m_Buffer.Revision();
 			m_SyntaxDueFrame = ctx.Frame() + 18;
 			m_SyntaxScheduled = true;
 		}
-		if (!m_ModuleSource && m_SyntaxScheduled && ctx.Frame() >= m_SyntaxDueFrame)
+		if (m_SyntaxScheduled && ctx.Frame() >= m_SyntaxDueFrame)
 		{
 			m_SyntaxScheduled = false;
 			LuauSyntaxError syntaxError;
@@ -718,8 +668,7 @@ namespace World
 		accessibility.Register(editorNode);
 
 		// W9.5:懒加载补全索引 + 同步当前脚本文件符号(Revision 变化才重建)。
-		if (!m_ModuleSource)
-			EnsureCompletionReady();
+		EnsureCompletionReady();
 		if (m_CompletionStubReady && m_CompletionFileRevision != m_Buffer.Revision())
 		{
 			m_CompletionFileRevision = m_Buffer.Revision();

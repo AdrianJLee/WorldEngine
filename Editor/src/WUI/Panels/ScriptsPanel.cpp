@@ -20,6 +20,7 @@ namespace World
 		constexpr float kRowButtonHeight = 22.0f;
 		constexpr float kSceneRowHeight = 46.0f;
 		constexpr float kDiskRowHeight = 24.0f;
+		constexpr float kProjectRowHeight = 24.0f;
 		constexpr float kDiskHeaderHeight = 24.0f;
 		constexpr float kStatusReserve = 26.0f;
 
@@ -133,10 +134,75 @@ namespace World
 			[](const DiskScript& left, const DiskScript& right) { return left.LogicalPath < right.LogicalPath; });
 	}
 
+	// PROJ-8/T1:项目源码段的数据源 —— 当前项目 `<项目根>/src/**` 的 .h/.cpp。
+	// 与"磁盘脚本"同一条纪律:0.5s 节流重扫(切片小、目录浅,不做常驻缓存失效的复杂度);
+	// 项目切换 / 新建 / 删除后,`World::Paths::ProjectDir()` 一变,下一次节流窗口就换根重扫。
+	void ScriptsPanel::RefreshProjectSources(bool force)
+	{
+		const double now = NowSeconds();
+		if (!force && now < m_NextProjectScanSeconds)
+			return;
+		m_NextProjectScanSeconds = now + 0.5;
+
+		m_ProjectSources.clear();
+		std::error_code error;
+		const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+		// "有当前项目" = 项目根里有清单(启动器的哨兵目录 / 引擎内空的 projects/ 都没有)。
+		m_HasProject = !projectRoot.empty()
+			&& std::filesystem::is_regular_file(projectRoot / "project.we.yaml", error);
+		if (!m_HasProject)
+			return;
+		const std::filesystem::path sourceRoot = projectRoot / "src";
+		if (!std::filesystem::is_directory(sourceRoot, error))
+			return;
+
+		const std::filesystem::directory_options options =
+			std::filesystem::directory_options::skip_permission_denied;
+		for (std::filesystem::recursive_directory_iterator iterator(sourceRoot, options, error), end;
+			iterator != end; iterator.increment(error))
+		{
+			if (error)
+			{
+				// 单个条目失败(权限/竞态删除)跳过即可,不打断整个扫描(与磁盘脚本段同口径)。
+				error.clear();
+				continue;
+			}
+			const std::filesystem::directory_entry& entry = *iterator;
+			// 跳过构建产物与隐藏目录(build/ 是项目自己的构建输出,不是源码)。
+			std::error_code entryError;
+			if (entry.is_directory(entryError) && !entryError)
+			{
+				const std::string name = entry.path().filename().string();
+				if (name == "build" || (!name.empty() && name.front() == '.'))
+					iterator.disable_recursion_pending();
+				continue;
+			}
+			if (!entry.is_regular_file(entryError) || entryError)
+				continue;
+			std::string extension = entry.path().extension().string();
+			std::transform(extension.begin(), extension.end(), extension.begin(),
+				[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+			if (extension != ".h" && extension != ".cpp")
+				continue;
+			const std::filesystem::path relative = entry.path().lexically_relative(projectRoot);
+			if (relative.empty())
+				continue;
+
+			ProjectSource source;
+			source.RelativePath = relative.generic_string();
+			source.DiskPath = entry.path();
+			m_ProjectSources.push_back(std::move(source));
+		}
+		std::sort(m_ProjectSources.begin(), m_ProjectSources.end(),
+			[](const ProjectSource& left, const ProjectSource& right)
+			{ return left.RelativePath < right.RelativePath; });
+	}
+
 	void ScriptsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
 		RefreshDiskScripts(false);
+		RefreshProjectSources(false);
 
 		Wui::PanelBackground(ctx, rect, { 0.10f, 0.105f, 0.115f, 1.0f });
 
@@ -235,9 +301,24 @@ namespace World
 				TruncateUtf8(status, 150), m_StatusIsError ? theme.Accent : theme.TextMuted, 12.0f);
 		};
 
-		// ---- U2d:场景里没有脚本、磁盘上也没有脚本 → 统一空状态 ----
-		// 工具栏与底部状态行保持原样;有任一脚本时下面两段与改动前逐帧一致。
-		if (sceneRows.empty() && m_DiskScripts.empty())
+		// ---- PROJ-8/T1:没有当前项目(启动器/未打开项目)时整页给一条可读提示 ----
+		// 场景脚本在启动器进程里也不存在(没挂载场景),三段都没有可展示的事实。
+		if (!m_HasProject)
+		{
+			const Wui::WuiRect emptyRect { rect.X + 8.0f, y, std::max(0.0f, rect.W - 16.0f),
+				std::max(0.0f, rect.Y + rect.H - kStatusReserve - y - 8.0f) };
+			(void)Wui::EmptyState(ctx, emptyRect, std::string(),
+				Wui::Tr("panel.scripts.project_sources.no_project.title", "No project open"),
+				Wui::Tr("panel.scripts.project_sources.no_project",
+					"No project is open — open or create one in the launcher; its C++ sources show up here."),
+				std::string(), 0, theme);
+			drawStatusLine();
+			return;
+		}
+
+		// ---- U2d:场景、项目源码、磁盘脚本三者都空 → 统一空状态 ----
+		// 工具栏与底部状态行保持原样;有任一脚本/源码时下面三段与改动前逐帧一致。
+		if (sceneRows.empty() && m_ProjectSources.empty() && m_DiskScripts.empty())
 		{
 			const Wui::WuiRect emptyRect { rect.X + 8.0f, y, std::max(0.0f, rect.W - 16.0f),
 				std::max(0.0f, rect.Y + rect.H - kStatusReserve - y - 8.0f) };
@@ -255,13 +336,21 @@ namespace World
 		y += 22.0f;
 
 		const float listBottom = rect.Y + rect.H - kStatusReserve;
-		const float listHeight = std::max(0.0f, listBottom - y - kDiskHeaderHeight);
-		// 两段共享剩余高度:场景行先占 45%,至少 1 行;720×470 默认窗口下两段都有行。
+		const float listHeight = std::max(0.0f, listBottom - y);
+		// 三段共享剩余高度(场景 40% / 项目源码 30% / 磁盘脚本 30%),每段至少 1 行的机会;
+		// 逐行再按 listBottom 硬夹一次 —— 窗口太小时宁可少画行,也不叠到状态行上。
+		const auto budgetRows = [](float budget, float headerHeight, float rowHeight) -> std::size_t
+		{
+			return static_cast<std::size_t>(std::max(0.0f, budget - headerHeight) / rowHeight);
+		};
 		const std::size_t maxSceneRows = std::max<std::size_t>(1,
-			static_cast<std::size_t>((listHeight * 0.45f) / kSceneRowHeight));
+			budgetRows(listHeight * 0.40f, 22.0f, kSceneRowHeight));
 		const std::size_t visibleSceneRows = std::min(sceneRows.size(), maxSceneRows);
+		std::size_t drawnSceneRows = 0;
 		for (std::size_t index = 0; index < visibleSceneRows; ++index)
 		{
+			if (y + kSceneRowHeight > listBottom + 0.5f)
+				break;
 			const SceneRow& row = sceneRows[index];
 			const Wui::WuiRect rowRect { rect.X + 8.0f, y, rect.W - 16.0f, kSceneRowHeight - 4.0f };
 			Wui::PanelBackground(ctx, rowRect, theme.PanelHeader);
@@ -301,10 +390,11 @@ namespace World
 					theme.TextMuted, 11.0f);
 			}
 			y += kSceneRowHeight;
+			++drawnSceneRows;
 		}
-		if (sceneRows.size() > visibleSceneRows)
+		if (sceneRows.size() > drawnSceneRows)
 		{
-			Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(sceneRows.size() - visibleSceneRows)
+			Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(sceneRows.size() - drawnSceneRows)
 				+ " more scene script(s); enlarge the window to see them", theme.TextMuted, 12.0f);
 			y += 16.0f;
 		}
@@ -316,6 +406,63 @@ namespace World
 			y += 18.0f;
 		}
 
+		// ---- 项目源码段(PROJ-8/T1:当前项目 `<项目根>/src/**` 的 .h/.cpp)----
+		y += 6.0f;
+		const std::string projectHeader = Wui::TrFormat("panel.scripts.project_sources.header",
+			"Project Sources ({count})", { { "count", std::to_string(m_ProjectSources.size()) } });
+		Wui::SectionHeader(ctx, { rect.X + 8.0f, y, rect.W - 16.0f, 20.0f }, projectHeader, theme.Accent, theme);
+		y += kDiskHeaderHeight;
+
+		const std::size_t maxProjectRows = std::max<std::size_t>(1,
+			budgetRows(listHeight * 0.30f, kDiskHeaderHeight, kProjectRowHeight));
+		const std::size_t visibleProjectRows = std::min(m_ProjectSources.size(), maxProjectRows);
+		std::size_t drawnProjectRows = 0;
+		for (std::size_t index = 0; index < visibleProjectRows; ++index)
+		{
+			if (y + kProjectRowHeight > listBottom + 0.5f)
+				break;
+			const ProjectSource& source = m_ProjectSources[index];
+			const Wui::WuiRect rowRect { rect.X + 8.0f, y, rect.W - 16.0f, kProjectRowHeight - 2.0f };
+			Wui::PanelBackground(ctx, rowRect, theme.PanelHeader);
+			// a11y:`project.source.<index>` = 行本身(只读,value = 绝对路径);
+			// 主按钮 `project.source.open.<index>` = Open in VS(双击行同一条路径)。
+			RegisterReadonlyNode(Wui::HashId(("project.source." + std::to_string(index)).c_str()),
+				"list-item", source.RelativePath, source.DiskPath.string(), rowRect);
+			Wui::Label(ctx, { rowRect.X + 8.0f, rowRect.Y + 3.0f },
+				TruncateUtf8(source.RelativePath, 76), theme.Text, 12.0f);
+
+			const Wui::WuiRect openRect {
+				rowRect.X + rowRect.W - 102.0f, rowRect.Y + 1.0f, 98.0f, 20.0f };
+			const bool doubleClicked = ctx.IsDoubleClicked(rowRect);
+			if (Wui::Button(ctx, Wui::HashId(("project.source.open." + std::to_string(index)).c_str()),
+				openRect, Wui::Tr("panel.scripts.project_sources.open_vs", "Open in VS"), theme)
+				|| doubleClicked)
+			{
+				// 与内容浏览器双击脚本/内置编辑器入口同一条 PanelHost 路径 —— 编辑器侧按
+				// 扩展名分流:`.h/.cpp` 走外部 Visual Studio(EditorShell::OpenScriptEditorNow)。
+				host.OpenScriptEditor(source.DiskPath.generic_string());
+				SetStatus(Wui::Tr("panel.scripts.project_sources.opened", "open in Visual Studio: ")
+					+ source.RelativePath, false);
+			}
+			y += kProjectRowHeight;
+			++drawnProjectRows;
+		}
+		if (m_ProjectSources.empty())
+		{
+			Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f },
+				TruncateUtf8(Wui::Tr("panel.scripts.project_sources.empty",
+					"This project has no C++ sources yet — use File ▶ New C++ Script… "
+					"or drop files into src/."), 110),
+				theme.TextMuted, 12.0f);
+			y += 18.0f;
+		}
+		else if (m_ProjectSources.size() > drawnProjectRows)
+		{
+			Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(m_ProjectSources.size() - drawnProjectRows)
+				+ " more project source(s); enlarge the window to see them", theme.TextMuted, 12.0f);
+			y += 16.0f;
+		}
+
 		// ---- 磁盘脚本段 ----
 		y += 6.0f;
 		const std::string diskHeader = "Disk Scripts (" + std::to_string(m_DiskScripts.size()) + ")";
@@ -325,8 +472,11 @@ namespace World
 		const std::size_t maxDiskRows = std::max<std::size_t>(1,
 			static_cast<std::size_t>(std::max(0.0f, listBottom - y) / kDiskRowHeight));
 		const std::size_t visibleDiskRows = std::min(m_DiskScripts.size(), maxDiskRows);
+		std::size_t drawnDiskRows = 0;
 		for (std::size_t index = 0; index < visibleDiskRows; ++index)
 		{
+			if (y + kDiskRowHeight > listBottom + 0.5f)
+				break;
 			const DiskScript& script = m_DiskScripts[index];
 			const Wui::WuiRect rowRect { rect.X + 8.0f, y, rect.W - 16.0f, kDiskRowHeight - 2.0f };
 			const bool selected = script.LogicalPath == m_SelectedDisk;
@@ -356,10 +506,11 @@ namespace World
 				SetStatus("external: " + (message.empty() ? (ok ? std::string("ok") : std::string("failed")) : message), !ok);
 			}
 			y += kDiskRowHeight;
+			++drawnDiskRows;
 		}
-		if (m_DiskScripts.size() > visibleDiskRows)
+		if (m_DiskScripts.size() > drawnDiskRows)
 		{
-			Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(m_DiskScripts.size() - visibleDiskRows)
+			Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(m_DiskScripts.size() - drawnDiskRows)
 				+ " more disk script(s); enlarge the window to see them", theme.TextMuted, 12.0f);
 			y += 16.0f;
 		}

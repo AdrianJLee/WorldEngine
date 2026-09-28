@@ -219,6 +219,17 @@ namespace World
 		bool ScriptsReloadInstance(entt::entity handle, std::string* message = nullptr);
 		// 用系统默认程序打开磁盘上的脚本(ResolveScriptDiskPath 解析;包内/非法路径 → false)。
 		bool ScriptsOpenExternal(const std::string& logicalPath, std::string* message = nullptr);
+		// ---- CPPT-7/PROJ-8:外部 Visual Studio 打开(内置编辑器不再编辑 C++ 源码)----
+		// 定位 devenv.exe(`vswhere -latest -property productPath`,会话内缓存一次;找不到 = false +
+		// 可读 message,不静默退回系统文件关联),再按文件归属选打开策略:
+		//   文件在项目根内且 `<项目根>/CMakeLists.txt` 存在 ⇒ 打开该 CMakeLists.txt(VS 的 CMake 模式,
+		//     IntelliSense/构建配置才准确);
+		//   文件在 `<repo>/Engine/**`                        ⇒ 打开 `<repo>/<WLD_OUTPUT_DIR>World.slnx`;
+		//   其它                                             ⇒ 直接打开该文件。
+		// 固定日志(探针断言点):`[vsopen] file=<abs> devenv=<abs> mode=<cmake|solution|file|shell>`
+		// (CreateProcessW 失败退 ShellExecuteW 时补一条 mode=shell);
+		// 环境变量 `WLD_VS_DRYRUN=1` = 只打日志、不真启动 VS(探针钩子,不弹窗不抢焦点)。
+		bool OpenInVisualStudio(const std::filesystem::path& absPath, std::string* message = nullptr);
 		// 从 scripts/templates/WorldScript.lua 复制出 scripts/script_<n>.lua(冲突递增、永不覆盖)。
 		bool ScriptsCreateFromTemplate(std::string& outLogicalPath, std::string* message = nullptr);
 

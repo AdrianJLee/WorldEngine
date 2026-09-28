@@ -121,6 +121,41 @@ namespace World
 		// 它返回**无**尾分隔符的绝对路径)。
 		bool LoadGameModuleForEditor(WorldContext& context, std::string* error)
 		{
+			// PROJ-8/T2:当前项目**自己构建**的 Game.dll 优先。项目 C++(<项目根>/src/**)由项目自带
+			// build.cmd/CMakeLists 编进 <项目根>/build/x64-<cfg>/bin/<cfg>/Game/<cfg>/Game.dll
+			// (与引擎开发布局同形);找不到才退回引擎开发布局(下面两条既有候选)。
+			// 加载失败的错误文本一并带回给调用方,日志里能看到"试过哪里、为什么没成"。
+			std::string projectNote;
+			{
+				std::string buildType(WLD_BUILD_TYPE);      // 编译期宏形如 "Debug/"(带尾分隔符)
+				while (!buildType.empty() && (buildType.back() == '/' || buildType.back() == '\\'))
+					buildType.pop_back();
+				const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+				if (!projectRoot.empty() && !buildType.empty())
+				{
+					const std::filesystem::path projectGameDll = projectRoot / "build" / ("x64-" + buildType)
+						/ "bin" / buildType / "Game" / buildType / "Game.dll";
+					std::error_code existsError;
+					if (std::filesystem::is_regular_file(projectGameDll, existsError))
+					{
+						std::string projectError;
+						if (context.Modules().Load(projectGameDll, context, &projectError) == Modules::ModuleManager::Status::Ok)
+						{
+							WLD_CORE_INFO("[game-module] loaded the project build: {0}", projectGameDll.string());
+							return true;
+						}
+						WLD_CORE_WARN("[game-module] project build rejected: {0} ({1})",
+							projectGameDll.string(), projectError);
+						projectNote = "project build " + projectGameDll.string() + ": " + projectError + "; ";
+					}
+					else
+					{
+						WLD_CORE_INFO("[game-module] no project build at {0}; falling back to the engine build",
+							projectGameDll.string());
+					}
+				}
+			}
+
 			std::string primaryError;
 			if (Modules::GameModuleHost::LoadDefault(context, &primaryError))
 				return true;
@@ -136,7 +171,7 @@ namespace World
 			}
 
 			if (error)
-				*error = primaryError + "; fallback " + anchored.string() + ": " + anchoredError;
+				*error = projectNote + primaryError + "; fallback " + anchored.string() + ": " + anchoredError;
 			return false;
 		}
 
@@ -2784,6 +2819,202 @@ namespace World
 			return false;
 		}
 		report("opened " + diskPath.string());
+		return true;
+	}
+
+	namespace
+	{
+		// CPPT-7/PROJ-8:vswhere → devenv.exe。会话内只解析一次(VS 安装不会在编辑会话中途变化),
+		// 结果空 = 没找到(调用方给可读提示,不静默走系统文件关联)。
+		const std::filesystem::path& VisualStudioDevenvPath()
+		{
+			static bool resolved = false;
+			static std::filesystem::path cached;
+			if (resolved)
+				return cached;
+			resolved = true;
+
+			const char* programFiles = std::getenv("ProgramFiles(x86)");
+			if (programFiles == nullptr || programFiles[0] == '\0')
+				programFiles = std::getenv("ProgramFiles");
+			if (programFiles == nullptr || programFiles[0] == '\0')
+			{
+				WLD_CORE_WARN("[vsopen] neither ProgramFiles(x86) nor ProgramFiles is set; cannot locate vswhere");
+				return cached;
+			}
+			const std::filesystem::path vswhere = std::filesystem::path(programFiles)
+				/ "Microsoft Visual Studio" / "Installer" / "vswhere.exe";
+			std::error_code fileError;
+			if (!std::filesystem::is_regular_file(vswhere, fileError))
+			{
+				WLD_CORE_WARN("[vsopen] vswhere.exe not found: {0}", vswhere.string());
+				return cached;
+			}
+
+			SECURITY_ATTRIBUTES attributes {};
+			attributes.nLength = sizeof(SECURITY_ATTRIBUTES);
+			attributes.bInheritHandle = TRUE;
+			HANDLE readPipe = nullptr;
+			HANDLE writePipe = nullptr;
+			if (!CreatePipe(&readPipe, &writePipe, &attributes, 0))
+			{
+				WLD_CORE_WARN("[vsopen] CreatePipe failed ({0}); cannot run vswhere", GetLastError());
+				return cached;
+			}
+			SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
+
+			STARTUPINFOW startup {};
+			startup.cb = sizeof(STARTUPINFOW);
+			startup.dwFlags = STARTF_USESTDHANDLES;
+			startup.hStdOutput = writePipe;
+			startup.hStdError = writePipe;
+			PROCESS_INFORMATION process {};
+			std::wstring commandLine = L"\"" + vswhere.wstring() + L"\" -latest -property productPath";
+			std::vector<wchar_t> commandBuffer(commandLine.begin(), commandLine.end());
+			commandBuffer.push_back(L'\0');
+			const BOOL spawned = CreateProcessW(vswhere.wstring().c_str(), commandBuffer.data(),
+				nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+			CloseHandle(writePipe);
+
+			std::string output;
+			if (spawned)
+			{
+				// 先读完输出再等进程:输出量很小(<1KB),这样不会因为写满管道而死锁。
+				char buffer[512];
+				DWORD read = 0;
+				while (ReadFile(readPipe, buffer, sizeof(buffer), &read, nullptr) && read > 0)
+					output.append(buffer, read);
+				WaitForSingleObject(process.hProcess, 20000);
+				CloseHandle(process.hThread);
+				CloseHandle(process.hProcess);
+			}
+			else
+			{
+				WLD_CORE_WARN("[vsopen] vswhere failed to start ({0})", GetLastError());
+			}
+			CloseHandle(readPipe);
+
+			while (!output.empty() && (output.back() == '\n' || output.back() == '\r'
+				|| output.back() == ' ' || output.back() == '\t'))
+				output.pop_back();
+			const std::size_t first = output.find_first_not_of(" \t\r\n");
+			if (first == std::string::npos)
+			{
+				WLD_CORE_WARN("[vsopen] vswhere reported no productPath (is a Visual Studio C++ installation present?)");
+				return cached;
+			}
+			output.erase(0, first);
+			// vswhere 的 productPath 是安装布局里的 ASCII 路径;按窄字符构造后仍要落盘校验。
+			const std::filesystem::path devenv(output);
+			if (std::filesystem::is_regular_file(devenv, fileError))
+				cached = devenv;
+			else
+				WLD_CORE_WARN("[vsopen] vswhere reported a productPath that is not a file: {0}", output);
+			return cached;
+		}
+	}
+
+	bool EditorLayer::OpenInVisualStudio(const std::filesystem::path& absPath, std::string* message)
+	{
+		auto report = [message](const std::string& text)
+		{
+			if (message)
+				*message = text;
+		};
+		std::error_code fileError;
+		if (absPath.empty() || !std::filesystem::is_regular_file(absPath, fileError))
+		{
+			WLD_CORE_WARN("[vsopen] file={0} devenv= mode=none (file not found)", absPath.string());
+			report("file not found: " + absPath.string());
+			return false;
+		}
+
+		// 打开策略:项目 CMake → 引擎解决方案 → 单文件(按文件归属判定,见头文件注释)。
+		const std::filesystem::path devenv = VisualStudioDevenvPath();
+		std::filesystem::path target = absPath;
+		std::string mode = "file";
+		const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+		const bool hasManifest = !projectRoot.empty()
+			&& std::filesystem::is_regular_file(projectRoot / "project.we.yaml", fileError);
+		const std::string projectRelative = projectRoot.empty()
+			? std::string() : absPath.lexically_relative(projectRoot).generic_string();
+		const bool insideProject = hasManifest && !projectRelative.empty()
+			&& projectRelative.compare(0, 2, "..") != 0;
+		const std::filesystem::path projectCMake = projectRoot / "CMakeLists.txt";
+		if (insideProject && std::filesystem::is_regular_file(projectCMake, fileError))
+		{
+			// VS 的 CMake 模式:打开 CMakeLists.txt,VS 自己接管 configure/IntelliSense。
+			target = projectCMake;
+			mode = "cmake";
+		}
+		else
+		{
+			const std::filesystem::path engineRoot = std::filesystem::path(WLD_REPO_ROOT) / "Engine";
+			const std::string engineRelative = absPath.lexically_relative(engineRoot).generic_string();
+			const std::filesystem::path solution =
+				std::filesystem::path(WLD_REPO_ROOT) / WLD_OUTPUT_DIR / "World.slnx";
+			if (!engineRelative.empty() && engineRelative.compare(0, 2, "..") != 0
+				&& std::filesystem::is_regular_file(solution, fileError))
+			{
+				target = solution;
+				mode = "solution";
+			}
+		}
+
+		if (devenv.empty())
+		{
+			WLD_CORE_WARN("[vsopen] file={0} devenv= mode=none (Visual Studio not found via vswhere)",
+				absPath.generic_string());
+			report(Wui::Tr("notice.vsopen.no_devenv",
+				"Visual Studio (devenv.exe) was not found via vswhere — install Visual Studio with the "
+				"C++ workload, then try again."));
+			return false;
+		}
+		// 固定日志(探针断言点):先按解析结果打一条,再决定真启动 / 只 dry-run。
+		WLD_CORE_INFO("[vsopen] file={0} devenv={1} mode={2}", absPath.generic_string(),
+			devenv.generic_string(), mode);
+
+		const char* dryRun = std::getenv("WLD_VS_DRYRUN");
+		if (dryRun != nullptr && dryRun[0] != '\0' && std::strcmp(dryRun, "0") != 0)
+		{
+			WLD_CORE_INFO("[vsopen] dry-run: not launching Visual Studio");
+			report("dry-run: would open " + target.string() + " in " + devenv.string());
+			return true;
+		}
+
+		std::wstring commandLine = L"\"" + devenv.wstring() + L"\" \"" + target.wstring() + L"\"";
+		std::vector<wchar_t> commandBuffer(commandLine.begin(), commandLine.end());
+		commandBuffer.push_back(L'\0');
+		STARTUPINFOW startup {};
+		startup.cb = sizeof(STARTUPINFOW);
+		PROCESS_INFORMATION process {};
+		const std::wstring workingDirectory = target.parent_path().wstring();
+		const BOOL spawned = CreateProcessW(devenv.wstring().c_str(), commandBuffer.data(),
+			nullptr, nullptr, FALSE, 0, nullptr, workingDirectory.empty() ? nullptr : workingDirectory.c_str(),
+			&startup, &process);
+		if (spawned)
+		{
+			CloseHandle(process.hThread);
+			CloseHandle(process.hProcess);
+			report("opened in Visual Studio: " + target.string());
+			return true;
+		}
+
+		const unsigned long lastError = GetLastError();
+		WLD_CORE_WARN("[vsopen] CreateProcessW failed ({0}); falling back to ShellExecuteW", lastError);
+		WLD_CORE_INFO("[vsopen] file={0} devenv={1} mode=shell", absPath.generic_string(),
+			devenv.generic_string());
+		const std::wstring parameters = L"\"" + target.wstring() + L"\"";
+		const HINSTANCE shellResult = ShellExecuteW(nullptr, L"open", devenv.wstring().c_str(),
+			parameters.c_str(), nullptr, SW_SHOWNORMAL);
+		if (reinterpret_cast<INT_PTR>(shellResult) <= 32)
+		{
+			report("CreateProcessW failed (" + std::to_string(lastError) + ") and ShellExecuteW failed (code "
+				+ std::to_string(static_cast<long long>(reinterpret_cast<INT_PTR>(shellResult)))
+				+ ") for " + target.string());
+			return false;
+		}
+		report("opened in Visual Studio (shell): " + target.string());
 		return true;
 	}
 

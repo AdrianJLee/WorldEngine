@@ -25,6 +25,11 @@ namespace World
 	//    dirty → 状态行提示"磁盘已变化" + Reload(覆盖)/Keep(忽略到指纹再次变化)两个动作;
 	//  - 只读:Play/Simulate 或非磁盘来源时禁用 Save/Revert 与编辑(工具栏按钮登记为 disabled);
 	//  - 快捷键:OnShortcut 只置位(事件派发在 UI 帧之外,不在派发期改文档),帧内 OnRender 统一消费。
+	//
+	// CPPT-7/PROJ-8:内置编辑器只服务 Lua/Luau。C++ 源码(旧的 `module:<checkout 相对路径>`
+	// 逻辑路径、`.h/.cpp`)不再由本面板编辑 —— EditorShell 在打开入口按扩展名改走外部
+	// Visual Studio(EditorLayer::OpenInVisualStudio);本面板对这类路径只剩"解析失败 →
+	// 只读 + 状态行错误"的兜底(不会出现内置 C++ 编辑态)。
 	class ScriptEditorPanel final : public EditorPanel
 	{
 	public:
@@ -64,10 +69,6 @@ namespace World
 		std::string m_LogicalPath;  // 逻辑路径(分隔符统一为 '/')
 		std::filesystem::path m_DiskPath;   // 解析出的磁盘绝对路径(仅 m_DiskBacked 时有效)
 		bool m_DiskBacked = false;
-		// CPPT-6-ED-NEWSCRIPT:逻辑路径带 `module:` 前缀 = 模块源码(Game/src/Scripts/*.h),
-		// 解析到仓库根(WLD_REPO_ROOT),与内容根(World::Paths::AssetRoot())无关;Luau 专属功能
-		// (语法检查/补全索引)对它关闭 —— 它是 C++ 头,不是 Luau 脚本。
-		bool m_ModuleSource = false;
 		Wui::WuiTextBuffer m_Buffer;
 		LuauHighlightCache m_Highlight;
 		// VEC-A7:vec2/vec3/vec4/mat3/mat4/Entity/WorldScript —— 代码里给它们单独的类色。

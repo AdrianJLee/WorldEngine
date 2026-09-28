@@ -14,5 +14,24 @@
 1. 组件加到 `src/Components/`,`WE_SCHEMA` 声明请参考引擎文档 `docs/dev/`。
 2. 脚本用编辑器 Scripts 面板的 "New Script" 从 `assets/scripts/templates/WorldScript.lua`
    复制生成,属性面板会按 `WE_FIELD` 声明渲染编辑控件。
-3. 本项目独立 `Game.dll` 的构建(项目自带 CMake/VS 工程)是后续能力;当前先用引擎
-   仓库的开发构建跑起来(见引擎文档 `docs/user/projects/README.md`)。
+3. C++ 脚本用编辑器 Scripts 面板的 `新建 C++ 脚本…`:它落到 `<项目根>/src/Scripts/<名字>.h`,
+   并在类型账本 `<项目根>/src/Generated/Game.manifest` 里登记该脚本声明的类型。
+
+## 构建本项目自己的 Game.dll(PROJ-8)
+
+项目自带 `CMakeLists.txt` + `build.cmd`:引擎以**子项目模式**被引用(只构建 World 与本项目的
+Game 模块),产物就在本项目里:
+
+```bat
+build.cmd                      :: Debug(默认)
+build.cmd <引擎根> Release      :: 指定引擎根 / 配置
+```
+
+产出 `<项目根>/build/x64-<配置>/bin/<配置>/Game/<配置>/Game.dll`(同目录带
+`WorldRuntime.dll`)。空模板还没有自定义 C++ 类型,所以这份 Game.dll 目前只是一个模块骨架;
+加了 `src/{Components,Scripts}/**.h` 的 `WE_SCHEMA_*` 声明后重新构建即可。
+`src/Generated/Game/GameSchemaRegistration.*` 由构建重新生成;`Game.manifest` 是**双向类型账本**,
+首次配置时自动从源码声明派生,此后由人和编辑器维护。
+
+构建完回到编辑器(用 `--project <项目根>` 打开的项目),`文件 ▸ 重载 C++ 模块` 即可加载
+新的 Game.dll —— 编辑器**优先**加载项目构建出来的这一份。

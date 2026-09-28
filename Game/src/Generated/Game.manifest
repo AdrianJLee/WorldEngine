@@ -1,4 +1,4 @@
-struct World::SampleDataComponent
-struct World::ExampleScript
-struct World::ExampleStats
-enum World::ExampleMode
+# Game 模块类型账本(双向清单):每行 "struct <限定名>" 或 "enum <限定名>",# 之后是注释。
+# PROJ-8/T2 起引擎的 Game/ 只留模块骨架(示例 C++ 随 templates/project-example 来到项目层),
+# 所以这里没有任何条目 —— 构建出来的 Game.dll 是一个"没有自定义类型"的模块。
+# 项目自己的账本在 <项目根>/src/Generated/Game.manifest(首次配置从源码声明派生)。

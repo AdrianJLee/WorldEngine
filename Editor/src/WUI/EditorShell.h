@@ -124,6 +124,15 @@ namespace World
 		void OpenScriptEditor(const std::string& logicalPath) override;
 		// 帧边界执行版:内部使用(AI 通道在帧首、OnRender 开头处理待办时)。
 		void OpenScriptEditorNow(const std::string& logicalPath);
+		// ---- CPPT-7/PROJ-8:项目源码视图 + 外部 Visual Studio(内置编辑器只服务 Lua/Luau)----
+		// 当前项目根(运行期;没有清单 —— 启动器/未打开项目 —— 返回空路径)。
+		std::filesystem::path CurrentProjectRoot() const;
+		// 解析一个 C++ 源码路径:绝对路径原样;`module:`(旧前缀)/相对路径依次按 项目根 → 仓库根 →
+		// 内容根 解析。失败(false)= 可读原因写进 error。
+		bool ResolveCppSourcePath(const std::string& path, std::filesystem::path& out,
+			std::string* error) const;
+		// 帧边界执行体:absolute → EditorLayer::OpenInVisualStudio;失败给可读提示 + 日志。
+		void OpenInVisualStudioNow(const std::filesystem::path& absolute);
 		// 动态脚本面板:从布局存档/AI ui.open 的 "script:<逻辑路径>" id 建实例。
 		void EnsureScriptPanelFromId(const std::string& panelId);
 		// 关闭动态面板(脚本编辑器工具栏 Close):与 Window 菜单同一条 TogglePanel 路径。
@@ -320,15 +329,17 @@ namespace World
 		void RenderImportDestinationModal(Wui::WuiContext& ctx);
 		// ---- CPPT-6-ED-NEWSCRIPT:File ▸ New C++ Script… ----
 		// 菜单入口 → 名称模态(合法 C++ 标识符 + 不重名,行内错误)→ 写
-		// `<checkout>/Game/src/Scripts/<Name>.h` 模板 → 打开内置代码编辑器 + 状态栏提示
-		// "重建 Game 后重载 C++ 模块生效";操作日志与内容浏览器的新建资产同口径。
+		// **当前项目** `<项目根>/src/Scripts/<Name>.h` 模板(PROJ-8/T1)→ 外部 Visual Studio
+		// 打开(帧边界;内置编辑器只服务 Lua/Luau)+ 状态栏提示"用 VS 构建这个项目,再重载
+		// C++ 模块";没有当前项目时不打开模态,直接给可读提示。操作日志与新建资产同口径。
 		void OpenNewCppScriptModal(Wui::WuiContext& ctx);
 		void DrawNewCppScriptModal(Wui::WuiContext& ctx);
-		// 名称校验:空 / 非法标识符 / 目标已存在 → 可读原因;空串 = 通过。
+		// 名称校验:没有项目 / 空 / 非法标识符 / 目标已存在 → 可读原因;空串 = 通过。
 		std::string NewCppScriptNameError() const;
-		// 目标绝对路径:`<checkout>/Game/src/Scripts/<Name>.h`(checkout 根 = WLD_REPO_ROOT)。
+		// 目标绝对路径:`<当前项目根>/src/Scripts/<Name>.h`(没有项目时为空路径的拼接)。
 		std::filesystem::path NewCppScriptTargetPath() const;
-		// 写模板 + 打开编辑器面板 + 状态栏提示 + 操作日志;失败写 m_NewCppScriptFailure 并返回 false。
+		// 写模板 + (项目类型账本存在时)登记类型 + 外部 VS 打开 + 状态栏提示 + 操作日志;
+		// 失败写 m_NewCppScriptFailure 并返回 false。
 		bool CreateNewCppScript(Wui::WuiContext& ctx);
 		bool m_NewCppScriptOpen = false;
 		uint32_t m_NewCppScriptOpenedFrame = 0;

@@ -126,6 +126,18 @@ namespace World
 			}
 		}
 
+		// CPPT-7/PROJ-8:内置脚本编辑器只服务 Lua/Luau —— C++ 源码一律走外部 Visual Studio。
+		// 判定只看扩展名(内容浏览器只对 .lua/.luau 走 OpenScriptEditor,不会误伤脚本)。
+		bool IsCppSourcePath(const std::string& path)
+		{
+			std::string extension = std::filesystem::path(path).extension().string();
+			std::transform(extension.begin(), extension.end(), extension.begin(),
+				[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+			return extension == ".h" || extension == ".hpp" || extension == ".hh"
+				|| extension == ".hxx" || extension == ".cpp" || extension == ".cc"
+				|| extension == ".cxx";
+		}
+
 		// P3-1②:挂靠标签(AttachTag)的无障碍登记 —— 稳定 id `shell.attach.<panel>`,
 		// value 标明面板当前是"附加态(attached)"还是"浮动态(floating)",脚本据此断言
 		// ui.detach / ui.attach 的结果,与 state.dump 的 "attach" 段同源(PanelStateLabel)。
@@ -3783,9 +3795,9 @@ namespace World
 	//
 	// 与内容浏览器的新建材质 / 新建着色器向导同一套交互骨架(名称 + 实时落点 + 行内错误 +
 	// Enter 确认 / Esc 取消),差别只有两点:
-	//   * 落点在**代码树**(`<checkout>/Game/src/Scripts/<Name>.h`,不在内容根里);
-	//   * 创建后打开的是脚本编辑器面板(内置代码编辑器内核,逻辑路径用 `module:` 前缀)。
-	// 模板语法与 `Game/src/Scripts/ExampleScript.h` 完全一致,可直接参与 Game 构建。
+	//   * 落点在**当前项目层**(`<项目根>/src/Scripts/<Name>.h`,PROJ-8/T1;不在内容根里);
+	//   * 创建后**外部 Visual Studio** 打开(CPPT-7:内置脚本编辑器只服务 Lua/Luau)。
+	// 模板语法与示例项目模板的 `src/Scripts/ExampleScript.h` 一致,随项目构建进 Game.dll。
 	namespace
 	{
 		// 名称 → 文件名:去掉用户可能顺手输入的 `.h` 后缀与首尾空白(与内容浏览器同名口径)。
@@ -3839,10 +3851,11 @@ namespace World
 			source += "\t// ============================================================================\n";
 			source += "\t// " + name + " — 由编辑器「文件 ▶ 新建 C++ 脚本…」生成的 C++ 脚本模板。\n";
 			source += "\t//\n";
-			source += "\t// 生效步骤:重建 Game 后 File ▶ Reload C++ Module 生效(编辑器不内置编译器 ——\n";
-			source += "\t// 改完这个文件必须重新构建 Game 模块,再在编辑器里重载它)。\n";
+			source += "\t// 生效步骤:用 Visual Studio 构建这个项目(输出到 <项目>/build),再执行\n";
+			source += "\t// File ▶ Reload C++ Module 生效(编辑器不内置编译器 —— 改完这个文件必须重新构建\n";
+			source += "\t// 项目里的 Game 模块,再在编辑器里重载它)。\n";
 			source += "\t//\n";
-			source += "\t// 结构与 Game/src/Scripts/ExampleScript.h 一致:标量 / 枚举 / 命名 struct /\n";
+			source += "\t// 结构与示例项目模板 src/Scripts/ExampleScript.h 一致:标量 / 枚举 / 命名 struct /\n";
 			source += "\t// Array / Map 各留一行范例,不需要的字段整行删掉即可。属性面板按 WE_FIELD 的声明\n";
 			source += "\t// 渲染控件;只有被编辑过的值才写进场景(.wd),未编辑时用成员初始化里的默认值。\n";
 			source += "\t// ============================================================================\n\n";
@@ -3911,16 +3924,21 @@ namespace World
 
 	std::filesystem::path EditorShell::NewCppScriptTargetPath() const
 	{
-		// checkout 根锚点 = WLD_REPO_ROOT:与 WLD_EDITOR_DIR 同源的编译期**绝对**路径,
-		// 与进程 CWD 无关(从 build 目录或快捷方式启动都能定位)。
-		// 注意 WLD_EDITOR_DIR 带尾分隔符,对它调 parent_path() 只会去掉空文件名
-		// (EditorLayer.cpp:115-118 的实测教训),所以不用它推根。
-		return std::filesystem::path(std::string(WLD_REPO_ROOT)) / "Game" / "src" / "Scripts"
+		// PROJ-8/T1:落点在**当前项目层** —— `<项目根>/src/Scripts/<Name>.h`(项目根取运行期
+		// World::Paths::ProjectDir(),与进程 CWD 无关)。引擎里的 `Game/src` 只剩模块骨架,
+		// 用户的 C++ 脚本源码属于项目:项目自带的 CMakeLists.txt 把它编进 Game.dll。
+		// 没有当前项目时 CurrentProjectRoot() 为空 → 调用方先给可读提示,不会走到写盘。
+		return CurrentProjectRoot() / "src" / "Scripts"
 			/ (CppScriptBaseName(m_NewCppScriptName) + ".h");
 	}
 
 	std::string EditorShell::NewCppScriptNameError() const
 	{
+		// 没有当前项目(启动器 / 未打开项目):先给"先打开/新建项目"这条可读原因,
+		// 不再去拼一个相对路径(那会按 CWD 误判"已存在")。
+		if (CurrentProjectRoot().empty())
+			return Wui::Tr("modal.newscript.no_project",
+				"No project is open — open or create a project in the launcher first.");
 		const std::string name = CppScriptBaseName(m_NewCppScriptName);
 		if (name.empty())
 			return Wui::Tr("modal.newscript.name.empty", "Name cannot be empty");
@@ -3931,7 +3949,8 @@ namespace World
 		std::error_code existsError;
 		if (std::filesystem::exists(NewCppScriptTargetPath(), existsError))
 		{
-			const std::string relative = "Game/src/Scripts/" + name + ".h";
+			// 落点回显 = 相对**项目根**(与项目源码视图的行标签同一口径)。
+			const std::string relative = "src/Scripts/" + name + ".h";
 			return Wui::TrFormat("modal.newscript.name.exists",
 				"A file with this name already exists: {path}", { { "path", relative } });
 		}
@@ -3940,6 +3959,18 @@ namespace World
 
 	void EditorShell::OpenNewCppScriptModal(Wui::WuiContext& ctx)
 	{
+		// PROJ-8/T1:没有当前项目时不打开一个写不了盘的模态 —— 给一条可读提示,并把这次
+		// 意图记进操作日志(与真实菜单动作同口径,方便自动化断言"点过但被拦下")。
+		if (CurrentProjectRoot().empty())
+		{
+			const std::string notice = Wui::Tr("notice.newscript.no_project",
+				"No project is open — open or create a project in the launcher first, "
+				"then create C++ scripts.");
+			PushNotice(notice);
+			ctx.RecordOp("script", "new-cpp-no-project", m_NewCppScriptName, "");
+			WLD_CORE_WARN("[new-cpp-script] rejected: no current project");
+			return;
+		}
 		m_NewCppScriptOpen = true;
 		m_NewCppScriptOpenedFrame = static_cast<uint32_t>(ctx.Frame());
 		m_NewCppScriptName = "MyScript";
@@ -3947,7 +3978,7 @@ namespace World
 		m_NewCppScriptFailureFor.clear();
 		ctx.SetModal(Wui::HashId("modal.newscript"));
 		ctx.SetFocus(Wui::HashId("script.new.name"));
-		ctx.RecordOp("script", "new-cpp-ask", m_NewCppScriptName, "Game/src/Scripts");
+		ctx.RecordOp("script", "new-cpp-ask", m_NewCppScriptName, "src/Scripts");
 	}
 
 	bool EditorShell::CreateNewCppScript(Wui::WuiContext& ctx)
@@ -4016,9 +4047,21 @@ namespace World
 		// 创建入口把模板声明的三个类型(脚本 / <Name>Data / <Name>Mode)全部登记,
 		// 用户重建 Game 时生成器即可直接通过。手写新脚本的作者仍需自己补这些行
 		// (见 docs/user/scripting/README.md)。
+		//
+		// PROJ-8/T1:账本位置口径不变(脚本源码的 `../Generated/Game.manifest`),脚本落到项目层后
+		// 它自动变成 `<项目根>/src/Generated/Game.manifest`(与 T2 的子项目构建故事一致)。
+		// 新增一条**存在性守卫**:账本还不存在(项目从未构建过)时**不新建** —— 凭空写一份
+		// 只有三条目的账本会把项目的构建输入改坏;由项目首次构建产出账本,之后再创建脚本即可登记。
+		const std::filesystem::path manifest =
+			target.parent_path().parent_path() / "Generated" / "Game.manifest";
+		std::error_code manifestFileError;
+		if (!std::filesystem::is_regular_file(manifest, manifestFileError))
 		{
-			const std::filesystem::path manifest =
-				target.parent_path().parent_path() / "Generated" / "Game.manifest";
+			WLD_CORE_WARN("[new-cpp-script] type ledger not found ({0}); "
+				"skipping registration of {1}, {1}Data, {1}Mode", manifest.string(), name);
+		}
+		else
+		{
 			std::string manifestText;
 			{
 				std::ifstream in(manifest, std::ios::binary);
@@ -4071,17 +4114,20 @@ namespace World
 			}
 		}
 
-			const std::string relative = "Game/src/Scripts/" + name + ".h";
+		// 落点/提示口径 = 相对**项目根**(项目源码视图的同一口径)。
+		const std::string relative = "src/Scripts/" + name + ".h";
 		// 操作日志:与内容浏览器的新建资产(browser.new-shader)同一条口径。
 		ctx.RecordOp("script", "new-cpp", name, relative);
 		WLD_CORE_INFO("[new-cpp-script] created '{0}'", target.string());
-		// 打开内置代码编辑器:走既有的"帧边界延迟打开"安全路径(与内容浏览器双击脚本相同),
-		// 逻辑路径 = `module:` 前缀 + 仓库相对路径(解析见 ScriptEditorPanel)。
-		OpenScriptEditor("module:" + relative);
-		// 状态栏提示:编辑器不内置编译器 —— 必须显式告诉用户"重建 Game 后重载 C++ 模块"。
+		// CPPT-7/PROJ-8:C++ 源码一律外部 Visual Studio —— 走既有的"帧边界延迟打开"安全路径
+		// (与内容浏览器双击脚本相同的安全点;EditorShell::OpenScriptEditorNow 按扩展名分流),
+		// 内置脚本编辑器只服务 Lua/Luau。
+		OpenScriptEditor(target.generic_string());
+		// 状态栏提示:编辑器不内置编译器 —— 显式告诉用户"用 VS 构建这个项目,再重载 C++ 模块"。
 		PushNotice(Wui::TrFormat("notice.newscript.created",
-			"Created {path} — rebuild Game, then use File ▶ Reload C++ Module to load it.",
-			{ { "path", relative } }));
+			"Created {path} — build this project with Visual Studio (output under {project}/build), "
+			"then use File ▶ Reload C++ Module.",
+			{ { "path", relative }, { "project", CurrentProjectRoot().generic_string() } }));
 		return true;
 	}
 
@@ -4142,8 +4188,8 @@ namespace World
 		Wui::Label(ctx, { nameRect.X + nameRect.W + 8.0f, cursorY + 6.0f }, ".h", m_Theme.TextMuted, 13.0f);
 		cursorY += 46.0f;
 
-		// ---- 实时落点回显(仓库相对路径;绝对路径进节点 Tooltip)----
-		const std::string relative = "Game/src/Scripts/" + CppScriptBaseName(m_NewCppScriptName) + ".h";
+		// ---- 实时落点回显(相对当前项目根;绝对路径进节点 Tooltip)----
+		const std::string relative = "src/Scripts/" + CppScriptBaseName(m_NewCppScriptName) + ".h";
 		const std::string targetLabel = Wui::Tr("modal.newscript.target", "Will create");
 		Wui::Label(ctx, { labelX, cursorY + 3.0f }, targetLabel, m_Theme.TextMuted, 12.0f);
 		Wui::Label(ctx, { fieldX, cursorY + 1.0f }, relative, m_Theme.Text, 13.0f);
@@ -4164,10 +4210,11 @@ namespace World
 		}
 		cursorY += 24.0f;
 
-		// ---- 生效步骤提示(重建 Game → 重载 C++ 模块;编辑器不内置编译器)----
+		// ---- 生效步骤提示(用 VS 构建项目 → 重载 C++ 模块;编辑器不内置编译器)----
 		Wui::Label(ctx, { labelX, cursorY + 2.0f },
 			Wui::Tr("modal.newscript.hint",
-				"Rebuild Game, then File ▶ Reload C++ Module (no built-in compiler)."),
+				"Build this project with Visual Studio (output under <project>/build), "
+				"then File ▶ Reload C++ Module (no built-in compiler)."),
 			m_Theme.TextMuted, 12.0f);
 
 		// ---- 底部按钮(名称不合法/重名时创建按钮禁用并带原因)----
@@ -5449,6 +5496,82 @@ namespace World
 		}
 	}
 
+	std::filesystem::path EditorShell::CurrentProjectRoot() const
+	{
+		// 运行期项目根唯一入口 = World::Paths::ProjectDir();有清单才算"打开着项目"
+		// (启动器的哨兵目录 / 引擎内空的 projects/ 容器都没有清单 → 空)。
+		std::error_code error;
+		const std::filesystem::path root = World::Paths::ProjectDir();
+		if (root.empty() || !std::filesystem::is_regular_file(root / "project.we.yaml", error))
+			return {};
+		return root;
+	}
+
+	bool EditorShell::ResolveCppSourcePath(const std::string& path, std::filesystem::path& out,
+		std::string* error) const
+	{
+		auto fail = [error](const std::string& text)
+		{
+			if (error)
+				*error = text;
+			return false;
+		};
+		std::string relative = path;
+		// 旧逻辑路径前缀(`module:` + checkout 相对路径):老存档 / 老调用点仍可能带它,
+		// 这里只当作"去掉前缀的相对路径",不再有独立的模块源码编辑通道。
+		constexpr const char* kModuleSourcePrefix = "module:";
+		if (relative.rfind(kModuleSourcePrefix, 0) == 0)
+			relative.erase(0, std::strlen(kModuleSourcePrefix));
+		if (relative.empty())
+			return fail("empty C++ source path");
+
+		std::error_code fileError;
+		const std::filesystem::path candidate(relative);
+		// 绝对路径(项目源码视图给的就是绝对路径)原样接受。
+		if (candidate.is_absolute() || candidate.has_root_name())
+		{
+			if (std::filesystem::is_regular_file(candidate, fileError))
+			{
+				out = candidate;
+				return true;
+			}
+			return fail("file not found: " + candidate.string());
+		}
+
+		// 相对路径依次按 项目根 → 仓库根 → 内容根 解析(第一条命中的算数)。
+		const std::filesystem::path roots[] = {
+			CurrentProjectRoot(),
+			std::filesystem::path(WLD_REPO_ROOT),
+			World::Paths::AssetRoot(),
+		};
+		std::string tried;
+		for (const std::filesystem::path& root : roots)
+		{
+			if (root.empty())
+				continue;
+			const std::filesystem::path full = root / candidate;
+			if (!tried.empty())
+				tried += ", ";
+			tried += full.string();
+			if (std::filesystem::is_regular_file(full, fileError))
+			{
+				out = full;
+				return true;
+			}
+		}
+		return fail("C++ source not found: " + path + (tried.empty() ? "" : " (tried " + tried + ")"));
+	}
+
+	void EditorShell::OpenInVisualStudioNow(const std::filesystem::path& absolute)
+	{
+		std::string message;
+		if (m_Editor.OpenInVisualStudio(absolute, &message))
+			return;
+		PushNotice(Wui::TrFormat("notice.vsopen.failed", "Could not open in Visual Studio: {reason}",
+			{ { "reason", message.empty() ? absolute.string() : message } }));
+		WLD_CORE_WARN("[vsopen] open failed for '{0}': {1}", absolute.string(), message);
+	}
+
 	void EditorShell::OpenScriptEditorNow(const std::string& logicalPath)
 	{
 		// 用户决定(2026-09-18 C):打开即**默认直接附加到主窗口** —— OS 窗口保持隐藏,
@@ -5457,6 +5580,24 @@ namespace World
 		std::replace(normalized.begin(), normalized.end(), '\\', '/');
 		if (normalized.empty())
 			return;
+		// CPPT-7/PROJ-8:C++ 源码(含旧的 `module:` 逻辑路径)不进内置编辑器 —— 改走外部
+		// Visual Studio(策略与固定日志见 EditorLayer::OpenInVisualStudio)。
+		if (IsCppSourcePath(normalized))
+		{
+			std::filesystem::path resolved;
+			std::string resolveError;
+			if (ResolveCppSourcePath(normalized, resolved, &resolveError))
+			{
+				OpenInVisualStudioNow(resolved);
+			}
+			else
+			{
+				PushNotice(Wui::TrFormat("notice.vsopen.failed",
+					"Could not open in Visual Studio: {reason}", { { "reason", resolveError } }));
+				WLD_CORE_WARN("[vsopen] cannot resolve '{0}': {1}", normalized, resolveError);
+			}
+			return;
+		}
 		const std::string panelId = std::string(kScriptPanelPrefix) + normalized;
 		EnsureScriptPanelFromId(panelId);
 		if (std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panelId) != m_AttachedPanels.end())
@@ -6251,9 +6392,9 @@ namespace World
 						OpenNewCppScriptModal(*m_Ctx);
 				}, false,
 				Wui::Tr("menu.file.new_cpp_script.tooltip",
-					"Create a C++ script template under Game/src/Scripts/ (scalar/enum/struct/Array/Map "
-					"samples) and open it in the built-in code editor. Rebuild Game, then use "
-					"File ▶ Reload C++ Module to load it."),
+					"Create a C++ script template under <project>/src/Scripts/ (scalar/enum/struct/"
+					"Array/Map samples) and open it in Visual Studio. Build the project (its build.cmd / "
+					"CMakeLists.txt), then use File ▶ Reload C++ Module to load it."),
 				Wui::HashId("menu.file.new_cpp_script") });
 		fileEntries.push_back({ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
 				[this]

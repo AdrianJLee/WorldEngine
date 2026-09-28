@@ -1,9 +1,23 @@
 ﻿cmake_minimum_required(VERSION 3.16)
 
 # 设置输出目录 (类似 Premake 的 outputdir)
+# PROJ-8/T2:引擎仓库根 = **本文件所在目录**。子项目模式下(游戏项目自带 CMakeLists 用
+# `add_subdirectory(<引擎根>)` 引用本仓库)CMAKE_SOURCE_DIR 是**项目根**;引擎自己的编译期
+# 宏与第三方路径必须继续锚在引擎仓库 ⇒ 本仓库统一走 WLD_ENGINE_ROOT。
+set(WLD_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# 子项目模式(PROJ-8/T2):
+#   * 宿主项目 `add_subdirectory(<引擎根>)` ⇒ 自动为 ON(本仓库不是顶层 CMAKE_SOURCE_DIR);
+#   * 也可以显式 `-DWORLD_AS_SUBPROJECT=ON`(引擎仍是顶层 CMakeLists 时同样适用);
+#   * ON = 只构建 World(+ schema-compiler 生成器)与 Game,不构建 Editor/Runtime/Launcher/tests。
+option(WORLD_AS_SUBPROJECT "Build only the engine runtime + game module (the host project owns the binaries)" OFF)
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(WORLD_AS_SUBPROJECT ON)
+endif()
+
 set(OUTPUT_CONFIG "${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_NAME}-x64")
 
-set(CMAKE_VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set(CMAKE_VS_DEBUGGER_WORKING_DIRECTORY "${WLD_ENGINE_ROOT}")
 
 project(World VERSION 1.0.0 LANGUAGES C CXX)
 
@@ -22,7 +36,7 @@ if(NOT DEFINED WLD_SLANG_DIR)
     if(DEFINED ENV{WLD_SLANG_DIR} AND NOT "$ENV{WLD_SLANG_DIR}" STREQUAL "")
         set(WLD_SLANG_DIR "$ENV{WLD_SLANG_DIR}")
     else()
-        set(WLD_SLANG_DIR "${CMAKE_SOURCE_DIR}/../WorldEngine-deps/slang-2026.18.2/bin")
+        set(WLD_SLANG_DIR "${WLD_ENGINE_ROOT}/../WorldEngine-deps/slang-2026.18.2/bin")
     endif()
 endif()
 file(TO_CMAKE_PATH "${WLD_SLANG_DIR}" WLD_SLANG_DIR)
@@ -36,36 +50,42 @@ endif()
 # --- 添加子项目---
 add_subdirectory(Engine)
 
-add_subdirectory(Editor)
-add_subdirectory(Game)
-add_subdirectory(Runtime)
-# PROJ-3/T2:项目侧小启动器(WeEdit.exe / WePlay.exe)——零引擎依赖,可单独复制进项目目录。
-add_subdirectory(Launcher)
+if(WORLD_AS_SUBPROJECT)
+    # 子项目模式:宿主项目只拿引擎运行时 + Game 模块;编辑器/运行时/启动器/tests 都不在这里建。
+    add_subdirectory(Game)
+else()
+    add_subdirectory(Editor)
+    add_subdirectory(Game)
+    add_subdirectory(Runtime)
+    # PROJ-3/T2:项目侧小启动器(WeEdit.exe / WePlay.exe)——零引擎依赖,可单独复制进项目目录。
+    add_subdirectory(Launcher)
 
-add_dependencies(Runtime Game)
-add_dependencies(Editor Runtime)
+    add_dependencies(Runtime Game)
+    add_dependencies(Editor Runtime)
+endif()
 
 
 target_compile_definitions(World PUBLIC
     WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"
     # 开发期绝对锚点(不带尾分隔符):供"与进程 CWD 无关"的路径拼接(如定位 Game.dll)。
-    WLD_REPO_ROOT="${CMAKE_SOURCE_DIR}"
-    WLD_EDITOR_DIR="${CMAKE_SOURCE_DIR}/Editor/"
-    WLD_LOCAL_DIR="${CMAKE_SOURCE_DIR}/local/"
+    # PROJ-8/T2:一律取引擎根 —— 子项目模式下 CMAKE_SOURCE_DIR 是**项目根**,不能用。
+    WLD_REPO_ROOT="${WLD_ENGINE_ROOT}"
+    WLD_EDITOR_DIR="${WLD_ENGINE_ROOT}/Editor/"
+    WLD_LOCAL_DIR="${WLD_ENGINE_ROOT}/local/"
     # WLD_GAME_DIR = Game **模块**目录(只放 gameplay DLL 源码);项目内容根见 WLD_PROJECT_DIR。
-    WLD_GAME_DIR="${CMAKE_SOURCE_DIR}/Game/"
+    WLD_GAME_DIR="${WLD_ENGINE_ROOT}/Game/"
     # Layout-S7:项目内容(清单/关卡表/assets)在 projects/<名>/。
     # PROJ-7/T3:引擎不再内置默认项目 —— projects/ 只是"项目默认放在仓库里"的容器目录
     # (见 projects/README.md),本身不是项目。宏名与运行期语义不变:--project / 环境变量
     # WLD_PROJECT_DIR 仍是唯一入口;下面两个默认值指向不存在的资产目录是**有意的**
     # (= "没有当前项目":没有清单就没有内容根,宿主据此只出项目启动器)。
-    WLD_PROJECT_DIR="${CMAKE_SOURCE_DIR}/projects/"
-    WLD_ASSETPATH="${CMAKE_SOURCE_DIR}/projects/assets"
+    WLD_PROJECT_DIR="${WLD_ENGINE_ROOT}/projects/"
+    WLD_ASSETPATH="${WLD_ENGINE_ROOT}/projects/assets"
     # PROJ-7/T1:测试夹具内容根 —— 只给 tests/ 用,把"测试真的读的项目内容"从项目目录搬进
     # 仓库内夹具(tests/fixtures/content);WLD_PROJECT_DIR / WLD_ASSETPATH 的运行期语义不变。
-    WLD_TEST_ASSETPATH="${CMAKE_SOURCE_DIR}/tests/fixtures/content"
+    WLD_TEST_ASSETPATH="${WLD_ENGINE_ROOT}/tests/fixtures/content"
     WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
-    WLD_WORLD_DIR="${CMAKE_SOURCE_DIR}/Engine/"
+    WLD_WORLD_DIR="${WLD_ENGINE_ROOT}/Engine/"
     # Slang-T5:唯一工具目录入口(见上面的 WLD_SLANG_DIR 说明)。
     WLD_SLANG_DIR="${WLD_SLANG_DIR}"
 )
@@ -77,7 +97,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 option(WORLD_BUILD_SCRIPT_TESTS "Build WorldEngine script lifecycle checks" OFF)
-if(WORLD_BUILD_SCRIPT_TESTS)
+if(WORLD_BUILD_SCRIPT_TESTS AND NOT WORLD_AS_SUBPROJECT)
     enable_testing()
     add_subdirectory(tests)
 endif()
