@@ -27,6 +27,11 @@ namespace World::Editor
 	class ProjectLauncher
 	{
 	public:
+		// 项目清单文件名:`project.we.yaml`。公开成常量是给 UI 侧的"这个目录是不是项目"判定用
+		// (PROJ-5R/T1 的确认模态要区分"可删除 / 已不存在 / 缺清单")—— 与
+		// DeleteProjectPermanently / IsValidProjectRoot 用同一份字面量,避免两边悄悄漂移。
+		static constexpr const char* kManifestFileName = "project.we.yaml";
+
 		// 本机态存储路径 = WLD_LOCAL_DIR/projects.json(WLD_LOCAL_DIR 带尾分隔符)。
 		static std::filesystem::path StorePath();
 
@@ -43,24 +48,22 @@ namespace World::Editor
 		static bool IsValidProjectRoot(const std::filesystem::path& root, std::string* reason = nullptr);
 
 		// PROJ-5/T1:永久删除项目目录(**不可恢复**;明确不走回收站/Shell/IFileOperation 删除)。
+		// PROJ-5R/T1(v2,用户二次指令):二次确认简化为"确认/取消"一步模态 —— 不再要求逐字
+		// 输入目录名,所以这里也去掉了 typedName 参数与"名字匹配"守卫;让用户确认一步由调用方
+		// (UI 模态)负责,本函数只做安全守卫 + 删除。
 		//
-		// 返回空串 = 成功;否则 = 可直接显示给用户的可读失败原因。typedName = 用户在二次确认里
-		// 逐字输入的**项目目录名**:去首尾空白后须与目录名大小写不敏感相等,不匹配一律拒绝
-		// (UI 也会禁用确认按钮,这里是双保险)。
+		// 返回空串 = 成功;否则 = 可直接显示给用户的可读失败原因。
 		//
-		// 全部校验在**任何写操作之前**完成(顺序即理由优先级,危险目标先判 —— 否则 `E:\` 这种
-		// 目录名为空的目标会先撞上"名字不匹配",拿不到明确的拒绝理由):
+		// 全部校验在**任何写操作之前**完成(顺序即理由优先级,危险目标先判):
 		//   ① 目标存在且是目录;
 		//   ② 拒绝盘根/UNC 根与"路径段数 < 2"的浅路径;
 		//   ③ 拒绝 WLD_REPO_ROOT 本身或它的任何祖先(删掉会把整个仓库带走),
 		//      以及引擎仓库内的目录(如 projects/default 这类随仓库走的项目);
 		//   ④ 含 project.we.yaml(不是项目就拒绝);
-		//   ⑤ typedName 与目录名匹配;
-		//   ⑥ 编辑器形态下拒绝当前打开的项目(启动器形态没有当前项目,ProjectDir() 指向
+		//   ⑤ 编辑器形态下拒绝当前打开的项目(启动器形态没有当前项目,ProjectDir() 指向
 		//      local/launcher-stub 哨兵,不会命中真实目标)。
 		// 删除用 std::filesystem::remove_all;成功后从最近列表移除该条,失败**不**动列表项。
-		static std::string DeleteProjectPermanently(const std::filesystem::path& projectRoot,
-			const std::string& typedName);
+		static std::string DeleteProjectPermanently(const std::filesystem::path& projectRoot);
 
 		// 两个路径是否指向同一位置(绝对 + 词法规范化 + 大小写不敏感;不要求路径存在)。
 		static bool SamePath(const std::filesystem::path& left, const std::filesystem::path& right);

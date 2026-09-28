@@ -8,7 +8,6 @@
 #include "World/WUI/WuiLocalization.h"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -23,7 +22,6 @@ namespace World::Editor
 	{
 		namespace fs = std::filesystem;
 
-		constexpr const char* kManifestFileName = "project.we.yaml";
 		// PROJ-4/T1(P2):最近列表上限 10 → 30,与启动器的显示上限(EditorShell 的
 		// std::min(size, 30) + 滚动区)一致 —— 否则存储端先把第 11 条截掉,显示上限形同虚设。
 		constexpr size_t kMaxRecentProjects = 30;
@@ -66,42 +64,6 @@ namespace World::Editor
 			buffer << stream.rdbuf();
 			*out = buffer.str();
 			return true;
-		}
-
-		// PROJ-5/T1:去首尾空白 + ASCII 大小写折叠 —— 与 EditorShell 的 TrimProjectNameText /
-		// AsciiLowerCopy 同一口径(中文等非 ASCII 字节原样比较,不做 locale 折叠)。
-		std::string TrimAsciiWhitespace(const std::string& text)
-		{
-			size_t begin = 0;
-			while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])))
-				++begin;
-			size_t end = text.size();
-			while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])))
-				--end;
-			return text.substr(begin, end - begin);
-		}
-
-		std::string FoldAsciiCase(const std::string& text)
-		{
-			std::string folded = text;
-			for (char& character : folded)
-			{
-				const unsigned char c = static_cast<unsigned char>(character);
-				if (c >= 'A' && c <= 'Z')
-					character = static_cast<char>(c - 'A' + 'a');
-			}
-			return folded;
-		}
-
-		// 二次确认:逐字输入的目录名(去首尾空白后)必须与目录名大小写不敏感相等。
-		bool TypedNameMatches(const std::string& expectedDirectoryName, const std::string& typedName)
-		{
-			if (expectedDirectoryName.empty())
-				return false;
-			const std::string trimmed = TrimAsciiWhitespace(typedName);
-			if (trimmed.empty())
-				return false;
-			return FoldAsciiCase(trimmed) == FoldAsciiCase(expectedDirectoryName);
 		}
 
 		// 路径"段数":根(盘符 / UNC 根)本身算 1 段,再加 relative_path 的每一段 ——
@@ -367,8 +329,7 @@ namespace World::Editor
 		return SaveRecent(entries, error);
 	}
 
-	std::string ProjectLauncher::DeleteProjectPermanently(const std::filesystem::path& projectRoot,
-		const std::string& typedName)
+	std::string ProjectLauncher::DeleteProjectPermanently(const std::filesystem::path& projectRoot)
 	{
 		// 目标一律解析成"绝对 + 词法规范化"路径:破坏性删除绝不能跟着调用方的相对路径/CWD 走。
 		std::error_code absoluteError;
@@ -388,8 +349,8 @@ namespace World::Editor
 				"The target is not an existing folder: {path}", { { "path", rootText } });
 		}
 
-		// ② 危险目标:盘根/UNC 根 + 浅路径(段数 < 2)。这两个先于"名字匹配"判定 ——
-		//    `E:\` 的目录名是空串,若先判名字就永远拿不到"拒绝盘根"这个理由。
+		// ② 危险目标:盘根/UNC 根 + 浅路径(段数 < 2)。先于清单/当前项目判定 ——
+		//    `E:\` 这类目标的拒绝理由必须明确(它们本来也不会含 project.we.yaml)。
 		if (root == root.root_path())
 		{
 			return Wui::TrFormat("modal.project_delete.error.root",
@@ -426,16 +387,7 @@ namespace World::Editor
 				"Not a WorldEngine project: project.we.yaml is missing");
 		}
 
-		// ⑤ 二次确认:逐字输入的目录名必须匹配(大小写不敏感、去首尾空白)。
-		const std::string expectedName = root.filename().u8string();
-		if (!TypedNameMatches(expectedName, typedName))
-		{
-			return Wui::TrFormat("modal.project_delete.error.name_mismatch",
-				"The typed name does not match the project folder name: {expected}",
-				{ { "expected", expectedName } });
-		}
-
-		// ⑥ 编辑器形态下不能删当前打开的项目(启动器形态没有当前项目:ProjectDir() 指向
+		// ⑤ 编辑器形态下不能删当前打开的项目(启动器形态没有当前项目:ProjectDir() 指向
 		//    local/launcher-stub 哨兵,不会命中真实目标)。
 		if (SamePath(root, World::Paths::ProjectDir()))
 		{

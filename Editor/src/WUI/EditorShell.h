@@ -385,17 +385,16 @@ namespace World
 		std::vector<Editor::RecentProjectEntry> m_RecentProjects;
 		double m_RecentProjectsLoadedAt = -1.0e9;
 		// PROJ-4/T1(P1/P2):启动器搜索词 + 最近列表滚动位置(过滤只影响"画哪些行",
-		// 行 id / 打开目标 / 移除目标一律用 m_RecentProjects 的原下标,避免筛选后错位)。
+		// 行 id / 打开目标 / 删除目标一律用 m_RecentProjects 的原下标,避免筛选后错位)。
 		std::string m_LauncherSearch;
 		float m_LauncherScrollY = 0.0f;
-		// PROJ-5/T1:最近项目"删除…"的两步确认状态机(0=关;1=知情;2=逐字输入目录名)。
+		// PROJ-5R/T1(v2):最近项目"删除…"的**一步**确认模态(打开 = true;不再输入目录名)。
 		// 打开时把**目标路径与显示名快照下来** —— 之后的列表刷新/筛选/滚动不会让目标串位;
-		// 真正的删除只走 ProjectLauncher::DeleteProjectPermanently(全部守卫在那边,UI 的
-		// 名字匹配只是"确认按钮禁用"的前端双保险)。
-		int m_LauncherDeleteStep = 0;
+		// 真正的删除只走 ProjectLauncher::DeleteProjectPermanently(全部守卫在那边);
+		// 目标目录已不存在时,同一个模态换成"从列表移除"(只动最近列表,不碰磁盘)。
+		bool m_LauncherDeleteOpen = false;
 		std::string m_LauncherDeletePath;
 		std::string m_LauncherDeleteName;
-		std::string m_LauncherDeleteTyped;
 		std::string m_LauncherDeleteError;
 		void DrawLauncherDeleteFlow(Wui::WuiContext& ctx, const Wui::WuiRect& frame, bool escapePressed);
 		// 运行 ▸ 启动项目(Runtime):目标 = 当前项目根(EditorLayer完成定位/启动/日志)。
