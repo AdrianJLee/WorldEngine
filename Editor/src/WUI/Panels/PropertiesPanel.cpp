@@ -1152,8 +1152,11 @@ namespace World
 		// 把一条结构化表属性递归合成成 arena 节点(返回下标;失败 = kScriptTableNoNode)。
 		// `idPath` 同时是合成 TypeSchema 的 DisplayName:DrawSchemaFields 递归时拿它当行 id
 		// 前缀,于是子行 id = `properties.<组件>.<属性>.<子字段>`(递归同名规则)。
+		// CPPT7R-T1(C2):`declared` = 声明**这一行**的 `FieldSchema`(顶层 = 脚本/组件 schema 里的
+		// 那条字段;结构体成员 = 结构体 schema 里的那条字段)—— 容器的 Range/Unit/Step 描述的是
+		// **元素**,靠它透传给元素行(见下面的 elementRow 块)。
 		size_t BuildScriptTableSchema(const ScriptProperty& property, const std::string& idPath, size_t depth,
-			const Schema::SchemaRegistry* schemas)
+			const Schema::SchemaRegistry* schemas, const Schema::FieldSchema* declared = nullptr)
 		{
 			ScriptTableSchemaArena& arena = ScriptTableArena();
 			if (depth > kScriptTableMaxDepth || arena.Used >= kScriptTableMaxNodes)
@@ -1193,6 +1196,22 @@ namespace World
 				{
 					field.Meta.ReadOnly = true;
 				}
+				// CPPT7R-T1(C2):容器**元素行**吃父字段的编辑元数据(Range/Unit/Step)。引擎的
+				// `ScriptProperty` 只带 Doc/ReadOnly/TypeName(注解不进属性表/不进存档),
+				// 元素行又是面板按父字段的 Children 合成的 ⇒ 元数据只能从声明里透传。
+				// 口径 = 与叶子行逐字段一致(未声明范围就不夹取、没有范围+单位就保持 DragFloat,
+				// 见本文件 Float/Int 分支):**不新增行为,只补齐缺的那一份声明**。
+				// 结构化表元素(Object)不在这一层吃父元数据:它的子字段各自有 schema 声明。
+				const bool elementRow = child.Type != Schema::Kind::Object
+					&& (property.Collection == ScriptPropertyCollection::Array
+						|| property.Collection == ScriptPropertyCollection::Map);
+				if (declared && elementRow)
+				{
+					field.Meta.Min = declared->Meta.Min;
+					field.Meta.Max = declared->Meta.Max;
+					field.Meta.Unit = declared->Meta.Unit;
+					field.Meta.Step = declared->Meta.Step;
+				}
 				if (child.Type == Schema::Kind::Object)
 				{
 					// 裸 table / 空结构 / 超护栏 → 只读摘要行(摘要文本由 Meta.DisplayName 携带,
@@ -1200,8 +1219,22 @@ namespace World
 					// VEC-C2:类型文案(含 `struct`/`array`/`map`)也走 Meta.DisplayName —— 没有注解
 					// 说明时行悬停用它回落(v4 §1);空数组/空映射仍可展开(子行只有底部 `+`)。
 					field.Meta.DisplayName = ScriptPropertyTypeText(child);
+					// 结构体成员是**声明行**:名字在父结构体的 schema 里查得到那份 FieldSchema
+					// ⇒ 往下传,使"结构体里的容器"的元素同样吃到元数据(递归透传)。
+					const Schema::FieldSchema* childDeclared = nullptr;
+					if (schemas && property.Collection == ScriptPropertyCollection::Struct
+						&& !property.TypeName.empty())
+					{
+						if (const Schema::TypeSchema* owner = schemas->Find(property.TypeName))
+							for (const Schema::FieldSchema& candidate : owner->Fields)
+								if (candidate.Name == child.Name)
+								{
+									childDeclared = &candidate;
+									break;
+								}
+					}
 					const size_t childNode = ScriptPropertyExpandable(child)
-						? BuildScriptTableSchema(child, idPath + "." + child.Name, depth + 1, schemas)
+						? BuildScriptTableSchema(child, idPath + "." + child.Name, depth + 1, schemas, childDeclared)
 						: kScriptTableNoNode;
 					if (childNode == kScriptTableNoNode)
 					{
@@ -1228,8 +1261,10 @@ namespace World
 		// 由 DrawSchemaFields 的 scriptPropertyRow 摘要分支画一行 `table`,不可展开、不进存档。
 		// 注:摘要里的 N keys 需要运行期摘要,当前冻结模型没有该字段(见 VEC-B3 报告),
 		// 所以拿不到 N 时只写类型名 `table`。
+		// CPPT7R-T1(C2):`declared` = 容器字段自己的 FieldSchema(顶层调用方从脚本/组件 schema 查),
+		// 它带着 Range/Unit/Step —— 合成元素行时透传(见 BuildScriptTableSchema 的 elementRow 块)。
 		Schema::FieldSchema MakeScriptTableField(const ScriptProperty& property, const std::string& idPath,
-			const Schema::SchemaRegistry* schemas)
+			const Schema::SchemaRegistry* schemas, const Schema::FieldSchema* declared = nullptr)
 		{
 			Schema::FieldSchema field;
 			field.Name = property.Name;
@@ -1240,7 +1275,7 @@ namespace World
 			field.Meta.DisplayName = ScriptPropertyTypeText(property);
 			if (!ScriptPropertyExpandable(property))
 				return field;
-			const size_t nodeIndex = BuildScriptTableSchema(property, idPath, 1, schemas);
+			const size_t nodeIndex = BuildScriptTableSchema(property, idPath, 1, schemas, declared);
 			if (nodeIndex == kScriptTableNoNode)
 			{
 				field.Meta.DisplayName = "table";
@@ -2627,6 +2662,21 @@ namespace World
 				revealTargetY = sectionTop;
 			contentHeight += kSectionHeader + (open ? m_Sections[i].ContentHeight : 0.0f) + kSectionGap;
 			sectionTop += kSectionHeader + (open ? m_Sections[i].ContentHeight : 0.0f) + kSectionGap;
+		}
+
+		// CPPT7R-T1(C3):末行留白 + 越界补偿。
+		//
+		// 无障碍的可见性判据是"节点**中心点**必须落在客户区内"(`WuiAccessibility::Register`),
+		// 而滚动范围原来正好把内容底边贴到面板底边 —— 滚到底时最后一行的中心只剩半行余量;
+		// 一旦面板底边落在客户区底边之下(停靠布局/窗口高度变化),末行就会被判 `visible=false`、
+		// `ui.invoke` 点不到(鼠标点它露在上半部分的那半截仍然可用)。
+		// 口径:滚动范围末尾多留**一行高**;面板底边越过客户区多少就再补多少 —— 保证"滚到底"
+		// 一定能把末行整个抬进客户区(中心 + 半行都在区内)。
+		if (contentHeight > viewportHeight)
+		{
+			const float viewportBottom = rect.Y + contentTop + viewportHeight;
+			const float panelOverflow = std::max(0.0f, viewportBottom - ctx.ViewportSize().y);
+			contentHeight += kRowHeight + panelOverflow;
 		}
 
 		const Wui::WuiRect scrollViewport { rect.X + 6, rect.Y + contentTop, rect.W - 12 - kScrollbarWidth, viewportHeight };
@@ -4140,7 +4190,10 @@ namespace World
 				{
 					// 嵌套 `---@class`:合成 GetNested/GetPtr(可展开、子行可编辑);
 					// 裸 table / 空结构 / 超护栏:降级成只读摘要行(看得到、不可编辑、不进存档)。
-					field = MakeScriptTableField(property, schema.DisplayName + "." + property.Name, &schemas);
+					// CPPT7R-T1(C2):把这条字段的声明(`declared`)带进合成 —— 容器的 Range/Unit/Step
+					// 透传给元素行(叶子容器行从此与叶子字段行同一编辑口径)。
+					field = MakeScriptTableField(property, schema.DisplayName + "." + property.Name, &schemas,
+						declared);
 					field.Meta.ReadOnly = field.Meta.ReadOnly || property.ReadOnly;
 				}
 				else

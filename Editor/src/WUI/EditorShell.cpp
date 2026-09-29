@@ -5183,20 +5183,18 @@ namespace World
 			ctx.RecordOp("project", "delete-ask", deletePendingName, deletePendingPath);
 		}
 
-		// 动作按钮上方的说明(点项目 = 重启编辑器;"新建示例项目…"= 向导预选示例模板)。
+		// 动作按钮上方的说明(点项目 = 重启编辑器;"新建项目…"向导里可选空模板或示例模板)。
 		Wui::Label(ctx, { frame.X + pad, frame.Y + frame.H - 76.0f },
 			Wui::Tr("modal.launcher.hint",
-				"Picking a project restarts the editor into it. New Example Project uses the example "
-				"template (scenes, materials, scripts)."),
+				"Picking a project restarts the editor into it. New Project lets you choose a template "
+				"(blank, or the example with scenes, materials and scripts)."),
 			m_Theme.TextMuted, 12.0f);
 
-		// PROJ-7/T3b:动作顺序 = 新建项目… / 新建示例项目… / 打开项目… / 退出(编辑器形态=关闭)。
-		// "新建示例项目…"只是打开同一个向导并预选 example 模板 —— 示例内容来自
-		// templates/project-example/**,仓库里已没有任何"内置默认项目"可打开。
-		const Wui::ModalButtonDesc buttons[4] = {
+		// PROJ-9:动作顺序 = 新建项目… / 打开项目… / 退出(编辑器形态=关闭)。
+		// 单独的"新建示例项目…"已移除 —— 新建项目向导里本来就能选示例模板(templates/project-example/**),
+		// 少一个入口也少一份维护面(用户 2026-09-29 口径)。
+		const Wui::ModalButtonDesc buttons[3] = {
 			{ Wui::Tr("modal.launcher.new", "New Project…"), Wui::HashId("project.launcher.new"), true },
-			{ Wui::Tr("modal.launcher.new_example", "New Example Project…"),
-				Wui::HashId("project.launcher.new_example"), true },
 			{ Wui::Tr("modal.launcher.open", "Open Project…"), Wui::HashId("project.launcher.open"), true },
 			// PROJ-3/T1:启动器模式下第 4 个动作是"退出"(关掉整个启动器进程);
 			// 普通编辑器形态下仍是 PROJ-2 的"关闭"(停在当前项目)。a11y id 两个形态共用。
@@ -5205,7 +5203,7 @@ namespace World
 				Wui::HashId("project.launcher.close"), true },
 		};
 		// 按钮照常绘制/登记(不能因为吞输入那一帧就少画),只丢掉这一帧的动作。
-		const int clickedRaw = Wui::ModalButtons(ctx, frame, buttons, 4, m_Theme);
+		const int clickedRaw = Wui::ModalButtons(ctx, frame, buttons, 3, m_Theme);
 		const int clicked = justBecameVisible ? -1 : clickedRaw;
 		const bool launcherEscape = justBecameVisible ? false : escapePressed;
 		Wui::EndModalFrame(ctx);
@@ -5215,13 +5213,9 @@ namespace World
 		}
 		else if (clicked == 1)
 		{
-			OpenNewProjectModal(ctx, "example");   // 同一个向导,但预选示例模板
-		}
-		else if (clicked == 2)
-		{
 			RequestOpenProjectBrowse(ctx);
 		}
-		else if (clicked == 3 || launcherEscape)
+		else if (clicked == 2 || launcherEscape)
 		{
 			if (m_LauncherMode)
 			{

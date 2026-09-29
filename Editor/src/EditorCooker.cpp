@@ -846,14 +846,46 @@ namespace World::Editor
 			fs::copy_file(srcRuntimeDll, options.PublishDir / "WorldRuntime.dll", fs::copy_options::overwrite_existing);
 			WLD_CORE_INFO("Copied WorldRuntime.dll from: {0}", srcRuntimeDll.string());
 
-			const fs::path srcGameDll = fs::absolute(std::string(WLD_OUTPUT_DIR) +
-				"bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll");
+			// CPPT-7/T2-C2(PROJ-8 后续):项目的 Game.dll 优先,与 GameModuleHost / 编辑器
+			// (`EditorLayer::LoadGameModuleForEditor`)同一口径 ——
+			//   <项目根>/build/x64-<cfg>/bin/<cfg>/Game/<cfg>/Game.dll
+			// PROJ-8 之后项目层 C++ 由项目自己的构建产出,引擎 build 里那份只是空模块;
+			// cook 出包必须带上项目那份,不然发行包里的组件/脚本类型会凭空消失。
+			// 找不到项目构建(项目还没 build 过)才回落引擎开发布局,日志写明用了哪一份。
+			fs::path srcGameDll;
+			{
+				std::string buildType(WLD_BUILD_TYPE);      // 编译期宏形如 "Debug/"(带尾分隔符)
+				while (!buildType.empty() && (buildType.back() == '/' || buildType.back() == '\\'))
+					buildType.pop_back();
+				const fs::path projectRoot = World::Paths::ProjectDir();
+				if (!projectRoot.empty() && !buildType.empty())
+				{
+					const fs::path projectGameDll = projectRoot / "build" / ("x64-" + buildType)
+						/ "bin" / buildType / "Game" / buildType / "Game.dll";
+					if (fs::is_regular_file(projectGameDll))
+					{
+						srcGameDll = projectGameDll;
+						WLD_CORE_INFO("[cook] Game.dll source: project build {0}", projectGameDll.string());
+					}
+					else
+					{
+						WLD_CORE_INFO("[cook] no project Game.dll at {0}; falling back to the engine build",
+							projectGameDll.string());
+					}
+				}
+			}
+			if (srcGameDll.empty())
+			{
+				srcGameDll = fs::absolute(std::string(WLD_OUTPUT_DIR) +
+					"bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll");
+				WLD_CORE_INFO("[cook] Game.dll source: engine build {0}", srcGameDll.string());
+			}
 			if (!fs::is_regular_file(srcGameDll))
 				throw std::runtime_error("Game.dll could not be located: " + srcGameDll.string());
 			fs::create_directories(options.PublishDir / "bin");
 			fs::copy_file(srcGameDll, options.PublishDir / "bin" / "Game.dll",
 				fs::copy_options::overwrite_existing);
-			WLD_CORE_INFO("Copied Game.dll into bin/");
+			WLD_CORE_INFO("Copied Game.dll into bin/ from {0}", srcGameDll.string());
 
 			// 7. 语言包:发行包只带选中的语言(engine / project 两层;编辑器层不进包,§11.1)。
 			const LocalizationCopyResult localization = CopyLocalizationSubset(options);

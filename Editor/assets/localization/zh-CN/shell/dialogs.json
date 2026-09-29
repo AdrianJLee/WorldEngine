@@ -86,7 +86,6 @@
   "modal.launcher.empty": "还没有最近项目 —— 新建一个,或打开包含 project.we.yaml 的文件夹。",
   "modal.launcher.invalid": "路径失效",
   "modal.launcher.new": "新建项目…",
-  "modal.launcher.new_example": "新建示例项目…",
   "modal.launcher.open": "打开项目…",
   "modal.launcher.close": "关闭",
   "modal.launcher.quit": "退出",

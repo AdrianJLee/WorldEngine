@@ -39,22 +39,24 @@ set(GAME_SCHEMA_ENGINE_SKELETON_SOURCE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Generated/Game/GameSchemaRegistration.cpp")
 
 # ---- Game schema 生成:输入自动发现(CPPT-6)+ 项目化(PROJ-8/T2)----
-# 输入 = <Game 源码根>/{Components,Scripts}/*.h。没有任何 schema 声明时:
-#   * 引擎自身构建 ⇒ 用 GameAPI.h 当唯一输入(零声明 = 空模块注册;生成物回写入库);
-#   * 项目构建     ⇒ 完全不生成,直接编引擎自带的空模块注册。
-file(GLOB GAME_SCHEMA_INPUTS CONFIGURE_DEPENDS
+# 输入 = <Game 源码根>/{Components,Scripts}/*.h,**由构建期脚本在构建时 glob**
+# (Game/cmake/game-schema-build.cmake,每次构建跑一次)。
+# 为什么不在配置期:配置期 glob 会把"配置时还在、现在已删"的头文件留在 --input /
+# --reg-include 里 ⇒ 删一个脚本头后的第一次构建 `schema-compiler: cannot open input file`
+# + MSB8066(CPPT-6 残项 / CPPT-7 T2-C1)。构建期脚本同时做账本双向同步与内容哈希门:
+# 输入没变就一个文件都不写(生成物 mtime 不动),变了才重跑 + copy_if_different 回写。
+#
+# 配置期只剩一个决定:零声明的**项目**构建编引擎自带空模块注册(不在项目里制造生成物)。
+# 这里仍用 CONFIGURE_DEPENDS glob,但结果只喂给这个判断,不进编译器的命令行。
+file(GLOB GAME_SCHEMA_DISCOVERY CONFIGURE_DEPENDS
     "${WLD_GAME_SRC_DIR}/Components/*.h"
     "${WLD_GAME_SRC_DIR}/Scripts/*.h"
 )
 set(GAME_SCHEMA_ENGINE_SKELETON FALSE)
-if(NOT GAME_SCHEMA_INPUTS)
-    if(WLD_GAME_PROJECT_DIR)
-        set(GAME_SCHEMA_ENGINE_SKELETON TRUE)
-        message(STATUS "WorldEngine Game module: project declares no schema types; "
-            "compiling the engine's empty-module registration")
-    else()
-        set(GAME_SCHEMA_INPUTS "${CMAKE_CURRENT_SOURCE_DIR}/src/GameAPI.h")
-    endif()
+if(NOT GAME_SCHEMA_DISCOVERY AND WLD_GAME_PROJECT_DIR)
+    set(GAME_SCHEMA_ENGINE_SKELETON TRUE)
+    message(STATUS "WorldEngine Game module: project declares no schema types; "
+        "compiling the engine's empty-module registration")
 endif()
 
 set(GAME_SCHEMA_SRC_DIR "${WLD_GAME_SRC_DIR}/Generated")
@@ -65,82 +67,26 @@ set(GAME_SCHEMA_GENERATED_HEADER "${GAME_SCHEMA_SRC_DIR}/Game/GameSchemaRegistra
 set(GAME_SCHEMA_GENERATED_SOURCE "${GAME_SCHEMA_SRC_DIR}/Game/GameSchemaRegistration.cpp")
 
 if(NOT GAME_SCHEMA_ENGINE_SKELETON)
-    # 类型账本是**双向清单**(schema-compiler 两个方向都拒:"声明未登记" / "登记未声明")。
-    # 首次配置时它还不存在(项目刚放进一批 C++、或模板刚建出的项目)⇒ 从源码里的
-    # WE_SCHEMA_BODY / WE_ENUM_SCHEMA 声明派生一份;此后以账本为准(编辑器 "New C++ Script…"
-    # 也在同一路径追加登记)。命名空间按项目层约定取 World::(与编辑器生成的模板一致)。
-    if(NOT EXISTS "${GAME_SCHEMA_MANIFEST}")
-        set(_wld_schema_entries "")
-        foreach(_input IN LISTS GAME_SCHEMA_INPUTS)
-            file(READ "${_input}" _wld_schema_text)
-            string(REPLACE "\r\n" "\n" _wld_schema_text "${_wld_schema_text}")
-            string(REPLACE "\n" ";" _wld_schema_lines "${_wld_schema_text}")
-            foreach(_line IN LISTS _wld_schema_lines)
-                # 注释行里的示意写法(例:`WE_SCHEMA_BODY(..., Struct)` 的说明)不算声明。
-                string(STRIP "${_line}" _stripped)
-                if(_stripped MATCHES "^//" OR _stripped MATCHES "^#")
-                    continue()
-                endif()
-                string(REGEX MATCHALL
-                    "WE_SCHEMA_BODY[ \t]*\\([ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*,[ \t]*[A-Za-z_][A-Za-z0-9_]*"
-                    _wld_struct_hits "${_line}")
-                foreach(_hit IN LISTS _wld_struct_hits)
-                    string(REGEX REPLACE "^.*,[ \t]*" "" _wld_type "${_hit}")
-                    list(APPEND _wld_schema_entries "struct World::${_wld_type}")
-                endforeach()
-                string(REGEX MATCHALL
-                    "WE_ENUM_SCHEMA[ \t]*\\([ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*,[ \t]*[A-Za-z_][A-Za-z0-9_]*"
-                    _wld_enum_hits "${_line}")
-                foreach(_hit IN LISTS _wld_enum_hits)
-                    string(REGEX REPLACE "^.*,[ \t]*" "" _wld_type "${_hit}")
-                    list(APPEND _wld_schema_entries "enum World::${_wld_type}")
-                endforeach()
-            endforeach()
-        endforeach()
-        if(_wld_schema_entries)
-            list(REMOVE_DUPLICATES _wld_schema_entries)
-            list(SORT _wld_schema_entries)
-            string(REPLACE ";" "\n" _wld_schema_body "${_wld_schema_entries}")
-        else()
-            set(_wld_schema_body "")
-        endif()
-        file(MAKE_DIRECTORY "${GAME_SCHEMA_SRC_DIR}")
-        file(WRITE "${GAME_SCHEMA_MANIFEST}"
-            "# Game 模块类型账本(双向清单):每行 \"struct <限定名>\" 或 \"enum <限定名>\",# 之后是注释。\n"
-            "# 首次配置时由 Game/CMakeLists.txt 从源码声明派生;此后由人和编辑器维护。\n"
-            "${_wld_schema_body}")
-        message(STATUS "WorldEngine Game schema: seeded ${GAME_SCHEMA_MANIFEST}")
-    endif()
-
-    set(GAME_SCHEMA_ARGS "")
-    foreach(_input IN LISTS GAME_SCHEMA_INPUTS)
-        list(APPEND GAME_SCHEMA_ARGS --input "${_input}")
-    endforeach()
-    foreach(_input IN LISTS GAME_SCHEMA_INPUTS)
-        file(RELATIVE_PATH _relative "${WLD_GAME_SRC_DIR}" "${_input}")
-        list(APPEND GAME_SCHEMA_ARGS --reg-include "${_relative}")
-    endforeach()
-
-    add_custom_command(OUTPUT "${GAME_SCHEMA_STAMP}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${GAME_SCHEMA_GEN_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${GAME_SCHEMA_MANIFEST}" "${GAME_SCHEMA_GEN_DIR}/Game.manifest"
-        COMMAND $<TARGET_FILE:schema-compiler> ${GAME_SCHEMA_ARGS} --module Game
-                --output "${GAME_SCHEMA_GEN_DIR}" --manifest "${GAME_SCHEMA_GEN_DIR}/Game.manifest"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${GAME_SCHEMA_SRC_DIR}/Game"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${GAME_SCHEMA_GEN_DIR}/Game/GameSchemaRegistration.h"
-                "${GAME_SCHEMA_GENERATED_HEADER}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${GAME_SCHEMA_GEN_DIR}/Game/GameSchemaRegistration.cpp"
-                "${GAME_SCHEMA_GENERATED_SOURCE}"
-        COMMAND ${CMAKE_COMMAND} -E touch "${GAME_SCHEMA_STAMP}"
-        DEPENDS ${GAME_SCHEMA_INPUTS} "${GAME_SCHEMA_MANIFEST}" schema-compiler
+    # 每次构建都跑:脚本自己看 glob + 账本 + 内容哈希决定要不要重跑 schema-compiler。
+    # DEPENDS 里**只有** schema-compiler 这个目标,没有"可能被删"的头文件 ——
+    # 头文件列表的事实源是构建期的那次 glob。
+    add_custom_target(GameSchema
+        COMMAND ${CMAKE_COMMAND}
+            "-DWLD_GAME_SRC_DIR=${WLD_GAME_SRC_DIR}"
+            "-DWLD_GAME_PROJECT_DIR=${WLD_GAME_PROJECT_DIR}"
+            "-DWLD_GAME_SCHEMA_COMPILER=$<TARGET_FILE:schema-compiler>"
+            "-DWLD_GAME_SCHEMA_GEN_DIR=${GAME_SCHEMA_GEN_DIR}"
+            "-DWLD_GAME_SCHEMA_STAMP=${GAME_SCHEMA_STAMP}"
+            "-DWLD_GAME_SCHEMA_MANIFEST=${GAME_SCHEMA_MANIFEST}"
+            "-DWLD_GAME_SCHEMA_HEADER=${GAME_SCHEMA_GENERATED_HEADER}"
+            "-DWLD_GAME_SCHEMA_SOURCE=${GAME_SCHEMA_GENERATED_SOURCE}"
+            "-DWLD_GAME_SCHEMA_ENGINE_API=${CMAKE_CURRENT_SOURCE_DIR}/src/GameAPI.h"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/game-schema-build.cmake"
         WORKING_DIRECTORY "${WLD_ENGINE_ROOT}"
-        COMMENT "Game schema: regenerate registration from globbed inputs (${WLD_GAME_SRC_DIR})"
+        COMMENT "Game schema: build-time input discovery + manifest sync (${WLD_GAME_SRC_DIR})"
         VERBATIM
     )
-    add_custom_target(GameSchema DEPENDS "${GAME_SCHEMA_STAMP}")
+    add_dependencies(GameSchema schema-compiler)
 else()
     # 目标名保持存在:`cmake --build <dir> --target GameSchema` 在零声明项目里是 no-op。
     add_custom_target(GameSchema)
