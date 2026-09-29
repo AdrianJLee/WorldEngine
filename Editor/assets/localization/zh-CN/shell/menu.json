@@ -21,7 +21,7 @@
   "menu.file.project_sources": "项目源码…",
   "menu.file.project_sources.tooltip": "打开脚本面板并展开/高亮当前项目的 C++ 源码段(<项目根>/src 下的 .h/.cpp);双击某一行用外部 Visual Studio 打开。",
   "menu.file.generate_build_entry": "生成项目构建入口(CMake + build.cmd)",
-  "menu.file.generate_build_entry.tooltip": "给当前项目补齐构建/启动入口:缺 CMakeLists.txt / build.cmd 时从引擎模板复制(已存在则保留不动),刷新 <项目名>-Edit.exe / <项目名>-Play.exe 与带引擎根的 .cmd 启动器,并补 .gitignore;不碰 src/ 与 assets/。",
+  "menu.file.generate_build_entry.tooltip": "同步当前项目的 CMakeLists.txt / build.cmd / CMakePresets.json(旧版先备份为 <名>.bak-<时间戳>,绝不覆盖已有备份,再升级),刷新 <项目名>-Edit.exe / <项目名>-Play.exe,写 .we/engine-root.txt(仅缺启动器 exe 时在 .we/ 放 .cmd 兜底;根级旧 .cmd 备份成 .we/legacy-*.bak 后迁走,没有可替代的 exe 时保留不动)与 .vs/launch.vs.json,并补 .gitignore;不碰 src/ 与 assets/。",
   "menu.file.project_settings": "项目设置",
   "menu.file.editor_settings": "编辑器偏好",
   "menu.file.exit": "退出",

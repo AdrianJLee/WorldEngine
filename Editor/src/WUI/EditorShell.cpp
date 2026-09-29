@@ -4535,7 +4535,9 @@ namespace World
 				}
 				Wui::Label(ctx, { labelX, cursorY },
 					Wui::TrFormat("modal.newproject.created.entrypoints",
-						"Launch entry points in the project root: {files} (double-click; no command line needed).",
+						"Project root: {files}; build with build.cmd, other entry files live in .we/ "
+						"(engine root record + .cmd fallback), and Visual Studio lists two launch items "
+						"(Open Editor / Play (Runtime)).",
 						{ { "files", entryList } }),
 					m_Theme.TextMuted, 12.0f);
 			}
@@ -6407,8 +6409,10 @@ namespace World
 					"Open the Scripts panel with this project's C++ sources (under <project>/src) "
 					"expanded and highlighted; double-click a row to open it in Visual Studio."),
 				Wui::HashId("menu.file.project_sources") });
-		// PROJ-11/T1:已存在的项目(向导旧版本建出来的)补 CMakeLists.txt / build.cmd /
-		// 启动器 / .gitignore。不覆盖已有 CMakeLists/build.cmd,不碰 src 与 assets。
+		// PROJ-11/T1 + PROJ-12/T2:已存在的项目(向导旧版本建出来的)同步
+		// CMakeLists.txt / build.cmd / CMakePresets.json(旧版备份 .bak 后升级)、
+		// 两个 exe 启动器、.we/engine-root.txt、.vs/launch.vs.json 与 .gitignore。
+		// 不碰 src 与 assets。
 		fileEntries.push_back({ Wui::Tr("menu.file.generate_build_entry",
 				"Generate Build Entry Points (CMake + build.cmd)"), false,
 				[this]
@@ -6428,10 +6432,13 @@ namespace World
 						m_BuildEntryResult.Ok ? "ok" : "failed");
 				}, false,
 				Wui::Tr("menu.file.generate_build_entry.tooltip",
-					"For the current project: create CMakeLists.txt / build.cmd when missing (existing "
-					"ones are kept), refresh <project>-Edit.exe / <project>-Play.exe (plus .cmd launchers "
-					"with the engine root, used by build.cmd), and top up .gitignore. Never touches src/ "
-					"or assets/."),
+					"For the current project: sync CMakeLists.txt / build.cmd / CMakePresets.json from the "
+					"engine template (an older version is backed up as <name>.bak-<timestamp> and existing "
+					"backups are never overwritten; legacy root .cmd launchers move into .we/ as "
+					"legacy-*.bak, or stay in place when there is no replacement launcher exe), refresh "
+					"<project>-Edit.exe / <project>-Play.exe, write .we/engine-root.txt (plus a .cmd fallback "
+					"in .we/ only when a launcher exe is missing) and .vs/launch.vs.json, then top up "
+					".gitignore. Never touches src/ or assets/."),
 				Wui::HashId("menu.file.generate_build_entry") });
 		fileEntries.push_back({ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
 				[this]
@@ -6535,7 +6542,8 @@ namespace World
 		Wui::ModalFrameDesc frameDesc;
 		frameDesc.Id = modalId;
 		frameDesc.Title = Wui::Tr("modal.build_entry.title", "Project Build Entry Points");
-		frameDesc.Size = { 640.0f, 252.0f };
+		// PROJ-12F/T2:多出"备份(时间戳)"与"旧 .cmd 迁移到 .we/"两行,框加高。
+		frameDesc.Size = { 720.0f, 420.0f };
 		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
 		{
 			// 模态被更高优先级的路径接管:同步清掉状态,避免下一帧再抢焦点。
@@ -6561,8 +6569,11 @@ namespace World
 		const std::string projectRoot = m_BuildEntryResult.ProjectRoot.u8string();
 		// 复制到剪贴板的完整指引(与下面画出来的两步同文)。
 		const std::string guidance = Wui::TrFormat("modal.build_entry.guidance",
-			"In the project root ({root}) run: build.cmd — double-click {name}-Play.exe to play "
-			"(or Run ▶ Launch Project).",
+			"Project root ({root}): run build.cmd; double-click {name}-Edit.exe / {name}-Play.exe. "
+			"Other entry files live in .we/ (engine-root.txt records the engine root; a .cmd fallback "
+			"appears there only when a launcher exe is missing; legacy root .cmd launchers are moved "
+			"there as legacy-*.bak, never deleted). Visual Studio has two launch items: "
+			"Open Editor / Play (Runtime).",
 			{ { "root", projectRoot }, { "name", projectName } });
 
 		if (!m_BuildEntryResult.Ok)
@@ -6591,18 +6602,67 @@ namespace World
 				m_Theme.Text, 13.0f);
 			cursorY += 20.0f;
 		}
-		if (!m_BuildEntryResult.Skipped.empty())
+		if (!m_BuildEntryResult.Upgraded.empty())
 		{
-			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.skipped",
-				"Kept as-is (already present): {files}",
-				{ { "files", join(m_BuildEntryResult.Skipped) } }), m_Theme.TextMuted, 13.0f);
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.upgraded",
+				"Upgraded: {files}",
+				{ { "files", join(m_BuildEntryResult.Upgraded) } }),
+				m_Theme.Text, 13.0f);
+			cursorY += 20.0f;
+		}
+		// PROJ-12F/T2:备份名带时间戳(绝不覆盖旧备份)—— 列出实际文件,便于用户找回。
+		// 名字里带时间戳 + 项目前缀,一行一份(多份挤一行会被右边缘裁掉);超过 4 份折叠。
+		if (!m_BuildEntryResult.Backups.empty())
+		{
+			Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.build_entry.backups",
+				"Previous versions backed up (timestamped, never overwritten):"),
+				m_Theme.TextMuted, 12.0f);
+			cursorY += 18.0f;
+			constexpr size_t kMaxListedBackups = 4;
+			const size_t listedBackups = std::min(kMaxListedBackups, m_BuildEntryResult.Backups.size());
+			for (size_t index = 0; index < listedBackups; ++index)
+			{
+				Wui::Label(ctx, { labelX + 16.0f, cursorY }, m_BuildEntryResult.Backups[index],
+					m_Theme.TextMuted, 12.0f);
+				cursorY += 16.0f;
+			}
+			if (listedBackups < m_BuildEntryResult.Backups.size())
+			{
+				Wui::Label(ctx, { labelX + 16.0f, cursorY }, Wui::TrFormat("modal.build_entry.backups_more",
+					"… and {count} more (see the editor log)",
+					{ { "count", std::to_string(m_BuildEntryResult.Backups.size() - listedBackups) } }),
+					m_Theme.TextMuted, 12.0f);
+				cursorY += 16.0f;
+			}
+		}
+		// PROJ-12F/T2:根级旧 .cmd 是"先备份再迁走",不是静默删除。
+		if (!m_BuildEntryResult.Migrated.empty())
+		{
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.migrated",
+				"Legacy .cmd launchers moved into .we/ (backed up as legacy-*.bak): {files}",
+				{ { "files", join(m_BuildEntryResult.Migrated) } }),
+				m_Theme.TextMuted, 13.0f);
 			cursorY += 20.0f;
 		}
 		if (!m_BuildEntryResult.Refreshed.empty())
 		{
 			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.refreshed",
-				"Launchers written/refreshed: {files}",
+				"Launchers/entry files written or refreshed: {files}",
 				{ { "files", join(m_BuildEntryResult.Refreshed) } }), m_Theme.TextMuted, 13.0f);
+			cursorY += 20.0f;
+		}
+		if (!m_BuildEntryResult.Removed.empty())
+		{
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.removed",
+				"Cleaned up (generated files no longer needed): {files}",
+				{ { "files", join(m_BuildEntryResult.Removed) } }), m_Theme.TextMuted, 13.0f);
+			cursorY += 20.0f;
+		}
+		if (!m_BuildEntryResult.Skipped.empty())
+		{
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.skipped",
+				"Already up to date (not rewritten): {files}",
+				{ { "files", join(m_BuildEntryResult.Skipped) } }), m_Theme.TextMuted, 13.0f);
 			cursorY += 20.0f;
 		}
 		for (const std::string& warning : m_BuildEntryResult.Warnings)
@@ -6612,6 +6672,11 @@ namespace World
 			cursorY += 18.0f;
 		}
 
+		Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.build_entry.layout",
+			"Layout: project root = 2 exe launchers + build.cmd + CMakePresets.json; .we/ = engine root "
+			"(+ .cmd fallback); Visual Studio = Open Editor / Play (Runtime) launch items."),
+			m_Theme.TextMuted, 12.0f);
+		cursorY += 18.0f;
 		Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.build_entry.next_steps", "Next steps"),
 			m_Theme.Text, 13.0f);
 		cursorY += 20.0f;
@@ -6619,7 +6684,8 @@ namespace World
 			"1) In the project root, run: build.cmd"), m_Theme.TextMuted, 12.0f);
 		cursorY += 18.0f;
 		Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.step_launch",
-			"2) Double-click {name}-Play.exe to play (or Run ▶ Launch Project).",
+			"2) Double-click {name}-Play.exe to play (or Run ▶ Launch Project); in Visual Studio pick "
+			"the Play (Runtime) launch item.",
 			{ { "name", projectName } }), m_Theme.TextMuted, 12.0f);
 
 		const Wui::ModalButtonDesc buttons[3] = {

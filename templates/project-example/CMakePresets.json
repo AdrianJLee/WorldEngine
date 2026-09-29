@@ -1,0 +1,34 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 16,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "project-debug",
+      "displayName": "This project - Debug (Game.dll)",
+      "description": "Configures this project's Game.dll build. Machine-local values stay out of this file: WE_ROOT and WE_ENGINE_BUILD_DIR come from the environment when set, otherwise the project resolves .we/engine-root.txt / the relative layout, and a complete <engine>/build/x64-Debug is picked up automatically (fast path).",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/x64-Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WE_ROOT": "$env{WE_ROOT}",
+        "WE_ENGINE_BUILD_DIR": "$env{WE_ENGINE_BUILD_DIR}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "project-debug",
+      "displayName": "Build Game.dll (Debug)",
+      "configurePreset": "project-debug",
+      "configuration": "Debug",
+      "targets": [
+        "Game"
+      ]
+    }
+  ]
+}
