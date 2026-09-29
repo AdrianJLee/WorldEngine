@@ -18,9 +18,31 @@
         "WE_ROOT": "$env{WE_ROOT}",
         "WE_ENGINE_BUILD_DIR": "$env{WE_ENGINE_BUILD_DIR}"
       }
+    },
+    {
+      "name": "project-release",
+      "displayName": "This project (Release)",
+      "description": "Release configuration. It uses the fast path only when the engine also has build/x64-Release built; otherwise it falls back to building the engine from source (slow on the first run).",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/x64-Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "WE_ROOT": "$env{WE_ROOT}",
+        "WE_ENGINE_BUILD_DIR": "$env{WE_ENGINE_BUILD_DIR}"
+      }
     }
   ],
   "buildPresets": [
+    {
+      "name": "project-release",
+      "displayName": "Release",
+      "configurePreset": "project-release",
+      "configuration": "Release",
+      "targets": [
+        "Game"
+      ]
+    },
     {
       "name": "project-debug",
       "displayName": "Debug",
@@ -29,6 +51,6 @@
       "targets": [
         "Game"
       ]
-    }
-  ]
+    }  ]
 }
+

@@ -93,9 +93,9 @@
      `Open Editor (this project)` 即可 —— 该状态存在 `.vs/`(本机缓存),VS 会记住,点一次就行。
 4. 命令行等价写法:`build.cmd`(构建,引擎已编译过时只编项目文件)→ 双击 `<项目名>-Play.exe` / `<项目名>-Edit.exe`。
 
-> **配置下拉里目前只有 `Debug`**:模板只提供 Debug 预设,而且快路径复用的是引擎的 `build/x64-Debug`。
-> 想要 Release,要么另外给引擎建一份 `build/x64-Release`(Release 也能走快路径),要么接受 Release 走源码模式
-> (第一次要把引擎整套编一遍)。
+> **配置下拉里有 `Debug` 与 `Release` 两项**(默认 `Debug`):Debug 的快路径复用引擎的 `build/x64-Debug`;
+> Release 只有在引擎也建了 `build/x64-Release` 时才走快路径,否则第一次会退回**源码模式**(把引擎整套编一遍,
+> 之后增量)。已经有旧项目的,重新执行一次 `文件 ▸ 生成项目构建入口` 即可拿到 Release 预设。
 
 > `.we/` 里放的是引擎根记录(`engine-root.txt`)与"没有启动器 exe 时才生成"的 `.cmd` 兜底;项目根只保留
 > 两个 exe 启动器 + `build.cmd` + `CMakePresets.json`;`.vs/` 是 VS 自己的本机目录(启动项配置与当前
