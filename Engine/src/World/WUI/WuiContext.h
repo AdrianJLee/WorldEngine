@@ -238,6 +238,10 @@ namespace World::Wui
 		void SetTooltip(std::string text) { m_Tooltip = std::move(text); }
 		const std::string& Tooltip() const { return m_Tooltip; }
 
+		// PROJ-17:清掉某个控件持久化的 WUI 状态 —— 用于"每次打开都从干净状态开始"的输入框
+		// (例如"新建项目"对话框的名称/位置:遗留的选区会让第一次 Delete 把整段文本一次删掉)。
+		void ErasePersist(WuiId id) { m_State.erase(id); }
+
 		template <typename T>
 		T& Persist(WuiId id, const T& initial)
 		{

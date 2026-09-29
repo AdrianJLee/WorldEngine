@@ -850,7 +850,17 @@ namespace World::Wui
 
 	namespace
 	{
-		struct WuiEditState { int Cursor = -1; int SelStart = -1; int SelEnd = -1; int DragAnchor = -1; bool MouseSelecting = false; };
+		// PROJ-17:`WasFocused` = 上一帧这个框是否持有焦点(单行文本框用来判断"焦点是从别处进来的",
+		// 见 TextFieldCore 里的遗留选区口径)。
+		struct WuiEditState
+		{
+			int Cursor = -1;
+			int SelStart = -1;
+			int SelEnd = -1;
+			int DragAnchor = -1;
+			bool MouseSelecting = false;
+			bool WasFocused = false;
+		};
 		struct WuiNumericState
 		{
 			bool Pressed = false;
@@ -2409,8 +2419,10 @@ namespace World::Wui
 				accessValue, true, true, ctx.Focus() == id);
 			ctx.RegisterFocusable(id, rect);
 			WuiEditState& state = ctx.Persist<WuiEditState>(id, {});
+			// PROJ-17:这一次按下是否落在本框内 —— 下面"焦点进入"要区分"点进来"和"Tab/程序进来"。
+			const bool clickedInField = ctx.Input().MouseClicked[0] && ctx.IsHovered(rect);
 			// 仅在按下的那一帧初始化拖选锚点;按住期间持续更新选区。
-			if (ctx.Input().MouseClicked[0] && ctx.IsHovered(rect))
+			if (clickedInField)
 			{
 				ctx.SetFocus(id);
 				const int clicked = CursorAtX(buffer, ctx.Input().MousePos.x - (rect.X + 6.0f), 15.0f);
@@ -2438,6 +2450,30 @@ namespace World::Wui
 			if (state.MouseSelecting && ctx.Input().MouseReleased[0])
 				state.MouseSelecting = false;
 			const bool focused = ctx.Focus() == id;
+			// PROJ-17(用户 2026-09-29:"位置那里,删除按一下就把路径全删了"):选区只活在
+			// **当前焦点会话**里。光标/选区按控件 id 长期持久化,而选区高亮只在持有焦点时绘制 ⇒
+			// 上一次会话留下的"整段选中"在重新打开对话框或用 Tab 进框时是**看不见的**,第一次
+			// Delete/Backspace 就会按整段选区执行,把整条路径一次吃光。
+			//   ① 焦点进入(不是点进来)⇒ 丢弃遗留选区,光标落到末尾,与"第一次点开这个框"一致;
+			//   ② 失焦 ⇒ 立刻丢弃选区与拖选锚点,不给下一次留下看不见的状态。
+			if (focused)
+			{
+				if (!clickedInField && !state.WasFocused)
+				{
+					state.Cursor = Utf8Count(buffer);
+					state.SelStart = -1;
+					state.SelEnd = -1;
+					state.DragAnchor = -1;
+					state.MouseSelecting = false;
+				}
+			}
+			else
+			{
+				state.SelStart = -1;
+				state.SelEnd = -1;
+				state.MouseSelecting = false;
+			}
+			state.WasFocused = focused;
 			// P1c-E4-fix:单行文本框(TextField/TextFieldEx 与其所有调用者:搜索框、重命名、
 			// 属性文本、Combo 过滤、十六进制输入……)登记时带 ReleaseOnTab 标记 ⇒ 按 Tab/Shift+Tab
 			// 交出焦点、走正常焦点链,不再把 Tab 吃掉。CodeEditor 不走这条路径 ⇒ Tab=缩进不变。

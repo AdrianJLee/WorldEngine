@@ -4326,6 +4326,12 @@ namespace World
 
 	void EditorShell::OpenNewProjectModal(Wui::WuiContext& ctx, const std::string& preselectTemplateId)
 	{
+		// PROJ-17(用户 2026-09-29:"位置那里,删除按一下就把路径全删了"):文本框的编辑状态
+		// (光标/选区)按控件 id 长期持久化 —— 上一次会话里若整段被选中(拖选或 Ctrl+A),
+		// 下次打开对话框时选区仍在,第一次 Delete/Backspace 就会把**整段路径**一次删掉。
+		// 每次打开对话框都清掉这两个输入框的持久状态:新状态 = 光标在末尾、无选区。
+		ctx.ErasePersist(Wui::HashId("project.new.name"));
+		ctx.ErasePersist(Wui::HashId("project.new.location"));
 		m_NewProjectOpen = true;
 		m_NewProjectOpenedFrame = static_cast<uint32_t>(ctx.Frame());
 		m_NewProjectCreated = false;
