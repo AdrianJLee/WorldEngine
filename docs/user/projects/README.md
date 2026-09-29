@@ -77,16 +77,29 @@
 
 1. VS 里 `文件 ▸ 打开 ▸ 文件夹`,选**项目根**(例如 `E:\MyProject`)——VS 会按项目自带的
    `CMakePresets.json`(`local` preset 里已写入本机引擎路径)自动配置;
-2. 构建目标选 **`Game`**(这是唯一需要构建的目标:项目自己的游戏模块;引擎在快路径下**不会**被重编);
-3. 运行**不要**选 `Game` —— 它是 `Game.dll`,不是可执行程序,点了会报"无法启动"。请用启动项下拉里的:
-   - **`Open Editor (this project)`**:用引擎编辑器打开这个项目;
-   - **`Play (Runtime)`**:直接跑这个项目(等价 `Runtime.exe --project "<项目根>"`)。
-   这两项来自项目里的 `.vs/launch.vs.json`(机器本地、不随项目提交);如果下拉里看不到,把 VS 里这个文件夹
-   重新加载一次(或关掉重开),必要时删掉 `.vs/` 让 VS 重建;
+2. 构建目标选 **`Game`**(这是唯一需要构建的目标:项目自己的 C++ 游戏模块;引擎在快路径下**不会**被重编);
+3. 运行**不要**选 `Game` —— 它是 `Game.dll`,不是可执行程序,点了会报"无法启动"。启动项下拉里只有
+   **一条** `Open Editor (this project)`(默认已选中):
+   - 它先构建 `Game`,再用引擎编辑器打开这个项目 —— 底下的可执行目标是项目自己的
+     `ProjectRun.exe`,下拉里的完整名字形如 `ProjectRun.exe (bin\Debug\ProjectRun.exe)`;
+   - 想**直接跑游戏**:双击项目根的 `<项目名>-Play.exe`(等价 `Runtime.exe --project "<项目根>"`),
+     或给这条启动项加上 `--play` 参数(同一个 exe:不带参数开编辑器,`--play` 跑游戏)。
+   这一条由 `.vs/launch.vs.json` 配好、`.vs/ProjectSettings.json` 把它设成当前启动项(两者都是
+   机器本地、不随项目提交,已加进 `.gitignore`);如果下拉里看不到,把项目文件夹重新加载一次
+   (或关掉 VS 重开);
+   - 下拉里还会看到 VS **自己列出**的原生目标(例如 `Game.dll (bin\...\Game.dll)`、裸的
+     `ProjectRun.exe (...)`)。它们是 VS 的"调试目标清单",**不是**我们写的启动项,文件里删不掉;
+     用下拉**最上面那条 `显示/隐藏调试目标…`(Show/Hide debug targets)** 取消勾选它们,只留
+     `Open Editor (this project)` 即可 —— 该状态存在 `.vs/`(本机缓存),VS 会记住,点一次就行。
 4. 命令行等价写法:`build.cmd`(构建,引擎已编译过时只编项目文件)→ 双击 `<项目名>-Play.exe` / `<项目名>-Edit.exe`。
 
+> **配置下拉里目前只有 `Debug`**:模板只提供 Debug 预设,而且快路径复用的是引擎的 `build/x64-Debug`。
+> 想要 Release,要么另外给引擎建一份 `build/x64-Release`(Release 也能走快路径),要么接受 Release 走源码模式
+> (第一次要把引擎整套编一遍)。
+
 > `.we/` 里放的是引擎根记录(`engine-root.txt`)与"没有启动器 exe 时才生成"的 `.cmd` 兜底;项目根只保留
-> 两个 exe 启动器 + `build.cmd` + `CMakePresets.json`。
+> 两个 exe 启动器 + `build.cmd` + `CMakePresets.json`;`.vs/` 是 VS 自己的本机目录(启动项配置与当前
+> 启动项记录就在里面)。
 
 启动器里可以:
 

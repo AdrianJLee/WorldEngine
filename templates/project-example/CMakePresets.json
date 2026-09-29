@@ -8,7 +8,7 @@
   "configurePresets": [
     {
       "name": "project-debug",
-      "displayName": "This project - Debug (Game.dll)",
+      "displayName": "This project (Debug)",
       "description": "Configures this project's Game.dll build. Machine-local values stay out of this file: WE_ROOT and WE_ENGINE_BUILD_DIR come from the environment when set, otherwise the project resolves .we/engine-root.txt / the relative layout, and a complete <engine>/build/x64-Debug is picked up automatically (fast path).",
       "generator": "Visual Studio 18 2026",
       "architecture": "x64",
@@ -23,7 +23,7 @@
   "buildPresets": [
     {
       "name": "project-debug",
-      "displayName": "Build Game.dll (Debug)",
+      "displayName": "Debug",
       "configurePreset": "project-debug",
       "configuration": "Debug",
       "targets": [

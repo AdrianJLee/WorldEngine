@@ -803,46 +803,163 @@ namespace World::Editor
 			return output;
 		}
 
-		// `<项目>/.vs/launch.vs.json`:VS CMake 模式的两个启动项(引擎绝对路径 + --project)。
-		// 这是本机文件(路径写死生成时的引擎根),`.gitignore` 忽略 `/.vs/`。
-		std::string LaunchVsJsonText(const fs::path& projectRoot, const std::string& engineRoot)
+		// VS 启动项的名字:`launch.vs.json` 的 configuration name 与 `.vs/ProjectSettings.json`
+		// 的 `CurrentProjectSetting`(`<名字> (<配置>)`)必须同一个来源,否则"默认选中"指不上。
+		constexpr const char* kLaunchItemName = "Open Editor (this project)";
+		// VS 自己记录"当前启动项"的那个键(值是字符串)。
+		constexpr const char* kProjectSettingKey = "CurrentProjectSetting";
+
+		// `<项目>/.vs/launch.vs.json`:**一个** VS 启动项(Open Editor)。落 **`.vs/`** ——
+		// 官方文档口径:`launch.vs.json` 位于项目根的 `.vs` 文件夹;`projectTarget` 必须匹配
+		// "启动项"下拉里已有的**可执行**目标。锚点 = 项目 CMake 自己的 `ProjectRun`
+		// (add_dependencies(Game) ⇒ F5 先构建项目 C++ 再启动引擎);不再写 `program` ——
+		// 让 VS 跑它自己构建出来的那个 exe。这一条默认就是**打开编辑器**,想跑游戏给
+		// `ProjectRun.exe` 加 `--play`(下拉里只有这一项,用户不用在两项之间挑)。
+		// 文件内容是本机的(路径写死生成时的项目根),`.gitignore` 忽略 `/.vs/`。
+		std::string LaunchVsJsonText(const fs::path& projectRoot)
 		{
 			const std::string buildType = TrimTrailingSeparators(WLD_BUILD_TYPE);
-			const std::string outputDir = TrimTrailingSeparators(WLD_OUTPUT_DIR);
-			const std::string builder = ToWindowsPath(engineRoot) + "\\";
-			const std::string editorExe = builder + ToWindowsPath(outputDir) + "\\Editor\\"
-				+ buildType + "\\Editor.exe";
-			const std::string runtimeExe = builder + ToWindowsPath(outputDir) + "\\Runtime\\"
-				+ buildType + "\\Runtime.exe";
 			const std::string root = ToWindowsPath(projectRoot.u8string());
+			// 产物布局由项目模板的 CMake 固定:`<构建根>/bin/<cfg>/ProjectRun.exe`
+			// (与 Game 同布局);projectTarget 括号里是相对**构建根**的路径。
+			const std::string runTarget = "ProjectRun.exe (bin\\" + buildType + "\\ProjectRun.exe)";
 
 			std::string text;
 			text += "{\n";
 			text += "  \"version\": \"0.2.1\",\n";
+			text += "  \"defaults\": {},\n";
 			text += "  \"configurations\": [\n";
 			text += "    {\n";
 			text += "      \"type\": \"default\",\n";
-			text += "      \"name\": \"Open Editor (this project)\",\n";
+			text += "      \"name\": \"" + JsonEscape(kLaunchItemName) + "\",\n";
 			text += "      \"project\": \"CMakeLists.txt\",\n";
-			text += "      \"projectTarget\": \"Game\",\n";
-			text += "      \"debuggerConfiguration\": \"cppvsdbg\",\n";
-			text += "      \"program\": \"" + JsonEscape(editorExe) + "\",\n";
-			text += "      \"args\": [\"--project\", \"" + JsonEscape(root) + "\"],\n";
-			text += "      \"currentDir\": \"" + JsonEscape(root) + "\"\n";
-			text += "    },\n";
-			text += "    {\n";
-			text += "      \"type\": \"default\",\n";
-			text += "      \"name\": \"Play (Runtime)\",\n";
-			text += "      \"project\": \"CMakeLists.txt\",\n";
-			text += "      \"projectTarget\": \"Game\",\n";
-			text += "      \"debuggerConfiguration\": \"cppvsdbg\",\n";
-			text += "      \"program\": \"" + JsonEscape(runtimeExe) + "\",\n";
+			text += "      \"projectTarget\": \"" + JsonEscape(runTarget) + "\",\n";
 			text += "      \"args\": [\"--project\", \"" + JsonEscape(root) + "\"],\n";
 			text += "      \"currentDir\": \"" + JsonEscape(root) + "\"\n";
 			text += "    }\n";
 			text += "  ]\n";
 			text += "}\n";
 			return text;
+		}
+
+		// `<项目>/.vs/ProjectSettings.json`:VS 自己存"当前启动项"的文件(`CurrentProjectSetting`
+		// = `<launch 项名字> (<配置>)`,实测 VS 自己也是这么存的)。**合并写**:只改这一个键,
+		// VS 已经写进去的其它键(工程/路径哈希等)原样保留;文件不是 JSON 对象、或该键不是
+		// 字符串时**不动它**并返回 false —— 宁可让用户在 VS 里点一次下拉,也不清掉他的状态。
+		bool MergeCurrentProjectSetting(const fs::path& path, const std::string& value,
+			bool* created, bool* changed, std::string* error)
+		{
+			std::error_code existsError;
+			const bool existed = fs::is_regular_file(path, existsError);
+			std::string text = existed ? ReadTextFile(path) : std::string();
+			const std::string quotedValue = "\"" + JsonEscape(value) + "\"";
+			const std::string entry = "\"" + std::string(kProjectSettingKey) + "\": " + quotedValue;
+
+			if (!existed || text.empty())
+			{
+				text = "{\n  " + entry + "\n}\n";
+			}
+			else
+			{
+				// 先确认它是 JSON 对象(容忍 UTF-8 BOM);不认识的内容一律不碰。
+				std::string parseText = text;
+				if (parseText.size() >= 3
+					&& static_cast<unsigned char>(parseText[0]) == 0xEF
+					&& static_cast<unsigned char>(parseText[1]) == 0xBB
+					&& static_cast<unsigned char>(parseText[2]) == 0xBF)
+					parseText.erase(0, 3);
+				std::string parseError;
+				const std::optional<Wui::JsonValue> root = Wui::JsonValue::Parse(parseText, &parseError);
+				if (!root || root->type != Wui::JsonValue::Type::Object)
+				{
+					*error = "existing " + path.u8string() + " is not a JSON object";
+					return false;
+				}
+
+				const std::string quotedKey = "\"" + std::string(kProjectSettingKey) + "\"";
+				const size_t keyPosition = text.find(quotedKey);
+				bool replaced = false;
+				if (keyPosition != std::string::npos)
+				{
+					// 键 → `:` → 字符串字面量;任一步对不上就放弃(宁可不动)。
+					size_t cursor = keyPosition + quotedKey.size();
+					while (cursor < text.size() && std::isspace(static_cast<unsigned char>(text[cursor])))
+						++cursor;
+					if (cursor < text.size() && text[cursor] == ':')
+					{
+						++cursor;
+						while (cursor < text.size() && std::isspace(static_cast<unsigned char>(text[cursor])))
+							++cursor;
+						if (cursor < text.size() && text[cursor] == '"')
+						{
+							size_t end = cursor + 1;
+							bool closed = false;
+							while (end < text.size())
+							{
+								if (text[end] == '\\')
+								{
+									end += 2;   // 跳过转义序列(含 \" 与 \\)。
+									continue;
+								}
+								if (text[end] == '"')
+								{
+									closed = true;
+									break;
+								}
+								++end;
+							}
+							if (closed)
+							{
+								text.replace(cursor, end - cursor + 1, quotedValue);
+								replaced = true;
+							}
+						}
+					}
+					if (!replaced)
+					{
+						*error = "existing " + path.u8string() + " has an unrecognized "
+							+ kProjectSettingKey + " entry";
+						return false;
+					}
+				}
+				else
+				{
+					// 没这个键:插到第一个 `{` 之后(空对象不加尾逗号)。
+					const size_t brace = text.find('{');
+					if (brace == std::string::npos)
+					{
+						*error = "existing " + path.u8string() + " is not a JSON object";
+						return false;
+					}
+					size_t next = brace + 1;
+					while (next < text.size() && std::isspace(static_cast<unsigned char>(text[next])))
+						++next;
+					if (next < text.size() && text[next] == '}')
+						text.insert(brace + 1, "\n  " + entry + "\n");
+					else
+						text.insert(brace + 1, "\n  " + entry + ",");
+				}
+			}
+
+			if (existed && ReadTextFile(path) == text)
+			{
+				*created = false;
+				*changed = false;
+				return true;
+			}
+			std::error_code directoryError;
+			fs::create_directories(path.parent_path(), directoryError);
+			if (directoryError)
+			{
+				*error = "cannot create " + path.parent_path().u8string() + " ("
+					+ directoryError.message() + ")";
+				return false;
+			}
+			if (!WriteTextFile(path, text, error))
+				return false;
+			*created = !existed;
+			*changed = true;
+			return true;
 		}
 
 		// 写一个生成文件:内容一致 = 未改动;否则建好父目录再写。
@@ -874,8 +991,11 @@ namespace World::Editor
 
 		// P2b/PROJ-12 的收尾步骤:根目录只放 `<项目名>-Edit.exe` / `<项目名>-Play.exe`
 		// (从构建目录的 WeEdit/WePlay 覆盖刷新);exe 缺失的那个才把 `.cmd` 兜底写进
-		// `<项目>/.we/`。`.we/engine-root.txt` 记录引擎根(UTF-8 无 BOM);`.vs/launch.vs.json`
-		// 写两个 VS 启动项;项目根遗留的旧版 `*-Edit.cmd`/`*-Play.cmd` 一律移除。
+		// `<项目>/.we/`。`.we/engine-root.txt` 记录引擎根(UTF-8 无 BOM);`<项目>/.vs/launch.vs.json`
+		// 写**一个** VS 启动项(PROJ-15/T1:锚定项目自己的 ProjectRun 可执行目标,默认开编辑器),
+		// `.vs/ProjectSettings.json` 再把 VS 的当前启动项合并设成它;
+		// 项目根遗留的旧版 `launch.vs.json`(PROJ-13 生成物)一并清掉;
+		// 项目根遗留的旧版 `*-Edit.cmd`/`*-Play.cmd` 一律移除。
 		// **任何失败都不影响项目本体** —— 只记警告,返回已经写成的部分。
 		// PROJ12-T4 修复:向导建项目时先写 `<目标>.tmp-*` 再整体改名 ⇒ 绝对路径内容
 		// (`launch.vs.json` 的 --project/currentDir)必须用**最终项目根**写,否则改名后那些路径指向
@@ -916,13 +1036,13 @@ namespace World::Editor
 				}
 			}
 
-			// `.vs/launch.vs.json`:VS 的两个启动项(机器本地;gitignore 忽略 /.vs/)。
+			// `.vs/launch.vs.json`:VS CMake 工程模式的**一个**启动项(机器本地;gitignore 忽略 /.vs/)。
 			{
 				const fs::path target = projectRoot / ".vs" / "launch.vs.json";
 				bool created = false;
 				bool changed = false;
 				std::string error;
-				if (WriteGeneratedFile(target, LaunchVsJsonText(contentRoot, engineRoot),
+				if (WriteGeneratedFile(target, LaunchVsJsonText(contentRoot),
 					&created, &changed, &error))
 				{
 					if (created)
@@ -937,6 +1057,54 @@ namespace World::Editor
 					placement.Warnings.push_back("could not write .vs/launch.vs.json: " + error);
 					WLD_CORE_WARN("[project-scaffolder] could not write '{0}': {1}",
 						target.u8string(), error);
+				}
+			}
+
+			// `.vs/ProjectSettings.json`:VS 的"当前启动项"。设成上面那一条(名字 + 本次配置),
+			// 打开项目就默认选中 `Open Editor`,不用用户再去下拉里挑一次。**合并写** ——
+			// VS 已经写在里面的其它键(工程/路径哈希等)逐字节保留。
+			{
+				const fs::path target = projectRoot / ".vs" / "ProjectSettings.json";
+				const std::string currentSetting = std::string(kLaunchItemName) + " ("
+					+ TrimTrailingSeparators(WLD_BUILD_TYPE) + ")";
+				bool created = false;
+				bool changed = false;
+				std::string error;
+				if (MergeCurrentProjectSetting(target, currentSetting, &created, &changed, &error))
+				{
+					if (created)
+						placement.Created.push_back(".vs/ProjectSettings.json");
+					else if (changed)
+						placement.Refreshed.push_back(".vs/ProjectSettings.json");
+					else
+						placement.Skipped.push_back(".vs/ProjectSettings.json");
+				}
+				else
+				{
+					placement.Warnings.push_back("could not write .vs/ProjectSettings.json: " + error);
+					WLD_CORE_WARN("[project-scaffolder] could not write '{0}': {1}",
+						target.u8string(), error);
+				}
+			}
+
+			// PROJ-13 把同一份写进过项目根(`<项目>/launch.vs.json`):那是旧版生成物,
+			// VS 的 CMake 工程模式不读它,两份并存只会让人分不清哪份生效,一律清掉。
+			// 只删这一个生成文件(它本来就被 .gitignore 忽略),不动 `.vs/` 里 VS 自己的状态。
+			{
+				const fs::path legacy = projectRoot / "launch.vs.json";
+				std::error_code existsError;
+				if (fs::is_regular_file(legacy, existsError))
+				{
+					std::error_code removeError;
+					if (fs::remove(legacy, removeError))
+					{
+						placement.Removed.push_back("launch.vs.json");
+						WLD_CORE_INFO("[project-scaffolder] removed stale '{0}'",
+							legacy.u8string());
+					}
+					else
+						placement.Warnings.push_back("could not remove stale launch.vs.json: "
+							+ removeError.message());
 				}
 			}
 
@@ -1089,9 +1257,11 @@ namespace World::Editor
 			}
 
 			std::string gitignoreError;
+			// 根级 `launch.vs.json` 是 PROJ-13 旧版生成物的忽略项(PROJ-14 起落点在 /.vs/ 下),
+			// 保留无害;`/.vs/` 覆盖新落点。
 			const std::vector<std::string> ignoreEntries = {
 				"*-Edit.exe", "*-Play.exe", "*-Edit.cmd", "*-Play.cmd",
-				"/.we/", "/.vs/", "/build/", "/local/" };
+				"launch.vs.json", "/.we/", "/.vs/", "/build/", "/local/" };
 			if (!EnsureGitignoreEntries(projectRoot, ignoreEntries, &gitignoreError))
 				placement.Warnings.push_back("could not update .gitignore: " + gitignoreError);
 
@@ -1323,7 +1493,9 @@ namespace World::Editor
 		EnsureLocalCMakePresets(templateDirectory, projectRoot, /*backupOnUpgrade=*/true,
 			&result.Created, &result.Upgraded, &result.Skipped, &result.Backups, &result.Warnings);
 
-		// 3) 项目根 exe 启动器 + .we/(engine-root.txt、必要时 .cmd 兜底)+ .vs/launch.vs.json。
+		// 3) 项目根 exe 启动器 + .we/(engine-root.txt、必要时 .cmd 兜底)+ .vs/launch.vs.json
+		//    + .vs/ProjectSettings.json(锚定 ProjectRun 并把当前启动项指向它;
+		//    根级旧版 launch.vs.json 一并清掉)。
 		LaunchPlacement placement = PlaceLaunchEntryPoints(projectRoot,
 			projectRoot.filename().u8string());
 		const auto append = [](std::vector<std::string>* target,

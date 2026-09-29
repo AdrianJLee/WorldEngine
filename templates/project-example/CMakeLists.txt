@@ -256,11 +256,46 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # schema 的输入发现、生成物(<项目根>/src/Generated/**)与类型账本(Game.manifest)同样落在本项目里。
 set(WLD_GAME_PROJECT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
+# ---- 项目启动器目标(ProjectRun,PROJ-15/T1)-----------------------------------
+# VS 的 CMake 工程模式只在 Startup Item 下拉里列**可执行 CMake 目标**(官方文档口径);
+# 项目侧 World 是库、Game 是 DLL、Editor/Runtime 属引擎侧,所以这里给项目补**一个**自己的
+# 可执行目标,并把"用哪个引擎、项目根在哪、开编辑器还是跑游戏"收进
+# src/Tools/ProjectRun.cpp(零引擎依赖,只链接系统库)。默认 = 打开编辑器,加 `--play`
+# 才拉起 Runtime —— 下拉里因此只有一个 ProjectRun.exe,不用在两项之间挑。
+# 产物布局与 .vs/launch.vs.json 的 projectTarget 字符串逐字对齐:<build>/bin/<配置>/。
+set(WE_PROJECT_RUNNER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/Tools/ProjectRun.cpp")
+
+function(_we_add_project_runner _we_target)
+    add_executable(${_we_target} WIN32 "${WE_PROJECT_RUNNER_SOURCE}")
+    target_compile_definitions(${_we_target} PRIVATE
+        # 与引擎侧 World 的 PUBLIC 定义逐字一致(启动器不链接 World,拿不到它们):
+        WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"
+        WLD_OUTPUT_DIR="build/x64-${CMAKE_BUILD_TYPE}/"
+    )
+    if(MSVC)
+        target_compile_options(${_we_target} PRIVATE "/utf-8")
+        # 与 Launcher 一致:目标机器不装 VC 运行库也能跑(启动器不跨 CRT 边界)。
+        set_property(TARGET ${_we_target} PROPERTY MSVC_RUNTIME_LIBRARY
+            "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
+    # F5 先从 VS 构建项目自己的 C++(Game.dll),再拉起引擎宿主。
+    add_dependencies(${_we_target} Game)
+    # 只用系统库(零第三方依赖)。
+    target_link_libraries(${_we_target} PRIVATE user32 shell32)
+    # VS 多配置生成器会自动再补 <配置> 子目录 ⇒ 产物恒为 bin/<配置>/<目标>.exe。
+    set_target_properties(${_we_target} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+endfunction()
+
 if(NOT WE_ENGINE_BUILD_DIR)
     # ---- 3a. 源码模式:引擎作为子项目构建 ------------------------------------
     # 引擎根不是顶层 CMAKE_SOURCE_DIR ⇒ 引擎侧自动进入子项目模式(只建 World + Game)。
     message(STATUS "WorldEngine build mode: source (add_subdirectory ${WE_ROOT})")
     add_subdirectory("${WE_ROOT}" "${CMAKE_BINARY_DIR}/engine")
+    # 注意:引擎侧 Game/CMakeLists.txt 的 src/** 通配也会看到 src/Tools/ProjectRun.cpp;
+    # 该 TU 在 GAME_BUILD_DLL 编译里整份跳过(见 ProjectRun.cpp 顶部说明)。
+    _we_add_project_runner(ProjectRun)
     return()
 endif()
 
@@ -404,6 +439,8 @@ file(GLOB_RECURSE GAME_MODULE_SOURCES CONFIGURE_DEPENDS
 foreach(_skeleton IN LISTS GAME_SKELETON_SOURCES)
     list(REMOVE_ITEM GAME_MODULE_SOURCES "${_skeleton}")
 endforeach()
+# src/Tools/ 是项目自己的工具程序(ProjectRun 的启动器源码),不属于 Game.dll。
+list(REMOVE_ITEM GAME_MODULE_SOURCES "${WE_PROJECT_RUNNER_SOURCE}")
 list(REMOVE_ITEM GAME_MODULE_SOURCES "${GAME_SCHEMA_GENERATED_SOURCE}")
 list(REMOVE_ITEM GAME_MODULE_SOURCES "${GAME_SCHEMA_ENGINE_SKELETON_SOURCE}")
 
@@ -452,3 +489,6 @@ else()
         "引擎 PDB 缺失，调试符号不可用 —— Game.dll 与 WorldRuntime.dll 仍会正常构建,"
         "但在 VS 里调试引擎代码时只有地址没有符号;用 Debug 配置重新构建引擎即可补上。")
 endif()
+
+# ---- 4. 项目启动器目标(ProjectRun)--------------------------------------------
+_we_add_project_runner(ProjectRun)

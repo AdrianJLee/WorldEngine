@@ -100,11 +100,14 @@ namespace World
 			//     `.we/legacy-<原名>.bak`(同名已存在 ⇒ 加时间戳),备份成功后才移除
 			//     (记入 Migrated + Backups);**没有可替代的 Launcher exe 时不删**,
 			//     保留根级脚本并给提示;
-			//   * `<项目>/.vs/launch.vs.json` 生成 VS CMake 模式的两个启动项
-			//     (Open Editor / Play Runtime);
+			//   * `<项目>/.vs/launch.vs.json` 生成 VS CMake 模式的**一个**启动项
+			//     (Open Editor;projectTarget 锚定项目自身的 ProjectRun 可执行目标 —— 默认开
+			//     编辑器,加 `--play` 才是 Runtime),`<项目>/.vs/ProjectSettings.json` 的
+			//     当前启动项合并设成它(格式 `<名字> (<配置>)`;VS 已写的其它键原样保留,
+			//     内容不认识时只警告、不动那个文件);根级旧版 `<项目>/launch.vs.json` 会清掉;
 			//   * CMakePresets.json 里补一个机器本地 `local` configure preset
 			//     (WE_ROOT + 可用的 WE_ENGINE_BUILD_DIR),让 VS 打开项目文件夹即可配置;
-			//   * `.gitignore` 只补缺行(含 /.we/、/.vs/)。
+			//   * `.gitignore` 只补缺行(含 /.we/、/.vs/、launch.vs.json)。
 			// **不碰** src/** 与 assets/**。模板选择:项目根的 template.json(向导会复制)优先,
 			// 否则按示例内容标记判断,最后回落 empty。
 			struct BuildEntryResult

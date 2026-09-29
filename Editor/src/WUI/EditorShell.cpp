@@ -4536,8 +4536,8 @@ namespace World
 				Wui::Label(ctx, { labelX, cursorY },
 					Wui::TrFormat("modal.newproject.created.entrypoints",
 						"Project root: {files}; build with build.cmd, other entry files live in .we/ "
-						"(engine root record + .cmd fallback), and Visual Studio lists two launch items "
-						"(Open Editor / Play (Runtime)).",
+						"(engine root record + .cmd fallback), and Visual Studio lists one launch item "
+						"(ProjectRun.exe — opens this project in the editor, from .vs/launch.vs.json).",
 						{ { "files", entryList } }),
 					m_Theme.TextMuted, 12.0f);
 			}
@@ -6411,7 +6411,9 @@ namespace World
 				Wui::HashId("menu.file.project_sources") });
 		// PROJ-11/T1 + PROJ-12/T2:已存在的项目(向导旧版本建出来的)同步
 		// CMakeLists.txt / build.cmd / CMakePresets.json(旧版备份 .bak 后升级)、
-		// 两个 exe 启动器、.we/engine-root.txt、.vs/launch.vs.json 与 .gitignore。
+		// 两个 exe 启动器、.we/engine-root.txt、.vs/launch.vs.json
+		// (PROJ-15/T1:锚定项目自己的 ProjectRun,.vs/ProjectSettings.json 设成当前启动项;
+		// 根级旧版 launch.vs.json 清掉)与 .gitignore。
 		// 不碰 src 与 assets。
 		fileEntries.push_back({ Wui::Tr("menu.file.generate_build_entry",
 				"Generate Build Entry Points (CMake + build.cmd)"), false,
@@ -6437,8 +6439,12 @@ namespace World
 					"backups are never overwritten; legacy root .cmd launchers move into .we/ as "
 					"legacy-*.bak, or stay in place when there is no replacement launcher exe), refresh "
 					"<project>-Edit.exe / <project>-Play.exe, write .we/engine-root.txt (plus a .cmd fallback "
-					"in .we/ only when a launcher exe is missing) and .vs/launch.vs.json, then top up "
-					".gitignore. Never touches src/ or assets/."),
+					"in .we/ only when a launcher exe is missing) and .vs/launch.vs.json (one Visual Studio "
+					"CMake launch item anchoring the project's own ProjectRun target, which opens the editor "
+					"by default; .vs/ProjectSettings.json gets CurrentProjectSetting pointed at it while the "
+					"keys Visual Studio already wrote are kept; a leftover root-level launch.vs.json from "
+					"the older generator is removed), "
+					"then top up .gitignore. Never touches src/ or assets/."),
 				Wui::HashId("menu.file.generate_build_entry") });
 		fileEntries.push_back({ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
 				[this]
@@ -6572,8 +6578,9 @@ namespace World
 			"Project root ({root}): run build.cmd; double-click {name}-Edit.exe / {name}-Play.exe. "
 			"Other entry files live in .we/ (engine-root.txt records the engine root; a .cmd fallback "
 			"appears there only when a launcher exe is missing; legacy root .cmd launchers are moved "
-			"there as legacy-*.bak, never deleted). Visual Studio has two launch items: "
-			"Open Editor / Play (Runtime).",
+			"there as legacy-*.bak, never deleted). Visual Studio has one launch item "
+			"(.vs/launch.vs.json): ProjectRun.exe — it builds Game first, then opens the editor; add "
+			"`--play` (or double-click {name}-Play.exe) to run the game instead.",
 			{ { "root", projectRoot }, { "name", projectName } });
 
 		if (!m_BuildEntryResult.Ok)
@@ -6673,8 +6680,9 @@ namespace World
 		}
 
 		Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.build_entry.layout",
-			"Layout: project root = 2 exe launchers + build.cmd + CMakePresets.json; .we/ = engine root "
-			"(+ .cmd fallback); Visual Studio = Open Editor / Play (Runtime) launch items."),
+			"Layout: project root = 2 exe launchers + build.cmd + CMakePresets.json; .vs/ = Visual "
+			"Studio launch item + current-item setting (launch.vs.json → ProjectRun.exe, "
+			"ProjectSettings.json); .we/ = engine root (+ .cmd fallback)."),
 			m_Theme.TextMuted, 12.0f);
 		cursorY += 18.0f;
 		Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.build_entry.next_steps", "Next steps"),
@@ -6685,7 +6693,7 @@ namespace World
 		cursorY += 18.0f;
 		Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.step_launch",
 			"2) Double-click {name}-Play.exe to play (or Run ▶ Launch Project); in Visual Studio pick "
-			"the Play (Runtime) launch item.",
+			"ProjectRun.exe (it builds Game, then opens the editor; add `--play` to run the game).",
 			{ { "name", projectName } }), m_Theme.TextMuted, 12.0f);
 
 		const Wui::ModalButtonDesc buttons[3] = {
