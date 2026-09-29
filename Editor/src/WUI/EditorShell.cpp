@@ -661,6 +661,46 @@ namespace World
 		return browser->SelectAsset(logicalPath, op);
 	}
 
+	// CPPSRC-1(用户 2026-09-29「c++脚本要像 asset 资产一样在编辑器里展示」):
+	// 项目 C++ 的唯一展示面 = 内容浏览器的 `Project C++` 根。三条入口(File ▸ 项目源码…、
+	// Scripts 面板的那行入口、AI/脚本)都收敛到这里:面板关着先拉回停靠树(否则"打开了但看不见"),
+	// 再激活,最后切根并把结果显示成状态栏提示/警告。
+	bool EditorShell::FocusContentBrowserProjectSources()
+	{
+		const std::string panel = "content_browser";
+		if (!m_Layout.Contains(panel))
+			DockPanelBackToTree(panel);
+		AiActivatePanel(panel, nullptr);
+		const auto found = m_PanelRegistry.find(panel);
+		if (found == m_PanelRegistry.end())
+			return false;
+		auto* browser = dynamic_cast<ContentBrowserPanel*>(found->second.get());
+		if (!browser)
+			return false;
+		if (!browser->SwitchRoot(ContentBrowserPanel::RootScope::ProjectSources))
+		{
+			// 没项目 / 没有 <项目根>/src:给可读理由(与"禁用项必须解释原因"同一口径),
+			// 不静默失败 —— 用户点了菜单却什么都不发生是最糟的反馈。
+			PushNotice(Wui::Tr("notice.project_sources.unavailable",
+				"Project C++ lives in <project>/src — open or create a project first."));
+			return false;
+		}
+		if (m_Ctx)
+			m_Ctx->RecordOp("browser", "root-project-sources", CurrentProjectRoot().generic_string(),
+				(CurrentProjectRoot() / "src").generic_string());
+		return true;
+	}
+
+	// CPPSRC-1:内容浏览器在"项目 C++"根下提供的"新建 C++ 脚本…"入口 —— 与 File ▸ 新建 C++ 脚本…
+	// 共用同一个向导(落点 `<项目根>/src/Scripts/*.h`,建完用外部 Visual Studio 打开)。
+	bool EditorShell::RequestNewCppScript()
+	{
+		if (!m_Ctx || CurrentProjectRoot().empty())
+			return false;   // 没有项目:向导弹"先打开项目",面板侧据此显示可读理由
+		OpenNewCppScriptModal(*m_Ctx);
+		return true;
+	}
+
 	// ---- U25-M2:材质工作流(PanelHost 能力)----
 	// 赋值/撤销都转发到 EditorLayer 的**唯一写入口**(与 AI 通道 scene.set Material 同一条字段);
 	// 编辑器侧不做"面板自己改组件"的旁路,否则脏标记与只读规则会两套。
@@ -6398,22 +6438,19 @@ namespace World
 					"Array/Map samples) and open it in Visual Studio. Build the project (its build.cmd / "
 					"CMakeLists.txt), then use File ▶ Reload C++ Module to load it."),
 				Wui::HashId("menu.file.new_cpp_script") });
-		// PROJ-11/T1:项目源码找不到 → 显式入口:打开/聚焦 Scripts 面板并展开高亮 C++ 段。
+		// CPPSRC-1(用户 2026-09-29「c++脚本要像 asset 资产一样在编辑器里展示」):
+		// 项目 C++ 的唯一展示面 = 内容浏览器的 `Project C++` 根 —— 这一项不再打开 Scripts 面板
+		// 的列表段,而是把内容浏览器切到源码根(同一套网格/列表/类型列/搜索)。
 		fileEntries.push_back({ Wui::Tr("menu.file.project_sources", "Project Sources…"), false,
 				[this]
 				{
 					if (!m_Ctx)
 						return;
-					// 与 Window 菜单同一条路径:已附加 → 激活顶栏标签;关着 → 打开并附加。
-					AiActivatePanel("scripts", nullptr);
-					const auto found = m_PanelRegistry.find("scripts");
-					if (found != m_PanelRegistry.end())
-						if (auto* panel = dynamic_cast<ScriptsPanel*>(found->second.get()))
-							panel->FocusProjectSources();
+					FocusContentBrowserProjectSources();
 				}, false,
 				Wui::Tr("menu.file.project_sources.tooltip",
-					"Open the Scripts panel with this project's C++ sources (under <project>/src) "
-					"expanded and highlighted; double-click a row to open it in Visual Studio."),
+					"Show this project's C++ sources (<project>/src) in the Content Browser — same grid or "
+					"list, type column and search as assets; double-click a file to open it in Visual Studio."),
 				Wui::HashId("menu.file.project_sources") });
 		// PROJ-11/T1 + PROJ-12/T2:已存在的项目(向导旧版本建出来的)同步
 		// CMakeLists.txt / build.cmd / CMakePresets.json(旧版备份 .bak 后升级)、

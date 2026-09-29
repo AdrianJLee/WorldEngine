@@ -636,17 +636,40 @@ namespace World
 		}
 		try
 		{
+			// CPPSRC-1(双根):两个根各存一份(旧版扁平格式只有内容根,见 LoadState 的 v2 口径)。
+			// 活动根 = 内存里的当前值,另一个根 = 状态桶里上次 Capture 的那份;
+			// 采集用的相对路径一律相对**各自的根**,切根不会互相覆盖对方的位置。
+			CaptureRootState(m_Model.Scope);
+			const auto writeBucket = [this](BrowserRootScope scope)
+			{
+				const RootState& state = m_RootStates[static_cast<int>(scope)];
+				const std::filesystem::path root = scope == BrowserRootScope::Content
+					? m_Model.ContentRoot : ProjectSourceRoot();
+				Wui::JsonValue node;
+				node.type = Wui::JsonValue::Type::Object;
+				node.Object.push_back({ "current",
+					Wui::JsonValue::MakeString(state.Current.lexically_relative(root).generic_string()) });
+				node.Object.push_back({ "treeScroll", Wui::JsonValue::MakeNumber(state.TreeScroll) });
+				node.Object.push_back({ "contentScroll", Wui::JsonValue::MakeNumber(state.ContentScroll) });
+				Wui::JsonValue open;
+				open.type = Wui::JsonValue::Type::Array;
+				for (const auto& path : state.TreeOpen)
+					open.Array.push_back(Wui::JsonValue::MakeString(path.lexically_relative(root).generic_string()));
+				node.Object.push_back({ "treeOpen", std::move(open) });
+				return node;
+			};
 			Wui::JsonValue root;
 			root.type = Wui::JsonValue::Type::Object;
+			root.Object.push_back({ "version", Wui::JsonValue::MakeNumber(2) });
 			root.Object.push_back({ "listMode", Wui::JsonValue::MakeBool(m_Model.ListMode) });
-			root.Object.push_back({ "current", Wui::JsonValue::MakeString(m_Model.Current.lexically_relative(m_Model.Root).generic_string()) });
-			root.Object.push_back({ "treeScroll", Wui::JsonValue::MakeNumber(m_Model.TreeScroll) });
-			root.Object.push_back({ "contentScroll", Wui::JsonValue::MakeNumber(m_Model.ContentScroll) });
-			Wui::JsonValue open;
-			open.type = Wui::JsonValue::Type::Array;
-			for (const auto& path : m_Model.TreeOpen)
-				open.Array.push_back(Wui::JsonValue::MakeString(path.lexically_relative(m_Model.Root).generic_string()));
-			root.Object.push_back({ "treeOpen", std::move(open) });
+			root.Object.push_back({ "scope", Wui::JsonValue::MakeString(
+				m_Model.Scope == BrowserRootScope::ProjectSources ? "projectSources" : "content") });
+			Wui::JsonValue roots;
+			roots.type = Wui::JsonValue::Type::Object;
+			roots.Object.push_back({ "content", writeBucket(BrowserRootScope::Content) });
+			if (m_RootStatesReady[static_cast<int>(BrowserRootScope::ProjectSources)])
+				roots.Object.push_back({ "projectSources", writeBucket(BrowserRootScope::ProjectSources) });
+			root.Object.push_back({ "roots", std::move(roots) });
 			std::ofstream stream(m_StatePath, std::ios::binary | std::ios::trunc);
 			if (stream)
 				stream << root.Dump();
@@ -673,36 +696,199 @@ namespace World
 				return;
 			if (const Wui::JsonValue* value = parsed->Find("listMode"))
 				m_Model.ListMode = value->AsBool(false);
-			if (const Wui::JsonValue* value = parsed->Find("current"))
+			// 一个根的桶:v2 从 `roots.<name>` 读,旧版扁平格式整个对象就是内容根的桶
+			// (向后兼容:老用户的浏览位置不会丢)。
+			const auto readBucket = [this](const Wui::JsonValue& object, BrowserRootScope scope)
 			{
-				const std::string relative = value->AsString("");
-				if (!relative.empty())
+				const int index = static_cast<int>(scope);
+				RootState& state = m_RootStates[index];
+				const std::filesystem::path root = scope == BrowserRootScope::Content
+					? m_Model.ContentRoot : ProjectSourceRoot();
+				if (const Wui::JsonValue* value = object.Find("current"))
 				{
-					const std::filesystem::path target = m_Model.Root / std::filesystem::path(relative);
-					std::error_code dirError;
-					if (std::filesystem::is_directory(target, dirError))
-						m_Model.Current = target;
-				}
-			}
-			if (const Wui::JsonValue* value = parsed->Find("treeScroll"))
-				m_Model.TreeScroll = static_cast<float>(value->AsNumber(0));
-			if (const Wui::JsonValue* value = parsed->Find("contentScroll"))
-				m_Model.ContentScroll = static_cast<float>(value->AsNumber(0));
-			if (const Wui::JsonValue* value = parsed->Find("treeOpen"))
-			{
-				m_Model.TreeOpen.clear();
-				for (const auto& item : value->Array)
-				{
-					const std::string relative = item.AsString("");
+					const std::string relative = value->AsString("");
 					if (!relative.empty())
-						m_Model.TreeOpen.insert(m_Model.Root / std::filesystem::path(relative));
+					{
+						const std::filesystem::path target = root / std::filesystem::path(relative);
+						std::error_code dirError;
+						if (std::filesystem::is_directory(target, dirError))
+							state.Current = target;
+					}
 				}
+				if (const Wui::JsonValue* value = object.Find("treeScroll"))
+					state.TreeScroll = static_cast<float>(value->AsNumber(0));
+				if (const Wui::JsonValue* value = object.Find("contentScroll"))
+					state.ContentScroll = static_cast<float>(value->AsNumber(0));
+				state.TreeOpen.clear();
+				if (const Wui::JsonValue* value = object.Find("treeOpen"))
+				{
+					for (const auto& item : value->Array)
+					{
+						const std::string relative = item.AsString("");
+						if (!relative.empty())
+							state.TreeOpen.insert(root / std::filesystem::path(relative));
+					}
+				}
+				m_RootStatesReady[index] = true;
+			};
+			const Wui::JsonValue* roots = parsed->Find("roots");
+			if (roots)
+			{
+				if (const Wui::JsonValue* content = roots->Find("content"))
+					readBucket(*content, BrowserRootScope::Content);
+				if (const Wui::JsonValue* sources = roots->Find("projectSources"))
+					readBucket(*sources, BrowserRootScope::ProjectSources);
 			}
+			else
+			{
+				readBucket(*parsed, BrowserRootScope::Content);
+			}
+			// 构造期恒为内容根:把内容根的桶装回模型(旧版行为逐字保留)。
+			m_Model.Scope = BrowserRootScope::Content;
+			m_Model.Root = m_Model.ContentRoot;
+			ApplyRootState(BrowserRootScope::Content);
 		}
 		catch (const std::exception& error)
 		{
 			WLD_CORE_WARN("Failed to load content browser state: {0}", error.what());
 		}
+	}
+
+	// ---- CPPSRC-1:双根(内容根 ⇄ 项目 C++ 源码根)----
+
+	std::filesystem::path ContentBrowserPanel::ProjectSourceRoot() const
+	{
+		const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+		if (projectRoot.empty())
+			return {};
+		return projectRoot / "src";
+	}
+
+	bool ContentBrowserPanel::ProjectSourcesAvailable() const
+	{
+		const std::filesystem::path root = ProjectSourceRoot();
+		const double now = std::chrono::duration<double>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+		// 项目根变了(重新打开项目)立刻重算,不吃 0.5s 缓存的亏;否则 0.5s 节流。
+		if (root == m_SourceRootChecked && m_SourceRootCheckedAt >= 0.0
+			&& now - m_SourceRootCheckedAt < 0.5)
+			return m_SourceRootAvailable;
+		m_SourceRootChecked = root;
+		m_SourceRootCheckedAt = now;
+		std::error_code dirError;
+		m_SourceRootAvailable = !root.empty() && std::filesystem::is_directory(root, dirError);
+		return m_SourceRootAvailable;
+	}
+
+	void ContentBrowserPanel::CaptureRootState(BrowserRootScope scope)
+	{
+		const int index = static_cast<int>(scope);
+		RootState& state = m_RootStates[index];
+		state.Current = m_Model.Current;
+		state.TreeOpen = m_Model.TreeOpen;
+		state.Selected = m_Model.Selected;
+		state.LastSelected = m_Model.LastSelected;
+		state.History = m_Model.History;
+		state.HistoryIndex = m_Model.HistoryIndex;
+		state.TreeScroll = m_Model.TreeScroll;
+		state.ContentScroll = m_Model.ContentScroll;
+		state.DirTree = m_Model.DirTree;
+		state.DirTreeDirty = m_Model.DirTreeDirty;
+		state.TreeStamp = m_Model.TreeStamp;
+		state.LastTreeCheck = m_Model.LastTreeCheck;
+		state.ListingPath = m_Model.ListingPath;
+		state.Listing = m_Model.Listing;
+		state.ListingDirty = m_Model.ListingDirty;
+		state.ListingStamp = m_Model.ListingStamp;
+		state.LastListingCheck = m_Model.LastListingCheck;
+		state.SizeCache = m_Model.SizeCache;
+		state.SearchEdit = m_Model.SearchEdit;
+		state.SearchResults = m_Model.SearchResults;
+		state.Search = std::string(m_Model.Search);
+		m_RootStatesReady[index] = true;
+	}
+
+	void ContentBrowserPanel::ApplyRootState(BrowserRootScope scope)
+	{
+		const int index = static_cast<int>(scope);
+		RootState& state = m_RootStates[index];
+		if (!m_RootStatesReady[index])
+		{
+			// 第一次进这个根:从干净状态起步(位置 = 根本身),不继承另一个根的浏览位置。
+			m_Model.Current = m_Model.Root;
+			m_Model.TreeOpen.clear();
+			m_Model.TreeOpen.insert(m_Model.Root);
+			m_Model.Selected.clear();
+			m_Model.LastSelected.clear();
+			m_Model.History.clear();
+			m_Model.HistoryIndex = -1;
+			m_Model.TreeScroll = 0.0f;
+			m_Model.ContentScroll = 0.0f;
+			m_Model.SizeCache.clear();
+			m_Model.SearchEdit.clear();
+			m_Model.Search[0] = '\0';
+			m_Model.SearchResults.clear();
+			return;
+		}
+		std::error_code dirError;
+		m_Model.Current = (!state.Current.empty() && std::filesystem::is_directory(state.Current, dirError))
+			? state.Current : m_Model.Root;
+		m_Model.TreeOpen = state.TreeOpen;
+		m_Model.Selected = state.Selected;
+		m_Model.LastSelected = state.LastSelected;
+		m_Model.History = state.History;
+		m_Model.HistoryIndex = state.HistoryIndex;
+		m_Model.TreeScroll = state.TreeScroll;
+		m_Model.ContentScroll = state.ContentScroll;
+		m_Model.DirTree = state.DirTree;
+		m_Model.DirTreeDirty = true;   // 树按新根重建(路径是绝对的,但深度/子项缓存可能过期)
+		m_Model.TreeStamp = {};
+		m_Model.LastTreeCheck = {};
+		m_Model.ListingPath = state.ListingPath;
+		m_Model.Listing = state.Listing;
+		m_Model.ListingDirty = true;
+		m_Model.ListingStamp = {};
+		m_Model.LastListingCheck = {};
+		m_Model.SizeCache = state.SizeCache;
+		m_Model.SearchEdit = state.SearchEdit;
+		std::snprintf(m_Model.Search, sizeof(m_Model.Search), "%s", state.Search.c_str());
+		m_Model.SearchResults = state.SearchResults;
+	}
+
+	bool ContentBrowserPanel::SwitchRoot(RootScope scope)
+	{
+		// 两个根的路径每次切换都按运行期重新解析(用户可能刚换了项目)。
+		m_Model.ContentRoot = World::Paths::AssetRoot();
+		m_Model.SourceRoot = ProjectSourceRoot();
+		if (scope == BrowserRootScope::ProjectSources && !ProjectSourcesAvailable())
+			return false;   // 没项目 / 没有 <项目根>/src:调用方给可读提示,状态一律不动
+		if (scope == m_Model.Scope)
+			return true;    // 幂等
+		CaptureRootState(m_Model.Scope);
+		m_Model.Scope = scope;
+		m_Model.Root = scope == BrowserRootScope::Content ? m_Model.ContentRoot : m_Model.SourceRoot;
+		// 瞬态:切根不带走另一个根的右键菜单/重命名/删除确认/剪贴板/新建文件夹输入。
+		m_Model.ContextMenuPath.clear();
+		m_Model.ContextMenuPos = {};
+		m_Model.BlankMenuPos = {};
+		m_Model.RenameActive = false;
+		m_Model.RenameTarget.clear();
+		m_Model.RenameEdit.clear();
+		m_Model.RenameBuffer[0] = '\0';
+		m_Model.ShowDeleteModal = false;
+		m_Model.ShowNewFolderInput = false;
+		m_Model.NewFolderBuffer[0] = '\0';
+		m_Model.Clipboard.clear();
+		m_Model.ClipboardCut = false;
+		m_Model.PendingDropDest.clear();
+		m_TreeMenuPath.clear();
+		ApplyRootState(scope);
+		InvalidateContents();
+		RefreshTree(true);
+		if (m_Model.Search[0])
+			UpdateSearch();
+		SaveState();
+		return true;
 	}
 
 	void ContentBrowserPanel::Navigate(const std::filesystem::path& path)
@@ -766,6 +952,20 @@ namespace World
 		{
 			Navigate(path);
 			return;
+		}
+		// CPPSRC-1:项目层 C++ 源码(.h/.cpp)双击 ⇒ **外部 Visual Studio** —— 与 Scripts 面板的
+		// "Open in VS" 同一条 PanelHost 路径(EditorShell::OpenScriptEditorNow 按扩展名分流;
+		// 内置脚本编辑器只服务 Lua/Luau)。路径按**绝对路径**给,不参与内容根相对逻辑路径换算。
+		{
+			const EditorAssetKind kind = DescribeAssetType(path, false).Kind;
+			if (kind == EditorAssetKind::CppHeader || kind == EditorAssetKind::CppSource)
+			{
+				m_Host.OpenScriptEditor(path.generic_string());
+				if (m_Ctx)
+					m_Ctx->RecordOp("browser", "open-cpp", path.filename().generic_string(),
+						path.generic_string());
+				return;
+			}
 		}
 		if (path.extension() == ".wd")
 			m_Host.OpenScene(path);
@@ -1563,6 +1763,19 @@ namespace World
 					theme.Accent, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
 			}
 
+			// CPPSRC-1:项目源码根下的 `Generated/**`(构建生成物)挂一枚常驻徽标 ——
+			// "能改的源码"和"别手改的生成物"在同一格里必须一眼分开。
+			if (slice.GeneratedSource)
+			{
+				const std::string badgeText = Wui::Tr("asset.badge.generated", "Generated");
+				const float badgeSize = infoSize;
+				const float badgeW = ctx.MeasureTextWidth(badgeText, badgeSize) + theme.PadSmall * 2.0f;
+				const float badgeH = badgeSize + 4.0f;
+				Wui::Badge(ctx, { cell.X + gap, cell.Y + gap, badgeW, badgeH }, badgeText,
+					theme.Warning, Wui::WuiColor { 1.0f, 1.0f, 1.0f, 1.0f }, theme, badgeSize);
+				RegisterGeneratedBadgeNode(slice, { cell.X + gap, cell.Y + gap, badgeW, badgeH });
+			}
+
 			// M4-TEX P4:纹理源图的两枚常驻徽标 —— "有资产 / 默认设置"(设置住在 `.wtex` 资产里,
 			// 源图自己不再是设置入口)+ 产物状态("已烘焙 / 需重烘 / 未烘焙")。文字保持 2 词内,
 			// 免得在 96px 格子里压住居中的图标;完整状态连同 a11y 节点一起给脚本读。
@@ -1612,8 +1825,11 @@ namespace World
 				? Wui::Tr("panel.content_browser.slice.folder", "Folder")
 				// glTF/GLB 用"导入源"而不是裸扩展名:它们在网格视图里必须一眼看出不是可引用资产。
 				// prefab / 着色器同理:显示类型名而不是 ".wprefab" / ".slang"。
+				// CPPSRC-1:项目源码根下的 C++ 文件同样给类型名(网格里就是"C++ 头文件/源文件",
+				// 而不是裸 ".h/.cpp")—— 与列表模式的类型列同一口径。
 				: ((slice.Extension == ".gltf" || slice.Extension == ".glb" || slice.Extension == ".wprefab"
-						|| slice.Extension == ".slang")
+						|| slice.Extension == ".slang" || slice.Kind == EditorAssetKind::CppHeader
+						|| slice.Kind == EditorAssetKind::CppSource)
 					? slice.TypeLabel
 					: (slice.Extension.empty() ? slice.TypeLabel : slice.Extension)) + " · "
 					+ FormatBytes(static_cast<size_t>(bytes));
@@ -1721,6 +1937,12 @@ namespace World
 						: Wui::Tr("panel.content_browser.badge.texture_defaults", "Defaults"))
 					+ " · " + TextureArtifactBadgeText(slice.TextureArtifact);
 				RegisterTextureBadgeNode(slice, { typeX, row.Y, typeW, row.H });
+			}
+			// CPPSRC-1:列表模式没有胶囊位 —— 生成物标记追加在类型列上(文字版 + 同一枚 a11y 节点)。
+			if (slice.GeneratedSource)
+			{
+				typeLabel += " · " + Wui::Tr("asset.badge.generated", "Generated");
+				RegisterGeneratedBadgeNode(slice, { typeX, row.Y, typeW, row.H });
 			}
 			const std::string typeText = EllipsizeToWidth(ctx, typeLabel,
 				std::max(0.0f, typeW - theme.PadSmall * 2.0f), smallSize);
@@ -2852,6 +3074,32 @@ namespace World
 		Wui::WuiAccessibility::Get().Register(node);
 	}
 
+	// CPPSRC-1:项目源码根下 `Generated/**` 的常驻徽标节点。网格/列表两种模式都登记同一个 id,
+	// 脚本按 `browser.badge.generated.<相对源码根路径>` 就能断言"这枚文件标成了生成物"。
+	void ContentBrowserPanel::RegisterGeneratedBadgeNode(const BrowserSlice& slice, const Wui::WuiRect& rect)
+	{
+		std::error_code relativeError;
+		const std::filesystem::path relative =
+			std::filesystem::relative(slice.Path, m_Model.Root, relativeError);
+		const std::string logical = relativeError ? slice.Path.filename().generic_string()
+			: relative.generic_string();
+		Wui::WuiAccessNode node;
+		node.Id = Wui::HashId(("browser.badge.generated." + logical).c_str());
+		node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+		node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+		node.Kind = "badge";
+		node.Label = Wui::Tr("asset.badge.generated", "Generated");
+		node.Value = logical;
+		node.Tooltip = Wui::Tr("panel.content_browser.badge.generated.tooltip",
+			"Build-generated source (schema registration / manifest sync) — do not edit by hand.")
+			+ "  " + logical;
+		node.Rect = rect;
+		node.Enabled = true;
+		node.Interactive = false;
+		node.Visible = true;
+		Wui::WuiAccessibility::Get().Register(node);
+	}
+
 	void ContentBrowserPanel::OpenTextureSettingsFor(const std::filesystem::path& path, bool resetConfirm)
 	{
 		std::string logical;
@@ -3424,12 +3672,90 @@ namespace World
 		const Wui::WuiRect treeRect { rect.X, y, treeW, rect.H - (y - rect.Y) };
 		Wui::PanelBackground(ctx, treeRect, { 0.09f, 0.095f, 0.10f, 1 });
 		RefreshTree(false);
+		// ---- CPPSRC-1:两行"根"(内容根 ⇄ 项目 C++ 源码根)----
+		// 用户 2026-09-29「c++脚本要像 asset 资产一样在编辑器里展示」:项目 C++ 从 Scripts 面板的
+		// 列表搬到这里,和资产共用同一套网格/列表/类型列/搜索。不可用(没项目 / 没有 <项目根>/src)时
+		// 第二行灰显并把理由写进 tooltip —— 灰按钮不能没有理由。
+		const float kRootRowH = 22.0f;
+		const bool sourcesAvailable = ProjectSourcesAvailable();
+		const float treeListTop = treeRect.Y + kRootRowH * 2.0f + 1.0f;
+		const Wui::WuiRect treeListRect { treeRect.X, treeListTop, treeRect.W,
+			std::max(0.0f, treeRect.H - (treeListTop - treeRect.Y)) };
+		{
+			const Wui::WuiRect contentRow { treeRect.X, treeRect.Y, treeRect.W, kRootRowH };
+			const Wui::WuiRect sourcesRow { treeRect.X, treeRect.Y + kRootRowH, treeRect.W, kRootRowH };
+			const std::string contentLabel = Wui::Tr("panel.content_browser.root.content", "Content");
+			const std::string sourcesLabel = Wui::Tr("panel.content_browser.root.project_sources", "Project C++");
+			const std::string contentTooltip = Wui::Tr("panel.content_browser.root.content.tooltip",
+				"Content root: <project>/assets — scenes, materials, textures, prefabs, scripts.");
+			const std::string sourcesTooltip = sourcesAvailable
+				? Wui::Tr("panel.content_browser.root.project_sources.tooltip",
+					"Project C++ (<project>/src): same grid/list, type column and search as assets; "
+					"double-click a file to open it in Visual Studio.")
+				: Wui::Tr("panel.content_browser.src.root_unavailable",
+					"Open or create a project first — project C++ lives in <project>/src.");
+			const auto rootRow = [&](const Wui::WuiRect& row, BrowserRootScope scope, const char* idText,
+				const std::string& label, const std::string& tooltip, const std::filesystem::path& root,
+				bool enabled) -> bool
+			{
+				const bool active = m_Model.Scope == scope;
+				const bool hovered = enabled && ctx.IsHovered(row);
+				Wui::PanelBackground(ctx, row,
+					active ? theme.ButtonHover : (hovered ? theme.ButtonBg : theme.PanelHeader), 3.0f);
+				if (active)
+					Wui::HighlightOutline(ctx, row, theme.Accent, 3.0f, 1.0f);
+				Wui::Label(ctx, { row.X + 20.0f, row.Y + (row.H - 13.0f) * 0.5f }, label,
+					enabled ? (active ? theme.Accent : theme.Text) : theme.TextDisabled, 13.0f);
+				Wui::WuiAccessNode node;
+				node.Id = Wui::HashId(idText);
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "list-item";
+				node.Label = label;
+				node.Value = root.generic_string();
+				node.Tooltip = tooltip;
+				node.Rect = row;
+				node.Enabled = enabled;
+				node.Focused = active;
+				node.Interactive = true;
+				node.Visible = true;
+				Wui::WuiAccessibility::Get().Register(node);
+				ctx.RegisterFocusable(node.Id, row);
+				Wui::DrawFocusRing(ctx, row, node.Id, theme);
+				if (hovered)
+				{
+					if (enabled)
+						ctx.SetCursor(Wui::WuiCursor::Hand);
+					if (!tooltip.empty())
+						ctx.SetTooltip(tooltip);
+				}
+				if (!enabled)
+					return false;
+				// 鼠标点击与键盘 Enter/Space 走同一条切换路径(焦点在根行上时)。
+				const bool activated = ctx.IsClicked(row)
+					|| (ctx.Focus() == node.Id
+						&& (ctx.WasKeyTriggered(KeyCodes::Enter) || ctx.WasKeyTriggered(KeyCodes::Space)));
+				return activated;
+			};
+			if (rootRow(contentRow, BrowserRootScope::Content, "browser.root.content", contentLabel,
+					contentTooltip, m_Model.ContentRoot, true))
+				SwitchRoot(BrowserRootScope::Content);
+			if (rootRow(sourcesRow, BrowserRootScope::ProjectSources, "browser.root.project-sources",
+					sourcesLabel, sourcesTooltip, ProjectSourceRoot(), sourcesAvailable))
+				SwitchRoot(BrowserRootScope::ProjectSources);
+			// 根行与目录树之间的分隔线(走库件 `Wui::PanelBackground` 的单色填充,不新增裸绘制)。
+			Wui::PanelBackground(ctx, { treeRect.X + 8.0f, treeListTop - 1.0f, treeRect.W - 16.0f, 1.0f },
+				theme.Border, 0.0f);
+		}
 		// 目录树走 TreeView 组件:展开箭头/悬停/选中由组件绘制,
 		// 导航、拖拽起手、拖入目标仍由面板处理(用组件返回的 ItemRects)。
 		std::vector<const BrowserDirNode*> visibleNodes;
 		std::vector<Wui::TreeViewItem> treeItems;
 		for (const BrowserDirNode& node : m_Model.DirTree)
 		{
+			// CPPSRC-1:根由上面两行"根行"代表,树里不再重复画同一个根行。
+			if (node.Depth == 0)
+				continue;
 			if (node.Depth > 1 && m_Model.TreeOpen.find(node.Path.parent_path()) == m_Model.TreeOpen.end())
 				continue;
 			const std::filesystem::path rel = node.Path.lexically_relative(m_Model.Root);
@@ -3446,13 +3772,13 @@ namespace World
 		bool treeRenameDrawn = false;
 		{
 			// P4-UX14:传 id 之后树才有键盘(Tab 停在这里时 ↑↓←→/Enter 生效)。
-			Wui::TreeViewResult tree = Wui::TreeView(ctx, treeRect, treeItems, 22.0f, m_Model.TreeScroll, theme,
+			Wui::TreeViewResult tree = Wui::TreeView(ctx, treeListRect, treeItems, 22.0f, m_Model.TreeScroll, theme,
 				Wui::HashId("browser.tree"));
 			// 键盘导航:控件只报"想做什么",改模型仍走与鼠标同一条路径。
 			if (tree.KeyMoveTo >= 0 && tree.KeyMoveTo < static_cast<int>(visibleNodes.size()))
 			{
 				Navigate(visibleNodes[tree.KeyMoveTo]->Path);
-				m_Model.TreeScroll = std::max(0.0f, 22.0f * static_cast<float>(tree.KeyMoveTo) - treeRect.H * 0.5f);
+				m_Model.TreeScroll = std::max(0.0f, 22.0f * static_cast<float>(tree.KeyMoveTo) - treeListRect.H * 0.5f);
 			}
 			else if (tree.KeyToggleExpand >= 0 && tree.KeyToggleExpand < static_cast<int>(visibleNodes.size()))
 			{
@@ -3504,7 +3830,7 @@ namespace World
 				}
 				// D10-6:从树菜单发起的重命名,输入框画在树行上(内容区那一份跳过,避免同一 id 画两份)。
 				if (!treeRenameDrawn && m_Model.RenameTarget == node.Path && m_TreeRenameTarget == node.Path
-					&& !(row.Y + row.H < treeRect.Y || row.Y > treeRect.Y + treeRect.H))
+					&& !(row.Y + row.H < treeListRect.Y || row.Y > treeListRect.Y + treeListRect.H))
 				{
 					RenderRenameField(ctx, node.Path,
 						{ row.X + 18.0f, row.Y + 1.0f, std::max(60.0f, row.W - 22.0f), row.H - 2.0f }, theme);
@@ -3580,7 +3906,19 @@ namespace World
 			};
 			// 0 = 新建(展开的清单 = 资产类型注册表,不再硬编码类型)
 			const Wui::WuiRect newRow { menuRect.X + 4.0f, menuRect.Y + 4.0f, menuW - 8.0f, itemH };
-			if (RenderNewAssetRow(ctx, Wui::HashId("browser.toolbar.menu.0"), newRow, theme))
+			const bool toolbarSourcesScope = m_Model.Scope == BrowserRootScope::ProjectSources;
+			if (toolbarSourcesScope)
+			{
+				// CPPSRC-1:源码根下"新建"只有 C++ 脚本一条(材质/场景/脚本/文件夹都是内容根语义);
+				// 走宿主同一个向导(File ▸ 新建 C++ 脚本…),不再展开资产类型清单。
+				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ Script…");
+				if (Wui::MenuItem(ctx, Wui::HashId("browser.toolbar.menu.newcpp"), newRow, newCppLabel, true, theme))
+				{
+					m_Host.RequestNewCppScript();
+					ctx.ClosePopup(toolbarPopup);
+				}
+			}
+			else if (RenderNewAssetRow(ctx, Wui::HashId("browser.toolbar.menu.0"), newRow, theme))
 				m_NewMenuOwner = (m_NewMenuOwner == 1) ? 0 : 1;
 			if (ctx.IsHovered(newRow))
 				hoveredIndex = 0;
@@ -3604,7 +3942,7 @@ namespace World
 				m_Model.Current != m_Model.Root, [this] { GoUp(); });
 			// 展开的"新建"清单(右/左侧贴边翻转);idx>0 的行被悬停 = 用户离开了新建行 → 收起。
 			Wui::WuiRect newMenuRect;
-			if (m_NewMenuOwner == 1)
+			if (m_NewMenuOwner == 1 && !toolbarSourcesScope)
 				newMenuRect = RenderNewAssetItems(ctx, "browser.toolbar.menu.new.", menuRect, rect, theme);
 			ctx.PopOverlay();
 			if (m_NewMenuOwner == 1 && hoveredIndex > 0)
@@ -3643,6 +3981,10 @@ namespace World
 		{
 			// 根行可新建/刷新/打开,但重命名/删除内容根会让整棵树失效 → 这两项对根行禁用。
 			const bool treeRoot = m_TreeMenuPath == m_Model.Root;
+			// CPPSRC-1:项目源码根下树的"新建文件夹/重命名/删除"全部锁死(理由见源码锁定文案)。
+			const bool treeSourcesScope = m_Model.Scope == BrowserRootScope::ProjectSources;
+			const std::string treeLockedReason = Wui::Tr("panel.content_browser.src.locked_reason",
+				"C++ sources are built by CMake — rename or delete them in Visual Studio or File Explorer.");
 			struct TreeMenuItem
 			{
 				const char* Label;
@@ -3651,7 +3993,7 @@ namespace World
 				std::function<void()> Action;
 			};
 			const std::vector<TreeMenuItem> items = {
-				{ "New Folder", Wui::HashId("browser.tree.menu.newfolder"), true,
+				{ "New Folder", Wui::HashId("browser.tree.menu.newfolder"), !treeSourcesScope,
 					[this, &ctx]
 					{
 						const std::filesystem::path parent = m_TreeMenuPath;
@@ -3661,13 +4003,13 @@ namespace World
 						if (!created.empty())
 							m_TreeRenameTarget = created;
 					} },
-				{ "Rename", Wui::HashId("browser.tree.menu.rename"), !treeRoot,
+				{ "Rename", Wui::HashId("browser.tree.menu.rename"), !treeRoot && !treeSourcesScope,
 					[this, &ctx]
 					{
 						StartRename(ctx, m_TreeMenuPath);
 						m_TreeRenameTarget = m_TreeMenuPath;
 					} },
-				{ "Delete", Wui::HashId("browser.tree.menu.delete"), !treeRoot,
+				{ "Delete", Wui::HashId("browser.tree.menu.delete"), !treeRoot && !treeSourcesScope,
 					[this]
 					{
 						// 复用内容区删除流程:选中该行 → 现有删除确认弹窗 → DeleteSelection。
@@ -3698,6 +4040,24 @@ namespace World
 						items[i].Action();
 						if (m_Ctx) m_Ctx->RecordOp("menu", "item", items[i].Label, "browser-tree");
 						ctx.CloseAllPopups();
+					}
+					else if (!items[i].Enabled && treeSourcesScope)
+					{
+						// 与内容区右键菜单同一口径:禁用项的理由常驻在 a11y 节点上(悬停时再弹气泡)。
+						if (ctx.IsHovered(item))
+							ctx.SetTooltip(treeLockedReason);
+						Wui::WuiAccessNode node;
+						node.Id = items[i].Id;
+						node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+						node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+						node.Kind = "menu-item";
+						node.Label = items[i].Label;
+						node.Tooltip = treeLockedReason;
+						node.Rect = item;
+						node.Enabled = false;
+						node.Interactive = true;
+						node.Visible = true;
+						Wui::WuiAccessibility::Get().Register(node);
 					}
 				}
 				if (ctx.IsKeyPressed(KeyCodes::Escape))
@@ -3747,6 +4107,9 @@ namespace World
 			slice.Type = type.Name;
 			slice.Kind = type.Kind;
 			slice.Extension = LowerExtension(path);
+			// CPPSRC-1:项目源码根下的 `Generated/**` = 构建生成物(schema 注册 + Game.manifest 同步)。
+			slice.GeneratedSource = m_Model.Scope == BrowserRootScope::ProjectSources
+				&& !slice.IsDir && IsGeneratedSourcePath(path.lexically_relative(m_Model.Root));
 			// M4-TEX P4:源图行的两枚徽标输入(有资产 / 已烘焙)。判定要读源字节算 sha256,
 			// 所以按 (源图 / .wtex / .wtexc) 的 mtime 缓存,只有真变了才重算。
 			if (slice.Kind == EditorAssetKind::TextureSource && !slice.IsDir)
@@ -3776,6 +4139,13 @@ namespace World
 					slice.TypeLabel = Wui::Tr("asset.file.texture_source", "Texture source");
 					break;
 				case EditorAssetKind::Script: slice.TypeLabel = Wui::Tr("asset.file.script", "Script"); break;
+				// CPPSRC-1:项目层 C++ 源码(内容根里一般不出现,项目源码根下是主角)。
+				case EditorAssetKind::CppHeader:
+					slice.TypeLabel = Wui::Tr("asset.file.cpp_header", "C++ Header");
+					break;
+				case EditorAssetKind::CppSource:
+					slice.TypeLabel = Wui::Tr("asset.file.cpp_source", "C++ Source");
+					break;
 				default: slice.TypeLabel = type.Name; break;
 			}
 			// 列表模式本来就要显示"大小"列:整表统计沿用旧行为;
@@ -4004,8 +4374,29 @@ namespace World
 		const Wui::WuiId popup = Wui::HashId("browser.context");
 		if (ctx.IsPopupOpen(popup) && !m_Model.ContextMenuPath.empty())
 		{
-			struct BrowserItem { std::string Label; std::function<void()> Action; };
+			// CPPSRC-1:条目多一个 Enabled(源码根下锁死重命名/删除/剪切/粘贴)与 Reason
+			// (禁用理由 —— 悬停提示 + a11y Tooltip,灰项不能没有理由)。
+			struct BrowserItem
+			{
+				std::string Label;
+				std::function<void()> Action;
+				bool Enabled = true;
+				std::string Reason;
+				// 无障碍 id 的稳定后缀(留空 = 沿用既有"按英文标签"的口径;本地化标签会变,
+				// 所以新加的跨语言条目(如 open-vs)显式给 id)。
+				std::string Id;
+			};
 			const bool single = m_Model.Selected.size() == 1;
+			// 项目源码根 = 只读浏览(源码由 CMake 编译;schema 注册与 Game.manifest 依赖这些路径)。
+			const bool sourcesScope = m_Model.Scope == BrowserRootScope::ProjectSources;
+			const std::string sourcesLockedReason = Wui::Tr("panel.content_browser.src.locked_reason",
+				"C++ sources are built by CMake — rename or delete them in Visual Studio or File Explorer.");
+			const std::string openInVsLabel = Wui::Tr("panel.content_browser.menu.open_vs",
+				"Open in Visual Studio");
+			const EditorAssetKind contextKind = std::filesystem::is_directory(m_Model.ContextMenuPath)
+				? EditorAssetKind::Folder : DescribeAssetType(m_Model.ContextMenuPath, false).Kind;
+			const bool contextIsCpp = contextKind == EditorAssetKind::CppHeader
+				|| contextKind == EditorAssetKind::CppSource;
 			// P4-UX16:"新建 X"不再挂在**条目**右键菜单上 —— 它建在"当前文件夹",和条目无关
 			// (资源管理器同款:新建属于空白处,条目菜单只做对该条目本身的操作)。
 			// P4-U13:prefab 的菜单按"它是资产不是文件"来排 —— 打开编辑 / 实例化到当前场景
@@ -4079,7 +4470,10 @@ namespace World
 			else
 			{
 				items = {
-					{ "Open", [this] { OpenItem(m_Model.ContextMenuPath); } },
+					// CPPSRC-1:项目源码根下"Open"就是"用 Visual Studio 打开"(双击同一条路径)。
+					{ contextIsCpp ? openInVsLabel : std::string("Open"),
+						[this] { OpenItem(m_Model.ContextMenuPath); }, true, std::string(),
+						contextIsCpp ? std::string("open-vs") : std::string() },
 					{ "Cut", [this] { Cut(); } },
 					{ "Copy", [this] { Copy(); } },
 					{ "Paste", [this] { PasteInto(std::filesystem::is_directory(m_Model.ContextMenuPath) ? m_Model.ContextMenuPath : m_Model.Current); } },
@@ -4087,6 +4481,21 @@ namespace World
 					{ "Open in Explorer", [this] { OpenInExplorer(m_Model.ContextMenuPath); } },
 					{ "Delete", [this] { m_Model.ShowDeleteModal = true; } },
 				};
+				if (sourcesScope)
+				{
+					// 锁死:改名/删除/剪切/粘贴会破坏 CMake glob 与 schema/清单依赖 ——
+					// 保留菜单项但禁用 + 理由(用户能看到"为什么不能点"),而不是静默消失。
+					for (BrowserItem& entry : items)
+					{
+						const bool destructive = entry.Label == "Cut" || entry.Label == "Paste"
+							|| entry.Label == "Rename" || entry.Label == "Delete";
+						if (destructive)
+						{
+							entry.Enabled = false;
+							entry.Reason = sourcesLockedReason;
+						}
+					}
+				}
 				// 还没有资产的源图:排在最前的一条 = 建资产(设置的家就是它,见 P0 §3)。
 				if (textureSourceFile && !textureSourceHasAsset)
 				{
@@ -4102,12 +4511,33 @@ namespace World
 				for (size_t i = 0; i < items.size(); ++i)
 				{
 					const Wui::WuiRect item { menuPanel.X + 4, menuPanel.Y + 4 + i * 22, menuPanel.W - 8, 22 };
-					if (Wui::ContextMenuItem(ctx, Wui::HashId(("browser.item." + std::string(items[i].Label)).c_str()),
-						item, items[i].Label, theme))
+					const std::string idSuffix = items[i].Id.empty() ? items[i].Label : items[i].Id;
+					const Wui::WuiId itemId = Wui::HashId(("browser.item." + idSuffix).c_str());
+					if (Wui::ContextMenuItem(ctx, itemId, item, items[i].Label, theme, items[i].Enabled))
 					{
 						items[i].Action();
 						if (m_Ctx) m_Ctx->RecordOp("menu", "item", items[i].Label, "browser");
 						ctx.CloseAllPopups();
+					}
+					else if (!items[i].Enabled && !items[i].Reason.empty())
+					{
+						// 禁用项的理由:MenuItem 的 a11y 节点没有 tooltip 参数,这里按同一 id 重登记
+						// (Register 是 upsert,以最后一次为准)⇒ **任何时候**读屏/脚本都读得到原因;
+						// 鼠标真停在这一行上时再弹出气泡。
+						if (ctx.IsHovered(item))
+							ctx.SetTooltip(items[i].Reason);
+						Wui::WuiAccessNode node;
+						node.Id = itemId;
+						node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+						node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+						node.Kind = "menu-item";
+						node.Label = items[i].Label;
+						node.Tooltip = items[i].Reason;
+						node.Rect = item;
+						node.Enabled = false;
+						node.Interactive = true;
+						node.Visible = true;
+						Wui::WuiAccessibility::Get().Register(node);
 					}
 				}
 				if (ctx.IsKeyPressed(KeyCodes::Escape))
@@ -4138,7 +4568,16 @@ namespace World
 			// P4-U7:同上(空白右键菜单)。
 			ctx.RegisterOverlayRect(menuPanel);
 			const Wui::WuiRect newRow { menuPanel.X + 4, menuPanel.Y + 4, menuPanel.W - 8, 22 };
-			if (RenderNewAssetRow(ctx, Wui::HashId("browser.blank.new"), newRow, theme))
+			const bool blankSourcesScope = m_Model.Scope == BrowserRootScope::ProjectSources;
+			if (blankSourcesScope)
+			{
+				// CPPSRC-1:源码根下空白右键只有"新建 C++ 脚本…"(资产类型都不适用);
+				// 走宿主同一个向导(File ▸ 新建 C++ 脚本…)。
+				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ Script…");
+				if (MenuItem(ctx, Wui::HashId("browser.blank.new.cpp"), newRow, newCppLabel, true, theme))
+					m_Host.RequestNewCppScript();
+			}
+			else if (RenderNewAssetRow(ctx, Wui::HashId("browser.blank.new"), newRow, theme))
 				m_NewMenuOwner = (m_NewMenuOwner == 2) ? 0 : 2;
 			struct BlankItem { const char* Label; std::function<void()> Action; };
 			const std::vector<BlankItem> items = {
@@ -4148,15 +4587,21 @@ namespace World
 			for (size_t i = 0; i < items.size(); ++i)
 			{
 				const Wui::WuiRect item { menuPanel.X + 4, menuPanel.Y + 4 + (i + 1) * 24, menuPanel.W - 8, 22 };
-				if (MenuItem(ctx, Wui::HashId(("browser.blank." + std::string(items[i].Label)).c_str()), item, items[i].Label, true, theme))
+				const bool pasteLocked = blankSourcesScope && std::strcmp(items[i].Label, "Paste") == 0;
+				if (MenuItem(ctx, Wui::HashId(("browser.blank." + std::string(items[i].Label)).c_str()), item,
+						items[i].Label, !pasteLocked, theme))
 				{
 					items[i].Action();
 					if (m_Ctx) m_Ctx->RecordOp("menu", "item", items[i].Label, "browser-blank");
 					ctx.CloseAllPopups();
 				}
+				// 禁用项的理由(与内容区右键菜单同一口径)。
+				else if (pasteLocked && ctx.IsHovered(item))
+					ctx.SetTooltip(Wui::Tr("panel.content_browser.src.locked_reason",
+						"C++ sources are built by CMake — rename or delete them in Visual Studio or File Explorer."));
 			}
 			Wui::WuiRect newMenuRect;
-			if (m_NewMenuOwner == 2)
+			if (m_NewMenuOwner == 2 && !blankSourcesScope)
 				newMenuRect = RenderNewAssetItems(ctx, "browser.blank.new.", menuPanel, rect, theme);
 			// 父菜单 + 展开的"新建"清单算同一块点击区(否则点子菜单会把父菜单一起关掉)。
 			Wui::WuiRect clickBlock = menuPanel;
@@ -4231,9 +4676,14 @@ namespace World
 		const bool textFocusActive = Wui::WuiTextFocus::Get().Active();
 		if (!textFocusActive && ctx.Input().Ctrl && ctx.IsKeyPressed(KeyCodes::A) && ctx.IsHovered(content))
 			SelectAll(shortcutPaths);
-		if (!textFocusActive && ctx.IsKeyPressed(KeyCodes::Delete) && !m_Model.Selected.empty() && ctx.IsHovered(content))
+		// CPPSRC-1:项目源码根 = 只读浏览 —— Delete/F2 这两条会把源码删掉/改名的键盘路整条不触发
+		// (菜单项已灰显 + 理由;键盘必须同一条口径,不能"菜单点不动、按 Delete 就删了")。
+		const bool sourcesReadOnly = m_Model.Scope == BrowserRootScope::ProjectSources;
+		if (!textFocusActive && !sourcesReadOnly
+			&& ctx.IsKeyPressed(KeyCodes::Delete) && !m_Model.Selected.empty() && ctx.IsHovered(content))
 			m_Model.ShowDeleteModal = true;
-		if (!textFocusActive && ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
+		if (!textFocusActive && !sourcesReadOnly
+			&& ctx.IsKeyPressed(KeyCodes::F2) && m_Model.Selected.size() == 1 && ctx.IsHovered(content))
 			StartRename(ctx, *m_Model.Selected.begin());
 
 		// ---- P4-UX16:由 OnShortcut(第 2 层路由)排队的"新建"动作 ----
@@ -4243,7 +4693,18 @@ namespace World
 		{
 			const int request = m_PendingNewShortcut;
 			m_PendingNewShortcut = 0;
-			if (request == 2)
+			if (m_Model.Scope == BrowserRootScope::ProjectSources)
+			{
+				// CPPSRC-1:源码根下 Ctrl+N = 新建 C++ 脚本(资产类型都不适用);
+				// Ctrl+Shift+N(新建文件夹)在只读浏览下锁死,只给理由,不做事。
+				if (request == 2)
+					NotifyAssetFailure(Wui::Tr("panel.content_browser.src.locked_reason",
+						"C++ sources are built by CMake — rename or delete them in Visual Studio or File Explorer."));
+				else if (!m_Host.RequestNewCppScript())
+					NotifyAssetFailure(Wui::Tr("panel.content_browser.new_cpp.unavailable",
+						"Open a project first — the New C++ Script wizard writes into <project>/src/Scripts."));
+			}
+			else if (request == 2)
 			{
 				std::string error;
 				if (!CreateAssetFromRegistry("folder", &error))

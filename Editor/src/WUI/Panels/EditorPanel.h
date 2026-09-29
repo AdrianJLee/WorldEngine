@@ -293,6 +293,14 @@ namespace World
 		// 打开脚本编辑器(逻辑路径;每个脚本一个 "script:<逻辑路径>" 面板)。默认空实现。
 		// 实现必须是"创建后默认附加到主窗口"(用户 2026-09-18 决定)。
 		virtual void OpenScriptEditor(const std::string& logicalPath) { (void)logicalPath; }
+		// CPPSRC-1(用户 2026-09-29:项目 C++ "像 asset 资产一样"展示):把内容浏览器切到
+		// **项目 C++ 根**(= `<项目根>/src`,内容根之外)。返回 false = 当前没有项目、
+		// `<项目根>/src` 不存在,或内容浏览器不可用 —— 调用方据此给可读提示/回退。
+		// 这是项目源码视图的唯一入口:File ▸ 项目源码… 与 Scripts 面板的那行入口都走它。
+		virtual bool FocusContentBrowserProjectSources() { return false; }
+		// CPPSRC-1:内容浏览器"项目 C++"根下的 `新建 C++ 脚本…`(工具栏 New / 空白右键 / Ctrl+N)
+		// 与 File ▸ New C++ Script… **同一个向导**。返回 false = 没有当前项目(向导写不进 <项目>/src)。
+		virtual bool RequestNewCppScript() { return false; }
 		// 关闭一个动态面板(脚本编辑器工具栏 Close 按钮)。默认空实现。
 		virtual void CloseEditorPanel(const std::string& panelId) { (void)panelId; }
 		// ---- W5-L1:文档场景的外部改动提示(EditorShell 转发 EditorLayer;默认未接线)----

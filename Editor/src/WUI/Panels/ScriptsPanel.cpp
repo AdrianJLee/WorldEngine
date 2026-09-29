@@ -85,6 +85,8 @@ namespace World
 	{
 		// 面板可能当前没渲染(独立窗口关着/在其它页签);这里只记请求,展开与高亮
 		// 都在下一次 OnRender 做 —— 与 EditorShell 的"帧边界再做窗口动作"同一纪律。
+		// CPPSRC-1:项目 C++ 的展示面已搬到内容浏览器;OnRender 里这条请求会转成
+		// host.FocusContentBrowserProjectSources(),宿主不可用时才回退到"展开段头"的老行为。
 		m_FocusProjectSourcesRequested = true;
 		m_ProjectSourcesCollapsed = false;
 		m_NextProjectScanSeconds = 0.0;
@@ -219,13 +221,24 @@ namespace World
 			m_FocusProjectSourcesRequested = false;
 			m_ProjectSourcesCollapsed = false;
 			RefreshProjectSources(true);
-			m_ProjectSourcesHighlightUntil = NowSeconds() + 2.5;
 			const std::filesystem::path projectRoot = World::Paths::ProjectDir();
 			const std::string sourceRoot = projectRoot.empty()
 				? std::string("<project>/src") : (projectRoot / "src").generic_u8string();
-			SetStatus(Wui::TrFormat("panel.scripts.project_sources.focus_status",
-				"project sources ({count}) under {path}",
-				{ { "count", std::to_string(m_ProjectSources.size()) }, { "path", sourceRoot } }), false);
+			// CPPSRC-1:项目 C++ 的展示面 = 内容浏览器「项目 C++」根。这条请求先走宿主入口;
+			// 宿主不可用(没项目 / 没有 src)时才回退到"展开段头 + 高亮"的老提示。
+			if (host.FocusContentBrowserProjectSources())
+			{
+				SetStatus(Wui::TrFormat("panel.scripts.project_sources.focus_status",
+					"content browser switched to Project C++ ({count}) under {path}",
+					{ { "count", std::to_string(m_ProjectSources.size()) }, { "path", sourceRoot } }), false);
+			}
+			else
+			{
+				m_ProjectSourcesHighlightUntil = NowSeconds() + 2.5;
+				SetStatus(Wui::TrFormat("panel.scripts.project_sources.focus_status",
+					"project sources ({count}) under {path}",
+					{ { "count", std::to_string(m_ProjectSources.size()) }, { "path", sourceRoot } }), true);
+			}
 		}
 		RefreshDiskScripts(false);
 		RefreshProjectSources(false);
@@ -364,15 +377,11 @@ namespace World
 		const float listBottom = rect.Y + rect.H - kStatusReserve;
 		const float listHeight = std::max(0.0f, listBottom - y);
 
-		// PROJ-11/T1:先给"项目源码"段预留空间(有源码时 ≥3 行,折叠时只留段头;
-		// 空态留 2 行:下一步提示 + <项目>/src 路径)—— 场景段再挤也不能把这段压没。
+		// CPPSRC-1:项目源码段现在固定三件(段头 + 一行入口按钮 + 一行路径/空态说明),
+		// 不再按文件数预留行数 —— 文件列表本体在内容浏览器的「项目 C++」根里。
 		const bool projectExpanded = !m_ProjectSourcesCollapsed;
-		const std::size_t projectReservedRows = m_ProjectSources.empty()
-			? (projectExpanded ? 2u : 1u)
-			: (projectExpanded ? std::min<std::size_t>(m_ProjectSources.size(), kProjectMinRows) : 1u);
 		const float projectReserve = kSectionGap + kDiskHeaderHeight
-			+ static_cast<float>(projectReservedRows) * kProjectRowHeight
-			+ (projectExpanded && m_ProjectSources.size() > kProjectMinRows ? 16.0f : 0.0f);
+			+ (projectExpanded ? (kProjectRowHeight + 6.0f + 16.0f) : 0.0f);
 		const float diskReserve = kSectionGap + kDiskHeaderHeight
 			+ (m_DiskScripts.empty() ? 0.0f : kDiskRowHeight);
 		const float sceneLimit = std::min(listBottom,
@@ -473,47 +482,29 @@ namespace World
 
 		if (!m_ProjectSourcesCollapsed)
 		{
-			// 预留已保证前 projectReservedRows 行装得下;这里再按 listBottom 兜一次底。
-			const std::size_t maxProjectRows = std::max<std::size_t>(1,
-				static_cast<std::size_t>(std::max(0.0f, listBottom - y) / kProjectRowHeight));
-			const std::size_t visibleProjectRows = std::min(m_ProjectSources.size(), maxProjectRows);
-			std::size_t drawnProjectRows = 0;
-			for (std::size_t index = 0; index < visibleProjectRows; ++index)
+			// CPPSRC-1(用户 2026-09-29「c++脚本要像 asset 资产一样在编辑器里展示」):这里不再重复
+			// 画 C++ 文件列表(那是内容浏览器「项目 C++」根的职责) —— 只留一行入口,
+			// 点一下就把内容浏览器切到源码根(与 File ▸ 项目源码… 同一条 PanelHost 路径)。
+			const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+			const std::string sourceRoot = projectRoot.empty()
+				? std::string("<project>/src") : (projectRoot / "src").generic_u8string();
+			const Wui::WuiRect entryRect { rect.X + 8.0f, y, rect.W - 16.0f, kProjectRowHeight + 4.0f };
+			const std::string entryLabel = Wui::Tr("panel.scripts.project_sources.open_in_browser",
+				"Open Project C++ in Content Browser");
+			if (Wui::Button(ctx, Wui::HashId("scripts.project_sources.open_in_browser"), entryRect,
+					entryLabel, theme))
 			{
-				if (y + kProjectRowHeight > listBottom + 0.5f)
-					break;
-				const ProjectSource& source = m_ProjectSources[index];
-				const Wui::WuiRect rowRect { rect.X + 8.0f, y, rect.W - 16.0f, kProjectRowHeight - 2.0f };
-				Wui::PanelBackground(ctx, rowRect, theme.PanelHeader);
-				// a11y:`project.source.<index>` = 行本身(只读,value = 绝对路径);
-				// 主按钮 `project.source.open.<index>` = Open in VS(双击行同一条路径)。
-				RegisterReadonlyNode(Wui::HashId(("project.source." + std::to_string(index)).c_str()),
-					"list-item", source.RelativePath, source.DiskPath.string(), rowRect);
-				Wui::Label(ctx, { rowRect.X + 8.0f, rowRect.Y + 3.0f },
-					TruncateUtf8(source.RelativePath, 76), theme.Text, 12.0f);
-
-				const Wui::WuiRect openRect {
-					rowRect.X + rowRect.W - 102.0f, rowRect.Y + 1.0f, 98.0f, 20.0f };
-				const bool doubleClicked = ctx.IsDoubleClicked(rowRect);
-				if (Wui::Button(ctx, Wui::HashId(("project.source.open." + std::to_string(index)).c_str()),
-					openRect, Wui::Tr("panel.scripts.project_sources.open_vs", "Open in VS"), theme)
-					|| doubleClicked)
-				{
-					// 与内容浏览器双击脚本/内置编辑器入口同一条 PanelHost 路径 —— 编辑器侧按
-					// 扩展名分流:`.h/.cpp` 走外部 Visual Studio(EditorShell::OpenScriptEditorNow)。
-					host.OpenScriptEditor(source.DiskPath.generic_string());
-					SetStatus(Wui::Tr("panel.scripts.project_sources.opened", "open in Visual Studio: ")
-						+ source.RelativePath, false);
-				}
-				y += kProjectRowHeight;
-				++drawnProjectRows;
+				if (!host.FocusContentBrowserProjectSources())
+					SetStatus(Wui::Tr("panel.scripts.project_sources.open_in_browser.unavailable",
+						"Open or create a project first — project C++ lives in <project>/src."), true);
+				else
+					SetStatus(Wui::Tr("panel.scripts.project_sources.open_in_browser.done",
+						"Content Browser switched to Project C++: ") + sourceRoot, false);
 			}
+			y += kProjectRowHeight + 6.0f;
 			if (m_ProjectSources.empty())
 			{
 				// 空态给出下一步 + 解析后的 <项目>/src 绝对路径(提示"文件放哪儿")。
-				const std::filesystem::path projectRoot = World::Paths::ProjectDir();
-				const std::string sourceRoot = projectRoot.empty()
-					? std::string("<project>/src") : (projectRoot / "src").generic_u8string();
 				Wui::Label(ctx, { rect.X + 12.0f, y + 1.0f },
 					TruncateUtf8(Wui::Tr("panel.scripts.project_sources.empty",
 						"No C++ sources yet — use File ▶ New C++ Script… or drop files into <project>/src/."), 110),
@@ -522,10 +513,10 @@ namespace World
 					TruncateUtf8(sourceRoot, 110), theme.TextMuted, 11.0f);
 				y += kProjectRowHeight * 2.0f;
 			}
-			else if (m_ProjectSources.size() > drawnProjectRows)
+			else
 			{
-				Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(m_ProjectSources.size() - drawnProjectRows)
-					+ " more project source(s); enlarge the window to see them", theme.TextMuted, 12.0f);
+				Wui::Label(ctx, { rect.X + 12.0f, y + 1.0f },
+					TruncateUtf8(sourceRoot, 110), theme.TextMuted, 11.0f);
 				y += 16.0f;
 			}
 		}

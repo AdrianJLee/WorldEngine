@@ -20,11 +20,12 @@ namespace World
 	//      主窗口)+ 次按钮 External(系统默认程序打开)+ 顶部 New(从 templates/WorldScript.lua
 	//      复制成 scripts/script_<n>.lua,磁盘冲突递增、不覆盖)。
 	//
-	// PROJ-8/T1 追加第二段"项目源码"(用户 2026-09-28:项目的 C++ 文件要显示在该项目的编辑器里):
-	//   ② 项目源码:当前项目 `<项目根>/src/**` 的 `.h/.cpp`(递归,跳过 build/ 与隐藏目录),
-	//      每行显示**相对项目根**的路径,主按钮 Open in VS 走外部 Visual Studio
-	//      (PanelHost::OpenScriptEditor → EditorShell 按扩展名分流;双击行同一条路径)。
-	//      没有当前项目(启动器/未打开项目)时整段显示"先打开或新建项目"的可读提示。
+	// 第二段"项目源码"(PROJ-8/T1 起;**CPPSRC-1 改为一行入口**):
+	//   CPPSRC-1(用户 2026-09-29「之前写的 c++ 脚本在编辑器里的展示要改一下,改成像 asset 资产一样」):
+	//   项目 `<项目根>/src/**` 的 `.h/.cpp` 不再在这里列行 —— 展示面搬到内容浏览器的「项目 C++」根
+	//   (与资产同一套网格/列表/类型列/搜索,双击走外部 Visual Studio)。本段只保留:
+	//   `scripts.project_sources.open_in_browser` 一行入口(点击 → PanelHost::FocusContentBrowserProjectSources)
+	//   + 解析后的 `<项目根>/src` 路径 / 空态提示。段头折叠与 File ▸ 项目源码… 的语义保持。
 	//
 	// 动作控件绘制时登记无障碍节点(scripts.*),AI 通道的 ui.tree / ui.invoke 能驱动它们;
 	// 场景枚举一律走 const Scene::GetRegistry(),Play/Simulate 下不触碰结构写禁令。

@@ -124,6 +124,12 @@ namespace World
 		void OpenScriptEditor(const std::string& logicalPath) override;
 		// 帧边界执行版:内部使用(AI 通道在帧首、OnRender 开头处理待办时)。
 		void OpenScriptEditorNow(const std::string& logicalPath);
+		// CPPSRC-1:项目 C++ 的唯一展示面 = 内容浏览器的"项目 C++"根
+		// (EditorPanel.h 的 PanelHost 契约)。把面板拉回停靠树 → 激活 → 切根;
+		// 失败(false)= 没当前项目 / 没有 `<项目根>/src` / 面板不可用。
+		bool FocusContentBrowserProjectSources() override;
+		// CPPSRC-1:内容浏览器里的"新建 C++ 脚本…"(与 File ▸ 新建 C++ 脚本… 同一个向导)。
+		bool RequestNewCppScript() override;
 		// ---- CPPT-7/PROJ-8:项目源码视图 + 外部 Visual Studio(内置编辑器只服务 Lua/Luau)----
 		// 当前项目根(运行期;没有清单 —— 启动器/未打开项目 —— 返回空路径)。
 		std::filesystem::path CurrentProjectRoot() const;

@@ -26,6 +26,13 @@ namespace World
 		TextureSource,
 		TextureAsset,
 		Script,
+		// CPPSRC-1(用户 2026-09-29「c++脚本要像 asset 资产一样在编辑器里展示」):项目层 C++
+		// 源码在内容浏览器里的两个一等类型。它们**不是可引用资产**(AssetCatalog::MatchesKind
+		// 的 default 分支返回 false),只是"像资产一样"展示:同一套网格/列表、类型列、徽标、
+		// 双击打开(外部 Visual Studio)。源码根 = `<项目根>/src`(内容根之外,见
+		// ContentBrowserPanel 的双根口径)。
+		CppHeader,      // .h / .hpp / .inl
+		CppSource,      // .c / .cc / .cpp / .cxx
 		Folder,
 		// 兼容别名:P4 之前的代码把"贴图"叫 Texture(= 源图)。新代码请用上面两个名字。
 		// **必须放在最后**:枚举值按"上一个枚举项"自增,别名插在中间会把后面的项顶成重复值
@@ -77,6 +84,26 @@ namespace World
 			return { EditorAssetKind::TextureSource, "Texture Source" };
 		if (extension == ".lua" || extension == ".luau")
 			return { EditorAssetKind::Script, "Script" };
+		// CPPSRC-1:项目层 C++ 源码(类型名走 Wui::Tr("asset.file.cpp_header" / "asset.file.cpp_source"),
+		// 这里的 Name 只作英文兜底/日志用)。
+		if (extension == ".h" || extension == ".hpp" || extension == ".inl")
+			return { EditorAssetKind::CppHeader, "C++ Header" };
+		if (extension == ".c" || extension == ".cc" || extension == ".cpp" || extension == ".cxx")
+			return { EditorAssetKind::CppSource, "C++ Source" };
 		return { EditorAssetKind::Unknown, "File" };
+	}
+
+	// CPPSRC-1:`src/Generated/**` 是引擎/项目构建生成物(schema 注册 + `Game.manifest` 同步),
+	// 在内容浏览器里照常列出(用户口径"要看得见"),但徽标与类型列要标成"Generated",
+	// 让"能改的源码"和"别手改的生成物"一眼分开。相对路径的第一段是 `Generated` 即命中。
+	inline bool IsGeneratedSourcePath(const std::filesystem::path& relativeToSourceRoot)
+	{
+		auto it = relativeToSourceRoot.begin();
+		if (it == relativeToSourceRoot.end())
+			return false;
+		std::string first = it->string();
+		std::transform(first.begin(), first.end(), first.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		return first == "generated";
 	}
 }

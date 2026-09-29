@@ -22,6 +22,20 @@
 
 namespace World
 {
+	// CPPSRC-1(用户 2026-09-29「之前写的 c++ 脚本在编辑器里的展示要改一下,改成像 asset 资产一样」):
+	// 内容浏览器有**两个根**,点左侧树顶部两行切换:
+	//   Content       = 内容根 `World::Paths::AssetRoot()`(默认 `<项目根>/assets`)—— 资产;
+	//   ProjectSources= 项目 C++ `<项目根>/src` —— 项目自己的 .h/.cpp(内容根之外,以前只在
+	//                   Scripts 面板里以列表出现,现在与资产同一套网格/列表/类型列/搜索,
+	//                   双击走外部 Visual Studio)。
+	// 枚举放在命名空间层是为了让状态模型(定义在类之前)也能用;类里 `using RootScope = BrowserRootScope`
+	// 保留 `ContentBrowserPanel::RootScope` 这个调用点拼写。
+	enum class BrowserRootScope
+	{
+		Content = 0,
+		ProjectSources = 1,
+	};
+
 	// 目录树节点(缓存扫描结果,避免每帧全量扫盘)。
 	struct BrowserDirNode
 	{
@@ -35,6 +49,12 @@ namespace World
 	{
 		// PROJ-1/T3:内容根在**构造时**取运行期值(无覆盖时 = 编译期默认项目根的 assets)。
 		std::filesystem::path Root = World::Paths::AssetRoot();
+		// CPPSRC-1:两个根各自的绝对路径 + 当前是哪一个。`Root` 恒等于"当前根";
+		// 本结构里其余字段(Current/TreeOpen/Selected/History/搜索/滚动/缓存)描述的都是**当前根**,
+		// 切根时的搬运与分桶由 ContentBrowserPanel::RootStates 负责。
+		std::filesystem::path ContentRoot = World::Paths::AssetRoot();
+		std::filesystem::path SourceRoot;
+		BrowserRootScope Scope = BrowserRootScope::Content;
 		std::filesystem::path Current;
 		char Search[256] = { 0 };
 		std::vector<std::filesystem::path> SearchResults;
@@ -86,6 +106,9 @@ namespace World
 		std::string Type;      // EditorAssetTypes 的类型名(Folder / Scene / Material / …)
 		// M4-S2/Slang-B1:类型枚举(切片绘制按它区分渲染:着色器的图标染色与类型徽标)。
 		EditorAssetKind Kind = EditorAssetKind::Unknown;
+		// CPPSRC-1:`<项目根>/src/Generated/**` 的切片 —— 类型列照常(C++ Header/Source),
+		// 但要多挂一枚 `Generated` 徽标,让"能改的源码"和"别手改的生成物"一眼分开。
+		bool GeneratedSource = false;
 		// M4-TEX P4:纹理源图两枚徽标的输入(网格:胶囊徽标;列表:类型列后缀)。
 		//   HasTextureAsset  = 同目录同主名的 `.wtex` 资产在场("有资产" / "默认设置")
 		//   TextureArtifact  = 该源图的 `.wtexc` 状态("已烘焙" / "需重烘")
@@ -100,6 +123,9 @@ namespace World
 	class ContentBrowserPanel final : public EditorPanel
 	{
 	public:
+		// CPPSRC-1:调用点拼写保持 `ContentBrowserPanel::RootScope::…`(枚举本体在命名空间层,
+		// 因为状态模型定义在类之前)。
+		using RootScope = BrowserRootScope;
 		explicit ContentBrowserPanel(PanelHost& host);
 		~ContentBrowserPanel();
 		const char* Id() const override { return "content_browser"; }
@@ -112,6 +138,13 @@ namespace World
 		// (居中 + 全窗口挡输入),面板不再画自己的覆盖层;只保留 shell 需要的两个入口:
 		// 导入成功后刷新列表(与工具栏 Refresh 同一条路径)。
 		void RefreshContents();
+		// CPPSRC-1:切根(幂等)。没有当前项目 / `<项目根>/src` 不是目录 / 面板不可用 ⇒ 返回 false
+		// 且**不改变任何状态**;成功 = 换 Root、恢复该根自己的目录/展开树/选中/滚动/搜索,
+		// 并清掉重命名/右键菜单/剪贴板这类瞬态。File ▸ 项目源码… 与 Scripts 面板的入口都走这条。
+		bool SwitchRoot(RootScope scope);
+		RootScope CurrentRoot() const { return m_Model.Scope; }
+		// 项目源码根是否可用(有当前项目 且 `<项目根>/src` 是目录);0.5s 节流,每帧调用无负担。
+		bool ProjectSourcesAvailable() const;
 		// 当前浏览目录:shell 打开导入模态时用它作默认落点(与双击导入/拖放同一约定)。
 		const std::filesystem::path& CurrentDirectory() const { return m_Model.Current; }
 		// P4-U13d:选中刚创建/刚生成的资产(逻辑路径相对内容根);目标不在内容根下或不存在 → false。
@@ -224,6 +257,9 @@ namespace World
 		bool LogicalPathFor(const std::filesystem::path& path, std::string* outLogical) const;
 		// 把源图行的徽标登记进无障碍树(可脚本读:label = "Asset"/"Baked"…,value = 状态码)。
 		void RegisterTextureBadgeNode(const BrowserSlice& slice, const Wui::WuiRect& rect);
+		// CPPSRC-1:把 `Generated` 徽标登记进无障碍树(id `browser.badge.generated.<相对源码根路径>`)——
+		// 网格模式挂胶囊,列表模式挂在类型列上(文字版),两种模式的脚本读法一致。
+		void RegisterGeneratedBadgeNode(const BrowserSlice& slice, const Wui::WuiRect& rect);
 		// D10-6:树行菜单「在资源管理器打开」——直接打开该目录本身(不是 /select 选中它)。
 		void OpenFolderInExplorer(const std::filesystem::path& path);
 		void Cut();
@@ -235,6 +271,45 @@ namespace World
 		void InvalidateContents();
 		void SaveState();
 		void LoadState();
+		// ---- CPPSRC-1:双根状态桶 ----
+		// 每个根各存一份"可搬运状态"(本结构里的字段与 ContentBrowserModel 同名同义);切根时
+		// 先 Capture 当前根、再 Apply 目标根 —— 两个根的浏览位置/展开树/选中/历史/搜索/滚动/缓存
+		// 互不污染(单根假设的那些字段原来只有一份,这是本任务最大的回归面)。
+		struct RootState
+		{
+			std::filesystem::path Current;
+			std::set<std::filesystem::path> TreeOpen;
+			std::set<std::filesystem::path> Selected;
+			std::filesystem::path LastSelected;
+			std::vector<std::filesystem::path> History;
+			int HistoryIndex = -1;
+			float TreeScroll = 0.0f;
+			float ContentScroll = 0.0f;
+			std::vector<BrowserDirNode> DirTree;
+			bool DirTreeDirty = true;
+			std::filesystem::file_time_type TreeStamp {};
+			std::chrono::steady_clock::time_point LastTreeCheck {};
+			std::filesystem::path ListingPath;
+			std::vector<std::filesystem::path> Listing;
+			bool ListingDirty = true;
+			std::filesystem::file_time_type ListingStamp {};
+			std::chrono::steady_clock::time_point LastListingCheck {};
+			std::map<std::filesystem::path, std::pair<std::filesystem::file_time_type, uintmax_t>> SizeCache;
+			std::string SearchEdit;
+			std::vector<std::filesystem::path> SearchResults;
+			std::string Search;   // 搜索框是 char[256],这里按字符串存(切根时逐字节还原)
+		};
+		// 索引 = static_cast<int>(BrowserRootScope)。
+		RootState m_RootStates[2];
+		bool m_RootStatesReady[2] { false, false };
+		void CaptureRootState(BrowserRootScope scope);
+		void ApplyRootState(BrowserRootScope scope);
+		// `<项目根>/src`(没有项目时为空路径)。
+		std::filesystem::path ProjectSourceRoot() const;
+		// 源码根可用性缓存(见 ProjectSourcesAvailable;mutable —— 它是 const 查询)。
+		mutable double m_SourceRootCheckedAt = -1.0;
+		mutable std::filesystem::path m_SourceRootChecked;
+		mutable bool m_SourceRootAvailable = false;
 		// P4-UX14:内容区统一切片的两个绘制入口(网格 / 列表 + 常驻表头)。
 		// interact = 面板既有的选中/双击/拖拽/右键处理,按切片路径调用。
 		void RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiRect& area, const Wui::WuiTheme& theme,

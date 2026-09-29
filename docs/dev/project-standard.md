@@ -9,7 +9,7 @@
 | 层 | 位置 | 归属 | 构建 |
 | --- | --- | --- | --- |
 | **引擎层 C++** | `Engine/**`(产物 `WorldRuntime.dll`) | 引擎仓库;项目**不复制、不改** | 引擎自己的解决方案 `build/x64-Debug/World.slnx` |
-| **游戏项目层 C++** | `<项目根>/src/**`(`Components/`、`Scripts/` 等) | 项目自己;脚本与组件都落这里 | 当前阶段:用外部 Visual Studio 打开项目源码;独立构建见 §5 |
+| **游戏项目层 C++** | `<项目根>/src/**`(`Components/`、`Scripts/` 等) | 项目自己;脚本与组件都落这里 | 编辑器:内容浏览器「项目 C++」根(与资产同一套网格/列表/搜索,双击走外部 Visual Studio);构建见 §5 |
 
 - **示例内容由示例项目模板提供**(`templates/project-example/**`,包含 4 个场景、示例材质/预制体/脚本/着色器/贴图)。
   **新建项目走向导选择模板**(干净骨架 `templates/project-empty/**` 或示例模板) —— 仓库内不再有内置的 `projects/default`。
