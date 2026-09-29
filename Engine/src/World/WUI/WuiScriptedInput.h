@@ -32,10 +32,15 @@ namespace World::Wui
 		// 同一窗口同时只有一份待注入输入;ui.type = QueueClick(聚焦) + QueueType。
 		void QueueType(const std::string& windowKey, std::string text);
 		// 注入一次按键(第 1 帧按下、第 2 帧释放):用于 AI 复现方向键/Enter 等键路。
+		// holdFrames > 0 时,按下帧之后**继续按住** holdFrames 帧再释放 —— 真人敲一次键
+		// 通常横跨好几帧(60fps 下 80ms ≈ 5 帧),只按 1 帧会漏掉"按住连触发"这类缺陷
+		// (用户 2026-09-29:"那个位置的删除太灵敏了" = 单击一次删掉好几个字符)。
+		// 按住期间只写 KeyDown、不写 KeyRepeated:与"未到系统重复延迟的短按"一致。
 		// ctrl/shift = 注入这两帧的修饰键状态。真实键盘的 Ctrl+A 在 ctx.Input().Ctrl 上,
 		// 而 keybd_event 合成的 Ctrl **到不了 WUI 的输入状态**(两次实测),所以组合键只能
 		// 从这里注入 —— 否则"框内 Ctrl+A"这类作用域问题永远只能靠人眼观察。
-		void QueueKey(const std::string& windowKey, uint32_t keyCode, bool ctrl = false, bool shift = false);
+		void QueueKey(const std::string& windowKey, uint32_t keyCode, bool ctrl = false, bool shift = false,
+			int holdFrames = 0);
 		// 注入一次滚轮(第 1 帧写 MousePos + Wheel,下一帧自动清掉)。滚动区/列表的
 		// "滚不动"类问题只能靠滚轮复现 —— 键盘 ↑/↓ 与拖动滚动条是另外两条路径,不能互相证明。
 		void QueueWheel(const std::string& windowKey, glm::vec2 position, float wheel);
@@ -57,6 +62,8 @@ namespace World::Wui
 			// 按键注入(0 = 无;1 = 待按下的帧;2 = 待释放的帧)。
 			uint32_t Key = 0;
 			int KeyPhase = 0;
+			// 按下之后还要"按住"多少帧(见 QueueKey 的 holdFrames 口径)。
+			int KeyHoldFrames = 0;
 			bool KeyCtrl = false;
 			bool KeyShift = false;
 			// 滚轮注入(0 = 无;>0 = 还剩几帧要写 Wheel)。

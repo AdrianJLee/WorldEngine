@@ -893,6 +893,8 @@ namespace World
 			}
 			// P4-UX16:可选 ctrl=/shift=(1/true/yes)→ 注入组合键。真实键盘的 Ctrl 无法通过
 			// keybd_event 进到 WUI 输入状态,组合键只能走这里(否则"框内 Ctrl+A"无法脚本复现)。
+			// 可选 frames=N(≥0)→ 按下后**继续按住 N 帧**再释放:真人敲一次键横跨好几帧
+			// (60fps 下 80ms ≈ 5 帧),默认的"只按 1 帧"会漏掉"按住连触发"类缺陷。
 			const auto flag = [&args](const char* name)
 			{
 				if (!args.count(name))
@@ -902,8 +904,10 @@ namespace World
 			};
 			const bool ctrl = flag("ctrl");
 			const bool shift = flag("shift");
-			Wui::WuiScriptedInput::Get().QueueKey(node->Window, keyCode, ctrl, shift);
+			const int holdFrames = args.count("frames") ? std::max(0, std::atoi(arg("frames").c_str())) : 0;
+			Wui::WuiScriptedInput::Get().QueueKey(node->Window, keyCode, ctrl, shift, holdFrames);
 			result = "queued key " + keyName + (ctrl ? " +Ctrl" : "") + (shift ? " +Shift" : "")
+				+ (holdFrames > 0 ? (" (held " + std::to_string(holdFrames) + " frames)") : "")
 				+ " to " + node->Kind + " '" + node->Label + "' window=" + node->Window;
 			return true;
 		}

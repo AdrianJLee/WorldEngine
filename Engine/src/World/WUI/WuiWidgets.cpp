@@ -1023,6 +1023,12 @@ namespace World::Wui
 			if (cursor > count) cursor = count;
 			// Shift 组合键扩展选区:靠近哪一端就移动哪一端,归零则取消选区。
 			const bool shift = ctx.Input().Shift;
+			// PROJ-17b(用户 2026-09-29:"那个位置的删除太灵敏了"):编辑键一律走**按下沿 + 系统重复**
+			// (WasKeyTriggered = 本帧新按下 或 本帧 OS 重复事件),**不能**用 IsKeyPressed ——
+			// 那是"按住就每帧为真"(KeyDown 列表),真人敲一次键横跨好几帧(60fps 下 80ms ≈ 5 帧),
+			// 于是 Backspace/Delete 一次轻按会按帧数连删好几个字符(实测按住 6 帧 = 删 7 个字符),
+			// 方向键/Home/End 也会一帧一格乱窜。按住连删的正确来源是 OS 重复事件(与系统"重复延迟/
+			// 重复速度"一致),不是帧率。
 			auto moveEdge = [&](int candidate)
 			{
 				if (selStart < 0 || selEnd <= selStart)
@@ -1038,27 +1044,27 @@ namespace World::Wui
 				if (selStart > selEnd) std::swap(selStart, selEnd);
 				if (selStart == selEnd) { selStart = -1; selEnd = -1; }
 			};
-			if (ctx.IsKeyPressed(KeyCodes::Left) && cursor > 0)
+			if (ctx.WasKeyTriggered(KeyCodes::Left) && cursor > 0)
 			{
 				if (shift) moveEdge(cursor - 1);
 				else { --cursor; selStart = -1; selEnd = -1; }
 			}
-			if (ctx.IsKeyPressed(KeyCodes::Right) && cursor < count)
+			if (ctx.WasKeyTriggered(KeyCodes::Right) && cursor < count)
 			{
 				if (shift) moveEdge(cursor + 1);
 				else { ++cursor; selStart = -1; selEnd = -1; }
 			}
-			if (ctx.IsKeyPressed(KeyCodes::Home))
+			if (ctx.WasKeyTriggered(KeyCodes::Home))
 			{
 				if (shift) moveEdge(0);
 				else { cursor = 0; selStart = -1; selEnd = -1; }
 			}
-			if (ctx.IsKeyPressed(KeyCodes::End))
+			if (ctx.WasKeyTriggered(KeyCodes::End))
 			{
 				if (shift) moveEdge(count);
 				else { cursor = count; selStart = -1; selEnd = -1; }
 			}
-			if (ctx.IsKeyPressed(KeyCodes::Backspace))
+			if (ctx.WasKeyTriggered(KeyCodes::Backspace))
 			{
 				if (selStart >= 0 && selEnd > selStart)
 				{
@@ -1070,7 +1076,7 @@ namespace World::Wui
 				else if (cursor > 0)
 					EraseBefore(buffer, cursor);
 			}
-			if (ctx.IsKeyPressed(KeyCodes::Delete))
+			if (ctx.WasKeyTriggered(KeyCodes::Delete))
 			{
 				if (selStart >= 0 && selEnd > selStart)
 				{
@@ -1082,8 +1088,8 @@ namespace World::Wui
 				else if (cursor < Utf8Count(buffer))
 					EraseAt(buffer, cursor);
 			}
-			if (ctx.IsKeyPressed(KeyCodes::Enter)) submitted = true;
-			if (ctx.IsKeyPressed(KeyCodes::Escape)) cancelled = true;
+			if (ctx.WasKeyTriggered(KeyCodes::Enter)) submitted = true;
+			if (ctx.WasKeyTriggered(KeyCodes::Escape)) cancelled = true;
 			return submitted || cancelled;
 		}
 

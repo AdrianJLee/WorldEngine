@@ -114,11 +114,13 @@ namespace World::Wui
 		return false;
 	}
 
-	void WuiScriptedInput::QueueKey(const std::string& windowKey, uint32_t keyCode, bool ctrl, bool shift)
+	void WuiScriptedInput::QueueKey(const std::string& windowKey, uint32_t keyCode, bool ctrl, bool shift,
+		int holdFrames)
 	{
 		Pending& pending = m_Pending[windowKey];
 		pending.Key = keyCode;
 		pending.KeyPhase = 1;
+		pending.KeyHoldFrames = std::max(0, holdFrames);
 		pending.KeyCtrl = ctrl;
 		pending.KeyShift = shift;
 	}
@@ -162,12 +164,21 @@ namespace World::Wui
 			{
 				input.KeyDown.push_back(pending.Key);
 				input.KeyPressed.push_back(pending.Key);
-				pending.KeyPhase = 2;
+				pending.KeyPhase = pending.KeyHoldFrames > 0 ? 3 : 2;
+			}
+			else if (pending.KeyPhase == 3)
+			{
+				// 按住:保持 KeyDown(控件侧"按住每帧触发"的路径照旧能读到),不发 KeyPressed /
+				// KeyRepeated —— 一次真人敲键横跨几帧,但通常还没到系统重复延迟。
+				input.KeyDown.push_back(pending.Key);
+				if (--pending.KeyHoldFrames <= 0)
+					pending.KeyPhase = 2;
 			}
 			else
 			{
 				pending.KeyPhase = 0;
 				pending.Key = 0;
+				pending.KeyHoldFrames = 0;
 				pending.KeyCtrl = false;
 				pending.KeyShift = false;
 			}
