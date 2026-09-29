@@ -42,5 +42,8 @@
   "notice.project_delete.done": "已永久删除:{path}",
   "notice.project_delete.failed": "永久删除失败:{reason}",
   "notice.project.runtime_missing": "Runtime 还没构建({exe})。先构建:{command}",
-  "notice.project.runtime_launched": "已启动项目运行时:{path}"
+  "notice.project.runtime_launched": "已启动项目运行时:{path}",
+  "notice.build_entry.no_project": "还没有打开项目 —— 先在启动器里打开或新建一个项目,再生成它的构建入口。",
+  "notice.build_entry.copied": "构建指引已复制到剪贴板。",
+  "notice.build_entry.explorer_failed": "打不开项目目录:{path}"
 }

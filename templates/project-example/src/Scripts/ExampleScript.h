@@ -158,6 +158,7 @@ namespace World
 				Doc("Nested struct sample: expandable child rows defined once by Game::ExampleStats (Health/Count with declared defaults)."));
 			// ---- Array:元素类型覆盖 Float / Vec3 / Struct / Enum ----
 			WE_FIELD(Scores, Array, Of(Float),
+				Range(0.0f, 100.0f), Unit("pts"), Step(1.0f),
 				Doc("Array<Float> sample: one row per element (row label = index), '-' removes and '+' appends."));
 			WE_FIELD(Path, Array, Of(Vec3),
 				Doc("Array<Vec3> sample: waypoints; each element is an editable vector row."));
@@ -167,6 +168,7 @@ namespace World
 				Doc("Array<Enum> sample: every element is an ExampleMode dropdown; the scene stores integers."));
 			// ---- Map:键固定 std::string ----
 			WE_FIELD(Costs, Map, Of(Float),
+				Range(0.0f, 500.0f), Unit("coins"),
 				Doc("Map<Float> sample: one row per key (key = string, value = number); '+' asks for a new key name first."));
 			WE_FIELD(Units, Map, Of(ExampleStats),
 				Doc("Map<Struct> sample: string key -> Game::ExampleStats; expand an entry to edit the nested fields."));

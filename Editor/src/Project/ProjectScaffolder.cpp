@@ -366,6 +366,15 @@ namespace World::Editor
 					Entity light = Entity::CreateEntity(scene.get(), "Directional Light");
 					light.AddComponent<TransformComponent>();
 					light.AddComponent<DirectionalLightComponent>();
+
+					// PROJ-10(用户 2026-09-29):空白模板也给一颗**内置图元**立方体 —— 启动就能看见东西,
+					// 不引入任何资产/材质(Primitive 是引擎内置网格,Color 直接当基色)。
+					Entity cube = Entity::CreateEntity(scene.get(), "Cube");
+					cube.AddComponent<TransformComponent>(glm::vec3 { 0.0f, 0.0f, 0.0f });
+					MeshRendererComponent cubeRenderer;
+					cubeRenderer.Primitive = "cube";
+					cubeRenderer.Color = glm::vec4 { 0.82f, 0.82f, 0.86f, 1.0f };
+					cube.AddComponent<MeshRendererComponent>(cubeRenderer);
 				}
 				catch (const std::exception& exception)
 				{
@@ -662,6 +671,201 @@ namespace World::Editor
 			std::sort(placed.begin(), placed.end());
 			return placed;
 		}
+
+		// ---- PROJ-11/T1:给"已存在的项目"补齐构建/启动入口 ----
+
+		// 模板选择:项目根的 template.json(向导会把它一起复制进项目)优先;没有就按
+		// 示例内容标记判断(示例模板的资产/场景不会出现在干净模板里);最后回落 empty。
+		std::string DetectBuildTemplateId(const fs::path& projectRoot)
+		{
+			std::error_code ec;
+			const fs::path manifestPath = projectRoot / kTemplateManifestName;
+			if (fs::is_regular_file(manifestPath, ec))
+			{
+				std::ifstream stream(manifestPath, std::ios::binary);
+				if (stream)
+				{
+					const std::string text((std::istreambuf_iterator<char>(stream)),
+						std::istreambuf_iterator<char>());
+					std::string parseError;
+					const std::optional<Wui::JsonValue> root = Wui::JsonValue::Parse(text, &parseError);
+					if (root && root->type == Wui::JsonValue::Type::Object)
+					{
+						if (const Wui::JsonValue* id = root->Find("id"))
+						{
+							const std::string value = id->AsString();
+							if (IsValidTemplateId(value)
+								&& fs::is_directory(ProjectScaffolder::TemplateDirectory(value), ec))
+								return value;
+						}
+					}
+				}
+			}
+			if (fs::is_directory(projectRoot / "assets" / "scripts" / "examples", ec)
+				|| fs::is_regular_file(projectRoot / "assets" / "scenes" / "3DTest.wd", ec))
+				return "example";
+			return "empty";
+		}
+
+		// "只在缺的时候补"的模板文件复制。已存在(含同名目录占位)一律记 Skipped,
+		// 绝不覆盖 —— 与向导的逐文件不覆盖纪律同口径。
+		bool EnsureTemplateFile(const fs::path& templateDirectory, const fs::path& projectRoot,
+			const char* fileName, std::vector<std::string>* created,
+			std::vector<std::string>* skipped, std::string* error)
+		{
+			const fs::path target = projectRoot / fileName;
+			std::error_code ec;
+			if (fs::exists(target, ec))
+			{
+				skipped->push_back(fileName);
+				return true;
+			}
+			const fs::path source = templateDirectory / fileName;
+			if (!fs::is_regular_file(source, ec))
+			{
+				*error = std::string("project template is missing ") + fileName + ": "
+					+ source.u8string();
+				return false;
+			}
+			fs::copy_file(source, target, fs::copy_options::none, ec);
+			if (ec)
+			{
+				*error = "cannot write " + target.u8string() + " (" + ec.message() + ")";
+				return false;
+			}
+			created->push_back(fileName);
+			return true;
+		}
+
+		// 刷新启动器:exe 存在就覆盖复制(**本动作的明确语义**);`.cmd` 一律重写 ——
+		// 它记录生成时的引擎根,是 build.cmd 在项目不在引擎树内时解析 WE_ROOT 的唯一来源。
+		void RefreshLaunchEntryPoints(const fs::path& projectRoot, const std::string& projectName,
+			std::vector<std::string>* refreshed, std::vector<std::string>* warnings)
+		{
+			const std::string buildType = TrimTrailingSeparators(WLD_BUILD_TYPE);
+			const std::string outputDir = TrimTrailingSeparators(WLD_OUTPUT_DIR);
+			const std::string editorExeRelative = outputDir + "/Editor/" + buildType + "/Editor.exe";
+			const std::string runtimeExeRelative = outputDir + "/Runtime/" + buildType + "/Runtime.exe";
+			const std::string stem = SanitizeLauncherFileStem(projectName);
+
+			struct EntryRequest
+			{
+				const char* SourceExeName;
+				std::string ExeName;
+				std::string CmdName;
+				const std::string* TargetExeRelative;
+			};
+			const EntryRequest requests[2] = {
+				{ "WeEdit.exe", stem + "-Edit.exe", stem + "-Edit.cmd", &editorExeRelative },
+				{ "WePlay.exe", stem + "-Play.exe", stem + "-Play.cmd", &runtimeExeRelative },
+			};
+
+			for (const EntryRequest& request : requests)
+			{
+				const fs::path artifact = FindLauncherArtifact(request.SourceExeName);
+				if (!artifact.empty())
+				{
+					const fs::path target = projectRoot / fs::u8path(request.ExeName);
+					std::error_code copyError;
+					fs::copy_file(artifact, target, fs::copy_options::overwrite_existing, copyError);
+					if (copyError)
+					{
+						warnings->push_back("could not refresh " + request.ExeName + ": "
+							+ copyError.message());
+						WLD_CORE_WARN("[project-scaffolder] could not refresh launcher '{0}': {1}",
+							target.u8string(), copyError.message());
+					}
+					else
+					{
+						refreshed->push_back(request.ExeName);
+						WLD_CORE_INFO("[project-scaffolder] refreshed launcher '{0}' from '{1}'",
+							target.u8string(), artifact.u8string());
+					}
+				}
+				std::string writeError;
+				const fs::path cmdTarget = projectRoot / fs::u8path(request.CmdName);
+				if (WriteTextFile(cmdTarget, LauncherCmdText(*request.TargetExeRelative), &writeError))
+				{
+					refreshed->push_back(request.CmdName);
+					WLD_CORE_INFO("[project-scaffolder] wrote launcher '{0}' (engine root {1})",
+						cmdTarget.u8string(), TrimTrailingSeparators(WLD_REPO_ROOT));
+				}
+				else
+				{
+					warnings->push_back("could not write " + request.CmdName + ": " + writeError);
+					WLD_CORE_WARN("[project-scaffolder] could not write '{0}': {1}",
+						cmdTarget.u8string(), writeError);
+				}
+			}
+			std::sort(refreshed->begin(), refreshed->end());
+
+			std::string gitignoreError;
+			const std::vector<std::string> ignoreEntries = {
+				"*-Edit.exe", "*-Play.exe", "*-Edit.cmd", "*-Play.cmd", "/build/", "/local/" };
+			if (!EnsureGitignoreEntries(projectRoot, ignoreEntries, &gitignoreError))
+				warnings->push_back("could not update .gitignore: " + gitignoreError);
+		}
+	}
+
+	ProjectScaffolder::BuildEntryResult ProjectScaffolder::EnsureBuildEntryPoints(
+		const std::filesystem::path& rawProjectRoot)
+	{
+		BuildEntryResult result;
+		const auto fail = [&result](const std::string& text)
+		{
+			result.Error = text;
+			return result;
+		};
+
+		std::error_code ec;
+		if (rawProjectRoot.empty())
+			return fail("no project root given");
+		const fs::path projectRoot = fs::absolute(rawProjectRoot, ec).lexically_normal();
+		if (ec)
+			return fail("cannot resolve the project root " + rawProjectRoot.u8string()
+				+ " (" + ec.message() + ")");
+		if (!fs::is_directory(projectRoot, ec))
+			return fail("project root is not a directory: " + projectRoot.u8string());
+		if (!fs::is_regular_file(projectRoot / kManifestFileName, ec))
+			return fail("not a WorldEngine project (project.we.yaml missing): "
+				+ projectRoot.u8string());
+		result.ProjectRoot = projectRoot;
+
+		const std::string templateId = DetectBuildTemplateId(projectRoot);
+		fs::path templateDirectory = TemplateDirectory(templateId);
+		if (fs::is_directory(templateDirectory, ec))
+		{
+			result.TemplateId = templateId;
+		}
+		else
+		{
+			// 模板库被裁剪/改名时不要直接失败:换另一个模板,再不行才报错。
+			const std::string fallbackId = templateId == "empty" ? "example" : "empty";
+			const fs::path fallback = TemplateDirectory(fallbackId);
+			if (!fs::is_directory(fallback, ec))
+				return fail("project template is missing: " + templateDirectory.u8string());
+			templateDirectory = fallback;
+			result.TemplateId = fallbackId;
+		}
+
+		std::string copyError;
+		if (!EnsureTemplateFile(templateDirectory, projectRoot, "CMakeLists.txt",
+			&result.Created, &result.Skipped, &copyError))
+			return fail(copyError);
+		if (!EnsureTemplateFile(templateDirectory, projectRoot, "build.cmd",
+			&result.Created, &result.Skipped, &copyError))
+			return fail(copyError);
+
+		RefreshLaunchEntryPoints(projectRoot, projectRoot.filename().u8string(),
+			&result.Refreshed, &result.Warnings);
+		std::sort(result.Created.begin(), result.Created.end());
+		std::sort(result.Skipped.begin(), result.Skipped.end());
+		WLD_CORE_INFO(
+			"[project-scaffolder] build entry points for '{0}' (template '{1}'): created={2}, skipped={3}, refreshed={4}",
+			projectRoot.u8string(), result.TemplateId, JoinNames(result.Created),
+			JoinNames(result.Skipped), JoinNames(result.Refreshed));
+		result.Ok = true;
+		return result;
 	}
 
 	fs::path ProjectScaffolder::TemplateRoot()

@@ -35,6 +35,10 @@ namespace World
 		const char* Title() const override { return "Scripts"; }
 		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
 
+		// PROJ-11/T1:File ▸ 项目源码… 的落点 —— 下一次渲染时展开/高亮"项目源码"段
+		// (面板本体由 EditorShell 持有;实例方法保证即使面板当前没渲染也先记下请求)。
+		void FocusProjectSources();
+
 	private:
 		struct DiskScript
 		{
@@ -66,5 +70,9 @@ namespace World
 		bool m_StatusIsError = false;
 		// 刚新建出来的脚本逻辑路径:该磁盘行高亮,提示"新文件在这里"。
 		std::string m_SelectedDisk;
+		// PROJ-11/T1:项目源码段可折叠(默认展开);File ▸ 项目源码… 会强制展开并高亮 2.5s。
+		bool m_ProjectSourcesCollapsed = false;
+		bool m_FocusProjectSourcesRequested = false;
+		double m_ProjectSourcesHighlightUntil = -1.0;
 	};
 }

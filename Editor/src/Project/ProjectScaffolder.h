@@ -87,6 +87,33 @@ namespace World
 				std::vector<std::string> EntryPoints;
 			};
 
+			// PROJ-11/T1:给**已经存在**的项目补齐"自带构建/启动入口"(用户 2026-09-29:
+			// 「项目怎么编译这些 c++ 以及如何启动呢」)。只动项目根下的入口文件:
+			//   * 缺 CMakeLists.txt  ⇒ 从 templates/project-<best>/CMakeLists.txt 复制;
+			//   * 缺 build.cmd       ⇒ 从同一模板复制;
+			//   * `<项目名>-Edit.exe` / `<项目名>-Play.exe` 用构建目录的 WeEdit/WePlay
+			//     **刷新**(存在就覆盖 —— 这是本动作的明确语义);
+			//   * 同时补/刷新 `<项目名>-Edit.cmd` / `<项目名>-Play.cmd`:内容记录生成时的
+			//     引擎根(WLD_REPO_ROOT)。它既是 exe 缺失时的兜底,也是项目 build.cmd
+			//     在没有 WE_ROOT 环境变量、项目又不在引擎树内时解析引擎根的唯一来源
+			//     (模板 CMakeLists/build.cmd 的解析顺序见 templates/project-*/build.cmd)。
+			//   * `.gitignore` 只补缺行。
+			// **不覆盖**已存在的 CMakeLists.txt / build.cmd(记入 Skipped),**不碰**
+			// src/** 与 assets/**。模板选择:项目根的 template.json(向导会复制)优先,
+			// 否则按示例内容标记判断,最后回落 empty。
+			struct BuildEntryResult
+			{
+				bool Ok = false;
+				std::string Error;                   // Ok=false 时可读原因
+				std::filesystem::path ProjectRoot;   // 解析后的绝对项目根
+				std::string TemplateId;              // 实际采用的模板 id(empty/example)
+				std::vector<std::string> Created;    // 新建的文件(相对项目根,已排序)
+				std::vector<std::string> Skipped;    // 已存在、按要求未改写的文件
+				std::vector<std::string> Refreshed;  // 被刷新/写入的启动器(相对项目根,已排序)
+				std::vector<std::string> Warnings;   // 非致命失败(启动器/忽略文件写不成)
+			};
+			static BuildEntryResult EnsureBuildEntryPoints(const std::filesystem::path& projectRoot);
+
 			// 生成骨架。context 只用于构造 Scene 走引擎的场景序列化(写 Main.wd)。
 			// templateId(默认 "empty",PROJ-7/T2):templates/project-<id> 里的模板;不存在/
 			//   缺 template.json/缺必需条目 ⇒ 可读错误,不写任何东西。

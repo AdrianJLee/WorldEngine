@@ -399,6 +399,13 @@ namespace World
 		// 空 = exe 与 .cmd 都没写成功 —— 成功态不画"启动入口"那一行)。
 		std::vector<std::string> m_NewProjectEntryPoints;
 
+		// ---- PROJ-11/T1:File ▸ 生成项目构建入口(给已存在项目补 CMake/build.cmd/启动器)----
+		// 动作本身走 ProjectScaffolder::EnsureBuildEntryPoints(纯逻辑 + 落盘),结果模态
+		// 显示"补了什么/跳过了什么" + 可复制的两条指引命令。
+		void DrawBuildEntryModal(Wui::WuiContext& ctx);
+		bool m_BuildEntryOpen = false;
+		Editor::ProjectScaffolder::BuildEntryResult m_BuildEntryResult;
+
 		// ---- PROJ-2/T1:项目启动器 + File ▸ Open Project… + 运行 ▸ 启动项目(Runtime)----
 		// 启动决策(是否显示启动器)在 EditorLayer;这里只渲染最近列表与四个动作、登记 a11y。
 		void DrawProjectLauncherModal(Wui::WuiContext& ctx);

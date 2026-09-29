@@ -6390,6 +6390,49 @@ namespace World
 					"Array/Map samples) and open it in Visual Studio. Build the project (its build.cmd / "
 					"CMakeLists.txt), then use File ▶ Reload C++ Module to load it."),
 				Wui::HashId("menu.file.new_cpp_script") });
+		// PROJ-11/T1:项目源码找不到 → 显式入口:打开/聚焦 Scripts 面板并展开高亮 C++ 段。
+		fileEntries.push_back({ Wui::Tr("menu.file.project_sources", "Project Sources…"), false,
+				[this]
+				{
+					if (!m_Ctx)
+						return;
+					// 与 Window 菜单同一条路径:已附加 → 激活顶栏标签;关着 → 打开并附加。
+					AiActivatePanel("scripts", nullptr);
+					const auto found = m_PanelRegistry.find("scripts");
+					if (found != m_PanelRegistry.end())
+						if (auto* panel = dynamic_cast<ScriptsPanel*>(found->second.get()))
+							panel->FocusProjectSources();
+				}, false,
+				Wui::Tr("menu.file.project_sources.tooltip",
+					"Open the Scripts panel with this project's C++ sources (under <project>/src) "
+					"expanded and highlighted; double-click a row to open it in Visual Studio."),
+				Wui::HashId("menu.file.project_sources") });
+		// PROJ-11/T1:已存在的项目(向导旧版本建出来的)补 CMakeLists.txt / build.cmd /
+		// 启动器 / .gitignore。不覆盖已有 CMakeLists/build.cmd,不碰 src 与 assets。
+		fileEntries.push_back({ Wui::Tr("menu.file.generate_build_entry",
+				"Generate Build Entry Points (CMake + build.cmd)"), false,
+				[this]
+				{
+					if (!m_Ctx)
+						return;
+					const std::filesystem::path projectRoot = CurrentProjectRoot();
+					if (projectRoot.empty())
+					{
+						PushNotice(Wui::Tr("notice.build_entry.no_project",
+							"No project is open — open or create one first, then generate its build entry points."));
+						return;
+					}
+					m_BuildEntryResult = Editor::ProjectScaffolder::EnsureBuildEntryPoints(projectRoot);
+					m_BuildEntryOpen = true;
+					m_Ctx->RecordOp("project", "build-entry", projectRoot.filename().u8string(),
+						m_BuildEntryResult.Ok ? "ok" : "failed");
+				}, false,
+				Wui::Tr("menu.file.generate_build_entry.tooltip",
+					"For the current project: create CMakeLists.txt / build.cmd when missing (existing "
+					"ones are kept), refresh <project>-Edit.exe / <project>-Play.exe (plus .cmd launchers "
+					"with the engine root, used by build.cmd), and top up .gitignore. Never touches src/ "
+					"or assets/."),
+				Wui::HashId("menu.file.generate_build_entry") });
 		fileEntries.push_back({ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
 				[this]
 				{
@@ -6473,6 +6516,147 @@ namespace World
 		// Unreal 的 Show 菜单就是这个位置)。实现见 ViewportPanel::OnRender。
 	}
 
+	// ---- PROJ-11/T1:File ▸ 生成项目构建入口 的结果模态 ----
+	// 落盘动作已在菜单回调里同步执行(纯文件复制,毫秒级);这里只显示结果 +
+	// 两条可复制的指引(build.cmd → 双击 <项目名>-Play.exe / 运行 ▸ 启动项目)。
+	void EditorShell::DrawBuildEntryModal(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiId modalId = Wui::HashId("modal.build_entry");
+		if (!m_BuildEntryOpen)
+		{
+			if (ctx.Modal() == modalId)
+				ctx.ClearModal();
+			return;
+		}
+		ctx.SetModal(modalId);
+
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("modal.build_entry.title", "Project Build Entry Points");
+		frameDesc.Size = { 640.0f, 252.0f };
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
+		{
+			// 模态被更高优先级的路径接管:同步清掉状态,避免下一帧再抢焦点。
+			m_BuildEntryOpen = false;
+			return;
+		}
+
+		const float labelX = frame.X + 16.0f;
+		float cursorY = frame.Y + 44.0f;
+		const auto join = [](const std::vector<std::string>& values)
+		{
+			std::string text;
+			for (const std::string& value : values)
+			{
+				if (!text.empty())
+					text += ", ";
+				text += value;
+			}
+			return text;
+		};
+
+		const std::string projectName = m_BuildEntryResult.ProjectRoot.filename().u8string();
+		const std::string projectRoot = m_BuildEntryResult.ProjectRoot.u8string();
+		// 复制到剪贴板的完整指引(与下面画出来的两步同文)。
+		const std::string guidance = Wui::TrFormat("modal.build_entry.guidance",
+			"In the project root ({root}) run: build.cmd — double-click {name}-Play.exe to play "
+			"(or Run ▶ Launch Project).",
+			{ { "root", projectRoot }, { "name", projectName } });
+
+		if (!m_BuildEntryResult.Ok)
+		{
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.error",
+				"Could not generate the build entry points: {reason}",
+				{ { "reason", m_BuildEntryResult.Error } }), m_Theme.Accent, 13.0f);
+			const Wui::ModalButtonDesc buttons[1] = {
+				{ Wui::Tr("modal.build_entry.close", "Close"),
+					Wui::HashId("modal.build_entry.close"), true },
+			};
+			const int clicked = Wui::ModalButtons(ctx, frame, buttons, 1, m_Theme);
+			if (clicked == 0 || escapePressed)
+			{
+				m_BuildEntryOpen = false;
+				ctx.ClearModal();
+			}
+			Wui::EndModalFrame(ctx);
+			return;
+		}
+
+		if (!m_BuildEntryResult.Created.empty())
+		{
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.created",
+				"Created: {files}", { { "files", join(m_BuildEntryResult.Created) } }),
+				m_Theme.Text, 13.0f);
+			cursorY += 20.0f;
+		}
+		if (!m_BuildEntryResult.Skipped.empty())
+		{
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.skipped",
+				"Kept as-is (already present): {files}",
+				{ { "files", join(m_BuildEntryResult.Skipped) } }), m_Theme.TextMuted, 13.0f);
+			cursorY += 20.0f;
+		}
+		if (!m_BuildEntryResult.Refreshed.empty())
+		{
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.refreshed",
+				"Launchers written/refreshed: {files}",
+				{ { "files", join(m_BuildEntryResult.Refreshed) } }), m_Theme.TextMuted, 13.0f);
+			cursorY += 20.0f;
+		}
+		for (const std::string& warning : m_BuildEntryResult.Warnings)
+		{
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.warning",
+				"Warning: {text}", { { "text", warning } }), m_Theme.Accent, 12.0f);
+			cursorY += 18.0f;
+		}
+
+		Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.build_entry.next_steps", "Next steps"),
+			m_Theme.Text, 13.0f);
+		cursorY += 20.0f;
+		Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.build_entry.step_build",
+			"1) In the project root, run: build.cmd"), m_Theme.TextMuted, 12.0f);
+		cursorY += 18.0f;
+		Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.build_entry.step_launch",
+			"2) Double-click {name}-Play.exe to play (or Run ▶ Launch Project).",
+			{ { "name", projectName } }), m_Theme.TextMuted, 12.0f);
+
+		const Wui::ModalButtonDesc buttons[3] = {
+			{ Wui::Tr("modal.build_entry.copy", "Copy instructions"),
+				Wui::HashId("modal.build_entry.copy"), true },
+			{ Wui::Tr("modal.build_entry.explorer", "Open project folder"),
+				Wui::HashId("modal.build_entry.explorer"), true },
+			{ Wui::Tr("modal.build_entry.close", "Close"),
+				Wui::HashId("modal.build_entry.close"), true },
+		};
+		const int clicked = Wui::ModalButtons(ctx, frame, buttons, 3, m_Theme);
+		if (clicked == 0)
+		{
+			if (ctx.SetClipboard)
+				ctx.SetClipboard(guidance);
+			PushNotice(Wui::Tr("notice.build_entry.copied", "Build instructions copied to the clipboard"));
+		}
+		else if (clicked == 1)
+		{
+			const HINSTANCE shellResult = ShellExecuteW(nullptr, L"open",
+				m_BuildEntryResult.ProjectRoot.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+			if (reinterpret_cast<INT_PTR>(shellResult) <= 32)
+			{
+				PushNotice(Wui::TrFormat("notice.build_entry.explorer_failed",
+					"Could not open the project folder: {path}", { { "path", projectRoot } }));
+				WLD_CORE_WARN("[build-entry] ShellExecuteW failed ({0}) for '{1}'",
+					static_cast<long long>(reinterpret_cast<INT_PTR>(shellResult)), projectRoot);
+			}
+		}
+		else if (clicked == 2 || escapePressed)
+		{
+			m_BuildEntryOpen = false;
+			ctx.ClearModal();
+		}
+		Wui::EndModalFrame(ctx);
+	}
+
 	void EditorShell::DrawModals(Wui::WuiContext& ctx)
 	{
 		// ---- P4-U13e:prefab 窗口的未保存改动(关窗 / 进文档会话)----
@@ -6489,6 +6673,9 @@ namespace World
 
 		// ---- PROJ-1/T1:新建项目(窗口级模态;成功态换成两个动作按钮) ----
 		DrawNewProjectModal(ctx);
+
+		// ---- PROJ-11/T1:生成项目构建入口的结果(动作已在菜单回调里执行完) ----
+		DrawBuildEntryModal(ctx);
 
 		// ---- PROJ-2/T1:项目启动器(启动态窗口级模态;其它模态在前时让位) ----
 		DrawProjectLauncherModal(ctx);

@@ -114,5 +114,18 @@
   "modal.project_delete.error.repo_inside": "拒绝删除引擎仓库内的目录:{path}",
   "modal.project_delete.error.no_manifest": "不是 WorldEngine 项目:缺少 project.we.yaml",
   "modal.project_delete.error.current_project": "不能删除当前打开的项目:{path}",
-  "modal.project_delete.error.remove_failed": "永久删除失败:{reason}"
+  "modal.project_delete.error.remove_failed": "永久删除失败:{reason}",
+  "modal.build_entry.title": "项目构建入口",
+  "modal.build_entry.guidance": "在项目根({root})运行:build.cmd\r\n双击 {name}-Play.exe 启动(或「运行 ▶ 启动项目」)。",
+  "modal.build_entry.error": "生成构建入口失败:{reason}",
+  "modal.build_entry.created": "已生成:{files}",
+  "modal.build_entry.skipped": "已存在,保持原样(未覆盖):{files}",
+  "modal.build_entry.refreshed": "启动器已写入/刷新:{files}",
+  "modal.build_entry.warning": "警告:{text}",
+  "modal.build_entry.next_steps": "下一步",
+  "modal.build_entry.step_build": "1) 在项目根运行:build.cmd",
+  "modal.build_entry.step_launch": "2) 双击 {name}-Play.exe 启动(或「运行 ▶ 启动项目」)",
+  "modal.build_entry.copy": "复制指引",
+  "modal.build_entry.explorer": "打开项目文件夹",
+  "modal.build_entry.close": "关闭"
 }

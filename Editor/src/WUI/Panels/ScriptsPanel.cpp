@@ -22,7 +22,11 @@ namespace World
 		constexpr float kDiskRowHeight = 24.0f;
 		constexpr float kProjectRowHeight = 24.0f;
 		constexpr float kDiskHeaderHeight = 24.0f;
+		constexpr float kSectionGap = 6.0f;
 		constexpr float kStatusReserve = 26.0f;
+		// PROJ-11/T1:有 C++ 源码时"项目源码"段至少留 3 行 —— 用户反馈新项目里
+		// 这段被上面的场景脚本段挤到看不见(2026-09-29)。
+		constexpr std::size_t kProjectMinRows = 3;
 
 		double NowSeconds()
 		{
@@ -75,6 +79,15 @@ namespace World
 	{
 		m_Status = std::move(text);
 		m_StatusIsError = error;
+	}
+
+	void ScriptsPanel::FocusProjectSources()
+	{
+		// 面板可能当前没渲染(独立窗口关着/在其它页签);这里只记请求,展开与高亮
+		// 都在下一次 OnRender 做 —— 与 EditorShell 的"帧边界再做窗口动作"同一纪律。
+		m_FocusProjectSourcesRequested = true;
+		m_ProjectSourcesCollapsed = false;
+		m_NextProjectScanSeconds = 0.0;
 	}
 
 	void ScriptsPanel::RefreshDiskScripts(bool force)
@@ -201,6 +214,19 @@ namespace World
 	void ScriptsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
 	{
 		const Wui::WuiTheme& theme = host.Theme();
+		if (m_FocusProjectSourcesRequested)
+		{
+			m_FocusProjectSourcesRequested = false;
+			m_ProjectSourcesCollapsed = false;
+			RefreshProjectSources(true);
+			m_ProjectSourcesHighlightUntil = NowSeconds() + 2.5;
+			const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+			const std::string sourceRoot = projectRoot.empty()
+				? std::string("<project>/src") : (projectRoot / "src").generic_u8string();
+			SetStatus(Wui::TrFormat("panel.scripts.project_sources.focus_status",
+				"project sources ({count}) under {path}",
+				{ { "count", std::to_string(m_ProjectSources.size()) }, { "path", sourceRoot } }), false);
+		}
 		RefreshDiskScripts(false);
 		RefreshProjectSources(false);
 
@@ -317,7 +343,8 @@ namespace World
 		}
 
 		// ---- U2d:场景、项目源码、磁盘脚本三者都空 → 统一空状态 ----
-		// 工具栏与底部状态行保持原样;有任一脚本/源码时下面三段与改动前逐帧一致。
+		// 工具栏与底部状态行保持原样;有任一脚本/源码时下面三段按 PROJ-11 的
+		// "项目源码优先预留空间"预算绘制。
 		if (sceneRows.empty() && m_ProjectSources.empty() && m_DiskScripts.empty())
 		{
 			const Wui::WuiRect emptyRect { rect.X + 8.0f, y, std::max(0.0f, rect.W - 16.0f),
@@ -325,31 +352,45 @@ namespace World
 			(void)Wui::EmptyState(ctx, emptyRect, std::string(),
 				Wui::Tr("panel.scripts.empty.title", "No scripts yet"),
 				Wui::Tr("panel.scripts.empty.hint",
-					"Create a .luau script in the Content Browser, then open it here."),
+					"Create a .luau script in the Content Browser, or use File ▶ New C++ Script… "
+					"to add C++ sources under <project>/src/."),
 				std::string(), 0, theme);
 			drawStatusLine();
 			return;
 		}
 
 		const std::string sceneHeader = "Scene Scripts (" + std::to_string(sceneRows.size()) + ")";
-		Wui::SectionHeader(ctx, { rect.X + 8.0f, y, rect.W - 16.0f, 20.0f }, sceneHeader, theme.Accent, theme);
-		y += 22.0f;
 
 		const float listBottom = rect.Y + rect.H - kStatusReserve;
 		const float listHeight = std::max(0.0f, listBottom - y);
-		// 三段共享剩余高度(场景 40% / 项目源码 30% / 磁盘脚本 30%),每段至少 1 行的机会;
-		// 逐行再按 listBottom 硬夹一次 —— 窗口太小时宁可少画行,也不叠到状态行上。
-		const auto budgetRows = [](float budget, float headerHeight, float rowHeight) -> std::size_t
-		{
-			return static_cast<std::size_t>(std::max(0.0f, budget - headerHeight) / rowHeight);
-		};
+
+		// PROJ-11/T1:先给"项目源码"段预留空间(有源码时 ≥3 行,折叠时只留段头;
+		// 空态留 2 行:下一步提示 + <项目>/src 路径)—— 场景段再挤也不能把这段压没。
+		const bool projectExpanded = !m_ProjectSourcesCollapsed;
+		const std::size_t projectReservedRows = m_ProjectSources.empty()
+			? (projectExpanded ? 2u : 1u)
+			: (projectExpanded ? std::min<std::size_t>(m_ProjectSources.size(), kProjectMinRows) : 1u);
+		const float projectReserve = kSectionGap + kDiskHeaderHeight
+			+ static_cast<float>(projectReservedRows) * kProjectRowHeight
+			+ (projectExpanded && m_ProjectSources.size() > kProjectMinRows ? 16.0f : 0.0f);
+		const float diskReserve = kSectionGap + kDiskHeaderHeight
+			+ (m_DiskScripts.empty() ? 0.0f : kDiskRowHeight);
+		const float sceneLimit = std::min(listBottom,
+			std::max(y + 22.0f, listBottom - projectReserve - diskReserve));
+
+		Wui::SectionHeader(ctx, { rect.X + 8.0f, y, rect.W - 16.0f, 20.0f }, sceneHeader, theme.Accent, theme);
+		y += 22.0f;
+
+		// 场景段仍拿 40% 的偏好预算,但上限被 sceneLimit 夹住 —— 项目源码/磁盘段的
+		// 预留空间不会被它吃掉。逐行再按 sceneLimit 硬夹一次。
+		const float sceneBudget = std::min(listHeight * 0.40f, std::max(0.0f, sceneLimit - y));
 		const std::size_t maxSceneRows = std::max<std::size_t>(1,
-			budgetRows(listHeight * 0.40f, 22.0f, kSceneRowHeight));
+			static_cast<std::size_t>(sceneBudget / kSceneRowHeight));
 		const std::size_t visibleSceneRows = std::min(sceneRows.size(), maxSceneRows);
 		std::size_t drawnSceneRows = 0;
 		for (std::size_t index = 0; index < visibleSceneRows; ++index)
 		{
-			if (y + kSceneRowHeight > listBottom + 0.5f)
+			if (y + kSceneRowHeight > sceneLimit + 0.5f)
 				break;
 			const SceneRow& row = sceneRows[index];
 			const Wui::WuiRect rowRect { rect.X + 8.0f, y, rect.W - 16.0f, kSceneRowHeight - 4.0f };
@@ -394,77 +435,103 @@ namespace World
 		}
 		if (sceneRows.size() > drawnSceneRows)
 		{
-			Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(sceneRows.size() - drawnSceneRows)
-				+ " more scene script(s); enlarge the window to see them", theme.TextMuted, 12.0f);
-			y += 16.0f;
+			if (y + 16.0f <= sceneLimit + 0.5f)
+			{
+				Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(sceneRows.size() - drawnSceneRows)
+					+ " more scene script(s); enlarge the window to see them", theme.TextMuted, 12.0f);
+				y += 16.0f;
+			}
 		}
 		if (sceneRows.empty())
 		{
-			Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f },
-				Wui::Tr("panel.scripts.scene_empty", "current scene has no script components"),
-				theme.TextMuted, 12.0f);
-			y += 18.0f;
+			if (y + 18.0f <= sceneLimit + 0.5f)
+			{
+				Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f },
+					Wui::Tr("panel.scripts.scene_empty", "current scene has no script components"),
+					theme.TextMuted, 12.0f);
+				y += 18.0f;
+			}
 		}
 
-		// ---- 项目源码段(PROJ-8/T1:当前项目 `<项目根>/src/**` 的 .h/.cpp)----
-		y += 6.0f;
+		// ---- 项目源码段(PROJ-8/T1:当前项目 `<项目根>/src/**` 的 .h/.cpp;
+		// PROJ-11/T1:段头可折叠(默认展开)+ 有源码时保证 ≥3 行可见 + File ▸ 项目源码… 高亮)----
+		y += kSectionGap;
 		const std::string projectHeader = Wui::TrFormat("panel.scripts.project_sources.header",
-			"Project Sources ({count})", { { "count", std::to_string(m_ProjectSources.size()) } });
-		Wui::SectionHeader(ctx, { rect.X + 8.0f, y, rect.W - 16.0f, 20.0f }, projectHeader, theme.Accent, theme);
+			"C++ Sources ({count})", { { "count", std::to_string(m_ProjectSources.size()) } });
+		const Wui::WuiRect projectHeaderRect { rect.X + 8.0f, y, rect.W - 16.0f, 20.0f };
+		bool projectOpen = !m_ProjectSourcesCollapsed;
+		if (Wui::CollapsibleHeader(ctx, Wui::HashId("panel.scripts.project_sources.header"),
+			projectHeaderRect, projectHeader, projectOpen, theme, std::string(), std::string(),
+			Wui::Tr("panel.scripts.project_sources.fold_tooltip",
+				"Collapse/expand this project's C++ sources; Open in VS always uses the external Visual Studio.")))
+		{
+			m_ProjectSourcesCollapsed = !projectOpen;
+		}
+		if (NowSeconds() < m_ProjectSourcesHighlightUntil)
+			Wui::HighlightOutline(ctx, projectHeaderRect, theme.Accent, 3.0f, 2.0f);
 		y += kDiskHeaderHeight;
 
-		const std::size_t maxProjectRows = std::max<std::size_t>(1,
-			budgetRows(listHeight * 0.30f, kDiskHeaderHeight, kProjectRowHeight));
-		const std::size_t visibleProjectRows = std::min(m_ProjectSources.size(), maxProjectRows);
-		std::size_t drawnProjectRows = 0;
-		for (std::size_t index = 0; index < visibleProjectRows; ++index)
+		if (!m_ProjectSourcesCollapsed)
 		{
-			if (y + kProjectRowHeight > listBottom + 0.5f)
-				break;
-			const ProjectSource& source = m_ProjectSources[index];
-			const Wui::WuiRect rowRect { rect.X + 8.0f, y, rect.W - 16.0f, kProjectRowHeight - 2.0f };
-			Wui::PanelBackground(ctx, rowRect, theme.PanelHeader);
-			// a11y:`project.source.<index>` = 行本身(只读,value = 绝对路径);
-			// 主按钮 `project.source.open.<index>` = Open in VS(双击行同一条路径)。
-			RegisterReadonlyNode(Wui::HashId(("project.source." + std::to_string(index)).c_str()),
-				"list-item", source.RelativePath, source.DiskPath.string(), rowRect);
-			Wui::Label(ctx, { rowRect.X + 8.0f, rowRect.Y + 3.0f },
-				TruncateUtf8(source.RelativePath, 76), theme.Text, 12.0f);
-
-			const Wui::WuiRect openRect {
-				rowRect.X + rowRect.W - 102.0f, rowRect.Y + 1.0f, 98.0f, 20.0f };
-			const bool doubleClicked = ctx.IsDoubleClicked(rowRect);
-			if (Wui::Button(ctx, Wui::HashId(("project.source.open." + std::to_string(index)).c_str()),
-				openRect, Wui::Tr("panel.scripts.project_sources.open_vs", "Open in VS"), theme)
-				|| doubleClicked)
+			// 预留已保证前 projectReservedRows 行装得下;这里再按 listBottom 兜一次底。
+			const std::size_t maxProjectRows = std::max<std::size_t>(1,
+				static_cast<std::size_t>(std::max(0.0f, listBottom - y) / kProjectRowHeight));
+			const std::size_t visibleProjectRows = std::min(m_ProjectSources.size(), maxProjectRows);
+			std::size_t drawnProjectRows = 0;
+			for (std::size_t index = 0; index < visibleProjectRows; ++index)
 			{
-				// 与内容浏览器双击脚本/内置编辑器入口同一条 PanelHost 路径 —— 编辑器侧按
-				// 扩展名分流:`.h/.cpp` 走外部 Visual Studio(EditorShell::OpenScriptEditorNow)。
-				host.OpenScriptEditor(source.DiskPath.generic_string());
-				SetStatus(Wui::Tr("panel.scripts.project_sources.opened", "open in Visual Studio: ")
-					+ source.RelativePath, false);
+				if (y + kProjectRowHeight > listBottom + 0.5f)
+					break;
+				const ProjectSource& source = m_ProjectSources[index];
+				const Wui::WuiRect rowRect { rect.X + 8.0f, y, rect.W - 16.0f, kProjectRowHeight - 2.0f };
+				Wui::PanelBackground(ctx, rowRect, theme.PanelHeader);
+				// a11y:`project.source.<index>` = 行本身(只读,value = 绝对路径);
+				// 主按钮 `project.source.open.<index>` = Open in VS(双击行同一条路径)。
+				RegisterReadonlyNode(Wui::HashId(("project.source." + std::to_string(index)).c_str()),
+					"list-item", source.RelativePath, source.DiskPath.string(), rowRect);
+				Wui::Label(ctx, { rowRect.X + 8.0f, rowRect.Y + 3.0f },
+					TruncateUtf8(source.RelativePath, 76), theme.Text, 12.0f);
+
+				const Wui::WuiRect openRect {
+					rowRect.X + rowRect.W - 102.0f, rowRect.Y + 1.0f, 98.0f, 20.0f };
+				const bool doubleClicked = ctx.IsDoubleClicked(rowRect);
+				if (Wui::Button(ctx, Wui::HashId(("project.source.open." + std::to_string(index)).c_str()),
+					openRect, Wui::Tr("panel.scripts.project_sources.open_vs", "Open in VS"), theme)
+					|| doubleClicked)
+				{
+					// 与内容浏览器双击脚本/内置编辑器入口同一条 PanelHost 路径 —— 编辑器侧按
+					// 扩展名分流:`.h/.cpp` 走外部 Visual Studio(EditorShell::OpenScriptEditorNow)。
+					host.OpenScriptEditor(source.DiskPath.generic_string());
+					SetStatus(Wui::Tr("panel.scripts.project_sources.opened", "open in Visual Studio: ")
+						+ source.RelativePath, false);
+				}
+				y += kProjectRowHeight;
+				++drawnProjectRows;
 			}
-			y += kProjectRowHeight;
-			++drawnProjectRows;
-		}
-		if (m_ProjectSources.empty())
-		{
-			Wui::Label(ctx, { rect.X + 12.0f, y + 2.0f },
-				TruncateUtf8(Wui::Tr("panel.scripts.project_sources.empty",
-					"This project has no C++ sources yet — use File ▶ New C++ Script… "
-					"or drop files into src/."), 110),
-				theme.TextMuted, 12.0f);
-			y += 18.0f;
-		}
-		else if (m_ProjectSources.size() > drawnProjectRows)
-		{
-			Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(m_ProjectSources.size() - drawnProjectRows)
-				+ " more project source(s); enlarge the window to see them", theme.TextMuted, 12.0f);
-			y += 16.0f;
+			if (m_ProjectSources.empty())
+			{
+				// 空态给出下一步 + 解析后的 <项目>/src 绝对路径(提示"文件放哪儿")。
+				const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+				const std::string sourceRoot = projectRoot.empty()
+					? std::string("<project>/src") : (projectRoot / "src").generic_u8string();
+				Wui::Label(ctx, { rect.X + 12.0f, y + 1.0f },
+					TruncateUtf8(Wui::Tr("panel.scripts.project_sources.empty",
+						"No C++ sources yet — use File ▶ New C++ Script… or drop files into <project>/src/."), 110),
+					theme.TextMuted, 12.0f);
+				Wui::Label(ctx, { rect.X + 12.0f, y + kProjectRowHeight + 1.0f },
+					TruncateUtf8(sourceRoot, 110), theme.TextMuted, 11.0f);
+				y += kProjectRowHeight * 2.0f;
+			}
+			else if (m_ProjectSources.size() > drawnProjectRows)
+			{
+				Wui::Label(ctx, { rect.X + 12.0f, y }, "+" + std::to_string(m_ProjectSources.size() - drawnProjectRows)
+					+ " more project source(s); enlarge the window to see them", theme.TextMuted, 12.0f);
+				y += 16.0f;
+			}
 		}
 
 		// ---- 磁盘脚本段 ----
-		y += 6.0f;
+		y += kSectionGap;
 		const std::string diskHeader = "Disk Scripts (" + std::to_string(m_DiskScripts.size()) + ")";
 		Wui::SectionHeader(ctx, { rect.X + 8.0f, y, rect.W - 16.0f, 20.0f }, diskHeader, theme.Accent, theme);
 		y += kDiskHeaderHeight;
