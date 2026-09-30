@@ -168,5 +168,10 @@
   "panel.content_browser.texture.outside_root": "纹理设置需要内容根里的资产。",
   "panel.content_browser.notice.texture_asset_created": "已创建 {asset}",
   "panel.content_browser.notice.texture_reimported": "已重烘 {source}",
-  "panel.content_browser.notice.texture_imported": "已导入 {source}(设置:{asset})"
+  "panel.content_browser.notice.texture_imported": "已导入 {source}(设置:{asset})",
+  "panel.content_browser.root.project_plugins": "项目插件",
+  "panel.content_browser.root.project_plugins.tooltip": "项目插件(<项目根>/plugins):与资产同一套网格/列表、类型列与搜索;只读 —— 双击 C++ 文件或 plugin.we.yaml 用 Visual Studio 打开。",
+  "panel.content_browser.plugins.root_unavailable": "先打开一个带 plugins/ 目录的项目 —— 项目插件在 <项目根>/plugins。",
+  "panel.content_browser.toolbar.new_locked": "新建…",
+  "panel.content_browser.type.plugin_manifest": "插件清单"
 }

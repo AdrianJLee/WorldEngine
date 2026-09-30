@@ -3,6 +3,7 @@
 #include "../EditorLayer.h"
 
 #include "World/Core/Log.h"
+#include "World/Plugins/PluginManager.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/MaterialLibrary.h"
@@ -1574,6 +1575,122 @@ namespace World
 				error = message.empty() ? "module reload failed" : message;
 				return false;
 			}
+			return true;
+		}
+		// ---- PLUG-T3:插件管理器(与面板同一条数据/动作路径;E2:无项目 = "需要先打开项目")----
+		//   plugin.list                     已发现条目 + 状态(JSON)
+		//   plugin.info <id>                单条详情(JSON;依赖 / 能力 / 导出说明 / 诊断 / 根路径)
+		//   plugin.set_enabled <id> <0|1>   引擎插件启停(写 local/plugins.json,下次启动生效)
+		if (cmd == "plugin.list" || cmd == "plugin.info" || cmd == "plugin.set_enabled")
+		{
+			Plugins::PluginManager* plugins = m_Shell.GetPluginManager();
+			if (!plugins)
+			{
+				// E2:插件管理器只在项目形态可用(启动器形态没有项目:面板不注册、命令给可读错误)。
+				error = "需要先打开项目";
+				return false;
+			}
+			const auto appendEntry = [this](std::ostringstream& out,
+				const Plugins::PluginEntry& entry)
+			{
+				const bool disabled = m_Shell.IsPluginDisabled(entry.Manifest.Id);
+				out << "{";
+				out << "\"id\":\"" << JsonEscape(entry.Manifest.Id) << "\"";
+				out << ",\"name\":\"" << JsonEscape(entry.Manifest.Name) << "\"";
+				out << ",\"scope\":\"" << Plugins::PluginScopeName(entry.Manifest.Scope) << "\"";
+				out << ",\"version\":\"" << JsonEscape(entry.Manifest.Version) << "\"";
+				// 已加载 = 插件自报 ABI;未加载 = 清单声明值(诊断上可读,避免永远是 0)。
+				out << ",\"abi\":" << (entry.PluginAbi != 0 ? entry.PluginAbi : entry.Manifest.Abi);
+				out << ",\"state\":\"" << Plugins::PluginStateName(entry.State) << "\"";
+				out << ",\"order\":" << entry.Order;
+				out << ",\"ship\":\"" << Plugins::PluginShipPolicyName(entry.Manifest.Ship) << "\"";
+				out << ",\"root\":\"" << JsonEscape(entry.Manifest.Root.generic_string()) << "\"";
+				out << ",\"disabled\":" << (disabled ? "true" : "false");
+				out << ",\"restartPending\":"
+					<< (m_Shell.PluginRestartPending(entry.Manifest.Id) ? "true" : "false");
+				out << ",\"diagnostic\":\"" << JsonEscape(entry.Diagnostic) << "\"";
+				out << ",\"loadError\":\""
+					<< JsonEscape(m_Shell.PluginLoadError(entry.Manifest.Id)) << "\"";
+				out << "}";
+			};
+			if (cmd == "plugin.list")
+			{
+				const std::vector<Plugins::PluginEntry> entries = plugins->Entries();
+				size_t loaded = 0;
+				size_t rejected = 0;
+				for (const Plugins::PluginEntry& entry : entries)
+				{
+					if (entry.State == Plugins::PluginState::Loaded)
+						++loaded;
+					if (entry.State == Plugins::PluginState::Rejected)
+						++rejected;
+				}
+				std::ostringstream out;
+				out << "{\"count\":" << entries.size() << ",\"loaded\":" << loaded
+					<< ",\"rejected\":" << rejected << ",\"plugins\":[";
+				for (size_t index = 0; index < entries.size(); ++index)
+				{
+					if (index > 0)
+						out << ",";
+					appendEntry(out, entries[index]);
+				}
+				out << "]}";
+				result = out.str();
+				return true;
+			}
+			if (cmd == "plugin.info")
+			{
+				const std::string id = arg("id");
+				if (id.empty())
+				{
+					error = "plugin.info needs id";
+					return false;
+				}
+				const Plugins::PluginEntry* entry = plugins->Find(id);
+				if (!entry)
+				{
+					error = "no plugin with id '" + id + "'";
+					return false;
+				}
+				std::ostringstream out;
+				out << "{\"plugin\":";
+				appendEntry(out, *entry);
+				out << ",\"publisher\":\"" << JsonEscape(entry->Manifest.Publisher) << "\"";
+				out << ",\"entry\":\"" << JsonEscape(entry->Manifest.Entry) << "\"";
+				out << ",\"engine\":\"" << JsonEscape(entry->Manifest.Engine) << "\"";
+				out << ",\"manifest\":\""
+					<< JsonEscape(entry->Manifest.ManifestPath.generic_string()) << "\"";
+				out << ",\"depends\":[";
+				for (size_t index = 0; index < entry->Manifest.Depends.size(); ++index)
+					out << (index ? "," : "") << "\"" << JsonEscape(entry->Manifest.Depends[index]) << "\"";
+				out << "],\"provides\":[";
+				for (size_t index = 0; index < entry->Manifest.Provides.size(); ++index)
+					out << (index ? "," : "") << "\"" << JsonEscape(entry->Manifest.Provides[index]) << "\"";
+				out << "],\"overrides\":[";
+				for (size_t index = 0; index < entry->Manifest.Overrides.size(); ++index)
+					out << (index ? "," : "") << "\"" << JsonEscape(entry->Manifest.Overrides[index]) << "\"";
+				out << "],\"exports\":[";
+				for (size_t index = 0; index < entry->ExportNames.size(); ++index)
+					out << (index ? "," : "") << "\"" << JsonEscape(entry->ExportNames[index]) << "\"";
+				out << "]}";
+				result = out.str();
+				return true;
+			}
+			// plugin.set_enabled
+			const std::string id = arg("id");
+			const std::string enabledText = arg("enabled");
+			if (id.empty() || (enabledText != "0" && enabledText != "1"))
+			{
+				error = "plugin.set_enabled needs id and 0|1";
+				return false;
+			}
+			std::string message;
+			if (!m_Shell.SetPluginEnabled(id, enabledText == "1", &message))
+			{
+				error = message.empty() ? "plugin.set_enabled failed" : message;
+				return false;
+			}
+			result = message;
 			return true;
 		}
 		// ---- W9-2:内置脚本编辑器 ----

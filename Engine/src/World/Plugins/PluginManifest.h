@@ -10,6 +10,13 @@
 
 namespace World::Plugins
 {
+	// 插件产物扩展名(单一定义:清单解析与"开发构建根"查找共用,见 PluginManager::Discover)。
+#if defined(_WIN32)
+	constexpr const char* kPluginLibraryExtension = ".dll";
+#else
+	constexpr const char* kPluginLibraryExtension = ".so";
+#endif
+
 	// `plugin.we.yaml` 的解析结果 + 由位置推导出的定位信息(方案 §4.1)。
 	//
 	// 契约要点(与 tools/agents/tasks/20260930-1100-plugin-framework/plan.md v2.1 同步):

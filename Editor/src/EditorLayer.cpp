@@ -17,6 +17,7 @@
 #include "World/Gameplay/Prefab.h"
 #include "World/Modules/GameModuleHost.h"
 #include "World/Modules/GameModuleReload.h"
+#include "World/Plugins/PluginManager.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/AnimationSystem.h"
@@ -30,7 +31,10 @@
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiLocalization.h"
+#include "World/WUI/WuiJson.h"
 #include <filesystem>
+#include <fstream>
+#include <set>
 #include <shellapi.h>
 #include <stdexcept>
 #include <chrono>
@@ -280,6 +284,215 @@ namespace World
 		m_Commands.Register({ Wui::HashId("cmd.simulate"), "Simulate", KeyCodes::F6, false, false, [this] { ToggleSimulate(); } });
 		m_Commands.Register({ Wui::HashId("cmd.pause"), "Pause", KeyCodes::F7, false, false, [this] { TogglePause(); } });
 	}
+
+	// PLUG-T3:析构在 .cpp 定义(unique_ptr<Plugins::PluginManager> 的删除器需要完整类型)。
+	EditorLayer::~EditorLayer() = default;
+
+	// ---- PLUG-T3:插件系统(引擎根 + 项目根;按 local/plugins.json 跳过被禁用的引擎插件)----
+	void EditorLayer::LoadDisabledPluginList()
+	{
+		m_DisabledPlugins.clear();
+		m_PluginDisabledListPath = std::filesystem::path(WLD_LOCAL_DIR) / "plugins.json";
+		std::error_code error;
+		if (!std::filesystem::is_regular_file(m_PluginDisabledListPath, error))
+			return;
+		std::ifstream stream(m_PluginDisabledListPath, std::ios::binary);
+		if (!stream)
+			return;
+		const std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+		std::string parseError;
+		const auto parsed = Wui::JsonValue::Parse(text, &parseError);
+		if (!parsed)
+		{
+			WLD_CORE_WARN("[plugin] local/plugins.json parse failed ({0}); treating the list as empty",
+				parseError);
+			return;
+		}
+		if (const Wui::JsonValue* disabled = parsed->Find("disabled"))
+			for (const Wui::JsonValue& item : disabled->Array)
+			{
+				const std::string id = item.AsString("");
+				if (!id.empty())
+					m_DisabledPlugins.insert(id);
+			}
+		WLD_CORE_INFO("[plugin] local disabled list: {0} plugin(s) [local/plugins.json]",
+			m_DisabledPlugins.size());
+	}
+
+	bool EditorLayer::SaveDisabledPluginList(std::string* error) const
+	{
+		try
+		{
+			Wui::JsonValue root;
+			root.type = Wui::JsonValue::Type::Object;
+			root.Object.push_back({ "version", Wui::JsonValue::MakeNumber(1) });
+			Wui::JsonValue disabled;
+			disabled.type = Wui::JsonValue::Type::Array;
+			for (const std::string& id : m_DisabledPlugins)   // std::set = 确定性顺序(可复核)
+				disabled.Array.push_back(Wui::JsonValue::MakeString(id));
+			root.Object.push_back({ "disabled", std::move(disabled) });
+			const std::filesystem::path directory = m_PluginDisabledListPath.parent_path();
+			std::error_code directoryError;
+			if (!directory.empty())
+				std::filesystem::create_directories(directory, directoryError);
+			std::ofstream stream(m_PluginDisabledListPath, std::ios::binary | std::ios::trunc);
+			if (!stream)
+			{
+				if (error)
+					*error = "cannot write " + m_PluginDisabledListPath.generic_string();
+				return false;
+			}
+			stream << root.Dump();
+			return true;
+		}
+		catch (const std::exception& exception)
+		{
+			if (error)
+				*error = exception.what();
+			return false;
+		}
+	}
+
+	void EditorLayer::InitPlugins()
+	{
+		m_PluginManager = std::make_unique<Plugins::PluginManager>();
+		LoadDisabledPluginList();
+		m_DisabledPluginsAtLoad = m_DisabledPlugins;
+		m_PluginLoadErrors.clear();
+
+		const std::filesystem::path engineRoot = std::filesystem::path(WLD_REPO_ROOT) / "plugins";
+		const std::filesystem::path projectRoot = World::Paths::ProjectDir() / "plugins";
+		// 开发构建的引擎插件产物根(与 Game.dll 查找同一口径的构建树布局):
+		// <repo>/<WLD_OUTPUT_DIR>bin/<WLD_BUILD_TYPE>plugins/<WLD_BUILD_TYPE>
+		// —— 引擎插件由引擎构建产出,源码树里不写产物;发布布局仍以插件自带 bin/ 为准。
+		const std::filesystem::path devEnginePluginBinRoot = std::filesystem::path(WLD_REPO_ROOT)
+			/ WLD_OUTPUT_DIR / "bin" / WLD_BUILD_TYPE / "plugins" / WLD_BUILD_TYPE;
+		std::string discoverError;
+		if (!m_PluginManager->Discover(engineRoot, projectRoot, { devEnginePluginBinRoot }))
+			// 只有"已有插件处于 Loaded"才会走到这里(启动路径不会);仍然不阻断编辑器。
+			WLD_CORE_ERROR("[plugin] discover failed: {0}", discoverError);
+
+		WorldContext& context = Application::Get().GetContext();
+		std::set<std::string> pending;
+		for (const Plugins::PluginEntry& entry : m_PluginManager->Entries())
+		{
+			if (entry.State == Plugins::PluginState::Rejected)
+				continue;
+			if (m_DisabledPlugins.count(entry.Manifest.Id) > 0)
+				continue;   // 本机禁用 = 发现后跳过(不 Register)
+			pending.insert(entry.Manifest.Id);
+		}
+		// 依赖顺序收敛:依赖未就绪的下一轮再试;其它失败逐条记录(条目保持可观测状态)。
+		// PluginManager 没有"按子集 LoadAll"的公共 API,这里用"直到没有进展"的循环等价实现 ——
+		// 与 LoadAll 同一语义(拓扑序 + 单条失败不影响其余),只是可以跳过被禁用者。
+		bool progress = true;
+		while (progress && !pending.empty())
+		{
+			progress = false;
+			for (auto iterator = pending.begin(); iterator != pending.end();)
+			{
+				std::string loadError;
+				const Plugins::PluginManager::Status status =
+					m_PluginManager->Load(*iterator, context, &loadError);
+				if (status == Plugins::PluginManager::Status::Ok)
+				{
+					iterator = pending.erase(iterator);
+					progress = true;
+				}
+				else if (status == Plugins::PluginManager::Status::DependencyNotLoaded)
+				{
+					++iterator;   // 依赖还没加载:等下一轮
+				}
+				else
+				{
+					const std::string reason = loadError.empty()
+						? Plugins::PluginManager::StatusName(status) : loadError;
+					m_PluginLoadErrors.emplace(*iterator, reason);
+					WLD_CORE_ERROR("[plugin] load failed id={0}: {1}", *iterator, reason);
+					iterator = pending.erase(iterator);
+					progress = true;
+				}
+			}
+		}
+		for (const std::string& id : pending)
+		{
+			m_PluginLoadErrors.emplace(id, "dependency is not loaded (or dependency cycle)");
+			WLD_CORE_ERROR("[plugin] load failed id={0}: dependency is not loaded", id);
+		}
+
+		size_t rejected = 0;
+		for (const Plugins::PluginEntry& entry : m_PluginManager->Entries())
+			if (entry.State == Plugins::PluginState::Rejected)
+				++rejected;
+		WLD_CORE_INFO("[plugin] summary: discovered={0} loaded={1} rejected={2} disabled={3} "
+			"(engine-root={4}, project-root={5})", m_PluginManager->Count(),
+			m_PluginManager->LoadedCount(), rejected, m_DisabledPlugins.size(),
+			engineRoot.generic_string(), projectRoot.generic_string());
+	}
+
+	void EditorLayer::ShutdownPlugins()
+	{
+		if (!m_PluginManager)
+			return;
+		// 卸载必须在场景/渲染器析构之前(插件可能持有随宿主生命周期释放的资源)。
+		m_PluginManager->UnloadAll(Application::Get().GetContext());
+		m_PluginManager.reset();
+		m_PluginLoadErrors.clear();
+	}
+
+	bool EditorLayer::IsPluginDisabled(const std::string& id) const
+	{
+		return m_DisabledPlugins.count(id) > 0;
+	}
+
+	bool EditorLayer::PluginRestartPending(const std::string& id) const
+	{
+		return IsPluginDisabled(id) != (m_DisabledPluginsAtLoad.count(id) > 0);
+	}
+
+	std::string EditorLayer::PluginLoadError(const std::string& id) const
+	{
+		const auto found = m_PluginLoadErrors.find(id);
+		return found == m_PluginLoadErrors.end() ? std::string() : found->second;
+	}
+
+	bool EditorLayer::SetPluginEnabled(const std::string& id, bool enabled, std::string* message)
+	{
+		const auto fail = [message](const std::string& reason)
+		{
+			if (message)
+				*message = reason;
+			return false;
+		};
+		if (!m_PluginManager)
+			return fail(Wui::Tr("panel.plugins.notice.need_project", "Open a project first."));
+		const Plugins::PluginEntry* entry = m_PluginManager->Find(id);
+		if (!entry)
+			return fail(Wui::TrFormat("panel.plugins.notice.not_found", "No plugin with id '{id}'.",
+				{ { "id", id } }));
+		if (entry->Manifest.Scope != Plugins::PluginScope::Engine)
+		{
+			// 项目插件随项目加载/禁用由项目清单管;本机开关只管引擎插件(方案 §1)。
+			return fail(Wui::Tr("panel.plugins.notice.project_plugin_toggle",
+				"Project plugins are loaded with the project — enable/disable them in the project manifest."));
+		}
+		const bool changed = enabled ? (m_DisabledPlugins.erase(id) > 0)
+			: (m_DisabledPlugins.insert(id).second);
+		if (changed)
+		{
+			std::string saveError;
+			if (!SaveDisabledPluginList(&saveError))
+				return fail(Wui::TrFormat("panel.plugins.notice.save_failed",
+					"Could not write local/plugins.json: {reason}", { { "reason", saveError } }));
+			WLD_CORE_INFO("[plugin] set_enabled id={0} enabled={1} (local/plugins.json; takes effect "
+				"on the next editor start)", id, enabled ? 1 : 0);
+		}
+		if (message)
+			*message = Wui::Tr("panel.plugins.notice.restart_required",
+				"Saved to local/plugins.json — restart the editor to apply.");
+		return true;
+	}
+
 	void EditorLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();
@@ -385,6 +598,9 @@ namespace World
 		m_CppModuleStatus.Ok = m_GameModuleLoaded;
 		m_CppModuleStatus.Message = m_GameModuleLoaded
 			? std::string("Game module loaded") : moduleError;
+		// PLUG-T3:插件系统(引擎插件 + 项目插件)—— 发现两个根 + 按本机禁用清单加载。
+		// 不依赖 Game 模块成败:插件是独立 ABI;加载失败只记录,不阻断编辑器启动。
+		InitPlugins();
 
 		// 开发期资产:编辑器与 Runtime 一致,经 VFS 目录 provider 读内容。
 		// 目录 provider 已由 Application::MountProjectContent 统一挂载,此处不再重复。
@@ -627,7 +843,10 @@ namespace World
 		m_HasRenderedScene = false;
 
 		SetSceneState(SceneState::Edit);
-		
+
+		// PLUG-T3:插件卸载必须在场景/渲染器析构之前(插件可能引用它们注册的回调/资源)。
+		ShutdownPlugins();
+
 		m_ActiveScene.reset();
 		m_RuntimeScene.reset();
 		m_Document = EditorDocument(Application::Get().GetContext());

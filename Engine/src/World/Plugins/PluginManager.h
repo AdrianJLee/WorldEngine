@@ -25,6 +25,8 @@ namespace World::Plugins
 		int Order = -1;          // State == Loaded 时的加载顺序(0 起,拓扑序)
 		uint32_t PluginAbi = 0;  // 插件自报的 ABI(诊断用;契约校验前失败时为 0)
 		uint32_t PluginStructSize = 0;  // 插件自报的 StructSize(诊断/前向兼容判据用)
+		// 插件 WePlugin::Exports 的 Name 列表(加载成功后填充;面板/`plugin.info` 直接展示)。
+		std::vector<std::string> ExportNames;
 	};
 
 	// 插件加载器(对外主入口):发现 → 校验干净拒绝 → 依赖拓扑 → 加载 → 卸载。
@@ -64,8 +66,14 @@ namespace World::Plugins
 		// projectRoot → Project)。根不存在 = 0 个插件(不是错误)。
 		// 清单/位置/重复 id/缺依赖/依赖环在发现期逐条给诊断(条目 State=Rejected);
 		// 有插件仍处于 Loaded 时拒绝重新发现(先 UnloadAll),返回 false 且保持现状。
+		//
+		// devBinaryRoots(2026-09-30):**开发构建**的插件产物根(如
+		// `<repo>/build/x64-Debug/bin/Debug/plugins/Debug`)。插件包自带 `<Root>/bin/<name>.dll`
+		// 不存在时按顺序在这些根里找 `<root>/<name>.dll` 并记为 LibraryPath ——
+		// 引擎插件由引擎构建产出,源码树里不写产物(发布布局仍以自带 bin/ 为准)。
 		bool Discover(const std::filesystem::path& enginePluginsRoot,
-			const std::filesystem::path& projectPluginsRoot);
+			const std::filesystem::path& projectPluginsRoot,
+			const std::vector<std::filesystem::path>& devBinaryRoots = {});
 
 		// 按依赖拓扑加载全部未加载插件;单条失败继续加载其余插件。
 		// 返回 Ok = 全部成功(含 0 个);Rejected = 有条目被拒绝(逐条诊断见 Find()/Entries())。
@@ -157,6 +165,7 @@ namespace World::Plugins
 
 		std::vector<Record> m_Records;
 		std::vector<size_t> m_LoadSequence;  // 发现期算出的拓扑序(LoadAll 用)
+		std::vector<std::filesystem::path> m_DevBinaryRoots;   // 开发构建产物根(Discover 传入)
 		WeHostApi m_HostApi;
 		int m_NextOrder = 0;
 		// Register 调用期间"当前有效的宿主表"(插件在 Register 里调宿主注册面时用它解析归属)。

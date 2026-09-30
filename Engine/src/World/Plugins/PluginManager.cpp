@@ -630,7 +630,8 @@ namespace World::Plugins
 	}
 
 	bool PluginManager::Discover(const std::filesystem::path& enginePluginsRoot,
-		const std::filesystem::path& projectPluginsRoot)
+		const std::filesystem::path& projectPluginsRoot,
+		const std::vector<std::filesystem::path>& devBinaryRoots)
 	{
 		if (LoadedCount() > 0)
 		{
@@ -642,6 +643,7 @@ namespace World::Plugins
 		m_Records.clear();
 		m_LoadSequence.clear();
 		m_NextOrder = 0;
+		m_DevBinaryRoots = devBinaryRoots;
 
 		ScanRoot(enginePluginsRoot, PluginScope::Engine);
 		ScanRoot(projectPluginsRoot, PluginScope::Project);
@@ -701,6 +703,29 @@ namespace World::Plugins
 				if (record.Entry.Manifest.Id.empty())
 					record.Entry.Manifest.Id = directory.filename().string();
 				Reject(record, reason);
+			}
+			else
+			{
+				// 产物定位(2026-09-30):自带 bin/ 优先;否则在宿主的开发构建根里找同名 DLL
+				// (引擎插件 = 引擎构建产出,源码树不写产物)。都没找到就保持自带路径,
+				// 由 Load 给出可读的"产物缺失"诊断。
+				const std::filesystem::path packaged = record.Entry.Manifest.LibraryPath;
+				if (!std::filesystem::is_regular_file(packaged, ec))
+				{
+					const std::string name = directory.filename().string();
+					for (const std::filesystem::path& devRoot : m_DevBinaryRoots)
+					{
+						const std::filesystem::path candidate = devRoot / (name + kPluginLibraryExtension);
+						if (std::filesystem::is_regular_file(candidate, ec))
+						{
+							record.Entry.Manifest.LibraryPath = candidate;
+							Log(WePluginLogInfo, "library resolved from dev build root id="
+								+ record.Entry.Manifest.Id + " path=" + candidate.string());
+							break;
+						}
+					}
+				}
+				ec.clear();
 			}
 			m_Records.push_back(std::move(record));
 		}
@@ -918,6 +943,11 @@ namespace World::Plugins
 		}
 		entry.PluginStructSize = plugin->StructSize;
 		entry.PluginAbi = plugin->AbiVersion;
+		// 导出表名(面板/plugin.info 展示用;在契约校验之前就记下来,失败条目也能诊断)。
+		entry.ExportNames.clear();
+		for (uint32_t i = 0; i < plugin->ExportCount && plugin->Exports; ++i)
+			if (plugin->Exports[i].Name && plugin->Exports[i].Name[0])
+				entry.ExportNames.push_back(plugin->Exports[i].Name);
 		if (plugin->AbiVersion != WE_PLUGIN_ABI_VERSION)
 		{
 			if (error) *error = "plugin ABI version mismatch (plugin=" + std::to_string(plugin->AbiVersion)

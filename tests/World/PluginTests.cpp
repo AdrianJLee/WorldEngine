@@ -172,6 +172,16 @@ namespace
 		CHECK(!ec);
 	}
 
+	// 只写清单(不写 bin/):用于"开发构建根解析"用例 —— 引擎插件在 dev 形态没有自带产物。
+	void WritePluginManifestOnly(const fs::path& root, const std::string& directory, const std::string& yaml)
+	{
+		const fs::path pluginDirectory = root / directory;
+		fs::create_directories(pluginDirectory);
+		std::ofstream out(pluginDirectory / "plugin.we.yaml", std::ios::binary | std::ios::trunc);
+		CHECK(out.is_open());
+		out << yaml;
+	}
+
 	void ExpectRejected(const PluginManager& manager, const std::string& id, const std::string& needle)
 	{
 		const PluginEntry* entry = manager.Find(id);
@@ -346,6 +356,36 @@ namespace
 		CHECK(LogContains(LogSince(mark), "[plugin] test.size.large: registered (larger struct accepted)"));
 		manager.UnloadAll(context);
 		CHECK(entry != nullptr && entry->State == PluginState::Unloaded);
+	}
+
+	// ③c 开发构建根:插件包没有自带 bin/ 时按宿主给的 dev 构建根解析产物(引擎插件在 dev 形态),
+	// 并钉住 PluginEntry::ExportNames(插件管理器面板 / plugin.info 的数据源)。
+	void CaseDevBinaryRootResolution()
+	{
+		const fs::path root = FreshRoot("dev-bin-root");
+		const fs::path devRoot = root / "dev-build" / "plugins" / "Debug";
+		fs::create_directories(devRoot);
+		ManifestFields fields;
+		fields.Id = "test.alpha";   // 目录名 = 产物名 = 插件 id 对应的 DLL 名
+		WritePluginManifestOnly(root / "engine", "test.alpha", BuildYaml(fields));
+		const std::string fileName = "test.alpha" + std::string(kLibraryExtension);
+		std::error_code copyError;
+		fs::copy_file(DllDirectory() / (std::string("WePluginTestAlpha") + kLibraryExtension),
+			devRoot / fileName, fs::copy_options::overwrite_existing, copyError);
+		CHECK(!copyError);
+
+		WorldContext context;
+		PluginManager manager;
+		CHECK(manager.Discover(root / "engine", root / "project", { devRoot }));
+		const PluginEntry* entry = manager.Find("test.alpha");
+		CHECK(entry != nullptr && entry->Manifest.LibraryPath == devRoot / fileName);
+		std::string error;
+		CHECK(manager.LoadAll(context, &error) == PluginManager::Status::Ok);
+		CHECK(entry != nullptr && entry->State == PluginState::Loaded);
+		CHECK(entry != nullptr
+			&& std::find(entry->ExportNames.begin(), entry->ExportNames.end(), "alpha.ping")
+				!= entry->ExportNames.end());
+		manager.UnloadAll(context);
 	}
 
 	// ④ 重复 id:后发现的拒绝 + 诊断(第一个条目保留)。
@@ -880,6 +920,7 @@ int main()
 		CasePluginAbiMismatch();            // ②b 插件 ABI 不符
 		CaseStructSizeMismatch();           // ③ StructSize 不符
 		CaseStructSizeLargerAccepted();     // ③b StructSize 更大(尾部追加)= 接受
+		CaseDevBinaryRootResolution();      // ③c 开发构建根解析 + ExportNames
 		CaseDuplicateId();                  // ④ 重复 id
 		CaseMissingDependency();            // ⑤ 缺依赖 + 级联
 		CaseDependencyCycle();              // ⑥ 依赖环

@@ -21,6 +21,9 @@ namespace World
 {
 	// P2 W5b:脚本热重载只按引用操作组件(完整定义在 Scene/Components.h)。
 	struct LuauScriptComponent;
+	// PLUG-T3:插件管理器(定义在 World/Plugins/PluginManager.h;这里只前置声明 ——
+	// 析构在 .cpp 定义,unique_ptr 的删除器能看到完整类型)。
+	namespace Plugins { class PluginManager; }
 
 	// PROJ-3/T1:`Editor.exe` 纯启动器模式(无参数 / `--launcher`,且没有 `--project`)——
 	// "不挂载任何项目"必须在 Application 构造**之前**生效:Application 的基类构造函数会
@@ -53,7 +56,8 @@ namespace World
 		// PROJ-3/T1:launcherMode = 纯启动器模式(宿主在 Application 构造前已按
 		// LauncherBootScope 的口径挡住项目挂载;这里负责跳过项目级初始化、只画启动器页)。
 		explicit EditorLayer(bool projectExplicit = false, bool launcherMode = false);
-		virtual ~EditorLayer() = default;
+		// PLUG-T3:析构在 .cpp 定义(unique_ptr<Plugins::PluginManager> 需要完整类型)。
+		virtual ~EditorLayer();
 		virtual void OnAttach() override;
 		virtual void OnDetach() override;
 		virtual void OnUpdate(Timestep ts) override;
@@ -281,6 +285,20 @@ namespace World
 		// 引擎实况:当前是否真的加载着 Game 模块(存根生成门禁按它判定)。
 		bool IsCppModuleLoaded() const;
 
+		// ---- PLUG-T3:插件系统(引擎插件 `<repo>/plugins` + 项目插件 `<project>/plugins`)----
+		// 挂载项目后实例化 PluginManager 并 Discover + 按本机禁用清单加载(`local/plugins.json`)。
+		// 启动器形态 / 初始化失败 = nullptr(面板与 `plugin.*` 命令据此给"需要先打开项目")。
+		Plugins::PluginManager* GetPluginManager() const { return m_PluginManager.get(); }
+		// 本机禁用清单(引擎插件;写 `local/plugins.json`)当前是否包含该插件 id。
+		bool IsPluginDisabled(const std::string& id) const;
+		// 启动时那份清单 ≠ 现在的清单(改动的生效时机 = 重启编辑器)—— 面板"需重启"提示的判据。
+		bool PluginRestartPending(const std::string& id) const;
+		// 启用/禁用**引擎插件**(写 `local/plugins.json`,下次启动生效)。
+		// 项目插件(随项目加载)与未知 id = false + 可读理由(面板据此禁用开关)。
+		bool SetPluginEnabled(const std::string& id, bool enabled, std::string* message = nullptr);
+		// 本次启动加载该插件时的失败原因(空 = 没有失败记录);与 PluginEntry::Diagnostic 并列。
+		std::string PluginLoadError(const std::string& id) const;
+
 		// ---- P2 W5-L1:资产热重载(材质/贴图自动重载;文档场景只提示 + 一键重开)----
 		// 文档场景(.wd)在磁盘上被外部改动 → 视口提示条;重开会走未保存确认(不静默丢弃修改)。
 		bool ExternalSceneChanged() const { return m_ExternalSceneChanged; }
@@ -367,6 +385,22 @@ namespace World
 		bool m_GameModuleLoaded = false;
 		// CPPT-3:Game 模块热重载状态(AI module.status / 状态栏节点 cppmodule.status 同一来源)。
 		CppModuleStatus m_CppModuleStatus;
+
+		// ---- PLUG-T3:插件系统状态 ----
+		// 管理器在项目形态的 OnAttach 里建立(Discover 两个根 + 按禁用清单加载);OnDetach 里
+		// UnloadAll + 释放。m_DisabledPlugins 是 `local/plugins.json` 的内存副本(唯一写入口
+		// 是 SetPluginEnabled);AtLoad 那份用于判定"改动是否需要重启才生效"。
+		std::unique_ptr<Plugins::PluginManager> m_PluginManager;
+		std::set<std::string> m_DisabledPlugins;
+		std::set<std::string> m_DisabledPluginsAtLoad;
+		std::filesystem::path m_PluginDisabledListPath;
+		std::map<std::string, std::string> m_PluginLoadErrors;
+		// 挂载项目后调用:发现两个根 → 读禁用清单 → 跳过被禁用的引擎插件逐个加载(失败只记日志,
+		// 不阻断编辑器启动)。ShutdownPlugins:UnloadAll + 释放管理器。
+		void InitPlugins();
+		void ShutdownPlugins();
+		void LoadDisabledPluginList();
+		bool SaveDisabledPluginList(std::string* error) const;
 
 		Ref<Scene> m_ActiveScene;
 		Ref<Scene> m_RuntimeScene;

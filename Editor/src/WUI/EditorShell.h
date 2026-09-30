@@ -15,6 +15,7 @@
 #include "Panels/WidgetGalleryPanel.h"
 #include "Panels/WindowsPanel.h"
 #include "Panels/AttachSlotPanel.h"
+#include "Panels/PluginsPanel.h"
 #include "FloatWindowHost.h"
 #include "../Project/ProjectLauncher.h"
 #include "../Project/ProjectScaffolder.h"
@@ -34,6 +35,7 @@ namespace World
 {
 	class EditorLayer;
 	class PrefabPanel;
+	namespace Plugins { class PluginManager; }
 
 	// 编辑器外壳:停靠布局、菜单栏、模态与面板注册表。业务面板已组件化到
 	// Panels/ 目录,外壳只负责驱动它们渲染并通过 PanelHost / ViewportHost 供给能力。
@@ -130,6 +132,24 @@ namespace World
 		bool FocusContentBrowserProjectSources() override;
 		// CPPSRC-1:内容浏览器里的"新建 C++ 脚本…"(与 File ▸ 新建 C++ 脚本… 同一个向导)。
 		bool RequestNewCppScript() override;
+		// ---- PLUG-T3:插件管理器面板的数据与动作 ----
+		// 面板只依赖 shell(与其它面板同一条纪律):数据源 = EditorLayer 的 PluginManager。
+		// 插件系统未接线(启动器形态 / 未打开项目 / 未初始化)⇒ nullptr。
+		// E2:插件管理器只在项目形态可用(启动器形态不注册面板、菜单不出现)。
+		Plugins::PluginManager* GetPluginManager() const;
+		bool PluginManagerAvailable() const;
+		// 本机禁用清单(`local/plugins.json`)当前是否包含该引擎插件。
+		bool IsPluginDisabled(const std::string& id) const;
+		// 本次启动后禁用状态被改过(启动时那份清单 ≠ 现在的清单)⇒ 面板给"需重启"提示。
+		bool PluginRestartPending(const std::string& id) const;
+		// 本次启动加载该插件失败的可读原因(空 = 没有失败记录;面板/`plugin.info` 与拒绝诊断并列)。
+		std::string PluginLoadError(const std::string& id) const;
+		// 启用/禁用**引擎插件**(写 `local/plugins.json`,下次启动生效)。
+		// 项目插件(随项目加载)返回 false + 可读理由;找不到 id 同样 false + 理由。
+		bool SetPluginEnabled(const std::string& id, bool enabled, std::string* message = nullptr);
+		// 「在内容浏览器中定位」:切到第三根(项目插件)并选中该插件的目录。
+		// 引擎插件不在 `<项目根>/plugins` 下 ⇒ false + 可读理由(面板据此禁用该按钮)。
+		bool LocatePluginInContentBrowser(const std::string& id, std::string* message = nullptr);
 		// ---- CPPT-7/PROJ-8:项目源码视图 + 外部 Visual Studio(内置编辑器只服务 Lua/Luau)----
 		// 当前项目根(运行期;没有清单 —— 启动器/未打开项目 —— 返回空路径)。
 		std::filesystem::path CurrentProjectRoot() const;

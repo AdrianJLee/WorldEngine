@@ -230,12 +230,8 @@ namespace World::Plugins
 				return fail(reason);
 
 			// 产物定位(方案 §4.1):<插件目录>/bin/<目录名><扩展名>。
-#if defined(_WIN32)
-			constexpr const char* kLibraryExtension = ".dll";
-#else
-			constexpr const char* kLibraryExtension = ".so";
-#endif
-			manifest.LibraryPath = manifest.Root / "bin" / (manifest.Root.filename().string() + kLibraryExtension);
+			manifest.LibraryPath = manifest.Root / "bin"
+				/ (manifest.Root.filename().string() + kPluginLibraryExtension);
 
 			*out = std::move(manifest);
 			return true;

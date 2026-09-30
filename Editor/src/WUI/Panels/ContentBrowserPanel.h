@@ -23,17 +23,22 @@
 namespace World
 {
 	// CPPSRC-1(用户 2026-09-29「之前写的 c++ 脚本在编辑器里的展示要改一下,改成像 asset 资产一样」):
-	// 内容浏览器有**两个根**,点左侧树顶部两行切换:
+	// 内容浏览器有**三个根**,点左侧树顶部三行切换:
 	//   Content       = 内容根 `World::Paths::AssetRoot()`(默认 `<项目根>/assets`)—— 资产;
 	//   ProjectSources= 项目 C++ `<项目根>/src` —— 项目自己的 .h/.cpp(内容根之外,以前只在
 	//                   Scripts 面板里以列表出现,现在与资产同一套网格/列表/类型列/搜索,
 	//                   双击走外部 Visual Studio)。
+	// PLUG-T3(用户 2026-09-30「对于项目的插件,也应该要像 c++ 代码一样可以在引擎中看到」):
+	//   ProjectPlugins= 项目插件 `<项目根>/plugins` —— 与项目 C++ 同一套只读浏览语义
+	//                   (改名/删除/剪切/新建文件夹/导入锁死 + 理由;双击 .h/.cpp/plugin.we.yaml
+	//                    走外部 Visual Studio;没有 `<项目根>/plugins` 时该根行禁用)。
 	// 枚举放在命名空间层是为了让状态模型(定义在类之前)也能用;类里 `using RootScope = BrowserRootScope`
 	// 保留 `ContentBrowserPanel::RootScope` 这个调用点拼写。
 	enum class BrowserRootScope
 	{
 		Content = 0,
 		ProjectSources = 1,
+		ProjectPlugins = 2,
 	};
 
 	// 目录树节点(缓存扫描结果,避免每帧全量扫盘)。
@@ -54,6 +59,7 @@ namespace World
 		// 切根时的搬运与分桶由 ContentBrowserPanel::RootStates 负责。
 		std::filesystem::path ContentRoot = World::Paths::AssetRoot();
 		std::filesystem::path SourceRoot;
+		std::filesystem::path PluginsRoot;
 		BrowserRootScope Scope = BrowserRootScope::Content;
 		std::filesystem::path Current;
 		char Search[256] = { 0 };
@@ -109,6 +115,8 @@ namespace World
 		// CPPSRC-1:`<项目根>/src/Generated/**` 的切片 —— 类型列照常(C++ Header/Source),
 		// 但要多挂一枚 `Generated` 徽标,让"能改的源码"和"别手改的生成物"一眼分开。
 		bool GeneratedSource = false;
+		// PLUG-T3:`plugin.we.yaml` 切片 —— 类型列/网格次级信息显示「插件清单」而不是裸 `.yaml`。
+		bool PluginManifest = false;
 		// M4-TEX P4:纹理源图两枚徽标的输入(网格:胶囊徽标;列表:类型列后缀)。
 		//   HasTextureAsset  = 同目录同主名的 `.wtex` 资产在场("有资产" / "默认设置")
 		//   TextureArtifact  = 该源图的 `.wtexc` 状态("已烘焙" / "需重烘")
@@ -145,8 +153,13 @@ namespace World
 		RootScope CurrentRoot() const { return m_Model.Scope; }
 		// 项目源码根是否可用(有当前项目 且 `<项目根>/src` 是目录);0.5s 节流,每帧调用无负担。
 		bool ProjectSourcesAvailable() const;
+		// PLUG-T3:项目插件根是否可用(有当前项目 且 `<项目根>/plugins` 是目录);同一套 0.5s 节流。
+		bool ProjectPluginsAvailable() const;
 		// 当前浏览目录:shell 打开导入模态时用它作默认落点(与双击导入/拖放同一约定)。
 		const std::filesystem::path& CurrentDirectory() const { return m_Model.Current; }
+		// PLUG-T3(插件管理器「在内容浏览器中定位」):切到目标根并选中该绝对路径(目录 = 定位到
+		// 它的父目录并选中它本身)。路径必须在目标根下、磁盘上存在,否则 false 且不改变状态。
+		bool RevealPathInRoot(RootScope scope, const std::filesystem::path& absolutePath);
 		// P4-U13d:选中刚创建/刚生成的资产(逻辑路径相对内容根);目标不在内容根下或不存在 → false。
 		// 与"新建材质/场景/脚本"同一条选中通道(SelectCreated),但会先把列表导航到目标所在目录,
 		// 让用户/脚本立刻看到它 —— 创建预制体成功后由宿主调用。
@@ -299,17 +312,26 @@ namespace World
 			std::vector<std::filesystem::path> SearchResults;
 			std::string Search;   // 搜索框是 char[256],这里按字符串存(切根时逐字节还原)
 		};
-		// 索引 = static_cast<int>(BrowserRootScope)。
-		RootState m_RootStates[2];
-		bool m_RootStatesReady[2] { false, false };
+			// 索引 = static_cast<int>(BrowserRootScope)。
+			RootState m_RootStates[3];
+			bool m_RootStatesReady[3] { false, false, false };
 		void CaptureRootState(BrowserRootScope scope);
 		void ApplyRootState(BrowserRootScope scope);
-		// `<项目根>/src`(没有项目时为空路径)。
-		std::filesystem::path ProjectSourceRoot() const;
-		// 源码根可用性缓存(见 ProjectSourcesAvailable;mutable —— 它是 const 查询)。
-		mutable double m_SourceRootCheckedAt = -1.0;
-		mutable std::filesystem::path m_SourceRootChecked;
-		mutable bool m_SourceRootAvailable = false;
+			// `<项目根>/src`(没有项目时为空路径)。
+			std::filesystem::path ProjectSourceRoot() const;
+			// `<项目根>/plugins`(没有项目时为空路径);可用性判定与项目 C++ 根同一口径。
+			std::filesystem::path ProjectPluginsRoot() const;
+			// 某一个根的绝对路径(运行期值优先,空则回退到编译期解析)。
+			std::filesystem::path RootPathFor(BrowserRootScope scope) const;
+			// 持久化 `scope` 字段的键名(与 LoadState/SaveState 同一份口径)。
+			static std::string ScopeKey(BrowserRootScope scope);
+			// 源码根可用性缓存(见 ProjectSourcesAvailable;mutable —— 它是 const 查询)。
+			mutable double m_SourceRootCheckedAt = -1.0;
+			mutable std::filesystem::path m_SourceRootChecked;
+			mutable bool m_SourceRootAvailable = false;
+			mutable double m_PluginsRootCheckedAt = -1.0;
+			mutable std::filesystem::path m_PluginsRootChecked;
+			mutable bool m_PluginsRootAvailable = false;
 		// P4-UX14:内容区统一切片的两个绘制入口(网格 / 列表 + 常驻表头)。
 		// interact = 面板既有的选中/双击/拖拽/右键处理,按切片路径调用。
 		void RenderGridSlices(Wui::WuiContext& ctx, const Wui::WuiRect& area, const Wui::WuiTheme& theme,

@@ -13,6 +13,7 @@
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/KeyCodes.h"
 #include "World/Renderer/Renderer.h"
+#include "World/Plugins/PluginManager.h"
 #include "World/Utils/Paths.h"
 #include "World/Utils/PlatformUtils.h"
 #include "World/WUI/WuiLayoutStore.h"
@@ -196,6 +197,9 @@ namespace World
 			{ "input",           EditorShell::PanelForm::Independent, { 660.0f, 120.0f, 440.0f, 340.0f } },
 			// W8:Scripts 面板(独立窗口,诊断行/按钮在默认客户区内,便于无鼠标自动化)。
 			{ "scripts",         EditorShell::PanelForm::Independent, { 120.0f, 160.0f, 760.0f, 470.0f } },
+			// PLUG-T3:插件管理器(停靠面板;E2 = 只在**项目形态**注册 —— 启动器形态下
+			// 构造期跳过它:不进 m_Panels / 不进注册表 / Window 菜单不出现)。
+			{ "plugins",         EditorShell::PanelForm::Docked, {} },
 			// 注:D3 材质编辑器是**动态面板**(每个材质一个 "material:<path>" 实例),
 			// 不在这张静态声明表里,由 IsMaterialPanel/EditorShell::OpenMaterialEditor 处理。
 		};
@@ -220,6 +224,9 @@ namespace World
 		std::vector<Wui::PanelId> dockedPanels;
 		for (const PanelSpec& spec : kPanelSpecs)
 		{
+			// PLUG-T3/E2:插件管理器只在项目形态注册(启动器形态:不注册面板、菜单不出现)。
+			if (m_LauncherMode && std::strcmp(spec.Id, "plugins") == 0)
+				continue;
 			m_Panels.push_back(spec.Id);
 			if (spec.Form == PanelForm::Docked)
 				dockedPanels.push_back(spec.Id);
@@ -265,6 +272,9 @@ namespace World
 		m_PanelRegistry.emplace("material", std::make_unique<MaterialEditorPanel>());
 		m_PanelRegistry.emplace("texture_settings", std::make_unique<TextureSettingsPanel>());
 		m_PanelRegistry.emplace("scripts", std::make_unique<ScriptsPanel>());
+		// PLUG-T3:插件管理器面板(数据/动作都走 EditorShell → EditorLayer;项目形态才注册)。
+		if (!m_LauncherMode)
+			m_PanelRegistry.emplace("plugins", std::make_unique<PluginsPanel>(*this));
 
 		// P4-UX10:恢复"上次退出时开着"的独立窗口。
 		// 存档里仍有浮动记录 = 上次开着(关掉的不会自动弹出);同时记了上次形态(挂靠 chip / 浮窗)。
@@ -349,6 +359,9 @@ namespace World
 
 	bool EditorShell::IsDeclaredPanel(const std::string& panel) const
 	{
+		// PLUG-T3/E2:启动器形态不注册插件管理器(菜单/脚本都看不到它)。
+		if (m_LauncherMode && panel == "plugins")
+			return false;
 		if (panel.compare(0, std::strlen(kMaterialPanelPrefix), kMaterialPanelPrefix) == 0)
 			return true;
 		if (panel.compare(0, std::strlen(kModelPanelPrefix), kModelPanelPrefix) == 0)
@@ -701,6 +714,80 @@ namespace World
 		return true;
 	}
 
+	// ---- PLUG-T3:插件管理器面板的数据与动作(面板只依赖 shell)----
+	// 数据源 = EditorLayer 持有的 PluginManager(T3 里在挂载项目后实例化并 Discover+Load);
+	// 面板/命令都走这几条入口,不直接抓 EditorLayer 内部状态。
+	Plugins::PluginManager* EditorShell::GetPluginManager() const
+	{
+		return m_Editor.GetPluginManager();
+	}
+
+	bool EditorShell::PluginManagerAvailable() const
+	{
+		return GetPluginManager() != nullptr;
+	}
+
+	bool EditorShell::IsPluginDisabled(const std::string& id) const
+	{
+		return m_Editor.IsPluginDisabled(id);
+	}
+
+	bool EditorShell::PluginRestartPending(const std::string& id) const
+	{
+		return m_Editor.PluginRestartPending(id);
+	}
+
+	std::string EditorShell::PluginLoadError(const std::string& id) const
+	{
+		return m_Editor.PluginLoadError(id);
+	}
+
+	bool EditorShell::SetPluginEnabled(const std::string& id, bool enabled, std::string* message)
+	{
+		return m_Editor.SetPluginEnabled(id, enabled, message);
+	}
+
+	bool EditorShell::LocatePluginInContentBrowser(const std::string& id, std::string* message)
+	{
+		const auto fail = [message](const std::string& reason)
+		{
+			if (message)
+				*message = reason;
+			return false;
+		};
+		Plugins::PluginManager* plugins = GetPluginManager();
+		if (!plugins)
+			return fail(Wui::Tr("panel.plugins.notice.need_project", "Open a project first."));
+		const Plugins::PluginEntry* entry = plugins->Find(id);
+		if (!entry)
+			return fail(Wui::TrFormat("panel.plugins.notice.not_found", "No plugin with id '{id}'.",
+				{ { "id", id } }));
+		if (entry->Manifest.Scope != Plugins::PluginScope::Project)
+		{
+			// 第三根只显示 `<项目根>/plugins`;引擎插件住在引擎仓库里,不在本根的范围内。
+			return fail(Wui::Tr("panel.plugins.notice.engine_plugin_not_in_browser",
+				"Engine plugins live in <engine>/plugins — the content browser shows project plugins only."));
+		}
+		const std::string panel = "content_browser";
+		if (!m_Layout.Contains(panel))
+			DockPanelBackToTree(panel);
+		const auto found = m_PanelRegistry.find(panel);
+		if (found == m_PanelRegistry.end())
+			return fail("content browser panel is not registered");
+		auto* browser = dynamic_cast<ContentBrowserPanel*>(found->second.get());
+		if (!browser)
+			return fail("content browser panel has an unexpected type");
+		if (!browser->RevealPathInRoot(ContentBrowserPanel::RootScope::ProjectPlugins, entry->Manifest.Root))
+		{
+			return fail(Wui::Tr("panel.plugins.notice.no_project_plugins_root",
+				"Project plugins live in <project>/plugins — this project has no plugins/ directory."));
+		}
+		AiActivatePanel(panel, nullptr);
+		if (m_Ctx)
+			m_Ctx->RecordOp("plugins", "locate", id, entry->Manifest.Root.generic_string());
+		return true;
+	}
+
 	// ---- U25-M2:材质工作流(PanelHost 能力)----
 	// 赋值/撤销都转发到 EditorLayer 的**唯一写入口**(与 AI 通道 scene.set Material 同一条字段);
 	// 编辑器侧不做"面板自己改组件"的旁路,否则脏标记与只读规则会两套。
@@ -963,6 +1050,7 @@ namespace World
 			{ "gallery",         { "panel.gallery", "Widget Gallery" } },
 			{ "input",           { "panel.input", "Input Map" } },
 			{ "scripts",         { "panel.scripts", "Scripts" } },
+			{ "plugins",         { "panel.plugins.title", "Plugins" } },
 			{ "texture_settings", { "panel.texture_settings", "Texture Settings" } },
 		};
 		(void)kTitles;
