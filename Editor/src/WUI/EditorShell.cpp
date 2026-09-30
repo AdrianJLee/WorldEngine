@@ -197,9 +197,13 @@ namespace World
 			{ "input",           EditorShell::PanelForm::Independent, { 660.0f, 120.0f, 440.0f, 340.0f } },
 			// W8:Scripts 面板(独立窗口,诊断行/按钮在默认客户区内,便于无鼠标自动化)。
 			{ "scripts",         EditorShell::PanelForm::Independent, { 120.0f, 160.0f, 760.0f, 470.0f } },
-			// PLUG-T3:插件管理器(停靠面板;E2 = 只在**项目形态**注册 —— 启动器形态下
-			// 构造期跳过它:不进 m_Panels / 不进注册表 / Window 菜单不出现)。
-			{ "plugins",         EditorShell::PanelForm::Docked, {} },
+			// PLUG-T3:插件管理器(**独立窗口形态**,用户 2026-09-30 指定:"应该是独立窗口类型"
+			// —— 与 Project Settings / Widget Gallery / Scripts 同款:默认打开走
+			// TogglePanel → OpenPanelAttached(附加到主窗口的标签切换),可拖出为独立 OS 窗口,
+			// 布局存档里的停靠记录由 StripIndependentPanelsFromTree 丢弃)。
+			// E2 = 只在**项目形态**注册 —— 启动器形态下构造期跳过它:不进 m_Panels /
+			// 不进注册表 / Window 菜单不出现。
+			{ "plugins",         EditorShell::PanelForm::Independent, { 200.0f, 120.0f, 760.0f, 500.0f } },
 			// 注:D3 材质编辑器是**动态面板**(每个材质一个 "material:<path>" 实例),
 			// 不在这张静态声明表里,由 IsMaterialPanel/EditorShell::OpenMaterialEditor 处理。
 		};
