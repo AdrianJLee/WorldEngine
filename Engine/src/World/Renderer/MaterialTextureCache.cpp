@@ -172,6 +172,8 @@ namespace World
 			desc.Extent = { header.Width, header.Height, 1 };
 			desc.MipLevels = mipLevels;
 			desc.Usage = Rhi::TextureUsageSampled | Rhi::TextureUsageTransferDst;
+			// HOTR-P2C:材质贴图可能在活动帧中途被替换/热重载 —— 走同步上传,见 RhiTexture.h 说明。
+			desc.SynchronousUpload = true;
 			desc.DebugName = "Material." + path;
 			Rhi::Handle<Rhi::Texture> texture = device->CreateTexture(desc);
 			if (!texture)
@@ -304,6 +306,8 @@ namespace World
 		desc.Format = srgb ? Rhi::Format::R8G8B8A8_SRGB : Rhi::Format::R8G8B8A8_UNORM;
 		desc.Extent = { data.Width, data.Height, 1 };
 		desc.Usage = Rhi::TextureUsageSampled | Rhi::TextureUsageTransferDst;
+		// HOTR-P2C:同上 —— 材质贴图热重载是常态路径。
+		desc.SynchronousUpload = true;
 		desc.DebugName = "Material." + normalizedPath;
 		Rhi::Handle<Rhi::Texture> texture = Renderer::GetDevice()->CreateTexture(desc);
 		if (texture && !data.Pixels.empty())

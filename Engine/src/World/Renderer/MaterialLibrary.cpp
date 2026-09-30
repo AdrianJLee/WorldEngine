@@ -882,6 +882,35 @@ namespace World
 		}
 	}
 
+	// HOTR-P2C:重烘产物(`.wtexc`)后让引用该贴图的材质失效 —— 与 PollAssetChanges 的
+	// "贴图内容变化"分支同一套口径(材质 Revision 前进由调用方随后触发渲染侧重建描述符集)。
+	std::size_t MaterialLibrary::InvalidateTextureDependents(const std::string& texturePath)
+	{
+		const std::string normalized = NormalizePath(texturePath);
+		if (normalized.empty())
+			return 0;
+		std::size_t invalidated = 0;
+		for (const auto& [key, material] : m_Cache)
+		{
+			if (!material)
+				continue;
+			const MaterialDesc& desc = material->GetDesc();
+			const bool albedoChanged = !desc.AlbedoTexture.empty()
+				&& NormalizePath(desc.AlbedoTexture) == normalized;
+			const bool normalChanged = !desc.NormalTexture.empty()
+				&& NormalizePath(desc.NormalTexture) == normalized;
+			if (albedoChanged || normalChanged)
+			{
+				material->InvalidateTextures();
+				++invalidated;
+			}
+		}
+		if (invalidated > 0)
+			WLD_CORE_INFO("[asset-hot-reload] texture rebaked -> invalidated {0} material(s) for '{1}'",
+				invalidated, normalized);
+		return invalidated;
+	}
+
 	std::string MaterialLibrary::GetLoadWarning(const std::string& path) const
 	{
 		const auto it = m_Warnings.find(NormalizePath(path));

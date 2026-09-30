@@ -3853,14 +3853,13 @@ namespace World
 		// HOTR-P2-T5(P2-c):内容根下 `.wtex` 及其 `source:` 源图的外部改动 → 自动重烘 `.wtexc`。
 		// 与材质/贴图/场景共用上面那道"资产热重载"开关(WLD_ASSET_HOTRELOAD / 偏好);
 		// Poll = 主线程指纹轮询 + 稳定窗口后派发(编码在工作线程),Pump = 主线程写盘 + 失效 + 日志。
-		// **默认关闭**:已知 Vulkan 缺陷 —— 活动材质从"容器源图"切到"新烘 BC7 产物"时会
-		// device lost(复现:`tools/agents/scratch/HOTR-P2/t5-texture-rebake-probe.py`,
-		// 验证层 VUID-vkResetFences-pFences-01123 + VUID-vkAcquireNextImageKHR-semaphore-01779)。
-		// 待引擎侧取证修复后再翻默认值;在此之前用 `WLD_TEXTURE_HOTRELOAD=1` 显式开启。
+		// **默认开启**(2026-09-30 修复后):`WLD_TEXTURE_HOTRELOAD=0` 可关(自动化/诊断用)。
+		// 历史:翻默认值前实测到"活动材质换贴图 → 帧同步被打坏 → device lost";真因是
+		// 材质贴图走异步上传环 + 重烘后材质未失效,两处都已修(见 plan.md P2-c 取证记录)。
 		static const bool textureHotReloadEnabled = []
 		{
 			const char* value = std::getenv("WLD_TEXTURE_HOTRELOAD");
-			return value != nullptr && *value != '\0' && std::string(value) != "0";
+			return !(value != nullptr && *value != '\0' && std::string(value) == "0");
 		}();
 		if (textureHotReloadEnabled)
 		{

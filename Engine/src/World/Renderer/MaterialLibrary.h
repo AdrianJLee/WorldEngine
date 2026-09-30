@@ -123,6 +123,12 @@ namespace World
 		//    WLD_ASSET_HOTRELOAD_TRACE=1 打 [asset-hot-reload] 日志。
 		void PollAssetChanges(double deltaSeconds, AssetHotReloadReport& report);
 
+		// HOTR-P2C:贴图**产物被重烘**(`.wtexc` 内容变、`.wtex` 本身可能没变)时,让引用该贴图的
+		// 材质 Revision 前进 —— 与 PollAssetChanges 里"贴图内容变化"同一套失效口径
+		// (MaterialTextureCache::Invalidate 由调用方负责;这里只做材质侧失效)。
+		// 调用方:编辑器 TextureImportWatch 的重烘提交(主线程帧边界)。返回失效的材质数。
+		std::size_t InvalidateTextureDependents(const std::string& texturePath);
+
 		// 规范化:统一分隔符为 '/'、去掉前导 "./"。
 		static std::string NormalizePath(const std::string& path);
 

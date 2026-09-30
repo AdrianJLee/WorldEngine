@@ -7,6 +7,7 @@
 #include "../WUI/Panels/TextureSettingsPanel.h"
 
 #include "World/Core/Sha256.h"
+#include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/TextureCompiler.h"
 #include "World/Utils/Paths.h"
 
@@ -448,6 +449,9 @@ namespace World
 				}
 				WLD_CORE_INFO("[asset-hot-reload] texture rebaked '{0}' ({1:.0f} ms)",
 					outcome.AssetLogical, outcome.ElapsedMs);
+				// 重烘产物落地后还要让**引用该贴图的材质**失效(Revision 前进):
+				// 否则渲染侧仍拿旧描述符集(实测:第二次重烘后画面停在上一轮颜色)。
+				MaterialLibrary::Get().InvalidateTextureDependents(outcome.AssetLogical);
 			}
 		}
 

@@ -13,6 +13,11 @@ namespace World::Rhi
 		uint32_t ArrayLayers = 1;
 		SampleCount Samples = SampleCount::Count1;
 		uint32_t Usage = TextureUsageSampled;
+		// HOTR-P2C:上传语义提示。true = 后端用**同步**上传路径(提交后等待),不并入异步上传环。
+		// 材质贴图(尤其热重载/产物切换)会在活动帧中途被替换,实测异步环路径会打坏帧同步
+		// (VUID 01123/01779 → 00045/00071 → device lost);这类纹理加载低频,同步代价可接受。
+		// GL 后端忽略该字段(它本来就是同步上传)。
+		bool SynchronousUpload = false;
 		std::string DebugName;
 	};
 
