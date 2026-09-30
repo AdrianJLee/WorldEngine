@@ -48,8 +48,9 @@ namespace World::Plugins
 		uint32_t Abi = WE_PLUGIN_ABI_VERSION;
 		std::string Entry = WE_PLUGIN_QUERY_SYMBOL;
 
-		// 最低引擎版本约束(空 = 不限制)。T1 只做形态校验与记录;与宿主版本比较依赖
-		// "引擎版本号"的单一事实源(见 PLUG-T1 报告的遗留项)。
+		// 最低引擎版本约束(空 = 不限制)。解析期只做形态校验(">=X.Y");
+		// 与宿主版本的语义比较 + 不满足 ⇒ 硬拒绝在 PluginManager::ScanRoot(PLUG-CLEAN-2),
+		// 宿主版本事实源见 HostEngineVersion()。
 		std::string Engine;
 		uint32_t EngineMinMajor = 0;
 		uint32_t EngineMinMinor = 0;

@@ -278,6 +278,7 @@ namespace
 		const PluginEntry* alphaEntry = manager.Find("test.alpha");
 		CHECK(alphaEntry != nullptr);
 		CHECK(alphaEntry->State == PluginState::Loaded);
+		CHECK(alphaEntry->EngineSatisfied);   // PLUG-CLEAN-2:清单一 engine >=2.0 被宿主 2.0.0 满足
 		CHECK(alphaEntry->Order == 0);
 		CHECK(alphaEntry->Manifest.Scope == PluginScope::Engine);
 		CHECK(alphaEntry->Manifest.HasScopeField == false);
@@ -346,6 +347,41 @@ namespace
 		CHECK(error.find("abi") != std::string::npos);
 		CHECK(LogContains(LogSince(mark), "[plugin] rejected id=test.alpha"));
 		CHECK(!LogContains(LogSince(mark), "[plugin] test.alpha: registered"));
+	}
+
+	// ②c PLUG-CLEAN-2:清单 engine: 约束不满足 → 发现期干净拒绝(不进 loaded、不注册),
+	// 诊断带声明值与宿主版本;依赖它的插件级联拒绝(不半可用)。
+	void CaseEngineRequirementRejected()
+	{
+		const fs::path root = FreshRoot("engine-gate");
+		ManifestFields old;
+		old.Id = "test.oldengine";
+		old.Engine = ">=99.0";
+		WritePlugin(root / "engine", "test.oldengine", "WePluginTestAlpha", BuildYaml(old));
+		ManifestFields dependent;
+		dependent.Id = "test.dependent";
+		dependent.Depends = { "test.oldengine" };
+		WritePlugin(root / "project", "test.dependent", "WePluginTestBeta", BuildYaml(dependent));
+
+		WorldContext context;
+		PluginManager manager;
+		const size_t mark = LogMark();
+		CHECK(manager.Discover(root / "engine", root / "project"));
+		const PluginEntry* entry = manager.Find("test.oldengine");
+		CHECK(entry != nullptr);
+		CHECK(entry->EngineSatisfied == false);
+		ExpectRejected(manager, "test.oldengine", "engine requirement");
+		ExpectRejected(manager, "test.oldengine", ">=99.0");
+		ExpectRejected(manager, "test.oldengine",
+			std::string("host engine ") + HostEngineVersion());
+		ExpectRejected(manager, "test.dependent", "could not be loaded");
+		CHECK(manager.LoadedCount() == 0);
+		std::string error;
+		CHECK(manager.LoadAll(context, &error) == PluginManager::Status::Rejected);
+		CHECK(manager.LoadedCount() == 0);
+		CHECK(error.find("engine requirement") != std::string::npos);
+		CHECK(LogContains(LogSince(mark), "[plugin] rejected id=test.oldengine"));
+		CHECK(!LogContains(LogSince(mark), "[plugin] test.oldengine: registered"));
 	}
 
 	// ②b 插件自报 ABI 与宿主不等值 → 加载期干净拒绝(Register 不被调用)。
@@ -2436,6 +2472,7 @@ namespace
 
 		CaseDiscoveryTopologyAndUnload();   // ① 拓扑顺序 / ⑧ 卸载与 Unregister
 		CaseManifestAbiMismatch();          // ②a 清单 abi 不符
+		CaseEngineRequirementRejected();    // ②c 清单 engine 约束不满足 = 硬拒绝 + 级联
 		CasePluginAbiMismatch();            // ②b 插件 ABI 不符
 		CaseStructSizeMismatch();           // ③ StructSize 不符
 		CaseStructSizeLargerAccepted();     // ③b StructSize 更大(尾部追加)= 接受

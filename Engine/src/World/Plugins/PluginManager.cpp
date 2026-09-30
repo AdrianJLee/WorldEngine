@@ -2081,38 +2081,37 @@ namespace World::Plugins
 			}
 			else
 			{
-				// PLUG-CLEAN-1:`engine:` 最低版本约束的语义化比较(宿主版本 =
-				// 根 CMakeLists 的 project(World VERSION …),见 PluginManifest.h)。
-				// 清单不带 engine: = 照旧通过。比较结果记在条目上(面板/`plugin.info`
-				// 诊断可读);不满足时给一条**可读警告** —— 宿主与随包清单
-				// (`plugins/hello-import`、6 个模板)的约束值需要主 agent 统一裁决
-				// (见 PLUG-CLEAN-1 报告"遗留"),那之前不把本仓库自带插件拦在门外。
+				// PLUG-CLEAN-2:`engine:` 最低版本约束 = **硬拒绝门**。约束不满足 ⇒
+				// 干净拒绝(Rejected + 可读诊断,不进 loaded、不注册任何面);宿主版本
+				// 事实源 = 根 CMakeLists 的 project(World VERSION …)(见 PluginManifest.h)。
+				// 清单不带 engine: = 照旧通过。比较结果记在条目上(面板/`plugin.info` 可读)。
 				record.Entry.EngineSatisfied = record.Entry.Manifest.Engine.empty()
 					|| HostEngineSatisfies(record.Entry.Manifest.EngineMinMajor,
 						record.Entry.Manifest.EngineMinMinor);
 				if (!record.Entry.EngineSatisfied)
 				{
-					Log(WePluginLogWarn, "warning id=" + record.Entry.Manifest.Id + " engine requirement '"
-						+ record.Entry.Manifest.Engine + "' is not satisfied by host engine "
-						+ HostEngineVersion() + " (engine gate pending manifest sync)");
+					Reject(record, "engine requirement '" + record.Entry.Manifest.Engine
+						+ "' is not satisfied by host engine " + HostEngineVersion());
 				}
-
-				// 产物定位(2026-09-30):自带 bin/ 优先;否则在宿主的开发构建根里找同名 DLL
-				// (引擎插件 = 引擎构建产出,源码树不写产物)。都没找到就保持自带路径,
-				// 由 Load 给出可读的"产物缺失"诊断。
-				const std::filesystem::path packaged = record.Entry.Manifest.LibraryPath;
-				if (!std::filesystem::is_regular_file(packaged, ec))
+				else
 				{
-					const std::string name = directory.filename().string();
-					for (const std::filesystem::path& devRoot : m_DevBinaryRoots)
+					// 产物定位(2026-09-30):自带 bin/ 优先;否则在宿主的开发构建根里找同名 DLL
+					// (引擎插件 = 引擎构建产出,源码树不写产物)。都没找到就保持自带路径,
+					// 由 Load 给出可读的"产物缺失"诊断。
+					const std::filesystem::path packaged = record.Entry.Manifest.LibraryPath;
+					if (!std::filesystem::is_regular_file(packaged, ec))
 					{
-						const std::filesystem::path candidate = devRoot / (name + kPluginLibraryExtension);
-						if (std::filesystem::is_regular_file(candidate, ec))
+						const std::string name = directory.filename().string();
+						for (const std::filesystem::path& devRoot : m_DevBinaryRoots)
 						{
-							record.Entry.Manifest.LibraryPath = candidate;
-							Log(WePluginLogInfo, "library resolved from dev build root id="
-								+ record.Entry.Manifest.Id + " path=" + candidate.string());
-							break;
+							const std::filesystem::path candidate = devRoot / (name + kPluginLibraryExtension);
+							if (std::filesystem::is_regular_file(candidate, ec))
+							{
+								record.Entry.Manifest.LibraryPath = candidate;
+								Log(WePluginLogInfo, "library resolved from dev build root id="
+									+ record.Entry.Manifest.Id + " path=" + candidate.string());
+								break;
+							}
 						}
 					}
 				}

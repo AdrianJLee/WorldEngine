@@ -431,7 +431,7 @@ namespace World::Plugins
 		return WLD_ENGINE_VERSION;
 #else
 		// 兜底:与根 CMakeLists.txt 的 project(World VERSION …) 保持一致(见头文件说明)。
-		return "1.0.0";
+		return "2.0.0";
 #endif
 	}
 

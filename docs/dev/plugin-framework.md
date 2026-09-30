@@ -524,16 +524,16 @@ load/unload 账本零增长 + 条目数不增长"。
 
 ### 引擎版本:`engine: ">=X.Y"` 的事实源与比较口径
 
-- **宿主引擎版本的事实源 = 根 `CMakeLists.txt` 的 `project(World VERSION …)`**(当前 `1.0.0`)。
+- **宿主引擎版本的事实源 = 根 `CMakeLists.txt` 的 `project(World VERSION …)`**(当前 `2.0.0`)。
   该值经编译定义 `WLD_ENGINE_VERSION` 传给 `World`(`World/Plugins/PluginManifest.h` 的
   `HostEngineVersion()` 是唯一读取点);不在插件层复制第二份版本号。
 - 清单 `engine:` 只接受 `">=X.Y"` 形态(或省略 = 不限制)。语义比较 = **宿主 `major.minor` ≥ 声明值**;
   `plugin.info` 输出宿主 `hostEngineVersion`,每个条目输出 `engineSatisfied`(空清单字段 = `true`)。
-- 自带清单的同步状态(重要):`plugins/hello-import` 与 6 个 `templates/plugin-*/plugin.we.yaml`
-  目前声明 `>=2.0`,而宿主事实源是 `1.0.0` ⇒ 它们会被标 `engineSatisfied=false`。PLUG-CLEAN-1 先把
-  **比较 + 诊断**落地;把"不满足 ⇒ 拒绝加载"接进 `PluginManager` 之前,必须先由主 agent 决策:
-  (a) 把这些清单改成与宿主相符的约束,或 (b) 提升版本事实源。探针 ① 同时接受"诊断模式
-  (loaded + `engineSatisfied=false`)"与"门禁模式(`rejected` + 可读诊断)"两种状态。
+- 自带清单与事实源已对齐:`plugins/hello-import` 与 6 个 `templates/plugin-*/plugin.we.yaml` 声明 `>=2.0`,
+  宿主事实源也是 `2.0.0`;约束不满足(例:`>=99.0`)⇒ **干净拒绝**并给可读诊断(见下一段)。
+- **PLUG-CLEAN-2 更新(2026-09-30)**:宿主版本事实源已提升为
+  `project(World VERSION 2.0.0)`(与自带清单的 `>=2.0` 对齐);`engine:` 约束不满足 ⇒ **硬拒绝**
+  (`PluginState::Rejected` + `engine requirement '…' is not satisfied by host engine 2.0.0`,不进 loaded)。
 - **加载失败必须干净拒绝,不能弹系统框**:`PluginManager::LoadRecord` 在 DLL 加载窗口内临时压制
   Windows 硬错误框(`SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX`),随后恢复进程原错误模式。
   坏产物 = 立即返回 `LoadLibraryA failed with Win32 error 193`(实测:进程默认错误模式为 0 时,
