@@ -66,6 +66,8 @@
   "settings.editor.editor.script_font_size.tooltip": "脚本编辑器字号\n脚本窗口使用该字号(Ctrl+滚轮仍可临时缩放)。\n范围:10 - 32 px\n立即生效",
   "settings.editor.workflow.asset_hot_reload": "资产热重载",
   "settings.editor.workflow.asset_hot_reload.tooltip": "资产热重载\n磁盘上的贴图/材质/模型改动后自动重新导入(内容哈希判定,同内容重写不触发)。\n默认:开(WLD_ASSET_HOTRELOAD 环境变量可覆盖)\n立即生效",
+  "settings.editor.workflow.scene_auto_reload": "场景自动重载",
+  "settings.editor.workflow.scene_auto_reload.tooltip": "场景自动重载\n磁盘上的 .wd 场景被外部改动时自动重新打开(仅当文档没有未保存修改且处于编辑态;重开后恢复选择与编辑器相机)。有未保存修改时绝不自动覆盖(视口保留重新打开提示)。\n默认:开(WLD_SCENE_AUTORELOAD=0 环境变量可覆盖)\n立即生效",
   "settings.editor.automation.ai_control_port": "AI 控制通道端口",
   "settings.editor.automation.ai_control_port.tooltip": "AI 控制通道端口\n只监听 127.0.0.1,供脚本/AI 读取无障碍树与截图;0 = 关闭。命令行 --ai-control=<port> 优先。\n默认:0(关闭)\n重启编辑器后生效",
   "settings.editor.diagnostics.log_level": "日志级别",

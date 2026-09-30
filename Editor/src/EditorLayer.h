@@ -355,6 +355,11 @@ namespace World
 		void PollScriptHotReload(float deltaSeconds);
 		// W5-L1:帧边界轮询资产外部改动(材质/贴图自动;文档场景置 externalSceneChanged)。
 		void PollAssetHotReload(float deltaSeconds);
+		// HOTR-P2-T6:当前**文档场景**里 prefab 实例引用的 `.wprefab` 外部改动 → 帧边界安全点
+		// 逐实例跟随(150ms 消抖,仅编辑态;override 保留由 ApplyPrefabChanges 负责)。
+		void PollPrefabHotReload(float deltaSeconds);
+		// 未决 prefab 变化在安全点(CanApplyScriptReload)消费;不安全点顺延到下一帧,不丢。
+		void ApplyPendingPrefabChanges();
 		// 用当前文档路径重建场景监听基线(打开/保存/重开成功后调用;换路径时也清提示)。
 		void RebaselineExternalSceneWatch();
 		// HOTR-P2-T5:外部改动 + 文档干净 + 编辑态 → 走 RequestAction 自动重开(带选择/相机恢复);
@@ -521,6 +526,12 @@ namespace World
 		AssetFileWatch m_SceneWatch;
 		// 当前监听的文档场景逻辑路径(空 = 未监听);镜像它以便换文档时重设基线。
 		std::string m_WatchedSceneLogicalPath;
+		// HOTR-P2-T6:场景内 prefab 实例引用的 `.wprefab` 监听(150ms)与未决变化。
+		// 监听集合每帧与 PrefabInstances() 的来源路径同步(新引用 Watch、消失的 Unwatch);
+		// 变化先进入未决集合,只在 CanApplyScriptReload() 的安全点消费(ApplyPrefabChanges
+		// 会改实体组件,与脚本热重载同一安全点口径)。
+		AssetFileWatch m_PrefabWatch;
+		std::vector<std::string> m_PendingPrefabReloads;
 		// P4-U13:prefab 编辑会话 —— 正在编辑的 prefab 逻辑路径(空 = 普通场景文档)
 		// 与"进来之前那个场景"的绝对路径(返回时重新打开它)。
 		std::string m_PrefabEditLogical;

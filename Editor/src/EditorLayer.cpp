@@ -3868,6 +3868,11 @@ namespace World
 			m_TextureImportWatch.Pump();
 		}
 
+		// HOTR-P2-T6(P2-b):当前文档场景引用的 `.wprefab` 外部改动 → 帧边界安全点逐实例跟随
+		// (保留 override;失败只记日志,其余实例继续)。放在文档路径早退之前:场景文档在内容根
+		// 之外时,实例引用的 prefab 逻辑路径仍然有效,跟随不受影响。
+		PollPrefabHotReload(static_cast<double>(deltaSeconds));
+
 		// 2) 文档场景(.wd):内容变化 → 视口提示条;**干净文档 + 编辑态**再自动重开
 		//    (HOTR-P2-T5;重开前按 UUID 记选择、记相机,重开后恢复)。
 		//    dirty / Play / Simulate / `scene_auto_reload` 关闭 → 只提示 + 手动重开,
@@ -3897,6 +3902,114 @@ namespace World
 			// HOTR-P2-T5:干净文档 + 编辑态 → 走 RequestAction 自动重开(选择/相机恢复);
 			// dirty / Play / Simulate / 开关关闭 → 这一条不做任何事(保留上面的提示语义)。
 			MaybeAutoReloadExternalScene();
+		}
+	}
+
+	// ---- HOTR-P2-T6:`.wprefab` 实例跟随(Edit 态 + 150ms 消抖)----
+	//
+	// 口径(方案 P2 细化设计,P2-b):
+	//   * 监听集合 = 当前**文档场景** PrefabInstances() 里的来源路径(每帧同步:新引用 Watch、
+	//     消失的引用 Unwatch);Play/Simulate 的活动场景是运行时副本,不跟随;
+	//   * 变化经 AssetFileWatch 150ms 消抖后进入未决集合,只在 CanApplyScriptReload()
+	//     的安全点消费(ApplyPrefabChanges 会改实体组件;与脚本热重载同一安全点口径),
+	//     不安全时顺延到下一帧,不丢;
+	//   * 每个被引用实例单独调用 Gameplay::ApplyPrefabChanges:false = 该实例未改(记 failed,
+	//     其余实例继续);true + 非空 error = 已应用但有字段跳过(记 WARN,不当作失败)。
+	void EditorLayer::PollPrefabHotReload(float deltaSeconds)
+	{
+		Scene* scene = m_ActiveScene.get();
+		const bool editDocument = scene != nullptr && m_SceneState == SceneState::Edit
+			&& scene == m_Document.GetScene().get();
+
+		// 1) 监听集合同步(编辑态 = 当前实例引用的路径;其它形态清空,回到编辑态时重新建立基线)。
+		std::vector<std::string> wanted;
+		if (editDocument)
+		{
+			for (const Gameplay::PrefabInstanceRecord& record : scene->PrefabInstances())
+			{
+				if (record.PrefabPath.empty())
+					continue;
+				if (std::find(wanted.begin(), wanted.end(), record.PrefabPath) == wanted.end())
+					wanted.push_back(record.PrefabPath);
+			}
+		}
+		for (const std::string& watched : m_PrefabWatch.WatchedPaths())
+		{
+			if (std::find(wanted.begin(), wanted.end(), watched) == wanted.end())
+				m_PrefabWatch.Unwatch(watched);
+		}
+		for (const std::string& path : wanted)
+		{
+			if (!m_PrefabWatch.IsWatched(path))
+			{
+				m_PrefabWatch.Watch(path);
+				WLD_CORE_INFO("[asset-hot-reload] prefab watch: {0} prefab(s)", m_PrefabWatch.Size());
+			}
+		}
+
+		// 2) 上一帧顺延下来的变化先消费(可能没有;安全点满足才真正应用)。
+		ApplyPendingPrefabChanges();
+
+		// 3) 轮询:稳定变化进入未决集合(报告后该内容即成为新基线,靠未决集合保证不丢),
+		//    安全点满足时立即应用,否则下一帧再试。
+		for (const std::string& changed : m_PrefabWatch.Poll(static_cast<double>(deltaSeconds)))
+		{
+			if (std::find(m_PendingPrefabReloads.begin(), m_PendingPrefabReloads.end(), changed)
+				== m_PendingPrefabReloads.end())
+				m_PendingPrefabReloads.push_back(changed);
+		}
+		ApplyPendingPrefabChanges();
+	}
+
+	void EditorLayer::ApplyPendingPrefabChanges()
+	{
+		if (m_PendingPrefabReloads.empty())
+			return;
+		Scene* scene = m_ActiveScene.get();
+		if (scene == nullptr || m_SceneState != SceneState::Edit || scene != m_Document.GetScene().get())
+			return;   // Play/Simulate / 无文档:不消费(回到编辑态后按新基线重新登记)
+		if (!scene->CanApplyScriptReload())
+			return;   // 不安全点(脚本回调/结构提交中):顺延,下一帧再试
+
+		std::vector<std::string> pending;
+		pending.swap(m_PendingPrefabReloads);
+		for (const std::string& path : pending)
+		{
+			// 变化期间实例可能被删/改来源:以当前注册表为准重新匹配,不用报告时的快照。
+			std::vector<entt::entity> roots;
+			for (const Gameplay::PrefabInstanceRecord& record : scene->PrefabInstances())
+				if (record.PrefabPath == path)
+					roots.push_back(record.Root);
+			if (roots.empty())
+				continue;   // 已无实例引用它(例如实例刚被断开链接)
+
+			uint32_t applied = 0;
+			std::string skippedFields;
+			for (const entt::entity root : roots)
+			{
+				Gameplay::PrefabInstanceRecord* record = scene->FindPrefabInstance(root);
+				if (!record)
+					continue;
+				std::string error;
+				if (!Gameplay::ApplyPrefabChanges(*record, *scene, &error))
+				{
+					// false + 非空 error = 该实例一个实体都没改(读档失败/结构不符):记日志,其余继续。
+					WLD_CORE_WARN("[asset-hot-reload] prefab failed '{0}': {1}", path,
+						error.empty() ? std::string("unknown error") : error);
+					continue;
+				}
+				++applied;
+				// true + 非空 error = 已应用但有字段跳过(如覆盖记录指向的字段已失效):WARN,不算失败。
+				if (!error.empty() && skippedFields.empty())
+					skippedFields = error;
+			}
+			if (applied > 0)
+			{
+				WLD_CORE_INFO("[asset-hot-reload] prefab applied '{0}' instances={1}", path, applied);
+				if (!skippedFields.empty())
+					WLD_CORE_WARN("[asset-hot-reload] prefab applied '{0}' with skipped field(s): {1}",
+						path, skippedFields);
+			}
 		}
 	}
 
