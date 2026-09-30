@@ -1215,7 +1215,71 @@ set_tests_properties(World.ImportWorldSettings PROPERTIES
     TIMEOUT 60
 )
 
-foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests WorldLuauCameraBindingTests WorldLuauPhysicsBindingTests WorldLuauEventBindingTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptBinaryLoadTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests ${_we_optional_test_targets})
+# PLUG-T1:插件系统 T1(清单解析 / 发现 / 校验 / 依赖拓扑 / 加载 / 卸载 / 回滚)headless 单测。
+# 测试插件 DLL 不链接 World(只依赖公共 ABI 头 WePluginApi.h),由插件加载器显式取符号,
+# 和真实第三方插件的边界一致;产物拷到测试 exe 旁,测试再把它们复制进临时插件包。
+add_executable(WorldPluginTests World/PluginTests.cpp)
+target_link_libraries(WorldPluginTests PRIVATE World)
+target_compile_features(WorldPluginTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldPluginTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+    WE_PLUGIN_TEST_DLL_DIR="$<TARGET_FILE_DIR:WorldPluginTests>"
+)
+if(WIN32)
+    target_compile_definitions(WorldPluginTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldPluginTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.Plugins COMMAND WorldPluginTests)
+set_tests_properties(World.Plugins PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+)
+
+set(WE_PLUGIN_TEST_DLL_TARGETS
+    WePluginTestAlpha
+    WePluginTestBeta
+    WePluginTestAbiBad
+    WePluginTestSizeBad
+    WePluginTestSizeLarge
+    WePluginTestIdMismatch
+    WePluginTestNoRegister
+    WePluginTestFailRegister
+    WePluginTestThrowRegister
+)
+foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
+    add_library(${_we_plugin_target} SHARED "plugins/${_we_plugin_target}.cpp")
+    target_compile_features(${_we_plugin_target} PRIVATE cxx_std_17)
+    target_include_directories(${_we_plugin_target} PRIVATE "${WLD_ENGINE_ROOT}/Engine/src")
+    target_compile_definitions(${_we_plugin_target} PRIVATE
+        _CRT_SECURE_NO_WARNINGS
+        NOMINMAX
+    )
+    if(WIN32)
+        target_compile_definitions(${_we_plugin_target} PRIVATE WLD_PLATFORM_WINDOWS)
+    endif()
+    if(MSVC)
+        target_compile_options(${_we_plugin_target} PRIVATE /utf-8)
+    endif()
+endforeach()
+add_dependencies(WorldPluginTests ${WE_PLUGIN_TEST_DLL_TARGETS})
+
+# 插件 DLL 拷到测试 exe 旁(与文件末尾 WorldRuntime.dll 的 copy_if_different 同写法;
+# 放在测试目标的 POST_BUILD 里,避免"插件目标 ↔ 测试目标"互相引用成环)。
+foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
+    add_custom_command(TARGET WorldPluginTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:${_we_plugin_target}>"
+            "$<TARGET_FILE_DIR:WorldPluginTests>"
+        COMMENT "Copying ${_we_plugin_target} next to WorldPluginTests.exe"
+        VERBATIM
+    )
+endforeach()
+
+foreach(_we_test_target WorldScriptTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldHierarchyTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldBehaviorRegistryTests WorldLuauSchemaBindingTests WorldLuauEntityBindingTests WorldLuauStubSchemaTests WorldLuauServiceBindingTests WorldLuauUiBindingTests WorldScriptHotReloadTests WorldLuauCameraBindingTests WorldLuauPhysicsBindingTests WorldLuauEventBindingTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptBinaryLoadTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"
