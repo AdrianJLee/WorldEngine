@@ -12,6 +12,7 @@
 #include "World/Script/BindServices.h"
 #include "World/Script/HotReload.h"
 #include "World/Script/LuauVm.h"
+#include "World/Script/PluginScriptLibrary.h"
 #include "World/Script/Sandbox.h"
 #include "World/Script/ScriptBindingContext.h"
 #include "World/Script/ScriptProperties.h"
@@ -1471,6 +1472,8 @@ namespace World
 		{
 			// W4:VM 关闭前先丢弃事件/计时器订阅(引用在 VM 关闭后一律失效)。
 			ResetScriptEventSubscriptions();
+			// T4:插件脚本函数账本保留,但"已绑定"状态必须清掉(下一次 Init 重新绑定)。
+			PluginScriptLibrary::OnVmShutdown();
 			s_LookupField.Release();
 			s_CollectFieldNames.Release();
 			s_CollectEntries.Release();
@@ -1534,6 +1537,10 @@ namespace World
 			// W4:事件/计时器面(只读全局表 `events`/`timers`;见 Script/BindEvents.h)。
 			if (!RegisterEventBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the event/timer bindings: " + error);
+			// T4:插件脚本函数库(插件可能在本 VM 之前注册 —— 账本在 Script/PluginScriptLibrary.h,
+			// 这里统一绑定;运行时绑定与存根渲染消费同一份描述)。
+			if (!PluginScriptLibrary::BindAll(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to bind the plugin script functions: " + error);
 		}
 		catch (...)
 		{
@@ -1719,7 +1726,10 @@ namespace World
 		const ScriptServiceBinding* eventTables = ScriptEventBindings(&eventCount);
 		for (std::size_t index = 0; index < eventCount; ++index)
 			serviceList.push_back(&eventTables[index]);
-		if (!LuaStubGenerator::Generate(path, LuaReflectionRegistry::GetTable(), components, serviceList, uiList, error))
+		// T4:插件脚本函数库块追加在既有全部块之后(顺序 = 命名空间升序、组内 (插件 id, 函数名);
+		// 零插件 = 空列表 ⇒ 存根与入库夹具逐字节一致)。
+		if (!LuaStubGenerator::Generate(path, LuaReflectionRegistry::GetTable(), components, serviceList,
+			uiList, PluginScriptLibrary::StubTables(), error))
 		{
 			if (Log::GetCoreLogger()) WLD_CORE_ERROR("[Lua] {0}", error);
 			return false;

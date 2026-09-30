@@ -244,3 +244,79 @@ AI 通道触发同一条命令 → 禁用重启后面板与命令全部消失)�
 > **§4 模板表的更正(T3b 落地)**:`editor-ui` 行原写 `requires: t3b`、"注册面未就绪" ——
 > 该模板的 `template.json` 已改为 `requires: none`,源码换成
 > `templates/plugin-editor-ui/src/plugin.cpp` 里的真实注册;以本节为准。
+
+## 10. Lua 函数库(脚本函数,T4,2026-09-30)
+
+`WeHostApi` 继续**尾部追加**脚本函数注册面(append-only:`WE_PLUGIN_ABI_VERSION` 仍 = 1;
+旧宿主缺这两个字段时,插件用
+`host.StructSize >= offsetof(WeHostApi, UnregisterScriptFunction) + sizeof(host.UnregisterScriptFunction)`
+自检并干净拒绝):
+
+```cpp
+bool (*RegisterScriptFunction)(void* userData, const WeScriptFunctionDesc* desc);
+bool (*UnregisterScriptFunction)(void* userData, const char* name);
+```
+
+```cpp
+struct WeScriptFunctionDesc { StructSize, AbiVersion, Name, Signature, Doc, Callback, UserData };
+struct WeScriptCallApi      { StructSize, AbiVersion, UserData, ArgCount,
+                              GetArgNumber, GetArgString, GetArgBool,
+                              PushNumber, PushString, PushBool, PushNil };
+```
+
+### 名字与绑定
+
+- `Name` = `<命名空间>.<函数名>`(**恰好一个点**;两段都必须是合法 Lua 标识符)。
+  宿主把函数绑成全局表 `<命名空间>` 的成员 —— 脚本里写 `hello.ping(...)`
+  (**点号调用**,不是 `hello:ping(...)`;插件函数没有隐式 self)。
+- 命名空间可以**跨插件共享**(两个插件都能往 `hello` 里加函数);完整名字**全局唯一**,
+  重复(本插件内或跨插件)= 注册被拒绝(不覆盖)。命名空间清空后宿主移除该全局表。
+- 引擎/沙箱保留的全局名(`Input`/`Level`/`Save`/`ui`/`events`/`timers`、Luau 标准库、
+  沙箱禁用名单、已登记的绑定类型)= 注册期干净拒绝;绑定发生时再用 VM 的真实全局表复核。
+
+### 参数、返回值与失败语义
+
+- 参数按位置读:`GetArgNumber/GetArgString/GetArgBool`(越界 / 类型不符 = false,
+  不改 `*out`;字符串指针只在本次调用期间有效)。参数只支持 number / string / boolean
+  能表达的值,表 / 函数等读不到。
+- 一次调用**最多一个返回值**:首次 `Push*` 生效,再次 Push = false(宿主记一条 WARN)。
+- 插件回调抛异常 = 契约违约:宿主转成 **Lua error**(脚本可 `pcall` 捕),不让异常穿过
+  ABI 或把 VM 带走。
+
+### 存根(`Signature` / `Doc`)—— 确定性是硬约束
+
+- `Signature` 形如 `"(name: string, count: number?): boolean"`:参数类型 ∈
+  {number, integer, boolean, string, any};`?`(参数名后或类型后)= 可选;`: 返回类型`
+  可省略(返回类型 ∈ {number, integer, boolean, string, nil, any});空 = 无参数、无返回值。
+  非法签名 = 注册被干净拒绝。`Doc` 是单行说明(不能以 `@` 开头 / 不含控制字符)。
+- 存根里插件块追加在**既有全部块之后**(Lua 类型 → 服务 → UI → 组件 → WorldScript →
+  插件块):块按**命名空间升序**,同一命名空间内函数按 **(插件 id, 函数名)升序** ——
+  与插件装载顺序、注册顺序无关。被禁用 / 被拒绝的插件不入账本,因此不参与渲染。
+- **零插件时渲染输出与入库夹具逐字节一致**:`LuaStubGenerator` 的既有重载与
+  "带插件表(空)"重载输出相同,`World.ScriptWorkflow` 的漂移门禁不变。
+
+### 运行时绑定与回收
+
+- 唯一账本在 `Engine/src/World/Script/PluginScriptLibrary.h`(运行时绑定与存根渲染**共用
+  同一份描述**)。`ScriptEngine::Init` 把账本里的函数统一绑进 VM;VM 已初始化时,
+  `RegisterScriptFunction` **立即绑定**(绑定失败 = 干净拒绝,不入账本)。
+- 卸载 / `Register` 返回 false / `Register` 抛异常 / 管理器析构四条路径都会把该插件的函数
+  从账本与 VM 全局表里回收(未自己注销 = 记 WARN 后强删)。
+- 幂等与归属:注销"本插件没注册过"的名字 = true;名字归**别的插件** = false + 警告
+  (`is not owned by this plugin; unregister ignored`)。卸载后重载同一批名字不留脏账。
+
+### 验证
+
+单测 `World.Plugins`(用例 T4①/T4②)用 ABI-only 测试插件
+(`tests/plugins/WePluginTestScriptLib.cpp` / `WePluginTestScriptTwo.cpp` /
+`WePluginTestThrowScriptLib.cpp`)覆盖:坏描述/重复注册干净拒绝、账本可见、
+真 Luau VM 调用(`hello.ping(2,3)==5`、共享命名空间、`pcall` 捕获插件异常)、
+跨插件归属保护、存根两次渲染逐字节一致 + (插件 id, 函数名)顺序、
+零插件等价路径,以及卸载 / 抛异常 / 析构三条兜底回收路径。
+模板 `templates/plugin-lua-lib/**` 生成物可编译(`PLUG-AUTH` 探针的构建断言);
+引擎插件与项目插件在编辑器里加载后,`plugin.list` 状态为 `loaded`。
+
+> **§4 模板表的更正(T4 落地)**:`lua-lib` 行原写 `requires: t4`、"注册面未就绪" ——
+> 该模板的 `template.json` 已改为 `requires: none`,源码换成
+> `templates/plugin-lua-lib/src/plugin.cpp` 里的真实注册(命名空间 = 插件 id 最后一段);
+> 以本节为准。

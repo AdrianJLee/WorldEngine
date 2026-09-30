@@ -3,6 +3,7 @@
 #include "World/Core/Asset/AssetTypeRegistry.h"
 #include "World/Core/WorldContext.h"
 #include "World/Schema/SchemaRegistry.h"
+#include "World/Script/PluginScriptLibrary.h"
 
 #include <algorithm>
 #include <array>
@@ -481,6 +482,9 @@ namespace World::Plugins
 		m_HostApi.UnregisterEditorCommand = &PluginManager::BridgeUnregisterEditorCommand;
 		m_HostApi.RegisterEditorPanel = &PluginManager::BridgeRegisterEditorPanel;
 		m_HostApi.UnregisterEditorPanel = &PluginManager::BridgeUnregisterEditorPanel;
+		// T4 脚本函数库(同上:尾部追加)。
+		m_HostApi.RegisterScriptFunction = &PluginManager::BridgeRegisterScriptFunction;
+		m_HostApi.UnregisterScriptFunction = &PluginManager::BridgeUnregisterScriptFunction;
 	}
 
 	PluginManager::~PluginManager()
@@ -755,6 +759,39 @@ namespace World::Plugins
 		return box->Manager->UnregisterEditorPanel(*record, id);
 	}
 
+	// ---- T4:脚本函数库桥 ----------------------------------------------------------------
+
+	bool PluginManager::BridgeRegisterScriptFunction(void* userData, const WeScriptFunctionDesc* desc)
+	{
+		auto* box = static_cast<HostApiBox*>(userData);
+		if (!box || !box->Manager)
+			return false;
+		Record* record = box->Manager->ResolveHostRecord(*box);
+		if (!record || !desc)
+		{
+			Log(WePluginLogWarn, (box->PluginId.empty() ? std::string("unknown plugin") : box->PluginId)
+				+ ": script function registration rejected ("
+				+ (!desc ? "null descriptor" : "invalid host handle") + ")");
+			return false;
+		}
+		return box->Manager->RegisterScriptFunction(*record, *desc);
+	}
+
+	bool PluginManager::BridgeUnregisterScriptFunction(void* userData, const char* name)
+	{
+		auto* box = static_cast<HostApiBox*>(userData);
+		if (!box || !box->Manager)
+			return false;
+		Record* record = box->Manager->ResolveHostRecord(*box);
+		if (!record)
+		{
+			Log(WePluginLogWarn, (box->PluginId.empty() ? std::string("unknown plugin") : box->PluginId)
+				+ ": script function unregister rejected (invalid host handle)");
+			return false;
+		}
+		return box->Manager->UnregisterScriptFunction(*record, name);
+	}
+
 	bool PluginManager::RegisterAssetType(Record& record, const WeAssetTypeDesc& desc)
 	{
 		const std::string& pluginId = record.Entry.Manifest.Id;
@@ -949,6 +986,53 @@ namespace World::Plugins
 				return item.Function;
 		}
 		return nullptr;
+	}
+
+	std::vector<PluginManager::PluginScriptFunction> PluginManager::ScriptFunctions() const
+	{
+		std::vector<PluginScriptFunction> functions;
+		for (const Record& record : m_Records)
+		{
+			for (const std::string& name : record.RegisteredScriptFunctions)
+			{
+				World::PluginScriptFunctionInfo info;
+				if (!World::PluginScriptLibrary::Describe(record.Entry.Manifest.Id, name, &info))
+					continue;
+				PluginScriptFunction function;
+				function.PluginId = info.PluginId;
+				function.Name = info.Name;
+				function.Namespace = info.Namespace;
+				function.Member = info.Member;
+				function.Signature = info.Signature;
+				function.Doc = info.Doc;
+				functions.push_back(std::move(function));
+			}
+		}
+		return functions;
+	}
+
+	bool PluginManager::FindScriptFunction(const std::string& pluginId, const std::string& name,
+		PluginScriptFunction* out) const
+	{
+		const Record* record = FindRecord(pluginId);
+		if (!record || record->Entry.State != PluginState::Loaded)
+			return false;
+		if (std::find(record->RegisteredScriptFunctions.begin(), record->RegisteredScriptFunctions.end(), name)
+			== record->RegisteredScriptFunctions.end())
+			return false;
+		World::PluginScriptFunctionInfo info;
+		if (!World::PluginScriptLibrary::Describe(pluginId, name, &info))
+			return false;
+		if (out)
+		{
+			out->PluginId = info.PluginId;
+			out->Name = info.Name;
+			out->Namespace = info.Namespace;
+			out->Member = info.Member;
+			out->Signature = info.Signature;
+			out->Doc = info.Doc;
+		}
+		return true;
 	}
 
 	std::vector<std::shared_ptr<World::Asset::IAssetImporter>> PluginManager::PluginImporters() const
@@ -1517,6 +1601,64 @@ namespace World::Plugins
 		return true;
 	}
 
+	// ---- T4:脚本函数库(账本在 World/Script/PluginScriptLibrary)------------------------
+
+	bool PluginManager::RegisterScriptFunction(Record& record, const WeScriptFunctionDesc& desc)
+	{
+		const std::string& pluginId = record.Entry.Manifest.Id;
+		const std::string name = desc.Name ? desc.Name : "";
+		if (name.empty())
+		{
+			Log(WePluginLogWarn, pluginId + ": script function registration rejected (empty name)");
+			return false;
+		}
+		std::string failure;
+		if (!World::PluginScriptLibrary::Register(pluginId, desc, &failure))
+		{
+			Log(WePluginLogWarn, pluginId + ": script function '" + name
+				+ "' registration rejected (" + failure + ")");
+			return false;
+		}
+		record.RegisteredScriptFunctions.push_back(name);
+		Log(WePluginLogInfo, pluginId + ": registered script function '" + name + "'");
+		return true;
+	}
+
+	bool PluginManager::UnregisterScriptFunction(Record& record, const char* name)
+	{
+		const std::string& pluginId = record.Entry.Manifest.Id;
+		const std::string id = name ? name : "";
+		if (id.empty())
+		{
+			Log(WePluginLogWarn, pluginId + ": script function unregister rejected (empty name)");
+			return false;
+		}
+		const auto tracked = std::find(record.RegisteredScriptFunctions.begin(),
+			record.RegisteredScriptFunctions.end(), id);
+		if (tracked == record.RegisteredScriptFunctions.end())
+		{
+			// 幂等路径:名字归别的插件 = 拒绝(不越权);否则 = true(可能已被兜底回收)。
+			const std::string owner = World::PluginScriptLibrary::OwnerOf(id);
+			if (!owner.empty() && owner != pluginId)
+			{
+				Log(WePluginLogWarn, pluginId + ": script function '" + id
+					+ "' is not owned by this plugin; unregister ignored");
+				return false;
+			}
+			return true;
+		}
+		std::string failure;
+		if (!World::PluginScriptLibrary::Unregister(pluginId, id, &failure))
+		{
+			Log(WePluginLogWarn, pluginId + ": script function '" + id
+				+ "' unregister failed (" + failure + ")");
+			return false;
+		}
+		record.RegisteredScriptFunctions.erase(tracked);
+		Log(WePluginLogInfo, pluginId + ": unregistered script function '" + id + "'");
+		return true;
+	}
+
 	void PluginManager::ReclaimEditorExtensions(Record& record)
 	{
 		const std::string& pluginId = record.Entry.Manifest.Id;
@@ -1591,6 +1733,15 @@ namespace World::Plugins
 		ReclaimComponentTypes(record, schemas);
 		// T3b:编辑器命令 / 面板的兜底回收(必须在释放 DLL 之前;登记里的回调指向插件)。
 		ReclaimEditorExtensions(record);
+		// T4:脚本函数的兜底回收(账本条目 + VM 全局表成员;回调同样指向插件本 DLL)。
+		if (!record.RegisteredScriptFunctions.empty())
+		{
+			for (const std::string& name : record.RegisteredScriptFunctions)
+				Log(WePluginLogWarn, pluginId + ": script function '" + name
+					+ "' was not unregistered by the plugin; force-removed");
+			World::PluginScriptLibrary::UnregisterAll(pluginId);
+			record.RegisteredScriptFunctions.clear();
+		}
 	}
 
 	void PluginManager::Reject(Record& record, std::string reason)

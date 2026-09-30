@@ -27,6 +27,11 @@
 // UnregisterEditorCommand + RegisterEditorPanel / UnregisterEditorPanel,以及
 // 面板 Draw 拿到的小组件表 WeEditorUiApi):同一个纪律,不改既有字段、不升 ABI。
 //
+// T4(2026-09-30)继续在**尾部**追加脚本函数注册面(RegisterScriptFunction /
+// UnregisterScriptFunction + WeScriptFunctionDesc / WeScriptCallApi):插件注册
+// "命名空间.函数名" 形式的全局 Luau 函数,宿主同一份账本既做运行时绑定也做存根渲染。
+// 同一个纪律,不改既有字段、不升 ABI。
+//
 // 版本同步点(升级时必须一起改):本文件、`plugin.we.yaml` 的 `abi`、
 // `Engine/src/World/Plugins/PluginManager.*`、`docs/dev/plugin-framework.md`。
 // 方案:`tools/agents/tasks/20260930-1100-plugin-framework/plan.md`(v2.1)。
@@ -294,6 +299,65 @@ namespace World::Plugins
 		void* UserData = nullptr;       // 只回传给 Draw
 	};
 
+	// ---- T4:脚本函数库(全局 Luau 函数)-----------------------------------------------
+	//
+	// 语义:
+	//   * 注册的是**全局脚本函数**:`Name` 是点分名 `<命名空间>.<函数名>`(例 "hello.ping"),
+	//     宿主把它绑定成全局表 `<命名空间>` 的成员 `ping` —— 脚本里写 `hello.ping(...)`;
+	//     命名空间可以跨插件共享(两个插件都能往 `hello` 里加函数),完整名字全局唯一;
+	//   * 参数 / 返回值只支持 C 类型能表达的值:number / string / boolean / nil
+	//     (参数按位置读;表 / 函数等值读不到,读失败 = Get* 返回 false);
+	//   * 一次调用**最多一个返回值**:首次 Push* 生效,再次 Push* = false(不覆盖);
+	//   * `Callback` 不得让异常跨过 ABI 边界(抛异常 = 契约违约,宿主把它转成 Lua error);
+	//   * `Signature` / `Doc` 是**存根渲染输入**(只影响 `WorldEngineAPI.luau` 的注解,
+	//     不参与运行时校验):Signature 形如 `"(name: string, count: number?): boolean"`
+	//     —— 参数类型 ∈ {number, integer, boolean, string, any},`?` = 可选参数,
+	//     `: 返回类型` 可省略(返回类型 ∈ {number, integer, boolean, string, nil, any});
+	//     空 = 无参数、无返回值声明。格式非法 = 注册被干净拒绝(不半注册)。
+	//   * 确定性:存根里插件块**按命名空间升序**,同一命名空间内函数按 (插件 id, 函数名)
+	//     升序 —— 与插件装载顺序无关;被禁用 / 被拒绝的插件不参与渲染。
+	//   * 生命周期:卸载 / `Register` 返回 false / `Register` 抛异常 / 管理器析构四条路径
+	//     都会把该插件的函数从账本与 VM 全局表里回收(未自己注销则记 WARN);注销幂等。
+
+	// 脚本函数调用的宿主参数 / 返回值读写表(仅在 Callback 调用期间有效):
+	//   * ArgCount = 本次调用的实参个数(位置 0..ArgCount-1);
+	//   * Get* 失败(越界 / 类型不符 / 空指针)= false,且不改 *out;
+	//   * GetArgString 拿到的指针只在本次调用期间有效(插件不得保留);
+	//   * Push* 把返回值压进结果栈:首次成功,重复 = false(本版最多一个返回值);
+	//   * PushString 拷贝传入的 UTF-8 文本(插件不必保留生命周期)。
+	struct WeScriptCallApi
+	{
+		uint32_t StructSize = sizeof(WeScriptCallApi);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+		// 宿主本次调用的状态句柄:必须**原样回传**给下面的 Get*/Push* 函数。
+		// (插件自己的句柄是回调的参数 `userData` = WeScriptFunctionDesc::UserData。)
+		void* UserData = nullptr;
+		uint32_t ArgCount = 0;
+		bool (*GetArgNumber)(void* userData, uint32_t index, double* out) = nullptr;
+		bool (*GetArgString)(void* userData, uint32_t index, const char** outUtf8) = nullptr;
+		bool (*GetArgBool)(void* userData, uint32_t index, bool* out) = nullptr;
+		bool (*PushNumber)(void* userData, double value) = nullptr;
+		bool (*PushString)(void* userData, const char* utf8) = nullptr;
+		bool (*PushBool)(void* userData, bool value) = nullptr;
+		bool (*PushNil)(void* userData) = nullptr;
+	};
+
+	// 脚本函数回调:`call` 只在本次调用期间有效(插件不得保留);异常 = 契约违约。
+	using WeScriptFunctionCallback = void (*)(void* userData, const WeScriptCallApi* call);
+
+	// 脚本函数描述(只含 C 类型)。
+	struct WeScriptFunctionDesc
+	{
+		uint32_t StructSize = sizeof(WeScriptFunctionDesc);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+
+		const char* Name = nullptr;       // "<命名空间>.<函数名>"(必需;两段都必须是合法 Lua 标识符)
+		const char* Signature = nullptr;  // 存根签名(可空;格式见上,非法 = 拒绝注册)
+		const char* Doc = nullptr;        // 单行说明(可空;不能以 '@' 开头 / 不含控制字符)
+		WeScriptFunctionCallback Callback = nullptr;  // 必需(空 = 拒绝注册)
+		void* UserData = nullptr;         // 只回传给 Callback 与 WeScriptCallApi
+	};
+
 	struct WeHostApi
 	{
 		uint32_t StructSize = sizeof(WeHostApi);
@@ -331,6 +395,13 @@ namespace World::Plugins
 		// 注册/注销编辑器面板(独立窗口形态)。语义同上(重复 Id / 幂等注销 / 卸载兜底)。
 		bool (*RegisterEditorPanel)(void* userData, const WeEditorPanelDesc* desc) = nullptr;
 		bool (*UnregisterEditorPanel)(void* userData, const char* id) = nullptr;
+
+		// ---- T4 追加(脚本函数库;同上:先自检 StructSize 覆盖到对应字段再调用)----
+		// 注册/注销全局脚本函数。重复 Name(本插件内或跨插件)= false + 警告(不覆盖);
+		// 注销"本插件没注册过"的 Name = 别的插件拥有 ⇒ false + 警告,否则 ⇒ true(幂等);
+		// 卸载时宿主兜底回收没自己注销的函数。
+		bool (*RegisterScriptFunction)(void* userData, const WeScriptFunctionDesc* desc) = nullptr;
+		bool (*UnregisterScriptFunction)(void* userData, const char* name) = nullptr;
 	};
 
 	// 插件描述 + 生命周期回调 + 导出表。

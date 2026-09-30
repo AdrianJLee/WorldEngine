@@ -135,6 +135,23 @@ namespace World::Plugins
 		// 渲染一个插件面板(宿主面板层调用;返回 0 = 正常,非 0 = 面板缺失 / 未接线 / 插件违约)。
 		int RenderEditorPanel(const std::string& panelId) const;
 
+		// ---- T4:脚本函数库(插件经 WeHostApi::RegisterScriptFunction 注册的全局函数)----
+		// 账本 + 运行时绑定 + 存根渲染的唯一事实源在 World/Script/PluginScriptLibrary.h;
+		// 这里只暴露"本管理器已加载插件"的可观测快照(确定性顺序 = 条目顺序 + 注册顺序)。
+		struct PluginScriptFunction
+		{
+			std::string PluginId;
+			std::string Name;       // 完整点分名("hello.ping")
+			std::string Namespace;  // 全局表名
+			std::string Member;     // 表里的函数名
+			std::string Signature;  // 注册时的存根签名原文(可空)
+			std::string Doc;
+		};
+		std::vector<PluginScriptFunction> ScriptFunctions() const;
+		// 单条查询(未命中 = 返回 false,不改 *out)。
+		bool FindScriptFunction(const std::string& pluginId, const std::string& name,
+			PluginScriptFunction* out) const;
+
 		// 按 id + 名字 + 最低版本(含)查已加载插件的 C++ 导出表(WePlugin::Exports)。
 		// 未命中 = nullptr(查询失败是正常分支,不记日志)。
 		void* LookupExport(const std::string& pluginId, const std::string& name,
@@ -204,6 +221,8 @@ namespace World::Plugins
 			// T3b:本插件注册的编辑器命令 / 面板(顺序 = 注册顺序)。
 			std::vector<RegisteredEditorCommand> RegisteredEditorCommands;
 			std::vector<RegisteredEditorPanel> RegisteredEditorPanels;
+			// T4:本插件注册的脚本函数(完整名;顺序 = 注册顺序)。
+			std::vector<std::string> RegisteredScriptFunctions;
 		};
 
 		Record* FindRecord(const std::string& id);
@@ -234,6 +253,9 @@ namespace World::Plugins
 		bool UnregisterEditorCommand(Record& record, const char* id);
 		bool RegisterEditorPanel(Record& record, const WeEditorPanelDesc& desc);
 		bool UnregisterEditorPanel(Record& record, const char* id);
+		// T4:脚本函数的注册 / 注销(WeHostApi 尾部字段的宿主实现;账本在 PluginScriptLibrary)。
+		bool RegisterScriptFunction(Record& record, const WeScriptFunctionDesc& desc);
+		bool UnregisterScriptFunction(Record& record, const char* name);
 		// 卸载/失败回滚的兜底:插件没自己注销的资产类型/导入器/组件类型在这里移除并记警告
 		// (不留悬空回调;组件类型整模块注销 + 释放字段访问器槽位)。
 		// schemas = 组件的 schema 注册表(可空:空则只清账本/槽位并记 ERROR)。
@@ -256,6 +278,8 @@ namespace World::Plugins
 		static bool BridgeUnregisterEditorCommand(void* userData, const char* id);
 		static bool BridgeRegisterEditorPanel(void* userData, const WeEditorPanelDesc* desc);
 		static bool BridgeUnregisterEditorPanel(void* userData, const char* id);
+		static bool BridgeRegisterScriptFunction(void* userData, const WeScriptFunctionDesc* desc);
+		static bool BridgeUnregisterScriptFunction(void* userData, const char* name);
 		// T3b:交给宿主的渲染入口(宿主只存函数指针;userData = 插件记录,卸载前必然注销)。
 		static int RenderPanelEntry(void* host, const PluginEditorPanel& panel,
 			WeEditorUiApi* ui, void* uiContext, void* userData);

@@ -61,6 +61,15 @@ namespace WeTestPlugin
 			&& host.UnregisterComponent != nullptr;
 	}
 
+	// T4:宿主表是否覆盖到脚本函数库注册面(同上:判据是**最后一个**追加字段)。
+	inline bool HostApiHasScriptFunctionSurface(const WeHostApi& host)
+	{
+		return host.StructSize >= offsetof(WeHostApi, UnregisterScriptFunction)
+				+ sizeof(host.UnregisterScriptFunction)
+			&& host.RegisterScriptFunction != nullptr
+			&& host.UnregisterScriptFunction != nullptr;
+	}
+
 	// 通过宿主表日志回传插件侧证据(单测用 World::Log::RecentLines 取回)。
 	inline void Log(const char* message, int level = WePluginLogInfo)
 	{

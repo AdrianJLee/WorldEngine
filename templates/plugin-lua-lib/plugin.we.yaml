@@ -6,7 +6,7 @@ version: 1.0.0
 abi: 1
 entry: WePluginQuery
 engine: ">=2.0"
-# 脚本库(注册面待 T4;现在声明能力,生成物可编译):
+# 脚本库(真实注册:WeHostApi::RegisterScriptFunction;命名空间 = 插件 id 的最后一段):
 provides:
   - script.library
 ship: auto

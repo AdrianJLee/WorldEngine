@@ -1272,6 +1272,11 @@ set(WE_PLUGIN_TEST_DLL_TARGETS
     WePluginTestEditorUi
     WePluginTestLeakyEditorUi
     WePluginTestThrowEditorUi
+    # T4:脚本函数库正例(坏描述拒绝 / 重复拒绝 / hello.ping+echo+boom / 按需注销幂等)/
+    # 第二个插件(共享命名空间 + 跨插件归属保护 + 卸载兜底回收)/ Register 抛异常回滚。
+    WePluginTestScriptLib
+    WePluginTestScriptTwo
+    WePluginTestThrowScriptLib
 )
 foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
     add_library(${_we_plugin_target} SHARED "plugins/${_we_plugin_target}.cpp")

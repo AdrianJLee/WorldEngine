@@ -17,6 +17,12 @@
 #include "World/Plugins/PluginManager.h"
 #include "World/Schema/Schema.h"
 #include "World/Schema/SchemaRegistry.h"
+#include "World/Scene/LuaStubGenerator.h"
+#include "World/Scene/ScriptEngine.h"
+#include "World/Script/BindServices.h"
+#include "World/Script/LuauVm.h"
+#include "World/Script/PluginScriptLibrary.h"
+#include "World/Script/ScriptValue.h"
 
 // T2b:测试插件与单测共用的组件布局夹具(两侧各自编译一份;插件不链接 World)。
 #include "../plugins/PluginComponentFixture.h"
@@ -1371,6 +1377,277 @@ namespace
 		CHECK(host.Commands.empty());
 		CHECK(host.Panels.empty());
 	}
+
+	// ---- PLUG-T4:脚本函数库(全局 Luau 函数)-------------------------------------------
+	//
+	// 覆盖:
+	//   * 两个 ABI-only 测试插件注册脚本函数 → 账本可见、坏描述/重复干净拒绝、
+	//     跨插件归属保护(别的插件不能注销不属于自己的函数);
+	//   * 同一进程内用真 Luau VM 调用:`hello.ping(2,3)==5`、`hello.echo`、共享命名空间
+	//     `hello.two`、`zeta.mul`;插件抛异常 = Lua error(pcall 可捕,不把 VM 带走);
+	//   * 装载顺序 ≠ 渲染顺序:目录名让 test.scripttwo 先加载,存根仍按 (插件 id, 函数名) 升序;
+	//   * 存根确定性:两次渲染逐字节一致;零插件时"带插件表的重载"与"不带插件表的重载"
+	//     逐字节一致(入库夹具的漂移门禁由 World.ScriptWorkflow 守着);
+	//   * 装卸与 VM 全局表联动:卸载 = 成员消失、命名空间清空后整表移除;重载 = 立即重绑。
+	void CaseScriptLibraryRegistration()
+	{
+		using World::ScriptServiceBinding;
+		const fs::path root = FreshRoot("script-library");
+		ManifestFields lib;
+		lib.Id = "test.scriptlib";
+		// 目录名故意排在 scripttwo 之后:装载顺序 = scripttwo → scriptlib,
+		// 而存根/绑定顺序必须仍按 (插件 id, 函数名) 升序。
+		WritePlugin(root / "engine", "zzz-scriptlib", "WePluginTestScriptLib", BuildYaml(lib));
+		ManifestFields two;
+		two.Id = "test.scripttwo";
+		WritePlugin(root / "engine", "aaa-scripttwo", "WePluginTestScriptTwo", BuildYaml(two));
+
+		WorldContext context;
+		PluginManager manager;
+		const size_t mark = LogMark();
+		CHECK(manager.Discover(root / "engine", root / "project"));
+		std::string error;
+		CHECK(manager.LoadAll(context, &error) == PluginManager::Status::Ok);
+		CHECK(manager.LoadOrder() == (std::vector<std::string>{ "test.scripttwo", "test.scriptlib" }));
+
+		// ① 坏描述全部干净拒绝 + 真注册成功(插件侧证据经 host.Log 回传)。
+		const std::vector<std::string> lines = LogSince(mark);
+		CHECK(LogContains(lines, "scriptlib-size-rejected"));
+		CHECK(LogContains(lines, "scriptlib-abi-rejected"));
+		CHECK(LogContains(lines, "scriptlib-empty-rejected"));
+		CHECK(LogContains(lines, "scriptlib-nonamespace-rejected"));
+		CHECK(LogContains(lines, "scriptlib-badsig-rejected"));
+		CHECK(LogContains(lines, "scriptlib-nocallback-rejected"));
+		CHECK(LogContains(lines, "scriptlib-duplicate-rejected"));
+		CHECK(LogContains(lines, "[plugin] test.scriptlib: registered script function 'hello.ping'"));
+		CHECK(LogContains(lines, "[plugin] test.scriptlib: registered script function 'hello.echo'"));
+		CHECK(LogContains(lines, "[plugin] test.scriptlib: registered script function 'hello.boom'"));
+		CHECK(LogContains(lines, "[plugin] test.scripttwo: registered script function 'hello.two'"));
+		CHECK(LogContains(lines, "[plugin] test.scripttwo: registered script function 'zeta.mul'"));
+
+		// ② 账本可见 + 确定性快照顺序 =(插件 id, 函数名)。
+		CHECK(World::PluginScriptLibrary::Count() == 5);
+		CHECK(World::PluginScriptLibrary::OwnerOf("hello.ping") == "test.scriptlib");
+		CHECK(World::PluginScriptLibrary::OwnerOf("hello.two") == "test.scripttwo");
+		CHECK(manager.ScriptFunctions().size() == 5);
+		PluginManager::PluginScriptFunction info;
+		CHECK(manager.FindScriptFunction("test.scriptlib", "hello.ping", &info));
+		CHECK(info.Namespace == "hello" && info.Member == "ping");
+		CHECK(info.Signature == "(left: number, right: number): number");
+		CHECK(!info.Doc.empty());
+		CHECK(!manager.FindScriptFunction("test.scriptlib", "hello.two", &info));
+		const std::vector<World::PluginScriptFunctionInfo> snapshot = World::PluginScriptLibrary::Snapshot();
+		CHECK(snapshot.size() == 5);
+		CHECK(snapshot.front().PluginId == "test.scriptlib");
+		CHECK(snapshot.front().Name == "hello.boom");   // (pluginId, name) 升序的第一条
+
+		// ③ 存根渲染:插件块取账本快照(与运行时绑定同一份),顺序确定、两次逐字节一致。
+		std::vector<World::LuaTypeReflection> types;
+		const std::vector<const Schema::TypeSchema*> noComponents;
+		const std::vector<const ScriptServiceBinding*> noServices;
+		std::string first;
+		std::string second;
+		CHECK(World::LuaStubGenerator::Render(types, noComponents, noServices, noServices,
+			World::PluginScriptLibrary::StubTables(), first, error));
+		CHECK(World::LuaStubGenerator::Render(types, noComponents, noServices, noServices,
+			World::PluginScriptLibrary::StubTables(), second, error));
+		CHECK(first == second);
+		CHECK(first.find("---@class hello") != std::string::npos);
+		CHECK(first.find("---@class zeta") != std::string::npos);
+		CHECK(first.find("function hello.ping(left, right) end") != std::string::npos);
+		CHECK(first.find("---@param left number") != std::string::npos);
+		CHECK(first.find("---@return number") != std::string::npos);
+		CHECK(first.find("function hello.two() end") != std::string::npos);
+		CHECK(first.find("function zeta.mul(left, right) end") != std::string::npos);
+		// 顺序 =(插件 id, 函数名)升序,而不是装载顺序(scripttwo 先加载)。
+		CHECK(first.find("function hello.boom") < first.find("function hello.echo"));
+		CHECK(first.find("function hello.echo") < first.find("function hello.ping"));
+		CHECK(first.find("function hello.ping") < first.find("function hello.two"));
+		CHECK(first.find("function hello.two") < first.find("function zeta.mul"));
+
+		// ④ 真 Luau VM(VM 在插件注册之后才初始化 ⇒ Init 统一绑定账本里的函数)。
+		World::ScriptEngine::Init();
+		CHECK(World::ScriptEngine::IsInitialized());
+		auto runLua = [](const std::string& source, const char* chunk)
+		{
+			std::string luaError;
+			if (!World::ScriptEngine::GetState().RunString(source, chunk, &luaError))
+				throw std::runtime_error(std::string(chunk) + ": " + luaError);
+		};
+		auto readNumber = [](const char* name)
+		{
+			double value = 0.0;
+			CHECK(World::ScriptEngine::GetState().GetGlobal(name).AsNumber(&value));
+			return value;
+		};
+		auto readBool = [](const char* name)
+		{
+			bool value = false;
+			CHECK(World::ScriptEngine::GetState().GetGlobal(name).AsBool(&value));
+			return value;
+		};
+		runLua(
+			"plugin_ping = hello.ping(2, 3)\n"
+			"plugin_echo = hello.echo(\"hi\")\n"
+			"plugin_two = hello.two()\n"
+			"plugin_mul = zeta.mul(6, 7)\n"
+			"local ok, err = pcall(hello.boom)\n"
+			"plugin_boom_ok = ok\n"
+			"plugin_boom_error = err\n",
+			"plugin-script-test");
+		CHECK(readNumber("plugin_ping") == 5.0);
+		std::string echoed;
+		CHECK(World::ScriptEngine::GetState().GetGlobal("plugin_echo").AsString(&echoed));
+		CHECK(echoed == "hi!");
+		CHECK(readNumber("plugin_two") == 2.0);
+		CHECK(readNumber("plugin_mul") == 42.0);
+		CHECK(readBool("plugin_boom_ok") == false);
+		std::string boomError;
+		CHECK(World::ScriptEngine::GetState().GetGlobal("plugin_boom_error").AsString(&boomError));
+		CHECK(boomError.find("boom from the script library plugin") != std::string::npos);
+
+		// ⑤ 卸载(VM 存活):违约插件(不自己注销)被兜底回收,VM 全局表同步清成员;
+		//    共享命名空间在还有成员时保留。
+		const size_t unloadTwoMark = LogMark();
+		CHECK(manager.Unload("test.scripttwo", context, &error) == PluginManager::Status::Ok);
+		const std::vector<std::string> unloadTwoLines = LogSince(unloadTwoMark);
+		CHECK(LogContains(unloadTwoLines, "scripttwo-leaves-its-functions-registered (contract violation test)"));
+		CHECK(LogContains(unloadTwoLines,
+			"script function 'hello.two' was not unregistered by the plugin; force-removed"));
+		CHECK(LogContains(unloadTwoLines,
+			"script function 'zeta.mul' was not unregistered by the plugin; force-removed"));
+		CHECK(World::PluginScriptLibrary::Count() == 3);
+		runLua(
+			"plugin_ping_after = hello.ping(1, 1)\n"
+			"plugin_two_gone = (hello.two == nil)\n"
+			"plugin_zeta_gone = (zeta == nil)\n",
+			"plugin-script-unload");
+		CHECK(readNumber("plugin_ping_after") == 2.0);
+		CHECK(readBool("plugin_two_gone"));
+		CHECK(readBool("plugin_zeta_gone"));
+
+		// ⑥ VM 存活时重载:注册即绑定(不等 Init)。
+		CHECK(manager.Load("test.scripttwo", context, &error) == PluginManager::Status::Ok);
+		CHECK(manager.FindScriptFunction("test.scripttwo", "hello.two", &info));
+		runLua(
+			"plugin_two_reloaded = hello.two()\n"
+			"plugin_mul_reloaded = zeta.mul(2, 5)\n",
+			"plugin-script-reload");
+		CHECK(readNumber("plugin_two_reloaded") == 2.0);
+		CHECK(readNumber("plugin_mul_reloaded") == 10.0);
+
+		// ⑦ 归属保护:test.scripttwo 不能注销 test.scriptlib 的 hello.ping。
+		const auto unregisterForeign = reinterpret_cast<bool (*)()>(
+			manager.LookupExport("test.scripttwo", "scripttwo.unregister-foreign", 1));
+		CHECK(unregisterForeign != nullptr);
+		const size_t crossMark = LogMark();
+		CHECK(unregisterForeign());
+		CHECK(LogContains(LogSince(crossMark), "scripttwo-cross-owner-rejected"));
+		CHECK(LogContains(LogSince(crossMark),
+			"[plugin] test.scripttwo: script function 'hello.ping' is not owned by this plugin; unregister ignored"));
+		CHECK(World::PluginScriptLibrary::OwnerOf("hello.ping") == "test.scriptlib");
+
+		// ⑧ 插件自己的按需注销(经导出回调)+ 幂等;VM 全局表同步清成员。
+		const auto unregisterEcho = reinterpret_cast<bool (*)(const char*)>(
+			manager.LookupExport("test.scriptlib", "scriptlib.unregister", 1));
+		CHECK(unregisterEcho != nullptr);
+		const size_t echoMark = LogMark();
+		CHECK(unregisterEcho("hello.echo"));
+		CHECK(LogContains(LogSince(echoMark), "scriptlib.unregister hello.echo -> idempotent-ok"));
+		CHECK(!manager.FindScriptFunction("test.scriptlib", "hello.echo", &info));
+		runLua("plugin_echo_gone = (hello.echo == nil)\n", "plugin-script-unregister");
+		CHECK(readBool("plugin_echo_gone"));
+
+		// ⑨ 收尾:scripttwo(违约)再卸载一次 → 强删;scriptlib 自己注销干净(无 force-removed);
+		//    hello 表在最后一个成员离开后整体移除。
+		CHECK(manager.Unload("test.scripttwo", context, &error) == PluginManager::Status::Ok);
+		const size_t unloadLibMark = LogMark();
+		CHECK(manager.Unload("test.scriptlib", context, &error) == PluginManager::Status::Ok);
+		const std::vector<std::string> unloadLibLines = LogSince(unloadLibMark);
+		CHECK(LogContains(unloadLibLines, "scriptlib-unregistered idempotent"));
+		CHECK(!LogContains(unloadLibLines, "was not unregistered by the plugin"));
+		CHECK(World::PluginScriptLibrary::Count() == 0);
+		CHECK(manager.ScriptFunctions().empty());
+		runLua(
+			"plugin_hello_gone = (hello == nil)\n"
+			"plugin_zeta_gone_final = (zeta == nil)\n",
+			"plugin-script-final");
+		CHECK(readBool("plugin_hello_gone"));
+		CHECK(readBool("plugin_zeta_gone_final"));
+
+		// ⑩ 零插件等价路径:两个重载逐字节一致(漂移门禁的"无插件"口径不受影响)。
+		CHECK(World::PluginScriptLibrary::StubTables().empty());
+		std::string withoutTables;
+		std::string withEmptyTables;
+		CHECK(World::LuaStubGenerator::Render(types, noComponents, noServices, noServices, withoutTables, error));
+		CHECK(World::LuaStubGenerator::Render(types, noComponents, noServices, noServices,
+			World::PluginScriptLibrary::StubTables(), withEmptyTables, error));
+		CHECK(withoutTables == withEmptyTables);
+
+		World::ScriptEngine::Shutdown();
+		CHECK(!World::ScriptEngine::IsInitialized());
+	}
+
+	// T4②:脚本函数兜底回收的三条路径 —— Register 抛异常 / 卸载 / 管理器析构。
+	void CaseLeakedScriptFunctionSweep()
+	{
+		const fs::path root = FreshRoot("leaky-script-library");
+		ManifestFields throwing;
+		throwing.Id = "test.throwscript";
+		WritePlugin(root / "engine", "test.throwscript", "WePluginTestThrowScriptLib", BuildYaml(throwing));
+		ManifestFields leaky;
+		leaky.Id = "test.scripttwo";
+		WritePlugin(root / "engine", "aaa-scripttwo", "WePluginTestScriptTwo", BuildYaml(leaky));
+
+		WorldContext context;
+		{
+			PluginManager manager;
+			CHECK(manager.Discover(root / "engine", root / "project"));
+			std::string error;
+			// ① Register 抛异常:best-effort Unregister + 兜底回收(不留脏账)。
+			const size_t throwMark = LogMark();
+			CHECK(manager.Load("test.throwscript", context, &error) == PluginManager::Status::Rejected);
+			CHECK(error.find("exception") != std::string::npos);
+			const std::vector<std::string> throwLines = LogSince(throwMark);
+			CHECK(LogContains(throwLines, "throw-scriptlib-registered"));
+			CHECK(LogContains(throwLines, "unregister-after-script-throw"));
+			CHECK(LogContains(throwLines,
+				"script function 'throwlib.ping' was not unregistered by the plugin; force-removed"));
+			CHECK(World::PluginScriptLibrary::Count() == 0);
+			CHECK(manager.ScriptFunctions().empty());
+		}
+		CHECK(World::PluginScriptLibrary::Count() == 0);
+
+		// ② 管理器析构路径(故意不 UnloadAll):违约插件注册的函数同样必须被移除 ——
+		//    不留指向已释放 DLL 的回调。
+		{
+			PluginManager scoped;
+			CHECK(scoped.Discover(root / "engine", root / "project"));
+			std::string error;
+			CHECK(scoped.Load("test.scripttwo", context, &error) == PluginManager::Status::Ok);
+			CHECK(scoped.ScriptFunctions().size() == 2);
+			CHECK(World::PluginScriptLibrary::Count() == 2);
+		}
+		CHECK(World::PluginScriptLibrary::Count() == 0);
+		CHECK(World::PluginScriptLibrary::OwnerOf("hello.two").empty());
+		CHECK(World::PluginScriptLibrary::OwnerOf("zeta.mul").empty());
+
+		// ③ 卸载 + 重载:兜底回收后不留脏账(可以再注册同一批名字)。
+		{
+			PluginManager manager;
+			CHECK(manager.Discover(root / "engine", root / "project"));
+			std::string error;
+			CHECK(manager.Load("test.scripttwo", context, &error) == PluginManager::Status::Ok);
+			const size_t unloadMark = LogMark();
+			CHECK(manager.Unload("test.scripttwo", context, &error) == PluginManager::Status::Ok);
+			CHECK(LogContains(LogSince(unloadMark),
+				"script function 'hello.two' was not unregistered by the plugin; force-removed"));
+			CHECK(manager.Load("test.scripttwo", context, &error) == PluginManager::Status::Ok);
+			CHECK(manager.ScriptFunctions().size() == 2);
+			manager.UnloadAll(context);
+			CHECK(World::PluginScriptLibrary::Count() == 0);
+		}
+	}
 }
 
 int main()
@@ -1405,6 +1682,8 @@ int main()
 		CaseLeakedComponentSweep();         // T2b② 归属保护 / 卸载与析构兜底回收
 		CaseEditorExtensionRegistration();  // T3b① 编辑器命令 / 面板注册 / 触发计数 / 注销幂等
 		CaseLeakedEditorExtensionSweep();   // T3b② 抛异常 / 卸载 / 析构三条回收路径
+		CaseScriptLibraryRegistration();    // T4① 脚本函数账本 / VM 调用 / 存根确定性 / 归属保护
+		CaseLeakedScriptFunctionSweep();    // T4② 抛异常 / 卸载 / 析构三条兜底回收路径
 
 		std::error_code ec;
 		fs::remove_all(fs::temp_directory_path() / "worldengine-plugin-tests", ec);

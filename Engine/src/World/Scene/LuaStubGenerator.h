@@ -41,6 +41,16 @@ namespace World
 			const std::vector<const ScriptServiceBinding*>& uiTables,
 			std::string& output, std::string& error);
 
+		// T4:把插件脚本函数库(按命名空间分组的全局函数表)渲染成注解块,追加在既有所有块
+		// (含 WorldScript 注解块)之后。插件块顺序 = 命名空间升序、组内 (插件 id, 函数名)升序。
+		// 空列表 = 与 5 参重载逐字节一致(零插件时漂移门禁不受影响)。
+		static bool Render(const std::vector<LuaTypeReflection>& types,
+			const std::vector<const Schema::TypeSchema*>& components,
+			const std::vector<const ScriptServiceBinding*>& services,
+			const std::vector<const ScriptServiceBinding*>& uiTables,
+			const std::vector<const ScriptServiceBinding*>& pluginTables,
+			std::string& output, std::string& error);
+
 		// A successful unchanged generation leaves the destination timestamp intact.
 		// A failed generation retains the last valid destination and reports its path.
 		static bool Generate(const std::filesystem::path& outputPath, std::string& error);
@@ -54,5 +64,10 @@ namespace World
 			const std::vector<const Schema::TypeSchema*>& components,
 			const std::vector<const ScriptServiceBinding*>& services,
 			const std::vector<const ScriptServiceBinding*>& uiTables, std::string& error);
+		static bool Generate(const std::filesystem::path& outputPath, const std::vector<LuaTypeReflection>& types,
+			const std::vector<const Schema::TypeSchema*>& components,
+			const std::vector<const ScriptServiceBinding*>& services,
+			const std::vector<const ScriptServiceBinding*>& uiTables,
+			const std::vector<const ScriptServiceBinding*>& pluginTables, std::string& error);
 	};
 }
