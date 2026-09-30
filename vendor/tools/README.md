@@ -3,10 +3,12 @@
 按 [`../README.md`](../README.md) 的判据,外部 CLI 工具固定在 `vendor/tools/<名字>/` 下
 (自带 `bin/` 有例外;重物默认不入库)。
 
-**当前为空**:Slang-T6b(2026-09-23)删掉了仅有的两个外部工具。着色器工具现在只有
-**Slang**,且按"重物不入库"走 FETCH + sha256,落在仓库外的 `WLD_SLANG_DIR`
-(默认 `<repo 同级>/WorldEngine-deps/slang-<版本>/bin`,见 [`../README.md`](../README.md)
-与 `tools/agents/fetch-slang.ps1`)。
+**当前条目**:只有一个 —— [`slang/`](slang/README.md)(Slang 着色器编译器 CLI 子集,
+~25MiB,入库;2026-09-30 用户批准的"重物不入库"破例,理由与实测覆盖写在条目 README)。
+Slang-T6b(2026-09-23)删掉的另外两个外部工具不再存在。
 
-这个目录保留为空目录的占位(布局机检 `tools/agents/check-layout.ps1` 要求 `vendor/tools/` 存在);
-将来放小体积 CLI 工具时,直接建 `vendor/tools/<名字>/` 并把条目写进 `../README.md` 的条目表。
+构建期 `WLD_SLANG_DIR` 的默认值指向 [`slang/bin`](slang/bin)(`-D`/环境变量仍可覆盖到
+仓库外目录);整包(含 `slangd`/LSP)仍可选走 `tools/agents/fetch-slang.ps1` 落到仓库外。
+
+布局机检 `tools/agents/check-layout.ps1` 要求 `vendor/tools/` 与 `third_party/` 分层存在;
+新工具直接建 `vendor/tools/<名字>/` 并把条目写进 `../README.md` 的条目表。

@@ -197,11 +197,15 @@ int main()
 			World::RendererAPI::SetAPI(previousApi);
 		}
 
+		// 工具缺 = 失败。2026-09-30 起 CLI 子集随仓库分发(vendor/tools/slang/bin),
+		// "跳过烘焙检查然后报 all checks passed" 会让 CI 在没有任何着色器证据时变绿。
 		if (!HasSlangc())
 		{
-			std::printf("World.ShaderPipeline: slangc missing (WLD_SLANG_DIR), bake checks skipped\n");
-			std::printf("World.ShaderPipeline: all checks passed\n");
-			return 0;
+			std::fprintf(stderr,
+				"World.ShaderPipeline: FAILED: slangc.exe not found in WLD_SLANG_DIR. "
+				"Run tools/agents/update-slang-tool.ps1 to restore the in-repo tool "
+				"(vendor/tools/slang/bin), or configure with -DWLD_SLANG_DIR=<dir containing slangc.exe>.\n");
+			return 1;
 		}
 
 		// 3. M4-S1:表面函数契约 + 引擎包装模板 + 编译/缓存/失败回退

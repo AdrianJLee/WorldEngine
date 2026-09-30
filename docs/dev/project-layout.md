@@ -20,7 +20,7 @@
 | `projects/<名>/` | **项目内容根**:`project.we.yaml`、`assets/**`、`levels/**`、项目级 dot 配置 | 运行时/编辑器按清单读取 |
 | `tests/<模块>/<概念>Tests.cpp` | 引擎与宿主测试;target 名 `World.<概念>` | `Engine`(部分目标额外编译 Game/TestKit 生成源) |
 | `third_party/<名>/` | 参与编译的第三方**源码**(submodule 优先) | 各 target |
-| `vendor/tools/<名>/` | 以**进程**调用的外部工具(重物默认不入库,如 slangc 走 FETCH + sha256) | 构建期/运行时 |
+| `vendor/tools/<名>/` | 以**进程**调用的外部工具(重物默认不入库;Slang CLI 子集 2026-09-30 经批准入库,见 `vendor/tools/slang/README.md`) | 构建期/运行时 |
 | `tools/agents/**` | 本机工作流与过程层(方案/派工/报告/scratch);**不入库、可丢** | 人 + AI |
 | `local/**` | 本机状态(编辑器偏好/布局/窗口/最近使用);**不入库、可整体删除** | 编辑器 |
 | `docs/{user,dev}/**` | 公开文档(用户手册 / 开发者文档) | 人 |

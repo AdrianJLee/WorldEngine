@@ -28,23 +28,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Vulkan QUIET)
 
 # --- Slang(Slang-T5 起是**唯一**的着色器编译器;Slang-T6b 删掉了旧的两套外部工具)---
-# 工具不入库("重物不入库"):由 tools/agents/fetch-slang.ps1 按固定版本 + sha256 下载到
-# 仓库外的依赖根(默认 <repo 同级>/WorldEngine-deps/slang-<版本>)。
+# 工具入库:CLI 子集(vendor/tools/slang/bin,~25MiB)随仓库分发,取件/升级走
+# tools/agents/update-slang-tool.ps1(固定版本 + sha256);理由与实测见
+# vendor/tools/slang/README.md。整包(含 slangd/LSP)仍可选走 fetch-slang.ps1 落到仓库外。
 # WLD_SLANG_DIR = **含 slangc.exe 的目录**,是"去哪儿找编译器"的唯一事实源:
-# 运行时代码只读这个编译期常量,不再有 env / vendor / PATH 兜底猜测。
+# 运行时代码只读这个编译期常量,不再有 env / 同级目录扫描 / PATH 兜底猜测。
 if(NOT DEFINED WLD_SLANG_DIR)
     if(DEFINED ENV{WLD_SLANG_DIR} AND NOT "$ENV{WLD_SLANG_DIR}" STREQUAL "")
         set(WLD_SLANG_DIR "$ENV{WLD_SLANG_DIR}")
     else()
-        set(WLD_SLANG_DIR "${WLD_ENGINE_ROOT}/../WorldEngine-deps/slang-2026.18.2/bin")
+        set(WLD_SLANG_DIR "${WLD_ENGINE_ROOT}/vendor/tools/slang/bin")
     endif()
 endif()
 file(TO_CMAKE_PATH "${WLD_SLANG_DIR}" WLD_SLANG_DIR)
 message(STATUS "WorldEngine Slang tool dir: ${WLD_SLANG_DIR}")
 if(NOT EXISTS "${WLD_SLANG_DIR}/slangc.exe")
     message(WARNING "slangc.exe not found in ${WLD_SLANG_DIR}; dev-time shader compilation will "
-        "fail (packaged builds use baked artifacts). Run tools/agents/fetch-slang.ps1, or "
-        "configure with -DWLD_SLANG_DIR=<dir containing slangc.exe>.")
+        "fail (packaged builds use baked artifacts). Run tools/agents/update-slang-tool.ps1 to "
+        "restore the in-repo tool, or configure with -DWLD_SLANG_DIR=<dir containing slangc.exe>.")
 endif()
 
 # --- 添加子项目---

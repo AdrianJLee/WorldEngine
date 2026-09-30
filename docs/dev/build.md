@@ -80,7 +80,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | 改了目录结构但构建没反应 | 源文件列表在配置阶段收集;重新跑 `cmake -S . -B ...` |
 | 产物路径和预期不符 | `CMAKE_BUILD_TYPE` 与 `--config` 不同名 |
 | DLL 找不到 / `LoadLibraryA` 失败 | 工作目录不对,或宿主与 DLL 的架构(x64)、构建类型不匹配 |
-| 着色器编译失败 | 找不到编译器时跑 `tools/agents/fetch-slang.ps1`(按固定版本 + sha256 取到仓库外),或用 `-DWLD_SLANG_DIR=<含 slangc.exe 的目录>` 配置 |
+| 着色器编译失败 | 编译器是**入库的 CLI 子集**(`vendor/tools/slang/bin`);文件缺失/哈希不符时跑 `tools/agents/update-slang-tool.ps1` 修复,或用 `-DWLD_SLANG_DIR=<含 slangc.exe 的目录>` 指到别处(整包走 `fetch-slang.ps1`) |
 
 ## 内部开发 checkout 的额外工具
 

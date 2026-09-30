@@ -209,9 +209,9 @@ namespace World
 		// ---- Slang 工具解析(Slang-T5:唯一入口) ----
 		//
 		// 只有一处事实源:构建系统给的 WLD_SLANG_DIR(根 CMake 变量,可 -D 覆盖;
-		// 默认 <repo>/../WorldEngine-deps/slang-<版本>/bin,由 tools/agents/fetch-slang.ps1
-		// 按版本 + sha256 取到仓库外)。T2/T3 过渡期的 env(WLD_SLANGC/WLD_SLANG_DIR)、
-		// vendor/tools/slang、同级 WorldEngine-deps 版本扫描与 PATH 兜底全部删除 ——
+		// 默认 <repo>/vendor/tools/slang/bin —— 入库的 CLI 子集,由
+		// tools/agents/update-slang-tool.ps1 按版本 + sha256 维护)。
+		// T2/T3 过渡期的 env(WLD_SLANGC)、同级 WorldEngine-deps 版本扫描与 PATH 兜底全部删除 ——
 		// "去哪儿找工具"由配置决定一次,不在运行时猜。
 		// 解析结果只算一次并缓存;失败时给出可执行的修复提示。
 		std::string ResolveSlangc()
@@ -225,7 +225,7 @@ namespace World
 			if (Log::GetCoreLogger())
 			{
 				WLD_CORE_ERROR("[shader] slangc.exe not found at '{0}' (WLD_SLANG_DIR). "
-					"Run tools/agents/fetch-slang.ps1, or configure with -DWLD_SLANG_DIR=<dir>.",
+					"Run tools/agents/update-slang-tool.ps1, or configure with -DWLD_SLANG_DIR=<dir>.",
 					candidate.string());
 			}
 #else
@@ -572,7 +572,7 @@ namespace World
 
 		if (ShaderCompiler::SlangcPath().empty())
 		{
-			error = "slangc.exe was not found in WLD_SLANG_DIR (run tools/agents/fetch-slang.ps1)";
+			error = "slangc.exe was not found in WLD_SLANG_DIR (run tools/agents/update-slang-tool.ps1)";
 			return false;
 		}
 

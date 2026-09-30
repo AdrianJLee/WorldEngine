@@ -25,16 +25,18 @@
 | 条目 | 形态 | 入库内容 | 备注 |
 | --- | --- | --- | --- |
 | (无) | — | — | **Slang-T6b(2026-09-23)后只有 Slang**:以前的两个着色器 CLI 工具与其中一个的库形态(工具目录 + submodule)已全部删除 |
-| `vendor/slang/` | 工具(实验,**已删**) | 整包不入库;获取方式见 [`tools/agents/scratch/slang-spike/FETCH.md`](../tools/agents/scratch/slang-spike/FETCH.md) | Spike 收尾后按"重物不入库"清掉(166MB);采纳时二选一:只入库 CLI 子集,或 FETCH + 版本/sha256 脚本 |
+| `vendor/tools/slang/` | 工具(CLI 子集,**已入库**) | `bin/slangc.exe` + `bin/slang-compiler.dll` + 许可(共 ~25MiB);证据与实测见 [`slang/README.md`](tools/slang/README.md) | 2026-09-30 用户批准的"重物不入库"破例:整包 166MB 里只留引擎用得到的两个文件,换来 `git clone` 即可编译着色器 |
 
 ## 与 `.gitignore` 的配合
 
 ### 着色器工具:只有 Slang(重要)
 
-着色器编译只有一条路:根 CMake 的 `WLD_SLANG_DIR`(= **含 `slangc.exe` 的目录**,`-D` 可覆盖,
-默认 `<repo 同级>/WorldEngine-deps/slang-<版本>/bin`),由
-[`tools/agents/fetch-slang.ps1`](../tools/agents/fetch-slang.ps1) 按固定版本 + sha256 落盘;
-运行时代码只读这个编译期常量,没有 env / vendor / PATH 兜底猜测。旧的着色器编译/转译工具
+着色器编译只有一条路:根 CMake 的 `WLD_SLANG_DIR`(= **含 `slangc.exe` 的目录**,`-D` / 环境变量可覆盖,
+默认 **`<repo>/vendor/tools/slang/bin`**,入库的 CLI 子集),取件/升级走
+[`tools/agents/update-slang-tool.ps1`](../tools/agents/update-slang-tool.ps1) 按固定版本 + sha256;
+需要整包(含 `slangd`/LSP)时才用可选的
+[`tools/agents/fetch-slang.ps1`](../tools/agents/fetch-slang.ps1) 落到仓库外。
+运行时代码只读这个编译期常量,没有 env / 同级目录扫描 / PATH 兜底猜测。旧的着色器编译/转译工具
 (整包工具目录与对应的库 submodule)已删除,GL 目标也走 Slang 直出的 SPIR-V(GL 4.6 + `GL_ARB_gl_spirv`)。
 
 新工具按 `vendor/tools/<name>/` 落位;若它同时提供"库"形态,库走 `third_party/<name>/`,不要同名同层。

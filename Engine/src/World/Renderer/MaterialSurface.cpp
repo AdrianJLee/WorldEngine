@@ -187,7 +187,7 @@ namespace World
 		// ---- Slang 工具解析(Slang-T5:只剩一份实现) ----
 		//
 		// 工具目录是构建期决定的单一事实源(根 CMake 的 WLD_SLANG_DIR,可 -D 覆盖;
-		// 落盘由 tools/agents/fetch-slang.ps1 负责)。这里直接用 ShaderUtils 里的
+		// 默认是入库的 CLI 子集,维护走 tools/agents/update-slang-tool.ps1)。这里直接用 ShaderUtils 里的
 		// ShaderCompiler::SlangcPath() —— 渲染内核与烘焙/发行路径不再各有一份解析,
 		// 也不再有 env/vendor/PATH 兜底猜测。
 		const std::string& SlangcPath()
@@ -1661,8 +1661,8 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 					SurfaceDiagnostic diagnostic;
 					diagnostic.Severity = "error";
 					diagnostic.Message = slangc.empty()
-						? "cannot launch slangc: slangc.exe not found (set WLD_SLANG_DIR, or run the "
-							"vendor/tools/slang FETCH)"
+						? "cannot launch slangc: slangc.exe not found (set WLD_SLANG_DIR, or run "
+							"tools/agents/update-slang-tool.ps1)"
 						: "cannot launch slangc: " + slangc;
 					result.Diagnostics.push_back(std::move(diagnostic));
 					result.RawToolOutput += "\n" + result.Diagnostics.back().Message + "\n";

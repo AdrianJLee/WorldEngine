@@ -48,7 +48,7 @@ namespace World
 
 		// Slang-T5:**唯一的工具目录解析入口**。
 		// 工具目录由构建系统给(WLD_SLANG_DIR,根 CMake 变量,可 -D 覆盖;默认
-		// <repo>/../WorldEngine-deps/slang-<版本>/bin,由 tools/agents/fetch-slang.ps1 落盘)。
+		// <repo>/vendor/tools/slang/bin —— 入库的 CLI 子集,维护走 tools/agents/update-slang-tool.ps1)。
 		// 解析只做一次存在性检查并缓存;解析失败返回空串并在日志里给出可执行提示。
 		// 渲染内核(MaterialSurface*)与烘焙/打包都走这里 —— 不允许第二份实现。
 		static const std::string& SlangcPath();

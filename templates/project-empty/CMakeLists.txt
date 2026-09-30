@@ -325,12 +325,12 @@ set_target_properties(World PROPERTIES
 )
 
 # 根 CMakeLists.txt 的工具目录:PUBLIC 宏。引擎二进制里已固化它自己的值,这里只影响
-# 项目自己调用着色器编译的代码;默认值与引擎根 CMakeLists 保持一致(引擎升级 Slang
-# 版本时同步这一行),WLD_SLANG_DIR 环境变量优先。
+# 项目自己调用着色器编译的代码;默认值与引擎根 CMakeLists 保持一致 —— 指向仓库内的
+# CLI 子集 vendor/tools/slang/bin(引擎升级 Slang 版本时同步这一行),WLD_SLANG_DIR 环境变量优先。
 if(DEFINED ENV{WLD_SLANG_DIR} AND NOT "$ENV{WLD_SLANG_DIR}" STREQUAL "")
     set(_we_slang_dir "$ENV{WLD_SLANG_DIR}")
 else()
-    set(_we_slang_dir "${WLD_ENGINE_ROOT}/../WorldEngine-deps/slang-2026.18.2/bin")
+    set(_we_slang_dir "${WLD_ENGINE_ROOT}/vendor/tools/slang/bin")
 endif()
 file(TO_CMAKE_PATH "${_we_slang_dir}" _we_slang_dir)
 
