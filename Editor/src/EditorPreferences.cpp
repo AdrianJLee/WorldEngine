@@ -145,6 +145,8 @@ namespace World::Editor
 						m_Data.ScriptFontSize = std::clamp(static_cast<float>(value.Number), 10.0f, 32.0f);
 					else if (key == "asset_hot_reload" && isBool)
 						m_Data.AssetHotReload = value.Bool;
+					else if (key == "scene_auto_reload" && isBool)
+						m_Data.SceneAutoReload = value.Bool;
 					else if (key == "startup_auto_open_last_project" && isBool)
 						m_Data.StartupAutoOpenLastProject = value.Bool;
 					else if (key == "restore_windows" && isString)
@@ -193,10 +195,11 @@ namespace World::Editor
 		if (const char* restore = std::getenv("WLD_RESTORE_WINDOWS"))
 			if (restore[0])
 				m_Data.RestoreWindows = RestoreModeFromString(restore);
-		WLD_CORE_INFO("编辑器偏好已加载: {0}(language={1} theme={2} scale={3:.2f} termHints={4} scriptFont={5:.0f} hotReload={6} aiPort={7} log={8})",
+		WLD_CORE_INFO("编辑器偏好已加载: {0}(language={1} theme={2} scale={3:.2f} termHints={4} scriptFont={5:.0f} hotReload={6} aiPort={7} log={8} sceneReload={9})",
 			path.string(), m_Data.Language, ThemeToString(m_Data.Theme), m_Data.UiScale,
 			m_Data.TermHints ? 1 : 0, m_Data.ScriptFontSize, m_Data.AssetHotReload ? 1 : 0,
-			m_Data.AiControlPort, kLogLevels[ClampLogLevel(m_Data.LogLevel)].Value);
+			m_Data.AiControlPort, kLogLevels[ClampLogLevel(m_Data.LogLevel)].Value,
+			m_Data.SceneAutoReload ? 1 : 0);
 		Apply();
 		// 诊断开关必须在窗口/渲染后端创建**之前**写进环境变量(它们在启动期读取)。
 		ApplyDiagnosticEnvironment();
@@ -250,6 +253,7 @@ namespace World::Editor
 			<< "  \"term_hints\": " << FormatBool(m_Data.TermHints) << ",\n"
 			<< "  \"script_font_size\": " << FormatFloat(m_Data.ScriptFontSize) << ",\n"
 			<< "  \"asset_hot_reload\": " << FormatBool(m_Data.AssetHotReload) << ",\n"
+			<< "  \"scene_auto_reload\": " << FormatBool(m_Data.SceneAutoReload) << ",\n"
 			<< "  \"startup_auto_open_last_project\": " << FormatBool(m_Data.StartupAutoOpenLastProject) << ",\n"
 			<< "  \"restore_windows\": \"" << RestoreModeToString(m_Data.RestoreWindows) << "\",\n"
 			<< "  \"ai_control_port\": " << m_Data.AiControlPort << ",\n"
@@ -324,6 +328,14 @@ namespace World::Editor
 		if (m_Data.AssetHotReload == enabled)
 			return;
 		m_Data.AssetHotReload = enabled;
+		Commit();
+	}
+
+	void EditorPreferences::SetSceneAutoReload(bool enabled)
+	{
+		if (m_Data.SceneAutoReload == enabled)
+			return;
+		m_Data.SceneAutoReload = enabled;
 		Commit();
 	}
 
@@ -553,6 +565,15 @@ namespace World::Editor
 			[&prefs](const std::string& value, std::string*) { prefs.SetAssetHotReload(value == "true"); return true; },
 			[&prefs] { return prefs.Data().AssetHotReload; },
 			[&prefs] { prefs.SetAssetHotReload(true); return true; });
+
+		// HOTR-P2-T5:场景 `.wd` 自动重开(仅"文档干净 + 编辑态"时;有未保存改动仍然只提示)。
+		addBool("editor.workflow.scene_auto_reload", "Workflow", SettingApply::Immediate, "Scene Auto Reload",
+			"Scene auto reload\nReopens the open scene when its .wd changes on disk, but only while the document has no unsaved edits and the editor is in Edit mode; the selection and the editor camera are restored. With unsaved edits the scene is never replaced (the viewport keeps showing the reopen prompt).\nDefault: on (the WLD_SCENE_AUTORELOAD=0 environment variable overrides). Applies immediately.",
+			[&prefs] { return FormatBool(prefs.Data().SceneAutoReload); },
+			[&prefs](const std::string& value, std::string*)
+			{ prefs.SetSceneAutoReload(value == "true"); return true; },
+			[&prefs] { return prefs.Data().SceneAutoReload; },
+			[&prefs] { prefs.SetSceneAutoReload(true); return true; });
 
 		// PROJ-2/T1:启动时自动打开"最近项目"第一条(只自动打开一次)。面板条目按注册表
 		// 自动出现;注册文案是英文 canonical,中文键(shell 之外的 panels/settings.json)

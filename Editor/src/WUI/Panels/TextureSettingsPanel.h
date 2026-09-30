@@ -2,6 +2,10 @@
 
 #include "EditorPanel.h"
 
+// HOTR-P2-T5:就地重烘 `<主名>.wtexc` 的实现已提取到 Editor/src/Texture/TextureArtifactBaker.*,
+// 本头文件继续转发声明(ContentBrowserPanel 等既有调用方 include 本头即可,调用点不变)。
+#include "../../Texture/TextureArtifactBaker.h"
+
 #include "World/RHI/Rhi.h"
 #include "World/Renderer/TextureArtifact.h"
 #include "World/Renderer/TextureImportSettings.h"
@@ -108,11 +112,6 @@ namespace World
 		// (缺资产 = 默认设置)。
 		TextureArtifactStatus InspectTextureArtifact(const std::filesystem::path& contentRoot,
 			const std::string& sourceLogical, const TextureImportSettings* settingsOverride);
-
-		// 就地在**内容根**重烘 `<源图主名>.wtexc`(开发态运行时能命中产物;`.wtexc` 已进 .gitignore),
-		// 并失效该逻辑路径的材质贴图缓存(下一次 Get 重新读盘上传)。失败填 error(人话)。
-		bool BakeTextureArtifactNow(const std::filesystem::path& contentRoot,
-			const std::string& sourceLogical, const TextureImportSettings& settings, std::string& outError);
 
 		// 为一张**源图**写一份最小 `.wtex`(内容 = `TextureImportSettings{}.Serialize()`:
 		// 注释头 + `usage: color`,没有 `source:` —— 缺省就是同目录同主名)。已存在 = 失败

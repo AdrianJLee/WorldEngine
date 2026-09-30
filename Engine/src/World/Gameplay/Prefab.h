@@ -51,6 +51,19 @@ namespace World::Gameplay
 	// 回滚实例:重新实例化来源 prefab 到临时场景,按树序把组件值拷回实例实体
 	// (契约:实例与 prefab 结构同构;整体回滚,字段级回滚需要 schema 字段访问,列入后续增量)。
 	WLD_API bool RevertInstance(PrefabInstanceRecord& record, Scene& scene);
+
+	// P2-b:把 prefab 文件最新内容应用到已有实例(**跟随**,覆盖保留)。
+	// 与 RevertInstance 的区别:回滚 = 丢弃覆盖回到资产原值并清空覆盖记录;跟随 =
+	//   1) 恢复前按 record.Overrides 登记的 (实体, 字段) 逐项快照实例**当前值**
+	//      (取值走 Schema::ReadSchemaField,字段串 = "<类型名>.<字段名>");
+	//   2) 与回滚同一套机制(InstantiateFromFile 到临时场景 + 两侧 Flatten 后逐实体
+	//      RestoreBuiltinComponents),其余内建组件字段回到 prefab 文件值;
+	//   3) 把快照值写回(Schema::WriteSchemaField);实体句柄不重建,record.Overrides 不清空。
+	// 失败(来源为空 / 实例根失效 / 读取失败 / 结构不一致:实体数或层级不同)返回 false + 非空
+	// error,且**不修改任何实体**(先检查后动手)。
+	// 单个字段无法解析或无可读值(类型/字段名对不上、组件不在该实体、Transient 未设)时跳过该
+	// 字段,原因累积进 error 文本,其余字段继续(整体仍返回 true)。
+	WLD_API bool ApplyPrefabChanges(PrefabInstanceRecord& record, Scene& scene, std::string* error = nullptr);
 	// 断链(Unpack):把实例变成普通实体——解除 prefab 关联并清空覆盖记录。
 	// 之后编辑不再被登记为覆盖,Revert/Apply 也不再可用(实体本身保持不变)。
 	// 嵌套 prefab 的数据表达:实例记录本身可再引用其它 prefab(编辑器侧维护多份记录),

@@ -15,6 +15,7 @@
 #include "AiControl/AiControlServer.h"
 #include "EngineShaderHotReload.h"
 #include "ShaderHotReload.h"
+#include "Texture/TextureImportWatch.h"
 #include <atomic>
 #include <functional>
 #include <string>
@@ -311,8 +312,10 @@ namespace World
 		bool ReloadPlugin(const std::string& id, Plugins::PluginReloadResult* result = nullptr,
 			std::string* message = nullptr);
 
-		// ---- P2 W5-L1:资产热重载(材质/贴图自动重载;文档场景只提示 + 一键重开)----
+		// ---- P2 W5-L1:资产热重载(材质/贴图自动重载;文档场景提示 + 一键重开)----
 		// 文档场景(.wd)在磁盘上被外部改动 → 视口提示条;重开会走未保存确认(不静默丢弃修改)。
+		// HOTR-P2-T5:文档**干净**且编辑态时改为自动重开(选择/相机恢复);dirty / Play / Simulate
+		// 仍然只提示 —— 见 MaybeAutoReloadExternalScene。
 		bool ExternalSceneChanged() const { return m_ExternalSceneChanged; }
 		void ReopenExternalScene();
 
@@ -354,6 +357,14 @@ namespace World
 		void PollAssetHotReload(float deltaSeconds);
 		// 用当前文档路径重建场景监听基线(打开/保存/重开成功后调用;换路径时也清提示)。
 		void RebaselineExternalSceneWatch();
+		// HOTR-P2-T5:外部改动 + 文档干净 + 编辑态 → 走 RequestAction 自动重开(带选择/相机恢复);
+		// dirty / Play / Simulate / 偏好关闭 → 保持现状(视口提示条 + 手动重开)。
+		void MaybeAutoReloadExternalScene();
+		// 自动重开前拍快照(选择实体的 UUID + 编辑器相机 + 视口 2D/3D 档),重开后恢复。
+		void CaptureSceneReopenSnapshot();
+		void RestoreSceneReopenSnapshot();
+		// 自动重开开关:偏好 `scene_auto_reload`(默认开),`WLD_SCENE_AUTORELOAD=0` 覆盖(自动化用)。
+		bool SceneAutoReloadEnabled() const;
 		// 当前文档场景的逻辑路径(相对内容根;不在内容根内/无路径 → 空)。
 		std::string CurrentDocumentLogicalPath() const;
 		void DoNewScene();
@@ -516,6 +527,21 @@ namespace World
 		std::filesystem::path m_SceneBeforePrefab;
 		bool m_HadSceneBeforePrefab = false;
 		bool m_ExternalSceneChanged = false;
+		// HOTR-P2-T5:自动重开的"重开前状态"快照(只在自动重开这一条路径上有效;
+		// 普通打开/新建/启动场景不受影响 —— Pending=false 时 Restore 是 no-op)。
+		struct SceneReopenSnapshot
+		{
+			bool Pending = false;
+			bool HasSelection = false;
+			UUID SelectionUUID {};
+			bool Viewport3D = false;
+			glm::vec3 CameraTarget { 0.0f };
+			float CameraDistance = 0.0f;
+			float CameraYaw = 0.0f;
+			float CameraPitch = 0.0f;
+			float Camera2DDistance = 0.0f;
+		};
+		SceneReopenSnapshot m_PendingSceneReopen;
 		// HOTR-P1-T1:材质着色器(`.slang`)编辑器级热重载 —— ChangedShaders → 后台重编译 →
 		// 帧边界 Install(路径键);材质面板没打开时也生效(编译失败保留旧管线)。
 		Editor::ShaderHotReload m_ShaderHotReload;
@@ -523,6 +549,9 @@ namespace World
 		// 绝对路径轮询(150ms 消抖)→ 帧边界 Renderer::ReloadShaders()(与 AI 命令同一入口)。
 		// 引擎 shader 与项目无关:无项目/启动器形态同样生效(见 OnUpdate)。
 		Editor::EngineShaderHotReload m_EngineShaderHotReload;
+		// HOTR-P2-T5(P2-c):内容根下 `.wtex` 与它们的 `source:` 源图外部改动 → 2s 节流 +
+		// 内容哈希优先 → 自动重烘 `.wtexc`(编码在工作线程,写盘/失效/日志在帧边界)。
+		Editor::TextureImportWatch m_TextureImportWatch;
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;
 		std::string m_RendererChangeName;

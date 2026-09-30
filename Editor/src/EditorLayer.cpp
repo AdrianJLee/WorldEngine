@@ -964,6 +964,8 @@ namespace World
 		m_ShaderHotReload.Shutdown();
 		// HOTR-P1-T3:引擎 shader 监听无工作线程/无 GPU 资源,清基线即可(下次构造重新建立)。
 		m_EngineShaderHotReload.Shutdown();
+		// HOTR-P2-T5:纹理自动重烘的编码线程先收掉(只跑纯 CPU 烘焙,不碰 GPU/文件写)。
+		m_TextureImportWatch.Shutdown();
 
 		SetSceneState(SceneState::Edit);
 
@@ -1708,12 +1710,23 @@ namespace World
 		if (!m_Document.LoadFromFile(path))
 		{
 			ShowError(m_Document.GetLastError());
+			// HOTR-P2-T5:自动重开失败(文件坏了/正在被写)→ 消费快照 + 重建基线,
+			// 不让下一帧拿着同一份未决状态反复重试刷屏。
+			if (m_PendingSceneReopen.Pending)
+			{
+				m_PendingSceneReopen = SceneReopenSnapshot {};
+				WLD_CORE_ERROR("[asset-hot-reload] scene auto reopen failed: {0} (the current document is kept)",
+					m_Document.GetLastError());
+				RebaselineExternalSceneWatch();
+			}
 			return;
 		}
 		SetSceneState(SceneState::Edit);
 		UpdateSceneContext(m_Document.GetScene());
 		// W5-L1:重开/打开成功即用磁盘内容重建外部改动基线(并清掉提示)。
 		RebaselineExternalSceneWatch();
+		// HOTR-P2-T5:自动重开这一条路径才恢复选择/相机(普通打开/新建/启动场景 = no-op)。
+		RestoreSceneReopenSnapshot();
 	}
 	bool EditorLayer::SaveScene()
 	{
@@ -3612,6 +3625,114 @@ namespace World
 		RequestAction([this, target]() { DoOpenScene(target); });
 	}
 
+	// ---- HOTR-P2-T5:场景 `.wd` 自动重开(干净文档 + 编辑态)----
+	//
+	// 口径(方案 P2 细化设计,P2-a):外部改动经现有 150ms 消抖后,
+	//   * 只走 RequestAction → 现有 DoOpenScene(**新 Scene 实例**,与手动"重新打开"同一条路径);
+	//   * 重开前按 **UUID** 记选择、记编辑器相机(3D 轨道相机 + 视口 2D/3D 档),重开后恢复;
+	//   * 文档 dirty → 保持现状(视口提示条 + 手动重开,**绝不**自动覆盖未保存修改);
+	//   * Play/Simulate → 不自动;
+	//   * 偏好 `scene_auto_reload`(默认开),`WLD_SCENE_AUTORELOAD=0` 覆盖(自动化用)。
+	bool EditorLayer::SceneAutoReloadEnabled() const
+	{
+		// 环境变量 > 偏好文件(与 WLD_ASSET_HOTRELOAD 同一口径)。
+		if (const char* switchValue = std::getenv("WLD_SCENE_AUTORELOAD"))
+			return std::string(switchValue) != "0";
+		return Editor::EditorPreferences::Get().Data().SceneAutoReload;
+	}
+
+	void EditorLayer::MaybeAutoReloadExternalScene()
+	{
+		if (!m_ExternalSceneChanged || !m_Document.HasPath())
+			return;
+		const std::string logical = CurrentDocumentLogicalPath();
+		if (!SceneAutoReloadEnabled())
+			return;   // 关掉开关 = 保持既有"提示 + 手动重开"行为
+		if (m_SceneState != SceneState::Edit)
+		{
+			WLD_CORE_INFO("[asset-hot-reload] scene auto reload skipped '{0}' (play/simulate in progress)",
+				logical);
+			return;
+		}
+		if (m_Document.IsDirty())
+		{
+			// 有未保存修改:不动文档,视口提示条继续给"重新打开"(用户点它时才走未保存确认)。
+			WLD_CORE_INFO("[asset-hot-reload] scene auto reload skipped '{0}' "
+				"(unsaved edits; the reopen prompt is kept)", logical);
+			return;
+		}
+		const std::filesystem::path target = m_Document.GetPath();
+		CaptureSceneReopenSnapshot();
+		WLD_CORE_INFO("[asset-hot-reload] scene auto reopening '{0}' (document clean, edit mode)", logical);
+		RequestAction([this, target]() { DoOpenScene(target); });
+	}
+
+	void EditorLayer::CaptureSceneReopenSnapshot()
+	{
+		m_PendingSceneReopen = SceneReopenSnapshot {};
+		m_PendingSceneReopen.Pending = true;
+		// 选择:只记 UUID(重开后是新 Scene 实例,实体句柄会复用旧值 —— 按句柄恢复会选错实体)。
+		const Scene* scene = m_ActiveScene.get();
+		if (scene && m_SelectedEntity.IsValid() && m_SelectedEntity.GetScene() == scene
+			&& m_SelectedEntity.HasComponent<UUIDComponent>())
+		{
+			m_PendingSceneReopen.HasSelection = true;
+			m_PendingSceneReopen.SelectionUUID = m_SelectedEntity.GetComponent<UUIDComponent>().ID;
+		}
+		// 编辑器相机:3D 轨道相机可完整记录/恢复;2D EditorCamera 只暴露距离(其余是私有轨道量,
+		// 不为此扩引擎接口)—— 恢复不了的部分在报告里写明。
+		m_PendingSceneReopen.Viewport3D = m_Viewport3D;
+		m_PendingSceneReopen.CameraTarget = m_EditorCamera3D.GetTarget();
+		m_PendingSceneReopen.CameraDistance = m_EditorCamera3D.GetDistance();
+		m_PendingSceneReopen.CameraYaw = m_EditorCamera3D.GetYaw();
+		m_PendingSceneReopen.CameraPitch = m_EditorCamera3D.GetPitch();
+		m_PendingSceneReopen.Camera2DDistance = m_EditorCamera.GetDistance();
+		const glm::vec3& target = m_PendingSceneReopen.CameraTarget;
+		WLD_CORE_INFO("[asset-hot-reload] scene reopen snapshot: selection={0} viewport3d={1} "
+			"target=({2:.2f},{3:.2f},{4:.2f}) distance={5:.2f} yaw={6:.1f} pitch={7:.1f}",
+			m_PendingSceneReopen.HasSelection ? "uuid" : "none", m_PendingSceneReopen.Viewport3D ? 1 : 0,
+			target.x, target.y, target.z, m_PendingSceneReopen.CameraDistance,
+			m_PendingSceneReopen.CameraYaw, m_PendingSceneReopen.CameraPitch);
+	}
+
+	void EditorLayer::RestoreSceneReopenSnapshot()
+	{
+		if (!m_PendingSceneReopen.Pending)
+			return;
+		const SceneReopenSnapshot snapshot = m_PendingSceneReopen;
+		m_PendingSceneReopen = SceneReopenSnapshot {};   // 消费一次(普通打开不受影响)
+		const Scene* scene = m_ActiveScene.get();
+		Entity restored;
+		if (snapshot.HasSelection && scene)
+		{
+			const entt::registry& registry = scene->GetRegistry();
+			for (const entt::entity handle : registry.view<UUIDComponent>())
+			{
+				if (static_cast<uint64_t>(registry.get<UUIDComponent>(handle).ID)
+					== static_cast<uint64_t>(snapshot.SelectionUUID))
+				{
+					restored = Entity(m_ActiveScene.get(), handle);
+					break;
+				}
+			}
+		}
+		// 找不到(实体被删/改名/换 ID)= 清选择,不留指向旧场景的悬空选择。
+		m_SelectedEntity = restored;
+		// 相机 + 视口档:按快照写回(DoOpenScene 本身不碰相机,这里是显式的"恢复"语义)。
+		m_Viewport3D = snapshot.Viewport3D;
+		m_EditorCamera3D.SetTarget(snapshot.CameraTarget);
+		m_EditorCamera3D.SetDistance(snapshot.CameraDistance);
+		m_EditorCamera3D.SetYawPitch(snapshot.CameraYaw, snapshot.CameraPitch);
+		m_EditorCamera.SetDistance(snapshot.Camera2DDistance);
+		const glm::vec3& target = snapshot.CameraTarget;
+		WLD_CORE_INFO("[asset-hot-reload] scene reopened '{0}' (selection={1}, camera restored: "
+			"viewport3d={2} target=({3:.2f},{4:.2f},{5:.2f}) distance={6:.2f} yaw={7:.1f} pitch={8:.1f})",
+			CurrentDocumentLogicalPath(),
+			snapshot.HasSelection ? (restored.IsValid() ? "kept" : "cleared") : "none",
+			snapshot.Viewport3D ? 1 : 0, target.x, target.y, target.z, snapshot.CameraDistance,
+			snapshot.CameraYaw, snapshot.CameraPitch);
+	}
+
 	bool EditorLayer::InstantiateModelFile(const std::string& logicalPath, std::string* message)
 	{
 		if (m_SceneState != SceneState::Edit || !m_ActiveScene)
@@ -3729,8 +3850,28 @@ namespace World
 		for (const std::string& path : report.ChangedShaders)
 			m_ShaderHotReload.Enqueue(path);
 
-		// 2) 文档场景(.wd):内容变化只提示 + 一键重开,**不自动替换**(会丢未保存修改,
-		//    选择/面板也仍指向旧 Scene 实例)。
+		// HOTR-P2-T5(P2-c):内容根下 `.wtex` 及其 `source:` 源图的外部改动 → 自动重烘 `.wtexc`。
+		// 与材质/贴图/场景共用上面那道"资产热重载"开关(WLD_ASSET_HOTRELOAD / 偏好);
+		// Poll = 主线程指纹轮询 + 稳定窗口后派发(编码在工作线程),Pump = 主线程写盘 + 失效 + 日志。
+		// **默认关闭**:已知 Vulkan 缺陷 —— 活动材质从"容器源图"切到"新烘 BC7 产物"时会
+		// device lost(复现:`tools/agents/scratch/HOTR-P2/t5-texture-rebake-probe.py`,
+		// 验证层 VUID-vkResetFences-pFences-01123 + VUID-vkAcquireNextImageKHR-semaphore-01779)。
+		// 待引擎侧取证修复后再翻默认值;在此之前用 `WLD_TEXTURE_HOTRELOAD=1` 显式开启。
+		static const bool textureHotReloadEnabled = []
+		{
+			const char* value = std::getenv("WLD_TEXTURE_HOTRELOAD");
+			return value != nullptr && *value != '\0' && std::string(value) != "0";
+		}();
+		if (textureHotReloadEnabled)
+		{
+			m_TextureImportWatch.Poll(static_cast<double>(deltaSeconds));
+			m_TextureImportWatch.Pump();
+		}
+
+		// 2) 文档场景(.wd):内容变化 → 视口提示条;**干净文档 + 编辑态**再自动重开
+		//    (HOTR-P2-T5;重开前按 UUID 记选择、记相机,重开后恢复)。
+		//    dirty / Play / Simulate / `scene_auto_reload` 关闭 → 只提示 + 手动重开,
+		//    绝不自动覆盖未保存修改。
 		const std::string logical = CurrentDocumentLogicalPath();
 		if (logical.empty())
 		{
@@ -3753,6 +3894,9 @@ namespace World
 			if (!m_ExternalSceneChanged)
 				WLD_CORE_INFO("[asset-hot-reload] scene changed '{0}' -> reopen prompt (document kept)", changed);
 			m_ExternalSceneChanged = true;
+			// HOTR-P2-T5:干净文档 + 编辑态 → 走 RequestAction 自动重开(选择/相机恢复);
+			// dirty / Play / Simulate / 开关关闭 → 这一条不做任何事(保留上面的提示语义)。
+			MaybeAutoReloadExternalScene();
 		}
 	}
 
