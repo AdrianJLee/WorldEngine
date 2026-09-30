@@ -1693,6 +1693,59 @@ namespace World
 			result = message;
 			return true;
 		}
+		// ---- PLUG-T3b:插件贡献的编辑器命令(命令面 = 面板按钮同一条执行路径)----
+		//   plugin.commands                     已注册的插件命令 + 执行次数(JSON)
+		//   plugin.command.run <id>             触发一条(名字 = plugin.command.<pluginId>.<id>,
+		//                                       也接受裸 <id>,唯一命中才执行)
+		if (cmd == "plugin.commands")
+		{
+			Plugins::PluginManager* plugins = m_Shell.GetPluginManager();
+			if (!plugins)
+			{
+				error = "需要先打开项目";
+				return false;
+			}
+			const std::vector<Plugins::PluginEditorCommand> commands = plugins->EditorCommands();
+			std::ostringstream out;
+			out << "{\"count\":" << commands.size() << ",\"commands\":[";
+			for (size_t index = 0; index < commands.size(); ++index)
+			{
+				if (index > 0)
+					out << ",";
+				out << "{\"plugin\":\"" << JsonEscape(commands[index].PluginId) << "\""
+					<< ",\"id\":\"" << JsonEscape(commands[index].Id) << "\""
+					<< ",\"name\":\"" << JsonEscape(commands[index].CommandName) << "\""
+					<< ",\"label\":\"" << JsonEscape(commands[index].Label) << "\""
+					<< ",\"tooltip\":\"" << JsonEscape(commands[index].Tooltip) << "\""
+					<< ",\"invokes\":" << commands[index].InvokeCount << "}";
+			}
+			out << "]}";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "plugin.command.run")
+		{
+			const std::string id = arg("id");
+			if (id.empty())
+			{
+				error = "plugin.command.run needs id";
+				return false;
+			}
+			Plugins::PluginManager* plugins = m_Shell.GetPluginManager();
+			if (!plugins)
+			{
+				error = "需要先打开项目";
+				return false;
+			}
+			std::string message;
+			if (!m_Shell.InvokePluginEditorCommand(id, &message))
+			{
+				error = message.empty() ? ("plugin.command.run failed: " + id) : message;
+				return false;
+			}
+			result = message;
+			return true;
+		}
 		// ---- W9-2:内置脚本编辑器 ----
 		// 打开脚本编辑器(逻辑路径;每个脚本一个 "script:<逻辑路径>" 面板)。
 		// 与用户入口(内容浏览器双击 .lua/.luau、Scripts 面板"在引擎内打开")同一条

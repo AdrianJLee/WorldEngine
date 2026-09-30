@@ -16,6 +16,8 @@
 #include "Panels/WindowsPanel.h"
 #include "Panels/AttachSlotPanel.h"
 #include "Panels/PluginsPanel.h"
+#include "Panels/PluginPanel.h"
+#include "PluginEditorHost.h"
 #include "FloatWindowHost.h"
 #include "../Project/ProjectLauncher.h"
 #include "../Project/ProjectScaffolder.h"
@@ -148,6 +150,30 @@ namespace World
 		// 启用/禁用**引擎插件**(写 `local/plugins.json`,下次启动生效)。
 		// 项目插件(随项目加载)返回 false + 可读理由;找不到 id 同样 false + 理由。
 		bool SetPluginEnabled(const std::string& id, bool enabled, std::string* message = nullptr);
+		// ---- PLUG-T3b:插件贡献的编辑器命令 / 面板 ----
+		// 编辑器侧的插件扩展宿主(命令注册表 + 面板注册表;由 EditorLayer 在插件加载前
+		// 通过 PluginManager::SetEditorHost 注入)。未接线 = nullptr。
+		PluginEditorHost* GetPluginEditorHost() const { return m_PluginEditorHost.get(); }
+		// 插件面板注册表 id 前缀(`plugin.panel.<pluginId>.<id>`)。
+		static bool IsPluginPanelId(const std::string& panelId);
+		// 面板注册表里的插件面板补建实例(插件加载全部结束后由 EditorLayer 调一次;
+		// 布局恢复 / AI ui.open 也走同一条 ensure 路径)。
+		void EnsurePluginPanelsFromRegistry();
+		void EnsurePluginPanelFromId(const std::string& panelId);
+		// 插件卸载后关闭对应面板(注册表里已经没有了;防止空窗口留在布局里)。
+		void ClosePluginPanelsNotInRegistry();
+		// 插件面板的渲染(PluginPanel 容器转发到这里;内部走 PluginEditorHost → PluginManager
+		// → 插件的 Draw)。面板已注销 = 画一行可读空态,不静默画旧内容。
+		void DrawPluginPanel(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const std::string& panelId);
+		// 触发一条插件编辑器命令(名字 = plugin.command.<pluginId>.<id>)。
+		bool InvokePluginEditorCommand(const std::string& commandName, std::string* message = nullptr);
+		// 启动器形态(PROJ-3/T1):插件管理器与插件扩展面在启动器形态整体缺席。
+		bool IsLauncherMode() const { return m_LauncherMode; }
+		// 插件面板 Draw 桥在**帧内**取当前绘制环境(由 PluginEditorHost 调用;
+		// 只在 RenderPanelContent 正在渲染插件面板时有效)。
+		bool HasWuiContext() const { return m_Ctx != nullptr && m_CurrentPluginPanelRect.W > 0.0f; }
+		Wui::WuiContext& WuiContextRef() const { return *m_Ctx; }
+		const Wui::WuiRect& CurrentPluginPanelRect() const { return m_CurrentPluginPanelRect; }
 		// 「在内容浏览器中定位」:切到第三根(项目插件)并选中该插件的目录。
 		// 引擎插件不在 `<项目根>/plugins` 下 ⇒ false + 可读理由(面板据此禁用该按钮)。
 		bool LocatePluginInContentBrowser(const std::string& id, std::string* message = nullptr);
@@ -551,6 +577,11 @@ namespace World
 		uint32_t m_ThemeGeneration = 0;
 		std::unordered_map<std::string, std::unique_ptr<EditorPanel>> m_PanelRegistry;
 		Wui::WuiRect m_ViewportRect;
+		// PLUG-T3b:插件扩展宿主(命令/面板注册表 + 面板 Draw 的 WUI 小组件表)。
+		std::unique_ptr<PluginEditorHost> m_PluginEditorHost;
+		// 正在渲染的插件面板矩形(仅 PluginPanel::OnRender → DrawPluginPanel 期间有效;
+		// PluginEditorHost 的 Draw 桥据此拿到控件布局区域)。
+		Wui::WuiRect m_CurrentPluginPanelRect { 0, 0, 0, 0 };
 
 		bool m_SplitterDragging = false;
 		Wui::DockNode* m_DragSplitNode = nullptr;

@@ -2,6 +2,7 @@
 
 #include "World/Core/Asset/AssetImporter.h"
 #include "World/Plugins/PluginManifest.h"
+#include "World/Plugins/PluginHostServices.h"
 #include "World/Schema/Schema.h"
 #include "World/Utils/DynamicLibrary.h"
 
@@ -104,6 +105,36 @@ namespace World::Plugins
 
 		// ---- T2:能力注册面(WeHostApi 尾部字段的宿主实现;宿主代码也可直接调用)----
 
+		// ---- T3b:编辑器扩展面(命令 / 面板)--------------------------------------------
+		//
+		// 账本语义与 T2 注册面一致:插件通过 WeHostApi::RegisterEditorCommand /
+		// RegisterEditorPanel 注册,卸载 / Register false / Register 抛异常 / 管理器析构
+		// 四条路径都会兜底回收(未自己注销则记 WARN),不留指向已释放 DLL 的回调。
+		// 真正的"进编辑器命令面 / 面板注册表"由宿主实现 PluginEditorHost 完成
+		// (Editor 的 PluginEditorHost);未接线时注册被干净拒绝(false + 警告)。
+		//
+		// 生命周期契约:宿主对象**必须比本管理器活得久**(或宿主析构前先
+		// SetEditorHost(nullptr) 断开)—— 本管理器只保存非拥有指针,析构时的兜底回收
+		// 会回拨宿主注销命令/面板。EditorLayer 的收尾顺序满足这条:先
+		// UnloadAll(登记随之清空)+ SetEditorHost(nullptr),再释放管理器。
+		void SetEditorHost(PluginEditorHost* host) { m_EditorHost = host; }
+		PluginEditorHost* EditorHost() const { return m_EditorHost; }
+
+		// 已注册命令快照(确定性顺序 = 插件发现顺序 + 注册顺序)。
+		std::vector<PluginEditorCommand> EditorCommands() const;
+		// 单条查询(未命中 = 返回 false,不改 *out)。
+		bool FindEditorCommand(const std::string& pluginId, const std::string& id,
+			PluginEditorCommand* out) const;
+		// 触发一条命令(宿主命令面入口;`plugin.command.<pluginId>.<id>` 也接受)。
+		// 成功 = 插件回调被调用(计数 +1,异常被截获并记 ERROR 后仍返回 true —— 回调跑了
+		// 就是跑了,异常属于插件契约违约,不让它把命令面带走)。
+		bool InvokeEditorCommand(const std::string& command, std::string* error = nullptr);
+		// 已注册面板快照(确定性顺序)与查找。
+		std::vector<PluginEditorPanel> EditorPanels() const;
+		bool FindEditorPanel(const std::string& panelId, PluginEditorPanel* out) const;
+		// 渲染一个插件面板(宿主面板层调用;返回 0 = 正常,非 0 = 面板缺失 / 未接线 / 插件违约)。
+		int RenderEditorPanel(const std::string& panelId) const;
+
 		// 按 id + 名字 + 最低版本(含)查已加载插件的 C++ 导出表(WePlugin::Exports)。
 		// 未命中 = nullptr(查询失败是正常分支,不记日志)。
 		void* LookupExport(const std::string& pluginId, const std::string& name,
@@ -142,6 +173,23 @@ namespace World::Plugins
 			World::Schema::TypeSchema Schema;      // 注册时提交的 schema(含字段访问器)
 			std::vector<uint32_t> Slots;           // 该类型字段占用的访问器槽位(注销时释放)
 		};
+		// T3b 注册账本的一条:插件注册的编辑器命令 / 面板(回调与 userData 取自插件描述)。
+		struct RegisteredEditorCommand
+		{
+			std::string Id;
+			std::string Label;
+			std::string Tooltip;
+			WeEditorCommandCallback Callback = nullptr;
+			void* UserData = nullptr;
+			uint64_t InvokeCount = 0;
+		};
+		struct RegisteredEditorPanel
+		{
+			std::string Id;
+			std::string Title;
+			WeEditorPanelDrawFn Draw = nullptr;
+			void* UserData = nullptr;
+		};
 		struct Record
 		{
 			PluginEntry Entry;
@@ -153,6 +201,9 @@ namespace World::Plugins
 			std::vector<RegisteredImporter> RegisteredImporters;
 			// T2b:本插件注册的组件类型(顺序 = 注册顺序)。
 			std::vector<RegisteredComponent> RegisteredComponents;
+			// T3b:本插件注册的编辑器命令 / 面板(顺序 = 注册顺序)。
+			std::vector<RegisteredEditorCommand> RegisteredEditorCommands;
+			std::vector<RegisteredEditorPanel> RegisteredEditorPanels;
 		};
 
 		Record* FindRecord(const std::string& id);
@@ -177,6 +228,12 @@ namespace World::Plugins
 			const WeComponentDesc& desc);
 		bool UnregisterComponent(Record& record, World::Schema::SchemaRegistry* registry,
 			const char* id);
+		// T3b:编辑器命令 / 面板的注册 / 注销(WeHostApi 尾部字段的宿主实现;
+		// 真正的编辑器接线转发给 PluginEditorHost)。
+		bool RegisterEditorCommand(Record& record, const WeEditorCommandDesc& desc);
+		bool UnregisterEditorCommand(Record& record, const char* id);
+		bool RegisterEditorPanel(Record& record, const WeEditorPanelDesc& desc);
+		bool UnregisterEditorPanel(Record& record, const char* id);
 		// 卸载/失败回滚的兜底:插件没自己注销的资产类型/导入器/组件类型在这里移除并记警告
 		// (不留悬空回调;组件类型整模块注销 + 释放字段访问器槽位)。
 		// schemas = 组件的 schema 注册表(可空:空则只清账本/槽位并记 ERROR)。
@@ -184,6 +241,8 @@ namespace World::Plugins
 			World::Schema::SchemaRegistry* schemas = nullptr);
 		// 组件类型整模块注销的兜底(卸载/回滚/管理器析构共用)。
 		void ReclaimComponentTypes(Record& record, World::Schema::SchemaRegistry* schemas);
+		// T3b:命令 / 面板的兜底回收(卸载 / Register false / 抛异常 / 析构四条路径共用)。
+		void ReclaimEditorExtensions(Record& record);
 		// WeHostApi 函数指针桥:userData → HostApiBox → 转发(越界/空参一律干净失败)。
 		static bool BridgeRegisterAssetType(void* userData, const WeAssetTypeDesc* desc);
 		static bool BridgeUnregisterAssetType(void* userData, const char* id);
@@ -193,6 +252,13 @@ namespace World::Plugins
 			uint32_t minVersion);
 		static bool BridgeRegisterComponent(void* userData, const WeComponentDesc* desc);
 		static bool BridgeUnregisterComponent(void* userData, const char* id);
+		static bool BridgeRegisterEditorCommand(void* userData, const WeEditorCommandDesc* desc);
+		static bool BridgeUnregisterEditorCommand(void* userData, const char* id);
+		static bool BridgeRegisterEditorPanel(void* userData, const WeEditorPanelDesc* desc);
+		static bool BridgeUnregisterEditorPanel(void* userData, const char* id);
+		// T3b:交给宿主的渲染入口(宿主只存函数指针;userData = 插件记录,卸载前必然注销)。
+		static int RenderPanelEntry(void* host, const PluginEditorPanel& panel,
+			WeEditorUiApi* ui, void* uiContext, void* userData);
 		static void LogBridge(void* userData, int level, const char* message);
 		static void Log(int level, const std::string& text);
 
@@ -203,5 +269,7 @@ namespace World::Plugins
 		int m_NextOrder = 0;
 		// Register 调用期间"当前有效的宿主表"(插件在 Register 里调宿主注册面时用它解析归属)。
 		HostApiBox* m_ActiveBox = nullptr;
+		// T3b:编辑器接线(非拥有;Editor 在插件加载前 SetEditorHost,nullptr = 未接线)。
+		PluginEditorHost* m_EditorHost = nullptr;
 	};
 }

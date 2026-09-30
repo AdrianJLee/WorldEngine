@@ -1267,6 +1267,11 @@ set(WE_PLUGIN_TEST_DLL_TARGETS
     # T2b:组件 schema 注册正例(含坏描述负例与注销导出)/ 违约兜底回收负例。
     WePluginTestComponent
     WePluginTestLeakyComponent
+    # T3b:编辑器扩展注册正例(命令/面板/触发计数/注销幂等)/ 三条负例
+    # (leaky 卸载回收、Register 抛异常回收、未接线宿主干净拒绝)。
+    WePluginTestEditorUi
+    WePluginTestLeakyEditorUi
+    WePluginTestThrowEditorUi
 )
 foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
     add_library(${_we_plugin_target} SHARED "plugins/${_we_plugin_target}.cpp")

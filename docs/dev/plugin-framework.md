@@ -166,3 +166,81 @@ ChoicesCount, Doc}`(定义与字段注释见 `Engine/src/World/Plugins/WePluginA
 用法示例即 `templates/plugin-component/src/plugin.cpp`(生成物可直接编译);单测
 `World.Plugins` 覆盖:注册可见性(`Find` / `ListByModule`)、字段元数据映射、
 `.wd` 同一条序列化 API 的往返(含按 `offsetof` 的逐字节断言)、注销幂等、卸载与析构兜底回收。
+
+## 9. 编辑器扩展(命令与面板,T3b,2026-09-30)
+
+`WeHostApi` 继续**尾部追加**编辑器扩展注册面(append-only:`WE_PLUGIN_ABI_VERSION` 仍 = 1;
+旧宿主缺这些字段时,插件用
+`host.StructSize >= offsetof(WeHostApi, UnregisterEditorPanel) + sizeof(host.UnregisterEditorPanel)`
+自检并干净拒绝):
+
+```cpp
+bool (*RegisterEditorCommand)(void* userData, const WeEditorCommandDesc* desc);
+bool (*UnregisterEditorCommand)(void* userData, const char* id);
+bool (*RegisterEditorPanel)(void* userData, const WeEditorPanelDesc* desc);
+bool (*UnregisterEditorPanel)(void* userData, const char* id);
+```
+
+```cpp
+struct WeEditorCommandDesc { StructSize, AbiVersion, Id, Label, Tooltip, Callback, UserData };
+struct WeEditorPanelDesc   { StructSize, AbiVersion, Id, Title, Draw, UserData };
+struct WeEditorUiApi       { StructSize, AbiVersion, UserData, PluginId,
+                             Label, Button, Separator, Checkbox, InvokeCommand };
+```
+
+### 命名契约(宿主统一加命名空间;插件只给面板内唯一的短 id)
+
+| 对象 | 完整名字 | 用途 |
+| --- | --- | --- |
+| 面板 | `plugin.panel.<插件 id>.<面板 id>` | 面板注册表 id / `ui.open` / a11y 根 id / 挂靠标签 `shell.attach.<面板 id>` |
+| 命令 | `plugin.command.<插件 id>.<命令 id>` | AI 通道 `plugin.command.run` 触发 |
+| 面板内控件 | `plugin.panel.<插件 id>.<面板 id>.<控件 id>` | 面板 a11y 节点(`Label` 自动编号 `#<n>`) |
+
+### 生命周期与回收
+
+- 面板是**独立窗口形态**(`PanelForm::Independent`,与插件管理器 / Project Settings 同款):
+  默认打开 = `TogglePanel → OpenPanelAttached`(附加到主窗口的标签切换),可拖出为独立 OS 窗口;
+  布局存档里不保留停靠记录(与其它独立面板同一套白名单规则)。
+- 卸载(`Unload` / `UnloadAll`)/ `Register` 返回 false / `Register` 抛异常 / 管理器析构四条路径
+  都会把该插件的命令与面板从编辑器注册表移除(未自己注销 = 记 WARN 后强删);
+  已打开的面板窗口由 `EditorShell` 在帧末按注册表核对关闭(不留空窗口)。
+- 幂等:重复 `Id`(同一插件)= false + 警告(不覆盖);注销"本插件没注册过"的 `Id` = true。
+- 生命周期契约:`PluginEditorHost` 宿主对象**必须比 `PluginManager` 活得久**,或宿主析构前先
+  `SetEditorHost(nullptr)`(`EditorLayer::ShutdownPlugins` 的收尾顺序就是这条)。
+- 启动器形态(没有项目 / 没有编辑器宿主):扩展注册被干净拒绝并记可读诊断,插件加载失败 ——
+  与 E2「插件管理器只在打开项目时可用」同一口径。
+
+### 面板绘制(`Draw`)——首期小组件表
+
+宿主每帧调用 `WeEditorPanelDesc::Draw(userData, ui, uiContext)`,按调用顺序**垂直排列**
+控件(面板高度不足 = 停止绘制,首期不做滚动):
+
+- `ui->Label(uiContext, text)`(只读文本;宿主登记 a11y `label` 节点);
+- `ui->Button(uiContext, id, label)` 返回是否被点击;
+- `ui->Separator(uiContext)`;
+- `ui->Checkbox(uiContext, id, label, &value)` 返回是否被点击改值(新值写回 `*value`);
+- `ui->InvokeCommand(uiContext, "<命令 id>")` 触发宿主命令面里的命令 —— 与 AI 通道
+  `plugin.command.run` 走同一条执行路径(执行次数在 `plugin.commands` 账本里可观测)。
+
+`Draw` 是只读渲染:不得在绘制里改宿主状态;不得让异常跨过 ABI 边界(抛异常 = 契约违约,
+宿主停止渲染该面板并记 ERROR)。命令回调(`Callback`)同理。
+
+### AI 通道命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `plugin.commands` | 已注册插件命令 + 执行次数(JSON;面板按钮与 AI 通道同源计数) |
+| `plugin.command.run <id>` | 触发一条(`plugin.command.<插件 id>.<命令 id>`,也接受唯一命中的裸 `<id>`) |
+
+### 验证
+
+单测 `World.Plugins` 用 ABI-only 测试插件(`tests/plugins/WePluginTestEditorUi.cpp` 等三个)覆盖:
+注册/重复拒绝/坏描述干净拒绝、账本可见、命令触发计数、面板渲染入口、
+按需注销幂等,以及卸载 / 抛异常 / 管理器析构三条兜底回收路径(不留悬停回调)。
+端到端探针:`tools/agents/scratch/PLUG-T3b/verify-plugin-editor-ui.py`
+(模板生成 → 编出 DLL → 重启后 loaded → 面板 `ui.open` + 挂靠标签形态 → 面板按钮触发命令 →
+AI 通道触发同一条命令 → 禁用重启后面板与命令全部消失)。
+
+> **§4 模板表的更正(T3b 落地)**:`editor-ui` 行原写 `requires: t3b`、"注册面未就绪" ——
+> 该模板的 `template.json` 已改为 `requires: none`,源码换成
+> `templates/plugin-editor-ui/src/plugin.cpp` 里的真实注册;以本节为准。

@@ -6,11 +6,16 @@
 - 目录名 / 产物名:`{{PluginDir}}`
 - 清单:`plugin.we.yaml`(字段口径见引擎的 `docs/dev/plugin-framework.md`)
 
-> **注册面未就绪**:插件侧编辑器扩展面(面板 / 命令)按计划属于 **T3b**,当前引擎 ABI
-> 还没有对应的注册函数。本模板现在生成的是**可编译骨架**:清单声明
-> `editor.panel` / `editor.command`,源码里用 TODO 标出将来要换成真实注册的位置,
-> 不引用任何尚不存在的 API。T3b 落地后把 TODO 换成 `host.RegisterPanel(...)` /
-> `host.RegisterCommand(...)` 即可。
+> **T3b 起是真实注册**:`src/plugin.cpp` 在 Register 里经
+> `WeHostApi::RegisterEditorCommand` / `RegisterEditorPanel` 注册一条命令与一个面板,
+> Unregister 里成对注销。面板是**独立窗口形态**(默认附加到主窗口的标签切换,可拖出为
+> 独立 OS 窗口),内容用宿主给的**小组件表**(`WeEditorUiApi`:Label / Button /
+> Separator / Checkbox)绘制;面板里的按钮经 `WeEditorUiApi::InvokeCommand` 触发本插件
+> 注册的命令 —— 与 AI 通道 `plugin.command.run` 同一条宿主命令路径。
+>
+> 注册面命名(宿主统一加命名空间,插件只需面板内唯一的短 id):
+> - 面板:`plugin.panel.<插件 id>.<面板 id>`(窗口菜单 / `ui.open` / a11y 根 id)
+> - 命令:`plugin.command.<插件 id>.<命令 id>`(AI `plugin.command.run` 触发)
 
 ## 构建
 

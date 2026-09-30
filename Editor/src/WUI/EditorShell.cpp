@@ -286,6 +286,8 @@ namespace World
 		constexpr const char* kScriptPanelPrefix = "script:";
 		// P4-U13c:prefab 资产窗口(每个 .wprefab 一个 "prefab:<逻辑路径>" 面板)。
 		constexpr const char* kPrefabPanelPrefix = "prefab:";
+		// PLUG-T3b:插件贡献的面板(独立窗口形态;id 命名空间 = `plugin.panel.<pluginId>.<id>`)。
+		constexpr const char* kPluginPanelPrefix = "plugin.panel.";
 	}
 
 	EditorShell::EditorShell(EditorLayer& editor, bool launcherMode)
@@ -349,6 +351,10 @@ namespace World
 		// PLUG-T3:插件管理器面板(数据/动作都走 EditorShell → EditorLayer;项目形态才注册)。
 		if (!m_LauncherMode)
 			m_PanelRegistry.emplace("plugins", std::make_unique<PluginsPanel>(*this));
+		// PLUG-T3b:插件扩展宿主(命令 / 面板注册表;由 EditorLayer 注入 PluginManager)。
+		// 启动器形态不建它:E2 口径下插件扩展面整体缺席。
+		if (!m_LauncherMode)
+			m_PluginEditorHost = std::make_unique<PluginEditorHost>(*this);
 
 		// P4-UX10:恢复"上次退出时开着"的独立窗口。
 		// 存档里仍有浮动记录 = 上次开着(关掉的不会自动弹出);同时记了上次形态(挂靠 chip / 浮窗)。
@@ -425,6 +431,9 @@ namespace World
 		// P4-U13c:prefab 资产窗口同上(默认附加到主窗口,可拖出)。
 		if (panel.compare(0, std::strlen(kPrefabPanelPrefix), kPrefabPanelPrefix) == 0)
 			return PanelForm::Independent;
+		// PLUG-T3b:插件贡献的面板 = 独立窗口形态(与插件管理器同款)。
+		if (panel.compare(0, std::strlen(kPluginPanelPrefix), kPluginPanelPrefix) == 0)
+			return PanelForm::Independent;
 		for (const PanelSpec& spec : kPanelSpecs)
 			if (panel == spec.Id)
 				return spec.Form;
@@ -436,6 +445,9 @@ namespace World
 		// PLUG-T3/E2:启动器形态不注册插件管理器(菜单/脚本都看不到它)。
 		if (m_LauncherMode && panel == "plugins")
 			return false;
+		// PLUG-T3b:插件面板只在注册表里存在时才算声明(卸载后立刻从菜单/脚本消失)。
+		if (IsPluginPanelId(panel))
+			return m_PluginEditorHost && m_PluginEditorHost->HasPanel(panel);
 		if (panel.compare(0, std::strlen(kMaterialPanelPrefix), kMaterialPanelPrefix) == 0)
 			return true;
 		if (panel.compare(0, std::strlen(kModelPanelPrefix), kModelPanelPrefix) == 0)
@@ -448,6 +460,11 @@ namespace World
 			if (panel == spec.Id)
 				return true;
 		return false;
+	}
+
+	bool EditorShell::IsPluginPanelId(const std::string& panelId)
+	{
+		return panelId.rfind(kPluginPanelPrefix, 0) == 0;
 	}
 
 	// 独立窗口只能以"独立窗口"存在:存档/撤销里的停靠树记录一律丢弃(不尝试修复)。
@@ -1149,6 +1166,10 @@ namespace World
 			{ "texture_settings", { "panel.texture_settings", "Texture Settings" } },
 		};
 		(void)kTitles;
+		// PLUG-T3b:插件面板标题来自插件注册(不受本地化表约束;卸载后注册表为空,回退到 id)。
+		if (IsPluginPanelId(id) && m_PluginEditorHost)
+			if (const std::string pluginTitle = m_PluginEditorHost->PanelTitle(id); !pluginTitle.empty())
+				return pluginTitle;
 		if (const auto found = titles.find(id); found != titles.end())
 			return Wui::Tr(found->second.first, found->second.second);
 		const auto it = m_PanelRegistry.find(id);
@@ -1837,6 +1858,8 @@ namespace World
 				RecordDockChange(ctx, "close", panel, before);
 		}
 		m_PendingPanelCloses.clear();
+		// PLUG-T3b:插件卸载后把对应面板的窗口/标签/布局记录收干净(注册表已没有它)。
+		ClosePluginPanelsNotInRegistry();
 
 		// P3-1①:挂靠标签拖拽(不经过 WuiContext)的收口 —— 左键已经抬起,而
 		// DrawAttachBar 这一帧没收到释放沿(释放落在别的窗口/窗口外)时,残留会让顶栏
@@ -3077,6 +3100,7 @@ namespace World
 				EnsureScriptPanelFromId(panel);
 				EnsureModelPanelFromId(panel);
 				EnsurePrefabPanelFromId(panel);
+				EnsurePluginPanelFromId(panel);   // PLUG-T3b:插件面板跨会话恢复
 			}
 			const bool attach = forceTabs || item.Attached;
 			// 先隐藏着建出来:恢复成 chip 时不会"闪一下窗口",恢复成浮窗时下一步再显示。
@@ -3201,6 +3225,21 @@ namespace World
 				TogglePanel(*m_Ctx, panel);
 			else
 				OpenScriptEditorNow(panel.substr(std::strlen(kScriptPanelPrefix)));
+			return true;
+		}
+		// PLUG-T3b:插件面板 —— 未建实例先补建,未打开走默认"附加到主窗口",已打开走切换。
+		if (IsPluginPanelId(panel))
+		{
+			EnsurePluginPanelFromId(panel);
+			if (!m_Ctx || !IsDeclaredPanel(panel))
+				return false;
+			const auto attached = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
+			FloatWindowHost* host = FindFloatHost(panel);
+			const bool visibleWindow = host && !host->IsHidden();
+			if (attached != m_AttachedPanels.end() || visibleWindow)
+				TogglePanel(*m_Ctx, panel);
+			else
+				OpenPanelAttached(panel);
 			return true;
 		}
 		if (!m_Ctx)
@@ -6304,6 +6343,119 @@ namespace World
 		m_PanelRegistry.emplace(panelId, std::move(panel));
 		if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
 			m_Panels.push_back(panelId);
+	}
+
+	// ---- PLUG-T3b:插件贡献的面板(动态实例,id = "plugin.panel.<pluginId>.<id>")----
+
+	void EditorShell::EnsurePluginPanelsFromRegistry()
+	{
+		if (m_LauncherMode || !m_PluginEditorHost)
+			return;
+		// 注册表是插件加载完成后的权威清单(插件中途失败不会留半个注册)。
+		for (const std::string& panelId : m_PluginEditorHost->PanelIds())
+			EnsurePluginPanelFromId(panelId);
+	}
+
+	void EditorShell::EnsurePluginPanelFromId(const std::string& panelId)
+	{
+		if (m_LauncherMode || !m_PluginEditorHost)
+			return;
+		if (m_PanelRegistry.find(panelId) != m_PanelRegistry.end())
+			return;
+		if (!IsPluginPanelId(panelId) || !m_PluginEditorHost->HasPanel(panelId))
+			return;
+		auto panel = std::make_unique<PluginPanel>(*this, panelId);
+		m_PanelRegistry.emplace(panelId, std::move(panel));
+		if (std::find(m_Panels.begin(), m_Panels.end(), panelId) == m_Panels.end())
+			m_Panels.push_back(panelId);
+		// 默认尺寸:插件面板要装下几行控件与按钮(与插件管理器同量级)。
+		if (m_LastFloatRects.find(panelId) == m_LastFloatRects.end())
+			m_LastFloatRects[panelId] = Wui::WuiRect { 200.0f, 140.0f, 520.0f, 360.0f };
+		if (!m_Layout.FindFloatMemory(panelId, nullptr))
+			m_Layout.FloatMemory.push_back({ panelId, m_LastFloatRects[panelId] });
+	}
+
+	void EditorShell::ClosePluginPanelsNotInRegistry()
+	{
+		if (m_LauncherMode || !m_PluginEditorHost)
+			return;
+		// 插件卸载后:注册表里没有了 ⇒ 关掉已打开的窗口/标签/停靠记录(不留下空窗口)。
+		const auto pluginPanelGone = [this](const std::string& panelId)
+		{
+			return IsPluginPanelId(panelId) && !m_PluginEditorHost->HasPanel(panelId);
+		};
+		const auto isGone = [&pluginPanelGone](const std::string& panelId)
+		{
+			return pluginPanelGone(panelId);
+		};
+
+		// 独立窗口(含附加态标签):先关窗口,再摘附加标签。
+		std::vector<std::string> staleHosts;
+		for (const std::unique_ptr<FloatWindowHost>& host : m_FloatHosts)
+			for (const std::string& panelId : host->Panels())
+				if (isGone(panelId) && std::find(staleHosts.begin(), staleHosts.end(), panelId)
+					== staleHosts.end())
+					staleHosts.push_back(panelId);
+		for (const std::string& panelId : staleHosts)
+			CloseFloatWindow(panelId, true, m_Ctx);
+		m_AttachedPanels.erase(std::remove_if(m_AttachedPanels.begin(), m_AttachedPanels.end(),
+			[&isGone](const std::string& panelId) { return isGone(panelId); }), m_AttachedPanels.end());
+		if (isGone(m_ActiveWindowTag))
+			m_ActiveWindowTag.clear();
+		for (const Wui::DockFloat& entry : m_Layout.Floating)
+			if (isGone(entry.Panel))
+				m_Layout.CloseFloating(entry.Panel);
+		m_Layout.FloatMemory.erase(std::remove_if(m_Layout.FloatMemory.begin(), m_Layout.FloatMemory.end(),
+			[&isGone](const Wui::DockFloat& entry) { return isGone(entry.Panel); }), m_Layout.FloatMemory.end());
+		m_Panels.erase(std::remove_if(m_Panels.begin(), m_Panels.end(),
+			[&pluginPanelGone](const std::string& panelId) { return pluginPanelGone(panelId); }), m_Panels.end());
+		std::vector<Wui::PanelId> dockedPanels;
+		m_Layout.AllPanels(&dockedPanels);
+		for (const Wui::PanelId& panelId : dockedPanels)
+			if (isGone(panelId))
+				m_Layout.RemoveTab(panelId);
+		// unordered_map 不支持 remove_if 的整体删除(pair 不可赋值)⇒ 显式遍历 + erase(it)。
+		for (auto it = m_PanelRegistry.begin(); it != m_PanelRegistry.end(); )
+		{
+			if (pluginPanelGone(it->first))
+				it = m_PanelRegistry.erase(it);
+			else
+				++it;
+		}
+	}
+
+	void EditorShell::DrawPluginPanel(Wui::WuiContext& ctx, const Wui::WuiRect& rect, const std::string& panelId)
+	{
+		Plugins::PluginManager* manager = GetPluginManager();
+		if (!manager || !m_PluginEditorHost || !m_PluginEditorHost->HasPanel(panelId))
+		{
+			// 面板已经被注销(插件卸载/禁用)而窗口还没收掉:给一行可读空态而不是空白。
+			Label(ctx, { rect.X + 8.0f, rect.Y + 8.0f },
+				Wui::Tr("panel.plugin.unavailable", "This plugin panel is no longer available."),
+				m_Theme.TextMuted, m_Theme.FontSizeBody);
+			return;
+		}
+		m_CurrentPluginPanelRect = rect;
+		if (manager->RenderEditorPanel(panelId) != 0)
+			WLD_CORE_WARN("[plugin] editor panel '{0}' draw failed", panelId);
+		m_CurrentPluginPanelRect = Wui::WuiRect { 0, 0, 0, 0 };
+	}
+
+	bool EditorShell::InvokePluginEditorCommand(const std::string& commandName, std::string* message)
+	{
+		if (!m_PluginEditorHost)
+		{
+			if (message) *message = Wui::Tr("plugin.command.unavailable", "No editor command surface.");
+			return false;
+		}
+		std::string error;
+		if (!m_PluginEditorHost->InvokeEditorCommand(commandName, &error))
+		{
+			if (message) *message = error;
+			return false;
+		}
+		if (message) *message = "invoked " + commandName;
+		return true;
 	}
 
 	// ---- P4-U13c:prefab 资产窗口(动态实例,id = "prefab:<逻辑路径>")----

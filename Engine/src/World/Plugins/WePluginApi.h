@@ -23,6 +23,10 @@
 // UnregisterComponent + WeComponentDesc / WeComponentFieldDesc):同一个纪律,
 // 仍然不改既有字段、不升 `WE_PLUGIN_ABI_VERSION`。
 //
+// T3b(2026-09-30)继续在**尾部**追加编辑器扩展注册面(RegisterEditorCommand /
+// UnregisterEditorCommand + RegisterEditorPanel / UnregisterEditorPanel,以及
+// 面板 Draw 拿到的小组件表 WeEditorUiApi):同一个纪律,不改既有字段、不升 ABI。
+//
 // 版本同步点(升级时必须一起改):本文件、`plugin.we.yaml` 的 `abi`、
 // `Engine/src/World/Plugins/PluginManager.*`、`docs/dev/plugin-framework.md`。
 // 方案:`tools/agents/tasks/20260930-1100-plugin-framework/plan.md`(v2.1)。
@@ -209,6 +213,87 @@ namespace World::Plugins
 	};
 
 	// 宿主能力表(函数指针表;T1 含最小集合,T2 起注册面**尾部追加**)。
+	// ---- T3b:编辑器扩展(命令 / 面板)-----------------------------------------------
+	//
+	// 语义:
+	//   * 命令 = 具名动作,进宿主的编辑器命令面;AI 通道用 `plugin.command.run <id>` 触发
+	//     (宿主命令名 = plugin.command.<pluginId>.<id>),插件面板里的按钮走
+	//     WeEditorUiApi::InvokeCommand 触发同一条执行路径(宿主统计成功次数)。
+	//   * 面板 = 独立窗口形态(与插件管理器同款:默认附加到主窗口的标签,可拖出为
+	//     独立 OS 窗口);宿主在渲染时调用 WeEditorPanelDesc::Draw,并把**只读上下文**
+	//     (WeEditorUiState:插件 id + 面板 id)与小组件表(WeEditorUiApi)交给插件。
+	//   * Draw 是**只读渲染**:不得在 Draw 里改宿主状态;按钮点击等交互要经
+	//     WeEditorUiApi::InvokeCommand 回到宿主命令路径。
+	//   * 首次版本的小组件表:Label / Button / Separator / Checkbox(不做全量 WUI 暴露)。
+	//     控件的 id 由宿主按面板命名空间隔离,插件只需给面板内的唯一短 id
+	//     (a11y id 形如 `plugin.panel.<pluginId>.<控件 id>`)。
+	//   * 禁用/被拒绝的插件不参与:宿主在面板能打开之前就调用 RegisterEditorPanel。
+	//   * 卸载路径:PluginManager 调用 UnregisterEditorCommand / UnregisterEditorPanel,
+	//     卸载**回收**该插件注册的全部命令与面板(不留悬空回调)。
+	//
+	// 反向约束(与 HostApi 其余注册面一致):注册失败 = 返回 false + 可读日志;
+	// 插件必须在 Register 里检查返回值;Unregister 幂等(注销"本插件没注册过"的 id = true)。
+
+	// 插件面板里的单值 / 动作控件(只回传 bool 结果;文本 / 状态由插件自己保存):
+	//   * Button 返回 true = 本帧被点击(按下并释放命中);
+	//   * Checkbox 返回 true = 本帧被点击改值(新值写回 *value;值由插件自己保存)。
+	using WeEditorUiLabelFn = void (*)(void* uiContext, const char* text);
+	using WeEditorUiButtonFn = bool (*)(void* uiContext, const char* id, const char* label);
+	using WeEditorUiSeparatorFn = void (*)(void* uiContext);
+	using WeEditorUiCheckboxFn = bool (*)(void* uiContext, const char* id, const char* label, bool* value);
+	// 从面板里触发宿主命令面里的一条命令(宿主按命令名解析;成功 = true)。
+	// 用于"按钮 → 命令"：插件面板把按钮点击转成命令调用,执行统计与 AI 通道同源。
+	using WeEditorUiInvokeCommandFn = bool (*)(void* uiContext, const char* commandId);
+
+	// 首期小组件表(宿主提供;函数指针可为 null = 该控件不可用)。
+	struct WeEditorUiApi
+	{
+		uint32_t StructSize = sizeof(WeEditorUiApi);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+		// 本面板的只读上下文句柄(宿主创建 / 销毁;插件只原样回传给上面的函数)。
+		void* UserData = nullptr;
+		// 只读上下文字符串(插件 id;仅调用期间有效,插件不得保留)。
+		const char* PluginId = nullptr;
+		// 控件绘制:宿主按 Draw 调用顺序垂直排列(控件 id 由宿主按面板命名空间隔离)。
+		WeEditorUiLabelFn Label = nullptr;
+		WeEditorUiButtonFn Button = nullptr;
+		WeEditorUiSeparatorFn Separator = nullptr;
+		WeEditorUiCheckboxFn Checkbox = nullptr;
+		// 命令面(可空 = 宿主未接命令面;面板按钮据此给可读提示而不是静默失败)。
+		WeEditorUiInvokeCommandFn InvokeCommand = nullptr;
+	};
+
+	// 命令描述(只含 C 类型)。Callback 由宿主在命令面里调用(命令被执行时);
+	// 回调**不得让异常跨过 ABI 边界**(抛异常 = 契约违约,宿主记错误并继续运行)。
+	using WeEditorCommandCallback = void (*)(void* userData);
+	struct WeEditorCommandDesc
+	{
+		uint32_t StructSize = sizeof(WeEditorCommandDesc);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+
+		const char* Id = nullptr;        // 插件内唯一(必需;空 = 拒绝注册)
+		const char* Label = nullptr;     // 显示名(可空 = Id)
+		const char* Tooltip = nullptr;   // 悬停提示(可空)
+		WeEditorCommandCallback Callback = nullptr;  // 必需(空 = 拒绝注册)
+		void* UserData = nullptr;        // 只回传给 Callback
+	};
+
+	// 面板 Draw 回调:`uiContext` = 本面板的只读上下文句柄(回传给 WeEditorUiApi 的函数);
+	// `ui` = 宿主提供的小组件表(仅本次调用期间有效,插件不得保留);`userData` = 注册时给的句柄。
+	// 返回 0 = 正常;非 0 = 契约违约(宿主把该面板判为坏面板)。
+	// Draw 不得让异常跨过 ABI 边界(抛异常 = 契约违约,宿主停止渲染该面板并记错误)。
+	using WeEditorPanelDrawFn = int (*)(void* userData, const WeEditorUiApi* ui, void* uiContext);
+	struct WeEditorPanelDesc
+	{
+		uint32_t StructSize = sizeof(WeEditorPanelDesc);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+
+		const char* Id = nullptr;       // 插件内唯一(必需;空 = 拒绝注册)
+		const char* Title = nullptr;    // 窗口/标签标题(可空 = Id)
+		WeEditorPanelDrawFn Draw = nullptr;  // 必需(空 = 拒绝注册)
+		void* UserData = nullptr;       // 只回传给 Draw
+	};
+
 	struct WeHostApi
 	{
 		uint32_t StructSize = sizeof(WeHostApi);
@@ -237,6 +322,15 @@ namespace World::Plugins
 		// 注册成功的类型在插件卸载时由宿主兜底注销(未被插件自己注销则记警告)。
 		bool (*RegisterComponent)(void* userData, const WeComponentDesc* desc) = nullptr;
 		bool (*UnregisterComponent)(void* userData, const char* id) = nullptr;
+
+		// ---- T3b 追加(编辑器扩展;同上:先自检 StructSize 覆盖到对应字段再调用)----
+		// 注册/注销编辑器命令。重复 Id(本插件内)= false + 警告(不覆盖);
+		// 注销"本插件没注册过"的 Id = true(幂等);命令在插件卸载时由宿主兜底注销。
+		bool (*RegisterEditorCommand)(void* userData, const WeEditorCommandDesc* desc) = nullptr;
+		bool (*UnregisterEditorCommand)(void* userData, const char* id) = nullptr;
+		// 注册/注销编辑器面板(独立窗口形态)。语义同上(重复 Id / 幂等注销 / 卸载兜底)。
+		bool (*RegisterEditorPanel)(void* userData, const WeEditorPanelDesc* desc) = nullptr;
+		bool (*UnregisterEditorPanel)(void* userData, const char* id) = nullptr;
 	};
 
 	// 插件描述 + 生命周期回调 + 导出表。

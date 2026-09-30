@@ -356,6 +356,10 @@ namespace World
 	void EditorLayer::InitPlugins()
 	{
 		m_PluginManager = std::make_unique<Plugins::PluginManager>();
+		// PLUG-T3b:编辑器扩展面必须在插件加载**之前**接线 —— 插件在 Register 里就要注册
+		// 命令 / 面板(否则注册被干净拒绝,插件加载失败)。启动器形态没有编辑器宿主
+		// (E2:插件扩展面整体缺席),插件仍可加载但扩展注册会被拒绝并记可读诊断。
+		m_PluginManager->SetEditorHost(m_Shell.GetPluginEditorHost());
 		LoadDisabledPluginList();
 		m_DisabledPluginsAtLoad = m_DisabledPlugins;
 		m_PluginLoadErrors.clear();
@@ -439,14 +443,21 @@ namespace World
 			"(engine-root={4}, project-root={5})", m_PluginManager->Count(),
 			m_PluginManager->LoadedCount(), rejected, m_DisabledPlugins.size(),
 			engineRoot.generic_string(), projectRoot.generic_string());
+		// PLUG-T3b:插件面板实例 / 布局补建放在加载全部结束之后(中途失败不留半个布局)。
+		m_Shell.EnsurePluginPanelsFromRegistry();
 	}
 
 	void EditorLayer::ShutdownPlugins()
 	{
 		if (!m_PluginManager)
 			return;
+		// PLUG-T3b:先收掉插件面板的窗口/标签/布局记录,再卸载插件(卸载会注销插件回调)。
+		m_Shell.ClosePluginPanelsNotInRegistry();
 		// 卸载必须在场景/渲染器析构之前(插件可能持有随宿主生命周期释放的资源)。
 		m_PluginManager->UnloadAll(Application::Get().GetContext());
+		// PLUG-T3b:清空编辑器宿主指针 —— 管理器析构时的兜底回收不再回拨宿主
+		// (登记在 UnloadAll 里已经全部注销;管理器必须比 EditorShell 先失效)。
+		m_PluginManager->SetEditorHost(nullptr);
 		m_PluginManager.reset();
 		m_PluginLoadErrors.clear();
 	}

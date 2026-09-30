@@ -1,8 +1,8 @@
 {
   "id": "editor-ui",
   "name": "Editor Extension Plugin",
-  "description": "Plugin that will contribute editor panels and commands (editor.panel / editor.command). Registration surface pending T3b; the generated skeleton compiles today.",
+  "description": "Plugin that contributes an editor panel and a command (editor.panel / editor.command): the panel is an independent window built from the host widget surface, and its button triggers the registered command through the same host command path as the AI channel.",
   "order": 4,
   "scopes": ["engine", "project"],
-  "requires": "t3b"
+  "requires": "none"
 }

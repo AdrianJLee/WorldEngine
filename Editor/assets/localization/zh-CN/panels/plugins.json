@@ -3,7 +3,9 @@
   "$layer": "editor",
   "$language": "zh-CN",
   "$owns": [
-    "panel.plugins."
+    "panel.plugins.",
+    "panel.plugin.",
+    "plugin.command."
   ],
   "panel.plugins.title": "插件",
   "panel.plugins.scope.engine": "引擎",
@@ -68,5 +70,7 @@
   "panel.plugins.notice.no_project_plugins_root": "项目插件住在 <项目根>/plugins —— 当前项目没有 plugins/ 目录。",
   "panel.plugins.notice.project_plugin_toggle": "项目插件随项目加载 —— 在项目清单里启用/禁用。",
   "panel.plugins.notice.save_failed": "写入 local/plugins.json 失败:{reason}",
-  "panel.plugins.notice.restart_required": "已写入 local/plugins.json —— 重启编辑器后生效。"
+  "panel.plugins.notice.restart_required": "已写入 local/plugins.json —— 重启编辑器后生效。",
+  "panel.plugin.unavailable": "该插件面板已不可用(插件已卸载或禁用)。",
+  "plugin.command.unavailable": "当前没有插件编辑器命令面。"
 }
