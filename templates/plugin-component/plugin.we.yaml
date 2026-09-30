@@ -6,7 +6,7 @@ version: 1.0.0
 abi: 1
 entry: WePluginQuery
 engine: ">=2.0"
-# 场景组件(注册面待 T2b;现在声明能力,生成物可编译):
+# 场景组件(schema 注册:T2b 起为真实注册,见 src/plugin.cpp):
 provides:
   - scene.component
 ship: auto

@@ -19,6 +19,10 @@
 // 字段只增不改号、`StructSize` 随成员增长,`WE_PLUGIN_ABI_VERSION` 不变 ——
 // 旧插件对新宿主仍兼容;新插件对旧宿主必须用 `StructSize >= offsetof(字段) + sizeof(字段)` 自检。
 //
+// T2b(2026-09-30)继续在**尾部**追加组件 schema 注册面(RegisterComponent /
+// UnregisterComponent + WeComponentDesc / WeComponentFieldDesc):同一个纪律,
+// 仍然不改既有字段、不升 `WE_PLUGIN_ABI_VERSION`。
+//
 // 版本同步点(升级时必须一起改):本文件、`plugin.we.yaml` 的 `abi`、
 // `Engine/src/World/Plugins/PluginManager.*`、`docs/dev/plugin-framework.md`。
 // 方案:`tools/agents/tasks/20260930-1100-plugin-framework/plan.md`(v2.1)。
@@ -131,6 +135,79 @@ namespace World::Plugins
 		void* UserData = nullptr;              // 只回传给上述回调
 	};
 
+	// ---- T2b:组件 schema 注册面 --------------------------------------------------------
+	//
+	// 组件注册 = 插件把**自己的组件布局**告诉宿主:每个字段给 (Kind, Offset, Size),
+	// 宿主据此生成 `Schema::FieldSchema` 并按偏移读写实例内存 —— 插件不必链接 World,
+	// 也不必把组件的 C++ 类型交给宿主。实例指针由消费方(插件自己的存储 / 会话 / 测试)提供。
+	//
+	// 语义边界(T2b):
+	//   * 注册产物 = `Schema::SchemaRegistry` 里的 `TypeCategory::Component` 类型
+	//     (List/Find/序列化 API 可见);**没有 entt 存储绑定**(Storage == nullptr),
+	//     所以该组件暂时不能挂到场景实体上(存储桥不在本版 ABI 里,见下面的 ComponentId);
+	//   * 支持的 Kind = 固定大小 POD(布尔/整型/浮点/向量/四元数/矩阵,见下表);
+	//     String / Enum / Asset / Object 与容器字段 = 干净拒绝(返回 false + 可读日志);
+	//   * 字段名在同一个组件内必须唯一(它同时是 `.wd`/YAML 的键)。
+
+	// 字段类型。**数值 = `World::Schema::Kind` 的稳定值**(Engine/src/World/Schema/Schema.h;
+	// PluginManager.cpp 用 static_assert 钉住这份映射)—— 追加新类型只能排在末尾。
+	enum WeComponentFieldKind : uint32_t
+	{
+		WeComponentKindNone = 0,
+		WeComponentKindBool,
+		WeComponentKindInt8, WeComponentKindInt16, WeComponentKindInt32, WeComponentKindInt64,
+		WeComponentKindUInt8, WeComponentKindUInt16, WeComponentKindUInt32, WeComponentKindUInt64,
+		WeComponentKindFloat, WeComponentKindDouble,
+		WeComponentKindVec2, WeComponentKindVec3, WeComponentKindVec4,
+		WeComponentKindIVec2, WeComponentKindIVec3, WeComponentKindIVec4,
+		WeComponentKindUVec2, WeComponentKindUVec3, WeComponentKindUVec4,
+		WeComponentKindQuat, WeComponentKindMat3, WeComponentKindMat4,
+		// 以下类型 T2b 不支持注册(声明在这里只为与 Schema::Kind 对齐值):
+		WeComponentKindString, WeComponentKindEnum, WeComponentKindAsset, WeComponentKindObject,
+	};
+
+	// 字段的编辑期提示(只影响属性面板怎么显示,不进序列化);未知位 = 忽略(前向兼容)。
+	enum WeComponentFieldFlags : uint32_t
+	{
+		WeComponentFieldFlagNone = 0,
+		WeComponentFieldFlagColor = 1u << 0,      // Vec3/Vec4 = 颜色 → 取色器
+		WeComponentFieldFlagReadOnly = 1u << 1,   // 只读行
+	};
+
+	// 组件字段描述(只含 C 类型)。Offset/Size 用 offsetof/sizeof 填:Offset 是字段在插件
+	// 组件结构里的字节偏移,Size 必须等于 Kind 的规范大小(否则注册被拒绝 —— 宿主不做
+	// "按声明大小瞎 memcpy" 的事)。宿主不校验组件结构的总大小(布局由插件拥有)。
+	struct WeComponentFieldDesc
+	{
+		uint32_t StructSize = sizeof(WeComponentFieldDesc);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+
+		const char* Name = nullptr;                 // 字段名(必需;同一组件内唯一)
+		uint32_t Kind = WeComponentKindNone;        // WeComponentFieldKind
+		uint32_t Offset = 0;                        // 字节偏移(插件用 offsetof 填)
+		uint32_t Size = 0;                          // 字节数(必须等于 Kind 的规范大小)
+		uint32_t Flags = WeComponentFieldFlagNone;  // WeComponentFieldFlags(编辑期提示)
+		const char* const* Choices = nullptr;       // 固定取值下拉(可空)
+		uint32_t ChoicesCount = 0;
+		const char* Doc = nullptr;                  // 行悬停提示(英文 canonical,可空)
+	};
+
+	// 组件类型描述(只含 C 类型)。Id = 类型全名(如 `com.example.foo.Health`;宿主用它
+	// Find/ListByModule,也是 `.wd` 里的类型键)。
+	struct WeComponentDesc
+	{
+		uint32_t StructSize = sizeof(WeComponentDesc);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+
+		const char* Id = nullptr;                   // 类型全名(必需;空 = 拒绝注册)
+		const char* DisplayName = nullptr;          // 可空 = Id
+		// T2b **必须为 0**:组件存储(entt 桥)不在本版 ABI 里;非 0 = 干净拒绝并给可读诊断。
+		// 将来追加 Add/Copy 回调后,这里才作为组件存储 id 启用(字段只增不改号,不升 ABI)。
+		uint32_t ComponentId = 0;
+		const WeComponentFieldDesc* Fields = nullptr;  // FieldCount == 0 时可为空
+		uint32_t FieldCount = 0;
+	};
+
 	// 宿主能力表(函数指针表;T1 含最小集合,T2 起注册面**尾部追加**)。
 	struct WeHostApi
 	{
@@ -152,6 +229,14 @@ namespace World::Plugins
 		// 未命中 = nullptr(查询失败是正常分支,不记日志)。
 		void* (*LookupExport)(void* userData, const char* pluginId, const char* name,
 			uint32_t minVersion) = nullptr;
+
+		// ---- T2b 追加(组件 schema;同上:先自检 StructSize 覆盖到对应字段再调用)----
+		// 注册/注销组件类型。重复 Id = false + 警告(不覆盖);注销"本插件没注册过"的 Id =
+		// 若该类型属于别的插件 = false + 警告,否则 = true(幂等);字段非法(不支持的 Kind /
+		// Size 与 Kind 不符 / 重名 / 空名)= false + 可读警告(不半注册)。
+		// 注册成功的类型在插件卸载时由宿主兜底注销(未被插件自己注销则记警告)。
+		bool (*RegisterComponent)(void* userData, const WeComponentDesc* desc) = nullptr;
+		bool (*UnregisterComponent)(void* userData, const char* id) = nullptr;
 	};
 
 	// 插件描述 + 生命周期回调 + 导出表。

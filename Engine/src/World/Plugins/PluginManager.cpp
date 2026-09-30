@@ -2,12 +2,17 @@
 #include "World/Plugins/PluginManager.h"
 #include "World/Core/Asset/AssetTypeRegistry.h"
 #include "World/Core/WorldContext.h"
+#include "World/Schema/SchemaRegistry.h"
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <functional>
 #include <set>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace World::Plugins
 {
@@ -193,6 +198,251 @@ namespace World::Plugins
 			WeAssetImportFn m_Import = nullptr;
 			WeAssetImporterFingerprintFn m_Fingerprint = nullptr;
 		};
+
+		// ---- T2b:组件 schema 注册面 → SchemaRegistry 的适配 --------------------------
+		//
+		// 组件注册 = 纯 schema 注册(TypeCategory::Component + Storage == nullptr):
+		// 类型进入 SchemaRegistry(Find/List/ListByModule 与序列化 API 可见),但**不参与
+		// entt 实例化** —— 存储桥(Add/Copy 回调)不在 T2b 的 ABI 里,宿主不伪造 Storage
+		// (伪造会让 Add Component 选择器列出无法实例化的组件)。
+		//
+		// 字段读写 = 宿主侧访问器按 (Kind, Offset) 从实例内存读出/写入 Value:插件拥有组件
+		// 布局,宿主只校验 Kind 与 Size 的对应关系;实例指针由消费方(插件自己的存储/会话/测试)
+		// 提供。Schema::FieldSchema 的 Get/Set 是不带 userData 的裸函数指针,而 (Kind, Offset)
+		// 是运行期数据 ⇒ 用固定槽位表把状态绑到一对 template<size_t> 函数上;槽位随注册分配、
+		// 随注销/兜底回收释放。注册面按 ABI 契约在插件 Register/Unregister 调用期间使用(单线程)。
+		constexpr uint32_t kMaxComponentFieldSlots = 256;
+
+		struct ComponentFieldSlot
+		{
+			bool InUse = false;
+			uint32_t Kind = WeComponentKindNone;
+			uint32_t Offset = 0;
+		};
+
+		ComponentFieldSlot g_ComponentFieldSlots[kMaxComponentFieldSlots];
+
+		uint32_t AllocateComponentFieldSlot(uint32_t kind, uint32_t offset)
+		{
+			for (uint32_t slot = 0; slot < kMaxComponentFieldSlots; ++slot)
+			{
+				if (g_ComponentFieldSlots[slot].InUse)
+					continue;
+				g_ComponentFieldSlots[slot].InUse = true;
+				g_ComponentFieldSlots[slot].Kind = kind;
+				g_ComponentFieldSlots[slot].Offset = offset;
+				return slot;
+			}
+			return kMaxComponentFieldSlots;   // 用尽 = 本次注册失败(可读诊断)
+		}
+
+		void ReleaseComponentFieldSlot(uint32_t slot)
+		{
+			if (slot < kMaxComponentFieldSlots)
+				g_ComponentFieldSlots[slot] = ComponentFieldSlot {};
+		}
+
+		// 字段 Kind 的规范字节数(0 = T2b 不支持该 Kind;String/Enum/Asset/Object 与容器不支持)。
+		uint32_t ComponentFieldKindSize(uint32_t kind)
+		{
+			switch (static_cast<WeComponentFieldKind>(kind))
+			{
+				case WeComponentKindBool: return sizeof(bool);
+				case WeComponentKindInt8: return sizeof(int8_t);
+				case WeComponentKindInt16: return sizeof(int16_t);
+				case WeComponentKindInt32: return sizeof(int32_t);
+				case WeComponentKindInt64: return sizeof(int64_t);
+				case WeComponentKindUInt8: return sizeof(uint8_t);
+				case WeComponentKindUInt16: return sizeof(uint16_t);
+				case WeComponentKindUInt32: return sizeof(uint32_t);
+				case WeComponentKindUInt64: return sizeof(uint64_t);
+				case WeComponentKindFloat: return sizeof(float);
+				case WeComponentKindDouble: return sizeof(double);
+				case WeComponentKindVec2: return sizeof(glm::vec2);
+				case WeComponentKindVec3: return sizeof(glm::vec3);
+				case WeComponentKindVec4: return sizeof(glm::vec4);
+				case WeComponentKindIVec2: return sizeof(glm::ivec2);
+				case WeComponentKindIVec3: return sizeof(glm::ivec3);
+				case WeComponentKindIVec4: return sizeof(glm::ivec4);
+				case WeComponentKindUVec2: return sizeof(glm::uvec2);
+				case WeComponentKindUVec3: return sizeof(glm::uvec3);
+				case WeComponentKindUVec4: return sizeof(glm::uvec4);
+				case WeComponentKindQuat: return sizeof(glm::quat);
+				case WeComponentKindMat3: return sizeof(glm::mat3);
+				case WeComponentKindMat4: return sizeof(glm::mat4);
+				default: return 0;
+			}
+		}
+
+		template <typename T>
+		bool ReadPodValue(const uint8_t* address, World::Schema::Value* out)
+		{
+			static_assert(std::is_trivially_copyable<T>::value, "组件字段必须是可平凡复制的 POD");
+			T value {};
+			std::memcpy(&value, address, sizeof(T));
+			*out = World::Schema::Value(value);
+			return true;
+		}
+
+		template <typename T>
+		bool WritePodValue(uint8_t* address, const World::Schema::Value& value)
+		{
+			static_assert(std::is_trivially_copyable<T>::value, "组件字段必须是可平凡复制的 POD");
+			const T* typed = std::get_if<T>(&value);
+			if (!typed)
+				return false;   // 类型不符 = 不写(与"未设不覆盖"同口径)
+			std::memcpy(address, typed, sizeof(T));
+			return true;
+		}
+
+		bool ReadComponentFieldValue(uint32_t kind, const uint8_t* address, World::Schema::Value* out)
+		{
+			switch (static_cast<WeComponentFieldKind>(kind))
+			{
+				case WeComponentKindBool: return ReadPodValue<bool>(address, out);
+				case WeComponentKindInt8: return ReadPodValue<int8_t>(address, out);
+				case WeComponentKindInt16: return ReadPodValue<int16_t>(address, out);
+				case WeComponentKindInt32: return ReadPodValue<int32_t>(address, out);
+				case WeComponentKindInt64: return ReadPodValue<int64_t>(address, out);
+				case WeComponentKindUInt8: return ReadPodValue<uint8_t>(address, out);
+				case WeComponentKindUInt16: return ReadPodValue<uint16_t>(address, out);
+				case WeComponentKindUInt32: return ReadPodValue<uint32_t>(address, out);
+				case WeComponentKindUInt64: return ReadPodValue<uint64_t>(address, out);
+				case WeComponentKindFloat: return ReadPodValue<float>(address, out);
+				case WeComponentKindDouble: return ReadPodValue<double>(address, out);
+				case WeComponentKindVec2: return ReadPodValue<glm::vec2>(address, out);
+				case WeComponentKindVec3: return ReadPodValue<glm::vec3>(address, out);
+				case WeComponentKindVec4: return ReadPodValue<glm::vec4>(address, out);
+				case WeComponentKindIVec2: return ReadPodValue<glm::ivec2>(address, out);
+				case WeComponentKindIVec3: return ReadPodValue<glm::ivec3>(address, out);
+				case WeComponentKindIVec4: return ReadPodValue<glm::ivec4>(address, out);
+				case WeComponentKindUVec2: return ReadPodValue<glm::uvec2>(address, out);
+				case WeComponentKindUVec3: return ReadPodValue<glm::uvec3>(address, out);
+				case WeComponentKindUVec4: return ReadPodValue<glm::uvec4>(address, out);
+				case WeComponentKindQuat: return ReadPodValue<glm::quat>(address, out);
+				case WeComponentKindMat3: return ReadPodValue<glm::mat3>(address, out);
+				case WeComponentKindMat4: return ReadPodValue<glm::mat4>(address, out);
+				default: return false;
+			}
+		}
+
+		bool WriteComponentFieldValue(uint32_t kind, uint8_t* address, const World::Schema::Value& value)
+		{
+			switch (static_cast<WeComponentFieldKind>(kind))
+			{
+				case WeComponentKindBool: return WritePodValue<bool>(address, value);
+				case WeComponentKindInt8: return WritePodValue<int8_t>(address, value);
+				case WeComponentKindInt16: return WritePodValue<int16_t>(address, value);
+				case WeComponentKindInt32: return WritePodValue<int32_t>(address, value);
+				case WeComponentKindInt64: return WritePodValue<int64_t>(address, value);
+				case WeComponentKindUInt8: return WritePodValue<uint8_t>(address, value);
+				case WeComponentKindUInt16: return WritePodValue<uint16_t>(address, value);
+				case WeComponentKindUInt32: return WritePodValue<uint32_t>(address, value);
+				case WeComponentKindUInt64: return WritePodValue<uint64_t>(address, value);
+				case WeComponentKindFloat: return WritePodValue<float>(address, value);
+				case WeComponentKindDouble: return WritePodValue<double>(address, value);
+				case WeComponentKindVec2: return WritePodValue<glm::vec2>(address, value);
+				case WeComponentKindVec3: return WritePodValue<glm::vec3>(address, value);
+				case WeComponentKindVec4: return WritePodValue<glm::vec4>(address, value);
+				case WeComponentKindIVec2: return WritePodValue<glm::ivec2>(address, value);
+				case WeComponentKindIVec3: return WritePodValue<glm::ivec3>(address, value);
+				case WeComponentKindIVec4: return WritePodValue<glm::ivec4>(address, value);
+				case WeComponentKindUVec2: return WritePodValue<glm::uvec2>(address, value);
+				case WeComponentKindUVec3: return WritePodValue<glm::uvec3>(address, value);
+				case WeComponentKindUVec4: return WritePodValue<glm::uvec4>(address, value);
+				case WeComponentKindQuat: return WritePodValue<glm::quat>(address, value);
+				case WeComponentKindMat3: return WritePodValue<glm::mat3>(address, value);
+				case WeComponentKindMat4: return WritePodValue<glm::mat4>(address, value);
+				default: return false;
+			}
+		}
+
+		// 槽位化的字段访问器:状态在 g_ComponentFieldSlots[Slot](见上)。
+		template <size_t Slot>
+		World::Schema::Value ComponentFieldSlotGet(const void* instance)
+		{
+			World::Schema::Value value;
+			const ComponentFieldSlot& state = g_ComponentFieldSlots[Slot];
+			if (!instance || !state.InUse)
+				return value;
+			ReadComponentFieldValue(state.Kind,
+				static_cast<const uint8_t*>(instance) + state.Offset, &value);
+			return value;
+		}
+
+		template <size_t Slot>
+		void ComponentFieldSlotSet(void* instance, const World::Schema::Value& value)
+		{
+			const ComponentFieldSlot& state = g_ComponentFieldSlots[Slot];
+			if (!instance || !state.InUse)
+				return;
+			WriteComponentFieldValue(state.Kind,
+				static_cast<uint8_t*>(instance) + state.Offset, value);
+		}
+
+		template <size_t... Indices>
+		constexpr std::array<World::Schema::Value (*)(const void*), sizeof...(Indices)>
+			MakeComponentFieldGetters(std::index_sequence<Indices...>)
+		{
+			return { &ComponentFieldSlotGet<Indices>... };
+		}
+
+		template <size_t... Indices>
+		constexpr std::array<void (*)(void*, const World::Schema::Value&), sizeof...(Indices)>
+			MakeComponentFieldSetters(std::index_sequence<Indices...>)
+		{
+			return { &ComponentFieldSlotSet<Indices>... };
+		}
+
+		constexpr auto kComponentFieldGetters =
+			MakeComponentFieldGetters(std::make_index_sequence<kMaxComponentFieldSlots>{});
+		constexpr auto kComponentFieldSetters =
+			MakeComponentFieldSetters(std::make_index_sequence<kMaxComponentFieldSlots>{});
+
+		// 组件 schema 的模块归属 = 插件 id(SchemaRegistry 的 UnregisterModule/ListByModule
+		// 只按 Name 比较;Version 仅存档)。
+		World::Schema::ModuleId PluginSchemaModule(const std::string& pluginId)
+		{
+			World::Schema::ModuleId module;
+			module.Name = pluginId;
+			module.Version = 1;
+			return module;
+		}
+
+		// T2b 公共契约:WeComponentFieldKind 的数值 = World::Schema::Kind 的稳定值。
+		// 逐项钉住(改这里 = 改 ABI,必须走 WePluginApi.h 的升版流程)。
+#define WE_T2B_KIND_ASSERT(abiName, schemaName) \
+		static_assert(static_cast<uint32_t>(World::Schema::Kind::schemaName) == abiName, \
+			"WeComponentFieldKind must mirror World::Schema::Kind values")
+		WE_T2B_KIND_ASSERT(WeComponentKindNone, None);
+		WE_T2B_KIND_ASSERT(WeComponentKindBool, Bool);
+		WE_T2B_KIND_ASSERT(WeComponentKindInt8, Int8);
+		WE_T2B_KIND_ASSERT(WeComponentKindInt16, Int16);
+		WE_T2B_KIND_ASSERT(WeComponentKindInt32, Int32);
+		WE_T2B_KIND_ASSERT(WeComponentKindInt64, Int64);
+		WE_T2B_KIND_ASSERT(WeComponentKindUInt8, UInt8);
+		WE_T2B_KIND_ASSERT(WeComponentKindUInt16, UInt16);
+		WE_T2B_KIND_ASSERT(WeComponentKindUInt32, UInt32);
+		WE_T2B_KIND_ASSERT(WeComponentKindUInt64, UInt64);
+		WE_T2B_KIND_ASSERT(WeComponentKindFloat, Float);
+		WE_T2B_KIND_ASSERT(WeComponentKindDouble, Double);
+		WE_T2B_KIND_ASSERT(WeComponentKindVec2, Vec2);
+		WE_T2B_KIND_ASSERT(WeComponentKindVec3, Vec3);
+		WE_T2B_KIND_ASSERT(WeComponentKindVec4, Vec4);
+		WE_T2B_KIND_ASSERT(WeComponentKindIVec2, IVec2);
+		WE_T2B_KIND_ASSERT(WeComponentKindIVec3, IVec3);
+		WE_T2B_KIND_ASSERT(WeComponentKindIVec4, IVec4);
+		WE_T2B_KIND_ASSERT(WeComponentKindUVec2, UVec2);
+		WE_T2B_KIND_ASSERT(WeComponentKindUVec3, UVec3);
+		WE_T2B_KIND_ASSERT(WeComponentKindUVec4, UVec4);
+		WE_T2B_KIND_ASSERT(WeComponentKindQuat, Quat);
+		WE_T2B_KIND_ASSERT(WeComponentKindMat3, Mat3);
+		WE_T2B_KIND_ASSERT(WeComponentKindMat4, Mat4);
+		WE_T2B_KIND_ASSERT(WeComponentKindString, String);
+		WE_T2B_KIND_ASSERT(WeComponentKindEnum, Enum);
+		WE_T2B_KIND_ASSERT(WeComponentKindAsset, Asset);
+		WE_T2B_KIND_ASSERT(WeComponentKindObject, Object);
+#undef WE_T2B_KIND_ASSERT
 	}
 
 	const char* PluginManager::StatusName(Status status)
@@ -223,6 +473,9 @@ namespace World::Plugins
 		m_HostApi.RegisterAssetImporter = &PluginManager::BridgeRegisterAssetImporter;
 		m_HostApi.UnregisterAssetImporter = &PluginManager::BridgeUnregisterAssetImporter;
 		m_HostApi.LookupExport = &PluginManager::BridgeLookupExport;
+		// T2b 组件 schema 注册面(同上:尾部追加)。
+		m_HostApi.RegisterComponent = &PluginManager::BridgeRegisterComponent;
+		m_HostApi.UnregisterComponent = &PluginManager::BridgeUnregisterComponent;
 	}
 
 	PluginManager::~PluginManager()
@@ -232,8 +485,10 @@ namespace World::Plugins
 				+ " plugin(s) still loaded (host must call UnloadAll first)");
 		// T2:管理器析构会让 Library 一起释放。即使宿主违约(没先 UnloadAll),也必须把
 		// 指向这些 DLL 的注册回调从宿主注册面移除 —— 否则留下悬空回调。
+		// T2b:组件 schema 用 HostApiBox 记住的注册表句柄整模块注销(宿主必须在 WorldContext
+		// 存活期间销毁本管理器 —— 这是"先 UnloadAll 再析构"契约的一部分)。
 		for (Record& record : m_Records)
-			ReclaimPluginRegistrations(record);
+			ReclaimPluginRegistrations(record, record.Host ? record.Host->Schemas : nullptr);
 	}
 
 	void PluginManager::Log(int level, const std::string& text)
@@ -398,6 +653,37 @@ namespace World::Plugins
 		if (!box || !box->Manager || !pluginId || !name)
 			return nullptr;
 		return box->Manager->LookupExport(pluginId, name, minVersion);
+	}
+
+	bool PluginManager::BridgeRegisterComponent(void* userData, const WeComponentDesc* desc)
+	{
+		auto* box = static_cast<HostApiBox*>(userData);
+		if (!box || !box->Manager)
+			return false;
+		Record* record = box->Manager->ResolveHostRecord(*box);
+		if (!record || !desc)
+		{
+			Log(WePluginLogWarn, (box->PluginId.empty() ? std::string("unknown plugin") : box->PluginId)
+				+ ": component registration rejected ("
+				+ (!desc ? "null descriptor" : "invalid host handle") + ")");
+			return false;
+		}
+		return box->Manager->RegisterComponent(*record, box->Schemas, *desc);
+	}
+
+	bool PluginManager::BridgeUnregisterComponent(void* userData, const char* id)
+	{
+		auto* box = static_cast<HostApiBox*>(userData);
+		if (!box || !box->Manager)
+			return false;
+		Record* record = box->Manager->ResolveHostRecord(*box);
+		if (!record)
+		{
+			Log(WePluginLogWarn, (box->PluginId.empty() ? std::string("unknown plugin") : box->PluginId)
+				+ ": component unregister rejected (invalid host handle)");
+			return false;
+		}
+		return box->Manager->UnregisterComponent(*record, box->Schemas, id);
 	}
 
 	bool PluginManager::RegisterAssetType(Record& record, const WeAssetTypeDesc& desc)
@@ -605,7 +891,248 @@ namespace World::Plugins
 		return importers;
 	}
 
-	void PluginManager::ReclaimPluginRegistrations(Record& record)
+	bool PluginManager::RegisterComponent(Record& record, World::Schema::SchemaRegistry* registry,
+		const WeComponentDesc& desc)
+	{
+		const std::string& pluginId = record.Entry.Manifest.Id;
+
+		// 前缀校验:宿主要读 v1 全字段 ⇒ 声明的大小必须覆盖它;ABI 等值门同 WePlugin。
+		if (desc.StructSize < sizeof(WeComponentDesc) || desc.AbiVersion != WE_PLUGIN_ABI_VERSION)
+		{
+			Log(WePluginLogWarn, pluginId + ": component registration rejected (struct/abi mismatch size="
+				+ std::to_string(desc.StructSize) + " abi=" + std::to_string(desc.AbiVersion) + ")");
+			return false;
+		}
+		const std::string id = desc.Id ? desc.Id : "";
+		if (id.empty())
+		{
+			Log(WePluginLogWarn, pluginId + ": component registration rejected (empty id)");
+			return false;
+		}
+		if (desc.ComponentId != 0)
+		{
+			// T2b:存储桥(entt Add/Copy)不在本版 ABI 里 —— 伪造 Storage 会让 Add Component
+			// 选择器列出无法实例化的组件,所以这里干净拒绝而不是"接受但静默忽略"。
+			Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected (ComponentId="
+				+ std::to_string(desc.ComponentId)
+				+ "; T2b has no storage bridge - schema-only components must pass ComponentId=0)");
+			return false;
+		}
+		if (desc.FieldCount > 0 && !desc.Fields)
+		{
+			Log(WePluginLogWarn, pluginId + ": component '" + id
+				+ "' registration rejected (field count > 0 but the table is null)");
+			return false;
+		}
+		if (desc.FieldCount > kMaxComponentFieldSlots)
+		{
+			Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected ("
+				+ std::to_string(desc.FieldCount) + " fields exceed the host slot table of "
+				+ std::to_string(kMaxComponentFieldSlots) + ")");
+			return false;
+		}
+		for (const RegisteredComponent& item : record.RegisteredComponents)
+		{
+			if (item.Id == id)
+			{
+				Log(WePluginLogWarn, pluginId + ": component '" + id
+					+ "' is already registered by this plugin; registration ignored");
+				return false;
+			}
+		}
+
+		if (!registry)
+		{
+			Log(WePluginLogWarn, pluginId + ": component '" + id
+				+ "' registration rejected (no schema registry handle for this plugin)");
+			return false;
+		}
+
+		World::Schema::TypeSchema schema;
+		schema.Id = World::Schema::TypeId(id);
+		schema.DisplayName = desc.DisplayName && desc.DisplayName[0] ? desc.DisplayName : id;
+		schema.Category = World::Schema::TypeCategory::Component;
+		schema.Size = 0;          // 组件结构总大小由插件拥有(宿主只按字段偏移读写)
+		schema.Storage = nullptr; // T2b:schema-only(没有 entt 存储绑定)
+
+		std::vector<uint32_t> slots;
+		std::set<std::string> fieldNames;
+		std::string failure;
+		for (uint32_t index = 0; index < desc.FieldCount; ++index)
+		{
+			const WeComponentFieldDesc& field = desc.Fields[index];
+			if (field.StructSize < sizeof(WeComponentFieldDesc)
+				|| field.AbiVersion != WE_PLUGIN_ABI_VERSION)
+			{
+				failure = "field " + std::to_string(index) + " has struct/abi mismatch (size="
+					+ std::to_string(field.StructSize) + " abi=" + std::to_string(field.AbiVersion) + ")";
+				break;
+			}
+			const std::string fieldName = field.Name ? field.Name : "";
+			if (fieldName.empty())
+			{
+				failure = "field " + std::to_string(index) + " has an empty name";
+				break;
+			}
+			if (!fieldNames.insert(fieldName).second)
+			{
+				failure = "duplicate field name '" + fieldName + "'";
+				break;
+			}
+			const uint32_t canonicalSize = ComponentFieldKindSize(field.Kind);
+			if (canonicalSize == 0)
+			{
+				failure = "field '" + fieldName + "' has unsupported kind "
+					+ std::to_string(field.Kind)
+					+ " (T2b supports fixed-size POD kinds only)";
+				break;
+			}
+			if (field.Size != canonicalSize)
+			{
+				failure = "field '" + fieldName + "' size " + std::to_string(field.Size)
+					+ " does not match its kind (expected " + std::to_string(canonicalSize) + ")";
+				break;
+			}
+			const uint32_t slot = AllocateComponentFieldSlot(field.Kind, field.Offset);
+			if (slot >= kMaxComponentFieldSlots)
+			{
+				failure = "field accessor slot table is exhausted";
+				break;
+			}
+			slots.push_back(slot);
+
+			World::Schema::FieldSchema converted;
+			converted.Id = World::Schema::FieldId { World::Schema::Fnv1a64(fieldName) };
+			converted.Name = fieldName;
+			converted.K = static_cast<World::Schema::Kind>(field.Kind);
+			converted.Get = kComponentFieldGetters[slot];
+			converted.Set = kComponentFieldSetters[slot];
+			converted.Meta.Doc = field.Doc ? field.Doc : "";
+			converted.Meta.Color = (field.Flags & WeComponentFieldFlagColor) != 0;
+			converted.Meta.ReadOnly = (field.Flags & WeComponentFieldFlagReadOnly) != 0;
+			for (uint32_t choice = 0; choice < field.ChoicesCount && field.Choices; ++choice)
+				if (field.Choices[choice] && field.Choices[choice][0])
+					converted.Meta.Choices.emplace_back(field.Choices[choice]);
+			schema.Fields.push_back(std::move(converted));
+		}
+		if (!failure.empty())
+		{
+			for (uint32_t slot : slots)
+				ReleaseComponentFieldSlot(slot);
+			Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected (" + failure + ")");
+			return false;
+		}
+
+		// 事务化:注册表校验失败不提交任何条目;失败时释放本次分配的槽位(不半注册)。
+		const World::Schema::SchemaRegistry::Status status = registry->RegisterModule(
+			PluginSchemaModule(pluginId), std::vector<World::Schema::TypeSchema> { schema });
+		if (status != World::Schema::SchemaRegistry::Status::Ok)
+		{
+			for (uint32_t slot : slots)
+				ReleaseComponentFieldSlot(slot);
+			Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected by the schema registry ("
+				+ World::Schema::SchemaRegistry::StatusName(status) + ")");
+			return false;
+		}
+
+		RegisteredComponent entry;
+		entry.Id = id;
+		entry.Schema = std::move(schema);
+		entry.Slots = std::move(slots);
+		record.RegisteredComponents.push_back(std::move(entry));
+		Log(WePluginLogInfo, pluginId + ": registered component '" + id + "' ("
+			+ std::to_string(desc.FieldCount) + " field(s))");
+		return true;
+	}
+
+	bool PluginManager::UnregisterComponent(Record& record, World::Schema::SchemaRegistry* registry,
+		const char* rawId)
+	{
+		const std::string& pluginId = record.Entry.Manifest.Id;
+		const std::string id = rawId ? rawId : "";
+		if (id.empty())
+		{
+			Log(WePluginLogWarn, pluginId + ": component unregister rejected (empty id)");
+			return false;
+		}
+
+		const auto tracked = std::find_if(record.RegisteredComponents.begin(),
+			record.RegisteredComponents.end(),
+			[&id](const RegisteredComponent& item) { return item.Id == id; });
+		if (tracked == record.RegisteredComponents.end())
+		{
+			// 幂等口径:本插件没注册过 → true 且不报错;但别人的类型必须拒绝(不能顺手删掉)。
+			if (registry && registry->Find(id))
+			{
+				Log(WePluginLogWarn, pluginId + ": component '" + id
+					+ "' is not owned by this plugin; unregister ignored");
+				return false;
+			}
+			return true;
+		}
+		if (!registry)
+		{
+			Log(WePluginLogWarn, pluginId + ": component '" + id
+				+ "' unregister rejected (no schema registry handle for this plugin)");
+			return false;
+		}
+
+		// SchemaRegistry 只有模块级注销 ⇒ 把该插件的其余类型按原顺序重新注册回同一模块。
+		// 先从账本取拷贝(UnregisterModule 会销毁注册表里的原条目),再整体注销 + 重注册。
+		std::vector<World::Schema::TypeSchema> remaining;
+		remaining.reserve(record.RegisteredComponents.size() - 1);
+		for (const RegisteredComponent& item : record.RegisteredComponents)
+			if (item.Id != id)
+				remaining.push_back(item.Schema);
+
+		registry->UnregisterModule(PluginSchemaModule(pluginId));
+		if (!remaining.empty())
+		{
+			const World::Schema::SchemaRegistry::Status status = registry->RegisterModule(
+				PluginSchemaModule(pluginId), remaining);
+			if (status != World::Schema::SchemaRegistry::Status::Ok)
+			{
+				// 其余类型此前都通过过校验,这里理论不可达;真发生 = 整个模块被丢弃并记 ERROR,
+				// 账本与槽位保持"模块为空"的一致状态(不留悬空访问器,也不留脏账)。
+				Log(WePluginLogError, pluginId + ": re-registering the remaining component types failed ("
+					+ World::Schema::SchemaRegistry::StatusName(status)
+					+ "); the plugin's component module was dropped");
+				for (const RegisteredComponent& item : record.RegisteredComponents)
+					for (uint32_t slot : item.Slots)
+						ReleaseComponentFieldSlot(slot);
+				record.RegisteredComponents.clear();
+				return false;
+			}
+		}
+
+		for (uint32_t slot : tracked->Slots)
+			ReleaseComponentFieldSlot(slot);
+		record.RegisteredComponents.erase(tracked);
+		Log(WePluginLogInfo, pluginId + ": unregistered component '" + id + "'");
+		return true;
+	}
+
+	void PluginManager::ReclaimComponentTypes(Record& record, World::Schema::SchemaRegistry* schemas)
+	{
+		if (record.RegisteredComponents.empty())
+			return;
+		const std::string& pluginId = record.Entry.Manifest.Id;
+		for (const RegisteredComponent& item : record.RegisteredComponents)
+			Log(WePluginLogWarn, pluginId + ": component '" + item.Id
+				+ "' was not unregistered by the plugin; force-removed");
+		if (schemas)
+			schemas->UnregisterModule(PluginSchemaModule(pluginId));
+		else
+			Log(WePluginLogError, pluginId
+				+ ": component schema module could not be removed (no schema registry handle)");
+		for (const RegisteredComponent& item : record.RegisteredComponents)
+			for (uint32_t slot : item.Slots)
+				ReleaseComponentFieldSlot(slot);
+		record.RegisteredComponents.clear();
+	}
+
+	void PluginManager::ReclaimPluginRegistrations(Record& record,
+		World::Schema::SchemaRegistry* schemas)
 	{
 		const std::string& pluginId = record.Entry.Manifest.Id;
 		for (const std::string& id : record.RegisteredAssetTypes)
@@ -619,6 +1146,9 @@ namespace World::Plugins
 			Log(WePluginLogWarn, pluginId + ": importer '" + item.Id
 				+ "' was not unregistered by the plugin; force-removed");
 		record.RegisteredImporters.clear();
+		// T2b:组件类型整模块注销(在释放 DLL 之前;访问器是宿主侧的,但 schema 不能留在
+		// 注册表里让编辑器/序列化继续看到一个已卸载插件的类型)。
+		ReclaimComponentTypes(record, schemas);
 	}
 
 	void PluginManager::Reject(Record& record, std::string reason)
@@ -986,6 +1516,9 @@ namespace World::Plugins
 		auto host = std::make_unique<HostApiBox>();
 		host->PluginId = pluginId;
 		host->Manager = this;
+		// T2b:组件 schema 注册到本次加载的 WorldContext 的注册表(插件经 WeHostApi 回调时
+		// 只拿得到本盒子,所以归属在这里记住)。
+		host->Schemas = &context.Schemas();
 		host->Api = m_HostApi;
 		host->Api.UserData = host.get();
 
@@ -1015,7 +1548,8 @@ namespace World::Plugins
 				catch (...) {}
 			}
 			m_ActiveBox = nullptr;
-			ReclaimPluginRegistrations(record);
+			// T2b:record.Host 此刻还没建立,注册表句柄从本次调用的 context 取。
+			ReclaimPluginRegistrations(record, &context.Schemas());
 			if (error) *error = registerFailure;
 			return Status::Rejected;
 		}
@@ -1025,7 +1559,7 @@ namespace World::Plugins
 		{
 			// 契约:Register 返回 false = 插件自己已清干净,宿主不调用 Unregister(防二次释放);
 			// 兜底仍回收它留下的注册项(违约插件也不留悬空回调)。
-			ReclaimPluginRegistrations(record);
+			ReclaimPluginRegistrations(record, &context.Schemas());
 			if (error) *error = "plugin registration failed (Register returned false)";
 			return Status::Rejected;
 		}
@@ -1120,6 +1654,9 @@ namespace World::Plugins
 
 		// Unregister 恰好一次(契约);之后才释放 DLL。HostApiBox 在 Unregister 期间保持有效。
 		std::string failure;
+		// T2b:插件可能在 Unregister 里注销自己注册的组件类型 —— 先刷新注册表归属。
+		if (record.Host)
+			record.Host->Schemas = &context.Schemas();
 		if (record.Plugin && record.Plugin->Unregister)
 		{
 			try
@@ -1140,9 +1677,9 @@ namespace World::Plugins
 			failure = "plugin has no Unregister entry (contract violation)";
 		}
 
-		// T2 兜底:Unregister 之后,插件没自己注销的资产类型/导入器在这里回收
+		// T2/T2b 兜底:Unregister 之后,插件没自己注销的资产类型/导入器/组件类型在这里回收
 		// (仍在注册表里的回调指向本 DLL,必须在释放 DLL 之前移除)。
-		ReclaimPluginRegistrations(record);
+		ReclaimPluginRegistrations(record, &context.Schemas());
 
 		record.Plugin = nullptr;
 		record.Host.reset();

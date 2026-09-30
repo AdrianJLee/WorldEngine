@@ -2,6 +2,7 @@
 
 #include "World/Core/Asset/AssetImporter.h"
 #include "World/Plugins/PluginManifest.h"
+#include "World/Schema/Schema.h"
 #include "World/Utils/DynamicLibrary.h"
 
 #include <filesystem>
@@ -12,6 +13,11 @@
 namespace World
 {
 	class WorldContext;
+
+	namespace Schema
+	{
+		class SchemaRegistry;
+	}
 }
 
 namespace World::Plugins
@@ -117,12 +123,24 @@ namespace World::Plugins
 			std::string PluginId;
 			PluginManager* Manager = nullptr;
 			WeHostApi Api;
+			// T2b:本次加载的 WorldContext 里那张 schema 注册表(Register/Unregister 期间刷新)。
+			// 组件 schema 必须注册到宿主唯一的注册表实例上,而 WeHostApi 回调只拿得到本盒子,
+			// 所以在这里记住归属(生命周期 = WorldContext 的 Schemas() 成员,见 WorldContext.h)。
+			World::Schema::SchemaRegistry* Schemas = nullptr;
 		};
 		// T2 注册账本的一条:插件注册的导入器(id + 适配对象)。
 		struct RegisteredImporter
 		{
 			std::string Id;
 			std::shared_ptr<World::Asset::IAssetImporter> Importer;
+		};
+		// T2b 注册账本的一条:插件注册的组件类型(schema 拷贝 + 它占用的字段访问器槽位)。
+		// Schema 拷贝用于"注销单个类型后把其余类型按原样重新注册回同一模块"。
+		struct RegisteredComponent
+		{
+			std::string Id;                        // 类型全名(= 注册键 = registry 的 Id.Name)
+			World::Schema::TypeSchema Schema;      // 注册时提交的 schema(含字段访问器)
+			std::vector<uint32_t> Slots;           // 该类型字段占用的访问器槽位(注销时释放)
 		};
 		struct Record
 		{
@@ -133,6 +151,8 @@ namespace World::Plugins
 			// T2:本插件经 WeHostApi 注册过、尚未注销的项(卸载兜底回收 + 诊断用)。
 			std::vector<std::string> RegisteredAssetTypes;
 			std::vector<RegisteredImporter> RegisteredImporters;
+			// T2b:本插件注册的组件类型(顺序 = 注册顺序)。
+			std::vector<RegisteredComponent> RegisteredComponents;
 		};
 
 		Record* FindRecord(const std::string& id);
@@ -151,8 +171,19 @@ namespace World::Plugins
 		bool UnregisterAssetType(Record& record, const char* id);
 		bool RegisterAssetImporter(Record& record, const WeAssetImporterDesc& desc);
 		bool UnregisterAssetImporter(Record& record, const char* id);
-		// 卸载/失败回滚的兜底:插件没自己注销的资产类型/导入器在这里移除并记警告(不留悬空回调)。
-		void ReclaimPluginRegistrations(Record& record);
+		// T2b:组件 schema 注册/注销(WeHostApi 尾部字段的宿主实现)。registry = 本次调用
+		// 归属的注册表(由桥从 HostApiBox 取;Register 期间 record.Host 还没建立)。
+		bool RegisterComponent(Record& record, World::Schema::SchemaRegistry* registry,
+			const WeComponentDesc& desc);
+		bool UnregisterComponent(Record& record, World::Schema::SchemaRegistry* registry,
+			const char* id);
+		// 卸载/失败回滚的兜底:插件没自己注销的资产类型/导入器/组件类型在这里移除并记警告
+		// (不留悬空回调;组件类型整模块注销 + 释放字段访问器槽位)。
+		// schemas = 组件的 schema 注册表(可空:空则只清账本/槽位并记 ERROR)。
+		void ReclaimPluginRegistrations(Record& record,
+			World::Schema::SchemaRegistry* schemas = nullptr);
+		// 组件类型整模块注销的兜底(卸载/回滚/管理器析构共用)。
+		void ReclaimComponentTypes(Record& record, World::Schema::SchemaRegistry* schemas);
 		// WeHostApi 函数指针桥:userData → HostApiBox → 转发(越界/空参一律干净失败)。
 		static bool BridgeRegisterAssetType(void* userData, const WeAssetTypeDesc* desc);
 		static bool BridgeUnregisterAssetType(void* userData, const char* id);
@@ -160,6 +191,8 @@ namespace World::Plugins
 		static bool BridgeUnregisterAssetImporter(void* userData, const char* id);
 		static void* BridgeLookupExport(void* userData, const char* pluginId, const char* name,
 			uint32_t minVersion);
+		static bool BridgeRegisterComponent(void* userData, const WeComponentDesc* desc);
+		static bool BridgeUnregisterComponent(void* userData, const char* id);
 		static void LogBridge(void* userData, int level, const char* message);
 		static void Log(int level, const std::string& text);
 

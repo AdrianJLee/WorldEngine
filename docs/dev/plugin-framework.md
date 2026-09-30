@@ -126,3 +126,43 @@ RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${CMAKE_BUILD_TYPE}/plugins"
 - 门禁:`ALL_BUILD` + `RUN_TESTS` + `tools/agents/check-layout.ps1` +
   `python tools/agents/skills/worldengine-dev/scripts/audit-localization.py`;
 - 报告口径:静态检查 / 编译 / 实际运行分开写(编译成功不等于界面/交互已验证)。
+
+## 8. 组件注册(T2b,2026-09-30)
+
+`WeHostApi` **尾部追加**了组件 schema 注册面(append-only:字段只增不改号,
+`WE_PLUGIN_ABI_VERSION` 仍 = 1;旧宿主缺这两个字段时,插件用
+`host.StructSize >= offsetof(WeHostApi, UnregisterComponent) + sizeof(host.UnregisterComponent)`
+自检并干净拒绝):
+
+```cpp
+bool (*RegisterComponent)(void* userData, const WeComponentDesc* desc);
+bool (*UnregisterComponent)(void* userData, const char* id);
+```
+
+`WeComponentDesc{StructSize, AbiVersion, Id, DisplayName, ComponentId, Fields, FieldCount}`;
+`WeComponentFieldDesc{StructSize, AbiVersion, Name, Kind, Offset, Size, Flags, Choices,
+ChoicesCount, Doc}`(定义与字段注释见 `Engine/src/World/Plugins/WePluginApi.h`)。
+
+- `Kind` 的数值 = `World::Schema::Kind` 的稳定值(口径见
+  `Engine/src/World/Schema/Schema.h`;`PluginManager.cpp` 有逐项 `static_assert` 钉住)。
+- `Offset` / `Size` 用 `offsetof` / `sizeof` 填;`Size` 必须等于 Kind 的规范大小,否则注册被拒
+  (宿主不会按插件声明的大小做越界 memcpy)。组件结构的总大小由插件拥有,宿主不校验。
+- 支持固定大小 POD(布尔 / 整型 / 浮点 / 向量 / 四元数 / 矩阵);String / Enum / Asset /
+  Object 与容器字段 = 干净拒绝(返回 false + 可读日志,不半注册)。
+- `ComponentId` 本阶段**必须为 0**:组件存储桥(entt Add/Copy)不在本版 ABI 里,非 0 会被拒绝
+  (避免"接受但静默忽略"造成组件能注册却不能实例化的误解)。
+- 宿主映射:`Schema::SchemaRegistry::RegisterModule(<插件 id>, {TypeSchema})`
+  (`Category = Component`,`Storage == nullptr`);注销 = `UnregisterModule(<插件 id>)` ——
+  注销单个类型时,宿主把该插件其余类型按原顺序重新注册回同一模块。
+- 兜底回收:插件自己没注销的类型,在卸载 / `Register` 返回 false 或抛异常的回滚 /
+  管理器析构时被整模块移除并记 WARN(不留指向已卸载插件的类型)。
+- 幂等/归属:重复 `Id` = false + 警告(不覆盖);注销"本插件没注册过"的 `Id` = 别的插件拥有
+  ⇒ false + 警告,否则 ⇒ true(幂等)。
+
+> **§4 模板表的更正(T2b 落地)**:`component` 行原写 `requires: t2b`、"注册面未就绪" ——
+> 该模板的 `template.json` 已改为 `requires: none`,源码从"骨架 + TODO"换成
+> `templates/plugin-component/src/plugin.cpp` 里的真实注册;以本节为准。
+
+用法示例即 `templates/plugin-component/src/plugin.cpp`(生成物可直接编译);单测
+`World.Plugins` 覆盖:注册可见性(`Find` / `ListByModule`)、字段元数据映射、
+`.wd` 同一条序列化 API 的往返(含按 `offsetof` 的逐字节断言)、注销幂等、卸载与析构兜底回收。

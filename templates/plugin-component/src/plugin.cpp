@@ -1,10 +1,16 @@
-// {{PluginName}} — 场景组件插件骨架(Component Plugin 模板,{{PluginScope}} 形态)。
+// {{PluginName}} — 场景组件插件(Component Plugin 模板,{{PluginScope}} 形态)。
 //
-// 现状:**可编译骨架**。插件侧组件 schema 注册面属于 T2b,当前 ABI 还没有对应的
-// 注册函数 —— 所以这里只声明能力 + 留 TODO,绝不引用尚不存在的 API。
+// T2b(2026-09-30)起是**真实注册**:Register 里把组件布局(每个字段的 Kind / Offset /
+// Size,用 offsetof/sizeof 填写)经 WeHostApi::RegisterComponent 交给宿主,宿主据此在
+// Schema::SchemaRegistry 里生成一个 TypeCategory::Component 类型;Unregister 成对注销。
+//
+// 语义边界:注册产物 = 组件 **schema**(注册表 Find/ListByModule 与序列化 API 可见)。
+// 组件的 entt 存储桥不在本版 ABI 里 ⇒ `WeComponentDesc::ComponentId` 必须为 0,组件暂时
+// 不能挂到场景实体上(将来在 ABI 尾部追加存储回调后才启用)。
 // 只依赖公共 ABI 头(World/Plugins/WePluginApi.h),不链接 World。
 #include "World/Plugins/WePluginApi.h"
 
+#include <cstddef>
 #include <cstdint>
 
 #if defined(_WIN32)
@@ -21,23 +27,69 @@ namespace
 	constexpr const char* kPluginId = "{{PluginId}}";
 	constexpr const char* kPluginName = "{{PluginName}}";
 
+	// 组件数据:布局由插件拥有;注册时用 offsetof/sizeof 告诉宿主每个字段在哪。
+	struct HealthComponent
+	{
+		float Health = 100.0f;
+		int32_t Charges = 3;
+	};
+
+	const char* const kChargeChoices[] = { "low", "normal", "high" };
+
+	// 字段描述表(必须是静态存储:宿主注册期间只读,不在注册后保留指针,但保持简单可靠)。
+	const WeComponentFieldDesc* ComponentFields()
+	{
+		static const WeComponentFieldDesc fields[] =
+		{
+			{ sizeof(WeComponentFieldDesc), WE_PLUGIN_ABI_VERSION, "Health", WeComponentKindFloat,
+				static_cast<uint32_t>(offsetof(HealthComponent, Health)), sizeof(float),
+				WeComponentFieldFlagNone, nullptr, 0, "Hit points." },
+			{ sizeof(WeComponentFieldDesc), WE_PLUGIN_ABI_VERSION, "Charges", WeComponentKindInt32,
+				static_cast<uint32_t>(offsetof(HealthComponent, Charges)), sizeof(int32_t),
+				WeComponentFieldFlagNone, kChargeChoices, 3, nullptr },
+		};
+		return fields;
+	}
+
+	// Unregister 无宿主表参数(ABI 契约)⇒ 插件自己记住 Register 时拿到的那张表。
+	WeHostApi& Host()
+	{
+		static WeHostApi host;
+		return host;
+	}
+
 	bool Register(World::WorldContext&, const WeHostApi& host)
 	{
-		// TODO(T2b):插件侧组件 schema 注册面尚未就绪。落地后在这里注册组件,例如:
-		//   WeComponentDesc component;
-		//   component.Id = "{{PluginDir}}.Health";
-		//   component.Fields = kFields;   // 字段描述表(名字/类型/默认值)
-		//   host.RegisterComponentSchema(host.UserData, &component);
-		// 并在 Unregister 里对称地注销(host.UnregisterComponentSchema)。
-		if (host.Log && host.UserData)
-			host.Log(host.UserData, WePluginLogInfo,
-				"component skeleton loaded; schema registration waits for T2b");
+		// 双向校验:宿主表必须覆盖到组件注册面(尾部追加字段的 offsetof + sizeof 判据)。
+		if (host.StructSize < offsetof(WeHostApi, UnregisterComponent) + sizeof(host.UnregisterComponent)
+			|| host.AbiVersion != WE_PLUGIN_ABI_VERSION
+			|| !host.Log || !host.RegisterComponent || !host.UnregisterComponent)
+		{
+			return false;   // 宿主太旧 / 缺能力 = 干净拒绝,不半注册
+		}
+		Host() = host;
+
+		WeComponentDesc desc;
+		desc.Id = "{{PluginId}}.Health";     // 类型全名(也是 .wd 里的类型键)
+		desc.DisplayName = "{{PluginName}} Health";
+		desc.ComponentId = 0;                // 没有存储桥 ⇒ 必须为 0(schema-only)
+		desc.Fields = ComponentFields();
+		desc.FieldCount = 2;
+		if (!host.RegisterComponent(host.UserData, &desc))
+		{
+			host.Log(host.UserData, WePluginLogError, "component registration failed");
+			return false;
+		}
+		host.Log(host.UserData, WePluginLogInfo, "registered {{PluginId}}.Health");
 		return true;
 	}
 
 	void Unregister(World::WorldContext&)
 	{
-		// TODO(T2b):与 Register 的注册成对。
+		const WeHostApi& host = Host();
+		if (!host.UserData || !host.UnregisterComponent)
+			return;
+		host.UnregisterComponent(host.UserData, "{{PluginId}}.Health");   // 与 Register 成对
 	}
 
 	const char* const kProvides[] = { "scene.component" };

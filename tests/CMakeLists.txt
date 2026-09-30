@@ -1264,6 +1264,9 @@ set(WE_PLUGIN_TEST_DLL_TARGETS
     WePluginTestHostApi
     WePluginTestLeaky
     WePluginTestLookup
+    # T2b:组件 schema 注册正例(含坏描述负例与注销导出)/ 违约兜底回收负例。
+    WePluginTestComponent
+    WePluginTestLeakyComponent
 )
 foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
     add_library(${_we_plugin_target} SHARED "plugins/${_we_plugin_target}.cpp")

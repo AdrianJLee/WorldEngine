@@ -5,11 +5,23 @@
 - 插件 ID:`{{PluginId}}`
 - 目录名 / 产物名:`{{PluginDir}}`
 - 清单:`plugin.we.yaml`(字段口径见引擎的 `docs/dev/plugin-framework.md`)
+- 组件类型:`{{PluginId}}.Health`(`float Health` + `int Charges` 示例布局 —— 换成你的字段)
 
-> **注册面未就绪**:插件侧场景组件 schema 注册面属于 **T2b**,当前 ABI 还没有对应的
-> 注册函数。本模板现在生成的是**可编译骨架**:清单声明 `scene.component`,源码里用
-> TODO 标出将来要换成真实注册的位置,不引用任何尚不存在的 API。T2b 落地后把 TODO
-> 换成 `host.RegisterComponentSchema(...)` 即可。
+## 注册面(T2b 起为真实注册)
+
+`src/plugin.cpp` 在 `Register` 里调用 `WeHostApi::RegisterComponent`,把组件布局(每个字段的
+Kind / Offset / Size,用 `offsetof` / `sizeof` 填写)交给宿主;宿主据此在
+`Schema::SchemaRegistry` 里生成一个 `TypeCategory::Component` 类型,并在 `Unregister` 里
+成对注销(`UnregisterComponent`)。注册的类型可被注册表查询(`Find` / `ListByModule`)与
+序列化 API 读写。
+
+边界:
+
+- 注册产物是**组件 schema**;**存储桥(entt)尚未提供** —— `WeComponentDesc::ComponentId`
+  必须为 0,组件暂时不能挂到场景实体上(挂载能力在后续 ABI 尾部追加存储回调后启用);
+- 字段类型支持固定大小 POD(布尔 / 整型 / 浮点 / 向量 / 四元数 / 矩阵);String / Enum /
+  Asset / Object 与容器字段会被宿主干净拒绝(返回 false + 可读日志);
+- 字段名就是 `.wd` / YAML 里的键,同一个组件内必须唯一。
 
 ## 构建
 

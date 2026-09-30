@@ -51,6 +51,16 @@ namespace WeTestPlugin
 			&& host.LookupExport != nullptr;
 	}
 
+	// T2b:宿主表是否覆盖到组件 schema 注册面(同一"offsetof + sizeof"判据;
+	// 判据用**最后一个**追加字段,所以旧宿主的表在这里会被干净拒绝)。
+	inline bool HostApiHasComponentSurface(const WeHostApi& host)
+	{
+		return host.StructSize >= offsetof(WeHostApi, UnregisterComponent)
+				+ sizeof(host.UnregisterComponent)
+			&& host.RegisterComponent != nullptr
+			&& host.UnregisterComponent != nullptr;
+	}
+
 	// 通过宿主表日志回传插件侧证据(单测用 World::Log::RecentLines 取回)。
 	inline void Log(const char* message, int level = WePluginLogInfo)
 	{

@@ -15,10 +15,16 @@
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
 #include "World/Plugins/PluginManager.h"
+#include "World/Schema/Schema.h"
+#include "World/Schema/SchemaRegistry.h"
+
+// T2b:测试插件与单测共用的组件布局夹具(两侧各自编译一份;插件不链接 World)。
+#include "../plugins/PluginComponentFixture.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -31,6 +37,7 @@ namespace
 {
 	using namespace World::Plugins;
 	using World::WorldContext;
+	namespace Schema = World::Schema;
 	namespace fs = std::filesystem;
 
 	void Check(bool condition, const char* expression, int line)
@@ -905,6 +912,208 @@ namespace
 		CHECK(manager.LoadOrder().empty());   // LoadOrder 只含已加载插件
 #endif
 	}
+
+	// T2b①:组件 schema 注册(ABI-only 测试插件 → SchemaRegistry)。
+	//   * 注册可见:Find / ListByModule / List(Component) 命中,字段顺序与元数据(ReadOnly /
+	//     Color / Choices / Doc)按插件描述映射;
+	//   * 坏描述干净拒绝(不支持的 Kind / Size 与 Kind 不符 / ComponentId != 0),不半注册;
+	//   * 重复 Id 拒绝(不覆盖);注销单个类型不影响同模块其余类型;注销不存在 = 幂等;
+	//   * 序列化往返:与 `.wd` 写入/读回同一条 API(ReadStructValue → WriteStructValue),
+	//     并按插件用 offsetof 声明的偏移逐字节断言宿主访问器写在了哪里;
+	//   * 卸载后类型与注册账本无残留,可以重新加载。
+	void CaseComponentSchemaRegistration()
+	{
+		const fs::path root = FreshRoot("component-schema");
+		ManifestFields fields;
+		fields.Id = "test.component";
+		WritePlugin(root / "engine", "test.component", "WePluginTestComponent", BuildYaml(fields));
+
+		WorldContext context;
+		Schema::SchemaRegistry& schemas = context.Schemas();
+		PluginManager manager;
+		const size_t mark = LogMark();
+		CHECK(manager.Discover(root / "engine", root / "project"));
+		std::string error;
+		CHECK(manager.LoadAll(context, &error) == PluginManager::Status::Ok);
+		CHECK(manager.LoadedCount() == 1);
+
+		const std::vector<std::string> lines = LogSince(mark);
+		// 坏描述:宿主逐条给可读诊断 + 插件侧看到 false。
+		CHECK(LogContains(lines, "unsupported kind"));
+		CHECK(LogContains(lines, "does not match its kind"));
+		CHECK(LogContains(lines, "no storage bridge"));
+		CHECK(LogContains(lines, "unsupported-kind-rejected"));
+		CHECK(LogContains(lines, "size-mismatch-rejected"));
+		CHECK(LogContains(lines, "component-id-rejected"));
+		// 正例:两个类型各自一条注册日志;同类型第二次 = 拒绝(不覆盖)。
+		CHECK(LogContains(lines,
+			"[plugin] test.component: registered component 'test.component.Health' (5 field(s))"));
+		CHECK(LogContains(lines,
+			"[plugin] test.component: registered component 'test.component.Shield' (1 field(s))"));
+		CHECK(LogContains(lines, "already registered by this plugin; registration ignored"));
+		CHECK(LogContains(lines, "component-duplicate-rejected"));
+
+		// 注册表可见性 + 元数据映射。
+		const Schema::TypeSchema* health = schemas.Find("test.component.Health");
+		CHECK(health != nullptr);
+		CHECK(health->Category == Schema::TypeCategory::Component);
+		CHECK(health->DisplayName == "Plugin Health");
+		CHECK(health->Storage == nullptr);   // T2b:schema-only(存储桥不在本版 ABI)
+		const Schema::TypeSchema* shield = schemas.Find("test.component.Shield");
+		CHECK(shield != nullptr && shield->Category == Schema::TypeCategory::Component);
+		CHECK(schemas.ListByModule("test.component").size() == 2);
+		CHECK(schemas.List(Schema::TypeCategory::Component).size() >= 2);
+
+		CHECK(health->Fields.size() == 5);
+		CHECK(health->Fields[0].Name == "Enabled");
+		CHECK(health->Fields[0].K == Schema::Kind::Bool);
+		CHECK(health->Fields[0].Id.Value == Schema::Fnv1a64("Enabled"));
+		CHECK(health->Fields[0].Meta.ReadOnly == true);
+		CHECK(health->Fields[0].Meta.Color == false);
+		CHECK(health->Fields[1].Name == "Charges");
+		CHECK(health->Fields[1].K == Schema::Kind::Int32);
+		CHECK(health->Fields[2].Name == "Health");
+		CHECK(health->Fields[2].K == Schema::Kind::Float);
+		CHECK(health->Fields[2].Meta.Doc == "Hit points.");
+		CHECK(health->Fields[3].Name == "Offset");
+		CHECK(health->Fields[3].K == Schema::Kind::Vec3);
+		CHECK(health->Fields[3].Meta.Color == true);
+		CHECK(health->Fields[4].Name == "Tier");
+		CHECK(health->Fields[4].K == Schema::Kind::UInt8);
+		CHECK(health->Fields[4].Meta.Choices == (std::vector<std::string>{ "light", "heavy" }));
+
+		// 序列化往返(.wd 的写/读走的就是这一对 API):先读成 Value,再写进一个新的实例。
+		WePluginComponentFixture::HealthFixture source;
+		source.Enabled = true;
+		source.Charges = 7;
+		source.Health = 42.5f;
+		source.Offset = { 1.0f, 2.0f, 3.0f };
+		source.Tier = 1;
+		const Schema::Value written = Schema::ReadStructValue(*health, &source);
+		const Schema::ValueMap* map = std::get_if<Schema::ValueMap>(&written);
+		CHECK(map != nullptr);
+		CHECK(std::get<bool>(map->at("Enabled")) == true);
+		CHECK(std::get<int32_t>(map->at("Charges")) == 7);
+		CHECK(std::get<float>(map->at("Health")) == 42.5f);
+		CHECK(std::get<glm::vec3>(map->at("Offset")) == glm::vec3(1.0f, 2.0f, 3.0f));
+		CHECK(std::get<uint8_t>(map->at("Tier")) == 1);
+
+		WePluginComponentFixture::HealthFixture restored;
+		CHECK(Schema::WriteStructValue(*health, &restored, written));
+		CHECK(restored.Enabled == true && restored.Charges == 7);
+		CHECK(restored.Health == 42.5f);
+		CHECK(restored.Offset.X == 1.0f && restored.Offset.Y == 2.0f && restored.Offset.Z == 3.0f);
+		CHECK(restored.Tier == 1);
+		// 逐字节:宿主访问器写的是插件用 offsetof 声明的偏移(不是"自洽但错位"的往返)。
+		const auto* raw = reinterpret_cast<const uint8_t*>(&restored);
+		float rawHealth = 0.0f;
+		std::memcpy(&rawHealth, raw + offsetof(WePluginComponentFixture::HealthFixture, Health),
+			sizeof(float));
+		CHECK(rawHealth == 42.5f);
+		int32_t rawCharges = 0;
+		std::memcpy(&rawCharges, raw + offsetof(WePluginComponentFixture::HealthFixture, Charges),
+			sizeof(int32_t));
+		CHECK(rawCharges == 7);
+		CHECK(raw[offsetof(WePluginComponentFixture::HealthFixture, Enabled)] == 1);
+		CHECK(raw[offsetof(WePluginComponentFixture::HealthFixture, Tier)] == 1);
+
+		// 单字段类型同样可往返(用第二个类型,避免"只有一个类型能跑"的假象)。
+		WePluginComponentFixture::ShieldFixture shieldSource;
+		shieldSource.Shield = 12.5f;
+		const Schema::Value shieldValue = Schema::ReadStructValue(*shield, &shieldSource);
+		WePluginComponentFixture::ShieldFixture shieldRestored;
+		CHECK(Schema::WriteStructValue(*shield, &shieldRestored, shieldValue));
+		CHECK(shieldRestored.Shield == 12.5f);
+
+		// 注销单个类型(经插件的导出回调,时机由单测控制):同模块其余类型不受影响。
+		const auto unregisterFn = reinterpret_cast<bool (*)(const char*)>(
+			manager.LookupExport("test.component", "component.unregister", 1));
+		CHECK(unregisterFn != nullptr);
+		const size_t partialMark = LogMark();
+		CHECK(unregisterFn("test.component.Health"));
+		CHECK(schemas.Find("test.component.Health") == nullptr);
+		CHECK(schemas.Find("test.component.Shield") != nullptr);
+		CHECK(schemas.ListByModule("test.component").size() == 1);
+		CHECK(LogContains(LogSince(partialMark),
+			"[plugin] test.component: unregistered component 'test.component.Health'"));
+
+		// 注销幂等:本插件没注册过的 id = true 且不报错(别人的类型才是拒绝,见 T2b②)。
+		const size_t idempotentMark = LogMark();
+		CHECK(unregisterFn("test.component.Health"));
+		CHECK(!LogContains(LogSince(idempotentMark), "is not owned by this plugin"));
+
+		// 卸载:插件自己的 Unregister 会幂等地再注销两个类型;注册表与账本都不留残留。
+		const size_t unloadMark = LogMark();
+		CHECK(manager.Unload("test.component", context, &error) == PluginManager::Status::Ok);
+		CHECK(schemas.Find("test.component.Health") == nullptr);
+		CHECK(schemas.Find("test.component.Shield") == nullptr);
+		CHECK(schemas.ListByModule("test.component").empty());
+		const std::vector<std::string> unloadLines = LogSince(unloadMark);
+		CHECK(LogContains(unloadLines, "component-unregistered idempotent"));
+		CHECK(!LogContains(unloadLines, "force-removed"));
+
+		// 不留脏账:重新加载后两个类型都能再注册(槽位/账本都可复用)。
+		CHECK(manager.Load("test.component", context, &error) == PluginManager::Status::Ok);
+		CHECK(schemas.Find("test.component.Health") != nullptr);
+		CHECK(schemas.Find("test.component.Shield") != nullptr);
+		CHECK(schemas.ListByModule("test.component").size() == 2);
+		manager.UnloadAll(context);
+		CHECK(schemas.ListByModule("test.component").empty());
+	}
+
+	// T2b②:组件注册账本的边界与兜底回收。
+	//   * 别人的类型不能被本插件顺手注销(拒绝 + 类型保留);
+	//   * 违约插件(不自己注销)→ 卸载时整模块移除 + WARN,且可重新加载(不留脏账);
+	//   * 管理器析构(宿主没先 UnloadAll)同样必须清掉组件类型 —— 不留指向已释放 DLL 的类型。
+	void CaseLeakedComponentSweep()
+	{
+		const fs::path root = FreshRoot("leaky-component");
+		ManifestFields component;
+		component.Id = "test.component";
+		WritePlugin(root / "engine", "test.component", "WePluginTestComponent", BuildYaml(component));
+		ManifestFields leaky;
+		leaky.Id = "test.leakycomponent";
+		WritePlugin(root / "engine", "test.leakycomponent", "WePluginTestLeakyComponent", BuildYaml(leaky));
+
+		WorldContext context;
+		Schema::SchemaRegistry& schemas = context.Schemas();
+		{
+			PluginManager manager;
+			CHECK(manager.Discover(root / "engine", root / "project"));
+			std::string error;
+			CHECK(manager.LoadAll(context, &error) == PluginManager::Status::Ok);
+			CHECK(manager.LoadedCount() == 2);
+			CHECK(schemas.Find("test.leakycomponent.Shield") != nullptr);
+
+			// 归属保护:test.component 不能注销 test.leakycomponent 的类型。
+			const auto unregisterFn = reinterpret_cast<bool (*)(const char*)>(
+				manager.LookupExport("test.component", "component.unregister", 1));
+			CHECK(unregisterFn != nullptr);
+			const size_t crossMark = LogMark();
+			CHECK(!unregisterFn("test.leakycomponent.Shield"));
+			CHECK(LogContains(LogSince(crossMark), "is not owned by this plugin; unregister ignored"));
+			CHECK(schemas.Find("test.leakycomponent.Shield") != nullptr);
+
+			// 违约插件卸载:兜底回收整模块 + 可读警告。
+			const size_t unloadMark = LogMark();
+			CHECK(manager.Unload("test.leakycomponent", context, &error) == PluginManager::Status::Ok);
+			CHECK(schemas.Find("test.leakycomponent.Shield") == nullptr);
+			CHECK(schemas.ListByModule("test.leakycomponent").empty());
+			const std::vector<std::string> unloadLines = LogSince(unloadMark);
+			CHECK(LogContains(unloadLines,
+				"component 'test.leakycomponent.Shield' was not unregistered by the plugin; force-removed"));
+
+			// 兜底回收后可以重新加载(证明不留脏账)。
+			CHECK(manager.Load("test.leakycomponent", context, &error) == PluginManager::Status::Ok);
+			CHECK(schemas.Find("test.leakycomponent.Shield") != nullptr);
+
+			// 管理器析构路径(故意不 UnloadAll):两个插件的组件类型都必须被移除。
+		}
+		CHECK(schemas.ListByModule("test.component").empty());
+		CHECK(schemas.ListByModule("test.leakycomponent").empty());
+		CHECK(schemas.Find("test.component.Health") == nullptr);
+		CHECK(schemas.Find("test.leakycomponent.Shield") == nullptr);
+	}
 }
 
 int main()
@@ -935,6 +1144,8 @@ int main()
 		CaseLeakedRegistrationSweep();      // T2a② 卸载兜底回收(违约插件不留悬空回调)
 		CaseLookupExport();                 // T2a③ LookupExport(宿主 + 插件两侧)
 		CaseExamplePluginDiscoverable();    // T2a④ plugins/hello-import 清单可发现
+		CaseComponentSchemaRegistration();  // T2b① 组件 schema 注册 / 序列化往返 / 单类型注销
+		CaseLeakedComponentSweep();         // T2b② 归属保护 / 卸载与析构兜底回收
 
 		std::error_code ec;
 		fs::remove_all(fs::temp_directory_path() / "worldengine-plugin-tests", ec);
