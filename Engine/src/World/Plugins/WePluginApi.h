@@ -15,6 +15,10 @@
 // 与 Game 模块的关系:`WE_MODULE_ABI_VERSION`(Game 模块契约)保持独立演进;
 // 插件加载器复用 ModuleManager 底层的 DynamicLibrary 与"等值门"思路,不复制第二套实现。
 //
+// T2(2026-09-30)在**尾部**追加了宿主注册面(资产类型 / 导入器 / LookupExport):
+// 字段只增不改号、`StructSize` 随成员增长,`WE_PLUGIN_ABI_VERSION` 不变 ——
+// 旧插件对新宿主仍兼容;新插件对旧宿主必须用 `StructSize >= offsetof(字段) + sizeof(字段)` 自检。
+//
 // 版本同步点(升级时必须一起改):本文件、`plugin.we.yaml` 的 `abi`、
 // `Engine/src/World/Plugins/PluginManager.*`、`docs/dev/plugin-framework.md`。
 // 方案:`tools/agents/tasks/20260930-1100-plugin-framework/plan.md`(v2.1)。
@@ -52,7 +56,82 @@ namespace World::Plugins
 		void* Function = nullptr;
 	};
 
-	// 宿主能力表(函数指针表;T1 只含最小集合,注册面在 T2 逐段**尾部追加**)。
+	// ---- T2:宿主注册面(资产类型 / 导入器 / C++ 导出查询)--------------------------------
+	//
+	// 纪律(与 WeHostApi 的 append-only 规则配套):
+	//   * 每个回调都带 `void* userData`(插件自己的句柄),宿主只原样回传,不解释;
+	//   * 重复注册同 id = 返回 false + 可读日志(不覆盖);注册方必须检查返回值;
+	//   * 注销幂等:注销"本插件没注册过"的 id = 返回 true 且不报错;
+	//   * 插件卸载时宿主会兜底回收该插件仍注册着的项(记警告)—— 插件不应依赖这一点,
+	//     Register/Unregister 必须成对,失败路径自己清干净。
+
+	// 资产"新建"回调(WeAssetTypeDesc::Create)。
+	//   * directoryUtf8 = 目标目录绝对路径(UTF-8,仅调用期间有效);
+	//   * 成功 = 至少落一份磁盘产物(失败不得留半成品)并返回 true;
+	//   * 失败 = 返回 false,并把可读原因写进 errorBuffer(UTF-8、含结尾 0,可截断)。
+	using WeAssetTypeCreateFn = bool (*)(void* userData, const char* directoryUtf8,
+		char* errorBuffer, uint32_t errorCapacity);
+
+	// 资产类型描述(T2):只含 C 类型;宿主侧映射到 World::AssetTypeDesc 一次注册。
+	struct WeAssetTypeDesc
+	{
+		uint32_t StructSize = sizeof(WeAssetTypeDesc);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+
+		const char* Id = nullptr;         // 稳定 id(必需;空 = 拒绝注册)
+		const char* Label = nullptr;      // 内联显示名(可空 = Id)
+		const char* Term = nullptr;       // 术语/别名(可空 = Label)
+		const char* Extension = nullptr;  // 默认扩展名(".whello";可空 = 无)
+		uint64_t Icon = 0;                // 图标纹理 id(0 = 无图标)
+		int32_t SortOrder = 100;          // 菜单排序(与 AssetTypeDesc::SortOrder 同口径)
+		int32_t IsFolder = 0;             // 非 0 = 文件夹语义
+		WeAssetTypeCreateFn Create = nullptr;  // 可空 = 只声明类型、不能"新建"
+		void* UserData = nullptr;         // 只回传给 Create
+	};
+
+	// 导入产物写出面(Import 调用期间由**宿主**提供;插件只调用,不得保留 sink、
+	// UserData 或 bytes 指针)。
+	//   * logicalPathUtf8 非空 = 多产物之一(相对 content_root 的逻辑路径);
+	//     空 = 单产物(宿主映射到 ImportResult::Data;单产物只能写一次);
+	//   * 返回 false = 宿主拒收(插件应让本次 Import 整体失败)。
+	struct WeImportSink
+	{
+		uint32_t StructSize = sizeof(WeImportSink);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+		void* UserData = nullptr;
+		bool (*Write)(void* userData, const char* logicalPathUtf8, const void* bytes,
+			uint64_t size) = nullptr;
+	};
+
+	// 匹配回调:sourceUtf8 = 源文件绝对路径(UTF-8);非 0 = 本导入器接手(顺序同内建导入器,
+	// 谁是"第一个匹配"由宿主交给 CookPipeline 的顺序决定)。
+	using WeAssetImporterMatchesFn = bool (*)(void* userData, const char* sourceUtf8);
+	// 导入回调:成功 = 至少向 sink 写一份产物并返回 true;失败 = 返回 false,
+	// errorBuffer(UTF-8、含结尾 0、可截断)带可读原因。
+	using WeAssetImportFn = bool (*)(void* userData, const char* logicalPathUtf8,
+		const char* sourceUtf8, const WeImportSink* sink, char* errorBuffer, uint32_t errorCapacity);
+	// 逐源设置指纹(可空 = 0 = 该导入器没有逐源设置;与 IAssetImporter::SettingsFingerprint 同语义)。
+	using WeAssetImporterFingerprintFn = uint64_t (*)(void* userData, const char* sourceUtf8);
+
+	// 资产导入器描述(T2)。Extensions 只是诊断/展示元数据(插件管理器用);
+	// "谁接手"始终以 Matches 回调为准,宿主不替插件判扩展名。
+	struct WeAssetImporterDesc
+	{
+		uint32_t StructSize = sizeof(WeAssetImporterDesc);
+		uint32_t AbiVersion = WE_PLUGIN_ABI_VERSION;
+
+		const char* Id = nullptr;              // 注册键 + 诊断名(必需;插件间唯一)
+		const char* DisplayName = nullptr;     // 显示名(可空 = Id)
+		const char* const* Extensions = nullptr;  // 诊断元数据(".whello";可空)
+		uint32_t ExtensionCount = 0;
+		uint32_t Version = 1;                  // 导入器版本(cook 复合指纹的参与项)
+		WeAssetImporterMatchesFn Matches = nullptr;      // 必需
+		WeAssetImportFn Import = nullptr;                // 必需
+		WeAssetImporterFingerprintFn SettingsFingerprint = nullptr;  // 可空
+		void* UserData = nullptr;              // 只回传给上述回调
+	};
+
+	// 宿主能力表(函数指针表;T1 含最小集合,T2 起注册面**尾部追加**)。
 	struct WeHostApi
 	{
 		uint32_t StructSize = sizeof(WeHostApi);
@@ -61,6 +140,18 @@ namespace World::Plugins
 		void* UserData = nullptr;
 		// 日志(宿主负责加插件身份前缀与落盘;message 为 UTF-8,调用方不保留所有权)。
 		void (*Log)(void* userData, int level, const char* message) = nullptr;
+
+		// ---- T2 追加(插件必须先自检 StructSize 覆盖到对应字段再调用)----
+		// 资产类型注册/注销(宿主侧 → World::AssetTypeRegistry;重复 id = false)。
+		bool (*RegisterAssetType)(void* userData, const WeAssetTypeDesc* desc) = nullptr;
+		bool (*UnregisterAssetType)(void* userData, const char* id) = nullptr;
+		// 导入器注册/注销(宿主侧 → 交给 CookPipeline 的导入器清单;重复 id = false)。
+		bool (*RegisterAssetImporter)(void* userData, const WeAssetImporterDesc* desc) = nullptr;
+		bool (*UnregisterAssetImporter)(void* userData, const char* id) = nullptr;
+		// 按插件 id + 名字 + 最低版本查已加载插件的 C++ 导出表(WePlugin::Exports);
+		// 未命中 = nullptr(查询失败是正常分支,不记日志)。
+		void* (*LookupExport)(void* userData, const char* pluginId, const char* name,
+			uint32_t minVersion) = nullptr;
 	};
 
 	// 插件描述 + 生命周期回调 + 导出表。

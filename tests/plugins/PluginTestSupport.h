@@ -8,6 +8,7 @@
 
 #include "World/Plugins/WePluginApi.h"
 
+#include <cstddef>
 #include <cstdint>
 
 #if defined(_WIN32)
@@ -36,6 +37,18 @@ namespace WeTestPlugin
 		return host.StructSize >= sizeof(WeHostApi)
 			&& host.AbiVersion == World::Plugins::WE_PLUGIN_ABI_VERSION
 			&& host.Log != nullptr;
+	}
+
+	// T2:宿主表是否覆盖到注册面**最后一个追加字段**(offsetof + sizeof 判据)。
+	// 追加字段 = StructSize 增长,所以这是"字段存在性"的唯一可靠判据。
+	inline bool HostApiHasRegistrationSurface(const WeHostApi& host)
+	{
+		return host.StructSize >= offsetof(WeHostApi, LookupExport) + sizeof(host.LookupExport)
+			&& host.RegisterAssetType != nullptr
+			&& host.UnregisterAssetType != nullptr
+			&& host.RegisterAssetImporter != nullptr
+			&& host.UnregisterAssetImporter != nullptr
+			&& host.LookupExport != nullptr;
 	}
 
 	// 通过宿主表日志回传插件侧证据(单测用 World::Log::RecentLines 取回)。

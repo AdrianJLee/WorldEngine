@@ -1,5 +1,6 @@
 #include "wldpch.h"
 #include "World/Plugins/PluginManager.h"
+#include "World/Core/Asset/AssetTypeRegistry.h"
 #include "World/Core/WorldContext.h"
 
 #include <algorithm>
@@ -23,6 +24,175 @@ namespace World::Plugins
 			}
 			return text;
 		}
+
+		// ---- T2:插件注册面 → 宿主既有注册表 / CookPipeline 清单的适配 ------------------
+
+		// 资产类型"新建"回调的宿主侧状态:生命周期 = AssetTypeRegistry 里那条记录;
+		// 注销(插件自己注销或卸载兜底回收)时随记录一起销毁,不留悬空回调。
+		struct PluginAssetTypeState
+		{
+			std::string PluginId;
+			WeAssetTypeCreateFn Create = nullptr;
+			void* UserData = nullptr;
+		};
+
+		// 插件导入器 → IAssetImporter 适配器。回调会跳进插件 DLL,所以卸载前必须先从
+		// PluginManager 的清单里移除(见 PluginManager::ReclaimPluginRegistrations)。
+		// Name() 取稳定 Id(不是 DisplayName):cook 复合指纹用 Name+Version 标识导入器身份,
+		// 显示名只做诊断/面板展示。
+		class PluginImporterAdapter final : public World::Asset::IAssetImporter
+		{
+		public:
+			PluginImporterAdapter(std::string pluginId, std::string id,
+				const WeAssetImporterDesc& desc)
+				: m_PluginId(std::move(pluginId))
+				, m_Id(std::move(id))
+				, m_DisplayName(desc.DisplayName ? desc.DisplayName : m_Id)
+				, m_Version(desc.Version)
+				, m_UserData(desc.UserData)
+				, m_Matches(desc.Matches)
+				, m_Import(desc.Import)
+				, m_Fingerprint(desc.SettingsFingerprint)
+			{
+			}
+
+			const std::string& Id() const { return m_Id; }
+			const std::string& DisplayName() const { return m_DisplayName; }
+			const std::string& PluginId() const { return m_PluginId; }
+
+			std::string Name() const override { return m_Id; }
+			uint32_t Version() const override { return m_Version; }
+
+			bool Matches(const std::filesystem::path& source) const override
+			{
+				if (!m_Matches)
+					return false;
+				try
+				{
+					return m_Matches(m_UserData, source.u8string().c_str());
+				}
+				catch (...)
+				{
+					return false;   // 契约违约(回调不得抛)= 不接手,不把异常带进 cook
+				}
+			}
+
+			uint64_t SettingsFingerprint(const std::filesystem::path& source) const override
+			{
+				if (!m_Fingerprint)
+					return 0;
+				try
+				{
+					return m_Fingerprint(m_UserData, source.u8string().c_str());
+				}
+				catch (...)
+				{
+					return 0;
+				}
+			}
+
+			World::Asset::ImportResult Import(const World::Asset::ImportRequest& request,
+				std::error_code& ec) const override
+			{
+				(void)ec;   // 失败原因统一走 ImportResult::Error(与内建导入器同一读法)
+				World::Asset::ImportResult result;
+				if (!m_Import)
+				{
+					result.Error = "plugin importer '" + m_Id + "' has no Import callback";
+					return result;
+				}
+
+				SinkState state;
+				state.Result = &result;
+				WeImportSink sink;
+				sink.StructSize = sizeof(WeImportSink);
+				sink.AbiVersion = WE_PLUGIN_ABI_VERSION;
+				sink.UserData = &state;
+				sink.Write = &PluginImporterAdapter::WriteSink;
+
+				char errorBuffer[512] = {};
+				bool ok = false;
+				try
+				{
+					ok = m_Import(m_UserData, request.LogicalPath.c_str(),
+						request.Source.u8string().c_str(), &sink, errorBuffer,
+						static_cast<uint32_t>(sizeof(errorBuffer)));
+				}
+				catch (...)
+				{
+					ok = false;
+				}
+				errorBuffer[sizeof(errorBuffer) - 1] = '\0';
+
+				if (!ok)
+				{
+					result.Data.clear();
+					result.Outputs.clear();
+					result.Error = errorBuffer[0] ? std::string(errorBuffer)
+						: ("plugin importer '" + m_Id + "' failed");
+					return result;
+				}
+				if (!state.SingleWritten && !state.MultiWritten)
+				{
+					result.Error = "plugin importer '" + m_Id
+						+ "' reported success without writing a product";
+					return result;
+				}
+				result.Ok = true;
+				return result;
+			}
+
+		private:
+			struct SinkState
+			{
+				World::Asset::ImportResult* Result = nullptr;
+				bool SingleWritten = false;
+				bool MultiWritten = false;
+			};
+
+			static bool WriteSink(void* userData, const char* logicalPathUtf8,
+				const void* bytes, uint64_t size)
+			{
+				auto* state = static_cast<SinkState*>(userData);
+				if (!state || !state->Result || (size > 0 && !bytes))
+					return false;
+
+				const bool multi = logicalPathUtf8 && logicalPathUtf8[0];
+				if (multi && state->SingleWritten)
+					return false;   // 单产物与多产物互斥(ImportResult 契约)
+				if (!multi && (state->SingleWritten || state->MultiWritten))
+					return false;   // 单产物只能写一次
+
+				std::vector<uint8_t> data;
+				if (size > 0)
+					data.assign(static_cast<const uint8_t*>(bytes),
+						static_cast<const uint8_t*>(bytes) + static_cast<size_t>(size));
+
+				if (multi)
+				{
+					World::Asset::ImportOutput output;
+					output.LogicalPath = logicalPathUtf8;
+					output.Data = std::move(data);
+					state->Result->Outputs.push_back(std::move(output));
+					state->MultiWritten = true;
+				}
+				else
+				{
+					state->Result->Data = std::move(data);
+					state->SingleWritten = true;
+				}
+				return true;
+			}
+
+			std::string m_PluginId;
+			std::string m_Id;
+			std::string m_DisplayName;
+			uint32_t m_Version = 1;
+			void* m_UserData = nullptr;
+			WeAssetImporterMatchesFn m_Matches = nullptr;
+			WeAssetImportFn m_Import = nullptr;
+			WeAssetImporterFingerprintFn m_Fingerprint = nullptr;
+		};
 	}
 
 	const char* PluginManager::StatusName(Status status)
@@ -47,6 +217,12 @@ namespace World::Plugins
 		m_HostApi.AbiVersion = WE_PLUGIN_ABI_VERSION;
 		m_HostApi.UserData = nullptr;
 		m_HostApi.Log = &PluginManager::LogBridge;
+		// T2 注册面(尾部追加,WePluginApi.h 的 append-only 纪律)。
+		m_HostApi.RegisterAssetType = &PluginManager::BridgeRegisterAssetType;
+		m_HostApi.UnregisterAssetType = &PluginManager::BridgeUnregisterAssetType;
+		m_HostApi.RegisterAssetImporter = &PluginManager::BridgeRegisterAssetImporter;
+		m_HostApi.UnregisterAssetImporter = &PluginManager::BridgeUnregisterAssetImporter;
+		m_HostApi.LookupExport = &PluginManager::BridgeLookupExport;
 	}
 
 	PluginManager::~PluginManager()
@@ -54,6 +230,10 @@ namespace World::Plugins
 		if (LoadedCount() > 0)
 			Log(WePluginLogError, "manager destroyed with " + std::to_string(LoadedCount())
 				+ " plugin(s) still loaded (host must call UnloadAll first)");
+		// T2:管理器析构会让 Library 一起释放。即使宿主违约(没先 UnloadAll),也必须把
+		// 指向这些 DLL 的注册回调从宿主注册面移除 —— 否则留下悬空回调。
+		for (Record& record : m_Records)
+			ReclaimPluginRegistrations(record);
 	}
 
 	void PluginManager::Log(int level, const std::string& text)
@@ -132,6 +312,313 @@ namespace World::Plugins
 	{
 		const Record* record = FindRecord(id);
 		return record ? &record->Entry : nullptr;
+	}
+
+	// ---- T2:宿主注册面(WeHostApi 尾部字段的宿主实现)----------------------------------
+
+	PluginManager::Record* PluginManager::ResolveHostRecord(HostApiBox& box)
+	{
+		if (box.Manager != this)
+			return nullptr;
+		Record* record = FindRecord(box.PluginId);
+		if (!record)
+			return nullptr;
+		// 只接受:本管理器在 Register 调用期间交给插件的那张表,或该条目自己的表(Unregister 期间)。
+		if (m_ActiveBox != &box && record->Host.get() != &box)
+			return nullptr;
+		return record;
+	}
+
+	bool PluginManager::BridgeRegisterAssetType(void* userData, const WeAssetTypeDesc* desc)
+	{
+		auto* box = static_cast<HostApiBox*>(userData);
+		if (!box || !box->Manager)
+			return false;
+		Record* record = box->Manager->ResolveHostRecord(*box);
+		if (!record || !desc)
+		{
+			Log(WePluginLogWarn, (box->PluginId.empty() ? std::string("unknown plugin") : box->PluginId)
+				+ ": asset type registration rejected ("
+				+ (!desc ? "null descriptor" : "invalid host handle") + ")");
+			return false;
+		}
+		return box->Manager->RegisterAssetType(*record, *desc);
+	}
+
+	bool PluginManager::BridgeUnregisterAssetType(void* userData, const char* id)
+	{
+		auto* box = static_cast<HostApiBox*>(userData);
+		if (!box || !box->Manager)
+			return false;
+		Record* record = box->Manager->ResolveHostRecord(*box);
+		if (!record)
+		{
+			Log(WePluginLogWarn, (box->PluginId.empty() ? std::string("unknown plugin") : box->PluginId)
+				+ ": asset type unregister rejected (invalid host handle)");
+			return false;
+		}
+		return box->Manager->UnregisterAssetType(*record, id);
+	}
+
+	bool PluginManager::BridgeRegisterAssetImporter(void* userData, const WeAssetImporterDesc* desc)
+	{
+		auto* box = static_cast<HostApiBox*>(userData);
+		if (!box || !box->Manager)
+			return false;
+		Record* record = box->Manager->ResolveHostRecord(*box);
+		if (!record || !desc)
+		{
+			Log(WePluginLogWarn, (box->PluginId.empty() ? std::string("unknown plugin") : box->PluginId)
+				+ ": importer registration rejected ("
+				+ (!desc ? "null descriptor" : "invalid host handle") + ")");
+			return false;
+		}
+		return box->Manager->RegisterAssetImporter(*record, *desc);
+	}
+
+	bool PluginManager::BridgeUnregisterAssetImporter(void* userData, const char* id)
+	{
+		auto* box = static_cast<HostApiBox*>(userData);
+		if (!box || !box->Manager)
+			return false;
+		Record* record = box->Manager->ResolveHostRecord(*box);
+		if (!record)
+		{
+			Log(WePluginLogWarn, (box->PluginId.empty() ? std::string("unknown plugin") : box->PluginId)
+				+ ": importer unregister rejected (invalid host handle)");
+			return false;
+		}
+		return box->Manager->UnregisterAssetImporter(*record, id);
+	}
+
+	void* PluginManager::BridgeLookupExport(void* userData, const char* pluginId, const char* name,
+		uint32_t minVersion)
+	{
+		auto* box = static_cast<HostApiBox*>(userData);
+		if (!box || !box->Manager || !pluginId || !name)
+			return nullptr;
+		return box->Manager->LookupExport(pluginId, name, minVersion);
+	}
+
+	bool PluginManager::RegisterAssetType(Record& record, const WeAssetTypeDesc& desc)
+	{
+		const std::string& pluginId = record.Entry.Manifest.Id;
+
+		// 前缀校验:宿主要读 v1 全字段 ⇒ 声明的大小必须覆盖它;ABI 等值门同 WePlugin。
+		if (desc.StructSize < sizeof(WeAssetTypeDesc) || desc.AbiVersion != WE_PLUGIN_ABI_VERSION)
+		{
+			Log(WePluginLogWarn, pluginId + ": asset type registration rejected (struct/abi mismatch size="
+				+ std::to_string(desc.StructSize) + " abi=" + std::to_string(desc.AbiVersion) + ")");
+			return false;
+		}
+		const std::string id = desc.Id ? desc.Id : "";
+		if (id.empty())
+		{
+			Log(WePluginLogWarn, pluginId + ": asset type registration rejected (empty id)");
+			return false;
+		}
+
+		World::AssetTypeRegistry& registry = World::AssetTypeRegistry::Get();
+		if (registry.Find(id))
+		{
+			// 重复 id = 不覆盖(注册方必须处理返回值);可能是别的所有者,也可能是本插件第二次。
+			Log(WePluginLogWarn, pluginId + ": asset type '" + id
+				+ "' is already registered; registration ignored");
+			return false;
+		}
+
+		World::AssetTypeDesc converted;
+		converted.Id = id;
+		converted.Label = desc.Label && desc.Label[0] ? desc.Label : id;
+		converted.Term = desc.Term && desc.Term[0] ? desc.Term : converted.Label;
+		converted.Extension = desc.Extension ? desc.Extension : "";
+		converted.Icon = desc.Icon;
+		converted.SortOrder = desc.SortOrder;
+		converted.IsFolder = desc.IsFolder != 0;
+		if (desc.Create)
+		{
+			auto state = std::make_shared<PluginAssetTypeState>();
+			state->PluginId = pluginId;
+			state->Create = desc.Create;
+			state->UserData = desc.UserData;
+			converted.Create = [state](const std::filesystem::path& dir, std::string* error) -> bool
+			{
+				char errorBuffer[512] = {};
+				bool ok = false;
+				try
+				{
+					ok = state->Create(state->UserData, dir.u8string().c_str(), errorBuffer,
+						static_cast<uint32_t>(sizeof(errorBuffer)));
+				}
+				catch (...)
+				{
+					ok = false;   // 契约违约(回调不得抛):当成"新建失败",不把异常带进编辑器
+				}
+				errorBuffer[sizeof(errorBuffer) - 1] = '\0';
+				if (!ok && error)
+					*error = errorBuffer[0] ? std::string(errorBuffer)
+						: ("plugin asset type '" + state->PluginId + "' could not create the asset");
+				return ok;
+			};
+		}
+
+		registry.Register(std::move(converted));
+		record.RegisteredAssetTypes.push_back(id);
+		Log(WePluginLogInfo, pluginId + ": registered asset type '" + id + "'");
+		return true;
+	}
+
+	bool PluginManager::UnregisterAssetType(Record& record, const char* rawId)
+	{
+		const std::string& pluginId = record.Entry.Manifest.Id;
+		const std::string id = rawId ? rawId : "";
+		if (id.empty())
+		{
+			Log(WePluginLogWarn, pluginId + ": asset type unregister rejected (empty id)");
+			return false;
+		}
+
+		const auto tracked = std::find(record.RegisteredAssetTypes.begin(),
+			record.RegisteredAssetTypes.end(), id);
+		if (tracked == record.RegisteredAssetTypes.end())
+		{
+			// 幂等口径:本插件没注册过 → true 且不报错;但别人的类型必须拒绝(不能顺手删掉)。
+			if (World::AssetTypeRegistry::Get().Find(id))
+			{
+				Log(WePluginLogWarn, pluginId + ": asset type '" + id
+					+ "' is not owned by this plugin; unregister ignored");
+				return false;
+			}
+			return true;
+		}
+
+		record.RegisteredAssetTypes.erase(tracked);
+		World::AssetTypeRegistry::Get().Unregister(id);
+		Log(WePluginLogInfo, pluginId + ": unregistered asset type '" + id + "'");
+		return true;
+	}
+
+	bool PluginManager::RegisterAssetImporter(Record& record, const WeAssetImporterDesc& desc)
+	{
+		const std::string& pluginId = record.Entry.Manifest.Id;
+		if (desc.StructSize < sizeof(WeAssetImporterDesc) || desc.AbiVersion != WE_PLUGIN_ABI_VERSION)
+		{
+			Log(WePluginLogWarn, pluginId + ": importer registration rejected (struct/abi mismatch size="
+				+ std::to_string(desc.StructSize) + " abi=" + std::to_string(desc.AbiVersion) + ")");
+			return false;
+		}
+		const std::string id = desc.Id ? desc.Id : "";
+		if (id.empty())
+		{
+			Log(WePluginLogWarn, pluginId + ": importer registration rejected (empty id)");
+			return false;
+		}
+		if (!desc.Matches || !desc.Import)
+		{
+			Log(WePluginLogWarn, pluginId + ": importer '" + id
+				+ "' registration rejected (Matches/Import callback missing)");
+			return false;
+		}
+		for (const Record& other : m_Records)
+		{
+			for (const RegisteredImporter& item : other.RegisteredImporters)
+			{
+				if (item.Id == id)
+				{
+					Log(WePluginLogWarn, pluginId + ": importer '" + id
+						+ "' is already registered (owner=" + other.Entry.Manifest.Id
+						+ "); registration ignored");
+					return false;
+				}
+			}
+		}
+
+		RegisteredImporter item;
+		item.Id = id;
+		item.Importer = std::make_shared<PluginImporterAdapter>(pluginId, id, desc);
+		record.RegisteredImporters.push_back(std::move(item));
+		Log(WePluginLogInfo, pluginId + ": registered importer '" + id + "'");
+		return true;
+	}
+
+	bool PluginManager::UnregisterAssetImporter(Record& record, const char* rawId)
+	{
+		const std::string& pluginId = record.Entry.Manifest.Id;
+		const std::string id = rawId ? rawId : "";
+		if (id.empty())
+		{
+			Log(WePluginLogWarn, pluginId + ": importer unregister rejected (empty id)");
+			return false;
+		}
+
+		auto tracked = std::find_if(record.RegisteredImporters.begin(),
+			record.RegisteredImporters.end(),
+			[&id](const RegisteredImporter& item) { return item.Id == id; });
+		if (tracked == record.RegisteredImporters.end())
+		{
+			for (const Record& other : m_Records)
+			{
+				if (&other == &record)
+					continue;
+				for (const RegisteredImporter& item : other.RegisteredImporters)
+				{
+					if (item.Id == id)
+					{
+						Log(WePluginLogWarn, pluginId + ": importer '" + id
+							+ "' is not owned by this plugin; unregister ignored");
+						return false;
+					}
+				}
+			}
+			return true;   // 幂等:没注册过 → true,不报错
+		}
+
+		record.RegisteredImporters.erase(tracked);
+		Log(WePluginLogInfo, pluginId + ": unregistered importer '" + id + "'");
+		return true;
+	}
+
+	void* PluginManager::LookupExport(const std::string& pluginId, const std::string& name,
+		uint32_t minVersion) const
+	{
+		const Record* record = FindRecord(pluginId);
+		if (!record || record->Entry.State != PluginState::Loaded || !record->Plugin)
+			return nullptr;
+		const WePlugin& plugin = *record->Plugin;
+		for (uint32_t index = 0; index < plugin.ExportCount && plugin.Exports; ++index)
+		{
+			const WePluginExport& item = plugin.Exports[index];
+			if (!item.Name || !item.Function)
+				continue;
+			if (name == item.Name && item.Version >= minVersion)
+				return item.Function;
+		}
+		return nullptr;
+	}
+
+	std::vector<std::shared_ptr<World::Asset::IAssetImporter>> PluginManager::PluginImporters() const
+	{
+		std::vector<std::shared_ptr<World::Asset::IAssetImporter>> importers;
+		for (const Record& record : m_Records)
+			for (const RegisteredImporter& item : record.RegisteredImporters)
+				importers.push_back(item.Importer);
+		return importers;
+	}
+
+	void PluginManager::ReclaimPluginRegistrations(Record& record)
+	{
+		const std::string& pluginId = record.Entry.Manifest.Id;
+		for (const std::string& id : record.RegisteredAssetTypes)
+		{
+			if (World::AssetTypeRegistry::Get().Unregister(id))
+				Log(WePluginLogWarn, pluginId + ": asset type '" + id
+					+ "' was not unregistered by the plugin; force-removed");
+		}
+		record.RegisteredAssetTypes.clear();
+		for (const RegisteredImporter& item : record.RegisteredImporters)
+			Log(WePluginLogWarn, pluginId + ": importer '" + item.Id
+				+ "' was not unregistered by the plugin; force-removed");
+		record.RegisteredImporters.clear();
 	}
 
 	void PluginManager::Reject(Record& record, std::string reason)
@@ -468,39 +955,47 @@ namespace World::Plugins
 
 		auto host = std::make_unique<HostApiBox>();
 		host->PluginId = pluginId;
+		host->Manager = this;
 		host->Api = m_HostApi;
 		host->Api.UserData = host.get();
 
 		bool registered = false;
+		std::string registerFailure;
+		m_ActiveBox = host.get();
 		try
 		{
 			registered = plugin->Register(context, host->Api);
 		}
 		catch (const std::exception& exception)
 		{
-			// 契约违约(回调不该抛):best-effort Unregister 回滚可能留下的半注册状态。
-			if (plugin->Unregister)
-			{
-				try { plugin->Unregister(context); }
-				catch (...) {}
-			}
-			if (error) *error = "plugin registration raised an exception: " + std::string(exception.what());
-			return Status::Rejected;
+			registerFailure = std::string("plugin registration raised an exception: ") + exception.what();
 		}
 		catch (...)
 		{
+			registerFailure = "plugin registration raised an unknown exception";
+		}
+
+		if (!registerFailure.empty())
+		{
+			// 契约违约(回调不该抛):best-effort Unregister 回滚可能留下的半注册状态。
+			// m_ActiveBox 保持有效 ⇒ 回滚里的 host.UnregisterAssetType/… 仍能按归属注销。
 			if (plugin->Unregister)
 			{
 				try { plugin->Unregister(context); }
 				catch (...) {}
 			}
-			if (error) *error = "plugin registration raised an unknown exception";
+			m_ActiveBox = nullptr;
+			ReclaimPluginRegistrations(record);
+			if (error) *error = registerFailure;
 			return Status::Rejected;
 		}
+		m_ActiveBox = nullptr;
 
 		if (!registered)
 		{
-			// 契约:Register 返回 false = 插件自己已清干净,宿主不调用 Unregister(防二次释放)。
+			// 契约:Register 返回 false = 插件自己已清干净,宿主不调用 Unregister(防二次释放);
+			// 兜底仍回收它留下的注册项(违约插件也不留悬空回调)。
+			ReclaimPluginRegistrations(record);
 			if (error) *error = "plugin registration failed (Register returned false)";
 			return Status::Rejected;
 		}
@@ -614,6 +1109,10 @@ namespace World::Plugins
 		{
 			failure = "plugin has no Unregister entry (contract violation)";
 		}
+
+		// T2 兜底:Unregister 之后,插件没自己注销的资产类型/导入器在这里回收
+		// (仍在注册表里的回调指向本 DLL,必须在释放 DLL 之前移除)。
+		ReclaimPluginRegistrations(record);
 
 		record.Plugin = nullptr;
 		record.Host.reset();

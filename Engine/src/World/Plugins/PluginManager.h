@@ -1,5 +1,6 @@
 #pragma once
 
+#include "World/Core/Asset/AssetImporter.h"
 #include "World/Plugins/PluginManifest.h"
 #include "World/Utils/DynamicLibrary.h"
 
@@ -36,8 +37,8 @@ namespace World::Plugins
 	//   * 成功加载过的插件在卸载时 Unregister **恰好调用一次**;
 	//   * 单个插件失败不影响其余插件(逐条目诊断在 Entries()/Find(),不做整批回滚)。
 	//
-	// T1 边界:不做能力注册面(资产类型/组件/命令/渲染钩子 = T2/T3)、不做打包(T5)、
-	// 不做热重载(T6)。
+	// T2 边界:注册面只到"资产类型 + 导入器 + C++ 导出查询";组件/系统/命令/面板/渲染钩子
+	// 与打包(T5)、热重载(T6)不在本类内。
 	class PluginManager
 	{
 	public:
@@ -87,12 +88,33 @@ namespace World::Plugins
 		// 传给插件 Register 的宿主能力表(T1 = 最小集合;字段尾部追加见 WePluginApi.h)。
 		const WeHostApi& HostApi() const { return m_HostApi; }
 
+		// ---- T2:能力注册面(WeHostApi 尾部字段的宿主实现;宿主代码也可直接调用)----
+
+		// 按 id + 名字 + 最低版本(含)查已加载插件的 C++ 导出表(WePlugin::Exports)。
+		// 未命中 = nullptr(查询失败是正常分支,不记日志)。
+		void* LookupExport(const std::string& pluginId, const std::string& name,
+			uint32_t minVersion) const;
+
+		// 已加载插件贡献的导入器(确定性顺序 = 条目顺序)。
+		// 现状:导入面没有单例注册表 —— `BuiltinImporters.h` 的 DefaultImporters() 返回一份
+		// 内置清单,由宿主(EditorCooker/测试)交给 CookPipeline。因此插件导入器由宿主把
+		// **这一份**追加进同一清单(兜底 PassThrough 之前);这里不复制第二套内置注册表。
+		// 生命周期:返回的适配器回调指向插件 DLL —— 调用方不得跨 Unload/UnloadAll 持有或使用。
+		std::vector<std::shared_ptr<World::Asset::IAssetImporter>> PluginImporters() const;
+
 	private:
 		// 每次成功加载的宿主侧状态:宿主表 + 日志前缀用的插件 id(插件只原样回传 UserData)。
 		struct HostApiBox
 		{
 			std::string PluginId;
+			PluginManager* Manager = nullptr;
 			WeHostApi Api;
+		};
+		// T2 注册账本的一条:插件注册的导入器(id + 适配对象)。
+		struct RegisteredImporter
+		{
+			std::string Id;
+			std::shared_ptr<World::Asset::IAssetImporter> Importer;
 		};
 		struct Record
 		{
@@ -100,6 +122,9 @@ namespace World::Plugins
 			std::unique_ptr<World::DynamicLibrary> Library;
 			const WePlugin* Plugin = nullptr;
 			std::unique_ptr<HostApiBox> Host;
+			// T2:本插件经 WeHostApi 注册过、尚未注销的项(卸载兜底回收 + 诊断用)。
+			std::vector<std::string> RegisteredAssetTypes;
+			std::vector<RegisteredImporter> RegisteredImporters;
 		};
 
 		Record* FindRecord(const std::string& id);
@@ -111,6 +136,22 @@ namespace World::Plugins
 		Status LoadRecord(size_t index, WorldContext& context, std::string* error);
 		Status UnloadRecord(Record& record, WorldContext& context, std::string* error, bool enforceDependents);
 		void Reject(Record& record, std::string reason);
+		// 解析插件调用宿主表时回传的 userData:只接受本管理器在 Register 期间交给插件的表,
+		// 或该条目自己的表(Unregister 期间);其它一律视为无效句柄。
+		Record* ResolveHostRecord(HostApiBox& box);
+		bool RegisterAssetType(Record& record, const WeAssetTypeDesc& desc);
+		bool UnregisterAssetType(Record& record, const char* id);
+		bool RegisterAssetImporter(Record& record, const WeAssetImporterDesc& desc);
+		bool UnregisterAssetImporter(Record& record, const char* id);
+		// 卸载/失败回滚的兜底:插件没自己注销的资产类型/导入器在这里移除并记警告(不留悬空回调)。
+		void ReclaimPluginRegistrations(Record& record);
+		// WeHostApi 函数指针桥:userData → HostApiBox → 转发(越界/空参一律干净失败)。
+		static bool BridgeRegisterAssetType(void* userData, const WeAssetTypeDesc* desc);
+		static bool BridgeUnregisterAssetType(void* userData, const char* id);
+		static bool BridgeRegisterAssetImporter(void* userData, const WeAssetImporterDesc* desc);
+		static bool BridgeUnregisterAssetImporter(void* userData, const char* id);
+		static void* BridgeLookupExport(void* userData, const char* pluginId, const char* name,
+			uint32_t minVersion);
 		static void LogBridge(void* userData, int level, const char* message);
 		static void Log(int level, const std::string& text);
 
@@ -118,5 +159,7 @@ namespace World::Plugins
 		std::vector<size_t> m_LoadSequence;  // 发现期算出的拓扑序(LoadAll 用)
 		WeHostApi m_HostApi;
 		int m_NextOrder = 0;
+		// Register 调用期间"当前有效的宿主表"(插件在 Register 里调宿主注册面时用它解析归属)。
+		HostApiBox* m_ActiveBox = nullptr;
 	};
 }

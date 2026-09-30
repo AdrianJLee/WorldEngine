@@ -1,0 +1,14 @@
+# PLUG-T2 引擎插件示例(方案 v2.1 §1/§4.1)。
+# 位置即 scope:本目录在 <引擎根>/plugins/ 下 ⇒ Engine 插件(不写 scope:,写了必须与位置一致)。
+# 能力:新资产类型(hello / .whello)+ 新导入器(hello.whello)+ C++ 导出表(hello.version)。
+id: engine.hello-import
+name: Hello Import
+version: 1.0.0
+abi: 1
+entry: WePluginQuery
+engine: ">=2.0"
+provides:
+  - asset.type
+  - asset.importer
+  - cxx.exports
+ship: auto

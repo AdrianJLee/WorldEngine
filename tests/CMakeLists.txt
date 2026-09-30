@@ -1225,6 +1225,8 @@ target_compile_definitions(WorldPluginTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
     NOMINMAX
     WE_PLUGIN_TEST_DLL_DIR="$<TARGET_FILE_DIR:WorldPluginTests>"
+    # T2a:示例引擎插件目录(用例 ④ 直接读真实清单,验证"包形态 + 清单"可被 Discover 解析)。
+    WE_PLUGIN_EXAMPLE_DIR="${CMAKE_SOURCE_DIR}/plugins/hello-import"
 )
 if(WIN32)
     target_compile_definitions(WorldPluginTests PRIVATE WLD_PLATFORM_WINDOWS)
@@ -1239,6 +1241,15 @@ set_tests_properties(World.Plugins PROPERTIES
     TIMEOUT 120
 )
 
+# T2a:引擎示例插件(plugins/hello-import)在配置期可见时,测试做**真实加载**(不只是清单解析):
+# 显式依赖保证 DLL 先于测试产出;路径用生成表达式取,不依赖 VS 多配置的输出层级。
+if(TARGET WePlugin_hello-import)
+    add_dependencies(WorldPluginTests WePlugin_hello-import)
+    target_compile_definitions(WorldPluginTests PRIVATE
+        WE_PLUGIN_EXAMPLE_DLL="$<TARGET_FILE:WePlugin_hello-import>"
+    )
+endif()
+
 set(WE_PLUGIN_TEST_DLL_TARGETS
     WePluginTestAlpha
     WePluginTestBeta
@@ -1249,6 +1260,10 @@ set(WE_PLUGIN_TEST_DLL_TARGETS
     WePluginTestNoRegister
     WePluginTestFailRegister
     WePluginTestThrowRegister
+    # T2a:宿主注册面正例 / 违约兜底负例 / 插件间 LookupExport。
+    WePluginTestHostApi
+    WePluginTestLeaky
+    WePluginTestLookup
 )
 foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
     add_library(${_we_plugin_target} SHARED "plugins/${_we_plugin_target}.cpp")

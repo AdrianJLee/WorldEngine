@@ -65,6 +65,22 @@ else()
     add_dependencies(Editor Runtime)
 endif()
 
+# --- 引擎插件(方案 §1:引擎插件住在 <引擎根>/plugins/<name>/,**可选**收集)--------
+#   * 存在性判断:plugins/<name>/CMakeLists.txt 存在才加入构建;没有 plugins/ = 零开销,
+#     与今天完全一致(不破坏现有 checkout 的构建)。
+#   * 子项目模式下宿主项目自己拥有二进制,不在这里收集插件(需要时由宿主显式加子目录)。
+#   * 产物落构建树(bin/<cfg>/plugins),不写仓库;新增插件目录后重跑 configure。
+option(WORLD_BUILD_ENGINE_PLUGINS "Build engine plugins under <engine>/plugins/**" ON)
+if(WORLD_BUILD_ENGINE_PLUGINS AND NOT WORLD_AS_SUBPROJECT)
+    file(GLOB WLD_ENGINE_PLUGIN_CMAKELISTS "${WLD_ENGINE_ROOT}/plugins/*/CMakeLists.txt")
+    foreach(_we_plugin_cmakelists IN LISTS WLD_ENGINE_PLUGIN_CMAKELISTS)
+        get_filename_component(_we_plugin_dir "${_we_plugin_cmakelists}" DIRECTORY)
+        get_filename_component(_we_plugin_name "${_we_plugin_dir}" NAME)
+        message(STATUS "WorldEngine engine plugin: ${_we_plugin_dir}")
+        add_subdirectory("${_we_plugin_dir}" "plugins/${_we_plugin_name}")
+    endforeach()
+endif()
+
 
 target_compile_definitions(World PUBLIC
     WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"
