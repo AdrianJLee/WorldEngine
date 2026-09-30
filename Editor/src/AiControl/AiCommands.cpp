@@ -1590,7 +1590,7 @@ namespace World
 				error = "需要先打开项目";
 				return false;
 			}
-			const auto appendEntry = [this](std::ostringstream& out,
+			const auto appendEntry = [this, plugins](std::ostringstream& out,
 				const Plugins::PluginEntry& entry)
 			{
 				const bool disabled = m_Shell.IsPluginDisabled(entry.Manifest.Id);
@@ -1611,6 +1611,8 @@ namespace World
 				out << ",\"diagnostic\":\"" << JsonEscape(entry.Diagnostic) << "\"";
 				out << ",\"loadError\":\""
 					<< JsonEscape(m_Shell.PluginLoadError(entry.Manifest.Id)) << "\"";
+				out << ",\"pendingReload\":"
+					<< (plugins->HasPendingReload(entry.Manifest.Id) ? "true" : "false");
 				out << "}";
 			};
 			if (cmd == "plugin.list")
@@ -1672,7 +1674,23 @@ namespace World
 				out << "],\"exports\":[";
 				for (size_t index = 0; index < entry->ExportNames.size(); ++index)
 					out << (index ? "," : "") << "\"" << JsonEscape(entry->ExportNames[index]) << "\"";
-				out << "]}";
+				out << "]";
+				// PLUG-T6:宿主侧注册账本(卸载后必须全 0)+ 活实例 + 未完成的重载快照状态。
+				const Plugins::PluginLedgerCounts ledgers = plugins->LedgerCounts(id);
+				out << ",\"ledgers\":{\"schema_types\":" << ledgers.Components
+					<< ",\"asset_types\":" << ledgers.AssetTypes
+					<< ",\"importers\":" << ledgers.Importers
+					<< ",\"editor_commands\":" << ledgers.EditorCommands
+					<< ",\"editor_panels\":" << ledgers.EditorPanels
+					<< ",\"script_functions\":" << ledgers.ScriptFunctions
+					<< ",\"total\":" << ledgers.Total() << "}";
+				out << ",\"liveInstances\":"
+					<< plugins->LiveComponentInstances(id, &Application::Get().GetContext());
+				out << ",\"hasPendingReload\":"
+					<< (plugins->HasPendingReload(id) ? "true" : "false");
+				out << ",\"loadedLibrary\":\""
+					<< JsonEscape(plugins->LoadedLibraryPath(id)) << "\"";
+				out << "}";
 				result = out.str();
 				return true;
 			}
@@ -1691,6 +1709,68 @@ namespace World
 				return false;
 			}
 			result = message;
+			return true;
+		}
+		// ---- PLUG-T6:插件卸载 / 两段式热重载 ------------------------------------------
+		//   plugin.unload <id>   卸载单个插件(T2c:有活组件实例 = 干净拒绝 + 可读原因;账本归零)
+		//   plugin.reload <id>   两段式:L(oaded) → 第一段(快照 + 卸载,释放 DLL 锁);
+		//                        未加载(+pending) → 第二段(载入新 DLL + 写回快照;失败回滚)
+		// 结果 JSON 字段 = 探针断言点(phase / rolledBack / instancesSnapshotted / instancesRestored)。
+		if (cmd == "plugin.unload" || cmd == "plugin.reload")
+		{
+			const std::string id = arg("id");
+			if (id.empty())
+			{
+				error = cmd + " needs id";
+				return false;
+			}
+			Plugins::PluginManager* plugins = m_Shell.GetPluginManager();
+			if (!plugins)
+			{
+				error = "需要先打开项目";
+				return false;
+			}
+			if (cmd == "plugin.unload")
+			{
+				std::string message;
+				if (!UnloadPlugin(id, &message))
+				{
+					error = message.empty() ? "plugin.unload failed" : message;
+					return false;
+				}
+				std::ostringstream out;
+				out << "{\"id\":\"" << JsonEscape(id) << "\",\"state\":\"unloaded\""
+					<< ",\"loaded\":" << plugins->LoadedCount() << "}";
+				result = out.str();
+				return true;
+			}
+			// plugin.reload:返回结构化阶段结果;回滚(rolledBack)= "已执行但本次重载失败",
+			// 与 module.reload 同口径——探针按 JSON 字段断言,不靠命令层 exit。
+			Plugins::PluginReloadResult reload;
+			std::string message;
+			const bool ok = ReloadPlugin(id, &reload, &message);
+			std::ostringstream out;
+			out << "{\"id\":\"" << JsonEscape(id) << "\""
+				<< ",\"phase\":\"" << Plugins::PluginReloadPhaseName(reload.ResultPhase) << "\""
+				<< ",\"ok\":" << (reload.Ok ? "true" : "false")
+				<< ",\"rolledBack\":" << (reload.RolledBack ? "true" : "false")
+				<< ",\"unloaded\":" << (reload.Unloaded ? "true" : "false")
+				<< ",\"instancesSnapshotted\":" << reload.InstancesSnapshotted
+				<< ",\"instancesRestored\":" << reload.InstancesRestored
+				<< ",\"instancesSkipped\":" << reload.InstancesSkipped
+				<< ",\"message\":\"" << JsonEscape(reload.Message) << "\""
+				<< ",\"loadedLibrary\":\"" << JsonEscape(reload.LibraryPath) << "\""
+				<< ",\"rollbackPath\":\"" << JsonEscape(reload.RollbackPath) << "\""
+				<< ",\"diagnostics\":[";
+			for (size_t index = 0; index < reload.Diagnostics.size(); ++index)
+				out << (index ? "," : "") << "\"" << JsonEscape(reload.Diagnostics[index]) << "\"";
+			out << "]}";
+			result = out.str();
+			if (!ok && !reload.RolledBack)
+			{
+				error = message.empty() ? "plugin.reload failed" : message;
+				return false;
+			}
 			return true;
 		}
 		// ---- PLUG-T3b:插件贡献的编辑器命令(命令面 = 面板按钮同一条执行路径)----

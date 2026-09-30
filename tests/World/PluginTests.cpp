@@ -2262,9 +2262,171 @@ namespace
 		CHECK(CoreLogFileText().find("did not register it") != std::string::npos);
 		manager.UnloadAll(context);
 	}
+
+	// ---- PLUG-T6:两段式热重载 + 账本审计 ---------------------------------------------
+	//
+	// 复用 T2c 的真插件 DLL(WePluginTestComponentStorage):写字段值 → 第一段(快照 + 卸载)
+	// → "外部重编"(把原 DLL 重新拷回包内;文件锁真的释放了才可能成功)→ 第二段(载入 +
+	// 写回)→ 坏 DLL 触发回滚(旧 DLL + 原状态)→ 活实例门(unload / 单类型注销都被拒)
+	// → 清实例后连续 load/unload 账本零增长。
+	void CasePluginHotReloadAndLedgerAudit()
+	{
+		// 与 T2c 同一理由:证据全部走 API(注册表 / 场景 / 返回状态 / 结果字段),日志静音。
+		const CoreLogMute mute;
+		const fs::path root = FreshRoot("plugin-reload");
+		ManifestFields storage;
+		storage.Id = "test.storage";
+		WritePlugin(root / "engine", "test.storage", "WePluginTestComponentStorage", BuildYaml(storage));
+
+		WorldContext context;
+		Schema::SchemaRegistry& schemas = context.Schemas();
+		PluginManager manager;
+		std::string error;
+		CHECK(manager.Discover(root / "engine", root / "project"));
+		CHECK(manager.LoadAll(context, &error) == PluginManager::Status::Ok);
+		CHECK(manager.LoadedCount() == 1);
+
+		const Schema::TypeSchema* health = schemas.Find("test.storage.Health");
+		CHECK(health != nullptr && health->Storage != nullptr);
+		const uint32_t healthId = health->Storage->ComponentId;
+
+		// 账本在加载后分类可见;活实例计数从 0 开始。
+		const PluginLedgerCounts loadedLedgers = manager.LedgerCounts("test.storage");
+		CHECK(loadedLedgers.Components == 3);       // Health + Shield + schema-only Legacy
+		CHECK(loadedLedgers.AssetTypes == 0 && loadedLedgers.Importers == 0);
+		CHECK(loadedLedgers.EditorCommands == 0 && loadedLedgers.EditorPanels == 0);
+		CHECK(loadedLedgers.ScriptFunctions == 0);
+		CHECK(loadedLedgers.Total() == 3);
+		CHECK(manager.LedgerTotals().Total() == 3);
+		CHECK(manager.LiveComponentInstances("test.storage", &context) == 0);
+
+		// 场景 + 实例 + 字段值(经宿主访问器写进插件声明布局的真实字节)。
+		World::Ref<World::Scene> scene = World::CreateRef<World::Scene>(context);
+		World::Entity entity = World::Entity::CreateEntity(scene.get(), "Reload Probe");
+		entity.AddComponent(healthId);
+		void* instance = entity.GetComponent(healthId);
+		CHECK(instance != nullptr);
+		health->Fields[0].Set(instance, Schema::Value(true));
+		health->Fields[1].Set(instance, Schema::Value(7));
+		health->Fields[2].Set(instance, Schema::Value(42.5f));
+		health->Fields[3].Set(instance, Schema::Value(glm::vec3(1.0f, 2.0f, 3.0f)));
+		health->Fields[4].Set(instance, Schema::Value(static_cast<uint8_t>(1)));
+		CHECK(manager.LiveComponentInstances("test.storage", &context) == 1);
+
+		// 单类型注销的活实例门(T6 对称补口):有实例 = false,类型/插件状态不动。
+		const auto unregisterFn = reinterpret_cast<bool (*)(const char*)>(
+			manager.LookupExport("test.storage", "storage.unregister", 1));
+		CHECK(unregisterFn != nullptr);
+		CHECK(!unregisterFn("test.storage.Health"));
+		CHECK(schemas.Find("test.storage.Health") != nullptr);
+		CHECK(manager.LoadedCount() == 1);
+
+		// 第一段:快照 + 从场景移除 + 卸载(释放 DLL 文件锁)。
+		PluginReloadResult first;
+		CHECK(manager.UnloadForReload("test.storage", context, scene.get(), &first)
+			== PluginManager::Status::Ok);
+		CHECK(first.ResultPhase == PluginReloadResult::Phase::Unloaded);
+		CHECK(first.Ok && first.Unloaded);
+		CHECK(first.InstancesSnapshotted == 1);
+		CHECK(manager.HasPendingReload("test.storage"));
+		CHECK(manager.LoadedCount() == 0);
+		CHECK(schemas.Find("test.storage.Health") == nullptr);
+		CHECK(manager.LedgerTotals().Total() == 0);                 // 卸载后宿主侧账本全 0
+		CHECK(manager.LiveComponentInstances("test.storage", &context) == 0);
+		CHECK(!entity.HasComponent(healthId));                      // 实例已从场景移除(值在快照里)
+		CHECK(!first.LibraryPath.empty() && !first.RollbackPath.empty());
+		CHECK(fs::is_regular_file(first.RollbackPath));             // 卸载前拷的旧 DLL(回滚用)
+
+		// "外部重编":已卸载 ⇒ 覆盖包内 DLL 必须成功(仍然加载着时 Windows 会拒绝写)。
+		const fs::path library = first.LibraryPath;
+		CHECK(fs::is_regular_file(library));
+		std::error_code copyError;
+		fs::copy_file(DllDirectory() / (std::string("WePluginTestComponentStorage") + kLibraryExtension),
+			library, fs::copy_options::overwrite_existing, copyError);
+		CHECK(!copyError);
+
+		// 第二段:载入新 DLL + 按字段 id 写回快照。
+		PluginReloadResult second;
+		CHECK(manager.LoadForReload("test.storage", context, scene.get(), &second)
+			== PluginManager::Status::Ok);
+		CHECK(second.ResultPhase == PluginReloadResult::Phase::Loaded);
+		CHECK(second.Ok && !second.RolledBack);
+		CHECK(second.InstancesRestored == 1 && second.InstancesSkipped == 0);
+		CHECK(!manager.HasPendingReload("test.storage"));
+		CHECK(manager.LoadedCount() == 1);
+		const Schema::TypeSchema* restored = schemas.Find("test.storage.Health");
+		CHECK(restored != nullptr && restored->Storage != nullptr);
+		CHECK(restored->Storage->ComponentId == healthId);          // 同档位同槽位 ⇒ id 复用
+		CHECK(entity.HasComponent(healthId));
+		void* restoredInstance = entity.GetComponent(healthId);
+		CHECK(restoredInstance != nullptr);
+		CHECK(std::get<bool>(restored->Fields[0].Get(restoredInstance)) == true);
+		CHECK(std::get<int32_t>(restored->Fields[1].Get(restoredInstance)) == 7);
+		CHECK(std::get<float>(restored->Fields[2].Get(restoredInstance)) == 42.5f);
+		CHECK(std::get<glm::vec3>(restored->Fields[3].Get(restoredInstance))
+			== glm::vec3(1.0f, 2.0f, 3.0f));
+		CHECK(std::get<uint8_t>(restored->Fields[4].Get(restoredInstance)) == 1);
+		CHECK(manager.LiveComponentInstances("test.storage", &context) == 1);
+		CHECK(manager.LedgerCounts("test.storage").Components == 3);
+
+		// 活实例时普通 Unload 干净拒绝(不偷数据);第一段才是显式带快照的卸载。
+		CHECK(manager.Unload("test.storage", context, &error)
+			== PluginManager::Status::HasLiveInstances);
+		CHECK(error.find("live component instances") != std::string::npos);
+		CHECK(manager.LoadedCount() == 1);
+
+		// 坏 DLL ⇒ 第二段失败但回滚到旧 DLL,原状态保留(实体 + 字段值都还在)。
+		PluginReloadResult brokenFirst;
+		CHECK(manager.UnloadForReload("test.storage", context, scene.get(), &brokenFirst)
+			== PluginManager::Status::Ok);
+		CHECK(brokenFirst.InstancesSnapshotted == 1);
+		WriteFileText(brokenFirst.LibraryPath, "PLUG-T6 deliberately broken library");
+		PluginReloadResult brokenSecond;
+		const PluginManager::Status brokenStatus =
+			manager.LoadForReload("test.storage", context, scene.get(), &brokenSecond);
+		CHECK(brokenStatus != PluginManager::Status::Ok);
+		CHECK(brokenSecond.RolledBack);
+		CHECK(brokenSecond.ResultPhase == PluginReloadResult::Phase::RolledBack);
+		CHECK(brokenSecond.InstancesRestored == 1);
+		CHECK(brokenSecond.Message.find("rolled back") != std::string::npos);
+		CHECK(!manager.HasPendingReload("test.storage"));
+		CHECK(manager.LoadedCount() == 1);
+		CHECK(manager.LoadedLibraryPath("test.storage") == brokenFirst.RollbackPath);
+		const Schema::TypeSchema* rolledBack = schemas.Find("test.storage.Health");
+		CHECK(rolledBack != nullptr && rolledBack->Storage != nullptr);
+		CHECK(entity.HasComponent(rolledBack->Storage->ComponentId));
+		void* rolledBackInstance = entity.GetComponent(rolledBack->Storage->ComponentId);
+		CHECK(rolledBackInstance != nullptr);
+		CHECK(std::get<float>(rolledBack->Fields[2].Get(rolledBackInstance)) == 42.5f);
+		CHECK(std::get<int32_t>(rolledBack->Fields[1].Get(rolledBackInstance)) == 7);
+		CHECK(manager.LedgerTotals().Total() == 3);
+
+		// 把规范路径上的 DLL 恢复成好产物(下一次 reload 仍指向"用户重编的那份")。
+		fs::copy_file(DllDirectory() / (std::string("WePluginTestComponentStorage") + kLibraryExtension),
+			brokenFirst.LibraryPath, fs::copy_options::overwrite_existing, copyError);
+		CHECK(!copyError);
+
+		// 清实例 → 普通卸载成功、账本归零;连续 N 轮 load/unload 账本不得增长。
+		entity.RemoveComponent(rolledBack->Storage->ComponentId);
+		CHECK(manager.LiveComponentInstances("test.storage", &context) == 0);
+		CHECK(manager.Unload("test.storage", context, &error) == PluginManager::Status::Ok);
+		CHECK(manager.LedgerTotals().Total() == 0);
+		CHECK(schemas.ListByModule("test.storage").empty());
+		const size_t entriesAfterLoad = manager.Count();
+		for (int round = 0; round < 5; ++round)
+		{
+			CHECK(manager.Load("test.storage", context, &error) == PluginManager::Status::Ok);
+			CHECK(manager.LedgerTotals().Total() == 3);
+			CHECK(manager.Unload("test.storage", context, &error) == PluginManager::Status::Ok);
+			CHECK(manager.LedgerTotals().Total() == 0);
+			CHECK(manager.LedgerCounts("test.storage").Total() == 0);
+			CHECK(manager.Count() == entriesAfterLoad);   // 条目数不随轮次增长
+		}
+		scene.reset();
+	}
 }
 
-int main()
+	int main()
 {
 	try
 	{
@@ -2303,6 +2465,7 @@ int main()
 		CasePluginPackagingReferenceGate();    // T5② 四类引用面 + 闭包外 ⇒ 失败 + tolerate_missing
 		CasePluginPackagingCopiesAndPackagedLoad();   // T5③ 产物拷贝 + 发行形态加载(缺件/多余 DLL)
 		CasePackagingManifestContracts();      // T5④ plugins: 块与 contributes: 的清单契约
+		CasePluginHotReloadAndLedgerAudit();    // T6 两段式热重载 + 回滚 + 活实例门 + 账本审计
 
 		std::error_code ec;
 		fs::remove_all(fs::temp_directory_path() / "worldengine-plugin-tests", ec);

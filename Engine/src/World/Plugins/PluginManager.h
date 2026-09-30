@@ -4,11 +4,13 @@
 #include "World/Plugins/PluginManifest.h"
 #include "World/Plugins/PluginHostServices.h"
 #include "World/Plugins/PluginComponentStorage.h"
+#include "World/Plugins/PluginReload.h"
 #include "World/Schema/Schema.h"
 #include "World/Utils/DynamicLibrary.h"
 
 #include <array>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,6 +18,7 @@
 namespace World
 {
 	class WorldContext;
+	class Scene;
 
 	namespace Schema
 	{
@@ -36,6 +39,24 @@ namespace World::Plugins
 		uint32_t PluginStructSize = 0;  // 插件自报的 StructSize(诊断/前向兼容判据用)
 		// 插件 WePlugin::Exports 的 Name 列表(加载成功后填充;面板/`plugin.info` 直接展示)。
 		std::vector<std::string> ExportNames;
+	};
+
+	// 宿主侧注册账本的一类计数(T6:plugin.info 的 ledgers 段 + 泄漏审计断言点)。
+	// 卸载路径(Unregister + 兜底回收)跑完后,一个插件的全部计数必须归零。
+	struct PluginLedgerCounts
+	{
+		std::size_t AssetTypes = 0;      // 资产类型(AssetTypeRegistry)
+		std::size_t Importers = 0;       // 导入器(宿主清单适配)
+		std::size_t Components = 0;      // schema 类型(组件)
+		std::size_t EditorCommands = 0;  // 编辑器命令
+		std::size_t EditorPanels = 0;    // 编辑器面板
+		std::size_t ScriptFunctions = 0; // Lua 函数(PluginScriptLibrary)
+
+		std::size_t Total() const
+		{
+			return AssetTypes + Importers + Components + EditorCommands + EditorPanels
+				+ ScriptFunctions;
+		}
 	};
 
 	// 插件加载器(对外主入口):发现 → 校验干净拒绝 → 依赖拓扑 → 加载 → 卸载。
@@ -66,6 +87,8 @@ namespace World::Plugins
 			// T2c:Unload 时它的 blob 组件在活场景里还有实例 —— 干净拒绝(先移除组件 /
 			// 销毁场景),避免把场景数据变成"没有 schema 的孤儿"。
 			HasLiveInstances,
+			// T6:热重载的"安全点"判定失败(脚本回调内 / 结构提交点 / Stop 流程中)。
+			NotSafePoint,
 		};
 		static const char* StatusName(Status status);
 
@@ -185,6 +208,28 @@ namespace World::Plugins
 		// 生命周期:返回的适配器回调指向插件 DLL —— 调用方不得跨 Unload/UnloadAll 持有或使用。
 		std::vector<std::shared_ptr<World::Asset::IAssetImporter>> PluginImporters() const;
 
+		// ---- T6:泄漏审计面 --------------------------------------------------------------
+		// 单个插件当前的宿主侧注册账本(未知 id = 全 0);Loaded 之外的条目自然全 0。
+		PluginLedgerCounts LedgerCounts(const std::string& id) const;
+		// 所有条目的账本合计(卸载全部后必须全 0;连续 load/unload 不得增长)。
+		PluginLedgerCounts LedgerTotals() const;
+		// 单个插件的 blob 组件在活场景里的实例总数(context 为空 = 全部)。
+		std::size_t LiveComponentInstances(const std::string& id,
+			const WorldContext* context = nullptr) const;
+
+		// ---- T6:两段式热重载(插件) ------------------------------------------------------
+		// 第一段:快照目标场景里的插件组件实例 → 从场景移除 → Unload(释放 DLL 文件锁)。
+		// 同 WorldContext 的其它活场景仍有实例 / 不能写(Play) = HasLiveInstances / 拒绝。
+		Status UnloadForReload(const std::string& id, WorldContext& context, Scene* scene,
+			PluginReloadResult* result = nullptr);
+		// 第二段:重读清单 → 载入新 DLL → 按字段 id 写回快照;失败回滚 .rollback 副本。
+		// 没有 pending 快照时等价于一次普通 Load(module.reload 的"未加载 → 加载"分支)。
+		Status LoadForReload(const std::string& id, WorldContext& context, Scene* scene,
+			PluginReloadResult* result = nullptr);
+		bool HasPendingReload(const std::string& id) const;
+		// 当前实际加载的 DLL 路径(未加载 = 空;回滚后 = 回滚副本路径)。
+		std::string LoadedLibraryPath(const std::string& id) const;
+
 	private:
 		// 每次成功加载的宿主侧状态:宿主表 + 日志前缀用的插件 id(插件只原样回传 UserData)。
 		struct HostApiBox
@@ -196,6 +241,9 @@ namespace World::Plugins
 			// 组件 schema 必须注册到宿主唯一的注册表实例上,而 WeHostApi 回调只拿得到本盒子,
 			// 所以在这里记住归属(生命周期 = WorldContext 的 Schemas() 成员,见 WorldContext.h)。
 			World::Schema::SchemaRegistry* Schemas = nullptr;
+			// T6:本次加载的 WorldContext(单类型注销的"活实例"门要用它做归属过滤;
+			// 生命周期 = 调用方持有的 context,和 Schemas 同源)。
+			WorldContext* Context = nullptr;
 		};
 		// T2 注册账本的一条:插件注册的导入器(id + 适配对象)。
 		struct RegisteredImporter
@@ -250,6 +298,17 @@ namespace World::Plugins
 			std::vector<RegisteredEditorPanel> RegisteredEditorPanels;
 			// T4:本插件注册的脚本函数(完整名;顺序 = 注册顺序)。
 			std::vector<std::string> RegisteredScriptFunctions;
+			// T6:当前实际加载的库路径(回滚后 = 回滚副本;Manifest.LibraryPath 仍是重编目标)。
+			std::filesystem::path LoadedLibraryPath;
+		};
+
+		// T6:第一段与第二段之间保留的实例快照(键 = 插件 id)。
+		struct PendingReload
+		{
+			std::vector<PluginComponentInstanceSnapshot> Instances;
+			std::filesystem::path TargetPath;     // 第一段记下的重编目标
+			std::filesystem::path RollbackPath;   // 卸载前拷贝的旧 DLL
+			std::uint32_t InstancesSnapshotted = 0;
 		};
 
 		Record* FindRecord(const std::string& id);
@@ -272,8 +331,10 @@ namespace World::Plugins
 		// 归属的注册表(由桥从 HostApiBox 取;Register 期间 record.Host 还没建立)。
 		bool RegisterComponent(Record& record, World::Schema::SchemaRegistry* registry,
 			const WeComponentDesc& desc);
+		// T6:单类型注销的活实例门需要归属 context(经由 Bridge 的 HostApiBox 传入;
+		// 为空 = 不按 context 过滤,与 CountLiveComponentInstances 同口径)。
 		bool UnregisterComponent(Record& record, World::Schema::SchemaRegistry* registry,
-			const char* id);
+			const char* id, WorldContext* context);
 		// T3b:编辑器命令 / 面板的注册 / 注销(WeHostApi 尾部字段的宿主实现;
 		// 真正的编辑器接线转发给 PluginEditorHost)。
 		bool RegisterEditorCommand(Record& record, const WeEditorCommandDesc& desc);
@@ -291,6 +352,19 @@ namespace World::Plugins
 		// PLUG-T5:声明(`plugin.we.yaml` 的 contributes)与运行时实际注册项的比对 ——
 		// 只对**声明了 contributes** 的插件生效;不一致逐条记 WARN(打包索引会漏报,必须可观测)。
 		void WarnContributionDrift(const Record& record);
+		// T6:重读单个插件的清单(拾取版本/声明变化;id 必须不变)并重解析产物路径。
+		// 失败 = false + 可读原因(调用方据此走回滚);成功时把 Rejected 条目复位为 Discovered。
+		bool RefreshManifest(Record& record, std::string* error);
+		// T6:从指定产物路径加载(回滚副本用);Manifest.LibraryPath 保持"重编目标"不变。
+		Status LoadFrom(const std::string& id, const std::filesystem::path& libraryPath,
+			WorldContext& context, std::string* error = nullptr);
+		// T6:第一段的快照 + 移除(只处理 scene 指向的场景;其它活场景的实例仍在 = 拒绝)。
+		Status SnapshotAndDrainInstances(Record& record, WorldContext& context, Scene* scene,
+			PendingReload& pending, PluginReloadResult& result);
+		// T6:第二段的写回(按新 schema 的字段 id/名字匹配;实体消失/字段缺失 = 诊断 + 计数)。
+		void RestoreInstances(const Record& record, WorldContext& context, Scene* scene,
+			const PendingReload& pending, PluginReloadResult& result);
+		void DiscardPendingReload(const std::string& id);
 		// 组件类型整模块注销的兜底(卸载/回滚/管理器析构共用)。
 		void ReclaimComponentTypes(Record& record, World::Schema::SchemaRegistry* schemas);
 		// T2c:插件组件在册槽位(存储 id 段的低位;空槽 = 可分配)。
@@ -323,6 +397,8 @@ namespace World::Plugins
 		std::vector<Record> m_Records;
 		std::vector<size_t> m_LoadSequence;  // 发现期算出的拓扑序(LoadAll 用)
 		std::vector<std::filesystem::path> m_DevBinaryRoots;   // 开发构建产物根(Discover 传入)
+		// T6:已快照但尚未写回的实例(键 = 插件 id);UnloadAll/Discover/析构时按数据丢失记 ERROR。
+		std::map<std::string, PendingReload> m_PendingReloads;
 		// T2c:插件组件存储的在册槽位(true = 已占用)。容量 = kPluginComponentSlotCount。
 		std::array<bool, kPluginComponentSlotCount> m_ComponentSlots {};
 		WeHostApi m_HostApi;

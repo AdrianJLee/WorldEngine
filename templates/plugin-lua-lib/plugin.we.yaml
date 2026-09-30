@@ -9,4 +9,9 @@ engine: ">=2.0"
 # 脚本库(真实注册:WeHostApi::RegisterScriptFunction;命名空间 = 插件 id 的最后一段):
 provides:
   - script.library
+# 打包期引用索引(T5):脚本函数命名空间(.luau 里以 `<命名空间>.函数` 调用)。
+# 命名空间由运行时按 **插件 id 的最后一段** 推导(src/plugin.cpp 的 LuaNamespace);
+# 保持 id 最后一段与插件目录名一致(向导默认如此),改 id 时同步改这一行。
+contributes:
+  script_namespaces: [{{PluginDir}}]
 ship: auto

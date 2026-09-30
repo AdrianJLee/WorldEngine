@@ -470,6 +470,7 @@ namespace World::Plugins
 			case Status::HasLoadedDependents: return "plugin still has loaded dependents";
 			case Status::NotLoaded: return "plugin is not loaded";
 			case Status::HasLiveInstances: return "plugin component still has live instances";
+			case Status::NotSafePoint: return "not at a plugin reload safe point";
 		}
 		return "unknown";
 	}
@@ -504,6 +505,12 @@ namespace World::Plugins
 		if (LoadedCount() > 0)
 			Log(WePluginLogError, "manager destroyed with " + std::to_string(LoadedCount())
 				+ " plugin(s) still loaded (host must call UnloadAll first)");
+		// T6:未完成第二段的实例快照只在内存里 —— 管理器析构 = 这些实例数据丢失。
+		for (const auto& [id, pending] : m_PendingReloads)
+			Log(WePluginLogError, "pending reload state for plugin '" + id + "' with "
+				+ std::to_string(pending.InstancesSnapshotted)
+				+ " snapshotted component instance(s) was dropped (host must finish reload before shutdown)");
+		m_PendingReloads.clear();
 		// T2:管理器析构会让 Library 一起释放。即使宿主违约(没先 UnloadAll),也必须把
 		// 指向这些 DLL 的注册回调从宿主注册面移除 —— 否则留下悬空回调。
 		// T2b:组件 schema 用 HostApiBox 记住的注册表句柄整模块注销(宿主必须在 WorldContext
@@ -704,7 +711,7 @@ namespace World::Plugins
 				+ ": component unregister rejected (invalid host handle)");
 			return false;
 		}
-		return box->Manager->UnregisterComponent(*record, box->Schemas, id);
+		return box->Manager->UnregisterComponent(*record, box->Schemas, id, box->Context);
 	}
 
 	// ---- T3b:编辑器扩展(命令 / 面板)桥 ------------------------------------------------
@@ -1300,7 +1307,7 @@ namespace World::Plugins
 	}
 
 	bool PluginManager::UnregisterComponent(Record& record, World::Schema::SchemaRegistry* registry,
-		const char* rawId)
+		const char* rawId, WorldContext* context)
 	{
 		const std::string& pluginId = record.Entry.Manifest.Id;
 		const std::string id = rawId ? rawId : "";
@@ -1329,6 +1336,23 @@ namespace World::Plugins
 			Log(WePluginLogWarn, pluginId + ": component '" + id
 				+ "' unregister rejected (no schema registry handle for this plugin)");
 			return false;
+		}
+
+		// ---- T6:活实例门(与 Unload / UnloadForReload 对称)----------------------------
+		// 注销类型会让 blob 实例变成"没有 schema 的孤儿"(序列化直接丢数据),所以有实例时
+		// 干净拒绝:先移除组件/销毁场景,再注销。schema-only 组件(没有存储)不受影响。
+		if (tracked->Storage)
+		{
+			const std::size_t instances = World::Scene::CountLiveComponentInstances(
+				tracked->Storage->ComponentId, context);
+			if (instances > 0)
+			{
+				Log(WePluginLogWarn, pluginId + ": component '" + id + "' unregister refused ("
+					+ std::to_string(instances) + " live component instance(s) use its storage id 0x"
+					+ Hex32(tracked->Storage->ComponentId)
+					+ "; remove the components or destroy the scene first)");
+				return false;
+			}
 		}
 
 		// SchemaRegistry 只有模块级注销 ⇒ 把该插件的其余类型按原顺序重新注册回同一模块。
@@ -1961,6 +1985,11 @@ namespace World::Plugins
 		m_LoadSequence.clear();
 		m_NextOrder = 0;
 		m_DevBinaryRoots = devBinaryRoots;
+		// T6:重新发现 = 丢掉进程内还没写回的实例快照(数据丢失,必须可观测)。
+		for (const auto& [id, pending] : m_PendingReloads)
+			Log(WePluginLogError, "discover dropped pending reload state for plugin '" + id + "' ("
+				+ std::to_string(pending.InstancesSnapshotted) + " snapshotted instance(s) lost)");
+		m_PendingReloads.clear();
 
 		ScanRoot(enginePluginsRoot, PluginScope::Engine);
 		ScanRoot(projectPluginsRoot, PluginScope::Project);
@@ -2306,6 +2335,8 @@ namespace World::Plugins
 		// T2b:组件 schema 注册到本次加载的 WorldContext 的注册表(插件经 WeHostApi 回调时
 		// 只拿得到本盒子,所以归属在这里记住)。
 		host->Schemas = &context.Schemas();
+		// T6:单类型注销的活实例门按本次加载的 WorldContext 过滤(与 Unload 同口径)。
+		host->Context = &context;
 		host->Api = m_HostApi;
 		host->Api.UserData = host.get();
 
@@ -2354,6 +2385,7 @@ namespace World::Plugins
 		record.Library = std::move(library);
 		record.Host = std::move(host);
 		record.Plugin = plugin;
+		record.LoadedLibraryPath = libraryPath;
 		entry.State = PluginState::Loaded;
 		entry.Order = m_NextOrder++;
 		entry.Diagnostic.clear();
@@ -2611,7 +2643,10 @@ namespace World::Plugins
 		std::string failure;
 		// T2b:插件可能在 Unregister 里注销自己注册的组件类型 —— 先刷新注册表归属。
 		if (record.Host)
+		{
 			record.Host->Schemas = &context.Schemas();
+			record.Host->Context = &context;
+		}
 		if (record.Plugin && record.Plugin->Unregister)
 		{
 			try
@@ -2639,6 +2674,7 @@ namespace World::Plugins
 		record.Plugin = nullptr;
 		record.Host.reset();
 		record.Library.reset();
+		record.LoadedLibraryPath.clear();
 		record.Entry.State = PluginState::Unloaded;
 		record.Entry.Order = -1;
 		Log(WePluginLogInfo, "unloaded id=" + id);
@@ -2676,5 +2712,11 @@ namespace World::Plugins
 			else if (status != Status::Ok)
 				Log(WePluginLogError, "unload failed id=" + *it + " reason=" + reason);
 		}
+		// T6:UnloadAll 是"收工"路径 —— 还有没写回的实例快照 = 数据丢失(记 ERROR 后清掉,
+		// 避免把过期快照带进下一次会话)。
+		for (const auto& [id, pending] : m_PendingReloads)
+			Log(WePluginLogError, "unload-all dropped pending reload state for plugin '" + id + "' ("
+				+ std::to_string(pending.InstancesSnapshotted) + " snapshotted instance(s) lost)");
+		m_PendingReloads.clear();
 	}
 }

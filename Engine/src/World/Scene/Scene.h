@@ -218,6 +218,15 @@ namespace World
 		// schema 会把场景数据变成"没有 schema 的孤儿"(序列化直接丢数据)。
 		static std::size_t CountLiveComponentInstances(entt::id_type componentId,
 			const WorldContext* context = nullptr);
+		// ---- PLUG-T6:插件组件热重载的定位辅助(不改场景语义)----
+		// 进程内活场景列表(稳定顺序 = 构造顺序;可按 WorldContext 过滤)。宿主只拿它定位
+		// "插件组件的实例在哪些场景里";真正的读写仍走各场景自己的 owner 线程 / 结构写门禁
+		// (GetRegistry 的 AssertStructuralWrite)—— Play/Simulate 场景因此不会被越权改写。
+		static std::vector<Scene*> LiveScenes(const WorldContext* context = nullptr);
+		// 按实体 UUID 在活场景里找实体(only != nullptr = 只查该场景;命中时写 out*,
+		// 未命中保持 out* 不变)。只读遍历,不触发结构写。
+		static bool FindLiveEntity(const UUID& id, const WorldContext* context = nullptr,
+			const Scene* only = nullptr, Scene** outScene = nullptr, entt::entity* outEntity = nullptr);
 		void DuplicateEntity(Entity entity);
 		entt::registry& GetRegistry();
 		const entt::registry& GetRegistry() const;

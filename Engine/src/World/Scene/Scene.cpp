@@ -23,6 +23,7 @@ namespace World
 		// 仍由场景 owner 线程负责 —— 查询走宿主主线程的卸载路径(与场景同线程)。
 		struct LiveSceneEntry
 		{
+			Scene* Owner = nullptr;
 			const WorldContext* Context = nullptr;
 			const entt::registry* Registry = nullptr;
 		};
@@ -30,10 +31,10 @@ namespace World
 		std::mutex g_LiveScenesMutex;
 		std::vector<LiveSceneEntry> g_LiveScenes;
 
-		void RegisterLiveScene(const WorldContext* context, const entt::registry* registry)
+		void RegisterLiveScene(Scene* owner, const WorldContext* context, const entt::registry* registry)
 		{
 			std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
-			g_LiveScenes.push_back({ context, registry });
+			g_LiveScenes.push_back({ owner, context, registry });
 		}
 
 		void UnregisterLiveScene(const entt::registry* registry)
@@ -130,7 +131,7 @@ namespace World
 
 	Scene::Scene(WorldContext& context) : m_Context(&context), m_OwnerThread(std::this_thread::get_id())
 	{
-		RegisterLiveScene(m_Context, &m_Registry);
+		RegisterLiveScene(this, m_Context, &m_Registry);
 	}
 
 	Scene::~Scene()
@@ -160,6 +161,48 @@ namespace World
 				count += storage->size();
 		}
 		return count;
+	}
+
+	std::vector<Scene*> Scene::LiveScenes(const WorldContext* context)
+	{
+		std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+		std::vector<Scene*> scenes;
+		scenes.reserve(g_LiveScenes.size());
+		for (const LiveSceneEntry& entry : g_LiveScenes)
+		{
+			if (context && entry.Context != context)
+				continue;
+			if (entry.Owner)
+				scenes.push_back(entry.Owner);
+		}
+		return scenes;
+	}
+
+	bool Scene::FindLiveEntity(const UUID& id, const WorldContext* context, const Scene* only,
+		Scene** outScene, entt::entity* outEntity)
+	{
+		std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+		for (const LiveSceneEntry& entry : g_LiveScenes)
+		{
+			if (!entry.Owner || !entry.Registry)
+				continue;
+			if (context && entry.Context != context)
+				continue;
+			if (only && entry.Owner != only)
+				continue;
+			for (const entt::entity handle : entry.Registry->view<UUIDComponent>())
+			{
+				const UUIDComponent& identity = entry.Registry->get<UUIDComponent>(handle);
+				if (static_cast<uint64_t>(identity.ID) != static_cast<uint64_t>(id))
+					continue;
+				if (outScene)
+					*outScene = entry.Owner;
+				if (outEntity)
+					*outEntity = handle;
+				return true;
+			}
+		}
+		return false;
 	}
 
 	void Scene::AssertOwnerThread() const

@@ -24,6 +24,8 @@ namespace World
 	// PLUG-T3:插件管理器(定义在 World/Plugins/PluginManager.h;这里只前置声明 ——
 	// 析构在 .cpp 定义,unique_ptr 的删除器能看到完整类型)。
 	namespace Plugins { class PluginManager; }
+	// PLUG-T6:两段式热重载的结果面(定义在 World/Plugins/PluginReload.h)。
+	namespace Plugins { struct PluginReloadResult; }
 
 	// PROJ-3/T1:`Editor.exe` 纯启动器模式(无参数 / `--launcher`,且没有 `--project`)——
 	// "不挂载任何项目"必须在 Application 构造**之前**生效:Application 的基类构造函数会
@@ -298,6 +300,14 @@ namespace World
 		bool SetPluginEnabled(const std::string& id, bool enabled, std::string* message = nullptr);
 		// 本次启动加载该插件时的失败原因(空 = 没有失败记录);与 PluginEntry::Diagnostic 并列。
 		std::string PluginLoadError(const std::string& id) const;
+		// ---- PLUG-T6:插件卸载 / 两段式热重载(AI plugin.unload / plugin.reload 的实现面)----
+		// 卸载单个插件:T2c 语义不变(有活组件实例 = 干净拒绝 + 可读原因);成功后收掉它的面板。
+		bool UnloadPlugin(const std::string& id, std::string* message = nullptr);
+		// 两段式热重载(与 module.reload 同款):loaded → 第一段(快照 + 卸载,释放 DLL 锁);
+		// unloaded(+pending) → 第二段(载入新 DLL + 写回快照;失败回滚 .rollback 副本)。
+		// 返回 = 本次调用成功(第二段失败但已回滚 ⇒ false + result.RolledBack=true)。
+		bool ReloadPlugin(const std::string& id, Plugins::PluginReloadResult* result = nullptr,
+			std::string* message = nullptr);
 
 		// ---- P2 W5-L1:资产热重载(材质/贴图自动重载;文档场景只提示 + 一键重开)----
 		// 文档场景(.wd)在磁盘上被外部改动 → 视口提示条;重开会走未保存确认(不静默丢弃修改)。

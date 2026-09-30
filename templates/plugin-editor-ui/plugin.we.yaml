@@ -10,4 +10,7 @@ engine: ">=2.0"
 provides:
   - editor.panel
   - editor.command
+# 打包期引用索引(T5):编辑器命令/面板不是"内容引用面"(不参与 cook 引用硬门),
+# 所以这里显式声明空贡献 —— 两面一致(= 没有可索引的内容引用)。
+contributes: {}
 ship: auto

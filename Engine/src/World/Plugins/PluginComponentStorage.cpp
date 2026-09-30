@@ -128,6 +128,92 @@ namespace World::Plugins
 		// [槽位][档位] → 填充函数(运行时按 (Size, slot) 查表;编译期全表展开)。
 		constexpr auto kPluginComponentBindingTable = MakePluginComponentBindingTable(
 			std::make_integer_sequence<uint32_t, kPluginComponentSlotCount>{});
+
+		// ---- PLUG-T6:实例级操作(按 id 的档位/槽位寻址;与上面同一张编译期展开表)----
+		struct PluginComponentInstanceOps
+		{
+			void* (*Value)(entt::registry&, entt::entity) = nullptr;
+			const void* (*ValueConst)(const entt::registry&, entt::entity) = nullptr;
+			bool (*Add)(entt::registry&, entt::entity) = nullptr;
+			bool (*Remove)(entt::registry&, entt::entity) = nullptr;
+		};
+
+		template <uint32_t Id>
+		void* ValueOfPluginComponentBlob(entt::registry& registry, entt::entity entity)
+		{
+			auto& storage = registry.storage<PluginComponentBlob<Id>>(Id);
+			return storage.contains(entity) ? &storage.get(entity) : nullptr;
+		}
+
+		template <uint32_t Id>
+		const void* ValueConstOfPluginComponentBlob(const entt::registry& registry, entt::entity entity)
+		{
+			const auto* storage = registry.storage<PluginComponentBlob<Id>>(Id);
+			return (storage && storage->contains(entity)) ? &storage->get(entity) : nullptr;
+		}
+
+		template <uint32_t Id>
+		bool AddOfPluginComponentBlob(entt::registry& registry, entt::entity entity)
+		{
+			auto& storage = registry.storage<PluginComponentBlob<Id>>(Id);
+			if (storage.contains(entity))
+				return false;
+			storage.emplace(entity);   // 值初始化 = 全零(与 AddPluginComponentBlob 同语义)
+			return true;
+		}
+
+		template <uint32_t Id>
+		bool RemoveOfPluginComponentBlob(entt::registry& registry, entt::entity entity)
+		{
+			auto& storage = registry.storage<PluginComponentBlob<Id>>(Id);
+			if (!storage.contains(entity))
+				return false;
+			storage.remove(entity);
+			return true;
+		}
+
+		template <uint32_t Tier, uint32_t Slot>
+		constexpr void FillPluginComponentInstanceOps(PluginComponentInstanceOps* out)
+		{
+			constexpr uint32_t Id = MakePluginComponentId(Tier, Slot);
+			out->Value = &ValueOfPluginComponentBlob<Id>;
+			out->ValueConst = &ValueConstOfPluginComponentBlob<Id>;
+			out->Add = &AddOfPluginComponentBlob<Id>;
+			out->Remove = &RemoveOfPluginComponentBlob<Id>;
+		}
+
+		template <uint32_t Slot, uint32_t... Tiers>
+		constexpr std::array<PluginComponentInstanceOps, sizeof...(Tiers)>
+			MakePluginComponentInstanceOpsRow(std::integer_sequence<uint32_t, Tiers...>)
+		{
+			std::array<PluginComponentInstanceOps, sizeof...(Tiers)> row {};
+			((FillPluginComponentInstanceOps<Tiers, Slot>(&row[Tiers])), ...);
+			return row;
+		}
+
+		template <uint32_t... Slots>
+		constexpr std::array<std::array<PluginComponentInstanceOps, kPluginComponentTierCount>,
+			sizeof...(Slots)>
+			MakePluginComponentInstanceOpsTable(std::integer_sequence<uint32_t, Slots...>)
+		{
+			return { MakePluginComponentInstanceOpsRow<Slots>(
+				std::make_integer_sequence<uint32_t, kPluginComponentTierCount>{})... };
+		}
+
+		// [槽位][档位] → 实例操作(与绑定表同一索引口径)。
+		constexpr auto kPluginComponentInstanceOpsTable = MakePluginComponentInstanceOpsTable(
+			std::make_integer_sequence<uint32_t, kPluginComponentSlotCount>{});
+
+		const PluginComponentInstanceOps* LookupPluginComponentInstanceOps(uint32_t componentId)
+		{
+			if ((componentId & kPluginComponentIdFlag) == 0)
+				return nullptr;
+			const uint32_t tier = (componentId >> 8) & 0x7u;
+			const uint32_t slot = componentId & 0xFFu;
+			if (tier >= kPluginComponentTierCount || slot >= kPluginComponentSlotCount)
+				return nullptr;
+			return &kPluginComponentInstanceOpsTable[slot][tier];
+		}
 	}
 
 	bool MakePluginComponentStorageBinding(uint32_t componentSize, uint32_t alignment,
@@ -166,5 +252,33 @@ namespace World::Plugins
 
 		kPluginComponentBindingTable[slot][tier](outBinding);
 		return true;
+	}
+
+	bool AddPluginComponentInstance(entt::registry& registry, uint32_t componentId,
+		entt::entity entity)
+	{
+		const PluginComponentInstanceOps* ops = LookupPluginComponentInstanceOps(componentId);
+		return ops && ops->Add ? ops->Add(registry, entity) : false;
+	}
+
+	bool RemovePluginComponentInstance(entt::registry& registry, uint32_t componentId,
+		entt::entity entity)
+	{
+		const PluginComponentInstanceOps* ops = LookupPluginComponentInstanceOps(componentId);
+		return ops && ops->Remove ? ops->Remove(registry, entity) : false;
+	}
+
+	void* PluginComponentInstancePointer(entt::registry& registry, uint32_t componentId,
+		entt::entity entity)
+	{
+		const PluginComponentInstanceOps* ops = LookupPluginComponentInstanceOps(componentId);
+		return ops && ops->Value ? ops->Value(registry, entity) : nullptr;
+	}
+
+	const void* PluginComponentInstancePointer(const entt::registry& registry, uint32_t componentId,
+		entt::entity entity)
+	{
+		const PluginComponentInstanceOps* ops = LookupPluginComponentInstanceOps(componentId);
+		return ops && ops->ValueConst ? ops->ValueConst(registry, entity) : nullptr;
 	}
 }

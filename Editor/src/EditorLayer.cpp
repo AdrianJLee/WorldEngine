@@ -515,6 +515,71 @@ namespace World
 		return true;
 	}
 
+	// ---- PLUG-T6:插件卸载 / 两段式热重载(与 module.reload 的 UX 同款)----------------
+	bool EditorLayer::UnloadPlugin(const std::string& id, std::string* message)
+	{
+		const auto fail = [message](const std::string& reason)
+		{
+			if (message)
+				*message = reason;
+			return false;
+		};
+		if (!m_PluginManager)
+			return fail(Wui::Tr("panel.plugins.notice.need_project", "Open a project first."));
+		std::string error;
+		const Plugins::PluginManager::Status status =
+			m_PluginManager->Unload(id, Application::Get().GetContext(), &error);
+		if (status != Plugins::PluginManager::Status::Ok)
+			return fail(error.empty() ? Plugins::PluginManager::StatusName(status) : error);
+		// 卸载即消失:插件注册命令/面板的兜底回收已经在 Unload 里完成,这里收掉窗口/标签/布局记录。
+		m_Shell.ClosePluginPanelsNotInRegistry();
+		WLD_CORE_INFO("[plugin] unloaded on request id={0}", id);
+		if (message)
+			*message = "plugin unloaded: " + id;
+		return true;
+	}
+
+	bool EditorLayer::ReloadPlugin(const std::string& id, Plugins::PluginReloadResult* result,
+		std::string* message)
+	{
+		const auto fail = [message](const std::string& reason)
+		{
+			if (message)
+				*message = reason;
+			return false;
+		};
+		if (!m_PluginManager)
+			return fail(Wui::Tr("panel.plugins.notice.need_project", "Open a project first."));
+		const Plugins::PluginEntry* entry = m_PluginManager->Find(id);
+		if (!entry)
+			return fail("no plugin with id '" + id + "'");
+
+		Plugins::PluginReloadResult local;
+		WorldContext& context = Application::Get().GetContext();
+		bool ok = false;
+		if (entry->State == Plugins::PluginState::Loaded)
+		{
+			// 第一段:快照 + 卸载(释放 DLL 文件锁;外部重编后再次调用本命令走第二段)。
+			ok = m_PluginManager->UnloadForReload(id, context, m_ActiveScene.get(), &local)
+				== Plugins::PluginManager::Status::Ok;
+			if (ok)
+				m_Shell.ClosePluginPanelsNotInRegistry();
+		}
+		else
+		{
+			// 第二段:载入新 DLL + 写回快照;失败时回滚到旧 DLL(旧状态保留)。
+			ok = m_PluginManager->LoadForReload(id, context, m_ActiveScene.get(), &local)
+				== Plugins::PluginManager::Status::Ok;
+			if (ok || local.RolledBack)
+				m_Shell.EnsurePluginPanelsFromRegistry();
+		}
+		if (result)
+			*result = local;
+		if (message)
+			*message = local.Message;
+		return ok;
+	}
+
 	void EditorLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();

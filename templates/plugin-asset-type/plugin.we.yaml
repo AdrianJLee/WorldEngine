@@ -10,4 +10,12 @@ engine: ">=2.0"
 provides:
   - asset.type
   - asset.importer
+# 打包期引用索引(T5):资产类型 + 导入器(内容里以文件扩展名出现)。
+contributes:
+  asset_types:
+    - id: {{PluginDir}}
+      extensions: [.{{PluginDir}}]
+  importers:
+    - id: {{PluginDir}}.asset
+      extensions: [.{{PluginDir}}]
 ship: auto

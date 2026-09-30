@@ -9,4 +9,7 @@ engine: ">=2.0"
 # 场景组件(T2b 起为真实注册、T2c 起能挂到场景实体上,见 src/plugin.cpp):
 provides:
   - scene.component
+# 打包期引用索引(T5):本插件提供的组件类型 id(.wd 里以类型全名出现)。
+contributes:
+  components: [{{PluginId}}.Health]
 ship: auto

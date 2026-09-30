@@ -33,6 +33,8 @@
 #include <cstdint>
 #include <string>
 
+#include <entt.hpp>
+
 namespace World::Plugins
 {
 	// 插件组件 id 的保留段标记(bit31)。
@@ -72,4 +74,20 @@ namespace World::Plugins
 	// 失败 = false + *error 可读原因(调用方记 WARN 并拒绝注册;不半注册)。
 	bool MakePluginComponentStorageBinding(uint32_t componentSize, uint32_t alignment,
 		uint32_t slot, World::Schema::StorageBinding* outBinding, std::string* error);
+
+	// ---- PLUG-T6:实例级操作(插件热重载的快照/回放用)--------------------------------
+	//
+	// 组件 id 必须落在保留段(`0x80000000 | 档位 << 8 | 槽位`);否则一律失败/返回 nullptr
+	// (不按普通引擎组件 id 解释)。Add = 给实体加一个清零 blob(实体已有 = false);
+	// Remove = 移除 blob(实体没有 = false);Pointer = blob 起始地址(实体没有 = nullptr)。
+	// 结构写仍走调用方持有的 registry —— 宿主侧入口(Scene::GetRegistry)自带 owner 线程与
+	// 结构写门禁,这里不重复实现。
+	bool AddPluginComponentInstance(entt::registry& registry, uint32_t componentId,
+		entt::entity entity);
+	bool RemovePluginComponentInstance(entt::registry& registry, uint32_t componentId,
+		entt::entity entity);
+	void* PluginComponentInstancePointer(entt::registry& registry, uint32_t componentId,
+		entt::entity entity);
+	const void* PluginComponentInstancePointer(const entt::registry& registry, uint32_t componentId,
+		entt::entity entity);
 }

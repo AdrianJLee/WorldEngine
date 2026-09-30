@@ -474,3 +474,48 @@ assets/scenes/main.wd (entity 0) → component 'com.example.health' → enable p
 - 端到端探针 `tools/agents/scratch/PLUG-T5/verify-plugin-packaging.py`:
   cook 干净包(引擎 + 项目插件都随包、摘要一致)→ 引用缺件 cook 失败(带引用者诊断)→
   `tolerate_missing` 降级(计数保留 + ERROR)→ Runtime 按发行清单加载 2 个插件,**20 PASS**。
+
+## 13. 热重载与泄漏审计(T6,2026-09-30)
+
+### 两段式(与 `module.reload` 同款;Windows 会锁住已加载 DLL)
+
+```
+plugin.reload <id>   # ① loaded → 第一段:快照实例 + 卸载(释放文件锁,plugin.list = unloaded)
+<外部重编该插件 DLL>  #    项目构建 / 引擎构建,产物路径与清单解析一致
+plugin.reload <id>   # ② 未加载 + pending → 第二段:重读清单 + 载入新 DLL + 写回快照
+```
+
+- **第一段**(`PluginManager::UnloadForReload`):按"实体 UUID + 组件 id + 字段 id"快照**目标场景**里
+  该插件的 blob 组件实例(字段值走 schema 访问器,卸载前完成)→ 从场景移除 → 卸载(账本回收 +
+  `Unregister` + `FreeLibrary`)。卸载前把当前 DLL 拷成同目录 `<名>.rollback-<插件ABI>.dll`(只留最近一份)。
+  同一 WorldContext 的**其它活场景**仍有实例,或场景处于 Play/Simulate(结构写门禁)= 干净拒绝,
+  理由可读(与 T2c 的 `Unload` 活实例门同口径;普通 `plugin.unload` 不偷数据,仍拒绝)。
+- **第二段**(`PluginManager::LoadForReload`):重读 `plugin.we.yaml`(拾取版本 / `contributes` 变化;
+  id 变化 = 干净拒绝并要求重新发现)→ 载入新 DLL → 按**字段 id**(字段名 FNV-1a,回退字段名)把快照
+  写回;实体消失 / 字段被删 / 字段 kind 变化 = 逐条诊断 + 计数(`instancesSkipped`),不写错值。
+  任一步失败 ⇒ 载入回滚副本(旧 DLL)并用旧 schema 写回原状态:`rolledBack=true` + 可读诊断。
+- 快照在管理器内存里:**没完成第二段就退出编辑器 = 那些实例数据丢失**;管理器析构 / `UnloadAll` /
+  重新 `Discover` 会为未完成的 pending 记 ERROR(不静默)。
+- `plugin.reload` 在"未加载且没有 pending"时等价于一次普通 `Load`(与 `module.reload` 的未加载分支一致)。
+
+### AI 命令
+
+| 命令 | 语义 |
+| --- | --- |
+| `plugin.unload <id>` | 卸载单个插件(T2c:有活组件实例 = 干净拒绝 + 可读原因);成功后关掉它的面板 |
+| `plugin.reload <id>` | 两段式(上表);返回 JSON:`phase`(unloaded/loaded/rolled-back)+ `rolledBack` + `instancesSnapshotted/restored/skipped` + `message` + `diagnostics[]` |
+| `plugin.info <id>` | 新增 `ledgers`(schema 类型 / 资产类型 / 导入器 / 编辑器命令 / 编辑器面板 / 脚本函数计数 + `total`)、`liveInstances`、`hasPendingReload`、`loadedLibrary` |
+
+### 泄漏审计口径
+
+宿主侧注册账本 = 资产类型 + 导入器 + 组件 schema 类型 + 编辑器命令 + 编辑器面板 + 脚本函数。
+**卸载路径跑完必须全部归零**(`PluginManager::LedgerTotals()`);插件没自己注销的项由兜底回收
+强删并记 WARN,`plugin.info` 的 `ledgers` 是可读证据。`World.Plugins` 的 T6 用例还做"连续 5 轮
+load/unload 账本零增长 + 条目数不增长"。
+
+### 验证
+
+- 单测 `World.Plugins`(T6):快照/写回(5 个字段全等)、坏 DLL 回滚(旧 DLL + 原字段值)、
+  有活实例时 `Unload` 与**单类型 `UnregisterComponent`** 都被拒、清实例后卸载成功、5 轮账本零增长;
+- 端到端探针 `tools/agents/scratch/PLUG-T6/verify-plugin-reload.py`:真项目插件 + 真项目构建
+  (`v1` → `v2` 标记证明加载的是新 DLL)+ 真场景字段值跨重载保留 + 坏 DLL 回滚 + 账本归零 + 活实例卸载被拒。

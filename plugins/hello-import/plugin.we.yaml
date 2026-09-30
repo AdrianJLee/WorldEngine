@@ -11,4 +11,12 @@ provides:
   - asset.type
   - asset.importer
   - cxx.exports
+# 打包期引用索引(T5):内容里的 .whello 引用能映射回本插件(cook 不加载 DLL)。
+contributes:
+  asset_types:
+    - id: hello
+      extensions: [.whello]
+  importers:
+    - id: hello.whello
+      extensions: [.whello]
 ship: auto
