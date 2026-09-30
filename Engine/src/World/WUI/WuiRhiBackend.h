@@ -6,6 +6,7 @@
 #include "World/Renderer/Renderer.h"
 
 #include <glm/glm.hpp>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -55,6 +56,14 @@ namespace World::Wui
 		// (实测退出码 0xC0000005)。独占各窗口的 WUI 后端必须显式走这一步。
 		void ReleaseDeviceResources();
 
+		// ---- HOTR-P1-T3:引擎 shader 热重载 ----
+		// 静态代数 +1:所有**活实例**在下一帧 Render → EnsureResources 里比较代数,只重建
+		// shader + pipeline(命令缓冲/UBO/描述符集/纹理集/字体/离屏 UI 目标一个都不动)。
+		// 返回本次将重建管线的活实例数(主窗口 + 浮窗;惰性重建在各自下一帧生效)。
+		// 失败时保留旧 shader/管线(记 ERROR),并把该代数记为"已处理" —— 修好源码后的
+		// 下一次 ReloadShaders(新代数)才会再试,不会每帧重跑编译器。
+		static uint32_t InvalidateShaders();
+
 	private:
 		struct Glyph
 		{
@@ -79,6 +88,11 @@ namespace World::Wui
 		};
 
 		void EnsureResources();
+		// 编译 Wui_Ui.slang 并按既有描述建管线;失败返回 false + error,**不动**任何既有句柄。
+		// reload=false = 启动路径(沿用断言编译入口);true = 热重载(非断言入口)。
+		bool BuildShaderAndPipeline(const Rhi::Handle<Rhi::Device>& device, bool reload,
+			Rhi::Handle<Rhi::Shader>& outShader, Rhi::Handle<Rhi::Pipeline>& outPipeline,
+			std::string* error);
 		void ReleaseResources();
 		void DrawList(const std::vector<WuiDrawCommand>& commands);
 		void PushQuad(const WuiRect& rect, const WuiColor& color, const WuiRect& uv);
@@ -125,6 +139,10 @@ namespace World::Wui
 		// 帧深 2:命令缓冲/UBO/全局描述符集/纹理描述符集/顶点索引缓冲都按帧槽位环形。
 		// 与 Renderer::FramesInFlight 同源(见 Renderer.h 的说明)。
 		static constexpr uint32_t kFramesInFlight = Renderer::FramesInFlight;
+		// 引擎 shader 失效代(静态,= 进程内所有实例共享)与本实例已见代。
+		static uint32_t s_ShaderGeneration;
+		static uint32_t s_LiveInstances;
+		uint32_t m_SeenShaderGeneration = 0;
 		uint32_t FrameSlot() const;
 		uint64_t SlotVertexBase() const;
 		uint64_t SlotIndexBase() const;

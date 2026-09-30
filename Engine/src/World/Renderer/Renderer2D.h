@@ -5,6 +5,7 @@
 #include "World/Renderer/EditorCamera.h"
 #include "World/Scene/Components.h"
 
+#include <string>
 #include <vector>
 
 namespace World
@@ -17,6 +18,9 @@ namespace World
 	{
 	public:
 		static void Init();
+		// HOTR-P1-T3:引擎内建 shader 热重载(只重建 shader + 管线;成功返回重建的管线数,
+		// 失败保留旧管线、返回 0 并把可读原因写进 error)。
+		static uint32_t ReloadShaders(std::string* error);
 		static void Shutdown();
 		static void BeginScene(const Camera& camera, const glm::mat4& transform, Rhi::Handle<Rhi::CommandBuffer> commandBuffer);
 

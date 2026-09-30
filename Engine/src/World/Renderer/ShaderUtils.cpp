@@ -13,6 +13,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -380,12 +381,17 @@ namespace World
 		s_ToolInvocations.store(0, std::memory_order_relaxed);
 	}
 
-	std::vector<char> ShaderCompiler::CompileOrLoad(const std::string& hlslPath, const std::string& entryPoint,
-		const std::string& profile)
+	// HOTR-P1-T3:共享编译核心 —— 既有断言入口(CompileOrLoad/CompileStage)与非断言热重载入口
+	// (TryCompileOrLoad/TryCompileStage)共用同一实现,避免"两份编译逻辑"漂移。
+	// 失败只填 failure/error:**不记日志、不断言** —— 日志与断言口径由调用方保持。
+	bool ShaderCompiler::CompileCore(const std::string& hlslPath, const std::string& entryPoint,
+		const std::string& profile, std::vector<char>& out, CompileFailure& failure, std::string& error)
 	{
-		const bool vulkan = Renderer::GetAPI() == RendererAPI::API::Vulkan;
+		failure = CompileFailure::None;
+		error.clear();
+		out.clear();
 
-		if (vulkan)
+		if (Renderer::GetAPI() == RendererAPI::API::Vulkan)
 		{
 			// 1) 烘焙产物(发行形态;宿主挂载 VFS 后注册)。
 			const std::string logical = ArtifactLogicalPath(hlslPath, entryPoint, true);
@@ -396,7 +402,8 @@ namespace World
 				{
 					s_CookedHits.fetch_add(1, std::memory_order_relaxed);
 					LogCookedHit(logical, bytes.size());
-					return std::vector<char>(bytes.begin(), bytes.end());
+					out.assign(bytes.begin(), bytes.end());
+					return true;
 				}
 			}
 
@@ -405,21 +412,30 @@ namespace World
 			const fs::path sourceAbs = fs::absolute(fs::path(WLD_WORLD_DIR) / hlslPath, ec);
 			if (ec || !fs::is_regular_file(sourceAbs, ec))
 			{
-				WLD_CORE_ERROR("Shader '{0}' has no cooked artifact ('{1}') and no source in the content tree.",
-					hlslPath, logical);
-				WLD_CORE_ASSERT(false, "Shader source missing and no cooked artifact available");
-				return {};
+				failure = CompileFailure::SourceMissing;
+				error = "no cooked artifact '" + logical + "' and no source in the content tree: " + hlslPath;
+				return false;
 			}
 
 			std::string modulePath;
-			std::string error;
-			if (!EnsureModule(sourceAbs, entryPoint, profile, /*glTarget*/ false, modulePath, error))
+			std::string moduleError;
+			if (!EnsureModule(sourceAbs, entryPoint, profile, /*glTarget*/ false, modulePath, moduleError))
 			{
-				WLD_CORE_ERROR("Shader '{0}' ({1}) compile failed: {2}", hlslPath, entryPoint, error);
-				WLD_CORE_ASSERT(false, "Shader compilation failed");
-				return {};
+				failure = CompileFailure::ToolFailure;
+				error = moduleError;
+				return false;
 			}
-			return ReadBinaryFile(modulePath);
+			std::vector<char> bytes = ReadBinaryFile(modulePath);
+			if (bytes.empty())
+			{
+				// 既有断言路径在这里返回空字节码(ReadBinaryFile 自己记了 ERROR);
+				// 热重载路径把它当**失败**处理(空模块不得进 CreateShader/CreatePipeline)。
+				failure = CompileFailure::EmptyModule;
+				error = "compiled module is empty: " + modulePath;
+				return false;
+			}
+			out = std::move(bytes);
+			return true;
 		}
 
 		// ---- OpenGL:GL 目标 SPIR-V(GL 4.6 core + GL_ARB_gl_spirv)----
@@ -428,11 +444,59 @@ namespace World
 		std::vector<uint8_t> spirv;
 		std::string reason;
 		if (TryLoadGlSpirVStage(hlslPath, entryPoint, profile, spirv, reason))
-			return std::vector<char>(spirv.begin(), spirv.end());
+		{
+			out.assign(spirv.begin(), spirv.end());
+			return true;
+		}
+		failure = CompileFailure::GlUnavailable;
+		error = reason;
+		return false;
+	}
 
-		WLD_CORE_ERROR("Shader '{0}' ({1}): no GL SPIR-V module available: {2}", hlslPath, entryPoint, reason);
+	std::vector<char> ShaderCompiler::CompileOrLoad(const std::string& hlslPath, const std::string& entryPoint,
+		const std::string& profile)
+	{
+		std::vector<char> bytes;
+		CompileFailure failure = CompileFailure::None;
+		std::string error;
+		if (CompileCore(hlslPath, entryPoint, profile, bytes, failure, error))
+			return bytes;
+
+		// 既有路径 = "失败即断言"(日志与断言消息逐条保留,行为不变)。
+		if (Renderer::GetAPI() == RendererAPI::API::Vulkan)
+		{
+			if (failure == CompileFailure::SourceMissing)
+			{
+				WLD_CORE_ERROR("Shader '{0}' has no cooked artifact ('{1}') and no source in the content tree.",
+					hlslPath, ArtifactLogicalPath(hlslPath, entryPoint, true));
+				WLD_CORE_ASSERT(false, "Shader source missing and no cooked artifact available");
+				return {};
+			}
+			if (failure == CompileFailure::ToolFailure)
+			{
+				WLD_CORE_ERROR("Shader '{0}' ({1}) compile failed: {2}", hlslPath, entryPoint, error);
+				WLD_CORE_ASSERT(false, "Shader compilation failed");
+				return {};
+			}
+			// EmptyModule:ReadBinaryFile 已记 ERROR;既有行为是返回空字节码(**不断言**)。
+			return {};
+		}
+
+		WLD_CORE_ERROR("Shader '{0}' ({1}): no GL SPIR-V module available: {2}", hlslPath, entryPoint, error);
 		WLD_CORE_ASSERT(false, "GL shader stage has no SPIR-V module");
 		return {};
+	}
+
+	bool ShaderCompiler::TryCompileOrLoad(const std::string& hlslPath, const std::string& entryPoint,
+		const std::string& profile, std::vector<char>& out, std::string* error)
+	{
+		CompileFailure failure = CompileFailure::None;
+		std::string reason;
+		if (CompileCore(hlslPath, entryPoint, profile, out, failure, reason))
+			return true;
+		if (error)
+			*error = reason.empty() ? std::string("shader compilation failed") : reason;
+		return false;
 	}
 
 	Rhi::ShaderStageSource ShaderCompiler::CompileStage(Rhi::ShaderStage stage, const std::string& hlslPath,
@@ -446,6 +510,7 @@ namespace World
 		{
 			// Vulkan:Slang 的 Vulkan profile 出 SPIR-V(模块入口名 = 源里的入口名,
 			// 与 pipeline 的 pName 一致 —— slangc 用 -fvk-use-entrypoint-name)。
+			// 保持既有"失败即断言"口径:热重载要走 TryCompileStage。
 			const std::vector<char> bytes = CompileOrLoad(hlslPath, entryPoint, profile);
 			out.SpirV.assign(bytes.begin(), bytes.end());
 			return out;
@@ -463,6 +528,24 @@ namespace World
 		// Slang-T6b:没有 GLSL 文本兜底 —— 留 ERROR,返回空阶段(调用方按"该阶段不可用"处理)。
 		WLD_CORE_ERROR("Shader '{0}' ({1}): GL SPIR-V unavailable — {2}", hlslPath, entryPoint, reason);
 		return out;
+	}
+
+	bool ShaderCompiler::TryCompileStage(Rhi::ShaderStage stage, const std::string& hlslPath,
+		const std::string& entryPoint, const std::string& profile,
+		Rhi::ShaderStageSource& out, std::string* error)
+	{
+		std::vector<char> bytes;
+		std::string reason;
+		if (!TryCompileOrLoad(hlslPath, entryPoint, profile, bytes, &reason))
+		{
+			if (error)
+				*error = reason;
+			return false;
+		}
+		out.Stage = stage;
+		out.EntryPoint = entryPoint;
+		out.SpirV.assign(bytes.begin(), bytes.end());
+		return true;
 	}
 
 	bool ShaderCompiler::TryLoadGlSpirVStage(const std::string& hlslPath, const std::string& entryPoint,

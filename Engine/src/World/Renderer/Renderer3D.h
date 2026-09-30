@@ -7,6 +7,7 @@
 
 #include <glm/glm.hpp>
 
+#include <string>
 #include <vector>
 
 namespace World
@@ -91,6 +92,10 @@ namespace World
 	{
 	public:
 		static void Init();
+		// HOTR-P1-T3:引擎内建 shader 热重载 —— 只重建 shader + 7 条管线(描述符布局/通道/
+		// 阴影资源/表面管线环境全部保留)。成功返回重建的管线数;失败保留旧管线、返回 0 并把
+		// 可读原因写进 error。
+		static uint32_t ReloadShaders(std::string* error);
 		static void Shutdown();
 
 		// ---- D4/D8a2:光照上限与阴影贴图规格 ----

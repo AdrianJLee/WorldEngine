@@ -38,6 +38,18 @@ namespace World
 		static Rhi::ShaderStageSource CompileStage(Rhi::ShaderStage stage, const std::string& hlslPath,
 			const std::string& entryPoint, const std::string& profile);
 
+		// ---- 热重载:非断言编译入口(HOTR-P1-T3,append-only) ----
+		// 与 CompileOrLoad/CompileStage 走**同一条编译核心**(烘焙产物 → 内容寻址缓存 → slangc,
+		// 见 CompileCore),但**不做 WLD_CORE_ASSERT**:失败返回 false 并把可读原因写进 error。
+		// 空模块 / 空 stage 一律视为失败 —— 调用方不得把空字节码交给 CreateShader/CreatePipeline
+		// (GL 侧 OpenGLPipeline 对"没有可编译阶段"是断言)。
+		// 既有断言版入口行为不变:启动期"失败即断言"仍然保留。
+		static bool TryCompileOrLoad(const std::string& hlslPath, const std::string& entryPoint,
+			const std::string& profile, std::vector<char>& out, std::string* error = nullptr);
+		static bool TryCompileStage(Rhi::ShaderStage stage, const std::string& hlslPath,
+			const std::string& entryPoint, const std::string& profile,
+			Rhi::ShaderStageSource& out, std::string* error = nullptr);
+
 		// ---- 烘焙产物解析(宿主挂载 VFS 后注册) ----
 		// 逻辑路径 = shaders/<stem>.<EntryPoint>.spv(Vulkan)| shaders/<stem>.<EntryPoint>.gl.spv(GL)。
 		using ArtifactResolver = std::function<bool(const std::string& logicalPath, std::vector<uint8_t>& out)>;
@@ -86,6 +98,19 @@ namespace World
 			const std::filesystem::path& outputDir);
 
 	private:
+		// 共享编译核心的失败类别(CompileCore 只填类别 + 可读原因,不记日志、不断言 ——
+		// 日志/断言口径由调用方保持:既有入口 = ERROR + ASSERT,热重载入口 = 回传 error)。
+		enum class CompileFailure
+		{
+			None = 0,
+			SourceMissing,    // 烘焙产物与源码树都没有
+			ToolFailure,      // 读取源码 / slangc / 缓存产物失败
+			EmptyModule,      // 模块文件存在但读不出字节(既有路径保持"返回空"行为,不断言)
+			GlUnavailable,    // GL 目标拿不到可摄入的 SPIR-V
+		};
+		// 目标后端的 SPIR-V(内容寻址缓存;未命中时 slangc 现场编译)与 GL 目标解析的共享实现。
+		static bool CompileCore(const std::string& hlslPath, const std::string& entryPoint,
+			const std::string& profile, std::vector<char>& out, CompileFailure& failure, std::string& error);
 		// 目标后端的 SPIR-V(内容寻址缓存;未命中时 slangc 现场编译)。
 		static bool EnsureModule(const std::filesystem::path& sourceAbs, const std::string& entryPoint,
 			const std::string& profile, bool glTarget, std::string& outPath, std::string& error);

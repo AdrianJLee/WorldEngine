@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 
 namespace World
 {
@@ -18,12 +19,30 @@ namespace World
 	};
 	struct PresentTarget;
 
+	// HOTR-P1-T3:引擎内建 shader(`Engine/assets/shaders/*.slang`)热重载的结果面。
+	// owner = 参与重建的渲染子系统(2D / 3D / WUI);每个 owner 自己保证"先建新、成功再替换"。
+	struct WLD_API ShaderReloadResult
+	{
+		uint32_t Owners = 0;      // 参与重建的渲染 owner 数(2D/3D/WUI)
+		uint32_t Pipelines = 0;   // 重建出的管线总数(WUI 为"本次将重建的活实例数",见实现)
+		uint32_t Failed = 0;      // 重建失败并保留旧管线的 owner 数
+		std::string Error;        // 首个失败的可读原因(可空)
+	};
+
 	class Renderer
 	{
 	public:
 		static void Init();
 		static void Init(const std::string& backend);
 		static void Shutdown();
+		// ---- HOTR-P1-T3:引擎内建 shader 热重载 ----
+		// 按 2D → 3D → WUI 顺序重建各 owner 的 shader + 管线(**只**重建 shader/管线:
+		// 渲染通道/描述符布局/缓冲/渲染目标/字体等全部保留);每个 owner 先建新句柄、成功后再
+		// 替换,旧句柄走 QueueRelease 延迟释放(Vulkan 在飞命令缓冲仍引用旧 VkPipeline)。
+		// 失败保留旧管线并计入 Failed(Error = 首个可读原因)。WUI 用静态代数失效,多实例
+		// (主窗口 + 浮窗)在各自下一帧 EnsureResources 里重建。
+		// 只允许在**主线程帧边界(渲染开始前)**调用。
+		static ShaderReloadResult ReloadShaders();
 		// ---- 帧节拍与资源回收(B0:去阻塞同步) ----
 		// 帧开始:等待本槽位的 fence(上一轮使用该槽位的提交已完成),并执行到期的延迟释放。
 		static void BeginFrame();

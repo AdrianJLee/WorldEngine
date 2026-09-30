@@ -2595,6 +2595,20 @@ namespace World
 			result = out.str();
 			return true;
 		}
+		// HOTR-P1-T3:引擎内建 shader 热重载。与编辑器 watch 走**同一入口**
+		// (Renderer::ReloadShaders);本函数在主线程帧内执行(AiControlServer::Pump 位于
+		// OnUiFrame 开头,早于本帧渲染),失败保留旧管线并用 failed/error 回报。
+		if (cmd == "renderer.reload_shaders")
+		{
+			const ShaderReloadResult reload = Renderer::ReloadShaders();
+			std::ostringstream out;
+			out << "{\"owners\":" << reload.Owners
+				<< ",\"pipelines\":" << reload.Pipelines
+				<< ",\"failed\":" << reload.Failed
+				<< ",\"error\":\"" << JsonEscape(reload.Error) << "\"}";
+			result = out.str();
+			return true;
+		}
 		if (cmd == "material.get")
 		{
 			const std::string path = arg("path");

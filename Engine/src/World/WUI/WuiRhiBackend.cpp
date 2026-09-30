@@ -17,10 +17,14 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <utility>
 
 namespace World::Wui
 {
 	WuiInputCollector WuiRhiBackend::s_Input;
+	// HOTR-P1-T3:引擎 shader 失效代 + 活实例计数(多实例:主窗口 + 浮窗都要失效)。
+	uint32_t WuiRhiBackend::s_ShaderGeneration = 1;
+	uint32_t WuiRhiBackend::s_LiveInstances = 0;
 
 	namespace
 	{
@@ -65,6 +69,7 @@ namespace World::Wui
 	WuiRhiBackend::WuiRhiBackend()
 	{
 		m_Faces.resize(5);
+		++s_LiveInstances;
 		// 度量钩子**不在这里注册**:构造时字体还没加载(EnsureResources 才加载),
 		// 未加载字体的后端会让 MeasureText 退化成 0.6em 估算;如果它最后注册,
 		// 整个编辑器的排版/光标就都用估算值,而绘制用真实字形 → 每个 token 前出现
@@ -77,6 +82,8 @@ namespace World::Wui
 		ClearTextMeasureHook(this);
 		for (FontFace& face : m_Faces)
 			delete face.Info;
+		if (s_LiveInstances > 0)
+			--s_LiveInstances;
 	}
 
 	void WuiRhiBackend::ReleaseDeviceResources()
@@ -151,13 +158,115 @@ namespace World::Wui
 		m_DeviceKey = nullptr;
 	}
 
+	// HOTR-P1-T3:静态代数 +1,让**所有**活实例在各自下一帧 EnsureResources 里只重建
+	// shader + pipeline(返回本次将重建管线的活实例数,供 Renderer::ReloadShaders 计数)。
+	uint32_t WuiRhiBackend::InvalidateShaders()
+	{
+		++s_ShaderGeneration;
+		return s_LiveInstances;
+	}
+
+	// HOTR-P1-T3:编译 Wui_Ui.slang 并按既有描述建管线;失败返回 false + error,
+	// **不动**任何既有句柄。reload=false = 启动路径(沿用断言编译入口,行为不变);
+	// reload=true = 热重载(非断言入口;空 stage / 空句柄一律视为失败)。
+	bool WuiRhiBackend::BuildShaderAndPipeline(const Rhi::Handle<Rhi::Device>& device, bool reload,
+		Rhi::Handle<Rhi::Shader>& outShader, Rhi::Handle<Rhi::Pipeline>& outPipeline, std::string* error)
+	{
+		if (!device || !m_UiPass || !m_TextureLayout)
+		{
+			if (error) *error = "WUI backend is not initialized";
+			return false;
+		}
+
+		Rhi::ShaderDesc shaderDesc;
+		shaderDesc.DebugName = "WUI";
+		Rhi::ShaderStageSource vertexStage;
+		Rhi::ShaderStageSource pixelStage;
+		if (reload)
+		{
+			if (!ShaderCompiler::TryCompileStage(Rhi::ShaderStage::Vertex, "assets/shaders/Wui_Ui.slang",
+					"VSMain", "vs_6_0", vertexStage, error)
+				|| !ShaderCompiler::TryCompileStage(Rhi::ShaderStage::Fragment, "assets/shaders/Wui_Ui.slang",
+					"PSMain", "ps_6_0", pixelStage, error))
+				return false;
+		}
+		else
+		{
+			vertexStage = ShaderCompiler::CompileStage(
+				Rhi::ShaderStage::Vertex, "assets/shaders/Wui_Ui.slang", "VSMain", "vs_6_0");
+			pixelStage = ShaderCompiler::CompileStage(
+				Rhi::ShaderStage::Fragment, "assets/shaders/Wui_Ui.slang", "PSMain", "ps_6_0");
+		}
+		shaderDesc.Stages.push_back(std::move(vertexStage));
+		shaderDesc.Stages.push_back(std::move(pixelStage));
+		Rhi::Handle<Rhi::Shader> shader = device->CreateShader(shaderDesc);
+		if (!shader)
+		{
+			if (error) *error = "CreateShader failed for assets/shaders/Wui_Ui.slang";
+			return false;
+		}
+
+		Rhi::PipelineDesc pipelineDesc;
+		pipelineDesc.Shader = shader;
+		pipelineDesc.RenderPass = m_IsVulkan ? Renderer::GetPresentRenderPass() : m_UiPass;
+		pipelineDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), m_TextureLayout };
+		pipelineDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
+		pipelineDesc.Cull = Rhi::CullMode::None;
+		pipelineDesc.VertexBindings.push_back({ 0, sizeof(Vertex), false });
+		pipelineDesc.VertexAttributes = {
+			{ 0, 0, Rhi::Format::R32G32_SFLOAT, 0 },
+			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 8 },
+			{ 2, 0, Rhi::Format::R32G32_SFLOAT, 24 },
+		};
+		pipelineDesc.Blends.push_back({
+			true,
+			Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
+			Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
+			0xF });
+		pipelineDesc.DebugName = "WUI";
+		Rhi::Handle<Rhi::Pipeline> pipeline = device->CreatePipeline(pipelineDesc);
+		if (!pipeline)
+		{
+			if (error) *error = "CreatePipeline failed (WUI)";
+			return false;
+		}
+		outShader = shader;
+		outPipeline = pipeline;
+		return true;
+	}
+
 	void WuiRhiBackend::EnsureResources()
 	{
 		const Rhi::Handle<Rhi::Device>& device = Renderer::GetDevice();
 		if (!device)
 			return;
 		if (device.get() == m_DeviceKey && m_Pipeline)
+		{
+			// HOTR-P1-T3:设备没变但引擎 shader 失效代变了 → **只**重建 shader + pipeline;
+			// 命令缓冲/UBO/描述符集/纹理集/字体图集/离屏 UI 目标全部保留。
+			if (m_SeenShaderGeneration != s_ShaderGeneration)
+			{
+				Rhi::Handle<Rhi::Shader> shader;
+				Rhi::Handle<Rhi::Pipeline> pipeline;
+				std::string error;
+				if (BuildShaderAndPipeline(device, /*reload*/ true, shader, pipeline, &error))
+				{
+					const Rhi::Handle<Rhi::Shader> oldShader = m_Shader;
+					const Rhi::Handle<Rhi::Pipeline> oldPipeline = m_Pipeline;
+					m_Shader = shader;
+					m_Pipeline = pipeline;
+					Renderer::QueueRelease([oldShader, oldPipeline]() {});
+				}
+				else
+				{
+					WLD_CORE_ERROR("[wui] engine shader hot reload failed: {0}", error);
+				}
+				// 无论成败都记"该代数已处理":失败保留旧管线;修好源码后的下一次
+				// Renderer::ReloadShaders(新代数)才会再试,不会每帧重跑编译器。
+				m_SeenShaderGeneration = s_ShaderGeneration;
+			}
 			return;
+		}
 		// 设备销毁前主动释放:句柄析构必须发生在设备仍存活时。
 		Renderer::RegisterDeviceReleaseHook(this, [this] { ReleaseResources(); });
 		ReleaseResources();
@@ -166,14 +275,6 @@ namespace World::Wui
 
 		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
 			m_Cmds[slot] = device->CreateCommandBuffer("WuiBackend");
-
-		Rhi::ShaderDesc shaderDesc;
-		shaderDesc.DebugName = "WUI";
-		shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(
-			Rhi::ShaderStage::Vertex, "assets/shaders/Wui_Ui.slang", "VSMain", "vs_6_0"));
-		shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(
-			Rhi::ShaderStage::Fragment, "assets/shaders/Wui_Ui.slang", "PSMain", "ps_6_0"));
-		m_Shader = device->CreateShader(shaderDesc);
 
 		Rhi::DescriptorSetLayoutDesc textureLayoutDesc;
 		// 着色器用组合采样器(Slang `Sampler2D`)声明,SPIR-V 产物里 binding 1 就是
@@ -208,25 +309,16 @@ namespace World::Wui
 		passDesc.DebugName = "WuiTarget";
 		m_UiPass = device->CreateRenderPass(passDesc);
 
-		Rhi::PipelineDesc pipelineDesc;
-		pipelineDesc.Shader = m_Shader;
-		pipelineDesc.RenderPass = m_IsVulkan ? Renderer::GetPresentRenderPass() : m_UiPass;
-		pipelineDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), m_TextureLayout };
-		pipelineDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
-		pipelineDesc.Cull = Rhi::CullMode::None;
-		pipelineDesc.VertexBindings.push_back({ 0, sizeof(Vertex), false });
-		pipelineDesc.VertexAttributes = {
-			{ 0, 0, Rhi::Format::R32G32_SFLOAT, 0 },
-			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 8 },
-			{ 2, 0, Rhi::Format::R32G32_SFLOAT, 24 },
-		};
-		pipelineDesc.Blends.push_back({
-			true,
-			Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
-			Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
-			0xF });
-		pipelineDesc.DebugName = "WUI";
-		m_Pipeline = device->CreatePipeline(pipelineDesc);
+		// HOTR-P1-T3:shader + 管线由 BuildShaderAndPipeline 统一创建(热重载走同一实现)。
+		{
+			std::string error;
+			if (!BuildShaderAndPipeline(device, /*reload*/ false, m_Shader, m_Pipeline, &error))
+			{
+				// 启动路径的编译入口本身会断言/记 ERROR;这里补一条装配原因。
+				WLD_CORE_ERROR("[wui] engine shader/pipeline creation failed: {0}", error);
+			}
+		}
+		m_SeenShaderGeneration = s_ShaderGeneration;
 
 		Rhi::BufferDesc vertexDesc;
 		// 按帧槽位分段:每个槽位一段,保证帧 N+1 的上传不覆盖帧 N 仍在读的数据。

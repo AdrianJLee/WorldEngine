@@ -9,6 +9,7 @@
 #include "World/Renderer/Renderer2D.h"
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/RenderSettings.h"
+#include "World/WUI/WuiRhiBackend.h"
 #include "World/RHI/Vulkan/VulkanSwapchain.h"
 #include "World/RHI/Vulkan/VulkanResources.h"
 #include "World/RHI/Vulkan/VulkanDevice.h"
@@ -426,6 +427,66 @@ namespace World
 	std::string Renderer::GetBackendName()
 	{
 		return s_BackendName;
+	}
+
+	ShaderReloadResult Renderer::ReloadShaders()
+	{
+		ShaderReloadResult result;
+		if (!m_Device)
+		{
+			result.Error = "RHI device is not initialized";
+			return result;
+		}
+		WLD_PROFILE_FUNCTION();
+
+		// 顺序固定 2D → 3D → WUI:2D/3D 同步重建(失败保留旧管线),WUI 走静态代数失效。
+		{
+			std::string error;
+			const uint32_t pipelines = Renderer2D::ReloadShaders(&error);
+			++result.Owners;
+			if (pipelines == 0)
+			{
+				++result.Failed;
+				if (result.Error.empty())
+					result.Error = "Renderer2D: " + (error.empty() ? std::string("reload failed") : error);
+			}
+			else
+			{
+				result.Pipelines += pipelines;
+			}
+		}
+		{
+			std::string error;
+			const uint32_t pipelines = Renderer3D::ReloadShaders(&error);
+			++result.Owners;
+			if (pipelines == 0)
+			{
+				++result.Failed;
+				if (result.Error.empty())
+					result.Error = "Renderer3D: " + (error.empty() ? std::string("reload failed") : error);
+			}
+			else
+			{
+				result.Pipelines += pipelines;
+			}
+		}
+		// WUI:静态代数 +1,活实例在各自下一帧 EnsureResources 里只重建 shader + pipeline。
+		// 没有活实例时不计 owner(新实例创建时本来就会按新源码走完整构建)。
+		const uint32_t wuiInstances = Wui::WuiRhiBackend::InvalidateShaders();
+		if (wuiInstances > 0)
+		{
+			++result.Owners;
+			result.Pipelines += wuiInstances;
+		}
+
+		if (result.Failed > 0)
+		{
+			WLD_CORE_ERROR("[shader-hot-reload] engine shaders rebuild failed (failed={0}): {1}",
+				result.Failed, result.Error);
+		}
+		WLD_CORE_INFO("[shader-hot-reload] engine shaders rebuilt owners={0} pipelines={1} failed={2}",
+			result.Owners, result.Pipelines, result.Failed);
+		return result;
 	}
 
 	void Renderer::SetVsync(bool enabled)

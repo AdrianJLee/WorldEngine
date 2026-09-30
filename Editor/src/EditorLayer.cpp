@@ -962,6 +962,8 @@ namespace World
 		// HOTR-P1-T1:先停材质着色器热重载的编译线程并 join(它只跑 slangc / 读源,不碰 GPU)——
 		// 放在场景/渲染器析构之前,保证 OnDetach 之后不会再有产物进入 Install。
 		m_ShaderHotReload.Shutdown();
+		// HOTR-P1-T3:引擎 shader 监听无工作线程/无 GPU 资源,清基线即可(下次构造重新建立)。
+		m_EngineShaderHotReload.Shutdown();
 
 		SetSceneState(SceneState::Edit);
 
@@ -1022,6 +1024,10 @@ namespace World
 				}
 			}
 		}
+		// HOTR-P1-T3:引擎内建 shader 热重载 —— 帧边界(渲染开始前)轮询引擎 shader 目录,
+		// 稳定变化即调 Renderer::ReloadShaders()。刻意放在"没有活动场景/渲染器"早退**之前**:
+		// 引擎 shader 与项目无关,启动器/无项目形态同样生效。
+		m_EngineShaderHotReload.Poll(ts.GetSeconds());
 		if (!m_ActiveScene || !m_SceneRenderer)
 			return;
 		// P2 W5b:帧边界(不在任何脚本回调内)轮询脚本热重载。编辑态轮询文档场景,

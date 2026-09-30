@@ -11,6 +11,8 @@
 
 #include <array>
 #include <filesystem>
+#include <string>
+#include <utility>
 
 namespace World
 {
@@ -62,6 +64,28 @@ namespace World
 			return Renderer::GetDevice()->CreateShader(desc);
 		}
 
+		// HOTR-P1-T3:热重载用的非断言版本(失败 = 空句柄 + 可读原因;空 stage 不进 CreateShader)。
+		Rhi::Handle<Rhi::Shader> TryCreateRendererShader(const char* hlsl, const char* debugName,
+			std::string* error)
+		{
+			Rhi::ShaderDesc desc;
+			desc.DebugName = debugName;
+			Rhi::ShaderStageSource vertexStage;
+			Rhi::ShaderStageSource pixelStage;
+			if (!ShaderCompiler::TryCompileStage(Rhi::ShaderStage::Vertex, hlsl, "VSMain", "vs_6_0",
+				vertexStage, error))
+				return nullptr;
+			if (!ShaderCompiler::TryCompileStage(Rhi::ShaderStage::Fragment, hlsl, "PSMain", "ps_6_0",
+				pixelStage, error))
+				return nullptr;
+			desc.Stages.push_back(std::move(vertexStage));
+			desc.Stages.push_back(std::move(pixelStage));
+			Rhi::Handle<Rhi::Shader> shader = Renderer::GetDevice()->CreateShader(desc);
+			if (!shader && error)
+				*error = std::string("CreateShader failed for ") + hlsl;
+			return shader;
+		}
+
 		Rhi::PipelineDesc MakePipeline(const Rhi::Handle<Rhi::Shader>& shader,
 			const std::vector<Rhi::VertexAttribute>& attributes, uint32_t stride,
 			Rhi::PrimitiveTopology topology,
@@ -93,6 +117,59 @@ namespace World
 				0xF });
 			desc.DebugName = shader->GetDesc().DebugName;
 			return desc;
+		}
+
+		// HOTR-P1-T3:批次顶点布局/拓扑/线宽的**唯一事实源** —— Init(建管线 + 建缓冲)与
+		// ReloadShaders(只重建管线)共用,保证重建出的管线与启动期逐项一致。
+		// 着色器路径同样只有这一处(Init / Reload 用同名源)。
+		constexpr const char* kQuadShaderPath = "assets/shaders/Renderer2D_Quad.slang";
+		constexpr const char* kCircleShaderPath = "assets/shaders/Renderer2D_Circle.slang";
+		constexpr const char* kLineShaderPath = "assets/shaders/Renderer2D_Line.slang";
+
+		struct BatchSpec
+		{
+			std::vector<Rhi::VertexAttribute> Attributes;
+			Rhi::PrimitiveTopology Topology = Rhi::PrimitiveTopology::TriangleList;
+			float LineWidth = 1.0f;
+		};
+
+		const BatchSpec& QuadBatchSpec()
+		{
+			static const BatchSpec spec {
+				{
+					{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
+					{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 12 },
+					{ 2, 0, Rhi::Format::R32G32_SFLOAT, 28 },
+					{ 3, 0, Rhi::Format::R32_SFLOAT, 36 },
+					{ 4, 0, Rhi::Format::R32_SFLOAT, 40 },
+					{ 5, 0, Rhi::Format::R32_SINT, 44 },
+				}, Rhi::PrimitiveTopology::TriangleList, 1.0f };
+			return spec;
+		}
+
+		const BatchSpec& CircleBatchSpec()
+		{
+			static const BatchSpec spec {
+				{
+					{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
+					{ 1, 0, Rhi::Format::R32G32B32_SFLOAT, 12 },
+					{ 2, 0, Rhi::Format::R32G32B32A32_SFLOAT, 24 },
+					{ 3, 0, Rhi::Format::R32_SFLOAT, 40 },
+					{ 4, 0, Rhi::Format::R32_SFLOAT, 44 },
+					{ 5, 0, Rhi::Format::R32_SINT, 48 },
+				}, Rhi::PrimitiveTopology::TriangleList, 1.0f };
+			return spec;
+		}
+
+		const BatchSpec& LineBatchSpec()
+		{
+			static const BatchSpec spec {
+				{
+					{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
+					{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 12 },
+					{ 2, 0, Rhi::Format::R32_SINT, 28 },
+				}, Rhi::PrimitiveTopology::LineList, 2.0f };
+			return spec;
 		}
 
 		template <typename Vertex>
@@ -133,14 +210,16 @@ namespace World
 		Renderer2DData s_Data;
 
 		template <typename Vertex, uint32_t MaxIndices>
-		void CreateBatch(Batch<Vertex>& batch, const Rhi::Handle<Rhi::Shader>& shader,
-			const std::vector<Rhi::VertexAttribute>& attributes,
-			Rhi::PrimitiveTopology topology,
-			const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout,
-			uint32_t maxVertices, float lineWidth)
+		void CreateBatchPipeline(Batch<Vertex>& batch, const Rhi::Handle<Rhi::Shader>& shader,
+			const BatchSpec& spec, const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout)
 		{
 			batch.Pipeline = Renderer::GetDevice()->CreatePipeline(
-				MakePipeline(shader, attributes, sizeof(Vertex), topology, textureLayout, lineWidth));
+				MakePipeline(shader, spec.Attributes, sizeof(Vertex), spec.Topology, textureLayout, spec.LineWidth));
+		}
+
+		template <typename Vertex, uint32_t MaxIndices>
+		void CreateBatchBuffers(Batch<Vertex>& batch, const BatchSpec& spec, uint32_t maxVertices)
+		{
 			Rhi::BufferDesc vertexDesc;
 			vertexDesc.Size = static_cast<uint64_t>(maxVertices) * sizeof(Vertex);
 			vertexDesc.Usage = Rhi::BufferUsageVertex;
@@ -151,7 +230,7 @@ namespace World
 
 			std::vector<uint32_t> indices(MaxIndices);
 			uint32_t offset = 0;
-			if (topology == Rhi::PrimitiveTopology::LineList)
+			if (spec.Topology == Rhi::PrimitiveTopology::LineList)
 			{
 				for (uint32_t i = 0; i < MaxIndices; i += 2)
 				{
@@ -178,6 +257,15 @@ namespace World
 			indexDesc.Usage = Rhi::BufferUsageIndex;
 			indexDesc.InitialData = indices.data();
 			batch.IndexBuffer = Renderer::GetDevice()->CreateBuffer(indexDesc);
+		}
+
+		template <typename Vertex, uint32_t MaxIndices>
+		void CreateBatch(Batch<Vertex>& batch, const Rhi::Handle<Rhi::Shader>& shader,
+			const BatchSpec& spec, const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout,
+			uint32_t maxVertices)
+		{
+			CreateBatchPipeline<Vertex, MaxIndices>(batch, shader, spec, textureLayout);
+			CreateBatchBuffers<Vertex, MaxIndices>(batch, spec, maxVertices);
 		}
 
 		template <typename Vertex>
@@ -288,32 +376,75 @@ namespace World
 		s_Data.Textures[0]->SetData(white, 4);
 		s_Data.SourceTextures[0] = nullptr;
 
-		const auto quadShader = CreateRendererShader("assets/shaders/Renderer2D_Quad.slang", "Renderer2D-Quad");
-		CreateBatch<QuadVertex, MaxQuads * 6>(s_Data.Quads, quadShader, {
-			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
-			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 12 },
-			{ 2, 0, Rhi::Format::R32G32_SFLOAT, 28 },
-			{ 3, 0, Rhi::Format::R32_SFLOAT, 36 },
-			{ 4, 0, Rhi::Format::R32_SFLOAT, 40 },
-			{ 5, 0, Rhi::Format::R32_SINT, 44 },
-		}, Rhi::PrimitiveTopology::TriangleList, s_Data.TextureLayout, MaxQuads * 4, 1.0f);
+		const auto quadShader = CreateRendererShader(kQuadShaderPath, "Renderer2D-Quad");
+		CreateBatch<QuadVertex, MaxQuads * 6>(s_Data.Quads, quadShader, QuadBatchSpec(),
+			s_Data.TextureLayout, MaxQuads * 4);
 
-		const auto circleShader = CreateRendererShader("assets/shaders/Renderer2D_Circle.slang", "Renderer2D-Circle");
-		CreateBatch<CircleVertex, MaxCircles * 6>(s_Data.Circles, circleShader, {
-			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
-			{ 1, 0, Rhi::Format::R32G32B32_SFLOAT, 12 },
-			{ 2, 0, Rhi::Format::R32G32B32A32_SFLOAT, 24 },
-			{ 3, 0, Rhi::Format::R32_SFLOAT, 40 },
-			{ 4, 0, Rhi::Format::R32_SFLOAT, 44 },
-			{ 5, 0, Rhi::Format::R32_SINT, 48 },
-		}, Rhi::PrimitiveTopology::TriangleList, s_Data.TextureLayout, MaxCircles * 4, 1.0f);
+		const auto circleShader = CreateRendererShader(kCircleShaderPath, "Renderer2D-Circle");
+		CreateBatch<CircleVertex, MaxCircles * 6>(s_Data.Circles, circleShader, CircleBatchSpec(),
+			s_Data.TextureLayout, MaxCircles * 4);
 
-		const auto lineShader = CreateRendererShader("assets/shaders/Renderer2D_Line.slang", "Renderer2D-Line");
-		CreateBatch<LineVertex, MaxLines * 2>(s_Data.Lines, lineShader, {
-			{ 0, 0, Rhi::Format::R32G32B32_SFLOAT, 0 },
-			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 12 },
-			{ 2, 0, Rhi::Format::R32_SINT, 28 },
-		}, Rhi::PrimitiveTopology::LineList, s_Data.TextureLayout, MaxLines * 2, 2.0f);
+		const auto lineShader = CreateRendererShader(kLineShaderPath, "Renderer2D-Line");
+		CreateBatch<LineVertex, MaxLines * 2>(s_Data.Lines, lineShader, LineBatchSpec(),
+			s_Data.TextureLayout, MaxLines * 2);
+	}
+
+	// HOTR-P1-T3:引擎内建 shader 热重载 —— **只**重建 shader + 管线:render pass / 纹理描述符
+	// 布局与描述符集 / 采样器 / 白纹理 / 顶点索引缓冲 / CPU 顶点数组全部保留。
+	// 任一 stage 编不出字节码或任一条管线建不出来 → 整个 owner 放弃(旧句柄一个都不动),
+	// 返回 0 并把可读原因写进 error。成功时返回重建的管线数,旧管线走 QueueRelease 延迟释放
+	// (Vulkan 在飞命令缓冲仍引用旧 VkPipeline)。
+	uint32_t Renderer2D::ReloadShaders(std::string* error)
+	{
+		WLD_PROFILE_FUNCTION();
+		if (!Renderer::GetDevice())
+		{
+			if (error) *error = "RHI device is not initialized";
+			return 0;
+		}
+
+		// 1) 三个 shader 先编出来(非断言入口;空 stage 视为失败)。
+		std::string reason;
+		const Rhi::Handle<Rhi::Shader> quadShader =
+			TryCreateRendererShader(kQuadShaderPath, "Renderer2D-Quad", &reason);
+		const Rhi::Handle<Rhi::Shader> circleShader = quadShader
+			? TryCreateRendererShader(kCircleShaderPath, "Renderer2D-Circle", &reason) : nullptr;
+		const Rhi::Handle<Rhi::Shader> lineShader = circleShader
+			? TryCreateRendererShader(kLineShaderPath, "Renderer2D-Line", &reason) : nullptr;
+		if (!lineShader)
+		{
+			if (error) *error = reason.empty() ? std::string("shader compilation failed") : reason;
+			return 0;
+		}
+
+		// 2) 三条新管线全部建好;任一条失败 = 整体失败,既有句柄不动。
+		const BatchSpec& quadSpec = QuadBatchSpec();
+		const BatchSpec& circleSpec = CircleBatchSpec();
+		const BatchSpec& lineSpec = LineBatchSpec();
+		const Rhi::Handle<Rhi::Pipeline> quadPipeline = Renderer::GetDevice()->CreatePipeline(
+			MakePipeline(quadShader, quadSpec.Attributes, sizeof(QuadVertex),
+				quadSpec.Topology, s_Data.TextureLayout, quadSpec.LineWidth));
+		const Rhi::Handle<Rhi::Pipeline> circlePipeline = Renderer::GetDevice()->CreatePipeline(
+			MakePipeline(circleShader, circleSpec.Attributes, sizeof(CircleVertex),
+				circleSpec.Topology, s_Data.TextureLayout, circleSpec.LineWidth));
+		const Rhi::Handle<Rhi::Pipeline> linePipeline = Renderer::GetDevice()->CreatePipeline(
+			MakePipeline(lineShader, lineSpec.Attributes, sizeof(LineVertex),
+				lineSpec.Topology, s_Data.TextureLayout, lineSpec.LineWidth));
+		if (!quadPipeline || !circlePipeline || !linePipeline)
+		{
+			if (error) *error = "pipeline creation failed (Renderer2D)";
+			return 0;
+		}
+
+		// 3) 提交:替换 + 旧管线延迟释放。
+		const Rhi::Handle<Rhi::Pipeline> oldQuad = s_Data.Quads.Pipeline;
+		const Rhi::Handle<Rhi::Pipeline> oldCircle = s_Data.Circles.Pipeline;
+		const Rhi::Handle<Rhi::Pipeline> oldLine = s_Data.Lines.Pipeline;
+		s_Data.Quads.Pipeline = quadPipeline;
+		s_Data.Circles.Pipeline = circlePipeline;
+		s_Data.Lines.Pipeline = linePipeline;
+		Renderer::QueueRelease([oldQuad, oldCircle, oldLine]() {});
+		return 3;
 	}
 
 	void Renderer2D::Shutdown()
