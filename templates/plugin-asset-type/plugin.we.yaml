@@ -1,0 +1,13 @@
+# Asset Type Plugin — 插件清单模板(位置即 scope:本目录在 <plugins>/ 下 ⇒ scope = {{PluginScope}})。
+# 字段口径:Engine/src/World/Plugins/PluginManifest.h 与 docs/dev/plugin-framework.md。
+id: {{PluginId}}
+name: {{PluginName}}
+version: 1.0.0
+abi: 1
+entry: WePluginQuery
+engine: ">=2.0"
+# 本模板注册新资产类型 + 导入器:
+provides:
+  - asset.type
+  - asset.importer
+ship: auto

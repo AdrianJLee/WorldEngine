@@ -367,8 +367,19 @@ namespace World
 		// —— 引擎插件由引擎构建产出,源码树里不写产物;发布布局仍以插件自带 bin/ 为准。
 		const std::filesystem::path devEnginePluginBinRoot = std::filesystem::path(WLD_REPO_ROOT)
 			/ WLD_OUTPUT_DIR / "bin" / WLD_BUILD_TYPE / "plugins" / WLD_BUILD_TYPE;
+		// PLUG-AUTH-1:项目插件的 dev 产物根(项目自己的构建产出):
+		// <项目根>/build/x64-<cfg>/bin/<cfg>/plugins/<cfg> —— 与引擎 dev 根同一套拼接口径。
+		// 少了这一根,向导新建的项目插件在 dev 形态"发现得到、加载不了"(DLL 找不到)。
+		std::string buildConfiguration = WLD_BUILD_TYPE;
+		while (!buildConfiguration.empty()
+			&& (buildConfiguration.back() == '/' || buildConfiguration.back() == '\\'))
+			buildConfiguration.pop_back();
+		const std::filesystem::path devProjectPluginBinRoot = World::Paths::ProjectDir()
+			/ "build" / ("x64-" + buildConfiguration) / "bin" / buildConfiguration
+			/ "plugins" / buildConfiguration;
 		std::string discoverError;
-		if (!m_PluginManager->Discover(engineRoot, projectRoot, { devEnginePluginBinRoot }))
+		if (!m_PluginManager->Discover(engineRoot, projectRoot,
+				{ devEnginePluginBinRoot, devProjectPluginBinRoot }))
 			// 只有"已有插件处于 Loaded"才会走到这里(启动路径不会);仍然不阻断编辑器。
 			WLD_CORE_ERROR("[plugin] discover failed: {0}", discoverError);
 

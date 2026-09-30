@@ -49,6 +49,8 @@
   "panel.plugins.none": "(无)",
   "panel.plugins.export.enumeration_unavailable": "清单已声明;枚举导出名需要引擎 API(WePlugin::Exports 未暴露)",
   "panel.plugins.action.locate": "在内容浏览器中定位",
+  "panel.plugins.action.new": "新建插件…",
+  "panel.plugins.action.new.tooltip": "从引擎自带的模板生成一个插件包(清单 + 源码 + CMake)到 <项目根>/plugins 或 <引擎根>/plugins。",
   "panel.plugins.action.locate.tooltip": "在内容浏览器「项目插件」根下选中该插件的目录。",
   "panel.plugins.action.locate.engine_tooltip": "引擎插件住在 <引擎根>/plugins —— 内容浏览器只显示项目插件。",
   "panel.plugins.action.copy_diagnostics": "复制诊断",

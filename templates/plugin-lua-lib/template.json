@@ -1,0 +1,8 @@
+{
+  "id": "lua-lib",
+  "name": "Lua Library Plugin",
+  "description": "Plugin that will expose a script library to Luau (script.library). Registration surface pending T4; the generated skeleton compiles today.",
+  "order": 6,
+  "scopes": ["engine", "project"],
+  "requires": "t4"
+}

@@ -19,6 +19,7 @@
 #include "FloatWindowHost.h"
 #include "../Project/ProjectLauncher.h"
 #include "../Project/ProjectScaffolder.h"
+#include "../Project/PluginScaffolder.h"
 
 #include "World/WUI/WuiContext.h"
 #include "World/WUI/WuiDock.h"
@@ -150,6 +151,10 @@ namespace World
 		// 「在内容浏览器中定位」:切到第三根(项目插件)并选中该插件的目录。
 		// 引擎插件不在 `<项目根>/plugins` 下 ⇒ false + 可读理由(面板据此禁用该按钮)。
 		bool LocatePluginInContentBrowser(const std::string& id, std::string* message = nullptr);
+		// PLUG-AUTH-1:「新建插件…」向导入口 —— File ▸ New Plugin… 与插件管理器面板的
+		// 「新建插件…」按钮走同一条路径(同一个脚手架/同一份模态状态)。
+		// 启动器形态(没有项目)也可用:目标固定为引擎插件,Project 分段禁用并给理由。
+		void OpenNewPluginModal(Wui::WuiContext& ctx);
 		// ---- CPPT-7/PROJ-8:项目源码视图 + 外部 Visual Studio(内置编辑器只服务 Lua/Luau)----
 		// 当前项目根(运行期;没有清单 —— 启动器/未打开项目 —— 返回空路径)。
 		std::filesystem::path CurrentProjectRoot() const;
@@ -424,6 +429,56 @@ namespace World
 		// PROJ-3/T1(P2b):本次创建写进项目根的启动入口(相对文件名,已排序;
 		// 空 = exe 与 .cmd 都没写成功 —— 成功态不画"启动入口"那一行)。
 		std::vector<std::string> m_NewProjectEntryPoints;
+
+		// ---- PLUG-AUTH-1:File ▸ New Plugin…(插件向导)----
+		// 菜单/面板入口 → 模态(目标引擎/项目 + 6 类模板 + 名称/插件 ID + 实时落点 + 行内错误)
+		// → 生成骨架(PluginScaffolder;模板来自 templates/plugin-*/)→ 成功态给出落盘目录、
+		// 「在内容浏览器中定位」(仅项目插件)与「打开插件目录」。
+		// 落盘同样在**帧边界**执行(上一帧只置标记,与 New Project 同一条纪律)。
+		void DrawNewPluginModal(Wui::WuiContext& ctx);
+		// 模板库刷新(打开模态时强制刷;模态开着时按 2s 节流刷 —— 模板是磁盘事实)。
+		// 选中项被删时退回"当前目标允许的第一个模板"。
+		void RefreshNewPluginTemplates(bool force);
+		// 只按当前目标重选模板 id(**不重建模板向量**)—— 目标分段按钮的点击发生在帧中途,
+		// 而同一帧后面还持有指向 m_NewPluginTemplates 的指针;在那里重建向量会让指针悬垂。
+		void EnsureNewPluginTemplateSelection();
+		const Editor::PluginScaffolder::PluginTemplateInfo* SelectedNewPluginTemplate() const;
+		// 帧边界执行体(OnRender 开头消费标记)。
+		void RunNewPluginCreate(Wui::WuiContext& ctx);
+		// 校验(行内错误):名称 / 插件 ID / 目标落点 / 模板;空串 = 通过。
+		std::string NewPluginNameError() const;
+		std::string NewPluginIdError() const;
+		std::string NewPluginTargetError() const;
+		std::string NewPluginTemplateError() const;
+		// 目标插件根:引擎 = <repo>/plugins;项目 = <项目根>/plugins(没有项目时为空)。
+		std::filesystem::path NewPluginPluginsRoot() const;
+		// 实时落点 = <插件根>/<名称>(绝对)。
+		std::filesystem::path NewPluginTargetRoot() const;
+		std::string NewPluginTrimmedName() const;
+		std::string NewPluginTrimmedId() const;
+		bool m_NewPluginOpen = false;
+		uint32_t m_NewPluginOpenedFrame = 0;
+		Editor::PluginScaffolder::PluginTarget m_NewPluginTarget =
+			Editor::PluginScaffolder::PluginTarget::Engine;
+		std::string m_NewPluginTemplateId = "empty";
+		std::string m_NewPluginName;
+		std::string m_NewPluginId;
+		bool m_NewPluginIdTouched = false;      // 用户改过 ID ⇒ 名称变化不再自动改写 ID
+		std::string m_NewPluginFailure;         // 落盘失败原因(名称/ID/目标变化时清)
+		std::string m_NewPluginFailureFor;      // 上面的原因对应的落点(变了就作废)
+		bool m_NewPluginCreatePending = false;  // 下一帧开头落盘
+		bool m_NewPluginCreated = false;        // 成功态(模态画动作按钮)
+		std::filesystem::path m_NewPluginRoot;  // 成功后的插件根(绝对)
+		std::vector<std::string> m_NewPluginFiles;
+		std::string m_NewPluginCreatedId;
+		std::string m_NewPluginCreatedTarget;   // engine / project(成功态显示)
+		std::vector<Editor::PluginScaffolder::PluginTemplateInfo> m_NewPluginTemplates;
+		double m_NewPluginTemplatesScannedAt = 0.0;   // steady_clock 秒;0 = 本会话还没扫过
+
+		// PLUG-AUTH-1:把任意目录在内容浏览器的某个根里定位(定位动作与插件面板共用;
+		// 失败 = false + 可读原因)。
+		bool RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope scope,
+			const std::filesystem::path& absolutePath, std::string* message);
 
 		// ---- PROJ-11/T1:File ▸ 生成项目构建入口(给已存在项目补 CMake/build.cmd/启动器)----
 		// 动作本身走 ProjectScaffolder::EnsureBuildEntryPoints(纯逻辑 + 落盘),结果模态

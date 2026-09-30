@@ -1,0 +1,8 @@
+{
+  "id": "component",
+  "name": "Component Plugin",
+  "description": "Plugin that will contribute scene component schemas (scene.component). Registration surface pending T2b; the generated skeleton compiles today.",
+  "order": 5,
+  "scopes": ["engine", "project"],
+  "requires": "t2b"
+}

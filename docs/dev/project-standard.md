@@ -30,6 +30,9 @@
     Components/               #   schema 组件
     Scripts/                  #   脚本(含 schema 生成输入的 `*.h`)
     Generated/                #   生成物(入库,标"不要手改")
+  plugins/                    # 可选:项目插件包(<plugins>/<名>/{plugin.we.yaml,src/,CMakeLists.txt})
+                              #   由项目构建收集(存在性判断;没有 plugins/ = 零行为变化);
+                              #   创建入口:File ▸ New Plugin…(见 plugin-framework.md)
   .vscode/  .luau-lsp/        # 可选:Lua IDE 配置
 ```
 

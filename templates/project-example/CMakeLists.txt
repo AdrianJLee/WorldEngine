@@ -288,11 +288,29 @@ function(_we_add_project_runner _we_target)
     )
 endfunction()
 
+# ---- 项目插件收集(<项目根>/plugins/*/CMakeLists.txt)---------------------------
+# 存在性收集:有 <项目根>/plugins/<name>/CMakeLists.txt 才加入构建;没有 plugins/ 目录
+# = 零行为变化(不无条件 GLOB、不报错)。新增插件目录后重跑 configure(与引擎插件同口径)。
+function(_we_add_project_plugins)
+    if(NOT WLD_ENGINE_ROOT)
+        set(WLD_ENGINE_ROOT "${WE_ROOT}")   # 源码模式下引擎根由本文件解析;快路径下面已设
+    endif()
+    file(GLOB _we_project_plugin_cmakelists
+        "${CMAKE_CURRENT_SOURCE_DIR}/plugins/*/CMakeLists.txt")
+    foreach(_we_project_plugin_cmakelists_item IN LISTS _we_project_plugin_cmakelists)
+        get_filename_component(_we_project_plugin_dir "${_we_project_plugin_cmakelists_item}" DIRECTORY)
+        get_filename_component(_we_project_plugin_name "${_we_project_plugin_dir}" NAME)
+        message(STATUS "WorldEngine project plugin: ${_we_project_plugin_dir}")
+        add_subdirectory("${_we_project_plugin_dir}" "plugins/${_we_project_plugin_name}")
+    endforeach()
+endfunction()
+
 if(NOT WE_ENGINE_BUILD_DIR)
     # ---- 3a. 源码模式:引擎作为子项目构建 ------------------------------------
     # 引擎根不是顶层 CMAKE_SOURCE_DIR ⇒ 引擎侧自动进入子项目模式(只建 World + Game)。
     message(STATUS "WorldEngine build mode: source (add_subdirectory ${WE_ROOT})")
     add_subdirectory("${WE_ROOT}" "${CMAKE_BINARY_DIR}/engine")
+    _we_add_project_plugins()
     # 注意:引擎侧 Game/CMakeLists.txt 的 src/** 通配也会看到 src/Tools/ProjectRun.cpp;
     # 该 TU 在 GAME_BUILD_DLL 编译里整份跳过(见 ProjectRun.cpp 顶部说明)。
     _we_add_project_runner(ProjectRun)
@@ -492,3 +510,6 @@ endif()
 
 # ---- 4. 项目启动器目标(ProjectRun)--------------------------------------------
 _we_add_project_runner(ProjectRun)
+
+# ---- 项目插件(快路径;源码模式在上面 add_subdirectory 之后已收集)----------------
+_we_add_project_plugins()

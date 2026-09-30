@@ -12,6 +12,8 @@
   "menu.file.save": "保存",
   "menu.file.new_project": "新建项目…",
   "menu.file.new_project.tooltip": "在任意位置生成一个标准项目骨架(不含示例):填项目名 + 选位置 → 生成清单、内容根与一个最小可运行场景(相机 + 方向光,可取消勾选);完成后可在资源管理器打开、重启编辑器进入,或直接启动项目。",
+  "menu.file.new_plugin": "新建插件…",
+  "menu.file.new_plugin.tooltip": "从引擎自带的插件模板生成一个插件包(清单 + 源码 + CMake):引擎插件落在 <引擎根>/plugins,项目插件落在 <项目根>/plugins。清单会先过插件加载器校验再整体落盘,目标已存在 = 拒绝。",
   "menu.file.open_project": "打开项目…",
   "menu.file.open_project.tooltip": "从任意位置打开项目:选项目根(含 project.we.yaml 的文件夹)→ 校验清单 → 重启编辑器进入该项目。",
   "menu.file.recent": "最近项目",

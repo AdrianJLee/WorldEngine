@@ -163,6 +163,24 @@ namespace World
 				+ " disabled=" + std::to_string(disabledCount),
 			{ rect.X, rect.Y, rect.W, kHeaderHeight }, false, false, summaryDetail);
 
+		// ---- PLUG-AUTH-1:面板级动作「新建插件…」----
+		// 与 File ▸ New Plugin… / 启动器页的同名入口走**同一个向导与脚手架**
+		// (面板不自己写一份落盘逻辑);稳定 a11y id plugins.action.new。
+		{
+			const float newButtonWidth = std::max(96.0f, std::min(140.0f, rect.W * 0.34f));
+			const Wui::WuiRect newButton { rect.X + rect.W - theme.Pad - newButtonWidth,
+				rect.Y + (kHeaderHeight - kButtonHeight) * 0.5f, newButtonWidth, kButtonHeight };
+			if (Wui::ButtonEx(ctx, Wui::HashId("plugins.action.new"), newButton,
+					Wui::Tr("panel.plugins.action.new", "New Plugin…"), theme, true, false,
+					Wui::Tr("panel.plugins.action.new.tooltip",
+						"Create a plugin package (manifest + source + CMake) under "
+						"<project>/plugins or <engine>/plugins.")))
+			{
+				m_Shell.OpenNewPluginModal(ctx);
+				ctx.RecordOp("plugins", "new-ask", "", "");
+			}
+		}
+
 		// ---- 布局:宽 = 左右分栏;窄 = 上下堆叠(停靠面板默认宽度下也要能用)----
 		const Wui::WuiRect body { rect.X, rect.Y + kHeaderHeight, rect.W,
 			std::max(0.0f, rect.H - kHeaderHeight) };

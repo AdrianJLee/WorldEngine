@@ -63,6 +63,76 @@ namespace World
 			return text.substr(begin, end - begin);
 		}
 
+		// ---- PLUG-AUTH-1:插件向导的默认值 ----
+		// 默认插件 id = <owner>.<短名>:owner 优先取当前项目清单的 id(com.<项目名>),
+		// 没有项目(启动器形态)时 = "com"。与方案 §1 "默认 com.<owner>.<name>" 同口径。
+		std::string PluginIdOwnerPrefix()
+		{
+			const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+			if (projectRoot.empty())
+				return "com";
+			World::Asset::ProjectManifest manifest;
+			std::string error;
+			if (World::Asset::ProjectManifest::Load(projectRoot / "project.we.yaml", &manifest, &error)
+				&& !manifest.Id.empty()
+				&& Editor::PluginScaffolder::ValidatePluginId(manifest.Id + ".probe").empty())
+				return manifest.Id;
+			return "com";
+		}
+
+		std::string PluginIdSuffixFromName(const std::string& name)
+		{
+			std::string slug;
+			for (const char character : name)
+			{
+				const unsigned char c = static_cast<unsigned char>(character);
+				if (std::isalnum(c) != 0)
+					slug.push_back(static_cast<char>(std::tolower(c)));
+				else if ((c == '-' || c == '_') && !slug.empty() && slug.back() != '-')
+					slug.push_back('-');
+			}
+			while (!slug.empty() && slug.back() == '-')
+				slug.pop_back();
+			return slug.empty() ? std::string("plugin") : slug;
+		}
+
+		std::string DefaultPluginIdForName(const std::string& name)
+		{
+			return PluginIdOwnerPrefix() + "." + PluginIdSuffixFromName(name);
+		}
+
+		// template.json 的 requires → 用户可读的注册面名(T2b/T3b/T4);其它值原样返回。
+		std::string PluginRequiresSurface(const std::string& requires)
+		{
+			if (requires == "t2b")
+				return "T2b";
+			if (requires == "t3b")
+				return "T3b";
+			if (requires == "t4")
+				return "T4";
+			return requires;
+		}
+
+		// PLUG-AUTH-1:向无障碍树登记一个"外壳"节点(菜单/模态内部件都挂 panel="shell")。
+		void RegisterShellAccessNode(Wui::WuiId id, const char* kind, const std::string& label,
+			const std::string& value, const Wui::WuiRect& rect, bool interactive, bool enabled,
+			const std::string& tooltip)
+		{
+			Wui::WuiAccessNode node;
+			node.Id = id;
+			node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+			node.Panel = "shell";
+			node.Kind = kind;
+			node.Label = label;
+			node.Value = value;
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = interactive;
+			node.Visible = true;
+			Wui::WuiAccessibility::Get().Register(node);
+		}
+
 		// PROJ-4/T1(P2):最近项目搜索的 ASCII 大小写折叠 —— "Alpha"/"alpha" 命中同一行;
 		// 非 ASCII 字节原样保留(中文没有大小写,不做 locale 折叠也不会漏)。
 		std::string AsciiLowerCopy(const std::string& text)
@@ -772,6 +842,25 @@ namespace World
 			return fail(Wui::Tr("panel.plugins.notice.engine_plugin_not_in_browser",
 				"Engine plugins live in <engine>/plugins — the content browser shows project plugins only."));
 		}
+		if (!RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::ProjectPlugins,
+				entry->Manifest.Root, message))
+			return false;
+		if (m_Ctx)
+			m_Ctx->RecordOp("plugins", "locate", id, entry->Manifest.Root.generic_string());
+		return true;
+	}
+
+	// PLUG-AUTH-1:定位动作的通用实现(插件面板的「在内容浏览器中定位」与新建插件成功态的
+	// 「在内容浏览器中定位」共用)。失败 = false + 可读原因。
+	bool EditorShell::RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope scope,
+		const std::filesystem::path& absolutePath, std::string* message)
+	{
+		const auto fail = [message](const std::string& reason)
+		{
+			if (message)
+				*message = reason;
+			return false;
+		};
 		const std::string panel = "content_browser";
 		if (!m_Layout.Contains(panel))
 			DockPanelBackToTree(panel);
@@ -781,14 +870,16 @@ namespace World
 		auto* browser = dynamic_cast<ContentBrowserPanel*>(found->second.get());
 		if (!browser)
 			return fail("content browser panel has an unexpected type");
-		if (!browser->RevealPathInRoot(ContentBrowserPanel::RootScope::ProjectPlugins, entry->Manifest.Root))
+		if (!browser->RevealPathInRoot(scope, absolutePath))
 		{
-			return fail(Wui::Tr("panel.plugins.notice.no_project_plugins_root",
-				"Project plugins live in <project>/plugins — this project has no plugins/ directory."));
+			if (scope == ContentBrowserPanel::RootScope::ProjectPlugins)
+				return fail(Wui::Tr("panel.plugins.notice.no_project_plugins_root",
+					"Project plugins live in <project>/plugins — this project has no plugins/ directory."));
+			return fail(Wui::TrFormat("notice.browser.reveal_failed",
+				"Cannot show this folder in the content browser: {path}",
+				{ { "path", absolutePath.u8string() } }));
 		}
 		AiActivatePanel(panel, nullptr);
-		if (m_Ctx)
-			m_Ctx->RecordOp("plugins", "locate", id, entry->Manifest.Root.generic_string());
 		return true;
 	}
 
@@ -1347,6 +1438,12 @@ namespace World
 			m_NewProjectCreatePending = false;
 			RunNewProjectCreate(ctx);
 		}
+		// PLUG-AUTH-1:"New Plugin…" 的落盘同样只在帧边界执行(上一帧只置标记)。
+		if (m_NewPluginCreatePending)
+		{
+			m_NewPluginCreatePending = false;
+			RunNewPluginCreate(ctx);
+		}
 		// PROJ-2/T1:File ▸ Open Project… / 启动器 ▸ 打开项目… 的"选择目录"原生对话框
 		// 同样只在帧边界弹(上一帧只置标记;与 New Project 向导同一条纪律)。
 		if (m_OpenProjectBrowsePending)
@@ -1427,6 +1524,8 @@ namespace World
 			|| m_NewCppScriptOpen
 			// PROJ-1/T1:"新建项目"模态(名称/位置/模板/落盘)同样封锁下层命中。
 			|| m_NewProjectOpen
+			// PLUG-AUTH-1:"新建插件"模态(目标/模板/名称/ID/落盘)同样封锁下层命中。
+			|| m_NewPluginOpen
 			// PROJ-2/T1:项目启动器(启动态窗口级模态)同样封锁下层命中。
 			|| m_Editor.ShowProjectLauncher();
 		// P4-U6b:面板级模态(属性面板的"添加组件"居中窗口)与 shell 模态同一条封锁路径;
@@ -5040,6 +5139,628 @@ namespace World
 		Wui::EndModalFrame(ctx);
 	}
 
+	// ---- PLUG-AUTH-1:File ▸ New Plugin…(窗口级模态;成功态换成动作按钮)----
+	//
+	// 入口:File ▸ New Plugin…(menu.file.new_plugin)、插件管理器面板的「新建插件…」
+	// (plugins.action.new)、启动器页的「新建插件…」(project.launcher.new_plugin)——
+	// 三条路都进同一个 m_NewPlugin* 状态机,内核 = PluginScaffolder。
+	//
+	// 目标:引擎插件 = <repo>/plugins(启动器形态固定这一项,Project 分段禁用并给理由);
+	// 项目插件 = <项目根>/plugins。模板 = templates/plugin-*(6 类);requires != none 的模板
+	// 只生成"可编译骨架 + TODO",向导里显式提示需要哪个注册面。
+	//
+	// 落盘在**帧边界**执行(m_NewPluginCreatePending 由 OnRender 开头消费,与 New Project 同款)。
+
+	std::string EditorShell::NewPluginTrimmedName() const
+	{
+		return TrimProjectNameText(m_NewPluginName);
+	}
+
+	std::string EditorShell::NewPluginTrimmedId() const
+	{
+		return TrimProjectNameText(m_NewPluginId);
+	}
+
+	std::filesystem::path EditorShell::NewPluginPluginsRoot() const
+	{
+		if (m_NewPluginTarget == Editor::PluginScaffolder::PluginTarget::Project)
+		{
+			const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+			if (projectRoot.empty())
+				return {};
+			return projectRoot / "plugins";
+		}
+		return std::filesystem::path(WLD_REPO_ROOT) / "plugins";
+	}
+
+	std::filesystem::path EditorShell::NewPluginTargetRoot() const
+	{
+		const std::filesystem::path root = NewPluginPluginsRoot();
+		const std::string name = NewPluginTrimmedName();
+		if (root.empty() || name.empty())
+			return {};
+		return (root / std::filesystem::u8path(name)).lexically_normal();
+	}
+
+	std::string EditorShell::NewPluginNameError() const
+	{
+		return Editor::PluginScaffolder::ValidatePluginName(m_NewPluginName);
+	}
+
+	std::string EditorShell::NewPluginIdError() const
+	{
+		return Editor::PluginScaffolder::ValidatePluginId(m_NewPluginId);
+	}
+
+	std::string EditorShell::NewPluginTemplateError() const
+	{
+		return Editor::PluginScaffolder::ValidateTemplate(m_NewPluginTemplateId, m_NewPluginTarget);
+	}
+
+	std::string EditorShell::NewPluginTargetError() const
+	{
+		if (m_NewPluginTarget == Editor::PluginScaffolder::PluginTarget::Project
+			&& (m_LauncherMode || World::Paths::ProjectDir().empty()))
+		{
+			return Wui::Tr("modal.newplugin.error.no_project",
+				"Open a project first — project plugins live in <project>/plugins.");
+		}
+		const std::filesystem::path root = NewPluginPluginsRoot();
+		if (root.empty())
+			return Wui::Tr("modal.newplugin.error.root_missing",
+				"Cannot resolve the plugins directory for this target");
+		// 名称/ID 的错误画在各自输入框下,这里不重复报(与 New Project 的模板错误同款)。
+		if (!NewPluginNameError().empty() || !NewPluginIdError().empty())
+			return {};
+		return Editor::PluginScaffolder::ValidateTarget(root, m_NewPluginName, m_NewPluginId);
+	}
+
+	void EditorShell::EnsureNewPluginTemplateSelection()
+	{
+		// 只调整"当前选中的模板",**不碰** m_NewPluginTemplates —— 调用它的路径可能发生在
+		// 一帧的中途(目标分段按钮的点击),而同一帧后面还持有指向该向量的指针
+		// (PLUG-AUTH-1 实测:帧中途重建向量会让早先抓的 selectedTemplate 悬垂,
+		//  读 Description 直接 std::length_error "string too long")。
+		const auto allowed = [this](const Editor::PluginScaffolder::PluginTemplateInfo& info)
+		{
+			return m_NewPluginTarget == Editor::PluginScaffolder::PluginTarget::Engine
+				? info.EngineOk : info.ProjectOk;
+		};
+		const auto contains = [this](const std::string& id)
+		{
+			for (const Editor::PluginScaffolder::PluginTemplateInfo& info : m_NewPluginTemplates)
+				if (info.Id == id)
+					return true;   // 坏模板也列出来(选中给行内错误),不静默消失
+			return false;
+		};
+		if (contains(m_NewPluginTemplateId))
+			return;
+		m_NewPluginTemplateId.clear();
+		for (const Editor::PluginScaffolder::PluginTemplateInfo& info : m_NewPluginTemplates)
+		{
+			if (info.Id == "empty" && allowed(info))
+			{
+				m_NewPluginTemplateId = info.Id;
+				break;
+			}
+		}
+		if (m_NewPluginTemplateId.empty())
+		{
+			for (const Editor::PluginScaffolder::PluginTemplateInfo& info : m_NewPluginTemplates)
+			{
+				if (allowed(info))
+				{
+					m_NewPluginTemplateId = info.Id;
+					break;
+				}
+			}
+		}
+		if (m_NewPluginTemplateId.empty() && !m_NewPluginTemplates.empty())
+			m_NewPluginTemplateId = m_NewPluginTemplates.front().Id;
+		if (m_NewPluginTemplateId.empty())
+			m_NewPluginTemplateId = "empty";
+		m_NewPluginFailure.clear();
+		m_NewPluginFailureFor.clear();
+	}
+
+	void EditorShell::RefreshNewPluginTemplates(bool force)
+	{
+		const double now = ShellNowSeconds();
+		if (!force && m_NewPluginTemplatesScannedAt > 0.0
+			&& now - m_NewPluginTemplatesScannedAt < 2.0)
+			return;
+		m_NewPluginTemplatesScannedAt = now;
+		m_NewPluginTemplates = Editor::PluginScaffolder::ListTemplates();
+		EnsureNewPluginTemplateSelection();
+	}
+
+	const Editor::PluginScaffolder::PluginTemplateInfo* EditorShell::SelectedNewPluginTemplate() const
+	{
+		for (const Editor::PluginScaffolder::PluginTemplateInfo& info : m_NewPluginTemplates)
+			if (info.Id == m_NewPluginTemplateId)
+				return &info;
+		return nullptr;
+	}
+
+	void EditorShell::RunNewPluginCreate(Wui::WuiContext& ctx)
+	{
+		RefreshNewPluginTemplates(false);
+		const Editor::PluginScaffolder::PluginTemplateInfo* selected = SelectedNewPluginTemplate();
+		const std::string nameError = NewPluginNameError();
+		const std::string idError = NewPluginIdError();
+		const std::string templateError = NewPluginTemplateError();
+		const std::string targetError = NewPluginTargetError();
+		// Create 按钮在任一校验不过时是禁用态;这里再夹一次,防止"绕过按钮的第二次调用"。
+		if (selected == nullptr || !nameError.empty() || !idError.empty()
+			|| !templateError.empty() || !targetError.empty())
+		{
+			const std::string blocked = !templateError.empty() ? templateError
+				: (!targetError.empty() ? targetError
+					: (!nameError.empty() ? nameError : idError));
+			m_NewPluginFailure = blocked.empty()
+				? Wui::Tr("modal.newplugin.error.no_template",
+					"No plugin template is available under <checkout>/templates/plugin-*/.")
+				: blocked;
+			m_NewPluginFailureFor = NewPluginTargetRoot().u8string();
+			return;
+		}
+
+		Editor::PluginScaffolder::PluginScaffoldRequest request;
+		request.Target = m_NewPluginTarget;
+		request.TemplateId = m_NewPluginTemplateId;
+		request.Name = NewPluginTrimmedName();
+		request.PluginId = NewPluginTrimmedId();
+
+		const Editor::PluginScaffolder::PluginScaffoldResult result =
+			Editor::PluginScaffolder::Scaffold(NewPluginPluginsRoot(), request);
+		if (!result.Ok)
+		{
+			m_NewPluginFailure = result.Error;
+			m_NewPluginFailureFor = NewPluginTargetRoot().u8string();
+			WLD_CORE_WARN("[new-plugin] scaffold failed: {0}", result.Error);
+			return;
+		}
+
+		m_NewPluginCreated = true;
+		m_NewPluginRoot = result.PluginRoot;
+		m_NewPluginFiles = result.Files;
+		m_NewPluginCreatedId = request.PluginId;
+		m_NewPluginCreatedTarget = Editor::PluginScaffolder::TargetName(request.Target);
+		m_NewPluginFailure.clear();
+		m_NewPluginFailureFor.clear();
+		ctx.RecordOp("plugin", "new", request.PluginId,
+			result.PluginRoot.u8string() + " [template " + m_NewPluginTemplateId + " target "
+				+ m_NewPluginCreatedTarget + " files " + std::to_string(result.Files.size()) + "]");
+		PushNotice(Wui::TrFormat("notice.newplugin.created", "Created the plugin at {path}",
+			{ { "path", result.PluginRoot.u8string() } }));
+		WLD_CORE_INFO("[new-plugin] created '{0}' (template '{1}', target {2}) at '{3}': {4} files",
+			request.PluginId, m_NewPluginTemplateId, m_NewPluginCreatedTarget,
+			result.PluginRoot.u8string(), result.Files.size());
+	}
+
+	void EditorShell::OpenNewPluginModal(Wui::WuiContext& ctx)
+	{
+		m_NewPluginOpen = true;
+		m_NewPluginOpenedFrame = static_cast<uint32_t>(ctx.Frame());
+		m_NewPluginCreated = false;
+		m_NewPluginRoot.clear();
+		m_NewPluginFiles.clear();
+		m_NewPluginCreatedId.clear();
+		m_NewPluginCreatedTarget.clear();
+		m_NewPluginFailure.clear();
+		m_NewPluginFailureFor.clear();
+		m_NewPluginCreatePending = false;
+
+		// 目标默认:能建项目插件时 = 项目插件(编辑器/面板入口的常见场景);
+		// 启动器形态(没有项目)= 引擎插件 —— Project 分段禁用并给理由(D1=允许引擎插件)。
+		const bool projectAvailable = !m_LauncherMode && !World::Paths::ProjectDir().empty();
+		m_NewPluginTarget = projectAvailable
+			? Editor::PluginScaffolder::PluginTarget::Project
+			: Editor::PluginScaffolder::PluginTarget::Engine;
+		RefreshNewPluginTemplates(true);   // 打开这一帧就把模板列出来(磁盘事实)
+		if (m_NewPluginName.empty())
+			m_NewPluginName = "MyPlugin";
+		if (m_NewPluginId.empty() || !m_NewPluginIdTouched)
+			m_NewPluginId = DefaultPluginIdForName(NewPluginTrimmedName());
+		ctx.SetModal(Wui::HashId("modal.newplugin"));
+		ctx.RecordOp("plugin", "new-ask", NewPluginTrimmedName(),
+			Editor::PluginScaffolder::TargetName(m_NewPluginTarget));
+	}
+
+	void EditorShell::DrawNewPluginModal(Wui::WuiContext& ctx)
+	{
+		const Wui::WuiId modalId = Wui::HashId("modal.newplugin");
+		if (m_NewPluginOpen)
+			ctx.SetModal(modalId);
+		else if (ctx.Modal() == modalId)
+			ctx.ClearModal();
+		if (!m_NewPluginOpen)
+			return;
+
+		Wui::WuiRect frame;
+		bool escapePressed = false;
+		Wui::ModalFrameDesc frameDesc;
+		frameDesc.Id = modalId;
+		frameDesc.Title = Wui::Tr("modal.newplugin.title", "New Plugin");
+		frameDesc.Size = { 680.0f, 470.0f };
+		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
+		{
+			// 模态被别的路径接管/收口:同步清掉宿主状态,避免状态与真实模态脱节。
+			m_NewPluginOpen = false;
+			return;
+		}
+
+		const float labelX = frame.X + 16.0f;
+		const float fieldX = frame.X + 130.0f;
+		const float fieldW = frame.W - 146.0f - 16.0f;
+
+		// ---- 成功态:落盘目录 + 文件清单 + 「在内容浏览器中定位 / 打开插件目录 / 关闭」----
+		if (m_NewPluginCreated)
+		{
+			const Editor::PluginScaffolder::PluginTemplateInfo* templateInfo = SelectedNewPluginTemplate();
+			const std::string templateName = templateInfo != nullptr ? templateInfo->Name
+				: m_NewPluginTemplateId;
+			float cursorY = frame.Y + 48.0f;
+			Wui::Label(ctx, { labelX, cursorY }, Wui::TrFormat("modal.newplugin.created",
+				"Created the plugin (template: {template}, target: {target}):",
+				{ { "template", templateName }, { "target", m_NewPluginCreatedTarget } }),
+				m_Theme.TextMuted, 12.0f);
+			cursorY += 20.0f;
+			Wui::Label(ctx, { labelX, cursorY }, m_NewPluginRoot.u8string(), m_Theme.Text, 13.0f);
+			cursorY += 24.0f;
+			{
+				// plugin.new.done:验证者按 id 读"落盘目录"与 id/target/文件数,不用从提示文案里猜。
+				std::string files;
+				const size_t shown = std::min<size_t>(m_NewPluginFiles.size(), 8);
+				for (size_t index = 0; index < shown; ++index)
+				{
+					if (index > 0)
+						files += ", ";
+					files += m_NewPluginFiles[index];
+				}
+				if (m_NewPluginFiles.size() > shown)
+					files += ", …";
+				RegisterShellAccessNode(Wui::HashId("plugin.new.done"), "text",
+					Wui::Tr("modal.newplugin.created.label", "Created plugin"),
+					"path=" + m_NewPluginRoot.u8string() + " id=" + m_NewPluginCreatedId
+						+ " target=" + m_NewPluginCreatedTarget + " files="
+						+ std::to_string(m_NewPluginFiles.size()),
+					{ labelX, frame.Y + 46.0f, frame.W - (labelX - frame.X) - 16.0f, 40.0f },
+					false, true, files);
+			}
+			if (!m_NewPluginFiles.empty())
+			{
+				std::string files;
+				const size_t shown = std::min<size_t>(m_NewPluginFiles.size(), 8);
+				for (size_t index = 0; index < shown; ++index)
+				{
+					if (index > 0)
+						files += ", ";
+					files += m_NewPluginFiles[index];
+				}
+				if (m_NewPluginFiles.size() > shown)
+					files += ", …";
+				Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.newplugin.created.files", "Files: ")
+						+ files, m_Theme.TextMuted, 12.0f);
+				cursorY += 20.0f;
+			}
+			Wui::Label(ctx, { labelX, cursorY }, Wui::Tr("modal.newplugin.created.hint",
+				"Engine plugins: re-run the engine CMake configure and build ALL_BUILD, then restart "
+				"the editor. Project plugins: build the project (build.cmd) — its plugin DLL lands in "
+				"<project>/build/x64-<config>/bin/<config>/plugins/<config>/."),
+				m_Theme.TextMuted, 12.0f);
+			cursorY += 20.0f;
+			// 引擎插件不在内容浏览器的第三根里(那儿只显示 <项目根>/plugins)⇒ locate 禁用,
+			// 并把理由画成可读文字 + 只读 a11y 节点(禁用按钮本身没有 tooltip 槽位)。
+			const bool canLocate = m_NewPluginCreatedTarget == std::string("project")
+				&& !World::Paths::ProjectDir().empty();
+			if (!canLocate)
+			{
+				const std::string reason = Wui::Tr("modal.newplugin.locate.reason",
+					"Locate is for project plugins: engine plugins live in <engine>/plugins, and the "
+					"content browser only shows <project>/plugins.");
+				Wui::Label(ctx, { labelX, cursorY }, reason, m_Theme.TextMuted, 12.0f);
+				RegisterShellAccessNode(Wui::HashId("plugin.new.locate.reason"), "text",
+					Wui::Tr("modal.newplugin.locate", "Locate in Content Browser"), reason,
+					{ labelX, cursorY - 2.0f, frame.W - (labelX - frame.X) - 16.0f, 18.0f },
+					false, true, reason);
+			}
+
+			const Wui::ModalButtonDesc buttons[3] = {
+				{ Wui::Tr("modal.newplugin.locate", "Locate in Content Browser"),
+					Wui::HashId("plugin.new.locate"), canLocate },
+				{ Wui::Tr("modal.newplugin.open", "Open Plugin Folder"),
+					Wui::HashId("plugin.new.open"), true },
+				{ Wui::Tr("modal.newplugin.close", "Close"),
+					Wui::HashId("plugin.new.close"), true },
+			};
+			const int clicked = Wui::ModalButtons(ctx, frame, buttons, 3, m_Theme);
+			if (clicked == 0 && canLocate)
+			{
+				std::string message;
+				if (RevealPathInContentBrowserPanel(ContentBrowserPanel::RootScope::ProjectPlugins,
+						m_NewPluginRoot, &message))
+					ctx.RecordOp("plugin", "new-locate", m_NewPluginCreatedId,
+						m_NewPluginRoot.generic_string());
+				else
+					PushNotice(message);
+			}
+			else if (clicked == 1)
+			{
+				const HINSTANCE shellResult = ShellExecuteW(nullptr, L"open",
+					m_NewPluginRoot.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+				if (reinterpret_cast<INT_PTR>(shellResult) <= 32)
+				{
+					PushNotice(Wui::TrFormat("notice.newplugin.explorer_failed",
+						"Could not open the plugin folder: {path}",
+						{ { "path", m_NewPluginRoot.u8string() } }));
+					WLD_CORE_WARN("[new-plugin] ShellExecuteW failed ({0}) for '{1}'",
+						static_cast<long long>(reinterpret_cast<INT_PTR>(shellResult)),
+						m_NewPluginRoot.u8string());
+				}
+				else
+				{
+					ctx.RecordOp("plugin", "new-open-explorer", m_NewPluginCreatedId,
+						m_NewPluginRoot.u8string());
+				}
+			}
+			else if (clicked == 2 || escapePressed)
+			{
+				m_NewPluginOpen = false;
+				ctx.ClearModal();
+			}
+			Wui::EndModalFrame(ctx);
+			return;
+		}
+
+		const Wui::WuiId nameId = Wui::HashId("plugin.new.name");
+		const Wui::WuiId idId = Wui::HashId("plugin.new.id");
+		const Wui::WuiId okId = Wui::HashId("plugin.new.create");
+		const Wui::WuiId cancelId = Wui::HashId("plugin.new.cancel");
+		const bool justOpened = ctx.Frame() == m_NewPluginOpenedFrame;
+		RefreshNewPluginTemplates(false);
+		const bool projectAvailable = !m_LauncherMode && !World::Paths::ProjectDir().empty();
+
+		// 写盘失败原因只对"同一个落点"有效:名称/ID/目标一改就作废(与 New Project 同口径)。
+		if (!m_NewPluginFailure.empty()
+			&& m_NewPluginFailureFor != NewPluginTargetRoot().u8string())
+		{
+			m_NewPluginFailure.clear();
+			m_NewPluginFailureFor.clear();
+		}
+		const std::string nameError = NewPluginNameError();
+		const std::string idError = NewPluginIdError();
+		const std::string templateError = NewPluginTemplateError();
+		const std::string targetError = NewPluginTargetError();
+
+		float cursorY = frame.Y + 46.0f;
+
+		// ---- 目标(引擎 / 项目;启动器形态 Project 禁用并给理由)----
+		{
+			const std::string targetLabel = Wui::Tr("modal.newplugin.target", "Target");
+			Wui::Label(ctx, { labelX, cursorY + 5.0f }, targetLabel, m_Theme.TextMuted, 13.0f);
+			RegisterShellAccessNode(Wui::HashId("plugin.new.target"), "group", targetLabel,
+				Editor::PluginScaffolder::TargetName(m_NewPluginTarget),
+				{ fieldX, cursorY - 3.0f, fieldW, 26.0f }, false, true, std::string());
+			const float segmentW = 168.0f;
+			const float segmentGap = 8.0f;
+			const bool engineActive =
+				m_NewPluginTarget == Editor::PluginScaffolder::PluginTarget::Engine;
+			const std::filesystem::path engineRoot =
+				std::filesystem::path(WLD_REPO_ROOT) / "plugins";
+			if (Wui::ButtonEx(ctx, Wui::HashId("plugin.new.scope.engine"),
+					{ fieldX, cursorY, segmentW, 24.0f },
+					Wui::Tr("modal.newplugin.scope.engine", "Engine Plugin"), m_Theme, true,
+					engineActive, engineRoot.u8string()))
+			{
+				if (!engineActive)
+				{
+					m_NewPluginTarget = Editor::PluginScaffolder::PluginTarget::Engine;
+					m_NewPluginFailure.clear();
+					m_NewPluginFailureFor.clear();
+					// 帧中途只重选模板,不重建模板向量(见 EnsureNewPluginTemplateSelection 注释)。
+					EnsureNewPluginTemplateSelection();
+					if (!m_NewPluginIdTouched)
+						m_NewPluginId = DefaultPluginIdForName(NewPluginTrimmedName());
+				}
+			}
+			const std::filesystem::path projectPluginsRoot =
+				World::Paths::ProjectDir().empty() ? std::filesystem::path()
+					: World::Paths::ProjectDir() / "plugins";
+			const std::string projectReason = projectAvailable ? projectPluginsRoot.u8string()
+				: Wui::Tr("modal.newplugin.scope.project.locked",
+					"Open or create a project first — project plugins live in <project>/plugins.");
+			const bool projectActive =
+				m_NewPluginTarget == Editor::PluginScaffolder::PluginTarget::Project;
+			if (Wui::ButtonEx(ctx, Wui::HashId("plugin.new.scope.project"),
+					{ fieldX + segmentW + segmentGap, cursorY, segmentW, 24.0f },
+					Wui::Tr("modal.newplugin.scope.project", "Project Plugin"), m_Theme,
+					projectAvailable, projectActive, projectReason)
+				&& projectAvailable && !projectActive)
+			{
+				m_NewPluginTarget = Editor::PluginScaffolder::PluginTarget::Project;
+				m_NewPluginFailure.clear();
+				m_NewPluginFailureFor.clear();
+				EnsureNewPluginTemplateSelection();
+				if (!m_NewPluginIdTouched)
+					m_NewPluginId = DefaultPluginIdForName(NewPluginTrimmedName());
+			}
+			cursorY += 34.0f;
+		}
+
+		// 目标分段按钮的点击可能刚刚改过 m_NewPluginTarget(并且只重选了模板 id,不动向量):
+		// 这里**重新取一次**选中模板指针 —— 指针必须晚于任何可能改动 m_NewPluginTemplates 的调用。
+		const Editor::PluginScaffolder::PluginTemplateInfo* selectedTemplate = SelectedNewPluginTemplate();
+
+		// ---- 模板(分段按钮;每项一个稳定 a11y id plugin.new.template.<id>)----
+		{
+			const std::string templateLabel = Wui::Tr("modal.newplugin.template", "Template");
+			Wui::Label(ctx, { labelX, cursorY + 5.0f }, templateLabel, m_Theme.TextMuted, 13.0f);
+			RegisterShellAccessNode(Wui::HashId("plugin.new.template"), "group", templateLabel,
+				m_NewPluginTemplateId,
+				{ fieldX, cursorY - 3.0f, fieldW, 26.0f }, false, true,
+				selectedTemplate != nullptr ? selectedTemplate->Description : std::string());
+			float segmentX = fieldX;
+			const float segmentW = 168.0f;
+			const float segmentGap = 8.0f;
+			float rowY = cursorY;
+			for (const Editor::PluginScaffolder::PluginTemplateInfo& info : m_NewPluginTemplates)
+			{
+				if (segmentX > fieldX && segmentX + segmentW > fieldX + fieldW + 0.5f)
+				{
+					segmentX = fieldX;
+					rowY += 30.0f;
+				}
+				const std::string surface = PluginRequiresSurface(info.Requires);
+				std::string tooltip = info.Valid ? info.Description : info.Error;
+				if (info.Valid && !surface.empty() && info.Requires != "none")
+				{
+					tooltip += "\n" + Wui::TrFormat("modal.newplugin.template.requires",
+						"Needs the {surface} registration surface (the generated skeleton compiles today).",
+						{ { "surface", surface } });
+				}
+				const std::string segmentLabel = info.Valid ? info.Name
+					: Wui::TrFormat("modal.newplugin.template.unavailable", "{name} (unavailable)",
+						{ { "name", info.Name } });
+				if (Wui::ButtonEx(ctx,
+						Wui::HashId(("plugin.new.template." + info.Id).c_str()),
+						{ segmentX, rowY, segmentW, 24.0f }, segmentLabel, m_Theme, true,
+						info.Id == m_NewPluginTemplateId, tooltip))
+				{
+					m_NewPluginTemplateId = info.Id;
+					m_NewPluginFailure.clear();
+					m_NewPluginFailureFor.clear();
+				}
+				segmentX += segmentW + segmentGap;
+			}
+			cursorY = rowY + 30.0f;
+			if (selectedTemplate != nullptr && !selectedTemplate->Description.empty())
+			{
+				Wui::Label(ctx, { labelX, cursorY }, selectedTemplate->Description,
+					m_Theme.TextMuted, 12.0f);
+				RegisterShellAccessNode(Wui::HashId("plugin.new.template.description"), "text",
+					templateLabel, selectedTemplate->Description,
+					{ labelX, cursorY - 2.0f, frame.W - (labelX - frame.X) - 16.0f, 18.0f },
+					false, true, selectedTemplate->Id);
+			}
+			cursorY += 20.0f;
+			if (selectedTemplate != nullptr && selectedTemplate->Valid
+				&& selectedTemplate->Requires != "none")
+			{
+				const std::string requiresText = Wui::TrFormat("modal.newplugin.template.requires",
+					"Needs the {surface} registration surface (the generated skeleton compiles today).",
+					{ { "surface", PluginRequiresSurface(selectedTemplate->Requires) } });
+				Wui::Label(ctx, { labelX, cursorY }, requiresText, m_Theme.Warning, 12.0f);
+				RegisterShellAccessNode(Wui::HashId("plugin.new.template.requires"), "text",
+					templateLabel, requiresText,
+					{ labelX, cursorY - 2.0f, frame.W - (labelX - frame.X) - 16.0f, 18.0f },
+					false, true, selectedTemplate->Requires);
+			cursorY += 20.0f;
+			}
+		}
+
+		// ---- 名称(= 目录名 + 默认显示名;非法就地报错)----
+		{
+			const std::string nameLabel = Wui::Tr("modal.newplugin.name", "Name");
+			Wui::Label(ctx, { labelX, cursorY + 5.0f }, nameLabel, m_Theme.TextMuted, 13.0f);
+			const Wui::WuiRect nameRect { fieldX, cursorY, fieldW, 24.0f };
+			Wui::TextFieldA11y nameA11y;
+			nameA11y.Label = nameLabel;
+			nameA11y.Placeholder = Wui::Tr("modal.newplugin.name.placeholder",
+				"Plugin name (folder name; letters, digits, '-' and '_')");
+			const bool nameFocused = ctx.Focus() == nameId;
+			const std::string nameBefore = m_NewPluginName;
+			const bool nameSubmitted = Wui::TextFieldEx(ctx, nameId, nameRect, m_NewPluginName,
+				m_Theme, nameError, &nameA11y);
+			// 名称变化时同步默认 ID(用户手动改过 ID 之后不再改写)。
+			if (m_NewPluginName != nameBefore && !m_NewPluginIdTouched)
+				m_NewPluginId = DefaultPluginIdForName(NewPluginTrimmedName());
+			cursorY += 46.0f;
+			if (!nameError.empty())
+				Wui::Label(ctx, { fieldX, cursorY - 20.0f }, nameError, m_Theme.Danger, 12.0f);
+
+			// ---- 插件 ID(反域名;唯一性在 Create 前由 ValidateTarget 查)----
+			const std::string idLabel = Wui::Tr("modal.newplugin.id", "Plugin ID");
+			Wui::Label(ctx, { labelX, cursorY + 5.0f }, idLabel, m_Theme.TextMuted, 13.0f);
+			const Wui::WuiRect idRect { fieldX, cursorY, fieldW, 24.0f };
+			Wui::TextFieldA11y idA11y;
+			idA11y.Label = idLabel;
+			idA11y.Placeholder = Wui::Tr("modal.newplugin.id.placeholder",
+				"Reverse-domain ID (e.g. com.studio.my-plugin)");
+			const bool idFocused = ctx.Focus() == idId;
+			const std::string idBefore = m_NewPluginId;
+			const bool idSubmitted = Wui::TextFieldEx(ctx, idId, idRect, m_NewPluginId,
+				m_Theme, idError, &idA11y);
+			if (m_NewPluginId != idBefore)
+				m_NewPluginIdTouched = true;
+			cursorY += 46.0f;
+			if (!idError.empty())
+				Wui::Label(ctx, { fieldX, cursorY - 20.0f }, idError, m_Theme.Danger, 12.0f);
+
+			// ---- 实时落点(只读;绝对路径进节点 Tooltip)----
+			const std::filesystem::path target = NewPluginTargetRoot();
+			const std::string targetText = target.empty() ? std::string("—") : target.u8string();
+			const std::string locationLabel = Wui::Tr("modal.newplugin.location", "Will create");
+			Wui::Label(ctx, { labelX, cursorY + 3.0f }, locationLabel, m_Theme.TextMuted, 12.0f);
+			Wui::Label(ctx, { fieldX, cursorY + 1.0f }, targetText,
+				target.empty() ? m_Theme.TextMuted : m_Theme.Text, 13.0f);
+			RegisterShellAccessNode(Wui::HashId("plugin.new.location"), "text", locationLabel,
+				targetText, { fieldX, cursorY - 3.0f, fieldW, 20.0f }, false, true,
+				target.u8string());
+			cursorY += 24.0f;
+
+			// ---- 模板/落点的通用错误行 + 提示 ----
+			const std::string generalError = !templateError.empty() ? templateError
+				: (!targetError.empty() ? targetError : m_NewPluginFailure);
+			if (!generalError.empty())
+			{
+				Wui::Label(ctx, { labelX, cursorY + 2.0f }, generalError, m_Theme.Danger, 12.0f);
+				RegisterShellAccessNode(Wui::HashId("plugin.new.error"), "text",
+					Wui::Tr("modal.newplugin.error.label", "Cannot create"), generalError,
+					{ labelX, cursorY, frame.W - (labelX - frame.X) - 16.0f, 18.0f },
+					false, true, generalError);
+			}
+			else
+			{
+				Wui::Label(ctx, { labelX, cursorY + 2.0f }, Wui::Tr("modal.newplugin.hint",
+					"The generated plugin.we.yaml is validated by the plugin loader before anything "
+					"lands; an existing directory is never overwritten. The plugin DLL is produced by "
+					"the engine or project build, not by this wizard."), m_Theme.TextMuted, 12.0f);
+			}
+
+			// ---- 底部按钮(名称/ID/模板/落点任一不过时 Create 禁用并带原因)----
+			const bool canCreate = selectedTemplate != nullptr && nameError.empty()
+				&& idError.empty() && templateError.empty() && targetError.empty();
+			const Wui::ModalResult footerResult = Wui::ModalFooter(ctx, frame,
+				Wui::Tr("modal.newplugin.ok", "Create"),
+				Wui::Tr("modal.newplugin.cancel", "Cancel"),
+				okId, cancelId, canCreate, m_Theme);
+
+			bool closeRequested = false;
+			if ((footerResult == Wui::ModalResult::Confirm
+					|| ((nameSubmitted && nameFocused) || (idSubmitted && idFocused)))
+				&& !justOpened && canCreate)
+			{
+				// 落盘推迟到下一帧开头(与 New Project 同一条帧边界纪律)。
+				m_NewPluginCreatePending = true;
+			}
+			else if (footerResult == Wui::ModalResult::Cancel || escapePressed)
+			{
+				ctx.RecordOp("plugin", "new-cancel", NewPluginTrimmedName(),
+					Editor::PluginScaffolder::TargetName(m_NewPluginTarget));
+				closeRequested = true;
+			}
+			if (closeRequested)
+			{
+				m_NewPluginOpen = false;
+				m_NewPluginFailure.clear();
+				m_NewPluginFailureFor.clear();
+				ctx.ClearModal();
+			}
+		}
+		Wui::EndModalFrame(ctx);
+	}
+
 	// ---- PROJ-2/T1:项目启动器 / File ▸ Open Project… / 运行 ▸ 启动项目(Runtime) ----
 	//
 	// 启动决策(显式项目 / 自动打开最近一次 / 显示启动器)在 EditorLayer;本文件只做:
@@ -5105,7 +5826,8 @@ namespace World
 	{
 		const Wui::WuiId modalId = Wui::HashId("modal.project_launcher");
 		// 其它模态在前时让位(启动期最可能的来源是错误框);它们收口后启动器会回到前台。
-		const bool blockedByOtherModal = m_NewProjectOpen || m_NewCppScriptOpen || m_ImportModalOpen ||
+		const bool blockedByOtherModal = m_NewProjectOpen || m_NewPluginOpen || m_NewCppScriptOpen
+			|| m_ImportModalOpen ||
 			m_PrefabPendingAction != PrefabPendingAction::None || m_Editor.ShowUnsavedModal() ||
 			m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress();
 		const bool visible = m_Editor.ShowProjectLauncher() && !blockedByOtherModal;
@@ -5327,14 +6049,19 @@ namespace World
 		Wui::Label(ctx, { frame.X + pad, frame.Y + frame.H - 76.0f },
 			Wui::Tr("modal.launcher.hint",
 				"Picking a project restarts the editor into it. New Project lets you choose a template "
-				"(blank, or the example with scenes, materials and scripts)."),
+				"(blank, or the example with scenes, materials and scripts); New Plugin creates an "
+				"engine plugin package from one of the built-in plugin templates."),
 			m_Theme.TextMuted, 12.0f);
 
 		// PROJ-9:动作顺序 = 新建项目… / 打开项目… / 退出(编辑器形态=关闭)。
 		// 单独的"新建示例项目…"已移除 —— 新建项目向导里本来就能选示例模板(templates/project-example/**),
 		// 少一个入口也少一份维护面(用户 2026-09-29 口径)。
-		const Wui::ModalButtonDesc buttons[3] = {
+		// PLUG-AUTH-1:启动器形态没有菜单栏,所以「新建插件…」在这里也放一个入口(D1=允许
+		// 无项目时新建引擎插件;Project 分段会在向导里禁用并给理由)。
+		const Wui::ModalButtonDesc buttons[4] = {
 			{ Wui::Tr("modal.launcher.new", "New Project…"), Wui::HashId("project.launcher.new"), true },
+			{ Wui::Tr("modal.launcher.new_plugin", "New Plugin…"),
+				Wui::HashId("project.launcher.new_plugin"), true },
 			{ Wui::Tr("modal.launcher.open", "Open Project…"), Wui::HashId("project.launcher.open"), true },
 			// PROJ-3/T1:启动器模式下第 4 个动作是"退出"(关掉整个启动器进程);
 			// 普通编辑器形态下仍是 PROJ-2 的"关闭"(停在当前项目)。a11y id 两个形态共用。
@@ -5343,7 +6070,7 @@ namespace World
 				Wui::HashId("project.launcher.close"), true },
 		};
 		// 按钮照常绘制/登记(不能因为吞输入那一帧就少画),只丢掉这一帧的动作。
-		const int clickedRaw = Wui::ModalButtons(ctx, frame, buttons, 3, m_Theme);
+		const int clickedRaw = Wui::ModalButtons(ctx, frame, buttons, 4, m_Theme);
 		const int clicked = justBecameVisible ? -1 : clickedRaw;
 		const bool launcherEscape = justBecameVisible ? false : escapePressed;
 		Wui::EndModalFrame(ctx);
@@ -5353,9 +6080,13 @@ namespace World
 		}
 		else if (clicked == 1)
 		{
+			OpenNewPluginModal(ctx);   // 启动器形态:目标固定引擎插件(向导里 Project 分段禁用)
+		}
+		else if (clicked == 2)
+		{
 			RequestOpenProjectBrowse(ctx);
 		}
-		else if (clicked == 2 || launcherEscape)
+		else if (clicked == 3 || launcherEscape)
 		{
 			if (m_LauncherMode)
 			{
@@ -6489,6 +7220,20 @@ namespace World
 					"light, can be turned off); then open it in Explorer, restart the editor into it, or "
 					"launch it."),
 				Wui::HashId("menu.file.new_project") });
+		// PLUG-AUTH-1:File ▸ New Plugin…(引擎插件 / 项目插件;6 类模板;同一个脚手架)。
+		// 稳定 id menu.file.new_plugin:AI 通道/自动化按 id 点它,不依赖标签语言。
+		fileEntries.push_back({ Wui::Tr("menu.file.new_plugin", "New Plugin…"), false,
+				[this]
+				{
+					if (m_Ctx)
+						OpenNewPluginModal(*m_Ctx);
+				}, false,
+				Wui::Tr("menu.file.new_plugin.tooltip",
+					"Create a plugin package (manifest + source + CMake) from one of the built-in "
+					"templates: engine plugins land in <engine>/plugins, project plugins in "
+					"<project>/plugins. The manifest is validated by the plugin loader before the "
+					"files land."),
+				Wui::HashId("menu.file.new_plugin") });
 		// PROJ-2/T1:Recent Projects 分区(最多 10 条;失效项灰显,仍带完整路径与原因提示)。
 		// 只在有记录时出现;列表在弹出后节流刷新(见 RefreshRecentProjectsIfStale)。
 		if (ctx.IsPopupOpen(menuFile))
@@ -6882,6 +7627,9 @@ namespace World
 
 		// ---- PROJ-1/T1:新建项目(窗口级模态;成功态换成两个动作按钮) ----
 		DrawNewProjectModal(ctx);
+
+		// ---- PLUG-AUTH-1:新建插件(窗口级模态;成功态换成动作按钮) ----
+		DrawNewPluginModal(ctx);
 
 		// ---- PROJ-11/T1:生成项目构建入口的结果(动作已在菜单回调里执行完) ----
 		DrawBuildEntryModal(ctx);
