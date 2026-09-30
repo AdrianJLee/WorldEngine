@@ -84,6 +84,9 @@ endif()
 
 target_compile_definitions(World PUBLIC
     WLD_BUILD_TYPE="${CMAKE_BUILD_TYPE}/"
+    # PLUG-CLEAN-1:宿主引擎版本(唯一事实源 = 本文件顶部的 project(World VERSION …))。
+    # 插件清单的 engine: 最低版本约束按它做语义化比较(见 World/Plugins/PluginManifest.h)。
+    WLD_ENGINE_VERSION="${PROJECT_VERSION}"
     # 开发期绝对锚点(不带尾分隔符):供"与进程 CWD 无关"的路径拼接(如定位 Game.dll)。
     # PROJ-8/T2:一律取引擎根 —— 子项目模式下 CMAKE_SOURCE_DIR 是**项目根**,不能用。
     WLD_REPO_ROOT="${WLD_ENGINE_ROOT}"

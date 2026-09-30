@@ -519,3 +519,47 @@ load/unload 账本零增长 + 条目数不增长"。
   有活实例时 `Unload` 与**单类型 `UnregisterComponent`** 都被拒、清实例后卸载成功、5 轮账本零增长;
 - 端到端探针 `tools/agents/scratch/PLUG-T6/verify-plugin-reload.py`:真项目插件 + 真项目构建
   (`v1` → `v2` 标记证明加载的是新 DLL)+ 真场景字段值跨重载保留 + 坏 DLL 回滚 + 账本归零 + 活实例卸载被拒。
+
+## PLUG-CLEAN-1 契约补充(2026-09-30)
+
+### 引擎版本:`engine: ">=X.Y"` 的事实源与比较口径
+
+- **宿主引擎版本的事实源 = 根 `CMakeLists.txt` 的 `project(World VERSION …)`**(当前 `1.0.0`)。
+  该值经编译定义 `WLD_ENGINE_VERSION` 传给 `World`(`World/Plugins/PluginManifest.h` 的
+  `HostEngineVersion()` 是唯一读取点);不在插件层复制第二份版本号。
+- 清单 `engine:` 只接受 `">=X.Y"` 形态(或省略 = 不限制)。语义比较 = **宿主 `major.minor` ≥ 声明值**;
+  `plugin.info` 输出宿主 `hostEngineVersion`,每个条目输出 `engineSatisfied`(空清单字段 = `true`)。
+- 自带清单的同步状态(重要):`plugins/hello-import` 与 6 个 `templates/plugin-*/plugin.we.yaml`
+  目前声明 `>=2.0`,而宿主事实源是 `1.0.0` ⇒ 它们会被标 `engineSatisfied=false`。PLUG-CLEAN-1 先把
+  **比较 + 诊断**落地;把"不满足 ⇒ 拒绝加载"接进 `PluginManager` 之前,必须先由主 agent 决策:
+  (a) 把这些清单改成与宿主相符的约束,或 (b) 提升版本事实源。探针 ① 同时接受"诊断模式
+  (loaded + `engineSatisfied=false`)"与"门禁模式(`rejected` + 可读诊断)"两种状态。
+- **加载失败必须干净拒绝,不能弹系统框**:`PluginManager::LoadRecord` 在 DLL 加载窗口内临时压制
+  Windows 硬错误框(`SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX`),随后恢复进程原错误模式。
+  坏产物 = 立即返回 `LoadLibraryA failed with Win32 error 193`(实测:进程默认错误模式为 0 时,
+  `LoadLibraryA` 会阻塞在系统错误框上 —— ctest 子进程曾因此在 `World.Plugins` 卡死超时)。
+
+### 插件组件显示名的本地化约定
+
+- **约定键:`plugin.<pluginId>.<typeId>`**。`<typeId>` 先按组件类型**全名**(`WeComponentDesc::Id`,
+  也是 `.wd` 里的类型键)查,未命中再按**短名**(最后一个 `.` 之后)查一次;都未命中 ⇒ 回落插件声明的
+  `DisplayName`(英文 canonical)。
+- 解析时机 = **插件加载 / 重载时**(组件注册进 schema 的同一生命周期),结果写入 `TypeSchema.DisplayName`:
+  属性面板分区标题、Add Component 候选行(行 id = `prop.add.<DisplayName>`)与 `plugin.info` 共用同一份文案。
+  因此**切换语言后需要 `plugin.reload`(面板「重新加载」按钮)或重启编辑器**才会重新解析插件组件的显示名;
+  内置组件不受此限。
+- 语言包分层(优先级从低到高):引擎层 `Engine/assets/localization/<lang>/**` → 编辑器层
+  `Editor/assets/localization/<lang>/**` → 项目层 `<项目根>/assets/localization/<lang>/**`。
+  插件作者/项目可以在任意一层提供该约定键的译文;缺条目回落声明的 `DisplayName`,不会出现裸键。
+
+### 面板「重新加载」按钮与两段式热重载的会话内契约
+
+- 插件管理器面板的动作 `plugins.action.reload` 与 AI `plugin.reload` 走**同一条实现**
+  (`EditorLayer::ReloadPlugin` 两段式):面板只登记请求(`PluginManager::RequestReload`),
+  宿主在**下一帧开头**执行 —— 面板绘制期间不卸载/装载 DLL(避免打断面板遍历)。
+  详情行同时显示 `pendingReload` 与 `ledgers` 摘要(与 `plugin.info` 同一数据源)。
+- **快照只活在本编辑器会话**:热重载快照在内存里,不落盘、不跨编辑器重启;没完成第二段就退出编辑器
+  = 那些组件实例的数据丢失(管理器析构 / `UnloadAll` / 重新 `Discover` 会为未完成的 pending 记 ERROR)。
+  面板按钮与 `plugin.reload` 的提示文案都写明这一点。
+- 第一段(loaded → 快照 + 卸载)之后 DLL 文件锁已释放,可以外部重编;失败 ⇒ 自动回滚到
+  `<名>.rollback-<插件ABI>.dll` 并用旧 schema 写回原状态(`rolledBack=true` + 可读诊断)。

@@ -341,11 +341,16 @@ namespace World
 		const std::string loadError = m_Shell.PluginLoadError(selected->Manifest.Id);
 		const std::string stateText = PluginStateText(*selected, disabled, restartPending, loadError);
 		const std::string diagnostic = !selected->Diagnostic.empty() ? selected->Diagnostic : loadError;
+		// PLUG-CLEAN-1:重载状态 + 宿主账本摘要(T6 的 pendingReload / ledgers 上屏)。
+		const bool pendingReload = manager->HasPendingReload(selected->Manifest.Id);
+		const Plugins::PluginLedgerCounts ledgers = manager->LedgerCounts(selected->Manifest.Id);
 		RegisterNode(Wui::HashId(("plugins.detail." + selected->Manifest.Id).c_str()), "plugin-detail",
 			selected->Manifest.Id,
 			"state=" + stateText + " raw=" + Plugins::PluginStateName(selected->State)
 				+ " disabled=" + (disabled ? "1" : "0")
 				+ " restart-pending=" + (restartPending ? "1" : "0")
+				+ " pending-reload=" + (pendingReload ? "1" : "0")
+				+ " ledgers-total=" + std::to_string(ledgers.Total())
 				+ " scope=" + Plugins::PluginScopeName(selected->Manifest.Scope)
 				+ " version=" + selected->Manifest.Version
 				+ " abi=" + std::to_string(EffectiveAbi(*selected))
@@ -395,6 +400,28 @@ namespace World
 		std::string exportText = JoinList(selected->ExportNames, Wui::Tr("panel.plugins.none", "(none)"));
 		DetailLine(ctx, detailBody, y, Wui::Tr("panel.plugins.detail.exports", "Exports"), exportText, theme);
 		y += lineStep;
+		// PLUG-CLEAN-1:pendingReload 与账本计数(与 `plugin.info` 的 ledgers 同一数据源)。
+		DetailLine(ctx, detailBody, y, Wui::Tr("panel.plugins.detail.pending_reload", "Pending Reload"),
+			pendingReload
+				? Wui::Tr("panel.plugins.detail.pending_reload.yes",
+					"Yes — snapshot held in this session only; rebuild the DLL, then Reload again")
+				: Wui::Tr("panel.plugins.detail.pending_reload.no", "No"),
+			theme);
+		y += lineStep;
+		// 注意:fallback 必须是**单个**字符串字面量 —— audit-localization 按
+		// TrFormat 的第一个字符串字面量参数提取占位符集合,拼接的多个字面量会被截断。
+		const std::string ledgerText = Wui::TrFormat("panel.plugins.detail.ledgers",
+			"{total} registered (schema {schema}, assets {assets}, importers {importers}, commands {commands}, panels {panels}, script fns {script})",
+			{ { "total", std::to_string(ledgers.Total()) },
+				{ "schema", std::to_string(ledgers.Components) },
+				{ "assets", std::to_string(ledgers.AssetTypes) },
+				{ "importers", std::to_string(ledgers.Importers) },
+				{ "commands", std::to_string(ledgers.EditorCommands) },
+				{ "panels", std::to_string(ledgers.EditorPanels) },
+				{ "script", std::to_string(ledgers.ScriptFunctions) } });
+		DetailLine(ctx, detailBody, y, Wui::Tr("panel.plugins.detail.ledgers_label", "Ledgers"),
+			ledgerText, theme);
+		y += lineStep;
 		DetailLine(ctx, detailBody, y, Wui::Tr("panel.plugins.detail.diagnostic", "Diagnostic"),
 			diagnostic.empty() ? Wui::Tr("panel.plugins.none", "(none)") : diagnostic, theme);
 
@@ -402,7 +429,7 @@ namespace World
 		const Wui::WuiRect buttons { detailPane.X, detailPane.Y + detailPane.H - kButtonHeight,
 			detailPane.W, kButtonHeight };
 		const float gap = theme.PadSmall;
-		const float buttonW = std::max(60.0f, (buttons.W - gap * 2.0f) / 3.0f);
+		const float buttonW = std::max(56.0f, (buttons.W - gap * 3.0f) / 4.0f);
 		const bool canLocate = selected->Manifest.Scope == Plugins::PluginScope::Project;
 		const std::string locateTooltip = canLocate
 			? Wui::Tr("panel.plugins.action.locate.tooltip",
@@ -444,6 +471,29 @@ namespace World
 					"Plugin diagnostics copied to the clipboard."));
 			}
 		}
+		// PLUG-CLEAN-1:「重新加载」按钮(稳定 a11y id plugins.action.reload)。
+		// 与 AI `plugin.reload` 完全同一条实现:面板只登记请求(帧边界由 EditorLayer
+		// 执行,面板绘制期间不卸载/装载 DLL)。两段式:第一次 = 快照 + 卸载(可用外部
+		// 构建覆盖 DLL);第二次 = 载入新 DLL + 写回快照(失败回滚,旧状态保留)。
+		// 契约:快照只活在本会话,不跨编辑器重启(见 docs/dev/plugin-framework.md)。
+		if (Wui::ButtonEx(ctx, Wui::HashId("plugins.action.reload"),
+				{ buttons.X + (buttonW + gap) * 2.0f, buttons.Y, buttonW, buttons.H },
+				Wui::Tr("panel.plugins.action.reload", "Reload"), theme, true, false,
+				Wui::Tr("panel.plugins.action.reload.tooltip",
+					"Reload this plugin: loaded → snapshot + unload (rebuild the DLL), then Reload "
+					"again to load the new build. The snapshot lives in this editor session only.")))
+		{
+			Plugins::PluginManager* reloadManager = m_Shell.GetPluginManager();
+			if (reloadManager)
+			{
+				reloadManager->RequestReload(selected->Manifest.Id);
+				ctx.RecordOp("plugins", "reload", selected->Manifest.Id,
+					pendingReload ? "phase-2 (pending snapshot)" : "phase-1 (loaded)");
+				m_Shell.Notify(Wui::TrFormat("panel.plugins.notice.reload_requested",
+					"Reload requested for '{id}' — it runs at the next frame boundary.",
+					{ { "id", selected->Manifest.Id } }));
+			}
+		}
 		const bool enginePlugin = selected->Manifest.Scope == Plugins::PluginScope::Engine;
 		const std::string toggleLabel = enginePlugin
 			? (disabled ? Wui::Tr("panel.plugins.action.enable", "Enable")
@@ -455,7 +505,7 @@ namespace World
 			: Wui::Tr("panel.plugins.action.toggle.project_tooltip",
 				"Project plugins are loaded with the project — manage them in the project manifest.");
 		if (Wui::ButtonEx(ctx, Wui::HashId("plugins.action.toggle"),
-				{ buttons.X + (buttonW + gap) * 2.0f, buttons.Y, buttonW, buttons.H }, toggleLabel, theme,
+				{ buttons.X + (buttonW + gap) * 3.0f, buttons.Y, buttonW, buttons.H }, toggleLabel, theme,
 				enginePlugin, false, toggleTooltip)
 			&& enginePlugin)
 		{

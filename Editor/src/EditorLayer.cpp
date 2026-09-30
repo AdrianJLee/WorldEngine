@@ -580,6 +580,36 @@ namespace World
 		return ok;
 	}
 
+	// PLUG-CLEAN-1:面板「重新加载」按钮的帧边界执行面。
+	// 面板在自己的绘制过程中只能登记请求(卸载/装载 DLL 会打断正在进行的面板遍历),
+	// 这里在下一帧开头取走,并走与 AI `plugin.reload` 完全相同的 ReloadPlugin 两段式:
+	//   loaded → 快照 + 卸载(释放 DLL 文件锁;面板显示 pendingReload);
+	//   unloaded + pending → 载入新 DLL + 写回快照(失败回滚,旧状态保留)。
+	void EditorLayer::ProcessPluginReloadRequests()
+	{
+		if (!m_PluginManager)
+			return;
+		const std::vector<std::string> requests = m_PluginManager->ConsumeReloadRequests();
+		for (const std::string& id : requests)
+		{
+			Plugins::PluginReloadResult result;
+			std::string message;
+			const bool ok = ReloadPlugin(id, &result, &message);
+			WLD_CORE_INFO("[plugin] reload on panel request id={0} ok={1} phase={2} rolledBack={3}",
+				id, ok, Plugins::PluginReloadPhaseName(result.ResultPhase), result.RolledBack);
+			std::string notice = message;
+			if (notice.empty())
+			{
+				notice = ok
+					? Wui::TrFormat("panel.plugins.notice.reload_done", "Plugin reloaded: {id}",
+						{ { "id", id } })
+					: Wui::TrFormat("panel.plugins.notice.reload_failed", "Plugin reload failed: {id}",
+						{ { "id", id } });
+			}
+			m_Shell.Notify(notice);
+		}
+	}
+
 	void EditorLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();
@@ -1441,6 +1471,10 @@ namespace World
 		// 注入到本窗口的输入状态 —— 控件侧看到的仍是普通输入,不是测试专用分支。
 		if (m_AiServer)
 			m_AiServer->Pump();
+
+		// PLUG-CLEAN-1:插件管理器面板上一帧登记的「重新加载」请求 → 帧边界执行
+		// (面板绘制期间不卸载/装载插件 DLL,避免打断正在进行的面板遍历)。
+		ProcessPluginReloadRequests();
 
 		Wui::WuiInputState input;
 		if (wuiBackend.BeginFrame(input))

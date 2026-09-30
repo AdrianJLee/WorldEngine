@@ -122,6 +122,24 @@ namespace World::Plugins
 			? record->LoadedLibraryPath.string() : std::string();
 	}
 
+	// ---- PLUG-CLEAN-1:面板"重新加载"请求(帧边界执行;契约见 PluginManager.h) --------
+
+	void PluginManager::RequestReload(const std::string& id)
+	{
+		if (id.empty())
+			return;
+		// 去重:同一帧/连续点击只登记一次(执行顺序 = 登记顺序,确定性)。
+		if (std::find(m_ReloadRequests.begin(), m_ReloadRequests.end(), id) == m_ReloadRequests.end())
+			m_ReloadRequests.push_back(id);
+	}
+
+	std::vector<std::string> PluginManager::ConsumeReloadRequests()
+	{
+		std::vector<std::string> requests = std::move(m_ReloadRequests);
+		m_ReloadRequests.clear();
+		return requests;
+	}
+
 	void PluginManager::DiscardPendingReload(const std::string& id)
 	{
 		m_PendingReloads.erase(id);

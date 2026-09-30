@@ -37,6 +37,9 @@ namespace World::Plugins
 		int Order = -1;          // State == Loaded 时的加载顺序(0 起,拓扑序)
 		uint32_t PluginAbi = 0;  // 插件自报的 ABI(诊断用;契约校验前失败时为 0)
 		uint32_t PluginStructSize = 0;  // 插件自报的 StructSize(诊断/前向兼容判据用)
+		// PLUG-CLEAN-1:清单 `engine: ">=X.Y"` 是否被宿主引擎满足(清单不带该字段 = true)。
+		// 宿主版本 = 根 CMakeLists 的 project(World VERSION …)(见 HostEngineVersion)。
+		bool EngineSatisfied = true;
 		// 插件 WePlugin::Exports 的 Name 列表(加载成功后填充;面板/`plugin.info` 直接展示)。
 		std::vector<std::string> ExportNames;
 	};
@@ -230,6 +233,15 @@ namespace World::Plugins
 		// 当前实际加载的 DLL 路径(未加载 = 空;回滚后 = 回滚副本路径)。
 		std::string LoadedLibraryPath(const std::string& id) const;
 
+		// ---- PLUG-CLEAN-1:编辑器面板的"重新加载"请求(帧边界执行) ----------------------
+		// 面板在**自己的绘制过程中**不能卸载/装载 DLL(插件面板/命令表都在同一次面板
+		// 遍历里被消费,卸载会打断遍历)—— 所以按钮只登记请求,EditorLayer 在下一帧
+		// 开头取走,并走与 AI `plugin.reload` 完全相同的 `EditorLayer::ReloadPlugin`
+		// 两段式实现(loaded → 快照+卸载;unloaded+pending → 载入新 DLL + 写回)。
+		// 语义 = 每 id 一次(重复请求去重,执行顺序 = 登记顺序);未命中 id 由执行方诊断。
+		void RequestReload(const std::string& id);
+		std::vector<std::string> ConsumeReloadRequests();
+
 	private:
 		// 每次成功加载的宿主侧状态:宿主表 + 日志前缀用的插件 id(插件只原样回传 UserData)。
 		struct HostApiBox
@@ -399,6 +411,8 @@ namespace World::Plugins
 		std::vector<std::filesystem::path> m_DevBinaryRoots;   // 开发构建产物根(Discover 传入)
 		// T6:已快照但尚未写回的实例(键 = 插件 id);UnloadAll/Discover/析构时按数据丢失记 ERROR。
 		std::map<std::string, PendingReload> m_PendingReloads;
+		// PLUG-CLEAN-1:面板登记的"重新加载"请求(帧边界由 EditorLayer 取走)。
+		std::vector<std::string> m_ReloadRequests;
 		// T2c:插件组件存储的在册槽位(true = 已占用)。容量 = kPluginComponentSlotCount。
 		std::array<bool, kPluginComponentSlotCount> m_ComponentSlots {};
 		WeHostApi m_HostApi;

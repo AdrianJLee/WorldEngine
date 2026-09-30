@@ -5,6 +5,7 @@
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Scene/Scene.h"
 #include "World/Script/PluginScriptLibrary.h"
+#include "World/WUI/WuiLocalization.h"
 
 #include <algorithm>
 #include <array>
@@ -40,6 +41,31 @@ namespace World::Plugins
 				text += id;
 			}
 			return text;
+		}
+
+		// PLUG-CLEAN-1:插件组件显示名的本地化约定(契约见 docs/dev/plugin-framework.md):
+		//   键 = "plugin.<pluginId>.<typeId>";先按类型全名(WeComponentDesc::Id)查,
+		//   未命中再按短名(最后一个 '.' 之后)查一次;都没命中 ⇒ 插件声明的 DisplayName。
+		// 解析发生在**加载/重载时**(与组件注册同一生命周期):schema.DisplayName 同时是
+		// 编辑期显示文案与 a11y 行 id(`prop.add.<DisplayName>`)的来源,不能每帧改写;
+		// 切换语言后由 plugin.reload 或重启编辑器重新解析。
+		std::string ResolveComponentDisplayName(const std::string& pluginId, const std::string& typeId,
+			const std::string& declared)
+		{
+			const std::string fallback = declared.empty() ? typeId : declared;
+			const Wui::LocalizedLabel full = Wui::TrLabel("plugin." + pluginId + "." + typeId, fallback);
+			if (full.Text != fallback)
+				return full.Text;
+			const size_t separator = typeId.rfind('.');
+			if (separator != std::string::npos && separator + 1 < typeId.size())
+			{
+				const std::string shortName = typeId.substr(separator + 1);
+				const Wui::LocalizedLabel shortLabel =
+					Wui::TrLabel("plugin." + pluginId + "." + shortName, fallback);
+				if (shortLabel.Text != fallback)
+					return shortLabel.Text;
+			}
+			return fallback;
 		}
 
 		// ---- T2:插件注册面 → 宿主既有注册表 / CookPipeline 清单的适配 ------------------
@@ -1162,7 +1188,10 @@ namespace World::Plugins
 
 		World::Schema::TypeSchema schema;
 		schema.Id = World::Schema::TypeId(id);
-		schema.DisplayName = desc.DisplayName && desc.DisplayName[0] ? desc.DisplayName : id;
+		// PLUG-CLEAN-1:显示名按约定键 `plugin.<pluginId>.<typeId>` 本地化(见
+		// ResolveComponentDisplayName;缺条目 = 插件声明的 DisplayName,行为不变)。
+		schema.DisplayName = ResolveComponentDisplayName(pluginId, id,
+			desc.DisplayName && desc.DisplayName[0] ? desc.DisplayName : "");
 		schema.Category = World::Schema::TypeCategory::Component;
 		// T2c:Size = 插件声明的结构总大小(0 = T2b 的 schema-only);Storage 在下面按声明
 		// 合成本次注册专属的 blob 存储绑定(只在注册进注册表**之前**填,保证指针稳定)。
@@ -2052,6 +2081,22 @@ namespace World::Plugins
 			}
 			else
 			{
+				// PLUG-CLEAN-1:`engine:` 最低版本约束的语义化比较(宿主版本 =
+				// 根 CMakeLists 的 project(World VERSION …),见 PluginManifest.h)。
+				// 清单不带 engine: = 照旧通过。比较结果记在条目上(面板/`plugin.info`
+				// 诊断可读);不满足时给一条**可读警告** —— 宿主与随包清单
+				// (`plugins/hello-import`、6 个模板)的约束值需要主 agent 统一裁决
+				// (见 PLUG-CLEAN-1 报告"遗留"),那之前不把本仓库自带插件拦在门外。
+				record.Entry.EngineSatisfied = record.Entry.Manifest.Engine.empty()
+					|| HostEngineSatisfies(record.Entry.Manifest.EngineMinMajor,
+						record.Entry.Manifest.EngineMinMinor);
+				if (!record.Entry.EngineSatisfied)
+				{
+					Log(WePluginLogWarn, "warning id=" + record.Entry.Manifest.Id + " engine requirement '"
+						+ record.Entry.Manifest.Engine + "' is not satisfied by host engine "
+						+ HostEngineVersion() + " (engine gate pending manifest sync)");
+				}
+
 				// 产物定位(2026-09-30):自带 bin/ 优先;否则在宿主的开发构建根里找同名 DLL
 				// (引擎插件 = 引擎构建产出,源码树不写产物)。都没找到就保持自带路径,
 				// 由 Load 给出可读的"产物缺失"诊断。
@@ -2252,7 +2297,17 @@ namespace World::Plugins
 		}
 
 		auto library = std::make_unique<World::DynamicLibrary>();
-		if (!library->Load(libraryPath.string()))
+		// PLUG-CLEAN-1:插件产物可能被外部重编/损坏(热重载第二段就按设计加载坏 DLL 走回滚),
+		// 而 `LoadLibraryA` 遇到坏镜像会走 Windows 的 hard-error 路径:进程默认错误模式里
+		// 没有 `SEM_FAILCRITICALERRORS` / `SEM_NOOPENFILEERRORBOX` 时,加载会**阻塞在
+		// 系统错误框**上(实测:ctest 子进程默认错误模式 = 0 ⇒ World.Plugins 卡死超时;
+		// PowerShell 子进程 = 0x8001 ⇒ 立即返回 193)。"加载失败 = 干净拒绝"是插件契约,
+		// 所以只在这一次加载窗口内压制系统错误框,随后恢复进程原错误模式。
+		const UINT previousErrorMode = ::SetErrorMode(
+			SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+		const bool loaded = library->Load(libraryPath.string());
+		::SetErrorMode(previousErrorMode);
+		if (!loaded)
 		{
 			if (error) *error = "plugin library load failed: " + library->GetLastError()
 				+ " (" + libraryPath.string() + ")";

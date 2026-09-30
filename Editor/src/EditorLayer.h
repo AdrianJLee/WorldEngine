@@ -411,6 +411,9 @@ namespace World
 		void ShutdownPlugins();
 		void LoadDisabledPluginList();
 		bool SaveDisabledPluginList(std::string* error) const;
+		// PLUG-CLEAN-1:插件管理器面板「重新加载」按钮登记的请求 → 帧边界执行
+		// (与 AI `plugin.reload` 同一个 ReloadPlugin 实现;面板绘制期间不卸载/装载 DLL)。
+		void ProcessPluginReloadRequests();
 
 		Ref<Scene> m_ActiveScene;
 		Ref<Scene> m_RuntimeScene;

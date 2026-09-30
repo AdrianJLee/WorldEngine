@@ -91,6 +91,20 @@ namespace World::Plugins
 			return true;
 		}
 
+		// PLUG-CLEAN-1:宿主版本串 "X.Y[.Z]" → major/minor(不关心 patch,不做 range 解析)。
+		bool ParseVersionComponents(std::string_view text, uint32_t* major, uint32_t* minor)
+		{
+			const size_t firstDot = text.find('.');
+			if (firstDot == std::string_view::npos)
+				return false;
+			const size_t secondDot = text.find('.', firstDot + 1);
+			if (!ReadNumber(text.substr(0, firstDot), major)
+				|| !ReadNumber(secondDot == std::string_view::npos
+						? text.substr(firstDot + 1) : text.substr(firstDot + 1, secondDot - firstDot - 1), minor))
+				return false;
+			return true;
+		}
+
 		// engine: 只接受空或 ">=X.Y"(方案 §4.1);其它形态干净拒绝,不猜语义。
 		bool ParseEngineConstraint(const std::string& text, uint32_t* major, uint32_t* minor, std::string* error)
 		{
@@ -409,5 +423,26 @@ namespace World::Plugins
 		{
 			return fail(std::string("cannot read manifest: ") + exception.what());
 		}
+	}
+
+	const char* HostEngineVersion()
+	{
+#ifdef WLD_ENGINE_VERSION
+		return WLD_ENGINE_VERSION;
+#else
+		// 兜底:与根 CMakeLists.txt 的 project(World VERSION …) 保持一致(见头文件说明)。
+		return "1.0.0";
+#endif
+	}
+
+	bool HostEngineSatisfies(uint32_t minimumMajor, uint32_t minimumMinor)
+	{
+		uint32_t hostMajor = 0;
+		uint32_t hostMinor = 0;
+		if (!ParseVersionComponents(HostEngineVersion(), &hostMajor, &hostMinor))
+			return true;   // 宿主版本串不可解析 = 不作限制
+		if (hostMajor != minimumMajor)
+			return hostMajor > minimumMajor;
+		return hostMinor >= minimumMinor;
 	}
 }

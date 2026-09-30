@@ -76,4 +76,15 @@ namespace World::Plugins
 		static bool Load(const std::filesystem::path& manifestPath, PluginScope locationScope,
 			PluginManifest* out, std::string* error);
 	};
+
+	// ---- PLUG-CLEAN-1:引擎版本(唯一事实源 + 语义化比较) ----------------------------
+	//
+	// 事实源 = 根 `CMakeLists.txt` 的 `project(World VERSION …)`:该值由编译定义
+	// `WLD_ENGINE_VERSION` 带进 World(含所有链接 World 的宿主),这里只读它 —— 不复制
+	// 第二份版本号(缺编译定义时的兜底字面量仅服务"不经过 CMake 的独立编译"场景)。
+	const char* HostEngineVersion();
+	// 清单的 `engine: ">=X.Y"` 是否被宿主引擎满足(host.major.minor >= X.Y)。
+	// 约定:host 版本串不可解析 ⇒ 返回 true(宿主自身问题不应拒绝插件);
+	// 清单不带 engine: 时由调用方直接视为满足,不调本函数。
+	bool HostEngineSatisfies(uint32_t minimumMajor, uint32_t minimumMinor);
 }

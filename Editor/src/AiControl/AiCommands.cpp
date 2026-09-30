@@ -8,19 +8,26 @@
 #include "World/Renderer/Renderer3D.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Scene/Components.h"
+#include "World/Schema/SchemaRegistry.h"
 #include "World/Script/ScriptProperties.h"
 #include "World/WUI/WuiAccessibility.h"
 #include "World/WUI/WuiScriptedInput.h"
 #include "World/Utils/Paths.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
+#include <type_traits>
+#include <variant>
 
 namespace World
 {
@@ -206,6 +213,422 @@ namespace World
 				return false;
 			*out = value;
 			return true;
+		}
+
+		// ---- PLUG-CLEAN-1:schema 字段访问器(场景命令读写插件组件) ----------------------
+		//
+		// `scene.get/set` 原先只认内建组件(Tag/Transform/MeshRenderer/…),T2c 起插件组件
+		// 能挂到实体上但没有任何写入口(探针只能用 `.wd` 写值)。这里补一条**通用 schema
+		// 通路**,与属性面板/序列化共用同一批字段访问器,不按偏移自己 memcpy:
+		//   * 组件解析 = 类型全名(full id)/ 短名(最后一个 `::` 之后)/ 显示名;
+		//   * 实例指针从 entt 存储直接取 —— 只读查询走 **const registry**,Play/Simulate 下
+		//     不触发"活动场景禁止结构写"断言(与 scene.list 同一口径);
+		//   * 字段读写 = Schema::ReadSchemaField / WriteSchemaField(FieldSchema::Get/Set 的
+		//     宿主封装;monostate/Transient 语义与序列化一致)。
+		//
+		// 命令口径(扁平 JSON 参数,与既有命令一致):
+		//   scene.get ... component=<类型> [property=<字段>]
+		//   scene.set ... component=<类型> property=<字段> value=<文本>
+		// 不带 component= 时输出/行为与旧版逐字节一致(内建属性回归口径)。
+		std::string TrimAscii(const std::string& text)
+		{
+			const size_t first = text.find_first_not_of(" \t");
+			if (first == std::string::npos)
+				return {};
+			const size_t last = text.find_last_not_of(" \t");
+			return text.substr(first, last - first + 1);
+		}
+
+		bool ParseSignedNumber(const std::string& text, int64_t* out)
+		{
+			const std::string trimmed = TrimAscii(text);
+			if (trimmed.empty())
+				return false;
+			errno = 0;
+			char* end = nullptr;
+			const long long value = std::strtoll(trimmed.c_str(), &end, 10);
+			if (end == trimmed.c_str() || *end != '\0' || errno == ERANGE)
+				return false;
+			*out = static_cast<int64_t>(value);
+			return true;
+		}
+
+		bool ParseUnsignedNumber(const std::string& text, uint64_t* out)
+		{
+			const std::string trimmed = TrimAscii(text);
+			if (trimmed.empty() || trimmed.front() == '-')
+				return false;
+			errno = 0;
+			char* end = nullptr;
+			const unsigned long long value = std::strtoull(trimmed.c_str(), &end, 10);
+			if (end == trimmed.c_str() || *end != '\0' || errno == ERANGE)
+				return false;
+			*out = static_cast<uint64_t>(value);
+			return true;
+		}
+
+		bool ParseRealNumber(const std::string& text, double* out)
+		{
+			const std::string trimmed = TrimAscii(text);
+			if (trimmed.empty())
+				return false;
+			errno = 0;
+			char* end = nullptr;
+			const double value = std::strtod(trimmed.c_str(), &end);
+			if (end == trimmed.c_str() || *end != '\0' || errno == ERANGE)
+				return false;
+			*out = value;
+			return true;
+		}
+
+		// "a,b,c" → 数量精确匹配的分量表(向量/四元数/矩阵用;空格容忍)。
+		bool ParseNumberList(const std::string& text, size_t count, std::vector<double>* realOut,
+			std::vector<int64_t>* signedOut, std::vector<uint64_t>* unsignedOut)
+		{
+			std::stringstream stream(text);
+			std::string part;
+			std::vector<std::string> parts;
+			while (std::getline(stream, part, ','))
+				parts.push_back(part);
+			if (parts.size() != count || parts.empty())
+				return false;
+			if (realOut)
+			{
+				realOut->clear();
+				for (const std::string& item : parts)
+				{
+					double value = 0.0;
+					if (!ParseRealNumber(item, &value))
+						return false;
+					realOut->push_back(value);
+				}
+				return true;
+			}
+			if (signedOut)
+			{
+				signedOut->clear();
+				for (const std::string& item : parts)
+				{
+					int64_t value = 0;
+					if (!ParseSignedNumber(item, &value))
+						return false;
+					signedOut->push_back(value);
+				}
+				return true;
+			}
+			if (unsignedOut)
+			{
+				unsignedOut->clear();
+				for (const std::string& item : parts)
+				{
+					uint64_t value = 0;
+					if (!ParseUnsignedNumber(item, &value))
+						return false;
+					unsignedOut->push_back(value);
+				}
+				return true;
+			}
+			return false;
+		}
+
+		std::string SchemaValueToJson(const Schema::Value& value)
+		{
+			return std::visit([](const auto& item) -> std::string
+			{
+				using T = std::decay_t<decltype(item)>;
+				if constexpr (std::is_same_v<T, std::monostate>)
+				{
+					return "null";
+				}
+				else if constexpr (std::is_same_v<T, bool>)
+				{
+					return item ? "true" : "false";
+				}
+				else if constexpr (std::is_same_v<T, std::string>)
+				{
+					return "\"" + JsonEscape(item) + "\"";
+				}
+				else if constexpr (std::is_integral_v<T>)
+				{
+					if constexpr (std::is_signed_v<T>)
+						return std::to_string(static_cast<int64_t>(item));
+					else
+						return std::to_string(static_cast<uint64_t>(item));
+				}
+				else if constexpr (std::is_floating_point_v<T>)
+				{
+					std::ostringstream stream;
+					stream << std::setprecision(std::numeric_limits<T>::max_digits10) << item;
+					return stream.str();
+				}
+				else if constexpr (std::is_same_v<T, glm::vec2> || std::is_same_v<T, glm::vec3>
+					|| std::is_same_v<T, glm::vec4> || std::is_same_v<T, glm::ivec2>
+					|| std::is_same_v<T, glm::ivec3> || std::is_same_v<T, glm::ivec4>
+					|| std::is_same_v<T, glm::uvec2> || std::is_same_v<T, glm::uvec3>
+					|| std::is_same_v<T, glm::uvec4>)
+				{
+					std::string text = "[";
+					for (glm::length_t component = 0; component < item.length(); ++component)
+					{
+						if (component > 0)
+							text += ",";
+						std::ostringstream stream;
+						stream << std::setprecision(std::numeric_limits<float>::max_digits10)
+							<< static_cast<double>(item[component]);
+						text += stream.str();
+					}
+					text += "]";
+					return text;
+				}
+				else if constexpr (std::is_same_v<T, glm::quat>)
+				{
+					std::ostringstream stream;
+					stream << "[" << std::setprecision(std::numeric_limits<float>::max_digits10)
+						<< item.w << "," << item.x << "," << item.y << "," << item.z << "]";
+					return stream.str();
+				}
+				else if constexpr (std::is_same_v<T, glm::mat3> || std::is_same_v<T, glm::mat4>)
+				{
+					std::string text = "[";
+					const glm::length_t rows = item.length();
+					for (glm::length_t column = 0; column < rows; ++column)
+					{
+						if (column > 0)
+							text += ",";
+						text += SchemaValueToJson(Schema::Value(item[column]));
+					}
+					text += "]";
+					return text;
+				}
+				else if constexpr (std::is_same_v<T, Schema::ValueList> || std::is_same_v<T, Schema::ValueMap>)
+				{
+					if constexpr (std::is_same_v<T, Schema::ValueList>)
+					{
+						std::string text = "[";
+						for (size_t index = 0; index < item.size(); ++index)
+						{
+							if (index > 0)
+								text += ",";
+							text += SchemaValueToJson(item[index]);
+						}
+						text += "]";
+						return text;
+					}
+					else
+					{
+						std::string text = "{";
+						bool first = true;
+						for (const auto& [key, entry] : item)
+						{
+							if (!first)
+								text += ",";
+							first = false;
+							text += "\"" + JsonEscape(key) + "\":" + SchemaValueToJson(entry);
+						}
+						text += "}";
+						return text;
+					}
+				}
+				else
+				{
+					return "null";
+				}
+			}, value);
+		}
+
+		std::string SchemaTypeShortName(const Schema::TypeSchema& schema)
+		{
+			const std::string& name = schema.Id.Name;
+			const size_t separator = name.rfind("::");
+			return separator == std::string::npos ? name : name.substr(separator + 2);
+		}
+
+		const Schema::TypeSchema* FindComponentSchema(const Schema::SchemaRegistry& schemas,
+			const std::string& name)
+		{
+			if (const Schema::TypeSchema* exact = schemas.Find(name))
+				return exact;
+			for (const Schema::TypeSchema* schema : schemas.List(Schema::TypeCategory::Component))
+				if (schema && (schema->Id.Name == name || SchemaTypeShortName(*schema) == name
+					|| schema->DisplayName == name))
+					return schema;
+			return nullptr;
+		}
+
+		const Schema::FieldSchema* FindComponentField(const Schema::TypeSchema& schema,
+			const std::string& name)
+		{
+			for (const Schema::FieldSchema& field : schema.Fields)
+				if (field.Name == name
+					|| (!field.Meta.DisplayName.empty() && field.Meta.DisplayName == name))
+					return &field;
+			return nullptr;
+		}
+
+		// 文本 → Schema::Value:只接受 schema 字段的**规范类型**(数值/向量/四元数/矩阵/字符串;
+		// 插件组件的 POD 字段集合 = God 面里的固定尺寸子集,见 WeComponentKind*)。形状不支持 =
+		// 可读错误,不猜、不静默转 0。
+		bool ParseSchemaFieldValue(const Schema::FieldSchema& field, const std::string& text,
+			Schema::Value* out, std::string* error)
+		{
+			const auto fail = [error](const std::string& reason)
+			{
+				if (error)
+					*error = reason;
+				return false;
+			};
+			std::vector<double> real;
+			std::vector<int64_t> signedInts;
+			std::vector<uint64_t> unsignedInts;
+			int64_t signedValue = 0;
+			uint64_t unsignedValue = 0;
+			double realValue = 0.0;
+			switch (field.K)
+			{
+				case Schema::Kind::Bool:
+				{
+					std::string lowered = TrimAscii(text);
+					std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+						[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+					if (lowered == "1" || lowered == "true")
+					{
+						*out = true;
+						return true;
+					}
+					if (lowered == "0" || lowered == "false")
+					{
+						*out = false;
+						return true;
+					}
+					return fail("value must be 0|1|true|false for Bool field '" + field.Name + "'");
+				}
+				case Schema::Kind::Int8:
+				case Schema::Kind::Int16:
+				case Schema::Kind::Int32:
+				case Schema::Kind::Int64:
+					if (!ParseSignedNumber(text, &signedValue))
+						return fail("value must be an integer for field '" + field.Name + "'");
+					if (field.K == Schema::Kind::Int8) *out = static_cast<int8_t>(signedValue);
+					else if (field.K == Schema::Kind::Int16) *out = static_cast<int16_t>(signedValue);
+					else if (field.K == Schema::Kind::Int32) *out = static_cast<int32_t>(signedValue);
+					else *out = signedValue;
+					return true;
+				case Schema::Kind::UInt8:
+				case Schema::Kind::UInt16:
+				case Schema::Kind::UInt32:
+				case Schema::Kind::UInt64:
+					if (!ParseUnsignedNumber(text, &unsignedValue))
+						return fail("value must be a non-negative integer for field '" + field.Name + "'");
+					if (field.K == Schema::Kind::UInt8) *out = static_cast<uint8_t>(unsignedValue);
+					else if (field.K == Schema::Kind::UInt16) *out = static_cast<uint16_t>(unsignedValue);
+					else if (field.K == Schema::Kind::UInt32) *out = static_cast<uint32_t>(unsignedValue);
+					else *out = unsignedValue;
+					return true;
+				case Schema::Kind::Float:
+					if (!ParseRealNumber(text, &realValue))
+						return fail("value must be a number for field '" + field.Name + "'");
+					*out = static_cast<float>(realValue);
+					return true;
+				case Schema::Kind::Double:
+					if (!ParseRealNumber(text, &realValue))
+						return fail("value must be a number for field '" + field.Name + "'");
+					*out = realValue;
+					return true;
+				case Schema::Kind::Vec2:
+				case Schema::Kind::Vec3:
+				case Schema::Kind::Vec4:
+				{
+					const size_t count = field.K == Schema::Kind::Vec2 ? 2
+						: (field.K == Schema::Kind::Vec3 ? 3 : 4);
+					if (!ParseNumberList(text, count, &real, nullptr, nullptr))
+						return fail("value must be " + std::to_string(count)
+							+ " comma-separated numbers for field '" + field.Name + "'");
+					if (count == 2)
+						*out = glm::vec2(static_cast<float>(real[0]), static_cast<float>(real[1]));
+					else if (count == 3)
+						*out = glm::vec3(static_cast<float>(real[0]), static_cast<float>(real[1]),
+							static_cast<float>(real[2]));
+					else
+						*out = glm::vec4(static_cast<float>(real[0]), static_cast<float>(real[1]),
+							static_cast<float>(real[2]), static_cast<float>(real[3]));
+					return true;
+				}
+				case Schema::Kind::IVec2:
+				case Schema::Kind::IVec3:
+				case Schema::Kind::IVec4:
+				{
+					const size_t count = field.K == Schema::Kind::IVec2 ? 2
+						: (field.K == Schema::Kind::IVec3 ? 3 : 4);
+					if (!ParseNumberList(text, count, nullptr, &signedInts, nullptr))
+						return fail("value must be " + std::to_string(count)
+							+ " comma-separated integers for field '" + field.Name + "'");
+					if (count == 2)
+						*out = glm::ivec2(static_cast<int32_t>(signedInts[0]), static_cast<int32_t>(signedInts[1]));
+					else if (count == 3)
+						*out = glm::ivec3(static_cast<int32_t>(signedInts[0]), static_cast<int32_t>(signedInts[1]),
+							static_cast<int32_t>(signedInts[2]));
+					else
+						*out = glm::ivec4(static_cast<int32_t>(signedInts[0]), static_cast<int32_t>(signedInts[1]),
+							static_cast<int32_t>(signedInts[2]), static_cast<int32_t>(signedInts[3]));
+					return true;
+				}
+				case Schema::Kind::UVec2:
+				case Schema::Kind::UVec3:
+				case Schema::Kind::UVec4:
+				{
+					const size_t count = field.K == Schema::Kind::UVec2 ? 2
+						: (field.K == Schema::Kind::UVec3 ? 3 : 4);
+					if (!ParseNumberList(text, count, nullptr, nullptr, &unsignedInts))
+						return fail("value must be " + std::to_string(count)
+							+ " comma-separated non-negative integers for field '" + field.Name + "'");
+					if (count == 2)
+						*out = glm::uvec2(static_cast<uint32_t>(unsignedInts[0]), static_cast<uint32_t>(unsignedInts[1]));
+					else if (count == 3)
+						*out = glm::uvec3(static_cast<uint32_t>(unsignedInts[0]), static_cast<uint32_t>(unsignedInts[1]),
+							static_cast<uint32_t>(unsignedInts[2]));
+					else
+						*out = glm::uvec4(static_cast<uint32_t>(unsignedInts[0]), static_cast<uint32_t>(unsignedInts[1]),
+							static_cast<uint32_t>(unsignedInts[2]), static_cast<uint32_t>(unsignedInts[3]));
+					return true;
+				}
+				case Schema::Kind::Quat:
+					if (!ParseNumberList(text, 4, &real, nullptr, nullptr))
+						return fail("value must be 4 comma-separated numbers (w,x,y,z) for field '"
+							+ field.Name + "'");
+					*out = glm::quat(static_cast<float>(real[0]), static_cast<float>(real[1]),
+						static_cast<float>(real[2]), static_cast<float>(real[3]));
+					return true;
+				case Schema::Kind::Mat3:
+				case Schema::Kind::Mat4:
+				{
+					const size_t count = field.K == Schema::Kind::Mat3 ? 9 : 16;
+					if (!ParseNumberList(text, count, &real, nullptr, nullptr))
+						return fail("value must be " + std::to_string(count)
+							+ " comma-separated numbers for field '" + field.Name + "'");
+					if (count == 9)
+					{
+						glm::mat3 matrix { 0.0f };
+						for (size_t index = 0; index < count; ++index)
+							matrix[index / 3][index % 3] = static_cast<float>(real[index]);
+						*out = matrix;
+					}
+					else
+					{
+						glm::mat4 matrix { 0.0f };
+						for (size_t index = 0; index < count; ++index)
+							matrix[index / 4][index % 4] = static_cast<float>(real[index]);
+						*out = matrix;
+					}
+					return true;
+				}
+				case Schema::Kind::String:
+				case Schema::Kind::Asset:
+					*out = text;
+					return true;
+				default:
+					return fail("field '" + field.Name
+						+ "' has a kind this text channel does not support (Object/Enum/container)");
+			}
 		}
 
 		// ---- U23:鼠标注入(跨帧按住 + 位移 = 真拖拽)----
@@ -1190,6 +1613,64 @@ namespace World
 					<< ",\"material\":\"" << JsonEscape(mesh->MaterialPath) << "\""
 					<< ",\"color\":[" << mesh->Color.r << "," << mesh->Color.g << ","
 					<< mesh->Color.b << "," << mesh->Color.a << "]";
+			// PLUG-CLEAN-1:任意 schema 组件(含插件组件 blob)的**字段读取**。
+			// 不带 component= ⇒ 上面的内建输出逐字节不变(回归口径)。
+			if (!arg("component").empty())
+			{
+				const std::string componentName = arg("component");
+				const Schema::SchemaRegistry& schemas = sceneRef.GetContext().Schemas();
+				const Schema::TypeSchema* schema = FindComponentSchema(schemas, componentName);
+				if (!schema)
+				{
+					error = "no component type '" + componentName
+						+ "' (use the full type id, its short name, or its display name)";
+					return false;
+				}
+				if (!schema->Storage)
+				{
+					error = "component '" + schema->Id.Name
+						+ "' is schema-only (no storage) and cannot live on an entity";
+					return false;
+				}
+				const auto* storage = registry.storage(schema->Storage->ComponentId);
+				const void* instance = storage && storage->contains(handle)
+					? storage->value(handle) : nullptr;
+				if (!instance)
+				{
+					error = "entity does not have component '" + componentName + "'";
+					return false;
+				}
+				const std::string fieldName = arg("property");
+				out << ",\"component\":{\"type\":\"" << JsonEscape(schema->Id.Name) << "\"";
+				if (fieldName.empty())
+				{
+					out << ",\"fields\":{";
+					bool firstField = true;
+					for (const Schema::FieldSchema& field : schema->Fields)
+					{
+						const Schema::Value value = Schema::ReadSchemaField(field, instance);
+						if (std::holds_alternative<std::monostate>(value))
+							continue;   // 未设(Transient / 缺访问器):不假装有值
+						if (!firstField)
+							out << ",";
+						firstField = false;
+						out << "\"" << JsonEscape(field.Name) << "\":" << SchemaValueToJson(value);
+					}
+					out << "}";
+				}
+				else
+				{
+					const Schema::FieldSchema* field = FindComponentField(*schema, fieldName);
+					if (!field)
+					{
+						error = "component '" + schema->Id.Name + "' has no field '" + fieldName + "'";
+						return false;
+					}
+					out << ",\"field\":\"" << JsonEscape(field->Name) << "\",\"value\":"
+						<< SchemaValueToJson(Schema::ReadSchemaField(*field, instance));
+				}
+				out << "}";
+			}
 			out << "}";
 			result = out.str();
 			return true;
@@ -1293,7 +1774,65 @@ namespace World
 					return true;
 				}
 			}
-			error = "unsupported property '" + property + "' (Tag/Location/Rotation/Scale/Material/Primitive/Color)";
+			// PLUG-CLEAN-1:任意 schema 组件(含插件组件 blob)的**字段写入**。
+			// 走 FieldSchema::Set 的宿主封装(WriteSchemaField),与属性面板/序列化同一条
+			// 访问器;Play/Simulate 的只读规则在本命令开头已统一拒绝。
+			if (!arg("component").empty())
+			{
+				const std::string componentName = arg("component");
+				if (property.empty())
+				{
+					error = "scene.set with component=<type> needs property=<field> and value=<text>";
+					return false;
+				}
+				Schema::SchemaRegistry& schemas = m_ActiveScene->GetContext().Schemas();
+				const Schema::TypeSchema* schema = FindComponentSchema(schemas, componentName);
+				if (!schema)
+				{
+					error = "no component type '" + componentName
+						+ "' (use the full type id, its short name, or its display name)";
+					return false;
+				}
+				if (!schema->Storage)
+				{
+					error = "component '" + schema->Id.Name
+						+ "' is schema-only (no storage) and cannot live on an entity";
+					return false;
+				}
+				auto* storage = registry.storage(schema->Storage->ComponentId);
+				void* instance = storage && storage->contains(handle) ? storage->value(handle) : nullptr;
+				if (!instance)
+				{
+					error = "entity does not have component '" + componentName
+						+ "' (add it first, e.g. from the properties panel)";
+					return false;
+				}
+				const Schema::FieldSchema* field = FindComponentField(*schema, property);
+				if (!field)
+				{
+					error = "component '" + schema->Id.Name + "' has no field '" + property + "'";
+					return false;
+				}
+				Schema::Value parsed;
+				std::string parseError;
+				if (!ParseSchemaFieldValue(*field, value, &parsed, &parseError))
+				{
+					error = parseError.empty()
+						? ("field '" + field->Name + "' rejected the value") : parseError;
+					return false;
+				}
+				if (!Schema::WriteSchemaField(*field, instance, parsed))
+				{
+					error = "field '" + field->Name + "' write rejected by '" + schema->Id.Name + "'";
+					return false;
+				}
+				MarkDocumentDirty();
+				result = "component " + schema->Id.Name + "." + field->Name + "=" + value;
+				return true;
+			}
+			error = "unsupported property '" + property
+				+ "' (Tag/Location/Rotation/Scale/Material/Primitive/Color; "
+				"or pass component=<type> [property=<field>] for any schema component)";
 			return false;
 		}
 		if (cmd == "scene.open")
@@ -1611,6 +2150,9 @@ namespace World
 				out << ",\"diagnostic\":\"" << JsonEscape(entry.Diagnostic) << "\"";
 				out << ",\"loadError\":\""
 					<< JsonEscape(m_Shell.PluginLoadError(entry.Manifest.Id)) << "\"";
+				// PLUG-CLEAN-1:清单 engine: 最低版本约束是否被宿主满足(宿主版本见 plugin.info
+				// 的 hostEngineVersion;空清单字段 = true)。
+				out << ",\"engineSatisfied\":" << (entry.EngineSatisfied ? "true" : "false");
 				out << ",\"pendingReload\":"
 					<< (plugins->HasPendingReload(entry.Manifest.Id) ? "true" : "false");
 				out << "}";
@@ -1660,6 +2202,8 @@ namespace World
 				out << ",\"publisher\":\"" << JsonEscape(entry->Manifest.Publisher) << "\"";
 				out << ",\"entry\":\"" << JsonEscape(entry->Manifest.Entry) << "\"";
 				out << ",\"engine\":\"" << JsonEscape(entry->Manifest.Engine) << "\"";
+				// PLUG-CLEAN-1:宿主引擎版本(单一事实源 = 根 CMakeLists 的 project VERSION)。
+				out << ",\"hostEngineVersion\":\"" << JsonEscape(Plugins::HostEngineVersion()) << "\"";
 				out << ",\"manifest\":\""
 					<< JsonEscape(entry->Manifest.ManifestPath.generic_string()) << "\"";
 				out << ",\"depends\":[";
