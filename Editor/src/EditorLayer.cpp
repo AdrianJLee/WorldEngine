@@ -958,6 +958,9 @@ namespace World
 			m_CookingThread.join();
 		m_ShowCookingProgress = false;
 		m_HasRenderedScene = false;
+		// HOTR-P3-T7:在飞的"构建并重载"先收掉 —— 终止整棵构建进程树再 join,
+		// 关编辑器不会被一次项目构建(分钟级)阻塞。
+		m_ProjectBuildRunner.Shutdown();
 
 		// HOTR-P1-T1:先停材质着色器热重载的编译线程并 join(它只跑 slangc / 读源,不碰 GPU)——
 		// 放在场景/渲染器析构之前,保证 OnDetach 之后不会再有产物进入 Install。
@@ -1030,6 +1033,9 @@ namespace World
 		// 稳定变化即调 Renderer::ReloadShaders()。刻意放在"没有活动场景/渲染器"早退**之前**:
 		// 引擎 shader 与项目无关,启动器/无项目形态同样生效。
 		m_EngineShaderHotReload.Poll(ts.GetSeconds());
+		// HOTR-P3-T7:帧边界消费"构建并重载"的后台构建结果(成功 → 加载段;失败 → 保持
+		// unloaded)。同样放在"没有活动场景/渲染器"早退之前:构建与场景无关。
+		PollCppModuleBuild();
 		if (!m_ActiveScene || !m_SceneRenderer)
 			return;
 		// P2 W5b:帧边界(不在任何脚本回调内)轮询脚本热重载。编辑态轮询文档场景,
@@ -2287,6 +2293,18 @@ namespace World
 
 	bool EditorLayer::ReloadCppModule(std::string* message)
 	{
+		// HOTR-P3-T7:构建在飞时不允许加载段 —— 否则会把旧/半成品 Game.dll 映射回去,
+		// 既可能让链接器写不进去,也让"构建完成后自动加载"失去意义(模块已加载 = 不再加载)。
+		if (m_ProjectBuildRunner.IsRunning())
+		{
+			const std::string error = "a project build is running — wait for it to finish";
+			if (message)
+				*message = error;
+			WLD_CORE_WARN("[cppmodule] reload rejected: {0}", error);
+			m_CppModuleStatus.Message = error;
+			m_Shell.NotifyCppModuleResult();
+			return false;
+		}
 		WorldContext& context = Application::Get().GetContext();
 		Modules::GameModuleReloadResult result;
 		if (Modules::GameModuleReload::IsUnloaded(context))
@@ -2317,6 +2335,108 @@ namespace World
 		return m_CppModuleStatus.State == CppModuleState::Reloading || m_CppModuleStatus.Ok;
 	}
 
+	// HOTR-P3-T7:File ▸ Build & Reload C++ Module / AI `module.build_reload` 的唯一实现面。
+	// 一次调用 = 卸载(先释放 Game.dll 文件锁)→ 后台构建项目自带的 build.cmd → 结果由
+	// OnUpdate 的 PollCppModuleBuild 在帧边界消费(成功自动加载 / 失败保持 unloaded)。
+	bool EditorLayer::BuildAndReloadCppModule(std::string* message)
+	{
+		const auto reject = [message](const std::string& text)
+		{
+			if (message)
+				*message = text;
+			WLD_CORE_WARN("[cppbuild] rejected: {0}", text);
+			return false;
+		};
+
+		if (m_ProjectBuildRunner.IsRunning())
+			return reject("a project build is already running — wait for it to finish");
+
+		const std::filesystem::path projectRoot = World::Paths::ProjectDir();
+		if (projectRoot.empty())
+			return reject("no project is open — Build & Reload C++ Module needs a project with its own build.cmd");
+		std::error_code scriptError;
+		if (!std::filesystem::is_regular_file(projectRoot / "build.cmd", scriptError))
+		{
+			// 早于卸载做检查:没有构建入口就"干净拒绝",模块保持原状态(不从"已加载"掉到 unloaded)。
+			return reject("no build.cmd in " + projectRoot.generic_string()
+				+ " — generate the project build entry points first (File ▶ Generate Build Entry Points)");
+		}
+
+		WorldContext& context = Application::Get().GetContext();
+		const bool wasLoaded = !Modules::GameModuleReload::IsUnloaded(context);
+		if (wasLoaded)
+		{
+			// Windows 上 Editor 映射着 Game.dll 时链接器无法改写该文件 —— 构建前必须先卸载。
+			// 不在安全点(Play/Simulate、脚本回调中)时卸载会干净失败,这里原样拒绝、不启动构建。
+			std::string unloadMessage;
+			if (!UnloadCppModule(&unloadMessage))
+				return reject(unloadMessage.empty() ? "cannot unload the Game module" : unloadMessage);
+		}
+
+		std::string configuration(WLD_BUILD_TYPE);   // 编译期宏形如 "Debug/"(带尾分隔符)
+		while (!configuration.empty()
+			&& (configuration.back() == '/' || configuration.back() == '\\'))
+			configuration.pop_back();
+
+		std::string startError;
+		if (!m_ProjectBuildRunner.Start(projectRoot, WLD_REPO_ROOT, configuration, &startError))
+		{
+			// 罕见(脚本前面已经校验过):把刚卸载掉的模块恢复回去,别让一次失败留下空洞。
+			if (wasLoaded && Modules::GameModuleReload::IsUnloaded(context))
+				ReloadCppModule();
+			return reject(startError.empty() ? "cannot start the project build" : startError);
+		}
+		m_CppBuildReloadPending = true;
+		WLD_CORE_INFO("[cppbuild] building '{0}' (engine '{1}', config {2}, moduleWasLoaded={3})",
+			projectRoot.generic_string(), std::string(WLD_REPO_ROOT), configuration,
+			wasLoaded ? "true" : "false");
+		if (message)
+			*message = "building " + projectRoot.generic_string();
+		return true;
+	}
+
+	// HOTR-P3-T7:帧边界消费构建结果。成功 → 走两段式的加载段(ABI 等值门 + 失败回滚,与
+	// File ▸ Reload C++ Module 的第二段同一入口);失败 → 保持 unloaded,输出尾部进日志与
+	// module.status 的 buildOutput 字段(可见、可断言)。
+	void EditorLayer::PollCppModuleBuild()
+	{
+		m_ProjectBuildRunner.Poll();
+		if (!m_CppBuildReloadPending || m_ProjectBuildRunner.IsRunning())
+			return;
+		m_CppBuildReloadPending = false;
+
+		const int exitCode = m_ProjectBuildRunner.ExitCode();
+		if (exitCode != 0)
+		{
+			WLD_CORE_ERROR("[cppbuild] project build failed (exit {0}); Game module stays unloaded", exitCode);
+			if (!m_ProjectBuildRunner.OutputTail().empty())
+				WLD_CORE_ERROR("[cppbuild] output tail:\n{0}", m_ProjectBuildRunner.OutputTail());
+			// 状态语义:模块仍是 unloaded(要重载必须先有可加载的产物);消息里点明构建失败,
+			// 输出尾部在日志与 module.status.buildOutput 里。
+			m_CppModuleStatus.State = CppModuleState::Unloaded;
+			m_CppModuleStatus.Ok = false;
+			m_CppModuleStatus.Message = "project build failed (exit code " + std::to_string(exitCode)
+				+ "); see the [cppbuild] log lines or module.status buildOutput";
+			++m_CppModuleStatus.Sequence;
+			m_Shell.NotifyCppModuleResult();
+			return;
+		}
+
+		WorldContext& context = Application::Get().GetContext();
+		if (!Modules::GameModuleReload::IsUnloaded(context))
+		{
+			// 构建期间有别的入口把旧构建加载回来了(例如手动点了 Reload C++ Module):
+			// 这里不能再走"未加载 → 加载"那一段(它会把已加载的模块又卸载掉)。只提示手动重载。
+			WLD_CORE_WARN("[cppbuild] build finished (exit 0) but the Game module is loaded again; "
+				"activate Reload C++ Module to swap in the new build");
+			m_CppModuleStatus.Message = "project build finished — activate Reload C++ Module to load the new build";
+			m_Shell.NotifyCppModuleResult();
+			return;
+		}
+		WLD_CORE_INFO("[cppbuild] project build finished (exit 0); loading the new Game.dll");
+		ReloadCppModule();
+	}
+
 	std::string EditorLayer::CppModuleStatusJson() const
 	{
 		const CppModuleStatus& status = m_CppModuleStatus;
@@ -2339,7 +2459,12 @@ namespace World
 				out << ",";
 			out << "\"" << JsonEscape(status.Diagnostics[index]) << "\"";
 		}
-		out << "]}";
+		// HOTR-P3-T7(append-only):"构建并重载"的进度与最近一次结果。buildRunning 在构建在飞
+		// (含"进程已退出但还没被帧边界 Poll 消费")时为真;buildOutput = 最近一次构建的
+		// stdout+stderr 尾部(新一次 Start 会清空);没有结果时 buildExitCode = -1。
+		out << "],\"buildRunning\":" << (m_ProjectBuildRunner.IsRunning() ? "true" : "false")
+			<< ",\"buildExitCode\":" << m_ProjectBuildRunner.ExitCode()
+			<< ",\"buildOutput\":\"" << JsonEscape(m_ProjectBuildRunner.OutputTail()) << "\"}";
 		return out.str();
 	}
 

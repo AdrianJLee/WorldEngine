@@ -13,6 +13,7 @@
 #include "World/WUI/WuiGizmo.h"
 #include "WUI/EditorShell.h"
 #include "AiControl/AiControlServer.h"
+#include "Build/ProjectBuildRunner.h"
 #include "EngineShaderHotReload.h"
 #include "ShaderHotReload.h"
 #include "Texture/TextureImportWatch.h"
@@ -287,6 +288,14 @@ namespace World
 		bool ReloadCppModule(std::string* message = nullptr);
 		// AI `module.unload`:显式卸载(幂等;已卸载时仍返回 true 并把状态对齐成 unloaded)。
 		bool UnloadCppModule(std::string* message = nullptr);
+		// ---- HOTR-P3-T7(P3-a):File ▸ Build & Reload C++ Module / AI `module.build_reload` ----
+		// 一次动作 = 卸载(释放 Game.dll 文件锁)→ 后台跑项目自带的 `<项目根>/build.cmd`
+		// (ProjectBuildRunner;同一时刻只允许一个构建)→ 成功后自动走加载段。
+		// 拒绝条件(不改状态、可读 message):没有项目根 / 项目里没有 `build.cmd` /
+		// 已有构建在飞 / 模块不在安全点(卸载失败)。
+		// 构建失败 = 保持 unloaded,输出尾部在 `[cppbuild]` 日志与 module.status 的
+		// `buildOutput` 字段里可见;加载段的 ABI 等值门/回滚语义不变。
+		bool BuildAndReloadCppModule(std::string* message = nullptr);
 		// 引擎实况:当前是否真的加载着 Game 模块(存根生成门禁按它判定)。
 		bool IsCppModuleLoaded() const;
 
@@ -390,6 +399,9 @@ namespace World
 		// CPPT-3:把一次模块热重载结果写进 `m_CppModuleStatus`(+ 同步 Layout-S6 的模块标记)。
 		void PublishCppModuleResult(const Modules::GameModuleReloadResult& result,
 			CppModuleState state, bool ok);
+		// HOTR-P3-T7:帧边界消费 ProjectBuildRunner 的结果(成功 → 加载段;失败 → 保持
+		// unloaded 并把输出尾部打进日志)。
+		void PollCppModuleBuild();
 		// 开发验证:WLD_CAPTURE_FRAMES=N 后把场景渲染目标写 PPM(后端无关 RHI 读回)。
 		void CaptureFrameIfRequested();
 		// 开发验证:WLD_HIERARCHY_CLICK=<进入 Play 后的帧数> 触发层级面板首行的真实点击回调,
@@ -413,6 +425,11 @@ namespace World
 		bool m_GameModuleLoaded = false;
 		// CPPT-3:Game 模块热重载状态(AI module.status / 状态栏节点 cppmodule.status 同一来源)。
 		CppModuleStatus m_CppModuleStatus;
+		// HOTR-P3-T7:项目 `build.cmd` 的后台执行器(构建在飞时 IsRunning()=true;
+		// 结果由 OnUpdate 的 PollCppModuleBuild 消费)。m_CppBuildReloadPending 只在
+		// "本次构建由 BuildAndReloadCppModule 发起"时为真,防止消费到无关结果。
+		Editor::ProjectBuildRunner m_ProjectBuildRunner;
+		bool m_CppBuildReloadPending = false;
 
 		// ---- PLUG-T3:插件系统状态 ----
 		// 管理器在项目形态的 OnAttach 里建立(Discover 两个根 + 按禁用清单加载);OnDetach 里

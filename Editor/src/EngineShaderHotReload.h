@@ -7,7 +7,8 @@
 
 namespace World::Editor
 {
-	// HOTR-P1-T3:引擎内建 shader(`Engine/assets/shaders/**/*.slang`)的开发态热重载监听。
+// HOTR-P1-T3:引擎内建 shader(`Engine/assets/shaders/**/*.slang`)的开发态热重载监听。
+// 生效矩阵与开关:`docs/dev/hot-reload.md`。
 	//
 	// 与 T1 的 `Editor::ShaderHotReload`(材质表面 `.slang`,走项目内容根 + 后台编译线程)分开:
 	// 引擎 shader 不属于任何项目内容根,产物的编译/重建由渲染器负责,所以这里只做

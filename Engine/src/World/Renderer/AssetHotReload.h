@@ -9,7 +9,8 @@
 
 namespace World
 {
-	// P2 W5-L1:资产外部改动的内容指纹与轮询监听(材质 .wmat / 贴图 / 场景 .wd 通用)。
+// P2 W5-L1:资产外部改动的内容指纹与轮询监听(材质 .wmat / 贴图 / 场景 .wd 通用)。
+// 生效矩阵与开关:`docs/dev/hot-reload.md`。
 	//
 	// 与 Script/HotReload 的口径一致:**内容哈希优先**(同内容重写只动 mtime 不算变化);
 	// 内容读不到时退化为 "size|mtime" 兜底(Exists=true, FromContent=false)。

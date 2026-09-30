@@ -18,6 +18,7 @@ namespace World
 	namespace Editor
 	{
 		// HOTR-P2-T5(P2-c):内容根下纹理资产(`.wtex`)与它们的 `source:` 源图被**外部改动**时,
+		// 生效矩阵与开关:`docs/dev/hot-reload.md`。
 		// 编辑器自动重烘 `<同目录>/<主名>.wtexc` 并失效材质贴图缓存。
 		//
 		// 动机:M4-TEX 的导入管线只在"用户点 Apply/Reimport"或 cook 时重烘;`.wtex`(或其源图)

@@ -2116,6 +2116,21 @@ namespace World
 			}
 			return true;
 		}
+		// HOTR-P3-T7:`module.build_reload` = 卸载 + 后台构建项目 build.cmd + 成功后自动加载。
+		// 命令异步:返回 ok=true 只代表"构建已启动",进度/结果轮询 `module.status`
+		// (buildRunning / buildExitCode / buildOutput;菜单项走同一入口)。
+		if (cmd == "module.build_reload")
+		{
+			std::string message;
+			const bool ok = BuildAndReloadCppModule(&message);
+			result = CppModuleStatusJson();
+			if (!ok)
+			{
+				error = message.empty() ? "module build_reload failed" : message;
+				return false;
+			}
+			return true;
+		}
 		// ---- PLUG-T3:插件管理器(与面板同一条数据/动作路径;E2:无项目 = "需要先打开项目")----
 		//   plugin.list                     已发现条目 + 状态(JSON)
 		//   plugin.info <id>                单条详情(JSON;依赖 / 能力 / 导出说明 / 诊断 / 根路径)

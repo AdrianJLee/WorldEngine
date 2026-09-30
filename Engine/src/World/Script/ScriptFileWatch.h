@@ -1,6 +1,7 @@
 #pragma once
 
 // P2 W5:L2 脚本文件监听(轮询式,不引 OS watcher)。
+// 生效矩阵与开关:`docs/dev/hot-reload.md`(改热重载行为时同批更新该文档)。
 //
 // 语义(对齐 W5 方案的"同内容不重载 + debounce 100-200ms"):
 //   - Watch() 只建立基线指纹,首次登记不产生变化;

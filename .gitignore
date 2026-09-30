@@ -47,6 +47,11 @@ projects/*/assets/**/*.wtexc
 !docs/
 !docs/**
 
+# 例外:编辑器源码目录 `Editor/src/Build/` 与裸 `build` 规则同名(裸名在任意深度命中,
+# 会静默吞掉这两个源文件);构建产物仍由 apply_patch 之外的规则/路径约定排除。
+!Editor/src/Build/
+!Editor/src/Build/**
+
 # 构建残留(MSVC 在仓库根生成的程序数据库),不入库
 /vc140.pdb
 tmp

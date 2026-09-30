@@ -7491,6 +7491,16 @@ namespace World
 					"the file; activate again to load the new build. C++ script instances are destroyed "
 					"and re-created from Pending via OnCreate."),
 				Wui::HashId("menu.file.reload_cpp_module") });
+		// HOTR-P3-T7:一步完成"卸载 + 构建 + 加载" —— 与 AI `module.build_reload` 是同一条
+		// EditorLayer::BuildAndReloadCppModule 入口(用户在编辑器内不再需要切到 VS/CMake 构建)。
+		fileEntries.push_back({ Wui::Tr("menu.file.build_reload_cpp_module", "Build & Reload C++ Module (Game.dll)"),
+				false,
+				[this] { m_Editor.BuildAndReloadCppModule(); }, false,
+				Wui::Tr("menu.file.build_reload_cpp_module.tooltip",
+					"Unload Game.dll, run this project's own build.cmd in the background, then load the "
+					"new build (a build failure keeps the module unloaded and shows the build output in "
+					"the log). One build at a time."),
+				Wui::HashId("menu.file.build_reload_cpp_module") });
 		fileEntries.push_back({ Wui::Tr("menu.file.project_settings", "Project Settings"), false, [this]
 				{
 					// P4-UX11:项目设置只有一处入口 = 独立窗口的 Settings 面板(渲染/物理/启动与内容)。

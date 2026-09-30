@@ -67,8 +67,10 @@ GetEntity().GetScene()->DeferStructuralChange([position](World::Scene& scene) {
 旧式同步 Create/Add(返回对象或引用)不能在回调里使用,会在写入前被拒绝。已有运行中、待创建或失败的脚本
 不能直接替换:先移除并完成清理,再在后续阶段添加。
 
-运行中 Inspector 禁用脚本重绑、解绑与自动重载;缓存的起始字段在停止后编辑。改完脚本要 **Stop 再 Play** 才生效,
-刷新声明不等于热重载。暂停时仍会提交结构请求,但不执行 `OnUpdate`。可以删除已有物理 body 或移除刚体;
+运行中 Inspector **禁用脚本重绑、解绑与手动 "Reload Script" 按钮**(Play/Simulate 是只读态:暂停或停止后才能点);
+但**脚本文件的热重载在 Play/Simulate 下仍然生效** —— 引擎在帧边界轮询正在运行的那份场景副本,改盘即生效。
+想让脚本从初始状态重跑,才需要 **Stop 再 Play**;刷新声明不等于热重载。暂停时仍会提交结构请求,但不执行 `OnUpdate`。
+可以删除已有物理 body 或移除刚体;
 运行中新增 / 替换刚体与 collider、以及破坏 Transform 依赖的操作会被拒绝。
 
 ## 排查
