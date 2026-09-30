@@ -3,6 +3,7 @@
 #include "VulkanDevice.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace World::Rhi::Vulkan
 {
@@ -112,6 +113,9 @@ namespace World::Rhi::Vulkan
 		segment.GuardFence = segment.OwnFence;
 		segment.Submitted = false;
 		segment.Dirty = false;
+		if (std::getenv("WLD_UPLOAD_RING_TRACE"))
+			WLD_CORE_INFO("[upload-ring] segment cmd={0} fence={1} capacity={2}",
+				reinterpret_cast<uint64_t>(segment.Cmd), reinterpret_cast<uint64_t>(segment.OwnFence), capacity);
 		return true;
 	}
 
@@ -163,6 +167,8 @@ namespace World::Rhi::Vulkan
 				m_Segments.push_back(fresh);
 				m_Current = m_Segments.size() - 1;
 				m_GrowCount++;
+				if (std::getenv("WLD_UPLOAD_RING_TRACE"))
+					WLD_CORE_INFO("[upload-ring] grow to {0} segment(s) (required={1})", m_Segments.size(), required);
 				return m_Segments.back();
 			}
 		}
@@ -179,6 +185,10 @@ namespace World::Rhi::Vulkan
 		VkFence guard = stalled.GuardFence ? stalled.GuardFence : stalled.OwnFence;
 		if (guard)
 			vkWaitForFences(m_Device.GetNativeDevice(), 1, &guard, VK_TRUE, UINT64_MAX);
+		if (std::getenv("WLD_UPLOAD_RING_TRACE"))
+			WLD_CORE_INFO("[upload-ring] stall on segment {0} cmd={1} fence={2} guard={3}",
+				stallIndex, reinterpret_cast<uint64_t>(stalled.Cmd),
+				reinterpret_cast<uint64_t>(stalled.OwnFence), reinterpret_cast<uint64_t>(guard));
 		if (stalled.OwnFence)
 			vkResetFences(m_Device.GetNativeDevice(), 1, &stalled.OwnFence);
 		if (stalled.Cmd)
@@ -212,6 +222,10 @@ namespace World::Rhi::Vulkan
 		segment->Offset = offset + size;
 		segment->Dirty = true;
 		m_PendingBytes += size;
+		if (std::getenv("WLD_UPLOAD_RING_TRACE"))
+			WLD_CORE_INFO("[upload-ring] alloc cmd={0} fence={1} offset={2} size={3} submitted={4}",
+				reinterpret_cast<uint64_t>(segment->Cmd), reinterpret_cast<uint64_t>(segment->OwnFence),
+				offset, size, segment->Submitted ? 1 : 0);
 		allocation.Buffer = segment->Buffer;
 		allocation.Offset = offset;
 		allocation.Size = size;
@@ -250,6 +264,10 @@ namespace World::Rhi::Vulkan
 		if (segment.OwnFence)
 			vkResetFences(m_Device.GetNativeDevice(), 1, &segment.OwnFence);
 		const VkResult submitResult = vkQueueSubmit(m_Device.GetGraphicsQueue(), 1, &submitInfo, segment.OwnFence);
+		if (std::getenv("WLD_UPLOAD_RING_TRACE"))
+			WLD_CORE_INFO("[upload-ring] submit cmd={0} fence={1} used={2} result={3}",
+				reinterpret_cast<uint64_t>(segment.Cmd), reinterpret_cast<uint64_t>(segment.OwnFence),
+				segment.Offset, static_cast<int>(submitResult));
 		if (submitResult != VK_SUCCESS)
 		{
 			// P4-UX5:上传环也要报出处(历史上 device lost 可能来自一次性提交)。

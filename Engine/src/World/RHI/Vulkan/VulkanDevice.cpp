@@ -361,6 +361,28 @@ namespace World::Rhi::Vulkan
 	// P4-UX5:device lost 取证。用户实测的两次事故都只有驱动级 nvlddmkm Event 153
 	// (引擎错误)、没有任何验证层 VUID —— 这种"硬件/驱动层面"的故障只有 VK_EXT_device_fault
 	// 能给出可分析的现场:故障地址类型与精度、厂商故障码,以及 NVIDIA 的厂商二进制数据。
+	// HOTR-P2C(2026-09-30 实测):设备丢失后直接调 vkGetDeviceFaultInfoEXT 会在 NVIDIA ICD 内
+	// 访问冲突(0xC0000005,nvoglv64!vkGetInstanceProcAddr+…),把"取证"变成"二次崩溃"。
+	// 这里用 SEH 包住该调用(独立小函数:无 C++ 对象,满足 MSVC __try/__except 限制):
+	// 查询失败/崩溃都只降级为"无故障细节",不影响后续清理路径。
+	namespace
+	{
+		VkResult SafeDeviceFaultInfo(PFN_vkGetDeviceFaultInfoEXT query, VkDevice device,
+			VkDeviceFaultCountsEXT* counts, VkDeviceFaultInfoEXT* info, bool* crashed)
+		{
+			*crashed = false;
+			__try
+			{
+				return query(device, counts, info);
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				*crashed = true;
+				return VK_ERROR_UNKNOWN;
+			}
+		}
+	}
+
 	void VulkanDevice::LogDeviceFault(const char* where)
 	{
 		if (!m_Device || !m_DeviceFaultSupported || !vkGetDeviceFaultInfoEXT)
@@ -373,10 +395,11 @@ namespace World::Rhi::Vulkan
 		counts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
 		VkDeviceFaultInfoEXT info{};
 		info.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT;
-		if (vkGetDeviceFaultInfoEXT(m_Device, &counts, &info) != VK_SUCCESS)
+		bool countsCrashed = false;
+		if (SafeDeviceFaultInfo(vkGetDeviceFaultInfoEXT, m_Device, &counts, &info, &countsCrashed) != VK_SUCCESS)
 		{
-			WLD_CORE_ERROR("[RHI-VK] device fault at '{0}':vkGetDeviceFaultInfoEXT 失败",
-				where ? where : "?");
+			WLD_CORE_ERROR("[RHI-VK] device fault at '{0}':vkGetDeviceFaultInfoEXT 失败{1}",
+				where ? where : "?", countsCrashed ? "(驱动内访问冲突,细节不可用)" : "");
 			return;
 		}
 		std::vector<VkDeviceFaultAddressInfoEXT> addresses(counts.addressInfoCount);
@@ -385,7 +408,8 @@ namespace World::Rhi::Vulkan
 		info.pAddressInfos = addresses.empty() ? nullptr : addresses.data();
 		info.pVendorInfos = vendors.empty() ? nullptr : vendors.data();
 		info.pVendorBinaryData = vendorBinary.empty() ? nullptr : vendorBinary.data();
-		vkGetDeviceFaultInfoEXT(m_Device, &counts, &info);
+		bool detailsCrashed = false;
+		SafeDeviceFaultInfo(vkGetDeviceFaultInfoEXT, m_Device, &counts, &info, &detailsCrashed);
 		WLD_CORE_ERROR("[RHI-VK] device fault details: where='{0}' desc='{1}' addressInfos={2} vendorInfos={3} vendorBinary={4}B",
 			where ? where : "?", info.description, counts.addressInfoCount, counts.vendorInfoCount,
 			static_cast<uint32_t>(vendorBinary.size()));
