@@ -32,6 +32,8 @@ target_link_libraries(Editor PRIVATE
     World
     # AI 控制通道(TCP 回环,JSON 行协议):winsock2。
     ws2_32
+    # 2026-09-30:复用已打开的 VS 实例(Running Object Table + DTE 晚期绑定)。
+    ole32
 )
 
 add_custom_command(TARGET Editor POST_BUILD

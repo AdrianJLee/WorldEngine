@@ -3,6 +3,7 @@
 #include "EditorPreferences.h"
 #include "EditorResources.h"
 #include "EditorStartup.h"
+#include "VisualStudioAutomation.h"
 #include "Project/ProjectLauncher.h"
 #include "World/Core/Asset/BuiltinImporters.h"
 #include "World/Core/Asset/CookPipeline.h"
@@ -318,6 +319,18 @@ namespace World
 			Application::Get().GetWindow().SetClipboardText(std::string(text));
 			return true;
 		};
+
+		// 2026-09-30 探针钩子:`WLD_VSOPEN_PROBE=<绝对路径>` 启动时走一次真实的
+		// "Open in Visual Studio" 路径(配 `WLD_VS_DRYRUN=1` 只打日志、不启动也不投递),
+		// 供自动化断言"实例复用 vs 回落启动"。正常编辑不受影响(不设变量 = 零行为变化)。
+		// 放在启动器分支之前:两种形态下都可以探到(该路径不依赖已挂载的项目)。
+		if (const char* vsProbe = std::getenv("WLD_VSOPEN_PROBE"); vsProbe != nullptr && vsProbe[0] != '\0')
+		{
+			std::string probeMessage;
+			const bool probeOk = OpenInVisualStudio(std::filesystem::path(vsProbe), &probeMessage);
+			WLD_CORE_INFO("[vsopen-probe] path={0} ok={1} message={2}", vsProbe, probeOk ? 1 : 0,
+				probeMessage);
+		}
 
 		// ---- PROJ-3/T1:纯启动器模式(不挂载项目、不做项目级初始化)----
 		// 宿主在 Application 构造前已经挡住项目挂载(见 LauncherBootScope);这里:
@@ -2927,6 +2940,53 @@ namespace World
 			WLD_CORE_WARN("[vsopen] file={0} devenv= mode=none (file not found)", absPath.string());
 			report("file not found: " + absPath.string());
 			return false;
+		}
+
+		// ---- 2026-09-30:优先"跳转已经在跑的 VS 实例" ----
+		// 只要有一个 VS 实例打开着该文件所属的根(引擎根 / 项目根),就在**那个实例**里
+		// 打开文件并激活窗口,不再起新实例。归属判定用"根最长前缀"——Open-Folder(CMake)
+		// 模式下 Solution.FindProjectItem 返回 null(2026-09-30 实测),不能拿它判归属。
+		// 枚举与打开都限时(默认 3s),任何失败/超时都回落到下面的"启动新实例"三模式。
+		{
+			const std::vector<Editor::RunningVisualStudio> instances = Editor::EnumerateRunningVisualStudio();
+			if (!instances.empty())
+			{
+				std::string roots;
+				for (const Editor::RunningVisualStudio& instance : instances)
+				{
+					if (!roots.empty())
+						roots += ", ";
+					roots += std::filesystem::path(instance.Root).u8string();
+				}
+				WLD_CORE_INFO("[vsopen] running Visual Studio instances={0} roots=[{1}]",
+					instances.size(), roots);
+			}
+			Editor::RunningVisualStudio matched;
+			if (Editor::FindRunningVisualStudioFor(instances, absPath, &matched))
+			{
+				const std::string rootText = std::filesystem::path(matched.Root).u8string();
+				const char* dryRunEnv = std::getenv("WLD_VS_DRYRUN");
+				const bool dryRun = dryRunEnv != nullptr && dryRunEnv[0] != '\0'
+					&& std::strcmp(dryRunEnv, "0") != 0;
+				if (dryRun)
+				{
+					WLD_CORE_INFO("[vsopen] file={0} devenv= mode=dte-match instance-root={1}",
+						absPath.generic_string(), rootText);
+					report("dry-run: would open " + absPath.string()
+						+ " in the running Visual Studio instance at " + rootText);
+					return true;
+				}
+				std::string openError;
+				if (Editor::OpenFileInRunningVisualStudio(matched, absPath, &openError))
+				{
+					WLD_CORE_INFO("[vsopen] file={0} devenv= mode=dte instance-root={1} pid={2}",
+						absPath.generic_string(), rootText, matched.Pid);
+					report("opened in the running Visual Studio instance: " + absPath.string());
+					return true;
+				}
+				WLD_CORE_WARN("[vsopen] running instance open failed ({0}); falling back to launch",
+					openError);
+			}
 		}
 
 		// 打开策略:项目 CMake → 引擎解决方案 → 单文件(按文件归属判定,见头文件注释)。
