@@ -4,9 +4,9 @@
 // Size,用 offsetof/sizeof 填写)经 WeHostApi::RegisterComponent 交给宿主,宿主据此在
 // Schema::SchemaRegistry 里生成一个 TypeCategory::Component 类型;Unregister 成对注销。
 //
-// 语义边界:注册产物 = 组件 **schema**(注册表 Find/ListByModule 与序列化 API 可见)。
-// 组件的 entt 存储桥不在本版 ABI 里 ⇒ `WeComponentDesc::ComponentId` 必须为 0,组件暂时
-// 不能挂到场景实体上(将来在 ABI 尾部追加存储回调后才启用)。
+// T2c(2026-09-30)起声明 `Size`(结构总大小)/ `Alignment`(结构对齐)后,宿主为它合成
+// entt blob 存储:组件能挂到场景实体上,Add/Remove/Copy/`.wd` 序列化/属性面板全部走
+// 既有 schema 通路(字段仍然按 offsetof 声明的偏移读写)。`Size = 0` = 旧式 schema-only。
 // 只依赖公共 ABI 头(World/Plugins/WePluginApi.h),不链接 World。
 #include "World/Plugins/WePluginApi.h"
 
@@ -72,9 +72,11 @@ namespace
 		WeComponentDesc desc;
 		desc.Id = "{{PluginId}}.Health";     // 类型全名(也是 .wd 里的类型键)
 		desc.DisplayName = "{{PluginName}} Health";
-		desc.ComponentId = 0;                // 没有存储桥 ⇒ 必须为 0(schema-only)
+		desc.ComponentId = 0;                // 存储 id 由宿主分配 ⇒ 插件必须填 0
 		desc.Fields = ComponentFields();
 		desc.FieldCount = 2;
+		desc.Size = static_cast<uint32_t>(sizeof(HealthComponent));       // T2c:> 0 = 宿主合成 blob 存储
+		desc.Alignment = static_cast<uint32_t>(alignof(HealthComponent)); // 0 = 未声明(<= 16 的 2 的幂)
 		if (!host.RegisterComponent(host.UserData, &desc))
 		{
 			host.Log(host.UserData, WePluginLogError, "component registration failed");

@@ -7,14 +7,43 @@
 #include "World/Gameplay/SystemRegistry.h"
 #include "World/Physics/Physics3D.h"
 #include <box2d/box2d.h>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <mutex>
 #include <stdexcept>
 
 namespace World
 {
 	namespace
 	{
+		// ---- PLUG-T2c:活场景表 ----------------------------------------------------
+		// Scene 构造/析构维护 (WorldContext, registry) 指针;插件卸载前的活实例查询用它
+		// 枚举"进程内所有活场景"(可按 WorldContext 过滤)。表本身加锁;注册表内容的读写
+		// 仍由场景 owner 线程负责 —— 查询走宿主主线程的卸载路径(与场景同线程)。
+		struct LiveSceneEntry
+		{
+			const WorldContext* Context = nullptr;
+			const entt::registry* Registry = nullptr;
+		};
+
+		std::mutex g_LiveScenesMutex;
+		std::vector<LiveSceneEntry> g_LiveScenes;
+
+		void RegisterLiveScene(const WorldContext* context, const entt::registry* registry)
+		{
+			std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+			g_LiveScenes.push_back({ context, registry });
+		}
+
+		void UnregisterLiveScene(const entt::registry* registry)
+		{
+			std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+			g_LiveScenes.erase(std::remove_if(g_LiveScenes.begin(), g_LiveScenes.end(),
+				[registry](const LiveSceneEntry& entry) { return entry.Registry == registry; }),
+				g_LiveScenes.end());
+		}
+
 		template<typename T>
 		std::vector<entt::entity> Snapshot(entt::registry& registry)
 		{
@@ -99,7 +128,10 @@ namespace World
 
 	}
 
-	Scene::Scene(WorldContext& context) : m_Context(&context), m_OwnerThread(std::this_thread::get_id()) {}
+	Scene::Scene(WorldContext& context) : m_Context(&context), m_OwnerThread(std::this_thread::get_id())
+	{
+		RegisterLiveScene(m_Context, &m_Registry);
+	}
 
 	Scene::~Scene()
 	{
@@ -111,6 +143,23 @@ namespace World
 		}
 		StopScene();
 		m_Lifetime.reset();
+		UnregisterLiveScene(&m_Registry);
+	}
+
+	std::size_t Scene::CountLiveComponentInstances(entt::id_type componentId,
+		const WorldContext* context)
+	{
+		std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+		std::size_t count = 0;
+		for (const LiveSceneEntry& entry : g_LiveScenes)
+		{
+			if (context && entry.Context != context)
+				continue;
+			const auto* storage = entry.Registry->storage(componentId);
+			if (storage)
+				count += storage->size();
+		}
+		return count;
 	}
 
 	void Scene::AssertOwnerThread() const

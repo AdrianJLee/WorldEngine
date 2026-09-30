@@ -211,6 +211,13 @@ namespace World
 		Entity GetPrimaryCameraEntity();
 		WorldContext& GetContext() { return *m_Context; }
 		const WorldContext& GetContext() const { return *m_Context; }
+		// ---- PLUG-T2c:活实例查询(插件组件存储的卸载前置检查)----
+		// 统计进程内活场景(可选:仅同一 WorldContext)里 componentId 的实例总数。
+		// 只读:走注册表的 storage(id) → size(),不触发结构写;查询应在场景 owner 线程
+		// (宿主主线程)调用。用途 = 卸载插件前确认它的 blob 组件没有活实例:有实例时注销
+		// schema 会把场景数据变成"没有 schema 的孤儿"(序列化直接丢数据)。
+		static std::size_t CountLiveComponentInstances(entt::id_type componentId,
+			const WorldContext* context = nullptr);
 		void DuplicateEntity(Entity entity);
 		entt::registry& GetRegistry();
 		const entt::registry& GetRegistry() const;

@@ -17,6 +17,10 @@
 #include "World/Plugins/PluginManager.h"
 #include "World/Schema/Schema.h"
 #include "World/Schema/SchemaRegistry.h"
+#include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
+#include "World/Scene/Scene.h"
+#include "World/Scene/SceneSerializer.h"
 #include "World/Scene/LuaStubGenerator.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Script/BindServices.h"
@@ -1122,6 +1126,276 @@ namespace
 		CHECK(schemas.Find("test.leakycomponent.Shield") == nullptr);
 	}
 
+	// PLUG-T2c:用例级的核心日志静音。
+	//
+	// World.Plugins 的证据约定是"插件侧走宿主日志、用 World::Log::RecentLines 取回",
+	// 而那份环形缓冲只有 400 行(Engine/src/World/Core/Log.cpp),既有用例的 mark/窗口
+	// 断言依赖它 —— 新用例的日志会把窗口挤走。T2c 用例改为**全部走 API 断言**
+	// (返回值 / 注册表 / 场景状态 / Unload 的可读 error),因此把核心日志临时关掉:
+	// 既不挤掉既有用例的窗口,也不让本用例自己依赖日志(异常路径由 RAII 恢复)。
+	class CoreLogMute
+	{
+	public:
+		CoreLogMute()
+		{
+			if (const std::shared_ptr<spdlog::logger>& logger = World::Log::GetCoreLogger())
+			{
+				m_Logger = logger;
+				m_Level = logger->level();
+				logger->set_level(spdlog::level::off);
+			}
+		}
+		~CoreLogMute()
+		{
+			if (m_Logger)
+				m_Logger->set_level(m_Level);
+		}
+		CoreLogMute(const CoreLogMute&) = delete;
+		CoreLogMute& operator=(const CoreLogMute&) = delete;
+
+	private:
+		std::shared_ptr<spdlog::logger> m_Logger;
+		spdlog::level::level_enum m_Level = spdlog::level::trace;
+	};
+
+	// T2c:组件存储桥(WeComponentDesc::Size / Alignment → 宿主合成 entt blob 存储)。
+	//   * 注册产物:TypeSchema.Storage != nullptr、Size = 插件声明的结构大小、组件 id 落在
+	//     保留高位段,FindByComponentId 自洽;
+	//   * 场景实体:走 schema/Entity 的按 id 通路新增 → HasComponent;blob 初始清零
+	//     (与引擎组件的 AddComponent 同语义);
+	//   * FieldSchema::Set/Get 在 blob 内按插件用 offsetof 声明的偏移读写(逐字节对照布局);
+	//   * Copy(Scene::DuplicateEntity)/ CopyAll(Scene::CopyScene)与引擎组件同语义;
+	//   * `.wd` 保存 → 重新加载 → 字段值一致;插件缺失时既有"未知组件 YAML 片段保留"不退化;
+	//   * 移除组件 → 类型仍在、实例消失;
+	//   * 有活实例时 Unload 干净拒绝(可读原因),清掉实例后 Unload 成功(槽位/绑定可复用);
+	//   * 未声明 Size(0)的旧式 schema-only 组件行为不变(Storage == nullptr、Size == 0)。
+	void CaseComponentStorageBridge()
+	{
+		// 本用例的核心日志全部静音(见 CoreLogMute):断言只看 API 结果。
+		//   副作用提示:插件侧"坏声明被拒绝"的证据 = 插件 Register 整体成功
+		//   (RegisterBadDescriptors 里任一坏声明被接受 ⇒ 插件拒绝加载 ⇒ LoadAll != Ok)。
+		const CoreLogMute mute;
+		const fs::path root = FreshRoot("component-storage");
+		ManifestFields storage;
+		storage.Id = "test.storage";
+		WritePlugin(root / "engine", "test.storage", "WePluginTestComponentStorage", BuildYaml(storage));
+
+		WorldContext context;
+		Schema::SchemaRegistry& schemas = context.Schemas();
+		PluginManager manager;
+		CHECK(manager.Discover(root / "engine", root / "project"));
+		std::string error;
+		CHECK(manager.LoadAll(context, &error) == PluginManager::Status::Ok);
+		CHECK(manager.LoadedCount() == 1);
+		CHECK(schemas.ListByModule("test.storage").size() == 3);
+
+		// ① 注册产物:存储绑定 + 声明大小 + 保留段 id。
+		const Schema::TypeSchema* health = schemas.Find("test.storage.Health");
+		CHECK(health != nullptr);
+		CHECK(health->Category == Schema::TypeCategory::Component);
+		CHECK(health->Size == sizeof(WePluginComponentFixture::HealthFixture));
+		CHECK(health->Storage != nullptr);
+		CHECK(health->Storage->Add != nullptr && health->Storage->Copy != nullptr
+			&& health->Storage->CopyAll != nullptr);
+		CHECK((health->Storage->ComponentId & 0x80000000u) != 0);
+		CHECK(schemas.FindByComponentId(health->Storage->ComponentId) == health);
+		const Schema::TypeSchema* shield = schemas.Find("test.storage.Shield");
+		CHECK(shield != nullptr && shield->Storage != nullptr);
+		CHECK(shield->Size == sizeof(WePluginComponentFixture::ShieldFixture));
+		CHECK(shield->Storage->ComponentId != health->Storage->ComponentId);
+		const uint32_t healthId = health->Storage->ComponentId;
+
+		// ⑦ 旧式 schema-only 组件行为不变(Size/Alignment = 0 ⇒ 没有存储、不能挂到实体上)。
+		const Schema::TypeSchema* legacySchema = schemas.Find("test.storage.Legacy");
+		CHECK(legacySchema != nullptr);
+		CHECK(legacySchema->Storage == nullptr);
+		CHECK(legacySchema->Size == 0);
+		CHECK(schemas.ListByModule("test.storage").size() == 3);
+
+		// ② 场景实体:按 id 通路新增,blob 初始全零。
+		World::Ref<World::Scene> scene = World::CreateRef<World::Scene>(context);
+		World::Entity entity = World::Entity::CreateEntity(scene.get(), "Storage Probe");
+		CHECK(!entity.HasComponent(healthId));
+		entity.AddComponent(healthId);
+		CHECK(entity.HasComponent(healthId));
+		void* instance = entity.GetComponent(healthId);
+		CHECK(instance != nullptr);
+		const auto fieldValue = [&](uint32_t index)
+		{
+			return health->Fields[index].Get(instance);
+		};
+		CHECK(std::get<bool>(fieldValue(0)) == false);
+		CHECK(std::get<int32_t>(fieldValue(1)) == 0);
+		CHECK(std::get<float>(fieldValue(2)) == 0.0f);
+		CHECK(std::get<uint8_t>(fieldValue(4)) == 0);
+
+		// ③ FieldSchema::Set/Get 在 blob 内按插件声明的 offset 读写(逐字节对照插件布局)。
+		WePluginComponentFixture::HealthFixture expected;
+		expected.Enabled = true;
+		expected.Charges = 7;
+		expected.Health = 42.5f;
+		expected.Offset = { 1.0f, 2.0f, 3.0f };
+		expected.Tier = 1;
+		health->Fields[0].Set(instance, Schema::Value(expected.Enabled));
+		health->Fields[1].Set(instance, Schema::Value(expected.Charges));
+		health->Fields[2].Set(instance, Schema::Value(expected.Health));
+		health->Fields[3].Set(instance, Schema::Value(glm::vec3(1.0f, 2.0f, 3.0f)));
+		health->Fields[4].Set(instance, Schema::Value(expected.Tier));
+		CHECK(std::get<bool>(fieldValue(0)) == true);
+		CHECK(std::get<int32_t>(fieldValue(1)) == 7);
+		CHECK(std::get<float>(fieldValue(2)) == 42.5f);
+		CHECK(std::get<glm::vec3>(fieldValue(3)) == glm::vec3(1.0f, 2.0f, 3.0f));
+		CHECK(std::get<uint8_t>(fieldValue(4)) == 1);
+		WePluginComponentFixture::HealthFixture raw;
+		std::memcpy(&raw, instance, sizeof(raw));
+		CHECK(raw.Enabled == true && raw.Charges == 7 && raw.Health == 42.5f && raw.Tier == 1);
+		CHECK(raw.Offset.X == 1.0f && raw.Offset.Y == 2.0f && raw.Offset.Z == 3.0f);
+
+		// ④ `.wd` 保存 → 重新加载 → 字段值一致(既有 schema 字段通路)。
+		const fs::path scenePath = fs::temp_directory_path() / "worldengine-plugin-storage-test.wd";
+		{
+			World::SceneSerializer writer(scene);
+			CHECK(writer.Serialize(scenePath.string()));
+		}
+		World::Ref<World::Scene> loaded = World::CreateRef<World::Scene>(context);
+		{
+			World::SceneSerializer reader(loaded);
+			CHECK(reader.Deserialize(scenePath.string()));
+			CHECK(reader.GetLastError().empty());
+		}
+		void* loadedInstance = nullptr;
+		{
+			const entt::registry& loadedRegistry = static_cast<const World::Scene&>(*loaded).GetRegistry();
+			const auto* storage = loadedRegistry.storage(healthId);
+			CHECK(storage != nullptr && storage->size() == 1);
+			for (const entt::entity handle : loadedRegistry.view<World::UUIDComponent>())
+				if (storage->contains(handle))
+					loadedInstance = const_cast<void*>(storage->value(handle));
+		}
+		CHECK(loadedInstance != nullptr);
+		CHECK(std::get<bool>(health->Fields[0].Get(loadedInstance)) == true);
+		CHECK(std::get<int32_t>(health->Fields[1].Get(loadedInstance)) == 7);
+		CHECK(std::get<float>(health->Fields[2].Get(loadedInstance)) == 42.5f);
+		CHECK(std::get<glm::vec3>(health->Fields[3].Get(loadedInstance)) == glm::vec3(1.0f, 2.0f, 3.0f));
+		CHECK(std::get<uint8_t>(health->Fields[4].Get(loadedInstance)) == 1);
+
+		// ⑤ Copy / CopyAll 通路(与引擎组件同语义)+ 活实例查询本身。
+		scene->DuplicateEntity(entity);                 // Storage->Copy
+		World::Ref<World::Scene> cloned = World::CreateRef<World::Scene>(context);
+		World::Scene::CopyScene(scene, cloned);         // Storage->CopyAll
+		// 活实例 = 源场景 2(源实体 + DuplicateEntity 副本)+ 读档场景 1 + 克隆场景 2
+		CHECK(World::Scene::CountLiveComponentInstances(healthId, &context) == 5);
+		std::size_t copied = 0;
+		{
+			const entt::registry& sceneRegistry = static_cast<const World::Scene&>(*scene).GetRegistry();
+			const auto* storage = sceneRegistry.storage(healthId);
+			for (const entt::entity handle : sceneRegistry.view<World::UUIDComponent>())
+			{
+				if (!storage || !storage->contains(handle))
+					continue;
+				++copied;
+				CHECK(std::get<float>(health->Fields[2].Get(storage->value(handle))) == 42.5f);
+			}
+		}
+		CHECK(copied == 2);   // 源实体 + DuplicateEntity 副本
+		{
+			const entt::registry& cloneRegistry = static_cast<const World::Scene&>(*cloned).GetRegistry();
+			const auto* storage = cloneRegistry.storage(healthId);
+			CHECK(storage != nullptr && storage->size() == 2);
+		}
+
+		// ⑥ 有活实例时 Unload 干净拒绝(可读原因;类型/插件状态与插件回调都保持不变)。
+		CHECK(manager.Unload("test.storage", context, &error) == PluginManager::Status::HasLiveInstances);
+		CHECK(error.find("live component instances") != std::string::npos);
+		CHECK(error.find("test.storage.Health") != std::string::npos);
+		CHECK(schemas.Find("test.storage.Health") != nullptr);
+		CHECK(schemas.Find("test.storage.Shield") != nullptr);
+		CHECK(manager.LoadedCount() == 1);
+
+		// 移除组件 → 类型仍在、实例消失(源场景)。
+		entity.RemoveComponent(healthId);
+		CHECK(!entity.HasComponent(healthId));
+		CHECK(schemas.Find("test.storage.Health") != nullptr);
+		// 源场景 1(副本)+ 读档场景 1 + 克隆场景 2 = 4
+		CHECK(World::Scene::CountLiveComponentInstances(healthId, &context) == 4);
+
+		// 销毁副本与读档场景;源场景还剩 DuplicateEntity 副本 —— 销毁它,但存储本身留在
+		// 注册表里(空存储),这正是"注销类型后重新注册"要覆盖的复用路径。
+		cloned.reset();
+		loaded.reset();
+		{
+			const entt::registry& sceneRegistry = static_cast<const World::Scene&>(*scene).GetRegistry();
+			const auto* storage = sceneRegistry.storage(healthId);
+			std::vector<entt::entity> withHealth;
+			for (const entt::entity handle : sceneRegistry.view<World::UUIDComponent>())
+				if (storage && storage->contains(handle))
+					withHealth.push_back(handle);
+			CHECK(withHealth.size() == 1);
+			for (const entt::entity handle : withHealth)
+				World::Entity::DestroyEntity(scene.get(), World::Entity(scene.get(), handle));
+		}
+		CHECK(World::Scene::CountLiveComponentInstances(healthId, &context) == 0);
+
+		// 单类型注销 + 重新注册(经插件导出;不重载 DLL,避免日志刷屏):
+		// 槽位/绑定/存储 id 复用 —— 同档位同槽位 ⇒ 同 id,先前的空存储照样能用。
+		const auto unregisterFn = reinterpret_cast<bool (*)(const char*)>(
+			manager.LookupExport("test.storage", "storage.unregister", 1));
+		const auto registerFn = reinterpret_cast<bool (*)()>(
+			manager.LookupExport("test.storage", "storage.register-health", 1));
+		CHECK(unregisterFn != nullptr && registerFn != nullptr);
+		CHECK(unregisterFn("test.storage.Health"));
+		CHECK(schemas.Find("test.storage.Health") == nullptr);
+		CHECK(schemas.ListByModule("test.storage").size() == 2);   // Shield + schema-only Legacy
+		CHECK(registerFn());
+		const Schema::TypeSchema* reloaded = schemas.Find("test.storage.Health");
+		CHECK(reloaded != nullptr && reloaded->Storage != nullptr);
+		CHECK(reloaded->Storage->ComponentId == healthId);
+		World::Entity probe = World::Entity::CreateEntity(scene.get(), "Second Probe");
+		probe.AddComponent(reloaded->Storage->ComponentId);
+		CHECK(probe.HasComponent(reloaded->Storage->ComponentId));
+		reloaded->Fields[2].Set(probe.GetComponent(reloaded->Storage->ComponentId), Schema::Value(1.5f));
+		CHECK(std::get<float>(reloaded->Fields[2].Get(probe.GetComponent(reloaded->Storage->ComponentId)))
+			== 1.5f);
+
+		// 注销同模块的另一个类型:其余类型保持可用(存储绑定的地址稳定)。
+		CHECK(unregisterFn("test.storage.Shield"));
+		CHECK(schemas.Find("test.storage.Shield") == nullptr);
+		const Schema::TypeSchema* remaining = schemas.Find("test.storage.Health");
+		CHECK(remaining != nullptr && remaining->Storage != nullptr);
+		CHECK(remaining->Storage->ComponentId == healthId);
+		CHECK(schemas.ListByModule("test.storage").size() == 2);   // Health + schema-only Legacy
+		remaining->Fields[2].Set(probe.GetComponent(remaining->Storage->ComponentId),
+			Schema::Value(2.5f));
+		CHECK(std::get<float>(remaining->Fields[2].Get(
+			probe.GetComponent(remaining->Storage->ComponentId))) == 2.5f);
+
+		// 清实例后 Unload 成功(类型/回调/账本全部回收;插件自己的 Unregister 幂等)。
+		World::Entity::DestroyEntity(scene.get(), probe);
+		CHECK(World::Scene::CountLiveComponentInstances(healthId, &context) == 0);
+		CHECK(manager.Unload("test.storage", context, &error) == PluginManager::Status::Ok);
+		CHECK(schemas.Find("test.storage.Health") == nullptr);
+		CHECK(schemas.Find("test.storage.Legacy") == nullptr);
+		CHECK(schemas.ListByModule("test.storage").empty());
+		CHECK(manager.LoadedCount() == 0);
+		scene.reset();
+
+		// 插件缺失:已存 `.wd` 里的插件组件 YAML 片段走既有"未知组件保留"路径(不退化)。
+		World::Ref<World::Scene> missing = World::CreateRef<World::Scene>(context);
+		{
+			World::SceneSerializer reader(missing);
+			CHECK(reader.Deserialize(scenePath.string()));
+		}
+		const fs::path missingPath = fs::temp_directory_path() / "worldengine-plugin-storage-unknown.wd";
+		{
+			World::SceneSerializer writer(missing);
+			CHECK(writer.Serialize(missingPath.string()));
+		}
+		CHECK(ReadFileText(missingPath).find("test.storage.Health") != std::string::npos);
+		fs::remove(missingPath);
+		missing.reset();
+		fs::remove(scenePath);
+	}
+
 	// ---- PLUG-T3b:编辑器扩展面(命令 / 面板)----------------------------------------
 	//
 	// 单测里的宿主替身:实现的接口与 Editor/src/WUI/PluginEditorHost.* 完全一致
@@ -1680,6 +1954,7 @@ int main()
 		CaseExamplePluginDiscoverable();    // T2a④ plugins/hello-import 清单可发现
 		CaseComponentSchemaRegistration();  // T2b① 组件 schema 注册 / 序列化往返 / 单类型注销
 		CaseLeakedComponentSweep();         // T2b② 归属保护 / 卸载与析构兜底回收
+		CaseComponentStorageBridge();       // T2c 组件存储桥(Size/Alignment → blob 存储 / 活实例门)
 		CaseEditorExtensionRegistration();  // T3b① 编辑器命令 / 面板注册 / 触发计数 / 注销幂等
 		CaseLeakedEditorExtensionSweep();   // T3b② 抛异常 / 卸载 / 析构三条回收路径
 		CaseScriptLibraryRegistration();    // T4① 脚本函数账本 / VM 调用 / 存根确定性 / 归属保护

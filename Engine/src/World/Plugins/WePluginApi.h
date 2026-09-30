@@ -32,6 +32,12 @@
 // "命名空间.函数名" 形式的全局 Luau 函数,宿主同一份账本既做运行时绑定也做存根渲染。
 // 同一个纪律,不改既有字段、不升 ABI。
 //
+// T2c(2026-09-30)继续在**尾部**追加组件存储桥声明(WeComponentDesc 的 `Size` /
+// `Alignment`):声明了 `Size` 的组件由宿主合成 entt blob 存储,能挂到场景实体上
+// (Add/Remove/Copy/序列化/属性面板走既有 schema 通路);`Size == 0` 保持 T2b 的
+// schema-only 行为。组件 id 仍由**宿主**分配(`ComponentId` 必须为 0,插件不选 id)。
+// 同一个纪律,不改既有字段、不升 ABI。
+//
 // 版本同步点(升级时必须一起改):本文件、`plugin.we.yaml` 的 `abi`、
 // `Engine/src/World/Plugins/PluginManager.*`、`docs/dev/plugin-framework.md`。
 // 方案:`tools/agents/tasks/20260930-1100-plugin-framework/plan.md`(v2.1)。
@@ -154,6 +160,8 @@ namespace World::Plugins
 	//   * 注册产物 = `Schema::SchemaRegistry` 里的 `TypeCategory::Component` 类型
 	//     (List/Find/序列化 API 可见);**没有 entt 存储绑定**(Storage == nullptr),
 	//     所以该组件暂时不能挂到场景实体上(存储桥不在本版 ABI 里,见下面的 ComponentId);
+	//     —— T2c 起:声明了 `Size`(> 0)的组件由宿主合成 entt blob 存储,能挂到场景实体上
+	//     (Storage != nullptr);`Size == 0` 仍是上面的 schema-only 行为。
 	//   * 支持的 Kind = 固定大小 POD(布尔/整型/浮点/向量/四元数/矩阵,见下表);
 	//     String / Enum / Asset / Object 与容器字段 = 干净拒绝(返回 false + 可读日志);
 	//   * 字段名在同一个组件内必须唯一(它同时是 `.wd`/YAML 的键)。
@@ -185,7 +193,8 @@ namespace World::Plugins
 
 	// 组件字段描述(只含 C 类型)。Offset/Size 用 offsetof/sizeof 填:Offset 是字段在插件
 	// 组件结构里的字节偏移,Size 必须等于 Kind 的规范大小(否则注册被拒绝 —— 宿主不做
-	// "按声明大小瞎 memcpy" 的事)。宿主不校验组件结构的总大小(布局由插件拥有)。
+	// "按声明大小瞎 memcpy" 的事)。组件结构的总大小与对齐由 `WeComponentDesc::Size` /
+	// `Alignment` 声明(T2c;Size == 0 = schema-only,宿主不做实例化)。
 	struct WeComponentFieldDesc
 	{
 		uint32_t StructSize = sizeof(WeComponentFieldDesc);
@@ -210,11 +219,24 @@ namespace World::Plugins
 
 		const char* Id = nullptr;                   // 类型全名(必需;空 = 拒绝注册)
 		const char* DisplayName = nullptr;          // 可空 = Id
-		// T2b **必须为 0**:组件存储(entt 桥)不在本版 ABI 里;非 0 = 干净拒绝并给可读诊断。
-		// 将来追加 Add/Copy 回调后,这里才作为组件存储 id 启用(字段只增不改号,不升 ABI)。
+		// **必须为 0**:组件存储 id 由**宿主**分配(T2c 起宿主为声明了 `Size` 的组件合成
+		// entt blob 存储并选保留段 id;插件不选 id)。非 0 = 干净拒绝 + 可读诊断。
 		uint32_t ComponentId = 0;
 		const WeComponentFieldDesc* Fields = nullptr;  // FieldCount == 0 时可为空
 		uint32_t FieldCount = 0;
+
+		// ---- T2c 追加(先自检 StructSize 覆盖到对应字段再填/再读)----
+		// 组件结构总大小(sizeof(插件组件结构));0 = 保持 T2b 的 schema-only 行为
+		// (类型可注册/序列化 API 可见,但不能挂到场景实体上)。
+		//   * Size > 0 = 宿主合成固定尺寸的 blob 存储(Add/Remove/Copy/序列化/属性面板
+		//     全部走既有 schema 通路);Size 必须覆盖每个字段的 `Offset + Size`,
+		//     且不超过宿主最大档(见 docs/dev/plugin-framework.md 的档位表);
+		//   * 插件声明的是**自己的结构布局**:字段 Offset 相对结构开头,宿主按同一偏移在
+		//     blob 内读写 —— blob 地址 == `Bytes` 地址(offset 0)。
+		uint32_t Size = 0;
+		// 组件结构对齐(alignof(插件组件结构));0 = 未声明(宿主按自己的 blob 对齐处理)。
+		// 非 0 必须是 2 的幂且不超过宿主 blob 对齐上限(16),否则 = 干净拒绝 + 可读诊断。
+		uint32_t Alignment = 0;
 	};
 
 	// 宿主能力表(函数指针表;T1 含最小集合,T2 起注册面**尾部追加**)。

@@ -320,3 +320,58 @@ struct WeScriptCallApi      { StructSize, AbiVersion, UserData, ArgCount,
 > 该模板的 `template.json` 已改为 `requires: none`,源码换成
 > `templates/plugin-lua-lib/src/plugin.cpp` 里的真实注册(命名空间 = 插件 id 最后一段);
 > 以本节为准。
+
+## 11. 组件存储桥(T2c,2026-09-30)
+
+T2b 的组件注册只有 schema(`Storage == nullptr`,不能挂到场景实体上)。T2c 在
+`WeComponentDesc` **尾部追加** `Size` / `Alignment`(append-only:不升
+`WE_PLUGIN_ABI_VERSION`),宿主据此为插件组件**合成 entt blob 存储** —— 组件从此能挂到
+场景实体上,Add/Remove/Copy/`.wd` 序列化/属性面板全部走既有 schema 通路。
+
+```cpp
+struct WeComponentDesc {
+    StructSize, AbiVersion, Id, DisplayName, ComponentId, Fields, FieldCount,
+    uint32_t Size;       // sizeof(插件组件结构);0 = 保持 T2b 的 schema-only 行为
+    uint32_t Alignment;  // alignof(插件组件结构);0 = 未声明
+};
+```
+
+- 声明规则:`Size > 0` 才启用存储桥;`Alignment != 0` 时必须是 2 的幂且 ≤ 16
+  (宿主 blob 的 `alignas(16)`),且 `Size` 是它的整数倍;`Size = 0` 时 `Alignment` 必须为 0。
+  每个字段必须落在 `Size` 之内(`Offset + 字段规范大小 <= Size`),否则注册被拒绝。
+  `Size > 2048`(最大档)= 干净拒绝;所有失败都不半注册。
+- **尺寸档位**:16 / 32 / 64 / 128 / 256 / 512 / 1024 / 2048 字节。宿主取**最小覆盖**
+  声明大小的一档,blob 类型 = `PluginComponentBlob<Id>`(对齐 16,blob 地址 == `Bytes`
+  地址 ⇒ 字段访问器写的 `实例 + Offset` 就是 `Bytes + Offset`)。
+- **组件 id 段(写死)**:
+
+  | 位 | 含义 |
+  | --- | --- |
+  | bit31 | `1` = 插件组件(保留高位段,与 entt 类型哈希段区分) |
+  | bit 8..10 | 尺寸档位 0..7(对应档位表) |
+  | bit 0..7 | 槽位 0..63(管理器分配的在册序号;首期容量 64) |
+
+  `id = 0x80000000 | 档位 << 8 | 槽位`。档位进 id 是必需的:entt 的
+  `registry.storage<Blob>(id)` 把 id 绑到存储类型上,复用槽位换档位必须落在不同 id。
+  槽位/档位都相同的重载 = 同 id 同类型,直接复用(不留脏账)。
+  与引擎/Game 现有组件同 id 时,`SchemaRegistry` 的 `DuplicateComponentId` 让注册
+  干净失败(可读诊断),不会半注册。
+- `TypeSchema::Size` = 插件声明的 `Size`;`Storage = { ComponentId, Add, Copy, CopyAll }`:
+  `Add` = 给实体加一个清零的 blob;`Copy` = `Scene::DuplicateEntity`;`CopyAll` =
+  `Scene::CopyScene`(编辑器 Play 的活动场景副本)—— 与引擎组件
+  (`ComponentSchemaBridge.h` 的 `MakeComponentStorage<T>`)同语义。
+- **卸载门(活实例)**:插件组件在**活场景**(同一 `WorldContext`)里还有实例时,
+  `PluginManager::Unload` 返回 `Status::HasLiveInstances` + 可读原因
+  (列出类型与实例数),**不调用插件 Unregister、不注销类型、不释放 DLL**。先移除组件 /
+  销毁场景再重试;`UnloadAll` 对这类插件记 WARN 后跳过。活实例查询 =
+  `Scene::CountLiveComponentInstances(componentId, context)`(Scene 构造/析构维护的活场景表,
+  只读 `storage(id)->size()`)。单类型注销(`UnregisterComponent`)保留 T2b 语义,不做活实例门。
+- 模板:PLUG-AUTH 探针里 `probe-component` 生成物可编译、`plugin.list` 状态为 `loaded`
+  (与 T2b 同一条断言,不退化)。
+
+单测 `World.Plugins`(用例 T2c)覆盖:注册产物(`Storage != nullptr`、`Size` = 声明值、
+保留段 id、`FindByComponentId` 自洽)、按 id 挂到实体 + blob 初始清零、
+`FieldSchema::Set/Get` 按插件 `offsetof` 逐字节成立、`DuplicateEntity` / `CopyScene`
+两条复制通路、`.wd` 往返一致、插件缺失时未知组件 YAML 片段保留、移除组件后类型仍在、
+有活实例时 Unload 被拒 / 清实例后成功 + 槽位与绑定可复用、单类型注销后同模块其余类型仍可用、
+以及 `Size = 0` 的旧式 schema-only 行为不变。

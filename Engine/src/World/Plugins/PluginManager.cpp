@@ -3,10 +3,12 @@
 #include "World/Core/Asset/AssetTypeRegistry.h"
 #include "World/Core/WorldContext.h"
 #include "World/Schema/SchemaRegistry.h"
+#include "World/Scene/Scene.h"
 #include "World/Script/PluginScriptLibrary.h"
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <set>
@@ -19,6 +21,14 @@ namespace World::Plugins
 {
 	namespace
 	{
+		// 诊断用:插件组件存储 id(保留段)写成 0xXXXXXXXX。
+		std::string Hex32(uint32_t value)
+		{
+			char buffer[16] = {};
+			std::snprintf(buffer, sizeof(buffer), "0x%08X", value);
+			return buffer;
+		}
+
 		std::string JoinIds(const std::set<std::string>& ids)
 		{
 			std::string text;
@@ -458,6 +468,7 @@ namespace World::Plugins
 			case Status::DependencyNotLoaded: return "plugin dependency is not loaded";
 			case Status::HasLoadedDependents: return "plugin still has loaded dependents";
 			case Status::NotLoaded: return "plugin is not loaded";
+			case Status::HasLiveInstances: return "plugin component still has live instances";
 		}
 		return "unknown";
 	}
@@ -1064,11 +1075,12 @@ namespace World::Plugins
 		}
 		if (desc.ComponentId != 0)
 		{
-			// T2b:存储桥(entt Add/Copy)不在本版 ABI 里 —— 伪造 Storage 会让 Add Component
-			// 选择器列出无法实例化的组件,所以这里干净拒绝而不是"接受但静默忽略"。
+			// 组件存储 id 由**宿主**分配(T2c 起:声明了 Size 的组件由宿主合成 entt blob
+			// 存储并选保留段 id)。插件自报 id 会与宿主分配冲突,所以干净拒绝。
 			Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected (ComponentId="
 				+ std::to_string(desc.ComponentId)
-				+ "; T2b has no storage bridge - schema-only components must pass ComponentId=0)");
+				+ "; no storage bridge is owned by plugins - the host assigns component storage ids,"
+				" plugins must pass ComponentId=0)");
 			return false;
 		}
 		if (desc.FieldCount > 0 && !desc.Fields)
@@ -1101,12 +1113,53 @@ namespace World::Plugins
 			return false;
 		}
 
+		// ---- T2c:存储桥声明(Size / Alignment)校验 --------------------------------
+		// Size == 0 = 保持 T2b 的 schema-only 行为(两字段都必须为 0);Size > 0 = 宿主为它
+		// 合成一个固定尺寸 blob 存储,组件能挂到场景实体上(Add/Remove/Copy/序列化/属性面板
+		// 全走既有 schema 通路)。
+		const uint32_t declaredSize = desc.Size;
+		const uint32_t declaredAlignment = desc.Alignment;
+		if (declaredSize == 0 && declaredAlignment != 0)
+		{
+			Log(WePluginLogWarn, pluginId + ": component '" + id
+				+ "' registration rejected (alignment " + std::to_string(declaredAlignment)
+				+ " declared without a size; schema-only components must pass Size=0 and Alignment=0)");
+			return false;
+		}
+		if (declaredSize > kPluginComponentMaxBytes)
+		{
+			Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected (declared size "
+				+ std::to_string(declaredSize) + " exceeds the host blob maximum of "
+				+ std::to_string(kPluginComponentMaxBytes) + " bytes)");
+			return false;
+		}
+		if (declaredSize > 0 && declaredAlignment != 0)
+		{
+			const bool powerOfTwo = (declaredAlignment & (declaredAlignment - 1u)) == 0u;
+			if (!powerOfTwo || declaredAlignment > kPluginComponentAlignmentCap)
+			{
+				Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected (declared alignment "
+					+ std::to_string(declaredAlignment) + " must be a power of two <= "
+					+ std::to_string(kPluginComponentAlignmentCap) + ")");
+				return false;
+			}
+			if (declaredSize % declaredAlignment != 0)
+			{
+				Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected (declared size "
+					+ std::to_string(declaredSize) + " is not a multiple of the declared alignment "
+					+ std::to_string(declaredAlignment) + ")");
+				return false;
+			}
+		}
+
 		World::Schema::TypeSchema schema;
 		schema.Id = World::Schema::TypeId(id);
 		schema.DisplayName = desc.DisplayName && desc.DisplayName[0] ? desc.DisplayName : id;
 		schema.Category = World::Schema::TypeCategory::Component;
-		schema.Size = 0;          // 组件结构总大小由插件拥有(宿主只按字段偏移读写)
-		schema.Storage = nullptr; // T2b:schema-only(没有 entt 存储绑定)
+		// T2c:Size = 插件声明的结构总大小(0 = T2b 的 schema-only);Storage 在下面按声明
+		// 合成本次注册专属的 blob 存储绑定(只在注册进注册表**之前**填,保证指针稳定)。
+		schema.Size = declaredSize;
+		schema.Storage = nullptr;
 
 		std::vector<uint32_t> slots;
 		std::set<std::string> fieldNames;
@@ -1146,6 +1199,15 @@ namespace World::Plugins
 					+ " does not match its kind (expected " + std::to_string(canonicalSize) + ")";
 				break;
 			}
+			// T2c:声明了结构大小时,每个字段必须落在结构内 —— 否则 blob 存储会越界。
+			if (declaredSize > 0 && (field.Offset > declaredSize
+				|| canonicalSize > declaredSize - field.Offset))
+			{
+				failure = "field '" + fieldName + "' (offset " + std::to_string(field.Offset)
+					+ " + size " + std::to_string(canonicalSize)
+					+ ") extends past the declared component size " + std::to_string(declaredSize);
+				break;
+			}
 			const uint32_t slot = AllocateComponentFieldSlot(field.Kind, field.Offset);
 			if (slot >= kMaxComponentFieldSlots)
 			{
@@ -1176,25 +1238,63 @@ namespace World::Plugins
 			return false;
 		}
 
+		// 存储绑定:在册槽位 + blob 类型(档位由声明大小决定)。绑定先建好再注册 ——
+		// 注册表里的 TypeSchema 拷贝持有它的地址,而 Schema.Storage 必须指向稳定地址。
+		RegisteredComponent entry;
+		entry.Id = id;
+		entry.Schema = std::move(schema);
+		entry.Slots = std::move(slots);
+		if (declaredSize > 0)
+		{
+			const uint32_t componentSlot = AllocateComponentSlot();
+			if (componentSlot >= kPluginComponentSlotCount)
+			{
+				for (uint32_t slot : entry.Slots)
+					ReleaseComponentFieldSlot(slot);
+				Log(WePluginLogWarn, pluginId + ": component '" + id
+					+ "' registration rejected (plugin component slot table is exhausted, max "
+					+ std::to_string(kPluginComponentSlotCount) + ")");
+				return false;
+			}
+			entry.Storage = std::make_unique<World::Schema::StorageBinding>();
+			std::string storageError;
+			if (!MakePluginComponentStorageBinding(declaredSize, declaredAlignment, componentSlot,
+				entry.Storage.get(), &storageError))
+			{
+				ReleaseComponentSlot(componentSlot);
+				for (uint32_t slot : entry.Slots)
+					ReleaseComponentFieldSlot(slot);
+				Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected ("
+					+ storageError + ")");
+				return false;
+			}
+			entry.Schema.Storage = entry.Storage.get();
+			entry.ComponentSlot = componentSlot;
+			entry.DeclaredSize = declaredSize;
+		}
+
 		// 事务化:注册表校验失败不提交任何条目;失败时释放本次分配的槽位(不半注册)。
 		const World::Schema::SchemaRegistry::Status status = registry->RegisterModule(
-			PluginSchemaModule(pluginId), std::vector<World::Schema::TypeSchema> { schema });
+			PluginSchemaModule(pluginId), std::vector<World::Schema::TypeSchema> { entry.Schema });
 		if (status != World::Schema::SchemaRegistry::Status::Ok)
 		{
-			for (uint32_t slot : slots)
+			if (entry.Storage)
+				ReleaseComponentSlot(entry.ComponentSlot);
+			for (uint32_t slot : entry.Slots)
 				ReleaseComponentFieldSlot(slot);
 			Log(WePluginLogWarn, pluginId + ": component '" + id + "' registration rejected by the schema registry ("
 				+ World::Schema::SchemaRegistry::StatusName(status) + ")");
 			return false;
 		}
 
-		RegisteredComponent entry;
-		entry.Id = id;
-		entry.Schema = std::move(schema);
-		entry.Slots = std::move(slots);
+		const uint32_t storageId = entry.Schema.Storage ? entry.Schema.Storage->ComponentId : 0;
+		const uint32_t fieldCount = static_cast<uint32_t>(entry.Schema.Fields.size());
 		record.RegisteredComponents.push_back(std::move(entry));
 		Log(WePluginLogInfo, pluginId + ": registered component '" + id + "' ("
-			+ std::to_string(desc.FieldCount) + " field(s))");
+			+ std::to_string(fieldCount) + " field(s)"
+			+ (declaredSize > 0 ? ", " + std::to_string(declaredSize) + "-byte blob storage id="
+				+ Hex32(storageId) : std::string())
+			+ ")");
 		return true;
 	}
 
@@ -1251,8 +1351,12 @@ namespace World::Plugins
 					+ World::Schema::SchemaRegistry::StatusName(status)
 					+ "); the plugin's component module was dropped");
 				for (const RegisteredComponent& item : record.RegisteredComponents)
+				{
 					for (uint32_t slot : item.Slots)
 						ReleaseComponentFieldSlot(slot);
+					if (item.Storage)
+						ReleaseComponentSlot(item.ComponentSlot);
+				}
 				record.RegisteredComponents.clear();
 				return false;
 			}
@@ -1260,7 +1364,11 @@ namespace World::Plugins
 
 		for (uint32_t slot : tracked->Slots)
 			ReleaseComponentFieldSlot(slot);
+		const bool hadStorage = tracked->Storage != nullptr;
+		const uint32_t componentSlot = tracked->ComponentSlot;
 		record.RegisteredComponents.erase(tracked);
+		if (hadStorage)
+			ReleaseComponentSlot(componentSlot);
 		Log(WePluginLogInfo, pluginId + ": unregistered component '" + id + "'");
 		return true;
 	}
@@ -1279,9 +1387,33 @@ namespace World::Plugins
 			Log(WePluginLogError, pluginId
 				+ ": component schema module could not be removed (no schema registry handle)");
 		for (const RegisteredComponent& item : record.RegisteredComponents)
+		{
 			for (uint32_t slot : item.Slots)
 				ReleaseComponentFieldSlot(slot);
+			if (item.Storage)
+				ReleaseComponentSlot(item.ComponentSlot);
+		}
 		record.RegisteredComponents.clear();
+	}
+
+	// ---- T2c:插件组件存储的在册槽位 ------------------------------------------------
+
+	uint32_t PluginManager::AllocateComponentSlot()
+	{
+		for (uint32_t slot = 0; slot < kPluginComponentSlotCount; ++slot)
+		{
+			if (m_ComponentSlots[slot])
+				continue;
+			m_ComponentSlots[slot] = true;
+			return slot;
+		}
+		return kPluginComponentSlotCount;   // 用尽(调用方按可读诊断拒绝注册)
+	}
+
+	void PluginManager::ReleaseComponentSlot(uint32_t slot)
+	{
+		if (slot < kPluginComponentSlotCount)
+			m_ComponentSlots[slot] = false;
 	}
 
 	// ---- T3b:编辑器扩展(命令 / 面板)---------------------------------------------------
@@ -2245,6 +2377,36 @@ namespace World::Plugins
 			}
 		}
 
+		// ---- T2c:活实例门(卸载前置检查)-------------------------------------------
+		// 插件的 blob 组件还有实例挂在活场景实体上(同一 WorldContext)⇒ **干净拒绝**:
+		// 注销 schema 会把那些实例变成"没有 schema 的孤儿"(序列化会直接丢数据)。
+		// 先移除组件 / 销毁场景,再重试 Unload。
+		{
+			std::string liveReport;
+			std::size_t liveTotal = 0;
+			for (const RegisteredComponent& item : record.RegisteredComponents)
+			{
+				if (!item.Schema.Storage)
+					continue;   // schema-only 组件没有实例可挂
+				const std::size_t instances = World::Scene::CountLiveComponentInstances(
+					item.Schema.Storage->ComponentId, &context);
+				if (instances == 0)
+					continue;
+				liveTotal += instances;
+				if (!liveReport.empty())
+					liveReport += ", ";
+				liveReport += item.Id + " x" + std::to_string(instances);
+			}
+			if (liveTotal > 0)
+			{
+				const std::string reason = "plugin '" + id + "' still has live component instances ("
+					+ liveReport + "); remove the components or destroy the scene before unloading";
+				Log(WePluginLogWarn, reason);
+				if (error) *error = reason;
+				return Status::HasLiveInstances;
+			}
+		}
+
 		// Unregister 恰好一次(契约);之后才释放 DLL。HostApiBox 在 Unregister 期间保持有效。
 		std::string failure;
 		// T2b:插件可能在 Unregister 里注销自己注册的组件类型 —— 先刷新注册表归属。
@@ -2308,7 +2470,10 @@ namespace World::Plugins
 		{
 			std::string reason;
 			const Status status = Unload(*it, context, &reason);
-			if (status != Status::Ok)
+			if (status == Status::HasLiveInstances)
+				Log(WePluginLogWarn, "unload skipped (live component instances) id=" + *it
+					+ " reason=" + reason);
+			else if (status != Status::Ok)
 				Log(WePluginLogError, "unload failed id=" + *it + " reason=" + reason);
 		}
 	}

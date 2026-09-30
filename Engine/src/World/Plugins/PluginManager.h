@@ -3,9 +3,11 @@
 #include "World/Core/Asset/AssetImporter.h"
 #include "World/Plugins/PluginManifest.h"
 #include "World/Plugins/PluginHostServices.h"
+#include "World/Plugins/PluginComponentStorage.h"
 #include "World/Schema/Schema.h"
 #include "World/Utils/DynamicLibrary.h"
 
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -61,6 +63,9 @@ namespace World::Plugins
 			DependencyNotLoaded,  // Load 该插件时它的依赖还没加载
 			HasLoadedDependents,  // Unload 时还有已加载插件依赖它
 			NotLoaded,            // Unload 未加载的插件
+			// T2c:Unload 时它的 blob 组件在活场景里还有实例 —— 干净拒绝(先移除组件 /
+			// 销毁场景),避免把场景数据变成"没有 schema 的孤儿"。
+			HasLiveInstances,
 		};
 		static const char* StatusName(Status status);
 
@@ -189,6 +194,12 @@ namespace World::Plugins
 			std::string Id;                        // 类型全名(= 注册键 = registry 的 Id.Name)
 			World::Schema::TypeSchema Schema;      // 注册时提交的 schema(含字段访问器)
 			std::vector<uint32_t> Slots;           // 该类型字段占用的访问器槽位(注销时释放)
+			// ---- T2c:存储桥(仅声明了 Size > 0 的组件非空)----
+			// unique_ptr:Schema.Storage 必须指向**地址稳定**的绑定(条目会被搬动,
+			// 注册表里的 TypeSchema 拷贝也持有同一指针),所以绑定放在堆上单独持有。
+			std::unique_ptr<World::Schema::StorageBinding> Storage;
+			uint32_t ComponentSlot = 0;            // 在册槽位(id 段的低 8 位)
+			uint32_t DeclaredSize = 0;             // 插件声明的结构总大小(诊断用)
 		};
 		// T3b 注册账本的一条:插件注册的编辑器命令 / 面板(回调与 userData 取自插件描述)。
 		struct RegisteredEditorCommand
@@ -263,6 +274,10 @@ namespace World::Plugins
 			World::Schema::SchemaRegistry* schemas = nullptr);
 		// 组件类型整模块注销的兜底(卸载/回滚/管理器析构共用)。
 		void ReclaimComponentTypes(Record& record, World::Schema::SchemaRegistry* schemas);
+		// T2c:插件组件在册槽位(存储 id 段的低位;空槽 = 可分配)。
+		// 槽位只决定 id 的低位,档位位由声明大小决定 —— 复用槽位换档位 = 换 id。
+		uint32_t AllocateComponentSlot();
+		void ReleaseComponentSlot(uint32_t slot);
 		// T3b:命令 / 面板的兜底回收(卸载 / Register false / 抛异常 / 析构四条路径共用)。
 		void ReclaimEditorExtensions(Record& record);
 		// WeHostApi 函数指针桥:userData → HostApiBox → 转发(越界/空参一律干净失败)。
@@ -289,6 +304,8 @@ namespace World::Plugins
 		std::vector<Record> m_Records;
 		std::vector<size_t> m_LoadSequence;  // 发现期算出的拓扑序(LoadAll 用)
 		std::vector<std::filesystem::path> m_DevBinaryRoots;   // 开发构建产物根(Discover 传入)
+		// T2c:插件组件存储的在册槽位(true = 已占用)。容量 = kPluginComponentSlotCount。
+		std::array<bool, kPluginComponentSlotCount> m_ComponentSlots {};
 		WeHostApi m_HostApi;
 		int m_NextOrder = 0;
 		// Register 调用期间"当前有效的宿主表"(插件在 Register 里调宿主注册面时用它解析归属)。
