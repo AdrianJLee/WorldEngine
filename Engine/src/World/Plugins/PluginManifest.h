@@ -17,6 +17,18 @@ namespace World::Plugins
 	constexpr const char* kPluginLibraryExtension = ".so";
 #endif
 
+	// PLUG-T5:`contributes:` 的一条贡献声明(打包期引用索引的一条记录)。
+	//
+	// Extensions 只在 AssetType / Importer 两个面上有意义:内容里的引用以**文件扩展名**
+	// 形式出现(如 `.whello`),cook 据此把内容文件映射回插件。规范化口径:小写、带前导点;
+	// 声明时可省略前导点(解析期补上)。Components / ScriptNamespace 面不允许写扩展名。
+	struct PluginContribution
+	{
+		PluginContributionFace Face = PluginContributionFace::Component;
+		std::string Id;
+		std::vector<std::string> Extensions;
+	};
+
 	// `plugin.we.yaml` 的解析结果 + 由位置推导出的定位信息(方案 §4.1)。
 	//
 	// 契约要点(与 tools/agents/tasks/20260930-1100-plugin-framework/plan.md v2.1 同步):
@@ -45,6 +57,8 @@ namespace World::Plugins
 		std::vector<std::string> Depends;    // 加载顺序 + 缺依赖拒绝
 		std::vector<std::string> Provides;   // 能力声明(与 WePlugin::Provides 比对,差异 = 警告)
 		std::vector<std::string> Overrides;  // 预留:显式覆盖低优先提供者(T3/T5 用)
+		// PLUG-T5:打包期引用索引(见 PluginContribution 的说明);缺省 = 空。
+		std::vector<PluginContribution> Contributions;
 		PluginShipPolicy Ship = PluginShipPolicy::Auto;
 
 		// 位置即 scope:Load() 时按所在根写入;清单里写了 scope: 且与位置不符 = 拒绝。

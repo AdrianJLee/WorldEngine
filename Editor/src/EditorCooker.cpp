@@ -5,6 +5,7 @@
 #include "World/Core/Asset/CookPipeline.h"
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Vfs/PackageProvider.h"
+#include "World/Plugins/PluginPackaging.h"
 #include "World/Renderer/MaterialLibrary.h"
 #include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/ShaderUtils.h"
@@ -732,6 +733,48 @@ namespace World::Editor
 			result.AssetsTotal = summary.Total;
 			result.AssetsChanged = summary.Changed;
 			result.AssetsSkipped = summary.Skipped;
+
+			// 3b. PLUG-T5:插件打包 —— 随包闭包(项目清单显式启用 + `depends` 传递闭包)+
+			//     引用完整性硬门(内容引用了闭包外/被禁用的插件 ⇒ cook 失败)+ 拷
+			//     `<publish>/bin/plugins/`。cook **不加载插件 DLL**:引用索引来自每个插件
+			//     自己清单的 `contributes:`(静态声明),打包因此是确定性、可审计的步骤。
+			//     唯一例外 = `plugins.tolerate_missing`(降级为 ERROR 日志 + 摘要计数)。
+			{
+				World::Plugins::PluginPackRequest packRequest;
+				packRequest.EnginePluginsRoot = std::filesystem::path(WLD_REPO_ROOT) / "plugins";
+				packRequest.ProjectPluginsRoot = World::Paths::ProjectDir() / "plugins";
+				// 开发构建的插件产物根(与 EditorLayer::InitPlugins / Game.dll 同一套拼接口径):
+				//   引擎插件 <repo>/<WLD_OUTPUT_DIR>bin/<cfg>/plugins/<cfg>,
+				//   项目插件 <项目根>/build/x64-<cfg>/bin/<cfg>/plugins/<cfg>。
+				std::string buildConfiguration(WLD_BUILD_TYPE);
+				while (!buildConfiguration.empty()
+					&& (buildConfiguration.back() == '/' || buildConfiguration.back() == '\\'))
+					buildConfiguration.pop_back();
+				packRequest.DevBinaryRoots = {
+					std::filesystem::path(WLD_REPO_ROOT) / WLD_OUTPUT_DIR / "bin"
+						/ WLD_BUILD_TYPE / "plugins" / WLD_BUILD_TYPE,
+					World::Paths::ProjectDir() / "build" / ("x64-" + buildConfiguration)
+						/ "bin" / buildConfiguration / "plugins" / buildConfiguration,
+				};
+				packRequest.ContentRoot = manifest.ResolveContentRoot(projectManifestPath);
+				packRequest.PublishDir = options.PublishDir;
+				packRequest.CopyLibraries = !options.CheckOnly;
+				packRequest.Enabled = manifest.Plugins.Enabled;
+				packRequest.TolerateMissing = manifest.Plugins.TolerateMissing;
+
+				const World::Plugins::PluginPackResult plugins =
+					World::Plugins::PackagePlugins(packRequest);
+				result.PluginsShipped = plugins.Shipped.size();
+				result.PluginsSkipped = plugins.Skipped.size();
+				result.PluginMissingReferences = plugins.MissingReferences;
+				result.PluginDiagnostics = plugins.Diagnostics;
+				if (!plugins.Ok)
+					throw std::runtime_error("Plugin packaging failed: " + plugins.Error);
+				// 发行清单:cook 把实际随包的插件 id(依赖拓扑序)写进发布目录的 project.we.yaml,
+				// Runtime 按这份列表加载 `<exe>/bin/plugins/*.dll`。
+				manifest.Plugins.Shipped = plugins.Shipped;
+			}
+
 			if (options.CheckOnly)
 			{
 				// 预检成功:摘要已填好,不创建发行目录、不烘焙着色器、不打包、不拷运行时。

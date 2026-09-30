@@ -15,6 +15,7 @@
 #include "World/Core/Log.h"
 #include "World/Core/WorldContext.h"
 #include "World/Plugins/PluginManager.h"
+#include "World/Plugins/PluginPackaging.h"
 #include "World/Schema/Schema.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Scene/Components.h"
@@ -128,6 +129,28 @@ namespace
 		return fs::path(WE_PLUGIN_TEST_DLL_DIR);
 	}
 
+	// 最近日志环形缓冲的容量只有 400 行(World/Core/Log.cpp),长套件跑到后半段必然饱和 ——
+	// 需要"不静默"证据(T5 的 ERROR/WARN)时直接读落盘的日志文件:
+	// 与 Log::Init 同口径 = exe 目录向上找到 `<套件名>.log`。
+	std::string CoreLogFileText()
+	{
+		for (fs::path directory = DllDirectory(); !directory.empty(); directory = directory.parent_path())
+		{
+			const fs::path candidate = directory / "WorldPluginTests.log";
+			std::error_code ec;
+			if (fs::is_regular_file(candidate, ec))
+			{
+				std::ifstream in(candidate, std::ios::binary);
+				if (in.is_open())
+					return std::string((std::istreambuf_iterator<char>(in)),
+						std::istreambuf_iterator<char>());
+			}
+			if (directory.parent_path() == directory)
+				break;
+		}
+		return {};
+	}
+
 	struct ManifestFields
 	{
 		std::string Id;
@@ -140,6 +163,8 @@ namespace
 		std::string Ship;     // 空 = 不写
 		std::vector<std::string> Depends;
 		std::vector<std::string> Provides;
+		// PLUG-T5:`contributes:` 的原始 YAML(缩进对齐;空 = 不写)。
+		std::vector<std::string> Contributes;
 	};
 
 	std::string BuildYaml(const ManifestFields& fields)
@@ -168,6 +193,12 @@ namespace
 			text += "provides:\n";
 			for (const std::string& provide : fields.Provides)
 				text += "  - " + provide + "\n";
+		}
+		if (!fields.Contributes.empty())
+		{
+			text += "contributes:\n";
+			for (const std::string& line : fields.Contributes)
+				text += line + "\n";
 		}
 		return text;
 	}
@@ -1922,6 +1953,315 @@ namespace
 			CHECK(World::PluginScriptLibrary::Count() == 0);
 		}
 	}
+
+	// ---- PLUG-T5:打包(随包闭包 / 引用完整性硬门 / tolerate_missing / 产物拷贝)----
+
+	// T5①:随包闭包 = 显式启用(引擎插件)+ 项目插件默认随包(除 `ship: never`)+
+	//       `depends` 传递闭包(拓扑序);全程不加载插件 DLL(打包是静态步骤)。
+	void CasePluginPackagingClosure()
+	{
+		const fs::path root = FreshRoot("pack-closure");
+		ManifestFields alpha;
+		alpha.Id = "com.probe.alpha";
+		alpha.Depends = { "com.probe.beta" };
+		WritePluginManifestOnly(root / "engine", "alpha", BuildYaml(alpha));
+		ManifestFields beta;
+		beta.Id = "com.probe.beta";
+		WritePluginManifestOnly(root / "engine", "beta", BuildYaml(beta));
+		ManifestFields gamma;
+		gamma.Id = "com.probe.gamma";
+		WritePluginManifestOnly(root / "engine", "gamma", BuildYaml(gamma));
+		ManifestFields delta;
+		delta.Id = "com.probe.delta";
+		WritePluginManifestOnly(root / "project", "delta", BuildYaml(delta));
+		ManifestFields epsilon;
+		epsilon.Id = "com.probe.epsilon";
+		epsilon.Ship = "never";
+		WritePluginManifestOnly(root / "project", "epsilon", BuildYaml(epsilon));
+
+		World::Plugins::PluginPackRequest request;
+		request.EnginePluginsRoot = root / "engine";
+		request.ProjectPluginsRoot = root / "project";
+		request.ContentRoot = root / "content";   // 不存在 = 0 命中(不是错误)
+		request.Enabled = { "com.probe.alpha" };
+		request.CopyLibraries = false;
+
+		const World::Plugins::PluginPackResult result = World::Plugins::PackagePlugins(request);
+		CHECK(result.Ok);
+		CHECK(result.Shipped == (std::vector<std::string>{
+			"com.probe.beta", "com.probe.alpha", "com.probe.delta" }));
+		CHECK(result.Skipped == (std::vector<std::string>{ "com.probe.gamma", "com.probe.epsilon" }));
+		CHECK(result.MissingReferences == 0);
+		CHECK(result.SummaryLine == "[plugins] shipped=com.probe.beta,com.probe.alpha,com.probe.delta"
+			" skipped=com.probe.gamma,com.probe.epsilon missing-references=0");
+
+		// 显式启用一个不存在的插件 id = 配置错误(不静默):cook 失败。
+		request.Enabled = { "com.probe.missing" };
+		const World::Plugins::PluginPackResult missing = World::Plugins::PackagePlugins(request);
+		CHECK(!missing.Ok);
+		CHECK(missing.Error.find("com.probe.missing") != std::string::npos);
+		CHECK(missing.MissingReferences == 1);
+
+		// `tolerate_missing` = 唯一例外:仍是缺件(计数 > 0)但不再让 cook 失败。
+		request.TolerateMissing = { "com.probe.missing" };
+		const World::Plugins::PluginPackResult tolerated = World::Plugins::PackagePlugins(request);
+		CHECK(tolerated.Ok);
+		CHECK(tolerated.MissingReferences == 1);
+
+		// 缺依赖 = 硬失败(依赖不在闭包里跑不起来);被 tolerate 时降级。
+		request.Enabled = { "com.probe.alpha" };
+		request.TolerateMissing.clear();
+		fs::remove_all(root / "engine" / "beta");
+		const World::Plugins::PluginPackResult missingDependency = World::Plugins::PackagePlugins(request);
+		CHECK(!missingDependency.Ok);
+		CHECK(missingDependency.Error.find("com.probe.beta") != std::string::npos);
+		request.TolerateMissing = { "com.probe.beta" };
+		const World::Plugins::PluginPackResult toleratedDependency = World::Plugins::PackagePlugins(request);
+		CHECK(toleratedDependency.Ok);
+		CHECK(toleratedDependency.MissingReferences == 1);
+	}
+
+	// T5②:四类引用面的命中 + "引用落在闭包外 ⇒ cook 失败" + tolerate_missing 降级。
+	void CasePluginPackagingReferenceGate()
+	{
+		const fs::path root = FreshRoot("pack-gate");
+		ManifestFields blocked;
+		blocked.Id = "com.probe.blocked";
+		blocked.Contributes = {
+			"  components:",
+			"    - com.probe.blocked.Health",
+			"  asset_types:",
+			"    - id: probe.asset",
+			"      extensions: [.wprobe]",
+			"  importers:",
+			"    - id: probe.import",
+			"      extensions: [.wprobesrc]",
+			"  script_namespaces: [probe]",
+		};
+		WritePluginManifestOnly(root / "engine", "blocked", BuildYaml(blocked));
+
+		const fs::path content = root / "content";
+		fs::create_directories(content / "scenes");
+		fs::create_directories(content / "scripts");
+		WriteFileText(content / "scenes" / "probe.wd",
+			"FormatVersion: 2\nScene: Probe\nEntities:\n  - World.UUID: 1\n"
+			"    com.probe.blocked.Health: 3\n");
+		WriteFileText(content / "probe.wprobe", "asset\n");
+		WriteFileText(content / "probe.wprobesrc", "source\n");
+		WriteFileText(content / "scripts" / "probe.luau",
+			"-- probe.ping is only mentioned in a comment\nlocal value = probe.ping(1)\n");
+
+		World::Plugins::PluginPackRequest request;
+		request.EnginePluginsRoot = root / "engine";
+		request.ProjectPluginsRoot = root / "project";
+		request.ContentRoot = content;
+		request.CopyLibraries = false;
+
+		// (a) 闭包外:硬门失败,四类面各命中 1,每条诊断都带"引用者 → 引用面 → 建议"。
+		const World::Plugins::PluginPackResult blockedResult = World::Plugins::PackagePlugins(request);
+		CHECK(!blockedResult.Ok);
+		CHECK(blockedResult.MissingReferences == 4);
+		CHECK(blockedResult.ComponentReferences == 1);
+		CHECK(blockedResult.AssetTypeReferences == 1);
+		CHECK(blockedResult.ImporterReferences == 1);
+		CHECK(blockedResult.ScriptReferences == 1);
+		CHECK(blockedResult.RenderHookReferences == 0);   // ⑤ 没有注册面 = 显式跳过并记 0
+		CHECK(blockedResult.Diagnostics.size() == 4);
+		bool sawComponent = false;
+		bool sawAssetType = false;
+		bool sawImporter = false;
+		bool sawScript = false;
+		for (const std::string& diagnostic : blockedResult.Diagnostics)
+		{
+			CHECK(diagnostic.find(" → ") != std::string::npos);
+			CHECK(diagnostic.find("enable plugin 'com.probe.blocked'") != std::string::npos);
+			if (diagnostic.find("component 'com.probe.blocked.Health'") != std::string::npos)
+				sawComponent = true;
+			if (diagnostic.find("asset.type '.wprobe'") != std::string::npos)
+				sawAssetType = true;
+			if (diagnostic.find("asset.importer '.wprobesrc'") != std::string::npos)
+				sawImporter = true;
+			if (diagnostic.find("script.namespace 'probe'") != std::string::npos)
+				sawScript = true;
+		}
+		CHECK(sawComponent && sawAssetType && sawImporter && sawScript);
+		CHECK(blockedResult.Error.find("com.probe.blocked") != std::string::npos);
+
+		// (b) 启用该插件 ⇒ 引用落在闭包内 = 通过(静态打包仍不加载 DLL)。
+		request.Enabled = { "com.probe.blocked" };
+		const World::Plugins::PluginPackResult enabled = World::Plugins::PackagePlugins(request);
+		CHECK(enabled.Ok);
+		CHECK(enabled.MissingReferences == 0);
+		CHECK(enabled.Shipped == (std::vector<std::string>{ "com.probe.blocked" }));
+
+		// (c) tolerate_missing = 唯一例外:缺件计数保留(> 0),cook 不失败。
+		request.Enabled.clear();
+		request.TolerateMissing = { "com.probe.blocked" };
+		const World::Plugins::PluginPackResult tolerated = World::Plugins::PackagePlugins(request);
+		CHECK(tolerated.Ok);
+		CHECK(tolerated.MissingReferences == 4);
+
+		// (d) 注释里的 probe.ping 不算调用:只剩三类缺件。
+		WriteFileText(content / "scripts" / "probe.luau",
+			"-- probe.ping is only mentioned in a comment\n");
+		request.TolerateMissing.clear();
+		const World::Plugins::PluginPackResult commentOnly = World::Plugins::PackagePlugins(request);
+		CHECK(commentOnly.ScriptReferences == 0);
+		CHECK(commentOnly.MissingReferences == 3);
+	}
+
+	// T5③:闭包内 DLL 拷进 <publish>/bin/plugins/,并按发行清单顺序做发行形态加载
+	//      (缺件 / 多余 DLL 都不静默)。
+	void CasePluginPackagingCopiesAndPackagedLoad()
+	{
+		const fs::path root = FreshRoot("pack-copy");
+		ManifestFields alpha;
+		alpha.Id = "test.alpha";
+		WritePlugin(root / "engine", "test.alpha", "WePluginTestAlpha", BuildYaml(alpha));
+		ManifestFields beta;
+		beta.Id = "test.beta";
+		beta.Depends = { "test.alpha" };
+		WritePlugin(root / "project", "test.beta", "WePluginTestBeta", BuildYaml(beta));
+
+		const fs::path publish = root / "publish";
+		World::Plugins::PluginPackRequest request;
+		request.EnginePluginsRoot = root / "engine";
+		request.ProjectPluginsRoot = root / "project";
+		request.ContentRoot = root / "content";
+		request.PublishDir = publish;
+		request.Enabled = { "test.alpha" };
+
+		const World::Plugins::PluginPackResult result = World::Plugins::PackagePlugins(request);
+		CHECK(result.Ok);
+		CHECK(result.Shipped == (std::vector<std::string>{ "test.alpha", "test.beta" }));
+		CHECK(result.CopiedLibraries == 2);
+		const fs::path plugbin = publish / "bin" / "plugins";
+		CHECK(fs::is_regular_file(plugbin / ("test.alpha" + std::string(kLibraryExtension))));
+		CHECK(fs::is_regular_file(plugbin / ("test.beta" + std::string(kLibraryExtension))));
+
+		// 发行形态加载:按清单顺序(拓扑序)加载同一批 DLL。
+		WorldContext context;
+		{
+			PluginManager manager;
+			std::string error;
+			CHECK(manager.LoadPackaged(plugbin, result.Shipped, context, &error) == PluginManager::Status::Ok);
+			CHECK(manager.LoadedCount() == 2);
+			CHECK(manager.LoadOrder() == result.Shipped);
+			manager.UnloadAll(context);
+		}
+
+		// 清单列了、目录里没有 ⇒ ERROR + 失败;单条失败不影响其余(不静默)。
+		{
+			PluginManager manager;
+			std::string error;
+			CHECK(manager.LoadPackaged(plugbin, { "test.alpha", "test.missing" }, context, &error)
+				== PluginManager::Status::Rejected);
+			CHECK(error.find("test.missing") != std::string::npos);
+			CHECK(CoreLogFileText().find("test.missing") != std::string::npos);
+			CHECK(manager.LoadedCount() == 1);
+			manager.UnloadAll(context);
+		}
+
+		// 目录里多余的 DLL(清单没列)⇒ WARN 后忽略。
+		{
+			PluginManager manager;
+			std::string error;
+			CHECK(manager.LoadPackaged(plugbin, { "test.alpha" }, context, &error)
+				== PluginManager::Status::Ok);
+			CHECK(CoreLogFileText().find("is not listed in the release manifest; ignored") != std::string::npos);
+			CHECK(manager.LoadedCount() == 1);
+			CHECK(manager.Find("test.beta") == nullptr);
+			manager.UnloadAll(context);
+		}
+	}
+
+	// T5④:清单契约 —— project.we.yaml 的 `plugins:` 块(向后兼容 / 解析 / 写回 / 校验)与
+	//       plugin.we.yaml 的 `contributes:`(形态校验 + 声明/注册不一致 = WARN)。
+	void CasePackagingManifestContracts()
+	{
+		const fs::path root = FreshRoot("pack-manifest");
+		std::string error;
+
+		// ---- project.we.yaml:老清单(没有 plugins: 块)= 三项全空,保存后也不新增该块 ----
+		const fs::path plainPath = root / "plain" / "project.we.yaml";
+		fs::create_directories(plainPath.parent_path());
+		WriteFileText(plainPath, "id: com.probe.proj\nversion: 1.0.0\ncontent_root: assets\n"
+			"start_scene: scenes/main.wd\nrenderer: opengl\npackages:\n  - content.wpak\n");
+		World::Asset::ProjectManifest plain;
+		CHECK(World::Asset::ProjectManifest::Load(plainPath, &plain, &error));
+		CHECK(plain.Plugins.IsDefault());
+		const fs::path plainOut = root / "plain-out" / "project.we.yaml";
+		CHECK(World::Asset::ProjectManifest::Save(plainOut, plain, &error));
+		CHECK(ReadFileText(plainOut).find("plugins:") == std::string::npos);
+
+		// ---- 解析 + 写回(shipped 是 cook 写的发行清单字段;注释保留)----
+		const fs::path manifestPath = root / "with-plugins" / "project.we.yaml";
+		fs::create_directories(manifestPath.parent_path());
+		WriteFileText(manifestPath, "id: com.probe.proj\nversion: 1.0.0\ncontent_root: assets\n"
+			"start_scene: scenes/main.wd\nrenderer: opengl\npackages:\n  - content.wpak\n"
+			"# 随包插件设置(手写注释必须保留)\n"
+			"plugins:\n  enabled:\n    - com.probe.alpha\n"
+			"  tolerate_missing:\n    - com.probe.optional\n");
+		World::Asset::ProjectManifest withPlugins;
+		CHECK(World::Asset::ProjectManifest::Load(manifestPath, &withPlugins, &error));
+		CHECK(withPlugins.Plugins.Enabled == (std::vector<std::string>{ "com.probe.alpha" }));
+		CHECK(withPlugins.Plugins.TolerateMissing == (std::vector<std::string>{ "com.probe.optional" }));
+		CHECK(withPlugins.Plugins.Shipped.empty());
+		withPlugins.Plugins.Shipped = { "com.probe.beta", "com.probe.alpha" };
+		CHECK(World::Asset::ProjectManifest::Save(manifestPath, withPlugins, &error));
+		World::Asset::ProjectManifest reloaded;
+		CHECK(World::Asset::ProjectManifest::Load(manifestPath, &reloaded, &error));
+		CHECK(reloaded.Plugins.Shipped == (std::vector<std::string>{ "com.probe.beta", "com.probe.alpha" }));
+		CHECK(reloaded.Plugins.Enabled == withPlugins.Plugins.Enabled);
+		CHECK(reloaded.Plugins.TolerateMissing == withPlugins.Plugins.TolerateMissing);
+		CHECK(ReadFileText(manifestPath).find("# 随包插件设置(手写注释必须保留)") != std::string::npos);
+
+		// ---- 空 id = 加载期干净拒绝 ----
+		const fs::path badPath = root / "bad" / "project.we.yaml";
+		fs::create_directories(badPath.parent_path());
+		WriteFileText(badPath, "id: com.probe.proj\nversion: 1.0.0\ncontent_root: assets\n"
+			"start_scene: scenes/main.wd\nrenderer: opengl\npackages:\n  - content.wpak\n"
+			"plugins:\n  enabled:\n    - \"\"\n");
+		CHECK(!World::Asset::ProjectManifest::Load(badPath, &reloaded, &error));
+		CHECK(error.find("plugins.enabled") != std::string::npos);
+
+		// ---- plugin.we.yaml:contributes 解析(扩展名默认小写 + 补前导点)----
+		const fs::path goodPlugin = root / "plugins" / "good" / "plugin.we.yaml";
+		fs::create_directories(goodPlugin.parent_path());
+		WriteFileText(goodPlugin, "id: com.probe.good\n"
+			"contributes:\n  components: [com.probe.good.Health]\n"
+			"  asset_types:\n    - id: probe.asset\n      extensions: [WPROBE]\n"
+			"  importers:\n    - id: probe.import\n      extensions: [.wprobesrc]\n"
+			"  script_namespaces: [probe]\n");
+		PluginManifest manifest;
+		CHECK(PluginManifest::Load(goodPlugin, PluginScope::Engine, &manifest, &error));
+		CHECK(manifest.Contributions.size() == 4);
+		CHECK(manifest.Contributions[1].Extensions == (std::vector<std::string>{ ".wprobe" }));
+
+		// 未知面 / 组件面写扩展名 = 干净拒绝(不猜语义)。
+		const fs::path badPlugin = root / "plugins" / "bad" / "plugin.we.yaml";
+		fs::create_directories(badPlugin.parent_path());
+		WriteFileText(badPlugin, "id: com.probe.bad\ncontributes:\n  widgets: [x]\n");
+		CHECK(!PluginManifest::Load(badPlugin, PluginScope::Engine, &manifest, &error));
+		CHECK(error.find("widgets") != std::string::npos);
+		WriteFileText(badPlugin, "id: com.probe.bad\n"
+			"contributes:\n  components:\n    - id: com.probe.bad.Health\n      extensions: [.x]\n");
+		CHECK(!PluginManifest::Load(badPlugin, PluginScope::Engine, &manifest, &error));
+		CHECK(error.find("extensions") != std::string::npos);
+
+		// ---- 声明了 contributes 的插件:声明与实际注册不一致 = WARN(打包索引漏报必须可观测)----
+		ManifestFields drift;
+		drift.Id = "test.alpha";
+		drift.Contributes = { "  components:", "    - test.alpha.NotRegistered" };
+		WritePlugin(root / "drift" / "engine", "test.alpha", "WePluginTestAlpha", BuildYaml(drift));
+		WorldContext context;
+		PluginManager manager;
+		CHECK(manager.Discover(root / "drift" / "engine", root / "drift" / "project"));
+		std::string loadError;
+		CHECK(manager.Load("test.alpha", context, &loadError) == PluginManager::Status::Ok);
+		CHECK(CoreLogFileText().find("did not register it") != std::string::npos);
+		manager.UnloadAll(context);
+	}
 }
 
 int main()
@@ -1959,6 +2299,10 @@ int main()
 		CaseLeakedEditorExtensionSweep();   // T3b② 抛异常 / 卸载 / 析构三条回收路径
 		CaseScriptLibraryRegistration();    // T4① 脚本函数账本 / VM 调用 / 存根确定性 / 归属保护
 		CaseLeakedScriptFunctionSweep();    // T4② 抛异常 / 卸载 / 析构三条兜底回收路径
+		CasePluginPackagingClosure();          // T5① 随包闭包(显式启用 + depends 传递 + ship 策略)
+		CasePluginPackagingReferenceGate();    // T5② 四类引用面 + 闭包外 ⇒ 失败 + tolerate_missing
+		CasePluginPackagingCopiesAndPackagedLoad();   // T5③ 产物拷贝 + 发行形态加载(缺件/多余 DLL)
+		CasePackagingManifestContracts();      // T5④ plugins: 块与 contributes: 的清单契约
 
 		std::error_code ec;
 		fs::remove_all(fs::temp_directory_path() / "worldengine-plugin-tests", ec);

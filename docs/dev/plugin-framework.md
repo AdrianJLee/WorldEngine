@@ -41,6 +41,7 @@
 | `provides` | 否 | 能力声明列表,与 `WePlugin::Provides` 比对(不一致 = 警告) |
 | `depends` | 否 | 依赖的插件 id(加载顺序 + 缺依赖拒绝) |
 | `ship` | 否 | `auto`(缺省)/ `always` / `never` |
+| `contributes` | 否 | **打包期引用索引**(T5):`components` / `asset_types` / `importers` / `script_namespaces`;见 §12 |
 
 清单**只解析、不重写**:向导生成时保留模板里的注释,做的是字面占位符替换。
 
@@ -375,3 +376,101 @@ struct WeComponentDesc {
 两条复制通路、`.wd` 往返一致、插件缺失时未知组件 YAML 片段保留、移除组件后类型仍在、
 有活实例时 Unload 被拒 / 清实例后成功 + 槽位与绑定可复用、单类型注销后同模块其余类型仍可用、
 以及 `Size = 0` 的旧式 schema-only 行为不变。
+
+
+## 12. 打包:显式启用 + 依赖闭包 + 引用完整性硬门(T5,2026-09-30)
+
+### 项目清单的 `plugins:` 区块
+
+`project.we.yaml` 新增 `plugins:` 区块(cook 读写;缺块 = 全默认,**老清单行为逐字节不变**):
+
+```yaml
+plugins:
+  enabled: [engine.hello-import, com.example.core]   # 显式启用(引擎插件需要在这里出现才随包)
+  shipped: [com.example.core, engine.hello-import]   # cook 写入发行清单的随包插件(依赖拓扑序)
+  tolerate_missing: [com.example.optional]           # 引用缺件的唯一例外(降级为 ERROR + 摘要计数)
+```
+
+- `enabled`:引擎插件必须在此出现才随包;**项目插件默认随包**,只有写在插件自己 `plugin.we.yaml`
+  里的 `ship: never` 才能排除;显式启用了 `ship: never` 的插件 = 记 WARN 后跳过;
+- `shipped`:只由 cook 写进**发布目录**的清单;Runtime 按它加载 `<exe>/bin/plugins/*.dll`;
+- `tolerate_missing`:缺省空;列出的插件,其引用缺件降级为 ERROR 日志 + `missing-references` 计数;
+  其余情况"引用落在闭包外"= **cook 失败**。
+
+### 插件清单的 `contributes:`
+
+引用硬门要回答"内容里的这个 id 是哪个插件提供的",索引来源是每个插件的**静态声明** ——
+cook 因此**不加载插件 DLL**(打包是确定性、可审计的步骤,不执行插件代码):
+
+```yaml
+contributes:
+  components: [com.example.health]              # .wd 里的组件类型 id(WeComponentDesc::Id)
+  asset_types:                                  # 资产类型:内容里以扩展名出现
+    - id: health
+      extensions: [.whealth]
+  importers:                                    # 导入器:内容里的源扩展名
+    - id: health.whealth
+      extensions: [.whealth]
+  script_namespaces: [health]                   # Lua 函数库命名空间(health.ping)
+```
+
+- 扩展名规范化:小写 + 前导点(`WHEALTH` → `.whealth`);未写扩展名的面"扫不到",该面按 0 计;
+- 未知面 / 在组件面写扩展名 / 空 id = 清单被**干净拒绝**(不猜语义);
+- **声明必须与实际注册一致**:插件加载成功后 `PluginManager::WarnContributionDrift` 逐条比对
+  声明与运行时注册的 id,不一致记 WARN(声明漏了 = 打包门禁漏报,不能静默)。
+
+### 闭包与产物
+
+- 随包闭包 = `enabled` ∪ **项目插件(`ship != never`)** ∪ 闭包内插件的 `depends` 传递闭包,
+  输出依赖拓扑序;
+- 闭包内插件的 DLL → `<publish>/bin/plugins/<name>.dll`;引擎插件产物从
+  `<repo>/build/x64-<cfg>/bin/<cfg>/plugins/<cfg>/`(或包自带 `bin/`)解析,项目插件从
+  `<项目根>/build/x64-<cfg>/bin/<cfg>/plugins/<cfg>/`(或包自带 `bin/`)解析;
+- cook 摘要固定格式(探针断言点):
+  `[plugins] shipped=<id,id|none> skipped=<id,id|none> missing-references=<n>`;
+- 逐面命中数另记一行 INFO:
+  `[plugins] references: components=… asset-types=… importers=… scripts=… render-hooks=0
+  (face not provided by the plugin ABI; skipped)` —— ⑤ 渲染钩子当前没有注册面,显式跳过并记 0。
+
+### 引用完整性硬门(扫不到该面就跳过并记 0)
+
+| 面 | 扫描口径 | 引用落在闭包外 |
+| --- | --- | --- |
+| ① 组件 | `.wd` 实体里出现的组件类型键 | cook 失败 |
+| ② 资产类型 | 内容里匹配声明扩展名的文件 | cook 失败 |
+| ③ 导入器 | 内容里匹配导入器声明扩展名的源文件 | cook 失败 |
+| ④ 脚本命名空间 | `.luau` / `.lua` 里的 `<命名空间>.` 调用(整行 `--` 注释跳过) | cook 失败 |
+| ⑤ 渲染钩子 | 没有注册面 ⇒ 恒 0 | — |
+
+诊断逐条给出**引用者 → 引用面 → 建议**:
+
+```
+assets/scenes/main.wd (entity 0) → component 'com.example.health' → enable plugin
+'com.example.health-plugin' (project.we.yaml plugins.enabled) or declare it under plugins.tolerate_missing
+```
+
+被 `tolerate_missing` 覆盖的条目同样逐条记 ERROR,只是不让 cook 失败。
+**已知边界**:没有被任何插件声明的 id(拼错、未安装)不在索引里,硬门无法判断 —— 它由内容/场景
+各自的加载诊断负责;本机 `local/plugins.json`(编辑器偏好)不是打包输入,打包只认项目清单。
+
+### Runtime 装载(发行形态)
+
+- Runtime 读发行清单的 `plugins.shipped`(依赖拓扑序),加载 `<exe>/bin/plugins/*.dll`:
+  每个 DLL 先 `WePluginQuery` 读出 id,再走与发现式加载**同一套**契约校验(ABI / StructSize /
+  id 一致 / `Register` / 回滚);
+- 清单列了但目录里没有 ⇒ ERROR + 报告失败(单条失败不影响其余);目录里多余(清单没列)⇒
+  WARN 后忽略;
+- **失败策略 = 可观测 + 不阻断启动**:缺失 / ABI 不符 / 注册失败记 ERROR 后继续启动(缺件在 cook
+  的硬门里已经是致命错误);Runtime 不接线编辑器扩展 —— 只提供 `editor.panel` / `editor.command`
+  的插件在这里按 T3b 契约干净拒绝,要随游戏发布且运行时可用,插件必须至少有一个运行期能力;
+- 插件在场景 / GameHost 之前加载(schema 组件、资产类型、脚本函数必须先就位),装载结论强制
+  刷一次日志(默认 INFO 不落盘,强杀进程会丢)。
+
+### 验证
+
+- 单测 `World.Plugins`(T5①–④):闭包(显式 + `depends` 传递 + `ship: never`)、四类引用面命中与
+  "闭包外 ⇒ 失败"、`tolerate_missing` 降级、产物拷贝 + `LoadPackaged`(缺件 / 多余 DLL)、
+  `plugins:` 块与 `contributes:` 的清单契约(含老清单向后兼容);
+- 端到端探针 `tools/agents/scratch/PLUG-T5/verify-plugin-packaging.py`:
+  cook 干净包(引擎 + 项目插件都随包、摘要一致)→ 引用缺件 cook 失败(带引用者诊断)→
+  `tolerate_missing` 降级(计数保留 + ERROR)→ Runtime 按发行清单加载 2 个插件,**20 PASS**。

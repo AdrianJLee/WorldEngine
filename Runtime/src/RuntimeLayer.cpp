@@ -2,6 +2,8 @@
 #include "GameHud.h"
 #include "World/Core/Asset/ProjectManifest.h"
 #include "World/Core/Log.h"
+#include "World/Core/WorldContext.h"
+#include "World/Plugins/PluginManager.h"
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/RenderSettings.h"
 #include "World/Modules/GameModuleHost.h"
@@ -20,11 +22,28 @@
 
 namespace World
 {
+	namespace
+	{
+		// PLUG-T5:发行形态的插件目录 = exe 旁的 `bin/plugins`(与 cook 的落点
+		// `<publish>/bin/plugins/<name>.dll` 一致;取模块自身路径,与进程 CWD 无关 ——
+		// 与 RuntimeApp 的语言层锚定同一口径)。
+		std::filesystem::path ExecutableDirectory()
+		{
+			char executablePathBuffer[MAX_PATH] = {};
+			if (!GetModuleFileNameA(nullptr, executablePathBuffer, MAX_PATH))
+				return {};
+			return std::filesystem::path(executablePathBuffer).parent_path();
+		}
+	}
+
 	RuntimeLayer::RuntimeLayer()
 		:Layer("RuntimeLayer")
 	{
 
 	}
+	// PLUG-T5:析构在 .cpp 定义(unique_ptr<Plugins::PluginManager> 需要完整类型)。
+	RuntimeLayer::~RuntimeLayer() = default;
+
 	void RuntimeLayer::OnAttach()
 	{
 		WLD_PROFILE_FUNCTION();
@@ -39,6 +58,8 @@ namespace World
 		desc.FixedStepHz = 60;
 		std::string scenePath = "scenes/test.wd";
 		std::filesystem::path manifestPath;
+		// PLUG-T5:发行清单里的随包插件 id(cook 写下的依赖拓扑序)。
+		std::vector<std::string> shippedPlugins;
 		if (Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
 		{
 			std::string manifestError;
@@ -54,6 +75,7 @@ namespace World
 				// D8a2:项目级渲染设置(rendering.*)对打包运行同样生效 —— 打包产物里没有
 				// 环境变量,用户只能通过清单配置,所以这条路径必须显式 Apply。
 				World::RenderSettings::Apply(manifest);
+				shippedPlugins = manifest.Plugins.Shipped;
 			}
 			// 启动解析结果:定位到哪份清单/内容根/启动场景 —— 排查"跑了但没画面"的第一步。
 			WLD_CORE_INFO("[runtime] manifest '{0}' contentRoot '{1}' startScene '{2}'",
@@ -74,6 +96,39 @@ namespace World
 				desc.StartLevel = scenePath;
 				WLD_CORE_INFO("[runtime] WLD_START_SCENE override: {0}", scenePath);
 			}
+
+		// PLUG-T5:按发行清单加载 `<exe>/bin/plugins/*.dll`(闭包内插件;顺序 = cook 写下的
+		// 依赖拓扑序)。加载必须在场景/GameHost 之前 —— 插件注册的 schema 组件、资产类型与
+		// 脚本函数要在关卡加载前就位。
+		//
+		// 失败策略(与 docs/dev/plugin-framework.md §12 同步):缺失 / ABI 不符 / 注册失败
+		// 一律**记 ERROR 并继续启动**(不静默,也不把游戏卡死在启动期 —— 缺件在 cook 的引用
+		// 硬门里已经是致命错误)。Runtime 不接线编辑器扩展:只提供 editor.panel / editor.command
+		// 的插件在这里按 T3b 契约干净拒绝(与"无编辑器宿主 = 注册失败"同口径)。
+		m_PluginManager = std::make_unique<Plugins::PluginManager>();
+		if (shippedPlugins.empty())
+		{
+			WLD_CORE_INFO("[plugin] release manifest ships no plugins; bin/plugins is not consulted");
+		}
+		else
+		{
+			const std::filesystem::path pluginLibraryDir = ExecutableDirectory() / "bin" / "plugins";
+			std::string pluginError;
+			const Plugins::PluginManager::Status pluginStatus = m_PluginManager->LoadPackaged(
+				pluginLibraryDir, shippedPlugins, Application::Get().GetContext(), &pluginError);
+			if (pluginStatus != Plugins::PluginManager::Status::Ok)
+				WLD_CORE_ERROR("[plugin] {0} of {1} shipped plugin(s) failed to load from {2}: {3}",
+					shippedPlugins.size() - m_PluginManager->LoadedCount(), shippedPlugins.size(),
+					pluginLibraryDir.string(), pluginError);
+			else
+				WLD_CORE_INFO("[plugin] loaded {0} plugin(s) from {1} (release manifest order)",
+					m_PluginManager->LoadedCount(), pluginLibraryDir.string());
+		}
+		// 插件装载结论立即落盘:核心日志默认只在 WARN 及以上刷新(见 Log::Init 的 flush_on),
+		// 而"发行包到底装上了哪些插件"是启动期最需要事后核对的一条事实 —— 不强制刷一次,
+		// 进程被强杀(玩家关窗口/自动化终止)时这条 INFO 会留在 stdio 缓冲里丢掉。
+		if (const std::shared_ptr<spdlog::logger>& logger = Log::GetCoreLogger())
+			logger->flush();
 
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 
@@ -101,6 +156,13 @@ namespace World
 		m_Host.StopRuntime();
 		m_Host.Shutdown();
 		m_SceneTextureId = 0;
+		// PLUG-T5:场景先销毁(插件组件还有活实例时 Unload 会干净拒绝),再卸载插件 ——
+		// 插件回调/组件存储因此在管理器析构前全部回收。
+		if (m_PluginManager)
+		{
+			m_PluginManager->UnloadAll(Application::Get().GetContext());
+			m_PluginManager.reset();
+		}
 		if (m_SceneRenderer)
 			m_SceneRenderer->Shutdown();
 		m_SceneRenderer.reset();

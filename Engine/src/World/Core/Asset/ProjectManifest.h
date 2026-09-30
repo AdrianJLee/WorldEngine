@@ -64,6 +64,28 @@ namespace World::Asset
 		float Gravity = -9.81f;      // 重力加速度(Y 轴,有限值)
 	};
 
+	// PLUG-T5:插件打包设置(project.we.yaml 的 `plugins:` 区块)。
+	//
+	// 口径(方案 v2.1 §7 / 派工单 PLUG-T5):
+	//   * Enabled = **显式启用**:引擎插件必须在这里出现才随包;项目插件默认随包
+	//     (`ship: never` 写在插件自己的 plugin.we.yaml 里才能排除);
+	//   * TolerateMissing = 引用缺件的**唯一例外**:该插件的引用缺件降级为 ERROR 日志 + 摘要计数
+	//     (不静默);缺省 = 空;
+	//   * Shipped = **发行清单**字段:cook 把实际随包的插件 id(依赖拓扑序)写进发布目录的清单,
+	//     Runtime 按它加载 `<exe>/bin/plugins/*.dll`。源清单通常为空。
+	// 缺省(老清单没有 `plugins:` 块)= 三项都空,行为与今天完全一致。
+	struct PluginPackageSettings
+	{
+		std::vector<std::string> Enabled;
+		std::vector<std::string> TolerateMissing;
+		std::vector<std::string> Shipped;
+
+		bool IsDefault() const
+		{
+			return Enabled.empty() && TolerateMissing.empty() && Shipped.empty();
+		}
+	};
+
 	// 项目清单(project.we.yaml):资产内容根、启动场景与发行包列表的单一事实源。
 	// ContentRoot 相对 manifest 文件所在目录;Packages 为发行布局下的相对路径。
 	class WLD_API ProjectManifest
@@ -82,6 +104,8 @@ namespace World::Asset
 		// P4-U4(2026-09-21):资产导入默认值(`imports:` 区块)。作为"源还没有产物时"的
 		// 模型导入默认 —— 已有资产 meta 里的逐源设置优先(ModelImportSettings::ResolveForImport)。
 		ModelImportSettings ImportDefaults;
+		// PLUG-T5:插件打包(`plugins:` 区块;缺省 = 空,向后兼容老清单)。
+		PluginPackageSettings Plugins;
 
 		// 加载并校验;error 为空表示成功。
 		static bool Load(const std::filesystem::path& path, ProjectManifest* out, std::string* error);

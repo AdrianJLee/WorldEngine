@@ -39,6 +39,11 @@ namespace World::Editor
 		size_t TextureSkipped = 0;          // M4-TEX P3:源图空/读不了而跳过的张数
 		size_t StrippedSourceTextures = 0;  // M4-TEX P3:剥离掉的源图 + sidecar 文件数(未开开关 = 0)
 		size_t RestoredSourceCopies = 0;    // M4-TEX P3:剥离后自愈补回的源图 + sidecar 文件数(通常 0)
+		// ---- PLUG-T5:插件打包(方案 §7:显式启用 + depends 闭包 + 引用完整性硬门)----
+		size_t PluginsShipped = 0;          // 随包插件数(闭包内;DLL 已拷进 <publish>/bin/plugins/)
+		size_t PluginsSkipped = 0;          // 发现但未随包的插件数
+		size_t PluginMissingReferences = 0; // 引用缺件条数(>0 = 全部被 plugins.tolerate_missing 降级)
+		std::vector<std::string> PluginDiagnostics;   // 逐条"引用者 → 引用面 → 建议"
 	};
 
 	// 执行一次完整打包:项目清单 → 增量烘焙 → 着色器烘焙 → 内容包 →

@@ -3,6 +3,8 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <stdexcept>
 #include <string_view>
@@ -172,6 +174,172 @@ namespace World::Plugins
 			}
 			return true;
 		}
+
+		// 扩展名规范化(PLUG-T5):小写、带前导点(`whello`、`.WHELLO` → `.whello`)。
+		bool NormalizeExtension(const std::string& raw, std::string* out, std::string* error)
+		{
+			std::string value = raw;
+			size_t first = value.find_first_not_of(" \t");
+			size_t last = value.find_last_not_of(" \t");
+			value = first == std::string::npos ? std::string() : value.substr(first, last - first + 1);
+			if (value.empty())
+			{
+				if (error) *error = "extension entries must not be empty";
+				return false;
+			}
+			std::transform(value.begin(), value.end(), value.begin(),
+				[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+			if (value.front() != '.')
+				value.insert(value.begin(), '.');
+			if (value.find('/') != std::string::npos || value.find('\\') != std::string::npos
+				|| value.find_first_of(" \t") != std::string::npos)
+			{
+				if (error) *error = "extension must be a plain file extension like '.whello': " + raw;
+				return false;
+			}
+			*out = value;
+			return true;
+		}
+
+		// PLUG-T5:`contributes:` —— 打包期引用索引的静态声明(见 PluginContribution)。
+		//
+		// 形态(未知 key / 坏形态 = 干净拒绝,不猜语义):
+		//   contributes:
+		//     components: [com.example.health]
+		//     asset_types:
+		//       - health                      # 字符串形式 = 只有 id(无扩展名 ⇒ 该面扫不到)
+		//       - id: health.file
+		//         extensions: [.whealth]
+		//     importers:
+		//       - id: health.whealth
+		//         extensions: [.whealth]
+		//     script_namespaces: [health]
+		bool ReadContributions(const YAML::Node& root, std::vector<PluginContribution>* out, std::string* error)
+		{
+			const YAML::Node node = root["contributes"];
+			if (!node)
+				return true;
+			if (!node.IsMap())
+			{
+				if (error) *error = "field 'contributes' must be a map of face name → list";
+				return false;
+			}
+
+			static const char* const kFaces[] =
+				{ "components", "asset_types", "importers", "script_namespaces" };
+			for (const auto& entry : node)
+			{
+				std::string key;
+				try
+				{
+					key = entry.first.as<std::string>("");
+				}
+				catch (const std::exception&)
+				{
+					if (error) *error = "field 'contributes' must use string face names";
+					return false;
+				}
+				bool known = false;
+				for (const char* candidate : kFaces)
+					if (key == candidate)
+						known = true;
+				if (!known)
+				{
+					if (error) *error = "field 'contributes' has unknown face '" + key
+						+ "' (expected components|asset_types|importers|script_namespaces)";
+					return false;
+				}
+			}
+
+			const auto readFace = [&](const char* key, PluginContributionFace face, bool allowExtensions)
+			{
+				const YAML::Node list = node[key];
+				if (!list)
+					return true;
+				if (!list.IsSequence())
+				{
+					if (error) *error = std::string("field 'contributes.") + key + "' must be a list";
+					return false;
+				}
+				for (const YAML::Node& item : list)
+				{
+					PluginContribution contribution;
+					contribution.Face = face;
+					if (item.IsScalar())
+					{
+						try
+						{
+							contribution.Id = item.as<std::string>("");
+						}
+						catch (const std::exception&)
+						{
+							if (error) *error = std::string("field 'contributes.") + key
+								+ "' entries must be strings or maps";
+							return false;
+						}
+					}
+					else if (item.IsMap())
+					{
+						try
+						{
+							contribution.Id = item["id"] ? item["id"].as<std::string>("") : "";
+						}
+						catch (const std::exception&)
+						{
+							if (error) *error = std::string("contributes.") + key + "[].id must be a string";
+							return false;
+						}
+						const YAML::Node extensions = item["extensions"];
+						if (extensions)
+						{
+							if (!extensions.IsSequence())
+							{
+								if (error) *error = std::string("contributes.") + key
+									+ "[].extensions must be a list of strings";
+								return false;
+							}
+							for (const YAML::Node& extension : extensions)
+							{
+								std::string normalized;
+								if (!NormalizeExtension(extension.as<std::string>(""), &normalized, error))
+									return false;
+								if (std::find(contribution.Extensions.begin(), contribution.Extensions.end(),
+										normalized) == contribution.Extensions.end())
+									contribution.Extensions.push_back(std::move(normalized));
+							}
+						}
+					}
+					else
+					{
+						if (error) *error = std::string("field 'contributes.") + key
+							+ "' entries must be strings or maps";
+						return false;
+					}
+
+					if (contribution.Id.empty())
+					{
+						if (error) *error = std::string("field 'contributes.") + key
+							+ "' entries must carry a non-empty id";
+						return false;
+					}
+					if (!allowExtensions && !contribution.Extensions.empty())
+					{
+						if (error) *error = std::string("field 'contributes.") + key
+							+ "' does not take extensions (only asset_types / importers do)";
+						return false;
+					}
+					out->push_back(std::move(contribution));
+				}
+				return true;
+			};
+
+			if (!readFace("components", PluginContributionFace::Component, false)
+				|| !readFace("asset_types", PluginContributionFace::AssetType, true)
+				|| !readFace("importers", PluginContributionFace::Importer, true)
+				|| !readFace("script_namespaces", PluginContributionFace::ScriptNamespace, false))
+				return false;
+			return true;
+		}
 	}
 
 	bool PluginManifest::Load(const std::filesystem::path& manifestPath, PluginScope locationScope,
@@ -213,6 +381,7 @@ namespace World::Plugins
 				|| !ReadStringList(root, "depends", &manifest.Depends, &reason)
 				|| !ReadStringList(root, "provides", &manifest.Provides, &reason)
 				|| !ReadStringList(root, "overrides", &manifest.Overrides, &reason)
+				|| !ReadContributions(root, &manifest.Contributions, &reason)
 				|| !ReadShip(root, &manifest.Ship, &reason)
 				|| !ReadScope(root, locationScope, &manifest.Scope, &manifest.HasScopeField, &reason))
 				return fail(reason);

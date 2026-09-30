@@ -156,6 +156,23 @@ namespace World::Asset
 			for (std::string& package : manifest.Packages)
 				if (!ValidateRelativePath(package, &package, error))
 					return false;
+			// PLUG-T5:`plugins:` 的三个列表都只接受非空 id(空串 = 配置错误,加载期拒绝)。
+			const auto validatePluginIds = [error](const char* key, const std::vector<std::string>& ids)
+			{
+				for (const std::string& id : ids)
+				{
+					if (id.empty())
+					{
+						if (error) *error = std::string("plugins.") + key + " must not contain empty ids";
+						return false;
+					}
+				}
+				return true;
+			};
+			if (!validatePluginIds("enabled", manifest.Plugins.Enabled)
+				|| !validatePluginIds("tolerate_missing", manifest.Plugins.TolerateMissing)
+				|| !validatePluginIds("shipped", manifest.Plugins.Shipped))
+				return false;
 			return true;
 		}
 
@@ -470,6 +487,12 @@ namespace World::Asset
 					"只在源文件**还没有产物**时生效 —— 已有资产 meta 里的逐源设置永远优先,不会改动已有资产。",
 					"由「项目设置 ▶ 导入默认值」页读写。",
 				};
+			if (blockKey == "plugins")
+				return {
+					"插件打包:enabled = 显式启用的插件(引擎插件需要在这里出现才随包);",
+					"shipped = cook 写入发行清单的随包插件(依赖拓扑序);tolerate_missing = 引用缺件的唯一例外(降级为 ERROR + 摘要计数)。",
+					"由 cook 读写;手改本文件同样生效。",
+				};
 			return {};
 		}
 
@@ -559,6 +582,35 @@ namespace World::Asset
 			{
 				const size_t contentEnd = BlockContentEnd(lines, packagesIndex, BlockEnd(lines, packagesIndex));
 				edits.push_back({ packagesIndex, contentEnd - packagesIndex, std::move(packages) });
+			}
+
+			// PLUG-T5:`plugins:` 是嵌套序列区块(enabled / shipped / tolerate_missing),同样是
+			// 整块重写 —— 但缺少且三项全空时**不新增**,老清单的形态逐字节不变。
+			const size_t pluginsIndex = FindTopLevelKey(lines, "plugins");
+			if (pluginsIndex != kNoLine || !manifest.Plugins.IsDefault())
+			{
+				std::vector<TextLine> pluginLines;
+				pluginLines.push_back({ "plugins:", eol });
+				const auto appendIdList = [&pluginLines, &eol](const char* key,
+					const std::vector<std::string>& ids)
+				{
+					if (ids.empty())
+						return;
+					pluginLines.push_back({ "  " + std::string(key) + ":", eol });
+					for (const std::string& id : ids)
+						pluginLines.push_back({ "    - " + id, eol });
+				};
+				appendIdList("enabled", manifest.Plugins.Enabled);
+				appendIdList("shipped", manifest.Plugins.Shipped);
+				appendIdList("tolerate_missing", manifest.Plugins.TolerateMissing);
+
+				if (pluginsIndex == kNoLine)
+					appended.insert(appended.end(), pluginLines.begin(), pluginLines.end());
+				else
+				{
+					const size_t contentEnd = BlockContentEnd(lines, pluginsIndex, BlockEnd(lines, pluginsIndex));
+					edits.push_back({ pluginsIndex, contentEnd - pluginsIndex, std::move(pluginLines) });
+				}
 			}
 
 			// 从后往前应用:前面的行下标不受后面的增删影响;同一起点时先做整块替换/删除,
@@ -743,6 +795,47 @@ namespace World::Asset
 					target.SharedMaterialFolder =
 						imports["model.shared_material_folder"].as<std::string>(target.SharedMaterialFolder);
 			}
+			// PLUG-T5:`plugins:` = 插件打包设置(见 ProjectManifest.h 的 PluginPackageSettings)。
+			// 缺块 = 三项全空(老清单行为逐字节不变);形态错误 = 加载期拒绝(不猜语义)。
+			if (const YAML::Node plugins = root["plugins"])
+			{
+				if (!plugins.IsMap())
+				{
+					if (error) *error = "manifest 'plugins' must be a map: " + path.string();
+					return false;
+				}
+				const auto readIdList = [&plugins, &path](const char* key, std::vector<std::string>* out,
+					std::string* listError) -> bool
+				{
+					const YAML::Node list = plugins[key];
+					if (!list)
+						return true;
+					if (!list.IsSequence())
+					{
+						if (listError) *listError = std::string("manifest 'plugins.") + key
+							+ "' must be a list of strings: " + path.string();
+						return false;
+					}
+					for (const YAML::Node& item : list)
+					{
+						try
+						{
+							out->push_back(item.as<std::string>(""));
+						}
+						catch (const std::exception&)
+						{
+							if (listError) *listError = std::string("manifest 'plugins.") + key
+								+ "' must be a list of strings: " + path.string();
+							return false;
+						}
+					}
+					return true;
+				};
+				if (!readIdList("enabled", &manifest.Plugins.Enabled, error)
+					|| !readIdList("shipped", &manifest.Plugins.Shipped, error)
+					|| !readIdList("tolerate_missing", &manifest.Plugins.TolerateMissing, error))
+					return false;
+			}
 			if (!ValidateManifest(manifest, error))
 				return false;
 			*out = std::move(manifest);
@@ -826,6 +919,26 @@ namespace World::Asset
 			for (const std::string& package : copy.Packages)
 				out << package;
 			out << YAML::EndSeq;
+			// PLUG-T5:插件打包区块(缺省不写,保持旧清单形态;发行清单的 shipped 由 cook 写入)。
+			if (!copy.Plugins.IsDefault())
+			{
+				out << YAML::Key << "plugins" << YAML::Value << YAML::BeginMap;
+				for (const std::string& comment : BlockComments("plugins"))
+					out << YAML::Comment(comment);
+				const auto emitIdList = [&out](const char* key, const std::vector<std::string>& ids)
+				{
+					if (ids.empty())
+						return;
+					out << YAML::Key << key << YAML::Value << YAML::BeginSeq;
+					for (const std::string& id : ids)
+						out << id;
+					out << YAML::EndSeq;
+				};
+				emitIdList("enabled", copy.Plugins.Enabled);
+				emitIdList("shipped", copy.Plugins.Shipped);
+				emitIdList("tolerate_missing", copy.Plugins.TolerateMissing);
+				out << YAML::EndMap;
+			}
 			out << YAML::EndMap;
 
 			// YAML 文件保持行尾换行(git 差异干净)。

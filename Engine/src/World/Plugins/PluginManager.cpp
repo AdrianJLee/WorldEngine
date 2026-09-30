@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -1845,6 +1846,67 @@ namespace World::Plugins
 		return -1;
 	}
 
+	// PLUG-T5:声明与运行时注册的一致性比对(只对**声明了 contributes** 的插件生效)。
+	//
+	// 为什么重要:cook 的引用完整性硬门用 `contributes:` 做索引,声明漏了 = 引用漏报(静默),
+	// 声明多了 = 误报。所以两面不一致必须在插件加载时就以 WARN 暴露出来,而不是等打包时猜。
+	void PluginManager::WarnContributionDrift(const Record& record)
+	{
+		const std::vector<PluginContribution>& declared = record.Entry.Manifest.Contributions;
+		if (declared.empty())
+			return;   // 旧插件/不声明贡献 = 打包索引不覆盖它,这里不打扰
+
+		const std::string& pluginId = record.Entry.Manifest.Id;
+		std::set<std::string> declaredComponents;
+		std::set<std::string> declaredAssetTypes;
+		std::set<std::string> declaredImporters;
+		std::set<std::string> declaredNamespaces;
+		for (const PluginContribution& contribution : declared)
+		{
+			switch (contribution.Face)
+			{
+				case PluginContributionFace::Component: declaredComponents.insert(contribution.Id); break;
+				case PluginContributionFace::AssetType: declaredAssetTypes.insert(contribution.Id); break;
+				case PluginContributionFace::Importer: declaredImporters.insert(contribution.Id); break;
+				case PluginContributionFace::ScriptNamespace: declaredNamespaces.insert(contribution.Id); break;
+			}
+		}
+
+		std::set<std::string> actualComponents;
+		std::set<std::string> actualAssetTypes;
+		std::set<std::string> actualImporters;
+		std::set<std::string> actualNamespaces;
+		for (const RegisteredComponent& component : record.RegisteredComponents)
+			actualComponents.insert(component.Id);
+		for (const std::string& id : record.RegisteredAssetTypes)
+			actualAssetTypes.insert(id);
+		for (const RegisteredImporter& importer : record.RegisteredImporters)
+			actualImporters.insert(importer.Id);
+		for (const std::string& name : record.RegisteredScriptFunctions)
+		{
+			const size_t dot = name.find('.');
+			if (dot != std::string::npos)
+				actualNamespaces.insert(name.substr(0, dot));
+		}
+
+		const auto compare = [&](const char* face, const std::set<std::string>& declaredIds,
+			const std::set<std::string>& actualIds)
+		{
+			for (const std::string& id : declaredIds)
+				if (actualIds.count(id) == 0)
+					Log(WePluginLogWarn, "warning id=" + pluginId + " contributes '" + face + ":" + id
+						+ "' but did not register it (the cook reference index would be wrong)");
+			for (const std::string& id : actualIds)
+				if (declaredIds.count(id) == 0)
+					Log(WePluginLogWarn, "warning id=" + pluginId + " registered " + face + " '" + id
+						+ "' without declaring it under contributes (cook cannot see that reference)");
+		};
+		compare("component", declaredComponents, actualComponents);
+		compare("asset.type", declaredAssetTypes, actualAssetTypes);
+		compare("asset.importer", declaredImporters, actualImporters);
+		compare("script.namespace", declaredNamespaces, actualNamespaces);
+	}
+
 	void PluginManager::ReclaimPluginRegistrations(Record& record,
 		World::Schema::SchemaRegistry* schemas)
 	{
@@ -2297,6 +2359,8 @@ namespace World::Plugins
 		entry.Diagnostic.clear();
 		Log(WePluginLogInfo, "loaded id=" + entry.Manifest.Id + " scope="
 			+ PluginScopeName(entry.Manifest.Scope) + " order=" + std::to_string(entry.Order));
+		// PLUG-T5:声明(contributes)与实际注册的一致性 —— 不一致会让 cook 的引用索引漏报/误报。
+		WarnContributionDrift(record);
 		return Status::Ok;
 	}
 
@@ -2343,6 +2407,142 @@ namespace World::Plugins
 				return LoadRecord(index, context, error);
 		if (error) *error = "plugin not found: " + id;
 		return Status::NotFound;
+	}
+
+	// PLUG-T5:发行形态加载(见 PluginManager.h 的契约说明)。
+	PluginManager::Status PluginManager::LoadPackaged(const std::filesystem::path& libraryDir,
+		const std::vector<std::string>& orderedIds, WorldContext& context, std::string* error)
+	{
+		if (orderedIds.empty())
+			return Status::Ok;   // 发行清单没带插件 = 零插件、零开销(与"缺根 = 0 个插件"同口径)
+		if (LoadedCount() > 0 || !m_Records.empty())
+		{
+			Log(WePluginLogError, "packaged load refused: the manager is not empty (call UnloadAll first)");
+			if (error) *error = "plugin manager already holds entries";
+			return Status::Rejected;
+		}
+
+		m_Records.clear();
+		m_LoadSequence.clear();
+		m_NextOrder = 0;
+
+		// 1. 平铺目录扫描:每个 DLL 只做"读 id"的探针(LoadLibrary + WePluginQuery),
+		//    不做 Register —— 真正的加载统一走 LoadRecord(同一套契约校验与回滚)。
+		std::map<std::string, std::filesystem::path> libraryById;
+		std::error_code ec;
+		if (std::filesystem::is_directory(libraryDir, ec))
+		{
+			std::vector<std::filesystem::path> libraries;
+			for (const std::filesystem::directory_entry& item :
+				std::filesystem::directory_iterator(libraryDir, ec))
+			{
+				std::error_code fileEc;
+				if (item.is_regular_file(fileEc)
+					&& item.path().extension().string() == kPluginLibraryExtension)
+					libraries.push_back(item.path());
+			}
+			std::sort(libraries.begin(), libraries.end());
+
+			for (const std::filesystem::path& libraryPath : libraries)
+			{
+				auto library = std::make_unique<World::DynamicLibrary>();
+				if (!library->Load(libraryPath.string()))
+				{
+					Log(WePluginLogError, "packaged plugin library failed to load: " + libraryPath.string()
+						+ " (" + library->GetLastError() + ")");
+					continue;
+				}
+				const auto query = reinterpret_cast<WePluginQueryFn>(
+					library->GetSymbol(WE_PLUGIN_QUERY_SYMBOL));
+				if (!query)
+				{
+					Log(WePluginLogError, "packaged plugin library has no '" + std::string(WE_PLUGIN_QUERY_SYMBOL)
+						+ "' entry: " + libraryPath.string());
+					continue;
+				}
+				const WePlugin* plugin = query(WE_PLUGIN_ABI_VERSION);
+				if (!plugin)
+				{
+					Log(WePluginLogError, "packaged plugin rejected the host plugin ABI "
+						+ std::to_string(WE_PLUGIN_ABI_VERSION) + ": " + libraryPath.string());
+					continue;
+				}
+				const std::string id = plugin->Id ? plugin->Id : "";
+				if (id.empty())
+				{
+					Log(WePluginLogError, "packaged plugin has an empty id: " + libraryPath.string());
+					continue;
+				}
+				const auto existing = libraryById.find(id);
+				if (existing != libraryById.end())
+				{
+					Log(WePluginLogWarn, "packaged plugin id '" + id + "' appears twice in "
+						+ libraryDir.string() + " (" + existing->second.string() + ", "
+						+ libraryPath.string() + "); keeping the first");
+					continue;
+				}
+				libraryById.emplace(id, libraryPath);
+			}
+		}
+		else
+		{
+			Log(WePluginLogError, "packaged plugin directory not found: " + libraryDir.string()
+				+ " (the release manifest lists " + std::to_string(orderedIds.size()) + " plugin(s))");
+		}
+
+		// 2. 按发行清单的顺序(= cook 写下的依赖拓扑序)逐条加载;单条失败不阻断其余。
+		std::string firstError;
+		size_t failed = 0;
+		for (const std::string& id : orderedIds)
+		{
+			const auto found = libraryById.find(id);
+			if (found == libraryById.end())
+			{
+				++failed;
+				const std::string reason = "release manifest ships plugin '" + id + "' but "
+					+ libraryDir.string() + " has no library providing it";
+				Log(WePluginLogError, reason);
+				if (firstError.empty())
+					firstError = reason;
+				continue;
+			}
+
+			Record record;
+			record.Entry.Manifest.Id = id;
+			record.Entry.Manifest.Name = id;
+			record.Entry.Manifest.Scope = PluginScope::Engine;   // 打包形态没有"项目/引擎"之分
+			record.Entry.Manifest.LibraryPath = found->second;
+			record.Entry.Manifest.ManifestPath = found->second;
+			m_Records.push_back(std::move(record));
+			const size_t index = m_Records.size() - 1;
+
+			std::string reason;
+			const Status status = LoadRecord(index, context, &reason);
+			if (status == Status::Ok)
+				continue;
+			++failed;
+			if (reason.empty())
+				reason = StatusName(status);
+			Reject(m_Records[index], reason);
+			if (firstError.empty())
+				firstError = "plugin '" + id + "': " + reason;
+		}
+
+		// 3. 目录里多余的 DLL(清单没列)⇒ 警告后忽略(不静默)。
+		for (const auto& entry : libraryById)
+		{
+			if (std::find(orderedIds.begin(), orderedIds.end(), entry.first) != orderedIds.end())
+				continue;
+			Log(WePluginLogWarn, "packaged plugin '" + entry.first + "' is present in "
+				+ libraryDir.string() + " but is not listed in the release manifest; ignored");
+		}
+
+		if (failed > 0)
+		{
+			if (error) *error = firstError;
+			return Status::Rejected;
+		}
+		return Status::Ok;
 	}
 
 	PluginManager::Status PluginManager::UnloadRecord(Record& record, WorldContext& context, std::string* error,

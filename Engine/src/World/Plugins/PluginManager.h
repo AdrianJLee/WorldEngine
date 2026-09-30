@@ -90,6 +90,22 @@ namespace World::Plugins
 		// 按依赖拓扑加载全部未加载插件;单条失败继续加载其余插件。
 		// 返回 Ok = 全部成功(含 0 个);Rejected = 有条目被拒绝(逐条诊断见 Find()/Entries())。
 		Status LoadAll(WorldContext& context, std::string* error = nullptr);
+
+		// ---- PLUG-T5:发行形态加载(bin/plugins/*.dll 平铺目录)--------------------------
+		//
+		// cook 的发行布局把闭包内插件的 DLL 拷到 `<publish>/bin/plugins/<name>.dll`,并把这些
+		// 插件的 **id 按依赖拓扑序**写进发行清单的 `plugins.shipped`。Runtime 按这份清单加载:
+		//   * 每个 DLL 先 `LoadLibrary` + `WePluginQuery` 读出 id,再走与发现式加载**同一套**
+		//     契约校验(ABI / StructSize / id 一致 / Register / 回滚)——不复制第二套加载器;
+		//   * 清单里列了、目录里没有 ⇒ 记 ERROR 并计入失败(**不静默**,不阻断其余插件);
+		//   * 目录里多余的 DLL(清单没列)⇒ 记 WARN 后忽略(**不静默**);
+		//   * 依赖顺序取清单顺序(cook 已写成拓扑序);单个失败不影响其余。
+		// 返回 Ok = 清单里的插件全部加载成功;Rejected = 有缺失/失败(error 给首条原因)。
+		// 与 Discover 一样:已有 Loaded 条目时拒绝(先 UnloadAll)。
+		Status LoadPackaged(const std::filesystem::path& libraryDir,
+			const std::vector<std::string>& orderedIds, WorldContext& context,
+			std::string* error = nullptr);
+
 		// 加载单个插件;依赖必须已加载(DependencyNotLoaded)。
 		Status Load(const std::string& id, WorldContext& context, std::string* error = nullptr);
 		// 卸载单个插件:Unregister 恰好一次 + 释放 DLL;有已加载依赖者 = HasLoadedDependents。
@@ -272,6 +288,9 @@ namespace World::Plugins
 		// schemas = 组件的 schema 注册表(可空:空则只清账本/槽位并记 ERROR)。
 		void ReclaimPluginRegistrations(Record& record,
 			World::Schema::SchemaRegistry* schemas = nullptr);
+		// PLUG-T5:声明(`plugin.we.yaml` 的 contributes)与运行时实际注册项的比对 ——
+		// 只对**声明了 contributes** 的插件生效;不一致逐条记 WARN(打包索引会漏报,必须可观测)。
+		void WarnContributionDrift(const Record& record);
 		// 组件类型整模块注销的兜底(卸载/回滚/管理器析构共用)。
 		void ReclaimComponentTypes(Record& record, World::Schema::SchemaRegistry* schemas);
 		// T2c:插件组件在册槽位(存储 id 段的低位;空槽 = 可分配)。

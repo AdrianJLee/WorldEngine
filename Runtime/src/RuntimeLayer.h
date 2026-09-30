@@ -2,14 +2,22 @@
 #include "World.h"
 #include "World/Gameplay/GameHost.h"
 
+#include <memory>
+
 namespace World
 {
+	namespace Plugins
+	{
+		class PluginManager;
+	}
+
 	// W1:宿主收敛——场景加载/更新/渲染统一走 Gameplay::GameHost(见 World/Gameplay/GameHost.h)。
 	class RuntimeLayer : public Layer
 	{
 	public:
 		RuntimeLayer();
-		virtual ~RuntimeLayer() = default;
+		// PLUG-T5:析构在 .cpp 定义(unique_ptr<Plugins::PluginManager> 的删除器需要完整类型)。
+		virtual ~RuntimeLayer();
 		virtual void OnAttach() override;
 		virtual void OnDetach() override;
 		virtual void OnUpdate(Timestep ts) override;
@@ -26,6 +34,8 @@ namespace World
 		Gameplay::GameHost m_Host;
 		Ref<SceneRenderer> m_SceneRenderer;
 		uint64_t m_SceneTextureId = 0;
+		// PLUG-T5:发行形态的插件管理器(<exe>/bin/plugins/*.dll,按发行清单的 shipped 顺序加载)。
+		std::unique_ptr<Plugins::PluginManager> m_PluginManager;
 		// UI 阶段帧计数器:开发钩子(WLD_UI_CLICK_FRAME / WLD_CAPTURE_PRESENT_FRAME)的
 		// 帧号口径就是它(第 1 帧 = 1),与 Editor 侧"帧内钩子"同一读法。
 		uint32_t m_UiFrame = 0;
