@@ -1513,6 +1513,15 @@ int main()
 			CHECK(std::find(input.KeyPressed.begin(), input.KeyPressed.end(), World::KeyCodes::Enter)
 				!= input.KeyPressed.end());
 			collector.EndFrame();
+			// PROJ-17b 起"按下沿 + OS 重复"是控件动作的唯一来源:同一个键在**未抬起**时
+			// 再收到一次 down(且没有 repeat 标记)会被 WuiInputCollector 按"已按住的重复事件"
+			// 丢掉 —— 真实键盘不可能产生这种序列。这里补一次抬起,让下面那次 KPEnter 是
+			// 真正的新按下沿(否则 TextField 拿不到 Enter 的触发,提交不成立)。
+			collector.OnKey(World::KeyCodes::Enter, false, false);
+			collector.BeginFrame(input, { 1280.0f, 720.0f }, 60.0f);
+			CHECK(std::find(input.KeyDown.begin(), input.KeyDown.end(), World::KeyCodes::Enter)
+				== input.KeyDown.end());
+			collector.EndFrame();
 
 			// 端到端一段:归一后的 KPEnter 走的是 TextField 的"回车提交"路径(返回 true)。
 			WuiContext ctx;
