@@ -959,6 +959,10 @@ namespace World
 		m_ShowCookingProgress = false;
 		m_HasRenderedScene = false;
 
+		// HOTR-P1-T1:先停材质着色器热重载的编译线程并 join(它只跑 slangc / 读源,不碰 GPU)——
+		// 放在场景/渲染器析构之前,保证 OnDetach 之后不会再有产物进入 Install。
+		m_ShaderHotReload.Shutdown();
+
 		SetSceneState(SceneState::Edit);
 
 		// PLUG-T3:插件卸载必须在场景/渲染器析构之前(插件可能引用它们注册的回调/资源)。
@@ -3697,6 +3701,11 @@ namespace World
 			return;
 		}
 
+		// HOTR-P1-T1:帧边界消费材质着色器热重载的后台编译产物(Install 只在主线程帧内执行;
+		// 编译失败保留旧管线)。放在文档场景早退之前 —— 没有文档路径(新场景/启动器)时也生效。
+		// 也放在热重载开关检查之后 —— 关掉热重载时不再装配在飞产物(与 Enqueue 同一道闸门)。
+		m_ShaderHotReload.Pump();
+
 		// 1) 材质/贴图:库内轮询缓存里的 .wmat 与它们引用的贴图(150ms / 500ms)。
 		AssetHotReloadReport report;
 		MaterialLibrary::Get().PollAssetChanges(static_cast<double>(deltaSeconds), report);
@@ -3708,6 +3717,11 @@ namespace World
 			WLD_CORE_WARN("[asset-hot-reload] material reload failed '{0}': {1}", failure.Path, failure.Error);
 		for (const std::string& path : report.InvalidatedTextures)
 			WLD_CORE_INFO("[asset-hot-reload] texture invalidated '{0}'", path);
+
+		// HOTR-P1-T1:材质引用的着色器(`.slang`)改了 —— 面板没打开时也走编辑器级热重载:
+		// 转交 ShaderHotReload(工作线程读源 + 编译),产物在下一帧边界 Pump 里 Install 到路径键。
+		for (const std::string& path : report.ChangedShaders)
+			m_ShaderHotReload.Enqueue(path);
 
 		// 2) 文档场景(.wd):内容变化只提示 + 一键重开,**不自动替换**(会丢未保存修改,
 		//    选择/面板也仍指向旧 Scene 实例)。

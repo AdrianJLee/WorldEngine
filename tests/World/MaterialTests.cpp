@@ -1,6 +1,7 @@
 // D3:材质资产(解析/版本/默认值/夹紧/往返)与材质库(缓存/保存/热重载)回归。
 #include "World/Renderer/Material.h"
 #include "World/Renderer/MaterialLibrary.h"
+#include "World/Renderer/MaterialSurface.h"
 #include "World/Renderer/MaterialTextureCache.h"
 #include "World/Renderer/TextureData.h"
 #include "World/Utils/Paths.h"
@@ -1719,6 +1720,112 @@ int main()
 						static_cast<unsigned long long>(materialAfter.Value),
 						revisionBefore, probe->GetRevision(), paramsBefore, probe->Params().size());
 				}
+			}
+
+			// 29. T2(HOTR-P1):材质着色器经 `#include` 引用的库文件(内容根 `shaders/lib/**`)
+			//     内容变化时,ChangedShaders 报**根 `.slang` 路径**(不是库路径),引用它的材质
+			//     Revision 前进;根自身变化仍报根。
+			{
+				std::error_code libEc;
+				const std::filesystem::path libDirectory =
+					std::filesystem::path(WLD_TEST_ASSETPATH) / "shaders" / "lib";
+				std::filesystem::create_directories(libDirectory, libEc);
+				const std::filesystem::path libFull = libDirectory / "hotr_t2_lib.slang";
+				const std::filesystem::path rootFull =
+					std::filesystem::path(WLD_TEST_ASSETPATH) / "material_m4s2_tmp" / "m4s3_lib_probe.slang";
+				const std::string libLogical = "shaders/lib/hotr_t2_lib.slang";
+				const std::string rootLogical = "material_m4s2_tmp/m4s3_lib_probe.slang";
+				const auto writeLib = [&libFull](const std::string& text)
+				{
+					std::ofstream file(libFull, std::ios::binary | std::ios::trunc);
+					file << text;
+				};
+				const auto writeRoot = [&rootFull](const std::string& text)
+				{
+					std::ofstream file(rootFull, std::ios::binary | std::ios::trunc);
+					file << text;
+				};
+
+				writeLib(
+					"float HotrT2Scale()\n"
+					"{\n"
+					"    return 1.0f;\n"
+					"}\n");
+				writeRoot(
+					"#include \"lib/hotr_t2_lib.slang\"\n"
+					"//! param Float Roughness = 0.4 [0,1]\n"
+					"Surface Evaluate(MaterialInputs input)\n"
+					"{\n"
+					"    Surface surface = MakeDefaultSurface();\n"
+					"    surface.Roughness = Roughness * HotrT2Scale();\n"
+					"    return surface;\n"
+					"}\n");
+				writeText("m4s3_lib_probe.wmat",
+					"FormatVersion: 2\n"
+					"Shader: material_m4s2_tmp/m4s3_lib_probe.slang\n"
+					"Name: \"LibProbe\"\n");
+
+				Ref<Material> libProbe = library.Load(relative("m4s3_lib_probe.wmat"), &error);
+				CHECK(libProbe != nullptr);
+				CHECK(libProbe->ShaderPath() == rootLogical);
+				CHECK(libProbe->Params().size() == 1);
+
+				// 公共 API:依赖解析返回库文件的**绝对路径**。
+				std::vector<std::filesystem::path> rootsForResolve;
+				rootsForResolve.push_back(std::filesystem::path(WLD_TEST_ASSETPATH) / "material_m4s2_tmp");
+				rootsForResolve.push_back(std::filesystem::path(WLD_TEST_ASSETPATH) / "shaders");
+				std::string rootSource;
+				CHECK(MaterialIO::ReadFileText(rootLogical, rootSource));
+				const std::vector<std::filesystem::path> dependencies =
+					MaterialSurfaceCompiler::ResolveDependencies(rootSource, rootsForResolve);
+				CHECK(dependencies.size() == 1);
+				CHECK(dependencies[0].is_absolute());
+				CHECK(MaterialLibrary::NormalizePath(dependencies[0].generic_string())
+					== MaterialLibrary::NormalizePath(libFull.string()));
+
+				// 基线:着色器自身 + lib 依赖都进监听集合(首次登记不报告)。
+				AssetHotReloadReport libBaseline;
+				library.PollAssetChanges(0.0, libBaseline);
+				CHECK(!libBaseline.Any());
+				const uint32_t libRevisionBefore = libProbe->GetRevision();
+
+				// 只改库文件 → ChangedShaders 恰含根路径,材质 Revision 前进。
+				writeLib(
+					"float HotrT2Scale()\n"
+					"{\n"
+					"    return 0.5f;\n"
+					"}\n");
+				AssetHotReloadReport libReport;
+				library.PollAssetChanges(0.0, libReport);       // 看到新内容,debounce 未到
+				CHECK(libReport.ChangedShaders.empty());
+				library.PollAssetChanges(0.2, libReport);       // 稳定 0.2s ≥ 0.15s → 报告根路径
+				CHECK(libReport.ChangedShaders.size() == 1);
+				CHECK(libReport.ChangedShaders[0] == rootLogical);
+				CHECK(libProbe->GetRevision() > libRevisionBefore);
+
+				// 根自身变化:行为不变,仍报根。
+				const uint32_t rootRevisionBefore = libProbe->GetRevision();
+				writeRoot(
+					"#include \"lib/hotr_t2_lib.slang\"\n"
+					"//! param Float Roughness = 0.4 [0,1]\n"
+					"Surface Evaluate(MaterialInputs input)\n"
+					"{\n"
+					"    Surface surface = MakeDefaultSurface();\n"
+					"    surface.Roughness = Roughness * HotrT2Scale() * 0.75f;\n"
+					"    return surface;\n"
+					"}\n");
+				AssetHotReloadReport rootReport;
+				library.PollAssetChanges(0.0, rootReport);
+				CHECK(rootReport.ChangedShaders.empty());
+				library.PollAssetChanges(0.2, rootReport);
+				CHECK(rootReport.ChangedShaders.size() == 1);
+				CHECK(rootReport.ChangedShaders[0] == rootLogical);
+				CHECK(libProbe->GetRevision() > rootRevisionBefore);
+
+				// 清理:夹具库文件落在 material_m4s2_tmp 之外的内容根 `shaders/lib/` 下,
+				// 不在本节的 remove_all 范围内 —— 必须显式删除,否则污染工作树(实测踩到)。
+				std::error_code cleanupEc;
+				std::filesystem::remove(libFull, cleanupEc);
 			}
 
 			library.Shutdown();

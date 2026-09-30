@@ -13,6 +13,7 @@
 #include "World/WUI/WuiGizmo.h"
 #include "WUI/EditorShell.h"
 #include "AiControl/AiControlServer.h"
+#include "ShaderHotReload.h"
 #include <atomic>
 #include <functional>
 #include <string>
@@ -514,6 +515,9 @@ namespace World
 		std::filesystem::path m_SceneBeforePrefab;
 		bool m_HadSceneBeforePrefab = false;
 		bool m_ExternalSceneChanged = false;
+		// HOTR-P1-T1:材质着色器(`.slang`)编辑器级热重载 —— ChangedShaders → 后台重编译 →
+		// 帧边界 Install(路径键);材质面板没打开时也生效(编译失败保留旧管线)。
+		Editor::ShaderHotReload m_ShaderHotReload;
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;
 		std::string m_RendererChangeName;

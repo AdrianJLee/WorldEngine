@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <unordered_set>
 
@@ -29,6 +31,49 @@ namespace World
 			if (std::filesystem::exists(candidate, ec))
 				return candidate;
 			return {};
+		}
+
+		// T2(HOTR-P1):材质着色器 include 根的绝对路径。顺序与编辑器面板/cooker 的
+		// SurfaceIncludeRoots 一致:**先材质自身目录,再内容根 `shaders/`**;只收集真实存在的
+		// 目录(新材质推出来的目录可能还不存在),根本身不进缓存键。
+		std::vector<std::filesystem::path> ShaderIncludeRoots(const std::string& shaderLogicalPath)
+		{
+			std::vector<std::filesystem::path> roots;
+			const auto add = [&roots](const std::filesystem::path& candidate)
+			{
+				if (candidate.empty())
+					return;
+				std::error_code ec;
+				if (!std::filesystem::is_directory(candidate, ec))
+					return;
+				const std::filesystem::path absolute = std::filesystem::absolute(candidate, ec);
+				if (ec || absolute.empty())
+					return;
+				const std::filesystem::path normalized = absolute.lexically_normal();
+				if (std::find(roots.begin(), roots.end(), normalized) == roots.end())
+					roots.push_back(normalized);
+			};
+			const std::filesystem::path shaderFile(shaderLogicalPath);
+			add((shaderFile.is_absolute() ? shaderFile : World::Paths::AssetRoot() / shaderFile).parent_path());
+			add(World::Paths::AssetRoot() / "shaders");
+			return roots;
+		}
+
+		// T2(HOTR-P1):着色器源文本(逻辑路径 VFS 优先;绝对路径直接读盘)。
+		// 只为监听集合的依赖扫描服务;读不到由调用方退化为"只监听根"。
+		bool ReadShaderReloadSource(const std::string& shaderPath, std::string& out)
+		{
+			std::vector<uint8_t> bytes;
+			if (ReadAssetBytes(shaderPath, bytes))
+			{
+				out.assign(bytes.begin(), bytes.end());
+				return true;
+			}
+			std::ifstream stream(std::filesystem::path(shaderPath), std::ios::binary);
+			if (!stream)
+				return false;
+			out.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+			return true;
 		}
 
 		std::filesystem::file_time_type FileWriteTime(const std::string& path)
@@ -626,6 +671,7 @@ namespace World
 			// 整体关闭:不建立也不推进监听(重新开启时重新建立基线)。
 			m_MaterialWatch.Clear();
 			m_TextureWatch.Clear();
+			m_ShaderWatch.Clear();
 			return;
 		}
 
@@ -655,7 +701,13 @@ namespace World
 		std::sort(wantedTextures.begin(), wantedTextures.end());
 
 		// M4-S3:监听集合还包括材质引用的材质着色器(表面函数代码态实时预览的输入)。
+		// T2(HOTR-P1):着色器自身 + 它通过 `#include`/`import` 传递引用的库文件一起监听;
+		// 依赖集合与 Watch/Unwatch 的集合同步口径一致(这里算出的集合直接做同步)。
 		std::vector<std::string> wantedShaders;
+		std::unordered_map<std::string, std::string> shaderMaterialDir;
+		// 一个 lib 可以被多个根 `.slang` 引用:一个依赖 → 多个根。
+		std::unordered_multimap<std::string, std::string> shaderDependencyRoot;
+		std::unordered_set<std::string> wantedShaderSet;
 		for (const auto& [key, material] : m_Cache)
 		{
 			if (!material)
@@ -663,8 +715,24 @@ namespace World
 			const std::string shaderPath = MaterialLibrary::NormalizePath(material->ShaderPath());
 			if (shaderPath.empty())
 				continue;
-			if (std::find(wantedShaders.begin(), wantedShaders.end(), shaderPath) == wantedShaders.end())
+			shaderMaterialDir.emplace(shaderPath, key);
+			if (wantedShaderSet.insert(shaderPath).second)
 				wantedShaders.push_back(shaderPath);
+			// 依赖集合 = 现有 `#include`/`import` 递归解析结果;读源失败 → 只监听根(不新增错误路径)。
+			std::string source;
+			if (!ReadShaderReloadSource(shaderPath, source))
+				continue;
+			for (const std::filesystem::path& dependency :
+				MaterialSurfaceCompiler::ResolveDependencies(source, ShaderIncludeRoots(shaderPath)))
+			{
+				const std::string dependencyPath =
+					MaterialLibrary::NormalizePath(dependency.generic_string());
+				if (dependencyPath.empty())
+					continue;
+				if (wantedShaderSet.insert(dependencyPath).second)
+					wantedShaders.push_back(dependencyPath);
+				shaderDependencyRoot.emplace(dependencyPath, shaderPath);
+			}
 		}
 		std::sort(wantedShaders.begin(), wantedShaders.end());
 
@@ -779,18 +847,34 @@ namespace World
 		const std::vector<std::string> changedShaders = m_ShaderWatch.Poll(deltaSeconds);
 		if (!changedShaders.empty())
 		{
-			std::unordered_set<std::string> changed(changedShaders.begin(), changedShaders.end());
+			// T2(HOTR-P1):库文件变化映射回**引用它的根 `.slang`**(缓存失效与报告都用根路径;
+			// 一个根只报一次);根自身变化照旧。依赖根映射可能落后一轮(本轮才新增的 include
+			// 下一轮进映射),此时根自身的源变化本来就会报根,不产生漏报。
+			std::unordered_set<std::string> changedRoots;
+			for (const std::string& reported : changedShaders)
+			{
+				if (shaderMaterialDir.count(reported) != 0)
+				{
+					changedRoots.insert(reported);
+					continue;
+				}
+				const auto range = shaderDependencyRoot.equal_range(reported);
+				for (auto it = range.first; it != range.second; ++it)
+					changedRoots.insert(it->second);
+			}
 			for (const auto& [key, material] : m_Cache)
 			{
 				if (!material)
 					continue;
 				const std::string shaderPath = MaterialLibrary::NormalizePath(material->ShaderPath());
-				if (shaderPath.empty() || changed.count(shaderPath) == 0)
+				if (shaderPath.empty() || changedRoots.count(shaderPath) == 0)
 					continue;
 				RefreshParams(*material);
 				material->InvalidateShader();
 			}
-			for (const std::string& normalized : changedShaders)
+			std::vector<std::string> reportedRoots(changedRoots.begin(), changedRoots.end());
+			std::sort(reportedRoots.begin(), reportedRoots.end());
+			for (const std::string& normalized : reportedRoots)
 			{
 				report.ChangedShaders.push_back(normalized);
 				PrintHotReloadTrace("changed shader", normalized);

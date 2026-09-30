@@ -371,12 +371,19 @@ namespace World
 			return false;
 		}
 
-		// 依赖键材料:`<解析后的绝对路径>\t<内容哈希>` 逐行(DFS 顺序,同一输入必得同一串);
-		// 解析不到的行是 `missing\t<源里的原样请求>`。没有任何依赖时返回空串。
-		std::string SurfaceDependencyKeyMaterial(const std::string& source,
+		// 依赖收集(键材料与监听集合共用这一份 DFS,保证两边解析顺序/去重口径一致):
+		//  - 键材料每行 = `<解析后的绝对路径>\t<内容哈希>`(解析不到 = `missing\t<原样请求>`);
+		//  - Paths = 已解析依赖的绝对路径(DFS 发现顺序去重),供热重载监听集合使用。
+		struct SurfaceDependencyScan
+		{
+			std::string KeyMaterial;
+			std::vector<fs::path> Paths;
+		};
+
+		SurfaceDependencyScan CollectSurfaceDependencies(const std::string& source,
 			const std::vector<fs::path>& includeRoots)
 		{
-			std::vector<std::string> lines;
+			SurfaceDependencyScan scan;
 			std::unordered_map<std::string, bool> visited;
 			std::vector<std::pair<fs::path, std::string>> pending;
 			// 顶层用户源:没有"包含它的文件"(生成的 `surface_user.slang` 落在缓存键目录里,
@@ -396,29 +403,30 @@ namespace World
 					fs::path resolved;
 					if (!ResolveSurfaceImport(request, includingDir, includeRoots, resolved))
 					{
-						lines.push_back("missing\t" + request);
+						scan.KeyMaterial += "missing\t" + request + "\n";
 						continue;
 					}
 					const std::string path = NormalizeSurfacePath(resolved);
 					if (visited.count(path) != 0)
 						continue;
 					visited.emplace(path, true);
-					lines.push_back(path + "\t" + Hex(HashFileBytes(path)));
+					scan.KeyMaterial += path + "\t" + Hex(HashFileBytes(path)) + "\n";
+					scan.Paths.emplace_back(fs::path(path));
 					std::string librarySource;
 					if (ReadAllText(fs::path(path), librarySource))
 						pending.emplace_back(fs::path(path).parent_path(), std::move(librarySource));
 				}
 			}
 
-			if (lines.empty())
-				return {};
-			std::string material;
-			for (const std::string& line : lines)
-			{
-				material += line;
-				material += '\n';
-			}
-			return material;
+			return scan;
+		}
+
+		// 依赖键材料:`<解析后的绝对路径>\t<内容哈希>` 逐行(DFS 顺序,同一输入必得同一串);
+		// 解析不到的行是 `missing\t<源里的原样请求>`。没有任何依赖时返回空串。
+		std::string SurfaceDependencyKeyMaterial(const std::string& source,
+			const std::vector<fs::path>& includeRoots)
+		{
+			return CollectSurfaceDependencies(source, includeRoots).KeyMaterial;
 		}
 
 		// 一个 stage 的 slangc 命令行。两家目标的差异只有两处(与 T2 的引擎 shader 路径一致):
@@ -1465,6 +1473,15 @@ SurfacePSOutput PSMain(SurfaceVSOutput input)
 			return result;
 		}
 		return CompileSurfaceWithParams(source, params, permutationKey, backend, includeRoots);
+	}
+
+	std::vector<fs::path> MaterialSurfaceCompiler::ResolveDependencies(const std::string& source,
+		const std::vector<fs::path>& includeRoots)
+	{
+		// 与编译同一口径:空源 = 引擎默认表面函数(不含 include/import)→ 无依赖。
+		const std::string effectiveSource = Trim(source).empty()
+			? DefaultSurfaceFunctionSource() : source;
+		return CollectSurfaceDependencies(effectiveSource, includeRoots).Paths;
 	}
 
 	SurfaceCompileResult MaterialSurfaceCompiler::CompileSurfaceWithParams(const std::string& source,

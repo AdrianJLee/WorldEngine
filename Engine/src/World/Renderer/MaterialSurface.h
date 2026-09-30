@@ -121,6 +121,13 @@ namespace World
 			SurfaceShaderBackend backend = SurfaceShaderBackend::VulkanSpirV,
 			const std::vector<std::filesystem::path>& includeRoots = {});
 
+		// MAT-FN1b:按与编译同一套解析规则(`#include` / `import`,递归)列出源引用的**依赖文件**。
+		// 返回**绝对路径**(lexically_normal),按依赖发现顺序去重,同一输入结果稳定;
+		// 解析不到的 include/import 不进结果(交给编译器报诊断)。调用方拿它做热重载监听。
+		static std::vector<std::filesystem::path> ResolveDependencies(
+			const std::string& source,
+			const std::vector<std::filesystem::path>& includeRoots);
+
 		// S3 的"新建 `.slang` 起始代码":只含用户可编辑的 Evaluate();默认值来自
 		// MakeDefaultSurface(),不会漏字段。
 		static std::string DefaultSurfaceFunctionSource();
