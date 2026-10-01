@@ -133,6 +133,17 @@ namespace World
 			return false;
 		}
 
+		// ---- HOTR-P3-T10:资产热重载总闸门 ----
+		// 与收敛前 EditorLayer::PollAssetHotReload 开头的判定逐条一致(环境变量 > 偏好文件):
+		// WLD_ASSET_HOTRELOAD 设了就以它为准(仅 "0" 关闭);没设就读偏好"资产热重载"。
+		// 引擎内建 shader 监听不受这道闸门影响(它有自己的 WLD_SHADER_HOTRELOAD)。
+		bool AssetHotReloadEnabled()
+		{
+			if (const char* switchValue = std::getenv("WLD_ASSET_HOTRELOAD"))
+				return std::string(switchValue) != "0";
+			return Editor::EditorPreferences::Get().Data().AssetHotReload;
+		}
+
 		// ---- Layout-S6:Game 模块加载 = 自动存根生成的前置条件 ----
 		//
 		// 编辑器的 Lua 存根输入是当前 WorldContext 的 schema 注册表:Game 组件(SampleDataComponent
@@ -313,8 +324,8 @@ namespace World
 		m_Commands.Register({ Wui::HashId("cmd.simulate"), "Simulate", KeyCodes::F6, false, false, [this] { ToggleSimulate(); } });
 		m_Commands.Register({ Wui::HashId("cmd.pause"), "Pause", KeyCodes::F7, false, false, [this] { TogglePause(); } });
 		// HOTR-P3-T9:模型自动重导入的冲突门探针 —— 对应面板打开时跳过(只顺延、不覆盖;
-		// 面板里的未保存设置看不到,按 T9 的降级分支"打开即跳过")。
-		m_ModelImportWatch.SetSkipProbe([this](const std::string& assetLogical)
+		// 面板里的未保存设置看不到,按 T9 的降级分支"打开即跳过")。T10 起经宿主透传。
+		m_HotReloadHost.SetModelSkipProbe([this](const std::string& assetLogical)
 		{
 			return IsModelPreviewPanelOpen(m_Shell, assetLogical);
 		});
@@ -1101,16 +1112,11 @@ namespace World
 		m_PluginBuildPending = false;
 		m_PluginBuildPluginId.clear();
 
-		// HOTR-P1-T1:先停材质着色器热重载的编译线程并 join(它只跑 slangc / 读源,不碰 GPU)——
-		// 放在场景/渲染器析构之前,保证 OnDetach 之后不会再有产物进入 Install。
-		m_ShaderHotReload.Shutdown();
-		// HOTR-P1-T3:引擎 shader 监听无工作线程/无 GPU 资源,清基线即可(下次构造重新建立)。
-		m_EngineShaderHotReload.Shutdown();
-		// HOTR-P2-T5:纹理自动重烘的编码线程先收掉(只跑纯 CPU 烘焙,不碰 GPU/文件写)。
-		m_TextureImportWatch.Shutdown();
-		// HOTR-P3-T9:模型自动重导入的导入线程同样先收掉(只跑纯 CPU 导入 + 临时文件;
-		// 未提交的临时产物在 Shutdown 里清掉)。
-		m_ModelImportWatch.Shutdown();
+		// HOTR-P3-T10:先停编辑器侧热重载宿主里的全部工作线程并 join(材质 `.slang` 编译线程
+		// 只跑 slangc / 读源,纹理重烘线程只跑纯 CPU 烘焙,模型重导入线程只写临时文件;
+		// 都不碰 GPU)—— 放在场景/渲染器析构之前,保证 OnDetach 之后不会再有产物进入
+		// Install / 落盘。各服务的清基线/清临时文件口径不变。
+		m_HotReloadHost.Shutdown();
 
 		SetSceneState(SceneState::Edit);
 
@@ -1171,10 +1177,15 @@ namespace World
 				}
 			}
 		}
-		// HOTR-P1-T3:引擎内建 shader 热重载 —— 帧边界(渲染开始前)轮询引擎 shader 目录,
-		// 稳定变化即调 Renderer::ReloadShaders()。刻意放在"没有活动场景/渲染器"早退**之前**:
-		// 引擎 shader 与项目无关,启动器/无项目形态同样生效。
-		m_EngineShaderHotReload.Poll(ts.GetSeconds());
+		// HOTR-P3-T10:编辑器侧热重载统一入口 —— 引擎内建 shader(T3)在帧边界(渲染开始前)
+		// 轮询引擎 shader 目录,稳定变化即调 Renderer::ReloadShaders()。刻意放在"没有活动
+		// 场景/渲染器"早退**之前**:引擎 shader 与项目无关,启动器/无项目形态同样生效。
+		// 资产侧三个 watcher(材质 `.slang` 装配 / `.wtex` 重烘 / glTF 重导入)保持收敛前的
+		// 闸门:活动场景 + 渲染器 + 资产热重载开关都满足时才轮询(与下面 PollAssetHotReload
+		// 的早退条件同口径);它们的提交(Pump)仍在 PollAssetHotReload 的同一条链上。
+		const bool assetHotReloadEnabled =
+			m_ActiveScene != nullptr && m_SceneRenderer != nullptr && AssetHotReloadEnabled();
+		m_HotReloadHost.Poll(assetHotReloadEnabled, ts.GetSeconds());
 		// HOTR-P3-T7:帧边界消费"构建并重载"的后台构建结果(成功 → 加载段;失败 → 保持
 		// unloaded)。同样放在"没有活动场景/渲染器"早退之前:构建与场景无关。
 		PollCppModuleBuild();
@@ -4133,20 +4144,14 @@ namespace World
 		// 开关(环境变量 > 偏好文件):
 		//  - WLD_ASSET_HOTRELOAD=0 整体关闭(默认开;自动化脚本用);
 		//  - 否则读编辑器偏好"资产热重载"(P4-UX7:以前只能靠环境变量,现在有面板入口)。
-		if (const char* switchValue = std::getenv("WLD_ASSET_HOTRELOAD"))
-		{
-			if (std::string(switchValue) == "0")
-				return;
-		}
-		else if (!Editor::EditorPreferences::Get().Data().AssetHotReload)
-		{
+		if (!AssetHotReloadEnabled())
 			return;
-		}
 
-		// HOTR-P1-T1:帧边界消费材质着色器热重载的后台编译产物(Install 只在主线程帧内执行;
-		// 编译失败保留旧管线)。放在文档场景早退之前 —— 没有文档路径(新场景/启动器)时也生效。
-		// 也放在热重载开关检查之后 —— 关掉热重载时不再装配在飞产物(与 Enqueue 同一道闸门)。
-		m_ShaderHotReload.Pump();
+		// HOTR-P3-T10:资产侧在飞产物的统一主线程提交入口(材质 `.slang` 的 Install、`.wtex`
+		// 重烘落盘 + 缓存失效、glTF 重导入原子替换;各服务内部保持自己的子开关与日志口径)。
+		// 放在文档场景早退之前 —— 没有文档路径(新场景/启动器)时也生效;也放在热重载开关
+		// 检查之后 —— 关掉热重载时不再装配在飞产物(与 Enqueue 同一道闸门)。
+		m_HotReloadHost.Pump(true);
 
 		// 1) 材质/贴图:库内轮询缓存里的 .wmat 与它们引用的贴图(150ms / 500ms)。
 		AssetHotReloadReport report;
@@ -4161,42 +4166,14 @@ namespace World
 			WLD_CORE_INFO("[asset-hot-reload] texture invalidated '{0}'", path);
 
 		// HOTR-P1-T1:材质引用的着色器(`.slang`)改了 —— 面板没打开时也走编辑器级热重载:
-		// 转交 ShaderHotReload(工作线程读源 + 编译),产物在下一帧边界 Pump 里 Install 到路径键。
+		// 转交宿主(工作线程读源 + 编译),产物在下一帧边界宿主 Pump 里 Install 到路径键。
 		for (const std::string& path : report.ChangedShaders)
-			m_ShaderHotReload.Enqueue(path);
+			m_HotReloadHost.EnqueueShader(path);
 
-		// HOTR-P2-T5(P2-c):内容根下 `.wtex` 及其 `source:` 源图的外部改动 → 自动重烘 `.wtexc`。
-		// 与材质/贴图/场景共用上面那道"资产热重载"开关(WLD_ASSET_HOTRELOAD / 偏好);
-		// Poll = 主线程指纹轮询 + 稳定窗口后派发(编码在工作线程),Pump = 主线程写盘 + 失效 + 日志。
-		// **默认开启**(2026-09-30 修复后):`WLD_TEXTURE_HOTRELOAD=0` 可关(自动化/诊断用)。
-		// 历史:翻默认值前实测到"活动材质换贴图 → 帧同步被打坏 → device lost";真因是
-		// 材质贴图走异步上传环 + 重烘后材质未失效,两处都已修(见 plan.md P2-c 取证记录)。
-		static const bool textureHotReloadEnabled = []
-		{
-			const char* value = std::getenv("WLD_TEXTURE_HOTRELOAD");
-			return !(value != nullptr && *value != '\0' && std::string(value) == "0");
-		}();
-		if (textureHotReloadEnabled)
-		{
-			m_TextureImportWatch.Poll(static_cast<double>(deltaSeconds));
-			m_TextureImportWatch.Pump();
-		}
-
-		// HOTR-P3-T9:内容根下 `.gltf/.glb` 源(已经导入过的 `.wmodel`)的外部改动 →
-		// 自动重导入(与面板 Reimport 同一条底层路径)。2s 重扫 + 2s 稳定窗口,导入在工作线程、
-		// 提交在帧边界;面板打开该 `.wmodel` 时跳过并把重导入顺延到面板关闭之后。
-		// **默认开启**:`WLD_MODEL_HOTRELOAD=0` 单独关(自动化/诊断用);同一道
-		// `WLD_ASSET_HOTRELOAD` 总开关也覆盖它。
-		static const bool modelHotReloadEnabled = []
-		{
-			const char* value = std::getenv("WLD_MODEL_HOTRELOAD");
-			return !(value != nullptr && *value != '\0' && std::string(value) == "0");
-		}();
-		if (modelHotReloadEnabled)
-		{
-			m_ModelImportWatch.Poll(static_cast<double>(deltaSeconds));
-			m_ModelImportWatch.Pump();
-		}
+		// HOTR-P3-T10:`.wtex` 自动重烘(T5)与 glTF 自动重导入(T9)的轮询/提交已收敛进
+		// `m_HotReloadHost`:Poll 在 OnUpdate 的帧边界统一入口(活动场景 + 渲染器 + 热重载
+		// 开关都满足时),提交在上面那次宿主 Pump;`WLD_TEXTURE_HOTRELOAD=0` /
+		// `WLD_MODEL_HOTRELOAD=0` 子开关语义不变(在宿主内部判定)。
 
 		// HOTR-P2-T6(P2-b):当前文档场景引用的 `.wprefab` 外部改动 → 帧边界安全点逐实例跟随
 		// (保留 override;失败只记日志,其余实例继续)。放在文档路径早退之前:场景文档在内容根

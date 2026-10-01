@@ -13,11 +13,8 @@
 #include "World/WUI/WuiGizmo.h"
 #include "WUI/EditorShell.h"
 #include "AiControl/AiControlServer.h"
-#include "Asset/ModelImportWatch.h"
 #include "Build/ProjectBuildRunner.h"
-#include "EngineShaderHotReload.h"
-#include "ShaderHotReload.h"
-#include "Texture/TextureImportWatch.h"
+#include "HotReload/EditorHotReloadHost.h"
 #include <atomic>
 #include <functional>
 #include <string>
@@ -587,19 +584,11 @@ namespace World
 			float Camera2DDistance = 0.0f;
 		};
 		SceneReopenSnapshot m_PendingSceneReopen;
-		// HOTR-P1-T1:材质着色器(`.slang`)编辑器级热重载 —— ChangedShaders → 后台重编译 →
-		// 帧边界 Install(路径键);材质面板没打开时也生效(编译失败保留旧管线)。
-		Editor::ShaderHotReload m_ShaderHotReload;
-		// HOTR-P1-T3:引擎内建 shader(`Engine/assets/shaders/**/*.slang`)开发态热重载 ——
-		// 绝对路径轮询(150ms 消抖)→ 帧边界 Renderer::ReloadShaders()(与 AI 命令同一入口)。
-		// 引擎 shader 与项目无关:无项目/启动器形态同样生效(见 OnUpdate)。
-		Editor::EngineShaderHotReload m_EngineShaderHotReload;
-		// HOTR-P2-T5(P2-c):内容根下 `.wtex` 与它们的 `source:` 源图外部改动 → 2s 节流 +
-		// 内容哈希优先 → 自动重烘 `.wtexc`(编码在工作线程,写盘/失效/日志在帧边界)。
-		Editor::TextureImportWatch m_TextureImportWatch;
-		// HOTR-P3-T9:内容根下 `.gltf/.glb` 源改动 → 已导入过的 `.wmodel` 自动重导入
-		// (与面板 Reimport 同一条内核;2s 重扫 + 2s 稳定窗口,导入在工作线程、提交在帧边界)。
-		Editor::ModelImportWatch m_ModelImportWatch;
+		// HOTR-P3-T10:编辑器侧 4 个自包含热重载服务(材质 `.slang` T1 / 引擎内建 shader T3 /
+		// `.wtex` 自动重烘 T5 / glTF 自动重导入 T9)收敛为一个宿主 —— 单一
+		// Poll/Pump/Shutdown/EnqueueShader 入口;各服务的日志前缀、开关语义与执行顺序
+		// 与收敛前逐条一致(实现见 Editor/src/HotReload/EditorHotReloadHost.*)。
+		Editor::EditorHotReloadHost m_HotReloadHost;
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;
 		std::string m_RendererChangeName;

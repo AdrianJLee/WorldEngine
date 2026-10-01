@@ -66,6 +66,10 @@ File 菜单不再有 `menu.file.reload_cpp_module`、AI `module.unload`/`module.
 
 - Vulkan **异步上传环**在"同一帧多次提交"下仍有隐患（材质贴图已改走同步上传绕开；
   根因与复现见 `tools/agents/tasks/20260930-2130-hotreload-p1p2p3/plan.md` 的 P2-c 取证记录）；
-- 统一进程级 watch 服务（把 150ms/500ms/2s 的轮询与日志收敛成一处）尚未实施；
+- 统一 watch 服务：**编辑器侧**已收敛为 `Editor/src/HotReload/EditorHotReloadHost`
+  （材质 `.slang` / 引擎内建 shader / `.wtex` 重烘 / glTF 重导入 4 个自包含服务共用
+  单一 `Poll/Pump/Shutdown/EnqueueShader` 入口；各服务的日志、开关与生效时机不变）；
+  引擎侧 `ScriptFileWatch` / `AssetFileWatch` 因被 Editor/Runtime 共用而保留独立，
+  跨进程的单一 watch 服务仍未实施；
 - glTF 源自动重导入的已知边界：只按源文件本身的内容哈希判定（引用的 `.bin`/贴图改动不触发）；
   面板打开期间的重导入会顺延到面板关闭之后（脏状态在面板私有状态里，层外不可见）。
