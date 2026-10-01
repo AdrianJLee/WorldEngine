@@ -49,6 +49,8 @@ namespace World::Rhi::Vulkan
 		~VulkanTexture() override;
 		const TextureDesc& GetDesc() const override { return m_Desc; }
 		void SetData(const void* data, uint64_t size, uint32_t layer = 0, uint32_t mip = 0) override;
+		// HOTR-P2C-ROOT:一批 mip 一次提交(环一次 Submit / 同步回退一条 one-shot)。
+		void SetDataMips(const TextureMipUpload* mips, std::size_t count) override;
 		VkImage GetImage() const { return m_Image; }
 		VkImageView GetView() const { return m_View; }
 		VkImageLayout GetLayout() const { return m_Layout; }
@@ -64,6 +66,8 @@ namespace World::Rhi::Vulkan
 		VkImageView m_View = VK_NULL_HANDLE;
 		VkImageLayout m_Layout = VK_IMAGE_LAYOUT_UNDEFINED;
 		bool m_OwnsImage = true;
+		// 本纹理是否允许走异步上传环(材质贴图/多 mip 默认走同步,见 .cpp 的说明)。
+		bool UsesAsyncUploadRing() const;
 	};
 
 	class VulkanSampler final : public Sampler

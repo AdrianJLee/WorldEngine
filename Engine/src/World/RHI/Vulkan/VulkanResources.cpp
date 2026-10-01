@@ -292,7 +292,11 @@ namespace World::Rhi::Vulkan
 		// `WLD_TEX_SYNC_UPLOAD=1` 可强制所有纹理走同步路径(诊断用)。
 		// 注:上传环本身在"同一帧多次异步提交"下仍有隐患,已记档待单独修复(plan.md P2-c 取证记录)。
 		static const bool forceSyncUpload = std::getenv("WLD_TEX_SYNC_UPLOAD") != nullptr;
-		const bool uploadSynchronously = forceSyncUpload || m_Desc.SynchronousUpload || m_Desc.MipLevels > 1;
+		// 诊断:`WLD_TEX_RING_UPLOAD=1` 强制材质贴图也走异步环(复现上传环缺陷,见
+		// tools/agents/scratch/HOTR-P2/t5-texture-rebake-probe.py + WLD_UPLOAD_RING_TRACE=1)。
+		static const bool forceRingUpload = std::getenv("WLD_TEX_RING_UPLOAD") != nullptr;
+		const bool uploadSynchronously =
+			!forceRingUpload && (forceSyncUpload || m_Desc.SynchronousUpload || m_Desc.MipLevels > 1);
 		if (m_OwnsImage && !uploadSynchronously)
 		{
 			if (m_Image) vkDestroyImage(device, m_Image, nullptr);
@@ -361,6 +365,22 @@ namespace World::Rhi::Vulkan
 		m_Layout = newLayout;
 	}
 
+	bool VulkanTexture::UsesAsyncUploadRing() const
+	{
+		// 与 RhiTexture.h / MaterialTextureCache 的说明配套:
+		//   * 材质贴图(可能活动帧中途替换)与多 mip 纹理默认走**同步**上传(低频);
+		//   * 诊断开关:WLD_TEX_SYNC_UPLOAD=1 全部同步;WLD_TEX_RING_UPLOAD=1 强制走环(压测/复现)。
+		static const bool forceSyncUpload = std::getenv("WLD_TEX_SYNC_UPLOAD") != nullptr;
+		static const bool forceRingUpload = std::getenv("WLD_TEX_RING_UPLOAD") != nullptr;
+		if (!m_OwnsImage)
+			return false;
+		if (forceRingUpload)
+			return true;
+		if (forceSyncUpload)
+			return false;
+		return !m_Desc.SynchronousUpload && m_Desc.MipLevels <= 1;
+	}
+
 	void VulkanTexture::SetData(const void* data, uint64_t size, uint32_t layer, uint32_t mip)
 	{
 		if (!data || size == 0)
@@ -369,10 +389,12 @@ namespace World::Rhi::Vulkan
 		// B2 异步上传:拷贝进常驻 staging 段,transition/copy/transition 一次提交完成,
 		// 不再 wait idle(旧路径每次上传要排空队列 3 次)。上传提交与渲染提交同队列,
 		// 队列顺序保证后续绘制能看到结果。
-		if (m_OwnsImage)
+		if (UsesAsyncUploadRing())
 		{
 			VulkanUploadRing& ring = m_Device.GetUploadRing();
-			const VulkanUploadAllocation allocation = ring.Allocate(size, 4);
+			// 16 字节对齐:块压缩格式(BC)的 bufferOffset 必须是块大小(8/16B)的整数倍
+			// (VUID:vkCmdCopyBufferToImage 的 block-size 约束)。
+			const VulkanUploadAllocation allocation = ring.Allocate(size, 16);
 			if (allocation.IsValid())
 			{
 				std::memcpy(allocation.Mapped, data, size);
@@ -430,6 +452,115 @@ namespace World::Rhi::Vulkan
 				std::max(1u, m_Desc.Extent.Depth >> mip) };
 			vkCmdCopyBufferToImage(commandBuffer, staging.GetBuffer(), m_Image,
 				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+		});
+		Transition(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, TargetLayout(m_Desc));
+	}
+
+	// HOTR-P2C-ROOT:一批 mip 一次提交。逐 mip `SetData` 会在一帧内打出多次异步提交 ——
+	// 实测会在"活动纹理替换"时打坏帧同步(VUID 01123/01779 → 00045/00071 → device lost);
+	// 这里按上传环的设计契约(分配多片 → **一次** Submit)实现。
+	void VulkanTexture::SetDataMips(const TextureMipUpload* mips, std::size_t count)
+	{
+		if (!mips || count == 0)
+			return;
+		std::vector<TextureMipUpload> uploads;
+		uploads.reserve(count);
+		for (std::size_t index = 0; index < count; ++index)
+			if (mips[index].Data && mips[index].Size > 0)
+				uploads.push_back(mips[index]);
+		if (uploads.empty())
+			return;
+
+		if (UsesAsyncUploadRing())
+		{
+			VulkanUploadRing& ring = m_Device.GetUploadRing();
+			std::vector<VulkanUploadAllocation> allocations(uploads.size());
+			bool allocated = true;
+			for (std::size_t index = 0; index < uploads.size(); ++index)
+			{
+				allocations[index] = ring.Allocate(uploads[index].Size, 16);
+				if (!allocations[index].IsValid())
+				{
+					allocated = false;
+					break;
+				}
+				std::memcpy(allocations[index].Mapped, uploads[index].Data, uploads[index].Size);
+			}
+			if (allocated)
+			{
+				const VkImageLayout target = TargetLayout(m_Desc);
+				const VkImageLayout source = m_Layout;
+				const bool submitted = ring.Submit([&](VkCommandBuffer commandBuffer)
+				{
+					RecordImageTransition(commandBuffer, m_Image, m_Desc, source,
+						VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, true);
+					for (std::size_t index = 0; index < uploads.size(); ++index)
+					{
+						VkBufferImageCopy region{};
+						region.bufferOffset = allocations[index].Offset;
+						region.imageSubresource.aspectMask = IsDepthFormat(m_Desc.Format)
+							? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+						region.imageSubresource.mipLevel = uploads[index].Mip;
+						region.imageSubresource.baseArrayLayer = 0;
+						region.imageSubresource.layerCount = 1;
+						region.imageExtent = {
+							std::max(1u, m_Desc.Extent.Width >> uploads[index].Mip),
+							std::max(1u, m_Desc.Extent.Height >> uploads[index].Mip),
+							std::max(1u, m_Desc.Extent.Depth >> uploads[index].Mip) };
+						vkCmdCopyBufferToImage(commandBuffer, allocations[index].Buffer, m_Image,
+							VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+					}
+					RecordImageTransition(commandBuffer, m_Image, m_Desc,
+						VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, target, false);
+				});
+				if (submitted)
+				{
+					m_Layout = target;
+					return;
+				}
+			}
+		}
+
+		// 同步回退:CPU 侧拼一段连续 staging(每个 mip 起点按 16 对齐),一条 one-shot 全部拷贝。
+		std::vector<uint64_t> offsets(uploads.size(), 0);
+		uint64_t total = 0;
+		for (std::size_t index = 0; index < uploads.size(); ++index)
+		{
+			total = (total + 15) & ~uint64_t(15);
+			offsets[index] = total;
+			total += uploads[index].Size;
+		}
+		std::vector<uint8_t> packed(static_cast<std::size_t>(total));
+		for (std::size_t index = 0; index < uploads.size(); ++index)
+			std::memcpy(packed.data() + offsets[index], uploads[index].Data, uploads[index].Size);
+
+		BufferDesc stagingDesc;
+		stagingDesc.Size = total;
+		stagingDesc.Usage = BufferUsageTransferSrc;
+		stagingDesc.Memory = MemoryHint::HostVisible;
+		stagingDesc.InitialData = packed.data();
+		VulkanBuffer staging(m_Device, stagingDesc);
+
+		Transition(m_Layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_IMAGE_LAYOUT_UNDEFINED : m_Layout,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		ExecuteOneShot(m_Device, [&](VkCommandBuffer commandBuffer)
+		{
+			for (std::size_t index = 0; index < uploads.size(); ++index)
+			{
+				VkBufferImageCopy region{};
+				region.bufferOffset = offsets[index];
+				region.imageSubresource.aspectMask = IsDepthFormat(m_Desc.Format)
+					? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+				region.imageSubresource.mipLevel = uploads[index].Mip;
+				region.imageSubresource.baseArrayLayer = 0;
+				region.imageSubresource.layerCount = 1;
+				region.imageExtent = {
+					std::max(1u, m_Desc.Extent.Width >> uploads[index].Mip),
+					std::max(1u, m_Desc.Extent.Height >> uploads[index].Mip),
+					std::max(1u, m_Desc.Extent.Depth >> uploads[index].Mip) };
+				vkCmdCopyBufferToImage(commandBuffer, staging.GetBuffer(), m_Image,
+					VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+			}
 		});
 		Transition(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, TargetLayout(m_Desc));
 	}

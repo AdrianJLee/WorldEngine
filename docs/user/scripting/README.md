@@ -155,7 +155,7 @@ cmake --build build/x64-Debug --config Debug --target Game
 
 生成物与注解不一致时 `Game.SchemaDrift` 会红灯；用
 `…\schema-compiler.exe --check`（或直接跑该 ctest）可只比较不改写。重建 `Game.dll` 后在编辑器里
-File ▸ Reload C++ Module 生效；新建脚本走 `File ▸ New C++ Script…`（创建后会提示重建）。
+File ▸ Build & Reload C++ Module 生效；新建脚本走 `File ▸ New C++ Script…`（创建后会提示重建）。
 
 > **类型账本**：`Game/src/Generated/Game.manifest` 是双向清单——声明了必须登记，登记了必须存在
 > （防止类型被误删）。用编辑器入口创建的脚本会自动补 `struct World::<Name>`、`struct World::<Name>Data`

@@ -2088,10 +2088,10 @@ namespace World
 		{
 			case EditorLayer::CppModuleState::Unloaded:
 				return Wui::Tr("status.cppmodule.hint.unloaded",
-					"Game.dll is not loaded — rebuild it, then File ▶ Reload C++ Module again");
+					"Game.dll is not loaded — use File ▶ Build & Reload C++ Module");
 			case EditorLayer::CppModuleState::Reloading:
 				return Wui::Tr("status.cppmodule.hint.reloading",
-					"Game.dll unloaded for rebuild — build it, then File ▶ Reload C++ Module to load the new build");
+					"Game.dll unloaded for rebuild — use File ▶ Build & Reload C++ Module to build and load it");
 			case EditorLayer::CppModuleState::RolledBack:
 				return Wui::Tr("status.cppmodule.hint.rolled_back",
 					"the new build was rejected; the previous Game.dll is loaded again (see diagnostics)");
@@ -4103,7 +4103,7 @@ namespace World
 			return true;
 		}
 
-		// 模板正文:头注释(重建 Game 后 File ▶ Reload C++ Module 生效)+ 标量
+		// 模板正文:头注释(File ▶ Build & Reload C++ Module 一步构建并加载)+ 标量
 		// (Default/Range/Unit/Step/Doc)+ 枚举 + 命名 struct(Object, Of(...))+
 		// Array/Map 容器 + `WE_SCHEMA_BODY(Game, <Name>, Script)`。
 		// 每个类型名都带脚本名前缀(`<Name>Mode` / `<Name>Data`):文件名唯一由校验保证,
@@ -4122,7 +4122,7 @@ namespace World
 			source += "\t// " + name + " — 由编辑器「文件 ▶ 新建 C++ 脚本…」生成的 C++ 脚本模板。\n";
 			source += "\t//\n";
 			source += "\t// 生效步骤:用 Visual Studio 构建这个项目(输出到 <项目>/build),再执行\n";
-			source += "\t// File ▶ Reload C++ Module 生效(编辑器不内置编译器 —— 改完这个文件必须重新构建\n";
+			source += "\t// File ▶ Build & Reload C++ Module 生效(编辑器在后台跑项目 build.cmd —— 改完这个文件不必离开编辑器)\n";
 			source += "\t// 项目里的 Game 模块,再在编辑器里重载它)。\n";
 			source += "\t//\n";
 			source += "\t// 结构与示例项目模板 src/Scripts/ExampleScript.h 一致:标量 / 枚举 / 命名 struct /\n";
@@ -4396,7 +4396,7 @@ namespace World
 		// 状态栏提示:编辑器不内置编译器 —— 显式告诉用户"用 VS 构建这个项目,再重载 C++ 模块"。
 		PushNotice(Wui::TrFormat("notice.newscript.created",
 			"Created {path} — build this project with Visual Studio (output under {project}/build), "
-			"then use File ▶ Reload C++ Module.",
+			"then use File ▶ Build & Reload C++ Module.",
 			{ { "path", relative }, { "project", CurrentProjectRoot().generic_string() } }));
 		return true;
 	}
@@ -4484,7 +4484,7 @@ namespace World
 		Wui::Label(ctx, { labelX, cursorY + 2.0f },
 			Wui::Tr("modal.newscript.hint",
 				"Build this project with Visual Studio (output under <project>/build), "
-				"then File ▶ Reload C++ Module (no built-in compiler)."),
+				"then File ▶ Build & Reload C++ Module."),
 			m_Theme.TextMuted, 12.0f);
 
 		// ---- 底部按钮(名称不合法/重名时创建按钮禁用并带原因)----
@@ -7165,7 +7165,7 @@ namespace World
 			bool Header = false;
 			std::string Tooltip;
 			// CPPT-3:显式无障碍 id(空 = 沿用"菜单名 + 本地化标签"的既有派生口径)。
-			// 需要跨语言稳定 id 的项(如 menu.file.reload_cpp_module)必须显式给。
+			// 需要跨语言稳定 id 的项(如 menu.file.build_reload_cpp_module)必须显式给。
 			Wui::WuiId ExplicitId = 0;
 			// PROJ-2/T1:失效的"最近项目"行灰显(可读不可点);其余菜单项默认可用。
 			bool Enabled = true;
@@ -7425,7 +7425,7 @@ namespace World
 				Wui::Tr("menu.file.new_cpp_script.tooltip",
 					"Create a C++ script template under <project>/src/Scripts/ (scalar/enum/struct/"
 					"Array/Map samples) and open it in Visual Studio. Build the project (its build.cmd / "
-					"CMakeLists.txt), then use File ▶ Reload C++ Module to load it."),
+					"CMakeLists.txt), then use File ▶ Build & Reload C++ Module to load it."),
 				Wui::HashId("menu.file.new_cpp_script") });
 		// CPPSRC-1(用户 2026-09-29「c++脚本要像 asset 资产一样在编辑器里展示」):
 		// 项目 C++ 的唯一展示面 = 内容浏览器的 `Project C++` 根 —— 这一项不再打开 Scripts 面板
@@ -7478,21 +7478,10 @@ namespace World
 					"the older generator is removed), "
 					"then top up .gitignore. Never touches src/ or assets/."),
 				Wui::HashId("menu.file.generate_build_entry") });
-		fileEntries.push_back({ Wui::Tr("menu.file.reload_cpp_module", "Reload C++ Module (Game.dll)"), false,
-				[this]
-				{
-					// 两段式反馈(第一段 = 已卸载等重建;第二段 = 已加载 / 已回滚 / 失败)统一由
-					// EditorLayer → NotifyCppModuleResult() 给出:菜单与 AI `module.reload` 同一条提示,
-					// 迁移诊断的条数与首条文本一起显示(CPPT-3-FIX1)。
-					m_Editor.ReloadCppModule();
-				}, false,
-				Wui::Tr("menu.file.reload_cpp_module.tooltip",
-					"Reload the Game.dll module. First activation unloads it so the build can replace "
-					"the file; activate again to load the new build. C++ script instances are destroyed "
-					"and re-created from Pending via OnCreate."),
-				Wui::HashId("menu.file.reload_cpp_module") });
 		// HOTR-P3-T7:一步完成"卸载 + 构建 + 加载" —— 与 AI `module.build_reload` 是同一条
 		// EditorLayer::BuildAndReloadCppModule 入口(用户在编辑器内不再需要切到 VS/CMake 构建)。
+		// 2026-10-01 用户口径:旧的"分步 Reload C++ Module"菜单项已移除(AI 侧仍保留
+		// `module.unload`/`module.reload` 两段式给自动化用)。
 		fileEntries.push_back({ Wui::Tr("menu.file.build_reload_cpp_module", "Build & Reload C++ Module (Game.dll)"),
 				false,
 				[this] { m_Editor.BuildAndReloadCppModule(); }, false,

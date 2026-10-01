@@ -183,6 +183,10 @@ namespace World
 				return nullptr;
 			}
 
+			// HOTR-P2C-ROOT:整条 mip 链**一次提交**(上传环的批量契约)。逐 mip SetData =
+			// 一帧内多次异步提交,实测会把帧同步状态打坏(见 plan.md 的 P2-c 取证记录)。
+			std::vector<Rhi::TextureMipUpload> uploads;
+			uploads.reserve(mipLevels);
 			for (uint32_t mip = 0; mip < mipLevels; ++mip)
 			{
 				const uint8_t* data = asset.MipData(mip);
@@ -193,8 +197,9 @@ namespace World
 						"falling back to the source image", path, mip);
 					return nullptr;
 				}
-				texture->SetData(data, size, /*layer*/ 0, mip);
+				uploads.push_back(Rhi::TextureMipUpload { mip, data, size });
 			}
+			texture->SetDataMips(uploads.data(), uploads.size());
 
 			// 产物命中的确凿证据(每次加载只打一条:缓存命中后不再走到这里)。
 			WLD_CORE_INFO("[material] texture '{0}': artifact format={1} {2}x{3} mips={4} srgb={5}",
