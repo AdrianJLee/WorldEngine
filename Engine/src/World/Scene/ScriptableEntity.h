@@ -3,7 +3,7 @@
 
 namespace World
 {
-	class ScriptableEntity
+	class [[deprecated("ScriptableEntity is deprecated in WorldEngine Pure ECS. Use World::ISystem or ecs:AddSystem instead.")]] ScriptableEntity
 	{
 	public:
 		virtual ~ScriptableEntity() = default;

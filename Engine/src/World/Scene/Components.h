@@ -391,7 +391,8 @@ namespace World
 		bool ShapeFromScene = false;
 	};
 
-	// C++ 行为组件(原 NativeScriptComponent;2026-09-26 重写)。
+	// [已弃用 / Deprecated] C++ 行为组件(原 NativeScriptComponent / ScriptableEntity OOP 机制)。
+	// WorldEngine 纯 ECS 架构下已全面转向纯数据驱动，推荐使用 World::ISystem (C++) 或 ecs:AddSystem (Luau) 替代。
 	//
 	// ScriptName = schema 里 Category==Script 的类型全名(如 "Game::ExampleScript")。
 	// 实例化按名字走 **schema 的脚本绑定(工厂)**,组件自己不再持函数指针 ⇒
