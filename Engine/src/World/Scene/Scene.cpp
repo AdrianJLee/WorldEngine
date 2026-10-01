@@ -889,6 +889,8 @@ namespace World
 		if (!m_FrameSystemDefinitions.empty())
 			return;
 		RegisterFrameSystem({ "scene-update", false, [this](Timestep ts) { OnScriptUpdate(ts); } });
+		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
+		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); } });
 	}
 
 	void Scene::OnUpdateRuntime(Timestep ts)

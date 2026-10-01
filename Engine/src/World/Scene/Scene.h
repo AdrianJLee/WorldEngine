@@ -4,6 +4,7 @@
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/PrefabTypes.h"
 #include "World/Renderer/EditorCamera.h"
+#include "World/Scene/Query.h"
 #include <box2d/id.h>
 #include <entt.hpp>
 #include <functional>
@@ -230,6 +231,18 @@ namespace World
 		void DuplicateEntity(Entity entity);
 		entt::registry& GetRegistry();
 		const entt::registry& GetRegistry() const;
+
+		template<typename... Components>
+		World::Query<Components...> Query()
+		{
+			return World::Query<Components...>(m_Registry);
+		}
+
+		template<typename... Components>
+		World::Query<const Components...> Query() const
+		{
+			return World::Query<const Components...>(const_cast<entt::registry&>(m_Registry));
+		}
 		static void CopyScene(Ref<Scene>& other, Ref<Scene>& newScene);
 
 	private:
