@@ -334,6 +334,62 @@ namespace World
 		}
 
 		// -------------------------------------------------------------------------
+		// ecs:CreateEntity([name]) 实现
+		// -------------------------------------------------------------------------
+		ScriptValue CreateEntityImpl(ScriptBindingContext& bindings, const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+			{
+				startIndex = 1;
+			}
+
+			std::string name = "Empty Entity";
+			if (count > startIndex && !args[startIndex].IsNil())
+			{
+				if (!args[startIndex].AsString(&name))
+					throw std::logic_error("ecs:CreateEntity expects an optional string name");
+			}
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateEntity requires an active scene");
+
+			Entity entity = Entity::CreateEntity(activeScene, name);
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
+		// -------------------------------------------------------------------------
+		// ecs:DestroyEntity(entity) 实现
+		// -------------------------------------------------------------------------
+		ScriptValue DestroyEntityImpl(ScriptBindingContext& bindings, const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+			{
+				startIndex = 1;
+			}
+
+			if (count <= startIndex)
+				throw std::logic_error("ecs:DestroyEntity expects an Entity argument");
+
+			Entity* entity = nullptr;
+			if (!bindings.Unwrap<Entity>("Entity", args[startIndex], &entity) || !entity)
+				throw std::logic_error("ecs:DestroyEntity expects an Entity userdata");
+
+			if (!entity->IsValid())
+				return ScriptValue::Nil();
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			Scene* scene = entity->GetScene() ? entity->GetScene() : activeScene;
+			if (!scene)
+				throw std::logic_error("ecs:DestroyEntity requires an active scene");
+
+			scene->DestroyEntity(*entity);
+			return ScriptValue::Nil();
+		}
+
+		// -------------------------------------------------------------------------
 		// ecs:EntityCount() 实现
 		// -------------------------------------------------------------------------
 		ScriptValue EntityCountImpl(ScriptBindingContext&, const ScriptValue*, std::size_t)
@@ -400,6 +456,26 @@ namespace World
 			})))
 		{
 			if (error) *error = "failed to bind ecs.AddSystem";
+			return false;
+		}
+
+		if (!ecsTable.SetField("CreateEntity", bindings.CreateFunction("ecs:CreateEntity",
+			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return CreateEntityImpl(bindings, args, count);
+			})))
+		{
+			if (error) *error = "failed to bind ecs.CreateEntity";
+			return false;
+		}
+
+		if (!ecsTable.SetField("DestroyEntity", bindings.CreateFunction("ecs:DestroyEntity",
+			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return DestroyEntityImpl(bindings, args, count);
+			})))
+		{
+			if (error) *error = "failed to bind ecs.DestroyEntity";
 			return false;
 		}
 

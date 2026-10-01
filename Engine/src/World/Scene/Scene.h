@@ -4,6 +4,7 @@
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/PrefabTypes.h"
 #include "World/Renderer/EditorCamera.h"
+#include "World/Scene/ISystem.h"
 #include "World/Scene/Query.h"
 #include <box2d/id.h>
 #include <entt.hpp>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -101,6 +103,25 @@ namespace World
 		void RegisterFrameSystem(FrameSystem system);
 		void RunFrameSystems(Timestep ts);
 		void EnsureDefaultFrameSystems();
+
+		template<typename T, typename... Args>
+		T& RegisterSystem(Args&&... args)
+		{
+			static_assert(std::is_base_of_v<ISystem, T>, "T must derive from World::ISystem");
+			auto system = std::make_unique<T>(std::forward<Args>(args)...);
+			T& ref = *system;
+
+			EnsureDefaultFrameSystems();
+			RegisterFrameSystem({
+				std::string(ref.Name()),
+				ref.ParallelSafe(),
+				[this, sys = std::shared_ptr<ISystem>(std::move(system))](Timestep ts)
+				{
+					sys->Update(*this, ts);
+				}
+			});
+			return ref;
+		}
 		const std::vector<FrameSystemTiming>& GetFrameSystemTimings() const { return m_FrameSystemTimings; }
 		static const char* GetFrameSystemStatsDescription(const Scene& scene);
 		void OnViewportResize(uint32_t width, uint32_t height);
@@ -115,6 +136,7 @@ namespace World
 		bool IsActive() const { return m_State != SceneState::Stopped; }
 		bool IsRunning() const { return m_State == SceneState::Running; }
 		bool IsPendingDestroy(entt::entity entity) const;
+		void DestroyEntity(entt::entity entity) { RequestDestroy(entity); }
 		// ---- W3f:2D 物理运行时 API(仅"世界已启动"时可用) ----
 		// 世界只在 OnRuntimeStart/OnSimulationStart → OnRuntimeStop 之间存在;
 		// 停止态的刚体只保留组件配置,运行时查询/驱动一律给可读错误(不静默)。

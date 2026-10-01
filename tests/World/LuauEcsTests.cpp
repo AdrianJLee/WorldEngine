@@ -60,9 +60,13 @@ int main()
 				assert(type(ecs.Query) == "function", "ecs.Query must be a function")
 				assert(type(ecs.AddSystem) == "function", "ecs.AddSystem must be a function")
 				assert(type(ecs.EntityCount) == "function", "ecs.EntityCount must be a function")
+				assert(type(ecs.CreateEntity) == "function", "ecs.CreateEntity must be a function")
+				assert(type(ecs.DestroyEntity) == "function", "ecs.DestroyEntity must be a function")
 				assert(type(world.Query) == "function", "world.Query must be a function")
 				assert(type(world.AddSystem) == "function", "world.AddSystem must be a function")
 				assert(type(world.EntityCount) == "function", "world.EntityCount must be a function")
+				assert(type(world.CreateEntity) == "function", "world.CreateEntity must be a function")
+				assert(type(world.DestroyEntity) == "function", "world.DestroyEntity must be a function")
 
 				-- Read-only verification
 				local okWriteEcs = pcall(function() ecs.NewField = 123 end)
@@ -270,6 +274,60 @@ int main()
 				end)
 				assert(not okNoScene, "Query without active scene must fail")
 			)", "TestNoActiveScene");
+		}
+
+		// =====================================================================
+		// 8. ecs:CreateEntity 与 ecs:DestroyEntity 实体生命周期绑定测试
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			RUN_OK(R"(
+				assert(ecs:EntityCount() == 0)
+
+				-- 1. 默认名字创建实体
+				local e1 = ecs:CreateEntity()
+				assert(e1 ~= nil, "CreateEntity must return userdata")
+				assert(e1:IsValid(), "e1 must be valid")
+				assert(e1:GetName() == "Empty Entity", "default entity name must be 'Empty Entity'")
+				assert(ecs:EntityCount() == 1, "entity count must be 1")
+
+				-- 2. 指定名称创建实体
+				local e2 = ecs:CreateEntity("CustomPlayer")
+				assert(e2 ~= nil and e2:IsValid())
+				assert(e2:GetName() == "CustomPlayer", "entity name must match")
+				assert(ecs:EntityCount() == 2)
+
+				-- 3. world 别名创建实体
+				local e3 = world:CreateEntity("WorldEntity")
+				assert(e3 ~= nil and e3:IsValid())
+				assert(e3:GetName() == "WorldEntity")
+				assert(world:EntityCount() == 3)
+
+				-- 4. 销毁实体 e1
+				ecs:DestroyEntity(e1)
+				assert(ecs:EntityCount() == 2, "entity count after destroying e1 must be 2")
+
+				-- 5. 通过 world 别名销毁实体 e2
+				world:DestroyEntity(e2)
+				assert(ecs:EntityCount() == 1, "entity count after destroying e2 must be 1")
+
+				-- 6. 点号语法调用销毁实体 e3
+				ecs.DestroyEntity(e3)
+				assert(ecs:EntityCount() == 0, "entity count after destroying e3 must be 0")
+			)", "TestCreateAndDestroyEntity");
+
+			// 验证异常与非法参数
+			RUN_OK(R"(
+				-- 无参数调用 DestroyEntity
+				local okNoArg = pcall(function() ecs:DestroyEntity() end)
+				assert(not okNoArg, "DestroyEntity without arguments must fail")
+
+				-- 非 Entity 参数调用 DestroyEntity
+				local okBadType = pcall(function() ecs:DestroyEntity("not_an_entity") end)
+				assert(not okBadType, "DestroyEntity with invalid type must fail")
+			)", "TestCreateDestroyErrors");
 		}
 
 		ScriptEngine::Shutdown();

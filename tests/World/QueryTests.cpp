@@ -3,7 +3,9 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Entity.h"
+#include "World/Scene/ISystem.h"
 #include "World/Scene/Query.h"
+#include <cmath>
 
 #include <cstdio>
 #include <stdexcept>
@@ -26,6 +28,24 @@ namespace
 
 	struct DisabledTestTag
 	{
+	};
+
+	class CustomTestSystem : public World::ISystem
+	{
+	public:
+		std::string_view Name() const override { return "CustomTestSystem"; }
+		void Update(World::Scene& scene, World::Timestep dt) override
+		{
+			++UpdateCount;
+			LastDt = dt.GetSeconds();
+			auto q = scene.Query<World::TransformComponent>();
+			q.Each([](World::TransformComponent& t) {
+				t.Location.x += 10.0f;
+			});
+		}
+
+		int UpdateCount = 0;
+		float LastDt = 0.0f;
 	};
 }
 
@@ -259,6 +279,30 @@ int main()
 				.With<DisabledTestTag>();
 			CHECK(!fluentEntity.HasComponent<VelocityTestComponent>());
 			CHECK(fluentEntity.HasComponent<DisabledTestTag>());
+		}
+
+		// ========================================================
+		// 11. ISystem 与 Scene::RegisterSystem 挂载及帧调度验证
+		// ========================================================
+		{
+			Scene systemScene(context);
+			auto& sysRef = systemScene.RegisterSystem<CustomTestSystem>();
+			CHECK(sysRef.Name() == "CustomTestSystem");
+			CHECK(sysRef.UpdateCount == 0);
+
+			const entt::entity testEnt = systemScene.GetRegistry().create();
+			systemScene.GetRegistry().emplace<TransformComponent>(testEnt, glm::vec3(1.0f, 2.0f, 3.0f));
+
+			// 触发运行时帧更新: 默认 5 大系统 + 1 个 CustomTestSystem 调度
+			systemScene.OnUpdateRuntime(0.016f);
+
+			CHECK(sysRef.UpdateCount == 1);
+			CHECK(std::fabs(sysRef.LastDt - 0.016f) < 0.001f);
+			CHECK(systemScene.GetRegistry().get<TransformComponent>(testEnt).Location.x == 11.0f);
+
+			const auto& timings = systemScene.GetFrameSystemTimings();
+			CHECK(timings.size() == 6);
+			CHECK(timings[5].Name == "CustomTestSystem");
 		}
 
 		std::puts("WorldQueryTests passed all assertions!");
