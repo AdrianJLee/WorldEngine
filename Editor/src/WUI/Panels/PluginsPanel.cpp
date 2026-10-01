@@ -343,6 +343,9 @@ namespace World
 		const std::string diagnostic = !selected->Diagnostic.empty() ? selected->Diagnostic : loadError;
 		// PLUG-CLEAN-1:重载状态 + 宿主账本摘要(T6 的 pendingReload / ledgers 上屏)。
 		const bool pendingReload = manager->HasPendingReload(selected->Manifest.Id);
+		// HOTR-P3-T8:一键重载的构建进度(与 plugin.info 的 building/buildExitCode 同一数据源)。
+		const Plugins::PluginManager::PluginBuildProgress buildProgress =
+			manager->PluginBuildState(selected->Manifest.Id);
 		const Plugins::PluginLedgerCounts ledgers = manager->LedgerCounts(selected->Manifest.Id);
 		RegisterNode(Wui::HashId(("plugins.detail." + selected->Manifest.Id).c_str()), "plugin-detail",
 			selected->Manifest.Id,
@@ -404,9 +407,19 @@ namespace World
 		DetailLine(ctx, detailBody, y, Wui::Tr("panel.plugins.detail.pending_reload", "Pending Reload"),
 			pendingReload
 				? Wui::Tr("panel.plugins.detail.pending_reload.yes",
-					"Yes — snapshot held in this session only; rebuild the DLL, then Reload again")
+					"Yes — snapshot held in this session only; press Reload to rebuild and load")
 				: Wui::Tr("panel.plugins.detail.pending_reload.no", "No"),
 			theme);
+		y += lineStep;
+		// HOTR-P3-T8:构建进度行(未构建过 = (none);构建在飞/结束都直接可见)。
+		std::string buildText;
+		if (buildProgress.Running)
+			buildText = "building (background CMake target)";
+		else if (buildProgress.ExitCode >= 0)
+			buildText = "exit " + std::to_string(buildProgress.ExitCode);
+		else
+			buildText = Wui::Tr("panel.plugins.none", "(none)");
+		DetailLine(ctx, detailBody, y, "Build", buildText, theme);
 		y += lineStep;
 		// 注意:fallback 必须是**单个**字符串字面量 —— audit-localization 按
 		// TrFormat 的第一个字符串字面量参数提取占位符集合,拼接的多个字面量会被截断。
@@ -471,26 +484,32 @@ namespace World
 					"Plugin diagnostics copied to the clipboard."));
 			}
 		}
-		// PLUG-CLEAN-1:「重新加载」按钮(稳定 a11y id plugins.action.reload)。
-		// 与 AI `plugin.reload` 完全同一条实现:面板只登记请求(帧边界由 EditorLayer
-		// 执行,面板绘制期间不卸载/装载 DLL)。两段式:第一次 = 快照 + 卸载(可用外部
-		// 构建覆盖 DLL);第二次 = 载入新 DLL + 写回快照(失败回滚,旧状态保留)。
+		// HOTR-P3-T8:「重新加载」= 一键(稳定 a11y id plugins.action.reload)。
+		// 面板只登记请求(帧边界由 EditorLayer 执行,面板绘制期间不卸载/装载 DLL):
+		// 快照+卸载 → 后台构建该插件的 CMake 目标 → 成功后自动载入新 DLL(失败回滚,
+		// 旧状态保留)。构建在飞时按钮置灰(理由 = tooltip;与 module.build_reload 共用
+		// 同一个后台构建器)。AI 的两段式 `plugin.reload`(不带 build)保留不变。
 		// 契约:快照只活在本会话,不跨编辑器重启(见 docs/dev/plugin-framework.md)。
+		const bool buildRunning = manager->PluginBuildRunning();
+		const std::string reloadTooltip = buildRunning
+			? std::string("A plugin build is running — Reload re-enables when it finishes.")
+			: Wui::Tr("panel.plugins.action.reload.tooltip",
+				"One-click rebuild & reload: snapshot + unload → build this plugin's CMake target in the "
+				"background → load the new DLL. On failure the plugin stays unloaded and the build output "
+				"tail is in the log and plugin.info. The snapshot lives in this editor session only.");
 		if (Wui::ButtonEx(ctx, Wui::HashId("plugins.action.reload"),
 				{ buttons.X + (buttonW + gap) * 2.0f, buttons.Y, buttonW, buttons.H },
-				Wui::Tr("panel.plugins.action.reload", "Reload"), theme, true, false,
-				Wui::Tr("panel.plugins.action.reload.tooltip",
-					"Reload this plugin: loaded → snapshot + unload (rebuild the DLL), then Reload "
-					"again to load the new build. The snapshot lives in this editor session only.")))
+				Wui::Tr("panel.plugins.action.reload", "Reload"), theme, !buildRunning, false,
+				reloadTooltip))
 		{
 			Plugins::PluginManager* reloadManager = m_Shell.GetPluginManager();
 			if (reloadManager)
 			{
-				reloadManager->RequestReload(selected->Manifest.Id);
+				reloadManager->RequestReloadWithBuild(selected->Manifest.Id);
 				ctx.RecordOp("plugins", "reload", selected->Manifest.Id,
-					pendingReload ? "phase-2 (pending snapshot)" : "phase-1 (loaded)");
+					"one-click (snapshot+unload → build → load)");
 				m_Shell.Notify(Wui::TrFormat("panel.plugins.notice.reload_requested",
-					"Reload requested for '{id}' — it runs at the next frame boundary.",
+					"Rebuild & reload requested for '{id}' — it runs at the next frame boundary.",
 					{ { "id", selected->Manifest.Id } }));
 			}
 		}

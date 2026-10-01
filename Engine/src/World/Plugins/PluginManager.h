@@ -242,6 +242,44 @@ namespace World::Plugins
 		void RequestReload(const std::string& id);
 		std::vector<std::string> ConsumeReloadRequests();
 
+		// ---- HOTR-P3-T8:插件"一键重载"(面板「重新加载」/ AI `plugin.reload <id> build=1`)----
+		//
+		// 旧的两段式(AI `plugin.reload <id>` 不带 build)语义不变:第一段快照+卸载、
+		// 用户外部重编、第二段加载。一键重载把"外部重编"换成宿主的后台构建器:
+		//   一次动作 = 快照+卸载 → 构建该插件的 CMake 目标 → 成功后走第二段加载;
+		//   构建失败 = 插件保持 unloaded,输出尾部在日志与 `plugin.info` 的 buildOutput 里可读。
+		//
+		// 构建请求与 RequestReload 共用同一个请求队列(m_ReloadRequests 保持登记顺序 + 按 id
+		// 去重;Build 标记按 id 记录,ConsumeReloadRequestsDetailed() 取走时清空)。
+		struct PluginReloadRequest
+		{
+			std::string Id;
+			bool Build = false;   // true = 这一段完成后要构建再加载(一键重载)
+		};
+		// 面板按钮入口:入队并要求执行方在卸载后构建插件目标。
+		void RequestReloadWithBuild(const std::string& id);
+		// 取走请求(含 build 标记)。旧的 ConsumeReloadRequests() 保留(内部取 Id 列表)。
+		std::vector<PluginReloadRequest> ConsumeReloadRequestsDetailed();
+		// 插件包源目录(含 plugin.we.yaml 的目录;未知 = 空路径)。由发现期记录推导。
+		std::filesystem::path PluginSourceDir(const std::string& id) const;
+		// 构建目标名(模板约定 = "WePlugin_" + 插件目录名;目录名不可得 = 空串)。
+		std::string PluginBuildTarget(const std::string& id) const;
+
+		// 后台构建进度(面板按钮置灰 + `plugin.info` 的 building/buildExitCode/buildOutput
+		// 的同一数据源)。由 EditorLayer 的后台构建器在启动/帧边界消费结果时写入;
+		// 同一时刻最多一个构建(与 `module.build_reload` 共用同一个构建器)。
+		struct PluginBuildProgress
+		{
+			bool Running = false;
+			int ExitCode = -1;       // 最近一次完成的退出码;从未完成 / 新一次开始 = -1
+			std::string Output;      // 最近一次完成的 stdout+stderr 输出尾部
+		};
+		void BeginPluginBuild(const std::string& id);
+		void CompletePluginBuild(const std::string& id, int exitCode, const std::string& output);
+		PluginBuildProgress PluginBuildState(const std::string& id) const;
+		// 是否有任意插件的构建在飞(面板据此置灰;模块构建由 module.status 单独报告)。
+		bool PluginBuildRunning() const;
+
 	private:
 		// 每次成功加载的宿主侧状态:宿主表 + 日志前缀用的插件 id(插件只原样回传 UserData)。
 		struct HostApiBox
@@ -413,6 +451,10 @@ namespace World::Plugins
 		std::map<std::string, PendingReload> m_PendingReloads;
 		// PLUG-CLEAN-1:面板登记的"重新加载"请求(帧边界由 EditorLayer 取走)。
 		std::vector<std::string> m_ReloadRequests;
+		// HOTR-P3-T8:与 m_ReloadRequests 同一队列的"构建后再加载"标记(按 id 去重;取走时清空)。
+		std::vector<std::string> m_ReloadBuildRequests;
+		// HOTR-P3-T8:插件构建进度(键 = 插件 id;同一时刻最多一个 Running)。
+		std::map<std::string, PluginBuildProgress> m_PluginBuilds;
 		// T2c:插件组件存储的在册槽位(true = 已占用)。容量 = kPluginComponentSlotCount。
 		std::array<bool, kPluginComponentSlotCount> m_ComponentSlots {};
 		WeHostApi m_HostApi;

@@ -498,13 +498,37 @@ plugin.reload <id>   # ② 未加载 + pending → 第二段:重读清单 + 载�
   重新 `Discover` 会为未完成的 pending 记 ERROR(不静默)。
 - `plugin.reload` 在"未加载且没有 pending"时等价于一次普通 `Load`(与 `module.reload` 的未加载分支一致)。
 
+### 一键:构建 + 重载(HOTR-P3-T8,2026-10-01)
+
+面板「重新加载」按钮与 AI `plugin.reload <id> build=1` 走**同一条实现**
+(`EditorLayer::StartPluginBuildAndReload`),把"外部重编"换成宿主内的后台构建:
+
+```
+一次动作: 快照+卸载(仅已加载时) → 后台构建插件 CMake 目标 → 构建成功后走第二段加载
+```
+
+- **构建目标**:模板约定 `WePlugin_<插件目录名>`(6 个 `templates/plugin-*` 的
+  `add_library(WePlugin_{{PluginDir}} ...)`);目标由**根 CMakeLists** 的 `plugins/*` 收集,
+  所以 CMake 源目录 = 项目插件的**项目根** / 引擎插件的**引擎根**。
+- **构建目录**:项目插件 `<项目根>/build/x64-<配置>`;引擎插件 `<WLD_REPO_ROOT>/build/x64-<配置>`。
+  `CMakeCache.txt` 不存在时先 `cmake -S <根> -B <构建目录> -G "Visual Studio 18 2026" -A x64
+  -DCMAKE_BUILD_TYPE=<配置> -DWE_ROOT=<引擎根>`,再构建目标;cmake 发现顺序 = PATH → VS 安装目录
+  (与 `templates/project-*/build.cmd` 的 `find_vs_cmake` 同一列表)。
+- **全局单飞**:与 `module.build_reload` 共用同一个后台构建器(同一时刻一个构建);构建在飞时
+  面板按钮置灰,`plugin.reload build=1` / `module.build_reload` 都被干净拒绝。
+- **失败语义**:构建失败 = 插件保持 unloaded(快照仍在内存,可修源码后再点一次),输出尾部在
+  `[pluginbuild]` 日志与 `plugin.info` 的 `buildOutput` 里可读;第二段加载失败仍走 `.rollback` 回滚。
+- **旧语义不变**:AI `plugin.reload <id>`(不带 build)依旧是两段式,`module.unload`/`module.reload`
+  不受影响。
+
 ### AI 命令
 
 | 命令 | 语义 |
 | --- | --- |
 | `plugin.unload <id>` | 卸载单个插件(T2c:有活组件实例 = 干净拒绝 + 可读原因);成功后关掉它的面板 |
 | `plugin.reload <id>` | 两段式(上表);返回 JSON:`phase`(unloaded/loaded/rolled-back)+ `rolledBack` + `instancesSnapshotted/restored/skipped` + `message` + `diagnostics[]` |
-| `plugin.info <id>` | 新增 `ledgers`(schema 类型 / 资产类型 / 导入器 / 编辑器命令 / 编辑器面板 / 脚本函数计数 + `total`)、`liveInstances`、`hasPendingReload`、`loadedLibrary` |
+| `plugin.reload <id> build=1` | 一键(上节):卸载后后台构建插件目标,成功自动加载;返回 `{id, building, message}`,进度从 `plugin.info` 读 |
+| `plugin.info <id>` | 新增 `ledgers`(schema 类型 / 资产类型 / 导入器 / 编辑器命令 / 编辑器面板 / 脚本函数计数 + `total`)、`liveInstances`、`hasPendingReload`、`loadedLibrary`;HOTR-P3-T8 追加 `building` / `buildExitCode` / `buildOutput`(构建进度与输出尾部) |
 
 ### 泄漏审计口径
 
@@ -552,12 +576,15 @@ load/unload 账本零增长 + 条目数不增长"。
   `Editor/assets/localization/<lang>/**` → 项目层 `<项目根>/assets/localization/<lang>/**`。
   插件作者/项目可以在任意一层提供该约定键的译文;缺条目回落声明的 `DisplayName`,不会出现裸键。
 
-### 面板「重新加载」按钮与两段式热重载的会话内契约
+### 面板「重新加载」按钮与热重载的会话内契约
 
-- 插件管理器面板的动作 `plugins.action.reload` 与 AI `plugin.reload` 走**同一条实现**
-  (`EditorLayer::ReloadPlugin` 两段式):面板只登记请求(`PluginManager::RequestReload`),
-  宿主在**下一帧开头**执行 —— 面板绘制期间不卸载/装载 DLL(避免打断面板遍历)。
-  详情行同时显示 `pendingReload` 与 `ledgers` 摘要(与 `plugin.info` 同一数据源)。
+- 插件管理器面板的动作 `plugins.action.reload` = **一键构建 + 重载**(HOTR-P3-T8):面板只登记
+  请求(`PluginManager::RequestReloadWithBuild`),宿主在**下一帧开头**执行
+  (`EditorLayer::StartPluginBuildAndReload`,快照+卸载 → 后台构建 → 自动加载)——
+  面板绘制期间不卸载/装载 DLL(避免打断面板遍历)。构建在飞时按钮置灰(理由进 tooltip)。
+  详情行显示 `pendingReload`、`ledgers` 摘要与构建进度(与 `plugin.info` 同一数据源)。
+- 只走两段式的路径 = AI `plugin.reload <id>`(不带 build;`EditorLayer::ReloadPlugin`);
+  它与面板一键路径共用第一/第二段(`UnloadForReload` / `LoadForReload`),语义一致。
 - **快照只活在本编辑器会话**:热重载快照在内存里,不落盘、不跨编辑器重启;没完成第二段就退出编辑器
   = 那些组件实例的数据丢失(管理器析构 / `UnloadAll` / 重新 `Discover` 会为未完成的 pending 记 ERROR)。
   面板按钮与 `plugin.reload` 的提示文案都写明这一点。

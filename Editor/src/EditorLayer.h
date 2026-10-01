@@ -321,6 +321,15 @@ namespace World
 		bool ReloadPlugin(const std::string& id, Plugins::PluginReloadResult* result = nullptr,
 			std::string* message = nullptr);
 
+		// ---- HOTR-P3-T8:插件"一键重载"(面板按钮 + AI `plugin.reload <id> build=1`)----
+		// 一次动作 = 快照+卸载(仅已加载时;释放 DLL 文件锁)→ 后台构建该插件的 CMake 目标
+		// (项目插件 = <项目根>/build/x64-<配置>,引擎插件 = <WLD_REPO_ROOT>/build/x64-<配置>;
+		// 与 `module.build_reload` 共用 ProjectBuildRunner ⇒ 同一时刻一个构建)→ 构建成功后
+		// 自动走 LoadForReload 第二段(失败回滚语义不变)。构建失败 = 插件保持 unloaded,
+		// 输出尾部在 `[pluginbuild]` 日志与 plugin.info 的 buildOutput 里可读。
+		// 拒绝(不改状态、可读 message):无项目 / 无该插件 / 已有构建在飞 / 卸载不在安全点。
+		bool StartPluginBuildAndReload(const std::string& id, std::string* message = nullptr);
+
 		// ---- P2 W5-L1:资产热重载(材质/贴图自动重载;文档场景提示 + 一键重开)----
 		// 文档场景(.wd)在磁盘上被外部改动 → 视口提示条;重开会走未保存确认(不静默丢弃修改)。
 		// HOTR-P2-T5:文档**干净**且编辑态时改为自动重开(选择/相机恢复);dirty / Play / Simulate
@@ -402,6 +411,9 @@ namespace World
 		// HOTR-P3-T7:帧边界消费 ProjectBuildRunner 的结果(成功 → 加载段;失败 → 保持
 		// unloaded 并把输出尾部打进日志)。
 		void PollCppModuleBuild();
+		// HOTR-P3-T8:帧边界消费插件"一键重载"的构建结果(成功 → 第二段加载;失败 → 保持
+		// unloaded 并把输出尾部写进 PluginManager 的构建进度 + 日志/通知)。
+		void PollPluginBuild();
 		// 开发验证:WLD_CAPTURE_FRAMES=N 后把场景渲染目标写 PPM(后端无关 RHI 读回)。
 		void CaptureFrameIfRequested();
 		// 开发验证:WLD_HIERARCHY_CLICK=<进入 Play 后的帧数> 触发层级面板首行的真实点击回调,
@@ -430,6 +442,10 @@ namespace World
 		// "本次构建由 BuildAndReloadCppModule 发起"时为真,防止消费到无关结果。
 		Editor::ProjectBuildRunner m_ProjectBuildRunner;
 		bool m_CppBuildReloadPending = false;
+		// HOTR-P3-T8:插件"一键重载"的在飞状态(构建器一次只跑一个构建,所以单个 id 足够);
+		// 进度经 PluginManager::BeginPluginBuild/CompletePluginBuild 发布给面板与 plugin.info。
+		bool m_PluginBuildPending = false;
+		std::string m_PluginBuildPluginId;
 
 		// ---- PLUG-T3:插件系统状态 ----
 		// 管理器在项目形态的 OnAttach 里建立(Discover 两个根 + 按禁用清单加载);OnDetach 里

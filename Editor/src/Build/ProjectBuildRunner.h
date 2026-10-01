@@ -44,6 +44,24 @@ namespace World::Editor
 		bool Start(const std::filesystem::path& projectRoot, const std::string& engineRoot,
 			const std::string& configuration, std::string* error = nullptr);
 
+		// HOTR-P3-T8:在同一后台执行器上构建一个 CMake 目标(插件"一键重载"用)。
+		//
+		//   * buildDir/CMakeCache.txt 存在 → 直接
+		//     `cmake --build <buildDir> --config <cfg> --target <target> --parallel`;
+		//   * 不存在 → 先
+		//     `cmake -S <sourceDir> -B <buildDir> -G "Visual Studio 18 2026" -A x64
+		//      -DCMAKE_BUILD_TYPE=<cfg> [-DWE_ROOT=<engineRoot>]`,再构建同一个目标。
+		//
+		// cmake 发现顺序 = PATH → VS 安装目录(与 templates/project-*/build.cmd 的
+		// find_vs_cmake 同一列表:Microsoft Visual Studio 下的 18/2025/2022 ×
+		// Community/Professional/Enterprise/BuildTools)。工作目录 = sourceDir。
+		// 契约与 Start() 相同:主线程调用;同一时刻只允许一个构建(在飞 = 可读拒绝);
+		// 结果同样经 Poll() 发布(ExitCode/OutputTail;configure 与 build 的输出合并保留尾部)。
+		bool StartCMakeTarget(const std::filesystem::path& sourceDir,
+			const std::filesystem::path& buildDir, const std::string& target,
+			const std::string& configuration, const std::string& engineRoot,
+			std::string* error = nullptr);
+
 		// 主线程帧边界:构建结束后 join 工作线程,把退出码与输出尾部变成可查询结果。
 		// 没有在飞构建 / 已消费过 = no-op(幂等)。
 		void Poll();
@@ -73,6 +91,10 @@ namespace World::Editor
 
 		void JoinWorker();
 		void CloseChildHandles();
+		// 共用的 Windows 启动段(Start / StartCMakeTarget 都从这里进):建管道 + Job 对象 +
+		// cmd.exe /d /s /c <commandLine> + 输出读取线程。description 只用于可读错误。
+		bool StartCommand(const std::wstring& commandLine, const std::filesystem::path& workingDirectory,
+			const std::string& description, std::string* error);
 
 		std::thread m_Worker;
 		std::atomic<bool> m_Finished { false };

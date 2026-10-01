@@ -2249,6 +2249,13 @@ namespace World
 					<< (plugins->HasPendingReload(id) ? "true" : "false");
 				out << ",\"loadedLibrary\":\""
 					<< JsonEscape(plugins->LoadedLibraryPath(id)) << "\"";
+				// HOTR-P3-T8:一键重载(后台构建插件 CMake 目标)的进度与最近一次结果 ——
+				// 与插件面板「重新加载」按钮的置灰/状态行同一数据源(PluginManager)。
+				const Plugins::PluginManager::PluginBuildProgress progress =
+					plugins->PluginBuildState(id);
+				out << ",\"building\":" << (progress.Running ? "true" : "false")
+					<< ",\"buildExitCode\":" << progress.ExitCode
+					<< ",\"buildOutput\":\"" << JsonEscape(progress.Output) << "\"";
 				out << "}";
 				result = out.str();
 				return true;
@@ -2274,6 +2281,10 @@ namespace World
 		//   plugin.unload <id>   卸载单个插件(T2c:有活组件实例 = 干净拒绝 + 可读原因;账本归零)
 		//   plugin.reload <id>   两段式:L(oaded) → 第一段(快照 + 卸载,释放 DLL 锁);
 		//                        未加载(+pending) → 第二段(载入新 DLL + 写回快照;失败回滚)
+		//   plugin.reload <id> build=1
+		//                        HOTR-P3-T8 一键:第一段(快照+卸载)→ 后台构建插件 CMake 目标 →
+		//                        构建成功后自动第二段;进度/输出见 plugin.info 的
+		//                        building/buildExitCode/buildOutput。
 		// 结果 JSON 字段 = 探针断言点(phase / rolledBack / instancesSnapshotted / instancesRestored)。
 		if (cmd == "plugin.unload" || cmd == "plugin.reload")
 		{
@@ -2301,6 +2312,25 @@ namespace World
 				out << "{\"id\":\"" << JsonEscape(id) << "\",\"state\":\"unloaded\""
 					<< ",\"loaded\":" << plugins->LoadedCount() << "}";
 				result = out.str();
+				return true;
+			}
+			// HOTR-P3-T8:`plugin.reload <id> build=1` = 一键重载(快照+卸载 → 后台构建插件
+			// CMake 目标 → 构建成功后自动加载);进度/结果从 plugin.info 的
+			// building/buildExitCode/buildOutput 读。不带 build 的旧命令仍是两段式,语义不变。
+			if (arg("build") == "1")
+			{
+				std::string message;
+				const bool started = StartPluginBuildAndReload(id, &message);
+				std::ostringstream out;
+				out << "{\"id\":\"" << JsonEscape(id) << "\""
+					<< ",\"building\":" << (started ? "true" : "false")
+					<< ",\"message\":\"" << JsonEscape(message) << "\"}";
+				result = out.str();
+				if (!started)
+				{
+					error = message.empty() ? "plugin.reload build=1 failed" : message;
+					return false;
+				}
 				return true;
 			}
 			// plugin.reload:返回结构化阶段结果;回滚(rolledBack)= "已执行但本次重载失败",

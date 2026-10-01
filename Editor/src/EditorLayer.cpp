@@ -580,18 +580,118 @@ namespace World
 		return ok;
 	}
 
+	// HOTR-P3-T8:插件"一键重载"的唯一实现面(面板「重新加载」+ AI `plugin.reload build=1`)。
+	// 与 `module.build_reload` 共用同一个 ProjectBuildRunner(全局同一时刻一个构建)。
+	bool EditorLayer::StartPluginBuildAndReload(const std::string& id, std::string* message)
+	{
+		const auto reject = [message](const std::string& text)
+		{
+			if (message)
+				*message = text;
+			WLD_CORE_WARN("[pluginbuild] rejected: {0}", text);
+			return false;
+		};
+		if (!m_PluginManager)
+			return reject(Wui::Tr("panel.plugins.notice.need_project", "Open a project first."));
+		const Plugins::PluginEntry* entry = m_PluginManager->Find(id);
+		if (!entry)
+			return reject(Wui::TrFormat("panel.plugins.notice.not_found", "No plugin with id '{id}'.",
+				{ { "id", id } }));
+		if (m_ProjectBuildRunner.IsRunning())
+			return reject("a project build is already running — wait for it to finish");
+
+		const std::filesystem::path packageDir = m_PluginManager->PluginSourceDir(id);
+		const std::string target = m_PluginManager->PluginBuildTarget(id);
+		if (packageDir.empty() || target.empty())
+			return reject("cannot derive the plugin build target for '" + id + "'");
+
+		std::string configuration(WLD_BUILD_TYPE);   // 编译期宏形如 "Debug/"(带尾分隔符)
+		while (!configuration.empty()
+			&& (configuration.back() == '/' || configuration.back() == '\\'))
+			configuration.pop_back();
+		if (configuration.empty())
+			return reject("no build configuration (WLD_BUILD_TYPE) for the plugin build");
+
+		// 模板约定:插件目标由**根 CMakeLists** 收集(`plugins/*/CMakeLists.txt` GLOB),
+		// 所以项目插件 = 项目根的 CMake 工程,引擎插件 = 引擎根的 CMake 工程。
+		std::filesystem::path cmakeSourceDir;
+		if (entry->Manifest.Scope == Plugins::PluginScope::Project)
+		{
+			cmakeSourceDir = World::Paths::ProjectDir();
+			if (cmakeSourceDir.empty())
+				return reject("no project is open — the project plugin build needs the project root");
+		}
+		else
+		{
+			cmakeSourceDir = std::filesystem::path(WLD_REPO_ROOT);
+		}
+		const std::filesystem::path cmakeBuildDir = cmakeSourceDir / "build" / ("x64-" + configuration);
+
+		// 第一段:仅已加载时快照+卸载(Windows 上编辑器映射着 DLL 时链接器写不进该文件)。
+		bool wasLoaded = false;
+		if (entry->State == Plugins::PluginState::Loaded)
+		{
+			wasLoaded = true;
+			Plugins::PluginReloadResult unloadResult;
+			std::string unloadMessage;
+			if (!ReloadPlugin(id, &unloadResult, &unloadMessage))
+				return reject(unloadMessage.empty()
+					? "cannot unload the plugin before building" : unloadMessage);
+		}
+
+		std::string startError;
+		if (!m_ProjectBuildRunner.StartCMakeTarget(cmakeSourceDir, cmakeBuildDir, target,
+				configuration, WLD_REPO_ROOT, &startError))
+		{
+			// 罕见(入口前面已检查过):把刚卸载的插件恢复回去,别让一次失败留下空洞。
+			if (wasLoaded)
+				ReloadPlugin(id);   // 第二段:载入旧 DLL + 写回快照
+			return reject(startError.empty() ? "cannot start the plugin build" : startError);
+		}
+		m_PluginBuildPending = true;
+		m_PluginBuildPluginId = id;
+		m_PluginManager->BeginPluginBuild(id);
+		WLD_CORE_INFO("[pluginbuild] building '{0}' for plugin '{1}' "
+			"(source '{2}', build '{3}', config {4})", target, id,
+			cmakeSourceDir.generic_string(), cmakeBuildDir.generic_string(), configuration);
+		if (message)
+			*message = "building " + target + " for plugin " + id;
+		return true;
+	}
+
 	// PLUG-CLEAN-1:面板「重新加载」按钮的帧边界执行面。
 	// 面板在自己的绘制过程中只能登记请求(卸载/装载 DLL 会打断正在进行的面板遍历),
-	// 这里在下一帧开头取走,并走与 AI `plugin.reload` 完全相同的 ReloadPlugin 两段式:
-	//   loaded → 快照 + 卸载(释放 DLL 文件锁;面板显示 pendingReload);
-	//   unloaded + pending → 载入新 DLL + 写回快照(失败回滚,旧状态保留)。
+	// 这里在下一帧开头取走:
+	//   Build=true(HOTR-P3-T8,面板按钮)→ 快照+卸载 → 后台构建 → 成功后自动加载;
+	//   Build=false(旧 RequestReload,保留兼容)→ 与 AI `plugin.reload` 相同的两段式:
+	//     loaded → 快照 + 卸载(释放 DLL 文件锁;面板显示 pendingReload);
+	//     unloaded + pending → 载入新 DLL + 写回快照(失败回滚,旧状态保留)。
 	void EditorLayer::ProcessPluginReloadRequests()
 	{
 		if (!m_PluginManager)
 			return;
-		const std::vector<std::string> requests = m_PluginManager->ConsumeReloadRequests();
-		for (const std::string& id : requests)
+		const std::vector<Plugins::PluginManager::PluginReloadRequest> requests =
+			m_PluginManager->ConsumeReloadRequestsDetailed();
+		for (const Plugins::PluginManager::PluginReloadRequest& request : requests)
 		{
+			const std::string& id = request.Id;
+			if (request.Build)
+			{
+				std::string message;
+				const bool ok = StartPluginBuildAndReload(id, &message);
+				WLD_CORE_INFO("[pluginbuild] panel request id={0} ok={1}", id, ok);
+				if (message.empty())
+				{
+					message = ok
+						? Wui::TrFormat("panel.plugins.notice.reload_requested",
+							"Rebuild & reload requested for '{id}' — it runs at the next frame boundary.",
+							{ { "id", id } })
+						: Wui::TrFormat("panel.plugins.notice.reload_failed",
+							"Plugin reload failed: {id}", { { "id", id } });
+				}
+				m_Shell.Notify(message);
+				continue;
+			}
 			Plugins::PluginReloadResult result;
 			std::string message;
 			const bool ok = ReloadPlugin(id, &result, &message);
@@ -961,6 +1061,10 @@ namespace World
 		// HOTR-P3-T7:在飞的"构建并重载"先收掉 —— 终止整棵构建进程树再 join,
 		// 关编辑器不会被一次项目构建(分钟级)阻塞。
 		m_ProjectBuildRunner.Shutdown();
+		// HOTR-P3-T8:插件"一键重载"的在飞标记同样清掉(快照由 ShutdownPlugins 的
+		// UnloadAll 按数据丢失记 ERROR,不会静默留半状态)。
+		m_PluginBuildPending = false;
+		m_PluginBuildPluginId.clear();
 
 		// HOTR-P1-T1:先停材质着色器热重载的编译线程并 join(它只跑 slangc / 读源,不碰 GPU)——
 		// 放在场景/渲染器析构之前,保证 OnDetach 之后不会再有产物进入 Install。
@@ -1036,6 +1140,8 @@ namespace World
 		// HOTR-P3-T7:帧边界消费"构建并重载"的后台构建结果(成功 → 加载段;失败 → 保持
 		// unloaded)。同样放在"没有活动场景/渲染器"早退之前:构建与场景无关。
 		PollCppModuleBuild();
+		// HOTR-P3-T8:插件"一键重载"的构建结果(与 module 共用一个后台构建器)。
+		PollPluginBuild();
 		if (!m_ActiveScene || !m_SceneRenderer)
 			return;
 		// P2 W5b:帧边界(不在任何脚本回调内)轮询脚本热重载。编辑态轮询文档场景,
@@ -2425,16 +2531,62 @@ namespace World
 		WorldContext& context = Application::Get().GetContext();
 		if (!Modules::GameModuleReload::IsUnloaded(context))
 		{
-			// 构建期间有别的入口把旧构建加载回来了(例如手动点了 Reload C++ Module):
+			// 构建期间有别的入口把旧构建加载回来了(例如 AI `module.reload` 的加载段):
 			// 这里不能再走"未加载 → 加载"那一段(它会把已加载的模块又卸载掉)。只提示手动重载。
 			WLD_CORE_WARN("[cppbuild] build finished (exit 0) but the Game module is loaded again; "
-				"activate Reload C++ Module to swap in the new build");
-			m_CppModuleStatus.Message = "project build finished — activate Reload C++ Module to load the new build";
+				"use Build & Reload C++ Module again to swap in the new build");
+			m_CppModuleStatus.Message = "project build finished — use Build & Reload C++ Module to load the new build";
 			m_Shell.NotifyCppModuleResult();
 			return;
 		}
 		WLD_CORE_INFO("[cppbuild] project build finished (exit 0); loading the new Game.dll");
 		ReloadCppModule();
+	}
+
+	// HOTR-P3-T8:帧边界消费插件"一键重载"的构建结果(与 module 的构建共用一个 runner,
+	// 两者各自有 pending 标记,互不消费对方的结果)。
+	void EditorLayer::PollPluginBuild()
+	{
+		m_ProjectBuildRunner.Poll();
+		if (!m_PluginBuildPending || m_ProjectBuildRunner.IsRunning())
+			return;
+		m_PluginBuildPending = false;
+		const std::string id = m_PluginBuildPluginId;
+		m_PluginBuildPluginId.clear();
+
+		const int exitCode = m_ProjectBuildRunner.ExitCode();
+		const std::string output = m_ProjectBuildRunner.OutputTail();
+		if (m_PluginManager)
+			m_PluginManager->CompletePluginBuild(id, exitCode, output);
+		if (exitCode != 0)
+		{
+			// 失败语义:插件保持 unloaded(第一段已经卸载;快照仍在内存里),输出尾部进日志与
+			// plugin.info 的 buildOutput —— 用户可修源码后再点一次「重新加载」。
+			WLD_CORE_ERROR("[pluginbuild] build failed (exit {0}); plugin '{1}' stays unloaded",
+				exitCode, id);
+			if (!output.empty())
+				WLD_CORE_ERROR("[pluginbuild] output tail:\n{0}", output);
+			m_Shell.Notify(Wui::TrFormat("panel.plugins.notice.reload_failed",
+				"Plugin reload failed: {id}", { { "id", id } }));
+			return;
+		}
+
+		WLD_CORE_INFO("[pluginbuild] build finished (exit 0); loading the new plugin DLL id={0}", id);
+		Plugins::PluginReloadResult result;
+		std::string message;
+		const bool ok = ReloadPlugin(id, &result, &message);
+		WLD_CORE_INFO("[pluginbuild] reload after build id={0} ok={1} phase={2} rolledBack={3}",
+			id, ok, Plugins::PluginReloadPhaseName(result.ResultPhase), result.RolledBack);
+		std::string notice = message;
+		if (notice.empty())
+		{
+			notice = ok
+				? Wui::TrFormat("panel.plugins.notice.reload_done", "Plugin reloaded: {id}",
+					{ { "id", id } })
+				: Wui::TrFormat("panel.plugins.notice.reload_failed", "Plugin reload failed: {id}",
+					{ { "id", id } });
+		}
+		m_Shell.Notify(notice);
 	}
 
 	std::string EditorLayer::CppModuleStatusJson() const

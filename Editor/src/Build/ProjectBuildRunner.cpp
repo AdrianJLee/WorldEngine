@@ -65,6 +65,44 @@ namespace World
 				wide.resize(static_cast<std::size_t>(size - 1));
 				return wide;
 			}
+
+			std::wstring QuoteWide(const std::wstring& text)
+			{
+				return L"\"" + text + L"\"";
+			}
+
+			// HOTR-P3-T8:cmake 发现顺序 = PATH → VS 安装目录(与 templates/project-*/build.cmd
+			// 的 find_vs_cmake 同一列表:Microsoft Visual Studio 下的 18/2025/2022 ×
+			// Community/Professional/Enterprise/BuildTools)。
+			std::filesystem::path FindCMakeExecutable()
+			{
+				std::vector<wchar_t> buffer(32768);
+				const DWORD length = SearchPathW(nullptr, L"cmake.exe", nullptr,
+					static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+				if (length > 0 && static_cast<std::size_t>(length) < buffer.size())
+					return std::filesystem::path(std::wstring(buffer.data(), length));
+
+				wchar_t programFiles[MAX_PATH] = {};
+				if (GetEnvironmentVariableW(L"ProgramFiles", programFiles, MAX_PATH) == 0)
+					return std::filesystem::path();
+				const wchar_t* versions[] = { L"18", L"2025", L"2022" };
+				const wchar_t* editions[] = { L"Community", L"Professional", L"Enterprise", L"BuildTools" };
+				std::error_code candidateError;
+				for (const wchar_t* version : versions)
+				{
+					for (const wchar_t* edition : editions)
+					{
+						const std::filesystem::path candidate = std::filesystem::path(programFiles)
+							/ L"Microsoft Visual Studio" / version / edition
+							/ L"Common7" / L"IDE" / L"CommonExtensions" / L"Microsoft"
+							/ L"CMake" / L"CMake" / L"bin" / L"cmake.exe";
+						if (std::filesystem::is_regular_file(candidate, candidateError))
+							return candidate;
+						candidateError.clear();
+					}
+				}
+				return std::filesystem::path();
+			}
 		}
 #endif
 
@@ -88,6 +126,89 @@ namespace World
 			if (!std::filesystem::is_regular_file(buildScript, existsError))
 				return fail("no build.cmd in " + projectRoot.generic_string());
 
+#ifdef WLD_PLATFORM_WINDOWS
+			// /d 跳过 AutoRun;/s + 最外层引号 = cmd 的"带引号脚本 + 带引号参数"标准写法
+			// (脚本路径与引擎根都可能含空格)。
+			const std::wstring commandLine = L"/d /s /c \"\"" + buildScript.wstring() + L"\" \""
+				+ std::filesystem::path(engineRoot).wstring() + L"\" " + ToWide(configuration) + L"\"";
+			return StartCommand(commandLine, projectRoot, buildScript.generic_string(), error);
+#else
+			return fail("ProjectBuildRunner is only available in the Windows build (cmd.exe / build.cmd)");
+#endif
+		}
+
+		// HOTR-P3-T8:插件"一键重载"的 CMake 目标构建(与 Start 共用同一套后台执行器)。
+		bool ProjectBuildRunner::StartCMakeTarget(const std::filesystem::path& sourceDir,
+			const std::filesystem::path& buildDir, const std::string& target,
+			const std::string& configuration, const std::string& engineRoot, std::string* error)
+		{
+			const auto fail = [error](const std::string& text)
+			{
+				if (error)
+					*error = text;
+				return false;
+			};
+			if (m_Running)
+				return fail("a project build is already running");
+			if (sourceDir.empty())
+				return fail("no CMake source directory given for the target build");
+			if (buildDir.empty())
+				return fail("no CMake build directory given for the target build");
+			if (target.empty())
+				return fail("no CMake target given for the target build");
+			if (configuration.empty())
+				return fail("no configuration given for the target build");
+#ifdef WLD_PLATFORM_WINDOWS
+			const std::filesystem::path cmake = FindCMakeExecutable();
+			if (cmake.empty())
+				return fail("cmake not found - neither on PATH nor in a Visual Studio install");
+
+			const std::wstring cmakeQuoted = QuoteWide(cmake.wstring());
+			std::wstring command = cmakeQuoted;
+			std::error_code cacheError;
+			if (std::filesystem::is_regular_file(buildDir / "CMakeCache.txt", cacheError))
+			{
+				// 已配置过:直接构建目标。
+				command += L" --build " + QuoteWide(buildDir.wstring())
+					+ L" --config " + ToWide(configuration)
+					+ L" --target " + ToWide(target) + L" --parallel";
+			}
+			else
+			{
+				// 未配置过:先 configure(与 templates/project-*/build.cmd 同一生成器/平台),
+				// 成功后接着构建同一个目标(cmd 的 && = configure 失败则不构建)。
+				command += L" -S " + QuoteWide(sourceDir.wstring())
+					+ L" -B " + QuoteWide(buildDir.wstring())
+					+ L" -G \"Visual Studio 18 2026\" -A x64 -DCMAKE_BUILD_TYPE=" + ToWide(configuration);
+				if (!engineRoot.empty())
+					command += L" " + QuoteWide(L"-DWE_ROOT=" + std::filesystem::path(engineRoot).wstring());
+				command += L" && " + cmakeQuoted + L" --build " + QuoteWide(buildDir.wstring())
+					+ L" --config " + ToWide(configuration)
+					+ L" --target " + ToWide(target) + L" --parallel";
+			}
+			return StartCommand(L"/d /s /c \"" + command + L"\"", sourceDir,
+				"cmake target " + target, error);
+#else
+			return fail("ProjectBuildRunner is only available in the Windows build (cmake target builds)");
+#endif
+		}
+
+		bool ProjectBuildRunner::StartCommand(const std::wstring& commandLine,
+			const std::filesystem::path& workingDirectory, const std::string& description,
+			std::string* error)
+		{
+			const auto fail = [error](const std::string& text)
+			{
+				if (error)
+					*error = text;
+				return false;
+			};
+			if (m_Running)
+				return fail("a project build is already running");
+			if (workingDirectory.empty())
+				return fail("no working directory given for the build");
+
+#ifdef WLD_PLATFORM_WINDOWS
 			// 新一次构建从干净结果开始:buildOutput 不会把上一次的输出当成这一次的。
 			m_HasResult = false;
 			m_ExitCode = -1;
@@ -95,7 +216,6 @@ namespace World
 			m_Outcome = Outcome {};
 			m_Finished.store(false, std::memory_order_relaxed);
 
-#ifdef WLD_PLATFORM_WINDOWS
 			SECURITY_ATTRIBUTES security {};
 			security.nLength = sizeof(security);
 			security.bInheritHandle = TRUE;
@@ -122,11 +242,6 @@ namespace World
 			const std::wstring application = (comspecLength > 0 && comspecLength < MAX_PATH)
 				? std::wstring(comspecBuffer) : std::wstring(L"cmd.exe");
 
-			// /d 跳过 AutoRun;/s + 最外层引号 = cmd 的"带引号脚本 + 带引号参数"标准写法
-			// (脚本路径与引擎根都可能含空格)。
-			std::wstring commandLine = L"/d /s /c \"\"" + buildScript.wstring() + L"\" \""
-				+ std::filesystem::path(engineRoot).wstring() + L"\" " + ToWide(configuration) + L"\"";
-
 			STARTUPINFOW startup {};
 			startup.cb = sizeof(startup);
 			startup.dwFlags = STARTF_USESTDHANDLES;
@@ -135,9 +250,12 @@ namespace World
 			startup.hStdError = pipeWrite;
 
 			PROCESS_INFORMATION process {};
-			const std::wstring workingDirectory = projectRoot.wstring();
-			const BOOL created = CreateProcessW(application.c_str(), commandLine.data(),
-				nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, workingDirectory.c_str(),
+			const std::wstring workingDirectoryText = workingDirectory.wstring();
+			// CreateProcessW 允许原地改写 lpCommandLine ⇒ 必须传**可写**缓冲
+			// (const std::wstring::data() 是 const wchar_t*，MSVC 直接拒绝)。
+			std::wstring commandLineBuffer = commandLine;
+			const BOOL created = CreateProcessW(application.c_str(), commandLineBuffer.data(),
+				nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, workingDirectoryText.c_str(),
 				&startup, &process);
 			if (!created)
 			{
@@ -146,7 +264,7 @@ namespace World
 				CloseHandle(pipeWrite);
 				if (job)
 					CloseHandle(job);
-				return fail("cannot start '" + buildScript.generic_string()
+				return fail("cannot start '" + description
 					+ "' (Win32 error " + std::to_string(code) + ")");
 			}
 			CloseHandle(pipeWrite);   // 父进程侧不需要写端(留着会让 EOF 永远不到)
@@ -228,7 +346,7 @@ namespace World
 			m_Running = true;
 			return true;
 #else
-			return fail("ProjectBuildRunner is only available in the Windows build (cmd.exe / build.cmd)");
+			return fail("ProjectBuildRunner is only available in the Windows build");
 #endif
 		}
 

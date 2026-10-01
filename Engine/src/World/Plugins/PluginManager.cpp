@@ -2121,6 +2121,91 @@ namespace World::Plugins
 		}
 	}
 
+	// ---- HOTR-P3-T8:插件"一键重载"的请求队列 / 定位 / 构建进度 --------------------
+
+	void PluginManager::RequestReloadWithBuild(const std::string& id)
+	{
+		if (id.empty())
+			return;
+		// 与 RequestReload 同一个请求队列:登记顺序 + 按 id 去重由它统一保证。
+		RequestReload(id);
+		if (std::find(m_ReloadBuildRequests.begin(), m_ReloadBuildRequests.end(), id)
+			== m_ReloadBuildRequests.end())
+			m_ReloadBuildRequests.push_back(id);
+	}
+
+	std::vector<PluginManager::PluginReloadRequest> PluginManager::ConsumeReloadRequestsDetailed()
+	{
+		const std::vector<std::string> ids = ConsumeReloadRequests();
+		std::vector<PluginReloadRequest> requests;
+		requests.reserve(ids.size());
+		for (const std::string& id : ids)
+		{
+			PluginReloadRequest request;
+			request.Id = id;
+			request.Build = std::find(m_ReloadBuildRequests.begin(), m_ReloadBuildRequests.end(), id)
+				!= m_ReloadBuildRequests.end();
+			requests.push_back(std::move(request));
+		}
+		m_ReloadBuildRequests.clear();
+		return requests;
+	}
+
+	std::filesystem::path PluginManager::PluginSourceDir(const std::string& id) const
+	{
+		const Record* record = FindRecord(id);
+		return record ? record->Entry.Manifest.Root : std::filesystem::path();
+	}
+
+	std::string PluginManager::PluginBuildTarget(const std::string& id) const
+	{
+		const Record* record = FindRecord(id);
+		if (!record)
+			return std::string();
+		// 模板约定 = "WePlugin_" + 插件目录名(templates/plugin-*/CMakeLists.txt 的
+		// add_library(WePlugin_{{PluginDir}} ...);目录名不可得 = 空串)。
+		const std::string directoryName = record->Entry.Manifest.Root.filename().string();
+		if (directoryName.empty())
+			return std::string();
+		return "WePlugin_" + directoryName;
+	}
+
+	void PluginManager::BeginPluginBuild(const std::string& id)
+	{
+		for (auto& [otherId, other] : m_PluginBuilds)
+		{
+			if (otherId != id)
+				other.Running = false;   // 防御:构建器同一时刻只跑一个,旧的 Running 不残留
+		}
+		PluginBuildProgress& progress = m_PluginBuilds[id];
+		progress.Running = true;
+		progress.ExitCode = -1;
+		progress.Output.clear();
+	}
+
+	void PluginManager::CompletePluginBuild(const std::string& id, int exitCode,
+		const std::string& output)
+	{
+		PluginBuildProgress& progress = m_PluginBuilds[id];
+		progress.Running = false;
+		progress.ExitCode = exitCode;
+		progress.Output = output;
+	}
+
+	PluginManager::PluginBuildProgress PluginManager::PluginBuildState(const std::string& id) const
+	{
+		const auto found = m_PluginBuilds.find(id);
+		return found == m_PluginBuilds.end() ? PluginBuildProgress() : found->second;
+	}
+
+	bool PluginManager::PluginBuildRunning() const
+	{
+		for (const auto& entry : m_PluginBuilds)
+			if (entry.second.Running)
+				return true;
+		return false;
+	}
+
 	void PluginManager::ValidateDependencies()
 	{
 		// 缺依赖 + 被拒绝依赖的级联拒绝(不静默、不半可用);迭代到不动点。

@@ -8,7 +8,9 @@
 - 热重载**只存在于编辑器进程（`Editor.exe`）**。发行形态（`Runtime.exe` + 打包内容）没有监听器、
   也没有着色器编译器：一切以 cook 产物为准（设计如此，不是缺陷）。
 - 分层口径：**L1 资产**（贴图/材质/场景/预制体/本地化/引擎着色器）→ **L2 脚本**（Luau）→
-  **L3 原生模块**（`Game.dll` / 插件 DLL）。L1/L2 自动；L3 需要外部构建，编辑器提供两段式重载入口。
+  **L3 原生模块**（`Game.dll` / 插件 DLL）。L1/L2 自动；L3 需要构建 —— 编辑器提供一键
+  「构建 + 重载」入口（`module.build_reload` / 插件管理器「重新加载」），AI 的两段式
+  （`module.reload` / `plugin.reload` 不带 build）保留不变。
 - 所有"改盘生效"都遵守两条硬规则：**同内容重写（只动 mtime）不算变化**（内容哈希优先）；
   **绝不用磁盘内容覆盖未保存的编辑**（面板 dirty 时只报告/只提示）。
 
@@ -26,7 +28,7 @@
 | 场景 `.wd`（当前文档） | `AssetFileWatch`：150ms | **干净文档 + Edit 态** → 自动重开（按 UUID 保选择、恢复编辑器相机）；否则只提示 | dirty/Play/Simulate 不自动；重开失败保留原文档 | `WLD_SCENE_AUTORELOAD=0` 关闭；未保存修改永不自动覆盖 |
 | 预制体 `.wprefab`（场景实例引用） | 每帧同步实例来源路径进 `AssetFileWatch`：150ms | 安全点逐实例 `Gameplay::ApplyPrefabChanges`（保留 overrides） | 结构不一致/读失败 → 不动任何实体 + 可读日志 | 不改变实例身份；同级重排不算结构变化 |
 | C++ 模块 `Game.dll`（含 C++ 脚本组件） | 手动：`File ▸ Build & Reload C++ Module` / AI `module.build_reload`（后台构建）；分步 `module.unload`+`module.reload` | 卸载释放 DLL 锁 → 构建 → 加载新 DLL；实例配置属性按稳定字段迁移 | 构建失败保持 unloaded + 输出尾部可见；加载失败自动回滚 `.rollback-<abi>.dll` | 不迁移 C++ 成员可变状态/指针注册；硬崩溃仍是进程终止 |
-| 插件 DLL（L3） | 手动：插件管理器「重新加载」/ AI `plugin.reload` | 两段式；blob 组件按实体 UUID + 字段 id 快照写回 | 第二段失败载入 `.rollback-<abi>.dll` 并写回原状态 | 有活实例/Play 下第一段干净拒绝；快照只在内存、不跨重启 |
+| 插件 DLL（L3） | 手动：插件管理器「重新加载」/ AI `plugin.reload <id> build=1`（一键）；AI `plugin.reload <id>` 保留两段式 | 一键 = 快照+卸载 → 后台构建插件 CMake 目标（项目插件 `<项目根>/build/x64-<配置>`、引擎插件 `<WLD_REPO_ROOT>/build/x64-<配置>`；与 `module.build_reload` 共用同一后台构建器）→ 成功后自动加载；blob 组件按实体 UUID + 字段 id 快照写回 | 构建失败保持 unloaded + 输出尾部进日志与 `plugin.info` 的 `buildOutput`；第二段失败载入 `.rollback-<abi>.dll` 并写回原状态 | 有活实例/Play 下第一段干净拒绝；快照只在内存、不跨重启；构建在飞时面板按钮置灰且全局同一时刻一个构建 |
 | glTF/GLB 源（`.gltf/.glb` → `.wmodel`） | 本轮**不自动** | 手动 Reimport；重导会清动画缓存 | 失败保留旧 `.wmodel` | 自动重导入会重写 `.wmodel`/材质/贴图，列为后续单独确认项 |
 
 ## 需要重启（或明确的人工动作）的场景
@@ -53,7 +55,9 @@
 回归探针（`tools/agents/scratch/`）：
 `HOTR-P1/t1-shader-hot-reload-probe.py`（材质 `.slang`）、`HOTR-P1/t3-engine-shader-probe.py`（引擎 shader）、
 `HOTR-P2/t5-scene-autoreload-probe.py`（场景）、`HOTR-P2/t5-texture-rebake-probe.py`（纹理重烘）、
-`HOTR-P2/t6-prefab-follow-probe.py`（预制体）、`HOTR-P3/t7-build-reload-probe.py`（构建并重载）。
+`HOTR-P2/t6-prefab-follow-probe.py`（预制体）、`HOTR-P3/t7-build-reload-probe.py`（构建并重载）、
+`HOTR-P3/t8-plugin-oneclick-probe.py`（插件一键构建+重载：成功/失败路径、面板按钮置灰、
+File 菜单不再有 `menu.file.reload_cpp_module`、AI `module.unload`/`module.reload` 仍可用）。
 
 ## 已知遗留
 
