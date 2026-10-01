@@ -305,6 +305,56 @@ int main()
 			CHECK(timings[5].Name == "CustomTestSystem");
 		}
 
+		// ========================================================
+		// 12. 响应式组件观察者 (OnAdd / OnRemove / RemoveComponentObserver)
+		// ========================================================
+		{
+			Scene observerScene(context);
+
+			int transformAddedCount = 0;
+			Entity lastAddedEntity;
+			uint64_t addHandle = observerScene.OnAdd<TransformComponent>([&](Entity e) {
+				++transformAddedCount;
+				lastAddedEntity = e;
+			});
+			CHECK(addHandle > 0);
+
+			int tagRemovedCount = 0;
+			Entity lastRemovedEntity;
+			uint64_t removeHandle = observerScene.OnRemove<TagComponent>([&](Entity e) {
+				++tagRemovedCount;
+				lastRemovedEntity = e;
+			});
+			CHECK(removeHandle > 0);
+
+			// 创建实体（带有 TagComponent 与 UUIDComponent）
+			Entity testEnt = observerScene.CreateEntityShell("ObserverTestEntity");
+			CHECK(testEnt.IsValid());
+			CHECK(testEnt.HasComponent<TagComponent>());
+			CHECK(transformAddedCount == 0);
+
+			// 动态增加 TransformComponent，断言 OnAdd 接收回调
+			testEnt.AddComponent(entt::type_id<TransformComponent>().hash());
+			CHECK(transformAddedCount == 1);
+			CHECK(lastAddedEntity == testEnt);
+
+			// 移除 TagComponent，断言 OnRemove 接收回调
+			testEnt.RemoveComponent<TagComponent>();
+			CHECK(tagRemovedCount == 1);
+			CHECK(lastRemovedEntity == testEnt);
+
+			// 注销观察者后再次操作，断言不再触发
+			observerScene.RemoveComponentObserver(addHandle);
+			observerScene.RemoveComponentObserver(removeHandle);
+
+			Entity testEnt2 = observerScene.CreateEntityShell("ObserverTestEntity2");
+			testEnt2.AddComponent(entt::type_id<TransformComponent>().hash());
+			CHECK(transformAddedCount == 1);
+
+			testEnt2.RemoveComponent<TagComponent>();
+			CHECK(tagRemovedCount == 1);
+		}
+
 		std::puts("WorldQueryTests passed all assertions!");
 		return 0;
 	}

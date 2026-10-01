@@ -342,7 +342,10 @@ namespace World
 		const entt::entity handle = m_Registry.create();
 		m_Registry.emplace<TagComponent>(handle, name);
 		m_Registry.emplace<UUIDComponent>(handle, UUID());
-		return Entity(this, handle);
+		Entity entity(this, handle);
+		NotifyComponentAdded(entity, entt::type_id<TagComponent>().hash());
+		NotifyComponentAdded(entity, entt::type_id<UUIDComponent>().hash());
+		return entity;
 	}
 
 	bool Scene::IsInsideScriptCallback() const
@@ -877,7 +880,11 @@ namespace World
 				else if (component == entt::type_id<LuauScriptComponent>().hash()) DestroyLuaScript(entity);
 				else if (component == entt::type_id<RigidBody2DComponent>().hash()) DestroyPhysicsBody(entity);
 				else if (component == entt::type_id<RigidBody3DComponent>().hash()) { if (m_Physics3D) m_Physics3D->DestroyBody(entity); }
-				if (auto* storage = m_Registry.storage(component)) storage->remove(entity);
+				if (auto* storage = m_Registry.storage(component))
+				{
+					storage->remove(entity);
+					NotifyComponentRemoved(target, component);
+				}
 			}
 			else if (!reason.empty()) Report("[Scene] RemoveComponent: " + reason);
 		}
@@ -1263,5 +1270,55 @@ namespace World
 		if (!m_Physics3D) return;
 		m_Physics3D->Stop();
 		m_Physics3D.reset();
+	}
+
+	uint64_t Scene::AddComponentObserver(entt::id_type componentId, std::function<void(Entity)> onAdd, std::function<void(Entity)> onRemove)
+	{
+		AssertOwnerThread();
+		const uint64_t id = ++m_NextObserverId;
+		m_ComponentObservers.push_back({ id, componentId, std::move(onAdd), std::move(onRemove) });
+		return id;
+	}
+
+	void Scene::RemoveComponentObserver(uint64_t observerId)
+	{
+		AssertOwnerThread();
+		auto it = std::remove_if(m_ComponentObservers.begin(), m_ComponentObservers.end(),
+			[observerId](const ComponentObserverEntry& entry) {
+				return entry.Id == observerId;
+			});
+		m_ComponentObservers.erase(it, m_ComponentObservers.end());
+	}
+
+	void Scene::NotifyComponentAdded(Entity entity, entt::id_type componentId)
+	{
+		AssertOwnerThread();
+		std::vector<std::function<void(Entity)>> callbacks;
+		callbacks.reserve(m_ComponentObservers.size());
+		for (const auto& observer : m_ComponentObservers)
+		{
+			if (observer.ComponentId == componentId && observer.OnAdd)
+				callbacks.push_back(observer.OnAdd);
+		}
+		for (const auto& cb : callbacks)
+		{
+			cb(entity);
+		}
+	}
+
+	void Scene::NotifyComponentRemoved(Entity entity, entt::id_type componentId)
+	{
+		AssertOwnerThread();
+		std::vector<std::function<void(Entity)>> callbacks;
+		callbacks.reserve(m_ComponentObservers.size());
+		for (const auto& observer : m_ComponentObservers)
+		{
+			if (observer.ComponentId == componentId && observer.OnRemove)
+				callbacks.push_back(observer.OnRemove);
+		}
+		for (const auto& cb : callbacks)
+		{
+			cb(entity);
+		}
 	}
 }

@@ -26,6 +26,8 @@ namespace World
 		Entity entity(scene, scene->m_Registry.create());
 		entity.AddComponent<TagComponent>(name);
 		entity.AddComponent<UUIDComponent>(id);
+		scene->NotifyComponentAdded(entity, entt::type_id<TagComponent>().hash());
+		scene->NotifyComponentAdded(entity, entt::type_id<UUIDComponent>().hash());
 		return entity;
 	}
 
@@ -167,12 +169,14 @@ namespace World
 			if (data) componentStorage->push(m_EntityHandle, data);
 			else schema->Storage->Add(static_cast<void*>(this));
 			m_Scene->EnsurePhysicsBody(m_EntityHandle);
+			m_Scene->NotifyComponentAdded(*this, componentId);
 			return;
 		}
 
 		m_Scene->AssertStructuralWrite();
 		if (data) componentStorage->push(m_EntityHandle, data);
 		else schema->Storage->Add(static_cast<void*>(this));
+		m_Scene->NotifyComponentAdded(*this, componentId);
 	}
 
 	void Entity::RemoveComponent(entt::id_type componentId)

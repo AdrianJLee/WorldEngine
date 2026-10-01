@@ -265,6 +265,32 @@ namespace World
 		{
 			return World::Query<const Components...>(const_cast<entt::registry&>(m_Registry));
 		}
+
+		// Pure ECS M3.6: 响应式组件观察者
+		struct ComponentObserverEntry
+		{
+			uint64_t Id = 0;
+			entt::id_type ComponentId = 0;
+			std::function<void(Entity)> OnAdd;
+			std::function<void(Entity)> OnRemove;
+		};
+
+		uint64_t AddComponentObserver(entt::id_type componentId, std::function<void(Entity)> onAdd, std::function<void(Entity)> onRemove = nullptr);
+		void RemoveComponentObserver(uint64_t observerId);
+		void NotifyComponentAdded(Entity entity, entt::id_type componentId);
+		void NotifyComponentRemoved(Entity entity, entt::id_type componentId);
+
+		template<typename T>
+		uint64_t OnAdd(std::function<void(Entity)> callback)
+		{
+			return AddComponentObserver(entt::type_id<T>().hash(), std::move(callback), nullptr);
+		}
+
+		template<typename T>
+		uint64_t OnRemove(std::function<void(Entity)> callback)
+		{
+			return AddComponentObserver(entt::type_id<T>().hash(), nullptr, std::move(callback));
+		}
 		static void CopyScene(Ref<Scene>& other, Ref<Scene>& newScene);
 
 	private:
@@ -341,5 +367,9 @@ namespace World
 		std::vector<Gameplay::PrefabInstanceRecord> m_PrefabInstances;
 		// P4-U4:场景级设置(.wd 头部的 World: 块)。
 		WorldSettings m_WorldSettings;
+
+		// Pure ECS M3.6: 响应式组件观察者注册表
+		uint64_t m_NextObserverId = 0;
+		std::vector<ComponentObserverEntry> m_ComponentObservers;
 	};
 }

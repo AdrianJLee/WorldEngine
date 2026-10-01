@@ -62,11 +62,17 @@ int main()
 				assert(type(ecs.EntityCount) == "function", "ecs.EntityCount must be a function")
 				assert(type(ecs.CreateEntity) == "function", "ecs.CreateEntity must be a function")
 				assert(type(ecs.DestroyEntity) == "function", "ecs.DestroyEntity must be a function")
+				assert(type(ecs.OnAdd) == "function", "ecs.OnAdd must be a function")
+				assert(type(ecs.OnRemove) == "function", "ecs.OnRemove must be a function")
+				assert(type(ecs.Off) == "function", "ecs.Off must be a function")
 				assert(type(world.Query) == "function", "world.Query must be a function")
 				assert(type(world.AddSystem) == "function", "world.AddSystem must be a function")
 				assert(type(world.EntityCount) == "function", "world.EntityCount must be a function")
 				assert(type(world.CreateEntity) == "function", "world.CreateEntity must be a function")
 				assert(type(world.DestroyEntity) == "function", "world.DestroyEntity must be a function")
+				assert(type(world.OnAdd) == "function", "world.OnAdd must be a function")
+				assert(type(world.OnRemove) == "function", "world.OnRemove must be a function")
+				assert(type(world.Off) == "function", "world.Off must be a function")
 
 				-- Read-only verification
 				local okWriteEcs = pcall(function() ecs.NewField = 123 end)
@@ -328,6 +334,69 @@ int main()
 				local okBadType = pcall(function() ecs:DestroyEntity("not_an_entity") end)
 				assert(not okBadType, "DestroyEntity with invalid type must fail")
 			)", "TestCreateDestroyErrors");
+		}
+
+		// =====================================================================
+		// 6. 响应式组件观察者 ecs:OnAdd / ecs:OnRemove / ecs:Off
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			RUN_OK(R"(
+				local addTriggerCount = 0
+				local lastAddedName = ""
+				local handleAdd = ecs:OnAdd("TagComponent", function(ent)
+					addTriggerCount = addTriggerCount + 1
+					assert(ent:HasComponent("TagComponent"), "added entity must have TagComponent")
+					lastAddedName = ent:GetName()
+				end)
+				assert(type(handleAdd) == "number" and handleAdd > 0, "handleAdd must be a positive number")
+
+				local removeTriggerCount = 0
+				local handleRemove = world:OnRemove("TagComponent", function(ent)
+					removeTriggerCount = removeTriggerCount + 1
+				end)
+				assert(type(handleRemove) == "number" and handleRemove > 0, "handleRemove must be a positive number")
+
+				-- 1. 创建实体时触发 TagComponent OnAdd
+				local e1 = ecs:CreateEntity("ObservedE1")
+				assert(addTriggerCount == 1, "OnAdd should trigger on entity creation")
+				assert(lastAddedName == "ObservedE1", "entity name in callback should match")
+
+				-- 2. 点号语法创建实体也应触发
+				local e2 = ecs.CreateEntity("ObservedE2")
+				assert(addTriggerCount == 2, "OnAdd should trigger for e2")
+				assert(lastAddedName == "ObservedE2", "entity name for e2 should match")
+
+				-- 3. 移除组件触发 OnRemove
+				assert(removeTriggerCount == 0, "removeTriggerCount must initially be 0")
+				e1:RemoveComponent("TagComponent")
+				assert(removeTriggerCount == 1, "OnRemove should trigger on component removal")
+
+				-- 4. 通过 ecs:Off 注销观察者
+				local offAddOk = ecs:Off(handleAdd)
+				assert(offAddOk == true, "ecs:Off should return true")
+				local offRemoveOk = world:Off(handleRemove)
+				assert(offRemoveOk == true, "world:Off should return true")
+
+				-- 5. 注销后创建实体和移除组件不再触发
+				local e3 = ecs:CreateEntity("ObservedE3")
+				assert(addTriggerCount == 2, "OnAdd should not trigger after Off")
+
+				e2:RemoveComponent("TagComponent")
+				assert(removeTriggerCount == 1, "OnRemove should not trigger after Off")
+
+				-- 6. 非法参数校验
+				local okBadComp = pcall(function() ecs:OnAdd("NoSuchComponent", function() end) end)
+				assert(not okBadComp, "OnAdd with unregistered component must fail")
+
+				local okNoFn = pcall(function() ecs:OnAdd("TagComponent") end)
+				assert(not okNoFn, "OnAdd without callback function must fail")
+
+				local okBadOff = ecs:Off(0)
+				assert(okBadOff == false, "Off with invalid handle 0 should return false")
+			)", "TestEcsObservers");
 		}
 
 		ScriptEngine::Shutdown();

@@ -409,6 +409,143 @@ namespace World
 
 			return ScriptValue::Number(entityCount);
 		}
+
+		// -------------------------------------------------------------------------
+		// ecs:OnAdd(componentName, fn) 实现
+		// -------------------------------------------------------------------------
+		ScriptValue OnAddImpl(ScriptBindingContext&, const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+			{
+				startIndex = 1;
+			}
+
+			std::size_t remaining = count - startIndex;
+			if (remaining < 2)
+				throw std::logic_error("ecs:OnAdd expects (componentName, callbackFn)");
+
+			std::string compName;
+			if (!args[startIndex].AsString(&compName) || compName.empty())
+				throw std::logic_error("ecs:OnAdd: component name must be a non-empty string");
+
+			ScriptFunctionRef fn;
+			if (!args[startIndex + 1].AsFunction(&fn) || !fn.IsValid())
+				throw std::logic_error("ecs:OnAdd: callback must be a valid function");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:OnAdd requires an active scene");
+
+			auto& schemaRegistry = activeScene->GetContext().Schemas();
+			const Schema::TypeSchema* schema = schemaRegistry.Find(compName);
+			if (!schema || schema->Category != Schema::TypeCategory::Component || !schema->Storage)
+				throw std::logic_error("ecs:OnAdd: '" + compName + "' is not a registered component type");
+
+			const entt::id_type componentId = schema->Storage->ComponentId;
+			const uint64_t handle = activeScene->AddComponentObserver(
+				componentId,
+				[fn, compName](Entity entity)
+				{
+					if (!entity.IsValid())
+						return;
+
+					ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+					const ScriptValue callArgs[] = { NewUserdataOf(context, "Entity", entity) };
+					ScriptValue result;
+					std::string callError;
+					if (!fn.Call(callArgs, 1, &result, &callError))
+					{
+						if (Log::GetCoreLogger())
+							WLD_CORE_ERROR("[Luau ECS OnAdd('{}')] callback error: {}", compName, callError);
+					}
+				},
+				nullptr);
+
+			return ScriptValue::Number(static_cast<double>(handle));
+		}
+
+		// -------------------------------------------------------------------------
+		// ecs:OnRemove(componentName, fn) 实现
+		// -------------------------------------------------------------------------
+		ScriptValue OnRemoveImpl(ScriptBindingContext&, const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+			{
+				startIndex = 1;
+			}
+
+			std::size_t remaining = count - startIndex;
+			if (remaining < 2)
+				throw std::logic_error("ecs:OnRemove expects (componentName, callbackFn)");
+
+			std::string compName;
+			if (!args[startIndex].AsString(&compName) || compName.empty())
+				throw std::logic_error("ecs:OnRemove: component name must be a non-empty string");
+
+			ScriptFunctionRef fn;
+			if (!args[startIndex + 1].AsFunction(&fn) || !fn.IsValid())
+				throw std::logic_error("ecs:OnRemove: callback must be a valid function");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:OnRemove requires an active scene");
+
+			auto& schemaRegistry = activeScene->GetContext().Schemas();
+			const Schema::TypeSchema* schema = schemaRegistry.Find(compName);
+			if (!schema || schema->Category != Schema::TypeCategory::Component || !schema->Storage)
+				throw std::logic_error("ecs:OnRemove: '" + compName + "' is not a registered component type");
+
+			const entt::id_type componentId = schema->Storage->ComponentId;
+			const uint64_t handle = activeScene->AddComponentObserver(
+				componentId,
+				nullptr,
+				[fn, compName](Entity entity)
+				{
+					if (!entity.IsValid())
+						return;
+
+					ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+					const ScriptValue callArgs[] = { NewUserdataOf(context, "Entity", entity) };
+					ScriptValue result;
+					std::string callError;
+					if (!fn.Call(callArgs, 1, &result, &callError))
+					{
+						if (Log::GetCoreLogger())
+							WLD_CORE_ERROR("[Luau ECS OnRemove('{}')] callback error: {}", compName, callError);
+					}
+				});
+
+			return ScriptValue::Number(static_cast<double>(handle));
+		}
+
+		// -------------------------------------------------------------------------
+		// ecs:Off(handle) 实现
+		// -------------------------------------------------------------------------
+		ScriptValue OffImpl(ScriptBindingContext&, const ScriptValue* args, std::size_t count)
+		{
+			std::size_t startIndex = 0;
+			if (count >= 1 && args[0].IsTable())
+			{
+				startIndex = 1;
+			}
+
+			if (count <= startIndex)
+				throw std::logic_error("ecs:Off expects an observer handle number");
+
+			double handleNum = 0.0;
+			if (!args[startIndex].AsNumber(&handleNum) || handleNum <= 0.0)
+				return ScriptValue::Boolean(false);
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:Off requires an active scene");
+
+			const uint64_t observerId = static_cast<uint64_t>(handleNum);
+			activeScene->RemoveComponentObserver(observerId);
+			return ScriptValue::Boolean(true);
+		}
 	}
 
 	bool RegisterEcsBindings(ScriptBindingContext& bindings, std::string* error)
@@ -486,6 +623,36 @@ namespace World
 			})))
 		{
 			if (error) *error = "failed to bind ecs.EntityCount";
+			return false;
+		}
+
+		if (!ecsTable.SetField("OnAdd", bindings.CreateFunction("ecs:OnAdd",
+			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return OnAddImpl(bindings, args, count);
+			})))
+		{
+			if (error) *error = "failed to bind ecs.OnAdd";
+			return false;
+		}
+
+		if (!ecsTable.SetField("OnRemove", bindings.CreateFunction("ecs:OnRemove",
+			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return OnRemoveImpl(bindings, args, count);
+			})))
+		{
+			if (error) *error = "failed to bind ecs.OnRemove";
+			return false;
+		}
+
+		if (!ecsTable.SetField("Off", bindings.CreateFunction("ecs:Off",
+			[&bindings](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return OffImpl(bindings, args, count);
+			})))
+		{
+			if (error) *error = "failed to bind ecs.Off";
 			return false;
 		}
 
