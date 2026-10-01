@@ -2,6 +2,7 @@
 #include "World/Core/WorldContext.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Scene.h"
+#include "World/Scene/Entity.h"
 #include "World/Scene/Query.h"
 
 #include <cstdio>
@@ -209,7 +210,7 @@ int main()
 		}
 
 		// ========================================================
-		// 9. 帧管线系统默认注册验证 (Scene 帧管线挂载)
+		// 9. 帧管线系统默认注册验证 (Scene 5 大系统管线调度)
 		// ========================================================
 		{
 			Scene pipeScene(context);
@@ -218,10 +219,46 @@ int main()
 			pipeScene.OnUpdateRuntime(0.016f);
 
 			const auto& timings = pipeScene.GetFrameSystemTimings();
-			CHECK(timings.size() == 3);
-			CHECK(timings[0].Name == "scene-update");
-			CHECK(timings[1].Name == "transform-system");
-			CHECK(timings[2].Name == "camera-system");
+			CHECK(timings.size() == 5);
+			CHECK(timings[0].Name == "physics-2d");
+			CHECK(timings[1].Name == "physics-3d");
+			CHECK(timings[2].Name == "scene-update");
+			CHECK(timings[3].Name == "transform-system");
+			CHECK(timings[4].Name == "camera-system");
+		}
+
+		// ========================================================
+		// 10. Entity 流式调用方法 (.Set, .With, .Without 链式操作)
+		// ========================================================
+		{
+			Entity fluentEntity = Entity::CreateEntity(&scene, "FluentEntity");
+			CHECK(fluentEntity.IsValid());
+			CHECK(fluentEntity.HasComponent<TagComponent>());
+
+			// 链式调用 .Set / .With
+			fluentEntity.Set<TransformComponent>(glm::vec3(100.0f, 200.0f, 300.0f))
+				.With<VelocityTestComponent>(VelocityTestComponent{ glm::vec3(1.0f, 2.0f, 3.0f) })
+				.With<DisabledTestTag>();
+
+			CHECK(fluentEntity.HasComponent<TransformComponent>());
+			CHECK(fluentEntity.HasComponent<VelocityTestComponent>());
+			CHECK(fluentEntity.HasComponent<DisabledTestTag>());
+			CHECK(fluentEntity.GetComponent<TransformComponent>().Location == glm::vec3(100.0f, 200.0f, 300.0f));
+			CHECK(fluentEntity.GetComponent<VelocityTestComponent>().Linear == glm::vec3(1.0f, 2.0f, 3.0f));
+
+			// .Set 覆盖已有组件
+			fluentEntity.Set<VelocityTestComponent>(VelocityTestComponent{ glm::vec3(4.0f, 5.0f, 6.0f) });
+			CHECK(fluentEntity.GetComponent<VelocityTestComponent>().Linear == glm::vec3(4.0f, 5.0f, 6.0f));
+
+			// .Without 链式移除组件
+			fluentEntity.Without<DisabledTestTag>();
+			CHECK(!fluentEntity.HasComponent<DisabledTestTag>());
+
+			// 链式混合调用
+			fluentEntity.Without<VelocityTestComponent>()
+				.With<DisabledTestTag>();
+			CHECK(!fluentEntity.HasComponent<VelocityTestComponent>());
+			CHECK(fluentEntity.HasComponent<DisabledTestTag>());
 		}
 
 		std::puts("WorldQueryTests passed all assertions!");

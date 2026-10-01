@@ -3,6 +3,7 @@
 #include "World/Core/UUID.h"
 #include <entt.hpp>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace World
@@ -20,20 +21,59 @@ namespace World
 		bool CanRemoveComponent(entt::id_type component, std::string* reason = nullptr) const;
 
 		template<typename T, typename... Args>
-		T& AddOrReplaceComponent(Args&&... args)
+		decltype(auto) AddOrReplaceComponent(Args&&... args)
 		{
 			RequireValid();
 			m_Scene->AssertStructuralWrite();
 			RequireCanAdd(entt::type_id<T>().hash(), true);
-			return m_Scene->m_Registry.emplace_or_replace<T>(m_EntityHandle, std::forward<Args>(args)...);
+			if constexpr (std::is_empty_v<T>)
+			{
+				m_Scene->m_Registry.emplace_or_replace<T>(m_EntityHandle, std::forward<Args>(args)...);
+			}
+			else
+			{
+				return m_Scene->m_Registry.emplace_or_replace<T>(m_EntityHandle, std::forward<Args>(args)...);
+			}
 		}
 		template<typename T, typename... Args>
-		T& AddComponent(Args&&... args)
+		decltype(auto) AddComponent(Args&&... args)
 		{
 			RequireValid();
 			m_Scene->AssertStructuralWrite();
 			RequireCanAdd(entt::type_id<T>().hash(), false);
-			return m_Scene->m_Registry.emplace<T>(m_EntityHandle, std::forward<Args>(args)...);
+			if constexpr (std::is_empty_v<T>)
+			{
+				m_Scene->m_Registry.emplace<T>(m_EntityHandle, std::forward<Args>(args)...);
+			}
+			else
+			{
+				return m_Scene->m_Registry.emplace<T>(m_EntityHandle, std::forward<Args>(args)...);
+			}
+		}
+
+		template<typename T, typename... Args>
+		Entity& Set(Args&&... args)
+		{
+			RequireValid();
+			m_Scene->AssertStructuralWrite();
+			RequireCanAdd(entt::type_id<T>().hash(), true);
+			m_Scene->m_Registry.emplace_or_replace<T>(m_EntityHandle, std::forward<Args>(args)...);
+			return *this;
+		}
+		template<typename T, typename... Args>
+		Entity& With(Args&&... args)
+		{
+			RequireValid();
+			m_Scene->AssertStructuralWrite();
+			RequireCanAdd(entt::type_id<T>().hash(), true);
+			m_Scene->m_Registry.emplace_or_replace<T>(m_EntityHandle, std::forward<Args>(args)...);
+			return *this;
+		}
+		template<typename T>
+		Entity& Without()
+		{
+			RemoveComponent<T>();
+			return *this;
 		}
 		// No-data dynamic adds can be requested by Lua; data-bearing adds stay synchronous.
 		void AddComponent(entt::id_type componentId, const void* data = nullptr);

@@ -54,6 +54,8 @@ namespace World
 			return { view.begin(), view.end() };
 		}
 
+		thread_local bool s_InsideFramePipeline = false;
+
 		std::string NativeError(const CppScriptComponent& script, entt::entity entity, const char* phase, const char* error)
 		{
 			return "[Native] " + script.ScriptName + " entity=" + std::to_string(static_cast<uint32_t>(entity)) +
@@ -242,6 +244,12 @@ namespace World
 		m_FrameSystemTimings.clear();
 		if (!m_FrameSystems)
 			return;
+
+		s_InsideFramePipeline = true;
+		struct PipelineScopeGuard
+		{
+			~PipelineScopeGuard() { s_InsideFramePipeline = false; }
+		} guard;
 
 		m_FrameSystems->RunPhase(Gameplay::SystemPhase::Update, ts);
 		for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
@@ -888,6 +896,8 @@ namespace World
 	{
 		if (!m_FrameSystemDefinitions.empty())
 			return;
+		RegisterFrameSystem({ "physics-2d", false, [this](Timestep ts) { OnUpdatePhysics2D(ts); } });
+		RegisterFrameSystem({ "physics-3d", false, [this](Timestep ts) { OnUpdatePhysics3D(ts); } });
 		RegisterFrameSystem({ "scene-update", false, [this](Timestep ts) { OnScriptUpdate(ts); } });
 		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
 		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); } });
@@ -964,9 +974,13 @@ namespace World
 			if (m_Registry.get<LuauScriptComponent>(entity).Runtime.State == ScriptInstanceState::Running) lua.push_back(entity);
 		StartPendingScripts();
 		if (m_StopRequested) { StopScene(); return; }
-		OnUpdatePhysics2D(ts);
-		// P1b D6:3D 物理与 2D 走同一条固定步路径(同一个 OnScriptUpdate 调用点,紧邻 2D 那一段)。
-		OnUpdatePhysics3D(ts);
+		// M2.5: 物理步进已解耦为独立帧管线系统("physics-2d", "physics-3d")。
+		// 仅在脱离管线直接调用 OnScriptUpdate 的独立测试场景下保留兼容性步进。
+		if (!s_InsideFramePipeline)
+		{
+			OnUpdatePhysics2D(ts);
+			OnUpdatePhysics3D(ts);
+		}
 		// W3d:回调内同步创建的新实体本帧对其它脚本的 FindByName 不可见,
 		// 快照在开始执行 OnUpdate 前冻结,下一帧重新收集。
 		// 没有 Lua 更新实例时不建快照(native-only 场景保持原开销)。
