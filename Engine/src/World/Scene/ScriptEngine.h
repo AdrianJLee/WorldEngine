@@ -106,6 +106,10 @@ namespace World
 		static bool IsInitialized();
 		static void AssertOwnerThread();
 
+		// Pure ECS: 全局活动场景上下文（供 ecs/world 脚本绑定访问当前场景）
+		static void SetActiveScene(Scene* scene);
+		static Scene* GetActiveScene();
+
 		static void DefineMathType();
 		static void RegisterMathTypes();
 

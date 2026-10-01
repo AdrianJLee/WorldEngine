@@ -7,6 +7,7 @@
 #include "World/Core/Asset/ScriptArtifact.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/BehaviorRegistry.h"
+#include "World/Script/BindECS.h"
 #include "World/Script/BindEvents.h"
 #include "World/Script/BindUI.h"
 #include "World/Script/BindServices.h"
@@ -46,6 +47,8 @@ namespace World
 		// W7-3:登记的内容上下文(宿主/U3 注入)。null = 回退 Application::HasInstance()。
 		// 只保存指针、不拥有;Shutdown() 清空,宿主不需要反登记。
 		WorldContext* s_ContentContext = nullptr;
+		// Pure ECS: 全局活动场景指针（不拥有；ShutdownInternal 清空）
+		Scene* s_ActiveScene = nullptr;
 		// W6:引擎默认预算(指令 1e6;时间关)。LuauVm 层保持 0 = 不限,
 		// 避免改变 World.LuauVm / World.LuauBinding 的既有语义。
 		Sandbox::Policy s_SandboxPolicy{ 1000000, 0 };
@@ -1482,6 +1485,7 @@ namespace World
 			if (s_Vm)
 				s_Vm->Shutdown();
 			s_Vm.reset();
+			s_ActiveScene = nullptr;
 			s_OwnerThread = {};
 		}
 	}
@@ -1492,6 +1496,16 @@ namespace World
 	{
 		if (!s_Vm) throw std::logic_error("ScriptEngine is not initialized");
 		if (s_OwnerThread != std::this_thread::get_id()) throw std::logic_error("Lua access must run on the ScriptEngine owner thread");
+	}
+
+	void ScriptEngine::SetActiveScene(Scene* scene)
+	{
+		s_ActiveScene = scene;
+	}
+
+	Scene* ScriptEngine::GetActiveScene()
+	{
+		return s_ActiveScene;
 	}
 
 	void ScriptEngine::Init()
@@ -1537,6 +1551,9 @@ namespace World
 			// W4:事件/计时器面(只读全局表 `events`/`timers`;见 Script/BindEvents.h)。
 			if (!RegisterEventBindings(*s_Bindings, &error))
 				throw std::runtime_error("[Lua] failed to register the event/timer bindings: " + error);
+			// Pure ECS: 注册全局 ecs 与 world 绑定表 (Script/BindECS.h)
+			if (!RegisterEcsBindings(*s_Bindings, &error))
+				throw std::runtime_error("[Lua] failed to register the ECS bindings: " + error);
 			// T4:插件脚本函数库(插件可能在本 VM 之前注册 —— 账本在 Script/PluginScriptLibrary.h,
 			// 这里统一绑定;运行时绑定与存根渲染消费同一份描述)。
 			if (!PluginScriptLibrary::BindAll(*s_Bindings, &error))
