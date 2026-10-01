@@ -20,6 +20,18 @@ namespace World
 		std::vector<std::shared_ptr<Wui::WuiLabel>> m_Lines;
 	};
 
+	class SystemsPanel final : public EditorPanel
+	{
+	public:
+		const char* Id() const override { return "systems"; }
+		const char* Title() const override { return "Systems Pipeline"; }
+		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
+
+	private:
+		std::shared_ptr<Wui::WuiBox> m_Root;
+		std::vector<std::shared_ptr<Wui::WuiLabel>> m_Lines;
+	};
+
 	class MemoryPanel final : public EditorPanel
 	{
 	public:

@@ -246,6 +246,7 @@ namespace World
 			{ "content_browser", EditorShell::PanelForm::Docked, {} },
 			{ "view",            EditorShell::PanelForm::Docked, {} },
 			{ "stats",           EditorShell::PanelForm::Docked, {} },
+			{ "systems",         EditorShell::PanelForm::Docked, {} },
 			// M4-TEX P4:纹理设置(Texture Settings)—— 编辑一个 `.wtex` 资产(设置 + source:)。
 			// 形态与 Project Settings 同款(独立窗口形态,默认打开 = 附加到主窗口的标签):
 			// 内容浏览器双击 `.wtex` / 右键 → 与 Window 菜单、AI `ui.activate` 落到同一条路径。
@@ -335,6 +336,7 @@ namespace World
 		m_PanelRegistry.emplace("content_browser", std::make_unique<ContentBrowserPanel>(*this));
 		m_PanelRegistry.emplace("view", std::make_unique<ViewportPanel>(*this));
 		m_PanelRegistry.emplace("stats", std::make_unique<StatsPanel>());
+		m_PanelRegistry.emplace("systems", std::make_unique<SystemsPanel>());
 		// D8a2:项目渲染设置(引擎用户可配置)。用户 2026-09-20 指定为独立窗口形态:
 		// 默认打开 = 附加到主窗口(见 PanelSpec),可拖出为独立 OS 窗口 / ui.detach。
 		m_PanelRegistry.emplace("settings", std::make_unique<SettingsPanel>());
@@ -1153,6 +1155,7 @@ namespace World
 			{ "content_browser", { "panel.content_browser", "Content Browser" } },
 			{ "view",            { "panel.view", "View" } },
 			{ "stats",           { "panel.stats", "Stats" } },
+			{ "systems",         { "panel.systems", "Systems" } },
 			{ "settings",        { "panel.settings", "Project Settings" } },
 			{ "prefs",           { "panel.prefs", "Editor Preferences" } },
 			{ "memory",          { "panel.memory", "Memory" } },

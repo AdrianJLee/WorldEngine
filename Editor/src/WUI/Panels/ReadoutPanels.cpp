@@ -120,6 +120,121 @@ namespace World
 		m_Root->Paint(paint);
 	}
 
+	void SystemsPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host)
+	{
+		const Ref<Scene> scene = host.GetActiveScene();
+
+		if (!m_Root)
+		{
+			m_Root = std::make_shared<Wui::WuiBox>();
+			m_Root->Direction = Wui::WuiDirection::Column;
+			m_Root->Gap = 2;
+		}
+
+		if (!scene)
+		{
+			if (m_Lines.size() != 1)
+			{
+				m_Root->Clear();
+				m_Root->Invalidate();
+				m_Lines.clear();
+				auto label = std::make_shared<Wui::WuiLabel>();
+				label->FontSize = 14;
+				m_Root->Add(label);
+				m_Lines.push_back(label);
+			}
+			m_Lines[0]->Text = "No active scene.";
+			m_Lines[0]->Color = { 0.55f, 0.58f, 0.62f, 1.0f };
+		}
+		else
+		{
+			const auto& timings = scene->GetFrameSystemTimings();
+			if (timings.empty())
+			{
+				if (m_Lines.size() != 2)
+				{
+					m_Root->Clear();
+					m_Root->Invalidate();
+					m_Lines.clear();
+					for (int i = 0; i < 2; ++i)
+					{
+						auto label = std::make_shared<Wui::WuiLabel>();
+						label->FontSize = 14;
+						m_Root->Add(label);
+						m_Lines.push_back(label);
+					}
+				}
+				m_Lines[0]->Text = "Systems Pipeline:";
+				m_Lines[0]->Color = { 0.55f, 0.58f, 0.62f, 1.0f };
+				m_Lines[1]->Text = "No system timings available (idle or unsimulated).";
+				m_Lines[1]->Color = { 0.55f, 0.58f, 0.62f, 1.0f };
+			}
+			else
+			{
+				const size_t requiredLines = timings.size() + 3;
+				if (m_Lines.size() != requiredLines)
+				{
+					m_Root->Clear();
+					m_Root->Invalidate();
+					m_Lines.clear();
+					m_Lines.reserve(requiredLines);
+					for (size_t i = 0; i < requiredLines; ++i)
+					{
+						auto label = std::make_shared<Wui::WuiLabel>();
+						label->FontSize = 14;
+						m_Root->Add(label);
+						m_Lines.push_back(label);
+					}
+				}
+
+				m_Lines[0]->Text = "Systems Pipeline:";
+				m_Lines[0]->Color = { 0.55f, 0.58f, 0.62f, 1.0f };
+
+				m_Lines[1]->Text = "Systems Count: " + std::to_string(timings.size());
+				m_Lines[1]->Color = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+				double totalMs = 0.0;
+				for (size_t i = 0; i < timings.size(); ++i)
+				{
+					const auto& timing = timings[i];
+					totalMs += timing.Milliseconds;
+
+					char buffer[256];
+					std::snprintf(buffer, sizeof(buffer), "[%s] (%s) - %.3f ms",
+						timing.Name.c_str(),
+						timing.ParallelSafe ? "Parallel" : "Main Thread",
+						timing.Milliseconds);
+
+					m_Lines[2 + i]->Text = buffer;
+					m_Lines[2 + i]->Color = { 0.85f, 0.88f, 0.92f, 1.0f };
+				}
+
+				char summaryBuffer[128];
+				std::snprintf(summaryBuffer, sizeof(summaryBuffer), "Total Pipeline Time: %.3f ms", totalMs);
+				m_Lines[2 + timings.size()]->Text = summaryBuffer;
+				m_Lines[2 + timings.size()]->Color = { 0.45f, 0.85f, 0.45f, 1.0f };
+
+				// 无障碍节点:自动化 / 压测可直接读取
+				{
+					Wui::WuiAccessNode node;
+					node.Id = Wui::HashId("systems.pipeline");
+					node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+					node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+					node.Kind = "status";
+					node.Label = "systems pipeline";
+					node.Value = "count=" + std::to_string(timings.size()) + " totalMs=" + std::to_string(totalMs);
+					node.Rect = { rect.X + 8.0f, rect.Y + 8.0f, rect.W - 16.0f, 16.0f };
+					node.Interactive = false;
+					Wui::WuiAccessibility::Get().Register(node);
+				}
+			}
+		}
+
+		Wui::LayoutWidgetTree(m_Root, { rect.X + 8, rect.Y + 8, rect.W - 16, rect.H - 16 });
+		Wui::WuiPaintContext paint(ctx);
+		m_Root->Paint(paint);
+	}
+
 	void MemoryPanel::OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost&)
 	{
 		const std::vector<AllocatorStats> snapshots = MemoryTracker::Get().GetFullSnapshot();
