@@ -1,6 +1,8 @@
 #include "wldpch.h"
 #include "Scene.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/TransformSystem.h"
+#include "World/Scene/CameraSystem.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Script/HotReload.h"
 #include "World/Core/Thread/JobSystem.h"
@@ -1061,11 +1063,7 @@ namespace World
 		AssertOwnerThread();
 		m_ViewportWidth = width;
 		m_ViewportHeight = height;
-		for (const auto entity : m_Registry.view<CameraComponent>())
-		{
-			auto& camera = m_Registry.get<CameraComponent>(entity);
-			if (!camera.FixedAspectRatio && width && height) camera.Camera.SetViewportSize(width, height);
-		}
+		CameraSystem::UpdateAllCameras(m_Registry, width, height);
 	}
 
 	Entity Scene::GetPrimaryCameraEntity()

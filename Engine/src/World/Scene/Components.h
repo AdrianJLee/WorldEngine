@@ -5,6 +5,7 @@
 #include "World/Core/Memory/PoolAllocator.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneCamera.h"
+#include "World/Scene/TransformSystem.h"
 #include "World/Scene/ScriptableEntity.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Renderer/Texture.h"
@@ -64,53 +65,24 @@ namespace World
 		glm::vec3 Scale { 1.0f, 1.0f, 1.0f };
 		glm::mat4 Transform { 1.0f };
 
-		TransformComponent(const glm::mat4& transform) { SetTransform(transform); }
-		TransformComponent(const glm::vec3& location = glm::vec3 { 0.0f, 0.0f, 0.0f }, const glm::vec3& rotation = glm::vec3 { 0.0f, 0.0f, 0.0f }, const glm::vec3& scale = glm::vec3 { 1.0f, 1.0f, 1.0f })
+		TransformComponent() = default;
+		TransformComponent(const glm::mat4& transform) { TransformSystem::SetTransform(*this, transform); }
+		TransformComponent(const glm::vec3& location, const glm::vec3& rotation = glm::vec3 { 0.0f, 0.0f, 0.0f }, const glm::vec3& scale = glm::vec3 { 1.0f, 1.0f, 1.0f })
 		{
-			SetTransform(location, rotation, scale);
+			TransformSystem::SetTransform(*this, location, rotation, scale);
 		}
 
-		void SetLocation(const glm::vec3& location) { Location = location; RecalculateTransform(); }
-		void SetRotation(const glm::vec3& rotation) { Rotation = rotation; RotationQuat = glm::quat(rotation); RecalculateTransform(); }
-		void SetScale(const glm::vec3& scale) { Scale = scale; RecalculateTransform(); }
+		// 变换解算与设置统一委托给 TransformSystem
+		void SetLocation(const glm::vec3& location) { TransformSystem::SetLocation(*this, location); }
+		void SetRotation(const glm::vec3& rotation) { TransformSystem::SetRotation(*this, rotation); }
+		void SetScale(const glm::vec3& scale) { TransformSystem::SetScale(*this, scale); }
 		void SetTransform(const glm::vec3& location, const glm::vec3& rotation, const glm::vec3& scale)
 		{
-			Location = location;
-			Rotation = rotation;
-			Scale = scale;
-			RotationQuat = glm::quat(rotation);
-			RecalculateTransform();
+			TransformSystem::SetTransform(*this, location, rotation, scale);
 		}
-		void SetTransform(const glm::mat4& transform)
-		{
-			Transform = transform;
-			Location = glm::vec3(transform[3]);
-			Scale.x = glm::length(glm::vec3(transform[0]));
-			Scale.y = glm::length(glm::vec3(transform[1]));
-			Scale.z = glm::length(glm::vec3(transform[2]));
-			if (glm::determinant(transform) < 0)
-				Scale.x *= -1.0f;
-			glm::mat4 rotationMatrix = transform;
-			rotationMatrix[0] /= Scale.x;
-			rotationMatrix[1] /= Scale.y;
-			rotationMatrix[2] /= Scale.z;
-			rotationMatrix[3] = glm::vec4(0, 0, 0, 1);
-			RotationQuat = glm::quat_cast(rotationMatrix);
-			Rotation = glm::eulerAngles(RotationQuat);
-		}
-		void SetRotationQuat(const glm::quat& rotationQuat)
-		{
-			RotationQuat = rotationQuat;
-			Rotation = glm::eulerAngles(rotationQuat);
-			RecalculateTransform();
-		}
-		void RecalculateTransform()
-		{
-			glm::mat4 rotationMatrix = glm::mat4_cast(RotationQuat);
-			glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), Scale);
-			glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), Location);
-			Transform = translationMatrix * rotationMatrix * scaleMatrix;
-		}
+		void SetTransform(const glm::mat4& transform) { TransformSystem::SetTransform(*this, transform); }
+		void SetRotationQuat(const glm::quat& rotationQuat) { TransformSystem::SetRotationQuat(*this, rotationQuat); }
+		void RecalculateTransform() { TransformSystem::Recalculate(*this); }
 
 		operator const glm::mat4&() const { return Transform; }
 

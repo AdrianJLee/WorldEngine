@@ -12,6 +12,7 @@
 #include "World/Renderer/RenderSettings.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
+#include "World/Scene/TransformSystem.h"
 #include "World/RHI/RhiTextureBridge.h"
 #include "World/Core/Thread/JobSystem.h"
 
@@ -442,7 +443,7 @@ namespace World
 		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
 		// 编辑/运行期都会改 Transform:每帧先重算层级世界矩阵,子实体才会跟随父实体
 		// (此前只有序列化/Prefab 路径求解,见 Hierarchy.h)。
-		Hierarchy::UpdateWorldTransforms(m_ActiveScene->m_Registry);
+		TransformSystem::UpdateWorldTransforms(m_ActiveScene->m_Registry);
 		// D5c-4a:先推进骨骼动画(写回 Time + 采样 → 节点世界矩阵 → 调色板),再收集绘制 ——
 		// 蒙皮提交拿的是本帧的调色板。步长来自宿主 SetDeltaSeconds(默认 0 = 不推进)。
 		AnimationSystem::Update(*m_ActiveScene, m_DeltaSeconds);
