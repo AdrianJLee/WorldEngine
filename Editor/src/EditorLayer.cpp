@@ -104,6 +104,35 @@ namespace World
 			timing.Frames = 0;
 		}
 
+		// ---- HOTR-P3-T9:模型重导入的冲突门 ----
+		// 壳没有公开的"面板是否打开"查询(形态判定 `PanelStateLabel` 是私有的);公开的
+		// `AiDescribeState()` 的 `attach` 段就是它按 `PanelStateLabel` 产出的面板形态清单
+		// (attached / floating / hidden),因此这里按它判断 `model:<逻辑路径>` 是否**打开**。
+		// 面板里"改了设置还没重导"的脏标记在面板私有状态里,层外面拿不到 ⇒ 打开即跳过
+		// (T9 口径的降级分支;跳过只顺延、不丢:面板关闭后自动重试)。
+		bool IsModelPreviewPanelOpen(const EditorShell& shell, const std::string& assetLogical)
+		{
+			const std::string panelId = "model:" + assetLogical;
+			std::string parseError;   // WuiJson 不接受空 error 指针(内部直接写 *error)
+			const std::optional<Wui::JsonValue> state =
+				Wui::JsonValue::Parse(shell.AiDescribeState(), &parseError);
+			if (!state)
+				return false;
+			const Wui::JsonValue* attach = state->Find("attach");
+			if (attach == nullptr || attach->type != Wui::JsonValue::Type::Array)
+				return false;
+			for (const Wui::JsonValue& entry : attach->Array)
+			{
+				const Wui::JsonValue* panel = entry.Find("panel");
+				if (panel == nullptr || panel->AsString() != panelId)
+					continue;
+				const Wui::JsonValue* stateField = entry.Find("state");
+				const std::string value = stateField ? stateField->AsString() : std::string();
+				return value == "attached" || value == "floating";
+			}
+			return false;
+		}
+
 		// ---- Layout-S6:Game 模块加载 = 自动存根生成的前置条件 ----
 		//
 		// 编辑器的 Lua 存根输入是当前 WorldContext 的 schema 注册表:Game 组件(SampleDataComponent
@@ -283,6 +312,12 @@ namespace World
 		m_Commands.Register({ Wui::HashId("cmd.play"), "Play", KeyCodes::F5, false, false, [this] { TogglePlay(); } });
 		m_Commands.Register({ Wui::HashId("cmd.simulate"), "Simulate", KeyCodes::F6, false, false, [this] { ToggleSimulate(); } });
 		m_Commands.Register({ Wui::HashId("cmd.pause"), "Pause", KeyCodes::F7, false, false, [this] { TogglePause(); } });
+		// HOTR-P3-T9:模型自动重导入的冲突门探针 —— 对应面板打开时跳过(只顺延、不覆盖;
+		// 面板里的未保存设置看不到,按 T9 的降级分支"打开即跳过")。
+		m_ModelImportWatch.SetSkipProbe([this](const std::string& assetLogical)
+		{
+			return IsModelPreviewPanelOpen(m_Shell, assetLogical);
+		});
 	}
 
 	// PLUG-T3:析构在 .cpp 定义(unique_ptr<Plugins::PluginManager> 的删除器需要完整类型)。
@@ -1073,6 +1108,9 @@ namespace World
 		m_EngineShaderHotReload.Shutdown();
 		// HOTR-P2-T5:纹理自动重烘的编码线程先收掉(只跑纯 CPU 烘焙,不碰 GPU/文件写)。
 		m_TextureImportWatch.Shutdown();
+		// HOTR-P3-T9:模型自动重导入的导入线程同样先收掉(只跑纯 CPU 导入 + 临时文件;
+		// 未提交的临时产物在 Shutdown 里清掉)。
+		m_ModelImportWatch.Shutdown();
 
 		SetSceneState(SceneState::Edit);
 
@@ -4142,6 +4180,22 @@ namespace World
 		{
 			m_TextureImportWatch.Poll(static_cast<double>(deltaSeconds));
 			m_TextureImportWatch.Pump();
+		}
+
+		// HOTR-P3-T9:内容根下 `.gltf/.glb` 源(已经导入过的 `.wmodel`)的外部改动 →
+		// 自动重导入(与面板 Reimport 同一条底层路径)。2s 重扫 + 2s 稳定窗口,导入在工作线程、
+		// 提交在帧边界;面板打开该 `.wmodel` 时跳过并把重导入顺延到面板关闭之后。
+		// **默认开启**:`WLD_MODEL_HOTRELOAD=0` 单独关(自动化/诊断用);同一道
+		// `WLD_ASSET_HOTRELOAD` 总开关也覆盖它。
+		static const bool modelHotReloadEnabled = []
+		{
+			const char* value = std::getenv("WLD_MODEL_HOTRELOAD");
+			return !(value != nullptr && *value != '\0' && std::string(value) == "0");
+		}();
+		if (modelHotReloadEnabled)
+		{
+			m_ModelImportWatch.Poll(static_cast<double>(deltaSeconds));
+			m_ModelImportWatch.Pump();
 		}
 
 		// HOTR-P2-T6(P2-b):当前文档场景引用的 `.wprefab` 外部改动 → 帧边界安全点逐实例跟随

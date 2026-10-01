@@ -13,6 +13,7 @@
 #include "World/WUI/WuiGizmo.h"
 #include "WUI/EditorShell.h"
 #include "AiControl/AiControlServer.h"
+#include "Asset/ModelImportWatch.h"
 #include "Build/ProjectBuildRunner.h"
 #include "EngineShaderHotReload.h"
 #include "ShaderHotReload.h"
@@ -596,6 +597,9 @@ namespace World
 		// HOTR-P2-T5(P2-c):内容根下 `.wtex` 与它们的 `source:` 源图外部改动 → 2s 节流 +
 		// 内容哈希优先 → 自动重烘 `.wtexc`(编码在工作线程,写盘/失效/日志在帧边界)。
 		Editor::TextureImportWatch m_TextureImportWatch;
+		// HOTR-P3-T9:内容根下 `.gltf/.glb` 源改动 → 已导入过的 `.wmodel` 自动重导入
+		// (与面板 Reimport 同一条内核;2s 重扫 + 2s 稳定窗口,导入在工作线程、提交在帧边界)。
+		Editor::ModelImportWatch m_ModelImportWatch;
 		Wui::WuiContext m_WuiContext;
 		bool m_RendererChangePending = false;
 		std::string m_RendererChangeName;

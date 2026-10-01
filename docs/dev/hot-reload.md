@@ -29,7 +29,7 @@
 | 预制体 `.wprefab`（场景实例引用） | 每帧同步实例来源路径进 `AssetFileWatch`：150ms | 安全点逐实例 `Gameplay::ApplyPrefabChanges`（保留 overrides） | 结构不一致/读失败 → 不动任何实体 + 可读日志 | 不改变实例身份；同级重排不算结构变化 |
 | C++ 模块 `Game.dll`（含 C++ 脚本组件） | 手动：`File ▸ Build & Reload C++ Module` / AI `module.build_reload`（后台构建）；分步 `module.unload`+`module.reload` | 卸载释放 DLL 锁 → 构建 → 加载新 DLL；实例配置属性按稳定字段迁移 | 构建失败保持 unloaded + 输出尾部可见；加载失败自动回滚 `.rollback-<abi>.dll` | 不迁移 C++ 成员可变状态/指针注册；硬崩溃仍是进程终止 |
 | 插件 DLL（L3） | 手动：插件管理器「重新加载」/ AI `plugin.reload <id> build=1`（一键）；AI `plugin.reload <id>` 保留两段式 | 一键 = 快照+卸载 → 后台构建插件 CMake 目标（项目插件 `<项目根>/build/x64-<配置>`、引擎插件 `<WLD_REPO_ROOT>/build/x64-<配置>`；与 `module.build_reload` 共用同一后台构建器）→ 成功后自动加载；blob 组件按实体 UUID + 字段 id 快照写回 | 构建失败保持 unloaded + 输出尾部进日志与 `plugin.info` 的 `buildOutput`；第二段失败载入 `.rollback-<abi>.dll` 并写回原状态 | 有活实例/Play 下第一段干净拒绝；快照只在内存、不跨重启；构建在飞时面板按钮置灰且全局同一时刻一个构建 |
-| glTF/GLB 源（`.gltf/.glb` → `.wmodel`） | 本轮**不自动** | 手动 Reimport；重导会清动画缓存 | 失败保留旧 `.wmodel` | 自动重导入会重写 `.wmodel`/材质/贴图，列为后续单独确认项 |
+| glTF/GLB 源（`.gltf/.glb` → `.wmodel`） | 编辑器 `ModelImportWatch`：2s 重扫 `**/*.wmodel` 读源路径/设置（源不存在 = 不监听）+ 2s 稳定窗口；工作线程导入 | 主线程帧边界提交：临时文件同目录**原子替换**（`.wmodel` 最后落盘）→ `Mesh::ClearWModelCache()` + `AnimationSystem::ClearCache()` + 日志 `model reimported` | 导入/落盘失败只记日志（`model reimport failed`），旧 `.wmodel` 逐字节不变；提交前核对基线，别人改过就丢弃本产物 | `WLD_MODEL_HOTRELOAD=0` 关闭；对应 `.wmodel` 从未导入过 → 忽略；**模型预览面板正打开该 `.wmodel` 时跳过**（面板脏状态在面板私有状态里拿不到 ⇒ 打开即跳过，关闭后自动顺延重试）；外部 `.bin`/贴图引用改动不触发（只监听源文件本身） |
 
 ## 需要重启（或明确的人工动作）的场景
 
@@ -43,8 +43,9 @@
 
 | 环境变量 | 作用 |
 | --- | --- |
-| `WLD_ASSET_HOTRELOAD=0` | 关闭材质/贴图/场景的资产监听（也关闭 `.wtex` 自动重烘的调度） |
+| `WLD_ASSET_HOTRELOAD=0` | 关闭材质/贴图/场景的资产监听（也关闭 `.wtex` 自动重烘与 glTF 自动重导入的调度） |
 | `WLD_TEXTURE_HOTRELOAD=0` | 只关 `.wtex` 自动重烘（默认开） |
+| `WLD_MODEL_HOTRELOAD=0` | 只关 glTF/GLB 源自动重导入（默认开） |
 | `WLD_SHADER_HOTRELOAD=0` | 关闭引擎内建 shader 监听 |
 | `WLD_SCENE_AUTORELOAD=0` | 关闭场景自动重开（保留"只提示"） |
 | `WLD_ASSET_HOTRELOAD_TRACE=1` | 资产监听日志（watching/changed/invalidated 等） |
@@ -57,11 +58,14 @@
 `HOTR-P2/t5-scene-autoreload-probe.py`（场景）、`HOTR-P2/t5-texture-rebake-probe.py`（纹理重烘）、
 `HOTR-P2/t6-prefab-follow-probe.py`（预制体）、`HOTR-P3/t7-build-reload-probe.py`（构建并重载）、
 `HOTR-P3/t8-plugin-oneclick-probe.py`（插件一键构建+重载：成功/失败路径、面板按钮置灰、
-File 菜单不再有 `menu.file.reload_cpp_module`、AI `module.unload`/`module.reload` 仍可用）。
+File 菜单不再有 `menu.file.reload_cpp_module`、AI `module.unload`/`module.reload` 仍可用）、
+`HOTR-P3/t9-gltf-reimport-probe.py`（glTF 源自动重导入：成功 / 坏源保留旧产物 / 未导入过忽略 /
+面板打开时跳过并在关闭后顺延）。
 
 ## 已知遗留
 
 - Vulkan **异步上传环**在"同一帧多次提交"下仍有隐患（材质贴图已改走同步上传绕开；
   根因与复现见 `tools/agents/tasks/20260930-2130-hotreload-p1p2p3/plan.md` 的 P2-c 取证记录）；
 - 统一进程级 watch 服务（把 150ms/500ms/2s 的轮询与日志收敛成一处）尚未实施；
-- glTF 源自动重导入未做（当前只提示）。
+- glTF 源自动重导入的已知边界：只按源文件本身的内容哈希判定（引用的 `.bin`/贴图改动不触发）；
+  面板打开期间的重导入会顺延到面板关闭之后（脏状态在面板私有状态里，层外不可见）。
