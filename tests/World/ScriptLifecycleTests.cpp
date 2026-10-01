@@ -130,11 +130,12 @@ namespace
         int32_t Count = 0;
     };
 
-    class NativeProbe final : public ScriptableEntity
+    // 纯数据脚本类:不继承任何基类;生命周期 = 普通方法(Entity 形参由 schema 工厂表注入)。
+    class NativeProbe final
     {
     public:
         explicit NativeProbe(ProbeContext& context) : m_Context(context) {}
-        ~NativeProbe() override { ++m_Context.Native[m_Id].Deletes; }
+        ~NativeProbe() { ++m_Context.Native[m_Id].Deletes; }
         float Value = 7.5f;
         // CPPT-2:Enum / Asset / 只读摘要(IVec3)字段 —— 与生成物里真实脚本字段走同一条 schema 通道。
         int64_t Mode = 0;
@@ -149,29 +150,32 @@ namespace
         std::vector<ProbeStats> Squad;
         std::map<std::string, ProbeStats> Units;
 
-    private:
-        void OnCreate() override
+        void OnCreate(Entity self)
         {
-            m_Id = static_cast<uint32_t>(GetEntity());
+            m_Self = self;
+            m_Id = static_cast<uint32_t>(self);
             Invoke("create");
         }
-        void OnUpdate(Timestep) override
+        void OnUpdate(Timestep)
         {
             Invoke("update");
             m_Context.Record(false, m_Id, "returned");
         }
-        void OnDestroy() override
+        void OnDestroy(Entity self)
         {
-            CHECK(GetEntity().IsValid());
-            CHECK(GetEntity().HasComponent<TagComponent>());
+            CHECK(self.IsValid());
+            CHECK(self.HasComponent<TagComponent>());
             Invoke("destroy");
         }
         void Invoke(const std::string& phase)
         {
             m_Context.Record(false, m_Id, phase);
-            if (m_Context.NativeAction) m_Context.NativeAction(GetEntity(), phase);
+            if (m_Context.NativeAction) m_Context.NativeAction(m_Self, phase);
         }
+
+    private:
         ProbeContext& m_Context;
+        Entity m_Self;
         uint32_t m_Id = 0;
     };
 
@@ -2834,11 +2838,20 @@ int main(int argc, char** argv)
             // 2026-09-26 重写:Category==Script 的 schema 绑定 = 工厂(Create/Destroy),
             // 组件里不再有函数指针;工厂这里需要当前 ProbeContext 才能建出 NativeProbe。
             static const Schema::ScriptBinding probeBinding = {
-                []() -> ScriptableEntity* {
+                []() -> void* {
                     if (!s_ProbeContext) throw std::logic_error("Missing test context");
                     return new NativeProbe(*s_ProbeContext);
                 },
-                [](ScriptableEntity* instance) { delete instance; },
+                [](void* instance) { delete static_cast<NativeProbe*>(instance); },
+                [](void* instance, void* rawEntity) {
+                    static_cast<NativeProbe*>(instance)->OnCreate(rawEntity ? *static_cast<Entity*>(rawEntity) : Entity());
+                },
+                [](void* instance, float deltaSeconds) {
+                    static_cast<NativeProbe*>(instance)->OnUpdate(Timestep(deltaSeconds));
+                },
+                [](void* instance, void* rawEntity) {
+                    static_cast<NativeProbe*>(instance)->OnDestroy(rawEntity ? *static_cast<Entity*>(rawEntity) : Entity());
+                },
             };
             static const Schema::FieldSchema probeValue = {
                 Schema::FieldId{ Schema::Fnv1a64("T02NativeProbe.Value") },

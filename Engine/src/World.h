@@ -29,7 +29,6 @@
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
-#include "World/Scene/ScriptableEntity.h"
 #include "World/Scene/SceneSerializer.h"
 
 #include "World/Renderer/SceneRenderer.h"

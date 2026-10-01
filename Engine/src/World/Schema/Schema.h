@@ -16,10 +16,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-namespace World
-{
-	class ScriptableEntity;   // ScriptBinding 的工厂签名只需要前置声明
-}
 
 namespace World::Schema
 {
@@ -261,10 +257,17 @@ namespace World::Schema
 	//
 	// 旧口径是 `Bind(void* nativeScript)`,把函数指针写进 CppScriptComponent —— 那让"组件数据"
 	// 与"只能由 C++ 现场填的绑定"混在一起。现在组件只存 ScriptName,实例化时按名字查这里的工厂。
+	// 生命周期回调全部可选:脚本类不继承任何基类,只按需提供同名方法
+	// (OnCreate(Entity) / OnCreate() / OnUpdate(Timestep) / OnDestroy(Entity) / OnDestroy()),
+	// 由 MakeScriptBinding<T>() 用 SFINAE 探测后填写。rawEntity 指向调用现场的
+	// World::Entity(Schema 层不依赖 Scene 类型,故用不透明指针)。
 	struct ScriptBinding
 	{
-		ScriptableEntity* (*Create)() = nullptr;
-		void (*Destroy)(ScriptableEntity*) = nullptr;
+		void* (*Create)() = nullptr;
+		void (*Destroy)(void*) = nullptr;
+		void (*OnCreate)(void* instance, void* rawEntity) = nullptr;
+		void (*OnUpdate)(void* instance, float deltaSeconds) = nullptr;
+		void (*OnDestroy)(void* instance, void* rawEntity) = nullptr;
 	};
 
 	// schema-compiler 在模块生成 TU 中显式特化这两个模板;头文件只通过

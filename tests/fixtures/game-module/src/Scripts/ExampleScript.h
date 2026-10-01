@@ -59,14 +59,18 @@ namespace World
 		WE_SCHEMA_END
 	};
 
-	class ExampleScript : public ScriptableEntity
+	// 纯数据脚本类:**不继承任何基类**(旧 ScriptableEntity OOP 机制已整体删除)。
+	// 生命周期 = 普通方法(OnCreate/OnUpdate/OnDestroy,可选用 Entity 形参),
+	// 由 MakeScriptBinding<ExampleScript>() 在编译期探测后填进 schema 工厂表。
+	class ExampleScript
 	{
 	public:
 		// 生命周期:怎么用容器。
 		// OnCreate 打印尺寸与元素(含 struct 元素的字段),在编辑器日志里可以直接核对
 		// "场景/检视器里改过的容器值真的进了实例"(Play 应用路径)。
-		virtual void OnCreate() override
+		void OnCreate(Entity self)
 		{
+			(void)self;
 			WLD_INFO("[ExampleScript] OnCreate: sizes Scores={} Path={} Squad={} Modes={} Costs={} Units={}",
 				Scores.size(), Path.size(), Squad.size(), Modes.size(), Costs.size(), Units.size());
 			for (std::size_t index = 0; index < Scores.size(); ++index)
@@ -88,7 +92,7 @@ namespace World
 				Stats.Health, Stats.Count);
 		}
 		// OnUpdate 演示 Map 的常见用法:每帧做一次查找;只在第一帧打印,避免刷屏。
-		virtual void OnUpdate(Timestep ts) override
+		void OnUpdate(Timestep ts)
 		{
 			(void)ts;
 			const auto gold = Costs.find("gold");
@@ -101,8 +105,9 @@ namespace World
 					WLD_INFO("[ExampleScript] OnUpdate map lookup: Costs has no 'gold' key");
 			}
 		}
-		virtual void OnDestroy() override
+		void OnDestroy(Entity self)
 		{
+			(void)self;
 			WLD_INFO("[ExampleScript] OnDestroy: cleanup (Scores={} Costs={} Squad={})",
 				Scores.size(), Costs.size(), Squad.size());
 		}

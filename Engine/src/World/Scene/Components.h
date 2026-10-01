@@ -6,7 +6,6 @@
 #include "World/Scene/Entity.h"
 #include "World/Scene/SceneCamera.h"
 #include "World/Scene/TransformSystem.h"
-#include "World/Scene/ScriptableEntity.h"
 #include "World/Script/ScriptRef.h"
 #include "World/Renderer/Texture.h"
 #include "World/Schema/Schema.h"
@@ -332,6 +331,11 @@ namespace World
 		std::string LastError;
 		uint64_t Generation = 0;
 		bool CreateEntered = false;
+		// 实例创建时从 schema 工厂表捕获的生命周期槽位:行为随**实例**走,工厂被注销/热重载
+		// 之后释放路径仍能收到配对的 OnDestroy(与旧 ScriptableEntity 虚函数面同语义)。
+		// 创建槽位只在创建时用一次,不留存;Create/Destroy 仍按当前注册表实时查。
+		void (*OnUpdate)(void* instance, float deltaSeconds) = nullptr;
+		void (*OnDestroy)(void* instance, void* rawEntity) = nullptr;
 	};
 
 	// C 期(数组/映射,2026-09-26):脚本属性的**集合形态**。
@@ -391,19 +395,21 @@ namespace World
 		bool ShapeFromScene = false;
 	};
 
-	// [已弃用 / Deprecated] C++ 行为组件(原 NativeScriptComponent / ScriptableEntity OOP 机制)。
-	// WorldEngine 纯 ECS 架构下已全面转向纯数据驱动，推荐使用 World::ISystem (C++) 或 ecs:AddSystem (Luau) 替代。
+	// C++ 脚本引用组件(纯数据)。**逻辑不在组件里**:组件只保存"用哪个已注册脚本 +
+	// 一组属性值",真正的代码在脚本类型自己的普通方法里(OnCreate/OnUpdate/OnDestroy,
+	// 不再是虚函数面 —— 旧 OOP 基类 ScriptableEntity 已整体删除)。
 	//
 	// ScriptName = schema 里 Category==Script 的类型全名(如 "Game::ExampleScript")。
-	// 实例化按名字走 **schema 的脚本绑定(工厂)**,组件自己不再持函数指针 ⇒
+	// 实例化按名字走 **schema 的脚本绑定(工厂表)**,组件自己不再持函数指针 ⇒
 	// 存档往返、预制体克隆、AI 通道读写都与"这个组件是不是 C++ 代码建出来的"无关。
-	// Instance 只在 Play/Simulate 期间有效。
+	// 生命周期方法由 MakeScriptBinding<T>() 在编译期探测后填表,没有的槽位就是空。
+	// Instance 是运行期句柄(与 RigidBody2DComponent::RuntimeBodyId 同类),只在 Play/Simulate 期间有效。
 	struct CppScriptComponent
 	{
 		std::string ScriptName;
 		std::vector<ScriptProperty> Properties;
 		ScriptRuntimeState Runtime;
-		ScriptableEntity* Instance = nullptr;
+		void* Instance = nullptr;
 
 		WE_SCHEMA_BODY(World, CppScriptComponent, Component)
 			WE_SCHEMA_META(Category("Scripting"),

@@ -3784,7 +3784,7 @@ namespace World
 	//
 	// 三条硬口径(方案 v2 §3 + 派工单):
 	//   ① **编辑态不实例化脚本**:属性直接读写组件里的 `Properties`;不建 VM、不跑 OnCreate、
-	//      不构造 `ScriptableEntity`(实例只由 Scene 在 Play/Simulate 按 schema 工厂创建);
+	//      不构造脚本实例(实例只由 Scene 在 Play/Simulate 按 schema 工厂创建);
 	//   ② **Play/Simulate 只读**:控件走既有只读行 / 禁用按钮契约 + 一行只读说明;
 	//      C++ 组件在运行实例在场时按**实例**读真实值(只读展示),Luau 用组件里保存的值;
 	//   ③ **属性行复用既有类型化行渲染**:每条属性造一条临时 `FieldSchema`(Get/Set 直连属性值),

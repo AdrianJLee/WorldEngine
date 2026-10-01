@@ -606,7 +606,9 @@ namespace World
 						throw std::logic_error("C++ script is not registered: " + script.ScriptName);
 					script.Instance = type->Script->Create();
 					if (!script.Instance) throw std::runtime_error("Native script factory returned null");
-					script.Instance->m_Entity = Entity(this, entity);
+					// 生命周期槽位随实例捕获(工厂之后被注销也能配对收尾)。
+					script.Runtime.OnUpdate = type->Script->OnUpdate;
+					script.Runtime.OnDestroy = type->Script->OnDestroy;
 					// 属性表 → 实例。缺项保留脚本自己的构造默认值(与 schema 注解默认值同源)。
 					for (const ScriptProperty& property : script.Properties)
 					{
@@ -619,7 +621,7 @@ namespace World
 						{
 							Schema::Value container;
 							if (ScriptProperties::BuildContainerValue(property, &container))
-								field->Set(dynamic_cast<void*>(script.Instance), container);
+								field->Set(script.Instance, container);
 							continue;
 						}
 						// P2-②:手改场景 / 坏存档可能让值停在 monostate 或 variant 备选与声明类型不符 ——
@@ -636,10 +638,14 @@ namespace World
 									ScriptProperties::KindName(property.Type));
 							continue;
 						}
-						field->Set(dynamic_cast<void*>(script.Instance), property.Value);
+						field->Set(script.Instance, property.Value);
 					}
 					script.Runtime.CreateEntered = true;
-					script.Instance->OnCreate();
+					if (type->Script->OnCreate)
+					{
+						Entity self(this, entity);
+						type->Script->OnCreate(script.Instance, &self);
+					}
 					script.Runtime.State = ScriptInstanceState::Running;
 				});
 			}
@@ -668,16 +674,22 @@ namespace World
 		faulted = faulted || script->Runtime.State == ScriptInstanceState::Faulted;
 		script->Runtime.State = ScriptInstanceState::Destroying;
 		const ScriptSource source{ entity, entt::type_id<CppScriptComponent>().hash(), script->Runtime.Generation, true };
+
+		// 生命周期:OnDestroy 只与已成对的 OnCreate 配对发生一次(CreateEntered 置位后),
+		// 且**先于**工厂释放执行;它抛异常不阻止释放(独立 try,catch 后继续走释放路径)。
 		try
 		{
-			if (script->Instance && script->Runtime.CreateEntered)
+			if (script->Instance && script->Runtime.CreateEntered && script->Runtime.OnDestroy)
 			{
 				script->Runtime.CreateEntered = false;
-				InvokeCallback(source, [&] { script->Instance->OnDestroy(); });
+				Entity self(this, entity);
+				void (*onDestroy)(void*, void*) = script->Runtime.OnDestroy;
+				InvokeCallback(source, [&] { onDestroy(script->Instance, &self); });
 			}
 		}
 		catch (const std::exception& error) { script->Runtime.LastError += "\n" + NativeError(*script, entity, "OnDestroy", error.what()); Report(script->Runtime.LastError); faulted = true; }
 		catch (...) { script->Runtime.LastError += "\n" + NativeError(*script, entity, "OnDestroy", "Unknown exception"); Report(script->Runtime.LastError); faulted = true; }
+
 		try
 		{
 			const Schema::TypeSchema* type = m_Context ? m_Context->Schemas().Find(script->ScriptName) : nullptr;
@@ -698,6 +710,8 @@ namespace World
 		catch (...) { Report("Native script release threw an unknown exception"); faulted = true; }
 		script->Instance = nullptr;
 		script->Runtime.CreateEntered = false;
+		script->Runtime.OnUpdate = nullptr;
+		script->Runtime.OnDestroy = nullptr;
 		script->Runtime.State = faulted ? ScriptInstanceState::Faulted : ScriptInstanceState::Stopped;
 	}
 
@@ -738,6 +752,8 @@ namespace World
 				continue;
 			script->Instance = nullptr;
 			script->Runtime.CreateEntered = false;
+			script->Runtime.OnUpdate = nullptr;
+			script->Runtime.OnDestroy = nullptr;
 			script->Runtime.LastError.clear();
 			// 迁移配置态:同名同类型保旧值;新字段取新声明默认值;被删字段丢弃(与 SyncFromSchema 同口径)。
 			// CPPT-2(FIX1):迁移前后各留一份快照,诊断走同一份 DescribeScriptFieldMigration
@@ -1023,14 +1039,18 @@ namespace World
 
 	void Scene::UpdateScriptSnapshot(Timestep ts, const std::vector<entt::entity>& native, const std::vector<entt::entity>& lua)
 	{
+		// C++ 脚本(纯数据引用 + schema 工厂):按 ScriptName 查表拿 OnUpdate 槽位,
+		// 没有 OnUpdate 的脚本直接跳过(不再有虚函数面)。
 		for (const auto entity : native)
 		{
 			if (m_StopRequested) break;
 			if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<CppScriptComponent>().hash())) continue;
 			auto* script = m_Registry.try_get<CppScriptComponent>(entity);
 			if (!script || script->Runtime.State != ScriptInstanceState::Running || !script->Instance) continue;
+			void (*onUpdate)(void*, float) = script->Runtime.OnUpdate;
+			if (!onUpdate) continue;
 			const ScriptSource source{ entity, entt::type_id<CppScriptComponent>().hash(), script->Runtime.Generation };
-			try { InvokeCallback(source, [&] { script->Instance->OnUpdate(ts); }); }
+			try { InvokeCallback(source, [&] { onUpdate(script->Instance, ts.GetSeconds()); }); }
 			catch (const std::exception& error) { script->Runtime.LastError = NativeError(*script, entity, "OnUpdate", error.what()); Report(script->Runtime.LastError); DestroyNativeScript(entity, true); }
 			catch (...) { script->Runtime.LastError = NativeError(*script, entity, "OnUpdate", "Unknown exception"); Report(script->Runtime.LastError); DestroyNativeScript(entity, true); }
 		}

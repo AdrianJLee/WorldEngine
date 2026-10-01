@@ -3,7 +3,7 @@
 // P2 W2a:语言无关的行为注册层。
 //
 // 行为 = 挂在实体上的一段生命周期逻辑。当前引擎里有两类现成行为:
-//   - C++:CppScriptComponent + ScriptableEntity,字段来自 schema 反射(TypeSchema);
+//   - C++:CppScriptComponent + schema 工厂表(普通方法,无基类),字段来自 schema 反射(TypeSchema);
 //   - Luau:LuauScriptComponent,字段来自组件的属性表(ScriptProperty:名字 + Schema 值类型)。
 // 本层把"行为"从"具体组件类型"里抽象出来:稳定模块 id / 显示名 / 语言标记 /
 // 字段描述(名字 + schema 值类型 + 稳定 field id)/ 四个生命周期槽位。
@@ -47,7 +47,7 @@ namespace World
 	};
 
 	// 四个生命周期槽位的**能力声明**:不保存回调、不规定调用约定、不参与调度。
-	//   C++  -> ScriptableEntity 的 OnCreate/OnUpdate/OnDestroy 虚函数面;
+	//   C++  -> schema 工厂表上的 OnCreate/OnUpdate/OnDestroy 槽位(编译期探测,非虚函数);
 	//   Luau -> ScriptEngine 在脚本表上查找 OnCreate/OnUpdate/OnDestroy 的前端面。
 	// 是否真的实现了某个回调仍由各前端在加载期判定(Lua 允许回调为 nil)。
 	// OnEvent 预留给 W4 事件总线,W2a 恒为 false(没有任何前端接线)。

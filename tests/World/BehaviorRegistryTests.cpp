@@ -53,25 +53,25 @@ namespace
 	int s_LuaUpdates = 0;
 	int s_LuaDestroys = 0;
 
-	class ProbeBehavior final : public ScriptableEntity
+	// 纯数据脚本类:不继承任何基类,生命周期靠普通方法名(OnCreate/OnUpdate/OnDestroy)
+	// 被 MakeScriptBinding<T>() 的 SFINAE 探测后填进工厂表。
+	class ProbeBehavior final
 	{
 	public:
 		float Value = 0.0f;
 		std::string Label;
 
-	protected:
-		void OnCreate() override { ++s_NativeCreates; }
-		void OnUpdate(Timestep) override { ++s_NativeUpdates; }
-		void OnDestroy() override { ++s_NativeDestroys; }
+		void OnCreate() { ++s_NativeCreates; }
+		void OnUpdate(Timestep) { ++s_NativeUpdates; }
+		void OnDestroy() { ++s_NativeDestroys; }
 	};
 
-	class ZetaBehavior final : public ScriptableEntity
+	class ZetaBehavior final
 	{
 	public:
 		int32_t Score = 0;
 
-	protected:
-		void OnCreate() override {}
+		void OnCreate() {}
 	};
 
 	// 字段 id 与 schema-compiler 同规则:Fnv1a64("<Module>::<Type>.<FieldName>")。

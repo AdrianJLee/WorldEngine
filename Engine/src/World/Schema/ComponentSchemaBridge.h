@@ -4,6 +4,7 @@
 // Schema 核心不依赖 entt/Scene;这里提供 MakeComponentStorage/MakeScriptBinding,
 // 由 schema-compiler 生成的注册 TU 调用。只做类型转换,不持状态。
 
+#include "World/Core/Timestep.h"
 #include "World/Schema/Schema.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
@@ -55,24 +56,95 @@ namespace World::Schema
 		return binding;
 	}
 
+	// ---- 生命周期方法的编译期探测(SFINAE)——脚本类不继承任何基类 ----
+	// 判据是"表达式能否编译",不是"有没有虚函数";没有对应方法 = 该槽位留空。
+
+	template <typename T, typename = void>
+	struct HasOnCreateWithEntity : std::false_type {};
 	template <typename T>
-	// 2026-09-26 重写:绑定 = 工厂(创建 + 销毁),不再往组件里写函数指针。
-	// 断言 T 真的是脚本类型(有虚析构,可安全经 ScriptableEntity* 删除)。
+	struct HasOnCreateWithEntity<T, std::void_t<decltype(std::declval<T&>().OnCreate(std::declval<const World::Entity&>()))>> : std::true_type {};
+
+	template <typename T, typename = void>
+	struct HasOnCreatePlain : std::false_type {};
+	template <typename T>
+	struct HasOnCreatePlain<T, std::void_t<decltype(std::declval<T&>().OnCreate())>> : std::true_type {};
+
+	template <typename T, typename = void>
+	struct HasOnUpdate : std::false_type {};
+	template <typename T>
+	struct HasOnUpdate<T, std::void_t<decltype(std::declval<T&>().OnUpdate(std::declval<World::Timestep>()))>> : std::true_type {};
+
+	template <typename T, typename = void>
+	struct HasOnDestroyWithEntity : std::false_type {};
+	template <typename T>
+	struct HasOnDestroyWithEntity<T, std::void_t<decltype(std::declval<T&>().OnDestroy(std::declval<const World::Entity&>()))>> : std::true_type {};
+
+	template <typename T, typename = void>
+	struct HasOnDestroyPlain : std::false_type {};
+	template <typename T>
+	struct HasOnDestroyPlain<T, std::void_t<decltype(std::declval<T&>().OnDestroy())>> : std::true_type {};
+
+	inline const World::Entity& EntityFromRaw(const void* rawEntity)
+	{
+		static const World::Entity kEmpty;
+		return rawEntity ? *static_cast<const World::Entity*>(rawEntity) : kEmpty;
+	}
+
+	template <typename T>
+	// 2026-10-01 重写:绑定 = 工厂(创建 + 生命周期 + 销毁)。脚本类**不继承任何基类**:
+	// 按需提供 OnCreate/OnUpdate/OnDestroy 同名方法即可,SFINAE 探测后填表;没有的槽位留空。
 	inline ScriptBinding MakeScriptBinding()
 	{
-		static_assert(std::is_base_of_v<World::ScriptableEntity, T>,
-			"Category==Script 的类型必须继承 ScriptableEntity");
 		ScriptBinding binding;
-		binding.Create = []() -> World::ScriptableEntity*
+		binding.Create = []() -> void*
 		{
-			return static_cast<World::ScriptableEntity*>(WLD_POOL_NEW(T));
+			return static_cast<void*>(WLD_POOL_NEW(T));
 		};
-		binding.Destroy = [](World::ScriptableEntity* instance)
+		binding.Destroy = [](void* instance)
 		{
 			if (!instance)
 				return;
-			WLD_POOL_DELETE(T, World::PoolTag::General, instance);
+			WLD_POOL_DELETE(T, World::PoolTag::General, static_cast<T*>(instance));
 		};
+
+		if constexpr (HasOnCreateWithEntity<T>::value)
+		{
+			binding.OnCreate = [](void* instance, void* rawEntity)
+			{
+				static_cast<T*>(instance)->OnCreate(EntityFromRaw(rawEntity));
+			};
+		}
+		else if constexpr (HasOnCreatePlain<T>::value)
+		{
+			binding.OnCreate = [](void* instance, void*)
+			{
+				static_cast<T*>(instance)->OnCreate();
+			};
+		}
+
+		if constexpr (HasOnUpdate<T>::value)
+		{
+			binding.OnUpdate = [](void* instance, float deltaSeconds)
+			{
+				static_cast<T*>(instance)->OnUpdate(World::Timestep(deltaSeconds));
+			};
+		}
+
+		if constexpr (HasOnDestroyWithEntity<T>::value)
+		{
+			binding.OnDestroy = [](void* instance, void* rawEntity)
+			{
+				static_cast<T*>(instance)->OnDestroy(EntityFromRaw(rawEntity));
+			};
+		}
+		else if constexpr (HasOnDestroyPlain<T>::value)
+		{
+			binding.OnDestroy = [](void* instance, void*)
+			{
+				static_cast<T*>(instance)->OnDestroy();
+			};
+		}
+
 		return binding;
 	}
 }
