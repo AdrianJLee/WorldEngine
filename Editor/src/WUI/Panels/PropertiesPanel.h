@@ -6,6 +6,7 @@
 #include "World/WUI/WuiWidget.h"
 #include "World/WUI/WuiWidgets.h"
 
+#include <deque>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -51,6 +52,17 @@ namespace World
 			ScriptPropertyCollection Kind = ScriptPropertyCollection::None;
 			std::string IdText;
 			bool Writable = false;
+			// PURE-ECS:这一层是**原生组件**的容器行(值就是 C++ 结构体里的容器)。
+			// 差别只有两处:① `+` 出来的命名 struct 元素要按元素 schema 补齐子行
+			// (脚本路径的元素行来自声明,原生路径只有 schema);② 折回 Value 时不做
+			// "场景是否记录过"的判定(实例本身就是权威)。渲染/增删/键输入完全共用。
+			bool PlainRows = false;
+			// 原生路径的 `+` 用它查元素 schema(`Container.TypeName` → 子行);脚本路径留空。
+			const Schema::SchemaRegistry* ElementSchemas = nullptr;
+			// 原生路径的**回写目标**:容器折回 `Schema::Value` 后写进哪个实例的哪个字段。
+			// 只有这一层知道 `changed`(增删改都发生在这里),所以折回/写回也在这一层落地。
+			void* WriteInstance = nullptr;
+			const Schema::FieldSchema* WriteField = nullptr;
 		};
 		float DrawSchemaFields(Wui::WuiContext& ctx, Wui::WuiId base, const Wui::WuiRect& rect, void* instance,
 			const std::string& typeName, const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
@@ -92,6 +104,19 @@ namespace World
 		std::string m_ScriptInspectingComponentName;   // schema.DisplayName(prefab 覆盖登记用)
 		// 当前绘制位置的**容器路径**(行路径 = 它 + 字段名);只有脚本属性行的递归维护它。
 		std::vector<std::string> m_ScriptRowPath;
+		// ---- PURE-ECS:普通 schema 组件的容器字段(Array/Map)----
+		//
+		// 纯 ECS 起组件是纯数据,容器字段直接挂在 C++ 结构体上(生成访问器装箱成
+		// `Schema::ValueList`/`ValueMap`,字段的 `GetNested` 为空)。旧的集合编辑 UI 只服务
+		// 脚本属性路径(那条路径随单实体脚本一起死了),所以这里把容器字段接到同一套行机制上:
+		// 每帧从**实例值**水合出 `ScriptProperty` 行模型 → 复用脚本行的渲染(分组头 / 元素行 /
+		// `+` / `-` / 映射键输入)→ 变更时折回 `Schema::Value` 写进结构体字段。
+		//
+		// true = 当前正在画的这一层就是原生容器行(叶子行的 `↺`/集合行判据据此走"声明默认"口径)。
+		bool m_PlainContainerRows = false;
+		// 容器元素的水合来源:元素是命名 struct 时 `+` 需要它建子行(等价于脚本路径的
+		// `m_ScriptInspectingEntity → scene.Schemas()`)。由 `DrawComponentInspector` 每组件刷新。
+		const Schema::SchemaRegistry* m_ContainerElementSchemas = nullptr;
 		// 本帧当前脚本组件的注解/schema 声明(只有 Luau 有):集合头的"形状是否偏离默认"判定要按
 		// 声明的默认形状比较;每帧在 DrawScriptComponentInspector 开头刷新,离开该函数即失效(不再引用)。
 		std::vector<ScriptProperties::Declaration> m_ScriptDeclarations;

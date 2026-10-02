@@ -556,6 +556,18 @@ namespace World
 			return true;
 		}
 
+		// PURE-ECS:无条件折叠(见头文件契约)。判据与 BuildContainerValue 的守卫一致,只是去掉
+		// "IsSceneRecorded / ShapeFromScene" 那一段 —— 纯 ECS 组件字段的值来自实例本身。
+		bool FoldContainerRows(const ScriptProperty& property, Schema::Value* outValue)
+		{
+			if (!outValue || property.ReadOnly ||
+				(property.Collection != ScriptPropertyCollection::Array &&
+					property.Collection != ScriptPropertyCollection::Map))
+				return false;
+			*outValue = FoldContainer(property);
+			return true;
+		}
+
 		void SyncFromDeclarations(std::vector<ScriptProperty>& properties,
 			const std::vector<Declaration>& declarations)
 		{

@@ -159,7 +159,8 @@ namespace World
 		// (绘制期只读探测;口径与 ProjectLauncher::DeleteProjectPermanently 的守卫一致):
 		//   Delete  = 目录在 + 含项目清单 ⇒ 提供"永久删除"(危险色);
 		//   Missing = 目录已不存在 ⇒ 提供"从列表移除"(只动 local/projects.json,不碰磁盘);
-		//   Reject  = 目录在但不是项目(缺 project.we.yaml)⇒ 拒绝 + 可读理由,不提供删除。
+		//   Reject  = 目录在但不是项目(缺 project.we.yaml)⇒ 拒绝打开/删除 + 可读理由,
+		//             但仍提供"从列表移除"(只动 local/projects.json,不碰磁盘)。
 		enum class LauncherDeleteVariant { Delete, Missing, Reject };
 
 		LauncherDeleteVariant ClassifyLauncherDeleteTarget(const std::string& path)
@@ -6147,7 +6148,8 @@ namespace World
 	//      `永久删除`(危险色)+ `取消`(Esc = 取消);
 	//   ② 目录已不存在 ⇒ 换成"该目录已不存在",主按钮变 `从列表移除` —— 只调 RemoveRecent
 	//      (只动 local/projects.json,绝不碰磁盘);
-	//   ③ 目录在但不是项目(缺 project.we.yaml)⇒ 拒绝 + 可读理由,不提供删除(只有 `取消`)。
+	//   ③ 目录在但不是项目(缺 project.we.yaml)⇒ 拒绝打开/删除 + 可读理由,主按钮同样是
+	//      `从列表移除`(只调 RemoveRecent),磁盘一动不动。
 	// 用户可见的删除只发生在形态①的 `永久删除` 被点的那一帧,并且全部安全守卫都在
 	// ProjectLauncher::DeleteProjectPermanently(先全查、再做唯一的写操作 remove_all);
 	// 失败/被拒时列表项**不动**,原因就地显示 + 状态栏通知。
@@ -6197,6 +6199,7 @@ namespace World
 			std::string bodyLabel = Wui::Tr("modal.project_delete.reject.title", "Cannot delete this folder");
 			std::string bodyText = Wui::Tr("modal.project_delete.error.no_manifest",
 				"Not a WorldEngine project: project.we.yaml is missing");
+			std::string bodyHint;                 // 形态③第二行:可以只把记录从最近列表移除
 			Wui::WuiColor bodyColor = m_Theme.Danger;
 			if (variant == LauncherDeleteVariant::Delete)
 			{
@@ -6214,6 +6217,14 @@ namespace World
 					"from the recent list.");
 				bodyColor = m_Theme.Text;
 			}
+			else if (variant == LauncherDeleteVariant::Reject)
+			{
+				// 目录在、但没有 project.we.yaml:打不开也删不掉;出口是"只把这条记录从最近
+				// 列表移除" —— 与形态②同一条 RemoveRecent 路径,磁盘一动不动。
+				bodyHint = Wui::Tr("modal.project_delete.reject.remove_hint",
+					"It cannot be opened or deleted. You can still remove this entry from the "
+					"recent list — nothing on disk is touched.");
+			}
 			Wui::Label(ctx, { frame.X + pad, cursorY }, bodyText, bodyColor, 12.5f);
 			Wui::WuiAccessNode node;
 			node.Id = bodyNodeId;
@@ -6221,14 +6232,21 @@ namespace World
 			node.Panel = "shell";
 			node.Kind = "text";
 			node.Label = bodyLabel;
-			node.Value = bodyText;
+			// 形态③:两行都给到同一个节点,读屏/脚本一次拿到完整说明。
+			node.Value = bodyHint.empty() ? bodyText : bodyText + " " + bodyHint;
 			node.Rect = { frame.X + pad, cursorY - 2.0f, contentWidth, 20.0f };
 			node.Enabled = true;
 			node.Interactive = false;
 			node.Visible = true;
 			Wui::WuiAccessibility::Get().Register(node);
+			cursorY += 20.0f;
+			if (!bodyHint.empty())
+			{
+				Wui::Label(ctx, { frame.X + pad, cursorY }, bodyHint, m_Theme.TextMuted, 12.0f);
+				cursorY += 20.0f;
+			}
 		}
-		cursorY += 34.0f;
+		cursorY += 14.0f;
 
 		// 失败/被拒的原因就地显示(上一帧 API 的返回文本);状态栏通知里也有一份。
 		if (!m_LauncherDeleteError.empty())
@@ -6247,11 +6265,11 @@ namespace World
 		const float cancelWidth = std::min(160.0f,
 			std::max(90.0f, ctx.MeasureTextWidth(cancelLabel, 15.0f) + 30.0f));
 
-		// 主按钮:形态① = `永久删除`(危险色);形态② = `从列表移除`(安全动作);形态③ = 不提供。
+		// 主按钮:形态① = `永久删除`(危险色);形态②/③ = `从列表移除`(安全动作,只动最近列表)。
 		std::string primaryLabel;
 		if (variant == LauncherDeleteVariant::Delete)
 			primaryLabel = Wui::Tr("modal.project_delete.confirm", "Delete permanently");
-		else if (variant == LauncherDeleteVariant::Missing)
+		else
 			primaryLabel = Wui::Tr("modal.project_delete.remove_from_list", "Remove from list");
 		const float primaryWidth = primaryLabel.empty() ? 0.0f : std::min(200.0f,
 			std::max(110.0f, ctx.MeasureTextWidth(primaryLabel, 15.0f) + 30.0f));
@@ -6267,9 +6285,10 @@ namespace World
 				{ rowX, buttonY, primaryWidth, buttonHeight }, primaryLabel, DangerButtonTheme(m_Theme),
 				true, true, std::string());
 		}
-		else if (variant == LauncherDeleteVariant::Missing)
+		else
 		{
-			// 失效条目补偿:只动最近列表 —— tooltip 明确"磁盘上什么都不动"。
+			// 失效/非项目条目补偿(形态②目录已不存在;形态③目录在但不是项目):
+			// 只动最近列表 —— tooltip 明确"磁盘上什么都不动"。
 			primaryClicked = Wui::ButtonEx(ctx, Wui::HashId("project.project_delete.confirm"),
 				{ rowX, buttonY, primaryWidth, buttonHeight }, primaryLabel, m_Theme, true, false,
 				Wui::Tr("modal.project_delete.remove_from_list.tooltip",
@@ -6301,9 +6320,9 @@ namespace World
 					{ { "reason", reason } }));
 			}
 		}
-		else if (variant == LauncherDeleteVariant::Missing && primaryClicked)
+		else if (variant != LauncherDeleteVariant::Delete && primaryClicked)
 		{
-			// 失效条目补偿:只调 RemoveRecent(local/projects.json),磁盘一动不动。
+			// 失效/非项目条目补偿:只调 RemoveRecent(local/projects.json),磁盘一动不动。
 			std::string error;
 			if (Editor::ProjectLauncher::RemoveRecent(std::filesystem::u8path(path), &error))
 			{

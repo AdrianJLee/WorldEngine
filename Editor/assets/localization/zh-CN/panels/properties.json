@@ -92,6 +92,7 @@
   "panel.properties.remove.core": "核心组件不可移除",
   "panel.properties.remove.readonly": "播放 / 模拟运行中,只读",
   "panel.properties.script_reset": "恢复组件默认值",
+  "panel.properties.plain_row_reset": "恢复这一项的声明默认值",
   "panel.properties.script_reset.tooltip": "恢复到组件里的默认值",
   "panel.properties.script_collection_reset.title": "恢复整个集合",
   "panel.properties.script_collection_reset.body": "把这个集合恢复到组件声明的默认形状与默认值。",

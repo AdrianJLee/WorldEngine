@@ -134,6 +134,12 @@ namespace World
 		//   * 非容器属性 → false(outValue 不动)。
 		WLD_API bool BuildContainerValue(const ScriptProperty& property, Schema::Value* outValue);
 
+		// PURE-ECS:把容器行**无条件**折成 schema 容器值(ValueList / ValueMap;命名 struct 元素 =
+		// "字段名 → Value" 的 ValueMap)。与 `BuildContainerValue` 的唯一差别是不做"场景是否记录过"
+		// 的判定 —— 调用方是"值就是实例本身"的纯 ECS 组件字段(形状/值即权威,没有"未设"概念)。
+		// 返回 false = 不是可折叠的容器(非 Array/Map 或 ReadOnly)。
+		WLD_API bool FoldContainerRows(const ScriptProperty& property, Schema::Value* outValue);
+
 		WLD_API ScriptProperty* Find(std::vector<ScriptProperty>& properties, const std::string& name);
 		WLD_API const ScriptProperty* Find(const std::vector<ScriptProperty>& properties, const std::string& name);
 	}

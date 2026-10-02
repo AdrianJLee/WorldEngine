@@ -670,8 +670,14 @@ namespace World
 		void ScriptTableChildSet(void* instance, const Schema::Value& edited)
 		{
 			auto* parent = static_cast<ScriptProperty*>(instance);
-			if (parent && Index < parent->Children.size())
-				parent->Children[Index].Value = edited;
+			if (!parent || Index >= parent->Children.size())
+				return;
+			ScriptProperty& child = parent->Children[Index];
+			// PURE-ECS:行内 `↺` 写回的是 monostate(= "清成未设")。原生组件(纯 ECS)的容器元素
+			// 没有"脚本成员初值"可回落,`↺` 的语义就是**回到这一行的声明默认**(`+` 追加时的同一种子,
+			// 见 `AppendCollectionElementFields`/`MakeCollectionElement`),所以把 monostate 落成
+			// `Default` 而不是留在行上 —— 折回 Value 时不会出现"未设"元素。
+			child.Value = std::holds_alternative<std::monostate>(edited) ? child.Default : edited;
 		}
 
 		template <size_t Index>
@@ -752,6 +758,15 @@ namespace World
 
 		const auto kScriptEnumTable = MakeScriptEnumTable(std::make_index_sequence<kScriptEnumMax> {});
 
+		// PURE-ECS:两处 per-draw 合成 arena 的复位。两者原本只服务脚本属性路径(M8 之后那条路径
+		// 已死),`Used` 从来没人清零;接上原生容器字段后必须**每个组件**重新开始,否则第 257 个
+		// 节点(或第 33 个枚举)开始容器行会静默退化成只读摘要。
+		void ResetScriptRowArenas()
+		{
+			ScriptTableArena().Used = 0;
+			ScriptEnumArenaStore().Used = 0;
+		}
+
 		using ScriptEnumGetter = const Schema::EnumSchema* (*)();
 
 		// 从注册表取枚举 schema 的稳定访问器(nullptr = 找不到 / arena 溢出 → 行降级只读摘要)。
@@ -807,11 +822,16 @@ namespace World
 		//  · 顶层行:合成 schema 不在 arena 里,instance 就是那条属性本身。
 		// 调用方必须已确认这是合成路径(m_ScriptInspectingScriptRows)—— Play 里 C++ 实例走真实
 		// 结构体指针,cast 成 ScriptProperty* 是未定义行为。
-		const ScriptProperty* ScriptRowModel(const Schema::TypeSchema& node, const void* instance, size_t fieldIndex)
+		const ScriptProperty* ScriptRowModel(const Schema::TypeSchema& node, const void* instance, size_t fieldIndex,
+			bool scriptRows)
 		{
 			if (const ScriptProperty* owner = ScriptTableNodeOwner(&node))
 				return fieldIndex < owner->Children.size() ? &owner->Children[fieldIndex] : nullptr;
-			return static_cast<const ScriptProperty*>(instance);
+			// 顶层脚本行:instance 就是那条属性本身 —— **只对脚本合成路径成立**。
+			// PURE-ECS 起原生组件的容器行也走 arena(`ScriptTableNodeOwner` 命中上一条分支),
+			// 所以这里必须把"instance 强转成 ScriptProperty*"限制在脚本路径,避免把真实
+			// C++ 结构体指针当属性读(未定义行为)。
+			return scriptRows ? static_cast<const ScriptProperty*>(instance) : nullptr;
 		}
 
 		// VEC-H6:一条**叶子**属性是否偏离脚本声明的默认值(与面板显示同源):
@@ -972,7 +992,13 @@ namespace World
 		// (如 `{{number}}`)时模板取已有同类元素的形态(Collection/ElementKind/KeyKind 在子项上)。
 		// 空容器没有模型行可抄 → 按声明/节点形状建模板(见上,CPPT-6-ED-COLLECTIONS);
 		// `schemas` 只有 C++ 脚本合成路径传得进来(Luau 的元素来自注解声明,保持既有回落)。
-		ScriptProperty MakeCollectionElement(const ScriptProperty& container, const Schema::SchemaRegistry* schemas)
+		// 前向声明:水合辅助定义在合成 schema 构建器之后(`+` 追加 struct 元素时要用)。
+		void HydratePlainStructElement(ScriptProperty& element, const Schema::SchemaRegistry* schemas);
+		void HydrateStructElementChildren(ScriptProperty& row, const Schema::TypeSchema& nested,
+			const Schema::Value& value, int depth, const Schema::SchemaRegistry* schemas);
+
+		ScriptProperty MakeCollectionElement(const ScriptProperty& container, const Schema::SchemaRegistry* schemas,
+			bool plainRows)
 		{
 			ScriptProperty child;
 			child.Type = container.ElementKind;
@@ -985,6 +1011,10 @@ namespace World
 				child.ElementKind = model.ElementKind;
 				child.KeyKind = model.KeyKind;
 				child.ReadOnly = model.ReadOnly;
+				// PURE-ECS:模型行抄形状**不抄子行** —— 原生路径的命名 struct 元素没有声明可
+				// 依赖,子行只能从元素 schema 建(脚本路径的元素行来自 Luau 声明,那里不需要)。
+				if (plainRows && child.Type == Schema::Kind::Object)
+					HydratePlainStructElement(child, schemas);
 			}
 			else
 			{
@@ -1264,6 +1294,150 @@ namespace World
 			return field;
 		}
 
+// ---- PURE-ECS:原生组件容器字段的"水合" ----
+		//
+		// 纯 ECS 组件是纯数据,没有挂在组件里的属性模型(旧的 CppScriptComponent 有一个
+		// `std::vector<ScriptProperty> Properties` 成员,面板改的是它)。原生容器因此每帧从
+		// **实例值**水合出行模型:形状/类型名/说明来自字段声明,值来自实例 ⇒ 面板显示的永远
+		// 等于结构体里的值;回写走 `ScriptProperties::FoldContainer`(折成生成访问器期望的
+		// `ValueList`/`ValueMap`,含命名 struct 元素的"字段名 → Value"形态)。
+		constexpr int kPlainContainerMaxDepth = 4;
+
+		// 按名字在注册表里找命名 struct 的 schema(元素行 / `+` 追加共用)。
+		const Schema::TypeSchema* FindNamedStructSchema(const Schema::SchemaRegistry* schemas,
+			const std::string& typeName)
+		{
+			return (schemas && !typeName.empty()) ? schemas->Find(typeName) : nullptr;
+		}
+
+		// 原生路径:给一个命名 struct 元素(还没有子行)按 schema 补出可编辑子行并记下默认种子。
+		// `Value` 保持 monostate:折叠时 `ElementValueOf` 对 Object 行按 `Children` 折成 ValueMap。
+		void HydratePlainStructElement(ScriptProperty& element, const Schema::SchemaRegistry* schemas)
+		{
+			if (element.Type != Schema::Kind::Object || !element.Children.empty() || element.ReadOnly)
+				return;
+			const Schema::TypeSchema* elementSchema = FindNamedStructSchema(schemas, element.TypeName);
+			if (!elementSchema)
+			{
+				element.ReadOnly = true;   // schema 拿不到 → 只读摘要(与引擎降级同口径)
+				return;
+			}
+			HydrateStructElementChildren(element, *elementSchema, Schema::Value(Schema::ValueMap {}), 0, schemas);
+		}
+
+		// 声明种子同时记成行默认值:`↺` 的语义 = 回到这个种子(原生容器没有别的"默认"可回落)。
+		void CapturePlainRowDefaults(ScriptProperty& row)
+		{
+			if (row.Type == Schema::Kind::Object)
+			{
+				for (ScriptProperty& child : row.Children)
+					CapturePlainRowDefaults(child);
+				return;
+			}
+			if (std::holds_alternative<std::monostate>(row.Default))
+				row.Default = row.Value;
+		}
+
+		// 命名 struct 元素的子行:形状从元素 schema 取(声明种子 → 默认值),值从实例的
+		// ValueMap 覆盖(键缺失 = 保留声明种子,面板不会显示"未设")。
+		void HydrateStructElementChildren(ScriptProperty& row, const Schema::TypeSchema& nested,
+			const Schema::Value& value, int depth, const Schema::SchemaRegistry* schemas)
+		{
+			AppendCollectionElementFields(row.Children, nested, depth);
+			for (ScriptProperty& child : row.Children)
+				CapturePlainRowDefaults(child);
+			const Schema::ValueMap* map = std::get_if<Schema::ValueMap>(&value);
+			if (!map)
+				return;
+			for (ScriptProperty& child : row.Children)
+			{
+				const Schema::ValueMap::const_iterator found = map->find(child.Name);
+				if (found == map->end())
+					continue;
+				if (child.Type == Schema::Kind::Object)
+				{
+					// 嵌套命名 struct:`AppendCollectionElementFields` 把声明名写进了 `TypeName`
+					// (与 schema 字段的 `GetNested()->Id.Name` 同一口径),按它回查子 schema。
+					const Schema::TypeSchema* childSchema = (schemas && !child.TypeName.empty())
+						? schemas->Find(child.TypeName) : nullptr;
+					if (childSchema && depth + 1 <= kPlainContainerMaxDepth)
+						HydrateStructElementChildren(child, *childSchema, found->second, depth + 1, schemas);
+				}
+				else
+					child.Value = found->second;
+			}
+		}
+
+		// 一个容器字段(Array/Map)从实例值水合出行模型。形状 = 实例里的元素(空容器 = 没有行,
+		// 面板给"暂无元素 + `+`");元素类型/说明/编辑元数据 = 字段声明 + 元素 schema。
+		ScriptProperty HydratePlainContainer(const Schema::FieldSchema& field, const Schema::Value& value,
+			const Schema::SchemaRegistry* schemas)
+		{
+			ScriptProperty container;
+			container.Name = field.Name;
+			container.Type = Schema::Kind::Object;
+			container.Doc = field.Meta.Doc;
+			container.Collection = field.Collection == Schema::CollectionKind::Map
+				? ScriptPropertyCollection::Map : ScriptPropertyCollection::Array;
+			container.ElementKind = field.ElementKind;
+			container.KeyKind = field.KeyKind;
+			if (field.ElementTypeName)
+				container.TypeName = field.ElementTypeName;
+			const Schema::TypeSchema* elementSchema = field.GetElementNested ? field.GetElementNested() : nullptr;
+			if (!elementSchema && schemas && !container.TypeName.empty())
+				elementSchema = schemas->Find(container.TypeName);
+			if (container.ElementKind == Schema::Kind::Enum)
+			{
+				const Schema::EnumSchema* enumSchema = field.GetEnum ? field.GetEnum() : nullptr;
+				if (enumSchema)
+					container.TypeName = enumSchema->Name;
+				else
+					container.ReadOnly = true;
+			}
+			else if (container.ElementKind == Schema::Kind::Object && !elementSchema)
+			{
+				container.ReadOnly = true;   // 元素 schema 拿不到:只读摘要(与引擎声明同一条降级)
+			}
+			else if (ScriptProperties::IsSummaryKind(container.ElementKind))
+			{
+				container.ReadOnly = true;   // 面板没有行控件
+			}
+
+			// 逐元素建行。元数据(Range/Unit/Step)声明在**容器字段**上,由 BuildScriptTableSchema
+			// 的 elementRow 分支透传给元素行 —— 与旧脚本路径逐字段一致。
+			const auto makeElement = [&](const Schema::Value& elementValue, const std::string& name, int depth)
+			{
+				ScriptProperty child;
+				child.Name = name;
+				child.Type = container.ElementKind;
+				child.TypeName = container.TypeName;
+				child.ReadOnly = container.ReadOnly;
+				if (child.Type == Schema::Kind::Object && elementSchema)
+					HydrateStructElementChildren(child, *elementSchema, elementValue, depth, schemas);
+				else
+					child.Value = elementValue;
+				CapturePlainRowDefaults(child);
+				if (child.Type != Schema::Kind::Object && !ScriptPropertyValueMatchesType(child))
+					child.Value = DefaultScriptPropertyValue(child.Type);   // 存值类型不符 → 声明零值
+				return child;
+			};
+
+			if (const Schema::ValueList* items = std::get_if<Schema::ValueList>(&value))
+			{
+				container.Children.reserve(items->size());
+				for (size_t index = 0; index < items->size(); ++index)
+					container.Children.push_back(makeElement((*items)[index], std::to_string(index + 1), 0));
+			}
+			else if (const Schema::ValueMap* items = std::get_if<Schema::ValueMap>(&value))
+			{
+				container.Children.reserve(items->size());
+				for (const auto& [key, elementValue] : *items)
+					container.Children.push_back(makeElement(elementValue, key, 0));
+			}
+			return container;
+		}
+
+		
 		// 按名字在 schema 类型里找字段(C++ 脚本的字段说明 / 默认值都挂在 schema 上)。
 		const Schema::FieldSchema* FindScriptSchemaField(const Schema::TypeSchema& schema, const std::string& name)
 		{
@@ -2811,6 +2985,10 @@ namespace World
 		const Wui::WuiTheme& theme = m_Host.Theme();
 		float y = 0;
 		bool changed = false;
+		// ---- PURE-ECS:本帧从 arena 水合出的原生容器节点 ----
+		// BuildScriptTableSchema 通过 `arena.Owners[]` 直接引用它们(绘制期间指针必须稳定)。折回 Value / 写回在**容器自己那一层**
+		// (元素增删改都发生在那里,只有那一层知道 `changed`)。
+		std::deque<ScriptProperty> plainNodes;
 		// VEC-H2:标签列宽来自库件(与 PropertyRow/PropertyGroupHeader 共用同一条口径),
 		// 同一面板传同一值 ⇒ 标签列竖向对齐;面板不再自己算 0.45 倍。
 		const float labelWidth = Wui::PropertyRowLabelWidth(rect);
@@ -2889,8 +3067,11 @@ namespace World
 			// 用户反馈的"点一个元素把整个集合都复原了")。
 			const Wui::WuiId resetId = Wui::HashId((rowIdText + ".reset").c_str());
 			const bool resetEnabled = scriptPropertyRow && !m_ReadOnly && !field.Meta.ReadOnly;
-			const std::string resetLabel = Wui::Tr("panel.properties.script_reset",
-				"Reset this item to the script default");
+			// PURE-ECS:原生容器行的 `↺` 回到**声明种子**(不再是"脚本默认值"),文案跟着分开,
+			// 避免对着纯 ECS 组件说"脚本"。
+			const std::string resetLabel = m_PlainContainerRows
+				? Wui::Tr("panel.properties.plain_row_reset", "Reset this item to its declared default")
+				: Wui::Tr("panel.properties.script_reset", "Reset this item to the script default");
 			const std::string resetDoc = resetEnabled
 				? Wui::Tr("panel.properties.script_reset.tooltip", ScriptItemResetDoc())
 				: Wui::Tr("panel.properties.script_readonly_notice",
@@ -2900,7 +3081,7 @@ namespace World
 			// 没有 Value/Default 可比 —— 保持既有"画禁用占位 + 理由"的口径(判据不可用时不去猜)。
 			const size_t fieldIndex = static_cast<size_t>(&field - schema.Fields.data());
 			const ScriptProperty* scriptRow = (scriptPropertyRow && m_ScriptInspectingScriptRows)
-				? ScriptRowModel(schema, instance, fieldIndex) : nullptr;
+				? ScriptRowModel(schema, instance, fieldIndex, m_ScriptInspectingScriptRows) : nullptr;
 			const bool resetModified = scriptRow
 				? ScriptRowModified(*scriptRow, scriptRowDeclaration(field.Name)) : true;
 			const auto applyItemReset = [&]()
@@ -2929,9 +3110,55 @@ namespace World
 
 			if (field.K == Schema::Kind::Object)
 			{
+				// PURE-ECS:原生容器行会把本行(含子树)临时切进脚本行渲染路径。RAII 在本次循环
+				// 迭代结束(含 `continue`)时还原,所以不需要在每个出口写还原代码。
+				struct PlainContainerScopeGuard
+				{
+					bool& Plain;
+					bool& ScriptRow;
+					bool PlainSaved;
+					bool ScriptRowSaved;
+					PlainContainerScopeGuard(bool& plain, bool& scriptRow)
+						: Plain(plain), ScriptRow(scriptRow), PlainSaved(plain), ScriptRowSaved(scriptRow) {}
+					~PlainContainerScopeGuard()
+					{
+						Plain = PlainSaved;
+						ScriptRow = ScriptRowSaved;
+					}
+				} plainScopeGuard(m_PlainContainerRows, scriptPropertyRow);
 				const std::string& idText = rowIdText;
 				const Schema::TypeSchema* nested = field.GetNested ? field.GetNested() : nullptr;
 				void* nestedInstance = field.GetPtr ? field.GetPtr(instance) : nullptr;
+				// ---- PURE-ECS:原生组件的容器字段(Array/Map)----
+				// 生成的容器访问器把字段做成 `K = Object` + `Collection != None`,而
+				// `GetPtr`/`GetNested` **都是空** ⇒ 天然落进下面那条"只读摘要"分支,容器字段
+				// 在纯 ECS 组件里完全没有编辑入口。这里先把实例值水合成行模型,后面按
+				// `scriptPropertyRow = true` 复用脚本行那一整套渲染(元素行 / `+` / `-` / 键输入)。
+				//
+				// 行 id 必须与字段自己的 `rowIdText` 一致,否则元素行的 `+`/`-` 动作与元素控件
+				// 会落到 `properties.<类型>.<字段>.<子字段>` 之外的前缀上(见 BuildScriptTableSchema
+				// 用 DisplayName 当递归 id 前缀)。容器节点的行名就是字段名(管道两侧同名约定)。
+				const bool plainContainerField = !scriptPropertyRow && m_ContainerElementSchemas != nullptr && !nested
+					&& field.Collection != Schema::CollectionKind::None && field.K == Schema::Kind::Object;
+				if (plainContainerField)
+				{
+					plainNodes.push_back(HydratePlainContainer(field, field.Get(instance), m_ContainerElementSchemas));
+					ScriptProperty& containerNode = plainNodes.back();
+					containerNode.Name = field.Name;
+					nestedInstance = &containerNode;
+					// 合成器只对外给「字段」入口(MakeScriptTableField),容器需要的嵌套节点从它的
+					// GetNested() 取(指针落在 arena 里,绘制期间稳定)。arena 满 = 退化成只读摘要行。
+					const Schema::FieldSchema containerField =
+						MakeScriptTableField(containerNode, rowIdText, m_ContainerElementSchemas, &field);
+					nested = containerField.GetNested ? containerField.GetNested() : nullptr;
+					// 这一行(及其子树)切到**脚本行渲染路径**:分组头 + 元素行 + 行外 `+`/`-`
+					// 就是容器需要的全部交互,原生路径只是喂给它不同的数据源。
+					// `m_ScriptInspectingScriptRows` 保持 false ⇒ 复位/声明默认那几条消费脚本模型的
+					// 分支不会打开;`m_PlainContainerRows` 让子层知道该按 schema 补元素子行、并且
+					// 折回 Value 时不做"场景是否记录过"的判定。
+					scriptPropertyRow = true;
+					m_PlainContainerRows = true;
+				}
 				// VEC-B3:脚本属性里的裸 table / 面板侧降级的结构化表 = 只读摘要行。
 				// 这一支只对脚本属性行开放(`scriptPropertyRow`),普通 schema 的 Object 字段
 				// 行为不变;摘要行不可展开、不可编辑、不进存档(值根本没有合成到这里)。
@@ -3002,11 +3229,14 @@ namespace World
 				// `nestedInstance` 只有在合成属性表路径上才是 `ScriptProperty*`(Play 里 C++ 实例走真实
 				// 结构体指针)→ 形态/复位只对合成路径成立;Play 那一路只画禁用占位。
 				const bool headScriptRow = headResetDrawn && m_ScriptInspectingScriptRows;
+				// PURE-ECS:原生容器行同样走合成节点(值就是组件字段),但它没有"脚本声明的默认形状"
+				// 可复原 ⇒ 只借形态/条数显示,复位整条不出现(点它没有可落地的语义)。
+				const bool headPlainRow = headResetDrawn && m_PlainContainerRows;
 				const bool headResettable = headScriptRow && !m_ReadOnly && !field.Meta.ReadOnly;
 				// 集合头 `↺` 的 id 契约:`properties.<组件>.<属性>.reset`(与单项同一字符串,
 				// 差别只在落点:集合头落在容器行,单项落在元素/键值行)。
 				ScriptPropertyCollection headKind = ScriptPropertyCollection::Struct;
-				if (headScriptRow)
+				if (headScriptRow || headPlainRow)
 					headKind = static_cast<const ScriptProperty*>(nestedInstance)->Collection;
 				const std::string headLabel = ScriptCollectionHeadResetLabel(headKind);
 				const std::string headDoc = headResettable
@@ -3020,7 +3250,7 @@ namespace World
 				head.LabelWidth = labelWidth;
 				head.LabelIndent = labelIndent;
 				// VEC-H4:集合头右侧常驻"当前条数"(数组/映射/结构化表都算),折叠时也知道里面有几项。
-				if (headScriptRow && !field.Meta.ReadOnly)
+				if ((headScriptRow || headPlainRow) && !field.Meta.ReadOnly)
 				{
 					const size_t childCount = static_cast<const ScriptProperty*>(nestedInstance)->Children.size();
 					head.Trailing = Wui::Tr("panel.properties.collection_count", "{n} item(s)");
@@ -3034,10 +3264,10 @@ namespace World
 				head.A11yLabel = labelText;
 				head.Open = open;
 				head.Enabled = reachable(row);
-				head.ShowReset = headResetDrawn;
+				head.ShowReset = headResetDrawn && !headPlainRow;
 				head.ResetEnabled = headResettable;
 				// VEC-H6:集合头 `↺` 只在"有任一元素/键值/形状偏离默认"时出现。
-				head.ResetModified = resetModified;
+				head.ResetModified = headPlainRow ? false : resetModified;
 				head.ResetId = resetId;
 				head.ResetLabel = headLabel;
 				head.ResetTooltip = headDoc;
@@ -3045,7 +3275,7 @@ namespace World
 					Wui::PropertyGroupHeader(ctx, rowNodeId, row, head, theme);
 				if (header.Toggled)
 					open = !open;
-				if (header.ResetClicked && headResettable)
+				if (header.ResetClicked && headResettable && !headPlainRow)
 				{
 					// VEC-H6:记下请求,等本组件画完再落地(同一帧后面的子行仍按旧 schema 画)。
 					m_PendingCollectionReset = static_cast<ScriptProperty*>(nestedInstance);
@@ -3063,7 +3293,16 @@ namespace World
 					ScriptCollectionRows* nestedRowsPtr = nullptr;
 					if (scriptPropertyRow)
 					{
-						const ScriptPropertyCollection nestedCollection = ScriptTableCollectionOf(nested);
+						// PURE-ECS:元素自身是容器(命名 struct 里的嵌套 Array/Map)分两种来源 ——
+						// ① 节点在合成 arena 里(脚本行 / 原生容器的子节点),形态由 `Collections[]` 给出;
+						// ② 原生容器路径下,元素自己的 `ScriptProperty` 直接带 `Collection`(水合时从声明抄的),
+						//    `Collections[]` 对它也命中,所以上一条已经覆盖 —— 这里只在 arena 未命中时兜底。
+						ScriptPropertyCollection nestedCollection = ScriptTableCollectionOf(nested);
+						// 兜底只对**合成节点**做(arena 里有它的 owner)。原生指针(Play 里的真实
+						// 结构体)不在 arena 里 → 这里绝不强转成 ScriptProperty*,与 ScriptRowModel 同一条防线。
+						if (nestedCollection == ScriptPropertyCollection::None)
+							if (const ScriptProperty* owner = ScriptTableNodeOwner(nested))
+								nestedCollection = owner->Collection;
 						if (nestedCollection == ScriptPropertyCollection::Array
 							|| nestedCollection == ScriptPropertyCollection::Map)
 						{
@@ -3071,6 +3310,11 @@ namespace World
 							nestedRows.Kind = nestedCollection;
 							nestedRows.IdText = idText;
 							nestedRows.Writable = !m_ReadOnly;
+							nestedRows.PlainRows = m_PlainContainerRows;
+							nestedRows.ElementSchemas = m_ContainerElementSchemas;
+							// 回写目标:本字段在本实例上的 setter(容器折回 Value 后写进结构体)。
+							nestedRows.WriteInstance = instance;
+							nestedRows.WriteField = &field;
 							nestedRowsPtr = &nestedRows;
 						}
 					}
@@ -3621,7 +3865,8 @@ namespace World
 				{
 					if (!keyText.empty() && !CollectionKeyTaken(container, keyText))
 					{
-						ScriptProperty child = MakeCollectionElement(container, collectionElementSchemas);
+						ScriptProperty child = MakeCollectionElement(container, collectionElementSchemas,
+						collectionRows->PlainRows);
 						child.Name = keyText;
 						container.Children.push_back(std::move(child));
 						markContainerChanged();
@@ -3652,7 +3897,8 @@ namespace World
 				{
 					if (collectionRows->Kind == ScriptPropertyCollection::Array)
 					{
-						ScriptProperty child = MakeCollectionElement(container, collectionElementSchemas);
+						ScriptProperty child = MakeCollectionElement(container, collectionElementSchemas,
+						collectionRows->PlainRows);
 						child.Name = std::to_string(container.Children.size() + 1);
 						container.Children.push_back(std::move(child));
 						markContainerChanged();
@@ -3684,6 +3930,20 @@ namespace World
 			}
 		}
 
+		// ---- PURE-ECS:原生组件的容器字段 → 折回 `Schema::Value` 写回结构体 ----
+		// 落点在**容器自己这一层**:元素/键的增删改都发生在这里,只有这里知道 `changed`。
+		// (顶层那次调用拿不到这个信号 —— 第一版把折回放在顶层,实测症状是"面板里加了元素、
+		// 存盘却丢掉"。)`FoldContainerRows` 折出的形状与生成访问器
+		// (`UnpackSequence`/`UnpackMap`)逐条对齐,包括命名 struct 元素的"字段名 → Value";
+		// 无条件折(不做"场景是否记录过"的判定):原生路径的值/形状就是实例本身。
+		if (changed && collectionRows && collectionRows->PlainRows
+			&& collectionRows->WriteField && collectionRows->WriteField->Set && collectionRows->WriteInstance)
+		{
+			Schema::Value folded;
+			if (ScriptProperties::FoldContainerRows(*collectionRows->Container, &folded))
+				collectionRows->WriteField->Set(collectionRows->WriteInstance, folded);
+		}
+
 		if (changed)
 			m_Host.MarkDocumentDirty();
 		return y;
@@ -3701,6 +3961,16 @@ namespace World
 		// 归属判定(这个实体属于哪条实例记录)放在 RegisterPrefabOverrides —— 普通实体编辑不产生记录。
 		std::vector<std::string> changedFields;
 		float height = 0.0f;
+
+		// PURE-ECS:合成 arena 每组件重新开始(`Used` 原本没人清零;接上原生容器字段后,
+		// 第 257 个节点起的容器行会静默退化成只读摘要 —— 见 ResetScriptRowArenas)。
+		ResetScriptRowArenas();
+		// 原生容器元素的 `+`/子行需要 schema(命名 struct 元素按它建子行)。与脚本路径的
+		// `m_ScriptInspectingEntity → scene.Schemas()` 同一来源。
+		{
+			Scene* rowScene = entity.IsValid() ? entity.GetScene() : nullptr;
+			m_ContainerElementSchemas = rowScene ? &rowScene->GetContext().Schemas() : nullptr;
+		}
 
 		// 自定义检查器:与迁移前一致的三行 Location/Rotation(度)/Scale。
 		if (schema.Id.Name == "World::TransformComponent")

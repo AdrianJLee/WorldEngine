@@ -107,6 +107,7 @@
   "modal.project_delete.remove_from_list": "从列表移除",
   "modal.project_delete.remove_from_list.tooltip": "只从最近列表移除这条记录,磁盘上的文件不会被改动",
   "modal.project_delete.reject.title": "无法删除这个目录",
+  "modal.project_delete.reject.remove_hint": "既不能打开也不能删除。你仍然可以把这条记录从最近列表移除 —— 磁盘上的文件不会被改动。",
   "modal.project_delete.error.not_directory": "目标不是已存在的目录:{path}",
   "modal.project_delete.error.root": "拒绝删除盘根 / UNC 根目录:{path}",
   "modal.project_delete.error.too_shallow": "路径层级过浅,拒绝删除:{path}",

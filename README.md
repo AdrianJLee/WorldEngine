@@ -78,7 +78,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `Engine/src/World/Script/` | Luau runtime, bindings and hot reload |
 | `Engine/assets/shaders/` | HLSL shader sources (`*.slang（legacy *.hlsl 仍可读）`, entry points `VSMain` / `PSMain`) |
 | `Game/src/` | Gameplay DLL source (`Game.dll`); the project content root lives under `projects/` |
-| `projects/default/` | Default project content root: `project.we.yaml` plus `assets/scenes/` and `assets/scripts/` |
+| `projects/` | Container for projects you want to keep inside the checkout. Not a project itself — projects come from the launcher/wizard (templates under `templates/`), and can live anywhere |
 | `Editor/src/WUI/` | Editor panels and shell |
 | `tests/` | Per-topic test executables and ctest registration |
 | `docs/` | Public documentation (see below) |
@@ -101,7 +101,7 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
 | `.wprefab` | Prefab |
 | `.wpak` | Content package (packaging output) |
 | `.lua` / `.luau` | Scripts; the embedded scripting runtime is Luau |
-| `WorldEngineAPI.luau` | Editor-generated completion stubs (`projects/default/assets/scripts/intermediate/`); do not edit by hand |
+| `WorldEngineAPI.luau` | Editor-generated completion stubs (`<project>/assets/scripts/intermediate/`); do not edit by hand |
 
 ## Repository
 

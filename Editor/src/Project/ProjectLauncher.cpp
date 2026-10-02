@@ -79,6 +79,23 @@ namespace World::Editor
 			}
 			return count;
 		}
+
+		// 引擎仓库内的"可丢弃根":这些第一段目录是构建产物 / 本机态 / 约定临时区,其下的
+		// 项目目录允许永久删除。理由逐条与仓库口径对齐:
+		//   build / tmp / local —— 本身就是 .gitignore 里的产物与本机状态目录;
+		//   projects          —— projects/README.md 写明的"想把项目放在仓库里"时的默认容器;
+		//   scratch / archive —— 仓库约定的临时/归档区。
+		// 入参是相对仓库根的规范化键(小写、`/` 分隔,来自 NormalizedKey),因此比较天然大小写不敏感。
+		bool IsDisposableRepoSubpath(const std::string& relativeKey)
+		{
+			if (relativeKey.empty())
+				return false;
+			const size_t slash = relativeKey.find('/');
+			const std::string first = relativeKey.substr(0,
+				slash == std::string::npos ? relativeKey.size() : slash);
+			return first == "build" || first == "projects" || first == "tmp"
+				|| first == "local" || first == "scratch" || first == "archive";
+		}
 	}
 
 	std::filesystem::path ProjectLauncher::StorePath()
@@ -362,8 +379,9 @@ namespace World::Editor
 				"Refusing to delete a path this shallow: {path}", { { "path", rootText } });
 		}
 
-		// ③ 引擎仓库锚点:仓库根本身/它的任何祖先(删掉会把整个仓库带走),以及仓库内的目录
-		//    (随仓库一起分发的项目/模板都住在那里)。用规范化键做前缀比较,大小写不敏感。
+		// ③ 引擎仓库锚点:仓库根本身/它的任何祖先(删掉会把整个仓库带走)一律拒绝;仓库内
+		//    只有"可丢弃根"下的目录放行(见 IsDisposableRepoSubpath),其余仓库内目录仍然拒绝
+		//    —— 随仓库一起分发的项目/模板住在那里。用规范化键做前缀比较,大小写不敏感。
 		const std::string key = NormalizedKey(root);
 		const std::string repoKey = NormalizedKey(std::filesystem::path(std::string(WLD_REPO_ROOT)));
 		if (key == repoKey || repoKey.rfind(key + "/", 0) == 0)
@@ -374,9 +392,14 @@ namespace World::Editor
 		}
 		if (key.rfind(repoKey + "/", 0) == 0)
 		{
-			return Wui::TrFormat("modal.project_delete.error.repo_inside",
-				"Refusing to delete a folder inside the engine repository: {path}",
-				{ { "path", rootText } });
+			// 仓库根本身已在上面拦下 ⇒ 这里的相对键非空;第一段不在可丢弃根下才拒绝。
+			const std::string relativeKey = key.substr(repoKey.size() + 1);
+			if (!IsDisposableRepoSubpath(relativeKey))
+			{
+				return Wui::TrFormat("modal.project_delete.error.repo_inside",
+					"Refusing to delete a folder inside the engine repository: {path}",
+					{ { "path", rootText } });
+			}
 		}
 
 		// ④ 不是项目就拒绝(与"打开项目"同一口径:缺清单 = 不是 WorldEngine 项目)。
