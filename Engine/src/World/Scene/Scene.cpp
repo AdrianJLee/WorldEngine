@@ -3,6 +3,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/TransformSystem.h"
 #include "World/Scene/CameraSystem.h"
+#include "World/Scene/MovementSystem.h"
 #include "World/Scene/ScriptEngine.h"
 #include "World/Script/HotReload.h"
 #include "World/Core/Thread/JobSystem.h"
@@ -921,6 +922,7 @@ namespace World
 			return;
 		RegisterFrameSystem({ "physics-2d", false, [this](Timestep ts) { OnUpdatePhysics2D(ts); } });
 		RegisterFrameSystem({ "physics-3d", false, [this](Timestep ts) { OnUpdatePhysics3D(ts); } });
+		RegisterFrameSystem({ "movement-system", false, [this](Timestep ts) { MovementSystem().Update(*this, ts); } });
 		RegisterFrameSystem({ "scene-update", false, [this](Timestep ts) { OnScriptUpdate(ts); } });
 		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
 		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); } });
@@ -952,6 +954,11 @@ namespace World
 		}
 		OnPhysics2DStart();
 		OnPhysics3DStart();
+		EnsureDefaultFrameSystems();
+		if (ScriptEngine::IsInitialized())
+		{
+			ScriptEngine::LoadSystemScripts(*this);
+		}
 		OnScriptStart();
 	}
 	void Scene::OnSimulationStart() { OnRuntimeStart(); }

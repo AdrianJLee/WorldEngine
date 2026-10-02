@@ -672,6 +672,11 @@ function ui:columns(x, y, w, h, count, gap) end
 ---@class UUIDComponent
 ---@field ID string read-only
 
+-- Component fields are exposed through Entity:GetComponent("VelocityComponent"); there is no runtime global named VelocityComponent.
+---@class VelocityComponent
+---@field Linear vec3
+---@field Angular vec3
+
 ---Annotation-only shape of a script table; there is no WorldScript runtime global or constructor.
 ---@class WorldScript
 ---@field entity Entity Entity owning this script instance.

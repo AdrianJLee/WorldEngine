@@ -11,6 +11,7 @@ namespace World::Schema
 const TypeSchema& WeSchemaOf_UUIDComponent();
 const TypeSchema& WeSchemaOf_TagComponent();
 const TypeSchema& WeSchemaOf_TransformComponent();
+const TypeSchema& WeSchemaOf_VelocityComponent();
 const TypeSchema& WeSchemaOf_SpriteComponent();
 const TypeSchema& WeSchemaOf_CircleRendererComponent();
 const TypeSchema& WeSchemaOf_MeshRendererComponent();
@@ -326,6 +327,92 @@ struct GeneratedAccess<World::TransformComponent>
             "Scene",
             "Local translation/rotation/scale of the entity; RotationQuat and the cached Transform matrix are derived runtime state (Transient, never serialized).",
             true,
+        };
+        return schema;
+    }
+};
+
+template <>
+struct GeneratedAccess<World::VelocityComponent>
+{
+    static Value Get_Linear(const void* instance)
+    {
+        const World::VelocityComponent* self = static_cast<const World::VelocityComponent*>(instance);
+        return Value(self->Linear);
+    }
+    static void Set_Linear(void* instance, const Value& value)
+    {
+        World::VelocityComponent* self = static_cast<World::VelocityComponent*>(instance);
+        self->Linear = std::get<glm::vec3>(value);
+    }
+    static Value Get_Angular(const void* instance)
+    {
+        const World::VelocityComponent* self = static_cast<const World::VelocityComponent*>(instance);
+        return Value(self->Angular);
+    }
+    static void Set_Angular(void* instance, const Value& value)
+    {
+        World::VelocityComponent* self = static_cast<World::VelocityComponent*>(instance);
+        self->Angular = std::get<glm::vec3>(value);
+    }
+    static const FieldSchema& Field_Linear()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA2D695D1AA0237AAull },
+            "Linear",
+            Kind::Vec3,
+            &Get_Linear,
+            &Set_Linear,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Velocity", std::nullopt, std::nullopt, false, false, "Linear velocity in world units per second.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_Angular()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xEA13B21DCFFED6FBull },
+            "Angular",
+            Kind::Vec3,
+            &Get_Angular,
+            &Set_Angular,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "Velocity", std::nullopt, std::nullopt, false, false, "Angular velocity in radians per second.", false, "", {  }, "", std::nullopt },
+            Value(glm::vec3(0.0f)),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::VelocityComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::VelocityComponent" },
+            "VelocityComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::VelocityComponent),
+            TypeCategory::Component,
+            {
+                Field_Linear(),
+                Field_Angular(),
+            },
+            &StorageBindingOf(),
+            nullptr,
+            "Movement",
+            "Linear and angular velocity of the entity for ECS movement systems.",
+            false,
         };
         return schema;
     }
@@ -3152,6 +3239,7 @@ struct GeneratedEnum<World::MeshCollider3DComponent::ColliderMode>
 const TypeSchema& WeSchemaOf_UUIDComponent() { return GeneratedAccess<World::UUIDComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TagComponent() { return GeneratedAccess<World::TagComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_TransformComponent() { return GeneratedAccess<World::TransformComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_VelocityComponent() { return GeneratedAccess<World::VelocityComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_SpriteComponent() { return GeneratedAccess<World::SpriteComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CircleRendererComponent() { return GeneratedAccess<World::CircleRendererComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_MeshRendererComponent() { return GeneratedAccess<World::MeshRendererComponent>::WeSchema(); }
@@ -3189,6 +3277,7 @@ const EnumSchema& WeEnumSchemaOf_ColliderMode() { return GeneratedEnum<World::Me
 			WeSchemaOf_UUIDComponent(),
 			WeSchemaOf_TagComponent(),
 			WeSchemaOf_TransformComponent(),
+			WeSchemaOf_VelocityComponent(),
 			WeSchemaOf_SpriteComponent(),
 			WeSchemaOf_CircleRendererComponent(),
 			WeSchemaOf_MeshRendererComponent(),

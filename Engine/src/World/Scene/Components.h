@@ -100,6 +100,26 @@ namespace World
 		WE_SCHEMA_END
 	};
 
+	// Pure ECS: 速度组件 (用于 MovementSystem 驱动实体线速度与角速度位移)
+	struct VelocityComponent
+	{
+		glm::vec3 Linear { 0.0f, 0.0f, 0.0f };
+		glm::vec3 Angular { 0.0f, 0.0f, 0.0f };
+
+		VelocityComponent() = default;
+		VelocityComponent(const glm::vec3& linear, const glm::vec3& angular = glm::vec3 { 0.0f })
+			: Linear(linear), Angular(angular) {}
+
+		WE_SCHEMA_BODY(World, VelocityComponent, Component)
+			WE_SCHEMA_META(Category("Movement"),
+				Doc("Linear and angular velocity of the entity for ECS movement systems."))
+			WE_FIELD(Linear, Vec3, Group("Velocity"),
+				Doc("Linear velocity in world units per second."));
+			WE_FIELD(Angular, Vec3, Group("Velocity"),
+				Doc("Angular velocity in radians per second."));
+		WE_SCHEMA_END
+	};
+
 	struct SpriteComponent
 	{
 		glm::vec4 Color { 1.0f, 1.0f, 1.0f, 1.0f };

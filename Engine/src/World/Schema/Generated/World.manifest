@@ -1,6 +1,7 @@
 struct World::UUIDComponent
 struct World::TagComponent
 struct World::TransformComponent
+struct World::VelocityComponent
 struct World::SpriteComponent
 struct World::CircleRendererComponent
 struct World::MeshRendererComponent

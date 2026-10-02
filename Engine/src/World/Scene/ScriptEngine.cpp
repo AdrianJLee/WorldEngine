@@ -1508,6 +1508,49 @@ namespace World
 		return s_ActiveScene;
 	}
 
+	std::size_t ScriptEngine::LoadSystemScripts(Scene& scene, const std::filesystem::path& systemsDir)
+	{
+		if (!IsInitialized() || !std::filesystem::exists(systemsDir) || !std::filesystem::is_directory(systemsDir))
+			return 0;
+
+		SetActiveScene(&scene);
+		std::size_t loaded = 0;
+
+		for (const auto& entry : std::filesystem::directory_iterator(systemsDir))
+		{
+			if (!entry.is_regular_file())
+				continue;
+			const auto ext = entry.path().extension().string();
+			if (ext != ".luau" && ext != ".lua")
+				continue;
+
+			const std::string content = ReadScriptSource(entry.path().string());
+			if (content.empty())
+				continue;
+
+			std::string error;
+			const std::string chunkName = entry.path().filename().string();
+			if (!s_Vm->RunString(content, chunkName.c_str(), &error))
+			{
+				if (Log::GetCoreLogger())
+					WLD_CORE_ERROR("[Luau System Loader] failed to load system script '{}': {}", chunkName, error);
+			}
+			else
+			{
+				if (Log::GetCoreLogger())
+					WLD_CORE_INFO("[Luau System Loader] loaded system script: {}", chunkName);
+				++loaded;
+			}
+		}
+		return loaded;
+	}
+
+	std::size_t ScriptEngine::LoadSystemScripts(Scene& scene)
+	{
+		const std::filesystem::path defaultDir = World::Paths::AssetRoot() / "scripts/systems";
+		return LoadSystemScripts(scene, defaultDir);
+	}
+
 	void ScriptEngine::Init()
 	{
 		if (s_Vm) { AssertOwnerThread(); return; }

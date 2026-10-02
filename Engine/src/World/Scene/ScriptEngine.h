@@ -110,6 +110,10 @@ namespace World
 		static void SetActiveScene(Scene* scene);
 		static Scene* GetActiveScene();
 
+		// Pure ECS: 自动扫描并加载项目系统脚本 (assets/scripts/systems/*.luau 与 *.lua)
+		static std::size_t LoadSystemScripts(Scene& scene, const std::filesystem::path& systemsDir);
+		static std::size_t LoadSystemScripts(Scene& scene);
+
 		static void DefineMathType();
 		static void RegisterMathTypes();
 

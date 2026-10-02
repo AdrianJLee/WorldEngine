@@ -239,12 +239,13 @@ int main()
 			pipeScene.OnUpdateRuntime(0.016f);
 
 			const auto& timings = pipeScene.GetFrameSystemTimings();
-			CHECK(timings.size() == 5);
+			CHECK(timings.size() == 6);
 			CHECK(timings[0].Name == "physics-2d");
 			CHECK(timings[1].Name == "physics-3d");
-			CHECK(timings[2].Name == "scene-update");
-			CHECK(timings[3].Name == "transform-system");
-			CHECK(timings[4].Name == "camera-system");
+			CHECK(timings[2].Name == "movement-system");
+			CHECK(timings[3].Name == "scene-update");
+			CHECK(timings[4].Name == "transform-system");
+			CHECK(timings[5].Name == "camera-system");
 		}
 
 		// ========================================================
@@ -301,8 +302,8 @@ int main()
 			CHECK(systemScene.GetRegistry().get<TransformComponent>(testEnt).Location.x == 11.0f);
 
 			const auto& timings = systemScene.GetFrameSystemTimings();
-			CHECK(timings.size() == 6);
-			CHECK(timings[5].Name == "CustomTestSystem");
+			CHECK(timings.size() == 7);
+			CHECK(timings[6].Name == "CustomTestSystem");
 		}
 
 		// ========================================================
@@ -353,6 +354,21 @@ int main()
 
 			testEnt2.RemoveComponent<TagComponent>();
 			CHECK(tagRemovedCount == 1);
+		}
+
+		// ========================================================
+		// 13. 真实 VelocityComponent 与 MovementSystem 自动位移驱动验证
+		// ========================================================
+		{
+			Scene moveScene(context);
+			Entity mover = Entity::CreateEntity(&moveScene, "Mover")
+				.Set<TransformComponent>(glm::vec3(0.0f, 0.0f, 0.0f))
+				.With<VelocityComponent>(glm::vec3(10.0f, 20.0f, 30.0f));
+
+			moveScene.OnUpdateRuntime(0.1f);
+			CHECK(mover.GetComponent<TransformComponent>().Location.x == 1.0f);
+			CHECK(mover.GetComponent<TransformComponent>().Location.y == 2.0f);
+			CHECK(mover.GetComponent<TransformComponent>().Location.z == 3.0f);
 		}
 
 		std::puts("WorldQueryTests passed all assertions!");
