@@ -53,6 +53,18 @@ cmake --build build/x64-Debug --config Debug --target RUN_TESTS
   otherwise the artifact paths will not line up.
 - Re-configure after adding or removing source files: source lists are collected at configure
   time (there is no `CONFIGURE_DEPENDS`).
+- **Never leave a half-built tree.** `WorldRuntime.dll` and the host executables (`Editor.exe`,
+  `Runtime.exe`) share type layouts through the headers, and the hosts compile member accesses
+  with the offsets they saw. A build that is interrupted (Ctrl+C, a killed MSBuild, a pipeline
+  that truncates the output) or that aborts partway (`error C1041: cannot open program database`)
+  leaves some objects from the *old* headers and some from the new ones. That mixture does not
+  fail to build — it produces a host that reads a class at the wrong offsets, and the symptom is
+  a crash inside `WorldRuntime.dll` (2026-10-02: `Scene::m_Physics3D` read 65 bytes too high, so
+  the editor saw "3D physics is running + a garbage world pointer" and crashed in
+  `Physics3DWorld::CollectDebugLines`). Two guards exist now:
+  `WE_RUNTIME_LAYOUT_MATCHES()` refuses to start a host whose `sizeof(Scene)`/`sizeof(WorldContext)`
+  disagrees with the DLL (exit code 3 + a readable message), and the `Game.dll` module ABI gate
+  rejects mismatched modules. If either fires, rebuild the whole engine — do not rebuild only one side.
 
 ## Repository layout
 

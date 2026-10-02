@@ -24,6 +24,17 @@ project(World VERSION 2.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# --- MSVC 构建健壮性(2026-10-02)--------------------------------------------------------
+# `/FS`:把多个 CL.EXE 对同一个 PDB 的写入串行化。VS 生成器在并行构建里会**同一个工程并发跑两次**
+#   (依赖图里出现两条到同一工程的路径),两个 CL 抢写 `<proj>.dir/Debug/vc145.pdb` ⇒
+#   `error C1041: 无法打开程序数据库 ... 请使用 /FS`。被这种错误打断的构建会留下
+#   "一部分产物是新的、一部分是旧的"的**混合世代**树 —— 实测表现是编辑器按错误偏移读
+#   `Scene` 成员,崩在物理调试绘制里(见 Engine/src/World/Core/RuntimeContract.h)。
+#   构建必须要么整体成功、要么明确失败,不能悄悄留下混合树。
+if(MSVC)
+    add_compile_options(/FS)
+endif()
+
 # --- 查找 Vulkan SDK(可选):headers+volk 已 vendor,SDK 仅用于可选验证层
 find_package(Vulkan QUIET)
 

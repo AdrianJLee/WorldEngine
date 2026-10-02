@@ -1,6 +1,8 @@
 #include "wldpch.h"
 #include "World/Core/WorldContext.h"
+#include "World/Core/RuntimeContract.h"
 #include "World/Schema/Generated/World/WorldSchemaRegistration.h"
+#include "World/Scene/Scene.h"
 #include "World/Utils/DynamicLibrary.h"
 
 #include <algorithm>
@@ -59,5 +61,15 @@ namespace World
 			if (it->Detach)
 				it->Detach(scene);
 		}
+	}
+
+	// ---- 宿主/运行期布局契约(契约原文见 RuntimeContract.h)----
+	bool RuntimeLayoutMatches(uint64_t hostSceneSize, uint64_t hostWorldContextSize,
+		uint32_t hostModuleAbiVersion)
+	{
+		// 这里的 sizeof 取自 **WorldRuntime.dll 自己**的编译单元;宿主传进来的是它自己的。
+		return hostSceneSize == sizeof(Scene)
+			&& hostWorldContextSize == sizeof(WorldContext)
+			&& hostModuleAbiVersion == Modules::WE_MODULE_ABI_VERSION;
 	}
 }

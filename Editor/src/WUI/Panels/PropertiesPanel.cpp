@@ -419,29 +419,6 @@ namespace World
 			RegisterNode(Wui::HashId(idText.c_str()), "text", row, TermText(label), value, false);
 		}
 
-		std::string ScriptStateName(ScriptInstanceState state)
-		{
-			switch (state)
-			{
-				case ScriptInstanceState::Pending: return "Pending";
-				case ScriptInstanceState::Creating: return "Creating";
-				case ScriptInstanceState::Running: return "Running";
-				case ScriptInstanceState::Destroying: return "Destroying";
-				case ScriptInstanceState::Stopped: return "Stopped";
-				case ScriptInstanceState::Faulted: return "Faulted";
-				default: return "?";
-			}
-		}
-
-		// 状态名显示文案(仅用于显示):拼接结果不参与任何比较/存储,id/hash 也不用状态文本。
-		std::string ScriptStateLabel(ScriptInstanceState state)
-		{
-			const std::string name = ScriptStateName(state);
-			if (name == "?")
-				return name;   // 未知状态保持原占位符
-			return Wui::Tr("panel.properties.script_state." + name, name);
-		}
-
 		// ---- 2026-09-26 脚本组件重写:统一脚本检视器的三个数据侧小工具 ----
 		//
 		// `ScriptProperty::Value` 的类型编码必须与 schema 一致

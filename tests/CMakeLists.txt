@@ -1,4 +1,4 @@
-# P2 W1:Luau 运行时封装(沙箱/错误定位),headless 可跑。
+﻿# P2 W1:Luau 运行时封装(沙箱/错误定位),headless 可跑。
 add_executable(WorldLuauVmTests World/LuauVmTests.cpp)
 target_link_libraries(WorldLuauVmTests PRIVATE World)
 target_compile_features(WorldLuauVmTests PRIVATE cxx_std_17)
@@ -991,6 +991,27 @@ set_tests_properties(World.ProjectSystemsHook PROPERTIES
     TIMEOUT 60
 )
 
+# PECS-T5:宿主与 WorldRuntime.dll 的运行期布局契约(sizeof(Scene)/sizeof(WorldContext)/模块 ABI)。
+add_executable(WorldRuntimeContractTests World/RuntimeContractTests.cpp)
+target_link_libraries(WorldRuntimeContractTests PRIVATE World)
+target_compile_features(WorldRuntimeContractTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldRuntimeContractTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldRuntimeContractTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldRuntimeContractTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.RuntimeContract COMMAND WorldRuntimeContractTests)
+set_tests_properties(World.RuntimeContract PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P2 W3a:字段 id / 生成物漂移门禁。schema-compiler --check 逐字节比较生成物;
 # 注解(含显式 Id(...))改了却没重跑生成器 → 此测试红灯。生成器只构建、不参与产品二进制。
 add_test(NAME World.SchemaDrift
@@ -1164,7 +1185,7 @@ foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
     )
 endforeach()
 
-foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"
