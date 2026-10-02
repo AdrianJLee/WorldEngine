@@ -47,7 +47,7 @@ namespace World
 		Tools,          // 临时分析工具、Debug 绘图对象
 		Internal,       // 引擎底层管理对象（如：DestructorNode 本身）
 
-		Script,         // 脚本系统专用（如：C++ 脚本实例）
+		Script,         // 脚本系统专用（Luau VM / 脚本求值期的临时对象）
 	};
 
 	#pragma region Macro

@@ -726,6 +726,9 @@ namespace World
 		{
 			ScriptEngine::LoadSystemScripts(*this);
 		}
+		// PURE-ECS:模块登记的场景系统(项目层 C++ 系统)在引擎内建帧系统之后挂上;
+		// 与 Lua 系统脚本同一时机、同一个 SystemRegistry。契约见 WorldContext.h。
+		m_Context->RunSceneAttachHooks(*this);
 		m_State = SceneState::Running;
 	}
 	void Scene::OnSimulationStart() { OnRuntimeStart(); }
@@ -738,6 +741,10 @@ namespace World
 	{
 		AssertOwnerThread();
 		if (m_State == SceneState::Stopping) return;
+		// PURE-ECS:模块登记的场景系统先撤销(与 RunSceneAttachHooks 对称);只在真的从
+		// 运行态停下来时跑,重复 StopScene 不重复 Detach。
+		if (m_State == SceneState::Running)
+			m_Context->RunSceneDetachHooks(*this);
 		m_State = SceneState::Stopping;
 		m_StopRequested = false;
 		m_Changes.clear();

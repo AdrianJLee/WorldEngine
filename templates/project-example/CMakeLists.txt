@@ -379,11 +379,21 @@ if(NOT IS_DIRECTORY "${WLD_GAME_SRC_DIR}")
         "(项目层 C++ 按 docs/dev/project-standard.md 放在 <项目根>/src/**)")
 endif()
 
+# ---- PURE-ECS:项目层系统挂载入口的构建期探测 ---------------------------------
+# 在 src/GameProject.cpp 里实现 World::Game::AttachProjectSystems / DetachProjectSystems
+# (见引擎 Game/src/GameAPI.h);缺席时编引擎的空实现,少一个文件不会链接失败。
+set(WLD_GAME_HOOK_DEFINE "WLD_GAME_NO_PROJECT_HOOK=1")
+if(EXISTS "${WLD_GAME_SRC_DIR}/GameProject.cpp")
+    set(WLD_GAME_HOOK_DEFINE "")
+    message(STATUS "WorldEngine Game module: project systems hook = ${WLD_GAME_SRC_DIR}/GameProject.cpp")
+else()
+    message(STATUS "WorldEngine Game module: no src/GameProject.cpp; compiling the empty systems hook")
+endif()
+
 # schema 输入发现:配置期只决定"零声明项目编引擎自带空模块注册"这一件事;
 # 真正的输入列表由构建期脚本(Game/cmake/game-schema-build.cmake)每次构建 glob。
 file(GLOB GAME_SCHEMA_DISCOVERY CONFIGURE_DEPENDS
     "${WLD_GAME_SRC_DIR}/Components/*.h"
-    "${WLD_GAME_SRC_DIR}/Scripts/*.h"
 )
 set(GAME_SCHEMA_ENGINE_SKELETON FALSE)
 if(NOT GAME_SCHEMA_DISCOVERY)
@@ -443,6 +453,7 @@ target_compile_definitions(Game PRIVATE
     YAML_CPP_STATIC_DEFINE
     WLD_CURRENT_DIR="${WLD_ENGINE_ROOT}/Game/"
     GAME_BUILD_DLL
+    ${WLD_GAME_HOOK_DEFINE}
 )
 
 # 模块骨架(WeGameModuleQuery / GameLayer)永远来自引擎;其余源码来自 <项目根>/src。

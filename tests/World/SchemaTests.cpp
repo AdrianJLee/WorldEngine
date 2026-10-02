@@ -1,4 +1,4 @@
-#include "World/Core/WorldContext.h"
+﻿#include "World/Core/WorldContext.h"
 #include "World/Core/Log.h"
 #include "World/Schema/Schema.h"
 #include "World/Scene/Components.h"
@@ -129,7 +129,7 @@ int main()
 
 		// 7. RegisterModule 事务化:批内失败不留下任何条目
 		{
-			TypeSchema manualOnly{ TypeId{ "TestKit::ManualOnly" }, "ManualOnly", WE_SCHEMA_ABI_VERSION, sizeof(uint32_t), TypeCategory::Struct, {}, nullptr, nullptr };
+			TypeSchema manualOnly{ TypeId{ "TestKit::ManualOnly" }, "ManualOnly", WE_SCHEMA_ABI_VERSION, sizeof(uint32_t), TypeCategory::Struct, {}, nullptr };
 			const std::vector<TypeSchema> batch = { *context.Schemas().Find("TestKit::HealthFixture"), manualOnly };
 			CHECK(context.Schemas().RegisterModule({ "TestKit", 1 }, batch) == SchemaRegistry::Status::DuplicateType);
 			CHECK(context.Schemas().Find("TestKit::ManualOnly") == nullptr);
@@ -147,7 +147,7 @@ int main()
 
 		// 9. ABI 版本超出宿主支持
 		{
-			TypeSchema tooNew{ TypeId{ "TestKit::TooNew" }, "TooNew", WE_SCHEMA_ABI_VERSION + 1, sizeof(uint32_t), TypeCategory::Struct, {}, nullptr, nullptr };
+			TypeSchema tooNew{ TypeId{ "TestKit::TooNew" }, "TooNew", WE_SCHEMA_ABI_VERSION + 1, sizeof(uint32_t), TypeCategory::Struct, {}, nullptr };
 			CHECK(context.Schemas().Register({ "TestKit", 1 }, tooNew) == SchemaRegistry::Status::AbiMismatch);
 		}
 

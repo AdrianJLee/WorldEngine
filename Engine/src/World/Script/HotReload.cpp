@@ -2,7 +2,6 @@
 #include "World/Script/HotReload.h"
 
 #include "World/Core/Application.h"
-#include "World/Script/BehaviorRegistry.h"
 #include "World/Script/ScriptProperties.h"
 #include "World/Utils/Paths.h"
 
@@ -38,14 +37,6 @@ namespace World
 		std::filesystem::path DiskPathFor(const std::string& logicalPath)
 		{
 			return World::Paths::AssetRoot() / logicalPath;
-		}
-
-		std::string FieldIdText(const std::string& fieldName)
-		{
-			char buffer[32] = {};
-			std::snprintf(buffer, sizeof(buffer), "0x%016llx",
-				static_cast<unsigned long long>(BehaviorRegistry::LuaFieldId(fieldName)));
-			return std::string(buffer);
 		}
 
 		bool ReadDiskFile(const std::filesystem::path& path, std::string& out)
@@ -224,85 +215,5 @@ namespace World
 		result.Exists = true;
 		if (error) error->clear();
 		return result;
-	}
-
-	void DescribeScriptFieldMigration(
-		const std::vector<ScriptProperty>& previous,
-		const std::vector<ScriptProperty>& next,
-		const std::string& scriptPath,
-		std::vector<std::string>* diagnostics,
-		const ScriptFieldMigrationOptions& options)
-	{
-		if (!diagnostics)
-			return;
-
-		// CPPT-6:字段类型文本 —— 容器带形状与元素/键类型(Array<Float> / Map<String, Entry>),
-		// 非容器仍是 KindName。形状变化(Array→Map、元素类型变化)必须与类型变化一样出诊断,
-		// 否则同名同 Kind(Object)的容器会静默重置值。
-		const auto fieldTypeText = [](const ScriptProperty& property)
-		{
-			if (property.Collection == ScriptPropertyCollection::None)
-				return std::string(ScriptProperties::KindName(property.Type));
-			const std::string element = property.ElementKind == Schema::Kind::Object && !property.TypeName.empty()
-				? property.TypeName : std::string(ScriptProperties::KindName(property.ElementKind));
-			if (property.Collection == ScriptPropertyCollection::Map)
-				return std::string("Map<") + ScriptProperties::KindName(property.KeyKind) + ", " + element + ">";
-			return std::string("Array<") + element + ">";
-		};
-
-		// 先按字段名收集再排序,保证诊断文本可断言/可复现(与容器顺序无关)。
-		// CPPT-2(FIX1):前缀按调用方选(Luau 热重载 / C++ 模块重载),文本规则只有这一份。
-		const std::string tag = options.Tag ? options.Tag : "[hot-reload]";
-		std::vector<std::pair<std::string, std::string>> lines;
-		lines.reserve(previous.size());
-		for (const ScriptProperty& newField : next)
-		{
-			const ScriptProperty* old = ScriptProperties::Find(previous, newField.Name);
-			if (!old)
-			{
-				// 新增字段:取新脚本默认值;模块级重载按验收也出一条(默认仍不产生)。
-				if (options.ReportAddedFields)
-					lines.emplace_back(newField.Name,
-						tag + " " + scriptPath + ": field '" + newField.Name + "' (id=" + FieldIdText(newField.Name) +
-						") is new in the reloaded script; its value takes the declared default");
-				continue;
-			}
-			if (old->Type == newField.Type
-				&& old->Collection == newField.Collection
-				&& old->ElementKind == newField.ElementKind
-				&& old->KeyKind == newField.KeyKind)
-				continue;   // 同名同类型同形状:同步时已保留旧值。
-			lines.emplace_back(newField.Name,
-				tag + " " + scriptPath + ": field '" + newField.Name + "' (id=" + FieldIdText(newField.Name) +
-				") type changed " + fieldTypeText(*old) + " -> " +
-				fieldTypeText(newField) + "; value reset to the new default");
-		}
-		for (const ScriptProperty& oldField : previous)
-		{
-			if (ScriptProperties::Find(next, oldField.Name))
-				continue;
-			lines.emplace_back(oldField.Name,
-				tag + " " + scriptPath + ": field '" + oldField.Name + "' (id=" + FieldIdText(oldField.Name) +
-				") is missing in the new script; its value was dropped");
-		}
-		std::sort(lines.begin(), lines.end(),
-			[](const std::pair<std::string, std::string>& left, const std::pair<std::string, std::string>& right)
-			{
-				return left.first < right.first;
-			});
-		for (auto& line : lines)
-			diagnostics->push_back(std::move(line.second));
-	}
-
-	std::string FormatScriptReloadFailure(const std::string& scriptPath, const char* phase,
-		const std::string& error)
-	{
-		std::string message = "[hot-reload] ";
-		message += scriptPath.empty() ? std::string("<unset script path>") : scriptPath;
-		message += ": ";
-		message += phase ? phase : "reload";
-		message += " failed: ";
-		message += error.empty() ? "unknown error" : error;
-		return message;
 	}
 }

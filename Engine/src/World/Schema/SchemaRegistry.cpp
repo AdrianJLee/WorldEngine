@@ -30,7 +30,6 @@ namespace World::Schema
 			case Status::DuplicateComponentId: return "duplicate component storage id";
 			case Status::Conflict: return "conflicting registration";
 			case Status::AbiMismatch: return "schema abi version not supported";
-			case Status::InvalidScript: return "script type needs a display name and a Create/Destroy binding";
 			default: return "unknown";
 		}
 	}
@@ -41,17 +40,6 @@ namespace World::Schema
 		{
 			*outStatus = Status::AbiMismatch;
 			return false;
-		}
-
-		// CPPT-2:Category==Script 的类型就是行为清单的事实源(不要再维护第二本账)——
-		// 缺显示名或工厂绑定会在 Play/选择器里变成静默空行,注册期直接给出可读拒绝。
-		if (schema.Category == TypeCategory::Script)
-		{
-			if (schema.DisplayName.empty() || !schema.Script || !schema.Script->Create || !schema.Script->Destroy)
-			{
-				*outStatus = Status::InvalidScript;
-				return false;
-			}
 		}
 
 		auto byName = m_ByName.find(schema.Id.Name);
@@ -65,7 +53,7 @@ namespace World::Schema
 					*outStatus = Status::DuplicateType;
 					return false;
 				}
-				// 组件类型跨模块同名视为冲突;Struct/Script 允许共存。
+				// 组件类型跨模块同名视为冲突;Struct/Enum 允许共存。
 				if (schema.Category == TypeCategory::Component && existing.Schema.Category == TypeCategory::Component)
 				{
 					*outStatus = Status::Conflict;

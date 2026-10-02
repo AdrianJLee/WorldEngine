@@ -59,7 +59,8 @@ namespace World::Editor
 			"assets/shaders/",
 			"assets/textures/",
 			"src/Components/",
-			"src/Scripts/README.md",
+			"src/Systems/",
+			"src/README.md",
 		};
 
 		fs::path RepoRoot()

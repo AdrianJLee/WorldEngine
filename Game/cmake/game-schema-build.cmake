@@ -2,19 +2,19 @@
 # Game 模块 schema 生成 —— **构建期**输入发现 + 账本同步 + 内容哈希增量门
 # (CPPT-7/T2-C1;由 Game/CMakeLists.txt 的 GameSchema 目标用 `cmake -P` 每次构建执行)。
 #
-# 旧症状(输入发现是配置期 glob):删掉 <Game 源码根>/Scripts/*.h 之后的**第一次**构建
+# 旧症状(输入发现是配置期 glob):删掉 <Game 源码根>/Components/*.h 之后的**第一次**构建
 # 必失败 —— `schema-compiler: cannot open input file: <已删的头>` + MSB8066
 # (自定义生成退出码 1),第二次才成功。原因:--input/--reg-include 列表在配置期算好,
 # 而这次删除不会在构建开始前重跑那次配置。事实源因此搬到构建期:每次构建 glob 一次。
 #
 # 每次构建做四件事(**没变化就不写任何文件,生成物 mtime 不动**):
-#   1) glob 输入:<Game 源码根>/{Components,Scripts}/*.h;一个都没有时 ——
+#   1) glob 输入:<Game 源码根>/Components/*.h;一个都没有时 ——
 #      引擎骨架构建退回 <Game>/src/GameAPI.h(零声明 = 空模块),项目构建直接返回
 #      (配置期已按"零声明项目编引擎自带空模块"选好了源文件,这里不该被调用);
 #   2) 账本(<Game 源码根>/Generated/Game.manifest)与源码声明双向同步:
 #      · 生成物顺序 = 账本顺序 ⇒ 账本条目按 "kind 短名" 规范排序(与旧配置期播种同一口径),
 #        这样"删掉一个脚本头再加回来"能回到逐字节相同的账本与生成物;
-#      · 声明了但账本没有 ⇒ 追加 "kind World::短名"(与编辑器 New C++ Script… 同一写法);
+#      · 声明了但账本没有 ⇒ 追加 "kind World::短名"(与编辑器 New C++ Component… 同一写法);
 #      · 账本有但声明已消失 ⇒ 删除(删掉脚本头后账本随之更新,不再卡住构建);
 #      · 注释行跟随其后的条目(条目被删则其注释一起走);文件头注释与文件尾注释原样保留;
 #        既不是注释也不是条目的行原样保留 —— 不猜用户写了什么,真错让 schema-compiler 报;
@@ -45,12 +45,11 @@ function(wld_game_schema_run)
 
     # ---- 1. 构建期输入发现 -------------------------------------------------
     file(GLOB _discovered
-        "${_src}/Components/*.h"
-        "${_src}/Scripts/*.h")
+        "${_src}/Components/*.h")
     if(_discovered)
         set(_inputs ${_discovered})
     elseif(WLD_GAME_PROJECT_DIR)
-        message(STATUS "Game schema: project declares no {Components,Scripts}/*.h; "
+        message(STATUS "Game schema: project declares no Components/*.h; "
             "the engine's empty-module registration is compiled instead; nothing to generate")
         return()
     else()

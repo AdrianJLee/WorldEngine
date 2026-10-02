@@ -28,7 +28,11 @@ namespace World::Modules
 	// CPPT-6(2026-09-28,C++ 容器属性):`Schema::Value` 追加容器替代项(数组/映射)、
 	// `Schema::FieldSchema` 尾部追加容器形状描述(Collection/ElementKind/KeyKind/…)
 	// ⇒ 反射与边界值布局再次变化,旧 Game.dll(ABI 6)必须被干净拒绝(同一条等值门)。
-	constexpr uint32_t WE_MODULE_ABI_VERSION = 7;
+	// PURE-ECS(2026-10-02):`TypeCategory::Script` 与 `Schema::ScriptBinding` 整体删除
+	// (单实体脚本组件已不存在,Script 类型既挂不上实体也没有工厂消费者)⇒
+	// `TypeCategory` 少一个枚举值、`TypeSchema` 少一个指针字段,布局再次变化,
+	// 旧 Game.dll(ABI 7)必须被干净拒绝(同一条等值门)。
+	constexpr uint32_t WE_MODULE_ABI_VERSION = 8;
 
 	struct WeModule
 	{

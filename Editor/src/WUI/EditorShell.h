@@ -133,7 +133,7 @@ namespace World
 		// (EditorPanel.h 的 PanelHost 契约)。把面板拉回停靠树 → 激活 → 切根;
 		// 失败(false)= 没当前项目 / 没有 `<项目根>/src` / 面板不可用。
 		bool FocusContentBrowserProjectSources() override;
-		// CPPSRC-1:内容浏览器里的"新建 C++ 脚本…"(与 File ▸ 新建 C++ 脚本… 同一个向导)。
+		// CPPSRC-1:内容浏览器里的"新建 C++ 组件…"(与 File ▸ 新建 C++ 组件… 同一个向导)。
 		bool RequestNewCppScript() override;
 		// ---- PLUG-T3:插件管理器面板的数据与动作 ----
 		// 面板只依赖 shell(与其它面板同一条纪律):数据源 = EditorLayer 的 PluginManager。
@@ -384,16 +384,16 @@ namespace World
 		// D10-15:DrawModals 里另外四个模态(unsaved/error/cooking/projectsettings)也走同一套
 		// BeginModalFrame + ModalButtons/ModalFooter,并由同一组 Begin/EndModalInputBlock 挡输入。
 		void RenderImportDestinationModal(Wui::WuiContext& ctx);
-		// ---- CPPT-6-ED-NEWSCRIPT:File ▸ New C++ Script… ----
+		// ---- CPPT-6-ED-NEWSCRIPT:File ▸ New C++ Component… ----
 		// 菜单入口 → 名称模态(合法 C++ 标识符 + 不重名,行内错误)→ 写
-		// **当前项目** `<项目根>/src/Scripts/<Name>.h` 模板(PROJ-8/T1)→ 外部 Visual Studio
+		// **当前项目** `<项目根>/src/Components/<Name>.h` 模板(PROJ-8/T1)→ 外部 Visual Studio
 		// 打开(帧边界;内置编辑器只服务 Lua/Luau)+ 状态栏提示"用 VS 构建这个项目,再重载
 		// C++ 模块";没有当前项目时不打开模态,直接给可读提示。操作日志与新建资产同口径。
 		void OpenNewCppScriptModal(Wui::WuiContext& ctx);
 		void DrawNewCppScriptModal(Wui::WuiContext& ctx);
 		// 名称校验:没有项目 / 空 / 非法标识符 / 目标已存在 → 可读原因;空串 = 通过。
 		std::string NewCppScriptNameError() const;
-		// 目标绝对路径:`<当前项目根>/src/Scripts/<Name>.h`(没有项目时为空路径的拼接)。
+		// 目标绝对路径:`<当前项目根>/src/Components/<Name>.h`(没有项目时为空路径的拼接)。
 		std::filesystem::path NewCppScriptTargetPath() const;
 		// 写模板 + (项目类型账本存在时)登记类型 + 外部 VS 打开 + 状态栏提示 + 操作日志;
 		// 失败写 m_NewCppScriptFailure 并返回 false。

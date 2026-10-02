@@ -9,7 +9,7 @@
 | 层 | 位置 | 归属 | 构建 |
 | --- | --- | --- | --- |
 | **引擎层 C++** | `Engine/**`(产物 `WorldRuntime.dll`) | 引擎仓库;项目**不复制、不改** | 引擎自己的解决方案 `build/x64-Debug/World.slnx` |
-| **游戏项目层 C++** | `<项目根>/src/**`(`Components/`、`Scripts/` 等) | 项目自己;脚本与组件都落这里 | 编辑器:内容浏览器「项目 C++」根(与资产同一套网格/列表/搜索,双击走外部 Visual Studio);构建见 §5 |
+| **游戏项目层 C++** | `<项目根>/src/**`(`Components/`、`Systems/`、`GameProject.cpp`) | 项目自己;组件(数据)与系统(逻辑)都落这里 | 编辑器:内容浏览器「项目 C++」根(与资产同一套网格/列表/搜索,双击走外部 Visual Studio);构建见 §5 |
 
 - **示例内容由示例项目模板提供**(`templates/project-example/**`,包含 4 个场景、示例材质/预制体/脚本/着色器/贴图)。
   **新建项目走向导选择模板**(干净骨架 `templates/project-empty/**` 或示例模板) —— 仓库内不再有内置的 `projects/default`。
@@ -27,8 +27,9 @@
     input.weinput             # 可选:输入映射
     scripts/templates/WorldScript.lua   # 可选:项目自带的 Lua 脚本模板
   src/                        # 必需:游戏项目层 C++
-    Components/               #   schema 组件
-    Scripts/                  #   脚本(含 schema 生成输入的 `*.h`)
+    Components/               #   schema 组件(纯数据;schema 输入只扫这里)
+    Systems/                  #   系统(逻辑,C++ ISystem)
+    GameProject.cpp           #   项目系统挂载入口(Attach/Detach,可选文件)
     Generated/                #   生成物(入库,标"不要手改")
   plugins/                    # 可选:项目插件包(<plugins>/<名>/{plugin.we.yaml,src/,CMakeLists.txt})
                               #   由项目构建收集(存在性判断;没有 plugins/ = 零行为变化);

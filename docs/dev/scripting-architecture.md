@@ -49,6 +49,34 @@ public:
 };
 ```
 
+**项目侧怎么挂上去**:模块加载时还没有场景,场景创建时模块拿不到通知,所以引擎给了一个
+显式的挂载时机 —— `WorldContext` 的场景钩子(`Engine/src/World/Core/WorldContext.h`):
+
+```cpp
+// <项目根>/src/GameProject.cpp   (声明在 Game/src/GameAPI.h)
+namespace World::Game
+{
+    void AttachProjectSystems(Scene& scene)
+    {
+        scene.RegisterSystem<MovementSystem>();
+    }
+
+    void DetachProjectSystems(Scene& scene)
+    {
+        scene.UnregisterFrameSystem("MovementSystem");   // 名字必须与 Name() 逐字相同
+    }
+}
+```
+
+Game 模块在 `Register(context)` 里把这一对回调登记进 `WorldContext`;引擎在
+`Scene::OnRuntimeStart()` 末尾调用 `Attach`、`Scene::OnRuntimeStop()` 开头调用 `Detach`。
+因此**系统只活在一次运行时内**:Play 停止 → 系统撤销,再次 Play → 重新挂上(与 Lua 系统脚本
+同一生命周期)。`src/GameProject.cpp` 是**可选**文件 —— 项目没有它时编一份空实现,
+构建不会因为少一个文件而失败(构建期探测,见 `Game/CMakeLists.txt`)。
+
+引擎自身的系统(物理 / movement / transform / camera)不走这条路:它们由
+`Scene::EnsureDefaultFrameSystems()` 在同一个注册表里挂好,`Attach` 只会**追加**在它们之后。
+
 **Luau** —— 项目内容树下的系统脚本,场景启动时整份执行一次:
 
 ```lua

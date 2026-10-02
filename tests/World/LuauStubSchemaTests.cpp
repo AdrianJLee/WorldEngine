@@ -1,4 +1,4 @@
-// P2 W3a-A2:存根随 schema 自动更新(LuaStubGenerator 渲染 schema 组件类型/字段)。
+﻿// P2 W3a-A2:存根随 schema 自动更新(LuaStubGenerator 渲染 schema 组件类型/字段)。
 //
 // 覆盖:程序构造的 TypeSchema → `---@class` + `---@field` 注解(Kind 覆盖 Bool/整数/Float/
 // String/Vec3/Asset/Object(UUID) 只读/Mat4 Transient/Quat 未映射)、字段顺序规则(field id
@@ -87,7 +87,6 @@ namespace
 			sizeof(uint64_t),
 			Schema::TypeCategory::Struct,
 			{},
-			nullptr,
 			nullptr,
 		};
 		return schema;

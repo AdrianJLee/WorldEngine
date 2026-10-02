@@ -18,6 +18,29 @@ namespace World::Modules
 			return "Game.rollback-" + std::to_string(WE_MODULE_ABI_VERSION) + ".dll";
 		}
 
+		// PURE-ECS:模块的 `WeModule::Register` 可以登记"场景系统挂载钩子"
+		// (WorldContext::AddSceneSystemsHook),Attach 挂上的帧系统函数指针就在这个 DLL 里。
+		// 运行中的场景一旦失去 DLL ⇒ 下一帧调用跳进已卸载内存。Scene::CanApplyScriptReload
+		// 只挡"回调内/结构提交点内/停止中"(它必须放行 Play 期间的 Lua 系统脚本热重载),
+		// 所以模块卸载/重载这条路径要自己再加一个安全点:同一 WorldContext 下不得有 Running 场景。
+		// 只有"真的登记过钩子"的上下文才受这条限制 —— 没有 `src/GameProject.cpp` 的项目
+		// (老项目/纯数据项目)保持原有"随时可卸载"的语义。
+		bool HasRunningScene(const WorldContext& context, std::string* reason)
+		{
+			if (!context.HasSceneSystemsHooks())
+				return false;
+			for (const Scene* scene : Scene::LiveScenes(&context))
+			{
+				if (scene && scene->IsRunning())
+				{
+					if (reason)
+						*reason = "a scene is running (stop Play/Simulate before unloading module systems)";
+					return true;
+				}
+			}
+			return false;
+		}
+
 		// 卸载时记下"用户真正在改的那份 Game.dll"(卸载后回滚副本可能已成为已加载模块,
 		// 但下一次重载的目标始终是规范路径;回滚副本只作为加载失败时的兜底)。
 		std::filesystem::path s_LastReloadTarget;
@@ -39,6 +62,15 @@ namespace World::Modules
 			out.Status = ModuleManager::Status::NotSafePoint;
 			out.Message = "not at a script reload safe point (inside a callback, structural commit or stop)";
 			return false;
+		}
+		{
+			std::string reason;
+			if (HasRunningScene(context, &reason))
+			{
+				out.Status = ModuleManager::Status::NotSafePoint;
+				out.Message = reason;
+				return false;
+			}
 		}
 
 		const std::filesystem::path loaded = context.Modules().PathOf(GameModuleId);

@@ -120,11 +120,10 @@ target_compile_features(WorldScriptWorkflowTests PRIVATE cxx_std_17)
 # 存根漂移门禁要复现"编辑器同一输入":额外编译 Game 模块的生成式 schema 注册源
 # (GameAPI.cpp 运行时走同一条 RegisterGameSchemaModule)。PROJ-8/T2 起示例 C++ 属于项目层/
 # 示例模板,引擎 Game/src 只剩骨架 ⇒ 测试改指**测试夹具** tests/fixtures/game-module/
-# (同名同形:Game::SampleDataComponent / Game::ExampleScript,存根夹具逐字节可比)。
+# (同名同形:Game::SampleDataComponent,存根夹具逐字节可比)。
 target_include_directories(WorldScriptWorkflowTests PRIVATE "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src")
 target_sources(WorldScriptWorkflowTests PRIVATE
     "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Generated/Game/GameSchemaRegistration.cpp"
-    "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Scripts/ExampleScript.cpp"
 )
 target_compile_definitions(WorldScriptWorkflowTests PRIVATE
     _CRT_SECURE_NO_WARNINGS
@@ -971,6 +970,27 @@ set_tests_properties(World.Behavior PROPERTIES
     TIMEOUT 60
 )
 
+# PECS-T4:项目层 C++ 系统的场景挂载钩子(AddSceneSystemsHook / RunSceneAttachHooks)契约回归。
+add_executable(WorldProjectSystemsHookTests World/ProjectSystemsHookTests.cpp)
+target_link_libraries(WorldProjectSystemsHookTests PRIVATE World)
+target_compile_features(WorldProjectSystemsHookTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldProjectSystemsHookTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldProjectSystemsHookTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldProjectSystemsHookTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.ProjectSystemsHook COMMAND WorldProjectSystemsHookTests)
+set_tests_properties(World.ProjectSystemsHook PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 60
+)
+
 # P2 W3a:字段 id / 生成物漂移门禁。schema-compiler --check 逐字节比较生成物;
 # 注解(含显式 Id(...))改了却没重跑生成器 → 此测试红灯。生成器只构建、不参与产品二进制。
 add_test(NAME World.SchemaDrift
@@ -997,12 +1017,10 @@ set_tests_properties(World.SchemaDrift PROPERTIES
 add_test(NAME Game.SchemaDrift
     COMMAND schema-compiler
         --input "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Components/SampleDataComponent.h"
-        --input "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Scripts/ExampleScript.h"
         --module Game
         --output "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Generated"
         --manifest "${CMAKE_SOURCE_DIR}/tests/fixtures/game-module/src/Generated/Game.manifest"
         --reg-include "Components/SampleDataComponent.h"
-        --reg-include "Scripts/ExampleScript.h"
         --check)
 set_tests_properties(Game.SchemaDrift PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -1146,7 +1164,7 @@ foreach(_we_plugin_target IN LISTS WE_PLUGIN_TEST_DLL_TARGETS)
     )
 endforeach()
 
-foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldImportWorldSettingsTests WorldPluginTests ${_we_optional_test_targets})
     add_custom_command(TARGET ${_we_test_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:World>"
@@ -1155,4 +1173,3 @@ foreach(_we_test_target WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldW
         VERBATIM
     )
 endforeach()
-

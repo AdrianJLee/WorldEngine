@@ -27,7 +27,7 @@
 | 引擎内建 shader（`Engine/assets/shaders/**.slang`） | `EngineShaderHotReload`：150ms，绝对路径轮询 | 帧边界 `Renderer::ReloadShaders()`（2D→3D→WUI；只重建 shader+管线，旧句柄延迟释放） | 任一 owner 失败保留其旧管线，`failed` 计数 + 首条可读原因 | `WLD_SHADER_HOTRELOAD=0` 关闭；打包形态读 cooked `shaders/*.spv` |
 | 场景 `.wd`（当前文档） | `AssetFileWatch`：150ms | **干净文档 + Edit 态** → 自动重开（按 UUID 保选择、恢复编辑器相机）；否则只提示 | dirty/Play/Simulate 不自动；重开失败保留原文档 | `WLD_SCENE_AUTORELOAD=0` 关闭；未保存修改永不自动覆盖 |
 | 预制体 `.wprefab`（场景实例引用） | 每帧同步实例来源路径进 `AssetFileWatch`：150ms | 安全点逐实例 `Gameplay::ApplyPrefabChanges`（保留 overrides） | 结构不一致/读失败 → 不动任何实体 + 可读日志 | 不改变实例身份；同级重排不算结构变化 |
-| C++ 模块 `Game.dll`（含 C++ 脚本组件） | 手动：`File ▸ Build & Reload C++ Module` / AI `module.build_reload`（后台构建）；分步 `module.unload`+`module.reload` | 卸载释放 DLL 锁 → 构建 → 加载新 DLL；实例配置属性按稳定字段迁移 | 构建失败保持 unloaded + 输出尾部可见；加载失败自动回滚 `.rollback-<abi>.dll` | 不迁移 C++ 成员可变状态/指针注册；硬崩溃仍是进程终止 |
+| C++ 模块 `Game.dll`（组件 schema + 项目系统） | 手动：`File ▸ Build & Reload C++ Module` / AI `module.build_reload`（后台构建）；分步 `module.unload`+`module.reload` | 卸载释放 DLL 锁 → 构建 → 加载新 DLL；**有 Running 场景时拒绝卸载**（模块的 `AttachProjectSystems` 挂上的帧系统函数指针在 DLL 里，见 `docs/dev/scripting-architecture.md` §3） | 构建失败保持 unloaded + 输出尾部可见；加载失败自动回滚 `.rollback-<abi>.dll` | 不迁移 C++ 成员可变状态/指针注册；硬崩溃仍是进程终止；系统只在运行时内存在 ⇒ 重载后**下次 Play** 才生效 |
 | 插件 DLL（L3） | 手动：插件管理器「重新加载」/ AI `plugin.reload <id> build=1`（一键）；AI `plugin.reload <id>` 保留两段式 | 一键 = 快照+卸载 → 后台构建插件 CMake 目标（项目插件 `<项目根>/build/x64-<配置>`、引擎插件 `<WLD_REPO_ROOT>/build/x64-<配置>`；与 `module.build_reload` 共用同一后台构建器）→ 成功后自动加载；blob 组件按实体 UUID + 字段 id 快照写回 | 构建失败保持 unloaded + 输出尾部进日志与 `plugin.info` 的 `buildOutput`；第二段失败载入 `.rollback-<abi>.dll` 并写回原状态 | 有活实例/Play 下第一段干净拒绝；快照只在内存、不跨重启；构建在飞时面板按钮置灰且全局同一时刻一个构建 |
 | glTF/GLB 源（`.gltf/.glb` → `.wmodel`） | 编辑器 `ModelImportWatch`：2s 重扫 `**/*.wmodel` 读源路径/设置（源不存在 = 不监听）+ 2s 稳定窗口；工作线程导入 | 主线程帧边界提交：临时文件同目录**原子替换**（`.wmodel` 最后落盘）→ `Mesh::ClearWModelCache()` + `AnimationSystem::ClearCache()` + 日志 `model reimported` | 导入/落盘失败只记日志（`model reimport failed`），旧 `.wmodel` 逐字节不变；提交前核对基线，别人改过就丢弃本产物 | `WLD_MODEL_HOTRELOAD=0` 关闭；对应 `.wmodel` 从未导入过 → 忽略；**模型预览面板正打开该 `.wmodel` 时跳过**（面板脏状态在面板私有状态里拿不到 ⇒ 打开即跳过，关闭后自动顺延重试）；外部 `.bin`/贴图引用改动不触发（只监听源文件本身） |
 
@@ -35,7 +35,7 @@
 
 - 渲染后端切换（`project.we.yaml` 的 `renderer:`）：编辑器自动重启进程；
 - AI 控制通道端口、插件启用清单（`local/plugins.json`）：重启生效；
-- 新增 C++ 脚本 API 后的 `WorldEngineAPI.luau` 存根：重新构建并重启编辑器；
+- 引擎 `ecs`/服务绑定表变化后的 `WorldEngineAPI.luau` 存根：重新构建并重启编辑器；
 - 插件组件的本地化显示名：`plugin.reload` 或重启；
 - 发行 Runtime：无热重载。
 

@@ -6,7 +6,6 @@
 #include "World/Core/Vfs/Vfs.h"
 #include "World/Core/Asset/ScriptArtifact.h"
 #include "World/Schema/SchemaRegistry.h"
-#include "World/Script/BehaviorRegistry.h"
 #include "World/Script/BindECS.h"
 #include "World/Script/BindEvents.h"
 #include "World/Script/BindUI.h"
@@ -1879,62 +1878,6 @@ namespace World
 
 
 
-	// ---- P2 W2a:行为注册层（只登记/查询，不参与调度）----
-
-	BehaviorRegistry& ScriptEngine::Behaviors()
-	{
-		return BehaviorRegistry::Instance();
-	}
-
-
-
-	std::size_t ScriptEngine::EnsureSchemaBehaviors(const Schema::SchemaRegistry& schemas, std::vector<std::string>* errors)
-	{
-		BehaviorRegistry& registry = BehaviorRegistry::Instance();
-		std::size_t ensured = 0;
-		for (const Schema::TypeSchema* type : schemas.List(Schema::TypeCategory::Script))
-		{
-			std::string error;
-			BehaviorDesc desc = BehaviorRegistry::MakeNativeDesc(*type);
-			const BehaviorDesc* existing = registry.Find(desc.ModuleId);
-			bool ok = false;
-			if (!existing) ok = registry.Register(std::move(desc), &error);
-			else if (BehaviorDescEquals(*existing, desc)) ok = true;
-			else ok = registry.Replace(std::move(desc), &error);
-			if (ok) ++ensured;
-			else if (errors) errors->push_back(std::move(error));
-		}
-		return ensured;
-	}
-
-	// ---- P2 W5:L2 脚本热重载(引擎侧)----
-
-	namespace
-	{
-		// 热重载后的 generation 必须与 Scene 启动期分配的 generation 不同,否则排队中的旧命令
-		// 会被 Scene::IsSourceAlive 误判为"仍然有效"(判活条件是 组件 + Generation 相等 + Running)。
-		// Scene 的计数器从 1 开始、每次脚本启动 +1(Scene::StartPendingScripts),所以这里把最高位当作
-		// "ScriptEngine 热重载域"标记 + 进程内单调序号:
-		//   - 与任何 Scene 分配值都不同(Scene 要启动 2^63 次才会撞上);
-		//   - 同一组件连续两次重载的 generation 也不同(每次 +1)。
-		uint64_t NextReloadGeneration()
-		{
-			static uint64_t s_ReloadGeneration = 0;
-			++s_ReloadGeneration;
-			return (uint64_t(1) << 63) | s_ReloadGeneration;
-		}
-
-		std::string JoinDiagnosticLines(const std::vector<std::string>& lines)
-		{
-			std::string text;
-			for (const std::string& line : lines)
-			{
-				if (!text.empty()) text += "\n";
-				text += line;
-			}
-			return text;
-		}
-	}
 
 
 }

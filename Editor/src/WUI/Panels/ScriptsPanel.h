@@ -53,7 +53,7 @@ namespace World
 
 		struct ProjectSource
 		{
-			std::string RelativePath;        // 相对项目根,如 src/Scripts/MyScript.h
+			std::string RelativePath;        // 相对项目根,如 src/Components/MyComponent.h
 			std::filesystem::path DiskPath;  // 绝对路径(Open in VS / a11y value)
 		};
 

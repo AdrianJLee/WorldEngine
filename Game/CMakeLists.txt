@@ -33,13 +33,26 @@ else()
     message(STATUS "WorldEngine Game module: engine skeleton only (WLD_GAME_PROJECT_DIR is empty)")
 endif()
 
+# ---- PURE-ECS:项目层系统挂载入口的构建期探测 ---------------------------------
+# 项目用 C++ 写系统时,在 `<项目根>/src/GameProject.cpp` 里实现
+# `World::Game::AttachProjectSystems / DetachProjectSystems`(见 GameAPI.h)。
+# 这个文件是**可选**的:缺席时 GameAPI.cpp 编一份空实现(宏在下面传给编译器),
+# 老项目/零系统项目不会因为少一个文件而链接失败。
+set(WLD_GAME_HOOK_DEFINE "WLD_GAME_NO_PROJECT_HOOK=1")
+if(WLD_GAME_PROJECT_DIR AND EXISTS "${WLD_GAME_SRC_DIR}/GameProject.cpp")
+    set(WLD_GAME_HOOK_DEFINE "")
+    message(STATUS "WorldEngine Game module: project systems hook = ${WLD_GAME_SRC_DIR}/GameProject.cpp")
+else()
+    message(STATUS "WorldEngine Game module: no src/GameProject.cpp; compiling the empty systems hook")
+endif()
+
 # 引擎自带的**空模块**注册(committed 生成物):零 schema 声明的项目直接编这一份,
 # 不在项目里制造任何生成物,也不会把机器相关路径写进项目文件。
 set(GAME_SCHEMA_ENGINE_SKELETON_SOURCE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Generated/Game/GameSchemaRegistration.cpp")
 
 # ---- Game schema 生成:输入自动发现(CPPT-6)+ 项目化(PROJ-8/T2)----
-# 输入 = <Game 源码根>/{Components,Scripts}/*.h,**由构建期脚本在构建时 glob**
+# 输入 = <Game 源码根>/Components/*.h,**由构建期脚本在构建时 glob**
 # (Game/cmake/game-schema-build.cmake,每次构建跑一次)。
 # 为什么不在配置期:配置期 glob 会把"配置时还在、现在已删"的头文件留在 --input /
 # --reg-include 里 ⇒ 删一个脚本头后的第一次构建 `schema-compiler: cannot open input file`
@@ -50,7 +63,6 @@ set(GAME_SCHEMA_ENGINE_SKELETON_SOURCE
 # 这里仍用 CONFIGURE_DEPENDS glob,但结果只喂给这个判断,不进编译器的命令行。
 file(GLOB GAME_SCHEMA_DISCOVERY CONFIGURE_DEPENDS
     "${WLD_GAME_SRC_DIR}/Components/*.h"
-    "${WLD_GAME_SRC_DIR}/Scripts/*.h"
 )
 set(GAME_SCHEMA_ENGINE_SKELETON FALSE)
 if(NOT GAME_SCHEMA_DISCOVERY AND WLD_GAME_PROJECT_DIR)
@@ -110,6 +122,7 @@ target_compile_definitions(Game PRIVATE
     YAML_CPP_STATIC_DEFINE
     WLD_CURRENT_DIR="${WLD_ENGINE_ROOT}/Game/"
     GAME_BUILD_DLL
+    ${WLD_GAME_HOOK_DEFINE}
 )
 
 # 模块骨架(WeGameModuleQuery / GameLayer)永远来自引擎;其余源码来自 <Game 源码根>。

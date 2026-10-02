@@ -14,7 +14,6 @@ namespace World
 {
 	class LuauVm;
 	class ScriptBindingContext;
-	class BehaviorRegistry;
 	class WorldContext;
 
 	namespace Schema { class SchemaRegistry; }
@@ -157,15 +156,8 @@ namespace World
 		// 当前 VM 的绑定上下文（类型注册/宿主函数装箱；未初始化时抛 logic_error）
 		static ScriptBindingContext& GetBindingContext();
 
-		// ---- P2 W2a:行为注册层（只登记/查询，不参与调度）----
-		// 进程内行为注册表：与 VM 生命周期无关（Init/Shutdown 不清空），宿主与测试共用。
-		static BehaviorRegistry& Behaviors();
 		// 幂等登记/刷新一个 Luau 行为（字段来自组件的属性表；路径为空 → false + error）。
 		// 同模块 id 描述一致 → 直接返回 true；描述变化（脚本编辑/热重载）→ Replace 刷新。
-		// 幂等登记/刷新 schema 注册表里全部 Category==Script 的 C++ 行为；
-		// 返回已登记/已确认的模块数，失败项写入 errors（可为 null）。
-		static std::size_t EnsureSchemaBehaviors(const Schema::SchemaRegistry& schemas,
-			std::vector<std::string>* errors = nullptr);
 
 		// ---- P2 W6:沙箱预算旋钮 ----
 		// 进程内默认策略(Init 时下发到 VM;不随 Shutdown 复位)。0 = 该维度不限;

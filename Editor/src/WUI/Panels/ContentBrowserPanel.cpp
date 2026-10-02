@@ -4061,9 +4061,9 @@ namespace World
 				"C++ sources are built by CMake — rename or delete them in Visual Studio or File Explorer.");
 			if (toolbarSourcesScope)
 			{
-				// CPPSRC-1:源码根下"新建"只有 C++ 脚本一条(材质/场景/脚本/文件夹都是内容根语义);
-				// 走宿主同一个向导(File ▸ 新建 C++ 脚本…),不再展开资产类型清单。
-				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ Script…");
+				// CPPSRC-1:源码根下"新建"只有 C++ 组件一条(材质/场景/脚本/文件夹都是内容根语义);
+				// 走宿主同一个向导(File ▸ 新建 C++ 组件…),不再展开资产类型清单。
+				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ Component…");
 				if (Wui::MenuItem(ctx, Wui::HashId("browser.toolbar.menu.newcpp"), newRow, newCppLabel, true, theme))
 				{
 					m_Host.RequestNewCppScript();
@@ -4756,9 +4756,9 @@ namespace World
 			const bool blankPluginsScope = m_Model.Scope == BrowserRootScope::ProjectPlugins;
 			if (blankSourcesScope)
 			{
-				// CPPSRC-1:源码根下空白右键只有"新建 C++ 脚本…"(资产类型都不适用);
-				// 走宿主同一个向导(File ▸ 新建 C++ 脚本…)。
-				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ Script…");
+				// CPPSRC-1:源码根下空白右键只有"新建 C++ 组件…"(资产类型都不适用);
+				// 走宿主同一个向导(File ▸ 新建 C++ 组件…)。
+				const std::string newCppLabel = Wui::Tr("panel.content_browser.toolbar.new_cpp", "New C++ Component…");
 				if (MenuItem(ctx, Wui::HashId("browser.blank.new.cpp"), newRow, newCppLabel, true, theme))
 					m_Host.RequestNewCppScript();
 			}
@@ -4892,14 +4892,14 @@ namespace World
 			m_PendingNewShortcut = 0;
 			if (m_Model.Scope == BrowserRootScope::ProjectSources)
 			{
-				// CPPSRC-1:源码根下 Ctrl+N = 新建 C++ 脚本(资产类型都不适用);
+				// CPPSRC-1:源码根下 Ctrl+N = 新建 C++ 组件(资产类型都不适用);
 				// Ctrl+Shift+N(新建文件夹)在只读浏览下锁死,只给理由,不做事。
 				if (request == 2)
 					NotifyAssetFailure(Wui::Tr("panel.content_browser.src.locked_reason",
 						"C++ sources are built by CMake — rename or delete them in Visual Studio or File Explorer."));
 				else if (!m_Host.RequestNewCppScript())
 					NotifyAssetFailure(Wui::Tr("panel.content_browser.new_cpp.unavailable",
-						"Open a project first — the New C++ Script wizard writes into <project>/src/Scripts."));
+						"Open a project first — the New C++ Component wizard writes into <project>/src/Components."));
 			}
 			else if (m_Model.Scope == BrowserRootScope::ProjectPlugins)
 			{

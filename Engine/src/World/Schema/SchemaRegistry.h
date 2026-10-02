@@ -20,7 +20,6 @@ namespace World::Schema
 			DuplicateComponentId, // 不同模块共用同一组件存储 id
 			Conflict,             // 跨模块同名组件等不允许的组合
 			AbiMismatch,          // schema ABI 版本超出宿主支持
-			InvalidScript,        // CPPT-2:Category==Script 缺显示名或工厂绑定
 		};
 
 		static const char* StatusName(Status status);

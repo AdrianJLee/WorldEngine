@@ -11,7 +11,7 @@
   "panel.scripts.project_sources.open_in_browser.tooltip": "把内容浏览器切到「项目 C++」根(<项目根>/src):与资产同一套网格/列表/类型列/搜索,双击用外部 Visual Studio 打开。",
   "panel.scripts.project_sources.open_in_browser.unavailable": "先打开或新建一个项目 —— 项目 C++ 位于 <项目根>/src。",
   "panel.scripts.project_sources.open_in_browser.done": "内容浏览器已切到「项目 C++」:",
-  "panel.scripts.project_sources.empty": "还没有 C++ 源码 —— 用「文件 ▶ 新建 C++ 脚本…」或把文件放进 <项目根>/src/。",
+  "panel.scripts.project_sources.empty": "还没有 C++ 源码 —— 用「文件 ▶ 新建 C++ 组件…」或把文件放进 <项目根>/src/。",
   "panel.scripts.project_sources.focus_status": "项目源码({count} 个)位于 {path}",
   "panel.scripts.project_sources.fold_tooltip": "折叠/展开这个项目的 C++ 源码;「用 VS 打开」始终走外部 Visual Studio。",
   "panel.scripts.project_sources.open_vs": "用 VS 打开",
@@ -19,7 +19,7 @@
   "panel.scripts.project_sources.no_project": "还没有打开项目 —— 先在启动器里打开或新建一个项目,项目的 C++ 源码会显示在这里。",
   "panel.scripts.project_sources.no_project.title": "还没有打开项目",
   "panel.scripts.empty.title": "还没有脚本",
-  "panel.scripts.empty.hint": "在内容浏览器里新建 .luau 脚本,或用「文件 ▶ 新建 C++ 脚本…」在 <项目根>/src/ 下新建 C++ 源码。",
+  "panel.scripts.empty.hint": "在内容浏览器里新建 .luau 脚本,或用「文件 ▶ 新建 C++ 组件…」在 <项目根>/src/ 下新建 C++ 源码。",
   "panel.scripts.scene_empty": "当前场景没有脚本组件",
   "panel.scripts.cpp_module_hint": "实例重载不支持(用「文件 ▶ 重载 C++ 模块」)"
 }

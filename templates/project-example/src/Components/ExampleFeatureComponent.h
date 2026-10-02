@@ -8,14 +8,13 @@
 namespace World
 {
 	// ============================================================================
-	// C++ 脚本属性"特性全览"示例(Game 模块)。
+	// 示例组件(纯数据):怎么声明字段、面板怎么画、什么进存档。
 	//
-	// 这个文件同时是"怎么声明、怎么用 C++ 脚本属性"的参考。每个 WE_FIELD 的注释写清
-	// 声明写法、面板上的编辑方式,以及值进不进场景存档(.wd):
+	// 组件只描述"实体有哪些数据",不写逻辑:
 	//
 	//   * 标量(Health/Speed/...):一行一个控件。写了 Default(...) 的行显示声明默认值;
-	//     没写 Default(...) 的行显示"未设(脚本默认)" —— Play 时未设字段不覆盖成员初值
-	//     (成员初始化 = 脚本默认值),复位(↺)只是回到"未设"。
+	//     没写 Default(...) 的行显示"未设" —— Play 时未设字段不覆盖成员初值
+	//     (成员初始化 = 组件的默认值),复位(↺)只是回到"未设"。
 	//   * 只读摘要(IVec3/Mat4):面板只画一行不可编辑的摘要文本;值不进存档,
 	//     Play 时保留成员初值 —— 适合放"运行期状态",不把几何/矩阵写死进场景。
 	//   * 嵌套 struct:`WE_SCHEMA_BODY(..., Struct)` 声明一份可复用的字段模型
@@ -27,6 +26,9 @@ namespace World
 	//     枚举(Of(枚举名))、资产(Of("资产类型"))或已注册的命名 struct。
 	//     容器没有 Default(...):成员初始化是默认形状,面板里加/改过的元素才进存档;
 	//     更深的匿名嵌套(Array<Array<T>>)不支持 —— 用命名 struct 再套容器表达。
+	//
+	// **逻辑不写在这里**:写到 `src/Systems/` 的系统里,并在 `src/GameProject.cpp` 里挂上。
+	// 组件 / 系统 / 脚本库三层边界见 docs/dev/scripting-architecture.md。
 	// ============================================================================
 
 	// 枚举示例:WE_ENUM_SCHEMA 注册后,`Enum, Of(ExampleMode)` 在面板里是可编辑下拉,
@@ -45,7 +47,7 @@ namespace World
 
 	// 嵌套 struct 示例:字段模型(名字 + kind + 默认值)在这里声明一次;
 	// 标量字段 Stats 与容器 Squad/Units 的元素都复用这份声明(数组元素可展开成子字段)。
-	// Struct 本身只描述数据形状;由引用它的 Script/Component 字段承载进场景。
+	// Struct 本身只描述数据形状;由引用它的组件字段承载进场景。
 	struct ExampleStats
 	{
 		float Health = 5.0f;
@@ -59,54 +61,9 @@ namespace World
 		WE_SCHEMA_END
 	};
 
-	class ExampleScript : public ScriptableEntity
+	// 组件本体:纯数据,不继承任何基类、没有生命周期回调 —— 逻辑属于系统。
+	struct ExampleFeatureComponent
 	{
-	public:
-		// 生命周期:怎么用容器。
-		// OnCreate 打印尺寸与元素(含 struct 元素的字段),在编辑器日志里可以直接核对
-		// "场景/检视器里改过的容器值真的进了实例"(Play 应用路径)。
-		virtual void OnCreate() override
-		{
-			WLD_INFO("[ExampleScript] OnCreate: sizes Scores={} Path={} Squad={} Modes={} Costs={} Units={}",
-				Scores.size(), Path.size(), Squad.size(), Modes.size(), Costs.size(), Units.size());
-			for (std::size_t index = 0; index < Scores.size(); ++index)
-				WLD_INFO("[ExampleScript] OnCreate Scores[{}]={}", index + 1, Scores[index]);
-			for (const glm::vec3& point : Path)
-				WLD_INFO("[ExampleScript] OnCreate Path point: ({}, {}, {})", point.x, point.y, point.z);
-			for (const ExampleStats& entry : Squad)
-				WLD_INFO("[ExampleScript] OnCreate Squad element: Health={} Count={}",
-					entry.Health, entry.Count);
-			for (std::size_t index = 0; index < Modes.size(); ++index)
-				WLD_INFO("[ExampleScript] OnCreate Modes[{}]={}", index + 1,
-					static_cast<int32_t>(Modes[index]));
-			for (const auto& [key, cost] : Costs)
-				WLD_INFO("[ExampleScript] OnCreate Costs[{}]={}", key, cost);
-			for (const auto& [key, unit] : Units)
-				WLD_INFO("[ExampleScript] OnCreate Units[{}]: Health={} Count={}",
-					key, unit.Health, unit.Count);
-			WLD_INFO("[ExampleScript] OnCreate nested struct Stats: Health={} Count={}",
-				Stats.Health, Stats.Count);
-		}
-		// OnUpdate 演示 Map 的常见用法:每帧做一次查找;只在第一帧打印,避免刷屏。
-		virtual void OnUpdate(Timestep ts) override
-		{
-			(void)ts;
-			const auto gold = Costs.find("gold");
-			if (!m_LoggedUpdateLookup)
-			{
-				m_LoggedUpdateLookup = true;
-				if (gold != Costs.end())
-					WLD_INFO("[ExampleScript] OnUpdate map lookup: Costs[gold]={}", gold->second);
-				else
-					WLD_INFO("[ExampleScript] OnUpdate map lookup: Costs has no 'gold' key");
-			}
-		}
-		virtual void OnDestroy() override
-		{
-			WLD_INFO("[ExampleScript] OnDestroy: cleanup (Scores={} Costs={} Squad={})",
-				Scores.size(), Costs.size(), Squad.size());
-		}
-
 		// ---- 标量:一行一个控件(Default/Range/Unit/Step/Doc 的写法) ----
 		float Health = 100.0f;
 		float Speed = 1.0f;
@@ -114,7 +71,7 @@ namespace World
 		std::string Label = "WorldEngine Example";
 		ExampleMode Mode = ExampleMode::Patrol;
 		Ref<Texture2D> Icon;
-		// vec3 可编辑(三个数值分量);IVec3/Mat4 是只读摘要(见下面的注释口径)。
+		// vec3 可编辑(三个数值分量);IVec3/Mat4 是只读摘要(见上面的注释口径)。
 		glm::vec3 SpawnPoint { 0.0f, 1.0f, 0.0f };
 		glm::ivec3 GridCell { 0, 0, 0 };
 		glm::mat4 PreviewMatrix = glm::mat4(1.0f);
@@ -130,9 +87,9 @@ namespace World
 		std::map<std::string, float> Costs { { "gold", 3.0f }, { "wood", 5.0f } };
 		std::map<std::string, ExampleStats> Units { { "boss", { 9.0f, 4 } } };
 
-		WE_SCHEMA_BODY(Game, ExampleScript, Script)
-			WE_SCHEMA_META(Category("Scripting/Examples"),
-				Doc("Feature showcase C++ behavior: scalars with edit metadata, bool/string/enum/asset, editable vec3, read-only IVec3/Mat4 summaries, a nested struct and Array/Map container properties with lifecycle usage notes."))
+		WE_SCHEMA_BODY(Game, ExampleFeatureComponent, Component)
+			WE_SCHEMA_META(Category("Examples"),
+				Doc("Pure-data example component: field declaration and inspector coverage for scalars with edit metadata, bool/string/enum/asset, editable vec3, read-only IVec3/Mat4 summaries, a nested struct and Array/Map container fields."))
 			// ---- 标量:Default/Range/Unit/Step/Doc 各来一份(Health/Speed 保留原示例口径) ----
 			WE_FIELD(Health, Float, Default(100.0f), Range(0.0f, 1000.0f), Unit("hp"), Step(1.0f),
 				Doc("Scalar sample: declared default 100; the inspector edits it with a 0..1000 range slider and shows the 'hp' unit."));
@@ -141,7 +98,7 @@ namespace World
 			WE_FIELD(Enabled, Bool, Default(true),
 				Doc("Bool sample: a checkbox row; the declared default is true."));
 			WE_FIELD(Label, String,
-				Doc("String sample: free text row; without Default(...) it starts unset and the script member initializer stays in effect."));
+				Doc("String sample: free text row; without Default(...) it starts unset and the member initializer stays in effect."));
 			WE_FIELD(Mode, Enum, Of(ExampleMode),
 				Doc("Enum sample: WE_ENUM_SCHEMA(Game, ExampleMode, Int32) turns this into a dropdown; the scene stores the integer value."));
 			WE_FIELD(Icon, Asset, Of("Texture2D"),
@@ -173,9 +130,5 @@ namespace World
 			WE_FIELD(Units, Map, Of(ExampleStats),
 				Doc("Map<Struct> sample: string key -> Game::ExampleStats; expand an entry to edit the nested fields."));
 		WE_SCHEMA_END
-
-	private:
-		// 非反射成员(没有 WE_FIELD):只用于示例的日志节流,不参与属性面板/存档。
-		bool m_LoggedUpdateLookup = false;
 	};
 }

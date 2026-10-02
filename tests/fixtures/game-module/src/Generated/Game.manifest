@@ -1,4 +1,1 @@
 struct World::SampleDataComponent
-struct World::ExampleScript
-struct World::ExampleStats
-enum World::ExampleMode

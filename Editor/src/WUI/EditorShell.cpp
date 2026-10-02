@@ -797,8 +797,8 @@ namespace World
 		return true;
 	}
 
-	// CPPSRC-1:内容浏览器在"项目 C++"根下提供的"新建 C++ 脚本…"入口 —— 与 File ▸ 新建 C++ 脚本…
-	// 共用同一个向导(落点 `<项目根>/src/Scripts/*.h`,建完用外部 Visual Studio 打开)。
+	// CPPSRC-1:内容浏览器在"项目 C++"根下提供的"新建 C++ 组件…"入口 —— 与 File ▸ 新建 C++ 组件…
+	// 共用同一个向导(落点 `<项目根>/src/Components/*.h`,建完用外部 Visual Studio 打开)。
 	bool EditorShell::RequestNewCppScript()
 	{
 		if (!m_Ctx || CurrentProjectRoot().empty())
@@ -1544,7 +1544,7 @@ namespace World
 			|| m_Editor.ShowErrorModal() || m_Editor.ShowCookingProgress()
 			// P4-U13e:prefab 未保存改动的确认(关窗 / 进文档会话)也是窗口级模态。
 			|| m_PrefabPendingAction != PrefabPendingAction::None
-			// CPPT-6-ED-NEWSCRIPT:"新建 C++ 脚本"模态同样封锁下层命中。
+			// CPPT-6-ED-NEWSCRIPT:"新建 C++ 组件"模态同样封锁下层命中。
 			|| m_NewCppScriptOpen
 			// PROJ-1/T1:"新建项目"模态(名称/位置/模板/落盘)同样封锁下层命中。
 			|| m_NewProjectOpen
@@ -1964,7 +1964,7 @@ namespace World
 
 		// ---- CPPT-3:Game 模块热重载状态(loaded / unloaded / reloading / rolled-back)----
 		// 常驻显示:模块未加载窗口(启动失败 / module.unload / reloading)必须显式提示 ——
-		// 该窗口里 Lua 存根生成被拒绝、C++ 脚本下拉为空,用户要能一眼看出"是模块没加载"。
+		// 该窗口里 Lua 存根生成被拒绝、C++ 组件下拉为空,用户要能一眼看出"是模块没加载"。
 		// 无障碍:`cppmodule.status`(kind=status,value = 稳定字面量)供 AI/探针断言;
 		// 发生过模块动作后追加 `cppmodule.result` 反馈节点(module.reload 的 ok/回滚/计数)。
 		{
@@ -4064,13 +4064,14 @@ namespace World
 		Wui::EndModalFrame(ctx);
 	}
 
-	// ---- CPPT-6-ED-NEWSCRIPT:File ▸ New C++ Script… ----
+	// ---- CPPT-6-ED-NEWSCRIPT:File ▸ New C++ Component… ----
 	//
 	// 与内容浏览器的新建材质 / 新建着色器向导同一套交互骨架(名称 + 实时落点 + 行内错误 +
 	// Enter 确认 / Esc 取消),差别只有两点:
-	//   * 落点在**当前项目层**(`<项目根>/src/Scripts/<Name>.h`,PROJ-8/T1;不在内容根里);
+	//   * 落点在**当前项目层**(`<项目根>/src/Components/<Name>.h`,PROJ-8/T1;不在内容根里);
 	//   * 创建后**外部 Visual Studio** 打开(CPPT-7:内置脚本编辑器只服务 Lua/Luau)。
-	// 模板语法与示例项目模板的 `src/Scripts/ExampleScript.h` 一致,随项目构建进 Game.dll。
+	// 模板是纯 ECS 组件(纯数据 + WE_FIELD 反射;逻辑归 src/Systems/ 的系统),
+	// 语法与示例项目模板的 `src/Components/SampleDataComponent.h` 一致,随项目构建进 Game.dll。
 	namespace
 	{
 		// 名称 → 文件名:去掉用户可能顺手输入的 `.h` 后缀与首尾空白(与内容浏览器同名口径)。
@@ -4106,31 +4107,35 @@ namespace World
 			return true;
 		}
 
-		// 模板正文:头注释(File ▶ Build & Reload C++ Module 一步构建并加载)+ 标量
+		// 模板正文:头注释(组件 = 纯数据 / 逻辑写在 src/Systems/ / 构建后重载 C++ 模块)+ 标量
 		// (Default/Range/Unit/Step/Doc)+ 枚举 + 命名 struct(Object, Of(...))+
-		// Array/Map 容器 + `WE_SCHEMA_BODY(Game, <Name>, Script)`。
-		// 每个类型名都带脚本名前缀(`<Name>Mode` / `<Name>Data`):文件名唯一由校验保证,
-		// 生成注册单元同时包含多个脚本头时也不会重定义。
+		// Array/Map 容器 + `WE_SCHEMA_BODY(Game, <Name>, Component)`。
+		// 每个类型名都带组件名前缀(`<Name>Mode` / `<Name>Data`):文件名唯一由校验保证,
+		// 生成注册单元同时包含多个组件头时也不会重定义。
 		std::string NewCppScriptTemplateSource(const std::string& name)
 		{
 			std::string source;
 			source += "#pragma once\n";
-			source += "#include \"World.h\"\n\n";
+			source += "#include \"World/Scene/Components.h\"\n\n";
 			source += "#include <map>\n";
 			source += "#include <string>\n";
 			source += "#include <vector>\n\n";
 			source += "namespace World\n";
 			source += "{\n";
 			source += "\t// ============================================================================\n";
-			source += "\t// " + name + " — 由编辑器「文件 ▶ 新建 C++ 脚本…」生成的 C++ 脚本模板。\n";
+			source += "\t// " + name + " — 由编辑器「文件 ▶ 新建 C++ 组件…」生成的纯 ECS 组件模板。\n";
 			source += "\t//\n";
-			source += "\t// 生效步骤:用 Visual Studio 构建这个项目(输出到 <项目>/build),再执行\n";
-			source += "\t// File ▶ Build & Reload C++ Module 生效(编辑器在后台跑项目 build.cmd —— 改完这个文件不必离开编辑器)\n";
-			source += "\t// 项目里的 Game 模块,再在编辑器里重载它)。\n";
+			source += "\t// ① 这是**组件 = 纯数据**:只声明字段与 WE_FIELD 反射元数据,不写逻辑;\n";
+			source += "\t//    编辑器属性面板按 WE_FIELD 的声明自动画控件。\n";
+			source += "\t// ② 逻辑写在 <项目根>/src/Systems/ 的系统里,并在 <项目根>/src/GameProject.cpp 里挂载:\n";
+			source += "\t//    AttachProjectSystems 里 scene.RegisterSystem<...>();\n";
+			source += "\t//    DetachProjectSystems 里 scene.UnregisterFrameSystem(\"...\")。\n";
+			source += "\t//    系统只活在一次运行时内(Play 启停各一次)。\n";
+			source += "\t// ③ 构建项目后回编辑器执行「文件 ▶ 重载 C++ 模块」加载新组件。\n";
 			source += "\t//\n";
-			source += "\t// 结构与示例项目模板 src/Scripts/ExampleScript.h 一致:标量 / 枚举 / 命名 struct /\n";
-			source += "\t// Array / Map 各留一行范例,不需要的字段整行删掉即可。属性面板按 WE_FIELD 的声明\n";
-			source += "\t// 渲染控件;只有被编辑过的值才写进场景(.wd),未编辑时用成员初始化里的默认值。\n";
+			source += "\t// 结构与示例项目模板 src/Components/SampleDataComponent.h 一致:标量 / 枚举 / 命名\n";
+			source += "\t// struct / Array / Map 各留一行范例,不需要的字段整行删掉即可。只有被编辑过的值才写进\n";
+			source += "\t// 场景(.wd),未编辑时用成员初始化里的默认值。\n";
 			source += "\t// ============================================================================\n\n";
 			source += "\t// 枚举:WE_ENUM_SCHEMA 注册后,`Enum, Of(...)` 在面板里是下拉框,存档写整数。\n";
 			source += "\tenum class " + name + "Mode : int32_t\n";
@@ -4154,22 +4159,9 @@ namespace World
 			source += "\t\t\t\tDoc(\"Nested struct sample: one editable integer.\"));\n";
 			source += "\t\tWE_SCHEMA_END\n";
 			source += "\t};\n\n";
-			source += "\t// 纯数据脚本类:不继承任何基类(旧 ScriptableEntity 已删除)。\n";
-			source += "\t// 生命周期 = 普通方法(可选用 Entity 形参);没有写的方法就是空槽,不参与调度。\n";
-			source += "\tclass " + name + "\n";
+			source += "\t// 纯数据组件:不继承任何基类、不写生命周期方法(旧 ScriptableEntity 已删除)。\n";
+			source += "\tstruct " + name + "\n";
 			source += "\t{\n";
-			source += "\tpublic:\n";
-			source += "\t\tvoid OnCreate(Entity self)\n";
-			source += "\t\t{\n";
-			source += "\t\t\t(void)self;\n";
-			source += "\t\t\tWLD_INFO(\"[" + name + "] OnCreate: Speed={} Values={} Weights={} Data.Amount={}\",\n";
-			source += "\t\t\t\tSpeed, Values.size(), Weights.size(), Data.Amount);\n";
-			source += "\t\t}\n";
-			source += "\t\tvoid OnUpdate(Timestep ts)\n";
-			source += "\t\t{\n";
-			source += "\t\t\t(void)ts;\n";
-			source += "\t\t}\n";
-			source += "\t\tvoid OnDestroy(Entity self) { (void)self; }\n\n";
 			source += "\t\t// ---- 标量:Default/Range/Unit/Step/Doc ----\n";
 			source += "\t\tfloat Speed = 1.0f;\n";
 			source += "\t\t" + name + "Mode Mode = " + name + "Mode::Idle;\n";
@@ -4178,9 +4170,9 @@ namespace World
 			source += "\t\t// ---- 容器:std::vector<元素> / std::map<std::string, 元素> ----\n";
 			source += "\t\tstd::vector<float> Values {};\n";
 			source += "\t\tstd::map<std::string, float> Weights {};\n\n";
-			source += "\t\tWE_SCHEMA_BODY(Game, " + name + ", Script)\n";
-			source += "\t\t\tWE_SCHEMA_META(Category(\"Scripting\"),\n";
-			source += "\t\t\t\tDoc(\"C++ script template generated from the editor: scalar with edit metadata, enum, nested struct and Array/Map container samples.\"))\n";
+			source += "\t\tWE_SCHEMA_BODY(Game, " + name + ", Component)\n";
+			source += "\t\t\tWE_SCHEMA_META(Category(\"Project\"),\n";
+			source += "\t\t\t\tDoc(\"C++ component template generated from the editor: scalar with edit metadata, enum, nested struct and Array/Map container samples.\"))\n";
 			source += "\t\t\tWE_FIELD(Speed, Float, Default(1.0f), Range(0.0f, 100.0f), Unit(\"m/s\"), Step(0.1f),\n";
 			source += "\t\t\t\tDoc(\"Scalar sample: Step(0.1) is the drag increment; Unit('m/s') is drawn after the value.\"));\n";
 			source += "\t\t\tWE_FIELD(Mode, Enum, Of(" + name + "Mode),\n";
@@ -4200,11 +4192,12 @@ namespace World
 
 	std::filesystem::path EditorShell::NewCppScriptTargetPath() const
 	{
-		// PROJ-8/T1:落点在**当前项目层** —— `<项目根>/src/Scripts/<Name>.h`(项目根取运行期
+		// PROJ-8/T1:落点在**当前项目层** —— `<项目根>/src/Components/<Name>.h`(项目根取运行期
 		// World::Paths::ProjectDir(),与进程 CWD 无关)。引擎里的 `Game/src` 只剩模块骨架,
-		// 用户的 C++ 脚本源码属于项目:项目自带的 CMakeLists.txt 把它编进 Game.dll。
+		// 用户的 C++ 组件源码属于项目:项目 CMake 的 schema 发现 glob 恰好是
+		// `<项目根>/src/Components/*.h`,随项目构建进 Game.dll。
 		// 没有当前项目时 CurrentProjectRoot() 为空 → 调用方先给可读提示,不会走到写盘。
-		return CurrentProjectRoot() / "src" / "Scripts"
+		return CurrentProjectRoot() / "src" / "Components"
 			/ (CppScriptBaseName(m_NewCppScriptName) + ".h");
 	}
 
@@ -4226,7 +4219,7 @@ namespace World
 		if (std::filesystem::exists(NewCppScriptTargetPath(), existsError))
 		{
 			// 落点回显 = 相对**项目根**(与项目源码视图的行标签同一口径)。
-			const std::string relative = "src/Scripts/" + name + ".h";
+			const std::string relative = "src/Components/" + name + ".h";
 			return Wui::TrFormat("modal.newscript.name.exists",
 				"A file with this name already exists: {path}", { { "path", relative } });
 		}
@@ -4241,7 +4234,7 @@ namespace World
 		{
 			const std::string notice = Wui::Tr("notice.newscript.no_project",
 				"No project is open — open or create a project in the launcher first, "
-				"then create C++ scripts.");
+				"then create C++ components.");
 			PushNotice(notice);
 			ctx.RecordOp("script", "new-cpp-no-project", m_NewCppScriptName, "");
 			WLD_CORE_WARN("[new-cpp-script] rejected: no current project");
@@ -4249,12 +4242,12 @@ namespace World
 		}
 		m_NewCppScriptOpen = true;
 		m_NewCppScriptOpenedFrame = static_cast<uint32_t>(ctx.Frame());
-		m_NewCppScriptName = "MyScript";
+		m_NewCppScriptName = "MyComponent";
 		m_NewCppScriptFailure.clear();
 		m_NewCppScriptFailureFor.clear();
 		ctx.SetModal(Wui::HashId("modal.newscript"));
 		ctx.SetFocus(Wui::HashId("script.new.name"));
-		ctx.RecordOp("script", "new-cpp-ask", m_NewCppScriptName, "src/Scripts");
+		ctx.RecordOp("script", "new-cpp-ask", m_NewCppScriptName, "src/Components");
 	}
 
 	bool EditorShell::CreateNewCppScript(Wui::WuiContext& ctx)
@@ -4320,14 +4313,14 @@ namespace World
 		}
 
 		// manifest 是**双向类型账本**(schema-compiler 拒绝"已声明但未登记"的新类型):
-		// 创建入口把模板声明的三个类型(脚本 / <Name>Data / <Name>Mode)全部登记,
-		// 用户重建 Game 时生成器即可直接通过。手写新脚本的作者仍需自己补这些行
+		// 创建入口把模板声明的三个类型(组件 / <Name>Data / <Name>Mode)全部登记,
+		// 用户重建 Game 时生成器即可直接通过。手写新组件的作者仍需自己补这些行
 		// (见 docs/user/scripting/README.md)。
 		//
-		// PROJ-8/T1:账本位置口径不变(脚本源码的 `../Generated/Game.manifest`),脚本落到项目层后
+		// PROJ-8/T1:账本位置口径不变(组件源码的 `../Generated/Game.manifest`),组件落到项目层后
 		// 它自动变成 `<项目根>/src/Generated/Game.manifest`(与 T2 的子项目构建故事一致)。
 		// 新增一条**存在性守卫**:账本还不存在(项目从未构建过)时**不新建** —— 凭空写一份
-		// 只有三条目的账本会把项目的构建输入改坏;由项目首次构建产出账本,之后再创建脚本即可登记。
+		// 只有三条目的账本会把项目的构建输入改坏;由项目首次构建产出账本,之后再创建组件即可登记。
 		const std::filesystem::path manifest =
 			target.parent_path().parent_path() / "Generated" / "Game.manifest";
 		std::error_code manifestFileError;
@@ -4391,7 +4384,7 @@ namespace World
 		}
 
 		// 落点/提示口径 = 相对**项目根**(项目源码视图的同一口径)。
-		const std::string relative = "src/Scripts/" + name + ".h";
+		const std::string relative = "src/Components/" + name + ".h";
 		// 操作日志:与内容浏览器的新建资产(browser.new-shader)同一条口径。
 		ctx.RecordOp("script", "new-cpp", name, relative);
 		WLD_CORE_INFO("[new-cpp-script] created '{0}'", target.string());
@@ -4421,7 +4414,7 @@ namespace World
 		bool escapePressed = false;
 		Wui::ModalFrameDesc frameDesc;
 		frameDesc.Id = modalId;
-		frameDesc.Title = Wui::Tr("modal.newscript.title", "New C++ Script");
+		frameDesc.Title = Wui::Tr("modal.newscript.title", "New C++ Component");
 		frameDesc.Size = { 560.0f, 236.0f };
 		if (!Wui::BeginModalFrame(ctx, frameDesc, &frame, &escapePressed, m_Theme))
 		{
@@ -4454,7 +4447,7 @@ namespace World
 		const std::string inlineError = nameError.empty() ? m_NewCppScriptFailure : nameError;
 		Wui::TextFieldA11y nameA11y;
 		nameA11y.Label = nameLabel;
-		nameA11y.Placeholder = Wui::Tr("modal.newscript.name.placeholder", "Script name (valid C++ identifier)");
+		nameA11y.Placeholder = Wui::Tr("modal.newscript.name.placeholder", "Component name (valid C++ identifier)");
 		// Enter 提交判定必须在**控件绘制前**取焦点:TextFieldCore 在回车那一帧会 `SetFocus(0)`
 		// (提交即交出焦点),画完再读 ctx.Focus() 已经不是本字段(实测:回车点了不建文件)。
 		const bool nameFocused = ctx.Focus() == nameId;
@@ -4465,7 +4458,7 @@ namespace World
 		cursorY += 46.0f;
 
 		// ---- 实时落点回显(相对当前项目根;绝对路径进节点 Tooltip)----
-		const std::string relative = "src/Scripts/" + CppScriptBaseName(m_NewCppScriptName) + ".h";
+		const std::string relative = "src/Components/" + CppScriptBaseName(m_NewCppScriptName) + ".h";
 		const std::string targetLabel = Wui::Tr("modal.newscript.target", "Will create");
 		Wui::Label(ctx, { labelX, cursorY + 3.0f }, targetLabel, m_Theme.TextMuted, 12.0f);
 		Wui::Label(ctx, { fieldX, cursorY + 1.0f }, relative, m_Theme.Text, 13.0f);
@@ -7422,16 +7415,17 @@ namespace World
 		}
 		fileEntries.push_back({ Wui::Tr("menu.file.import", "Import glTF..."), false,
 			[this] { m_Editor.ImportModelDialog(); } });
-		fileEntries.push_back({ Wui::Tr("menu.file.new_cpp_script", "New C++ Script…"), false,
+		fileEntries.push_back({ Wui::Tr("menu.file.new_cpp_script", "New C++ Component…"), false,
 				[this]
 				{
 					if (m_Ctx)
 						OpenNewCppScriptModal(*m_Ctx);
 				}, false,
 				Wui::Tr("menu.file.new_cpp_script.tooltip",
-					"Create a C++ script template under <project>/src/Scripts/ (scalar/enum/struct/"
-					"Array/Map samples) and open it in Visual Studio. Build the project (its build.cmd / "
-					"CMakeLists.txt), then use File ▶ Build & Reload C++ Module to load it."),
+					"Create a pure-ECS C++ component (data-only struct) under <project>/src/Components/ "
+					"(scalar/enum/struct/Array/Map samples) and open it in Visual Studio. Put logic in "
+					"<project>/src/Systems/ and register it in <project>/src/GameProject.cpp; build the "
+					"project, then use File ▶ Build & Reload C++ Module to load it."),
 				Wui::HashId("menu.file.new_cpp_script") });
 		// CPPSRC-1(用户 2026-09-29「c++脚本要像 asset 资产一样在编辑器里展示」):
 		// 项目 C++ 的唯一展示面 = 内容浏览器的 `Project C++` 根 —— 这一项不再打开 Scripts 面板
@@ -7779,7 +7773,7 @@ namespace World
 		// 选择器保持打开并把失败原因写进 import.dest.status。
 		RenderImportDestinationModal(ctx);
 
-		// ---- CPPT-6-ED-NEWSCRIPT:新建 C++ 脚本(窗口级模态) ----
+		// ---- CPPT-6-ED-NEWSCRIPT:新建 C++ 组件(窗口级模态) ----
 		DrawNewCppScriptModal(ctx);
 
 		// ---- PROJ-1/T1:新建项目(窗口级模态;成功态换成两个动作按钮) ----

@@ -286,7 +286,7 @@ namespace World
 			(void)Wui::EmptyState(ctx, emptyRect, std::string(),
 				Wui::Tr("panel.scripts.empty.title", "No scripts yet"),
 				Wui::Tr("panel.scripts.empty.hint",
-					"Create a .luau script in the Content Browser, or use File ▶ New C++ Script… "
+					"Create a .luau script in the Content Browser, or use File ▶ New C++ Component… "
 					"to add C++ sources under <project>/src/."),
 				std::string(), 0, theme);
 			drawStatusLine();
@@ -340,7 +340,7 @@ namespace World
 				// 空态给出下一步 + 解析后的 <项目>/src 绝对路径(提示"文件放哪儿")。
 				Wui::Label(ctx, { rect.X + 12.0f, y + 1.0f },
 					TruncateUtf8(Wui::Tr("panel.scripts.project_sources.empty",
-						"No C++ sources yet — use File ▶ New C++ Script… or drop files into <project>/src/."), 110),
+						"No C++ sources yet — use File ▶ New C++ Component… or drop files into <project>/src/."), 110),
 					theme.TextMuted, 12.0f);
 				Wui::Label(ctx, { rect.X + 12.0f, y + kProjectRowHeight + 1.0f },
 					TruncateUtf8(sourceRoot, 110), theme.TextMuted, 11.0f);

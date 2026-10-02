@@ -92,7 +92,6 @@ namespace World::Schema
 	{
 		Struct,
 		Component,
-		Script,
 		Enum,
 	};
 
@@ -252,24 +251,6 @@ namespace World::Schema
 		void (*CopyAll)(void* dstRegistry, void* srcRegistry, const void* entityMap) = nullptr;
 	};
 
-	// 脚本工厂绑定(2026-09-26 重写):schema 里 Category==Script 的类型 = 一个工厂,
-	// 由桥接文件生成(见 ComponentSchemaBridge.h 的 MakeScriptBinding<T>())。
-	//
-	// 旧口径是 `Bind(void* nativeScript)`,把函数指针写进 Script —— 那让"组件数据"
-	// 与"只能由 C++ 现场填的绑定"混在一起。现在组件只存 ScriptName,实例化时按名字查这里的工厂。
-	// 生命周期回调全部可选:脚本类不继承任何基类,只按需提供同名方法
-	// (OnCreate(Entity) / OnCreate() / OnUpdate(Timestep) / OnDestroy(Entity) / OnDestroy()),
-	// 由 MakeScriptBinding<T>() 用 SFINAE 探测后填写。rawEntity 指向调用现场的
-	// World::Entity(Schema 层不依赖 Scene 类型,故用不透明指针)。
-	struct ScriptBinding
-	{
-		void* (*Create)() = nullptr;
-		void (*Destroy)(void*) = nullptr;
-		void (*OnCreate)(void* instance, void* rawEntity) = nullptr;
-		void (*OnUpdate)(void* instance, float deltaSeconds) = nullptr;
-		void (*OnDestroy)(void* instance, void* rawEntity) = nullptr;
-	};
-
 	// schema-compiler 在模块生成 TU 中显式特化这两个模板;头文件只通过
 	// WE_SCHEMA_BODY 声明友元,不包含任何生成代码,也不做静态初始化期注册。
 	template <typename T>
@@ -318,7 +299,6 @@ namespace World::Schema
 		TypeCategory Category = TypeCategory::Struct;
 		std::vector<FieldSchema> Fields;
 		const StorageBinding* Storage = nullptr; // Category==Component
-		const ScriptBinding* Script = nullptr;   // Category==Script
 
 		// ---- 类型级描述元数据(编辑期/UI 用:组件选择器分组、说明文案、搜索) ----
 		// 来源 = 声明处的 WE_SCHEMA_META(Category(...), Doc(...)) 注解,由 schema-compiler 带进生成物。

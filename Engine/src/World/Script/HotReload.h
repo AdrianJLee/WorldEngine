@@ -5,14 +5,11 @@
 // 本文件只做三件与 VM 无关的事:
 //   1. 脚本源指纹:内容 FNV-1a64 优先,mtime+size 兜底(同一内容不重载);
 //   2. 逻辑脚本路径 → 原始字节/源码文本:VFS 优先、磁盘回退(与 ScriptEngine 读取语义一致);
-//   3. 实例字段迁移诊断:LuaFieldId 派生的稳定 id + 类型兼容规则的可读说明。
 //
-// 真正的重载编排(读取 → 编译 → 回调校验 → 字段迁移 → 整体交换 → generation)
-// 在 ScriptEngine::ReloadScript;监听器在 Script/ScriptFileWatch.h。
+// 监听器在 Script/ScriptFileWatch.h(系统脚本目录轮询,见 docs/dev/scripting-architecture.md)。
 
 #include "World/Core/Export.h"
 #include "World/Scene/Components.h"
-#include "World/Script/ScriptProperties.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -80,33 +77,4 @@ namespace World
 	// 需要时创建父目录;成功返回 true,error 写首个失败的路径(可为 null)。
 	WLD_API bool EnsureScriptEditorScaffold(const std::filesystem::path& contentRoot,
 		std::string* error = nullptr);
-
-	// CPPT-2(FIX1):迁移诊断的调用方选项 —— Luau 热重载与 C++ 模块重载复用同一条实现:
-	//   * Tag:每条诊断的前缀("[hot-reload]" / "[module-reload]");
-	//   * ReportAddedFields:新增字段是否也出一条(模块级重载的验收要求"类型变化 / 字段被删 /
-	//     新增字段"三类各一条;Luau 热重载保持"新增字段 = 取新默认值,无诊断"的原语义,
-	//     默认 false)。
-	struct ScriptFieldMigrationOptions
-	{
-		const char* Tag = "[hot-reload]";
-		bool ReportAddedFields = false;
-	};
-
-	// 字段迁移诊断规则(previous = 旧实例状态,next = 新脚本合并后的字段表):
-	//   - 旧无、新有(新增字段):取新脚本默认值;默认不产生诊断,ReportAddedFields=true 时出一条;
-	//   - 同名同类型:保留旧值(合并由 SyncFromSchema / ScriptEngine 的属性表同步完成),不产生诊断;
-	//   - 同名类型变化:回新默认值 + 一条诊断(含 BehaviorRegistry::LuaFieldId 稳定 id);
-	//   - 旧有新无(字段被删):丢弃旧值 + 一条诊断(含稳定 id)。
-	// 输出按字段名升序,保证跨平台/跨运行稳定;diagnostics 可为 null。
-	WLD_API void DescribeScriptFieldMigration(
-		const std::vector<ScriptProperty>& previous,
-		const std::vector<ScriptProperty>& next,
-		const std::string& scriptPath,
-		std::vector<std::string>* diagnostics,
-		const ScriptFieldMigrationOptions& options = {});
-
-	// 失败诊断统一格式:`[hot-reload] <脚本路径>: <phase> failed: <error>`。
-	// 编译器给的错误文本本身带 "<路径>:<行号>:" 前缀时,行号原样保留。
-	WLD_API std::string FormatScriptReloadFailure(const std::string& scriptPath,
-		const char* phase, const std::string& error);
 }
