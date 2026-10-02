@@ -78,20 +78,7 @@ namespace World
 			return mismatch.first == normalizedParent.end();
 		}
 
-		// P2 W5b:脚本实例状态名(script.status/script.reload 的 JSON 字段)。
-		const char* ScriptStateLabel(ScriptInstanceState state)
-		{
-			switch (state)
-			{
-				case ScriptInstanceState::Pending: return "Pending";
-				case ScriptInstanceState::Creating: return "Creating";
-				case ScriptInstanceState::Running: return "Running";
-				case ScriptInstanceState::Destroying: return "Destroying";
-				case ScriptInstanceState::Stopped: return "Stopped";
-				case ScriptInstanceState::Faulted: return "Faulted";
-				default: return "?";
-			}
-		}
+
 
 		// CPPT-3:脚本属性值的一行文本(script.status 的 properties 数组;只做断言用,
 		// 不做本地化 —— 与属性面板的展示格式同量级:整数/浮点/向量/字符串)。
