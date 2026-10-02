@@ -271,7 +271,12 @@ namespace World
 	void Scene::RunFrameSystems(Timestep ts)
 	{
 		AssertOwnerThread();
-		m_FrameSystemTimings.clear();
+		// 一帧的耗时表:谁先跑谁清(固定阶段先于可变阶段,见 OnFixedUpdate)。帧末复位。
+		if (!m_FrameTimingsBegun)
+		{
+			m_FrameSystemTimings.clear();
+			m_FrameTimingsBegun = true;
+		}
 		if (!m_FrameSystems)
 			return;
 
@@ -281,15 +286,56 @@ namespace World
 			~PipelineScopeGuard() { s_InsideFramePipeline = false; }
 		} guard;
 
-		// PURE-ECS:按阶段顺序跑满 5 个阶段。此前只跑 Update ⇒ 注册在任何其它阶段的系统
-		// **永远不会执行**(ISystem::Phase() 等于没有效果)。同阶段内的顺序依赖由
-		// SystemRegistry 的 After 拓扑排序负责。耗时按阶段累积(RunPhase 每次会清自己的列表)。
-		for (int phase = 0; phase < static_cast<int>(Gameplay::SystemPhase::Count); ++phase)
+		// PURE-ECS(工业口径):可变阶段 = Update → Late → PreRender,每帧一次。
+		// **Fixed 阶段不在这里** —— 它在 RunFixedFrameSystems 里按固定 dt 跑 0..N 次。
+		// 同阶段内的顺序依赖由 SystemRegistry 的 After 拓扑排序负责。
+		for (int phase = static_cast<int>(Gameplay::SystemPhase::Update);
+			phase <= static_cast<int>(Gameplay::SystemPhase::PreRender); ++phase)
 		{
 			m_FrameSystems->RunPhase(static_cast<Gameplay::SystemPhase>(phase), ts);
 			for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
 				m_FrameSystemTimings.push_back({ timing.Name, timing.ParallelSafe, timing.Milliseconds });
 		}
+		m_FrameTimingsBegun = false;   // 本帧结束:下一帧重新开始收集
+	}
+
+	// ---- 固定步长阶段(工业口径)----
+	// 物理与移动在 `PreFixed` / `Fixed` 推进:它们必须跑固定 dt 才可复现 ——
+	// 同一段真实时间、不管帧率是多少,结果一致(GameApp 的累加器负责"跑几步")。
+	void Scene::RunFixedFrameSystems(Timestep fixedDt)
+	{
+		AssertOwnerThread();
+		if (!m_FrameTimingsBegun)
+		{
+			m_FrameSystemTimings.clear();
+			m_FrameTimingsBegun = true;
+		}
+		if (!m_FrameSystems)
+			return;
+
+		s_InsideFramePipeline = true;
+		struct PipelineScopeGuard
+		{
+			~PipelineScopeGuard() { s_InsideFramePipeline = false; }
+		} guard;
+
+		for (int phase = static_cast<int>(Gameplay::SystemPhase::PreFixed);
+			phase <= static_cast<int>(Gameplay::SystemPhase::Fixed); ++phase)
+		{
+			m_FrameSystems->RunPhase(static_cast<Gameplay::SystemPhase>(phase), fixedDt);
+			for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
+				m_FrameSystemTimings.push_back({ timing.Name, timing.ParallelSafe, timing.Milliseconds });
+		}
+	}
+
+	void Scene::OnFixedUpdate(Timestep fixedDt)
+	{
+		AssertOwnerThread();
+		// 与 OnUpdateRuntime 对称:**不做运行态守卫** —— 宿主已经按"运行时才调"接线,
+		// 而两个物理系统自身有空世界保护(OnUpdatePhysics2D/3D 各自早退),
+		// 无守卫让 headless 测试能直接按固定步驱动(与 OnUpdateRuntime 同一用法)。
+		EnsureDefaultFrameSystems();
+		RunFixedFrameSystems(fixedDt);
 	}
 	const char* Scene::GetFrameSystemStatsDescription(const Scene& scene)
 	{
@@ -767,9 +813,18 @@ namespace World
 	{
 		if (!m_FrameSystemDefinitions.empty())
 			return;
-		RegisterFrameSystem({ "physics-2d", false, [this](Timestep ts) { OnUpdatePhysics2D(ts); } });
-		RegisterFrameSystem({ "physics-3d", false, [this](Timestep ts) { OnUpdatePhysics3D(ts); } });
-		RegisterFrameSystem({ "movement-system", false, [this](Timestep ts) { MovementSystem().Update(*this, ts); } });
+		// PURE-ECS(工业口径):**物理与移动跑固定步长**(`Fixed` 阶段)。
+		// 此前它们注册在默认的 `Update` 阶段、拿的是可变帧时间 ⇒ 同一段真实时间在不同帧率下
+		// 结果不同(物理不可复现)。引擎的累加器(GameApp 的 m_Accumulator / MaxFixedStepsPerFrame)
+		// 已经负责"一帧跑几步",这里只是把系统挪到它该在的阶段。
+		RegisterFrameSystem({ "physics-2d", false, [this](Timestep ts) { OnUpdatePhysics2D(ts); },
+			Gameplay::SystemPhase::Fixed, {} });
+		RegisterFrameSystem({ "physics-3d", false, [this](Timestep ts) { OnUpdatePhysics3D(ts); },
+			Gameplay::SystemPhase::Fixed, {} });
+		RegisterFrameSystem({ "movement-system", false, [this](Timestep ts) { MovementSystem().Update(*this, ts); },
+			Gameplay::SystemPhase::Fixed, { "physics-2d", "physics-3d" } });
+		// 可变阶段(每帧一次):世界矩阵传播/相机/动画/抽取 —— 表现层,看到的是本帧
+		// **最后一次**物理步之后的位姿(GameApp 的顺序是 Fixed(0..N) → Update → Late → PreRender)。
 		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
 		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); } });
 		// PURE-ECS:骨骼动画采样进 `PreRender` 阶段 —— 它必须排在 transform-system 之后、

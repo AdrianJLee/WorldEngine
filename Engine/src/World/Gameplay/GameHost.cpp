@@ -66,9 +66,17 @@ namespace World::Gameplay
 
 		GameApp& app = GameApp::Get();
 		// W1:权威模拟仍是 Scene::OnUpdateRuntime(脚本 + 物理)。W5 把物理/脚本搬进固定步长,
-		// 因此这里先按"可变步长驱动场景"接线,行为与改造前 RuntimeLayer 完全一致。
+		// 固定阶段(物理/移动)与可变阶段(transform/camera/animation/抽取)分别接到场景:
+		// 顺序由 GameApp::Tick 保证 = Fixed(0..N) → Update → Late → PreRender。
 		app.SetPhaseCallbacks(
-			GameApp::PhaseCallback(),
+			// PURE-ECS(工业口径):**固定步长回调**接场景的固定阶段(物理 + 移动)。
+			// 此前这里是空回调、只有可变 update 接了场景 ⇒ 物理拿的是可变帧时间,
+			// 同一段真实时间在不同帧率下结果不同。GameApp 的累加器负责一帧跑 0..N 步。
+			[this](Timestep ts)
+			{
+				if (m_Scene && m_RuntimeStarted)
+					m_Scene->OnFixedUpdate(ts);
+			},
 			[this](Timestep ts)
 			{
 				if (m_Scene && m_RuntimeStarted)

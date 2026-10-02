@@ -251,24 +251,26 @@ int main()
 		}
 
 		// ========================================================
-		// 9. 帧管线系统默认注册验证 (Scene 5 大系统管线调度)
+		// 9. 帧管线系统默认注册验证 (7 个内置系统 + 阶段顺序)
 		// ========================================================
 		{
 			Scene pipeScene(context);
 			pipeScene.EnsureDefaultFrameSystems();
-			// 触发一次运行时更新
+			// 按**宿主(GameHost)的真实序列**驱动一帧:固定步长(物理/移动)先跑,
+			// 再跑可变阶段(表现层)。只调 OnUpdateRuntime 的话 Fixed 阶段不跑 ——
+			// 那正是本次改动:物理不再跟着可变帧时间走。
+			pipeScene.OnFixedUpdate(0.016f);
 			pipeScene.OnUpdateRuntime(0.016f);
 
 			const auto& timings = pipeScene.GetFrameSystemTimings();
-			// PURE-ECS:内置帧系统从 5 个增加到 7 个 —— 骨骼动画采样与渲染抽取都进了
-			// PreRender 阶段(此前它们躺在 SceneRenderer 里,不在管线中)。
+			// 顺序 = 固定阶段(Fixed)在前 → 可变阶段(Update→Late→PreRender)。
 			CHECK(timings.size() == 7);
 			CHECK(timings[0].Name == "physics-2d");
 			CHECK(timings[1].Name == "physics-3d");
 			CHECK(timings[2].Name == "movement-system");
 			CHECK(timings[3].Name == "transform-system");
 			CHECK(timings[4].Name == "camera-system");
-			CHECK(timings[5].Name == "animation-system");   // PreRender 阶段 → 排后面
+			CHECK(timings[5].Name == "animation-system");   // PreRender
 			CHECK(timings[6].Name == "render-extract");     // 抽取排在动画之后(要拿当帧调色板)
 		}
 
@@ -318,7 +320,8 @@ int main()
 			const entt::entity testEnt = systemScene.GetRegistry().create();
 			systemScene.GetRegistry().emplace<TransformComponent>(testEnt, glm::vec3(1.0f, 2.0f, 3.0f));
 
-			// 触发运行时帧更新: 6 个内置系统 + 1 个 CustomTestSystem 调度
+			// 一帧:固定阶段(3 个)+ 可变阶段(4 个内置)+ CustomTestSystem(Update)
+			systemScene.OnFixedUpdate(0.016f);
 			systemScene.OnUpdateRuntime(0.016f);
 
 			CHECK(sysRef.UpdateCount == 1);
@@ -326,7 +329,7 @@ int main()
 			CHECK(systemScene.GetRegistry().get<TransformComponent>(testEnt).Location.x == 11.0f);
 
 			const auto& timings = systemScene.GetFrameSystemTimings();
-			// 7 个内置 + 自定义
+			// 7 个内置 + 自定义;CustomTestSystem 在 Update 阶段 ⇒ 排在内置的表现层之前
 			CHECK(timings.size() == 8);
 			CHECK(timings[5].Name == "CustomTestSystem");
 		}
@@ -350,6 +353,8 @@ int main()
 			phaseScene.RegisterSystem<PhaseProbeSystem>("PreFixedSystem",
 				Gameplay::SystemPhase::PreFixed, std::vector<std::string> {}, &log);
 
+			// PreFixed 属于**固定**阶段:先按宿主的固定回调跑一次,再跑可变阶段。
+			phaseScene.OnFixedUpdate(0.016f);
 			phaseScene.OnUpdateRuntime(0.016f);
 
 			CHECK(log.size() == 4);
@@ -430,6 +435,7 @@ int main()
 				.With<VelocityComponent>(glm::vec3(10.0f, 20.0f, 30.0f));
 
 			moveScene.OnUpdateRuntime(0.1f);
+			moveScene.OnFixedUpdate(0.1f);
 			CHECK(mover.GetComponent<TransformComponent>().Location.x == 1.0f);
 			CHECK(mover.GetComponent<TransformComponent>().Location.y == 2.0f);
 			CHECK(mover.GetComponent<TransformComponent>().Location.z == 3.0f);

@@ -114,6 +114,13 @@ namespace World
 		bool UnregisterFrameSystem(const std::string& name);
 		bool HasFrameSystem(const std::string& name) const;
 		void RunFrameSystems(Timestep ts);
+		// PURE-ECS(工业口径):**固定步长**阶段(PreFixed + Fixed)。物理与移动在这里推进 ——
+		// 它们必须跑固定 dt 才有确定性(同真实时间、不同帧率 ⇒ 同结果);表现层(transform/
+		// camera/animation/抽取)留在可变阶段,见 RunFrameSystems。
+		// 一帧内由宿主的固定回调调用 **0..N 次**(GameApp 的累加器 + MaxFixedStepsPerFrame)。
+		void RunFixedFrameSystems(Timestep fixedDt);
+		// 宿主固定回调入口:运行态下跑 RunFixedFrameSystems(不在运行时是 no-op)。
+		void OnFixedUpdate(Timestep fixedDt);
 		void EnsureDefaultFrameSystems();
 
 		// ---- PURE-ECS:帧内一次的三个"逐实体遍历"步骤 ----
@@ -325,6 +332,8 @@ namespace World
 		bool m_WorldTransformsDone = false;
 		bool m_AnimationDone = false;
 		bool m_RenderExtractDone = false;
+		// 一帧的耗时表由**先跑的那个阶段集合**清空(固定先于可变),帧末重置。见 RunFrameSystems。
+		bool m_FrameTimingsBegun = false;
 		// 抽取缓冲与它的生产者。缓冲用 unique_ptr:FrameExtract 的完整定义在
 		// Renderer/FrameExtract.h,本头文件只前向声明(析构在 Scene.cpp 里定义)。
 		std::unique_ptr<FrameExtract> m_RenderExtract;

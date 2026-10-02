@@ -109,8 +109,15 @@ end, "Update")
 没有接线:注册被硬编码成 `Update`、派发也只跑 `Update`,非 `Update` 阶段的系统**永不执行**)。
 
 **引擎内置的帧系统(2026-10-02 起共 7 个)**:`physics-2d` / `physics-3d` /
-`movement-system` / `transform-system` / `camera-system`(以上 `Update`)、
+`movement-system`(以上 **`Fixed`** —— 固定步长)、`transform-system` / `camera-system`(`Update`)、
 `animation-system` / `render-extract`(`PreRender`,抽取声明 `After(animation-system)`)。
+
+**固定步长(工业口径)**:物理(Box2D / Jolt 两侧)与移动跑 `Fixed` 阶段,**dt 恒为
+`1/FixedStepHz`** —— 由 `GameApp` 的累加器决定"这一帧跑 0..N 步",宿主(`GameHost`)只负责
+把固定回调接到 `Scene::OnFixedUpdate`。⇒ **同一段真实时间,不管帧率多少,模拟结果一致**
+(实测:60fps 与 30fps 逐位相同;改成 `Update` 阶段的可变 dt 则不一致)。
+表现层(transform/camera/animation/抽取)留在可变阶段,看到的是本帧**最后一次**物理步之后的位姿
+(顺序:`Fixed(0..N) → Update → Late → PreRender`)。
 后两个此前埋在 `SceneRenderer` 里、不在管线中;现在它们是**每帧一次且幂等**的帧内步骤
 (`Scene::EnsureWorldTransforms` / `EnsureAnimationAdvanced` / `EnsureRenderExtract`)——
 Play/Simulate 走帧系统,**编辑态不跑帧系统**,由渲染前兜底跑同一份实现

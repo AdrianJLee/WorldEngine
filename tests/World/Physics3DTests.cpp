@@ -12,6 +12,7 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
+#include "World/Gameplay/GameApp.h"
 
 #include <box2d/box2d.h>
 
@@ -295,7 +296,9 @@ namespace
 		CHECK(scene->IsPhysics2DRunning());
 		CHECK(scene->IsPhysics3DRunning());
 		for (int frame = 0; frame < 60; ++frame)
-			scene->OnUpdateRuntime(Timestep(kFixedStep));   // 2D/3D 同一条固定步路径
+			// PURE-ECS(工业口径):物理跑**固定步长**(Fixed 阶段)⇒ 由固定回调驱动;
+			// 可变阶段(表现层)每帧仍跑一次,与宿主(GameHost)同序。
+			scene->OnFixedUpdate(Timestep(kFixedStep));
 
 		const b2Vec2 position2D = b2Body_GetPosition(faller2D.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
 		glm::vec3 position3D { 0.0f };
@@ -369,7 +372,7 @@ namespace
 		});
 		hooked->OnRuntimeStart();
 		for (int frame = 0; frame < 150; ++frame)
-			hooked->OnUpdateRuntime(Timestep(kFixedStep));
+			hooked->OnFixedUpdate(Timestep(kFixedStep));   // 同上:物理走固定步长回调
 		hooked->OnRuntimeStop();
 		std::printf("[info] scene hook events=%d pairMatched=%d\n", hookEvents, hookPairMatched ? 1 : 0);
 		CHECK(hookEvents >= 1);
@@ -479,6 +482,91 @@ int main()
 	{
 		std::setvbuf(stdout, nullptr, _IONBF, 0);
 
+		// ============================================================
+		// PECS-P4:固定步长确定性(工业口径)—— 同一段**真实时间**、两种**帧率**,物理结果必须一致。
+		//
+		// 关键:不能手工喂不同的 dt(那当然会不同) —— 要测的是**宿主累加器**:
+		// 帧率变了,累加器仍然只喂 1/FixedStepHz 的固定步。所以这里按宿主的接线驱动
+		// (GameApp 的阶段回调 → Scene::OnFixedUpdate / OnUpdateRuntime),用 1/60 与 1/30
+		// 两种帧时间各推进 1.0 秒真实时间,比较刚体位置。
+		// ============================================================
+		{
+			const float kRealSeconds = 1.0f;
+			const float kFrameSeconds[2] = { 1.0f / 60.0f, 1.0f / 30.0f };
+			float height[2] = { 0.0f, 0.0f };
+			for (int run = 0; run < 2; ++run)
+			{
+				WorldContext localContext;
+				Ref<Scene> scene = CreateRef<Scene>(localContext);
+				Entity faller = AddBox(*scene, "DeterminismFaller", { 0.0f, 10.0f, 0.0f },
+					RigidBody3DComponent::MotionType::Dynamic, { 0.5f, 0.5f, 0.5f });
+				scene->OnRuntimeStart();
+
+				Gameplay::GameAppDesc desc;
+				desc.ProjectId = "physics-determinism";
+				desc.FixedStepHz = 60;
+				Gameplay::GameApp::Create(desc);
+				Gameplay::GameApp& app = Gameplay::GameApp::Get();
+				// 与 GameHost 同一接线:固定回调 → OnFixedUpdate,可变回调 → OnUpdateRuntime。
+				app.SetPhaseCallbacks(
+					[&](Timestep ts) { scene->OnFixedUpdate(ts); },
+					[&](Timestep ts) { scene->OnUpdateRuntime(ts); },
+					Gameplay::GameApp::PhaseCallback());
+
+				const float frameSeconds = kFrameSeconds[run];
+				for (float elapsed = 0.0f; elapsed < kRealSeconds - 1e-6f; elapsed += frameSeconds)
+					app.Tick(Timestep(frameSeconds));
+				Gameplay::GameApp::Shutdown();
+
+				glm::vec3 position { 0.0f };
+				if (!scene->GetPhysics3DWorld()->TryGetBodyTransform(faller, &position, nullptr))
+					throw std::runtime_error("determinism probe: no body transform");
+				height[run] = position.y;
+				scene->OnRuntimeStop();
+			}
+			std::printf("[info] determinism: 60fps=%.9f 30fps=%.9f\n", height[0], height[1]);
+			CHECK(height[0] == height[1]);
+		}
+		// ============================================================
+		// 同一保证的 **2D/Box2D** 版:同一段真实时间、两种帧率 ⇒ 结果逐位相同。
+		// (两个后端都走 Fixed 阶段,都由宿主累加器喂固定 dt。)
+		// ============================================================
+		{
+			const float kRealSeconds = 1.0f;
+			const float kFrameSeconds[2] = { 1.0f / 60.0f, 1.0f / 30.0f };
+			float height[2] = { 0.0f, 0.0f };
+			for (int run = 0; run < 2; ++run)
+			{
+				WorldContext localContext;
+				Ref<Scene> scene = CreateRef<Scene>(localContext);
+				Entity faller = AddEntityAt(*scene, "DeterminismFaller2D", { 0.0f, 10.0f, 0.0f });
+				RigidBody2DComponent& body = faller.AddComponent<RigidBody2DComponent>();
+				body.Type = RigidBody2DComponent::BodyType::Dynamic;
+				faller.AddComponent<BoxCollider2DComponent>().Size = { 0.5f, 0.5f };
+				scene->OnRuntimeStart();
+
+				Gameplay::GameAppDesc desc;
+				desc.ProjectId = "physics-determinism-2d";
+				desc.FixedStepHz = 60;
+				Gameplay::GameApp::Create(desc);
+				Gameplay::GameApp& app = Gameplay::GameApp::Get();
+				app.SetPhaseCallbacks(
+					[&](Timestep ts) { scene->OnFixedUpdate(ts); },
+					[&](Timestep ts) { scene->OnUpdateRuntime(ts); },
+					Gameplay::GameApp::PhaseCallback());
+
+				const float frameSeconds = kFrameSeconds[run];
+				for (float elapsed = 0.0f; elapsed < kRealSeconds - 1e-6f; elapsed += frameSeconds)
+					app.Tick(Timestep(frameSeconds));
+				Gameplay::GameApp::Shutdown();
+
+				const b2Vec2 position = b2Body_GetPosition(faller.GetComponent<RigidBody2DComponent>().RuntimeBodyId);
+				height[run] = position.y;
+				scene->OnRuntimeStop();
+			}
+			std::printf("[info] determinism 2D: 60fps=%.9f 30fps=%.9f\n", height[0], height[1]);
+			CHECK(height[0] == height[1]);
+		}
 		const std::pair<const char*, void(*)()> tests[] = {
 			{ "RigidBody2DComponent still exists (2D/3D coexistence baseline)", RigidBody2DComponentStillExists },
 			{ "free fall matches gravity (1s drop ~ g)", FreeFallMatchesGravity },
