@@ -5,6 +5,8 @@
 #include "World/Scene/CameraSystem.h"
 #include "World/Scene/MovementSystem.h"
 #include "World/Scene/ScriptEngine.h"
+#include "World/Renderer/AnimationSystem.h"
+#include "World/Renderer/FrameExtract.h"
 #include "World/Core/Thread/JobSystem.h"
 #include "World/Gameplay/SystemRegistry.h"
 #include "World/Physics/Physics3D.h"
@@ -136,6 +138,13 @@ namespace World
 
 	Scene::~Scene()
 	{
+		// sink 是跨帧装在场景上的(见 Renderer/RenderExtract.h):场景先死时必须通知宿主
+		// 忘掉它,否则渲染器里那个 Scene* 会悬垂。
+		if (m_RenderExtractSink)
+		{
+			m_RenderExtractSink->OnExtractSceneDestroyed(*this);
+			m_RenderExtractSink = nullptr;
+		}
 		// Destroying a scene on another thread would also destroy Lua references there.
 		if (m_OwnerThread != std::this_thread::get_id())
 		{
@@ -686,7 +695,72 @@ namespace World
 		}
 	}
 
-	void Scene::OnUpdateEditor(Timestep, const EditorCamera&) { AssertOwnerThread(); }
+	// ---- PURE-ECS:帧内一次的三个步骤(见 Scene.h 的说明)----
+	void Scene::BeginFrame()
+	{
+		AssertOwnerThread();
+		m_WorldTransformsDone = false;
+		m_AnimationDone = false;
+		m_RenderExtractDone = false;
+	}
+
+	void Scene::EnsureWorldTransforms()
+	{
+		AssertOwnerThread();
+		if (m_WorldTransformsDone)
+			return;
+		m_WorldTransformsDone = true;
+		TransformSystem::UpdateWorldTransforms(m_Registry);
+	}
+
+	void Scene::EnsureAnimationAdvanced(Timestep dt)
+	{
+		AssertOwnerThread();
+		if (m_AnimationDone)
+			return;
+		m_AnimationDone = true;
+		AnimationSystem::Update(*this, dt.GetSeconds());
+	}
+
+	void Scene::SetRenderExtractSink(IRenderExtractSink* sink)
+	{
+		AssertOwnerThread();
+		m_RenderExtractSink = sink;
+	}
+
+	FrameExtract& Scene::RenderExtract()
+	{
+		if (!m_RenderExtract)
+			m_RenderExtract = std::make_unique<FrameExtract>();
+		return *m_RenderExtract;
+	}
+
+	const FrameExtract& Scene::RenderExtract() const
+	{
+		// const 重载不惰性创建(不可能返回可写引用);没有缓冲时返回一个空壳。
+		static const FrameExtract kEmpty;
+		return m_RenderExtract ? *m_RenderExtract : kEmpty;
+	}
+
+	void Scene::EnsureRenderExtract(float deltaSeconds)
+	{
+		AssertOwnerThread();
+		if (m_RenderExtractDone)
+			return;
+		m_RenderExtractDone = true;
+		if (!m_RenderExtractSink)
+			return;   // 无渲染宿主(纯逻辑测试/工具):抽取不是必需的
+		RenderExtract().Clear();
+		m_RenderExtractSink->ExtractScene(*this, deltaSeconds);
+	}
+
+	void Scene::OnUpdateEditor(Timestep, const EditorCamera&)
+	{
+		AssertOwnerThread();
+		// 编辑态不跑帧系统,但"本帧一次"的步骤仍要按帧推进:
+		// 渲染前由 EnsureWorldTransforms / EnsureAnimationAdvanced 兜底执行(见 SceneRenderer)。
+		BeginFrame();
+	}
 	// 内置帧系统:运行/模拟更新保持"脚本 + 物理"的原有顺序与语义,标记为独占(主线程)。
 	// 宿主可再注册 parallel-safe 系统(不得触碰注册表结构),它们会在内置阶段之前并行执行。
 	void Scene::EnsureDefaultFrameSystems()
@@ -698,10 +772,23 @@ namespace World
 		RegisterFrameSystem({ "movement-system", false, [this](Timestep ts) { MovementSystem().Update(*this, ts); } });
 		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
 		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); } });
+		// PURE-ECS:骨骼动画采样进 `PreRender` 阶段 —— 它必须排在 transform-system 之后、
+		// 渲染之前;进管线后它出现在 Systems Pipeline 里,用户系统也能用 `after` 排序它。
+		// 幂等:编辑态不跑帧系统,由 SceneRenderer 兜底跑同一个 EnsureAnimationAdvanced。
+		RegisterFrameSystem({ "animation-system", false,
+			[this](Timestep ts) { EnsureAnimationAdvanced(ts); },
+			Gameplay::SystemPhase::PreRender, {} });
+		// PURE-ECS:渲染抽取也进管线(PreRender,**排在 animation-system 之后** ——
+		// 蒙皮绘制要拿本帧的调色板)。相机无关,所以这里做;剔除/阴影矩阵/pass 留在提交侧。
+		// 编辑态不跑帧系统 ⇒ SceneRenderer::SubmitScene 里兜底跑同一个 EnsureRenderExtract。
+		RegisterFrameSystem({ "render-extract", false,
+			[this](Timestep ts) { EnsureRenderExtract(ts.GetSeconds()); },
+			Gameplay::SystemPhase::PreRender, { "animation-system" } });
 	}
 
 	void Scene::OnUpdateRuntime(Timestep ts)
 	{
+		BeginFrame();
 		EnsureDefaultFrameSystems();
 		// Pure ECS:系统脚本热重载 —— 每帧轮询 scripts/systems/,变化过的文件整份重跑。
 		if (ScriptEngine::IsInitialized())
@@ -711,6 +798,7 @@ namespace World
 
 	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera&)
 	{
+		BeginFrame();
 		EnsureDefaultFrameSystems();
 		RunFrameSystems(ts);
 	}

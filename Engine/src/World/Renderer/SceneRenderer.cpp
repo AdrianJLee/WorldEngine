@@ -10,6 +10,7 @@
 #include "World/Renderer/ProjectionConventions.h"
 #include "World/Renderer/FrustumCull.h"
 #include "World/Renderer/RenderSettings.h"
+#include "World/Renderer/FrameExtract.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Hierarchy.h"
 #include "World/Scene/TransformSystem.h"
@@ -269,6 +270,12 @@ namespace World
 	void SceneRenderer::Shutdown()
 	{
 		WLD_PROFILE_FUNCTION();
+		// 抽取 sink 是跨帧装在场景上的:渲染器先死时把它摘掉,避免场景留着悬垂指针。
+		if (m_ExtractSinkScene)
+		{
+			m_ExtractSinkScene->SetRenderExtractSink(nullptr);
+			m_ExtractSinkScene = nullptr;
+		}
 		m_ActiveScene = nullptr;
 		m_Framebuffer = nullptr;
 		m_FramebufferView = nullptr;
@@ -415,11 +422,27 @@ namespace World
 		ApplyRenderScale();
 		m_ActiveScene = scene;
 		m_Options = options;
+		// PURE-ECS:把抽取宿主装到场景上。**跨帧保持**(EndScene 不摘)—— 下一帧的
+		// `render-extract` 帧系统要在渲染之前就抽好;每帧摘掉会让它在 Play 里永远空转。
+		// 换场景时先把旧的摘掉;场景析构会回调 OnExtractSceneDestroyed;Shutdown 兜底。
+		if (m_ExtractSinkScene && m_ExtractSinkScene != scene)
+			m_ExtractSinkScene->SetRenderExtractSink(nullptr);
+		if (m_ActiveScene)
+		{
+			m_ActiveScene->SetRenderExtractSink(this);
+			m_ExtractSinkScene = m_ActiveScene;
+		}
 	}
 
 	void SceneRenderer::EndScene()
 	{
 		m_ActiveScene = nullptr;
+	}
+
+	void SceneRenderer::OnExtractSceneDestroyed(Scene& scene)
+	{
+		if (m_ExtractSinkScene == &scene)
+			m_ExtractSinkScene = nullptr;
 	}
 
 	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform)
@@ -432,59 +455,25 @@ namespace World
 		RecordSubmit(camera, cameraTransform, entity);
 	}
 
-	void SceneRenderer::RecordSubmit(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
+	// ---- PURE-ECS:Extract 阶段(相机无关的收集)----
+	// 契约见 Renderer/RenderExtract.h:`render-extract` 帧系统(PreRender,排在 animation-system
+	// 之后)在 Play/Simulate 调用它;编辑态不跑帧系统,由 SubmitScene 兜底调同一份(幂等)。
+	void SceneRenderer::ExtractScene(Scene& scene, float deltaSeconds)
 	{
-		if (!m_ActiveScene)
-			return;
-
-		// D8a:场景提交总耗时(统计阈值起点,与 Renderer 的帧时间口径不同:
-		// 这里只量"收集 → 剔除 → 阴影 → 主通道 → 命令缓冲提交"这一段 CPU 时间)。
-		const auto sceneStart = std::chrono::steady_clock::now();
-		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
-		// 编辑/运行期都会改 Transform:每帧先重算层级世界矩阵,子实体才会跟随父实体
-		// (此前只有序列化/Prefab 路径求解,见 Hierarchy.h)。
-		TransformSystem::UpdateWorldTransforms(m_ActiveScene->m_Registry);
-		// D5c-4a:先推进骨骼动画(写回 Time + 采样 → 节点世界矩阵 → 调色板),再收集绘制 ——
-		// 蒙皮提交拿的是本帧的调色板。步长来自宿主 SetDeltaSeconds(默认 0 = 不推进)。
-		AnimationSystem::Update(*m_ActiveScene, m_DeltaSeconds);
-		// 后端适配:场景渲染到**离屏纹理**(WUI 用固定 UV 贴到视口),
-		// 因此 Vulkan 只补深度范围、**不翻 Y**(翻了会在视口里上下颠倒,实测)。
-		viewProjection = AdaptViewProjectionForOffscreen(viewProjection, Renderer::GetBackendName() == "vulkan");
-		const uint32_t slot = FrameSlot();
-		// D8b:该槽位 3 帧后被复用,上一轮提交的 GPU 工作已完成(帧栅栏)→ 读回上一轮时间戳。
-		const double gpuMilliseconds = ReadGpuTiming(slot);
-		m_CameraBuffers[slot]->SetData(&viewProjection, sizeof(glm::mat4));
-
+		// 形参留给以后需要帧上下文的收集(LOD / 时间相关筛选);当前收集只看组件 ——
+		// 动画已由 animation-system 按同一步长推进过。
+		(void)deltaSeconds;
+		FrameExtract& extract = scene.RenderExtract();
 		// ---- 3D 网格收集(D2c/D3) ----
 		// 收集前移到阴影通道之前:方向光阴影的正交矩阵要覆盖本帧所有网格实体的世界包围盒。
 		// 有 MaterialPath 时走材质(贴图/粗糙度/透明),否则沿用 Color 常量色(旧行为)。
-		struct MeshDraw
 		{
-			entt::entity Entity;
-			const glm::mat4* Model = nullptr;
-			Ref<Mesh> MeshAsset;
-			// D5:UINT32_MAX = 整网格提交(内置 primitive / 无 submesh 的资产);
-			// 否则只提交该 submesh(独立对象槽位 + 该 submesh 槽位的材质)。
-			uint32_t SubmeshIndex = UINT32_MAX;
-			Ref<Material> MaterialAsset;
-			glm::vec4 Color { 1.0f };
-			bool Transparent = false;
-			// D5c-4a:蒙皮绘制(走 Renderer3D::SubmitSkinned/SubmitShadowSkinned;不进实例化合批)。
-			// Palette 是 AnimationSystem 当帧缓存的该实体调色板;nullptr = 该实体本帧没有蒙皮结果。
-			bool Skinned = false;
-			const std::vector<glm::mat4>* Palette = nullptr;
-			// D8a:世界空间 AABB(逐子网格;视锥剔除用)。
-			glm::vec3 WorldMin { 0.0f };
-			glm::vec3 WorldMax { 0.0f };
-		};
-		std::vector<MeshDraw> draws;
-		{
-			auto meshView = m_ActiveScene->m_Registry.view<TransformComponent, MeshRendererComponent>();
+			auto meshView = scene.m_Registry.view<TransformComponent, MeshRendererComponent>();
 			for (auto entity : meshView)
 			{
 				// D5c-4a:同时挂 SkinnedMeshRendererComponent 的实体交给下面的蒙皮收集块,
 				// 这里跳过以免同一个实体画两遍(只挂 MeshRendererComponent 的实体逐字节不变)。
-				if (m_ActiveScene->m_Registry.all_of<SkinnedMeshRendererComponent>(entity))
+				if (scene.m_Registry.all_of<SkinnedMeshRendererComponent>(entity))
 					continue;
 				const auto& [transform, meshComponent] =
 					meshView.get<TransformComponent, MeshRendererComponent>(entity);
@@ -527,12 +516,12 @@ namespace World
 				// 层级实体用求解后的世界矩阵:直接提交本地矩阵会让子实体不跟随父实体
 				// (实测"移动父项子项不动")。世界矩阵由本轮统一求解(见上方 UpdateWorldTransforms)。
 				const glm::mat4* modelMatrix = &transform.Transform;
-				if (m_ActiveScene->m_Registry.all_of<WorldTransformComponent>(entity))
-					modelMatrix = &m_ActiveScene->m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
 
 				const auto makeDraw = [&](uint32_t submeshIndex, const Ref<Material>& material)
 				{
-					MeshDraw draw;
+					FrameMeshDraw draw;
 					draw.Entity = entity;
 					draw.Model = modelMatrix;
 					draw.MeshAsset = mesh;
@@ -548,7 +537,7 @@ namespace World
 						: mesh->GetBounds();
 					TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max,
 						draw.WorldMin, draw.WorldMax);
-					draws.push_back(std::move(draw));
+					extract.Draws.push_back(std::move(draw));
 				};
 
 				if (mesh->HasSubmeshes() && !mesh->GetMeshes().empty())
@@ -591,7 +580,7 @@ namespace World
 		// 与静态路径同一套网格/材质/层级矩阵口径,只是多了"该实体本帧的调色板"并标记 Skinned。
 		// 组件没有 Color 字段:常量色路径用白色(等价于 Renderer3D::Submit 的默认基色)。
 		{
-			auto skinnedView = m_ActiveScene->m_Registry.view<TransformComponent, SkinnedMeshRendererComponent>();
+			auto skinnedView = scene.m_Registry.view<TransformComponent, SkinnedMeshRendererComponent>();
 			for (auto entity : skinnedView)
 			{
 				const auto& [transform, skinned] =
@@ -622,14 +611,14 @@ namespace World
 				}
 				// 层级实体用求解后的世界矩阵(与静态路径同一约定)。
 				const glm::mat4* modelMatrix = &transform.Transform;
-				if (m_ActiveScene->m_Registry.all_of<WorldTransformComponent>(entity))
-					modelMatrix = &m_ActiveScene->m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
 				// AnimationSystem::Update 当帧算好的调色板;nullptr = 本帧取不到(读失败/非蒙皮)。
 				const std::vector<glm::mat4>* palette = AnimationSystem::GetPalette(entity);
 
 				const auto makeSkinnedDraw = [&](uint32_t submeshIndex, const Ref<Material>& material)
 				{
-					MeshDraw draw;
+					FrameMeshDraw draw;
 					draw.Entity = entity;
 					draw.Model = modelMatrix;
 					draw.MeshAsset = mesh;
@@ -646,7 +635,7 @@ namespace World
 						: mesh->GetBounds();
 					TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max,
 						draw.WorldMin, draw.WorldMax);
-					draws.push_back(std::move(draw));
+					extract.Draws.push_back(std::move(draw));
 				};
 
 				if (mesh->HasSubmeshes() && !mesh->GetMeshes().empty())
@@ -685,6 +674,75 @@ namespace World
 			}
 		}
 
+		// ---- D4:灯光收集(registry 遍历顺序 = 截断顺序)+ 方向光阴影矩阵 + 灯光 UBO ----
+		LightRig lightRig;
+		{
+			std::vector<DirectionalLightData> directionalLights;
+			for (auto entity : scene.m_Registry.view<DirectionalLightComponent>())
+			{
+				const auto& light = scene.m_Registry.get<DirectionalLightComponent>(entity);
+				directionalLights.push_back({ light.Color, light.Intensity, light.Direction, light.CastShadow });
+			}
+			std::vector<PointLightData> pointLights;
+			for (auto entity : scene.m_Registry.view<PointLightComponent>())
+			{
+				const auto& light = scene.m_Registry.get<PointLightComponent>(entity);
+				// 点光位置取实体世界位置(有层级时用求解后的世界矩阵,与网格同一约定)。
+				glm::vec3 position { 0.0f };
+				if (const auto* world = scene.m_Registry.try_get<WorldTransformComponent>(entity))
+					position = glm::vec3(world->Matrix[3]);
+				else if (const auto* transform = scene.m_Registry.try_get<TransformComponent>(entity))
+					position = transform->Location;
+				pointLights.push_back({ light.Color, light.Intensity, position, light.Range });
+			}
+			AmbientLightData ambientLight;
+			bool hasAmbient = false;
+			for (auto entity : scene.m_Registry.view<AmbientLightComponent>())
+			{
+				// 场景级:多盏时第一盏生效(与上限截断同一"registry 顺序"语义)。
+				const auto& light = scene.m_Registry.get<AmbientLightComponent>(entity);
+				ambientLight = { light.Color, light.Intensity };
+				hasAmbient = true;
+				break;
+			}
+			const bool glDepthConvention = Renderer::GetBackendName() != "vulkan";
+			extract.Lights = Renderer3D::BuildLightRig(directionalLights, pointLights,
+				hasAmbient ? &ambientLight : nullptr, glDepthConvention);
+		}
+
+	}
+
+	void SceneRenderer::RecordSubmit(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
+	{
+		if (!m_ActiveScene)
+			return;
+
+		// D8a:场景提交总耗时(统计阈值起点,与 Renderer 的帧时间口径不同:
+		// 这里只量"收集 → 剔除 → 阴影 → 主通道 → 命令缓冲提交"这一段 CPU 时间)。
+		const auto sceneStart = std::chrono::steady_clock::now();
+		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		// 编辑/运行期都会改 Transform:每帧先重算层级世界矩阵,子实体才会跟随父实体
+		// (此前只有序列化/Prefab 路径求解,见 Hierarchy.h)。
+		// PURE-ECS:改成**帧内幂等** —— Play 时 `transform-system` 已经算过,这里是 no-op;
+		// 编辑态不跑帧系统 ⇒ 由这里兜底(此前两处各跑一遍,Play 时每帧整棵树白传播一次)。
+		m_ActiveScene->EnsureWorldTransforms();
+		// D5c-4a:先推进骨骼动画(写回 Time + 采样 → 节点世界矩阵 → 调色板),再收集绘制 ——
+		// 蒙皮提交拿的是本帧的调色板。步长来自宿主 SetDeltaSeconds(默认 0 = 不推进)。
+		// 同样幂等:Play 时 `animation-system`(PreRender 阶段)已经推进过。
+		m_ActiveScene->EnsureAnimationAdvanced(Timestep(m_DeltaSeconds));
+		// 后端适配:场景渲染到**离屏纹理**(WUI 用固定 UV 贴到视口),
+		// 因此 Vulkan 只补深度范围、**不翻 Y**(翻了会在视口里上下颠倒,实测)。
+		viewProjection = AdaptViewProjectionForOffscreen(viewProjection, Renderer::GetBackendName() == "vulkan");
+		const uint32_t slot = FrameSlot();
+		// D8b:该槽位 3 帧后被复用,上一轮提交的 GPU 工作已完成(帧栅栏)→ 读回上一轮时间戳。
+		const double gpuMilliseconds = ReadGpuTiming(slot);
+		m_CameraBuffers[slot]->SetData(&viewProjection, sizeof(glm::mat4));
+
+		// PURE-ECS:本帧要画什么来自 Extract 阶段(相机无关)。Play/Simulate 由 `render-extract`
+		// 帧系统填好;编辑态不跑帧系统,这里的 Ensure 兜底(同一份实现、幂等)。
+		m_ActiveScene->EnsureRenderExtract(m_DeltaSeconds);
+		const FrameExtract& extract = m_ActiveScene->RenderExtract();
+		const std::vector<FrameMeshDraw>& draws = extract.Draws;
 		// ---- D8a:相机视锥剔除 ----
 		// 主通道只提交视锥内的 draw;剔除掉的物体**不进阴影通道的判断**(见下:阴影用
 		// 光源自己的正交视锥,否则"相机看不见但影子投进画面"的投影者会丢)。
@@ -699,7 +757,7 @@ namespace World
 			const FrustumPlanes cameraFrustum = ExtractFrustumPlanes(viewProjection);
 			for (uint32_t index = 0; index < draws.size(); ++index)
 			{
-				const MeshDraw& draw = draws[index];
+				const FrameMeshDraw& draw = draws[index];
 				if (!cullingEnabled
 					|| AabbInFrustum(cameraFrustum, draw.WorldMin, draw.WorldMax))
 					visibleDraws.push_back(index);
@@ -709,41 +767,7 @@ namespace World
 		}
 		uint32_t shadowCasters = 0;
 
-		// ---- D4:灯光收集(registry 遍历顺序 = 截断顺序)+ 方向光阴影矩阵 + 灯光 UBO ----
-		LightRig lightRig;
-		{
-			std::vector<DirectionalLightData> directionalLights;
-			for (auto entity : m_ActiveScene->m_Registry.view<DirectionalLightComponent>())
-			{
-				const auto& light = m_ActiveScene->m_Registry.get<DirectionalLightComponent>(entity);
-				directionalLights.push_back({ light.Color, light.Intensity, light.Direction, light.CastShadow });
-			}
-			std::vector<PointLightData> pointLights;
-			for (auto entity : m_ActiveScene->m_Registry.view<PointLightComponent>())
-			{
-				const auto& light = m_ActiveScene->m_Registry.get<PointLightComponent>(entity);
-				// 点光位置取实体世界位置(有层级时用求解后的世界矩阵,与网格同一约定)。
-				glm::vec3 position { 0.0f };
-				if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
-					position = glm::vec3(world->Matrix[3]);
-				else if (const auto* transform = m_ActiveScene->m_Registry.try_get<TransformComponent>(entity))
-					position = transform->Location;
-				pointLights.push_back({ light.Color, light.Intensity, position, light.Range });
-			}
-			AmbientLightData ambientLight;
-			bool hasAmbient = false;
-			for (auto entity : m_ActiveScene->m_Registry.view<AmbientLightComponent>())
-			{
-				// 场景级:多盏时第一盏生效(与上限截断同一"registry 顺序"语义)。
-				const auto& light = m_ActiveScene->m_Registry.get<AmbientLightComponent>(entity);
-				ambientLight = { light.Color, light.Intensity };
-				hasAmbient = true;
-				break;
-			}
-			const bool glDepthConvention = Renderer::GetBackendName() != "vulkan";
-			lightRig = Renderer3D::BuildLightRig(directionalLights, pointLights,
-				hasAmbient ? &ambientLight : nullptr, glDepthConvention);
-		}
+		LightRig lightRig = extract.Lights;
 
 		// D8a2:项目清单 `rendering.shadows=false` → 整条阴影通道关掉(投影者不提交、
 		// 主通道不采样)。WLD_NO_SHADOWS=1 同样强制关闭(自动化)。
@@ -760,7 +784,7 @@ namespace World
 		{
 			glm::vec3 boundsMin { FLT_MAX, FLT_MAX, FLT_MAX };
 			glm::vec3 boundsMax { -FLT_MAX, -FLT_MAX, -FLT_MAX };
-			for (const MeshDraw& draw : draws)
+			for (const FrameMeshDraw& draw : draws)
 			{
 				// D8a:直接用收集期算好的世界 AABB(逐子网格,更紧)。
 				boundsMin = glm::min(boundsMin, draw.WorldMin);
@@ -788,7 +812,7 @@ namespace World
 				shadowDraws.reserve(draws.size());
 				for (uint32_t index = 0; index < draws.size(); ++index)
 				{
-					const MeshDraw& draw = draws[index];
+					const FrameMeshDraw& draw = draws[index];
 					if (AabbInFrustum(lightFrustum, draw.WorldMin, draw.WorldMax))
 						shadowDraws.push_back(index);
 				}
@@ -830,7 +854,7 @@ namespace World
 			{
 				for (const uint32_t drawIndex : shadowDraws)
 				{
-					const MeshDraw& draw = draws[drawIndex];
+					const FrameMeshDraw& draw = draws[drawIndex];
 					// D5c-4a:蒙皮投影者不参与实例化合批(调色板逐物体,per-instance 通道里没有它)。
 					if (draw.Skinned)
 						continue;
@@ -839,7 +863,7 @@ namespace World
 			}
 			for (const uint32_t drawIndex : shadowDraws)
 			{
-				const MeshDraw& draw = draws[drawIndex];
+				const FrameMeshDraw& draw = draws[drawIndex];
 				// D5c-4a:蒙皮投影者走蒙皮入口(否则影子留在绑定姿态)。调色板本帧取不到时:
 				// 布局 1(模型没有 skin 数据)回退静态入口;布局 2 只跳过 —— 静态管线的顶点
 				// 布局是 stride 32,读布局 2 的顶点缓冲会画出垃圾。
@@ -879,7 +903,7 @@ namespace World
 				// 回退:逐物体补交这一桶(与上面同一条路径)。
 				for (const uint32_t drawIndex : indices)
 				{
-					const MeshDraw& draw = draws[drawIndex];
+					const FrameMeshDraw& draw = draws[drawIndex];
 					if (draw.SubmeshIndex == UINT32_MAX)
 						Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
 					else
@@ -958,7 +982,7 @@ namespace World
 				{
 					for (const uint32_t drawIndex : visibleDraws)
 					{
-						const MeshDraw& draw = draws[drawIndex];
+						const FrameMeshDraw& draw = draws[drawIndex];
 						// D5c-4a:蒙皮 draw 不进实例化桶(调色板逐物体,合批没有 per-instance 通道)。
 						if (draw.Transparent || draw.Skinned)
 							continue;
@@ -966,7 +990,7 @@ namespace World
 							draw.Color }].push_back(drawIndex);
 					}
 				}
-				const auto batchEligible = [&buckets, kMinBatchInstances](const MeshDraw& draw)
+				const auto batchEligible = [&buckets, kMinBatchInstances](const FrameMeshDraw& draw)
 				{
 					const auto found = buckets.find({ draw.MeshAsset.get(), draw.SubmeshIndex,
 						draw.MaterialAsset.get(), draw.Color });
@@ -980,7 +1004,7 @@ namespace World
 					std::vector<std::pair<float, uint32_t>> sorted;
 					for (const uint32_t drawIndex : visibleDraws)
 					{
-						const MeshDraw& draw = draws[drawIndex];
+						const FrameMeshDraw& draw = draws[drawIndex];
 						if (!draw.Transparent)
 							continue;
 						const glm::vec3 center = (draw.WorldMin + draw.WorldMax) * 0.5f;
@@ -1000,7 +1024,7 @@ namespace World
 				{
 					for (const uint32_t drawIndex : (transparentPass ? transparentOrder : visibleDraws))
 					{
-						const MeshDraw& draw = draws[drawIndex];
+						const FrameMeshDraw& draw = draws[drawIndex];
 						// D8b-2:属于合批桶的不透明 draw 交给下面的实例化提交(避免重复画)。
 						if (!draw.Transparent && batchEligible(draw))
 							continue;
@@ -1067,7 +1091,7 @@ namespace World
 					batchEntityIds.reserve(indices.size());
 					for (const uint32_t drawIndex : indices)
 					{
-						const MeshDraw& draw = draws[drawIndex];
+						const FrameMeshDraw& draw = draws[drawIndex];
 						batchTransforms.push_back(*draw.Model);
 						batchColors.push_back(draw.Color);
 						batchEntityIds.push_back(static_cast<int32_t>(static_cast<uint32_t>(draw.Entity)));
@@ -1081,7 +1105,7 @@ namespace World
 						continue;
 					for (const uint32_t drawIndex : indices)
 					{
-						const MeshDraw& draw = draws[drawIndex];
+						const FrameMeshDraw& draw = draws[drawIndex];
 						const int32_t entityId = static_cast<int32_t>(static_cast<uint32_t>(draw.Entity));
 						if (draw.SubmeshIndex == UINT32_MAX)
 						{

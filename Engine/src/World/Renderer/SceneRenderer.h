@@ -18,7 +18,7 @@ namespace World
 		bool ShowGrid = true;
 	};
 
-	class SceneRenderer
+	class SceneRenderer : public IRenderExtractSink
 	{
 	public:
 		void Init();
@@ -26,6 +26,14 @@ namespace World
 
 		void BeginScene(Scene* scene, const SceneRendererOptions& options);
 		void EndScene();
+
+		// ---- PURE-ECS:Extract 阶段(相机无关的收集;接口契约见 Renderer/RenderExtract.h)----
+		// 把"本帧要画什么"填进 `scene.RenderExtract()`。Play/Simulate 由 `render-extract`
+		// 帧系统调用(PreRender 阶段,排在 animation-system 之后);编辑态不跑帧系统,
+		// 由 `SubmitScene` 兜底调同一份实现(幂等)。
+		void ExtractScene(Scene& scene, float deltaSeconds) override;
+		// 场景析构时清掉"sink 装在哪个场景上"的记录(见 Renderer/RenderExtract.h)。
+		void OnExtractSceneDestroyed(Scene& scene) override;
 
 		// D5c-4a:骨骼动画的时间推进步长(秒)。宿主每帧在 SubmitScene 之前设置;
 		// SceneRenderer 在收集 3D 绘制前调用 AnimationSystem::Update 推进
@@ -118,6 +126,8 @@ namespace World
 		float m_AppliedRenderScale = 0.0f;
 		// D5c-4a:骨骼动画步长(SetDeltaSeconds;默认 0 = 不推进)。
 		float m_DeltaSeconds = 0.0f;
+		// 抽取 sink 装在哪个场景上(跨帧保持;EndScene 不摘,否则下一帧帧系统拿不到)。
+		Scene* m_ExtractSinkScene = nullptr;
 		Scene* m_ActiveScene = nullptr;
 		SceneRendererOptions m_Options;
 		Ref<Framebuffer> m_FramebufferView;

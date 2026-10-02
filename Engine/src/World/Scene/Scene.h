@@ -4,6 +4,7 @@
 #include "World/Core/WorldContext.h"
 #include "World/Gameplay/PrefabTypes.h"
 #include "World/Renderer/EditorCamera.h"
+#include "World/Renderer/RenderExtract.h"
 #include "World/Scene/ISystem.h"
 #include "World/Scene/Query.h"
 #include <box2d/id.h>
@@ -114,6 +115,32 @@ namespace World
 		bool HasFrameSystem(const std::string& name) const;
 		void RunFrameSystems(Timestep ts);
 		void EnsureDefaultFrameSystems();
+
+		// ---- PURE-ECS:帧内一次的三个"逐实体遍历"步骤 ----
+		//
+		// 工业口径(Bevy 的 PostUpdate/PreRender/Extract 分组、Unity DOTS 的
+		// TransformSystemGroup/AnimationGroup 同一思路):世界矩阵传播、骨骼动画采样、
+		// 渲染抽取都是**每帧一次**的逐实体遍历。
+		//
+		//   * Play / Simulate:由帧系统做(`transform-system` / `animation-system` /
+		//     `render-extract`),于是它们出现在 Systems Pipeline 里、可被用户系统用
+		//     `after` 排序;
+		//   * **编辑态不跑帧系统** ⇒ 渲染前由 `BeginScene` 侧的 Ensure* 兜底跑一次
+		//     (否则编辑器里拖父项子项不跟随、蒙皮预览不动)。
+		//
+		// 三者都**幂等**:同一帧内第二次调用是 no-op。这同时修掉了"`transform-system`
+		// 与 `SceneRenderer::RecordSubmit` 各跑一遍世界矩阵传播"的重复计算。
+		void BeginFrame();                            // 帧边界:清掉"本帧已做"标记
+		void EnsureWorldTransforms();                 // 幂等
+		void EnsureAnimationAdvanced(Timestep dt);    // 幂等(步长由调用方给:帧系统用 ts,编辑态用渲染步长)
+		// 渲染抽取(相机无关的收集)。幂等;没有 sink 时是 no-op(纯逻辑测试/工具不需要渲染)。
+		// sink 由渲染器在 BeginScene 时装上、EndScene 时摘掉 ⇒ 不存在悬垂指针。
+		void SetRenderExtractSink(IRenderExtractSink* sink);
+		void EnsureRenderExtract(float deltaSeconds);  // 幂等
+		// 本帧的抽取结果(由 sink 填;渲染器提交时消费)。Scene 持有 ⇒ 主渲染器与预览渲染器
+		// 提交同一场景时看到的是同一份。
+		FrameExtract& RenderExtract();
+		const FrameExtract& RenderExtract() const;
 
 		template<typename T, typename... Args>
 		T& RegisterSystem(Args&&... args)
@@ -294,6 +321,14 @@ namespace World
 		static void CopyScene(Ref<Scene>& other, Ref<Scene>& newScene);
 
 	private:
+		// "本帧已做"标记(见 BeginFrame / Ensure*)。帧边界由 BeginFrame 推进。
+		bool m_WorldTransformsDone = false;
+		bool m_AnimationDone = false;
+		bool m_RenderExtractDone = false;
+		// 抽取缓冲与它的生产者。缓冲用 unique_ptr:FrameExtract 的完整定义在
+		// Renderer/FrameExtract.h,本头文件只前向声明(析构在 Scene.cpp 里定义)。
+		std::unique_ptr<FrameExtract> m_RenderExtract;
+		IRenderExtractSink* m_RenderExtractSink = nullptr;
 		friend class Entity;
 		friend class SceneRenderer;
 		friend class SceneHierarchyPanel;

@@ -260,12 +260,16 @@ int main()
 			pipeScene.OnUpdateRuntime(0.016f);
 
 			const auto& timings = pipeScene.GetFrameSystemTimings();
-			CHECK(timings.size() == 5);
+			// PURE-ECS:内置帧系统从 5 个增加到 7 个 —— 骨骼动画采样与渲染抽取都进了
+			// PreRender 阶段(此前它们躺在 SceneRenderer 里,不在管线中)。
+			CHECK(timings.size() == 7);
 			CHECK(timings[0].Name == "physics-2d");
 			CHECK(timings[1].Name == "physics-3d");
 			CHECK(timings[2].Name == "movement-system");
 			CHECK(timings[3].Name == "transform-system");
 			CHECK(timings[4].Name == "camera-system");
+			CHECK(timings[5].Name == "animation-system");   // PreRender 阶段 → 排后面
+			CHECK(timings[6].Name == "render-extract");     // 抽取排在动画之后(要拿当帧调色板)
 		}
 
 		// ========================================================
@@ -314,7 +318,7 @@ int main()
 			const entt::entity testEnt = systemScene.GetRegistry().create();
 			systemScene.GetRegistry().emplace<TransformComponent>(testEnt, glm::vec3(1.0f, 2.0f, 3.0f));
 
-			// 触发运行时帧更新: 默认 5 大系统 + 1 个 CustomTestSystem 调度
+			// 触发运行时帧更新: 6 个内置系统 + 1 个 CustomTestSystem 调度
 			systemScene.OnUpdateRuntime(0.016f);
 
 			CHECK(sysRef.UpdateCount == 1);
@@ -322,7 +326,8 @@ int main()
 			CHECK(systemScene.GetRegistry().get<TransformComponent>(testEnt).Location.x == 11.0f);
 
 			const auto& timings = systemScene.GetFrameSystemTimings();
-			CHECK(timings.size() == 6);
+			// 7 个内置 + 自定义
+			CHECK(timings.size() == 8);
 			CHECK(timings[5].Name == "CustomTestSystem");
 		}
 
@@ -358,7 +363,7 @@ int main()
 
 			// 每个阶段都进耗时表(读面板按它列系统)。
 			const auto& phaseTimings = phaseScene.GetFrameSystemTimings();
-			CHECK(phaseTimings.size() == 4 + 5);   // 4 个探针 + 5 个引擎内置
+			CHECK(phaseTimings.size() == 4 + 7);   // 4 个探针 + 7 个引擎内置
 			bool sawLate = false;
 			for (const auto& timing : phaseTimings)
 				sawLate = sawLate || timing.Name == "LateSystem";
