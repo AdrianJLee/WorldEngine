@@ -18,7 +18,7 @@
 
 | 资产/系统 | 监听与触发 | 生效时机 | 失败/回滚 | 已知限制 |
 | --- | --- | --- | --- | --- |
-| Luau 脚本（`assets/scripts/**.luau`） | `ScriptFileWatch`：150ms 消抖轮询，内容哈希优先 | 帧边界；编辑态作用于文档场景，Play/Simulate 作用于运行副本；不满足安全点自动顺延 | 编译/校验失败保留旧实例，原因写 `ReloadDiagnostic`；字段按稳定 id 迁移 | 回调内/结构提交点内不重载（顺延）；包内脚本只读 |
+| Luau 系统脚本（`assets/scripts/systems/*.luau`） | `ScriptFileWatch`：150ms 消抖轮询，内容哈希优先 | 帧边界（`Scene::OnUpdateRuntime` → `ScriptEngine::PollSystemScriptReload`）；**整份重跑**该系统脚本：先按归属表撤销它上次注册的系统，再重读源执行 | 读源/执行失败记日志并保留已撤销状态（下次保存再试） | 只有系统脚本加载作用域内注册的系统参与；宿主手写 `ecs:AddSystem` 的系统不参与；包内脚本只读 |
 | 编辑器本地化（`assets/localization/<lang>/**`） | `EditorApp` 的 `LocalizationHotReloadLayer`：0.5s 节流（路径/大小/mtime） | `ReloadLocalization()` 重扫多层目录，`Generation++`，下一帧换文案 | 缺键回落内联英文；层内重复键记冲突 | 插件组件的显示名不随语言切换刷新（要 `plugin.reload` 或重启） |
 | 材质 `.wmat` | `MaterialLibrary` + `AssetFileWatch`：150ms；指纹含父级链 | clean 材质原地 `Reload`（实例同一性保持，Revision 前进） | dirty → 只报告；解析失败保留旧内存态 | 父级链深度上限 8 |
 | 贴图（材质引用的 Albedo/Normal） | `AssetFileWatch`：500ms；内容哈希 | `MaterialTextureCache::Invalidate` + 引用材质 `InvalidateTextures()`；Vulkan 旧句柄延迟释放 | 坏产物/坏图回退源图；材质贴图上传走**同步路径**（见下） | 只跟踪已加载材质引用的贴图 |

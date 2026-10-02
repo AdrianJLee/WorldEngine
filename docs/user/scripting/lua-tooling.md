@@ -14,44 +14,42 @@
 `.luarc.json` 里的 `runtime.version` 是 LuaLS 自身的设置项(LuaLS 没有 Luau 运行时档位);
 实际执行脚本的是引擎里的 Luau 版本,两者不是同一个东西。
 
-## 写一个脚本
+## 写一个系统脚本
 
-从 `<项目根>/assets/scripts/templates/WorldScript.lua` 复制新脚本,修改类名和字段。用
-`---@class YourScript : WorldScript`、`---@field`、`---@param` 描述自己新增的类型。脚本必须返回一个 table。
+系统脚本放在 `<项目根>/assets/scripts/systems/`。它不是"类",是**直接执行的脚本**:
+用 `ecs:Query` 建查询,用 `ecs:AddSystem` 把系统挂进帧管线。
 
 ```lua
----@class PlayerScript : WorldScript
----@field Speed number 移动速度
-local PlayerScript = { Speed = 5.0 }
+-- assets/scripts/systems/player_movement.luau
+local movement = ecs:Query({ "TransformComponent", "VelocityComponent" })
 
----@param dt number 距离上一帧的秒数
-function PlayerScript:OnUpdate(dt)
-    local direction = vec3.new(1.0, 0.0, 0.0)
-    print(self.entity:GetID(), direction:length(), self.Speed * dt)
-end
-
-return PlayerScript
+ecs:AddSystem("PlayerMovementSystem", "Update", function(dt)
+    movement:Each(function(entity, transform, velocity)
+        local direction = vec3.new(1.0, 0.0, 0.0)
+        transform.Location.x = transform.Location.x + velocity.Linear.x * dt
+        print(entity:GetID(), direction:length())
+    end)
+end)
 ```
 
-在 `self.entity:` 后使用补全;输入 `vec3.new(` 后看参数提示;悬停 `direction`、`dt`、`self.Speed` 查看类型。
-`WorldScript` 只描述脚本形状,不能调用 `WorldScript.new()`;构造数学对象用实际绑定的 `.new(...)`。
+在 `movement:Each(` 的回调里,`transform` / `velocity` 是**组件代理**,字段带补全;
+输入 `vec3.new(` 后看参数提示;悬停 `dt`、`transform.Location` 查看类型。
+构造数学对象用实际绑定的 `.new(...)`。
 
 `<项目根>/assets/scripts/intermediate/WorldEngineAPI.luau` 由编辑器按**实际注册的绑定**生成,仅供语言服务器读取,
 **不要 require 或运行它**。编辑器注册完 API 会自动刷新(内容不变就不改写,失败保留原文件),
-也可以从菜单手动刷新。新增 C++ 侧脚本 API 后要重新构建并启动编辑器才会出现在声明里;Runtime 不生成提示文件。
+也可以从菜单手动刷新。Runtime 不生成提示文件。
 
-目前 `Entity:GetComponent(name)` 返回不透明的 `userdata|nil`,没有通用组件字段代理,因此不承诺 Transform
-等组件字段的补全。`GetID()` 返回当前场景的运行句柄整数,不是持久 UUID。实体句柄只有 `self.entity`
-一个名字(旧别名 `self.__Entity` / `self.__EntityID` 已移除)。
+需要 Lua 视野里的"结构"（例如一张怪物配置表）时,在 `scripts/lib/` 里用 `---@class` / `---@field`
+声明注解表并 `require` 它 —— 那只是类型注解,不参与存储与序列化。
 
-## 生命周期和结构修改
+## 结构修改
 
-场景拥有并在同一线程调用 `OnCreate`、`OnUpdate(dt)` 和 `OnDestroy`。创建回调进入后,销毁至多尝试一次;
-回调出错后清理实例并保留 Faulted 诊断,下次明确 Play 才重试,其他脚本继续运行。停止场景会取消未执行的创建命令并清理运行引用。
+Entity 句柄会校验场景寿命与实体代数。脚本可以用 `ecs:CreateEntity(name)`、
+`ecs:DestroyEntity(entity)`、`entity:RemoveComponent(name)` 请求结构变更:
+**当前回调先返回,随后在安全点统一提交**;待删除的对象不会再被更新。
 
-Entity 句柄会校验场景寿命与实体代数。脚本可以用 `self.entity:Destroy()`、`RemoveComponent(name)` 请求删除:
-当前回调先返回,随后统一提交 ;待删除的对象不会再被更新。`OnDestroy` 里仍可读取本实体现有的组件。
-失效句柄的调用返回可定位的错误,跨帧保留底层组件指针是不允许的。
+失效句柄的调用返回可定位的错误;跨帧保留底层组件指针是不允许的。
 
 原生代码里需要创建并配置实体时,用显式命令并按值捕获参数或 Entity 句柄:
 
@@ -59,27 +57,26 @@ Entity 句柄会校验场景寿命与实体代数。脚本可以用 `self.entity
 GetEntity().GetScene()->DeferStructuralChange([position](World::Scene& scene) {
     auto entity = World::Entity::CreateEntity(&scene, "Spawned");
     entity.AddComponent<World::TransformComponent>().SetLocation(position);
-    entity.AddComponent<World::LuauScriptComponent>("scripts/Test.lua");
 });
 ```
 
-命令在安全点按批次提交,来源实体 / 脚本失效时取消。不要捕获裸 `this`、组件引用或局部变量引用。
-旧式同步 Create/Add(返回对象或引用)不能在回调里使用,会在写入前被拒绝。已有运行中、待创建或失败的脚本
-不能直接替换:先移除并完成清理,再在后续阶段添加。
+命令在安全点按批次提交,来源实体失效时取消。不要捕获裸 `this`、组件引用或局部变量引用。
 
-运行中 Inspector **禁用脚本重绑、解绑与手动 "Reload Script" 按钮**(Play/Simulate 是只读态:暂停或停止后才能点);
-但**脚本文件的热重载在 Play/Simulate 下仍然生效** —— 引擎在帧边界轮询正在运行的那份场景副本,改盘即生效。
-想让脚本从初始状态重跑,才需要 **Stop 再 Play**;刷新声明不等于热重载。暂停时仍会提交结构请求,但不执行 `OnUpdate`。
-可以删除已有物理 body 或移除刚体;
-运行中新增 / 替换刚体与 collider、以及破坏 Transform 依赖的操作会被拒绝。
+## 热重载
+
+- 改 `<内容根>/scripts/systems/` 下的脚本,**保存即生效**:编辑器在帧边界轮询,内容变化后 150ms 消抖,
+  然后**整份重跑**该系统脚本（先撤销它上次注册的系统,再重新执行）。
+- 内容改回原值不算变化;只动 mtime 不算变化（内容哈希优先）。
+- 宿主手写 `ecs:AddSystem`（不在系统脚本加载作用域内）的系统**不参与**脚本热重载。
+- 发行形态（`Runtime.exe` + 打包内容）没有监听器;详见 [热重载生效矩阵](../../dev/hot-reload.md)。
 
 ## 排查
 
 | 症状 | 先查什么 |
 | --- | --- |
 | 没有补全 | 打开的是仓库根或 `Game/`(配置见上表);语言服务器索引是否完成;声明基线是否存在 |
-| 自定义字段没有类型 | 给脚本的 class / field 和回调参数补注解;类名是否唯一 |
-| API 变更没出现在补全里 | 重新构建并启动编辑器,看生成是否报错;不要手改生成文件 |
-| 生命周期报错 | 看 Inspector 状态与引擎日志里的文件、实体、阶段和 traceback,修好后重新 Play |
+| `ecs` 标红未定义 | 声明基线是否包含 `ecs` 块;重新构建并启动编辑器看生成是否报错;不要手改生成文件 |
+| 系统不生效 | 文件是否在 `<内容根>/scripts/systems/` 下;`ecs:AddSystem` 的名字是否与别处重名（同名会替换） |
+| `ui.*` 没反应 | 这是已知边界:脚本 UI 尚未恢复,现在调用不会报错也不会有显示效果 |
 
 `tests/World/lua/CompletionProbe.lua` 有意包含错误,用于语言服务器的验收;日常工作区已把它排除在索引之外。

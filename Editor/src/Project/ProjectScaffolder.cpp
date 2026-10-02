@@ -54,6 +54,7 @@ namespace World::Editor
 			"assets/models/",
 			"assets/prefabs/",
 			"assets/scenes/",
+			"assets/scripts/systems/",
 			"assets/scripts/templates/WorldScript.lua",
 			"assets/shaders/",
 			"assets/textures/",

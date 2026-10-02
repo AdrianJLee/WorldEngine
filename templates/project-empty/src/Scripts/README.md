@@ -12,8 +12,10 @@
 ## 怎么开始
 
 1. 组件加到 `src/Components/`,`WE_SCHEMA` 声明请参考引擎文档 `docs/dev/`。
-2. 脚本用编辑器 Scripts 面板的 "New Script" 从 `assets/scripts/templates/WorldScript.lua`
-   复制生成,属性面板会按 `WE_FIELD` 声明渲染编辑控件。
+2. **Luau 玩法逻辑写成"系统脚本"**:放在 `assets/scripts/systems/` 下,用 `ecs:Query` +
+   `ecs:AddSystem` 注册进帧管线(模板见 `assets/scripts/templates/WorldScript.lua`)。
+   系统脚本不在实体上挂载,场景启动时自动加载。**Luau 不能定义组件类型** —— 需要新数据就在
+   `src/Components/` 加 C++ 组件。
 3. C++ 脚本用编辑器 Scripts 面板的 `新建 C++ 脚本…`:它落到 `<项目根>/src/Scripts/<名字>.h`,
    并在类型账本 `<项目根>/src/Generated/Game.manifest` 里登记该脚本声明的类型。
 

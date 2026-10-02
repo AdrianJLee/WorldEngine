@@ -1,0 +1,2 @@
+-- 系统脚本目录占位。放进这里的 *.luau 会在场景启动时自动执行一次,
+-- 用 ecs:Query + ecs:AddSystem 把系统注册进帧管线。见 docs/user/scripting/README.md。
