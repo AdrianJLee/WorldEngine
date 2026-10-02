@@ -95,7 +95,9 @@ namespace
 
 	void ResolveDiskPathHitsRealFile()
 	{
-		const std::string logical = "scripts/tests/UiProbe.lua";
+		// 夹具 = 项目模板自带的系统脚本模板(语义仍然是当前的:纯系统脚本,无旧脚本组件)。
+		// 这条用例只要求"磁盘上一个真实存在的脚本",不关心它写什么。
+		const std::string logical = "scripts/templates/WorldScript.lua";
 		const fs::path expected = fs::path(WLD_TEST_ASSETPATH) / fs::path(logical);
 		CHECK(fs::is_regular_file(expected));   // 前提:入库的开发树脚本
 
@@ -109,7 +111,7 @@ namespace
 
 		// 反斜杠分隔与重复斜杠走同一条归一化:解析结果一致。
 		fs::path separated;
-		CHECK(ResolveScriptDiskPath("scripts\\tests//UiProbe.lua", separated, nullptr));
+		CHECK(ResolveScriptDiskPath("scripts\\templates//WorldScript.lua", separated, nullptr));
 		CHECK(fs::equivalent(separated, resolved));
 	}
 
