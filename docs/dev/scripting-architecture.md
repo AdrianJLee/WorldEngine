@@ -108,6 +108,16 @@ end, "Update")
 `{ phase = …, after = { … } }` 都能决定执行时机(2026-10-02 之前这两条在 Scene 宿主路径上
 没有接线:注册被硬编码成 `Update`、派发也只跑 `Update`,非 `Update` 阶段的系统**永不执行**)。
 
+**引擎内置的帧系统(2026-10-02 起共 7 个)**:`physics-2d` / `physics-3d` /
+`movement-system` / `transform-system` / `camera-system`(以上 `Update`)、
+`animation-system` / `render-extract`(`PreRender`,抽取声明 `After(animation-system)`)。
+后两个此前埋在 `SceneRenderer` 里、不在管线中;现在它们是**每帧一次且幂等**的帧内步骤
+(`Scene::EnsureWorldTransforms` / `EnsureAnimationAdvanced` / `EnsureRenderExtract`)——
+Play/Simulate 走帧系统,**编辑态不跑帧系统**,由渲染前兜底跑同一份实现
+(所以编辑器里拖父项子项仍跟随、蒙皮预览仍动)。
+渲染抽取的结果落在**场景**上(`Scene::RenderExtract()`):收集是**相机无关**的(所以能进管线),
+而视锥剔除、阴影矩阵与各 pass 依赖相机,留在提交侧(相机由宿主在提交时给)。
+
 ### `ecs` 全局表（也是 `world`）
 
 | 方法 | 作用 |
